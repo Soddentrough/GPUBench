@@ -1,5 +1,8 @@
 # Hashes of file build rules.
 09b8ae9cf065fa3206e2212f13e97e27 CMakeFiles/shaders
+ba7fde7bcd3a0cd3cb49b22ff96f3581 cachebw_l1.spv
+30b581f293041be2937dcbf5cfc7714f cachebw_l2.spv
+41b58ad2f913bc4bec47ace69819158e cachebw_l3.spv
 29e074bd8f9589b265fa89a701db1639 fp16.spv
 88ec0f289894c4a39765ba6b1238ecf1 fp32.spv
 f2f1ee48bfd02ae9b02729b7824a5d71 fp64.spv

@@ -142,6 +142,30 @@ gpubench/fast:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/gpubench.dir/build.make CMakeFiles/gpubench.dir/build
 .PHONY : gpubench/fast
 
+src/benchmarks/CacheBandwidthBench.o: src/benchmarks/CacheBandwidthBench.cpp.o
+.PHONY : src/benchmarks/CacheBandwidthBench.o
+
+# target to build an object file
+src/benchmarks/CacheBandwidthBench.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gpubench.dir/build.make CMakeFiles/gpubench.dir/src/benchmarks/CacheBandwidthBench.cpp.o
+.PHONY : src/benchmarks/CacheBandwidthBench.cpp.o
+
+src/benchmarks/CacheBandwidthBench.i: src/benchmarks/CacheBandwidthBench.cpp.i
+.PHONY : src/benchmarks/CacheBandwidthBench.i
+
+# target to preprocess a source file
+src/benchmarks/CacheBandwidthBench.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gpubench.dir/build.make CMakeFiles/gpubench.dir/src/benchmarks/CacheBandwidthBench.cpp.i
+.PHONY : src/benchmarks/CacheBandwidthBench.cpp.i
+
+src/benchmarks/CacheBandwidthBench.s: src/benchmarks/CacheBandwidthBench.cpp.s
+.PHONY : src/benchmarks/CacheBandwidthBench.s
+
+# target to generate assembly for a file
+src/benchmarks/CacheBandwidthBench.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gpubench.dir/build.make CMakeFiles/gpubench.dir/src/benchmarks/CacheBandwidthBench.cpp.s
+.PHONY : src/benchmarks/CacheBandwidthBench.cpp.s
+
 src/benchmarks/Fp16Bench.o: src/benchmarks/Fp16Bench.cpp.o
 .PHONY : src/benchmarks/Fp16Bench.o
 
@@ -392,6 +416,9 @@ help:
 	@echo "... rebuild_cache"
 	@echo "... shaders"
 	@echo "... gpubench"
+	@echo "... src/benchmarks/CacheBandwidthBench.o"
+	@echo "... src/benchmarks/CacheBandwidthBench.i"
+	@echo "... src/benchmarks/CacheBandwidthBench.s"
 	@echo "... src/benchmarks/Fp16Bench.o"
 	@echo "... src/benchmarks/Fp16Bench.i"
 	@echo "... src/benchmarks/Fp16Bench.s"

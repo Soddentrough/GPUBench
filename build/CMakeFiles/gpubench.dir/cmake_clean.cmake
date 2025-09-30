@@ -1,5 +1,7 @@
 file(REMOVE_RECURSE
   "CMakeFiles/gpubench.dir/link.d"
+  "CMakeFiles/gpubench.dir/src/benchmarks/CacheBandwidthBench.cpp.o"
+  "CMakeFiles/gpubench.dir/src/benchmarks/CacheBandwidthBench.cpp.o.d"
   "CMakeFiles/gpubench.dir/src/benchmarks/Fp16Bench.cpp.o"
   "CMakeFiles/gpubench.dir/src/benchmarks/Fp16Bench.cpp.o.d"
   "CMakeFiles/gpubench.dir/src/benchmarks/Fp32Bench.cpp.o"

@@ -1,5 +1,8 @@
 file(REMOVE_RECURSE
   "CMakeFiles/shaders"
+  "cachebw_l1.spv"
+  "cachebw_l2.spv"
+  "cachebw_l3.spv"
   "fp16.spv"
   "fp32.spv"
   "fp64.spv"

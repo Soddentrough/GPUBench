@@ -11,6 +11,7 @@ gpubench: \
   CMakeFiles/gpubench.dir/src/benchmarks/Int8Bench.cpp.o \
   CMakeFiles/gpubench.dir/src/benchmarks/Int4Bench.cpp.o \
   CMakeFiles/gpubench.dir/src/benchmarks/MemBandwidthBench.cpp.o \
+  CMakeFiles/gpubench.dir/src/benchmarks/CacheBandwidthBench.cpp.o \
   CMakeFiles/gpubench.dir/src/core/VulkanContext.cpp.o \
   /lib64/libvulkan.so \
   /usr/lib/gcc/x86_64-redhat-linux/15/libstdc++.so \
@@ -64,6 +65,8 @@ CMakeFiles/gpubench.dir/src/benchmarks/Int8Bench.cpp.o:
 CMakeFiles/gpubench.dir/src/benchmarks/Int4Bench.cpp.o:
 
 CMakeFiles/gpubench.dir/src/benchmarks/MemBandwidthBench.cpp.o:
+
+CMakeFiles/gpubench.dir/src/benchmarks/CacheBandwidthBench.cpp.o:
 
 CMakeFiles/gpubench.dir/src/core/VulkanContext.cpp.o:
 

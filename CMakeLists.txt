@@ -72,6 +72,7 @@ set(SOURCES
     src/benchmarks/Int8Bench.cpp
     src/benchmarks/Int4Bench.cpp
     src/benchmarks/MemBandwidthBench.cpp
+    src/benchmarks/CacheBandwidthBench.cpp
 )
 
 # Add backend-specific sources

@@ -6,8 +6,12 @@
 #include "benchmarks/Int8Bench.h"
 #include "benchmarks/Int4Bench.h"
 #include "benchmarks/MemBandwidthBench.h"
+#include "benchmarks/CacheBandwidthBench.h"
 #include <iostream>
+#include <iomanip>
 #include <stdexcept>
+#include <sstream>
+#include <locale>
 
 #ifdef HAVE_VULKAN
 #include "core/VulkanContext.h"
@@ -59,7 +63,14 @@ void BenchmarkRunner::discoverBenchmarks() {
     benchmarks.push_back(std::make_unique<Int8Bench>());
     benchmarks.push_back(std::make_unique<Int4Bench>());
     benchmarks.push_back(std::make_unique<MemBandwidthBench>());
+    benchmarks.push_back(std::make_unique<CacheBandwidthBench>());
 }
+
+struct BenchmarkResultRow {
+    std::string testName;
+    double performance;
+    std::string unit;
+};
 
 void BenchmarkRunner::run(const std::vector<std::string>& benchmarks_to_run) {
 #ifndef HAVE_VULKAN
@@ -73,6 +84,7 @@ void BenchmarkRunner::run(const std::vector<std::string>& benchmarks_to_run) {
     }
     
     VulkanContext* vkContext = static_cast<VulkanContext*>(context.getVulkanContext());
+    std::vector<BenchmarkResultRow> results;
 
     for (auto& bench : benchmarks) {
         bool should_run = benchmarks_to_run.empty();
@@ -89,13 +101,15 @@ void BenchmarkRunner::run(const std::vector<std::string>& benchmarks_to_run) {
                 continue;
             }
             
-            std::cout << "Running " << bench->GetName() << std::endl;
+            std::cout << "Running " << bench->GetName() << "..." << std::flush;
             bench->Setup(*vkContext, ".");
 
-            // Check if this is a memory bandwidth benchmark (runs multiple configs)
+            // Check if this is a bandwidth benchmark (runs multiple configs)
             std::string bench_name = bench->GetName();
-            bool is_bandwidth_bench = bench_name.find("Memory Bandwidth") != std::string::npos;
-            int num_configs = is_bandwidth_bench ? 4 : 1;
+            bool is_mem_bandwidth_bench = bench_name.find("Memory Bandwidth") != std::string::npos;
+            bool is_cache_bandwidth_bench = bench_name.find("Cache Bandwidth") != std::string::npos;
+            bool is_bandwidth_bench = is_mem_bandwidth_bench || is_cache_bandwidth_bench;
+            int num_configs = is_mem_bandwidth_bench ? 4 : (is_cache_bandwidth_bench ? 3 : 1);
             
             for (int config_idx = 0; config_idx < num_configs; config_idx++) {
                 if (is_bandwidth_bench && config_idx > 0) {
@@ -156,29 +170,74 @@ void BenchmarkRunner::run(const std::vector<std::string>& benchmarks_to_run) {
 
                 double total_ops = (double)result.operations * total_invocations;
                 
-                std::cout.precision(3);
-                if (is_bandwidth_bench) {
-                    const char* config_names[] = {"128 threads/group", "256 threads/group", "512 threads/group", "1024 threads/group"};
-                    std::cout << "  Configuration: " << config_names[config_idx] << std::endl;
-                }
-                std::cout << "  Operations per invocation: " << result.operations << std::endl;
-                std::cout << "  Invocations: " << total_invocations << std::endl;
-                std::cout << "  Total runtime: " << std::fixed << total_elapsed_time / 1000.0 << " seconds" << std::endl;
-                std::cout << "  Avg time per invocation: " << result.elapsedTime << " ms" << std::endl;
-                
                 if (is_bandwidth_bench) {
                     // For bandwidth benchmarks, operations represent bytes transferred
                     double bandwidth_gbps = total_ops / (total_elapsed_time / 1000.0) / 1e9;
-                    std::cout << "  Performance: " << std::fixed << bandwidth_gbps << " GB/s" << std::endl;
+                    std::string testName;
+                    if (is_mem_bandwidth_bench) {
+                        const char* config_names[] = {"128 threads/group", "256 threads/group", "512 threads/group", "1024 threads/group"};
+                        testName = std::string(bench->GetName()) + " (" + config_names[config_idx] + ")";
+                    } else if (is_cache_bandwidth_bench) {
+                        // Cache bandwidth configs have detailed names built-in
+                        const char* config_names[] = {
+                            "L1: 16 KB working set (16KB/CU × 80 CUs = 1.28 MB total)",
+                            "L2: 2 MB working set (4 MB total shared)",
+                            "Infinity Cache: 64 MB working set (128 MB total)"
+                        };
+                        testName = std::string(bench->GetName()) + " (" + config_names[config_idx] + ")";
+                    }
+                    results.push_back({testName, bandwidth_gbps, "GB/s"});
                 } else {
                     // For compute benchmarks, operations represent FLOPS
                     double tflops = total_ops / (total_elapsed_time / 1000.0) / 1e12;
-                    std::cout << "  Performance: " << std::fixed << tflops << " TFLOPS" << std::endl;
+                    results.push_back({bench->GetName(), tflops, "TFLOPS"});
                 }
             }
+            
+            std::cout << " Done" << std::endl;
 
             bench->Teardown();
         }
+    }
+    
+    // Print results table
+    if (!results.empty()) {
+        std::cout << "\n";
+        std::cout << "========================================================================================================\n";
+        std::cout << "BENCHMARK RESULTS\n";
+        std::cout << "========================================================================================================\n";
+        std::cout << std::left << std::setw(70) << "Test" << " | " << std::right << std::setw(15) << "Performance" << "\n";
+        std::cout << "--------------------------------------------------------------------------------------------------------\n";
+        
+        // Helper lambda to format numbers with commas
+        auto formatWithCommas = [](double value) -> std::string {
+            std::stringstream ss;
+            ss << std::fixed << std::setprecision(3) << value;
+            std::string result = ss.str();
+            
+            // Find the decimal point
+            size_t decimal_pos = result.find('.');
+            if (decimal_pos == std::string::npos) {
+                decimal_pos = result.length();
+            }
+            
+            // Insert commas in the integer part
+            int insert_pos = decimal_pos - 3;
+            while (insert_pos > 0) {
+                result.insert(insert_pos, ",");
+                insert_pos -= 3;
+            }
+            
+            return result;
+        };
+        
+        for (const auto& row : results) {
+            std::string formatted_perf = formatWithCommas(row.performance);
+            std::cout << std::left << std::setw(70) << row.testName << " | " 
+                      << std::right << std::setw(15) << formatted_perf 
+                      << " " << std::left << row.unit << "\n";
+        }
+        std::cout << "========================================================================================================\n";
     }
 #endif
 }
