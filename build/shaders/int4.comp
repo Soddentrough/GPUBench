@@ -1,0 +1,20 @@
+#version 450
+#extension GL_EXT_shader_8bit_storage : require
+#extension GL_EXT_shader_explicit_arithmetic_types : require
+
+layout (local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) buffer Data {
+    int8_t data[];
+} InOutBuffer;
+
+void main() {
+    uint index = gl_GlobalInvocationID.x;
+
+    int8_t val = InOutBuffer.data[index];
+    for (int i = 0; i < 65536; ++i) {
+        // Emulate 4-bit operations
+        val = int8_t((val & 0x0F) * 2 + 1);
+    }
+    InOutBuffer.data[index] = val;
+}

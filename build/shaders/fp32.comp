@@ -1,0 +1,17 @@
+#version 450
+
+layout (local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) buffer Data {
+    float data[];
+} InOutBuffer;
+
+void main() {
+    uint index = gl_GlobalInvocationID.x;
+
+    float val = InOutBuffer.data[index];
+    for (int i = 0; i < 65536; ++i) {
+        val = val * 0.5 + 0.25;
+    }
+    InOutBuffer.data[index] = val;
+}

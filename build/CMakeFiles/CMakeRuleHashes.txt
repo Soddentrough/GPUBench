@@ -1,0 +1,13 @@
+# Hashes of file build rules.
+09b8ae9cf065fa3206e2212f13e97e27 CMakeFiles/shaders
+29e074bd8f9589b265fa89a701db1639 fp16.spv
+88ec0f289894c4a39765ba6b1238ecf1 fp32.spv
+f2f1ee48bfd02ae9b02729b7824a5d71 fp64.spv
+f80a131b5efaad0ab2a3b4670df25239 fp8.spv
+c283e9d00b7e4671384684c6a0872898 int4.spv
+1712218b9388c6007cbabff54e1a3208 int8.spv
+c5bfe5edb31604896abb70099f9bc2e1 shaders/fp16.spv
+1f1be92e6aaa4a7d60f24446b8006160 shaders/fp32.spv
+5161c87aa8bcbeb31887a9f45ab7bf35 shaders/fp64.spv
+145a27f8479f621a67c0b74c61e298e5 shaders/int4.spv
+0654f0d3b4e13ba9f6c9151cecd0803c shaders/int8.spv

@@ -1,0 +1,4 @@
+/home/naoki/Development/GPUBench/build/CMakeFiles/shaders.dir
+/home/naoki/Development/GPUBench/build/CMakeFiles/gpubench.dir
+/home/naoki/Development/GPUBench/build/CMakeFiles/edit_cache.dir
+/home/naoki/Development/GPUBench/build/CMakeFiles/rebuild_cache.dir

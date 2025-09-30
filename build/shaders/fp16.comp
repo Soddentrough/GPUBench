@@ -1,0 +1,19 @@
+#version 450
+#extension GL_EXT_shader_16bit_storage : require
+#extension GL_EXT_shader_explicit_arithmetic_types : require
+
+layout (local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) buffer Data {
+    float16_t data[];
+} InOutBuffer;
+
+void main() {
+    uint index = gl_GlobalInvocationID.x;
+
+    float16_t val = InOutBuffer.data[index];
+    for (int i = 0; i < 65536; ++i) {
+        val = val * float16_t(0.5) + float16_t(0.25);
+    }
+    InOutBuffer.data[index] = val;
+}
