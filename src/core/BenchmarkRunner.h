@@ -1,13 +1,17 @@
 #pragma once
 
-#include "core/VulkanContext.h"
+#include "core/IComputeContext.h"
 #include "benchmarks/IBenchmark.h"
 #include <vector>
 #include <memory>
 
+#ifdef HAVE_VULKAN
+#include <vulkan/vulkan.h>
+#endif
+
 class BenchmarkRunner {
 public:
-    BenchmarkRunner(VulkanContext& context);
+    BenchmarkRunner(IComputeContext& context);
     ~BenchmarkRunner();
 
     void run(const std::vector<std::string>& benchmarks_to_run);
@@ -15,8 +19,11 @@ public:
 private:
     void discoverBenchmarks();
 
-    VulkanContext& context;
+    IComputeContext& context;
     std::vector<std::unique_ptr<IBenchmark>> benchmarks;
+    
+#ifdef HAVE_VULKAN
     VkCommandPool commandPool = VK_NULL_HANDLE;
     VkQueryPool queryPool = VK_NULL_HANDLE;
+#endif
 };

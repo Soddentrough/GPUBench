@@ -51,6 +51,90 @@ void VulkanContext::enumeratePhysicalDevices() {
     vkEnumeratePhysicalDevices(instance, &deviceCount, physicalDevices.data());
 }
 
+const std::vector<DeviceInfo>& VulkanContext::getDevices() const {
+    if (deviceInfos.empty()) {
+        for (const auto& device : physicalDevices) {
+            VkPhysicalDeviceProperties props;
+            vkGetPhysicalDeviceProperties(device, &props);
+            
+            VkPhysicalDeviceMemoryProperties memProps;
+            vkGetPhysicalDeviceMemoryProperties(device, &memProps);
+            
+            // Get subgroup properties
+            VkPhysicalDeviceSubgroupProperties subgroupProps{};
+            subgroupProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
+            
+            VkPhysicalDeviceProperties2 props2{};
+            props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+            props2.pNext = &subgroupProps;
+            vkGetPhysicalDeviceProperties2(device, &props2);
+            
+            uint64_t vramSize = 0;
+            for (uint32_t i = 0; i < memProps.memoryHeapCount; ++i) {
+                if (memProps.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) {
+                    vramSize = memProps.memoryHeaps[i].size;
+                    break;
+                }
+            }
+            
+            DeviceInfo info;
+            info.name = props.deviceName;
+            info.memorySize = vramSize;
+            info.computeUnits = subgroupProps.subgroupSize;
+            info.maxWorkGroupSize = props.limits.maxComputeWorkGroupInvocations;
+            info.maxComputeWorkGroupCountX = props.limits.maxComputeWorkGroupCount[0];
+            info.maxComputeWorkGroupCountY = props.limits.maxComputeWorkGroupCount[1];
+            info.maxComputeWorkGroupCountZ = props.limits.maxComputeWorkGroupCount[2];
+            info.maxComputeSharedMemorySize = props.limits.maxComputeSharedMemorySize;
+            info.subgroupSize = subgroupProps.subgroupSize;
+            deviceInfos.push_back(info);
+        }
+    }
+    return deviceInfos;
+}
+
+void VulkanContext::pickDevice(uint32_t index) {
+    pickPhysicalDevice(index);
+}
+
+DeviceInfo VulkanContext::getCurrentDeviceInfo() const {
+    if (physicalDevice == VK_NULL_HANDLE) {
+        throw std::runtime_error("No device selected");
+    }
+    
+    VkPhysicalDeviceMemoryProperties memProps;
+    vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memProps);
+    
+    // Get subgroup properties
+    VkPhysicalDeviceSubgroupProperties subgroupProps{};
+    subgroupProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
+    
+    VkPhysicalDeviceProperties2 props2{};
+    props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    props2.pNext = &subgroupProps;
+    vkGetPhysicalDeviceProperties2(physicalDevice, &props2);
+    
+    uint64_t vramSize = 0;
+    for (uint32_t i = 0; i < memProps.memoryHeapCount; ++i) {
+        if (memProps.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) {
+            vramSize = memProps.memoryHeaps[i].size;
+            break;
+        }
+    }
+    
+    DeviceInfo info;
+    info.name = properties.deviceName;
+    info.memorySize = vramSize;
+    info.computeUnits = subgroupProps.subgroupSize;
+    info.maxWorkGroupSize = properties.limits.maxComputeWorkGroupInvocations;
+    info.maxComputeWorkGroupCountX = properties.limits.maxComputeWorkGroupCount[0];
+    info.maxComputeWorkGroupCountY = properties.limits.maxComputeWorkGroupCount[1];
+    info.maxComputeWorkGroupCountZ = properties.limits.maxComputeWorkGroupCount[2];
+    info.maxComputeSharedMemorySize = properties.limits.maxComputeSharedMemorySize;
+    info.subgroupSize = subgroupProps.subgroupSize;
+    return info;
+}
+
 void VulkanContext::pickPhysicalDevice(uint32_t index) {
     if (index >= physicalDevices.size()) {
         throw std::runtime_error("invalid device index");

@@ -72,6 +72,10 @@ CMakeFiles/shaders: fp64.spv
 CMakeFiles/shaders: fp8.spv
 CMakeFiles/shaders: int4.spv
 CMakeFiles/shaders: int8.spv
+CMakeFiles/shaders: membw.spv
+CMakeFiles/shaders: membw_1024.spv
+CMakeFiles/shaders: membw_128.spv
+CMakeFiles/shaders: membw_256.spv
 
 fp16.spv: /home/naoki/Development/GPUBench/shaders/fp16.comp
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Generating fp16.spv"
@@ -97,6 +101,22 @@ int8.spv: /home/naoki/Development/GPUBench/shaders/int8.comp
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_6) "Generating int8.spv"
 	/usr/bin/glslc --target-env=vulkan1.2 /home/naoki/Development/GPUBench/shaders/int8.comp -o /home/naoki/Development/GPUBench/build/int8.spv
 
+membw.spv: /home/naoki/Development/GPUBench/shaders/membw.comp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_7) "Generating membw.spv"
+	/usr/bin/glslc --target-env=vulkan1.2 /home/naoki/Development/GPUBench/shaders/membw.comp -o /home/naoki/Development/GPUBench/build/membw.spv
+
+membw_1024.spv: /home/naoki/Development/GPUBench/shaders/membw_1024.comp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_8) "Generating membw_1024.spv"
+	/usr/bin/glslc --target-env=vulkan1.2 /home/naoki/Development/GPUBench/shaders/membw_1024.comp -o /home/naoki/Development/GPUBench/build/membw_1024.spv
+
+membw_128.spv: /home/naoki/Development/GPUBench/shaders/membw_128.comp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_9) "Generating membw_128.spv"
+	/usr/bin/glslc --target-env=vulkan1.2 /home/naoki/Development/GPUBench/shaders/membw_128.comp -o /home/naoki/Development/GPUBench/build/membw_128.spv
+
+membw_256.spv: /home/naoki/Development/GPUBench/shaders/membw_256.comp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_10) "Generating membw_256.spv"
+	/usr/bin/glslc --target-env=vulkan1.2 /home/naoki/Development/GPUBench/shaders/membw_256.comp -o /home/naoki/Development/GPUBench/build/membw_256.spv
+
 CMakeFiles/shaders.dir/codegen:
 .PHONY : CMakeFiles/shaders.dir/codegen
 
@@ -107,6 +127,10 @@ shaders: fp64.spv
 shaders: fp8.spv
 shaders: int4.spv
 shaders: int8.spv
+shaders: membw.spv
+shaders: membw_1024.spv
+shaders: membw_128.spv
+shaders: membw_256.spv
 shaders: CMakeFiles/shaders.dir/build.make
 .PHONY : shaders
 

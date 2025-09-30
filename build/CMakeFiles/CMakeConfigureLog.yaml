@@ -536,3 +536,46 @@ events:
       Running the CXX compiler's linker: "/usr/bin/ld" "-v"
       GNU ld version 2.44-6.fc42
 ...
+
+---
+events:
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake/Modules/CheckSymbolExists.cmake:163 (try_compile)"
+      - "/usr/share/cmake/Modules/CheckSymbolExists.cmake:68 (__CHECK_SYMBOL_EXISTS_IMPL)"
+      - "/usr/share/cmake/Modules/FindOpenCL.cmake:59 (CHECK_SYMBOL_EXISTS)"
+      - "/usr/share/cmake/Modules/FindOpenCL.cmake:100 (_FIND_OPENCL_VERSION)"
+      - "CMakeLists.txt:21 (find_package)"
+    checks:
+      - "Looking for CL_VERSION_3_0"
+    directories:
+      source: "/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-So1qTZ"
+      binary: "/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-So1qTZ"
+    cmakeVariables:
+      CMAKE_C_FLAGS: ""
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+    buildResult:
+      variable: "OPENCL_VERSION_3_0"
+      cached: true
+      stdout: |
+        Change Dir: '/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-So1qTZ'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_000d5/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_000d5.dir/build.make CMakeFiles/cmTC_000d5.dir/build
+        gmake[1]: Entering directory '/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-So1qTZ'
+        Building C object CMakeFiles/cmTC_000d5.dir/CheckSymbolExists.c.o
+        /usr/bin/cc    -o CMakeFiles/cmTC_000d5.dir/CheckSymbolExists.c.o -c /home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-So1qTZ/CheckSymbolExists.c
+        In file included from /usr/include/CL/cl.h:20,
+                         from /home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-So1qTZ/CheckSymbolExists.c:2:
+        /usr/include/CL/cl_version.h:22:9: note: ‘#pragma message: cl_version.h: CL_TARGET_OPENCL_VERSION is not defined. Defaulting to 300 (OpenCL 3.0)’
+           22 | #pragma message("cl_version.h: CL_TARGET_OPENCL_VERSION is not defined. Defaulting to 300 (OpenCL 3.0)")
+              |         ^~~~~~~
+        Linking C executable cmTC_000d5
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_000d5.dir/link.txt --verbose=1
+        /usr/bin/cc CMakeFiles/cmTC_000d5.dir/CheckSymbolExists.c.o -o cmTC_000d5
+        gmake[1]: Leaving directory '/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-So1qTZ'
+        
+      exitCode: 0
+...

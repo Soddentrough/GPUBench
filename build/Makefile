@@ -286,6 +286,30 @@ src/benchmarks/Int8Bench.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/gpubench.dir/build.make CMakeFiles/gpubench.dir/src/benchmarks/Int8Bench.cpp.s
 .PHONY : src/benchmarks/Int8Bench.cpp.s
 
+src/benchmarks/MemBandwidthBench.o: src/benchmarks/MemBandwidthBench.cpp.o
+.PHONY : src/benchmarks/MemBandwidthBench.o
+
+# target to build an object file
+src/benchmarks/MemBandwidthBench.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gpubench.dir/build.make CMakeFiles/gpubench.dir/src/benchmarks/MemBandwidthBench.cpp.o
+.PHONY : src/benchmarks/MemBandwidthBench.cpp.o
+
+src/benchmarks/MemBandwidthBench.i: src/benchmarks/MemBandwidthBench.cpp.i
+.PHONY : src/benchmarks/MemBandwidthBench.i
+
+# target to preprocess a source file
+src/benchmarks/MemBandwidthBench.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gpubench.dir/build.make CMakeFiles/gpubench.dir/src/benchmarks/MemBandwidthBench.cpp.i
+.PHONY : src/benchmarks/MemBandwidthBench.cpp.i
+
+src/benchmarks/MemBandwidthBench.s: src/benchmarks/MemBandwidthBench.cpp.s
+.PHONY : src/benchmarks/MemBandwidthBench.s
+
+# target to generate assembly for a file
+src/benchmarks/MemBandwidthBench.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gpubench.dir/build.make CMakeFiles/gpubench.dir/src/benchmarks/MemBandwidthBench.cpp.s
+.PHONY : src/benchmarks/MemBandwidthBench.cpp.s
+
 src/core/BenchmarkRunner.o: src/core/BenchmarkRunner.cpp.o
 .PHONY : src/core/BenchmarkRunner.o
 
@@ -386,6 +410,9 @@ help:
 	@echo "... src/benchmarks/Int8Bench.o"
 	@echo "... src/benchmarks/Int8Bench.i"
 	@echo "... src/benchmarks/Int8Bench.s"
+	@echo "... src/benchmarks/MemBandwidthBench.o"
+	@echo "... src/benchmarks/MemBandwidthBench.i"
+	@echo "... src/benchmarks/MemBandwidthBench.s"
 	@echo "... src/core/BenchmarkRunner.o"
 	@echo "... src/core/BenchmarkRunner.i"
 	@echo "... src/core/BenchmarkRunner.s"

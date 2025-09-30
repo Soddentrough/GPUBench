@@ -88,12 +88,12 @@ clean: CMakeFiles/gpubench.dir/clean
 CMakeFiles/shaders.dir/all:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/shaders.dir/build.make CMakeFiles/shaders.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/shaders.dir/build.make CMakeFiles/shaders.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=11,12,13,14,15,16 "Built target shaders"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=12,13,14,15,16,17,18,19,20,21 "Built target shaders"
 .PHONY : CMakeFiles/shaders.dir/all
 
 # Build rule for subdir invocation for target.
 CMakeFiles/shaders.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/naoki/Development/GPUBench/build/CMakeFiles 6
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/naoki/Development/GPUBench/build/CMakeFiles 10
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/shaders.dir/all
 	$(CMAKE_COMMAND) -E cmake_progress_start /home/naoki/Development/GPUBench/build/CMakeFiles 0
 .PHONY : CMakeFiles/shaders.dir/rule
@@ -105,7 +105,7 @@ shaders: CMakeFiles/shaders.dir/rule
 # codegen rule for target.
 CMakeFiles/shaders.dir/codegen:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/shaders.dir/build.make CMakeFiles/shaders.dir/codegen
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=11,12,13,14,15,16 "Finished codegen for target shaders"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=12,13,14,15,16,17,18,19,20,21 "Finished codegen for target shaders"
 .PHONY : CMakeFiles/shaders.dir/codegen
 
 # clean rule for target.
@@ -120,12 +120,12 @@ CMakeFiles/shaders.dir/clean:
 CMakeFiles/gpubench.dir/all: CMakeFiles/shaders.dir/all
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/gpubench.dir/build.make CMakeFiles/gpubench.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/gpubench.dir/build.make CMakeFiles/gpubench.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=1,2,3,4,5,6,7,8,9,10 "Built target gpubench"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=1,2,3,4,5,6,7,8,9,10,11 "Built target gpubench"
 .PHONY : CMakeFiles/gpubench.dir/all
 
 # Build rule for subdir invocation for target.
 CMakeFiles/gpubench.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/naoki/Development/GPUBench/build/CMakeFiles 16
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/naoki/Development/GPUBench/build/CMakeFiles 21
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/gpubench.dir/all
 	$(CMAKE_COMMAND) -E cmake_progress_start /home/naoki/Development/GPUBench/build/CMakeFiles 0
 .PHONY : CMakeFiles/gpubench.dir/rule
@@ -137,7 +137,7 @@ gpubench: CMakeFiles/gpubench.dir/rule
 # codegen rule for target.
 CMakeFiles/gpubench.dir/codegen: CMakeFiles/shaders.dir/all
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/gpubench.dir/build.make CMakeFiles/gpubench.dir/codegen
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=1,2,3,4,5,6,7,8,9,10 "Finished codegen for target gpubench"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=1,2,3,4,5,6,7,8,9,10,11 "Finished codegen for target gpubench"
 .PHONY : CMakeFiles/gpubench.dir/codegen
 
 # clean rule for target.

@@ -14,6 +14,7 @@ set(CMAKE_DEPENDS_DEPENDENCY_FILES
   "/home/naoki/Development/GPUBench/src/benchmarks/Fp8Bench.cpp" "CMakeFiles/gpubench.dir/src/benchmarks/Fp8Bench.cpp.o" "gcc" "CMakeFiles/gpubench.dir/src/benchmarks/Fp8Bench.cpp.o.d"
   "/home/naoki/Development/GPUBench/src/benchmarks/Int4Bench.cpp" "CMakeFiles/gpubench.dir/src/benchmarks/Int4Bench.cpp.o" "gcc" "CMakeFiles/gpubench.dir/src/benchmarks/Int4Bench.cpp.o.d"
   "/home/naoki/Development/GPUBench/src/benchmarks/Int8Bench.cpp" "CMakeFiles/gpubench.dir/src/benchmarks/Int8Bench.cpp.o" "gcc" "CMakeFiles/gpubench.dir/src/benchmarks/Int8Bench.cpp.o.d"
+  "/home/naoki/Development/GPUBench/src/benchmarks/MemBandwidthBench.cpp" "CMakeFiles/gpubench.dir/src/benchmarks/MemBandwidthBench.cpp.o" "gcc" "CMakeFiles/gpubench.dir/src/benchmarks/MemBandwidthBench.cpp.o.d"
   "/home/naoki/Development/GPUBench/src/core/BenchmarkRunner.cpp" "CMakeFiles/gpubench.dir/src/core/BenchmarkRunner.cpp.o" "gcc" "CMakeFiles/gpubench.dir/src/core/BenchmarkRunner.cpp.o.d"
   "/home/naoki/Development/GPUBench/src/core/VulkanContext.cpp" "CMakeFiles/gpubench.dir/src/core/VulkanContext.cpp.o" "gcc" "CMakeFiles/gpubench.dir/src/core/VulkanContext.cpp.o.d"
   "/home/naoki/Development/GPUBench/src/main.cpp" "CMakeFiles/gpubench.dir/src/main.cpp.o" "gcc" "CMakeFiles/gpubench.dir/src/main.cpp.o.d"

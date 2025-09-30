@@ -12,6 +12,8 @@ file(REMOVE_RECURSE
   "CMakeFiles/gpubench.dir/src/benchmarks/Int4Bench.cpp.o.d"
   "CMakeFiles/gpubench.dir/src/benchmarks/Int8Bench.cpp.o"
   "CMakeFiles/gpubench.dir/src/benchmarks/Int8Bench.cpp.o.d"
+  "CMakeFiles/gpubench.dir/src/benchmarks/MemBandwidthBench.cpp.o"
+  "CMakeFiles/gpubench.dir/src/benchmarks/MemBandwidthBench.cpp.o.d"
   "CMakeFiles/gpubench.dir/src/core/BenchmarkRunner.cpp.o"
   "CMakeFiles/gpubench.dir/src/core/BenchmarkRunner.cpp.o.d"
   "CMakeFiles/gpubench.dir/src/core/VulkanContext.cpp.o"
