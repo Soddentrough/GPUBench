@@ -1,0 +1,27 @@
+#pragma once
+
+#include <string>
+#include <vector>
+#include <cstdint>
+
+struct ResultData {
+    std::string backendName;
+    std::string deviceName;
+    std::string benchmarkName;
+    uint64_t operations;
+    double time_ms;
+    bool isEmulated;
+};
+
+class ResultFormatter {
+public:
+    ResultFormatter();
+    ~ResultFormatter();
+
+    void addResult(const ResultData& result);
+    void print();
+
+private:
+    std::string formatNumber(uint64_t n);
+    std::vector<ResultData> results;
+};

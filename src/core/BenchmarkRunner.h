@@ -5,13 +5,11 @@
 #include <vector>
 #include <memory>
 
-#ifdef HAVE_VULKAN
-#include <vulkan/vulkan.h>
-#endif
+class ResultFormatter;
 
 class BenchmarkRunner {
 public:
-    BenchmarkRunner(IComputeContext& context);
+    BenchmarkRunner(const std::vector<IComputeContext*>& contexts);
     ~BenchmarkRunner();
 
     void run(const std::vector<std::string>& benchmarks_to_run);
@@ -19,11 +17,7 @@ public:
 private:
     void discoverBenchmarks();
 
-    IComputeContext& context;
+    std::vector<IComputeContext*> contexts;
     std::vector<std::unique_ptr<IBenchmark>> benchmarks;
-    
-#ifdef HAVE_VULKAN
-    VkCommandPool commandPool = VK_NULL_HANDLE;
-    VkQueryPool queryPool = VK_NULL_HANDLE;
-#endif
+    std::unique_ptr<ResultFormatter> formatter;
 };

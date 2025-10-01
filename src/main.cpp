@@ -14,7 +14,7 @@ int main(int argc, char** argv) {
     CLI::App app{"GPUBench"};
 
     std::vector<std::string> benchmarks_to_run;
-    app.add_option("-b,--benchmarks", benchmarks_to_run, "Benchmarks to run")->expected(1, -1);
+    app.add_option("-b,--benchmarks", benchmarks_to_run, "Benchmarks to run")->delimiter(',');
 
     uint32_t device_index = 0;
     app.add_option("-d,--device", device_index, "Device to use");
@@ -22,60 +22,83 @@ int main(int argc, char** argv) {
     bool list_devices = false;
     app.add_flag("-l,--list-devices", list_devices, "List available devices");
 
-    std::string backend_str = "auto";
-    app.add_option("-k,--backend", backend_str, "Backend to use: auto, vulkan, opencl (default: auto)");
+    bool list_backends = false;
+    app.add_flag("--list-backends", list_backends, "List available backends");
+
+    std::vector<std::string> backend_strs;
+    app.add_option("-k,--backend", backend_strs, "Backend to use: auto, vulkan, opencl, rocm (default: auto)")->delimiter(',');
+
+    bool verbose = false;
+    app.add_flag("--verbose", verbose, "Enable verbose logging");
 
     CLI11_PARSE(app, argc, argv);
 
+    if (verbose) {
+        std::cout << "Benchmarks to run: " << std::endl;
+        for (const auto& name : benchmarks_to_run) {
+            std::cout << "- " << name << std::endl;
+        }
+    }
+
     try {
-        // Create compute context with specified backend
-        std::unique_ptr<IComputeContext> context;
-        
-        if (backend_str == "auto") {
+        // Create compute contexts for specified backends
+        std::vector<std::unique_ptr<IComputeContext>> contexts;
+        if (backend_strs.empty() || (backend_strs.size() == 1 && backend_strs[0] == "auto")) {
             std::cout << "Auto-detecting compute backend..." << std::endl;
-            context = ComputeBackendFactory::createWithFallback();
-        } else if (backend_str == "vulkan") {
-            if (!ComputeBackendFactory::isAvailable(ComputeBackend::Vulkan)) {
-                std::cerr << "Vulkan backend not available" << std::endl;
-                return EXIT_FAILURE;
-            }
-            context = ComputeBackendFactory::create(ComputeBackend::Vulkan);
-        } else if (backend_str == "opencl") {
-            if (!ComputeBackendFactory::isAvailable(ComputeBackend::OpenCL)) {
-                std::cerr << "OpenCL backend not available" << std::endl;
-                return EXIT_FAILURE;
-            }
-            context = ComputeBackendFactory::create(ComputeBackend::OpenCL);
+            contexts.push_back(ComputeBackendFactory::createWithFallback());
         } else {
-            std::cerr << "Unknown backend: " << backend_str << std::endl;
-            std::cerr << "Valid options: auto, vulkan, opencl" << std::endl;
+            for (const auto& backend_str : backend_strs) {
+                if (backend_str == "vulkan") {
+                    if (ComputeBackendFactory::isAvailable(ComputeBackend::Vulkan)) {
+                        contexts.push_back(ComputeBackendFactory::create(ComputeBackend::Vulkan));
+                    }
+                } else if (backend_str == "opencl") {
+                    if (ComputeBackendFactory::isAvailable(ComputeBackend::OpenCL)) {
+                        contexts.push_back(ComputeBackendFactory::create(ComputeBackend::OpenCL));
+                    }
+                } else if (backend_str == "rocm") {
+                    if (ComputeBackendFactory::isAvailable(ComputeBackend::ROCm)) {
+                        contexts.push_back(ComputeBackendFactory::create(ComputeBackend::ROCm, verbose));
+                    }
+                } else {
+                    std::cerr << "Unknown or unavailable backend: " << backend_str << std::endl;
+                }
+            }
+        }
+
+        if (contexts.empty() && !list_backends) {
+            std::cerr << "No valid compute backends found." << std::endl;
             return EXIT_FAILURE;
         }
-        
-        std::cout << "Using backend: " << ComputeBackendFactory::getBackendName(context->getBackend()) << std::endl;
+
+        if (list_backends) {
+            // This part is a bit of a placeholder as we don't have a formal way 
+            // to query data type support without creating a context and checking benchmarks.
+            std::cout << "Available backends:" << std::endl;
+            std::cout << "- vulkan: " << (ComputeBackendFactory::isAvailable(ComputeBackend::Vulkan) ? "Supported" : "Not Supported") << std::endl;
+            std::cout << "- opencl: " << (ComputeBackendFactory::isAvailable(ComputeBackend::OpenCL) ? "Supported" : "Not Supported") << std::endl;
+            std::cout << "- rocm: " << (ComputeBackendFactory::isAvailable(ComputeBackend::ROCm) ? "Supported" : "Not Supported") << std::endl;
+            return EXIT_SUCCESS;
+        }
 
         if (list_devices) {
-            std::cout << "Available devices:" << std::endl;
-            const auto& devices = context->getDevices();
-            for (size_t i = 0; i < devices.size(); ++i) {
-                std::cout << "  " << i << ": " << devices[i].name << std::endl;
+            for (const auto& context : contexts) {
+                std::cout << "Backend: " << ComputeBackendFactory::getBackendName(context->getBackend()) << std::endl;
+                const auto& devices = context->getDevices();
+                for (size_t i = 0; i < devices.size(); ++i) {
+                    std::cout << "  " << i << ": " << devices[i].name << std::endl;
+                }
             }
             return EXIT_SUCCESS;
         }
 
-        context->pickDevice(device_index);
-        
-        DeviceInfo info = context->getCurrentDeviceInfo();
-        std::cout << "Using device: " << info.name << std::endl;
-        std::cout << "  VRAM: " << info.memorySize / (1024 * 1024) << " MB" << std::endl;
-        std::cout << "  Subgroup size (wavefront/warp): " << info.subgroupSize << " threads" << std::endl;
-        std::cout << "  Max work group size: " << info.maxWorkGroupSize << " threads" << std::endl;
-        std::cout << "  Max work group count: " << info.maxComputeWorkGroupCountX 
-                  << " x " << info.maxComputeWorkGroupCountY 
-                  << " x " << info.maxComputeWorkGroupCountZ << std::endl;
-        std::cout << "  Shared memory per work group: " << info.maxComputeSharedMemorySize / 1024 << " KB" << std::endl;
+        std::vector<IComputeContext*> context_ptrs;
+        for (const auto& context : contexts) {
+            context->pickDevice(device_index);
+            context_ptrs.push_back(context.get());
+        }
 
-        BenchmarkRunner runner(*context);
+        BenchmarkRunner runner(context_ptrs);
         runner.run(benchmarks_to_run);
     } catch (const std::runtime_error& e) {
         std::cerr << "An error occurred: " << e.what() << std::endl;

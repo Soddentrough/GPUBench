@@ -1,40 +1,71 @@
-#version 450
-#extension GL_EXT_shader_16bit_storage : require
-#extension GL_EXT_shader_explicit_arithmetic_types : require
+#version 460
+// Requires Vulkan 1.4+
+
+// Check if the GPU/driver supports native FP8 types and 8-bit storage
+#if defined(GL_EXT_shader_explicit_arithmetic_types_float8) && defined(GL_EXT_shader_8bit_storage)
+    // --- NATIVE FP8 PATH ---
+    #pragma message("Compiling with native FP8 support.")
+    #extension GL_EXT_shader_8bit_storage : require
+    #extension GL_EXT_shader_explicit_arithmetic_types_float8 : require
+
+    // Define a common type alias for native FP8 vectors
+    #define T_VEC4 f8vec4
+    #define T_CONST(v) f8vec4(v)
+
+    // Define the buffer with the native FP8 type
+    layout(set = 0, binding = 0) buffer Data {
+        f8vec4 data[];
+    } InOutBuffer;
+
+#else
+    // --- FP16 EMULATION FALLBACK PATH ---
+    #pragma message("Fallback: Compiling with FP16 for FP8 emulation.")
+    #extension GL_EXT_shader_16bit_storage : require
+    #extension GL_EXT_shader_explicit_arithmetic_types : require
+
+    // Define the common type alias for FP16 vectors
+    #define T_VEC4 f16vec4
+    #define T_CONST(v) f16vec4(v)
+
+    // Define the buffer with the FP16 type
+    layout(set = 0, binding = 0) buffer Data {
+        f16vec4 data[];
+    } InOutBuffer;
+
+#endif
 
 layout (local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
-layout(set = 0, binding = 0) buffer Data {
-    f16vec4 data[];
-} InOutBuffer;
-
+// The main logic is now written once and works for both f8vec4 and f16vec4
+// thanks to the T_VEC4 and T_CONST aliases.
 void main() {
     uint index = gl_GlobalInvocationID.x;
 
-    // Emulating FP8 with FP16 packed values (f16vec4 = 4 FP8-equivalent values)
-    // Using multiple accumulators to avoid dependency chains
-    f16vec4 val1 = InOutBuffer.data[index];
-    f16vec4 val2 = f16vec4(0.1, 0.2, 0.3, 0.4);
-    f16vec4 val3 = f16vec4(0.5, 0.6, 0.7, 0.8);
-    f16vec4 val4 = f16vec4(0.9, 1.0, 1.1, 1.2);
-    f16vec4 val5 = f16vec4(1.3, 1.4, 1.5, 1.6);
-    f16vec4 val6 = f16vec4(1.7, 1.8, 1.9, 2.0);
-    f16vec4 val7 = f16vec4(2.1, 2.2, 2.3, 2.4);
-    f16vec4 val8 = f16vec4(2.5, 2.6, 2.7, 2.8);
+    // Load initial data
+    T_VEC4 val1 = InOutBuffer.data[index];
+
+    // Initialize accumulators
+    T_VEC4 val2 = T_VEC4(0.1, 0.2, 0.3, 0.4);
+    T_VEC4 val3 = T_VEC4(0.5, 0.6, 0.7, 0.8);
+    T_VEC4 val4 = T_VEC4(0.9, 1.0, 1.1, 1.2);
+    T_VEC4 val5 = T_VEC4(1.3, 1.4, 1.5, 1.6);
+    T_VEC4 val6 = T_VEC4(1.7, 1.8, 1.9, 2.0);
+    T_VEC4 val7 = T_VEC4(2.1, 2.2, 2.3, 2.4);
+    T_VEC4 val8 = T_VEC4(2.5, 2.6, 2.7, 2.8);
     
-    // Each iteration performs 8 f16vec4 FMAs = 8 * 4 * 2 = 64 FP8-equivalent ops
-    // This emulates what FP8 workloads would look like with higher throughput
+    T_VEC4 mult = T_CONST(1.0001);
+
     for (int i = 0; i < 16384; ++i) {
-        val1 = fma(val1, f16vec4(1.0001), val2);
-        val2 = fma(val2, f16vec4(1.0001), val3);
-        val3 = fma(val3, f16vec4(1.0001), val4);
-        val4 = fma(val4, f16vec4(1.0001), val5);
-        val5 = fma(val5, f16vec4(1.0001), val6);
-        val6 = fma(val6, f16vec4(1.0001), val7);
-        val7 = fma(val7, f16vec4(1.0001), val8);
-        val8 = fma(val8, f16vec4(1.0001), val1);
+        val1 = fma(val1, mult, val2);
+        val2 = fma(val2, mult, val3);
+        val3 = fma(val3, mult, val4);
+        val4 = fma(val4, mult, val5);
+        val5 = fma(val5, mult, val6);
+        val6 = fma(val6, mult, val7);
+        val7 = fma(val7, mult, val8);
+        val8 = fma(val8, mult, val1);
     }
     
-    // Prevent optimization away
+    // Prevent optimization
     InOutBuffer.data[index] = val1 + val2 + val3 + val4 + val5 + val6 + val7 + val8;
 }

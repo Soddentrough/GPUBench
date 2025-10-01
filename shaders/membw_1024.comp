@@ -1,0 +1,51 @@
+#version 460
+// Requires Vulkan 1.4+
+
+layout (local_size_x = 1024, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) buffer InputData {
+    vec4 inputData[];
+} InputBuffer;
+
+layout(set = 0, binding = 1) buffer OutputData {
+    vec4 outputData[];
+} OutputBuffer;
+
+void main() {
+    uint baseIndex = gl_GlobalInvocationID.x * 16;
+    
+    // Each thread processes 16 vec4s (256 bytes)
+    vec4 data0 = InputBuffer.inputData[baseIndex + 0];
+    vec4 data1 = InputBuffer.inputData[baseIndex + 1];
+    vec4 data2 = InputBuffer.inputData[baseIndex + 2];
+    vec4 data3 = InputBuffer.inputData[baseIndex + 3];
+    vec4 data4 = InputBuffer.inputData[baseIndex + 4];
+    vec4 data5 = InputBuffer.inputData[baseIndex + 5];
+    vec4 data6 = InputBuffer.inputData[baseIndex + 6];
+    vec4 data7 = InputBuffer.inputData[baseIndex + 7];
+    vec4 data8 = InputBuffer.inputData[baseIndex + 8];
+    vec4 data9 = InputBuffer.inputData[baseIndex + 9];
+    vec4 data10 = InputBuffer.inputData[baseIndex + 10];
+    vec4 data11 = InputBuffer.inputData[baseIndex + 11];
+    vec4 data12 = InputBuffer.inputData[baseIndex + 12];
+    vec4 data13 = InputBuffer.inputData[baseIndex + 13];
+    vec4 data14 = InputBuffer.inputData[baseIndex + 14];
+    vec4 data15 = InputBuffer.inputData[baseIndex + 15];
+    
+    OutputBuffer.outputData[baseIndex + 0] = data0;
+    OutputBuffer.outputData[baseIndex + 1] = data1;
+    OutputBuffer.outputData[baseIndex + 2] = data2;
+    OutputBuffer.outputData[baseIndex + 3] = data3;
+    OutputBuffer.outputData[baseIndex + 4] = data4;
+    OutputBuffer.outputData[baseIndex + 5] = data5;
+    OutputBuffer.outputData[baseIndex + 6] = data6;
+    OutputBuffer.outputData[baseIndex + 7] = data7;
+    OutputBuffer.outputData[baseIndex + 8] = data8;
+    OutputBuffer.outputData[baseIndex + 9] = data9;
+    OutputBuffer.outputData[baseIndex + 10] = data10;
+    OutputBuffer.outputData[baseIndex + 11] = data11;
+    OutputBuffer.outputData[baseIndex + 12] = data12;
+    OutputBuffer.outputData[baseIndex + 13] = data13;
+    OutputBuffer.outputData[baseIndex + 14] = data14;
+    OutputBuffer.outputData[baseIndex + 15] = data15;
+}

@@ -130,6 +130,32 @@ shaders/fast:
 .PHONY : shaders/fast
 
 #=============================================================================
+# Target rules for targets named kernels
+
+# Build rule for target.
+kernels: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 kernels
+.PHONY : kernels
+
+# fast build rule for target.
+kernels/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/kernels.dir/build.make CMakeFiles/kernels.dir/build
+.PHONY : kernels/fast
+
+#=============================================================================
+# Target rules for targets named hip_kernels
+
+# Build rule for target.
+hip_kernels: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 hip_kernels
+.PHONY : hip_kernels
+
+# fast build rule for target.
+hip_kernels/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/hip_kernels.dir/build.make CMakeFiles/hip_kernels.dir/build
+.PHONY : hip_kernels/fast
+
+#=============================================================================
 # Target rules for targets named gpubench
 
 # Build rule for target.
@@ -165,6 +191,30 @@ src/benchmarks/CacheBandwidthBench.s: src/benchmarks/CacheBandwidthBench.cpp.s
 src/benchmarks/CacheBandwidthBench.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/gpubench.dir/build.make CMakeFiles/gpubench.dir/src/benchmarks/CacheBandwidthBench.cpp.s
 .PHONY : src/benchmarks/CacheBandwidthBench.cpp.s
+
+src/benchmarks/CacheLatencyBench.o: src/benchmarks/CacheLatencyBench.cpp.o
+.PHONY : src/benchmarks/CacheLatencyBench.o
+
+# target to build an object file
+src/benchmarks/CacheLatencyBench.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gpubench.dir/build.make CMakeFiles/gpubench.dir/src/benchmarks/CacheLatencyBench.cpp.o
+.PHONY : src/benchmarks/CacheLatencyBench.cpp.o
+
+src/benchmarks/CacheLatencyBench.i: src/benchmarks/CacheLatencyBench.cpp.i
+.PHONY : src/benchmarks/CacheLatencyBench.i
+
+# target to preprocess a source file
+src/benchmarks/CacheLatencyBench.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gpubench.dir/build.make CMakeFiles/gpubench.dir/src/benchmarks/CacheLatencyBench.cpp.i
+.PHONY : src/benchmarks/CacheLatencyBench.cpp.i
+
+src/benchmarks/CacheLatencyBench.s: src/benchmarks/CacheLatencyBench.cpp.s
+.PHONY : src/benchmarks/CacheLatencyBench.s
+
+# target to generate assembly for a file
+src/benchmarks/CacheLatencyBench.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gpubench.dir/build.make CMakeFiles/gpubench.dir/src/benchmarks/CacheLatencyBench.cpp.s
+.PHONY : src/benchmarks/CacheLatencyBench.cpp.s
 
 src/benchmarks/Fp16Bench.o: src/benchmarks/Fp16Bench.cpp.o
 .PHONY : src/benchmarks/Fp16Bench.o
@@ -214,6 +264,30 @@ src/benchmarks/Fp32Bench.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/gpubench.dir/build.make CMakeFiles/gpubench.dir/src/benchmarks/Fp32Bench.cpp.s
 .PHONY : src/benchmarks/Fp32Bench.cpp.s
 
+src/benchmarks/Fp4Bench.o: src/benchmarks/Fp4Bench.cpp.o
+.PHONY : src/benchmarks/Fp4Bench.o
+
+# target to build an object file
+src/benchmarks/Fp4Bench.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gpubench.dir/build.make CMakeFiles/gpubench.dir/src/benchmarks/Fp4Bench.cpp.o
+.PHONY : src/benchmarks/Fp4Bench.cpp.o
+
+src/benchmarks/Fp4Bench.i: src/benchmarks/Fp4Bench.cpp.i
+.PHONY : src/benchmarks/Fp4Bench.i
+
+# target to preprocess a source file
+src/benchmarks/Fp4Bench.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gpubench.dir/build.make CMakeFiles/gpubench.dir/src/benchmarks/Fp4Bench.cpp.i
+.PHONY : src/benchmarks/Fp4Bench.cpp.i
+
+src/benchmarks/Fp4Bench.s: src/benchmarks/Fp4Bench.cpp.s
+.PHONY : src/benchmarks/Fp4Bench.s
+
+# target to generate assembly for a file
+src/benchmarks/Fp4Bench.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gpubench.dir/build.make CMakeFiles/gpubench.dir/src/benchmarks/Fp4Bench.cpp.s
+.PHONY : src/benchmarks/Fp4Bench.cpp.s
+
 src/benchmarks/Fp64Bench.o: src/benchmarks/Fp64Bench.cpp.o
 .PHONY : src/benchmarks/Fp64Bench.o
 
@@ -237,6 +311,30 @@ src/benchmarks/Fp64Bench.s: src/benchmarks/Fp64Bench.cpp.s
 src/benchmarks/Fp64Bench.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/gpubench.dir/build.make CMakeFiles/gpubench.dir/src/benchmarks/Fp64Bench.cpp.s
 .PHONY : src/benchmarks/Fp64Bench.cpp.s
+
+src/benchmarks/Fp6Bench.o: src/benchmarks/Fp6Bench.cpp.o
+.PHONY : src/benchmarks/Fp6Bench.o
+
+# target to build an object file
+src/benchmarks/Fp6Bench.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gpubench.dir/build.make CMakeFiles/gpubench.dir/src/benchmarks/Fp6Bench.cpp.o
+.PHONY : src/benchmarks/Fp6Bench.cpp.o
+
+src/benchmarks/Fp6Bench.i: src/benchmarks/Fp6Bench.cpp.i
+.PHONY : src/benchmarks/Fp6Bench.i
+
+# target to preprocess a source file
+src/benchmarks/Fp6Bench.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gpubench.dir/build.make CMakeFiles/gpubench.dir/src/benchmarks/Fp6Bench.cpp.i
+.PHONY : src/benchmarks/Fp6Bench.cpp.i
+
+src/benchmarks/Fp6Bench.s: src/benchmarks/Fp6Bench.cpp.s
+.PHONY : src/benchmarks/Fp6Bench.s
+
+# target to generate assembly for a file
+src/benchmarks/Fp6Bench.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gpubench.dir/build.make CMakeFiles/gpubench.dir/src/benchmarks/Fp6Bench.cpp.s
+.PHONY : src/benchmarks/Fp6Bench.cpp.s
 
 src/benchmarks/Fp8Bench.o: src/benchmarks/Fp8Bench.cpp.o
 .PHONY : src/benchmarks/Fp8Bench.o
@@ -358,6 +456,78 @@ src/core/BenchmarkRunner.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/gpubench.dir/build.make CMakeFiles/gpubench.dir/src/core/BenchmarkRunner.cpp.s
 .PHONY : src/core/BenchmarkRunner.cpp.s
 
+src/core/OpenCLContext.o: src/core/OpenCLContext.cpp.o
+.PHONY : src/core/OpenCLContext.o
+
+# target to build an object file
+src/core/OpenCLContext.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gpubench.dir/build.make CMakeFiles/gpubench.dir/src/core/OpenCLContext.cpp.o
+.PHONY : src/core/OpenCLContext.cpp.o
+
+src/core/OpenCLContext.i: src/core/OpenCLContext.cpp.i
+.PHONY : src/core/OpenCLContext.i
+
+# target to preprocess a source file
+src/core/OpenCLContext.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gpubench.dir/build.make CMakeFiles/gpubench.dir/src/core/OpenCLContext.cpp.i
+.PHONY : src/core/OpenCLContext.cpp.i
+
+src/core/OpenCLContext.s: src/core/OpenCLContext.cpp.s
+.PHONY : src/core/OpenCLContext.s
+
+# target to generate assembly for a file
+src/core/OpenCLContext.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gpubench.dir/build.make CMakeFiles/gpubench.dir/src/core/OpenCLContext.cpp.s
+.PHONY : src/core/OpenCLContext.cpp.s
+
+src/core/ROCmContext.o: src/core/ROCmContext.cpp.o
+.PHONY : src/core/ROCmContext.o
+
+# target to build an object file
+src/core/ROCmContext.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gpubench.dir/build.make CMakeFiles/gpubench.dir/src/core/ROCmContext.cpp.o
+.PHONY : src/core/ROCmContext.cpp.o
+
+src/core/ROCmContext.i: src/core/ROCmContext.cpp.i
+.PHONY : src/core/ROCmContext.i
+
+# target to preprocess a source file
+src/core/ROCmContext.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gpubench.dir/build.make CMakeFiles/gpubench.dir/src/core/ROCmContext.cpp.i
+.PHONY : src/core/ROCmContext.cpp.i
+
+src/core/ROCmContext.s: src/core/ROCmContext.cpp.s
+.PHONY : src/core/ROCmContext.s
+
+# target to generate assembly for a file
+src/core/ROCmContext.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gpubench.dir/build.make CMakeFiles/gpubench.dir/src/core/ROCmContext.cpp.s
+.PHONY : src/core/ROCmContext.cpp.s
+
+src/core/ResultFormatter.o: src/core/ResultFormatter.cpp.o
+.PHONY : src/core/ResultFormatter.o
+
+# target to build an object file
+src/core/ResultFormatter.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gpubench.dir/build.make CMakeFiles/gpubench.dir/src/core/ResultFormatter.cpp.o
+.PHONY : src/core/ResultFormatter.cpp.o
+
+src/core/ResultFormatter.i: src/core/ResultFormatter.cpp.i
+.PHONY : src/core/ResultFormatter.i
+
+# target to preprocess a source file
+src/core/ResultFormatter.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gpubench.dir/build.make CMakeFiles/gpubench.dir/src/core/ResultFormatter.cpp.i
+.PHONY : src/core/ResultFormatter.cpp.i
+
+src/core/ResultFormatter.s: src/core/ResultFormatter.cpp.s
+.PHONY : src/core/ResultFormatter.s
+
+# target to generate assembly for a file
+src/core/ResultFormatter.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gpubench.dir/build.make CMakeFiles/gpubench.dir/src/core/ResultFormatter.cpp.s
+.PHONY : src/core/ResultFormatter.cpp.s
+
 src/core/VulkanContext.o: src/core/VulkanContext.cpp.o
 .PHONY : src/core/VulkanContext.o
 
@@ -414,20 +584,31 @@ help:
 	@echo "... depend"
 	@echo "... edit_cache"
 	@echo "... rebuild_cache"
+	@echo "... hip_kernels"
+	@echo "... kernels"
 	@echo "... shaders"
 	@echo "... gpubench"
 	@echo "... src/benchmarks/CacheBandwidthBench.o"
 	@echo "... src/benchmarks/CacheBandwidthBench.i"
 	@echo "... src/benchmarks/CacheBandwidthBench.s"
+	@echo "... src/benchmarks/CacheLatencyBench.o"
+	@echo "... src/benchmarks/CacheLatencyBench.i"
+	@echo "... src/benchmarks/CacheLatencyBench.s"
 	@echo "... src/benchmarks/Fp16Bench.o"
 	@echo "... src/benchmarks/Fp16Bench.i"
 	@echo "... src/benchmarks/Fp16Bench.s"
 	@echo "... src/benchmarks/Fp32Bench.o"
 	@echo "... src/benchmarks/Fp32Bench.i"
 	@echo "... src/benchmarks/Fp32Bench.s"
+	@echo "... src/benchmarks/Fp4Bench.o"
+	@echo "... src/benchmarks/Fp4Bench.i"
+	@echo "... src/benchmarks/Fp4Bench.s"
 	@echo "... src/benchmarks/Fp64Bench.o"
 	@echo "... src/benchmarks/Fp64Bench.i"
 	@echo "... src/benchmarks/Fp64Bench.s"
+	@echo "... src/benchmarks/Fp6Bench.o"
+	@echo "... src/benchmarks/Fp6Bench.i"
+	@echo "... src/benchmarks/Fp6Bench.s"
 	@echo "... src/benchmarks/Fp8Bench.o"
 	@echo "... src/benchmarks/Fp8Bench.i"
 	@echo "... src/benchmarks/Fp8Bench.s"
@@ -443,6 +624,15 @@ help:
 	@echo "... src/core/BenchmarkRunner.o"
 	@echo "... src/core/BenchmarkRunner.i"
 	@echo "... src/core/BenchmarkRunner.s"
+	@echo "... src/core/OpenCLContext.o"
+	@echo "... src/core/OpenCLContext.i"
+	@echo "... src/core/OpenCLContext.s"
+	@echo "... src/core/ROCmContext.o"
+	@echo "... src/core/ROCmContext.i"
+	@echo "... src/core/ROCmContext.s"
+	@echo "... src/core/ResultFormatter.o"
+	@echo "... src/core/ResultFormatter.i"
+	@echo "... src/core/ResultFormatter.s"
 	@echo "... src/core/VulkanContext.o"
 	@echo "... src/core/VulkanContext.i"
 	@echo "... src/core/VulkanContext.s"

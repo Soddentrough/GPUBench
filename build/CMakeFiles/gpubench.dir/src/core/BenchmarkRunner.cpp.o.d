@@ -106,22 +106,6 @@ CMakeFiles/gpubench.dir/src/core/BenchmarkRunner.cpp.o: \
  /usr/include/stdint.h /usr/include/bits/stdint-uintn.h \
  /usr/include/bits/stdint-least.h \
  /home/naoki/Development/GPUBench/src/benchmarks/IBenchmark.h \
- /home/naoki/Development/GPUBench/src/core/VulkanContext.h \
- /usr/include/vulkan/vulkan.h /usr/include/vulkan/vk_platform.h \
- /usr/include/vulkan/vulkan_core.h \
- /usr/include/vk_video/vulkan_video_codec_h264std.h \
- /usr/include/vk_video/vulkan_video_codecs_common.h \
- /usr/include/vk_video/vulkan_video_codec_h264std_encode.h \
- /usr/include/vk_video/vulkan_video_codec_h264std.h \
- /usr/include/vk_video/vulkan_video_codec_h265std.h \
- /usr/include/vk_video/vulkan_video_codec_h265std_encode.h \
- /usr/include/vk_video/vulkan_video_codec_h265std.h \
- /usr/include/vk_video/vulkan_video_codec_h264std_decode.h \
- /usr/include/vk_video/vulkan_video_codec_h265std_decode.h \
- /usr/include/vk_video/vulkan_video_codec_av1std.h \
- /usr/include/vk_video/vulkan_video_codec_av1std_decode.h \
- /usr/include/vk_video/vulkan_video_codec_av1std.h \
- /usr/include/vk_video/vulkan_video_codec_av1std_encode.h \
  /usr/include/c++/15/memory /usr/include/c++/15/bits/stl_tempbuf.h \
  /usr/include/c++/15/bits/stl_raw_storage_iter.h \
  /usr/include/c++/15/bits/align.h /usr/include/c++/15/bits/unique_ptr.h \
@@ -156,14 +140,102 @@ CMakeFiles/gpubench.dir/src/core/BenchmarkRunner.cpp.o: \
  /usr/include/c++/15/backward/auto_ptr.h \
  /usr/include/c++/15/pstl/glue_memory_defs.h \
  /usr/include/c++/15/pstl/execution_defs.h \
+ /home/naoki/Development/GPUBench/src/core/ComputeBackendFactory.h \
+ /usr/include/c++/15/stdexcept \
+ /home/naoki/Development/GPUBench/src/core/VulkanContext.h \
+ /usr/include/vulkan/vulkan.h /usr/include/vulkan/vk_platform.h \
+ /usr/include/vulkan/vulkan_core.h \
+ /usr/include/vk_video/vulkan_video_codec_h264std.h \
+ /usr/include/vk_video/vulkan_video_codecs_common.h \
+ /usr/include/vk_video/vulkan_video_codec_h264std_encode.h \
+ /usr/include/vk_video/vulkan_video_codec_h264std.h \
+ /usr/include/vk_video/vulkan_video_codec_h265std.h \
+ /usr/include/vk_video/vulkan_video_codec_h265std_encode.h \
+ /usr/include/vk_video/vulkan_video_codec_h265std.h \
+ /usr/include/vk_video/vulkan_video_codec_h264std_decode.h \
+ /usr/include/vk_video/vulkan_video_codec_h265std_decode.h \
+ /usr/include/vk_video/vulkan_video_codec_av1std.h \
+ /usr/include/vk_video/vulkan_video_codec_av1std_decode.h \
+ /usr/include/vk_video/vulkan_video_codec_av1std.h \
+ /usr/include/vk_video/vulkan_video_codec_av1std_encode.h \
+ /usr/include/c++/15/map /usr/include/c++/15/bits/stl_tree.h \
+ /usr/include/c++/15/bits/node_handle.h \
+ /usr/include/c++/15/bits/stl_map.h \
+ /usr/include/c++/15/bits/stl_multimap.h \
+ /usr/include/c++/15/bits/erase_if.h \
+ /home/naoki/Development/GPUBench/src/core/OpenCLContext.h \
+ /usr/include/CL/cl.h /usr/include/CL/cl_version.h \
+ /usr/include/CL/cl_platform.h \
+ /usr/lib/gcc/x86_64-redhat-linux/15/include/xmmintrin.h \
+ /usr/lib/gcc/x86_64-redhat-linux/15/include/mmintrin.h \
+ /usr/lib/gcc/x86_64-redhat-linux/15/include/mm_malloc.h \
+ /usr/include/c++/15/stdlib.h \
+ /usr/lib/gcc/x86_64-redhat-linux/15/include/emmintrin.h \
+ /home/naoki/Development/GPUBench/src/core/ROCmContext.h \
+ /usr/include/hip/hip_runtime.h /usr/include/assert.h \
+ /usr/include/c++/15/thread /usr/include/c++/15/bits/std_thread.h \
+ /usr/include/c++/15/bits/this_thread_sleep.h \
+ /usr/include/c++/15/bits/chrono.h /usr/include/c++/15/ratio \
+ /usr/include/c++/15/limits /usr/include/c++/15/ctime \
+ /usr/include/c++/15/bits/parse_numbers.h /usr/include/hip/hip_version.h \
+ /usr/include/hip/hip_common.h \
+ /usr/include/hip/amd_detail/amd_hip_runtime.h \
+ /usr/include/hip/amd_detail/amd_hip_common.h /usr/include/c++/15/cmath \
+ /usr/include/math.h /usr/include/bits/math-vector.h \
+ /usr/include/bits/libm-simd-decl-stubs.h \
+ /usr/include/bits/flt-eval-method.h /usr/include/bits/fp-logb.h \
+ /usr/include/bits/fp-fast.h /usr/include/bits/mathcalls-macros.h \
+ /usr/include/bits/mathcalls-helper-functions.h \
+ /usr/include/bits/mathcalls.h /usr/include/bits/mathcalls-narrow.h \
+ /usr/include/bits/iscanonical.h /usr/include/c++/15/bits/specfun.h \
+ /usr/include/c++/15/tr1/gamma.tcc \
+ /usr/include/c++/15/tr1/special_function_util.h \
+ /usr/include/c++/15/tr1/bessel_function.tcc \
+ /usr/include/c++/15/tr1/beta_function.tcc \
+ /usr/include/c++/15/tr1/ell_integral.tcc \
+ /usr/include/c++/15/tr1/exp_integral.tcc \
+ /usr/include/c++/15/tr1/hypergeometric.tcc \
+ /usr/include/c++/15/tr1/legendre_function.tcc \
+ /usr/include/c++/15/tr1/modified_bessel_func.tcc \
+ /usr/include/c++/15/tr1/poly_hermite.tcc \
+ /usr/include/c++/15/tr1/poly_laguerre.tcc \
+ /usr/include/c++/15/tr1/riemann_zeta.tcc \
+ /usr/include/hip/hip_runtime_api.h /usr/include/string.h \
+ /usr/include/strings.h /usr/include/hip/linker_types.h \
+ /usr/include/hip/amd_detail/host_defines.h \
+ /usr/include/hip/driver_types.h /usr/include/hip/texture_types.h \
+ /usr/lib/gcc/x86_64-redhat-linux/15/include/limits.h \
+ /usr/lib/gcc/x86_64-redhat-linux/15/include/syslimits.h \
+ /usr/include/limits.h /usr/include/bits/posix1_lim.h \
+ /usr/include/bits/local_lim.h /usr/include/linux/limits.h \
+ /usr/include/bits/posix2_lim.h /usr/include/bits/xopen_lim.h \
+ /usr/include/bits/uio_lim.h /usr/include/hip/channel_descriptor.h \
+ /usr/include/hip/amd_detail/amd_channel_descriptor.h \
+ /usr/include/hip/amd_detail/amd_hip_vector_types.h \
+ /usr/include/c++/15/array /usr/include/c++/15/compare \
+ /usr/include/hip/surface_types.h \
+ /usr/include/hip/amd_detail/amd_hip_runtime_pt_api.h \
+ /usr/include/hip/amd_detail/hip_prof_str.h \
+ /usr/include/hip/hip_deprecated.h \
+ /usr/include/hip/amd_detail/amd_hip_gl_interop.h \
+ /usr/include/hip/library_types.h /usr/include/hip/hip_vector_types.h \
+ /usr/include/c++/15/unordered_map \
+ /usr/include/c++/15/bits/unordered_map.h \
+ /usr/include/c++/15/bits/hashtable.h \
+ /usr/include/c++/15/bits/hashtable_policy.h \
+ /usr/include/c++/15/bits/enable_special_members.h \
+ /home/naoki/Development/GPUBench/src/core/ResultFormatter.h \
  /home/naoki/Development/GPUBench/src/benchmarks/Fp32Bench.h \
  /home/naoki/Development/GPUBench/src/benchmarks/Fp64Bench.h \
  /home/naoki/Development/GPUBench/src/benchmarks/Fp16Bench.h \
  /home/naoki/Development/GPUBench/src/benchmarks/Fp8Bench.h \
+ /home/naoki/Development/GPUBench/src/benchmarks/Fp4Bench.h \
  /home/naoki/Development/GPUBench/src/benchmarks/Int8Bench.h \
  /home/naoki/Development/GPUBench/src/benchmarks/Int4Bench.h \
  /home/naoki/Development/GPUBench/src/benchmarks/MemBandwidthBench.h \
  /home/naoki/Development/GPUBench/src/benchmarks/CacheBandwidthBench.h \
+ /home/naoki/Development/GPUBench/src/benchmarks/CacheLatencyBench.h \
+ /home/naoki/Development/GPUBench/src/benchmarks/Fp6Bench.h \
  /usr/include/c++/15/iostream /usr/include/c++/15/ostream \
  /usr/include/c++/15/bits/ostream.h /usr/include/c++/15/ios \
  /usr/include/c++/15/bits/ios_base.h \
@@ -171,8 +243,7 @@ CMakeFiles/gpubench.dir/src/core/BenchmarkRunner.cpp.o: \
  /usr/include/c++/15/bits/locale_classes.tcc \
  /usr/include/c++/15/system_error \
  /usr/include/c++/15/x86_64-redhat-linux/bits/error_constants.h \
- /usr/include/c++/15/stdexcept /usr/include/c++/15/streambuf \
- /usr/include/c++/15/bits/streambuf.tcc \
+ /usr/include/c++/15/streambuf /usr/include/c++/15/bits/streambuf.tcc \
  /usr/include/c++/15/bits/basic_ios.h \
  /usr/include/c++/15/bits/locale_facets.h /usr/include/c++/15/cwctype \
  /usr/include/wctype.h /usr/include/bits/wctype-wchar.h \
@@ -182,13 +253,16 @@ CMakeFiles/gpubench.dir/src/core/BenchmarkRunner.cpp.o: \
  /usr/include/c++/15/bits/locale_facets.tcc \
  /usr/include/c++/15/bits/basic_ios.tcc \
  /usr/include/c++/15/bits/ostream.tcc /usr/include/c++/15/istream \
- /usr/include/c++/15/bits/istream.tcc /usr/include/c++/15/iomanip \
+ /usr/include/c++/15/bits/istream.tcc /usr/include/c++/15/chrono \
+ /usr/include/c++/15/algorithm /usr/include/c++/15/bits/stl_algo.h \
+ /usr/include/c++/15/bits/algorithmfwd.h \
+ /usr/include/c++/15/bits/stl_heap.h \
+ /usr/include/c++/15/bits/uniform_int_dist.h \
+ /usr/include/c++/15/pstl/glue_algorithm_defs.h \
  /usr/include/c++/15/locale \
- /usr/include/c++/15/bits/locale_facets_nonio.h /usr/include/c++/15/ctime \
+ /usr/include/c++/15/bits/locale_facets_nonio.h \
  /usr/include/c++/15/x86_64-redhat-linux/bits/time_members.h \
  /usr/include/c++/15/x86_64-redhat-linux/bits/messages_members.h \
  /usr/include/libintl.h /usr/include/c++/15/bits/codecvt.h \
  /usr/include/c++/15/bits/locale_facets_nonio.tcc \
- /usr/include/c++/15/bits/locale_conv.h \
- /usr/include/c++/15/bits/quoted_string.h /usr/include/c++/15/sstream \
- /usr/include/c++/15/bits/sstream.tcc
+ /usr/include/c++/15/bits/locale_conv.h

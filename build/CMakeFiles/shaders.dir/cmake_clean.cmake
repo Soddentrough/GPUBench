@@ -5,6 +5,7 @@ file(REMOVE_RECURSE
   "cachebw_l3.spv"
   "fp16.spv"
   "fp32.spv"
+  "fp4.spv"
   "fp64.spv"
   "fp8.spv"
   "int4.spv"

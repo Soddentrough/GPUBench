@@ -154,6 +154,72 @@ CMakeFiles/gpubench.dir/src/main.cpp.o: \
  /usr/include/vk_video/vulkan_video_codec_av1std_decode.h \
  /usr/include/vk_video/vulkan_video_codec_av1std.h \
  /usr/include/vk_video/vulkan_video_codec_av1std_encode.h \
+ /usr/include/c++/15/map /usr/include/c++/15/bits/stl_tree.h \
+ /usr/include/c++/15/bits/node_handle.h \
+ /usr/include/c++/15/bits/stl_map.h \
+ /usr/include/c++/15/bits/stl_multimap.h \
+ /usr/include/c++/15/bits/erase_if.h \
+ /home/naoki/Development/GPUBench/src/core/OpenCLContext.h \
+ /usr/include/CL/cl.h /usr/include/CL/cl_version.h \
+ /usr/include/CL/cl_platform.h \
+ /usr/lib/gcc/x86_64-redhat-linux/15/include/xmmintrin.h \
+ /usr/lib/gcc/x86_64-redhat-linux/15/include/mmintrin.h \
+ /usr/lib/gcc/x86_64-redhat-linux/15/include/mm_malloc.h \
+ /usr/include/c++/15/stdlib.h \
+ /usr/lib/gcc/x86_64-redhat-linux/15/include/emmintrin.h \
+ /home/naoki/Development/GPUBench/src/core/ROCmContext.h \
+ /usr/include/hip/hip_runtime.h /usr/include/assert.h \
+ /usr/include/c++/15/thread /usr/include/c++/15/bits/std_thread.h \
+ /usr/include/c++/15/bits/this_thread_sleep.h \
+ /usr/include/c++/15/bits/chrono.h /usr/include/c++/15/ratio \
+ /usr/include/c++/15/limits /usr/include/c++/15/ctime \
+ /usr/include/c++/15/bits/parse_numbers.h /usr/include/hip/hip_version.h \
+ /usr/include/hip/hip_common.h \
+ /usr/include/hip/amd_detail/amd_hip_runtime.h \
+ /usr/include/hip/amd_detail/amd_hip_common.h /usr/include/c++/15/cmath \
+ /usr/include/math.h /usr/include/bits/math-vector.h \
+ /usr/include/bits/libm-simd-decl-stubs.h \
+ /usr/include/bits/flt-eval-method.h /usr/include/bits/fp-logb.h \
+ /usr/include/bits/fp-fast.h /usr/include/bits/mathcalls-macros.h \
+ /usr/include/bits/mathcalls-helper-functions.h \
+ /usr/include/bits/mathcalls.h /usr/include/bits/mathcalls-narrow.h \
+ /usr/include/bits/iscanonical.h /usr/include/c++/15/bits/specfun.h \
+ /usr/include/c++/15/tr1/gamma.tcc \
+ /usr/include/c++/15/tr1/special_function_util.h \
+ /usr/include/c++/15/tr1/bessel_function.tcc \
+ /usr/include/c++/15/tr1/beta_function.tcc \
+ /usr/include/c++/15/tr1/ell_integral.tcc \
+ /usr/include/c++/15/tr1/exp_integral.tcc \
+ /usr/include/c++/15/tr1/hypergeometric.tcc \
+ /usr/include/c++/15/tr1/legendre_function.tcc \
+ /usr/include/c++/15/tr1/modified_bessel_func.tcc \
+ /usr/include/c++/15/tr1/poly_hermite.tcc \
+ /usr/include/c++/15/tr1/poly_laguerre.tcc \
+ /usr/include/c++/15/tr1/riemann_zeta.tcc \
+ /usr/include/hip/hip_runtime_api.h /usr/include/string.h \
+ /usr/include/strings.h /usr/include/hip/linker_types.h \
+ /usr/include/hip/amd_detail/host_defines.h \
+ /usr/include/hip/driver_types.h /usr/include/hip/texture_types.h \
+ /usr/lib/gcc/x86_64-redhat-linux/15/include/limits.h \
+ /usr/lib/gcc/x86_64-redhat-linux/15/include/syslimits.h \
+ /usr/include/limits.h /usr/include/bits/posix1_lim.h \
+ /usr/include/bits/local_lim.h /usr/include/linux/limits.h \
+ /usr/include/bits/posix2_lim.h /usr/include/bits/xopen_lim.h \
+ /usr/include/bits/uio_lim.h /usr/include/hip/channel_descriptor.h \
+ /usr/include/hip/amd_detail/amd_channel_descriptor.h \
+ /usr/include/hip/amd_detail/amd_hip_vector_types.h \
+ /usr/include/c++/15/array /usr/include/c++/15/compare \
+ /usr/include/hip/surface_types.h \
+ /usr/include/hip/amd_detail/amd_hip_runtime_pt_api.h \
+ /usr/include/hip/amd_detail/hip_prof_str.h \
+ /usr/include/hip/hip_deprecated.h \
+ /usr/include/hip/amd_detail/amd_hip_gl_interop.h \
+ /usr/include/hip/library_types.h /usr/include/hip/hip_vector_types.h \
+ /usr/include/c++/15/unordered_map \
+ /usr/include/c++/15/bits/unordered_map.h \
+ /usr/include/c++/15/bits/hashtable.h \
+ /usr/include/c++/15/bits/hashtable_policy.h \
+ /usr/include/c++/15/bits/enable_special_members.h \
  /home/naoki/Development/GPUBench/src/core/BenchmarkRunner.h \
  /home/naoki/Development/GPUBench/src/benchmarks/IBenchmark.h \
  /usr/include/c++/15/iostream /usr/include/c++/15/ostream \
@@ -176,7 +242,7 @@ CMakeFiles/gpubench.dir/src/main.cpp.o: \
  /usr/include/c++/15/bits/istream.tcc \
  /home/naoki/Development/GPUBench/external/CLI11.hpp \
  /usr/include/c++/15/iomanip /usr/include/c++/15/locale \
- /usr/include/c++/15/bits/locale_facets_nonio.h /usr/include/c++/15/ctime \
+ /usr/include/c++/15/bits/locale_facets_nonio.h \
  /usr/include/c++/15/x86_64-redhat-linux/bits/time_members.h \
  /usr/include/c++/15/x86_64-redhat-linux/bits/messages_members.h \
  /usr/include/libintl.h /usr/include/c++/15/bits/codecvt.h \
@@ -184,52 +250,21 @@ CMakeFiles/gpubench.dir/src/main.cpp.o: \
  /usr/include/c++/15/bits/locale_conv.h \
  /usr/include/c++/15/bits/quoted_string.h /usr/include/c++/15/sstream \
  /usr/include/c++/15/bits/sstream.tcc /usr/include/c++/15/set \
- /usr/include/c++/15/bits/stl_tree.h \
- /usr/include/c++/15/bits/node_handle.h \
  /usr/include/c++/15/bits/stl_set.h \
- /usr/include/c++/15/bits/stl_multiset.h \
- /usr/include/c++/15/bits/erase_if.h /usr/include/c++/15/utility \
+ /usr/include/c++/15/bits/stl_multiset.h /usr/include/c++/15/utility \
  /usr/include/c++/15/bits/stl_relops.h /usr/include/c++/15/functional \
- /usr/include/c++/15/bits/std_function.h \
- /usr/include/c++/15/unordered_map \
- /usr/include/c++/15/bits/unordered_map.h \
- /usr/include/c++/15/bits/hashtable.h \
- /usr/include/c++/15/bits/hashtable_policy.h \
- /usr/include/c++/15/bits/enable_special_members.h \
- /usr/include/c++/15/array /usr/include/c++/15/compare \
- /usr/include/c++/15/iterator /usr/include/c++/15/bits/stream_iterator.h \
- /usr/include/c++/15/numeric /usr/include/c++/15/bits/stl_numeric.h \
+ /usr/include/c++/15/bits/std_function.h /usr/include/c++/15/iterator \
+ /usr/include/c++/15/bits/stream_iterator.h /usr/include/c++/15/numeric \
+ /usr/include/c++/15/bits/stl_numeric.h \
  /usr/include/c++/15/pstl/glue_numeric_defs.h /usr/include/c++/15/fstream \
  /usr/include/c++/15/x86_64-redhat-linux/bits/basic_file.h \
  /usr/include/c++/15/x86_64-redhat-linux/bits/c++io.h \
- /usr/include/c++/15/bits/fstream.tcc /usr/include/c++/15/map \
- /usr/include/c++/15/bits/stl_map.h \
- /usr/include/c++/15/bits/stl_multimap.h /usr/include/c++/15/algorithm \
+ /usr/include/c++/15/bits/fstream.tcc /usr/include/c++/15/algorithm \
  /usr/include/c++/15/bits/stl_algo.h \
  /usr/include/c++/15/bits/algorithmfwd.h \
  /usr/include/c++/15/bits/stl_heap.h \
  /usr/include/c++/15/bits/uniform_int_dist.h \
- /usr/include/c++/15/pstl/glue_algorithm_defs.h /usr/include/c++/15/cmath \
- /usr/include/math.h /usr/include/bits/math-vector.h \
- /usr/include/bits/libm-simd-decl-stubs.h \
- /usr/include/bits/flt-eval-method.h /usr/include/bits/fp-logb.h \
- /usr/include/bits/fp-fast.h /usr/include/bits/mathcalls-macros.h \
- /usr/include/bits/mathcalls-helper-functions.h \
- /usr/include/bits/mathcalls.h /usr/include/bits/mathcalls-narrow.h \
- /usr/include/bits/iscanonical.h /usr/include/c++/15/bits/specfun.h \
- /usr/include/c++/15/limits /usr/include/c++/15/tr1/gamma.tcc \
- /usr/include/c++/15/tr1/special_function_util.h \
- /usr/include/c++/15/tr1/bessel_function.tcc \
- /usr/include/c++/15/tr1/beta_function.tcc \
- /usr/include/c++/15/tr1/ell_integral.tcc \
- /usr/include/c++/15/tr1/exp_integral.tcc \
- /usr/include/c++/15/tr1/hypergeometric.tcc \
- /usr/include/c++/15/tr1/legendre_function.tcc \
- /usr/include/c++/15/tr1/modified_bessel_func.tcc \
- /usr/include/c++/15/tr1/poly_hermite.tcc \
- /usr/include/c++/15/tr1/poly_laguerre.tcc \
- /usr/include/c++/15/tr1/riemann_zeta.tcc /usr/include/c++/15/filesystem \
- /usr/include/c++/15/bits/fs_fwd.h /usr/include/c++/15/bits/chrono.h \
- /usr/include/c++/15/ratio /usr/include/c++/15/bits/parse_numbers.h \
+ /usr/include/c++/15/pstl/glue_algorithm_defs.h \
+ /usr/include/c++/15/filesystem /usr/include/c++/15/bits/fs_fwd.h \
  /usr/include/c++/15/bits/fs_path.h /usr/include/c++/15/codecvt \
  /usr/include/c++/15/bits/fs_dir.h /usr/include/c++/15/bits/fs_ops.h

@@ -3,6 +3,8 @@
 #include "IComputeContext.h"
 #include <vulkan/vulkan.h>
 #include <vector>
+#include <map>
+#include <string>
 
 class VulkanContext : public IComputeContext {
 public:
@@ -17,6 +19,20 @@ public:
     const std::vector<DeviceInfo>& getDevices() const override;
     void pickDevice(uint32_t index) override;
     DeviceInfo getCurrentDeviceInfo() const override;
+
+    // Buffer management
+    ComputeBuffer createBuffer(size_t size, const void* host_ptr = nullptr) override;
+    void writeBuffer(ComputeBuffer buffer, size_t offset, size_t size, const void* host_ptr) override;
+    void readBuffer(ComputeBuffer buffer, size_t offset, size_t size, void* host_ptr) const override;
+    void releaseBuffer(ComputeBuffer buffer) override;
+
+    // Kernel management
+    ComputeKernel createKernel(const std::string& file_name, const std::string& kernel_name, uint32_t num_args) override;
+    void setKernelArg(ComputeKernel kernel, uint32_t arg_index, ComputeBuffer buffer) override;
+    void setKernelArg(ComputeKernel kernel, uint32_t arg_index, size_t arg_size, const void* arg_value) override;
+    void dispatch(ComputeKernel kernel, uint32_t grid_x, uint32_t grid_y, uint32_t grid_z, uint32_t block_x, uint32_t block_y, uint32_t block_z) override;
+    void releaseKernel(ComputeKernel kernel) override;
+    void waitIdle() override;
     
     VkPhysicalDevice getVulkanPhysicalDevice() const override { return physicalDevice; }
     VkDevice getVulkanDevice() const override { return device; }
@@ -33,10 +49,27 @@ public:
 public:
     const std::vector<VkPhysicalDevice>& getPhysicalDevices() const { return physicalDevices; }
     void pickPhysicalDevice(uint32_t index);
+
 private:
+    struct VulkanBuffer {
+        VkBuffer buffer;
+        VkDeviceMemory memory;
+    };
+
+    struct VulkanKernel {
+        VkShaderModule shaderModule;
+        VkDescriptorSetLayout descriptorSetLayout;
+        VkPipelineLayout pipelineLayout;
+        VkPipeline pipeline;
+        VkDescriptorPool descriptorPool;
+        VkDescriptorSet descriptorSet;
+        std::map<uint32_t, ComputeBuffer> arg_buffers;
+    };
+
     void createInstance();
     void enumeratePhysicalDevices();
     void createDevice();
+    uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const;
 
     VkInstance instance = VK_NULL_HANDLE;
     std::vector<VkPhysicalDevice> physicalDevices;
@@ -46,6 +79,10 @@ private:
     
     uint32_t computeQueueFamilyIndex = 0;
     VkQueue computeQueue = VK_NULL_HANDLE;
+    VkCommandPool commandPool = VK_NULL_HANDLE;
+
+    std::map<ComputeBuffer, VulkanBuffer*> buffers;
+    std::map<ComputeKernel, VulkanKernel*> kernels;
     
     mutable std::vector<DeviceInfo> deviceInfos;
 };

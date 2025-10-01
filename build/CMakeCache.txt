@@ -14,6 +14,9 @@
 # EXTERNAL cache entries
 ########################
 
+//The directory containing a CMake configuration file for AMDDeviceLibs.
+AMDDeviceLibs_DIR:PATH=/usr/lib64/cmake/AMDDeviceLibs
+
 //Path to a program.
 CMAKE_ADDR2LINE:FILEPATH=/usr/bin/addr2line
 
@@ -80,7 +83,7 @@ CMAKE_C_FLAGS_RELEASE:STRING=-O3 -DNDEBUG
 CMAKE_C_FLAGS_RELWITHDEBINFO:STRING=-O2 -g -DNDEBUG
 
 //Path to a program.
-CMAKE_DLLTOOL:FILEPATH=CMAKE_DLLTOOL-NOTFOUND
+CMAKE_DLLTOOL:FILEPATH=/usr/bin/llvm-dlltool
 
 //Flags used by the linker during all build types.
 CMAKE_EXE_LINKER_FLAGS:STRING=
@@ -102,6 +105,39 @@ CMAKE_EXPORT_COMPILE_COMMANDS:BOOL=
 
 //Value Computed by CMake.
 CMAKE_FIND_PACKAGE_REDIRECTS_DIR:STATIC=/home/naoki/Development/GPUBench/build/CMakeFiles/pkgRedirects
+
+//HIP architectures
+CMAKE_HIP_ARCHITECTURES:STRING=gfx1030
+
+//HIP compiler
+CMAKE_HIP_COMPILER:FILEPATH=/usr/lib64/rocm/llvm/bin/clang++
+
+//LLVM archiver
+CMAKE_HIP_COMPILER_AR:FILEPATH=/usr/lib64/rocm/llvm/bin/llvm-ar
+
+//`clang-scan-deps` dependency scanner
+CMAKE_HIP_COMPILER_CLANG_SCAN_DEPS:FILEPATH=/usr/lib64/rocm/llvm/bin/clang-scan-deps
+
+//Generate index for LLVM archive
+CMAKE_HIP_COMPILER_RANLIB:FILEPATH=/usr/lib64/rocm/llvm/bin/llvm-ranlib
+
+//Flags used by the HIP compiler during all build types.
+CMAKE_HIP_FLAGS:STRING=
+
+//Flags used by the HIP compiler during DEBUG builds.
+CMAKE_HIP_FLAGS_DEBUG:STRING=-g -O
+
+//Flags used by the HIP compiler during MINSIZEREL builds.
+CMAKE_HIP_FLAGS_MINSIZEREL:STRING=-Os -DNDEBUG
+
+//Flags used by the HIP compiler during RELEASE builds.
+CMAKE_HIP_FLAGS_RELEASE:STRING=-O3 -DNDEBUG
+
+//Flags used by the HIP compiler during RELWITHDEBINFO builds.
+CMAKE_HIP_FLAGS_RELWITHDEBINFO:STRING=-O2 -g -DNDEBUG
+
+//HIP platform
+CMAKE_HIP_PLATFORM:STRING=amd
 
 //Install path prefix, prepended onto install directories.
 CMAKE_INSTALL_PREFIX:PATH=/usr/local
@@ -227,14 +263,20 @@ GPUBench_IS_TOP_LEVEL:STATIC=ON
 //Value Computed by CMake
 GPUBench_SOURCE_DIR:STATIC=/home/naoki/Development/GPUBench
 
+//GPU targets to compile for
+GPU_BUILD_TARGETS:STRING=
+
+//The directory containing a CMake configuration file for HIP.
+HIP_DIR:PATH=/usr/lib64/cmake/hip
+
 //Path to a file.
 OpenCL_INCLUDE_DIR:PATH=/usr/include
 
 //Path to a library.
-OpenCL_LIBRARY:FILEPATH=OpenCL_LIBRARY-NOTFOUND
+OpenCL_LIBRARY:FILEPATH=/usr/lib64/libOpenCL.so
 
 //Path to a program.
-Vulkan_GLSLANG_VALIDATOR_EXECUTABLE:FILEPATH=Vulkan_GLSLANG_VALIDATOR_EXECUTABLE-NOTFOUND
+Vulkan_GLSLANG_VALIDATOR_EXECUTABLE:FILEPATH=/bin/glslangValidator
 
 //Path to a program.
 Vulkan_GLSLC_EXECUTABLE:FILEPATH=/bin/glslc
@@ -244,6 +286,12 @@ Vulkan_INCLUDE_DIR:PATH=/usr/include
 
 //Path to a library.
 Vulkan_LIBRARY:FILEPATH=/lib64/libvulkan.so
+
+//The directory containing a CMake configuration file for amd_comgr.
+amd_comgr_DIR:PATH=/usr/lib64/cmake/amd_comgr
+
+//The directory containing a CMake configuration file for hsa-runtime64.
+hsa-runtime64_DIR:PATH=/usr/lib64/cmake/hsa-runtime64
 
 
 ########################
@@ -330,6 +378,26 @@ CMAKE_GENERATOR_INSTANCE:INTERNAL=
 CMAKE_GENERATOR_PLATFORM:INTERNAL=
 //Name of generator toolset.
 CMAKE_GENERATOR_TOOLSET:INTERNAL=
+//Test CMAKE_HAVE_LIBC_PTHREAD
+CMAKE_HAVE_LIBC_PTHREAD:INTERNAL=1
+//ADVANCED property for variable: CMAKE_HIP_COMPILER
+CMAKE_HIP_COMPILER-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_HIP_COMPILER_AR
+CMAKE_HIP_COMPILER_AR-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_HIP_COMPILER_CLANG_SCAN_DEPS
+CMAKE_HIP_COMPILER_CLANG_SCAN_DEPS-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_HIP_COMPILER_RANLIB
+CMAKE_HIP_COMPILER_RANLIB-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_HIP_FLAGS
+CMAKE_HIP_FLAGS-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_HIP_FLAGS_DEBUG
+CMAKE_HIP_FLAGS_DEBUG-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_HIP_FLAGS_MINSIZEREL
+CMAKE_HIP_FLAGS_MINSIZEREL-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_HIP_FLAGS_RELEASE
+CMAKE_HIP_FLAGS_RELEASE-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_HIP_FLAGS_RELWITHDEBINFO
+CMAKE_HIP_FLAGS_RELWITHDEBINFO-ADVANCED:INTERNAL=1
 //Source directory with the top level CMakeLists.txt file for this
 // project
 CMAKE_HOME_DIRECTORY:INTERNAL=/home/naoki/Development/GPUBench
@@ -397,8 +465,12 @@ CMAKE_TAPI-ADVANCED:INTERNAL=1
 CMAKE_UNAME:INTERNAL=/usr/bin/uname
 //ADVANCED property for variable: CMAKE_VERBOSE_MAKEFILE
 CMAKE_VERBOSE_MAKEFILE-ADVANCED:INTERNAL=1
+//Details about finding OpenCL
+FIND_PACKAGE_MESSAGE_DETAILS_OpenCL:INTERNAL=[/usr/lib64/libOpenCL.so][/usr/include][v3.0()]
+//Details about finding Threads
+FIND_PACKAGE_MESSAGE_DETAILS_Threads:INTERNAL=[TRUE][v()]
 //Details about finding Vulkan
-FIND_PACKAGE_MESSAGE_DETAILS_Vulkan:INTERNAL=[/lib64/libvulkan.so][/usr/include][cfound components: glslc missing components: glslangValidator][v1.4.313()]
+FIND_PACKAGE_MESSAGE_DETAILS_Vulkan:INTERNAL=[/lib64/libvulkan.so][/usr/include][cfound components: glslc glslangValidator ][v1.4.313()]
 //Have symbol CL_VERSION_3_0
 OPENCL_VERSION_3_0:INTERNAL=1
 //ADVANCED property for variable: OpenCL_INCLUDE_DIR
@@ -417,6 +489,8 @@ Vulkan_LIBRARY-ADVANCED:INTERNAL=1
 _CMAKE_CXX_LINKER_PUSHPOP_STATE_SUPPORTED:INTERNAL=TRUE
 //linker supports push/pop state
 _CMAKE_C_LINKER_PUSHPOP_STATE_SUPPORTED:INTERNAL=TRUE
+//linker supports push/pop state
+_CMAKE_HIP_LINKER_PUSHPOP_STATE_SUPPORTED:INTERNAL=TRUE
 //linker supports push/pop state
 _CMAKE_LINKER_PUSHPOP_STATE_SUPPORTED:INTERNAL=TRUE
 
