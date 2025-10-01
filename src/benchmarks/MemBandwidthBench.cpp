@@ -65,12 +65,21 @@ void MemBandwidthBench::Teardown() {
     }
 }
 
+const char* MemBandwidthBench::GetName() const {
+    return "Memory Bandwidth";
+}
+
+const char* MemBandwidthBench::GetMetric() const {
+    return "GB/s";
+}
+
 BenchmarkResult MemBandwidthBench::GetResult() const {
     if (currentConfigIndex == 0 || currentConfigIndex > configs.size()) {
         return {0, 0.0};
     }
     
     const auto& config = configs[currentConfigIndex - 1];
-    uint64_t bytes_transferred = (uint64_t)config.workgroupSize * config.numWorkgroups * 16; // Each thread transfers 16 bytes (vec4)
+    // Each thread transfers 16 vec4s (16*16=256 bytes) per iteration, for 1024 iterations, times 2 for read/write
+    uint64_t bytes_transferred = (uint64_t)config.workgroupSize * config.numWorkgroups * 256 * 1024 * 2;
     return {bytes_transferred, 0.0};
 }

@@ -168,53 +168,29 @@ gpubench/fast:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/gpubench.dir/build.make CMakeFiles/gpubench.dir/build
 .PHONY : gpubench/fast
 
-src/benchmarks/CacheBandwidthBench.o: src/benchmarks/CacheBandwidthBench.cpp.o
-.PHONY : src/benchmarks/CacheBandwidthBench.o
+src/benchmarks/CacheBench.o: src/benchmarks/CacheBench.cpp.o
+.PHONY : src/benchmarks/CacheBench.o
 
 # target to build an object file
-src/benchmarks/CacheBandwidthBench.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/gpubench.dir/build.make CMakeFiles/gpubench.dir/src/benchmarks/CacheBandwidthBench.cpp.o
-.PHONY : src/benchmarks/CacheBandwidthBench.cpp.o
+src/benchmarks/CacheBench.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gpubench.dir/build.make CMakeFiles/gpubench.dir/src/benchmarks/CacheBench.cpp.o
+.PHONY : src/benchmarks/CacheBench.cpp.o
 
-src/benchmarks/CacheBandwidthBench.i: src/benchmarks/CacheBandwidthBench.cpp.i
-.PHONY : src/benchmarks/CacheBandwidthBench.i
-
-# target to preprocess a source file
-src/benchmarks/CacheBandwidthBench.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/gpubench.dir/build.make CMakeFiles/gpubench.dir/src/benchmarks/CacheBandwidthBench.cpp.i
-.PHONY : src/benchmarks/CacheBandwidthBench.cpp.i
-
-src/benchmarks/CacheBandwidthBench.s: src/benchmarks/CacheBandwidthBench.cpp.s
-.PHONY : src/benchmarks/CacheBandwidthBench.s
-
-# target to generate assembly for a file
-src/benchmarks/CacheBandwidthBench.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/gpubench.dir/build.make CMakeFiles/gpubench.dir/src/benchmarks/CacheBandwidthBench.cpp.s
-.PHONY : src/benchmarks/CacheBandwidthBench.cpp.s
-
-src/benchmarks/CacheLatencyBench.o: src/benchmarks/CacheLatencyBench.cpp.o
-.PHONY : src/benchmarks/CacheLatencyBench.o
-
-# target to build an object file
-src/benchmarks/CacheLatencyBench.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/gpubench.dir/build.make CMakeFiles/gpubench.dir/src/benchmarks/CacheLatencyBench.cpp.o
-.PHONY : src/benchmarks/CacheLatencyBench.cpp.o
-
-src/benchmarks/CacheLatencyBench.i: src/benchmarks/CacheLatencyBench.cpp.i
-.PHONY : src/benchmarks/CacheLatencyBench.i
+src/benchmarks/CacheBench.i: src/benchmarks/CacheBench.cpp.i
+.PHONY : src/benchmarks/CacheBench.i
 
 # target to preprocess a source file
-src/benchmarks/CacheLatencyBench.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/gpubench.dir/build.make CMakeFiles/gpubench.dir/src/benchmarks/CacheLatencyBench.cpp.i
-.PHONY : src/benchmarks/CacheLatencyBench.cpp.i
+src/benchmarks/CacheBench.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gpubench.dir/build.make CMakeFiles/gpubench.dir/src/benchmarks/CacheBench.cpp.i
+.PHONY : src/benchmarks/CacheBench.cpp.i
 
-src/benchmarks/CacheLatencyBench.s: src/benchmarks/CacheLatencyBench.cpp.s
-.PHONY : src/benchmarks/CacheLatencyBench.s
+src/benchmarks/CacheBench.s: src/benchmarks/CacheBench.cpp.s
+.PHONY : src/benchmarks/CacheBench.s
 
 # target to generate assembly for a file
-src/benchmarks/CacheLatencyBench.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/gpubench.dir/build.make CMakeFiles/gpubench.dir/src/benchmarks/CacheLatencyBench.cpp.s
-.PHONY : src/benchmarks/CacheLatencyBench.cpp.s
+src/benchmarks/CacheBench.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gpubench.dir/build.make CMakeFiles/gpubench.dir/src/benchmarks/CacheBench.cpp.s
+.PHONY : src/benchmarks/CacheBench.cpp.s
 
 src/benchmarks/Fp16Bench.o: src/benchmarks/Fp16Bench.cpp.o
 .PHONY : src/benchmarks/Fp16Bench.o
@@ -588,12 +564,9 @@ help:
 	@echo "... kernels"
 	@echo "... shaders"
 	@echo "... gpubench"
-	@echo "... src/benchmarks/CacheBandwidthBench.o"
-	@echo "... src/benchmarks/CacheBandwidthBench.i"
-	@echo "... src/benchmarks/CacheBandwidthBench.s"
-	@echo "... src/benchmarks/CacheLatencyBench.o"
-	@echo "... src/benchmarks/CacheLatencyBench.i"
-	@echo "... src/benchmarks/CacheLatencyBench.s"
+	@echo "... src/benchmarks/CacheBench.o"
+	@echo "... src/benchmarks/CacheBench.i"
+	@echo "... src/benchmarks/CacheBench.s"
 	@echo "... src/benchmarks/Fp16Bench.o"
 	@echo "... src/benchmarks/Fp16Bench.i"
 	@echo "... src/benchmarks/Fp16Bench.s"

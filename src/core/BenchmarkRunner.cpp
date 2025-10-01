@@ -9,8 +9,7 @@
 #include "benchmarks/Int8Bench.h"
 #include "benchmarks/Int4Bench.h"
 #include "benchmarks/MemBandwidthBench.h"
-#include "benchmarks/CacheBandwidthBench.h"
-#include "benchmarks/CacheLatencyBench.h"
+#include "benchmarks/CacheBench.h"
 #include "benchmarks/Fp6Bench.h"
 #include <iostream>
 #include <chrono>
@@ -36,8 +35,18 @@ void BenchmarkRunner::discoverBenchmarks() {
     benchmarks.push_back(std::make_unique<Int8Bench>());
     benchmarks.push_back(std::make_unique<Int4Bench>());
     benchmarks.push_back(std::make_unique<MemBandwidthBench>());
-    benchmarks.push_back(std::make_unique<CacheBandwidthBench>());
-    benchmarks.push_back(std::make_unique<CacheLatencyBench>());
+
+    // Cache Bandwidth
+    benchmarks.push_back(std::make_unique<CacheBench>("L0 Cache Bandwidth", "GB/s", 0, "l0_cache"));
+    benchmarks.push_back(std::make_unique<CacheBench>("L1 Cache Bandwidth", "GB/s", 24 * 1024, "cache_bandwidth"));
+    benchmarks.push_back(std::make_unique<CacheBench>("L2 Cache Bandwidth", "GB/s", 256 * 1024, "cache_bandwidth"));
+    benchmarks.push_back(std::make_unique<CacheBench>("L3 Cache Bandwidth", "GB/s", 8 * 1024 * 1024, "cache_bandwidth"));
+
+    // Cache Latency
+    benchmarks.push_back(std::make_unique<CacheBench>("L0 Cache Latency", "ns", 0, "l0_cache"));
+    benchmarks.push_back(std::make_unique<CacheBench>("L1 Cache Latency", "ns", 24 * 1024, "cache_latency"));
+    benchmarks.push_back(std::make_unique<CacheBench>("L2 Cache Latency", "ns", 256 * 1024, "cache_latency"));
+    benchmarks.push_back(std::make_unique<CacheBench>("L3 Cache Latency", "ns", 8 * 1024 * 1024, "cache_latency"));
 }
 
 struct BenchmarkResultRow {
@@ -75,14 +84,13 @@ void BenchmarkRunner::run(const std::vector<std::string>& benchmarks_to_run) {
                     double total_time_ms = 0;
                     uint64_t total_invocations = 0;
                     auto bench_start = std::chrono::high_resolution_clock::now();
-                    while (total_time_ms < 8000) {
+                    while (total_time_ms < 5000) {
                         bench->Run();
                         context->waitIdle();
                         total_invocations++;
                         auto now = std::chrono::high_resolution_clock::now();
                         total_time_ms = std::chrono::duration_cast<std::chrono::nanoseconds>(now - bench_start).count() / 1e6;
                     }
-                    double time_ms = total_time_ms / total_invocations;
 
                     BenchmarkResult bench_result = bench->GetResult();
                     
@@ -90,8 +98,9 @@ void BenchmarkRunner::run(const std::vector<std::string>& benchmarks_to_run) {
                     result_data.backendName = ComputeBackendFactory::getBackendName(context->getBackend());
                     result_data.deviceName = info.name;
                     result_data.benchmarkName = bench->GetName();
-                    result_data.operations = bench_result.operations;
-                    result_data.time_ms = time_ms;
+                    result_data.metric = bench->GetMetric();
+                    result_data.operations = bench_result.operations * total_invocations;
+                    result_data.time_ms = total_time_ms;
                     result_data.isEmulated = false; // This will be updated later
 
                     formatter->addResult(result_data);

@@ -2,6 +2,8 @@
 09b8ae9cf065fa3206e2212f13e97e27 CMakeFiles/hip_kernels
 09b8ae9cf065fa3206e2212f13e97e27 CMakeFiles/kernels
 09b8ae9cf065fa3206e2212f13e97e27 CMakeFiles/shaders
+ddcf86cf30af6b5857aa42c11aa1a8bb cache_bandwidth.spv
+460bea8a8f6aaac6b0f62086a557a07d cache_latency.spv
 94ecafa83963ebf808bf58e3acbbdfa5 cachebw_l1.spv
 0be9495185d88477538c6aeca3779f18 cachebw_l2.spv
 a0d4893dacfdf30f6dd3ce2263f07eb7 cachebw_l3.spv
@@ -31,6 +33,7 @@ ab3f682885bcb02831d6ef5fe3e9fdcb kernels/fp64.cl
 d0281d15504f1752827607cd154a37de kernels/fp8.cl
 c450313c7541900ed366436bf6a865dd kernels/int4.cl
 88a77026540244bbaca24a77300eadfa kernels/int8.cl
+62f9cdfc4522cb256dbe06e9bb60b863 l0_cache.spv
 75f7e8bb6f1498cf37aaea7eb2428d33 membw.spv
 56892c8297568f2ffdd20c789aeffc5d membw_1024.spv
 70e7ed3ba09cf1cb11a3d9697c4ce8e3 membw_128.spv

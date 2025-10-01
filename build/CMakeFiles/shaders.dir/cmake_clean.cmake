@@ -1,5 +1,7 @@
 file(REMOVE_RECURSE
   "CMakeFiles/shaders"
+  "cache_bandwidth.spv"
+  "cache_latency.spv"
   "cachebw_l1.spv"
   "cachebw_l2.spv"
   "cachebw_l3.spv"
@@ -10,6 +12,7 @@ file(REMOVE_RECURSE
   "fp8.spv"
   "int4.spv"
   "int8.spv"
+  "l0_cache.spv"
   "membw.spv"
   "membw_1024.spv"
   "membw_128.spv"

@@ -15,7 +15,8 @@ struct BandwidthConfig {
 
 class MemBandwidthBench : public IBenchmark {
 public:
-    const char* GetName() const override { return "Memory Bandwidth Benchmark"; }
+    const char* GetName() const override;
+    const char* GetMetric() const override;
     bool IsSupported(const DeviceInfo& info, IComputeContext* context = nullptr) const override;
     void Setup(IComputeContext& context, const std::string& kernel_dir) override;
     void Run() override;

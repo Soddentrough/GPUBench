@@ -8,6 +8,7 @@ struct ResultData {
     std::string backendName;
     std::string deviceName;
     std::string benchmarkName;
+    std::string metric;
     uint64_t operations;
     double time_ms;
     bool isEmulated;

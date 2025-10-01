@@ -8,8 +8,7 @@ set(CMAKE_DEPENDS_LANGUAGES
 
 # The set of dependency files which are needed:
 set(CMAKE_DEPENDS_DEPENDENCY_FILES
-  "/home/naoki/Development/GPUBench/src/benchmarks/CacheBandwidthBench.cpp" "CMakeFiles/gpubench.dir/src/benchmarks/CacheBandwidthBench.cpp.o" "gcc" "CMakeFiles/gpubench.dir/src/benchmarks/CacheBandwidthBench.cpp.o.d"
-  "/home/naoki/Development/GPUBench/src/benchmarks/CacheLatencyBench.cpp" "CMakeFiles/gpubench.dir/src/benchmarks/CacheLatencyBench.cpp.o" "gcc" "CMakeFiles/gpubench.dir/src/benchmarks/CacheLatencyBench.cpp.o.d"
+  "/home/naoki/Development/GPUBench/src/benchmarks/CacheBench.cpp" "CMakeFiles/gpubench.dir/src/benchmarks/CacheBench.cpp.o" "gcc" "CMakeFiles/gpubench.dir/src/benchmarks/CacheBench.cpp.o.d"
   "/home/naoki/Development/GPUBench/src/benchmarks/Fp16Bench.cpp" "CMakeFiles/gpubench.dir/src/benchmarks/Fp16Bench.cpp.o" "gcc" "CMakeFiles/gpubench.dir/src/benchmarks/Fp16Bench.cpp.o.d"
   "/home/naoki/Development/GPUBench/src/benchmarks/Fp32Bench.cpp" "CMakeFiles/gpubench.dir/src/benchmarks/Fp32Bench.cpp.o" "gcc" "CMakeFiles/gpubench.dir/src/benchmarks/Fp32Bench.cpp.o.d"
   "/home/naoki/Development/GPUBench/src/benchmarks/Fp4Bench.cpp" "CMakeFiles/gpubench.dir/src/benchmarks/Fp4Bench.cpp.o" "gcc" "CMakeFiles/gpubench.dir/src/benchmarks/Fp4Bench.cpp.o.d"
