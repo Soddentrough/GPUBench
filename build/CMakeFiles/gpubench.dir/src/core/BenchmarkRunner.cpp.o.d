@@ -264,4 +264,9 @@ CMakeFiles/gpubench.dir/src/core/BenchmarkRunner.cpp.o: \
  /usr/include/c++/15/x86_64-redhat-linux/bits/messages_members.h \
  /usr/include/libintl.h /usr/include/c++/15/bits/codecvt.h \
  /usr/include/c++/15/bits/locale_facets_nonio.tcc \
- /usr/include/c++/15/bits/locale_conv.h
+ /usr/include/c++/15/bits/locale_conv.h /usr/include/c++/15/numeric \
+ /usr/include/c++/15/bits/stl_numeric.h \
+ /usr/include/c++/15/pstl/glue_numeric_defs.h /usr/include/c++/15/random \
+ /usr/include/c++/15/bits/random.h \
+ /usr/include/c++/15/x86_64-redhat-linux/bits/opt_random.h \
+ /usr/include/c++/15/bits/random.tcc

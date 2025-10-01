@@ -17,6 +17,17 @@
 #include <string>
 #include <algorithm>
 #include <locale>
+#include <numeric>
+#include <random>
+
+// Helper function to create a shuffled index array for pointer chasing
+std::vector<uint32_t> create_shuffled_indices(size_t size) {
+    std::vector<uint32_t> indices(size);
+    std::iota(indices.begin(), indices.end(), 0);
+    std::mt19937 g(1337); // Use a fixed seed for reproducibility
+    std::shuffle(indices.begin(), indices.end(), g);
+    return indices;
+}
 
 BenchmarkRunner::BenchmarkRunner(const std::vector<IComputeContext*>& contexts) : contexts(contexts) {
     discoverBenchmarks();
@@ -37,16 +48,20 @@ void BenchmarkRunner::discoverBenchmarks() {
     benchmarks.push_back(std::make_unique<MemBandwidthBench>());
 
     // Cache Bandwidth
-    benchmarks.push_back(std::make_unique<CacheBench>("L0 Cache Bandwidth", "GB/s", 0, "l0_cache"));
+    benchmarks.push_back(std::make_unique<CacheBench>("L0 Cache Bandwidth", "GB/s", 4, "l0_cache_bandwidth"));
     benchmarks.push_back(std::make_unique<CacheBench>("L1 Cache Bandwidth", "GB/s", 24 * 1024, "cache_bandwidth"));
     benchmarks.push_back(std::make_unique<CacheBench>("L2 Cache Bandwidth", "GB/s", 256 * 1024, "cache_bandwidth"));
     benchmarks.push_back(std::make_unique<CacheBench>("L3 Cache Bandwidth", "GB/s", 8 * 1024 * 1024, "cache_bandwidth"));
 
     // Cache Latency
-    benchmarks.push_back(std::make_unique<CacheBench>("L0 Cache Latency", "ns", 0, "l0_cache"));
-    benchmarks.push_back(std::make_unique<CacheBench>("L1 Cache Latency", "ns", 24 * 1024, "cache_latency"));
-    benchmarks.push_back(std::make_unique<CacheBench>("L2 Cache Latency", "ns", 256 * 1024, "cache_latency"));
-    benchmarks.push_back(std::make_unique<CacheBench>("L3 Cache Latency", "ns", 8 * 1024 * 1024, "cache_latency"));
+    const size_t l1_size = 24 * 1024;
+    const size_t l2_size = 256 * 1024;
+    const size_t l3_size = 8 * 1024 * 1024;
+
+    benchmarks.push_back(std::make_unique<CacheBench>("L0 Cache Latency", "ns", 4, "l0_cache_latency"));
+    benchmarks.push_back(std::make_unique<CacheBench>("L1 Cache Latency", "ns", l1_size, "cache_latency", create_shuffled_indices(l1_size / sizeof(uint32_t))));
+    benchmarks.push_back(std::make_unique<CacheBench>("L2 Cache Latency", "ns", l2_size, "cache_latency", create_shuffled_indices(l2_size / sizeof(uint32_t))));
+    benchmarks.push_back(std::make_unique<CacheBench>("L3 Cache Latency", "ns", l3_size, "cache_latency", create_shuffled_indices(l3_size / sizeof(uint32_t))));
 }
 
 struct BenchmarkResultRow {

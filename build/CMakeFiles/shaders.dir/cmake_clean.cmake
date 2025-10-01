@@ -13,6 +13,8 @@ file(REMOVE_RECURSE
   "int4.spv"
   "int8.spv"
   "l0_cache.spv"
+  "l0_cache_bandwidth.spv"
+  "l0_cache_latency.spv"
   "membw.spv"
   "membw_1024.spv"
   "membw_128.spv"

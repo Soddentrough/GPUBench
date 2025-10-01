@@ -34,6 +34,8 @@ d0281d15504f1752827607cd154a37de kernels/fp8.cl
 c450313c7541900ed366436bf6a865dd kernels/int4.cl
 88a77026540244bbaca24a77300eadfa kernels/int8.cl
 62f9cdfc4522cb256dbe06e9bb60b863 l0_cache.spv
+6562ba42e0b2633ba29cdf6245429144 l0_cache_bandwidth.spv
+fc06e9510d303a2ff93acf59ec8c40b3 l0_cache_latency.spv
 75f7e8bb6f1498cf37aaea7eb2428d33 membw.spv
 56892c8297568f2ffdd20c789aeffc5d membw_1024.spv
 70e7ed3ba09cf1cb11a3d9697c4ce8e3 membw_128.spv

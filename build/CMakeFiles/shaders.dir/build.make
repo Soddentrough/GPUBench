@@ -79,6 +79,8 @@ CMakeFiles/shaders: fp8.spv
 CMakeFiles/shaders: int4.spv
 CMakeFiles/shaders: int8.spv
 CMakeFiles/shaders: l0_cache.spv
+CMakeFiles/shaders: l0_cache_bandwidth.spv
+CMakeFiles/shaders: l0_cache_latency.spv
 CMakeFiles/shaders: membw.spv
 CMakeFiles/shaders: membw_1024.spv
 CMakeFiles/shaders: membw_128.spv
@@ -136,20 +138,28 @@ l0_cache.spv: /home/naoki/Development/GPUBench/shaders/l0_cache.comp
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_13) "Compiling shader: /home/naoki/Development/GPUBench/shaders/l0_cache.comp"
 	/usr/bin/glslc --target-env=vulkan1.2 --target-spv=spv1.5 /home/naoki/Development/GPUBench/shaders/l0_cache.comp -o /home/naoki/Development/GPUBench/build/l0_cache.spv
 
+l0_cache_bandwidth.spv: /home/naoki/Development/GPUBench/shaders/l0_cache_bandwidth.comp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_14) "Compiling shader: /home/naoki/Development/GPUBench/shaders/l0_cache_bandwidth.comp"
+	/usr/bin/glslc --target-env=vulkan1.2 --target-spv=spv1.5 /home/naoki/Development/GPUBench/shaders/l0_cache_bandwidth.comp -o /home/naoki/Development/GPUBench/build/l0_cache_bandwidth.spv
+
+l0_cache_latency.spv: /home/naoki/Development/GPUBench/shaders/l0_cache_latency.comp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_15) "Compiling shader: /home/naoki/Development/GPUBench/shaders/l0_cache_latency.comp"
+	/usr/bin/glslc --target-env=vulkan1.2 --target-spv=spv1.5 /home/naoki/Development/GPUBench/shaders/l0_cache_latency.comp -o /home/naoki/Development/GPUBench/build/l0_cache_latency.spv
+
 membw.spv: /home/naoki/Development/GPUBench/shaders/membw.comp
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_14) "Compiling shader: /home/naoki/Development/GPUBench/shaders/membw.comp"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_16) "Compiling shader: /home/naoki/Development/GPUBench/shaders/membw.comp"
 	/usr/bin/glslc --target-env=vulkan1.2 --target-spv=spv1.5 /home/naoki/Development/GPUBench/shaders/membw.comp -o /home/naoki/Development/GPUBench/build/membw.spv
 
 membw_1024.spv: /home/naoki/Development/GPUBench/shaders/membw_1024.comp
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_15) "Compiling shader: /home/naoki/Development/GPUBench/shaders/membw_1024.comp"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_17) "Compiling shader: /home/naoki/Development/GPUBench/shaders/membw_1024.comp"
 	/usr/bin/glslc --target-env=vulkan1.2 --target-spv=spv1.5 /home/naoki/Development/GPUBench/shaders/membw_1024.comp -o /home/naoki/Development/GPUBench/build/membw_1024.spv
 
 membw_128.spv: /home/naoki/Development/GPUBench/shaders/membw_128.comp
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_16) "Compiling shader: /home/naoki/Development/GPUBench/shaders/membw_128.comp"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_18) "Compiling shader: /home/naoki/Development/GPUBench/shaders/membw_128.comp"
 	/usr/bin/glslc --target-env=vulkan1.2 --target-spv=spv1.5 /home/naoki/Development/GPUBench/shaders/membw_128.comp -o /home/naoki/Development/GPUBench/build/membw_128.spv
 
 membw_256.spv: /home/naoki/Development/GPUBench/shaders/membw_256.comp
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_17) "Compiling shader: /home/naoki/Development/GPUBench/shaders/membw_256.comp"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_19) "Compiling shader: /home/naoki/Development/GPUBench/shaders/membw_256.comp"
 	/usr/bin/glslc --target-env=vulkan1.2 --target-spv=spv1.5 /home/naoki/Development/GPUBench/shaders/membw_256.comp -o /home/naoki/Development/GPUBench/build/membw_256.spv
 
 CMakeFiles/shaders.dir/codegen:
@@ -169,6 +179,8 @@ shaders: fp8.spv
 shaders: int4.spv
 shaders: int8.spv
 shaders: l0_cache.spv
+shaders: l0_cache_bandwidth.spv
+shaders: l0_cache_latency.spv
 shaders: membw.spv
 shaders: membw_1024.spv
 shaders: membw_128.spv

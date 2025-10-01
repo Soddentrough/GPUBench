@@ -1,6 +1,7 @@
 #version 460
 
-layout (local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+// Use a larger workgroup size to saturate bandwidth
+layout (local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
 
 layout(set = 0, binding = 0) buffer Data {
     uint data[];
@@ -8,10 +9,22 @@ layout(set = 0, binding = 0) buffer Data {
 
 void main() {
     uint sum = 0;
+    uint size = Buffer.data.length();
+    uint thread_id = gl_GlobalInvocationID.x;
+    uint stride = gl_NumWorkGroups.x * gl_WorkGroupSize.x;
+
+    // Each thread strides through the buffer to read data
+    // This ensures that memory accesses are spread out across the buffer
     for (int i = 0; i < 1024; ++i) {
-        for (int j = 0; j < 16; ++j) {
-            sum += Buffer.data[j];
+        uint index = (thread_id + i * stride);
+        if (index < size) {
+            sum += Buffer.data[index];
         }
     }
-    Buffer.data[0] = sum;
+
+    // Write back the result to prevent optimization
+    // Use the thread_id to avoid race conditions
+    if (thread_id < size) {
+        Buffer.data[thread_id] = sum;
+    }
 }

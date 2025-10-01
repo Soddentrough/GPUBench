@@ -1,8 +1,8 @@
 #include "benchmarks/CacheBench.h"
 #include <stdexcept>
 
-CacheBench::CacheBench(std::string name, std::string metric, uint64_t bufferSize, std::string kernelFile)
-    : name(name), metric(metric), bufferSize(bufferSize), kernelFile(kernelFile) {}
+CacheBench::CacheBench(std::string name, std::string metric, uint64_t bufferSize, std::string kernelFile, std::vector<uint32_t> initData)
+    : name(name), metric(metric), bufferSize(bufferSize), kernelFile(kernelFile), initData(initData) {}
 
 CacheBench::~CacheBench() {}
 
@@ -15,6 +15,9 @@ void CacheBench::Setup(IComputeContext& context, const std::string& kernel_dir) 
 
     if (bufferSize > 0) {
         buffer = context.createBuffer(bufferSize);
+        if (!initData.empty()) {
+            context.writeBuffer(buffer, 0, initData.size() * sizeof(uint32_t), initData.data());
+        }
     }
 
     std::string full_kernel_path;
@@ -33,7 +36,15 @@ void CacheBench::Setup(IComputeContext& context, const std::string& kernel_dir) 
 }
 
 void CacheBench::Run() {
-    context->dispatch(kernel, 1, 1, 1, 1, 1, 1);
+    if (metric == "GB/s") {
+        // For bandwidth, we want to saturate the GPU with threads.
+        // Dispatch a large number of workgroups.
+        // The shader uses a workgroup size of 256.
+        context->dispatch(kernel, 65536, 1, 1, 256, 1, 1);
+    } else {
+        // For latency, we run a single thread to measure the dependency chain.
+        context->dispatch(kernel, 1, 1, 1, 1, 1, 1);
+    }
 }
 
 void CacheBench::Teardown() {
@@ -55,17 +66,21 @@ const char* CacheBench::GetMetric() const {
 
 BenchmarkResult CacheBench::GetResult() const {
     uint64_t operations = 0;
+    const uint64_t num_threads_bw = 65536 * 256;
+
     if (name == "L0 Cache Bandwidth") {
-        // 16 registers are read and written in a loop of 1024 iterations.
-        // Each register is 4 bytes.
-        operations = 16 * 1024 * 4 * 2;
+        // 16 independent ops * 1024 iterations * num_threads
+        operations = 16 * 1024 * num_threads_bw;
     } else if (name == "L0 Cache Latency") {
-        // 16 dependent operations in a loop of 1024 iterations.
-        operations = 16 * 1024;
+        // 16 dependent ops * 128 iterations
+        operations = 16 * 128;
     } else if (metric == "GB/s") {
-        operations = bufferSize * 1024 * 2; // 1024 iterations, read/write
+        // Each thread reads 1024 times.
+        // We multiply by sizeof(uint) to get bytes.
+        operations = num_threads_bw * 1024 * sizeof(uint32_t);
     } else if (metric == "ns") {
-        operations = 32 * 1024; // 32 dependent latency reads * 1024 iterations
+        // 1024 dependent reads
+        operations = 1024;
     }
     return {operations, 0.0};
 }
