@@ -31,7 +31,7 @@ void Fp8Bench::Setup(IComputeContext& context, const std::string& kernel_dir) {
         kernel_file = kernel_dir + "/fp8.cl";
     }
     
-    kernel = context.createKernel(kernel_file, "compute", 1);
+    kernel = context.createKernel(kernel_file, "run_benchmark", 1);
     context.setKernelArg(kernel, 0, buffer);
 }
 

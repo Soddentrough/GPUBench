@@ -35,7 +35,7 @@ void Fp16Bench::Setup(IComputeContext& context, const std::string& kernel_dir) {
         kernel_file = kernel_dir + "/fp16.cl";
     }
     
-    kernel = context.createKernel(kernel_file, "main", 1);
+    kernel = context.createKernel(kernel_file, "run_benchmark", 1);
     context.setKernelArg(kernel, 0, buffer);
 }
 

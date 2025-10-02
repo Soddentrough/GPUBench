@@ -1,4 +1,5 @@
 #include "benchmarks/Fp64Bench.h"
+#include "core/VulkanContext.h"
 #include <stdexcept>
 #include <vector>
 #include <vulkan/vulkan.h>
@@ -16,9 +17,8 @@ void Fp64Bench::Setup(IComputeContext& context, const std::string& kernel_dir) {
     this->context = &context;
 
     // Create storage buffer
-    size_t bufferSize = 1024 * 64 * sizeof(double); // 1024 workgroups * 64 threads * 8 bytes
-    std::vector<double> initialData(1024 * 64, 0.0);
-    buffer = context.createBuffer(bufferSize, initialData.data());
+    size_t bufferSize = 4096 * 64 * sizeof(double); // 4096 workgroups * 64 threads * 8 bytes
+    buffer = context.createBuffer(bufferSize);
 
     // Create kernel
     std::string kernel_file;
@@ -30,25 +30,28 @@ void Fp64Bench::Setup(IComputeContext& context, const std::string& kernel_dir) {
         kernel_file = kernel_dir + "/fp64.cl";
     }
     
-    kernel = context.createKernel(kernel_file, "main", 1);
+    kernel = context.createKernel(kernel_file, "run_benchmark", 1);
     context.setKernelArg(kernel, 0, buffer);
 }
 
 void Fp64Bench::Run() {
-    context->dispatch(kernel, 1024, 1, 1, 64, 1, 1);
+    context->dispatch(kernel, 4096, 1, 1, 64, 1, 1);
 }
 
 void Fp64Bench::Teardown() {
     if (kernel) {
         context->releaseKernel(kernel);
+        kernel = nullptr;
     }
     if (buffer) {
         context->releaseBuffer(buffer);
+        buffer = nullptr;
     }
 }
 
 BenchmarkResult Fp64Bench::GetResult() const {
     // 2 operations per loop iteration (FMA)
-    uint64_t num_ops = (uint64_t)65536 * 2 * 1024 * 64;
+    uint64_t num_threads = 4096 * 64;
+    uint64_t num_ops = (uint64_t)65536 * 2 * num_threads;
     return {num_ops, 0.0};
 }

@@ -23,7 +23,7 @@ void Fp32Bench::Setup(IComputeContext& context, const std::string& kernel_dir) {
         kernel_file = kernel_dir + "/fp32.cl";
     }
     
-    kernel = context.createKernel(kernel_file, "main", 1);
+    kernel = context.createKernel(kernel_file, "run_benchmark", 1);
     context.setKernelArg(kernel, 0, buffer);
 }
 
@@ -35,9 +35,11 @@ void Fp32Bench::Run() {
 void Fp32Bench::Teardown() {
     if (kernel) {
         context->releaseKernel(kernel);
+        kernel = nullptr;
     }
     if (buffer) {
         context->releaseBuffer(buffer);
+        buffer = nullptr;
     }
 }
 

@@ -2,7 +2,7 @@
 #include <hip/hip_runtime.h>
 #include <hip/hip_fp16.h>
 
-extern "C" __global__ void compute(half* data) {
+extern "C" __global__ void run_benchmark(half* data) {
     uint index = blockIdx.x * blockDim.x + threadIdx.x;
 
     half2 val1 = reinterpret_cast<half2*>(data)[index];

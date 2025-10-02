@@ -5,7 +5,7 @@
 
 class Fp64Bench : public IBenchmark {
 public:
-    const char* GetName() const override { return "FP64 Benchmark"; }
+    const char* GetName() const override { return "FP64"; }
     bool IsSupported(const DeviceInfo& info, IComputeContext* context = nullptr) const override;
     void Setup(IComputeContext& context, const std::string& kernel_dir) override;
     void Run() override;

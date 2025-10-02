@@ -82,7 +82,7 @@ if(HIP_FOUND)
         set(HIP_OBJECT "${CMAKE_CURRENT_BINARY_DIR}/hip_kernels/${KERNEL_NAME}.o")
         add_custom_command(
             OUTPUT ${HIP_OBJECT}
-            COMMAND ${HIP_HIPCC_EXECUTABLE} --genco -c ${HIP_KERNEL} -o ${HIP_OBJECT}
+            COMMAND ${HIP_HIPCC_EXECUTABLE} --genco -c ${HIP_KERNEL} -o ${HIP_OBJECT} -D__HIP_PLATFORM_AMD__
             DEPENDS ${HIP_KERNEL}
         )
         list(APPEND HIP_OBJECTS ${HIP_OBJECT})

@@ -66,6 +66,8 @@ include CMakeFiles/hip_kernels.dir/compiler_depend.make
 # Include the progress variables for this target.
 include CMakeFiles/hip_kernels.dir/progress.make
 
+CMakeFiles/hip_kernels: hip_kernels/cache_bandwidth.o
+CMakeFiles/hip_kernels: hip_kernels/cache_latency.o
 CMakeFiles/hip_kernels: hip_kernels/cachebw_l1.o
 CMakeFiles/hip_kernels: hip_kernels/cachebw_l2.o
 CMakeFiles/hip_kernels: hip_kernels/cachebw_l3.o
@@ -75,62 +77,82 @@ CMakeFiles/hip_kernels: hip_kernels/fp64.o
 CMakeFiles/hip_kernels: hip_kernels/fp8.o
 CMakeFiles/hip_kernels: hip_kernels/int4.o
 CMakeFiles/hip_kernels: hip_kernels/int8.o
+CMakeFiles/hip_kernels: hip_kernels/l0_cache_bandwidth.o
+CMakeFiles/hip_kernels: hip_kernels/l0_cache_latency.o
 CMakeFiles/hip_kernels: hip_kernels/membw_1024.o
 CMakeFiles/hip_kernels: hip_kernels/membw_128.o
 CMakeFiles/hip_kernels: hip_kernels/membw_256.o
 
+hip_kernels/cache_bandwidth.o: /home/naoki/Development/GPUBench/hip_kernels/cache_bandwidth.hip
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Generating hip_kernels/cache_bandwidth.o"
+	/usr/bin/hipcc --genco -c /home/naoki/Development/GPUBench/hip_kernels/cache_bandwidth.hip -o /home/naoki/Development/GPUBench/build/hip_kernels/cache_bandwidth.o -D__HIP_PLATFORM_AMD__
+
+hip_kernels/cache_latency.o: /home/naoki/Development/GPUBench/hip_kernels/cache_latency.hip
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Generating hip_kernels/cache_latency.o"
+	/usr/bin/hipcc --genco -c /home/naoki/Development/GPUBench/hip_kernels/cache_latency.hip -o /home/naoki/Development/GPUBench/build/hip_kernels/cache_latency.o -D__HIP_PLATFORM_AMD__
+
 hip_kernels/cachebw_l1.o: /home/naoki/Development/GPUBench/hip_kernels/cachebw_l1.hip
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Generating hip_kernels/cachebw_l1.o"
-	/usr/bin/hipcc --genco -c /home/naoki/Development/GPUBench/hip_kernels/cachebw_l1.hip -o /home/naoki/Development/GPUBench/build/hip_kernels/cachebw_l1.o
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Generating hip_kernels/cachebw_l1.o"
+	/usr/bin/hipcc --genco -c /home/naoki/Development/GPUBench/hip_kernels/cachebw_l1.hip -o /home/naoki/Development/GPUBench/build/hip_kernels/cachebw_l1.o -D__HIP_PLATFORM_AMD__
 
 hip_kernels/cachebw_l2.o: /home/naoki/Development/GPUBench/hip_kernels/cachebw_l2.hip
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Generating hip_kernels/cachebw_l2.o"
-	/usr/bin/hipcc --genco -c /home/naoki/Development/GPUBench/hip_kernels/cachebw_l2.hip -o /home/naoki/Development/GPUBench/build/hip_kernels/cachebw_l2.o
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Generating hip_kernels/cachebw_l2.o"
+	/usr/bin/hipcc --genco -c /home/naoki/Development/GPUBench/hip_kernels/cachebw_l2.hip -o /home/naoki/Development/GPUBench/build/hip_kernels/cachebw_l2.o -D__HIP_PLATFORM_AMD__
 
 hip_kernels/cachebw_l3.o: /home/naoki/Development/GPUBench/hip_kernels/cachebw_l3.hip
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Generating hip_kernels/cachebw_l3.o"
-	/usr/bin/hipcc --genco -c /home/naoki/Development/GPUBench/hip_kernels/cachebw_l3.hip -o /home/naoki/Development/GPUBench/build/hip_kernels/cachebw_l3.o
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_5) "Generating hip_kernels/cachebw_l3.o"
+	/usr/bin/hipcc --genco -c /home/naoki/Development/GPUBench/hip_kernels/cachebw_l3.hip -o /home/naoki/Development/GPUBench/build/hip_kernels/cachebw_l3.o -D__HIP_PLATFORM_AMD__
 
 hip_kernels/fp16.o: /home/naoki/Development/GPUBench/hip_kernels/fp16.hip
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Generating hip_kernels/fp16.o"
-	/usr/bin/hipcc --genco -c /home/naoki/Development/GPUBench/hip_kernels/fp16.hip -o /home/naoki/Development/GPUBench/build/hip_kernels/fp16.o
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_6) "Generating hip_kernels/fp16.o"
+	/usr/bin/hipcc --genco -c /home/naoki/Development/GPUBench/hip_kernels/fp16.hip -o /home/naoki/Development/GPUBench/build/hip_kernels/fp16.o -D__HIP_PLATFORM_AMD__
 
 hip_kernels/fp32.o: /home/naoki/Development/GPUBench/hip_kernels/fp32.hip
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_5) "Generating hip_kernels/fp32.o"
-	/usr/bin/hipcc --genco -c /home/naoki/Development/GPUBench/hip_kernels/fp32.hip -o /home/naoki/Development/GPUBench/build/hip_kernels/fp32.o
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_7) "Generating hip_kernels/fp32.o"
+	/usr/bin/hipcc --genco -c /home/naoki/Development/GPUBench/hip_kernels/fp32.hip -o /home/naoki/Development/GPUBench/build/hip_kernels/fp32.o -D__HIP_PLATFORM_AMD__
 
 hip_kernels/fp64.o: /home/naoki/Development/GPUBench/hip_kernels/fp64.hip
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_6) "Generating hip_kernels/fp64.o"
-	/usr/bin/hipcc --genco -c /home/naoki/Development/GPUBench/hip_kernels/fp64.hip -o /home/naoki/Development/GPUBench/build/hip_kernels/fp64.o
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_8) "Generating hip_kernels/fp64.o"
+	/usr/bin/hipcc --genco -c /home/naoki/Development/GPUBench/hip_kernels/fp64.hip -o /home/naoki/Development/GPUBench/build/hip_kernels/fp64.o -D__HIP_PLATFORM_AMD__
 
 hip_kernels/fp8.o: /home/naoki/Development/GPUBench/hip_kernels/fp8.hip
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_7) "Generating hip_kernels/fp8.o"
-	/usr/bin/hipcc --genco -c /home/naoki/Development/GPUBench/hip_kernels/fp8.hip -o /home/naoki/Development/GPUBench/build/hip_kernels/fp8.o
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_9) "Generating hip_kernels/fp8.o"
+	/usr/bin/hipcc --genco -c /home/naoki/Development/GPUBench/hip_kernels/fp8.hip -o /home/naoki/Development/GPUBench/build/hip_kernels/fp8.o -D__HIP_PLATFORM_AMD__
 
 hip_kernels/int4.o: /home/naoki/Development/GPUBench/hip_kernels/int4.hip
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_8) "Generating hip_kernels/int4.o"
-	/usr/bin/hipcc --genco -c /home/naoki/Development/GPUBench/hip_kernels/int4.hip -o /home/naoki/Development/GPUBench/build/hip_kernels/int4.o
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_10) "Generating hip_kernels/int4.o"
+	/usr/bin/hipcc --genco -c /home/naoki/Development/GPUBench/hip_kernels/int4.hip -o /home/naoki/Development/GPUBench/build/hip_kernels/int4.o -D__HIP_PLATFORM_AMD__
 
 hip_kernels/int8.o: /home/naoki/Development/GPUBench/hip_kernels/int8.hip
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_9) "Generating hip_kernels/int8.o"
-	/usr/bin/hipcc --genco -c /home/naoki/Development/GPUBench/hip_kernels/int8.hip -o /home/naoki/Development/GPUBench/build/hip_kernels/int8.o
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_11) "Generating hip_kernels/int8.o"
+	/usr/bin/hipcc --genco -c /home/naoki/Development/GPUBench/hip_kernels/int8.hip -o /home/naoki/Development/GPUBench/build/hip_kernels/int8.o -D__HIP_PLATFORM_AMD__
+
+hip_kernels/l0_cache_bandwidth.o: /home/naoki/Development/GPUBench/hip_kernels/l0_cache_bandwidth.hip
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_12) "Generating hip_kernels/l0_cache_bandwidth.o"
+	/usr/bin/hipcc --genco -c /home/naoki/Development/GPUBench/hip_kernels/l0_cache_bandwidth.hip -o /home/naoki/Development/GPUBench/build/hip_kernels/l0_cache_bandwidth.o -D__HIP_PLATFORM_AMD__
+
+hip_kernels/l0_cache_latency.o: /home/naoki/Development/GPUBench/hip_kernels/l0_cache_latency.hip
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_13) "Generating hip_kernels/l0_cache_latency.o"
+	/usr/bin/hipcc --genco -c /home/naoki/Development/GPUBench/hip_kernels/l0_cache_latency.hip -o /home/naoki/Development/GPUBench/build/hip_kernels/l0_cache_latency.o -D__HIP_PLATFORM_AMD__
 
 hip_kernels/membw_1024.o: /home/naoki/Development/GPUBench/hip_kernels/membw_1024.hip
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_10) "Generating hip_kernels/membw_1024.o"
-	/usr/bin/hipcc --genco -c /home/naoki/Development/GPUBench/hip_kernels/membw_1024.hip -o /home/naoki/Development/GPUBench/build/hip_kernels/membw_1024.o
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_14) "Generating hip_kernels/membw_1024.o"
+	/usr/bin/hipcc --genco -c /home/naoki/Development/GPUBench/hip_kernels/membw_1024.hip -o /home/naoki/Development/GPUBench/build/hip_kernels/membw_1024.o -D__HIP_PLATFORM_AMD__
 
 hip_kernels/membw_128.o: /home/naoki/Development/GPUBench/hip_kernels/membw_128.hip
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_11) "Generating hip_kernels/membw_128.o"
-	/usr/bin/hipcc --genco -c /home/naoki/Development/GPUBench/hip_kernels/membw_128.hip -o /home/naoki/Development/GPUBench/build/hip_kernels/membw_128.o
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_15) "Generating hip_kernels/membw_128.o"
+	/usr/bin/hipcc --genco -c /home/naoki/Development/GPUBench/hip_kernels/membw_128.hip -o /home/naoki/Development/GPUBench/build/hip_kernels/membw_128.o -D__HIP_PLATFORM_AMD__
 
 hip_kernels/membw_256.o: /home/naoki/Development/GPUBench/hip_kernels/membw_256.hip
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_12) "Generating hip_kernels/membw_256.o"
-	/usr/bin/hipcc --genco -c /home/naoki/Development/GPUBench/hip_kernels/membw_256.hip -o /home/naoki/Development/GPUBench/build/hip_kernels/membw_256.o
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_16) "Generating hip_kernels/membw_256.o"
+	/usr/bin/hipcc --genco -c /home/naoki/Development/GPUBench/hip_kernels/membw_256.hip -o /home/naoki/Development/GPUBench/build/hip_kernels/membw_256.o -D__HIP_PLATFORM_AMD__
 
 CMakeFiles/hip_kernels.dir/codegen:
 .PHONY : CMakeFiles/hip_kernels.dir/codegen
 
 hip_kernels: CMakeFiles/hip_kernels
+hip_kernels: hip_kernels/cache_bandwidth.o
+hip_kernels: hip_kernels/cache_latency.o
 hip_kernels: hip_kernels/cachebw_l1.o
 hip_kernels: hip_kernels/cachebw_l2.o
 hip_kernels: hip_kernels/cachebw_l3.o
@@ -140,6 +162,8 @@ hip_kernels: hip_kernels/fp64.o
 hip_kernels: hip_kernels/fp8.o
 hip_kernels: hip_kernels/int4.o
 hip_kernels: hip_kernels/int8.o
+hip_kernels: hip_kernels/l0_cache_bandwidth.o
+hip_kernels: hip_kernels/l0_cache_latency.o
 hip_kernels: hip_kernels/membw_1024.o
 hip_kernels: hip_kernels/membw_128.o
 hip_kernels: hip_kernels/membw_256.o

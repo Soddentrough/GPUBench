@@ -7,7 +7,7 @@ public:
     Fp6Bench();
     ~Fp6Bench() override;
 
-    const char* GetName() const override;
+    const char* GetName() const override { return "FP6 (Emulated)"; }
     bool IsSupported(const DeviceInfo& device, IComputeContext* context = nullptr) const override;
     void Setup(IComputeContext& context, const std::string& build_dir) override;
     void Run() override;

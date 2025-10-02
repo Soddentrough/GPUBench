@@ -1,7 +1,7 @@
 // Requires ROCm 6.4+
 #include <hip/hip_runtime.h>
 
-extern "C" __global__ void compute(char4* data) {
+extern "C" __global__ void run_benchmark(char4* data) {
     uint index = blockIdx.x * blockDim.x + threadIdx.x;
 
     char4 val1 = data[index];

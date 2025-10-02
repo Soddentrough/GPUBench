@@ -29,13 +29,16 @@ void CacheBench::Setup(IComputeContext& context, const std::string& kernel_dir) 
         full_kernel_path = kernel_dir + "/" + kernelFile + ".cl";
     }
     
-    kernel = context.createKernel(full_kernel_path, "main", 1);
+    kernel = context.createKernel(full_kernel_path, "run_benchmark", 1);
     if (buffer) {
         context.setKernelArg(kernel, 0, buffer);
     }
 }
 
 void CacheBench::Run() {
+    if (!context) {
+        throw std::runtime_error("Context is not set up");
+    }
     if (metric == "GB/s") {
         // For bandwidth, we want to saturate the GPU with threads.
         // Dispatch a large number of workgroups.
@@ -50,9 +53,11 @@ void CacheBench::Run() {
 void CacheBench::Teardown() {
     if (kernel) {
         context->releaseKernel(kernel);
+        kernel = nullptr;
     }
     if (buffer) {
         context->releaseBuffer(buffer);
+        buffer = nullptr;
     }
 }
 

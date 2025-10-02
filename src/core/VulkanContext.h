@@ -80,6 +80,8 @@ private:
     uint32_t computeQueueFamilyIndex = 0;
     VkQueue computeQueue = VK_NULL_HANDLE;
     VkCommandPool commandPool = VK_NULL_HANDLE;
+    VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
+    VkFence dispatchFence = VK_NULL_HANDLE;
 
     std::map<ComputeBuffer, VulkanBuffer*> buffers;
     std::map<ComputeKernel, VulkanKernel*> kernels;

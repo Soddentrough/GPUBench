@@ -11,7 +11,7 @@ __device__ inline float4 fmaf4(float4 a, float4 b, float4 c) {
     );
 }
 
-extern "C" __global__ void compute(float* data) {
+extern "C" __global__ void run_benchmark(float* data) {
     uint index = blockIdx.x * blockDim.x + threadIdx.x;
 
     // Work with multiple accumulators to avoid dependency chains

@@ -14,6 +14,8 @@ public:
 
     void run(const std::vector<std::string>& benchmarks_to_run);
 
+    std::vector<std::string> getAvailableBenchmarks() const;
+
 private:
     void discoverBenchmarks();
 

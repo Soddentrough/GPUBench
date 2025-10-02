@@ -11,15 +11,17 @@ void main() {
     uint sum = 0;
     uint size = Buffer.data.length();
     uint thread_id = gl_GlobalInvocationID.x;
-    uint stride = gl_NumWorkGroups.x * gl_WorkGroupSize.x;
 
-    // Each thread strides through the buffer to read data
-    // This ensures that memory accesses are spread out across the buffer
+    // Use a simple LCG to generate a pseudo-random access pattern
+    // This helps defeat the hardware prefetcher
+    uint state = thread_id;
+    uint lcg_a = 1664525;
+    uint lcg_c = 1013904223;
+
     for (int i = 0; i < 1024; ++i) {
-        uint index = (thread_id + i * stride);
-        if (index < size) {
-            sum += Buffer.data[index];
-        }
+        state = state * lcg_a + lcg_c;
+        uint index = state % size;
+        sum += Buffer.data[index];
     }
 
     // Write back the result to prevent optimization

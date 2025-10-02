@@ -5,7 +5,7 @@
 
 class Fp16Bench : public IBenchmark {
 public:
-    const char* GetName() const override { return "FP16 Benchmark"; }
+    const char* GetName() const override { return "FP16"; }
     bool IsSupported(const DeviceInfo& info, IComputeContext* context = nullptr) const override;
     void Setup(IComputeContext& context, const std::string& kernel_dir) override;
     void Run() override;

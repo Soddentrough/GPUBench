@@ -5,7 +5,7 @@
 
 class Fp4Bench : public IBenchmark {
 public:
-    const char* GetName() const override { return "FP4 Benchmark (Emulated)"; }
+    const char* GetName() const override { return "FP4 (Emulated)"; }
     bool IsSupported(const DeviceInfo& info, IComputeContext* context = nullptr) const override;
     void Setup(IComputeContext& context, const std::string& kernel_dir) override;
     void Run() override;

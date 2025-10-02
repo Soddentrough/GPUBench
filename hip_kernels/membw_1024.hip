@@ -1,7 +1,7 @@
 // Requires ROCm 6.4+
 #include <hip/hip_runtime.h>
 
-extern "C" __global__ void compute(float4* inputData, float4* outputData) {
+extern "C" __global__ void run_benchmark(float4* inputData, float4* outputData) {
     uint baseIndex = (blockIdx.x * blockDim.x + threadIdx.x) * 16;
     
     float4 data0 = inputData[baseIndex + 0];

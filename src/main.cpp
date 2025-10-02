@@ -14,7 +14,10 @@ int main(int argc, char** argv) {
     CLI::App app{"GPUBench"};
 
     std::vector<std::string> benchmarks_to_run;
-    app.add_option("-b,--benchmarks", benchmarks_to_run, "Benchmarks to run")->delimiter(',');
+    app.add_option("-b,--benchmarks,--benchmark", benchmarks_to_run, "Benchmarks to run (comma-separated)")->delimiter(',');
+
+    bool list_benchmarks = false;
+    app.add_flag("--list-benchmarks", list_benchmarks, "List available benchmarks");
 
     uint32_t device_index = 0;
     app.add_option("-d,--device", device_index, "Device to use");
@@ -32,6 +35,16 @@ int main(int argc, char** argv) {
     app.add_flag("--verbose", verbose, "Enable verbose logging");
 
     CLI11_PARSE(app, argc, argv);
+
+    if (list_benchmarks) {
+        BenchmarkRunner runner({});
+        auto available_benchmarks = runner.getAvailableBenchmarks();
+        std::cout << "Available benchmarks:" << std::endl;
+        for (const auto& name : available_benchmarks) {
+            std::cout << "- " << name << std::endl;
+        }
+        return EXIT_SUCCESS;
+    }
 
     if (verbose) {
         std::cout << "Benchmarks to run: " << std::endl;
@@ -100,7 +113,7 @@ int main(int argc, char** argv) {
 
         BenchmarkRunner runner(context_ptrs);
         runner.run(benchmarks_to_run);
-    } catch (const std::runtime_error& e) {
+    } catch (const std::exception& e) {
         std::cerr << "An error occurred: " << e.what() << std::endl;
         return EXIT_FAILURE;
     }
