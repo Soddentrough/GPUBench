@@ -15,7 +15,8 @@ void MemBandwidthBench::createKernel(BandwidthConfig& config, const std::string&
         kernel_file = kernel_dir + "/" + config.kernelFile + ".cl";
     }
     
-    config.kernel = context->createKernel(kernel_file, "run_benchmark", 2);
+    std::string kernel_name = (context->getBackend() == ComputeBackend::Vulkan) ? "main" : "run_benchmark";
+    config.kernel = context->createKernel(kernel_file, kernel_name, 2);
     context->setKernelArg(config.kernel, 0, inputBuffer);
     context->setKernelArg(config.kernel, 1, outputBuffer);
 }

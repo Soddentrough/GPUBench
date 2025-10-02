@@ -26,13 +26,7 @@ VulkanContext::~VulkanContext() {
     while (!buffers.empty()) {
         releaseBuffer(buffers.begin()->first);
     }
-    if (dispatchFence != VK_NULL_HANDLE) {
-        vkDestroyFence(device, dispatchFence, nullptr);
-    }
     if (commandPool != VK_NULL_HANDLE) {
-        if (commandBuffer != VK_NULL_HANDLE) {
-            vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
-        }
         vkDestroyCommandPool(device, commandPool, nullptr);
     }
     if (device != VK_NULL_HANDLE) {
@@ -207,22 +201,6 @@ void VulkanContext::createDevice() {
 
     if (vkCreateCommandPool(device, &poolInfo, nullptr, &commandPool) != VK_SUCCESS) {
         throw std::runtime_error("failed to create command pool!");
-    }
-
-    VkCommandBufferAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    allocInfo.commandPool = commandPool;
-    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocInfo.commandBufferCount = 1;
-
-    if (vkAllocateCommandBuffers(device, &allocInfo, &commandBuffer) != VK_SUCCESS) {
-        throw std::runtime_error("failed to allocate command buffer!");
-    }
-
-    VkFenceCreateInfo fenceInfo{};
-    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-    if (vkCreateFence(device, &fenceInfo, nullptr, &dispatchFence) != VK_SUCCESS) {
-        throw std::runtime_error("failed to create fence!");
     }
 }
 
@@ -561,8 +539,14 @@ void VulkanContext::dispatch(ComputeKernel kernel, uint32_t grid_x, uint32_t gri
     }
     VulkanKernel* vulkanKernel = it->second;
 
-    vkResetFences(device, 1, &dispatchFence);
-    vkResetCommandBuffer(commandBuffer, 0);
+    VkCommandBufferAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocInfo.commandPool = commandPool;
+    allocInfo.commandBufferCount = 1;
+
+    VkCommandBuffer commandBuffer;
+    vkAllocateCommandBuffers(device, &allocInfo, &commandBuffer);
 
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -579,8 +563,14 @@ void VulkanContext::dispatch(ComputeKernel kernel, uint32_t grid_x, uint32_t gri
     submitInfo.commandBufferCount = 1;
     submitInfo.pCommandBuffers = &commandBuffer;
 
-    vkQueueSubmit(computeQueue, 1, &submitInfo, dispatchFence);
-    vkWaitForFences(device, 1, &dispatchFence, VK_TRUE, UINT64_MAX);
+    vkQueueSubmit(computeQueue, 1, &submitInfo, VK_NULL_HANDLE);
+
+    // No vkQueueWaitIdle here to allow for asynchronous execution.
+    // waitIdle() should be called explicitly when synchronization is needed.
+
+    // Cleanup can be managed more efficiently, but for simplicity:
+    vkQueueWaitIdle(computeQueue);
+    vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
 }
 
 void VulkanContext::releaseKernel(ComputeKernel kernel) {

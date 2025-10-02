@@ -5,14 +5,25 @@ Fp6Bench::Fp6Bench() {}
 
 Fp6Bench::~Fp6Bench() {}
 
+const char* Fp6Bench::GetName() const {
+    if (is_emulated) {
+        return "FP6 (Emulated)";
+    }
+    return name.c_str();
+}
+
 bool Fp6Bench::IsSupported(const DeviceInfo& device, IComputeContext* context) const {
     // FP6 is not a standard data type, so we will assume it requires emulation.
     // The logic for emulation will be added in a future step.
-    return false;
+    return true;
 }
 
 void Fp6Bench::Setup(IComputeContext& context, const std::string& build_dir) {
     this->context = &context;
+    
+    DeviceInfo info = context.getCurrentDeviceInfo();
+    is_emulated = info.name.find("gfx942") == std::string::npos;
+    
     // Implementation will be added in a future step.
 }
 

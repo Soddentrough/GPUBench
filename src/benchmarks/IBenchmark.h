@@ -18,4 +18,5 @@ public:
     virtual void Run() = 0;
     virtual void Teardown() = 0;
     virtual BenchmarkResult GetResult() const = 0;
+    virtual bool IsEmulated() const { return false; }
 };

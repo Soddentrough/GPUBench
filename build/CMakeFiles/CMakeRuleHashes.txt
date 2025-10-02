@@ -10,8 +10,12 @@ a0d4893dacfdf30f6dd3ce2263f07eb7 cachebw_l3.spv
 33a71bddc8f77840343394267ad0c2a8 fp16.spv
 a3d1476f99294e99a86b53cc19263330 fp32.spv
 15a6b2a93f43b3ff6b4346605fa8757a fp4.spv
+8fbcae94e6a652d11d54d13b66654d78 fp4_emulated.spv
+3ec7032ed64470edd585b8e73d06b8e2 fp4_native.spv
 6183a370600e352ed25422ac8b353cde fp64.spv
 18747f3d41ee6b043e94a87b099a9e31 fp8.spv
+9e03562e8363ab53ed0e124eb4395cd6 fp8_emulated.spv
+45944ce1c3a52debede5a934a8daa2c2 fp8_native.spv
 f1c0785daa6656cb07b5e9b5bd71974f hip_kernels/cache_bandwidth.o
 427a3c7ce3191945b1efeafa0b910c69 hip_kernels/cache_latency.o
 513ce0301f7286625db3e61c0b5ed220 hip_kernels/cachebw_l1.o
@@ -19,8 +23,10 @@ a81d3f4e085748f93b6320696f526a31 hip_kernels/cachebw_l2.o
 1f0f778ff3a3a59acd1b1e5fcdf51def hip_kernels/cachebw_l3.o
 635ce111ef279d4568e29ab4ac06b4a6 hip_kernels/fp16.o
 60b6c3c9f57796a6b07dd790a6520cb0 hip_kernels/fp32.o
+f1236e61faf590d75b5eefe2ebe88118 hip_kernels/fp4_emulated.o
 b798f3c0e9e16f641f135a9ea0e534a4 hip_kernels/fp64.o
 87ec4e08dbe831d29df2632d4fc9beb3 hip_kernels/fp8.o
+d03935d5807094af9085a031f7bf57d3 hip_kernels/fp8_emulated.o
 0384f89bcd5f8086ddf83ddc9ba3615f hip_kernels/int4.o
 bc203c4dfbdb77ed847c9cfeee6f66a2 hip_kernels/int8.o
 3975db0c2e203cb5f865ddf434ae9ae6 hip_kernels/l0_cache_bandwidth.o

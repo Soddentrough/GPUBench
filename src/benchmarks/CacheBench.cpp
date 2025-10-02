@@ -29,7 +29,8 @@ void CacheBench::Setup(IComputeContext& context, const std::string& kernel_dir) 
         full_kernel_path = kernel_dir + "/" + kernelFile + ".cl";
     }
     
-    kernel = context.createKernel(full_kernel_path, "run_benchmark", 1);
+    std::string kernel_name = (context.getBackend() == ComputeBackend::Vulkan) ? "main" : "run_benchmark";
+    kernel = context.createKernel(full_kernel_path, kernel_name, 1);
     if (buffer) {
         context.setKernelArg(kernel, 0, buffer);
     }

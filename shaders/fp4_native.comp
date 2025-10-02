@@ -1,0 +1,7 @@
+#version 460
+
+// Placeholder for native FP4 shader
+
+void main() {
+    // Native FP4 implementation will be added here
+}

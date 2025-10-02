@@ -2,20 +2,22 @@
 #include <stdexcept>
 #include <iostream>
 
+const char* Fp8Bench::GetName() const {
+    if (is_emulated) {
+        return "FP8 (Emulated)";
+    }
+    return name.c_str();
+}
+
 bool Fp8Bench::IsSupported(const DeviceInfo& info, IComputeContext* context) const {
-    // Check for gfx942, the first architecture to support FP4/FP8
-    if (info.name.find("gfx942") != std::string::npos) {
-        return true;
-    }
-    
-    if (info.verbose) {
-        std::cout << "FP8 benchmark not supported on device: " << info.name << std::endl;
-    }
-    return false;
+    return true;
 }
 
 void Fp8Bench::Setup(IComputeContext& context, const std::string& kernel_dir) {
     this->context = &context;
+    
+    DeviceInfo info = context.getCurrentDeviceInfo();
+    is_emulated = info.name.find("gfx942") == std::string::npos;
 
     // Create storage buffer
     size_t bufferSize = 8192 * 64 * 4; // 8192 workgroups * 64 threads * 4 bytes (u8vec4)
@@ -23,15 +25,17 @@ void Fp8Bench::Setup(IComputeContext& context, const std::string& kernel_dir) {
 
     // Create kernel
     std::string kernel_file;
+    std::string kernel_name = is_emulated ? "fp8_emulated" : "fp8_native";
     if (context.getBackend() == ComputeBackend::Vulkan) {
-        kernel_file = kernel_dir + "/fp8.spv";
+        kernel_file = kernel_dir + "/" + kernel_name + ".spv";
     } else if (context.getBackend() == ComputeBackend::ROCm) {
-        kernel_file = kernel_dir + "/hip_kernels/fp8.o";
+        kernel_file = kernel_dir + "/hip_kernels/" + kernel_name + ".o";
     } else {
-        kernel_file = kernel_dir + "/fp8.cl";
+        kernel_file = kernel_dir + "/" + kernel_name + ".cl";
     }
     
-    kernel = context.createKernel(kernel_file, "run_benchmark", 1);
+    std::string func_name = (context.getBackend() == ComputeBackend::Vulkan) ? "main" : "run_benchmark";
+    kernel = context.createKernel(kernel_file, func_name, 1);
     context.setKernelArg(kernel, 0, buffer);
 }
 

@@ -125,8 +125,8 @@ void BenchmarkRunner::run(const std::vector<std::string>& benchmarks_to_run) {
 
                 if (should_run && bench->IsSupported(info, context)) {
                     try {
-                        std::cout << "Running " << bench->GetName() << "..." << std::endl;
-                        bench->Setup(*context, ".");
+                        std::cout << "Running " << bench->GetName() <<   "..." << std::endl;
+                        bench->Setup(*context, "build");
 
                         // Timed run
                         double total_time_ms = 0;
@@ -145,13 +145,13 @@ void BenchmarkRunner::run(const std::vector<std::string>& benchmarks_to_run) {
                         ResultData result_data;
                         result_data.backendName = ComputeBackendFactory::getBackendName(context->getBackend());
                         result_data.deviceName = info.name;
-                        result_data.benchmarkName = bench->GetName();
-                        result_data.metric = bench->GetMetric();
-                        result_data.operations = bench_result.operations * total_invocations;
-                        result_data.time_ms = total_time_ms;
-                        result_data.isEmulated = false; // This will be updated later
+                    result_data.benchmarkName = bench->GetName();
+                    result_data.metric = bench->GetMetric();
+                    result_data.operations = bench_result.operations * total_invocations;
+                    result_data.time_ms = total_time_ms;
+                    result_data.isEmulated = bench->IsEmulated();
 
-                        formatter->addResult(result_data);
+                    formatter->addResult(result_data);
 
                         bench->Teardown();
                     } catch (const std::exception& e) {

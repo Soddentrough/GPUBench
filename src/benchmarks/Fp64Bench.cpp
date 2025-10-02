@@ -30,7 +30,8 @@ void Fp64Bench::Setup(IComputeContext& context, const std::string& kernel_dir) {
         kernel_file = kernel_dir + "/fp64.cl";
     }
     
-    kernel = context.createKernel(kernel_file, "run_benchmark", 1);
+    std::string kernel_name = (context.getBackend() == ComputeBackend::Vulkan) ? "main" : "run_benchmark";
+    kernel = context.createKernel(kernel_file, kernel_name, 1);
     context.setKernelArg(kernel, 0, buffer);
 }
 
