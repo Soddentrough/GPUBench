@@ -12,14 +12,14 @@ layout(set = 0, binding = 1) buffer OutputData {
 } OutputBuffer;
 
 void main() {
-    uint baseIndex = gl_GlobalInvocationID.x * 16;
-    uint stride = gl_WorkGroupSize.x * 16;
+    uint baseIndex = gl_GlobalInvocationID.x * 32;
+    uint stride = gl_WorkGroupSize.x * 32;
     uint buffer_mask = (256 * 1024 * 1024) / 16 - 1;
 
     for (int i = 0; i < 1024; ++i) {
         uint currentIndex = (baseIndex + i * stride) & buffer_mask;
 
-        // Each thread processes 16 vec4s (256 bytes)
+        // Each thread processes 32 vec4s (512 bytes)
         vec4 data0 = InputBuffer.inputData[currentIndex + 0];
         vec4 data1 = InputBuffer.inputData[currentIndex + 1];
         vec4 data2 = InputBuffer.inputData[currentIndex + 2];
@@ -36,6 +36,22 @@ void main() {
         vec4 data13 = InputBuffer.inputData[currentIndex + 13];
         vec4 data14 = InputBuffer.inputData[currentIndex + 14];
         vec4 data15 = InputBuffer.inputData[currentIndex + 15];
+        vec4 data16 = InputBuffer.inputData[currentIndex + 16];
+        vec4 data17 = InputBuffer.inputData[currentIndex + 17];
+        vec4 data18 = InputBuffer.inputData[currentIndex + 18];
+        vec4 data19 = InputBuffer.inputData[currentIndex + 19];
+        vec4 data20 = InputBuffer.inputData[currentIndex + 20];
+        vec4 data21 = InputBuffer.inputData[currentIndex + 21];
+        vec4 data22 = InputBuffer.inputData[currentIndex + 22];
+        vec4 data23 = InputBuffer.inputData[currentIndex + 23];
+        vec4 data24 = InputBuffer.inputData[currentIndex + 24];
+        vec4 data25 = InputBuffer.inputData[currentIndex + 25];
+        vec4 data26 = InputBuffer.inputData[currentIndex + 26];
+        vec4 data27 = InputBuffer.inputData[currentIndex + 27];
+        vec4 data28 = InputBuffer.inputData[currentIndex + 28];
+        vec4 data29 = InputBuffer.inputData[currentIndex + 29];
+        vec4 data30 = InputBuffer.inputData[currentIndex + 30];
+        vec4 data31 = InputBuffer.inputData[currentIndex + 31];
         
         OutputBuffer.outputData[currentIndex + 0] = data0;
         OutputBuffer.outputData[currentIndex + 1] = data1;
@@ -53,5 +69,21 @@ void main() {
         OutputBuffer.outputData[currentIndex + 13] = data13;
         OutputBuffer.outputData[currentIndex + 14] = data14;
         OutputBuffer.outputData[currentIndex + 15] = data15;
+        OutputBuffer.outputData[currentIndex + 16] = data16;
+        OutputBuffer.outputData[currentIndex + 17] = data17;
+        OutputBuffer.outputData[currentIndex + 18] = data18;
+        OutputBuffer.outputData[currentIndex + 19] = data19;
+        OutputBuffer.outputData[currentIndex + 20] = data20;
+        OutputBuffer.outputData[currentIndex + 21] = data21;
+        OutputBuffer.outputData[currentIndex + 22] = data22;
+        OutputBuffer.outputData[currentIndex + 23] = data23;
+        OutputBuffer.outputData[currentIndex + 24] = data24;
+        OutputBuffer.outputData[currentIndex + 25] = data25;
+        OutputBuffer.outputData[currentIndex + 26] = data26;
+        OutputBuffer.outputData[currentIndex + 27] = data27;
+        OutputBuffer.outputData[currentIndex + 28] = data28;
+        OutputBuffer.outputData[currentIndex + 29] = data29;
+        OutputBuffer.outputData[currentIndex + 30] = data30;
+        OutputBuffer.outputData[currentIndex + 31] = data31;
     }
 }

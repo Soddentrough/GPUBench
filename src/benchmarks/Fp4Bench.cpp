@@ -50,9 +50,9 @@ void Fp4Bench::Teardown() {
 }
 
 BenchmarkResult Fp4Bench::GetResult() const {
-    // 12 u8vec4 operations per iteration, each with multiply-add + AND = 3 ops per component
-    // 12 * 4 * 3 = 144 FP4-equivalent operations per iteration
-    // 16384 iterations * 144 ops * 8192 workgroups * 64 threads
-    uint64_t num_ops = (uint64_t)16384 * 144 * 8192 * 64;
+    // 8 fma operations per iteration, each is 2 ops (multiply, add)
+    // 8 * 2 * 4 = 64 FP4-equivalent operations per iteration
+    // 16384 iterations * 64 ops * 8192 workgroups * 64 threads
+    uint64_t num_ops = (uint64_t)16384 * 64 * 8192 * 64;
     return {num_ops, 0.0};
 }

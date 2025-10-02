@@ -80,7 +80,7 @@ BenchmarkResult MemBandwidthBench::GetResult() const {
     }
     
     const auto& config = configs[currentConfigIndex - 1];
-    // Each thread transfers 16 vec4s (16*16=256 bytes) per iteration, for 1024 iterations, times 2 for read/write
-    uint64_t bytes_transferred = (uint64_t)config.workgroupSize * config.numWorkgroups * 256 * 1024 * 2;
+    // Each thread transfers 32 vec4s (32*16=512 bytes) per iteration, for 1024 iterations, times 2 for read/write
+    uint64_t bytes_transferred = (uint64_t)config.workgroupSize * config.numWorkgroups * 512 * 1024 * 2;
     return {bytes_transferred, 0.0};
 }

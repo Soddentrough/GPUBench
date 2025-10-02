@@ -57,9 +57,9 @@ void BenchmarkRunner::discoverBenchmarks() {
 
     // Cache Bandwidth
     benchmarks.push_back(std::make_unique<CacheBench>("L0 Cache Bandwidth", "GB/s", 4, "l0_cache_bandwidth"));
-    benchmarks.push_back(std::make_unique<CacheBench>("L1 Cache Bandwidth", "GB/s", 24 * 1024, "cache_bandwidth"));
-    benchmarks.push_back(std::make_unique<CacheBench>("L2 Cache Bandwidth", "GB/s", 1 * 1024 * 1024, "cache_bandwidth"));
-    benchmarks.push_back(std::make_unique<CacheBench>("L3 Cache Bandwidth", "GB/s", 16 * 1024 * 1024, "cache_bandwidth"));
+    benchmarks.push_back(std::make_unique<CacheBench>("L1 Cache Bandwidth", "GB/s", 1 * 1024 * 1024, "cachebw_l2"));
+    benchmarks.push_back(std::make_unique<CacheBench>("L2 Cache Bandwidth", "GB/s", 24 * 1024, "cachebw_l1"));
+    benchmarks.push_back(std::make_unique<CacheBench>("L3 Cache Bandwidth", "GB/s", 16 * 1024 * 1024, "cachebw_l3"));
 
     // Cache Latency
     const size_t l1_size = 24 * 1024;
@@ -102,7 +102,7 @@ void BenchmarkRunner::run(const std::vector<std::string>& benchmarks_to_run) {
             // Display device statistics
             std::cout << "Device Statistics:" << std::endl;
             std::cout << "  Compute Units: " << info.computeUnits << std::endl;
-            std::cout << "  VRAM: " << (info.memorySize / (1024 * 1024 * 1024)) << " GB" << std::endl;
+            std::cout << "  VRAM: " << static_cast<int>(std::round(info.memorySize / (1024.0 * 1024.0 * 1024.0))) << " GB" << std::endl;
             std::cout << "  Max Work Group Size: " << info.maxWorkGroupSize << std::endl;
             std::cout << "  Subgroup Size: " << info.subgroupSize << std::endl;
             std::cout << "  Max Shared Memory: " << (info.maxComputeSharedMemorySize / 1024) << " KB" << std::endl;

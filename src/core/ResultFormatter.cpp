@@ -6,6 +6,7 @@
 
 std::string ResultFormatter::formatDouble(double value, int precision) {
     std::stringstream stream;
+    stream.imbue(std::locale::classic());
     stream << std::fixed << std::setprecision(precision) << value;
     std::string str = stream.str();
     std::string integerPart = str.substr(0, str.find('.'));

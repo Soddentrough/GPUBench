@@ -23,7 +23,8 @@ void main() {
     
     // Perform many iterations to measure L1 cache bandwidth
     // Each workgroup accesses its own small 4KB region repeatedly
-    for (int iter = 0; iter < 1000; iter++) {
+    #pragma unroll
+    for (int iter = 0; iter < 1024; iter++) {
         vec4 v0 = Buffer.data[baseIndex];
         
         // Simple accumulation to prevent optimization
