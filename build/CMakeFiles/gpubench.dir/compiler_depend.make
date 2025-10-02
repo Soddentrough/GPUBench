@@ -1795,7 +1795,6 @@ CMakeFiles/gpubench.dir/src/core/BenchmarkRunner.cpp.o: /home/naoki/Development/
   /home/naoki/Development/GPUBench/src/benchmarks/Fp32Bench.h \
   /home/naoki/Development/GPUBench/src/benchmarks/Fp4Bench.h \
   /home/naoki/Development/GPUBench/src/benchmarks/Fp64Bench.h \
-  /home/naoki/Development/GPUBench/src/benchmarks/Fp6Bench.h \
   /home/naoki/Development/GPUBench/src/benchmarks/Fp8Bench.h \
   /home/naoki/Development/GPUBench/src/benchmarks/IBenchmark.h \
   /home/naoki/Development/GPUBench/src/benchmarks/Int4Bench.h \

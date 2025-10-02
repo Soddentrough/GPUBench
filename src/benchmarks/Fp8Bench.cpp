@@ -3,10 +3,7 @@
 #include <iostream>
 
 const char* Fp8Bench::GetName() const {
-    if (is_emulated) {
-        return "FP8 (Emulated)";
-    }
-    return name.c_str();
+    return "FP8";
 }
 
 bool Fp8Bench::IsSupported(const DeviceInfo& info, IComputeContext* context) const {

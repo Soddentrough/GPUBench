@@ -10,7 +10,7 @@
 #include "benchmarks/Int4Bench.h"
 #include "benchmarks/MemBandwidthBench.h"
 #include "benchmarks/CacheBench.h"
-#include "benchmarks/Fp6Bench.h"
+// #include "benchmarks/Fp6Bench.h" // Temporarily disabled
 #include <iostream>
 #include <chrono>
 #include <thread>
@@ -49,7 +49,7 @@ void BenchmarkRunner::discoverBenchmarks() {
     benchmarks.push_back(std::make_unique<Fp32Bench>());
     benchmarks.push_back(std::make_unique<Fp16Bench>());
     benchmarks.push_back(std::make_unique<Fp8Bench>());
-    benchmarks.push_back(std::make_unique<Fp6Bench>());
+    // benchmarks.push_back(std::make_unique<Fp6Bench>()); // Temporarily disabled
     benchmarks.push_back(std::make_unique<Fp4Bench>());
     benchmarks.push_back(std::make_unique<Int8Bench>());
     benchmarks.push_back(std::make_unique<Int4Bench>());
@@ -126,7 +126,7 @@ void BenchmarkRunner::run(const std::vector<std::string>& benchmarks_to_run) {
                 if (should_run && bench->IsSupported(info, context)) {
                     try {
                         std::cout << "Running " << bench->GetName() <<   "..." << std::endl;
-                        bench->Setup(*context, "build");
+                        bench->Setup(*context, ".");
 
                         // Timed run
                         double total_time_ms = 0;

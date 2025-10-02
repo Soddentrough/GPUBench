@@ -4,6 +4,20 @@
 #include <algorithm>
 #include <locale>
 
+std::string ResultFormatter::formatDouble(double value, int precision) {
+    std::stringstream stream;
+    stream << std::fixed << std::setprecision(precision) << value;
+    std::string str = stream.str();
+    std::string integerPart = str.substr(0, str.find('.'));
+    std::string fractionalPart = str.substr(str.find('.'));
+    int insertPosition = integerPart.length() - 3;
+    while (insertPosition > 0) {
+        integerPart.insert(insertPosition, ",");
+        insertPosition -= 3;
+    }
+    return integerPart + fractionalPart;
+}
+
 std::string ResultFormatter::formatNumber(uint64_t value) {
     std::string numWithCommas = std::to_string(value);
     int insertPosition = numWithCommas.length() - 3;
@@ -57,8 +71,9 @@ void ResultFormatter::print() {
             benchmarkName += " (Emulated)";
         }
 
+        std::string formatted_value = formatDouble(value, 3);
         std::stringstream resultStream;
-        resultStream << std::fixed << std::setprecision(3) << value << unit;
+        resultStream << formatted_value << unit;
 
         std::cout << std::left << std::setw(12) << result.backendName
                   << std::setw(40) << result.deviceName

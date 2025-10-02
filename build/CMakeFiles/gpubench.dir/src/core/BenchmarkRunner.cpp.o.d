@@ -234,7 +234,6 @@ CMakeFiles/gpubench.dir/src/core/BenchmarkRunner.cpp.o: \
  /home/naoki/Development/GPUBench/src/benchmarks/Int4Bench.h \
  /home/naoki/Development/GPUBench/src/benchmarks/MemBandwidthBench.h \
  /home/naoki/Development/GPUBench/src/benchmarks/CacheBench.h \
- /home/naoki/Development/GPUBench/src/benchmarks/Fp6Bench.h \
  /usr/include/c++/15/iostream /usr/include/c++/15/ostream \
  /usr/include/c++/15/bits/ostream.h /usr/include/c++/15/ios \
  /usr/include/c++/15/bits/ios_base.h \

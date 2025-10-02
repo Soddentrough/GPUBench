@@ -6,10 +6,7 @@ Fp6Bench::Fp6Bench() {}
 Fp6Bench::~Fp6Bench() {}
 
 const char* Fp6Bench::GetName() const {
-    if (is_emulated) {
-        return "FP6 (Emulated)";
-    }
-    return name.c_str();
+    return "FP6";
 }
 
 bool Fp6Bench::IsSupported(const DeviceInfo& device, IComputeContext* context) const {

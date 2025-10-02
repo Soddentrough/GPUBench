@@ -3,10 +3,7 @@
 #include <iostream>
 
 const char* Fp4Bench::GetName() const {
-    if (is_emulated) {
-        return "FP4 (Emulated)";
-    }
-    return name.c_str();
+    return "FP4";
 }
 
 bool Fp4Bench::IsSupported(const DeviceInfo& info, IComputeContext* context) const {

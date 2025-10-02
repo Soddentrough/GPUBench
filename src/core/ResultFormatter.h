@@ -24,5 +24,6 @@ public:
 
 private:
     std::string formatNumber(uint64_t n);
+    std::string formatDouble(double value, int precision);
     std::vector<ResultData> results;
 };
