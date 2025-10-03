@@ -1,7 +1,7 @@
 // Requires OpenCL 1.2+
 #pragma OPENCL EXTENSION cl_khr_fp64 : enable
 
-__kernel void compute(__global double* data) {
+__kernel void run_benchmark(__global double* data) {
     uint index = get_global_id(0);
 
     const double c1 = 0.5;

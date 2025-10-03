@@ -1,6 +1,6 @@
 // Requires OpenCL 1.2+
 
-__kernel void compute(__global float* data) {
+__kernel void run_benchmark(__global float* data) {
     uint index = get_global_id(0);
 
     // Work with multiple accumulators to avoid dependency chains

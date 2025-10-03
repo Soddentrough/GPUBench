@@ -32,10 +32,17 @@ void Int8Bench::Setup(IComputeContext& context, const std::string& kernel_dir) {
     } else if (context.getBackend() == ComputeBackend::ROCm) {
         kernel_file = kernel_dir + "/hip_kernels/int8.o";
     } else {
-        kernel_file = kernel_dir + "/int8.cl";
+        kernel_file = "kernels/int8.cl";
     }
     
-    std::string kernel_name = (context.getBackend() == ComputeBackend::Vulkan) ? "main" : "run_benchmark";
+    std::string kernel_name;
+    if (context.getBackend() == ComputeBackend::Vulkan) {
+        kernel_name = "main";
+    } else if (context.getBackend() == ComputeBackend::ROCm) {
+        kernel_name = "rocm_compute";
+    } else {
+        kernel_name = "run_benchmark";
+    }
     kernel = context.createKernel(kernel_file, kernel_name, 1);
     context.setKernelArg(kernel, 0, buffer);
 }

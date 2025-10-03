@@ -1,8 +1,10 @@
+
+
 #pragma OPENCL EXTENSION cl_khr_fp16 : enable
 
 // Requires OpenCL 1.2+
 
-__kernel void compute(__global half* data) {
+__kernel void run_benchmark(__global half* data) {
     uint index = get_global_id(0);
 
     // Emulating FP8 with FP16 packed values (half4 = 4 FP8-equivalent values)

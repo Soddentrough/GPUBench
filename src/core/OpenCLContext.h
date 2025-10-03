@@ -25,23 +25,32 @@ public:
     cl_context getOpenCLContext() const override { return context; }
 
     // Buffer management
-    ComputeBuffer createBuffer(size_t size, const void* host_ptr = nullptr) override { return nullptr; }
-    void writeBuffer(ComputeBuffer buffer, size_t offset, size_t size, const void* host_ptr) override {}
-    void readBuffer(ComputeBuffer buffer, size_t offset, size_t size, void* host_ptr) const override {}
-    void releaseBuffer(ComputeBuffer buffer) override {}
+    ComputeBuffer createBuffer(size_t size, const void* host_ptr = nullptr) override;
+    void writeBuffer(ComputeBuffer buffer, size_t offset, size_t size, const void* host_ptr) override;
+    void readBuffer(ComputeBuffer buffer, size_t offset, size_t size, void* host_ptr) const override;
+    void releaseBuffer(ComputeBuffer buffer) override;
 
     // Kernel management
-    ComputeKernel createKernel(const std::string& file_name, const std::string& kernel_name, uint32_t num_args) override { return nullptr; }
-    void setKernelArg(ComputeKernel kernel, uint32_t arg_index, ComputeBuffer buffer) override {}
-    void setKernelArg(ComputeKernel kernel, uint32_t arg_index, size_t arg_size, const void* arg_value) override {}
-    void dispatch(ComputeKernel kernel, uint32_t grid_x, uint32_t grid_y, uint32_t grid_z, uint32_t block_x, uint32_t block_y, uint32_t block_z) override {}
-    void releaseKernel(ComputeKernel kernel) override {}
+    ComputeKernel createKernel(const std::string& file_name, const std::string& kernel_name, uint32_t num_args) override;
+    void setKernelArg(ComputeKernel kernel, uint32_t arg_index, ComputeBuffer buffer) override;
+    void setKernelArg(ComputeKernel kernel, uint32_t arg_index, size_t arg_size, const void* arg_value) override;
+    void dispatch(ComputeKernel kernel, uint32_t grid_x, uint32_t grid_y, uint32_t grid_z, uint32_t block_x, uint32_t block_y, uint32_t block_z) override;
+    void releaseKernel(ComputeKernel kernel) override;
     void waitIdle() override;
     
     // OpenCL-specific accessors
     cl_command_queue getCommandQueue() const { return commandQueue; }
 
 private:
+    struct ComputeBuffer_cl {
+        cl_mem buffer;
+    };
+
+    struct ComputeKernel_cl {
+        cl_program program;
+        cl_kernel kernel;
+    };
+
     void enumeratePlatformsAndDevices();
     void createContext();
     void createCommandQueue();

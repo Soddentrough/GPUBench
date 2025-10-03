@@ -20,10 +20,17 @@ void Fp32Bench::Setup(IComputeContext& context, const std::string& kernel_dir) {
     } else if (context.getBackend() == ComputeBackend::ROCm) {
         kernel_file = kernel_dir + "/hip_kernels/fp32.o";
     } else {
-        kernel_file = kernel_dir + "/fp32.cl";
+        kernel_file = "kernels/fp32.cl";
     }
     
-    std::string kernel_name = (context.getBackend() == ComputeBackend::Vulkan) ? "main" : "run_benchmark";
+    std::string kernel_name;
+    if (context.getBackend() == ComputeBackend::Vulkan) {
+        kernel_name = "main";
+    } else if (context.getBackend() == ComputeBackend::ROCm) {
+        kernel_name = "rocm_compute";
+    } else {
+        kernel_name = "run_benchmark";
+    }
     kernel = context.createKernel(kernel_file, kernel_name, 1);
     context.setKernelArg(kernel, 0, buffer);
 }

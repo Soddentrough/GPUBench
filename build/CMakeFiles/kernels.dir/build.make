@@ -66,53 +66,32 @@ include CMakeFiles/kernels.dir/compiler_depend.make
 # Include the progress variables for this target.
 include CMakeFiles/kernels.dir/progress.make
 
-CMakeFiles/kernels: kernels/fp16.cl
-CMakeFiles/kernels: kernels/fp32.cl
-CMakeFiles/kernels: kernels/fp4.cl
-CMakeFiles/kernels: kernels/fp64.cl
-CMakeFiles/kernels: kernels/fp8.cl
-CMakeFiles/kernels: kernels/int4.cl
-CMakeFiles/kernels: kernels/int8.cl
+CMakeFiles/kernels: kernels
 
-kernels/fp16.cl: /home/naoki/Development/GPUBench/kernels/fp16.cl
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Generating kernels/fp16.cl"
-	/usr/bin/cmake -E copy /home/naoki/Development/GPUBench/kernels/fp16.cl /home/naoki/Development/GPUBench/build/kernels/fp16.cl
-
-kernels/fp32.cl: /home/naoki/Development/GPUBench/kernels/fp32.cl
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Generating kernels/fp32.cl"
-	/usr/bin/cmake -E copy /home/naoki/Development/GPUBench/kernels/fp32.cl /home/naoki/Development/GPUBench/build/kernels/fp32.cl
-
-kernels/fp4.cl: /home/naoki/Development/GPUBench/kernels/fp4.cl
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Generating kernels/fp4.cl"
-	/usr/bin/cmake -E copy /home/naoki/Development/GPUBench/kernels/fp4.cl /home/naoki/Development/GPUBench/build/kernels/fp4.cl
-
-kernels/fp64.cl: /home/naoki/Development/GPUBench/kernels/fp64.cl
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Generating kernels/fp64.cl"
-	/usr/bin/cmake -E copy /home/naoki/Development/GPUBench/kernels/fp64.cl /home/naoki/Development/GPUBench/build/kernels/fp64.cl
-
-kernels/fp8.cl: /home/naoki/Development/GPUBench/kernels/fp8.cl
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_5) "Generating kernels/fp8.cl"
-	/usr/bin/cmake -E copy /home/naoki/Development/GPUBench/kernels/fp8.cl /home/naoki/Development/GPUBench/build/kernels/fp8.cl
-
-kernels/int4.cl: /home/naoki/Development/GPUBench/kernels/int4.cl
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_6) "Generating kernels/int4.cl"
-	/usr/bin/cmake -E copy /home/naoki/Development/GPUBench/kernels/int4.cl /home/naoki/Development/GPUBench/build/kernels/int4.cl
-
-kernels/int8.cl: /home/naoki/Development/GPUBench/kernels/int8.cl
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_7) "Generating kernels/int8.cl"
-	/usr/bin/cmake -E copy /home/naoki/Development/GPUBench/kernels/int8.cl /home/naoki/Development/GPUBench/build/kernels/int8.cl
+kernels: /home/naoki/Development/GPUBench/kernels/cache_latency.cl
+kernels: /home/naoki/Development/GPUBench/kernels/cachebw_l1.cl
+kernels: /home/naoki/Development/GPUBench/kernels/cachebw_l2.cl
+kernels: /home/naoki/Development/GPUBench/kernels/cachebw_l3.cl
+kernels: /home/naoki/Development/GPUBench/kernels/fp16.cl
+kernels: /home/naoki/Development/GPUBench/kernels/fp32.cl
+kernels: /home/naoki/Development/GPUBench/kernels/fp4.cl
+kernels: /home/naoki/Development/GPUBench/kernels/fp64.cl
+kernels: /home/naoki/Development/GPUBench/kernels/fp8.cl
+kernels: /home/naoki/Development/GPUBench/kernels/int4.cl
+kernels: /home/naoki/Development/GPUBench/kernels/int8.cl
+kernels: /home/naoki/Development/GPUBench/kernels/l0_cache_bandwidth.cl
+kernels: /home/naoki/Development/GPUBench/kernels/l0_cache_latency.cl
+kernels: /home/naoki/Development/GPUBench/kernels/membw_1024.cl
+kernels: /home/naoki/Development/GPUBench/kernels/membw_128.cl
+kernels: /home/naoki/Development/GPUBench/kernels/membw_256.cl
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Generating kernels"
+	/usr/bin/cmake -E copy_directory /home/naoki/Development/GPUBench/kernels /home/naoki/Development/GPUBench/build/kernels
 
 CMakeFiles/kernels.dir/codegen:
 .PHONY : CMakeFiles/kernels.dir/codegen
 
 kernels: CMakeFiles/kernels
-kernels: kernels/fp16.cl
-kernels: kernels/fp32.cl
-kernels: kernels/fp4.cl
-kernels: kernels/fp64.cl
-kernels: kernels/fp8.cl
-kernels: kernels/int4.cl
-kernels: kernels/int8.cl
+kernels: kernels
 kernels: CMakeFiles/kernels.dir/build.make
 .PHONY : kernels
 

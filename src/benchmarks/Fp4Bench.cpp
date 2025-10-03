@@ -18,6 +18,10 @@ void Fp4Bench::Setup(IComputeContext& context, const std::string& kernel_dir) {
 
     // Create storage buffer
     size_t bufferSize = 8192 * 64 * 4; // 8192 workgroups * 64 threads * 4 bytes (u8vec4)
+    if (context.getBackend() == ComputeBackend::OpenCL) {
+        // The OpenCL kernel uses half4, which is 8 bytes per thread
+        bufferSize = 8192 * 64 * 8;
+    }
     buffer = context.createBuffer(bufferSize);
 
     // Create kernel
@@ -28,10 +32,17 @@ void Fp4Bench::Setup(IComputeContext& context, const std::string& kernel_dir) {
     } else if (context.getBackend() == ComputeBackend::ROCm) {
         kernel_file = kernel_dir + "/hip_kernels/" + kernel_name + ".o";
     } else {
-        kernel_file = kernel_dir + "/" + kernel_name + ".cl";
+        kernel_file = "kernels/fp4.cl";
     }
     
-    std::string func_name = (context.getBackend() == ComputeBackend::Vulkan) ? "main" : "run_benchmark";
+    std::string func_name;
+    if (context.getBackend() == ComputeBackend::Vulkan) {
+        func_name = "main";
+    } else if (context.getBackend() == ComputeBackend::ROCm) {
+        func_name = "rocm_compute";
+    } else {
+        func_name = "run_benchmark";
+    }
     kernel = context.createKernel(kernel_file, func_name, 1);
     context.setKernelArg(kernel, 0, buffer);
 }

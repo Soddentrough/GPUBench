@@ -9,11 +9,9 @@ ddcf86cf30af6b5857aa42c11aa1a8bb cache_bandwidth.spv
 a0d4893dacfdf30f6dd3ce2263f07eb7 cachebw_l3.spv
 33a71bddc8f77840343394267ad0c2a8 fp16.spv
 a3d1476f99294e99a86b53cc19263330 fp32.spv
-15a6b2a93f43b3ff6b4346605fa8757a fp4.spv
 8fbcae94e6a652d11d54d13b66654d78 fp4_emulated.spv
 3ec7032ed64470edd585b8e73d06b8e2 fp4_native.spv
 6183a370600e352ed25422ac8b353cde fp64.spv
-18747f3d41ee6b043e94a87b099a9e31 fp8.spv
 9e03562e8363ab53ed0e124eb4395cd6 fp8_emulated.spv
 45944ce1c3a52debede5a934a8daa2c2 fp8_native.spv
 f1c0785daa6656cb07b5e9b5bd71974f hip_kernels/cache_bandwidth.o
@@ -36,13 +34,7 @@ ebc2d8431564ae86095d4a1eb949f91b hip_kernels/membw_1024.o
 f820e44a3912e8ef90fed8ccd631924d hip_kernels/membw_256.o
 624e5581e0a0ba83f89251ab7d8aee2b int4.spv
 20be90cc497ad4afb404f9bfe7115f34 int8.spv
-50b5678f3b7df3bfa425a3dbdf01770f kernels/fp16.cl
-ec920ee05edfc33d08006a149a82825b kernels/fp32.cl
-1314d3d885ea688c76e7a3103ed178fa kernels/fp4.cl
-ab3f682885bcb02831d6ef5fe3e9fdcb kernels/fp64.cl
-d0281d15504f1752827607cd154a37de kernels/fp8.cl
-c450313c7541900ed366436bf6a865dd kernels/int4.cl
-88a77026540244bbaca24a77300eadfa kernels/int8.cl
+9df261470978a607bff4c900528195b9 kernels
 62f9cdfc4522cb256dbe06e9bb60b863 l0_cache.spv
 6562ba42e0b2633ba29cdf6245429144 l0_cache_bandwidth.spv
 fc06e9510d303a2ff93acf59ec8c40b3 l0_cache_latency.spv

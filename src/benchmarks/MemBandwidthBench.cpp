@@ -12,25 +12,44 @@ void MemBandwidthBench::createKernel(BandwidthConfig& config, const std::string&
     } else if (context->getBackend() == ComputeBackend::ROCm) {
         kernel_file = kernel_dir + "/hip_kernels/" + config.kernelFile + ".o";
     } else {
-        kernel_file = kernel_dir + "/" + config.kernelFile + ".cl";
+        kernel_file = "kernels/" + config.kernelFile + ".cl";
     }
     
-    std::string kernel_name = (context->getBackend() == ComputeBackend::Vulkan) ? "main" : "run_benchmark";
-    config.kernel = context->createKernel(kernel_file, kernel_name, 2);
-    context->setKernelArg(config.kernel, 0, inputBuffer);
-    context->setKernelArg(config.kernel, 1, outputBuffer);
+    std::string kernel_name;
+    if (context->getBackend() == ComputeBackend::Vulkan) {
+        kernel_name = "main";
+    } else if (context->getBackend() == ComputeBackend::ROCm) {
+        kernel_name = "rocm_compute";
+    } else {
+        kernel_name = "cl_compute";
+    }
+    config.kernel = this->context->createKernel(kernel_file, kernel_name, 2);
+    this->context->setKernelArg(config.kernel, 0, inputBuffer);
+    this->context->setKernelArg(config.kernel, 1, outputBuffer);
 }
 
 void MemBandwidthBench::Setup(IComputeContext& context, const std::string& kernel_dir) {
     this->context = &context;
 
     size_t bufferSize = 256 * 1024 * 1024; // 256 MB
-    inputBuffer = context.createBuffer(bufferSize);
-    outputBuffer = context.createBuffer(bufferSize);
+    inputBuffer = this->context->createBuffer(bufferSize);
+    outputBuffer = this->context->createBuffer(bufferSize);
 
+    // Initialize input buffer with test data to prevent reading uninitialized memory
+    std::vector<float> testData(bufferSize / sizeof(float), 1.0f);
+    this->context->writeBuffer(inputBuffer, 0, bufferSize, testData.data());
+
+    // Get device max workgroup size and clamp configurations to it
+    DeviceInfo deviceInfo = context.getCurrentDeviceInfo();
+    uint32_t maxWorkgroupSize = deviceInfo.maxWorkGroupSize;
+    
     configs.push_back({"128 threads/group", "membw_128", 128, 4096, nullptr});
-    configs.push_back({"256 threads/group", "membw_256", 256, 2048, nullptr});
-    configs.push_back({"1024 threads/group", "membw_1024", 1024, 512, nullptr});
+    configs.push_back({"256 threads/group", "membw_256", std::min(256u, maxWorkgroupSize), 2048, nullptr});
+    
+    // Only add 1024 config if device supports it
+    if (maxWorkgroupSize >= 1024) {
+        configs.push_back({"1024 threads/group", "membw_1024", 1024, 512, nullptr});
+    }
     
     for (auto& config : configs) {
         createKernel(config, kernel_dir);

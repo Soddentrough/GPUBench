@@ -61,16 +61,12 @@ endif()
 # Copy OpenCL kernels to build directory
 if(OpenCL_FOUND)
     file(GLOB KERNELS "kernels/*.cl")
-    foreach(KERNEL ${KERNELS})
-        get_filename_component(KERNEL_NAME ${KERNEL} NAME)
-        add_custom_command(
-            OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/kernels/${KERNEL_NAME}"
-            COMMAND ${CMAKE_COMMAND} -E copy ${KERNEL} "${CMAKE_CURRENT_BINARY_DIR}/kernels/${KERNEL_NAME}"
-            DEPENDS ${KERNEL}
-        )
-        list(APPEND COPIED_KERNELS "${CMAKE_CURRENT_BINARY_DIR}/kernels/${KERNEL_NAME}")
-    endforeach()
-    add_custom_target(kernels ALL DEPENDS ${COPIED_KERNELS})
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/kernels
+        COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/kernels ${CMAKE_CURRENT_BINARY_DIR}/kernels
+        DEPENDS ${KERNELS}
+    )
+    add_custom_target(kernels ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/kernels)
 endif()
 
 # Compile HIP kernels

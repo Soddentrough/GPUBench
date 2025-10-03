@@ -1,6 +1,6 @@
 // Requires OpenCL 1.2+
 
-__kernel void compute(__global char* data) {
+__kernel void run_benchmark(__global char* data) {
     uint index = get_global_id(0);
 
     // Use packed char4 for 4x throughput

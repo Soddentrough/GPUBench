@@ -57,8 +57,13 @@ int main(int argc, char** argv) {
         // Create compute contexts for specified backends
         std::vector<std::unique_ptr<IComputeContext>> contexts;
         if (backend_strs.empty() || (backend_strs.size() == 1 && backend_strs[0] == "auto")) {
-            std::cout << "Auto-detecting compute backend..." << std::endl;
-            contexts.push_back(ComputeBackendFactory::createWithFallback());
+            std::cout << "Forcing OpenCL backend for testing..." << std::endl;
+            if (ComputeBackendFactory::isAvailable(ComputeBackend::OpenCL)) {
+                contexts.push_back(ComputeBackendFactory::create(ComputeBackend::OpenCL));
+            } else {
+                std::cerr << "OpenCL backend not available for testing." << std::endl;
+                return EXIT_FAILURE;
+            }
         } else {
             for (const auto& backend_str : backend_strs) {
                 if (backend_str == "vulkan") {
