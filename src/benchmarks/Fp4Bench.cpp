@@ -28,11 +28,11 @@ void Fp4Bench::Setup(IComputeContext& context, const std::string& kernel_dir) {
     std::string kernel_file;
     std::string kernel_name = is_emulated ? "fp4_emulated" : "fp4_native";
     if (context.getBackend() == ComputeBackend::Vulkan) {
-        kernel_file = kernel_dir + "/" + kernel_name + ".spv";
+        kernel_file = kernel_dir + "/vulkan/" + kernel_name + ".spv";
     } else if (context.getBackend() == ComputeBackend::ROCm) {
-        kernel_file = kernel_dir + "/hip_kernels/" + kernel_name + ".o";
+        kernel_file = kernel_dir + "/rocm/" + kernel_name + ".o";
     } else {
-        kernel_file = "kernels/fp4.cl";
+        kernel_file = kernel_dir + "/opencl/fp4.cl";
     }
     
     std::string func_name;

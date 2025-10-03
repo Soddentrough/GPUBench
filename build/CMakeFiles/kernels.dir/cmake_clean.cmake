@@ -1,6 +1,6 @@
 file(REMOVE_RECURSE
   "CMakeFiles/kernels"
-  "kernels"
+  "kernels/opencl"
 )
 
 # Per-language clean rules from dependency scanning.

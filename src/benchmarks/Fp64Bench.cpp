@@ -23,11 +23,11 @@ void Fp64Bench::Setup(IComputeContext& context, const std::string& kernel_dir) {
     // Create kernel
     std::string kernel_file;
     if (context.getBackend() == ComputeBackend::Vulkan) {
-        kernel_file = kernel_dir + "/fp64.spv";
+        kernel_file = kernel_dir + "/vulkan/fp64.spv";
     } else if (context.getBackend() == ComputeBackend::ROCm) {
-        kernel_file = kernel_dir + "/hip_kernels/fp64.o";
+        kernel_file = kernel_dir + "/rocm/fp64.o";
     } else {
-        kernel_file = "kernels/fp64.cl";
+        kernel_file = kernel_dir + "/opencl/fp64.cl";
     }
     
     std::string kernel_name;

@@ -28,11 +28,11 @@ void Int4Bench::Setup(IComputeContext& context, const std::string& kernel_dir) {
     // Create kernel
     std::string kernel_file;
     if (context.getBackend() == ComputeBackend::Vulkan) {
-        kernel_file = kernel_dir + "/int4.spv";
+        kernel_file = kernel_dir + "/vulkan/int4.spv";
     } else if (context.getBackend() == ComputeBackend::ROCm) {
-        kernel_file = kernel_dir + "/hip_kernels/int4.o";
+        kernel_file = kernel_dir + "/rocm/int4.o";
     } else {
-        kernel_file = "kernels/int4.cl";
+        kernel_file = kernel_dir + "/opencl/int4.cl";
     }
     
     std::string kernel_name;

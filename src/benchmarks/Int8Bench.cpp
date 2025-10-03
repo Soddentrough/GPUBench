@@ -28,11 +28,11 @@ void Int8Bench::Setup(IComputeContext& context, const std::string& kernel_dir) {
     // Create kernel
     std::string kernel_file;
     if (context.getBackend() == ComputeBackend::Vulkan) {
-        kernel_file = kernel_dir + "/int8.spv";
+        kernel_file = kernel_dir + "/vulkan/int8.spv";
     } else if (context.getBackend() == ComputeBackend::ROCm) {
-        kernel_file = kernel_dir + "/hip_kernels/int8.o";
+        kernel_file = kernel_dir + "/rocm/int8.o";
     } else {
-        kernel_file = "kernels/int8.cl";
+        kernel_file = kernel_dir + "/opencl/int8.cl";
     }
     
     std::string kernel_name;

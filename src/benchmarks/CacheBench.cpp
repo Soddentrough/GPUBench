@@ -22,11 +22,11 @@ void CacheBench::Setup(IComputeContext& context, const std::string& kernel_dir) 
 
     std::string full_kernel_path;
     if (context.getBackend() == ComputeBackend::Vulkan) {
-        full_kernel_path = kernel_dir + "/" + kernelFile + ".spv";
+        full_kernel_path = kernel_dir + "/vulkan/" + kernelFile + ".spv";
     } else if (context.getBackend() == ComputeBackend::ROCm) {
-        full_kernel_path = kernel_dir + "/hip_kernels/" + kernelFile + ".o";
+        full_kernel_path = kernel_dir + "/rocm/" + kernelFile + ".o";
     } else {
-        full_kernel_path = "kernels/" + kernelFile + ".cl";
+        full_kernel_path = kernel_dir + "/opencl/" + kernelFile + ".cl";
     }
     
     std::string kernel_name;

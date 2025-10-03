@@ -28,11 +28,11 @@ void Fp16Bench::Setup(IComputeContext& context, const std::string& kernel_dir) {
     // Create kernel
     std::string kernel_file;
     if (context.getBackend() == ComputeBackend::Vulkan) {
-        kernel_file = kernel_dir + "/fp16.spv";
+        kernel_file = kernel_dir + "/vulkan/fp16.spv";
     } else if (context.getBackend() == ComputeBackend::ROCm) {
-        kernel_file = kernel_dir + "/hip_kernels/fp16.o";
+        kernel_file = kernel_dir + "/rocm/fp16.o";
     } else {
-        kernel_file = "kernels/fp16.cl";
+        kernel_file = kernel_dir + "/opencl/fp16.cl";
     }
     
     std::string kernel_name;

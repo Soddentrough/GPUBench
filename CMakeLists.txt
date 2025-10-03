@@ -44,9 +44,10 @@ endif()
 # Shader/Kernel compilation
 if(Vulkan_FOUND)
     file(GLOB SHADERS "shaders/*.comp")
+    file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/kernels/vulkan)
     foreach(SHADER ${SHADERS})
         get_filename_component(SHADER_NAME ${SHADER} NAME_WE)
-        set(SPIRV_SHADER "${CMAKE_CURRENT_BINARY_DIR}/${SHADER_NAME}.spv")
+        set(SPIRV_SHADER "${CMAKE_CURRENT_BINARY_DIR}/kernels/vulkan/${SHADER_NAME}.spv")
         add_custom_command(
             OUTPUT ${SPIRV_SHADER}
             COMMAND ${GLSLC_EXECUTABLE} --target-env=vulkan1.2 --target-spv=spv1.5 ${SHADER} -o ${SPIRV_SHADER}
@@ -62,20 +63,20 @@ endif()
 if(OpenCL_FOUND)
     file(GLOB KERNELS "kernels/*.cl")
     add_custom_command(
-        OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/kernels
-        COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/kernels ${CMAKE_CURRENT_BINARY_DIR}/kernels
+        OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/kernels/opencl
+        COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/kernels ${CMAKE_CURRENT_BINARY_DIR}/kernels/opencl
         DEPENDS ${KERNELS}
     )
-    add_custom_target(kernels ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/kernels)
+    add_custom_target(kernels ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/kernels/opencl)
 endif()
 
 # Compile HIP kernels
 if(HIP_FOUND)
     file(GLOB HIP_KERNELS "hip_kernels/*.hip")
-    file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/hip_kernels)
+    file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/kernels/rocm)
     foreach(HIP_KERNEL ${HIP_KERNELS})
         get_filename_component(KERNEL_NAME ${HIP_KERNEL} NAME_WE)
-        set(HIP_OBJECT "${CMAKE_CURRENT_BINARY_DIR}/hip_kernels/${KERNEL_NAME}.o")
+        set(HIP_OBJECT "${CMAKE_CURRENT_BINARY_DIR}/kernels/rocm/${KERNEL_NAME}.o")
         add_custom_command(
             OUTPUT ${HIP_OBJECT}
             COMMAND ${HIP_HIPCC_EXECUTABLE} --genco -c ${HIP_KERNEL} -o ${HIP_OBJECT} -D__HIP_PLATFORM_AMD__
@@ -172,3 +173,11 @@ endif()
 if(HIP_FOUND)
     target_compile_definitions(gpubench PRIVATE HAVE_ROCM)
 endif()
+
+# Copy kernels directory to project root for running from base directory
+add_custom_command(TARGET gpubench POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_CURRENT_BINARY_DIR}/kernels
+    ${CMAKE_CURRENT_SOURCE_DIR}/kernels
+    COMMENT "Copying kernels directory to project root"
+)

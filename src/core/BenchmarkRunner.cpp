@@ -146,7 +146,7 @@ void BenchmarkRunner::run(const std::vector<std::string>& benchmarks_to_run) {
                 if (should_run && bench->IsSupported(info, context)) {
                     try {
                         std::cout << "Running " << bench->GetName() <<   "..." << std::endl;
-                        bench->Setup(*context, "");
+                        bench->Setup(*context, "kernels");
 
                         // Timed run
                         double total_time_ms = 0;
