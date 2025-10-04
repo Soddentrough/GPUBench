@@ -19,9 +19,9 @@ void MemBandwidthBench::createKernel(BandwidthConfig& config, const std::string&
     if (context->getBackend() == ComputeBackend::Vulkan) {
         kernel_name = "main";
     } else if (context->getBackend() == ComputeBackend::ROCm) {
-        kernel_name = "rocm_compute";
+        kernel_name = "run_benchmark";
     } else {
-        kernel_name = "cl_compute";
+        kernel_name = "run_benchmark";
     }
     config.kernel = this->context->createKernel(kernel_file, kernel_name, 2);
     this->context->setKernelArg(config.kernel, 0, inputBuffer);

@@ -1,0 +1,75 @@
+__kernel void cl_compute(__global float4* inputData, __global float4* outputData) {
+    uint baseIndex = get_global_id(0) * 32;
+    uint stride = get_global_size(0) * 32;
+    uint buffer_mask = (256 * 1024 * 1024) / 16 - 1;
+
+    for (int i = 0; i < 1024; ++i) {
+        uint currentIndex = (baseIndex + i * stride) & buffer_mask;
+
+        float4 data0 = inputData[currentIndex + 0];
+        float4 data1 = inputData[currentIndex + 1];
+        float4 data2 = inputData[currentIndex + 2];
+        float4 data3 = inputData[currentIndex + 3];
+        float4 data4 = inputData[currentIndex + 4];
+        float4 data5 = inputData[currentIndex + 5];
+        float4 data6 = inputData[currentIndex + 6];
+        float4 data7 = inputData[currentIndex + 7];
+        float4 data8 = inputData[currentIndex + 8];
+        float4 data9 = inputData[currentIndex + 9];
+        float4 data10 = inputData[currentIndex + 10];
+        float4 data11 = inputData[currentIndex + 11];
+        float4 data12 = inputData[currentIndex + 12];
+        float4 data13 = inputData[currentIndex + 13];
+        float4 data14 = inputData[currentIndex + 14];
+        float4 data15 = inputData[currentIndex + 15];
+        float4 data16 = inputData[currentIndex + 16];
+        float4 data17 = inputData[currentIndex + 17];
+        float4 data18 = inputData[currentIndex + 18];
+        float4 data19 = inputData[currentIndex + 19];
+        float4 data20 = inputData[currentIndex + 20];
+        float4 data21 = inputData[currentIndex + 21];
+        float4 data22 = inputData[currentIndex + 22];
+        float4 data23 = inputData[currentIndex + 23];
+        float4 data24 = inputData[currentIndex + 24];
+        float4 data25 = inputData[currentIndex + 25];
+        float4 data26 = inputData[currentIndex + 26];
+        float4 data27 = inputData[currentIndex + 27];
+        float4 data28 = inputData[currentIndex + 28];
+        float4 data29 = inputData[currentIndex + 29];
+        float4 data30 = inputData[currentIndex + 30];
+        float4 data31 = inputData[currentIndex + 31];
+        
+        outputData[currentIndex + 0] = data0;
+        outputData[currentIndex + 1] = data1;
+        outputData[currentIndex + 2] = data2;
+        outputData[currentIndex + 3] = data3;
+        outputData[currentIndex + 4] = data4;
+        outputData[currentIndex + 5] = data5;
+        outputData[currentIndex + 6] = data6;
+        outputData[currentIndex + 7] = data7;
+        outputData[currentIndex + 8] = data8;
+        outputData[currentIndex + 9] = data9;
+        outputData[currentIndex + 10] = data10;
+        outputData[currentIndex + 11] = data11;
+        outputData[currentIndex + 12] = data12;
+        outputData[currentIndex + 13] = data13;
+        outputData[currentIndex + 14] = data14;
+        outputData[currentIndex + 15] = data15;
+        outputData[currentIndex + 16] = data16;
+        outputData[currentIndex + 17] = data17;
+        outputData[currentIndex + 18] = data18;
+        outputData[currentIndex + 19] = data19;
+        outputData[currentIndex + 20] = data20;
+        outputData[currentIndex + 21] = data21;
+        outputData[currentIndex + 22] = data22;
+        outputData[currentIndex + 23] = data23;
+        outputData[currentIndex + 24] = data24;
+        outputData[currentIndex + 25] = data25;
+        outputData[currentIndex + 26] = data26;
+        outputData[currentIndex + 27] = data27;
+        outputData[currentIndex + 28] = data28;
+        outputData[currentIndex + 29] = data29;
+        outputData[currentIndex + 30] = data30;
+        outputData[currentIndex + 31] = data31;
+    }
+}

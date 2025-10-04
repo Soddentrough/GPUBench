@@ -27,7 +27,6 @@ void ROCmContext::enumerateDevices() {
             info.name = prop.name;
             info.memorySize = prop.totalGlobalMem;
             info.verbose = verbose;
-            info.computeUnits = prop.multiProcessorCount;
             info.maxWorkGroupSize = prop.maxThreadsPerBlock;
             info.maxComputeWorkGroupCountX = prop.maxGridSize[0];
             info.maxComputeWorkGroupCountY = prop.maxGridSize[1];

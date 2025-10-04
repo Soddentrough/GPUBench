@@ -121,7 +121,6 @@ void BenchmarkRunner::run(const std::vector<std::string>& benchmarks_to_run) {
             
             // Display device statistics
             std::cout << "Device Statistics:" << std::endl;
-            std::cout << "  Compute Units: " << info.computeUnits << std::endl;
             std::cout << "  VRAM: " << static_cast<int>(std::round(info.memorySize / (1024.0 * 1024.0 * 1024.0))) << " GB" << std::endl;
             std::cout << "  Max Work Group Size: " << info.maxWorkGroupSize << std::endl;
             std::cout << "  Subgroup Size: " << info.subgroupSize << std::endl;

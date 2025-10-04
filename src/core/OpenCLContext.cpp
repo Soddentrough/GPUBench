@@ -81,10 +81,6 @@ const std::vector<DeviceInfo>& OpenCLContext::getDevices() const {
             clGetDeviceInfo(dev, CL_DEVICE_GLOBAL_MEM_SIZE, sizeof(memSize), &memSize, nullptr);
             info.memorySize = memSize;
             
-            cl_uint computeUnits;
-            clGetDeviceInfo(dev, CL_DEVICE_MAX_COMPUTE_UNITS, sizeof(computeUnits), &computeUnits, nullptr);
-            info.computeUnits = computeUnits;
-            
             size_t maxWorkGroupSize;
             clGetDeviceInfo(dev, CL_DEVICE_MAX_WORK_GROUP_SIZE, sizeof(maxWorkGroupSize), &maxWorkGroupSize, nullptr);
             info.maxWorkGroupSize = static_cast<uint32_t>(maxWorkGroupSize);
@@ -118,10 +114,6 @@ DeviceInfo OpenCLContext::getCurrentDeviceInfo() const {
     cl_ulong memSize;
     clGetDeviceInfo(device, CL_DEVICE_GLOBAL_MEM_SIZE, sizeof(memSize), &memSize, nullptr);
     info.memorySize = memSize;
-    
-    cl_uint computeUnits;
-    clGetDeviceInfo(device, CL_DEVICE_MAX_COMPUTE_UNITS, sizeof(computeUnits), &computeUnits, nullptr);
-    info.computeUnits = computeUnits;
     
     size_t maxWorkGroupSize;
     clGetDeviceInfo(device, CL_DEVICE_MAX_WORK_GROUP_SIZE, sizeof(maxWorkGroupSize), &maxWorkGroupSize, nullptr);

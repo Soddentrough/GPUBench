@@ -39,7 +39,7 @@ void Fp4Bench::Setup(IComputeContext& context, const std::string& kernel_dir) {
     if (context.getBackend() == ComputeBackend::Vulkan) {
         func_name = "main";
     } else if (context.getBackend() == ComputeBackend::ROCm) {
-        func_name = "rocm_compute";
+        func_name = "run_benchmark";
     } else {
         func_name = "run_benchmark";
     }

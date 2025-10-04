@@ -33,9 +33,9 @@ void CacheBench::Setup(IComputeContext& context, const std::string& kernel_dir) 
     if (context.getBackend() == ComputeBackend::Vulkan) {
         kernel_name = "main";
     } else if (context.getBackend() == ComputeBackend::ROCm) {
-        kernel_name = "rocm_compute";
+        kernel_name = "run_benchmark";
     } else {
-        kernel_name = "cl_compute";
+        kernel_name = "run_benchmark";
     }
     kernel = context.createKernel(full_kernel_path, kernel_name, 1);
     if (buffer) {

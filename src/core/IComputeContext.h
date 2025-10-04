@@ -30,7 +30,6 @@ typedef struct ihipModuleSymbol_t* hipFunction_t;
 struct DeviceInfo {
     std::string name;
     uint64_t memorySize;
-    uint32_t computeUnits;
     uint32_t maxWorkGroupSize;
     uint32_t maxComputeWorkGroupCountX;
     uint32_t maxComputeWorkGroupCountY;

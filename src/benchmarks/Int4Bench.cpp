@@ -39,7 +39,7 @@ void Int4Bench::Setup(IComputeContext& context, const std::string& kernel_dir) {
     if (context.getBackend() == ComputeBackend::Vulkan) {
         kernel_name = "main";
     } else if (context.getBackend() == ComputeBackend::ROCm) {
-        kernel_name = "rocm_compute";
+        kernel_name = "run_benchmark";
     } else {
         kernel_name = "run_benchmark";
     }

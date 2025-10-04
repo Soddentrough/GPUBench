@@ -94,7 +94,6 @@ const std::vector<DeviceInfo>& VulkanContext::getDevices() const {
             DeviceInfo info;
             info.name = props.deviceName;
             info.memorySize = vramSize;
-            info.computeUnits = subgroupProps.subgroupSize;
             info.maxWorkGroupSize = props.limits.maxComputeWorkGroupInvocations;
             info.maxComputeWorkGroupCountX = props.limits.maxComputeWorkGroupCount[0];
             info.maxComputeWorkGroupCountY = props.limits.maxComputeWorkGroupCount[1];
@@ -138,7 +137,6 @@ DeviceInfo VulkanContext::getCurrentDeviceInfo() const {
     DeviceInfo info;
     info.name = properties.deviceName;
     info.memorySize = vramSize;
-    info.computeUnits = subgroupProps.subgroupSize;
     info.maxWorkGroupSize = properties.limits.maxComputeWorkGroupInvocations;
     info.maxComputeWorkGroupCountX = properties.limits.maxComputeWorkGroupCount[0];
     info.maxComputeWorkGroupCountY = properties.limits.maxComputeWorkGroupCount[1];
