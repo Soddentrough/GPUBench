@@ -96,9 +96,19 @@ BenchmarkResult CacheBench::GetResult() const {
     } else if (name == "L0 Cache Latency") {
         // 16 dependent ops * 128 iterations
         operations = 16 * 128;
+    } else if (name == "L1 Cache Bandwidth") {
+        // L1: 1024 iterations × 1 float4 read × sizeof(float4)
+        operations = num_threads_bw * 1024 * sizeof(float) * 4;
+    } else if (name == "L2 Cache Bandwidth") {
+        // L2: 500 iterations × 1 float4 read × sizeof(float4)
+        operations = num_threads_bw * 500 * sizeof(float) * 4;
+    } else if (name == "L3 Cache Bandwidth") {
+        // L3: 200 iterations × 32 float4 reads × sizeof(float4)
+        // Note: For L3, we use reduced workgroups (100 instead of 65536)
+        const uint64_t l3_num_threads = 100 * 256;
+        operations = l3_num_threads * 200 * 32 * sizeof(float) * 4;
     } else if (metric == "GB/s") {
-        // Each thread reads 1024 times.
-        // We multiply by sizeof(uint) to get bytes.
+        // Generic bandwidth: assume 1024 reads
         operations = num_threads_bw * 1024 * sizeof(uint32_t);
     } else if (metric == "ns") {
         // 1024 dependent reads

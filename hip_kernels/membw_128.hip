@@ -4,10 +4,10 @@ extern "C" __global__ void run_benchmark(float4* inputData, float4* outputData) 
     uint thread_id = blockIdx.x * blockDim.x + threadIdx.x;
     uint num_threads = gridDim.x * blockDim.x;
     
-    // Buffer size is 256MB, which is 16M float4s.
+    // Buffer size is 1GB, which is 64M float4s.
     // Each thread processes a chunk of 16 float4s.
-    // Total chunks in buffer is 1M.
-    const uint buffer_num_chunks = 1024 * 1024;
+    // Total chunks in buffer is 4M.
+    const uint buffer_num_chunks = 4 * 1024 * 1024;
     const uint buffer_mask = buffer_num_chunks - 1;
 
     uint chunk_index = thread_id;

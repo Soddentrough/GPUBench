@@ -31,7 +31,7 @@ void MemBandwidthBench::createKernel(BandwidthConfig& config, const std::string&
 void MemBandwidthBench::Setup(IComputeContext& context, const std::string& kernel_dir) {
     this->context = &context;
 
-    size_t bufferSize = 256 * 1024 * 1024; // 256 MB
+    size_t bufferSize = 1024 * 1024 * 1024; // 1 GB
     inputBuffer = this->context->createBuffer(bufferSize);
     outputBuffer = this->context->createBuffer(bufferSize);
 
