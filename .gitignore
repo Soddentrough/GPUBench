@@ -1,0 +1,30 @@
+# Build directory
+build/
+
+# GPU core dump files
+gpucore.*
+**/gpucore.*
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Compiled binaries
+*.o
+*.so
+*.a
+*.exe
+
+# CMake generated files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+install_manifest.txt
+
+# Backup files
+*~
+*.bak
