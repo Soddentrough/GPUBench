@@ -11,7 +11,7 @@ extern "C" __global__ void run_benchmark(float4* data) {
     float4 sum = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
     
     #pragma unroll
-    for (int iter = 0; iter < 1024; iter++) {
+    for (int iter = 0; iter < 200; iter++) {
         for (int i = 0; i < 32; i++) {
             float4 v = data[baseIndex + i];
             sum.x += v.x;
