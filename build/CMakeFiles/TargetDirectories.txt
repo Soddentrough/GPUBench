@@ -4,3 +4,7 @@
 /home/naoki/Development/GPUBench/build/CMakeFiles/gpubench.dir
 /home/naoki/Development/GPUBench/build/CMakeFiles/edit_cache.dir
 /home/naoki/Development/GPUBench/build/CMakeFiles/rebuild_cache.dir
+/home/naoki/Development/GPUBench/build/CMakeFiles/list_install_components.dir
+/home/naoki/Development/GPUBench/build/CMakeFiles/install.dir
+/home/naoki/Development/GPUBench/build/CMakeFiles/install/local.dir
+/home/naoki/Development/GPUBench/build/CMakeFiles/install/strip.dir

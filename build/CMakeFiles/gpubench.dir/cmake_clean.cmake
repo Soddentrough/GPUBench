@@ -32,6 +32,8 @@ file(REMOVE_RECURSE
   "CMakeFiles/gpubench.dir/src/core/VulkanContext.cpp.o.d"
   "CMakeFiles/gpubench.dir/src/main.cpp.o"
   "CMakeFiles/gpubench.dir/src/main.cpp.o.d"
+  "CMakeFiles/gpubench.dir/src/utils/KernelPath.cpp.o"
+  "CMakeFiles/gpubench.dir/src/utils/KernelPath.cpp.o.d"
   "gpubench"
   "gpubench.pdb"
 )

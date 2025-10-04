@@ -15,6 +15,7 @@ gpubench: \
   CMakeFiles/gpubench.dir/src/benchmarks/MemBandwidthBench.cpp.o \
   CMakeFiles/gpubench.dir/src/benchmarks/CacheBench.cpp.o \
   CMakeFiles/gpubench.dir/src/benchmarks/Fp6Bench.cpp.o \
+  CMakeFiles/gpubench.dir/src/utils/KernelPath.cpp.o \
   CMakeFiles/gpubench.dir/src/core/VulkanContext.cpp.o \
   CMakeFiles/gpubench.dir/src/core/OpenCLContext.cpp.o \
   CMakeFiles/gpubench.dir/src/core/ROCmContext.cpp.o \
@@ -87,6 +88,8 @@ CMakeFiles/gpubench.dir/src/benchmarks/MemBandwidthBench.cpp.o:
 CMakeFiles/gpubench.dir/src/benchmarks/CacheBench.cpp.o:
 
 CMakeFiles/gpubench.dir/src/benchmarks/Fp6Bench.cpp.o:
+
+CMakeFiles/gpubench.dir/src/utils/KernelPath.cpp.o:
 
 CMakeFiles/gpubench.dir/src/core/VulkanContext.cpp.o:
 

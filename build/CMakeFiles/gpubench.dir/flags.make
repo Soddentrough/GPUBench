@@ -4,7 +4,7 @@
 # compile CXX with /usr/bin/c++
 CXX_DEFINES = -DHAVE_OPENCL -DHAVE_ROCM -DHAVE_VULKAN -DUSE_PROF_API=1 -D__HIP_PLATFORM_AMD__=1
 
-CXX_INCLUDES = -I/home/naoki/Development/GPUBench/src -I/home/naoki/Development/GPUBench/external
+CXX_INCLUDES = -I/home/naoki/Development/GPUBench/src -I/home/naoki/Development/GPUBench/external -I/home/naoki/Development/GPUBench/build/src
 
 CXX_FLAGS =  -g -std=gnu++17 -fPIE
 

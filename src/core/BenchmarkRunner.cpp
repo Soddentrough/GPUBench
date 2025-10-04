@@ -10,6 +10,7 @@
 #include "benchmarks/Int4Bench.h"
 #include "benchmarks/MemBandwidthBench.h"
 #include "benchmarks/CacheBench.h"
+#include "utils/KernelPath.h"
 // #include "benchmarks/Fp6Bench.h" // Temporarily disabled
 #include <iostream>
 #include <chrono>
@@ -145,7 +146,7 @@ void BenchmarkRunner::run(const std::vector<std::string>& benchmarks_to_run) {
                 if (should_run && bench->IsSupported(info, context)) {
                     try {
                         std::cout << "Running " << bench->GetName() <<   "..." << std::endl;
-                        bench->Setup(*context, "kernels");
+                        bench->Setup(*context, KernelPath::find());
 
                         // Timed run
                         double total_time_ms = 0;

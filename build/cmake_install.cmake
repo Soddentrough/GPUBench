@@ -2,7 +2,7 @@
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)
-  set(CMAKE_INSTALL_PREFIX "/usr/local")
+  set(CMAKE_INSTALL_PREFIX "/tmp/gpubench_install")
 endif()
 string(REGEX REPLACE "/$" "" CMAKE_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}")
 
@@ -40,6 +40,55 @@ endif()
 # Set path to fallback-tool for dependency-resolution.
 if(NOT DEFINED CMAKE_OBJDUMP)
   set(CMAKE_OBJDUMP "/usr/bin/objdump")
+endif()
+
+if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT)
+  if(EXISTS "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/gpubench" AND
+     NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/gpubench")
+    file(RPATH_CHECK
+         FILE "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/gpubench"
+         RPATH "")
+  endif()
+  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/bin" TYPE EXECUTABLE FILES "/home/naoki/Development/GPUBench/build/gpubench")
+  if(EXISTS "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/gpubench" AND
+     NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/gpubench")
+    if(CMAKE_INSTALL_DO_STRIP)
+      execute_process(COMMAND "/usr/bin/strip" "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/gpubench")
+    endif()
+  endif()
+endif()
+
+if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT)
+  include("/home/naoki/Development/GPUBench/build/CMakeFiles/gpubench.dir/install-cxx-module-bmi-noconfig.cmake" OPTIONAL)
+endif()
+
+if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT)
+  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/share/gpubench/kernels" TYPE DIRECTORY FILES "/home/naoki/Development/GPUBench/build/kernels/vulkan" FILES_MATCHING REGEX "/[^/]*\\.spv$")
+endif()
+
+if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT)
+  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/share/gpubench/kernels/opencl" TYPE FILE FILES
+    "/home/naoki/Development/GPUBench/kernels/cache_latency.cl"
+    "/home/naoki/Development/GPUBench/kernels/cachebw_l1.cl"
+    "/home/naoki/Development/GPUBench/kernels/cachebw_l2.cl"
+    "/home/naoki/Development/GPUBench/kernels/cachebw_l3.cl"
+    "/home/naoki/Development/GPUBench/kernels/fp16.cl"
+    "/home/naoki/Development/GPUBench/kernels/fp32.cl"
+    "/home/naoki/Development/GPUBench/kernels/fp4.cl"
+    "/home/naoki/Development/GPUBench/kernels/fp64.cl"
+    "/home/naoki/Development/GPUBench/kernels/fp8.cl"
+    "/home/naoki/Development/GPUBench/kernels/int4.cl"
+    "/home/naoki/Development/GPUBench/kernels/int8.cl"
+    "/home/naoki/Development/GPUBench/kernels/l0_cache_bandwidth.cl"
+    "/home/naoki/Development/GPUBench/kernels/l0_cache_latency.cl"
+    "/home/naoki/Development/GPUBench/kernels/membw_1024.cl"
+    "/home/naoki/Development/GPUBench/kernels/membw_128.cl"
+    "/home/naoki/Development/GPUBench/kernels/membw_256.cl"
+    )
+endif()
+
+if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT)
+  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/share/gpubench/kernels" TYPE DIRECTORY FILES "/home/naoki/Development/GPUBench/build/kernels/rocm" FILES_MATCHING REGEX "/[^/]*\\.o$")
 endif()
 
 string(REPLACE ";" "\n" CMAKE_INSTALL_MANIFEST_CONTENT

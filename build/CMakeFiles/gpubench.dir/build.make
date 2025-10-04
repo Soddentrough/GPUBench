@@ -254,10 +254,24 @@ CMakeFiles/gpubench.dir/src/benchmarks/Fp6Bench.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/gpubench.dir/src/benchmarks/Fp6Bench.cpp.s"
 	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/naoki/Development/GPUBench/src/benchmarks/Fp6Bench.cpp -o CMakeFiles/gpubench.dir/src/benchmarks/Fp6Bench.cpp.s
 
+CMakeFiles/gpubench.dir/src/utils/KernelPath.cpp.o: CMakeFiles/gpubench.dir/flags.make
+CMakeFiles/gpubench.dir/src/utils/KernelPath.cpp.o: /home/naoki/Development/GPUBench/src/utils/KernelPath.cpp
+CMakeFiles/gpubench.dir/src/utils/KernelPath.cpp.o: CMakeFiles/gpubench.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_14) "Building CXX object CMakeFiles/gpubench.dir/src/utils/KernelPath.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/gpubench.dir/src/utils/KernelPath.cpp.o -MF CMakeFiles/gpubench.dir/src/utils/KernelPath.cpp.o.d -o CMakeFiles/gpubench.dir/src/utils/KernelPath.cpp.o -c /home/naoki/Development/GPUBench/src/utils/KernelPath.cpp
+
+CMakeFiles/gpubench.dir/src/utils/KernelPath.cpp.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/gpubench.dir/src/utils/KernelPath.cpp.i"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/naoki/Development/GPUBench/src/utils/KernelPath.cpp > CMakeFiles/gpubench.dir/src/utils/KernelPath.cpp.i
+
+CMakeFiles/gpubench.dir/src/utils/KernelPath.cpp.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/gpubench.dir/src/utils/KernelPath.cpp.s"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/naoki/Development/GPUBench/src/utils/KernelPath.cpp -o CMakeFiles/gpubench.dir/src/utils/KernelPath.cpp.s
+
 CMakeFiles/gpubench.dir/src/core/VulkanContext.cpp.o: CMakeFiles/gpubench.dir/flags.make
 CMakeFiles/gpubench.dir/src/core/VulkanContext.cpp.o: /home/naoki/Development/GPUBench/src/core/VulkanContext.cpp
 CMakeFiles/gpubench.dir/src/core/VulkanContext.cpp.o: CMakeFiles/gpubench.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_14) "Building CXX object CMakeFiles/gpubench.dir/src/core/VulkanContext.cpp.o"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_15) "Building CXX object CMakeFiles/gpubench.dir/src/core/VulkanContext.cpp.o"
 	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/gpubench.dir/src/core/VulkanContext.cpp.o -MF CMakeFiles/gpubench.dir/src/core/VulkanContext.cpp.o.d -o CMakeFiles/gpubench.dir/src/core/VulkanContext.cpp.o -c /home/naoki/Development/GPUBench/src/core/VulkanContext.cpp
 
 CMakeFiles/gpubench.dir/src/core/VulkanContext.cpp.i: cmake_force
@@ -271,7 +285,7 @@ CMakeFiles/gpubench.dir/src/core/VulkanContext.cpp.s: cmake_force
 CMakeFiles/gpubench.dir/src/core/OpenCLContext.cpp.o: CMakeFiles/gpubench.dir/flags.make
 CMakeFiles/gpubench.dir/src/core/OpenCLContext.cpp.o: /home/naoki/Development/GPUBench/src/core/OpenCLContext.cpp
 CMakeFiles/gpubench.dir/src/core/OpenCLContext.cpp.o: CMakeFiles/gpubench.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_15) "Building CXX object CMakeFiles/gpubench.dir/src/core/OpenCLContext.cpp.o"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_16) "Building CXX object CMakeFiles/gpubench.dir/src/core/OpenCLContext.cpp.o"
 	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/gpubench.dir/src/core/OpenCLContext.cpp.o -MF CMakeFiles/gpubench.dir/src/core/OpenCLContext.cpp.o.d -o CMakeFiles/gpubench.dir/src/core/OpenCLContext.cpp.o -c /home/naoki/Development/GPUBench/src/core/OpenCLContext.cpp
 
 CMakeFiles/gpubench.dir/src/core/OpenCLContext.cpp.i: cmake_force
@@ -285,7 +299,7 @@ CMakeFiles/gpubench.dir/src/core/OpenCLContext.cpp.s: cmake_force
 CMakeFiles/gpubench.dir/src/core/ROCmContext.cpp.o: CMakeFiles/gpubench.dir/flags.make
 CMakeFiles/gpubench.dir/src/core/ROCmContext.cpp.o: /home/naoki/Development/GPUBench/src/core/ROCmContext.cpp
 CMakeFiles/gpubench.dir/src/core/ROCmContext.cpp.o: CMakeFiles/gpubench.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_16) "Building CXX object CMakeFiles/gpubench.dir/src/core/ROCmContext.cpp.o"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_17) "Building CXX object CMakeFiles/gpubench.dir/src/core/ROCmContext.cpp.o"
 	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/gpubench.dir/src/core/ROCmContext.cpp.o -MF CMakeFiles/gpubench.dir/src/core/ROCmContext.cpp.o.d -o CMakeFiles/gpubench.dir/src/core/ROCmContext.cpp.o -c /home/naoki/Development/GPUBench/src/core/ROCmContext.cpp
 
 CMakeFiles/gpubench.dir/src/core/ROCmContext.cpp.i: cmake_force
@@ -311,6 +325,7 @@ gpubench_OBJECTS = \
 "CMakeFiles/gpubench.dir/src/benchmarks/MemBandwidthBench.cpp.o" \
 "CMakeFiles/gpubench.dir/src/benchmarks/CacheBench.cpp.o" \
 "CMakeFiles/gpubench.dir/src/benchmarks/Fp6Bench.cpp.o" \
+"CMakeFiles/gpubench.dir/src/utils/KernelPath.cpp.o" \
 "CMakeFiles/gpubench.dir/src/core/VulkanContext.cpp.o" \
 "CMakeFiles/gpubench.dir/src/core/OpenCLContext.cpp.o" \
 "CMakeFiles/gpubench.dir/src/core/ROCmContext.cpp.o"
@@ -331,6 +346,7 @@ gpubench: CMakeFiles/gpubench.dir/src/benchmarks/Int4Bench.cpp.o
 gpubench: CMakeFiles/gpubench.dir/src/benchmarks/MemBandwidthBench.cpp.o
 gpubench: CMakeFiles/gpubench.dir/src/benchmarks/CacheBench.cpp.o
 gpubench: CMakeFiles/gpubench.dir/src/benchmarks/Fp6Bench.cpp.o
+gpubench: CMakeFiles/gpubench.dir/src/utils/KernelPath.cpp.o
 gpubench: CMakeFiles/gpubench.dir/src/core/VulkanContext.cpp.o
 gpubench: CMakeFiles/gpubench.dir/src/core/OpenCLContext.cpp.o
 gpubench: CMakeFiles/gpubench.dir/src/core/ROCmContext.cpp.o
@@ -340,7 +356,7 @@ gpubench: /lib64/libvulkan.so
 gpubench: /usr/lib64/libOpenCL.so
 gpubench: /usr/lib64/libamdhip64.so.6.4.43484
 gpubench: CMakeFiles/gpubench.dir/link.txt
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_17) "Linking CXX executable gpubench"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/home/naoki/Development/GPUBench/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_18) "Linking CXX executable gpubench"
 	$(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/gpubench.dir/link.txt --verbose=$(VERBOSE)
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold "Copying kernels directory to project root"
 	/usr/bin/cmake -E copy_directory /home/naoki/Development/GPUBench/build/kernels /home/naoki/Development/GPUBench/kernels

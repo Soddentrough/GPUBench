@@ -57,11 +57,15 @@ int main(int argc, char** argv) {
         // Create compute contexts for specified backends
         std::vector<std::unique_ptr<IComputeContext>> contexts;
         if (backend_strs.empty() || (backend_strs.size() == 1 && backend_strs[0] == "auto")) {
-            std::cout << "Forcing OpenCL backend for testing..." << std::endl;
-            if (ComputeBackendFactory::isAvailable(ComputeBackend::OpenCL)) {
+            // Default to Vulkan, fall back to OpenCL, then ROCm
+            if (ComputeBackendFactory::isAvailable(ComputeBackend::Vulkan)) {
+                contexts.push_back(ComputeBackendFactory::create(ComputeBackend::Vulkan));
+            } else if (ComputeBackendFactory::isAvailable(ComputeBackend::OpenCL)) {
                 contexts.push_back(ComputeBackendFactory::create(ComputeBackend::OpenCL));
+            } else if (ComputeBackendFactory::isAvailable(ComputeBackend::ROCm)) {
+                contexts.push_back(ComputeBackendFactory::create(ComputeBackend::ROCm, verbose));
             } else {
-                std::cerr << "OpenCL backend not available for testing." << std::endl;
+                std::cerr << "No compute backend available." << std::endl;
                 return EXIT_FAILURE;
             }
         } else {

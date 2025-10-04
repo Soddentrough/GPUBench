@@ -12,6 +12,7 @@ set(CMAKE_MAKEFILE_DEPENDS
   "CMakeFiles/3.31.6/CMakeCXXCompiler.cmake"
   "CMakeFiles/3.31.6/CMakeHIPCompiler.cmake"
   "CMakeFiles/3.31.6/CMakeSystem.cmake"
+  "/home/naoki/Development/GPUBench/src/utils/Config.h.in"
   "/usr/lib64/cmake/AMDDeviceLibs/AMDDeviceLibsConfig.cmake"
   "/usr/lib64/cmake/amd_comgr/amd_comgr-config-version.cmake"
   "/usr/lib64/cmake/amd_comgr/amd_comgr-config.cmake"
@@ -93,6 +94,7 @@ set(CMAKE_MAKEFILE_OUTPUTS
 
 # Byproducts of CMake generate step:
 set(CMAKE_MAKEFILE_PRODUCTS
+  "src/utils/Config.h"
   "CMakeFiles/CMakeDirectoryInformation.cmake"
   )
 

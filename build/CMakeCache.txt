@@ -140,7 +140,7 @@ CMAKE_HIP_FLAGS_RELWITHDEBINFO:STRING=-O2 -g -DNDEBUG
 CMAKE_HIP_PLATFORM:STRING=amd
 
 //Install path prefix, prepended onto install directories.
-CMAKE_INSTALL_PREFIX:PATH=/usr/local
+CMAKE_INSTALL_PREFIX:PATH=/tmp/gpubench_install
 
 //Path to a program.
 CMAKE_LINKER:FILEPATH=/usr/bin/ld

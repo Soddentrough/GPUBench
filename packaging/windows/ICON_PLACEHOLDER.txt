@@ -1,0 +1,22 @@
+Icon File Placeholder
+====================
+
+For a production Windows installer, you need to create an icon.ico file in this directory.
+
+To create a proper icon:
+
+1. Design an icon (256x256 pixels recommended)
+2. Use a tool like ImageMagick to convert:
+   convert icon.png -define icon:auto-resize=256,128,64,48,32,16 icon.ico
+
+3. Or use online converters: https://convertio.co/png-ico/
+
+4. Save the file as: packaging/windows/icon.ico
+
+The icon will be used for:
+- NSIS installer icon
+- Installed application icon  
+- Start Menu shortcuts
+
+Note: The CMakeLists.txt references packaging/windows/icon.ico
+If the file doesn't exist, CPack will still work but without a custom icon.

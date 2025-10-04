@@ -1,4 +1,4 @@
-__kernel void cl_compute(__global float4* inputData, __global float4* outputData) {
+__kernel void run_benchmark(__global float4* inputData, __global float4* outputData) {
     uint baseIndex = get_global_id(0) * 32;
     uint stride = get_global_size(0) * 32;
     uint buffer_mask = (256 * 1024 * 1024) / 16 - 1;

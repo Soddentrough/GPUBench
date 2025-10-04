@@ -1,10 +1,16 @@
 cmake_minimum_required(VERSION 3.16)
-project(GPUBench)
+project(GPUBench VERSION 1.0.0)
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g")
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# Generate config header with install paths
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/utils/Config.h.in
+    ${CMAKE_CURRENT_BINARY_DIR}/src/utils/Config.h
+)
 
 # Try to find Vulkan (primary backend)
 find_package(Vulkan)
@@ -102,6 +108,7 @@ set(SOURCES
     src/benchmarks/MemBandwidthBench.cpp
     src/benchmarks/CacheBench.cpp
     src/benchmarks/Fp6Bench.cpp
+    src/utils/KernelPath.cpp
 )
 
 # Add backend-specific sources
@@ -134,6 +141,7 @@ endif()
 target_include_directories(gpubench PUBLIC 
     src
     ${CMAKE_CURRENT_SOURCE_DIR}/external
+    ${CMAKE_CURRENT_BINARY_DIR}/src
 )
 
 if(Vulkan_FOUND)
@@ -181,3 +189,88 @@ add_custom_command(TARGET gpubench POST_BUILD
     ${CMAKE_CURRENT_SOURCE_DIR}/kernels
     COMMENT "Copying kernels directory to project root"
 )
+
+# Install targets
+install(TARGETS gpubench DESTINATION bin)
+
+# Install kernel files for each backend
+if(Vulkan_FOUND)
+    install(DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/kernels/vulkan
+            DESTINATION share/gpubench/kernels
+            FILES_MATCHING PATTERN "*.spv")
+endif()
+
+if(OpenCL_FOUND)
+    file(GLOB OPENCL_KERNELS "${CMAKE_CURRENT_SOURCE_DIR}/kernels/*.cl")
+    install(FILES ${OPENCL_KERNELS}
+            DESTINATION share/gpubench/kernels/opencl)
+endif()
+
+if(HIP_FOUND)
+    install(DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/kernels/rocm
+            DESTINATION share/gpubench/kernels
+            FILES_MATCHING PATTERN "*.o")
+endif()
+
+# CPack configuration for creating packages
+set(CPACK_PACKAGE_NAME "GPUBench")
+set(CPACK_PACKAGE_VENDOR "GPUBench")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "GPU Compute Benchmarking Tool")
+set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
+set(CPACK_PACKAGE_VERSION_MAJOR ${PROJECT_VERSION_MAJOR})
+set(CPACK_PACKAGE_VERSION_MINOR ${PROJECT_VERSION_MINOR})
+set(CPACK_PACKAGE_VERSION_PATCH ${PROJECT_VERSION_PATCH})
+set(CPACK_PACKAGE_INSTALL_DIRECTORY "GPUBench")
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
+set(CPACK_RESOURCE_FILE_README "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
+
+# Platform-specific package settings
+if(WIN32)
+    # Windows-specific packaging
+    set(CPACK_GENERATOR "ZIP;NSIS")
+    
+    # NSIS (Windows installer) settings
+    set(CPACK_NSIS_DISPLAY_NAME "GPUBench ${PROJECT_VERSION}")
+    set(CPACK_NSIS_PACKAGE_NAME "GPUBench")
+    set(CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL ON)
+    set(CPACK_NSIS_MODIFY_PATH ON)
+    set(CPACK_NSIS_MUI_ICON "${CMAKE_CURRENT_SOURCE_DIR}/packaging/windows/icon.ico")
+    set(CPACK_NSIS_MUI_UNIICON "${CMAKE_CURRENT_SOURCE_DIR}/packaging/windows/icon.ico")
+    set(CPACK_NSIS_HELP_LINK "https://github.com/yourusername/GPUBench")
+    set(CPACK_NSIS_URL_INFO_ABOUT "https://github.com/yourusername/GPUBench")
+    set(CPACK_NSIS_CONTACT "your.email@example.com")
+    set(CPACK_NSIS_MENU_LINKS
+        "bin/gpubench.exe" "GPUBench"
+        "https://github.com/yourusername/GPUBench" "GPUBench Website"
+    )
+    
+    # Include Visual C++ Redistributable if needed
+    # set(CPACK_NSIS_EXTRA_INSTALL_COMMANDS "ExecWait '$INSTDIR\\\\vcredist_x64.exe /quiet'")
+    
+elseif(UNIX AND NOT APPLE)
+    # Linux packaging
+    set(CPACK_GENERATOR "TGZ;DEB;RPM")
+    
+    # DEB package settings
+    set(CPACK_DEBIAN_PACKAGE_MAINTAINER "GPUBench Maintainer <your.email@example.com>")
+    set(CPACK_DEBIAN_PACKAGE_SECTION "utils")
+    set(CPACK_DEBIAN_PACKAGE_DEPENDS "")
+    
+    # RPM package settings
+    set(CPACK_RPM_PACKAGE_LICENSE "MIT")
+    set(CPACK_RPM_PACKAGE_GROUP "Applications/System")
+    
+elseif(APPLE)
+    # macOS packaging
+    set(CPACK_GENERATOR "TGZ;DragNDrop")
+    set(CPACK_DMG_VOLUME_NAME "GPUBench")
+endif()
+
+# Architecture detection
+if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+    set(CPACK_SYSTEM_NAME "win64")
+else()
+    set(CPACK_SYSTEM_NAME "win32")
+endif()
+
+include(CPack)
