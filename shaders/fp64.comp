@@ -10,9 +10,10 @@ layout(set = 0, binding = 0) buffer OutputBuffer {
 
 void main() {
     uint index = gl_GlobalInvocationID.x;
-    double val = double(index);
+    double val = 1.0;
+    double add = double(index) * 0.00000001;
     for (int i = 0; i < 65536; ++i) {
-        val = fma(val, 1.000001, 1.0);
+        val = fma(val, 1.000001 + add, 1.0);
     }
     outBuffer.data[index] = val;
 }
