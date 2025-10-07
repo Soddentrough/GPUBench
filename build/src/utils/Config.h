@@ -1,6 +1,6 @@
 #ifndef GPUBENCH_CONFIG_H
 #define GPUBENCH_CONFIG_H
 
-#define GPUBENCH_INSTALL_PREFIX "/tmp/gpubench_install"
+#define GPUBENCH_INSTALL_PREFIX "/usr/local"
 
 #endif // GPUBENCH_CONFIG_H

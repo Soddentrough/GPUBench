@@ -61,8 +61,8 @@ events:
     checks:
       - "Detecting C compiler ABI info"
     directories:
-      source: "/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-yCN0nm"
-      binary: "/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-yCN0nm"
+      source: "/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-h4oo1p"
+      binary: "/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-h4oo1p"
     cmakeVariables:
       CMAKE_C_FLAGS: ""
       CMAKE_C_FLAGS_DEBUG: "-g"
@@ -71,13 +71,13 @@ events:
       variable: "CMAKE_C_ABI_COMPILED"
       cached: true
       stdout: |
-        Change Dir: '/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-yCN0nm'
+        Change Dir: '/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-h4oo1p'
         
-        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_6701b/fast
-        /usr/bin/gmake  -f CMakeFiles/cmTC_6701b.dir/build.make CMakeFiles/cmTC_6701b.dir/build
-        gmake[1]: Entering directory '/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-yCN0nm'
-        Building C object CMakeFiles/cmTC_6701b.dir/CMakeCCompilerABI.c.o
-        /usr/bin/cc   -v -o CMakeFiles/cmTC_6701b.dir/CMakeCCompilerABI.c.o -c /usr/share/cmake/Modules/CMakeCCompilerABI.c
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_d0125/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_d0125.dir/build.make CMakeFiles/cmTC_d0125.dir/build
+        gmake[1]: Entering directory '/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-h4oo1p'
+        Building C object CMakeFiles/cmTC_d0125.dir/CMakeCCompilerABI.c.o
+        /usr/bin/cc   -v -o CMakeFiles/cmTC_d0125.dir/CMakeCCompilerABI.c.o -c /usr/share/cmake/Modules/CMakeCCompilerABI.c
         Using built-in specs.
         COLLECT_GCC=/usr/bin/cc
         OFFLOAD_TARGET_NAMES=nvptx-none:amdgcn-amdhsa
@@ -87,8 +87,8 @@ events:
         Thread model: posix
         Supported LTO compression algorithms: zlib zstd
         gcc version 15.2.1 20250808 (Red Hat 15.2.1-1) (GCC) 
-        COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_6701b.dir/CMakeCCompilerABI.c.o' '-c' '-mtune=generic' '-march=x86-64' '-dumpdir' 'CMakeFiles/cmTC_6701b.dir/'
-         /usr/libexec/gcc/x86_64-redhat-linux/15/cc1 -quiet -v /usr/share/cmake/Modules/CMakeCCompilerABI.c -quiet -dumpdir CMakeFiles/cmTC_6701b.dir/ -dumpbase CMakeCCompilerABI.c.c -dumpbase-ext .c -mtune=generic -march=x86-64 -version -o /tmp/ccVbbIkf.s
+        COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_d0125.dir/CMakeCCompilerABI.c.o' '-c' '-mtune=generic' '-march=x86-64' '-dumpdir' 'CMakeFiles/cmTC_d0125.dir/'
+         /usr/libexec/gcc/x86_64-redhat-linux/15/cc1 -quiet -v /usr/share/cmake/Modules/CMakeCCompilerABI.c -quiet -dumpdir CMakeFiles/cmTC_d0125.dir/ -dumpbase CMakeCCompilerABI.c.c -dumpbase-ext .c -mtune=generic -march=x86-64 -version -o /tmp/ccFLS1OK.s
         GNU C23 (GCC) version 15.2.1 20250808 (Red Hat 15.2.1-1) (x86_64-redhat-linux)
         	compiled by GNU C version 15.2.1 20250808 (Red Hat 15.2.1-1), GMP version 6.3.0, MPFR version 4.2.2, MPC version 1.3.1, isl version isl-0.24-GMP
         
@@ -102,14 +102,14 @@ events:
          /usr/include
         End of search list.
         Compiler executable checksum: 2f5fb64c856191160801414dd9eb2451
-        COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_6701b.dir/CMakeCCompilerABI.c.o' '-c' '-mtune=generic' '-march=x86-64' '-dumpdir' 'CMakeFiles/cmTC_6701b.dir/'
-         as -v --64 -o CMakeFiles/cmTC_6701b.dir/CMakeCCompilerABI.c.o /tmp/ccVbbIkf.s
+        COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_d0125.dir/CMakeCCompilerABI.c.o' '-c' '-mtune=generic' '-march=x86-64' '-dumpdir' 'CMakeFiles/cmTC_d0125.dir/'
+         as -v --64 -o CMakeFiles/cmTC_d0125.dir/CMakeCCompilerABI.c.o /tmp/ccFLS1OK.s
         GNU assembler version 2.44 (x86_64-redhat-linux) using BFD version version 2.44-6.fc42
         COMPILER_PATH=/usr/libexec/gcc/x86_64-redhat-linux/15/:/usr/libexec/gcc/x86_64-redhat-linux/15/:/usr/libexec/gcc/x86_64-redhat-linux/:/usr/lib/gcc/x86_64-redhat-linux/15/:/usr/lib/gcc/x86_64-redhat-linux/
         LIBRARY_PATH=/usr/lib/gcc/x86_64-redhat-linux/15/:/usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/:/lib/../lib64/:/usr/lib/../lib64/:/usr/lib/gcc/x86_64-redhat-linux/15/../../../:/lib/:/usr/lib/
-        COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_6701b.dir/CMakeCCompilerABI.c.o' '-c' '-mtune=generic' '-march=x86-64' '-dumpdir' 'CMakeFiles/cmTC_6701b.dir/CMakeCCompilerABI.c.'
-        Linking C executable cmTC_6701b
-        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_6701b.dir/link.txt --verbose=1
+        COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_d0125.dir/CMakeCCompilerABI.c.o' '-c' '-mtune=generic' '-march=x86-64' '-dumpdir' 'CMakeFiles/cmTC_d0125.dir/CMakeCCompilerABI.c.'
+        Linking C executable cmTC_d0125
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_d0125.dir/link.txt --verbose=1
         Using built-in specs.
         COLLECT_GCC=/usr/bin/cc
         COLLECT_LTO_WRAPPER=/usr/libexec/gcc/x86_64-redhat-linux/15/lto-wrapper
@@ -122,14 +122,14 @@ events:
         gcc version 15.2.1 20250808 (Red Hat 15.2.1-1) (GCC) 
         COMPILER_PATH=/usr/libexec/gcc/x86_64-redhat-linux/15/:/usr/libexec/gcc/x86_64-redhat-linux/15/:/usr/libexec/gcc/x86_64-redhat-linux/:/usr/lib/gcc/x86_64-redhat-linux/15/:/usr/lib/gcc/x86_64-redhat-linux/
         LIBRARY_PATH=/usr/lib/gcc/x86_64-redhat-linux/15/:/usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/:/lib/../lib64/:/usr/lib/../lib64/:/usr/lib/gcc/x86_64-redhat-linux/15/../../../:/lib/:/usr/lib/
-        COLLECT_GCC_OPTIONS='-v' '-o' 'cmTC_6701b' '-mtune=generic' '-march=x86-64' '-dumpdir' 'cmTC_6701b.'
-         /usr/libexec/gcc/x86_64-redhat-linux/15/collect2 -plugin /usr/libexec/gcc/x86_64-redhat-linux/15/liblto_plugin.so -plugin-opt=/usr/libexec/gcc/x86_64-redhat-linux/15/lto-wrapper -plugin-opt=-fresolution=/tmp/cc1FMwws.res -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s --build-id --no-add-needed --eh-frame-hdr --hash-style=gnu -m elf_x86_64 -dynamic-linker /lib64/ld-linux-x86-64.so.2 -o cmTC_6701b /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crt1.o /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crti.o /usr/lib/gcc/x86_64-redhat-linux/15/crtbegin.o -L/usr/lib/gcc/x86_64-redhat-linux/15 -L/usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64 -L/lib/../lib64 -L/usr/lib/../lib64 -L/usr/lib/gcc/x86_64-redhat-linux/15/../../.. -L/lib -L/usr/lib -v CMakeFiles/cmTC_6701b.dir/CMakeCCompilerABI.c.o -lgcc --push-state --as-needed -lgcc_s --pop-state -lc -lgcc --push-state --as-needed -lgcc_s --pop-state /usr/lib/gcc/x86_64-redhat-linux/15/crtend.o /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crtn.o
+        COLLECT_GCC_OPTIONS='-v' '-o' 'cmTC_d0125' '-mtune=generic' '-march=x86-64' '-dumpdir' 'cmTC_d0125.'
+         /usr/libexec/gcc/x86_64-redhat-linux/15/collect2 -plugin /usr/libexec/gcc/x86_64-redhat-linux/15/liblto_plugin.so -plugin-opt=/usr/libexec/gcc/x86_64-redhat-linux/15/lto-wrapper -plugin-opt=-fresolution=/tmp/ccgZwoLa.res -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s --build-id --no-add-needed --eh-frame-hdr --hash-style=gnu -m elf_x86_64 -dynamic-linker /lib64/ld-linux-x86-64.so.2 -o cmTC_d0125 /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crt1.o /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crti.o /usr/lib/gcc/x86_64-redhat-linux/15/crtbegin.o -L/usr/lib/gcc/x86_64-redhat-linux/15 -L/usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64 -L/lib/../lib64 -L/usr/lib/../lib64 -L/usr/lib/gcc/x86_64-redhat-linux/15/../../.. -L/lib -L/usr/lib -v CMakeFiles/cmTC_d0125.dir/CMakeCCompilerABI.c.o -lgcc --push-state --as-needed -lgcc_s --pop-state -lc -lgcc --push-state --as-needed -lgcc_s --pop-state /usr/lib/gcc/x86_64-redhat-linux/15/crtend.o /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crtn.o
         collect2 version 15.2.1 20250808 (Red Hat 15.2.1-1)
-        /usr/bin/ld -plugin /usr/libexec/gcc/x86_64-redhat-linux/15/liblto_plugin.so -plugin-opt=/usr/libexec/gcc/x86_64-redhat-linux/15/lto-wrapper -plugin-opt=-fresolution=/tmp/cc1FMwws.res -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s --build-id --no-add-needed --eh-frame-hdr --hash-style=gnu -m elf_x86_64 -dynamic-linker /lib64/ld-linux-x86-64.so.2 -o cmTC_6701b /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crt1.o /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crti.o /usr/lib/gcc/x86_64-redhat-linux/15/crtbegin.o -L/usr/lib/gcc/x86_64-redhat-linux/15 -L/usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64 -L/lib/../lib64 -L/usr/lib/../lib64 -L/usr/lib/gcc/x86_64-redhat-linux/15/../../.. -L/lib -L/usr/lib -v CMakeFiles/cmTC_6701b.dir/CMakeCCompilerABI.c.o -lgcc --push-state --as-needed -lgcc_s --pop-state -lc -lgcc --push-state --as-needed -lgcc_s --pop-state /usr/lib/gcc/x86_64-redhat-linux/15/crtend.o /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crtn.o
+        /usr/bin/ld -plugin /usr/libexec/gcc/x86_64-redhat-linux/15/liblto_plugin.so -plugin-opt=/usr/libexec/gcc/x86_64-redhat-linux/15/lto-wrapper -plugin-opt=-fresolution=/tmp/ccgZwoLa.res -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s --build-id --no-add-needed --eh-frame-hdr --hash-style=gnu -m elf_x86_64 -dynamic-linker /lib64/ld-linux-x86-64.so.2 -o cmTC_d0125 /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crt1.o /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crti.o /usr/lib/gcc/x86_64-redhat-linux/15/crtbegin.o -L/usr/lib/gcc/x86_64-redhat-linux/15 -L/usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64 -L/lib/../lib64 -L/usr/lib/../lib64 -L/usr/lib/gcc/x86_64-redhat-linux/15/../../.. -L/lib -L/usr/lib -v CMakeFiles/cmTC_d0125.dir/CMakeCCompilerABI.c.o -lgcc --push-state --as-needed -lgcc_s --pop-state -lc -lgcc --push-state --as-needed -lgcc_s --pop-state /usr/lib/gcc/x86_64-redhat-linux/15/crtend.o /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crtn.o
         GNU ld version 2.44-6.fc42
-        COLLECT_GCC_OPTIONS='-v' '-o' 'cmTC_6701b' '-mtune=generic' '-march=x86-64' '-dumpdir' 'cmTC_6701b.'
-        /usr/bin/cc  -v -Wl,-v CMakeFiles/cmTC_6701b.dir/CMakeCCompilerABI.c.o -o cmTC_6701b
-        gmake[1]: Leaving directory '/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-yCN0nm'
+        COLLECT_GCC_OPTIONS='-v' '-o' 'cmTC_d0125' '-mtune=generic' '-march=x86-64' '-dumpdir' 'cmTC_d0125.'
+        /usr/bin/cc  -v -Wl,-v CMakeFiles/cmTC_d0125.dir/CMakeCCompilerABI.c.o -o cmTC_d0125
+        gmake[1]: Leaving directory '/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-h4oo1p'
         
       exitCode: 0
   -
@@ -162,13 +162,13 @@ events:
       Parsed C implicit link information:
         link line regex: [^( *|.*[/\\])(ld[0-9]*(\\.[a-z]+)?|CMAKE_LINK_STARTFILE-NOTFOUND|([^/\\]+-)?ld|collect2)[^/\\]*( |$)]
         linker tool regex: [^[ 	]*(->|")?[ 	]*(([^"]*[/\\])?(ld[0-9]*(\\.[a-z]+)?))("|,| |$)]
-        ignore line: [Change Dir: '/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-yCN0nm']
+        ignore line: [Change Dir: '/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-h4oo1p']
         ignore line: []
-        ignore line: [Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_6701b/fast]
-        ignore line: [/usr/bin/gmake  -f CMakeFiles/cmTC_6701b.dir/build.make CMakeFiles/cmTC_6701b.dir/build]
-        ignore line: [gmake[1]: Entering directory '/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-yCN0nm']
-        ignore line: [Building C object CMakeFiles/cmTC_6701b.dir/CMakeCCompilerABI.c.o]
-        ignore line: [/usr/bin/cc   -v -o CMakeFiles/cmTC_6701b.dir/CMakeCCompilerABI.c.o -c /usr/share/cmake/Modules/CMakeCCompilerABI.c]
+        ignore line: [Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_d0125/fast]
+        ignore line: [/usr/bin/gmake  -f CMakeFiles/cmTC_d0125.dir/build.make CMakeFiles/cmTC_d0125.dir/build]
+        ignore line: [gmake[1]: Entering directory '/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-h4oo1p']
+        ignore line: [Building C object CMakeFiles/cmTC_d0125.dir/CMakeCCompilerABI.c.o]
+        ignore line: [/usr/bin/cc   -v -o CMakeFiles/cmTC_d0125.dir/CMakeCCompilerABI.c.o -c /usr/share/cmake/Modules/CMakeCCompilerABI.c]
         ignore line: [Using built-in specs.]
         ignore line: [COLLECT_GCC=/usr/bin/cc]
         ignore line: [OFFLOAD_TARGET_NAMES=nvptx-none:amdgcn-amdhsa]
@@ -178,8 +178,8 @@ events:
         ignore line: [Thread model: posix]
         ignore line: [Supported LTO compression algorithms: zlib zstd]
         ignore line: [gcc version 15.2.1 20250808 (Red Hat 15.2.1-1) (GCC) ]
-        ignore line: [COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_6701b.dir/CMakeCCompilerABI.c.o' '-c' '-mtune=generic' '-march=x86-64' '-dumpdir' 'CMakeFiles/cmTC_6701b.dir/']
-        ignore line: [ /usr/libexec/gcc/x86_64-redhat-linux/15/cc1 -quiet -v /usr/share/cmake/Modules/CMakeCCompilerABI.c -quiet -dumpdir CMakeFiles/cmTC_6701b.dir/ -dumpbase CMakeCCompilerABI.c.c -dumpbase-ext .c -mtune=generic -march=x86-64 -version -o /tmp/ccVbbIkf.s]
+        ignore line: [COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_d0125.dir/CMakeCCompilerABI.c.o' '-c' '-mtune=generic' '-march=x86-64' '-dumpdir' 'CMakeFiles/cmTC_d0125.dir/']
+        ignore line: [ /usr/libexec/gcc/x86_64-redhat-linux/15/cc1 -quiet -v /usr/share/cmake/Modules/CMakeCCompilerABI.c -quiet -dumpdir CMakeFiles/cmTC_d0125.dir/ -dumpbase CMakeCCompilerABI.c.c -dumpbase-ext .c -mtune=generic -march=x86-64 -version -o /tmp/ccFLS1OK.s]
         ignore line: [GNU C23 (GCC) version 15.2.1 20250808 (Red Hat 15.2.1-1) (x86_64-redhat-linux)]
         ignore line: [	compiled by GNU C version 15.2.1 20250808 (Red Hat 15.2.1-1)  GMP version 6.3.0  MPFR version 4.2.2  MPC version 1.3.1  isl version isl-0.24-GMP]
         ignore line: []
@@ -193,14 +193,14 @@ events:
         ignore line: [ /usr/include]
         ignore line: [End of search list.]
         ignore line: [Compiler executable checksum: 2f5fb64c856191160801414dd9eb2451]
-        ignore line: [COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_6701b.dir/CMakeCCompilerABI.c.o' '-c' '-mtune=generic' '-march=x86-64' '-dumpdir' 'CMakeFiles/cmTC_6701b.dir/']
-        ignore line: [ as -v --64 -o CMakeFiles/cmTC_6701b.dir/CMakeCCompilerABI.c.o /tmp/ccVbbIkf.s]
+        ignore line: [COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_d0125.dir/CMakeCCompilerABI.c.o' '-c' '-mtune=generic' '-march=x86-64' '-dumpdir' 'CMakeFiles/cmTC_d0125.dir/']
+        ignore line: [ as -v --64 -o CMakeFiles/cmTC_d0125.dir/CMakeCCompilerABI.c.o /tmp/ccFLS1OK.s]
         ignore line: [GNU assembler version 2.44 (x86_64-redhat-linux) using BFD version version 2.44-6.fc42]
         ignore line: [COMPILER_PATH=/usr/libexec/gcc/x86_64-redhat-linux/15/:/usr/libexec/gcc/x86_64-redhat-linux/15/:/usr/libexec/gcc/x86_64-redhat-linux/:/usr/lib/gcc/x86_64-redhat-linux/15/:/usr/lib/gcc/x86_64-redhat-linux/]
         ignore line: [LIBRARY_PATH=/usr/lib/gcc/x86_64-redhat-linux/15/:/usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/:/lib/../lib64/:/usr/lib/../lib64/:/usr/lib/gcc/x86_64-redhat-linux/15/../../../:/lib/:/usr/lib/]
-        ignore line: [COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_6701b.dir/CMakeCCompilerABI.c.o' '-c' '-mtune=generic' '-march=x86-64' '-dumpdir' 'CMakeFiles/cmTC_6701b.dir/CMakeCCompilerABI.c.']
-        ignore line: [Linking C executable cmTC_6701b]
-        ignore line: [/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_6701b.dir/link.txt --verbose=1]
+        ignore line: [COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_d0125.dir/CMakeCCompilerABI.c.o' '-c' '-mtune=generic' '-march=x86-64' '-dumpdir' 'CMakeFiles/cmTC_d0125.dir/CMakeCCompilerABI.c.']
+        ignore line: [Linking C executable cmTC_d0125]
+        ignore line: [/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_d0125.dir/link.txt --verbose=1]
         ignore line: [Using built-in specs.]
         ignore line: [COLLECT_GCC=/usr/bin/cc]
         ignore line: [COLLECT_LTO_WRAPPER=/usr/libexec/gcc/x86_64-redhat-linux/15/lto-wrapper]
@@ -213,13 +213,13 @@ events:
         ignore line: [gcc version 15.2.1 20250808 (Red Hat 15.2.1-1) (GCC) ]
         ignore line: [COMPILER_PATH=/usr/libexec/gcc/x86_64-redhat-linux/15/:/usr/libexec/gcc/x86_64-redhat-linux/15/:/usr/libexec/gcc/x86_64-redhat-linux/:/usr/lib/gcc/x86_64-redhat-linux/15/:/usr/lib/gcc/x86_64-redhat-linux/]
         ignore line: [LIBRARY_PATH=/usr/lib/gcc/x86_64-redhat-linux/15/:/usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/:/lib/../lib64/:/usr/lib/../lib64/:/usr/lib/gcc/x86_64-redhat-linux/15/../../../:/lib/:/usr/lib/]
-        ignore line: [COLLECT_GCC_OPTIONS='-v' '-o' 'cmTC_6701b' '-mtune=generic' '-march=x86-64' '-dumpdir' 'cmTC_6701b.']
-        link line: [ /usr/libexec/gcc/x86_64-redhat-linux/15/collect2 -plugin /usr/libexec/gcc/x86_64-redhat-linux/15/liblto_plugin.so -plugin-opt=/usr/libexec/gcc/x86_64-redhat-linux/15/lto-wrapper -plugin-opt=-fresolution=/tmp/cc1FMwws.res -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s --build-id --no-add-needed --eh-frame-hdr --hash-style=gnu -m elf_x86_64 -dynamic-linker /lib64/ld-linux-x86-64.so.2 -o cmTC_6701b /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crt1.o /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crti.o /usr/lib/gcc/x86_64-redhat-linux/15/crtbegin.o -L/usr/lib/gcc/x86_64-redhat-linux/15 -L/usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64 -L/lib/../lib64 -L/usr/lib/../lib64 -L/usr/lib/gcc/x86_64-redhat-linux/15/../../.. -L/lib -L/usr/lib -v CMakeFiles/cmTC_6701b.dir/CMakeCCompilerABI.c.o -lgcc --push-state --as-needed -lgcc_s --pop-state -lc -lgcc --push-state --as-needed -lgcc_s --pop-state /usr/lib/gcc/x86_64-redhat-linux/15/crtend.o /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crtn.o]
+        ignore line: [COLLECT_GCC_OPTIONS='-v' '-o' 'cmTC_d0125' '-mtune=generic' '-march=x86-64' '-dumpdir' 'cmTC_d0125.']
+        link line: [ /usr/libexec/gcc/x86_64-redhat-linux/15/collect2 -plugin /usr/libexec/gcc/x86_64-redhat-linux/15/liblto_plugin.so -plugin-opt=/usr/libexec/gcc/x86_64-redhat-linux/15/lto-wrapper -plugin-opt=-fresolution=/tmp/ccgZwoLa.res -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s --build-id --no-add-needed --eh-frame-hdr --hash-style=gnu -m elf_x86_64 -dynamic-linker /lib64/ld-linux-x86-64.so.2 -o cmTC_d0125 /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crt1.o /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crti.o /usr/lib/gcc/x86_64-redhat-linux/15/crtbegin.o -L/usr/lib/gcc/x86_64-redhat-linux/15 -L/usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64 -L/lib/../lib64 -L/usr/lib/../lib64 -L/usr/lib/gcc/x86_64-redhat-linux/15/../../.. -L/lib -L/usr/lib -v CMakeFiles/cmTC_d0125.dir/CMakeCCompilerABI.c.o -lgcc --push-state --as-needed -lgcc_s --pop-state -lc -lgcc --push-state --as-needed -lgcc_s --pop-state /usr/lib/gcc/x86_64-redhat-linux/15/crtend.o /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crtn.o]
           arg [/usr/libexec/gcc/x86_64-redhat-linux/15/collect2] ==> ignore
           arg [-plugin] ==> ignore
           arg [/usr/libexec/gcc/x86_64-redhat-linux/15/liblto_plugin.so] ==> ignore
           arg [-plugin-opt=/usr/libexec/gcc/x86_64-redhat-linux/15/lto-wrapper] ==> ignore
-          arg [-plugin-opt=-fresolution=/tmp/cc1FMwws.res] ==> ignore
+          arg [-plugin-opt=-fresolution=/tmp/ccgZwoLa.res] ==> ignore
           arg [-plugin-opt=-pass-through=-lgcc] ==> ignore
           arg [-plugin-opt=-pass-through=-lgcc_s] ==> ignore
           arg [-plugin-opt=-pass-through=-lc] ==> ignore
@@ -234,7 +234,7 @@ events:
           arg [-dynamic-linker] ==> ignore
           arg [/lib64/ld-linux-x86-64.so.2] ==> ignore
           arg [-o] ==> ignore
-          arg [cmTC_6701b] ==> ignore
+          arg [cmTC_d0125] ==> ignore
           arg [/usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crt1.o] ==> obj [/usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crt1.o]
           arg [/usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crti.o] ==> obj [/usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crti.o]
           arg [/usr/lib/gcc/x86_64-redhat-linux/15/crtbegin.o] ==> obj [/usr/lib/gcc/x86_64-redhat-linux/15/crtbegin.o]
@@ -246,7 +246,7 @@ events:
           arg [-L/lib] ==> dir [/lib]
           arg [-L/usr/lib] ==> dir [/usr/lib]
           arg [-v] ==> ignore
-          arg [CMakeFiles/cmTC_6701b.dir/CMakeCCompilerABI.c.o] ==> ignore
+          arg [CMakeFiles/cmTC_d0125.dir/CMakeCCompilerABI.c.o] ==> ignore
           arg [-lgcc] ==> lib [gcc]
           arg [--push-state] ==> ignore
           arg [--as-needed] ==> ignore
@@ -261,7 +261,7 @@ events:
           arg [/usr/lib/gcc/x86_64-redhat-linux/15/crtend.o] ==> obj [/usr/lib/gcc/x86_64-redhat-linux/15/crtend.o]
           arg [/usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crtn.o] ==> obj [/usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crtn.o]
         ignore line: [collect2 version 15.2.1 20250808 (Red Hat 15.2.1-1)]
-        ignore line: [/usr/bin/ld -plugin /usr/libexec/gcc/x86_64-redhat-linux/15/liblto_plugin.so -plugin-opt=/usr/libexec/gcc/x86_64-redhat-linux/15/lto-wrapper -plugin-opt=-fresolution=/tmp/cc1FMwws.res -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s --build-id --no-add-needed --eh-frame-hdr --hash-style=gnu -m elf_x86_64 -dynamic-linker /lib64/ld-linux-x86-64.so.2 -o cmTC_6701b /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crt1.o /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crti.o /usr/lib/gcc/x86_64-redhat-linux/15/crtbegin.o -L/usr/lib/gcc/x86_64-redhat-linux/15 -L/usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64 -L/lib/../lib64 -L/usr/lib/../lib64 -L/usr/lib/gcc/x86_64-redhat-linux/15/../../.. -L/lib -L/usr/lib -v CMakeFiles/cmTC_6701b.dir/CMakeCCompilerABI.c.o -lgcc --push-state --as-needed -lgcc_s --pop-state -lc -lgcc --push-state --as-needed -lgcc_s --pop-state /usr/lib/gcc/x86_64-redhat-linux/15/crtend.o /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crtn.o]
+        ignore line: [/usr/bin/ld -plugin /usr/libexec/gcc/x86_64-redhat-linux/15/liblto_plugin.so -plugin-opt=/usr/libexec/gcc/x86_64-redhat-linux/15/lto-wrapper -plugin-opt=-fresolution=/tmp/ccgZwoLa.res -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s --build-id --no-add-needed --eh-frame-hdr --hash-style=gnu -m elf_x86_64 -dynamic-linker /lib64/ld-linux-x86-64.so.2 -o cmTC_d0125 /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crt1.o /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crti.o /usr/lib/gcc/x86_64-redhat-linux/15/crtbegin.o -L/usr/lib/gcc/x86_64-redhat-linux/15 -L/usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64 -L/lib/../lib64 -L/usr/lib/../lib64 -L/usr/lib/gcc/x86_64-redhat-linux/15/../../.. -L/lib -L/usr/lib -v CMakeFiles/cmTC_d0125.dir/CMakeCCompilerABI.c.o -lgcc --push-state --as-needed -lgcc_s --pop-state -lc -lgcc --push-state --as-needed -lgcc_s --pop-state /usr/lib/gcc/x86_64-redhat-linux/15/crtend.o /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crtn.o]
         linker tool for 'C': /usr/bin/ld
         collapse obj [/usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crt1.o] ==> [/usr/lib64/crt1.o]
         collapse obj [/usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crti.o] ==> [/usr/lib64/crti.o]
@@ -298,8 +298,8 @@ events:
     checks:
       - "Detecting CXX compiler ABI info"
     directories:
-      source: "/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-pDnXuc"
-      binary: "/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-pDnXuc"
+      source: "/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-Qn0sIb"
+      binary: "/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-Qn0sIb"
     cmakeVariables:
       CMAKE_CXX_FLAGS: ""
       CMAKE_CXX_FLAGS_DEBUG: "-g"
@@ -309,13 +309,13 @@ events:
       variable: "CMAKE_CXX_ABI_COMPILED"
       cached: true
       stdout: |
-        Change Dir: '/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-pDnXuc'
+        Change Dir: '/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-Qn0sIb'
         
-        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_4d898/fast
-        /usr/bin/gmake  -f CMakeFiles/cmTC_4d898.dir/build.make CMakeFiles/cmTC_4d898.dir/build
-        gmake[1]: Entering directory '/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-pDnXuc'
-        Building CXX object CMakeFiles/cmTC_4d898.dir/CMakeCXXCompilerABI.cpp.o
-        /usr/bin/c++   -v -o CMakeFiles/cmTC_4d898.dir/CMakeCXXCompilerABI.cpp.o -c /usr/share/cmake/Modules/CMakeCXXCompilerABI.cpp
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_ce048/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_ce048.dir/build.make CMakeFiles/cmTC_ce048.dir/build
+        gmake[1]: Entering directory '/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-Qn0sIb'
+        Building CXX object CMakeFiles/cmTC_ce048.dir/CMakeCXXCompilerABI.cpp.o
+        /usr/bin/c++   -v -o CMakeFiles/cmTC_ce048.dir/CMakeCXXCompilerABI.cpp.o -c /usr/share/cmake/Modules/CMakeCXXCompilerABI.cpp
         Using built-in specs.
         COLLECT_GCC=/usr/bin/c++
         OFFLOAD_TARGET_NAMES=nvptx-none:amdgcn-amdhsa
@@ -325,8 +325,8 @@ events:
         Thread model: posix
         Supported LTO compression algorithms: zlib zstd
         gcc version 15.2.1 20250808 (Red Hat 15.2.1-1) (GCC) 
-        COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_4d898.dir/CMakeCXXCompilerABI.cpp.o' '-c' '-shared-libgcc' '-mtune=generic' '-march=x86-64' '-dumpdir' 'CMakeFiles/cmTC_4d898.dir/'
-         /usr/libexec/gcc/x86_64-redhat-linux/15/cc1plus -quiet -v -D_GNU_SOURCE /usr/share/cmake/Modules/CMakeCXXCompilerABI.cpp -quiet -dumpdir CMakeFiles/cmTC_4d898.dir/ -dumpbase CMakeCXXCompilerABI.cpp.cpp -dumpbase-ext .cpp -mtune=generic -march=x86-64 -version -o /tmp/cc7LggJk.s
+        COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_ce048.dir/CMakeCXXCompilerABI.cpp.o' '-c' '-shared-libgcc' '-mtune=generic' '-march=x86-64' '-dumpdir' 'CMakeFiles/cmTC_ce048.dir/'
+         /usr/libexec/gcc/x86_64-redhat-linux/15/cc1plus -quiet -v -D_GNU_SOURCE /usr/share/cmake/Modules/CMakeCXXCompilerABI.cpp -quiet -dumpdir CMakeFiles/cmTC_ce048.dir/ -dumpbase CMakeCXXCompilerABI.cpp.cpp -dumpbase-ext .cpp -mtune=generic -march=x86-64 -version -o /tmp/ccSjWDKe.s
         GNU C++17 (GCC) version 15.2.1 20250808 (Red Hat 15.2.1-1) (x86_64-redhat-linux)
         	compiled by GNU C version 15.2.1 20250808 (Red Hat 15.2.1-1), GMP version 6.3.0, MPFR version 4.2.2, MPC version 1.3.1, isl version isl-0.24-GMP
         
@@ -343,14 +343,14 @@ events:
          /usr/include
         End of search list.
         Compiler executable checksum: 7616bbd86ab77c360311eb36cf6ebbe2
-        COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_4d898.dir/CMakeCXXCompilerABI.cpp.o' '-c' '-shared-libgcc' '-mtune=generic' '-march=x86-64' '-dumpdir' 'CMakeFiles/cmTC_4d898.dir/'
-         as -v --64 -o CMakeFiles/cmTC_4d898.dir/CMakeCXXCompilerABI.cpp.o /tmp/cc7LggJk.s
+        COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_ce048.dir/CMakeCXXCompilerABI.cpp.o' '-c' '-shared-libgcc' '-mtune=generic' '-march=x86-64' '-dumpdir' 'CMakeFiles/cmTC_ce048.dir/'
+         as -v --64 -o CMakeFiles/cmTC_ce048.dir/CMakeCXXCompilerABI.cpp.o /tmp/ccSjWDKe.s
         GNU assembler version 2.44 (x86_64-redhat-linux) using BFD version version 2.44-6.fc42
         COMPILER_PATH=/usr/libexec/gcc/x86_64-redhat-linux/15/:/usr/libexec/gcc/x86_64-redhat-linux/15/:/usr/libexec/gcc/x86_64-redhat-linux/:/usr/lib/gcc/x86_64-redhat-linux/15/:/usr/lib/gcc/x86_64-redhat-linux/
         LIBRARY_PATH=/usr/lib/gcc/x86_64-redhat-linux/15/:/usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/:/lib/../lib64/:/usr/lib/../lib64/:/usr/lib/gcc/x86_64-redhat-linux/15/../../../:/lib/:/usr/lib/
-        COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_4d898.dir/CMakeCXXCompilerABI.cpp.o' '-c' '-shared-libgcc' '-mtune=generic' '-march=x86-64' '-dumpdir' 'CMakeFiles/cmTC_4d898.dir/CMakeCXXCompilerABI.cpp.'
-        Linking CXX executable cmTC_4d898
-        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_4d898.dir/link.txt --verbose=1
+        COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_ce048.dir/CMakeCXXCompilerABI.cpp.o' '-c' '-shared-libgcc' '-mtune=generic' '-march=x86-64' '-dumpdir' 'CMakeFiles/cmTC_ce048.dir/CMakeCXXCompilerABI.cpp.'
+        Linking CXX executable cmTC_ce048
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_ce048.dir/link.txt --verbose=1
         Using built-in specs.
         COLLECT_GCC=/usr/bin/c++
         COLLECT_LTO_WRAPPER=/usr/libexec/gcc/x86_64-redhat-linux/15/lto-wrapper
@@ -363,14 +363,14 @@ events:
         gcc version 15.2.1 20250808 (Red Hat 15.2.1-1) (GCC) 
         COMPILER_PATH=/usr/libexec/gcc/x86_64-redhat-linux/15/:/usr/libexec/gcc/x86_64-redhat-linux/15/:/usr/libexec/gcc/x86_64-redhat-linux/:/usr/lib/gcc/x86_64-redhat-linux/15/:/usr/lib/gcc/x86_64-redhat-linux/
         LIBRARY_PATH=/usr/lib/gcc/x86_64-redhat-linux/15/:/usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/:/lib/../lib64/:/usr/lib/../lib64/:/usr/lib/gcc/x86_64-redhat-linux/15/../../../:/lib/:/usr/lib/
-        COLLECT_GCC_OPTIONS='-v' '-o' 'cmTC_4d898' '-foffload-options=-l_GCC_stdc++' '-foffload-options=-l_GCC_m' '-shared-libgcc' '-mtune=generic' '-march=x86-64' '-dumpdir' 'cmTC_4d898.'
-         /usr/libexec/gcc/x86_64-redhat-linux/15/collect2 -plugin /usr/libexec/gcc/x86_64-redhat-linux/15/liblto_plugin.so -plugin-opt=/usr/libexec/gcc/x86_64-redhat-linux/15/lto-wrapper -plugin-opt=-fresolution=/tmp/ccBGdlOL.res -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc --build-id --no-add-needed --eh-frame-hdr --hash-style=gnu -m elf_x86_64 -dynamic-linker /lib64/ld-linux-x86-64.so.2 -o cmTC_4d898 /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crt1.o /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crti.o /usr/lib/gcc/x86_64-redhat-linux/15/crtbegin.o -L/usr/lib/gcc/x86_64-redhat-linux/15 -L/usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64 -L/lib/../lib64 -L/usr/lib/../lib64 -L/usr/lib/gcc/x86_64-redhat-linux/15/../../.. -L/lib -L/usr/lib -v CMakeFiles/cmTC_4d898.dir/CMakeCXXCompilerABI.cpp.o -lstdc++ -lm -lgcc_s -lgcc -lc -lgcc_s -lgcc /usr/lib/gcc/x86_64-redhat-linux/15/crtend.o /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crtn.o
+        COLLECT_GCC_OPTIONS='-v' '-o' 'cmTC_ce048' '-foffload-options=-l_GCC_stdc++' '-foffload-options=-l_GCC_m' '-shared-libgcc' '-mtune=generic' '-march=x86-64' '-dumpdir' 'cmTC_ce048.'
+         /usr/libexec/gcc/x86_64-redhat-linux/15/collect2 -plugin /usr/libexec/gcc/x86_64-redhat-linux/15/liblto_plugin.so -plugin-opt=/usr/libexec/gcc/x86_64-redhat-linux/15/lto-wrapper -plugin-opt=-fresolution=/tmp/cclAQR76.res -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc --build-id --no-add-needed --eh-frame-hdr --hash-style=gnu -m elf_x86_64 -dynamic-linker /lib64/ld-linux-x86-64.so.2 -o cmTC_ce048 /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crt1.o /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crti.o /usr/lib/gcc/x86_64-redhat-linux/15/crtbegin.o -L/usr/lib/gcc/x86_64-redhat-linux/15 -L/usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64 -L/lib/../lib64 -L/usr/lib/../lib64 -L/usr/lib/gcc/x86_64-redhat-linux/15/../../.. -L/lib -L/usr/lib -v CMakeFiles/cmTC_ce048.dir/CMakeCXXCompilerABI.cpp.o -lstdc++ -lm -lgcc_s -lgcc -lc -lgcc_s -lgcc /usr/lib/gcc/x86_64-redhat-linux/15/crtend.o /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crtn.o
         collect2 version 15.2.1 20250808 (Red Hat 15.2.1-1)
-        /usr/bin/ld -plugin /usr/libexec/gcc/x86_64-redhat-linux/15/liblto_plugin.so -plugin-opt=/usr/libexec/gcc/x86_64-redhat-linux/15/lto-wrapper -plugin-opt=-fresolution=/tmp/ccBGdlOL.res -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc --build-id --no-add-needed --eh-frame-hdr --hash-style=gnu -m elf_x86_64 -dynamic-linker /lib64/ld-linux-x86-64.so.2 -o cmTC_4d898 /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crt1.o /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crti.o /usr/lib/gcc/x86_64-redhat-linux/15/crtbegin.o -L/usr/lib/gcc/x86_64-redhat-linux/15 -L/usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64 -L/lib/../lib64 -L/usr/lib/../lib64 -L/usr/lib/gcc/x86_64-redhat-linux/15/../../.. -L/lib -L/usr/lib -v CMakeFiles/cmTC_4d898.dir/CMakeCXXCompilerABI.cpp.o -lstdc++ -lm -lgcc_s -lgcc -lc -lgcc_s -lgcc /usr/lib/gcc/x86_64-redhat-linux/15/crtend.o /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crtn.o
+        /usr/bin/ld -plugin /usr/libexec/gcc/x86_64-redhat-linux/15/liblto_plugin.so -plugin-opt=/usr/libexec/gcc/x86_64-redhat-linux/15/lto-wrapper -plugin-opt=-fresolution=/tmp/cclAQR76.res -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc --build-id --no-add-needed --eh-frame-hdr --hash-style=gnu -m elf_x86_64 -dynamic-linker /lib64/ld-linux-x86-64.so.2 -o cmTC_ce048 /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crt1.o /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crti.o /usr/lib/gcc/x86_64-redhat-linux/15/crtbegin.o -L/usr/lib/gcc/x86_64-redhat-linux/15 -L/usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64 -L/lib/../lib64 -L/usr/lib/../lib64 -L/usr/lib/gcc/x86_64-redhat-linux/15/../../.. -L/lib -L/usr/lib -v CMakeFiles/cmTC_ce048.dir/CMakeCXXCompilerABI.cpp.o -lstdc++ -lm -lgcc_s -lgcc -lc -lgcc_s -lgcc /usr/lib/gcc/x86_64-redhat-linux/15/crtend.o /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crtn.o
         GNU ld version 2.44-6.fc42
-        COLLECT_GCC_OPTIONS='-v' '-o' 'cmTC_4d898' '-foffload-options=-l_GCC_stdc++' '-foffload-options=-l_GCC_m' '-shared-libgcc' '-mtune=generic' '-march=x86-64' '-dumpdir' 'cmTC_4d898.'
-        /usr/bin/c++  -v -Wl,-v CMakeFiles/cmTC_4d898.dir/CMakeCXXCompilerABI.cpp.o -o cmTC_4d898
-        gmake[1]: Leaving directory '/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-pDnXuc'
+        COLLECT_GCC_OPTIONS='-v' '-o' 'cmTC_ce048' '-foffload-options=-l_GCC_stdc++' '-foffload-options=-l_GCC_m' '-shared-libgcc' '-mtune=generic' '-march=x86-64' '-dumpdir' 'cmTC_ce048.'
+        /usr/bin/c++  -v -Wl,-v CMakeFiles/cmTC_ce048.dir/CMakeCXXCompilerABI.cpp.o -o cmTC_ce048
+        gmake[1]: Leaving directory '/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-Qn0sIb'
         
       exitCode: 0
   -
@@ -409,13 +409,13 @@ events:
       Parsed CXX implicit link information:
         link line regex: [^( *|.*[/\\])(ld[0-9]*(\\.[a-z]+)?|CMAKE_LINK_STARTFILE-NOTFOUND|([^/\\]+-)?ld|collect2)[^/\\]*( |$)]
         linker tool regex: [^[ 	]*(->|")?[ 	]*(([^"]*[/\\])?(ld[0-9]*(\\.[a-z]+)?))("|,| |$)]
-        ignore line: [Change Dir: '/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-pDnXuc']
+        ignore line: [Change Dir: '/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-Qn0sIb']
         ignore line: []
-        ignore line: [Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_4d898/fast]
-        ignore line: [/usr/bin/gmake  -f CMakeFiles/cmTC_4d898.dir/build.make CMakeFiles/cmTC_4d898.dir/build]
-        ignore line: [gmake[1]: Entering directory '/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-pDnXuc']
-        ignore line: [Building CXX object CMakeFiles/cmTC_4d898.dir/CMakeCXXCompilerABI.cpp.o]
-        ignore line: [/usr/bin/c++   -v -o CMakeFiles/cmTC_4d898.dir/CMakeCXXCompilerABI.cpp.o -c /usr/share/cmake/Modules/CMakeCXXCompilerABI.cpp]
+        ignore line: [Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_ce048/fast]
+        ignore line: [/usr/bin/gmake  -f CMakeFiles/cmTC_ce048.dir/build.make CMakeFiles/cmTC_ce048.dir/build]
+        ignore line: [gmake[1]: Entering directory '/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-Qn0sIb']
+        ignore line: [Building CXX object CMakeFiles/cmTC_ce048.dir/CMakeCXXCompilerABI.cpp.o]
+        ignore line: [/usr/bin/c++   -v -o CMakeFiles/cmTC_ce048.dir/CMakeCXXCompilerABI.cpp.o -c /usr/share/cmake/Modules/CMakeCXXCompilerABI.cpp]
         ignore line: [Using built-in specs.]
         ignore line: [COLLECT_GCC=/usr/bin/c++]
         ignore line: [OFFLOAD_TARGET_NAMES=nvptx-none:amdgcn-amdhsa]
@@ -425,8 +425,8 @@ events:
         ignore line: [Thread model: posix]
         ignore line: [Supported LTO compression algorithms: zlib zstd]
         ignore line: [gcc version 15.2.1 20250808 (Red Hat 15.2.1-1) (GCC) ]
-        ignore line: [COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_4d898.dir/CMakeCXXCompilerABI.cpp.o' '-c' '-shared-libgcc' '-mtune=generic' '-march=x86-64' '-dumpdir' 'CMakeFiles/cmTC_4d898.dir/']
-        ignore line: [ /usr/libexec/gcc/x86_64-redhat-linux/15/cc1plus -quiet -v -D_GNU_SOURCE /usr/share/cmake/Modules/CMakeCXXCompilerABI.cpp -quiet -dumpdir CMakeFiles/cmTC_4d898.dir/ -dumpbase CMakeCXXCompilerABI.cpp.cpp -dumpbase-ext .cpp -mtune=generic -march=x86-64 -version -o /tmp/cc7LggJk.s]
+        ignore line: [COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_ce048.dir/CMakeCXXCompilerABI.cpp.o' '-c' '-shared-libgcc' '-mtune=generic' '-march=x86-64' '-dumpdir' 'CMakeFiles/cmTC_ce048.dir/']
+        ignore line: [ /usr/libexec/gcc/x86_64-redhat-linux/15/cc1plus -quiet -v -D_GNU_SOURCE /usr/share/cmake/Modules/CMakeCXXCompilerABI.cpp -quiet -dumpdir CMakeFiles/cmTC_ce048.dir/ -dumpbase CMakeCXXCompilerABI.cpp.cpp -dumpbase-ext .cpp -mtune=generic -march=x86-64 -version -o /tmp/ccSjWDKe.s]
         ignore line: [GNU C++17 (GCC) version 15.2.1 20250808 (Red Hat 15.2.1-1) (x86_64-redhat-linux)]
         ignore line: [	compiled by GNU C version 15.2.1 20250808 (Red Hat 15.2.1-1)  GMP version 6.3.0  MPFR version 4.2.2  MPC version 1.3.1  isl version isl-0.24-GMP]
         ignore line: []
@@ -443,14 +443,14 @@ events:
         ignore line: [ /usr/include]
         ignore line: [End of search list.]
         ignore line: [Compiler executable checksum: 7616bbd86ab77c360311eb36cf6ebbe2]
-        ignore line: [COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_4d898.dir/CMakeCXXCompilerABI.cpp.o' '-c' '-shared-libgcc' '-mtune=generic' '-march=x86-64' '-dumpdir' 'CMakeFiles/cmTC_4d898.dir/']
-        ignore line: [ as -v --64 -o CMakeFiles/cmTC_4d898.dir/CMakeCXXCompilerABI.cpp.o /tmp/cc7LggJk.s]
+        ignore line: [COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_ce048.dir/CMakeCXXCompilerABI.cpp.o' '-c' '-shared-libgcc' '-mtune=generic' '-march=x86-64' '-dumpdir' 'CMakeFiles/cmTC_ce048.dir/']
+        ignore line: [ as -v --64 -o CMakeFiles/cmTC_ce048.dir/CMakeCXXCompilerABI.cpp.o /tmp/ccSjWDKe.s]
         ignore line: [GNU assembler version 2.44 (x86_64-redhat-linux) using BFD version version 2.44-6.fc42]
         ignore line: [COMPILER_PATH=/usr/libexec/gcc/x86_64-redhat-linux/15/:/usr/libexec/gcc/x86_64-redhat-linux/15/:/usr/libexec/gcc/x86_64-redhat-linux/:/usr/lib/gcc/x86_64-redhat-linux/15/:/usr/lib/gcc/x86_64-redhat-linux/]
         ignore line: [LIBRARY_PATH=/usr/lib/gcc/x86_64-redhat-linux/15/:/usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/:/lib/../lib64/:/usr/lib/../lib64/:/usr/lib/gcc/x86_64-redhat-linux/15/../../../:/lib/:/usr/lib/]
-        ignore line: [COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_4d898.dir/CMakeCXXCompilerABI.cpp.o' '-c' '-shared-libgcc' '-mtune=generic' '-march=x86-64' '-dumpdir' 'CMakeFiles/cmTC_4d898.dir/CMakeCXXCompilerABI.cpp.']
-        ignore line: [Linking CXX executable cmTC_4d898]
-        ignore line: [/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_4d898.dir/link.txt --verbose=1]
+        ignore line: [COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_ce048.dir/CMakeCXXCompilerABI.cpp.o' '-c' '-shared-libgcc' '-mtune=generic' '-march=x86-64' '-dumpdir' 'CMakeFiles/cmTC_ce048.dir/CMakeCXXCompilerABI.cpp.']
+        ignore line: [Linking CXX executable cmTC_ce048]
+        ignore line: [/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_ce048.dir/link.txt --verbose=1]
         ignore line: [Using built-in specs.]
         ignore line: [COLLECT_GCC=/usr/bin/c++]
         ignore line: [COLLECT_LTO_WRAPPER=/usr/libexec/gcc/x86_64-redhat-linux/15/lto-wrapper]
@@ -463,13 +463,13 @@ events:
         ignore line: [gcc version 15.2.1 20250808 (Red Hat 15.2.1-1) (GCC) ]
         ignore line: [COMPILER_PATH=/usr/libexec/gcc/x86_64-redhat-linux/15/:/usr/libexec/gcc/x86_64-redhat-linux/15/:/usr/libexec/gcc/x86_64-redhat-linux/:/usr/lib/gcc/x86_64-redhat-linux/15/:/usr/lib/gcc/x86_64-redhat-linux/]
         ignore line: [LIBRARY_PATH=/usr/lib/gcc/x86_64-redhat-linux/15/:/usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/:/lib/../lib64/:/usr/lib/../lib64/:/usr/lib/gcc/x86_64-redhat-linux/15/../../../:/lib/:/usr/lib/]
-        ignore line: [COLLECT_GCC_OPTIONS='-v' '-o' 'cmTC_4d898' '-foffload-options=-l_GCC_stdc++' '-foffload-options=-l_GCC_m' '-shared-libgcc' '-mtune=generic' '-march=x86-64' '-dumpdir' 'cmTC_4d898.']
-        link line: [ /usr/libexec/gcc/x86_64-redhat-linux/15/collect2 -plugin /usr/libexec/gcc/x86_64-redhat-linux/15/liblto_plugin.so -plugin-opt=/usr/libexec/gcc/x86_64-redhat-linux/15/lto-wrapper -plugin-opt=-fresolution=/tmp/ccBGdlOL.res -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc --build-id --no-add-needed --eh-frame-hdr --hash-style=gnu -m elf_x86_64 -dynamic-linker /lib64/ld-linux-x86-64.so.2 -o cmTC_4d898 /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crt1.o /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crti.o /usr/lib/gcc/x86_64-redhat-linux/15/crtbegin.o -L/usr/lib/gcc/x86_64-redhat-linux/15 -L/usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64 -L/lib/../lib64 -L/usr/lib/../lib64 -L/usr/lib/gcc/x86_64-redhat-linux/15/../../.. -L/lib -L/usr/lib -v CMakeFiles/cmTC_4d898.dir/CMakeCXXCompilerABI.cpp.o -lstdc++ -lm -lgcc_s -lgcc -lc -lgcc_s -lgcc /usr/lib/gcc/x86_64-redhat-linux/15/crtend.o /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crtn.o]
+        ignore line: [COLLECT_GCC_OPTIONS='-v' '-o' 'cmTC_ce048' '-foffload-options=-l_GCC_stdc++' '-foffload-options=-l_GCC_m' '-shared-libgcc' '-mtune=generic' '-march=x86-64' '-dumpdir' 'cmTC_ce048.']
+        link line: [ /usr/libexec/gcc/x86_64-redhat-linux/15/collect2 -plugin /usr/libexec/gcc/x86_64-redhat-linux/15/liblto_plugin.so -plugin-opt=/usr/libexec/gcc/x86_64-redhat-linux/15/lto-wrapper -plugin-opt=-fresolution=/tmp/cclAQR76.res -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc --build-id --no-add-needed --eh-frame-hdr --hash-style=gnu -m elf_x86_64 -dynamic-linker /lib64/ld-linux-x86-64.so.2 -o cmTC_ce048 /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crt1.o /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crti.o /usr/lib/gcc/x86_64-redhat-linux/15/crtbegin.o -L/usr/lib/gcc/x86_64-redhat-linux/15 -L/usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64 -L/lib/../lib64 -L/usr/lib/../lib64 -L/usr/lib/gcc/x86_64-redhat-linux/15/../../.. -L/lib -L/usr/lib -v CMakeFiles/cmTC_ce048.dir/CMakeCXXCompilerABI.cpp.o -lstdc++ -lm -lgcc_s -lgcc -lc -lgcc_s -lgcc /usr/lib/gcc/x86_64-redhat-linux/15/crtend.o /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crtn.o]
           arg [/usr/libexec/gcc/x86_64-redhat-linux/15/collect2] ==> ignore
           arg [-plugin] ==> ignore
           arg [/usr/libexec/gcc/x86_64-redhat-linux/15/liblto_plugin.so] ==> ignore
           arg [-plugin-opt=/usr/libexec/gcc/x86_64-redhat-linux/15/lto-wrapper] ==> ignore
-          arg [-plugin-opt=-fresolution=/tmp/ccBGdlOL.res] ==> ignore
+          arg [-plugin-opt=-fresolution=/tmp/cclAQR76.res] ==> ignore
           arg [-plugin-opt=-pass-through=-lgcc_s] ==> ignore
           arg [-plugin-opt=-pass-through=-lgcc] ==> ignore
           arg [-plugin-opt=-pass-through=-lc] ==> ignore
@@ -484,7 +484,7 @@ events:
           arg [-dynamic-linker] ==> ignore
           arg [/lib64/ld-linux-x86-64.so.2] ==> ignore
           arg [-o] ==> ignore
-          arg [cmTC_4d898] ==> ignore
+          arg [cmTC_ce048] ==> ignore
           arg [/usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crt1.o] ==> obj [/usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crt1.o]
           arg [/usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crti.o] ==> obj [/usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crti.o]
           arg [/usr/lib/gcc/x86_64-redhat-linux/15/crtbegin.o] ==> obj [/usr/lib/gcc/x86_64-redhat-linux/15/crtbegin.o]
@@ -496,7 +496,7 @@ events:
           arg [-L/lib] ==> dir [/lib]
           arg [-L/usr/lib] ==> dir [/usr/lib]
           arg [-v] ==> ignore
-          arg [CMakeFiles/cmTC_4d898.dir/CMakeCXXCompilerABI.cpp.o] ==> ignore
+          arg [CMakeFiles/cmTC_ce048.dir/CMakeCXXCompilerABI.cpp.o] ==> ignore
           arg [-lstdc++] ==> lib [stdc++]
           arg [-lm] ==> lib [m]
           arg [-lgcc_s] ==> lib [gcc_s]
@@ -507,7 +507,7 @@ events:
           arg [/usr/lib/gcc/x86_64-redhat-linux/15/crtend.o] ==> obj [/usr/lib/gcc/x86_64-redhat-linux/15/crtend.o]
           arg [/usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crtn.o] ==> obj [/usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crtn.o]
         ignore line: [collect2 version 15.2.1 20250808 (Red Hat 15.2.1-1)]
-        ignore line: [/usr/bin/ld -plugin /usr/libexec/gcc/x86_64-redhat-linux/15/liblto_plugin.so -plugin-opt=/usr/libexec/gcc/x86_64-redhat-linux/15/lto-wrapper -plugin-opt=-fresolution=/tmp/ccBGdlOL.res -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc --build-id --no-add-needed --eh-frame-hdr --hash-style=gnu -m elf_x86_64 -dynamic-linker /lib64/ld-linux-x86-64.so.2 -o cmTC_4d898 /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crt1.o /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crti.o /usr/lib/gcc/x86_64-redhat-linux/15/crtbegin.o -L/usr/lib/gcc/x86_64-redhat-linux/15 -L/usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64 -L/lib/../lib64 -L/usr/lib/../lib64 -L/usr/lib/gcc/x86_64-redhat-linux/15/../../.. -L/lib -L/usr/lib -v CMakeFiles/cmTC_4d898.dir/CMakeCXXCompilerABI.cpp.o -lstdc++ -lm -lgcc_s -lgcc -lc -lgcc_s -lgcc /usr/lib/gcc/x86_64-redhat-linux/15/crtend.o /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crtn.o]
+        ignore line: [/usr/bin/ld -plugin /usr/libexec/gcc/x86_64-redhat-linux/15/liblto_plugin.so -plugin-opt=/usr/libexec/gcc/x86_64-redhat-linux/15/lto-wrapper -plugin-opt=-fresolution=/tmp/cclAQR76.res -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc --build-id --no-add-needed --eh-frame-hdr --hash-style=gnu -m elf_x86_64 -dynamic-linker /lib64/ld-linux-x86-64.so.2 -o cmTC_ce048 /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crt1.o /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crti.o /usr/lib/gcc/x86_64-redhat-linux/15/crtbegin.o -L/usr/lib/gcc/x86_64-redhat-linux/15 -L/usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64 -L/lib/../lib64 -L/usr/lib/../lib64 -L/usr/lib/gcc/x86_64-redhat-linux/15/../../.. -L/lib -L/usr/lib -v CMakeFiles/cmTC_ce048.dir/CMakeCXXCompilerABI.cpp.o -lstdc++ -lm -lgcc_s -lgcc -lc -lgcc_s -lgcc /usr/lib/gcc/x86_64-redhat-linux/15/crtend.o /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crtn.o]
         linker tool for 'CXX': /usr/bin/ld
         collapse obj [/usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crt1.o] ==> [/usr/lib64/crt1.o]
         collapse obj [/usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crti.o] ==> [/usr/lib64/crti.o]
@@ -546,8 +546,8 @@ events:
     checks:
       - "Looking for CL_VERSION_3_0"
     directories:
-      source: "/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-w6Agci"
-      binary: "/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-w6Agci"
+      source: "/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-KDH40N"
+      binary: "/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-KDH40N"
     cmakeVariables:
       CMAKE_C_FLAGS: ""
       CMAKE_C_FLAGS_DEBUG: "-g"
@@ -557,22 +557,22 @@ events:
       variable: "OPENCL_VERSION_3_0"
       cached: true
       stdout: |
-        Change Dir: '/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-w6Agci'
+        Change Dir: '/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-KDH40N'
         
-        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_198e2/fast
-        /usr/bin/gmake  -f CMakeFiles/cmTC_198e2.dir/build.make CMakeFiles/cmTC_198e2.dir/build
-        gmake[1]: Entering directory '/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-w6Agci'
-        Building C object CMakeFiles/cmTC_198e2.dir/CheckSymbolExists.c.o
-        /usr/bin/cc   -fPIE -o CMakeFiles/cmTC_198e2.dir/CheckSymbolExists.c.o -c /home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-w6Agci/CheckSymbolExists.c
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_43056/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_43056.dir/build.make CMakeFiles/cmTC_43056.dir/build
+        gmake[1]: Entering directory '/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-KDH40N'
+        Building C object CMakeFiles/cmTC_43056.dir/CheckSymbolExists.c.o
+        /usr/bin/cc   -fPIE -o CMakeFiles/cmTC_43056.dir/CheckSymbolExists.c.o -c /home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-KDH40N/CheckSymbolExists.c
         In file included from /usr/include/CL/cl.h:20,
-                         from /home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-w6Agci/CheckSymbolExists.c:2:
+                         from /home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-KDH40N/CheckSymbolExists.c:2:
         /usr/include/CL/cl_version.h:22:9: note: ‘#pragma message: cl_version.h: CL_TARGET_OPENCL_VERSION is not defined. Defaulting to 300 (OpenCL 3.0)’
            22 | #pragma message("cl_version.h: CL_TARGET_OPENCL_VERSION is not defined. Defaulting to 300 (OpenCL 3.0)")
               |         ^~~~~~~
-        Linking C executable cmTC_198e2
-        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_198e2.dir/link.txt --verbose=1
-        /usr/bin/cc CMakeFiles/cmTC_198e2.dir/CheckSymbolExists.c.o -o cmTC_198e2
-        gmake[1]: Leaving directory '/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-w6Agci'
+        Linking C executable cmTC_43056
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_43056.dir/link.txt --verbose=1
+        /usr/bin/cc CMakeFiles/cmTC_43056.dir/CheckSymbolExists.c.o -o cmTC_43056
+        gmake[1]: Leaving directory '/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-KDH40N'
         
       exitCode: 0
   -
@@ -589,8 +589,8 @@ events:
     checks:
       - "Performing Test CMAKE_HAVE_LIBC_PTHREAD"
     directories:
-      source: "/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-OerT2G"
-      binary: "/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-OerT2G"
+      source: "/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-BLxmXp"
+      binary: "/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-BLxmXp"
     cmakeVariables:
       CMAKE_C_FLAGS: ""
       CMAKE_C_FLAGS_DEBUG: "-g"
@@ -600,17 +600,17 @@ events:
       variable: "CMAKE_HAVE_LIBC_PTHREAD"
       cached: true
       stdout: |
-        Change Dir: '/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-OerT2G'
+        Change Dir: '/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-BLxmXp'
         
-        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_26562/fast
-        /usr/bin/gmake  -f CMakeFiles/cmTC_26562.dir/build.make CMakeFiles/cmTC_26562.dir/build
-        gmake[1]: Entering directory '/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-OerT2G'
-        Building C object CMakeFiles/cmTC_26562.dir/src.c.o
-        /usr/bin/cc -DCMAKE_HAVE_LIBC_PTHREAD  -fPIE -o CMakeFiles/cmTC_26562.dir/src.c.o -c /home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-OerT2G/src.c
-        Linking C executable cmTC_26562
-        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_26562.dir/link.txt --verbose=1
-        /usr/bin/cc CMakeFiles/cmTC_26562.dir/src.c.o -o cmTC_26562
-        gmake[1]: Leaving directory '/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-OerT2G'
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_5c6b1/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_5c6b1.dir/build.make CMakeFiles/cmTC_5c6b1.dir/build
+        gmake[1]: Entering directory '/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-BLxmXp'
+        Building C object CMakeFiles/cmTC_5c6b1.dir/src.c.o
+        /usr/bin/cc -DCMAKE_HAVE_LIBC_PTHREAD  -fPIE -o CMakeFiles/cmTC_5c6b1.dir/src.c.o -c /home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-BLxmXp/src.c
+        Linking C executable cmTC_5c6b1
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_5c6b1.dir/link.txt --verbose=1
+        /usr/bin/cc CMakeFiles/cmTC_5c6b1.dir/src.c.o -o cmTC_5c6b1
+        gmake[1]: Leaving directory '/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-BLxmXp'
         
       exitCode: 0
   -
@@ -662,7 +662,7 @@ events:
       Candidate multilib: 32;@m32
       Selected multilib: .;@m64
       Found HIP installation: /usr, version 6.4.43484
-       "/usr/lib64/rocm/llvm/bin/clang-19" -cc1 -triple amdgcn-amd-amdhsa -aux-triple x86_64-redhat-linux-gnu -Werror=atomic-alignment -emit-obj -dumpdir a- -disable-free -clear-ast-before-backend -disable-llvm-verifier -discard-value-names -main-file-name CMakeHIPCompilerId.hip -mrelocation-model pic -pic-level 2 -fhalf-no-semantic-interposition -mframe-pointer=all -fno-rounding-math -mconstructor-aliases -aux-target-cpu x86-64 -fcuda-is-device -mllvm -amdgpu-internalize-symbols -fcuda-allow-variadic-functions -fvisibility=hidden -fapply-global-visibility-to-externs -mlink-builtin-bitcode /usr/lib64/rocm/llvm/lib/clang/19/amdgcn/bitcode/hip.bc -mlink-builtin-bitcode /usr/lib64/rocm/llvm/lib/clang/19/amdgcn/bitcode/ocml.bc -mlink-builtin-bitcode /usr/lib64/rocm/llvm/lib/clang/19/amdgcn/bitcode/ockl.bc -mlink-builtin-bitcode /usr/lib64/rocm/llvm/lib/clang/19/amdgcn/bitcode/oclc_daz_opt_off.bc -mlink-builtin-bitcode /usr/lib64/rocm/llvm/lib/clang/19/amdgcn/bitcode/oclc_unsafe_math_off.bc -mlink-builtin-bitcode /usr/lib64/rocm/llvm/lib/clang/19/amdgcn/bitcode/oclc_finite_only_off.bc -mlink-builtin-bitcode /usr/lib64/rocm/llvm/lib/clang/19/amdgcn/bitcode/oclc_correctly_rounded_sqrt_on.bc -mlink-builtin-bitcode /usr/lib64/rocm/llvm/lib/clang/19/amdgcn/bitcode/oclc_wavefrontsize64_on.bc -mlink-builtin-bitcode /usr/lib64/rocm/llvm/lib/clang/19/amdgcn/bitcode/oclc_isa_version_906.bc -mlink-builtin-bitcode /usr/lib64/rocm/llvm/lib/clang/19/amdgcn/bitcode/oclc_abi_version_600.bc -target-cpu gfx906 -debugger-tuning=gdb -fdebug-compilation-dir=/home/naoki/Development/GPUBench/build/CMakeFiles/3.31.6/CompilerIdHIP -v -resource-dir /usr/lib64/rocm/llvm/lib/clang/19 -internal-isystem /usr/lib64/rocm/llvm/lib/clang/19/include/cuda_wrappers -idirafter /usr/include -include __clang_hip_runtime_wrapper.h -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15 -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15/x86_64-redhat-linux -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15/backward -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15 -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15/x86_64-redhat-linux -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15/backward -internal-isystem /usr/lib64/rocm/llvm/lib/clang/19/include -internal-isystem /usr/local/include -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../x86_64-redhat-linux/include -internal-externc-isystem /include -internal-externc-isystem /usr/include -internal-isystem /usr/lib64/rocm/llvm/lib/clang/19/include -internal-isystem /usr/local/include -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../x86_64-redhat-linux/include -internal-externc-isystem /include -internal-externc-isystem /usr/include -fdeprecated-macro -fno-autolink -ferror-limit 19 -fhip-new-launch-api -fgnuc-version=4.2.1 -fskip-odr-check-in-gmf -fcxx-exceptions -fexceptions -cuid=23d2243eb75221 -fcuda-allow-variadic-functions -faddrsig -D__GCC_HAVE_DWARF2_CFI_ASM=1 -o /tmp/CMakeHIPCompilerId-gfx906-bf634e.o -x hip CMakeHIPCompilerId.hip
+       "/usr/lib64/rocm/llvm/bin/clang-19" -cc1 -triple amdgcn-amd-amdhsa -aux-triple x86_64-redhat-linux-gnu -Werror=atomic-alignment -emit-obj -dumpdir a- -disable-free -clear-ast-before-backend -disable-llvm-verifier -discard-value-names -main-file-name CMakeHIPCompilerId.hip -mrelocation-model pic -pic-level 2 -fhalf-no-semantic-interposition -mframe-pointer=all -fno-rounding-math -mconstructor-aliases -aux-target-cpu x86-64 -fcuda-is-device -mllvm -amdgpu-internalize-symbols -fcuda-allow-variadic-functions -fvisibility=hidden -fapply-global-visibility-to-externs -mlink-builtin-bitcode /usr/lib64/rocm/llvm/lib/clang/19/amdgcn/bitcode/hip.bc -mlink-builtin-bitcode /usr/lib64/rocm/llvm/lib/clang/19/amdgcn/bitcode/ocml.bc -mlink-builtin-bitcode /usr/lib64/rocm/llvm/lib/clang/19/amdgcn/bitcode/ockl.bc -mlink-builtin-bitcode /usr/lib64/rocm/llvm/lib/clang/19/amdgcn/bitcode/oclc_daz_opt_off.bc -mlink-builtin-bitcode /usr/lib64/rocm/llvm/lib/clang/19/amdgcn/bitcode/oclc_unsafe_math_off.bc -mlink-builtin-bitcode /usr/lib64/rocm/llvm/lib/clang/19/amdgcn/bitcode/oclc_finite_only_off.bc -mlink-builtin-bitcode /usr/lib64/rocm/llvm/lib/clang/19/amdgcn/bitcode/oclc_correctly_rounded_sqrt_on.bc -mlink-builtin-bitcode /usr/lib64/rocm/llvm/lib/clang/19/amdgcn/bitcode/oclc_wavefrontsize64_on.bc -mlink-builtin-bitcode /usr/lib64/rocm/llvm/lib/clang/19/amdgcn/bitcode/oclc_isa_version_906.bc -mlink-builtin-bitcode /usr/lib64/rocm/llvm/lib/clang/19/amdgcn/bitcode/oclc_abi_version_600.bc -target-cpu gfx906 -debugger-tuning=gdb -fdebug-compilation-dir=/home/naoki/Development/GPUBench/build/CMakeFiles/3.31.6/CompilerIdHIP -v -resource-dir /usr/lib64/rocm/llvm/lib/clang/19 -internal-isystem /usr/lib64/rocm/llvm/lib/clang/19/include/cuda_wrappers -idirafter /usr/include -include __clang_hip_runtime_wrapper.h -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15 -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15/x86_64-redhat-linux -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15/backward -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15 -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15/x86_64-redhat-linux -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15/backward -internal-isystem /usr/lib64/rocm/llvm/lib/clang/19/include -internal-isystem /usr/local/include -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../x86_64-redhat-linux/include -internal-externc-isystem /include -internal-externc-isystem /usr/include -internal-isystem /usr/lib64/rocm/llvm/lib/clang/19/include -internal-isystem /usr/local/include -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../x86_64-redhat-linux/include -internal-externc-isystem /include -internal-externc-isystem /usr/include -fdeprecated-macro -fno-autolink -ferror-limit 19 -fhip-new-launch-api -fgnuc-version=4.2.1 -fskip-odr-check-in-gmf -fcxx-exceptions -fexceptions -cuid=23d2243eb75221 -fcuda-allow-variadic-functions -faddrsig -D__GCC_HAVE_DWARF2_CFI_ASM=1 -o /tmp/CMakeHIPCompilerId-gfx906-793860.o -x hip CMakeHIPCompilerId.hip
       clang -cc1 version 19.0.0git based upon LLVM 19.0.0git default target x86_64-redhat-linux-gnu
       ignoring nonexistent directory "/usr/lib/gcc/x86_64-redhat-linux/15/../../../../x86_64-redhat-linux/include"
       ignoring nonexistent directory "/include"
@@ -688,9 +688,9 @@ events:
        /usr/local/include
        /usr/include
       End of search list.
-       "/usr/lib64/rocm/llvm/bin/lld" -flavor gnu -m elf64_amdgpu --no-undefined -shared -plugin-opt=-amdgpu-internalize-symbols -plugin-opt=mcpu=gfx906 --whole-archive -o /tmp/CMakeHIPCompilerId-gfx906-e1e283.out /tmp/CMakeHIPCompilerId-gfx906-bf634e.o --no-whole-archive
-       "/usr/lib64/rocm/llvm/bin/clang-offload-bundler" -type=o -bundle-align=4096 -targets=host-x86_64-unknown-linux-gnu,hipv4-amdgcn-amd-amdhsa--gfx906 -input=/dev/null -input=/tmp/CMakeHIPCompilerId-gfx906-e1e283.out -output=/tmp/CMakeHIPCompilerId-22a450.hipfb -verbose
-       "/usr/lib64/rocm/llvm/bin/clang-19" -cc1 -triple x86_64-redhat-linux-gnu -aux-triple amdgcn-amd-amdhsa -emit-obj -dumpdir a- -disable-free -clear-ast-before-backend -disable-llvm-verifier -discard-value-names -main-file-name CMakeHIPCompilerId.hip -mrelocation-model pic -pic-level 2 -pic-is-pie -mframe-pointer=all -fmath-errno -fno-rounding-math -mconstructor-aliases -funwind-tables=2 -target-cpu x86-64 -tune-cpu generic -debugger-tuning=gdb -fdebug-compilation-dir=/home/naoki/Development/GPUBench/build/CMakeFiles/3.31.6/CompilerIdHIP -v -fcoverage-compilation-dir=/home/naoki/Development/GPUBench/build/CMakeFiles/3.31.6/CompilerIdHIP -resource-dir /usr/lib64/rocm/llvm/lib/clang/19 -internal-isystem /usr/lib64/rocm/llvm/lib/clang/19/include/cuda_wrappers -idirafter /usr/include -include __clang_hip_runtime_wrapper.h -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15 -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15/x86_64-redhat-linux -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15/backward -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15 -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15/x86_64-redhat-linux -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15/backward -internal-isystem /usr/lib64/rocm/llvm/lib/clang/19/include -internal-isystem /usr/local/include -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../x86_64-redhat-linux/include -internal-externc-isystem /include -internal-externc-isystem /usr/include -internal-isystem /usr/lib64/rocm/llvm/lib/clang/19/include -internal-isystem /usr/local/include -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../x86_64-redhat-linux/include -internal-externc-isystem /include -internal-externc-isystem /usr/include -fdeprecated-macro -ferror-limit 19 -fhip-new-launch-api -fgnuc-version=4.2.1 -fskip-odr-check-in-gmf -fcxx-exceptions -fexceptions -fcuda-include-gpubinary /tmp/CMakeHIPCompilerId-22a450.hipfb -cuid=23d2243eb75221 -fcuda-allow-variadic-functions -faddrsig -D__GCC_HAVE_DWARF2_CFI_ASM=1 -o /tmp/CMakeHIPCompilerId-7ceff5.o -x hip CMakeHIPCompilerId.hip
+       "/usr/lib64/rocm/llvm/bin/lld" -flavor gnu -m elf64_amdgpu --no-undefined -shared -plugin-opt=-amdgpu-internalize-symbols -plugin-opt=mcpu=gfx906 --whole-archive -o /tmp/CMakeHIPCompilerId-gfx906-dabc6c.out /tmp/CMakeHIPCompilerId-gfx906-793860.o --no-whole-archive
+       "/usr/lib64/rocm/llvm/bin/clang-offload-bundler" -type=o -bundle-align=4096 -targets=host-x86_64-unknown-linux-gnu,hipv4-amdgcn-amd-amdhsa--gfx906 -input=/dev/null -input=/tmp/CMakeHIPCompilerId-gfx906-dabc6c.out -output=/tmp/CMakeHIPCompilerId-1b69a9.hipfb -verbose
+       "/usr/lib64/rocm/llvm/bin/clang-19" -cc1 -triple x86_64-redhat-linux-gnu -aux-triple amdgcn-amd-amdhsa -emit-obj -dumpdir a- -disable-free -clear-ast-before-backend -disable-llvm-verifier -discard-value-names -main-file-name CMakeHIPCompilerId.hip -mrelocation-model pic -pic-level 2 -pic-is-pie -mframe-pointer=all -fmath-errno -fno-rounding-math -mconstructor-aliases -funwind-tables=2 -target-cpu x86-64 -tune-cpu generic -debugger-tuning=gdb -fdebug-compilation-dir=/home/naoki/Development/GPUBench/build/CMakeFiles/3.31.6/CompilerIdHIP -v -fcoverage-compilation-dir=/home/naoki/Development/GPUBench/build/CMakeFiles/3.31.6/CompilerIdHIP -resource-dir /usr/lib64/rocm/llvm/lib/clang/19 -internal-isystem /usr/lib64/rocm/llvm/lib/clang/19/include/cuda_wrappers -idirafter /usr/include -include __clang_hip_runtime_wrapper.h -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15 -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15/x86_64-redhat-linux -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15/backward -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15 -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15/x86_64-redhat-linux -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15/backward -internal-isystem /usr/lib64/rocm/llvm/lib/clang/19/include -internal-isystem /usr/local/include -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../x86_64-redhat-linux/include -internal-externc-isystem /include -internal-externc-isystem /usr/include -internal-isystem /usr/lib64/rocm/llvm/lib/clang/19/include -internal-isystem /usr/local/include -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../x86_64-redhat-linux/include -internal-externc-isystem /include -internal-externc-isystem /usr/include -fdeprecated-macro -ferror-limit 19 -fhip-new-launch-api -fgnuc-version=4.2.1 -fskip-odr-check-in-gmf -fcxx-exceptions -fexceptions -fcuda-include-gpubinary /tmp/CMakeHIPCompilerId-1b69a9.hipfb -cuid=23d2243eb75221 -fcuda-allow-variadic-functions -faddrsig -D__GCC_HAVE_DWARF2_CFI_ASM=1 -o /tmp/CMakeHIPCompilerId-2ec4f0.o -x hip CMakeHIPCompilerId.hip
       clang -cc1 version 19.0.0git based upon LLVM 19.0.0git default target x86_64-redhat-linux-gnu
       ignoring nonexistent directory "/usr/lib/gcc/x86_64-redhat-linux/15/../../../../x86_64-redhat-linux/include"
       ignoring nonexistent directory "/include"
@@ -713,7 +713,7 @@ events:
        /usr/local/include
        /usr/include
       End of search list.
-       "/usr/lib64/rocm/llvm/bin/ld.lld" --hash-style=gnu --build-id --eh-frame-hdr -m elf_x86_64 -pie -dynamic-linker /lib64/ld-linux-x86-64.so.2 -o a.out /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/Scrt1.o /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crti.o /usr/lib/gcc/x86_64-redhat-linux/15/crtbeginS.o -L/usr/lib64/rocm/llvm/bin/../lib -L/usr/lib/gcc/x86_64-redhat-linux/15 -L/usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64 -L/lib/../lib64 -L/usr/lib/../lib64 -L/lib -L/usr/lib /tmp/CMakeHIPCompilerId-7ceff5.o -L/usr/lib -lamdhip64 -lstdc++ -lm -lgcc_s -lgcc -lc -lgcc_s -lgcc /usr/lib/gcc/x86_64-redhat-linux/15/crtendS.o /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crtn.o
+       "/usr/lib64/rocm/llvm/bin/ld.lld" --hash-style=gnu --build-id --eh-frame-hdr -m elf_x86_64 -pie -dynamic-linker /lib64/ld-linux-x86-64.so.2 -o a.out /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/Scrt1.o /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crti.o /usr/lib/gcc/x86_64-redhat-linux/15/crtbeginS.o -L/usr/lib64/rocm/llvm/bin/../lib -L/usr/lib/gcc/x86_64-redhat-linux/15 -L/usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64 -L/lib/../lib64 -L/usr/lib/../lib64 -L/lib -L/usr/lib /tmp/CMakeHIPCompilerId-2ec4f0.o -L/usr/lib -lamdhip64 -lstdc++ -lm -lgcc_s -lgcc -lc -lgcc_s -lgcc /usr/lib/gcc/x86_64-redhat-linux/15/crtendS.o /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crtn.o
       
       
       Compilation of the HIP compiler identification source "CMakeHIPCompilerId.hip" produced "a.out"
@@ -742,7 +742,7 @@ events:
         ignore line: [Selected multilib: .]
         ignore line: [@m64]
         ignore line: [Found HIP installation: /usr  version 6.4.43484]
-        ignore line: [ "/usr/lib64/rocm/llvm/bin/clang-19" -cc1 -triple amdgcn-amd-amdhsa -aux-triple x86_64-redhat-linux-gnu -Werror=atomic-alignment -emit-obj -dumpdir a- -disable-free -clear-ast-before-backend -disable-llvm-verifier -discard-value-names -main-file-name CMakeHIPCompilerId.hip -mrelocation-model pic -pic-level 2 -fhalf-no-semantic-interposition -mframe-pointer=all -fno-rounding-math -mconstructor-aliases -aux-target-cpu x86-64 -fcuda-is-device -mllvm -amdgpu-internalize-symbols -fcuda-allow-variadic-functions -fvisibility=hidden -fapply-global-visibility-to-externs -mlink-builtin-bitcode /usr/lib64/rocm/llvm/lib/clang/19/amdgcn/bitcode/hip.bc -mlink-builtin-bitcode /usr/lib64/rocm/llvm/lib/clang/19/amdgcn/bitcode/ocml.bc -mlink-builtin-bitcode /usr/lib64/rocm/llvm/lib/clang/19/amdgcn/bitcode/ockl.bc -mlink-builtin-bitcode /usr/lib64/rocm/llvm/lib/clang/19/amdgcn/bitcode/oclc_daz_opt_off.bc -mlink-builtin-bitcode /usr/lib64/rocm/llvm/lib/clang/19/amdgcn/bitcode/oclc_unsafe_math_off.bc -mlink-builtin-bitcode /usr/lib64/rocm/llvm/lib/clang/19/amdgcn/bitcode/oclc_finite_only_off.bc -mlink-builtin-bitcode /usr/lib64/rocm/llvm/lib/clang/19/amdgcn/bitcode/oclc_correctly_rounded_sqrt_on.bc -mlink-builtin-bitcode /usr/lib64/rocm/llvm/lib/clang/19/amdgcn/bitcode/oclc_wavefrontsize64_on.bc -mlink-builtin-bitcode /usr/lib64/rocm/llvm/lib/clang/19/amdgcn/bitcode/oclc_isa_version_906.bc -mlink-builtin-bitcode /usr/lib64/rocm/llvm/lib/clang/19/amdgcn/bitcode/oclc_abi_version_600.bc -target-cpu gfx906 -debugger-tuning=gdb -fdebug-compilation-dir=/home/naoki/Development/GPUBench/build/CMakeFiles/3.31.6/CompilerIdHIP -v -resource-dir /usr/lib64/rocm/llvm/lib/clang/19 -internal-isystem /usr/lib64/rocm/llvm/lib/clang/19/include/cuda_wrappers -idirafter /usr/include -include __clang_hip_runtime_wrapper.h -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15 -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15/x86_64-redhat-linux -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15/backward -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15 -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15/x86_64-redhat-linux -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15/backward -internal-isystem /usr/lib64/rocm/llvm/lib/clang/19/include -internal-isystem /usr/local/include -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../x86_64-redhat-linux/include -internal-externc-isystem /include -internal-externc-isystem /usr/include -internal-isystem /usr/lib64/rocm/llvm/lib/clang/19/include -internal-isystem /usr/local/include -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../x86_64-redhat-linux/include -internal-externc-isystem /include -internal-externc-isystem /usr/include -fdeprecated-macro -fno-autolink -ferror-limit 19 -fhip-new-launch-api -fgnuc-version=4.2.1 -fskip-odr-check-in-gmf -fcxx-exceptions -fexceptions -cuid=23d2243eb75221 -fcuda-allow-variadic-functions -faddrsig -D__GCC_HAVE_DWARF2_CFI_ASM=1 -o /tmp/CMakeHIPCompilerId-gfx906-bf634e.o -x hip CMakeHIPCompilerId.hip]
+        ignore line: [ "/usr/lib64/rocm/llvm/bin/clang-19" -cc1 -triple amdgcn-amd-amdhsa -aux-triple x86_64-redhat-linux-gnu -Werror=atomic-alignment -emit-obj -dumpdir a- -disable-free -clear-ast-before-backend -disable-llvm-verifier -discard-value-names -main-file-name CMakeHIPCompilerId.hip -mrelocation-model pic -pic-level 2 -fhalf-no-semantic-interposition -mframe-pointer=all -fno-rounding-math -mconstructor-aliases -aux-target-cpu x86-64 -fcuda-is-device -mllvm -amdgpu-internalize-symbols -fcuda-allow-variadic-functions -fvisibility=hidden -fapply-global-visibility-to-externs -mlink-builtin-bitcode /usr/lib64/rocm/llvm/lib/clang/19/amdgcn/bitcode/hip.bc -mlink-builtin-bitcode /usr/lib64/rocm/llvm/lib/clang/19/amdgcn/bitcode/ocml.bc -mlink-builtin-bitcode /usr/lib64/rocm/llvm/lib/clang/19/amdgcn/bitcode/ockl.bc -mlink-builtin-bitcode /usr/lib64/rocm/llvm/lib/clang/19/amdgcn/bitcode/oclc_daz_opt_off.bc -mlink-builtin-bitcode /usr/lib64/rocm/llvm/lib/clang/19/amdgcn/bitcode/oclc_unsafe_math_off.bc -mlink-builtin-bitcode /usr/lib64/rocm/llvm/lib/clang/19/amdgcn/bitcode/oclc_finite_only_off.bc -mlink-builtin-bitcode /usr/lib64/rocm/llvm/lib/clang/19/amdgcn/bitcode/oclc_correctly_rounded_sqrt_on.bc -mlink-builtin-bitcode /usr/lib64/rocm/llvm/lib/clang/19/amdgcn/bitcode/oclc_wavefrontsize64_on.bc -mlink-builtin-bitcode /usr/lib64/rocm/llvm/lib/clang/19/amdgcn/bitcode/oclc_isa_version_906.bc -mlink-builtin-bitcode /usr/lib64/rocm/llvm/lib/clang/19/amdgcn/bitcode/oclc_abi_version_600.bc -target-cpu gfx906 -debugger-tuning=gdb -fdebug-compilation-dir=/home/naoki/Development/GPUBench/build/CMakeFiles/3.31.6/CompilerIdHIP -v -resource-dir /usr/lib64/rocm/llvm/lib/clang/19 -internal-isystem /usr/lib64/rocm/llvm/lib/clang/19/include/cuda_wrappers -idirafter /usr/include -include __clang_hip_runtime_wrapper.h -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15 -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15/x86_64-redhat-linux -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15/backward -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15 -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15/x86_64-redhat-linux -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15/backward -internal-isystem /usr/lib64/rocm/llvm/lib/clang/19/include -internal-isystem /usr/local/include -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../x86_64-redhat-linux/include -internal-externc-isystem /include -internal-externc-isystem /usr/include -internal-isystem /usr/lib64/rocm/llvm/lib/clang/19/include -internal-isystem /usr/local/include -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../x86_64-redhat-linux/include -internal-externc-isystem /include -internal-externc-isystem /usr/include -fdeprecated-macro -fno-autolink -ferror-limit 19 -fhip-new-launch-api -fgnuc-version=4.2.1 -fskip-odr-check-in-gmf -fcxx-exceptions -fexceptions -cuid=23d2243eb75221 -fcuda-allow-variadic-functions -faddrsig -D__GCC_HAVE_DWARF2_CFI_ASM=1 -o /tmp/CMakeHIPCompilerId-gfx906-793860.o -x hip CMakeHIPCompilerId.hip]
         ignore line: [clang -cc1 version 19.0.0git based upon LLVM 19.0.0git default target x86_64-redhat-linux-gnu]
         ignore line: [ignoring nonexistent directory "/usr/lib/gcc/x86_64-redhat-linux/15/../../../../x86_64-redhat-linux/include"]
         ignore line: [ignoring nonexistent directory "/include"]
@@ -768,9 +768,9 @@ events:
         ignore line: [ /usr/local/include]
         ignore line: [ /usr/include]
         ignore line: [End of search list.]
-        ignore line: [ "/usr/lib64/rocm/llvm/bin/lld" -flavor gnu -m elf64_amdgpu --no-undefined -shared -plugin-opt=-amdgpu-internalize-symbols -plugin-opt=mcpu=gfx906 --whole-archive -o /tmp/CMakeHIPCompilerId-gfx906-e1e283.out /tmp/CMakeHIPCompilerId-gfx906-bf634e.o --no-whole-archive]
-        ignore line: [ "/usr/lib64/rocm/llvm/bin/clang-offload-bundler" -type=o -bundle-align=4096 -targets=host-x86_64-unknown-linux-gnu hipv4-amdgcn-amd-amdhsa--gfx906 -input=/dev/null -input=/tmp/CMakeHIPCompilerId-gfx906-e1e283.out -output=/tmp/CMakeHIPCompilerId-22a450.hipfb -verbose]
-        ignore line: [ "/usr/lib64/rocm/llvm/bin/clang-19" -cc1 -triple x86_64-redhat-linux-gnu -aux-triple amdgcn-amd-amdhsa -emit-obj -dumpdir a- -disable-free -clear-ast-before-backend -disable-llvm-verifier -discard-value-names -main-file-name CMakeHIPCompilerId.hip -mrelocation-model pic -pic-level 2 -pic-is-pie -mframe-pointer=all -fmath-errno -fno-rounding-math -mconstructor-aliases -funwind-tables=2 -target-cpu x86-64 -tune-cpu generic -debugger-tuning=gdb -fdebug-compilation-dir=/home/naoki/Development/GPUBench/build/CMakeFiles/3.31.6/CompilerIdHIP -v -fcoverage-compilation-dir=/home/naoki/Development/GPUBench/build/CMakeFiles/3.31.6/CompilerIdHIP -resource-dir /usr/lib64/rocm/llvm/lib/clang/19 -internal-isystem /usr/lib64/rocm/llvm/lib/clang/19/include/cuda_wrappers -idirafter /usr/include -include __clang_hip_runtime_wrapper.h -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15 -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15/x86_64-redhat-linux -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15/backward -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15 -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15/x86_64-redhat-linux -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15/backward -internal-isystem /usr/lib64/rocm/llvm/lib/clang/19/include -internal-isystem /usr/local/include -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../x86_64-redhat-linux/include -internal-externc-isystem /include -internal-externc-isystem /usr/include -internal-isystem /usr/lib64/rocm/llvm/lib/clang/19/include -internal-isystem /usr/local/include -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../x86_64-redhat-linux/include -internal-externc-isystem /include -internal-externc-isystem /usr/include -fdeprecated-macro -ferror-limit 19 -fhip-new-launch-api -fgnuc-version=4.2.1 -fskip-odr-check-in-gmf -fcxx-exceptions -fexceptions -fcuda-include-gpubinary /tmp/CMakeHIPCompilerId-22a450.hipfb -cuid=23d2243eb75221 -fcuda-allow-variadic-functions -faddrsig -D__GCC_HAVE_DWARF2_CFI_ASM=1 -o /tmp/CMakeHIPCompilerId-7ceff5.o -x hip CMakeHIPCompilerId.hip]
+        ignore line: [ "/usr/lib64/rocm/llvm/bin/lld" -flavor gnu -m elf64_amdgpu --no-undefined -shared -plugin-opt=-amdgpu-internalize-symbols -plugin-opt=mcpu=gfx906 --whole-archive -o /tmp/CMakeHIPCompilerId-gfx906-dabc6c.out /tmp/CMakeHIPCompilerId-gfx906-793860.o --no-whole-archive]
+        ignore line: [ "/usr/lib64/rocm/llvm/bin/clang-offload-bundler" -type=o -bundle-align=4096 -targets=host-x86_64-unknown-linux-gnu hipv4-amdgcn-amd-amdhsa--gfx906 -input=/dev/null -input=/tmp/CMakeHIPCompilerId-gfx906-dabc6c.out -output=/tmp/CMakeHIPCompilerId-1b69a9.hipfb -verbose]
+        ignore line: [ "/usr/lib64/rocm/llvm/bin/clang-19" -cc1 -triple x86_64-redhat-linux-gnu -aux-triple amdgcn-amd-amdhsa -emit-obj -dumpdir a- -disable-free -clear-ast-before-backend -disable-llvm-verifier -discard-value-names -main-file-name CMakeHIPCompilerId.hip -mrelocation-model pic -pic-level 2 -pic-is-pie -mframe-pointer=all -fmath-errno -fno-rounding-math -mconstructor-aliases -funwind-tables=2 -target-cpu x86-64 -tune-cpu generic -debugger-tuning=gdb -fdebug-compilation-dir=/home/naoki/Development/GPUBench/build/CMakeFiles/3.31.6/CompilerIdHIP -v -fcoverage-compilation-dir=/home/naoki/Development/GPUBench/build/CMakeFiles/3.31.6/CompilerIdHIP -resource-dir /usr/lib64/rocm/llvm/lib/clang/19 -internal-isystem /usr/lib64/rocm/llvm/lib/clang/19/include/cuda_wrappers -idirafter /usr/include -include __clang_hip_runtime_wrapper.h -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15 -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15/x86_64-redhat-linux -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15/backward -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15 -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15/x86_64-redhat-linux -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15/backward -internal-isystem /usr/lib64/rocm/llvm/lib/clang/19/include -internal-isystem /usr/local/include -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../x86_64-redhat-linux/include -internal-externc-isystem /include -internal-externc-isystem /usr/include -internal-isystem /usr/lib64/rocm/llvm/lib/clang/19/include -internal-isystem /usr/local/include -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../x86_64-redhat-linux/include -internal-externc-isystem /include -internal-externc-isystem /usr/include -fdeprecated-macro -ferror-limit 19 -fhip-new-launch-api -fgnuc-version=4.2.1 -fskip-odr-check-in-gmf -fcxx-exceptions -fexceptions -fcuda-include-gpubinary /tmp/CMakeHIPCompilerId-1b69a9.hipfb -cuid=23d2243eb75221 -fcuda-allow-variadic-functions -faddrsig -D__GCC_HAVE_DWARF2_CFI_ASM=1 -o /tmp/CMakeHIPCompilerId-2ec4f0.o -x hip CMakeHIPCompilerId.hip]
         ignore line: [clang -cc1 version 19.0.0git based upon LLVM 19.0.0git default target x86_64-redhat-linux-gnu]
         ignore line: [ignoring nonexistent directory "/usr/lib/gcc/x86_64-redhat-linux/15/../../../../x86_64-redhat-linux/include"]
         ignore line: [ignoring nonexistent directory "/include"]
@@ -793,7 +793,7 @@ events:
         ignore line: [ /usr/local/include]
         ignore line: [ /usr/include]
         ignore line: [End of search list.]
-        link line: [ "/usr/lib64/rocm/llvm/bin/ld.lld" --hash-style=gnu --build-id --eh-frame-hdr -m elf_x86_64 -pie -dynamic-linker /lib64/ld-linux-x86-64.so.2 -o a.out /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/Scrt1.o /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crti.o /usr/lib/gcc/x86_64-redhat-linux/15/crtbeginS.o -L/usr/lib64/rocm/llvm/bin/../lib -L/usr/lib/gcc/x86_64-redhat-linux/15 -L/usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64 -L/lib/../lib64 -L/usr/lib/../lib64 -L/lib -L/usr/lib /tmp/CMakeHIPCompilerId-7ceff5.o -L/usr/lib -lamdhip64 -lstdc++ -lm -lgcc_s -lgcc -lc -lgcc_s -lgcc /usr/lib/gcc/x86_64-redhat-linux/15/crtendS.o /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crtn.o]
+        link line: [ "/usr/lib64/rocm/llvm/bin/ld.lld" --hash-style=gnu --build-id --eh-frame-hdr -m elf_x86_64 -pie -dynamic-linker /lib64/ld-linux-x86-64.so.2 -o a.out /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/Scrt1.o /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crti.o /usr/lib/gcc/x86_64-redhat-linux/15/crtbeginS.o -L/usr/lib64/rocm/llvm/bin/../lib -L/usr/lib/gcc/x86_64-redhat-linux/15 -L/usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64 -L/lib/../lib64 -L/usr/lib/../lib64 -L/lib -L/usr/lib /tmp/CMakeHIPCompilerId-2ec4f0.o -L/usr/lib -lamdhip64 -lstdc++ -lm -lgcc_s -lgcc -lc -lgcc_s -lgcc /usr/lib/gcc/x86_64-redhat-linux/15/crtendS.o /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crtn.o]
           arg [/usr/lib64/rocm/llvm/bin/ld.lld] ==> ignore
           arg [--hash-style=gnu] ==> ignore
           arg [--build-id] ==> ignore
@@ -844,8 +844,8 @@ events:
     checks:
       - "Detecting HIP compiler ABI info"
     directories:
-      source: "/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-U18IOd"
-      binary: "/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-U18IOd"
+      source: "/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-2liT0T"
+      binary: "/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-2liT0T"
     cmakeVariables:
       CMAKE_EXE_LINKER_FLAGS: ""
       CMAKE_HIP_ARCHITECTURES: "gfx1030"
@@ -858,13 +858,13 @@ events:
       variable: "CMAKE_HIP_ABI_COMPILED"
       cached: true
       stdout: |
-        Change Dir: '/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-U18IOd'
+        Change Dir: '/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-2liT0T'
         
-        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_2bce9/fast
-        /usr/bin/gmake  -f CMakeFiles/cmTC_2bce9.dir/build.make CMakeFiles/cmTC_2bce9.dir/build
-        gmake[1]: Entering directory '/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-U18IOd'
-        Building HIP object CMakeFiles/cmTC_2bce9.dir/CMakeHIPCompilerABI.hip.o
-        /usr/lib64/rocm/llvm/bin/clang++  -D__HIP_ROCclr__=1  --cuda-host-only  --offload-arch=gfx1030 -fPIE   -v -o CMakeFiles/cmTC_2bce9.dir/CMakeHIPCompilerABI.hip.o -x hip -c /usr/share/cmake/Modules/CMakeHIPCompilerABI.hip
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_47bb4/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_47bb4.dir/build.make CMakeFiles/cmTC_47bb4.dir/build
+        gmake[1]: Entering directory '/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-2liT0T'
+        Building HIP object CMakeFiles/cmTC_47bb4.dir/CMakeHIPCompilerABI.hip.o
+        /usr/lib64/rocm/llvm/bin/clang++  -D__HIP_ROCclr__=1  --cuda-host-only  --offload-arch=gfx1030 -fPIE   -v -o CMakeFiles/cmTC_47bb4.dir/CMakeHIPCompilerABI.hip.o -x hip -c /usr/share/cmake/Modules/CMakeHIPCompilerABI.hip
         clang version 19.0.0git
         Target: x86_64-redhat-linux-gnu
         Thread model: posix
@@ -876,7 +876,7 @@ events:
         Selected multilib: .;@m64
         Found HIP installation: /usr, version 6.4.43484
          (in-process)
-         "/usr/lib64/rocm/llvm/bin/clang-19" -cc1 -triple x86_64-redhat-linux-gnu -aux-triple amdgcn-amd-amdhsa -emit-obj -disable-free -clear-ast-before-backend -disable-llvm-verifier -discard-value-names -main-file-name CMakeHIPCompilerABI.hip -mrelocation-model pic -pic-level 2 -pic-is-pie -mframe-pointer=all -fmath-errno -fno-rounding-math -mconstructor-aliases -funwind-tables=2 -target-cpu x86-64 -tune-cpu generic -debugger-tuning=gdb -fdebug-compilation-dir=/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-U18IOd -v -fcoverage-compilation-dir=/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-U18IOd -resource-dir /usr/lib64/rocm/llvm/lib/clang/19 -internal-isystem /usr/lib64/rocm/llvm/lib/clang/19/include/cuda_wrappers -idirafter /usr/include -include __clang_hip_runtime_wrapper.h -D __HIP_ROCclr__=1 -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15 -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15/x86_64-redhat-linux -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15/backward -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15 -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15/x86_64-redhat-linux -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15/backward -internal-isystem /usr/lib64/rocm/llvm/lib/clang/19/include -internal-isystem /usr/local/include -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../x86_64-redhat-linux/include -internal-externc-isystem /include -internal-externc-isystem /usr/include -internal-isystem /usr/lib64/rocm/llvm/lib/clang/19/include -internal-isystem /usr/local/include -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../x86_64-redhat-linux/include -internal-externc-isystem /include -internal-externc-isystem /usr/include -fdeprecated-macro -ferror-limit 19 -fhip-new-launch-api -fgnuc-version=4.2.1 -fskip-odr-check-in-gmf -fcxx-exceptions -fexceptions -cuid=e6f2cd303819a15f -fcuda-allow-variadic-functions -faddrsig -D__GCC_HAVE_DWARF2_CFI_ASM=1 -o CMakeFiles/cmTC_2bce9.dir/CMakeHIPCompilerABI.hip.o -x hip /usr/share/cmake/Modules/CMakeHIPCompilerABI.hip
+         "/usr/lib64/rocm/llvm/bin/clang-19" -cc1 -triple x86_64-redhat-linux-gnu -aux-triple amdgcn-amd-amdhsa -emit-obj -disable-free -clear-ast-before-backend -disable-llvm-verifier -discard-value-names -main-file-name CMakeHIPCompilerABI.hip -mrelocation-model pic -pic-level 2 -pic-is-pie -mframe-pointer=all -fmath-errno -fno-rounding-math -mconstructor-aliases -funwind-tables=2 -target-cpu x86-64 -tune-cpu generic -debugger-tuning=gdb -fdebug-compilation-dir=/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-2liT0T -v -fcoverage-compilation-dir=/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-2liT0T -resource-dir /usr/lib64/rocm/llvm/lib/clang/19 -internal-isystem /usr/lib64/rocm/llvm/lib/clang/19/include/cuda_wrappers -idirafter /usr/include -include __clang_hip_runtime_wrapper.h -D __HIP_ROCclr__=1 -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15 -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15/x86_64-redhat-linux -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15/backward -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15 -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15/x86_64-redhat-linux -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15/backward -internal-isystem /usr/lib64/rocm/llvm/lib/clang/19/include -internal-isystem /usr/local/include -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../x86_64-redhat-linux/include -internal-externc-isystem /include -internal-externc-isystem /usr/include -internal-isystem /usr/lib64/rocm/llvm/lib/clang/19/include -internal-isystem /usr/local/include -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../x86_64-redhat-linux/include -internal-externc-isystem /include -internal-externc-isystem /usr/include -fdeprecated-macro -ferror-limit 19 -fhip-new-launch-api -fgnuc-version=4.2.1 -fskip-odr-check-in-gmf -fcxx-exceptions -fexceptions -cuid=731f8a0d0a0acc00 -fcuda-allow-variadic-functions -faddrsig -D__GCC_HAVE_DWARF2_CFI_ASM=1 -o CMakeFiles/cmTC_47bb4.dir/CMakeHIPCompilerABI.hip.o -x hip /usr/share/cmake/Modules/CMakeHIPCompilerABI.hip
         clang -cc1 version 19.0.0git based upon LLVM 19.0.0git default target x86_64-redhat-linux-gnu
         ignoring nonexistent directory "/usr/lib/gcc/x86_64-redhat-linux/15/../../../../x86_64-redhat-linux/include"
         ignoring nonexistent directory "/include"
@@ -899,8 +899,8 @@ events:
          /usr/local/include
          /usr/include
         End of search list.
-        Linking HIP executable cmTC_2bce9
-        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_2bce9.dir/link.txt --verbose=1
+        Linking HIP executable cmTC_47bb4
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_47bb4.dir/link.txt --verbose=1
         clang version 19.0.0git
         Target: x86_64-redhat-linux-gnu
         Thread model: posix
@@ -911,9 +911,9 @@ events:
         Candidate multilib: 32;@m32
         Selected multilib: .;@m64
         Found HIP installation: /usr, version 6.4.43484
-         "/usr/lib64/rocm/llvm/bin/ld.lld" --hash-style=gnu --build-id --eh-frame-hdr -m elf_x86_64 -pie -dynamic-linker /lib64/ld-linux-x86-64.so.2 -o cmTC_2bce9 /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/Scrt1.o /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crti.o /usr/lib64/rocm/llvm/lib/clang/19/lib/linux/clang_rt.crtbegin-x86_64.o -L/usr/lib64/rocm/llvm/bin/../lib -L/usr/lib/gcc/x86_64-redhat-linux/15 -L/usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64 -L/lib/../lib64 -L/usr/lib/../lib64 -L/lib -L/usr/lib CMakeFiles/cmTC_2bce9.dir/CMakeHIPCompilerABI.hip.o /usr/lib64/libamdhip64.so.6.4.43484 -L/usr/lib -lamdhip64 -lstdc++ -lm /usr/lib64/rocm/llvm/lib/clang/19/lib/linux/libclang_rt.builtins-x86_64.a -lgcc_s -lc /usr/lib64/rocm/llvm/lib/clang/19/lib/linux/libclang_rt.builtins-x86_64.a -lgcc_s /usr/lib64/rocm/llvm/lib/clang/19/lib/linux/clang_rt.crtend-x86_64.o /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crtn.o
-        /usr/lib64/rocm/llvm/bin/clang++  --cuda-host-only  --offload-arch=gfx1030  -v --hip-link --rtlib=compiler-rt -unwindlib=libgcc CMakeFiles/cmTC_2bce9.dir/CMakeHIPCompilerABI.hip.o -o cmTC_2bce9  /usr/lib64/libamdhip64.so.6.4.43484
-        gmake[1]: Leaving directory '/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-U18IOd'
+         "/usr/lib64/rocm/llvm/bin/ld.lld" --hash-style=gnu --build-id --eh-frame-hdr -m elf_x86_64 -pie -dynamic-linker /lib64/ld-linux-x86-64.so.2 -o cmTC_47bb4 /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/Scrt1.o /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crti.o /usr/lib64/rocm/llvm/lib/clang/19/lib/linux/clang_rt.crtbegin-x86_64.o -L/usr/lib64/rocm/llvm/bin/../lib -L/usr/lib/gcc/x86_64-redhat-linux/15 -L/usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64 -L/lib/../lib64 -L/usr/lib/../lib64 -L/lib -L/usr/lib CMakeFiles/cmTC_47bb4.dir/CMakeHIPCompilerABI.hip.o /usr/lib64/libamdhip64.so.6.4.43484 -L/usr/lib -lamdhip64 -lstdc++ -lm /usr/lib64/rocm/llvm/lib/clang/19/lib/linux/libclang_rt.builtins-x86_64.a -lgcc_s -lc /usr/lib64/rocm/llvm/lib/clang/19/lib/linux/libclang_rt.builtins-x86_64.a -lgcc_s /usr/lib64/rocm/llvm/lib/clang/19/lib/linux/clang_rt.crtend-x86_64.o /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crtn.o
+        /usr/lib64/rocm/llvm/bin/clang++  --cuda-host-only  --offload-arch=gfx1030  -v --hip-link --rtlib=compiler-rt -unwindlib=libgcc CMakeFiles/cmTC_47bb4.dir/CMakeHIPCompilerABI.hip.o -o cmTC_47bb4  /usr/lib64/libamdhip64.so.6.4.43484
+        gmake[1]: Leaving directory '/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-2liT0T'
         
       exitCode: 0
   -
@@ -954,13 +954,13 @@ events:
       Parsed HIP implicit link information:
         link line regex: [^( *|.*[/\\])(ld[0-9]*(\\.[a-z]+)?|CMAKE_LINK_STARTFILE-NOTFOUND|([^/\\]+-)?ld|collect2)[^/\\]*( |$)]
         linker tool regex: [^[ 	]*(->|")?[ 	]*(([^"]*[/\\])?(ld[0-9]*(\\.[a-z]+)?))("|,| |$)]
-        ignore line: [Change Dir: '/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-U18IOd']
+        ignore line: [Change Dir: '/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-2liT0T']
         ignore line: []
-        ignore line: [Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_2bce9/fast]
-        ignore line: [/usr/bin/gmake  -f CMakeFiles/cmTC_2bce9.dir/build.make CMakeFiles/cmTC_2bce9.dir/build]
-        ignore line: [gmake[1]: Entering directory '/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-U18IOd']
-        ignore line: [Building HIP object CMakeFiles/cmTC_2bce9.dir/CMakeHIPCompilerABI.hip.o]
-        ignore line: [/usr/lib64/rocm/llvm/bin/clang++  -D__HIP_ROCclr__=1  --cuda-host-only  --offload-arch=gfx1030 -fPIE   -v -o CMakeFiles/cmTC_2bce9.dir/CMakeHIPCompilerABI.hip.o -x hip -c /usr/share/cmake/Modules/CMakeHIPCompilerABI.hip]
+        ignore line: [Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_47bb4/fast]
+        ignore line: [/usr/bin/gmake  -f CMakeFiles/cmTC_47bb4.dir/build.make CMakeFiles/cmTC_47bb4.dir/build]
+        ignore line: [gmake[1]: Entering directory '/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-2liT0T']
+        ignore line: [Building HIP object CMakeFiles/cmTC_47bb4.dir/CMakeHIPCompilerABI.hip.o]
+        ignore line: [/usr/lib64/rocm/llvm/bin/clang++  -D__HIP_ROCclr__=1  --cuda-host-only  --offload-arch=gfx1030 -fPIE   -v -o CMakeFiles/cmTC_47bb4.dir/CMakeHIPCompilerABI.hip.o -x hip -c /usr/share/cmake/Modules/CMakeHIPCompilerABI.hip]
         ignore line: [clang version 19.0.0git]
         ignore line: [Target: x86_64-redhat-linux-gnu]
         ignore line: [Thread model: posix]
@@ -975,7 +975,7 @@ events:
         ignore line: [@m64]
         ignore line: [Found HIP installation: /usr  version 6.4.43484]
         ignore line: [ (in-process)]
-        ignore line: [ "/usr/lib64/rocm/llvm/bin/clang-19" -cc1 -triple x86_64-redhat-linux-gnu -aux-triple amdgcn-amd-amdhsa -emit-obj -disable-free -clear-ast-before-backend -disable-llvm-verifier -discard-value-names -main-file-name CMakeHIPCompilerABI.hip -mrelocation-model pic -pic-level 2 -pic-is-pie -mframe-pointer=all -fmath-errno -fno-rounding-math -mconstructor-aliases -funwind-tables=2 -target-cpu x86-64 -tune-cpu generic -debugger-tuning=gdb -fdebug-compilation-dir=/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-U18IOd -v -fcoverage-compilation-dir=/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-U18IOd -resource-dir /usr/lib64/rocm/llvm/lib/clang/19 -internal-isystem /usr/lib64/rocm/llvm/lib/clang/19/include/cuda_wrappers -idirafter /usr/include -include __clang_hip_runtime_wrapper.h -D __HIP_ROCclr__=1 -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15 -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15/x86_64-redhat-linux -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15/backward -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15 -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15/x86_64-redhat-linux -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15/backward -internal-isystem /usr/lib64/rocm/llvm/lib/clang/19/include -internal-isystem /usr/local/include -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../x86_64-redhat-linux/include -internal-externc-isystem /include -internal-externc-isystem /usr/include -internal-isystem /usr/lib64/rocm/llvm/lib/clang/19/include -internal-isystem /usr/local/include -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../x86_64-redhat-linux/include -internal-externc-isystem /include -internal-externc-isystem /usr/include -fdeprecated-macro -ferror-limit 19 -fhip-new-launch-api -fgnuc-version=4.2.1 -fskip-odr-check-in-gmf -fcxx-exceptions -fexceptions -cuid=e6f2cd303819a15f -fcuda-allow-variadic-functions -faddrsig -D__GCC_HAVE_DWARF2_CFI_ASM=1 -o CMakeFiles/cmTC_2bce9.dir/CMakeHIPCompilerABI.hip.o -x hip /usr/share/cmake/Modules/CMakeHIPCompilerABI.hip]
+        ignore line: [ "/usr/lib64/rocm/llvm/bin/clang-19" -cc1 -triple x86_64-redhat-linux-gnu -aux-triple amdgcn-amd-amdhsa -emit-obj -disable-free -clear-ast-before-backend -disable-llvm-verifier -discard-value-names -main-file-name CMakeHIPCompilerABI.hip -mrelocation-model pic -pic-level 2 -pic-is-pie -mframe-pointer=all -fmath-errno -fno-rounding-math -mconstructor-aliases -funwind-tables=2 -target-cpu x86-64 -tune-cpu generic -debugger-tuning=gdb -fdebug-compilation-dir=/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-2liT0T -v -fcoverage-compilation-dir=/home/naoki/Development/GPUBench/build/CMakeFiles/CMakeScratch/TryCompile-2liT0T -resource-dir /usr/lib64/rocm/llvm/lib/clang/19 -internal-isystem /usr/lib64/rocm/llvm/lib/clang/19/include/cuda_wrappers -idirafter /usr/include -include __clang_hip_runtime_wrapper.h -D __HIP_ROCclr__=1 -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15 -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15/x86_64-redhat-linux -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15/backward -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15 -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15/x86_64-redhat-linux -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15/backward -internal-isystem /usr/lib64/rocm/llvm/lib/clang/19/include -internal-isystem /usr/local/include -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../x86_64-redhat-linux/include -internal-externc-isystem /include -internal-externc-isystem /usr/include -internal-isystem /usr/lib64/rocm/llvm/lib/clang/19/include -internal-isystem /usr/local/include -internal-isystem /usr/lib/gcc/x86_64-redhat-linux/15/../../../../x86_64-redhat-linux/include -internal-externc-isystem /include -internal-externc-isystem /usr/include -fdeprecated-macro -ferror-limit 19 -fhip-new-launch-api -fgnuc-version=4.2.1 -fskip-odr-check-in-gmf -fcxx-exceptions -fexceptions -cuid=731f8a0d0a0acc00 -fcuda-allow-variadic-functions -faddrsig -D__GCC_HAVE_DWARF2_CFI_ASM=1 -o CMakeFiles/cmTC_47bb4.dir/CMakeHIPCompilerABI.hip.o -x hip /usr/share/cmake/Modules/CMakeHIPCompilerABI.hip]
         ignore line: [clang -cc1 version 19.0.0git based upon LLVM 19.0.0git default target x86_64-redhat-linux-gnu]
         ignore line: [ignoring nonexistent directory "/usr/lib/gcc/x86_64-redhat-linux/15/../../../../x86_64-redhat-linux/include"]
         ignore line: [ignoring nonexistent directory "/include"]
@@ -998,8 +998,8 @@ events:
         ignore line: [ /usr/local/include]
         ignore line: [ /usr/include]
         ignore line: [End of search list.]
-        ignore line: [Linking HIP executable cmTC_2bce9]
-        ignore line: [/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_2bce9.dir/link.txt --verbose=1]
+        ignore line: [Linking HIP executable cmTC_47bb4]
+        ignore line: [/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_47bb4.dir/link.txt --verbose=1]
         ignore line: [clang version 19.0.0git]
         ignore line: [Target: x86_64-redhat-linux-gnu]
         ignore line: [Thread model: posix]
@@ -1013,7 +1013,7 @@ events:
         ignore line: [Selected multilib: .]
         ignore line: [@m64]
         ignore line: [Found HIP installation: /usr  version 6.4.43484]
-        link line: [ "/usr/lib64/rocm/llvm/bin/ld.lld" --hash-style=gnu --build-id --eh-frame-hdr -m elf_x86_64 -pie -dynamic-linker /lib64/ld-linux-x86-64.so.2 -o cmTC_2bce9 /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/Scrt1.o /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crti.o /usr/lib64/rocm/llvm/lib/clang/19/lib/linux/clang_rt.crtbegin-x86_64.o -L/usr/lib64/rocm/llvm/bin/../lib -L/usr/lib/gcc/x86_64-redhat-linux/15 -L/usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64 -L/lib/../lib64 -L/usr/lib/../lib64 -L/lib -L/usr/lib CMakeFiles/cmTC_2bce9.dir/CMakeHIPCompilerABI.hip.o /usr/lib64/libamdhip64.so.6.4.43484 -L/usr/lib -lamdhip64 -lstdc++ -lm /usr/lib64/rocm/llvm/lib/clang/19/lib/linux/libclang_rt.builtins-x86_64.a -lgcc_s -lc /usr/lib64/rocm/llvm/lib/clang/19/lib/linux/libclang_rt.builtins-x86_64.a -lgcc_s /usr/lib64/rocm/llvm/lib/clang/19/lib/linux/clang_rt.crtend-x86_64.o /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crtn.o]
+        link line: [ "/usr/lib64/rocm/llvm/bin/ld.lld" --hash-style=gnu --build-id --eh-frame-hdr -m elf_x86_64 -pie -dynamic-linker /lib64/ld-linux-x86-64.so.2 -o cmTC_47bb4 /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/Scrt1.o /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crti.o /usr/lib64/rocm/llvm/lib/clang/19/lib/linux/clang_rt.crtbegin-x86_64.o -L/usr/lib64/rocm/llvm/bin/../lib -L/usr/lib/gcc/x86_64-redhat-linux/15 -L/usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64 -L/lib/../lib64 -L/usr/lib/../lib64 -L/lib -L/usr/lib CMakeFiles/cmTC_47bb4.dir/CMakeHIPCompilerABI.hip.o /usr/lib64/libamdhip64.so.6.4.43484 -L/usr/lib -lamdhip64 -lstdc++ -lm /usr/lib64/rocm/llvm/lib/clang/19/lib/linux/libclang_rt.builtins-x86_64.a -lgcc_s -lc /usr/lib64/rocm/llvm/lib/clang/19/lib/linux/libclang_rt.builtins-x86_64.a -lgcc_s /usr/lib64/rocm/llvm/lib/clang/19/lib/linux/clang_rt.crtend-x86_64.o /usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crtn.o]
           arg [/usr/lib64/rocm/llvm/bin/ld.lld] ==> ignore
           arg [--hash-style=gnu] ==> ignore
           arg [--build-id] ==> ignore
@@ -1024,7 +1024,7 @@ events:
           arg [-dynamic-linker] ==> ignore
           arg [/lib64/ld-linux-x86-64.so.2] ==> ignore
           arg [-o] ==> ignore
-          arg [cmTC_2bce9] ==> ignore
+          arg [cmTC_47bb4] ==> ignore
           arg [/usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/Scrt1.o] ==> obj [/usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/Scrt1.o]
           arg [/usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crti.o] ==> obj [/usr/lib/gcc/x86_64-redhat-linux/15/../../../../lib64/crti.o]
           arg [/usr/lib64/rocm/llvm/lib/clang/19/lib/linux/clang_rt.crtbegin-x86_64.o] ==> obj [/usr/lib64/rocm/llvm/lib/clang/19/lib/linux/clang_rt.crtbegin-x86_64.o]
@@ -1035,7 +1035,7 @@ events:
           arg [-L/usr/lib/../lib64] ==> dir [/usr/lib/../lib64]
           arg [-L/lib] ==> dir [/lib]
           arg [-L/usr/lib] ==> dir [/usr/lib]
-          arg [CMakeFiles/cmTC_2bce9.dir/CMakeHIPCompilerABI.hip.o] ==> ignore
+          arg [CMakeFiles/cmTC_47bb4.dir/CMakeHIPCompilerABI.hip.o] ==> ignore
           arg [/usr/lib64/libamdhip64.so.6.4.43484] ==> ignore
           arg [-L/usr/lib] ==> dir [/usr/lib]
           arg [-lamdhip64] ==> lib [amdhip64]

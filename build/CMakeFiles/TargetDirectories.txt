@@ -2,6 +2,8 @@
 /home/naoki/Development/GPUBench/build/CMakeFiles/kernels.dir
 /home/naoki/Development/GPUBench/build/CMakeFiles/hip_kernels.dir
 /home/naoki/Development/GPUBench/build/CMakeFiles/gpubench.dir
+/home/naoki/Development/GPUBench/build/CMakeFiles/package.dir
+/home/naoki/Development/GPUBench/build/CMakeFiles/package_source.dir
 /home/naoki/Development/GPUBench/build/CMakeFiles/edit_cache.dir
 /home/naoki/Development/GPUBench/build/CMakeFiles/rebuild_cache.dir
 /home/naoki/Development/GPUBench/build/CMakeFiles/list_install_components.dir

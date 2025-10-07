@@ -85,7 +85,7 @@ ComputeBuffer ROCmContext::createBuffer(size_t size, const void* host_ptr) {
             if (verbose) {
                 std::cerr << "hipMemcpy error: " << hipGetErrorString(err) << std::endl;
             }
-            hipFree(device_ptr);
+            (void)hipFree(device_ptr);
             throw std::runtime_error("Failed to copy data to device: " + std::string(hipGetErrorString(err)));
         }
     }
