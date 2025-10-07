@@ -1,16 +1,13 @@
 #include "KernelPath.h"
 #include "utils/Config.h"
 #include <cstdlib>
-#include <sys/stat.h>
+#include <filesystem>
 #include <iostream>
 
 // Helper function to check if a directory exists
 static bool directoryExists(const std::string& path) {
-    struct stat info;
-    if (stat(path.c_str(), &info) != 0) {
-        return false;
-    }
-    return (info.st_mode & S_IFDIR) != 0;
+    std::error_code ec;
+    return std::filesystem::is_directory(path, ec);
 }
 
 std::string KernelPath::find() {
