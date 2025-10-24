@@ -47,7 +47,7 @@ void Fp16Bench::Setup(IComputeContext& context, const std::string& kernel_dir) {
     context.setKernelArg(kernel, 0, buffer);
 }
 
-void Fp16Bench::Run() {
+void Fp16Bench::Run(uint32_t config_idx) {
     context->dispatch(kernel, 8192, 1, 1, 64, 1, 1);
 }
 
@@ -60,7 +60,7 @@ void Fp16Bench::Teardown() {
     }
 }
 
-BenchmarkResult Fp16Bench::GetResult() const {
+BenchmarkResult Fp16Bench::GetResult(uint32_t config_idx) const {
     // 8 f16vec2 FMAs per iteration = 8 * 2 * 2 = 32 FP16 operations per iteration
     // 16384 iterations * 32 ops * 8192 workgroups * 64 threads
     uint64_t num_ops = (uint64_t)16384 * 32 * 8192 * 64;

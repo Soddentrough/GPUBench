@@ -24,11 +24,11 @@ void Fp6Bench::Setup(IComputeContext& context, const std::string& build_dir) {
     // Implementation will be added in a future step.
 }
 
-void Fp6Bench::Run() {
+void Fp6Bench::Run(uint32_t config_idx) {
     // Implementation will be added in a future step.
 }
 
-BenchmarkResult Fp6Bench::GetResult() const {
+BenchmarkResult Fp6Bench::GetResult(uint32_t config_idx) const {
     // Implementation will be added in a future step.
     return {0, 0};
 }

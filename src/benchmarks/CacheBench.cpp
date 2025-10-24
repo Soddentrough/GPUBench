@@ -1,8 +1,8 @@
 #include "benchmarks/CacheBench.h"
 #include <stdexcept>
 
-CacheBench::CacheBench(std::string name, std::string metric, uint64_t bufferSize, std::string kernelFile, std::vector<uint32_t> initData)
-    : name(name), metric(metric), bufferSize(bufferSize), kernelFile(kernelFile), initData(initData) {}
+CacheBench::CacheBench(std::string name, std::string metric, uint64_t bufferSize, std::string kernelFile, std::vector<uint32_t> initData, std::vector<std::string> aliases)
+    : name(name), metric(metric), bufferSize(bufferSize), kernelFile(kernelFile), initData(initData), aliases(aliases) {}
 
 CacheBench::~CacheBench() {}
 
@@ -43,7 +43,7 @@ void CacheBench::Setup(IComputeContext& context, const std::string& kernel_dir) 
     }
 }
 
-void CacheBench::Run() {
+void CacheBench::Run(uint32_t config_idx) {
     if (!context) {
         throw std::runtime_error("Context is not set up");
     }
@@ -82,11 +82,15 @@ const char* CacheBench::GetName() const {
     return name.c_str();
 }
 
+std::vector<std::string> CacheBench::GetAliases() const {
+    return aliases;
+}
+
 const char* CacheBench::GetMetric() const {
     return metric.c_str();
 }
 
-BenchmarkResult CacheBench::GetResult() const {
+BenchmarkResult CacheBench::GetResult(uint32_t config_idx) const {
     uint64_t operations = 0;
     const uint64_t num_threads_bw = 65536 * 256;
 

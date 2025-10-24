@@ -12,6 +12,7 @@ struct ResultData {
     uint64_t operations;
     double time_ms;
     bool isEmulated;
+    uint32_t maxWorkGroupSize;
 };
 
 class ResultFormatter {

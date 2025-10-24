@@ -10,8 +10,8 @@ public:
     const char* GetName() const override;
     bool IsSupported(const DeviceInfo& device, IComputeContext* context = nullptr) const override;
     void Setup(IComputeContext& context, const std::string& build_dir) override;
-    void Run() override;
-    BenchmarkResult GetResult() const override;
+    void Run(uint32_t config_idx = 0) override;
+    BenchmarkResult GetResult(uint32_t config_idx = 0) const override;
     void Teardown() override;
     bool IsEmulated() const override { return is_emulated; }
 

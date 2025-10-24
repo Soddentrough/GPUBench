@@ -35,7 +35,7 @@ void Fp32Bench::Setup(IComputeContext& context, const std::string& kernel_dir) {
     context.setKernelArg(kernel, 0, buffer);
 }
 
-void Fp32Bench::Run() {
+void Fp32Bench::Run(uint32_t config_idx) {
     // Increase to 8192 workgroups for better GPU saturation
     context->dispatch(kernel, 8192, 1, 1, 64, 1, 1);
 }
@@ -51,7 +51,7 @@ void Fp32Bench::Teardown() {
     }
 }
 
-BenchmarkResult Fp32Bench::GetResult() const {
+BenchmarkResult Fp32Bench::GetResult(uint32_t config_idx) const {
     // 4 vec4 FMAs per iteration = 4 * 4 * 2 = 32 FP32 operations per iteration
     // 16384 iterations * 32 ops * 8192 workgroups * 64 threads
     uint64_t num_ops = (uint64_t)16384 * 32 * 8192 * 64;

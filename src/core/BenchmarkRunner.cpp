@@ -58,7 +58,7 @@ void BenchmarkRunner::discoverBenchmarks() {
 
     // Cache Bandwidth
     std::vector<uint32_t> l0_init = {42};  // Initialize with a single value
-    benchmarks.push_back(std::make_unique<CacheBench>("L0 Cache Bandwidth", "GB/s", 4, "l0_cache_bandwidth", l0_init));
+    benchmarks.push_back(std::make_unique<CacheBench>("L0 Cache Bandwidth", "GB/s", 4, "l0_cache_bandwidth", l0_init, std::vector<std::string>{"l0b"}));
     
     const size_t l1_size = 24 * 1024;
     const size_t l2_size = 1 * 1024 * 1024;
@@ -82,15 +82,15 @@ void BenchmarkRunner::discoverBenchmarks() {
     // We'll keep the 16MB allocation but need to fix the kernel or dispatch
     std::vector<uint32_t> l3_bw_init(l3_size / sizeof(uint32_t), 1);
     
-    benchmarks.push_back(std::make_unique<CacheBench>("L1 Cache Bandwidth", "GB/s", cachebw_l2_size, "cachebw_l2", l2_bw_init));
-    benchmarks.push_back(std::make_unique<CacheBench>("L2 Cache Bandwidth", "GB/s", cachebw_l1_size, "cachebw_l1", l1_bw_init));
-    benchmarks.push_back(std::make_unique<CacheBench>("L3 Cache Bandwidth", "GB/s", l3_size, "cachebw_l3", l3_bw_init));
+    benchmarks.push_back(std::make_unique<CacheBench>("L1 Cache Bandwidth", "GB/s", cachebw_l2_size, "cachebw_l2", l2_bw_init, std::vector<std::string>{"l1b"}));
+    benchmarks.push_back(std::make_unique<CacheBench>("L2 Cache Bandwidth", "GB/s", cachebw_l1_size, "cachebw_l1", l1_bw_init, std::vector<std::string>{"l2b"}));
+    benchmarks.push_back(std::make_unique<CacheBench>("L3 Cache Bandwidth", "GB/s", l3_size, "cachebw_l3", l3_bw_init, std::vector<std::string>{"l3b"}));
 
     // Cache Latency
-    benchmarks.push_back(std::make_unique<CacheBench>("L0 Cache Latency", "ns", 4, "l0_cache_latency", l0_init));
-    benchmarks.push_back(std::make_unique<CacheBench>("L1 Cache Latency", "ns", l1_size, "cache_latency", create_shuffled_indices(l1_size / sizeof(uint32_t))));
-    benchmarks.push_back(std::make_unique<CacheBench>("L2 Cache Latency", "ns", l2_size, "cache_latency", create_shuffled_indices(l2_size / sizeof(uint32_t))));
-    benchmarks.push_back(std::make_unique<CacheBench>("L3 Cache Latency", "ns", l3_size, "cache_latency", create_shuffled_indices(l3_size / sizeof(uint32_t))));
+    benchmarks.push_back(std::make_unique<CacheBench>("L0 Cache Latency", "ns", 4, "l0_cache_latency", l0_init, std::vector<std::string>{"l0l"}));
+    benchmarks.push_back(std::make_unique<CacheBench>("L1 Cache Latency", "ns", l1_size, "cache_latency", create_shuffled_indices(l1_size / sizeof(uint32_t)), std::vector<std::string>{"l1l"}));
+    benchmarks.push_back(std::make_unique<CacheBench>("L2 Cache Latency", "ns", l2_size, "cache_latency", create_shuffled_indices(l2_size / sizeof(uint32_t)), std::vector<std::string>{"l2l"}));
+    benchmarks.push_back(std::make_unique<CacheBench>("L3 Cache Latency", "ns", l3_size, "cache_latency", create_shuffled_indices(l3_size / sizeof(uint32_t)), std::vector<std::string>{"l3l"}));
 }
 
 struct BenchmarkResultRow {
@@ -135,43 +135,61 @@ void BenchmarkRunner::run(const std::vector<std::string>& benchmarks_to_run) {
                     should_run = true;
                 } else {
                     std::string bench_name_lower = to_lower(bench->GetName());
+                    auto aliases = bench->GetAliases();
                     for (const auto& run_name : lower_benchmarks_to_run) {
                         if (bench_name_lower.find(run_name) != std::string::npos) {
                             should_run = true;
                             break;
+                        }
+                        for (const auto& alias : aliases) {
+                            if (to_lower(alias) == run_name) {
+                                should_run = true;
+                                break;
+                            }
                         }
                     }
                 }
 
                 if (should_run && bench->IsSupported(info, context)) {
                     try {
-                        std::cout << "Running " << bench->GetName() <<   "..." << std::endl;
+                        std::cout << "Setting up " << bench->GetName() << "..." << std::endl;
                         bench->Setup(*context, KernelPath::find());
 
-                        // Timed run
-                        double total_time_ms = 0;
-                        uint64_t total_invocations = 0;
-                        auto bench_start = std::chrono::high_resolution_clock::now();
-                        while (total_time_ms < 5000) {
-                            bench->Run();
-                            context->waitIdle();
-                            total_invocations++;
-                            auto now = std::chrono::high_resolution_clock::now();
-                            total_time_ms = std::chrono::duration_cast<std::chrono::nanoseconds>(now - bench_start).count() / 1e6;
+                        uint32_t num_configs = bench->GetNumConfigs();
+                        for (uint32_t i = 0; i < num_configs; ++i) {
+                            std::string bench_name = bench->GetName();
+                            std::string config_name = bench->GetConfigName(i);
+                            if (!config_name.empty()) {
+                                bench_name += " (" + config_name + ")";
+                            }
+                            std::cout << "Running " << bench_name << "..." << std::endl;
+
+                            // Timed run
+                            double total_time_ms = 0;
+                            uint64_t total_invocations = 0;
+                            auto bench_start = std::chrono::high_resolution_clock::now();
+                            while (total_time_ms < 5000) {
+                                bench->Run(i);
+                                context->waitIdle();
+                                total_invocations++;
+                                auto now = std::chrono::high_resolution_clock::now();
+                                total_time_ms = std::chrono::duration_cast<std::chrono::nanoseconds>(now - bench_start).count() / 1e6;
+                            }
+
+                            BenchmarkResult bench_result = bench->GetResult(i);
+                            
+                            ResultData result_data;
+                            result_data.backendName = ComputeBackendFactory::getBackendName(context->getBackend());
+                            result_data.deviceName = info.name;
+                            result_data.benchmarkName = bench_name;
+                            result_data.metric = bench->GetMetric();
+                            result_data.operations = bench_result.operations * total_invocations;
+                            result_data.time_ms = total_time_ms;
+                            result_data.isEmulated = bench->IsEmulated();
+                            result_data.maxWorkGroupSize = info.maxWorkGroupSize;
+
+                            formatter->addResult(result_data);
                         }
-
-                        BenchmarkResult bench_result = bench->GetResult();
-                        
-                        ResultData result_data;
-                        result_data.backendName = ComputeBackendFactory::getBackendName(context->getBackend());
-                        result_data.deviceName = info.name;
-                    result_data.benchmarkName = bench->GetName();
-                    result_data.metric = bench->GetMetric();
-                    result_data.operations = bench_result.operations * total_invocations;
-                    result_data.time_ms = total_time_ms;
-                    result_data.isEmulated = bench->IsEmulated();
-
-                    formatter->addResult(result_data);
 
                         bench->Teardown();
                     } catch (const std::exception& e) {

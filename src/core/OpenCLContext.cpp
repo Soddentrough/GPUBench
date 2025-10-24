@@ -163,7 +163,7 @@ ComputeBuffer OpenCLContext::createBuffer(size_t size, const void* host_ptr) {
 
 void OpenCLContext::writeBuffer(ComputeBuffer buffer, size_t offset, size_t size, const void* host_ptr) {
     auto* buffer_cl = static_cast<ComputeBuffer_cl*>(buffer);
-    cl_int err = clEnqueueWriteBuffer(commandQueue, buffer_cl->buffer, CL_TRUE, offset, size, host_ptr, 0, nullptr, nullptr);
+    cl_int err = clEnqueueWriteBuffer(commandQueue, buffer_cl->buffer, CL_FALSE, offset, size, host_ptr, 0, nullptr, nullptr);
     if (err != CL_SUCCESS) {
         throw std::runtime_error("Failed to write to OpenCL buffer");
     }
@@ -171,7 +171,7 @@ void OpenCLContext::writeBuffer(ComputeBuffer buffer, size_t offset, size_t size
 
 void OpenCLContext::readBuffer(ComputeBuffer buffer, size_t offset, size_t size, void* host_ptr) const {
     const auto* buffer_cl = static_cast<const ComputeBuffer_cl*>(buffer);
-    cl_int err = clEnqueueReadBuffer(commandQueue, buffer_cl->buffer, CL_TRUE, offset, size, host_ptr, 0, nullptr, nullptr);
+    cl_int err = clEnqueueReadBuffer(commandQueue, buffer_cl->buffer, CL_FALSE, offset, size, host_ptr, 0, nullptr, nullptr);
     if (err != CL_SUCCESS) {
         throw std::runtime_error("Failed to read from OpenCL buffer");
     }
@@ -239,7 +239,16 @@ void OpenCLContext::setKernelArg(ComputeKernel kernel, uint32_t arg_index, size_
     auto* kernel_cl = static_cast<ComputeKernel_cl*>(kernel);
     cl_int err = clSetKernelArg(kernel_cl->kernel, arg_index, arg_size, arg_value);
     if (err != CL_SUCCESS) {
-        throw std::runtime_error("Failed to set OpenCL kernel value argument");
+        std::string error_msg = "Failed to set OpenCL kernel value argument at index " + std::to_string(arg_index) +
+                               " (size: " + std::to_string(arg_size) + " bytes, error code: " + std::to_string(err) + ")";
+        if (err == CL_INVALID_ARG_INDEX) {
+            error_msg += " - Invalid argument index (kernel may not have this many arguments)";
+        } else if (err == CL_INVALID_ARG_SIZE) {
+            error_msg += " - Invalid argument size";
+        } else if (err == CL_INVALID_ARG_VALUE) {
+            error_msg += " - Invalid argument value";
+        }
+        throw std::runtime_error(error_msg);
     }
 }
 

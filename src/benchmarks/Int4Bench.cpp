@@ -47,7 +47,7 @@ void Int4Bench::Setup(IComputeContext& context, const std::string& kernel_dir) {
     context.setKernelArg(kernel, 0, buffer);
 }
 
-void Int4Bench::Run() {
+void Int4Bench::Run(uint32_t config_idx) {
     context->dispatch(kernel, 8192, 1, 1, 64, 1, 1);
 }
 
@@ -60,7 +60,7 @@ void Int4Bench::Teardown() {
     }
 }
 
-BenchmarkResult Int4Bench::GetResult() const {
+BenchmarkResult Int4Bench::GetResult(uint32_t config_idx) const {
     // 12 i8vec4 operations per iteration, each with multiply-add + AND = 3 ops per component
     // 12 * 4 * 3 = 144 INT4-equivalent operations per iteration
     // 16384 iterations * 144 ops * 8192 workgroups * 64 threads

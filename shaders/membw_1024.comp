@@ -11,12 +11,23 @@ layout(set = 0, binding = 1) buffer OutputData {
     vec4 outputData[];
 } OutputBuffer;
 
+layout(push_constant) uniform PushConstants {
+    uint mode;
+    uint bufferSize;
+} pc;
+
 void main() {
+    // mode == 0: Read
+    // mode == 1: Write
+    // mode == 2: Read/Write
+
     uint baseIndex = gl_GlobalInvocationID.x * 32;
     uint stride = gl_NumWorkGroups.x * gl_WorkGroupSize.x * 32;
-    uint buffer_mask = (4u * 1024 * 1024 * 1024) / 16 - 1;
+    uint buffer_mask = (pc.bufferSize / 16) - 1;
+    
+    vec4 accumulator = vec4(0.0);
 
-    for (int i = 0; i < 1024; ++i) {
+    for (int i = 0; i < 32; ++i) {
         uint currentIndex = (baseIndex + i * stride) & buffer_mask;
 
         // Each thread processes 32 vec4s (512 bytes)
@@ -53,37 +64,83 @@ void main() {
         vec4 data30 = InputBuffer.inputData[currentIndex + 30];
         vec4 data31 = InputBuffer.inputData[currentIndex + 31];
         
-        OutputBuffer.outputData[currentIndex + 0] = data0 * 2.0 - 1.0;
-        OutputBuffer.outputData[currentIndex + 1] = data1 * 2.0 - 1.0;
-        OutputBuffer.outputData[currentIndex + 2] = data2 * 2.0 - 1.0;
-        OutputBuffer.outputData[currentIndex + 3] = data3 * 2.0 - 1.0;
-        OutputBuffer.outputData[currentIndex + 4] = data4 * 2.0 - 1.0;
-        OutputBuffer.outputData[currentIndex + 5] = data5 * 2.0 - 1.0;
-        OutputBuffer.outputData[currentIndex + 6] = data6 * 2.0 - 1.0;
-        OutputBuffer.outputData[currentIndex + 7] = data7 * 2.0 - 1.0;
-        OutputBuffer.outputData[currentIndex + 8] = data8 * 2.0 - 1.0;
-        OutputBuffer.outputData[currentIndex + 9] = data9 * 2.0 - 1.0;
-        OutputBuffer.outputData[currentIndex + 10] = data10 * 2.0 - 1.0;
-        OutputBuffer.outputData[currentIndex + 11] = data11 * 2.0 - 1.0;
-        OutputBuffer.outputData[currentIndex + 12] = data12 * 2.0 - 1.0;
-        OutputBuffer.outputData[currentIndex + 13] = data13 * 2.0 - 1.0;
-        OutputBuffer.outputData[currentIndex + 14] = data14 * 2.0 - 1.0;
-        OutputBuffer.outputData[currentIndex + 15] = data15 * 2.0 - 1.0;
-        OutputBuffer.outputData[currentIndex + 16] = data16 * 2.0 - 1.0;
-        OutputBuffer.outputData[currentIndex + 17] = data17 * 2.0 - 1.0;
-        OutputBuffer.outputData[currentIndex + 18] = data18 * 2.0 - 1.0;
-        OutputBuffer.outputData[currentIndex + 19] = data19 * 2.0 - 1.0;
-        OutputBuffer.outputData[currentIndex + 20] = data20 * 2.0 - 1.0;
-        OutputBuffer.outputData[currentIndex + 21] = data21 * 2.0 - 1.0;
-        OutputBuffer.outputData[currentIndex + 22] = data22 * 2.0 - 1.0;
-        OutputBuffer.outputData[currentIndex + 23] = data23 * 2.0 - 1.0;
-        OutputBuffer.outputData[currentIndex + 24] = data24 * 2.0 - 1.0;
-        OutputBuffer.outputData[currentIndex + 25] = data25 * 2.0 - 1.0;
-        OutputBuffer.outputData[currentIndex + 26] = data26 * 2.0 - 1.0;
-        OutputBuffer.outputData[currentIndex + 27] = data27 * 2.0 - 1.0;
-        OutputBuffer.outputData[currentIndex + 28] = data28 * 2.0 - 1.0;
-        OutputBuffer.outputData[currentIndex + 29] = data29 * 2.0 - 1.0;
-        OutputBuffer.outputData[currentIndex + 30] = data30 * 2.0 - 1.0;
-        OutputBuffer.outputData[currentIndex + 31] = data31 * 2.0 - 1.0;
+        if (pc.mode == 0) { // Read
+            // Accumulate to prevent optimization
+            accumulator += data0 + data1 + data2 + data3 + data4 + data5 + data6 + data7;
+            accumulator += data8 + data9 + data10 + data11 + data12 + data13 + data14 + data15;
+            accumulator += data16 + data17 + data18 + data19 + data20 + data21 + data22 + data23;
+            accumulator += data24 + data25 + data26 + data27 + data28 + data29 + data30 + data31;
+        } else if (pc.mode == 1) { // Write
+            OutputBuffer.outputData[currentIndex + 0] = vec4(1.0);
+            OutputBuffer.outputData[currentIndex + 1] = vec4(1.0);
+            OutputBuffer.outputData[currentIndex + 2] = vec4(1.0);
+            OutputBuffer.outputData[currentIndex + 3] = vec4(1.0);
+            OutputBuffer.outputData[currentIndex + 4] = vec4(1.0);
+            OutputBuffer.outputData[currentIndex + 5] = vec4(1.0);
+            OutputBuffer.outputData[currentIndex + 6] = vec4(1.0);
+            OutputBuffer.outputData[currentIndex + 7] = vec4(1.0);
+            OutputBuffer.outputData[currentIndex + 8] = vec4(1.0);
+            OutputBuffer.outputData[currentIndex + 9] = vec4(1.0);
+            OutputBuffer.outputData[currentIndex + 10] = vec4(1.0);
+            OutputBuffer.outputData[currentIndex + 11] = vec4(1.0);
+            OutputBuffer.outputData[currentIndex + 12] = vec4(1.0);
+            OutputBuffer.outputData[currentIndex + 13] = vec4(1.0);
+            OutputBuffer.outputData[currentIndex + 14] = vec4(1.0);
+            OutputBuffer.outputData[currentIndex + 15] = vec4(1.0);
+            OutputBuffer.outputData[currentIndex + 16] = vec4(1.0);
+            OutputBuffer.outputData[currentIndex + 17] = vec4(1.0);
+            OutputBuffer.outputData[currentIndex + 18] = vec4(1.0);
+            OutputBuffer.outputData[currentIndex + 19] = vec4(1.0);
+            OutputBuffer.outputData[currentIndex + 20] = vec4(1.0);
+            OutputBuffer.outputData[currentIndex + 21] = vec4(1.0);
+            OutputBuffer.outputData[currentIndex + 22] = vec4(1.0);
+            OutputBuffer.outputData[currentIndex + 23] = vec4(1.0);
+            OutputBuffer.outputData[currentIndex + 24] = vec4(1.0);
+            OutputBuffer.outputData[currentIndex + 25] = vec4(1.0);
+            OutputBuffer.outputData[currentIndex + 26] = vec4(1.0);
+            OutputBuffer.outputData[currentIndex + 27] = vec4(1.0);
+            OutputBuffer.outputData[currentIndex + 28] = vec4(1.0);
+            OutputBuffer.outputData[currentIndex + 29] = vec4(1.0);
+            OutputBuffer.outputData[currentIndex + 30] = vec4(1.0);
+            OutputBuffer.outputData[currentIndex + 31] = vec4(1.0);
+        } else { // Read/Write
+            OutputBuffer.outputData[currentIndex + 0] = data0;
+            OutputBuffer.outputData[currentIndex + 1] = data1;
+            OutputBuffer.outputData[currentIndex + 2] = data2;
+            OutputBuffer.outputData[currentIndex + 3] = data3;
+            OutputBuffer.outputData[currentIndex + 4] = data4;
+            OutputBuffer.outputData[currentIndex + 5] = data5;
+            OutputBuffer.outputData[currentIndex + 6] = data6;
+            OutputBuffer.outputData[currentIndex + 7] = data7;
+            OutputBuffer.outputData[currentIndex + 8] = data8;
+            OutputBuffer.outputData[currentIndex + 9] = data9;
+            OutputBuffer.outputData[currentIndex + 10] = data10;
+            OutputBuffer.outputData[currentIndex + 11] = data11;
+            OutputBuffer.outputData[currentIndex + 12] = data12;
+            OutputBuffer.outputData[currentIndex + 13] = data13;
+            OutputBuffer.outputData[currentIndex + 14] = data14;
+            OutputBuffer.outputData[currentIndex + 15] = data15;
+            OutputBuffer.outputData[currentIndex + 16] = data16;
+            OutputBuffer.outputData[currentIndex + 17] = data17;
+            OutputBuffer.outputData[currentIndex + 18] = data18;
+            OutputBuffer.outputData[currentIndex + 19] = data19;
+            OutputBuffer.outputData[currentIndex + 20] = data20;
+            OutputBuffer.outputData[currentIndex + 21] = data21;
+            OutputBuffer.outputData[currentIndex + 22] = data22;
+            OutputBuffer.outputData[currentIndex + 23] = data23;
+            OutputBuffer.outputData[currentIndex + 24] = data24;
+            OutputBuffer.outputData[currentIndex + 25] = data25;
+            OutputBuffer.outputData[currentIndex + 26] = data26;
+            OutputBuffer.outputData[currentIndex + 27] = data27;
+            OutputBuffer.outputData[currentIndex + 28] = data28;
+            OutputBuffer.outputData[currentIndex + 29] = data29;
+            OutputBuffer.outputData[currentIndex + 30] = data30;
+            OutputBuffer.outputData[currentIndex + 31] = data31;
+        }
+    }
+    
+    // Prevent compiler from optimizing away reads (branch never taken, but compiler can't prove it)
+    if (accumulator.x > 1e30) {
+        OutputBuffer.outputData[0] = accumulator;
     }
 }

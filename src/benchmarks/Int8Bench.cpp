@@ -47,7 +47,7 @@ void Int8Bench::Setup(IComputeContext& context, const std::string& kernel_dir) {
     context.setKernelArg(kernel, 0, buffer);
 }
 
-void Int8Bench::Run() {
+void Int8Bench::Run(uint32_t config_idx) {
     context->dispatch(kernel, 8192, 1, 1, 64, 1, 1);
 }
 
@@ -60,7 +60,7 @@ void Int8Bench::Teardown() {
     }
 }
 
-BenchmarkResult Int8Bench::GetResult() const {
+BenchmarkResult Int8Bench::GetResult(uint32_t config_idx) const {
     // 8 i8vec4 multiply-adds per iteration = 8 * 4 * 2 = 64 INT8 operations per iteration
     // 16384 iterations * 64 ops * 8192 workgroups * 64 threads
     uint64_t num_ops = (uint64_t)16384 * 64 * 8192 * 64;

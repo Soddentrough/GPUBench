@@ -1,4 +1,4 @@
-__kernel void cl_compute(__global float4* data) {
+__kernel void run_benchmark(__global float4* data) {
     uint workgroupOffset = get_group_id(0) * 256;
     uint localId = get_local_id(0);
     

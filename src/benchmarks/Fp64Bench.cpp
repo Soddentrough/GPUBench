@@ -42,7 +42,7 @@ void Fp64Bench::Setup(IComputeContext& context, const std::string& kernel_dir) {
     context.setKernelArg(kernel, 0, buffer);
 }
 
-void Fp64Bench::Run() {
+void Fp64Bench::Run(uint32_t config_idx) {
     context->dispatch(kernel, 4096, 1, 1, 64, 1, 1);
 }
 
@@ -57,7 +57,7 @@ void Fp64Bench::Teardown() {
     }
 }
 
-BenchmarkResult Fp64Bench::GetResult() const {
+BenchmarkResult Fp64Bench::GetResult(uint32_t config_idx) const {
     // 2 operations per loop iteration (FMA)
     uint64_t num_threads = 4096 * 64;
     uint64_t num_ops = (uint64_t)65536 * 2 * num_threads;

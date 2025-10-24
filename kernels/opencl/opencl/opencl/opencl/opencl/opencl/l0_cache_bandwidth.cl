@@ -1,4 +1,4 @@
-__kernel void cl_compute(__global uint* data) {
+__kernel void run_benchmark(__global uint* data) {
     uint r0 = get_global_id(0) * 1, r1 = get_global_id(0) * 2, r2 = get_global_id(0) * 3, r3 = get_global_id(0) * 4;
     uint r4 = get_global_id(0) * 5, r5 = get_global_id(0) * 6, r6 = get_global_id(0) * 7, r7 = get_global_id(0) * 8;
     uint r8 = get_global_id(0) * 9, r9 = get_global_id(0) * 10, r10 = get_global_id(0) * 11, r11 = get_global_id(0) * 12;

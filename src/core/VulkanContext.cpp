@@ -443,15 +443,26 @@ ComputeKernel VulkanContext::createKernel(const std::string& file_name, const st
         throw std::runtime_error("failed to create descriptor set layout!");
     }
 
+    // Set up push constants for non-buffer arguments (e.g., mode, bufferSize)
+    VkPushConstantRange pushConstantRange{};
+    pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    pushConstantRange.offset = 0;
+    pushConstantRange.size = 128; // Allocate 128 bytes for push constants
+    
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipelineLayoutInfo.setLayoutCount = 1;
     pipelineLayoutInfo.pSetLayouts = &vulkanKernel->descriptorSetLayout;
+    pipelineLayoutInfo.pushConstantRangeCount = 1;
+    pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
 
     if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &vulkanKernel->pipelineLayout) != VK_SUCCESS) {
         delete vulkanKernel;
         throw std::runtime_error("failed to create pipeline layout!");
     }
+    
+    // Initialize push constant data buffer
+    vulkanKernel->pushConstantData.resize(128, 0);
 
     VkComputePipelineCreateInfo pipelineInfo{};
     pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
@@ -525,9 +536,18 @@ void VulkanContext::setKernelArg(ComputeKernel kernel, uint32_t arg_index, Compu
 }
 
 void VulkanContext::setKernelArg(ComputeKernel kernel, uint32_t arg_index, size_t arg_size, const void* arg_value) {
-    // This is a simplified implementation. For non-buffer arguments,
-    // a common approach is to use push constants or a UBO.
-    // For simplicity, we'll assume arguments are set via buffers.
+    auto it = kernels.find(kernel);
+    if (it == kernels.end()) {
+        throw std::runtime_error("Invalid kernel handle");
+    }
+    
+    // For Vulkan, non-buffer arguments are passed via push constants
+    // Arguments are laid out sequentially in the push constant buffer
+    // arg_index 2 -> offset 0, arg_index 3 -> offset 4, etc.
+    size_t offset = (arg_index - 2) * 4; // Assuming args 0,1 are buffers
+    if (offset + arg_size <= it->second->pushConstantData.size()) {
+        memcpy(it->second->pushConstantData.data() + offset, arg_value, arg_size);
+    }
 }
 
 void VulkanContext::dispatch(ComputeKernel kernel, uint32_t grid_x, uint32_t grid_y, uint32_t grid_z, uint32_t block_x, uint32_t block_y, uint32_t block_z) {
@@ -553,6 +573,14 @@ void VulkanContext::dispatch(ComputeKernel kernel, uint32_t grid_x, uint32_t gri
     vkBeginCommandBuffer(commandBuffer, &beginInfo);
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, vulkanKernel->pipeline);
     vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, vulkanKernel->pipelineLayout, 0, 1, &vulkanKernel->descriptorSet, 0, nullptr);
+    
+    // Push constants for non-buffer arguments
+    if (!vulkanKernel->pushConstantData.empty()) {
+        vkCmdPushConstants(commandBuffer, vulkanKernel->pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, 
+                          static_cast<uint32_t>(vulkanKernel->pushConstantData.size()), 
+                          vulkanKernel->pushConstantData.data());
+    }
+    
     vkCmdDispatch(commandBuffer, grid_x, grid_y, grid_z);
     vkEndCommandBuffer(commandBuffer);
 
@@ -562,11 +590,6 @@ void VulkanContext::dispatch(ComputeKernel kernel, uint32_t grid_x, uint32_t gri
     submitInfo.pCommandBuffers = &commandBuffer;
 
     vkQueueSubmit(computeQueue, 1, &submitInfo, VK_NULL_HANDLE);
-
-    // No vkQueueWaitIdle here to allow for asynchronous execution.
-    // waitIdle() should be called explicitly when synchronization is needed.
-
-    // Cleanup can be managed more efficiently, but for simplicity:
     vkQueueWaitIdle(computeQueue);
     vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
 }

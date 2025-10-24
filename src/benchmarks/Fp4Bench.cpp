@@ -47,7 +47,7 @@ void Fp4Bench::Setup(IComputeContext& context, const std::string& kernel_dir) {
     context.setKernelArg(kernel, 0, buffer);
 }
 
-void Fp4Bench::Run() {
+void Fp4Bench::Run(uint32_t config_idx) {
     context->dispatch(kernel, 8192, 1, 1, 64, 1, 1);
 }
 
@@ -60,7 +60,7 @@ void Fp4Bench::Teardown() {
     }
 }
 
-BenchmarkResult Fp4Bench::GetResult() const {
+BenchmarkResult Fp4Bench::GetResult(uint32_t config_idx) const {
     // 8 fma operations per iteration, each is 2 ops (multiply, add)
     // 8 * 2 * 4 = 64 FP4-equivalent operations per iteration
     // 16384 iterations * 64 ops * 8192 workgroups * 64 threads
