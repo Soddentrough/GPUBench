@@ -1,5 +1,6 @@
 #include "benchmarks/MemBandwidthBench.h"
 #include <stdexcept>
+#include <iostream>
 
 bool MemBandwidthBench::IsSupported(const DeviceInfo& info, IComputeContext* context) const {
     return true;
@@ -28,8 +29,15 @@ void MemBandwidthBench::createKernel(BandwidthConfig& config, const std::string&
     this->context->setKernelArg(config.kernel, 1, outputBuffer);
     uint32_t mode = static_cast<uint32_t>(config.mode);
     this->context->setKernelArg(config.kernel, 2, sizeof(mode), &mode);
-    uint32_t bufferSizeParam = static_cast<uint32_t>(bufferSize);
-    this->context->setKernelArg(config.kernel, 3, sizeof(bufferSizeParam), &bufferSizeParam);
+    // Pass buffer size in bytes (all kernels now expect bytes)
+    uint32_t bufferSizeInBytes = static_cast<uint32_t>(bufferSize);
+    this->context->setKernelArg(config.kernel, 3, sizeof(bufferSizeInBytes), &bufferSizeInBytes);
+    
+    // Debug logging for Vulkan
+    if (this->context->getBackend() == ComputeBackend::Vulkan) {
+        std::cout << "  [DEBUG] Vulkan kernel '" << config.name << "': bufferSize=" << bufferSizeInBytes 
+                  << " bytes (" << (bufferSizeInBytes/(1024*1024*1024)) << "GB), mode=" << mode << std::endl;
+    }
 }
 
 void MemBandwidthBench::Setup(IComputeContext& context, const std::string& kernel_dir) {
@@ -38,11 +46,44 @@ void MemBandwidthBench::Setup(IComputeContext& context, const std::string& kerne
     // Get device info first
     DeviceInfo deviceInfo = context.getCurrentDeviceInfo();
     
-    // Use a fixed 2GB buffer size per buffer
-    // This is large enough to measure memory bandwidth while avoiding OOM errors
+    // Calculate buffer size based on available VRAM and workload requirements
+    uint64_t availableVRAM = deviceInfo.memorySize;
+    uint32_t maxWorkgroupSize = deviceInfo.maxWorkGroupSize;
+    
+    // Determine maximum number of threads across all configurations
+    // Each config has: workgroupSize * numWorkgroups threads
+    uint32_t maxThreads = 0;
+    
+    // 128 threads/group configs
+    maxThreads = std::max(maxThreads, 128u * 4096u);
+    
+    // 256 threads/group configs (if supported)
+    if (maxWorkgroupSize >= 256) {
+        maxThreads = std::max(maxThreads, std::min(256u, maxWorkgroupSize) * 2048u);
+    }
+    
+    // 1024 threads/group configs (if supported)
+    if (maxWorkgroupSize >= 1024) {
+        maxThreads = std::max(maxThreads, 1024u * 512u);
+    }
+    
+    // Use 3.5GB buffer size per buffer (7GB total) to avoid uint32_t overflow
+    // uint32_t max is ~4.29GB, so 3.5GB is safe for passing as uint32 parameter
+    // This is large enough to exceed cache sizes and measure memory bandwidth
+    this->bufferSize = 3584ULL * 1024ULL * 1024ULL; // 3.5 GB
+    
+    // If VRAM is less than 7GB, scale down proportionally
+    if (availableVRAM < 7ULL * 1024ULL * 1024ULL * 1024ULL) {
+        // Use 40% of available VRAM per buffer, capped at uint32 max
+        this->bufferSize = std::min((availableVRAM * 2ULL) / 5ULL, 4000ULL * 1024ULL * 1024ULL);
+    }
+    
     // Ensure buffer size is a multiple of 16 bytes (vec4 size)
-    this->bufferSize = 2UL * 1024 * 1024 * 1024; // 2 GB
     this->bufferSize = (this->bufferSize / 16) * 16; // Round down to multiple of 16
+    
+    // Log buffer size for debugging
+    std::cout << "Allocating memory buffers: " << (bufferSize / (1024*1024*1024)) << " GB per buffer ("
+              << ((bufferSize * 2) / (1024*1024*1024)) << " GB total)" << std::endl;
     
     inputBuffer = this->context->createBuffer(bufferSize);
     outputBuffer = this->context->createBuffer(bufferSize);
@@ -52,23 +93,34 @@ void MemBandwidthBench::Setup(IComputeContext& context, const std::string& kerne
     this->context->writeBuffer(inputBuffer, 0, bufferSize, testData.data());
     this->context->waitIdle();
 
-    // Get device max workgroup size and clamp configurations to it
-    uint32_t maxWorkgroupSize = deviceInfo.maxWorkGroupSize;
+    // Calculate safe number of workgroups to avoid buffer aliasing
+    // Each thread needs: 32 iterations × 32 vec4s = 1024 vec4s of unique buffer space
+    // With stride = total_threads × 32, we need: total_threads × 32 × 32 ≤ buffer_size_in_vec4s
+    uint32_t bufferSizeInVec4s = bufferSize / 16;
+    uint32_t maxTotalThreads = bufferSizeInVec4s / (32 * 32); // = bufferSize / 16384
     
-    configs.push_back({"Read 128 threads/group", "membw_128", 128, 4096, TestMode::Read, nullptr});
-    configs.push_back({"Write 128 threads/group", "membw_128", 128, 4096, TestMode::Write, nullptr});
-    configs.push_back({"R/W 128 threads/group", "membw_128", 128, 4096, TestMode::ReadWrite, nullptr});
+    // Create configurations based on device capabilities  
+    uint32_t numWorkgroups128 = std::min(4096u, maxTotalThreads / 128);
+    configs.push_back({"Read 128 threads/group", "membw_128", 128, numWorkgroups128, TestMode::Read, nullptr});
+    configs.push_back({"Write 128 threads/group", "membw_128", 128, numWorkgroups128, TestMode::Write, nullptr});
+    configs.push_back({"R/W 128 threads/group", "membw_128", 128, numWorkgroups128, TestMode::ReadWrite, nullptr});
 
-    configs.push_back({"Read 256 threads/group", "membw_256", std::min(256u, maxWorkgroupSize), 2048, TestMode::Read, nullptr});
-    configs.push_back({"Write 256 threads/group", "membw_256", std::min(256u, maxWorkgroupSize), 2048, TestMode::Write, nullptr});
-    configs.push_back({"R/W 256 threads/group", "membw_256", std::min(256u, maxWorkgroupSize), 2048, TestMode::ReadWrite, nullptr});
+    uint32_t workgroupSize256 = std::min(256u, maxWorkgroupSize);
+    uint32_t numWorkgroups256 = std::min(2048u, maxTotalThreads / workgroupSize256);
+    configs.push_back({"Read 256 threads/group", "membw_256", workgroupSize256, numWorkgroups256, TestMode::Read, nullptr});
+    configs.push_back({"Write 256 threads/group", "membw_256", workgroupSize256, numWorkgroups256, TestMode::Write, nullptr});
+    configs.push_back({"R/W 256 threads/group", "membw_256", workgroupSize256, numWorkgroups256, TestMode::ReadWrite, nullptr});
     
     // Only add 1024 config if device supports it
     if (maxWorkgroupSize >= 1024) {
-        configs.push_back({"Read 1024 threads/group", "membw_1024", 1024, 512, TestMode::Read, nullptr});
-        configs.push_back({"Write 1024 threads/group", "membw_1024", 1024, 512, TestMode::Write, nullptr});
-        configs.push_back({"R/W 1024 threads/group", "membw_1024", 1024, 512, TestMode::ReadWrite, nullptr});
+        uint32_t numWorkgroups1024 = std::min(512u, maxTotalThreads / 1024);
+        configs.push_back({"Read 1024 threads/group", "membw_1024", 1024, numWorkgroups1024, TestMode::Read, nullptr});
+        configs.push_back({"Write 1024 threads/group", "membw_1024", 1024, numWorkgroups1024, TestMode::Write, nullptr});
+        configs.push_back({"R/W 1024 threads/group", "membw_1024", 1024, numWorkgroups1024, TestMode::ReadWrite, nullptr});
     }
+    
+    std::cout << "Max safe threads for " << (bufferSize/(1024*1024*1024)) << "GB buffer: " << maxTotalThreads 
+              << " (128tpg: " << numWorkgroups128 << " wg, 256tpg: " << numWorkgroups256 << " wg)" << std::endl;
     
     for (auto& config : configs) {
         createKernel(config, kernel_dir);
