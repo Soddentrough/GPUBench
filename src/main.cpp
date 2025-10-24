@@ -34,7 +34,15 @@ int main(int argc, char** argv) {
     bool verbose = false;
     app.add_flag("--verbose", verbose, "Enable verbose logging");
 
+    bool debug = false;
+    app.add_flag("--debug", debug, "Enable debug logging (implies verbose)");
+
     CLI11_PARSE(app, argc, argv);
+    
+    // Debug implies verbose
+    if (debug) {
+        verbose = true;
+    }
 
     if (list_benchmarks) {
         BenchmarkRunner runner({});
@@ -120,7 +128,7 @@ int main(int argc, char** argv) {
             context_ptrs.push_back(context.get());
         }
 
-        BenchmarkRunner runner(context_ptrs);
+        BenchmarkRunner runner(context_ptrs, verbose, debug);
         runner.run(benchmarks_to_run);
     } catch (const std::exception& e) {
         std::cerr << "An error occurred: " << e.what() << std::endl;

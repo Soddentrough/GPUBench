@@ -32,6 +32,8 @@ public:
     BenchmarkResult GetResult(uint32_t config_idx = 0) const override;
     uint32_t GetNumConfigs() const override;
     std::string GetConfigName(uint32_t config_idx) const override;
+    
+    void setDebug(bool debug) { this->debug = debug; }
 
 private:
     IComputeContext* context = nullptr;
@@ -39,6 +41,7 @@ private:
     ComputeBuffer inputBuffer = nullptr;
     ComputeBuffer outputBuffer = nullptr;
     size_t bufferSize = 0;
+    bool debug = false;
     
     void createKernel(BandwidthConfig& config, const std::string& kernel_dir);
 };

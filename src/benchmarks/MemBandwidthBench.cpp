@@ -33,8 +33,8 @@ void MemBandwidthBench::createKernel(BandwidthConfig& config, const std::string&
     uint32_t bufferSizeInBytes = static_cast<uint32_t>(bufferSize);
     this->context->setKernelArg(config.kernel, 3, sizeof(bufferSizeInBytes), &bufferSizeInBytes);
     
-    // Debug logging for Vulkan
-    if (this->context->getBackend() == ComputeBackend::Vulkan) {
+    // Debug logging for Vulkan (only if debug flag is enabled)
+    if (debug && this->context->getBackend() == ComputeBackend::Vulkan) {
         std::cout << "  [DEBUG] Vulkan kernel '" << config.name << "': bufferSize=" << bufferSizeInBytes 
                   << " bytes (" << (bufferSizeInBytes/(1024*1024*1024)) << "GB), mode=" << mode << std::endl;
     }

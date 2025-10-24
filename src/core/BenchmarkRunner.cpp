@@ -30,7 +30,8 @@ std::vector<uint32_t> create_shuffled_indices(size_t size) {
     return indices;
 }
 
-BenchmarkRunner::BenchmarkRunner(const std::vector<IComputeContext*>& contexts) : contexts(contexts) {
+BenchmarkRunner::BenchmarkRunner(const std::vector<IComputeContext*>& contexts, bool verbose, bool debug) 
+    : contexts(contexts), verbose(verbose), debug(debug) {
     discoverBenchmarks();
     formatter = std::make_unique<ResultFormatter>();
 }
@@ -152,17 +153,38 @@ void BenchmarkRunner::run(const std::vector<std::string>& benchmarks_to_run) {
 
                 if (should_run && bench->IsSupported(info, context)) {
                     try {
-                        std::cout << "Setting up " << bench->GetName() << "..." << std::endl;
+                        // Set debug flag for MemBandwidthBench
+                        if (std::string(bench->GetName()) == "Memory Bandwidth") {
+                            auto* membw = dynamic_cast<MemBandwidthBench*>(bench.get());
+                            if (membw) {
+                                membw->setDebug(debug);
+                            }
+                        }
+                        
+                        if (verbose) {
+                            std::cout << "Setting up " << bench->GetName() << "..." << std::endl;
+                        }
                         bench->Setup(*context, KernelPath::find());
 
                         uint32_t num_configs = bench->GetNumConfigs();
+                        
+                        // For Memory Bandwidth tests in non-verbose mode, print a single summary message
+                        bool is_membw = (std::string(bench->GetName()) == "Memory Bandwidth");
+                        if (is_membw && !verbose) {
+                            std::cout << "Running Memory Bandwidth tests.." << std::endl;
+                        }
+                        
                         for (uint32_t i = 0; i < num_configs; ++i) {
                             std::string bench_name = bench->GetName();
                             std::string config_name = bench->GetConfigName(i);
                             if (!config_name.empty()) {
                                 bench_name += " (" + config_name + ")";
                             }
-                            std::cout << "Running " << bench_name << "..." << std::endl;
+                            
+                            // Only print individual "Running..." messages in verbose mode
+                            if (verbose) {
+                                std::cout << "Running " << bench_name << "..." << std::endl;
+                            }
 
                             // Timed run
                             double total_time_ms = 0;

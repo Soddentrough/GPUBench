@@ -9,7 +9,7 @@ class ResultFormatter;
 
 class BenchmarkRunner {
 public:
-    BenchmarkRunner(const std::vector<IComputeContext*>& contexts);
+    BenchmarkRunner(const std::vector<IComputeContext*>& contexts, bool verbose = false, bool debug = false);
     ~BenchmarkRunner();
 
     void run(const std::vector<std::string>& benchmarks_to_run);
@@ -22,4 +22,6 @@ private:
     std::vector<IComputeContext*> contexts;
     std::vector<std::unique_ptr<IBenchmark>> benchmarks;
     std::unique_ptr<ResultFormatter> formatter;
+    bool verbose;
+    bool debug;
 };
