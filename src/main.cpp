@@ -12,6 +12,7 @@
 
 int main(int argc, char** argv) {
     CLI::App app{"GPUBench"};
+    app.set_version_flag("--version", GPUBENCH_VERSION);
 
     std::vector<std::string> benchmarks_to_run;
     app.add_option("-b,--benchmarks,--benchmark", benchmarks_to_run, "Benchmarks to run (comma-separated)")->delimiter(',');
@@ -62,6 +63,7 @@ int main(int argc, char** argv) {
     }
 
     try {
+        std::cout << "GPUBench version " << GPUBENCH_VERSION << std::endl << std::endl;
         // Create compute contexts for specified backends
         std::vector<std::unique_ptr<IComputeContext>> contexts;
         if (backend_strs.empty() || (backend_strs.size() == 1 && backend_strs[0] == "auto")) {

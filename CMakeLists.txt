@@ -180,6 +180,8 @@ if(HIP_FOUND)
 endif()
 
 # Compiler definitions for conditional compilation
+target_compile_definitions(gpubench PRIVATE GPUBENCH_VERSION="${PROJECT_VERSION}")
+
 if(Vulkan_FOUND)
     target_compile_definitions(gpubench PRIVATE HAVE_VULKAN)
 endif()
