@@ -1,8 +1,8 @@
-__kernel void run_benchmark(__global float4* data) {
+__kernel void run_benchmark(__global volatile float4* data) {
     uint workgroupOffset = get_group_id(0) * 8192;
     uint localId = get_local_id(0);
     
-    uint baseIndex = workgroupOffset + (localId * 32);
+    uint baseIndex = (workgroupOffset + (localId * 32)) & 0xFFFFF;
     
     float4 sum = (float4)(0.0f);
     

@@ -8,10 +8,10 @@ __kernel void run_benchmark(__global float4* data) {
     
     for (int iter = 0; iter < 200; iter++) {
         for (int i = 0; i < 32; i++) {
-            float4 v = data[baseIndex + i];
+            float4 v = data[(baseIndex + i) & 0xFFFFF];
             sum += v;
         }
     }
     
-    data[baseIndex] = sum;
+    data[baseIndex & 0xFFFFF] = sum;
 }

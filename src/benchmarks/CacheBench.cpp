@@ -52,13 +52,9 @@ void CacheBench::Run(uint32_t config_idx) {
         // The shader uses a workgroup size of 256.
         uint32_t numWorkgroups = 65536;
         
-        // For L3 cache bandwidth with the cachebw_l3 kernel, reduce workgroups to prevent 
-        // out-of-bounds access. The kernel uses workgroupOffset = get_group_id(0) * 8192,
-        // so with a 16MB buffer (1M float4 elements), we can only safely use ~122 workgroups.
-        if (kernelFile == "cachebw_l3" && bufferSize == 16 * 1024 * 1024) {
-            // bufferSize / sizeof(float4) / 8192 = 16MB / 16 / 8192 = ~122
-            numWorkgroups = 100;  // Use 100 to be safe
-        }
+        // For L3 cache bandwidth with the cachebw_l3 kernel, we use a mask in the kernel
+        // to ensure we stay within bounds (wrapping around the buffer).
+        // This allows us to saturate the GPU with many workgroups.
         
         context->dispatch(kernel, numWorkgroups, 1, 1, 256, 1, 1);
     } else {
@@ -108,9 +104,7 @@ BenchmarkResult CacheBench::GetResult(uint32_t config_idx) const {
         operations = num_threads_bw * 500 * sizeof(float) * 4;
     } else if (name == "L3 Cache Bandwidth") {
         // L3: 200 iterations × 32 float4 reads × sizeof(float4)
-        // Note: For L3, we use reduced workgroups (100 instead of 65536)
-        const uint64_t l3_num_threads = 100 * 256;
-        operations = l3_num_threads * 200 * 32 * sizeof(float) * 4;
+        operations = num_threads_bw * 200 * 32 * sizeof(float) * 4;
     } else if (metric == "GB/s") {
         // Generic bandwidth: assume 1024 reads
         operations = num_threads_bw * 1024 * sizeof(uint32_t);

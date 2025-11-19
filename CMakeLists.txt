@@ -17,7 +17,7 @@ configure_file(
 )
 
 # Try to find Vulkan (primary backend)
-find_package(Vulkan)
+find_package(Vulkan REQUIRED)
 if(Vulkan_FOUND)
     message(STATUS "Vulkan found: ${Vulkan_LIBRARIES}")
     find_program(GLSLC_EXECUTABLE glslc)
@@ -168,7 +168,8 @@ endif()
 
 # Link libraries
 if(Vulkan_FOUND)
-    target_link_libraries(gpubench PUBLIC ${Vulkan_LIBRARIES})
+    #target_link_libraries(gpubench PUBLIC ${Vulkan_LIBRARIES})
+    target_link_libraries(gpubench PUBLIC Vulkan::Vulkan)
 endif()
 
 if(OpenCL_FOUND)

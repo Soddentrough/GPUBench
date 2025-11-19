@@ -25,11 +25,11 @@ void main() {
     for (int iter = 0; iter < 200; iter++) {
         // Read 32 vec4 elements per thread
         for (int i = 0; i < 32; i++) {
-            vec4 v = Buffer.data[baseIndex + i];
+            vec4 v = Buffer.data[(baseIndex + i) & 0xFFFFF];
             sum += v;
         }
     }
     
     // Write back to prevent dead code elimination
-    Buffer.data[baseIndex] = sum;
+    Buffer.data[baseIndex & 0xFFFFF] = sum;
 }
