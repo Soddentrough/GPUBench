@@ -29,4 +29,5 @@ private:
     ComputeKernel kernel = nullptr;
     ComputeBuffer buffer = nullptr;
     std::vector<uint32_t> initData;
+    void* hostMem = nullptr;
 };

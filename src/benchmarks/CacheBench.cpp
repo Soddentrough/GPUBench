@@ -1,5 +1,9 @@
 #include "benchmarks/CacheBench.h"
+#include <iostream>
 #include <stdexcept>
+#include <cstdlib>
+#include <cstring>
+#include <algorithm> // for std::min
 
 CacheBench::CacheBench(std::string name, std::string metric, uint64_t bufferSize, std::string kernelFile, std::vector<uint32_t> initData, std::vector<std::string> aliases)
     : name(name), metric(metric), bufferSize(bufferSize), kernelFile(kernelFile), initData(initData), aliases(aliases) {}
@@ -14,9 +18,34 @@ void CacheBench::Setup(IComputeContext& context, const std::string& kernel_dir) 
     this->context = &context;
 
     if (bufferSize > 0) {
-        buffer = context.createBuffer(bufferSize);
-        if (!initData.empty()) {
-            context.writeBuffer(buffer, 0, initData.size() * sizeof(uint32_t), initData.data());
+        // Allocate page-aligned host memory for Zero Copy / Pinned access.
+        // This is critical for stability on Unified Memory (APU) platforms like Strix Halo
+        // to ensure the driver can map the memory without page faults or copying.
+        hostMem = aligned_alloc(4096, bufferSize);
+        
+        if (hostMem) {
+            // Initialize memory
+            if (!initData.empty()) {
+                size_t copySize = std::min((size_t)bufferSize, initData.size() * sizeof(uint32_t));
+                memcpy(hostMem, initData.data(), copySize);
+                // Zero fill the rest if any
+                if (copySize < bufferSize) {
+                    memset((char*)hostMem + copySize, 0, bufferSize - copySize);
+                }
+            } else {
+                memset(hostMem, 0, bufferSize);
+            }
+            
+            // Create buffer using the aligned host pointer (CL_MEM_USE_HOST_PTR)
+            // Print buffer range for debugging
+            std::cout << "  [DEBUG] CacheBench Buffer: " << hostMem << " - " << (void*)((char*)hostMem + bufferSize) << std::endl;
+            buffer = context.createBuffer(bufferSize, hostMem);
+        } else {
+            // Fallback to standard allocation if host allocation fails (unlikely)
+            buffer = context.createBuffer(bufferSize);
+            if (!initData.empty()) {
+                context.writeBuffer(buffer, 0, initData.size() * sizeof(uint32_t), initData.data());
+            }
         }
     }
 
@@ -50,7 +79,10 @@ void CacheBench::Run(uint32_t config_idx) {
     if (metric == "GB/s") {
         // For bandwidth, we want to saturate the GPU with threads.
         // The shader uses a workgroup size of 256.
-        uint32_t numWorkgroups = 65536;
+        // Reduced to 32 to eliminate wrapping/aliasing on 4MB buffers (L3).
+        // 32 workgroups * 8192 vec4s/wg = 262144 vec4s = 4MB.
+        // This ensures 1:1 mapping with no contention.
+        uint32_t numWorkgroups = 32;
         
         // For L3 cache bandwidth with the cachebw_l3 kernel, we use a mask in the kernel
         // to ensure we stay within bounds (wrapping around the buffer).
@@ -72,6 +104,10 @@ void CacheBench::Teardown() {
         context->releaseBuffer(buffer);
         buffer = nullptr;
     }
+    if (hostMem) {
+        free(hostMem);
+        hostMem = nullptr;
+    }
 }
 
 const char* CacheBench::GetName() const {
@@ -88,7 +124,8 @@ const char* CacheBench::GetMetric() const {
 
 BenchmarkResult CacheBench::GetResult(uint32_t config_idx) const {
     uint64_t operations = 0;
-    const uint64_t num_threads_bw = 65536 * 256;
+    // Must match numWorkgroups in Run()
+    const uint64_t num_threads_bw = 32 * 256;
 
     if (name == "L0 Cache Bandwidth") {
         // 16 independent ops * 1024 iterations * num_threads

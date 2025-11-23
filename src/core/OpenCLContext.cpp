@@ -84,6 +84,10 @@ const std::vector<DeviceInfo>& OpenCLContext::getDevices() const {
             size_t maxWorkGroupSize;
             clGetDeviceInfo(dev, CL_DEVICE_MAX_WORK_GROUP_SIZE, sizeof(maxWorkGroupSize), &maxWorkGroupSize, nullptr);
             info.maxWorkGroupSize = static_cast<uint32_t>(maxWorkGroupSize);
+
+            cl_ulong localMemSize;
+            clGetDeviceInfo(dev, CL_DEVICE_LOCAL_MEM_SIZE, sizeof(localMemSize), &localMemSize, nullptr);
+            info.maxComputeSharedMemorySize = static_cast<uint32_t>(localMemSize);
             
             deviceInfos.push_back(info);
         }
@@ -118,6 +122,10 @@ DeviceInfo OpenCLContext::getCurrentDeviceInfo() const {
     size_t maxWorkGroupSize;
     clGetDeviceInfo(device, CL_DEVICE_MAX_WORK_GROUP_SIZE, sizeof(maxWorkGroupSize), &maxWorkGroupSize, nullptr);
     info.maxWorkGroupSize = static_cast<uint32_t>(maxWorkGroupSize);
+
+    cl_ulong localMemSize;
+    clGetDeviceInfo(device, CL_DEVICE_LOCAL_MEM_SIZE, sizeof(localMemSize), &localMemSize, nullptr);
+    info.maxComputeSharedMemorySize = static_cast<uint32_t>(localMemSize);
     
     return info;
 }
@@ -145,8 +153,10 @@ ComputeBuffer OpenCLContext::createBuffer(size_t size, const void* host_ptr) {
     
     cl_int err;
     cl_mem_flags flags = CL_MEM_READ_WRITE;
+    // If host pointer is provided, use it directly (zero-copy/pinned) instead of copying
+    // This is critical for large buffers on APUs to avoid extra copies and ensure residency
     if (host_ptr) {
-        flags |= CL_MEM_COPY_HOST_PTR;
+        flags |= CL_MEM_USE_HOST_PTR;
     }
     cl_mem buffer = clCreateBuffer(context, flags, size, const_cast<void*>(host_ptr), &err);
     if (err != CL_SUCCESS) {
@@ -163,7 +173,8 @@ ComputeBuffer OpenCLContext::createBuffer(size_t size, const void* host_ptr) {
 
 void OpenCLContext::writeBuffer(ComputeBuffer buffer, size_t offset, size_t size, const void* host_ptr) {
     auto* buffer_cl = static_cast<ComputeBuffer_cl*>(buffer);
-    cl_int err = clEnqueueWriteBuffer(commandQueue, buffer_cl->buffer, CL_FALSE, offset, size, host_ptr, 0, nullptr, nullptr);
+    // Use blocking write (CL_TRUE) to ensure data is resident before proceeding
+    cl_int err = clEnqueueWriteBuffer(commandQueue, buffer_cl->buffer, CL_TRUE, offset, size, host_ptr, 0, nullptr, nullptr);
     if (err != CL_SUCCESS) {
         throw std::runtime_error("Failed to write to OpenCL buffer");
     }
@@ -171,7 +182,8 @@ void OpenCLContext::writeBuffer(ComputeBuffer buffer, size_t offset, size_t size
 
 void OpenCLContext::readBuffer(ComputeBuffer buffer, size_t offset, size_t size, void* host_ptr) const {
     const auto* buffer_cl = static_cast<const ComputeBuffer_cl*>(buffer);
-    cl_int err = clEnqueueReadBuffer(commandQueue, buffer_cl->buffer, CL_FALSE, offset, size, host_ptr, 0, nullptr, nullptr);
+    // Use blocking read (CL_TRUE)
+    cl_int err = clEnqueueReadBuffer(commandQueue, buffer_cl->buffer, CL_TRUE, offset, size, host_ptr, 0, nullptr, nullptr);
     if (err != CL_SUCCESS) {
         throw std::runtime_error("Failed to read from OpenCL buffer");
     }

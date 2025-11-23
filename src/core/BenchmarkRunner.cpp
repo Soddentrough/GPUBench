@@ -63,7 +63,8 @@ void BenchmarkRunner::discoverBenchmarks() {
     
     const size_t l1_size = 24 * 1024;
     const size_t l2_size = 1 * 1024 * 1024;
-    const size_t l3_size = 16 * 1024 * 1024;
+    // Reduce L3 size to 4MB to avoid potential OpenCL allocation/mapping limits or stability issues
+    const size_t l3_size = 4 * 1024 * 1024;
     
     // Cache bandwidth kernels use float4 arrays and access large index ranges
     // We need to allocate enough space based on the dispatch pattern (65536 workgroups * 256 threads)

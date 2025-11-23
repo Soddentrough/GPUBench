@@ -1,4 +1,4 @@
-#include "benchmarks/MemBandwidthBench.h"
+                                                                                                                                                                                                                                                                                                                                        #include "benchmarks/MemBandwidthBench.h"
 #include <stdexcept>
 #include <iostream>
 
@@ -67,19 +67,16 @@ void MemBandwidthBench::Setup(IComputeContext& context, const std::string& kerne
         maxThreads = std::max(maxThreads, 1024u * 512u);
     }
     
-    // Use 3.5GB buffer size per buffer (7GB total) to avoid uint32_t overflow
-    // uint32_t max is ~4.29GB, so 3.5GB is safe for passing as uint32 parameter
-    // This is large enough to exceed cache sizes and measure memory bandwidth
-    this->bufferSize = 3584ULL * 1024ULL * 1024ULL; // 3.5 GB
+    // Calculate max safe size: 50% of VRAM or 1GB, whichever is smaller.
+    // We cap at 1GB to avoid potential signed integer overflow issues with 2GB (0x80000000) 
+    // in some drivers/kernels, while still being large enough for bandwidth testing.
+    uint64_t maxSafeSize = std::min<uint64_t>(availableVRAM / 2, 1024ULL * 1024ULL * 1024ULL);
     
-    // If VRAM is less than 7GB, scale down proportionally
-    if (availableVRAM < 7ULL * 1024ULL * 1024ULL * 1024ULL) {
-        // Use 40% of available VRAM per buffer, capped at uint32 max
-        this->bufferSize = std::min((availableVRAM * 2ULL) / 5ULL, 4000ULL * 1024ULL * 1024ULL);
+    // Find largest power of 2 that fits in maxSafeSize
+    this->bufferSize = 16ULL * 1024ULL * 1024ULL; // Start at 16MB min
+    while (this->bufferSize * 2 <= maxSafeSize) {
+        this->bufferSize *= 2;
     }
-    
-    // Ensure buffer size is a multiple of 16 bytes (vec4 size)
-    this->bufferSize = (this->bufferSize / 16) * 16; // Round down to multiple of 16
     
     // Log buffer size for debugging
     std::cout << "Allocating memory buffers: " << (bufferSize / (1024*1024*1024)) << " GB per buffer ("
@@ -91,6 +88,10 @@ void MemBandwidthBench::Setup(IComputeContext& context, const std::string& kerne
     // Initialize input buffer with test data to prevent reading uninitialized memory
     std::vector<float> testData(bufferSize / sizeof(float), 1.0f);
     this->context->writeBuffer(inputBuffer, 0, bufferSize, testData.data());
+    
+    // Initialize output buffer as well to ensure pages are mapped/resident (prevents page faults on unified memory)
+    this->context->writeBuffer(outputBuffer, 0, bufferSize, testData.data());
+    
     this->context->waitIdle();
 
     // Calculate safe number of workgroups to avoid buffer aliasing
