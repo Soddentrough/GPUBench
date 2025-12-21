@@ -63,8 +63,8 @@ void BenchmarkRunner::discoverBenchmarks() {
     
     const size_t l1_size = 24 * 1024;
     const size_t l2_size = 1 * 1024 * 1024;
-    // Reduce L3 size to 4MB to avoid potential OpenCL allocation/mapping limits or stability issues
-    const size_t l3_size = 4 * 1024 * 1024;
+    // Increase L3 size to 8MB to ensure we hit L3 cache (Infinity Cache) and avoid L2 aliasing
+    const size_t l3_size = 8 * 1024 * 1024;
     
     // Cache bandwidth kernels use float4 arrays and access large index ranges
     // We need to allocate enough space based on the dispatch pattern (65536 workgroups * 256 threads)
@@ -72,21 +72,21 @@ void BenchmarkRunner::discoverBenchmarks() {
     // cachebw_l2: max index = 65536 * 256 + 255 = ~16.7M float4 elements = ~268MB
     // cachebw_l3: max index = 65536 * 8192 + 255*32+31 = ~537M float4 elements = ~8.6GB (too large!)
     
-    // For cachebw_l1 (L2 cache), allocate 2MB (enough for the access pattern)
+    // For cachebw_l1 (L1 cache), allocate 2MB (enough for the access pattern)
     size_t cachebw_l1_size = 2 * 1024 * 1024;
     std::vector<uint32_t> l1_bw_init(cachebw_l1_size / sizeof(uint32_t), 1);
     
-    // For cachebw_l2 (L1 cache), allocate 268MB (enough for the access pattern)
+    // For cachebw_l2 (L2 cache), allocate 268MB (enough for the access pattern)
     size_t cachebw_l2_size = 268 * 1024 * 1024;
     std::vector<uint32_t> l2_bw_init(cachebw_l2_size / sizeof(uint32_t), 1);
     
-    // For cachebw_l3 (L3 cache), the kernel would access ~8.6GB which is too much
-    // We'll keep the 16MB allocation but need to fix the kernel or dispatch
-    std::vector<uint32_t> l3_bw_init(l3_size / sizeof(uint32_t), 1);
+    // For cachebw_l3 (L3 cache), we use 8MB which fits in L3
+    size_t cachebw_l3_size = l3_size;
+    std::vector<uint32_t> l3_bw_init(cachebw_l3_size / sizeof(uint32_t), 1);
     
-    benchmarks.push_back(std::make_unique<CacheBench>("L1 Cache Bandwidth", "GB/s", cachebw_l2_size, "cachebw_l2", l2_bw_init, std::vector<std::string>{"l1b"}));
-    benchmarks.push_back(std::make_unique<CacheBench>("L2 Cache Bandwidth", "GB/s", cachebw_l1_size, "cachebw_l1", l1_bw_init, std::vector<std::string>{"l2b"}));
-    benchmarks.push_back(std::make_unique<CacheBench>("L3 Cache Bandwidth", "GB/s", l3_size, "cachebw_l3", l3_bw_init, std::vector<std::string>{"l3b"}));
+    benchmarks.push_back(std::make_unique<CacheBench>("L1 Cache Bandwidth", "GB/s", cachebw_l1_size, "cachebw_l1", l1_bw_init, std::vector<std::string>{"l1b"}, 1));
+    benchmarks.push_back(std::make_unique<CacheBench>("L2 Cache Bandwidth", "GB/s", cachebw_l2_size, "cachebw_l2", l2_bw_init, std::vector<std::string>{"l2b"}, 2));
+    benchmarks.push_back(std::make_unique<CacheBench>("L3 Cache Bandwidth", "GB/s", cachebw_l3_size, "cachebw_l3", l3_bw_init, std::vector<std::string>{"l3b"}, 3));
 
     // Cache Latency
     benchmarks.push_back(std::make_unique<CacheBench>("L0 Cache Latency", "ns", 4, "l0_cache_latency", l0_init, std::vector<std::string>{"l0l"}));
@@ -114,21 +114,36 @@ void BenchmarkRunner::run(const std::vector<std::string>& benchmarks_to_run) {
         lower_benchmarks_to_run.push_back(to_lower(b));
     }
 
+    int totalSelected = contexts.size();
+    int totalAvailable = 0;
+    std::vector<ComputeBackend> countedBackends;
+    
+    for (auto* context : contexts) {
+        bool alreadyCounted = false;
+        for (auto b : countedBackends) {
+            if (b == context->getBackend()) {
+                alreadyCounted = true;
+                break;
+            }
+        }
+        
+        if (!alreadyCounted) {
+            totalAvailable += context->getDevices().size();
+            countedBackends.push_back(context->getBackend());
+        }
+    }
+
+    std::cout << "Using " << totalSelected << " of " << totalAvailable << " devices:" << std::endl;
+
     for (auto* context : contexts) {
         try {
             DeviceInfo info = context->getCurrentDeviceInfo();
-            std::cout << "================================================================" << std::endl;
-            std::cout << "Running on device: " << info.name 
-                      << " (" << ComputeBackendFactory::getBackendName(context->getBackend()) << ")" << std::endl;
-            std::cout << "================================================================" << std::endl;
-            
-            // Display device statistics
-            std::cout << "Device Statistics:" << std::endl;
-            std::cout << "  VRAM: " << static_cast<int>(std::round(info.memorySize / (1024.0 * 1024.0 * 1024.0))) << " GB" << std::endl;
-            std::cout << "  Max Work Group Size: " << info.maxWorkGroupSize << std::endl;
-            std::cout << "  Subgroup Size: " << info.subgroupSize << std::endl;
-            std::cout << "  Max Shared Memory: " << (info.maxComputeSharedMemorySize / 1024) << " KB" << std::endl;
-            std::cout << "================================================================" << std::endl;
+            std::cout << "Device " << context->getSelectedDeviceIndex() << ": " << info.name 
+                      << " (" << ComputeBackendFactory::getBackendName(context->getBackend()) << ") : "
+                      << "VRAM: " << static_cast<int>(std::round(info.memorySize / (1024.0 * 1024.0 * 1024.0))) << " GB. "
+                      << "Max Workgroup size: " << info.maxWorkGroupSize << ", "
+                      << "Subgroup Size: " << info.subgroupSize << ", "
+                      << "Max Shared Memory: " << (info.maxComputeSharedMemorySize / 1024) << " KB" << std::endl;
             std::cout << std::endl;
 
             for (auto& bench : benchmarks) {
@@ -154,12 +169,11 @@ void BenchmarkRunner::run(const std::vector<std::string>& benchmarks_to_run) {
 
                 if (should_run && bench->IsSupported(info, context)) {
                     try {
-                        // Set debug flag for MemBandwidthBench
-                        if (std::string(bench->GetName()) == "Memory Bandwidth") {
-                            auto* membw = dynamic_cast<MemBandwidthBench*>(bench.get());
-                            if (membw) {
-                                membw->setDebug(debug);
-                            }
+                        // Set debug flag for benchmarks
+                        if (auto* membw = dynamic_cast<MemBandwidthBench*>(bench.get())) {
+                            membw->setDebug(debug);
+                        } else if (auto* cache = dynamic_cast<CacheBench*>(bench.get())) {
+                            cache->setDebug(debug);
                         }
                         
                         if (verbose) {
@@ -170,10 +184,9 @@ void BenchmarkRunner::run(const std::vector<std::string>& benchmarks_to_run) {
                         uint32_t num_configs = bench->GetNumConfigs();
                         
                         // For Memory Bandwidth tests in non-verbose mode, print a single summary message
+                        // For Memory Bandwidth tests in non-verbose mode, we don't need a separate message
+                        // as the individual configs will print updates via \r
                         bool is_membw = (std::string(bench->GetName()) == "Memory Bandwidth");
-                        if (is_membw && !verbose) {
-                            std::cout << "Running Memory Bandwidth tests.." << std::endl;
-                        }
                         
                         for (uint32_t i = 0; i < num_configs; ++i) {
                             std::string bench_name = bench->GetName();
@@ -185,6 +198,8 @@ void BenchmarkRunner::run(const std::vector<std::string>& benchmarks_to_run) {
                             // Only print individual "Running..." messages in verbose mode
                             if (verbose) {
                                 std::cout << "Running " << bench_name << "..." << std::endl;
+                            } else {
+                                std::cout << "\rRunning " << bench_name << "..." << std::flush;
                             }
 
                             // Timed run
@@ -210,6 +225,7 @@ void BenchmarkRunner::run(const std::vector<std::string>& benchmarks_to_run) {
                             result_data.time_ms = total_time_ms;
                             result_data.isEmulated = bench->IsEmulated();
                             result_data.maxWorkGroupSize = info.maxWorkGroupSize;
+                            result_data.deviceIndex = context->getSelectedDeviceIndex();
 
                             formatter->addResult(result_data);
                         }
@@ -226,6 +242,7 @@ void BenchmarkRunner::run(const std::vector<std::string>& benchmarks_to_run) {
                     }
                 }
             }
+            if (!verbose) std::cout << std::endl;
         } catch (const std::exception& e) {
             std::cerr << "Error processing device: " << e.what() << std::endl;
             continue;

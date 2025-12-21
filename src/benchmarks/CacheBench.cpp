@@ -5,8 +5,8 @@
 #include <cstring>
 #include <algorithm> // for std::min
 
-CacheBench::CacheBench(std::string name, std::string metric, uint64_t bufferSize, std::string kernelFile, std::vector<uint32_t> initData, std::vector<std::string> aliases)
-    : name(name), metric(metric), bufferSize(bufferSize), kernelFile(kernelFile), initData(initData), aliases(aliases) {}
+CacheBench::CacheBench(std::string name, std::string metric, uint64_t bufferSize, std::string kernelFile, std::vector<uint32_t> initData, std::vector<std::string> aliases, int targetCacheLevel)
+    : name(name), metric(metric), bufferSize(bufferSize), kernelFile(kernelFile), initData(initData), aliases(aliases), targetCacheLevel(targetCacheLevel) {}
 
 CacheBench::~CacheBench() {}
 
@@ -14,8 +14,48 @@ bool CacheBench::IsSupported(const DeviceInfo& info, IComputeContext* context) c
     return true;
 }
 
+// Helper to round down to nearest power of 2
+static uint64_t roundDownToPowerOf2(uint64_t v) {
+    v--;
+    v |= v >> 1;
+    v |= v >> 2;
+    v |= v >> 4;
+    v |= v >> 8;
+    v |= v >> 16;
+    v |= v >> 32;
+    v++;
+    return v >> 1;
+}
+
 void CacheBench::Setup(IComputeContext& context, const std::string& kernel_dir) {
     this->context = &context;
+    DeviceInfo info = context.getCurrentDeviceInfo();
+
+    // Adjust buffer size based on cache level if available
+    if (targetCacheLevel == 3 && info.l3CacheSize > 0) {
+        // Use 75% of L3 size, rounded down to power of 2
+        bufferSize = roundDownToPowerOf2(info.l3CacheSize * 3 / 4);
+        if (bufferSize < 1024 * 1024) bufferSize = 1024 * 1024; // Min 1MB
+    } else if (targetCacheLevel == 2 && info.l2CacheSize > 0) {
+        // Use 75% of L2 size, rounded down to power of 2
+        bufferSize = roundDownToPowerOf2(info.l2CacheSize * 3 / 4);
+    }
+
+    // Determine numWorkgroups to cover the buffer exactly once.
+    // Each thread accesses 32 vec4s for Bandwidth tests (except L1 which is different but we'll adapt).
+    // Let's standardize on the L3 pattern: 256 threads * 32 vec4s/thread = 8192 vec4s per workgroup.
+    if (metric == "GB/s") {
+        uint64_t vec4_count = bufferSize / 16;
+        uint64_t elements_per_wg = 8192; // Default for L3
+        if (targetCacheLevel == 1) elements_per_wg = 2;
+        else if (targetCacheLevel == 2) elements_per_wg = 256;
+        
+        numWorkgroups = static_cast<uint32_t>(std::max<uint64_t>(1, vec4_count / elements_per_wg));
+        // Clamp to avoid excessive dispatch on small buffers
+        if (numWorkgroups > 65536) numWorkgroups = 65536; 
+    } else {
+        numWorkgroups = 1;
+    }
 
     if (bufferSize > 0) {
         // Allocate page-aligned host memory for Zero Copy / Pinned access.
@@ -38,7 +78,9 @@ void CacheBench::Setup(IComputeContext& context, const std::string& kernel_dir) 
             
             // Create buffer using the aligned host pointer (CL_MEM_USE_HOST_PTR)
             // Print buffer range for debugging
-            std::cout << "  [DEBUG] CacheBench Buffer: " << hostMem << " - " << (void*)((char*)hostMem + bufferSize) << std::endl;
+            if (debug) {
+                std::cout << "  [DEBUG] CacheBench Buffer: " << hostMem << " - " << (void*)((char*)hostMem + bufferSize) << " (" << (bufferSize/1024/1024) << " MB)" << std::endl;
+            }
             buffer = context.createBuffer(bufferSize, hostMem);
         } else {
             // Fallback to standard allocation if host allocation fails (unlikely)
@@ -53,7 +95,7 @@ void CacheBench::Setup(IComputeContext& context, const std::string& kernel_dir) 
     if (context.getBackend() == ComputeBackend::Vulkan) {
         full_kernel_path = kernel_dir + "/vulkan/" + kernelFile + ".spv";
     } else if (context.getBackend() == ComputeBackend::ROCm) {
-        full_kernel_path = kernel_dir + "/rocm/" + kernelFile + ".o";
+        full_kernel_path = kernel_dir + "/rocm/" + kernelFile + ".co";
     } else {
         full_kernel_path = kernel_dir + "/opencl/" + kernelFile + ".cl";
     }
@@ -66,9 +108,16 @@ void CacheBench::Setup(IComputeContext& context, const std::string& kernel_dir) 
     } else {
         kernel_name = "run_benchmark";
     }
-    kernel = context.createKernel(full_kernel_path, kernel_name, 1);
+    
+    // We now pass 2 arguments: buffer and mask
+    kernel = context.createKernel(full_kernel_path, kernel_name, 2);
     if (buffer) {
         context.setKernelArg(kernel, 0, buffer);
+        
+        // Calculate mask (element count - 1)
+        // bufferSize is in bytes, vec4 is 16 bytes
+        uint32_t mask = (bufferSize / 16) - 1;
+        context.setKernelArg(kernel, 1, sizeof(uint32_t), &mask);
     }
 }
 
@@ -77,17 +126,6 @@ void CacheBench::Run(uint32_t config_idx) {
         throw std::runtime_error("Context is not set up");
     }
     if (metric == "GB/s") {
-        // For bandwidth, we want to saturate the GPU with threads.
-        // The shader uses a workgroup size of 256.
-        // Reduced to 32 to eliminate wrapping/aliasing on 4MB buffers (L3).
-        // 32 workgroups * 8192 vec4s/wg = 262144 vec4s = 4MB.
-        // This ensures 1:1 mapping with no contention.
-        uint32_t numWorkgroups = 32;
-        
-        // For L3 cache bandwidth with the cachebw_l3 kernel, we use a mask in the kernel
-        // to ensure we stay within bounds (wrapping around the buffer).
-        // This allows us to saturate the GPU with many workgroups.
-        
         context->dispatch(kernel, numWorkgroups, 1, 1, 256, 1, 1);
     } else {
         // For latency, we run a single thread to measure the dependency chain.
@@ -124,8 +162,7 @@ const char* CacheBench::GetMetric() const {
 
 BenchmarkResult CacheBench::GetResult(uint32_t config_idx) const {
     uint64_t operations = 0;
-    // Must match numWorkgroups in Run()
-    const uint64_t num_threads_bw = 32 * 256;
+    uint64_t num_threads_bw = (uint64_t)numWorkgroups * 256;
 
     if (name == "L0 Cache Bandwidth") {
         // 16 independent ops * 1024 iterations * num_threads

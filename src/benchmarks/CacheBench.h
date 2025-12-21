@@ -7,7 +7,7 @@
 
 class CacheBench : public IBenchmark {
 public:
-    CacheBench(std::string name, std::string metric, uint64_t bufferSize, std::string kernelFile, std::vector<uint32_t> initData = {}, std::vector<std::string> aliases = {});
+    CacheBench(std::string name, std::string metric, uint64_t bufferSize, std::string kernelFile, std::vector<uint32_t> initData = {}, std::vector<std::string> aliases = {}, int targetCacheLevel = -1);
     ~CacheBench();
 
     bool IsSupported(const DeviceInfo& info, IComputeContext* context) const override;
@@ -30,4 +30,10 @@ private:
     ComputeBuffer buffer = nullptr;
     std::vector<uint32_t> initData;
     void* hostMem = nullptr;
+    int targetCacheLevel = -1;
+    uint32_t numWorkgroups = 1;
+    bool debug = false;
+
+public:
+    void setDebug(bool d) { debug = d; }
 };
