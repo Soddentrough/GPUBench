@@ -19,6 +19,7 @@ public:
     const std::vector<DeviceInfo>& getDevices() const override;
     void pickDevice(uint32_t index) override;
     DeviceInfo getCurrentDeviceInfo() const override;
+    uint32_t getSelectedDeviceIndex() const override { return selectedDeviceIndex; }
 
     // Buffer management
     ComputeBuffer createBuffer(size_t size, const void* host_ptr = nullptr) override;
@@ -88,4 +89,5 @@ private:
     std::map<ComputeKernel, VulkanKernel*> kernels;
     
     mutable std::vector<DeviceInfo> deviceInfos;
+    uint32_t selectedDeviceIndex = 0;
 };

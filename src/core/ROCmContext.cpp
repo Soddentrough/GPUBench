@@ -33,6 +33,17 @@ void ROCmContext::enumerateDevices() {
             info.maxComputeWorkGroupCountZ = prop.maxGridSize[2];
             info.maxComputeSharedMemorySize = prop.sharedMemPerBlock;
             info.subgroupSize = prop.warpSize;
+            info.l2CacheSize = prop.l2CacheSize;
+            
+            // Check for FP8 support (CDNA3 MI300+ or RDNA3+)
+            info.fp8Support = (std::string(prop.gcnArchName).find("gfx942") != std::string::npos ||
+                               std::string(prop.gcnArchName).find("gfx11") != std::string::npos);
+            info.fp6Support = false;
+            info.fp4Support = false; 
+            info.fp64Support = true;
+            info.fp16Support = true;
+            info.int8Support = true;
+            info.int4Support = false; 
             devices.push_back(info);
         }
     }

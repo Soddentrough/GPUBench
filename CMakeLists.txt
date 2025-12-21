@@ -92,10 +92,10 @@ if(HIP_FOUND)
     file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/kernels/rocm)
     foreach(HIP_KERNEL ${HIP_KERNELS})
         get_filename_component(KERNEL_NAME ${HIP_KERNEL} NAME_WE)
-        set(HIP_OBJECT "${CMAKE_CURRENT_BINARY_DIR}/kernels/rocm/${KERNEL_NAME}.o")
+        set(HIP_OBJECT "${CMAKE_CURRENT_BINARY_DIR}/kernels/rocm/${KERNEL_NAME}.co")
         add_custom_command(
             OUTPUT ${HIP_OBJECT}
-            COMMAND ${HIP_HIPCC_EXECUTABLE} --genco -c ${HIP_KERNEL} -o ${HIP_OBJECT} -D__HIP_PLATFORM_AMD__
+            COMMAND ${HIP_HIPCC_EXECUTABLE} --genco --offload-arch=gfx1030 --offload-arch=gfx1100 --offload-arch=gfx1101 --offload-arch=gfx1102 --offload-arch=gfx1151 --offload-arch=gfx1200 --offload-arch=gfx1201 ${HIP_KERNEL} -o ${HIP_OBJECT} -D__HIP_PLATFORM_AMD__
             DEPENDS ${HIP_KERNEL}
         )
         list(APPEND HIP_OBJECTS ${HIP_OBJECT})
@@ -222,7 +222,7 @@ endif()
 if(HIP_FOUND)
     install(DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/kernels/rocm
             DESTINATION share/gpubench/kernels
-            FILES_MATCHING PATTERN "*.o")
+            FILES_MATCHING PATTERN "*.co")
 endif()
 
 # CPack configuration for creating packages

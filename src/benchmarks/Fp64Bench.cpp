@@ -1,16 +1,9 @@
 #include "benchmarks/Fp64Bench.h"
-#include "core/VulkanContext.h"
 #include <stdexcept>
 #include <vector>
-#include <vulkan/vulkan.h>
 
 bool Fp64Bench::IsSupported(const DeviceInfo& info, IComputeContext* context) const {
-    if (context && context->getBackend() == ComputeBackend::Vulkan) {
-        VkPhysicalDeviceFeatures features;
-        vkGetPhysicalDeviceFeatures(context->getVulkanPhysicalDevice(), &features);
-        return features.shaderFloat64;
-    }
-    return true;
+    return info.fp64Support;
 }
 
 void Fp64Bench::Setup(IComputeContext& context, const std::string& kernel_dir) {
@@ -19,13 +12,17 @@ void Fp64Bench::Setup(IComputeContext& context, const std::string& kernel_dir) {
     // Create storage buffer
     size_t bufferSize = 4096 * 64 * sizeof(double); // 4096 workgroups * 64 threads * 8 bytes
     buffer = context.createBuffer(bufferSize);
+    
+    // Initialize buffer
+    std::vector<double> initData(bufferSize / sizeof(double), 0.0);
+    context.writeBuffer(buffer, 0, bufferSize, initData.data());
 
     // Create kernel
     std::string kernel_file;
     if (context.getBackend() == ComputeBackend::Vulkan) {
         kernel_file = kernel_dir + "/vulkan/fp64.spv";
     } else if (context.getBackend() == ComputeBackend::ROCm) {
-        kernel_file = kernel_dir + "/rocm/fp64.o";
+        kernel_file = kernel_dir + "/rocm/fp64.co";
     } else {
         kernel_file = kernel_dir + "/opencl/fp64.cl";
     }

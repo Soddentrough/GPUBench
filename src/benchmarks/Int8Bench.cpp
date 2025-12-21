@@ -3,19 +3,7 @@
 #include <vulkan/vulkan.h>
 
 bool Int8Bench::IsSupported(const DeviceInfo& info, IComputeContext* context) const {
-    if (context && context->getBackend() == ComputeBackend::Vulkan) {
-        VkPhysicalDevice8BitStorageFeatures features8bit = {};
-        features8bit.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES;
-        
-        VkPhysicalDeviceFeatures2 deviceFeatures2 = {};
-        deviceFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-        deviceFeatures2.pNext = &features8bit;
-        
-        vkGetPhysicalDeviceFeatures2(context->getVulkanPhysicalDevice(), &deviceFeatures2);
-        
-        return features8bit.storageBuffer8BitAccess;
-    }
-    return true;
+    return info.int8Support;
 }
 
 void Int8Bench::Setup(IComputeContext& context, const std::string& kernel_dir) {
@@ -30,7 +18,7 @@ void Int8Bench::Setup(IComputeContext& context, const std::string& kernel_dir) {
     if (context.getBackend() == ComputeBackend::Vulkan) {
         kernel_file = kernel_dir + "/vulkan/int8.spv";
     } else if (context.getBackend() == ComputeBackend::ROCm) {
-        kernel_file = kernel_dir + "/rocm/int8.o";
+        kernel_file = kernel_dir + "/rocm/int8.co";
     } else {
         kernel_file = kernel_dir + "/opencl/int8.cl";
     }

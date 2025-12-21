@@ -19,6 +19,7 @@ public:
     const std::vector<DeviceInfo>& getDevices() const override;
     void pickDevice(uint32_t index) override;
     DeviceInfo getCurrentDeviceInfo() const override;
+    uint32_t getSelectedDeviceIndex() const override { return selectedDeviceIndex; }
     
     cl_platform_id getOpenCLPlatform() const override { return platform; }
     cl_device_id getOpenCLDevice() const override { return device; }
@@ -62,4 +63,5 @@ private:
     cl_command_queue commandQueue = nullptr;
     
     mutable std::vector<DeviceInfo> deviceInfos;
+    uint32_t selectedDeviceIndex = 0;
 };

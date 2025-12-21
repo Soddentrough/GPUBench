@@ -7,23 +7,91 @@ layout(set = 0, binding = 0) buffer Data {
     float data[];
 } InOutBuffer;
 
+layout(push_constant) uniform PushConstants {
+    float multiplier;
+    uint num_elements;
+} pushConstants;
+
 void main() {
     uint index = gl_GlobalInvocationID.x;
+    if (index >= pushConstants.num_elements) return;
 
-    // Work with multiple accumulators to avoid dependency chains
+    // Work with multiple accumulators to avoid dependency chains and hide latency
     vec4 val1 = vec4(InOutBuffer.data[index]);
     vec4 val2 = vec4(0.1, 0.2, 0.3, 0.4);
     vec4 val3 = vec4(0.5, 0.6, 0.7, 0.8);
     vec4 val4 = vec4(0.9, 1.0, 1.1, 1.2);
+    vec4 val5 = vec4(1.3, 1.4, 1.5, 1.6);
+    vec4 val6 = vec4(1.7, 1.8, 1.9, 2.0);
+    vec4 val7 = vec4(2.1, 2.2, 2.3, 2.4);
+    vec4 val8 = vec4(2.5, 2.6, 2.7, 2.8);
+    vec4 val9 = vec4(2.9, 3.0, 3.1, 3.2);
+    vec4 val10 = vec4(3.3, 3.4, 3.5, 3.6);
+    vec4 val11 = vec4(3.7, 3.8, 3.9, 4.0);
+    vec4 val12 = vec4(4.1, 4.2, 4.3, 4.4);
+    vec4 val13 = vec4(4.5, 4.6, 4.7, 4.8);
+    vec4 val14 = vec4(4.9, 5.0, 5.1, 5.2);
+    vec4 val15 = vec4(5.3, 5.4, 5.5, 5.6);
+    vec4 val16 = vec4(5.7, 5.8, 5.9, 6.0);
+    vec4 val17 = vec4(6.1, 6.2, 6.3, 6.4);
+    vec4 val18 = vec4(6.5, 6.6, 6.7, 6.8);
+    vec4 val19 = vec4(6.9, 7.0, 7.1, 7.2);
+    vec4 val20 = vec4(7.3, 7.4, 7.5, 7.6);
+    vec4 val21 = vec4(7.7, 7.8, 7.9, 8.0);
+    vec4 val22 = vec4(8.1, 8.2, 8.3, 8.4);
+    vec4 val23 = vec4(8.5, 8.6, 8.7, 8.8);
+    vec4 val24 = vec4(8.9, 9.0, 9.1, 9.2);
+    vec4 val25 = vec4(9.3, 9.4, 9.5, 9.6);
+    vec4 val26 = vec4(9.7, 9.8, 9.9, 10.0);
+    vec4 val27 = vec4(10.1, 10.2, 10.3, 10.4);
+    vec4 val28 = vec4(10.5, 10.6, 10.7, 10.8);
+    vec4 val29 = vec4(10.9, 11.0, 11.1, 11.2);
+    vec4 val30 = vec4(11.3, 11.4, 11.5, 11.6);
+    vec4 val31 = vec4(11.7, 11.8, 11.9, 12.0);
+    vec4 val32 = vec4(12.1, 12.2, 12.3, 12.4);
     
-    // Each iteration performs 4 vec4 FMAs = 4 * 4 * 2 = 32 FP32 ops
+    float mult = pushConstants.multiplier;
+    vec4 v_mult = vec4(mult);
+    
+    // Each iteration performs 32 vec4 FMAs = 32 * 4 * 2 = 256 FP32 ops
     for (int i = 0; i < 16384; ++i) {
-        val1 = fma(val1, vec4(1.0001), val2);
-        val2 = fma(val2, vec4(1.0001), val3);
-        val3 = fma(val3, vec4(1.0001), val4);
-        val4 = fma(val4, vec4(1.0001), val1);
+        val1 = fma(val1, v_mult, val2);
+        val2 = fma(val2, v_mult, val3);
+        val3 = fma(val3, v_mult, val4);
+        val4 = fma(val4, v_mult, val5);
+        val5 = fma(val5, v_mult, val6);
+        val6 = fma(val6, v_mult, val7);
+        val7 = fma(val7, v_mult, val8);
+        val8 = fma(val8, v_mult, val9);
+        val9 = fma(val9, v_mult, val10);
+        val10 = fma(val10, v_mult, val11);
+        val11 = fma(val11, v_mult, val12);
+        val12 = fma(val12, v_mult, val13);
+        val13 = fma(val13, v_mult, val14);
+        val14 = fma(val14, v_mult, val15);
+        val15 = fma(val15, v_mult, val16);
+        val16 = fma(val16, v_mult, val17);
+        val17 = fma(val17, v_mult, val18);
+        val18 = fma(val18, v_mult, val19);
+        val19 = fma(val19, v_mult, val20);
+        val20 = fma(val20, v_mult, val21);
+        val21 = fma(val21, v_mult, val22);
+        val22 = fma(val22, v_mult, val23);
+        val23 = fma(val23, v_mult, val24);
+        val24 = fma(val24, v_mult, val25);
+        val25 = fma(val25, v_mult, val26);
+        val26 = fma(val26, v_mult, val27);
+        val27 = fma(val27, v_mult, val28);
+        val28 = fma(val28, v_mult, val29);
+        val29 = fma(val29, v_mult, val30);
+        val30 = fma(val30, v_mult, val31);
+        val31 = fma(val31, v_mult, val32);
+        val32 = fma(val32, v_mult, val1);
     }
     
     // Prevent optimization away
-    InOutBuffer.data[index] = val1.x + val2.y + val3.z + val4.w;
+    InOutBuffer.data[index] = val1.x + val2.y + val3.z + val4.w + val5.x + val6.y + val7.z + val8.w +
+                              val9.x + val10.y + val11.z + val12.w + val13.x + val14.y + val15.z + val16.w +
+                              val17.x + val18.y + val19.z + val20.w + val21.x + val22.y + val23.z + val24.w +
+                              val25.x + val26.y + val27.z + val28.w + val29.x + val30.y + val31.z + val32.w;
 }

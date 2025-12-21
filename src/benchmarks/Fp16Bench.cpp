@@ -1,21 +1,8 @@
 #include "benchmarks/Fp16Bench.h"
 #include <stdexcept>
-#include <vulkan/vulkan.h>
 
 bool Fp16Bench::IsSupported(const DeviceInfo& info, IComputeContext* context) const {
-    if (context && context->getBackend() == ComputeBackend::Vulkan) {
-        VkPhysicalDevice16BitStorageFeatures features16bit = {};
-        features16bit.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES;
-        
-        VkPhysicalDeviceFeatures2 deviceFeatures2 = {};
-        deviceFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-        deviceFeatures2.pNext = &features16bit;
-        
-        vkGetPhysicalDeviceFeatures2(context->getVulkanPhysicalDevice(), &deviceFeatures2);
-        
-        return features16bit.storageBuffer16BitAccess;
-    }
-    return true;
+    return info.fp16Support;
 }
 
 void Fp16Bench::Setup(IComputeContext& context, const std::string& kernel_dir) {
@@ -24,13 +11,18 @@ void Fp16Bench::Setup(IComputeContext& context, const std::string& kernel_dir) {
     // Create storage buffer
     size_t bufferSize = 8192 * 64 * 4; // 8192 workgroups * 64 threads * 4 bytes (f16vec2)
     buffer = context.createBuffer(bufferSize);
+    
+    // Initialize buffer
+    // Use uint32_t to fill with zeros (size is in bytes)
+    std::vector<uint32_t> initData(bufferSize / sizeof(uint32_t), 0);
+    context.writeBuffer(buffer, 0, bufferSize, initData.data());
 
     // Create kernel
     std::string kernel_file;
     if (context.getBackend() == ComputeBackend::Vulkan) {
         kernel_file = kernel_dir + "/vulkan/fp16.spv";
     } else if (context.getBackend() == ComputeBackend::ROCm) {
-        kernel_file = kernel_dir + "/rocm/fp16.o";
+        kernel_file = kernel_dir + "/rocm/fp16.co";
     } else {
         kernel_file = kernel_dir + "/opencl/fp16.cl";
     }

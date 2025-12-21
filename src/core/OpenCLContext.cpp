@@ -71,11 +71,19 @@ void OpenCLContext::enumeratePlatformsAndDevices() {
 const std::vector<DeviceInfo>& OpenCLContext::getDevices() const {
     if (deviceInfos.empty()) {
         for (const auto& dev : devices) {
-            DeviceInfo info;
-            
             char name[256];
             clGetDeviceInfo(dev, CL_DEVICE_NAME, sizeof(name), name, nullptr);
-            info.name = name;
+            std::string deviceName = name;
+
+            // Filter out software renderers (llvmpipe) and CPU devices
+            if (deviceName.find("llvmpipe") != std::string::npos) continue;
+
+            cl_device_type type;
+            clGetDeviceInfo(dev, CL_DEVICE_TYPE, sizeof(type), &type, nullptr);
+            if (type & CL_DEVICE_TYPE_CPU) continue;
+
+            DeviceInfo info;
+            info.name = deviceName;
             
             cl_ulong memSize;
             clGetDeviceInfo(dev, CL_DEVICE_GLOBAL_MEM_SIZE, sizeof(memSize), &memSize, nullptr);
@@ -89,6 +97,24 @@ const std::vector<DeviceInfo>& OpenCLContext::getDevices() const {
             clGetDeviceInfo(dev, CL_DEVICE_LOCAL_MEM_SIZE, sizeof(localMemSize), &localMemSize, nullptr);
             info.maxComputeSharedMemorySize = static_cast<uint32_t>(localMemSize);
             
+            cl_ulong cacheSize;
+            clGetDeviceInfo(dev, CL_DEVICE_GLOBAL_MEM_CACHE_SIZE, sizeof(cacheSize), &cacheSize, nullptr);
+            info.l2CacheSize = static_cast<uint32_t>(cacheSize);
+
+            size_t ext_size;
+            clGetDeviceInfo(dev, CL_DEVICE_EXTENSIONS, 0, nullptr, &ext_size);
+            std::vector<char> extensions(ext_size);
+            clGetDeviceInfo(dev, CL_DEVICE_EXTENSIONS, ext_size, extensions.data(), nullptr);
+            std::string ext_str(extensions.data());
+            
+            info.fp64Support = (ext_str.find("cl_khr_fp64") != std::string::npos || ext_str.find("cl_amd_fp64") != std::string::npos);
+            info.fp16Support = (ext_str.find("cl_khr_fp16") != std::string::npos);
+            info.fp8Support = false;
+            info.fp6Support = false;
+            info.fp4Support = false;
+            info.int8Support = true;
+            info.int4Support = false;
+
             deviceInfos.push_back(info);
         }
     }
@@ -99,6 +125,7 @@ void OpenCLContext::pickDevice(uint32_t index) {
     if (index >= devices.size()) {
         throw std::runtime_error("Invalid device index");
     }
+    selectedDeviceIndex = index;
     device = devices[index];
     createContext();
     createCommandQueue();
@@ -127,6 +154,24 @@ DeviceInfo OpenCLContext::getCurrentDeviceInfo() const {
     clGetDeviceInfo(device, CL_DEVICE_LOCAL_MEM_SIZE, sizeof(localMemSize), &localMemSize, nullptr);
     info.maxComputeSharedMemorySize = static_cast<uint32_t>(localMemSize);
     
+    cl_ulong cacheSize;
+    clGetDeviceInfo(device, CL_DEVICE_GLOBAL_MEM_CACHE_SIZE, sizeof(cacheSize), &cacheSize, nullptr);
+    info.l2CacheSize = static_cast<uint32_t>(cacheSize);
+
+    size_t ext_size;
+    clGetDeviceInfo(device, CL_DEVICE_EXTENSIONS, 0, nullptr, &ext_size);
+    std::vector<char> extensions(ext_size);
+    clGetDeviceInfo(device, CL_DEVICE_EXTENSIONS, ext_size, extensions.data(), nullptr);
+    std::string ext_str(extensions.data());
+    
+    info.fp64Support = (ext_str.find("cl_khr_fp64") != std::string::npos || ext_str.find("cl_amd_fp64") != std::string::npos);
+    info.fp16Support = (ext_str.find("cl_khr_fp16") != std::string::npos);
+    info.fp8Support = false;
+    info.fp6Support = false;
+    info.fp4Support = false;
+    info.int8Support = true;
+    info.int4Support = false;
+
     return info;
 }
 

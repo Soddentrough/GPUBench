@@ -17,4 +17,5 @@ private:
     IComputeContext* context = nullptr;
     ComputeKernel kernel = nullptr;
     ComputeBuffer buffer = nullptr;
+    uint32_t numElements = 0;
 };

@@ -1,20 +1,19 @@
 #include "benchmarks/Fp8Bench.h"
 #include <stdexcept>
-#include <iostream>
 
 const char* Fp8Bench::GetName() const {
     return "FP8";
 }
 
 bool Fp8Bench::IsSupported(const DeviceInfo& info, IComputeContext* context) const {
-    return true;
+    return info.fp8Support;
 }
 
 void Fp8Bench::Setup(IComputeContext& context, const std::string& kernel_dir) {
     this->context = &context;
     
     DeviceInfo info = context.getCurrentDeviceInfo();
-    is_emulated = info.name.find("gfx942") == std::string::npos;
+    is_emulated = (info.name.find("gfx942") == std::string::npos && info.name.find("gfx11") == std::string::npos);
 
     // Create storage buffer
     size_t bufferSize = 8192 * 64 * 4; // 8192 workgroups * 64 threads * 4 bytes (u8vec4)
@@ -30,7 +29,7 @@ void Fp8Bench::Setup(IComputeContext& context, const std::string& kernel_dir) {
     if (context.getBackend() == ComputeBackend::Vulkan) {
         kernel_file = kernel_dir + "/vulkan/" + kernel_name + ".spv";
     } else if (context.getBackend() == ComputeBackend::ROCm) {
-        kernel_file = kernel_dir + "/rocm/" + kernel_name + ".o";
+        kernel_file = kernel_dir + "/rocm/" + kernel_name + ".co";
     } else {
         kernel_file = kernel_dir + "/opencl/fp8.cl";
     }

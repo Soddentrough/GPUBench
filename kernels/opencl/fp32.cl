@@ -1,7 +1,8 @@
 // Requires OpenCL 1.2+
 
-__kernel void run_benchmark(__global float* data) {
+__kernel void run_benchmark(__global float* data, float multiplier, uint num_elements) {
     uint index = get_global_id(0);
+    if (index >= num_elements) return;
 
     // Work with multiple accumulators to avoid dependency chains
     float4 val1 = (float4)(data[index]);

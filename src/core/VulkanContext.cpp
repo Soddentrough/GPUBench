@@ -62,8 +62,20 @@ void VulkanContext::enumeratePhysicalDevices() {
         throw std::runtime_error("failed to find GPUs with Vulkan support!");
     }
 
-    physicalDevices.resize(deviceCount);
-    vkEnumeratePhysicalDevices(instance, &deviceCount, physicalDevices.data());
+    std::vector<VkPhysicalDevice> allDevices(deviceCount);
+    vkEnumeratePhysicalDevices(instance, &deviceCount, allDevices.data());
+
+    for (const auto& device : allDevices) {
+        VkPhysicalDeviceProperties props;
+        vkGetPhysicalDeviceProperties(device, &props);
+
+        // Filter out software renderers (llvmpipe) and CPUs
+        std::string name = props.deviceName;
+        if (name.find("llvmpipe") != std::string::npos) continue;
+        if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU) continue;
+
+        physicalDevices.push_back(device);
+    }
 }
 
 const std::vector<DeviceInfo>& VulkanContext::getDevices() const {
@@ -86,10 +98,21 @@ const std::vector<DeviceInfo>& VulkanContext::getDevices() const {
             uint64_t vramSize = 0;
             for (uint32_t i = 0; i < memProps.memoryHeapCount; ++i) {
                 if (memProps.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) {
-                    vramSize = memProps.memoryHeaps[i].size;
-                    break;
+                    vramSize += memProps.memoryHeaps[i].size;
                 }
             }
+            
+            VkPhysicalDeviceShaderFloat16Int8Features features168{};
+            features168.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES;
+            
+            VkPhysicalDevice8BitStorageFeatures features8bit{};
+            features8bit.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES;
+            features8bit.pNext = &features168;
+            
+            VkPhysicalDeviceFeatures2 features2{};
+            features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+            features2.pNext = &features8bit;
+            vkGetPhysicalDeviceFeatures2(device, &features2);
             
             DeviceInfo info;
             info.name = props.deviceName;
@@ -100,6 +123,13 @@ const std::vector<DeviceInfo>& VulkanContext::getDevices() const {
             info.maxComputeWorkGroupCountZ = props.limits.maxComputeWorkGroupCount[2];
             info.maxComputeSharedMemorySize = props.limits.maxComputeSharedMemorySize;
             info.subgroupSize = subgroupProps.subgroupSize;
+            info.fp64Support = (features2.features.shaderFloat64 == VK_TRUE);
+            info.fp16Support = (features168.shaderFloat16 == VK_TRUE);
+            info.int8Support = (features8bit.storageBuffer8BitAccess == VK_TRUE);
+            info.fp8Support = false; // Add specific extension check if available in future
+            info.fp6Support = false;
+            info.fp4Support = false;
+            info.int4Support = false;
             deviceInfos.push_back(info);
         }
     }
@@ -129,11 +159,22 @@ DeviceInfo VulkanContext::getCurrentDeviceInfo() const {
     uint64_t vramSize = 0;
     for (uint32_t i = 0; i < memProps.memoryHeapCount; ++i) {
         if (memProps.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) {
-            vramSize = memProps.memoryHeaps[i].size;
-            break;
+            vramSize += memProps.memoryHeaps[i].size;
         }
     }
     
+    VkPhysicalDeviceShaderFloat16Int8Features features168_curr{};
+    features168_curr.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES;
+    
+    VkPhysicalDevice8BitStorageFeatures features8bit_curr{};
+    features8bit_curr.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES;
+    features8bit_curr.pNext = &features168_curr;
+    
+    VkPhysicalDeviceFeatures2 features2_2{};
+    features2_2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    features2_2.pNext = &features8bit_curr;
+    vkGetPhysicalDeviceFeatures2(physicalDevice, &features2_2);
+
     DeviceInfo info;
     info.name = properties.deviceName;
     info.memorySize = vramSize;
@@ -143,6 +184,13 @@ DeviceInfo VulkanContext::getCurrentDeviceInfo() const {
     info.maxComputeWorkGroupCountZ = properties.limits.maxComputeWorkGroupCount[2];
     info.maxComputeSharedMemorySize = properties.limits.maxComputeSharedMemorySize;
     info.subgroupSize = subgroupProps.subgroupSize;
+    info.fp64Support = (features2_2.features.shaderFloat64 == VK_TRUE);
+    info.fp16Support = (features168_curr.shaderFloat16 == VK_TRUE);
+    info.int8Support = (features8bit_curr.storageBuffer8BitAccess == VK_TRUE);
+    info.fp8Support = false;
+    info.fp6Support = false;
+    info.fp4Support = false;
+    info.int4Support = false;
     return info;
 }
 
@@ -150,6 +198,7 @@ void VulkanContext::pickPhysicalDevice(uint32_t index) {
     if (index >= physicalDevices.size()) {
         throw std::runtime_error("invalid device index");
     }
+    selectedDeviceIndex = index;
     physicalDevice = physicalDevices[index];
     vkGetPhysicalDeviceProperties(physicalDevice, &properties);
     createDevice();
@@ -543,8 +592,8 @@ void VulkanContext::setKernelArg(ComputeKernel kernel, uint32_t arg_index, size_
     
     // For Vulkan, non-buffer arguments are passed via push constants
     // Arguments are laid out sequentially in the push constant buffer
-    // arg_index 2 -> offset 0, arg_index 3 -> offset 4, etc.
-    size_t offset = (arg_index - 2) * 4; // Assuming args 0,1 are buffers
+    // We map arg_index directly to offset to handle mixed buffer/value args
+    size_t offset = arg_index * 4;
     if (offset + arg_size <= it->second->pushConstantData.size()) {
         memcpy(it->second->pushConstantData.data() + offset, arg_value, arg_size);
     }

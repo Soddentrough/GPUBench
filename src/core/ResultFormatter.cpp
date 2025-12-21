@@ -5,6 +5,7 @@
 #include <locale>
 #include <map>
 #include <vector>
+#include <set>
 
 std::string ResultFormatter::formatDouble(double value, int precision) {
     std::stringstream stream;
@@ -72,63 +73,164 @@ void ResultFormatter::print() {
         return;
     }
 
-    // Group results by backend and device
-    std::map<std::string, std::map<std::string, std::vector<ResultData>>> groupedResults;
-    for (const auto& result : results) {
-        groupedResults[result.backendName][result.deviceName].push_back(result);
-    }
-
-    for (const auto& backend_pair : groupedResults) {
-        for (const auto& device_pair : backend_pair.second) {
-            std::cout << "----------------------------------------------------------------" << std::endl;
-            std::cout << "Backend: " << backend_pair.first << std::endl;
-            std::cout << "Device:  " << device_pair.first << std::endl;
-            // Get max workgroup size from first result (all results from same device have same value)
-            if (!device_pair.second.empty()) {
-                std::cout << "Maximum workgroup size: " << device_pair.second[0].maxWorkGroupSize << std::endl;
-            }
-            std::cout << "----------------------------------------------------------------" << std::endl;
-
-            std::map<BenchmarkCategory, std::vector<ResultData>> categorizedResults;
-            for (const auto& result : device_pair.second) {
-                categorizedResults[getBenchmarkCategory(result.benchmarkName)].push_back(result);
-            }
-
-            if (!categorizedResults[BenchmarkCategory::Compute].empty()) {
-                std::cout << "\n[Compute Benchmarks]" << std::endl;
-                for (const auto& result : categorizedResults[BenchmarkCategory::Compute]) {
-                    double value = (static_cast<double>(result.operations) / (result.time_ms / 1000.0)) / 1e12;
-                    std::string unit = "TFLOPs";
-                    if (result.benchmarkName.find("Int") != std::string::npos) {
-                        unit = "TOPS";
-                    }
-                    std::string benchmarkName = result.benchmarkName;
-                     if (result.isEmulated) {
-                        benchmarkName += " (Emulated)";
-                    }
-                    std::cout << "  - " << std::left << std::setw(50) << benchmarkName + ":"
-                              << std::right << std::setw(10) << formatDouble(value, 2) << " " << unit << std::endl;
-                }
-            }
-
-            if (!categorizedResults[BenchmarkCategory::Memory].empty()) {
-                std::cout << "\n[Memory Benchmarks]" << std::endl;
-                for (const auto& result : categorizedResults[BenchmarkCategory::Memory]) {
-                    double value = (static_cast<double>(result.operations) / (result.time_ms / 1000.0)) / 1e9;
-                    std::cout << "  - " << std::left << std::setw(50) << result.benchmarkName + ":"
-                              << std::right << std::setw(10) << formatDouble(value, 2) << " GB/s" << std::endl;
-                }
-            }
-
-            if (!categorizedResults[BenchmarkCategory::Latency].empty()) {
-                std::cout << "\n[Latency Benchmarks]" << std::endl;
-                for (const auto& result : categorizedResults[BenchmarkCategory::Latency]) {
-                    double value = (result.time_ms * 1e6) / result.operations;
-                    std::cout << "  - " << std::left << std::setw(50) << result.benchmarkName + ":"
-                              << std::right << std::setw(10) << formatDouble(value, 2) << " ns" << std::endl;
-                }
-            }
-            std::cout << std::endl;
+    // 1. Identify all unique devices (by index) and map to names
+    std::set<uint32_t> deviceIndices;
+    std::map<uint32_t, std::string> deviceNames;
+    for (const auto& res : results) {
+        deviceIndices.insert(res.deviceIndex);
+        if (deviceNames.find(res.deviceIndex) == deviceNames.end()) {
+            deviceNames[res.deviceIndex] = res.deviceName;
         }
     }
+
+    // 2. Identify all unique backends
+    std::set<std::string> backends;
+    for (const auto& res : results) {
+        backends.insert(res.backendName);
+    }
+
+    // 3. Identify all unique benchmarks and categorize them
+    std::vector<std::string> benchmarkOrder;
+    std::map<std::string, BenchmarkCategory> benchmarkCategories;
+    for (const auto& result : results) {
+        std::string name = result.benchmarkName;
+        if (result.isEmulated) name += " (Emulated)";
+        
+        if (benchmarkCategories.find(name) == benchmarkCategories.end()) {
+            benchmarkCategories[name] = getBenchmarkCategory(result.benchmarkName);
+            benchmarkOrder.push_back(name);
+        }
+    }
+
+    // Sort benchmarks
+    std::sort(benchmarkOrder.begin(), benchmarkOrder.end(), 
+        [&](const std::string& a, const std::string& b) {
+            if (benchmarkCategories[a] != benchmarkCategories[b]) {
+                return benchmarkCategories[a] < benchmarkCategories[b];
+            }
+            return a < b;
+        });
+
+    // 4. Organize data: [Benchmark][Backend][DeviceIndex] -> ResultData
+    std::map<std::string, std::map<std::string, std::map<uint32_t, ResultData>>> data;
+    for (const auto& res : results) {
+        std::string name = res.benchmarkName;
+        if (res.isEmulated) name += " (Emulated)";
+        data[name][res.backendName][res.deviceIndex] = res;
+    }
+
+    // 5. Print Table
+    int nameWidth = 45;
+    int colWidth = 25;
+    for (const auto& pair : deviceNames) {
+        colWidth = std::max(colWidth, (int)pair.second.length() + 2);
+    }
+
+    const std::string RESET = "\033[0m";
+    const std::string BOLD = "\033[1m";
+    const std::string CYAN = "\033[36m";
+    const std::string GREEN = "\033[32m";
+    const std::string YELLOW = "\033[33m";
+
+    auto repeat = [](const std::string& s, int n) {
+        std::string res;
+        for (int i = 0; i < n; ++i) res += s;
+        return res;
+    };
+
+    auto print_line = [&](const std::string& start, const std::string& mid, const std::string& sep, const std::string& end) {
+        std::cout << start << repeat(mid, nameWidth);
+        for (size_t i = 0; i < deviceIndices.size(); ++i) {
+            std::cout << sep << repeat(mid, colWidth + 2);
+        }
+        std::cout << end << std::endl;
+    };
+
+    auto print_row_start = [&](const std::string& text, const std::string& color = "", bool bold = false) {
+        std::cout << "│ " << (bold ? BOLD : "") << color << std::left << std::setw(nameWidth - 1) << text << RESET;
+    };
+
+    auto print_row_cell = [&](const std::string& text, const std::string& unit = "", const std::string& color = "", bool right = true) {
+        std::cout << "│ ";
+        if (!color.empty()) std::cout << color;
+        if (right) {
+            std::cout << std::right << std::setw(colWidth - (int)unit.length()) << text << RESET << unit;
+        } else {
+            std::cout << std::left << std::setw(colWidth) << text << RESET;
+        }
+        std::cout << " ";
+    };
+
+    std::cout << std::endl;
+    print_line("┌", "─", "┬", "┐");
+    print_row_start("BENCHMARK RESULTS", "", true);
+    for (size_t i = 0; i < deviceIndices.size(); ++i) print_row_cell("", "", "", false);
+    std::cout << "│" << std::endl;
+    print_line("├", "─", "┼", "┤");
+
+    // Header Row
+    print_row_start("Benchmark", "", true);
+    for (uint32_t idx : deviceIndices) {
+        print_row_cell(deviceNames[idx], "", "", true);
+    }
+    std::cout << "│" << std::endl;
+    print_line("├", "─", "┼", "┤");
+
+    BenchmarkCategory currentCat = BenchmarkCategory::Unknown;
+    for (const auto& benchName : benchmarkOrder) {
+        BenchmarkCategory cat = benchmarkCategories[benchName];
+        if (cat != currentCat) {
+            currentCat = cat;
+            std::string catName;
+            switch(cat) {
+                case BenchmarkCategory::Compute: catName = "Compute"; break;
+                case BenchmarkCategory::Memory: catName = "Memory Bandwidth"; break;
+                case BenchmarkCategory::Latency: catName = "Latency"; break;
+                default: catName = "Other"; break;
+            }
+            print_row_start("[ " + catName + " ]", CYAN, true);
+            for (size_t i = 0; i < deviceIndices.size(); ++i) print_row_cell("", "", "", false);
+            std::cout << "│" << std::endl;
+        }
+
+        // Print Benchmark Name Row
+        print_row_start(benchName);
+        for (size_t i = 0; i < deviceIndices.size(); ++i) print_row_cell("", "", "", false);
+        std::cout << "│" << std::endl;
+
+        // Print Backend Rows
+        for (const auto& backend : backends) {
+            if (data[benchName].find(backend) == data[benchName].end()) continue;
+
+            print_row_start("  " + backend, YELLOW);
+            
+            for (uint32_t devIdx : deviceIndices) {
+                if (data[benchName][backend].count(devIdx)) {
+                    const auto& res = data[benchName][backend][devIdx];
+                    std::string valStr;
+                    std::string unit;
+                    
+                    if (cat == BenchmarkCategory::Compute) {
+                        double val = (static_cast<double>(res.operations) / (res.time_ms / 1000.0)) / 1e12;
+                        valStr = formatDouble(val, 2);
+                        unit = (res.benchmarkName.find("Int") != std::string::npos || res.benchmarkName.find("INT") != std::string::npos) ? " TOPS" : " TFLOPs";
+                    } else if (cat == BenchmarkCategory::Memory) {
+                        double val = (static_cast<double>(res.operations) / (res.time_ms / 1000.0)) / 1e9;
+                        valStr = formatDouble(val, 2);
+                        unit = " GB/s";
+                    } else if (cat == BenchmarkCategory::Latency) {
+                        double val = (res.time_ms * 1e6) / res.operations;
+                        valStr = formatDouble(val, 2);
+                        unit = " ns";
+                    }
+                    print_row_cell(valStr, unit, GREEN, true);
+                } else {
+                    print_row_cell("-", "", "", true);
+                }
+            }
+            std::cout << "│" << std::endl;
+        }
+    }
+    print_line("└", "─", "┴", "┘");
+    std::cout << std::endl;
 }

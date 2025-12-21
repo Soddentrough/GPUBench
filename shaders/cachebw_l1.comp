@@ -9,6 +9,11 @@ layout(set = 0, binding = 0) buffer Data {
     vec4 data[];
 } Buffer;
 
+layout(push_constant) uniform PushConstants {
+    uint _pad; // Offset 0 (arg 0 is buffer)
+    uint mask; // Offset 4 (arg 1 is mask)
+} pushConstants;
+
 void main() {
     // 16 KB total = 1024 vec4 elements
     // 512 workgroups, each accesses 2 elements
@@ -25,12 +30,12 @@ void main() {
     // Each workgroup accesses its own small 4KB region repeatedly
     #pragma unroll
     for (int iter = 0; iter < 1024; iter++) {
-        vec4 v0 = Buffer.data[baseIndex];
+        vec4 v0 = Buffer.data[baseIndex & pushConstants.mask];
         
         // Simple accumulation to prevent optimization
         sum += v0;
     }
     
     // Write back to prevent dead code elimination
-    Buffer.data[baseIndex] = sum;
+    Buffer.data[baseIndex & pushConstants.mask] = sum;
 }

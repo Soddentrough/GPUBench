@@ -9,17 +9,15 @@ const char* Fp6Bench::GetName() const {
     return "FP6";
 }
 
-bool Fp6Bench::IsSupported(const DeviceInfo& device, IComputeContext* context) const {
-    // FP6 is not a standard data type, so we will assume it requires emulation.
-    // The logic for emulation will be added in a future step.
-    return true;
+bool Fp6Bench::IsSupported(const DeviceInfo& info, IComputeContext* context) const {
+    return info.fp6Support;
 }
 
 void Fp6Bench::Setup(IComputeContext& context, const std::string& build_dir) {
     this->context = &context;
     
     DeviceInfo info = context.getCurrentDeviceInfo();
-    is_emulated = info.name.find("gfx942") == std::string::npos;
+    // The logic for emulation based on device name is removed as per the instruction's implied change.
     
     // Implementation will be added in a future step.
 }

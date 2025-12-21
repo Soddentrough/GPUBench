@@ -11,26 +11,60 @@ __device__ inline float4 fmaf4(float4 a, float4 b, float4 c) {
     );
 }
 
-extern "C" __global__ void run_benchmark(float* data) {
+extern "C" __global__ void run_benchmark(float* data, float multiplier, uint32_t num_elements) {
     uint index = blockIdx.x * blockDim.x + threadIdx.x;
+    if (index >= num_elements) return;
 
-    // Work with multiple accumulators to avoid dependency chains
-    float scalar_val = data[index];
-    float4 val1 = make_float4(scalar_val, scalar_val, scalar_val, scalar_val);
+    float4 val1 = make_float4(data[index], data[index], data[index], data[index]);
     float4 val2 = make_float4(0.1f, 0.2f, 0.3f, 0.4f);
     float4 val3 = make_float4(0.5f, 0.6f, 0.7f, 0.8f);
     float4 val4 = make_float4(0.9f, 1.0f, 1.1f, 1.2f);
-    const float4 fma_val = make_float4(1.0001f, 1.0001f, 1.0001f, 1.0001f);
+    float4 m = make_float4(multiplier, multiplier, multiplier, multiplier);
     
     // Each iteration performs 4 vec4 FMAs = 4 * 4 * 2 = 32 FP32 ops
+    // We do 8 blocks of 4 to match the 256 ops/iter in GetResult
     #pragma unroll
     for (int i = 0; i < 16384; ++i) {
-        val1 = fmaf4(val1, fma_val, val2);
-        val2 = fmaf4(val2, fma_val, val3);
-        val3 = fmaf4(val3, fma_val, val4);
-        val4 = fmaf4(val4, fma_val, val1);
+        val1 = fmaf4(val1, m, val2);
+        val2 = fmaf4(val2, m, val3);
+        val3 = fmaf4(val3, m, val4);
+        val4 = fmaf4(val4, m, val1);
+        
+        val1 = fmaf4(val1, m, val2);
+        val2 = fmaf4(val2, m, val3);
+        val3 = fmaf4(val3, m, val4);
+        val4 = fmaf4(val4, m, val1);
+
+        val1 = fmaf4(val1, m, val2);
+        val2 = fmaf4(val2, m, val3);
+        val3 = fmaf4(val3, m, val4);
+        val4 = fmaf4(val4, m, val1);
+
+        val1 = fmaf4(val1, m, val2);
+        val2 = fmaf4(val2, m, val3);
+        val3 = fmaf4(val3, m, val4);
+        val4 = fmaf4(val4, m, val1);
+
+        val1 = fmaf4(val1, m, val2);
+        val2 = fmaf4(val2, m, val3);
+        val3 = fmaf4(val3, m, val4);
+        val4 = fmaf4(val4, m, val1);
+
+        val1 = fmaf4(val1, m, val2);
+        val2 = fmaf4(val2, m, val3);
+        val3 = fmaf4(val3, m, val4);
+        val4 = fmaf4(val4, m, val1);
+
+        val1 = fmaf4(val1, m, val2);
+        val2 = fmaf4(val2, m, val3);
+        val3 = fmaf4(val3, m, val4);
+        val4 = fmaf4(val4, m, val1);
+
+        val1 = fmaf4(val1, m, val2);
+        val2 = fmaf4(val2, m, val3);
+        val3 = fmaf4(val3, m, val4);
+        val4 = fmaf4(val4, m, val1);
     }
     
-    // Prevent optimization away
     data[index] = val1.x + val2.y + val3.z + val4.w;
 }

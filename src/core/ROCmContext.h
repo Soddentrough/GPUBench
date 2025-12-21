@@ -17,6 +17,7 @@ public:
     const std::vector<DeviceInfo>& getDevices() const override { return devices; }
     void pickDevice(uint32_t index) override;
     DeviceInfo getCurrentDeviceInfo() const override;
+    uint32_t getSelectedDeviceIndex() const override { return static_cast<uint32_t>(selectedDeviceIndex); }
 
     // Buffer management
     ComputeBuffer createBuffer(size_t size, const void* host_ptr = nullptr) override;

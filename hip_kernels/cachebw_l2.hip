@@ -1,12 +1,12 @@
 // Requires ROCm 6.4+
 #include <hip/hip_runtime.h>
 
-extern "C" __global__ void run_benchmark(float4* data) {
+extern "C" __global__ void run_benchmark(float4* data, uint32_t mask) {
     uint workgroupOffset = blockIdx.x * 256;
     uint localId = threadIdx.x;
     
-    // The buffer has 65536 float4s. Mask is 65535 (0xFFFF).
-    uint baseIndex = (workgroupOffset + localId) & 65535;
+    // The buffer mask is now passed in
+    uint baseIndex = (workgroupOffset + localId) & mask;
     
     float4 sum = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
     

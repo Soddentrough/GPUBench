@@ -1,20 +1,19 @@
 #include "benchmarks/Fp4Bench.h"
 #include <stdexcept>
-#include <iostream>
 
 const char* Fp4Bench::GetName() const {
     return "FP4";
 }
 
 bool Fp4Bench::IsSupported(const DeviceInfo& info, IComputeContext* context) const {
-    return true;
+    return info.fp4Support;
 }
 
 void Fp4Bench::Setup(IComputeContext& context, const std::string& kernel_dir) {
     this->context = &context;
     
     DeviceInfo info = context.getCurrentDeviceInfo();
-    is_emulated = info.name.find("gfx942") == std::string::npos;
+    is_emulated = (info.name.find("gfx942") == std::string::npos && info.name.find("gfx11") == std::string::npos);
 
     // Create storage buffer
     size_t bufferSize = 8192 * 64 * 4; // 8192 workgroups * 64 threads * 4 bytes (u8vec4)
@@ -30,7 +29,7 @@ void Fp4Bench::Setup(IComputeContext& context, const std::string& kernel_dir) {
     if (context.getBackend() == ComputeBackend::Vulkan) {
         kernel_file = kernel_dir + "/vulkan/" + kernel_name + ".spv";
     } else if (context.getBackend() == ComputeBackend::ROCm) {
-        kernel_file = kernel_dir + "/rocm/" + kernel_name + ".o";
+        kernel_file = kernel_dir + "/rocm/" + kernel_name + ".co";
     } else {
         kernel_file = kernel_dir + "/opencl/fp4.cl";
     }

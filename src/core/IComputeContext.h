@@ -36,6 +36,16 @@ struct DeviceInfo {
     uint32_t maxComputeWorkGroupCountZ;
     uint32_t maxComputeSharedMemorySize;
     uint32_t subgroupSize;
+    uint32_t l1CacheSize = 0;
+    uint32_t l2CacheSize = 0;
+    uint32_t l3CacheSize = 0;
+    bool fp64Support = false;
+    bool fp16Support = false;
+    bool fp8Support = false;
+    bool fp6Support = false;
+    bool fp4Support = false;
+    bool int8Support = false;
+    bool int4Support = false;
     bool verbose = false;
 };
 
@@ -51,6 +61,7 @@ public:
     virtual const std::vector<DeviceInfo>& getDevices() const = 0;
     virtual void pickDevice(uint32_t index) = 0;
     virtual DeviceInfo getCurrentDeviceInfo() const = 0;
+    virtual uint32_t getSelectedDeviceIndex() const = 0;
 
     // Buffer management
     virtual ComputeBuffer createBuffer(size_t size, const void* host_ptr = nullptr) = 0;

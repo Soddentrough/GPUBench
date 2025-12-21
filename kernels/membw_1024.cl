@@ -13,7 +13,7 @@ __kernel void run_benchmark(__global float4* inputData, __global float4* outputD
         if (mode == 0 || mode == 2) {
             #pragma unroll
             for (int j = 0; j < 32; ++j) {
-                data[j] = inputData[currentIndex + j];
+                data[j] = inputData[(currentIndex + j) & buffer_mask];
                 accumulator += data[j];
             }
         }
@@ -31,7 +31,7 @@ __kernel void run_benchmark(__global float4* inputData, __global float4* outputD
         if (mode == 1 || mode == 2) {
             #pragma unroll
             for (int j = 0; j < 32; ++j) {
-                outputData[currentIndex + j] = data[j];
+                outputData[(currentIndex + j) & buffer_mask] = data[j];
             }
         }
     }
