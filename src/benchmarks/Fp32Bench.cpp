@@ -19,7 +19,7 @@ void Fp32Bench::Setup(IComputeContext& context, const std::string& kernel_dir) {
     if (context.getBackend() == ComputeBackend::Vulkan) {
         kernel_file = kernel_dir + "/vulkan/fp32.spv";
     } else if (context.getBackend() == ComputeBackend::ROCm) {
-        kernel_file = kernel_dir + "/rocm/fp32.o";
+        kernel_file = kernel_dir + "/rocm/fp32.co";
     } else {
         kernel_file = kernel_dir + "/opencl/fp32.cl";
     }

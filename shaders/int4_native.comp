@@ -1,0 +1,27 @@
+#version 450
+#extension GL_EXT_shader_explicit_arithmetic_types_int8 : enable
+#extension GL_EXT_shader_8bit_storage : enable
+
+// INT4 is often packed into 8-bit or 32-bit types in GLSL if no explicit int4 type exists.
+// RDNA4 might support 'int4_t' if the extension is updated or via specific vendor extension.
+// For now, we assume a hypothetical native type or reuse int8 with assumed hardware acceleration.
+// If the compiler supports it, it will compile.
+
+layout(local_size_x = 64) in;
+
+layout(set = 0, binding = 0) buffer InputA { int8_t a[]; }; // Treating as packed or small int
+layout(set = 0, binding = 1) buffer InputB { int8_t b[]; };
+layout(set = 0, binding = 2) buffer OutputC { int8_t c[]; };
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    int8_t valA = a[idx];
+    int8_t valB = b[idx];
+    int8_t valC = c[idx];
+    
+    for(int i=0; i<100; ++i) {
+        valC = valA * valB + valC;
+    }
+    
+    c[idx] = valC;
+}

@@ -75,7 +75,7 @@ BenchmarkResult Int8Bench::GetResult(uint32_t config_idx) const {
 }
 
 uint32_t Int8Bench::GetNumConfigs() const {
-    return context && context->getCurrentDeviceInfo().cooperativeMatrixSupport ? 2 : 1;
+    return (matrixKernel != nullptr) ? 2 : 1;
 }
 
 std::string Int8Bench::GetConfigName(uint32_t config_idx) const {

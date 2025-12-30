@@ -14,7 +14,35 @@ extern "C" __global__ void run_benchmark(half* data) {
     half2 val7 = __half2half2(1.1f);
     half2 val8 = __half2half2(1.3f);
     
-    for (int i = 0; i < 16384; ++i) {
+    for (int i = 0; i < 65536; ++i) {
+        val1 = __hfma2(val1, __half2half2(1.0001f), val2);
+        val2 = __hfma2(val2, __half2half2(1.0001f), val3);
+        val3 = __hfma2(val3, __half2half2(1.0001f), val4);
+        val4 = __hfma2(val4, __half2half2(1.0001f), val5);
+        val5 = __hfma2(val5, __half2half2(1.0001f), val6);
+        val6 = __hfma2(val6, __half2half2(1.0001f), val7);
+        val7 = __hfma2(val7, __half2half2(1.0001f), val8);
+        val8 = __hfma2(val8, __half2half2(1.0001f), val1);
+        
+        // Unroll 3 more times to reach 32 FMAs (8 * 4 = 32)
+        val1 = __hfma2(val1, __half2half2(1.0001f), val2);
+        val2 = __hfma2(val2, __half2half2(1.0001f), val3);
+        val3 = __hfma2(val3, __half2half2(1.0001f), val4);
+        val4 = __hfma2(val4, __half2half2(1.0001f), val5);
+        val5 = __hfma2(val5, __half2half2(1.0001f), val6);
+        val6 = __hfma2(val6, __half2half2(1.0001f), val7);
+        val7 = __hfma2(val7, __half2half2(1.0001f), val8);
+        val8 = __hfma2(val8, __half2half2(1.0001f), val1);
+
+        val1 = __hfma2(val1, __half2half2(1.0001f), val2);
+        val2 = __hfma2(val2, __half2half2(1.0001f), val3);
+        val3 = __hfma2(val3, __half2half2(1.0001f), val4);
+        val4 = __hfma2(val4, __half2half2(1.0001f), val5);
+        val5 = __hfma2(val5, __half2half2(1.0001f), val6);
+        val6 = __hfma2(val6, __half2half2(1.0001f), val7);
+        val7 = __hfma2(val7, __half2half2(1.0001f), val8);
+        val8 = __hfma2(val8, __half2half2(1.0001f), val1);
+
         val1 = __hfma2(val1, __half2half2(1.0001f), val2);
         val2 = __hfma2(val2, __half2half2(1.0001f), val3);
         val3 = __hfma2(val3, __half2half2(1.0001f), val4);

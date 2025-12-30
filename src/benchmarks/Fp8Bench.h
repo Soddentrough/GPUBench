@@ -24,6 +24,8 @@ private:
     ComputeKernel vectorKernel = nullptr;
     ComputeKernel matrixKernel = nullptr;
     ComputeBuffer buffer = nullptr;
-    bool is_emulated = true;
+    bool is_emulated = false;
+    bool is_native_vector = false;
+    bool is_native_matrix = false;
     mutable std::string name = "FP8";
 };

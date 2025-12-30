@@ -55,15 +55,42 @@ endif()
 if(Vulkan_FOUND)
     file(GLOB SHADERS "shaders/*.comp")
     file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/kernels/vulkan)
+    
+    # Define optional shaders that are allowed to fail compilation
+    set(OPTIONAL_SHADERS 
+        "coop_matrix_fp8" 
+        "coop_matrix_int4" 
+        "fp8_native" 
+        "fp4_native" 
+        "int4_native"
+    )
+
     foreach(SHADER ${SHADERS})
         get_filename_component(SHADER_NAME ${SHADER} NAME_WE)
         set(SPIRV_SHADER "${CMAKE_CURRENT_BINARY_DIR}/kernels/vulkan/${SHADER_NAME}.spv")
-        add_custom_command(
-            OUTPUT ${SPIRV_SHADER}
-            COMMAND ${GLSLC_EXECUTABLE} --target-env=vulkan1.3 --target-spv=spv1.6 ${SHADER} -o ${SPIRV_SHADER}
-            DEPENDS ${SHADER}
-            COMMENT "Compiling shader: ${SHADER}"
-        )
+        
+        # Check if this shader is optional
+        list(FIND OPTIONAL_SHADERS ${SHADER_NAME} IS_OPTIONAL)
+        
+        if(IS_OPTIONAL GREATER -1)
+            # For optional shaders, we use a command that always succeeds (exit 0)
+            # even if glslc fails. We print a warning if it fails.
+            add_custom_command(
+                OUTPUT ${SPIRV_SHADER}
+                COMMAND ${GLSLC_EXECUTABLE} --target-env=vulkan1.3 --target-spv=spv1.6 ${SHADER} -o ${SPIRV_SHADER} || echo "WARNING: Optional shader ${SHADER_NAME} failed to compile"
+                DEPENDS ${SHADER}
+                COMMENT "Compiling optional shader: ${SHADER}"
+            )
+        else()
+            # For standard shaders, fail the build if compilation fails
+            add_custom_command(
+                OUTPUT ${SPIRV_SHADER}
+                COMMAND ${GLSLC_EXECUTABLE} --target-env=vulkan1.3 --target-spv=spv1.6 ${SHADER} -o ${SPIRV_SHADER}
+                DEPENDS ${SHADER}
+                COMMENT "Compiling shader: ${SHADER}"
+            )
+        endif()
+        
         list(APPEND SPIRV_SHADERS ${SPIRV_SHADER})
     endforeach()
     add_custom_target(shaders ALL DEPENDS ${SPIRV_SHADERS})
@@ -90,14 +117,32 @@ endif()
 if(HIP_FOUND)
     file(GLOB HIP_KERNELS "hip_kernels/*.hip")
     file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/kernels/rocm)
+    
+    # Define optional HIP kernels
+    set(OPTIONAL_HIP_KERNELS "fp8" "int4")
+    
     foreach(HIP_KERNEL ${HIP_KERNELS})
         get_filename_component(KERNEL_NAME ${HIP_KERNEL} NAME_WE)
         set(HIP_OBJECT "${CMAKE_CURRENT_BINARY_DIR}/kernels/rocm/${KERNEL_NAME}.co")
-        add_custom_command(
-            OUTPUT ${HIP_OBJECT}
-            COMMAND ${HIP_HIPCC_EXECUTABLE} --genco --offload-arch=gfx1201 ${HIP_KERNEL} -o ${HIP_OBJECT} -D__HIP_PLATFORM_AMD__
-            DEPENDS ${HIP_KERNEL}
-        )
+        
+        list(FIND OPTIONAL_HIP_KERNELS ${KERNEL_NAME} IS_OPTIONAL)
+        
+        if(IS_OPTIONAL GREATER -1)
+             add_custom_command(
+                OUTPUT ${HIP_OBJECT}
+                COMMAND ${HIP_HIPCC_EXECUTABLE} --genco --offload-arch=gfx1201 ${HIP_KERNEL} -o ${HIP_OBJECT} -D__HIP_PLATFORM_AMD__ || echo "WARNING: Optional HIP kernel ${KERNEL_NAME} failed to compile"
+                DEPENDS ${HIP_KERNEL}
+                COMMENT "Compiling optional HIP kernel: ${HIP_KERNEL}"
+            )
+        else()
+             add_custom_command(
+                OUTPUT ${HIP_OBJECT}
+                COMMAND ${HIP_HIPCC_EXECUTABLE} --genco --offload-arch=gfx1201 ${HIP_KERNEL} -o ${HIP_OBJECT} -D__HIP_PLATFORM_AMD__
+                DEPENDS ${HIP_KERNEL}
+                COMMENT "Compiling HIP kernel: ${HIP_KERNEL}"
+            )
+        endif()
+       
         list(APPEND HIP_OBJECTS ${HIP_OBJECT})
     endforeach()
     add_custom_target(hip_kernels ALL DEPENDS ${HIP_OBJECTS})

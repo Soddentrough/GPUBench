@@ -1,6 +1,7 @@
 #include "benchmarks/Fp8Bench.h"
 #include <stdexcept>
 #include <fstream>
+#include <iostream>
 
 const char* Fp8Bench::GetName() const {
     return "FP8";
@@ -32,26 +33,91 @@ void Fp8Bench::Setup(IComputeContext& context, const std::string& kernel_dir) {
         return f.good();
     };
 
+    if (context.getBackend() == ComputeBackend::ROCm) {
+         // HIP Path
+         std::string kernel_file = kernel_dir + "/rocm/fp8.co";
+         std::string matrix_file = kernel_dir + "/rocm/fp8_matrix.co";
+         
+         if (file_exists(kernel_file)) {
+             vectorKernel = context.createKernel(kernel_file, "run_benchmark", 1);
+             context.setKernelArg(vectorKernel, 0, buffer);
+             is_native_vector = true;
+             is_emulated = false; // "Native" placeholder
+         } else {
+             is_native_vector = false;
+         }
+
+         if (file_exists(matrix_file)) {
+             matrixKernel = context.createKernel(matrix_file, "run_benchmark", 1);
+             context.setKernelArg(matrixKernel, 0, buffer);
+             is_native_matrix = true; 
+         } else {
+             is_native_matrix = false;
+         }
+         return;
+    }
+
+    // Vulkan Path
     // Load Vector Kernel
     std::string native_vector = kernel_dir + "/vulkan/fp8_native.spv";
     std::string emulated_vector = kernel_dir + "/vulkan/fp8_emulated.spv";
-    std::string vector_file = (is_emulated || !file_exists(native_vector)) ? emulated_vector : native_vector;
     
-    vectorKernel = context.createKernel(vector_file, "main", 1);
-    context.setKernelArg(vectorKernel, 0, buffer);
+    // Default to emulated
+    std::string vector_file = emulated_vector;
+    is_native_vector = false;
+    is_emulated = true;
+
+    // Try native if file exists and we are on compatible hardware (or forcing check)
+    // FORCE DISABLE: The native shader has known issues and ghosts, forcing emulation for consistency.
+    /*
+    if (file_exists(native_vector)) {
+        vector_file = native_vector;
+        is_native_vector = true;
+        is_emulated = false;
+    }
+    */
+    
+    try {
+        vectorKernel = context.createKernel(vector_file, "main", 1);
+        context.setKernelArg(vectorKernel, 0, buffer);
+    } catch (...) {
+        // Fallback if native failed to load even if file existed
+        if (is_native_vector) {
+            std::cerr << "Native FP8 vector kernel failed to load, falling back to emulation." << std::endl;
+            vector_file = emulated_vector;
+            vectorKernel = context.createKernel(vector_file, "main", 1);
+            context.setKernelArg(vectorKernel, 0, buffer);
+            is_native_vector = false;
+            is_emulated = true;
+        } else {
+            throw;
+        }
+    }
 
     // Optionally load Matrix Kernel
+    is_native_matrix = false;
     if (info.cooperativeMatrixSupport && context.getBackend() == ComputeBackend::Vulkan) {
         std::string matrix_file = kernel_dir + "/vulkan/coop_matrix_fp8.spv";
         if (file_exists(matrix_file)) {
-            matrixKernel = context.createKernel(matrix_file, "main", 1);
-            context.setKernelArg(matrixKernel, 0, buffer);
+            try {
+                matrixKernel = context.createKernel(matrix_file, "main", 1);
+                context.setKernelArg(matrixKernel, 0, buffer);
+                is_native_matrix = true;
+            } catch (...) {
+                // Ignore failure, just don't enable matrix mode
+                is_native_matrix = false;
+            }
         }
     }
+    
+    // std::cout << "DEBUG: Setup Complete. vectorKernel=" << vectorKernel << ", buffer=" << buffer << std::endl;
 }
 
 void Fp8Bench::Run(uint32_t config_idx) {
     if (config_idx == 0) {
+        if (!vectorKernel) {
+             throw std::runtime_error("vectorKernel is NULL in Run!");
+        }
         context->dispatch(vectorKernel, 8192, 1, 1, 64, 1, 1);
     } else if (matrixKernel) {
         context->dispatch(matrixKernel, 32768, 1, 1, 32, 1, 1);

@@ -35,15 +35,21 @@ void ROCmContext::enumerateDevices() {
             info.subgroupSize = prop.warpSize;
             info.l2CacheSize = prop.l2CacheSize;
             
-            // Check for FP8 support (CDNA3 MI300+ or RDNA3+)
+            // Check for FP8 support (CDNA3 MI300+, RDNA3+, RDNA4+)
             info.fp8Support = (std::string(prop.gcnArchName).find("gfx942") != std::string::npos ||
-                               std::string(prop.gcnArchName).find("gfx11") != std::string::npos);
+                               std::string(prop.gcnArchName).find("gfx11") != std::string::npos ||
+                               std::string(prop.gcnArchName).find("gfx12") != std::string::npos);
             info.fp6Support = false;
-            info.fp4Support = false; 
+            info.fp4Support = (std::string(prop.gcnArchName).find("gfx12") != std::string::npos); 
             info.fp64Support = true;
             info.fp16Support = true;
             info.int8Support = true;
-            info.int4Support = false; 
+            info.int4Support = (std::string(prop.gcnArchName).find("gfx12") != std::string::npos); 
+            
+            // Assume WMMA support for RDNA3/4 and CDNA3
+            info.cooperativeMatrixSupport = (std::string(prop.gcnArchName).find("gfx942") != std::string::npos ||
+                                             std::string(prop.gcnArchName).find("gfx11") != std::string::npos ||
+                                             std::string(prop.gcnArchName).find("gfx12") != std::string::npos);
             devices.push_back(info);
         }
     }

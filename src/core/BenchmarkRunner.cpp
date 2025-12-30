@@ -143,7 +143,7 @@ void BenchmarkRunner::run(const std::vector<std::string>& benchmarks_to_run) {
     std::cout << "================================================================================" << std::endl;
     std::cout << std::endl;
 
-    std::cout << "Selected " << totalSelected << " of " << totalAvailable << " devices:" << std::endl;
+    std::cout << "Selected execution targets:" << std::endl;
 
     for (auto* context : contexts) {
         try {

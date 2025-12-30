@@ -17,9 +17,14 @@ public:
     std::string GetConfigName(uint32_t config_idx) const override;
     const char* GetMetric() const override { return "TOPS"; }
 
+    bool IsEmulated() const override { return is_emulated; }
+
 private:
     IComputeContext* context = nullptr;
     ComputeKernel vectorKernel = nullptr;
     ComputeKernel matrixKernel = nullptr;
     ComputeBuffer buffer = nullptr;
+    bool is_emulated = true;
+    bool is_native_vector = false;
+    bool is_native_matrix = false;
 };

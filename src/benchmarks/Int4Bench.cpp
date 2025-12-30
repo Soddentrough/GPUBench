@@ -1,6 +1,7 @@
 #include "benchmarks/Int4Bench.h"
 #include <stdexcept>
 #include <fstream>
+#include <iostream>
 
 bool Int4Bench::IsSupported(const DeviceInfo& info, IComputeContext* context) const {
     return info.int4Support;
@@ -13,24 +14,72 @@ void Int4Bench::Setup(IComputeContext& context, const std::string& kernel_dir) {
     size_t bufferSize = 8192 * 64 * 4; // 8192 workgroups * 64 threads * 4 bytes (i8vec4)
     buffer = context.createBuffer(bufferSize);
 
-    // Load Vector Kernel
-    std::string vector_file = kernel_dir + "/vulkan/int4.spv";
-    vectorKernel = context.createKernel(vector_file, "main", 1);
-    context.setKernelArg(vectorKernel, 0, buffer);
-
     // Helper to check if file exists
     auto file_exists = [](const std::string& path) {
         std::ifstream f(path.c_str());
         return f.good();
     };
 
-    // Load Matrix Kernel
+    if (context.getBackend() == ComputeBackend::ROCm) {
+         // HIP Path
+         std::string kernel_file = kernel_dir + "/rocm/int4.co";
+         if (file_exists(kernel_file)) {
+             vectorKernel = context.createKernel(kernel_file, "run_benchmark", 1);
+             context.setKernelArg(vectorKernel, 0, buffer);
+             is_native_vector = true;
+             is_emulated = false;
+         } else {
+             std::cerr << "Native INT4 HIP kernel missing: " << kernel_file << std::endl;
+             is_native_vector = false; // Not supported
+             // We can return here or let it be null.
+         }
+         is_native_matrix = false;
+         return;
+    }
+
+    // Vulkan Path
+    // Load Vector Kernel
+    std::string native_vector = kernel_dir + "/vulkan/int4_native.spv";
+    std::string emulated_vector = kernel_dir + "/vulkan/int4.spv"; // Assuming int4.spv is emulated/fallback
+    
+    std::string vector_file = emulated_vector;
+    is_native_vector = false;
+    is_emulated = true;
+
+    // Check for native
+    if (file_exists(native_vector)) {
+        vector_file = native_vector;
+        is_native_vector = true;
+        is_emulated = false;
+    }
+    
+    try {
+        vectorKernel = context.createKernel(vector_file, "main", 1);
+        context.setKernelArg(vectorKernel, 0, buffer);
+    } catch (...) {
+         if (is_native_vector) {
+            std::cerr << "Native INT4 vector kernel failed to load, falling back to emulation." << std::endl;
+            vector_file = emulated_vector;
+            vectorKernel = context.createKernel(vector_file, "main", 1);
+            context.setKernelArg(vectorKernel, 0, buffer);
+            is_native_vector = false;
+            is_emulated = true;
+        } else {
+            throw;
+        }
+    }
+
     bool is_rdna4 = context.getCurrentDeviceInfo().name.find("gfx12") != std::string::npos;
     if (context.getCurrentDeviceInfo().cooperativeMatrixSupport && context.getBackend() == ComputeBackend::Vulkan && is_rdna4) {
         std::string matrix_file = kernel_dir + "/vulkan/coop_matrix_int4.spv";
         if (file_exists(matrix_file)) {
-            matrixKernel = context.createKernel(matrix_file, "main", 1);
-            context.setKernelArg(matrixKernel, 0, buffer);
+            try {
+                matrixKernel = context.createKernel(matrix_file, "main", 1);
+                context.setKernelArg(matrixKernel, 0, buffer);
+                is_native_matrix = true;
+            } catch (...) {
+                is_native_matrix = false;
+            }
         }
     }
 }

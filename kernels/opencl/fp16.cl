@@ -15,8 +15,36 @@ __kernel void run_benchmark(__global half* data) {
     half2 val7 = (half2)(1.1h, 1.2h);
     half2 val8 = (half2)(1.3h, 1.4h);
     
-    // Each iteration performs 8 half2 FMAs = 8 * 2 * 2 = 32 FP16 ops
-    for (int i = 0; i < 16384; ++i) {
+    // Each iteration performs 32 half2 FMAs = 32 * 2 * 2 = 128 FP16 ops
+    // Host expects 65536 iters * 128 ops.
+    for (int i = 0; i < 65536; ++i) {
+        val1 = fma(val1, (half2)(1.0001h), val2);
+        val2 = fma(val2, (half2)(1.0001h), val3);
+        val3 = fma(val3, (half2)(1.0001h), val4);
+        val4 = fma(val4, (half2)(1.0001h), val5);
+        val5 = fma(val5, (half2)(1.0001h), val6);
+        val6 = fma(val6, (half2)(1.0001h), val7);
+        val7 = fma(val7, (half2)(1.0001h), val8);
+        val8 = fma(val8, (half2)(1.0001h), val1);
+
+        val1 = fma(val1, (half2)(1.0001h), val2);
+        val2 = fma(val2, (half2)(1.0001h), val3);
+        val3 = fma(val3, (half2)(1.0001h), val4);
+        val4 = fma(val4, (half2)(1.0001h), val5);
+        val5 = fma(val5, (half2)(1.0001h), val6);
+        val6 = fma(val6, (half2)(1.0001h), val7);
+        val7 = fma(val7, (half2)(1.0001h), val8);
+        val8 = fma(val8, (half2)(1.0001h), val1);
+
+        val1 = fma(val1, (half2)(1.0001h), val2);
+        val2 = fma(val2, (half2)(1.0001h), val3);
+        val3 = fma(val3, (half2)(1.0001h), val4);
+        val4 = fma(val4, (half2)(1.0001h), val5);
+        val5 = fma(val5, (half2)(1.0001h), val6);
+        val6 = fma(val6, (half2)(1.0001h), val7);
+        val7 = fma(val7, (half2)(1.0001h), val8);
+        val8 = fma(val8, (half2)(1.0001h), val1);
+
         val1 = fma(val1, (half2)(1.0001h), val2);
         val2 = fma(val2, (half2)(1.0001h), val3);
         val3 = fma(val3, (half2)(1.0001h), val4);
