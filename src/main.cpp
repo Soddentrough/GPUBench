@@ -4,6 +4,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <cstdlib>
 #include "CLI11.hpp"
 
 #ifdef HAVE_VULKAN
@@ -11,6 +12,10 @@
 #endif
 
 int main(int argc, char** argv) {
+#ifdef __linux__
+    // Suppress Mesa/RADV conformance warnings to keep the output clean
+    setenv("MESA_VK_IGNORE_CONFORMANCE_WARNING", "1", 1);
+#endif
     CLI::App app{"GPUBench"};
     app.set_version_flag("--version", GPUBENCH_VERSION);
 

@@ -1,5 +1,6 @@
 #include "benchmarks/Fp8Bench.h"
 #include <stdexcept>
+#include <fstream>
 
 const char* Fp8Bench::GetName() const {
     return "FP8";
@@ -13,7 +14,9 @@ void Fp8Bench::Setup(IComputeContext& context, const std::string& kernel_dir) {
     this->context = &context;
     
     DeviceInfo info = context.getCurrentDeviceInfo();
-    is_emulated = (info.name.find("gfx942") == std::string::npos && info.name.find("gfx11") == std::string::npos);
+    is_emulated = (info.name.find("gfx942") == std::string::npos && 
+                   info.name.find("gfx11") == std::string::npos &&
+                   info.name.find("gfx12") == std::string::npos); // RDNA4 is native
 
     // Create storage buffer
     size_t bufferSize = 8192 * 64 * 4; // 8192 workgroups * 64 threads * 4 bytes (u8vec4)
@@ -23,46 +26,65 @@ void Fp8Bench::Setup(IComputeContext& context, const std::string& kernel_dir) {
     }
     buffer = context.createBuffer(bufferSize);
 
-    // Create kernel
-    std::string kernel_file;
-    std::string kernel_name = is_emulated ? "fp8_emulated" : "fp8_native";
-    if (context.getBackend() == ComputeBackend::Vulkan) {
-        kernel_file = kernel_dir + "/vulkan/" + kernel_name + ".spv";
-    } else if (context.getBackend() == ComputeBackend::ROCm) {
-        kernel_file = kernel_dir + "/rocm/" + kernel_name + ".co";
-    } else {
-        kernel_file = kernel_dir + "/opencl/fp8.cl";
-    }
+    // Helper to check if file exists
+    auto file_exists = [](const std::string& path) {
+        std::ifstream f(path.c_str());
+        return f.good();
+    };
+
+    // Load Vector Kernel
+    std::string native_vector = kernel_dir + "/vulkan/fp8_native.spv";
+    std::string emulated_vector = kernel_dir + "/vulkan/fp8_emulated.spv";
+    std::string vector_file = (is_emulated || !file_exists(native_vector)) ? emulated_vector : native_vector;
     
-    std::string func_name;
-    if (context.getBackend() == ComputeBackend::Vulkan) {
-        func_name = "main";
-    } else if (context.getBackend() == ComputeBackend::ROCm) {
-        func_name = "run_benchmark";
-    } else {
-        func_name = "run_benchmark";
+    vectorKernel = context.createKernel(vector_file, "main", 1);
+    context.setKernelArg(vectorKernel, 0, buffer);
+
+    // Optionally load Matrix Kernel
+    if (info.cooperativeMatrixSupport && context.getBackend() == ComputeBackend::Vulkan) {
+        std::string matrix_file = kernel_dir + "/vulkan/coop_matrix_fp8.spv";
+        if (file_exists(matrix_file)) {
+            matrixKernel = context.createKernel(matrix_file, "main", 1);
+            context.setKernelArg(matrixKernel, 0, buffer);
+        }
     }
-    kernel = context.createKernel(kernel_file, func_name, 1);
-    context.setKernelArg(kernel, 0, buffer);
 }
 
 void Fp8Bench::Run(uint32_t config_idx) {
-    context->dispatch(kernel, 8192, 1, 1, 64, 1, 1);
+    if (config_idx == 0) {
+        context->dispatch(vectorKernel, 8192, 1, 1, 64, 1, 1);
+    } else if (matrixKernel) {
+        context->dispatch(matrixKernel, 32768, 1, 1, 32, 1, 1);
+    }
 }
 
 void Fp8Bench::Teardown() {
-    if (kernel) {
-        context->releaseKernel(kernel);
-    }
-    if (buffer) {
-        context->releaseBuffer(buffer);
-    }
+    if (vectorKernel) context->releaseKernel(vectorKernel);
+    if (matrixKernel) context->releaseKernel(matrixKernel);
+    if (buffer) context->releaseBuffer(buffer);
+    vectorKernel = nullptr;
+    matrixKernel = nullptr;
+    buffer = nullptr;
 }
 
 BenchmarkResult Fp8Bench::GetResult(uint32_t config_idx) const {
-    // 8 fma operations per iteration, each is 2 ops (multiply, add)
-    // 8 * 2 * 4 = 64 FP8-equivalent operations per iteration
-    // 16384 iterations * 64 ops * 8192 workgroups * 64 threads
-    uint64_t num_ops = (uint64_t)16384 * 64 * 8192 * 64;
-    return {num_ops, 0.0};
+    if (config_idx == 0) { // Vector
+        // 8 fma operations per iteration, each is 2 ops (multiply, add)
+        // 8 * 2 * 4 = 64 FP8-equivalent operations per iteration
+        uint64_t num_ops = (uint64_t)16384 * 64 * 8192 * 64;
+        return {num_ops, 0.0};
+    } else { // Matrix
+        // 16x16x16 matrix multiply = 8192 ops
+        // 16384 iterations * 8192 ops * 32768 subgroups
+        uint64_t num_ops = (uint64_t)16384 * 8192 * 32768; 
+        return {num_ops, 0.0};
+    }
+}
+
+uint32_t Fp8Bench::GetNumConfigs() const {
+    return (matrixKernel != nullptr) ? 2 : 1;
+}
+
+std::string Fp8Bench::GetConfigName(uint32_t config_idx) const {
+    return (config_idx == 0) ? "Vector" : "Matrix";
 }

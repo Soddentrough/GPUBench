@@ -60,7 +60,7 @@ if(Vulkan_FOUND)
         set(SPIRV_SHADER "${CMAKE_CURRENT_BINARY_DIR}/kernels/vulkan/${SHADER_NAME}.spv")
         add_custom_command(
             OUTPUT ${SPIRV_SHADER}
-            COMMAND ${GLSLC_EXECUTABLE} --target-env=vulkan1.2 --target-spv=spv1.5 ${SHADER} -o ${SPIRV_SHADER}
+            COMMAND ${GLSLC_EXECUTABLE} --target-env=vulkan1.3 --target-spv=spv1.6 ${SHADER} -o ${SPIRV_SHADER}
             DEPENDS ${SHADER}
             COMMENT "Compiling shader: ${SHADER}"
         )
@@ -95,7 +95,7 @@ if(HIP_FOUND)
         set(HIP_OBJECT "${CMAKE_CURRENT_BINARY_DIR}/kernels/rocm/${KERNEL_NAME}.co")
         add_custom_command(
             OUTPUT ${HIP_OBJECT}
-            COMMAND ${HIP_HIPCC_EXECUTABLE} --genco --offload-arch=gfx1030 --offload-arch=gfx1100 --offload-arch=gfx1101 --offload-arch=gfx1102 --offload-arch=gfx1151 --offload-arch=gfx1200 --offload-arch=gfx1201 ${HIP_KERNEL} -o ${HIP_OBJECT} -D__HIP_PLATFORM_AMD__
+            COMMAND ${HIP_HIPCC_EXECUTABLE} --genco --offload-arch=gfx1201 ${HIP_KERNEL} -o ${HIP_OBJECT} -D__HIP_PLATFORM_AMD__
             DEPENDS ${HIP_KERNEL}
         )
         list(APPEND HIP_OBJECTS ${HIP_OBJECT})

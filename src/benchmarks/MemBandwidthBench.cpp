@@ -78,8 +78,10 @@ void MemBandwidthBench::Setup(IComputeContext& context, const std::string& kerne
     }
     
     // Log buffer size for debugging
-    std::cout << "Allocating memory buffers: " << (bufferSize / (1024*1024*1024)) << " GB per buffer ("
-              << ((bufferSize * 2) / (1024*1024*1024)) << " GB total)" << std::endl;
+    if (this->context->getBackend() == ComputeBackend::Vulkan && debug) {
+        std::cout << "Allocating memory buffers: " << (bufferSize / (1024*1024*1024)) << " GB per buffer ("
+                  << ((bufferSize * 2) / (1024*1024*1024)) << " GB total)" << std::endl;
+    }
     
     inputBuffer = this->context->createBuffer(bufferSize);
     outputBuffer = this->context->createBuffer(bufferSize);
@@ -120,8 +122,10 @@ void MemBandwidthBench::Setup(IComputeContext& context, const std::string& kerne
         configs.push_back({"R/W 1024 threads/group", "membw_1024", 1024, numWorkgroups1024, TestMode::ReadWrite, nullptr});
     }
     
-    std::cout << "Max safe threads for " << (bufferSize/(1024*1024*1024)) << "GB buffer: " << maxTotalThreads 
-              << " (128tpg: " << numWorkgroups128 << " wg, 256tpg: " << numWorkgroups256 << " wg)" << std::endl;
+    if (debug) {
+        std::cout << "Max safe threads for " << (bufferSize/(1024*1024*1024)) << "GB buffer: " << maxTotalThreads 
+                  << " (128tpg: " << numWorkgroups128 << " wg, 256tpg: " << numWorkgroups256 << " wg)" << std::endl;
+    }
     
     for (auto& config : configs) {
         createKernel(config, kernel_dir);

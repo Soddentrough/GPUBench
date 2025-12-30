@@ -1,0 +1,28 @@
+[ 30%] Built target shaders
+[ 52%] Built target kernels
+[ 53%] Generating kernels/rocm/membw_1024.co
+[ 54%] Generating kernels/rocm/membw_128.co
+[ 56%] Generating kernels/rocm/membw_256.co
+[ 77%] Built target hip_kernels
+[ 77%] Building CXX object CMakeFiles/gpubench.dir/src/main.cpp.o
+[ 78%] Building CXX object CMakeFiles/gpubench.dir/src/core/BenchmarkRunner.cpp.o
+[ 80%] Building CXX object CMakeFiles/gpubench.dir/src/core/ResultFormatter.cpp.o
+[ 88%] Building CXX object CMakeFiles/gpubench.dir/src/benchmarks/Int8Bench.cpp.o
+[ 89%] Building CXX object CMakeFiles/gpubench.dir/src/benchmarks/Int4Bench.cpp.o
+[ 90%] Building CXX object CMakeFiles/gpubench.dir/src/benchmarks/MemBandwidthBench.cpp.o
+[ 92%] Building CXX object CMakeFiles/gpubench.dir/src/benchmarks/CacheBench.cpp.o
+[ 93%] Building CXX object CMakeFiles/gpubench.dir/src/benchmarks/Fp6Bench.cpp.o
+[ 94%] Building CXX object CMakeFiles/gpubench.dir/src/utils/KernelPath.cpp.o
+[ 96%] Building CXX object CMakeFiles/gpubench.dir/src/core/VulkanContext.cpp.o
+/home/naoki/Development/GPUBench/src/core/VulkanContext.cpp: In member function ‘void VulkanContext::createDevice()’:
+/home/naoki/Development/GPUBench/src/core/VulkanContext.cpp:232:62: error: ‘VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16_BIT_STORAGE_FEATURES’ was not declared in this scope; did you mean ‘VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES’?
+  232 |     VkPhysicalDevice16BitStorageFeatures features16Storage { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16_BIT_STORAGE_FEATURES };
+      |                                                              ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+      |                                                              VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES
+/home/naoki/Development/GPUBench/src/core/VulkanContext.cpp:233:60: error: ‘VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8_BIT_STORAGE_FEATURES’ was not declared in this scope; did you mean ‘VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES’?
+  233 |     VkPhysicalDevice8BitStorageFeatures features8Storage { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8_BIT_STORAGE_FEATURES };
+      |                                                            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+      |                                                            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES
+make[2]: *** [CMakeFiles/gpubench.dir/build.make:275: CMakeFiles/gpubench.dir/src/core/VulkanContext.cpp.o] Error 1
+make[1]: *** [CMakeFiles/Makefile2:194: CMakeFiles/gpubench.dir/all] Error 2
+make: *** [Makefile:156: all] Error 2

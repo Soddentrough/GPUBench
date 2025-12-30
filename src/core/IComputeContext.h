@@ -46,6 +46,8 @@ struct DeviceInfo {
     bool fp4Support = false;
     bool int8Support = false;
     bool int4Support = false;
+    bool cooperativeMatrixSupport = false;
+    bool structuredSparsitySupport = false;
     bool verbose = false;
 };
 

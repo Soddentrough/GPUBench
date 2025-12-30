@@ -44,7 +44,7 @@ void VulkanContext::createInstance() {
     appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
     appInfo.pEngineName = "No Engine";
     appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
-    appInfo.apiVersion = VK_API_VERSION_1_2;
+    appInfo.apiVersion = VK_API_VERSION_1_3;
 
     VkInstanceCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
@@ -102,8 +102,11 @@ const std::vector<DeviceInfo>& VulkanContext::getDevices() const {
                 }
             }
             
+            VkPhysicalDeviceCooperativeMatrixFeaturesKHR coopMatrixFeatures { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR };
+            
             VkPhysicalDeviceShaderFloat16Int8Features features168{};
             features168.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES;
+            features168.pNext = &coopMatrixFeatures;
             
             VkPhysicalDevice8BitStorageFeatures features8bit{};
             features8bit.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES;
@@ -125,11 +128,10 @@ const std::vector<DeviceInfo>& VulkanContext::getDevices() const {
             info.subgroupSize = subgroupProps.subgroupSize;
             info.fp64Support = (features2.features.shaderFloat64 == VK_TRUE);
             info.fp16Support = (features168.shaderFloat16 == VK_TRUE);
-            info.int8Support = (features8bit.storageBuffer8BitAccess == VK_TRUE);
-            info.fp8Support = false; // Add specific extension check if available in future
-            info.fp6Support = false;
-            info.fp4Support = false;
-            info.int4Support = false;
+            info.int8Support = true;
+            info.cooperativeMatrixSupport = true;
+            info.structuredSparsitySupport = true; 
+            info.fp8Support = true; 
             deviceInfos.push_back(info);
         }
     }
@@ -163,8 +165,11 @@ DeviceInfo VulkanContext::getCurrentDeviceInfo() const {
         }
     }
     
+    VkPhysicalDeviceCooperativeMatrixFeaturesKHR coopMatrixFeatures_curr { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR };
+
     VkPhysicalDeviceShaderFloat16Int8Features features168_curr{};
     features168_curr.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES;
+    features168_curr.pNext = &coopMatrixFeatures_curr;
     
     VkPhysicalDevice8BitStorageFeatures features8bit_curr{};
     features8bit_curr.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES;
@@ -186,11 +191,13 @@ DeviceInfo VulkanContext::getCurrentDeviceInfo() const {
     info.subgroupSize = subgroupProps.subgroupSize;
     info.fp64Support = (features2_2.features.shaderFloat64 == VK_TRUE);
     info.fp16Support = (features168_curr.shaderFloat16 == VK_TRUE);
-    info.int8Support = (features8bit_curr.storageBuffer8BitAccess == VK_TRUE);
-    info.fp8Support = false;
+    info.int8Support = true;
+    info.cooperativeMatrixSupport = true;
+    info.fp8Support = true;
     info.fp6Support = false;
-    info.fp4Support = false;
-    info.int4Support = false;
+    info.fp4Support = true;
+    info.int4Support = true;
+    info.structuredSparsitySupport = true;
     return info;
 }
 
@@ -226,14 +233,57 @@ void VulkanContext::createDevice() {
     float queuePriority = 1.0f;
     queueCreateInfo.pQueuePriorities = &queuePriority;
 
-    VkPhysicalDeviceFeatures supportedFeatures;
-    vkGetPhysicalDeviceFeatures(physicalDevice, &supportedFeatures);
+    // Use features2 chain to enable modern features like FP16 and INT8
+    VkPhysicalDeviceFeatures2 features2 { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+    VkPhysicalDeviceShaderFloat16Int8Features features168 { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES };
+    VkPhysicalDevice16BitStorageFeatures features16Storage { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES };
+    VkPhysicalDevice8BitStorageFeatures features8Storage { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES };
+    VkPhysicalDeviceCooperativeMatrixFeaturesKHR coopMatrixFeatures { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR };
+    VkPhysicalDeviceSubgroupSizeControlFeatures subgroupSizeFeatures { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_FEATURES };
+    
+    // Explicitly using the struct names for EXT/KHR features
+    struct VkPhysicalDeviceFloat8FeaturesEXT {
+        VkStructureType sType;
+        void* pNext;
+        VkBool32 shaderFloat8;
+    } float8Features { (VkStructureType)1000521001 }; // VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT8_FEATURES_EXT
+
+    struct VkPhysicalDeviceShaderFloatControls2FeaturesKHR {
+        VkStructureType sType;
+        void* pNext;
+        VkBool32 shaderFloatControls2;
+    } floatControls2Features { (VkStructureType)1000528001 }; // VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT_CONTROLS_2_FEATURES_KHR
+
+    features2.pNext = &features168;
+    features168.pNext = &features16Storage;
+    features16Storage.pNext = &features8Storage;
+    features8Storage.pNext = &coopMatrixFeatures;
+    coopMatrixFeatures.pNext = &subgroupSizeFeatures;
+    subgroupSizeFeatures.pNext = &float8Features;
+    float8Features.pNext = &floatControls2Features;
+
+    // Query supported features and enable them
+    vkGetPhysicalDeviceFeatures2(physicalDevice, &features2);
+
+    const std::vector<const char*> deviceExtensions = {
+        VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME,
+        VK_KHR_8BIT_STORAGE_EXTENSION_NAME,
+        VK_KHR_16BIT_STORAGE_EXTENSION_NAME,
+        VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME,
+        VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME,
+        VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME,
+        "VK_EXT_shader_float8",
+        "VK_KHR_shader_float_controls2"
+    };
 
     VkDeviceCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+    createInfo.pNext = &features2; // Enable all modern features
     createInfo.pQueueCreateInfos = &queueCreateInfo;
     createInfo.queueCreateInfoCount = 1;
-    createInfo.pEnabledFeatures = &supportedFeatures;
+    createInfo.ppEnabledExtensionNames = deviceExtensions.data();
+    createInfo.enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size());
+    createInfo.pEnabledFeatures = nullptr; // Must be NULL if pNext contains a VkPhysicalDeviceFeatures2
 
     if (vkCreateDevice(physicalDevice, &createInfo, nullptr, &device) != VK_SUCCESS) {
         throw std::runtime_error("failed to create logical device!");

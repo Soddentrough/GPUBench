@@ -1,32 +1,20 @@
-// Requires ROCm 6.4+
 #include <hip/hip_runtime.h>
 #include <hip/hip_fp16.h>
 
-extern "C" __global__ void run_benchmark(half* data) {
-    uint index = blockIdx.x * blockDim.x + threadIdx.x;
-
-    half2 val1 = reinterpret_cast<half2*>(data)[index];
-    half2 val2 = __half2half2(0.1f);
-    half2 val3 = __half2half2(0.3f);
-    half2 val4 = __half2half2(0.5f);
-    half2 val5 = __half2half2(0.7f);
-    half2 val6 = __half2half2(0.9f);
-    half2 val7 = __half2half2(1.1f);
-    half2 val8 = __half2half2(1.3f);
+// Experimental RDNA4 WMMA built-ins
+extern "C" __global__ void run_benchmark(
+    const __half* a,
+    const __half* b,
+    float* c,
+    uint32_t iterations) 
+{
+    // Use float16 to float8 conversion builtins if available
+    // For now, testing if WMMA is accepted by compiler
+    // __builtin_amdgcn_wmma_f32_16x16x16_fp8_fp8 is expected on GFX12
     
-    const half2 fma_val = __half2half2(1.0001f);
-
-    for (int i = 0; i < 16384; ++i) {
-        val1 = __hfma2(val1, fma_val, val2);
-        val2 = __hfma2(val2, fma_val, val3);
-        val3 = __hfma2(val3, fma_val, val4);
-        val4 = __hfma2(val4, fma_val, val5);
-        val5 = __hfma2(val5, fma_val, val6);
-        val6 = __hfma2(val6, fma_val, val7);
-        val7 = __hfma2(val7, fma_val, val8);
-        val8 = __hfma2(val8, fma_val, val1);
-    }
-    
-    half2 result = __hadd2(__hadd2(__hadd2(val1, val2), __hadd2(val3, val4)), __hadd2(__hadd2(val5, val6), __hadd2(val7, val8)));
-    reinterpret_cast<half2*>(data)[index] = result;
+    // Placeholder logic that mimics the WMMA interface
+    // This allows us to test if the compiler recognizes the target
+    #if defined(__gfx1201__)
+    // Real WMMA call would go here
+    #endif
 }

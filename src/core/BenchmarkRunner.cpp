@@ -133,17 +133,28 @@ void BenchmarkRunner::run(const std::vector<std::string>& benchmarks_to_run) {
         }
     }
 
-    std::cout << "Using " << totalSelected << " of " << totalAvailable << " devices:" << std::endl;
+    std::cout << "================================================================================" << std::endl;
+    std::cout << "   ______ ______  _    _  ____   ______  _   _   _____  _    _" << std::endl;
+    std::cout << "  |  ____|  __  || |  | ||  _ \\ |  ____|| \\ | | / ____|| |  | |" << std::endl;
+    std::cout << "  | |  __| |__) || |  | || |_) || |____ |  \\| || |     | |__| |" << std::endl;
+    std::cout << "  | | |_ |  ___/ | |  | ||  _ < |  ____|| . ` || |     |  __  |" << std::endl;
+    std::cout << "  | |__| | |     | |__| || |_) || |____ | |\\  || |____ | |  | |" << std::endl;
+    std::cout << "  \\______|_|      \\____/ |____/ |______||_| \\_| \\_____||_|  |_|" << std::endl;
+    std::cout << "================================================================================" << std::endl;
+    std::cout << std::endl;
+
+    std::cout << "Selected " << totalSelected << " of " << totalAvailable << " devices:" << std::endl;
 
     for (auto* context : contexts) {
         try {
             DeviceInfo info = context->getCurrentDeviceInfo();
-            std::cout << "Device " << context->getSelectedDeviceIndex() << ": " << info.name 
-                      << " (" << ComputeBackendFactory::getBackendName(context->getBackend()) << ") : "
-                      << "VRAM: " << static_cast<int>(std::round(info.memorySize / (1024.0 * 1024.0 * 1024.0))) << " GB. "
-                      << "Max Workgroup size: " << info.maxWorkGroupSize << ", "
-                      << "Subgroup Size: " << info.subgroupSize << ", "
-                      << "Max Shared Memory: " << (info.maxComputeSharedMemorySize / 1024) << " KB" << std::endl;
+            std::cout << " [Device " << context->getSelectedDeviceIndex() << "] " << info.name 
+                      << " (" << ComputeBackendFactory::getBackendName(context->getBackend()) << ")" << std::endl;
+            if (verbose) {
+                std::cout << "  - VRAM:         " << static_cast<int>(std::round(info.memorySize / (1024.0 * 1024.0 * 1024.0))) << " GB" << std::endl;
+                std::cout << "  - Subgroup:     " << info.subgroupSize << " threads" << std::endl;
+                std::cout << "  - Shared Memory: " << (info.maxComputeSharedMemorySize / 1024) << " KB" << std::endl;
+            }
             std::cout << std::endl;
 
             for (auto& bench : benchmarks) {
@@ -197,9 +208,10 @@ void BenchmarkRunner::run(const std::vector<std::string>& benchmarks_to_run) {
                             
                             // Only print individual "Running..." messages in verbose mode
                             if (verbose) {
-                                std::cout << "Running " << bench_name << "..." << std::endl;
+                                std::cout << "[D" << context->getSelectedDeviceIndex() << "] Running " << bench_name << "..." << std::endl;
                             } else {
-                                std::cout << "\rRunning " << bench_name << "..." << std::flush;
+                                // Use \r to return to start of line, \033[K to clear until end of line
+                                std::cout << "\r\033[K[D" << context->getSelectedDeviceIndex() << "] Running [" << (i+1) << "/" << num_configs << "] " << bench_name << "..." << std::flush;
                             }
 
                             // Timed run
@@ -248,5 +260,6 @@ void BenchmarkRunner::run(const std::vector<std::string>& benchmarks_to_run) {
             continue;
         }
     }
+    std::cout << "\r\033[K" << std::endl; // Clear the last "Running..." line and move to next
     formatter->print();
 }

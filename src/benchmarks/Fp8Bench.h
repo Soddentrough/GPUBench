@@ -12,11 +12,17 @@ public:
     void Run(uint32_t config_idx = 0) override;
     void Teardown() override;
     BenchmarkResult GetResult(uint32_t config_idx = 0) const override;
+    
+    uint32_t GetNumConfigs() const override;
+    std::string GetConfigName(uint32_t config_idx) const override;
+    const char* GetMetric() const override { return "TFLOPs"; }
+    
     bool IsEmulated() const override { return is_emulated; }
 
 private:
     IComputeContext* context = nullptr;
-    ComputeKernel kernel = nullptr;
+    ComputeKernel vectorKernel = nullptr;
+    ComputeKernel matrixKernel = nullptr;
     ComputeBuffer buffer = nullptr;
     bool is_emulated = true;
     mutable std::string name = "FP8";

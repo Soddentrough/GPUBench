@@ -1,0 +1,32 @@
+#version 460
+#extension GL_KHR_cooperative_matrix : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int8 : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int32 : require
+#extension GL_KHR_memory_scope_semantics : require
+
+layout (local_size_x = 32, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) buffer DataA {
+    int8_t data[];
+} BufferA;
+
+layout(set = 0, binding = 1) buffer DataC {
+    int32_t data[];
+} BufferC;
+
+void main() {
+    coopmat<int8_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseA> matA;
+    coopmat<int8_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseB> matB;
+    coopmat<int32_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC;
+
+    // Use non-suffixed names.
+    coopMatLoad(matA, BufferA.data, 0u, 16u, 0);
+    coopMatLoad(matB, BufferA.data, 0u, 16u, 0);
+    coopMatLoad(matC, BufferC.data, 0u, 16u, 0);
+
+    for (int i = 0; i < 16384; ++i) {
+        matC = coopMatMulAdd(matA, matB, matC);
+    }
+
+    coopMatStore(matC, BufferC.data, 0u, 16u, 0);
+}

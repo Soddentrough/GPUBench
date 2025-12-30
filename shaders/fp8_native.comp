@@ -1,7 +1,0 @@
-#version 460
-
-// Placeholder for native FP8 shader
-
-void main() {
-    // Native FP8 implementation will be added here
-}
