@@ -161,6 +161,7 @@ set(SOURCES
     src/benchmarks/Int8Bench.cpp
     src/benchmarks/Int4Bench.cpp
     src/benchmarks/MemBandwidthBench.cpp
+    src/benchmarks/SysMemBandwidthBench.cpp
     src/benchmarks/CacheBench.cpp
     src/benchmarks/Fp6Bench.cpp
     src/utils/KernelPath.cpp

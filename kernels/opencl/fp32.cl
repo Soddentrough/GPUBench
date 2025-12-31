@@ -10,43 +10,8 @@ __kernel void run_benchmark(__global float* data, float multiplier, uint num_ele
     float4 val3 = (float4)(0.5f, 0.6f, 0.7f, 0.8f);
     float4 val4 = (float4)(0.9f, 1.0f, 1.1f, 1.2f);
     
-    // Each iteration performs 32 vec4 FMAs = 32 * 4 * 2 = 256 FP32 ops
+    // Each iteration performs 4 vec4 FMAs = 4 * 4 * 2 = 32 FP32 ops
     for (int i = 0; i < 16384; ++i) {
-        val1 = fma(val1, (float4)(1.0001f), val2);
-        val2 = fma(val2, (float4)(1.0001f), val3);
-        val3 = fma(val3, (float4)(1.0001f), val4);
-        val4 = fma(val4, (float4)(1.0001f), val1);
-
-        val1 = fma(val1, (float4)(1.0001f), val2);
-        val2 = fma(val2, (float4)(1.0001f), val3);
-        val3 = fma(val3, (float4)(1.0001f), val4);
-        val4 = fma(val4, (float4)(1.0001f), val1);
-
-        val1 = fma(val1, (float4)(1.0001f), val2);
-        val2 = fma(val2, (float4)(1.0001f), val3);
-        val3 = fma(val3, (float4)(1.0001f), val4);
-        val4 = fma(val4, (float4)(1.0001f), val1);
-
-        val1 = fma(val1, (float4)(1.0001f), val2);
-        val2 = fma(val2, (float4)(1.0001f), val3);
-        val3 = fma(val3, (float4)(1.0001f), val4);
-        val4 = fma(val4, (float4)(1.0001f), val1);
-
-        val1 = fma(val1, (float4)(1.0001f), val2);
-        val2 = fma(val2, (float4)(1.0001f), val3);
-        val3 = fma(val3, (float4)(1.0001f), val4);
-        val4 = fma(val4, (float4)(1.0001f), val1);
-
-        val1 = fma(val1, (float4)(1.0001f), val2);
-        val2 = fma(val2, (float4)(1.0001f), val3);
-        val3 = fma(val3, (float4)(1.0001f), val4);
-        val4 = fma(val4, (float4)(1.0001f), val1);
-
-        val1 = fma(val1, (float4)(1.0001f), val2);
-        val2 = fma(val2, (float4)(1.0001f), val3);
-        val3 = fma(val3, (float4)(1.0001f), val4);
-        val4 = fma(val4, (float4)(1.0001f), val1);
-
         val1 = fma(val1, (float4)(1.0001f), val2);
         val2 = fma(val2, (float4)(1.0001f), val3);
         val3 = fma(val3, (float4)(1.0001f), val4);
