@@ -15,9 +15,15 @@
 static bool hasAVX2() { return __builtin_cpu_supports("avx2"); }
 
 SysMemBandwidthBench::SysMemBandwidthBench() {
-  configs.push_back({"Read Bandwidth", SysMemTestMode::Read});
-  configs.push_back({"Write Bandwidth", SysMemTestMode::Write});
-  configs.push_back({"Copy Bandwidth", SysMemTestMode::ReadWrite});
+  configs.push_back({"Read Bandwidth", SysMemTestMode::Read, 0});
+  configs.push_back({"Write Bandwidth", SysMemTestMode::Write, 0});
+  configs.push_back({"Copy Bandwidth", SysMemTestMode::ReadWrite, 0});
+
+  // Single Threaded (Scaling / Channel Bandwidth approximation)
+  configs.push_back({"Read Bandwidth (1 Thread)", SysMemTestMode::Read, 1});
+  configs.push_back({"Write Bandwidth (1 Thread)", SysMemTestMode::Write, 1});
+  configs.push_back(
+      {"Copy Bandwidth (1 Thread)", SysMemTestMode::ReadWrite, 1});
 }
 
 SysMemBandwidthBench::~SysMemBandwidthBench() { Teardown(); }
@@ -145,9 +151,12 @@ void SysMemBandwidthBench::Run(uint32_t config_idx) {
   bool useAVX2 = hasAVX2();
 
   // Determine thread count
-  unsigned int threadCount = std::thread::hardware_concurrency();
-  if (threadCount == 0)
-    threadCount = 4; // Fallback
+  unsigned int threadCount = config.numThreads;
+  if (threadCount == 0) {
+    threadCount = std::thread::hardware_concurrency();
+    if (threadCount == 0)
+      threadCount = 4; // Fallback
+  }
 
   // Split buffer among threads
   size_t chunkSize = bufferSize / threadCount;

@@ -140,190 +140,234 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
 
   int totalSelected = contexts.size();
   int totalAvailable = 0;
-  std::vector<ComputeBackend> countedBackends;
 
-  for (auto *context : contexts) {
-    bool alreadyCounted = false;
-    for (auto b : countedBackends) {
-      if (b == context->getBackend()) {
-        alreadyCounted = true;
-        break;
+  // Check if we need to run any device-dependent benchmarks
+  bool hasDeviceBenchmarks = false;
+  for (const auto &bench : benchmarks) {
+    if (!bench->IsDeviceDependent())
+      continue;
+
+    bool should_run = false;
+    if (benchmarks_to_run.empty()) {
+      should_run = true;
+    } else {
+      std::string bench_name_lower = to_lower(bench->GetName());
+      auto aliases = bench->GetAliases();
+      for (const auto &run_name : lower_benchmarks_to_run) {
+        if (bench_name_lower.find(run_name) != std::string::npos) {
+          should_run = true;
+          break;
+        }
+        for (const auto &alias : aliases) {
+          if (to_lower(alias) == run_name) {
+            should_run = true;
+            break;
+          }
+        }
       }
     }
 
-    if (!alreadyCounted) {
-      totalAvailable += context->getDevices().size();
-      countedBackends.push_back(context->getBackend());
+    if (should_run) {
+      hasDeviceBenchmarks = true;
+      break;
     }
   }
 
-  std::cout << "==============================================================="
-               "================="
-            << std::endl;
-  std::cout << "   ______ ______  _    _  ____   ______  _   _   _____  _    _"
-            << std::endl;
-  std::cout
-      << "  |  ____|  __  || |  | ||  _ \\ |  ____|| \\ | | / ____|| |  | |"
-      << std::endl;
-  std::cout
-      << "  | |  __| |__) || |  | || |_) || |____ |  \\| || |     | |__| |"
-      << std::endl;
-  std::cout << "  | | |_ |  ___/ | |  | ||  _ < |  ____|| . ` || |     |  __  |"
-            << std::endl;
-  std::cout
-      << "  | |__| | |     | |__| || |_) || |____ | |\\  || |____ | |  | |"
-      << std::endl;
-  std::cout
-      << "  \\______|_|      \\____/ |____/ |______||_| \\_| \\_____||_|  |_|"
-      << std::endl;
-  std::cout << "==============================================================="
-               "================="
-            << std::endl;
-  std::cout << std::endl;
+  std::vector<ComputeBackend> countedBackends;
 
-  std::cout << "Selected execution targets:" << std::endl;
-
-  for (auto *context : contexts) {
-    try {
-      DeviceInfo info = context->getCurrentDeviceInfo();
-      std::cout << " [Device " << context->getSelectedDeviceIndex() << "] "
-                << info.name << " ("
-                << ComputeBackendFactory::getBackendName(context->getBackend())
-                << ")" << std::endl;
-      if (verbose) {
-        std::cout << "  - VRAM:         "
-                  << static_cast<int>(std::round(info.memorySize /
-                                                 (1024.0 * 1024.0 * 1024.0)))
-                  << " GB" << std::endl;
-        std::cout << "  - Subgroup:     " << info.subgroupSize << " threads"
-                  << std::endl;
-        std::cout << "  - Shared Memory: "
-                  << (info.maxComputeSharedMemorySize / 1024) << " KB"
-                  << std::endl;
+  if (hasDeviceBenchmarks) {
+    for (auto *context : contexts) {
+      bool alreadyCounted = false;
+      for (auto b : countedBackends) {
+        if (b == context->getBackend()) {
+          alreadyCounted = true;
+          break;
+        }
       }
-      std::cout << std::endl;
 
-      for (auto &bench : benchmarks) {
-        bool should_run = false;
-        if (benchmarks_to_run.empty()) {
-          should_run = true;
-        } else {
-          std::string bench_name_lower = to_lower(bench->GetName());
-          auto aliases = bench->GetAliases();
-          for (const auto &run_name : lower_benchmarks_to_run) {
-            if (bench_name_lower.find(run_name) != std::string::npos) {
-              should_run = true;
-              break;
-            }
-            for (const auto &alias : aliases) {
-              if (to_lower(alias) == run_name) {
+      if (!alreadyCounted) {
+        totalAvailable += context->getDevices().size();
+        countedBackends.push_back(context->getBackend());
+      }
+    }
+
+    std::cout
+        << "==============================================================="
+           "================="
+        << std::endl;
+    std::cout
+        << "   ______ ______  _    _  ____   ______  _   _   _____  _    _"
+        << std::endl;
+    std::cout
+        << "  |  ____|  __  || |  | ||  _ \\ |  ____|| \\ | | / ____|| |  | |"
+        << std::endl;
+    std::cout
+        << "  | |  __| |__) || |  | || |_) || |____ |  \\| || |     | |__| |"
+        << std::endl;
+    std::cout
+        << "  | | |_ |  ___/ | |  | ||  _ < |  ____|| . ` || |     |  __  |"
+        << std::endl;
+    std::cout
+        << "  | |__| | |     | |__| || |_) || |____ | |\\  || |____ | |  | |"
+        << std::endl;
+    std::cout
+        << "  \\______|_|      \\____/ |____/ |______||_| \\_| \\_____||_|  |_|"
+        << std::endl;
+    std::cout
+        << "==============================================================="
+           "================="
+        << std::endl;
+    std::cout << std::endl;
+
+    if (hasDeviceBenchmarks) {
+      std::cout << "Selected execution targets:" << std::endl;
+    }
+
+    for (auto *context : contexts) {
+      try {
+        DeviceInfo info = context->getCurrentDeviceInfo();
+        std::cout << " [Device " << context->getSelectedDeviceIndex() << "] "
+                  << info.name << " ("
+                  << ComputeBackendFactory::getBackendName(
+                         context->getBackend())
+                  << ")" << std::endl;
+        if (verbose) {
+          std::cout << "  - VRAM:         "
+                    << static_cast<int>(std::round(info.memorySize /
+                                                   (1024.0 * 1024.0 * 1024.0)))
+                    << " GB" << std::endl;
+          std::cout << "  - Subgroup:     " << info.subgroupSize << " threads"
+                    << std::endl;
+          std::cout << "  - Shared Memory: "
+                    << (info.maxComputeSharedMemorySize / 1024) << " KB"
+                    << std::endl;
+        }
+        std::cout << std::endl;
+
+        for (auto &bench : benchmarks) {
+          bool should_run = false;
+          if (benchmarks_to_run.empty()) {
+            should_run = true;
+          } else {
+            std::string bench_name_lower = to_lower(bench->GetName());
+            auto aliases = bench->GetAliases();
+            for (const auto &run_name : lower_benchmarks_to_run) {
+              if (bench_name_lower.find(run_name) != std::string::npos) {
                 should_run = true;
                 break;
               }
+              for (const auto &alias : aliases) {
+                if (to_lower(alias) == run_name) {
+                  should_run = true;
+                  break;
+                }
+              }
             }
           }
-        }
 
-        if (should_run && bench->IsSupported(info, context)) {
-          if (!bench->IsDeviceDependent())
-            continue; // Run system benchmarks separately
+          if (should_run && bench->IsSupported(info, context)) {
+            if (!bench->IsDeviceDependent())
+              continue; // Run system benchmarks separately
 
-          try {
-            // Set debug flag for benchmarks
-            if (auto *membw = dynamic_cast<MemBandwidthBench *>(bench.get())) {
-              membw->setDebug(debug);
-            } else if (auto *cache = dynamic_cast<CacheBench *>(bench.get())) {
-              cache->setDebug(debug);
-            }
-
-            if (verbose) {
-              std::cout << "Setting up " << bench->GetName() << "..."
-                        << std::endl;
-            }
-            bench->Setup(*context, KernelPath::find());
-
-            uint32_t num_configs = bench->GetNumConfigs();
-
-            // For Memory Bandwidth tests in non-verbose mode, print a single
-            // summary message For Memory Bandwidth tests in non-verbose mode,
-            // we don't need a separate message as the individual configs will
-            // print updates via \r
-            bool is_membw =
-                (std::string(bench->GetName()) == "Memory Bandwidth");
-
-            for (uint32_t i = 0; i < num_configs; ++i) {
-              std::string bench_name = bench->GetName();
-              std::string config_name = bench->GetConfigName(i);
-              if (!config_name.empty()) {
-                bench_name += " (" + config_name + ")";
-              }
-
-              // Only print individual "Running..." messages in verbose mode
-              if (verbose) {
-                std::cout << "[D" << context->getSelectedDeviceIndex()
-                          << "] Running " << bench_name << "..." << std::endl;
-              } else {
-                // Use \r to return to start of line, \033[K to clear until end
-                // of line
-                std::cout << "\r\033[K[D" << context->getSelectedDeviceIndex()
-                          << "] Running [" << (i + 1) << "/" << num_configs
-                          << "] " << bench_name << "..." << std::flush;
-              }
-
-              // Timed run
-              double total_time_ms = 0;
-              uint64_t total_invocations = 0;
-              auto bench_start = std::chrono::high_resolution_clock::now();
-              while (total_time_ms < 5000) {
-                bench->Run(i);
-                context->waitIdle();
-                total_invocations++;
-                auto now = std::chrono::high_resolution_clock::now();
-                total_time_ms =
-                    std::chrono::duration_cast<std::chrono::nanoseconds>(
-                        now - bench_start)
-                        .count() /
-                    1e6;
-              }
-
-              BenchmarkResult bench_result = bench->GetResult(i);
-
-              ResultData result_data;
-              result_data.backendName =
-                  ComputeBackendFactory::getBackendName(context->getBackend());
-              result_data.deviceName = info.name;
-              result_data.benchmarkName = bench_name;
-              result_data.metric = bench->GetMetric();
-              result_data.operations =
-                  bench_result.operations * total_invocations;
-              result_data.time_ms = total_time_ms;
-              result_data.isEmulated = bench->IsEmulated();
-              result_data.maxWorkGroupSize = info.maxWorkGroupSize;
-              result_data.deviceIndex = context->getSelectedDeviceIndex();
-
-              formatter->addResult(result_data);
-            }
-
-            bench->Teardown();
-          } catch (const std::exception &e) {
-            std::cerr << "Error running " << bench->GetName() << ": "
-                      << e.what() << std::endl;
-            // Make sure to clean up
             try {
+              // Set debug flag for benchmarks
+              if (auto *membw =
+                      dynamic_cast<MemBandwidthBench *>(bench.get())) {
+                membw->setDebug(debug);
+              } else if (auto *cache =
+                             dynamic_cast<CacheBench *>(bench.get())) {
+                cache->setDebug(debug);
+              }
+
+              if (verbose) {
+                std::cout << "Setting up " << bench->GetName() << "..."
+                          << std::endl;
+              }
+              bench->Setup(*context, KernelPath::find());
+
+              uint32_t num_configs = bench->GetNumConfigs();
+
+              // For Memory Bandwidth tests in non-verbose mode, print a single
+              // summary message For Memory Bandwidth tests in non-verbose mode,
+              // we don't need a separate message as the individual configs will
+              // print updates via \r
+              bool is_membw =
+                  (std::string(bench->GetName()) == "Memory Bandwidth");
+
+              for (uint32_t i = 0; i < num_configs; ++i) {
+                std::string bench_name = bench->GetName();
+                std::string config_name = bench->GetConfigName(i);
+                if (!config_name.empty()) {
+                  bench_name += " (" + config_name + ")";
+                }
+
+                // Only print individual "Running..." messages in verbose mode
+                if (verbose) {
+                  std::cout << "[D" << context->getSelectedDeviceIndex()
+                            << "] Running " << bench_name << "..." << std::endl;
+                } else {
+                  // Use \r to return to start of line, \033[K to clear until
+                  // end of line
+                  std::cout << "\r\033[K[D" << context->getSelectedDeviceIndex()
+                            << "] Running [" << (i + 1) << "/" << num_configs
+                            << "] " << bench_name << "..." << std::flush;
+                }
+
+                // Timed run
+                double total_time_ms = 0;
+                uint64_t total_invocations = 0;
+                auto bench_start = std::chrono::high_resolution_clock::now();
+                while (total_time_ms < 5000) {
+                  bench->Run(i);
+                  context->waitIdle();
+                  total_invocations++;
+                  auto now = std::chrono::high_resolution_clock::now();
+                  total_time_ms =
+                      std::chrono::duration_cast<std::chrono::nanoseconds>(
+                          now - bench_start)
+                          .count() /
+                      1e6;
+                }
+
+                BenchmarkResult bench_result = bench->GetResult(i);
+
+                ResultData result_data;
+                result_data.backendName = ComputeBackendFactory::getBackendName(
+                    context->getBackend());
+                result_data.deviceName = info.name;
+                result_data.benchmarkName = bench_name;
+                result_data.metric = bench->GetMetric();
+                result_data.operations =
+                    bench_result.operations * total_invocations;
+                result_data.time_ms = total_time_ms;
+                result_data.isEmulated = bench->IsEmulated();
+                result_data.maxWorkGroupSize = info.maxWorkGroupSize;
+                result_data.deviceIndex = context->getSelectedDeviceIndex();
+
+                formatter->addResult(result_data);
+              }
+
               bench->Teardown();
-            } catch (...) {
-              // Ignore errors during cleanup
+            } catch (const std::exception &e) {
+              std::cerr << "Error running " << bench->GetName() << ": "
+                        << e.what() << std::endl;
+              // Make sure to clean up
+              try {
+                bench->Teardown();
+              } catch (...) {
+                // Ignore errors during cleanup
+              }
             }
           }
         }
+        if (!verbose)
+          std::cout << std::endl;
+      } catch (const std::exception &e) {
+        std::cerr << "Error processing device: " << e.what() << std::endl;
+        continue;
       }
-      if (!verbose)
-        std::cout << std::endl;
-    } catch (const std::exception &e) {
-      std::cerr << "Error processing device: " << e.what() << std::endl;
-      continue;
     }
-  }
+  } // End hasDeviceBenchmarks
 
   // Run System/Host Benchmarks
   if (!contexts.empty()) {

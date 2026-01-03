@@ -9,6 +9,7 @@ enum class SysMemTestMode { Read, Write, ReadWrite };
 struct SysMemConfig {
   std::string name;
   SysMemTestMode mode;
+  uint32_t numThreads = 0; // 0 = Auto/Max
 };
 
 class SysMemBandwidthBench : public IBenchmark {
