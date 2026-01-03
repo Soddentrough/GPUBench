@@ -23,7 +23,18 @@ std::string KernelPath::find() {
         return env_path;
     }
     
-    // 3. Check installed location
+    // 3. Check relative install locations (for portable usage)
+    std::string share_path = "share/gpubench/kernels";
+    if (directoryExists(share_path)) {
+        return share_path;
+    }
+
+    std::string rel_share_path = "../share/gpubench/kernels";
+    if (directoryExists(rel_share_path)) {
+        return rel_share_path;
+    }
+
+    // 4. Check installed location
     std::string install_path = std::string(GPUBENCH_INSTALL_PREFIX) + "/share/gpubench/kernels";
     if (directoryExists(install_path)) {
         return install_path;
@@ -35,6 +46,8 @@ std::string KernelPath::find() {
     if (env_path) {
         std::cerr << "  - GPUBENCH_KERNEL_PATH: " << env_path << std::endl;
     }
+    std::cerr << "  - Relative share: " << share_path << std::endl;
+    std::cerr << "  - Relative ../share: " << rel_share_path << std::endl;
     std::cerr << "  - Install location: " << install_path << std::endl;
     
     return dev_path;

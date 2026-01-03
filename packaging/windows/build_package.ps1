@@ -62,6 +62,23 @@ function Test-NSIS {
 Write-Info "=== GPUBench Windows Package Builder ==="
 Write-Info ""
 
+# Add MinGW to PATH if detected and needed
+if (-not (Get-Command gcc -ErrorAction SilentlyContinue)) {
+    $mingwPaths = @(
+        "C:\msys64\mingw64\bin",
+        "C:\ProgramData\chocolatey\bin",
+        "C:\Program Files\MinGW\bin"
+    )
+    
+    foreach ($path in $mingwPaths) {
+        if (Test-Path $path) {
+            Write-Info "Found compiler tools at: $path"
+            $env:PATH = "$path;$env:PATH"
+            break
+        }
+    }
+}
+
 # Verify prerequisites
 if (-not (Test-CMake)) {
     Write-Error-Custom "ERROR: CMake not found. Please install CMake 3.16 or later."
@@ -112,6 +129,15 @@ try {
         "-DCMAKE_BUILD_TYPE=$BuildType",
         "-DCMAKE_INSTALL_PREFIX=GPUBench"
     )
+
+    # Detect generator
+    if (Get-Command ninja -ErrorAction SilentlyContinue) {
+        Write-Info "  Using Ninja generator"
+        $cmakeArgs += "-G", "Ninja"
+    } elseif (Get-Command mingw32-make -ErrorAction SilentlyContinue) {
+        Write-Info "  Using MinGW Makefiles generator"
+        $cmakeArgs += "-G", "MinGW Makefiles"
+    }
     
     & cmake @cmakeArgs
     if ($LASTEXITCODE -ne 0) {
@@ -122,9 +148,18 @@ try {
     # Build the project
     Write-Info ""
     Write-Info "Step 2: Building project..."
-    & cmake --build . --config $BuildType
+    if ($cmakeArgs -contains "Ninja") {
+        & cmake --build .
+    } else {
+        & cmake --build . --config $BuildType
+    }
+    
     if ($LASTEXITCODE -ne 0) {
         throw "Build failed"
+    }
+    
+    if (-not (Test-Path "gpubench.exe")) {
+        throw "Build finished but gpubench.exe not found"
     }
     Write-Success "✓ Build complete"
 
@@ -137,7 +172,12 @@ try {
     # Create ZIP package
     if (($PackageType -eq "zip") -or ($PackageType -eq "both")) {
         Write-Info "  Creating ZIP package..."
-        & cpack -G ZIP -C $BuildType
+        if ($cmakeArgs -contains "Ninja") {
+            & cpack -G ZIP
+        } else {
+            & cpack -G ZIP -C $BuildType
+        }
+        
         if ($LASTEXITCODE -eq 0) {
             $zipFile = Get-ChildItem -Filter "GPUBench-*.zip" | Select-Object -First 1
             if ($zipFile) {
@@ -152,7 +192,12 @@ try {
     # Create NSIS installer
     if (($PackageType -eq "nsis") -or ($PackageType -eq "both")) {
         Write-Info "  Creating NSIS installer..."
-        & cpack -G NSIS -C $BuildType
+        if ($cmakeArgs -contains "Ninja") {
+            & cpack -G NSIS
+        } else {
+            & cpack -G NSIS -C $BuildType
+        }
+        
         if ($LASTEXITCODE -eq 0) {
             $exeFile = Get-ChildItem -Filter "GPUBench-*.exe" | Select-Object -First 1
             if ($exeFile) {

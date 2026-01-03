@@ -5,6 +5,15 @@
 #include <cstring>
 #include <algorithm> // for std::min
 
+#ifdef _WIN32
+#include <malloc.h>
+#define ALIGNED_ALLOC(alignment, size) _aligned_malloc(size, alignment)
+#define ALIGNED_FREE(ptr) _aligned_free(ptr)
+#else
+#define ALIGNED_ALLOC(alignment, size) aligned_alloc(alignment, size)
+#define ALIGNED_FREE(ptr) free(ptr)
+#endif
+
 CacheBench::CacheBench(std::string name, std::string metric, uint64_t bufferSize, std::string kernelFile, std::vector<uint32_t> initData, std::vector<std::string> aliases, int targetCacheLevel)
     : name(name), metric(metric), bufferSize(bufferSize), kernelFile(kernelFile), initData(initData), aliases(aliases), targetCacheLevel(targetCacheLevel) {}
 
@@ -61,7 +70,7 @@ void CacheBench::Setup(IComputeContext& context, const std::string& kernel_dir) 
         // Allocate page-aligned host memory for Zero Copy / Pinned access.
         // This is critical for stability on Unified Memory (APU) platforms like Strix Halo
         // to ensure the driver can map the memory without page faults or copying.
-        hostMem = aligned_alloc(4096, bufferSize);
+        hostMem = ALIGNED_ALLOC(4096, bufferSize);
         
         if (hostMem) {
             // Initialize memory
@@ -143,7 +152,7 @@ void CacheBench::Teardown() {
         buffer = nullptr;
     }
     if (hostMem) {
-        free(hostMem);
+        ALIGNED_FREE(hostMem);
         hostMem = nullptr;
     }
 }

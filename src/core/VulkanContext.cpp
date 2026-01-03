@@ -116,6 +116,19 @@ const std::vector<DeviceInfo>& VulkanContext::getDevices() const {
             features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
             features2.pNext = &features8bit;
             vkGetPhysicalDeviceFeatures2(device, &features2);
+
+            // Check extensions
+            uint32_t extCount;
+            vkEnumerateDeviceExtensionProperties(device, nullptr, &extCount, nullptr);
+            std::vector<VkExtensionProperties> availableExts(extCount);
+            vkEnumerateDeviceExtensionProperties(device, nullptr, &extCount, availableExts.data());
+
+            auto hasExt = [&](const char* name) {
+                for (const auto& ext : availableExts) {
+                    if (strcmp(ext.extensionName, name) == 0) return true;
+                }
+                return false;
+            };
             
             DeviceInfo info;
             info.name = props.deviceName;
@@ -128,10 +141,14 @@ const std::vector<DeviceInfo>& VulkanContext::getDevices() const {
             info.subgroupSize = subgroupProps.subgroupSize;
             info.fp64Support = (features2.features.shaderFloat64 == VK_TRUE);
             info.fp16Support = (features168.shaderFloat16 == VK_TRUE);
-            info.int8Support = true;
-            info.cooperativeMatrixSupport = true;
+            info.int8Support = true; // Usually supported if 8bit storage/int8 shader is supported
+#ifdef _WIN32
+            info.cooperativeMatrixSupport = false; // Disable unstable benchmark on Windows
+#else
+            info.cooperativeMatrixSupport = hasExt(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME);
+#endif
             info.structuredSparsitySupport = true; 
-            info.fp8Support = true; 
+            info.fp8Support = hasExt("VK_EXT_shader_float8"); 
             deviceInfos.push_back(info);
         }
     }
@@ -180,6 +197,19 @@ DeviceInfo VulkanContext::getCurrentDeviceInfo() const {
     features2_2.pNext = &features8bit_curr;
     vkGetPhysicalDeviceFeatures2(physicalDevice, &features2_2);
 
+    // Check extensions
+    uint32_t extCount;
+    vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &extCount, nullptr);
+    std::vector<VkExtensionProperties> availableExts(extCount);
+    vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &extCount, availableExts.data());
+
+    auto hasExt = [&](const char* name) {
+        for (const auto& ext : availableExts) {
+            if (strcmp(ext.extensionName, name) == 0) return true;
+        }
+        return false;
+    };
+
     DeviceInfo info;
     info.name = properties.deviceName;
     info.memorySize = vramSize;
@@ -192,11 +222,15 @@ DeviceInfo VulkanContext::getCurrentDeviceInfo() const {
     info.fp64Support = (features2_2.features.shaderFloat64 == VK_TRUE);
     info.fp16Support = (features168_curr.shaderFloat16 == VK_TRUE);
     info.int8Support = true;
-    info.cooperativeMatrixSupport = true;
-    info.fp8Support = true;
+#ifdef _WIN32
+    info.cooperativeMatrixSupport = false; // Disable unstable benchmark on Windows
+#else
+    info.cooperativeMatrixSupport = hasExt(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME);
+#endif
+    info.fp8Support = hasExt("VK_EXT_shader_float8");
     info.fp6Support = false;
-    info.fp4Support = true;
-    info.int4Support = true;
+    info.fp4Support = true; // Assuming support or emulation
+    info.int4Support = true; // Assuming support or emulation
     info.structuredSparsitySupport = true;
     return info;
 }
@@ -265,7 +299,7 @@ void VulkanContext::createDevice() {
     // Query supported features and enable them
     vkGetPhysicalDeviceFeatures2(physicalDevice, &features2);
 
-    const std::vector<const char*> deviceExtensions = {
+    const std::vector<const char*> desiredExtensions = {
         VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME,
         VK_KHR_8BIT_STORAGE_EXTENSION_NAME,
         VK_KHR_16BIT_STORAGE_EXTENSION_NAME,
@@ -276,13 +310,35 @@ void VulkanContext::createDevice() {
         "VK_KHR_shader_float_controls2"
     };
 
+    // Filter extensions to only request supported ones
+    uint32_t extensionCount;
+    vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &extensionCount, nullptr);
+    std::vector<VkExtensionProperties> availableExtensions(extensionCount);
+    vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &extensionCount, availableExtensions.data());
+
+    std::vector<const char*> enabledExtensions;
+    for (const auto& extension : desiredExtensions) {
+        bool found = false;
+        for (const auto& available : availableExtensions) {
+            if (strcmp(extension, available.extensionName) == 0) {
+                found = true;
+                break;
+            }
+        }
+        if (found) {
+            enabledExtensions.push_back(extension);
+        } else {
+            std::cerr << "Warning: Extension " << extension << " not supported by device, disabling." << std::endl;
+        }
+    }
+
     VkDeviceCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     createInfo.pNext = &features2; // Enable all modern features
     createInfo.pQueueCreateInfos = &queueCreateInfo;
     createInfo.queueCreateInfoCount = 1;
-    createInfo.ppEnabledExtensionNames = deviceExtensions.data();
-    createInfo.enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size());
+    createInfo.ppEnabledExtensionNames = enabledExtensions.data();
+    createInfo.enabledExtensionCount = static_cast<uint32_t>(enabledExtensions.size());
     createInfo.pEnabledFeatures = nullptr; // Must be NULL if pNext contains a VkPhysicalDeviceFeatures2
 
     if (vkCreateDevice(physicalDevice, &createInfo, nullptr, &device) != VK_SUCCESS) {

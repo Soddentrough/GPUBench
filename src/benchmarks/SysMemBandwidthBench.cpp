@@ -10,20 +10,28 @@
 #include <thread>
 #include <vector>
 
+#ifdef _WIN32
+#include <malloc.h>
+#define ALIGNED_ALLOC(alignment, size) _aligned_malloc(size, alignment)
+#define ALIGNED_FREE(ptr) _aligned_free(ptr)
+#else
+#define ALIGNED_ALLOC(alignment, size) aligned_alloc(alignment, size)
+#define ALIGNED_FREE(ptr) free(ptr)
+#endif
+
 // Check for AVX2 support
 // This is a GCC/Clang builtin. For MSVC one would use __cpuid.
 static bool hasAVX2() { return __builtin_cpu_supports("avx2"); }
 
 SysMemBandwidthBench::SysMemBandwidthBench() {
-  configs.push_back({"Read Bandwidth", SysMemTestMode::Read, 0});
-  configs.push_back({"Write Bandwidth", SysMemTestMode::Write, 0});
-  configs.push_back({"Copy Bandwidth", SysMemTestMode::ReadWrite, 0});
+  configs.push_back({"Read", SysMemTestMode::Read, 0});
+  configs.push_back({"Write", SysMemTestMode::Write, 0});
+  configs.push_back({"Copy", SysMemTestMode::ReadWrite, 0});
 
   // Single Threaded (Scaling / Channel Bandwidth approximation)
-  configs.push_back({"Read Bandwidth (1 Thread)", SysMemTestMode::Read, 1});
-  configs.push_back({"Write Bandwidth (1 Thread)", SysMemTestMode::Write, 1});
-  configs.push_back(
-      {"Copy Bandwidth (1 Thread)", SysMemTestMode::ReadWrite, 1});
+  configs.push_back({"Read (1 Thread)", SysMemTestMode::Read, 1});
+  configs.push_back({"Write (1 Thread)", SysMemTestMode::Write, 1});
+  configs.push_back({"Copy (1 Thread)", SysMemTestMode::ReadWrite, 1});
 }
 
 SysMemBandwidthBench::~SysMemBandwidthBench() { Teardown(); }
@@ -45,8 +53,8 @@ void SysMemBandwidthBench::Setup(IComputeContext &context,
   bufferSize = 4ULL * 1024ULL * 1024ULL * 1024ULL;
 
   // Use aligned_alloc for AVX
-  buffer = aligned_alloc(64, bufferSize);
-  destBuffer = aligned_alloc(64, bufferSize);
+  buffer = ALIGNED_ALLOC(64, bufferSize);
+  destBuffer = ALIGNED_ALLOC(64, bufferSize);
 
   if (!buffer || !destBuffer) {
     throw std::runtime_error("Failed to allocate system memory buffers");
@@ -224,11 +232,11 @@ void SysMemBandwidthBench::Run(uint32_t config_idx) {
 
 void SysMemBandwidthBench::Teardown() {
   if (buffer) {
-    std::free(buffer);
+    ALIGNED_FREE(buffer);
     buffer = nullptr;
   }
   if (destBuffer) {
-    std::free(destBuffer);
+    ALIGNED_FREE(destBuffer);
     destBuffer = nullptr;
   }
 }

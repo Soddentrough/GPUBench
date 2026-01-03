@@ -38,35 +38,17 @@ void Int4Bench::Setup(IComputeContext& context, const std::string& kernel_dir) {
     }
 
     // Vulkan Path
-    // Load Vector Kernel
-    std::string native_vector = kernel_dir + "/vulkan/int4_native.spv";
-    std::string emulated_vector = kernel_dir + "/vulkan/int4.spv"; // Assuming int4.spv is emulated/fallback
-    
-    std::string vector_file = emulated_vector;
+    // Use emulated vector kernel for stability on Windows
+    std::string vector_file = kernel_dir + "/vulkan/int4.spv";
     is_native_vector = false;
     is_emulated = true;
 
-    // Check for native
-    if (file_exists(native_vector)) {
-        vector_file = native_vector;
-        is_native_vector = true;
-        is_emulated = false;
-    }
-    
     try {
         vectorKernel = context.createKernel(vector_file, "main", 1);
         context.setKernelArg(vectorKernel, 0, buffer);
-    } catch (...) {
-         if (is_native_vector) {
-            std::cerr << "Native INT4 vector kernel failed to load, falling back to emulation." << std::endl;
-            vector_file = emulated_vector;
-            vectorKernel = context.createKernel(vector_file, "main", 1);
-            context.setKernelArg(vectorKernel, 0, buffer);
-            is_native_vector = false;
-            is_emulated = true;
-        } else {
-            throw;
-        }
+    } catch (const std::exception& e) {
+        std::cerr << "INT4 vector kernel failed to load: " << e.what() << std::endl;
+        throw;
     }
 
     bool is_rdna4 = context.getCurrentDeviceInfo().name.find("gfx12") != std::string::npos;

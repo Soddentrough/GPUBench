@@ -11,7 +11,16 @@
 #include <vulkan/vulkan.h>
 #endif
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 int main(int argc, char** argv) {
+#ifdef _WIN32
+    // Set console output to UTF-8
+    SetConsoleOutputCP(CP_UTF8);
+#endif
+
 #ifdef __linux__
     // Suppress Mesa/RADV conformance warnings to keep the output clean
     setenv("MESA_VK_IGNORE_CONFORMANCE_WARNING", "1", 1);

@@ -252,6 +252,21 @@ add_custom_command(TARGET gpubench POST_BUILD
 # Install targets
 install(TARGETS gpubench DESTINATION bin)
 
+# Bundle MinGW DLLs
+if(MINGW)
+    find_program(MINGW_GCC gcc)
+    if(MINGW_GCC)
+        get_filename_component(MINGW_BIN_DIR ${MINGW_GCC} DIRECTORY)
+        install(FILES
+            "${MINGW_BIN_DIR}/libstdc++-6.dll"
+            "${MINGW_BIN_DIR}/libgcc_s_seh-1.dll"
+            "${MINGW_BIN_DIR}/libwinpthread-1.dll"
+            DESTINATION bin
+            OPTIONAL
+        )
+    endif()
+endif()
+
 # Install kernel files for each backend
 if(Vulkan_FOUND)
     install(DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/kernels/vulkan
