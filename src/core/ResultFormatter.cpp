@@ -103,10 +103,39 @@ void ResultFormatter::print() {
     }
 
     // Sort benchmarks
+    auto get_type_rank = [](const std::string& name) {
+        std::string lower = to_lower_static(name);
+        if (lower.find("fp64") != std::string::npos) return 0;
+        if (lower.find("fp32") != std::string::npos) return 1;
+        if (lower.find("fp16") != std::string::npos) return 2;
+        if (lower.find("fp8") != std::string::npos) return 3;
+        if (lower.find("fp6") != std::string::npos) return 4;
+        if (lower.find("fp4") != std::string::npos) return 5;
+        if (lower.find("int8") != std::string::npos) return 6;
+        if (lower.find("int4") != std::string::npos) return 7;
+        return 100;
+    };
+
+    auto get_sub_rank = [](const std::string& name) {
+        std::string lower = to_lower_static(name);
+        if (lower.find("matrix") != std::string::npos) return 1;
+        if (lower.find("vector") != std::string::npos) return 0;
+        return 2;
+    };
+
     std::sort(benchmarkOrder.begin(), benchmarkOrder.end(), 
         [&](const std::string& a, const std::string& b) {
             if (benchmarkCategories[a] != benchmarkCategories[b]) {
-                return benchmarkCategories[a] < benchmarkCategories[b];
+                return (int)benchmarkCategories[a] < (int)benchmarkCategories[b];
+            }
+            if (benchmarkCategories[a] == BenchmarkCategory::Compute) {
+                int rankA = get_type_rank(a);
+                int rankB = get_type_rank(b);
+                if (rankA != rankB) return rankA < rankB;
+                
+                int subA = get_sub_rank(a);
+                int subB = get_sub_rank(b);
+                return subA < subB;
             }
             return a < b;
         });

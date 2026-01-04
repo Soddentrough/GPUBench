@@ -142,11 +142,7 @@ const std::vector<DeviceInfo>& VulkanContext::getDevices() const {
             info.fp64Support = (features2.features.shaderFloat64 == VK_TRUE);
             info.fp16Support = (features168.shaderFloat16 == VK_TRUE);
             info.int8Support = true; // Usually supported if 8bit storage/int8 shader is supported
-#ifdef _WIN32
-            info.cooperativeMatrixSupport = false; // Disable unstable benchmark on Windows
-#else
             info.cooperativeMatrixSupport = hasExt(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME);
-#endif
             info.structuredSparsitySupport = true; 
             info.fp8Support = hasExt("VK_EXT_shader_float8"); 
             deviceInfos.push_back(info);
@@ -222,11 +218,7 @@ DeviceInfo VulkanContext::getCurrentDeviceInfo() const {
     info.fp64Support = (features2_2.features.shaderFloat64 == VK_TRUE);
     info.fp16Support = (features168_curr.shaderFloat16 == VK_TRUE);
     info.int8Support = true;
-#ifdef _WIN32
-    info.cooperativeMatrixSupport = false; // Disable unstable benchmark on Windows
-#else
     info.cooperativeMatrixSupport = hasExt(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME);
-#endif
     info.fp8Support = hasExt("VK_EXT_shader_float8");
     info.fp6Support = false;
     info.fp4Support = true; // Assuming support or emulation

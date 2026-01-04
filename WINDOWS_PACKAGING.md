@@ -95,6 +95,7 @@ Both package types include:
 
 ```
 GPUBench/
+├── RunAllBenchmarks.bat      # Easy execution script
 ├── bin/
 │   └── gpubench.exe          # Main executable
 └── share/gpubench/
@@ -130,23 +131,24 @@ The PowerShell script accepts several parameters:
 ## Testing the Package
 
 ### ZIP Package
+1. Extract `GPUBench-1.0.0-win64.zip`
+2. Double-click `RunAllBenchmarks.bat` in the root directory
+3. The benchmarks will run and the window will stay open when finished
+
+Alternatively, via command line:
 ```powershell
 # Extract
 Expand-Archive GPUBench-1.0.0-win64.zip -DestinationPath test
 
-# Navigate and test
-cd test\GPUBench\bin
-.\gpubench.exe --list-benchmarks
+# Run the wrapper script
+cd test\GPUBench
+.\RunAllBenchmarks.bat
 ```
 
 ### NSIS Installer
-```powershell
-# Run the installer
-.\GPUBench-1.0.0-win64.exe
-
-# After installation, test from anywhere
-gpubench --list-benchmarks
-```
+1. Run the installer `GPUBench-1.0.0-win64.exe`
+2. You can find "Run All Benchmarks" in the Start Menu
+3. Or run `gpubench --list-benchmarks` from any terminal
 
 ## Customization
 

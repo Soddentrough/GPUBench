@@ -1,0 +1,87 @@
+﻿=== GPUBench Windows Package Builder ===
+
+Found compiler tools at: C:\msys64\mingw64\bin
+Cleaning build directory: build-release
+Creating build directory: build-release
+
+Step 1: Configuring project with CMake...
+  Using Ninja generator
+-- The C compiler identification is GNU 15.2.0
+-- The CXX compiler identification is GNU 15.2.0
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: C:/msys64/mingw64/bin/cc.exe - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: C:/msys64/mingw64/bin/c++.exe - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Found Vulkan: C:/VulkanSDK/1.4.321.1/Lib/vulkan-1.lib (found version "1.4.321") found components: glslc glslangValidator
+-- Vulkan found: C:/VulkanSDK/1.4.321.1/Lib/vulkan-1.lib
+-- Looking for CL_VERSION_3_0
+-- Looking for CL_VERSION_3_0 - not found
+-- Looking for CL_VERSION_2_2
+-- Looking for CL_VERSION_2_2 - not found
+-- Looking for CL_VERSION_2_1
+-- Looking for CL_VERSION_2_1 - not found
+-- Looking for CL_VERSION_2_0
+-- Looking for CL_VERSION_2_0 - not found
+-- Looking for CL_VERSION_1_2
+-- Looking for CL_VERSION_1_2 - not found
+-- Looking for CL_VERSION_1_1
+-- Looking for CL_VERSION_1_1 - not found
+-- Looking for CL_VERSION_1_0
+-- Looking for CL_VERSION_1_0 - not found
+-- Could NOT find OpenCL (missing: OpenCL_LIBRARY OpenCL_INCLUDE_DIR) 
+-- OpenCL not found
+powershell : CMake Warning at CMakeLists.txt:41 (find_package):
+At line:1 char:1
++ powershell -ExecutionPolicy Bypass -File .\packaging\windows\build_pa ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (CMake Warning a...(find_package)::String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  By not providing "FindHIP.cmake" in CMAKE_MODULE_PATH this project has
+  asked CMake to find a package configuration file provided by "HIP", but
+  CMake did not find one.
+
+  Could not find a package configuration file provided by "HIP" with any of
+  the following names:
+
+    HIPConfig.cmake
+    hip-config.cmake
+
+  Add the installation prefix of "HIP" to CMAKE_PREFIX_PATH or set "HIP_DIR"
+  to a directory containing one of the above files.  If "HIP" provides a
+  separate development package or SDK, be sure it has been installed.
+
+
+-- HIP (ROCm) not found
+-- Configuring done (2.1s)
+-- Generating done (0.0s)
+-- Build files have been written to: C:/Users/naoki/Development/GPUBench/build-release
+âœ
+
+Step 3: Creating packages...
+  Creating ZIP package...
+CPack: Create package using ZIP
+CPack: Install projects
+CPack: - Install project: GPUBench []
+CMake Error at C:/Users/naoki/Development/GPUBench/build-release/cmake_install.cmake:41 (file):
+  file INSTALL cannot find
+  "C:/Users/naoki/Development/GPUBench/build-release/gpubench.exe": File
+  exists.
+
+
+CPack Error: Error when generating package: GPUBench
+  âœ— NSIS installer creation failed
+
+=== Build Complete ===
+
+Build directory: C:\Users\naoki\Development\GPUBench\build-release
+
+No packages were created successfully.
+
+Done!

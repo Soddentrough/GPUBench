@@ -286,6 +286,12 @@ if(HIP_FOUND)
             FILES_MATCHING PATTERN "*.co")
 endif()
 
+# Install Windows batch script for easy benchmarking
+if(WIN32)
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/packaging/windows/RunAllBenchmarks.bat"
+            DESTINATION .)
+endif()
+
 # CPack configuration for creating packages
 set(CPACK_PACKAGE_NAME "GPUBench")
 set(CPACK_PACKAGE_VENDOR "GPUBench")
@@ -314,7 +320,8 @@ if(WIN32)
     set(CPACK_NSIS_URL_INFO_ABOUT "https://github.com/yourusername/GPUBench")
     set(CPACK_NSIS_CONTACT "your.email@example.com")
     set(CPACK_NSIS_MENU_LINKS
-        "bin/gpubench.exe" "GPUBench"
+        "RunAllBenchmarks.bat" "Run All Benchmarks"
+        "bin/gpubench.exe" "GPUBench (CLI)"
         "https://github.com/yourusername/GPUBench" "GPUBench Website"
     )
     
