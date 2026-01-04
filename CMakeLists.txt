@@ -5,6 +5,11 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Versioning
+set(BUILD_NUMBER "1" CACHE STRING "Build number for the project")
+set(PROJECT_FULL_VERSION "${PROJECT_VERSION}.${BUILD_NUMBER}")
+
+
 # Set proper debug flags based on compiler
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
@@ -227,7 +232,7 @@ if(HIP_FOUND)
 endif()
 
 # Compiler definitions for conditional compilation
-target_compile_definitions(gpubench PRIVATE GPUBENCH_VERSION="${PROJECT_VERSION}")
+target_compile_definitions(gpubench PRIVATE GPUBENCH_VERSION="${PROJECT_FULL_VERSION}")
 
 if(Vulkan_FOUND)
     target_compile_definitions(gpubench PRIVATE HAVE_VULKAN)
@@ -296,10 +301,11 @@ endif()
 set(CPACK_PACKAGE_NAME "GPUBench")
 set(CPACK_PACKAGE_VENDOR "GPUBench")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "GPU Compute Benchmarking Tool")
-set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
+set(CPACK_PACKAGE_VERSION ${PROJECT_FULL_VERSION})
 set(CPACK_PACKAGE_VERSION_MAJOR ${PROJECT_VERSION_MAJOR})
 set(CPACK_PACKAGE_VERSION_MINOR ${PROJECT_VERSION_MINOR})
 set(CPACK_PACKAGE_VERSION_PATCH ${PROJECT_VERSION_PATCH})
+set(CPACK_RPM_PACKAGE_RELEASE ${BUILD_NUMBER})
 set(CPACK_PACKAGE_INSTALL_DIRECTORY "GPUBench")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
 set(CPACK_RESOURCE_FILE_README "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
@@ -348,10 +354,12 @@ elseif(APPLE)
 endif()
 
 # Architecture detection
-if(CMAKE_SIZEOF_VOID_P EQUAL 8)
-    set(CPACK_SYSTEM_NAME "win64")
-else()
-    set(CPACK_SYSTEM_NAME "win32")
+if(WIN32)
+    if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+        set(CPACK_SYSTEM_NAME "win64")
+    else()
+        set(CPACK_SYSTEM_NAME "win32")
+    endif()
 endif()
 
 include(CPack)
