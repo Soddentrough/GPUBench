@@ -337,6 +337,7 @@ if(WIN32)
 elseif(UNIX AND NOT APPLE)
     # Linux packaging
     set(CPACK_GENERATOR "TGZ;DEB;RPM")
+    set(CPACK_PACKAGING_INSTALL_PREFIX "/usr")
     
     # DEB package settings
     set(CPACK_DEBIAN_PACKAGE_MAINTAINER "GPUBench Maintainer <your.email@example.com>")
