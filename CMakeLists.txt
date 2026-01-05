@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Versioning
-set(BUILD_NUMBER "1" CACHE STRING "Build number for the project")
+set(BUILD_NUMBER "2" CACHE STRING "Build number for the project")
 set(PROJECT_FULL_VERSION "${PROJECT_VERSION}.${BUILD_NUMBER}")
 
 
@@ -60,8 +60,22 @@ find_package(HIP)
 if(HIP_FOUND)
     message(STATUS "HIP (ROCm) found: ${HIP_LIBRARIES}")
     enable_language(HIP)
+    
+    # Find hiprtc for runtime compilation
+    find_library(HIPRTC_LIBRARY NAMES hiprtc)
+    if(HIPRTC_LIBRARY)
+        message(STATUS "Found hiprtc: ${HIPRTC_LIBRARY}")
+    endif()
 else()
     message(STATUS "HIP (ROCm) not found")
+endif()
+
+# Find shaderc for runtime Vulkan shader compilation
+find_path(SHADERC_INCLUDE_DIR NAMES shaderc/shaderc.hpp)
+find_library(SHADERC_LIBRARY NAMES shaderc_shared)
+if(SHADERC_INCLUDE_DIR AND SHADERC_LIBRARY)
+    set(SHADERC_FOUND TRUE)
+    message(STATUS "Found shaderc: ${SHADERC_LIBRARY}")
 endif()
 
 # Check that at least one backend is available
@@ -69,49 +83,24 @@ if(NOT Vulkan_FOUND AND NOT OpenCL_FOUND AND NOT HIP_FOUND)
     message(FATAL_ERROR "Neither Vulkan, OpenCL, nor ROCm found! At least one compute backend is required.")
 endif()
 
-# Shader/Kernel compilation
+# Shader/Kernel sources
 if(Vulkan_FOUND)
     file(GLOB SHADERS "shaders/*.comp")
     file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/kernels/vulkan)
     
-    # Define optional shaders that are allowed to fail compilation
-    set(OPTIONAL_SHADERS 
-        "coop_matrix_fp8" 
-        "coop_matrix_int4" 
-        "fp8_native" 
-        "fp4_native" 
-        "int4_native"
-    )
-
     foreach(SHADER ${SHADERS})
-        get_filename_component(SHADER_NAME ${SHADER} NAME_WE)
-        set(SPIRV_SHADER "${CMAKE_CURRENT_BINARY_DIR}/kernels/vulkan/${SHADER_NAME}.spv")
+        get_filename_component(SHADER_NAME ${SHADER} NAME)
+        set(DEST_SHADER "${CMAKE_CURRENT_BINARY_DIR}/kernels/vulkan/${SHADER_NAME}")
         
-        # Check if this shader is optional
-        list(FIND OPTIONAL_SHADERS ${SHADER_NAME} IS_OPTIONAL)
-        
-        if(IS_OPTIONAL GREATER -1)
-            # For optional shaders, we use a command that always succeeds (exit 0)
-            # even if glslc fails. We print a warning if it fails.
-            add_custom_command(
-                OUTPUT ${SPIRV_SHADER}
-                COMMAND ${GLSLC_EXECUTABLE} --target-env=vulkan1.3 --target-spv=spv1.6 ${SHADER} -o ${SPIRV_SHADER} || echo "WARNING: Optional shader ${SHADER_NAME} failed to compile"
-                DEPENDS ${SHADER}
-                COMMENT "Compiling optional shader: ${SHADER}"
-            )
-        else()
-            # For standard shaders, fail the build if compilation fails
-            add_custom_command(
-                OUTPUT ${SPIRV_SHADER}
-                COMMAND ${GLSLC_EXECUTABLE} --target-env=vulkan1.3 --target-spv=spv1.6 ${SHADER} -o ${SPIRV_SHADER}
-                DEPENDS ${SHADER}
-                COMMENT "Compiling shader: ${SHADER}"
-            )
-        endif()
-        
-        list(APPEND SPIRV_SHADERS ${SPIRV_SHADER})
+        add_custom_command(
+            OUTPUT ${DEST_SHADER}
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${SHADER} ${DEST_SHADER}
+            DEPENDS ${SHADER}
+            COMMENT "Copying Vulkan shader source: ${SHADER}"
+        )
+        list(APPEND VULKAN_SHADERS ${DEST_SHADER})
     endforeach()
-    add_custom_target(shaders ALL DEPENDS ${SPIRV_SHADERS})
+    add_custom_target(shaders ALL DEPENDS ${VULKAN_SHADERS})
 endif()
 
 # Copy OpenCL kernels to build directory
@@ -131,39 +120,25 @@ if(OpenCL_FOUND)
     add_custom_target(kernels ALL DEPENDS ${KERNEL_DESTINATIONS})
 endif()
 
-# Compile HIP kernels
+# Copy HIP kernels
 if(HIP_FOUND)
-    file(GLOB HIP_KERNELS "hip_kernels/*.hip")
+    file(GLOB HIP_SOURCES "hip_kernels/*.hip")
     file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/kernels/rocm)
     
-    # Define optional HIP kernels
-    set(OPTIONAL_HIP_KERNELS "fp8" "int4")
-    
-    foreach(HIP_KERNEL ${HIP_KERNELS})
-        get_filename_component(KERNEL_NAME ${HIP_KERNEL} NAME_WE)
-        set(HIP_OBJECT "${CMAKE_CURRENT_BINARY_DIR}/kernels/rocm/${KERNEL_NAME}.co")
+    foreach(HIP_SOURCE ${HIP_SOURCES})
+        get_filename_component(KERNEL_NAME ${HIP_SOURCE} NAME)
+        set(DEST_HIP_SOURCE "${CMAKE_CURRENT_BINARY_DIR}/kernels/rocm/${KERNEL_NAME}")
         
-        list(FIND OPTIONAL_HIP_KERNELS ${KERNEL_NAME} IS_OPTIONAL)
-        
-        if(IS_OPTIONAL GREATER -1)
-             add_custom_command(
-                OUTPUT ${HIP_OBJECT}
-                COMMAND ${HIP_HIPCC_EXECUTABLE} --genco --offload-arch=gfx1201 ${HIP_KERNEL} -o ${HIP_OBJECT} -D__HIP_PLATFORM_AMD__ || echo "WARNING: Optional HIP kernel ${KERNEL_NAME} failed to compile"
-                DEPENDS ${HIP_KERNEL}
-                COMMENT "Compiling optional HIP kernel: ${HIP_KERNEL}"
-            )
-        else()
-             add_custom_command(
-                OUTPUT ${HIP_OBJECT}
-                COMMAND ${HIP_HIPCC_EXECUTABLE} --genco --offload-arch=gfx1201 ${HIP_KERNEL} -o ${HIP_OBJECT} -D__HIP_PLATFORM_AMD__
-                DEPENDS ${HIP_KERNEL}
-                COMMENT "Compiling HIP kernel: ${HIP_KERNEL}"
-            )
-        endif()
+        add_custom_command(
+            OUTPUT ${DEST_HIP_SOURCE}
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${HIP_SOURCE} ${DEST_HIP_SOURCE}
+            DEPENDS ${HIP_SOURCE}
+            COMMENT "Copying HIP source: ${HIP_SOURCE}"
+        )
        
-        list(APPEND HIP_OBJECTS ${HIP_OBJECT})
+        list(APPEND HIP_KERNELS_SRC ${DEST_HIP_SOURCE})
     endforeach()
-    add_custom_target(hip_kernels ALL DEPENDS ${HIP_OBJECTS})
+    add_custom_target(hip_kernels ALL DEPENDS ${HIP_KERNELS_SRC})
 endif()
 
 # Source files - always include core files
@@ -184,6 +159,7 @@ set(SOURCES
     src/benchmarks/CacheBench.cpp
     src/benchmarks/Fp6Bench.cpp
     src/utils/KernelPath.cpp
+    src/utils/ShaderCache.cpp
 )
 
 # Add backend-specific sources
@@ -214,13 +190,16 @@ endif()
 
 # Include directories
 target_include_directories(gpubench PUBLIC 
-    src
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/external
     ${CMAKE_CURRENT_BINARY_DIR}/src
 )
 
 if(Vulkan_FOUND)
     target_include_directories(gpubench PUBLIC ${Vulkan_INCLUDE_DIRS})
+    if(SHADERC_FOUND)
+        target_include_directories(gpubench PUBLIC ${SHADERC_INCLUDE_DIR})
+    endif()
 endif()
 
 if(OpenCL_FOUND)
@@ -235,6 +214,10 @@ endif()
 if(Vulkan_FOUND)
     #target_link_libraries(gpubench PUBLIC ${Vulkan_LIBRARIES})
     target_link_libraries(gpubench PUBLIC Vulkan::Vulkan)
+    if(SHADERC_FOUND)
+        target_link_libraries(gpubench PUBLIC ${SHADERC_LIBRARY})
+        target_compile_definitions(gpubench PRIVATE HAVE_SHADERC)
+    endif()
 endif()
 
 if(OpenCL_FOUND)
@@ -243,6 +226,10 @@ endif()
 
 if(HIP_FOUND)
     target_link_libraries(gpubench PRIVATE hip::host)
+    if(HIPRTC_LIBRARY)
+        target_link_libraries(gpubench PRIVATE ${HIPRTC_LIBRARY})
+        target_compile_definitions(gpubench PRIVATE HAVE_HIPRTC __HIP_PLATFORM_AMD__)
+    endif()
 endif()
 
 # Compiler definitions for conditional compilation
@@ -290,7 +277,7 @@ endif()
 if(Vulkan_FOUND)
     install(DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/kernels/vulkan
             DESTINATION share/gpubench/kernels
-            FILES_MATCHING PATTERN "*.spv")
+            FILES_MATCHING PATTERN "*.comp")
 endif()
 
 if(OpenCL_FOUND)
@@ -302,7 +289,7 @@ endif()
 if(HIP_FOUND)
     install(DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/kernels/rocm
             DESTINATION share/gpubench/kernels
-            FILES_MATCHING PATTERN "*.co")
+            FILES_MATCHING PATTERN "*.hip")
 endif()
 
 # Install Windows batch script for easy benchmarking

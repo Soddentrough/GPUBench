@@ -34,8 +34,12 @@ void Fp8Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
 
   if (context.getBackend() == ComputeBackend::ROCm) {
     // HIP Path
-    std::string kernel_file = kernel_dir + "/rocm/fp8.co";
-    std::string matrix_file = kernel_dir + "/rocm/fp8_matrix.co";
+    std::string kernel_file = (context.getBackend() == ComputeBackend::ROCm)
+                                  ? kernel_dir + "/rocm/fp8.hip"
+                                  : "";
+    std::string matrix_file = (context.getBackend() == ComputeBackend::ROCm)
+                                  ? kernel_dir + "/rocm/fp8_matrix.hip"
+                                  : "";
 
     if (file_exists(kernel_file)) {
       vectorKernel = context.createKernel(kernel_file, "run_benchmark", 1);

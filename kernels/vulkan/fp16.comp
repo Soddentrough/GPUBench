@@ -1,0 +1,94 @@
+#version 460
+// Requires Vulkan 1.4+
+#extension GL_EXT_shader_16bit_storage : require
+#extension GL_EXT_shader_explicit_arithmetic_types : require
+
+layout (local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) buffer Data {
+    f16vec2 data[];
+} InOutBuffer;
+
+void main() {
+    uint index = gl_GlobalInvocationID.x;
+
+    // Use 32 f16vec2 accumulators for high ILP and GPU saturation.
+    // 32 f16vec2 = 64 halfs = 32 VGPRs (same as FP32 kernel).
+    f16vec2 val1 = InOutBuffer.data[index % 1024]; // Small modulo to keep in cache if needed
+    f16vec2 val2 = f16vec2(0.1, 0.2);
+    f16vec2 val3 = f16vec2(0.3, 0.4);
+    f16vec2 val4 = f16vec2(0.5, 0.6);
+    f16vec2 val5 = f16vec2(0.7, 0.8);
+    f16vec2 val6 = f16vec2(0.9, 1.0);
+    f16vec2 val7 = f16vec2(1.1, 1.2);
+    f16vec2 val8 = f16vec2(1.3, 1.4);
+    f16vec2 val9 = f16vec2(1.5, 1.6);
+    f16vec2 val10 = f16vec2(1.7, 1.8);
+    f16vec2 val11 = f16vec2(1.9, 2.0);
+    f16vec2 val12 = f16vec2(2.1, 2.2);
+    f16vec2 val13 = f16vec2(2.3, 2.4);
+    f16vec2 val14 = f16vec2(2.5, 2.6);
+    f16vec2 val15 = f16vec2(2.7, 2.8);
+    f16vec2 val16 = f16vec2(2.9, 3.0);
+    f16vec2 val17 = f16vec2(3.1, 3.2);
+    f16vec2 val18 = f16vec2(3.3, 3.4);
+    f16vec2 val19 = f16vec2(3.5, 3.6);
+    f16vec2 val20 = f16vec2(3.7, 3.8);
+    f16vec2 val21 = f16vec2(3.9, 4.0);
+    f16vec2 val22 = f16vec2(4.1, 4.2);
+    f16vec2 val23 = f16vec2(4.3, 4.4);
+    f16vec2 val24 = f16vec2(4.5, 4.6);
+    f16vec2 val25 = f16vec2(4.7, 4.8);
+    f16vec2 val26 = f16vec2(4.9, 5.0);
+    f16vec2 val27 = f16vec2(5.1, 5.2);
+    f16vec2 val28 = f16vec2(5.3, 5.4);
+    f16vec2 val29 = f16vec2(5.5, 5.6);
+    f16vec2 val30 = f16vec2(5.7, 5.8);
+    f16vec2 val31 = f16vec2(5.9, 6.0);
+    f16vec2 val32 = f16vec2(6.1, 6.2);
+
+    f16vec2 m = f16vec2(float16_t(1.0001));
+    
+    // Each iteration performs 32 f16vec2 FMAs = 32 * 2 * 2 = 128 FP16 ops.
+    // Daisy-chain pattern to ensure instruction depth and overlap.
+    for (int i = 0; i < 65536; ++i) {
+        val1 = fma(val1, m, val2);
+        val2 = fma(val2, m, val3);
+        val3 = fma(val3, m, val4);
+        val4 = fma(val4, m, val5);
+        val5 = fma(val5, m, val6);
+        val6 = fma(val6, m, val7);
+        val7 = fma(val7, m, val8);
+        val8 = fma(val8, m, val9);
+        val9 = fma(val9, m, val10);
+        val10 = fma(val10, m, val11);
+        val11 = fma(val11, m, val12);
+        val12 = fma(val12, m, val13);
+        val13 = fma(val13, m, val14);
+        val14 = fma(val14, m, val15);
+        val15 = fma(val15, m, val16);
+        val16 = fma(val16, m, val17);
+        val17 = fma(val17, m, val18);
+        val18 = fma(val18, m, val19);
+        val19 = fma(val19, m, val20);
+        val20 = fma(val20, m, val21);
+        val21 = fma(val21, m, val22);
+        val22 = fma(val22, m, val23);
+        val23 = fma(val23, m, val24);
+        val24 = fma(val24, m, val25);
+        val25 = fma(val25, m, val26);
+        val26 = fma(val26, m, val27);
+        val27 = fma(val27, m, val28);
+        val28 = fma(val28, m, val29);
+        val29 = fma(val29, m, val30);
+        val30 = fma(val30, m, val31);
+        val31 = fma(val31, m, val32);
+        val32 = fma(val32, m, val1);
+    }
+    
+    // Prevent optimization away
+    InOutBuffer.data[index] = val1 + val2 + val3 + val4 + val5 + val6 + val7 + val8 +
+                              val9 + val10 + val11 + val12 + val13 + val14 + val15 + val16 +
+                              val17 + val18 + val19 + val20 + val21 + val22 + val23 + val24 +
+                              val25 + val26 + val27 + val28 + val29 + val30 + val31 + val32;
+}

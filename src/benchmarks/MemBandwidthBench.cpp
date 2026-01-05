@@ -2,7 +2,6 @@
 #include <iostream>
 #include <stdexcept>
 
-
 bool MemBandwidthBench::IsSupported(const DeviceInfo &info,
                                     IComputeContext *context) const {
   return true;
@@ -12,9 +11,9 @@ void MemBandwidthBench::createKernel(BandwidthConfig &config,
                                      const std::string &kernel_dir) {
   std::string kernel_file;
   if (context->getBackend() == ComputeBackend::Vulkan) {
-    kernel_file = kernel_dir + "/vulkan/" + config.kernelFile + ".spv";
+    kernel_file = kernel_dir + "/vulkan/" + config.kernelFile + ".comp";
   } else if (context->getBackend() == ComputeBackend::ROCm) {
-    kernel_file = kernel_dir + "/rocm/" + config.kernelFile + ".co";
+    kernel_file = kernel_dir + "/rocm/" + config.kernelFile + ".hip";
   } else {
     kernel_file = kernel_dir + "/opencl/" + config.kernelFile + ".cl";
   }

@@ -24,6 +24,7 @@ gpucore.*
 # Logs and temporary files
 *.log
 *.txt
+!CMakeLists.txt
 runner.bat
 test.cpp
 test_minimal.cpp
@@ -48,6 +49,9 @@ _CPack_Packages/
 *.zip
 *.msi
 *.exe
+*.rpm
+*.deb
+*.tar.gz
 
 # Test test directory
 test/

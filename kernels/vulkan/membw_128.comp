@@ -1,0 +1,154 @@
+#version 460
+// Requires Vulkan 1.4+
+
+layout (local_size_x = 128, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) buffer InputData {
+    vec4 inputData[];
+} InputBuffer;
+
+layout(set = 0, binding = 1) buffer OutputData {
+    vec4 outputData[];
+} OutputBuffer;
+
+layout(push_constant) uniform PushConstants {
+    uint mode;
+    uint bufferSize;  // Buffer size in bytes
+} pc;
+
+void main() {
+    // mode == 0: Read
+    // mode == 1: Write
+    // mode == 2: Read/Write
+    
+    uint thread_id = gl_GlobalInvocationID.x;
+    uint num_threads = gl_NumWorkGroups.x * gl_WorkGroupSize.x;
+    
+    // Calculate buffer mask based on actual buffer size in bytes
+    // Each chunk is 32 vec4s (512 bytes)
+    uint buffer_num_chunks = pc.bufferSize / 512;
+    uint buffer_mask = buffer_num_chunks - 1;
+
+    uint chunk_index = thread_id;
+    vec4 accumulator = vec4(0.0);
+
+    for (int i = 0; i < 32; ++i) {
+        uint current_chunk = chunk_index & buffer_mask;
+        uint baseIndex = current_chunk * 32;
+
+        // Read 32 vec4s (512 bytes)
+        vec4 data0 = InputBuffer.inputData[baseIndex + 0];
+        vec4 data1 = InputBuffer.inputData[baseIndex + 1];
+        vec4 data2 = InputBuffer.inputData[baseIndex + 2];
+        vec4 data3 = InputBuffer.inputData[baseIndex + 3];
+        vec4 data4 = InputBuffer.inputData[baseIndex + 4];
+        vec4 data5 = InputBuffer.inputData[baseIndex + 5];
+        vec4 data6 = InputBuffer.inputData[baseIndex + 6];
+        vec4 data7 = InputBuffer.inputData[baseIndex + 7];
+        vec4 data8 = InputBuffer.inputData[baseIndex + 8];
+        vec4 data9 = InputBuffer.inputData[baseIndex + 9];
+        vec4 data10 = InputBuffer.inputData[baseIndex + 10];
+        vec4 data11 = InputBuffer.inputData[baseIndex + 11];
+        vec4 data12 = InputBuffer.inputData[baseIndex + 12];
+        vec4 data13 = InputBuffer.inputData[baseIndex + 13];
+        vec4 data14 = InputBuffer.inputData[baseIndex + 14];
+        vec4 data15 = InputBuffer.inputData[baseIndex + 15];
+        vec4 data16 = InputBuffer.inputData[baseIndex + 16];
+        vec4 data17 = InputBuffer.inputData[baseIndex + 17];
+        vec4 data18 = InputBuffer.inputData[baseIndex + 18];
+        vec4 data19 = InputBuffer.inputData[baseIndex + 19];
+        vec4 data20 = InputBuffer.inputData[baseIndex + 20];
+        vec4 data21 = InputBuffer.inputData[baseIndex + 21];
+        vec4 data22 = InputBuffer.inputData[baseIndex + 22];
+        vec4 data23 = InputBuffer.inputData[baseIndex + 23];
+        vec4 data24 = InputBuffer.inputData[baseIndex + 24];
+        vec4 data25 = InputBuffer.inputData[baseIndex + 25];
+        vec4 data26 = InputBuffer.inputData[baseIndex + 26];
+        vec4 data27 = InputBuffer.inputData[baseIndex + 27];
+        vec4 data28 = InputBuffer.inputData[baseIndex + 28];
+        vec4 data29 = InputBuffer.inputData[baseIndex + 29];
+        vec4 data30 = InputBuffer.inputData[baseIndex + 30];
+        vec4 data31 = InputBuffer.inputData[baseIndex + 31];
+        
+        if (pc.mode == 0) { // Read
+            // Accumulate to prevent optimization
+            accumulator.x += data0.x + data1.x + data2.x + data3.x + data4.x + data5.x + data6.x + data7.x;
+            accumulator.y += data8.x + data9.x + data10.x + data11.x + data12.x + data13.x + data14.x + data15.x;
+            accumulator.z += data16.x + data17.x + data18.x + data19.x + data20.x + data21.x + data22.x + data23.x;
+            accumulator.w += data24.x + data25.x + data26.x + data27.x + data28.x + data29.x + data30.x + data31.x;
+        } else if (pc.mode == 1) { // Write
+            OutputBuffer.outputData[baseIndex + 0] = vec4(1.0);
+            OutputBuffer.outputData[baseIndex + 1] = vec4(1.0);
+            OutputBuffer.outputData[baseIndex + 2] = vec4(1.0);
+            OutputBuffer.outputData[baseIndex + 3] = vec4(1.0);
+            OutputBuffer.outputData[baseIndex + 4] = vec4(1.0);
+            OutputBuffer.outputData[baseIndex + 5] = vec4(1.0);
+            OutputBuffer.outputData[baseIndex + 6] = vec4(1.0);
+            OutputBuffer.outputData[baseIndex + 7] = vec4(1.0);
+            OutputBuffer.outputData[baseIndex + 8] = vec4(1.0);
+            OutputBuffer.outputData[baseIndex + 9] = vec4(1.0);
+            OutputBuffer.outputData[baseIndex + 10] = vec4(1.0);
+            OutputBuffer.outputData[baseIndex + 11] = vec4(1.0);
+            OutputBuffer.outputData[baseIndex + 12] = vec4(1.0);
+            OutputBuffer.outputData[baseIndex + 13] = vec4(1.0);
+            OutputBuffer.outputData[baseIndex + 14] = vec4(1.0);
+            OutputBuffer.outputData[baseIndex + 15] = vec4(1.0);
+            OutputBuffer.outputData[baseIndex + 16] = vec4(1.0);
+            OutputBuffer.outputData[baseIndex + 17] = vec4(1.0);
+            OutputBuffer.outputData[baseIndex + 18] = vec4(1.0);
+            OutputBuffer.outputData[baseIndex + 19] = vec4(1.0);
+            OutputBuffer.outputData[baseIndex + 20] = vec4(1.0);
+            OutputBuffer.outputData[baseIndex + 21] = vec4(1.0);
+            OutputBuffer.outputData[baseIndex + 22] = vec4(1.0);
+            OutputBuffer.outputData[baseIndex + 23] = vec4(1.0);
+            OutputBuffer.outputData[baseIndex + 24] = vec4(1.0);
+            OutputBuffer.outputData[baseIndex + 25] = vec4(1.0);
+            OutputBuffer.outputData[baseIndex + 26] = vec4(1.0);
+            OutputBuffer.outputData[baseIndex + 27] = vec4(1.0);
+            OutputBuffer.outputData[baseIndex + 28] = vec4(1.0);
+            OutputBuffer.outputData[baseIndex + 29] = vec4(1.0);
+            OutputBuffer.outputData[baseIndex + 30] = vec4(1.0);
+            OutputBuffer.outputData[baseIndex + 31] = vec4(1.0);
+        } else { // Read/Write
+            OutputBuffer.outputData[baseIndex + 0] = data0;
+            OutputBuffer.outputData[baseIndex + 1] = data1;
+            OutputBuffer.outputData[baseIndex + 2] = data2;
+            OutputBuffer.outputData[baseIndex + 3] = data3;
+            OutputBuffer.outputData[baseIndex + 4] = data4;
+            OutputBuffer.outputData[baseIndex + 5] = data5;
+            OutputBuffer.outputData[baseIndex + 6] = data6;
+            OutputBuffer.outputData[baseIndex + 7] = data7;
+            OutputBuffer.outputData[baseIndex + 8] = data8;
+            OutputBuffer.outputData[baseIndex + 9] = data9;
+            OutputBuffer.outputData[baseIndex + 10] = data10;
+            OutputBuffer.outputData[baseIndex + 11] = data11;
+            OutputBuffer.outputData[baseIndex + 12] = data12;
+            OutputBuffer.outputData[baseIndex + 13] = data13;
+            OutputBuffer.outputData[baseIndex + 14] = data14;
+            OutputBuffer.outputData[baseIndex + 15] = data15;
+            OutputBuffer.outputData[baseIndex + 16] = data16;
+            OutputBuffer.outputData[baseIndex + 17] = data17;
+            OutputBuffer.outputData[baseIndex + 18] = data18;
+            OutputBuffer.outputData[baseIndex + 19] = data19;
+            OutputBuffer.outputData[baseIndex + 20] = data20;
+            OutputBuffer.outputData[baseIndex + 21] = data21;
+            OutputBuffer.outputData[baseIndex + 22] = data22;
+            OutputBuffer.outputData[baseIndex + 23] = data23;
+            OutputBuffer.outputData[baseIndex + 24] = data24;
+            OutputBuffer.outputData[baseIndex + 25] = data25;
+            OutputBuffer.outputData[baseIndex + 26] = data26;
+            OutputBuffer.outputData[baseIndex + 27] = data27;
+            OutputBuffer.outputData[baseIndex + 28] = data28;
+            OutputBuffer.outputData[baseIndex + 29] = data29;
+            OutputBuffer.outputData[baseIndex + 30] = data30;
+            OutputBuffer.outputData[baseIndex + 31] = data31;
+        }
+
+        chunk_index += num_threads;
+    }
+    
+    // Prevent compiler from optimizing away reads (branch never taken, but compiler can't prove it)
+    if (accumulator.x > 1e30) {
+        OutputBuffer.outputData[0] = accumulator;
+    }
+}

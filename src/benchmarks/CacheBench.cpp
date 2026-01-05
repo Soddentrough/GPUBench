@@ -123,9 +123,9 @@ void CacheBench::Setup(IComputeContext &context,
 
   std::string full_kernel_path;
   if (context.getBackend() == ComputeBackend::Vulkan) {
-    full_kernel_path = kernel_dir + "/vulkan/" + kernelFile + ".spv";
+    full_kernel_path = kernel_dir + "/vulkan/" + kernelFile + ".comp";
   } else if (context.getBackend() == ComputeBackend::ROCm) {
-    full_kernel_path = kernel_dir + "/rocm/" + kernelFile + ".co";
+    full_kernel_path = kernel_dir + "/rocm/" + kernelFile + ".hip";
   } else {
     full_kernel_path = kernel_dir + "/opencl/" + kernelFile + ".cl";
   }

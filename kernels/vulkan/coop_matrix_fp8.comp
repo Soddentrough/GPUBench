@@ -1,0 +1,26 @@
+#version 450
+#extension GL_KHR_cooperative_matrix : enable
+#extension GL_EXT_shader_explicit_arithmetic_types_float16 : enable
+#extension GL_EXT_shader_8bit_storage : enable
+
+// Native FP8 types (when supported by toolchain)
+// #extension GL_EXT_shader_explicit_arithmetic_types_float8 : enable
+
+layout(local_size_x = 32) in;
+
+layout(set = 0, binding = 0) buffer InputA { float16_t a[]; };
+layout(set = 0, binding = 1) buffer InputB { float16_t b[]; };
+layout(set = 0, binding = 2) buffer OutputC { float16_t c[]; };
+
+// Using float16 for now as fallback if float8 is unavailable in toolchain
+// But we use the coop_matrix interface which will map to RDNA4 Matrix Cores
+void main() {
+    coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseA> matA;
+    coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseB> matB;
+    coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC;
+
+    coopMatLoad(matA, a, 0, 16, false);
+    coopMatLoad(matB, b, 0, 16, false);
+    matC = coopMatMulAdd(matA, matB, matC);
+    coopMatStore(matC, c, 0, 16, false);
+}

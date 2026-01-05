@@ -1,0 +1,25 @@
+#version 450
+#extension GL_KHR_cooperative_matrix : enable
+#extension GL_EXT_shader_explicit_arithmetic_types_int8 : enable
+#extension GL_EXT_shader_explicit_arithmetic_types_int32 : enable
+#extension GL_EXT_shader_8bit_storage : enable
+#extension GL_KHR_memory_scope_semantics : enable
+
+layout(local_size_x = 32) in;
+
+layout(set = 0, binding = 0) buffer InputA { int8_t a[]; };
+layout(set = 0, binding = 1) buffer InputB { int8_t b[]; };
+layout(set = 0, binding = 2) buffer OutputC { int8_t c[]; };
+
+void main() {
+    // RDNA4 supports INT4 via RDNA4-specific paths, but Cooperative Matrix KHR
+    // usually targets INT8. We use INT8 interface as proxy for hardware INT4 cores if available.
+    coopmat<int8_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseA> matA;
+    coopmat<int8_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseB> matB;
+    coopmat<int32_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC;
+
+    coopMatLoad(matA, a, 0, 16, false);
+    coopMatLoad(matB, b, 0, 16, false);
+    matC = coopMatMulAdd(matA, matB, matC);
+    // coopMatStore(matC, c, 0, 16, false); // Store back to int32 accumulator
+}

@@ -66,7 +66,7 @@ void Int4Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
       context.getCurrentDeviceInfo().name.find("gfx12") != std::string::npos;
   if (context.getCurrentDeviceInfo().cooperativeMatrixSupport &&
       context.getBackend() == ComputeBackend::Vulkan && is_rdna4) {
-    std::string matrix_file = kernel_dir + "/vulkan/coop_matrix_int4.spv";
+    std::string matrix_file = kernel_dir + "/vulkan/coop_matrix_int4.comp";
     if (file_exists(matrix_file)) {
       try {
         matrixKernel = context.createKernel(matrix_file, "main", 1);

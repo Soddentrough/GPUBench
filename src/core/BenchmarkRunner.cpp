@@ -157,7 +157,11 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
     if (benchmarks_to_run.empty()) {
       should_run = true;
     } else {
-      std::string bench_name_lower = to_lower(bench->GetName());
+      std::string bench_name = bench->GetName();
+      if (bench_name == "Performance") {
+        bench_name += " (" + std::string(bench->GetSubCategory()) + ")";
+      }
+      std::string bench_name_lower = to_lower(bench_name);
       auto aliases = bench->GetAliases();
       for (const auto &run_name : lower_benchmarks_to_run) {
         if (bench_name_lower.find(run_name) != std::string::npos) {
