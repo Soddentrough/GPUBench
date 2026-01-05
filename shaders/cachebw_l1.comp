@@ -1,41 +1,33 @@
-#version 460
-// Requires Vulkan 1.4+
+#version 450
 
-// L1 cache bandwidth test
-// Uses a 4 KB working set with many repeated accesses
-layout (local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+layout(local_size_x = 256) in;
 
-layout(set = 0, binding = 0) buffer Data {
+layout(set = 0, binding = 0) volatile buffer Data {
     vec4 data[];
 } Buffer;
 
 layout(push_constant) uniform PushConstants {
-    uint _pad; // Offset 0 (arg 0 is buffer)
-    uint mask; // Offset 4 (arg 1 is mask)
+    uint mask;
 } pushConstants;
 
 void main() {
-    // 16 KB total = 1024 vec4 elements
-    // 512 workgroups, each accesses 2 elements
-    // 256 threads per workgroup, so threads share elements
-    uint workgroupOffset = gl_WorkGroupID.x * 2;
-    uint localId = gl_LocalInvocationID.x;
-    
-    // Multiple threads access the same element for L1 cache locality
-    uint baseIndex = workgroupOffset + (localId % 2);
-    
+    uint globalId = gl_GlobalInvocationID.x;
+    uint idx = globalId & pushConstants.mask;
     vec4 sum = vec4(0.0);
-    
-    // Perform many iterations to measure L1 cache bandwidth
-    // Each workgroup accesses its own small 4KB region repeatedly
-    #pragma unroll
-    for (int iter = 0; iter < 1024; iter++) {
-        vec4 v0 = Buffer.data[baseIndex & pushConstants.mask];
-        
-        // Simple accumulation to prevent optimization
-        sum += v0;
+
+    for (uint i = 0; i < 2000; i++) {
+        uint base = (idx + i * 8) & pushConstants.mask;
+        sum += Buffer.data[(base + 0) & pushConstants.mask];
+        sum += Buffer.data[(base + 1) & pushConstants.mask];
+        sum += Buffer.data[(base + 2) & pushConstants.mask];
+        sum += Buffer.data[(base + 3) & pushConstants.mask];
+        sum += Buffer.data[(base + 4) & pushConstants.mask];
+        sum += Buffer.data[(base + 5) & pushConstants.mask];
+        sum += Buffer.data[(base + 6) & pushConstants.mask];
+        sum += Buffer.data[(base + 7) & pushConstants.mask];
     }
-    
-    // Write back to prevent dead code elimination
-    Buffer.data[baseIndex & pushConstants.mask] = sum;
+
+    if (sum.x < 0.0) {
+        Buffer.data[idx] = sum;
+    }
 }

@@ -1,39 +1,29 @@
-#version 460
-// Requires Vulkan 1.4+
+#version 450
 
-// L2 cache bandwidth test
-// Uses a 128 KB working set with repeated accesses
-layout (local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+layout(local_size_x = 256) in;
 
-layout(set = 0, binding = 0) buffer Data {
+layout(set = 0, binding = 0) volatile buffer Data {
     vec4 data[];
 } Buffer;
 
 layout(push_constant) uniform PushConstants {
-    uint _pad; // Offset 0 (arg 0 is buffer)
-    uint mask; // Offset 4 (arg 1 is mask)
+    uint mask;
 } pushConstants;
 
 void main() {
-    // 2 MB total working set = 131072 vec4 elements
-    // 512 workgroups, each accesses 256 elements
-    // 256 threads per workgroup, each thread accesses 1 element
-    uint workgroupOffset = gl_WorkGroupID.x * 256;
-    uint localId = gl_LocalInvocationID.x;
-    
-    // Each thread accesses one element
-    uint baseIndex = workgroupOffset + localId;
-    
+    uint globalId = gl_GlobalInvocationID.x;
+    uint idx = globalId & pushConstants.mask;
     vec4 sum = vec4(0.0);
-    
-    // Perform iterations to measure L2 cache bandwidth
-    for (int iter = 0; iter < 500; iter++) {
-        vec4 v0 = Buffer.data[baseIndex & pushConstants.mask];
-        
-        // Accumulate to prevent optimization
-        sum += v0;
+
+    for (uint i = 0; i < 500; i++) {
+        uint base = (idx + i * 32) & pushConstants.mask;
+        sum += Buffer.data[(base + 0) & pushConstants.mask];
+        sum += Buffer.data[(base + 8) & pushConstants.mask];
+        sum += Buffer.data[(base + 16) & pushConstants.mask];
+        sum += Buffer.data[(base + 24) & pushConstants.mask];
     }
-    
-    // Write back to prevent dead code elimination
-    Buffer.data[baseIndex & pushConstants.mask] = sum;
+
+    if (sum.x < 0.0) {
+        Buffer.data[idx] = sum;
+    }
 }

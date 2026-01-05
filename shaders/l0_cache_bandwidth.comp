@@ -1,38 +1,34 @@
-#version 460
+#version 450
 
-layout (local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+layout(local_size_x = 256) in;
 
-layout(set = 0, binding = 0) buffer Data {
-    uint data[];
+layout(set = 0, binding = 0) volatile buffer Data {
+    vec4 data[];
 } Buffer;
 
+layout(push_constant) uniform PushConstants {
+    uint mask;
+} pushConstants;
+
 void main() {
-    uint r0 = gl_GlobalInvocationID.x * 1, r1 = gl_GlobalInvocationID.x * 2, r2 = gl_GlobalInvocationID.x * 3, r3 = gl_GlobalInvocationID.x * 4;
-    uint r4 = gl_GlobalInvocationID.x * 5, r5 = gl_GlobalInvocationID.x * 6, r6 = gl_GlobalInvocationID.x * 7, r7 = gl_GlobalInvocationID.x * 8;
-    uint r8 = gl_GlobalInvocationID.x * 9, r9 = gl_GlobalInvocationID.x * 10, r10 = gl_GlobalInvocationID.x * 11, r11 = gl_GlobalInvocationID.x * 12;
-    uint r12 = gl_GlobalInvocationID.x * 13, r13 = gl_GlobalInvocationID.x * 14, r14 = gl_GlobalInvocationID.x * 15, r15 = gl_GlobalInvocationID.x * 16;
+    uint globalId = gl_GlobalInvocationID.x;
+    uint idx = globalId & pushConstants.mask;
+    vec4 sum = vec4(0.0);
 
-    uint start_val = Buffer.data[0];
-
-    // Perform many independent operations
-    for (int i = 0; i < 1024; ++i) {
-        r0 += r1 + start_val;
-        r1 += r2 + start_val;
-        r2 += r3 + start_val;
-        r3 += r4 + start_val;
-        r4 += r5 + start_val;
-        r5 += r6 + start_val;
-        r6 += r7 + start_val;
-        r7 += r8 + start_val;
-        r8 += r9 + start_val;
-        r9 += r10 + start_val;
-        r10 += r11 + start_val;
-        r11 += r12 + start_val;
-        r12 += r13 + start_val;
-        r13 += r14 + start_val;
-        r14 += r15 + start_val;
-        r15 += r0 + start_val;
+    // Unrolled loop to maximize IPC and saturate L0
+    for (uint i = 0; i < 10000; i++) {
+        uint base = (idx + i * 8) & pushConstants.mask;
+        sum += Buffer.data[(base + 0) & pushConstants.mask];
+        sum += Buffer.data[(base + 1) & pushConstants.mask];
+        sum += Buffer.data[(base + 2) & pushConstants.mask];
+        sum += Buffer.data[(base + 3) & pushConstants.mask];
+        sum += Buffer.data[(base + 4) & pushConstants.mask];
+        sum += Buffer.data[(base + 5) & pushConstants.mask];
+        sum += Buffer.data[(base + 6) & pushConstants.mask];
+        sum += Buffer.data[(base + 7) & pushConstants.mask];
     }
 
-    Buffer.data[0] = r0 + r1 + r2 + r3 + r4 + r5 + r6 + r7 + r8 + r9 + r10 + r11 + r12 + r13 + r14 + r15;
+    if (sum.x < 0.0) {
+        Buffer.data[idx] = sum;
+    }
 }

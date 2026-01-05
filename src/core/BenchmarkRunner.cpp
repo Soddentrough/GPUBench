@@ -61,16 +61,19 @@ void BenchmarkRunner::discoverBenchmarks() {
   benchmarks.push_back(std::make_unique<SysMemBandwidthBench>());
 
   // Cache Bandwidth
-  std::vector<uint32_t> l0_init = {42}; // Initialize with a single value
-  benchmarks.push_back(std::make_unique<CacheBench>(
-      "L0 Cache Bandwidth", "GB/s", 4, "l0_cache_bandwidth", l0_init,
-      std::vector<std::string>{"l0b"}));
+  const size_t l0_size = 16 * 1024; // 16KB L0 cache
+  std::vector<uint32_t> l0_init(l0_size / sizeof(uint32_t));
+  std::iota(l0_init.begin(), l0_init.end(), 0);
 
-  const size_t l1_size = 24 * 1024;
+  benchmarks.push_back(std::make_unique<CacheBench>(
+      "L0 Cache Bandwidth", "GB/s", l0_size, "l0_cache_bandwidth", l0_init,
+      std::vector<std::string>{"l0b"}, 0));
+
+  const size_t l1_size = 32 * 1024; // RDNA L1 is often 32KB per CU
   const size_t l2_size = 1 * 1024 * 1024;
-  // Increase L3 size to 8MB to ensure we hit L3 cache (Infinity Cache) and
+  // Increase L3 size to 32MB to ensure we hit L3 cache (Infinity Cache) and
   // avoid L2 aliasing
-  const size_t l3_size = 8 * 1024 * 1024;
+  const size_t l3_size = 32 * 1024 * 1024;
 
   // Cache bandwidth kernels use float4 arrays and access large index ranges
   // We need to allocate enough space based on the dispatch pattern (65536
@@ -103,8 +106,9 @@ void BenchmarkRunner::discoverBenchmarks() {
 
   // Cache Latency
   benchmarks.push_back(std::make_unique<CacheBench>(
-      "L0 Cache Latency", "ns", 4, "l0_cache_latency", l0_init,
-      std::vector<std::string>{"l0l"}));
+      "L0 Cache Latency", "ns", l0_size, "l0_cache_latency",
+      create_shuffled_indices(l0_size / sizeof(uint32_t)),
+      std::vector<std::string>{"l0l"}, 0));
   benchmarks.push_back(std::make_unique<CacheBench>(
       "L1 Cache Latency", "ns", l1_size, "cache_latency",
       create_shuffled_indices(l1_size / sizeof(uint32_t)),
