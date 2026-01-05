@@ -44,7 +44,11 @@ BenchmarkRunner::~BenchmarkRunner() {}
 std::vector<std::string> BenchmarkRunner::getAvailableBenchmarks() const {
   std::vector<std::string> names;
   for (const auto &bench : benchmarks) {
-    names.push_back(bench->GetName());
+    std::string name = bench->GetName();
+    if (name == "Performance") {
+      name += " (" + std::string(bench->GetSubCategory()) + ")";
+    }
+    names.push_back(name);
   }
   return names;
 }
