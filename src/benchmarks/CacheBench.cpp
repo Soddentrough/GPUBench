@@ -194,8 +194,8 @@ BenchmarkResult CacheBench::GetResult(uint32_t config_idx) const {
     // 10,000 iterations * 8 vec4 loads * num_threads * 16 bytes/vec4
     operations = 80000ULL * num_threads_bw * 16;
   } else if (name == "L0 Cache Latency") {
-    // 10,000 pointer chasing steps
-    operations = 10000;
+    // 1,000,000 pointer chasing steps
+    operations = 1000000;
   } else if (name == "L1 Cache Bandwidth") {
     // L1: 2,000 iterations × 8 float4 loads × 16 bytes
     operations = num_threads_bw * 16000ULL * 16;
@@ -207,14 +207,22 @@ BenchmarkResult CacheBench::GetResult(uint32_t config_idx) const {
     operations = num_threads_bw * 1000ULL * 16;
   } else if (name == "L1 Cache Latency" || name == "L2 Cache Latency" ||
              name == "L3 Cache Latency") {
-    // 10,000 iterations in the new shaders
-    operations = 10000;
+    // 1,000,000 iterations in the new shaders
+    operations = 1000000;
   } else if (metric == "GB/s") {
     // Generic bandwidth: assume 1024 reads
     operations = num_threads_bw * 1024 * sizeof(uint32_t);
   } else if (metric == "ns") {
-    // 10,000 dependent reads
-    operations = 10000;
+    // 1,000,000 dependent reads
+    operations = 1000000;
   }
   return {operations, 0.0};
+}
+
+const char *CacheBench::GetComponent(uint32_t config_idx) const {
+  return "Memory";
+}
+
+const char *CacheBench::GetSubCategory(uint32_t config_idx) const {
+  return (metric == "GB/s") ? "Bandwidth" : "Latency";
 }

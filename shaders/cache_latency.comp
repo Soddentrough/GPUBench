@@ -7,14 +7,17 @@ layout(set = 0, binding = 0) buffer Data {
 } Buffer;
 
 layout(push_constant) uniform PushConstants {
-    uint mask;
+    uint mask; // Kept for host compatibility
 } pushConstants;
 
 void main() {
     uint index = 0;
-    for (uint i = 0; i < 10000; i++) {
-        index = Buffer.data[index & pushConstants.mask];
+    
+    // Raw chasing without mask
+    for (uint i = 0; i < 1000000; i++) {
+        index = Buffer.data[index];
     }
+
     if (index == 0xDEADBEEF) {
         Buffer.data[0] = index;
     }

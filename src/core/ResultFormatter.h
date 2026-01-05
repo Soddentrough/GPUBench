@@ -1,31 +1,34 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <vector>
-#include <cstdint>
+
 
 struct ResultData {
-    std::string backendName;
-    std::string deviceName;
-    std::string benchmarkName;
-    std::string metric;
-    uint64_t operations;
-    double time_ms;
-    bool isEmulated;
-    uint32_t maxWorkGroupSize;
-    uint32_t deviceIndex;
+  std::string backendName;
+  std::string deviceName;
+  std::string benchmarkName;
+  std::string component;   // e.g., "Compute", "Memory"
+  std::string subcategory; // e.g., "Bandwidth", "Latency", "FP32"
+  std::string metric;
+  uint64_t operations;
+  double time_ms;
+  bool isEmulated;
+  uint32_t maxWorkGroupSize;
+  uint32_t deviceIndex;
 };
 
 class ResultFormatter {
 public:
-    ResultFormatter();
-    ~ResultFormatter();
+  ResultFormatter();
+  ~ResultFormatter();
 
-    void addResult(const ResultData& result);
-    void print();
+  void addResult(const ResultData &result);
+  void print();
 
 private:
-    std::string formatNumber(uint64_t n);
-    std::string formatDouble(double value, int precision);
-    std::vector<ResultData> results;
+  std::string formatNumber(uint64_t n);
+  std::string formatDouble(double value, int precision);
+  std::vector<ResultData> results;
 };

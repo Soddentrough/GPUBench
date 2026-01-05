@@ -5,19 +5,26 @@
 
 class Fp4Bench : public IBenchmark {
 public:
-    const char* GetName() const override;
-    std::vector<std::string> GetAliases() const override { return {"f4"}; }
-    bool IsSupported(const DeviceInfo& info, IComputeContext* context = nullptr) const override;
-    void Setup(IComputeContext& context, const std::string& kernel_dir) override;
-    void Run(uint32_t config_idx = 0) override;
-    void Teardown() override;
-    BenchmarkResult GetResult(uint32_t config_idx = 0) const override;
-    bool IsEmulated() const override { return is_emulated; }
+  const char *GetName() const override { return "Performance"; }
+  std::vector<std::string> GetAliases() const override { return {"f4"}; }
+  bool IsSupported(const DeviceInfo &info,
+                   IComputeContext *context = nullptr) const override;
+  void Setup(IComputeContext &context, const std::string &kernel_dir) override;
+  void Run(uint32_t config_idx = 0) override;
+  void Teardown() override;
+  BenchmarkResult GetResult(uint32_t config_idx = 0) const override;
+  const char *GetComponent(uint32_t config_idx = 0) const override {
+    return "Compute";
+  }
+  const char *GetSubCategory(uint32_t config_idx = 0) const override {
+    return "FP4";
+  }
+  bool IsEmulated() const override { return is_emulated; }
 
 private:
-    IComputeContext* context = nullptr;
-    ComputeKernel kernel = nullptr;
-    ComputeBuffer buffer = nullptr;
-    bool is_emulated = true;
-    mutable std::string name = "FP4";
+  IComputeContext *context = nullptr;
+  ComputeKernel kernel = nullptr;
+  ComputeBuffer buffer = nullptr;
+  bool is_emulated = true;
+  mutable std::string name = "FP4";
 };

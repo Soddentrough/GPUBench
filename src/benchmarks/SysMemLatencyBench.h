@@ -4,22 +4,14 @@
 #include <string>
 #include <vector>
 
-enum class SysMemTestMode { Read, Write, ReadWrite };
-
-struct SysMemConfig {
-  std::string name;
-  SysMemTestMode mode;
-  uint32_t numThreads = 0; // 0 = Auto/Max
-};
-
-class SysMemBandwidthBench : public IBenchmark {
+class SysMemLatencyBench : public IBenchmark {
 public:
-  SysMemBandwidthBench();
-  virtual ~SysMemBandwidthBench();
+  SysMemLatencyBench();
+  virtual ~SysMemLatencyBench();
 
   const char *GetName() const override;
   std::vector<std::string> GetAliases() const override {
-    return {"sysmem", "ram", "bw"};
+    return {"sysmem_latency", "ram_latency", "sl"};
   }
   const char *GetMetric() const override;
   bool IsSupported(const DeviceInfo &info,
@@ -29,29 +21,21 @@ public:
   void Run(uint32_t config_idx = 0) override;
   void Teardown() override;
   BenchmarkResult GetResult(uint32_t config_idx = 0) const override;
+  uint32_t GetNumConfigs() const override;
+  std::string GetConfigName(uint32_t config_idx) const override;
   const char *GetComponent(uint32_t config_idx = 0) const override {
     return "Memory";
   }
   const char *GetSubCategory(uint32_t config_idx = 0) const override {
-    return "Bandwidth";
+    return "Latency";
   }
-  uint32_t GetNumConfigs() const override;
-  std::string GetConfigName(uint32_t config_idx) const override;
 
-  // System benchmark is not tied to a specific GPU
   bool IsDeviceDependent() const override { return false; }
-
-  // Not an emulated benchmark, it's a real system benchmark, but returns false
-  // for GPU emulation
   bool IsEmulated() const override { return false; }
 
 private:
-  std::vector<SysMemConfig> configs;
   void *buffer = nullptr;
-  void *destBuffer = nullptr; // For ReadWrite/Copy
   size_t bufferSize = 0;
-
-  // Results
   double lastRunTimeMs = 0.0;
-  uint64_t lastRunBytes = 0;
+  uint64_t lastRunOps = 0;
 };

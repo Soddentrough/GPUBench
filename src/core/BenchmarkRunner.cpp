@@ -9,6 +9,7 @@
 #include "benchmarks/Int8Bench.h"
 #include "benchmarks/MemBandwidthBench.h"
 #include "benchmarks/SysMemBandwidthBench.h"
+#include "benchmarks/SysMemLatencyBench.h"
 #include "core/ComputeBackendFactory.h"
 #include "core/ResultFormatter.h"
 #include "utils/KernelPath.h"
@@ -59,6 +60,7 @@ void BenchmarkRunner::discoverBenchmarks() {
   benchmarks.push_back(std::make_unique<Int4Bench>());
   benchmarks.push_back(std::make_unique<MemBandwidthBench>());
   benchmarks.push_back(std::make_unique<SysMemBandwidthBench>());
+  benchmarks.push_back(std::make_unique<SysMemLatencyBench>());
 
   // Cache Bandwidth
   const size_t l0_size = 16 * 1024; // 16KB L0 cache
@@ -69,11 +71,10 @@ void BenchmarkRunner::discoverBenchmarks() {
       "L0 Cache Bandwidth", "GB/s", l0_size, "l0_cache_bandwidth", l0_init,
       std::vector<std::string>{"l0b"}, 0));
 
-  const size_t l1_size = 32 * 1024; // RDNA L1 is often 32KB per CU
-  const size_t l2_size = 1 * 1024 * 1024;
-  // Increase L3 size to 32MB to ensure we hit L3 cache (Infinity Cache) and
-  // avoid L2 aliasing
-  const size_t l3_size = 32 * 1024 * 1024;
+  // Define target cache sizes for isolation
+  const size_t l1_size = 128 * 1024;       // 128KB
+  const size_t l2_size = 4 * 1024 * 1024;  // 4MB
+  const size_t l3_size = 64 * 1024 * 1024; // 64MB
 
   // Cache bandwidth kernels use float4 arrays and access large index ranges
   // We need to allocate enough space based on the dispatch pattern (65536
@@ -86,23 +87,20 @@ void BenchmarkRunner::discoverBenchmarks() {
   size_t cachebw_l1_size = 2 * 1024 * 1024;
   std::vector<uint32_t> l1_bw_init(cachebw_l1_size / sizeof(uint32_t), 1);
 
-  // For cachebw_l2 (L2 cache), allocate 268MB (enough for the access pattern)
-  size_t cachebw_l2_size = 268 * 1024 * 1024;
-  std::vector<uint32_t> l2_bw_init(cachebw_l2_size / sizeof(uint32_t), 1);
+  // L1 Cache Bandwidth
+  benchmarks.push_back(std::make_unique<CacheBench>(
+      "L1 Cache Bandwidth", "GB/s", l1_size, "cachebw_l1",
+      std::vector<uint32_t>{}, std::vector<std::string>{"l1b"}, 1));
 
-  // For cachebw_l3 (L3 cache), we use 8MB which fits in L3
-  size_t cachebw_l3_size = l3_size;
-  std::vector<uint32_t> l3_bw_init(cachebw_l3_size / sizeof(uint32_t), 1);
+  // L2 Cache Bandwidth
+  benchmarks.push_back(std::make_unique<CacheBench>(
+      "L2 Cache Bandwidth", "GB/s", l2_size, "cachebw_l2",
+      std::vector<uint32_t>{}, std::vector<std::string>{"l2b"}, 2));
 
+  // L3 Cache Bandwidth
   benchmarks.push_back(std::make_unique<CacheBench>(
-      "L1 Cache Bandwidth", "GB/s", cachebw_l1_size, "cachebw_l1", l1_bw_init,
-      std::vector<std::string>{"l1b"}, 1));
-  benchmarks.push_back(std::make_unique<CacheBench>(
-      "L2 Cache Bandwidth", "GB/s", cachebw_l2_size, "cachebw_l2", l2_bw_init,
-      std::vector<std::string>{"l2b"}, 2));
-  benchmarks.push_back(std::make_unique<CacheBench>(
-      "L3 Cache Bandwidth", "GB/s", cachebw_l3_size, "cachebw_l3", l3_bw_init,
-      std::vector<std::string>{"l3b"}, 3));
+      "L3 Cache Bandwidth", "GB/s", l3_size, "cachebw_l3",
+      std::vector<uint32_t>{}, std::vector<std::string>{"l3b"}, 3));
 
   // Cache Latency
   benchmarks.push_back(std::make_unique<CacheBench>(
@@ -345,6 +343,8 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
                     bench_result.operations * total_invocations;
                 result_data.time_ms = total_time_ms;
                 result_data.isEmulated = bench->IsEmulated();
+                result_data.component = bench->GetComponent(i);
+                result_data.subcategory = bench->GetSubCategory(i);
                 result_data.maxWorkGroupSize = info.maxWorkGroupSize;
                 result_data.deviceIndex = context->getSelectedDeviceIndex();
 
@@ -463,8 +463,10 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
                 bench_result.operations * total_invocations;
             result_data.time_ms = total_time_ms;
             result_data.isEmulated = false;
+            result_data.component = bench->GetComponent(i);
+            result_data.subcategory = bench->GetSubCategory(i);
             result_data.maxWorkGroupSize = 0;
-            result_data.deviceIndex = 0;
+            result_data.deviceIndex = 0xFFFFFFFF;
 
             formatter->addResult(result_data);
           }

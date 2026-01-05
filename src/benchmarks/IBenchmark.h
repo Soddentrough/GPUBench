@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/IComputeContext.h"
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -29,4 +30,11 @@ public:
   // Returns true if this benchmark depends on the selected GPU device context.
   // Returns false if it is a system-wide or host-only benchmark (runs once).
   virtual bool IsDeviceDependent() const { return true; }
+
+  virtual const char *GetComponent(uint32_t config_idx = 0) const {
+    return "Other";
+  }
+  virtual const char *GetSubCategory(uint32_t config_idx = 0) const {
+    return "";
+  }
 };

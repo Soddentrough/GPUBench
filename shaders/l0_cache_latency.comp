@@ -2,23 +2,22 @@
 
 layout(local_size_x = 1) in;
 
-// Removed 'volatile' to allow L0/L1 vector cache to function normally,
-// as pointer chasing provides the necessary dependency to prevent hoisting.
 layout(set = 0, binding = 0) buffer Data {
     uint data[];
 } Buffer;
 
 layout(push_constant) uniform PushConstants {
-    uint mask;
+    uint mask; // Kept for host compatibility
 } pushConstants;
 
 void main() {
     uint index = 0;
     
-    for (uint i = 0; i < 10000; i++) {
-        index = Buffer.data[index & pushConstants.mask];
+    // Raw chasing without mask to avoid extra arithmetic in the hot loop
+    for (uint i = 0; i < 1000000; i++) {
+        index = Buffer.data[index];
     }
-    
+
     if (index == 0xDEADBEEF) {
         Buffer.data[0] = index;
     }

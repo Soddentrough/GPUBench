@@ -2,17 +2,17 @@
 # This script automates building Windows packages (ZIP and/or NSIS installer)
 
 param(
-    [Parameter(Mandatory=$false)]
+    [Parameter(Mandatory = $false)]
     [ValidateSet("zip", "nsis", "both")]
     [string]$PackageType = "both",
     
-    [Parameter(Mandatory=$false)]
+    [Parameter(Mandatory = $false)]
     [string]$BuildDir = "build-release",
     
-    [Parameter(Mandatory=$false)]
+    [Parameter(Mandatory = $false)]
     [switch]$CleanBuild = $false,
     
-    [Parameter(Mandatory=$false)]
+    [Parameter(Mandatory = $false)]
     [ValidateSet("Release", "Debug")]
     [string]$BuildType = "Release"
 )
@@ -38,7 +38,8 @@ function Test-CMake {
     try {
         $null = cmake --version
         return $true
-    } catch {
+    }
+    catch {
         return $false
     }
 }
@@ -53,7 +54,8 @@ function Test-NSIS {
         # Try to find in PATH
         $null = Get-Command makensis -ErrorAction Stop
         return $true
-    } catch {
+    }
+    catch {
         return $false
     }
 }
@@ -66,6 +68,7 @@ Write-Info ""
 if (-not (Get-Command gcc -ErrorAction SilentlyContinue)) {
     $mingwPaths = @(
         "C:\msys64\mingw64\bin",
+        "C:\msys64\ucrt64\bin",
         "C:\ProgramData\chocolatey\bin",
         "C:\Program Files\MinGW\bin"
     )
@@ -92,7 +95,8 @@ if (($PackageType -eq "nsis") -or ($PackageType -eq "both")) {
         if ($PackageType -eq "nsis") {
             Write-Error-Custom "         Falling back to ZIP package only."
             $PackageType = "zip"
-        } else {
+        }
+        else {
             Write-Error-Custom "         Will create ZIP package only."
             $PackageType = "zip"
         }
@@ -134,7 +138,8 @@ try {
     if (Get-Command ninja -ErrorAction SilentlyContinue) {
         Write-Info "  Using Ninja generator"
         $cmakeArgs += "-G", "Ninja"
-    } elseif (Get-Command mingw32-make -ErrorAction SilentlyContinue) {
+    }
+    elseif (Get-Command mingw32-make -ErrorAction SilentlyContinue) {
         Write-Info "  Using MinGW Makefiles generator"
         $cmakeArgs += "-G", "MinGW Makefiles"
     }
@@ -150,7 +155,8 @@ try {
     Write-Info "Step 2: Building project..."
     if ($cmakeArgs -contains "Ninja") {
         & cmake --build .
-    } else {
+    }
+    else {
         & cmake --build . --config $BuildType
     }
     
@@ -174,7 +180,8 @@ try {
         Write-Info "  Creating ZIP package..."
         if ($cmakeArgs -contains "Ninja") {
             & cpack -G ZIP
-        } else {
+        }
+        else {
             & cpack -G ZIP -C $BuildType
         }
         
@@ -184,7 +191,8 @@ try {
                 $packagesCreated += $zipFile.Name
                 Write-Success "  ✓ ZIP package created: $($zipFile.Name)"
             }
-        } else {
+        }
+        else {
             Write-Error-Custom "  ✗ ZIP package creation failed"
         }
     }
@@ -194,7 +202,8 @@ try {
         Write-Info "  Creating NSIS installer..."
         if ($cmakeArgs -contains "Ninja") {
             & cpack -G NSIS
-        } else {
+        }
+        else {
             & cpack -G NSIS -C $BuildType
         }
         
@@ -204,7 +213,8 @@ try {
                 $packagesCreated += $exeFile.Name
                 Write-Success "  ✓ NSIS installer created: $($exeFile.Name)"
             }
-        } else {
+        }
+        else {
             Write-Error-Custom "  ✗ NSIS installer creation failed"
         }
     }
@@ -233,11 +243,13 @@ try {
             Write-Info "To test the installer:"
             Write-Info "  .\$($packagesCreated[1])"
         }
-    } else {
+    }
+    else {
         Write-Error-Custom "No packages were created successfully."
     }
     
-} catch {
+}
+catch {
     Write-Error-Custom ""
     Write-Error-Custom "ERROR: $_"
     Pop-Location

@@ -1,6 +1,7 @@
 # Build directory
 build/
 build-release/
+build-release-package/
 
 # GPU core dump files
 gpucore.*
@@ -18,6 +19,20 @@ gpucore.*
 *.so
 *.a
 *.exe
+*.spv
+
+# Logs and temporary files
+*.log
+*.txt
+runner.bat
+test.cpp
+test_minimal.cpp
+
+# Specific logs
+build_error.log
+build_error.txt
+build_out.txt
+total_build.log
 
 # CMake generated files
 CMakeCache.txt
@@ -25,6 +40,17 @@ CMakeFiles/
 cmake_install.cmake
 Makefile
 install_manifest.txt
+CPackConfig.cmake
+CPackSourceConfig.cmake
+_CPack_Packages/
+
+# Distribution packages
+*.zip
+*.msi
+*.exe
+
+# Test test directory
+test/
 
 # Backup files
 *~

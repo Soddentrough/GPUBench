@@ -25,7 +25,20 @@ configure_file(
 find_package(Vulkan REQUIRED)
 if(Vulkan_FOUND)
     message(STATUS "Vulkan found: ${Vulkan_LIBRARIES}")
-    find_program(GLSLC_EXECUTABLE glslc)
+    # Try to find glslc, checking VULKAN_SDK environment variable if defined
+    find_program(GLSLC_EXECUTABLE glslc
+        HINTS "$ENV{VULKAN_SDK}/Bin"
+    )
+    if(NOT GLSLC_EXECUTABLE)
+        message(WARNING "glslc not found! Searching for glslc in Vulkan SDK...")
+        # Fallback search if HINTS didn't work and GLSLC is still not found
+        file(GLOB GLSLC_FALLBACK "C:/VulkanSDK/*/Bin/glslc.exe")
+        if(GLSLC_FALLBACK)
+            list(GET GLSLC_FALLBACK 0 GLSLC_EXECUTABLE)
+            set(GLSLC_EXECUTABLE ${GLSLC_EXECUTABLE} CACHE FILEPATH "glslc executable")
+        endif()
+    endif()
+
     if(NOT GLSLC_EXECUTABLE)
         message(WARNING "glslc not found! Vulkan backend will be disabled.")
         set(Vulkan_FOUND FALSE)
@@ -167,6 +180,7 @@ set(SOURCES
     src/benchmarks/Int4Bench.cpp
     src/benchmarks/MemBandwidthBench.cpp
     src/benchmarks/SysMemBandwidthBench.cpp
+    src/benchmarks/SysMemLatencyBench.cpp
     src/benchmarks/CacheBench.cpp
     src/benchmarks/Fp6Bench.cpp
     src/utils/KernelPath.cpp
