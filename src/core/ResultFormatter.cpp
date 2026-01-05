@@ -99,12 +99,18 @@ void ResultFormatter::print() {
                    std::map<std::string, std::map<std::string, ResultData>>>>>
       organizedData;
 
+  size_t maxBenchNameLen = 30; // Minimum width
+
   for (const auto &res : results) {
     std::string name = res.benchmarkName;
     if (res.isEmulated)
       name += " (Emulated)";
     organizedData[res.deviceIndex][res.component][res.subcategory][name]
                  [res.backendName] = res;
+    
+    if (name.length() > maxBenchNameLen) {
+        maxBenchNameLen = name.length();
+    }
   }
 
   const std::string RESET = "\033[0m";
@@ -154,14 +160,14 @@ void ResultFormatter::print() {
         const auto &benchmarks = subcatPair.second;
         for (const auto &benchPair : benchmarks) {
           const std::string &benchName = benchPair.first;
-          std::cout << "      - " << std::left << std::setw(30) << benchName;
+          std::cout << "      - " << std::left << std::setw(maxBenchNameLen) << benchName;
 
           const auto &backendData = benchPair.second;
           bool firstBackend = true;
           for (const auto &backend : backends) {
             if (backendData.count(backend)) {
               if (!firstBackend) {
-                std::cout << std::endl << std::setw(38) << "";
+                std::cout << std::endl << std::setw(8 + maxBenchNameLen) << "";
               }
               const auto &res = backendData.at(backend);
 
