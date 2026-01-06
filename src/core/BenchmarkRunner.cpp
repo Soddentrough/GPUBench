@@ -195,7 +195,7 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
         }
       }
 
-      if (!alreadyCounted) {
+      if (!alreadyCounted && context->isAvailable()) {
         totalAvailable += context->getDevices().size();
         countedBackends.push_back(context->getBackend());
       }
@@ -234,6 +234,8 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
     }
 
     for (auto *context : contexts) {
+      if (!context->isAvailable())
+        continue;
       try {
         DeviceInfo info = context->getCurrentDeviceInfo();
         std::cout << " [Device " << context->getSelectedDeviceIndex() << "] "

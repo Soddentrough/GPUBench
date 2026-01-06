@@ -16,6 +16,7 @@ public:
 
   // IComputeContext interface
   ComputeBackend getBackend() const override { return ComputeBackend::Vulkan; }
+  bool isAvailable() const override { return instance != VK_NULL_HANDLE; }
   const std::vector<DeviceInfo> &getDevices() const override;
   void pickDevice(uint32_t index) override;
   DeviceInfo getCurrentDeviceInfo() const override;

@@ -63,6 +63,7 @@ public:
   virtual ~IComputeContext() = default;
 
   virtual ComputeBackend getBackend() const = 0;
+  virtual bool isAvailable() const = 0;
   virtual const std::vector<DeviceInfo> &getDevices() const = 0;
   virtual void pickDevice(uint32_t index) = 0;
   virtual DeviceInfo getCurrentDeviceInfo() const = 0;

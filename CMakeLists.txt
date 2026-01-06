@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Versioning
-set(BUILD_NUMBER "2" CACHE STRING "Build number for the project")
+set(BUILD_NUMBER "3" CACHE STRING "Build number for the project")
 set(PROJECT_FULL_VERSION "${PROJECT_VERSION}.${BUILD_NUMBER}")
 
 
@@ -86,19 +86,36 @@ endif()
 # Shader/Kernel sources
 if(Vulkan_FOUND)
     file(GLOB SHADERS "shaders/*.comp")
+    # Filter out problematic shaders that use non-standard extensions
+    list(REMOVE_ITEM SHADERS 
+        "${CMAKE_CURRENT_SOURCE_DIR}/shaders/coop_matrix_fp8.comp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/shaders/coop_matrix_int4.comp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/shaders/fp8_native.comp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/shaders/int4_native.comp"
+    )
     file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/kernels/vulkan)
     
     foreach(SHADER ${SHADERS})
         get_filename_component(SHADER_NAME ${SHADER} NAME)
         set(DEST_SHADER "${CMAKE_CURRENT_BINARY_DIR}/kernels/vulkan/${SHADER_NAME}")
+        set(SPV_SHADER "${DEST_SHADER}.spv")
         
+        # Pre-compile GLSL to SPIR-V
+        add_custom_command(
+            OUTPUT ${SPV_SHADER}
+            COMMAND ${GLSLC_EXECUTABLE} -O --target-env=vulkan1.3 ${SHADER} -o ${SPV_SHADER}
+            DEPENDS ${SHADER}
+            COMMENT "Compiling Vulkan shader to SPIR-V: ${SHADER}"
+        )
+        
+        # Also copy the source as fallback
         add_custom_command(
             OUTPUT ${DEST_SHADER}
             COMMAND ${CMAKE_COMMAND} -E copy_if_different ${SHADER} ${DEST_SHADER}
             DEPENDS ${SHADER}
             COMMENT "Copying Vulkan shader source: ${SHADER}"
         )
-        list(APPEND VULKAN_SHADERS ${DEST_SHADER})
+        list(APPEND VULKAN_SHADERS ${DEST_SHADER} ${SPV_SHADER})
     endforeach()
     add_custom_target(shaders ALL DEPENDS ${VULKAN_SHADERS})
 endif()
@@ -212,24 +229,27 @@ endif()
 
 # Link libraries
 if(Vulkan_FOUND)
-    #target_link_libraries(gpubench PUBLIC ${Vulkan_LIBRARIES})
     target_link_libraries(gpubench PUBLIC Vulkan::Vulkan)
-    if(SHADERC_FOUND)
-        target_link_libraries(gpubench PUBLIC ${SHADERC_LIBRARY})
-        target_compile_definitions(gpubench PRIVATE HAVE_SHADERC)
-    endif()
+    # Removing shaderc dependency for runtime compilation
+    # if(SHADERC_FOUND)
+    #     target_link_libraries(gpubench PUBLIC ${SHADERC_LIBRARY})
+    #     target_compile_definitions(gpubench PRIVATE HAVE_SHADERC)
+    # endif()
 endif()
 
 if(OpenCL_FOUND)
-    target_link_libraries(gpubench PUBLIC ${OpenCL_LIBRARIES})
+    # No longer linking OpenCL directly to avoid RPM dependency
+    # target_link_libraries(gpubench PUBLIC ${OpenCL_LIBRARIES})
 endif()
 
 if(HIP_FOUND)
-    target_link_libraries(gpubench PRIVATE hip::host)
-    if(HIPRTC_LIBRARY)
-        target_link_libraries(gpubench PRIVATE ${HIPRTC_LIBRARY})
-        target_compile_definitions(gpubench PRIVATE HAVE_HIPRTC __HIP_PLATFORM_AMD__)
-    endif()
+    # No longer linking HIP directly to avoid RPM dependency
+    # target_link_libraries(gpubench PRIVATE hip::host)
+    # if(HIPRTC_LIBRARY)
+    #     target_link_libraries(gpubench PRIVATE ${HIPRTC_LIBRARY})
+    #     target_compile_definitions(gpubench PRIVATE HAVE_HIPRTC __HIP_PLATFORM_AMD__)
+    # endif()
+    target_compile_definitions(gpubench PRIVATE __HIP_PLATFORM_AMD__)
 endif()
 
 # Compiler definitions for conditional compilation
@@ -275,9 +295,9 @@ endif()
 
 # Install kernel files for each backend
 if(Vulkan_FOUND)
-    install(DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/kernels/vulkan
-            DESTINATION share/gpubench/kernels
-            FILES_MATCHING PATTERN "*.comp")
+    install(DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/kernels/vulkan/
+            DESTINATION share/gpubench/kernels/vulkan
+            FILES_MATCHING PATTERN "*.comp" PATTERN "*.spv")
 endif()
 
 if(OpenCL_FOUND)
@@ -348,6 +368,14 @@ elseif(UNIX AND NOT APPLE)
     # RPM package settings
     set(CPACK_RPM_PACKAGE_LICENSE "MIT")
     set(CPACK_RPM_PACKAGE_GROUP "Applications/System")
+    
+    # Disable automatic dependency detection to avoid 2GB ROCm requirement
+    set(CPACK_RPM_PACKAGE_AUTOREQ "no")
+    
+    # Manually specify minimal required dependencies
+    # We only REQUIRE Vulkan loader and standard libraries
+    # OpenCL/ROCm are OPTIONAL due to dynamic loading
+    set(CPACK_RPM_PACKAGE_REQUIRES "vulkan-loader, glibc, libgcc, libstdc++")
     
 elseif(APPLE)
     # macOS packaging

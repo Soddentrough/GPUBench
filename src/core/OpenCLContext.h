@@ -2,7 +2,9 @@
 
 #include "IComputeContext.h"
 #define CL_TARGET_OPENCL_VERSION 300
+#include "utils/DynamicLibrary.h"
 #include <CL/cl.h>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -16,6 +18,7 @@ public:
 
   // IComputeContext interface
   ComputeBackend getBackend() const override { return ComputeBackend::OpenCL; }
+  bool isAvailable() const override { return available; }
   const std::vector<DeviceInfo> &getDevices() const override;
   void pickDevice(uint32_t index) override;
   DeviceInfo getCurrentDeviceInfo() const override;
@@ -67,6 +70,10 @@ private:
   void createContext();
   void createCommandQueue();
 
+  static std::unique_ptr<utils::DynamicLibrary> openclLib;
+  static bool librariesLoaded;
+  static bool loadLibraries();
+
   cl_platform_id platform = nullptr;
   std::vector<cl_device_id> devices;
   cl_device_id device = nullptr;
@@ -76,4 +83,5 @@ private:
   mutable std::vector<DeviceInfo> deviceInfos;
   uint32_t selectedDeviceIndex = 0;
   bool verbose = false;
+  bool available = false;
 };

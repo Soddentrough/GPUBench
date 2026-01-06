@@ -627,66 +627,77 @@ ComputeKernel VulkanContext::createKernel(const std::string &file_name,
   }
 
   std::vector<uint32_t> spirv_code;
-
-#ifdef HAVE_SHADERC
+  std::string spv_file = file_name;
   if (is_glsl) {
-    if (utils::ShaderCache::loadVulkanCache(
-            file_name, deviceInfos[selectedDeviceIndex], spirv_code)) {
+    spv_file = file_name + ".spv";
+  }
+
+  bool loaded_from_file = false;
+  std::ifstream spv_stream(spv_file, std::ios::ate | std::ios::binary);
+  if (spv_stream.is_open()) {
+    size_t fileSize = (size_t)spv_stream.tellg();
+    if (fileSize > 0 && fileSize % 4 == 0) {
+      std::vector<char> buffer(fileSize);
+      spv_stream.seekg(0);
+      spv_stream.read(buffer.data(), fileSize);
+      spv_stream.close();
+
+      spirv_code.resize(fileSize / 4);
+      std::memcpy(spirv_code.data(), buffer.data(), fileSize);
+      loaded_from_file = true;
       if (verbose) {
-        std::cout << "Loaded Vulkan shader from cache: " << file_name
-                  << std::endl;
+        std::cout << "Loaded pre-compiled SPIR-V: " << spv_file << std::endl;
+      }
+    }
+  }
+
+  if (!loaded_from_file) {
+#ifdef HAVE_SHADERC
+    if (is_glsl) {
+      if (utils::ShaderCache::loadVulkanCache(
+              file_name, deviceInfos[selectedDeviceIndex], spirv_code)) {
+        if (verbose) {
+          std::cout << "Loaded Vulkan shader from cache: " << file_name
+                    << std::endl;
+        }
+      } else {
+        if (verbose) {
+          std::cout << "Compiling Vulkan shader: " << file_name << std::endl;
+        }
+        std::ifstream file(file_name);
+        if (!file.is_open()) {
+          throw std::runtime_error("Failed to open shader file: " + file_name);
+        }
+        std::string source((std::istreambuf_iterator<char>(file)),
+                           std::istreambuf_iterator<char>());
+
+        shaderc::Compiler compiler;
+        shaderc::CompileOptions options;
+
+        options.SetTargetEnvironment(shaderc_target_env_vulkan,
+                                     shaderc_env_version_vulkan_1_3);
+        options.SetOptimizationLevel(shaderc_optimization_level_performance);
+
+        shaderc::SpvCompilationResult result = compiler.CompileGlslToSpv(
+            source, shaderc_glsl_compute_shader, file_name.c_str(), options);
+
+        if (result.GetCompilationStatus() !=
+            shaderc_compilation_status_success) {
+          throw std::runtime_error("Failed to compile Vulkan shader " +
+                                   file_name + ": " + result.GetErrorMessage());
+        }
+
+        spirv_code.assign(result.cbegin(), result.cend());
+        utils::ShaderCache::saveVulkanCache(
+            file_name, deviceInfos[selectedDeviceIndex], spirv_code);
       }
     } else {
-      if (verbose) {
-        std::cout << "Compiling Vulkan shader: " << file_name << std::endl;
-      }
-      std::ifstream file(file_name);
-      if (!file.is_open()) {
-        throw std::runtime_error("Failed to open shader file: " + file_name);
-      }
-      std::string source((std::istreambuf_iterator<char>(file)),
-                         std::istreambuf_iterator<char>());
-
-      shaderc::Compiler compiler;
-      shaderc::CompileOptions options;
-
-      // Optimization level can be configured
-      options.SetTargetEnvironment(shaderc_target_env_vulkan,
-                                   shaderc_env_version_vulkan_1_3);
-      options.SetOptimizationLevel(shaderc_optimization_level_performance);
-
-      shaderc::SpvCompilationResult result = compiler.CompileGlslToSpv(
-          source, shaderc_glsl_compute_shader, file_name.c_str(), options);
-
-      if (result.GetCompilationStatus() != shaderc_compilation_status_success) {
-        throw std::runtime_error("Failed to compile Vulkan shader " +
-                                 file_name + ": " + result.GetErrorMessage());
-      }
-
-      spirv_code.assign(result.cbegin(), result.cend());
-      utils::ShaderCache::saveVulkanCache(
-          file_name, deviceInfos[selectedDeviceIndex], spirv_code);
+      throw std::runtime_error("Failed to load SPIR-V from " + file_name);
     }
-  } else
+#else
+    throw std::runtime_error("Failed to load pre-compiled SPIR-V from " +
+                             spv_file + " and shaderc is not available.");
 #endif
-  {
-    // Treat as binary SPIR-V
-    std::ifstream file(file_name, std::ios::ate | std::ios::binary);
-    if (!file.is_open()) {
-      throw std::runtime_error("failed to open file: " + file_name);
-    }
-    size_t fileSize = (size_t)file.tellg();
-    if (fileSize % 4 != 0) {
-      throw std::runtime_error("SPIR-V file size must be a multiple of 4: " +
-                               file_name);
-    }
-    std::vector<char> buffer(fileSize);
-    file.seekg(0);
-    file.read(buffer.data(), fileSize);
-    file.close();
-
-    spirv_code.resize(fileSize / 4);
-    std::memcpy(spirv_code.data(), buffer.data(), fileSize);
   }
 
   VkShaderModuleCreateInfo createInfo{};
