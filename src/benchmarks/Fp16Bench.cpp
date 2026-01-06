@@ -1,4 +1,5 @@
 #include "benchmarks/Fp16Bench.h"
+#include <filesystem>
 #include <stdexcept>
 
 bool Fp16Bench::IsSupported(const DeviceInfo &info,
@@ -19,26 +20,24 @@ void Fp16Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
   context.writeBuffer(buffer, 0, bufferSize, initData.data());
 
   // Load Vector Kernel
-  std::string vector_file;
-  if (context.getBackend() == ComputeBackend::Vulkan) {
-    vector_file = kernel_dir + "/vulkan/fp16.comp";
-  } else if (context.getBackend() == ComputeBackend::ROCm) {
-    vector_file = kernel_dir + "/rocm/fp16.hip";
+  std::filesystem::path kdir(kernel_dir);
+  std::filesystem::path vector_file;
+
+  if (context.getBackend() == ComputeBackend::ROCm) {
+    vector_file = kdir / "rocm" / "fp16.hip";
   } else {
-    vector_file = kernel_dir + "/opencl/fp16.cl";
+    vector_file = kdir / "vulkan" / "fp16.comp";
   }
 
-  std::string kernel_name = (context.getBackend() == ComputeBackend::Vulkan)
-                                ? "main"
-                                : "run_benchmark";
-  vectorKernel = context.createKernel(vector_file, kernel_name, 1);
+  vectorKernel = context.createKernel(vector_file.string(), "main", 1);
   context.setKernelArg(vectorKernel, 0, buffer);
 
   // Optionally load Matrix Kernel if supported
   if (context.getCurrentDeviceInfo().cooperativeMatrixSupport &&
       context.getBackend() == ComputeBackend::Vulkan) {
-    std::string matrix_file = kernel_dir + "/vulkan/coop_matrix_fp16.comp";
-    matrixKernel = context.createKernel(matrix_file, "main", 1);
+    std::filesystem::path matrix_file =
+        kdir / "vulkan" / "coop_matrix_fp16.comp";
+    matrixKernel = context.createKernel(matrix_file.string(), "main", 1);
     context.setKernelArg(matrixKernel, 0, buffer);
   }
 }

@@ -1,4 +1,5 @@
 #include "benchmarks/MemBandwidthBench.h"
+#include <filesystem>
 #include <iostream>
 #include <stdexcept>
 
@@ -9,24 +10,26 @@ bool MemBandwidthBench::IsSupported(const DeviceInfo &info,
 
 void MemBandwidthBench::createKernel(BandwidthConfig &config,
                                      const std::string &kernel_dir) {
-  std::string kernel_file;
-  if (context->getBackend() == ComputeBackend::Vulkan) {
-    kernel_file = kernel_dir + "/vulkan/" + config.kernelFile + ".comp";
-  } else if (context->getBackend() == ComputeBackend::ROCm) {
-    kernel_file = kernel_dir + "/rocm/" + config.kernelFile + ".hip";
-  } else {
-    kernel_file = kernel_dir + "/opencl/" + config.kernelFile + ".cl";
+  std::filesystem::path kdir(kernel_dir);
+  std::filesystem::path
+      kernel_file_path; // Renamed to avoid conflict with string kernel_file
+
+  // The order of backend checks in the edit is different from original,
+  // following the edit's logic for path construction.
+  if (this->context->getBackend() == ComputeBackend::ROCm) {
+    kernel_file_path = kdir / "rocm" / (config.kernelFile + ".hip");
+  } else if (this->context->getBackend() == ComputeBackend::OpenCL) {
+    kernel_file_path = kdir / "opencl" / (config.kernelFile + ".cl");
+  } else { // Default to Vulkan if not ROCm or OpenCL
+    kernel_file_path = kdir / "vulkan" / (config.kernelFile + ".comp");
   }
 
   std::string kernel_name;
-  if (context->getBackend() == ComputeBackend::Vulkan) {
+  if (this->context->getBackend() == ComputeBackend::Vulkan) {
     kernel_name = "main";
-  } else if (context->getBackend() == ComputeBackend::ROCm) {
-    kernel_name = "run_benchmark";
-  } else {
-    kernel_name = "run_benchmark";
   }
-  config.kernel = this->context->createKernel(kernel_file, kernel_name, 4);
+  config.kernel =
+      this->context->createKernel(kernel_file_path.string(), kernel_name, 4);
   this->context->setKernelArg(config.kernel, 0, inputBuffer);
   this->context->setKernelArg(config.kernel, 1, outputBuffer);
   uint32_t mode = static_cast<uint32_t>(config.mode);

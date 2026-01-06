@@ -20,6 +20,7 @@ public:
   const char *GetSubCategory(uint32_t config_idx = 0) const override {
     return "FP32";
   }
+  int GetSortWeight() const override { return 20; }
 
 private:
   IComputeContext *context = nullptr;

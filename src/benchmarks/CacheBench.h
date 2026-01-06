@@ -6,7 +6,6 @@
 #include <string>
 #include <vector>
 
-
 class CacheBench : public IBenchmark {
 public:
   CacheBench(std::string name, std::string metric, uint64_t bufferSize,
@@ -25,6 +24,7 @@ public:
   BenchmarkResult GetResult(uint32_t config_idx = 0) const override;
   const char *GetComponent(uint32_t config_idx = 0) const override;
   const char *GetSubCategory(uint32_t config_idx = 0) const override;
+  int GetSortWeight() const override;
 
 private:
   std::string name;

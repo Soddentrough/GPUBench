@@ -1,5 +1,5 @@
-
 #include "benchmarks/Fp4Bench.h"
+#include <filesystem>
 #include <stdexcept>
 
 bool Fp4Bench::IsSupported(const DeviceInfo &info,
@@ -24,25 +24,25 @@ void Fp4Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
   buffer = context.createBuffer(bufferSize);
 
   // Create kernel
-  std::string kernel_file;
-  std::string kernel_name = is_emulated ? "fp4_emulated" : "fp4_native";
+  std::filesystem::path kdir(kernel_dir);
+  std::filesystem::path kernel_file_path;
+  std::string kernel_base_name = is_emulated ? "fp4_emulated" : "fp4_native";
+
   if (context.getBackend() == ComputeBackend::Vulkan) {
-    kernel_file = kernel_dir + "/vulkan/" + kernel_name + ".comp";
+    kernel_file_path = kdir / "vulkan" / (kernel_base_name + ".comp");
   } else if (context.getBackend() == ComputeBackend::ROCm) {
-    kernel_file = kernel_dir + "/rocm/" + kernel_name + ".hip";
+    kernel_file_path = kdir / "rocm" / (kernel_base_name + ".hip");
   } else {
-    kernel_file = kernel_dir + "/opencl/fp4.cl";
+    kernel_file_path = kdir / "opencl" / "fp4.cl";
   }
 
   std::string func_name;
   if (context.getBackend() == ComputeBackend::Vulkan) {
     func_name = "main";
-  } else if (context.getBackend() == ComputeBackend::ROCm) {
-    func_name = "run_benchmark";
   } else {
     func_name = "run_benchmark";
   }
-  kernel = context.createKernel(kernel_file, func_name, 1);
+  kernel = context.createKernel(kernel_file_path.string(), func_name, 1);
   context.setKernelArg(kernel, 0, buffer);
 }
 

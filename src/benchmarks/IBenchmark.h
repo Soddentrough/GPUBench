@@ -37,4 +37,5 @@ public:
   virtual const char *GetSubCategory(uint32_t config_idx = 0) const {
     return "";
   }
+  virtual int GetSortWeight() const { return 999; }
 };

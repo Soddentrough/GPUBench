@@ -19,6 +19,7 @@ public:
   const char *GetSubCategory(uint32_t config_idx = 0) const override {
     return "FP4";
   }
+  int GetSortWeight() const override { return 60; }
   bool IsEmulated() const override { return is_emulated; }
 
 private:

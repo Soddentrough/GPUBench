@@ -2,6 +2,7 @@
 #include <algorithm> // for std::min
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <iostream>
 #include <stdexcept>
 
@@ -121,13 +122,15 @@ void CacheBench::Setup(IComputeContext &context,
     }
   }
 
-  std::string full_kernel_path;
-  if (context.getBackend() == ComputeBackend::Vulkan) {
-    full_kernel_path = kernel_dir + "/vulkan/" + kernelFile + ".comp";
-  } else if (context.getBackend() == ComputeBackend::ROCm) {
-    full_kernel_path = kernel_dir + "/rocm/" + kernelFile + ".hip";
-  } else {
-    full_kernel_path = kernel_dir + "/opencl/" + kernelFile + ".cl";
+  std::filesystem::path kdir(kernel_dir);
+  std::filesystem::path full_kernel_path;
+
+  if (context.getBackend() == ComputeBackend::ROCm) {
+    full_kernel_path = kdir / "rocm" / (kernelFile + ".hip");
+  } else if (context.getBackend() == ComputeBackend::OpenCL) {
+    full_kernel_path = kdir / "opencl" / (kernelFile + ".cl");
+  } else { // Default to Vulkan
+    full_kernel_path = kdir / "vulkan" / (kernelFile + ".comp");
   }
 
   std::string kernel_name;
@@ -135,7 +138,7 @@ void CacheBench::Setup(IComputeContext &context,
     kernel_name = "main";
   } else if (context.getBackend() == ComputeBackend::ROCm) {
     kernel_name = "run_benchmark";
-  } else {
+  } else { // OpenCL
     kernel_name = "run_benchmark";
   }
 
@@ -226,3 +229,5 @@ const char *CacheBench::GetComponent(uint32_t config_idx) const {
 const char *CacheBench::GetSubCategory(uint32_t config_idx) const {
   return (metric == "GB/s") ? "Bandwidth" : "Latency";
 }
+
+int CacheBench::GetSortWeight() const { return (metric == "GB/s") ? 100 : 200; }

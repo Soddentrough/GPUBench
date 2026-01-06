@@ -94,8 +94,8 @@ void ResultFormatter::print() {
   std::map<
       uint32_t,
       std::map<
-          std::string,
-          std::map<std::string,
+          std::pair<int, std::string>,          // Component (weight, name)
+          std::map<std::pair<int, std::string>, // SubCategory (weight, name)
                    std::map<std::string, std::map<std::string, ResultData>>>>>
       organizedData;
 
@@ -105,11 +105,20 @@ void ResultFormatter::print() {
     std::string name = res.benchmarkName;
     if (res.isEmulated)
       name += " (Emulated)";
-    organizedData[res.deviceIndex][res.component][res.subcategory][name]
-                 [res.backendName] = res;
-    
+
+    // Component weight: Compute=1, Memory=2, Other=3
+    int compWeight = 3;
+    if (res.component == "Compute")
+      compWeight = 1;
+    else if (res.component == "Memory")
+      compWeight = 2;
+
+    organizedData[res.deviceIndex][{compWeight, res.component}]
+                 [{res.sortWeight, res.subcategory}][name][res.backendName] =
+                     res;
+
     if (name.length() > maxBenchNameLen) {
-        maxBenchNameLen = name.length();
+      maxBenchNameLen = name.length();
     }
   }
 
@@ -148,19 +157,20 @@ void ResultFormatter::print() {
 
     const auto &components = organizedData[devIdx];
     for (const auto &compPair : components) {
-      const std::string &compName = compPair.first;
+      const std::string &compName = compPair.first.second;
       std::cout << "  [" << BOLD << CYAN << compName << RESET << "]"
                 << std::endl;
 
       const auto &subcats = compPair.second;
       for (const auto &subcatPair : subcats) {
-        const std::string &subcatName = subcatPair.first;
+        const std::string &subcatName = subcatPair.first.second;
         std::cout << "    > " << YELLOW << subcatName << RESET << std::endl;
 
         const auto &benchmarks = subcatPair.second;
         for (const auto &benchPair : benchmarks) {
           const std::string &benchName = benchPair.first;
-          std::cout << "      - " << std::left << std::setw(maxBenchNameLen) << benchName;
+          std::cout << "      - " << std::left << std::setw(maxBenchNameLen)
+                    << benchName;
 
           const auto &backendData = benchPair.second;
           bool firstBackend = true;

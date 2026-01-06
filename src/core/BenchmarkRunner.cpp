@@ -355,6 +355,7 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
                 result_data.subcategory = bench->GetSubCategory(i);
                 result_data.maxWorkGroupSize = info.maxWorkGroupSize;
                 result_data.deviceIndex = context->getSelectedDeviceIndex();
+                result_data.sortWeight = bench->GetSortWeight();
 
                 formatter->addResult(result_data);
               }
@@ -473,8 +474,11 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
             result_data.isEmulated = false;
             result_data.component = bench->GetComponent(i);
             result_data.subcategory = bench->GetSubCategory(i);
+            result_data.component = bench->GetComponent(i);
+            result_data.subcategory = bench->GetSubCategory(i);
             result_data.maxWorkGroupSize = 0;
             result_data.deviceIndex = 0xFFFFFFFF;
+            result_data.sortWeight = bench->GetSortWeight();
 
             formatter->addResult(result_data);
           }

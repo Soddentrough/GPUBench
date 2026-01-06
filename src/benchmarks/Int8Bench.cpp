@@ -1,5 +1,6 @@
 #include "benchmarks/Int8Bench.h"
-#include <stdexcept>
+#include <filesystem>
+#include <iostream>
 #include <vulkan/vulkan.h>
 
 bool Int8Bench::IsSupported(const DeviceInfo &info,
@@ -16,26 +17,30 @@ void Int8Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
   buffer = context.createBuffer(bufferSize);
 
   // Load Vector Kernel
-  std::string vector_file;
-  if (context.getBackend() == ComputeBackend::Vulkan) {
-    vector_file = kernel_dir + "/vulkan/int8.comp";
-  } else if (context.getBackend() == ComputeBackend::ROCm) {
-    vector_file = kernel_dir + "/rocm/int8.hip";
+  std::filesystem::path kdir(kernel_dir);
+  std::filesystem::path vector_file_path;
+
+  if (context.getBackend() == ComputeBackend::ROCm) {
+    vector_file_path = kdir / "rocm" / "int8.hip";
+  } else if (context.getBackend() == ComputeBackend::Vulkan) {
+    vector_file_path = kdir / "vulkan" / "int8.comp";
   } else {
-    vector_file = kernel_dir + "/opencl/int8.cl";
+    vector_file_path = kdir / "opencl" / "int8.cl";
   }
 
   std::string kernel_name = (context.getBackend() == ComputeBackend::Vulkan)
                                 ? "main"
                                 : "run_benchmark";
-  vectorKernel = context.createKernel(vector_file, kernel_name, 1);
+  vectorKernel =
+      context.createKernel(vector_file_path.string(), kernel_name, 1);
   context.setKernelArg(vectorKernel, 0, buffer);
 
   // Optionally load Matrix Kernel
   if (context.getCurrentDeviceInfo().cooperativeMatrixSupport &&
       context.getBackend() == ComputeBackend::Vulkan) {
-    std::string matrix_file = kernel_dir + "/vulkan/coop_matrix_int8.comp";
-    matrixKernel = context.createKernel(matrix_file, "main", 2);
+    std::filesystem::path matrix_file_path =
+        kdir / "vulkan" / "coop_matrix_int8.comp";
+    matrixKernel = context.createKernel(matrix_file_path.string(), "main", 2);
     context.setKernelArg(matrixKernel, 0, buffer); // Binding 0: int8 (A/B)
     context.setKernelArg(matrixKernel, 1, buffer); // Binding 1: int32 (C)
   }

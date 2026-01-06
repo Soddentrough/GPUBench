@@ -1,4 +1,6 @@
 #include "benchmarks/Fp64Bench.h"
+#include <filesystem>
+#include <iostream>
 #include <stdexcept>
 #include <vector>
 
@@ -20,24 +22,18 @@ void Fp64Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
   context.writeBuffer(buffer, 0, bufferSize, initData.data());
 
   // Create kernel
-  std::string kernel_file;
-  if (context.getBackend() == ComputeBackend::Vulkan) {
-    kernel_file = kernel_dir + "/vulkan/fp64.comp";
-  } else if (context.getBackend() == ComputeBackend::ROCm) {
-    kernel_file = kernel_dir + "/rocm/fp64.hip";
-  } else {
-    kernel_file = kernel_dir + "/opencl/fp64.cl";
-  }
-
+  std::filesystem::path kdir(kernel_dir);
+  std::filesystem::path kernel_file_path;
   std::string kernel_name;
-  if (context.getBackend() == ComputeBackend::Vulkan) {
+
+  if (context.getBackend() == ComputeBackend::ROCm) {
+    kernel_file_path = kdir / "rocm" / "fp64.hip";
+    kernel_name = "run_benchmark";
+  } else { // Default to Vulkan
+    kernel_file_path = kdir / "vulkan" / "fp64.comp";
     kernel_name = "main";
-  } else if (context.getBackend() == ComputeBackend::ROCm) {
-    kernel_name = "run_benchmark";
-  } else {
-    kernel_name = "run_benchmark";
   }
-  kernel = context.createKernel(kernel_file, kernel_name, 1);
+  kernel = context.createKernel(kernel_file_path.string(), kernel_name, 1);
   context.setKernelArg(kernel, 0, buffer);
 }
 

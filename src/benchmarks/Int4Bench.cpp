@@ -1,4 +1,5 @@
 #include "benchmarks/Int4Bench.h"
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
@@ -22,16 +23,19 @@ void Int4Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
     return f.good();
   };
 
+  std::filesystem::path kdir(kernel_dir);
+
   if (context.getBackend() == ComputeBackend::ROCm) {
     // HIP Path
-    std::string kernel_file = kernel_dir + "/rocm/int4.co";
-    if (file_exists(kernel_file)) {
-      vectorKernel = context.createKernel(kernel_file, "run_benchmark", 1);
+    std::filesystem::path kernel_file = kdir / "rocm" / "int4.hip";
+    if (file_exists(kernel_file.string())) {
+      vectorKernel =
+          context.createKernel(kernel_file.string(), "run_benchmark", 1);
       context.setKernelArg(vectorKernel, 0, buffer);
       is_native_vector = true;
       is_emulated = false;
     } else {
-      std::cerr << "Native INT4 HIP kernel missing: " << kernel_file
+      std::cerr << "Native INT4 HIP kernel missing: " << kernel_file.string()
                 << std::endl;
       is_native_vector = false; // Not supported
                                 // We can return here or let it be null.
@@ -42,7 +46,7 @@ void Int4Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
 
   // Vulkan Path
   // Use emulated vector kernel for stability on Windows
-  std::string vector_file = kernel_dir + "/vulkan/int4.spv";
+  std::filesystem::path vector_file = kdir / "vulkan" / "int4.comp";
   is_native_vector = false;
   is_emulated = true;
 
@@ -51,7 +55,7 @@ void Int4Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
     std::vector<int8_t> zeros(bufferSize, 0);
     context.writeBuffer(buffer, 0, bufferSize, zeros.data());
 
-    vectorKernel = context.createKernel(vector_file, "main", 1);
+    vectorKernel = context.createKernel(vector_file.string(), "main", 1);
     context.setKernelArg(vectorKernel, 0, buffer);
 
     // Pass element count (number of i8vec4) as push constant at offset 0
@@ -66,10 +70,11 @@ void Int4Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
       context.getCurrentDeviceInfo().name.find("gfx12") != std::string::npos;
   if (context.getCurrentDeviceInfo().cooperativeMatrixSupport &&
       context.getBackend() == ComputeBackend::Vulkan && is_rdna4) {
-    std::string matrix_file = kernel_dir + "/vulkan/coop_matrix_int4.comp";
-    if (file_exists(matrix_file)) {
+    std::filesystem::path matrix_file =
+        kdir / "vulkan" / "coop_matrix_int4.comp";
+    if (file_exists(matrix_file.string())) {
       try {
-        matrixKernel = context.createKernel(matrix_file, "main", 1);
+        matrixKernel = context.createKernel(matrix_file.string(), "main", 1);
         context.setKernelArg(matrixKernel, 0, buffer);
         is_native_matrix = true;
       } catch (...) {

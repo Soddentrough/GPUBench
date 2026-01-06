@@ -4,7 +4,6 @@
 #include <string>
 #include <vector>
 
-
 struct ResultData {
   std::string backendName;
   std::string deviceName;
@@ -17,6 +16,7 @@ struct ResultData {
   bool isEmulated;
   uint32_t maxWorkGroupSize;
   uint32_t deviceIndex;
+  int sortWeight;
 };
 
 class ResultFormatter {

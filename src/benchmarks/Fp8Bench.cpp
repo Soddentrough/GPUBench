@@ -1,4 +1,5 @@
 #include "benchmarks/Fp8Bench.h"
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
@@ -32,17 +33,16 @@ void Fp8Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
     return f.good();
   };
 
+  std::filesystem::path kdir(kernel_dir);
+
   if (context.getBackend() == ComputeBackend::ROCm) {
     // HIP Path
-    std::string kernel_file = (context.getBackend() == ComputeBackend::ROCm)
-                                  ? kernel_dir + "/rocm/fp8.hip"
-                                  : "";
-    std::string matrix_file = (context.getBackend() == ComputeBackend::ROCm)
-                                  ? kernel_dir + "/rocm/fp8_matrix.hip"
-                                  : "";
+    std::filesystem::path kernel_file = kdir / "rocm" / "fp8.hip";
+    std::filesystem::path matrix_file = kdir / "rocm" / "fp8_matrix.hip";
 
-    if (file_exists(kernel_file)) {
-      vectorKernel = context.createKernel(kernel_file, "run_benchmark", 1);
+    if (file_exists(kernel_file.string())) {
+      vectorKernel =
+          context.createKernel(kernel_file.string(), "run_benchmark", 1);
       context.setKernelArg(vectorKernel, 0, buffer);
       is_native_vector = true;
       is_emulated = false; // "Native" placeholder
@@ -50,8 +50,9 @@ void Fp8Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
       is_native_vector = false;
     }
 
-    if (file_exists(matrix_file)) {
-      matrixKernel = context.createKernel(matrix_file, "run_benchmark", 1);
+    if (file_exists(matrix_file.string())) {
+      matrixKernel =
+          context.createKernel(matrix_file.string(), "run_benchmark", 1);
       context.setKernelArg(matrixKernel, 0, buffer);
       is_native_matrix = true;
     } else {
@@ -62,27 +63,16 @@ void Fp8Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
 
   // Vulkan Path
   // Load Vector Kernel
-  std::string native_vector = kernel_dir + "/vulkan/fp8_native.spv";
-  std::string emulated_vector = kernel_dir + "/vulkan/fp8_emulated.spv";
+  std::filesystem::path native_vector = kdir / "vulkan" / "fp8_native.comp";
+  std::filesystem::path emulated_vector = kdir / "vulkan" / "fp8_emulated.comp";
 
   // Default to emulated
-  std::string vector_file = emulated_vector;
+  std::filesystem::path vector_file = emulated_vector;
   is_native_vector = false;
   is_emulated = true;
 
-  // Try native if file exists and we are on compatible hardware (or forcing
-  // check) FORCE DISABLE: The native shader has known issues and ghosts,
-  // forcing emulation for consistency.
-  /*
-  if (file_exists(native_vector)) {
-      vector_file = native_vector;
-      is_native_vector = true;
-      is_emulated = false;
-  }
-  */
-
   try {
-    vectorKernel = context.createKernel(vector_file, "main", 1);
+    vectorKernel = context.createKernel(vector_file.string(), "main", 1);
     context.setKernelArg(vectorKernel, 0, buffer);
   } catch (...) {
     // Fallback if native failed to load even if file existed
@@ -91,7 +81,7 @@ void Fp8Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
                    "emulation."
                 << std::endl;
       vector_file = emulated_vector;
-      vectorKernel = context.createKernel(vector_file, "main", 1);
+      vectorKernel = context.createKernel(vector_file.string(), "main", 1);
       context.setKernelArg(vectorKernel, 0, buffer);
       is_native_vector = false;
       is_emulated = true;
@@ -104,10 +94,11 @@ void Fp8Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
   is_native_matrix = false;
   if (info.cooperativeMatrixSupport &&
       context.getBackend() == ComputeBackend::Vulkan) {
-    std::string matrix_file = kernel_dir + "/vulkan/coop_matrix_fp8.spv";
-    if (file_exists(matrix_file)) {
+    std::filesystem::path matrix_file =
+        kdir / "vulkan" / "coop_matrix_fp8.comp";
+    if (file_exists(matrix_file.string())) {
       try {
-        matrixKernel = context.createKernel(matrix_file, "main", 1);
+        matrixKernel = context.createKernel(matrix_file.string(), "main", 1);
         context.setKernelArg(matrixKernel, 0, buffer);
         is_native_matrix = true;
       } catch (...) {

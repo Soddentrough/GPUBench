@@ -1,4 +1,6 @@
 #include "benchmarks/Fp32Bench.h"
+#include <filesystem>
+#include <iostream>
 #include <stdexcept>
 
 bool Fp32Bench::IsSupported(const DeviceInfo &info,
@@ -16,21 +18,21 @@ void Fp32Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
   buffer = context.createBuffer(bufferSize);
 
   // Create kernel
-  std::string kernel_file;
-  if (context.getBackend() == ComputeBackend::Vulkan) {
-    kernel_file = kernel_dir + "/vulkan/fp32.comp";
-  } else if (context.getBackend() == ComputeBackend::ROCm) {
-    kernel_file = kernel_dir + "/rocm/fp32.hip";
-  } else {
-    kernel_file = kernel_dir + "/opencl/fp32.cl";
+  std::filesystem::path kdir(kernel_dir);
+  std::filesystem::path kernel_file;
+
+  if (context.getBackend() == ComputeBackend::ROCm) {
+    kernel_file = kdir / "rocm" / "fp32.hip";
+  } else if (context.getBackend() == ComputeBackend::OpenCL) {
+    kernel_file = kdir / "opencl" / "fp32.cl";
+  } else { // Vulkan
+    kernel_file = kdir / "vulkan" / "fp32.comp";
   }
 
   std::string kernel_name;
   if (context.getBackend() == ComputeBackend::Vulkan) {
     kernel_name = "main";
   } else if (context.getBackend() == ComputeBackend::ROCm) {
-    kernel_name = "run_benchmark";
-  } else {
     kernel_name = "run_benchmark";
   }
   kernel = context.createKernel(kernel_file, kernel_name, 3);
