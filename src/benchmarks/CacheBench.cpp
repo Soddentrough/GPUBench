@@ -143,7 +143,7 @@ void CacheBench::Setup(IComputeContext &context,
   }
 
   // We now pass 2 arguments: buffer and mask
-  kernel = context.createKernel(full_kernel_path, kernel_name, 2);
+  kernel = context.createKernel(full_kernel_path.string(), kernel_name, 2);
   if (buffer) {
     context.setKernelArg(kernel, 0, buffer);
 
