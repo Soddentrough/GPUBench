@@ -20,6 +20,7 @@ public:
   const char *GetSubCategory(uint32_t config_idx = 0) const override {
     return "FP16";
   }
+  int GetSortWeight() const override { return 30; }
   uint32_t GetNumConfigs() const override;
   std::string GetConfigName(uint32_t config_idx) const override;
 

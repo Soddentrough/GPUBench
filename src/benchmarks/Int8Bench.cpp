@@ -1,3 +1,4 @@
+#include <vector>
 #include "benchmarks/Int8Bench.h"
 #include <filesystem>
 #include <iostream>
@@ -15,6 +16,8 @@ void Int8Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
   size_t bufferSize =
       8192 * 64 * 4; // 8192 workgroups * 64 threads * 4 bytes (i8vec4)
   buffer = context.createBuffer(bufferSize);
+  std::vector<int8_t> initData(bufferSize, 1);
+  context.writeBuffer(buffer, 0, bufferSize, initData.data());
 
   // Load Vector Kernel
   std::filesystem::path kdir(kernel_dir);

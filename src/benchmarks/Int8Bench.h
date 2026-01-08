@@ -22,6 +22,7 @@ public:
   int GetSortWeight() const override { return 70; }
   uint32_t GetNumConfigs() const override;
   std::string GetConfigName(uint32_t config_idx) const override;
+  const char *GetMetric() const override { return "TOPS"; }
 
 private:
   IComputeContext *context = nullptr;

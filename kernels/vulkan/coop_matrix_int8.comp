@@ -20,13 +20,14 @@ void main() {
     coopmat<int32_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC;
 
     // Use non-suffixed names.
-    coopMatLoad(matA, BufferA.data, 0u, 16u, 0);
-    coopMatLoad(matB, BufferA.data, 0u, 16u, 0);
-    coopMatLoad(matC, BufferC.data, 0u, 16u, 0);
+    uint gid = gl_WorkGroupID.x;
+    coopMatLoad(matA, BufferA.data, (gid % 8192) * 256, 16u, 0);
+    coopMatLoad(matB, BufferA.data, (gid % 8192) * 256, 16u, 0);
+    coopMatLoad(matC, BufferC.data, (gid % 2048) * 256, 16u, 0);
 
     for (int i = 0; i < 16384; ++i) {
         matC = coopMatMulAdd(matA, matB, matC);
     }
 
-    coopMatStore(matC, BufferC.data, 0u, 16u, 0);
+    coopMatStore(matC, BufferC.data, (gid % 2048) * 256, 16u, 0);
 }

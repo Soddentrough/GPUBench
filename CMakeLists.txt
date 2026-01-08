@@ -1,12 +1,12 @@
 cmake_minimum_required(VERSION 3.16)
-project(GPUBench VERSION 1.0.0)
+project(GPUBench VERSION 1.0.1)
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Versioning
-set(BUILD_NUMBER "3" CACHE STRING "Build number for the project")
+set(BUILD_NUMBER "7" CACHE STRING "Build number for the project")
 set(PROJECT_FULL_VERSION "${PROJECT_VERSION}.${BUILD_NUMBER}")
 
 
@@ -322,11 +322,12 @@ endif()
 set(CPACK_PACKAGE_NAME "GPUBench")
 set(CPACK_PACKAGE_VENDOR "GPUBench")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "GPU Compute Benchmarking Tool")
-set(CPACK_PACKAGE_VERSION ${PROJECT_FULL_VERSION})
+set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
 set(CPACK_PACKAGE_VERSION_MAJOR ${PROJECT_VERSION_MAJOR})
 set(CPACK_PACKAGE_VERSION_MINOR ${PROJECT_VERSION_MINOR})
 set(CPACK_PACKAGE_VERSION_PATCH ${PROJECT_VERSION_PATCH})
 set(CPACK_RPM_PACKAGE_RELEASE ${BUILD_NUMBER})
+set(CPACK_DEBIAN_PACKAGE_RELEASE ${BUILD_NUMBER})
 set(CPACK_PACKAGE_INSTALL_DIRECTORY "GPUBench")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
 set(CPACK_RESOURCE_FILE_README "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
@@ -343,13 +344,13 @@ if(WIN32)
     set(CPACK_NSIS_MODIFY_PATH ON)
     set(CPACK_NSIS_MUI_ICON "${CMAKE_CURRENT_SOURCE_DIR}/packaging/windows/icon.ico")
     set(CPACK_NSIS_MUI_UNIICON "${CMAKE_CURRENT_SOURCE_DIR}/packaging/windows/icon.ico")
-    set(CPACK_NSIS_HELP_LINK "https://github.com/yourusername/GPUBench")
-    set(CPACK_NSIS_URL_INFO_ABOUT "https://github.com/yourusername/GPUBench")
-    set(CPACK_NSIS_CONTACT "your.email@example.com")
+    set(CPACK_NSIS_HELP_LINK "https://github.com/Soddentrough/GPUBench")
+    set(CPACK_NSIS_URL_INFO_ABOUT "https://github.com/Soddentrough/GPUBench")
+    set(CPACK_NSIS_CONTACT "https://github.com/Soddentrough/GPUBench/issues")
     set(CPACK_NSIS_MENU_LINKS
         "RunAllBenchmarks.bat" "Run All Benchmarks"
         "bin/gpubench.exe" "GPUBench (CLI)"
-        "https://github.com/yourusername/GPUBench" "GPUBench Website"
+        "https://github.com/Soddentrough/GPUBench" "GPUBench Website"
     )
     
     # Include Visual C++ Redistributable if needed
@@ -361,7 +362,7 @@ elseif(UNIX AND NOT APPLE)
     set(CPACK_PACKAGING_INSTALL_PREFIX "/usr")
     
     # DEB package settings
-    set(CPACK_DEBIAN_PACKAGE_MAINTAINER "GPUBench Maintainer <your.email@example.com>")
+    set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Soddentrough <https://github.com/Soddentrough/GPUBench>")
     set(CPACK_DEBIAN_PACKAGE_SECTION "utils")
     set(CPACK_DEBIAN_PACKAGE_DEPENDS "")
     
