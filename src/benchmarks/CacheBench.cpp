@@ -143,17 +143,37 @@ void CacheBench::Setup(IComputeContext &context,
     kernel_name = "run_benchmark";
   }
 
-  // We now pass 2 arguments at the API level, but only 1 is a buffer descriptor
+  // We now pass 3 push constants: stride, mask, iterations
   kernel = context.createKernel(full_kernel_path.string(), kernel_name, 1);
   if (buffer) {
     context.setKernelArg(kernel, 0, buffer);
 
     // Calculate mask (element count - 1)
-    // For Latency (ns) we use uint32_t (4 bytes), for Bandwidth (GB/s) we use
-    // vec4 (16 bytes)
     uint32_t mask = (metric == "ns") ? (uint32_t)(bufferSize / 4 - 1)
                                      : (uint32_t)(bufferSize / 16 - 1);
-    context.setKernelArg(kernel, 1, sizeof(uint32_t), &mask);
+
+    uint32_t stride = 1;
+    uint32_t iterations = 1000000;
+
+    if (metric == "GB/s") {
+      // Set architectural strides to ensure we hit the targeted cache level
+      if (targetCacheLevel == 2)
+        stride = 32; // 512 bytes stride
+      else if (targetCacheLevel == 3)
+        stride = 128; // 2048 bytes stride
+    } else {
+      // Latency tests use their own logic and don't yet use the robust kernel,
+      // but for consistency we'll set defaults.
+      iterations = 1000000;
+    }
+
+    struct PushConstants {
+      uint32_t stride;
+      uint32_t mask;
+      uint32_t iterations;
+    } pc = {stride, mask, iterations};
+
+    context.setKernelArg(kernel, 1, sizeof(pc), &pc);
   }
 }
 
@@ -196,8 +216,8 @@ BenchmarkResult CacheBench::GetResult(uint32_t config_idx) const {
 
   if (name == "L0 Cache Bandwidth" || name == "L1 Cache Bandwidth" ||
       name == "L2 Cache Bandwidth" || name == "L3 Cache Bandwidth") {
-    // Standardized: 10,000 iterations * 8 float4 loads * 16 bytes
-    operations = num_threads_bw * 80000ULL * 16;
+    // Robust kernel: 1,000,000 iterations * 8 float4 loads * 16 bytes
+    operations = num_threads_bw * 8000000ULL * 16;
   } else if (name == "L0 Cache Latency" || name == "L1 Cache Latency" ||
              name == "L2 Cache Latency" || name == "L3 Cache Latency") {
     // 1,000,000 pointer chasing steps

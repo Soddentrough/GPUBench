@@ -77,7 +77,7 @@ void BenchmarkRunner::discoverBenchmarks() {
   std::iota(l0_init.begin(), l0_init.end(), 0);
 
   benchmarks.push_back(std::make_unique<CacheBench>(
-      "L0 Cache Bandwidth", "GB/s", l0_size, "l0_cache_bandwidth", l0_init,
+      "L0 Cache Bandwidth", "GB/s", l0_size, "cache_bw_robust", l0_init,
       std::vector<std::string>{"l0b"}, 0));
 
   // Define target cache sizes for isolation
@@ -98,17 +98,17 @@ void BenchmarkRunner::discoverBenchmarks() {
 
   // L1 Cache Bandwidth
   benchmarks.push_back(std::make_unique<CacheBench>(
-      "L1 Cache Bandwidth", "GB/s", l1_size, "cachebw_l1",
+      "L1 Cache Bandwidth", "GB/s", l1_size, "cache_bw_robust",
       std::vector<uint32_t>{}, std::vector<std::string>{"l1b"}, 1));
 
   // L2 Cache Bandwidth
   benchmarks.push_back(std::make_unique<CacheBench>(
-      "L2 Cache Bandwidth", "GB/s", l2_size, "cachebw_l2",
+      "L2 Cache Bandwidth", "GB/s", l2_size, "cache_bw_robust",
       std::vector<uint32_t>{}, std::vector<std::string>{"l2b"}, 2));
 
   // L3 Cache Bandwidth
   benchmarks.push_back(std::make_unique<CacheBench>(
-      "L3 Cache Bandwidth", "GB/s", l3_size, "cachebw_l3",
+      "L3 Cache Bandwidth", "GB/s", l3_size, "cache_bw_robust",
       std::vector<uint32_t>{}, std::vector<std::string>{"l3b"}, 3));
 
   // Cache Latency
