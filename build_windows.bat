@@ -27,23 +27,27 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-:: Check if build-release exists, if not create it
-if not exist "build-release" (
-    echo [GPUBench] Configuring CMake...
+:: Optional: Handle 'clean' argument
+if "%1"=="clean" (
+    echo [GPUBench] Cleaning build directory...
+    if exist "build-release" rd /s /q build-release
+)
+
+:: Configure CMake (always run to pick up version changes)
+echo [GPUBench] Configuring CMake...
     
-    :: Prefer Ninja if available
-    where ninja >nul 2>nul
-    if %errorlevel% == 0 (
-        cmake -B build-release -S . -DCMAKE_BUILD_TYPE=Release -G "Ninja"
-    ) else (
-        cmake -B build-release -S . -DCMAKE_BUILD_TYPE=Release -G "MinGW Makefiles"
-    )
-    
-    if %errorlevel% neq 0 (
-        echo [ERROR] CMake configuration failed.
-        pause
-        exit /b %errorlevel%
-    )
+:: Prefer Ninja if available
+where ninja >nul 2>nul
+if %errorlevel% == 0 (
+    cmake -B build-release -S . -DCMAKE_BUILD_TYPE=Release -G "Ninja"
+) else (
+    cmake -B build-release -S . -DCMAKE_BUILD_TYPE=Release -G "MinGW Makefiles"
+)
+
+if %errorlevel% neq 0 (
+    echo [ERROR] CMake configuration failed.
+    pause
+    exit /b %errorlevel%
 )
 
 :: Build the project
@@ -54,6 +58,18 @@ if %errorlevel% neq 0 (
     pause
     exit /b %errorlevel%
 )
+
+:: Create ZIP package
+echo [GPUBench] Creating ZIP package...
+cd build-release
+cpack -G ZIP -C Release
+if %errorlevel% neq 0 (
+    echo [WARNING] Packaging failed.
+) else (
+    echo [GPUBench] ZIP package created successfully.
+    for %%i in (GPUBench-*.zip) do echo [GPUBench] Package: build-release\%%i
+)
+cd ..
 
 echo [GPUBench] Build successful! 
 echo Binary is at: build-release\gpubench.exe
