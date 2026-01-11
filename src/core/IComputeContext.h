@@ -71,6 +71,12 @@ public:
   virtual DeviceInfo getCurrentDeviceInfo() const = 0;
   virtual uint32_t getSelectedDeviceIndex() const = 0;
 
+  virtual void setVerbose(bool v) {}
+
+  // Compilation progress tracking
+  virtual void setExpectedKernelCount(uint32_t count) {}
+  virtual void notifyKernelCreated(const std::string &kernel_name) {}
+
   // Buffer management
   virtual ComputeBuffer createBuffer(size_t size,
                                      const void *host_ptr = nullptr) = 0;

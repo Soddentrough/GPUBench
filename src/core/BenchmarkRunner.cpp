@@ -36,6 +36,9 @@ std::vector<uint32_t> create_shuffled_indices(size_t size) {
 BenchmarkRunner::BenchmarkRunner(const std::vector<IComputeContext *> &contexts,
                                  bool verbose, bool debug)
     : contexts(contexts), verbose(verbose), debug(debug) {
+  for (auto *context : contexts) {
+    context->setVerbose(verbose);
+  }
   discoverBenchmarks();
   formatter = std::make_unique<ResultFormatter>();
 }
@@ -257,6 +260,39 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
                     << std::endl;
         }
         std::cout << std::endl;
+
+        // Calculate total expected kernels for progress bar
+        uint32_t totalKernels = 0;
+        for (auto &bench : benchmarks) {
+          bool should_run = false;
+          if (benchmarks_to_run.empty()) {
+            should_run = true;
+          } else {
+            std::string bench_name_lower = to_lower(bench->GetName());
+            if (bench_name_lower == "performance") {
+              bench_name_lower +=
+                  " (" + to_lower(std::string(bench->GetSubCategory())) + ")";
+            }
+            auto aliases = bench->GetAliases();
+            for (const auto &run_name : lower_benchmarks_to_run) {
+              if (bench_name_lower.find(run_name) != std::string::npos) {
+                should_run = true;
+                break;
+              }
+              for (const auto &alias : aliases) {
+                if (to_lower(alias) == run_name) {
+                  should_run = true;
+                  break;
+                }
+              }
+            }
+          }
+          if (should_run && bench->IsSupported(info, context) &&
+              bench->IsDeviceDependent()) {
+            totalKernels += bench->GetExpectedKernelCount();
+          }
+        }
+        context->setExpectedKernelCount(totalKernels);
 
         for (auto &bench : benchmarks) {
           bool should_run = false;

@@ -4,6 +4,7 @@
 #include <cstring>
 #include <filesystem>
 #include <iostream>
+#include <numeric>
 #include <stdexcept>
 
 #ifdef _WIN32
@@ -193,24 +194,13 @@ BenchmarkResult CacheBench::GetResult(uint32_t config_idx) const {
   uint64_t operations = 0;
   uint64_t num_threads_bw = (uint64_t)numWorkgroups * 256;
 
-  if (name == "L0 Cache Bandwidth") {
-    // 10,000 iterations * 8 vec4 loads * num_threads * 16 bytes/vec4
-    operations = 80000ULL * num_threads_bw * 16;
-  } else if (name == "L0 Cache Latency") {
+  if (name == "L0 Cache Bandwidth" || name == "L1 Cache Bandwidth" ||
+      name == "L2 Cache Bandwidth" || name == "L3 Cache Bandwidth") {
+    // Standardized: 10,000 iterations * 8 float4 loads * 16 bytes
+    operations = num_threads_bw * 80000ULL * 16;
+  } else if (name == "L0 Cache Latency" || name == "L1 Cache Latency" ||
+             name == "L2 Cache Latency" || name == "L3 Cache Latency") {
     // 1,000,000 pointer chasing steps
-    operations = 1000000;
-  } else if (name == "L1 Cache Bandwidth") {
-    // L1: 2,000 iterations × 8 float4 loads × 16 bytes
-    operations = num_threads_bw * 16000ULL * 16;
-  } else if (name == "L2 Cache Bandwidth") {
-    // L2: 500 iterations × 4 float4 loads × 16 bytes
-    operations = num_threads_bw * 2000ULL * 16;
-  } else if (name == "L3 Cache Bandwidth") {
-    // L3: 250 iterations × 4 float4 loads × 16 bytes
-    operations = num_threads_bw * 1000ULL * 16;
-  } else if (name == "L1 Cache Latency" || name == "L2 Cache Latency" ||
-             name == "L3 Cache Latency") {
-    // 1,000,000 iterations in the new shaders
     operations = 1000000;
   } else if (metric == "GB/s") {
     // Generic bandwidth: assume 1024 reads

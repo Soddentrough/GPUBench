@@ -20,8 +20,10 @@ public:
   BenchmarkResult GetResult(uint32_t config_idx = 0) const override;
 
   uint32_t GetNumConfigs() const override { return 2; }
+  std::vector<std::string> GetAliases() const override {
+    return {"rt", "raytracing"};
+  }
   std::string GetConfigName(uint32_t config_idx) const override;
-
   const char *GetComponent(uint32_t config_idx = 0) const override;
 
 private:

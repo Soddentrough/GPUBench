@@ -37,6 +37,9 @@ public:
   int GetSortWeight() const override { return 300; }
   uint32_t GetNumConfigs() const override;
   std::string GetConfigName(uint32_t config_idx) const override;
+  virtual uint32_t GetExpectedKernelCount() const override {
+    return 9; // Read/Write/RW for 128, 256, and 1024 threads
+  }
 
   void setDebug(bool debug) { this->debug = debug; }
 

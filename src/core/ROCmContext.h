@@ -50,6 +50,9 @@ public:
                 uint32_t grid_z, uint32_t block_x, uint32_t block_y,
                 uint32_t block_z) override;
   void releaseKernel(ComputeKernel kernel) override;
+  void setExpectedKernelCount(uint32_t count) override;
+  void notifyKernelCreated(const std::string &kernel_name) override;
+  void setVerbose(bool v) override { verbose = v; }
   void waitIdle() override;
 
   hipDevice_t getROCmDevice() const override { return device; }
@@ -74,4 +77,9 @@ private:
   std::unordered_map<ComputeKernel, ROCmKernel> kernels;
   bool verbose = false;
   bool available = false;
+
+  uint32_t expectedKernelCount = 0;
+  uint32_t createdKernelCount = 0;
+  void printProgressBar(uint32_t current, uint32_t total,
+                        const std::string &kernel_name);
 };

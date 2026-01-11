@@ -317,6 +317,7 @@ void ROCmContext::releaseBuffer(ComputeBuffer buffer) {
 ComputeKernel ROCmContext::createKernel(const std::string &file_name,
                                         const std::string &kernel_name,
                                         uint32_t num_args) {
+  notifyKernelCreated(file_name);
   if (!available || selectedDeviceIndex < 0) {
     throw std::runtime_error("No device selected or ROCm not available.");
   }
@@ -491,4 +492,53 @@ void ROCmContext::waitIdle() {
   if (available && f_hipDeviceSynchronize() != hipSuccess) {
     throw std::runtime_error("hipDeviceSynchronize failed");
   }
+}
+
+void ROCmContext::setExpectedKernelCount(uint32_t count) {
+  expectedKernelCount = count;
+  createdKernelCount = 0;
+  if (verbose && count > 0) {
+    std::cout << "Starting setup for " << count << " kernels..." << std::endl;
+#ifdef HAVE_HIPRTC
+    int major, minor;
+    if (f_hiprtcVersion(&major, &minor) == HIPRTC_SUCCESS) {
+      std::cout << "Using compiler: hiprtc " << major << "." << minor
+                << std::endl;
+    } else {
+      std::cout << "Using compiler: hiprtc (ROCm)" << std::endl;
+    }
+#endif
+  }
+}
+
+void ROCmContext::notifyKernelCreated(const std::string &file_name) {
+  createdKernelCount++;
+  if (!verbose && expectedKernelCount > 0) {
+    printProgressBar(createdKernelCount, expectedKernelCount, file_name);
+  }
+}
+
+void ROCmContext::printProgressBar(uint32_t current, uint32_t total,
+                                   const std::string &kernel_name) {
+  const int barWidth = 30;
+  float progress = static_cast<float>(current) / total;
+  int pos = static_cast<int>(barWidth * progress);
+
+  std::string short_name = kernel_name;
+  size_t last_slash = kernel_name.find_last_of("/\\");
+  if (last_slash != std::string::npos) {
+    short_name = kernel_name.substr(last_slash + 1);
+  }
+
+  std::cout << "\r\033[K[";
+  for (int i = 0; i < barWidth; ++i) {
+    if (i < pos)
+      std::cout << "#";
+    else if (i == pos)
+      std::cout << ">";
+    else
+      std::cout << " ";
+  }
+  std::cout << "] " << int(progress * 100.0) << "% Compiling " << short_name
+            << (current == total ? "\n" : "") << std::flush;
 }

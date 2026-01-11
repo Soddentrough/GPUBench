@@ -212,7 +212,7 @@ void ResultFormatter::print() {
               } else {
                 value = (static_cast<double>(res.operations) /
                          (res.time_ms / 1000.0));
-                if (res.metric == "GRays/s") {
+                if (res.metric == "GIS/s" || res.metric == "GRays/s") {
                   value /= 1e9;
                 }
                 valStr = formatDouble(value, 2);

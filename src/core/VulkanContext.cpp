@@ -680,6 +680,7 @@ VkBuffer VulkanContext::getVkBuffer(ComputeBuffer buffer) const {
 ComputeKernel VulkanContext::createKernel(const std::string &file_name,
                                           const std::string &kernel_name,
                                           uint32_t num_buffer_args) {
+  notifyKernelCreated(file_name);
   bool is_glsl = false;
   if (file_name.size() > 5 &&
       file_name.substr(file_name.size() - 5) == ".comp") {
@@ -1026,4 +1027,47 @@ void VulkanContext::releaseKernel(ComputeKernel kernel) {
     delete vulkanKernel;
     kernels.erase(it);
   }
+}
+
+void VulkanContext::setExpectedKernelCount(uint32_t count) {
+  expectedKernelCount = count;
+  createdKernelCount = 0;
+  if (verbose && count > 0) {
+    std::cout << "Starting setup for " << count << " kernels..." << std::endl;
+#ifdef HAVE_SHADERC
+    std::cout << "Using compiler: shaderc (Vulkan SPIR-V)" << std::endl;
+#endif
+  }
+}
+
+void VulkanContext::notifyKernelCreated(const std::string &file_name) {
+  createdKernelCount++;
+  if (!verbose && expectedKernelCount > 0) {
+    printProgressBar(createdKernelCount, expectedKernelCount, file_name);
+  }
+}
+
+void VulkanContext::printProgressBar(uint32_t current, uint32_t total,
+                                     const std::string &kernel_name) {
+  const int barWidth = 30;
+  float progress = static_cast<float>(current) / total;
+  int pos = static_cast<int>(barWidth * progress);
+
+  std::string short_name = kernel_name;
+  size_t last_slash = kernel_name.find_last_of("/\\");
+  if (last_slash != std::string::npos) {
+    short_name = kernel_name.substr(last_slash + 1);
+  }
+
+  std::cout << "\r\033[K[";
+  for (int i = 0; i < barWidth; ++i) {
+    if (i < pos)
+      std::cout << "#";
+    else if (i == pos)
+      std::cout << ">";
+    else
+      std::cout << " ";
+  }
+  std::cout << "] " << int(progress * 100.0) << "% Compiling " << short_name
+            << (current == total ? "\n" : "") << std::flush;
 }

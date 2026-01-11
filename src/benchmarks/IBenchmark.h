@@ -26,6 +26,7 @@ public:
   virtual bool IsEmulated() const { return false; }
   virtual uint32_t GetNumConfigs() const { return 1; }
   virtual std::string GetConfigName(uint32_t config_idx) const { return ""; }
+  virtual uint32_t GetExpectedKernelCount() const { return 1; }
 
   // Returns true if this benchmark depends on the selected GPU device context.
   // Returns false if it is a system-wide or host-only benchmark (runs once).

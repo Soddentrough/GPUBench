@@ -1,7 +1,7 @@
-#include <vector>
 #include "benchmarks/Int8Bench.h"
 #include <filesystem>
 #include <iostream>
+#include <vector>
 #include <vulkan/vulkan.h>
 
 bool Int8Bench::IsSupported(const DeviceInfo &info,
@@ -75,9 +75,9 @@ void Int8Bench::Teardown() {
 
 BenchmarkResult Int8Bench::GetResult(uint32_t config_idx) const {
   if (config_idx == 0) {
-    // 8 i8vec4 multiply-adds per iteration = 8 * 4 * 2 = 64 INT8 operations per
-    // iteration 16384 iterations * 64 ops * 8192 workgroups * 64 threads
-    uint64_t num_ops = (uint64_t)16384 * 64 * 8192 * 64;
+    // 16 i8vec4 multiply-adds per iteration = 16 * 4 * 2 = 128 INT8 operations
+    // per iteration. 65536 iterations * 128 ops * 8192 workgroups * 64 threads
+    uint64_t num_ops = (uint64_t)65536 * 128 * 8192 * 64;
     return {num_ops, 0.0};
   } else {
     // Matrix mode: 16x16x16 matmul = 16 * 16 * 16 * 2 ops = 8192 ops per

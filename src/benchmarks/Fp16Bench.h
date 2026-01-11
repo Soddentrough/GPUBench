@@ -22,6 +22,7 @@ public:
   }
   int GetSortWeight() const override { return 30; }
   uint32_t GetNumConfigs() const override;
+  virtual uint32_t GetExpectedKernelCount() const override { return 2; }
   std::string GetConfigName(uint32_t config_idx) const override;
 
 private:

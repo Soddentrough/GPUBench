@@ -50,6 +50,10 @@ public:
   void releaseKernel(ComputeKernel kernel) override;
   void waitIdle() override;
 
+  void setExpectedKernelCount(uint32_t count) override;
+  void notifyKernelCreated(const std::string &kernel_name) override;
+  void setVerbose(bool v) override { verbose = v; }
+
   VkPhysicalDevice getVulkanPhysicalDevice() const override {
     return physicalDevice;
   }
@@ -118,4 +122,9 @@ private:
   mutable std::vector<DeviceInfo> deviceInfos;
   uint32_t selectedDeviceIndex = 0;
   bool verbose = false;
+
+  uint32_t expectedKernelCount = 0;
+  uint32_t createdKernelCount = 0;
+  void printProgressBar(uint32_t current, uint32_t total,
+                        const std::string &kernel_name);
 };
