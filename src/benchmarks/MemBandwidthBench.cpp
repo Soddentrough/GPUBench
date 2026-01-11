@@ -29,7 +29,7 @@ void MemBandwidthBench::createKernel(BandwidthConfig &config,
     kernel_name = "main";
   }
   config.kernel =
-      this->context->createKernel(kernel_file_path.string(), kernel_name, 4);
+      this->context->createKernel(kernel_file_path.string(), kernel_name, 2);
   this->context->setKernelArg(config.kernel, 0, inputBuffer);
   this->context->setKernelArg(config.kernel, 1, outputBuffer);
   uint32_t mode = static_cast<uint32_t>(config.mode);

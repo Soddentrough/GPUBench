@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Versioning
-set(BUILD_NUMBER "7" CACHE STRING "Build number for the project")
+set(BUILD_NUMBER "8" CACHE STRING "Build number for the project")
 set(PROJECT_FULL_VERSION "${PROJECT_VERSION}.${BUILD_NUMBER}")
 
 
@@ -175,6 +175,7 @@ set(SOURCES
     src/benchmarks/SysMemLatencyBench.cpp
     src/benchmarks/CacheBench.cpp
     src/benchmarks/Fp6Bench.cpp
+    src/benchmarks/RayTracingBench.cpp
     src/utils/KernelPath.cpp
     src/utils/ShaderCache.cpp
 )

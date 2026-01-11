@@ -35,7 +35,7 @@ void Fp32Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
   } else if (context.getBackend() == ComputeBackend::ROCm) {
     kernel_name = "run_benchmark";
   }
-  kernel = context.createKernel(kernel_file.string(), kernel_name, 3);
+  kernel = context.createKernel(kernel_file.string(), kernel_name, 1);
   context.setKernelArg(kernel, 0, buffer);
 }
 

@@ -171,6 +171,9 @@ const std::vector<DeviceInfo> &VulkanContext::getDevices() const {
           hasExt(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME);
       info.structuredSparsitySupport = true;
       info.fp8Support = hasExt("VK_EXT_shader_float8");
+      info.rayTracingSupport =
+          hasExt(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) &&
+          hasExt(VK_KHR_RAY_QUERY_EXTENSION_NAME);
       deviceInfos.push_back(info);
     }
   }
@@ -259,6 +262,9 @@ DeviceInfo VulkanContext::getCurrentDeviceInfo() const {
   info.fp4Support = true;  // Assuming support or emulation
   info.int4Support = true; // Assuming support or emulation
   info.structuredSparsitySupport = true;
+  info.rayTracingSupport =
+      hasExt(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) &&
+      hasExt(VK_KHR_RAY_QUERY_EXTENSION_NAME);
   return info;
 }
 
@@ -310,6 +316,13 @@ void VulkanContext::createDevice() {
   VkPhysicalDeviceSubgroupSizeControlFeatures subgroupSizeFeatures{
       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_FEATURES};
 
+  VkPhysicalDeviceAccelerationStructureFeaturesKHR asFeatures{
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR};
+  VkPhysicalDeviceRayQueryFeaturesKHR rayQueryFeatures{
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR};
+  VkPhysicalDeviceBufferDeviceAddressFeatures bufferDeviceAddressFeatures{
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES};
+
   // Explicitly using the struct names for EXT/KHR features
   struct VkPhysicalDeviceFloat8FeaturesEXT {
     VkStructureType sType;
@@ -330,7 +343,10 @@ void VulkanContext::createDevice() {
   features16Storage.pNext = &features8Storage;
   features8Storage.pNext = &coopMatrixFeatures;
   coopMatrixFeatures.pNext = &subgroupSizeFeatures;
-  subgroupSizeFeatures.pNext = &float8Features;
+  subgroupSizeFeatures.pNext = &asFeatures;
+  asFeatures.pNext = &rayQueryFeatures;
+  rayQueryFeatures.pNext = &bufferDeviceAddressFeatures;
+  bufferDeviceAddressFeatures.pNext = &float8Features;
   float8Features.pNext = &floatControls2Features;
 
   // Query supported features and enable them
@@ -343,6 +359,10 @@ void VulkanContext::createDevice() {
       VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME,
       VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME,
       VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME,
+      VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
+      VK_KHR_RAY_QUERY_EXTENSION_NAME,
+      VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
+      VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
       "VK_EXT_shader_float8",
       "VK_KHR_shader_float_controls2"};
 
@@ -424,6 +444,13 @@ ComputeBuffer VulkanContext::createBuffer(size_t size, const void *host_ptr) {
   bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
                      VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
                      VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+
+  if (getCurrentDeviceInfo().rayTracingSupport) {
+    bufferInfo.usage |=
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR;
+  }
   bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
   if (vkCreateBuffer(device, &bufferInfo, nullptr, &vulkanBuffer->buffer) !=
@@ -441,6 +468,13 @@ ComputeBuffer VulkanContext::createBuffer(size_t size, const void *host_ptr) {
   allocInfo.memoryTypeIndex = findMemoryType(
       memRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
+  VkMemoryAllocateFlagsInfo flagsInfo{};
+  if (getCurrentDeviceInfo().rayTracingSupport) {
+    flagsInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
+    flagsInfo.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
+    allocInfo.pNext = &flagsInfo;
+  }
+
   if (vkAllocateMemory(device, &allocInfo, nullptr, &vulkanBuffer->memory) !=
       VK_SUCCESS) {
     delete vulkanBuffer;
@@ -448,6 +482,15 @@ ComputeBuffer VulkanContext::createBuffer(size_t size, const void *host_ptr) {
   }
 
   vkBindBufferMemory(device, vulkanBuffer->buffer, vulkanBuffer->memory, 0);
+
+  if (getCurrentDeviceInfo().rayTracingSupport) {
+    VkBufferDeviceAddressInfo bdaInfo{
+        VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO};
+    bdaInfo.buffer = vulkanBuffer->buffer;
+    vulkanBuffer->address = vkGetBufferDeviceAddress(device, &bdaInfo);
+  } else {
+    vulkanBuffer->address = 0;
+  }
 
   buffers[vulkanBuffer] = vulkanBuffer;
 
@@ -617,9 +660,26 @@ void VulkanContext::releaseBuffer(ComputeBuffer buffer) {
   }
 }
 
+VkDeviceAddress
+VulkanContext::getBufferDeviceAddress(ComputeBuffer buffer) const {
+  auto it = buffers.find(buffer);
+  if (it != buffers.end()) {
+    return it->second->address;
+  }
+  return 0;
+}
+
+VkBuffer VulkanContext::getVkBuffer(ComputeBuffer buffer) const {
+  auto it = buffers.find(buffer);
+  if (it != buffers.end()) {
+    return it->second->buffer;
+  }
+  return VK_NULL_HANDLE;
+}
+
 ComputeKernel VulkanContext::createKernel(const std::string &file_name,
                                           const std::string &kernel_name,
-                                          uint32_t num_args) {
+                                          uint32_t num_buffer_args) {
   bool is_glsl = false;
   if (file_name.size() > 5 &&
       file_name.substr(file_name.size() - 5) == ".comp") {
@@ -706,6 +766,7 @@ ComputeKernel VulkanContext::createKernel(const std::string &file_name,
   createInfo.pCode = spirv_code.data();
 
   auto vulkanKernel = new VulkanKernel();
+  vulkanKernel->numBufferDescriptors = num_buffer_args;
   if (vkCreateShaderModule(device, &createInfo, nullptr,
                            &vulkanKernel->shaderModule) != VK_SUCCESS) {
     delete vulkanKernel;
@@ -714,11 +775,18 @@ ComputeKernel VulkanContext::createKernel(const std::string &file_name,
 
   // This is a simplified setup. A real application would inspect the shader for
   // bindings.
+  bool is_rt = (file_name.find("rt_") != std::string::npos);
+
   std::vector<VkDescriptorSetLayoutBinding> bindings;
-  for (uint32_t i = 0; i < num_args; ++i) {
+  for (uint32_t i = 0; i < num_buffer_args; ++i) {
     VkDescriptorSetLayoutBinding layoutBinding{};
     layoutBinding.binding = i;
-    layoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    if (is_rt && i == 0) {
+      layoutBinding.descriptorType =
+          VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+    } else {
+      layoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    }
     layoutBinding.descriptorCount = 1;
     layoutBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
     bindings.push_back(layoutBinding);
@@ -781,14 +849,16 @@ ComputeKernel VulkanContext::createKernel(const std::string &file_name,
                              "). This may be a driver issue.");
   }
 
-  VkDescriptorPoolSize poolSize{};
-  poolSize.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-  poolSize.descriptorCount = num_args;
+  VkDescriptorPoolSize poolSizes[2] = {};
+  poolSizes[0].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+  poolSizes[0].descriptorCount = num_buffer_args;
+  poolSizes[1].type = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+  poolSizes[1].descriptorCount = 1;
 
   VkDescriptorPoolCreateInfo poolInfo{};
   poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-  poolInfo.poolSizeCount = 1;
-  poolInfo.pPoolSizes = &poolSize;
+  poolInfo.poolSizeCount = is_rt ? 2 : 1;
+  poolInfo.pPoolSizes = poolSizes;
   poolInfo.maxSets = 1;
 
   if (vkCreateDescriptorPool(device, &poolInfo, nullptr,
@@ -838,6 +908,32 @@ void VulkanContext::setKernelArg(ComputeKernel kernel, uint32_t arg_index,
   vkUpdateDescriptorSets(device, 1, &descriptorWrite, 0, nullptr);
 }
 
+void VulkanContext::setKernelAS(ComputeKernel kernel, uint32_t arg_index,
+                                AccelerationStructure as) {
+  auto it = kernels.find(kernel);
+  if (it == kernels.end()) {
+    throw std::runtime_error("Invalid kernel handle");
+  }
+
+  VkAccelerationStructureKHR vkAS = (VkAccelerationStructureKHR)as;
+  VkWriteDescriptorSetAccelerationStructureKHR descriptorAS{
+      VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR};
+  descriptorAS.accelerationStructureCount = 1;
+  descriptorAS.pAccelerationStructures = &vkAS;
+
+  VkWriteDescriptorSet descriptorWrite{};
+  descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+  descriptorWrite.pNext = &descriptorAS;
+  descriptorWrite.dstSet = it->second->descriptorSet;
+  descriptorWrite.dstBinding = arg_index;
+  descriptorWrite.dstArrayElement = 0;
+  descriptorWrite.descriptorType =
+      VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+  descriptorWrite.descriptorCount = 1;
+
+  vkUpdateDescriptorSets(device, 1, &descriptorWrite, 0, nullptr);
+}
+
 void VulkanContext::setKernelArg(ComputeKernel kernel, uint32_t arg_index,
                                  size_t arg_size, const void *arg_value) {
   auto it = kernels.find(kernel);
@@ -848,7 +944,19 @@ void VulkanContext::setKernelArg(ComputeKernel kernel, uint32_t arg_index,
   // For Vulkan, non-buffer arguments are passed via push constants
   // Arguments are laid out sequentially in the push constant buffer
   // We map arg_index directly to offset to handle mixed buffer/value args
-  size_t offset = arg_index * 4;
+  // Buffer arguments (descriptors) take indices 0 to numBufferDescriptors-1.
+  // Push constants start AFTER the descriptor indices.
+
+  if (arg_index < it->second->numBufferDescriptors) {
+    if (verbose) {
+      std::cerr << "Error: setKernelArg (value) called for index " << arg_index
+                << " but it's reserved for a buffer descriptor (numBuffers="
+                << it->second->numBufferDescriptors << ")" << std::endl;
+    }
+    return;
+  }
+
+  size_t offset = (arg_index - it->second->numBufferDescriptors) * 4;
   if (offset + arg_size <= it->second->pushConstantData.size()) {
     memcpy(it->second->pushConstantData.data() + offset, arg_value, arg_size);
   }

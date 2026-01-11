@@ -60,7 +60,7 @@ void Int4Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
 
     // Pass element count (number of i8vec4) as push constant at offset 0
     uint32_t elementCount = (uint32_t)(8192 * 64);
-    context.setKernelArg(vectorKernel, 0, sizeof(uint32_t), &elementCount);
+    context.setKernelArg(vectorKernel, 1, sizeof(uint32_t), &elementCount);
   } catch (const std::exception &e) {
     std::cerr << "INT4 vector kernel failed to load: " << e.what() << std::endl;
     throw;

@@ -6,6 +6,7 @@
 #include <hip/hip_runtime_api.h>
 #include <map>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -39,6 +40,10 @@ public:
                              uint32_t num_args) override;
   void setKernelArg(ComputeKernel kernel, uint32_t arg_index,
                     ComputeBuffer buffer) override;
+  void setKernelAS(ComputeKernel kernel, uint32_t arg_index,
+                   AccelerationStructure as) override {
+    throw std::runtime_error("setKernelAS not supported on ROCm backend");
+  }
   void setKernelArg(ComputeKernel kernel, uint32_t arg_index, size_t arg_size,
                     const void *arg_value) override;
   void dispatch(ComputeKernel kernel, uint32_t grid_x, uint32_t grid_y,

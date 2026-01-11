@@ -8,6 +8,7 @@
 #include "benchmarks/Int4Bench.h"
 #include "benchmarks/Int8Bench.h"
 #include "benchmarks/MemBandwidthBench.h"
+#include "benchmarks/RayTracingBench.h"
 #include "benchmarks/SysMemBandwidthBench.h"
 #include "benchmarks/SysMemLatencyBench.h"
 #include "core/ComputeBackendFactory.h"
@@ -65,6 +66,7 @@ void BenchmarkRunner::discoverBenchmarks() {
   benchmarks.push_back(std::make_unique<MemBandwidthBench>());
   benchmarks.push_back(std::make_unique<SysMemBandwidthBench>());
   benchmarks.push_back(std::make_unique<SysMemLatencyBench>());
+  benchmarks.push_back(std::make_unique<RayTracingBench>());
 
   // Cache Bandwidth
   const size_t l0_size = 16 * 1024; // 16KB L0 cache

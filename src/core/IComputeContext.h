@@ -51,12 +51,14 @@ struct DeviceInfo {
   bool int4Support = false;
   bool cooperativeMatrixSupport = false;
   bool structuredSparsitySupport = false;
+  bool rayTracingSupport = false;
   bool verbose = false;
 };
 
 // Opaque handles for compute resources
 using ComputeBuffer = void *;
 using ComputeKernel = void *;
+using AccelerationStructure = void *;
 
 class IComputeContext {
 public:
@@ -84,6 +86,8 @@ public:
                                      uint32_t num_args) = 0;
   virtual void setKernelArg(ComputeKernel kernel, uint32_t arg_index,
                             ComputeBuffer buffer) = 0;
+  virtual void setKernelAS(ComputeKernel kernel, uint32_t arg_index,
+                           AccelerationStructure as) = 0;
   virtual void setKernelArg(ComputeKernel kernel, uint32_t arg_index,
                             size_t arg_size, const void *arg_value) = 0;
   virtual void dispatch(ComputeKernel kernel, uint32_t grid_x, uint32_t grid_y,

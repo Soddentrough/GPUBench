@@ -32,13 +32,16 @@ public:
   void readBuffer(ComputeBuffer buffer, size_t offset, size_t size,
                   void *host_ptr) const override;
   void releaseBuffer(ComputeBuffer buffer) override;
+  VkDeviceAddress getBufferDeviceAddress(ComputeBuffer buffer) const;
 
   // Kernel management
   ComputeKernel createKernel(const std::string &file_name,
                              const std::string &kernel_name,
-                             uint32_t num_args) override;
+                             uint32_t num_buffer_args) override;
   void setKernelArg(ComputeKernel kernel, uint32_t arg_index,
                     ComputeBuffer buffer) override;
+  void setKernelAS(ComputeKernel kernel, uint32_t arg_index,
+                   AccelerationStructure as) override;
   void setKernelArg(ComputeKernel kernel, uint32_t arg_index, size_t arg_size,
                     const void *arg_value) override;
   void dispatch(ComputeKernel kernel, uint32_t grid_x, uint32_t grid_y,
@@ -64,6 +67,7 @@ public:
   const VkPhysicalDeviceProperties &getPhysicalDeviceProperties() const {
     return properties;
   }
+  VkBuffer getVkBuffer(ComputeBuffer buffer) const;
 
 public:
   const std::vector<VkPhysicalDevice> &getPhysicalDevices() const {
@@ -75,6 +79,7 @@ private:
   struct VulkanBuffer {
     VkBuffer buffer;
     VkDeviceMemory memory;
+    VkDeviceAddress address;
   };
 
   struct VulkanKernel {
@@ -85,6 +90,7 @@ private:
     VkDescriptorPool descriptorPool;
     VkDescriptorSet descriptorSet;
     std::map<uint32_t, ComputeBuffer> arg_buffers;
+    uint32_t numBufferDescriptors;
     std::vector<uint8_t> pushConstantData;
   };
 

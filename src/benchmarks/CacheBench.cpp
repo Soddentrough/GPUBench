@@ -142,8 +142,8 @@ void CacheBench::Setup(IComputeContext &context,
     kernel_name = "run_benchmark";
   }
 
-  // We now pass 2 arguments: buffer and mask
-  kernel = context.createKernel(full_kernel_path.string(), kernel_name, 2);
+  // We now pass 2 arguments at the API level, but only 1 is a buffer descriptor
+  kernel = context.createKernel(full_kernel_path.string(), kernel_name, 1);
   if (buffer) {
     context.setKernelArg(kernel, 0, buffer);
 
