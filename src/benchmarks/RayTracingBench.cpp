@@ -59,14 +59,15 @@ void RayTracingBench::Setup(IComputeContext &context,
         float fx = (float)x - 8.0f + jitterX;
         float fy = (float)y - 8.0f + jitterY;
         float fz = (float)z * 0.1f;
+        // Small triangles in the bottom corner (0.1 to 0.4)
         vertices.push_back(fx + 0.1f);
         vertices.push_back(fy + 0.1f);
         vertices.push_back(fz);
-        vertices.push_back(fx + 0.9f);
+        vertices.push_back(fx + 0.4f);
         vertices.push_back(fy + 0.1f);
         vertices.push_back(fz);
-        vertices.push_back(fx + 0.5f);
-        vertices.push_back(fy + 0.9f);
+        vertices.push_back(fx + 0.1f);
+        vertices.push_back(fy + 0.4f);
         vertices.push_back(fz);
       }
     }
@@ -83,7 +84,9 @@ void RayTracingBench::Setup(IComputeContext &context,
         float fx = (float)x - 8.0f + jitterX;
         float fy = (float)y - 8.0f + jitterY;
         float fz = (float)z * 0.1f;
-        aabbs.push_back({fx + 0.1f, fy + 0.1f, fz - 0.01f, fx + 0.9f, fy + 0.9f,
+        // Small AABB in the bottom corner (0.1 to 0.4). Ray at 0.8 completely
+        // misses it!
+        aabbs.push_back({fx + 0.1f, fy + 0.1f, fz - 0.01f, fx + 0.4f, fy + 0.4f,
                          fz + 0.01f});
       }
     }
@@ -110,7 +113,8 @@ void RayTracingBench::buildAS() {
   VkAccelerationStructureGeometryKHR triGeom{
       VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR};
   triGeom.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
-  triGeom.flags = 0; // Non-opaque to stress math units
+  triGeom.flags =
+      VK_GEOMETRY_OPAQUE_BIT_KHR; // Force exact hardware Ray-Tri test!
   triGeom.geometry.triangles.sType =
       VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
   triGeom.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
