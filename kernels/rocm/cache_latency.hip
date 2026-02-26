@@ -10,9 +10,11 @@ extern "C" __global__ void run_benchmark(uint* buffer, uint* pc) {
     uint val = 0;
 
     #pragma unroll
-    for (int i = 0; i < 1024; ++i) {
+    for (uint i = 0; i < iterations; ++i) {
         val = buffer[val];
     }
+
+    if (stride == 0xFFFFFFFF) { buffer[1] = mask; }
 
     if (val > 0) {
         buffer[0] = val;
