@@ -330,8 +330,28 @@ ComputeKernel ROCmContext::createKernel(const std::string &file_name,
 
   hipModule_t module;
   if (modules.find(file_name) == modules.end()) {
+    bool loaded_co_successfully = false;
+    if (is_hip) {
+      std::string co_file_name =
+          file_name.substr(0, file_name.size() - 4) + ".co";
+      hipError_t err = f_hipModuleLoad(&module, co_file_name.c_str());
+      if (err == hipSuccess) {
+        if (verbose) {
+          std::cout << "Successfully loaded pre-compiled HIP module: "
+                    << co_file_name << std::endl;
+        }
+        loaded_co_successfully = true;
+        is_hip = false; // Bypass HIPRTC entirely
+      } else {
+        std::cout << "Failed to load pre-compiled .co file " << co_file_name
+                  << " error: " << err << " (" << f_hipGetErrorString(err)
+                  << ")" << std::endl;
+      }
+    }
+
 #ifdef HAVE_HIPRTC
-    if (is_hip && hiprtcLib && hiprtcLib->isValid()) {
+    if (is_hip && hiprtcLib && hiprtcLib->isValid() &&
+        !loaded_co_successfully) {
       std::vector<char> code;
       if (utils::ShaderCache::loadROCmCache(
               file_name, devices[selectedDeviceIndex], code)) {
@@ -358,15 +378,27 @@ ComputeKernel ROCmContext::createKernel(const std::string &file_name,
 
         std::string offload_arch =
             "--offload-arch=" + devices[selectedDeviceIndex].archName;
-        const char *opts[] = {offload_arch.c_str()};
-        hiprtcResult compileResult = f_hiprtcCompileProgram(prog, 1, opts);
+        const char *opts[] = {offload_arch.c_str(), "-I/usr/include",
+                              "-I/opt/rocm/include", "-I/usr/local/include"};
+        hiprtcResult compileResult = f_hiprtcCompileProgram(prog, 4, opts);
 
         if (compileResult != HIPRTC_SUCCESS) {
-          size_t logSize;
-          f_hiprtcGetProgramLogSize(prog, &logSize);
-          std::vector<char> log(logSize);
-          f_hiprtcGetProgramLog(prog, log.data());
-          std::string log_str(log.data());
+          std::cout << "HIPRTC compilation failed with code: " << compileResult
+                    << std::endl;
+          std::cout << "Source snippet: "
+                    << source.substr(0, std::min(source.length(), (size_t)150))
+                    << std::endl;
+          size_t logSize = 0;
+          hiprtcResult logSizeRes = f_hiprtcGetProgramLogSize(prog, &logSize);
+          std::cout << "HIPRTC logSizeRes=" << logSizeRes
+                    << " logSize=" << logSize << std::endl;
+          std::string log_str = "No log available";
+          if (logSize > 0) {
+            std::vector<char> log(logSize);
+            hiprtcResult logRes = f_hiprtcGetProgramLog(prog, log.data());
+            std::cout << "HIPRTC get log res: " << logRes << std::endl;
+            log_str = std::string(log.data(), logSize);
+          }
           f_hiprtcDestroyProgram(&prog);
           throw std::runtime_error("Failed to compile HIP kernel " + file_name +
                                    ":\n" + log_str);
@@ -390,23 +422,26 @@ ComputeKernel ROCmContext::createKernel(const std::string &file_name,
     } else
 #endif
     {
-      if (verbose) {
-        std::cout << "Attempting to load HIP module from binary: " << file_name
-                  << std::endl;
-      }
-      hipError_t err = f_hipModuleLoad(&module, file_name.c_str());
-      if (err != hipSuccess) {
+      if (!loaded_co_successfully) {
         if (verbose) {
-          std::cerr << "hipModuleLoad error: " << f_hipGetErrorString(err)
-                    << std::endl;
-          std::cerr << "Module file: " << file_name << std::endl;
+          std::cout << "Attempting to load HIP module from binary: "
+                    << file_name << std::endl;
         }
-        if (err == hipErrorNoBinaryForGpu) {
+        hipError_t err = f_hipModuleLoad(&module, file_name.c_str());
+        if (err != hipSuccess) {
+          if (verbose) {
+            std::cerr << "hipModuleLoad error: " << f_hipGetErrorString(err)
+                      << std::endl;
+            std::cerr << "Module file: " << file_name << std::endl;
+          }
+          if (err == hipErrorNoBinaryForGpu) {
+            throw std::runtime_error("Failed to load HIP module from " +
+                                     file_name + ": No binary for GPU");
+          }
           throw std::runtime_error("Failed to load HIP module from " +
-                                   file_name + ": No binary for GPU");
+                                   file_name + ": " +
+                                   std::string(f_hipGetErrorString(err)));
         }
-        throw std::runtime_error("Failed to load HIP module from " + file_name +
-                                 ": " + std::string(f_hipGetErrorString(err)));
       }
     }
     modules[file_name] = module;
@@ -500,13 +535,7 @@ void ROCmContext::setExpectedKernelCount(uint32_t count) {
   if (verbose && count > 0) {
     std::cout << "Starting setup for " << count << " kernels..." << std::endl;
 #ifdef HAVE_HIPRTC
-    int major, minor;
-    if (f_hiprtcVersion(&major, &minor) == HIPRTC_SUCCESS) {
-      std::cout << "Using compiler: hiprtc " << major << "." << minor
-                << std::endl;
-    } else {
-      std::cout << "Using compiler: hiprtc (ROCm)" << std::endl;
-    }
+    std::cout << "Using compiler: hiprtc (ROCm)" << std::endl;
 #endif
   }
 }

@@ -35,6 +35,7 @@ private:
   IComputeContext *context = nullptr;
   ComputeKernel kernel = nullptr;
   ComputeBuffer buffer = nullptr;
+  ComputeBuffer pcBuffer = nullptr;
   std::vector<uint32_t> initData;
   void *hostMem = nullptr;
   int targetCacheLevel = -1;

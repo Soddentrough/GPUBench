@@ -468,6 +468,12 @@ ComputeKernel OpenCLContext::createKernel(const std::string &file_name,
     std::string source((std::istreambuf_iterator<char>(file)),
                        std::istreambuf_iterator<char>());
 
+    std::cout << "--- OPENCL COMPILER READING KERNEL ---" << std::endl;
+    std::cout << "File: " << file_name << std::endl;
+    std::cout << "First 150 chars: "
+              << source.substr(0, std::min(source.size(), (size_t)150))
+              << std::endl;
+
     const char *source_ptr = source.c_str();
     size_t source_size = source.length();
 
@@ -520,7 +526,9 @@ void OpenCLContext::setKernelArg(ComputeKernel kernel, uint32_t arg_index,
   cl_int err = f_clSetKernelArg(kernel_cl->kernel, arg_index, sizeof(cl_mem),
                                 &buffer_cl->buffer);
   if (err != CL_SUCCESS) {
-    throw std::runtime_error("Failed to set OpenCL kernel buffer argument");
+    throw std::runtime_error(
+        "Failed to set OpenCL kernel buffer argument at index " +
+        std::to_string(arg_index) + ". Error: " + std::to_string(err));
   }
 }
 
@@ -530,7 +538,10 @@ void OpenCLContext::setKernelArg(ComputeKernel kernel, uint32_t arg_index,
   cl_int err =
       f_clSetKernelArg(kernel_cl->kernel, arg_index, arg_size, arg_value);
   if (err != CL_SUCCESS) {
-    throw std::runtime_error("Failed to set OpenCL kernel value argument");
+    throw std::runtime_error("Failed to set OpenCL kernel value argument " +
+                             std::to_string(arg_index) + " with size " +
+                             std::to_string(arg_size) +
+                             ". Error: " + std::to_string(err));
   }
 }
 

@@ -122,7 +122,7 @@ endif()
 
 # Copy OpenCL kernels to build directory
 if(OpenCL_FOUND)
-    file(GLOB KERNELS "kernels/*.cl")
+    file(GLOB KERNELS "kernels/opencl/*.cl")
     file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/kernels/opencl)
     foreach(KERNEL_FILE ${KERNELS})
         get_filename_component(KERNEL_NAME ${KERNEL_FILE} NAME)
@@ -137,15 +137,25 @@ if(OpenCL_FOUND)
     add_custom_target(kernels ALL DEPENDS ${KERNEL_DESTINATIONS})
 endif()
 
-# Copy HIP kernels
+# Copy HIP kernels and compile code objects
 if(HIP_FOUND)
     file(GLOB HIP_SOURCES "hip_kernels/*.hip")
     file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/kernels/rocm)
     
     foreach(HIP_SOURCE ${HIP_SOURCES})
         get_filename_component(KERNEL_NAME ${HIP_SOURCE} NAME)
+        get_filename_component(KERNEL_NAME_WE ${HIP_SOURCE} NAME_WLE)
         set(DEST_HIP_SOURCE "${CMAKE_CURRENT_BINARY_DIR}/kernels/rocm/${KERNEL_NAME}")
+        set(DEST_HIP_CO "${CMAKE_CURRENT_BINARY_DIR}/kernels/rocm/${KERNEL_NAME_WE}.co")
         
+        # Compile to .co using hipcc
+        add_custom_command(
+            OUTPUT ${DEST_HIP_CO}
+            COMMAND hipcc --genco --offload-arch=native ${HIP_SOURCE} -o ${DEST_HIP_CO}
+            DEPENDS ${HIP_SOURCE}
+            COMMENT "Compiling HIP kernel to code object: ${HIP_SOURCE}"
+        )
+
         add_custom_command(
             OUTPUT ${DEST_HIP_SOURCE}
             COMMAND ${CMAKE_COMMAND} -E copy_if_different ${HIP_SOURCE} ${DEST_HIP_SOURCE}
@@ -153,7 +163,7 @@ if(HIP_FOUND)
             COMMENT "Copying HIP source: ${HIP_SOURCE}"
         )
        
-        list(APPEND HIP_KERNELS_SRC ${DEST_HIP_SOURCE})
+        list(APPEND HIP_KERNELS_SRC ${DEST_HIP_SOURCE} ${DEST_HIP_CO})
     endforeach()
     add_custom_target(hip_kernels ALL DEPENDS ${HIP_KERNELS_SRC})
 endif()
@@ -248,9 +258,8 @@ if(HIP_FOUND)
     # target_link_libraries(gpubench PRIVATE hip::host)
     # if(HIPRTC_LIBRARY)
     #     target_link_libraries(gpubench PRIVATE ${HIPRTC_LIBRARY})
-    #     target_compile_definitions(gpubench PRIVATE HAVE_HIPRTC __HIP_PLATFORM_AMD__)
     # endif()
-    target_compile_definitions(gpubench PRIVATE __HIP_PLATFORM_AMD__)
+    target_compile_definitions(gpubench PRIVATE HAVE_HIPRTC __HIP_PLATFORM_AMD__)
 endif()
 
 # Compiler definitions for conditional compilation

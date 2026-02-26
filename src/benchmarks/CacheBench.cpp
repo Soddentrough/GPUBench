@@ -24,7 +24,17 @@ CacheBench::CacheBench(std::string name, std::string metric,
       kernelFile(kernelFile), initData(initData), aliases(aliases),
       targetCacheLevel(targetCacheLevel) {}
 
-CacheBench::~CacheBench() {}
+CacheBench::~CacheBench() {
+  if (buffer) {
+    context->releaseBuffer(buffer);
+  }
+  if (pcBuffer) {
+    context->releaseBuffer(pcBuffer);
+  }
+  if (kernel) {
+    context->releaseKernel(kernel);
+  }
+}
 
 bool CacheBench::IsSupported(const DeviceInfo &info,
                              IComputeContext *context) const {
@@ -144,7 +154,7 @@ void CacheBench::Setup(IComputeContext &context,
   }
 
   // We now pass 3 push constants: stride, mask, iterations
-  kernel = context.createKernel(full_kernel_path.string(), kernel_name, 1);
+  kernel = context.createKernel(full_kernel_path.string(), kernel_name, 2);
   if (buffer) {
     context.setKernelArg(kernel, 0, buffer);
 
@@ -171,9 +181,18 @@ void CacheBench::Setup(IComputeContext &context,
       uint32_t stride;
       uint32_t mask;
       uint32_t iterations;
-    } pc = {stride, mask, iterations};
+      uint32_t padding;
+    } pc = {stride, mask, iterations, 0};
 
-    context.setKernelArg(kernel, 1, sizeof(pc), &pc);
+    if (context.getBackend() == ComputeBackend::Vulkan) {
+      context.setKernelArg(kernel, 1, sizeof(pc), &pc);
+    } else {
+      if (!pcBuffer) {
+        pcBuffer = context.createBuffer(sizeof(PushConstants));
+      }
+      context.writeBuffer(pcBuffer, 0, sizeof(PushConstants), &pc);
+      context.setKernelArg(kernel, 1, pcBuffer);
+    }
   }
 }
 

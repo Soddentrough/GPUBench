@@ -1,7 +1,11 @@
 // Requires ROCm 6.4+
 #include <hip/hip_runtime.h>
 
-extern "C" __global__ void run_benchmark(float4* data, uint32_t mask) {
+extern "C" __global__ void run_benchmark(float4* data, uint* pc) {
+    uint stride = pc[0];
+    uint mask = pc[1];
+    uint iterations = pc[2];
+
     uint globalId = blockIdx.x * blockDim.x + threadIdx.x;
     
     float4 sum = make_float4(0.0f, 0.0f, 0.0f, 0.0f);

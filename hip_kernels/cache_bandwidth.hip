@@ -2,7 +2,11 @@
 
 // Kernel to measure cache bandwidth.
 // Each thread reads from a buffer in a coalesced manner.
-extern "C" __global__ void run_benchmark(uint* buffer) {
+extern "C" __global__ void run_benchmark(uint* buffer, uint* pc) {
+    uint stride = pc[0];
+    uint mask = pc[1];
+    uint iterations = pc[2];
+
     uint id = threadIdx.x + blockIdx.x * blockDim.x;
     uint val = 0;
 
