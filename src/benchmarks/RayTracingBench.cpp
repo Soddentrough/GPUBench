@@ -2,6 +2,7 @@
 #include "core/VulkanContext.h"
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <iostream>
@@ -45,48 +46,36 @@ void RayTracingBench::Setup(IComputeContext &context,
   uint32_t zero = 0;
   context.writeBuffer(resultBuffer, 0, 4, &zero);
 
-  // Setup Triangle and Box data (64 layers of 16x16 grids = 16,384 primitives)
-  uint32_t gridSize = 16;
-  uint32_t layers = 64;
-  numPrimitives = gridSize * gridSize * layers;
+  // Setup Triangle and Box data (Deep Traversal sparse volume = 1,048,576
+  // primitives)
+  numPrimitives = 1048576;
 
   std::vector<float> vertices;
-  for (uint32_t z = 0; z < layers; ++z) {
-    float jitterX = (z % 8) * 0.05f;
-    float jitterY = (z / 8) * 0.05f;
-    for (uint32_t y = 0; y < gridSize; ++y) {
-      for (uint32_t x = 0; x < gridSize; ++x) {
-        float fx = (float)x - 8.0f + jitterX;
-        float fy = (float)y - 8.0f + jitterY;
-        float fz = (float)z * 0.1f;
-        vertices.push_back(fx + 0.1f);
-        vertices.push_back(fy + 0.1f);
-        vertices.push_back(fz);
-        vertices.push_back(fx + 0.9f);
-        vertices.push_back(fy + 0.1f);
-        vertices.push_back(fz);
-        vertices.push_back(fx + 0.5f);
-        vertices.push_back(fy + 0.9f);
-        vertices.push_back(fz);
-      }
-    }
+  vertices.reserve(numPrimitives * 9);
+  for (uint32_t i = 0; i < numPrimitives; ++i) {
+    float x = (std::sin(i * 1.3f) * 500.0f);
+    float y = (std::cos(i * 1.7f) * 500.0f);
+    float z = (std::sin(i * 2.3f) * 500.0f);
+    vertices.push_back(x + 0.1f);
+    vertices.push_back(y + 0.1f);
+    vertices.push_back(z);
+    vertices.push_back(x + 0.9f);
+    vertices.push_back(y + 0.1f);
+    vertices.push_back(z);
+    vertices.push_back(x + 0.5f);
+    vertices.push_back(y + 0.9f);
+    vertices.push_back(z);
   }
   vertexBuffer =
       context.createBuffer(vertices.size() * sizeof(float), vertices.data());
 
   std::vector<VkAabbPositionsKHR> aabbs;
-  for (uint32_t z = 0; z < layers; ++z) {
-    float jitterX = (z % 8) * 0.05f;
-    float jitterY = (z / 8) * 0.05f;
-    for (uint32_t y = 0; y < gridSize; ++y) {
-      for (uint32_t x = 0; x < gridSize; ++x) {
-        float fx = (float)x - 8.0f + jitterX;
-        float fy = (float)y - 8.0f + jitterY;
-        float fz = (float)z * 0.1f;
-        aabbs.push_back({fx + 0.1f, fy + 0.1f, fz - 0.01f, fx + 0.9f, fy + 0.9f,
-                         fz + 0.01f});
-      }
-    }
+  aabbs.reserve(numPrimitives);
+  for (uint32_t i = 0; i < numPrimitives; ++i) {
+    float x = (std::sin(i * 1.3f) * 500.0f);
+    float y = (std::cos(i * 1.7f) * 500.0f);
+    float z = (std::sin(i * 2.3f) * 500.0f);
+    aabbs.push_back({x, y, z, x + 1.0f, y + 1.0f, z + 1.0f});
   }
   aabbBuffer = context.createBuffer(aabbs.size() * sizeof(VkAabbPositionsKHR),
                                     aabbs.data());
@@ -380,7 +369,8 @@ void RayTracingBench::Teardown() {
 }
 
 BenchmarkResult RayTracingBench::GetResult(uint32_t config_idx) const {
-  // Each ray hits exactly 64 layers in our structured grid
+  // Each ray traverses the deep BVH evaluating ~64 nodes, with minimal leaves
+  // hit.
   return {(uint64_t)rayCount * 64, 0.0};
 }
 

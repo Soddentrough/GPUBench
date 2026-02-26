@@ -1,5 +1,6 @@
 # Build directory
 build/
+build-windows/
 build-release/
 build-release-package/
 

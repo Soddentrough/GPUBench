@@ -235,8 +235,8 @@ BenchmarkResult CacheBench::GetResult(uint32_t config_idx) const {
 
   if (name == "L0 Cache Bandwidth" || name == "L1 Cache Bandwidth" ||
       name == "L2 Cache Bandwidth" || name == "L3 Cache Bandwidth") {
-    // Robust kernel: 1,000,000 iterations * 8 float4 loads * 16 bytes
-    operations = num_threads_bw * 8000000ULL * 16;
+    // Robust kernel loops 2,000 times * 8 float4 loads * 16 bytes
+    operations = num_threads_bw * 16000ULL * 16;
   } else if (name == "L0 Cache Latency" || name == "L1 Cache Latency" ||
              name == "L2 Cache Latency" || name == "L3 Cache Latency") {
     // 1,000,000 pointer chasing steps
