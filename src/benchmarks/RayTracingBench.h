@@ -25,6 +25,7 @@ public:
   }
   std::string GetConfigName(uint32_t config_idx) const override;
   const char *GetComponent(uint32_t config_idx = 0) const override;
+  const char *GetSubCategory(uint32_t config_idx = 0) const override;
 
 private:
   IComputeContext *context = nullptr;

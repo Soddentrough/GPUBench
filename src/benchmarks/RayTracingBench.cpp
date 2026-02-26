@@ -389,6 +389,10 @@ const char *RayTracingBench::GetComponent(uint32_t config_idx) const {
   return "Ray Tracing";
 }
 const char *RayTracingBench::GetMetric() const { return "GIS/s"; }
+const char *RayTracingBench::GetSubCategory(uint32_t config_idx) const {
+  return "Intersection tests";
+}
+
 std::string RayTracingBench::GetConfigName(uint32_t config_idx) const {
   return config_idx == 0 ? "Ray-Triangle" : "Ray-Box";
 }
