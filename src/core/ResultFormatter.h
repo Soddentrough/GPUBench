@@ -16,6 +16,7 @@ struct ResultData {
   bool isEmulated;
   uint32_t maxWorkGroupSize;
   uint32_t deviceIndex;
+  uint32_t configIndex;
   int sortWeight;
 };
 

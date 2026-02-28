@@ -91,12 +91,12 @@ void ResultFormatter::print() {
   // We use std::map to keep things sorted alphabetically (Component,
   // SubCategory) For benchmarks within a subcategory, we might want a specific
   // order.
-  std::map<
-      uint32_t,
-      std::map<
-          std::pair<int, std::string>,          // Component (weight, name)
-          std::map<std::pair<int, std::string>, // SubCategory (weight, name)
-                   std::map<std::string, std::map<std::string, ResultData>>>>>
+  std::map<uint32_t,
+           std::map<std::pair<int, std::string>, // Component (weight, name)
+                    std::map<std::pair<int, std::string>, // SubCategory
+                                                          // (weight, name)
+                             std::map<std::pair<uint32_t, std::string>,
+                                      std::map<std::string, ResultData>>>>>
       organizedData;
 
   size_t maxBenchNameLen = 30; // Minimum width
@@ -114,8 +114,8 @@ void ResultFormatter::print() {
       compWeight = 2;
 
     organizedData[res.deviceIndex][{compWeight, res.component}]
-                 [{res.sortWeight, res.subcategory}][name][res.backendName] =
-                     res;
+                 [{res.sortWeight, res.subcategory}][{res.configIndex, name}]
+                 [res.backendName] = res;
 
     if (name.length() > maxBenchNameLen) {
       maxBenchNameLen = name.length();
@@ -168,7 +168,7 @@ void ResultFormatter::print() {
 
         const auto &benchmarks = subcatPair.second;
         for (const auto &benchPair : benchmarks) {
-          const std::string &benchName = benchPair.first;
+          const std::string &benchName = benchPair.first.second;
           std::cout << "      - " << std::left << std::setw(maxBenchNameLen)
                     << benchName;
 
@@ -212,10 +212,13 @@ void ResultFormatter::print() {
               } else {
                 value = (static_cast<double>(res.operations) /
                          (res.time_ms / 1000.0));
+                int precision = 2;
                 if (res.metric == "GIS/s" || res.metric == "GRays/s") {
                   value /= 1e9;
+                  if (res.metric == "GRays/s")
+                    precision = 3;
                 }
-                valStr = formatDouble(value, 2);
+                valStr = formatDouble(value, precision);
                 unit = " " + res.metric;
               }
 

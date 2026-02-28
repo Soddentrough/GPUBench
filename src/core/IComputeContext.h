@@ -90,6 +90,14 @@ public:
   virtual ComputeKernel createKernel(const std::string &file_name,
                                      const std::string &kernel_name,
                                      uint32_t num_args) = 0;
+
+  // Create an RT pipeline from multiple shaders (raygen, miss, closest hits)
+  virtual ComputeKernel
+  createRTPipeline(const std::string &rgen_path, const std::string &rmiss_path,
+                   const std::vector<std::string> &rchit_paths,
+                   uint32_t num_args) {
+    return nullptr;
+  }
   virtual void setKernelArg(ComputeKernel kernel, uint32_t arg_index,
                             ComputeBuffer buffer) = 0;
   virtual void setKernelAS(ComputeKernel kernel, uint32_t arg_index,

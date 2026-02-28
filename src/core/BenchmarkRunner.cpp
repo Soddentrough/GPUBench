@@ -8,6 +8,7 @@
 #include "benchmarks/Int4Bench.h"
 #include "benchmarks/Int8Bench.h"
 #include "benchmarks/MemBandwidthBench.h"
+#include "benchmarks/RayDivergenceBench.h"
 #include "benchmarks/RayTracingBench.h"
 #include "benchmarks/SysMemBandwidthBench.h"
 #include "benchmarks/SysMemLatencyBench.h"
@@ -70,6 +71,7 @@ void BenchmarkRunner::discoverBenchmarks() {
   benchmarks.push_back(std::make_unique<SysMemBandwidthBench>());
   benchmarks.push_back(std::make_unique<SysMemLatencyBench>());
   benchmarks.push_back(std::make_unique<RayTracingBench>());
+  benchmarks.push_back(std::make_unique<RayDivergenceBench>());
 
   // Cache Bandwidth
   const size_t l0_size = 16 * 1024; // 16KB L0 cache
@@ -395,6 +397,7 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
                 result_data.subcategory = bench->GetSubCategory(i);
                 result_data.maxWorkGroupSize = info.maxWorkGroupSize;
                 result_data.deviceIndex = context->getSelectedDeviceIndex();
+                result_data.configIndex = i;
                 result_data.sortWeight = bench->GetSortWeight();
 
                 formatter->addResult(result_data);
@@ -518,6 +521,7 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
             result_data.subcategory = bench->GetSubCategory(i);
             result_data.maxWorkGroupSize = 0;
             result_data.deviceIndex = 0xFFFFFFFF;
+            result_data.configIndex = i;
             result_data.sortWeight = bench->GetSortWeight();
 
             formatter->addResult(result_data);

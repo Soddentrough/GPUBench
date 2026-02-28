@@ -85,7 +85,7 @@ endif()
 
 # Shader/Kernel sources
 if(Vulkan_FOUND)
-    file(GLOB SHADERS "shaders/*.comp")
+    file(GLOB SHADERS "shaders/*.comp" "shaders/*.rgen" "shaders/*.rmiss" "shaders/*.rchit")
     # Filter out problematic shaders that use non-standard extensions
     list(REMOVE_ITEM SHADERS 
         "${CMAKE_CURRENT_SOURCE_DIR}/shaders/coop_matrix_fp8.comp"
@@ -103,7 +103,7 @@ if(Vulkan_FOUND)
         # Pre-compile GLSL to SPIR-V
         add_custom_command(
             OUTPUT ${SPV_SHADER}
-            COMMAND ${GLSLC_EXECUTABLE} -O --target-env=vulkan1.3 ${SHADER} -o ${SPV_SHADER}
+            COMMAND ${GLSLC_EXECUTABLE} -O --target-env=vulkan1.4 ${SHADER} -o ${SPV_SHADER}
             DEPENDS ${SHADER}
             COMMENT "Compiling Vulkan shader to SPIR-V: ${SHADER}"
         )
@@ -186,6 +186,7 @@ set(SOURCES
     src/benchmarks/CacheBench.cpp
     src/benchmarks/Fp6Bench.cpp
     src/benchmarks/RayTracingBench.cpp
+    src/benchmarks/RayDivergenceBench.cpp
     src/utils/KernelPath.cpp
     src/utils/ShaderCache.cpp
 )
