@@ -38,6 +38,10 @@ public:
   ComputeKernel createKernel(const std::string &file_name,
                              const std::string &kernel_name,
                              uint32_t num_buffer_args) override;
+  ComputeKernel createRTPipeline(const std::string &rgen_path,
+                                 const std::string &rmiss_path,
+                                 const std::vector<std::string> &rchit_paths,
+                                 uint32_t num_buffer_args) override;
   void setKernelArg(ComputeKernel kernel, uint32_t arg_index,
                     ComputeBuffer buffer) override;
   void setKernelAS(ComputeKernel kernel, uint32_t arg_index,
@@ -96,6 +100,12 @@ private:
     std::map<uint32_t, ComputeBuffer> arg_buffers;
     uint32_t numBufferDescriptors;
     std::vector<uint8_t> pushConstantData;
+    bool isRTPipeline = false;
+    VkStridedDeviceAddressRegionKHR rgenRegion{};
+    VkStridedDeviceAddressRegionKHR missRegion{};
+    VkStridedDeviceAddressRegionKHR hitRegion{};
+    VkStridedDeviceAddressRegionKHR callRegion{};
+    ComputeBuffer sbtBuffer = nullptr;
   };
 
   void createInstance();

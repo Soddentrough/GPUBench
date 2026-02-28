@@ -52,7 +52,7 @@ void VulkanContext::createInstance() {
   appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
   appInfo.pEngineName = "No Engine";
   appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
-  appInfo.apiVersion = VK_API_VERSION_1_3;
+  appInfo.apiVersion = VK_API_VERSION_1_4;
 
   VkInstanceCreateInfo createInfo{};
   createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
@@ -338,6 +338,16 @@ void VulkanContext::createDevice() {
   } floatControls2Features{(
       VkStructureType)1000528001}; // VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT_CONTROLS_2_FEATURES_KHR
 
+  VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtPipelineFeatures{
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR};
+
+  struct VkPhysicalDeviceRayTracingInvocationReorderFeaturesEXTCustom {
+    VkStructureType sType;
+    void *pNext;
+    VkBool32 rayTracingInvocationReorderEXT;
+  } serFeatures{(
+      VkStructureType)1000581000}; // VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_INVOCATION_REORDER_FEATURES_EXT
+
   features2.pNext = &features168;
   features168.pNext = &features16Storage;
   features16Storage.pNext = &features8Storage;
@@ -348,6 +358,8 @@ void VulkanContext::createDevice() {
   rayQueryFeatures.pNext = &bufferDeviceAddressFeatures;
   bufferDeviceAddressFeatures.pNext = &float8Features;
   float8Features.pNext = &floatControls2Features;
+  floatControls2Features.pNext = &rtPipelineFeatures;
+  rtPipelineFeatures.pNext = &serFeatures;
 
   // Query supported features and enable them
   vkGetPhysicalDeviceFeatures2(physicalDevice, &features2);
@@ -363,8 +375,10 @@ void VulkanContext::createDevice() {
       VK_KHR_RAY_QUERY_EXTENSION_NAME,
       VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
       VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
+      VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
       "VK_EXT_shader_float8",
-      "VK_KHR_shader_float_controls2"};
+      "VK_KHR_shader_float_controls2",
+      "VK_EXT_ray_tracing_invocation_reorder"};
 
   // Filter extensions to only request supported ones
   uint32_t extensionCount;
@@ -681,9 +695,24 @@ ComputeKernel VulkanContext::createKernel(const std::string &file_name,
                                           const std::string &kernel_name,
                                           uint32_t num_buffer_args) {
   notifyKernelCreated(file_name);
+  if (file_name.find(".rgen") != std::string::npos ||
+      file_name.find(".rmiss") != std::string::npos ||
+      file_name.find(".rchit") != std::string::npos) {
+    if (verbose) {
+      std::cout << "Skipping compute compile for RT shader: " << file_name
+                << "\n";
+    }
+    return nullptr;
+  }
   bool is_glsl = false;
-  if (file_name.size() > 5 &&
-      file_name.substr(file_name.size() - 5) == ".comp") {
+  std::string file_ext;
+  size_t last_dot = file_name.find_last_of('.');
+  if (last_dot != std::string::npos) {
+    file_ext = file_name.substr(last_dot);
+  }
+
+  if (file_ext == ".comp" || file_ext == ".rgen" || file_ext == ".rmiss" ||
+      file_ext == ".rchit" || file_ext == ".rahit" || file_ext == ".rint") {
     is_glsl = true;
   }
 
@@ -986,22 +1015,39 @@ void VulkanContext::dispatch(ComputeKernel kernel, uint32_t grid_x,
   beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
   vkBeginCommandBuffer(commandBuffer, &beginInfo);
-  vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
-                    vulkanKernel->pipeline);
-  vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+  VkPipelineBindPoint bindPoint = vulkanKernel->isRTPipeline
+                                      ? VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR
+                                      : VK_PIPELINE_BIND_POINT_COMPUTE;
+
+  vkCmdBindPipeline(commandBuffer, bindPoint, vulkanKernel->pipeline);
+  vkCmdBindDescriptorSets(commandBuffer, bindPoint,
                           vulkanKernel->pipelineLayout, 0, 1,
                           &vulkanKernel->descriptorSet, 0, nullptr);
 
   // Push constants for non-buffer arguments
   if (!vulkanKernel->pushConstantData.empty()) {
+    VkShaderStageFlags stageFlags = vulkanKernel->isRTPipeline
+                                        ? (VK_SHADER_STAGE_RAYGEN_BIT_KHR |
+                                           VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR |
+                                           VK_SHADER_STAGE_MISS_BIT_KHR)
+                                        : VK_SHADER_STAGE_COMPUTE_BIT;
+
     vkCmdPushConstants(
-        commandBuffer, vulkanKernel->pipelineLayout,
-        VK_SHADER_STAGE_COMPUTE_BIT, 0,
+        commandBuffer, vulkanKernel->pipelineLayout, stageFlags, 0,
         static_cast<uint32_t>(vulkanKernel->pushConstantData.size()),
         vulkanKernel->pushConstantData.data());
   }
 
-  vkCmdDispatch(commandBuffer, grid_x, grid_y, grid_z);
+  if (vulkanKernel->isRTPipeline) {
+    auto pfnTraceRays =
+        (PFN_vkCmdTraceRaysKHR)vkGetDeviceProcAddr(device, "vkCmdTraceRaysKHR");
+    pfnTraceRays(commandBuffer, &vulkanKernel->rgenRegion,
+                 &vulkanKernel->missRegion, &vulkanKernel->hitRegion,
+                 &vulkanKernel->callRegion, grid_x, grid_y, grid_z);
+  } else {
+    vkCmdDispatch(commandBuffer, grid_x, grid_y, grid_z);
+  }
+
   vkEndCommandBuffer(commandBuffer);
 
   VkSubmitInfo submitInfo{};
@@ -1022,7 +1068,12 @@ void VulkanContext::releaseKernel(ComputeKernel kernel) {
     vkDestroyPipelineLayout(device, vulkanKernel->pipelineLayout, nullptr);
     vkDestroyDescriptorSetLayout(device, vulkanKernel->descriptorSetLayout,
                                  nullptr);
-    vkDestroyShaderModule(device, vulkanKernel->shaderModule, nullptr);
+    if (vulkanKernel->shaderModule) {
+      vkDestroyShaderModule(device, vulkanKernel->shaderModule, nullptr);
+    }
+    if (vulkanKernel->sbtBuffer) {
+      releaseBuffer(vulkanKernel->sbtBuffer);
+    }
     vkDestroyDescriptorPool(device, vulkanKernel->descriptorPool, nullptr);
     delete vulkanKernel;
     kernels.erase(it);
@@ -1070,4 +1121,223 @@ void VulkanContext::printProgressBar(uint32_t current, uint32_t total,
   }
   std::cout << "] " << int(progress * 100.0) << "% Compiling " << short_name
             << (current == total ? "\n" : "") << std::flush;
+}
+
+ComputeKernel VulkanContext::createRTPipeline(
+    const std::string &rgen_path, const std::string &rmiss_path,
+    const std::vector<std::string> &rchit_paths, uint32_t num_buffer_args) {
+
+  auto load_shader = [&](const std::string &path) -> VkShaderModule {
+    std::string spv_path = path + ".spv";
+    std::ifstream file(spv_path, std::ios::ate | std::ios::binary);
+    if (!file.is_open())
+      throw std::runtime_error("Failed to open " + spv_path);
+    size_t fileSize = (size_t)file.tellg();
+    std::vector<uint32_t> buffer(fileSize / sizeof(uint32_t));
+    file.seekg(0);
+    file.read((char *)buffer.data(), fileSize);
+    file.close();
+
+    VkShaderModuleCreateInfo createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    createInfo.codeSize = buffer.size() * sizeof(uint32_t);
+    createInfo.pCode = buffer.data();
+    VkShaderModule shaderModule;
+    if (vkCreateShaderModule(device, &createInfo, nullptr, &shaderModule) !=
+        VK_SUCCESS) {
+      throw std::runtime_error("Failed to create shader module for " +
+                               spv_path);
+    }
+    return shaderModule;
+  };
+
+  VulkanKernel *vulkanKernel = new VulkanKernel();
+  vulkanKernel->isRTPipeline = true;
+  vulkanKernel->numBufferDescriptors = num_buffer_args;
+
+  std::vector<VkShaderModule> modules;
+  std::vector<VkPipelineShaderStageCreateInfo> stages;
+  std::vector<VkRayTracingShaderGroupCreateInfoKHR> groups;
+
+  auto add_stage = [&](VkShaderModule module, VkShaderStageFlagBits stage) {
+    VkPipelineShaderStageCreateInfo info{
+        VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO};
+    info.stage = stage;
+    info.module = module;
+    info.pName = "main";
+    stages.push_back(info);
+  };
+
+  // Raygen
+  VkShaderModule rgen_module = load_shader(rgen_path);
+  modules.push_back(rgen_module);
+  add_stage(rgen_module, VK_SHADER_STAGE_RAYGEN_BIT_KHR);
+  VkRayTracingShaderGroupCreateInfoKHR group{
+      VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR};
+  group.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
+  group.generalShader = 0;
+  group.closestHitShader = VK_SHADER_UNUSED_KHR;
+  group.anyHitShader = VK_SHADER_UNUSED_KHR;
+  group.intersectionShader = VK_SHADER_UNUSED_KHR;
+  groups.push_back(group);
+
+  // Miss
+  VkShaderModule rmiss_module = load_shader(rmiss_path);
+  modules.push_back(rmiss_module);
+  add_stage(rmiss_module, VK_SHADER_STAGE_MISS_BIT_KHR);
+  group.generalShader = 1;
+  groups.push_back(group);
+
+  // Closest Hits
+  for (size_t i = 0; i < rchit_paths.size(); i++) {
+    VkShaderModule rchit_module = load_shader(rchit_paths[i]);
+    modules.push_back(rchit_module);
+    add_stage(rchit_module, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR);
+
+    VkRayTracingShaderGroupCreateInfoKHR hitGroup{
+        VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR};
+    hitGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;
+    hitGroup.generalShader = VK_SHADER_UNUSED_KHR;
+    hitGroup.closestHitShader = 2 + i;
+    hitGroup.anyHitShader = VK_SHADER_UNUSED_KHR;
+    hitGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
+    groups.push_back(hitGroup);
+  }
+
+  // Descriptors and Layout
+  std::vector<VkDescriptorSetLayoutBinding> bindings;
+  for (uint32_t i = 0; i < num_buffer_args; i++) {
+    VkDescriptorSetLayoutBinding binding{};
+    binding.binding = i;
+    binding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    if (i == 0)
+      binding.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+    binding.descriptorCount = 1;
+    binding.stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR |
+                         VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR |
+                         VK_SHADER_STAGE_MISS_BIT_KHR;
+    bindings.push_back(binding);
+  }
+
+  VkDescriptorSetLayoutCreateInfo layoutInfo{
+      VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+  layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
+  layoutInfo.pBindings = bindings.data();
+  vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr,
+                              &vulkanKernel->descriptorSetLayout);
+
+  VkPushConstantRange pushConstant{};
+  pushConstant.stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR |
+                            VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR |
+                            VK_SHADER_STAGE_MISS_BIT_KHR;
+  pushConstant.offset = 0;
+  pushConstant.size = 128; // Up to 128 bytes
+  vulkanKernel->pushConstantData.resize(128);
+
+  VkPipelineLayoutCreateInfo pipelineLayoutInfo{
+      VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+  pipelineLayoutInfo.setLayoutCount = 1;
+  pipelineLayoutInfo.pSetLayouts = &vulkanKernel->descriptorSetLayout;
+  pipelineLayoutInfo.pushConstantRangeCount = 1;
+  pipelineLayoutInfo.pPushConstantRanges = &pushConstant;
+  vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr,
+                         &vulkanKernel->pipelineLayout);
+
+  // Pipeline execution
+  VkRayTracingPipelineCreateInfoKHR pipelineInfo{
+      VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR};
+  pipelineInfo.stageCount = static_cast<uint32_t>(stages.size());
+  pipelineInfo.pStages = stages.data();
+  pipelineInfo.groupCount = static_cast<uint32_t>(groups.size());
+  pipelineInfo.pGroups = groups.data();
+  pipelineInfo.maxPipelineRayRecursionDepth = 1;
+  pipelineInfo.layout = vulkanKernel->pipelineLayout;
+
+  auto pfnCreateRays = (PFN_vkCreateRayTracingPipelinesKHR)vkGetDeviceProcAddr(
+      device, "vkCreateRayTracingPipelinesKHR");
+  if (pfnCreateRays(device, VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &pipelineInfo,
+                    nullptr, &vulkanKernel->pipeline) != VK_SUCCESS) {
+    throw std::runtime_error("Failed to create RT Pipeline");
+  }
+
+  // SBT
+  VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProps{
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR};
+  VkPhysicalDeviceProperties2 props2{
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
+  props2.pNext = &rtProps;
+  vkGetPhysicalDeviceProperties2(physicalDevice, &props2);
+
+  uint32_t handleSize = rtProps.shaderGroupHandleSize;
+  uint32_t handleSizeAligned =
+      (handleSize + rtProps.shaderGroupHandleAlignment - 1) &
+      ~(rtProps.shaderGroupHandleAlignment - 1);
+  uint32_t groupCount = static_cast<uint32_t>(groups.size());
+  uint32_t sbtSize = groupCount * handleSizeAligned;
+
+  std::vector<uint8_t> handles(groupCount * handleSize);
+  auto pfnGetHandles =
+      (PFN_vkGetRayTracingShaderGroupHandlesKHR)vkGetDeviceProcAddr(
+          device, "vkGetRayTracingShaderGroupHandlesKHR");
+  pfnGetHandles(device, vulkanKernel->pipeline, 0, groupCount, handles.size(),
+                handles.data());
+
+  vulkanKernel->sbtBuffer = createBuffer(sbtSize);
+  VkBuffer vkSbt = getVkBuffer(vulkanKernel->sbtBuffer);
+  VkDeviceAddress sbtAddr = getBufferDeviceAddress(vulkanKernel->sbtBuffer);
+
+  // Upload handles
+  std::vector<uint8_t> sbtData(sbtSize, 0);
+  for (uint32_t i = 0; i < groupCount; i++) {
+    memcpy(sbtData.data() + i * handleSizeAligned,
+           handles.data() + i * handleSize, handleSize);
+  }
+  writeBuffer(vulkanKernel->sbtBuffer, 0, sbtSize, sbtData.data());
+
+  // Regions
+  // 0: rgen, 1: miss, 2..N: closest hit
+  vulkanKernel->rgenRegion.deviceAddress = sbtAddr;
+  vulkanKernel->rgenRegion.stride = handleSizeAligned;
+  vulkanKernel->rgenRegion.size = handleSizeAligned;
+
+  vulkanKernel->missRegion.deviceAddress = sbtAddr + handleSizeAligned;
+  vulkanKernel->missRegion.stride = handleSizeAligned;
+  vulkanKernel->missRegion.size = handleSizeAligned;
+
+  vulkanKernel->hitRegion.deviceAddress = sbtAddr + 2 * handleSizeAligned;
+  vulkanKernel->hitRegion.stride = handleSizeAligned;
+  vulkanKernel->hitRegion.size = (groupCount - 2) * handleSizeAligned;
+
+  vulkanKernel->callRegion.deviceAddress = 0;
+  vulkanKernel->callRegion.stride = 0;
+  vulkanKernel->callRegion.size = 0;
+
+  // Cleanup modules
+  for (auto m : modules) {
+    vkDestroyShaderModule(device, m, nullptr);
+  }
+
+  // Allocate Descriptor Sets
+  std::vector<VkDescriptorPoolSize> poolSizes = {
+      {VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1},
+      {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, num_buffer_args - 1}
+      // assuming first is AS, rest are buffers
+  };
+  VkDescriptorPoolCreateInfo poolInfo{
+      VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+  poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
+  poolInfo.pPoolSizes = poolSizes.data();
+  poolInfo.maxSets = 1;
+  vkCreateDescriptorPool(device, &poolInfo, nullptr,
+                         &vulkanKernel->descriptorPool);
+
+  VkDescriptorSetAllocateInfo allocInfo{
+      VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+  allocInfo.descriptorPool = vulkanKernel->descriptorPool;
+  allocInfo.descriptorSetCount = 1;
+  allocInfo.pSetLayouts = &vulkanKernel->descriptorSetLayout;
+  vkAllocateDescriptorSets(device, &allocInfo, &vulkanKernel->descriptorSet);
+
+  kernels[vulkanKernel] = vulkanKernel;
+  return vulkanKernel;
 }
