@@ -19,6 +19,7 @@ public:
   void Teardown() override;
 
   BenchmarkResult GetResult(uint32_t config_idx = 0) const override;
+  void DumpGeometry() const override;
 
   uint32_t GetNumConfigs() const override { return 5; }
   std::vector<std::string> GetAliases() const override {
@@ -67,4 +68,5 @@ private:
 
   void loadRTProcs(VkDevice device);
   void buildAS();
+  void generateGeometry(std::vector<float> &vertices) const;
 };

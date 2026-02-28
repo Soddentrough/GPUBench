@@ -59,6 +59,10 @@ int main(int argc, char **argv) {
   bool debug = false;
   app.add_flag("--debug", debug, "Enable debug logging (implies verbose)");
 
+  bool dump_geometry = false;
+  app.add_flag("--dump-geometry", dump_geometry,
+               "Dump ray tracing geometry to OBJ files");
+
   CLI11_PARSE(app, argc, argv);
 
   // Default to device 0 if none specified
@@ -229,7 +233,7 @@ int main(int argc, char **argv) {
     }
 
     // We need to keep execution_contexts alive until runner finishes
-    BenchmarkRunner runner(context_ptrs, verbose, debug);
+    BenchmarkRunner runner(context_ptrs, verbose, debug, dump_geometry);
     runner.run(benchmarks_to_run);
 
     // execution_contexts will be destroyed here, cleaning up resources

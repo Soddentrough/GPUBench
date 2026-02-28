@@ -39,4 +39,8 @@ public:
     return "";
   }
   virtual int GetSortWeight() const { return 999; }
+
+  // Exports the scene geometry to an external file (e.g. OBJ) for
+  // visualization.
+  virtual void DumpGeometry() const {}
 };

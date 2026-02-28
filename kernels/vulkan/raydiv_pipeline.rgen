@@ -50,6 +50,9 @@ void main() {
         sbtOffset = hash(idx + pc.seed * 3) % 4;
     }
     
+    // TODO: Investigate using VK_EXT_ray_tracing_invocation_reorder (GL_EXT_shader_invocation_reorder) 
+    // for hardware Shader Execution Reordering (SER).
+    // Currently disabled because parsing hitObjectEXT opcodes causes radv/Mesa to crash during SPIR-V compilation.
     traceRayEXT(topLevelAS, gl_RayFlagsNoneEXT, 0xFF, sbtOffset, 1, 0, origin, 0.001, dir, 100.0, 0);
 
     atomicAdd(hits, uint(payload.x * 100.0) + uint(payload.y * 10.0) + uint(payload.z));

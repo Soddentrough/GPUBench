@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 
 bool RayTracingBench::IsSupported(const DeviceInfo &info,
@@ -399,4 +400,66 @@ const char *RayTracingBench::GetSubCategory(uint32_t config_idx) const {
 
 std::string RayTracingBench::GetConfigName(uint32_t config_idx) const {
   return config_idx == 0 ? "Ray-Triangle" : "Ray-Box";
+}
+
+void RayTracingBench::DumpGeometry() const {
+  std::ofstream objFile("raytracing_scene.obj");
+  uint32_t gridSize = 16;
+  uint32_t layers = 64;
+  uint32_t vIdx = 1;
+
+  for (uint32_t z = 0; z < layers; ++z) {
+    float jitterX = (z % 8) * 0.05f;
+    float jitterY = (z / 8) * 0.05f;
+    for (uint32_t y = 0; y < gridSize; ++y) {
+      for (uint32_t x = 0; x < gridSize; ++x) {
+        float fx = (float)x - 8.0f + jitterX;
+        float fy = (float)y - 8.0f + jitterY;
+        float fz = (float)z * 0.1f;
+
+        // Triangle
+        objFile << "v " << fx + 0.1f << " " << fy + 0.1f << " " << fz << "\n";
+        objFile << "v " << fx + 0.4f << " " << fy + 0.1f << " " << fz << "\n";
+        objFile << "v " << fx + 0.1f << " " << fy + 0.4f << " " << fz << "\n";
+        objFile << "f " << vIdx << " " << vIdx + 1 << " " << vIdx + 2 << "\n";
+        vIdx += 3;
+
+        // Box as Cube (12 triangles)
+        float x0 = fx + 0.1f, y0 = fy + 0.1f, z0 = fz - 0.01f;
+        float x1 = fx + 0.4f, y1 = fy + 0.4f, z1 = fz + 0.01f;
+
+        // 8 Vertices
+        objFile << "v " << x0 << " " << y0 << " " << z0 << "\n";
+        objFile << "v " << x1 << " " << y0 << " " << z0 << "\n";
+        objFile << "v " << x1 << " " << y1 << " " << z0 << "\n";
+        objFile << "v " << x0 << " " << y1 << " " << z0 << "\n";
+        objFile << "v " << x0 << " " << y0 << " " << z1 << "\n";
+        objFile << "v " << x1 << " " << y0 << " " << z1 << "\n";
+        objFile << "v " << x1 << " " << y1 << " " << z1 << "\n";
+        objFile << "v " << x0 << " " << y1 << " " << z1 << "\n";
+
+        auto f = [&](int a, int b, int c) {
+          objFile << "f " << vIdx + a << " " << vIdx + b << " " << vIdx + c
+                  << "\n";
+        };
+        // Front, Back, Top, Bottom, Left, Right
+        f(0, 1, 2);
+        f(0, 2, 3);
+        f(5, 4, 7);
+        f(5, 7, 6);
+        f(4, 5, 1);
+        f(4, 1, 0);
+        f(3, 2, 6);
+        f(3, 6, 7);
+        f(4, 0, 3);
+        f(4, 3, 7);
+        f(1, 5, 6);
+        f(1, 6, 2);
+
+        vIdx += 8;
+      }
+    }
+  }
+  objFile.close();
+  std::cout << "Geometry dumped to raytracing_scene.obj" << std::endl;
 }

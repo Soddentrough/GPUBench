@@ -89,17 +89,6 @@ void RayDivergenceBench::Setup(IComputeContext &context,
   addPlane(0.0f);   // Floor
   addPlane(-20.0f); // Ceiling
 
-  // Export the generated geometry to an OBJ file for visualization in Blender
-  std::ofstream objFile("raydiv_scene.obj");
-  for (size_t i = 0; i < vertices.size(); i += 3) {
-    objFile << "v " << vertices[i] << " " << vertices[i + 1] << " "
-            << vertices[i + 2] << "\n";
-  }
-  for (size_t i = 1; i <= vertices.size() / 3; i += 3) {
-    objFile << "f " << i << " " << i + 1 << " " << i + 2 << "\n";
-  }
-  objFile.close();
-
   vertexBuffer =
       context.createBuffer(vertices.size() * sizeof(float), vertices.data());
 
@@ -110,7 +99,8 @@ void RayDivergenceBench::Setup(IComputeContext &context,
       (kdir / "vulkan" / "raydiv_pipeline_a.rchit").string(),
       (kdir / "vulkan" / "raydiv_pipeline_b.rchit").string(),
       (kdir / "vulkan" / "raydiv_pipeline_c.rchit").string(),
-      (kdir / "vulkan" / "raydiv_pipeline_d.rchit").string()};
+      (kdir / "vulkan" / "raydiv_pipeline_d.rchit").string(),
+      (kdir / "vulkan" / "raydiv_pipeline_e.rchit").string()};
 
   try {
     VulkanContext *vContext = dynamic_cast<VulkanContext *>(&context);
@@ -373,4 +363,95 @@ std::string RayDivergenceBench::GetConfigName(uint32_t config_idx) const {
     label += " (Perfectly Diffuse)";
 
   return label;
+}
+
+void RayDivergenceBench::generateGeometry(std::vector<float> &vertices) const {
+  uint32_t gridSize = 256;
+  uint32_t primitivesPerPlane = gridSize * gridSize * 2;
+  vertices.reserve(primitivesPerPlane * 2 * 9);
+
+  auto addPlane = [&](float z) {
+    float scale = 200.0f / gridSize;
+    for (uint32_t y = 0; y < gridSize; ++y) {
+      for (uint32_t x = 0; x < gridSize; ++x) {
+        float fx0 = (float)x * scale - 100.0f;
+        float fy0 = (float)y * scale - 100.0f;
+        float fx1 = (float)(x + 1) * scale - 100.0f;
+        float fy1 = (float)(y + 1) * scale - 100.0f;
+
+        // Triangle 1
+        vertices.push_back(fx0);
+        vertices.push_back(fy0);
+        vertices.push_back(z);
+        vertices.push_back(fx1);
+        vertices.push_back(fy0);
+        vertices.push_back(z);
+        vertices.push_back(fx0);
+        vertices.push_back(fy1);
+        vertices.push_back(z);
+        // Triangle 2
+        vertices.push_back(fx1);
+        vertices.push_back(fy0);
+        vertices.push_back(z);
+        vertices.push_back(fx1);
+        vertices.push_back(fy1);
+        vertices.push_back(z);
+        vertices.push_back(fx0);
+        vertices.push_back(fy1);
+        vertices.push_back(z);
+      }
+    }
+  };
+
+  addPlane(0.0f);   // Floor
+  addPlane(-20.0f); // Ceiling
+}
+
+void RayDivergenceBench::DumpGeometry() const {
+  std::vector<float> vertices;
+  generateGeometry(vertices);
+
+  std::ofstream mtlFile("raydiv_scene.mtl");
+  mtlFile << "newmtl MaterialA\nKd 1.0 0.5 0.5\nPr 0.0\nNs 1000\n";
+  mtlFile << "newmtl MaterialB\nKd 0.5 1.0 0.5\nPr 0.25\nNs 400\n";
+  mtlFile << "newmtl MaterialC\nKd 0.5 0.5 1.0\nPr 0.5\nNs 100\n";
+  mtlFile << "newmtl MaterialD\nKd 1.0 1.0 0.5\nPr 0.75\nNs 25\n";
+  mtlFile << "newmtl MaterialE\nKd 1.0 0.5 1.0\nPr 1.0\nNs 1\n";
+  mtlFile.close();
+
+  std::ofstream objFile("raydiv_scene.obj");
+  objFile << "mtllib raydiv_scene.mtl\n";
+
+  for (size_t i = 0; i < vertices.size(); i += 3) {
+    objFile << "v " << vertices[i] << " " << vertices[i + 1] << " "
+            << vertices[i + 2] << "\n";
+  }
+
+  uint32_t gridSize = 256;
+  uint32_t vIdx = 1;
+
+  auto writePlaneFaces = [&](bool isCeiling) {
+    for (uint32_t y = 0; y < gridSize; ++y) {
+      for (uint32_t x = 0; x < gridSize; ++x) {
+        // Material is based on x-coordinate stripping for 5 materials
+        uint32_t matIdx = x % 5;
+        char matChar = 'A' + matIdx;
+        objFile << "usemtl Material" << matChar << "\n";
+
+        // Triangle 1
+        objFile << "f " << vIdx << " " << vIdx + 1 << " " << vIdx + 2 << "\n";
+        // Triangle 2
+        objFile << "f " << vIdx + 3 << " " << vIdx + 4 << " " << vIdx + 5
+                << "\n";
+        vIdx += 6;
+      }
+    }
+  };
+
+  writePlaneFaces(false); // Floor
+  writePlaneFaces(true);  // Ceiling
+
+  objFile.close();
+  std::cout << "Geometry dumped to raydiv_scene.obj and raydiv_scene.mtl"
+            << std::endl;
 }

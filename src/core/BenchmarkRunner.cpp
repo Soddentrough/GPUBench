@@ -35,8 +35,9 @@ std::vector<uint32_t> create_shuffled_indices(size_t size) {
 }
 
 BenchmarkRunner::BenchmarkRunner(const std::vector<IComputeContext *> &contexts,
-                                 bool verbose, bool debug)
-    : contexts(contexts), verbose(verbose), debug(debug) {
+                                 bool verbose, bool debug, bool dumpGeometry)
+    : contexts(contexts), verbose(verbose), debug(debug),
+      dumpGeometry(dumpGeometry) {
   for (auto *context : contexts) {
     context->setVerbose(verbose);
   }
@@ -318,6 +319,9 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
           }
 
           if (should_run && bench->IsSupported(info, context)) {
+            if (dumpGeometry) {
+              bench->DumpGeometry();
+            }
             if (!bench->IsDeviceDependent())
               continue; // Run system benchmarks separately
 
