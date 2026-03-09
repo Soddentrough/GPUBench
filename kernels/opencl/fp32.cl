@@ -4,20 +4,21 @@ __kernel void run_benchmark(__global float* data, float multiplier, uint num_ele
     uint index = get_global_id(0);
     if (index >= num_elements) return;
 
-    // Work with multiple accumulators to avoid dependency chains
-    float4 val1 = (float4)(data[index]);
-    float4 val2 = (float4)(0.1f, 0.2f, 0.3f, 0.4f);
-    float4 val3 = (float4)(0.5f, 0.6f, 0.7f, 0.8f);
-    float4 val4 = (float4)(0.9f, 1.0f, 1.1f, 1.2f);
-    
-    // Each iteration performs 4 vec4 FMAs = 4 * 4 * 2 = 32 FP32 ops
+    // 4 fully independent accumulators — no cross-reads between them.
+    // This matches the ROCm design that achieves spec throughput.
+    // 4 vec4 FMAs × 4 components × 2 ops = 32 FP32 ops per iteration.
+    float4 m   = (float4)(multiplier);
+    float4 v0  = (float4)(data[index]);
+    float4 v1  = (float4)(0.10f, 0.11f, 0.12f, 0.13f);
+    float4 v2  = (float4)(0.20f, 0.21f, 0.22f, 0.23f);
+    float4 v3  = (float4)(0.30f, 0.31f, 0.32f, 0.33f);
+
     for (int i = 0; i < 16384; ++i) {
-        val1 = fma(val1, (float4)(1.0001f), val2);
-        val2 = fma(val2, (float4)(1.0001f), val3);
-        val3 = fma(val3, (float4)(1.0001f), val4);
-        val4 = fma(val4, (float4)(1.0001f), val1);
+        v0 = fma(v0, m, (float4)(0.001f));
+        v1 = fma(v1, m, (float4)(0.002f));
+        v2 = fma(v2, m, (float4)(0.003f));
+        v3 = fma(v3, m, (float4)(0.004f));
     }
-    
-    // Prevent optimization away
-    data[index] = val1.x + val2.y + val3.z + val4.w;
+
+    data[index] = v0.x + v1.y + v2.z + v3.w;
 }

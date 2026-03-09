@@ -10,22 +10,28 @@ layout(set = 0, binding = 0) buffer Data {
 } buf;
 
 void main() {
-    // RDNA4: FP116 matrix A/B (16x16), FP32 accumulator C.
-    // Use explicit scope 3 (Subgroup). gl_ScopeSubgroup = 3.
+    // RDNA4: V_WMMA_F32_16X16X16_F16 — each instruction: 16*16*16*2 = 8192 FP16 ops per wave32.
+    // Single accumulator leaves WMMA pipeline stalled on its own RAW hazard (~16+ cycle latency).
+    // Two independent C matrices (matC0, matC1) let the hardware issue matC1's WMMA
+    // while matC0's latency resolves, doubling effective pipeline occupancy.
+
     coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseA> matA;
     coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseB> matB;
-    coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC;
+    coopmat<float,     gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC0;
+    coopmat<float,     gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC1;
 
-    // Use non-suffixed names. Stride 16, Layout 0 (Row Major).
-    coopMatLoad(matA, buf.data, 0u, 16u, 0);
-    coopMatLoad(matB, buf.data, 0u, 16u, 0);
-    
-    // Initialize Accumulator
-    matC = coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(0.0);
+    coopMatLoad(matA, buf.data, 0u, 16u, gl_CooperativeMatrixLayoutRowMajorKHR);
+    coopMatLoad(matB, buf.data, 0u, 16u, gl_CooperativeMatrixLayoutRowMajorKHR);
 
+    matC0 = coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(0.0);
+    matC1 = coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(1.0);
+
+    // Interleaved dual-tile loop: WMMA hardware can overlap C1 with C0's result latency.
     for (int i = 0; i < 32768; ++i) {
-        matC = coopMatMulAdd(matA, matB, matC);
+        matC0 = coopMatMulAdd(matA, matB, matC0);
+        matC1 = coopMatMulAdd(matA, matB, matC1);
     }
 
-    coopMatStore(matC, buf.data, 0u, 16u, 0);
+    coopMatStore(matC0, buf.data, 0u, 16u, gl_CooperativeMatrixLayoutRowMajorKHR);
+    coopMatStore(matC1, buf.data, 0u, 16u, gl_CooperativeMatrixLayoutRowMajorKHR);
 }

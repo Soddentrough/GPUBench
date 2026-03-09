@@ -15,19 +15,22 @@ layout(set = 0, binding = 1) buffer DataC {
 } BufferC;
 
 void main() {
-    coopmat<int8_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseA> matA;
-    coopmat<int8_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseB> matB;
-    coopmat<int32_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC;
+    coopmat<int8_t,  gl_ScopeSubgroup, 16, 16, gl_MatrixUseA> matA;
+    coopmat<int8_t,  gl_ScopeSubgroup, 16, 16, gl_MatrixUseB> matB;
+    coopmat<int32_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC0;
+    coopmat<int32_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC1;
 
-    // Use non-suffixed names.
     uint gid = gl_WorkGroupID.x;
-    coopMatLoad(matA, BufferA.data, (gid % 8192) * 256, 16u, 0);
-    coopMatLoad(matB, BufferA.data, (gid % 8192) * 256, 16u, 0);
-    coopMatLoad(matC, BufferC.data, (gid % 2048) * 256, 16u, 0);
+    coopMatLoad(matA, BufferA.data, (gid % 8192) * 256, 16u, gl_CooperativeMatrixLayoutRowMajorKHR);
+    coopMatLoad(matB, BufferA.data, (gid % 8192) * 256, 16u, gl_CooperativeMatrixLayoutRowMajorKHR);
+    coopMatLoad(matC0, BufferC.data, (gid % 2048) * 256, 16u, gl_CooperativeMatrixLayoutRowMajorKHR);
+    matC1 = coopmat<int32_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(1);
 
+    // Dual-tile interleaving: matC1's WMMA can issue while matC0's result latency resolves.
     for (int i = 0; i < 32768; ++i) {
-        matC = coopMatMulAdd(matA, matB, matC);
+        matC0 = coopMatMulAdd(matA, matB, matC0);
+        matC1 = coopMatMulAdd(matA, matB, matC1);
     }
 
-    coopMatStore(matC, BufferC.data, (gid % 2048) * 256, 16u, 0);
+    coopMatStore(matC0, BufferC.data, (gid % 2048) * 256, 16u, gl_CooperativeMatrixLayoutRowMajorKHR);
 }
