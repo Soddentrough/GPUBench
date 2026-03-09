@@ -7,7 +7,8 @@ extern "C" __global__ void run_benchmark(double* data) {
     const double c1 = 0.5;
     const double c2 = 0.25;
     double val = data[index];
-    for (int i = 0; i < 65536; ++i) {
+    // Loop count reduced from 65536 → 2048 (32×) to keep dispatch time <50ms.
+    for (int i = 0; i < 2048; ++i) {
         val = val * c1 + c2;
     }
     data[index] = val;

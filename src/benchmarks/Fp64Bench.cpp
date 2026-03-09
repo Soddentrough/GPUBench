@@ -53,8 +53,14 @@ void Fp64Bench::Teardown() {
 }
 
 BenchmarkResult Fp64Bench::GetResult(uint32_t config_idx) const {
-  // 2 operations per loop iteration (FMA)
+  // 2 operations per loop iteration (FMA).
+  // ROCm kernel loop reduced from 65536 → 2048 to avoid TDR timeout;
+  // Vulkan and OpenCL kernels still use 65536 iterations.
+  uint64_t iters = 65536;
+  if (context && context->getBackend() == ComputeBackend::ROCm) {
+    iters = 2048;
+  }
   uint64_t num_threads = 4096 * 64;
-  uint64_t num_ops = (uint64_t)65536 * 2 * num_threads;
+  uint64_t num_ops = iters * 2 * num_threads;
   return {num_ops, 0.0};
 }

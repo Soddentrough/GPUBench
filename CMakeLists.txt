@@ -1,12 +1,12 @@
 cmake_minimum_required(VERSION 3.16)
-project(GPUBench VERSION 1.0.1)
+project(GPUBench VERSION 1.0.2)
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Versioning
-set(BUILD_NUMBER "12") # Build number for the project
+set(BUILD_NUMBER "13") # Build number for the project
 set(PROJECT_FULL_VERSION "${PROJECT_VERSION}.${BUILD_NUMBER}")
 
 
@@ -21,8 +21,8 @@ configure_file(
     ${CMAKE_CURRENT_BINARY_DIR}/src/utils/Config.h
 )
 
-# Try to find Vulkan (primary backend)
-find_package(Vulkan REQUIRED)
+# Try to find Vulkan (primary backend) — optional so OpenCL/ROCm-only builds work
+find_package(Vulkan)
 if(Vulkan_FOUND)
     message(STATUS "Vulkan found: ${Vulkan_LIBRARIES}")
     # Try to find glslc, checking VULKAN_SDK environment variable if defined
@@ -184,7 +184,6 @@ set(SOURCES
     src/benchmarks/SysMemBandwidthBench.cpp
     src/benchmarks/SysMemLatencyBench.cpp
     src/benchmarks/CacheBench.cpp
-    src/benchmarks/Fp6Bench.cpp
     src/benchmarks/RayTracingBench.cpp
     src/benchmarks/RayDivergenceBench.cpp
     src/utils/KernelPath.cpp
@@ -312,7 +311,7 @@ if(Vulkan_FOUND)
 endif()
 
 if(OpenCL_FOUND)
-    file(GLOB OPENCL_KERNELS "${CMAKE_CURRENT_SOURCE_DIR}/kernels/*.cl")
+    file(GLOB OPENCL_KERNELS "${CMAKE_CURRENT_SOURCE_DIR}/kernels/opencl/*.cl")
     install(FILES ${OPENCL_KERNELS}
             DESTINATION share/gpubench/kernels/opencl)
 endif()
@@ -320,7 +319,7 @@ endif()
 if(HIP_FOUND)
     install(DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/kernels/rocm
             DESTINATION share/gpubench/kernels
-            FILES_MATCHING PATTERN "*.hip")
+            FILES_MATCHING PATTERN "*.hip" PATTERN "*.co")
 endif()
 
 # Install Windows batch script for easy benchmarking

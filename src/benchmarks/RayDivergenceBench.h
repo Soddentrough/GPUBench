@@ -4,7 +4,9 @@
 #include <fstream>
 #include <string>
 #include <vector>
+#ifdef HAVE_VULKAN
 #include <vulkan/vulkan.h>
+#endif
 
 class RayDivergenceBench : public IBenchmark {
 public:
@@ -34,6 +36,7 @@ private:
   ComputeKernel kernel = nullptr;
   ComputeBuffer resultBuffer = nullptr;
 
+#ifdef HAVE_VULKAN
   // Acceleration Structures
   VkAccelerationStructureKHR triangleBlas = VK_NULL_HANDLE;
   VkAccelerationStructureKHR boxBlas = VK_NULL_HANDLE;
@@ -60,13 +63,16 @@ private:
       vkGetAccelerationStructureDeviceAddressKHR_ptr = nullptr;
   PFN_vkDestroyAccelerationStructureKHR vkDestroyAccelerationStructureKHR_ptr =
       nullptr;
+#endif // HAVE_VULKAN
 
   uint32_t rayCount = 4000000;
   uint32_t numPrimitives = 4096;
   uint32_t iterations = 100;
   double rtResults[5] = {0.0};
 
+#ifdef HAVE_VULKAN
   void loadRTProcs(VkDevice device);
   void buildAS();
   void generateGeometry(std::vector<float> &vertices) const;
+#endif
 };

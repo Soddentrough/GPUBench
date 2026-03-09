@@ -3,7 +3,9 @@
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
-#include <immintrin.h>
+#ifndef _MSC_VER
+#include <immintrin.h>  // AVX2 intrinsics (GCC/Clang only)
+#endif
 #include <iostream>
 #include <numeric>
 #include <stdexcept>
@@ -19,9 +21,14 @@
 #define ALIGNED_FREE(ptr) free(ptr)
 #endif
 
-// Check for AVX2 support
-// This is a GCC/Clang builtin. For MSVC one would use __cpuid.
+// Check for AVX2 support.
+// __builtin_cpu_supports is a GCC/Clang builtin. MSVC does not support it;
+// on MSVC we always disable AVX2 and use the scalar fallback.
+#ifndef _MSC_VER
 static bool hasAVX2() { return __builtin_cpu_supports("avx2"); }
+#else
+static bool hasAVX2() { return false; }
+#endif
 
 SysMemBandwidthBench::SysMemBandwidthBench() {
   configs.push_back({"Read", SysMemTestMode::Read, 0});

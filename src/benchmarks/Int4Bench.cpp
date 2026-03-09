@@ -106,13 +106,17 @@ void Int4Bench::Teardown() {
 
 BenchmarkResult Int4Bench::GetResult(uint32_t config_idx) const {
   if (config_idx == 0) { // Vector
-    // 4 i8vec4 operations per iteration, each with multiply-add + AND = 3 ops
-    // per component 4 * 4 * 3 = 48 INT4-equivalent operations per iteration
-    uint64_t num_ops = (uint64_t)32768 * 48 * 8192 * 64;
+    // Shader (int4.comp): loop body has 4 MAD operations, each using i8vec4
+    // (4-bit values masked to 0x0F). There are 2 MAD pairs per body line ×
+    // 2 body lines = 4 MADs per iteration. Each MAD = 4 components × 2 ops
+    // (mul + add) = 8 ops. Total: 32768 iters × 4 MADs × 8 ops = 1024 ops per
+    // thread, but the loop unrolls 4 lines (val1 and val2 each updated twice).
+    // = 32768 iterations × 4 body lines × 4 components × 2 ops = 32768 * 128 ops
+    uint64_t num_ops = (uint64_t)32768 * 128 * 8192 * 64;
     return {num_ops, 0.0};
   } else { // Matrix
-    // 16x16x16 matmul = 8192 ops per iteration
-    // 16384 iterations * 8192 ops * 32768 subgroups
+    // 16×16×16 matmul = 8192 ops per iteration
+    // 16384 iterations × 8192 ops × 32768 subgroups
     uint64_t num_ops = (uint64_t)16384 * 8192 * 32768;
     return {num_ops, 0.0};
   }

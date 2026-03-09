@@ -2,7 +2,9 @@
 #include <filesystem>
 #include <iostream>
 #include <vector>
+#ifdef HAVE_VULKAN
 #include <vulkan/vulkan.h>
+#endif
 
 bool Int8Bench::IsSupported(const DeviceInfo &info,
                             IComputeContext *context) const {
@@ -53,8 +55,8 @@ void Int8Bench::Run(uint32_t config_idx) {
   if (config_idx == 0) {
     context->dispatch(vectorKernel, 8192, 1, 1, 64, 1, 1);
   } else if (matrixKernel) {
-    // Matrix mode uses 32x1x1 workgroups for cooperative matrices
-    context->dispatch(matrixKernel, 32768, 1, 1, 32, 1, 1);
+    // 65536 WGs of 32 threads each — double dispatch to saturate tensor units
+    context->dispatch(matrixKernel, 65536, 1, 1, 32, 1, 1);
   }
 }
 
@@ -75,14 +77,23 @@ void Int8Bench::Teardown() {
 
 BenchmarkResult Int8Bench::GetResult(uint32_t config_idx) const {
   if (config_idx == 0) {
-    // 16 i8vec4 multiply-adds per iteration = 16 * 4 * 2 = 128 INT8 operations
-    // per iteration. 65536 iterations * 128 ops * 8192 workgroups * 64 threads
-    uint64_t num_ops = (uint64_t)65536 * 128 * 8192 * 64;
+    // Shader: 8 i8vec4 multiply-adds per iteration.
+    // Each MAD on i8vec4 = 4 components × 2 ops = 8 ops per MAD.
+    // 8 MADs × 8 = 64 INT8 operations per iteration.
+    // Vulkan: 16384 iters. OpenCL: 16384 iters. ROCm: 512 iters.
+    uint64_t iters = 16384; // Vulkan/OpenCL default
+    if (context) {
+      if (context->getBackend() == ComputeBackend::ROCm) {
+        iters = 512;
+      }
+    }
+    uint64_t num_ops = iters * 64 * 8192 * 64;
     return {num_ops, 0.0};
   } else {
-    // Matrix mode: 16x16x16 matmul = 16 * 16 * 16 * 2 ops = 8192 ops per
-    // iteration 16384 iterations * 8192 ops * 32768 workgroups
-    uint64_t num_ops = (uint64_t)16384 * 8192 * 32768;
+    // coopmat 16x16x16: 16*16*16*2 = 8192 INT8 ops per coopMatMulAdd.
+    // Each subgroup (32 threads) computes one tile — not multiplied by thread count.
+    // Shader loops 32768 iters. Dispatch: 65536 WGs.
+    uint64_t num_ops = (uint64_t)65536 * 32768 * 8192;
     return {num_ops, 0.0};
   }
 }

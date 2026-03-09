@@ -25,14 +25,19 @@ CacheBench::CacheBench(std::string name, std::string metric,
       targetCacheLevel(targetCacheLevel) {}
 
 CacheBench::~CacheBench() {
-  if (buffer) {
-    context->releaseBuffer(buffer);
-  }
-  if (pcBuffer) {
-    context->releaseBuffer(pcBuffer);
-  }
-  if (kernel) {
-    context->releaseKernel(kernel);
+  if (context) {
+    if (buffer) {
+      context->releaseBuffer(buffer);
+      buffer = nullptr;
+    }
+    if (pcBuffer) {
+      context->releaseBuffer(pcBuffer);
+      pcBuffer = nullptr;
+    }
+    if (kernel) {
+      context->releaseKernel(kernel);
+      kernel = nullptr;
+    }
   }
 }
 
@@ -41,17 +46,19 @@ bool CacheBench::IsSupported(const DeviceInfo &info,
   return true;
 }
 
-// Helper to round down to nearest power of 2
+// Helper to round down to nearest power of 2.
+// Returns the highest power of 2 that is <= v.
+// Returns 0 for v == 0.
 static uint64_t roundDownToPowerOf2(uint64_t v) {
-  v--;
+  if (v == 0) return 0;
+  // Propagate the highest set bit downward, then isolate it.
   v |= v >> 1;
   v |= v >> 2;
   v |= v >> 4;
   v |= v >> 8;
   v |= v >> 16;
   v |= v >> 32;
-  v++;
-  return v >> 1;
+  return v - (v >> 1);
 }
 
 void CacheBench::Setup(IComputeContext &context,

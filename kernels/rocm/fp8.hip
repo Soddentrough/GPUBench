@@ -16,7 +16,8 @@ extern "C" __global__ void run_benchmark(
     // We'll do a simple float conversion loop.
     
     float acc = 0.0f;
-    for (int i = 0; i < 16384; ++i) {
+    // Loop count reduced from 16384 → 512 (32×) to keep dispatch time <50ms.
+    for (int i = 0; i < 512; ++i) {
         // Pretend to do 128 ops. 
         // 128 ops = 64 FMAs.
         // Doing real math prevents optimization.

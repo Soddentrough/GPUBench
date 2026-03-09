@@ -46,8 +46,8 @@ void Fp16Bench::Run(uint32_t config_idx) {
   if (config_idx == 0) {
     context->dispatch(vectorKernel, 8192, 1, 1, 64, 1, 1);
   } else if (matrixKernel) {
-    // Matrix mode uses 32x1x1 workgroups for cooperative matrices
-    context->dispatch(matrixKernel, 32768, 1, 1, 32, 1, 1);
+    // 65536 WGs of 32 threads each — double dispatch to saturate tensor units
+    context->dispatch(matrixKernel, 65536, 1, 1, 32, 1, 1);
   }
 }
 
@@ -68,14 +68,26 @@ void Fp16Bench::Teardown() {
 
 BenchmarkResult Fp16Bench::GetResult(uint32_t config_idx) const {
   if (config_idx == 0) {
-    // 32 f16vec2 FMAs per iteration = 32 * 2 * 2 = 128 FP16 operations per
-    // iteration 65536 iterations * 128 ops * 8192 workgroups * 64 threads
-    uint64_t num_ops = (uint64_t)65536 * 128 * 8192 * 64;
+    // 32 f16vec2 FMAs per iteration = 32 * 4 = 128 FP16 ops per iteration.
+    // Each f16vec2 FMA = 2 elements × (mul+add) = 4 FP16 ops.
+    // Vulkan: 65536 iters. OpenCL: 16384 iters. ROCm: 2048 iters.
+    uint64_t iters = 65536; // Vulkan default
+    uint64_t ops_per_iter = 128; // 32 FMAs × 4 ops each
+    if (context) {
+      if (context->getBackend() == ComputeBackend::ROCm) {
+        iters = 2048;
+      } else if (context->getBackend() == ComputeBackend::OpenCL) {
+        iters = 16384;
+      }
+    }
+    // 8192 workgroups × 64 threads
+    uint64_t num_ops = iters * ops_per_iter * 8192 * 64;
     return {num_ops, 0.0};
   } else {
-    // Matrix mode: 16x16x16 matmul = 16 * 16 * 16 * 2 ops = 8192 ops per
-    // iteration 16384 iterations * 8192 ops * 32768 workgroups
-    uint64_t num_ops = (uint64_t)16384 * 8192 * 32768;
+    // coopmat 16x16x16: 16*16*16*2 = 8192 FP16 ops per coopMatMulAdd.
+    // Each subgroup (32 threads) computes one tile — not multiplied by thread count.
+    // Shader loops 32768 iters. Dispatch: 65536 WGs.
+    uint64_t num_ops = (uint64_t)65536 * 32768 * 8192;
     return {num_ops, 0.0};
   }
 }

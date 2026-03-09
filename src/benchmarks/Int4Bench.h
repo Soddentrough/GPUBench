@@ -5,8 +5,10 @@
 
 class Int4Bench : public IBenchmark {
 public:
-  const char *GetName() const override { return "Performance"; }
-  std::vector<std::string> GetAliases() const override { return {"int4"}; }
+  const char *GetName() const override { return "INT4"; }
+  std::vector<std::string> GetAliases() const override {
+    return {"int4", "performance"};
+  }
   bool IsSupported(const DeviceInfo &info,
                    IComputeContext *context = nullptr) const override;
   void Setup(IComputeContext &context, const std::string &kernel_dir) override;

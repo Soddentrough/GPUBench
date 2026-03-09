@@ -53,16 +53,19 @@ void Fp4Bench::Run(uint32_t config_idx) {
 void Fp4Bench::Teardown() {
   if (kernel) {
     context->releaseKernel(kernel);
+    kernel = nullptr;
   }
   if (buffer) {
     context->releaseBuffer(buffer);
+    buffer = nullptr;
   }
 }
 
 BenchmarkResult Fp4Bench::GetResult(uint32_t config_idx) const {
-  // 8 fma operations per iteration, each is 2 ops (multiply, add)
-  // 8 * 2 * 4 = 64 FP4-equivalent operations per iteration
-  // 16384 iterations * 64 ops * 8192 workgroups * 64 threads
-  uint64_t num_ops = (uint64_t)16384 * 64 * 8192 * 64;
+  // Shader (fp4_emulated.comp): 16 f16vec4 FMAs per iteration.
+  // Each FMA on f16vec4 = 4 components × 2 ops (mul+add) = 8 ops per FMA.
+  // 16 FMAs × 8 = 128 FP4-equivalent operations per iteration.
+  // 16384 iterations × 128 ops × 8192 workgroups × 64 threads
+  uint64_t num_ops = (uint64_t)16384 * 128 * 8192 * 64;
   return {num_ops, 0.0};
 }

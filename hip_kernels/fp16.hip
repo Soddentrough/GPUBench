@@ -14,7 +14,8 @@ extern "C" __global__ void run_benchmark(half* data) {
     half2 val7 = __half2half2(1.1f);
     half2 val8 = __half2half2(1.3f);
     
-    for (int i = 0; i < 65536; ++i) {
+    // Loop count reduced from 65536 → 2048 (32×) to keep dispatch time <50ms.
+    for (int i = 0; i < 2048; ++i) {
         val1 = __hfma2(val1, __half2half2(1.0001f), val2);
         val2 = __hfma2(val2, __half2half2(1.0001f), val3);
         val3 = __hfma2(val3, __half2half2(1.0001f), val4);

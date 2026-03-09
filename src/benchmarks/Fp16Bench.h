@@ -6,8 +6,10 @@
 
 class Fp16Bench : public IBenchmark {
 public:
-  const char *GetName() const override { return "Performance"; }
-  std::vector<std::string> GetAliases() const override { return {"f16"}; }
+  const char *GetName() const override { return "FP16"; }
+  std::vector<std::string> GetAliases() const override {
+    return {"f16", "performance"};
+  }
   bool IsSupported(const DeviceInfo &info,
                    IComputeContext *context = nullptr) const override;
   void Setup(IComputeContext &context, const std::string &kernel_dir) override;

@@ -33,8 +33,11 @@ extern "C" __global__ void run_benchmark(float* data, float multiplier, uint32_t
     // 32 calls * 4 components * 2 ops (FMA) = 256 ops.
     // Perfect match.
 
+    // Loop count reduced from 16384 → 512 to keep dispatch time <50ms and
+    // avoid triggering the amdgpu TDR watchdog. The outer benchmark loop
+    // compensates by running more invocations in the 5-second window.
     #pragma unroll 4
-    for (int i = 0; i < 16384; ++i) {
+    for (int i = 0; i < 512; ++i) {
         acc0 = fmaf4(acc0, m, add);
         acc1 = fmaf4(acc1, m, add);
         acc2 = fmaf4(acc2, m, add);

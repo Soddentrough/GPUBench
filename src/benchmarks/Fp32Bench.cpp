@@ -64,7 +64,13 @@ void Fp32Bench::Teardown() {
 
 BenchmarkResult Fp32Bench::GetResult(uint32_t config_idx) const {
   // 32 vec4 FMAs per iteration = 32 * 4 * 2 = 256 FP32 operations per iteration
-  // 16384 iterations * 256 ops * 8192 workgroups * 64 threads
-  uint64_t num_ops = (uint64_t)16384 * 256 * 8192 * 64;
+  // Vulkan: 16384 iters. OpenCL: 16384 iters. ROCm: 512 iters.
+  uint64_t iters = 16384; // Vulkan/OpenCL default
+  if (context) {
+    if (context->getBackend() == ComputeBackend::ROCm) {
+      iters = 512;
+    }
+  }
+  uint64_t num_ops = iters * 256 * 8192 * 64;
   return {num_ops, 0.0};
 }

@@ -1050,14 +1050,35 @@ void VulkanContext::dispatch(ComputeKernel kernel, uint32_t grid_x,
 
   vkEndCommandBuffer(commandBuffer);
 
+  // Use a fence with a 3-second timeout instead of vkQueueWaitIdle.
+  // This allows GPUBench to detect and abort a hung dispatch before the
+  // amdgpu kernel-driver TDR fires (default: 10 s), preventing a system crash.
+  VkFenceCreateInfo fenceInfo{};
+  fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+  VkFence fence = VK_NULL_HANDLE;
+  vkCreateFence(device, &fenceInfo, nullptr, &fence);
+
   VkSubmitInfo submitInfo{};
   submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
   submitInfo.commandBufferCount = 1;
   submitInfo.pCommandBuffers = &commandBuffer;
 
-  vkQueueSubmit(computeQueue, 1, &submitInfo, VK_NULL_HANDLE);
-  vkQueueWaitIdle(computeQueue);
+  vkQueueSubmit(computeQueue, 1, &submitInfo, fence);
+
+  // Wait up to 3 seconds for completion
+  constexpr uint64_t kTimeoutNs = 3'000'000'000ULL; // 3 seconds in nanoseconds
+  VkResult waitResult = vkWaitForFences(device, 1, &fence, VK_TRUE, kTimeoutNs);
+
+  vkDestroyFence(device, fence, nullptr);
   vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
+
+  if (waitResult == VK_TIMEOUT) {
+    throw std::runtime_error(
+        "GPU dispatch timed out (>3 s) — aborting benchmark to prevent amdgpu TDR crash.");
+  } else if (waitResult != VK_SUCCESS) {
+    throw std::runtime_error(
+        "vkWaitForFences failed with result: " + std::to_string(waitResult));
+  }
 }
 
 void VulkanContext::releaseKernel(ComputeKernel kernel) {

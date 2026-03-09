@@ -102,10 +102,10 @@ int main(int argc, char **argv) {
       // Default to Vulkan, fall back to OpenCL, then ROCm
       if (ComputeBackendFactory::isAvailable(ComputeBackend::Vulkan)) {
         contexts.push_back(
-            ComputeBackendFactory::create(ComputeBackend::Vulkan));
+            ComputeBackendFactory::create(ComputeBackend::Vulkan, verbose));
       } else if (ComputeBackendFactory::isAvailable(ComputeBackend::OpenCL)) {
         contexts.push_back(
-            ComputeBackendFactory::create(ComputeBackend::OpenCL));
+            ComputeBackendFactory::create(ComputeBackend::OpenCL, verbose));
       } else if (ComputeBackendFactory::isAvailable(ComputeBackend::ROCm)) {
         contexts.push_back(
             ComputeBackendFactory::create(ComputeBackend::ROCm, verbose));
@@ -118,12 +118,12 @@ int main(int argc, char **argv) {
         if (backend_str == "vulkan") {
           if (ComputeBackendFactory::isAvailable(ComputeBackend::Vulkan)) {
             contexts.push_back(
-                ComputeBackendFactory::create(ComputeBackend::Vulkan));
+                ComputeBackendFactory::create(ComputeBackend::Vulkan, verbose));
           }
         } else if (backend_str == "opencl") {
           if (ComputeBackendFactory::isAvailable(ComputeBackend::OpenCL)) {
             contexts.push_back(
-                ComputeBackendFactory::create(ComputeBackend::OpenCL));
+                ComputeBackendFactory::create(ComputeBackend::OpenCL, verbose));
           }
         } else if (backend_str == "rocm") {
           if (ComputeBackendFactory::isAvailable(ComputeBackend::ROCm)) {
@@ -217,12 +217,10 @@ int main(int argc, char **argv) {
             execution_contexts.push_back(std::move(new_context));
           }
         } else {
-          if (verbose) {
-            std::cerr << "Warning: Device index " << device_idx
-                      << " out of range for backend "
-                      << ComputeBackendFactory::getBackendName(backend)
-                      << std::endl;
-          }
+          std::cerr << "Warning: Device index " << device_idx
+                    << " out of range for backend "
+                    << ComputeBackendFactory::getBackendName(backend)
+                    << std::endl;
         }
       }
     }

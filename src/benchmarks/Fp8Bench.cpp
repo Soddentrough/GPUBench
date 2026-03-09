@@ -138,8 +138,14 @@ void Fp8Bench::Teardown() {
 BenchmarkResult Fp8Bench::GetResult(uint32_t config_idx) const {
   if (config_idx == 0) { // Vector
     // 8 fma operations per iteration, each is 2 ops (multiply, add)
-    // 8 * 2 * 4 = 64 FP8-equivalent operations per iteration
-    uint64_t num_ops = (uint64_t)16384 * 64 * 8192 * 64;
+    // 8 * 2 * 4 = 64 FP8-equivalent operations per iteration.
+    // ROCm kernel loop reduced from 16384 → 512 to avoid TDR timeout;
+    // Vulkan and OpenCL kernels still use 16384 iterations.
+    uint64_t iters = 16384;
+    if (context && context->getBackend() == ComputeBackend::ROCm) {
+      iters = 512;
+    }
+    uint64_t num_ops = iters * 64 * 8192 * 64;
     return {num_ops, 0.0};
   } else { // Matrix
     // 16x16x16 matrix multiply = 8192 ops

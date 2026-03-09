@@ -50,11 +50,7 @@ BenchmarkRunner::~BenchmarkRunner() {}
 std::vector<std::string> BenchmarkRunner::getAvailableBenchmarks() const {
   std::vector<std::string> names;
   for (const auto &bench : benchmarks) {
-    std::string name = bench->GetName();
-    if (name == "Performance") {
-      name += " (" + std::string(bench->GetSubCategory()) + ")";
-    }
-    names.push_back(name);
+    names.push_back(bench->GetName());
   }
   return names;
 }
@@ -374,8 +370,29 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
                 uint64_t total_invocations = 0;
                 auto bench_start = std::chrono::high_resolution_clock::now();
                 while (total_time_ms < 5000) {
+                  auto iter_start =
+                      std::chrono::high_resolution_clock::now();
                   bench->Run(i);
                   context->waitIdle();
+                  auto iter_end =
+                      std::chrono::high_resolution_clock::now();
+                  double iter_ms =
+                      std::chrono::duration_cast<std::chrono::nanoseconds>(
+                          iter_end - iter_start)
+                          .count() /
+                      1e6;
+                  if (verbose && iter_ms > 500.0) {
+                    std::cerr
+                        << "\n[WARNING] Single dispatch took " << iter_ms
+                        << " ms — approaching amdgpu TDR timeout!" << std::endl;
+                  }
+                  if (iter_ms > 3000.0) {
+                    std::cerr
+                        << "\n[ABORT] Dispatch took " << iter_ms
+                        << " ms — aborting benchmark to avoid system crash."
+                        << std::endl;
+                    break;
+                  }
                   total_invocations++;
                   auto now = std::chrono::high_resolution_clock::now();
                   total_time_ms =
@@ -519,8 +536,6 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
                 bench_result.operations * total_invocations;
             result_data.time_ms = total_time_ms;
             result_data.isEmulated = false;
-            result_data.component = bench->GetComponent(i);
-            result_data.subcategory = bench->GetSubCategory(i);
             result_data.component = bench->GetComponent(i);
             result_data.subcategory = bench->GetSubCategory(i);
             result_data.maxWorkGroupSize = 0;

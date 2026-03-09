@@ -13,7 +13,8 @@ extern "C" __global__ void run_benchmark(char4* data) {
     char4 val7 = make_char4(21, 22, 23, 24);
     char4 val8 = make_char4(25, 26, 27, 28);
     
-    for (int i = 0; i < 16384; ++i) {
+    // Loop count reduced from 16384 → 512 (32×) to keep dispatch time <50ms.
+    for (int i = 0; i < 512; ++i) {
         val1 = make_char4(val1.x * 3 + val2.x, val1.y * 3 + val2.y, val1.z * 3 + val2.z, val1.w * 3 + val2.w);
         val2 = make_char4(val2.x * 3 + val3.x, val2.y * 3 + val3.y, val2.z * 3 + val3.z, val2.w * 3 + val3.w);
         val3 = make_char4(val3.x * 3 + val4.x, val3.y * 3 + val4.y, val3.z * 3 + val4.z, val3.w * 3 + val4.w);
