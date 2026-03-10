@@ -8,7 +8,7 @@
 
 class VulkanContext : public IComputeContext {
 public:
-  VulkanContext(bool verbose = false);
+  VulkanContext(bool verbose = false, bool debug = false);
   ~VulkanContext();
 
   VulkanContext(const VulkanContext &) = delete;
@@ -132,6 +132,7 @@ private:
   mutable std::vector<DeviceInfo> deviceInfos;
   uint32_t selectedDeviceIndex = 0;
   bool verbose = false;
+  bool debug = false;
 
   uint32_t expectedKernelCount = 0;
   uint32_t createdKernelCount = 0;

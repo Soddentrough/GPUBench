@@ -102,13 +102,13 @@ int main(int argc, char **argv) {
       // Default to Vulkan, fall back to OpenCL, then ROCm
       if (ComputeBackendFactory::isAvailable(ComputeBackend::Vulkan)) {
         contexts.push_back(
-            ComputeBackendFactory::create(ComputeBackend::Vulkan, verbose));
+            ComputeBackendFactory::create(ComputeBackend::Vulkan, verbose, debug));
       } else if (ComputeBackendFactory::isAvailable(ComputeBackend::OpenCL)) {
         contexts.push_back(
-            ComputeBackendFactory::create(ComputeBackend::OpenCL, verbose));
+            ComputeBackendFactory::create(ComputeBackend::OpenCL, verbose, debug));
       } else if (ComputeBackendFactory::isAvailable(ComputeBackend::ROCm)) {
         contexts.push_back(
-            ComputeBackendFactory::create(ComputeBackend::ROCm, verbose));
+            ComputeBackendFactory::create(ComputeBackend::ROCm, verbose, debug));
       } else {
         std::cerr << "No compute backend available." << std::endl;
         return EXIT_FAILURE;
@@ -118,17 +118,17 @@ int main(int argc, char **argv) {
         if (backend_str == "vulkan") {
           if (ComputeBackendFactory::isAvailable(ComputeBackend::Vulkan)) {
             contexts.push_back(
-                ComputeBackendFactory::create(ComputeBackend::Vulkan, verbose));
+                ComputeBackendFactory::create(ComputeBackend::Vulkan, verbose, debug));
           }
         } else if (backend_str == "opencl") {
           if (ComputeBackendFactory::isAvailable(ComputeBackend::OpenCL)) {
             contexts.push_back(
-                ComputeBackendFactory::create(ComputeBackend::OpenCL, verbose));
+                ComputeBackendFactory::create(ComputeBackend::OpenCL, verbose, debug));
           }
         } else if (backend_str == "rocm") {
           if (ComputeBackendFactory::isAvailable(ComputeBackend::ROCm)) {
             contexts.push_back(
-                ComputeBackendFactory::create(ComputeBackend::ROCm, verbose));
+                ComputeBackendFactory::create(ComputeBackend::ROCm, verbose, debug));
           }
         } else {
           std::cerr << "Unknown or unavailable backend: " << backend_str
@@ -210,7 +210,7 @@ int main(int argc, char **argv) {
         if (device_idx < devices.size()) {
           // Create a new context for this device
           std::unique_ptr<IComputeContext> new_context =
-              ComputeBackendFactory::create(backend, verbose);
+              ComputeBackendFactory::create(backend, verbose, debug);
 
           if (new_context) {
             new_context->pickDevice(device_idx);

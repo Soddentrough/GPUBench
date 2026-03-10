@@ -16,84 +16,82 @@ void main() {
     uint index = gl_GlobalInvocationID.x;
     if (index >= pushConstants.num_elements) return;
 
-    // 32 fully independent accumulators — no cross-reads between them.
-    // Each acc_i = fma(acc_i, mult, addend_i) depends ONLY on itself,
-    // so all 32 FMAs per iteration are data-independent and issue in parallel.
-    // This mirrors the ROCm fp32.hip design that achieves spec throughput.
-    // 32 vec4 FMAs × 4 components × 2 ops = 256 FP32 ops per iteration.
-    float4 m = float4(pushConstants.multiplier);
-    float4 v0  = float4(InOutBuffer.data[index]);
-    float4 v1  = float4(0.10, 0.11, 0.12, 0.13);
-    float4 v2  = float4(0.20, 0.21, 0.22, 0.23);
-    float4 v3  = float4(0.30, 0.31, 0.32, 0.33);
-    float4 v4  = float4(0.40, 0.41, 0.42, 0.43);
-    float4 v5  = float4(0.50, 0.51, 0.52, 0.53);
-    float4 v6  = float4(0.60, 0.61, 0.62, 0.63);
-    float4 v7  = float4(0.70, 0.71, 0.72, 0.73);
-    float4 v8  = float4(0.80, 0.81, 0.82, 0.83);
-    float4 v9  = float4(0.90, 0.91, 0.92, 0.93);
-    float4 v10 = float4(1.00, 1.01, 1.02, 1.03);
-    float4 v11 = float4(1.10, 1.11, 1.12, 1.13);
-    float4 v12 = float4(1.20, 1.21, 1.22, 1.23);
-    float4 v13 = float4(1.30, 1.31, 1.32, 1.33);
-    float4 v14 = float4(1.40, 1.41, 1.42, 1.43);
-    float4 v15 = float4(1.50, 1.51, 1.52, 1.53);
-    float4 v16 = float4(1.60, 1.61, 1.62, 1.63);
-    float4 v17 = float4(1.70, 1.71, 1.72, 1.73);
-    float4 v18 = float4(1.80, 1.81, 1.82, 1.83);
-    float4 v19 = float4(1.90, 1.91, 1.92, 1.93);
-    float4 v20 = float4(2.00, 2.01, 2.02, 2.03);
-    float4 v21 = float4(2.10, 2.11, 2.12, 2.13);
-    float4 v22 = float4(2.20, 2.21, 2.22, 2.23);
-    float4 v23 = float4(2.30, 2.31, 2.32, 2.33);
-    float4 v24 = float4(2.40, 2.41, 2.42, 2.43);
-    float4 v25 = float4(2.50, 2.51, 2.52, 2.53);
-    float4 v26 = float4(2.60, 2.61, 2.62, 2.63);
-    float4 v27 = float4(2.70, 2.71, 2.72, 2.73);
-    float4 v28 = float4(2.80, 2.81, 2.82, 2.83);
-    float4 v29 = float4(2.90, 2.91, 2.92, 2.93);
-    float4 v30 = float4(3.00, 3.01, 3.02, 3.03);
-    float4 v31 = float4(3.10, 3.11, 3.12, 3.13);
-
+    // Work with multiple accumulators to avoid dependency chains and hide latency
+    vec4 val1 = vec4(InOutBuffer.data[index]);
+    vec4 val2 = vec4(0.1, 0.2, 0.3, 0.4);
+    vec4 val3 = vec4(0.5, 0.6, 0.7, 0.8);
+    vec4 val4 = vec4(0.9, 1.0, 1.1, 1.2);
+    vec4 val5 = vec4(1.3, 1.4, 1.5, 1.6);
+    vec4 val6 = vec4(1.7, 1.8, 1.9, 2.0);
+    vec4 val7 = vec4(2.1, 2.2, 2.3, 2.4);
+    vec4 val8 = vec4(2.5, 2.6, 2.7, 2.8);
+    vec4 val9 = vec4(2.9, 3.0, 3.1, 3.2);
+    vec4 val10 = vec4(3.3, 3.4, 3.5, 3.6);
+    vec4 val11 = vec4(3.7, 3.8, 3.9, 4.0);
+    vec4 val12 = vec4(4.1, 4.2, 4.3, 4.4);
+    vec4 val13 = vec4(4.5, 4.6, 4.7, 4.8);
+    vec4 val14 = vec4(4.9, 5.0, 5.1, 5.2);
+    vec4 val15 = vec4(5.3, 5.4, 5.5, 5.6);
+    vec4 val16 = vec4(5.7, 5.8, 5.9, 6.0);
+    vec4 val17 = vec4(6.1, 6.2, 6.3, 6.4);
+    vec4 val18 = vec4(6.5, 6.6, 6.7, 6.8);
+    vec4 val19 = vec4(6.9, 7.0, 7.1, 7.2);
+    vec4 val20 = vec4(7.3, 7.4, 7.5, 7.6);
+    vec4 val21 = vec4(7.7, 7.8, 7.9, 8.0);
+    vec4 val22 = vec4(8.1, 8.2, 8.3, 8.4);
+    vec4 val23 = vec4(8.5, 8.6, 8.7, 8.8);
+    vec4 val24 = vec4(8.9, 9.0, 9.1, 9.2);
+    vec4 val25 = vec4(9.3, 9.4, 9.5, 9.6);
+    vec4 val26 = vec4(9.7, 9.8, 9.9, 10.0);
+    vec4 val27 = vec4(10.1, 10.2, 10.3, 10.4);
+    vec4 val28 = vec4(10.5, 10.6, 10.7, 10.8);
+    vec4 val29 = vec4(10.9, 11.0, 11.1, 11.2);
+    vec4 val30 = vec4(11.3, 11.4, 11.5, 11.6);
+    vec4 val31 = vec4(11.7, 11.8, 11.9, 12.0);
+    vec4 val32 = vec4(12.1, 12.2, 12.3, 12.4);
+    
+    float mult = pushConstants.multiplier;
+    vec4 v_mult = vec4(mult);
+    
+    // Each iteration performs 32 vec4 FMAs = 32 * 4 * 2 = 256 FP32 ops
     for (int i = 0; i < 16384; ++i) {
-        v0  = fma(v0,  m, float4(0.001));
-        v1  = fma(v1,  m, float4(0.002));
-        v2  = fma(v2,  m, float4(0.003));
-        v3  = fma(v3,  m, float4(0.004));
-        v4  = fma(v4,  m, float4(0.005));
-        v5  = fma(v5,  m, float4(0.006));
-        v6  = fma(v6,  m, float4(0.007));
-        v7  = fma(v7,  m, float4(0.008));
-        v8  = fma(v8,  m, float4(0.009));
-        v9  = fma(v9,  m, float4(0.010));
-        v10 = fma(v10, m, float4(0.011));
-        v11 = fma(v11, m, float4(0.012));
-        v12 = fma(v12, m, float4(0.013));
-        v13 = fma(v13, m, float4(0.014));
-        v14 = fma(v14, m, float4(0.015));
-        v15 = fma(v15, m, float4(0.016));
-        v16 = fma(v16, m, float4(0.017));
-        v17 = fma(v17, m, float4(0.018));
-        v18 = fma(v18, m, float4(0.019));
-        v19 = fma(v19, m, float4(0.020));
-        v20 = fma(v20, m, float4(0.021));
-        v21 = fma(v21, m, float4(0.022));
-        v22 = fma(v22, m, float4(0.023));
-        v23 = fma(v23, m, float4(0.024));
-        v24 = fma(v24, m, float4(0.025));
-        v25 = fma(v25, m, float4(0.026));
-        v26 = fma(v26, m, float4(0.027));
-        v27 = fma(v27, m, float4(0.028));
-        v28 = fma(v28, m, float4(0.029));
-        v29 = fma(v29, m, float4(0.030));
-        v30 = fma(v30, m, float4(0.031));
-        v31 = fma(v31, m, float4(0.032));
+        val1 = fma(val1, v_mult, val2);
+        val2 = fma(val2, v_mult, val3);
+        val3 = fma(val3, v_mult, val4);
+        val4 = fma(val4, v_mult, val5);
+        val5 = fma(val5, v_mult, val6);
+        val6 = fma(val6, v_mult, val7);
+        val7 = fma(val7, v_mult, val8);
+        val8 = fma(val8, v_mult, val9);
+        val9 = fma(val9, v_mult, val10);
+        val10 = fma(val10, v_mult, val11);
+        val11 = fma(val11, v_mult, val12);
+        val12 = fma(val12, v_mult, val13);
+        val13 = fma(val13, v_mult, val14);
+        val14 = fma(val14, v_mult, val15);
+        val15 = fma(val15, v_mult, val16);
+        val16 = fma(val16, v_mult, val17);
+        val17 = fma(val17, v_mult, val18);
+        val18 = fma(val18, v_mult, val19);
+        val19 = fma(val19, v_mult, val20);
+        val20 = fma(val20, v_mult, val21);
+        val21 = fma(val21, v_mult, val22);
+        val22 = fma(val22, v_mult, val23);
+        val23 = fma(val23, v_mult, val24);
+        val24 = fma(val24, v_mult, val25);
+        val25 = fma(val25, v_mult, val26);
+        val26 = fma(val26, v_mult, val27);
+        val27 = fma(val27, v_mult, val28);
+        val28 = fma(val28, v_mult, val29);
+        val29 = fma(val29, v_mult, val30);
+        val30 = fma(val30, v_mult, val31);
+        val31 = fma(val31, v_mult, val32);
+        val32 = fma(val32, v_mult, val1);
     }
-
-    // Prevent optimization away — sum one component from each accumulator
-    InOutBuffer.data[index] =
-        v0.x  + v1.y  + v2.z  + v3.w  + v4.x  + v5.y  + v6.z  + v7.w  +
-        v8.x  + v9.y  + v10.z + v11.w + v12.x + v13.y + v14.z + v15.w +
-        v16.x + v17.y + v18.z + v19.w + v20.x + v21.y + v22.z + v23.w +
-        v24.x + v25.y + v26.z + v27.w + v28.x + v29.y + v30.z + v31.w;
+    
+    // Prevent optimization away
+    InOutBuffer.data[index] = val1.x + val2.y + val3.z + val4.w + val5.x + val6.y + val7.z + val8.w +
+                              val9.x + val10.y + val11.z + val12.w + val13.x + val14.y + val15.z + val16.w +
+                              val17.x + val18.y + val19.z + val20.w + val21.x + val22.y + val23.z + val24.w +
+                              val25.x + val26.y + val27.z + val28.w + val29.x + val30.y + val31.z + val32.w;
 }

@@ -1,32 +1,56 @@
 // Requires ROCm 6.4+
+// INT8 vector benchmark using the dot4 MAC pattern.
+// AMDGPU LLVM auto-maps the "4 sign-extended int8 multiply-add" pattern to V_DOT4_I32_IU8.
+// Uses __attribute__((target("dot1-insts"))) on the kernel to enable the feature.
+// 8 independent int32 accumulators × 8 INT8 ops per dot4 = 64 INT8 ops per iteration.
 #include <hip/hip_runtime.h>
+
+// Helper: signed int8 dot product of 4 pairs into int32 + accumulate.
+// LLVM lowers this to V_DOT4_I32_IU8 when targeting GFX1201.
+__device__ __forceinline__
+int sdot4(char4 a, char4 b, int c) {
+    return (int)a.x * (int)b.x
+         + (int)a.y * (int)b.y
+         + (int)a.z * (int)b.z
+         + (int)a.w * (int)b.w
+         + c;
+}
 
 extern "C" __global__ void run_benchmark(char4* data) {
     uint index = blockIdx.x * blockDim.x + threadIdx.x;
 
-    char4 val1 = data[index];
-    char4 val2 = make_char4(1, 2, 3, 4);
-    char4 val3 = make_char4(5, 6, 7, 8);
-    char4 val4 = make_char4(9, 10, 11, 12);
-    char4 val5 = make_char4(13, 14, 15, 16);
-    char4 val6 = make_char4(17, 18, 19, 20);
-    char4 val7 = make_char4(21, 22, 23, 24);
-    char4 val8 = make_char4(25, 26, 27, 28);
-    
-    // Loop count reduced from 16384 → 512 (32×) to keep dispatch time <50ms.
+    // Dynamic load — compiler cannot constant-fold loop body.
+    char4 a = data[index & 0x1FFFu];
+
+    const char4 w0 = make_char4( 1,  2,  3,  4);
+    const char4 w1 = make_char4( 5,  6,  7,  8);
+    const char4 w2 = make_char4( 9, 10, 11, 12);
+    const char4 w3 = make_char4(13, 14, 15, 16);
+    const char4 w4 = make_char4(17, 18, 19, 20);
+    const char4 w5 = make_char4(21, 22, 23, 24);
+    const char4 w6 = make_char4(25, 26, 27, 28);
+    const char4 w7 = make_char4(29, 30, 31, 32);
+
+    int acc0 = 0, acc1 = 0, acc2 = 0, acc3 = 0;
+    int acc4 = 0, acc5 = 0, acc6 = 0, acc7 = 0;
+
+    #pragma unroll 4
     for (int i = 0; i < 512; ++i) {
-        val1 = make_char4(val1.x * 3 + val2.x, val1.y * 3 + val2.y, val1.z * 3 + val2.z, val1.w * 3 + val2.w);
-        val2 = make_char4(val2.x * 3 + val3.x, val2.y * 3 + val3.y, val2.z * 3 + val3.z, val2.w * 3 + val3.w);
-        val3 = make_char4(val3.x * 3 + val4.x, val3.y * 3 + val4.y, val3.z * 3 + val4.z, val3.w * 3 + val4.w);
-        val4 = make_char4(val4.x * 3 + val5.x, val4.y * 3 + val5.y, val4.z * 3 + val5.z, val4.w * 3 + val5.w);
-        val5 = make_char4(val5.x * 3 + val6.x, val5.y * 3 + val6.y, val5.z * 3 + val6.z, val5.w * 3 + val6.w);
-        val6 = make_char4(val6.x * 3 + val7.x, val6.y * 3 + val7.y, val6.z * 3 + val7.z, val6.w * 3 + val7.w);
-        val7 = make_char4(val7.x * 3 + val8.x, val7.y * 3 + val8.y, val7.z * 3 + val8.z, val7.w * 3 + val8.w);
-        val8 = make_char4(val8.x * 3 + val1.x, val8.y * 3 + val1.y, val8.z * 3 + val1.z, val8.w * 3 + val1.w);
+        // ai varies each iteration to prevent loop hoisting.
+        char4 ai = make_char4(a.x + (char)i, a.y + (char)i,
+                              a.z + (char)i, a.w + (char)i);
+
+        acc0 = sdot4(ai, w0, acc0);
+        acc1 = sdot4(ai, w1, acc1);
+        acc2 = sdot4(ai, w2, acc2);
+        acc3 = sdot4(ai, w3, acc3);
+        acc4 = sdot4(ai, w4, acc4);
+        acc5 = sdot4(ai, w5, acc5);
+        acc6 = sdot4(ai, w6, acc6);
+        acc7 = sdot4(ai, w7, acc7);
     }
-    
-    data[index] = make_char4(val1.x + val2.x + val3.x + val4.x + val5.x + val6.x + val7.x + val8.x,
-                             val1.y + val2.y + val3.y + val4.y + val5.y + val6.y + val7.y + val8.y,
-                             val1.z + val2.z + val3.z + val4.z + val5.z + val6.z + val7.z + val8.z,
-                             val1.w + val2.w + val3.w + val4.w + val5.w + val6.w + val7.w + val8.w);
+
+    int total = acc0 + acc1 + acc2 + acc3 + acc4 + acc5 + acc6 + acc7;
+    data[index] = make_char4((char)total, (char)(total >> 8),
+                             (char)(total >> 16), (char)(total >> 24));
 }

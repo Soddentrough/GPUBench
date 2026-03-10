@@ -20,18 +20,18 @@
 class ComputeBackendFactory {
 public:
     // Try to create the specified backend, throw if not available
-    static std::unique_ptr<IComputeContext> create(ComputeBackend backend, bool verbose = false) {
+    static std::unique_ptr<IComputeContext> create(ComputeBackend backend, bool verbose = false, bool debug = false) {
         switch (backend) {
             case ComputeBackend::Vulkan:
 #ifdef HAVE_VULKAN
-                return std::make_unique<VulkanContext>();
+                return std::make_unique<VulkanContext>(verbose, debug);
 #else
                 throw std::runtime_error("Vulkan backend not available (not compiled with HAVE_VULKAN)");
 #endif
             
             case ComputeBackend::OpenCL:
 #ifdef HAVE_OPENCL
-                return std::make_unique<OpenCLContext>();
+                return std::make_unique<OpenCLContext>(verbose);
 #else
                 throw std::runtime_error("OpenCL backend not available (not compiled with HAVE_OPENCL)");
 #endif

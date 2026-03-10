@@ -13,10 +13,10 @@
 
 void VulkanContext::waitIdle() { vkQueueWaitIdle(computeQueue); }
 
-VulkanContext::VulkanContext(bool verbose) : verbose(verbose) {
+VulkanContext::VulkanContext(bool verbose, bool debug) : verbose(verbose), debug(debug) {
   char *verbose_env = std::getenv("GPUBENCH_VERBOSE");
   if (verbose_env && std::string(verbose_env) == "1") {
-    verbose = true;
+    this->verbose = true;
   }
   try {
     createInstance();
@@ -57,6 +57,13 @@ void VulkanContext::createInstance() {
   VkInstanceCreateInfo createInfo{};
   createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
   createInfo.pApplicationInfo = &appInfo;
+
+  std::vector<const char*> layers;
+  if (debug) {
+      layers.push_back("VK_LAYER_KHRONOS_validation");
+  }
+  createInfo.enabledLayerCount = static_cast<uint32_t>(layers.size());
+  createInfo.ppEnabledLayerNames = layers.empty() ? nullptr : layers.data();
 
   if (vkCreateInstance(&createInfo, nullptr, &instance) != VK_SUCCESS) {
     throw std::runtime_error("failed to create instance!");
