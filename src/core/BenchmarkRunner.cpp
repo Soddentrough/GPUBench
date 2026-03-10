@@ -75,6 +75,10 @@ void BenchmarkRunner::discoverBenchmarks() {
   std::vector<uint32_t> l0_init(l0_size / sizeof(uint32_t));
   std::iota(l0_init.begin(), l0_init.end(), 0);
 
+  // Cache Bandwidth is currently difficult to measure reliably because shader compilers
+  // aggressively optimize out the memory reading loops via Dead-Code Elimination. 
+  // We've disabled these by default until a more robust measurement technique is implemented.
+  /*
   benchmarks.push_back(std::make_unique<CacheBench>(
       "L0 Cache Bandwidth", "GB/s", l0_size, "cache_bw_robust", l0_init,
       std::vector<std::string>{"l0b"}, 0));
@@ -83,13 +87,6 @@ void BenchmarkRunner::discoverBenchmarks() {
   const size_t l1_size = 128 * 1024;       // 128KB
   const size_t l2_size = 4 * 1024 * 1024;  // 4MB
   const size_t l3_size = 64 * 1024 * 1024; // 64MB
-
-  // Cache bandwidth kernels use float4 arrays and access large index ranges
-  // We need to allocate enough space based on the dispatch pattern (65536
-  // workgroups * 256 threads) cachebw_l1: max index = 65536 * 2 + 1 = ~131K
-  // float4 elements = ~2MB cachebw_l2: max index = 65536 * 256 + 255 = ~16.7M
-  // float4 elements = ~268MB cachebw_l3: max index = 65536 * 8192 + 255*32+31 =
-  // ~537M float4 elements = ~8.6GB (too large!)
 
   // For cachebw_l1 (L1 cache), allocate 2MB (enough for the access pattern)
   size_t cachebw_l1_size = 2 * 1024 * 1024;
@@ -109,6 +106,12 @@ void BenchmarkRunner::discoverBenchmarks() {
   benchmarks.push_back(std::make_unique<CacheBench>(
       "L3 Cache Bandwidth", "GB/s", l3_size, "cache_bw_robust",
       std::vector<uint32_t>{}, std::vector<std::string>{"l3b"}, 3));
+  */
+
+  // We still need the sizes for latency tests
+  const size_t l1_size = 128 * 1024;       // 128KB
+  const size_t l2_size = 4 * 1024 * 1024;  // 4MB
+  const size_t l3_size = 64 * 1024 * 1024; // 64MB
 
   // Cache Latency
   benchmarks.push_back(std::make_unique<CacheBench>(

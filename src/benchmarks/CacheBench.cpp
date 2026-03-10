@@ -178,6 +178,9 @@ void CacheBench::Setup(IComputeContext &context,
         stride = 32; // 512 bytes stride
       else if (targetCacheLevel == 3)
         stride = 128; // 2048 bytes stride
+      
+      // We expect 2000 iterations for GB/s benchmark
+      iterations = 2000;
     } else {
       // Latency tests use their own logic and don't yet use the robust kernel,
       // but for consistency we'll set defaults.
