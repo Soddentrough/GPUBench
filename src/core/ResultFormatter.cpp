@@ -95,7 +95,7 @@ void ResultFormatter::print() {
            std::map<std::pair<int, std::string>, // Component (weight, name)
                     std::map<std::pair<int, std::string>, // SubCategory
                                                           // (weight, name)
-                             std::map<std::pair<uint32_t, std::string>,
+                             std::map<std::tuple<std::string, uint32_t, std::string>,
                                       std::map<std::string, ResultData>>>>>
       organizedData;
 
@@ -113,8 +113,10 @@ void ResultFormatter::print() {
     else if (res.component == "Memory")
       compWeight = 2;
 
+    std::string baseName = name.substr(0, name.find(" ("));
+
     organizedData[res.deviceIndex][{compWeight, res.component}]
-                 [{res.sortWeight, res.subcategory}][{res.configIndex, name}]
+                 [{res.sortWeight, res.subcategory}][{baseName, res.configIndex, name}]
                  [res.backendName] = res;
 
     if (name.length() > maxBenchNameLen) {
@@ -168,7 +170,7 @@ void ResultFormatter::print() {
 
         const auto &benchmarks = subcatPair.second;
         for (const auto &benchPair : benchmarks) {
-          const std::string &benchName = benchPair.first.second;
+          const std::string &benchName = std::get<2>(benchPair.first);
           std::cout << "      - " << std::left << std::setw(maxBenchNameLen)
                     << benchName;
 
