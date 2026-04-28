@@ -1036,6 +1036,7 @@ void VulkanContext::dispatch(ComputeKernel kernel, uint32_t grid_x,
     VkShaderStageFlags stageFlags = vulkanKernel->isRTPipeline
                                         ? (VK_SHADER_STAGE_RAYGEN_BIT_KHR |
                                            VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR |
+                                           VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
                                            VK_SHADER_STAGE_MISS_BIT_KHR)
                                         : VK_SHADER_STAGE_COMPUTE_BIT;
 
@@ -1153,7 +1154,9 @@ void VulkanContext::printProgressBar(uint32_t current, uint32_t total,
 
 ComputeKernel VulkanContext::createRTPipeline(
     const std::string &rgen_path, const std::string &rmiss_path,
-    const std::vector<std::string> &rchit_paths, uint32_t num_buffer_args) {
+    const std::vector<std::string> &rchit_paths,
+    const std::vector<std::string> &rahit_paths,
+    const std::vector<std::string> &rint_paths, uint32_t num_buffer_args) {
 
   auto load_shader = [&](const std::string &path) -> VkShaderModule {
     std::string spv_path = path + ".spv";
@@ -1216,19 +1219,42 @@ ComputeKernel VulkanContext::createRTPipeline(
   group.generalShader = 1;
   groups.push_back(group);
 
-  // Closest Hits
-  for (size_t i = 0; i < rchit_paths.size(); i++) {
-    VkShaderModule rchit_module = load_shader(rchit_paths[i]);
-    modules.push_back(rchit_module);
-    add_stage(rchit_module, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR);
+  // Hit Groups
+  size_t num_hit_groups = std::max(rchit_paths.size(), std::max(rahit_paths.size(), rint_paths.size()));
+  uint32_t current_stage_index = 2; // 0 is rgen, 1 is rmiss
 
+  for (size_t i = 0; i < rchit_paths.size(); i++) {
+    VkShaderModule module = load_shader(rchit_paths[i]);
+    modules.push_back(module);
+    add_stage(module, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR);
+  }
+  uint32_t rahit_stage_start = current_stage_index + rchit_paths.size();
+
+  for (size_t i = 0; i < rahit_paths.size(); i++) {
+    VkShaderModule module = load_shader(rahit_paths[i]);
+    modules.push_back(module);
+    add_stage(module, VK_SHADER_STAGE_ANY_HIT_BIT_KHR);
+  }
+  uint32_t rint_stage_start = rahit_stage_start + rahit_paths.size();
+
+  for (size_t i = 0; i < rint_paths.size(); i++) {
+    VkShaderModule module = load_shader(rint_paths[i]);
+    modules.push_back(module);
+    add_stage(module, VK_SHADER_STAGE_INTERSECTION_BIT_KHR);
+  }
+
+  for (size_t i = 0; i < num_hit_groups; i++) {
     VkRayTracingShaderGroupCreateInfoKHR hitGroup{
         VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR};
-    hitGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;
+    if (i < rint_paths.size()) {
+      hitGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
+    } else {
+      hitGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;
+    }
     hitGroup.generalShader = VK_SHADER_UNUSED_KHR;
-    hitGroup.closestHitShader = 2 + i;
-    hitGroup.anyHitShader = VK_SHADER_UNUSED_KHR;
-    hitGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
+    hitGroup.closestHitShader = (i < rchit_paths.size()) ? (current_stage_index + i) : VK_SHADER_UNUSED_KHR;
+    hitGroup.anyHitShader = (i < rahit_paths.size()) ? (rahit_stage_start + i) : VK_SHADER_UNUSED_KHR;
+    hitGroup.intersectionShader = (i < rint_paths.size()) ? (rint_stage_start + i) : VK_SHADER_UNUSED_KHR;
     groups.push_back(hitGroup);
   }
 
@@ -1243,6 +1269,8 @@ ComputeKernel VulkanContext::createRTPipeline(
     binding.descriptorCount = 1;
     binding.stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR |
                          VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR |
+                         VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
+                         VK_SHADER_STAGE_INTERSECTION_BIT_KHR |
                          VK_SHADER_STAGE_MISS_BIT_KHR;
     bindings.push_back(binding);
   }
@@ -1257,6 +1285,8 @@ ComputeKernel VulkanContext::createRTPipeline(
   VkPushConstantRange pushConstant{};
   pushConstant.stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR |
                             VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR |
+                            VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
+                            VK_SHADER_STAGE_INTERSECTION_BIT_KHR |
                             VK_SHADER_STAGE_MISS_BIT_KHR;
   pushConstant.offset = 0;
   pushConstant.size = 128; // Up to 128 bytes

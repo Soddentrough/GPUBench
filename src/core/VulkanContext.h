@@ -41,6 +41,8 @@ public:
   ComputeKernel createRTPipeline(const std::string &rgen_path,
                                  const std::string &rmiss_path,
                                  const std::vector<std::string> &rchit_paths,
+                                 const std::vector<std::string> &rahit_paths,
+                                 const std::vector<std::string> &rint_paths,
                                  uint32_t num_buffer_args) override;
   void setKernelArg(ComputeKernel kernel, uint32_t arg_index,
                     ComputeBuffer buffer) override;

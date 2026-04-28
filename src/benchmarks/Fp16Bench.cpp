@@ -22,23 +22,41 @@ void Fp16Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
   // Load Vector Kernel
   std::filesystem::path kdir(kernel_dir);
   std::filesystem::path vector_file;
+  std::filesystem::path matrix_file;
 
   if (context.getBackend() == ComputeBackend::ROCm) {
     vector_file = kdir / "rocm" / "fp16.hip";
+    matrix_file = kdir / "rocm" / "fp16_matrix.hip";
   } else {
     vector_file = kdir / "vulkan" / "fp16.comp";
+    matrix_file = kdir / "vulkan" / "coop_matrix_fp16.comp";
   }
 
   vectorKernel = context.createKernel(vector_file.string(), "main", 1);
+  if (!vectorKernel && context.getBackend() == ComputeBackend::ROCm) {
+    // HIP uses run_benchmark
+    vectorKernel = context.createKernel(vector_file.string(), "run_benchmark", 1);
+  }
   context.setKernelArg(vectorKernel, 0, buffer);
 
   // Optionally load Matrix Kernel if supported
-  if (context.getCurrentDeviceInfo().cooperativeMatrixSupport &&
-      context.getBackend() == ComputeBackend::Vulkan) {
-    std::filesystem::path matrix_file =
-        kdir / "vulkan" / "coop_matrix_fp16.comp";
-    matrixKernel = context.createKernel(matrix_file.string(), "main", 1);
-    context.setKernelArg(matrixKernel, 0, buffer);
+  bool try_load_matrix = false;
+  if (context.getBackend() == ComputeBackend::Vulkan && context.getCurrentDeviceInfo().cooperativeMatrixSupport) {
+      try_load_matrix = true;
+  } else if (context.getBackend() == ComputeBackend::ROCm) {
+      // Allow ROCm to attempt to load its matrix kernel on RDNA3+
+      try_load_matrix = true;
+  }
+
+  if (try_load_matrix) {
+    try {
+      matrixKernel = context.createKernel(matrix_file.string(), context.getBackend() == ComputeBackend::ROCm ? "run_benchmark" : "main", 1);
+      if (matrixKernel) {
+          context.setKernelArg(matrixKernel, 0, buffer);
+      }
+    } catch (...) {
+      matrixKernel = nullptr;
+    }
   }
 }
 

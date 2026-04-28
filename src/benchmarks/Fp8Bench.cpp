@@ -13,10 +13,11 @@ void Fp8Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
   this->context = &context;
 
   DeviceInfo info = context.getCurrentDeviceInfo();
-  is_emulated =
-      (info.name.find("gfx942") == std::string::npos &&
-       info.name.find("gfx11") == std::string::npos &&
-       info.name.find("gfx12") == std::string::npos); // RDNA4 is native
+  
+  // RDNA3 (gfx11) does NOT have native FP8. Only MI300 (gfx942) and RDNA4 (gfx12) do.
+  bool has_native_fp8 = (info.name.find("gfx942") != std::string::npos ||
+                         info.name.find("gfx12") != std::string::npos);
+  is_emulated = !has_native_fp8;
 
   // Create storage buffer
   size_t bufferSize =
@@ -54,7 +55,7 @@ void Fp8Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
       matrixKernel =
           context.createKernel(matrix_file.string(), "run_benchmark", 1);
       context.setKernelArg(matrixKernel, 0, buffer);
-      is_native_matrix = true;
+      is_native_matrix = has_native_fp8;
     } else {
       is_native_matrix = false;
     }
@@ -156,9 +157,13 @@ BenchmarkResult Fp8Bench::GetResult(uint32_t config_idx) const {
 }
 
 uint32_t Fp8Bench::GetNumConfigs() const {
-  return (matrixKernel != nullptr) ? 2 : 1;
+  int configs = 0;
+  if (vectorKernel != nullptr) configs++;
+  if (matrixKernel != nullptr) configs++;
+  return configs;
 }
 
 std::string Fp8Bench::GetConfigName(uint32_t config_idx) const {
-  return (config_idx == 0) ? "Vector" : "Matrix";
+  if (config_idx == 0 && vectorKernel != nullptr) return is_emulated ? "Vector (Emulated)" : "Vector";
+  return is_native_matrix ? "Matrix" : "Matrix (Emulated)";
 }

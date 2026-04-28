@@ -8,7 +8,13 @@
 #include "benchmarks/Int4Bench.h"
 #include "benchmarks/Int8Bench.h"
 #include "benchmarks/MemBandwidthBench.h"
+#include "benchmarks/RayAnyHitBench.h"
+#include "benchmarks/RayASBuildBench.h"
 #include "benchmarks/RayDivergenceBench.h"
+#include "benchmarks/RayIncoherentBench.h"
+#include "benchmarks/RayMaterialDivergenceBench.h"
+#include "benchmarks/RayPayloadBench.h"
+#include "benchmarks/RayProceduralBench.h"
 #include "benchmarks/RayTracingBench.h"
 #include "benchmarks/SysMemBandwidthBench.h"
 #include "benchmarks/SysMemLatencyBench.h"
@@ -69,6 +75,12 @@ void BenchmarkRunner::discoverBenchmarks() {
   benchmarks.push_back(std::make_unique<SysMemLatencyBench>());
   benchmarks.push_back(std::make_unique<RayTracingBench>());
   benchmarks.push_back(std::make_unique<RayDivergenceBench>());
+  benchmarks.push_back(std::make_unique<RayAnyHitBench>());
+  benchmarks.push_back(std::make_unique<RayIncoherentBench>());
+  benchmarks.push_back(std::make_unique<RayPayloadBench>());
+  benchmarks.push_back(std::make_unique<RayASBuildBench>());
+  benchmarks.push_back(std::make_unique<RayProceduralBench>());
+  benchmarks.push_back(std::make_unique<RayMaterialDivergenceBench>());
 
   // Cache Bandwidth
   const size_t l0_size = 16 * 1024; // 16KB L0 cache

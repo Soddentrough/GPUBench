@@ -1,4 +1,4 @@
-#include "RayDivergenceBench.h"
+#include "RayIncoherentBench.h"
 #include "core/VulkanContext.h"
 #include <algorithm>
 #include <chrono>
@@ -6,13 +6,13 @@
 #include <filesystem>
 #include <iostream>
 
-bool RayDivergenceBench::IsSupported(const DeviceInfo &info,
+bool RayIncoherentBench::IsSupported(const DeviceInfo &info,
                                      IComputeContext *context) const {
   return info.rayTracingSupport &&
          (context && context->getBackend() == ComputeBackend::Vulkan);
 }
 
-void RayDivergenceBench::loadRTProcs(VkDevice device) {
+void RayIncoherentBench::loadRTProcs(VkDevice device) {
   vkGetAccelerationStructureBuildSizesKHR_ptr =
       (PFN_vkGetAccelerationStructureBuildSizesKHR)vkGetDeviceProcAddr(
           device, "vkGetAccelerationStructureBuildSizesKHR");
@@ -30,64 +30,44 @@ void RayDivergenceBench::loadRTProcs(VkDevice device) {
           device, "vkDestroyAccelerationStructureKHR");
 }
 
-void RayDivergenceBench::Setup(IComputeContext &context,
+void RayIncoherentBench::Setup(IComputeContext &context,
                                const std::string &kernel_dir) {
   this->context = &context;
   VulkanContext *vContext = dynamic_cast<VulkanContext *>(&context);
   if (!vContext)
-    throw std::runtime_error("RayDivergenceBench requires VulkanContext");
+    throw std::runtime_error("RayIncoherentBench requires VulkanContext");
 
   loadRTProcs(vContext->getVulkanDevice());
 
-  // Target a substantial workload to saturate RTUs
   rayCount = 4000000;
   resultBuffer = context.createBuffer(sizeof(uint32_t));
   uint32_t zero = 0;
   context.writeBuffer(resultBuffer, 0, 4, &zero);
 
-  // Setup a high-resolution flat floor plane (Z=0) and ceiling plane (Z=-20)
-  uint32_t gridSize = 256;
-  uint32_t primitivesPerPlane = gridSize * gridSize * 2;
-  numPrimitives = primitivesPerPlane * 2; // Floor + Ceiling
-
+  // Generate a bunch of random triangles in a volume (bounding box -100 to 100)
+  numPrimitives = 200000; 
   std::vector<float> vertices;
   vertices.reserve(numPrimitives * 9);
 
-  auto addPlane = [&](float z) {
-    float scale = 200.0f / gridSize;
-    for (uint32_t y = 0; y < gridSize; ++y) {
-      for (uint32_t x = 0; x < gridSize; ++x) {
-        float fx0 = (float)x * scale - 100.0f;
-        float fy0 = (float)y * scale - 100.0f;
-        float fx1 = (float)(x + 1) * scale - 100.0f;
-        float fy1 = (float)(y + 1) * scale - 100.0f;
+  srand(1337);
+  for (uint32_t i = 0; i < numPrimitives; ++i) {
+    float x = (float(rand()) / RAND_MAX) * 200.0f - 100.0f;
+    float y = (float(rand()) / RAND_MAX) * 200.0f - 100.0f;
+    float z = (float(rand()) / RAND_MAX) * 200.0f - 100.0f;
+    float s = 2.0f; // Size of triangle
 
-        // Triangle 1
-        vertices.push_back(fx0);
-        vertices.push_back(fy0);
-        vertices.push_back(z);
-        vertices.push_back(fx1);
-        vertices.push_back(fy0);
-        vertices.push_back(z);
-        vertices.push_back(fx0);
-        vertices.push_back(fy1);
-        vertices.push_back(z);
-        // Triangle 2
-        vertices.push_back(fx1);
-        vertices.push_back(fy0);
-        vertices.push_back(z);
-        vertices.push_back(fx1);
-        vertices.push_back(fy1);
-        vertices.push_back(z);
-        vertices.push_back(fx0);
-        vertices.push_back(fy1);
-        vertices.push_back(z);
-      }
-    }
-  };
-
-  addPlane(0.0f);   // Floor
-  addPlane(-20.0f); // Ceiling
+    vertices.push_back(x);
+    vertices.push_back(y);
+    vertices.push_back(z);
+    
+    vertices.push_back(x + s);
+    vertices.push_back(y);
+    vertices.push_back(z);
+    
+    vertices.push_back(x);
+    vertices.push_back(y + s);
+    vertices.push_back(z);
+  }
 
   vertexBuffer =
       context.createBuffer(vertices.size() * sizeof(float), vertices.data());
@@ -96,26 +76,15 @@ void RayDivergenceBench::Setup(IComputeContext &context,
 
   std::filesystem::path kdir(kernel_dir);
   std::vector<std::string> hit_shaders = {
-      (kdir / "vulkan" / "raydiv_pipeline_a.rchit").string(),
-      (kdir / "vulkan" / "raydiv_pipeline_b.rchit").string(),
-      (kdir / "vulkan" / "raydiv_pipeline_c.rchit").string(),
-      (kdir / "vulkan" / "raydiv_pipeline_d.rchit").string(),
-      (kdir / "vulkan" / "raydiv_pipeline_e.rchit").string()};
+      (kdir / "vulkan" / "rayincoherent.rchit").string()};
 
   try {
-    VulkanContext *vContext = dynamic_cast<VulkanContext *>(&context);
     if (vContext) {
       kernel = vContext->createRTPipeline(
-          (kdir / "vulkan" / "raydiv_pipeline.rgen").string(),
-          (kdir / "vulkan" / "raydiv_pipeline.rmiss").string(), hit_shaders,
-          {}, // empty rahit_paths
-          {}, // empty rint_paths
-          2); // 2 buffer descriptors (TLAS + Result Buffer)
-    } else {
-      std::cerr
-          << "RayDivergenceBench currently only supports Vulkan RT backend."
-          << std::endl;
-      kernel = nullptr;
+          (kdir / "vulkan" / "rayincoherent.rgen").string(),
+          (kdir / "vulkan" / "rayincoherent.rmiss").string(), hit_shaders,
+          {}, {}, 
+          2);
     }
   } catch (const std::exception &e) {
     std::cerr << "RT Pipeline creation failed: " << e.what() << std::endl;
@@ -123,19 +92,18 @@ void RayDivergenceBench::Setup(IComputeContext &context,
   }
 }
 
-void RayDivergenceBench::buildAS() {
+void RayIncoherentBench::buildAS() {
   VulkanContext *vContext = static_cast<VulkanContext *>(context);
   VkDevice device = vContext->getVulkanDevice();
   VkQueue queue = vContext->getComputeQueue();
 
   VkDeviceAddress vAddr = vContext->getBufferDeviceAddress(vertexBuffer);
 
-  // 1. Triangle BLAS
+  // Triangle BLAS
   VkAccelerationStructureGeometryKHR triGeom{
       VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR};
   triGeom.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
-  triGeom.flags =
-      VK_GEOMETRY_OPAQUE_BIT_KHR; // Force exact hardware Ray-Tri test!
+  triGeom.flags = VK_GEOMETRY_OPAQUE_BIT_KHR; 
   triGeom.geometry.triangles.sType =
       VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
   triGeom.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
@@ -227,12 +195,10 @@ void RayDivergenceBench::buildAS() {
 
   size_t triScratch = createTLAS(topTriGeom, triangleTlas, triangleTlasBuffer);
 
-  // Scratch buffer
   size_t scratchSize = std::max(triSizes.buildScratchSize, triScratch);
   scratchBuffer = context->createBuffer(scratchSize);
   VkDeviceAddress sAddr = vContext->getBufferDeviceAddress(scratchBuffer);
 
-  // Build commands
   VkCommandPoolCreateInfo cpInfo{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
   cpInfo.queueFamilyIndex = vContext->getComputeQueueFamilyIndex();
   VkCommandPool tmpPool;
@@ -290,20 +256,16 @@ void RayDivergenceBench::buildAS() {
   vkDestroyCommandPool(device, tmpPool, nullptr);
 }
 
-void RayDivergenceBench::Run(uint32_t config_idx) {
+void RayIncoherentBench::Run(uint32_t config_idx) {
   VulkanContext *vContext = static_cast<VulkanContext *>(context);
-  VkAccelerationStructureKHR activeTlas = triangleTlas;
-
-  vContext->setKernelAS(kernel, 0, (AccelerationStructure)activeTlas);
+  
+  vContext->setKernelAS(kernel, 0, (AccelerationStructure)triangleTlas);
   vContext->setKernelArg(kernel, 1, resultBuffer);
 
-  // config_idx 0 = 100% coherence. config_idx 4 = 0% coherence.
-  float coherenceFactor = 1.0f - (float(config_idx) * 0.25f);
-  uint32_t seed = config_idx * 1337;
-
-  // Push Constants: rayCount, coherenceFactor, seed
+  uint32_t is_incoherent = config_idx;
+  uint32_t seed = rand();
   vContext->setKernelArg(kernel, 2, sizeof(uint32_t), &rayCount);
-  vContext->setKernelArg(kernel, 3, sizeof(float), &coherenceFactor);
+  vContext->setKernelArg(kernel, 3, sizeof(uint32_t), &is_incoherent);
   vContext->setKernelArg(kernel, 4, sizeof(uint32_t), &seed);
 
   auto start = std::chrono::high_resolution_clock::now();
@@ -315,7 +277,7 @@ void RayDivergenceBench::Run(uint32_t config_idx) {
   rtResults[config_idx] = diff.count();
 }
 
-void RayDivergenceBench::Teardown() {
+void RayIncoherentBench::Teardown() {
   VulkanContext *vContext = static_cast<VulkanContext *>(context);
   VkDevice device = vContext->getVulkanDevice();
 
@@ -340,120 +302,19 @@ void RayDivergenceBench::Teardown() {
     context->releaseBuffer(scratchBuffer);
 }
 
-BenchmarkResult RayDivergenceBench::GetResult(uint32_t config_idx) const {
-  return {(uint64_t)rayCount, rtResults[config_idx]};
+BenchmarkResult RayIncoherentBench::GetResult(uint32_t config_idx) const {
+  return {(uint64_t)rayCount, rtResults.at(config_idx)};
 }
 
-const char *RayDivergenceBench::GetName() const { return "RayDivergence"; }
-const char *RayDivergenceBench::GetComponent(uint32_t config_idx) const {
+const char *RayIncoherentBench::GetName() const { return "RayIncoherent"; }
+const char *RayIncoherentBench::GetComponent(uint32_t config_idx) const {
   return "Ray Tracing";
 }
-const char *RayDivergenceBench::GetMetric() const { return "GRays/s"; }
-const char *RayDivergenceBench::GetSubCategory(uint32_t config_idx) const {
-  return "Material Divergence";
+const char *RayIncoherentBench::GetMetric() const { return "GRays/s"; }
+const char *RayIncoherentBench::GetSubCategory(uint32_t config_idx) const {
+  return "Incoherent Traversal";
 }
 
-std::string RayDivergenceBench::GetConfigName(uint32_t config_idx) const {
-  int coherencePercentage = 100 - (config_idx * 25);
-  std::string label = std::to_string(coherencePercentage) + "% Coherence";
-
-  if (coherencePercentage == 100)
-    label += " (Perfect Mirror)";
-  else if (coherencePercentage == 50)
-    label += " (Half Diffuse)";
-  else if (coherencePercentage == 0)
-    label += " (Perfectly Diffuse)";
-
-  return label;
-}
-
-void RayDivergenceBench::generateGeometry(std::vector<float> &vertices) const {
-  uint32_t gridSize = 256;
-  uint32_t primitivesPerPlane = gridSize * gridSize * 2;
-  vertices.reserve(primitivesPerPlane * 2 * 9);
-
-  auto addPlane = [&](float z) {
-    float scale = 200.0f / gridSize;
-    for (uint32_t y = 0; y < gridSize; ++y) {
-      for (uint32_t x = 0; x < gridSize; ++x) {
-        float fx0 = (float)x * scale - 100.0f;
-        float fy0 = (float)y * scale - 100.0f;
-        float fx1 = (float)(x + 1) * scale - 100.0f;
-        float fy1 = (float)(y + 1) * scale - 100.0f;
-
-        // Triangle 1
-        vertices.push_back(fx0);
-        vertices.push_back(fy0);
-        vertices.push_back(z);
-        vertices.push_back(fx1);
-        vertices.push_back(fy0);
-        vertices.push_back(z);
-        vertices.push_back(fx0);
-        vertices.push_back(fy1);
-        vertices.push_back(z);
-        // Triangle 2
-        vertices.push_back(fx1);
-        vertices.push_back(fy0);
-        vertices.push_back(z);
-        vertices.push_back(fx1);
-        vertices.push_back(fy1);
-        vertices.push_back(z);
-        vertices.push_back(fx0);
-        vertices.push_back(fy1);
-        vertices.push_back(z);
-      }
-    }
-  };
-
-  addPlane(0.0f);   // Floor
-  addPlane(-20.0f); // Ceiling
-}
-
-void RayDivergenceBench::DumpGeometry() const {
-  std::vector<float> vertices;
-  generateGeometry(vertices);
-
-  std::ofstream mtlFile("raydiv_scene.mtl");
-  mtlFile << "newmtl MaterialA\nKd 1.0 0.5 0.5\nPr 0.0\nNs 1000\n";
-  mtlFile << "newmtl MaterialB\nKd 0.5 1.0 0.5\nPr 0.25\nNs 400\n";
-  mtlFile << "newmtl MaterialC\nKd 0.5 0.5 1.0\nPr 0.5\nNs 100\n";
-  mtlFile << "newmtl MaterialD\nKd 1.0 1.0 0.5\nPr 0.75\nNs 25\n";
-  mtlFile << "newmtl MaterialE\nKd 1.0 0.5 1.0\nPr 1.0\nNs 1\n";
-  mtlFile.close();
-
-  std::ofstream objFile("raydiv_scene.obj");
-  objFile << "mtllib raydiv_scene.mtl\n";
-
-  for (size_t i = 0; i < vertices.size(); i += 3) {
-    objFile << "v " << vertices[i] << " " << vertices[i + 1] << " "
-            << vertices[i + 2] << "\n";
-  }
-
-  uint32_t gridSize = 256;
-  uint32_t vIdx = 1;
-
-  auto writePlaneFaces = [&](bool isCeiling) {
-    for (uint32_t y = 0; y < gridSize; ++y) {
-      for (uint32_t x = 0; x < gridSize; ++x) {
-        // Material is based on x-coordinate stripping for 5 materials
-        uint32_t matIdx = x % 5;
-        char matChar = 'A' + matIdx;
-        objFile << "usemtl Material" << matChar << "\n";
-
-        // Triangle 1
-        objFile << "f " << vIdx << " " << vIdx + 1 << " " << vIdx + 2 << "\n";
-        // Triangle 2
-        objFile << "f " << vIdx + 3 << " " << vIdx + 4 << " " << vIdx + 5
-                << "\n";
-        vIdx += 6;
-      }
-    }
-  };
-
-  writePlaneFaces(false); // Floor
-  writePlaneFaces(true);  // Ceiling
-
-  objFile.close();
-  std::cout << "Geometry dumped to raydiv_scene.obj and raydiv_scene.mtl"
-            << std::endl;
+std::string RayIncoherentBench::GetConfigName(uint32_t config_idx) const {
+  return config_idx == 0 ? "Coherent (Primary)" : "Incoherent (Diffuse Bounces)";
 }

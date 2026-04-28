@@ -92,10 +92,12 @@ public:
                                      uint32_t num_args) = 0;
 
   // Create an RT pipeline from multiple shaders (raygen, miss, closest hits)
-  virtual ComputeKernel
-  createRTPipeline(const std::string &rgen_path, const std::string &rmiss_path,
-                   const std::vector<std::string> &rchit_paths,
-                   uint32_t num_args) {
+  virtual ComputeKernel createRTPipeline(
+      const std::string &rgen_path, const std::string &rmiss_path,
+      const std::vector<std::string> &rchit_paths,
+      const std::vector<std::string> &rahit_paths,
+      const std::vector<std::string> &rint_paths,
+      uint32_t num_buffer_args) {
     return nullptr;
   }
   virtual void setKernelArg(ComputeKernel kernel, uint32_t arg_index,

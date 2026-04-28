@@ -1,4 +1,7 @@
 #include "CLI11.hpp"
+#include "benchmarks/RayAnyHitBench.h"
+#include "benchmarks/RayDivergenceBench.h"
+#include "benchmarks/RayTracingBench.h"
 #include "core/BenchmarkRunner.h"
 #include "core/ComputeBackendFactory.h"
 #include <cstdlib>

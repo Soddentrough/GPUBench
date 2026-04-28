@@ -1,4 +1,4 @@
-#include "RayDivergenceBench.h"
+#include "RayAnyHitBench.h"
 #include "core/VulkanContext.h"
 #include <algorithm>
 #include <chrono>
@@ -6,13 +6,13 @@
 #include <filesystem>
 #include <iostream>
 
-bool RayDivergenceBench::IsSupported(const DeviceInfo &info,
-                                     IComputeContext *context) const {
+bool RayAnyHitBench::IsSupported(const DeviceInfo &info,
+                                 IComputeContext *context) const {
   return info.rayTracingSupport &&
          (context && context->getBackend() == ComputeBackend::Vulkan);
 }
 
-void RayDivergenceBench::loadRTProcs(VkDevice device) {
+void RayAnyHitBench::loadRTProcs(VkDevice device) {
   vkGetAccelerationStructureBuildSizesKHR_ptr =
       (PFN_vkGetAccelerationStructureBuildSizesKHR)vkGetDeviceProcAddr(
           device, "vkGetAccelerationStructureBuildSizesKHR");
@@ -30,12 +30,12 @@ void RayDivergenceBench::loadRTProcs(VkDevice device) {
           device, "vkDestroyAccelerationStructureKHR");
 }
 
-void RayDivergenceBench::Setup(IComputeContext &context,
-                               const std::string &kernel_dir) {
+void RayAnyHitBench::Setup(IComputeContext &context,
+                           const std::string &kernel_dir) {
   this->context = &context;
   VulkanContext *vContext = dynamic_cast<VulkanContext *>(&context);
   if (!vContext)
-    throw std::runtime_error("RayDivergenceBench requires VulkanContext");
+    throw std::runtime_error("RayAnyHitBench requires VulkanContext");
 
   loadRTProcs(vContext->getVulkanDevice());
 
@@ -45,10 +45,11 @@ void RayDivergenceBench::Setup(IComputeContext &context,
   uint32_t zero = 0;
   context.writeBuffer(resultBuffer, 0, 4, &zero);
 
-  // Setup a high-resolution flat floor plane (Z=0) and ceiling plane (Z=-20)
+  // Setup multiple high-resolution flat planes to measure alpha-tested traversal
   uint32_t gridSize = 256;
   uint32_t primitivesPerPlane = gridSize * gridSize * 2;
-  numPrimitives = primitivesPerPlane * 2; // Floor + Ceiling
+  uint32_t numPlanes = 16;
+  numPrimitives = primitivesPerPlane * numPlanes;
 
   std::vector<float> vertices;
   vertices.reserve(numPrimitives * 9);
@@ -86,8 +87,9 @@ void RayDivergenceBench::Setup(IComputeContext &context,
     }
   };
 
-  addPlane(0.0f);   // Floor
-  addPlane(-20.0f); // Ceiling
+  for (uint32_t i = 0; i < numPlanes; ++i) {
+    addPlane(float(i) * 2.0f); // Planes at z=0, 2, 4, ... 30
+  }
 
   vertexBuffer =
       context.createBuffer(vertices.size() * sizeof(float), vertices.data());
@@ -96,24 +98,20 @@ void RayDivergenceBench::Setup(IComputeContext &context,
 
   std::filesystem::path kdir(kernel_dir);
   std::vector<std::string> hit_shaders = {
-      (kdir / "vulkan" / "raydiv_pipeline_a.rchit").string(),
-      (kdir / "vulkan" / "raydiv_pipeline_b.rchit").string(),
-      (kdir / "vulkan" / "raydiv_pipeline_c.rchit").string(),
-      (kdir / "vulkan" / "raydiv_pipeline_d.rchit").string(),
-      (kdir / "vulkan" / "raydiv_pipeline_e.rchit").string()};
+      (kdir / "vulkan" / "rayanyhit_pipeline.rchit").string()};
+  std::vector<std::string> anyhit_shaders = {
+      (kdir / "vulkan" / "rayanyhit_pipeline.rahit").string()};
 
   try {
-    VulkanContext *vContext = dynamic_cast<VulkanContext *>(&context);
     if (vContext) {
       kernel = vContext->createRTPipeline(
-          (kdir / "vulkan" / "raydiv_pipeline.rgen").string(),
-          (kdir / "vulkan" / "raydiv_pipeline.rmiss").string(), hit_shaders,
-          {}, // empty rahit_paths
-          {}, // empty rint_paths
+          (kdir / "vulkan" / "rayanyhit_pipeline.rgen").string(),
+          (kdir / "vulkan" / "rayanyhit_pipeline.rmiss").string(), hit_shaders,
+          anyhit_shaders, {},
           2); // 2 buffer descriptors (TLAS + Result Buffer)
     } else {
       std::cerr
-          << "RayDivergenceBench currently only supports Vulkan RT backend."
+          << "RayAnyHitBench currently only supports Vulkan RT backend."
           << std::endl;
       kernel = nullptr;
     }
@@ -123,7 +121,7 @@ void RayDivergenceBench::Setup(IComputeContext &context,
   }
 }
 
-void RayDivergenceBench::buildAS() {
+void RayAnyHitBench::buildAS() {
   VulkanContext *vContext = static_cast<VulkanContext *>(context);
   VkDevice device = vContext->getVulkanDevice();
   VkQueue queue = vContext->getComputeQueue();
@@ -134,8 +132,9 @@ void RayDivergenceBench::buildAS() {
   VkAccelerationStructureGeometryKHR triGeom{
       VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR};
   triGeom.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
-  triGeom.flags =
-      VK_GEOMETRY_OPAQUE_BIT_KHR; // Force exact hardware Ray-Tri test!
+  // IMPORTANT: We do NOT set VK_GEOMETRY_OPAQUE_BIT_KHR here,
+  // which forces the hardware to invoke the AnyHit shader for alpha testing!
+  triGeom.flags = 0; 
   triGeom.geometry.triangles.sType =
       VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
   triGeom.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
@@ -182,7 +181,8 @@ void RayDivergenceBench::buildAS() {
   triInstance.instanceCustomIndex = 0;
   triInstance.mask = 0xFF;
   triInstance.accelerationStructureReference = triASAddr;
-  triInstance.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
+  // Also ensuring we do NOT force opaque at the instance level
+  triInstance.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR | VK_GEOMETRY_INSTANCE_FORCE_NO_OPAQUE_BIT_KHR;
 
   instanceBuffer =
       context->createBuffer(sizeof(VkAccelerationStructureInstanceKHR));
@@ -290,20 +290,21 @@ void RayDivergenceBench::buildAS() {
   vkDestroyCommandPool(device, tmpPool, nullptr);
 }
 
-void RayDivergenceBench::Run(uint32_t config_idx) {
+void RayAnyHitBench::Run(uint32_t config_idx) {
   VulkanContext *vContext = static_cast<VulkanContext *>(context);
   VkAccelerationStructureKHR activeTlas = triangleTlas;
 
   vContext->setKernelAS(kernel, 0, (AccelerationStructure)activeTlas);
   vContext->setKernelArg(kernel, 1, resultBuffer);
 
-  // config_idx 0 = 100% coherence. config_idx 4 = 0% coherence.
-  float coherenceFactor = 1.0f - (float(config_idx) * 0.25f);
+  // config_idx 0 = 100% Solid (1.0 alpha density) -> Almost all rays hit opaque
+  // config_idx 4 = 0% Solid (0.0 alpha density) -> All rays pass through
+  float alphaDensity = 1.0f - (float(config_idx) * 0.25f);
   uint32_t seed = config_idx * 1337;
 
-  // Push Constants: rayCount, coherenceFactor, seed
+  // Push Constants: rayCount, alphaDensity, seed
   vContext->setKernelArg(kernel, 2, sizeof(uint32_t), &rayCount);
-  vContext->setKernelArg(kernel, 3, sizeof(float), &coherenceFactor);
+  vContext->setKernelArg(kernel, 3, sizeof(float), &alphaDensity);
   vContext->setKernelArg(kernel, 4, sizeof(uint32_t), &seed);
 
   auto start = std::chrono::high_resolution_clock::now();
@@ -315,7 +316,7 @@ void RayDivergenceBench::Run(uint32_t config_idx) {
   rtResults[config_idx] = diff.count();
 }
 
-void RayDivergenceBench::Teardown() {
+void RayAnyHitBench::Teardown() {
   VulkanContext *vContext = static_cast<VulkanContext *>(context);
   VkDevice device = vContext->getVulkanDevice();
 
@@ -340,120 +341,27 @@ void RayDivergenceBench::Teardown() {
     context->releaseBuffer(scratchBuffer);
 }
 
-BenchmarkResult RayDivergenceBench::GetResult(uint32_t config_idx) const {
-  return {(uint64_t)rayCount, rtResults[config_idx]};
+BenchmarkResult RayAnyHitBench::GetResult(uint32_t config_idx) const {
+  return {(uint64_t)rayCount, rtResults.at(config_idx)};
 }
 
-const char *RayDivergenceBench::GetName() const { return "RayDivergence"; }
-const char *RayDivergenceBench::GetComponent(uint32_t config_idx) const {
+const char *RayAnyHitBench::GetName() const { return "RayAnyHit"; }
+const char *RayAnyHitBench::GetComponent(uint32_t config_idx) const {
   return "Ray Tracing";
 }
-const char *RayDivergenceBench::GetMetric() const { return "GRays/s"; }
-const char *RayDivergenceBench::GetSubCategory(uint32_t config_idx) const {
-  return "Material Divergence";
+const char *RayAnyHitBench::GetMetric() const { return "GRays/s"; }
+const char *RayAnyHitBench::GetSubCategory(uint32_t config_idx) const {
+  return "Alpha-Tested Geometry";
 }
 
-std::string RayDivergenceBench::GetConfigName(uint32_t config_idx) const {
-  int coherencePercentage = 100 - (config_idx * 25);
-  std::string label = std::to_string(coherencePercentage) + "% Coherence";
+std::string RayAnyHitBench::GetConfigName(uint32_t config_idx) const {
+  int solidPercentage = 100 - (config_idx * 25);
+  std::string label = std::to_string(solidPercentage) + "% Solid";
 
-  if (coherencePercentage == 100)
-    label += " (Perfect Mirror)";
-  else if (coherencePercentage == 50)
-    label += " (Half Diffuse)";
-  else if (coherencePercentage == 0)
-    label += " (Perfectly Diffuse)";
+  if (solidPercentage == 100)
+    label += " (Min AnyHit Ignore)";
+  else if (solidPercentage == 0)
+    label += " (Max AnyHit Ignore)";
 
   return label;
-}
-
-void RayDivergenceBench::generateGeometry(std::vector<float> &vertices) const {
-  uint32_t gridSize = 256;
-  uint32_t primitivesPerPlane = gridSize * gridSize * 2;
-  vertices.reserve(primitivesPerPlane * 2 * 9);
-
-  auto addPlane = [&](float z) {
-    float scale = 200.0f / gridSize;
-    for (uint32_t y = 0; y < gridSize; ++y) {
-      for (uint32_t x = 0; x < gridSize; ++x) {
-        float fx0 = (float)x * scale - 100.0f;
-        float fy0 = (float)y * scale - 100.0f;
-        float fx1 = (float)(x + 1) * scale - 100.0f;
-        float fy1 = (float)(y + 1) * scale - 100.0f;
-
-        // Triangle 1
-        vertices.push_back(fx0);
-        vertices.push_back(fy0);
-        vertices.push_back(z);
-        vertices.push_back(fx1);
-        vertices.push_back(fy0);
-        vertices.push_back(z);
-        vertices.push_back(fx0);
-        vertices.push_back(fy1);
-        vertices.push_back(z);
-        // Triangle 2
-        vertices.push_back(fx1);
-        vertices.push_back(fy0);
-        vertices.push_back(z);
-        vertices.push_back(fx1);
-        vertices.push_back(fy1);
-        vertices.push_back(z);
-        vertices.push_back(fx0);
-        vertices.push_back(fy1);
-        vertices.push_back(z);
-      }
-    }
-  };
-
-  addPlane(0.0f);   // Floor
-  addPlane(-20.0f); // Ceiling
-}
-
-void RayDivergenceBench::DumpGeometry() const {
-  std::vector<float> vertices;
-  generateGeometry(vertices);
-
-  std::ofstream mtlFile("raydiv_scene.mtl");
-  mtlFile << "newmtl MaterialA\nKd 1.0 0.5 0.5\nPr 0.0\nNs 1000\n";
-  mtlFile << "newmtl MaterialB\nKd 0.5 1.0 0.5\nPr 0.25\nNs 400\n";
-  mtlFile << "newmtl MaterialC\nKd 0.5 0.5 1.0\nPr 0.5\nNs 100\n";
-  mtlFile << "newmtl MaterialD\nKd 1.0 1.0 0.5\nPr 0.75\nNs 25\n";
-  mtlFile << "newmtl MaterialE\nKd 1.0 0.5 1.0\nPr 1.0\nNs 1\n";
-  mtlFile.close();
-
-  std::ofstream objFile("raydiv_scene.obj");
-  objFile << "mtllib raydiv_scene.mtl\n";
-
-  for (size_t i = 0; i < vertices.size(); i += 3) {
-    objFile << "v " << vertices[i] << " " << vertices[i + 1] << " "
-            << vertices[i + 2] << "\n";
-  }
-
-  uint32_t gridSize = 256;
-  uint32_t vIdx = 1;
-
-  auto writePlaneFaces = [&](bool isCeiling) {
-    for (uint32_t y = 0; y < gridSize; ++y) {
-      for (uint32_t x = 0; x < gridSize; ++x) {
-        // Material is based on x-coordinate stripping for 5 materials
-        uint32_t matIdx = x % 5;
-        char matChar = 'A' + matIdx;
-        objFile << "usemtl Material" << matChar << "\n";
-
-        // Triangle 1
-        objFile << "f " << vIdx << " " << vIdx + 1 << " " << vIdx + 2 << "\n";
-        // Triangle 2
-        objFile << "f " << vIdx + 3 << " " << vIdx + 4 << " " << vIdx + 5
-                << "\n";
-        vIdx += 6;
-      }
-    }
-  };
-
-  writePlaneFaces(false); // Floor
-  writePlaneFaces(true);  // Ceiling
-
-  objFile.close();
-  std::cout << "Geometry dumped to raydiv_scene.obj and raydiv_scene.mtl"
-            << std::endl;
 }

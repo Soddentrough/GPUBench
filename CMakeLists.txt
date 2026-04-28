@@ -1,12 +1,12 @@
 cmake_minimum_required(VERSION 3.16)
-project(GPUBench VERSION 1.0.2)
+project(GPUBench VERSION 1.1.0)
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Versioning
-set(BUILD_NUMBER "13") # Build number for the project
+set(BUILD_NUMBER "0") # Build number for the project
 set(PROJECT_FULL_VERSION "${PROJECT_VERSION}.${BUILD_NUMBER}")
 
 
@@ -85,7 +85,7 @@ endif()
 
 # Shader/Kernel sources
 if(Vulkan_FOUND)
-    file(GLOB SHADERS "shaders/*.comp" "shaders/*.rgen" "shaders/*.rmiss" "shaders/*.rchit")
+    file(GLOB SHADERS "shaders/*.comp" "shaders/*.rgen" "shaders/*.rmiss" "shaders/*.rchit" "shaders/*.rahit" "shaders/*.rint")
     # Filter out problematic shaders that use non-standard extensions
     list(REMOVE_ITEM SHADERS 
         "${CMAKE_CURRENT_SOURCE_DIR}/shaders/coop_matrix_fp8.comp"
@@ -186,6 +186,12 @@ set(SOURCES
     src/benchmarks/CacheBench.cpp
     src/benchmarks/RayTracingBench.cpp
     src/benchmarks/RayDivergenceBench.cpp
+    src/benchmarks/RayAnyHitBench.cpp
+    src/benchmarks/RayIncoherentBench.cpp
+    src/benchmarks/RayPayloadBench.cpp
+    src/benchmarks/RayASBuildBench.cpp
+    src/benchmarks/RayProceduralBench.cpp
+    src/benchmarks/RayMaterialDivergenceBench.cpp
     src/utils/KernelPath.cpp
     src/utils/ShaderCache.cpp
 )

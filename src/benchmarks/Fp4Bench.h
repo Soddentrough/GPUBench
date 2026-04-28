@@ -9,6 +9,11 @@ public:
   std::vector<std::string> GetAliases() const override {
     return {"f4", "performance"};
   }
+  const char *GetMetric() const override { return "TOPS"; }
+
+  uint32_t GetNumConfigs() const override;
+  std::string GetConfigName(uint32_t config_idx) const override;
+
   bool IsSupported(const DeviceInfo &info,
                    IComputeContext *context = nullptr) const override;
   void Setup(IComputeContext &context, const std::string &kernel_dir) override;
