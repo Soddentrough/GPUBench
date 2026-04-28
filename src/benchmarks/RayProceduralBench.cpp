@@ -71,6 +71,7 @@ void RayProceduralBench::Setup(IComputeContext &context,
 
   buildAS();
 
+
   std::filesystem::path kdir(kernel_dir);
   
   if (vContext) {
@@ -79,7 +80,8 @@ void RayProceduralBench::Setup(IComputeContext &context,
     
     kernel = vContext->createRTPipeline(
         (kdir / "vulkan" / "rayprocedural.rgen").string(),
-        (kdir / "vulkan" / "rayprocedural.rmiss").string(), hit, {}, rint, 2);
+        (kdir / "vulkan" / "rayprocedural.rmiss").string(), hit, {}, rint, 3);
+
   }
 }
 
@@ -215,6 +217,8 @@ void RayProceduralBench::buildAS() {
   cmdBuild(blasBuildInfo, aabbBlas, numPrimitives);
   cmdBuild(tlasBuildInfo, aabbTlas, 1);
 
+
+
   vkEndCommandBuffer(cmd);
 
   VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
@@ -222,6 +226,8 @@ void RayProceduralBench::buildAS() {
   submit.pCommandBuffers = &cmd;
   vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE);
   vkQueueWaitIdle(queue);
+
+
 
   vkDestroyCommandPool(device, tmpPool, nullptr);
 }
@@ -239,6 +245,7 @@ void RayProceduralBench::Run(uint32_t config_idx) {
   vContext->dispatch(kernel, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
   context->waitIdle();
   auto end = std::chrono::high_resolution_clock::now();
+
 
   std::chrono::duration<double> diff = end - start;
   rtResults[config_idx] = diff.count();
