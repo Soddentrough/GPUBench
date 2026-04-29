@@ -24,6 +24,9 @@ public:
   std::string GetConfigName(uint32_t config_idx) const override;
 
   uint32_t GetNumConfigs() const override { return 2; } // Coherent, Divergent
+  std::vector<std::string> GetAliases() const override {
+    return {"raymatdiv", "materialdivergence", "raydivergence"};
+  }
 
 private:
   void loadRTProcs(VkDevice device);

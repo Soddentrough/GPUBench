@@ -25,7 +25,7 @@ public:
 
   uint32_t GetNumConfigs() const override { return 5; }
   std::vector<std::string> GetAliases() const override {
-    return {"raydiv", "divergence"};
+    return {"raydiv", "divergence", "materialdivergence", "raymaterialdivergence"};
   }
   std::string GetConfigName(uint32_t config_idx) const override;
   const char *GetComponent(uint32_t config_idx = 0) const override;
