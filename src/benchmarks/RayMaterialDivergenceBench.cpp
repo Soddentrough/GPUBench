@@ -2,6 +2,7 @@
 #include "core/VulkanContext.h"
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <iostream>
@@ -51,7 +52,7 @@ void RayMaterialDivergenceBench::Setup(IComputeContext &context,
   srand(1337);
   for (uint32_t i = 0; i < numPrimitives; ++i) {
     for (int j = 0; j < 9; ++j) {
-      vertices.push_back((float(rand()) / RAND_MAX) * 2.0f - 1.0f);
+      vertices.push_back((float(rand()) / RAND_MAX) * 0.8f - 0.4f);
     }
   }
 
@@ -131,15 +132,23 @@ void RayMaterialDivergenceBench::buildAS(uint32_t config_idx) {
   VkDeviceAddress triASAddr =
       vkGetAccelerationStructureDeviceAddressKHR_ptr(device, &triAddrInfo);
 
-  numInstances = 100000;
+  numInstances = 40000;
   std::vector<VkAccelerationStructureInstanceKHR> instances(numInstances);
+  
+  uint32_t gridWidth = sqrt(numInstances);
+  float spacing = 200.0f / gridWidth;
+
   srand(1337);
   for(uint32_t i=0; i<numInstances; ++i) {
       instances[i].transform = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0};
-      // Randomize position
-      instances[i].transform.matrix[0][3] = (float(rand()) / RAND_MAX) * 200.0f - 100.0f;
-      instances[i].transform.matrix[1][3] = (float(rand()) / RAND_MAX) * 200.0f - 100.0f;
-      instances[i].transform.matrix[2][3] = (float(rand()) / RAND_MAX) * 200.0f - 100.0f;
+      
+      // Arrange in a 2D grid across X and Y, with a fixed Z
+      uint32_t ix = i % gridWidth;
+      uint32_t iy = i / gridWidth;
+      
+      instances[i].transform.matrix[0][3] = (ix * spacing) - 100.0f;
+      instances[i].transform.matrix[1][3] = (iy * spacing) - 100.0f;
+      instances[i].transform.matrix[2][3] = 0.0f; // Fixed depth
       
       instances[i].instanceCustomIndex = i;
       instances[i].mask = 0xFF;
