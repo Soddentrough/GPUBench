@@ -277,6 +277,7 @@ const std::vector<DeviceInfo> &OpenCLContext::getDevices() const {
       info.fp64Support = (ext_str.find("cl_khr_fp64") != std::string::npos ||
                           ext_str.find("cl_amd_fp64") != std::string::npos);
       info.fp16Support = (ext_str.find("cl_khr_fp16") != std::string::npos);
+      info.bf16Support = true;
       info.fp8Support = false;
       info.fp6Support = false;
       info.fp4Support = false;
@@ -366,6 +367,7 @@ DeviceInfo OpenCLContext::getCurrentDeviceInfo() const {
   info.fp64Support = (ext_str.find("cl_khr_fp64") != std::string::npos ||
                       ext_str.find("cl_amd_fp64") != std::string::npos);
   info.fp16Support = (ext_str.find("cl_khr_fp16") != std::string::npos);
+  info.bf16Support = true;
   info.fp8Support = false;
   info.fp6Support = false;
   info.fp4Support = false;

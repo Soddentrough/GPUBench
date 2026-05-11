@@ -14,18 +14,38 @@ void main() {
     // Use explicit scope 3 (Subgroup). gl_ScopeSubgroup = 3.
     coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseA> matA;
     coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseB> matB;
-    coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC;
+    
+    coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC0 = coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(0.0);
+    coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC1 = coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(0.0);
+    coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC2 = coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(0.0);
+    coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC3 = coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(0.0);
+    coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC4 = coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(0.0);
+    coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC5 = coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(0.0);
+    coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC6 = coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(0.0);
+    coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC7 = coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(0.0);
 
     // Use non-suffixed names. Stride 16, Layout 0 (Row Major).
     coopMatLoad(matA, buf.data, 0u, 16u, 0);
     coopMatLoad(matB, buf.data, 0u, 16u, 0);
-    
-    // Initialize Accumulator
-    matC = coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(0.0);
 
-    for (int i = 0; i < 32768; ++i) {
-        matC = coopMatMulAdd(matA, matB, matC);
+    for (int i = 0; i < 4096; ++i) {
+        matC0 = coopMatMulAdd(matA, matB, matC0);
+        matC1 = coopMatMulAdd(matA, matB, matC1);
+        matC2 = coopMatMulAdd(matA, matB, matC2);
+        matC3 = coopMatMulAdd(matA, matB, matC3);
+        matC4 = coopMatMulAdd(matA, matB, matC4);
+        matC5 = coopMatMulAdd(matA, matB, matC5);
+        matC6 = coopMatMulAdd(matA, matB, matC6);
+        matC7 = coopMatMulAdd(matA, matB, matC7);
     }
 
-    coopMatStore(matC, buf.data, 0u, 16u, 0);
+    matC0 = matC0 + matC1;
+    matC2 = matC2 + matC3;
+    matC4 = matC4 + matC5;
+    matC6 = matC6 + matC7;
+    matC0 = matC0 + matC2;
+    matC4 = matC4 + matC6;
+    matC0 = matC0 + matC4;
+
+    coopMatStore(matC0, buf.data, 0u, 16u, 0);
 }

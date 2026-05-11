@@ -27,7 +27,7 @@ public:
     return "FP4";
   }
   int GetSortWeight() const override { return 60; }
-  bool IsEmulated() const override { return is_emulated; }
+  bool IsEmulated(uint32_t config_idx = 0) const override { return is_emulated; }
 
 private:
   IComputeContext *context = nullptr;

@@ -44,7 +44,7 @@ public:
 
   // Not an emulated benchmark, it's a real system benchmark, but returns false
   // for GPU emulation
-  bool IsEmulated() const override { return false; }
+  bool IsEmulated(uint32_t config_idx = 0) const override { return false; }
 
 private:
   std::vector<SysMemConfig> configs;

@@ -44,6 +44,7 @@ struct DeviceInfo {
   uint32_t l3CacheSize = 0;
   bool fp64Support = false;
   bool fp16Support = false;
+  bool bf16Support = false;
   bool fp8Support = false;
   bool fp6Support = false;
   bool fp4Support = false;

@@ -23,7 +23,7 @@ public:
   virtual void Run(uint32_t config_idx = 0) = 0;
   virtual void Teardown() = 0;
   virtual BenchmarkResult GetResult(uint32_t config_idx = 0) const = 0;
-  virtual bool IsEmulated() const { return false; }
+  virtual bool IsEmulated(uint32_t config_idx = 0) const { return false; }
   virtual uint32_t GetNumConfigs() const { return 1; }
   virtual std::string GetConfigName(uint32_t config_idx) const { return ""; }
   virtual uint32_t GetExpectedKernelCount() const { return 1; }

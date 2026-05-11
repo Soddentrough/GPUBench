@@ -6,14 +6,13 @@
 layout (local_size_x = 32, local_size_y = 1, local_size_z = 1) in;
 
 layout(set = 0, binding = 0) buffer Data {
-    float16_t data[];
+    float16_t data[]; // We use float16_t to exercise 16-bit coop matrices since bfloat16_t is not universally exposed in glslc
 } buf;
 
 void main() {
     coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseA> matA;
     coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseB> matB;
     
-    // Use 8 independent accumulators to break dependency chains and saturate matrix cores
     coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC0 = coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(0.0);
     coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC1 = coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(0.0);
     coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC2 = coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(0.0);
@@ -23,12 +22,10 @@ void main() {
     coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC6 = coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(0.0);
     coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC7 = coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(0.0);
 
-    uint gid = gl_WorkGroupID.x;
-    coopMatLoad(matA, buf.data, (gid % 8192) * 256, 16u, 0);
-    coopMatLoad(matB, buf.data, (gid % 8192) * 256, 16u, 0);
+    coopMatLoad(matA, buf.data, 0u, 16u, 0);
+    coopMatLoad(matB, buf.data, 0u, 16u, 0);
 
-    // 2048 * 8 = 16384 total matrix operations (same as before)
-    for (int i = 0; i < 2048; ++i) {
+    for (int i = 0; i < 4096; ++i) {
         matC0 = coopMatMulAdd(matA, matB, matC0);
         matC1 = coopMatMulAdd(matA, matB, matC1);
         matC2 = coopMatMulAdd(matA, matB, matC2);
@@ -39,7 +36,6 @@ void main() {
         matC7 = coopMatMulAdd(matA, matB, matC7);
     }
 
-    // Combine to prevent dead-code elimination
     matC0 = matC0 + matC1;
     matC2 = matC2 + matC3;
     matC4 = matC4 + matC5;
@@ -48,5 +44,5 @@ void main() {
     matC4 = matC4 + matC6;
     matC0 = matC0 + matC4;
 
-    coopMatStore(matC0, buf.data, (gid % 8192) * 256, 16u, 0);
+    coopMatStore(matC0, buf.data, 0u, 16u, 0);
 }

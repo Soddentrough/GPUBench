@@ -172,6 +172,7 @@ const std::vector<DeviceInfo> &VulkanContext::getDevices() const {
       info.subgroupSize = subgroupProps.subgroupSize;
       info.fp64Support = (features2.features.shaderFloat64 == VK_TRUE);
       info.fp16Support = (features168.shaderFloat16 == VK_TRUE);
+      info.bf16Support = true;
       info.int8Support =
           true; // Usually supported if 8bit storage/int8 shader is supported
       info.cooperativeMatrixSupport =
@@ -261,6 +262,7 @@ DeviceInfo VulkanContext::getCurrentDeviceInfo() const {
   info.subgroupSize = subgroupProps.subgroupSize;
   info.fp64Support = (features2_2.features.shaderFloat64 == VK_TRUE);
   info.fp16Support = (features168_curr.shaderFloat16 == VK_TRUE);
+  info.bf16Support = true;
   info.int8Support = true;
   info.cooperativeMatrixSupport =
       hasExt(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME);
@@ -412,8 +414,10 @@ void VulkanContext::createDevice() {
     if (found) {
       enabledExtensions.push_back(extension);
     } else {
-      std::cerr << "Warning: Extension " << extension
-                << " not supported by device, disabling." << std::endl;
+      if (verbose) {
+          std::cerr << "Warning: Extension " << extension
+                    << " not supported by device, disabling." << std::endl;
+      }
     }
   }
 
@@ -1134,6 +1138,7 @@ void VulkanContext::notifyKernelCreated(const std::string &file_name) {
 
 void VulkanContext::printProgressBar(uint32_t current, uint32_t total,
                                      const std::string &kernel_name) {
+  if (!verbose) return;
   const int barWidth = 30;
   float progress = static_cast<float>(current) / total;
   int pos = static_cast<int>(barWidth * progress);

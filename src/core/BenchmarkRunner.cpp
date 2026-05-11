@@ -1,6 +1,7 @@
 #include "core/BenchmarkRunner.h"
 #include "benchmarks/CacheBench.h"
 #include "benchmarks/Fp16Bench.h"
+#include "benchmarks/Bf16Bench.h"
 #include "benchmarks/Fp32Bench.h"
 #include "benchmarks/Fp4Bench.h"
 #include "benchmarks/Fp64Bench.h"
@@ -65,6 +66,7 @@ void BenchmarkRunner::discoverBenchmarks() {
   benchmarks.push_back(std::make_unique<Fp64Bench>());
   benchmarks.push_back(std::make_unique<Fp32Bench>());
   benchmarks.push_back(std::make_unique<Fp16Bench>());
+  benchmarks.push_back(std::make_unique<Bf16Bench>());
   benchmarks.push_back(std::make_unique<Fp8Bench>());
   // benchmarks.push_back(std::make_unique<Fp6Bench>()); // Temporarily disabled
   benchmarks.push_back(std::make_unique<Fp4Bench>());
@@ -220,35 +222,37 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
       }
     }
 
-    std::cout
-        << "==============================================================="
-           "================="
-        << std::endl;
-    std::cout
-        << "   ______ ______  _    _  ____   ______  _   _   _____  _    _"
-        << std::endl;
-    std::cout
-        << "  |  ____|  __  || |  | ||  _ \\ |  ____|| \\ | | / ____|| |  | |"
-        << std::endl;
-    std::cout
-        << "  | |  __| |__) || |  | || |_) || |____ |  \\| || |     | |__| |"
-        << std::endl;
-    std::cout
-        << "  | | |_ |  ___/ | |  | ||  _ < |  ____|| . ` || |     |  __  |"
-        << std::endl;
-    std::cout
-        << "  | |__| | |     | |__| || |_) || |____ | |\\  || |____ | |  | |"
-        << std::endl;
-    std::cout
-        << "  \\______|_|      \\____/ |____/ |______||_| \\_| \\_____||_|  |_|"
-        << std::endl;
-    std::cout
-        << "==============================================================="
-           "================="
-        << std::endl;
-    std::cout << std::endl;
+    if (verbose) {
+        std::cout
+            << "==============================================================="
+               "================="
+            << std::endl;
+        std::cout
+            << "   ______ ______  _    _  ____   ______  _   _   _____  _    _"
+            << std::endl;
+        std::cout
+            << "  |  ____|  __  || |  | ||  _ \\ |  ____|| \\ | | / ____|| |  | |"
+            << std::endl;
+        std::cout
+            << "  | |  __| |__) || |  | || |_) || |____ |  \\| || |     | |__| |"
+            << std::endl;
+        std::cout
+            << "  | | |_ |  ___/ | |  | ||  _ < |  ____|| . ` || |     |  __  |"
+            << std::endl;
+        std::cout
+            << "  | |__| | |     | |__| || |_) || |____ | |\\  || |____ | |  | |"
+            << std::endl;
+        std::cout
+            << "  \\______|_|      \\____/ |____/ |______||_| \\_| \\_____||_|  |_|"
+            << std::endl;
+        std::cout
+            << "==============================================================="
+               "================="
+            << std::endl;
+        std::cout << std::endl;
+    }
 
-    if (hasDeviceBenchmarks) {
+    if (hasDeviceBenchmarks && verbose) {
       std::cout << "Selected execution targets:" << std::endl;
     }
 
@@ -257,23 +261,23 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
         continue;
       try {
         DeviceInfo info = context->getCurrentDeviceInfo();
-        std::cout << " [Device " << context->getSelectedDeviceIndex() << "] "
-                  << info.name << " ("
-                  << ComputeBackendFactory::getBackendName(
-                         context->getBackend())
-                  << ")" << std::endl;
         if (verbose) {
-          std::cout << "  - VRAM:         "
-                    << static_cast<int>(std::round(info.memorySize /
-                                                   (1024.0 * 1024.0 * 1024.0)))
-                    << " GB" << std::endl;
-          std::cout << "  - Subgroup:     " << info.subgroupSize << " threads"
-                    << std::endl;
-          std::cout << "  - Shared Memory: "
-                    << (info.maxComputeSharedMemorySize / 1024) << " KB"
-                    << std::endl;
+            std::cout << " [Device " << context->getSelectedDeviceIndex() << "] "
+                      << info.name << " ("
+                      << ComputeBackendFactory::getBackendName(
+                             context->getBackend())
+                      << ")" << std::endl;
+            std::cout << "  - VRAM:         "
+                      << static_cast<int>(std::round(info.memorySize /
+                                                     (1024.0 * 1024.0 * 1024.0)))
+                      << " GB" << std::endl;
+            std::cout << "  - Subgroup:     " << info.subgroupSize << " threads"
+                      << std::endl;
+            std::cout << "  - Shared Memory: "
+                      << (info.maxComputeSharedMemorySize / 1024) << " KB"
+                      << std::endl;
+            std::cout << std::endl;
         }
-        std::cout << std::endl;
 
         // Calculate total expected kernels for progress bar
         uint32_t totalKernels = 0;
@@ -428,7 +432,7 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
                 result_data.operations =
                     bench_result.operations * total_invocations;
                 result_data.time_ms = total_time_ms;
-                result_data.isEmulated = bench->IsEmulated();
+                result_data.isEmulated = bench->IsEmulated(i);
                 result_data.component = bench->GetComponent(i);
                 result_data.subcategory = bench->GetSubCategory(i);
                 result_data.maxWorkGroupSize = info.maxWorkGroupSize;
@@ -441,8 +445,10 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
 
               bench->Teardown();
             } catch (const std::exception &e) {
-              std::cerr << "Error running " << bench->GetName() << ": "
-                        << e.what() << std::endl;
+              if (verbose) {
+                  std::cerr << "Error running " << bench->GetName() << ": "
+                            << e.what() << std::endl;
+              }
               // Make sure to clean up
               try {
                 bench->Teardown();
@@ -452,8 +458,6 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
             }
           }
         }
-        if (!verbose)
-          std::cout << std::endl;
       } catch (const std::exception &e) {
         std::cerr << "Error processing device: " << e.what() << std::endl;
         continue;
@@ -562,8 +566,10 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
           }
           bench->Teardown();
         } catch (const std::exception &e) {
-          std::cerr << "Error running " << bench->GetName() << ": " << e.what()
-                    << std::endl;
+          if (verbose) {
+              std::cerr << "Error running " << bench->GetName() << ": " << e.what()
+                        << std::endl;
+          }
           try {
             bench->Teardown();
           } catch (...) {
@@ -572,7 +578,8 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
       }
     }
   }
-  std::cout << "\r\033[K"
-            << std::endl; // Clear the last "Running..." line and move to next
+  if (!verbose) {
+      std::cout << "\r\033[K" << std::flush;
+  }
   formatter->print();
 }

@@ -17,7 +17,6 @@ void Int4Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
       8192 * 64 * 4; // 8192 workgroups * 64 threads * 4 bytes (i8vec4)
   buffer = context.createBuffer(bufferSize);
 
-  // Helper to check if file exists
   auto file_exists = [](const std::string &path) {
     std::ifstream f(path.c_str());
     return f.good();
@@ -26,20 +25,15 @@ void Int4Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
   std::filesystem::path kdir(kernel_dir);
 
   if (context.getBackend() == ComputeBackend::ROCm) {
-    // HIP Path
-    std::filesystem::path kernel_file = kdir / "rocm" / "int4.hip";
-    if (file_exists(kernel_file.string())) {
-      vectorKernel =
-          context.createKernel(kernel_file.string(), "run_benchmark", 1);
-      context.setKernelArg(vectorKernel, 0, buffer);
-      is_native_vector = true;
-      is_emulated = false;
-    } else {
-      std::cerr << "Native INT4 HIP kernel missing: " << kernel_file.string()
-                << std::endl;
-      is_native_vector = false; // Not supported
-                                // We can return here or let it be null.
-    }
+    // HIP INT4 is currently completely emulated. Skip to prevent inaccurate results.
+    is_native_vector = false;
+    is_native_matrix = false;
+    return;
+  }
+
+  if (context.getBackend() == ComputeBackend::OpenCL) {
+    // OpenCL INT4 is completely emulated. Skip to prevent inaccurate results.
+    is_native_vector = false;
     is_native_matrix = false;
     return;
   }
@@ -55,30 +49,26 @@ void Int4Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
   }
 
   // Vulkan Path
-  // Use emulated vector kernel for stability on Windows
-  std::filesystem::path vector_file = kdir / "vulkan" / "int4.comp";
+  // INT4 vector shader uses i8vec4 with masking — this is emulated regardless
+  // of hardware since there is no native INT4 vector ISA in Vulkan/SPIR-V.
+  // Skip to prevent inaccurate results.
   is_native_vector = false;
-  is_emulated = true;
+  is_emulated_vector = false;
+  vectorKernel = nullptr;
 
-  try {
-    // Initialize buffer to zero for stability
-    std::vector<int8_t> zeros(bufferSize, 0);
-    context.writeBuffer(buffer, 0, bufferSize, zeros.data());
+  DeviceInfo info = context.getCurrentDeviceInfo();
 
-    vectorKernel = context.createKernel(vector_file.string(), "main", 1);
-    context.setKernelArg(vectorKernel, 0, buffer);
-
-    // Pass element count (number of i8vec4) as push constant at offset 0
-    uint32_t elementCount = (uint32_t)(8192 * 64);
-    context.setKernelArg(vectorKernel, 1, sizeof(uint32_t), &elementCount);
-  } catch (const std::exception &e) {
-    std::cerr << "INT4 vector kernel failed to load: " << e.what() << std::endl;
-    throw;
-  }
-
+  // Cooperative Matrix path: on RDNA4, the matrix cores handle INT4 natively
+  // via the cooperative matrix interface with int8_t types (HW packs/unpacks).
   bool is_rdna4 =
-      context.getCurrentDeviceInfo().name.find("gfx12") != std::string::npos;
-  if (context.getCurrentDeviceInfo().cooperativeMatrixSupport &&
+      info.name.find("gfx12") != std::string::npos ||
+      info.name.find("GFX12") != std::string::npos ||
+      info.name.find("rx 9070") != std::string::npos ||
+      info.name.find("R9700") != std::string::npos ||
+      info.name.find("Radeon AI") != std::string::npos;
+      
+  is_native_matrix = false;
+  if (info.cooperativeMatrixSupport &&
       context.getBackend() == ComputeBackend::Vulkan && is_rdna4) {
     std::filesystem::path matrix_file =
         kdir / "vulkan" / "coop_matrix_int4.comp";
@@ -95,7 +85,7 @@ void Int4Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
 }
 
 void Int4Bench::Run(uint32_t config_idx) {
-  if (config_idx == 0) {
+  if (config_idx == 0 && vectorKernel != nullptr) {
     context->dispatch(vectorKernel, 8192, 1, 1, 64, 1, 1);
   } else if (matrixKernel) {
     context->dispatch(matrixKernel, 32768, 1, 1, 32, 1, 1);
@@ -115,15 +105,9 @@ void Int4Bench::Teardown() {
 }
 
 BenchmarkResult Int4Bench::GetResult(uint32_t config_idx) const {
-  if (config_idx == 0) { // Vector
-    // Shader (int4.comp): loop body has 4 MAD operations, each using i8vec4
-    // (4-bit values masked to 0x0F). There are 2 MAD pairs per body line ×
-    // 2 body lines = 4 MADs per iteration. Each MAD = 4 components × 2 ops
-    // (mul + add) = 8 ops. Total: 32768 iters × 4 MADs × 8 ops = 1024 ops per
-    // thread, but the loop unrolls 4 lines (val1 and val2 each updated twice).
-    // = 32768 iterations × 4 body lines × 4 components × 2 ops = 32768 * 128 ops
+  if (config_idx == 0 && vectorKernel != nullptr) { // Vector
     uint64_t iters = 32768;
-    uint64_t ops_per_iter = 128;
+    uint64_t ops_per_iter = 32;
     if (context) {
       if (context->getBackend() == ComputeBackend::OpenCL) {
         iters = 16384;
@@ -133,7 +117,7 @@ BenchmarkResult Int4Bench::GetResult(uint32_t config_idx) const {
         ops_per_iter = 96;
       }
     }
-    uint64_t num_ops = iters * ops_per_iter * 8192 * 64;
+    uint64_t num_ops = (uint64_t)iters * ops_per_iter * 8192 * 64;
     return {num_ops, 0.0};
   } else { // Matrix
     // 16×16×16 matmul = 8192 ops per iteration
@@ -144,9 +128,13 @@ BenchmarkResult Int4Bench::GetResult(uint32_t config_idx) const {
 }
 
 uint32_t Int4Bench::GetNumConfigs() const {
-  return (matrixKernel != nullptr) ? 2 : 1;
+  int configs = 0;
+  if (vectorKernel != nullptr) configs++;
+  if (matrixKernel != nullptr) configs++;
+  return configs;
 }
 
 std::string Int4Bench::GetConfigName(uint32_t config_idx) const {
-  return (config_idx == 0) ? "Vector" : "Matrix";
+  if (config_idx == 0 && vectorKernel != nullptr) return "Vector";
+  return "Matrix";
 }

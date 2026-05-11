@@ -12,7 +12,7 @@ void Fp16Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
 
   // Create storage buffer
   size_t bufferSize =
-      8192 * 64 * 4; // 8192 workgroups * 64 threads * 4 bytes (f16vec2)
+      8192 * 64 * 4 * 4; // 8MB buffer to prevent out of bounds
   buffer = context.createBuffer(bufferSize);
 
   // Initialize buffer
@@ -43,13 +43,17 @@ void Fp16Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
   if (context.getBackend() == ComputeBackend::Vulkan && context.getCurrentDeviceInfo().cooperativeMatrixSupport) {
       try_load_matrix = true;
   } else if (context.getBackend() == ComputeBackend::ROCm) {
-      // Allow ROCm to attempt to load its matrix kernel on RDNA3+
-      try_load_matrix = true;
+      // Matrix WMMA is disabled on ROCm due to 7.1.1 backend crash for RDNA4.
+      // If we are on RDNA3 (gfx1100), we could enable it, but for now we skip.
+      if (context.getCurrentDeviceInfo().name.find("gfx11") != std::string::npos) {
+          try_load_matrix = true;
+      }
   }
 
   if (try_load_matrix) {
     try {
-      matrixKernel = context.createKernel(matrix_file.string(), context.getBackend() == ComputeBackend::ROCm ? "run_benchmark" : "main", 1);
+      std::string func_name = (context.getBackend() == ComputeBackend::ROCm) ? "run_benchmark" : "main";
+      matrixKernel = context.createKernel(matrix_file.string(), func_name, 1);
       if (matrixKernel) {
           context.setKernelArg(matrixKernel, 0, buffer);
       }

@@ -33,15 +33,19 @@ extern "C" __global__ void run_benchmark(float* data) {
         // Intrinsic for FP8 WMMA on RDNA4. This signature might need adjustment based on LLVM updates.
         c = __builtin_amdgcn_wmma_f32_16x16x16_fp8_fp8_w32(a, b, c);
     }
-    data[idx] = c[0] + c[1];
+    // Modulo idx by buffer size (524288 floats) to prevent OOB
+    int safe_idx = idx % 524288;
+    data[safe_idx] = c[0] + c[1];
 #else
     // Emulated Fallback for architectures without FP8 WMMA (e.g. RDNA3)
     float acc = 1.0f;
-    for(int i=0; i<16384; i++) {
+    // Loop count reduced from 16384 → 512 to prevent TDR/GPU crash on long emulated dispatch
+    for(int i=0; i<512; i++) {
         // 16x16x16 = 4096 MACs per matrix op. Emulating just enough workload to represent it, 
         // but performance will be severely handicapped, proving lack of native support.
         acc += 0.001f;
     }
-    data[idx] = acc;
+    int safe_idx = idx % 524288;
+    data[safe_idx] = acc;
 #endif
 }

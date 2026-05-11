@@ -88,8 +88,6 @@ if(Vulkan_FOUND)
     file(GLOB SHADERS "shaders/*.comp" "shaders/*.rgen" "shaders/*.rmiss" "shaders/*.rchit" "shaders/*.rahit" "shaders/*.rint")
     # Filter out problematic shaders that use non-standard extensions
     list(REMOVE_ITEM SHADERS 
-        "${CMAKE_CURRENT_SOURCE_DIR}/shaders/coop_matrix_fp8.comp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/shaders/coop_matrix_int4.comp"
         "${CMAKE_CURRENT_SOURCE_DIR}/shaders/fp8_native.comp"
         "${CMAKE_CURRENT_SOURCE_DIR}/shaders/int4_native.comp"
     )
@@ -176,6 +174,7 @@ set(SOURCES
     src/benchmarks/Fp32Bench.cpp
     src/benchmarks/Fp64Bench.cpp
     src/benchmarks/Fp16Bench.cpp
+    src/benchmarks/Bf16Bench.cpp
     src/benchmarks/Fp8Bench.cpp
     src/benchmarks/Fp4Bench.cpp
     src/benchmarks/Int8Bench.cpp

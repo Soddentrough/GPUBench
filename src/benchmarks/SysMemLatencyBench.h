@@ -32,7 +32,7 @@ public:
   int GetSortWeight() const override { return 500; }
 
   bool IsDeviceDependent() const override { return false; }
-  bool IsEmulated() const override { return false; }
+  bool IsEmulated(uint32_t config_idx = 0) const override { return false; }
 
 private:
   void *buffer = nullptr;

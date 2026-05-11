@@ -13,6 +13,8 @@
 #include "utils/ShaderCache.h"
 #include <cstring>
 #include <fstream>
+#include <algorithm>
+#include <cctype>
 
 // Static members
 std::unique_ptr<utils::DynamicLibrary> ROCmContext::hipLib;
@@ -185,8 +187,8 @@ void ROCmContext::enumerateDevices() {
       info.name = prop.name;
       info.archName = prop.gcnArchName;
 
-      int runtimeVersion;
-      f_hipRuntimeGetVersion(&runtimeVersion);
+      int runtimeVersion = 0;
+      (void)f_hipRuntimeGetVersion(&runtimeVersion);
       info.driverVersion = static_cast<uint32_t>(runtimeVersion);
 
       char uuid_str[64];
@@ -205,23 +207,31 @@ void ROCmContext::enumerateDevices() {
       info.subgroupSize = prop.warpSize;
       info.l2CacheSize = prop.l2CacheSize;
 
-      info.fp8Support =
-          (std::string(prop.gcnArchName).find("gfx942") != std::string::npos ||
-           std::string(prop.gcnArchName).find("gfx11") != std::string::npos ||
-           std::string(prop.gcnArchName).find("gfx12") != std::string::npos);
+      std::string archNameStr = prop.gcnArchName;
+      std::string deviceNameStr = prop.name;
+      std::transform(archNameStr.begin(), archNameStr.end(), archNameStr.begin(), ::tolower);
+      std::transform(deviceNameStr.begin(), deviceNameStr.end(), deviceNameStr.begin(), ::tolower);
+
+      // Workaround for hybrid ROCm 7.1.1/7.2.0 environments where gcnArchName is corrupted on RDNA4
+      bool is_rdna4 = (archNameStr.find("gfx12") != std::string::npos) ||
+                      (deviceNameStr.find("rx 9070") != std::string::npos) ||
+                      (deviceNameStr.find("rx 9070xt") != std::string::npos) ||
+                      (deviceNameStr.find("radeon ai pro r9700") != std::string::npos) ||
+                      (deviceNameStr.find("radeon ai") != std::string::npos);
+
+      bool is_rdna3 = (archNameStr.find("gfx11") != std::string::npos);
+      bool is_cdna3 = (archNameStr.find("gfx942") != std::string::npos);
+
+      info.fp8Support = (is_cdna3 || is_rdna3 || is_rdna4);
       info.fp6Support = false;
-      info.fp4Support =
-          (std::string(prop.gcnArchName).find("gfx12") != std::string::npos);
+      info.fp4Support = is_rdna4;
       info.fp64Support = true;
       info.fp16Support = true;
+      info.bf16Support = true;
       info.int8Support = true;
-      info.int4Support =
-          (std::string(prop.gcnArchName).find("gfx12") != std::string::npos);
+      info.int4Support = is_rdna4;
 
-      info.cooperativeMatrixSupport =
-          (std::string(prop.gcnArchName).find("gfx942") != std::string::npos ||
-           std::string(prop.gcnArchName).find("gfx11") != std::string::npos ||
-           std::string(prop.gcnArchName).find("gfx12") != std::string::npos);
+      info.cooperativeMatrixSupport = (is_cdna3 || is_rdna3 || is_rdna4);
       devices.push_back(info);
     }
   }
@@ -549,6 +559,7 @@ void ROCmContext::notifyKernelCreated(const std::string &file_name) {
 
 void ROCmContext::printProgressBar(uint32_t current, uint32_t total,
                                    const std::string &kernel_name) {
+  if (!verbose) return;
   const int barWidth = 30;
   float progress = static_cast<float>(current) / total;
   int pos = static_cast<int>(barWidth * progress);

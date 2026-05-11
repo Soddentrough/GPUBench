@@ -9,7 +9,8 @@ __kernel void run_benchmark(__global half* data) {
 
     // Emulating FP8 with FP16 packed values (half4 = 4 FP8-equivalent values)
     // Using multiple accumulators to avoid dependency chains
-    half4 val1 = vload4(index, data);
+    uint safe_index = index % 262144;
+    half4 val1 = vload4(safe_index, data);
     half4 val2 = (half4)(0.1h, 0.2h, 0.3h, 0.4h);
     half4 val3 = (half4)(0.5h, 0.6h, 0.7h, 0.8h);
     half4 val4 = (half4)(0.9h, 1.0h, 1.1h, 1.2h);
@@ -32,6 +33,8 @@ __kernel void run_benchmark(__global half* data) {
     }
     
     // Prevent optimization away
+    // Buffer is 2097152 bytes = 1048576 halfs. vstore4/vload4 uses 4-half elements, so max index is 262143.
+    uint safe_index = index % 262144;
     half4 result = val1 + val2 + val3 + val4 + val5 + val6 + val7 + val8;
-    vstore4(result, index, data);
+    vstore4(result, safe_index, data);
 }

@@ -15,7 +15,6 @@ extern "C" __global__ void run_benchmark(float* data) {
     
 #if defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__)
     // RDNA3 WMMA Intrinsic
-    // Note: Disabled for RDNA4 (gfx1200/1201) due to ROCm 7.1.1 backend crash.
     using float8 = __attribute__((ext_vector_type(8))) float;
     using half16 = __attribute__((ext_vector_type(16))) _Float16;
     
@@ -36,11 +35,7 @@ extern "C" __global__ void run_benchmark(float* data) {
     
     data[idx] = c[0] + c[1] + c[2] + c[3] + c[4] + c[5] + c[6] + c[7];
 #else
-    // Fallback if not RDNA3/4
-    float acc = 1.0f;
-    for(int i=0; i<32768; i++) {
-        acc += 0.001f;
-    }
-    data[idx] = acc;
+    // Disabled for RDNA4 (gfx1200/1201) due to ROCm 7.1.1 backend crash.
+    data[idx] = 0.0f;
 #endif
 }
