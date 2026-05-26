@@ -32,7 +32,8 @@ void Fp32Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
   std::string kernel_name;
   if (context.getBackend() == ComputeBackend::Vulkan) {
     kernel_name = "main";
-  } else if (context.getBackend() == ComputeBackend::ROCm) {
+  } else if (context.getBackend() == ComputeBackend::ROCm ||
+             context.getBackend() == ComputeBackend::OpenCL) {
     kernel_name = "run_benchmark";
   }
   kernel = context.createKernel(kernel_file.string(), kernel_name, 1);

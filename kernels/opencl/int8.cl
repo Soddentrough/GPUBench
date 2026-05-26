@@ -3,6 +3,10 @@
 // OpenCL's dot(char4, char4) → int maps to V_DOT4_I32_IU8 on AMD RDNA4.
 // 8 independent int32 accumulators × 8 INT8 ops per dot4 = 64 INT8 ops/iter.
 
+inline int dot_int4(int4 a, int4 b) {
+    return a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w;
+}
+
 __kernel void run_benchmark(__global char4* data) {
     uint index = get_global_id(0);
 
@@ -26,14 +30,14 @@ __kernel void run_benchmark(__global char4* data) {
         // ai varies each iteration to prevent loop hoisting.
         char4 ai = a + (char4)((char)i);
 
-        acc0 += dot(convert_int4(ai), convert_int4(w0));
-        acc1 += dot(convert_int4(ai), convert_int4(w1));
-        acc2 += dot(convert_int4(ai), convert_int4(w2));
-        acc3 += dot(convert_int4(ai), convert_int4(w3));
-        acc4 += dot(convert_int4(ai), convert_int4(w4));
-        acc5 += dot(convert_int4(ai), convert_int4(w5));
-        acc6 += dot(convert_int4(ai), convert_int4(w6));
-        acc7 += dot(convert_int4(ai), convert_int4(w7));
+        acc0 += dot_int4(convert_int4(ai), convert_int4(w0));
+        acc1 += dot_int4(convert_int4(ai), convert_int4(w1));
+        acc2 += dot_int4(convert_int4(ai), convert_int4(w2));
+        acc3 += dot_int4(convert_int4(ai), convert_int4(w3));
+        acc4 += dot_int4(convert_int4(ai), convert_int4(w4));
+        acc5 += dot_int4(convert_int4(ai), convert_int4(w5));
+        acc6 += dot_int4(convert_int4(ai), convert_int4(w6));
+        acc7 += dot_int4(convert_int4(ai), convert_int4(w7));
     }
 
     int total = acc0 + acc1 + acc2 + acc3 + acc4 + acc5 + acc6 + acc7;

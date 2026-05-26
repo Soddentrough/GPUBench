@@ -444,6 +444,7 @@ void OpenCLContext::releaseBuffer(ComputeBuffer buffer) {
 ComputeKernel OpenCLContext::createKernel(const std::string &file_name,
                                           const std::string &kernel_name,
                                           uint32_t num_args) {
+  notifyKernelCreated(file_name);
   if (!available)
     throw std::runtime_error("OpenCL not available");
   cl_int err;
@@ -451,6 +452,9 @@ ComputeKernel OpenCLContext::createKernel(const std::string &file_name,
   std::vector<char> program_binary;
   if (utils::ShaderCache::loadOpenCLCache(
           file_name, getDevices()[selectedDeviceIndex], program_binary)) {
+    if (verbose) {
+      std::cout << "Loaded OpenCL kernel from cache: " << file_name << std::endl;
+    }
     const unsigned char *binary_ptr =
         reinterpret_cast<const unsigned char *>(program_binary.data());
     size_t binary_size = program_binary.size();
@@ -468,11 +472,13 @@ ComputeKernel OpenCLContext::createKernel(const std::string &file_name,
     std::string source((std::istreambuf_iterator<char>(file)),
                        std::istreambuf_iterator<char>());
 
-    std::cout << "--- OPENCL COMPILER READING KERNEL ---" << std::endl;
-    std::cout << "File: " << file_name << std::endl;
-    std::cout << "First 150 chars: "
-              << source.substr(0, std::min(source.size(), (size_t)150))
-              << std::endl;
+    if (verbose) {
+      std::cout << "--- OPENCL COMPILER READING KERNEL ---" << std::endl;
+      std::cout << "File: " << file_name << std::endl;
+      std::cout << "First 150 chars: "
+                << source.substr(0, std::min(source.size(), (size_t)150))
+                << std::endl;
+    }
 
     const char *source_ptr = source.c_str();
     size_t source_size = source.length();
@@ -569,4 +575,44 @@ void OpenCLContext::releaseKernel(ComputeKernel kernel) {
     f_clReleaseProgram(kernel_cl->program);
     delete kernel_cl;
   }
+}
+
+void OpenCLContext::setExpectedKernelCount(uint32_t count) {
+  expectedKernelCount = count;
+  createdKernelCount = 0;
+  if (verbose && count > 0) {
+    std::cout << "Starting setup for " << count << " OpenCL kernels..." << std::endl;
+  }
+}
+
+void OpenCLContext::notifyKernelCreated(const std::string &file_name) {
+  createdKernelCount++;
+  if (!verbose && expectedKernelCount > 0) {
+    printProgressBar(createdKernelCount, expectedKernelCount, file_name);
+  }
+}
+
+void OpenCLContext::printProgressBar(uint32_t current, uint32_t total,
+                                     const std::string &kernel_name) {
+  const int barWidth = 30;
+  float progress = static_cast<float>(current) / total;
+  int pos = static_cast<int>(barWidth * progress);
+
+  std::string short_name = kernel_name;
+  size_t last_slash = kernel_name.find_last_of("/\\");
+  if (last_slash != std::string::npos) {
+    short_name = kernel_name.substr(last_slash + 1);
+  }
+
+  std::cout << "\r\033[K[";
+  for (int i = 0; i < barWidth; ++i) {
+    if (i < pos)
+      std::cout << "#";
+    else if (i == pos)
+      std::cout << ">";
+    else
+      std::cout << " ";
+  }
+  std::cout << "] " << int(progress * 100.0) << "% Compiling " << short_name
+            << (current == total ? "\n" : "") << std::flush;
 }

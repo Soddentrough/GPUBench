@@ -27,16 +27,15 @@ void Fp16Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
   if (context.getBackend() == ComputeBackend::ROCm) {
     vector_file = kdir / "rocm" / "fp16.hip";
     matrix_file = kdir / "rocm" / "fp16_matrix.hip";
+  } else if (context.getBackend() == ComputeBackend::OpenCL) {
+    vector_file = kdir / "opencl" / "fp16.cl";
   } else {
     vector_file = kdir / "vulkan" / "fp16.comp";
     matrix_file = kdir / "vulkan" / "coop_matrix_fp16.comp";
   }
 
-  vectorKernel = context.createKernel(vector_file.string(), "main", 1);
-  if (!vectorKernel && context.getBackend() == ComputeBackend::ROCm) {
-    // HIP uses run_benchmark
-    vectorKernel = context.createKernel(vector_file.string(), "run_benchmark", 1);
-  }
+  std::string vector_kernel_name = (context.getBackend() == ComputeBackend::Vulkan) ? "main" : "run_benchmark";
+  vectorKernel = context.createKernel(vector_file.string(), vector_kernel_name, 1);
   context.setKernelArg(vectorKernel, 0, buffer);
 
   // Optionally load Matrix Kernel if supported

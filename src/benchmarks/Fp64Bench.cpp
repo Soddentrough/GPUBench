@@ -29,6 +29,9 @@ void Fp64Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
   if (context.getBackend() == ComputeBackend::ROCm) {
     kernel_file_path = kdir / "rocm" / "fp64.hip";
     kernel_name = "run_benchmark";
+  } else if (context.getBackend() == ComputeBackend::OpenCL) {
+    kernel_file_path = kdir / "opencl" / "fp64.cl";
+    kernel_name = "run_benchmark";
   } else { // Default to Vulkan
     kernel_file_path = kdir / "vulkan" / "fp64.comp";
     kernel_name = "main";

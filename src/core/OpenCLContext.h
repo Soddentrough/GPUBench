@@ -31,6 +31,10 @@ public:
   cl_device_id getOpenCLDevice() const override { return device; }
   cl_context getOpenCLContext() const override { return context; }
 
+  void setVerbose(bool v) override { verbose = v; }
+  void setExpectedKernelCount(uint32_t count) override;
+  void notifyKernelCreated(const std::string &kernel_name) override;
+
   // Buffer management
   ComputeBuffer createBuffer(size_t size,
                              const void *host_ptr = nullptr) override;
@@ -74,6 +78,8 @@ private:
   void enumeratePlatformsAndDevices();
   void createContext();
   void createCommandQueue();
+  void printProgressBar(uint32_t current, uint32_t total,
+                       const std::string &kernel_name);
 
   static std::unique_ptr<utils::DynamicLibrary> openclLib;
   static bool librariesLoaded;
@@ -87,6 +93,8 @@ private:
 
   mutable std::vector<DeviceInfo> deviceInfos;
   uint32_t selectedDeviceIndex = 0;
+  uint32_t expectedKernelCount = 0;
+  uint32_t createdKernelCount = 0;
   bool verbose = false;
   bool available = false;
 };

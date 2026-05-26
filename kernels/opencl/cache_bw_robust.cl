@@ -30,9 +30,6 @@ __kernel void run_benchmark(__global float4* data, __global uint* pc) {
 
     float4 final_sum = sum0 + sum1 + sum2 + sum3 + sum4 + sum5 + sum6 + sum7;
 
-    // Force the compiler to keep the loop by adding a condition it can't evaluate statically.
-    // final_sum.x will almost never equal mask + 0.5f, but the compiler doesn't know.
-    if (final_sum.x == (float)mask + 0.5f) {
-        data[globalId & mask] = final_sum;
-    }
+    // Write final sum back unconditionally to prevent compiler dead-code elimination of reads
+    data[globalId & mask] = final_sum;
 }

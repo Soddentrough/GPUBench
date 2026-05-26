@@ -27,6 +27,8 @@ void MemBandwidthBench::createKernel(BandwidthConfig &config,
   std::string kernel_name;
   if (this->context->getBackend() == ComputeBackend::Vulkan) {
     kernel_name = "main";
+  } else {
+    kernel_name = "run_benchmark";
   }
   config.kernel =
       this->context->createKernel(kernel_file_path.string(), kernel_name, 2);

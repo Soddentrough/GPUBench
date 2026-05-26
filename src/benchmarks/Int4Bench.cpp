@@ -44,6 +44,16 @@ void Int4Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
     return;
   }
 
+  if (context.getBackend() == ComputeBackend::OpenCL) {
+    std::filesystem::path kernel_file = kdir / "opencl" / "int4.cl";
+    vectorKernel = context.createKernel(kernel_file.string(), "run_benchmark", 1);
+    context.setKernelArg(vectorKernel, 0, buffer);
+    is_native_vector = true;
+    is_emulated = false;
+    is_native_matrix = false;
+    return;
+  }
+
   // Vulkan Path
   // Use emulated vector kernel for stability on Windows
   std::filesystem::path vector_file = kdir / "vulkan" / "int4.comp";
@@ -112,7 +122,18 @@ BenchmarkResult Int4Bench::GetResult(uint32_t config_idx) const {
     // (mul + add) = 8 ops. Total: 32768 iters × 4 MADs × 8 ops = 1024 ops per
     // thread, but the loop unrolls 4 lines (val1 and val2 each updated twice).
     // = 32768 iterations × 4 body lines × 4 components × 2 ops = 32768 * 128 ops
-    uint64_t num_ops = (uint64_t)32768 * 128 * 8192 * 64;
+    uint64_t iters = 32768;
+    uint64_t ops_per_iter = 128;
+    if (context) {
+      if (context->getBackend() == ComputeBackend::OpenCL) {
+        iters = 16384;
+        ops_per_iter = 96;
+      } else if (context->getBackend() == ComputeBackend::ROCm) {
+        iters = 16384;
+        ops_per_iter = 96;
+      }
+    }
+    uint64_t num_ops = iters * ops_per_iter * 8192 * 64;
     return {num_ops, 0.0};
   } else { // Matrix
     // 16×16×16 matmul = 8192 ops per iteration
