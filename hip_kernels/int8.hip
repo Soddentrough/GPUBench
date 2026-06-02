@@ -9,11 +9,15 @@
 // LLVM lowers this to V_DOT4_I32_IU8 when targeting GFX1201.
 __device__ __forceinline__
 int sdot4(char4 a, char4 b, int c) {
-    return (int)a.x * (int)b.x
-         + (int)a.y * (int)b.y
-         + (int)a.z * (int)b.z
-         + (int)a.w * (int)b.w
-         + c;
+    union {
+        char4 c4;
+        int i32;
+    } ua, ub;
+    ua.c4 = a;
+    ub.c4 = b;
+    int dst;
+    __asm__ volatile("v_dot4_i32_i8 %0, %1, %2, %3" : "=v"(dst) : "v"(ua.i32), "v"(ub.i32), "v"(c));
+    return dst;
 }
 
 extern "C" __global__ void run_benchmark(char4* data) {
