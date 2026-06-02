@@ -355,11 +355,15 @@ void VulkanContext::createDevice() {
   } serFeatures{(
       VkStructureType)1000581000}; // VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_INVOCATION_REORDER_FEATURES_EXT
 
+  VkPhysicalDeviceShaderIntegerDotProductFeatures dotProductFeatures{
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_DOT_PRODUCT_FEATURES};
+
   features2.pNext = &features168;
   features168.pNext = &features16Storage;
   features16Storage.pNext = &features8Storage;
   features8Storage.pNext = &coopMatrixFeatures;
-  coopMatrixFeatures.pNext = &subgroupSizeFeatures;
+  coopMatrixFeatures.pNext = &dotProductFeatures;
+  dotProductFeatures.pNext = &subgroupSizeFeatures;
   subgroupSizeFeatures.pNext = &asFeatures;
   asFeatures.pNext = &rayQueryFeatures;
   rayQueryFeatures.pNext = &bufferDeviceAddressFeatures;
@@ -376,6 +380,7 @@ void VulkanContext::createDevice() {
       VK_KHR_8BIT_STORAGE_EXTENSION_NAME,
       VK_KHR_16BIT_STORAGE_EXTENSION_NAME,
       VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME,
+      VK_KHR_SHADER_INTEGER_DOT_PRODUCT_EXTENSION_NAME,
       VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME,
       VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME,
       VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,

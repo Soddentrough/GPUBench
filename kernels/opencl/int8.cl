@@ -1,10 +1,10 @@
 // Requires OpenCL 1.2+
-// INT8 vector benchmark using dot4 accumulation.
-// OpenCL's dot(char4, char4) → int maps to V_DOT4_I32_IU8 on AMD RDNA4.
-// 8 independent int32 accumulators × 8 INT8 ops per dot4 = 64 INT8 ops/iter.
+// INT8 vector benchmark using native AMDGPU v_dot4 assembly.
 
-inline int dot_int4(int4 a, int4 b) {
-    return a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w;
+inline int sdot4_asm(int a, int b, int c) {
+    int dst;
+    __asm__ volatile("v_dot4_i32_i8 %0, %1, %2, %3" : "=v"(dst) : "v"(a), "v"(b), "v"(c));
+    return dst;
 }
 
 __kernel void run_benchmark(__global char4* data) {
@@ -30,14 +30,14 @@ __kernel void run_benchmark(__global char4* data) {
         // ai varies each iteration to prevent loop hoisting.
         char4 ai = a + (char4)((char)i);
 
-        acc0 += dot_int4(convert_int4(ai), convert_int4(w0));
-        acc1 += dot_int4(convert_int4(ai), convert_int4(w1));
-        acc2 += dot_int4(convert_int4(ai), convert_int4(w2));
-        acc3 += dot_int4(convert_int4(ai), convert_int4(w3));
-        acc4 += dot_int4(convert_int4(ai), convert_int4(w4));
-        acc5 += dot_int4(convert_int4(ai), convert_int4(w5));
-        acc6 += dot_int4(convert_int4(ai), convert_int4(w6));
-        acc7 += dot_int4(convert_int4(ai), convert_int4(w7));
+        acc0 = sdot4_asm(as_int(ai), as_int(w0), acc0);
+        acc1 = sdot4_asm(as_int(ai), as_int(w1), acc1);
+        acc2 = sdot4_asm(as_int(ai), as_int(w2), acc2);
+        acc3 = sdot4_asm(as_int(ai), as_int(w3), acc3);
+        acc4 = sdot4_asm(as_int(ai), as_int(w4), acc4);
+        acc5 = sdot4_asm(as_int(ai), as_int(w5), acc5);
+        acc6 = sdot4_asm(as_int(ai), as_int(w6), acc6);
+        acc7 = sdot4_asm(as_int(ai), as_int(w7), acc7);
     }
 
     int total = acc0 + acc1 + acc2 + acc3 + acc4 + acc5 + acc6 + acc7;
