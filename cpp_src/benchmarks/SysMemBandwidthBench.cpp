@@ -73,6 +73,7 @@ void SysMemBandwidthBench::Setup(IComputeContext &context,
   std::memset(destBuffer, 0, bufferSize); // Touch pages
 }
 
+#ifndef _MSC_VER
 // AVX2 kernels
 __attribute__((target("avx2"))) void run_read_avx2(const void *src,
                                                    size_t size) {
@@ -134,6 +135,7 @@ __attribute__((target("avx2"))) void run_copy_avx2(const void *src, void *dst,
   }
   _mm_sfence();
 }
+#endif
 
 // Fallbacks
 void run_read_fallback(const void *src, size_t size) {
@@ -192,6 +194,7 @@ void SysMemBandwidthBench::Run(uint32_t config_idx) {
       std::this_thread::yield();
     }
 
+#ifndef _MSC_VER
     if (useAVX2) {
       if (config.mode == SysMemTestMode::Read) {
         run_read_avx2(tSrc, chunkSize);
@@ -200,7 +203,9 @@ void SysMemBandwidthBench::Run(uint32_t config_idx) {
       } else {
         run_copy_avx2(tSrc, tDst, chunkSize);
       }
-    } else {
+    } else
+#endif
+    {
       if (config.mode == SysMemTestMode::Read) {
         run_read_fallback(tSrc, chunkSize);
       } else if (config.mode == SysMemTestMode::Write) {
