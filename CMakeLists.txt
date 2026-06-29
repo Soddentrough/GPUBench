@@ -311,6 +311,33 @@ add_custom_command(TARGET gpubench POST_BUILD
     COMMENT "Copying kernels directory to project root"
 )
 
+# Build and package Rust GUI if Cargo is available
+find_program(CARGO_EXECUTABLE cargo)
+if(CARGO_EXECUTABLE)
+    message(STATUS "Cargo found: ${CARGO_EXECUTABLE}. Configuring Rust GUI build.")
+    
+    # Custom target to compile Rust workspace
+    add_custom_target(gpubench_rust_gui ALL
+        COMMAND ${CARGO_EXECUTABLE} build --release --workspace
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        COMMENT "Building Rust GUI and core library"
+    )
+    
+    # Ensure C++ gpubench target depends on it
+    add_dependencies(gpubench gpubench_rust_gui)
+
+    # Install the Rust GUI binary
+    if(WIN32)
+        install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/target/release/gpubench-gui.exe"
+                DESTINATION bin)
+    else()
+        install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/target/release/gpubench-gui"
+                DESTINATION bin)
+    endif()
+else()
+    message(WARNING "Cargo not found. Rust GUI will not be built and packaged.")
+endif()
+
 # Install targets
 install(TARGETS gpubench DESTINATION bin)
 
