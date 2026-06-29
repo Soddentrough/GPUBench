@@ -17,8 +17,8 @@ endif()
 
 # Generate config header with install paths
 configure_file(
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/utils/Config.h.in
-    ${CMAKE_CURRENT_BINARY_DIR}/src/utils/Config.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/cpp_src/utils/Config.h.in
+    ${CMAKE_CURRENT_BINARY_DIR}/cpp_src/utils/Config.h
 )
 
 # Try to find Vulkan (primary backend) — optional so OpenCL/ROCm-only builds work
@@ -167,47 +167,52 @@ if(HIP_FOUND)
 endif()
 
 # Source files - always include core files
-set(SOURCES
-    src/main.cpp
-    src/core/BenchmarkRunner.cpp
-    src/core/ResultFormatter.cpp
-    src/benchmarks/Fp32Bench.cpp
-    src/benchmarks/Fp64Bench.cpp
-    src/benchmarks/Fp16Bench.cpp
-    src/benchmarks/Bf16Bench.cpp
-    src/benchmarks/Fp8Bench.cpp
-    src/benchmarks/Fp4Bench.cpp
-    src/benchmarks/Int8Bench.cpp
-    src/benchmarks/Int4Bench.cpp
-    src/benchmarks/MemBandwidthBench.cpp
-    src/benchmarks/SysMemBandwidthBench.cpp
-    src/benchmarks/SysMemLatencyBench.cpp
-    src/benchmarks/CacheBench.cpp
-    src/benchmarks/RayTracingBench.cpp
-    src/benchmarks/RayDivergenceBench.cpp
-    src/benchmarks/RayAnyHitBench.cpp
-    src/benchmarks/RayIncoherentBench.cpp
-    src/benchmarks/RayPayloadBench.cpp
-    src/benchmarks/RayASBuildBench.cpp
-    src/benchmarks/RayProceduralBench.cpp
-    src/benchmarks/RayMaterialDivergenceBench.cpp
-    src/utils/KernelPath.cpp
-    src/utils/ShaderCache.cpp
+set(LIB_SOURCES
+    cpp_src/core/BenchmarkRunner.cpp
+    cpp_src/core/ResultFormatter.cpp
+    cpp_src/benchmarks/Fp32Bench.cpp
+    cpp_src/benchmarks/Fp64Bench.cpp
+    cpp_src/benchmarks/Fp16Bench.cpp
+    cpp_src/benchmarks/Bf16Bench.cpp
+    cpp_src/benchmarks/Fp8Bench.cpp
+    cpp_src/benchmarks/Fp4Bench.cpp
+    cpp_src/benchmarks/Int8Bench.cpp
+    cpp_src/benchmarks/Int4Bench.cpp
+    cpp_src/benchmarks/MemBandwidthBench.cpp
+    cpp_src/benchmarks/SysMemBandwidthBench.cpp
+    cpp_src/benchmarks/SysMemLatencyBench.cpp
+    cpp_src/benchmarks/CacheBench.cpp
+    cpp_src/benchmarks/RayTracingBench.cpp
+    cpp_src/benchmarks/RayDivergenceBench.cpp
+    cpp_src/benchmarks/RayAnyHitBench.cpp
+    cpp_src/benchmarks/RayIncoherentBench.cpp
+    cpp_src/benchmarks/RayPayloadBench.cpp
+    cpp_src/benchmarks/RayASBuildBench.cpp
+    cpp_src/benchmarks/RayProceduralBench.cpp
+    cpp_src/benchmarks/RayMaterialDivergenceBench.cpp
+    cpp_src/utils/KernelPath.cpp
+    cpp_src/utils/ShaderCache.cpp
 )
 
 # Add backend-specific sources
 if(Vulkan_FOUND)
-    list(APPEND SOURCES src/core/VulkanContext.cpp)
+    list(APPEND LIB_SOURCES cpp_src/core/VulkanContext.cpp)
 endif()
 
 if(OpenCL_FOUND)
-    list(APPEND SOURCES src/core/OpenCLContext.cpp)
+    list(APPEND LIB_SOURCES cpp_src/core/OpenCLContext.cpp)
 endif()
 
 if(HIP_FOUND)
-    list(APPEND SOURCES src/core/ROCmContext.cpp)
+    list(APPEND LIB_SOURCES cpp_src/core/ROCmContext.cpp)
 endif()
 
+list(APPEND LIB_SOURCES cpp_src/core/RunnerAPI.cpp)
+
+set(SOURCES cpp_src/main.cpp ${LIB_SOURCES})
+
+add_library(gpubench_lib STATIC ${LIB_SOURCES})
+set_target_properties(gpubench_lib PROPERTIES POSITION_INDEPENDENT_CODE ON)
 add_executable(gpubench ${SOURCES})
 
 # Add dependencies on shader/kernel compilation
@@ -223,29 +228,40 @@ endif()
 
 # Include directories
 target_include_directories(gpubench PUBLIC 
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/cpp_src
     ${CMAKE_CURRENT_SOURCE_DIR}/external
-    ${CMAKE_CURRENT_BINARY_DIR}/src
+    ${CMAKE_CURRENT_BINARY_DIR}/cpp_src
+)
+
+target_include_directories(gpubench_lib PUBLIC 
+    ${CMAKE_CURRENT_SOURCE_DIR}/cpp_src
+    ${CMAKE_CURRENT_SOURCE_DIR}/external
+    ${CMAKE_CURRENT_BINARY_DIR}/cpp_src
 )
 
 if(Vulkan_FOUND)
     target_include_directories(gpubench PUBLIC ${Vulkan_INCLUDE_DIRS})
+    target_include_directories(gpubench_lib PUBLIC ${Vulkan_INCLUDE_DIRS})
     if(SHADERC_FOUND)
         target_include_directories(gpubench PUBLIC ${SHADERC_INCLUDE_DIR})
+        target_include_directories(gpubench_lib PUBLIC ${SHADERC_INCLUDE_DIR})
     endif()
 endif()
 
 if(OpenCL_FOUND)
     target_include_directories(gpubench PUBLIC ${OpenCL_INCLUDE_DIRS})
+    target_include_directories(gpubench_lib PUBLIC ${OpenCL_INCLUDE_DIRS})
 endif()
 
 if(HIP_FOUND)
     target_include_directories(gpubench PUBLIC ${HIP_INCLUDE_DIRS})
+    target_include_directories(gpubench_lib PUBLIC ${HIP_INCLUDE_DIRS})
 endif()
 
 # Link libraries
 if(Vulkan_FOUND)
     target_link_libraries(gpubench PUBLIC Vulkan::Vulkan)
+    target_link_libraries(gpubench_lib PUBLIC Vulkan::Vulkan)
     # Removing shaderc dependency for runtime compilation
     # if(SHADERC_FOUND)
     #     target_link_libraries(gpubench PUBLIC ${SHADERC_LIBRARY})
@@ -265,21 +281,26 @@ if(HIP_FOUND)
     #     target_link_libraries(gpubench PRIVATE ${HIPRTC_LIBRARY})
     # endif()
     target_compile_definitions(gpubench PRIVATE HAVE_HIPRTC __HIP_PLATFORM_AMD__)
+    target_compile_definitions(gpubench_lib PRIVATE HAVE_HIPRTC __HIP_PLATFORM_AMD__)
 endif()
 
 # Compiler definitions for conditional compilation
 target_compile_definitions(gpubench PRIVATE GPUBENCH_VERSION="${PROJECT_FULL_VERSION}")
+target_compile_definitions(gpubench_lib PRIVATE GPUBENCH_VERSION="${PROJECT_FULL_VERSION}")
 
 if(Vulkan_FOUND)
     target_compile_definitions(gpubench PRIVATE HAVE_VULKAN)
+    target_compile_definitions(gpubench_lib PRIVATE HAVE_VULKAN)
 endif()
 
 if(OpenCL_FOUND)
     target_compile_definitions(gpubench PRIVATE HAVE_OPENCL)
+    target_compile_definitions(gpubench_lib PRIVATE HAVE_OPENCL)
 endif()
 
 if(HIP_FOUND)
     target_compile_definitions(gpubench PRIVATE HAVE_ROCM)
+    target_compile_definitions(gpubench_lib PRIVATE HAVE_ROCM)
 endif()
 
 # Copy kernels directory to project root for running from base directory

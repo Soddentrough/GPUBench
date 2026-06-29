@@ -1,0 +1,9 @@
+[package]
+name = "gpubench-core"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ash = "0.38.0"
+clap = { version = "4.4", features = ["derive"] }
+opencl3 = "0.12.3"

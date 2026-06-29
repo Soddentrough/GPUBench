@@ -1,0 +1,12 @@
+[package]
+name = "gpubench-sys"
+version = "0.1.0"
+edition = "2024"
+build = "build.rs"
+
+[dependencies]
+cxx = "1.0"
+
+[build-dependencies]
+cmake = "0.1"
+cxx-build = "1.0"
