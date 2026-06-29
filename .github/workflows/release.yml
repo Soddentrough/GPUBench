@@ -16,10 +16,12 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Install Vulkan SDK
-        uses: humbletim/install-vulkan-sdk@v1
-        with:
-          version: latest
-          cache: false
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://sdk.lunarg.com/sdk/download/latest/windows/vulkan_sdk.exe" -OutFile VulkanSDK.exe
+          Start-Process -FilePath .\VulkanSDK.exe -ArgumentList "--root", "C:\VulkanSDK", "--accept-licenses", "--default-answer", "--confirm-command", "install" -NoNewWindow -Wait
+          echo "VULKAN_SDK=C:\VulkanSDK" >> $env:GITHUB_ENV
+          echo "C:\VulkanSDK\Bin" >> $env:GITHUB_PATH
 
       - name: Configure CMake
         run: |
