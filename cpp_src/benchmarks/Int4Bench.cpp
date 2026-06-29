@@ -43,7 +43,7 @@ void Int4Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
     vectorKernel = context.createKernel(kernel_file.string(), "run_benchmark", 1);
     context.setKernelArg(vectorKernel, 0, buffer);
     is_native_vector = true;
-    is_emulated = false;
+    is_emulated_vector = false;
     is_native_matrix = false;
     return;
   }
