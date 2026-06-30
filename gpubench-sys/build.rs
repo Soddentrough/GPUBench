@@ -28,4 +28,5 @@ fn main() {
     println!("cargo:rerun-if-changed=src/lib.rs");
     println!("cargo:rerun-if-changed=src/bridge.cpp");
     println!("cargo:rerun-if-changed=../CMakeLists.txt");
+    println!("cargo:rerun-if-changed=../cpp_src");
 }
