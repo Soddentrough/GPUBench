@@ -214,11 +214,13 @@ void ResultFormatter::print() {
               } else {
                 value = (static_cast<double>(res.operations) /
                          (res.time_ms / 1000.0));
-                int precision = 2;
-                if (res.metric == "GIS/s" || res.metric == "GRays/s") {
-                  value /= 1e9;
-                  if (res.metric == "GRays/s")
-                    precision = 3;
+                 int precision = 2;
+                 if (res.metric == "GIS/s" || res.metric == "GRays/s") {
+                   value /= 1e9;
+                   if (res.metric == "GRays/s")
+                     precision = 3;
+                } else if (res.metric == "MTris/s" || res.metric == "MInst/s") {
+                  value /= 1e6;
                 }
                 valStr = formatDouble(value, precision);
                 unit = " " + res.metric;

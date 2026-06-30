@@ -16,6 +16,7 @@ public:
   virtual const char *GetName() const = 0;
   virtual std::vector<std::string> GetAliases() const { return {}; }
   virtual const char *GetMetric() const { return "TFLOPS"; }
+  virtual const char *GetMetric(uint32_t config_idx) const { return GetMetric(); }
   virtual bool IsSupported(const DeviceInfo &info,
                            IComputeContext *context = nullptr) const = 0;
   virtual void Setup(IComputeContext &context,

@@ -257,16 +257,22 @@ void RayASBuildBench::Teardown() {
 }
 
 BenchmarkResult RayASBuildBench::GetResult(uint32_t config_idx) const {
-  return {1, buildTimes.at(config_idx)};
+  uint64_t ops = (config_idx == 1) ? numInstances : numPrimitives;
+  return {ops, buildTimes.at(config_idx)};
 }
 
 const char *RayASBuildBench::GetName() const { return "RayASBuild"; }
 const char *RayASBuildBench::GetComponent(uint32_t config_idx) const {
   return "Ray Tracing";
 }
-const char *RayASBuildBench::GetMetric() const { return "ms/op"; }
+const char *RayASBuildBench::GetMetric(uint32_t config_idx) const {
+  if (config_idx == 1) return "MInst/s";
+  return "MTris/s";
+}
 const char *RayASBuildBench::GetSubCategory(uint32_t config_idx) const {
-  return "AS Build Performance";
+  if (config_idx == 0) return "BLAS Build";
+  if (config_idx == 1) return "TLAS Build";
+  return "BLAS Update";
 }
 
 std::string RayASBuildBench::GetConfigName(uint32_t config_idx) const {

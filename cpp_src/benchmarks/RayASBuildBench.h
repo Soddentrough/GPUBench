@@ -19,7 +19,7 @@ public:
   BenchmarkResult GetResult(uint32_t config_idx) const override;
   const char *GetName() const override;
   const char *GetComponent(uint32_t config_idx) const override;
-  const char *GetMetric() const override;
+  const char *GetMetric(uint32_t config_idx) const override;
   const char *GetSubCategory(uint32_t config_idx) const override;
   std::string GetConfigName(uint32_t config_idx) const override;
 

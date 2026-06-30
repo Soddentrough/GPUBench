@@ -201,7 +201,9 @@ struct GPUBenchApp {
     gpu_int4_matrix: f32,
     
     gpu_rt_anyhit: f32,
-    gpu_rt_as_build: f32,
+    gpu_rt_blas_build: f32,
+    gpu_rt_blas_update: f32,
+    gpu_rt_tlas_build: f32,
     gpu_rt_incoherent: f32,
     gpu_rt_intersect: f32,
     gpu_rt_divergence: f32,
@@ -287,7 +289,9 @@ impl Application for GPUBenchApp {
                 gpu_int4_vector: 0.0,
                 gpu_int4_matrix: 0.0,
                 gpu_rt_anyhit: 0.0,
-                gpu_rt_as_build: 0.0,
+                gpu_rt_blas_build: 0.0,
+                gpu_rt_blas_update: 0.0,
+                gpu_rt_tlas_build: 0.0,
                 gpu_rt_incoherent: 0.0,
                 gpu_rt_intersect: 0.0,
                 gpu_rt_divergence: 0.0,
@@ -534,7 +538,9 @@ impl Application for GPUBenchApp {
                                 },
                                 "ray_tracing": {
                                     "any_hit": self.gpu_rt_anyhit,
-                                    "as_build": self.gpu_rt_as_build,
+                                    "blas_build_mtris_sec": self.gpu_rt_blas_build,
+                                    "blas_update_mtris_sec": self.gpu_rt_blas_update,
+                                    "tlas_build_minst_sec": self.gpu_rt_tlas_build,
                                     "incoherent": self.gpu_rt_incoherent,
                                     "intersect": self.gpu_rt_intersect,
                                     "divergence": self.gpu_rt_divergence,
@@ -797,7 +803,9 @@ impl Application for GPUBenchApp {
                     metric_row("RayAnyHit", "AnyHit", self.gpu_rt_anyhit, "GRays/s", "Tests intersection performance against geometry with alpha-testing (transparency) enabled. Stresses the GPU's ability to evaluate shaders during ray traversal."),
                     metric_row("RayIncoherent", "Incoherent", self.gpu_rt_incoherent, "GRays/s", "Tests performance when rays bounce in completely random directions, causing high cache misses. Simulates complex global illumination and path tracing."),
                     metric_row("RayPayload", "Payload", self.gpu_rt_payload, "GRays/s", "Tests the impact of carrying large blocks of data (payloads) along with the ray, which stresses the register usage and VRAM bandwidth of the compute units."),
-                    metric_row("RayASBuild", "AS Build", self.gpu_rt_as_build, "ms", "Measures the time required to build the Acceleration Structure (BVH) for a complex scene. Lower is better. Crucial for dynamic or destructible environments."),
+                    metric_row("RayASBuild", "BLAS Build", self.gpu_rt_blas_build, "MTris/s", "Measures BVH construction speed for bottom-level static geometry (1 Million Triangles). Higher is better."),
+                    metric_row("RayASBuild", "BLAS Update", self.gpu_rt_blas_update, "MTris/s", "Measures BVH update/refit speed for bottom-level dynamic geometry (1 Million Triangles). Higher is better."),
+                    metric_row("RayASBuild", "TLAS Build", self.gpu_rt_tlas_build, "MInst/s", "Measures top-level instantiation speed for scene-graph organization (10,000 Instances). Higher is better."),
                     metric_row("RayProcedural", "Procedural", self.gpu_rt_procedural, "GRays/s", "Measures intersection speed against mathematically defined geometry (like spheres or curves) rather than explicit triangles. Useful for advanced rendering engines."),
                 ].spacing(12).into();
 
@@ -904,6 +912,8 @@ impl GPUBenchApp {
             value /= 1e9;
         } else if res.metric == "TFLOPS" || res.metric == "TOPS" {
             value /= 1e12;
+        } else if res.metric == "MTris/s" || res.metric == "MInst/s" {
+            value /= 1e6;
         }
 
         if res.backendName == "Native" || res.backendName == "System" {
@@ -950,10 +960,9 @@ impl GPUBenchApp {
                 }
                 "Ray Tracing" => {
                     if res.subcategory == "Alpha-Tested Geometry" { self.gpu_rt_anyhit = self.gpu_rt_anyhit.max(value); }
-                    if res.subcategory == "AS Build Performance" {
-                        if self.gpu_rt_as_build == 0.0 { self.gpu_rt_as_build = value; }
-                        else { self.gpu_rt_as_build = self.gpu_rt_as_build.min(value); }
-                    }
+                    if res.subcategory == "BLAS Build" { self.gpu_rt_blas_build = self.gpu_rt_blas_build.max(value); }
+                    if res.subcategory == "BLAS Update" { self.gpu_rt_blas_update = self.gpu_rt_blas_update.max(value); }
+                    if res.subcategory == "TLAS Build" { self.gpu_rt_tlas_build = self.gpu_rt_tlas_build.max(value); }
                     if res.subcategory == "Incoherent Traversal" { self.gpu_rt_incoherent = self.gpu_rt_incoherent.max(value); }
                     if res.subcategory == "Intersection tests" { self.gpu_rt_intersect = self.gpu_rt_intersect.max(value); }
                     if res.subcategory == "Material Divergence" || res.subcategory == "Execution Divergence" { self.gpu_rt_divergence = self.gpu_rt_divergence.max(value); }

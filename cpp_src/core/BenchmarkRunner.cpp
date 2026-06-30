@@ -426,7 +426,7 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
                     context->getBackend());
                 result_data.deviceName = info.name;
                 result_data.benchmarkName = bench_name;
-                result_data.metric = bench->GetMetric();
+                result_data.metric = bench->GetMetric(i);
                 result_data.operations =
                     bench_result.operations * total_invocations;
                 result_data.time_ms = total_time_ms;
@@ -548,7 +548,7 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
             result_data.backendName = "System";
             result_data.deviceName = "Host CPU";
             result_data.benchmarkName = bench_name;
-            result_data.metric = bench->GetMetric();
+            result_data.metric = bench->GetMetric(i);
             result_data.operations =
                 bench_result.operations * total_invocations;
             result_data.time_ms = total_time_ms;
