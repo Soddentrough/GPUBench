@@ -107,10 +107,15 @@ pub fn run_benchmarks(
         }
     }
     
+    let backend_strs_lower: Vec<String> = backend_strs
+        .iter()
+        .map(|s| s.to_lowercase())
+        .collect();
+
     let ffi_results = gpubench_sys::ffi::gpubench_run_benchmarks(
         benchmarks,
         device_indices,
-        backend_strs,
+        &backend_strs_lower,
         verbose,
         debug,
         dump_geometry,
