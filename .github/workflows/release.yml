@@ -23,6 +23,12 @@ jobs:
           echo "VULKAN_SDK=C:\VulkanSDK" >> $env:GITHUB_ENV
           echo "C:\VulkanSDK\Bin" >> $env:GITHUB_PATH
 
+      - name: Install NSIS
+        shell: pwsh
+        run: |
+          choco install nsis -y
+          echo "C:\Program Files (x86)\NSIS" >> $env:GITHUB_PATH
+
       - name: Configure CMake
         run: |
           mkdir build
