@@ -1,3 +1,5 @@
+#![windows_subsystem = "windows"]
+
 use iced::widget::{button, column, container, progress_bar, row, scrollable, text, Space, tooltip};
 use iced::{color, Background, Border, Command, Element, Length, Theme, executor, Application, Settings};
 use gpubench_core::{get_available_benchmarks, run_benchmarks, ResultData};
@@ -115,7 +117,7 @@ pub fn main() -> iced::Result {
     GPUBenchApp::run(Settings {
         antialiasing: true,
         window: iced::window::Settings {
-            size: iced::Size::new(1050.0, 850.0),
+            size: iced::Size::new(980.0, 700.0),
             ..Default::default()
         },
         ..Settings::default()
@@ -187,11 +189,16 @@ struct GPUBenchApp {
     
     gpu_fp64: f32,
     gpu_fp32: f32,
-    gpu_fp16: f32,
-    gpu_bf16: f32,
-    gpu_fp8: f32,
-    gpu_int8: f32,
-    gpu_int4: f32,
+    gpu_fp16_vector: f32,
+    gpu_fp16_matrix: f32,
+    gpu_bf16_vector: f32,
+    gpu_bf16_matrix: f32,
+    gpu_fp8_vector: f32,
+    gpu_fp8_matrix: f32,
+    gpu_int8_vector: f32,
+    gpu_int8_matrix: f32,
+    gpu_int4_vector: f32,
+    gpu_int4_matrix: f32,
     
     gpu_rt_anyhit: f32,
     gpu_rt_as_build: f32,
@@ -269,11 +276,16 @@ impl Application for GPUBenchApp {
                 sys_mem_lat: 0.0,
                 gpu_fp64: 0.0,
                 gpu_fp32: 0.0,
-                gpu_fp16: 0.0,
-                gpu_bf16: 0.0,
-                gpu_fp8: 0.0,
-                gpu_int8: 0.0,
-                gpu_int4: 0.0,
+                gpu_fp16_vector: 0.0,
+                gpu_fp16_matrix: 0.0,
+                gpu_bf16_vector: 0.0,
+                gpu_bf16_matrix: 0.0,
+                gpu_fp8_vector: 0.0,
+                gpu_fp8_matrix: 0.0,
+                gpu_int8_vector: 0.0,
+                gpu_int8_matrix: 0.0,
+                gpu_int4_vector: 0.0,
+                gpu_int4_matrix: 0.0,
                 gpu_rt_anyhit: 0.0,
                 gpu_rt_as_build: 0.0,
                 gpu_rt_incoherent: 0.0,
@@ -506,11 +518,16 @@ impl Application for GPUBenchApp {
                                 "compute": {
                                     "fp64_tflops": self.gpu_fp64,
                                     "fp32_tflops": self.gpu_fp32,
-                                    "fp16_tflops": self.gpu_fp16,
-                                    "bf16_tflops": self.gpu_bf16,
-                                    "fp8_tflops": self.gpu_fp8,
-                                    "int8_tops": self.gpu_int8,
-                                    "int4_tops": self.gpu_int4,
+                                    "fp16_vector_tflops": self.gpu_fp16_vector,
+                                    "fp16_matrix_tflops": self.gpu_fp16_matrix,
+                                    "bf16_vector_tflops": self.gpu_bf16_vector,
+                                    "bf16_matrix_tflops": self.gpu_bf16_matrix,
+                                    "fp8_vector_tflops": self.gpu_fp8_vector,
+                                    "fp8_matrix_tflops": self.gpu_fp8_matrix,
+                                    "int8_vector_tops": self.gpu_int8_vector,
+                                    "int8_matrix_tops": self.gpu_int8_matrix,
+                                    "int4_vector_tops": self.gpu_int4_vector,
+                                    "int4_matrix_tops": self.gpu_int4_matrix,
                                 },
                                 "memory": {
                                     "bandwidth_gbps": self.gpu_bw,
@@ -760,13 +777,18 @@ impl Application for GPUBenchApp {
                 ].spacing(12).into();
 
                 let compute_content = column![
-                    metric_row("FP64", "FP64", self.gpu_fp64, "TFLOPS", "Measures double precision (64-bit) floating point operations per second. Crucial for scientific simulations and high-accuracy physics."),
-                    metric_row("FP32", "FP32", self.gpu_fp32, "TFLOPS", "Measures single precision (32-bit) floating point operations per second. The standard metric for generic gaming and graphics compute workloads."),
-                    metric_row("FP16", "FP16", self.gpu_fp16, "TFLOPS", "Measures half precision (16-bit) floating point operations per second. Used extensively in modern rendering, mobile ML, and HDR imaging."),
-                    metric_row("BF16", "BF16", self.gpu_bf16, "TFLOPS", "Measures Brain Float 16 operations per second. Primarily utilized in AI training and deep learning models to retain dynamic range while saving bandwidth."),
-                    metric_row("FP8", "FP8", self.gpu_fp8, "TFLOPS", "Measures quarter precision (8-bit) floating point operations. Used for highly optimized AI inference where memory bandwidth is the primary bottleneck."),
-                    metric_row("INT8", "INT8", self.gpu_int8, "TOPS", "Measures 8-bit integer operations per second. Often used for quantized machine learning inference and specialized hardware-accelerated video processing."),
-                    metric_row("INT4", "INT4", self.gpu_int4, "TOPS", "Measures 4-bit integer operations per second. An extreme quantization format used in ultra-efficient AI processing and specialized lookup tasks."),
+                    metric_row("FP64", "FP64 (Vector)", self.gpu_fp64, "TFLOPS", "Measures double precision (64-bit) floating point operations per second. Crucial for scientific simulations and high-accuracy physics."),
+                    metric_row("FP32", "FP32 (Vector)", self.gpu_fp32, "TFLOPS", "Measures single precision (32-bit) floating point operations per second. The standard metric for generic gaming and graphics compute workloads."),
+                    metric_row("FP16", "FP16 (Vector)", self.gpu_fp16_vector, "TFLOPS", "Measures vector half precision (16-bit) floating point operations per second. Used extensively in modern rendering, mobile ML, and HDR imaging."),
+                    metric_row("FP16", "FP16 (Matrix)", self.gpu_fp16_matrix, "TFLOPS", "Measures hardware-accelerated cooperative matrix half precision (16-bit) operations."),
+                    metric_row("BF16", "BF16 (Vector)", self.gpu_bf16_vector, "TFLOPS", "Measures vector Brain Float 16 operations per second. Primarily utilized in AI training and deep learning models to retain dynamic range while saving bandwidth."),
+                    metric_row("BF16", "BF16 (Matrix)", self.gpu_bf16_matrix, "TFLOPS", "Measures hardware-accelerated cooperative matrix Brain Float 16 operations."),
+                    metric_row("FP8", "FP8 (Vector)", self.gpu_fp8_vector, "TFLOPS", "Measures vector quarter precision (8-bit) floating point operations per second. Used for highly optimized AI inference where memory bandwidth is the primary bottleneck."),
+                    metric_row("FP8", "FP8 (Matrix)", self.gpu_fp8_matrix, "TFLOPS", "Measures hardware-accelerated cooperative matrix quarter precision (8-bit) operations."),
+                    metric_row("INT8", "INT8 (Vector)", self.gpu_int8_vector, "TOPS", "Measures vector 8-bit integer operations per second. Often used for quantized machine learning inference and specialized hardware-accelerated video processing."),
+                    metric_row("INT8", "INT8 (Matrix)", self.gpu_int8_matrix, "TOPS", "Measures hardware-accelerated cooperative matrix 8-bit integer operations."),
+                    metric_row("INT4", "INT4 (Vector)", self.gpu_int4_vector, "TOPS", "Measures vector 4-bit integer operations per second. An extreme quantization format used in ultra-efficient AI processing and specialized lookup tasks."),
+                    metric_row("INT4", "INT4 (Matrix)", self.gpu_int4_matrix, "TOPS", "Measures hardware-accelerated cooperative matrix 4-bit integer operations."),
                 ].spacing(12).into();
 
                 let rt_content = column![
@@ -905,11 +927,26 @@ impl GPUBenchApp {
                 "Compute" => {
                     if res.subcategory == "FP64" { self.gpu_fp64 = self.gpu_fp64.max(value); }
                     if res.subcategory == "FP32" { self.gpu_fp32 = self.gpu_fp32.max(value); }
-                    if res.subcategory == "FP16" { self.gpu_fp16 = self.gpu_fp16.max(value); }
-                    if res.subcategory == "BF16" { self.gpu_bf16 = self.gpu_bf16.max(value); }
-                    if res.subcategory == "FP8" { self.gpu_fp8 = self.gpu_fp8.max(value); }
-                    if res.subcategory == "INT8" { self.gpu_int8 = self.gpu_int8.max(value); }
-                    if res.subcategory == "INT4" { self.gpu_int4 = self.gpu_int4.max(value); }
+                    if res.subcategory == "FP16" {
+                        if res.configIndex == 0 { self.gpu_fp16_vector = self.gpu_fp16_vector.max(value); }
+                        else { self.gpu_fp16_matrix = self.gpu_fp16_matrix.max(value); }
+                    }
+                    if res.subcategory == "BF16" {
+                        if res.configIndex == 0 { self.gpu_bf16_vector = self.gpu_bf16_vector.max(value); }
+                        else { self.gpu_bf16_matrix = self.gpu_bf16_matrix.max(value); }
+                    }
+                    if res.subcategory == "FP8" {
+                        if res.configIndex == 0 { self.gpu_fp8_vector = self.gpu_fp8_vector.max(value); }
+                        else { self.gpu_fp8_matrix = self.gpu_fp8_matrix.max(value); }
+                    }
+                    if res.subcategory == "INT8" {
+                        if res.configIndex == 0 { self.gpu_int8_vector = self.gpu_int8_vector.max(value); }
+                        else { self.gpu_int8_matrix = self.gpu_int8_matrix.max(value); }
+                    }
+                    if res.subcategory == "INT4" {
+                        if res.configIndex == 0 { self.gpu_int4_vector = self.gpu_int4_vector.max(value); }
+                        else { self.gpu_int4_matrix = self.gpu_int4_matrix.max(value); }
+                    }
                 }
                 "Ray Tracing" => {
                     if res.subcategory == "Alpha-Tested Geometry" { self.gpu_rt_anyhit = self.gpu_rt_anyhit.max(value); }
