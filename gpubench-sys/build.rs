@@ -7,7 +7,15 @@ fn main() {
     println!("cargo:rustc-link-search=native={}/build/Release", dst.display());
     println!("cargo:rustc-link-search=native={}/build/Debug", dst.display());
     println!("cargo:rustc-link-lib=static=gpubench_lib");
-    println!("cargo:rustc-link-lib=vulkan");
+    let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    if target_os == "windows" {
+        println!("cargo:rustc-link-lib=vulkan-1");
+        if let Ok(sdk) = std::env::var("VULKAN_SDK") {
+            println!("cargo:rustc-link-search=native={}/Lib", sdk);
+        }
+    } else {
+        println!("cargo:rustc-link-lib=vulkan");
+    }
 
     cxx_build::bridge("src/lib.rs")
         .file("src/bridge.cpp") // We'll create this to bridge complex types if needed

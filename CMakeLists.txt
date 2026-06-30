@@ -328,10 +328,10 @@ if(CARGO_EXECUTABLE)
 
     # Install the Rust GUI binary
     if(WIN32)
-        install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/target/release/gpubench-gui.exe"
+        install(PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/target/release/gpubench-gui.exe"
                 DESTINATION bin)
     else()
-        install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/target/release/gpubench-gui"
+        install(PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/target/release/gpubench-gui"
                 DESTINATION bin)
     endif()
 else()
@@ -411,8 +411,9 @@ if(WIN32)
     set(CPACK_NSIS_URL_INFO_ABOUT "https://github.com/Soddentrough/GPUBench")
     set(CPACK_NSIS_CONTACT "https://github.com/Soddentrough/GPUBench/issues")
     set(CPACK_NSIS_MENU_LINKS
-        "RunAllBenchmarks.bat" "Run All Benchmarks"
+        "bin/gpubench-gui.exe" "GPUBench"
         "bin/gpubench.exe" "GPUBench (CLI)"
+        "RunAllBenchmarks.bat" "Run All Benchmarks"
         "https://github.com/Soddentrough/GPUBench" "GPUBench Website"
     )
     
