@@ -421,12 +421,9 @@ impl Application for GPUBenchApp {
                         ),
                         Command::perform(
                             async move {
-                                println!("[DIAGNOSTIC] Waiting 500ms to allow UI redraw...");
                                 tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-                                println!("[DIAGNOSTIC] spawn_blocking started");
                                 let res = tokio::task::spawn_blocking(move || {
-                                    println!("[DIAGNOSTIC] run_benchmarks executing");
-                                    let r = run_benchmarks(
+                                    run_benchmarks(
                                         &tests_to_run,
                                         &vec![d_idx],
                                         &vec![b_str],
@@ -434,11 +431,8 @@ impl Application for GPUBenchApp {
                                         false,
                                         false,
                                         progress_callback
-                                    );
-                                    println!("[DIAGNOSTIC] run_benchmarks finished");
-                                    r
+                                    )
                                 }).await;
-                                println!("[DIAGNOSTIC] spawn_blocking finished, await result: {:?}", res.is_ok());
                             },
                             |_| Message::BenchmarksComplete
                         )
@@ -759,10 +753,10 @@ impl Application for GPUBenchApp {
                 };
 
                 let sys_content = column![
-                    metric_row("MemBandwidth", "Max Bandwidth", self.gpu_bw, "GB/s", "Measures the maximum rate at which data can be read from or stored into the GPU's VRAM. Critical for high-resolution textures and large datasets."),
-                    metric_row("SysMemBandwidth", "System Bandwidth", self.sys_mem_bw, "GB/s", "Measures the maximum multi-threaded bandwidth to the host's system RAM. Important for CPU-to-GPU data transfers and general system performance."),
-                    metric_row("SysMemBandwidth", "Sys Bandwidth (1 Thread)", self.sys_mem_bw_single, "GB/s", "Measures single-threaded bandwidth to system RAM, which indicates memory channel efficiency and latency-bound transfer speeds."),
-                    metric_row("SysMemLatency", "System Latency", self.sys_mem_lat, "ns", "Measures the time it takes to fetch a single un-cached piece of data from system memory. Lower is better. Essential for game engines and unpredictable data access."),
+                    metric_row("MemBandwidth", "GPU VRAM Bandwidth", self.gpu_bw, "GB/s", "Measures the maximum rate at which data can be read from or stored into the GPU's VRAM. Critical for high-resolution textures and large datasets."),
+                    metric_row("SysMemBandwidth", "System RAM Bandwidth", self.sys_mem_bw, "GB/s", "Measures the maximum multi-threaded bandwidth to the host's system RAM. Important for CPU-to-GPU data transfers and general system performance."),
+                    metric_row("SysMemBandwidth", "System RAM (1 Thread)", self.sys_mem_bw_single, "GB/s", "Measures single-threaded bandwidth to system RAM, which indicates memory channel efficiency and latency-bound transfer speeds."),
+                    metric_row("SysMemLatency", "System RAM Latency", self.sys_mem_lat, "ns", "Measures the time it takes to fetch a single un-cached piece of data from system memory. Lower is better. Essential for game engines and unpredictable data access."),
                 ].spacing(12).into();
 
                 let compute_content = column![
@@ -880,8 +874,10 @@ impl GPUBenchApp {
         
         let mut value = ((res.operations as f64) / (res.time_ms / 1000.0)) as f32;
 
-        if res.metric == "ms/op" || res.metric == "ns" {
+        if res.metric == "ms/op" {
             value = (res.time_ms as f32) / (res.operations as f32);
+        } else if res.metric == "ns" {
+            value = ((res.time_ms * 1_000_000.0) as f32) / (res.operations as f32);
         } else if res.metric == "GIS/s" || res.metric == "GRays/s" || res.metric == "GB/s" {
             value /= 1e9;
         } else if res.metric == "TFLOPS" || res.metric == "TOPS" {

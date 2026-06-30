@@ -77,7 +77,6 @@ pub struct VulkanContext {
 
 impl VulkanContext {
     pub fn new() -> Result<Self, String> {
-        println!("[DIAGNOSTIC] VulkanContext::new() called");
         let core = VULKAN_CORE.as_ref().map_err(|e| e.clone())?;
         let instance = &core.1;
 
@@ -165,7 +164,6 @@ impl ComputeContext for VulkanContext {
     }
 
     fn pick_device(&mut self, index: u32) -> Result<(), String> {
-        println!("[DIAGNOSTIC] VulkanContext::pick_device() called with index {}", index);
         if index as usize >= self.physical_devices.len() {
             return Err("Invalid device index".to_string());
         }
@@ -242,7 +240,6 @@ impl ComputeContext for VulkanContext {
             
         device_info.p_next = &features2_create as *const _ as *const std::ffi::c_void;
 
-        println!("[DIAGNOSTIC] create_device executing");
         let device = unsafe { instance.create_device(pdevice, &device_info, None).map_err(|e| e.to_string())? };
         
         let rt_pipeline = if self.device_infos[self.selected_device_idx as usize].ray_tracing_support {
@@ -252,8 +249,7 @@ impl ComputeContext for VulkanContext {
         let rt_as = if self.device_infos[self.selected_device_idx as usize].ray_tracing_support {
             Some(AccelerationStructure::new(instance, &device))
         } else { None };
-
-        println!("[DIAGNOSTIC] create_device success");
+        
         let queue = unsafe { device.get_device_queue(queue_family_index, 0) };
 
         let pool_info = vk::CommandPoolCreateInfo::default()
@@ -306,9 +302,6 @@ impl ComputeContext for VulkanContext {
         let mem_type_idx = self.find_memory_type(mem_req.memory_type_bits, properties).unwrap_or_else(|_| {
             self.find_memory_type(mem_req.memory_type_bits, vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT).unwrap()
         });
-        
-        println!("[DIAGNOSTIC] create_buffer: using mem_type_idx {}", mem_type_idx);
-        
         let mut alloc_flags = vk::MemoryAllocateFlagsInfo::default().flags(vk::MemoryAllocateFlags::DEVICE_ADDRESS);
         let alloc_info = vk::MemoryAllocateInfo::default()
             .allocation_size(mem_req.size)
@@ -318,19 +311,15 @@ impl ComputeContext for VulkanContext {
         let memory = unsafe { device.allocate_memory(&alloc_info, None).map_err(|e| e.to_string())? };
         unsafe { device.bind_buffer_memory(buffer, memory, 0).map_err(|e| e.to_string())? };
 
-        if let Some(data) = host_ptr {
-            let ptr = unsafe { device.map_memory(memory, 0, size as u64, vk::MemoryMapFlags::empty()).map_err(|e| e.to_string())? };
-            unsafe { std::ptr::copy_nonoverlapping(data.as_ptr(), ptr as *mut u8, data.len().min(size)) };
-            unsafe { device.unmap_memory(memory) };
-        }
-
         let id = self.next_buffer_id;
         self.next_buffer_id += 1;
         let bda_info = vk::BufferDeviceAddressInfo::default().buffer(buffer);
-        let bda = unsafe { device.get_buffer_device_address(&bda_info) };
-        println!("[DIAGNOSTIC] create_buffer: id={}, size={}, align={}, bda=0x{:X}", id, size, mem_req.alignment, bda);
-
         self.buffers.insert(id, VulkanBuffer { buffer, memory, _size: size });
+
+        if let Some(data) = host_ptr {
+            self.write_buffer(id, 0, data)?;
+        }
+
         Ok(id)
     }
 
@@ -1176,12 +1165,9 @@ impl ComputeContext for VulkanContext {
 
 impl Drop for VulkanContext {
     fn drop(&mut self) {
-        println!("[DIAGNOSTIC] VulkanContext::drop() called");
         if let Some(device) = &self.device {
             unsafe {
-                println!("[DIAGNOSTIC] device_wait_idle");
                 let _ = device.device_wait_idle();
-                println!("[DIAGNOSTIC] destroying kernels");
                 for (_, k) in self.kernels.drain() {
                     device.destroy_pipeline(k.pipeline, None);
                     device.destroy_pipeline_layout(k.pipeline_layout, None);
@@ -1192,13 +1178,9 @@ impl Drop for VulkanContext {
                     device.destroy_buffer(vbuf.buffer, None);
                     device.free_memory(vbuf.memory, None);
                 }
-                println!("[DIAGNOSTIC] destroying fence");
                 device.destroy_fence(self.fence, None);
-                println!("[DIAGNOSTIC] destroying pool");
                 device.destroy_command_pool(self.command_pool, None);
-                println!("[DIAGNOSTIC] destroying device");
                 device.destroy_device(None);
-                println!("[DIAGNOSTIC] Drop complete");
             }
         }
     }

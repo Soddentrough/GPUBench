@@ -68,7 +68,6 @@ impl Benchmark for MemBwBench {
         let mut actual_iters = 0;
         
         while start.elapsed().as_secs_f64() < 2.5 {
-            println!("[DIAGNOSTIC] MemBw iter {}", actual_iters);
             context.dispatch(self.kernel, workgroups, 1, 1, 512, 1, 1)?;
             context.wait_idle()?;
             actual_iters += 1;

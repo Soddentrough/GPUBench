@@ -72,7 +72,6 @@ impl Benchmark for Fp32Bench {
         // Wait, the cpp code's `Run` is just 1 dispatch?
         // Ah, the CLI runner orchestrates the `Run` iteration loop.
         for iter in 0..5 {
-            println!("[DIAGNOSTIC] FP32 iter {}", iter);
             let temp_buffer = context.create_buffer(8 * 1024 * 1024, None)?;
             context.set_kernel_arg_buffer(self.kernel, 0, temp_buffer)?;
             context.dispatch(self.kernel, 1024, 1, 1, 64, 1, 1)?;

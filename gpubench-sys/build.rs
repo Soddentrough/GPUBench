@@ -4,6 +4,8 @@ fn main() {
         .build();
 
     println!("cargo:rustc-link-search=native={}/build", dst.display());
+    println!("cargo:rustc-link-search=native={}/build/Release", dst.display());
+    println!("cargo:rustc-link-search=native={}/build/Debug", dst.display());
     println!("cargo:rustc-link-lib=static=gpubench_lib");
     println!("cargo:rustc-link-lib=vulkan");
 
