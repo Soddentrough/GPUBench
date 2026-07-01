@@ -582,5 +582,7 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
   if (verbose) {
       std::cout << "\r\033[K" << std::flush;
   }
-  formatter->print();
+  if (!onResult) {
+      formatter->print();
+  }
 }

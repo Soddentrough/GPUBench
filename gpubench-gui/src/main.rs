@@ -33,6 +33,27 @@ impl iced::widget::button::StyleSheet for PrimaryGradientButton {
     }
 }
 
+struct SecondaryBorderButton;
+impl iced::widget::button::StyleSheet for SecondaryBorderButton {
+    type Style = Theme;
+    fn active(&self, _style: &Self::Style) -> iced::widget::button::Appearance {
+        iced::widget::button::Appearance {
+            background: Some(Background::Color(color!(0x1A1A24))),
+            text_color: color!(0x00E5FF),
+            border: Border { radius: 25.0.into(), width: 1.0, color: color!(0x00E5FF, 0.5) },
+            ..Default::default()
+        }
+    }
+    fn hovered(&self, _style: &Self::Style) -> iced::widget::button::Appearance {
+        iced::widget::button::Appearance {
+            background: Some(Background::Color(color!(0x222233))),
+            text_color: color!(0x00E5FF),
+            border: Border { radius: 25.0.into(), width: 1.0, color: color!(0x00E5FF, 1.0) },
+            ..Default::default()
+        }
+    }
+}
+
 struct PillToggle {
     is_active: bool,
     is_api_selector: bool,
@@ -178,6 +199,11 @@ struct GPUBenchApp {
     current_benchmark: String,
     current_device: String,
     selected_tests: HashSet<String>,
+    available_backends: Vec<String>,
+    selected_backend: String,
+    available_devices: Vec<String>,
+    selected_device: String,
+    available_tests: Vec<String>,
     
     // Metrics
     gpu_bw: f32,
@@ -221,6 +247,7 @@ enum Message {
     BenchmarksComplete,
     Tick,
     SaveResults,
+    Retest,
 }
 
 impl Application for GPUBenchApp {
@@ -262,12 +289,17 @@ impl Application for GPUBenchApp {
         (
             Self {
                 state: AppState::Setup {
-                    available_backends: backends,
-                    selected_backend,
-                    available_devices: devices,
-                    selected_device,
-                    available_tests: tests,
+                    available_backends: backends.clone(),
+                    selected_backend: selected_backend.clone(),
+                    available_devices: devices.clone(),
+                    selected_device: selected_device.clone(),
+                    available_tests: tests.clone(),
                 },
+                available_backends: backends,
+                selected_backend: selected_backend,
+                available_devices: devices,
+                selected_device: selected_device,
+                available_tests: tests,
                 selected_tests: initial_tests,
                 current_benchmark: String::from("Waiting to start..."),
                 current_device: String::from(""),
@@ -311,6 +343,7 @@ impl Application for GPUBenchApp {
             Message::BackendSelected(backend) => {
                 if let AppState::Setup { selected_backend, available_devices, selected_device, .. } = &mut self.state {
                     *selected_backend = backend.clone();
+                    self.selected_backend = backend.clone();
                     
                     let hw = gpubench_core::get_available_hardware();
                     let mut new_devices = Vec::new();
@@ -329,12 +362,15 @@ impl Application for GPUBenchApp {
                         new_devices.push("0: Default Device".to_string());
                     }
                     *available_devices = new_devices.clone();
+                    self.available_devices = new_devices.clone();
                     *selected_device = new_devices[0].clone();
+                    self.selected_device = new_devices[0].clone();
                 }
             }
             Message::DeviceSelected(device) => {
                 if let AppState::Setup { selected_device, .. } = &mut self.state {
-                    *selected_device = device;
+                    *selected_device = device.clone();
+                    self.selected_device = device;
                 }
             }
             Message::TestToggled(name, is_checked) => {
@@ -554,6 +590,44 @@ impl Application for GPUBenchApp {
                         }
                     }
                 }
+                return Command::none();
+            }
+            Message::Retest => {
+                self.state = AppState::Setup {
+                    available_backends: self.available_backends.clone(),
+                    selected_backend: self.selected_backend.clone(),
+                    available_devices: self.available_devices.clone(),
+                    selected_device: self.selected_device.clone(),
+                    available_tests: self.available_tests.clone(),
+                };
+                self.current_benchmark = String::from("Waiting to start...");
+                self.current_device = String::from("");
+                self.gpu_bw = 0.0;
+                self.cpu_bw = 0.0;
+                self.sys_mem_bw = 0.0;
+                self.sys_mem_bw_single = 0.0;
+                self.sys_mem_lat = 0.0;
+                self.gpu_fp64 = 0.0;
+                self.gpu_fp32 = 0.0;
+                self.gpu_fp16_vector = 0.0;
+                self.gpu_fp16_matrix = 0.0;
+                self.gpu_bf16_vector = 0.0;
+                self.gpu_bf16_matrix = 0.0;
+                self.gpu_fp8_vector = 0.0;
+                self.gpu_fp8_matrix = 0.0;
+                self.gpu_int8_vector = 0.0;
+                self.gpu_int8_matrix = 0.0;
+                self.gpu_int4_vector = 0.0;
+                self.gpu_int4_matrix = 0.0;
+                self.gpu_rt_anyhit = 0.0;
+                self.gpu_rt_blas_build = 0.0;
+                self.gpu_rt_blas_update = 0.0;
+                self.gpu_rt_tlas_build = 0.0;
+                self.gpu_rt_incoherent = 0.0;
+                self.gpu_rt_intersect = 0.0;
+                self.gpu_rt_divergence = 0.0;
+                self.gpu_rt_payload = 0.0;
+                self.gpu_rt_procedural = 0.0;
                 return Command::none();
             }
         }
@@ -829,16 +903,31 @@ impl Application for GPUBenchApp {
 
                 let split_layout = row![compute_col, rt_col, mem_col].spacing(20);
 
-                let save_btn: Element<'_, Message> = if matches!(self.state, AppState::Complete { .. }) {
-                    button(
-                        container(text("SAVE RESULTS").size(14).style(iced::theme::Text::Color(color!(0xFFFFFF))))
-                            .width(Length::Fill)
-                            .center_x()
-                    )
+                let action_buttons: Element<'_, Message> = if matches!(self.state, AppState::Complete { .. }) {
+                    column![
+                        button(
+                            container(text("SAVE RESULTS").size(14).style(iced::theme::Text::Color(color!(0xFFFFFF))))
+                                .width(Length::Fill)
+                                .center_x()
+                        )
+                        .width(Length::Fill)
+                        .padding([14, 0])
+                        .on_press(Message::SaveResults)
+                        .style(iced::theme::Button::Custom(Box::new(PrimaryGradientButton))),
+                        
+                        Space::with_height(10),
+                        
+                        button(
+                            container(text("RUN NEW TEST").size(14).style(iced::theme::Text::Color(color!(0xFFFFFF))))
+                                .width(Length::Fill)
+                                .center_x()
+                        )
+                        .width(Length::Fill)
+                        .padding([14, 0])
+                        .on_press(Message::Retest)
+                        .style(iced::theme::Button::Custom(Box::new(SecondaryBorderButton)))
+                    ]
                     .width(Length::Fill)
-                    .padding([14, 0])
-                    .on_press(Message::SaveResults)
-                    .style(iced::theme::Button::Custom(Box::new(PrimaryGradientButton)))
                     .into()
                 } else {
                     Space::with_height(0).into()
@@ -859,7 +948,7 @@ impl Application for GPUBenchApp {
                         Space::with_height(20),
                         text(if self.current_benchmark.len() > 30 { "Complete" } else { &self.current_benchmark }).size(12).style(color!(0x666677)),
                         Space::with_height(Length::Fill),
-                        save_btn
+                        action_buttons
                     ]
                 )
                 .width(Length::Fixed(300.0))
