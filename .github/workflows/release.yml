@@ -65,9 +65,9 @@ jobs:
         run: |
           VERSION=$(curl -sL https://vulkan.lunarg.com/sdk/latest/mac.txt)
           echo "Downloading Vulkan SDK version $VERSION"
-          curl -L -o vulkan_sdk.dmg "https://sdk.lunarg.com/sdk/download/$VERSION/mac/vulkansdk-macos-$VERSION.dmg"
-          sudo hdiutil attach vulkan_sdk.dmg
-          sudo /Volumes/vulkansdk-macOS-*/InstallVulkan.app/Contents/MacOS/InstallVulkan \
+          curl -L -o vulkan_sdk.zip "https://sdk.lunarg.com/sdk/download/$VERSION/mac/vulkan_sdk.zip?Human=true"
+          unzip -q vulkan_sdk.zip
+          ./vulkansdk-macOS-*/Contents/MacOS/vulkansdk-macOS-* \
             --root "$GITHUB_WORKSPACE/VulkanSDK" \
             --accept-licenses \
             --default-answer \
