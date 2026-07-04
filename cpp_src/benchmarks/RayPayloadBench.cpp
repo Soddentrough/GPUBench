@@ -194,7 +194,7 @@ void RayPayloadBench::buildAS() {
 
   size_t triScratch = createTLAS(topTriGeom, triangleTlas, triangleTlasBuffer);
 
-  size_t scratchSize = std::max(triSizes.buildScratchSize, triScratch);
+  size_t scratchSize = std::max(static_cast<size_t>(triSizes.buildScratchSize), triScratch);
   scratchBuffer = context->createBuffer(scratchSize);
   VkDeviceAddress sAddr = vContext->getBufferDeviceAddress(scratchBuffer);
 
