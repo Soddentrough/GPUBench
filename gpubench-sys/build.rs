@@ -15,6 +15,11 @@ fn main() {
         }
     } else {
         println!("cargo:rustc-link-lib=vulkan");
+        if target_os == "macos" {
+            if let Ok(sdk) = std::env::var("VULKAN_SDK") {
+                println!("cargo:rustc-link-search=native={}/lib", sdk);
+            }
+        }
     }
 
     cxx_build::bridge("src/lib.rs")
