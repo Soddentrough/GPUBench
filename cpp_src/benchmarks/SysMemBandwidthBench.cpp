@@ -3,7 +3,13 @@
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
-#ifndef _MSC_VER
+#if !defined(_MSC_VER) && (defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86))
+#define ENABLE_AVX2 1
+#else
+#define ENABLE_AVX2 0
+#endif
+
+#if ENABLE_AVX2
 #include <immintrin.h>  // AVX2 intrinsics (GCC/Clang only)
 #endif
 #include <iostream>
@@ -24,7 +30,7 @@
 // Check for AVX2 support.
 // __builtin_cpu_supports is a GCC/Clang builtin. MSVC does not support it;
 // on MSVC we always disable AVX2 and use the scalar fallback.
-#ifndef _MSC_VER
+#if ENABLE_AVX2
 static bool hasAVX2() { return __builtin_cpu_supports("avx2"); }
 #else
 static bool hasAVX2() { return false; }
@@ -73,7 +79,7 @@ void SysMemBandwidthBench::Setup(IComputeContext &context,
   std::memset(destBuffer, 0, bufferSize); // Touch pages
 }
 
-#ifndef _MSC_VER
+#if ENABLE_AVX2
 // AVX2 kernels
 __attribute__((target("avx2"))) void run_read_avx2(const void *src,
                                                    size_t size) {
@@ -194,7 +200,7 @@ void SysMemBandwidthBench::Run(uint32_t config_idx) {
       std::this_thread::yield();
     }
 
-#ifndef _MSC_VER
+#if ENABLE_AVX2
     if (useAVX2) {
       if (config.mode == SysMemTestMode::Read) {
         run_read_avx2(tSrc, chunkSize);
