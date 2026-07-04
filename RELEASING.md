@@ -61,3 +61,32 @@ gh release upload v1.1.0.1 \
   build/GPUBench-1.1.0.1-Linux.tar.gz \
   --clobber
 ```
+
+---
+
+## 3. macOS Releases (Local macOS Machine)
+
+If you compile for macOS, those packages (DMG, Tarball) are built locally on a macOS machine and uploaded manually using the GitHub CLI.
+
+### Step 1: Build and Package Locally
+```bash
+# Navigate to the build directory
+cd build
+
+# Configure and compile release targets
+cmake .. -DCMAKE_BUILD_TYPE=Release
+cmake --build . --parallel $(sysctl -n hw.ncpu)
+
+# Generate DMG installer and tarball
+cpack -G DragNDrop
+cpack -G TGZ
+```
+
+### Step 2: Upload to GitHub Release
+```bash
+# Upload assets to the corresponding tag
+gh release upload v1.1.0.1 \
+  build/GPUBench-1.1.0.1-Darwin.dmg \
+  build/GPUBench-1.1.0.1-Darwin.tar.gz \
+  --clobber
+```
