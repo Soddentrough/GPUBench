@@ -265,8 +265,9 @@ void RayTracingBench::buildAS() {
 
   // Scratch buffer
   size_t scratchSize =
-      std::max({triSizes.buildScratchSize, boxSizes.buildScratchSize,
-                triScratch, boxScratch});
+      std::max({static_cast<size_t>(triSizes.buildScratchSize),
+                static_cast<size_t>(boxSizes.buildScratchSize), triScratch,
+                boxScratch});
   scratchBuffer = context->createBuffer(scratchSize);
   VkDeviceAddress sAddr = vContext->getBufferDeviceAddress(scratchBuffer);
 
