@@ -72,8 +72,8 @@ jobs:
             --accept-licenses \
             --default-answer \
             --confirm-command install
-          echo "VULKAN_SDK=$GITHUB_WORKSPACE/VulkanSDK" >> $GITHUB_ENV
-          echo "$GITHUB_WORKSPACE/VulkanSDK/bin" >> $GITHUB_PATH
+          echo "VULKAN_SDK=$GITHUB_WORKSPACE/VulkanSDK/macOS" >> $GITHUB_ENV
+          echo "$GITHUB_WORKSPACE/VulkanSDK/macOS/bin" >> $GITHUB_PATH
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
