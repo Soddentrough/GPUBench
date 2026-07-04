@@ -1,0 +1,136 @@
+#version 460
+#extension GL_EXT_ray_query : enable
+#extension GL_EXT_ray_flags_primitive_culling : enable
+
+layout(local_size_x = 32) in;
+
+layout(set = 0, binding = 0) uniform accelerationStructureEXT topLevelAS;
+layout(set = 0, binding = 1) buffer Results {
+    uint hits; // Count total rays traced across all threads
+} results;
+
+layout(push_constant) uniform PushConstants {
+    uint rayCount;
+    uint bounces;
+    uint seed;
+} pc;
+
+shared uint localHits;
+
+// Simple PCG random number generator for high statistical quality
+uint pcg_hash(inout uint state) {
+    uint oldstate = state;
+    state = oldstate * 747796405u + 2891336453u;
+    uint word = ((oldstate >> ((oldstate >> 28u) + 4u)) ^ oldstate) * 277803737u;
+    return (word >> 22u) ^ word;
+}
+
+float rand_float(inout uint state) {
+    return float(pcg_hash(state) & 0x00FFFFFFu) / 16777216.0;
+}
+
+// Cosine-weighted hemisphere sampling
+vec3 cosine_sample_hemisphere(float u1, float u2) {
+    float r = sqrt(u1);
+    float theta = 2.0 * 3.14159265358979 * u2;
+    float x = r * cos(theta);
+    float y = r * sin(theta);
+    float z = sqrt(max(0.0, 1.0 - u1));
+    return vec3(x, y, z);
+}
+
+// Orient a sample vector from local space around the surface normal
+vec3 align_to_normal(vec3 sample_dir, vec3 normal) {
+    vec3 up = abs(normal.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+    vec3 tangent = normalize(cross(up, normal));
+    vec3 bitangent = cross(normal, tangent);
+    return tangent * sample_dir.x + bitangent * sample_dir.y + normal * sample_dir.z;
+}
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    if (idx >= pc.rayCount) return;
+
+    if (gl_LocalInvocationID.x == 0) {
+        localHits = 0;
+    }
+    barrier();
+
+    // Spread rays across a 256x256 virtual image plane
+    float fx = float(idx % 256) - 128.0 + 0.5;
+    float fy = float((idx / 256) % 256) - 128.0 + 0.5;
+
+    // Path tracing state
+    vec3 origin = vec3(fx * 0.05, fy * 0.05, -5.0);
+    vec3 direction = vec3(0.0, 0.0, 1.0);
+    vec3 throughput = vec3(1.0);
+    vec3 accumulated = vec3(0.0);
+    uint threadRaysTraced = 0;
+
+    uint rngState = idx + pc.seed;
+
+    for (uint bounce = 0; bounce < pc.bounces; bounce++) {
+        threadRaysTraced++;
+
+        rayQueryEXT query;
+        rayQueryInitializeEXT(query, topLevelAS, gl_RayFlagsNoneEXT, 0xFF, origin, 0.001, direction, 20.0);
+
+        while (rayQueryProceedEXT(query)) {
+            // Traverse
+        }
+
+        if (rayQueryGetIntersectionTypeEXT(query, true) == gl_RayQueryCommittedIntersectionTriangleEXT) {
+            float t = rayQueryGetIntersectionTEXT(query, true);
+            vec3 hitPos = origin + direction * t;
+
+            // Generate a pseudo-normal based on primitive ID for geometric diversity
+            uint primId = rayQueryGetIntersectionPrimitiveIndexEXT(query, true);
+            vec3 normal;
+            if (primId % 3 == 0) {
+                normal = vec3(0.0, 1.0, 0.0);
+            } else if (primId % 3 == 1) {
+                normal = vec3(1.0, 0.0, 0.0);
+            } else {
+                normal = vec3(0.0, 0.0, 1.0);
+            }
+
+            // Ensure normal faces back along the incoming ray
+            if (dot(normal, direction) > 0.0) {
+                normal = -normal;
+            }
+
+            // Generate next ray direction via hemisphere cosine sampling (diffuse reflection)
+            float u1 = rand_float(rngState);
+            float u2 = rand_float(rngState);
+            vec3 localSample = cosine_sample_hemisphere(u1, u2);
+            direction = align_to_normal(localSample, normal);
+
+            // Shift origin slightly to prevent self-intersection
+            origin = hitPos + normal * 0.002;
+
+            // Compute material reflectance
+            vec3 diffuse = (primId % 7 == 0) ? vec3(0.8, 0.3, 0.3) :
+                           ((primId % 7 == 1) ? vec3(0.3, 0.8, 0.3) : vec3(0.7, 0.7, 0.7));
+            throughput *= diffuse;
+
+            // Check if we hit an arbitrary light source triangle (emissive)
+            if (primId % 23 == 0) {
+                accumulated += throughput * vec3(3.0);
+                break;
+            }
+        } else {
+            // Hit background environment (sky light)
+            accumulated += throughput * vec3(0.6, 0.8, 1.0) * 0.5;
+            break;
+        }
+    }
+
+    if (threadRaysTraced > 0) {
+        atomicAdd(localHits, threadRaysTraced);
+    }
+    barrier();
+
+    if (gl_LocalInvocationID.x == 0 && localHits > 0) {
+        atomicAdd(results.hits, localHits);
+    }
+}

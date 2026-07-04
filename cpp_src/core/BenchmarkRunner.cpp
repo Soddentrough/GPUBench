@@ -14,6 +14,7 @@
 #include "benchmarks/RayDivergenceBench.h"
 #include "benchmarks/RayIncoherentBench.h"
 #include "benchmarks/RayMaterialDivergenceBench.h"
+#include "benchmarks/RayPathTracingBench.h"
 #include "benchmarks/RayPayloadBench.h"
 #include "benchmarks/RayProceduralBench.h"
 #include "benchmarks/RayTracingBench.h"
@@ -87,6 +88,7 @@ void BenchmarkRunner::discoverBenchmarks() {
   benchmarks.push_back(std::make_unique<RayASBuildBench>());
   benchmarks.push_back(std::make_unique<RayProceduralBench>());
   benchmarks.push_back(std::make_unique<RayMaterialDivergenceBench>());
+  benchmarks.push_back(std::make_unique<RayPathTracingBench>());
 
   // Cache Bandwidth
   const size_t l0_size = 16 * 1024; // 16KB L0 cache

@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Versioning
-set(BUILD_NUMBER "0") # Build number for the project
+set(BUILD_NUMBER "1") # Build number for the project
 set(PROJECT_FULL_VERSION "${PROJECT_VERSION}.${BUILD_NUMBER}")
 
 
@@ -190,6 +190,7 @@ set(LIB_SOURCES
     cpp_src/benchmarks/RayASBuildBench.cpp
     cpp_src/benchmarks/RayProceduralBench.cpp
     cpp_src/benchmarks/RayMaterialDivergenceBench.cpp
+    cpp_src/benchmarks/RayPathTracingBench.cpp
     cpp_src/utils/KernelPath.cpp
     cpp_src/utils/ShaderCache.cpp
 )

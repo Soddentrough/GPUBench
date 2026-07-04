@@ -54,3 +54,45 @@ jobs:
             build/GPUBench-*-win64.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libvulkan-dev vulkan-tools ocl-icd-opencl-dev opencl-headers pkg-config libx11-dev libwayland-dev libxkbcommon-dev libasound2-dev libfontconfig1-dev
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Configure CMake
+        run: |
+          mkdir build
+          cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build Target
+        run: |
+          cd build
+          cmake --build . --config Release
+
+      - name: Package with CPack
+        run: |
+          cd build
+          cpack -G TGZ
+          cpack -G DEB
+          cpack -G RPM
+
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            build/GPUBench-*-Linux.tar.gz
+            build/GPUBench-*-Linux.deb
+            build/GPUBench-*-Linux.rpm
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

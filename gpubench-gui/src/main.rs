@@ -138,7 +138,7 @@ pub fn main() -> iced::Result {
     GPUBenchApp::run(Settings {
         antialiasing: true,
         window: iced::window::Settings {
-            size: iced::Size::new(980.0, 700.0),
+            size: iced::Size::new(1200.0, 820.0),
             ..Default::default()
         },
         ..Settings::default()
@@ -235,6 +235,7 @@ struct GPUBenchApp {
     gpu_rt_divergence: f32,
     gpu_rt_payload: f32,
     gpu_rt_procedural: f32,
+    gpu_rt_pathtracing: f32,
 }
 
 #[derive(Debug, Clone)]
@@ -257,6 +258,9 @@ impl Application for GPUBenchApp {
     type Flags = ();
 
     fn new(_flags: ()) -> (Self, Command<Message>) {
+        unsafe {
+            std::env::set_var("GPUBENCH_KERNEL_PATH", concat!(env!("CARGO_MANIFEST_DIR"), "/../kernels"));
+        }
         let tests = get_available_benchmarks();
         
         let backends = vec!["VULKAN".to_string(), "ROCm".to_string()];
@@ -329,6 +333,7 @@ impl Application for GPUBenchApp {
                 gpu_rt_divergence: 0.0,
                 gpu_rt_payload: 0.0,
                 gpu_rt_procedural: 0.0,
+                gpu_rt_pathtracing: 0.0,
             },
             Command::none()
         )
@@ -582,6 +587,7 @@ impl Application for GPUBenchApp {
                                     "divergence": self.gpu_rt_divergence,
                                     "payload": self.gpu_rt_payload,
                                     "procedural": self.gpu_rt_procedural,
+                                    "path_tracing": self.gpu_rt_pathtracing,
                                 }
                             }
                         });
@@ -628,6 +634,7 @@ impl Application for GPUBenchApp {
                 self.gpu_rt_divergence = 0.0;
                 self.gpu_rt_payload = 0.0;
                 self.gpu_rt_procedural = 0.0;
+                self.gpu_rt_pathtracing = 0.0;
                 return Command::none();
             }
         }
@@ -693,9 +700,9 @@ impl Application for GPUBenchApp {
                         start_btn
                     ]
                 )
-                .width(Length::Fixed(300.0))
+                .width(Length::Fixed(240.0))
                 .height(Length::Fill)
-                .padding(30)
+                .padding(20)
                 .style(|_t: &Theme| container::Appearance {
                     background: Some(Background::Color(color!(0x0A0A0F))),
                     border: Border { color: color!(0x1A1A24), width: 1.0, ..Default::default() },
@@ -710,7 +717,21 @@ impl Application for GPUBenchApp {
                         if available_tests.contains(&t.to_string()) {
                             let is_checked = self.selected_tests.contains(t);
                             let name = t.to_string();
-                            let pill = button(text(t).size(13).horizontal_alignment(iced::alignment::Horizontal::Center))
+                            let friendly_name = match t {
+                                "MemBandwidth" => "GPU Mem BW",
+                                "SysMemBandwidth" => "Sys Mem BW",
+                                "SysMemLatency" => "Sys Mem Lat",
+                                "RayTracing" => "Intersect",
+                                "RayDivergence" => "Divergence",
+                                "RayAnyHit" => "AnyHit",
+                                "RayIncoherent" => "Incoherent",
+                                "RayPayload" => "Payload",
+                                "RayASBuild" => "AS Build",
+                                "RayProcedural" => "Procedural",
+                                "RayPathTracing" => "Path Tracing",
+                                _ => t
+                            };
+                            let pill = button(text(friendly_name).size(13).horizontal_alignment(iced::alignment::Horizontal::Center))
                                 .padding([12, 0])
                                 .width(Length::Fill)
                                 .on_press(Message::TestToggled(name.clone(), !is_checked))
@@ -734,9 +755,9 @@ impl Application for GPUBenchApp {
                     })
                 };
 
-                let comp_col = create_pill_grid("COMPUTE", vec!["FP64", "FP32", "FP16", "BF16", "FP8", "INT8", "INT4"]);
-                let sys_col = create_pill_grid("SYSTEM", vec!["MemBandwidth", "SysMemBandwidth", "SysMemLatency"]);
-                let rt_col = create_pill_grid("RAY TRACING", vec!["RayTracing", "RayDivergence", "RayAnyHit", "RayIncoherent", "RayPayload", "RayASBuild", "RayProcedural"]);
+                let comp_col = create_pill_grid("COMPUTE CORES", vec!["FP64", "FP32", "FP16", "BF16", "FP8", "INT8", "INT4"]);
+                let sys_col = create_pill_grid("MEMORY & SYSTEM", vec!["MemBandwidth", "SysMemBandwidth", "SysMemLatency"]);
+                let rt_col = create_pill_grid("RAY TRACING", vec!["RayTracing", "RayDivergence", "RayAnyHit", "RayIncoherent", "RayPayload", "RayASBuild", "RayProcedural", "RayPathTracing"]);
 
                 let compute_tests: Vec<&String> = available_tests.iter().filter(|t| !t.starts_with("Ray") && !t.contains("MemBandwidth") && !t.contains("SysMem")).collect();
                 let sys_tests: Vec<&String> = available_tests.iter().filter(|t| t.contains("MemBandwidth") || t.contains("SysMem")).collect();
@@ -756,11 +777,11 @@ impl Application for GPUBenchApp {
                         .padding([6, 16])
                         .on_press(Message::TestGroupSelected("NONE".to_string()))
                         .style(iced::theme::Button::Custom(Box::new(GroupPill { is_highlighted: none_selected }))),
-                    button(text("Compute").size(12).horizontal_alignment(iced::alignment::Horizontal::Center))
+                    button(text("Compute Cores").size(12).horizontal_alignment(iced::alignment::Horizontal::Center))
                         .padding([6, 16])
                         .on_press(Message::TestGroupSelected("COMPUTE".to_string()))
                         .style(iced::theme::Button::Custom(Box::new(GroupPill { is_highlighted: compute_all && !all_selected }))),
-                    button(text("System").size(12).horizontal_alignment(iced::alignment::Horizontal::Center))
+                    button(text("Memory & System").size(12).horizontal_alignment(iced::alignment::Horizontal::Center))
                         .padding([6, 16])
                         .on_press(Message::TestGroupSelected("SYSTEM".to_string()))
                         .style(iced::theme::Button::Custom(Box::new(GroupPill { is_highlighted: sys_all && !all_selected }))),
@@ -788,7 +809,7 @@ impl Application for GPUBenchApp {
                 )
                 .width(Length::Fill)
                 .height(Length::Fill)
-                .padding(40)
+                .padding(20)
                 .style(|_t: &Theme| container::Appearance {
                     background: Some(Background::Color(color!(0x111116))),
                     ..Default::default()
@@ -832,21 +853,33 @@ impl Application for GPUBenchApp {
                         Space::with_width(4),
                         tooltip(
                             text("(?)").size(12).style(color!(0x8888AA)),
-                            text(desc).size(12),
+                            container(text(desc).size(12).style(color!(0xDDDDDD)))
+                                .width(Length::Fixed(250.0))
+                                .padding(12)
+                                .style(|_t: &Theme| container::Appearance {
+                                    background: Some(Background::Color(color!(0x1A1A24))),
+                                    border: Border { radius: 8.0.into(), width: 1.0, color: color!(0x2E2E38) },
+                                    ..Default::default()
+                                }),
                             tooltip::Position::Right
                         )
                         .gap(4)
-                        .style(iced::theme::Container::Box)
+                        .style(iced::theme::Container::Transparent)
                     ].align_items(iced::Alignment::Center);
 
                     column![
                         row![
                             label_with_tooltip, 
                             Space::with_width(Length::Fill), 
-                            text(val_str).size(14).style(text_color)
-                        ],
+                            text(val_str).size(13).style(text_color)
+                        ]
+                        .width(Length::Fill)
+                        .align_items(iced::Alignment::Center),
                         Space::with_height(4) // Minimal spacing instead of the bar
-                    ].spacing(6).into()
+                    ]
+                    .width(Length::Fill)
+                    .spacing(6)
+                    .into()
                 };
 
                 let sys_content = column![
@@ -854,7 +887,7 @@ impl Application for GPUBenchApp {
                     metric_row("SysMemBandwidth", "System RAM Bandwidth", self.sys_mem_bw, "GB/s", "Measures the maximum multi-threaded bandwidth to the host's system RAM. Important for CPU-to-GPU data transfers and general system performance."),
                     metric_row("SysMemBandwidth", "System RAM (1 Thread)", self.sys_mem_bw_single, "GB/s", "Measures single-threaded bandwidth to system RAM, which indicates memory channel efficiency and latency-bound transfer speeds."),
                     metric_row("SysMemLatency", "System RAM Latency", self.sys_mem_lat, "ns", "Measures the time it takes to fetch a single un-cached piece of data from system memory. Lower is better. Essential for game engines and unpredictable data access."),
-                ].spacing(12).into();
+                ].spacing(12).width(Length::Fill).into();
 
                 let compute_content = column![
                     metric_row("FP64", "FP64 (Vector)", self.gpu_fp64, "TFLOPS", "Measures double precision (64-bit) floating point operations per second. Crucial for scientific simulations and high-accuracy physics."),
@@ -869,7 +902,7 @@ impl Application for GPUBenchApp {
                     metric_row("INT8", "INT8 (Matrix)", self.gpu_int8_matrix, "TOPS", "Measures hardware-accelerated cooperative matrix 8-bit integer operations."),
                     metric_row("INT4", "INT4 (Vector)", self.gpu_int4_vector, "TOPS", "Measures vector 4-bit integer operations per second. An extreme quantization format used in ultra-efficient AI processing and specialized lookup tasks."),
                     metric_row("INT4", "INT4 (Matrix)", self.gpu_int4_matrix, "TOPS", "Measures hardware-accelerated cooperative matrix 4-bit integer operations."),
-                ].spacing(12).into();
+                ].spacing(12).width(Length::Fill).into();
 
                 let rt_content = column![
                     metric_row("RayTracing", "Intersect", self.gpu_rt_intersect, "GIS/s", "Measures raw intersection throughput against opaque triangle geometry. Tests the peak performance of the hardware's dedicated ray intersection engines."),
@@ -881,7 +914,8 @@ impl Application for GPUBenchApp {
                     metric_row("RayASBuild", "BLAS Update", self.gpu_rt_blas_update, "MTris/s", "Measures BVH update/refit speed for bottom-level dynamic geometry (1 Million Triangles). Higher is better."),
                     metric_row("RayASBuild", "TLAS Build", self.gpu_rt_tlas_build, "MInst/s", "Measures top-level instantiation speed for scene-graph organization (10,000 Instances). Higher is better."),
                     metric_row("RayProcedural", "Procedural", self.gpu_rt_procedural, "GRays/s", "Measures intersection speed against mathematically defined geometry (like spheres or curves) rather than explicit triangles. Useful for advanced rendering engines."),
-                ].spacing(12).into();
+                    metric_row("RayPathTracing", "Path Tracing", self.gpu_rt_pathtracing, "MRays/s", "Simulates global illumination using stochastic multi-bounce path tracing (up to 8 bounces). Evaluates the GPU's intersection units, Monte Carlo math processing, cache hierarchy efficiency under random memory read pressure, and wavefront scheduling capabilities under thread divergence."),
+                ].spacing(12).width(Length::Fill).into();
 
                 let compute_col = column![
                     text("COMPUTE CORES").size(16).style(color!(0xFFFFFF)),
@@ -901,7 +935,9 @@ impl Application for GPUBenchApp {
                     create_panel("", color!(0x00E5FF), sys_content)
                 ].spacing(5).width(Length::FillPortion(1));
 
-                let split_layout = row![compute_col, rt_col, mem_col].spacing(20);
+                let split_layout = row![compute_col, rt_col, mem_col]
+                    .spacing(20)
+                    .width(Length::Fill);
 
                 let action_buttons: Element<'_, Message> = if matches!(self.state, AppState::Complete { .. }) {
                     column![
@@ -951,9 +987,9 @@ impl Application for GPUBenchApp {
                         action_buttons
                     ]
                 )
-                .width(Length::Fixed(300.0))
+                .width(Length::Fixed(240.0))
                 .height(Length::Fill)
-                .padding(30)
+                .padding(20)
                 .style(|_t: &Theme| container::Appearance {
                     background: Some(Background::Color(color!(0x0A0A0F))),
                     border: Border { color: color!(0x1A1A24), width: 1.0, ..Default::default() },
@@ -965,12 +1001,16 @@ impl Application for GPUBenchApp {
                         column![
                             global_progress,
                             split_layout
-                        ].spacing(30)
-                    ).height(Length::Fill)
+                        ]
+                        .spacing(30)
+                        .width(Length::Fill)
+                    )
+                    .width(Length::Fill)
+                    .height(Length::Fill)
                 )
                 .width(Length::Fill)
                 .height(Length::Fill)
-                .padding(40)
+                .padding(20)
                 .style(|_t: &Theme| container::Appearance {
                     background: Some(Background::Color(color!(0x111116))),
                     ..Default::default()
@@ -1001,7 +1041,7 @@ impl GPUBenchApp {
             value /= 1e9;
         } else if res.metric == "TFLOPS" || res.metric == "TOPS" {
             value /= 1e12;
-        } else if res.metric == "MTris/s" || res.metric == "MInst/s" {
+        } else if res.metric == "MTris/s" || res.metric == "MInst/s" || res.metric == "MRays/s" {
             value /= 1e6;
         }
 
@@ -1057,6 +1097,7 @@ impl GPUBenchApp {
                     if res.subcategory == "Material Divergence" || res.subcategory == "Execution Divergence" { self.gpu_rt_divergence = self.gpu_rt_divergence.max(value); }
                     if res.subcategory == "Payload Register Pressure" { self.gpu_rt_payload = self.gpu_rt_payload.max(value); }
                     if res.subcategory == "Procedural Intersection" { self.gpu_rt_procedural = self.gpu_rt_procedural.max(value); }
+                    if res.subcategory == "Path Tracing" { self.gpu_rt_pathtracing = self.gpu_rt_pathtracing.max(value); }
                 }
                 _ => {}
             }
@@ -1069,9 +1110,9 @@ fn create_panel<'a>(title: &str, title_color: iced::Color, children: Element<'a,
         text(title).size(22).style(title_color),
         Space::with_height(10),
         children
-    ])
+    ].width(Length::Fill))
     .width(Length::Fill)
-    .padding(20)
+    .padding(12)
     .style(move |_t: &Theme| container::Appearance {
         background: Some(Background::Color(color!(0x111116))),
         border: Border { radius: 8.0.into(), width: 1.0, color: color!(0x222233) },

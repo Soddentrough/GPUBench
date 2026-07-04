@@ -2,6 +2,7 @@
 #include "benchmarks/RayAnyHitBench.h"
 #include "benchmarks/RayDivergenceBench.h"
 #include "benchmarks/RayTracingBench.h"
+#include "benchmarks/RayPathTracingBench.h"
 #include "core/BenchmarkRunner.h"
 #include "core/ComputeBackendFactory.h"
 #include <cstdlib>
