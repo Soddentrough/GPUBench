@@ -8,6 +8,9 @@
 #else
 #include <CL/cl.h>
 #endif
+#ifndef CL_VERSION_2_0
+typedef intptr_t cl_queue_properties;
+#endif
 #include <memory>
 #include <stdexcept>
 #include <string>

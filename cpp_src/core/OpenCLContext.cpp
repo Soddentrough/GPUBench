@@ -23,6 +23,8 @@ typedef cl_context (*p_clCreateContext)(
 typedef cl_int (*p_clReleaseContext)(cl_context);
 typedef cl_command_queue (*p_clCreateCommandQueueWithProperties)(
     cl_context, cl_device_id, const cl_queue_properties *, cl_int *);
+typedef cl_command_queue (*p_clCreateCommandQueue)(
+    cl_context, cl_device_id, cl_command_queue_properties, cl_int *);
 typedef cl_int (*p_clReleaseCommandQueue)(cl_command_queue);
 typedef cl_mem (*p_clCreateBuffer)(cl_context, cl_mem_flags, size_t, void *,
                                    cl_int *);
@@ -67,6 +69,7 @@ static p_clCreateContext f_clCreateContext;
 static p_clReleaseContext f_clReleaseContext;
 static p_clCreateCommandQueueWithProperties
     f_clCreateCommandQueueWithProperties;
+static p_clCreateCommandQueue f_clCreateCommandQueue;
 static p_clReleaseCommandQueue f_clReleaseCommandQueue;
 static p_clCreateBuffer f_clCreateBuffer;
 static p_clReleaseMemObject f_clReleaseMemObject;
@@ -111,6 +114,8 @@ bool OpenCLContext::loadLibraries() {
     f_clCreateCommandQueueWithProperties =
         openclLib->getFunction<p_clCreateCommandQueueWithProperties>(
             "clCreateCommandQueueWithProperties");
+    f_clCreateCommandQueue =
+        openclLib->getFunction<p_clCreateCommandQueue>("clCreateCommandQueue");
     f_clReleaseCommandQueue = openclLib->getFunction<p_clReleaseCommandQueue>(
         "clReleaseCommandQueue");
     f_clCreateBuffer =
@@ -387,7 +392,13 @@ void OpenCLContext::createContext() {
 
 void OpenCLContext::createCommandQueue() {
   cl_int err;
-  commandQueue = f_clCreateCommandQueueWithProperties(context, device, 0, &err);
+  if (f_clCreateCommandQueueWithProperties) {
+    commandQueue = f_clCreateCommandQueueWithProperties(context, device, nullptr, &err);
+  } else if (f_clCreateCommandQueue) {
+    commandQueue = f_clCreateCommandQueue(context, device, 0, &err);
+  } else {
+    throw std::runtime_error("OpenCL command queue creation functions not found");
+  }
   if (err != CL_SUCCESS) {
     throw std::runtime_error("Failed to create OpenCL command queue");
   }
