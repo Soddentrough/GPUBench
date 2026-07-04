@@ -5,24 +5,24 @@ This document describes how GPUBench builds and publishes releases for different
 ## Release Architecture
 
 GPUBench uses a hybrid release process:
-1. **Windows Binaries**: Built and published automatically in the cloud via GitHub Actions.
+1. **Windows & macOS Binaries**: Built and published automatically in the cloud via GitHub Actions.
 2. **Linux Packages**: Built locally on the development machine and uploaded manually using the GitHub CLI (`gh`).
 
 ---
 
-## 1. Windows Releases (Automated)
+## 1. Windows & macOS Releases (Automated)
 
-Windows binaries are handled by the GitHub Actions workflow in `.github/workflows/release.yml`.
+Windows and macOS binaries are handled by the GitHub Actions workflow in `.github/workflows/release.yml`.
 
-- **Trigger**: Pushing a tag matching `v*` (e.g. `v1.1.0.1`).
+- **Trigger**: Pushing a tag matching `v*` (e.g. `v1.1.0.2`).
 - **Generated Assets**:
-  - `GPUBench-*-win64.zip` (Portable ZIP)
-  - `GPUBench-*-win64.exe` (NSIS Installer)
+  - Windows: `GPUBench-*-win64.zip` and `GPUBench-*-win64.exe`
+  - macOS: `GPUBench-*-Darwin.dmg` and `GPUBench-*-Darwin.tar.gz`
 - **Workflow**:
   1. Commit changes and update the `BUILD_NUMBER` in `CMakeLists.txt`.
-  2. Tag the commit (e.g., `git tag v1.1.0.1`).
-  3. Push the tag to remote (`git push origin v1.1.0.1`).
-  4. The GitHub Actions runner will automatically build, package, and publish the Windows binaries to the release page.
+  2. Tag the commit (e.g., `git tag v1.1.0.2`).
+  3. Push the tag to remote (`git push origin v1.1.0.2`).
+  4. The GitHub Actions runner will automatically build, package, and publish the Windows and macOS binaries to the release page.
 
 ---
 
@@ -55,38 +55,9 @@ Upload the generated assets directly to the existing GitHub release page using t
 
 ```bash
 # Upload assets to the corresponding tag
-gh release upload v1.1.0.1 \
-  build/GPUBench-1.1.0.1-Linux.deb \
-  build/GPUBench-1.1.0.1-Linux.rpm \
-  build/GPUBench-1.1.0.1-Linux.tar.gz \
-  --clobber
-```
-
----
-
-## 3. macOS Releases (Local macOS Machine)
-
-If you compile for macOS, those packages (DMG, Tarball) are built locally on a macOS machine and uploaded manually using the GitHub CLI.
-
-### Step 1: Build and Package Locally
-```bash
-# Navigate to the build directory
-cd build
-
-# Configure and compile release targets
-cmake .. -DCMAKE_BUILD_TYPE=Release
-cmake --build . --parallel $(sysctl -n hw.ncpu)
-
-# Generate DMG installer and tarball
-cpack -G DragNDrop
-cpack -G TGZ
-```
-
-### Step 2: Upload to GitHub Release
-```bash
-# Upload assets to the corresponding tag
-gh release upload v1.1.0.1 \
-  build/GPUBench-1.1.0.1-Darwin.dmg \
-  build/GPUBench-1.1.0.1-Darwin.tar.gz \
+gh release upload v1.1.0.2 \
+  build/GPUBench-1.1.0.2-Linux.deb \
+  build/GPUBench-1.1.0.2-Linux.rpm \
+  build/GPUBench-1.1.0.2-Linux.tar.gz \
   --clobber
 ```
