@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Install Vulkan SDK (LunarG apt repo)
+        run: |
+          wget -qO - https://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo apt-key add -
+          sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-jammy.list \
+            https://packages.lunarg.com/vulkan/lunarg-vulkan-jammy.list
+          sudo apt-get update
+          sudo apt-get install -y vulkan-sdk
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            ocl-icd-opencl-dev \
+            opencl-headers \
+            cmake \
+            build-essential
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo workspace
+        uses: Swatinem/rust-cache@v2
+
+      - name: Configure CMake
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: |
+          cmake --build build --config Release --parallel
+          cargo build --workspace --release
+
+      - name: Smoke test (list commands)
+        run: |
+          echo "Smoke test only: GPU-less CI runners may fail the list commands; build failures above are NOT masked."
+          ./build/gpubench --list-benchmarks || true
+          ./build/gpubench --list-backends || true
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Install Vulkan SDK
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://sdk.lunarg.com/sdk/download/latest/windows/vulkan_sdk.exe" -OutFile VulkanSDK.exe
+          Start-Process -FilePath .\VulkanSDK.exe -ArgumentList "--root", "C:\VulkanSDK", "--accept-licenses", "--default-answer", "--confirm-command", "install" -NoNewWindow -Wait
+          echo "VULKAN_SDK=C:\VulkanSDK" >> $env:GITHUB_ENV
+          echo "C:\VulkanSDK\Bin" >> $env:GITHUB_PATH
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo workspace
+        uses: Swatinem/rust-cache@v2
+
+      - name: Configure CMake
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: |
+          cmake --build build --config Release
+          cargo build --workspace --release

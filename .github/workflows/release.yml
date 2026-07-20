@@ -29,6 +29,12 @@ jobs:
           choco install nsis -y
           echo "C:\Program Files (x86)\NSIS" >> $env:GITHUB_PATH
 
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo workspace
+        uses: Swatinem/rust-cache@v2
+
       - name: Configure CMake
         run: |
           mkdir build
@@ -78,6 +84,9 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Cache cargo workspace
+        uses: Swatinem/rust-cache@v2
+
       - name: Configure CMake
         run: |
           mkdir build
@@ -101,5 +110,63 @@ jobs:
           files: |
             build/GPUBench-*-Darwin.dmg
             build/GPUBench-*-Darwin.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Install Vulkan SDK (LunarG apt repo)
+        run: |
+          wget -qO - https://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo apt-key add -
+          sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-jammy.list \
+            https://packages.lunarg.com/vulkan/lunarg-vulkan-jammy.list
+          sudo apt-get update
+          sudo apt-get install -y vulkan-sdk
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            ocl-icd-opencl-dev \
+            opencl-headers \
+            cmake \
+            build-essential \
+            rpm
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo workspace
+        uses: Swatinem/rust-cache@v2
+
+      - name: Configure CMake
+        run: |
+          mkdir build
+          cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="GPUBench"
+
+      - name: Build C++ Target
+        run: |
+          cd build
+          cmake --build . --config Release --parallel
+
+      - name: Package with CPack
+        run: |
+          cd build
+          cpack -G DEB
+          cpack -G RPM
+          cpack -G TGZ
+
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            build/GPUBench-*-Linux.deb
+            build/GPUBench-*-Linux.rpm
+            build/GPUBench-*-Linux.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

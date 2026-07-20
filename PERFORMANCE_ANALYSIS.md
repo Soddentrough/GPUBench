@@ -163,3 +163,84 @@ The optimizations successfully addressed the main performance issues:
 - ✓ Multiple accumulators eliminated dependency chains
 
 The benchmark now provides realistic and meaningful performance measurements for the AMD RX 6900 XT.
+
+## Known Platform Ceilings and Toolchain Gaps (measured 2026-07, R9700/RADV)
+
+- **FP16/BF16 vector (~51.5 TFLOPS, 1.13x FP32)**: the SPIR-V is correct
+  (packed v2f16 FMAs verified by disassembly), but measured throughput caps
+  at ~1.13x FP32 on RADV/GFX12 regardless of formulation (v2/v4 vectors,
+  4x unrolling, ACO and LLVM backends all identical). The op counting is
+  correct; this is a driver/hardware-path ceiling, not a benchmark bug.
+  BF16 vector intentionally uses an FP16 shader (same packed rate on RDNA4).
+- **FP8 vector/matrix: reported UNSUPPORTED.** Hardware and driver support
+  native FP8 (VK_EXT_shader_float8 + shaderFloat8CooperativeMatrix), but no
+  GLSL toolchain can compile FP8 shaders (glslang main has no
+  GL_EXT_shader_explicit_arithmetic_types_float8). The old FP16-based proxy
+  shaders were reporting FP16 rates mislabeled as FP8; they are now gated
+  off until a compiler (glslang FP8 support, or slang with FP8 CoopMat) is
+  integrated.
+- **INT4 matrix: reported UNSUPPORTED.** VK_KHR_cooperative_matrix has no
+  4-bit integer component type, so native INT4 WMMA rates are not
+  expressible through Vulkan today; the old shader measured INT8. INT4
+  vector has no native Vulkan path either.
+- **FP4: reported UNSUPPORTED** (no FP4 type on RDNA4; FP16-based emulation
+  disabled as inaccurate).
+
+## Known Platform Ceilings and Toolchain Gaps (measured 2026-07, R9700/RADV)
+
+- FP16/BF16 vector (~51.5 TFLOPS, 1.13x FP32): the SPIR-V is correct
+  (packed v2f16 FMAs verified by disassembly), but measured throughput caps
+  at ~1.13x FP32 on RADV/GFX12 regardless of formulation (v2/v4 vectors,
+  4x unrolling, ACO and LLVM backends all identical). The op counting is
+  correct; this is a driver/hardware-path ceiling, not a benchmark bug.
+  BF16 vector intentionally uses an FP16 shader (same packed rate on RDNA4).
+- FP8 vector/matrix: reported UNSUPPORTED. Hardware and driver support
+  native FP8 (VK_EXT_shader_float8 + shaderFloat8CooperativeMatrix), but no
+  GLSL toolchain can compile FP8 shaders (glslang main has no
+  GL_EXT_shader_explicit_arithmetic_types_float8). The old FP16-based proxy
+  shaders were reporting FP16 rates mislabeled as FP8; they are now gated
+  off until a compiler (glslang FP8 support, or slang with FP8 CoopMat) is
+  integrated.
+- INT4 matrix: reported UNSUPPORTED. VK_KHR_cooperative_matrix has no
+  4-bit integer component type, so native INT4 WMMA rates are not
+  expressible through Vulkan today; the old shader measured INT8.
+- FP4: reported UNSUPPORTED (no FP4 type on RDNA4; FP16-based emulation
+  disabled as inaccurate).
+
+## ROCm Backend Findings (2026-07, R9700, TheRock ROCm 7.x / clang 23)
+
+- FP32 (~24-25 TFLOPS, ~half of Vulkan): REAL fp32 math, but hipcc/LLVM
+  cannot exploit RDNA4's second FP32 pipe. Disassembly shows 512 scalar
+  v_fma_f32 and no dual-issue pairing; v_dual_fma_f32 does not exist on
+  gfx1201 (VOPD FMA was removed after gfx11 — hardware dual-issue requires
+  bank-aware register allocation that LLVM does not do; RADV/ACO does,
+  which is why the Vulkan numbers show the true silicon peak). Reported
+  as-is: it is the honest hipcc-achievable rate.
+- BF16 vector: UNSUPPORTED [toolchain]. TheRock's clang has no native
+  bf16 vector codegen for gfx12 — __bf16 arithmetic is emulated via FP32
+  with software rounding on the SCALAR unit (verified in disassembly),
+  and headers lack hip_bfloat162/__hfma2. The previous ~2.5 TFLOPS result
+  was emulated bf16, not hardware throughput.
+- L0/L1/L2/L3 cache latency: FIXED (L0 was 0.00 ns — the old kernel did
+  integer ALU ops with no memory reads; now a real 1M-step pointer chase,
+  measuring ~14/21/44/217 ns).
+- Memory bandwidth (~64% of Vulkan, e.g. Read 399 vs 622 GB/s): the HIP
+  kernel is structurally identical to the Vulkan shader and grids match;
+  the gap is hipcc/RADV codegen quality for the masked streaming access
+  pattern. Known issue, not yet resolved. .co kernels are now built -O3.
+
+## Cache Latency: Vulkan vs ROCm Are Different Hardware Paths (2026-07)
+
+The L0-L3 latency numbers are NOT directly comparable across backends:
+- Vulkan (RADV): the chase compiles to VMEM buffer_load_b32 with a
+  scalar<->vector round trip (v_readfirstlane) in every dependency step
+  (verified in RADV SASS; persists even with nonuniformEXT since ACO
+  proves the address uniform). Measures the vector cache path as real
+  Vulkan compute shaders experience it: ~32/70/86/160 ns.
+- ROCm (hipcc): the chase compiles to SMEM s_load_b32 (scalar memory
+  path), which on RDNA4 has substantially lower hit latency:
+  ~13/21/41/133 ns.
+Both are "correct" for their path; treat them as per-backend metrics, not
+cross-backend equivalents. The VMEM path is what general compute kernels
+use, so the Vulkan numbers are the more representative cache-latency
+figures for typical shader workloads.

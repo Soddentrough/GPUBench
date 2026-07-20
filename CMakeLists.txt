@@ -149,7 +149,7 @@ if(HIP_FOUND)
         # Compile to .co using hipcc
         add_custom_command(
             OUTPUT ${DEST_HIP_CO}
-            COMMAND hipcc --genco --offload-arch=native ${HIP_SOURCE} -o ${DEST_HIP_CO}
+            COMMAND hipcc -O3 --genco --offload-arch=native ${HIP_SOURCE} -o ${DEST_HIP_CO}
             DEPENDS ${HIP_SOURCE}
             COMMENT "Compiling HIP kernel to code object: ${HIP_SOURCE}"
         )
@@ -313,6 +313,9 @@ add_custom_command(TARGET gpubench POST_BUILD
 )
 
 # Build and package Rust GUI if Cargo is available
+# GPUBENCH_REQUIRE_GUI (default ON): require cargo for the Rust GUI build.
+# Set -DGPUBENCH_REQUIRE_GUI=OFF to build/package a CLI-only release without cargo.
+option(GPUBENCH_REQUIRE_GUI "Require cargo to build the Rust GUI (disable for CLI-only builds)" ON)
 find_program(CARGO_EXECUTABLE cargo)
 if(CARGO_EXECUTABLE)
     message(STATUS "Cargo found: ${CARGO_EXECUTABLE}. Configuring Rust GUI build.")
@@ -327,16 +330,27 @@ if(CARGO_EXECUTABLE)
     # Ensure C++ gpubench target depends on it
     add_dependencies(gpubench gpubench_rust_gui)
 
-    # Install the Rust GUI binary
-    if(WIN32)
-        install(PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/target/release/gpubench-gui.exe"
-                DESTINATION bin)
-    else()
-        install(PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/target/release/gpubench-gui"
-                DESTINATION bin)
+    # Install the Rust GUI binary (only when the GUI is actually built)
+    if(GPUBENCH_REQUIRE_GUI OR CARGO_EXECUTABLE)
+        if(WIN32)
+            install(PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/target/release/gpubench-gui.exe"
+                    DESTINATION bin)
+        else()
+            install(PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/target/release/gpubench-gui"
+                    DESTINATION bin)
+        endif()
     endif()
 else()
-    message(WARNING "Cargo not found. Rust GUI will not be built and packaged.")
+    if(GPUBENCH_REQUIRE_GUI)
+        message(FATAL_ERROR
+            "Cargo (Rust toolchain) not found, but GPUBENCH_REQUIRE_GUI is ON. "
+            "The Rust GUI (gpubench-gui) is required for the default build. "
+            "Install Rust (https://rustup.rs) or configure with "
+            "-DGPUBENCH_REQUIRE_GUI=OFF to build and package the CLI only.")
+    else()
+        message(WARNING "Cargo not found and GPUBENCH_REQUIRE_GUI=OFF: "
+            "skipping Rust GUI build and install (CLI-only build).")
+    endif()
 endif()
 
 # Install targets
@@ -429,7 +443,10 @@ elseif(UNIX AND NOT APPLE)
     # DEB package settings
     set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Soddentrough <https://github.com/Soddentrough/GPUBench>")
     set(CPACK_DEBIAN_PACKAGE_SECTION "utils")
-    set(CPACK_DEBIAN_PACKAGE_DEPENDS "")
+    # DEB package dependencies (Debian package names; libvulkan1 is the Vulkan loader).
+    # OpenCL/ROCm stay OPTIONAL -- they are resolved at runtime via dynamic loading,
+    # so they are intentionally not listed here (mirrors the RPM policy below).
+    set(CPACK_DEBIAN_PACKAGE_DEPENDS "libvulkan1, libc6, libstdc++6")
     
     # RPM package settings
     set(CPACK_RPM_PACKAGE_LICENSE "MIT")
