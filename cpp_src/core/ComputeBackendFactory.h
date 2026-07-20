@@ -106,7 +106,21 @@ public:
                 return false;
         }
     }
-    
+
+    // Check runtime availability: the backend must be compiled in AND a
+    // lightweight context creation must succeed (driver/runtime present).
+    static bool isRuntimeAvailable(ComputeBackend backend) {
+        if (!isAvailable(backend)) {
+            return false;
+        }
+        try {
+            auto ctx = create(backend, false, false);
+            return ctx != nullptr;
+        } catch (...) {
+            return false;
+        }
+    }
+
     // Get the name of a backend
     static const char* getBackendName(ComputeBackend backend) {
         switch (backend) {

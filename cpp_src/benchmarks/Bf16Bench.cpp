@@ -4,6 +4,14 @@
 
 bool Bf16Bench::IsSupported(const DeviceInfo &info,
                             IComputeContext *context) const {
+  if (context && context->getBackend() == ComputeBackend::ROCm) {
+    // The current HIP toolchain (TheRock/LLVM clang 23) emulates bf16
+    // arithmetic via FP32 with software rounding on the scalar unit, and
+    // its headers lack hip_bfloat162/__hfma2. A benchmark of emulated
+    // bf16 would report ~2.5 TFLOPS, which is not the hardware's BF16
+    // rate — report UNSUPPORTED instead (toolchain limitation).
+    return false;
+  }
   return info.bf16Support;
 }
 
@@ -88,7 +96,8 @@ BenchmarkResult Bf16Bench::GetResult(uint32_t config_idx) const {
     uint64_t iters = 16384;
     uint64_t ops_per_iter = 128; // Vulkan/OpenCL use f16vec2 (128 ops)
     if (context && context->getBackend() == ComputeBackend::ROCm) {
-      ops_per_iter = 64; // ROCm uses scalar hip_bfloat16 (64 ops)
+      iters = 2048;      // bf16.hip: 2048 iterations
+      ops_per_iter = 128; // bf16.hip: packed hip_bfloat162 __hfma2 chain
     }
     uint64_t num_ops = iters * ops_per_iter * 8192 * 64;
     return {num_ops, 0.0};
@@ -100,7 +109,14 @@ BenchmarkResult Bf16Bench::GetResult(uint32_t config_idx) const {
     if (context && context->getBackend() == ComputeBackend::ROCm) {
         iters = 32768;
     }
-    uint64_t num_ops = iters * 8192 * 32768;
+    // The Vulkan shader runs 4096 loop iterations x 8 independent
+    // accumulators = 32768 coopMatMulAdds per subgroup. Count them all.
+    // Other backends: one muladd per iteration (unchanged behavior).
+    uint64_t muladds = iters;
+    if (context && context->getBackend() == ComputeBackend::Vulkan) {
+        muladds = iters * 8;
+    }
+    uint64_t num_ops = muladds * 8192 * 32768;
     return {num_ops, 0.0};
   }
 }

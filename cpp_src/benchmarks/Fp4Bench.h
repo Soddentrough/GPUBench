@@ -16,6 +16,13 @@ public:
 
   bool IsSupported(const DeviceInfo &info,
                    IComputeContext *context = nullptr) const override;
+  std::string GetSupportNote() const override {
+    return "RDNA4 has no FP4 units (FP4 arrived with CDNA4/gfx950); no FP4 "
+           "shader type exists on Vulkan or HIP either";
+  }
+  SupportLimitation GetSupportLimitation() const override {
+    return SupportLimitation::kHardware;
+  }
   void Setup(IComputeContext &context, const std::string &kernel_dir) override;
   void Run(uint32_t config_idx = 0) override;
   void Teardown() override;

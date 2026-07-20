@@ -49,6 +49,7 @@ private:
   uint32_t rayCount = 0;
   uint32_t numPrimitives = 0;
   uint32_t numInstances = 0;
+  int builtConfigIdx = -1; // Which config the current AS was built for
   std::map<uint32_t, double> rtResults;
 
   // Function pointers

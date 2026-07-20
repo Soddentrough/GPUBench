@@ -171,6 +171,41 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
     lower_benchmarks_to_run.push_back(to_lower(b));
   }
 
+  // Determine which requested names match at least one benchmark, using the
+  // same matching rule as the run loops below (substring of the benchmark
+  // name, case-insensitive, or exact alias match).
+  unmatchedBenchmarks.clear();
+  numBenchmarksRun = 0;
+  for (size_t i = 0; i < lower_benchmarks_to_run.size(); ++i) {
+    const std::string &run_name = lower_benchmarks_to_run[i];
+    bool matched = false;
+    for (const auto &bench : benchmarks) {
+      // Replicate the name decoration used by the run loops below:
+      // benchmarks named "Performance" are matched as
+      // "Performance (<subcategory>)".
+      std::string bench_name_lower = to_lower(bench->GetName());
+      if (bench_name_lower == "performance") {
+        bench_name_lower +=
+            " (" + to_lower(std::string(bench->GetSubCategory())) + ")";
+      }
+      if (bench_name_lower.find(run_name) != std::string::npos) {
+        matched = true;
+        break;
+      }
+      for (const auto &alias : bench->GetAliases()) {
+        if (to_lower(alias) == run_name) {
+          matched = true;
+          break;
+        }
+      }
+      if (matched)
+        break;
+    }
+    if (!matched) {
+      unmatchedBenchmarks.push_back(benchmarks_to_run[i]);
+    }
+  }
+
   int totalSelected = contexts.size();
   int totalAvailable = 0;
 
@@ -318,26 +353,37 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
         }
         context->setExpectedKernelCount(totalKernels);
 
-        for (auto &bench : benchmarks) {
-          bool should_run = false;
-          if (benchmarks_to_run.empty()) {
-            should_run = true;
-          } else {
-            std::string bench_name_lower = to_lower(bench->GetName());
-            auto aliases = bench->GetAliases();
-            for (const auto &run_name : lower_benchmarks_to_run) {
-              if (bench_name_lower.find(run_name) != std::string::npos) {
-                should_run = true;
-                break;
-              }
-              for (const auto &alias : aliases) {
-                if (to_lower(alias) == run_name) {
-                  should_run = true;
-                  break;
-                }
-              }
+        // Shared selection predicate, applying the "Performance
+        // (subcategory)" name decoration used by the pre-scan and the
+        // kernel-count loop above.
+        auto isSelected = [&](IBenchmark *b) {
+          if (lower_benchmarks_to_run.empty())
+            return true;
+          std::string bench_name_lower = to_lower(b->GetName());
+          if (bench_name_lower == "performance") {
+            bench_name_lower +=
+                " (" + to_lower(std::string(b->GetSubCategory())) + ")";
+          }
+          for (const auto &run_name : lower_benchmarks_to_run) {
+            if (bench_name_lower.find(run_name) != std::string::npos)
+              return true;
+            for (const auto &alias : b->GetAliases()) {
+              if (to_lower(alias) == run_name)
+                return true;
             }
           }
+          return false;
+        };
+
+        // Phase 1: set up (compile kernels, allocate buffers) ALL selected
+        // benchmarks up front, so shader compilation is never interleaved
+        // with timed runs.
+        std::cout << "Preparing benchmarks (compiling kernels, uploading "
+                     "data, building acceleration structures)..."
+                  << std::endl;
+        std::vector<IBenchmark *> runnable;
+        for (auto &bench : benchmarks) {
+          bool should_run = isSelected(bench.get());
 
           if (should_run && bench->IsSupported(info, context)) {
             if (dumpGeometry) {
@@ -361,15 +407,69 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
                           << std::endl;
               }
               bench->Setup(*context, KernelPath::find());
+              runnable.push_back(bench.get());
+            } catch (const std::exception &e) {
+              if (verbose) {
+                  std::cerr << "Error setting up " << bench->GetName() << ": "
+                            << e.what() << std::endl;
+              }
+              try {
+                bench->Teardown();
+              } catch (...) {
+                // Ignore errors during cleanup
+              }
+            }
+          } else if (should_run && bench->IsDeviceDependent()) {
+            // Benchmark was selected but is not supported on this
+            // device/backend (e.g. missing hardware capability). Report it
+            // explicitly as UNSUPPORTED instead of skipping silently.
+            ResultData result_data;
+            result_data.backendName =
+                ComputeBackendFactory::getBackendName(context->getBackend());
+            result_data.deviceName = info.name;
+            result_data.benchmarkName = bench->GetName();
+            result_data.metric = "";
+            result_data.operations = 0;
+            result_data.time_ms = 0;
+            result_data.isEmulated = false;
+            result_data.isUnsupported = true;
+            result_data.supportNote = bench->GetSupportNote();
+            switch (bench->GetSupportLimitation()) {
+            case IBenchmark::SupportLimitation::kHardware:
+              result_data.supportCategory = "hardware";
+              break;
+            case IBenchmark::SupportLimitation::kApi:
+              result_data.supportCategory = "api";
+              break;
+            case IBenchmark::SupportLimitation::kToolchain:
+              result_data.supportCategory = "toolchain";
+              break;
+            default:
+              break;
+            }
+            result_data.component = bench->GetComponent(0);
+            result_data.subcategory = bench->GetSubCategory(0);
+            result_data.maxWorkGroupSize = info.maxWorkGroupSize;
+            result_data.deviceIndex = context->getSelectedDeviceIndex();
+            result_data.configIndex = 0;
+            result_data.sortWeight = bench->GetSortWeight();
 
+            formatter->addResult(result_data);
+            // Not counted in numBenchmarksRun: nothing was measured.
+            if (onResult) {
+                onResult(result_data);
+            }
+          }
+        }
+
+        // Phase 2: timed runs. All kernels are already compiled above, so
+        // no compilation overlaps the measurements. The leading newline
+        // terminates the \r progress-bar line from phase 1.
+        std::cout << "\nPreparation complete. Running benchmarks..."
+                  << std::endl;
+        for (auto *bench : runnable) {
+          try {
               uint32_t num_configs = bench->GetNumConfigs();
-
-              // For Memory Bandwidth tests in non-verbose mode, print a single
-              // summary message For Memory Bandwidth tests in non-verbose mode,
-              // we don't need a separate message as the individual configs will
-              // print updates via \r
-              bool is_membw =
-                  (std::string(bench->GetName()) == "Memory Bandwidth");
 
               for (uint32_t i = 0; i < num_configs; ++i) {
                 std::string bench_name = bench->GetName();
@@ -384,14 +484,40 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
                             << "] Running " << bench_name << "..." << std::endl;
                 }
 
-                // Timed run
+                // Warmup (not counted): ramp GPU clocks and fill caches
+                // before the measurement window starts. Skipped for
+                // latency (ns) benchmarks: they are single-thread pointer
+                // chases whose ns-per-step is extremely clock-sensitive,
+                // and pre-heating the GPU measurably distorts them.
+                if (std::string(bench->GetMetric(i)) != "ns") {
+                  auto warmup_start =
+                      std::chrono::high_resolution_clock::now();
+                  double warmup_ms = 0;
+                  while (warmup_ms < 250.0) {
+                    bench->Run(i);
+                    context->waitIdle();
+                    auto now = std::chrono::high_resolution_clock::now();
+                    warmup_ms =
+                        std::chrono::duration_cast<std::chrono::nanoseconds>(
+                            now - warmup_start)
+                            .count() /
+                        1e6;
+                  }
+                }
+
+                // Timed run with adaptive dispatch batching: submit several
+                // dispatches before each waitIdle so the GPU is never left
+                // idle while the CPU records the next command buffer.
                 double total_time_ms = 0;
                 uint64_t total_invocations = 0;
+                uint32_t batch = 1;
                 auto bench_start = std::chrono::high_resolution_clock::now();
                 while (total_time_ms < 2500) {
                   auto iter_start =
                       std::chrono::high_resolution_clock::now();
-                  bench->Run(i);
+                  for (uint32_t j = 0; j < batch; ++j) {
+                    bench->Run(i);
+                  }
                   context->waitIdle();
                   auto iter_end =
                       std::chrono::high_resolution_clock::now();
@@ -402,17 +528,22 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
                       1e6;
                   if (verbose && iter_ms > 500.0) {
                     std::cerr
-                        << "\n[WARNING] Single dispatch took " << iter_ms
+                        << "\n[WARNING] Dispatch batch took " << iter_ms
                         << " ms — approaching amdgpu TDR timeout!" << std::endl;
                   }
                   if (iter_ms > 3000.0) {
                     std::cerr
-                        << "\n[ABORT] Dispatch took " << iter_ms
+                        << "\n[ABORT] Dispatch batch took " << iter_ms
                         << " ms — aborting benchmark to avoid system crash."
                         << std::endl;
                     break;
                   }
-                  total_invocations++;
+                  total_invocations += batch;
+                  // Grow the batch until one batch occupies >= ~25 ms of GPU
+                  // time (cap 64), keeping the pipeline fed for short kernels.
+                  if (iter_ms < 25.0 && batch < 64 && !getenv("GPUBENCH_NO_BATCH")) {
+                    batch = (batch * 2 > 64) ? 64 : batch * 2;
+                  }
                   auto now = std::chrono::high_resolution_clock::now();
                   total_time_ms =
                       std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -441,13 +572,18 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
                 result_data.sortWeight = bench->GetSortWeight();
 
                 formatter->addResult(result_data);
+                numBenchmarksRun++;
                 if (onResult) {
                     onResult(result_data);
                 }
               }
 
               bench->Teardown();
-                std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+              // Let GPU clocks/power state settle before the next
+              // benchmark. NOTE: the necessity of this delay is unproven —
+              // the test that suggested it was confounded by a competing
+              // GPU process. Keep it; removing it is untested.
+              std::this_thread::sleep_for(std::chrono::milliseconds(1000));
             } catch (const std::exception &e) {
               if (verbose) {
                   std::cerr << "Error running " << bench->GetName() << ": "
@@ -460,7 +596,6 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
                 // Ignore errors during cleanup
               }
             }
-          }
         }
       } catch (const std::exception &e) {
         std::cerr << "Error processing device: " << e.what() << std::endl;
@@ -563,6 +698,7 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
             result_data.sortWeight = bench->GetSortWeight();
 
             formatter->addResult(result_data);
+            numBenchmarksRun++;
             if (onResult) {
                 onResult(result_data);
             }

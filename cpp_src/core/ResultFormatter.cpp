@@ -128,6 +128,7 @@ void ResultFormatter::print() {
   const std::string BOLD = "\033[1m";
   const std::string CYAN = "\033[36m";
   const std::string GREEN = "\033[32m";
+  const std::string RED = "\033[31m";
   const std::string YELLOW = "\033[33m";
   const std::string MAGENTA = "\033[35m";
 
@@ -187,7 +188,15 @@ void ResultFormatter::print() {
               std::string valStr;
               std::string unit = res.metric;
 
-              if (res.component == "Compute") {
+              if (res.isUnsupported) {
+                valStr = "UNSUPPORTED";
+                unit = res.supportCategory.empty()
+                           ? ""
+                           : " [" + res.supportCategory + " limitation]";
+                if (!res.supportNote.empty()) {
+                  unit += " (" + res.supportNote + ")";
+                }
+              } else if (res.component == "Compute") {
                 // TFLOPS or TOPS
                 value = (static_cast<double>(res.operations) /
                          (res.time_ms / 1000.0)) /
@@ -227,8 +236,9 @@ void ResultFormatter::print() {
               }
 
               std::cout << " : " << std::setw(12) << std::right << YELLOW
-                        << backend << RESET << " | " << BOLD << GREEN
-                        << std::setw(10) << valStr << RESET << unit;
+                        << backend << RESET << " | " << BOLD
+                        << (res.isUnsupported ? RED : GREEN) << std::setw(10)
+                        << valStr << RESET << unit;
               firstBackend = false;
             }
           }

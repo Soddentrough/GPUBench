@@ -52,11 +52,41 @@ void VulkanContext::createInstance() {
   appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
   appInfo.pEngineName = "No Engine";
   appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
-  appInfo.apiVersion = VK_API_VERSION_1_4;
+
+  // Negotiate the instance API version: request up to Vulkan 1.4 but clamp
+  // to what the loader/driver stack actually supports (MoltenVK and older
+  // drivers may only expose 1.0-1.3). vkEnumerateInstanceVersion does not
+  // exist on Vulkan 1.0 loaders, so resolve it dynamically and fall back to
+  // 1.0 when it is missing.
+  uint32_t apiVersion = VK_API_VERSION_1_0;
+  auto pfnEnumerateInstanceVersion =
+      reinterpret_cast<PFN_vkEnumerateInstanceVersion>(
+          vkGetInstanceProcAddr(nullptr, "vkEnumerateInstanceVersion"));
+  if (pfnEnumerateInstanceVersion) {
+    uint32_t supportedVersion = VK_API_VERSION_1_0;
+    if (pfnEnumerateInstanceVersion(&supportedVersion) == VK_SUCCESS) {
+      apiVersion = supportedVersion;
+    }
+  }
+  if (apiVersion > VK_API_VERSION_1_4) {
+    apiVersion = VK_API_VERSION_1_4;
+  }
+  appInfo.apiVersion = apiVersion;
 
   VkInstanceCreateInfo createInfo{};
   createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
   createInfo.pApplicationInfo = &appInfo;
+
+  std::vector<const char*> extensions;
+#ifdef __APPLE__
+  // MoltenVK requires the portability enumeration extension (and its flag)
+  // to expose physical devices on macOS.
+  extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+  createInfo.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+#endif
+  createInfo.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
+  createInfo.ppEnabledExtensionNames =
+      extensions.empty() ? nullptr : extensions.data();
 
   std::vector<const char*> layers;
   if (debug) {
@@ -268,8 +298,12 @@ DeviceInfo VulkanContext::getCurrentDeviceInfo() const {
       hasExt(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME);
   info.fp8Support = hasExt("VK_EXT_shader_float8");
   info.fp6Support = false;
-  info.fp4Support = true;  // Assuming support or emulation
-  info.int4Support = true; // Assuming support or emulation
+  info.fp4Support = false; // No Vulkan FP4 shader type exists; Fp4Bench is
+                           // deliberately disabled (see its IsSupported).
+  // No Vulkan/SPIR-V cooperative-matrix component type for 4-bit integers
+  // exists, so native INT4 rates cannot be measured through Vulkan. The
+  // coop_matrix_int4.comp shader actually performs INT8 math.
+  info.int4Support = false;
   info.structuredSparsitySupport = true;
   info.rayTracingSupport =
       hasExt(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) &&
@@ -1152,7 +1186,9 @@ void VulkanContext::notifyKernelCreated(const std::string &file_name) {
 
 void VulkanContext::printProgressBar(uint32_t current, uint32_t total,
                                      const std::string &kernel_name) {
-  if (!verbose) return;
+  // Note: no verbose guard here. This is only called from
+  // notifyKernelCreated() in non-verbose mode (matching the OpenCL/ROCm
+  // contexts), where the progress bar is the only setup feedback shown.
   const int barWidth = 30;
   float progress = static_cast<float>(current) / total;
   int pos = static_cast<int>(barWidth * progress);

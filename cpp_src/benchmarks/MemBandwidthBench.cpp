@@ -198,10 +198,22 @@ BenchmarkResult MemBandwidthBench::GetResult(uint32_t config_idx) const {
   }
 
   const auto &config = configs[config_idx];
-  // Each thread transfers 32 vec4s (32*16=512 bytes) per iteration, for 32
-  // iterations
-  uint64_t bytes_transferred =
+  // Byte accounting: each thread moves 32 vec4s (32*16 = 512 bytes) per loop
+  // iteration, for 32 iterations (16 KiB per thread per direction). The
+  // membw_* kernels select the access pattern at runtime via the mode
+  // argument, so the reported bytes are mode-aware:
+  //   Read:      reads 512 B/iter only              -> 1x base
+  //   Write:     writes 512 B/iter only             -> 1x base
+  //   ReadWrite: reads AND writes 512 B/iter each   -> 2x base
+  // Note: the Vulkan/ROCm kernels issue the 512 B of loads unconditionally
+  // (the mode is a runtime push constant, so the loads cannot be proven
+  // dead), but their results are only consumed in Read/ReadWrite modes; we
+  // report the intended per-mode traffic above for all backends so results
+  // stay comparable across backends.
+  uint64_t base_bytes =
       (uint64_t)config.workgroupSize * config.numWorkgroups * 512 * 32;
+  uint64_t bytes_transferred =
+      (config.mode == TestMode::ReadWrite) ? base_bytes * 2 : base_bytes;
   return {bytes_transferred, 0.0};
 }
 

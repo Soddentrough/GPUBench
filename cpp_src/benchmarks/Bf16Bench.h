@@ -6,6 +6,14 @@ class Bf16Bench : public IBenchmark {
 public:
   bool IsSupported(const DeviceInfo &info,
                    IComputeContext *context) const override;
+  std::string GetSupportNote() const override {
+    return "HIP toolchain clang emulates bf16 via FP32 (no native "
+           "hip_bfloat162/__hfma2 in headers, scalar-unit codegen); "
+           "Vulkan measures the native rate";
+  }
+  SupportLimitation GetSupportLimitation() const override {
+    return SupportLimitation::kToolchain;
+  }
   void Setup(IComputeContext &context, const std::string &kernel_dir) override;
   void Run(uint32_t config_idx) override;
   void Teardown() override;

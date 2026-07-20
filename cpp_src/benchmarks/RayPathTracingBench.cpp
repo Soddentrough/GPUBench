@@ -294,9 +294,11 @@ void RayPathTracingBench::Teardown() {
 }
 
 BenchmarkResult RayPathTracingBench::GetResult(uint32_t config_idx) const {
-  uint32_t bounces = (config_idx == 0) ? 2 : ((config_idx == 1) ? 4 : 8);
-  // Return raw rays count. Formatter will divide by 1e6 to output MRays/s.
-  return {(uint64_t)rayCount * bounces, results[config_idx]};
+  // Metric is primary-ray throughput: rays launched from the camera per
+  // second. Do NOT multiply by bounce count — counting secondary rays
+  // inverts the scaling (paths terminate early, so total time grows
+  // slower than the bounce count, making throughput appear to increase).
+  return {(uint64_t)rayCount, results[config_idx]};
 }
 
 const char *RayPathTracingBench::GetName() const { return "RayPathTracing"; }

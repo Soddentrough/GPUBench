@@ -5,7 +5,9 @@
 #include "benchmarks/RayPathTracingBench.h"
 #include "core/BenchmarkRunner.h"
 #include "core/ComputeBackendFactory.h"
+#include "core/ResultFormatter.h"
 #include <cstdlib>
+#include <fstream>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -18,6 +20,105 @@
 #ifdef _WIN32
 #include <windows.h>
 #endif
+
+namespace {
+
+// Escape a string for inclusion in a JSON double-quoted value.
+std::string jsonEscape(const std::string &s) {
+  std::string out;
+  out.reserve(s.size() + 8);
+  for (char c : s) {
+    switch (c) {
+    case '"':
+      out += "\\\"";
+      break;
+    case '\\':
+      out += "\\\\";
+      break;
+    case '\n':
+      out += "\\n";
+      break;
+    case '\r':
+      out += "\\r";
+      break;
+    case '\t':
+      out += "\\t";
+      break;
+    default:
+      out += c;
+    }
+  }
+  return out;
+}
+
+// Quote a field for CSV (RFC 4180 style: quote when it contains comma,
+// quote, or newline; double up embedded quotes).
+std::string csvQuote(const std::string &s) {
+  if (s.find_first_of(",\"\n\r") == std::string::npos) {
+    return s;
+  }
+  std::string out = "\"";
+  for (char c : s) {
+    if (c == '"') {
+      out += "\"\"";
+    } else {
+      out += c;
+    }
+  }
+  out += '"';
+  return out;
+}
+
+std::string resultsToJson(const std::vector<ResultData> &results) {
+  std::string out = "[\n";
+  for (size_t i = 0; i < results.size(); ++i) {
+    const ResultData &r = results[i];
+    out += "  {\n";
+    out += "    \"backend\": \"" + jsonEscape(r.backendName) + "\",\n";
+    out += "    \"device\": \"" + jsonEscape(r.deviceName) + "\",\n";
+    out += "    \"device_index\": " + std::to_string(r.deviceIndex) + ",\n";
+    out += "    \"benchmark\": \"" + jsonEscape(r.benchmarkName) + "\",\n";
+    out += "    \"component\": \"" + jsonEscape(r.component) + "\",\n";
+    out += "    \"subcategory\": \"" + jsonEscape(r.subcategory) + "\",\n";
+    out += "    \"metric\": \"" + jsonEscape(r.metric) + "\",\n";
+    out += "    \"operations\": " + std::to_string(r.operations) + ",\n";
+    out += "    \"time_ms\": " + std::to_string(r.time_ms) + ",\n";
+    out += std::string("    \"is_emulated\": ") +
+           (r.isEmulated ? "true" : "false") + ",\n";
+    out += std::string("    \"unsupported\": ") +
+           (r.isUnsupported ? "true" : "false") + ",\n";
+    if (r.isUnsupported) {
+      out += "    \"unsupported_category\": \"" +
+             jsonEscape(r.supportCategory) + "\",\n";
+      out += "    \"unsupported_reason\": \"" + jsonEscape(r.supportNote) +
+             "\",\n";
+    }
+    out += "    \"max_workgroup_size\": " +
+           std::to_string(r.maxWorkGroupSize) + ",\n";
+    out += "    \"config_index\": " + std::to_string(r.configIndex) + "\n";
+    out += (i + 1 < results.size()) ? "  },\n" : "  }\n";
+  }
+  out += "]\n";
+  return out;
+}
+
+std::string resultsToCsv(const std::vector<ResultData> &results) {
+  std::string out =
+      "backend,device,device_index,benchmark,component,subcategory,metric,"
+      "operations,time_ms,is_emulated,max_workgroup_size,config_index\n";
+  for (const ResultData &r : results) {
+    out += csvQuote(r.backendName) + "," + csvQuote(r.deviceName) + "," +
+           std::to_string(r.deviceIndex) + "," + csvQuote(r.benchmarkName) +
+           "," + csvQuote(r.component) + "," + csvQuote(r.subcategory) + "," +
+           csvQuote(r.metric) + "," + std::to_string(r.operations) + "," +
+           std::to_string(r.time_ms) + "," + (r.isEmulated ? "true" : "false") +
+           "," + std::to_string(r.maxWorkGroupSize) + "," +
+           std::to_string(r.configIndex) + "\n";
+  }
+  return out;
+}
+
+} // namespace
 
 int main(int argc, char **argv) {
 #ifdef _WIN32
@@ -67,7 +168,23 @@ int main(int argc, char **argv) {
   app.add_flag("--dump-geometry", dump_geometry,
                "Dump ray tracing geometry to OBJ files");
 
+  std::string output_format;
+  app.add_option("--output", output_format,
+                 "Machine-readable output format: json or csv")
+      ->check(CLI::IsMember({"json", "csv"}));
+
+  std::string output_file;
+  app.add_option("--output-file", output_file,
+                 "Write machine-readable output to this file instead of "
+                 "stdout (requires --output)");
+
   CLI11_PARSE(app, argc, argv);
+
+  if (!output_file.empty() && output_format.empty()) {
+    std::cerr << "Error: --output-file requires --output (json or csv)"
+              << std::endl;
+    return EXIT_FAILURE;
+  }
 
   // Default to device 0 if none specified
   // if (device_indices.empty()) {
@@ -103,17 +220,27 @@ int main(int argc, char **argv) {
     std::vector<std::unique_ptr<IComputeContext>> contexts;
     if (backend_strs.empty() ||
         (backend_strs.size() == 1 && backend_strs[0] == "auto")) {
-      // Default to Vulkan, fall back to OpenCL, then ROCm
-      if (ComputeBackendFactory::isAvailable(ComputeBackend::Vulkan)) {
-        contexts.push_back(
-            ComputeBackendFactory::create(ComputeBackend::Vulkan, verbose, debug));
-      } else if (ComputeBackendFactory::isAvailable(ComputeBackend::OpenCL)) {
-        contexts.push_back(
-            ComputeBackendFactory::create(ComputeBackend::OpenCL, verbose, debug));
-      } else if (ComputeBackendFactory::isAvailable(ComputeBackend::ROCm)) {
-        contexts.push_back(
-            ComputeBackendFactory::create(ComputeBackend::ROCm, verbose, debug));
-      } else {
+      // Default to Vulkan, fall back to OpenCL, then ROCm. A backend can be
+      // compiled in but fail at runtime (missing driver/GPU), so attempt
+      // creation in order and fall through on failure.
+      const ComputeBackend auto_order[] = {
+          ComputeBackend::Vulkan, ComputeBackend::OpenCL, ComputeBackend::ROCm};
+      for (ComputeBackend backend : auto_order) {
+        if (!ComputeBackendFactory::isAvailable(backend)) {
+          continue;
+        }
+        try {
+          contexts.push_back(
+              ComputeBackendFactory::create(backend, verbose, debug));
+          break;
+        } catch (const std::exception &e) {
+          std::cerr << "Backend "
+                    << ComputeBackendFactory::getBackendName(backend)
+                    << " failed to initialize (" << e.what()
+                    << "), trying next backend..." << std::endl;
+        }
+      }
+      if (contexts.empty()) {
         std::cerr << "No compute backend available." << std::endl;
         return EXIT_FAILURE;
       }
@@ -147,25 +274,24 @@ int main(int argc, char **argv) {
     }
 
     if (list_backends) {
-      // This part is a bit of a placeholder as we don't have a formal way
-      // to query data type support without creating a context and checking
-      // benchmarks.
+      // Report both compile-time support and runtime availability (a
+      // lightweight context creation probe) for each backend.
+      auto reportBackend = [](const char *name, ComputeBackend backend) {
+        if (!ComputeBackendFactory::isAvailable(backend)) {
+          std::cout << "- " << name << ": Not Supported (not compiled in)"
+                    << std::endl;
+          return;
+        }
+        bool runtime = ComputeBackendFactory::isRuntimeAvailable(backend);
+        std::cout << "- " << name << ": Supported, runtime "
+                  << (runtime ? "available" : "UNAVAILABLE (driver/GPU "
+                                             "missing or init failed)")
+                  << std::endl;
+      };
       std::cout << "Available backends:" << std::endl;
-      std::cout << "- vulkan: "
-                << (ComputeBackendFactory::isAvailable(ComputeBackend::Vulkan)
-                        ? "Supported"
-                        : "Not Supported")
-                << std::endl;
-      std::cout << "- opencl: "
-                << (ComputeBackendFactory::isAvailable(ComputeBackend::OpenCL)
-                        ? "Supported"
-                        : "Not Supported")
-                << std::endl;
-      std::cout << "- rocm: "
-                << (ComputeBackendFactory::isAvailable(ComputeBackend::ROCm)
-                        ? "Supported"
-                        : "Not Supported")
-                << std::endl;
+      reportBackend("vulkan", ComputeBackend::Vulkan);
+      reportBackend("opencl", ComputeBackend::OpenCL);
+      reportBackend("rocm", ComputeBackend::ROCm);
       return EXIT_SUCCESS;
     }
 
@@ -237,6 +363,42 @@ int main(int argc, char **argv) {
     // We need to keep execution_contexts alive until runner finishes
     BenchmarkRunner runner(context_ptrs, verbose, debug, dump_geometry);
     runner.run(benchmarks_to_run);
+
+    // Warn about requested benchmark names that matched nothing
+    bool hadUnmatched = false;
+    for (const auto &name : runner.getUnmatchedBenchmarks()) {
+      std::cerr << "Warning: no benchmark matched '" << name
+                << "' (see --list-benchmarks)" << std::endl;
+      hadUnmatched = true;
+    }
+
+    // Machine-readable output (in addition to the human report above)
+    if (!output_format.empty()) {
+      std::string payload = (output_format == "json")
+                                ? resultsToJson(runner.getResults())
+                                : resultsToCsv(runner.getResults());
+      if (!output_file.empty()) {
+        std::ofstream ofs(output_file, std::ios::out | std::ios::trunc);
+        if (!ofs) {
+          std::cerr << "Error: could not open output file '" << output_file
+                    << "'" << std::endl;
+          return EXIT_FAILURE;
+        }
+        ofs << payload;
+      } else {
+        std::cout << payload;
+      }
+    }
+
+    // Exit non-zero when nothing ran (bogus benchmark names, out-of-range
+    // device indices, etc.) so scripts can detect failure.
+    if (runner.getNumBenchmarksRun() == 0) {
+      std::cerr << "Error: no benchmarks were run." << std::endl;
+      return EXIT_FAILURE;
+    }
+    if (hadUnmatched) {
+      return EXIT_FAILURE;
+    }
 
     // execution_contexts will be destroyed here, cleaning up resources
 

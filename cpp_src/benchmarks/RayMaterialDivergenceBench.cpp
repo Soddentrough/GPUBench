@@ -249,8 +249,15 @@ void RayMaterialDivergenceBench::buildAS(uint32_t config_idx) {
 
 void RayMaterialDivergenceBench::Run(uint32_t config_idx) {
   VulkanContext *vContext = static_cast<VulkanContext *>(context);
-  
-  buildAS(config_idx);
+
+  // Build the acceleration structure once per config, NOT per timed
+  // iteration. The runner times the whole Run() call, so rebuilding a
+  // 40k-instance TLAS every iteration (~25x the dispatch cost) was
+  // being folded into the reported throughput.
+  if (builtConfigIdx != static_cast<int>(config_idx)) {
+    buildAS(config_idx);
+    builtConfigIdx = static_cast<int>(config_idx);
+  }
   
   vContext->setKernelAS(kernel, 0, (AccelerationStructure)triangleTlas);
   vContext->setKernelArg(kernel, 1, resultBuffer);

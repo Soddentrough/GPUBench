@@ -11,6 +11,15 @@ public:
   }
   bool IsSupported(const DeviceInfo &info,
                    IComputeContext *context = nullptr) const override;
+  std::string GetSupportNote() const override {
+    return "GPU supports FP8 natively, but no shader toolchain on any "
+           "backend can emit it yet: glslang lacks FP8 GLSL for Vulkan "
+           "(no GL_EXT_shader_explicit_arithmetic_types_float8) and the "
+           "HIP FP8 path is emulated (disabled as inaccurate)";
+  }
+  SupportLimitation GetSupportLimitation() const override {
+    return SupportLimitation::kToolchain;
+  }
   void Setup(IComputeContext &context, const std::string &kernel_dir) override;
   void Run(uint32_t config_idx = 0) override;
   void Teardown() override;

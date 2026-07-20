@@ -6,7 +6,16 @@
 
 bool Fp8Bench::IsSupported(const DeviceInfo &info,
                            IComputeContext *context) const {
-  return true; // Supported on all backends via emulated vector paths if native is absent.
+  // The RDNA4 hardware and RADV driver support native FP8
+  // (VK_EXT_shader_float8, including cooperative matrix), but no available
+  // GLSL toolchain can compile FP8 shaders: glslc/glslang do not implement
+  // GL_EXT_shader_explicit_arithmetic_types_float8 (checked against glslang
+  // main). The existing "FP8" shaders are FP16 math (fp8_emulated.comp,
+  // coop_matrix_fp8.comp), so they would report FP16 throughput mislabeled
+  // as FP8. Report UNSUPPORTED instead of publishing misleading numbers.
+  (void)info;
+  (void)context;
+  return false;
 }
 
 void Fp8Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {

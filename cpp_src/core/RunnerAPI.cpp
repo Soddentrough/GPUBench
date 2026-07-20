@@ -9,8 +9,11 @@ std::vector<ResultData> RunBenchmarksAPI(
     const std::vector<uint32_t>& device_indices,
     const std::vector<std::string>& backend_strs,
     bool verbose, bool debug, bool dump_geometry,
-    std::function<void(const ResultData&)> callback) 
+    std::function<void(const ResultData&)> callback)
 {
+    // Never let C++ exceptions cross the cxx FFI boundary into Rust (that
+    // would call std::terminate). On error, return an empty result list.
+    try {
     std::vector<std::unique_ptr<IComputeContext>> contexts;
     if (backend_strs.empty() || (backend_strs.size() == 1 && backend_strs[0] == "auto")) {
         if (ComputeBackendFactory::isAvailable(ComputeBackend::Vulkan)) {
@@ -65,49 +68,86 @@ std::vector<ResultData> RunBenchmarksAPI(
     }
     runner.run(benchmarks_to_run);
     return runner.getResults();
+    } catch (const std::exception& e) {
+        std::cerr << "RunBenchmarksAPI failed: " << e.what() << std::endl;
+        return {};
+    } catch (...) {
+        std::cerr << "RunBenchmarksAPI failed: unknown error" << std::endl;
+        return {};
+    }
 }
 
 std::vector<std::string> GetAvailableHardwareAPI() {
+    // Never let C++ exceptions cross the cxx FFI boundary into Rust. On
+    // error, return whatever was gathered (possibly just the System entry).
     std::vector<std::string> results;
-    
+
     // System
     results.push_back("System|0|System Memory / Host CPU");
 
+    try {
     if (ComputeBackendFactory::isAvailable(ComputeBackend::Vulkan)) {
-        auto ctx = ComputeBackendFactory::create(ComputeBackend::Vulkan, false, false);
-        if (ctx) {
-            uint32_t i = 0;
-            for (const auto& dev : ctx->getDevices()) {
-                results.push_back("vulkan|" + std::to_string(i) + "|" + dev.name);
-                i++;
+        try {
+            auto ctx = ComputeBackendFactory::create(ComputeBackend::Vulkan, false, false);
+            if (ctx) {
+                uint32_t i = 0;
+                for (const auto& dev : ctx->getDevices()) {
+                    results.push_back("vulkan|" + std::to_string(i) + "|" + dev.name);
+                    i++;
+                }
             }
+        } catch (...) {
+            // Vulkan compiled in but not usable at runtime; skip it
         }
     }
     if (ComputeBackendFactory::isAvailable(ComputeBackend::OpenCL)) {
-        auto ctx = ComputeBackendFactory::create(ComputeBackend::OpenCL, false, false);
-        if (ctx) {
-            uint32_t i = 0;
-            for (const auto& dev : ctx->getDevices()) {
-                results.push_back("opencl|" + std::to_string(i) + "|" + dev.name);
-                i++;
+        try {
+            auto ctx = ComputeBackendFactory::create(ComputeBackend::OpenCL, false, false);
+            if (ctx) {
+                uint32_t i = 0;
+                for (const auto& dev : ctx->getDevices()) {
+                    results.push_back("opencl|" + std::to_string(i) + "|" + dev.name);
+                    i++;
+                }
             }
+        } catch (...) {
+            // OpenCL compiled in but not usable at runtime; skip it
         }
     }
     if (ComputeBackendFactory::isAvailable(ComputeBackend::ROCm)) {
-        auto ctx = ComputeBackendFactory::create(ComputeBackend::ROCm, false, false);
-        if (ctx) {
-            uint32_t i = 0;
-            for (const auto& dev : ctx->getDevices()) {
-                results.push_back("rocm|" + std::to_string(i) + "|" + dev.name);
-                i++;
+        try {
+            auto ctx = ComputeBackendFactory::create(ComputeBackend::ROCm, false, false);
+            if (ctx) {
+                uint32_t i = 0;
+                for (const auto& dev : ctx->getDevices()) {
+                    results.push_back("rocm|" + std::to_string(i) + "|" + dev.name);
+                    i++;
+                }
             }
+        } catch (...) {
+            // ROCm compiled in but not usable at runtime; skip it
         }
+    }
+    } catch (const std::exception& e) {
+        std::cerr << "GetAvailableHardwareAPI failed: " << e.what() << std::endl;
+    } catch (...) {
+        std::cerr << "GetAvailableHardwareAPI failed: unknown error" << std::endl;
     }
     return results;
 }
 
 std::vector<std::string> GetAvailableBenchmarksAPI() {
-    std::vector<IComputeContext*> dummy;
-    BenchmarkRunner runner(dummy, false, false, false);
-    return runner.getAvailableBenchmarks();
+    // Never let C++ exceptions cross the cxx FFI boundary into Rust. On
+    // error, return an empty list.
+    try {
+        std::vector<IComputeContext*> dummy;
+        BenchmarkRunner runner(dummy, false, false, false);
+        return runner.getAvailableBenchmarks();
+    } catch (const std::exception& e) {
+        std::cerr << "GetAvailableBenchmarksAPI failed: " << e.what() << std::endl;
+        return {};
+    } catch (...) {
+        std::cerr << "GetAvailableBenchmarksAPI failed: unknown error" << std::endl;
+        return {};
+    }
 }

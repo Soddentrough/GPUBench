@@ -224,7 +224,8 @@ void ROCmContext::enumerateDevices() {
 
       info.fp8Support = (is_cdna3 || is_rdna3 || is_rdna4);
       info.fp6Support = false;
-      info.fp4Support = is_rdna4;
+      // RDNA4 (gfx12) has no FP4 hardware; FP4 arrived with CDNA4 (gfx950).
+      info.fp4Support = false;
       info.fp64Support = true;
       info.fp16Support = true;
       info.bf16Support = true;
@@ -388,9 +389,10 @@ ComputeKernel ROCmContext::createKernel(const std::string &file_name,
 
         std::string offload_arch =
             "--offload-arch=" + devices[selectedDeviceIndex].archName;
-        const char *opts[] = {offload_arch.c_str(), "-I/usr/include",
-                              "-I/opt/rocm/include", "-I/usr/local/include"};
-        hiprtcResult compileResult = f_hiprtcCompileProgram(prog, 4, opts);
+        const char *opts[] = {offload_arch.c_str(), "-O3",
+                              "-I/usr/include", "-I/opt/rocm/include",
+                              "-I/usr/local/include"};
+        hiprtcResult compileResult = f_hiprtcCompileProgram(prog, 5, opts);
 
         if (compileResult != HIPRTC_SUCCESS) {
           std::cout << "HIPRTC compilation failed with code: " << compileResult

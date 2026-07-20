@@ -14,6 +14,15 @@ struct ResultData {
   uint64_t operations;
   double time_ms;
   bool isEmulated;
+  // True when the benchmark was selected but is not supported on this
+  // device/backend (e.g. missing hardware capability). Such entries carry
+  // no measurement and are displayed as "UNSUPPORTED" in the human report.
+  bool isUnsupported = false;
+  // Human-readable explanation when isUnsupported is true (may be empty).
+  std::string supportNote;
+  // Limitation category when isUnsupported is true: "hardware", "api",
+  // "toolchain", or "" (see IBenchmark::SupportLimitation).
+  std::string supportCategory;
   uint32_t maxWorkGroupSize;
   uint32_t deviceIndex;
   uint32_t configIndex;

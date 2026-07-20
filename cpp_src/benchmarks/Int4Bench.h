@@ -11,6 +11,14 @@ public:
   }
   bool IsSupported(const DeviceInfo &info,
                    IComputeContext *context = nullptr) const override;
+  std::string GetSupportNote() const override {
+    return "RDNA4 has INT4 matrix hardware, but it is not expressible: "
+           "Vulkan cooperative matrix has no 4-bit component type, and "
+           "HIP/OpenCL INT4 paths are emulated (disabled as inaccurate)";
+  }
+  SupportLimitation GetSupportLimitation() const override {
+    return SupportLimitation::kApi;
+  }
   void Setup(IComputeContext &context, const std::string &kernel_dir) override;
   void Run(uint32_t config_idx = 0) override;
   void Teardown() override;

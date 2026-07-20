@@ -25,6 +25,22 @@ public:
   virtual void Teardown() = 0;
   virtual BenchmarkResult GetResult(uint32_t config_idx = 0) const = 0;
   virtual bool IsEmulated(uint32_t config_idx = 0) const { return false; }
+  // Why a benchmark is unsupported (only meaningful when IsSupported()
+  // returns false). Used to clearly distinguish hardware limitations from
+  // API/toolchain limitations in reports.
+  enum class SupportLimitation {
+    kNone,      // supported, or reason unknown
+    kHardware,  // the GPU physically lacks the capability
+    kApi,       // the GPU has it, but the compute API cannot express it
+    kToolchain, // GPU + API support it, but no shader compiler can emit it
+  };
+  virtual SupportLimitation GetSupportLimitation() const {
+    return SupportLimitation::kNone;
+  }
+  // Optional human-readable note explaining a capability limitation (shown
+  // by --list-benchmarks and useful when IsSupported() returns false).
+  // Empty string means no note.
+  virtual std::string GetSupportNote() const { return ""; }
   virtual uint32_t GetNumConfigs() const { return 1; }
   virtual std::string GetConfigName(uint32_t config_idx) const { return ""; }
   virtual uint32_t GetExpectedKernelCount() const { return 1; }

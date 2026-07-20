@@ -6,7 +6,13 @@
 
 bool Int4Bench::IsSupported(const DeviceInfo &info,
                             IComputeContext *context) const {
-  return info.int4Support;
+  // RDNA4 has INT4 matrix hardware, but it cannot be expressed on any
+  // current backend: Vulkan cooperative matrix has no 4-bit component
+  // type, and the HIP/OpenCL INT4 paths are emulated (disabled to avoid
+  // inaccurate results). Report UNSUPPORTED everywhere.
+  (void)info;
+  (void)context;
+  return false;
 }
 
 void Int4Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {

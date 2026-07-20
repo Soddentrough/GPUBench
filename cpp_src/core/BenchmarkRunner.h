@@ -21,12 +21,23 @@ public:
   std::vector<std::string> getAvailableBenchmarks() const;
   const std::vector<ResultData>& getResults() const;
 
+  // Names passed to run() that did not match any benchmark (populated by
+  // the most recent run() call).
+  const std::vector<std::string> &getUnmatchedBenchmarks() const {
+    return unmatchedBenchmarks;
+  }
+  // Number of benchmark configs that produced a result in the most recent
+  // run() call.
+  uint32_t getNumBenchmarksRun() const { return numBenchmarksRun; }
+
 private:
   void discoverBenchmarks();
 
   std::vector<IComputeContext *> contexts;
   std::vector<std::unique_ptr<IBenchmark>> benchmarks;
   std::unique_ptr<ResultFormatter> formatter;
+  std::vector<std::string> unmatchedBenchmarks;
+  uint32_t numBenchmarksRun = 0;
   bool verbose;
   bool debug;
   bool dumpGeometry;
