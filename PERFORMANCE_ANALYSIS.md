@@ -224,10 +224,12 @@ The benchmark now provides realistic and meaningful performance measurements for
 - L0/L1/L2/L3 cache latency: FIXED (L0 was 0.00 ns — the old kernel did
   integer ALU ops with no memory reads; now a real 1M-step pointer chase,
   measuring ~14/21/44/217 ns).
-- Memory bandwidth (~64% of Vulkan, e.g. Read 399 vs 622 GB/s): the HIP
-  kernel is structurally identical to the Vulkan shader and grids match;
-  the gap is hipcc/RADV codegen quality for the masked streaming access
-  pattern. Known issue, not yet resolved. .co kernels are now built -O3.
+- Memory bandwidth: FIXED. The HIP membw kernels accumulated only the .x
+  lane of each float4 load, which let LLVM narrow every 128-bit load into
+  b96+b32 pairs (half VMEM throughput). Accumulating full vectors restores
+  single global_load_b128 per float4: Read 634/633/632 GB/s (was
+  397/362/348), now at/above the Vulkan numbers. Write and R/W also
+  improved substantially. .co kernels are now built -O3.
 
 ## Cache Latency: Vulkan vs ROCm Are Different Hardware Paths (2026-07)
 
