@@ -93,6 +93,16 @@ impl VulkanContext {
                 continue;
             }
             filtered_devices.push(*pdevice);
+
+            // Query actual feature support (Vulkan 1.1 core features + Vulkan 1.2
+            // shaderFloat16/shaderInt8) instead of assuming everything is available.
+            let mut features12 = vk::PhysicalDeviceVulkan12Features::default();
+            let mut features2 = vk::PhysicalDeviceFeatures2::default().push_next(&mut features12);
+            unsafe { instance.get_physical_device_features2(*pdevice, &mut features2); }
+            let fp64_support = features2.features.shader_float64 == vk::TRUE;
+            let fp16_support = features12.shader_float16 == vk::TRUE;
+            let int8_support = features12.shader_int8 == vk::TRUE;
+
             let ext_props = unsafe { instance.enumerate_device_extension_properties(*pdevice).unwrap_or_default() };
             let mut rt_support = false;
             for ext in ext_props {
@@ -109,9 +119,9 @@ impl VulkanContext {
                 max_compute_units: 0, 
                 max_work_group_size: props.limits.max_compute_work_group_invocations,
                 ray_tracing_support: rt_support,
-                fp64_support: true,
-                fp16_support: true,
-                int8_support: true,
+                fp64_support,
+                fp16_support,
+                int8_support,
             });
         }
 
@@ -490,7 +500,7 @@ impl ComputeContext for VulkanContext {
         let push_ranges = [vk::PushConstantRange::default()
             .stage_flags(vk::ShaderStageFlags::COMPUTE)
             .offset(0)
-            .size(8)]; // allocate 8 bytes of push constants
+            .size(128)]; // matches the 128-byte padded push-constant buffer in set_kernel_arg_push_constant
 
         let pipeline_layout_info = vk::PipelineLayoutCreateInfo::default()
             .set_layouts(std::slice::from_ref(&desc_set_layout))
@@ -833,22 +843,13 @@ impl ComputeContext for VulkanContext {
             
             device.cmd_dispatch(cb, grid_x, grid_y, grid_z);
             
+            // Barrier to make shader writes visible after the dispatch completes.
+            // NOTE: exactly one dispatch is recorded per submit -- op counts in the
+            // benchmarks assume a single kernel execution per dispatch() call.
             let memory_barrier = vk::MemoryBarrier::default()
                 .src_access_mask(vk::AccessFlags::MEMORY_WRITE | vk::AccessFlags::MEMORY_READ)
                 .dst_access_mask(vk::AccessFlags::MEMORY_WRITE | vk::AccessFlags::MEMORY_READ);
                 
-            device.cmd_pipeline_barrier(
-                cb,
-                vk::PipelineStageFlags::COMPUTE_SHADER,
-                vk::PipelineStageFlags::COMPUTE_SHADER,
-                vk::DependencyFlags::empty(),
-                std::slice::from_ref(&memory_barrier),
-                &[],
-                &[]
-            );
-            
-            device.cmd_dispatch(cb, grid_x, grid_y, grid_z);
-            
             device.cmd_pipeline_barrier(
                 cb,
                 vk::PipelineStageFlags::COMPUTE_SHADER,

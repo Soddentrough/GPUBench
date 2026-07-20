@@ -3,6 +3,17 @@ use crate::context::{ComputeBuffer, ComputeContext, ComputeKernel};
 use std::process::Command;
 use std::time::Instant;
 
+// Single source of truth for the grid size: used by BOTH the dispatch and the
+// op-count math so they can never drift apart. Matches the C++ Fp32Bench.
+const NUM_WORKGROUPS: u32 = 8192;
+const WORKGROUP_SIZE: u32 = 64;
+// Number of timed dispatch iterations inside run().
+const NUM_ITERATIONS: u64 = 5;
+// The Vulkan shader loops 16384 FMA iterations; each iteration is 32 vec4 FMAs
+// = 32 * 4 * 2 = 256 FP32 ops.
+const SHADER_LOOP_ITERS: u64 = 16384;
+const OPS_PER_ITER: u64 = 256;
+
 pub struct Fp32Bench {
     kernel: ComputeKernel,
     buffer: ComputeBuffer,
@@ -23,7 +34,7 @@ impl Fp32Bench {
 
 impl Benchmark for Fp32Bench {
     fn setup(&mut self, context: &mut dyn ComputeContext, kernel_dir: &str) -> Result<(), String> {
-        self.num_elements = 1024 * 64; // 65536
+        self.num_elements = NUM_WORKGROUPS * WORKGROUP_SIZE; // 524288
         let buffer_size = 8 * 1024 * 1024; // 8MB buffer to prevent out of bounds
         self.buffer = context.create_buffer(buffer_size, None)?;
 
@@ -45,48 +56,45 @@ impl Benchmark for Fp32Bench {
 
         let spv_bytes = std::fs::read(&spv_path).map_err(|e| e.to_string())?;
         self.kernel = context.create_kernel(&spv_bytes, "main", 1)?;
+
+        // All kernel argument setup happens here, before the timed region,
+        // matching the C++ Setup/Run split.
         context.set_kernel_arg_buffer(self.kernel, 0, self.buffer)?;
+
+        // Push constants: [float multiplier, uint numElements] -> 8 bytes total.
+        // multiplier = 1.0001 (not 1.0) so the FMA chain cannot be constant-folded
+        // by the shader compiler, matching the C++ path.
+        let multiplier: f32 = 1.0001;
+        let mut pc = [0u8; 8];
+        pc[0..4].copy_from_slice(&multiplier.to_le_bytes());
+        pc[4..8].copy_from_slice(&self.num_elements.to_le_bytes());
+        context.set_kernel_arg_push_constant(self.kernel, &pc)?;
 
         Ok(())
     }
 
     fn run(&mut self, context: &mut dyn ComputeContext, _config_idx: u32) -> Result<(), String> {
-        let multiplier: f32 = 1.0001;
-        // In our pure Rust, we will implement push constants using set_kernel_arg_push_constant
-        // For simplicity right now, we can pass it if we implemented it, or ignore if the shader doesn't strictly need it to run the benchmark loops.
-        // Actually the cpp benchmark sets arg 1 to multiplier and arg 2 to numElements.
-        // In Vulkan, args 1 and 2 are usually mapped to push constants if they are not buffers.
-        
-        // Push constants: [float multiplier, uint numElements] -> 8 bytes total
-        let mut pc = [0u8; 8];
-        let multiplier: f32 = 1.0;
-        pc[0..4].copy_from_slice(&multiplier.to_le_bytes());
-        pc[4..8].copy_from_slice(&self.num_elements.to_le_bytes());
-        println!("PC bytes: {:?}", pc);
-        context.set_kernel_arg_push_constant(self.kernel, &pc)?;
-
-        // Run the benchmark
+        // Timed region: dispatches only. Buffer creation and kernel argument
+        // setup were already done in setup().
         let start = Instant::now();
-        
-        // The original cpp code dispatched 8192, 1, 1 but iterated outside.
-        // Wait, the cpp code's `Run` is just 1 dispatch?
-        // Ah, the CLI runner orchestrates the `Run` iteration loop.
-        for iter in 0..5 {
-            let temp_buffer = context.create_buffer(8 * 1024 * 1024, None)?;
-            context.set_kernel_arg_buffer(self.kernel, 0, temp_buffer)?;
-            context.dispatch(self.kernel, 1024, 1, 1, 64, 1, 1)?;
+
+        for _ in 0..NUM_ITERATIONS {
+            context.dispatch(self.kernel, NUM_WORKGROUPS, 1, 1, WORKGROUP_SIZE, 1, 1)?;
             context.wait_idle()?;
         }
-        
+
         self.elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
         Ok(())
     }
 
     fn get_result(&self, _config_idx: u32) -> (u64, f64) {
-        // 32 vec4 FMAs per iteration = 32 * 4 * 2 = 256 FP32 operations per iteration
-        // Vulkan kernel loops 16384 iters
-        let iters: u64 = 16384; 
-        let num_ops = iters * 256 * 8192 * 64;
+        // NUM_ITERATIONS dispatches, each running SHADER_LOOP_ITERS iterations of
+        // OPS_PER_ITER FP32 ops on NUM_WORKGROUPS * WORKGROUP_SIZE threads.
+        let num_ops = NUM_ITERATIONS
+            * SHADER_LOOP_ITERS
+            * OPS_PER_ITER
+            * NUM_WORKGROUPS as u64
+            * WORKGROUP_SIZE as u64;
         (num_ops, self.elapsed_ms)
     }
 

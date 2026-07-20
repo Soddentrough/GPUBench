@@ -29,7 +29,11 @@ impl Benchmark for MemBwBench {
         let buffer_size = 8 * 1024 * 1024;
         self.num_elements = (buffer_size / 16) as u32; // Number of vec4s
         
+        // shaders/membw.comp declares two SSBOs: input (binding 0) and output
+        // (binding 1). Both must be allocated and bound or the descriptor set is
+        // incomplete and the dispatch is invalid.
         self.buffer_in = context.create_buffer(buffer_size, None)?;
+        self.buffer_out = context.create_buffer(buffer_size, None)?;
 
         let glsl_path = format!("{}/vulkan/membw.comp", kernel_dir);
         let spv_path = format!("{}/vulkan/membw.comp.spv", kernel_dir);
@@ -47,14 +51,9 @@ impl Benchmark for MemBwBench {
         }
 
         let spv_bytes = std::fs::read(&spv_path).map_err(|e| e.to_string())?;
-        self.kernel = context.create_kernel(&spv_bytes, "main", 1)?;
+        self.kernel = context.create_kernel(&spv_bytes, "main", 2)?;
         context.set_kernel_arg_buffer(self.kernel, 0, self.buffer_in)?;
-        
-        let mut pc = [0u8; 8];
-        let multiplier: f32 = 1.0;
-        pc[0..4].copy_from_slice(&multiplier.to_le_bytes());
-        pc[4..8].copy_from_slice(&self.num_elements.to_le_bytes());
-        context.set_kernel_arg_push_constant(self.kernel, &pc)?;
+        context.set_kernel_arg_buffer(self.kernel, 1, self.buffer_out)?;
 
         Ok(())
     }
@@ -78,7 +77,8 @@ impl Benchmark for MemBwBench {
     }
 
     fn get_result(&self, _config_idx: u32) -> (u64, f64) {
-        // Read 256MB and write 256MB = 512MB total traffic
+        // Each dispatch reads an 8 MB input buffer and writes an 8 MB output
+        // buffer = 16 MB total traffic per dispatch.
         let bytes_transferred = (self.num_elements as u64) * 16 * 2;
         
         // Return bytes as operations. The GUI expects GB/s, so we must calculate bandwidth.

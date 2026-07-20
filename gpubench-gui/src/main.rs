@@ -134,7 +134,38 @@ impl iced::widget::button::StyleSheet for GroupPill {
     }
 }
 
+/// Candidate kernel directories in priority order (pure, unit-testable):
+/// 1. exe-relative install layout: <exe_dir>/../share/gpubench/kernels
+/// 2. dev-tree layout: <crate>/../kernels (path baked at compile time,
+///    but only checked for existence at runtime)
+fn kernel_path_candidates() -> Vec<std::path::PathBuf> {
+    let mut candidates = Vec::new();
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(exe_dir) = exe.parent() {
+            candidates.push(exe_dir.join("../share/gpubench/kernels"));
+        }
+    }
+    candidates.push(std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../kernels")));
+    candidates
+}
+
+/// Resolve GPUBENCH_KERNEL_PATH once at startup.
+/// (a) If the user already set it, leave it alone.
+/// (b/c) Otherwise set it to the first candidate that exists at runtime.
+/// (d) If no candidate exists, set nothing and let the C++ core's own search handle it.
+fn resolve_kernel_path() {
+    if std::env::var_os("GPUBENCH_KERNEL_PATH").is_some() {
+        return;
+    }
+    if let Some(candidate) = kernel_path_candidates().into_iter().find(|p| p.exists()) {
+        unsafe {
+            std::env::set_var("GPUBENCH_KERNEL_PATH", candidate);
+        }
+    }
+}
+
 pub fn main() -> iced::Result {
+    resolve_kernel_path();
     GPUBenchApp::run(Settings {
         antialiasing: true,
         window: iced::window::Settings {
@@ -174,6 +205,39 @@ fn clean_device_name(raw: &str) -> String {
     cleaned.trim().to_string()
 }
 
+/// Deduplicated, uppercased backend names parsed from the "api|index|name"
+/// hardware strings, so the selector only offers APIs that actually exist.
+fn available_backends(hw: &[String]) -> Vec<String> {
+    let mut backends: Vec<String> = Vec::new();
+    for h in hw {
+        let parts: Vec<&str> = h.split('|').collect();
+        if parts.len() == 3 {
+            let api = parts[0].to_uppercase();
+            if !backends.contains(&api) {
+                backends.push(api);
+            }
+        }
+    }
+    backends
+}
+
+/// Display strings ("index: name") for the devices whose API matches the
+/// selected backend (case-insensitive, since display names are uppercased).
+fn devices_for_backend(hw: &[String], selected_backend: &str) -> Vec<String> {
+    let mut devices = Vec::new();
+    for h in hw {
+        let parts: Vec<&str> = h.split('|').collect();
+        if parts.len() == 3 && parts[0].eq_ignore_ascii_case(selected_backend) {
+            let cleaned = clean_device_name(parts[2]);
+            devices.push(format!("{}: {}", parts[1], cleaned));
+        }
+    }
+    if devices.is_empty() {
+        devices.push("0: Default Device".to_string());
+    }
+    devices
+}
+
 enum AppState {
     Setup {
         available_backends: Vec<String>,
@@ -192,6 +256,7 @@ enum AppState {
     Complete {
         total_benchmarks: usize,
     },
+    Error(String),
 }
 
 struct GPUBenchApp {
@@ -206,8 +271,10 @@ struct GPUBenchApp {
     available_tests: Vec<String>,
     
     // Metrics
+    // TODO(refactor): these per-metric fields should be collapsed into a
+    // HashMap keyed by (component, subcategory/config) -- deferred to keep
+    // this diff reviewable.
     gpu_bw: f32,
-    cpu_bw: f32,
     
     sys_mem_bw: f32,
     sys_mem_bw_single: f32,
@@ -246,6 +313,7 @@ enum Message {
     TestGroupSelected(String),
     StartBenchmarks,
     BenchmarksComplete,
+    BenchmarksFailed(String),
     Tick,
     SaveResults,
     Retest,
@@ -258,30 +326,15 @@ impl Application for GPUBenchApp {
     type Flags = ();
 
     fn new(_flags: ()) -> (Self, Command<Message>) {
-        unsafe {
-            std::env::set_var("GPUBENCH_KERNEL_PATH", concat!(env!("CARGO_MANIFEST_DIR"), "/../kernels"));
-        }
         let tests = get_available_benchmarks();
         
-        let backends = vec!["VULKAN".to_string(), "ROCm".to_string()];
-        let selected_backend = "VULKAN".to_string();
-        
         let hw = gpubench_core::get_available_hardware();
-        let mut devices = Vec::new();
-        for h in &hw {
-            let parts: Vec<&str> = h.split('|').collect();
-            if parts.len() == 3 {
-                let api = parts[0];
-                let is_match = if selected_backend == "VULKAN" { api == "vulkan" } else { api == "opencl" };
-                if is_match {
-                    let cleaned = clean_device_name(parts[2]);
-                    devices.push(format!("{}: {}", parts[1], cleaned));
-                }
-            }
+        let mut backends = available_backends(&hw);
+        if backends.is_empty() {
+            backends.push("VULKAN".to_string());
         }
-        if devices.is_empty() {
-            devices.push("0: Default Device".to_string());
-        }
+        let selected_backend = backends[0].clone();
+        let devices = devices_for_backend(&hw, &selected_backend);
 
         let selected_device = devices[0].clone();
         
@@ -308,7 +361,6 @@ impl Application for GPUBenchApp {
                 current_benchmark: String::from("Waiting to start..."),
                 current_device: String::from(""),
                 gpu_bw: 0.0,
-                cpu_bw: 0.0,
                 sys_mem_bw: 0.0,
                 sys_mem_bw_single: 0.0,
                 sys_mem_lat: 0.0,
@@ -340,7 +392,7 @@ impl Application for GPUBenchApp {
     }
 
     fn title(&self) -> String {
-        String::from("BenchmarkX 2026 - Pro Edition")
+        String::from("GPUBench")
     }
 
     fn update(&mut self, message: Message) -> Command<Message> {
@@ -351,21 +403,7 @@ impl Application for GPUBenchApp {
                     self.selected_backend = backend.clone();
                     
                     let hw = gpubench_core::get_available_hardware();
-                    let mut new_devices = Vec::new();
-                    for h in &hw {
-                        let parts: Vec<&str> = h.split('|').collect();
-                        if parts.len() == 3 {
-                            let api = parts[0];
-                            let is_match = if *selected_backend == "VULKAN" { api == "vulkan" } else { api == "opencl" };
-                            if is_match {
-                                let cleaned = clean_device_name(parts[2]);
-                                new_devices.push(format!("{}: {}", parts[1], cleaned));
-                            }
-                        }
-                    }
-                    if new_devices.is_empty() {
-                        new_devices.push("0: Default Device".to_string());
-                    }
+                    let new_devices = devices_for_backend(&hw, selected_backend);
                     *available_devices = new_devices.clone();
                     self.available_devices = new_devices.clone();
                     *selected_device = new_devices[0].clone();
@@ -479,7 +517,7 @@ impl Application for GPUBenchApp {
                         Command::perform(
                             async move {
                                 tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-                                let res = tokio::task::spawn_blocking(move || {
+                                tokio::task::spawn_blocking(move || {
                                     run_benchmarks(
                                         &tests_to_run,
                                         &vec![d_idx],
@@ -489,9 +527,14 @@ impl Application for GPUBenchApp {
                                         false,
                                         progress_callback
                                     )
-                                }).await;
+                                }).await
                             },
-                            |_| Message::BenchmarksComplete
+                            |res| match res {
+                                Ok(_) => Message::BenchmarksComplete,
+                                Err(e) => Message::BenchmarksFailed(
+                                    format!("Benchmark worker task failed: {}", e)
+                                ),
+                            }
                         )
                     ]);
                 }
@@ -513,7 +556,9 @@ impl Application for GPUBenchApp {
 
                 if let AppState::Running { completed_suites, .. } = &mut self.state {
                     for res in &results_to_process {
-                        completed_suites.insert(res.component.clone());
+                        // Key on (component, benchmark) so suites that share a
+                        // component name (e.g. all "Ray Tracing" tests) count separately.
+                        completed_suites.insert(format!("{}|{}", res.component, res.benchmarkName));
                     }
                 }
                 
@@ -533,7 +578,7 @@ impl Application for GPUBenchApp {
                 if let AppState::Running { ref mut progress_receiver, ref mut completed_suites, .. } = self.state {
                     if let Some(rx) = progress_receiver.take() {
                         while let Ok(res) = rx.try_recv() {
-                            completed_suites.insert(res.component.clone());
+                            completed_suites.insert(format!("{}|{}", res.component, res.benchmarkName));
                             results_to_process.push(res);
                         }
                     }
@@ -549,6 +594,11 @@ impl Application for GPUBenchApp {
                 self.current_benchmark = String::from("");
                 return Command::none();
             }
+            Message::BenchmarksFailed(err) => {
+                self.state = AppState::Error(err);
+                self.current_benchmark = String::from("");
+                return Command::none();
+            }
             Message::SaveResults => {
                 if matches!(self.state, AppState::Complete { .. }) {
                     if let Some(path) = rfd::FileDialog::new()
@@ -558,7 +608,7 @@ impl Application for GPUBenchApp {
                         
                         let data = serde_json::json!({
                             "hardware": self.current_device,
-                            "compute_api": "Vulkan",
+                            "compute_api": self.selected_backend,
                             "results": {
                                 "compute": {
                                     "fp64_tflops": self.gpu_fp64,
@@ -576,6 +626,10 @@ impl Application for GPUBenchApp {
                                 },
                                 "memory": {
                                     "bandwidth_gbps": self.gpu_bw,
+                                },
+                                "system_memory": {
+                                    "bandwidth_gbps": self.sys_mem_bw,
+                                    "latency_ns": self.sys_mem_lat,
                                 },
                                 "ray_tracing": {
                                     "any_hit": self.gpu_rt_anyhit,
@@ -609,7 +663,6 @@ impl Application for GPUBenchApp {
                 self.current_benchmark = String::from("Waiting to start...");
                 self.current_device = String::from("");
                 self.gpu_bw = 0.0;
-                self.cpu_bw = 0.0;
                 self.sys_mem_bw = 0.0;
                 self.sys_mem_bw_single = 0.0;
                 self.sys_mem_lat = 0.0;
@@ -646,6 +699,7 @@ impl Application for GPUBenchApp {
             AppState::Setup { .. } => ("SYSTEM IDLE", color!(0x555566)),
             AppState::Running { .. } => ("ENGAGED", color!(0x00FF88)),
             AppState::Complete { .. } => ("COMPLETE", color!(0x00E5FF)),
+            AppState::Error(_) => ("ERROR", color!(0xFF3366)),
         };
 
         // Header integrated into sidebars
@@ -686,8 +740,7 @@ impl Application for GPUBenchApp {
 
                 let sidebar = container(
                     column![
-                        text("BENCHMARK").size(28).style(color!(0xFFFFFF)),
-                        text("X PRO").size(28).style(color!(0x00E5FF)),
+                        text("GPUBENCH").size(28).style(color!(0x00E5FF)),
                         Space::with_height(50),
                         text("TARGET HARDWARE").size(11).style(color!(0x8888AA)),
                         Space::with_height(10),
@@ -806,6 +859,69 @@ impl Application for GPUBenchApp {
                             ].spacing(20)
                         ]
                     ).height(Length::Fill)
+                )
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .padding(20)
+                .style(|_t: &Theme| container::Appearance {
+                    background: Some(Background::Color(color!(0x111116))),
+                    ..Default::default()
+                });
+
+                row![sidebar, main_area].width(Length::Fill).height(Length::Fill).into()
+            }
+            AppState::Error(err) => {
+                let retry_btn = button(
+                    container(text("RUN NEW TEST").size(14).style(iced::theme::Text::Color(color!(0xFFFFFF))))
+                        .width(Length::Fill)
+                        .center_x()
+                )
+                .width(Length::Fill)
+                .padding([14, 0])
+                .on_press(Message::Retest)
+                .style(iced::theme::Button::Custom(Box::new(PrimaryGradientButton)));
+
+                let sidebar = container(
+                    column![
+                        text("GPUBENCH").size(28).style(color!(0x00E5FF)),
+                        Space::with_height(50),
+                        text("STATUS").size(11).style(color!(0x8888AA)),
+                        Space::with_height(10),
+                        text(status_text).size(22).style(status_color),
+                        Space::with_height(Length::Fill),
+                        retry_btn
+                    ]
+                )
+                .width(Length::Fixed(240.0))
+                .height(Length::Fill)
+                .padding(20)
+                .style(|_t: &Theme| container::Appearance {
+                    background: Some(Background::Color(color!(0x0A0A0F))),
+                    border: Border { color: color!(0x1A1A24), width: 1.0, ..Default::default() },
+                    ..Default::default()
+                });
+
+                let error_panel = container(
+                    column![
+                        text("BENCHMARK RUN FAILED").size(24).style(color!(0xFF3366)),
+                        Space::with_height(20),
+                        text(err).size(14).style(color!(0xDDDDDD)),
+                        Space::with_height(30),
+                        text("Use RUN NEW TEST to return to the configuration screen.").size(12).style(color!(0x8888AA)),
+                    ]
+                    .width(Length::Fill)
+                )
+                .width(Length::Fill)
+                .padding(20)
+                .style(|_t: &Theme| container::Appearance {
+                    background: Some(Background::Color(color!(0x12121A))),
+                    border: Border { radius: 16.0.into(), width: 1.0, color: color!(0xFF3366, 0.4) },
+                    ..Default::default()
+                });
+
+                let main_area = container(
+                    column![error_panel]
+                        .width(Length::Fill)
                 )
                 .width(Length::Fill)
                 .height(Length::Fill)
@@ -971,8 +1087,7 @@ impl Application for GPUBenchApp {
 
                 let sidebar = container(
                     column![
-                        text("BENCHMARK").size(28).style(color!(0xFFFFFF)),
-                        text("X PRO").size(28).style(color!(0x00E5FF)),
+                        text("GPUBENCH").size(28).style(color!(0x00E5FF)),
                         Space::with_height(50),
                         text("TARGET HARDWARE").size(11).style(color!(0x8888AA)),
                         Space::with_height(10),
@@ -1055,9 +1170,8 @@ impl GPUBenchApp {
                     if self.sys_mem_lat == 0.0 { self.sys_mem_lat = value; }
                     else { self.sys_mem_lat = self.sys_mem_lat.min(value); }
                 }
-            } else {
-                self.cpu_bw = self.cpu_bw.max(value);
             }
+            // Non-"System" native results have no dedicated display metric.
         } else {
             match res.component.as_str() {
                 "Memory" => {

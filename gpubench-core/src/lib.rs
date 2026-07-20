@@ -138,6 +138,136 @@ pub fn run_benchmarks(
     }).collect()
 }
 
+/// Compute the display value and unit for a result, mirroring the C++
+/// ResultFormatter logic.
+fn format_result_value(res: &ResultData) -> (f64, String) {
+    let ops = res.operations as f64;
+    let time_s = res.time_ms / 1000.0;
+    match res.metric.as_str() {
+        "TFLOPS" | "TOPS" => (ops / time_s / 1e12, res.metric.clone()),
+        "ns" => {
+            let v = if res.operations > 0 { res.time_ms * 1e6 / ops } else { 0.0 };
+            (v, "ns".to_string())
+        }
+        "GB/s" => (ops / time_s / 1e9, "GB/s".to_string()),
+        other => (ops / time_s, other.to_string()),
+    }
+}
+
+fn print_results_table(results: &[ResultData]) {
+    if results.is_empty() {
+        println!("No results.");
+        return;
+    }
+
+    let rows: Vec<(String, String, String, String)> = results
+        .iter()
+        .map(|r| {
+            let (value, unit) = format_result_value(r);
+            (
+                r.benchmarkName.clone(),
+                r.component.clone(),
+                format!("{:.2}", value),
+                unit,
+            )
+        })
+        .collect();
+
+    let w_bench = rows.iter().map(|r| r.0.len()).max().unwrap_or(9).max(9);
+    let w_comp = rows.iter().map(|r| r.1.len()).max().unwrap_or(9).max(9);
+    let w_val = rows.iter().map(|r| r.2.len()).max().unwrap_or(5).max(5);
+
+    println!(
+        "{:<w_bench$} | {:<w_comp$} | {:>w_val$} | {}",
+        "benchmark", "component", "value", "unit",
+        w_bench = w_bench,
+        w_comp = w_comp,
+        w_val = w_val
+    );
+    println!(
+        "{:-<w_bench$}-+-{:-<w_comp$}-+-{:-<w_val$}-+------",
+        "",
+        "",
+        "",
+        w_bench = w_bench,
+        w_comp = w_comp,
+        w_val = w_val
+    );
+    for (bench, comp, val, unit) in &rows {
+        println!(
+            "{:<w_bench$} | {:<w_comp$} | {:>w_val$} | {}",
+            bench,
+            comp,
+            val,
+            unit,
+            w_bench = w_bench,
+            w_comp = w_comp,
+            w_val = w_val
+        );
+    }
+}
+
 pub fn run_cli() {
-    println!("GPUBench CLI has been ported to pure Rust. Implementation pending.");
+    // RADV prints a conformance warning to stderr unless this is set.
+    if std::env::var_os("MESA_VK_IGNORE_CONFORMANCE_WARNING").is_none() {
+        // SAFETY: called at process startup, before any threads are spawned.
+        unsafe { std::env::set_var("MESA_VK_IGNORE_CONFORMANCE_WARNING", "1") };
+    }
+
+    let cli = Cli::parse();
+
+    if cli.list_benchmarks {
+        println!("Available benchmarks:");
+        for name in get_available_benchmarks() {
+            println!("  {}", name);
+        }
+        return;
+    }
+
+    if cli.list_devices {
+        println!("Available devices (backend | index | name):");
+        for entry in get_available_hardware() {
+            println!("  {}", entry);
+        }
+        return;
+    }
+
+    if cli.list_backends {
+        // Hardware entries are "backend|index|name"; collect unique backends,
+        // excluding the pseudo "System" entry.
+        let mut backends: Vec<String> = Vec::new();
+        for entry in get_available_hardware() {
+            if let Some(backend) = entry.split('|').next() {
+                if backend != "System" && !backends.iter().any(|b| b == backend) {
+                    backends.push(backend.to_string());
+                }
+            }
+        }
+        println!("Available backends:");
+        for b in backends {
+            println!("  {}", b);
+        }
+        return;
+    }
+
+    // Empty benchmark list = run all (C++ BenchmarkRunner convention).
+    // Empty device list = device 0, empty backend list = auto (C++ RunnerAPI convention).
+    let results = run_benchmarks(
+        &cli.benchmarks_to_run,
+        &cli.device_indices,
+        &cli.backend_strs,
+        cli.verbose,
+        cli.debug,
+        cli.dump_geometry,
+        |_| {},
+    );
+
+    print_results_table(&results);
+
+    // Exit non-zero when nothing ran (backend failure, unmatched benchmark
+    // names, out-of-range device) so scripts can detect it.
+    if results.is_empty() {
+        eprintln!("Error: no benchmark results were produced.");
+        std::process::exit(1);
+    }
 }
