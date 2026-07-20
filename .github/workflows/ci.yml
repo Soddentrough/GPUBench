@@ -15,8 +15,9 @@ jobs:
       - name: Install Vulkan SDK (LunarG apt repo)
         run: |
           wget -qO - https://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo apt-key add -
-          sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-jammy.list \
-            https://packages.lunarg.com/vulkan/lunarg-vulkan-jammy.list
+          CODENAME=$(. /etc/os-release && echo $VERSION_CODENAME)
+          sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-$CODENAME.list \
+            https://packages.lunarg.com/vulkan/lunarg-vulkan-$CODENAME.list
           sudo apt-get update
           sudo apt-get install -y vulkan-sdk
 
