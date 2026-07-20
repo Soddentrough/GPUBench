@@ -19,6 +19,7 @@ pub struct ResultData {
     pub operations: u64,
     pub time_ms: f64,
     pub isEmulated: bool,
+    pub isUnsupported: bool,
 }
 
 #[derive(Parser, Debug, Clone)]
@@ -99,6 +100,7 @@ pub fn run_benchmarks(
             operations: ffi_res.operations,
             time_ms: ffi_res.time_ms,
             isEmulated: ffi_res.isEmulated,
+            isUnsupported: ffi_res.isUnsupported,
         };
         if let Ok(guard) = CALLBACK_MUTEX.lock() {
             if let Some(cb) = *guard {
@@ -135,6 +137,7 @@ pub fn run_benchmarks(
         operations: ffi_res.operations,
         time_ms: ffi_res.time_ms,
         isEmulated: ffi_res.isEmulated,
+        isUnsupported: ffi_res.isUnsupported,
     }).collect()
 }
 

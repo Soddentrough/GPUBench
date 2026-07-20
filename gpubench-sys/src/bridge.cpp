@@ -42,6 +42,7 @@ rust::Vec<FfiResultData> gpubench_run_benchmarks(const rust::Vec<rust::String>& 
             r.operations = res.operations;
             r.time_ms = res.time_ms;
             r.isEmulated = res.isEmulated;
+            r.isUnsupported = res.isUnsupported;
             r.maxWorkGroupSize = res.maxWorkGroupSize;
             r.deviceIndex = res.deviceIndex;
             r.configIndex = res.configIndex;
@@ -61,6 +62,7 @@ rust::Vec<FfiResultData> gpubench_run_benchmarks(const rust::Vec<rust::String>& 
         r.operations = res.operations;
         r.time_ms = res.time_ms;
         r.isEmulated = res.isEmulated;
+        r.isUnsupported = res.isUnsupported;
         r.maxWorkGroupSize = res.maxWorkGroupSize;
         r.deviceIndex = res.deviceIndex;
         r.configIndex = res.configIndex;

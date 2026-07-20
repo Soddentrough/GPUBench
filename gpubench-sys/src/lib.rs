@@ -10,6 +10,7 @@ pub mod ffi {
         operations: u64,
         time_ms: f64,
         isEmulated: bool,
+        isUnsupported: bool,
         maxWorkGroupSize: u32,
         deviceIndex: u32,
         configIndex: u32,

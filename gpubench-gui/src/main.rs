@@ -165,6 +165,12 @@ fn resolve_kernel_path() {
 }
 
 pub fn main() -> iced::Result {
+    // Suppress Mesa/RADV conformance warnings (set before any threads spawn).
+    // SAFETY: called at the very start of main, before the winit/tokio
+    // executors start, so no other thread can be reading the environment.
+    if std::env::var_os("MESA_VK_IGNORE_CONFORMANCE_WARNING").is_none() {
+        unsafe { std::env::set_var("MESA_VK_IGNORE_CONFORMANCE_WARNING", "1") };
+    }
     resolve_kernel_path();
     GPUBenchApp::run(Settings {
         antialiasing: true,
