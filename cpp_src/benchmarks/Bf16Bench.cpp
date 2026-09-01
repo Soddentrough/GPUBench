@@ -93,11 +93,14 @@ void Bf16Bench::Teardown() {
 
 BenchmarkResult Bf16Bench::GetResult(uint32_t config_idx) const {
   if (config_idx == 0 && vectorKernel != nullptr) { // Vector
-    uint64_t iters = 16384;
-    uint64_t ops_per_iter = 128; // Vulkan/OpenCL use f16vec2 (128 ops)
+    uint64_t iters = 32768;
+    uint64_t ops_per_iter = 256; // Vulkan f16vec4 (32 FMAs × 8 ops)
     if (context && context->getBackend() == ComputeBackend::ROCm) {
       iters = 2048;      // bf16.hip: 2048 iterations
       ops_per_iter = 128; // bf16.hip: packed hip_bfloat162 __hfma2 chain
+    } else if (context && context->getBackend() == ComputeBackend::OpenCL) {
+      iters = 16384;
+      ops_per_iter = 128;
     }
     uint64_t num_ops = iters * ops_per_iter * 8192 * 64;
     return {num_ops, 0.0};

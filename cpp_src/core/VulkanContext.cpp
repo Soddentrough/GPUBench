@@ -11,7 +11,24 @@
 #include <shaderc/shaderc.hpp>
 #endif
 
-void VulkanContext::waitIdle() { vkQueueWaitIdle(computeQueue); }
+void VulkanContext::waitIdle() {
+  if (device == VK_NULL_HANDLE) return;
+  for (size_t i = 0; i < kMaxInFlight; ++i) {
+    if (inFlightFrames[i].inUse && inFlightFrames[i].fence != VK_NULL_HANDLE) {
+      constexpr uint64_t kTimeoutNs = 3'000'000'000ULL;
+      VkResult waitResult =
+          vkWaitForFences(device, 1, &inFlightFrames[i].fence, VK_TRUE, kTimeoutNs);
+      if (waitResult == VK_TIMEOUT) {
+        throw std::runtime_error("GPU dispatch timed out (>3 s) in waitIdle()");
+      }
+      vkResetFences(device, 1, &inFlightFrames[i].fence);
+      inFlightFrames[i].inUse = false;
+    }
+  }
+  if (computeQueue != VK_NULL_HANDLE) {
+    vkQueueWaitIdle(computeQueue);
+  }
+}
 
 VulkanContext::VulkanContext(bool verbose, bool debug) : verbose(verbose), debug(debug) {
   char *verbose_env = std::getenv("GPUBENCH_VERBOSE");
@@ -28,11 +45,23 @@ VulkanContext::VulkanContext(bool verbose, bool debug) : verbose(verbose), debug
 }
 
 VulkanContext::~VulkanContext() {
+  try {
+    waitIdle();
+  } catch (...) {
+  }
   while (!kernels.empty()) {
     releaseKernel(kernels.begin()->first);
   }
   while (!buffers.empty()) {
     releaseBuffer(buffers.begin()->first);
+  }
+  if (device != VK_NULL_HANDLE) {
+    for (size_t i = 0; i < kMaxInFlight; ++i) {
+      if (inFlightFrames[i].fence != VK_NULL_HANDLE) {
+        vkDestroyFence(device, inFlightFrames[i].fence, nullptr);
+        inFlightFrames[i].fence = VK_NULL_HANDLE;
+      }
+    }
   }
   if (commandPool != VK_NULL_HANDLE) {
     vkDestroyCommandPool(device, commandPool, nullptr);
@@ -495,6 +524,30 @@ void VulkanContext::createDevice() {
       VK_SUCCESS) {
     throw std::runtime_error("failed to create command pool!");
   }
+
+  VkCommandBufferAllocateInfo cmdAllocInfo{};
+  cmdAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+  cmdAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+  cmdAllocInfo.commandPool = commandPool;
+  cmdAllocInfo.commandBufferCount = static_cast<uint32_t>(kMaxInFlight);
+
+  std::vector<VkCommandBuffer> cmdBuffers(kMaxInFlight);
+  if (vkAllocateCommandBuffers(device, &cmdAllocInfo, cmdBuffers.data()) !=
+      VK_SUCCESS) {
+    throw std::runtime_error("failed to allocate in-flight command buffers!");
+  }
+
+  for (size_t i = 0; i < kMaxInFlight; ++i) {
+    inFlightFrames[i].commandBuffer = cmdBuffers[i];
+    VkFenceCreateInfo fenceInfo{};
+    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    if (vkCreateFence(device, &fenceInfo, nullptr, &inFlightFrames[i].fence) !=
+        VK_SUCCESS) {
+      throw std::runtime_error("failed to create in-flight fence!");
+    }
+    inFlightFrames[i].inUse = false;
+  }
+  currentFrameIndex = 0;
 }
 
 uint32_t VulkanContext::findMemoryType(uint32_t typeFilter,
@@ -1065,26 +1118,33 @@ void VulkanContext::dispatch(ComputeKernel kernel, uint32_t grid_x,
   }
   VulkanKernel *vulkanKernel = it->second;
 
-  VkCommandBufferAllocateInfo allocInfo{};
-  allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-  allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-  allocInfo.commandPool = commandPool;
-  allocInfo.commandBufferCount = 1;
-
-  VkCommandBuffer commandBuffer;
-  vkAllocateCommandBuffers(device, &allocInfo, &commandBuffer);
+  InFlightFrame &frame = inFlightFrames[currentFrameIndex];
+  if (frame.inUse) {
+    constexpr uint64_t kTimeoutNs = 3'000'000'000ULL;
+    VkResult waitResult =
+        vkWaitForFences(device, 1, &frame.fence, VK_TRUE, kTimeoutNs);
+    if (waitResult == VK_TIMEOUT) {
+      throw std::runtime_error(
+          "GPU dispatch timed out (>3 s) — aborting benchmark to prevent amdgpu TDR crash.");
+    } else if (waitResult != VK_SUCCESS) {
+      throw std::runtime_error("vkWaitForFences failed with result: " +
+                               std::to_string(waitResult));
+    }
+    vkResetFences(device, 1, &frame.fence);
+    frame.inUse = false;
+  }
 
   VkCommandBufferBeginInfo beginInfo{};
   beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
   beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
-  vkBeginCommandBuffer(commandBuffer, &beginInfo);
+  vkBeginCommandBuffer(frame.commandBuffer, &beginInfo);
   VkPipelineBindPoint bindPoint = vulkanKernel->isRTPipeline
                                       ? VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR
                                       : VK_PIPELINE_BIND_POINT_COMPUTE;
 
-  vkCmdBindPipeline(commandBuffer, bindPoint, vulkanKernel->pipeline);
-  vkCmdBindDescriptorSets(commandBuffer, bindPoint,
+  vkCmdBindPipeline(frame.commandBuffer, bindPoint, vulkanKernel->pipeline);
+  vkCmdBindDescriptorSets(frame.commandBuffer, bindPoint,
                           vulkanKernel->pipelineLayout, 0, 1,
                           &vulkanKernel->descriptorSet, 0, nullptr);
 
@@ -1098,7 +1158,7 @@ void VulkanContext::dispatch(ComputeKernel kernel, uint32_t grid_x,
                                         : VK_SHADER_STAGE_COMPUTE_BIT;
 
     vkCmdPushConstants(
-        commandBuffer, vulkanKernel->pipelineLayout, stageFlags, 0,
+        frame.commandBuffer, vulkanKernel->pipelineLayout, stageFlags, 0,
         static_cast<uint32_t>(vulkanKernel->pushConstantData.size()),
         vulkanKernel->pushConstantData.data());
   }
@@ -1106,44 +1166,24 @@ void VulkanContext::dispatch(ComputeKernel kernel, uint32_t grid_x,
   if (vulkanKernel->isRTPipeline) {
     auto pfnTraceRays =
         (PFN_vkCmdTraceRaysKHR)vkGetDeviceProcAddr(device, "vkCmdTraceRaysKHR");
-    pfnTraceRays(commandBuffer, &vulkanKernel->rgenRegion,
+    pfnTraceRays(frame.commandBuffer, &vulkanKernel->rgenRegion,
                  &vulkanKernel->missRegion, &vulkanKernel->hitRegion,
                  &vulkanKernel->callRegion, grid_x, grid_y, grid_z);
   } else {
-    vkCmdDispatch(commandBuffer, grid_x, grid_y, grid_z);
+    vkCmdDispatch(frame.commandBuffer, grid_x, grid_y, grid_z);
   }
 
-  vkEndCommandBuffer(commandBuffer);
-
-  // Use a fence with a 3-second timeout instead of vkQueueWaitIdle.
-  // This allows GPUBench to detect and abort a hung dispatch before the
-  // amdgpu kernel-driver TDR fires (default: 10 s), preventing a system crash.
-  VkFenceCreateInfo fenceInfo{};
-  fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-  VkFence fence = VK_NULL_HANDLE;
-  vkCreateFence(device, &fenceInfo, nullptr, &fence);
+  vkEndCommandBuffer(frame.commandBuffer);
 
   VkSubmitInfo submitInfo{};
   submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
   submitInfo.commandBufferCount = 1;
-  submitInfo.pCommandBuffers = &commandBuffer;
+  submitInfo.pCommandBuffers = &frame.commandBuffer;
 
-  vkQueueSubmit(computeQueue, 1, &submitInfo, fence);
+  vkQueueSubmit(computeQueue, 1, &submitInfo, frame.fence);
+  frame.inUse = true;
 
-  // Wait up to 3 seconds for completion
-  constexpr uint64_t kTimeoutNs = 3'000'000'000ULL; // 3 seconds in nanoseconds
-  VkResult waitResult = vkWaitForFences(device, 1, &fence, VK_TRUE, kTimeoutNs);
-
-  vkDestroyFence(device, fence, nullptr);
-  vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
-
-  if (waitResult == VK_TIMEOUT) {
-    throw std::runtime_error(
-        "GPU dispatch timed out (>3 s) — aborting benchmark to prevent amdgpu TDR crash.");
-  } else if (waitResult != VK_SUCCESS) {
-    throw std::runtime_error(
-        "vkWaitForFences failed with result: " + std::to_string(waitResult));
-  }
+  currentFrameIndex = (currentFrameIndex + 1) % kMaxInFlight;
 }
 
 void VulkanContext::releaseKernel(ComputeKernel kernel) {

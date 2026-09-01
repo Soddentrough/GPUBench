@@ -4,7 +4,7 @@
 
 class Fp6Bench : public IBenchmark {
 public:
-  const char *GetName() const override { return "Performance"; }
+  const char *GetName() const override { return "FP6"; }
   bool IsSupported(const DeviceInfo &device,
                    IComputeContext *context = nullptr) const override;
   void Setup(IComputeContext &context, const std::string &build_dir) override;

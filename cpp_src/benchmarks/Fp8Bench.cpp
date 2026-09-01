@@ -6,16 +6,20 @@
 
 bool Fp8Bench::IsSupported(const DeviceInfo &info,
                            IComputeContext *context) const {
+  if (context && context->getBackend() == ComputeBackend::ROCm) {
+    return info.fp8Support || info.cooperativeMatrixSupport;
+  }
   // The RDNA4 hardware and RADV driver support native FP8
   // (VK_EXT_shader_float8, including cooperative matrix), but no available
   // GLSL toolchain can compile FP8 shaders: glslc/glslang do not implement
   // GL_EXT_shader_explicit_arithmetic_types_float8 (checked against glslang
   // main). The existing "FP8" shaders are FP16 math (fp8_emulated.comp,
   // coop_matrix_fp8.comp), so they would report FP16 throughput mislabeled
-  // as FP8. Report UNSUPPORTED instead of publishing misleading numbers.
-  (void)info;
-  (void)context;
-  return false;
+  // as FP8. Report UNSUPPORTED on Vulkan instead of publishing misleading numbers.
+  if (context && context->getBackend() == ComputeBackend::Vulkan) {
+    return false;
+  }
+  return info.fp8Support;
 }
 
 void Fp8Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
@@ -26,16 +30,11 @@ void Fp8Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
   // Detect hardware with native FP8 support:
   // - MI300 (gfx942) and RDNA4 (gfx12) have native FP8 vector/matrix
   // - RDNA3 (gfx11) does NOT have native FP8
-  // For Vulkan, the VK_EXT_shader_float8 extension indicates native support.
-  bool has_native_fp8 = info.fp8Support; // This checks VK_EXT_shader_float8
+  bool has_native_fp8 = info.fp8Support;
 
   // Create storage buffer
   size_t bufferSize =
-      8192 * 64 * 4; // 8192 workgroups * 64 threads * 4 bytes (u8vec4)
-  if (context.getBackend() == ComputeBackend::OpenCL) {
-    // The OpenCL kernel uses half4, which is 8 bytes per thread
-    bufferSize = 8192 * 64 * 8;
-  }
+      8192 * 64 * sizeof(float);
   buffer = context.createBuffer(bufferSize);
 
   // Helper to check if file exists
@@ -47,10 +46,24 @@ void Fp8Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
   std::filesystem::path kdir(kernel_dir);
 
   if (context.getBackend() == ComputeBackend::ROCm) {
-    // ROCm FP8 is completely emulated on the current compiler stack.
-    // Skip to prevent inaccurate benchmark results.
     is_native_vector = false;
+    is_emulated_vector = false;
     is_native_matrix = false;
+
+    if (info.cooperativeMatrixSupport || info.fp8Support) {
+      std::filesystem::path matrix_file = kdir / "rocm" / "fp8_matrix.hip";
+      try {
+        matrixKernel = context.createKernel(matrix_file.string(), "run_benchmark", 1);
+        if (matrixKernel) {
+          context.setKernelArg(matrixKernel, 0, buffer);
+          is_native_matrix = true;
+        }
+      } catch (const std::exception &e) {
+        std::cerr << "ROCm FP8 Matrix kernel compilation failed: " << e.what() << std::endl;
+        matrixKernel = nullptr;
+        is_native_matrix = false;
+      }
+    }
     return;
   }
 
@@ -59,16 +72,6 @@ void Fp8Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
     // Skip to prevent inaccurate benchmark results.
     is_native_vector = false;
     is_emulated_vector = false;
-    return;
-  }
-
-  if (context.getBackend() == ComputeBackend::OpenCL) {
-    std::filesystem::path kernel_file = kdir / "opencl" / "fp8.cl";
-    vectorKernel = context.createKernel(kernel_file.string(), "run_benchmark", 1);
-    context.setKernelArg(vectorKernel, 0, buffer);
-    is_native_vector = true;
-    is_emulated_vector = false;
-    is_native_matrix = false;
     return;
   }
 
@@ -119,7 +122,8 @@ void Fp8Bench::Run(uint32_t config_idx) {
   if (config_idx == 0 && vectorKernel != nullptr) {
     context->dispatch(vectorKernel, 8192, 1, 1, 64, 1, 1);
   } else if (matrixKernel) {
-    context->dispatch(matrixKernel, 32768, 1, 1, 32, 1, 1);
+    // 65536 WGs of 32 threads each (subgroup wave32)
+    context->dispatch(matrixKernel, 65536, 1, 1, 32, 1, 1);
   }
 }
 
@@ -139,22 +143,14 @@ BenchmarkResult Fp8Bench::GetResult(uint32_t config_idx) const {
   if (config_idx == 0 && vectorKernel != nullptr) { // Vector
     // 8 fma operations per iteration, each is 2 ops (multiply, add)
     // 8 * 2 * 4 = 64 FP8-equivalent operations per iteration.
-    // ROCm kernel loop reduced from 16384 → 512 to avoid TDR timeout;
-    // Vulkan and OpenCL kernels still use 16384 iterations.
     uint64_t iters = 16384;
-    if (context && context->getBackend() == ComputeBackend::ROCm) {
-      iters = 512;
-    }
     uint64_t num_ops = iters * 64 * 8192 * 64;
     return {num_ops, 0.0};
   } else { // Matrix
-    // 16x16x16 matrix multiply = 8192 ops
-    // 16384 iterations * 8192 ops * 32768 subgroups
-    uint64_t iters = 16384;
-    if (context && context->getBackend() == ComputeBackend::ROCm) {
-      iters = 512;
-    }
-    uint64_t num_ops = iters * 8192 * 32768;
+    // 16x16x16 matrix multiply = 8192 ops per WMMA
+    // 4096 iters * 8 WMMA ops = 32768 WMMA ops per workgroup
+    // Dispatch: 65536 WGs
+    uint64_t num_ops = (uint64_t)65536 * 32768 * 8192;
     return {num_ops, 0.0};
   }
 }
@@ -167,6 +163,9 @@ uint32_t Fp8Bench::GetNumConfigs() const {
 }
 
 std::string Fp8Bench::GetConfigName(uint32_t config_idx) const {
-  if (config_idx == 0 && vectorKernel != nullptr) return "Vector";
+  if (vectorKernel != nullptr) {
+    if (config_idx == 0) return "Vector";
+    return "Matrix";
+  }
   return "Matrix";
 }

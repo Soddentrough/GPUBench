@@ -56,10 +56,12 @@ extern "C" __global__ void run_benchmark(float4* inputData, float4* outputData, 
         
         if (mode == 0) { // Read
             // Accumulate to prevent optimization
-            accumulator.x += data0.x + data1.x + data2.x + data3.x + data4.x + data5.x + data6.x + data7.x;
-            accumulator.y += data8.x + data9.x + data10.x + data11.x + data12.x + data13.x + data14.x + data15.x;
-            accumulator.z += data16.x + data17.x + data18.x + data19.x + data20.x + data21.x + data22.x + data23.x;
-            accumulator.w += data24.x + data25.x + data26.x + data27.x + data28.x + data29.x + data30.x + data31.x;
+            // Accumulate FULL vectors (see membw_128.hip: .x-only lets LLVM
+            // split 128-bit loads into b96+b32 pairs).
+            accumulator += data0 + data1 + data2 + data3 + data4 + data5 + data6 + data7;
+            accumulator += data8 + data9 + data10 + data11 + data12 + data13 + data14 + data15;
+            accumulator += data16 + data17 + data18 + data19 + data20 + data21 + data22 + data23;
+            accumulator += data24 + data25 + data26 + data27 + data28 + data29 + data30 + data31;
         } else if (mode == 1) { // Write
             outputData[baseIndex + 0] = make_float4(1.0f, 1.0f, 1.0f, 1.0f);
             outputData[baseIndex + 1] = make_float4(1.0f, 1.0f, 1.0f, 1.0f);

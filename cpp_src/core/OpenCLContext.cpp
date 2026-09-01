@@ -237,9 +237,16 @@ const std::vector<DeviceInfo> &OpenCLContext::getDevices() const {
 
   if (deviceInfos.empty()) {
     for (const auto &dev : devices) {
-      char name[256];
+      char name[256] = {0};
       f_clGetDeviceInfo(dev, CL_DEVICE_NAME, sizeof(name), name, nullptr);
       std::string deviceName = name;
+
+      // Try querying CL_DEVICE_BOARD_NAME_AMD (0x4038) for AMD GPUs to get friendly model name
+      char boardName[256] = {0};
+      if (f_clGetDeviceInfo(dev, 0x4038, sizeof(boardName), boardName, nullptr) == 0 &&
+          boardName[0] != '\0') {
+        deviceName = std::string(boardName);
+      }
 
       if (deviceName.find("llvmpipe") != std::string::npos)
         continue;

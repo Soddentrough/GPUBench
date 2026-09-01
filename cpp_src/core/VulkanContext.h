@@ -1,6 +1,7 @@
 #pragma once
 
 #include "IComputeContext.h"
+#include <array>
 #include <map>
 #include <string>
 #include <vector>
@@ -125,8 +126,15 @@ private:
   uint32_t computeQueueFamilyIndex = 0;
   VkQueue computeQueue = VK_NULL_HANDLE;
   VkCommandPool commandPool = VK_NULL_HANDLE;
-  VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
-  VkFence computeFence = VK_NULL_HANDLE;
+
+  static constexpr size_t kMaxInFlight = 16;
+  struct InFlightFrame {
+    VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
+    VkFence fence = VK_NULL_HANDLE;
+    bool inUse = false;
+  };
+  std::array<InFlightFrame, kMaxInFlight> inFlightFrames{};
+  size_t currentFrameIndex = 0;
 
   std::map<ComputeBuffer, VulkanBuffer *> buffers;
   std::map<ComputeKernel, VulkanKernel *> kernels;

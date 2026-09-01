@@ -32,10 +32,15 @@ struct VulkanKernel {
     bound_buffers: HashMap<u32, ComputeBuffer>,
     push_constants: Vec<u8>,
     
+    #[allow(dead_code)]
     is_rt: bool,
+    #[allow(dead_code)]
     rgen_region: vk::StridedDeviceAddressRegionKHR,
+    #[allow(dead_code)]
     rmiss_region: vk::StridedDeviceAddressRegionKHR,
+    #[allow(dead_code)]
     rhit_region: vk::StridedDeviceAddressRegionKHR,
+    #[allow(dead_code)]
     rcall_region: vk::StridedDeviceAddressRegionKHR,
     sbt_buffer: Option<ComputeBuffer>,
 }
@@ -58,6 +63,7 @@ pub struct VulkanContext {
     
     command_pool: vk::CommandPool,
     command_buffer: vk::CommandBuffer,
+    #[allow(dead_code)]
     is_cmd_recorded: bool,
     fence: vk::Fence,
 
@@ -294,7 +300,7 @@ impl ComputeContext for VulkanContext {
 
     fn create_buffer(&mut self, size: usize, host_ptr: Option<&[u8]>) -> Result<ComputeBuffer, String> {
         let device = self.device.as_ref().unwrap();
-        let mut usage = vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS;
+        let usage = vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS;
         let buffer_info = vk::BufferCreateInfo::default()
             .size(size as u64)
             .usage(usage)
@@ -323,7 +329,6 @@ impl ComputeContext for VulkanContext {
 
         let id = self.next_buffer_id;
         self.next_buffer_id += 1;
-        let bda_info = vk::BufferDeviceAddressInfo::default().buffer(buffer);
         self.buffers.insert(id, VulkanBuffer { buffer, memory, _size: size });
 
         if let Some(data) = host_ptr {

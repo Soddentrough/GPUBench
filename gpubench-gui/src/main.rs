@@ -176,6 +176,7 @@ pub fn main() -> iced::Result {
         antialiasing: true,
         window: iced::window::Settings {
             size: iced::Size::new(1200.0, 820.0),
+            min_size: Some(iced::Size::new(1000.0, 680.0)),
             ..Default::default()
         },
         ..Settings::default()
@@ -265,6 +266,49 @@ enum AppState {
     Error(String),
 }
 
+fn read_sysfs_trimmed(path: &str) -> Option<String> {
+    std::fs::read_to_string(path).ok().map(|s| s.trim().to_string())
+}
+
+fn query_gpu_telemetry(card_idx: u32) -> (f32, f32, u32, u32, u64, u64) {
+    let base = format!("/sys/class/drm/card{}/device/", card_idx);
+    let mut temp = 0.0f32;
+    let mut power = 0.0f32;
+    let mut sclk = 0u32;
+    let mut mclk = 0u32;
+    let mut vram_used = 0u64;
+    let mut vram_total = 0u64;
+
+    for h in 0..5 {
+        let hwmon = format!("{}hwmon/hwmon{}/", base, h);
+        if std::path::Path::new(&hwmon).exists() {
+            if let Some(t) = read_sysfs_trimmed(&format!("{}temp1_input", hwmon)).and_then(|s| s.parse::<f32>().ok()) {
+                temp = t / 1000.0;
+            }
+            if let Some(p) = read_sysfs_trimmed(&format!("{}power1_average", hwmon))
+                .or_else(|| read_sysfs_trimmed(&format!("{}power1_input", hwmon)))
+                .and_then(|s| s.parse::<f32>().ok()) {
+                power = p / 1_000_000.0;
+            }
+            break;
+        }
+    }
+    if let Some(vu) = read_sysfs_trimmed(&format!("{}mem_info_vram_used", base)).and_then(|s| s.parse::<u64>().ok()) {
+        vram_used = vu / (1024 * 1024);
+    }
+    if let Some(vt) = read_sysfs_trimmed(&format!("{}mem_info_vram_total", base)).and_then(|s| s.parse::<u64>().ok()) {
+        vram_total = vt / (1024 * 1024);
+    }
+    if let Some(s) = read_sysfs_trimmed(&format!("{}current_gfxclk", base)).and_then(|s| s.parse::<u32>().ok()) {
+        sclk = s;
+    }
+    if let Some(m) = read_sysfs_trimmed(&format!("{}current_uclk", base)).and_then(|s| s.parse::<u32>().ok()) {
+        mclk = m;
+    }
+
+    (temp, power, sclk, mclk, vram_used, vram_total)
+}
+
 struct GPUBenchApp {
     state: AppState,
     current_benchmark: String,
@@ -276,10 +320,15 @@ struct GPUBenchApp {
     selected_device: String,
     available_tests: Vec<String>,
     
+    // Live Hardware Telemetry
+    telemetry_temp: f32,
+    telemetry_power: f32,
+    telemetry_sclk: u32,
+    telemetry_mclk: u32,
+    telemetry_vram_used: u64,
+    telemetry_vram_total: u64,
+
     // Metrics
-    // TODO(refactor): these per-metric fields should be collapsed into a
-    // HashMap keyed by (component, subcategory/config) -- deferred to keep
-    // this diff reviewable.
     gpu_bw: f32,
     
     sys_mem_bw: f32,
@@ -309,6 +358,10 @@ struct GPUBenchApp {
     gpu_rt_payload: f32,
     gpu_rt_procedural: f32,
     gpu_rt_pathtracing: f32,
+
+    gpu_pixel_fill: f32,
+    gpu_pixel_fill_hdr: f32,
+    gpu_pixel_fill_blend: f32,
 }
 
 #[derive(Debug, Clone)]
@@ -349,6 +402,8 @@ impl Application for GPUBenchApp {
             initial_tests.insert(t.clone());
         }
 
+        let (temp, power, sclk, mclk, vram_used, vram_total) = query_gpu_telemetry(0);
+
         (
             Self {
                 state: AppState::Setup {
@@ -366,6 +421,12 @@ impl Application for GPUBenchApp {
                 selected_tests: initial_tests,
                 current_benchmark: String::from("Waiting to start..."),
                 current_device: String::from(""),
+                telemetry_temp: temp,
+                telemetry_power: power,
+                telemetry_sclk: sclk,
+                telemetry_mclk: mclk,
+                telemetry_vram_used: vram_used,
+                telemetry_vram_total: vram_total,
                 gpu_bw: 0.0,
                 sys_mem_bw: 0.0,
                 sys_mem_bw_single: 0.0,
@@ -392,6 +453,9 @@ impl Application for GPUBenchApp {
                 gpu_rt_payload: 0.0,
                 gpu_rt_procedural: 0.0,
                 gpu_rt_pathtracing: 0.0,
+                gpu_pixel_fill: 0.0,
+                gpu_pixel_fill_hdr: 0.0,
+                gpu_pixel_fill_blend: 0.0,
             },
             Command::none()
         )
@@ -546,6 +610,14 @@ impl Application for GPUBenchApp {
                 }
             }
             Message::Tick => {
+                let (temp, power, sclk, mclk, vram_used, vram_total) = query_gpu_telemetry(0);
+                self.telemetry_temp = temp;
+                self.telemetry_power = power;
+                self.telemetry_sclk = sclk;
+                self.telemetry_mclk = mclk;
+                self.telemetry_vram_used = vram_used;
+                self.telemetry_vram_total = vram_total;
+
                 let mut results = Vec::new();
                 if let AppState::Running { progress_receiver, .. } = &self.state {
                     if let Some(rx) = progress_receiver.as_ref() {
@@ -636,6 +708,11 @@ impl Application for GPUBenchApp {
                                 "system_memory": {
                                     "bandwidth_gbps": self.sys_mem_bw,
                                     "latency_ns": self.sys_mem_lat,
+                                },
+                                "graphics": {
+                                    "pixel_fill_rgba8_gpixels_sec": self.gpu_pixel_fill,
+                                    "pixel_fill_rgba16f_gpixels_sec": self.gpu_pixel_fill_hdr,
+                                    "pixel_fill_blend_gpixels_sec": self.gpu_pixel_fill_blend,
                                 },
                                 "ray_tracing": {
                                     "any_hit": self.gpu_rt_anyhit,
@@ -968,15 +1045,21 @@ impl Application for GPUBenchApp {
                         format!("{:.1} {}", val, unit)
                     };
 
-                    let text_color = if !is_active { color!(0x333344) } else if val <= 0.0 { color!(0x444455) } else { color!(0xFFFFFF) };
+                    let text_color = if !is_active {
+                        color!(0x333344)
+                    } else if val <= 0.0 {
+                        if val_str == "UNSUPPORTED" { color!(0xFF5555, 0.7) } else { color!(0x666677) }
+                    } else {
+                        color!(0x00FF88)
+                    };
                     
                     let label_with_tooltip = row![
-                        text(label).size(14).style(if val <= 0.0 { color!(0x666677) } else { color!(0xAAAAAA) }),
-                        Space::with_width(4),
+                        text(label).size(13).style(if val <= 0.0 { color!(0x888899) } else { color!(0xDDDDDD) }),
+                        Space::with_width(6),
                         tooltip(
-                            text("(?)").size(12).style(color!(0x8888AA)),
+                            text("(?)").size(11).style(color!(0x666688)),
                             container(text(desc).size(12).style(color!(0xDDDDDD)))
-                                .width(Length::Fixed(250.0))
+                                .width(Length::Fixed(260.0))
                                 .padding(12)
                                 .style(|_t: &Theme| container::Appearance {
                                     background: Some(Background::Color(color!(0x1A1A24))),
@@ -989,18 +1072,21 @@ impl Application for GPUBenchApp {
                         .style(iced::theme::Container::Transparent)
                     ].align_items(iced::Alignment::Center);
 
-                    column![
+                    container(
                         row![
                             label_with_tooltip, 
                             Space::with_width(Length::Fill), 
                             text(val_str).size(13).style(text_color)
                         ]
                         .width(Length::Fill)
-                        .align_items(iced::Alignment::Center),
-                        Space::with_height(4) // Minimal spacing instead of the bar
-                    ]
-                    .width(Length::Fill)
-                    .spacing(6)
+                        .align_items(iced::Alignment::Center)
+                    )
+                    .padding([8, 12])
+                    .style(move |_t: &Theme| container::Appearance {
+                        background: Some(Background::Color(color!(0x161622))),
+                        border: Border { radius: 8.0.into(), width: 1.0, color: color!(0x222233) },
+                        ..Default::default()
+                    })
                     .into()
                 };
 
@@ -1009,7 +1095,7 @@ impl Application for GPUBenchApp {
                     metric_row("SysMemBandwidth", "System RAM Bandwidth", self.sys_mem_bw, "GB/s", "Measures the maximum multi-threaded bandwidth to the host's system RAM. Important for CPU-to-GPU data transfers and general system performance."),
                     metric_row("SysMemBandwidth", "System RAM (1 Thread)", self.sys_mem_bw_single, "GB/s", "Measures single-threaded bandwidth to system RAM, which indicates memory channel efficiency and latency-bound transfer speeds."),
                     metric_row("SysMemLatency", "System RAM Latency", self.sys_mem_lat, "ns", "Measures the time it takes to fetch a single un-cached piece of data from system memory. Lower is better. Essential for game engines and unpredictable data access."),
-                ].spacing(12).width(Length::Fill).into();
+                ].spacing(8).width(Length::Fill).into();
 
                 let compute_content = column![
                     metric_row("FP64", "FP64 (Vector)", self.gpu_fp64, "TFLOPS", "Measures double precision (64-bit) floating point operations per second. Crucial for scientific simulations and high-accuracy physics."),
@@ -1024,7 +1110,7 @@ impl Application for GPUBenchApp {
                     metric_row("INT8", "INT8 (Matrix)", self.gpu_int8_matrix, "TOPS", "Measures hardware-accelerated cooperative matrix 8-bit integer operations."),
                     metric_row("INT4", "INT4 (Vector)", self.gpu_int4_vector, "TOPS", "Measures vector 4-bit integer operations per second. An extreme quantization format used in ultra-efficient AI processing and specialized lookup tasks."),
                     metric_row("INT4", "INT4 (Matrix)", self.gpu_int4_matrix, "TOPS", "Measures hardware-accelerated cooperative matrix 4-bit integer operations."),
-                ].spacing(12).width(Length::Fill).into();
+                ].spacing(8).width(Length::Fill).into();
 
                 let rt_content = column![
                     metric_row("RayTracing", "Intersect", self.gpu_rt_intersect, "GIS/s", "Measures raw intersection throughput against opaque triangle geometry. Tests the peak performance of the hardware's dedicated ray intersection engines."),
@@ -1037,12 +1123,24 @@ impl Application for GPUBenchApp {
                     metric_row("RayASBuild", "TLAS Build", self.gpu_rt_tlas_build, "MInst/s", "Measures top-level instantiation speed for scene-graph organization (10,000 Instances). Higher is better."),
                     metric_row("RayProcedural", "Procedural", self.gpu_rt_procedural, "GRays/s", "Measures intersection speed against mathematically defined geometry (like spheres or curves) rather than explicit triangles. Useful for advanced rendering engines."),
                     metric_row("RayPathTracing", "Path Tracing", self.gpu_rt_pathtracing, "MRays/s", "Simulates global illumination using stochastic multi-bounce path tracing (up to 8 bounces). Evaluates the GPU's intersection units, Monte Carlo math processing, cache hierarchy efficiency under random memory read pressure, and wavefront scheduling capabilities under thread divergence."),
-                ].spacing(12).width(Length::Fill).into();
+                ].spacing(8).width(Length::Fill).into();
+
+                let graphics_content = column![
+                    metric_row("PixelFillRate", "RGBA8 Color Fill", self.gpu_pixel_fill, "GPixels/s", "Measures the peak rasterization write rate to an 8192x8192 standard 32-bit color framebuffer (ROP throughput)."),
+                    metric_row("PixelFillRate", "RGBA16F HDR Fill", self.gpu_pixel_fill_hdr, "GPixels/s", "Measures the peak rasterization write rate to an 8192x8192 64-bit HDR floating point framebuffer."),
+                    metric_row("PixelFillRate", "Alpha Blending Fill", self.gpu_pixel_fill_blend, "GPixels/s", "Measures ROP alpha blending fill rate with src-alpha / dst-one-minus-alpha blending enabled."),
+                ].spacing(8).width(Length::Fill).into();
 
                 let compute_col = column![
                     text("COMPUTE CORES").size(16).style(color!(0xFFFFFF)),
                     Space::with_height(10),
                     create_panel("", color!(0xFF3366), compute_content)
+                ].spacing(5).width(Length::FillPortion(1));
+
+                let gfx_col = column![
+                    text("GRAPHICS & ROP").size(16).style(color!(0xFFFFFF)),
+                    Space::with_height(10),
+                    create_panel("", color!(0xFFB300), graphics_content)
                 ].spacing(5).width(Length::FillPortion(1));
 
                 let rt_col = column![
@@ -1057,9 +1155,12 @@ impl Application for GPUBenchApp {
                     create_panel("", color!(0x00E5FF), sys_content)
                 ].spacing(5).width(Length::FillPortion(1));
 
-                let split_layout = row![compute_col, rt_col, mem_col]
-                    .spacing(20)
-                    .width(Length::Fill);
+                let split_layout = row![
+                    column![compute_col, gfx_col].spacing(20).width(Length::FillPortion(1)),
+                    column![mem_col, rt_col].spacing(20).width(Length::FillPortion(1))
+                ]
+                .spacing(20)
+                .width(Length::Fill);
 
                 let action_buttons: Element<'_, Message> = if matches!(self.state, AppState::Complete { .. }) {
                     column![
@@ -1094,21 +1195,39 @@ impl Application for GPUBenchApp {
                 let sidebar = container(
                     column![
                         text("GPUBENCH").size(28).style(color!(0x00E5FF)),
-                        Space::with_height(50),
+                        Space::with_height(25),
+                        text("LIVE HARDWARE HUD").size(11).style(color!(0x8888AA)),
+                        Space::with_height(6),
+                        container(
+                            column![
+                                row![text("TEMP:").size(11).style(color!(0x8888AA)), Space::with_width(Length::Fill), text(format!("{:.1} °C", self.telemetry_temp)).size(11).style(if self.telemetry_temp > 80.0 { color!(0xFF5555) } else { color!(0x00FF88) })],
+                                row![text("POWER:").size(11).style(color!(0x8888AA)), Space::with_width(Length::Fill), text(format!("{:.1} W", self.telemetry_power)).size(11).style(color!(0x00E5FF))],
+                                row![text("CORE:").size(11).style(color!(0x8888AA)), Space::with_width(Length::Fill), text(format!("{} MHz", self.telemetry_sclk)).size(11).style(color!(0xDDDDDD))],
+                                row![text("MEM:").size(11).style(color!(0x8888AA)), Space::with_width(Length::Fill), text(format!("{} MHz", self.telemetry_mclk)).size(11).style(color!(0xDDDDDD))],
+                                row![text("VRAM:").size(11).style(color!(0x8888AA)), Space::with_width(Length::Fill), text(format!("{}/{} MB", self.telemetry_vram_used, self.telemetry_vram_total)).size(11).style(color!(0xDDDDDD))],
+                            ].spacing(4)
+                        )
+                        .padding(10)
+                        .style(|_t: &Theme| container::Appearance {
+                            background: Some(Background::Color(color!(0x161622))),
+                            border: Border { radius: 8.0.into(), width: 1.0, color: color!(0x2A2A38) },
+                            ..Default::default()
+                        }),
+                        Space::with_height(25),
                         text("TARGET HARDWARE").size(11).style(color!(0x8888AA)),
-                        Space::with_height(10),
+                        Space::with_height(6),
                         text(if self.current_device.is_empty() { "Unknown" } else { &self.current_device }).size(13).style(color!(0xFFFFFF)),
-                        Space::with_height(40),
+                        Space::with_height(25),
                         text("STATUS").size(11).style(color!(0x8888AA)),
-                        Space::with_height(10),
+                        Space::with_height(6),
                         text(status_text).size(22).style(status_color),
-                        Space::with_height(20),
+                        Space::with_height(10),
                         text(if self.current_benchmark.len() > 30 { "Complete" } else { &self.current_benchmark }).size(12).style(color!(0x666677)),
                         Space::with_height(Length::Fill),
                         action_buttons
                     ]
                 )
-                .width(Length::Fixed(240.0))
+                .width(Length::Fixed(250.0))
                 .height(Length::Fill)
                 .padding(20)
                 .style(|_t: &Theme| container::Appearance {
@@ -1158,7 +1277,7 @@ impl GPUBenchApp {
             value = (res.time_ms as f32) / (res.operations as f32);
         } else if res.metric == "ns" {
             value = ((res.time_ms * 1_000_000.0) as f32) / (res.operations as f32);
-        } else if res.metric == "GIS/s" || res.metric == "GRays/s" || res.metric == "GB/s" {
+        } else if res.metric == "GIS/s" || res.metric == "GRays/s" || res.metric == "GB/s" || res.metric == "GPixels/s" {
             value /= 1e9;
         } else if res.metric == "TFLOPS" || res.metric == "TOPS" {
             value /= 1e12;
@@ -1182,6 +1301,11 @@ impl GPUBenchApp {
             match res.component.as_str() {
                 "Memory" => {
                     self.gpu_bw = self.gpu_bw.max(value);
+                }
+                "Graphics" => {
+                    if res.configIndex == 0 { self.gpu_pixel_fill = self.gpu_pixel_fill.max(value); }
+                    else if res.configIndex == 1 { self.gpu_pixel_fill_hdr = self.gpu_pixel_fill_hdr.max(value); }
+                    else { self.gpu_pixel_fill_blend = self.gpu_pixel_fill_blend.max(value); }
                 }
                 "Compute" => {
                     if res.subcategory == "FP64" { self.gpu_fp64 = self.gpu_fp64.max(value); }
@@ -1226,16 +1350,17 @@ impl GPUBenchApp {
 }
 
 fn create_panel<'a>(title: &str, title_color: iced::Color, children: Element<'a, Message>) -> iced::widget::Container<'a, Message> {
-    container(column![
-        text(title).size(22).style(title_color),
-        Space::with_height(10),
-        children
-    ].width(Length::Fill))
+    let mut col = column![].width(Length::Fill).spacing(8);
+    if !title.is_empty() {
+        col = col.push(text(title).size(20).style(title_color));
+    }
+    col = col.push(children);
+    container(col)
     .width(Length::Fill)
-    .padding(12)
+    .padding(14)
     .style(move |_t: &Theme| container::Appearance {
         background: Some(Background::Color(color!(0x111116))),
-        border: Border { radius: 8.0.into(), width: 1.0, color: color!(0x222233) },
+        border: Border { radius: 12.0.into(), width: 1.0, color: color!(0x222233) },
         ..Default::default()
     })
 }

@@ -1,12 +1,12 @@
 cmake_minimum_required(VERSION 3.16)
-project(GPUBench VERSION 1.1.0)
+project(GPUBench VERSION 1.2.0)
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Versioning
-set(BUILD_NUMBER "3") # Build number for the project
+set(BUILD_NUMBER "2") # Build number for the project
 set(PROJECT_FULL_VERSION "${PROJECT_VERSION}.${BUILD_NUMBER}")
 
 
@@ -85,7 +85,7 @@ endif()
 
 # Shader/Kernel sources
 if(Vulkan_FOUND)
-    file(GLOB SHADERS "shaders/*.comp" "shaders/*.rgen" "shaders/*.rmiss" "shaders/*.rchit" "shaders/*.rahit" "shaders/*.rint")
+    file(GLOB SHADERS "shaders/*.comp" "shaders/*.rgen" "shaders/*.rmiss" "shaders/*.rchit" "shaders/*.rahit" "shaders/*.rint" "shaders/*.vert" "shaders/*.frag")
     # Filter out problematic shaders that use non-standard extensions
     list(REMOVE_ITEM SHADERS 
         "${CMAKE_CURRENT_SOURCE_DIR}/shaders/fp8_native.comp"
@@ -137,6 +137,17 @@ endif()
 
 # Copy HIP kernels and compile code objects
 if(HIP_FOUND)
+    find_program(HIPCC_EXECUTABLE hipcc HINTS /opt/rocm/core-10.0/bin /opt/rocm/bin)
+    if(NOT HIPCC_EXECUTABLE)
+        set(HIPCC_EXECUTABLE hipcc)
+    endif()
+    find_path(ROCM_CLANG_PATH clang++ HINTS /opt/rocm/core-10.0/lib/llvm/bin /usr/lib64/rocm/llvm/bin)
+    if(ROCM_CLANG_PATH)
+        set(HIPCC_ENV ${CMAKE_COMMAND} -E env HIP_CLANG_PATH=${ROCM_CLANG_PATH} ROCM_PATH=/opt/rocm/core-10.0)
+    else()
+        set(HIPCC_ENV)
+    endif()
+
     file(GLOB HIP_SOURCES "hip_kernels/*.hip")
     file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/kernels/rocm)
     
@@ -149,7 +160,7 @@ if(HIP_FOUND)
         # Compile to .co using hipcc
         add_custom_command(
             OUTPUT ${DEST_HIP_CO}
-            COMMAND hipcc -O3 --genco --offload-arch=native ${HIP_SOURCE} -o ${DEST_HIP_CO}
+            COMMAND ${HIPCC_ENV} ${HIPCC_EXECUTABLE} -O3 --genco --offload-arch=native ${HIP_SOURCE} -o ${DEST_HIP_CO}
             DEPENDS ${HIP_SOURCE}
             COMMENT "Compiling HIP kernel to code object: ${HIP_SOURCE}"
         )
@@ -182,6 +193,7 @@ set(LIB_SOURCES
     cpp_src/benchmarks/SysMemBandwidthBench.cpp
     cpp_src/benchmarks/SysMemLatencyBench.cpp
     cpp_src/benchmarks/CacheBench.cpp
+    cpp_src/benchmarks/PixelFillRateBench.cpp
     cpp_src/benchmarks/RayTracingBench.cpp
     cpp_src/benchmarks/RayDivergenceBench.cpp
     cpp_src/benchmarks/RayAnyHitBench.cpp
@@ -191,6 +203,7 @@ set(LIB_SOURCES
     cpp_src/benchmarks/RayProceduralBench.cpp
     cpp_src/benchmarks/RayMaterialDivergenceBench.cpp
     cpp_src/benchmarks/RayPathTracingBench.cpp
+    cpp_src/utils/HardwareTelemetry.cpp
     cpp_src/utils/KernelPath.cpp
     cpp_src/utils/ShaderCache.cpp
 )

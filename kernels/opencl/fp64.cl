@@ -4,11 +4,13 @@
 __kernel void run_benchmark(__global double* data) {
     uint index = get_global_id(0);
 
-    const double c1 = 0.5;
-    const double c2 = 0.25;
-    double val = data[index];
+    double add = (double)(index) * 0.00000001;
+    double mult = 1.000001 + add;
+    double val = data[index] + 1.0;
+
     for (int i = 0; i < 65536; ++i) {
-        val = val * c1 + c2;
+        val = fma(val, mult, 1.0);
     }
     data[index] = val;
 }
+

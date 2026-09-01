@@ -40,14 +40,10 @@ void Fp16Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
 
   // Optionally load Matrix Kernel if supported
   bool try_load_matrix = false;
-  if (context.getBackend() == ComputeBackend::Vulkan && context.getCurrentDeviceInfo().cooperativeMatrixSupport) {
-      try_load_matrix = true;
-  } else if (context.getBackend() == ComputeBackend::ROCm) {
-      // Matrix WMMA is disabled on ROCm due to 7.1.1 backend crash for RDNA4.
-      // If we are on RDNA3 (gfx1100), we could enable it, but for now we skip.
-      if (context.getCurrentDeviceInfo().name.find("gfx11") != std::string::npos) {
-          try_load_matrix = true;
-      }
+  if ((context.getBackend() == ComputeBackend::Vulkan ||
+       context.getBackend() == ComputeBackend::ROCm) &&
+      context.getCurrentDeviceInfo().cooperativeMatrixSupport) {
+    try_load_matrix = true;
   }
 
   if (try_load_matrix) {
@@ -89,16 +85,18 @@ void Fp16Bench::Teardown() {
 
 BenchmarkResult Fp16Bench::GetResult(uint32_t config_idx) const {
   if (config_idx == 0) {
-    // 32 f16vec2 FMAs per iteration = 32 * 4 = 128 FP16 ops per iteration.
-    // Each f16vec2 FMA = 2 elements × (mul+add) = 4 FP16 ops.
-    // Vulkan: 65536 iters. OpenCL: 16384 iters. ROCm: 2048 iters.
-    uint64_t iters = 65536; // Vulkan default
-    uint64_t ops_per_iter = 128; // 32 FMAs × 4 ops each
+    // 32 f16vec4 FMAs per iteration = 32 * 8 = 256 FP16 ops per iteration.
+    // Each f16vec4 FMA = 4 elements × (mul+add) = 8 FP16 ops.
+    // Vulkan: 32768 iters. OpenCL: 16384 iters. ROCm: 2048 iters.
+    uint64_t iters = 32768; // Vulkan default
+    uint64_t ops_per_iter = 256; // 32 FMAs × 8 ops each
     if (context) {
       if (context->getBackend() == ComputeBackend::ROCm) {
         iters = 2048;
+        ops_per_iter = 128;
       } else if (context->getBackend() == ComputeBackend::OpenCL) {
         iters = 16384;
+        ops_per_iter = 128;
       }
     }
     // 8192 workgroups × 64 threads

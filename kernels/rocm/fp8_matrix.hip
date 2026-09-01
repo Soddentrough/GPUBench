@@ -19,33 +19,37 @@ extern "C" __global__ void run_benchmark(float* data) {
     
 // Speculative intrinsic implementation for RDNA4 (gfx12)
 // Disabled due to ROCm 7.1.1 backend failure: "Cannot select: intrinsic %llvm.amdgcn.wmma.f32.16x16x16.f16"
-#if defined(__gfx1200_DISABLED__)
-    using float8 = __attribute__((ext_vector_type(8))) float;
-    // RDNA4 WMMA expects packed fp8 in int vectors or similar. We use int4 (4x 32-bit = 16 bytes = 16x fp8)
-    using int4 = __attribute__((ext_vector_type(4))) int;
-    
-    int4 a = {0x3C3C3C3C, 0x3C3C3C3C, 0x3C3C3C3C, 0x3C3C3C3C};
-    int4 b = {0x3C3C3C3C, 0x3C3C3C3C, 0x3C3C3C3C, 0x3C3C3C3C};
-    float8 c = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
-    
-    #pragma unroll 4
-    for(int i = 0; i < 16384; i++) {
-        // Intrinsic for FP8 WMMA on RDNA4. This signature might need adjustment based on LLVM updates.
-        c = __builtin_amdgcn_wmma_f32_16x16x16_fp8_fp8_w32(a, b, c);
+#if defined(__gfx1200__) || defined(__gfx1201__)
+    typedef int int2_v __attribute__((vector_size(8)));
+    typedef float float8_v __attribute__((vector_size(32)));
+
+    int2_v a = {0x3C3C3C3C, 0x3C3C3C3C};
+    int2_v b = {0x3C3C3C3C, 0x3C3C3C3C};
+
+    float8_v c0 = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+    float8_v c1 = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+    float8_v c2 = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+    float8_v c3 = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+    float8_v c4 = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+    float8_v c5 = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+    float8_v c6 = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+    float8_v c7 = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+
+    for (int i = 0; i < 4096; i++) {
+        c0 = __builtin_amdgcn_wmma_f32_16x16x16_fp8_fp8_w32_gfx12(a, b, c0);
+        c1 = __builtin_amdgcn_wmma_f32_16x16x16_fp8_fp8_w32_gfx12(a, b, c1);
+        c2 = __builtin_amdgcn_wmma_f32_16x16x16_fp8_fp8_w32_gfx12(a, b, c2);
+        c3 = __builtin_amdgcn_wmma_f32_16x16x16_fp8_fp8_w32_gfx12(a, b, c3);
+        c4 = __builtin_amdgcn_wmma_f32_16x16x16_fp8_fp8_w32_gfx12(a, b, c4);
+        c5 = __builtin_amdgcn_wmma_f32_16x16x16_fp8_fp8_w32_gfx12(a, b, c5);
+        c6 = __builtin_amdgcn_wmma_f32_16x16x16_fp8_fp8_w32_gfx12(a, b, c6);
+        c7 = __builtin_amdgcn_wmma_f32_16x16x16_fp8_fp8_w32_gfx12(a, b, c7);
     }
-    // Modulo idx by buffer size (524288 floats) to prevent OOB
+
+    float8_v c = c0 + c1 + c2 + c3 + c4 + c5 + c6 + c7;
     int safe_idx = idx % 524288;
-    data[safe_idx] = c[0] + c[1];
+    data[safe_idx] = c[0] + c[1] + c[2] + c[3] + c[4] + c[5] + c[6] + c[7];
 #else
-    // Emulated Fallback for architectures without FP8 WMMA (e.g. RDNA3)
-    float acc = 1.0f;
-    // Loop count reduced from 16384 → 512 to prevent TDR/GPU crash on long emulated dispatch
-    for(int i=0; i<512; i++) {
-        // 16x16x16 = 4096 MACs per matrix op. Emulating just enough workload to represent it, 
-        // but performance will be severely handicapped, proving lack of native support.
-        acc += 0.001f;
-    }
-    int safe_idx = idx % 524288;
-    data[safe_idx] = acc;
+    data[idx % 524288] = 0.0f;
 #endif
 }

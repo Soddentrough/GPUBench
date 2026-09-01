@@ -9,6 +9,7 @@
 #include "benchmarks/Int4Bench.h"
 #include "benchmarks/Int8Bench.h"
 #include "benchmarks/MemBandwidthBench.h"
+#include "benchmarks/PixelFillRateBench.h"
 #include "benchmarks/RayAnyHitBench.h"
 #include "benchmarks/RayASBuildBench.h"
 #include "benchmarks/RayDivergenceBench.h"
@@ -89,6 +90,7 @@ void BenchmarkRunner::discoverBenchmarks() {
   benchmarks.push_back(std::make_unique<RayProceduralBench>());
   benchmarks.push_back(std::make_unique<RayMaterialDivergenceBench>());
   benchmarks.push_back(std::make_unique<RayPathTracingBench>());
+  benchmarks.push_back(std::make_unique<PixelFillRateBench>());
 
   // Cache Bandwidth
   const size_t l0_size = 16 * 1024; // 16KB L0 cache
@@ -478,10 +480,12 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
                   bench_name += " (" + config_name + ")";
                 }
 
-                // Only print individual "Running..." messages in verbose mode
                 if (verbose) {
                   std::cout << "[D" << context->getSelectedDeviceIndex()
                             << "] Running " << bench_name << "..." << std::endl;
+                } else {
+                  std::cout << "  - [" << ComputeBackendFactory::getBackendName(context->getBackend())
+                            << "] Running " << bench_name << "..." << std::flush;
                 }
 
                 // Warmup (not counted): ramp GPU clocks and fill caches
@@ -550,6 +554,16 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
                           now - bench_start)
                           .count() /
                       1e6;
+                }
+
+                if (!verbose) {
+                  std::cout << " Done." << std::endl;
+                }
+
+                bool isValid = bench->ValidateResults(i);
+                if (!isValid && verbose) {
+                  std::cerr << " [WARNING] Result validation failed for "
+                            << bench_name << std::endl;
                 }
 
                 BenchmarkResult bench_result = bench->GetResult(i);

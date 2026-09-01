@@ -3,6 +3,7 @@ build/
 build-windows/
 build-release/
 build-release-package/
+target/
 
 # GPU core dump files
 gpucore.*

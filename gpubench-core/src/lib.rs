@@ -24,7 +24,7 @@ pub struct ResultData {
 
 #[derive(Parser, Debug, Clone)]
 #[command(name = "GPUBench")]
-#[command(version = "1.1.0")]
+#[command(version = "1.2.0")]
 #[command(about = "High-performance cross-platform GPU benchmarking tool", long_about = None)]
 pub struct Cli {
     #[arg(short = 'b', long = "benchmarks", value_delimiter = ',')]

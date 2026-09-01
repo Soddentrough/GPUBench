@@ -24,6 +24,7 @@ public:
   virtual void Run(uint32_t config_idx = 0) = 0;
   virtual void Teardown() = 0;
   virtual BenchmarkResult GetResult(uint32_t config_idx = 0) const = 0;
+  virtual bool ValidateResults(uint32_t config_idx = 0) const { return true; }
   virtual bool IsEmulated(uint32_t config_idx = 0) const { return false; }
   // Why a benchmark is unsupported (only meaningful when IsSupported()
   // returns false). Used to clearly distinguish hardware limitations from

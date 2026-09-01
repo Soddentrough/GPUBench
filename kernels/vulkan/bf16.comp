@@ -6,51 +6,51 @@
 layout (local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
 layout(set = 0, binding = 0) buffer Data {
-    f16vec2 data[];
+    f16vec4 data[];
 } InOutBuffer;
 
 void main() {
     uint index = gl_GlobalInvocationID.x;
 
-    // Use 32 f16vec2 accumulators to exercise 16-bit math throughput.
+    // Use 32 f16vec4 accumulators to exercise 16-bit math throughput.
     // We fall back to FP16 since bfloat16_t is not universally exposed in glslc.
-    f16vec2 val1 = InOutBuffer.data[index % 1024];
-    f16vec2 val2 = f16vec2(0.1, 0.2);
-    f16vec2 val3 = f16vec2(0.3, 0.4);
-    f16vec2 val4 = f16vec2(0.5, 0.6);
-    f16vec2 val5 = f16vec2(0.7, 0.8);
-    f16vec2 val6 = f16vec2(0.9, 1.0);
-    f16vec2 val7 = f16vec2(1.1, 1.2);
-    f16vec2 val8 = f16vec2(1.3, 1.4);
-    f16vec2 val9 = f16vec2(1.5, 1.6);
-    f16vec2 val10 = f16vec2(1.7, 1.8);
-    f16vec2 val11 = f16vec2(1.9, 2.0);
-    f16vec2 val12 = f16vec2(2.1, 2.2);
-    f16vec2 val13 = f16vec2(2.3, 2.4);
-    f16vec2 val14 = f16vec2(2.5, 2.6);
-    f16vec2 val15 = f16vec2(2.7, 2.8);
-    f16vec2 val16 = f16vec2(2.9, 3.0);
-    f16vec2 val17 = f16vec2(3.1, 3.2);
-    f16vec2 val18 = f16vec2(3.3, 3.4);
-    f16vec2 val19 = f16vec2(3.5, 3.6);
-    f16vec2 val20 = f16vec2(3.7, 3.8);
-    f16vec2 val21 = f16vec2(3.9, 4.0);
-    f16vec2 val22 = f16vec2(4.1, 4.2);
-    f16vec2 val23 = f16vec2(4.3, 4.4);
-    f16vec2 val24 = f16vec2(4.5, 4.6);
-    f16vec2 val25 = f16vec2(4.7, 4.8);
-    f16vec2 val26 = f16vec2(4.9, 5.0);
-    f16vec2 val27 = f16vec2(5.1, 5.2);
-    f16vec2 val28 = f16vec2(5.3, 5.4);
-    f16vec2 val29 = f16vec2(5.5, 5.6);
-    f16vec2 val30 = f16vec2(5.7, 5.8);
-    f16vec2 val31 = f16vec2(5.9, 6.0);
-    f16vec2 val32 = f16vec2(6.1, 6.2);
+    f16vec4 val1 = InOutBuffer.data[index % 1024];
+    f16vec4 val2 = f16vec4(0.1, 0.2, 0.3, 0.4);
+    f16vec4 val3 = f16vec4(0.5, 0.6, 0.7, 0.8);
+    f16vec4 val4 = f16vec4(0.9, 1.0, 1.1, 1.2);
+    f16vec4 val5 = f16vec4(1.3, 1.4, 1.5, 1.6);
+    f16vec4 val6 = f16vec4(1.7, 1.8, 1.9, 2.0);
+    f16vec4 val7 = f16vec4(2.1, 2.2, 2.3, 2.4);
+    f16vec4 val8 = f16vec4(2.5, 2.6, 2.7, 2.8);
+    f16vec4 val9 = f16vec4(2.9, 3.0, 3.1, 3.2);
+    f16vec4 val10 = f16vec4(3.3, 3.4, 3.5, 3.6);
+    f16vec4 val11 = f16vec4(3.7, 3.8, 3.9, 4.0);
+    f16vec4 val12 = f16vec4(4.1, 4.2, 4.3, 4.4);
+    f16vec4 val13 = f16vec4(4.5, 4.6, 4.7, 4.8);
+    f16vec4 val14 = f16vec4(4.9, 5.0, 5.1, 5.2);
+    f16vec4 val15 = f16vec4(5.3, 5.4, 5.5, 5.6);
+    f16vec4 val16 = f16vec4(5.7, 5.8, 5.9, 6.0);
+    f16vec4 val17 = f16vec4(6.1, 6.2, 6.3, 6.4);
+    f16vec4 val18 = f16vec4(6.5, 6.6, 6.7, 6.8);
+    f16vec4 val19 = f16vec4(6.9, 7.0, 7.1, 7.2);
+    f16vec4 val20 = f16vec4(7.3, 7.4, 7.5, 7.6);
+    f16vec4 val21 = f16vec4(7.7, 7.8, 7.9, 8.0);
+    f16vec4 val22 = f16vec4(8.1, 8.2, 8.3, 8.4);
+    f16vec4 val23 = f16vec4(8.5, 8.6, 8.7, 8.8);
+    f16vec4 val24 = f16vec4(8.9, 9.0, 9.1, 9.2);
+    f16vec4 val25 = f16vec4(9.3, 9.4, 9.5, 9.6);
+    f16vec4 val26 = f16vec4(9.7, 9.8, 9.9, 10.0);
+    f16vec4 val27 = f16vec4(10.1, 10.2, 10.3, 10.4);
+    f16vec4 val28 = f16vec4(10.5, 10.6, 10.7, 10.8);
+    f16vec4 val29 = f16vec4(10.9, 11.0, 11.1, 11.2);
+    f16vec4 val30 = f16vec4(11.3, 11.4, 11.5, 11.6);
+    f16vec4 val31 = f16vec4(11.7, 11.8, 11.9, 12.0);
+    f16vec4 val32 = f16vec4(12.1, 12.2, 12.3, 12.4);
 
-    f16vec2 m = f16vec2(float16_t(1.0001));
+    f16vec4 m = f16vec4(float16_t(1.0001));
     
-    // Each iteration performs 32 f16vec2 FMAs = 32 * 2 * 2 = 128 FP16 ops.
-    for (int i = 0; i < 16384; ++i) {
+    // Each iteration performs 32 f16vec4 FMAs = 32 * 4 * 2 = 256 FP16 ops.
+    for (int i = 0; i < 32768; ++i) {
         val1 = fma(val1, m, val2);
         val2 = fma(val2, m, val3);
         val3 = fma(val3, m, val4);

@@ -561,7 +561,6 @@ void ROCmContext::notifyKernelCreated(const std::string &file_name) {
 
 void ROCmContext::printProgressBar(uint32_t current, uint32_t total,
                                    const std::string &kernel_name) {
-  if (!verbose) return;
   const int barWidth = 30;
   float progress = static_cast<float>(current) / total;
   int pos = static_cast<int>(barWidth * progress);

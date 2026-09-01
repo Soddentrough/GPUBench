@@ -1,4 +1,5 @@
 #include "benchmarks/Fp32Bench.h"
+#include <cmath>
 #include <filesystem>
 #include <iostream>
 #include <stdexcept>
@@ -65,13 +66,21 @@ void Fp32Bench::Teardown() {
 
 BenchmarkResult Fp32Bench::GetResult(uint32_t config_idx) const {
   // 32 vec4 FMAs per iteration = 32 * 4 * 2 = 256 FP32 operations per iteration
-  // Vulkan: 16384 iters. OpenCL: 16384 iters. ROCm: 512 iters.
-  uint64_t iters = 16384; // Vulkan/OpenCL default
-  if (context) {
-    if (context->getBackend() == ComputeBackend::ROCm) {
-      iters = 512;
-    }
-  }
+  // 16384 iters across Vulkan, OpenCL, and ROCm
+  uint64_t iters = 16384;
   uint64_t num_ops = iters * 256 * 8192 * 64;
   return {num_ops, 0.0};
 }
+
+bool Fp32Bench::ValidateResults(uint32_t config_idx) const {
+  if (!context || !buffer)
+    return false;
+  float val = 0.0f;
+  try {
+    context->readBuffer(buffer, 0, sizeof(float), &val);
+    return !std::isnan(val) && !std::isinf(val) && val != 0.0f;
+  } catch (...) {
+    return false;
+  }
+}
+

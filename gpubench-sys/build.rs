@@ -1,6 +1,7 @@
 fn main() {
     let dst = cmake::Config::new("..")
-        .build_target("gpubench_lib") // We will need to update CMakeLists.txt to build a lib
+        .define("CMAKE_DISABLE_FIND_PACKAGE_HIP", "TRUE")
+        .build_target("gpubench_lib")
         .build();
 
     println!("cargo:rustc-link-search=native={}/build", dst.display());
