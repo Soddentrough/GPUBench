@@ -5,11 +5,14 @@ layout(location = 0) rayPayloadInEXT vec3 payload;
 hitAttributeEXT vec2 attribs;
 
 void main() {
-    // Mimic metallic material with some math
-    vec3 V = vec3(0.0, 0.0, 1.0);
-    vec3 N = vec3(0.0, 1.0, 0.0);
-    vec3 H = normalize(V + N);
-    float NdotH = max(dot(N, H), 0.0);
-    float spec = pow(NdotH, 32.0);
-    payload = vec3(0.8, 0.8, 0.8) * spec;
+    vec3 V = -normalize(gl_WorldRayDirectionEXT);
+    vec3 N = normalize(vec3(attribs.x - 0.5, 1.0, attribs.y - 0.5));
+    float cosTheta = clamp(dot(V, N), 0.0, 1.0);
+    float eta = 1.5;
+    float r0 = (1.0 - eta) / (1.0 + eta);
+    r0 = r0 * r0;
+    float F = r0 + (1.0 - r0) * pow(1.0 - cosTheta, 5.0);
+    vec3 refractDir = refract(-V, N, 1.0 / eta);
+    vec3 reflectDir = reflect(-V, N);
+    payload = mix(vec3(0.1, 0.4, 0.8) * abs(refractDir), vec3(0.9) * abs(reflectDir), F);
 }

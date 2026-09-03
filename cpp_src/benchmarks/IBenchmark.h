@@ -46,6 +46,9 @@ public:
   virtual std::string GetConfigName(uint32_t config_idx) const { return ""; }
   virtual bool IsConfigSupported(uint32_t config_idx) const { return true; }
   virtual std::string GetConfigSupportNote(uint32_t config_idx) const { return ""; }
+  virtual SupportLimitation GetConfigSupportLimitation(uint32_t config_idx) const {
+    return GetSupportLimitation();
+  }
   virtual uint32_t GetExpectedKernelCount() const { return 1; }
 
   // Returns true if this benchmark depends on the selected GPU device context.

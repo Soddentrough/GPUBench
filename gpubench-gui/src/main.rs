@@ -1187,7 +1187,7 @@ impl Application for GPUBenchApp {
             row![
                 text("GPUBench").size(24).style(color!(0xF8FAFC)),
                 Space::with_width(8),
-                container(text("v1.3.1").size(10).style(color!(0x818CF8)))
+                container(text("v1.4.0").size(10).style(color!(0x818CF8)))
                     .padding([2, 6])
                     .style(|_t: &Theme| container::Appearance {
                         background: Some(Background::Color(color!(0x6366F1, 0.15))),

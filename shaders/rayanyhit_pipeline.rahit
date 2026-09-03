@@ -19,12 +19,16 @@ uint hash(uint seed) {
 }
 
 void main() {
-    // Generate a pseudo-random number to simulate an alpha test (e.g. reading from a texture)
-    uint state = hash(gl_PrimitiveID + pc.seed);
-    float randVal = float(state % 10000) / 10000.0;
+    // Compute barycentric UV coordinate across triangle surface
+    vec2 uv = attribs * 16.0;
     
-    // If our random value is greater than alphaDensity, we consider this part of the triangle transparent
-    if (randVal > pc.alphaDensity) {
+    // Procedural multi-frequency alpha cutout mask (simulating foliage leaf / fence cutout)
+    float mask = sin(uv.x * 6.28318) * cos(uv.y * 6.28318);
+    mask += 0.5 * sin(uv.x * 18.849) * cos(uv.y * 18.849);
+    float alphaVal = clamp(0.5 + 0.5 * mask, 0.0, 1.0);
+
+    // Alpha test threshold: if alpha < (1.0 - alphaDensity), the surface is transparent
+    if (alphaVal < (1.0 - pc.alphaDensity)) {
         ignoreIntersectionEXT;
     }
 }

@@ -20,7 +20,7 @@ struct CompactRayPayload {
 
 layout(set = 0, binding = 2) buffer WorkListBuffer {
     uint queueCounters[32]; // Per-material or per-bounce counters
-    CompactRayPayload rayRecords[131072]; // Compact queue buffer
+    CompactRayPayload rayRecords[1048576]; // Compact queue buffer
 } worklist;
 
 // DispatchIndirectCommand structure matching VkDispatchIndirectCommand
@@ -122,8 +122,8 @@ void main() {
             // Work Lists: Stream compaction into 32 material bins
             uint matId = (primId + idx) % 32;
             uint slot = atomicAdd(worklist.queueCounters[matId], 1);
-            if (slot < 4096) {
-                uint recordIdx = matId * 4096 + slot;
+            if (slot < 32768) {
+                uint recordIdx = matId * 32768 + slot;
                 worklist.rayRecords[recordIdx].originAndMatId = vec4(hitPos + normal * 0.002, uintBitsToFloat(matId));
                 worklist.rayRecords[recordIdx].directionAndSeed = vec4(direction, uintBitsToFloat(rngState));
                 worklist.rayRecords[recordIdx].throughputAndMorton = vec4(1.0, 1.0, 1.0, 0.0);
@@ -158,23 +158,29 @@ void main() {
                 }
             }
         } else {
-            // Work Lists: Incoherent secondary rays with Morton spatial code calculation
+            // Work Lists: Incoherent secondary rays with Directional Octant Binning
+            // The GPU directly bins rays into 8 directional cones (+/-X, +/-Y, +/-Z) at birth,
+            // producing pre-ordered, coherent work lists without needing SER or sorting passes.
             float u1 = rand_float(rngState);
             float u2 = rand_float(rngState);
             vec3 incohDir = align_to_normal(cosine_sample_hemisphere(u1, u2), normal);
-            uint morton = morton3D(incohDir);
 
-            uint slot = atomicAdd(worklist.queueCounters[0], 1);
-            if (slot < 65536) {
-                worklist.rayRecords[slot].originAndMatId = vec4(hitPos + normal * 0.002, 0.0);
-                worklist.rayRecords[slot].directionAndSeed = vec4(incohDir, uintBitsToFloat(rngState));
-                worklist.rayRecords[slot].throughputAndMorton = vec4(1.0, 1.0, 1.0, uintBitsToFloat(morton));
+            uint octant = (incohDir.x > 0.0 ? 1u : 0u) |
+                          (incohDir.y > 0.0 ? 2u : 0u) |
+                          (incohDir.z > 0.0 ? 4u : 0u);
+
+            uint slot = atomicAdd(worklist.queueCounters[octant], 1);
+            if (slot < 131072) {
+                uint recordIdx = octant * 131072 + slot;
+                worklist.rayRecords[recordIdx].originAndMatId = vec4(hitPos + normal * 0.002, float(octant));
+                worklist.rayRecords[recordIdx].directionAndSeed = vec4(incohDir, uintBitsToFloat(rngState));
+                worklist.rayRecords[recordIdx].throughputAndMorton = vec4(1.0, 1.0, 1.0, 0.0);
             }
 
             if ((slot % 64) == 0) {
-                atomicMax(indirectCmds.commands[0].x, (slot + 64) / 64);
-                indirectCmds.commands[0].y = 1;
-                indirectCmds.commands[0].z = 1;
+                atomicMax(indirectCmds.commands[octant].x, (slot + 64) / 64);
+                indirectCmds.commands[octant].y = 1;
+                indirectCmds.commands[octant].z = 1;
             }
         }
     }

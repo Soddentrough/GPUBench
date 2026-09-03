@@ -19,20 +19,21 @@ struct CompactRayPayload {
 
 layout(set = 0, binding = 2) buffer WorkListBuffer {
     uint queueCounters[32];
-    CompactRayPayload rayRecords[131072];
+    CompactRayPayload rayRecords[1048576];
 } worklist;
 
 layout(push_constant) uniform PushConstants {
-    uint currentBounce;
-    uint maxQueueSize;
+    uint queueIndex;   // Queue index (0 for bounce compaction, or 0..7 for directional octants)
+    uint maxQueueSize; // Base stride (e.g. 16384 for octants, or 0 for single queue)
 } pc;
 
 void main() {
     uint threadIdx = gl_GlobalInvocationID.x;
-    uint activeCount = worklist.queueCounters[0];
+    uint activeCount = worklist.queueCounters[pc.queueIndex];
     if (threadIdx >= activeCount) return;
 
-    CompactRayPayload payload = worklist.rayRecords[threadIdx];
+    uint recordIdx = pc.queueIndex * pc.maxQueueSize + threadIdx;
+    CompactRayPayload payload = worklist.rayRecords[recordIdx];
     vec3 origin = payload.originAndMatId.xyz;
     vec3 direction = payload.directionAndSeed.xyz;
 

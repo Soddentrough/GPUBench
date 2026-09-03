@@ -8,6 +8,7 @@
 #define VK_ENABLE_BETA_EXTENSIONS
 #endif
 #include <vulkan/vulkan.h>
+#include "core/VulkanContext.h"
 #endif
 
 class RayParadigmBench : public IBenchmark {
@@ -41,6 +42,15 @@ public:
   std::string GetConfigSupportNote(uint32_t config_idx) const override {
     return unsupportedReason[config_idx];
   }
+  SupportLimitation GetConfigSupportLimitation(uint32_t config_idx) const override {
+    if (config_idx == 1 || config_idx == 5 || config_idx == 9) {
+      return SupportLimitation::kHardware;
+    }
+    if (config_idx == 3 || config_idx == 7 || config_idx == 11) {
+      return SupportLimitation::kApi;
+    }
+    return SupportLimitation::kNone;
+  }
   const char *GetComponent(uint32_t config_idx = 0) const override { return "Ray Tracing"; }
   const char *GetSubCategory(uint32_t config_idx = 0) const override;
 
@@ -52,7 +62,6 @@ private:
   ComputeKernel kernelClassify = nullptr;
   ComputeKernel kernelMaterial = nullptr;
   ComputeKernel kernelBounce = nullptr;
-  ComputeKernel kernelSort = nullptr;
   ComputeKernel kernelWorkGraph = nullptr;
 
   // Storage Buffers
@@ -77,6 +86,10 @@ private:
 
   void loadRTProcs(VkDevice device);
   void buildAS();
+
+  std::vector<VulkanContext::IndirectBatchEntry> materialBatches;
+  std::vector<VulkanContext::IndirectBatchEntry> bounceBatches;
+  std::vector<VulkanContext::IndirectBatchEntry> octantBatches;
 #endif
 
   uint32_t rayCount = 1000000;

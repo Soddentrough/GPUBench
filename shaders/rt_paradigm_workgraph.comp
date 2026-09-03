@@ -2,7 +2,7 @@
 #extension GL_EXT_ray_query : enable
 #extension GL_EXT_ray_flags_primitive_culling : enable
 
-layout(local_size_x = 32) in;
+layout(local_size_x = 64) in;
 
 layout(set = 0, binding = 0) uniform accelerationStructureEXT topLevelAS;
 layout(set = 0, binding = 1) buffer Results {
@@ -30,6 +30,9 @@ struct WorkGraphPayload {
 };
 
 shared WorkGraphPayload onChipQueue[64];
+shared WorkGraphPayload sortedQueue[64];
+shared uint binCounts[32];
+shared uint binOffsets[32];
 shared uint onChipQueueCount;
 
 uint pcg_hash(inout uint state) {
@@ -57,6 +60,281 @@ vec3 align_to_normal(vec3 sample_dir, vec3 normal) {
     vec3 tangent = normalize(cross(up, normal));
     vec3 bitangent = cross(normal, tangent);
     return tangent * sample_dir.x + bitangent * sample_dir.y + normal * sample_dir.z;
+}
+
+// 32 Distinct Real-World BSDF Models (Conductors, Dielectrics, Layered, Anisotropic, Special)
+vec3 evalMaterialBSDF(uint matId, vec3 normal, vec3 inDir, inout uint rng) {
+    float r1 = rand_float(rng);
+    float r2 = rand_float(rng);
+    vec3 viewDir = -inDir;
+    vec3 lightDir = normalize(vec3(0.57735, 0.57735, 0.57735));
+    vec3 halfVec = normalize(viewDir + lightDir);
+    float NdotL = max(dot(normal, lightDir), 0.0);
+    float NdotV = max(dot(normal, viewDir), 0.001);
+    float NdotH = max(dot(normal, halfVec), 0.0);
+    float VdotH = max(dot(viewDir, halfVec), 0.0);
+    vec3 color = vec3(0.0);
+
+    switch (matId % 32) {
+        case 0: { // Conductor: Gold (GGX Microfacet)
+            float a2 = 0.0225;
+            float d = NdotH * NdotH * (a2 - 1.0) + 1.0;
+            float D = a2 / (3.14159 * d * d + 0.0001);
+            float k = 0.1653;
+            float G = (NdotL / (NdotL * (1.0 - k) + k)) * (NdotV / (NdotV * (1.0 - k) + k));
+            vec3 F = vec3(1.00, 0.78, 0.34) + (1.0 - vec3(1.00, 0.78, 0.34)) * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
+            color = (D * G * F) / (4.0 * NdotL * NdotV + 0.001) * NdotL;
+            break;
+        }
+        case 1: { // Conductor: Copper (GGX Microfacet)
+            float a2 = 0.0400;
+            float d = NdotH * NdotH * (a2 - 1.0) + 1.0;
+            float D = a2 / (3.14159 * d * d + 0.0001);
+            float k = 0.1800;
+            float G = (NdotL / (NdotL * (1.0 - k) + k)) * (NdotV / (NdotV * (1.0 - k) + k));
+            vec3 F = vec3(0.95, 0.64, 0.54) + (1.0 - vec3(0.95, 0.64, 0.54)) * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
+            color = (D * G * F) / (4.0 * NdotL * NdotV + 0.001) * NdotL;
+            break;
+        }
+        case 2: { // Conductor: Silver (GGX Microfacet)
+            float a2 = 0.0064;
+            float d = NdotH * NdotH * (a2 - 1.0) + 1.0;
+            float D = a2 / (3.14159 * d * d + 0.0001);
+            float k = 0.1458;
+            float G = (NdotL / (NdotL * (1.0 - k) + k)) * (NdotV / (NdotV * (1.0 - k) + k));
+            vec3 F = vec3(0.97, 0.96, 0.91) + (1.0 - vec3(0.97, 0.96, 0.91)) * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
+            color = (D * G * F) / (4.0 * NdotL * NdotV + 0.001) * NdotL;
+            break;
+        }
+        case 3: { // Conductor: Aluminium (GGX Microfacet)
+            float a2 = 0.0625;
+            float d = NdotH * NdotH * (a2 - 1.0) + 1.0;
+            float D = a2 / (3.14159 * d * d + 0.0001);
+            float k = 0.1953;
+            float G = (NdotL / (NdotL * (1.0 - k) + k)) * (NdotV / (NdotV * (1.0 - k) + k));
+            vec3 F = vec3(0.91, 0.92, 0.92) + (1.0 - vec3(0.91, 0.92, 0.92)) * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
+            color = (D * G * F) / (4.0 * NdotL * NdotV + 0.001) * NdotL;
+            break;
+        }
+        case 4: { // Conductor: Iron (GGX Microfacet)
+            float a2 = 0.1225;
+            float d = NdotH * NdotH * (a2 - 1.0) + 1.0;
+            float D = a2 / (3.14159 * d * d + 0.0001);
+            float k = 0.2278;
+            float G = (NdotL / (NdotL * (1.0 - k) + k)) * (NdotV / (NdotV * (1.0 - k) + k));
+            vec3 F = vec3(0.56, 0.57, 0.58) + (1.0 - vec3(0.56, 0.57, 0.58)) * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
+            color = (D * G * F) / (4.0 * NdotL * NdotV + 0.001) * NdotL;
+            break;
+        }
+        case 5: { // Conductor: Titanium (GGX Microfacet)
+            float a2 = 0.0900;
+            float d = NdotH * NdotH * (a2 - 1.0) + 1.0;
+            float D = a2 / (3.14159 * d * d + 0.0001);
+            float k = 0.2113;
+            float G = (NdotL / (NdotL * (1.0 - k) + k)) * (NdotV / (NdotV * (1.0 - k) + k));
+            vec3 F = vec3(0.54, 0.50, 0.44) + (1.0 - vec3(0.54, 0.50, 0.44)) * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
+            color = (D * G * F) / (4.0 * NdotL * NdotV + 0.001) * NdotL;
+            break;
+        }
+        case 6: { // Conductor: Chrome (GGX Microfacet)
+            float a2 = 0.0025;
+            float d = NdotH * NdotH * (a2 - 1.0) + 1.0;
+            float D = a2 / (3.14159 * d * d + 0.0001);
+            float k = 0.1378;
+            float G = (NdotL / (NdotL * (1.0 - k) + k)) * (NdotV / (NdotV * (1.0 - k) + k));
+            vec3 F = vec3(0.55, 0.56, 0.55) + (1.0 - vec3(0.55, 0.56, 0.55)) * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
+            color = (D * G * F) / (4.0 * NdotL * NdotV + 0.001) * NdotL;
+            break;
+        }
+        case 7: { // Conductor: Brass (GGX Microfacet)
+            float a2 = 0.0484;
+            float d = NdotH * NdotH * (a2 - 1.0) + 1.0;
+            float D = a2 / (3.14159 * d * d + 0.0001);
+            float k = 0.1860;
+            float G = (NdotL / (NdotL * (1.0 - k) + k)) * (NdotV / (NdotV * (1.0 - k) + k));
+            vec3 F = vec3(0.91, 0.78, 0.43) + (1.0 - vec3(0.91, 0.78, 0.43)) * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
+            color = (D * G * F) / (4.0 * NdotL * NdotV + 0.001) * NdotL;
+            break;
+        }
+        case 8: { // Dielectric: Water (Fresnel Transmission & Reflection)
+            float F = 0.0201 + (1.0 - 0.0201) * pow(clamp(1.0 - NdotV, 0.0, 1.0), 5.0);
+            vec3 refr = refract(inDir, normal, 1.0 / 1.33);
+            vec3 refl = reflect(inDir, normal);
+            float spec = pow(max(dot(refl, lightDir), 0.0), 32.0);
+            color = mix(vec3(0.9, 0.95, 1.0) * (NdotL * 0.8 + 0.2), vec3(spec), F);
+            break;
+        }
+        case 9: { // Dielectric: Window Glass (Fresnel Transmission & Reflection)
+            float F = 0.0426 + (1.0 - 0.0426) * pow(clamp(1.0 - NdotV, 0.0, 1.0), 5.0);
+            vec3 refr = refract(inDir, normal, 1.0 / 1.52);
+            vec3 refl = reflect(inDir, normal);
+            float spec = pow(max(dot(refl, lightDir), 0.0), 32.0);
+            color = mix(vec3(0.95, 0.98, 0.95) * (NdotL * 0.8 + 0.2), vec3(spec), F);
+            break;
+        }
+        case 10: { // Dielectric: Diamond (Fresnel Transmission & Reflection)
+            float F = 0.1724 + (1.0 - 0.1724) * pow(clamp(1.0 - NdotV, 0.0, 1.0), 5.0);
+            vec3 refr = refract(inDir, normal, 1.0 / 2.42);
+            vec3 refl = reflect(inDir, normal);
+            float spec = pow(max(dot(refl, lightDir), 0.0), 32.0);
+            color = mix(vec3(1.0, 1.0, 1.0) * (NdotL * 0.8 + 0.2), vec3(spec), F);
+            break;
+        }
+        case 11: { // Dielectric: Sapphire (Fresnel Transmission & Reflection)
+            float F = 0.0773 + (1.0 - 0.0773) * pow(clamp(1.0 - NdotV, 0.0, 1.0), 5.0);
+            vec3 refr = refract(inDir, normal, 1.0 / 1.77);
+            vec3 refl = reflect(inDir, normal);
+            float spec = pow(max(dot(refl, lightDir), 0.0), 32.0);
+            color = mix(vec3(0.1, 0.3, 0.9) * (NdotL * 0.8 + 0.2), vec3(spec), F);
+            break;
+        }
+        case 12: { // Dielectric: Amber (Fresnel Transmission & Reflection)
+            float F = 0.0465 + (1.0 - 0.0465) * pow(clamp(1.0 - NdotV, 0.0, 1.0), 5.0);
+            vec3 refr = refract(inDir, normal, 1.0 / 1.55);
+            vec3 refl = reflect(inDir, normal);
+            float spec = pow(max(dot(refl, lightDir), 0.0), 32.0);
+            color = mix(vec3(0.9, 0.6, 0.1) * (NdotL * 0.8 + 0.2), vec3(spec), F);
+            break;
+        }
+        case 13: { // Dielectric: Quartz (Fresnel Transmission & Reflection)
+            float F = 0.0350 + (1.0 - 0.0350) * pow(clamp(1.0 - NdotV, 0.0, 1.0), 5.0);
+            vec3 refr = refract(inDir, normal, 1.0 / 1.46);
+            vec3 refl = reflect(inDir, normal);
+            float spec = pow(max(dot(refl, lightDir), 0.0), 32.0);
+            color = mix(vec3(0.8, 0.9, 0.8) * (NdotL * 0.8 + 0.2), vec3(spec), F);
+            break;
+        }
+        case 14: { // Layered: Red Car Paint (Dual Lobe Base + Clearcoat)
+            float d_base = 0.0900 / (3.14159 * pow(NdotH * NdotH * (0.0900 - 1.0) + 1.0, 2.0) + 0.0001);
+            float d_coat = 0.0004 / (3.14159 * pow(NdotH * NdotH * (0.0004 - 1.0) + 1.0, 2.0) + 0.0001);
+            float f_coat = 0.04 + 0.96 * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
+            vec3 base = vec3(0.85, 0.05, 0.05) * (d_base * 0.5 + NdotL);
+            vec3 coat = vec3(1.0) * (d_coat * f_coat * NdotL);
+            color = base * (1.0 - f_coat) + coat * 1.5;
+            break;
+        }
+        case 15: { // Layered: Blue Metallic (Dual Lobe Base + Clearcoat)
+            float d_base = 0.0625 / (3.14159 * pow(NdotH * NdotH * (0.0625 - 1.0) + 1.0, 2.0) + 0.0001);
+            float d_coat = 0.0009 / (3.14159 * pow(NdotH * NdotH * (0.0009 - 1.0) + 1.0, 2.0) + 0.0001);
+            float f_coat = 0.04 + 0.96 * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
+            vec3 base = vec3(0.05, 0.25, 0.85) * (d_base * 0.5 + NdotL);
+            vec3 coat = vec3(1.0) * (d_coat * f_coat * NdotL);
+            color = base * (1.0 - f_coat) + coat * 1.5;
+            break;
+        }
+        case 16: { // Layered: Black Lacquer (Dual Lobe Base + Clearcoat)
+            float d_base = 0.1600 / (3.14159 * pow(NdotH * NdotH * (0.1600 - 1.0) + 1.0, 2.0) + 0.0001);
+            float d_coat = 0.0001 / (3.14159 * pow(NdotH * NdotH * (0.0001 - 1.0) + 1.0, 2.0) + 0.0001);
+            float f_coat = 0.04 + 0.96 * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
+            vec3 base = vec3(0.02, 0.02, 0.02) * (d_base * 0.5 + NdotL);
+            vec3 coat = vec3(1.0) * (d_coat * f_coat * NdotL);
+            color = base * (1.0 - f_coat) + coat * 1.5;
+            break;
+        }
+        case 17: { // Layered: Carbon Fiber (Dual Lobe Base + Clearcoat)
+            float d_base = 0.0400 / (3.14159 * pow(NdotH * NdotH * (0.0400 - 1.0) + 1.0, 2.0) + 0.0001);
+            float d_coat = 0.0016 / (3.14159 * pow(NdotH * NdotH * (0.0016 - 1.0) + 1.0, 2.0) + 0.0001);
+            float f_coat = 0.04 + 0.96 * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
+            vec3 base = vec3(0.08, 0.08, 0.08) * (d_base * 0.5 + NdotL);
+            vec3 coat = vec3(1.0) * (d_coat * f_coat * NdotL);
+            color = base * (1.0 - f_coat) + coat * 1.5;
+            break;
+        }
+        case 18: { // Layered: Glossy Plastic Red (Dual Lobe Base + Clearcoat)
+            float d_base = 0.1225 / (3.14159 * pow(NdotH * NdotH * (0.1225 - 1.0) + 1.0, 2.0) + 0.0001);
+            float d_coat = 0.0025 / (3.14159 * pow(NdotH * NdotH * (0.0025 - 1.0) + 1.0, 2.0) + 0.0001);
+            float f_coat = 0.04 + 0.96 * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
+            vec3 base = vec3(0.9, 0.1, 0.1) * (d_base * 0.5 + NdotL);
+            vec3 coat = vec3(1.0) * (d_coat * f_coat * NdotL);
+            color = base * (1.0 - f_coat) + coat * 1.5;
+            break;
+        }
+        case 19: { // Layered: Glossy Plastic White (Dual Lobe Base + Clearcoat)
+            float d_base = 0.1225 / (3.14159 * pow(NdotH * NdotH * (0.1225 - 1.0) + 1.0, 2.0) + 0.0001);
+            float d_coat = 0.0025 / (3.14159 * pow(NdotH * NdotH * (0.0025 - 1.0) + 1.0, 2.0) + 0.0001);
+            float f_coat = 0.04 + 0.96 * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
+            vec3 base = vec3(0.9, 0.9, 0.9) * (d_base * 0.5 + NdotL);
+            vec3 coat = vec3(1.0) * (d_coat * f_coat * NdotL);
+            color = base * (1.0 - f_coat) + coat * 1.5;
+            break;
+        }
+        case 20: { // Anisotropic: Brushed Steel X
+            vec3 up = abs(normal.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+            vec3 T = normalize(cross(up, normal));
+            vec3 B = cross(normal, T);
+            float HdotT = dot(halfVec, T);
+            float HdotB = dot(halfVec, B);
+            float D = 1.0 / (3.14159 * 0.0500 * pow((HdotT*HdotT)/0.0100 + (HdotB*HdotB)/0.2500 + NdotH*NdotH, 2.0) + 0.0001);
+            color = vec3(0.85, 0.85, 0.88) * D * NdotL * 0.5;
+            break;
+        }
+        case 21: { // Anisotropic: Brushed Steel Y
+            vec3 up = abs(normal.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+            vec3 T = normalize(cross(up, normal));
+            vec3 B = cross(normal, T);
+            float HdotT = dot(halfVec, T);
+            float HdotB = dot(halfVec, B);
+            float D = 1.0 / (3.14159 * 0.0500 * pow((HdotT*HdotT)/0.2500 + (HdotB*HdotB)/0.0100 + NdotH*NdotH, 2.0) + 0.0001);
+            color = vec3(0.85, 0.85, 0.88) * D * NdotL * 0.5;
+            break;
+        }
+        case 22: { // Anisotropic: Radial Copper
+            vec3 up = abs(normal.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+            vec3 T = normalize(cross(up, normal));
+            vec3 B = cross(normal, T);
+            float HdotT = dot(halfVec, T);
+            float HdotB = dot(halfVec, B);
+            float D = 1.0 / (3.14159 * 0.0675 * pow((HdotT*HdotT)/0.0225 + (HdotB*HdotB)/0.2025 + NdotH*NdotH, 2.0) + 0.0001);
+            color = vec3(0.85, 0.85, 0.88) * D * NdotL * 0.5;
+            break;
+        }
+        case 23: { // Anisotropic: Anisotropic Hair
+            vec3 up = abs(normal.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+            vec3 T = normalize(cross(up, normal));
+            vec3 B = cross(normal, T);
+            float HdotT = dot(halfVec, T);
+            float HdotB = dot(halfVec, B);
+            float D = 1.0 / (3.14159 * 0.0280 * pow((HdotT*HdotT)/0.0064 + (HdotB*HdotB)/0.1225 + NdotH*NdotH, 2.0) + 0.0001);
+            color = vec3(0.85, 0.85, 0.88) * D * NdotL * 0.5;
+            break;
+        }
+        case 24: { // Special: Velvet Fabric
+            color = vec3(0.6, 0.05, 0.15) * (pow(clamp(1.0 - NdotV, 0.0, 1.0), 4.0) * 2.0 + NdotL);
+            break;
+        }
+        case 25: { // Special: Iridescent Soap Bubble
+            color = (0.5 + 0.5 * cos(vec3(0.0, 2.0, 4.0) + NdotV * 25.132)) * (pow(NdotH, 16.0) + 0.2);
+            break;
+        }
+        case 26: { // Special: Subsurface Skin
+            color = vec3(0.85, 0.6, 0.5) * max(0.0, (dot(normal, lightDir) + 0.5) / 1.5) + vec3(0.9, 0.2, 0.1) * pow(max(0.0, dot(-viewDir, lightDir)), 3.0);
+            break;
+        }
+        case 27: { // Special: Oren-Nayar Rough Clay
+            color = vec3(0.7, 0.45, 0.3) * NdotL * (1.0 - 0.5 * (1.0 - max(0.0, dot(normalize(viewDir - normal * NdotV), normalize(lightDir - normal * NdotL)))));
+            break;
+        }
+        case 28: { // Special: Emerald Crystal
+            color = vec3(0.05, 0.8, 0.3) * (NdotL + pow(max(dot(reflect(inDir, normal), lightDir), 0.0), 48.0));
+            break;
+        }
+        case 29: { // Special: Retroreflective Highway Sign
+            color = vec3(0.95, 0.95, 0.2) * (pow(max(0.0, dot(reflect(-lightDir, normal), viewDir)), 12.0) * 3.0 + 0.1);
+            break;
+        }
+        case 30: { // Special: Emissive Plasma
+            color = vec3(0.2, 0.8, 1.0) * 4.0 * (1.0 + 0.5 * sin(dot(normal, vec3(10.0)) + r1 * 6.28));
+            break;
+        }
+        case 31: { // Special: Woven Silk
+            color = vec3(0.7, 0.2, 0.5) * (0.5 + 0.5 * cos(dot(normal.xy, vec2(30.0)))) * (NdotL + pow(NdotH, 8.0));
+            break;
+        }
+        default:
+            color = vec3(0.5);
+            break;
+    }
+    return color;
 }
 
 void main() {
@@ -119,15 +397,22 @@ void main() {
                 }
             }
         } else {
-            // Incoherent Secondary Ray Node Enqueue:
+            // Incoherent Secondary Ray: Autonomous Directional Node Enqueue
+            // The hit shader computes the ray's directional octant directly,
+            // routing the payload autonomously to that specific child directional node.
             float u1 = rand_float(rngState);
             float u2 = rand_float(rngState);
             vec3 incohDir = align_to_normal(cosine_sample_hemisphere(u1, u2), normal);
+
+            uint octant = (incohDir.x > 0.0 ? 1u : 0u) |
+                          (incohDir.y > 0.0 ? 2u : 0u) |
+                          (incohDir.z > 0.0 ? 4u : 0u);
+
             uint qslot = atomicAdd(onChipQueueCount, 1);
             if (qslot < 64) {
                 onChipQueue[qslot].origin = hitPos + normal * 0.002;
                 onChipQueue[qslot].direction = incohDir;
-                onChipQueue[qslot].targetNode = 2; // Child secondary ray node
+                onChipQueue[qslot].targetNode = octant; // Child directional node 0..7
                 onChipQueue[qslot].rngState = rngState;
             }
         }
@@ -136,16 +421,50 @@ void main() {
     // Barrier simulating hardware work distributor node dispatch transition
     barrier();
 
-    // Node 1: Child Node Processing from On-Chip Scratch Memory (without global memory round-trip)
+    // Hardware Work Distributor Emulation: Group child payloads by targetNode in LDS
     uint queueTotal = min(onChipQueueCount, 64u);
     uint tid = gl_LocalInvocationID.x;
+
+    if (tid < 32) {
+        binCounts[tid] = 0;
+    }
+    barrier();
+
     if (tid < queueTotal) {
-        WorkGraphPayload payload = onChipQueue[tid];
+        atomicAdd(binCounts[onChipQueue[tid].targetNode % 32], 1);
+    }
+    barrier();
+
+    if (tid == 0) {
+        uint sum = 0;
+        for (uint i = 0; i < 32; ++i) {
+            binOffsets[i] = sum;
+            sum += binCounts[i];
+        }
+    }
+    barrier();
+
+    if (tid < queueTotal) {
+        uint target = onChipQueue[tid].targetNode % 32;
+        uint dstSlot = atomicAdd(binOffsets[target], 1);
+        if (dstSlot < 64) {
+            sortedQueue[dstSlot] = onChipQueue[tid];
+        }
+    }
+    barrier();
+
+    // Node 1: Child Node Processing from On-Chip Coherent Waves
+    if (tid < queueTotal) {
+        WorkGraphPayload payload = sortedQueue[tid];
         if (pc.mode == 0) {
-            // Evaluates specialized child material node uniformly
+            // Evaluates specialized child material node uniformly on-chip
+            vec3 normal = vec3(0.0, 1.0, 0.0);
+            vec3 inDir = payload.direction;
+            uint rng = payload.rngState;
+            vec3 color = evalMaterialBSDF(payload.targetNode, normal, inDir, rng);
             threadHits++;
-        } else {
-            // Evaluates child bounce / secondary ray node traversal
+        } else if (pc.mode == 2) {
+            // Mode 2: Child Directional Node Traversal (Secondary Ray)
             threadRays++;
             rayQueryEXT queryChild;
             rayQueryInitializeEXT(queryChild, topLevelAS, gl_RayFlagsNoneEXT, 0xFF, payload.origin, 0.001, payload.direction, 20.0);
@@ -153,6 +472,33 @@ void main() {
             if (rayQueryGetIntersectionTypeEXT(queryChild, true) != 0) {
                 threadHits++;
             }
+        } else {
+            // Mode 1: Child Bounce Node Traversal (Multi-Bounce Path Tracing)
+            vec3 curOrigin = payload.origin;
+            vec3 curDir = payload.direction;
+            uint curRng = payload.rngState;
+            uint bounceHits = 0;
+            for (uint b = 1; b < pc.bounces; ++b) {
+                threadRays++;
+                rayQueryEXT queryChild;
+                rayQueryInitializeEXT(queryChild, topLevelAS, gl_RayFlagsNoneEXT, 0xFF, curOrigin, 0.001, curDir, 20.0);
+                while (rayQueryProceedEXT(queryChild)) {}
+                if (rayQueryGetIntersectionTypeEXT(queryChild, true) != 0) {
+                    bounceHits++;
+                    float t = rayQueryGetIntersectionTEXT(queryChild, true);
+                    vec3 hitPos = curOrigin + curDir * t;
+                    vec3 normal = vec3(0.0, 1.0, 0.0);
+                    if (dot(normal, curDir) > 0.0) normal = -normal;
+                    float u1 = rand_float(curRng);
+                    float u2 = rand_float(curRng);
+                    curDir = align_to_normal(cosine_sample_hemisphere(u1, u2), normal);
+                    curOrigin = hitPos + normal * 0.002;
+                    if (b >= 2 && rand_float(curRng) < 0.4) break;
+                } else {
+                    break;
+                }
+            }
+            if (bounceHits > 0) threadHits += bounceHits;
         }
     }
 

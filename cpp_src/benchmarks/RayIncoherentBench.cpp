@@ -304,7 +304,7 @@ const char *RayIncoherentBench::GetName() const { return "RayIncoherent"; }
 const char *RayIncoherentBench::GetComponent(uint32_t config_idx) const {
   return "Ray Tracing";
 }
-const char *RayIncoherentBench::GetMetric() const { return "GRays/s"; }
+const char *RayIncoherentBench::GetMetric() const { return "MRays/s"; }
 const char *RayIncoherentBench::GetSubCategory(uint32_t config_idx) const {
   return "Incoherent Traversal";
 }

@@ -65,6 +65,85 @@ std::vector<std::string> BenchmarkRunner::getAvailableBenchmarks() const {
   return names;
 }
 
+std::vector<BenchmarkGroupInfo> BenchmarkRunner::getAvailableGroups() const {
+  std::vector<BenchmarkGroupInfo> groups = {
+    {"Compute", "compute", {"comp"}, "Vector and matrix compute arithmetic (FP64 down to INT4)", {}},
+    {"Memory", "memory", {"mem", "cache"}, "Device memory bandwidth and cache latency", {}},
+    {"Ray Tracing", "raytracing", {"rt", "ray", "ray tracing", "ray_tracing"}, "Hardware BVH traversal, intersection, and execution paradigms", {}},
+    {"Graphics", "graphics", {"gfx", "rop"}, "Rasterization and ROP fill rates", {}},
+    {"System", "system", {"sys", "host"}, "Host system memory bandwidth and latency", {}}
+  };
+
+  for (const auto &bench : benchmarks) {
+    std::string comp = bench->GetComponent();
+    std::string name = bench->GetName();
+    if (!bench->IsDeviceDependent() || comp == "System") {
+      groups[4].benchmarks.push_back(name);
+    } else if (comp == "Compute") {
+      groups[0].benchmarks.push_back(name);
+    } else if (comp == "Memory") {
+      groups[1].benchmarks.push_back(name);
+    } else if (comp == "Ray Tracing") {
+      groups[2].benchmarks.push_back(name);
+    } else if (comp == "Graphics") {
+      groups[3].benchmarks.push_back(name);
+    }
+  }
+
+  return groups;
+}
+
+std::vector<std::string> BenchmarkRunner::expandGroups(const std::vector<std::string> &inputs) const {
+  auto normalize = [](const std::string &s) {
+    std::string out;
+    for (char c : s) {
+      if (c != ' ' && c != '_' && c != '-') {
+        out.push_back(std::tolower(static_cast<unsigned char>(c)));
+      }
+    }
+    return out;
+  };
+
+  auto groups = getAvailableGroups();
+  std::vector<std::string> expanded;
+
+  for (const auto &input : inputs) {
+    std::string normInput = normalize(input);
+    if (normInput.empty()) continue;
+
+    bool isGroup = false;
+    for (const auto &grp : groups) {
+      if (normalize(grp.id) == normInput || normalize(grp.name) == normInput) {
+        isGroup = true;
+      } else {
+        for (const auto &alias : grp.aliases) {
+          if (normalize(alias) == normInput) {
+            isGroup = true;
+            break;
+          }
+        }
+      }
+
+      if (isGroup) {
+        for (const auto &benchName : grp.benchmarks) {
+          if (std::find(expanded.begin(), expanded.end(), benchName) == expanded.end()) {
+            expanded.push_back(benchName);
+          }
+        }
+        break;
+      }
+    }
+
+    if (!isGroup) {
+      if (std::find(expanded.begin(), expanded.end(), input) == expanded.end()) {
+        expanded.push_back(input);
+      }
+    }
+  }
+
+  return expanded;
+}
+
 const std::vector<ResultData>& BenchmarkRunner::getResults() const {
   return formatter->getResults();
 }
@@ -199,8 +278,9 @@ static bool benchmarkMatches(const IBenchmark *bench, const std::string &run_nam
 }
 
 void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
+  std::vector<std::string> effective_benchmarks = expandGroups(benchmarks_to_run);
   std::vector<std::string> lower_benchmarks_to_run;
-  for (const auto &b : benchmarks_to_run) {
+  for (const auto &b : effective_benchmarks) {
     lower_benchmarks_to_run.push_back(to_lower(b));
   }
 
@@ -217,7 +297,7 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
       }
     }
     if (!matched) {
-      unmatchedBenchmarks.push_back(benchmarks_to_run[i]);
+      unmatchedBenchmarks.push_back(effective_benchmarks[i]);
     }
   }
 
@@ -231,7 +311,7 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
       continue;
 
     bool should_run = false;
-    if (benchmarks_to_run.empty()) {
+    if (effective_benchmarks.empty()) {
       should_run = true;
     } else {
       for (const auto &run_name : lower_benchmarks_to_run) {
@@ -327,7 +407,7 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
         uint32_t totalKernels = 0;
         for (auto &bench : benchmarks) {
           bool should_run = false;
-          if (benchmarks_to_run.empty()) {
+          if (effective_benchmarks.empty()) {
             should_run = true;
           } else {
             for (const auto &run_name : lower_benchmarks_to_run) {
@@ -480,7 +560,20 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
                   result_data.isEmulated = false;
                   result_data.isUnsupported = true;
                   result_data.supportNote = bench->GetConfigSupportNote(i);
-                  result_data.supportCategory = "hardware";
+                  switch (bench->GetConfigSupportLimitation(i)) {
+                  case IBenchmark::SupportLimitation::kHardware:
+                    result_data.supportCategory = "hardware";
+                    break;
+                  case IBenchmark::SupportLimitation::kApi:
+                    result_data.supportCategory = "driver/api";
+                    break;
+                  case IBenchmark::SupportLimitation::kToolchain:
+                    result_data.supportCategory = "toolchain";
+                    break;
+                  default:
+                    result_data.supportCategory = "hardware";
+                    break;
+                  }
                   result_data.component = bench->GetComponent(i);
                   result_data.subcategory = bench->GetSubCategory(i);
                   result_data.maxWorkGroupSize = info.maxWorkGroupSize;
@@ -636,7 +729,7 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
         continue; // Skip device benchmarks
 
       bool should_run = false;
-      if (benchmarks_to_run.empty()) {
+      if (effective_benchmarks.empty()) {
         should_run = true;
       } else {
         for (const auto &run_name : lower_benchmarks_to_run) {

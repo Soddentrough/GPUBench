@@ -13,8 +13,12 @@ std::string ResultFormatter::formatDouble(double value, int precision) {
   stream.imbue(std::locale::classic());
   stream << std::fixed << std::setprecision(precision) << value;
   std::string str = stream.str();
-  std::string integerPart = str.substr(0, str.find('.'));
-  std::string fractionalPart = str.substr(str.find('.'));
+  size_t dotPos = str.find('.');
+  if (dotPos == std::string::npos) {
+    return str;
+  }
+  std::string integerPart = str.substr(0, dotPos);
+  std::string fractionalPart = str.substr(dotPos);
   int insertPosition = integerPart.length() - 3;
   while (insertPosition > 0) {
     integerPart.insert(insertPosition, ",");

@@ -269,7 +269,7 @@ const char *RayProceduralBench::GetName() const { return "RayProcedural"; }
 const char *RayProceduralBench::GetComponent(uint32_t config_idx) const {
   return "Ray Tracing";
 }
-const char *RayProceduralBench::GetMetric() const { return "GRays/s"; }
+const char *RayProceduralBench::GetMetric() const { return "MRays/s"; }
 const char *RayProceduralBench::GetSubCategory(uint32_t config_idx) const {
   return "Procedural Intersection";
 }

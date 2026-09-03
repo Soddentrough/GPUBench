@@ -343,7 +343,7 @@ const char *RayAnyHitBench::GetName() const { return "RayAnyHit"; }
 const char *RayAnyHitBench::GetComponent(uint32_t config_idx) const {
   return "Ray Tracing";
 }
-const char *RayAnyHitBench::GetMetric() const { return "GRays/s"; }
+const char *RayAnyHitBench::GetMetric() const { return "MRays/s"; }
 const char *RayAnyHitBench::GetSubCategory(uint32_t config_idx) const {
   return "Alpha-Tested Geometry";
 }

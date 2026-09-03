@@ -103,8 +103,21 @@ public:
            isExtensionEnabled("VK_NV_ray_tracing_invocation_reorder");
   }
 
+  struct IndirectBatchEntry {
+    VkDeviceSize offset;
+    std::vector<uint8_t> pushConstants;
+  };
+
   void dispatchIndirect(ComputeKernel kernel, ComputeBuffer indirectBuffer,
                         VkDeviceSize offset = 0);
+  void dispatchIndirectSequence(ComputeKernel kernel, ComputeBuffer indirectBuffer,
+                                const std::vector<IndirectBatchEntry> &entries);
+  void dispatchWorkListSequence(
+      ComputeBuffer clearBuf1, size_t clearSize1,
+      ComputeBuffer clearBuf2, size_t clearSize2,
+      ComputeKernel classifyKernel, uint32_t grid_x, uint32_t grid_y, uint32_t grid_z,
+      ComputeKernel secondKernel, ComputeBuffer indirectBuffer,
+      const std::vector<IndirectBatchEntry> &entries);
   void dispatchRayTracingIndirect(ComputeKernel kernel, ComputeBuffer indirectBuffer,
                                  VkDeviceSize offset = 0);
 

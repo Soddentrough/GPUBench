@@ -342,7 +342,7 @@ const char *RayDivergenceBench::GetName() const { return "RayDivergence"; }
 const char *RayDivergenceBench::GetComponent(uint32_t config_idx) const {
   return "Ray Tracing";
 }
-const char *RayDivergenceBench::GetMetric() const { return "GRays/s"; }
+const char *RayDivergenceBench::GetMetric() const { return "MRays/s"; }
 const char *RayDivergenceBench::GetSubCategory(uint32_t config_idx) const {
   return "Material Divergence";
 }

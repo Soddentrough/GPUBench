@@ -298,13 +298,13 @@ const char *RayPayloadBench::GetName() const { return "RayPayload"; }
 const char *RayPayloadBench::GetComponent(uint32_t config_idx) const {
   return "Ray Tracing";
 }
-const char *RayPayloadBench::GetMetric() const { return "GRays/s"; }
+const char *RayPayloadBench::GetMetric() const { return "MRays/s"; }
 const char *RayPayloadBench::GetSubCategory(uint32_t config_idx) const {
   return "Payload Register Pressure";
 }
 
 std::string RayPayloadBench::GetConfigName(uint32_t config_idx) const {
-  if (config_idx == 0) return "16B Payload";
-  if (config_idx == 1) return "128B Payload";
-  return "256B Payload";
+  if (config_idx == 0) return "16B Payload (Shadow / AO Visibility Probe)";
+  if (config_idx == 1) return "128B Payload (Real-Time Path Tracing & GI)";
+  return "256B Payload (Production / Film BSDF & MIS)";
 }

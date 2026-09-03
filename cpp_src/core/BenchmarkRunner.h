@@ -7,6 +7,14 @@
 #include <vector>
 #include <functional>
 
+struct BenchmarkGroupInfo {
+  std::string name;
+  std::string id;
+  std::vector<std::string> aliases;
+  std::string description;
+  std::vector<std::string> benchmarks;
+};
+
 class BenchmarkRunner {
 public:
   BenchmarkRunner(const std::vector<IComputeContext *> &contexts,
@@ -19,6 +27,8 @@ public:
   std::function<void(const ResultData&)> onResult;
 
   std::vector<std::string> getAvailableBenchmarks() const;
+  std::vector<BenchmarkGroupInfo> getAvailableGroups() const;
+  std::vector<std::string> expandGroups(const std::vector<std::string> &inputs) const;
   const std::vector<ResultData>& getResults() const;
 
   // Names passed to run() that did not match any benchmark (populated by

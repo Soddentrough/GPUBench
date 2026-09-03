@@ -165,12 +165,21 @@ int main(int argc, char **argv) {
 
   std::vector<std::string> benchmarks_to_run;
   app.add_option("-b,--benchmarks,--benchmark", benchmarks_to_run,
-                 "Benchmarks to run (comma-separated)")
+                 "Benchmarks to run (comma-separated, can also be a group name)")
+      ->delimiter(',');
+
+  std::vector<std::string> groups_to_run;
+  app.add_option("-g,--groups,--group", groups_to_run,
+                 "Benchmark group(s) to run: compute, memory, raytracing, graphics, system")
       ->delimiter(',');
 
   bool list_benchmarks = false;
   app.add_flag("--list-benchmarks", list_benchmarks,
-               "List available benchmarks");
+               "List available benchmarks (organized by group)");
+
+  bool list_groups = false;
+  app.add_flag("--list-groups", list_groups,
+               "List available benchmark groups");
 
   std::vector<uint32_t> device_indices;
   app.add_option("-d,--device", device_indices,
@@ -226,14 +235,36 @@ int main(int argc, char **argv) {
     verbose = true;
   }
 
-  if (list_benchmarks) {
+  if (list_groups) {
     BenchmarkRunner runner({});
-    auto available_benchmarks = runner.getAvailableBenchmarks();
-    std::cout << "Available benchmarks:" << std::endl;
-    for (const auto &name : available_benchmarks) {
-      std::cout << "- " << name << std::endl;
+    std::cout << "Available benchmark groups:" << std::endl << std::endl;
+    for (const auto &grp : runner.getAvailableGroups()) {
+      std::cout << "  " << grp.name << "  (flag: -g " << grp.id << ")" << std::endl;
+      std::cout << "    Description: " << grp.description << std::endl;
+      std::cout << "    Benchmarks:  ";
+      for (size_t i = 0; i < grp.benchmarks.size(); ++i) {
+        std::cout << grp.benchmarks[i] << (i + 1 < grp.benchmarks.size() ? ", " : "");
+      }
+      std::cout << std::endl << std::endl;
     }
     return EXIT_SUCCESS;
+  }
+
+  if (list_benchmarks) {
+    BenchmarkRunner runner({});
+    std::cout << "Available benchmarks (grouped):" << std::endl;
+    for (const auto &grp : runner.getAvailableGroups()) {
+      std::cout << std::endl << "[" << grp.name << "]  (run group with: -g " << grp.id << ")" << std::endl;
+      for (const auto &name : grp.benchmarks) {
+        std::cout << "  - " << name << std::endl;
+      }
+    }
+    std::cout << std::endl;
+    return EXIT_SUCCESS;
+  }
+
+  for (const auto &grp : groups_to_run) {
+    benchmarks_to_run.push_back(grp);
   }
 
   if (verbose) {

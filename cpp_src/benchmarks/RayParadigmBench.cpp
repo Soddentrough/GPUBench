@@ -211,21 +211,21 @@ std::string RayParadigmBench::GetConfigName(uint32_t config_idx) const {
   case 3:
     return "Material Divergence - Work Graphs (Autonomous Node Enqueue)";
   case 4:
-    return "Multi-Bounce Path Tracing - Traditional Megakernel (Lane Idling)";
+    return "Multi-Bounce Path Tracing (4 Bounces, Russian Roulette) - Traditional Megakernel (Lane Idling)";
   case 5:
-    return "Multi-Bounce Path Tracing - Traditional + SER (Hardware Reordering)";
+    return "Multi-Bounce Path Tracing (4 Bounces, Russian Roulette) - Traditional + SER (Hardware Reordering)";
   case 6:
-    return "Multi-Bounce Path Tracing - Work Lists / DGC (Wavefront Compaction)";
+    return "Multi-Bounce Path Tracing (4 Bounces, Russian Roulette) - Work Lists / DGC (Wavefront Compaction)";
   case 7:
-    return "Multi-Bounce Path Tracing - Work Graphs (Dynamic Bounce Node Enqueue)";
+    return "Multi-Bounce Path Tracing (4 Bounces, Russian Roulette) - Work Graphs (Dynamic Bounce Node Enqueue)";
   case 8:
     return "Incoherent Rays - Traditional Megakernel (Direct Traversal)";
   case 9:
     return "Incoherent Rays - Traditional + SER (Spatial Reordering Hint)";
   case 10:
-    return "Incoherent Rays - Work Lists (GPU Morton Spatial Sort)";
+    return "Incoherent Rays - Work Lists / DGC (Directional Octant Binning)";
   case 11:
-    return "Incoherent Rays - Work Graphs (Asynchronous Node Enqueue)";
+    return "Incoherent Rays - Work Graphs (Autonomous Directional Node Enqueue)";
   default:
     return "Unknown";
   }
@@ -254,8 +254,8 @@ void RayParadigmBench::Setup(IComputeContext &context_ref,
   uint32_t zeros[4] = {0, 0, 0, 0};
   context->writeBuffer(resultBuffer, 0, sizeof(zeros), zeros);
 
-  // WorkList storage buffer: 32 counters (128B) + 131072 * 48B records (~6.25MB)
-  size_t workListSize = sizeof(uint32_t) * 32 + 131072 * sizeof(float) * 12;
+  // WorkList storage buffer: 32 counters (128B) + 1048576 * 48B records (~50MB)
+  size_t workListSize = sizeof(uint32_t) * 32 + 1048576 * sizeof(float) * 12;
   workListBuffer = context->createBuffer(workListSize);
 
   // Indirect dispatch commands: 32 * VkDispatchIndirectCommand (384B)
@@ -291,8 +291,6 @@ void RayParadigmBench::Setup(IComputeContext &context_ref,
       (kdir / "vulkan" / "rt_paradigm_worklist_material.comp").string(), "main", 3);
   kernelBounce = vContext->createKernel(
       (kdir / "vulkan" / "rt_paradigm_worklist_bounce.comp").string(), "main", 3);
-  kernelSort = vContext->createKernel(
-      (kdir / "vulkan" / "rt_paradigm_worklist_sort.comp").string(), "main", 3);
   kernelWorkGraph = vContext->createKernel(
       (kdir / "vulkan" / "rt_paradigm_workgraph.comp").string(), "main", 2);
 
@@ -310,6 +308,59 @@ void RayParadigmBench::Setup(IComputeContext &context_ref,
     unsupportedConfig[9] = true;
     unsupportedReason[9] = "Hardware SER (VK_EXT/NV_ray_tracing_invocation_reorder) not supported on this GPU";
   }
+
+  // Check Work Graphs support (VK_AMDX_shader_enqueue)
+  //
+  // TODO: Revisit and benchmark Work Graphs when VK_AMDX_shader_enqueue (or
+  //       VK_KHR_work_graphs) is exposed by Mesa RADV for this architecture.
+  //       Once exposed, this test should be implemented with native execution graph
+  //       pipelines (vkCreateExecutionGraphPipelinesAMDX, vkCmdDispatchGraphAMDX,
+  //       and DXC HLSL node compilation targeting SPV_AMDX_shader_enqueue) to
+  //       accurately measure hardware work distributor scheduling in silicon rather
+  //       than relying on synthetic compute shader emulations.
+  bool workGraphsSupported = vContext->isWorkGraphsSupported();
+  if (!workGraphsSupported) {
+    unsupportedConfig[3] = true;
+    unsupportedReason[3] = "Work Graphs (VK_AMDX_shader_enqueue) not exposed by driver";
+    unsupportedConfig[7] = true;
+    unsupportedReason[7] = "Work Graphs (VK_AMDX_shader_enqueue) not exposed by driver";
+    unsupportedConfig[11] = true;
+    unsupportedReason[11] = "Work Graphs (VK_AMDX_shader_enqueue) not exposed by driver";
+  }
+
+  // Pre-generate static indirect batches for Work Lists dispatches
+  materialBatches.reserve(32);
+  for (uint32_t m = 0; m < 32; ++m) {
+    struct {
+      uint32_t materialId;
+      uint32_t totalQueueSize;
+    } pcMat{m, 32768};
+    std::vector<uint8_t> pcData(sizeof(pcMat));
+    std::memcpy(pcData.data(), &pcMat, sizeof(pcMat));
+    materialBatches.push_back({m * sizeof(uint32_t) * 3, pcData});
+  }
+
+  bounceBatches.reserve(3);
+  for (uint32_t b = 1; b < 4; ++b) {
+    struct {
+      uint32_t queueIndex;
+      uint32_t maxQueueSize;
+    } pcBounce{0, 65536};
+    std::vector<uint8_t> pcData(sizeof(pcBounce));
+    std::memcpy(pcData.data(), &pcBounce, sizeof(pcBounce));
+    bounceBatches.push_back({0, pcData});
+  }
+
+  octantBatches.reserve(8);
+  for (uint32_t oct = 0; oct < 8; ++oct) {
+    struct {
+      uint32_t queueIndex;
+      uint32_t maxQueueSize;
+    } pcBounce{oct, 131072};
+    std::vector<uint8_t> pcData(sizeof(pcBounce));
+    std::memcpy(pcData.data(), &pcBounce, sizeof(pcBounce));
+    octantBatches.push_back({oct * sizeof(uint32_t) * 3, pcData});
+  }
 #endif
 }
 
@@ -318,10 +369,6 @@ void RayParadigmBench::Run(uint32_t config_idx) {
   VulkanContext *vContext = static_cast<VulkanContext *>(context);
   if (unsupportedConfig[config_idx])
     return;
-
-  // Clear results hits buffer for this timed run iteration
-  uint32_t zeros[4] = {0, 0, 0, 0};
-  context->writeBuffer(resultBuffer, 0, sizeof(zeros), zeros);
 
   uint32_t seed = rand();
 
@@ -344,13 +391,8 @@ void RayParadigmBench::Run(uint32_t config_idx) {
     break;
   }
   case 2: { // Material Divergence - Work Lists / DGC
-    // Clear queue counters & indirect dispatch commands
-    std::vector<uint32_t> initCounters(32, 0);
-    context->writeBuffer(workListBuffer, 0, sizeof(uint32_t) * 32, initCounters.data());
-    std::vector<uint32_t> initCommands(32 * 3, 0);
-    context->writeBuffer(indirectBuffer, 0, sizeof(uint32_t) * 32 * 3, initCommands.data());
-
-    // Pass 1: Traversal & Stream Compaction into Material Bins
+    // Pass 1 & 2: Traversal, stream compaction into material bins, and uniform indirect dispatches
+    // executed seamlessly in a single GPU command stream with hardware pipeline barriers.
     vContext->setKernelAS(kernelClassify, 0, (AccelerationStructure)sceneTlas);
     vContext->setKernelArg(kernelClassify, 1, resultBuffer);
     vContext->setKernelArg(kernelClassify, 2, workListBuffer);
@@ -362,20 +404,16 @@ void RayParadigmBench::Run(uint32_t config_idx) {
       uint32_t seed;
     } pcClassify{rayCount, 0, 0, seed};
     vContext->setKernelArg(kernelClassify, 4, sizeof(pcClassify), &pcClassify);
-    vContext->dispatch(kernelClassify, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
 
-    // Pass 2: Uniform Indirect Material Dispatches
     vContext->setKernelAS(kernelMaterial, 0, (AccelerationStructure)sceneTlas);
     vContext->setKernelArg(kernelMaterial, 1, resultBuffer);
     vContext->setKernelArg(kernelMaterial, 2, workListBuffer);
-    for (uint32_t m = 0; m < 32; ++m) {
-      struct {
-        uint32_t materialId;
-        uint32_t totalQueueSize;
-      } pcMat{m, 4096};
-      vContext->setKernelArg(kernelMaterial, 3, sizeof(pcMat), &pcMat);
-      vContext->dispatchIndirect(kernelMaterial, indirectBuffer, m * sizeof(uint32_t) * 3);
-    }
+
+    vContext->dispatchWorkListSequence(
+        workListBuffer, sizeof(uint32_t) * 32,
+        indirectBuffer, sizeof(uint32_t) * 32 * 3,
+        kernelClassify, (rayCount + 31) / 32, 1, 1,
+        kernelMaterial, indirectBuffer, materialBatches);
     break;
   }
   case 3: { // Material Divergence - Work Graphs
@@ -409,12 +447,6 @@ void RayParadigmBench::Run(uint32_t config_idx) {
     break;
   }
   case 6: { // Multi-Bounce Path Tracing - Work Lists / DGC (Wavefront Compaction)
-    std::vector<uint32_t> initCounters(32, 0);
-    context->writeBuffer(workListBuffer, 0, sizeof(uint32_t) * 32, initCounters.data());
-    std::vector<uint32_t> initCommands(32 * 3, 0);
-    context->writeBuffer(indirectBuffer, 0, sizeof(uint32_t) * 32 * 3, initCommands.data());
-
-    // Pass 1: Primary Ray Generation & Initial Filter
     vContext->setKernelAS(kernelClassify, 0, (AccelerationStructure)sceneTlas);
     vContext->setKernelArg(kernelClassify, 1, resultBuffer);
     vContext->setKernelArg(kernelClassify, 2, workListBuffer);
@@ -426,20 +458,16 @@ void RayParadigmBench::Run(uint32_t config_idx) {
       uint32_t seed;
     } pcClassify{rayCount, 1, 0, seed};
     vContext->setKernelArg(kernelClassify, 4, sizeof(pcClassify), &pcClassify);
-    vContext->dispatch(kernelClassify, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
 
-    // Pass 2..4: Compacted Wavefront Bounce Dispatches
     vContext->setKernelAS(kernelBounce, 0, (AccelerationStructure)sceneTlas);
     vContext->setKernelArg(kernelBounce, 1, resultBuffer);
     vContext->setKernelArg(kernelBounce, 2, workListBuffer);
-    for (uint32_t b = 1; b < 4; ++b) {
-      struct {
-        uint32_t currentBounce;
-        uint32_t maxQueueSize;
-      } pcBounce{b, 65536};
-      vContext->setKernelArg(kernelBounce, 3, sizeof(pcBounce), &pcBounce);
-      vContext->dispatchIndirect(kernelBounce, indirectBuffer, 0);
-    }
+
+    vContext->dispatchWorkListSequence(
+        workListBuffer, sizeof(uint32_t) * 32,
+        indirectBuffer, sizeof(uint32_t) * 32 * 3,
+        kernelClassify, (rayCount + 31) / 32, 1, 1,
+        kernelBounce, indirectBuffer, bounceBatches);
     break;
   }
   case 7: { // Multi-Bounce Path Tracing - Work Graphs
@@ -472,13 +500,9 @@ void RayParadigmBench::Run(uint32_t config_idx) {
     // Checked via unsupportedConfig
     break;
   }
-  case 10: { // Incoherent Rays - Work Lists with Morton Spatial Sort
-    std::vector<uint32_t> initCounters(32, 0);
-    context->writeBuffer(workListBuffer, 0, sizeof(uint32_t) * 32, initCounters.data());
-    std::vector<uint32_t> initCommands(32 * 3, 0);
-    context->writeBuffer(indirectBuffer, 0, sizeof(uint32_t) * 32 * 3, initCommands.data());
-
-    // Pass 1: Traversal + Morton Code Generation
+  case 10: { // Incoherent Rays - Work Lists / DGC (Directional Octant Binning)
+    // Pass 1 & 2: Traversal, directional octant binning, and coherent secondary ray dispatches
+    // executed in a single command stream on the GPU.
     vContext->setKernelAS(kernelClassify, 0, (AccelerationStructure)sceneTlas);
     vContext->setKernelArg(kernelClassify, 1, resultBuffer);
     vContext->setKernelArg(kernelClassify, 2, workListBuffer);
@@ -490,38 +514,19 @@ void RayParadigmBench::Run(uint32_t config_idx) {
       uint32_t seed;
     } pcClassify{rayCount, 2, 0, seed};
     vContext->setKernelArg(kernelClassify, 4, sizeof(pcClassify), &pcClassify);
-    vContext->dispatch(kernelClassify, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
 
-    // Pass 2: GPU Bitonic Sort by 30-bit Morton Code (Spatial Reordering)
-    vContext->setKernelAS(kernelSort, 0, (AccelerationStructure)sceneTlas);
-    vContext->setKernelArg(kernelSort, 1, resultBuffer);
-    vContext->setKernelArg(kernelSort, 2, workListBuffer);
-    uint32_t sortElements = 32768; // Power of 2 sort block
-    for (uint32_t p = 2; p <= sortElements; p <<= 1) {
-      for (uint32_t q = p >> 1; q > 0; q >>= 1) {
-        struct {
-          uint32_t p;
-          uint32_t q;
-          uint32_t count;
-        } pcSort{p, q, sortElements};
-        vContext->setKernelArg(kernelSort, 3, sizeof(pcSort), &pcSort);
-        vContext->dispatch(kernelSort, (sortElements + 63) / 64, 1, 1, 64, 1, 1);
-      }
-    }
-
-    // Pass 3: Coherent BVH Traversal from Spatially Sorted Ray Queue
     vContext->setKernelAS(kernelBounce, 0, (AccelerationStructure)sceneTlas);
     vContext->setKernelArg(kernelBounce, 1, resultBuffer);
     vContext->setKernelArg(kernelBounce, 2, workListBuffer);
-    struct {
-      uint32_t currentBounce;
-      uint32_t maxQueueSize;
-    } pcBounce{0, 65536};
-    vContext->setKernelArg(kernelBounce, 3, sizeof(pcBounce), &pcBounce);
-    vContext->dispatchIndirect(kernelBounce, indirectBuffer, 0);
+
+    vContext->dispatchWorkListSequence(
+        workListBuffer, sizeof(uint32_t) * 32,
+        indirectBuffer, sizeof(uint32_t) * 32 * 3,
+        kernelClassify, (rayCount + 63) / 64, 1, 1,
+        kernelBounce, indirectBuffer, octantBatches);
     break;
   }
-  case 11: { // Incoherent Rays - Work Graphs
+  case 11: { // Incoherent Rays - Work Graphs (Autonomous Directional Node Enqueue)
     vContext->setKernelAS(kernelWorkGraph, 0, (AccelerationStructure)sceneTlas);
     vContext->setKernelArg(kernelWorkGraph, 1, resultBuffer);
     struct {
@@ -531,7 +536,7 @@ void RayParadigmBench::Run(uint32_t config_idx) {
       uint32_t seed;
     } pc{rayCount, 2, 1, seed};
     vContext->setKernelArg(kernelWorkGraph, 2, sizeof(pc), &pc);
-    vContext->dispatch(kernelWorkGraph, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
+    vContext->dispatch(kernelWorkGraph, (rayCount + 63) / 64, 1, 1, 64, 1, 1);
     break;
   }
   }
@@ -556,8 +561,6 @@ void RayParadigmBench::Teardown() {
     context->releaseKernel(kernelMaterial);
   if (kernelBounce)
     context->releaseKernel(kernelBounce);
-  if (kernelSort)
-    context->releaseKernel(kernelSort);
   if (kernelWorkGraph)
     context->releaseKernel(kernelWorkGraph);
 

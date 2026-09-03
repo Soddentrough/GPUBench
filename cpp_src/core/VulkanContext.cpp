@@ -1228,9 +1228,12 @@ void VulkanContext::dispatch(ComputeKernel kernel, uint32_t grid_x,
   if (vulkanKernel->isRTPipeline) {
     auto pfnTraceRays =
         (PFN_vkCmdTraceRaysKHR)vkGetDeviceProcAddr(device, "vkCmdTraceRaysKHR");
+    uint32_t rWidth = (block_x > 1) ? (grid_x * block_x) : grid_x;
+    uint32_t rHeight = (block_y > 1) ? (grid_y * block_y) : grid_y;
+    uint32_t rDepth = (block_z > 1) ? (grid_z * block_z) : grid_z;
     pfnTraceRays(frame.commandBuffer, &vulkanKernel->rgenRegion,
                  &vulkanKernel->missRegion, &vulkanKernel->hitRegion,
-                 &vulkanKernel->callRegion, grid_x, grid_y, grid_z);
+                 &vulkanKernel->callRegion, rWidth, rHeight, rDepth);
   } else {
     vkCmdDispatch(frame.commandBuffer, grid_x, grid_y, grid_z);
   }
@@ -1284,6 +1287,164 @@ void VulkanContext::dispatchIndirect(ComputeKernel kernel_handle,
 
   VkBuffer vkIndirect = getVkBuffer(indirectBuffer);
   vkCmdDispatchIndirect(frame.commandBuffer, vkIndirect, offset);
+
+  vkEndCommandBuffer(frame.commandBuffer);
+
+  VkSubmitInfo submitInfo{};
+  submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+  submitInfo.commandBufferCount = 1;
+  submitInfo.pCommandBuffers = &frame.commandBuffer;
+
+  vkQueueSubmit(computeQueue, 1, &submitInfo, frame.fence);
+  frame.inUse = true;
+
+  currentFrameIndex = (currentFrameIndex + 1) % kMaxInFlight;
+}
+
+void VulkanContext::dispatchIndirectSequence(
+    ComputeKernel kernel_handle, ComputeBuffer indirectBuffer,
+    const std::vector<IndirectBatchEntry> &entries) {
+  auto *vulkanKernel = kernels[kernel_handle];
+  if (!vulkanKernel || entries.empty())
+    return;
+
+  auto &frame = inFlightFrames[currentFrameIndex];
+  if (frame.inUse) {
+    vkWaitForFences(device, 1, &frame.fence, VK_TRUE, UINT64_MAX);
+    vkResetFences(device, 1, &frame.fence);
+    frame.inUse = false;
+  }
+
+  vkResetCommandBuffer(frame.commandBuffer, 0);
+
+  VkCommandBufferBeginInfo beginInfo{};
+  beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+  beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  vkBeginCommandBuffer(frame.commandBuffer, &beginInfo);
+
+  vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                    vulkanKernel->pipeline);
+  vkCmdBindDescriptorSets(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                          vulkanKernel->pipelineLayout, 0, 1,
+                          &vulkanKernel->descriptorSet, 0, nullptr);
+
+  VkBuffer vkIndirect = getVkBuffer(indirectBuffer);
+
+  for (const auto &entry : entries) {
+    if (!entry.pushConstants.empty()) {
+      vkCmdPushConstants(frame.commandBuffer, vulkanKernel->pipelineLayout,
+                         VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                         entry.pushConstants.size(),
+                         entry.pushConstants.data());
+    }
+    vkCmdDispatchIndirect(frame.commandBuffer, vkIndirect, entry.offset);
+  }
+
+  vkEndCommandBuffer(frame.commandBuffer);
+
+  VkSubmitInfo submitInfo{};
+  submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+  submitInfo.commandBufferCount = 1;
+  submitInfo.pCommandBuffers = &frame.commandBuffer;
+
+  vkQueueSubmit(computeQueue, 1, &submitInfo, frame.fence);
+  frame.inUse = true;
+
+  currentFrameIndex = (currentFrameIndex + 1) % kMaxInFlight;
+}
+
+void VulkanContext::dispatchWorkListSequence(
+    ComputeBuffer clearBuf1, size_t clearSize1,
+    ComputeBuffer clearBuf2, size_t clearSize2,
+    ComputeKernel classifyKernel_handle, uint32_t grid_x, uint32_t grid_y, uint32_t grid_z,
+    ComputeKernel secondKernel_handle, ComputeBuffer indirectBuffer,
+    const std::vector<IndirectBatchEntry> &entries) {
+  auto *classifyKernel = kernels[classifyKernel_handle];
+  auto *secondKernel = kernels[secondKernel_handle];
+  if (!classifyKernel || !secondKernel)
+    return;
+
+  auto &frame = inFlightFrames[currentFrameIndex];
+  if (frame.inUse) {
+    vkWaitForFences(device, 1, &frame.fence, VK_TRUE, UINT64_MAX);
+    vkResetFences(device, 1, &frame.fence);
+    frame.inUse = false;
+  }
+
+  vkResetCommandBuffer(frame.commandBuffer, 0);
+
+  VkCommandBufferBeginInfo beginInfo{};
+  beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+  beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  vkBeginCommandBuffer(frame.commandBuffer, &beginInfo);
+
+  // 1. Clear queue counters & indirect dispatch commands on the GPU DMA engine
+  bool cleared = false;
+  if (clearBuf1 && clearSize1 > 0) {
+    VkBuffer b1 = getVkBuffer(clearBuf1);
+    if (b1) {
+      vkCmdFillBuffer(frame.commandBuffer, b1, 0, clearSize1, 0);
+      cleared = true;
+    }
+  }
+  if (clearBuf2 && clearSize2 > 0) {
+    VkBuffer b2 = getVkBuffer(clearBuf2);
+    if (b2) {
+      vkCmdFillBuffer(frame.commandBuffer, b2, 0, clearSize2, 0);
+      cleared = true;
+    }
+  }
+
+  if (cleared) {
+    VkMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+    vkCmdPipelineBarrier(frame.commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &barrier, 0,
+                         nullptr, 0, nullptr);
+  }
+
+  // 2. Pass 1: Traversal & classification / stream compaction
+  vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                    classifyKernel->pipeline);
+  vkCmdBindDescriptorSets(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                          classifyKernel->pipelineLayout, 0, 1,
+                          &classifyKernel->descriptorSet, 0, nullptr);
+  if (!classifyKernel->pushConstantData.empty()) {
+    vkCmdPushConstants(frame.commandBuffer, classifyKernel->pipelineLayout,
+                       VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                       classifyKernel->pushConstantData.size(),
+                       classifyKernel->pushConstantData.data());
+  }
+  vkCmdDispatch(frame.commandBuffer, grid_x, grid_y, grid_z);
+
+  // 3. Pipeline Barrier: Pass 1 writes -> Pass 2 reads & indirect dispatches
+  VkMemoryBarrier passBarrier{};
+  passBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+  passBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+  passBarrier.dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_SHADER_READ_BIT;
+  vkCmdPipelineBarrier(frame.commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                       VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                       0, 1, &passBarrier, 0, nullptr, 0, nullptr);
+
+  // 4. Pass 2: Uniform Indirect Dispatches (DGC / Work Lists)
+  vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                    secondKernel->pipeline);
+  vkCmdBindDescriptorSets(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                          secondKernel->pipelineLayout, 0, 1,
+                          &secondKernel->descriptorSet, 0, nullptr);
+
+  VkBuffer vkIndirect = getVkBuffer(indirectBuffer);
+  for (const auto &entry : entries) {
+    if (!entry.pushConstants.empty()) {
+      vkCmdPushConstants(frame.commandBuffer, secondKernel->pipelineLayout,
+                         VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                         entry.pushConstants.size(),
+                         entry.pushConstants.data());
+    }
+    vkCmdDispatchIndirect(frame.commandBuffer, vkIndirect, entry.offset);
+  }
 
   vkEndCommandBuffer(frame.commandBuffer);
 

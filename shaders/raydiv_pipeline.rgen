@@ -42,6 +42,20 @@ void main() {
     vec3 origin = vec3(fx + jx, fy + jy, -10.0);
     vec3 dir = vec3(0.0, 0.0, 1.0);
     
+    // Spatial & Directional Ray Divergence
+    if (pc.coherenceFactor < 0.99) {
+        float maxTheta = (1.0 - pc.coherenceFactor) * 1.5707963; // Up to 90 deg cone
+        state = hash(state);
+        float u1 = float(state % 10000) / 10000.0;
+        state = hash(state);
+        float u2 = float(state % 10000) / 10000.0;
+        
+        float cosTheta = 1.0 - u1 * (1.0 - cos(maxTheta));
+        float sinTheta = sqrt(max(0.0, 1.0 - cosTheta * cosTheta));
+        float phi = 6.2831853 * u2;
+        dir = normalize(vec3(sinTheta * cos(phi), sinTheta * sin(phi), cosTheta));
+    }
+
     payload = vec3(0.0);
     
     float randVal = float(hash(idx + pc.seed * 2)) / 4294967295.0;
