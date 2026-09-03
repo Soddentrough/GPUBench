@@ -253,13 +253,7 @@ void RayPathTracingBench::Run(uint32_t config_idx) {
   vContext->setKernelArg(kernel, 3, sizeof(uint32_t), &bounces);
   vContext->setKernelArg(kernel, 4, sizeof(uint32_t), &seed);
 
-  auto start = std::chrono::high_resolution_clock::now();
   vContext->dispatch(kernel, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
-  context->waitIdle();
-  auto end = std::chrono::high_resolution_clock::now();
-
-  std::chrono::duration<double> diff = end - start;
-  results[config_idx] = diff.count();
 }
 
 void RayPathTracingBench::Teardown() {
@@ -298,7 +292,7 @@ BenchmarkResult RayPathTracingBench::GetResult(uint32_t config_idx) const {
   // second. Do NOT multiply by bounce count — counting secondary rays
   // inverts the scaling (paths terminate early, so total time grows
   // slower than the bounce count, making throughput appear to increase).
-  return {(uint64_t)rayCount, results[config_idx]};
+  return {(uint64_t)rayCount, 0.0};
 }
 
 const char *RayPathTracingBench::GetName() const { return "RayPathTracing"; }

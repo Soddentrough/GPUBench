@@ -305,21 +305,25 @@ void PixelFillRateBench::Setup(IComputeContext &ctx, const std::string &kernel_d
     throw std::runtime_error("Failed to create command pool for pixel fill rate!");
   }
 
-  VkCommandBufferAllocateInfo cmdAllocInfo{};
-  cmdAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-  cmdAllocInfo.commandPool = commandPool;
-  cmdAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-  cmdAllocInfo.commandBufferCount = 1;
+  for (size_t i = 0; i < kMaxInFlight; ++i) {
+    VkCommandBufferAllocateInfo cmdAllocInfo{};
+    cmdAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    cmdAllocInfo.commandPool = commandPool;
+    cmdAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    cmdAllocInfo.commandBufferCount = 1;
 
-  if (vkAllocateCommandBuffers(device, &cmdAllocInfo, &commandBuffer) != VK_SUCCESS) {
-    throw std::runtime_error("Failed to allocate command buffer for pixel fill rate!");
-  }
+    if (vkAllocateCommandBuffers(device, &cmdAllocInfo, &frames[i].commandBuffer) != VK_SUCCESS) {
+      throw std::runtime_error("Failed to allocate command buffer for pixel fill rate!");
+    }
 
-  VkFenceCreateInfo fenceInfo{};
-  fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-  if (vkCreateFence(device, &fenceInfo, nullptr, &fence) != VK_SUCCESS) {
-    throw std::runtime_error("Failed to create fence for pixel fill rate!");
+    VkFenceCreateInfo fenceInfo{};
+    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    if (vkCreateFence(device, &fenceInfo, nullptr, &frames[i].fence) != VK_SUCCESS) {
+      throw std::runtime_error("Failed to create fence for pixel fill rate!");
+    }
+    frames[i].inFlight = false;
   }
+  frameIndex = 0;
 
   // Create pipelines for all configurations
   for (auto &cfg : configs) {
@@ -330,13 +334,26 @@ void PixelFillRateBench::Setup(IComputeContext &ctx, const std::string &kernel_d
 void PixelFillRateBench::Run(uint32_t config_idx) {
   if (config_idx >= configs.size()) return;
   auto &cfg = configs[config_idx];
+  auto &frame = frames[frameIndex];
 
-  vkResetCommandBuffer(commandBuffer, 0);
+  if (frame.inFlight) {
+    constexpr uint64_t kTimeoutNs = 3'000'000'000ULL;
+    VkResult waitResult = vkWaitForFences(device, 1, &frame.fence, VK_TRUE, kTimeoutNs);
+    if (waitResult == VK_TIMEOUT) {
+      throw std::runtime_error("Pixel fill rate dispatch timed out (>3 s)!");
+    } else if (waitResult != VK_SUCCESS) {
+      throw std::runtime_error("Pixel fill rate fence wait failed!");
+    }
+    vkResetFences(device, 1, &frame.fence);
+    frame.inFlight = false;
+  }
+
+  vkResetCommandBuffer(frame.commandBuffer, 0);
 
   VkCommandBufferBeginInfo beginInfo{};
   beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
   beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-  vkBeginCommandBuffer(commandBuffer, &beginInfo);
+  vkBeginCommandBuffer(frame.commandBuffer, &beginInfo);
 
   VkRenderPassBeginInfo renderPassBegin{};
   renderPassBegin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -348,34 +365,29 @@ void PixelFillRateBench::Run(uint32_t config_idx) {
   float colorSeed[4] = {0.2f, 0.4f, 0.6f, 1.0f};
 
   for (uint32_t p = 0; p < passesPerDispatch; ++p) {
-    vkCmdBeginRenderPass(commandBuffer, &renderPassBegin, VK_SUBPASS_CONTENTS_INLINE);
-    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, cfg.pipeline);
+    vkCmdBeginRenderPass(frame.commandBuffer, &renderPassBegin, VK_SUBPASS_CONTENTS_INLINE);
+    vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, cfg.pipeline);
 
     colorSeed[0] = static_cast<float>(p) * 0.1f;
-    vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+    vkCmdPushConstants(frame.commandBuffer, pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0,
                        sizeof(colorSeed), colorSeed);
 
-    vkCmdDraw(commandBuffer, 3, 1, 0, 0); // Fullscreen triangle
-    vkCmdEndRenderPass(commandBuffer);
+    vkCmdDraw(frame.commandBuffer, 3, 1, 0, 0); // Fullscreen triangle
+    vkCmdEndRenderPass(frame.commandBuffer);
   }
 
-  vkEndCommandBuffer(commandBuffer);
+  vkEndCommandBuffer(frame.commandBuffer);
 
   VkSubmitInfo submitInfo{};
   submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
   submitInfo.commandBufferCount = 1;
-  submitInfo.pCommandBuffers = &commandBuffer;
+  submitInfo.pCommandBuffers = &frame.commandBuffer;
 
-  vkResetFences(device, 1, &fence);
-  vkQueueSubmit(queue, 1, &submitInfo, fence);
+  vkResetFences(device, 1, &frame.fence);
+  vkQueueSubmit(queue, 1, &submitInfo, frame.fence);
+  frame.inFlight = true;
 
-  constexpr uint64_t kTimeoutNs = 3'000'000'000ULL;
-  VkResult waitResult = vkWaitForFences(device, 1, &fence, VK_TRUE, kTimeoutNs);
-  if (waitResult == VK_TIMEOUT) {
-    throw std::runtime_error("Pixel fill rate dispatch timed out (>3 s)!");
-  } else if (waitResult != VK_SUCCESS) {
-    throw std::runtime_error("Pixel fill rate fence wait failed!");
-  }
+  frameIndex = (frameIndex + 1) % kMaxInFlight;
 }
 
 void PixelFillRateBench::Teardown() {
@@ -421,13 +433,15 @@ void PixelFillRateBench::Teardown() {
       vkDestroyShaderModule(device, fragShaderModule, nullptr);
       fragShaderModule = VK_NULL_HANDLE;
     }
-    if (fence != VK_NULL_HANDLE) {
-      vkDestroyFence(device, fence, nullptr);
-      fence = VK_NULL_HANDLE;
-    }
-    if (commandBuffer != VK_NULL_HANDLE && commandPool != VK_NULL_HANDLE) {
-      vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
-      commandBuffer = VK_NULL_HANDLE;
+    for (size_t i = 0; i < kMaxInFlight; ++i) {
+      if (frames[i].inFlight && frames[i].fence != VK_NULL_HANDLE) {
+        vkWaitForFences(device, 1, &frames[i].fence, VK_TRUE, 3'000'000'000ULL);
+        frames[i].inFlight = false;
+      }
+      if (frames[i].fence != VK_NULL_HANDLE) {
+        vkDestroyFence(device, frames[i].fence, nullptr);
+        frames[i].fence = VK_NULL_HANDLE;
+      }
     }
     if (commandPool != VK_NULL_HANDLE) {
       vkDestroyCommandPool(device, commandPool, nullptr);

@@ -6,19 +6,20 @@ use gpubench_core::{get_available_benchmarks, run_benchmarks, ResultData};
 use std::sync::{mpsc, mpsc::Sender, Mutex, LazyLock};
 use std::collections::HashSet;
 
-struct PrimaryGradientButton;
-impl iced::widget::button::StyleSheet for PrimaryGradientButton {
+struct SleekPrimaryButton;
+impl iced::widget::button::StyleSheet for SleekPrimaryButton {
     type Style = Theme;
     fn active(&self, _style: &Self::Style) -> iced::widget::button::Appearance {
         use iced::gradient::Linear;
         let mut gradient = Linear::new(0.0);
-        gradient = gradient.add_stop(0.0, color!(0x1A2980, 0.85));
-        gradient = gradient.add_stop(1.0, color!(0x26D0CE, 0.85));
+        gradient = gradient.add_stop(0.0, color!(0x4F46E5, 0.95)); // Indigo 600
+        gradient = gradient.add_stop(0.6, color!(0x6366F1, 0.95)); // Indigo 500
+        gradient = gradient.add_stop(1.0, color!(0x818CF8, 0.95)); // Indigo 400
         iced::widget::button::Appearance {
             background: Some(Background::Gradient(gradient.into())),
             text_color: color!(0xFFFFFF),
-            border: Border { radius: 25.0.into(), width: 0.0, color: color!(0x000000, 0.0) },
-            shadow_offset: iced::Vector::new(0.0, 4.0),
+            border: Border { radius: 10.0.into(), width: 1.0, color: color!(0xFFFFFF, 0.15) },
+            shadow_offset: iced::Vector::new(0.0, 2.0),
             ..Default::default()
         }
     }
@@ -26,63 +27,65 @@ impl iced::widget::button::StyleSheet for PrimaryGradientButton {
         let mut app = self.active(style);
         use iced::gradient::Linear;
         let mut gradient = Linear::new(0.0);
-        gradient = gradient.add_stop(0.0, color!(0x1A2980, 1.0));
-        gradient = gradient.add_stop(1.0, color!(0x26D0CE, 1.0));
+        gradient = gradient.add_stop(0.0, color!(0x4338CA, 1.0)); // Indigo 700
+        gradient = gradient.add_stop(0.6, color!(0x4F46E5, 1.0)); // Indigo 600
+        gradient = gradient.add_stop(1.0, color!(0x6366F1, 1.0)); // Indigo 500
         app.background = Some(Background::Gradient(gradient.into()));
+        app.border = Border { radius: 10.0.into(), width: 1.0, color: color!(0xFFFFFF, 0.3) };
         app
     }
 }
 
-struct SecondaryBorderButton;
-impl iced::widget::button::StyleSheet for SecondaryBorderButton {
+struct SleekSecondaryButton;
+impl iced::widget::button::StyleSheet for SleekSecondaryButton {
     type Style = Theme;
     fn active(&self, _style: &Self::Style) -> iced::widget::button::Appearance {
         iced::widget::button::Appearance {
-            background: Some(Background::Color(color!(0x1A1A24))),
-            text_color: color!(0x00E5FF),
-            border: Border { radius: 25.0.into(), width: 1.0, color: color!(0x00E5FF, 0.5) },
+            background: Some(Background::Color(color!(0x141722))),
+            text_color: color!(0xCBD5E1),
+            border: Border { radius: 10.0.into(), width: 1.0, color: color!(0x2D354B) },
             ..Default::default()
         }
     }
     fn hovered(&self, _style: &Self::Style) -> iced::widget::button::Appearance {
         iced::widget::button::Appearance {
-            background: Some(Background::Color(color!(0x222233))),
-            text_color: color!(0x00E5FF),
-            border: Border { radius: 25.0.into(), width: 1.0, color: color!(0x00E5FF, 1.0) },
+            background: Some(Background::Color(color!(0x1D2232))),
+            text_color: color!(0xF8FAFC),
+            border: Border { radius: 10.0.into(), width: 1.0, color: color!(0x475569) },
             ..Default::default()
         }
     }
 }
 
-struct PillToggle {
+struct SleekPillToggle {
     is_active: bool,
     is_api_selector: bool,
 }
 
-impl iced::widget::button::StyleSheet for PillToggle {
+impl iced::widget::button::StyleSheet for SleekPillToggle {
     type Style = Theme;
     fn active(&self, _style: &Self::Style) -> iced::widget::button::Appearance {
         if self.is_active {
             if self.is_api_selector {
                 iced::widget::button::Appearance {
-                    background: Some(Background::Color(color!(0x00E5FF, 0.1))),
-                    text_color: color!(0x00E5FF),
-                    border: Border { radius: 12.0.into(), width: 1.0, color: color!(0x00E5FF, 0.8) },
+                    background: Some(Background::Color(color!(0x0EA5E9, 0.16))),
+                    text_color: color!(0x38BDF8),
+                    border: Border { radius: 8.0.into(), width: 1.0, color: color!(0x0EA5E9, 0.75) },
                     ..Default::default()
                 }
             } else {
                 iced::widget::button::Appearance {
-                    background: Some(Background::Color(color!(0xFFFFFF, 0.1))),
-                    text_color: color!(0xFFFFFF),
-                    border: Border { radius: 12.0.into(), width: 1.0, color: color!(0xFFFFFF, 0.6) },
+                    background: Some(Background::Color(color!(0x6366F1, 0.16))),
+                    text_color: color!(0xA5B4FC),
+                    border: Border { radius: 8.0.into(), width: 1.0, color: color!(0x6366F1, 0.75) },
                     ..Default::default()
                 }
             }
         } else {
             iced::widget::button::Appearance {
-                background: Some(Background::Color(color!(0x1A1A24))),
-                text_color: color!(0x666677),
-                border: Border { radius: 12.0.into(), width: 1.0, color: color!(0x1A1A24) },
+                background: Some(Background::Color(color!(0x12151F))),
+                text_color: color!(0x64748B),
+                border: Border { radius: 8.0.into(), width: 1.0, color: color!(0x1A1F2C) },
                 ..Default::default()
             }
         }
@@ -92,52 +95,455 @@ impl iced::widget::button::StyleSheet for PillToggle {
             self.active(style)
         } else {
             iced::widget::button::Appearance {
-                background: Some(Background::Color(color!(0x222233))),
-                text_color: color!(0xAAAAAA),
-                border: Border { radius: 12.0.into(), width: 1.0, color: color!(0x333344) },
+                background: Some(Background::Color(color!(0x181C2A))),
+                text_color: color!(0x94A3B8),
+                border: Border { radius: 8.0.into(), width: 1.0, color: color!(0x262D40) },
                 ..Default::default()
             }
         }
     }
 }
 
-struct GroupPill {
-    is_highlighted: bool,
-}
-
-impl iced::widget::button::StyleSheet for GroupPill {
+struct SleekDisabledPill;
+impl iced::widget::button::StyleSheet for SleekDisabledPill {
     type Style = Theme;
     fn active(&self, _style: &Self::Style) -> iced::widget::button::Appearance {
-        if self.is_highlighted {
+        iced::widget::button::Appearance {
+            background: Some(Background::Color(color!(0x0C0E14))),
+            text_color: color!(0x334155),
+            border: Border { radius: 8.0.into(), width: 1.0, color: color!(0x161B26) },
+            ..Default::default()
+        }
+    }
+    fn hovered(&self, style: &Self::Style) -> iced::widget::button::Appearance {
+        self.active(style)
+    }
+}
+
+struct SleekDeviceCheckbox {
+    is_checked: bool,
+}
+
+impl iced::widget::button::StyleSheet for SleekDeviceCheckbox {
+    type Style = Theme;
+    fn active(&self, _style: &Self::Style) -> iced::widget::button::Appearance {
+        if self.is_checked {
             iced::widget::button::Appearance {
-                background: Some(Background::Color(color!(0xFF3366, 0.15))),
-                text_color: color!(0xFF3366),
-                border: Border { radius: 20.0.into(), width: 1.0, color: color!(0xFF3366, 0.6) },
+                background: Some(Background::Color(color!(0x141A2E))),
+                text_color: color!(0xF1F5F9),
+                border: Border { radius: 8.0.into(), width: 1.0, color: color!(0x6366F1, 0.7) },
                 ..Default::default()
             }
         } else {
             iced::widget::button::Appearance {
-                background: Some(Background::Color(color!(0x1A1A24))),
-                text_color: color!(0x8888AA),
-                border: Border { radius: 20.0.into(), width: 1.0, color: color!(0x222233) },
+                background: Some(Background::Color(color!(0x0E1017))),
+                text_color: color!(0x64748B),
+                border: Border { radius: 8.0.into(), width: 1.0, color: color!(0x1E2433) },
                 ..Default::default()
             }
         }
     }
     fn hovered(&self, _style: &Self::Style) -> iced::widget::button::Appearance {
         iced::widget::button::Appearance {
-            background: Some(Background::Color(color!(0xFF3366, 0.1))),
-            text_color: color!(0xFF3366),
-            border: Border { radius: 20.0.into(), width: 1.0, color: color!(0xFF3366, 0.3) },
+            background: Some(Background::Color(color!(0x182038))),
+            text_color: color!(0xFFFFFF),
+            border: Border { radius: 8.0.into(), width: 1.0, color: color!(0x818CF8, 0.85) },
             ..Default::default()
         }
     }
 }
 
-/// Candidate kernel directories in priority order (pure, unit-testable):
-/// 1. exe-relative install layout: <exe_dir>/../share/gpubench/kernels
-/// 2. dev-tree layout: <crate>/../kernels (path baked at compile time,
-///    but only checked for existence at runtime)
+struct SleekGroupChip {
+    is_highlighted: bool,
+    is_disabled: bool,
+}
+
+impl iced::widget::button::StyleSheet for SleekGroupChip {
+    type Style = Theme;
+    fn active(&self, _style: &Self::Style) -> iced::widget::button::Appearance {
+        if self.is_disabled {
+            iced::widget::button::Appearance {
+                background: Some(Background::Color(color!(0x0D0F16))),
+                text_color: color!(0x334155),
+                border: Border { radius: 16.0.into(), width: 1.0, color: color!(0x161B26) },
+                ..Default::default()
+            }
+        } else if self.is_highlighted {
+            iced::widget::button::Appearance {
+                background: Some(Background::Color(color!(0x4F46E5, 0.4))),
+                text_color: color!(0xFFFFFF),
+                border: Border { radius: 16.0.into(), width: 1.0, color: color!(0x818CF8, 0.9) },
+                ..Default::default()
+            }
+        } else {
+            iced::widget::button::Appearance {
+                background: Some(Background::Color(color!(0x131722))),
+                text_color: color!(0x94A3B8),
+                border: Border { radius: 16.0.into(), width: 1.0, color: color!(0x262E42) },
+                ..Default::default()
+            }
+        }
+    }
+    fn hovered(&self, style: &Self::Style) -> iced::widget::button::Appearance {
+        if self.is_disabled {
+            self.active(style)
+        } else {
+            iced::widget::button::Appearance {
+                background: Some(Background::Color(color!(0x1B2132))),
+                text_color: color!(0xF8FAFC),
+                border: Border { radius: 16.0.into(), width: 1.0, color: color!(0x6366F1, 0.8) },
+                ..Default::default()
+            }
+        }
+    }
+}
+
+struct SleekDeviceTab {
+    is_active: bool,
+}
+
+impl iced::widget::button::StyleSheet for SleekDeviceTab {
+    type Style = Theme;
+    fn active(&self, _style: &Self::Style) -> iced::widget::button::Appearance {
+        if self.is_active {
+            iced::widget::button::Appearance {
+                background: Some(Background::Color(color!(0x0EA5E9, 0.25))),
+                text_color: color!(0x38BDF8),
+                border: Border { radius: 5.0.into(), width: 1.0, color: color!(0x0EA5E9, 0.8) },
+                ..Default::default()
+            }
+        } else {
+            iced::widget::button::Appearance {
+                background: Some(Background::Color(color!(0x131722))),
+                text_color: color!(0x64748B),
+                border: Border { radius: 5.0.into(), width: 1.0, color: color!(0x1C2230) },
+                ..Default::default()
+            }
+        }
+    }
+    fn hovered(&self, style: &Self::Style) -> iced::widget::button::Appearance {
+        if self.is_active {
+            self.active(style)
+        } else {
+            iced::widget::button::Appearance {
+                background: Some(Background::Color(color!(0x1A2030))),
+                text_color: color!(0x94A3B8),
+                border: Border { radius: 5.0.into(), width: 1.0, color: color!(0x2D3748) },
+                ..Default::default()
+            }
+        }
+    }
+}
+
+// ============================================================================
+// Hardware Telemetry & Dynamic API Detection
+// ============================================================================
+
+#[derive(Debug, Clone)]
+pub struct DeviceTelemetry {
+    pub id: String,
+    pub name: String,
+    pub is_gpu: bool,
+    pub hwmon_path: std::path::PathBuf,
+    pub drm_dev_path: Option<std::path::PathBuf>,
+    
+    // Live values
+    pub temp: f32,
+    pub junction_temp: f32,
+    pub power: f32,
+    pub sclk: u32,
+    pub mclk: u32,
+    pub vram_used: u64,
+    pub vram_total: u64,
+
+    // Session Statistics
+    pub temp_min: f32,
+    pub temp_max: f32,
+    pub temp_sum: f32,
+    pub power_min: f32,
+    pub power_max: f32,
+    pub power_sum: f32,
+    pub sample_count: u32,
+}
+
+impl DeviceTelemetry {
+    pub fn reset_stats(&mut self) {
+        self.temp_min = 0.0;
+        self.temp_max = 0.0;
+        self.temp_sum = 0.0;
+        self.power_min = 0.0;
+        self.power_max = 0.0;
+        self.power_sum = 0.0;
+        self.sample_count = 0;
+    }
+
+    pub fn avg_temp(&self) -> f32 {
+        if self.sample_count > 0 { self.temp_sum / self.sample_count as f32 } else { self.temp }
+    }
+
+    pub fn avg_power(&self) -> f32 {
+        if self.sample_count > 0 { self.power_sum / self.sample_count as f32 } else { self.power }
+    }
+}
+
+fn read_sysfs_trimmed(path: &str) -> Option<String> {
+    std::fs::read_to_string(path).ok().map(|s| s.trim().to_string())
+}
+
+fn discover_all_devices() -> Vec<DeviceTelemetry> {
+    let mut devices = Vec::new();
+
+    // 1. Discover GPUs via DRM
+    let mut cards = Vec::new();
+    if let Ok(entries) = std::fs::read_dir("/sys/class/drm") {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                if name.starts_with("card") && !name.contains('-') {
+                    if path.join("device/hwmon").exists() {
+                        cards.push(path);
+                    }
+                }
+            }
+        }
+    }
+    cards.sort();
+
+    for (i, card) in cards.iter().enumerate() {
+        let dev = card.join("device");
+        let hwmon_base = dev.join("hwmon");
+        let mut hwmon_path = std::path::PathBuf::new();
+        if let Ok(entries) = std::fs::read_dir(&hwmon_base) {
+            for entry in entries.flatten() {
+                hwmon_path = entry.path();
+                break;
+            }
+        }
+        
+        let prod_name = read_sysfs_trimmed(&dev.join("product_name").to_string_lossy())
+            .or_else(|| read_sysfs_trimmed(&card.join("device/product_name").to_string_lossy()))
+            .unwrap_or_else(|| format!("AMD Radeon GPU #{}", i));
+
+        devices.push(DeviceTelemetry {
+            id: format!("GPU {}", i),
+            name: prod_name,
+            is_gpu: true,
+            hwmon_path,
+            drm_dev_path: Some(dev),
+            temp: 0.0,
+            junction_temp: 0.0,
+            power: 0.0,
+            sclk: 0,
+            mclk: 0,
+            vram_used: 0,
+            vram_total: 0,
+            temp_min: 0.0,
+            temp_max: 0.0,
+            temp_sum: 0.0,
+            power_min: 0.0,
+            power_max: 0.0,
+            power_sum: 0.0,
+            sample_count: 0,
+        });
+    }
+
+    // 2. Discover CPU via hwmon (k10temp / coretemp / zenpower)
+    if let Ok(entries) = std::fs::read_dir("/sys/class/hwmon") {
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if let Some(name) = read_sysfs_trimmed(&p.join("name").to_string_lossy()) {
+                if name == "k10temp" || name == "coretemp" || name == "zenpower" || name.contains("cpu") {
+                    devices.push(DeviceTelemetry {
+                        id: "CPU".to_string(),
+                        name: "Host CPU (Package)".to_string(),
+                        is_gpu: false,
+                        hwmon_path: p,
+                        drm_dev_path: None,
+                        temp: 0.0,
+                        junction_temp: 0.0,
+                        power: 0.0,
+                        sclk: 0,
+                        mclk: 0,
+                        vram_used: 0,
+                        vram_total: 0,
+                        temp_min: 0.0,
+                        temp_max: 0.0,
+                        temp_sum: 0.0,
+                        power_min: 0.0,
+                        power_max: 0.0,
+                        power_sum: 0.0,
+                        sample_count: 0,
+                    });
+                    break;
+                }
+            }
+        }
+    }
+
+    devices
+}
+
+fn poll_all_devices(devices: &mut [DeviceTelemetry], is_benchmarking: bool) {
+    for dev in devices.iter_mut() {
+        if dev.is_gpu {
+            if let Some(t) = read_sysfs_trimmed(&dev.hwmon_path.join("temp1_input").to_string_lossy()).and_then(|s| s.parse::<f32>().ok()) {
+                dev.temp = t / 1000.0;
+            }
+            if let Some(t2) = read_sysfs_trimmed(&dev.hwmon_path.join("temp2_input").to_string_lossy()).and_then(|s| s.parse::<f32>().ok()) {
+                dev.junction_temp = t2 / 1000.0;
+            }
+            if let Some(pw) = read_sysfs_trimmed(&dev.hwmon_path.join("power1_average").to_string_lossy())
+                .or_else(|| read_sysfs_trimmed(&dev.hwmon_path.join("power1_input").to_string_lossy()))
+                .and_then(|s| s.parse::<f32>().ok()) {
+                dev.power = pw / 1_000_000.0;
+            }
+            if let Some(f1) = read_sysfs_trimmed(&dev.hwmon_path.join("freq1_input").to_string_lossy()).and_then(|s| s.parse::<u32>().ok()) {
+                dev.sclk = f1 / 1_000_000;
+            }
+            if let Some(f2) = read_sysfs_trimmed(&dev.hwmon_path.join("freq2_input").to_string_lossy()).and_then(|s| s.parse::<u32>().ok()) {
+                dev.mclk = f2 / 1_000_000;
+            }
+            if let Some(drm_dev) = &dev.drm_dev_path {
+                if dev.sclk == 0 {
+                    if let Some(s) = read_sysfs_trimmed(&drm_dev.join("current_gfxclk").to_string_lossy()).and_then(|s| s.parse::<u32>().ok()) {
+                        dev.sclk = s;
+                    }
+                }
+                if dev.mclk == 0 {
+                    if let Some(m) = read_sysfs_trimmed(&drm_dev.join("current_uclk").to_string_lossy()).and_then(|s| s.parse::<u32>().ok()) {
+                        dev.mclk = m;
+                    }
+                }
+                if let Some(vu) = read_sysfs_trimmed(&drm_dev.join("mem_info_vram_used").to_string_lossy()).and_then(|s| s.parse::<u64>().ok()) {
+                    dev.vram_used = vu / (1024 * 1024);
+                }
+                if let Some(vt) = read_sysfs_trimmed(&drm_dev.join("mem_info_vram_total").to_string_lossy()).and_then(|s| s.parse::<u64>().ok()) {
+                    dev.vram_total = vt / (1024 * 1024);
+                }
+            }
+        } else {
+            // CPU
+            if let Some(t) = read_sysfs_trimmed(&dev.hwmon_path.join("temp1_input").to_string_lossy()).and_then(|s| s.parse::<f32>().ok()) {
+                dev.temp = t / 1000.0;
+            }
+            if let Some(pw) = read_sysfs_trimmed(&dev.hwmon_path.join("power1_average").to_string_lossy())
+                .or_else(|| read_sysfs_trimmed(&dev.hwmon_path.join("power1_input").to_string_lossy()))
+                .and_then(|s| s.parse::<f32>().ok()) {
+                dev.power = pw / 1_000_000.0;
+            }
+        }
+
+        if is_benchmarking {
+            if dev.temp > 0.0 {
+                dev.temp_min = if dev.temp_min == 0.0 { dev.temp } else { dev.temp_min.min(dev.temp) };
+                dev.temp_max = dev.temp_max.max(dev.temp);
+                dev.temp_sum += dev.temp;
+            }
+            if dev.power > 0.0 {
+                dev.power_min = if dev.power_min == 0.0 { dev.power } else { dev.power_min.min(dev.power) };
+                dev.power_max = dev.power_max.max(dev.power);
+                dev.power_sum += dev.power;
+            }
+            dev.sample_count += 1;
+        }
+    }
+}
+
+fn detect_dynamic_api_version(api: &str) -> String {
+    match api.to_uppercase().as_str() {
+        "VULKAN" => {
+            #[cfg(target_os = "linux")]
+            {
+                type PfnEnumerate = unsafe extern "C" fn(*mut u32) -> i32;
+                unsafe {
+                    for lib_name in &[b"libvulkan.so.1\0".as_ptr(), b"libvulkan.so\0".as_ptr()] {
+                        let handle = libc::dlopen(*lib_name as *const _, libc::RTLD_LAZY);
+                        if !handle.is_null() {
+                            let sym = libc::dlsym(handle, b"vkEnumerateInstanceVersion\0".as_ptr() as *const _);
+                            if !sym.is_null() {
+                                let func: PfnEnumerate = std::mem::transmute(sym);
+                                let mut ver = 0u32;
+                                if func(&mut ver) == 0 {
+                                    libc::dlclose(handle);
+                                    let major = (ver >> 22) & 0x7F;
+                                    let minor = (ver >> 12) & 0x3FF;
+                                    return format!("{}.{}", major, minor);
+                                }
+                            }
+                            libc::dlclose(handle);
+                        }
+                    }
+                }
+            }
+            "1.4".to_string()
+        }
+        "ROCM" => {
+            #[cfg(target_os = "linux")]
+            {
+                type PfnHipVersion = unsafe extern "C" fn(*mut i32) -> i32;
+                unsafe {
+                    for lib_name in &[
+                        b"libamdhip64.so.7\0".as_ptr(),
+                        b"libamdhip64.so.6\0".as_ptr(),
+                        b"libamdhip64.so\0".as_ptr(),
+                    ] {
+                        let handle = libc::dlopen(*lib_name as *const _, libc::RTLD_LAZY);
+                        if !handle.is_null() {
+                            let sym = libc::dlsym(handle, b"hipRuntimeGetVersion\0".as_ptr() as *const _);
+                            if !sym.is_null() {
+                                let func: PfnHipVersion = std::mem::transmute(sym);
+                                let mut ver = 0i32;
+                                if func(&mut ver) == 0 && ver > 0 {
+                                    libc::dlclose(handle);
+                                    let major = ver / 10000000;
+                                    let minor = (ver / 100000) % 100;
+                                    return format!("{}.{}", major, minor);
+                                }
+                            }
+                            libc::dlclose(handle);
+                        }
+                    }
+                }
+            }
+            "7.1".to_string()
+        }
+        "OPENCL" => "3.0".to_string(),
+        _ => "".to_string(),
+    }
+}
+
+fn get_benchmark_description(name: &str) -> &'static str {
+    match name {
+        "FP64" => "Double-precision (64-bit IEEE 754) floating point compute throughput.",
+        "FP32" => "Single-precision (32-bit float) compute throughput, primary metric for standard 3D shaders and graphics compute.",
+        "FP16" => "Half-precision (16-bit float) SIMD vector and dual-issue packed arithmetic throughput.",
+        "BF16" => "16-bit Brain Floating Point vector throughput optimized for machine learning and neural network training.",
+        "FP8" => "Quarter-precision 8-bit floating point arithmetic (E4M3 / E5M2) for modern low-bit AI inference.",
+        "FP4" => "4-bit quantized floating point compute throughput for ultra-compact model execution.",
+        "INT8" => "8-bit integer tensor and dot-product (DP4A) throughput for quantized neural network inference.",
+        "INT4" => "4-bit integer quantized vector compute throughput for heavily compressed models.",
+        "Device Memory Bandwidth" => "Peak streaming read/write bandwidth across the dedicated GPU VRAM bus.",
+        "System Memory Bandwidth" => "Multi-threaded host RAM copy and streaming bandwidth from CPU to system DDR memory.",
+        "System Memory Latency" => "Pointer-chasing memory access latency in nanoseconds (lower is better).",
+        "Pixel Fill Rate" => "Rasterizer and ROP output fill throughput across 32-bit RGBA, 64-bit HDR, and alpha blending.",
+        "RayTracing" => "Peak BVH acceleration structure traversal and ray-triangle intersection throughput.",
+        "RayDivergence" => "BVH traversal throughput under non-uniform ray branches and wavefront execution divergence.",
+        "RayAnyHit" => "Traversal and shader invocation throughput against transparent, alpha-tested geometry.",
+        "RayIncoherent" => "Cache hit rate and traversal speed under randomized non-coherent diffuse bounce distributions.",
+        "RayPayload" => "Ray traversal performance under heavy recursive register payload pressure.",
+        "RayASBuild" => "Acceleration structure construction (BLAS/TLAS) and dynamic mesh refit throughput.",
+        "RayProcedural" => "Intersection evaluation against mathematically defined procedural primitives (spheres, curves).",
+        "RayMaterialDivergence" => "Shading dispatch throughput when secondary rays scatter across dissimilar materials.",
+        "RayPathTracing" => "Full multi-bounce stochastic Monte Carlo path tracing with global illumination and cosine sampling.",
+        "RayExecutionParadigm" => "Comparative ray execution paradigms: Traditional Megakernel vs Work Lists / DGC vs GPU Work Graphs vs Hardware SER.",
+        _ => "GPU workstation benchmark suite.",
+    }
+}
+
+// ============================================================================
+// Kernel Discovery & Entry Point
+// ============================================================================
+
 fn kernel_path_candidates() -> Vec<std::path::PathBuf> {
     let mut candidates = Vec::new();
     if let Ok(exe) = std::env::current_exe() {
@@ -149,10 +555,6 @@ fn kernel_path_candidates() -> Vec<std::path::PathBuf> {
     candidates
 }
 
-/// Resolve GPUBENCH_KERNEL_PATH once at startup.
-/// (a) If the user already set it, leave it alone.
-/// (b/c) Otherwise set it to the first candidate that exists at runtime.
-/// (d) If no candidate exists, set nothing and let the C++ core's own search handle it.
 fn resolve_kernel_path() {
     if std::env::var_os("GPUBENCH_KERNEL_PATH").is_some() {
         return;
@@ -165,9 +567,6 @@ fn resolve_kernel_path() {
 }
 
 pub fn main() -> iced::Result {
-    // Suppress Mesa/RADV conformance warnings (set before any threads spawn).
-    // SAFETY: called at the very start of main, before the winit/tokio
-    // executors start, so no other thread can be reading the environment.
     if std::env::var_os("MESA_VK_IGNORE_CONFORMANCE_WARNING").is_none() {
         unsafe { std::env::set_var("MESA_VK_IGNORE_CONFORMANCE_WARNING", "1") };
     }
@@ -175,15 +574,14 @@ pub fn main() -> iced::Result {
     GPUBenchApp::run(Settings {
         antialiasing: true,
         window: iced::window::Settings {
-            size: iced::Size::new(1200.0, 820.0),
-            min_size: Some(iced::Size::new(1000.0, 680.0)),
+            size: iced::Size::new(1280.0, 840.0),
+            min_size: Some(iced::Size::new(1080.0, 720.0)),
             ..Default::default()
         },
         ..Settings::default()
     })
 }
 
-// Use a Mutex around the Option instead of OnceLock to allow resetting the sender
 static PROGRESS_SENDER: LazyLock<Mutex<Option<Sender<ResultData>>>> = LazyLock::new(|| Mutex::new(None));
 
 fn progress_callback(res: &ResultData) {
@@ -194,11 +592,8 @@ fn progress_callback(res: &ResultData) {
     }
 }
 
-/// Extract just the product name from a hardware string like "vulkan|0|AMD Radeon AI PRO R9700 (RADV GFX1201)"
-/// Strips driver info in parentheses and common prefixes.
 fn clean_device_name(raw: &str) -> String {
     let name = raw.to_string();
-    // Strip parenthesized driver info like "(RADV GFX1201)" or "(TM)"
     let mut cleaned = String::new();
     let mut depth = 0i32;
     for c in name.chars() {
@@ -212,35 +607,32 @@ fn clean_device_name(raw: &str) -> String {
     cleaned.trim().to_string()
 }
 
-/// Deduplicated, uppercased backend names parsed from the "api|index|name"
-/// hardware strings, so the selector only offers APIs that actually exist.
 fn available_backends(hw: &[String]) -> Vec<String> {
     let mut backends: Vec<String> = Vec::new();
     for h in hw {
         let parts: Vec<&str> = h.split('|').collect();
         if parts.len() == 3 {
             let api = parts[0].to_uppercase();
-            if !backends.contains(&api) {
+            if api != "SYSTEM" && !backends.contains(&api) {
                 backends.push(api);
             }
         }
     }
+    if backends.is_empty() {
+        backends.push("VULKAN".to_string());
+    }
     backends
 }
 
-/// Display strings ("index: name") for the devices whose API matches the
-/// selected backend (case-insensitive, since display names are uppercased).
 fn devices_for_backend(hw: &[String], selected_backend: &str) -> Vec<String> {
     let mut devices = Vec::new();
+    devices.push("System: Host CPU & RAM".to_string());
     for h in hw {
         let parts: Vec<&str> = h.split('|').collect();
         if parts.len() == 3 && parts[0].eq_ignore_ascii_case(selected_backend) {
             let cleaned = clean_device_name(parts[2]);
             devices.push(format!("{}: {}", parts[1], cleaned));
         }
-    }
-    if devices.is_empty() {
-        devices.push("0: Default Device".to_string());
     }
     devices
 }
@@ -249,16 +641,13 @@ enum AppState {
     Setup {
         available_backends: Vec<String>,
         selected_backend: String,
-        
         available_devices: Vec<String>,
-        selected_device: String,
-        
         available_tests: Vec<String>,
     },
     Running {
         progress_receiver: Option<mpsc::Receiver<ResultData>>,
         total_benchmarks: usize,
-        completed_suites: std::collections::HashSet<String>,
+        completed_suites: HashSet<String>,
     },
     Complete {
         total_benchmarks: usize,
@@ -266,67 +655,19 @@ enum AppState {
     Error(String),
 }
 
-fn read_sysfs_trimmed(path: &str) -> Option<String> {
-    std::fs::read_to_string(path).ok().map(|s| s.trim().to_string())
-}
-
-fn query_gpu_telemetry(card_idx: u32) -> (f32, f32, u32, u32, u64, u64) {
-    let base = format!("/sys/class/drm/card{}/device/", card_idx);
-    let mut temp = 0.0f32;
-    let mut power = 0.0f32;
-    let mut sclk = 0u32;
-    let mut mclk = 0u32;
-    let mut vram_used = 0u64;
-    let mut vram_total = 0u64;
-
-    for h in 0..5 {
-        let hwmon = format!("{}hwmon/hwmon{}/", base, h);
-        if std::path::Path::new(&hwmon).exists() {
-            if let Some(t) = read_sysfs_trimmed(&format!("{}temp1_input", hwmon)).and_then(|s| s.parse::<f32>().ok()) {
-                temp = t / 1000.0;
-            }
-            if let Some(p) = read_sysfs_trimmed(&format!("{}power1_average", hwmon))
-                .or_else(|| read_sysfs_trimmed(&format!("{}power1_input", hwmon)))
-                .and_then(|s| s.parse::<f32>().ok()) {
-                power = p / 1_000_000.0;
-            }
-            break;
-        }
-    }
-    if let Some(vu) = read_sysfs_trimmed(&format!("{}mem_info_vram_used", base)).and_then(|s| s.parse::<u64>().ok()) {
-        vram_used = vu / (1024 * 1024);
-    }
-    if let Some(vt) = read_sysfs_trimmed(&format!("{}mem_info_vram_total", base)).and_then(|s| s.parse::<u64>().ok()) {
-        vram_total = vt / (1024 * 1024);
-    }
-    if let Some(s) = read_sysfs_trimmed(&format!("{}current_gfxclk", base)).and_then(|s| s.parse::<u32>().ok()) {
-        sclk = s;
-    }
-    if let Some(m) = read_sysfs_trimmed(&format!("{}current_uclk", base)).and_then(|s| s.parse::<u32>().ok()) {
-        mclk = m;
-    }
-
-    (temp, power, sclk, mclk, vram_used, vram_total)
-}
-
 struct GPUBenchApp {
     state: AppState,
     current_benchmark: String,
-    current_device: String,
+    current_devices_label: String,
     selected_tests: HashSet<String>,
-    available_backends: Vec<String>,
     selected_backend: String,
     available_devices: Vec<String>,
-    selected_device: String,
+    selected_devices: HashSet<String>,
     available_tests: Vec<String>,
     
-    // Live Hardware Telemetry
-    telemetry_temp: f32,
-    telemetry_power: f32,
-    telemetry_sclk: u32,
-    telemetry_mclk: u32,
-    telemetry_vram_used: u64,
-    telemetry_vram_total: u64,
+    // Multi-Hardware Telemetry
+    monitored_devices: Vec<DeviceTelemetry>,
+    selected_telemetry_device: usize,
 
     // Metrics
     gpu_bw: f32,
@@ -358,6 +699,9 @@ struct GPUBenchApp {
     gpu_rt_payload: f32,
     gpu_rt_procedural: f32,
     gpu_rt_pathtracing: f32,
+    gpu_rt_paradigm_workgraph: f32,
+    gpu_rt_paradigm_worklist: f32,
+    gpu_rt_paradigm_trad: f32,
 
     gpu_pixel_fill: f32,
     gpu_pixel_fill_hdr: f32,
@@ -367,9 +711,10 @@ struct GPUBenchApp {
 #[derive(Debug, Clone)]
 enum Message {
     BackendSelected(String),
-    DeviceSelected(String),
+    DeviceToggled(String),
     TestToggled(String, bool),
     TestGroupSelected(String),
+    TelemetryDeviceSelected(usize),
     StartBenchmarks,
     BenchmarksComplete,
     BenchmarksFailed(String),
@@ -388,21 +733,22 @@ impl Application for GPUBenchApp {
         let tests = get_available_benchmarks();
         
         let hw = gpubench_core::get_available_hardware();
-        let mut backends = available_backends(&hw);
-        if backends.is_empty() {
-            backends.push("VULKAN".to_string());
-        }
-        let selected_backend = backends[0].clone();
+        let backends = available_backends(&hw);
+        let selected_backend = backends.first().cloned().unwrap_or_else(|| "VULKAN".to_string());
         let devices = devices_for_backend(&hw, &selected_backend);
-
-        let selected_device = devices[0].clone();
         
+        let mut initial_devices = HashSet::new();
+        for d in &devices {
+            initial_devices.insert(d.clone());
+        }
+
         let mut initial_tests = HashSet::new();
         for t in &tests {
             initial_tests.insert(t.clone());
         }
 
-        let (temp, power, sclk, mclk, vram_used, vram_total) = query_gpu_telemetry(0);
+        let mut monitored = discover_all_devices();
+        poll_all_devices(&mut monitored, false);
 
         (
             Self {
@@ -410,23 +756,17 @@ impl Application for GPUBenchApp {
                     available_backends: backends.clone(),
                     selected_backend: selected_backend.clone(),
                     available_devices: devices.clone(),
-                    selected_device: selected_device.clone(),
                     available_tests: tests.clone(),
                 },
-                available_backends: backends,
-                selected_backend: selected_backend,
+                selected_backend,
                 available_devices: devices,
-                selected_device: selected_device,
+                selected_devices: initial_devices,
                 available_tests: tests,
                 selected_tests: initial_tests,
                 current_benchmark: String::from("Waiting to start..."),
-                current_device: String::from(""),
-                telemetry_temp: temp,
-                telemetry_power: power,
-                telemetry_sclk: sclk,
-                telemetry_mclk: mclk,
-                telemetry_vram_used: vram_used,
-                telemetry_vram_total: vram_total,
+                current_devices_label: String::from(""),
+                monitored_devices: monitored,
+                selected_telemetry_device: 0,
                 gpu_bw: 0.0,
                 sys_mem_bw: 0.0,
                 sys_mem_bw_single: 0.0,
@@ -453,6 +793,9 @@ impl Application for GPUBenchApp {
                 gpu_rt_payload: 0.0,
                 gpu_rt_procedural: 0.0,
                 gpu_rt_pathtracing: 0.0,
+                gpu_rt_paradigm_workgraph: 0.0,
+                gpu_rt_paradigm_worklist: 0.0,
+                gpu_rt_paradigm_trad: 0.0,
                 gpu_pixel_fill: 0.0,
                 gpu_pixel_fill_hdr: 0.0,
                 gpu_pixel_fill_blend: 0.0,
@@ -462,13 +805,17 @@ impl Application for GPUBenchApp {
     }
 
     fn title(&self) -> String {
-        String::from("GPUBench")
+        String::from("GPUBench — Workstation GPU Profiler")
+    }
+
+    fn subscription(&self) -> iced::Subscription<Message> {
+        iced::time::every(std::time::Duration::from_millis(500)).map(|_| Message::Tick)
     }
 
     fn update(&mut self, message: Message) -> Command<Message> {
         match message {
             Message::BackendSelected(backend) => {
-                if let AppState::Setup { selected_backend, available_devices, selected_device, .. } = &mut self.state {
+                if let AppState::Setup { selected_backend, available_devices, .. } = &mut self.state {
                     *selected_backend = backend.clone();
                     self.selected_backend = backend.clone();
                     
@@ -476,29 +823,53 @@ impl Application for GPUBenchApp {
                     let new_devices = devices_for_backend(&hw, selected_backend);
                     *available_devices = new_devices.clone();
                     self.available_devices = new_devices.clone();
-                    *selected_device = new_devices[0].clone();
-                    self.selected_device = new_devices[0].clone();
+                    
+                    self.selected_devices.clear();
+                    for d in &self.available_devices {
+                        self.selected_devices.insert(d.clone());
+                    }
+
+                    if backend != "VULKAN" {
+                        self.selected_tests.retain(|t| !t.starts_with("Ray"));
+                    }
                 }
+                Command::none()
             }
-            Message::DeviceSelected(device) => {
-                if let AppState::Setup { selected_device, .. } = &mut self.state {
-                    *selected_device = device.clone();
-                    self.selected_device = device;
+            Message::DeviceToggled(device) => {
+                if self.selected_devices.contains(&device) {
+                    if self.selected_devices.len() > 1 {
+                        self.selected_devices.remove(&device);
+                    }
+                } else {
+                    self.selected_devices.insert(device);
                 }
+                Command::none()
+            }
+            Message::TelemetryDeviceSelected(idx) => {
+                if idx < self.monitored_devices.len() {
+                    self.selected_telemetry_device = idx;
+                }
+                Command::none()
             }
             Message::TestToggled(name, is_checked) => {
+                if self.selected_backend != "VULKAN" && name.starts_with("Ray") {
+                    return Command::none();
+                }
                 if is_checked {
                     self.selected_tests.insert(name);
                 } else {
                     self.selected_tests.remove(&name);
                 }
+                Command::none()
             }
             Message::TestGroupSelected(group) => {
                 if let AppState::Setup { available_tests, .. } = &mut self.state {
                     match group.as_str() {
                         "ALL" => {
                             for t in available_tests.iter() {
-                                self.selected_tests.insert(t.clone());
+                                if self.selected_backend == "VULKAN" || !t.starts_with("Ray") {
+                                    self.selected_tests.insert(t.clone());
+                                }
                             }
                         }
                         "NONE" => {
@@ -506,47 +877,31 @@ impl Application for GPUBenchApp {
                         }
                         "COMPUTE" => {
                             let compute: Vec<String> = available_tests.iter()
-                                .filter(|t| !t.starts_with("Ray") && *t != "MemBandwidth")
+                                .filter(|t| !t.starts_with("Ray") && !t.contains("Memory") && !t.contains("SysMem") && !t.contains("Pixel"))
                                 .cloned().collect();
-                            let global_all = available_tests.iter().all(|t| self.selected_tests.contains(t));
-                            if global_all {
-                                self.selected_tests.clear();
-                                for t in compute { self.selected_tests.insert(t); }
+                            let all_selected = compute.iter().all(|t| self.selected_tests.contains(t));
+                            if all_selected {
+                                for t in &compute { self.selected_tests.remove(t); }
                             } else {
-                                let all_selected = compute.iter().all(|t| self.selected_tests.contains(t));
-                                if all_selected {
-                                    for t in &compute { self.selected_tests.remove(t); }
-                                } else {
-                                    for t in compute { self.selected_tests.insert(t); }
-                                }
+                                for t in compute { self.selected_tests.insert(t); }
                             }
                         }
-                        "SYSTEM" => {
+                        "MEMORY" => {
                             let sys: Vec<String> = available_tests.iter()
-                                .filter(|t| *t == "MemBandwidth")
+                                .filter(|t| t.contains("Memory") || t.contains("SysMem") || t.contains("Pixel"))
                                 .cloned().collect();
-                            let global_all = available_tests.iter().all(|t| self.selected_tests.contains(t));
-                            if global_all {
-                                self.selected_tests.clear();
-                                for t in sys { self.selected_tests.insert(t); }
+                            let all_selected = sys.iter().all(|t| self.selected_tests.contains(t));
+                            if all_selected {
+                                for t in &sys { self.selected_tests.remove(t); }
                             } else {
-                                let all_selected = sys.iter().all(|t| self.selected_tests.contains(t));
-                                if all_selected {
-                                    for t in &sys { self.selected_tests.remove(t); }
-                                } else {
-                                    for t in sys { self.selected_tests.insert(t); }
-                                }
+                                for t in sys { self.selected_tests.insert(t); }
                             }
                         }
                         "RAY TRACING" => {
-                            let rt: Vec<String> = available_tests.iter()
-                                .filter(|t| t.starts_with("Ray"))
-                                .cloned().collect();
-                            let global_all = available_tests.iter().all(|t| self.selected_tests.contains(t));
-                            if global_all {
-                                self.selected_tests.clear();
-                                for t in rt { self.selected_tests.insert(t); }
-                            } else {
+                            if self.selected_backend == "VULKAN" {
+                                let rt: Vec<String> = available_tests.iter()
+                                    .filter(|t| t.starts_with("Ray"))
+                                    .cloned().collect();
                                 let all_selected = rt.iter().all(|t| self.selected_tests.contains(t));
                                 if all_selected {
                                     for t in &rt { self.selected_tests.remove(t); }
@@ -558,13 +913,46 @@ impl Application for GPUBenchApp {
                         _ => {}
                     }
                 }
+                Command::none()
             }
             Message::StartBenchmarks => {
-                if let AppState::Setup { selected_backend, selected_device, .. } = &self.state {
+                if let AppState::Setup { selected_backend, .. } = &self.state {
                     let b_str = selected_backend.clone();
-                    let d_idx: u32 = selected_device.split(':').next().unwrap_or("0").parse().unwrap_or(0);
-                    self.current_device = selected_device.clone();
-                    let tests_to_run: Vec<String> = self.selected_tests.iter().cloned().collect();
+                    
+                    let mut gpu_indices: Vec<u32> = Vec::new();
+                    let mut dev_names = Vec::new();
+                    let has_system = self.selected_devices.iter().any(|d| d.starts_with("System"));
+                    
+                    for dev in &self.selected_devices {
+                        if !dev.starts_with("System") {
+                            if let Some(idx_str) = dev.split(':').next() {
+                                if let Ok(idx) = idx_str.parse::<u32>() {
+                                    if !gpu_indices.contains(&idx) {
+                                        gpu_indices.push(idx);
+                                    }
+                                }
+                            }
+                            dev_names.push(dev.clone());
+                        }
+                    }
+                    gpu_indices.sort();
+                    
+                    if has_system {
+                        dev_names.insert(0, "System".to_string());
+                    }
+                    self.current_devices_label = dev_names.join(", ");
+
+                    let mut tests_to_run: Vec<String> = self.selected_tests.iter().cloned().collect();
+                    if !has_system {
+                        tests_to_run.retain(|t| !t.contains("System Memory"));
+                    }
+                    if gpu_indices.is_empty() {
+                        tests_to_run.retain(|t| t.contains("System Memory"));
+                    }
+                    if b_str != "VULKAN" {
+                        tests_to_run.retain(|t| !t.starts_with("Ray"));
+                    }
+
                     let total = tests_to_run.len();
                     if total == 0 { return Command::none(); }
                     let (tx, rx) = mpsc::channel();
@@ -573,50 +961,44 @@ impl Application for GPUBenchApp {
                         *guard = Some(tx);
                     }
 
+                    for dev in &mut self.monitored_devices {
+                        dev.reset_stats();
+                    }
+
                     self.state = AppState::Running {
                         progress_receiver: Some(rx),
                         total_benchmarks: total,
-                        completed_suites: std::collections::HashSet::new(),
+                        completed_suites: HashSet::new(),
                     };
 
-                    return Command::batch(vec![
-                        Command::perform(
-                            async { tokio::time::sleep(std::time::Duration::from_millis(50)).await; },
-                            |_| Message::Tick
-                        ),
-                        Command::perform(
-                            async move {
-                                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-                                tokio::task::spawn_blocking(move || {
-                                    run_benchmarks(
-                                        &tests_to_run,
-                                        &vec![d_idx],
-                                        &vec![b_str],
-                                        false,
-                                        false,
-                                        false,
-                                        progress_callback
-                                    )
-                                }).await
-                            },
-                            |res| match res {
-                                Ok(_) => Message::BenchmarksComplete,
-                                Err(e) => Message::BenchmarksFailed(
-                                    format!("Benchmark worker task failed: {}", e)
-                                ),
-                            }
-                        )
-                    ]);
+                    return Command::perform(
+                        async move {
+                            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                            tokio::task::spawn_blocking(move || {
+                                run_benchmarks(
+                                    &tests_to_run,
+                                    &gpu_indices,
+                                    &vec![b_str],
+                                    false,
+                                    false,
+                                    false,
+                                    progress_callback
+                                )
+                            }).await
+                        },
+                        |res| match res {
+                            Ok(_) => Message::BenchmarksComplete,
+                            Err(e) => Message::BenchmarksFailed(
+                                format!("Benchmark worker task failed: {}", e)
+                            ),
+                        }
+                    );
                 }
+                Command::none()
             }
             Message::Tick => {
-                let (temp, power, sclk, mclk, vram_used, vram_total) = query_gpu_telemetry(0);
-                self.telemetry_temp = temp;
-                self.telemetry_power = power;
-                self.telemetry_sclk = sclk;
-                self.telemetry_mclk = mclk;
-                self.telemetry_vram_used = vram_used;
-                self.telemetry_vram_total = vram_total;
+                let is_running = matches!(self.state, AppState::Running { .. });
+                poll_all_devices(&mut self.monitored_devices, is_running);
 
                 let mut results = Vec::new();
                 if let AppState::Running { progress_receiver, .. } = &self.state {
@@ -627,29 +1009,17 @@ impl Application for GPUBenchApp {
                     }
                 }
                 
-                let mut results_to_process = Vec::new();
-                for res in results {
-                    results_to_process.push(res);
-                }
-
                 if let AppState::Running { completed_suites, .. } = &mut self.state {
-                    for res in &results_to_process {
-                        // Key on (component, benchmark) so suites that share a
-                        // component name (e.g. all "Ray Tracing" tests) count separately.
+                    for res in &results {
                         completed_suites.insert(format!("{}|{}", res.component, res.benchmarkName));
                     }
                 }
                 
-                for res in results_to_process {
+                for res in results {
                     self.process_result(&res);
                 }
 
-                if matches!(self.state, AppState::Running { .. }) {
-                    return Command::perform(
-                        async { tokio::time::sleep(std::time::Duration::from_millis(50)).await; },
-                        |_| Message::Tick
-                    );
-                }
+                Command::none()
             }
             Message::BenchmarksComplete => {
                 let mut results_to_process = Vec::new();
@@ -684,9 +1054,25 @@ impl Application for GPUBenchApp {
                         .set_file_name("gpubench_results.json")
                         .save_file() {
                         
+                        let telemetry_summary: Vec<serde_json::Value> = self.monitored_devices.iter().map(|d| {
+                            serde_json::json!({
+                                "id": d.id,
+                                "name": d.name,
+                                "is_gpu": d.is_gpu,
+                                "temp_min_c": d.temp_min,
+                                "temp_max_c": d.temp_max,
+                                "temp_avg_c": d.avg_temp(),
+                                "power_min_w": d.power_min,
+                                "power_max_w": d.power_max,
+                                "power_avg_w": d.avg_power(),
+                                "samples": d.sample_count,
+                            })
+                        }).collect();
+
                         let data = serde_json::json!({
-                            "hardware": self.current_device,
+                            "hardware": self.current_devices_label,
                             "compute_api": self.selected_backend,
+                            "telemetry_profile": telemetry_summary,
                             "results": {
                                 "compute": {
                                     "fp64_tflops": self.gpu_fp64,
@@ -725,6 +1111,9 @@ impl Application for GPUBenchApp {
                                     "payload": self.gpu_rt_payload,
                                     "procedural": self.gpu_rt_procedural,
                                     "path_tracing": self.gpu_rt_pathtracing,
+                                    "work_graphs": self.gpu_rt_paradigm_workgraph,
+                                    "work_lists": self.gpu_rt_paradigm_worklist,
+                                    "traditional_megakernel": self.gpu_rt_paradigm_trad,
                                 }
                             }
                         });
@@ -736,15 +1125,18 @@ impl Application for GPUBenchApp {
                 return Command::none();
             }
             Message::Retest => {
+                let hw = gpubench_core::get_available_hardware();
+                let backends = available_backends(&hw);
+                let devices = devices_for_backend(&hw, &self.selected_backend);
+                
                 self.state = AppState::Setup {
-                    available_backends: self.available_backends.clone(),
+                    available_backends: backends.clone(),
                     selected_backend: self.selected_backend.clone(),
-                    available_devices: self.available_devices.clone(),
-                    selected_device: self.selected_device.clone(),
+                    available_devices: devices.clone(),
                     available_tests: self.available_tests.clone(),
                 };
                 self.current_benchmark = String::from("Waiting to start...");
-                self.current_device = String::from("");
+                self.current_devices_label = String::from("");
                 self.gpu_bw = 0.0;
                 self.sys_mem_bw = 0.0;
                 self.sys_mem_bw_single = 0.0;
@@ -771,183 +1163,504 @@ impl Application for GPUBenchApp {
                 self.gpu_rt_payload = 0.0;
                 self.gpu_rt_procedural = 0.0;
                 self.gpu_rt_pathtracing = 0.0;
+                self.gpu_rt_paradigm_workgraph = 0.0;
+                self.gpu_rt_paradigm_worklist = 0.0;
+                self.gpu_rt_paradigm_trad = 0.0;
+                self.gpu_pixel_fill = 0.0;
+                self.gpu_pixel_fill_hdr = 0.0;
+                self.gpu_pixel_fill_blend = 0.0;
                 return Command::none();
             }
         }
-        Command::none()
     }
 
     fn view(&self) -> Element<'_, Message> {
-        let (status_text, status_color) = match &self.state {
-            AppState::Setup { .. } => ("SYSTEM IDLE", color!(0x555566)),
-            AppState::Running { .. } => ("ENGAGED", color!(0x00FF88)),
-            AppState::Complete { .. } => ("COMPLETE", color!(0x00E5FF)),
-            AppState::Error(_) => ("ERROR", color!(0xFF3366)),
+        let (status_text, status_badge_color, status_text_color) = match &self.state {
+            AppState::Setup { .. } => ("IDLE", color!(0x1E2333), color!(0x94A3B8)),
+            AppState::Running { .. } => ("RUNNING", color!(0x10B981, 0.2), color!(0x34D399)),
+            AppState::Complete { .. } => ("READY", color!(0x6366F1, 0.2), color!(0xA5B4FC)),
+            AppState::Error(_) => ("FAILED", color!(0xEF4444, 0.2), color!(0xF87171)),
         };
 
-        // Header integrated into sidebars
+        // Header Title / Brand block
+        let brand_block = column![
+            row![
+                text("GPUBench").size(24).style(color!(0xF8FAFC)),
+                Space::with_width(8),
+                container(text("v1.3.1").size(10).style(color!(0x818CF8)))
+                    .padding([2, 6])
+                    .style(|_t: &Theme| container::Appearance {
+                        background: Some(Background::Color(color!(0x6366F1, 0.15))),
+                        border: Border { radius: 6.0.into(), width: 1.0, color: color!(0x6366F1, 0.4) },
+                        ..Default::default()
+                    })
+            ].align_items(iced::Alignment::Center),
+            text("Workstation Profiler").size(11).style(color!(0x64748B))
+        ].spacing(2);
+
+        // Multi-Hardware Telemetry Panel
+        let telemetry_panel = {
+            let active_dev = self.monitored_devices.get(self.selected_telemetry_device)
+                .or_else(|| self.monitored_devices.first());
+
+            let mut tabs_row = row![].spacing(4);
+            for (idx, dev) in self.monitored_devices.iter().enumerate() {
+                let is_sel = idx == self.selected_telemetry_device;
+                let btn = button(text(&dev.id).size(9).horizontal_alignment(iced::alignment::Horizontal::Center))
+                    .padding([3, 6])
+                    .on_press(Message::TelemetryDeviceSelected(idx))
+                    .style(iced::theme::Button::Custom(Box::new(SleekDeviceTab { is_active: is_sel })));
+                tabs_row = tabs_row.push(btn);
+            }
+
+            let mut hud_content = column![
+                row![
+                    text("HARDWARE MONITOR").size(10).style(color!(0x64748B)),
+                    Space::with_width(Length::Fill),
+                    container(text(status_text).size(9).style(status_text_color))
+                        .padding([2, 6])
+                        .style(move |_t: &Theme| container::Appearance {
+                            background: Some(Background::Color(status_badge_color)),
+                            border: Border { radius: 4.0.into(), width: 1.0, color: color!(0x2D3748) },
+                            ..Default::default()
+                        })
+                ].align_items(iced::Alignment::Center),
+                tabs_row,
+            ].spacing(6);
+
+            if let Some(dev) = active_dev {
+                let temp_pct = (dev.temp / 100.0).clamp(0.0, 1.0);
+                let temp_color = if dev.temp > 80.0 { color!(0xEF4444) } else if dev.temp > 0.0 { color!(0x10B981) } else { color!(0x64748B) };
+                let power_pct = (dev.power / 350.0).clamp(0.0, 1.0);
+
+                let temp_str = if dev.temp > 0.0 { format!("{:.1} °C", dev.temp) } else { "-- °C".to_string() };
+                let power_str = if dev.power > 0.0 { format!("{:.1} W", dev.power) } else { "-- W".to_string() };
+
+                hud_content = hud_content.push(
+                    column![
+                        // Temp gauge
+                        column![
+                            row![text("TEMP").size(9).style(color!(0x94A3B8)), Space::with_width(Length::Fill), text(temp_str).size(10).style(temp_color)],
+                            progress_bar(0.0..=1.0, temp_pct).height(3.0)
+                        ].spacing(1),
+                        // Power gauge
+                        column![
+                            row![text("POWER").size(9).style(color!(0x94A3B8)), Space::with_width(Length::Fill), text(power_str).size(10).style(color!(0x38BDF8))],
+                            progress_bar(0.0..=1.0, power_pct).height(3.0)
+                        ].spacing(1),
+                    ].spacing(4)
+                );
+
+                if dev.is_gpu {
+                    let sclk_str = if dev.sclk > 0 { format!("{} MHz", dev.sclk) } else { "-- MHz".to_string() };
+                    let mclk_str = if dev.mclk > 0 { format!("{} MHz", dev.mclk) } else { "-- MHz".to_string() };
+                    let vram_pct = if dev.vram_total > 0 { (dev.vram_used as f32 / dev.vram_total as f32).clamp(0.0, 1.0) } else { 0.0 };
+                    let vram_str = if dev.vram_total > 0 { format!("{}/{} MB", dev.vram_used, dev.vram_total) } else { "-- / -- MB".to_string() };
+
+                    hud_content = hud_content.push(
+                        column![
+                            row![
+                                column![text("CORE CLK").size(8).style(color!(0x64748B)), text(sclk_str).size(10).style(color!(0xF1F5F9))].spacing(1),
+                                Space::with_width(Length::Fill),
+                                column![text("MEM CLK").size(8).style(color!(0x64748B)), text(mclk_str).size(10).style(color!(0xF1F5F9))].spacing(1),
+                            ],
+                            column![
+                                row![text("VRAM").size(9).style(color!(0x94A3B8)), Space::with_width(Length::Fill), text(vram_str).size(9).style(color!(0xA5B4FC))],
+                                progress_bar(0.0..=1.0, vram_pct).height(3.0)
+                            ].spacing(1),
+                        ].spacing(4)
+                    );
+                }
+            }
+
+            container(hud_content)
+                .padding(12)
+                .style(|_t: &Theme| container::Appearance {
+                    background: Some(Background::Color(color!(0x11141E))),
+                    border: Border { radius: 10.0.into(), width: 1.0, color: color!(0x1F2536) },
+                    ..Default::default()
+                })
+        };
 
         match &self.state {
-            AppState::Setup { available_backends, selected_backend, available_devices, selected_device, available_tests } => {
-                let mut device_col = column![].spacing(8);
+            AppState::Setup { available_backends, selected_backend, available_devices, available_tests } => {
+                let mut device_col = column![].spacing(5);
                 for dev in available_devices {
-                    let is_sel = dev == selected_device;
-                    let dev_btn = button(text(dev).size(13).horizontal_alignment(iced::alignment::Horizontal::Center))
-                        .padding([14, 16])
-                        .width(Length::Fill)
-                        .on_press(Message::DeviceSelected(dev.clone()))
-                        .style(iced::theme::Button::Custom(Box::new(PillToggle { is_active: is_sel, is_api_selector: false })));
-                    device_col = device_col.push(dev_btn);
+                    let is_checked = self.selected_devices.contains(dev);
+                    let check_box = text(if is_checked { "[X] " } else { "[   ] " })
+                        .size(11)
+                        .style(if is_checked { color!(0x818CF8) } else { color!(0x475569) });
+
+                    let dev_row = button(
+                        row![
+                            check_box,
+                            text(dev).size(11).style(if is_checked { color!(0xF8FAFC) } else { color!(0x64748B) })
+                        ].align_items(iced::Alignment::Center)
+                    )
+                    .padding([6, 8])
+                    .width(Length::Fill)
+                    .on_press(Message::DeviceToggled(dev.clone()))
+                    .style(iced::theme::Button::Custom(Box::new(SleekDeviceCheckbox { is_checked })));
+                    
+                    device_col = device_col.push(dev_row);
                 }
 
-                let mut api_col = column![].spacing(8);
+                let mut api_row = row![].spacing(6);
                 for api in available_backends {
                     let is_sel = api == selected_backend;
-                    let api_btn = button(text(api).size(13).horizontal_alignment(iced::alignment::Horizontal::Center))
-                        .padding([14, 16])
-                        .width(Length::Fill)
-                        .on_press(Message::BackendSelected(api.clone()))
-                        .style(iced::theme::Button::Custom(Box::new(PillToggle { is_active: is_sel, is_api_selector: true })));
-                    api_col = api_col.push(api_btn);
+                    let ver = detect_dynamic_api_version(api);
+                    let label = if ver.is_empty() { api.clone() } else { format!("{} {}", api, ver) };
+                    
+                    let api_btn = button(
+                        text(label).size(10).horizontal_alignment(iced::alignment::Horizontal::Center)
+                    )
+                    .padding([7, 0])
+                    .width(Length::Fill)
+                    .on_press(Message::BackendSelected(api.clone()))
+                    .style(iced::theme::Button::Custom(Box::new(SleekPillToggle { is_active: is_sel, is_api_selector: true })));
+                    
+                    api_row = api_row.push(api_btn);
                 }
 
                 let start_btn = button(
-                    container(text("BEGIN BENCHMARK").size(16).style(color!(0xFFFFFF)))
+                    container(text("START BENCHMARK").size(13).style(color!(0xFFFFFF)))
                         .width(Length::Fill)
                         .center_x()
                 )
                 .width(Length::Fill)
-                .padding([18, 0])
+                .padding([12, 0])
                 .on_press(Message::StartBenchmarks)
-                .style(iced::theme::Button::Custom(Box::new(PrimaryGradientButton)));
+                .style(iced::theme::Button::Custom(Box::new(SleekPrimaryButton)));
 
                 let sidebar = container(
                     column![
-                        text("GPUBENCH").size(28).style(color!(0x00E5FF)),
-                        Space::with_height(50),
-                        text("TARGET HARDWARE").size(11).style(color!(0x8888AA)),
-                        Space::with_height(10),
+                        brand_block,
+                        Space::with_height(14),
+                        telemetry_panel,
+                        Space::with_height(14),
+                        text("COMPUTE API").size(10).style(color!(0x64748B)),
+                        Space::with_height(4),
+                        api_row,
+                        Space::with_height(14),
+                        text("TARGET DEVICES").size(10).style(color!(0x64748B)),
+                        Space::with_height(4),
                         device_col,
-                        Space::with_height(40),
-                        text("COMPUTE API").size(11).style(color!(0x8888AA)),
-                        Space::with_height(10),
-                        api_col,
                         Space::with_height(Length::Fill),
                         start_btn
                     ]
                 )
-                .width(Length::Fixed(240.0))
+                .width(Length::Fixed(270.0))
                 .height(Length::Fill)
-                .padding(20)
+                .padding(18)
                 .style(|_t: &Theme| container::Appearance {
-                    background: Some(Background::Color(color!(0x0A0A0F))),
-                    border: Border { color: color!(0x1A1A24), width: 1.0, ..Default::default() },
+                    background: Some(Background::Color(color!(0x0A0B10))),
+                    border: Border { color: color!(0x1A1E2B), width: 1.0, ..Default::default() },
                     ..Default::default()
                 });
 
-                let create_pill_grid = |title: &str, items: Vec<&str>| {
-                    let mut col = column![text(title).size(14).style(color!(0xFFFFFF)), Space::with_height(5)].spacing(12);
-                    let mut current_row = row![].spacing(12);
+                let create_pill_grid_with_tooltips = |title: &str, accent_color: iced::Color, is_rt: bool, items: Vec<(&str, &str)>| {
+                    let is_rt_disabled = is_rt && selected_backend != "VULKAN";
+                    
+                    let header_row = if is_rt_disabled {
+                        row![
+                            container(Space::with_width(3)).height(14).style(move |_t: &Theme| container::Appearance {
+                                background: Some(Background::Color(color!(0x475569))),
+                                border: Border { radius: 2.0.into(), ..Default::default() },
+                                ..Default::default()
+                            }),
+                            Space::with_width(8),
+                            text(title).size(13).style(color!(0x94A3B8)),
+                            Space::with_width(Length::Fill),
+                            container(text("VULKAN ONLY").size(9).style(color!(0xF59E0B)))
+                                .padding([2, 5])
+                                .style(|_t: &Theme| container::Appearance {
+                                    background: Some(Background::Color(color!(0xF59E0B, 0.15))),
+                                    border: Border { radius: 4.0.into(), width: 1.0, color: color!(0xF59E0B, 0.4) },
+                                    ..Default::default()
+                                })
+                        ].align_items(iced::Alignment::Center)
+                    } else {
+                        row![
+                            container(Space::with_width(3)).height(14).style(move |_t: &Theme| container::Appearance {
+                                background: Some(Background::Color(accent_color)),
+                                border: Border { radius: 2.0.into(), ..Default::default() },
+                                ..Default::default()
+                            }),
+                            Space::with_width(8),
+                            text(title).size(13).style(color!(0xF1F5F9))
+                        ].align_items(iced::Alignment::Center)
+                    };
+
+                    let mut col = column![
+                        header_row,
+                        Space::with_height(6)
+                    ].spacing(8);
+
+                    let mut current_row = row![].spacing(8);
                     let mut count = 0;
-                    for t in items {
-                        if available_tests.contains(&t.to_string()) {
-                            let is_checked = self.selected_tests.contains(t);
-                            let name = t.to_string();
-                            let friendly_name = match t {
-                                "MemBandwidth" => "GPU Mem BW",
-                                "SysMemBandwidth" => "Sys Mem BW",
-                                "SysMemLatency" => "Sys Mem Lat",
-                                "RayTracing" => "Intersect",
-                                "RayDivergence" => "Divergence",
-                                "RayAnyHit" => "AnyHit",
-                                "RayIncoherent" => "Incoherent",
-                                "RayPayload" => "Payload",
-                                "RayASBuild" => "AS Build",
-                                "RayProcedural" => "Procedural",
-                                "RayPathTracing" => "Path Tracing",
-                                _ => t
+                    for (key, display_label) in items {
+                        if available_tests.contains(&key.to_string()) {
+                            let is_checked = self.selected_tests.contains(key);
+                            let name = key.to_string();
+                            let tip_text = if is_rt_disabled {
+                                "Hardware Ray Tracing requires the Vulkan backend."
+                            } else {
+                                get_benchmark_description(key)
                             };
-                            let pill = button(text(friendly_name).size(13).horizontal_alignment(iced::alignment::Horizontal::Center))
-                                .padding([12, 0])
-                                .width(Length::Fill)
-                                .on_press(Message::TestToggled(name.clone(), !is_checked))
-                                .style(iced::theme::Button::Custom(Box::new(PillToggle { is_active: is_checked, is_api_selector: false })));
-                            
-                            current_row = current_row.push(pill);
+
+                            let pill_btn = if is_rt_disabled {
+                                button(text(display_label).size(12).horizontal_alignment(iced::alignment::Horizontal::Center))
+                                    .padding([10, 0])
+                                    .width(Length::Fill)
+                                    .style(iced::theme::Button::Custom(Box::new(SleekDisabledPill)))
+                            } else {
+                                button(text(display_label).size(12).horizontal_alignment(iced::alignment::Horizontal::Center))
+                                    .padding([10, 0])
+                                    .width(Length::Fill)
+                                    .on_press(Message::TestToggled(name.clone(), !is_checked))
+                                    .style(iced::theme::Button::Custom(Box::new(SleekPillToggle { is_active: is_checked, is_api_selector: false })))
+                            };
+
+                            let pill_with_tip = tooltip(
+                                pill_btn,
+                                container(text(tip_text).size(11).style(color!(0xE2E8F0)))
+                                    .width(Length::Fixed(260.0))
+                                    .padding(8)
+                                    .style(|_t: &Theme| container::Appearance {
+                                        background: Some(Background::Color(color!(0x141824))),
+                                        border: Border { radius: 6.0.into(), width: 1.0, color: color!(0x2A3248) },
+                                        ..Default::default()
+                                    }),
+                                tooltip::Position::Top
+                            )
+                            .gap(4)
+                            .style(iced::theme::Container::Transparent);
+
+                            current_row = current_row.push(pill_with_tip);
                             count += 1;
                             if count % 2 == 0 {
                                 col = col.push(current_row);
-                                current_row = row![].spacing(12);
+                                current_row = row![].spacing(8);
                             }
                         }
                     }
                     if count % 2 != 0 {
                         col = col.push(current_row.push(Space::with_width(Length::Fill)));
                     }
-                    container(col).padding(20).style(|_t: &Theme| container::Appearance {
-                        background: Some(Background::Color(color!(0x12121A))),
-                        border: Border { radius: 16.0.into(), width: 1.0, color: color!(0x1E1E28) },
+                    col
+                };
+
+                let comp_col = container(
+                    create_pill_grid_with_tooltips("Compute Pipelines", color!(0x8B5CF6), false, vec![
+                        ("FP64", "FP64 Double"),
+                        ("FP32", "FP32 Single"),
+                        ("FP16", "FP16 Vector"),
+                        ("BF16", "BF16 Vector"),
+                        ("FP8", "FP8 Vector"),
+                        ("FP4", "FP4 Vector"),
+                        ("INT8", "INT8 Vector"),
+                        ("INT4", "INT4 Vector"),
+                    ])
+                )
+                .padding(16)
+                .style(|_t: &Theme| container::Appearance {
+                    background: Some(Background::Color(color!(0x0F121A))),
+                    border: Border { radius: 12.0.into(), width: 1.0, color: color!(0x1C2230) },
+                    ..Default::default()
+                });
+
+                let sys_col = container(
+                    column![
+                        create_pill_grid_with_tooltips("Memory & Graphics", color!(0x0EA5E9), false, vec![
+                            ("Device Memory Bandwidth", "GPU VRAM Bandwidth"),
+                            ("System Memory Bandwidth", "System RAM Bandwidth"),
+                            ("System Memory Latency", "System RAM Latency"),
+                            ("Pixel Fill Rate", "Pixel Fill Rate"),
+                        ]),
+                        Space::with_height(12),
+                        container(
+                            column![
+                                text("STREAMING & ROP PROFILER").size(10).style(color!(0x64748B)),
+                                Space::with_height(4),
+                                text("Measures multi-threaded host RAM copy, PCIe host-to-device transfers, cache latency, and 32/64-bit frame buffer rasterization throughput.")
+                                    .size(11).style(color!(0x94A3B8)),
+                            ]
+                        )
+                        .padding(10)
+                        .style(|_t: &Theme| container::Appearance {
+                            background: Some(Background::Color(color!(0x0B0E16))),
+                            border: Border { radius: 8.0.into(), width: 1.0, color: color!(0x161C2A) },
+                            ..Default::default()
+                        })
+                    ]
+                )
+                .padding(16)
+                .style(|_t: &Theme| container::Appearance {
+                    background: Some(Background::Color(color!(0x0F121A))),
+                    border: Border { radius: 12.0.into(), width: 1.0, color: color!(0x1C2230) },
+                    ..Default::default()
+                });
+
+                let rt_col = {
+                    let is_rt_disabled = selected_backend != "VULKAN";
+                    let rt_top = create_pill_grid_with_tooltips("Ray Tracing Acceleration", color!(0x10B981), true, vec![
+                        ("RayTracing", "Ray-Triangle Intersect"),
+                        ("RayDivergence", "Divergence Traversal"),
+                        ("RayAnyHit", "AnyHit Alpha-Tested"),
+                        ("RayIncoherent", "Incoherent Bounces"),
+                        ("RayPayload", "Payload Pressure"),
+                        ("RayASBuild", "BLAS & TLAS Build"),
+                        ("RayProcedural", "Procedural Geometry"),
+                        ("RayMaterialDivergence", "Material Divergence"),
+                    ]);
+
+                    let is_pt_checked = self.selected_tests.contains("RayPathTracing");
+                    let pt_tip_text = if is_rt_disabled {
+                        "Hardware Ray Tracing requires the Vulkan backend."
+                    } else {
+                        get_benchmark_description("RayPathTracing")
+                    };
+
+                    let pt_btn = if is_rt_disabled {
+                        button(text("Path Tracing (Full Stochastic GI)").size(12).horizontal_alignment(iced::alignment::Horizontal::Center))
+                            .padding([10, 0])
+                            .width(Length::Fill)
+                            .style(iced::theme::Button::Custom(Box::new(SleekDisabledPill)))
+                    } else {
+                        button(text("Path Tracing (Full Stochastic GI)").size(12).horizontal_alignment(iced::alignment::Horizontal::Center))
+                            .padding([10, 0])
+                            .width(Length::Fill)
+                            .on_press(Message::TestToggled("RayPathTracing".to_string(), !is_pt_checked))
+                            .style(iced::theme::Button::Custom(Box::new(SleekPillToggle { is_active: is_pt_checked, is_api_selector: false })))
+                    };
+
+                    let pt_with_tip = tooltip(
+                        pt_btn,
+                        container(text(pt_tip_text).size(11).style(color!(0xE2E8F0)))
+                            .width(Length::Fixed(260.0))
+                            .padding(8)
+                            .style(|_t: &Theme| container::Appearance {
+                                background: Some(Background::Color(color!(0x141824))),
+                                border: Border { radius: 6.0.into(), width: 1.0, color: color!(0x2A3248) },
+                                ..Default::default()
+                            }),
+                        tooltip::Position::Top
+                    )
+                    .gap(4)
+                    .style(iced::theme::Container::Transparent);
+
+                    let is_paradigm_checked = self.selected_tests.contains("RayExecutionParadigm");
+                    let paradigm_tip_text = if is_rt_disabled {
+                        "Hardware Ray Tracing requires the Vulkan backend."
+                    } else {
+                        get_benchmark_description("RayExecutionParadigm")
+                    };
+
+                    let paradigm_btn = if is_rt_disabled {
+                        button(text("Ray Paradigms (Work Graphs vs Work Lists vs SER)").size(12).horizontal_alignment(iced::alignment::Horizontal::Center))
+                            .padding([10, 0])
+                            .width(Length::Fill)
+                            .style(iced::theme::Button::Custom(Box::new(SleekDisabledPill)))
+                    } else {
+                        button(text("Ray Paradigms (Work Graphs vs Work Lists vs SER)").size(12).horizontal_alignment(iced::alignment::Horizontal::Center))
+                            .padding([10, 0])
+                            .width(Length::Fill)
+                            .on_press(Message::TestToggled("RayExecutionParadigm".to_string(), !is_paradigm_checked))
+                            .style(iced::theme::Button::Custom(Box::new(SleekPillToggle { is_active: is_paradigm_checked, is_api_selector: false })))
+                    };
+
+                    let paradigm_with_tip = tooltip(
+                        paradigm_btn,
+                        container(text(paradigm_tip_text).size(11).style(color!(0xE2E8F0)))
+                            .width(Length::Fixed(260.0))
+                            .padding(8)
+                            .style(|_t: &Theme| container::Appearance {
+                                background: Some(Background::Color(color!(0x141824))),
+                                border: Border { radius: 6.0.into(), width: 1.0, color: color!(0x2A3248) },
+                                ..Default::default()
+                            }),
+                        tooltip::Position::Top
+                    )
+                    .gap(4)
+                    .style(iced::theme::Container::Transparent);
+
+                    container(
+                        column![
+                            rt_top,
+                            pt_with_tip,
+                            paradigm_with_tip
+                        ].spacing(8)
+                    )
+                    .padding(16)
+                    .style(|_t: &Theme| container::Appearance {
+                        background: Some(Background::Color(color!(0x0F121A))),
+                        border: Border { radius: 12.0.into(), width: 1.0, color: color!(0x1C2230) },
                         ..Default::default()
                     })
                 };
 
-                let comp_col = create_pill_grid("COMPUTE CORES", vec!["FP64", "FP32", "FP16", "BF16", "FP8", "INT8", "INT4"]);
-                let sys_col = create_pill_grid("MEMORY & SYSTEM", vec!["MemBandwidth", "SysMemBandwidth", "SysMemLatency"]);
-                let rt_col = create_pill_grid("RAY TRACING", vec!["RayTracing", "RayDivergence", "RayAnyHit", "RayIncoherent", "RayPayload", "RayASBuild", "RayProcedural", "RayPathTracing"]);
-
-                let compute_tests: Vec<&String> = available_tests.iter().filter(|t| !t.starts_with("Ray") && !t.contains("MemBandwidth") && !t.contains("SysMem")).collect();
-                let sys_tests: Vec<&String> = available_tests.iter().filter(|t| t.contains("MemBandwidth") || t.contains("SysMem")).collect();
-                let rt_tests: Vec<&String> = available_tests.iter().filter(|t| t.starts_with("Ray")).collect();
+                let compute_tests: Vec<&String> = available_tests.iter()
+                    .filter(|t| !t.starts_with("Ray") && !t.contains("Memory") && !t.contains("SysMem") && !t.contains("Pixel")).collect();
+                let sys_tests: Vec<&String> = available_tests.iter()
+                    .filter(|t| t.contains("Memory") || t.contains("SysMem") || t.contains("Pixel")).collect();
+                let rt_tests: Vec<&String> = available_tests.iter()
+                    .filter(|t| t.starts_with("Ray")).collect();
+                
                 let all_selected = available_tests.iter().all(|t| self.selected_tests.contains(t));
                 let none_selected = self.selected_tests.is_empty();
-                let compute_all = compute_tests.iter().all(|t| self.selected_tests.contains(*t));
-                let sys_all = sys_tests.iter().all(|t| self.selected_tests.contains(*t));
-                let rt_all = rt_tests.iter().all(|t| self.selected_tests.contains(*t));
+                let compute_all = !compute_tests.is_empty() && compute_tests.iter().all(|t| self.selected_tests.contains(*t));
+                let sys_all = !sys_tests.is_empty() && sys_tests.iter().all(|t| self.selected_tests.contains(*t));
+                let rt_all = !rt_tests.is_empty() && rt_tests.iter().all(|t| self.selected_tests.contains(*t));
+                let is_rt_avail = selected_backend == "VULKAN";
 
                 let group_toggles = row![
-                    button(text("All").size(12).horizontal_alignment(iced::alignment::Horizontal::Center))
-                        .padding([6, 16])
+                    button(text("All").size(11).horizontal_alignment(iced::alignment::Horizontal::Center))
+                        .padding([5, 14])
                         .on_press(Message::TestGroupSelected("ALL".to_string()))
-                        .style(iced::theme::Button::Custom(Box::new(GroupPill { is_highlighted: all_selected }))),
-                    button(text("None").size(12).horizontal_alignment(iced::alignment::Horizontal::Center))
-                        .padding([6, 16])
+                        .style(iced::theme::Button::Custom(Box::new(SleekGroupChip { is_highlighted: all_selected, is_disabled: false }))),
+                    button(text("None").size(11).horizontal_alignment(iced::alignment::Horizontal::Center))
+                        .padding([5, 14])
                         .on_press(Message::TestGroupSelected("NONE".to_string()))
-                        .style(iced::theme::Button::Custom(Box::new(GroupPill { is_highlighted: none_selected }))),
-                    button(text("Compute Cores").size(12).horizontal_alignment(iced::alignment::Horizontal::Center))
-                        .padding([6, 16])
+                        .style(iced::theme::Button::Custom(Box::new(SleekGroupChip { is_highlighted: none_selected, is_disabled: false }))),
+                    button(text("Compute").size(11).horizontal_alignment(iced::alignment::Horizontal::Center))
+                        .padding([5, 14])
                         .on_press(Message::TestGroupSelected("COMPUTE".to_string()))
-                        .style(iced::theme::Button::Custom(Box::new(GroupPill { is_highlighted: compute_all && !all_selected }))),
-                    button(text("Memory & System").size(12).horizontal_alignment(iced::alignment::Horizontal::Center))
-                        .padding([6, 16])
-                        .on_press(Message::TestGroupSelected("SYSTEM".to_string()))
-                        .style(iced::theme::Button::Custom(Box::new(GroupPill { is_highlighted: sys_all && !all_selected }))),
-                    button(text("Ray Tracing").size(12).horizontal_alignment(iced::alignment::Horizontal::Center))
-                        .padding([6, 16])
+                        .style(iced::theme::Button::Custom(Box::new(SleekGroupChip { is_highlighted: compute_all && !all_selected, is_disabled: false }))),
+                    button(text("Memory").size(11).horizontal_alignment(iced::alignment::Horizontal::Center))
+                        .padding([5, 14])
+                        .on_press(Message::TestGroupSelected("MEMORY".to_string()))
+                        .style(iced::theme::Button::Custom(Box::new(SleekGroupChip { is_highlighted: sys_all && !all_selected, is_disabled: false }))),
+                    button(text("Ray Tracing").size(11).horizontal_alignment(iced::alignment::Horizontal::Center))
+                        .padding([5, 14])
                         .on_press(Message::TestGroupSelected("RAY TRACING".to_string()))
-                        .style(iced::theme::Button::Custom(Box::new(GroupPill { is_highlighted: rt_all && !all_selected }))),
-                ].spacing(8);
+                        .style(iced::theme::Button::Custom(Box::new(SleekGroupChip { is_highlighted: is_rt_avail && rt_all && !all_selected, is_disabled: !is_rt_avail }))),
+                ].spacing(6);
 
                 let main_area = container(
                     scrollable(
                         column![
                             row![
-                                text("TEST WORKLOADS").size(24).style(color!(0xFFFFFF)),
+                                column![
+                                    text("Benchmarks").size(20).style(color!(0xF8FAFC)),
+                                    text("Select GPU compute, memory, and ray tracing benchmarks to profile").size(12).style(color!(0x64748B))
+                                ].spacing(2),
                                 Space::with_width(Length::Fill),
                                 group_toggles
                             ].align_items(iced::Alignment::Center),
-                            Space::with_height(30),
+                            Space::with_height(20),
                             row![
                                 comp_col.width(Length::FillPortion(1)),
-                                column![sys_col, rt_col].spacing(20).width(Length::FillPortion(1))
-                            ].spacing(20)
+                                sys_col.width(Length::FillPortion(1)),
+                                rt_col.width(Length::FillPortion(1)),
+                            ].spacing(16)
                         ]
                     ).height(Length::Fill)
                 )
                 .width(Length::Fill)
                 .height(Length::Fill)
-                .padding(20)
+                .padding(24)
                 .style(|_t: &Theme| container::Appearance {
-                    background: Some(Background::Color(color!(0x111116))),
+                    background: Some(Background::Color(color!(0x07080D))),
                     ..Default::default()
                 });
 
@@ -955,62 +1668,59 @@ impl Application for GPUBenchApp {
             }
             AppState::Error(err) => {
                 let retry_btn = button(
-                    container(text("RUN NEW TEST").size(14).style(iced::theme::Text::Color(color!(0xFFFFFF))))
+                    container(text("RUN NEW TEST").size(13).style(color!(0xFFFFFF)))
                         .width(Length::Fill)
                         .center_x()
                 )
                 .width(Length::Fill)
-                .padding([14, 0])
+                .padding([12, 0])
                 .on_press(Message::Retest)
-                .style(iced::theme::Button::Custom(Box::new(PrimaryGradientButton)));
+                .style(iced::theme::Button::Custom(Box::new(SleekPrimaryButton)));
 
                 let sidebar = container(
                     column![
-                        text("GPUBENCH").size(28).style(color!(0x00E5FF)),
-                        Space::with_height(50),
-                        text("STATUS").size(11).style(color!(0x8888AA)),
-                        Space::with_height(10),
-                        text(status_text).size(22).style(status_color),
+                        brand_block,
+                        Space::with_height(20),
+                        telemetry_panel,
                         Space::with_height(Length::Fill),
                         retry_btn
                     ]
                 )
-                .width(Length::Fixed(240.0))
+                .width(Length::Fixed(270.0))
                 .height(Length::Fill)
                 .padding(20)
                 .style(|_t: &Theme| container::Appearance {
-                    background: Some(Background::Color(color!(0x0A0A0F))),
-                    border: Border { color: color!(0x1A1A24), width: 1.0, ..Default::default() },
+                    background: Some(Background::Color(color!(0x0A0B10))),
+                    border: Border { color: color!(0x1A1E2B), width: 1.0, ..Default::default() },
                     ..Default::default()
                 });
 
                 let error_panel = container(
                     column![
-                        text("BENCHMARK RUN FAILED").size(24).style(color!(0xFF3366)),
+                        text("Benchmark Run Failed").size(20).style(color!(0xEF4444)),
+                        Space::with_height(12),
+                        text(err).size(13).style(color!(0xCBD5E1)),
                         Space::with_height(20),
-                        text(err).size(14).style(color!(0xDDDDDD)),
-                        Space::with_height(30),
-                        text("Use RUN NEW TEST to return to the configuration screen.").size(12).style(color!(0x8888AA)),
+                        text("Click RUN NEW TEST to reconfigure the benchmark suite.").size(12).style(color!(0x64748B)),
                     ]
                     .width(Length::Fill)
                 )
                 .width(Length::Fill)
-                .padding(20)
+                .padding(24)
                 .style(|_t: &Theme| container::Appearance {
-                    background: Some(Background::Color(color!(0x12121A))),
-                    border: Border { radius: 16.0.into(), width: 1.0, color: color!(0xFF3366, 0.4) },
+                    background: Some(Background::Color(color!(0x141016))),
+                    border: Border { radius: 12.0.into(), width: 1.0, color: color!(0xEF4444, 0.4) },
                     ..Default::default()
                 });
 
                 let main_area = container(
-                    column![error_panel]
-                        .width(Length::Fill)
+                    column![error_panel].width(Length::Fill)
                 )
                 .width(Length::Fill)
                 .height(Length::Fill)
-                .padding(20)
+                .padding(24)
                 .style(|_t: &Theme| container::Appearance {
-                    background: Some(Background::Color(color!(0x111116))),
+                    background: Some(Background::Color(color!(0x07080D))),
                     ..Default::default()
                 });
 
@@ -1024,46 +1734,52 @@ impl Application for GPUBenchApp {
                 };
 
                 let global_progress = column![
-                    row![text("SUITE PROGRESS").size(14).style(color!(0x8888AA)), Space::with_width(Length::Fill), text(format!("{}/{}", completed, total)).size(14).style(color!(0x8888AA))],
-                    progress_bar(0.0..=total.max(completed.max(1.0)), completed).height(8.0),
-                ].spacing(8);
+                    row![
+                        text("Suite Execution Progress").size(13).style(color!(0xF8FAFC)),
+                        Space::with_width(Length::Fill),
+                        text(format!("{:.0} of {:.0} completed", completed, total)).size(12).style(color!(0x818CF8))
+                    ],
+                    progress_bar(0.0..=total.max(completed.max(1.0)), completed).height(6.0),
+                ].spacing(6);
 
                 let metric_row = |key: &str, label: &str, val: f32, unit: &str, desc: &str| -> Element<'_, Message> {
                     let is_active = self.selected_tests.contains(key);
                     
-                    let val_str = if !is_active {
-                        String::from("")
+                    let (val_str, is_unsupported, is_pending) = if !is_active {
+                        (String::from("—"), false, false)
                     } else if val <= 0.0 {
                         if matches!(self.state, AppState::Complete { .. }) {
-                            String::from("UNSUPPORTED")
+                            (String::from("UNSUPPORTED"), true, false)
                         } else {
-                            String::from("PENDING")
+                            (String::from("PENDING"), false, true)
                         }
                     } else if val < 10.0 {
-                        format!("{:.2} {}", val, unit)
+                        (format!("{:.2} {}", val, unit), false, false)
                     } else {
-                        format!("{:.1} {}", val, unit)
+                        (format!("{:.1} {}", val, unit), false, false)
                     };
 
-                    let text_color = if !is_active {
-                        color!(0x333344)
-                    } else if val <= 0.0 {
-                        if val_str == "UNSUPPORTED" { color!(0xFF5555, 0.7) } else { color!(0x666677) }
+                    let (val_color, badge_bg, badge_border) = if !is_active {
+                        (color!(0x475569), color!(0x10131B), color!(0x161B26))
+                    } else if is_unsupported {
+                        (color!(0xF87171), color!(0xEF4444, 0.12), color!(0xEF4444, 0.35))
+                    } else if is_pending {
+                        (color!(0x64748B), color!(0x181C28), color!(0x222838))
                     } else {
-                        color!(0x00FF88)
+                        (color!(0x34D399), color!(0x10B981, 0.14), color!(0x10B981, 0.4))
                     };
                     
                     let label_with_tooltip = row![
-                        text(label).size(13).style(if val <= 0.0 { color!(0x888899) } else { color!(0xDDDDDD) }),
+                        text(label).size(12).style(if val <= 0.0 && !is_active { color!(0x475569) } else { color!(0xCBD5E1) }),
                         Space::with_width(6),
                         tooltip(
-                            text("(?)").size(11).style(color!(0x666688)),
-                            container(text(desc).size(12).style(color!(0xDDDDDD)))
-                                .width(Length::Fixed(260.0))
-                                .padding(12)
+                            text("ⓘ").size(11).style(color!(0x475569)),
+                            container(text(desc).size(11).style(color!(0xE2E8F0)))
+                                .width(Length::Fixed(280.0))
+                                .padding(10)
                                 .style(|_t: &Theme| container::Appearance {
-                                    background: Some(Background::Color(color!(0x1A1A24))),
-                                    border: Border { radius: 8.0.into(), width: 1.0, color: color!(0x2E2E38) },
+                                    background: Some(Background::Color(color!(0x141824))),
+                                    border: Border { radius: 6.0.into(), width: 1.0, color: color!(0x2A3248) },
                                     ..Default::default()
                                 }),
                             tooltip::Position::Right
@@ -1072,119 +1788,216 @@ impl Application for GPUBenchApp {
                         .style(iced::theme::Container::Transparent)
                     ].align_items(iced::Alignment::Center);
 
+                    let value_badge = container(text(val_str).size(11).style(val_color))
+                        .padding([3, 8])
+                        .style(move |_t: &Theme| container::Appearance {
+                            background: Some(Background::Color(badge_bg)),
+                            border: Border { radius: 6.0.into(), width: 1.0, color: badge_border },
+                            ..Default::default()
+                        });
+
                     container(
                         row![
                             label_with_tooltip, 
                             Space::with_width(Length::Fill), 
-                            text(val_str).size(13).style(text_color)
+                            value_badge
                         ]
                         .width(Length::Fill)
                         .align_items(iced::Alignment::Center)
                     )
-                    .padding([8, 12])
+                    .padding([6, 10])
                     .style(move |_t: &Theme| container::Appearance {
-                        background: Some(Background::Color(color!(0x161622))),
-                        border: Border { radius: 8.0.into(), width: 1.0, color: color!(0x222233) },
+                        background: Some(Background::Color(color!(0x10131C))),
+                        border: Border { radius: 6.0.into(), width: 1.0, color: color!(0x1A202C) },
                         ..Default::default()
                     })
                     .into()
                 };
 
                 let sys_content = column![
-                    metric_row("MemBandwidth", "GPU VRAM Bandwidth", self.gpu_bw, "GB/s", "Measures the maximum rate at which data can be read from or stored into the GPU's VRAM. Critical for high-resolution textures and large datasets."),
-                    metric_row("SysMemBandwidth", "System RAM Bandwidth", self.sys_mem_bw, "GB/s", "Measures the maximum multi-threaded bandwidth to the host's system RAM. Important for CPU-to-GPU data transfers and general system performance."),
-                    metric_row("SysMemBandwidth", "System RAM (1 Thread)", self.sys_mem_bw_single, "GB/s", "Measures single-threaded bandwidth to system RAM, which indicates memory channel efficiency and latency-bound transfer speeds."),
-                    metric_row("SysMemLatency", "System RAM Latency", self.sys_mem_lat, "ns", "Measures the time it takes to fetch a single un-cached piece of data from system memory. Lower is better. Essential for game engines and unpredictable data access."),
-                ].spacing(8).width(Length::Fill).into();
+                    metric_row("Device Memory Bandwidth", "GPU VRAM Bandwidth", self.gpu_bw, "GB/s", "Peak memory read/write throughput from dedicated VRAM."),
+                    metric_row("System Memory Bandwidth", "System RAM (Multi-Thread)", self.sys_mem_bw, "GB/s", "Multi-threaded host system RAM bandwidth."),
+                    metric_row("System Memory Bandwidth", "System RAM (1 Thread)", self.sys_mem_bw_single, "GB/s", "Single-threaded host system RAM bandwidth."),
+                    metric_row("System Memory Latency", "System RAM Latency", self.sys_mem_lat, "ns", "Host memory access latency. Lower is better."),
+                ].spacing(6).width(Length::Fill).into();
 
                 let compute_content = column![
-                    metric_row("FP64", "FP64 (Vector)", self.gpu_fp64, "TFLOPS", "Measures double precision (64-bit) floating point operations per second. Crucial for scientific simulations and high-accuracy physics."),
-                    metric_row("FP32", "FP32 (Vector)", self.gpu_fp32, "TFLOPS", "Measures single precision (32-bit) floating point operations per second. The standard metric for generic gaming and graphics compute workloads."),
-                    metric_row("FP16", "FP16 (Vector)", self.gpu_fp16_vector, "TFLOPS", "Measures vector half precision (16-bit) floating point operations per second. Used extensively in modern rendering, mobile ML, and HDR imaging."),
-                    metric_row("FP16", "FP16 (Matrix)", self.gpu_fp16_matrix, "TFLOPS", "Measures hardware-accelerated cooperative matrix half precision (16-bit) operations."),
-                    metric_row("BF16", "BF16 (Vector)", self.gpu_bf16_vector, "TFLOPS", "Measures vector Brain Float 16 operations per second. Primarily utilized in AI training and deep learning models to retain dynamic range while saving bandwidth."),
-                    metric_row("BF16", "BF16 (Matrix)", self.gpu_bf16_matrix, "TFLOPS", "Measures hardware-accelerated cooperative matrix Brain Float 16 operations."),
-                    metric_row("FP8", "FP8 (Vector)", self.gpu_fp8_vector, "TFLOPS", "Measures vector quarter precision (8-bit) floating point operations per second. Used for highly optimized AI inference where memory bandwidth is the primary bottleneck."),
-                    metric_row("FP8", "FP8 (Matrix)", self.gpu_fp8_matrix, "TFLOPS", "Measures hardware-accelerated cooperative matrix quarter precision (8-bit) operations."),
-                    metric_row("INT8", "INT8 (Vector)", self.gpu_int8_vector, "TOPS", "Measures vector 8-bit integer operations per second. Often used for quantized machine learning inference and specialized hardware-accelerated video processing."),
-                    metric_row("INT8", "INT8 (Matrix)", self.gpu_int8_matrix, "TOPS", "Measures hardware-accelerated cooperative matrix 8-bit integer operations."),
-                    metric_row("INT4", "INT4 (Vector)", self.gpu_int4_vector, "TOPS", "Measures vector 4-bit integer operations per second. An extreme quantization format used in ultra-efficient AI processing and specialized lookup tasks."),
-                    metric_row("INT4", "INT4 (Matrix)", self.gpu_int4_matrix, "TOPS", "Measures hardware-accelerated cooperative matrix 4-bit integer operations."),
-                ].spacing(8).width(Length::Fill).into();
+                    metric_row("FP64", "FP64 (Double Precision)", self.gpu_fp64, "TFLOPS", "64-bit floating point compute throughput."),
+                    metric_row("FP32", "FP32 (Single Precision)", self.gpu_fp32, "TFLOPS", "32-bit floating point standard compute throughput."),
+                    metric_row("FP16", "FP16 (Vector)", self.gpu_fp16_vector, "TFLOPS", "16-bit half precision vector operations."),
+                    metric_row("FP16", "FP16 (Matrix / Tensor)", self.gpu_fp16_matrix, "TFLOPS", "Hardware matrix/tensor core half precision throughput."),
+                    metric_row("BF16", "BF16 (Vector)", self.gpu_bf16_vector, "TFLOPS", "16-bit Brain Float vector operations."),
+                    metric_row("BF16", "BF16 (Matrix / Tensor)", self.gpu_bf16_matrix, "TFLOPS", "Hardware matrix Brain Float throughput."),
+                    metric_row("FP8", "FP8 (Vector)", self.gpu_fp8_vector, "TFLOPS", "8-bit floating point vector operations."),
+                    metric_row("FP8", "FP8 (Matrix / Tensor)", self.gpu_fp8_matrix, "TFLOPS", "Hardware matrix 8-bit float throughput."),
+                    metric_row("INT8", "INT8 (Vector)", self.gpu_int8_vector, "TOPS", "8-bit quantized integer vector throughput."),
+                    metric_row("INT8", "INT8 (Matrix / Tensor)", self.gpu_int8_matrix, "TOPS", "Hardware matrix 8-bit integer throughput."),
+                    metric_row("INT4", "INT4 (Vector)", self.gpu_int4_vector, "TOPS", "4-bit quantized integer vector throughput."),
+                    metric_row("INT4", "INT4 (Matrix / Tensor)", self.gpu_int4_matrix, "TOPS", "Hardware matrix 4-bit integer throughput."),
+                ].spacing(6).width(Length::Fill).into();
 
                 let rt_content = column![
-                    metric_row("RayTracing", "Intersect", self.gpu_rt_intersect, "GIS/s", "Measures raw intersection throughput against opaque triangle geometry. Tests the peak performance of the hardware's dedicated ray intersection engines."),
-                    metric_row("RayDivergence", "Divergence", self.gpu_rt_divergence, "GRays/s", "Evaluates performance when neighboring rays hit entirely different materials and geometry, causing execution divergence and stalling compute wave-fronts."),
-                    metric_row("RayAnyHit", "AnyHit", self.gpu_rt_anyhit, "GRays/s", "Tests intersection performance against geometry with alpha-testing (transparency) enabled. Stresses the GPU's ability to evaluate shaders during ray traversal."),
-                    metric_row("RayIncoherent", "Incoherent", self.gpu_rt_incoherent, "GRays/s", "Tests performance when rays bounce in completely random directions, causing high cache misses. Simulates complex global illumination and path tracing."),
-                    metric_row("RayPayload", "Payload", self.gpu_rt_payload, "GRays/s", "Tests the impact of carrying large blocks of data (payloads) along with the ray, which stresses the register usage and VRAM bandwidth of the compute units."),
-                    metric_row("RayASBuild", "BLAS Build", self.gpu_rt_blas_build, "MTris/s", "Measures BVH construction speed for bottom-level static geometry (1 Million Triangles). Higher is better."),
-                    metric_row("RayASBuild", "BLAS Update", self.gpu_rt_blas_update, "MTris/s", "Measures BVH update/refit speed for bottom-level dynamic geometry (1 Million Triangles). Higher is better."),
-                    metric_row("RayASBuild", "TLAS Build", self.gpu_rt_tlas_build, "MInst/s", "Measures top-level instantiation speed for scene-graph organization (10,000 Instances). Higher is better."),
-                    metric_row("RayProcedural", "Procedural", self.gpu_rt_procedural, "GRays/s", "Measures intersection speed against mathematically defined geometry (like spheres or curves) rather than explicit triangles. Useful for advanced rendering engines."),
-                    metric_row("RayPathTracing", "Path Tracing", self.gpu_rt_pathtracing, "MRays/s", "Simulates global illumination using stochastic multi-bounce path tracing (up to 8 bounces). Evaluates the GPU's intersection units, Monte Carlo math processing, cache hierarchy efficiency under random memory read pressure, and wavefront scheduling capabilities under thread divergence."),
-                ].spacing(8).width(Length::Fill).into();
+                    metric_row("RayTracing", "Ray-Triangle Intersect", self.gpu_rt_intersect, "GIS/s", "Peak BVH triangle intersection throughput."),
+                    metric_row("RayDivergence", "Divergence Traversal", self.gpu_rt_divergence, "GRays/s", "Performance under heavy branch/wave divergence."),
+                    metric_row("RayAnyHit", "AnyHit (Alpha-Tested)", self.gpu_rt_anyhit, "GRays/s", "Intersection rate against transparent/alpha geometry."),
+                    metric_row("RayIncoherent", "Incoherent Bounces", self.gpu_rt_incoherent, "GRays/s", "Cache miss penalty under random ray distributions."),
+                    metric_row("RayPayload", "Payload Pressure", self.gpu_rt_payload, "GRays/s", "Impact of large register payloads during traversal."),
+                    metric_row("RayASBuild", "BLAS Build (1M Tris)", self.gpu_rt_blas_build, "MTris/s", "Bottom-level acceleration structure construction."),
+                    metric_row("RayASBuild", "BLAS Update (1M Tris)", self.gpu_rt_blas_update, "MTris/s", "Bottom-level dynamic mesh refit speed."),
+                    metric_row("RayASBuild", "TLAS Build (10k Inst)", self.gpu_rt_tlas_build, "MInst/s", "Top-level instance hierarchy construction."),
+                    metric_row("RayProcedural", "Procedural Geometry", self.gpu_rt_procedural, "GRays/s", "Intersection against mathematical curves and spheres."),
+                    metric_row("RayPathTracing", "Multi-Bounce Path Tracing", self.gpu_rt_pathtracing, "MRays/s", "Full stochastic 8-bounce Monte Carlo global illumination."),
+                    metric_row("RayExecutionParadigm", "Work Graphs Node Enqueue", self.gpu_rt_paradigm_workgraph, "MRays/s", "Autonomous child node dispatch with on-chip payload routing."),
+                    metric_row("RayExecutionParadigm", "Work Lists / DGC Compaction", self.gpu_rt_paradigm_worklist, "MRays/s", "GPU stream compaction into uniform material/bounce queues."),
+                    metric_row("RayExecutionParadigm", "Traditional Megakernel", self.gpu_rt_paradigm_trad, "MRays/s", "Monolithic shader dispatch with in-shader loops and branching."),
+                ].spacing(6).width(Length::Fill).into();
 
                 let graphics_content = column![
-                    metric_row("PixelFillRate", "RGBA8 Color Fill", self.gpu_pixel_fill, "GPixels/s", "Measures the peak rasterization write rate to an 8192x8192 standard 32-bit color framebuffer (ROP throughput)."),
-                    metric_row("PixelFillRate", "RGBA16F HDR Fill", self.gpu_pixel_fill_hdr, "GPixels/s", "Measures the peak rasterization write rate to an 8192x8192 64-bit HDR floating point framebuffer."),
-                    metric_row("PixelFillRate", "Alpha Blending Fill", self.gpu_pixel_fill_blend, "GPixels/s", "Measures ROP alpha blending fill rate with src-alpha / dst-one-minus-alpha blending enabled."),
-                ].spacing(8).width(Length::Fill).into();
+                    metric_row("Pixel Fill Rate", "RGBA8 Color Fill", self.gpu_pixel_fill, "GPixels/s", "Standard 32-bit ROP rasterization fill rate."),
+                    metric_row("Pixel Fill Rate", "RGBA16F HDR Fill", self.gpu_pixel_fill_hdr, "GPixels/s", "64-bit HDR framebuffer rasterization rate."),
+                    metric_row("Pixel Fill Rate", "Alpha Blending Fill", self.gpu_pixel_fill_blend, "GPixels/s", "ROP alpha blend rasterization rate."),
+                ].spacing(6).width(Length::Fill).into();
 
                 let compute_col = column![
-                    text("COMPUTE CORES").size(16).style(color!(0xFFFFFF)),
-                    Space::with_height(10),
-                    create_panel("", color!(0xFF3366), compute_content)
-                ].spacing(5).width(Length::FillPortion(1));
+                    row![
+                        container(Space::with_width(3)).height(12).style(|_t: &Theme| container::Appearance {
+                            background: Some(Background::Color(color!(0x8B5CF6))),
+                            border: Border { radius: 2.0.into(), ..Default::default() },
+                            ..Default::default()
+                        }),
+                        Space::with_width(6),
+                        text("COMPUTE PIPELINES").size(12).style(color!(0xE2E8F0))
+                    ].align_items(iced::Alignment::Center),
+                    Space::with_height(4),
+                    create_panel(compute_content)
+                ].spacing(2).width(Length::FillPortion(1));
 
                 let gfx_col = column![
-                    text("GRAPHICS & ROP").size(16).style(color!(0xFFFFFF)),
-                    Space::with_height(10),
-                    create_panel("", color!(0xFFB300), graphics_content)
-                ].spacing(5).width(Length::FillPortion(1));
+                    row![
+                        container(Space::with_width(3)).height(12).style(|_t: &Theme| container::Appearance {
+                            background: Some(Background::Color(color!(0xF59E0B))),
+                            border: Border { radius: 2.0.into(), ..Default::default() },
+                            ..Default::default()
+                        }),
+                        Space::with_width(6),
+                        text("GRAPHICS & ROP").size(12).style(color!(0xE2E8F0))
+                    ].align_items(iced::Alignment::Center),
+                    Space::with_height(4),
+                    create_panel(graphics_content)
+                ].spacing(2).width(Length::FillPortion(1));
 
                 let rt_col = column![
-                    text("RAY TRACING").size(16).style(color!(0xFFFFFF)),
-                    Space::with_height(10),
-                    create_panel("", color!(0x00FF88), rt_content)
-                ].spacing(5).width(Length::FillPortion(1));
+                    row![
+                        container(Space::with_width(3)).height(12).style(|_t: &Theme| container::Appearance {
+                            background: Some(Background::Color(color!(0x10B981))),
+                            border: Border { radius: 2.0.into(), ..Default::default() },
+                            ..Default::default()
+                        }),
+                        Space::with_width(6),
+                        text("RAY TRACING").size(12).style(color!(0xE2E8F0))
+                    ].align_items(iced::Alignment::Center),
+                    Space::with_height(4),
+                    create_panel(rt_content)
+                ].spacing(2).width(Length::FillPortion(1));
                 
                 let mem_col = column![
-                    text("MEMORY & SYSTEM").size(16).style(color!(0xFFFFFF)),
-                    Space::with_height(10),
-                    create_panel("", color!(0x00E5FF), sys_content)
-                ].spacing(5).width(Length::FillPortion(1));
+                    row![
+                        container(Space::with_width(3)).height(12).style(|_t: &Theme| container::Appearance {
+                            background: Some(Background::Color(color!(0x0EA5E9))),
+                            border: Border { radius: 2.0.into(), ..Default::default() },
+                            ..Default::default()
+                        }),
+                        Space::with_width(6),
+                        text("MEMORY & SYSTEM").size(12).style(color!(0xE2E8F0))
+                    ].align_items(iced::Alignment::Center),
+                    Space::with_height(4),
+                    create_panel(sys_content)
+                ].spacing(2).width(Length::FillPortion(1));
 
                 let split_layout = row![
-                    column![compute_col, gfx_col].spacing(20).width(Length::FillPortion(1)),
-                    column![mem_col, rt_col].spacing(20).width(Length::FillPortion(1))
+                    column![compute_col, gfx_col].spacing(16).width(Length::FillPortion(1)),
+                    column![mem_col, rt_col].spacing(16).width(Length::FillPortion(1))
                 ]
-                .spacing(20)
+                .spacing(16)
                 .width(Length::Fill);
+
+                // Hardware Thermal & Power Profile Section (on Complete)
+                let thermal_profile_section = if matches!(self.state, AppState::Complete { .. }) {
+                    let mut cards_row = row![].spacing(12);
+                    for dev in &self.monitored_devices {
+                        let dev_card = container(
+                            column![
+                                row![
+                                    text(&dev.id).size(12).style(color!(0x818CF8)),
+                                    Space::with_width(6),
+                                    text(&dev.name).size(11).style(color!(0x94A3B8)),
+                                ].align_items(iced::Alignment::Center),
+                                Space::with_height(4),
+                                row![
+                                    column![
+                                        text("TEMPERATURE").size(9).style(color!(0x64748B)),
+                                        text(format!("Peak: {:.1} °C", dev.temp_max)).size(11).style(color!(0x10B981)),
+                                        text(format!("Avg:  {:.1} °C", dev.avg_temp())).size(10).style(color!(0x94A3B8)),
+                                    ].spacing(1),
+                                    Space::with_width(Length::Fill),
+                                    column![
+                                        text("BOARD POWER").size(9).style(color!(0x64748B)),
+                                        text(format!("Peak: {:.1} W", dev.power_max)).size(11).style(color!(0x38BDF8)),
+                                        text(format!("Avg:  {:.1} W", dev.avg_power())).size(10).style(color!(0x94A3B8)),
+                                    ].spacing(1),
+                                ]
+                            ].spacing(4)
+                        )
+                        .padding(12)
+                        .width(Length::FillPortion(1))
+                        .style(|_t: &Theme| container::Appearance {
+                            background: Some(Background::Color(color!(0x0C0E16))),
+                            border: Border { radius: 8.0.into(), width: 1.0, color: color!(0x1F2538) },
+                            ..Default::default()
+                        });
+                        cards_row = cards_row.push(dev_card);
+                    }
+
+                    column![
+                        row![
+                            container(Space::with_width(3)).height(12).style(|_t: &Theme| container::Appearance {
+                                background: Some(Background::Color(color!(0xEC4899))),
+                                border: Border { radius: 2.0.into(), ..Default::default() },
+                                ..Default::default()
+                            }),
+                            Space::with_width(6),
+                            text("HARDWARE THERMAL & POWER PROFILE").size(12).style(color!(0xE2E8F0))
+                        ].align_items(iced::Alignment::Center),
+                        Space::with_height(4),
+                        cards_row
+                    ].spacing(2).width(Length::Fill)
+                } else {
+                    column![]
+                };
 
                 let action_buttons: Element<'_, Message> = if matches!(self.state, AppState::Complete { .. }) {
                     column![
                         button(
-                            container(text("SAVE RESULTS").size(14).style(iced::theme::Text::Color(color!(0xFFFFFF))))
+                            container(text("EXPORT JSON").size(13).style(color!(0xFFFFFF)))
                                 .width(Length::Fill)
                                 .center_x()
                         )
                         .width(Length::Fill)
-                        .padding([14, 0])
+                        .padding([11, 0])
                         .on_press(Message::SaveResults)
-                        .style(iced::theme::Button::Custom(Box::new(PrimaryGradientButton))),
+                        .style(iced::theme::Button::Custom(Box::new(SleekPrimaryButton))),
                         
-                        Space::with_height(10),
+                        Space::with_height(8),
                         
                         button(
-                            container(text("RUN NEW TEST").size(14).style(iced::theme::Text::Color(color!(0xFFFFFF))))
+                            container(text("RUN NEW TEST").size(13).style(color!(0xCBD5E1)))
                                 .width(Length::Fill)
                                 .center_x()
                         )
                         .width(Length::Fill)
-                        .padding([14, 0])
+                        .padding([11, 0])
                         .on_press(Message::Retest)
-                        .style(iced::theme::Button::Custom(Box::new(SecondaryBorderButton)))
+                        .style(iced::theme::Button::Custom(Box::new(SleekSecondaryButton)))
                     ]
                     .width(Length::Fill)
                     .into()
@@ -1194,45 +2007,38 @@ impl Application for GPUBenchApp {
 
                 let sidebar = container(
                     column![
-                        text("GPUBENCH").size(28).style(color!(0x00E5FF)),
-                        Space::with_height(25),
-                        text("LIVE HARDWARE HUD").size(11).style(color!(0x8888AA)),
-                        Space::with_height(6),
+                        brand_block,
+                        Space::with_height(14),
+                        telemetry_panel,
+                        Space::with_height(14),
+                        text("ACTIVE CONFIGURATION").size(10).style(color!(0x64748B)),
+                        Space::with_height(4),
                         container(
                             column![
-                                row![text("TEMP:").size(11).style(color!(0x8888AA)), Space::with_width(Length::Fill), text(format!("{:.1} °C", self.telemetry_temp)).size(11).style(if self.telemetry_temp > 80.0 { color!(0xFF5555) } else { color!(0x00FF88) })],
-                                row![text("POWER:").size(11).style(color!(0x8888AA)), Space::with_width(Length::Fill), text(format!("{:.1} W", self.telemetry_power)).size(11).style(color!(0x00E5FF))],
-                                row![text("CORE:").size(11).style(color!(0x8888AA)), Space::with_width(Length::Fill), text(format!("{} MHz", self.telemetry_sclk)).size(11).style(color!(0xDDDDDD))],
-                                row![text("MEM:").size(11).style(color!(0x8888AA)), Space::with_width(Length::Fill), text(format!("{} MHz", self.telemetry_mclk)).size(11).style(color!(0xDDDDDD))],
-                                row![text("VRAM:").size(11).style(color!(0x8888AA)), Space::with_width(Length::Fill), text(format!("{}/{} MB", self.telemetry_vram_used, self.telemetry_vram_total)).size(11).style(color!(0xDDDDDD))],
-                            ].spacing(4)
+                                row![text("API:").size(10).style(color!(0x64748B)), Space::with_width(Length::Fill), text(format!("{} {}", &self.selected_backend, detect_dynamic_api_version(&self.selected_backend))).size(11).style(color!(0x38BDF8))],
+                                row![text("DEVICES:").size(10).style(color!(0x64748B)), Space::with_width(Length::Fill), text(if self.current_devices_label.is_empty() { "—" } else { &self.current_devices_label }).size(10).style(color!(0xE2E8F0))],
+                            ].spacing(3)
                         )
                         .padding(10)
                         .style(|_t: &Theme| container::Appearance {
-                            background: Some(Background::Color(color!(0x161622))),
-                            border: Border { radius: 8.0.into(), width: 1.0, color: color!(0x2A2A38) },
+                            background: Some(Background::Color(color!(0x11141E))),
+                            border: Border { radius: 8.0.into(), width: 1.0, color: color!(0x1A202C) },
                             ..Default::default()
                         }),
-                        Space::with_height(25),
-                        text("TARGET HARDWARE").size(11).style(color!(0x8888AA)),
-                        Space::with_height(6),
-                        text(if self.current_device.is_empty() { "Unknown" } else { &self.current_device }).size(13).style(color!(0xFFFFFF)),
-                        Space::with_height(25),
-                        text("STATUS").size(11).style(color!(0x8888AA)),
-                        Space::with_height(6),
-                        text(status_text).size(22).style(status_color),
-                        Space::with_height(10),
-                        text(if self.current_benchmark.len() > 30 { "Complete" } else { &self.current_benchmark }).size(12).style(color!(0x666677)),
+                        Space::with_height(14),
+                        text("CURRENT WORKLOAD").size(10).style(color!(0x64748B)),
+                        Space::with_height(4),
+                        text(if self.current_benchmark.is_empty() { "Complete" } else { &self.current_benchmark }).size(12).style(color!(0xA5B4FC)),
                         Space::with_height(Length::Fill),
                         action_buttons
                     ]
                 )
-                .width(Length::Fixed(250.0))
+                .width(Length::Fixed(270.0))
                 .height(Length::Fill)
-                .padding(20)
+                .padding(18)
                 .style(|_t: &Theme| container::Appearance {
-                    background: Some(Background::Color(color!(0x0A0A0F))),
-                    border: Border { color: color!(0x1A1A24), width: 1.0, ..Default::default() },
+                    background: Some(Background::Color(color!(0x0A0B10))),
+                    border: Border { color: color!(0x1A1E2B), width: 1.0, ..Default::default() },
                     ..Default::default()
                 });
 
@@ -1240,9 +2046,10 @@ impl Application for GPUBenchApp {
                     scrollable(
                         column![
                             global_progress,
-                            split_layout
+                            split_layout,
+                            thermal_profile_section
                         ]
-                        .spacing(30)
+                        .spacing(20)
                         .width(Length::Fill)
                     )
                     .width(Length::Fill)
@@ -1250,9 +2057,9 @@ impl Application for GPUBenchApp {
                 )
                 .width(Length::Fill)
                 .height(Length::Fill)
-                .padding(20)
+                .padding(24)
                 .style(|_t: &Theme| container::Appearance {
-                    background: Some(Background::Color(color!(0x111116))),
+                    background: Some(Background::Color(color!(0x07080D))),
                     ..Default::default()
                 });
 
@@ -1296,7 +2103,6 @@ impl GPUBenchApp {
                     else { self.sys_mem_lat = self.sys_mem_lat.min(value); }
                 }
             }
-            // Non-"System" native results have no dedicated display metric.
         } else {
             match res.component.as_str() {
                 "Memory" => {
@@ -1342,6 +2148,15 @@ impl GPUBenchApp {
                     if res.subcategory == "Payload Register Pressure" { self.gpu_rt_payload = self.gpu_rt_payload.max(value); }
                     if res.subcategory == "Procedural Intersection" { self.gpu_rt_procedural = self.gpu_rt_procedural.max(value); }
                     if res.subcategory == "Path Tracing" { self.gpu_rt_pathtracing = self.gpu_rt_pathtracing.max(value); }
+                    if res.benchmarkName.contains("RayExecutionParadigm") {
+                        if res.benchmarkName.contains("Work Graphs") {
+                            self.gpu_rt_paradigm_workgraph = self.gpu_rt_paradigm_workgraph.max(value);
+                        } else if res.benchmarkName.contains("Work Lists") {
+                            self.gpu_rt_paradigm_worklist = self.gpu_rt_paradigm_worklist.max(value);
+                        } else if res.benchmarkName.contains("Traditional") && !res.benchmarkName.contains("+ SER") {
+                            self.gpu_rt_paradigm_trad = self.gpu_rt_paradigm_trad.max(value);
+                        }
+                    }
                 }
                 _ => {}
             }
@@ -1349,18 +2164,13 @@ impl GPUBenchApp {
     }
 }
 
-fn create_panel<'a>(title: &str, title_color: iced::Color, children: Element<'a, Message>) -> iced::widget::Container<'a, Message> {
-    let mut col = column![].width(Length::Fill).spacing(8);
-    if !title.is_empty() {
-        col = col.push(text(title).size(20).style(title_color));
-    }
-    col = col.push(children);
-    container(col)
-    .width(Length::Fill)
-    .padding(14)
-    .style(move |_t: &Theme| container::Appearance {
-        background: Some(Background::Color(color!(0x111116))),
-        border: Border { radius: 12.0.into(), width: 1.0, color: color!(0x222233) },
-        ..Default::default()
-    })
+fn create_panel<'a>(children: Element<'a, Message>) -> iced::widget::Container<'a, Message> {
+    container(children)
+        .width(Length::Fill)
+        .padding(12)
+        .style(|_t: &Theme| container::Appearance {
+            background: Some(Background::Color(color!(0x0C0E15))),
+            border: Border { radius: 10.0.into(), width: 1.0, color: color!(0x1A1F2C) },
+            ..Default::default()
+        })
 }

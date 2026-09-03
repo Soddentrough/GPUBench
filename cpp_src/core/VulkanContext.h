@@ -3,9 +3,15 @@
 #include "IComputeContext.h"
 #include <array>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
+
+#ifndef VK_ENABLE_BETA_EXTENSIONS
+#define VK_ENABLE_BETA_EXTENSIONS
+#endif
 #include <vulkan/vulkan.h>
+#include <vulkan/vulkan_beta.h>
 
 class VulkanContext : public IComputeContext {
 public:
@@ -80,6 +86,28 @@ public:
   }
   VkBuffer getVkBuffer(ComputeBuffer buffer) const;
 
+  bool isExtensionEnabled(const std::string &ext) const {
+    return enabledExtensionsSet.find(ext) != enabledExtensionsSet.end();
+  }
+  bool isRTMaint1Supported() const {
+    return isExtensionEnabled("VK_KHR_ray_tracing_maintenance1");
+  }
+  bool isDGCSupported() const {
+    return isExtensionEnabled("VK_EXT_device_generated_commands");
+  }
+  bool isWorkGraphsSupported() const {
+    return isExtensionEnabled("VK_AMDX_shader_enqueue");
+  }
+  bool isSERSupported() const {
+    return isExtensionEnabled("VK_EXT_ray_tracing_invocation_reorder") ||
+           isExtensionEnabled("VK_NV_ray_tracing_invocation_reorder");
+  }
+
+  void dispatchIndirect(ComputeKernel kernel, ComputeBuffer indirectBuffer,
+                        VkDeviceSize offset = 0);
+  void dispatchRayTracingIndirect(ComputeKernel kernel, ComputeBuffer indirectBuffer,
+                                 VkDeviceSize offset = 0);
+
 public:
   const std::vector<VkPhysicalDevice> &getPhysicalDevices() const {
     return physicalDevices;
@@ -146,6 +174,7 @@ private:
 
   uint32_t expectedKernelCount = 0;
   uint32_t createdKernelCount = 0;
+  std::set<std::string> enabledExtensionsSet;
   void printProgressBar(uint32_t current, uint32_t total,
                         const std::string &kernel_name);
 };

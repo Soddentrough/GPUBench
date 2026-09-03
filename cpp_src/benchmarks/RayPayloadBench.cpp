@@ -266,13 +266,7 @@ void RayPayloadBench::Run(uint32_t config_idx) {
   vContext->setKernelArg(activeKernel, 1, resultBuffer);
   vContext->setKernelArg(activeKernel, 2, sizeof(uint32_t), &rayCount);
 
-  auto start = std::chrono::high_resolution_clock::now();
   vContext->dispatch(activeKernel, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
-  context->waitIdle();
-  auto end = std::chrono::high_resolution_clock::now();
-
-  std::chrono::duration<double> diff = end - start;
-  rtResults[config_idx] = diff.count();
 }
 
 void RayPayloadBench::Teardown() {
@@ -297,7 +291,7 @@ void RayPayloadBench::Teardown() {
 }
 
 BenchmarkResult RayPayloadBench::GetResult(uint32_t config_idx) const {
-  return {(uint64_t)rayCount, rtResults.at(config_idx)};
+  return {(uint64_t)rayCount, 0.0};
 }
 
 const char *RayPayloadBench::GetName() const { return "RayPayload"; }

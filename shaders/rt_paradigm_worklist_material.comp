@@ -1,0 +1,112 @@
+#version 460
+#extension GL_EXT_ray_query : enable
+
+layout(local_size_x = 64) in;
+
+layout(set = 0, binding = 0) uniform accelerationStructureEXT topLevelAS;
+layout(set = 0, binding = 1) buffer Results {
+    uint totalRays;
+    uint totalHits;
+    float accumulatedLuminance;
+} results;
+
+struct CompactRayPayload {
+    vec4 originAndMatId;
+    vec4 directionAndSeed;
+    vec4 throughputAndMorton;
+};
+
+layout(set = 0, binding = 2) buffer WorkListBuffer {
+    uint queueCounters[32];
+    CompactRayPayload rayRecords[131072];
+} worklist;
+
+layout(push_constant) uniform PushConstants {
+    uint materialId; // The specialized material index for this uniform indirect dispatch
+    uint totalQueueSize;
+} pc;
+
+uint pcg_hash(inout uint state) {
+    uint oldstate = state;
+    state = oldstate * 747796405u + 2891336453u;
+    uint word = ((oldstate >> ((oldstate >> 28u) + 4u)) ^ oldstate) * 277803737u;
+    return (word >> 22u) ^ word;
+}
+
+float rand_float(inout uint state) {
+    return float(pcg_hash(state) & 0x00FFFFFFu) / 16777216.0;
+}
+
+// Specialized material execution: uniform across all threads in this indirect dispatch
+vec3 evalUniformMaterial(uint matId, vec3 normal, vec3 inDir, inout uint rng) {
+    float r1 = rand_float(rng);
+    float r2 = rand_float(rng);
+    vec3 color = vec3(0.5);
+
+    switch (matId % 32) {
+        case 0: // Perfect Mirror
+            color = vec3(0.95, 0.95, 0.98) * max(0.0, dot(reflect(inDir, normal), normal));
+            break;
+        case 1: // Rough Gold
+            color = vec3(1.0, 0.76, 0.33) * pow(max(0.0, dot(reflect(inDir, normal), normal)), 12.0);
+            break;
+        case 2: // Dielectric Glass (Fresnel reflection)
+            float eta = 1.5;
+            float cosTheta = clamp(-dot(inDir, normal), 0.0, 1.0);
+            float f0 = ((1.0 - eta) / (1.0 + eta)) * ((1.0 - eta) / (1.0 + eta));
+            float fresnel = f0 + (1.0 - f0) * pow(1.0 - cosTheta, 5.0);
+            color = vec3(fresnel);
+            break;
+        case 3: // Procedural 3D Checker
+            float checker = mod(floor(normal.x * 8.0) + floor(normal.y * 8.0) + floor(normal.z * 8.0), 2.0);
+            color = (checker > 0.5) ? vec3(0.9) : vec3(0.1);
+            break;
+        case 4: // Anisotropic Brushed Metal
+            vec3 tangent = normalize(cross(normal, vec3(0.0, 1.0, 0.0)));
+            float aniso = abs(dot(tangent, reflect(inDir, normal)));
+            color = vec3(0.8, 0.82, 0.85) * pow(aniso, 8.0);
+            break;
+        case 5: // Retroreflective Velvet
+            float rim = 1.0 - max(0.0, -dot(inDir, normal));
+            color = vec3(0.6, 0.1, 0.1) * (1.0 + pow(rim, 4.0) * 4.0);
+            break;
+        case 6: // Iridescent Thin Film
+            float d = dot(-inDir, normal) * 4.0;
+            color = 0.5 + 0.5 * cos(vec3(0.0, 2.0, 4.0) + d * 6.28);
+            break;
+        case 7: // Microfacet GGX Copper
+            float alpha = 0.25;
+            vec3 h = normalize(-inDir + reflect(inDir, normal));
+            float nDotH = max(0.0, dot(normal, h));
+            float denom = (nDotH * nDotH * (alpha * alpha - 1.0) + 1.0);
+            float ndf = (alpha * alpha) / (3.14159 * denom * denom);
+            color = vec3(0.95, 0.64, 0.54) * ndf;
+            break;
+        default:
+            uint hval = pcg_hash(matId);
+            color = vec3(float((hval >> 16) & 0xFF) / 255.0,
+                         float((hval >> 8) & 0xFF) / 255.0,
+                         float(hval & 0xFF) / 255.0);
+            color *= (0.5 + 0.5 * dot(normal, -inDir));
+            break;
+    }
+    return color;
+}
+
+void main() {
+    uint threadIdx = gl_GlobalInvocationID.x;
+    uint count = worklist.queueCounters[pc.materialId];
+    if (threadIdx >= count) return;
+
+    uint recordIdx = pc.materialId * 4096 + threadIdx;
+    CompactRayPayload payload = worklist.rayRecords[recordIdx];
+
+    vec3 normal = vec3(0.0, 1.0, 0.0);
+    vec3 inDir = payload.directionAndSeed.xyz;
+    uint rng = floatBitsToUint(payload.directionAndSeed.w);
+
+    vec3 color = evalUniformMaterial(pc.materialId, normal, inDir, rng);
+
+    // Accumulate result
+    atomicAdd(results.totalHits, 1);
+}

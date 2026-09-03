@@ -69,18 +69,43 @@ std::string csvQuote(const std::string &s) {
   return out;
 }
 
+static double computeResultValue(const ResultData &r) {
+  if (r.metric == "ns") {
+    return (r.operations > 0) ? ((r.time_ms * 1e6) / r.operations) : 0.0;
+  }
+  double time_s = r.time_ms / 1000.0;
+  if (time_s <= 0.0) return 0.0;
+
+  if (r.metric == "TFLOPS" || r.metric == "TOPS") {
+    return (r.operations / time_s) / 1e12;
+  } else if (r.metric == "GB/s") {
+    return (r.operations / time_s) / 1e9;
+  } else if (r.metric == "MRays/s") {
+    return (r.operations / time_s) / 1e6;
+  } else if (r.metric == "GRays/s" || r.metric == "GIS/s" || r.metric == "GPixels/s") {
+    return (r.operations / time_s) / 1e9;
+  }
+  return r.operations / time_s;
+}
+
 std::string resultsToJson(const std::vector<ResultData> &results) {
   std::string out = "[\n";
   for (size_t i = 0; i < results.size(); ++i) {
     const ResultData &r = results[i];
+    std::string devIdxStr = (r.deviceIndex == 0xFFFFFFFF || r.backendName == "System")
+                                ? "null"
+                                : std::to_string(r.deviceIndex);
+    double value = computeResultValue(r);
+
     out += "  {\n";
     out += "    \"backend\": \"" + jsonEscape(r.backendName) + "\",\n";
     out += "    \"device\": \"" + jsonEscape(r.deviceName) + "\",\n";
-    out += "    \"device_index\": " + std::to_string(r.deviceIndex) + ",\n";
+    out += "    \"device_index\": " + devIdxStr + ",\n";
     out += "    \"benchmark\": \"" + jsonEscape(r.benchmarkName) + "\",\n";
     out += "    \"component\": \"" + jsonEscape(r.component) + "\",\n";
     out += "    \"subcategory\": \"" + jsonEscape(r.subcategory) + "\",\n";
     out += "    \"metric\": \"" + jsonEscape(r.metric) + "\",\n";
+    out += "    \"value\": " + std::to_string(value) + ",\n";
     out += "    \"operations\": " + std::to_string(r.operations) + ",\n";
     out += "    \"time_ms\": " + std::to_string(r.time_ms) + ",\n";
     out += std::string("    \"is_emulated\": ") +
@@ -105,14 +130,19 @@ std::string resultsToJson(const std::vector<ResultData> &results) {
 std::string resultsToCsv(const std::vector<ResultData> &results) {
   std::string out =
       "backend,device,device_index,benchmark,component,subcategory,metric,"
-      "operations,time_ms,is_emulated,max_workgroup_size,config_index\n";
+      "value,operations,time_ms,is_emulated,max_workgroup_size,config_index\n";
   for (const ResultData &r : results) {
+    std::string devIdxStr = (r.deviceIndex == 0xFFFFFFFF || r.backendName == "System")
+                                ? ""
+                                : std::to_string(r.deviceIndex);
+    double value = computeResultValue(r);
     out += csvQuote(r.backendName) + "," + csvQuote(r.deviceName) + "," +
-           std::to_string(r.deviceIndex) + "," + csvQuote(r.benchmarkName) +
+           devIdxStr + "," + csvQuote(r.benchmarkName) +
            "," + csvQuote(r.component) + "," + csvQuote(r.subcategory) + "," +
-           csvQuote(r.metric) + "," + std::to_string(r.operations) + "," +
-           std::to_string(r.time_ms) + "," + (r.isEmulated ? "true" : "false") +
-           "," + std::to_string(r.maxWorkGroupSize) + "," +
+           csvQuote(r.metric) + "," + std::to_string(value) + "," +
+           std::to_string(r.operations) + "," + std::to_string(r.time_ms) +
+           "," + (r.isEmulated ? "true" : "false") + "," +
+           std::to_string(r.maxWorkGroupSize) + "," +
            std::to_string(r.configIndex) + "\n";
   }
   return out;
@@ -211,6 +241,13 @@ int main(int argc, char **argv) {
     for (const auto &name : benchmarks_to_run) {
       std::cout << "- " << name << std::endl;
     }
+  }
+
+  // If machine-readable output is requested to stdout, divert diagnostic
+  // logging (banners, progress, tables) to stderr so stdout is pure JSON/CSV.
+  std::streambuf *orig_cout = nullptr;
+  if (!output_format.empty() && output_file.empty()) {
+    orig_cout = std::cout.rdbuf(std::cerr.rdbuf());
   }
 
   try {
@@ -386,8 +423,17 @@ int main(int argc, char **argv) {
         }
         ofs << payload;
       } else {
+        if (orig_cout) {
+          std::cout.rdbuf(orig_cout);
+          orig_cout = nullptr;
+        }
         std::cout << payload;
       }
+    }
+
+    if (orig_cout) {
+      std::cout.rdbuf(orig_cout);
+      orig_cout = nullptr;
     }
 
     // Exit non-zero when nothing ran (bogus benchmark names, out-of-range
@@ -403,6 +449,9 @@ int main(int argc, char **argv) {
     // execution_contexts will be destroyed here, cleaning up resources
 
   } catch (const std::exception &e) {
+    if (orig_cout) {
+      std::cout.rdbuf(orig_cout);
+    }
     std::cerr << "An error occurred: " << e.what() << std::endl;
     return EXIT_FAILURE;
   }

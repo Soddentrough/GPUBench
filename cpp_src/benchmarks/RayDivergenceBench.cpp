@@ -306,13 +306,7 @@ void RayDivergenceBench::Run(uint32_t config_idx) {
   vContext->setKernelArg(kernel, 3, sizeof(float), &coherenceFactor);
   vContext->setKernelArg(kernel, 4, sizeof(uint32_t), &seed);
 
-  auto start = std::chrono::high_resolution_clock::now();
   vContext->dispatch(kernel, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
-  context->waitIdle();
-  auto end = std::chrono::high_resolution_clock::now();
-
-  std::chrono::duration<double> diff = end - start;
-  rtResults[config_idx] = diff.count();
 }
 
 void RayDivergenceBench::Teardown() {
@@ -341,7 +335,7 @@ void RayDivergenceBench::Teardown() {
 }
 
 BenchmarkResult RayDivergenceBench::GetResult(uint32_t config_idx) const {
-  return {(uint64_t)rayCount, rtResults[config_idx]};
+  return {(uint64_t)rayCount, 0.0};
 }
 
 const char *RayDivergenceBench::GetName() const { return "RayDivergence"; }

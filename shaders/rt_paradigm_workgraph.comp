@@ -1,0 +1,167 @@
+#version 460
+#extension GL_EXT_ray_query : enable
+#extension GL_EXT_ray_flags_primitive_culling : enable
+
+layout(local_size_x = 32) in;
+
+layout(set = 0, binding = 0) uniform accelerationStructureEXT topLevelAS;
+layout(set = 0, binding = 1) buffer Results {
+    uint totalRays;
+    uint totalHits;
+    float accumulatedLuminance;
+} results;
+
+layout(push_constant) uniform PushConstants {
+    uint rayCount;
+    uint mode;     // 0: Material Divergence, 1: Multi-Bounce Path Tracing, 2: Incoherent GI
+    uint bounces;  // Max bounces
+    uint seed;
+} pc;
+
+shared uint localRays;
+shared uint localHits;
+
+// On-chip payload queue in workgroup shared memory simulating Work Graph payload distributor
+struct WorkGraphPayload {
+    vec3 origin;
+    vec3 direction;
+    uint targetNode; // Material node or next bounce node
+    uint rngState;
+};
+
+shared WorkGraphPayload onChipQueue[64];
+shared uint onChipQueueCount;
+
+uint pcg_hash(inout uint state) {
+    uint oldstate = state;
+    state = oldstate * 747796405u + 2891336453u;
+    uint word = ((oldstate >> ((oldstate >> 28u) + 4u)) ^ oldstate) * 277803737u;
+    return (word >> 22u) ^ word;
+}
+
+float rand_float(inout uint state) {
+    return float(pcg_hash(state) & 0x00FFFFFFu) / 16777216.0;
+}
+
+vec3 cosine_sample_hemisphere(float u1, float u2) {
+    float r = sqrt(u1);
+    float theta = 6.28318530718 * u2;
+    float x = r * cos(theta);
+    float y = r * sin(theta);
+    float z = sqrt(max(0.0, 1.0 - u1));
+    return vec3(x, y, z);
+}
+
+vec3 align_to_normal(vec3 sample_dir, vec3 normal) {
+    vec3 up = abs(normal.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+    vec3 tangent = normalize(cross(up, normal));
+    vec3 bitangent = cross(normal, tangent);
+    return tangent * sample_dir.x + bitangent * sample_dir.y + normal * sample_dir.z;
+}
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    if (idx >= pc.rayCount) return;
+
+    if (gl_LocalInvocationID.x == 0) {
+        localRays = 0;
+        localHits = 0;
+        onChipQueueCount = 0;
+    }
+    barrier();
+
+    uint rngState = idx + pc.seed;
+    float fx = float(idx % 512) - 256.0 + 0.5;
+    float fy = float((idx / 512) % 512) - 256.0 + 0.5;
+
+    vec3 origin = vec3(fx * 0.02, fy * 0.02, -5.0);
+    vec3 direction = vec3(0.0, 0.0, 1.0);
+    uint threadRays = 1;
+    uint threadHits = 0;
+
+    // Node 0: Primary Ray Generation & Traversal Node
+    rayQueryEXT query;
+    rayQueryInitializeEXT(query, topLevelAS, gl_RayFlagsNoneEXT, 0xFF, origin, 0.001, direction, 20.0);
+    while (rayQueryProceedEXT(query)) {}
+
+    if (rayQueryGetIntersectionTypeEXT(query, true) == gl_RayQueryCommittedIntersectionTriangleEXT) {
+        threadHits = 1;
+        float t = rayQueryGetIntersectionTEXT(query, true);
+        vec3 hitPos = origin + direction * t;
+        uint primId = rayQueryGetIntersectionPrimitiveIndexEXT(query, true);
+        vec3 normal = (primId % 2 == 0) ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+        if (dot(normal, direction) > 0.0) normal = -normal;
+
+        // Autonomous Graph Enqueue: dynamic forwarding of child node work
+        if (pc.mode == 0) {
+            // Material Node Enqueue:
+            uint targetMatNode = (primId + idx) % 32;
+            uint qslot = atomicAdd(onChipQueueCount, 1);
+            if (qslot < 64) {
+                onChipQueue[qslot].origin = hitPos + normal * 0.002;
+                onChipQueue[qslot].direction = direction;
+                onChipQueue[qslot].targetNode = targetMatNode;
+                onChipQueue[qslot].rngState = rngState;
+            }
+        } else if (pc.mode == 1) {
+            // Next Bounce Node Enqueue (surviving rays only):
+            float u1 = rand_float(rngState);
+            float u2 = rand_float(rngState);
+            vec3 nextDir = align_to_normal(cosine_sample_hemisphere(u1, u2), normal);
+            bool survives = (rand_float(rngState) >= 0.4);
+            if (survives) {
+                uint qslot = atomicAdd(onChipQueueCount, 1);
+                if (qslot < 64) {
+                    onChipQueue[qslot].origin = hitPos + normal * 0.002;
+                    onChipQueue[qslot].direction = nextDir;
+                    onChipQueue[qslot].targetNode = 1; // Child bounce node
+                    onChipQueue[qslot].rngState = rngState;
+                }
+            }
+        } else {
+            // Incoherent Secondary Ray Node Enqueue:
+            float u1 = rand_float(rngState);
+            float u2 = rand_float(rngState);
+            vec3 incohDir = align_to_normal(cosine_sample_hemisphere(u1, u2), normal);
+            uint qslot = atomicAdd(onChipQueueCount, 1);
+            if (qslot < 64) {
+                onChipQueue[qslot].origin = hitPos + normal * 0.002;
+                onChipQueue[qslot].direction = incohDir;
+                onChipQueue[qslot].targetNode = 2; // Child secondary ray node
+                onChipQueue[qslot].rngState = rngState;
+            }
+        }
+    }
+
+    // Barrier simulating hardware work distributor node dispatch transition
+    barrier();
+
+    // Node 1: Child Node Processing from On-Chip Scratch Memory (without global memory round-trip)
+    uint queueTotal = min(onChipQueueCount, 64u);
+    uint tid = gl_LocalInvocationID.x;
+    if (tid < queueTotal) {
+        WorkGraphPayload payload = onChipQueue[tid];
+        if (pc.mode == 0) {
+            // Evaluates specialized child material node uniformly
+            threadHits++;
+        } else {
+            // Evaluates child bounce / secondary ray node traversal
+            threadRays++;
+            rayQueryEXT queryChild;
+            rayQueryInitializeEXT(queryChild, topLevelAS, gl_RayFlagsNoneEXT, 0xFF, payload.origin, 0.001, payload.direction, 20.0);
+            while (rayQueryProceedEXT(queryChild)) {}
+            if (rayQueryGetIntersectionTypeEXT(queryChild, true) != 0) {
+                threadHits++;
+            }
+        }
+    }
+
+    if (threadRays > 0) atomicAdd(localRays, threadRays);
+    if (threadHits > 0) atomicAdd(localHits, threadHits);
+    barrier();
+
+    if (gl_LocalInvocationID.x == 0) {
+        atomicAdd(results.totalRays, localRays);
+        atomicAdd(results.totalHits, localHits);
+    }
+}

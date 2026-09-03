@@ -9,7 +9,7 @@ class Int8Bench : public IBenchmark {
 public:
   const char *GetName() const override { return "INT8"; }
   std::vector<std::string> GetAliases() const override {
-    return {"int8", "int8b", "performance"};
+    return {"int8", "int8b"};
   }
   bool IsSupported(const DeviceInfo &info,
                    IComputeContext *context = nullptr) const override;

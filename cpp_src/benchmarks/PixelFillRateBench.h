@@ -1,6 +1,7 @@
 #pragma once
 
 #include "benchmarks/IBenchmark.h"
+#include <array>
 #include <vulkan/vulkan.h>
 #include <string>
 #include <vector>
@@ -17,6 +18,12 @@ public:
   const char *GetMetric() const override { return "GPixels/s"; }
   bool IsSupported(const DeviceInfo &info,
                    IComputeContext *context = nullptr) const override;
+  SupportLimitation GetSupportLimitation() const override {
+    return SupportLimitation::kApi;
+  }
+  std::string GetSupportNote() const override {
+    return "Pixel Fill Rate benchmark requires Vulkan graphics rasterization pipeline (ROPs)";
+  }
   void Setup(IComputeContext &context, const std::string &kernel_dir) override;
   void Run(uint32_t config_idx = 0) override;
   void Teardown() override;
@@ -60,9 +67,15 @@ private:
   VkShaderModule vertShaderModule = VK_NULL_HANDLE;
   VkShaderModule fragShaderModule = VK_NULL_HANDLE;
 
+  static constexpr size_t kMaxInFlight = 16;
+  struct FrameSync {
+    VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
+    VkFence fence = VK_NULL_HANDLE;
+    bool inFlight = false;
+  };
+  std::array<FrameSync, kMaxInFlight> frames{};
+  size_t frameIndex = 0;
   VkCommandPool commandPool = VK_NULL_HANDLE;
-  VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
-  VkFence fence = VK_NULL_HANDLE;
 
   std::vector<Config> configs;
   uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const;

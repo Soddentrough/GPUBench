@@ -19,6 +19,7 @@
 #include "benchmarks/RayPayloadBench.h"
 #include "benchmarks/RayProceduralBench.h"
 #include "benchmarks/RayTracingBench.h"
+#include "benchmarks/RayParadigmBench.h"
 #include "benchmarks/SysMemBandwidthBench.h"
 #include "benchmarks/SysMemLatencyBench.h"
 #include "core/ComputeBackendFactory.h"
@@ -91,6 +92,7 @@ void BenchmarkRunner::discoverBenchmarks() {
   benchmarks.push_back(std::make_unique<RayMaterialDivergenceBench>());
   benchmarks.push_back(std::make_unique<RayPathTracingBench>());
   benchmarks.push_back(std::make_unique<PixelFillRateBench>());
+  benchmarks.push_back(std::make_unique<RayParadigmBench>());
 
   // Cache Bandwidth
   const size_t l0_size = 16 * 1024; // 16KB L0 cache
@@ -167,41 +169,52 @@ static std::string to_lower(std::string s) {
   return s;
 }
 
+// Case-insensitive, delimiter-agnostic exact benchmark matching
+static bool benchmarkMatches(const IBenchmark *bench, const std::string &run_name) {
+  auto normalize = [](const std::string &s) {
+    std::string out;
+    for (char c : s) {
+      if (c != ' ' && c != '_' && c != '-') {
+        out.push_back(std::tolower(static_cast<unsigned char>(c)));
+      }
+    }
+    return out;
+  };
+
+  std::string normRun = normalize(run_name);
+  if (normRun.empty()) return false;
+
+  std::string benchName = bench->GetName();
+  if (normalize(benchName) == normRun) return true;
+
+  if (benchName == "Performance") {
+    std::string decorated = benchName + " (" + bench->GetSubCategory() + ")";
+    if (normalize(decorated) == normRun) return true;
+  }
+
+  for (const auto &alias : bench->GetAliases()) {
+    if (normalize(alias) == normRun) return true;
+  }
+  return false;
+}
+
 void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
   std::vector<std::string> lower_benchmarks_to_run;
   for (const auto &b : benchmarks_to_run) {
     lower_benchmarks_to_run.push_back(to_lower(b));
   }
 
-  // Determine which requested names match at least one benchmark, using the
-  // same matching rule as the run loops below (substring of the benchmark
-  // name, case-insensitive, or exact alias match).
+  // Determine which requested names match at least one benchmark
   unmatchedBenchmarks.clear();
   numBenchmarksRun = 0;
   for (size_t i = 0; i < lower_benchmarks_to_run.size(); ++i) {
     const std::string &run_name = lower_benchmarks_to_run[i];
     bool matched = false;
     for (const auto &bench : benchmarks) {
-      // Replicate the name decoration used by the run loops below:
-      // benchmarks named "Performance" are matched as
-      // "Performance (<subcategory>)".
-      std::string bench_name_lower = to_lower(bench->GetName());
-      if (bench_name_lower == "performance") {
-        bench_name_lower +=
-            " (" + to_lower(std::string(bench->GetSubCategory())) + ")";
-      }
-      if (bench_name_lower.find(run_name) != std::string::npos) {
+      if (benchmarkMatches(bench.get(), run_name)) {
         matched = true;
         break;
       }
-      for (const auto &alias : bench->GetAliases()) {
-        if (to_lower(alias) == run_name) {
-          matched = true;
-          break;
-        }
-      }
-      if (matched)
-        break;
     }
     if (!matched) {
       unmatchedBenchmarks.push_back(benchmarks_to_run[i]);
@@ -221,22 +234,10 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
     if (benchmarks_to_run.empty()) {
       should_run = true;
     } else {
-      std::string bench_name = bench->GetName();
-      if (bench_name == "Performance") {
-        bench_name += " (" + std::string(bench->GetSubCategory()) + ")";
-      }
-      std::string bench_name_lower = to_lower(bench_name);
-      auto aliases = bench->GetAliases();
       for (const auto &run_name : lower_benchmarks_to_run) {
-        if (bench_name_lower.find(run_name) != std::string::npos) {
+        if (benchmarkMatches(bench.get(), run_name)) {
           should_run = true;
           break;
-        }
-        for (const auto &alias : aliases) {
-          if (to_lower(alias) == run_name) {
-            should_run = true;
-            break;
-          }
         }
       }
     }
@@ -329,22 +330,10 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
           if (benchmarks_to_run.empty()) {
             should_run = true;
           } else {
-            std::string bench_name_lower = to_lower(bench->GetName());
-            if (bench_name_lower == "performance") {
-              bench_name_lower +=
-                  " (" + to_lower(std::string(bench->GetSubCategory())) + ")";
-            }
-            auto aliases = bench->GetAliases();
             for (const auto &run_name : lower_benchmarks_to_run) {
-              if (bench_name_lower.find(run_name) != std::string::npos) {
+              if (benchmarkMatches(bench.get(), run_name)) {
                 should_run = true;
                 break;
-              }
-              for (const auto &alias : aliases) {
-                if (to_lower(alias) == run_name) {
-                  should_run = true;
-                  break;
-                }
               }
             }
           }
@@ -355,24 +344,13 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
         }
         context->setExpectedKernelCount(totalKernels);
 
-        // Shared selection predicate, applying the "Performance
-        // (subcategory)" name decoration used by the pre-scan and the
-        // kernel-count loop above.
+        // Shared selection predicate
         auto isSelected = [&](IBenchmark *b) {
           if (lower_benchmarks_to_run.empty())
             return true;
-          std::string bench_name_lower = to_lower(b->GetName());
-          if (bench_name_lower == "performance") {
-            bench_name_lower +=
-                " (" + to_lower(std::string(b->GetSubCategory())) + ")";
-          }
           for (const auto &run_name : lower_benchmarks_to_run) {
-            if (bench_name_lower.find(run_name) != std::string::npos)
+            if (benchmarkMatches(b, run_name))
               return true;
-            for (const auto &alias : b->GetAliases()) {
-              if (to_lower(alias) == run_name)
-                return true;
-            }
           }
           return false;
         };
@@ -486,6 +464,36 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
                 } else {
                   std::cout << "  - [" << ComputeBackendFactory::getBackendName(context->getBackend())
                             << "] Running " << bench_name << "..." << std::flush;
+                }
+
+                if (!bench->IsConfigSupported(i)) {
+                  if (!verbose) {
+                    std::cout << " Unsupported." << std::endl;
+                  }
+                  ResultData result_data;
+                  result_data.backendName = ComputeBackendFactory::getBackendName(context->getBackend());
+                  result_data.deviceName = info.name;
+                  result_data.benchmarkName = bench_name;
+                  result_data.metric = bench->GetMetric(i);
+                  result_data.operations = 0;
+                  result_data.time_ms = 0;
+                  result_data.isEmulated = false;
+                  result_data.isUnsupported = true;
+                  result_data.supportNote = bench->GetConfigSupportNote(i);
+                  result_data.supportCategory = "hardware";
+                  result_data.component = bench->GetComponent(i);
+                  result_data.subcategory = bench->GetSubCategory(i);
+                  result_data.maxWorkGroupSize = info.maxWorkGroupSize;
+                  result_data.deviceIndex = context->getSelectedDeviceIndex();
+                  result_data.configIndex = i;
+                  result_data.sortWeight = bench->GetSortWeight();
+
+                  formatter->addResult(result_data);
+                  numBenchmarksRun++;
+                  if (onResult) {
+                    onResult(result_data);
+                  }
+                  continue;
                 }
 
                 // Warmup (not counted): ramp GPU clocks and fill caches
@@ -631,18 +639,10 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
       if (benchmarks_to_run.empty()) {
         should_run = true;
       } else {
-        std::string bench_name_lower = to_lower(bench->GetName());
-        auto aliases = bench->GetAliases();
         for (const auto &run_name : lower_benchmarks_to_run) {
-          if (bench_name_lower.find(run_name) != std::string::npos) {
+          if (benchmarkMatches(bench.get(), run_name)) {
             should_run = true;
             break;
-          }
-          for (const auto &alias : aliases) {
-            if (to_lower(alias) == run_name) {
-              should_run = true;
-              break;
-            }
           }
         }
       }

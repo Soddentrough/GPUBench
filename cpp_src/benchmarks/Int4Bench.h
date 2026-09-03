@@ -7,7 +7,7 @@ class Int4Bench : public IBenchmark {
 public:
   const char *GetName() const override { return "INT4"; }
   std::vector<std::string> GetAliases() const override {
-    return {"int4", "performance"};
+    return {"int4"};
   }
   bool IsSupported(const DeviceInfo &info,
                    IComputeContext *context = nullptr) const override;

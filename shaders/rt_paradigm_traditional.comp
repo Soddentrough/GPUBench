@@ -1,0 +1,246 @@
+#version 460
+#extension GL_EXT_ray_query : enable
+#extension GL_EXT_ray_flags_primitive_culling : enable
+
+layout(local_size_x = 32) in;
+
+layout(set = 0, binding = 0) uniform accelerationStructureEXT topLevelAS;
+layout(set = 0, binding = 1) buffer Results {
+    uint totalRays;
+    uint totalHits;
+    float accumulatedLuminance;
+} results;
+
+layout(push_constant) uniform PushConstants {
+    uint rayCount;
+    uint mode;     // 0: Material Divergence, 1: Multi-Bounce Path Tracing, 2: Incoherent GI
+    uint bounces;  // Max bounces (for mode 1)
+    uint seed;
+} pc;
+
+shared uint localRays;
+shared uint localHits;
+
+// PCG Random Generator
+uint pcg_hash(inout uint state) {
+    uint oldstate = state;
+    state = oldstate * 747796405u + 2891336453u;
+    uint word = ((oldstate >> ((oldstate >> 28u) + 4u)) ^ oldstate) * 277803737u;
+    return (word >> 22u) ^ word;
+}
+
+float rand_float(inout uint state) {
+    return float(pcg_hash(state) & 0x00FFFFFFu) / 16777216.0;
+}
+
+vec3 cosine_sample_hemisphere(float u1, float u2) {
+    float r = sqrt(u1);
+    float theta = 6.28318530718 * u2;
+    float x = r * cos(theta);
+    float y = r * sin(theta);
+    float z = sqrt(max(0.0, 1.0 - u1));
+    return vec3(x, y, z);
+}
+
+vec3 align_to_normal(vec3 sample_dir, vec3 normal) {
+    vec3 up = abs(normal.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+    vec3 tangent = normalize(cross(up, normal));
+    vec3 bitangent = cross(normal, tangent);
+    return tangent * sample_dir.x + bitangent * sample_dir.y + normal * sample_dir.z;
+}
+
+// 32 Distinct Material Evaluation Functions to induce realistic ALU divergence
+vec3 evalMaterial(uint matId, vec3 normal, vec3 inDir, inout uint rng) {
+    float r1 = rand_float(rng);
+    float r2 = rand_float(rng);
+    vec3 color = vec3(0.5);
+
+    switch (matId % 32) {
+        case 0: // Perfect Mirror
+            color = vec3(0.95, 0.95, 0.98) * max(0.0, dot(reflect(inDir, normal), normal));
+            break;
+        case 1: // Rough Gold
+            color = vec3(1.0, 0.76, 0.33) * pow(max(0.0, dot(reflect(inDir, normal), normal)), 12.0);
+            break;
+        case 2: // Dielectric Glass (Fresnel reflection)
+            float eta = 1.5;
+            float cosTheta = clamp(-dot(inDir, normal), 0.0, 1.0);
+            float f0 = ((1.0 - eta) / (1.0 + eta)) * ((1.0 - eta) / (1.0 + eta));
+            float fresnel = f0 + (1.0 - f0) * pow(1.0 - cosTheta, 5.0);
+            color = vec3(fresnel);
+            break;
+        case 3: // Procedural 3D Checker
+            float checker = mod(floor(normal.x * 8.0) + floor(normal.y * 8.0) + floor(normal.z * 8.0), 2.0);
+            color = (checker > 0.5) ? vec3(0.9) : vec3(0.1);
+            break;
+        case 4: // Anisotropic Brushed Metal
+            vec3 tangent = normalize(cross(normal, vec3(0.0, 1.0, 0.0)));
+            float aniso = abs(dot(tangent, reflect(inDir, normal)));
+            color = vec3(0.8, 0.82, 0.85) * pow(aniso, 8.0);
+            break;
+        case 5: // Retroreflective Velvet
+            float rim = 1.0 - max(0.0, -dot(inDir, normal));
+            color = vec3(0.6, 0.1, 0.1) * (1.0 + pow(rim, 4.0) * 4.0);
+            break;
+        case 6: // Iridescent Thin Film (Interference)
+            float d = dot(-inDir, normal) * 4.0;
+            color = 0.5 + 0.5 * cos(vec3(0.0, 2.0, 4.0) + d * 6.28);
+            break;
+        case 7: // Microfacet GGX Copper
+            float alpha = 0.25;
+            vec3 h = normalize(-inDir + reflect(inDir, normal));
+            float nDotH = max(0.0, dot(normal, h));
+            float denom = (nDotH * nDotH * (alpha * alpha - 1.0) + 1.0);
+            float ndf = (alpha * alpha) / (3.14159 * denom * denom);
+            color = vec3(0.95, 0.64, 0.54) * ndf;
+            break;
+        case 8: // Subsurface Scattering approximation
+            color = vec3(0.9, 0.3, 0.2) * (max(0.0, dot(-inDir, -normal)) * 0.4 + 0.6);
+            break;
+        case 9: // Procedural Noise Ring
+            float dist = length(normal.xy);
+            color = vec3(0.5 + 0.5 * sin(dist * 20.0 + r1 * 3.14));
+            break;
+        case 10: // Glossy Plastic
+            color = mix(vec3(0.1, 0.2, 0.8), vec3(1.0), pow(1.0 - max(0.0, -dot(inDir, normal)), 3.0));
+            break;
+        case 11: // Chrome
+            color = vec3(0.99) * max(0.0, dot(reflect(inDir, normal), normal));
+            break;
+        case 12: // Carbon Fiber
+            float pattern = sin(normal.x * 50.0) * cos(normal.y * 50.0);
+            color = vec3(0.05) + vec3(0.1) * pattern;
+            break;
+        case 13: // Emerald Gemstone
+            color = vec3(0.1, 0.85, 0.3) * (0.8 + 0.2 * r2);
+            break;
+        case 14: // Matt Clay
+            color = vec3(0.7, 0.4, 0.3) * max(0.0, dot(normal, vec3(0.0, 1.0, 0.0)));
+            break;
+        case 15: // Emissive Neon
+            color = vec3(0.2, 1.0, 0.8) * 3.0;
+            break;
+        default: // Procedural Hash Variations 16-31
+            uint hval = pcg_hash(matId);
+            color = vec3(float((hval >> 16) & 0xFF) / 255.0,
+                         float((hval >> 8) & 0xFF) / 255.0,
+                         float(hval & 0xFF) / 255.0);
+            color *= (0.5 + 0.5 * dot(normal, -inDir));
+            break;
+    }
+    return color;
+}
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    if (idx >= pc.rayCount) return;
+
+    if (gl_LocalInvocationID.x == 0) {
+        localRays = 0;
+        localHits = 0;
+    }
+    barrier();
+
+    uint rngState = idx + pc.seed;
+    float fx = float(idx % 512) - 256.0 + 0.5;
+    float fy = float((idx / 512) % 512) - 256.0 + 0.5;
+
+    vec3 origin = vec3(fx * 0.02, fy * 0.02, -5.0);
+    vec3 direction = vec3(0.0, 0.0, 1.0);
+    vec3 accumulated = vec3(0.0);
+    vec3 throughput = vec3(1.0);
+    uint threadRays = 0;
+    uint threadHits = 0;
+
+    if (pc.mode == 0) {
+        // Mode 0: Material Divergence Stress Test (32 materials)
+        threadRays++;
+        rayQueryEXT query;
+        rayQueryInitializeEXT(query, topLevelAS, gl_RayFlagsNoneEXT, 0xFF, origin, 0.001, direction, 20.0);
+        while (rayQueryProceedEXT(query)) {}
+
+        if (rayQueryGetIntersectionTypeEXT(query, true) == gl_RayQueryCommittedIntersectionTriangleEXT) {
+            threadHits++;
+            uint primId = rayQueryGetIntersectionPrimitiveIndexEXT(query, true);
+            // Derive normal
+            vec3 normal = (primId % 2 == 0) ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+            if (dot(normal, direction) > 0.0) normal = -normal;
+
+            // Divergent material ID assignment across threads in the wavefront
+            uint matId = (primId + idx) % 32;
+            accumulated = evalMaterial(matId, normal, direction, rngState);
+        }
+    } else if (pc.mode == 1) {
+        // Mode 1: Multi-Bounce Path Tracing with Russian Roulette (SIMD Lane Starvation)
+        for (uint b = 0; b < pc.bounces; ++b) {
+            threadRays++;
+            rayQueryEXT query;
+            rayQueryInitializeEXT(query, topLevelAS, gl_RayFlagsNoneEXT, 0xFF, origin, 0.001, direction, 20.0);
+            while (rayQueryProceedEXT(query)) {}
+
+            if (rayQueryGetIntersectionTypeEXT(query, true) == gl_RayQueryCommittedIntersectionTriangleEXT) {
+                threadHits++;
+                float t = rayQueryGetIntersectionTEXT(query, true);
+                vec3 hitPos = origin + direction * t;
+                uint primId = rayQueryGetIntersectionPrimitiveIndexEXT(query, true);
+                vec3 normal = vec3(0.0, 1.0, 0.0);
+                if (dot(normal, direction) > 0.0) normal = -normal;
+
+                // Hemisphere reflection
+                float u1 = rand_float(rngState);
+                float u2 = rand_float(rngState);
+                direction = align_to_normal(cosine_sample_hemisphere(u1, u2), normal);
+                origin = hitPos + normal * 0.002;
+
+                throughput *= vec3(0.8);
+
+                // Russian roulette termination (40% termination probability)
+                // In traditional execution, terminated threads must idle until the entire wave completes!
+                if (b >= 2 && rand_float(rngState) < 0.4) {
+                    break; // Thread becomes inactive; remaining lanes keep looping
+                }
+            } else {
+                accumulated += throughput * vec3(0.5, 0.7, 1.0);
+                break;
+            }
+        }
+    } else {
+        // Mode 2: Incoherent Secondary GI (Hemisphere Scattering without Spatial Binning)
+        threadRays++;
+        rayQueryEXT query1;
+        rayQueryInitializeEXT(query1, topLevelAS, gl_RayFlagsNoneEXT, 0xFF, origin, 0.001, direction, 20.0);
+        while (rayQueryProceedEXT(query1)) {}
+
+        if (rayQueryGetIntersectionTypeEXT(query1, true) == gl_RayQueryCommittedIntersectionTriangleEXT) {
+            threadHits++;
+            float t = rayQueryGetIntersectionTEXT(query1, true);
+            vec3 hitPos = origin + direction * t;
+            vec3 normal = vec3(0.0, 1.0, 0.0);
+
+            // Incoherent scattering: arbitrary random directions
+            float u1 = rand_float(rngState);
+            float u2 = rand_float(rngState);
+            vec3 incohDir = align_to_normal(cosine_sample_hemisphere(u1, u2), normal);
+
+            // Secondary ray: high BVH cache miss rate when unorganized
+            threadRays++;
+            rayQueryEXT query2;
+            rayQueryInitializeEXT(query2, topLevelAS, gl_RayFlagsNoneEXT, 0xFF, hitPos + normal * 0.002, 0.001, incohDir, 20.0);
+            while (rayQueryProceedEXT(query2)) {}
+
+            if (rayQueryGetIntersectionTypeEXT(query2, true) != 0) {
+                threadHits++;
+                accumulated += vec3(1.0);
+            }
+        }
+    }
+
+    if (threadRays > 0) atomicAdd(localRays, threadRays);
+    if (threadHits > 0) atomicAdd(localHits, threadHits);
+    barrier();
+
+    if (gl_LocalInvocationID.x == 0) {
+        atomicAdd(results.totalRays, localRays);
+        atomicAdd(results.totalHits, localHits);
+    }
+}

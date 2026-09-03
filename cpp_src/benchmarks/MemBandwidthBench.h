@@ -21,7 +21,7 @@ class MemBandwidthBench : public IBenchmark {
 public:
   const char *GetName() const override { return "Device Memory Bandwidth"; }
   std::vector<std::string> GetAliases() const override {
-    return {"membw", "bandwidth", "performance", "devicemem"};
+    return {"membw", "bandwidth", "devicemem"};
   }
   const char *GetMetric() const override;
   bool IsSupported(const DeviceInfo &info,

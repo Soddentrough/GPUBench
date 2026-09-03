@@ -34,7 +34,6 @@ __kernel void run_benchmark(__global half* data) {
     
     // Prevent optimization away
     // Buffer is 2097152 bytes = 1048576 halfs. vstore4/vload4 uses 4-half elements, so max index is 262143.
-    uint safe_index = index % 262144;
     half4 result = val1 + val2 + val3 + val4 + val5 + val6 + val7 + val8;
     vstore4(result, safe_index, data);
 }

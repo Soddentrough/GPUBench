@@ -77,6 +77,20 @@ void SysMemBandwidthBench::Setup(IComputeContext &context,
   // allocation)
   std::memset(buffer, 1, bufferSize);
   std::memset(destBuffer, 0, bufferSize); // Touch pages
+
+  // Determine thread count and initialize persistent worker thread pool
+  threadCount = std::thread::hardware_concurrency();
+  if (threadCount == 0) threadCount = 4;
+  if (threadCount > 64) threadCount = 64; // Cap to 64 to avoid excessive memory bus contention
+
+  stopPool = false;
+  workGeneration = 0;
+  completedWorkers = 0;
+  workers.clear();
+  workers.reserve(threadCount);
+  for (unsigned int i = 0; i < threadCount; ++i) {
+    workers.emplace_back(&SysMemBandwidthBench::workerLoop, this, i);
+  }
 }
 
 #if ENABLE_AVX2
@@ -166,70 +180,76 @@ void run_copy_fallback(const void *src, void *dst, size_t size) {
   std::memcpy(dst, src, size);
 }
 
+void SysMemBandwidthBench::workerLoop(unsigned int tid) {
+  bool useAVX2 = hasAVX2();
+  uint32_t localGen = 0;
+
+  while (true) {
+    uint32_t cfgIdx = 0;
+    {
+      std::unique_lock<std::mutex> lock(poolMutex);
+      cvStart.wait(lock, [&] { return stopPool.load() || workGeneration != localGen; });
+      if (stopPool.load()) {
+        return;
+      }
+      localGen = workGeneration;
+      cfgIdx = activeConfigIdx;
+    }
+
+    if (cfgIdx < configs.size()) {
+      const auto &config = configs[cfgIdx];
+      size_t chunkSize = bufferSize / threadCount;
+      chunkSize = (chunkSize / 256) * 256;
+
+      size_t offset = tid * chunkSize;
+      char *tSrc = (char *)buffer + offset;
+      char *tDst = (char *)destBuffer + offset;
+
+#if ENABLE_AVX2
+      if (useAVX2) {
+        if (config.mode == SysMemTestMode::Read) {
+          run_read_avx2(tSrc, chunkSize);
+        } else if (config.mode == SysMemTestMode::Write) {
+          run_write_avx2(tSrc, chunkSize);
+        } else {
+          run_copy_avx2(tSrc, tDst, chunkSize);
+        }
+      } else
+#endif
+      {
+        if (config.mode == SysMemTestMode::Read) {
+          run_read_fallback(tSrc, chunkSize);
+        } else if (config.mode == SysMemTestMode::Write) {
+          run_write_fallback(tSrc, chunkSize);
+        } else {
+          run_copy_fallback(tSrc, tDst, chunkSize);
+        }
+      }
+    }
+
+    if (++completedWorkers == threadCount) {
+      cvDone.notify_one();
+    }
+  }
+}
+
 void SysMemBandwidthBench::Run(uint32_t config_idx) {
-  if (config_idx >= configs.size())
+  if (config_idx >= configs.size() || workers.empty() || threadCount == 0)
     return;
 
   const auto &config = configs[config_idx];
-  bool useAVX2 = hasAVX2();
-
-  // Determine thread count
-  unsigned int threadCount = config.numThreads;
-  if (threadCount == 0) {
-    threadCount = std::thread::hardware_concurrency();
-    if (threadCount == 0)
-      threadCount = 4; // Fallback
-  }
-
-  // Split buffer among threads
   size_t chunkSize = bufferSize / threadCount;
-  // Align chunk size to 256 bytes (safe for AVX unroll)
   chunkSize = (chunkSize / 256) * 256;
-
-  std::vector<std::thread> threads;
-  std::atomic<int> barrier_counter(0);
-
-  auto thread_func = [&](int tid) {
-    size_t offset = tid * chunkSize;
-    char *tSrc = (char *)buffer + offset;
-    char *tDst = (char *)destBuffer + offset;
-
-    // Simple barrier
-    barrier_counter++;
-    while (barrier_counter < (int)threadCount) {
-      std::this_thread::yield();
-    }
-
-#if ENABLE_AVX2
-    if (useAVX2) {
-      if (config.mode == SysMemTestMode::Read) {
-        run_read_avx2(tSrc, chunkSize);
-      } else if (config.mode == SysMemTestMode::Write) {
-        run_write_avx2(tSrc, chunkSize);
-      } else {
-        run_copy_avx2(tSrc, tDst, chunkSize);
-      }
-    } else
-#endif
-    {
-      if (config.mode == SysMemTestMode::Read) {
-        run_read_fallback(tSrc, chunkSize);
-      } else if (config.mode == SysMemTestMode::Write) {
-        run_write_fallback(tSrc, chunkSize);
-      } else {
-        run_copy_fallback(tSrc, tDst, chunkSize);
-      }
-    }
-  };
 
   auto start = std::chrono::high_resolution_clock::now();
 
-  for (unsigned int i = 0; i < threadCount; ++i) {
-    threads.emplace_back(thread_func, i);
-  }
-
-  for (auto &t : threads) {
-    t.join();
+  {
+    std::unique_lock<std::mutex> lock(poolMutex);
+    completedWorkers = 0;
+    activeConfigIdx = config_idx;
+    workGeneration++;
+    cvStart.notify_all();
+    cvDone.wait(lock, [&] { return completedWorkers.load() == threadCount; });
   }
 
   auto end = std::chrono::high_resolution_clock::now();
@@ -249,6 +269,18 @@ void SysMemBandwidthBench::Run(uint32_t config_idx) {
 }
 
 void SysMemBandwidthBench::Teardown() {
+  {
+    std::unique_lock<std::mutex> lock(poolMutex);
+    stopPool = true;
+    cvStart.notify_all();
+  }
+  for (auto &w : workers) {
+    if (w.joinable()) {
+      w.join();
+    }
+  }
+  workers.clear();
+
   if (buffer) {
     ALIGNED_FREE(buffer);
     buffer = nullptr;

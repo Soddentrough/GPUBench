@@ -6,8 +6,19 @@
 namespace utils {
 
 std::filesystem::path ShaderCache::getCacheDir(const DeviceInfo &device) {
-  std::filesystem::path home = std::getenv("HOME") ? std::getenv("HOME") : ".";
-  std::filesystem::path cache_base = home / ".cache" / "gpubench";
+  std::filesystem::path cache_base;
+#if defined(_WIN32)
+  const char *localAppData = std::getenv("LOCALAPPDATA");
+  if (localAppData) {
+    cache_base = std::filesystem::path(localAppData) / "gpubench" / "cache";
+  } else {
+    const char *userProfile = std::getenv("USERPROFILE");
+    cache_base = (userProfile ? std::filesystem::path(userProfile) : std::filesystem::path(".")) / ".cache" / "gpubench";
+  }
+#else
+  const char *home = std::getenv("HOME");
+  cache_base = (home ? std::filesystem::path(home) : std::filesystem::path(".")) / ".cache" / "gpubench";
+#endif
 
   // Create a unique directory for this driver/device combination
   std::string sig =
@@ -34,6 +45,16 @@ bool ShaderCache::loadVulkanCache(const std::string &kernel_name,
 
   if (!std::filesystem::exists(cache_file)) {
     return false;
+  }
+
+  if (std::filesystem::exists(kernel_name)) {
+    try {
+      if (std::filesystem::last_write_time(kernel_name) >
+          std::filesystem::last_write_time(cache_file)) {
+        return false;
+      }
+    } catch (...) {
+    }
   }
 
   std::ifstream file(cache_file, std::ios::binary | std::ios::ate);
@@ -75,6 +96,16 @@ bool ShaderCache::loadROCmCache(const std::string &kernel_name,
     return false;
   }
 
+  if (std::filesystem::exists(kernel_name)) {
+    try {
+      if (std::filesystem::last_write_time(kernel_name) >
+          std::filesystem::last_write_time(cache_file)) {
+        return false;
+      }
+    } catch (...) {
+    }
+  }
+
   std::ifstream file(cache_file, std::ios::binary | std::ios::ate);
   if (!file.is_open()) {
     return false;
@@ -111,6 +142,16 @@ bool ShaderCache::loadOpenCLCache(const std::string &kernel_name,
 
   if (!std::filesystem::exists(cache_file)) {
     return false;
+  }
+
+  if (std::filesystem::exists(kernel_name)) {
+    try {
+      if (std::filesystem::last_write_time(kernel_name) >
+          std::filesystem::last_write_time(cache_file)) {
+        return false;
+      }
+    } catch (...) {
+    }
   }
 
   std::ifstream file(cache_file, std::ios::binary | std::ios::ate);

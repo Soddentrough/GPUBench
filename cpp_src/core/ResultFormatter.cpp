@@ -192,10 +192,7 @@ void ResultFormatter::print() {
                 valStr = "UNSUPPORTED";
                 unit = res.supportCategory.empty()
                            ? ""
-                           : " [" + res.supportCategory + " limitation]";
-                if (!res.supportNote.empty()) {
-                  unit += " (" + res.supportNote + ")";
-                }
+                           : " [" + res.supportCategory + "]";
               } else if (res.component == "Compute") {
                 // TFLOPS or TOPS
                 value = (static_cast<double>(res.operations) /

@@ -40,6 +40,7 @@ typedef hipError_t (*p_hipModuleLaunchKernel)(hipFunction_t, unsigned int,
                                               unsigned int, unsigned int,
                                               unsigned int, unsigned int,
                                               hipStream_t, void **, void **);
+typedef hipError_t (*p_hipModuleUnload)(hipModule_t);
 typedef hipError_t (*p_hipDeviceSynchronize)(void);
 
 // Function pointers for HIPRTC
@@ -77,6 +78,7 @@ static p_hipModuleLoadData f_hipModuleLoadData;
 static p_hipModuleLoad f_hipModuleLoad;
 static p_hipModuleGetFunction f_hipModuleGetFunction;
 static p_hipModuleLaunchKernel f_hipModuleLaunchKernel;
+static p_hipModuleUnload f_hipModuleUnload;
 static p_hipDeviceSynchronize f_hipDeviceSynchronize;
 
 bool ROCmContext::loadLibraries() {
@@ -86,9 +88,21 @@ bool ROCmContext::loadLibraries() {
 #ifdef _WIN32
   hipLib = std::make_unique<utils::DynamicLibrary>("amdhip64.dll");
 #else
-  hipLib = std::make_unique<utils::DynamicLibrary>("libamdhip64.so.6");
+  hipLib = std::make_unique<utils::DynamicLibrary>("libamdhip64.so.7");
+  if (!hipLib->isValid()) {
+    hipLib = std::make_unique<utils::DynamicLibrary>("libamdhip64.so.6");
+  }
   if (!hipLib->isValid()) {
     hipLib = std::make_unique<utils::DynamicLibrary>("libamdhip64.so");
+  }
+  if (!hipLib->isValid()) {
+    hipLib = std::make_unique<utils::DynamicLibrary>("/opt/rocm/lib/libamdhip64.so.7");
+  }
+  if (!hipLib->isValid()) {
+    hipLib = std::make_unique<utils::DynamicLibrary>("/opt/rocm/lib/libamdhip64.so.6");
+  }
+  if (!hipLib->isValid()) {
+    hipLib = std::make_unique<utils::DynamicLibrary>("/opt/rocm/lib/libamdhip64.so");
   }
 #endif
 
@@ -113,6 +127,8 @@ bool ROCmContext::loadLibraries() {
         hipLib->getFunction<p_hipModuleGetFunction>("hipModuleGetFunction");
     f_hipModuleLaunchKernel =
         hipLib->getFunction<p_hipModuleLaunchKernel>("hipModuleLaunchKernel");
+    f_hipModuleUnload =
+        hipLib->getFunction<p_hipModuleUnload>("hipModuleUnload");
     f_hipDeviceSynchronize =
         hipLib->getFunction<p_hipDeviceSynchronize>("hipDeviceSynchronize");
 
@@ -123,9 +139,21 @@ bool ROCmContext::loadLibraries() {
       hiprtcLib = std::make_unique<utils::DynamicLibrary>("hiprtc64.dll");
     }
 #else
-    hiprtcLib = std::make_unique<utils::DynamicLibrary>("libhiprtc.so.6");
+    hiprtcLib = std::make_unique<utils::DynamicLibrary>("libhiprtc.so.7");
+    if (!hiprtcLib->isValid()) {
+      hiprtcLib = std::make_unique<utils::DynamicLibrary>("libhiprtc.so.6");
+    }
     if (!hiprtcLib->isValid()) {
       hiprtcLib = std::make_unique<utils::DynamicLibrary>("libhiprtc.so");
+    }
+    if (!hiprtcLib->isValid()) {
+      hiprtcLib = std::make_unique<utils::DynamicLibrary>("/opt/rocm/lib/libhiprtc.so.7");
+    }
+    if (!hiprtcLib->isValid()) {
+      hiprtcLib = std::make_unique<utils::DynamicLibrary>("/opt/rocm/lib/libhiprtc.so.6");
+    }
+    if (!hiprtcLib->isValid()) {
+      hiprtcLib = std::make_unique<utils::DynamicLibrary>("/opt/rocm/lib/libhiprtc.so");
     }
 #endif
 
@@ -160,16 +188,37 @@ ROCmContext::ROCmContext(bool verbose)
     return;
   }
 
-  if (f_hipInit(0) != hipSuccess) {
-    available = false;
-    return;
+  if (f_hipInit) {
+    (void)f_hipInit(0);
   }
 
   available = true;
   enumerateDevices();
+  if (devices.empty()) {
+    available = false;
+  }
 }
 
-ROCmContext::~ROCmContext() = default;
+ROCmContext::~ROCmContext() {
+  try {
+    waitIdle();
+  } catch (...) {
+  }
+
+  for (auto &pair : kernels) {
+    delete static_cast<ROCmKernel *>(pair.first);
+  }
+  kernels.clear();
+
+  if (f_hipModuleUnload) {
+    for (auto &pair : modules) {
+      if (pair.second) {
+        (void)f_hipModuleUnload(pair.second);
+      }
+    }
+  }
+  modules.clear();
+}
 
 void ROCmContext::enumerateDevices() {
   if (!available)

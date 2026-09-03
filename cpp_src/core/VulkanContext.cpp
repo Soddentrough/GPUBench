@@ -344,6 +344,38 @@ void VulkanContext::pickPhysicalDevice(uint32_t index) {
   if (index >= physicalDevices.size()) {
     throw std::runtime_error("invalid device index");
   }
+  if (physicalDevice == physicalDevices[index] && device != VK_NULL_HANDLE) {
+    return; // Already initialized for this device
+  }
+
+  if (device != VK_NULL_HANDLE) {
+    try {
+      waitIdle();
+    } catch (...) {
+    }
+    while (!kernels.empty()) {
+      releaseKernel(kernels.begin()->first);
+    }
+    while (!buffers.empty()) {
+      releaseBuffer(buffers.begin()->first);
+    }
+    for (size_t i = 0; i < kMaxInFlight; ++i) {
+      if (inFlightFrames[i].fence != VK_NULL_HANDLE) {
+        vkDestroyFence(device, inFlightFrames[i].fence, nullptr);
+        inFlightFrames[i].fence = VK_NULL_HANDLE;
+      }
+      inFlightFrames[i].commandBuffer = VK_NULL_HANDLE;
+      inFlightFrames[i].inUse = false;
+    }
+    currentFrameIndex = 0;
+    if (commandPool != VK_NULL_HANDLE) {
+      vkDestroyCommandPool(device, commandPool, nullptr);
+      commandPool = VK_NULL_HANDLE;
+    }
+    vkDestroyDevice(device, nullptr);
+    device = VK_NULL_HANDLE;
+  }
+
   selectedDeviceIndex = index;
   physicalDevice = physicalDevices[index];
   vkGetPhysicalDeviceProperties(physicalDevice, &properties);
@@ -430,6 +462,18 @@ void VulkanContext::createDevice() {
     VkBool32 rayTracingInvocationReorderEXT;
   } serFeatures{(VkStructureType)1000581000, nullptr, VK_FALSE};
 
+  VkPhysicalDeviceRayTracingMaintenance1FeaturesKHR rtMaint1Features{
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_MAINTENANCE_1_FEATURES_KHR,
+      nullptr, VK_FALSE, VK_FALSE};
+
+  VkPhysicalDeviceDeviceGeneratedCommandsFeaturesEXT dgcFeatures{
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEVICE_GENERATED_COMMANDS_FEATURES_EXT,
+      nullptr, VK_FALSE, VK_FALSE};
+
+  VkPhysicalDeviceShaderEnqueueFeaturesAMDX enqueueFeatures{
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ENQUEUE_FEATURES_AMDX,
+      nullptr, VK_FALSE, VK_FALSE};
+
   VkPhysicalDeviceShaderIntegerDotProductFeatures dotProductFeatures{
       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_DOT_PRODUCT_FEATURES, nullptr};
 
@@ -456,6 +500,15 @@ void VulkanContext::createDevice() {
   if (hasExt("VK_EXT_ray_tracing_invocation_reorder")) {
       *currentPNext = &serFeatures; currentPNext = &serFeatures.pNext;
   }
+  if (hasExt(VK_KHR_RAY_TRACING_MAINTENANCE_1_EXTENSION_NAME)) {
+      *currentPNext = &rtMaint1Features; currentPNext = &rtMaint1Features.pNext;
+  }
+  if (hasExt(VK_EXT_DEVICE_GENERATED_COMMANDS_EXTENSION_NAME)) {
+      *currentPNext = &dgcFeatures; currentPNext = &dgcFeatures.pNext;
+  }
+  if (hasExt("VK_AMDX_shader_enqueue")) {
+      *currentPNext = &enqueueFeatures; currentPNext = &enqueueFeatures.pNext;
+  }
   *currentPNext = nullptr;
 
   // Query supported features and enable them
@@ -474,9 +527,13 @@ void VulkanContext::createDevice() {
       VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
       VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
       VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
+      VK_KHR_RAY_TRACING_MAINTENANCE_1_EXTENSION_NAME,
+      VK_EXT_DEVICE_GENERATED_COMMANDS_EXTENSION_NAME,
       "VK_EXT_shader_float8",
       "VK_KHR_shader_float_controls2",
-      "VK_EXT_ray_tracing_invocation_reorder"};
+      "VK_EXT_ray_tracing_invocation_reorder",
+      "VK_NV_ray_tracing_invocation_reorder",
+      "VK_AMDX_shader_enqueue"};
 
   std::vector<const char *> enabledExtensions;
   for (const auto &extension : desiredExtensions) {
@@ -495,6 +552,11 @@ void VulkanContext::createDevice() {
                     << " not supported by device, disabling." << std::endl;
       }
     }
+  }
+
+  enabledExtensionsSet.clear();
+  for (const auto &ext : enabledExtensions) {
+    enabledExtensionsSet.insert(ext);
   }
 
   VkDeviceCreateInfo createInfo{};
@@ -1171,6 +1233,114 @@ void VulkanContext::dispatch(ComputeKernel kernel, uint32_t grid_x,
                  &vulkanKernel->callRegion, grid_x, grid_y, grid_z);
   } else {
     vkCmdDispatch(frame.commandBuffer, grid_x, grid_y, grid_z);
+  }
+
+  vkEndCommandBuffer(frame.commandBuffer);
+
+  VkSubmitInfo submitInfo{};
+  submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+  submitInfo.commandBufferCount = 1;
+  submitInfo.pCommandBuffers = &frame.commandBuffer;
+
+  vkQueueSubmit(computeQueue, 1, &submitInfo, frame.fence);
+  frame.inUse = true;
+
+  currentFrameIndex = (currentFrameIndex + 1) % kMaxInFlight;
+}
+
+void VulkanContext::dispatchIndirect(ComputeKernel kernel_handle,
+                                     ComputeBuffer indirectBuffer,
+                                     VkDeviceSize offset) {
+  auto *vulkanKernel = kernels[kernel_handle];
+  if (!vulkanKernel)
+    return;
+
+  auto &frame = inFlightFrames[currentFrameIndex];
+  if (frame.inUse) {
+    vkWaitForFences(device, 1, &frame.fence, VK_TRUE, UINT64_MAX);
+    vkResetFences(device, 1, &frame.fence);
+    frame.inUse = false;
+  }
+
+  vkResetCommandBuffer(frame.commandBuffer, 0);
+
+  VkCommandBufferBeginInfo beginInfo{};
+  beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+  beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  vkBeginCommandBuffer(frame.commandBuffer, &beginInfo);
+
+  vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                    vulkanKernel->pipeline);
+  vkCmdBindDescriptorSets(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                          vulkanKernel->pipelineLayout, 0, 1,
+                          &vulkanKernel->descriptorSet, 0, nullptr);
+
+  if (!vulkanKernel->pushConstantData.empty()) {
+    vkCmdPushConstants(frame.commandBuffer, vulkanKernel->pipelineLayout,
+                       VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                       vulkanKernel->pushConstantData.size(),
+                       vulkanKernel->pushConstantData.data());
+  }
+
+  VkBuffer vkIndirect = getVkBuffer(indirectBuffer);
+  vkCmdDispatchIndirect(frame.commandBuffer, vkIndirect, offset);
+
+  vkEndCommandBuffer(frame.commandBuffer);
+
+  VkSubmitInfo submitInfo{};
+  submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+  submitInfo.commandBufferCount = 1;
+  submitInfo.pCommandBuffers = &frame.commandBuffer;
+
+  vkQueueSubmit(computeQueue, 1, &submitInfo, frame.fence);
+  frame.inUse = true;
+
+  currentFrameIndex = (currentFrameIndex + 1) % kMaxInFlight;
+}
+
+void VulkanContext::dispatchRayTracingIndirect(ComputeKernel kernel_handle,
+                                             ComputeBuffer indirectBuffer,
+                                             VkDeviceSize offset) {
+  auto *vulkanKernel = kernels[kernel_handle];
+  if (!vulkanKernel || !vulkanKernel->isRTPipeline)
+    return;
+
+  auto &frame = inFlightFrames[currentFrameIndex];
+  if (frame.inUse) {
+    vkWaitForFences(device, 1, &frame.fence, VK_TRUE, UINT64_MAX);
+    vkResetFences(device, 1, &frame.fence);
+    frame.inUse = false;
+  }
+
+  vkResetCommandBuffer(frame.commandBuffer, 0);
+
+  VkCommandBufferBeginInfo beginInfo{};
+  beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+  beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  vkBeginCommandBuffer(frame.commandBuffer, &beginInfo);
+
+  vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
+                    vulkanKernel->pipeline);
+  vkCmdBindDescriptorSets(frame.commandBuffer,
+                          VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
+                          vulkanKernel->pipelineLayout, 0, 1,
+                          &vulkanKernel->descriptorSet, 0, nullptr);
+
+  if (!vulkanKernel->pushConstantData.empty()) {
+    vkCmdPushConstants(
+        frame.commandBuffer, vulkanKernel->pipelineLayout,
+        VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR |
+            VK_SHADER_STAGE_MISS_BIT_KHR,
+        0, vulkanKernel->pushConstantData.size(),
+        vulkanKernel->pushConstantData.data());
+  }
+
+  auto pfnTraceRaysIndirect2 = (PFN_vkCmdTraceRaysIndirect2KHR)vkGetDeviceProcAddr(
+      device, "vkCmdTraceRaysIndirect2KHR");
+  if (pfnTraceRaysIndirect2) {
+    VkDeviceAddress indirectAddress =
+        getBufferDeviceAddress(indirectBuffer) + offset;
+    pfnTraceRaysIndirect2(frame.commandBuffer, indirectAddress);
   }
 
   vkEndCommandBuffer(frame.commandBuffer);

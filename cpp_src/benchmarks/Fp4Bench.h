@@ -7,7 +7,7 @@ class Fp4Bench : public IBenchmark {
 public:
   const char *GetName() const override { return "FP4"; }
   std::vector<std::string> GetAliases() const override {
-    return {"f4", "performance"};
+    return {"fp4", "f4"};
   }
   const char *GetMetric() const override { return "TOPS"; }
 

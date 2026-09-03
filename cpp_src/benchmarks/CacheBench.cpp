@@ -39,6 +39,10 @@ CacheBench::~CacheBench() {
       kernel = nullptr;
     }
   }
+  if (hostMem) {
+    ALIGNED_FREE(hostMem);
+    hostMem = nullptr;
+  }
 }
 
 bool CacheBench::IsSupported(const DeviceInfo &info,

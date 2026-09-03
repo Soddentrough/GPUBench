@@ -1,6 +1,3 @@
-pub mod context;
-pub mod vulkan;
-pub mod benchmarks;
 
 use clap::Parser;
 
@@ -24,7 +21,7 @@ pub struct ResultData {
 
 #[derive(Parser, Debug, Clone)]
 #[command(name = "GPUBench")]
-#[command(version = "1.2.0")]
+#[command(version = "1.3.1")]
 #[command(about = "High-performance cross-platform GPU benchmarking tool", long_about = None)]
 pub struct Cli {
     #[arg(short = 'b', long = "benchmarks", value_delimiter = ',')]

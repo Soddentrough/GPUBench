@@ -263,13 +263,7 @@ void RayMaterialDivergenceBench::Run(uint32_t config_idx) {
   vContext->setKernelArg(kernel, 1, resultBuffer);
   vContext->setKernelArg(kernel, 2, sizeof(uint32_t), &rayCount);
 
-  auto start = std::chrono::high_resolution_clock::now();
   vContext->dispatch(kernel, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
-  context->waitIdle();
-  auto end = std::chrono::high_resolution_clock::now();
-
-  std::chrono::duration<double> diff = end - start;
-  rtResults[config_idx] = diff.count();
 }
 
 void RayMaterialDivergenceBench::Teardown() {
@@ -289,7 +283,7 @@ void RayMaterialDivergenceBench::Teardown() {
 }
 
 BenchmarkResult RayMaterialDivergenceBench::GetResult(uint32_t config_idx) const {
-  return {(uint64_t)rayCount, rtResults.at(config_idx)};
+  return {(uint64_t)rayCount, 0.0};
 }
 
 const char *RayMaterialDivergenceBench::GetName() const { return "RayMaterialDivergence"; }

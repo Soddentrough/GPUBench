@@ -34,8 +34,8 @@ bool SysMemLatencyBench::IsSupported(const DeviceInfo &info,
 
 void SysMemLatencyBench::Setup(IComputeContext &context,
                                const std::string &kernel_dir) {
-  // 512MB buffer to ensure we bypass CPU caches (including large L3)
-  bufferSize = 512ULL * 1024ULL * 1024ULL;
+  // 256MB buffer to ensure we bypass CPU caches (including 32MB - 128MB L3)
+  bufferSize = 256ULL * 1024ULL * 1024ULL;
 
   buffer = ALIGNED_ALLOC(64, bufferSize);
   if (!buffer) {
@@ -43,22 +43,26 @@ void SysMemLatencyBench::Setup(IComputeContext &context,
         "Failed to allocate system memory buffer for latency test");
   }
 
-  // Initialize with shuffled indices for pointer chasing
-  uint32_t numElements = (uint32_t)(bufferSize / sizeof(uint32_t));
+  // Pointer chasing across 64-byte cache lines.
+  // Striding by 64 bytes (16 uint32_t elements) guarantees that every jump
+  // targets a distinct cache line, defeating hardware prefetchers and ensuring
+  // true DRAM access latency while reducing index generation time from 8s to <100ms.
+  constexpr uint32_t kStrideElements = 16; // 16 * sizeof(uint32_t) = 64 bytes
+  uint32_t numLines = static_cast<uint32_t>(bufferSize / (kStrideElements * sizeof(uint32_t)));
   uint32_t *pBuffer = reinterpret_cast<uint32_t *>(buffer);
 
-  std::vector<uint32_t> indices(numElements);
-  std::iota(indices.begin(), indices.end(), 0);
+  std::vector<uint32_t> lineIndices(numLines);
+  std::iota(lineIndices.begin(), lineIndices.end(), 0);
 
   std::random_device rd;
   std::mt19937 g(rd());
-  std::shuffle(indices.begin(), indices.end(), g);
+  std::shuffle(lineIndices.begin(), lineIndices.end(), g);
 
-  // Create chasing chain: pBuffer[indices[i]] = indices[i+1]
-  for (uint32_t i = 0; i < numElements - 1; ++i) {
-    pBuffer[indices[i]] = indices[i + 1];
+  // Create chasing chain on cache-line boundaries:
+  for (uint32_t i = 0; i < numLines - 1; ++i) {
+    pBuffer[lineIndices[i] * kStrideElements] = lineIndices[i + 1] * kStrideElements;
   }
-  pBuffer[indices[numElements - 1]] = indices[0]; // Close the loop
+  pBuffer[lineIndices[numLines - 1] * kStrideElements] = lineIndices[0] * kStrideElements; // Close the cycle
 }
 
 void SysMemLatencyBench::Run(uint32_t config_idx) {

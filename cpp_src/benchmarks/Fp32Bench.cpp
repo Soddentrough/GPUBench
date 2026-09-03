@@ -18,6 +18,10 @@ void Fp32Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
   size_t bufferSize = numElements * sizeof(float);
   buffer = context.createBuffer(bufferSize);
 
+  // Initialize buffer with test seed
+  std::vector<float> initData(numElements, 1.0f);
+  context.writeBuffer(buffer, 0, bufferSize, initData.data());
+
   // Create kernel
   std::filesystem::path kdir(kernel_dir);
   std::filesystem::path kernel_file;
@@ -43,7 +47,7 @@ void Fp32Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
 
 void Fp32Bench::Run(uint32_t config_idx) {
   // Pass multiplier as push constant / arg 1
-  float multiplier = 1.0001f;
+  float multiplier = 1.0f;
   context->setKernelArg(kernel, 1, sizeof(float), &multiplier);
 
   // Pass numElements as arg 2

@@ -14,6 +14,12 @@ public:
 
   bool IsSupported(const DeviceInfo &info,
                    IComputeContext *context = nullptr) const override;
+  SupportLimitation GetSupportLimitation() const override {
+    return SupportLimitation::kApi;
+  }
+  std::string GetSupportNote() const override {
+    return "Ray tracing benchmark requires Vulkan hardware ray tracing pipelines and acceleration structures (VK_KHR_ray_tracing_pipeline)";
+  }
 
   void Setup(IComputeContext &context, const std::string &kernel_dir) override;
   void Run(uint32_t config_idx = 0) override;

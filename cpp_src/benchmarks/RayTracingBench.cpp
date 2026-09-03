@@ -347,7 +347,6 @@ void RayTracingBench::Run(uint32_t config_idx) {
   vContext->setKernelArg(kernel, 3, sizeof(uint32_t), &testMode);
 
   vContext->dispatch(kernel, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
-  context->waitIdle();
 }
 
 void RayTracingBench::Teardown() {

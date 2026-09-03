@@ -8,7 +8,7 @@ class Fp32Bench : public IBenchmark {
 public:
   const char *GetName() const override { return "FP32"; }
   std::vector<std::string> GetAliases() const override {
-    return {"f32", "performance"};
+    return {"f32", "sp"};
   }
   bool IsSupported(const DeviceInfo &info,
                    IComputeContext *context = nullptr) const override;

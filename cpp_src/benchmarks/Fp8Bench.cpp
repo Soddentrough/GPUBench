@@ -6,6 +6,10 @@
 
 bool Fp8Bench::IsSupported(const DeviceInfo &info,
                            IComputeContext *context) const {
+  this->lastCheckedContext = context;
+  if (context && context->getBackend() == ComputeBackend::OpenCL) {
+    return false;
+  }
   if (context && context->getBackend() == ComputeBackend::ROCm) {
     return info.fp8Support || info.cooperativeMatrixSupport;
   }

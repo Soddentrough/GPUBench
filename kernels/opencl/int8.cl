@@ -1,10 +1,16 @@
 // Requires OpenCL 1.2+
-// INT8 vector benchmark using native AMDGPU v_dot4 assembly.
+// Cross-vendor INT8 vector benchmark with optional native ISA acceleration.
 
-inline int sdot4_asm(int a, int b, int c) {
+inline int sdot4(char4 a, char4 b, int c) {
+#if defined(__AMDGPU__) && defined(__IMAGE_SUPPORT__)
+    // On AMD GPUs with inline assembly support, use native dot4 instruction
     int dst;
-    __asm__ volatile("v_dot4_i32_i8 %0, %1, %2, %3" : "=v"(dst) : "v"(a), "v"(b), "v"(c));
+    __asm__ volatile("v_dot4_i32_i8 %0, %1, %2, %3" : "=v"(dst) : "v"(as_int(a)), "v"(as_int(b)), "v"(c));
     return dst;
+#else
+    // Standard OpenCL C portable dot product
+    return c + ((int)a.x * (int)b.x + (int)a.y * (int)b.y + (int)a.z * (int)b.z + (int)a.w * (int)b.w);
+#endif
 }
 
 __kernel void run_benchmark(__global char4* data) {
@@ -30,14 +36,14 @@ __kernel void run_benchmark(__global char4* data) {
         // ai varies each iteration to prevent loop hoisting.
         char4 ai = a + (char4)((char)i);
 
-        acc0 = sdot4_asm(as_int(ai), as_int(w0), acc0);
-        acc1 = sdot4_asm(as_int(ai), as_int(w1), acc1);
-        acc2 = sdot4_asm(as_int(ai), as_int(w2), acc2);
-        acc3 = sdot4_asm(as_int(ai), as_int(w3), acc3);
-        acc4 = sdot4_asm(as_int(ai), as_int(w4), acc4);
-        acc5 = sdot4_asm(as_int(ai), as_int(w5), acc5);
-        acc6 = sdot4_asm(as_int(ai), as_int(w6), acc6);
-        acc7 = sdot4_asm(as_int(ai), as_int(w7), acc7);
+        acc0 = sdot4(ai, w0, acc0);
+        acc1 = sdot4(ai, w1, acc1);
+        acc2 = sdot4(ai, w2, acc2);
+        acc3 = sdot4(ai, w3, acc3);
+        acc4 = sdot4(ai, w4, acc4);
+        acc5 = sdot4(ai, w5, acc5);
+        acc6 = sdot4(ai, w6, acc6);
+        acc7 = sdot4(ai, w7, acc7);
     }
 
     int total = acc0 + acc1 + acc2 + acc3 + acc4 + acc5 + acc6 + acc7;

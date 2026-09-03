@@ -204,11 +204,12 @@ void OpenCLContext::enumeratePlatformsAndDevices() {
     cl_uint deviceCount = 0;
     err = f_clGetDeviceIDs(p, CL_DEVICE_TYPE_GPU, 0, nullptr, &deviceCount);
     if (err == CL_SUCCESS && deviceCount > 0) {
-      platform = p;
-      devices.resize(deviceCount);
-      f_clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, deviceCount,
-                       devices.data(), nullptr);
-      break;
+      if (!platform) platform = p;
+      std::vector<cl_device_id> pDevs(deviceCount);
+      if (f_clGetDeviceIDs(p, CL_DEVICE_TYPE_GPU, deviceCount,
+                           pDevs.data(), nullptr) == CL_SUCCESS) {
+        devices.insert(devices.end(), pDevs.begin(), pDevs.end());
+      }
     }
   }
 
@@ -217,11 +218,12 @@ void OpenCLContext::enumeratePlatformsAndDevices() {
       cl_uint deviceCount = 0;
       err = f_clGetDeviceIDs(p, CL_DEVICE_TYPE_ALL, 0, nullptr, &deviceCount);
       if (err == CL_SUCCESS && deviceCount > 0) {
-        platform = p;
-        devices.resize(deviceCount);
-        f_clGetDeviceIDs(platform, CL_DEVICE_TYPE_ALL, deviceCount,
-                         devices.data(), nullptr);
-        break;
+        if (!platform) platform = p;
+        std::vector<cl_device_id> pDevs(deviceCount);
+        if (f_clGetDeviceIDs(p, CL_DEVICE_TYPE_ALL, deviceCount,
+                             pDevs.data(), nullptr) == CL_SUCCESS) {
+          devices.insert(devices.end(), pDevs.begin(), pDevs.end());
+        }
       }
     }
   }
@@ -289,12 +291,14 @@ const std::vector<DeviceInfo> &OpenCLContext::getDevices() const {
       info.fp64Support = (ext_str.find("cl_khr_fp64") != std::string::npos ||
                           ext_str.find("cl_amd_fp64") != std::string::npos);
       info.fp16Support = (ext_str.find("cl_khr_fp16") != std::string::npos);
-      info.bf16Support = true;
+      info.bf16Support = false;
       info.fp8Support = false;
       info.fp6Support = false;
       info.fp4Support = false;
       info.int8Support = true;
       info.int4Support = false;
+      info.cooperativeMatrixSupport = false;
+      info.rayTracingSupport = false;
 
       char driverVersion[256];
       f_clGetDeviceInfo(dev, CL_DRIVER_VERSION, sizeof(driverVersion),
@@ -333,8 +337,21 @@ void OpenCLContext::pickDevice(uint32_t index) {
   if (!available || index >= devices.size()) {
     throw std::runtime_error("Invalid device index or OpenCL not available");
   }
+  if (selectedDeviceIndex == index && device != nullptr && context != nullptr) {
+    return;
+  }
+  if (commandQueue) {
+    f_clReleaseCommandQueue(commandQueue);
+    commandQueue = nullptr;
+  }
+  if (context) {
+    f_clReleaseContext(context);
+    context = nullptr;
+  }
   selectedDeviceIndex = index;
   device = devices[index];
+  f_clGetDeviceInfo(device, CL_DEVICE_PLATFORM, sizeof(cl_platform_id),
+                    &platform, nullptr);
   createContext();
   createCommandQueue();
 }
@@ -379,12 +396,14 @@ DeviceInfo OpenCLContext::getCurrentDeviceInfo() const {
   info.fp64Support = (ext_str.find("cl_khr_fp64") != std::string::npos ||
                       ext_str.find("cl_amd_fp64") != std::string::npos);
   info.fp16Support = (ext_str.find("cl_khr_fp16") != std::string::npos);
-  info.bf16Support = true;
+  info.bf16Support = false;
   info.fp8Support = false;
   info.fp6Support = false;
   info.fp4Support = false;
   info.int8Support = true;
   info.int4Support = false;
+  info.cooperativeMatrixSupport = false;
+  info.rayTracingSupport = false;
 
   return info;
 }
@@ -539,7 +558,8 @@ ComputeKernel OpenCLContext::createKernel(const std::string &file_name,
   cl_kernel kernel = f_clCreateKernel(program, kernel_name.c_str(), &err);
   if (err != CL_SUCCESS) {
     f_clReleaseProgram(program);
-    throw std::runtime_error("Failed to create OpenCL kernel");
+    throw std::runtime_error("Failed to create OpenCL kernel '" + kernel_name +
+                             "' (error: " + std::to_string(err) + ")");
   }
 
   return new ComputeKernel_cl{program, kernel};
@@ -584,7 +604,8 @@ void OpenCLContext::dispatch(ComputeKernel kernel, uint32_t grid_x,
                                         nullptr, global_work_size,
                                         local_work_size, 0, nullptr, nullptr);
   if (err != CL_SUCCESS) {
-    throw std::runtime_error("Failed to dispatch OpenCL kernel");
+    throw std::runtime_error("Failed to dispatch OpenCL kernel (error: " +
+                             std::to_string(err) + ")");
   }
 }
 

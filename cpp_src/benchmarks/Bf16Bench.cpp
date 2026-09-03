@@ -4,12 +4,17 @@
 
 bool Bf16Bench::IsSupported(const DeviceInfo &info,
                             IComputeContext *context) const {
+  this->lastCheckedContext = context;
   if (context && context->getBackend() == ComputeBackend::ROCm) {
     // The current HIP toolchain (TheRock/LLVM clang 23) emulates bf16
     // arithmetic via FP32 with software rounding on the scalar unit, and
     // its headers lack hip_bfloat162/__hfma2. A benchmark of emulated
     // bf16 would report ~2.5 TFLOPS, which is not the hardware's BF16
     // rate — report UNSUPPORTED instead (toolchain limitation).
+    return false;
+  }
+  if (context && context->getBackend() == ComputeBackend::OpenCL) {
+    // Standard OpenCL does not support native BFloat16 floating-point arithmetic.
     return false;
   }
   return info.bf16Support;

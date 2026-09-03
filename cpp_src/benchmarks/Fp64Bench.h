@@ -8,7 +8,7 @@ class Fp64Bench : public IBenchmark {
 public:
   const char *GetName() const override { return "FP64"; }
   std::vector<std::string> GetAliases() const override {
-    return {"f64", "performance"};
+    return {"f64", "dp"};
   }
   bool IsSupported(const DeviceInfo &info,
                    IComputeContext *context = nullptr) const override;

@@ -1,7 +1,11 @@
 #pragma once
 
 #include "benchmarks/IBenchmark.h"
+#include <atomic>
+#include <condition_variable>
+#include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 enum class SysMemTestMode { Read, Write, ReadWrite };
@@ -19,7 +23,7 @@ public:
 
   const char *GetName() const override;
   std::vector<std::string> GetAliases() const override {
-    return {"sysmem", "ram", "bw"};
+    return {"sysmem", "ram", "bw", "system"};
   }
   const char *GetMetric() const override;
   bool IsSupported(const DeviceInfo &info,
@@ -55,4 +59,16 @@ private:
   // Results
   double lastRunTimeMs = 0.0;
   uint64_t lastRunBytes = 0;
+
+  // Persistent worker thread pool
+  unsigned int threadCount = 0;
+  std::vector<std::thread> workers;
+  std::mutex poolMutex;
+  std::condition_variable cvStart;
+  std::condition_variable cvDone;
+  std::atomic<bool> stopPool{false};
+  uint32_t activeConfigIdx = 0;
+  uint32_t workGeneration = 0;
+  std::atomic<unsigned int> completedWorkers{0};
+  void workerLoop(unsigned int tid);
 };

@@ -44,15 +44,6 @@ void Int4Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
     return;
   }
 
-  if (context.getBackend() == ComputeBackend::OpenCL) {
-    std::filesystem::path kernel_file = kdir / "opencl" / "int4.cl";
-    vectorKernel = context.createKernel(kernel_file.string(), "run_benchmark", 1);
-    context.setKernelArg(vectorKernel, 0, buffer);
-    is_native_vector = true;
-    is_emulated_vector = false;
-    is_native_matrix = false;
-    return;
-  }
 
   // Vulkan Path
   // INT4 vector shader uses i8vec4 with masking — this is emulated regardless

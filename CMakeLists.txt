@@ -1,13 +1,13 @@
 cmake_minimum_required(VERSION 3.16)
-project(GPUBench VERSION 1.2.0)
+project(GPUBench VERSION 1.3.1)
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Versioning
-set(BUILD_NUMBER "2") # Build number for the project
-set(PROJECT_FULL_VERSION "${PROJECT_VERSION}.${BUILD_NUMBER}")
+set(BUILD_NUMBER "0")
+set(PROJECT_FULL_VERSION "${PROJECT_VERSION}")
 
 
 # Set proper debug flags based on compiler
@@ -137,13 +137,17 @@ endif()
 
 # Copy HIP kernels and compile code objects
 if(HIP_FOUND)
-    find_program(HIPCC_EXECUTABLE hipcc HINTS /opt/rocm/core-10.0/bin /opt/rocm/bin)
+    find_program(HIPCC_EXECUTABLE hipcc HINTS /usr/bin /opt/rocm/core-10.0/bin /opt/rocm/bin)
     if(NOT HIPCC_EXECUTABLE)
         set(HIPCC_EXECUTABLE hipcc)
     endif()
-    find_path(ROCM_CLANG_PATH clang++ HINTS /opt/rocm/core-10.0/lib/llvm/bin /usr/lib64/rocm/llvm/bin)
+    find_path(ROCM_CLANG_PATH clang++ HINTS /usr/lib64/rocm/llvm/bin /opt/rocm/core-10.0/lib/llvm/bin)
     if(ROCM_CLANG_PATH)
-        set(HIPCC_ENV ${CMAKE_COMMAND} -E env HIP_CLANG_PATH=${ROCM_CLANG_PATH} ROCM_PATH=/opt/rocm/core-10.0)
+        if(EXISTS "/opt/rocm/core-10.0")
+            set(HIPCC_ENV ${CMAKE_COMMAND} -E env HIP_CLANG_PATH=${ROCM_CLANG_PATH} ROCM_PATH=/opt/rocm/core-10.0)
+        else()
+            set(HIPCC_ENV ${CMAKE_COMMAND} -E env HIP_CLANG_PATH=${ROCM_CLANG_PATH})
+        endif()
     else()
         set(HIPCC_ENV)
     endif()
@@ -203,6 +207,7 @@ set(LIB_SOURCES
     cpp_src/benchmarks/RayProceduralBench.cpp
     cpp_src/benchmarks/RayMaterialDivergenceBench.cpp
     cpp_src/benchmarks/RayPathTracingBench.cpp
+    cpp_src/benchmarks/RayParadigmBench.cpp
     cpp_src/utils/HardwareTelemetry.cpp
     cpp_src/utils/KernelPath.cpp
     cpp_src/utils/ShaderCache.cpp
@@ -472,6 +477,8 @@ elseif(UNIX AND NOT APPLE)
     # We only REQUIRE Vulkan loader and standard libraries
     # OpenCL/ROCm are OPTIONAL due to dynamic loading
     set(CPACK_RPM_PACKAGE_REQUIRES "vulkan-loader, glibc, libgcc, libstdc++")
+    file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tmp")
+    set(CPACK_RPM_SPEC_MORE_DEFINE "%define _tmppath ${CMAKE_CURRENT_BINARY_DIR}/tmp")
     
 elseif(APPLE)
     # macOS packaging

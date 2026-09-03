@@ -1,6 +1,5 @@
 fn main() {
     let dst = cmake::Config::new("..")
-        .define("CMAKE_DISABLE_FIND_PACKAGE_HIP", "TRUE")
         .build_target("gpubench_lib")
         .build();
 
@@ -24,9 +23,13 @@ fn main() {
     }
 
     cxx_build::bridge("src/lib.rs")
-        .file("src/bridge.cpp") // We'll create this to bridge complex types if needed
+        .file("src/bridge.cpp")
         .include("../cpp_src")
         .include("../external")
+        .define("HAVE_VULKAN", None)
+        .define("HAVE_OPENCL", None)
+        .define("HAVE_ROCM", None)
+        .define("__HIP_PLATFORM_AMD__", None)
         .flag_if_supported("-std=c++17")
         .flag_if_supported("-Wno-maybe-uninitialized")
         .compile("gpubench-cxx");
