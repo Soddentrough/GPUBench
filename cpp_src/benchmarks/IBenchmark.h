@@ -21,6 +21,7 @@ public:
                            IComputeContext *context = nullptr) const = 0;
   virtual void Setup(IComputeContext &context,
                      const std::string &kernel_dir) = 0;
+  virtual void SetResolution(uint32_t w, uint32_t h) {}
   virtual void Run(uint32_t config_idx = 0) = 0;
   virtual void Teardown() = 0;
   virtual BenchmarkResult GetResult(uint32_t config_idx = 0) const = 0;

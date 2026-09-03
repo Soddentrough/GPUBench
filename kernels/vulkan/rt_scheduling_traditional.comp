@@ -21,6 +21,8 @@ layout(push_constant) uniform PushConstants {
     uint bounces;  // Max bounces (for mode 1)
     uint seed;
     uint dumpRenders; // 1: dump pixels to fb
+    uint width;
+    uint height;
 } pc;
 
 shared uint localRays;
@@ -395,7 +397,10 @@ void main() {
     vec3 camUp = vec3(0.0, 0.1857, 0.9826);
     float fov = 0.48; // ~52 deg FoV (38mm lens)
 
-    vec2 uv = vec2((float(idx % 1024) - 512.0 + 0.5) / 512.0, (float(idx / 1024) - 512.0 + 0.5) / 512.0);
+    float halfH = float(pc.height) * 0.5;
+    float px = float(idx % pc.width) - float(pc.width) * 0.5 + 0.5;
+    float py = float(idx / pc.width) - halfH + 0.5;
+    vec2 uv = vec2(px / halfH, py / halfH);
     vec3 origin = camPos;
     vec3 direction = normalize(camForward + camRight * (uv.x * fov) - camUp * (uv.y * fov));
     vec3 accumulated = vec3(0.0);

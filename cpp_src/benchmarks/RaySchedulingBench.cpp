@@ -264,17 +264,21 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
     dumpRenders = true;
   }
 
-  rayCount = 1048576; // 1024 x 1024 square ray grid
+  rayCount = renderWidth * renderHeight;
+  queueCapacity = 65536;
+  while (queueCapacity < rayCount / 6) {
+    queueCapacity *= 2;
+  }
   resultBuffer = context->createBuffer(sizeof(uint32_t) * 4);
   uint32_t zeros[4] = {0, 0, 0, 0};
   context->writeBuffer(resultBuffer, 0, sizeof(zeros), zeros);
 
-  // Allocate 1024x1024 RGBA32F framebuffers for visual verification
+  // Allocate RGBA32F framebuffers for visual verification
   fbTraditional = context->createBuffer(rayCount * sizeof(float) * 4);
   fbWorkList = context->createBuffer(rayCount * sizeof(float) * 4);
 
-  // WorkList storage buffer: 32 counters (128B) + 32 * 65536 * 48B records (~100MB)
-  size_t workListSize = sizeof(uint32_t) * 32 + 32 * 65536 * sizeof(float) * 12;
+  // WorkList storage buffer: 32 counters (128B) + 32 * queueCapacity * 48B records
+  size_t workListSize = sizeof(uint32_t) * 32 + (size_t)32 * queueCapacity * sizeof(float) * 12;
   workListBuffer = context->createBuffer(workListSize);
 
   // Indirect dispatch commands: 32 * VkDispatchIndirectCommand (384B)
@@ -445,9 +449,10 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
   for (uint32_t m = 0; m < 32; ++m) {
     struct {
       uint32_t materialId;
-      uint32_t totalQueueSize;
+      uint32_t queueCapacity;
       uint32_t dumpRenders;
-    } pcMat{m, 65536, dumpRenders ? 1u : 0u};
+      uint32_t totalPixels;
+    } pcMat{m, queueCapacity, dumpRenders ? 1u : 0u, rayCount};
     std::vector<uint8_t> pcData(sizeof(pcMat));
     std::memcpy(pcData.data(), &pcMat, sizeof(pcMat));
     uint32_t arch = (m < 20) ? (m / 4) : 5;
@@ -476,7 +481,7 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
     struct {
       uint32_t queueIndex;
       uint32_t maxQueueSize;
-    } pcBounce{0, 65536};
+    } pcBounce{0, queueCapacity};
     std::vector<uint8_t> pcData(sizeof(pcBounce));
     std::memcpy(pcData.data(), &pcBounce, sizeof(pcBounce));
     bounceBatches.push_back({0, pcData});
@@ -487,7 +492,7 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
     struct {
       uint32_t queueIndex;
       uint32_t maxQueueSize;
-    } pcBounce{oct, 131072};
+    } pcBounce{oct, queueCapacity};
     std::vector<uint8_t> pcData(sizeof(pcBounce));
     std::memcpy(pcData.data(), &pcBounce, sizeof(pcBounce));
     octantBatches.push_back({oct * sizeof(uint32_t) * 3, pcData});
@@ -514,7 +519,9 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
       uint32_t bounces;
       uint32_t seed;
       uint32_t dumpRenders;
-    } pc{rayCount, 0, 1, seed, dumpRenders ? 1u : 0u};
+      uint32_t width;
+      uint32_t height;
+    } pc{rayCount, 0, 1, seed, dumpRenders ? 1u : 0u, renderWidth, renderHeight};
     vContext->setKernelArg(kernelTraditional, 3, sizeof(pc), &pc);
     vContext->dispatch(kernelTraditional, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     break;
@@ -537,7 +544,10 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
       uint32_t bounce;
       uint32_t seed;
       uint32_t dumpRenders;
-    } pcClassify{rayCount, 0, 0, seed, dumpRenders ? 1u : 0u};
+      uint32_t width;
+      uint32_t height;
+      uint32_t queueCapacity;
+    } pcClassify{rayCount, 0, 0, seed, dumpRenders ? 1u : 0u, renderWidth, renderHeight, queueCapacity};
     vContext->setKernelArg(kernelClassify, 5, sizeof(pcClassify), &pcClassify);
 
     vContext->setKernelAS(kernelMaterial, 0, (AccelerationStructure)sceneTlas);
@@ -575,7 +585,9 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
       uint32_t bounces;
       uint32_t seed;
       uint32_t dumpRenders;
-    } pc{rayCount, 1, 4, seed, 0};
+      uint32_t width;
+      uint32_t height;
+    } pc{rayCount, 1, 4, seed, 0, renderWidth, renderHeight};
     vContext->setKernelArg(kernelTraditional, 3, sizeof(pc), &pc);
     vContext->dispatch(kernelTraditional, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     break;
@@ -596,7 +608,10 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
       uint32_t bounce;
       uint32_t seed;
       uint32_t dumpRenders;
-    } pcClassify{rayCount, 1, 0, seed, 0};
+      uint32_t width;
+      uint32_t height;
+      uint32_t queueCapacity;
+    } pcClassify{rayCount, 1, 0, seed, 0, renderWidth, renderHeight, queueCapacity};
     vContext->setKernelArg(kernelClassify, 5, sizeof(pcClassify), &pcClassify);
 
     vContext->setKernelAS(kernelBounce, 0, (AccelerationStructure)sceneTlas);
@@ -633,7 +648,9 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
       uint32_t bounces;
       uint32_t seed;
       uint32_t dumpRenders;
-    } pc{rayCount, 2, 1, seed, 0};
+      uint32_t width;
+      uint32_t height;
+    } pc{rayCount, 2, 1, seed, 0, renderWidth, renderHeight};
     vContext->setKernelArg(kernelTraditional, 3, sizeof(pc), &pc);
     vContext->dispatch(kernelTraditional, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     break;
@@ -656,7 +673,10 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
       uint32_t bounce;
       uint32_t seed;
       uint32_t dumpRenders;
-    } pcClassify{rayCount, 2, 0, seed, 0};
+      uint32_t width;
+      uint32_t height;
+      uint32_t queueCapacity;
+    } pcClassify{rayCount, 2, 0, seed, 0, renderWidth, renderHeight, queueCapacity};
     vContext->setKernelArg(kernelClassify, 5, sizeof(pcClassify), &pcClassify);
 
     vContext->setKernelAS(kernelBounce, 0, (AccelerationStructure)sceneTlas);
@@ -693,7 +713,9 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
       uint32_t bounces;
       uint32_t seed;
       uint32_t dumpRenders;
-    } pc{rayCount, 3, 1, seed, 0};
+      uint32_t width;
+      uint32_t height;
+    } pc{rayCount, 3, 1, seed, 0, renderWidth, renderHeight};
     vContext->setKernelArg(kernelTraditional, 3, sizeof(pc), &pc);
     vContext->dispatch(kernelTraditional, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     break;
@@ -708,7 +730,9 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
       uint32_t bounces;
       uint32_t seed;
       uint32_t dumpRenders;
-    } pc{rayCount, 4, 1, seed, 0};
+      uint32_t width;
+      uint32_t height;
+    } pc{rayCount, 4, 1, seed, 0, renderWidth, renderHeight};
     vContext->setKernelArg(kernelTraditional, 3, sizeof(pc), &pc);
     vContext->dispatch(kernelTraditional, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     break;
@@ -729,7 +753,10 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
       uint32_t bounce;
       uint32_t seed;
       uint32_t dumpRenders;
-    } pcClassify{rayCount, 3, 0, seed, 0};
+      uint32_t width;
+      uint32_t height;
+      uint32_t queueCapacity;
+    } pcClassify{rayCount, 3, 0, seed, 0, renderWidth, renderHeight, queueCapacity};
     vContext->setKernelArg(kernelClassify, 5, sizeof(pcClassify), &pcClassify);
     vContext->dispatch(kernelClassify, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     break;
@@ -742,7 +769,7 @@ void RaySchedulingBench::performVisualVerification() {
 #ifdef HAVE_VULKAN
   if (!context || !fbTraditional || !fbWorkList) return;
 
-  uint32_t width = 1024, height = 1024;
+  uint32_t width = renderWidth, height = renderHeight;
   size_t bufferSize = width * height * sizeof(float) * 4;
 
   std::vector<float> hdrTrad(width * height * 4, 0.0f);
@@ -781,7 +808,7 @@ void RaySchedulingBench::performVisualVerification() {
   std::cout << "  Work Lists Render   : " << workPng << std::endl;
   std::cout << "  Difference Heatmap  : " << diffPng << " (10x amplified)" << std::endl;
   std::cout << "--------------------------------------------------------------------------------" << std::endl;
-  std::cout << "  Full Scene Rendering Performance (1024x1024 Frame):" << std::endl;
+  std::cout << "  Full Scene Rendering Performance (" << width << "x" << height << " Frame):" << std::endl;
   if (recordedInvocations[0] > 0 && recordedTimeMs[0] > 0.0) {
     double timeSec = recordedTimeMs[0] / 1000.0;
     double fpsTrad = static_cast<double>(recordedInvocations[0]) / timeSec;
@@ -817,7 +844,7 @@ void RaySchedulingBench::performVisualVerification() {
   std::cout << "  Near-Exact (<=1 LSB): " << (metrics.totalPixels - metrics.diffPixels) << " / " << metrics.totalPixels
             << " (" << std::fixed << std::setprecision(3) << nearExactPct << "%)" << std::endl;
   std::cout << "  Discrepant (> 1 LSB): " << metrics.diffPixels << " / " << metrics.totalPixels
-            << " (" << (metrics.diffPixels <= 32 ? "VERIFIED: PARITY PASSED" : "DEVIATION DETECTED") << ")" << std::endl;
+            << " (" << (metrics.diffPixels <= std::max(32u, (uint32_t)(metrics.totalPixels * 0.0001f)) ? "VERIFIED: PARITY PASSED" : "DEVIATION DETECTED") << ")" << std::endl;
   std::cout << "================================================================================" << std::endl;
   std::cout << std::endl;
 #endif

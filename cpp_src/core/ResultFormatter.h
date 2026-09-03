@@ -27,6 +27,8 @@ struct ResultData {
   uint32_t deviceIndex;
   uint32_t configIndex;
   int sortWeight;
+  uint32_t width = 0;
+  uint32_t height = 0;
 };
 
 class ResultFormatter {

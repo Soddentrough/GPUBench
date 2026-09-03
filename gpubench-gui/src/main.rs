@@ -1754,7 +1754,7 @@ impl Application for GPUBenchApp {
                             (String::from("PENDING"), false, true)
                         }
                     } else if key == "RayScheduling" && unit == "MRays/s" {
-                        let fps = (val * 1e6) / 1048576.0;
+                        let fps = (val * 1e6) / 2073600.0;
                         (format!("{:.1} {} ({:.0} FPS)", val, unit, fps), false, false)
                     } else if val < 10.0 {
                         (format!("{:.2} {}", val, unit), false, false)

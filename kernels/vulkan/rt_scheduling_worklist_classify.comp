@@ -44,6 +44,9 @@ layout(push_constant) uniform PushConstants {
     uint bounce;   // Current bounce index
     uint seed;
     uint dumpRenders; // 1: dump pixels to fb
+    uint width;
+    uint height;
+    uint queueCapacity;
 } pc;
 
 shared uint localRays;
@@ -230,7 +233,10 @@ void main() {
     vec3 camUp = vec3(0.0, 0.1857, 0.9826);
     float fov = 0.48; // ~52 deg FoV (38mm lens)
 
-    vec2 uv = vec2((float(idx % 1024) - 512.0 + 0.5) / 512.0, (float(idx / 1024) - 512.0 + 0.5) / 512.0);
+    float halfH = float(pc.height) * 0.5;
+    float px = float(idx % pc.width) - float(pc.width) * 0.5 + 0.5;
+    float py = float(idx / pc.width) - halfH + 0.5;
+    vec2 uv = vec2(px / halfH, py / halfH);
     vec3 origin = camPos;
     vec3 direction = normalize(camForward + camRight * (uv.x * fov) - camUp * (uv.y * fov));
     uint threadRays = 1;
@@ -241,8 +247,8 @@ void main() {
         threadHits = 1;
         uint matId = idx % 32;
         uint slot = atomicAdd(worklist.queueCounters[matId], 1);
-        if (slot < 65536) {
-            uint recordIdx = matId * 65536 + slot;
+        if (slot < pc.queueCapacity) {
+            uint recordIdx = matId * pc.queueCapacity + slot;
             worklist.rayRecords[recordIdx].originAndMatId = vec4(origin, uintBitsToFloat(matId));
             worklist.rayRecords[recordIdx].directionAndSeed = vec4(direction, uintBitsToFloat(rngState));
             worklist.rayRecords[recordIdx].throughputAndMorton = vec4(1.0, 1.0, 1.0, 0.0);
@@ -268,8 +274,8 @@ void main() {
                 // Work Lists: Stream compaction into 32 material bins
                 uint matId = computeMaterialId(primId, hitPos);
                 uint slot = atomicAdd(worklist.queueCounters[matId], 1);
-                if (slot < 65536) {
-                    uint recordIdx = matId * 65536 + slot;
+                if (slot < pc.queueCapacity) {
+                    uint recordIdx = matId * pc.queueCapacity + slot;
                     worklist.rayRecords[recordIdx].originAndMatId = vec4(hitPos, uintBitsToFloat(matId));
                     worklist.rayRecords[recordIdx].directionAndSeed = vec4(direction, uintBitsToFloat(rngState));
                     worklist.rayRecords[recordIdx].throughputAndMorton = vec4(normal, uintBitsToFloat(idx));
@@ -291,7 +297,7 @@ void main() {
                     vec3 nextDir = align_to_normal(cosine_sample_hemisphere(u1, u2), normal);
 
                     uint slot = atomicAdd(worklist.queueCounters[0], 1);
-                    if (slot < 65536) {
+                    if (slot < pc.queueCapacity) {
                         worklist.rayRecords[slot].originAndMatId = vec4(hitPos + normal * 0.002, uintBitsToFloat(primId));
                         worklist.rayRecords[slot].directionAndSeed = vec4(nextDir, uintBitsToFloat(rngState));
                         worklist.rayRecords[slot].throughputAndMorton = vec4(0.8, 0.8, 0.8, 0.0);
@@ -316,8 +322,8 @@ void main() {
                               (incohDir.z > 0.0 ? 4u : 0u);
 
                 uint slot = atomicAdd(worklist.queueCounters[octant], 1);
-                if (slot < 131072) {
-                    uint recordIdx = octant * 131072 + slot;
+                if (slot < pc.queueCapacity) {
+                    uint recordIdx = octant * pc.queueCapacity + slot;
                     worklist.rayRecords[recordIdx].originAndMatId = vec4(hitPos + normal * 0.002, float(octant));
                     worklist.rayRecords[recordIdx].directionAndSeed = vec4(incohDir, uintBitsToFloat(rngState));
                     worklist.rayRecords[recordIdx].throughputAndMorton = vec4(1.0, 1.0, 1.0, 0.0);

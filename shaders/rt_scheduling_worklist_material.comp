@@ -27,8 +27,9 @@ layout(set = 0, binding = 3) buffer Framebuffer {
 
 layout(push_constant) uniform PushConstants {
     uint materialId; // The specialized material index for this uniform indirect dispatch
-    uint totalQueueSize;
+    uint queueCapacity;
     uint dumpRenders; // 1: dump pixels to fb
+    uint totalPixels;
 } pc;
 
 uint pcg_hash(inout uint state) {
@@ -324,7 +325,7 @@ void main() {
     uint count = worklist.queueCounters[pc.materialId];
     if (threadIdx >= count) return;
 
-    uint recordIdx = pc.materialId * 65536 + threadIdx;
+    uint recordIdx = pc.materialId * pc.queueCapacity + threadIdx;
     CompactRayPayload payload = worklist.rayRecords[recordIdx];
 
     vec3 normal = payload.throughputAndMorton.xyz;
@@ -341,7 +342,7 @@ void main() {
 
     if (pc.dumpRenders != 0) {
         uint pixelIdx = floatBitsToUint(payload.throughputAndMorton.w);
-        if (pixelIdx < 1048576) {
+        if (pixelIdx < pc.totalPixels) {
             fb.pixels[pixelIdx] = vec4(color, 1.0);
         }
     }

@@ -471,6 +471,7 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
                 std::cout << "Setting up " << bench->GetName() << "..."
                           << std::endl;
               }
+              bench->SetResolution(renderWidth, renderHeight);
               bench->Setup(*context, KernelPath::find());
               runnable.push_back(bench.get());
             } catch (const std::exception &e) {
@@ -691,6 +692,8 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
                 result_data.deviceIndex = context->getSelectedDeviceIndex();
                 result_data.configIndex = i;
                 result_data.sortWeight = bench->GetSortWeight();
+                result_data.width = renderWidth;
+                result_data.height = renderHeight;
 
                 formatter->addResult(result_data);
                 numBenchmarksRun++;
@@ -762,6 +765,7 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
             std::cout << "Setting up " << bench->GetName() << "..."
                       << std::endl;
           }
+          bench->SetResolution(renderWidth, renderHeight);
           bench->Setup(*context, KernelPath::find());
 
           uint32_t num_configs = bench->GetNumConfigs();

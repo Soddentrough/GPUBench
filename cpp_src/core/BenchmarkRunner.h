@@ -40,6 +40,13 @@ public:
   // run() call.
   uint32_t getNumBenchmarksRun() const { return numBenchmarksRun; }
 
+  void setResolution(uint32_t w, uint32_t h) {
+    renderWidth = w;
+    renderHeight = h;
+  }
+  uint32_t getRenderWidth() const { return renderWidth; }
+  uint32_t getRenderHeight() const { return renderHeight; }
+
 private:
   void discoverBenchmarks();
 
@@ -52,4 +59,6 @@ private:
   bool debug;
   bool dumpGeometry;
   bool dumpRenders;
+  uint32_t renderWidth = 1920;
+  uint32_t renderHeight = 1080;
 };

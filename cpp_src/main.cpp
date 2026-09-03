@@ -108,8 +108,11 @@ std::string resultsToJson(const std::vector<ResultData> &results) {
     out += "    \"metric\": \"" + jsonEscape(r.metric) + "\",\n";
     out += "    \"value\": " + std::to_string(value) + ",\n";
     if (r.benchmarkName.find("RayScheduling") != std::string::npos && r.metric == "MRays/s") {
-      double fps = (value * 1e6) / 1048576.0;
+      uint32_t w = r.width ? r.width : 1920;
+      uint32_t h = r.height ? r.height : 1080;
+      double fps = (value * 1e6) / static_cast<double>(w * h);
       out += "    \"fps\": " + std::to_string(fps) + ",\n";
+      out += "    \"resolution\": \"" + std::to_string(w) + "x" + std::to_string(h) + "\",\n";
     }
     out += "    \"operations\": " + std::to_string(r.operations) + ",\n";
     out += "    \"time_ms\": " + std::to_string(r.time_ms) + ",\n";
@@ -213,8 +216,12 @@ int main(int argc, char **argv) {
                "Dump ray tracing geometry to OBJ files");
 
   bool dump_renders = false;
-  app.add_flag("--dump-renders", dump_renders,
+  app.add_flag("--dump-renders,--dump", dump_renders,
                "Dump and analytically compare rendered frames between Megakernel and Work Lists");
+
+  std::string resolution_str = "1080p";
+  app.add_option("-r,--resolution", resolution_str,
+                 "Resolution preset (720p, 1080p, 1440p, 4k, 1024x1024) or custom WxH (default: 1080p)");
 
   std::string output_format;
   app.add_option("--output", output_format,
@@ -234,10 +241,46 @@ int main(int argc, char **argv) {
     return EXIT_FAILURE;
   }
 
-  // Default to device 0 if none specified
-  // if (device_indices.empty()) {
-  //     device_indices.push_back(0);
-  // }
+  // Parse resolution
+  uint32_t render_width = 1920;
+  uint32_t render_height = 1080;
+  std::string res_lower;
+  for (char c : resolution_str) res_lower.push_back(std::tolower(static_cast<unsigned char>(c)));
+
+  if (res_lower == "720p") {
+    render_width = 1280;
+    render_height = 720;
+  } else if (res_lower == "1080p" || res_lower == "fhd") {
+    render_width = 1920;
+    render_height = 1080;
+  } else if (res_lower == "1440p" || res_lower == "2k" || res_lower == "qhd") {
+    render_width = 2560;
+    render_height = 1440;
+  } else if (res_lower == "4k" || res_lower == "2160p" || res_lower == "uhd") {
+    render_width = 3840;
+    render_height = 2160;
+  } else if (res_lower == "1024x1024") {
+    render_width = 1024;
+    render_height = 1024;
+  } else {
+    auto xPos = res_lower.find('x');
+    if (xPos != std::string::npos) {
+      try {
+        render_width = std::stoul(res_lower.substr(0, xPos));
+        render_height = std::stoul(res_lower.substr(xPos + 1));
+      } catch (...) {
+        std::cerr << "Warning: Invalid resolution string '" << resolution_str
+                  << "', defaulting to 1080p (1920x1080)" << std::endl;
+        render_width = 1920;
+        render_height = 1080;
+      }
+    } else {
+      std::cerr << "Warning: Unrecognized resolution preset '" << resolution_str
+                << "', defaulting to 1080p (1920x1080)" << std::endl;
+      render_width = 1920;
+      render_height = 1080;
+    }
+  }
 
   // Debug implies verbose
   if (debug) {
@@ -439,6 +482,7 @@ int main(int argc, char **argv) {
 
     // We need to keep execution_contexts alive until runner finishes
     BenchmarkRunner runner(context_ptrs, verbose, debug, dump_geometry, dump_renders);
+    runner.setResolution(render_width, render_height);
     runner.run(benchmarks_to_run);
 
     // Warn about requested benchmark names that matched nothing

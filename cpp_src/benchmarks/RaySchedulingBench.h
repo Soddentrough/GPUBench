@@ -61,6 +61,19 @@ public:
   void SetDumpRenders(bool dump) { dumpRenders = dump; }
   bool GetDumpRenders() const { return dumpRenders; }
 
+  void SetResolution(uint32_t w, uint32_t h) override {
+    renderWidth = w;
+    renderHeight = h;
+    rayCount = renderWidth * renderHeight;
+    queueCapacity = 65536;
+    while (queueCapacity < rayCount / 6) {
+      queueCapacity *= 2;
+    }
+  }
+  uint32_t GetRenderWidth() const { return renderWidth; }
+  uint32_t GetRenderHeight() const { return renderHeight; }
+  uint32_t GetQueueCapacity() const { return queueCapacity; }
+
   void RecordRunResult(uint32_t config_idx, uint64_t total_invocations, double total_time_ms) override {
     if (config_idx < 16) {
       recordedInvocations[config_idx] = total_invocations;
@@ -114,7 +127,10 @@ private:
   std::vector<VulkanContext::IndirectBatchEntry> octantBatches;
 #endif
 
-  uint32_t rayCount = 1000000;
+  uint32_t renderWidth = 1920;
+  uint32_t renderHeight = 1080;
+  uint32_t rayCount = 1920 * 1080;
+  uint32_t queueCapacity = 262144;
   uint32_t numPrimitives = 4096;
   mutable double results[16] = {0.0};
   mutable bool unsupportedConfig[16] = {false};
