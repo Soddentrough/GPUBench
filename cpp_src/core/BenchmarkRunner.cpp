@@ -45,9 +45,10 @@ std::vector<uint32_t> create_shuffled_indices(size_t size) {
 }
 
 BenchmarkRunner::BenchmarkRunner(const std::vector<IComputeContext *> &contexts,
-                                 bool verbose, bool debug, bool dumpGeometry)
+                                 bool verbose, bool debug, bool dumpGeometry,
+                                 bool dumpRenders)
     : contexts(contexts), verbose(verbose), debug(debug),
-      dumpGeometry(dumpGeometry) {
+      dumpGeometry(dumpGeometry), dumpRenders(dumpRenders) {
   for (auto *context : contexts) {
     context->setVerbose(verbose);
   }
@@ -171,7 +172,11 @@ void BenchmarkRunner::discoverBenchmarks() {
   benchmarks.push_back(std::make_unique<RayMaterialDivergenceBench>());
   benchmarks.push_back(std::make_unique<RayPathTracingBench>());
   benchmarks.push_back(std::make_unique<PixelFillRateBench>());
-  benchmarks.push_back(std::make_unique<RaySchedulingBench>());
+  auto rayScheduling = std::make_unique<RaySchedulingBench>();
+  if (dumpRenders) {
+    rayScheduling->SetDumpRenders(true);
+  }
+  benchmarks.push_back(std::move(rayScheduling));
 
   // Cache Bandwidth
   const size_t l0_size = 16 * 1024; // 16KB L0 cache

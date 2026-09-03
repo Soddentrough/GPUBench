@@ -58,14 +58,21 @@ public:
   const char *GetComponent(uint32_t config_idx = 0) const override { return "Ray Tracing"; }
   const char *GetSubCategory(uint32_t config_idx = 0) const override;
 
+  void SetDumpRenders(bool dump) { dumpRenders = dump; }
+  bool GetDumpRenders() const { return dumpRenders; }
+
 private:
   IComputeContext *context = nullptr;
+  bool dumpRenders = false;
+  ComputeBuffer fbTraditional = nullptr;
+  ComputeBuffer fbWorkList = nullptr;
+  void performVisualVerification();
 
   // Compute Kernels
   ComputeKernel kernelTraditional = nullptr;
   ComputeKernel kernelClassify = nullptr;
   ComputeKernel kernelMaterial = nullptr;
-  ComputeKernel kernelMaterialSpecialized[5] = {nullptr};
+  ComputeKernel kernelMaterialSpecialized[6] = {nullptr};
   ComputeKernel kernelBounce = nullptr;
   ComputeKernel kernelWorkGraph = nullptr;
 
@@ -93,6 +100,7 @@ private:
   void buildAS();
 
   std::vector<VulkanContext::IndirectBatchEntry> materialBatches;
+  std::vector<VulkanContext::IndirectBatchEntry> materialBatchesBreakdown;
   std::vector<VulkanContext::IndirectBatchEntry> bounceBatches;
   std::vector<VulkanContext::IndirectBatchEntry> octantBatches;
 #endif

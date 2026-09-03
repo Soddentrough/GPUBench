@@ -61,3 +61,7 @@ test/
 # Backup files
 *~
 *.bak
+
+# Render test output dumps
+renders/
+

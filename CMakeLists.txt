@@ -480,6 +480,44 @@ elseif(UNIX AND NOT APPLE)
     file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tmp")
     set(CPACK_RPM_SPEC_MORE_DEFINE "%define _tmppath ${CMAKE_CURRENT_BINARY_DIR}/tmp")
     
+    # Use sanitized rpmbuild wrapper to protect against environment module syntax errors on Fedora/RHEL
+    find_program(SYSTEM_RPMBUILD rpmbuild)
+    if(SYSTEM_RPMBUILD)
+        configure_file(
+            "${CMAKE_CURRENT_SOURCE_DIR}/packaging/linux/rpmbuild_wrapper.sh"
+            "${CMAKE_CURRENT_BINARY_DIR}/rpmbuild_wrapper.sh"
+            COPYONLY
+        )
+        execute_process(COMMAND chmod +x "${CMAKE_CURRENT_BINARY_DIR}/rpmbuild_wrapper.sh")
+        set(CPACK_PROJECT_CONFIG_FILE "${CMAKE_CURRENT_BINARY_DIR}/CPackProjectConfig.cmake")
+        file(WRITE "${CPACK_PROJECT_CONFIG_FILE}"
+            "# Sanitize shell environment for rpmbuild\n"
+            "set(RPMBUILD_EXECUTABLE \"${CMAKE_CURRENT_BINARY_DIR}/rpmbuild_wrapper.sh\" CACHE FILEPATH \"Sanitized rpmbuild wrapper\" FORCE)\n"
+        )
+    endif()
+
+    # Dedicated packaging targets for Linux
+    add_custom_target(package_rpm
+        COMMAND ${CMAKE_COMMAND} -E env --unset=BASH_FUNC_module%% --unset=BASH_FUNC_ml%% --unset=BASH_FUNC__module_raw%% cpack -G RPM
+        WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
+        COMMENT "Building RPM package with sanitized shell environment"
+    )
+    add_custom_target(package_deb
+        COMMAND cpack -G DEB
+        WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
+        COMMENT "Building DEB package"
+    )
+    add_custom_target(package_tgz
+        COMMAND cpack -G TGZ
+        WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
+        COMMENT "Building TGZ package"
+    )
+    add_custom_target(package_linux
+        COMMAND ${CMAKE_COMMAND} -E env --unset=BASH_FUNC_module%% --unset=BASH_FUNC_ml%% --unset=BASH_FUNC__module_raw%% cpack -G "TGZ\\;DEB\\;RPM"
+        WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
+        COMMENT "Building all Linux packages (TGZ, DEB, RPM) with sanitized shell environment"
+    )
+    
 elseif(APPLE)
     # macOS packaging
     set(CPACK_GENERATOR "TGZ;DragNDrop")

@@ -254,14 +254,13 @@ cd build-release
 cmake .. -DCMAKE_BUILD_TYPE=Release
 cmake --build .
 
-# Create DEB package (Debian/Ubuntu)
-cpack -G DEB
+# Create all packages (DEB, RPM, TGZ)
+cmake --build . --target package_linux
 
-# Create RPM package (Fedora/RHEL)
-cpack -G RPM
-
-# Create tarball
-cpack -G TGZ
+# Or create packages individually:
+cpack -G DEB  # Debian/Ubuntu
+cpack -G RPM  # Fedora/RHEL (or cmake --build . --target package_rpm)
+cpack -G TGZ  # Tarball
 ```
 
 **Output:**

@@ -1,5 +1,6 @@
 #include "RaySchedulingBench.h"
 #include "core/VulkanContext.h"
+#include "utils/ImageExport.h"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -259,13 +260,21 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
 #ifdef HAVE_VULKAN
   loadRTProcs(vContext->getVulkanDevice());
 
-  rayCount = 1000000;
+  if (getenv("GPUBENCH_DUMP_RENDERS")) {
+    dumpRenders = true;
+  }
+
+  rayCount = 1048576; // 1024 x 1024 square ray grid
   resultBuffer = context->createBuffer(sizeof(uint32_t) * 4);
   uint32_t zeros[4] = {0, 0, 0, 0};
   context->writeBuffer(resultBuffer, 0, sizeof(zeros), zeros);
 
-  // WorkList storage buffer: 32 counters (128B) + 1048576 * 48B records (~50MB)
-  size_t workListSize = sizeof(uint32_t) * 32 + 1048576 * sizeof(float) * 12;
+  // Allocate 1024x1024 RGBA32F framebuffers for visual verification
+  fbTraditional = context->createBuffer(rayCount * sizeof(float) * 4);
+  fbWorkList = context->createBuffer(rayCount * sizeof(float) * 4);
+
+  // WorkList storage buffer: 32 counters (128B) + 32 * 65536 * 48B records (~100MB)
+  size_t workListSize = sizeof(uint32_t) * 32 + 32 * 65536 * sizeof(float) * 12;
   workListBuffer = context->createBuffer(workListSize);
 
   // Indirect dispatch commands: 32 * VkDispatchIndirectCommand (384B)
@@ -288,14 +297,14 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
     float r = R_knot + r0_knot * std::cos(q_knot * u);
     float cx = r * std::cos(p_knot * u);
     float cy = r * std::sin(p_knot * u);
-    float cz = -r0_knot * std::sin(q_knot * u) + 1.5f;
+    float cz = -r0_knot * std::sin(q_knot * u);
 
     // Tangent approximation
     float u_next = u + 0.001f;
     float r_n = R_knot + r0_knot * std::cos(q_knot * u_next);
     float tx = r_n * std::cos(p_knot * u_next) - cx;
     float ty = r_n * std::sin(p_knot * u_next) - cy;
-    float tz = -r0_knot * std::sin(q_knot * u_next) + 1.5f - cz;
+    float tz = -r0_knot * std::sin(q_knot * u_next) - cz;
     float tlen = std::sqrt(tx * tx + ty * ty + tz * tz);
     tx /= tlen; ty /= tlen; tz /= tlen;
 
@@ -307,14 +316,23 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
     float by = tz * nx - tx * nz;
     float bz = tx * ny - ty * nx;
 
+    // 3D Euler rotation matching Blender showroom scene (25°, 20°, -15°) + location (0, 0, 0.45)
+    const float R[3][3] = {
+      { 0.907673f,  0.243210f,  0.342020f},
+      {-0.094951f,  0.912837f, -0.397131f},
+      {-0.408795f,  0.327990f,  0.851651f}
+    };
+
     for (uint32_t j = 0; j < knot_v; ++j) {
       float v = (float(j) / float(knot_v)) * pi2;
       float cv = std::cos(v), sv = std::sin(v);
-      knot_grid[i][j] = {
-        cx + r_tube * (cv * nx + sv * bx),
-        cy + r_tube * (cv * ny + sv * by),
-        cz + r_tube * (cv * nz + sv * bz)
-      };
+      float px = cx + r_tube * (cv * nx + sv * bx);
+      float py = cy + r_tube * (cv * ny + sv * by);
+      float pz = cz + r_tube * (cv * nz + sv * bz);
+      float rx = R[0][0] * px + R[0][1] * py + R[0][2] * pz;
+      float ry = R[1][0] * px + R[1][1] * py + R[1][2] * pz;
+      float rz = R[2][0] * px + R[2][1] * py + R[2][2] * pz + 0.45f;
+      knot_grid[i][j] = {rx, ry, rz};
     }
   }
 
@@ -335,26 +353,22 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
     }
   }
 
-  // Part 2: Concave Showroom Cavity Dish (128 * 128 * 2 = 32,768 triangles)
+  // Part 2: Concave Showroom Cavity Dish matching Blender README scene (128 * 128 * 2 = 32,768 triangles)
   const uint32_t dish_n = 128;
   for (uint32_t i = 0; i < dish_n; ++i) {
-    float u0 = float(i) / float(dish_n);
-    float u1 = float(i + 1) / float(dish_n);
-    float x0 = (u0 - 0.5f) * 12.0f;
-    float x1 = (u1 - 0.5f) * 12.0f;
+    float u0 = (float(i) / float(dish_n) - 0.5f) * 16.0f;
+    float u1 = (float(i + 1) / float(dish_n) - 0.5f) * 16.0f;
     for (uint32_t j = 0; j < dish_n; ++j) {
-      float v0 = float(j) / float(dish_n);
-      float v1 = float(j + 1) / float(dish_n);
-      float y0 = (v0 - 0.5f) * 12.0f;
-      float y1 = (v1 - 0.5f) * 12.0f;
+      float v0 = (float(j) / float(dish_n) - 0.5f) * 16.0f;
+      float v1 = (float(j + 1) / float(dish_n) - 0.5f) * 16.0f;
 
-      float z00 = 4.0f + 0.05f * (x0 * x0 + y0 * y0);
-      float z10 = 4.0f + 0.05f * (x1 * x1 + y0 * y0);
-      float z11 = 4.0f + 0.05f * (x1 * x1 + y1 * y1);
-      float z01 = 4.0f + 0.05f * (x0 * x0 + y1 * y1);
+      float z00 = -1.5f + 0.035f * (u0 * u0 + v0 * v0);
+      float z10 = -1.5f + 0.035f * (u1 * u1 + v0 * v0);
+      float z11 = -1.5f + 0.035f * (u1 * u1 + v1 * v1);
+      float z01 = -1.5f + 0.035f * (u0 * u0 + v1 * v1);
 
-      vertices.insert(vertices.end(), {x0, y0, z00, x1, y0, z10, x1, y1, z11});
-      vertices.insert(vertices.end(), {x0, y0, z00, x1, y1, z11, x0, y1, z01});
+      vertices.insert(vertices.end(), {u0, v0, z00, u1, v0, z10, u1, v1, z11});
+      vertices.insert(vertices.end(), {u0, v0, z00, u1, v1, z11, u0, v1, z01});
     }
   }
 
@@ -366,17 +380,33 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
 
   std::filesystem::path kdir(kernel_dir);
   kernelTraditional = vContext->createKernel(
-      (kdir / "vulkan" / "rt_scheduling_traditional.comp").string(), "main", 2);
+      (kdir / "vulkan" / "rt_scheduling_traditional.comp").string(), "main", 3);
+  vContext->setKernelAS(kernelTraditional, 0, (AccelerationStructure)sceneTlas);
+  vContext->setKernelArg(kernelTraditional, 1, resultBuffer);
+  vContext->setKernelArg(kernelTraditional, 2, fbTraditional);
+
   kernelClassify = vContext->createKernel(
-      (kdir / "vulkan" / "rt_scheduling_worklist_classify.comp").string(), "main", 4);
+      (kdir / "vulkan" / "rt_scheduling_worklist_classify.comp").string(), "main", 5);
+  vContext->setKernelAS(kernelClassify, 0, (AccelerationStructure)sceneTlas);
+  vContext->setKernelArg(kernelClassify, 1, resultBuffer);
+  vContext->setKernelArg(kernelClassify, 2, workListBuffer);
+  vContext->setKernelArg(kernelClassify, 3, indirectBuffer);
+  vContext->setKernelArg(kernelClassify, 4, fbWorkList);
+
   kernelMaterial = vContext->createKernel(
-      (kdir / "vulkan" / "rt_scheduling_worklist_material.comp").string(), "main", 3);
-  for (uint32_t arch = 0; arch < 5; ++arch) {
+      (kdir / "vulkan" / "rt_scheduling_worklist_material.comp").string(), "main", 4);
+  vContext->setKernelAS(kernelMaterial, 0, (AccelerationStructure)sceneTlas);
+  vContext->setKernelArg(kernelMaterial, 1, resultBuffer);
+  vContext->setKernelArg(kernelMaterial, 2, workListBuffer);
+  vContext->setKernelArg(kernelMaterial, 3, fbWorkList);
+
+  for (uint32_t arch = 0; arch < 6; ++arch) {
     kernelMaterialSpecialized[arch] = vContext->createKernelWithSpec(
-        (kdir / "vulkan" / "rt_scheduling_worklist_material.comp").string(), "main", 3, 0, arch);
+        (kdir / "vulkan" / "rt_scheduling_worklist_material.comp").string(), "main", 4, 0, arch);
     vContext->setKernelAS(kernelMaterialSpecialized[arch], 0, (AccelerationStructure)sceneTlas);
     vContext->setKernelArg(kernelMaterialSpecialized[arch], 1, resultBuffer);
     vContext->setKernelArg(kernelMaterialSpecialized[arch], 2, workListBuffer);
+    vContext->setKernelArg(kernelMaterialSpecialized[arch], 3, fbWorkList);
   }
   kernelBounce = vContext->createKernel(
       (kdir / "vulkan" / "rt_scheduling_worklist_bounce.comp").string(), "main", 3);
@@ -399,14 +429,6 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
   }
 
   // Check Work Graphs support (VK_AMDX_shader_enqueue)
-  //
-  // TODO: Revisit and benchmark Work Graphs when VK_AMDX_shader_enqueue (or
-  //       VK_KHR_work_graphs) is exposed by Mesa RADV for this architecture.
-  //       Once exposed, this test should be implemented with native execution graph
-  //       pipelines (vkCreateExecutionGraphPipelinesAMDX, vkCmdDispatchGraphAMDX,
-  //       and DXC HLSL node compilation targeting SPV_AMDX_shader_enqueue) to
-  //       accurately measure hardware work distributor scheduling in silicon rather
-  //       than relying on synthetic compute shader emulations.
   bool workGraphsSupported = vContext->isWorkGraphsSupported();
   if (!workGraphsSupported) {
     unsupportedConfig[3] = true;
@@ -419,15 +441,21 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
 
   // Pre-generate static indirect batches for Work Lists dispatches with specialized PSOs
   materialBatches.reserve(32);
+  materialBatchesBreakdown.reserve(32);
   for (uint32_t m = 0; m < 32; ++m) {
     struct {
       uint32_t materialId;
       uint32_t totalQueueSize;
-    } pcMat{m, 32768};
+      uint32_t dumpRenders;
+    } pcMat{m, 65536, dumpRenders ? 1u : 0u};
     std::vector<uint8_t> pcData(sizeof(pcMat));
     std::memcpy(pcData.data(), &pcMat, sizeof(pcMat));
-    uint32_t arch = m % 5;
+    uint32_t arch = (m < 20) ? (m / 4) : 5;
     materialBatches.push_back({m * sizeof(uint32_t) * 3, pcData, kernelMaterialSpecialized[arch]});
+
+    pcMat.dumpRenders = 0u;
+    std::memcpy(pcData.data(), &pcMat, sizeof(pcMat));
+    materialBatchesBreakdown.push_back({m * sizeof(uint32_t) * 3, pcData, kernelMaterialSpecialized[arch]});
   }
 
   // Pre-initialize indirectBuffer commands and workList counters for isolated stage testing
@@ -473,19 +501,21 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
   if (unsupportedConfig[config_idx])
     return;
 
-  uint32_t seed = rand();
+  uint32_t seed = dumpRenders ? 1337u : rand();
 
   switch (config_idx) {
   case 0: { // Material Divergence - Traditional Megakernel
     vContext->setKernelAS(kernelTraditional, 0, (AccelerationStructure)sceneTlas);
     vContext->setKernelArg(kernelTraditional, 1, resultBuffer);
+    vContext->setKernelArg(kernelTraditional, 2, fbTraditional);
     struct {
       uint32_t rayCount;
       uint32_t mode;
       uint32_t bounces;
       uint32_t seed;
-    } pc{rayCount, 0, 1, seed};
-    vContext->setKernelArg(kernelTraditional, 2, sizeof(pc), &pc);
+      uint32_t dumpRenders;
+    } pc{rayCount, 0, 1, seed, dumpRenders ? 1u : 0u};
+    vContext->setKernelArg(kernelTraditional, 3, sizeof(pc), &pc);
     vContext->dispatch(kernelTraditional, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     break;
   }
@@ -500,17 +530,20 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     vContext->setKernelArg(kernelClassify, 1, resultBuffer);
     vContext->setKernelArg(kernelClassify, 2, workListBuffer);
     vContext->setKernelArg(kernelClassify, 3, indirectBuffer);
+    vContext->setKernelArg(kernelClassify, 4, fbWorkList);
     struct {
       uint32_t rayCount;
       uint32_t mode;
       uint32_t bounce;
       uint32_t seed;
-    } pcClassify{rayCount, 0, 0, seed};
-    vContext->setKernelArg(kernelClassify, 4, sizeof(pcClassify), &pcClassify);
+      uint32_t dumpRenders;
+    } pcClassify{rayCount, 0, 0, seed, dumpRenders ? 1u : 0u};
+    vContext->setKernelArg(kernelClassify, 5, sizeof(pcClassify), &pcClassify);
 
     vContext->setKernelAS(kernelMaterial, 0, (AccelerationStructure)sceneTlas);
     vContext->setKernelArg(kernelMaterial, 1, resultBuffer);
     vContext->setKernelArg(kernelMaterial, 2, workListBuffer);
+    vContext->setKernelArg(kernelMaterial, 3, fbWorkList);
 
     vContext->dispatchWorkListSequence(
         workListBuffer, sizeof(uint32_t) * 32,
@@ -535,13 +568,15 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
   case 4: { // Multi-Bounce Path Tracing - Traditional Megakernel
     vContext->setKernelAS(kernelTraditional, 0, (AccelerationStructure)sceneTlas);
     vContext->setKernelArg(kernelTraditional, 1, resultBuffer);
+    vContext->setKernelArg(kernelTraditional, 2, fbTraditional);
     struct {
       uint32_t rayCount;
       uint32_t mode;
       uint32_t bounces;
       uint32_t seed;
-    } pc{rayCount, 1, 4, seed};
-    vContext->setKernelArg(kernelTraditional, 2, sizeof(pc), &pc);
+      uint32_t dumpRenders;
+    } pc{rayCount, 1, 4, seed, 0};
+    vContext->setKernelArg(kernelTraditional, 3, sizeof(pc), &pc);
     vContext->dispatch(kernelTraditional, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     break;
   }
@@ -554,13 +589,15 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     vContext->setKernelArg(kernelClassify, 1, resultBuffer);
     vContext->setKernelArg(kernelClassify, 2, workListBuffer);
     vContext->setKernelArg(kernelClassify, 3, indirectBuffer);
+    vContext->setKernelArg(kernelClassify, 4, fbWorkList);
     struct {
       uint32_t rayCount;
       uint32_t mode;
       uint32_t bounce;
       uint32_t seed;
-    } pcClassify{rayCount, 1, 0, seed};
-    vContext->setKernelArg(kernelClassify, 4, sizeof(pcClassify), &pcClassify);
+      uint32_t dumpRenders;
+    } pcClassify{rayCount, 1, 0, seed, 0};
+    vContext->setKernelArg(kernelClassify, 5, sizeof(pcClassify), &pcClassify);
 
     vContext->setKernelAS(kernelBounce, 0, (AccelerationStructure)sceneTlas);
     vContext->setKernelArg(kernelBounce, 1, resultBuffer);
@@ -589,13 +626,15 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
   case 8: { // Incoherent Rays - Traditional Megakernel
     vContext->setKernelAS(kernelTraditional, 0, (AccelerationStructure)sceneTlas);
     vContext->setKernelArg(kernelTraditional, 1, resultBuffer);
+    vContext->setKernelArg(kernelTraditional, 2, fbTraditional);
     struct {
       uint32_t rayCount;
       uint32_t mode;
       uint32_t bounces;
       uint32_t seed;
-    } pc{rayCount, 2, 1, seed};
-    vContext->setKernelArg(kernelTraditional, 2, sizeof(pc), &pc);
+      uint32_t dumpRenders;
+    } pc{rayCount, 2, 1, seed, 0};
+    vContext->setKernelArg(kernelTraditional, 3, sizeof(pc), &pc);
     vContext->dispatch(kernelTraditional, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     break;
   }
@@ -610,13 +649,15 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     vContext->setKernelArg(kernelClassify, 1, resultBuffer);
     vContext->setKernelArg(kernelClassify, 2, workListBuffer);
     vContext->setKernelArg(kernelClassify, 3, indirectBuffer);
+    vContext->setKernelArg(kernelClassify, 4, fbWorkList);
     struct {
       uint32_t rayCount;
       uint32_t mode;
       uint32_t bounce;
       uint32_t seed;
-    } pcClassify{rayCount, 2, 0, seed};
-    vContext->setKernelArg(kernelClassify, 4, sizeof(pcClassify), &pcClassify);
+      uint32_t dumpRenders;
+    } pcClassify{rayCount, 2, 0, seed, 0};
+    vContext->setKernelArg(kernelClassify, 5, sizeof(pcClassify), &pcClassify);
 
     vContext->setKernelAS(kernelBounce, 0, (AccelerationStructure)sceneTlas);
     vContext->setKernelArg(kernelBounce, 1, resultBuffer);
@@ -645,31 +686,35 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
   case 12: { // Stage Breakdown - Pure BVH Traversal (98K Triangles, No Shading)
     vContext->setKernelAS(kernelTraditional, 0, (AccelerationStructure)sceneTlas);
     vContext->setKernelArg(kernelTraditional, 1, resultBuffer);
+    vContext->setKernelArg(kernelTraditional, 2, fbTraditional);
     struct {
       uint32_t rayCount;
       uint32_t mode;
       uint32_t bounces;
       uint32_t seed;
-    } pc{rayCount, 3, 1, seed};
-    vContext->setKernelArg(kernelTraditional, 2, sizeof(pc), &pc);
+      uint32_t dumpRenders;
+    } pc{rayCount, 3, 1, seed, 0};
+    vContext->setKernelArg(kernelTraditional, 3, sizeof(pc), &pc);
     vContext->dispatch(kernelTraditional, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     break;
   }
   case 13: { // Stage Breakdown - Pure Material Shading (Traditional Megakernel, 4 Lights)
     vContext->setKernelAS(kernelTraditional, 0, (AccelerationStructure)sceneTlas);
     vContext->setKernelArg(kernelTraditional, 1, resultBuffer);
+    vContext->setKernelArg(kernelTraditional, 2, fbTraditional);
     struct {
       uint32_t rayCount;
       uint32_t mode;
       uint32_t bounces;
       uint32_t seed;
-    } pc{rayCount, 4, 1, seed};
-    vContext->setKernelArg(kernelTraditional, 2, sizeof(pc), &pc);
+      uint32_t dumpRenders;
+    } pc{rayCount, 4, 1, seed, 0};
+    vContext->setKernelArg(kernelTraditional, 3, sizeof(pc), &pc);
     vContext->dispatch(kernelTraditional, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     break;
   }
   case 14: { // Stage Breakdown - Pure Material Shading (Work Lists Specialized, 4 Lights)
-    vContext->dispatchIndirectSequence(kernelMaterial, indirectBuffer, materialBatches);
+    vContext->dispatchIndirectSequence(kernelMaterial, indirectBuffer, materialBatchesBreakdown);
     break;
   }
   case 15: { // Stage Breakdown - Stream Compaction & Memory Spilling Overhead
@@ -677,13 +722,15 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     vContext->setKernelArg(kernelClassify, 1, resultBuffer);
     vContext->setKernelArg(kernelClassify, 2, workListBuffer);
     vContext->setKernelArg(kernelClassify, 3, indirectBuffer);
+    vContext->setKernelArg(kernelClassify, 4, fbWorkList);
     struct {
       uint32_t rayCount;
       uint32_t mode;
       uint32_t bounce;
       uint32_t seed;
-    } pcClassify{rayCount, 3, 0, seed};
-    vContext->setKernelArg(kernelClassify, 4, sizeof(pcClassify), &pcClassify);
+      uint32_t dumpRenders;
+    } pcClassify{rayCount, 3, 0, seed, 0};
+    vContext->setKernelArg(kernelClassify, 5, sizeof(pcClassify), &pcClassify);
     vContext->dispatch(kernelClassify, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     break;
   }
@@ -691,8 +738,73 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
 #endif
 }
 
+void RaySchedulingBench::performVisualVerification() {
+#ifdef HAVE_VULKAN
+  if (!context || !fbTraditional || !fbWorkList) return;
+
+  uint32_t width = 1024, height = 1024;
+  size_t bufferSize = width * height * sizeof(float) * 4;
+
+  std::vector<float> hdrTrad(width * height * 4, 0.0f);
+  std::vector<float> hdrWork(width * height * 4, 0.0f);
+
+  context->readBuffer(fbTraditional, 0, bufferSize, hdrTrad.data());
+  context->readBuffer(fbWorkList, 0, bufferSize, hdrWork.data());
+
+  std::vector<uint8_t> ldrTrad, ldrWork, ldrDiff;
+  auto metrics = gpubench::ImageExport::compareAndTonemap(
+      hdrTrad.data(), hdrWork.data(), width, height, ldrTrad, ldrWork, ldrDiff);
+
+  std::filesystem::create_directories("renders");
+  std::string tradPpm = "renders/render_traditional_megakernel.ppm";
+  std::string workPpm = "renders/render_worklist_dgc.ppm";
+  std::string diffPpm = "renders/render_difference_heatmap.ppm";
+
+  std::string tradPng = "renders/render_traditional_megakernel.png";
+  std::string workPng = "renders/render_worklist_dgc.png";
+  std::string diffPng = "renders/render_difference_heatmap.png";
+
+  gpubench::ImageExport::writePPM(tradPpm, width, height, ldrTrad);
+  gpubench::ImageExport::writePPM(workPpm, width, height, ldrWork);
+  gpubench::ImageExport::writePPM(diffPpm, width, height, ldrDiff);
+
+  gpubench::ImageExport::convertPPMtoPNG(tradPpm, tradPng);
+  gpubench::ImageExport::convertPPMtoPNG(workPpm, workPng);
+  gpubench::ImageExport::convertPPMtoPNG(diffPpm, diffPng);
+
+  std::cout << std::endl;
+  std::cout << "================================================================================" << std::endl;
+  std::cout << "            RAY SCHEDULING VISUAL & ANALYTICAL PARITY VERIFICATION              " << std::endl;
+  std::cout << "================================================================================" << std::endl;
+  std::cout << "  Resolution          : " << width << " x " << height << " (" << (width * height) << " rays)" << std::endl;
+  std::cout << "  Megakernel Render   : " << tradPng << std::endl;
+  std::cout << "  Work Lists Render   : " << workPng << std::endl;
+  std::cout << "  Difference Heatmap  : " << diffPng << " (10x amplified)" << std::endl;
+  std::cout << "--------------------------------------------------------------------------------" << std::endl;
+  std::cout << "  Max Color Delta     : " << std::fixed << std::setprecision(6) << metrics.maxDelta
+            << " (" << static_cast<int>(metrics.maxDelta * 255.0f + 0.5f) << " / 255)" << std::endl;
+  std::cout << "  Mean Abs Error (MAE): " << std::fixed << std::setprecision(6) << metrics.mae << std::endl;
+  std::cout << "  RMSE                : " << std::fixed << std::setprecision(6) << metrics.rmse << std::endl;
+  std::cout << "  PSNR                : " << std::fixed << std::setprecision(2) << metrics.psnr << " dB" << std::endl;
+  float bitExactPct = (float)metrics.exactPixels / (float)metrics.totalPixels * 100.0f;
+  float nearExactPct = (float)(metrics.totalPixels - metrics.diffPixels) / (float)metrics.totalPixels * 100.0f;
+  std::cout << "  Bit-Exact Match     : " << metrics.exactPixels << " / " << metrics.totalPixels
+            << " (" << std::fixed << std::setprecision(2) << bitExactPct << "%)" << std::endl;
+  std::cout << "  Near-Exact (<=1 LSB): " << (metrics.totalPixels - metrics.diffPixels) << " / " << metrics.totalPixels
+            << " (" << std::fixed << std::setprecision(3) << nearExactPct << "%)" << std::endl;
+  std::cout << "  Discrepant (> 1 LSB): " << metrics.diffPixels << " / " << metrics.totalPixels
+            << " (" << (metrics.diffPixels <= 32 ? "VERIFIED: PARITY PASSED" : "DEVIATION DETECTED") << ")" << std::endl;
+  std::cout << "================================================================================" << std::endl;
+  std::cout << std::endl;
+#endif
+}
+
 void RaySchedulingBench::Teardown() {
 #ifdef HAVE_VULKAN
+  if (dumpRenders) {
+    performVisualVerification();
+  }
+
   VulkanContext *vContext = static_cast<VulkanContext *>(context);
   VkDevice device = vContext->getVulkanDevice();
 
@@ -722,6 +834,15 @@ void RaySchedulingBench::Teardown() {
     context->releaseBuffer(workListBuffer);
   if (indirectBuffer)
     context->releaseBuffer(indirectBuffer);
+
+  if (fbTraditional) {
+    context->releaseBuffer(fbTraditional);
+    fbTraditional = nullptr;
+  }
+  if (fbWorkList) {
+    context->releaseBuffer(fbWorkList);
+    fbWorkList = nullptr;
+  }
 
   if (vertexBuffer)
     context->releaseBuffer(vertexBuffer);

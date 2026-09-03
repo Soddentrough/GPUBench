@@ -49,10 +49,13 @@ cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release
 cmake --build . --parallel $(nproc)
 
-# Generate packages using a clean environment wrapper
-env -i HOME=$HOME PATH=$PATH USER=$USER cpack -G DEB
-env -i HOME=$HOME PATH=$PATH USER=$USER cpack -G RPM
-env -i HOME=$HOME PATH=$PATH USER=$USER cpack -G TGZ
+# Generate all packages (TGZ, DEB, RPM) with automated shell sanitization:
+cmake --build . --target package_linux
+
+# Or generate individually:
+cmake --build . --target package_rpm
+cmake --build . --target package_deb
+cmake --build . --target package_tgz
 ```
 
 ### Step 2: Upload to GitHub Release

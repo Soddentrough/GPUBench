@@ -20,7 +20,7 @@ struct CompactRayPayload {
 
 layout(set = 0, binding = 2) buffer WorkListBuffer {
     uint queueCounters[32]; // Per-material or per-bounce counters
-    CompactRayPayload rayRecords[1048576]; // Compact queue buffer
+    CompactRayPayload rayRecords[]; // Compact queue buffer
 } worklist;
 
 // DispatchIndirectCommand structure matching VkDispatchIndirectCommand
@@ -34,11 +34,16 @@ layout(set = 0, binding = 3) buffer IndirectCommandsBuffer {
     VkDispatchIndirectCommand commands[32];
 } indirectCmds;
 
+layout(set = 0, binding = 4) buffer Framebuffer {
+    vec4 pixels[];
+} fb;
+
 layout(push_constant) uniform PushConstants {
     uint rayCount;
     uint mode;     // 0: Material Divergence, 1: Multi-Bounce Path Tracing, 2: Incoherent GI
     uint bounce;   // Current bounce index
     uint seed;
+    uint dumpRenders; // 1: dump pixels to fb
 } pc;
 
 shared uint localRays;
@@ -87,6 +92,125 @@ uint morton3D(vec3 dir) {
     return (part1By2(u.x) << 2) | (part1By2(u.y) << 1) | part1By2(u.z);
 }
 
+// Procedural hash & value noise for atmospheric cloud coverage
+float skyHash21(vec2 p) {
+    p = fract(p * vec2(123.34, 456.21));
+    p += dot(p, p + 45.32);
+    return fract(p.x * p.y);
+}
+
+float skyNoise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    float a = skyHash21(i);
+    float b = skyHash21(i + vec2(1.0, 0.0));
+    float c = skyHash21(i + vec2(0.0, 1.0));
+    float d = skyHash21(i + vec2(1.0, 1.0));
+    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+
+float skyCloudFBM(vec2 p) {
+    float v = 0.0;
+    float a = 0.5;
+    mat2 rot = mat2(0.8, -0.6, 0.6, 0.8);
+    for (int i = 0; i < 3; ++i) {
+        v += a * skyNoise(p);
+        p = rot * p * 2.02 + vec2(1.7, 9.2);
+        a *= 0.5;
+    }
+    return v;
+}
+
+// Analytic Atmospheric Rayleigh-Mie Sky Model with Procedural Clouds for Ray Miss Evaluation
+vec3 evalAnalyticSky(vec3 dir) {
+    vec3 sunDir = normalize(vec3(0.342, -0.664, 0.664));
+    float cosTheta = clamp(dir.z, 0.0, 1.0);
+    float cosGamma = dot(dir, sunDir);
+
+    // Deep zenith gradient -> atmospheric haze
+    vec3 zenithCol = vec3(0.06, 0.22, 0.62);
+    vec3 horizonCol = vec3(0.58, 0.70, 0.84);
+    float rayleighPhase = 0.75 * (1.0 + cosGamma * cosGamma);
+    vec3 skyGrad = mix(horizonCol, zenithCol, pow(cosTheta, 0.55));
+
+    // Sharp solar disc + Henyey-Greenstein corona
+    float sunDisc = smoothstep(0.9985, 0.9995, cosGamma);
+    const float g = 0.82;
+    const float g2 = g * g;
+    float miePhase = (1.5 * (1.0 - g2) / (2.0 + g2)) * (1.0 + cosGamma * cosGamma) 
+                   / pow(max(1.0 + g2 - 2.0 * g * cosGamma, 0.001), 1.5);
+    vec3 sunColor = vec3(1.0, 0.92, 0.75);
+
+    vec3 sky = skyGrad * rayleighPhase + sunColor * (miePhase * 0.04) + sunColor * (sunDisc * 8.0);
+
+    // Procedural planar cloud deck (Z-up coordinates)
+    if (dir.z > 0.02) {
+        vec2 cloudUV = (dir.xy / (dir.z + 0.05)) * 1.8;
+        float cloudDensity = smoothstep(0.42, 0.75, skyCloudFBM(cloudUV));
+        if (cloudDensity > 0.0) {
+            float sunScatter = clamp(cosGamma, 0.0, 1.0);
+            vec3 cloudLit = vec3(0.72, 0.76, 0.82) * 0.4 + vec3(1.0, 0.96, 0.90) * 1.4 * pow(sunScatter, 3.0);
+            vec3 cloudShadow = vec3(0.35, 0.38, 0.45);
+            vec3 cloudColor = mix(cloudShadow, cloudLit, 0.6 + 0.4 * cosTheta);
+            sky = mix(sky, cloudColor, cloudDensity * 0.85);
+        }
+    } else {
+        vec3 groundCol = vec3(0.06, 0.06, 0.07);
+        sky = mix(horizonCol * 0.4, groundCol, clamp(-dir.z * 3.0, 0.0, 1.0));
+    }
+
+    return sky;
+}
+
+vec3 computeSmoothNormal(uint primId, vec3 hitPos, vec3 rayDir) {
+    vec3 normal;
+    if (primId < 65536) {
+        // Continuous Parametric Trefoil Torus Knot tube normal with segment interpolation
+        uint ringIdx = primId / 256;
+        float u0 = (float(ringIdx) / 256.0) * 6.2831853;
+        float u1 = (float((ringIdx + 1) % 256) / 256.0) * 6.2831853;
+
+        float r0 = 2.0 + 0.8 * cos(3.0 * u0);
+        vec3 unrot0 = vec3(r0 * cos(2.0 * u0), r0 * sin(2.0 * u0), -0.8 * sin(3.0 * u0));
+        float r1 = 2.0 + 0.8 * cos(3.0 * u1);
+        vec3 unrot1 = vec3(r1 * cos(2.0 * u1), r1 * sin(2.0 * u1), -0.8 * sin(3.0 * u1));
+
+        mat3 R = mat3(
+            0.907673, -0.094951, -0.408795,
+            0.243210,  0.912837,  0.327990,
+            0.342020, -0.397131,  0.851651
+        );
+        vec3 c0 = R * unrot0 + vec3(0.0, 0.0, 0.45);
+        vec3 c1 = R * unrot1 + vec3(0.0, 0.0, 0.45);
+
+        vec3 seg = c1 - c0;
+        float segLen2 = dot(seg, seg);
+        float tSeg = clamp(dot(hitPos - c0, seg) / max(segLen2, 0.00001), 0.0, 1.0);
+        vec3 center = c0 + tSeg * seg;
+
+        normal = normalize(hitPos - center);
+    } else {
+        // Showroom cavity dish: z = -1.5 + 0.035 * (x^2 + y^2)
+        normal = normalize(vec3(-0.07 * hitPos.x, -0.07 * hitPos.y, 1.0));
+    }
+    if (dot(normal, rayDir) > 0.0) normal = -normal;
+    return normal;
+}
+
+uint computeMaterialId(uint primId, vec3 hitPos) {
+    if (primId < 65536) {
+        // 5 broad continuous material sections matching Blender showroom scene (ring // 51)
+        uint ringIdx = primId / 256;
+        uint section = (ringIdx / 51) % 5;
+        uint subQueue = primId % 4;
+        return section * 4 + subQueue;
+    } else {
+        // Showroom floor: distribute across 12 queues (20..31) so no queue overflows
+        return 20 + ((primId - 65536) % 12);
+    }
+}
+
 void main() {
     uint idx = gl_GlobalInvocationID.x;
     if (idx >= pc.rayCount) return;
@@ -98,11 +222,17 @@ void main() {
     barrier();
 
     uint rngState = idx + pc.seed;
-    float fx = float(idx % 512) - 256.0 + 0.5;
-    float fy = float((idx / 512) % 512) - 256.0 + 0.5;
 
-    vec3 origin = vec3(fx * 0.02, fy * 0.02, -5.0);
-    vec3 direction = vec3(0.0, 0.0, 1.0);
+    // Perspective showroom camera matching Blender view (0, -8.2, 2.0) looking at (0, 0, 0.45)
+    vec3 camPos = vec3(0.0, -8.2, 2.0);
+    vec3 camForward = vec3(0.0, 0.9826, -0.1857);
+    vec3 camRight = vec3(1.0, 0.0, 0.0);
+    vec3 camUp = vec3(0.0, 0.1857, 0.9826);
+    float fov = 0.48; // ~52 deg FoV (38mm lens)
+
+    vec2 uv = vec2((float(idx % 1024) - 512.0 + 0.5) / 512.0, (float(idx / 1024) - 512.0 + 0.5) / 512.0);
+    vec3 origin = camPos;
+    vec3 direction = normalize(camForward + camRight * (uv.x * fov) - camUp * (uv.y * fov));
     uint threadRays = 1;
     uint threadHits = 0;
 
@@ -111,8 +241,8 @@ void main() {
         threadHits = 1;
         uint matId = idx % 32;
         uint slot = atomicAdd(worklist.queueCounters[matId], 1);
-        if (slot < 32768) {
-            uint recordIdx = matId * 32768 + slot;
+        if (slot < 65536) {
+            uint recordIdx = matId * 65536 + slot;
             worklist.rayRecords[recordIdx].originAndMatId = vec4(origin, uintBitsToFloat(matId));
             worklist.rayRecords[recordIdx].directionAndSeed = vec4(direction, uintBitsToFloat(rngState));
             worklist.rayRecords[recordIdx].throughputAndMorton = vec4(1.0, 1.0, 1.0, 0.0);
@@ -124,83 +254,86 @@ void main() {
         }
     } else {
         rayQueryEXT query;
-        rayQueryInitializeEXT(query, topLevelAS, gl_RayFlagsNoneEXT, 0xFF, origin, 0.001, direction, 20.0);
+        rayQueryInitializeEXT(query, topLevelAS, gl_RayFlagsNoneEXT, 0xFF, origin, 0.01, direction, 50.0);
         while (rayQueryProceedEXT(query)) {}
 
         if (rayQueryGetIntersectionTypeEXT(query, true) == gl_RayQueryCommittedIntersectionTriangleEXT) {
-        threadHits = 1;
-        float t = rayQueryGetIntersectionTEXT(query, true);
-        vec3 hitPos = origin + direction * t;
-        uint primId = rayQueryGetIntersectionPrimitiveIndexEXT(query, true);
-        vec3 normal = (primId % 2 == 0) ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
-        if (dot(normal, direction) > 0.0) normal = -normal;
+            threadHits = 1;
+            float t = rayQueryGetIntersectionTEXT(query, true);
+            vec3 hitPos = origin + direction * t;
+            uint primId = rayQueryGetIntersectionPrimitiveIndexEXT(query, true);
+            vec3 normal = computeSmoothNormal(primId, hitPos, direction);
 
-        if (pc.mode == 0) {
-            // Work Lists: Stream compaction into 32 material bins
-            uint matId = (primId + idx) % 32;
-            uint slot = atomicAdd(worklist.queueCounters[matId], 1);
-            if (slot < 32768) {
-                uint recordIdx = matId * 32768 + slot;
-                worklist.rayRecords[recordIdx].originAndMatId = vec4(hitPos + normal * 0.002, uintBitsToFloat(matId));
-                worklist.rayRecords[recordIdx].directionAndSeed = vec4(direction, uintBitsToFloat(rngState));
-                worklist.rayRecords[recordIdx].throughputAndMorton = vec4(1.0, 1.0, 1.0, 0.0);
-            }
+            if (pc.mode == 0) {
+                // Work Lists: Stream compaction into 32 material bins
+                uint matId = computeMaterialId(primId, hitPos);
+                uint slot = atomicAdd(worklist.queueCounters[matId], 1);
+                if (slot < 65536) {
+                    uint recordIdx = matId * 65536 + slot;
+                    worklist.rayRecords[recordIdx].originAndMatId = vec4(hitPos, uintBitsToFloat(matId));
+                    worklist.rayRecords[recordIdx].directionAndSeed = vec4(direction, uintBitsToFloat(rngState));
+                    worklist.rayRecords[recordIdx].throughputAndMorton = vec4(normal, uintBitsToFloat(idx));
+                }
 
-            // Update indirect dispatch parameters for this material queue
-            if ((slot % 64) == 0) {
-                atomicMax(indirectCmds.commands[matId].x, (slot + 64) / 64);
-                indirectCmds.commands[matId].y = 1;
-                indirectCmds.commands[matId].z = 1;
-            }
-        } else if (pc.mode == 1) {
-            // Work Lists: Wavefront path tracing compaction (Russian roulette filtering)
-            bool survives = (pc.bounce < 2) || (rand_float(rngState) >= 0.4);
-            if (survives) {
-                // Generate next bounce ray direction
+                // Update indirect dispatch parameters for this material queue
+                if ((slot % 64) == 0) {
+                    atomicMax(indirectCmds.commands[matId].x, (slot + 64) / 64);
+                    indirectCmds.commands[matId].y = 1;
+                    indirectCmds.commands[matId].z = 1;
+                }
+            } else if (pc.mode == 1) {
+                // Work Lists: Wavefront path tracing compaction (Russian roulette filtering)
+                bool survives = (pc.bounce < 2) || (rand_float(rngState) >= 0.4);
+                if (survives) {
+                    // Generate next bounce ray direction
+                    float u1 = rand_float(rngState);
+                    float u2 = rand_float(rngState);
+                    vec3 nextDir = align_to_normal(cosine_sample_hemisphere(u1, u2), normal);
+
+                    uint slot = atomicAdd(worklist.queueCounters[0], 1);
+                    if (slot < 65536) {
+                        worklist.rayRecords[slot].originAndMatId = vec4(hitPos + normal * 0.002, uintBitsToFloat(primId));
+                        worklist.rayRecords[slot].directionAndSeed = vec4(nextDir, uintBitsToFloat(rngState));
+                        worklist.rayRecords[slot].throughputAndMorton = vec4(0.8, 0.8, 0.8, 0.0);
+                    }
+
+                    if ((slot % 64) == 0) {
+                        atomicMax(indirectCmds.commands[0].x, (slot + 64) / 64);
+                        indirectCmds.commands[0].y = 1;
+                        indirectCmds.commands[0].z = 1;
+                    }
+                }
+            } else {
+                // Work Lists: Incoherent secondary rays with Directional Octant Binning
+                // The GPU directly bins rays into 8 directional cones (+/-X, +/-Y, +/-Z) at birth,
+                // producing pre-ordered, coherent work lists without needing SER or sorting passes.
                 float u1 = rand_float(rngState);
                 float u2 = rand_float(rngState);
-                vec3 nextDir = align_to_normal(cosine_sample_hemisphere(u1, u2), normal);
+                vec3 incohDir = align_to_normal(cosine_sample_hemisphere(u1, u2), normal);
 
-                uint slot = atomicAdd(worklist.queueCounters[0], 1);
-                if (slot < 65536) {
-                    worklist.rayRecords[slot].originAndMatId = vec4(hitPos + normal * 0.002, uintBitsToFloat(primId));
-                    worklist.rayRecords[slot].directionAndSeed = vec4(nextDir, uintBitsToFloat(rngState));
-                    worklist.rayRecords[slot].throughputAndMorton = vec4(0.8, 0.8, 0.8, 0.0);
+                uint octant = (incohDir.x > 0.0 ? 1u : 0u) |
+                              (incohDir.y > 0.0 ? 2u : 0u) |
+                              (incohDir.z > 0.0 ? 4u : 0u);
+
+                uint slot = atomicAdd(worklist.queueCounters[octant], 1);
+                if (slot < 131072) {
+                    uint recordIdx = octant * 131072 + slot;
+                    worklist.rayRecords[recordIdx].originAndMatId = vec4(hitPos + normal * 0.002, float(octant));
+                    worklist.rayRecords[recordIdx].directionAndSeed = vec4(incohDir, uintBitsToFloat(rngState));
+                    worklist.rayRecords[recordIdx].throughputAndMorton = vec4(1.0, 1.0, 1.0, 0.0);
                 }
 
                 if ((slot % 64) == 0) {
-                    atomicMax(indirectCmds.commands[0].x, (slot + 64) / 64);
-                    indirectCmds.commands[0].y = 1;
-                    indirectCmds.commands[0].z = 1;
+                    atomicMax(indirectCmds.commands[octant].x, (slot + 64) / 64);
+                    indirectCmds.commands[octant].y = 1;
+                    indirectCmds.commands[octant].z = 1;
                 }
             }
         } else {
-            // Work Lists: Incoherent secondary rays with Directional Octant Binning
-            // The GPU directly bins rays into 8 directional cones (+/-X, +/-Y, +/-Z) at birth,
-            // producing pre-ordered, coherent work lists without needing SER or sorting passes.
-            float u1 = rand_float(rngState);
-            float u2 = rand_float(rngState);
-            vec3 incohDir = align_to_normal(cosine_sample_hemisphere(u1, u2), normal);
-
-            uint octant = (incohDir.x > 0.0 ? 1u : 0u) |
-                          (incohDir.y > 0.0 ? 2u : 0u) |
-                          (incohDir.z > 0.0 ? 4u : 0u);
-
-            uint slot = atomicAdd(worklist.queueCounters[octant], 1);
-            if (slot < 131072) {
-                uint recordIdx = octant * 131072 + slot;
-                worklist.rayRecords[recordIdx].originAndMatId = vec4(hitPos + normal * 0.002, float(octant));
-                worklist.rayRecords[recordIdx].directionAndSeed = vec4(incohDir, uintBitsToFloat(rngState));
-                worklist.rayRecords[recordIdx].throughputAndMorton = vec4(1.0, 1.0, 1.0, 0.0);
-            }
-
-            if ((slot % 64) == 0) {
-                atomicMax(indirectCmds.commands[octant].x, (slot + 64) / 64);
-                indirectCmds.commands[octant].y = 1;
-                indirectCmds.commands[octant].z = 1;
+            if (pc.dumpRenders != 0) {
+                fb.pixels[idx] = vec4(evalAnalyticSky(direction), 1.0);
             }
         }
-    }
     }
 
     if (threadRays > 0) atomicAdd(localRays, threadRays);

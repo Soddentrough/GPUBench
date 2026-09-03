@@ -207,6 +207,10 @@ int main(int argc, char **argv) {
   app.add_flag("--dump-geometry", dump_geometry,
                "Dump ray tracing geometry to OBJ files");
 
+  bool dump_renders = false;
+  app.add_flag("--dump-renders", dump_renders,
+               "Dump and analytically compare rendered frames between Megakernel and Work Lists");
+
   std::string output_format;
   app.add_option("--output", output_format,
                  "Machine-readable output format: json or csv")
@@ -429,7 +433,7 @@ int main(int argc, char **argv) {
     }
 
     // We need to keep execution_contexts alive until runner finishes
-    BenchmarkRunner runner(context_ptrs, verbose, debug, dump_geometry);
+    BenchmarkRunner runner(context_ptrs, verbose, debug, dump_geometry, dump_renders);
     runner.run(benchmarks_to_run);
 
     // Warn about requested benchmark names that matched nothing

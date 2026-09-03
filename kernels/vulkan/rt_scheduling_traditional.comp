@@ -11,11 +11,16 @@ layout(set = 0, binding = 1) buffer Results {
     float accumulatedLuminance;
 } results;
 
+layout(set = 0, binding = 2) buffer Framebuffer {
+    vec4 pixels[];
+} fb;
+
 layout(push_constant) uniform PushConstants {
     uint rayCount;
     uint mode;     // 0: Material Divergence, 1: Multi-Bounce Path Tracing, 2: Incoherent GI
     uint bounces;  // Max bounces (for mode 1)
     uint seed;
+    uint dumpRenders; // 1: dump pixels to fb
 } pc;
 
 shared uint localRays;
@@ -139,8 +144,8 @@ float skyCloudFBM(vec2 p) {
 
 // Analytic Atmospheric Rayleigh-Mie Sky Model with Procedural Clouds for Ray Miss Evaluation
 vec3 evalAnalyticSky(vec3 dir) {
-    vec3 sunDir = normalize(vec3(0.4, 0.55, 0.72));
-    float cosTheta = clamp(dir.y, 0.0, 1.0);
+    vec3 sunDir = normalize(vec3(0.342, -0.664, 0.664));
+    float cosTheta = clamp(dir.z, 0.0, 1.0);
     float cosGamma = dot(dir, sunDir);
 
     // Deep zenith gradient -> atmospheric haze
@@ -159,9 +164,9 @@ vec3 evalAnalyticSky(vec3 dir) {
 
     vec3 sky = skyGrad * rayleighPhase + sunColor * (miePhase * 0.04) + sunColor * (sunDisc * 8.0);
 
-    // Procedural planar cloud deck (projected to altitude plane)
-    if (dir.y > 0.02) {
-        vec2 cloudUV = (dir.xz / (dir.y + 0.05)) * 1.8;
+    // Procedural planar cloud deck (Z-up coordinates)
+    if (dir.z > 0.02) {
+        vec2 cloudUV = (dir.xy / (dir.z + 0.05)) * 1.8;
         float cloudDensity = smoothstep(0.42, 0.75, skyCloudFBM(cloudUV));
         if (cloudDensity > 0.0) {
             float sunScatter = clamp(cosGamma, 0.0, 1.0);
@@ -171,14 +176,14 @@ vec3 evalAnalyticSky(vec3 dir) {
             sky = mix(sky, cloudColor, cloudDensity * 0.85);
         }
     } else {
-        vec3 groundCol = vec3(0.10, 0.09, 0.08);
-        sky = mix(horizonCol * 0.4, groundCol, clamp(-dir.y * 3.0, 0.0, 1.0));
+        vec3 groundCol = vec3(0.06, 0.06, 0.07);
+        sky = mix(horizonCol * 0.4, groundCol, clamp(-dir.z * 3.0, 0.0, 1.0));
     }
 
     return sky;
 }
 
-// 4 Realistic Clustered Production Lights
+// 4 Realistic Production Lights matching Blender showroom scene
 struct SceneLight {
     vec3 dir;
     vec3 color;
@@ -186,18 +191,18 @@ struct SceneLight {
 };
 
 const SceneLight SCENE_LIGHTS[4] = SceneLight[4](
-    SceneLight(vec3(0.40, 0.55, 0.72), vec3(1.0, 0.95, 0.88), 3.0),   // Light 0: Key Sun
-    SceneLight(vec3(-0.65, 0.35, -0.68), vec3(1.0, 0.55, 0.20), 1.5),  // Light 1: Warm Rim Light
-    SceneLight(vec3(0.10, 0.85, -0.50), vec3(0.40, 0.65, 1.0), 1.0),   // Light 2: Cool Fill Light
-    SceneLight(vec3(0.0, -1.0, 0.0), vec3(0.35, 0.25, 0.18), 0.6)      // Light 3: Ground Bounce Light
+    SceneLight(vec3(0.342, -0.664, 0.664), vec3(1.0, 0.96, 0.90), 3.4),   // Key Sun
+    SceneLight(vec3(-0.60, 0.70, 0.40), vec3(1.0, 0.75, 0.40), 1.6),     // Warm Rim
+    SceneLight(vec3(-0.55, -0.75, 0.35), vec3(0.65, 0.80, 1.0), 1.4),    // Cool Fill
+    SceneLight(vec3(0.0, 0.20, 0.95), vec3(0.40, 0.35, 0.30), 0.6)       // Ground Bounce
 );
 
-// 5 Realistic Production Material Archetypes across 32 IDs with Multi-Light Integration
+// 5 Realistic Production Material Archetypes matching Blender showroom scene
 vec3 evalMaterialBSDF(uint matId, vec3 normal, vec3 inDir, vec3 hitPos, inout uint rng) {
     vec3 viewDir = -inDir;
     float NdotV = max(dot(normal, viewDir), 0.001);
     vec3 totalRadiance = vec3(0.0);
-    uint archetype = matId % 5;
+    uint archetype = (matId < 20) ? (matId / 4) : 5;
 
     for (int l = 0; l < 4; ++l) {
         vec3 lightDir = normalize(SCENE_LIGHTS[l].dir);
@@ -207,24 +212,12 @@ vec3 evalMaterialBSDF(uint matId, vec3 normal, vec3 inDir, vec3 hitPos, inout ui
         float NdotH = max(dot(normal, halfVec), 0.0);
         float VdotH = max(dot(viewDir, halfVec), 0.0);
 
-        if (NdotL <= 0.0 && archetype != 2) continue; // SSS can wrap around
+        if (NdotL <= 0.0 && archetype != 1 && archetype != 5) continue;
 
         vec3 color = vec3(0.0);
         switch (archetype) {
             case 0: {
-                // Archetype 0: Pure Conductors & Standard Dielectric PBR
-                float a2 = 0.04;
-                float d = NdotH * NdotH * (a2 - 1.0) + 1.0;
-                float D = a2 / (3.14159 * d * d + 0.0001);
-                float k = 0.18;
-                float G = (NdotL / (NdotL * (1.0 - k) + k)) * (NdotV / (NdotV * (1.0 - k) + k));
-                vec3 baseCol = (matId % 2 == 0) ? vec3(1.0, 0.78, 0.34) : vec3(0.9, 0.9, 0.92);
-                vec3 F = baseCol + (1.0 - baseCol) * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
-                color = (D * G * F) / (4.0 * NdotL * NdotV + 0.001) * NdotL + baseCol * (0.1 * NdotL);
-                break;
-            }
-            case 1: {
-                // Archetype 1: Automotive Clearcoat with Metallic Voronoi Flakes
+                // Archetype 0: Automotive Clearcoat with Metallic Voronoi Flakes (Crimson Red)
                 float flakeNoise = voronoiFlakes(hitPos * 120.0);
                 vec3 flakeNormal = normalize(normal + (fract(vec3(flakeNoise * 13.0, flakeNoise * 7.0, flakeNoise * 19.0)) - 0.5) * 0.15);
                 float flakeNdotH = max(dot(flakeNormal, halfVec), 0.0);
@@ -233,8 +226,8 @@ vec3 evalMaterialBSDF(uint matId, vec3 normal, vec3 inDir, vec3 hitPos, inout ui
                 float a2 = 0.06;
                 float d = flakeNdotH * flakeNdotH * (a2 - 1.0) + 1.0;
                 float D_base = a2 / (3.14159 * d * d + 0.0001);
-                vec3 baseTint = vec3(0.85, 0.04, 0.08); // Crimson
-                vec3 baseSpec = (D_base * 0.8 * baseTint) / (4.0 * NdotL * NdotV + 0.001) * flakeNdotL;
+                vec3 baseTint = vec3(0.85, 0.03, 0.06); // Crimson red
+                vec3 baseSpec = (D_base * 0.9 * baseTint) / (4.0 * NdotL * NdotV + 0.001) * flakeNdotL;
 
                 float a2_coat = 0.0004;
                 float d_coat = NdotH * NdotH * (a2_coat - 1.0) + 1.0;
@@ -246,22 +239,32 @@ vec3 evalMaterialBSDF(uint matId, vec3 normal, vec3 inDir, vec3 hitPos, inout ui
                 color = coatSpec + baseSpec * (1.0 - F_coat) * absorption;
                 break;
             }
-            case 2: {
-                // Archetype 2: Organic Jade / Subsurface Scattering
-                vec3 baseJade = vec3(0.1, 0.75, 0.45);
+            case 1: {
+                // Archetype 1: Organic Jade / Subsurface Scattering (Mint Green)
+                vec3 baseJade = vec3(0.08, 0.82, 0.48);
                 float wrap = 0.45;
                 float diffuseWrap = max((dot(normal, lightDir) + wrap) / (1.0 + wrap), 0.0);
-                vec3 sssProfile = exp(-vec3(0.4, 0.9, 0.3) * (1.0 - diffuseWrap));
-                float a2 = 0.0225;
+                vec3 sssProfile = exp(-vec3(0.35, 0.9, 0.4) * (1.0 - diffuseWrap));
+                float a2 = 0.015;
                 float d = NdotH * NdotH * (a2 - 1.0) + 1.0;
                 float D = a2 / (3.14159 * d * d + 0.0001);
                 float F = 0.05 + 0.95 * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
                 vec3 coat = vec3((D * F) / (4.0 * NdotL * NdotV + 0.001) * NdotL);
-                color = baseJade * diffuseWrap * sssProfile * 2.0 + coat;
+                color = baseJade * diffuseWrap * sssProfile * 2.2 + coat;
+                break;
+            }
+            case 2: {
+                // Archetype 2: Dispersive Chrome / Glass (Mirror Conductor)
+                float a2 = 0.002;
+                float d = NdotH * NdotH * (a2 - 1.0) + 1.0;
+                float D = a2 / (3.14159 * d * d + 0.0001);
+                vec3 baseCol = vec3(0.95, 0.98, 1.0);
+                vec3 F = baseCol + (1.0 - baseCol) * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
+                color = (D * F) / (4.0 * NdotL * NdotV + 0.001) * NdotL + baseCol * (0.05 * NdotL);
                 break;
             }
             case 3: {
-                // Archetype 3: Anisotropic Woven Velvet with Charlie Sheen
+                // Archetype 3: Anisotropic Woven Velvet with Charlie Sheen (Deep Purple)
                 vec3 t, b;
                 buildOrthonormalBasis(normal, t, b);
                 float TdotH = dot(t, halfVec);
@@ -273,34 +276,104 @@ vec3 evalMaterialBSDF(uint matId, vec3 normal, vec3 inDir, vec3 hitPos, inout ui
                 
                 float sin2 = max(1.0 - NdotV * NdotV, 0.0);
                 float sheen = pow(sin2, 1.25) * 1.5;
-                vec3 sheenCol = vec3(0.95, 0.4, 0.85);
-                vec3 baseCol = vec3(0.35, 0.03, 0.28);
+                vec3 sheenCol = vec3(0.95, 0.4, 0.8);
+                vec3 baseCol = vec3(0.32, 0.02, 0.25);
                 
                 float weave = 0.5 + 0.5 * sin(dot(hitPos.xy, vec2(80.0)));
                 color = (baseCol * weave * NdotL + sheenCol * sheen + vec3(D_aniso * 0.1) * NdotL);
                 break;
             }
             case 4: {
-                // Archetype 4: Weathered Industrial Rust (Heavy 5-octave FBM loop)
+                // Archetype 4: Weathered Industrial Rust (Multi-octave FBM Procedural)
                 float rustNoise = fbmRust(hitPos * 4.0);
                 float rustMask = smoothstep(0.35, 0.65, rustNoise);
                 
-                vec3 steelCol = vec3(0.45, 0.47, 0.50);
+                vec3 steelCol = vec3(0.42, 0.44, 0.47);
                 float d_steel = NdotH * NdotH * (0.09 - 1.0) + 1.0;
                 float D_steel = 0.09 / (3.14159 * d_steel * d_steel + 0.0001);
                 vec3 steelSpec = steelCol * (D_steel / (4.0 * NdotL * NdotV + 0.001) * NdotL);
 
-                vec3 rustCol = vec3(0.55, 0.18, 0.05);
+                vec3 rustCol = vec3(0.55, 0.16, 0.05);
                 vec3 rustDiff = rustCol * NdotL;
 
                 color = mix(steelSpec, rustDiff, rustMask);
+                break;
+            }
+            case 5: {
+                // Archetype 5: Sleek Dark Charcoal Showroom Floor matching Blender
+                vec3 floorBase = vec3(0.06, 0.06, 0.07);
+                float d_floor = NdotH * NdotH * (0.09 - 1.0) + 1.0;
+                float D_floor = 0.09 / (3.14159 * d_floor * d_floor + 0.0001);
+                vec3 floorSpec = vec3(D_floor * 0.12 / (4.0 * NdotL * NdotV + 0.001) * NdotL);
+                color = floorBase * NdotL + floorSpec;
                 break;
             }
         }
         totalRadiance += color * lightCol;
     }
 
+    // Specular environment reflection for polished materials
+    vec3 reflDir = reflect(inDir, normal);
+    vec3 skyRefl = evalAnalyticSky(reflDir);
+    if (archetype == 0) {
+        totalRadiance += skyRefl * 0.35 * pow(clamp(1.0 - NdotV, 0.0, 1.0), 4.0);
+    } else if (archetype == 1) {
+        totalRadiance += skyRefl * 0.15 * pow(clamp(1.0 - NdotV, 0.0, 1.0), 5.0);
+    } else if (archetype == 2) {
+        totalRadiance = mix(totalRadiance, skyRefl * 1.2, 0.75);
+    } else if (archetype == 5) {
+        totalRadiance += skyRefl * 0.08 * pow(clamp(1.0 - NdotV, 0.0, 1.0), 3.0);
+    }
+
     return totalRadiance;
+}
+
+vec3 computeSmoothNormal(uint primId, vec3 hitPos, vec3 rayDir) {
+    vec3 normal;
+    if (primId < 65536) {
+        // Continuous Parametric Trefoil Torus Knot tube normal with segment interpolation
+        uint ringIdx = primId / 256;
+        float u0 = (float(ringIdx) / 256.0) * 6.2831853;
+        float u1 = (float((ringIdx + 1) % 256) / 256.0) * 6.2831853;
+
+        float r0 = 2.0 + 0.8 * cos(3.0 * u0);
+        vec3 unrot0 = vec3(r0 * cos(2.0 * u0), r0 * sin(2.0 * u0), -0.8 * sin(3.0 * u0));
+        float r1 = 2.0 + 0.8 * cos(3.0 * u1);
+        vec3 unrot1 = vec3(r1 * cos(2.0 * u1), r1 * sin(2.0 * u1), -0.8 * sin(3.0 * u1));
+
+        mat3 R = mat3(
+            0.907673, -0.094951, -0.408795,
+            0.243210,  0.912837,  0.327990,
+            0.342020, -0.397131,  0.851651
+        );
+        vec3 c0 = R * unrot0 + vec3(0.0, 0.0, 0.45);
+        vec3 c1 = R * unrot1 + vec3(0.0, 0.0, 0.45);
+
+        vec3 seg = c1 - c0;
+        float segLen2 = dot(seg, seg);
+        float tSeg = clamp(dot(hitPos - c0, seg) / max(segLen2, 0.00001), 0.0, 1.0);
+        vec3 center = c0 + tSeg * seg;
+
+        normal = normalize(hitPos - center);
+    } else {
+        // Showroom cavity dish: z = -1.5 + 0.035 * (x^2 + y^2)
+        normal = normalize(vec3(-0.07 * hitPos.x, -0.07 * hitPos.y, 1.0));
+    }
+    if (dot(normal, rayDir) > 0.0) normal = -normal;
+    return normal;
+}
+
+uint computeMaterialId(uint primId, vec3 hitPos) {
+    if (primId < 65536) {
+        // 5 broad continuous material sections matching Blender showroom scene (ring // 51)
+        uint ringIdx = primId / 256;
+        uint section = (ringIdx / 51) % 5;
+        uint subQueue = primId % 4;
+        return section * 4 + subQueue;
+    } else {
+        // Showroom floor: distribute across 12 queues (20..31) so no queue overflows
+        return 20 + ((primId - 65536) % 12);
+    }
 }
 
 void main() {
@@ -314,11 +387,17 @@ void main() {
     barrier();
 
     uint rngState = idx + pc.seed;
-    float fx = float(idx % 512) - 256.0 + 0.5;
-    float fy = float((idx / 512) % 512) - 256.0 + 0.5;
 
-    vec3 origin = vec3(fx * 0.02, fy * 0.02, -5.0);
-    vec3 direction = vec3(0.0, 0.0, 1.0);
+    // Perspective showroom camera matching Blender view (0, -8.2, 2.0) looking at (0, 0, 0.45)
+    vec3 camPos = vec3(0.0, -8.2, 2.0);
+    vec3 camForward = vec3(0.0, 0.9826, -0.1857);
+    vec3 camRight = vec3(1.0, 0.0, 0.0);
+    vec3 camUp = vec3(0.0, 0.1857, 0.9826);
+    float fov = 0.48; // ~52 deg FoV (38mm lens)
+
+    vec2 uv = vec2((float(idx % 1024) - 512.0 + 0.5) / 512.0, (float(idx / 1024) - 512.0 + 0.5) / 512.0);
+    vec3 origin = camPos;
+    vec3 direction = normalize(camForward + camRight * (uv.x * fov) - camUp * (uv.y * fov));
     vec3 accumulated = vec3(0.0);
     vec3 throughput = vec3(1.0);
     uint threadRays = 0;
@@ -328,7 +407,7 @@ void main() {
         // Mode 0: Material Divergence Stress Test (32 materials)
         threadRays++;
         rayQueryEXT query;
-        rayQueryInitializeEXT(query, topLevelAS, gl_RayFlagsNoneEXT, 0xFF, origin, 0.001, direction, 20.0);
+        rayQueryInitializeEXT(query, topLevelAS, gl_RayFlagsNoneEXT, 0xFF, origin, 0.01, direction, 50.0);
         while (rayQueryProceedEXT(query)) {}
 
         if (rayQueryGetIntersectionTypeEXT(query, true) == gl_RayQueryCommittedIntersectionTriangleEXT) {
@@ -336,14 +415,17 @@ void main() {
             float t = rayQueryGetIntersectionTEXT(query, true);
             vec3 hitPos = origin + direction * t;
             uint primId = rayQueryGetIntersectionPrimitiveIndexEXT(query, true);
-            // Derive normal
-            vec3 normal = (primId % 2 == 0) ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
-            if (dot(normal, direction) > 0.0) normal = -normal;
+            vec3 normal = computeSmoothNormal(primId, hitPos, direction);
+            uint matId = computeMaterialId(primId, hitPos);
 
-            // Divergent material ID assignment across threads in the wavefront
-            uint matId = (primId + idx) % 32;
             accumulated = evalMaterialBSDF(matId, normal, direction, hitPos, rngState);
             if (dot(accumulated, accumulated) >= 0.0) threadHits++;
+        } else {
+            accumulated = evalAnalyticSky(direction);
+        }
+
+        if (pc.dumpRenders != 0) {
+            fb.pixels[idx] = vec4(accumulated, 1.0);
         }
     } else if (pc.mode == 1) {
         // Mode 1: Multi-Bounce Path Tracing with Russian Roulette (SIMD Lane Starvation)
@@ -358,8 +440,7 @@ void main() {
                 float t = rayQueryGetIntersectionTEXT(query, true);
                 vec3 hitPos = origin + direction * t;
                 uint primId = rayQueryGetIntersectionPrimitiveIndexEXT(query, true);
-                vec3 normal = vec3(0.0, 1.0, 0.0);
-                if (dot(normal, direction) > 0.0) normal = -normal;
+                vec3 normal = computeSmoothNormal(primId, hitPos, direction);
 
                 // Hemisphere reflection
                 float u1 = rand_float(rngState);
@@ -390,7 +471,8 @@ void main() {
             threadHits++;
             float t = rayQueryGetIntersectionTEXT(query1, true);
             vec3 hitPos = origin + direction * t;
-            vec3 normal = vec3(0.0, 1.0, 0.0);
+            uint primId = rayQueryGetIntersectionPrimitiveIndexEXT(query1, true);
+            vec3 normal = computeSmoothNormal(primId, hitPos, direction);
 
             // Incoherent scattering: arbitrary random directions
             float u1 = rand_float(rngState);
@@ -424,7 +506,7 @@ void main() {
     } else if (pc.mode == 4) {
         // Mode 4: Stage Breakdown - Pure Material Shading (Megakernel Divergent, 4 Lights, No BVH)
         threadRays++;
-        vec3 hitPos = vec3(fx * 0.01, fy * 0.01, 1.5);
+        vec3 hitPos = vec3(uv.x * 5.0, uv.y * 5.0, 1.5);
         vec3 normal = ((idx % 2) == 0) ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
         uint matId = idx % 32;
         accumulated = evalMaterialBSDF(matId, normal, direction, hitPos, rngState);

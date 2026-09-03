@@ -19,7 +19,7 @@ class BenchmarkRunner {
 public:
   BenchmarkRunner(const std::vector<IComputeContext *> &contexts,
                   bool verbose = false, bool debug = false,
-                  bool dumpGeometry = false);
+                  bool dumpGeometry = false, bool dumpRenders = false);
   ~BenchmarkRunner();
 
   void run(const std::vector<std::string> &benchmarks_to_run);
@@ -51,4 +51,5 @@ private:
   bool verbose;
   bool debug;
   bool dumpGeometry;
+  bool dumpRenders;
 };
