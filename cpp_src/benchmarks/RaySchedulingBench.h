@@ -14,7 +14,6 @@
 class RaySchedulingBench : public IBenchmark {
 public:
   const char *GetName() const override { return "RayScheduling"; }
-  const char *GetMetric(uint32_t config_idx = 0) const override { return "MRays/s"; }
 
   bool IsSupported(const DeviceInfo &info,
                    IComputeContext *context = nullptr) const override;
@@ -31,11 +30,16 @@ public:
 
   BenchmarkResult GetResult(uint32_t config_idx = 0) const override;
 
-  uint32_t GetNumConfigs() const override { return 12; }
+  uint32_t GetNumConfigs() const override { return 16; }
   std::vector<std::string> GetAliases() const override {
     return {"rayscheduling", "rtscheduling", "rayexecutionparadigm", "rayparadigm", "rtparadigm", "workgraphs", "worklists", "dgc", "ser"};
   }
   std::string GetConfigName(uint32_t config_idx) const override;
+  const char *GetMetric(uint32_t config_idx = 0) const override {
+    if (config_idx == 13 || config_idx == 14) return "MHits/s";
+    if (config_idx == 15) return "MRecords/s";
+    return "MRays/s";
+  }
   bool IsConfigSupported(uint32_t config_idx) const override {
     return !unsupportedConfig[config_idx];
   }
@@ -61,6 +65,7 @@ private:
   ComputeKernel kernelTraditional = nullptr;
   ComputeKernel kernelClassify = nullptr;
   ComputeKernel kernelMaterial = nullptr;
+  ComputeKernel kernelMaterialSpecialized[5] = {nullptr};
   ComputeKernel kernelBounce = nullptr;
   ComputeKernel kernelWorkGraph = nullptr;
 
@@ -94,7 +99,7 @@ private:
 
   uint32_t rayCount = 1000000;
   uint32_t numPrimitives = 4096;
-  mutable double results[12] = {0.0};
-  mutable bool unsupportedConfig[12] = {false};
-  mutable std::string unsupportedReason[12];
+  mutable double results[16] = {0.0};
+  mutable bool unsupportedConfig[16] = {false};
+  mutable std::string unsupportedReason[16];
 };

@@ -226,6 +226,14 @@ std::string RaySchedulingBench::GetConfigName(uint32_t config_idx) const {
     return "Incoherent Rays - Work Lists / DGC (Directional Octant Binning)";
   case 11:
     return "Incoherent Rays - Work Graphs (Autonomous Directional Node Enqueue)";
+  case 12:
+    return "Stage Breakdown - Pure BVH Traversal (98K Triangles, No Shading)";
+  case 13:
+    return "Stage Breakdown - Pure Material Shading (Traditional Megakernel, 4 Lights)";
+  case 14:
+    return "Stage Breakdown - Pure Material Shading (Work Lists Specialized, 4 Lights)";
+  case 15:
+    return "Stage Breakdown - Stream Compaction & Memory Spilling Overhead";
   default:
     return "Unknown";
   }
@@ -236,7 +244,9 @@ const char *RaySchedulingBench::GetSubCategory(uint32_t config_idx) const {
     return "Material Divergence";
   if (config_idx < 8)
     return "Multi-Bounce Path Tracing";
-  return "Incoherent Secondary Rays";
+  if (config_idx < 12)
+    return "Incoherent Secondary Rays";
+  return "Stage Breakdown Analysis";
 }
 
 void RaySchedulingBench::Setup(IComputeContext &context_ref,
@@ -361,6 +371,13 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
       (kdir / "vulkan" / "rt_scheduling_worklist_classify.comp").string(), "main", 4);
   kernelMaterial = vContext->createKernel(
       (kdir / "vulkan" / "rt_scheduling_worklist_material.comp").string(), "main", 3);
+  for (uint32_t arch = 0; arch < 5; ++arch) {
+    kernelMaterialSpecialized[arch] = vContext->createKernelWithSpec(
+        (kdir / "vulkan" / "rt_scheduling_worklist_material.comp").string(), "main", 3, 0, arch);
+    vContext->setKernelAS(kernelMaterialSpecialized[arch], 0, (AccelerationStructure)sceneTlas);
+    vContext->setKernelArg(kernelMaterialSpecialized[arch], 1, resultBuffer);
+    vContext->setKernelArg(kernelMaterialSpecialized[arch], 2, workListBuffer);
+  }
   kernelBounce = vContext->createKernel(
       (kdir / "vulkan" / "rt_scheduling_worklist_bounce.comp").string(), "main", 3);
   kernelWorkGraph = vContext->createKernel(
@@ -368,7 +385,7 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
 
   // Check hardware SER support
   bool serSupported = vContext->isSERSupported();
-  for (int i = 0; i < 12; ++i) {
+  for (int i = 0; i < 16; ++i) {
     unsupportedConfig[i] = false;
     unsupportedReason[i] = "";
   }
@@ -400,7 +417,7 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
     unsupportedReason[11] = "Work Graphs (VK_AMDX_shader_enqueue) not exposed by driver";
   }
 
-  // Pre-generate static indirect batches for Work Lists dispatches
+  // Pre-generate static indirect batches for Work Lists dispatches with specialized PSOs
   materialBatches.reserve(32);
   for (uint32_t m = 0; m < 32; ++m) {
     struct {
@@ -409,8 +426,22 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
     } pcMat{m, 32768};
     std::vector<uint8_t> pcData(sizeof(pcMat));
     std::memcpy(pcData.data(), &pcMat, sizeof(pcMat));
-    materialBatches.push_back({m * sizeof(uint32_t) * 3, pcData});
+    uint32_t arch = m % 5;
+    materialBatches.push_back({m * sizeof(uint32_t) * 3, pcData, kernelMaterialSpecialized[arch]});
   }
+
+  // Pre-initialize indirectBuffer commands and workList counters for isolated stage testing
+  std::vector<uint32_t> initCmds(32 * 3);
+  std::vector<uint32_t> initCounters(32);
+  uint32_t perQueue = rayCount / 32;
+  for (uint32_t m = 0; m < 32; ++m) {
+    initCmds[m * 3 + 0] = (perQueue + 63) / 64;
+    initCmds[m * 3 + 1] = 1;
+    initCmds[m * 3 + 2] = 1;
+    initCounters[m] = perQueue;
+  }
+  context->writeBuffer(indirectBuffer, 0, initCmds.size() * sizeof(uint32_t), initCmds.data());
+  context->writeBuffer(workListBuffer, 0, initCounters.size() * sizeof(uint32_t), initCounters.data());
 
   bounceBatches.reserve(3);
   for (uint32_t b = 1; b < 4; ++b) {
@@ -611,6 +642,51 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     vContext->dispatch(kernelWorkGraph, (rayCount + 63) / 64, 1, 1, 64, 1, 1);
     break;
   }
+  case 12: { // Stage Breakdown - Pure BVH Traversal (98K Triangles, No Shading)
+    vContext->setKernelAS(kernelTraditional, 0, (AccelerationStructure)sceneTlas);
+    vContext->setKernelArg(kernelTraditional, 1, resultBuffer);
+    struct {
+      uint32_t rayCount;
+      uint32_t mode;
+      uint32_t bounces;
+      uint32_t seed;
+    } pc{rayCount, 3, 1, seed};
+    vContext->setKernelArg(kernelTraditional, 2, sizeof(pc), &pc);
+    vContext->dispatch(kernelTraditional, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
+    break;
+  }
+  case 13: { // Stage Breakdown - Pure Material Shading (Traditional Megakernel, 4 Lights)
+    vContext->setKernelAS(kernelTraditional, 0, (AccelerationStructure)sceneTlas);
+    vContext->setKernelArg(kernelTraditional, 1, resultBuffer);
+    struct {
+      uint32_t rayCount;
+      uint32_t mode;
+      uint32_t bounces;
+      uint32_t seed;
+    } pc{rayCount, 4, 1, seed};
+    vContext->setKernelArg(kernelTraditional, 2, sizeof(pc), &pc);
+    vContext->dispatch(kernelTraditional, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
+    break;
+  }
+  case 14: { // Stage Breakdown - Pure Material Shading (Work Lists Specialized, 4 Lights)
+    vContext->dispatchIndirectSequence(kernelMaterial, indirectBuffer, materialBatches);
+    break;
+  }
+  case 15: { // Stage Breakdown - Stream Compaction & Memory Spilling Overhead
+    vContext->setKernelAS(kernelClassify, 0, (AccelerationStructure)sceneTlas);
+    vContext->setKernelArg(kernelClassify, 1, resultBuffer);
+    vContext->setKernelArg(kernelClassify, 2, workListBuffer);
+    vContext->setKernelArg(kernelClassify, 3, indirectBuffer);
+    struct {
+      uint32_t rayCount;
+      uint32_t mode;
+      uint32_t bounce;
+      uint32_t seed;
+    } pcClassify{rayCount, 3, 0, seed};
+    vContext->setKernelArg(kernelClassify, 4, sizeof(pcClassify), &pcClassify);
+    vContext->dispatch(kernelClassify, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
+    break;
+  }
   }
 #endif
 }
@@ -631,6 +707,10 @@ void RaySchedulingBench::Teardown() {
     context->releaseKernel(kernelClassify);
   if (kernelMaterial)
     context->releaseKernel(kernelMaterial);
+  for (uint32_t arch = 0; arch < 5; ++arch) {
+    if (kernelMaterialSpecialized[arch])
+      context->releaseKernel(kernelMaterialSpecialized[arch]);
+  }
   if (kernelBounce)
     context->releaseKernel(kernelBounce);
   if (kernelWorkGraph)

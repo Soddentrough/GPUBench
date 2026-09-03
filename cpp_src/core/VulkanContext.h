@@ -45,6 +45,11 @@ public:
   ComputeKernel createKernel(const std::string &file_name,
                              const std::string &kernel_name,
                              uint32_t num_buffer_args) override;
+  ComputeKernel createKernelWithSpec(const std::string &file_name,
+                                     const std::string &kernel_name,
+                                     uint32_t num_buffer_args,
+                                     uint32_t spec_id,
+                                     uint32_t spec_val);
   ComputeKernel createRTPipeline(const std::string &rgen_path,
                                  const std::string &rmiss_path,
                                  const std::vector<std::string> &rchit_paths,
@@ -106,6 +111,7 @@ public:
   struct IndirectBatchEntry {
     VkDeviceSize offset;
     std::vector<uint8_t> pushConstants;
+    ComputeKernel specializedKernel = nullptr;
   };
 
   void dispatchIndirect(ComputeKernel kernel, ComputeBuffer indirectBuffer,
@@ -187,6 +193,12 @@ private:
 
   uint32_t expectedKernelCount = 0;
   uint32_t createdKernelCount = 0;
+
+  ComputeKernel createKernelInternal(const std::string &file_name,
+                                     const std::string &kernel_name,
+                                     uint32_t num_buffer_args,
+                                     const uint32_t *spec_id,
+                                     const uint32_t *spec_val);
   std::set<std::string> enabledExtensionsSet;
   void printProgressBar(uint32_t current, uint32_t total,
                         const std::string &kernel_name);

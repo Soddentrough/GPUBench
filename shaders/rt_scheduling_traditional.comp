@@ -178,108 +178,129 @@ vec3 evalAnalyticSky(vec3 dir) {
     return sky;
 }
 
-// 5 Realistic Production Material Archetypes across 32 IDs
+// 4 Realistic Clustered Production Lights
+struct SceneLight {
+    vec3 dir;
+    vec3 color;
+    float intensity;
+};
+
+const SceneLight SCENE_LIGHTS[4] = SceneLight[4](
+    SceneLight(vec3(0.40, 0.55, 0.72), vec3(1.0, 0.95, 0.88), 3.0),   // Light 0: Key Sun
+    SceneLight(vec3(-0.65, 0.35, -0.68), vec3(1.0, 0.55, 0.20), 1.5),  // Light 1: Warm Rim Light
+    SceneLight(vec3(0.10, 0.85, -0.50), vec3(0.40, 0.65, 1.0), 1.0),   // Light 2: Cool Fill Light
+    SceneLight(vec3(0.0, -1.0, 0.0), vec3(0.35, 0.25, 0.18), 0.6)      // Light 3: Ground Bounce Light
+);
+
+// 5 Realistic Production Material Archetypes across 32 IDs with Multi-Light Integration
 vec3 evalMaterialBSDF(uint matId, vec3 normal, vec3 inDir, vec3 hitPos, inout uint rng) {
     vec3 viewDir = -inDir;
-    vec3 lightDir = normalize(vec3(0.57735, 0.57735, 0.57735));
-    vec3 halfVec = normalize(viewDir + lightDir);
-    float NdotL = max(dot(normal, lightDir), 0.0);
     float NdotV = max(dot(normal, viewDir), 0.001);
-    float NdotH = max(dot(normal, halfVec), 0.0);
-    float VdotH = max(dot(viewDir, halfVec), 0.0);
-    vec3 color = vec3(0.0);
-
+    vec3 totalRadiance = vec3(0.0);
     uint archetype = matId % 5;
 
-    switch (archetype) {
-        case 0: {
-            // Archetype 0: Pure Conductors & Standard Dielectric PBR (Fast baseline)
-            float a2 = 0.04;
-            float d = NdotH * NdotH * (a2 - 1.0) + 1.0;
-            float D = a2 / (3.14159 * d * d + 0.0001);
-            float k = 0.18;
-            float G = (NdotL / (NdotL * (1.0 - k) + k)) * (NdotV / (NdotV * (1.0 - k) + k));
-            vec3 baseCol = (matId % 2 == 0) ? vec3(1.0, 0.78, 0.34) : vec3(0.9, 0.9, 0.92);
-            vec3 F = baseCol + (1.0 - baseCol) * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
-            color = (D * G * F) / (4.0 * NdotL * NdotV + 0.001) * NdotL + baseCol * 0.1;
-            break;
-        }
-        case 1: {
-            // Archetype 1: Automotive Clearcoat with Metallic Voronoi Flakes
-            float flakeNoise = voronoiFlakes(hitPos * 120.0);
-            vec3 flakeNormal = normalize(normal + (fract(vec3(flakeNoise * 13.0, flakeNoise * 7.0, flakeNoise * 19.0)) - 0.5) * 0.15);
-            float flakeNdotH = max(dot(flakeNormal, halfVec), 0.0);
-            float flakeNdotL = max(dot(flakeNormal, lightDir), 0.0);
-            
-            float a2 = 0.06;
-            float d = flakeNdotH * flakeNdotH * (a2 - 1.0) + 1.0;
-            float D_base = a2 / (3.14159 * d * d + 0.0001);
-            vec3 baseTint = vec3(0.85, 0.04, 0.08); // Crimson
-            vec3 baseSpec = (D_base * 0.8 * baseTint) / (4.0 * NdotL * NdotV + 0.001) * flakeNdotL;
+    for (int l = 0; l < 4; ++l) {
+        vec3 lightDir = normalize(SCENE_LIGHTS[l].dir);
+        vec3 lightCol = SCENE_LIGHTS[l].color * SCENE_LIGHTS[l].intensity;
+        vec3 halfVec = normalize(viewDir + lightDir);
+        float NdotL = max(dot(normal, lightDir), 0.0);
+        float NdotH = max(dot(normal, halfVec), 0.0);
+        float VdotH = max(dot(viewDir, halfVec), 0.0);
 
-            float a2_coat = 0.0004;
-            float d_coat = NdotH * NdotH * (a2_coat - 1.0) + 1.0;
-            float D_coat = a2_coat / (3.14159 * d_coat * d_coat + 0.0001);
-            float F_coat = 0.04 + 0.96 * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
-            vec3 coatSpec = vec3((D_coat * F_coat) / (4.0 * NdotL * NdotV + 0.001) * NdotL);
+        if (NdotL <= 0.0 && archetype != 2) continue; // SSS can wrap around
 
-            vec3 absorption = exp(-vec3(0.1, 0.8, 0.7) * 0.05);
-            color = coatSpec + baseSpec * (1.0 - F_coat) * absorption;
-            break;
-        }
-        case 2: {
-            // Archetype 2: Organic Jade / Subsurface Scattering
-            vec3 baseJade = vec3(0.1, 0.75, 0.45);
-            float wrap = 0.45;
-            float diffuseWrap = max((dot(normal, lightDir) + wrap) / (1.0 + wrap), 0.0);
-            vec3 sssProfile = exp(-vec3(0.4, 0.9, 0.3) * (1.0 - diffuseWrap));
-            float a2 = 0.0225;
-            float d = NdotH * NdotH * (a2 - 1.0) + 1.0;
-            float D = a2 / (3.14159 * d * d + 0.0001);
-            float F = 0.05 + 0.95 * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
-            vec3 coat = vec3((D * F) / (4.0 * NdotL * NdotV + 0.001) * NdotL);
-            color = baseJade * diffuseWrap * sssProfile * 2.0 + coat;
-            break;
-        }
-        case 3: {
-            // Archetype 3: Anisotropic Woven Velvet with Charlie Sheen
-            vec3 t, b;
-            buildOrthonormalBasis(normal, t, b);
-            float TdotH = dot(t, halfVec);
-            float BdotH = dot(b, halfVec);
-            float ax = 0.04;
-            float ay = 0.36;
-            float d_aniso = (TdotH * TdotH) / (ax * ax) + (BdotH * BdotH) / (ay * ay) + NdotH * NdotH;
-            float D_aniso = 1.0 / (3.14159 * ax * ay * d_aniso * d_aniso + 0.0001);
-            
-            float sin2 = max(1.0 - NdotV * NdotV, 0.0);
-            float sheen = pow(sin2, 1.25) * 1.5;
-            vec3 sheenCol = vec3(0.95, 0.4, 0.85);
-            vec3 baseCol = vec3(0.35, 0.03, 0.28);
-            
-            float weave = 0.5 + 0.5 * sin(dot(hitPos.xy, vec2(80.0)));
-            color = (baseCol * weave * NdotL + sheenCol * sheen + vec3(D_aniso * 0.1) * NdotL);
-            break;
-        }
-        case 4: {
-            // Archetype 4: Weathered Industrial Rust (Heavy 5-octave FBM loop)
-            float rustNoise = fbmRust(hitPos * 4.0);
-            float rustMask = smoothstep(0.35, 0.65, rustNoise);
-            
-            vec3 steelCol = vec3(0.45, 0.47, 0.50);
-            float d_steel = NdotH * NdotH * (0.09 - 1.0) + 1.0;
-            float D_steel = 0.09 / (3.14159 * d_steel * d_steel + 0.0001);
-            vec3 steelSpec = steelCol * (D_steel / (4.0 * NdotL * NdotV + 0.001) * NdotL);
+        vec3 color = vec3(0.0);
+        switch (archetype) {
+            case 0: {
+                // Archetype 0: Pure Conductors & Standard Dielectric PBR
+                float a2 = 0.04;
+                float d = NdotH * NdotH * (a2 - 1.0) + 1.0;
+                float D = a2 / (3.14159 * d * d + 0.0001);
+                float k = 0.18;
+                float G = (NdotL / (NdotL * (1.0 - k) + k)) * (NdotV / (NdotV * (1.0 - k) + k));
+                vec3 baseCol = (matId % 2 == 0) ? vec3(1.0, 0.78, 0.34) : vec3(0.9, 0.9, 0.92);
+                vec3 F = baseCol + (1.0 - baseCol) * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
+                color = (D * G * F) / (4.0 * NdotL * NdotV + 0.001) * NdotL + baseCol * (0.1 * NdotL);
+                break;
+            }
+            case 1: {
+                // Archetype 1: Automotive Clearcoat with Metallic Voronoi Flakes
+                float flakeNoise = voronoiFlakes(hitPos * 120.0);
+                vec3 flakeNormal = normalize(normal + (fract(vec3(flakeNoise * 13.0, flakeNoise * 7.0, flakeNoise * 19.0)) - 0.5) * 0.15);
+                float flakeNdotH = max(dot(flakeNormal, halfVec), 0.0);
+                float flakeNdotL = max(dot(flakeNormal, lightDir), 0.0);
+                
+                float a2 = 0.06;
+                float d = flakeNdotH * flakeNdotH * (a2 - 1.0) + 1.0;
+                float D_base = a2 / (3.14159 * d * d + 0.0001);
+                vec3 baseTint = vec3(0.85, 0.04, 0.08); // Crimson
+                vec3 baseSpec = (D_base * 0.8 * baseTint) / (4.0 * NdotL * NdotV + 0.001) * flakeNdotL;
 
-            vec3 rustCol = vec3(0.55, 0.18, 0.05);
-            vec3 rustDiff = rustCol * NdotL;
+                float a2_coat = 0.0004;
+                float d_coat = NdotH * NdotH * (a2_coat - 1.0) + 1.0;
+                float D_coat = a2_coat / (3.14159 * d_coat * d_coat + 0.0001);
+                float F_coat = 0.04 + 0.96 * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
+                vec3 coatSpec = vec3((D_coat * F_coat) / (4.0 * NdotL * NdotV + 0.001) * NdotL);
 
-            color = mix(steelSpec, rustDiff, rustMask);
-            break;
+                vec3 absorption = exp(-vec3(0.1, 0.8, 0.7) * 0.05);
+                color = coatSpec + baseSpec * (1.0 - F_coat) * absorption;
+                break;
+            }
+            case 2: {
+                // Archetype 2: Organic Jade / Subsurface Scattering
+                vec3 baseJade = vec3(0.1, 0.75, 0.45);
+                float wrap = 0.45;
+                float diffuseWrap = max((dot(normal, lightDir) + wrap) / (1.0 + wrap), 0.0);
+                vec3 sssProfile = exp(-vec3(0.4, 0.9, 0.3) * (1.0 - diffuseWrap));
+                float a2 = 0.0225;
+                float d = NdotH * NdotH * (a2 - 1.0) + 1.0;
+                float D = a2 / (3.14159 * d * d + 0.0001);
+                float F = 0.05 + 0.95 * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
+                vec3 coat = vec3((D * F) / (4.0 * NdotL * NdotV + 0.001) * NdotL);
+                color = baseJade * diffuseWrap * sssProfile * 2.0 + coat;
+                break;
+            }
+            case 3: {
+                // Archetype 3: Anisotropic Woven Velvet with Charlie Sheen
+                vec3 t, b;
+                buildOrthonormalBasis(normal, t, b);
+                float TdotH = dot(t, halfVec);
+                float BdotH = dot(b, halfVec);
+                float ax = 0.04;
+                float ay = 0.36;
+                float d_aniso = (TdotH * TdotH) / (ax * ax) + (BdotH * BdotH) / (ay * ay) + NdotH * NdotH;
+                float D_aniso = 1.0 / (3.14159 * ax * ay * d_aniso * d_aniso + 0.0001);
+                
+                float sin2 = max(1.0 - NdotV * NdotV, 0.0);
+                float sheen = pow(sin2, 1.25) * 1.5;
+                vec3 sheenCol = vec3(0.95, 0.4, 0.85);
+                vec3 baseCol = vec3(0.35, 0.03, 0.28);
+                
+                float weave = 0.5 + 0.5 * sin(dot(hitPos.xy, vec2(80.0)));
+                color = (baseCol * weave * NdotL + sheenCol * sheen + vec3(D_aniso * 0.1) * NdotL);
+                break;
+            }
+            case 4: {
+                // Archetype 4: Weathered Industrial Rust (Heavy 5-octave FBM loop)
+                float rustNoise = fbmRust(hitPos * 4.0);
+                float rustMask = smoothstep(0.35, 0.65, rustNoise);
+                
+                vec3 steelCol = vec3(0.45, 0.47, 0.50);
+                float d_steel = NdotH * NdotH * (0.09 - 1.0) + 1.0;
+                float D_steel = 0.09 / (3.14159 * d_steel * d_steel + 0.0001);
+                vec3 steelSpec = steelCol * (D_steel / (4.0 * NdotL * NdotV + 0.001) * NdotL);
+
+                vec3 rustCol = vec3(0.55, 0.18, 0.05);
+                vec3 rustDiff = rustCol * NdotL;
+
+                color = mix(steelSpec, rustDiff, rustMask);
+                break;
+            }
         }
+        totalRadiance += color * lightCol;
     }
 
-    return color;
+    return totalRadiance;
 }
 
 void main() {
@@ -322,6 +343,7 @@ void main() {
             // Divergent material ID assignment across threads in the wavefront
             uint matId = (primId + idx) % 32;
             accumulated = evalMaterialBSDF(matId, normal, direction, hitPos, rngState);
+            if (dot(accumulated, accumulated) >= 0.0) threadHits++;
         }
     } else if (pc.mode == 1) {
         // Mode 1: Multi-Bounce Path Tracing with Russian Roulette (SIMD Lane Starvation)
@@ -357,7 +379,7 @@ void main() {
                 break;
             }
         }
-    } else {
+    } else if (pc.mode == 2) {
         // Mode 2: Incoherent Secondary GI (Hemisphere Scattering without Spatial Binning)
         threadRays++;
         rayQueryEXT query1;
@@ -389,6 +411,25 @@ void main() {
             }
         } else {
             accumulated += evalAnalyticSky(direction);
+        }
+    } else if (pc.mode == 3) {
+        // Mode 3: Stage Breakdown - Pure BVH Traversal (98K Triangles, No Shading)
+        threadRays++;
+        rayQueryEXT query;
+        rayQueryInitializeEXT(query, topLevelAS, gl_RayFlagsNoneEXT, 0xFF, origin, 0.001, direction, 20.0);
+        while (rayQueryProceedEXT(query)) {}
+        if (rayQueryGetIntersectionTypeEXT(query, true) == gl_RayQueryCommittedIntersectionTriangleEXT) {
+            threadHits++;
+        }
+    } else if (pc.mode == 4) {
+        // Mode 4: Stage Breakdown - Pure Material Shading (Megakernel Divergent, 4 Lights, No BVH)
+        threadRays++;
+        vec3 hitPos = vec3(fx * 0.01, fy * 0.01, 1.5);
+        vec3 normal = ((idx % 2) == 0) ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+        uint matId = idx % 32;
+        accumulated = evalMaterialBSDF(matId, normal, direction, hitPos, rngState);
+        if (dot(accumulated, accumulated) >= 0.0) {
+            threadHits++;
         }
     }
 

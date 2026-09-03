@@ -106,11 +106,28 @@ void main() {
     uint threadRays = 1;
     uint threadHits = 0;
 
-    rayQueryEXT query;
-    rayQueryInitializeEXT(query, topLevelAS, gl_RayFlagsNoneEXT, 0xFF, origin, 0.001, direction, 20.0);
-    while (rayQueryProceedEXT(query)) {}
+    if (pc.mode == 3) {
+        // Mode 3: Stage Breakdown - Pure Stream Compaction & Payload Spilling (No BVH)
+        threadHits = 1;
+        uint matId = idx % 32;
+        uint slot = atomicAdd(worklist.queueCounters[matId], 1);
+        if (slot < 32768) {
+            uint recordIdx = matId * 32768 + slot;
+            worklist.rayRecords[recordIdx].originAndMatId = vec4(origin, uintBitsToFloat(matId));
+            worklist.rayRecords[recordIdx].directionAndSeed = vec4(direction, uintBitsToFloat(rngState));
+            worklist.rayRecords[recordIdx].throughputAndMorton = vec4(1.0, 1.0, 1.0, 0.0);
+        }
+        if ((slot % 64) == 0) {
+            atomicMax(indirectCmds.commands[matId].x, (slot + 64) / 64);
+            indirectCmds.commands[matId].y = 1;
+            indirectCmds.commands[matId].z = 1;
+        }
+    } else {
+        rayQueryEXT query;
+        rayQueryInitializeEXT(query, topLevelAS, gl_RayFlagsNoneEXT, 0xFF, origin, 0.001, direction, 20.0);
+        while (rayQueryProceedEXT(query)) {}
 
-    if (rayQueryGetIntersectionTypeEXT(query, true) == gl_RayQueryCommittedIntersectionTriangleEXT) {
+        if (rayQueryGetIntersectionTypeEXT(query, true) == gl_RayQueryCommittedIntersectionTriangleEXT) {
         threadHits = 1;
         float t = rayQueryGetIntersectionTEXT(query, true);
         vec3 hitPos = origin + direction * t;
@@ -183,6 +200,7 @@ void main() {
                 indirectCmds.commands[octant].z = 1;
             }
         }
+    }
     }
 
     if (threadRays > 0) atomicAdd(localRays, threadRays);

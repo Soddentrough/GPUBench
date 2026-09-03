@@ -1,6 +1,6 @@
 [package]
 name = "gpubench-gui"
-version = "1.4.0"
+version = "1.4.1"
 edition = "2024"
 
 [dependencies]

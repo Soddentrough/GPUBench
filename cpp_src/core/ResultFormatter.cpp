@@ -231,7 +231,8 @@ void ResultFormatter::print() {
                    if (res.metric == "GRays/s")
                      precision = 3;
                  } else if (res.metric == "MTris/s" || res.metric == "MInst/s" ||
-                            res.metric == "MRays/s") {
+                            res.metric == "MRays/s" || res.metric == "MHits/s" ||
+                            res.metric == "MRecords/s") {
                    value /= 1e6;
                  }
                 valStr = formatDouble(value, precision);

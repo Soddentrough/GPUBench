@@ -873,6 +873,22 @@ VkBuffer VulkanContext::getVkBuffer(ComputeBuffer buffer) const {
 ComputeKernel VulkanContext::createKernel(const std::string &file_name,
                                           const std::string &kernel_name,
                                           uint32_t num_buffer_args) {
+  return createKernelInternal(file_name, kernel_name, num_buffer_args, nullptr, nullptr);
+}
+
+ComputeKernel VulkanContext::createKernelWithSpec(const std::string &file_name,
+                                                 const std::string &kernel_name,
+                                                 uint32_t num_buffer_args,
+                                                 uint32_t spec_id,
+                                                 uint32_t spec_val) {
+  return createKernelInternal(file_name, kernel_name, num_buffer_args, &spec_id, &spec_val);
+}
+
+ComputeKernel VulkanContext::createKernelInternal(const std::string &file_name,
+                                                 const std::string &kernel_name,
+                                                 uint32_t num_buffer_args,
+                                                 const uint32_t *spec_id,
+                                                 const uint32_t *spec_val) {
   notifyKernelCreated(file_name);
   if (file_name.find(".rgen") != std::string::npos ||
       file_name.find(".rmiss") != std::string::npos ||
@@ -1043,6 +1059,21 @@ ComputeKernel VulkanContext::createKernel(const std::string &file_name,
   pipelineInfo.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
   pipelineInfo.stage.module = vulkanKernel->shaderModule;
   pipelineInfo.stage.pName = kernel_name.c_str();
+
+  VkSpecializationMapEntry specEntry{};
+  VkSpecializationInfo specInfo{};
+  if (spec_id && spec_val) {
+    specEntry.constantID = *spec_id;
+    specEntry.offset = 0;
+    specEntry.size = sizeof(uint32_t);
+
+    specInfo.mapEntryCount = 1;
+    specInfo.pMapEntries = &specEntry;
+    specInfo.dataSize = sizeof(uint32_t);
+    specInfo.pData = spec_val;
+
+    pipelineInfo.stage.pSpecializationInfo = &specInfo;
+  }
 
   VkResult result =
       vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo,
@@ -1329,10 +1360,20 @@ void VulkanContext::dispatchIndirectSequence(
                           &vulkanKernel->descriptorSet, 0, nullptr);
 
   VkBuffer vkIndirect = getVkBuffer(indirectBuffer);
+  VulkanKernel *lastBound = vulkanKernel;
 
   for (const auto &entry : entries) {
+    VulkanKernel *kToBind = entry.specializedKernel ? kernels[entry.specializedKernel] : vulkanKernel;
+    if (kToBind && kToBind != lastBound) {
+      vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                        kToBind->pipeline);
+      vkCmdBindDescriptorSets(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                              kToBind->pipelineLayout, 0, 1,
+                              &kToBind->descriptorSet, 0, nullptr);
+      lastBound = kToBind;
+    }
     if (!entry.pushConstants.empty()) {
-      vkCmdPushConstants(frame.commandBuffer, vulkanKernel->pipelineLayout,
+      vkCmdPushConstants(frame.commandBuffer, lastBound->pipelineLayout,
                          VK_SHADER_STAGE_COMPUTE_BIT, 0,
                          entry.pushConstants.size(),
                          entry.pushConstants.data());
@@ -1436,9 +1477,19 @@ void VulkanContext::dispatchWorkListSequence(
                           &secondKernel->descriptorSet, 0, nullptr);
 
   VkBuffer vkIndirect = getVkBuffer(indirectBuffer);
+  VulkanKernel *lastBound = secondKernel;
   for (const auto &entry : entries) {
+    VulkanKernel *kToBind = entry.specializedKernel ? kernels[entry.specializedKernel] : secondKernel;
+    if (kToBind && kToBind != lastBound) {
+      vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                        kToBind->pipeline);
+      vkCmdBindDescriptorSets(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                              kToBind->pipelineLayout, 0, 1,
+                              &kToBind->descriptorSet, 0, nullptr);
+      lastBound = kToBind;
+    }
     if (!entry.pushConstants.empty()) {
-      vkCmdPushConstants(frame.commandBuffer, secondKernel->pipelineLayout,
+      vkCmdPushConstants(frame.commandBuffer, lastBound->pipelineLayout,
                          VK_SHADER_STAGE_COMPUTE_BIT, 0,
                          entry.pushConstants.size(),
                          entry.pushConstants.data());

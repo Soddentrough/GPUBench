@@ -1187,7 +1187,7 @@ impl Application for GPUBenchApp {
             row![
                 text("GPUBench").size(24).style(color!(0xF8FAFC)),
                 Space::with_width(8),
-                container(text("v1.4.0").size(10).style(color!(0x818CF8)))
+                container(text("v1.4.1").size(10).style(color!(0x818CF8)))
                     .padding([2, 6])
                     .style(|_t: &Theme| container::Appearance {
                         background: Some(Background::Color(color!(0x6366F1, 0.15))),
@@ -2147,8 +2147,8 @@ impl GPUBenchApp {
                     if res.subcategory == "Material Divergence" || res.subcategory == "Execution Divergence" { self.gpu_rt_divergence = self.gpu_rt_divergence.max(value); }
                     if res.subcategory == "Payload Register Pressure" { self.gpu_rt_payload = self.gpu_rt_payload.max(value); }
                     if res.subcategory == "Procedural Intersection" { self.gpu_rt_procedural = self.gpu_rt_procedural.max(value); }
-                    if res.subcategory == "Path Tracing" { self.gpu_rt_pathtracing = self.gpu_rt_pathtracing.max(value); }
-                    if res.benchmarkName.contains("RayScheduling") || res.benchmarkName.contains("RayExecutionParadigm") {
+                    if (res.benchmarkName.contains("RayScheduling") || res.benchmarkName.contains("RayExecutionParadigm"))
+                        && !res.benchmarkName.contains("Stage Breakdown") {
                         if res.benchmarkName.contains("Work Graphs") {
                             self.gpu_rt_scheduling_workgraph = self.gpu_rt_scheduling_workgraph.max(value);
                         } else if res.benchmarkName.contains("Work Lists") {
