@@ -1,4 +1,4 @@
-#include "RayParadigmBench.h"
+#include "RaySchedulingBench.h"
 #include "core/VulkanContext.h"
 #include <algorithm>
 #include <cmath>
@@ -8,7 +8,7 @@
 #include <stdexcept>
 
 #ifdef HAVE_VULKAN
-void RayParadigmBench::loadRTProcs(VkDevice device) {
+void RaySchedulingBench::loadRTProcs(VkDevice device) {
   vkGetAccelerationStructureBuildSizesKHR_ptr =
       (PFN_vkGetAccelerationStructureBuildSizesKHR)vkGetDeviceProcAddr(
           device, "vkGetAccelerationStructureBuildSizesKHR");
@@ -26,7 +26,7 @@ void RayParadigmBench::loadRTProcs(VkDevice device) {
           device, "vkDestroyAccelerationStructureKHR");
 }
 
-void RayParadigmBench::buildAS() {
+void RaySchedulingBench::buildAS() {
   VulkanContext *vContext = static_cast<VulkanContext *>(context);
   VkDevice device = vContext->getVulkanDevice();
   VkQueue queue = vContext->getComputeQueue();
@@ -194,13 +194,13 @@ void RayParadigmBench::buildAS() {
 }
 #endif // HAVE_VULKAN
 
-bool RayParadigmBench::IsSupported(const DeviceInfo &info,
+bool RaySchedulingBench::IsSupported(const DeviceInfo &info,
                                    IComputeContext *computeContext) const {
   return info.rayTracingSupport &&
          (computeContext && computeContext->getBackend() == ComputeBackend::Vulkan);
 }
 
-std::string RayParadigmBench::GetConfigName(uint32_t config_idx) const {
+std::string RaySchedulingBench::GetConfigName(uint32_t config_idx) const {
   switch (config_idx) {
   case 0:
     return "Material Divergence - Traditional Megakernel";
@@ -231,7 +231,7 @@ std::string RayParadigmBench::GetConfigName(uint32_t config_idx) const {
   }
 }
 
-const char *RayParadigmBench::GetSubCategory(uint32_t config_idx) const {
+const char *RaySchedulingBench::GetSubCategory(uint32_t config_idx) const {
   if (config_idx < 4)
     return "Material Divergence";
   if (config_idx < 8)
@@ -239,12 +239,12 @@ const char *RayParadigmBench::GetSubCategory(uint32_t config_idx) const {
   return "Incoherent Secondary Rays";
 }
 
-void RayParadigmBench::Setup(IComputeContext &context_ref,
+void RaySchedulingBench::Setup(IComputeContext &context_ref,
                              const std::string &kernel_dir) {
   this->context = &context_ref;
   VulkanContext *vContext = dynamic_cast<VulkanContext *>(&context_ref);
   if (!vContext)
-    throw std::runtime_error("RayParadigmBench requires VulkanContext");
+    throw std::runtime_error("RaySchedulingBench requires VulkanContext");
 
 #ifdef HAVE_VULKAN
   loadRTProcs(vContext->getVulkanDevice());
@@ -262,21 +262,93 @@ void RayParadigmBench::Setup(IComputeContext &context_ref,
   size_t indirectSize = sizeof(uint32_t) * 3 * 32;
   indirectBuffer = context->createBuffer(indirectSize);
 
-  // Geometry: 4096 triangles for high geometric diversity
-  numPrimitives = 4096;
+  // High-Density Continuous Showroom Geometry (98,304 triangles)
+  // Part 1: Continuous Parametric Trefoil Torus Knot (65,536 triangles)
+  // Part 2: Concave Showroom Cavity Dish (32,768 triangles)
   std::vector<float> vertices;
-  vertices.reserve(numPrimitives * 9);
-  srand(42);
-  for (uint32_t i = 0; i < numPrimitives; ++i) {
-    float cx = (float(rand()) / RAND_MAX) * 10.0f - 5.0f;
-    float cy = (float(rand()) / RAND_MAX) * 10.0f - 5.0f;
-    float cz = (float(rand()) / RAND_MAX) * 5.0f + 1.0f;
-    for (int j = 0; j < 3; ++j) {
-      vertices.push_back(cx + (float(rand()) / RAND_MAX) * 0.4f - 0.2f);
-      vertices.push_back(cy + (float(rand()) / RAND_MAX) * 0.4f - 0.2f);
-      vertices.push_back(cz + (float(rand()) / RAND_MAX) * 0.4f - 0.2f);
+  const uint32_t knot_u = 256;
+  const uint32_t knot_v = 128;
+  const float p_knot = 2.0f, q_knot = 3.0f;
+  const float R_knot = 2.0f, r0_knot = 0.8f, r_tube = 0.45f;
+  const float pi2 = 6.283185307179586f;
+
+  std::vector<std::vector<std::array<float, 3>>> knot_grid(knot_u, std::vector<std::array<float, 3>>(knot_v));
+  for (uint32_t i = 0; i < knot_u; ++i) {
+    float u = (float(i) / float(knot_u)) * pi2;
+    float r = R_knot + r0_knot * std::cos(q_knot * u);
+    float cx = r * std::cos(p_knot * u);
+    float cy = r * std::sin(p_knot * u);
+    float cz = -r0_knot * std::sin(q_knot * u) + 1.5f;
+
+    // Tangent approximation
+    float u_next = u + 0.001f;
+    float r_n = R_knot + r0_knot * std::cos(q_knot * u_next);
+    float tx = r_n * std::cos(p_knot * u_next) - cx;
+    float ty = r_n * std::sin(p_knot * u_next) - cy;
+    float tz = -r0_knot * std::sin(q_knot * u_next) + 1.5f - cz;
+    float tlen = std::sqrt(tx * tx + ty * ty + tz * tz);
+    tx /= tlen; ty /= tlen; tz /= tlen;
+
+    // Normal & binormal frame
+    float nx = -ty, ny = tx, nz = 0.0f;
+    float nlen = std::sqrt(nx * nx + ny * ny);
+    if (nlen < 0.001f) { nx = 1.0f; ny = 0.0f; nz = 0.0f; } else { nx /= nlen; ny /= nlen; }
+    float bx = ty * nz - tz * ny;
+    float by = tz * nx - tx * nz;
+    float bz = tx * ny - ty * nx;
+
+    for (uint32_t j = 0; j < knot_v; ++j) {
+      float v = (float(j) / float(knot_v)) * pi2;
+      float cv = std::cos(v), sv = std::sin(v);
+      knot_grid[i][j] = {
+        cx + r_tube * (cv * nx + sv * bx),
+        cy + r_tube * (cv * ny + sv * by),
+        cz + r_tube * (cv * nz + sv * bz)
+      };
     }
   }
+
+  // Triangulate Knot (256 * 128 * 2 = 65,536 triangles)
+  for (uint32_t i = 0; i < knot_u; ++i) {
+    uint32_t i_next = (i + 1) % knot_u;
+    for (uint32_t j = 0; j < knot_v; ++j) {
+      uint32_t j_next = (j + 1) % knot_v;
+      const auto &p00 = knot_grid[i][j];
+      const auto &p10 = knot_grid[i_next][j];
+      const auto &p11 = knot_grid[i_next][j_next];
+      const auto &p01 = knot_grid[i][j_next];
+
+      // Tri 1
+      vertices.insert(vertices.end(), {p00[0], p00[1], p00[2], p10[0], p10[1], p10[2], p11[0], p11[1], p11[2]});
+      // Tri 2
+      vertices.insert(vertices.end(), {p00[0], p00[1], p00[2], p11[0], p11[1], p11[2], p01[0], p01[1], p01[2]});
+    }
+  }
+
+  // Part 2: Concave Showroom Cavity Dish (128 * 128 * 2 = 32,768 triangles)
+  const uint32_t dish_n = 128;
+  for (uint32_t i = 0; i < dish_n; ++i) {
+    float u0 = float(i) / float(dish_n);
+    float u1 = float(i + 1) / float(dish_n);
+    float x0 = (u0 - 0.5f) * 12.0f;
+    float x1 = (u1 - 0.5f) * 12.0f;
+    for (uint32_t j = 0; j < dish_n; ++j) {
+      float v0 = float(j) / float(dish_n);
+      float v1 = float(j + 1) / float(dish_n);
+      float y0 = (v0 - 0.5f) * 12.0f;
+      float y1 = (v1 - 0.5f) * 12.0f;
+
+      float z00 = 4.0f + 0.05f * (x0 * x0 + y0 * y0);
+      float z10 = 4.0f + 0.05f * (x1 * x1 + y0 * y0);
+      float z11 = 4.0f + 0.05f * (x1 * x1 + y1 * y1);
+      float z01 = 4.0f + 0.05f * (x0 * x0 + y1 * y1);
+
+      vertices.insert(vertices.end(), {x0, y0, z00, x1, y0, z10, x1, y1, z11});
+      vertices.insert(vertices.end(), {x0, y0, z00, x1, y1, z11, x0, y1, z01});
+    }
+  }
+
+  numPrimitives = static_cast<uint32_t>(vertices.size() / 9);
   vertexBuffer =
       context->createBuffer(vertices.size() * sizeof(float), vertices.data());
 
@@ -284,15 +356,15 @@ void RayParadigmBench::Setup(IComputeContext &context_ref,
 
   std::filesystem::path kdir(kernel_dir);
   kernelTraditional = vContext->createKernel(
-      (kdir / "vulkan" / "rt_paradigm_traditional.comp").string(), "main", 2);
+      (kdir / "vulkan" / "rt_scheduling_traditional.comp").string(), "main", 2);
   kernelClassify = vContext->createKernel(
-      (kdir / "vulkan" / "rt_paradigm_worklist_classify.comp").string(), "main", 4);
+      (kdir / "vulkan" / "rt_scheduling_worklist_classify.comp").string(), "main", 4);
   kernelMaterial = vContext->createKernel(
-      (kdir / "vulkan" / "rt_paradigm_worklist_material.comp").string(), "main", 3);
+      (kdir / "vulkan" / "rt_scheduling_worklist_material.comp").string(), "main", 3);
   kernelBounce = vContext->createKernel(
-      (kdir / "vulkan" / "rt_paradigm_worklist_bounce.comp").string(), "main", 3);
+      (kdir / "vulkan" / "rt_scheduling_worklist_bounce.comp").string(), "main", 3);
   kernelWorkGraph = vContext->createKernel(
-      (kdir / "vulkan" / "rt_paradigm_workgraph.comp").string(), "main", 2);
+      (kdir / "vulkan" / "rt_scheduling_workgraph.comp").string(), "main", 2);
 
   // Check hardware SER support
   bool serSupported = vContext->isSERSupported();
@@ -364,7 +436,7 @@ void RayParadigmBench::Setup(IComputeContext &context_ref,
 #endif
 }
 
-void RayParadigmBench::Run(uint32_t config_idx) {
+void RaySchedulingBench::Run(uint32_t config_idx) {
 #ifdef HAVE_VULKAN
   VulkanContext *vContext = static_cast<VulkanContext *>(context);
   if (unsupportedConfig[config_idx])
@@ -543,7 +615,7 @@ void RayParadigmBench::Run(uint32_t config_idx) {
 #endif
 }
 
-void RayParadigmBench::Teardown() {
+void RaySchedulingBench::Teardown() {
 #ifdef HAVE_VULKAN
   VulkanContext *vContext = static_cast<VulkanContext *>(context);
   VkDevice device = vContext->getVulkanDevice();
@@ -584,7 +656,7 @@ void RayParadigmBench::Teardown() {
 #endif
 }
 
-BenchmarkResult RayParadigmBench::GetResult(uint32_t config_idx) const {
+BenchmarkResult RaySchedulingBench::GetResult(uint32_t config_idx) const {
   BenchmarkResult r;
   r.operations = static_cast<uint64_t>(rayCount);
   r.elapsedTime = 0.0;

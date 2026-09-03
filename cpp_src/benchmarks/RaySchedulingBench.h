@@ -11,9 +11,9 @@
 #include "core/VulkanContext.h"
 #endif
 
-class RayParadigmBench : public IBenchmark {
+class RaySchedulingBench : public IBenchmark {
 public:
-  const char *GetName() const override { return "RayExecutionParadigm"; }
+  const char *GetName() const override { return "RayScheduling"; }
   const char *GetMetric(uint32_t config_idx = 0) const override { return "MRays/s"; }
 
   bool IsSupported(const DeviceInfo &info,
@@ -22,7 +22,7 @@ public:
     return SupportLimitation::kApi;
   }
   std::string GetSupportNote() const override {
-    return "Ray Execution Paradigm benchmark requires Vulkan ray query / ray tracing acceleration structures";
+    return "Ray Scheduling benchmark requires Vulkan ray query / ray tracing acceleration structures";
   }
 
   void Setup(IComputeContext &context, const std::string &kernel_dir) override;
@@ -33,7 +33,7 @@ public:
 
   uint32_t GetNumConfigs() const override { return 12; }
   std::vector<std::string> GetAliases() const override {
-    return {"rayparadigm", "rtparadigm", "workgraphs", "worklists", "dgc", "ser"};
+    return {"rayscheduling", "rtscheduling", "rayexecutionparadigm", "rayparadigm", "rtparadigm", "workgraphs", "worklists", "dgc", "ser"};
   }
   std::string GetConfigName(uint32_t config_idx) const override;
   bool IsConfigSupported(uint32_t config_idx) const override {

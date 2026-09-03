@@ -19,7 +19,7 @@
 #include "benchmarks/RayPayloadBench.h"
 #include "benchmarks/RayProceduralBench.h"
 #include "benchmarks/RayTracingBench.h"
-#include "benchmarks/RayParadigmBench.h"
+#include "benchmarks/RaySchedulingBench.h"
 #include "benchmarks/SysMemBandwidthBench.h"
 #include "benchmarks/SysMemLatencyBench.h"
 #include "core/ComputeBackendFactory.h"
@@ -69,7 +69,7 @@ std::vector<BenchmarkGroupInfo> BenchmarkRunner::getAvailableGroups() const {
   std::vector<BenchmarkGroupInfo> groups = {
     {"Compute", "compute", {"comp"}, "Vector and matrix compute arithmetic (FP64 down to INT4)", {}},
     {"Memory", "memory", {"mem", "cache"}, "Device memory bandwidth and cache latency", {}},
-    {"Ray Tracing", "raytracing", {"rt", "ray", "ray tracing", "ray_tracing"}, "Hardware BVH traversal, intersection, and execution paradigms", {}},
+    {"Ray Tracing", "raytracing", {"rt", "ray", "ray tracing", "ray_tracing"}, "Hardware BVH traversal, intersection, and scheduling architectures", {}},
     {"Graphics", "graphics", {"gfx", "rop"}, "Rasterization and ROP fill rates", {}},
     {"System", "system", {"sys", "host"}, "Host system memory bandwidth and latency", {}}
   };
@@ -171,7 +171,7 @@ void BenchmarkRunner::discoverBenchmarks() {
   benchmarks.push_back(std::make_unique<RayMaterialDivergenceBench>());
   benchmarks.push_back(std::make_unique<RayPathTracingBench>());
   benchmarks.push_back(std::make_unique<PixelFillRateBench>());
-  benchmarks.push_back(std::make_unique<RayParadigmBench>());
+  benchmarks.push_back(std::make_unique<RaySchedulingBench>());
 
   // Cache Bandwidth
   const size_t l0_size = 16 * 1024; // 16KB L0 cache

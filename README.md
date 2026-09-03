@@ -1,6 +1,6 @@
 # GPUBench
 
-GPUBench is a high-performance cross-platform GPU benchmarking tool designed to measure raw compute capabilities, memory bandwidth, and modern hardware ray tracing pipeline architectures across graphics hardware. It supports multiple backends and a wide range of data types, from double-precision floating point (FP64) down to 4-bit integers (INT4), alongside cutting-edge ray execution paradigms.
+GPUBench is a high-performance cross-platform GPU benchmarking tool designed to measure raw compute capabilities, memory bandwidth, and modern hardware ray tracing pipeline architectures across graphics hardware. It supports multiple backends and a wide range of data types, from double-precision floating point (FP64) down to 4-bit integers (INT4), alongside cutting-edge ray scheduling architectures.
 
 ![GitHub Version](https://img.shields.io/github/v/release/Soddentrough/GPUBench)
 ![License](https://img.shields.io/github/license/Soddentrough/GPUBench)
@@ -9,7 +9,7 @@ GPUBench is a high-performance cross-platform GPU benchmarking tool designed to 
 
 - **Multi-Backend Support**: Benchmarks using Vulkan, OpenCL, and ROCm/HIP.
 - **Hardware Ray Tracing Suite**:
-  - **Ray Execution Paradigms**: Megakernel vs. Hardware Shader Execution Reordering (SER) vs. Work Lists / Device-Generated Commands (DGC) vs. Autonomous Work Graphs (`VK_AMDX_shader_enqueue`).
+  - **Ray Scheduling Architectures**: Megakernel vs. Hardware Shader Execution Reordering (SER) vs. Work Lists / Device-Generated Commands (DGC) vs. Autonomous Work Graphs (`VK_AMDX_shader_enqueue`).
   - **Real-World Material Divergence**: Realistic heterogeneous material distributions testing VGPR allocation pressure and SIMD wave divergence.
   - **Spatial Ray Divergence**: Parametric cone divergence measuring BVH traversal cache hit rates.
   - **Multi-Layer Alpha Testing**: AnyHit alpha evaluation through 16 stacked cutout planes.
@@ -31,11 +31,11 @@ GPUBench is a high-performance cross-platform GPU benchmarking tool designed to 
 
 ---
 
-## Hardware Ray Tracing & Execution Paradigms
+## Hardware Ray Tracing & Scheduling Architectures
 
 Modern ray tracing performance in production games and visual effects engines is rarely bound by simple triangle intersection; it is bound by **divergence**—both spatial ray direction divergence and material shading divergence.
 
-GPUBench evaluates how different GPU hardware architectures handle these workloads across four distinct execution paradigms:
+GPUBench evaluates how different GPU hardware architectures handle these workloads across four distinct scheduling architectures:
 
 1. **Traditional Megakernel**: Traces rays and evaluates all hit shading in a single massive compute pass. Suffering from the "convoy effect," a single complex material forces all lanes to allocate worst-case VGPRs and serializes execution over divergent SIMD branches.
 2. **Traditional + SER (Shader Execution Reordering)**: Leverages hardware reordering (`VK_KHR_ray_tracing_reorder` / NV SER) to dynamically regroup divergent lanes by spatial direction and material hit ID before executing hit shaders.
@@ -109,7 +109,7 @@ gpubench --list-benchmarks
 gpubench
 
 # Run specific benchmarks on a specific GPU device (e.g. Device 1)
-gpubench -d 1 -b FP32,RayExecutionParadigm,RayMaterialDivergence
+gpubench -d 1 -b FP32,RayScheduling,RayMaterialDivergence
 
 # Export results to JSON
 gpubench -d 1 --json benchmark_results.json

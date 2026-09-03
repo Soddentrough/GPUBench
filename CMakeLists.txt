@@ -207,7 +207,7 @@ set(LIB_SOURCES
     cpp_src/benchmarks/RayProceduralBench.cpp
     cpp_src/benchmarks/RayMaterialDivergenceBench.cpp
     cpp_src/benchmarks/RayPathTracingBench.cpp
-    cpp_src/benchmarks/RayParadigmBench.cpp
+    cpp_src/benchmarks/RaySchedulingBench.cpp
     cpp_src/utils/HardwareTelemetry.cpp
     cpp_src/utils/KernelPath.cpp
     cpp_src/utils/ShaderCache.cpp

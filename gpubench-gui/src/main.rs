@@ -535,7 +535,7 @@ fn get_benchmark_description(name: &str) -> &'static str {
         "RayProcedural" => "Intersection evaluation against mathematically defined procedural primitives (spheres, curves).",
         "RayMaterialDivergence" => "Shading dispatch throughput when secondary rays scatter across dissimilar materials.",
         "RayPathTracing" => "Full multi-bounce stochastic Monte Carlo path tracing with global illumination and cosine sampling.",
-        "RayExecutionParadigm" => "Comparative ray execution paradigms: Traditional Megakernel vs Work Lists / DGC vs GPU Work Graphs vs Hardware SER.",
+        "RayScheduling" | "RayExecutionParadigm" => "Comparative ray scheduling architectures: Traditional Megakernel vs Work Lists / DGC vs GPU Work Graphs vs Hardware SER.",
         _ => "GPU workstation benchmark suite.",
     }
 }
@@ -699,9 +699,9 @@ struct GPUBenchApp {
     gpu_rt_payload: f32,
     gpu_rt_procedural: f32,
     gpu_rt_pathtracing: f32,
-    gpu_rt_paradigm_workgraph: f32,
-    gpu_rt_paradigm_worklist: f32,
-    gpu_rt_paradigm_trad: f32,
+    gpu_rt_scheduling_workgraph: f32,
+    gpu_rt_scheduling_worklist: f32,
+    gpu_rt_scheduling_trad: f32,
 
     gpu_pixel_fill: f32,
     gpu_pixel_fill_hdr: f32,
@@ -793,9 +793,9 @@ impl Application for GPUBenchApp {
                 gpu_rt_payload: 0.0,
                 gpu_rt_procedural: 0.0,
                 gpu_rt_pathtracing: 0.0,
-                gpu_rt_paradigm_workgraph: 0.0,
-                gpu_rt_paradigm_worklist: 0.0,
-                gpu_rt_paradigm_trad: 0.0,
+                gpu_rt_scheduling_workgraph: 0.0,
+                gpu_rt_scheduling_worklist: 0.0,
+                gpu_rt_scheduling_trad: 0.0,
                 gpu_pixel_fill: 0.0,
                 gpu_pixel_fill_hdr: 0.0,
                 gpu_pixel_fill_blend: 0.0,
@@ -1111,9 +1111,9 @@ impl Application for GPUBenchApp {
                                     "payload": self.gpu_rt_payload,
                                     "procedural": self.gpu_rt_procedural,
                                     "path_tracing": self.gpu_rt_pathtracing,
-                                    "work_graphs": self.gpu_rt_paradigm_workgraph,
-                                    "work_lists": self.gpu_rt_paradigm_worklist,
-                                    "traditional_megakernel": self.gpu_rt_paradigm_trad,
+                                    "work_graphs": self.gpu_rt_scheduling_workgraph,
+                                    "work_lists": self.gpu_rt_scheduling_worklist,
+                                    "traditional_megakernel": self.gpu_rt_scheduling_trad,
                                 }
                             }
                         });
@@ -1163,9 +1163,9 @@ impl Application for GPUBenchApp {
                 self.gpu_rt_payload = 0.0;
                 self.gpu_rt_procedural = 0.0;
                 self.gpu_rt_pathtracing = 0.0;
-                self.gpu_rt_paradigm_workgraph = 0.0;
-                self.gpu_rt_paradigm_worklist = 0.0;
-                self.gpu_rt_paradigm_trad = 0.0;
+                self.gpu_rt_scheduling_workgraph = 0.0;
+                self.gpu_rt_scheduling_worklist = 0.0;
+                self.gpu_rt_scheduling_trad = 0.0;
                 self.gpu_pixel_fill = 0.0;
                 self.gpu_pixel_fill_hdr = 0.0;
                 self.gpu_pixel_fill_blend = 0.0;
@@ -1549,29 +1549,29 @@ impl Application for GPUBenchApp {
                     .gap(4)
                     .style(iced::theme::Container::Transparent);
 
-                    let is_paradigm_checked = self.selected_tests.contains("RayExecutionParadigm");
-                    let paradigm_tip_text = if is_rt_disabled {
+                    let is_scheduling_checked = self.selected_tests.contains("RayScheduling") || self.selected_tests.contains("RayExecutionParadigm");
+                    let scheduling_tip_text = if is_rt_disabled {
                         "Hardware Ray Tracing requires the Vulkan backend."
                     } else {
-                        get_benchmark_description("RayExecutionParadigm")
+                        get_benchmark_description("RayScheduling")
                     };
 
-                    let paradigm_btn = if is_rt_disabled {
-                        button(text("Ray Paradigms (Work Graphs vs Work Lists vs SER)").size(12).horizontal_alignment(iced::alignment::Horizontal::Center))
+                    let scheduling_btn = if is_rt_disabled {
+                        button(text("Ray Scheduling (Megakernel vs Work Lists vs Work Graphs vs SER)").size(12).horizontal_alignment(iced::alignment::Horizontal::Center))
                             .padding([10, 0])
                             .width(Length::Fill)
                             .style(iced::theme::Button::Custom(Box::new(SleekDisabledPill)))
                     } else {
-                        button(text("Ray Paradigms (Work Graphs vs Work Lists vs SER)").size(12).horizontal_alignment(iced::alignment::Horizontal::Center))
+                        button(text("Ray Scheduling (Megakernel vs Work Lists vs Work Graphs vs SER)").size(12).horizontal_alignment(iced::alignment::Horizontal::Center))
                             .padding([10, 0])
                             .width(Length::Fill)
-                            .on_press(Message::TestToggled("RayExecutionParadigm".to_string(), !is_paradigm_checked))
-                            .style(iced::theme::Button::Custom(Box::new(SleekPillToggle { is_active: is_paradigm_checked, is_api_selector: false })))
+                            .on_press(Message::TestToggled("RayScheduling".to_string(), !is_scheduling_checked))
+                            .style(iced::theme::Button::Custom(Box::new(SleekPillToggle { is_active: is_scheduling_checked, is_api_selector: false })))
                     };
 
-                    let paradigm_with_tip = tooltip(
-                        paradigm_btn,
-                        container(text(paradigm_tip_text).size(11).style(color!(0xE2E8F0)))
+                    let scheduling_with_tip = tooltip(
+                        scheduling_btn,
+                        container(text(scheduling_tip_text).size(11).style(color!(0xE2E8F0)))
                             .width(Length::Fixed(260.0))
                             .padding(8)
                             .style(|_t: &Theme| container::Appearance {
@@ -1588,7 +1588,7 @@ impl Application for GPUBenchApp {
                         column![
                             rt_top,
                             pt_with_tip,
-                            paradigm_with_tip
+                            scheduling_with_tip
                         ].spacing(8)
                     )
                     .padding(16)
@@ -1847,9 +1847,9 @@ impl Application for GPUBenchApp {
                     metric_row("RayASBuild", "TLAS Build (10k Inst)", self.gpu_rt_tlas_build, "MInst/s", "Top-level instance hierarchy construction."),
                     metric_row("RayProcedural", "Procedural Geometry", self.gpu_rt_procedural, "GRays/s", "Intersection against mathematical curves and spheres."),
                     metric_row("RayPathTracing", "Multi-Bounce Path Tracing", self.gpu_rt_pathtracing, "MRays/s", "Full stochastic 8-bounce Monte Carlo global illumination."),
-                    metric_row("RayExecutionParadigm", "Work Graphs Node Enqueue", self.gpu_rt_paradigm_workgraph, "MRays/s", "Autonomous child node dispatch with on-chip payload routing."),
-                    metric_row("RayExecutionParadigm", "Work Lists / DGC Compaction", self.gpu_rt_paradigm_worklist, "MRays/s", "GPU stream compaction into uniform material/bounce queues."),
-                    metric_row("RayExecutionParadigm", "Traditional Megakernel", self.gpu_rt_paradigm_trad, "MRays/s", "Monolithic shader dispatch with in-shader loops and branching."),
+                    metric_row("RayScheduling", "Work Graphs Node Enqueue", self.gpu_rt_scheduling_workgraph, "MRays/s", "Autonomous child node dispatch with on-chip payload routing."),
+                    metric_row("RayScheduling", "Work Lists / DGC Compaction", self.gpu_rt_scheduling_worklist, "MRays/s", "GPU stream compaction into uniform material/bounce queues."),
+                    metric_row("RayScheduling", "Traditional Megakernel", self.gpu_rt_scheduling_trad, "MRays/s", "Monolithic shader dispatch with in-shader loops and branching."),
                 ].spacing(6).width(Length::Fill).into();
 
                 let graphics_content = column![
@@ -2148,13 +2148,13 @@ impl GPUBenchApp {
                     if res.subcategory == "Payload Register Pressure" { self.gpu_rt_payload = self.gpu_rt_payload.max(value); }
                     if res.subcategory == "Procedural Intersection" { self.gpu_rt_procedural = self.gpu_rt_procedural.max(value); }
                     if res.subcategory == "Path Tracing" { self.gpu_rt_pathtracing = self.gpu_rt_pathtracing.max(value); }
-                    if res.benchmarkName.contains("RayExecutionParadigm") {
+                    if res.benchmarkName.contains("RayScheduling") || res.benchmarkName.contains("RayExecutionParadigm") {
                         if res.benchmarkName.contains("Work Graphs") {
-                            self.gpu_rt_paradigm_workgraph = self.gpu_rt_paradigm_workgraph.max(value);
+                            self.gpu_rt_scheduling_workgraph = self.gpu_rt_scheduling_workgraph.max(value);
                         } else if res.benchmarkName.contains("Work Lists") {
-                            self.gpu_rt_paradigm_worklist = self.gpu_rt_paradigm_worklist.max(value);
+                            self.gpu_rt_scheduling_worklist = self.gpu_rt_scheduling_worklist.max(value);
                         } else if res.benchmarkName.contains("Traditional") && !res.benchmarkName.contains("+ SER") {
-                            self.gpu_rt_paradigm_trad = self.gpu_rt_paradigm_trad.max(value);
+                            self.gpu_rt_scheduling_trad = self.gpu_rt_scheduling_trad.max(value);
                         }
                     }
                 }
