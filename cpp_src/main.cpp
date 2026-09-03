@@ -80,7 +80,8 @@ static double computeResultValue(const ResultData &r) {
     return (r.operations / time_s) / 1e12;
   } else if (r.metric == "GB/s") {
     return (r.operations / time_s) / 1e9;
-  } else if (r.metric == "MRays/s") {
+  } else if (r.metric == "MRays/s" || r.metric == "MHits/s" || r.metric == "MRecords/s" ||
+             r.metric == "MTris/s" || r.metric == "MInst/s") {
     return (r.operations / time_s) / 1e6;
   } else if (r.metric == "GRays/s" || r.metric == "GIS/s" || r.metric == "GPixels/s") {
     return (r.operations / time_s) / 1e9;
@@ -106,6 +107,10 @@ std::string resultsToJson(const std::vector<ResultData> &results) {
     out += "    \"subcategory\": \"" + jsonEscape(r.subcategory) + "\",\n";
     out += "    \"metric\": \"" + jsonEscape(r.metric) + "\",\n";
     out += "    \"value\": " + std::to_string(value) + ",\n";
+    if (r.benchmarkName.find("RayScheduling") != std::string::npos && r.metric == "MRays/s") {
+      double fps = (value * 1e6) / 1048576.0;
+      out += "    \"fps\": " + std::to_string(fps) + ",\n";
+    }
     out += "    \"operations\": " + std::to_string(r.operations) + ",\n";
     out += "    \"time_ms\": " + std::to_string(r.time_ms) + ",\n";
     out += std::string("    \"is_emulated\": ") +

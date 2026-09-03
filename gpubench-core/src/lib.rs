@@ -150,6 +150,15 @@ fn format_result_value(res: &ResultData) -> (f64, String) {
             (v, "ns".to_string())
         }
         "GB/s" => (ops / time_s / 1e9, "GB/s".to_string()),
+        "MRays/s" | "MHits/s" | "MRecords/s" => {
+            let val = ops / time_s / 1e6;
+            let mut unit = res.metric.clone();
+            if res.benchmarkName.contains("RayScheduling") && (res.metric == "MRays/s" || res.metric == "MHits/s") {
+                let fps = (val * 1e6) / 1048576.0;
+                unit = format!("{} ({:.1} FPS)", res.metric, fps);
+            }
+            (val, unit)
+        }
         other => (ops / time_s, other.to_string()),
     }
 }

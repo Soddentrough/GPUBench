@@ -61,7 +61,16 @@ public:
   void SetDumpRenders(bool dump) { dumpRenders = dump; }
   bool GetDumpRenders() const { return dumpRenders; }
 
+  void RecordRunResult(uint32_t config_idx, uint64_t total_invocations, double total_time_ms) override {
+    if (config_idx < 16) {
+      recordedInvocations[config_idx] = total_invocations;
+      recordedTimeMs[config_idx] = total_time_ms;
+    }
+  }
+
 private:
+  uint64_t recordedInvocations[16] = {0};
+  double recordedTimeMs[16] = {0.0};
   IComputeContext *context = nullptr;
   bool dumpRenders = false;
   ComputeBuffer fbTraditional = nullptr;

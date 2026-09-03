@@ -673,6 +673,7 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
                 }
 
                 BenchmarkResult bench_result = bench->GetResult(i);
+                bench->RecordRunResult(i, total_invocations, total_time_ms);
 
                 ResultData result_data;
                 result_data.backendName = ComputeBackendFactory::getBackendName(

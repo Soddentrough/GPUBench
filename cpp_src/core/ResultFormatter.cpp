@@ -237,6 +237,10 @@ void ResultFormatter::print() {
                  }
                 valStr = formatDouble(value, precision);
                 unit = " " + res.metric;
+                if (res.benchmarkName.find("RayScheduling") != std::string::npos && res.metric == "MRays/s") {
+                  double fps = (value * 1e6) / 1048576.0;
+                  unit += " (" + formatDouble(fps, 1) + " FPS)";
+                }
               }
 
               std::cout << " : " << std::setw(12) << std::right << YELLOW

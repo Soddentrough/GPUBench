@@ -781,6 +781,30 @@ void RaySchedulingBench::performVisualVerification() {
   std::cout << "  Work Lists Render   : " << workPng << std::endl;
   std::cout << "  Difference Heatmap  : " << diffPng << " (10x amplified)" << std::endl;
   std::cout << "--------------------------------------------------------------------------------" << std::endl;
+  std::cout << "  Full Scene Rendering Performance (1024x1024 Frame):" << std::endl;
+  if (recordedInvocations[0] > 0 && recordedTimeMs[0] > 0.0) {
+    double timeSec = recordedTimeMs[0] / 1000.0;
+    double fpsTrad = static_cast<double>(recordedInvocations[0]) / timeSec;
+    double mraysTrad = (static_cast<double>(recordedInvocations[0] * rayCount) / timeSec) / 1e6;
+    double frameMsTrad = recordedTimeMs[0] / static_cast<double>(recordedInvocations[0]);
+    std::cout << "    Traditional Megakernel : " << std::fixed << std::setprecision(2) << mraysTrad
+              << " MRays/s | " << std::setprecision(1) << fpsTrad << " FPS ("
+              << std::setprecision(2) << frameMsTrad << " ms/frame)" << std::endl;
+  }
+  if (recordedInvocations[2] > 0 && recordedTimeMs[2] > 0.0) {
+    double timeSec = recordedTimeMs[2] / 1000.0;
+    double fpsWork = static_cast<double>(recordedInvocations[2]) / timeSec;
+    double mraysWork = (static_cast<double>(recordedInvocations[2] * rayCount) / timeSec) / 1e6;
+    double frameMsWork = recordedTimeMs[2] / static_cast<double>(recordedInvocations[2]);
+    double speedup = (recordedInvocations[0] > 0 && recordedTimeMs[0] > 0.0)
+                         ? (fpsWork / (static_cast<double>(recordedInvocations[0]) / (recordedTimeMs[0] / 1000.0)))
+                         : 1.0;
+    std::cout << "    Work Lists / DGC       : " << std::fixed << std::setprecision(2) << mraysWork
+              << " MRays/s | " << std::setprecision(1) << fpsWork << " FPS ("
+              << std::setprecision(2) << frameMsWork << " ms/frame) ["
+              << std::setprecision(2) << speedup << "x speedup]" << std::endl;
+  }
+  std::cout << "--------------------------------------------------------------------------------" << std::endl;
   std::cout << "  Max Color Delta     : " << std::fixed << std::setprecision(6) << metrics.maxDelta
             << " (" << static_cast<int>(metrics.maxDelta * 255.0f + 0.5f) << " / 255)" << std::endl;
   std::cout << "  Mean Abs Error (MAE): " << std::fixed << std::setprecision(6) << metrics.mae << std::endl;
@@ -819,7 +843,7 @@ void RaySchedulingBench::Teardown() {
     context->releaseKernel(kernelClassify);
   if (kernelMaterial)
     context->releaseKernel(kernelMaterial);
-  for (uint32_t arch = 0; arch < 5; ++arch) {
+  for (uint32_t arch = 0; arch < 6; ++arch) {
     if (kernelMaterialSpecialized[arch])
       context->releaseKernel(kernelMaterialSpecialized[arch]);
   }
