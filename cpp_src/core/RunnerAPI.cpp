@@ -155,3 +155,49 @@ std::vector<std::string> GetAvailableBenchmarksAPI() {
         return {};
     }
 }
+
+std::vector<DeviceProfile> GetDeviceProfilesAPI() {
+    std::vector<DeviceProfile> profiles;
+    try {
+        if (ComputeBackendFactory::isAvailable(ComputeBackend::Vulkan)) {
+            try {
+                auto ctx = ComputeBackendFactory::create(ComputeBackend::Vulkan, false, false);
+                if (ctx) {
+                    uint32_t i = 0;
+                    for (const auto& dev : ctx->getDevices()) {
+                        DeviceProfile p;
+                        p.backend = "Vulkan";
+                        p.deviceIndex = i;
+                        p.deviceName = dev.name;
+                        p.vendorID = dev.vendorID;
+                        p.deviceID = dev.deviceID;
+                        p.driverName = dev.driverName;
+                        p.driverInfo = dev.driverInfo;
+                        p.driverVersion = dev.driverVersionStr;
+                        uint32_t apiMajor = dev.apiVersion >> 22;
+                        uint32_t apiMinor = (dev.apiVersion >> 12) & 0x3FF;
+                        uint32_t apiPatch = dev.apiVersion & 0xFFF;
+                        p.apiVersion = std::to_string(apiMajor) + "." + std::to_string(apiMinor) + "." + std::to_string(apiPatch);
+                        p.vramTotalMb = dev.memorySize / (1024 * 1024);
+                        p.subgroupSize = dev.subgroupSize;
+                        p.maxWorkGroupSize = dev.maxWorkGroupSize;
+                        p.rayTracingSupported = dev.rayTracingSupport;
+                        p.serSupported = dev.serSupported;
+                        p.workGraphsSupported = dev.workGraphsSupported;
+                        p.cooperativeMatrixSupported = dev.cooperativeMatrixSupport;
+                        p.float16Supported = dev.fp16Support;
+                        p.int8Supported = dev.int8Support;
+                        profiles.push_back(p);
+                        i++;
+                    }
+                }
+            } catch (...) {}
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "GetDeviceProfilesAPI failed: " << e.what() << std::endl;
+    } catch (...) {
+        std::cerr << "GetDeviceProfilesAPI failed: unknown error" << std::endl;
+    }
+    return profiles;
+}
+

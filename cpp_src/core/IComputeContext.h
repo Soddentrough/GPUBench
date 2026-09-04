@@ -53,6 +53,14 @@ struct DeviceInfo {
   bool cooperativeMatrixSupport = false;
   bool structuredSparsitySupport = false;
   bool rayTracingSupport = false;
+  bool serSupported = false;
+  bool workGraphsSupported = false;
+  uint32_t vendorID = 0;
+  uint32_t deviceID = 0;
+  uint32_t apiVersion = 0;
+  std::string driverName = "";
+  std::string driverInfo = "";
+  std::string driverVersionStr = "";
   bool verbose = false;
 };
 

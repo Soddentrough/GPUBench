@@ -17,5 +17,27 @@ std::vector<ResultData> RunBenchmarksAPI(
     uint32_t renderHeight = 0,
     std::function<void(const ResultData&)> callback = nullptr);
 
+struct DeviceProfile {
+    std::string backend;
+    uint32_t deviceIndex;
+    std::string deviceName;
+    uint32_t vendorID;
+    uint32_t deviceID;
+    std::string driverName;
+    std::string driverInfo;
+    std::string driverVersion;
+    std::string apiVersion;
+    uint64_t vramTotalMb;
+    uint32_t subgroupSize;
+    uint32_t maxWorkGroupSize;
+    bool rayTracingSupported;
+    bool serSupported;
+    bool workGraphsSupported;
+    bool cooperativeMatrixSupported;
+    bool float16Supported;
+    bool int8Supported;
+};
+
 std::vector<std::string> GetAvailableHardwareAPI();
 std::vector<std::string> GetAvailableBenchmarksAPI();
+std::vector<DeviceProfile> GetDeviceProfilesAPI();

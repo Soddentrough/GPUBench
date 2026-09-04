@@ -184,9 +184,13 @@ const std::vector<DeviceInfo> &VulkanContext::getDevices() const {
       VkPhysicalDeviceMemoryProperties memProps;
       vkGetPhysicalDeviceMemoryProperties(device, &memProps);
 
+      VkPhysicalDeviceDriverProperties driverProps{};
+      driverProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES;
+
       VkPhysicalDeviceSubgroupProperties subgroupProps{};
       subgroupProps.sType =
           VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
+      subgroupProps.pNext = &driverProps;
 
       VkPhysicalDeviceProperties2 props2{};
       props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
@@ -235,7 +239,29 @@ const std::vector<DeviceInfo> &VulkanContext::getDevices() const {
 
       DeviceInfo info;
       info.name = props.deviceName;
+      info.vendorID = props.vendorID;
+      info.deviceID = props.deviceID;
+      info.apiVersion = props.apiVersion;
       info.driverVersion = props.driverVersion;
+
+      std::string driverVerStr;
+      if (props.vendorID == 0x10DE) {
+        uint32_t major = (props.driverVersion >> 22) & 0x3FF;
+        uint32_t minor = (props.driverVersion >> 14) & 0xFF;
+        uint32_t sec = (props.driverVersion >> 6) & 0xFF;
+        uint32_t tert = props.driverVersion & 0x3F;
+        driverVerStr = std::to_string(major) + "." + std::to_string(minor);
+        if (sec > 0 || tert > 0) {
+          driverVerStr += "." + std::to_string(sec) + "." + std::to_string(tert);
+        }
+      } else {
+        driverVerStr = std::to_string(VK_VERSION_MAJOR(props.driverVersion)) + "." +
+                       std::to_string(VK_VERSION_MINOR(props.driverVersion)) + "." +
+                       std::to_string(VK_VERSION_PATCH(props.driverVersion));
+      }
+      info.driverVersionStr = driverVerStr;
+      info.driverName = (driverProps.driverName[0] != '\0') ? driverProps.driverName : "";
+      info.driverInfo = (driverProps.driverInfo[0] != '\0') ? driverProps.driverInfo : "";
 
       char uuid_str[33];
       for (int i = 0; i < VK_UUID_SIZE; ++i) {
@@ -262,6 +288,22 @@ const std::vector<DeviceInfo> &VulkanContext::getDevices() const {
       info.rayTracingSupport =
           hasExt(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) &&
           hasExt(VK_KHR_RAY_QUERY_EXTENSION_NAME);
+
+      VkPhysicalDeviceRayTracingInvocationReorderFeaturesEXT serFeatures{
+          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_INVOCATION_REORDER_FEATURES_EXT};
+      bool hasSERExt = hasExt(VK_EXT_RAY_TRACING_INVOCATION_REORDER_EXTENSION_NAME) ||
+                       hasExt("VK_NV_ray_tracing_invocation_reorder");
+      if (hasSERExt) {
+        VkPhysicalDeviceFeatures2 f2_ser{};
+        f2_ser.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+        f2_ser.pNext = &serFeatures;
+        vkGetPhysicalDeviceFeatures2(device, &f2_ser);
+        info.serSupported = (serFeatures.rayTracingInvocationReorder == VK_TRUE);
+      } else {
+        info.serSupported = false;
+      }
+      info.workGraphsSupported = hasExt("VK_AMDX_shader_enqueue") || hasExt("VK_KHR_work_graphs");
+
       deviceInfos.push_back(info);
     }
   }
@@ -278,8 +320,12 @@ DeviceInfo VulkanContext::getCurrentDeviceInfo() const {
   VkPhysicalDeviceMemoryProperties memProps;
   vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memProps);
 
+  VkPhysicalDeviceDriverProperties driverProps{};
+  driverProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES;
+
   VkPhysicalDeviceSubgroupProperties subgroupProps{};
   subgroupProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
+  subgroupProps.pNext = &driverProps;
 
   VkPhysicalDeviceProperties2 props2{};
   props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
@@ -329,6 +375,30 @@ DeviceInfo VulkanContext::getCurrentDeviceInfo() const {
 
   DeviceInfo info;
   info.name = properties.deviceName;
+  info.vendorID = properties.vendorID;
+  info.deviceID = properties.deviceID;
+  info.apiVersion = properties.apiVersion;
+  info.driverVersion = properties.driverVersion;
+
+  std::string driverVerStr;
+  if (properties.vendorID == 0x10DE) {
+    uint32_t major = (properties.driverVersion >> 22) & 0x3FF;
+    uint32_t minor = (properties.driverVersion >> 14) & 0xFF;
+    uint32_t sec = (properties.driverVersion >> 6) & 0xFF;
+    uint32_t tert = properties.driverVersion & 0x3F;
+    driverVerStr = std::to_string(major) + "." + std::to_string(minor);
+    if (sec > 0 || tert > 0) {
+      driverVerStr += "." + std::to_string(sec) + "." + std::to_string(tert);
+    }
+  } else {
+    driverVerStr = std::to_string(VK_VERSION_MAJOR(properties.driverVersion)) + "." +
+                   std::to_string(VK_VERSION_MINOR(properties.driverVersion)) + "." +
+                   std::to_string(VK_VERSION_PATCH(properties.driverVersion));
+  }
+  info.driverVersionStr = driverVerStr;
+  info.driverName = (driverProps.driverName[0] != '\0') ? driverProps.driverName : "";
+  info.driverInfo = (driverProps.driverInfo[0] != '\0') ? driverProps.driverInfo : "";
+
   info.memorySize = vramSize;
   info.maxWorkGroupSize = properties.limits.maxComputeWorkGroupInvocations;
   info.maxComputeWorkGroupCountX =
@@ -358,6 +428,22 @@ DeviceInfo VulkanContext::getCurrentDeviceInfo() const {
   info.rayTracingSupport =
       hasExt(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) &&
       hasExt(VK_KHR_RAY_QUERY_EXTENSION_NAME);
+
+  VkPhysicalDeviceRayTracingInvocationReorderFeaturesEXT serFeatures{
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_INVOCATION_REORDER_FEATURES_EXT};
+  bool hasSERExt = hasExt(VK_EXT_RAY_TRACING_INVOCATION_REORDER_EXTENSION_NAME) ||
+                   hasExt("VK_NV_ray_tracing_invocation_reorder");
+  if (hasSERExt) {
+    VkPhysicalDeviceFeatures2 f2_ser{};
+    f2_ser.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    f2_ser.pNext = &serFeatures;
+    vkGetPhysicalDeviceFeatures2(physicalDevice, &f2_ser);
+    info.serSupported = (serFeatures.rayTracingInvocationReorder == VK_TRUE);
+  } else {
+    info.serSupported = false;
+  }
+  info.workGraphsSupported = hasExt("VK_AMDX_shader_enqueue") || hasExt("VK_KHR_work_graphs");
+
   return info;
 }
 

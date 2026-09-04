@@ -21,7 +21,7 @@ pub struct ResultData {
 
 #[derive(Parser, Debug, Clone)]
 #[command(name = "GPUBench")]
-#[command(version = "1.4.4")]
+#[command(version = "1.4.5")]
 #[command(about = "High-performance cross-platform GPU benchmarking tool", long_about = None)]
 pub struct Cli {
     #[arg(short = 'b', long = "benchmarks", value_delimiter = ',')]
@@ -58,7 +58,58 @@ pub struct Cli {
     pub resolution: String,
 }
 
+pub mod sysinfo;
+pub use sysinfo::SystemInfo;
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DeviceProfile {
+    pub backend: String,
+    pub device_index: u32,
+    pub device_name: String,
+    pub vendor_id: String,
+    pub device_id_hex: String,
+    pub driver_name: String,
+    pub driver_info: String,
+    pub driver_version: String,
+    pub api_version: String,
+    pub vram_total_mb: u64,
+    pub subgroup_size: u32,
+    pub max_workgroup_size: u32,
+    pub ray_tracing_supported: bool,
+    pub ser_supported: bool,
+    pub work_graphs_supported: bool,
+    pub cooperative_matrix_supported: bool,
+    pub float16_supported: bool,
+    pub int8_supported: bool,
+}
+
 use std::sync::Mutex;
+
+pub fn get_device_profiles() -> Vec<DeviceProfile> {
+    gpubench_sys::ffi::gpubench_get_device_profiles()
+        .into_iter()
+        .map(|p| DeviceProfile {
+            backend: p.backend,
+            device_index: p.deviceIndex,
+            device_name: p.deviceName,
+            vendor_id: format!("0x{:04X}", p.vendorId),
+            device_id_hex: format!("0x{:04X}", p.deviceId),
+            driver_name: p.driverName,
+            driver_info: p.driverInfo,
+            driver_version: p.driverVersion,
+            api_version: p.apiVersion,
+            vram_total_mb: p.vramTotalMb,
+            subgroup_size: p.subgroupSize,
+            max_workgroup_size: p.maxWorkGroupSize,
+            ray_tracing_supported: p.rayTracingSupported,
+            ser_supported: p.serSupported,
+            work_graphs_supported: p.workGraphsSupported,
+            cooperative_matrix_supported: p.cooperativeMatrixSupported,
+            float16_supported: p.float16Supported,
+            int8_supported: p.int8Supported,
+        })
+        .collect()
+}
 
 pub fn get_available_hardware() -> Vec<String> {
     gpubench_sys::ffi::gpubench_get_available_hardware()

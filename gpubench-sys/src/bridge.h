@@ -3,8 +3,7 @@
 #include <cstdint>
 
 struct FfiResultData;
-
-
+struct FfiDeviceProfile;
 
 rust::Vec<FfiResultData> gpubench_run_benchmarks(const rust::Vec<rust::String>& benchmarks_to_run_rust,
                                                  const rust::Vec<uint32_t>& device_indices_rust,
@@ -17,5 +16,6 @@ rust::Vec<FfiResultData> gpubench_run_benchmarks(const rust::Vec<rust::String>& 
 
 rust::Vec<rust::String> gpubench_get_available_hardware();
 rust::Vec<rust::String> gpubench_get_available_benchmarks();
+rust::Vec<FfiDeviceProfile> gpubench_get_device_profiles();
 
 void gpubench_init();

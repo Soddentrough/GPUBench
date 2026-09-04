@@ -93,3 +93,32 @@ rust::Vec<rust::String> gpubench_get_available_benchmarks() {
     }
     return rust_results;
 }
+
+rust::Vec<FfiDeviceProfile> gpubench_get_device_profiles() {
+    auto profiles = GetDeviceProfilesAPI();
+    rust::Vec<FfiDeviceProfile> rust_profiles;
+    for (const auto& p : profiles) {
+        FfiDeviceProfile f;
+        f.backend = p.backend;
+        f.deviceIndex = p.deviceIndex;
+        f.deviceName = p.deviceName;
+        f.vendorId = p.vendorID;
+        f.deviceId = p.deviceID;
+        f.driverName = p.driverName;
+        f.driverInfo = p.driverInfo;
+        f.driverVersion = p.driverVersion;
+        f.apiVersion = p.apiVersion;
+        f.vramTotalMb = p.vramTotalMb;
+        f.subgroupSize = p.subgroupSize;
+        f.maxWorkGroupSize = p.maxWorkGroupSize;
+        f.rayTracingSupported = p.rayTracingSupported;
+        f.serSupported = p.serSupported;
+        f.workGraphsSupported = p.workGraphsSupported;
+        f.cooperativeMatrixSupported = p.cooperativeMatrixSupported;
+        f.float16Supported = p.float16Supported;
+        f.int8Supported = p.int8Supported;
+        rust_profiles.push_back(f);
+    }
+    return rust_profiles;
+}
+

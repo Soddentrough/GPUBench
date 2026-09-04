@@ -454,7 +454,12 @@ int main(int argc, char **argv) {
                   << std::endl;
         const auto &devices = context->getDevices();
         for (size_t i = 0; i < devices.size(); ++i) {
-          std::cout << "  " << i << ": " << devices[i].name << std::endl;
+          const auto &d = devices[i];
+          std::cout << "  " << i << ": " << d.name;
+          if (!d.driverName.empty() || !d.driverVersionStr.empty()) {
+            std::cout << " [Driver: " << d.driverName << " " << d.driverVersionStr << "]";
+          }
+          std::cout << std::endl;
         }
       }
       return EXIT_SUCCESS;

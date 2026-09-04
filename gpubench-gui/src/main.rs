@@ -2,7 +2,7 @@
 
 use iced::widget::{button, column, container, progress_bar, row, scrollable, text, Space, tooltip};
 use iced::{color, Background, Border, Command, Element, Length, Theme, executor, Application, Settings};
-use gpubench_core::{get_available_benchmarks, run_benchmarks, ResultData};
+use gpubench_core::{get_available_benchmarks, run_benchmarks, ResultData, SystemInfo, DeviceProfile, get_device_profiles};
 use std::sync::{mpsc, mpsc::Sender, Mutex, LazyLock};
 use std::collections::{HashSet, HashMap};
 
@@ -602,7 +602,27 @@ pub fn main() -> iced::Result {
 
 static PROGRESS_SENDER: LazyLock<Mutex<Option<Sender<ResultData>>>> = LazyLock::new(|| Mutex::new(None));
 
+fn log_diagnostic(msg: &str) {
+    use std::io::Write;
+    let dur = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    let secs = dur.as_secs();
+    let millis = dur.subsec_millis();
+    let line = format!("[{}.{:03}] {}\n", secs, millis, msg);
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open("gpubench.log") {
+        let _ = f.write_all(line.as_bytes());
+        let _ = f.flush();
+    }
+}
+
 fn progress_callback(res: &ResultData) {
+    if res.time_ms < 0.0 {
+        log_diagnostic(&format!("[START] dev={} bench='{}' comp='{}'", res.deviceIndex, res.benchmarkName, res.component));
+    } else {
+        log_diagnostic(&format!("[FINISH] dev={} bench='{}' comp='{}' ops={} time_ms={:.3} metric='{}' unsupported={}",
+            res.deviceIndex, res.benchmarkName, res.component, res.operations, res.time_ms, res.metric, res.isUnsupported));
+    }
     if let Ok(guard) = PROGRESS_SENDER.lock() {
         if let Some(sender) = guard.as_ref() {
             let _ = sender.send(res.clone());
@@ -664,6 +684,8 @@ pub struct CellResult {
     pub unit: String,
     pub is_running: bool,
     pub is_unsupported: bool,
+    pub raw_operations: u64,
+    pub raw_time_ms: f64,
 }
 
 #[derive(Clone, Debug)]
@@ -1308,6 +1330,7 @@ enum Message {
     SaveResults,
     Retest,
     ResolutionSelected(ResolutionPreset),
+    CopyDiagnostics,
 }
 
 impl Application for GPUBenchApp {
@@ -1653,6 +1676,11 @@ impl Application for GPUBenchApp {
                     let dump_renders_val = self.dump_renders;
                     let (res_w, res_h) = self.selected_resolution.dimensions();
 
+                    log_diagnostic(&format!(
+                        "=== Benchmark run started: backend='{}', resolution='{}' ({}x{}), devices={:?}, tests={:?} ===",
+                        b_str, self.selected_resolution.label(), res_w, res_h, dev_names, tests_to_run
+                    ));
+
                     self.state = AppState::Running {
                         progress_receiver: Some(rx),
                         total_configs: self.total_expected_configs,
@@ -1727,9 +1755,11 @@ impl Application for GPUBenchApp {
                 self.total_expected_configs = final_count;
                 self.state = AppState::Complete { total_configs: final_count };
                 self.current_benchmark = String::from("Complete");
+                log_diagnostic("=== Benchmark suite completed successfully ===");
                 return Command::none();
             }
             Message::BenchmarksFailed(err) => {
+                log_diagnostic(&format!("=== Benchmark suite failed: {} ===", err));
                 self.state = AppState::Error(err);
                 self.current_benchmark = String::from("");
                 return Command::none();
@@ -1742,8 +1772,12 @@ impl Application for GPUBenchApp {
 
                 #[derive(serde::Serialize)]
                 struct BenchmarkReport {
+                    app_version: String,
                     timestamp: u64,
                     backend: String,
+                    resolution: String,
+                    system_info: SystemInfo,
+                    device_profiles: Vec<DeviceProfile>,
                     devices: Vec<String>,
                     results: Vec<DeviceReport>,
                     telemetry: Vec<TelemetryReport>,
@@ -1766,6 +1800,8 @@ impl Application for GPUBenchApp {
                     numeric: f64,
                     unit: String,
                     status: String,
+                    raw_operations: u64,
+                    raw_time_ms: f64,
                 }
 
                 #[derive(serde::Serialize)]
@@ -1804,6 +1840,8 @@ impl Application for GPUBenchApp {
                                 numeric: cell.numeric,
                                 unit: if cell.unit.is_empty() { w.default_unit.to_string() } else { cell.unit.clone() },
                                 status,
+                                raw_operations: cell.raw_operations,
+                                raw_time_ms: cell.raw_time_ms,
                             });
                         }
                     }
@@ -1826,9 +1864,14 @@ impl Application for GPUBenchApp {
                     });
                 }
 
+                let (res_w, res_h) = self.selected_resolution.dimensions();
                 let report = BenchmarkReport {
+                    app_version: env!("CARGO_PKG_VERSION").to_string(),
                     timestamp: now,
                     backend: self.selected_backend.clone(),
+                    resolution: format!("{} ({}x{})", self.selected_resolution.label(), res_w, res_h),
+                    system_info: SystemInfo::collect(),
+                    device_profiles: get_device_profiles(),
                     devices: self.active_device_targets.iter().map(|(_, n)| n.clone()).collect(),
                     results: device_reports,
                     telemetry: telem_reports,
@@ -1847,6 +1890,13 @@ impl Application for GPUBenchApp {
                     self.current_benchmark = format!("Results exported: {}", filename);
                 }
                 return Command::none();
+            }
+            Message::CopyDiagnostics => {
+                let summary = self.generate_diagnostic_summary();
+                let _ = std::fs::write("gpubench_diagnostics.txt", &summary);
+                log_diagnostic("Copied diagnostic report to clipboard and saved to gpubench_diagnostics.txt");
+                self.current_benchmark = "Diagnostics copied to clipboard & saved to gpubench_diagnostics.txt".to_string();
+                return iced::clipboard::write(summary);
             }
             Message::Retest => {
                 let hw = gpubench_core::get_available_hardware();
@@ -2513,15 +2563,25 @@ impl Application for GPUBenchApp {
                 row![sidebar, main_area].width(Length::Fill).height(Length::Fill).into()
             }
             AppState::Error(err) => {
+                let copy_diag_btn = button(
+                    container(text("COPY DIAGNOSTICS").size(13).style(color!(0xFFFFFF)))
+                        .width(Length::Fill)
+                        .center_x()
+                )
+                .width(Length::Fill)
+                .padding([12, 0])
+                .on_press(Message::CopyDiagnostics)
+                .style(iced::theme::Button::Custom(Box::new(SleekPrimaryButton)));
+
                 let retry_btn = button(
-                    container(text("RUN NEW TEST").size(13).style(color!(0xFFFFFF)))
+                    container(text("RUN NEW TEST").size(13).style(color!(0xCBD5E1)))
                         .width(Length::Fill)
                         .center_x()
                 )
                 .width(Length::Fill)
                 .padding([12, 0])
                 .on_press(Message::Retest)
-                .style(iced::theme::Button::Custom(Box::new(SleekPrimaryButton)));
+                .style(iced::theme::Button::Custom(Box::new(SleekSecondaryButton)));
 
                 let sidebar = container(
                     column![
@@ -2529,6 +2589,8 @@ impl Application for GPUBenchApp {
                         Space::with_height(20),
                         telemetry_panel,
                         Space::with_height(Length::Fill),
+                        copy_diag_btn,
+                        Space::with_height(8),
                         retry_btn
                     ]
                 )
@@ -2547,7 +2609,7 @@ impl Application for GPUBenchApp {
                         Space::with_height(12),
                         text(err).size(13).style(color!(0xCBD5E1)),
                         Space::with_height(20),
-                        text("Click RUN NEW TEST to reconfigure the benchmark suite.").size(12).style(color!(0x64748B)),
+                        text("Click COPY DIAGNOSTICS to copy system and benchmark debug logs to clipboard, or RUN NEW TEST to reconfigure.").size(12).style(color!(0x64748B)),
                     ]
                     .width(Length::Fill)
                 )
@@ -2862,6 +2924,18 @@ impl Application for GPUBenchApp {
                         .style(iced::theme::Button::Custom(Box::new(SleekPrimaryButton))),
                         
                         Space::with_height(8),
+
+                        button(
+                            container(text("COPY DIAGNOSTICS").size(13).style(color!(0xCBD5E1)))
+                                .width(Length::Fill)
+                                .center_x()
+                        )
+                        .width(Length::Fill)
+                        .padding([11, 0])
+                        .on_press(Message::CopyDiagnostics)
+                        .style(iced::theme::Button::Custom(Box::new(SleekSecondaryButton))),
+                        
+                        Space::with_height(8),
                         
                         button(
                             container(text("RUN NEW TEST").size(13).style(color!(0xCBD5E1)))
@@ -3143,16 +3217,22 @@ impl GPUBenchApp {
                     if value < entry.numeric {
                         entry.numeric = value;
                         entry.value_str = value_str.clone();
+                        entry.raw_operations = res.operations;
+                        entry.raw_time_ms = res.time_ms;
                     }
                 } else if value > entry.numeric {
                     entry.numeric = value;
                     entry.value_str = value_str.clone();
+                    entry.raw_operations = res.operations;
+                    entry.raw_time_ms = res.time_ms;
                 }
             } else {
                 entry.numeric = value;
                 entry.value_str = value_str.clone();
                 entry.unit = res.metric.clone();
                 entry.is_unsupported = is_unsupported;
+                entry.raw_operations = res.operations;
+                entry.raw_time_ms = res.time_ms;
             }
             entry.is_running = false;
 
@@ -3241,6 +3321,92 @@ impl GPUBenchApp {
                 _ => {}
             }
         }
+    }
+
+    fn generate_diagnostic_summary(&self) -> String {
+        let sys = SystemInfo::collect();
+        let profiles = get_device_profiles();
+        let (res_w, res_h) = self.selected_resolution.dimensions();
+
+        let mut s = String::new();
+        s.push_str("# GPUBench Diagnostic Report\n\n");
+        s.push_str(&format!("- **GPUBench Version**: v{}\n", env!("CARGO_PKG_VERSION")));
+        s.push_str(&format!("- **OS**: {}\n", sys.os_name));
+        s.push_str(&format!("- **Kernel**: {}\n", sys.kernel_version));
+        s.push_str(&format!("- **Architecture**: {}\n", sys.arch));
+        s.push_str(&format!("- **CPU**: {} ({} logical threads)\n", sys.cpu_model, sys.cpu_logical_cores));
+        s.push_str(&format!("- **Total System RAM**: {:.1} GB\n", sys.total_ram_gb));
+        s.push_str(&format!("- **Selected Backend**: {}\n", self.selected_backend));
+        s.push_str(&format!("- **Selected Resolution**: {} ({}x{})\n\n", self.selected_resolution.label(), res_w, res_h));
+
+        s.push_str("## Detected GPU Profiles\n\n");
+        if profiles.is_empty() {
+            s.push_str("*No GPU profiles returned by backend.*\n\n");
+        } else {
+            for (idx, p) in profiles.iter().enumerate() {
+                s.push_str(&format!("### GPU #{}: {}\n", idx, p.device_name));
+                s.push_str(&format!("- **Vendor ID**: {}, **Device ID**: {}\n", p.vendor_id, p.device_id_hex));
+                s.push_str(&format!("- **Driver**: {} | Info: {} | Version: {}\n", p.driver_name, p.driver_info, p.driver_version));
+                s.push_str(&format!("- **API Version**: {}\n", p.api_version));
+                s.push_str(&format!("- **Total VRAM**: {} MB\n", p.vram_total_mb));
+                s.push_str(&format!("- **Subgroup Size**: {}, **Max Workgroup Size**: {}\n", p.subgroup_size, p.max_workgroup_size));
+                s.push_str(&format!("- **Ray Tracing Pipeline**: {}\n", if p.ray_tracing_supported { "Supported" } else { "Unsupported" }));
+                s.push_str(&format!("- **Hardware SER**: {}\n", if p.ser_supported { "Supported" } else { "Unsupported" }));
+                s.push_str(&format!("- **Work Graphs**: {}\n", if p.work_graphs_supported { "Supported" } else { "Unsupported" }));
+                s.push_str(&format!("- **Cooperative Matrix**: {}\n", if p.cooperative_matrix_supported { "Supported" } else { "Unsupported" }));
+                s.push_str(&format!("- **Float16 Compute**: {}, **Int8 Compute**: {}\n\n",
+                    if p.float16_supported { "Supported" } else { "Unsupported" },
+                    if p.int8_supported { "Supported" } else { "Unsupported" }
+                ));
+            }
+        }
+
+        s.push_str("## Active Device Results\n\n");
+        for (dev_id, dev_name) in &self.active_device_targets {
+            s.push_str(&format!("### Device {}: {}\n\n", dev_id, dev_name));
+            s.push_str("| Workload | Result | Unit | Ops | Time (ms) | Status |\n");
+            s.push_str("| :--- | :--- | :--- | :--- | :--- | :--- |\n");
+            for w in WORKLOADS {
+                if (w.is_system && *dev_id != SYSTEM_DEVICE_ID) || (!w.is_system && *dev_id == SYSTEM_DEVICE_ID) {
+                    continue;
+                }
+                if let Some(cell) = self.results_map.get(&(*dev_id, w.id)) {
+                    let status = if cell.is_unsupported {
+                        "UNSUPPORTED"
+                    } else if cell.is_running {
+                        "RUNNING"
+                    } else if !cell.value_str.is_empty() {
+                        "COMPLETED"
+                    } else {
+                        "PENDING"
+                    };
+                    s.push_str(&format!("| {} | {} | {} | {} | {:.2} | {} |\n",
+                        w.label,
+                        if cell.value_str.is_empty() { "-" } else { &cell.value_str },
+                        if cell.unit.is_empty() { w.default_unit } else { &cell.unit },
+                        cell.raw_operations,
+                        cell.raw_time_ms,
+                        status
+                    ));
+                }
+            }
+            s.push_str("\n");
+        }
+
+        s.push_str("## Recent Execution Log\n\n```text\n");
+        if let Ok(log_content) = std::fs::read_to_string("gpubench.log") {
+            let lines: Vec<&str> = log_content.lines().collect();
+            let start = if lines.len() > 60 { lines.len() - 60 } else { 0 };
+            for line in &lines[start..] {
+                s.push_str(line);
+                s.push('\n');
+            }
+        } else {
+            s.push_str("(No log recorded yet)\n");
+        }
+        s.push_str("```\n");
+
+        s
     }
 }
 

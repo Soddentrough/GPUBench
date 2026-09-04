@@ -17,6 +17,27 @@ pub mod ffi {
         sortWeight: i32,
     }
 
+    struct FfiDeviceProfile {
+        backend: String,
+        deviceIndex: u32,
+        deviceName: String,
+        vendorId: u32,
+        deviceId: u32,
+        driverName: String,
+        driverInfo: String,
+        driverVersion: String,
+        apiVersion: String,
+        vramTotalMb: u64,
+        subgroupSize: u32,
+        maxWorkGroupSize: u32,
+        rayTracingSupported: bool,
+        serSupported: bool,
+        workGraphsSupported: bool,
+        cooperativeMatrixSupported: bool,
+        float16Supported: bool,
+        int8Supported: bool,
+    }
+
     unsafe extern "C++" {
         include!("gpubench-sys/src/bridge.h");
 
@@ -36,6 +57,7 @@ pub mod ffi {
 
         fn gpubench_get_available_hardware() -> Vec<String>;
         fn gpubench_get_available_benchmarks() -> Vec<String>;
+        fn gpubench_get_device_profiles() -> Vec<FfiDeviceProfile>;
     }
 }
 
