@@ -11,20 +11,52 @@ public:
   }
   bool IsSupported(const DeviceInfo &info,
                    IComputeContext *context = nullptr) const override;
-  std::string GetSupportNote() const override {
-    if (lastCheckedContext && lastCheckedContext->getBackend() == ComputeBackend::OpenCL) {
-      return "OpenCL standard does not define native 8-bit floating point compute (cl_khr_fp8 missing)";
-    }
-    return "GPU supports FP8 natively, but no shader toolchain on any "
-           "backend can emit it yet: glslang lacks FP8 GLSL for Vulkan "
-           "(no GL_EXT_shader_explicit_arithmetic_types_float8) and the "
-           "HIP FP8 path is emulated (disabled as inaccurate)";
-  }
   SupportLimitation GetSupportLimitation() const override {
-    if (lastCheckedContext && lastCheckedContext->getBackend() == ComputeBackend::OpenCL) {
+    return SupportLimitation::kToolchain;
+  }
+  SupportLimitation GetSupportLimitation(const DeviceInfo &info,
+                                         IComputeContext *context = nullptr) const override {
+    if (context && context->getBackend() == ComputeBackend::OpenCL) {
       return SupportLimitation::kApi;
     }
+    if (!info.fp8Support) {
+      return SupportLimitation::kHardware;
+    }
     return SupportLimitation::kToolchain;
+  }
+  std::string GetSupportNote() const override {
+    return "extension GL_EXT_shader_explicit_arithmetic_types_float8 missing in glslang toolchain";
+  }
+  std::string GetSupportNote(const DeviceInfo &info,
+                             IComputeContext *context = nullptr) const override {
+    if (context && context->getBackend() == ComputeBackend::OpenCL) {
+      return "No support for 8-bit floating point in OpenCL API (extension cl_khr_fp8 missing)";
+    }
+    if (!info.fp8Support) {
+      return "shaderFloat8 hardware bit not set (no native FP8 support on GPU)";
+    }
+    if (context && context->getBackend() == ComputeBackend::Vulkan) {
+      return "extension GL_EXT_shader_explicit_arithmetic_types_float8 missing in glslang toolchain";
+    }
+    if (context && context->getBackend() == ComputeBackend::ROCm) {
+      return "ROCm HIP compiler lacks native FP8 vector arithmetic types on gfx1201";
+    }
+    return "extension GL_EXT_shader_explicit_arithmetic_types_float8 missing in glslang toolchain";
+  }
+  std::string GetConfigSupportNote(uint32_t config_idx,
+                                   const DeviceInfo &info,
+                                   IComputeContext *context = nullptr) const override {
+    if (context && context->getBackend() == ComputeBackend::ROCm) {
+      if (config_idx == 0) {
+        return "ROCm HIP compiler lacks native FP8 vector arithmetic types on gfx1201";
+      }
+    }
+    return GetSupportNote(info, context);
+  }
+  SupportLimitation GetConfigSupportLimitation(uint32_t config_idx,
+                                               const DeviceInfo &info,
+                                               IComputeContext *context = nullptr) const override {
+    return GetSupportLimitation(info, context);
   }
   void Setup(IComputeContext &context, const std::string &kernel_dir) override;
   void Run(uint32_t config_idx = 0) override;

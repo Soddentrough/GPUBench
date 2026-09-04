@@ -41,16 +41,48 @@ public:
   virtual SupportLimitation GetSupportLimitation() const {
     return SupportLimitation::kNone;
   }
+  virtual SupportLimitation GetSupportLimitation(const DeviceInfo &info,
+                                                IComputeContext *context = nullptr) const {
+    (void)info;
+    (void)context;
+    return GetSupportLimitation();
+  }
   // Optional human-readable note explaining a capability limitation (shown
   // by --list-benchmarks and useful when IsSupported() returns false).
   // Empty string means no note.
   virtual std::string GetSupportNote() const { return ""; }
+  virtual std::string GetSupportNote(const DeviceInfo &info,
+                                     IComputeContext *context = nullptr) const {
+    (void)info;
+    (void)context;
+    return GetSupportNote();
+  }
   virtual uint32_t GetNumConfigs() const { return 1; }
   virtual std::string GetConfigName(uint32_t config_idx) const { return ""; }
   virtual bool IsConfigSupported(uint32_t config_idx) const { return true; }
+  virtual bool IsConfigSupported(uint32_t config_idx, const DeviceInfo &info,
+                                 IComputeContext *context = nullptr) const {
+    (void)info;
+    (void)context;
+    return IsConfigSupported(config_idx);
+  }
   virtual std::string GetConfigSupportNote(uint32_t config_idx) const { return ""; }
+  virtual std::string GetConfigSupportNote(uint32_t config_idx,
+                                           const DeviceInfo &info,
+                                           IComputeContext *context = nullptr) const {
+    (void)info;
+    (void)context;
+    return GetConfigSupportNote(config_idx);
+  }
   virtual SupportLimitation GetConfigSupportLimitation(uint32_t config_idx) const {
     return GetSupportLimitation();
+  }
+  virtual SupportLimitation GetConfigSupportLimitation(uint32_t config_idx,
+                                                       const DeviceInfo &info,
+                                                       IComputeContext *context = nullptr) const {
+    (void)info;
+    (void)context;
+    return GetConfigSupportLimitation(config_idx);
   }
   virtual uint32_t GetExpectedKernelCount() const { return 1; }
 

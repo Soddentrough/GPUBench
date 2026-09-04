@@ -34,8 +34,29 @@ public:
   SupportLimitation GetSupportLimitation() const override {
     return SupportLimitation::kApi;
   }
+  SupportLimitation GetSupportLimitation(const DeviceInfo &info,
+                                         IComputeContext *context = nullptr) const override {
+    if (context && (context->getBackend() == ComputeBackend::OpenCL ||
+                    context->getBackend() == ComputeBackend::ROCm)) {
+      return SupportLimitation::kApi;
+    }
+    return SupportLimitation::kHardware;
+  }
   std::string GetSupportNote() const override {
-    return "Ray Scheduling benchmark requires Vulkan ray query / ray tracing acceleration structures";
+    return "Ray Scheduling benchmark requires Vulkan ray query acceleration structures";
+  }
+  std::string GetSupportNote(const DeviceInfo &info,
+                             IComputeContext *context = nullptr) const override {
+    if (context && context->getBackend() == ComputeBackend::OpenCL) {
+      return "No support for ray tracing acceleration structures in OpenCL API";
+    }
+    if (context && context->getBackend() == ComputeBackend::ROCm) {
+      return "No support for ray tracing acceleration structures in ROCm/HIP API";
+    }
+    if (!info.rayTracingSupport) {
+      return "extension VK_KHR_acceleration_structure or VK_KHR_ray_query missing";
+    }
+    return "Ray Scheduling benchmark requires Vulkan ray query acceleration structures";
   }
 
   void Setup(IComputeContext &context, const std::string &kernel_dir) override;
@@ -63,8 +84,28 @@ public:
   bool IsConfigSupported(uint32_t config_idx) const override {
     return !unsupportedConfig[config_idx];
   }
+  bool IsConfigSupported(uint32_t config_idx, const DeviceInfo &info,
+                         IComputeContext *context = nullptr) const override {
+    (void)info;
+    (void)context;
+    return !unsupportedConfig[config_idx];
+  }
   std::string GetConfigSupportNote(uint32_t config_idx) const override {
     return unsupportedReason[config_idx];
+  }
+  std::string GetConfigSupportNote(uint32_t config_idx,
+                                   const DeviceInfo &info,
+                                   IComputeContext *context = nullptr) const override {
+    if (!unsupportedReason[config_idx].empty()) {
+      return unsupportedReason[config_idx];
+    }
+    if (config_idx == 1 || config_idx == 5 || config_idx == 9 || config_idx == 13) {
+      return "extension VK_EXT_ray_tracing_invocation_reorder missing";
+    }
+    if (config_idx == 3 || config_idx == 7 || config_idx == 11 || config_idx == 15) {
+      return "extension VK_AMDX_shader_enqueue missing";
+    }
+    return GetSupportNote(info, context);
   }
   SupportLimitation GetConfigSupportLimitation(uint32_t config_idx) const override {
     if (config_idx == 1 || config_idx == 5 || config_idx == 9 || config_idx == 13) {
@@ -74,6 +115,13 @@ public:
       return SupportLimitation::kApi;
     }
     return SupportLimitation::kNone;
+  }
+  SupportLimitation GetConfigSupportLimitation(uint32_t config_idx,
+                                               const DeviceInfo &info,
+                                               IComputeContext *context = nullptr) const override {
+    (void)info;
+    (void)context;
+    return GetConfigSupportLimitation(config_idx);
   }
   const char *GetComponent(uint32_t config_idx = 0) const override { return "Ray Tracing"; }
   const char *GetSubCategory(uint32_t config_idx = 0) const override;

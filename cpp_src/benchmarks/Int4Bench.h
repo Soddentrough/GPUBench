@@ -12,11 +12,28 @@ public:
   bool IsSupported(const DeviceInfo &info,
                    IComputeContext *context = nullptr) const override;
   std::string GetSupportNote() const override {
-    return "RDNA4 has INT4 matrix hardware, but it is not expressible: "
-           "Vulkan cooperative matrix has no 4-bit component type, and "
-           "HIP/OpenCL INT4 paths are emulated (disabled as inaccurate)";
+    return "No support for 4-bit integer types in Vulkan API (no 4-bit component type in VK_KHR_cooperative_matrix or SPIR-V)";
+  }
+  std::string GetSupportNote(const DeviceInfo &info,
+                             IComputeContext *context = nullptr) const override {
+    (void)info;
+    if (context && context->getBackend() == ComputeBackend::OpenCL) {
+      return "No support for 4-bit integer types in OpenCL API";
+    }
+    if (context && context->getBackend() == ComputeBackend::ROCm) {
+      return "No support for 4-bit integer types in ROCm API (HIP toolchain lacks native 4-bit types)";
+    }
+    return "No support for 4-bit integer types in Vulkan API (no 4-bit component type in VK_KHR_cooperative_matrix or SPIR-V)";
   }
   SupportLimitation GetSupportLimitation() const override {
+    return SupportLimitation::kApi;
+  }
+  SupportLimitation GetSupportLimitation(const DeviceInfo &info,
+                                         IComputeContext *context = nullptr) const override {
+    (void)info;
+    if (context && context->getBackend() == ComputeBackend::ROCm) {
+      return SupportLimitation::kToolchain;
+    }
     return SupportLimitation::kApi;
   }
   void Setup(IComputeContext &context, const std::string &kernel_dir) override;

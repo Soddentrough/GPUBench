@@ -18,8 +18,30 @@ public:
   SupportLimitation GetSupportLimitation() const override {
     return SupportLimitation::kApi;
   }
+  SupportLimitation GetSupportLimitation(const DeviceInfo &info,
+                                         IComputeContext *context = nullptr) const override {
+    (void)info;
+    if (context && (context->getBackend() == ComputeBackend::OpenCL ||
+                    context->getBackend() == ComputeBackend::ROCm)) {
+      return SupportLimitation::kApi;
+    }
+    return SupportLimitation::kHardware;
+  }
   std::string GetSupportNote() const override {
-    return "Ray tracing benchmark requires Vulkan hardware ray tracing pipelines and acceleration structures (VK_KHR_ray_tracing_pipeline)";
+    return "Ray tracing requires Vulkan ray query acceleration structures";
+  }
+  std::string GetSupportNote(const DeviceInfo &info,
+                             IComputeContext *context = nullptr) const override {
+    if (context && context->getBackend() == ComputeBackend::OpenCL) {
+      return "No support for ray tracing acceleration structures in OpenCL API";
+    }
+    if (context && context->getBackend() == ComputeBackend::ROCm) {
+      return "No support for ray tracing acceleration structures in ROCm/HIP API";
+    }
+    if (!info.rayTracingSupport) {
+      return "extension VK_KHR_acceleration_structure or VK_KHR_ray_query missing";
+    }
+    return "Ray tracing requires Vulkan ray query acceleration structures";
   }
 
   void Setup(IComputeContext &context, const std::string &kernel_dir) override;

@@ -385,33 +385,43 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
       (kdir / "vulkan" / "rt_scheduling_workgraph.comp").string(), "main", 2);
 
   // Check hardware SER support
+  bool hasSERExt = vContext->isExtensionEnabled("VK_EXT_ray_tracing_invocation_reorder") ||
+                   vContext->isExtensionEnabled("VK_NV_ray_tracing_invocation_reorder");
   bool serSupported = vContext->isSERSupported();
   for (int i = 0; i < 23; ++i) {
     unsupportedConfig[i] = false;
     unsupportedReason[i] = "";
   }
   if (!serSupported) {
+    std::string reason = !hasSERExt
+        ? "extension VK_EXT_ray_tracing_invocation_reorder missing"
+        : "rayTracingInvocationReorder hardware bit not set";
     unsupportedConfig[1] = true;
-    unsupportedReason[1] = "Hardware SER (VK_EXT/NV_ray_tracing_invocation_reorder) not supported on this GPU";
+    unsupportedReason[1] = reason;
     unsupportedConfig[5] = true;
-    unsupportedReason[5] = "Hardware SER (VK_EXT/NV_ray_tracing_invocation_reorder) not supported on this GPU";
+    unsupportedReason[5] = reason;
     unsupportedConfig[9] = true;
-    unsupportedReason[9] = "Hardware SER (VK_EXT/NV_ray_tracing_invocation_reorder) not supported on this GPU";
+    unsupportedReason[9] = reason;
     unsupportedConfig[13] = true;
-    unsupportedReason[13] = "Hardware SER (VK_EXT/NV_ray_tracing_invocation_reorder) not supported on this GPU";
+    unsupportedReason[13] = reason;
   }
 
   // Check Work Graphs support (VK_AMDX_shader_enqueue)
+  bool hasWorkGraphsExt = vContext->isExtensionEnabled("VK_AMDX_shader_enqueue") ||
+                          vContext->isExtensionEnabled("VK_KHR_work_graphs");
   bool workGraphsSupported = vContext->isWorkGraphsSupported();
   if (!workGraphsSupported) {
+    std::string reason = !hasWorkGraphsExt
+        ? "extension VK_AMDX_shader_enqueue missing"
+        : "shaderEnqueue hardware bit not set";
     unsupportedConfig[3] = true;
-    unsupportedReason[3] = "Work Graphs (VK_AMDX_shader_enqueue) not exposed by driver";
+    unsupportedReason[3] = reason;
     unsupportedConfig[7] = true;
-    unsupportedReason[7] = "Work Graphs (VK_AMDX_shader_enqueue) not exposed by driver";
+    unsupportedReason[7] = reason;
     unsupportedConfig[11] = true;
-    unsupportedReason[11] = "Work Graphs (VK_AMDX_shader_enqueue) not exposed by driver";
+    unsupportedReason[11] = reason;
     unsupportedConfig[15] = true;
-    unsupportedReason[15] = "Work Graphs (VK_AMDX_shader_enqueue) not exposed by driver";
+    unsupportedReason[15] = reason;
   }
 
   // Pre-generate static indirect batches for Work Lists dispatches with specialized PSOs

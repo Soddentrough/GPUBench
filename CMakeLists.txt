@@ -352,7 +352,8 @@ if(CARGO_EXECUTABLE)
     if(GPUBENCH_REQUIRE_GUI OR CARGO_EXECUTABLE)
         if(WIN32)
             install(PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/target/release/gpubench-gui.exe"
-                    DESTINATION bin)
+                    DESTINATION bin
+                    OPTIONAL)
         else()
             install(PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/target/release/gpubench-gui"
                     DESTINATION bin)

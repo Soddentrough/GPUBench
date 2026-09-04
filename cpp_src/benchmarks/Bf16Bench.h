@@ -7,16 +7,31 @@ public:
   bool IsSupported(const DeviceInfo &info,
                    IComputeContext *context) const override;
   std::string GetSupportNote() const override {
-    if (lastCheckedContext && lastCheckedContext->getBackend() == ComputeBackend::OpenCL) {
-      return "OpenCL standard does not define native BFloat16 floating-point arithmetic (cl_khr_bfloat16 missing)";
+    return "HIP toolchain clang emulates bf16 via FP32 (no native hip_bfloat162/__hfma2 in headers)";
+  }
+  std::string GetSupportNote(const DeviceInfo &info,
+                             IComputeContext *context = nullptr) const override {
+    if (context && context->getBackend() == ComputeBackend::OpenCL) {
+      return "No support for native BFloat16 floating-point arithmetic in OpenCL API (extension cl_khr_bfloat16 missing)";
     }
-    return "HIP toolchain clang emulates bf16 via FP32 (no native "
-           "hip_bfloat162/__hfma2 in headers, scalar-unit codegen); "
-           "Vulkan measures the native rate";
+    if (context && context->getBackend() == ComputeBackend::ROCm) {
+      return "HIP toolchain clang emulates bf16 via FP32 (no native hip_bfloat162/__hfma2 in headers)";
+    }
+    if (!info.bf16Support) {
+      return "shaderBfloat16 hardware bit not set";
+    }
+    return "HIP toolchain clang emulates bf16 via FP32 (no native hip_bfloat162/__hfma2 in headers)";
   }
   SupportLimitation GetSupportLimitation() const override {
-    if (lastCheckedContext && lastCheckedContext->getBackend() == ComputeBackend::OpenCL) {
+    return SupportLimitation::kToolchain;
+  }
+  SupportLimitation GetSupportLimitation(const DeviceInfo &info,
+                                         IComputeContext *context = nullptr) const override {
+    if (context && context->getBackend() == ComputeBackend::OpenCL) {
       return SupportLimitation::kApi;
+    }
+    if (!info.bf16Support) {
+      return SupportLimitation::kHardware;
     }
     return SupportLimitation::kToolchain;
   }

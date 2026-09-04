@@ -295,14 +295,47 @@ static bool benchmarkMatches(const IBenchmark *bench, const std::string &run_nam
   return false;
 }
 
-void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
-  std::vector<std::string> effective_benchmarks = expandGroups(benchmarks_to_run);
-  std::vector<std::string> lower_benchmarks_to_run;
+void BenchmarkRunner::printBanner() {
+  std::cout
+      << "==============================================================="
+         "================="
+      << std::endl;
+  std::cout
+      << "   ______ ______  _    _  ____   ______  _   _   _____  _    _"
+      << std::endl;
+  std::cout
+      << "  |  ____|  __  || |  | ||  _ \\ |  ____|| \\ | | / ____|| |  | |"
+      << std::endl;
+  std::cout
+      << "  | |  __| |__) || |  | || |_) || |____ |  \\| || |     | |__| |"
+      << std::endl;
+  std::cout
+      << "  | | |_ |  ___/ | |  | ||  _ < |  ____|| . ` || |     |  __  |"
+      << std::endl;
+  std::cout
+      << "  | |__| | |     | |__| || |_) || |____ | |\\  || |____ | |  | |"
+      << std::endl;
+  std::cout
+      << "  \\______|_|      \\____/ |____/ |______||_| \\_| \\_____||_|  |_|"
+      << std::endl;
+  std::cout
+      << "==============================================================="
+         "================="
+      << std::endl;
+  std::cout << std::endl;
+}
+
+void BenchmarkRunner::initRunConfig(const std::vector<std::string> &benchmarks_to_run) {
+  if (runConfigInitialized)
+    return;
+  runConfigInitialized = true;
+
+  effective_benchmarks = expandGroups(benchmarks_to_run);
+  lower_benchmarks_to_run.clear();
   for (const auto &b : effective_benchmarks) {
     lower_benchmarks_to_run.push_back(to_lower(b));
   }
 
-  // Determine which requested names match at least one benchmark
   unmatchedBenchmarks.clear();
   numBenchmarksRun = 0;
   for (size_t i = 0; i < lower_benchmarks_to_run.size(); ++i) {
@@ -318,14 +351,464 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
       unmatchedBenchmarks.push_back(effective_benchmarks[i]);
     }
   }
+}
 
-  int totalSelected = contexts.size();
-  int totalAvailable = 0;
+void BenchmarkRunner::runForContext(IComputeContext *context,
+                                    const std::vector<std::string> &benchmarks_to_run) {
+  if (!context || !context->isAvailable())
+    return;
 
-  // Check if we need to run any device-dependent benchmarks
-  bool hasDeviceBenchmarks = false;
-  for (const auto &bench : benchmarks) {
-    if (!bench->IsDeviceDependent())
+  initRunConfig(benchmarks_to_run);
+
+  if (verbose && !bannerPrinted) {
+    printBanner();
+    bannerPrinted = true;
+  }
+
+  context->setVerbose(verbose);
+
+  try {
+    DeviceInfo info = context->getCurrentDeviceInfo();
+    if (verbose) {
+      std::cout << " [Device " << context->getSelectedDeviceIndex() << "] "
+                << info.name << " ("
+                << ComputeBackendFactory::getBackendName(context->getBackend())
+                << ")" << std::endl;
+      std::cout << "  - VRAM:         "
+                << static_cast<int>(std::round(info.memorySize /
+                                               (1024.0 * 1024.0 * 1024.0)))
+                << " GB" << std::endl;
+      std::cout << "  - Subgroup:     " << info.subgroupSize << " threads"
+                << std::endl;
+      std::cout << "  - Shared Memory: "
+                << (info.maxComputeSharedMemorySize / 1024) << " KB"
+                << std::endl;
+      std::cout << std::endl;
+    }
+
+    auto isSelected = [&](IBenchmark *b) {
+      if (lower_benchmarks_to_run.empty())
+        return true;
+      for (const auto &run_name : lower_benchmarks_to_run) {
+        if (benchmarkMatches(b, run_name))
+          return true;
+      }
+      return false;
+    };
+
+    uint32_t totalKernels = 0;
+    for (auto &bench : benchmarks) {
+      if (isSelected(bench.get()) && bench->IsSupported(info, context) &&
+          bench->IsDeviceDependent()) {
+        totalKernels += bench->GetExpectedKernelCount();
+      }
+    }
+    context->setExpectedKernelCount(totalKernels);
+
+    std::cout << "Preparing benchmarks (compiling kernels, uploading "
+                 "data, building acceleration structures)..."
+              << std::endl;
+    uint32_t effectiveWidth = renderWidth;
+    uint32_t effectiveHeight = renderHeight;
+    if (effectiveWidth == 0 || effectiveHeight == 0) {
+      if (info.memorySize >= 15ULL * 1024 * 1024 * 1024) {
+        effectiveWidth = 3840;
+        effectiveHeight = 2160;
+      } else if (info.memorySize >= 9ULL * 1024 * 1024 * 1024) {
+        effectiveWidth = 2560;
+        effectiveHeight = 1440;
+      } else {
+        effectiveWidth = 1920;
+        effectiveHeight = 1080;
+      }
+      if (verbose) {
+        std::cout << "Auto-selected resolution: " << effectiveWidth << "x" << effectiveHeight
+                  << " for " << info.name << " (" << (info.memorySize / (1024 * 1024 * 1024))
+                  << " GB VRAM)" << std::endl;
+      }
+    }
+
+    std::vector<IBenchmark *> runnable;
+    for (auto &bench : benchmarks) {
+      bool should_run = isSelected(bench.get());
+
+      if (should_run && bench->IsSupported(info, context)) {
+        if (dumpGeometry) {
+          bench->DumpGeometry();
+        }
+        if (!bench->IsDeviceDependent())
+          continue;
+
+        try {
+          if (auto *membw = dynamic_cast<MemBandwidthBench *>(bench.get())) {
+            membw->setDebug(debug);
+          } else if (auto *cache = dynamic_cast<CacheBench *>(bench.get())) {
+            cache->setDebug(debug);
+          }
+
+          if (verbose) {
+            std::cout << "Setting up " << bench->GetName() << "..." << std::endl;
+          }
+          bench->SetResolution(effectiveWidth, effectiveHeight);
+          bench->Setup(*context, KernelPath::find());
+          runnable.push_back(bench.get());
+        } catch (const std::exception &e) {
+          if (verbose) {
+            std::cerr << "Error setting up " << bench->GetName() << ": "
+                      << e.what() << std::endl;
+          }
+          try {
+            bench->Teardown();
+          } catch (...) {
+          }
+        }
+      } else if (should_run && bench->IsDeviceDependent()) {
+        std::string bname = bench->GetName();
+        uint32_t num_unsupported_configs = 1;
+        if (bname == "FP8" || bname == "INT4" || bname == "FP16" || bname == "BF16" || bname == "INT8") {
+          num_unsupported_configs = 2;
+        }
+
+        for (uint32_t ci = 0; ci < num_unsupported_configs; ++ci) {
+          ResultData result_data;
+          result_data.backendName =
+              ComputeBackendFactory::getBackendName(context->getBackend());
+          result_data.deviceName = info.name;
+          result_data.benchmarkName = (num_unsupported_configs > 1)
+              ? (bname + (ci == 0 ? " (Vector)" : " (Matrix)"))
+              : bname;
+          result_data.metric = "";
+          result_data.operations = 0;
+          result_data.time_ms = 0;
+          result_data.isEmulated = false;
+          result_data.isUnsupported = true;
+          result_data.supportNote = bench->GetConfigSupportNote(ci, info, context);
+          if (result_data.supportNote.empty()) {
+            result_data.supportNote = bench->GetSupportNote(info, context);
+          }
+          switch (bench->GetConfigSupportLimitation(ci, info, context)) {
+          case IBenchmark::SupportLimitation::kHardware:
+            result_data.supportCategory = "hardware";
+            break;
+          case IBenchmark::SupportLimitation::kApi:
+            result_data.supportCategory = "api";
+            break;
+          case IBenchmark::SupportLimitation::kToolchain:
+            result_data.supportCategory = "toolchain";
+            break;
+          default:
+            break;
+          }
+          result_data.component = bench->GetComponent(ci);
+          result_data.subcategory = bench->GetSubCategory(ci);
+          result_data.maxWorkGroupSize = info.maxWorkGroupSize;
+          result_data.deviceIndex = context->getSelectedDeviceIndex();
+          result_data.configIndex = ci;
+          result_data.sortWeight = bench->GetSortWeight(ci);
+
+          formatter->addResult(result_data);
+          numBenchmarksRun++;
+          if (onResult) {
+            onResult(result_data);
+          }
+        }
+      }
+    }
+
+    std::cout << "\nPreparation complete. Running benchmarks..." << std::endl;
+    struct BenchmarkTask {
+      IBenchmark *bench;
+      uint32_t configIndex;
+      int sortWeight;
+    };
+
+    std::vector<BenchmarkTask> tasks;
+    for (auto *bench : runnable) {
+      uint32_t num_configs = bench->GetNumConfigs();
+      for (uint32_t i = 0; i < num_configs; ++i) {
+        if (targetConfig >= 0 && static_cast<int>(i) != targetConfig) {
+          continue;
+        }
+        tasks.push_back({bench, i, bench->GetSortWeight(i)});
+      }
+    }
+
+    std::stable_sort(tasks.begin(), tasks.end(),
+                     [](const BenchmarkTask &a, const BenchmarkTask &b) {
+                       return a.sortWeight < b.sortWeight;
+                     });
+
+    IBenchmark *prevBench = nullptr;
+    for (const auto &task : tasks) {
+      auto *bench = task.bench;
+      uint32_t i = task.configIndex;
+
+      if (prevBench && prevBench != bench) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(150));
+      }
+      prevBench = bench;
+
+      std::string bench_name = bench->GetName();
+      std::string config_name = bench->GetConfigName(i);
+      if (!config_name.empty()) {
+        bench_name += " (" + config_name + ")";
+      }
+
+      try {
+        if (verbose) {
+          std::cout << "[D" << context->getSelectedDeviceIndex()
+                    << "] Running " << bench_name << "..." << std::endl;
+        } else {
+          std::cout << "  - [" << ComputeBackendFactory::getBackendName(context->getBackend())
+                    << "] Running " << bench_name << "..." << std::flush;
+        }
+
+        if (onResult) {
+          ResultData start_data;
+          start_data.backendName = ComputeBackendFactory::getBackendName(context->getBackend());
+          start_data.deviceName = info.name;
+          start_data.benchmarkName = bench_name;
+          start_data.component = bench->GetComponent(i);
+          start_data.subcategory = bench->GetSubCategory(i);
+          start_data.metric = bench->GetMetric(i);
+          start_data.operations = 0;
+          start_data.time_ms = -1.0;
+          start_data.isEmulated = false;
+          start_data.isUnsupported = false;
+          start_data.maxWorkGroupSize = info.maxWorkGroupSize;
+          start_data.deviceIndex = context->getSelectedDeviceIndex();
+          start_data.configIndex = i;
+          start_data.sortWeight = bench->GetSortWeight(i);
+          start_data.width = effectiveWidth;
+          start_data.height = effectiveHeight;
+          onResult(start_data);
+        }
+
+        if (!bench->IsConfigSupported(i, info, context)) {
+          std::string note = bench->GetConfigSupportNote(i, info, context);
+          if (note.empty()) {
+            note = bench->GetSupportNote(info, context);
+          }
+          if (!verbose) {
+            if (!note.empty()) {
+              std::cout << " Unsupported (" << note << ")." << std::endl;
+            } else {
+              std::cout << " Unsupported." << std::endl;
+            }
+          }
+          ResultData result_data;
+          result_data.backendName = ComputeBackendFactory::getBackendName(context->getBackend());
+          result_data.deviceName = info.name;
+          result_data.benchmarkName = bench_name;
+          result_data.metric = bench->GetMetric(i);
+          result_data.operations = 0;
+          result_data.time_ms = 0;
+          result_data.isEmulated = false;
+          result_data.isUnsupported = true;
+          result_data.supportNote = note;
+          switch (bench->GetConfigSupportLimitation(i, info, context)) {
+          case IBenchmark::SupportLimitation::kHardware:
+            result_data.supportCategory = "hardware";
+            break;
+          case IBenchmark::SupportLimitation::kApi:
+            result_data.supportCategory = "driver/api";
+            break;
+          case IBenchmark::SupportLimitation::kToolchain:
+            result_data.supportCategory = "toolchain";
+            break;
+          default:
+            result_data.supportCategory = "hardware";
+            break;
+          }
+          result_data.component = bench->GetComponent(i);
+          result_data.subcategory = bench->GetSubCategory(i);
+          result_data.maxWorkGroupSize = info.maxWorkGroupSize;
+          result_data.deviceIndex = context->getSelectedDeviceIndex();
+          result_data.configIndex = i;
+          result_data.sortWeight = bench->GetSortWeight(i);
+          result_data.width = effectiveWidth;
+          result_data.height = effectiveHeight;
+
+          formatter->addResult(result_data);
+          numBenchmarksRun++;
+          if (onResult) {
+            onResult(result_data);
+          }
+          continue;
+        }
+
+        double total_time_ms = 0;
+        uint64_t total_invocations = 0;
+
+        if (profileSnapshot) {
+          bench->Run(i);
+          context->waitIdle();
+
+          auto start = std::chrono::high_resolution_clock::now();
+          bench->Run(i);
+          context->waitIdle();
+          auto end = std::chrono::high_resolution_clock::now();
+          total_time_ms =
+              std::chrono::duration<double, std::milli>(end - start).count();
+          total_invocations = 1;
+        } else {
+          auto start = std::chrono::high_resolution_clock::now();
+          bench->Run(i);
+          context->waitIdle();
+          auto end = std::chrono::high_resolution_clock::now();
+          double single_run_ms =
+              std::chrono::duration<double, std::milli>(end - start).count();
+
+          // Warmup: Run until the GPU clocks ramp up from idle/sleep to sustained boost clocks.
+          // On modern GPUs with dynamic power management (DPM) governors, ramping takes ~250-400ms.
+          const double min_warmup_duration_ms = 400.0;
+          uint64_t warmup_iters = 3;
+          if (single_run_ms > 0.0) {
+            warmup_iters = static_cast<uint64_t>(
+                std::max(3.0, std::ceil(min_warmup_duration_ms / single_run_ms)));
+          }
+          warmup_iters = std::min(warmup_iters, static_cast<uint64_t>(200));
+
+          for (uint64_t w = 0; w < warmup_iters; ++w) {
+            bench->Run(i);
+          }
+          context->waitIdle();
+
+          // After warmup, re-measure single run latency at warmed-up clock speeds
+          start = std::chrono::high_resolution_clock::now();
+          bench->Run(i);
+          context->waitIdle();
+          end = std::chrono::high_resolution_clock::now();
+          single_run_ms =
+              std::chrono::duration<double, std::milli>(end - start).count();
+
+          const double target_duration_ms = 250.0;
+          uint64_t iterations = 1;
+          if (single_run_ms > 0.0) {
+            iterations = static_cast<uint64_t>(
+                std::max(1.0, std::round(target_duration_ms / single_run_ms)));
+          }
+          iterations = std::min(iterations, static_cast<uint64_t>(10000));
+          iterations = std::max(iterations, static_cast<uint64_t>(1));
+
+          total_invocations = iterations;
+          start = std::chrono::high_resolution_clock::now();
+          for (uint64_t iter = 0; iter < iterations; ++iter) {
+            bench->Run(i);
+          }
+          context->waitIdle();
+          end = std::chrono::high_resolution_clock::now();
+          total_time_ms =
+              std::chrono::duration<double, std::milli>(end - start).count();
+          if (verbose) {
+            std::cout << "[TIMING " << bench_name << "] single_run_ms: " << single_run_ms
+                      << ", iterations: " << iterations
+                      << ", total_time_ms: " << total_time_ms
+                      << ", avg_ms: " << (total_time_ms / iterations) << std::endl;
+          }
+        }
+
+        if (!verbose) {
+          std::cout << " Done." << std::endl;
+        }
+
+        bool isValid = bench->ValidateResults(i);
+        if (!isValid && verbose) {
+          std::cerr << " [WARNING] Result validation failed for "
+                    << bench_name << std::endl;
+        }
+
+        BenchmarkResult bench_result = bench->GetResult(i);
+        bench->RecordRunResult(i, total_invocations, total_time_ms);
+
+        ResultData result_data;
+        result_data.backendName = ComputeBackendFactory::getBackendName(
+            context->getBackend());
+        result_data.deviceName = info.name;
+        result_data.benchmarkName = bench_name;
+        result_data.metric = bench->GetMetric(i);
+        result_data.operations =
+            bench_result.operations * total_invocations;
+        result_data.time_ms = total_time_ms;
+        result_data.isEmulated = bench->IsEmulated(i);
+        result_data.component = bench->GetComponent(i);
+        result_data.subcategory = bench->GetSubCategory(i);
+        result_data.maxWorkGroupSize = info.maxWorkGroupSize;
+        result_data.deviceIndex = context->getSelectedDeviceIndex();
+        result_data.configIndex = i;
+        result_data.sortWeight = bench->GetSortWeight(i);
+        result_data.width = effectiveWidth;
+        result_data.height = effectiveHeight;
+
+        formatter->addResult(result_data);
+        numBenchmarksRun++;
+        if (onResult) {
+          onResult(result_data);
+        }
+      } catch (const std::exception &e) {
+        if (!verbose) {
+          std::cout << " Failed (" << e.what() << ")" << std::endl;
+        } else {
+          std::cerr << "Error running task " << bench_name << ": " << e.what() << std::endl;
+        }
+
+        std::string errStr = e.what();
+        bool isLost = (errStr.find("DEVICE_LOST") != std::string::npos ||
+                       errStr.find("timed out") != std::string::npos ||
+                       errStr.find("timeout") != std::string::npos ||
+                       errStr.find("context lost") != std::string::npos ||
+                       errStr.find("Device lost") != std::string::npos ||
+                       errStr.find("result: -4") != std::string::npos);
+        if (isLost) {
+          std::cerr << "  [CRITICAL] GPU device hung or lost during " << bench_name
+                    << ". Aborting remaining tasks on this device." << std::endl;
+          break;
+        }
+      }
+    }
+
+    for (auto *bench : runnable) {
+      try {
+        bench->Teardown();
+      } catch (const std::exception &e) {
+        if (verbose) {
+          std::cerr << "Error tearing down " << bench->GetName() << ": "
+                    << e.what() << std::endl;
+        }
+      }
+    }
+  } catch (const std::exception &e) {
+    std::cerr << "Error processing device: " << e.what() << std::endl;
+  }
+}
+
+void BenchmarkRunner::runHostBenchmarks(const std::vector<std::string> &benchmarks_to_run) {
+  initRunConfig(benchmarks_to_run);
+
+  bool headerPrinted = false;
+  struct DummyHostContext : public IComputeContext {
+    ComputeBackend getBackend() const override { return ComputeBackend::Vulkan; }
+    bool isAvailable() const override { return true; }
+    const std::vector<DeviceInfo> &getDevices() const override { static std::vector<DeviceInfo> d; return d; }
+    DeviceInfo getCurrentDeviceInfo() const override { return {}; }
+    uint32_t getSelectedDeviceIndex() const override { return 0; }
+    void pickDevice(uint32_t) override {}
+    ComputeBuffer createBuffer(size_t, const void *) override { return nullptr; }
+    void releaseBuffer(ComputeBuffer) override {}
+    void writeBuffer(ComputeBuffer, size_t, size_t, const void *) override {}
+    void readBuffer(ComputeBuffer, size_t, size_t, void *) const override {}
+    ComputeKernel createKernel(const std::string &, const std::string &, uint32_t) override { return nullptr; }
+    void releaseKernel(ComputeKernel) override {}
+    void setKernelArg(ComputeKernel, uint32_t, size_t, const void *) override {}
+    void setKernelArg(ComputeKernel, uint32_t, ComputeBuffer) override {}
+    void setKernelAS(ComputeKernel, uint32_t, AccelerationStructure) override {}
+    void dispatch(ComputeKernel, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t) override {}
+    void waitIdle() override {}
+  } dummy;
+  IComputeContext *context = contexts.empty() ? &dummy : contexts[0];
+
+  for (auto &bench : benchmarks) {
+    if (bench->IsDeviceDependent())
       continue;
 
     bool should_run = false;
@@ -341,598 +824,127 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
     }
 
     if (should_run) {
-      hasDeviceBenchmarks = true;
-      break;
-    }
-  }
-
-  std::vector<ComputeBackend> countedBackends;
-
-  if (hasDeviceBenchmarks) {
-    for (auto *context : contexts) {
-      bool alreadyCounted = false;
-      for (auto b : countedBackends) {
-        if (b == context->getBackend()) {
-          alreadyCounted = true;
-          break;
-        }
-      }
-
-      if (!alreadyCounted && context->isAvailable()) {
-        totalAvailable += context->getDevices().size();
-        countedBackends.push_back(context->getBackend());
-      }
-    }
-
-    if (verbose) {
-        std::cout
-            << "==============================================================="
-               "================="
-            << std::endl;
-        std::cout
-            << "   ______ ______  _    _  ____   ______  _   _   _____  _    _"
-            << std::endl;
-        std::cout
-            << "  |  ____|  __  || |  | ||  _ \\ |  ____|| \\ | | / ____|| |  | |"
-            << std::endl;
-        std::cout
-            << "  | |  __| |__) || |  | || |_) || |____ |  \\| || |     | |__| |"
-            << std::endl;
-        std::cout
-            << "  | | |_ |  ___/ | |  | ||  _ < |  ____|| . ` || |     |  __  |"
-            << std::endl;
-        std::cout
-            << "  | |__| | |     | |__| || |_) || |____ | |\\  || |____ | |  | |"
-            << std::endl;
-        std::cout
-            << "  \\______|_|      \\____/ |____/ |______||_| \\_| \\_____||_|  |_|"
-            << std::endl;
-        std::cout
-            << "==============================================================="
-               "================="
-            << std::endl;
-        std::cout << std::endl;
-    }
-
-    if (hasDeviceBenchmarks && verbose) {
-      std::cout << "Selected execution targets:" << std::endl;
-    }
-
-    for (auto *context : contexts) {
-      if (!context->isAvailable())
-        continue;
-      try {
-        DeviceInfo info = context->getCurrentDeviceInfo();
+      if (!headerPrinted) {
+        std::cout << " [System] Host CPU" << std::endl;
         if (verbose) {
-            std::cout << " [Device " << context->getSelectedDeviceIndex() << "] "
-                      << info.name << " ("
-                      << ComputeBackendFactory::getBackendName(
-                             context->getBackend())
-                      << ")" << std::endl;
-            std::cout << "  - VRAM:         "
-                      << static_cast<int>(std::round(info.memorySize /
-                                                     (1024.0 * 1024.0 * 1024.0)))
-                      << " GB" << std::endl;
-            std::cout << "  - Subgroup:     " << info.subgroupSize << " threads"
-                      << std::endl;
-            std::cout << "  - Shared Memory: "
-                      << (info.maxComputeSharedMemorySize / 1024) << " KB"
-                      << std::endl;
-            std::cout << std::endl;
+          std::cout << "  - Threads:      "
+                    << std::thread::hardware_concurrency() << std::endl;
         }
+        std::cout << std::endl;
+        headerPrinted = true;
+      }
 
-        // Calculate total expected kernels for progress bar
-        uint32_t totalKernels = 0;
-        for (auto &bench : benchmarks) {
-          bool should_run = false;
-          if (effective_benchmarks.empty()) {
-            should_run = true;
-          } else {
-            for (const auto &run_name : lower_benchmarks_to_run) {
-              if (benchmarkMatches(bench.get(), run_name)) {
-                should_run = true;
-                break;
-              }
-            }
-          }
-          if (should_run && bench->IsSupported(info, context) &&
-              bench->IsDeviceDependent()) {
-            totalKernels += bench->GetExpectedKernelCount();
-          }
+      try {
+        if (verbose) {
+          std::cout << "Setting up " << bench->GetName() << "..." << std::endl;
         }
-        context->setExpectedKernelCount(totalKernels);
+        bench->SetResolution(renderWidth, renderHeight);
+        bench->Setup(*context, KernelPath::find());
 
-        // Shared selection predicate
-        auto isSelected = [&](IBenchmark *b) {
-          if (lower_benchmarks_to_run.empty())
-            return true;
-          for (const auto &run_name : lower_benchmarks_to_run) {
-            if (benchmarkMatches(b, run_name))
-              return true;
-          }
-          return false;
-        };
+        uint32_t num_configs = bench->GetNumConfigs();
 
-        // Phase 1: set up (compile kernels, allocate buffers) ALL selected
-        // benchmarks up front, so shader compilation is never interleaved
-        // with timed runs.
-        std::cout << "Preparing benchmarks (compiling kernels, uploading "
-                     "data, building acceleration structures)..."
-                  << std::endl;
-        uint32_t effectiveWidth = renderWidth;
-        uint32_t effectiveHeight = renderHeight;
-        if (effectiveWidth == 0 || effectiveHeight == 0) {
-          if (info.memorySize >= 15ULL * 1024 * 1024 * 1024) {
-            effectiveWidth = 3840;
-            effectiveHeight = 2160;
-          } else if (info.memorySize >= 9ULL * 1024 * 1024 * 1024) {
-            effectiveWidth = 2560;
-            effectiveHeight = 1440;
-          } else {
-            effectiveWidth = 1920;
-            effectiveHeight = 1080;
+        for (uint32_t i = 0; i < num_configs; ++i) {
+          std::string bench_name = bench->GetName();
+          std::string config_name = bench->GetConfigName(i);
+          if (!config_name.empty()) {
+            bench_name += " (" + config_name + ")";
           }
+
           if (verbose) {
-            std::cout << "Auto-selected resolution: " << effectiveWidth << "x" << effectiveHeight
-                      << " for " << info.name << " (" << (info.memorySize / (1024 * 1024 * 1024))
-                      << " GB VRAM)" << std::endl;
+            std::cout << "[Sys] Running " << bench_name << "..." << std::endl;
+          }
+
+          if (onResult) {
+            ResultData start_data;
+            start_data.backendName = "System";
+            start_data.deviceName = "Host CPU";
+            start_data.benchmarkName = bench_name;
+            start_data.component = bench->GetComponent(i);
+            start_data.subcategory = bench->GetSubCategory(i);
+            start_data.metric = bench->GetMetric(i);
+            start_data.operations = 0;
+            start_data.time_ms = -1.0;
+            start_data.isEmulated = false;
+            start_data.isUnsupported = false;
+            start_data.maxWorkGroupSize = 0;
+            start_data.deviceIndex = 0xFFFFFFFF;
+            start_data.configIndex = i;
+            start_data.sortWeight = bench->GetSortWeight(i);
+            onResult(start_data);
+          }
+
+          double total_time_ms = 0;
+          uint64_t total_invocations = 0;
+          auto bench_start = std::chrono::high_resolution_clock::now();
+          while (total_time_ms < 5000) {
+            bench->Run(i);
+            total_invocations++;
+            auto now = std::chrono::high_resolution_clock::now();
+            total_time_ms =
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    now - bench_start)
+                    .count() /
+                1e6;
+          }
+
+          BenchmarkResult bench_result = bench->GetResult(i);
+
+          ResultData result_data;
+          result_data.backendName = "System";
+          result_data.deviceName = "Host CPU";
+          result_data.benchmarkName = bench_name;
+          result_data.metric = bench->GetMetric(i);
+          result_data.operations =
+              bench_result.operations * total_invocations;
+          result_data.time_ms = total_time_ms;
+          result_data.isEmulated = false;
+          result_data.component = bench->GetComponent(i);
+          result_data.subcategory = bench->GetSubCategory(i);
+          result_data.maxWorkGroupSize = 0;
+          result_data.deviceIndex = 0xFFFFFFFF;
+          result_data.configIndex = i;
+          result_data.sortWeight = bench->GetSortWeight(i);
+
+          formatter->addResult(result_data);
+          numBenchmarksRun++;
+          if (onResult) {
+            onResult(result_data);
           }
         }
-
-        std::vector<IBenchmark *> runnable;
-        for (auto &bench : benchmarks) {
-          bool should_run = isSelected(bench.get());
-
-          if (should_run && bench->IsSupported(info, context)) {
-            if (dumpGeometry) {
-              bench->DumpGeometry();
-            }
-            if (!bench->IsDeviceDependent())
-              continue; // Run system benchmarks separately
-
-            try {
-              // Set debug flag for benchmarks
-              if (auto *membw =
-                      dynamic_cast<MemBandwidthBench *>(bench.get())) {
-                membw->setDebug(debug);
-              } else if (auto *cache =
-                             dynamic_cast<CacheBench *>(bench.get())) {
-                cache->setDebug(debug);
-              }
-
-              if (verbose) {
-                std::cout << "Setting up " << bench->GetName() << "..."
-                          << std::endl;
-              }
-              bench->SetResolution(effectiveWidth, effectiveHeight);
-              bench->Setup(*context, KernelPath::find());
-              runnable.push_back(bench.get());
-            } catch (const std::exception &e) {
-              if (verbose) {
-                  std::cerr << "Error setting up " << bench->GetName() << ": "
-                            << e.what() << std::endl;
-              }
-              try {
-                bench->Teardown();
-              } catch (...) {
-                // Ignore errors during cleanup
-              }
-            }
-          } else if (should_run && bench->IsDeviceDependent()) {
-            // Benchmark was selected but is not supported on this
-            // device/backend (e.g. missing hardware capability). Report it
-            // explicitly as UNSUPPORTED instead of skipping silently.
-            std::string bname = bench->GetName();
-            uint32_t num_unsupported_configs = 1;
-            if (bname == "FP8" || bname == "INT4" || bname == "FP16" || bname == "BF16" || bname == "INT8") {
-              num_unsupported_configs = 2;
-            }
-
-            for (uint32_t ci = 0; ci < num_unsupported_configs; ++ci) {
-              ResultData result_data;
-              result_data.backendName =
-                  ComputeBackendFactory::getBackendName(context->getBackend());
-              result_data.deviceName = info.name;
-              result_data.benchmarkName = (num_unsupported_configs > 1)
-                  ? (bname + (ci == 0 ? " (Vector)" : " (Matrix)"))
-                  : bname;
-              result_data.metric = "";
-              result_data.operations = 0;
-              result_data.time_ms = 0;
-              result_data.isEmulated = false;
-              result_data.isUnsupported = true;
-              result_data.supportNote = bench->GetSupportNote();
-              switch (bench->GetSupportLimitation()) {
-              case IBenchmark::SupportLimitation::kHardware:
-                result_data.supportCategory = "hardware";
-                break;
-              case IBenchmark::SupportLimitation::kApi:
-                result_data.supportCategory = "api";
-                break;
-              case IBenchmark::SupportLimitation::kToolchain:
-                result_data.supportCategory = "toolchain";
-                break;
-              default:
-                break;
-              }
-              result_data.component = bench->GetComponent(ci);
-              result_data.subcategory = bench->GetSubCategory(ci);
-              result_data.maxWorkGroupSize = info.maxWorkGroupSize;
-              result_data.deviceIndex = context->getSelectedDeviceIndex();
-              result_data.configIndex = ci;
-              result_data.sortWeight = bench->GetSortWeight(ci);
-
-              formatter->addResult(result_data);
-              // Not counted in numBenchmarksRun: nothing was measured.
-              if (onResult) {
-                  onResult(result_data);
-              }
-            }
-          }
-        }
-
-        // Phase 2: timed runs. All kernels are already compiled above, so
-        // no compilation overlaps the measurements. The leading newline
-        // terminates the \r progress-bar line from phase 1.
-        std::cout << "\nPreparation complete. Running benchmarks..."
-                  << std::endl;
-        struct BenchmarkTask {
-          IBenchmark *bench;
-          uint32_t configIndex;
-          int sortWeight;
-        };
-
-        std::vector<BenchmarkTask> tasks;
-        for (auto *bench : runnable) {
-          uint32_t num_configs = bench->GetNumConfigs();
-          for (uint32_t i = 0; i < num_configs; ++i) {
-            if (targetConfig >= 0 && static_cast<int>(i) != targetConfig) {
-              continue;
-            }
-            tasks.push_back({bench, i, bench->GetSortWeight(i)});
-          }
-        }
-
-        std::stable_sort(tasks.begin(), tasks.end(),
-                         [](const BenchmarkTask &a, const BenchmarkTask &b) {
-                           return a.sortWeight < b.sortWeight;
-                         });
-
-        IBenchmark *prevBench = nullptr;
-        for (const auto &task : tasks) {
-          auto *bench = task.bench;
-          uint32_t i = task.configIndex;
-
-          if (prevBench && prevBench != bench) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(150));
-          }
-          prevBench = bench;
-
-          try {
-            std::string bench_name = bench->GetName();
-            std::string config_name = bench->GetConfigName(i);
-            if (!config_name.empty()) {
-              bench_name += " (" + config_name + ")";
-            }
-
-            if (verbose) {
-              std::cout << "[D" << context->getSelectedDeviceIndex()
-                        << "] Running " << bench_name << "..." << std::endl;
-            } else {
-              std::cout << "  - [" << ComputeBackendFactory::getBackendName(context->getBackend())
-                        << "] Running " << bench_name << "..." << std::flush;
-            }
-
-            if (onResult) {
-              ResultData start_data;
-              start_data.backendName = ComputeBackendFactory::getBackendName(context->getBackend());
-              start_data.deviceName = info.name;
-              start_data.benchmarkName = bench_name;
-              start_data.component = bench->GetComponent(i);
-              start_data.subcategory = bench->GetSubCategory(i);
-              start_data.metric = bench->GetMetric(i);
-              start_data.operations = 0;
-              start_data.time_ms = -1.0;
-              start_data.isEmulated = false;
-              start_data.isUnsupported = false;
-              start_data.maxWorkGroupSize = info.maxWorkGroupSize;
-              start_data.deviceIndex = context->getSelectedDeviceIndex();
-              start_data.configIndex = i;
-              start_data.sortWeight = bench->GetSortWeight(i);
-              start_data.width = effectiveWidth;
-              start_data.height = effectiveHeight;
-              onResult(start_data);
-            }
-
-            if (!bench->IsConfigSupported(i)) {
-              if (!verbose) {
-                std::cout << " Unsupported." << std::endl;
-              }
-              ResultData result_data;
-              result_data.backendName = ComputeBackendFactory::getBackendName(context->getBackend());
-              result_data.deviceName = info.name;
-              result_data.benchmarkName = bench_name;
-              result_data.metric = bench->GetMetric(i);
-              result_data.operations = 0;
-              result_data.time_ms = 0;
-              result_data.isEmulated = false;
-              result_data.isUnsupported = true;
-              result_data.supportNote = bench->GetConfigSupportNote(i);
-              switch (bench->GetConfigSupportLimitation(i)) {
-              case IBenchmark::SupportLimitation::kHardware:
-                result_data.supportCategory = "hardware";
-                break;
-              case IBenchmark::SupportLimitation::kApi:
-                result_data.supportCategory = "driver/api";
-                break;
-              case IBenchmark::SupportLimitation::kToolchain:
-                result_data.supportCategory = "toolchain";
-                break;
-              default:
-                result_data.supportCategory = "hardware";
-                break;
-              }
-              result_data.component = bench->GetComponent(i);
-              result_data.subcategory = bench->GetSubCategory(i);
-              result_data.maxWorkGroupSize = info.maxWorkGroupSize;
-              result_data.deviceIndex = context->getSelectedDeviceIndex();
-              result_data.configIndex = i;
-              result_data.sortWeight = bench->GetSortWeight(i);
-              result_data.width = effectiveWidth;
-              result_data.height = effectiveHeight;
-
-              formatter->addResult(result_data);
-              numBenchmarksRun++;
-              if (onResult) {
-                onResult(result_data);
-              }
-              continue;
-            }
-
-            double total_time_ms = 0;
-            uint64_t total_invocations = 0;
-
-            if (profileSnapshot) {
-              // Single warmup run
-              bench->Run(i);
-              context->waitIdle();
-
-              // Timed run
-              auto start = std::chrono::high_resolution_clock::now();
-              bench->Run(i);
-              context->waitIdle();
-              auto end = std::chrono::high_resolution_clock::now();
-              total_time_ms =
-                  std::chrono::duration<double, std::milli>(end - start).count();
-              total_invocations = 1;
-            } else {
-              // Calibration phase
-              auto start = std::chrono::high_resolution_clock::now();
-              bench->Run(i);
-              context->waitIdle();
-              auto end = std::chrono::high_resolution_clock::now();
-              double single_run_ms =
-                  std::chrono::duration<double, std::milli>(end - start).count();
-
-              // Determine iteration count for target duration (50ms)
-              const double target_duration_ms = 50.0;
-              uint64_t iterations = 1;
-              if (single_run_ms > 0.0) {
-                iterations = static_cast<uint64_t>(
-                    std::max(1.0, std::round(target_duration_ms / single_run_ms)));
-              }
-              // Cap iterations to reasonable limits
-              iterations = std::min(iterations, static_cast<uint64_t>(10000));
-              iterations = std::max(iterations, static_cast<uint64_t>(1));
-
-              // Warmup
-              for (int w = 0; w < 3; ++w) {
-                bench->Run(i);
-              }
-              context->waitIdle();
-
-              // Timed execution
-              total_invocations = iterations;
-              start = std::chrono::high_resolution_clock::now();
-              for (uint64_t iter = 0; iter < iterations; ++iter) {
-                bench->Run(i);
-              }
-              context->waitIdle();
-              end = std::chrono::high_resolution_clock::now();
-              total_time_ms =
-                  std::chrono::duration<double, std::milli>(end - start).count();
-            }
-
-            if (!verbose) {
-              std::cout << " Done." << std::endl;
-            }
-
-            bool isValid = bench->ValidateResults(i);
-            if (!isValid && verbose) {
-              std::cerr << " [WARNING] Result validation failed for "
-                        << bench_name << std::endl;
-            }
-
-            BenchmarkResult bench_result = bench->GetResult(i);
-            bench->RecordRunResult(i, total_invocations, total_time_ms);
-
-            ResultData result_data;
-            result_data.backendName = ComputeBackendFactory::getBackendName(
-                context->getBackend());
-            result_data.deviceName = info.name;
-            result_data.benchmarkName = bench_name;
-            result_data.metric = bench->GetMetric(i);
-            result_data.operations =
-                bench_result.operations * total_invocations;
-            result_data.time_ms = total_time_ms;
-            result_data.isEmulated = bench->IsEmulated(i);
-            result_data.component = bench->GetComponent(i);
-            result_data.subcategory = bench->GetSubCategory(i);
-            result_data.maxWorkGroupSize = info.maxWorkGroupSize;
-            result_data.deviceIndex = context->getSelectedDeviceIndex();
-            result_data.configIndex = i;
-            result_data.sortWeight = bench->GetSortWeight(i);
-            result_data.width = effectiveWidth;
-            result_data.height = effectiveHeight;
-
-            formatter->addResult(result_data);
-            numBenchmarksRun++;
-            if (onResult) {
-              onResult(result_data);
-            }
-          } catch (const std::exception &e) {
-            if (verbose) {
-              std::cerr << "Error running task: " << e.what() << std::endl;
-            }
-          }
-        }
-
-        for (auto *bench : runnable) {
-          try {
-            bench->Teardown();
-          } catch (const std::exception &e) {
-            if (verbose) {
-              std::cerr << "Error tearing down " << bench->GetName() << ": "
-                        << e.what() << std::endl;
-            }
-          }
-        }
+        bench->Teardown();
       } catch (const std::exception &e) {
-        std::cerr << "Error processing device: " << e.what() << std::endl;
-        continue;
-      }
-    }
-  } // End hasDeviceBenchmarks
-
-  // Run System/Host Benchmarks
-  if (!contexts.empty()) {
-    bool headerPrinted = false;
-    IComputeContext *context = contexts[0]; // Reuse first context for utility
-
-    for (auto &bench : benchmarks) {
-      if (bench->IsDeviceDependent())
-        continue; // Skip device benchmarks
-
-      bool should_run = false;
-      if (effective_benchmarks.empty()) {
-        should_run = true;
-      } else {
-        for (const auto &run_name : lower_benchmarks_to_run) {
-          if (benchmarkMatches(bench.get(), run_name)) {
-            should_run = true;
-            break;
-          }
+        if (verbose) {
+          std::cerr << "Error running " << bench->GetName() << ": " << e.what()
+                    << std::endl;
         }
-      }
-
-      if (should_run) {
-        if (!headerPrinted) {
-          std::cout << " [System] Host CPU" << std::endl;
-          if (verbose) {
-            std::cout << "  - Threads:      "
-                      << std::thread::hardware_concurrency() << std::endl;
-          }
-          std::cout << std::endl;
-          headerPrinted = true;
-        }
-
         try {
-          if (verbose) {
-            std::cout << "Setting up " << bench->GetName() << "..."
-                      << std::endl;
-          }
-          bench->SetResolution(renderWidth, renderHeight);
-          bench->Setup(*context, KernelPath::find());
-
-          uint32_t num_configs = bench->GetNumConfigs();
-
-          for (uint32_t i = 0; i < num_configs; ++i) {
-            std::string bench_name = bench->GetName();
-            std::string config_name = bench->GetConfigName(i);
-            if (!config_name.empty()) {
-              bench_name += " (" + config_name + ")";
-            }
-
-            if (verbose) {
-              std::cout << "[Sys] Running " << bench_name << "..." << std::endl;
-            }
-
-            if (onResult) {
-              ResultData start_data;
-              start_data.backendName = "System";
-              start_data.deviceName = "Host CPU";
-              start_data.benchmarkName = bench_name;
-              start_data.component = bench->GetComponent(i);
-              start_data.subcategory = bench->GetSubCategory(i);
-              start_data.metric = bench->GetMetric(i);
-              start_data.operations = 0;
-              start_data.time_ms = -1.0;
-              start_data.isEmulated = false;
-              start_data.isUnsupported = false;
-              start_data.maxWorkGroupSize = 0;
-              start_data.deviceIndex = 0xFFFFFFFF;
-              start_data.configIndex = i;
-              start_data.sortWeight = bench->GetSortWeight(i);
-              onResult(start_data);
-            }
-
-            double total_time_ms = 0;
-            uint64_t total_invocations = 0;
-            auto bench_start = std::chrono::high_resolution_clock::now();
-            while (total_time_ms < 5000) {
-              bench->Run(i);
-              // context->waitIdle(); // Not needed for system bench usually
-              total_invocations++;
-              auto now = std::chrono::high_resolution_clock::now();
-              total_time_ms =
-                  std::chrono::duration_cast<std::chrono::nanoseconds>(
-                      now - bench_start)
-                      .count() /
-                  1e6;
-            }
-
-            BenchmarkResult bench_result = bench->GetResult(i);
-
-            ResultData result_data;
-            result_data.backendName = "System";
-            result_data.deviceName = "Host CPU";
-            result_data.benchmarkName = bench_name;
-            result_data.metric = bench->GetMetric(i);
-            result_data.operations =
-                bench_result.operations * total_invocations;
-            result_data.time_ms = total_time_ms;
-            result_data.isEmulated = false;
-            result_data.component = bench->GetComponent(i);
-            result_data.subcategory = bench->GetSubCategory(i);
-            result_data.maxWorkGroupSize = 0;
-            result_data.deviceIndex = 0xFFFFFFFF;
-            result_data.configIndex = i;
-            result_data.sortWeight = bench->GetSortWeight(i);
-
-            formatter->addResult(result_data);
-            numBenchmarksRun++;
-            if (onResult) {
-                onResult(result_data);
-            }
-          }
           bench->Teardown();
-        } catch (const std::exception &e) {
-          if (verbose) {
-              std::cerr << "Error running " << bench->GetName() << ": " << e.what()
-                        << std::endl;
-          }
-          try {
-            bench->Teardown();
-          } catch (...) {
-          }
+        } catch (...) {
         }
       }
     }
   }
+}
+
+void BenchmarkRunner::printReport() {
   if (verbose) {
-      std::cout << "\r\033[K" << std::flush;
+    std::cout << "\r\033[K" << std::flush;
   }
   if (!onResult) {
-      formatter->print();
+    formatter->print();
+  }
+}
+
+void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
+  initRunConfig(benchmarks_to_run);
+
+  for (auto *context : contexts) {
+    runForContext(context, benchmarks_to_run);
+  }
+
+  runHostBenchmarks(benchmarks_to_run);
+
+  if (!onResult) {
+    printReport();
   }
 }

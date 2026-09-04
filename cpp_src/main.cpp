@@ -138,7 +138,7 @@ std::string resultsToJson(const std::vector<ResultData> &results) {
 std::string resultsToCsv(const std::vector<ResultData> &results) {
   std::string out =
       "backend,device,device_index,benchmark,component,subcategory,metric,"
-      "value,operations,time_ms,is_emulated,max_workgroup_size,config_index\n";
+      "value,operations,time_ms,is_emulated,unsupported,unsupported_reason,max_workgroup_size,config_index\n";
   for (const ResultData &r : results) {
     std::string devIdxStr = (r.deviceIndex == 0xFFFFFFFF || r.backendName == "System")
                                 ? ""
@@ -150,6 +150,8 @@ std::string resultsToCsv(const std::vector<ResultData> &results) {
            csvQuote(r.metric) + "," + std::to_string(value) + "," +
            std::to_string(r.operations) + "," + std::to_string(r.time_ms) +
            "," + (r.isEmulated ? "true" : "false") + "," +
+           (r.isUnsupported ? "true" : "false") + "," +
+           csvQuote(r.supportNote) + "," +
            std::to_string(r.maxWorkGroupSize) + "," +
            std::to_string(r.configIndex) + "\n";
   }
@@ -465,63 +467,50 @@ int main(int argc, char **argv) {
       return EXIT_SUCCESS;
     }
 
-    std::vector<IComputeContext *> context_ptrs;
-
-    // For each context (backend), we need to create a separate instance for
-    // each selected device But wait, IComputeContext is stateful (selected
-    // device). We can't reuse the same context pointer for multiple devices
-    // simultaneously if they share state. However, looking at the
-    // implementations (VulkanContext, OpenCLContext, ROCmContext), they seem to
-    // hold a single 'device' or 'physicalDevice'. So we need to duplicate the
-    // context for each device we want to test.
-
-    // Actually, the current design seems to assume one context = one backend
-    // instance. And pickDevice() sets the active device for that context. If we
-    // want to test multiple devices on the same backend, we need multiple
-    // context instances.
-
-    // Let's rebuild the context list based on the requested devices.
-    std::vector<std::unique_ptr<IComputeContext>> execution_contexts;
-
-    for (auto &proto_context : contexts) {
-      ComputeBackend backend = proto_context->getBackend();
-      const auto &devices = proto_context->getDevices();
-
-      std::vector<uint32_t> target_indices = device_indices;
-      if (target_indices.empty()) {
-        target_indices.push_back(0);
-      }
-
-      for (uint32_t device_idx : target_indices) {
-        if (device_idx < devices.size()) {
-          // Create a new context for this device
-          std::unique_ptr<IComputeContext> new_context =
-              ComputeBackendFactory::create(backend, verbose, debug);
-
-          if (new_context) {
-            new_context->pickDevice(device_idx);
-            execution_contexts.push_back(std::move(new_context));
-          }
-        } else {
-          std::cerr << "Warning: Device index " << device_idx
-                    << " out of range for backend "
-                    << ComputeBackendFactory::getBackendName(backend)
-                    << std::endl;
-        }
-      }
-    }
-
-    // Now populate context_ptrs for the runner
-    for (const auto &ctx : execution_contexts) {
-      context_ptrs.push_back(ctx.get());
-    }
-
-    // We need to keep execution_contexts alive until runner finishes
-    BenchmarkRunner runner(context_ptrs, verbose, debug, dump_geometry, dump_renders, scene_str);
+    BenchmarkRunner runner({}, verbose, debug, dump_geometry, dump_renders, scene_str);
     runner.setResolution(render_width, render_height);
     runner.setTargetConfig(config_target);
     runner.setProfileSnapshot(profile_snapshot);
-    runner.run(benchmarks_to_run);
+
+    std::vector<uint32_t> target_indices = device_indices;
+    if (target_indices.empty()) {
+      target_indices.push_back(0);
+    }
+
+    std::vector<ComputeBackend> target_backends;
+    for (const auto &proto_context : contexts) {
+      target_backends.push_back(proto_context->getBackend());
+    }
+    // Drop prototype contexts to free any early probe allocations before benchmark execution
+    contexts.clear();
+
+    // Execute each backend and device sequentially.
+    // Each context is instantiated, executed, and immediately destroyed to prevent
+    // cross-runtime resource contention (e.g. HIP vs Vulkan on display GPU).
+    for (ComputeBackend backend : target_backends) {
+      for (uint32_t device_idx : target_indices) {
+        std::unique_ptr<IComputeContext> new_context =
+            ComputeBackendFactory::create(backend, verbose, debug);
+
+        if (new_context) {
+          if (device_idx < new_context->getDevices().size()) {
+            new_context->pickDevice(device_idx);
+            runner.runForContext(new_context.get(), benchmarks_to_run);
+          } else {
+            std::cerr << "Warning: Device index " << device_idx
+                      << " out of range for backend "
+                      << ComputeBackendFactory::getBackendName(backend)
+                      << std::endl;
+          }
+        }
+        // Context is destroyed here before next device/backend initializes
+      }
+    }
+
+    runner.runHostBenchmarks(benchmarks_to_run);
+    if (!runner.onResult) {
+      runner.printReport();
+    }
 
     // Warn about requested benchmark names that matched nothing
     bool hadUnmatched = false;
@@ -560,7 +549,7 @@ int main(int argc, char **argv) {
 
     // Exit non-zero when nothing ran (bogus benchmark names, out-of-range
     // device indices, etc.) so scripts can detect failure.
-    if (runner.getNumBenchmarksRun() == 0) {
+    if (runner.getNumBenchmarksRun() == 0 && runner.getResults().empty()) {
       std::cerr << "Error: no benchmarks were run." << std::endl;
       return EXIT_FAILURE;
     }

@@ -25,24 +25,7 @@ CacheBench::CacheBench(std::string name, std::string metric,
       targetCacheLevel(targetCacheLevel) {}
 
 CacheBench::~CacheBench() {
-  if (context) {
-    if (buffer) {
-      context->releaseBuffer(buffer);
-      buffer = nullptr;
-    }
-    if (pcBuffer) {
-      context->releaseBuffer(pcBuffer);
-      pcBuffer = nullptr;
-    }
-    if (kernel) {
-      context->releaseKernel(kernel);
-      kernel = nullptr;
-    }
-  }
-  if (hostMem) {
-    ALIGNED_FREE(hostMem);
-    hostMem = nullptr;
-  }
+  Teardown();
 }
 
 bool CacheBench::IsSupported(const DeviceInfo &info,
@@ -223,13 +206,20 @@ void CacheBench::Run(uint32_t config_idx) {
 }
 
 void CacheBench::Teardown() {
-  if (kernel) {
-    context->releaseKernel(kernel);
-    kernel = nullptr;
-  }
-  if (buffer) {
-    context->releaseBuffer(buffer);
-    buffer = nullptr;
+  if (context) {
+    if (kernel) {
+      context->releaseKernel(kernel);
+      kernel = nullptr;
+    }
+    if (buffer) {
+      context->releaseBuffer(buffer);
+      buffer = nullptr;
+    }
+    if (pcBuffer) {
+      context->releaseBuffer(pcBuffer);
+      pcBuffer = nullptr;
+    }
+    context = nullptr;
   }
   if (hostMem) {
     ALIGNED_FREE(hostMem);

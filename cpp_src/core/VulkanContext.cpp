@@ -20,13 +20,20 @@ void VulkanContext::waitIdle() {
           vkWaitForFences(device, 1, &inFlightFrames[i].fence, VK_TRUE, kTimeoutNs);
       if (waitResult == VK_TIMEOUT) {
         throw std::runtime_error("GPU dispatch timed out (>3 s) in waitIdle()");
+      } else if (waitResult != VK_SUCCESS) {
+        throw std::runtime_error("vkWaitForFences failed in waitIdle with result: " +
+                                 std::to_string(waitResult));
       }
       vkResetFences(device, 1, &inFlightFrames[i].fence);
       inFlightFrames[i].inUse = false;
     }
   }
   if (computeQueue != VK_NULL_HANDLE) {
-    vkQueueWaitIdle(computeQueue);
+    VkResult queueResult = vkQueueWaitIdle(computeQueue);
+    if (queueResult != VK_SUCCESS) {
+      throw std::runtime_error("vkQueueWaitIdle failed in waitIdle with result: " +
+                               std::to_string(queueResult));
+    }
   }
 }
 
@@ -673,6 +680,9 @@ void VulkanContext::createDevice() {
   serSupported = hasExt("VK_EXT_ray_tracing_invocation_reorder") &&
                  (serFeatures.rayTracingInvocationReorderEXT == VK_TRUE);
 
+  subgroupSizeControlSupported = hasExt(VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME) &&
+                                 (subgroupSizeFeatures.subgroupSizeControl == VK_TRUE);
+
   VkDeviceCreateInfo createInfo{};
   createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
   createInfo.pNext = &features2; // Enable all modern features
@@ -1189,6 +1199,8 @@ ComputeKernel VulkanContext::createKernelInternal(const std::string &file_name,
     pipelineInfo.stage.pSpecializationInfo = &specInfo;
   }
 
+
+
   VkResult result =
       vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo,
                                nullptr, &vulkanKernel->pipeline);
@@ -1390,7 +1402,11 @@ void VulkanContext::dispatch(ComputeKernel kernel, uint32_t grid_x,
   submitInfo.commandBufferCount = 1;
   submitInfo.pCommandBuffers = &frame.commandBuffer;
 
-  vkQueueSubmit(computeQueue, 1, &submitInfo, frame.fence);
+  VkResult submitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, frame.fence);
+  if (submitRes != VK_SUCCESS) {
+    throw std::runtime_error("vkQueueSubmit failed in dispatch with result: " +
+                             std::to_string(submitRes));
+  }
   frame.inUse = true;
 
   currentFrameIndex = (currentFrameIndex + 1) % kMaxInFlight;
@@ -1405,7 +1421,16 @@ void VulkanContext::dispatchIndirect(ComputeKernel kernel_handle,
 
   auto &frame = inFlightFrames[currentFrameIndex];
   if (frame.inUse) {
-    vkWaitForFences(device, 1, &frame.fence, VK_TRUE, UINT64_MAX);
+    constexpr uint64_t kTimeoutNs = 3'000'000'000ULL;
+    VkResult waitResult =
+        vkWaitForFences(device, 1, &frame.fence, VK_TRUE, kTimeoutNs);
+    if (waitResult == VK_TIMEOUT) {
+      throw std::runtime_error(
+          "GPU dispatch timed out (>3 s) — aborting benchmark to prevent amdgpu TDR crash.");
+    } else if (waitResult != VK_SUCCESS) {
+      throw std::runtime_error("vkWaitForFences failed with result: " +
+                               std::to_string(waitResult));
+    }
     vkResetFences(device, 1, &frame.fence);
     frame.inUse = false;
   }
@@ -1440,7 +1465,11 @@ void VulkanContext::dispatchIndirect(ComputeKernel kernel_handle,
   submitInfo.commandBufferCount = 1;
   submitInfo.pCommandBuffers = &frame.commandBuffer;
 
-  vkQueueSubmit(computeQueue, 1, &submitInfo, frame.fence);
+  VkResult indSubmitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, frame.fence);
+  if (indSubmitRes != VK_SUCCESS) {
+    throw std::runtime_error("vkQueueSubmit failed in dispatchIndirect with result: " +
+                             std::to_string(indSubmitRes));
+  }
   frame.inUse = true;
 
   currentFrameIndex = (currentFrameIndex + 1) % kMaxInFlight;
@@ -1455,7 +1484,16 @@ void VulkanContext::dispatchIndirectSequence(
 
   auto &frame = inFlightFrames[currentFrameIndex];
   if (frame.inUse) {
-    vkWaitForFences(device, 1, &frame.fence, VK_TRUE, UINT64_MAX);
+    constexpr uint64_t kTimeoutNs = 3'000'000'000ULL;
+    VkResult waitResult =
+        vkWaitForFences(device, 1, &frame.fence, VK_TRUE, kTimeoutNs);
+    if (waitResult == VK_TIMEOUT) {
+      throw std::runtime_error(
+          "GPU dispatch timed out (>3 s) — aborting benchmark to prevent amdgpu TDR crash.");
+    } else if (waitResult != VK_SUCCESS) {
+      throw std::runtime_error("vkWaitForFences failed with result: " +
+                               std::to_string(waitResult));
+    }
     vkResetFences(device, 1, &frame.fence);
     frame.inUse = false;
   }
@@ -1502,7 +1540,11 @@ void VulkanContext::dispatchIndirectSequence(
   submitInfo.commandBufferCount = 1;
   submitInfo.pCommandBuffers = &frame.commandBuffer;
 
-  vkQueueSubmit(computeQueue, 1, &submitInfo, frame.fence);
+  VkResult indSeqSubmitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, frame.fence);
+  if (indSeqSubmitRes != VK_SUCCESS) {
+    throw std::runtime_error("vkQueueSubmit failed in dispatchIndirectSequence with result: " +
+                             std::to_string(indSeqSubmitRes));
+  }
   frame.inUse = true;
 
   currentFrameIndex = (currentFrameIndex + 1) % kMaxInFlight;
@@ -1521,7 +1563,16 @@ void VulkanContext::dispatchWorkListSequence(
 
   auto &frame = inFlightFrames[currentFrameIndex];
   if (frame.inUse) {
-    vkWaitForFences(device, 1, &frame.fence, VK_TRUE, UINT64_MAX);
+    constexpr uint64_t kTimeoutNs = 3'000'000'000ULL;
+    VkResult waitResult =
+        vkWaitForFences(device, 1, &frame.fence, VK_TRUE, kTimeoutNs);
+    if (waitResult == VK_TIMEOUT) {
+      throw std::runtime_error(
+          "GPU dispatch timed out (>3 s) — aborting benchmark to prevent amdgpu TDR crash.");
+    } else if (waitResult != VK_SUCCESS) {
+      throw std::runtime_error("vkWaitForFences failed with result: " +
+                               std::to_string(waitResult));
+    }
     vkResetFences(device, 1, &frame.fence);
     frame.inUse = false;
   }
@@ -1618,7 +1669,11 @@ void VulkanContext::dispatchWorkListSequence(
   submitInfo.commandBufferCount = 1;
   submitInfo.pCommandBuffers = &frame.commandBuffer;
 
-  vkQueueSubmit(computeQueue, 1, &submitInfo, frame.fence);
+  VkResult wlSubmitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, frame.fence);
+  if (wlSubmitRes != VK_SUCCESS) {
+    throw std::runtime_error("vkQueueSubmit failed in dispatchWorkListSequence with result: " +
+                             std::to_string(wlSubmitRes));
+  }
   frame.inUse = true;
 
   currentFrameIndex = (currentFrameIndex + 1) % kMaxInFlight;
@@ -1633,7 +1688,16 @@ void VulkanContext::dispatchRayTracingIndirect(ComputeKernel kernel_handle,
 
   auto &frame = inFlightFrames[currentFrameIndex];
   if (frame.inUse) {
-    vkWaitForFences(device, 1, &frame.fence, VK_TRUE, UINT64_MAX);
+    constexpr uint64_t kTimeoutNs = 3'000'000'000ULL;
+    VkResult waitResult =
+        vkWaitForFences(device, 1, &frame.fence, VK_TRUE, kTimeoutNs);
+    if (waitResult == VK_TIMEOUT) {
+      throw std::runtime_error(
+          "GPU dispatch timed out (>3 s) — aborting benchmark to prevent amdgpu TDR crash.");
+    } else if (waitResult != VK_SUCCESS) {
+      throw std::runtime_error("vkWaitForFences failed with result: " +
+                               std::to_string(waitResult));
+    }
     vkResetFences(device, 1, &frame.fence);
     frame.inUse = false;
   }
@@ -1676,7 +1740,11 @@ void VulkanContext::dispatchRayTracingIndirect(ComputeKernel kernel_handle,
   submitInfo.commandBufferCount = 1;
   submitInfo.pCommandBuffers = &frame.commandBuffer;
 
-  vkQueueSubmit(computeQueue, 1, &submitInfo, frame.fence);
+  VkResult rtSubmitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, frame.fence);
+  if (rtSubmitRes != VK_SUCCESS) {
+    throw std::runtime_error("vkQueueSubmit failed in dispatchRayTracingIndirect with result: " +
+                             std::to_string(rtSubmitRes));
+  }
   frame.inUse = true;
 
   currentFrameIndex = (currentFrameIndex + 1) % kMaxInFlight;

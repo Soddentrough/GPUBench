@@ -461,8 +461,16 @@ void RayASBuildBench::Run(uint32_t config_idx) {
     VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
     submit.commandBufferCount = 1;
     submit.pCommandBuffers = &cmd;
-    vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE);
-    vkQueueWaitIdle(queue);
+    VkResult res = vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE);
+    if (res != VK_SUCCESS) {
+      vkDestroyCommandPool(device, tmpPool, nullptr);
+      throw std::runtime_error("vkQueueSubmit failed in RayASBuild: " + std::to_string(res));
+    }
+    res = vkQueueWaitIdle(queue);
+    if (res != VK_SUCCESS) {
+      vkDestroyCommandPool(device, tmpPool, nullptr);
+      throw std::runtime_error("vkQueueWaitIdle failed in RayASBuild: " + std::to_string(res));
+    }
   }
 
   auto end = std::chrono::high_resolution_clock::now();

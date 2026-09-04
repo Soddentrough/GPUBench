@@ -197,6 +197,7 @@ private:
 
   uint32_t expectedKernelCount = 0;
   uint32_t createdKernelCount = 0;
+  bool subgroupSizeControlSupported = false;
 
   ComputeKernel createKernelInternal(const std::string &file_name,
                                      const std::string &kernel_name,

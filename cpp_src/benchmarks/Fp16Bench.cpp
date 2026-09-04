@@ -69,17 +69,20 @@ void Fp16Bench::Run(uint32_t config_idx) {
 }
 
 void Fp16Bench::Teardown() {
-  if (vectorKernel) {
-    context->releaseKernel(vectorKernel);
-    vectorKernel = nullptr;
-  }
-  if (matrixKernel) {
-    context->releaseKernel(matrixKernel);
-    matrixKernel = nullptr;
-  }
-  if (buffer) {
-    context->releaseBuffer(buffer);
-    buffer = nullptr;
+  if (context) {
+    if (vectorKernel) {
+      context->releaseKernel(vectorKernel);
+      vectorKernel = nullptr;
+    }
+    if (matrixKernel) {
+      context->releaseKernel(matrixKernel);
+      matrixKernel = nullptr;
+    }
+    if (buffer) {
+      context->releaseBuffer(buffer);
+      buffer = nullptr;
+    }
+    context = nullptr;
   }
 }
 

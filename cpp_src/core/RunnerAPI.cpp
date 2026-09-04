@@ -38,39 +38,37 @@ std::vector<ResultData> RunBenchmarksAPI(
         }
     }
 
-    std::vector<IComputeContext*> context_ptrs;
-    std::vector<std::unique_ptr<IComputeContext>> execution_contexts;
+    BenchmarkRunner runner({}, verbose, debug, dump_geometry, dump_renders);
+    runner.setResolution(renderWidth, renderHeight);
+    if (callback) {
+        runner.onResult = callback;
+    }
 
-    for (auto& proto_context : contexts) {
-        ComputeBackend backend = proto_context->getBackend();
-        const auto& devices = proto_context->getDevices();
+    std::vector<uint32_t> target_indices = device_indices;
+    if (target_indices.empty()) {
+        target_indices.push_back(0);
+    }
 
-        std::vector<uint32_t> target_indices = device_indices;
-        if (target_indices.empty()) {
-            target_indices.push_back(0);
-        }
+    std::vector<ComputeBackend> target_backends;
+    for (const auto &proto_context : contexts) {
+        target_backends.push_back(proto_context->getBackend());
+    }
+    contexts.clear();
 
+    for (ComputeBackend backend : target_backends) {
         for (uint32_t device_idx : target_indices) {
-            if (device_idx < devices.size()) {
-                std::unique_ptr<IComputeContext> new_context = ComputeBackendFactory::create(backend, verbose, debug);
-                if (new_context) {
+            std::unique_ptr<IComputeContext> new_context =
+                ComputeBackendFactory::create(backend, verbose, debug);
+            if (new_context) {
+                if (device_idx < new_context->getDevices().size()) {
                     new_context->pickDevice(device_idx);
-                    execution_contexts.push_back(std::move(new_context));
+                    runner.runForContext(new_context.get(), benchmarks_to_run);
                 }
             }
         }
     }
 
-    for (const auto& ctx : execution_contexts) {
-        context_ptrs.push_back(ctx.get());
-    }
-
-    BenchmarkRunner runner(context_ptrs, verbose, debug, dump_geometry, dump_renders);
-    runner.setResolution(renderWidth, renderHeight);
-    if (callback) {
-        runner.onResult = callback;
-    }
-    runner.run(benchmarks_to_run);
+    runner.runHostBenchmarks(benchmarks_to_run);
     return runner.getResults();
     } catch (const std::exception& e) {
         std::cerr << "RunBenchmarksAPI failed: " << e.what() << std::endl;

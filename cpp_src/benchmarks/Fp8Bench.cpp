@@ -132,12 +132,15 @@ void Fp8Bench::Run(uint32_t config_idx) {
 }
 
 void Fp8Bench::Teardown() {
-  if (vectorKernel)
-    context->releaseKernel(vectorKernel);
-  if (matrixKernel)
-    context->releaseKernel(matrixKernel);
-  if (buffer)
-    context->releaseBuffer(buffer);
+  if (context) {
+    if (vectorKernel)
+      context->releaseKernel(vectorKernel);
+    if (matrixKernel)
+      context->releaseKernel(matrixKernel);
+    if (buffer)
+      context->releaseBuffer(buffer);
+    context = nullptr;
+  }
   vectorKernel = nullptr;
   matrixKernel = nullptr;
   buffer = nullptr;

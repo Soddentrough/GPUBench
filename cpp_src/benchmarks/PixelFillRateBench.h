@@ -21,7 +21,24 @@ public:
   SupportLimitation GetSupportLimitation() const override {
     return SupportLimitation::kApi;
   }
+  SupportLimitation GetSupportLimitation(const DeviceInfo &info,
+                                         IComputeContext *context = nullptr) const override {
+    (void)info;
+    (void)context;
+    return SupportLimitation::kApi;
+  }
   std::string GetSupportNote() const override {
+    return "Pixel Fill Rate benchmark requires Vulkan graphics rasterization pipeline (ROPs)";
+  }
+  std::string GetSupportNote(const DeviceInfo &info,
+                             IComputeContext *context = nullptr) const override {
+    (void)info;
+    if (context && context->getBackend() == ComputeBackend::OpenCL) {
+      return "No support for graphics rasterization pipeline (ROPs) in OpenCL API";
+    }
+    if (context && context->getBackend() == ComputeBackend::ROCm) {
+      return "No support for graphics rasterization pipeline (ROPs) in ROCm API";
+    }
     return "Pixel Fill Rate benchmark requires Vulkan graphics rasterization pipeline (ROPs)";
   }
   void Setup(IComputeContext &context, const std::string &kernel_dir) override;

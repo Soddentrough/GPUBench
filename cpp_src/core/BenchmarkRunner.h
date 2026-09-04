@@ -24,6 +24,10 @@ public:
   ~BenchmarkRunner();
 
   void run(const std::vector<std::string> &benchmarks_to_run);
+  void runForContext(IComputeContext *context, const std::vector<std::string> &benchmarks_to_run);
+  void runHostBenchmarks(const std::vector<std::string> &benchmarks_to_run);
+  void printReport();
+  void initRunConfig(const std::vector<std::string> &benchmarks_to_run);
 
   std::function<void(const ResultData&)> onResult;
 
@@ -58,11 +62,16 @@ public:
 
 private:
   void discoverBenchmarks();
+  void printBanner();
 
   std::vector<IComputeContext *> contexts;
   std::vector<std::unique_ptr<IBenchmark>> benchmarks;
   std::unique_ptr<ResultFormatter> formatter;
   std::vector<std::string> unmatchedBenchmarks;
+  std::vector<std::string> effective_benchmarks;
+  std::vector<std::string> lower_benchmarks_to_run;
+  bool runConfigInitialized = false;
+  bool bannerPrinted = false;
   uint32_t numBenchmarksRun = 0;
   bool verbose;
   bool debug;

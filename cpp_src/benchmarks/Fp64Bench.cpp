@@ -14,7 +14,7 @@ void Fp64Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
 
   // Create storage buffer
   size_t bufferSize =
-      4096 * 64 * sizeof(double); // 4096 workgroups * 64 threads * 8 bytes
+      8192 * 64 * sizeof(double); // 8192 workgroups * 64 threads * 8 bytes
   buffer = context.createBuffer(bufferSize);
 
   // Initialize buffer
@@ -41,7 +41,7 @@ void Fp64Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
 }
 
 void Fp64Bench::Run(uint32_t config_idx) {
-  context->dispatch(kernel, 4096, 1, 1, 64, 1, 1);
+  context->dispatch(kernel, 8192, 1, 1, 64, 1, 1);
 }
 
 void Fp64Bench::Teardown() {
@@ -57,13 +57,10 @@ void Fp64Bench::Teardown() {
 
 BenchmarkResult Fp64Bench::GetResult(uint32_t config_idx) const {
   // 2 operations per loop iteration (FMA).
-  // ROCm kernel loop reduced from 65536 → 2048 to avoid TDR timeout;
-  // Vulkan and OpenCL kernels still use 65536 iterations.
-  uint64_t iters = 65536;
-  if (context && context->getBackend() == ComputeBackend::ROCm) {
-    iters = 2048;
-  }
-  uint64_t num_threads = 4096 * 64;
+  // Kernel loop count is 2048 across all backends to keep dispatch time <50ms
+  // and prevent TDR / ring timeouts on display GPUs.
+  uint64_t iters = 2048;
+  uint64_t num_threads = 8192 * 64;
   uint64_t num_ops = iters * 2 * num_threads;
   return {num_ops, 0.0};
 }

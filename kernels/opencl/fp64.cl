@@ -8,7 +8,7 @@ __kernel void run_benchmark(__global double* data) {
     double mult = 1.000001 + add;
     double val = data[index] + 1.0;
 
-    for (int i = 0; i < 65536; ++i) {
+    for (int i = 0; i < 2048; ++i) {
         val = fma(val, mult, 1.0);
     }
     data[index] = val;

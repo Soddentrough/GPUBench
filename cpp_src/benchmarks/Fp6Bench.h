@@ -7,6 +7,24 @@ public:
   const char *GetName() const override { return "FP6"; }
   bool IsSupported(const DeviceInfo &device,
                    IComputeContext *context = nullptr) const override;
+  std::string GetSupportNote() const override {
+    return "shaderFloat6 hardware bit not set (no native 6-bit floating point hardware support)";
+  }
+  std::string GetSupportNote(const DeviceInfo &info,
+                             IComputeContext *context = nullptr) const override {
+    (void)info;
+    (void)context;
+    return "shaderFloat6 hardware bit not set (no native 6-bit floating point hardware support)";
+  }
+  SupportLimitation GetSupportLimitation() const override {
+    return SupportLimitation::kHardware;
+  }
+  SupportLimitation GetSupportLimitation(const DeviceInfo &info,
+                                         IComputeContext *context = nullptr) const override {
+    (void)info;
+    (void)context;
+    return SupportLimitation::kHardware;
+  }
   void Setup(IComputeContext &context, const std::string &build_dir) override;
   void Run(uint32_t config_idx = 0) override;
   BenchmarkResult GetResult(uint32_t config_idx = 0) const override;

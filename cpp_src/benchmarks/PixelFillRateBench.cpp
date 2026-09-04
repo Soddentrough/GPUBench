@@ -447,6 +447,10 @@ void PixelFillRateBench::Teardown() {
       vkDestroyCommandPool(device, commandPool, nullptr);
       commandPool = VK_NULL_HANDLE;
     }
+
+    device = VK_NULL_HANDLE;
+    physicalDevice = VK_NULL_HANDLE;
+    queue = VK_NULL_HANDLE;
   }
 }
 

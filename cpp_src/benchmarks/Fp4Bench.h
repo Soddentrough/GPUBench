@@ -17,10 +17,28 @@ public:
   bool IsSupported(const DeviceInfo &info,
                    IComputeContext *context = nullptr) const override;
   std::string GetSupportNote() const override {
-    return "RDNA4 has no FP4 units (FP4 arrived with CDNA4/gfx950); no FP4 "
-           "shader type exists on Vulkan or HIP either";
+    return "shaderFloat4 hardware bit not set (no native FP4 compute units; CDNA4/gfx950+ only)";
+  }
+  std::string GetSupportNote(const DeviceInfo &info,
+                             IComputeContext *context = nullptr) const override {
+    (void)info;
+    if (context && context->getBackend() == ComputeBackend::OpenCL) {
+      return "No support for 4-bit floating point in OpenCL API";
+    }
+    if (context && context->getBackend() == ComputeBackend::ROCm) {
+      return "shaderFloat4 hardware bit not set (no native FP4 units on RDNA4; CDNA4/gfx950+ only)";
+    }
+    return "shaderFloat4 hardware bit not set (no native FP4 units on RDNA4; CDNA4/gfx950+ only)";
   }
   SupportLimitation GetSupportLimitation() const override {
+    return SupportLimitation::kHardware;
+  }
+  SupportLimitation GetSupportLimitation(const DeviceInfo &info,
+                                         IComputeContext *context = nullptr) const override {
+    (void)info;
+    if (context && context->getBackend() == ComputeBackend::OpenCL) {
+      return SupportLimitation::kApi;
+    }
     return SupportLimitation::kHardware;
   }
   void Setup(IComputeContext &context, const std::string &kernel_dir) override;
