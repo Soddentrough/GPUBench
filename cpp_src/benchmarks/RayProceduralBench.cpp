@@ -246,19 +246,30 @@ void RayProceduralBench::Run(uint32_t config_idx) {
 
 void RayProceduralBench::Teardown() {
   VulkanContext *vContext = static_cast<VulkanContext *>(context);
-  VkDevice device = vContext->getVulkanDevice();
+  VkDevice device = vContext ? vContext->getVulkanDevice() : VK_NULL_HANDLE;
 
-  if (aabbBlas) vkDestroyAccelerationStructureKHR_ptr(device, aabbBlas, nullptr);
-  if (aabbTlas) vkDestroyAccelerationStructureKHR_ptr(device, aabbTlas, nullptr);
+  if (device != VK_NULL_HANDLE && vkDestroyAccelerationStructureKHR_ptr) {
+    if (aabbBlas != VK_NULL_HANDLE) {
+      vkDestroyAccelerationStructureKHR_ptr(device, aabbBlas, nullptr);
+      aabbBlas = VK_NULL_HANDLE;
+    }
+    if (aabbTlas != VK_NULL_HANDLE) {
+      vkDestroyAccelerationStructureKHR_ptr(device, aabbTlas, nullptr);
+      aabbTlas = VK_NULL_HANDLE;
+    }
+  }
 
-  if (kernel) context->releaseKernel(kernel);
-  if (resultBuffer) context->releaseBuffer(resultBuffer);
-  if (aabbBuffer) context->releaseBuffer(aabbBuffer);
-  if (sphereBuffer) context->releaseBuffer(sphereBuffer);
-  if (instanceBuffer) context->releaseBuffer(instanceBuffer);
-  if (aabbBlasBuffer) context->releaseBuffer(aabbBlasBuffer);
-  if (aabbTlasBuffer) context->releaseBuffer(aabbTlasBuffer);
-  if (scratchBuffer) context->releaseBuffer(scratchBuffer);
+  if (context) {
+    if (kernel) { context->releaseKernel(kernel); kernel = nullptr; }
+    if (resultBuffer) { context->releaseBuffer(resultBuffer); resultBuffer = nullptr; }
+    if (aabbBuffer) { context->releaseBuffer(aabbBuffer); aabbBuffer = nullptr; }
+    if (sphereBuffer) { context->releaseBuffer(sphereBuffer); sphereBuffer = nullptr; }
+    if (instanceBuffer) { context->releaseBuffer(instanceBuffer); instanceBuffer = nullptr; }
+    if (aabbBlasBuffer) { context->releaseBuffer(aabbBlasBuffer); aabbBlasBuffer = nullptr; }
+    if (aabbTlasBuffer) { context->releaseBuffer(aabbTlasBuffer); aabbTlasBuffer = nullptr; }
+    if (scratchBuffer) { context->releaseBuffer(scratchBuffer); scratchBuffer = nullptr; }
+    context = nullptr;
+  }
 }
 
 BenchmarkResult RayProceduralBench::GetResult(uint32_t config_idx) const {

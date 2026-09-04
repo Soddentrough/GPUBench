@@ -1,0 +1,136 @@
+{
+  "device": "AMD Radeon AI PRO R9700 (GFX1201 / RDNA4)",
+  "resolution": "1920x1080 (2,073,600 rays/frame)",
+  "bvh_structure": {
+    "blas": {
+      "allocated_size": 3977536,
+      "compacted_size": 1810368,
+      "max_depth": 10,
+      "box_node_count": 6925,
+      "primitive_node_count": 7222,
+      "instance_node_count": 0,
+      "sah": 4234199,
+      "scene_sah": 0
+    },
+    "tlas": {
+      "allocated_size": 576,
+      "compacted_size": 576,
+      "max_depth": 2,
+      "box_node_count": 1,
+      "primitive_node_count": 0,
+      "instance_node_count": 1,
+      "sah": 1200110,
+      "scene_sah": 5434979
+    }
+  },
+  "coherence_comparisons": [
+    {
+      "category": "Primary Ray Tracing",
+      "scene": "Indoor Atrium",
+      "traditional": {
+        "name": "Traditional Megakernel",
+        "c_dir": 0.9994,
+        "d_trav": 0.18,
+        "m_div": 0.42,
+        "active_lane_pct": 89.2,
+        "l1_cache_hit_pct": 84.5,
+        "wait_stall_cycles": 42.0,
+        "throughput": 485.2,
+        "unit": "MRays/s"
+      },
+      "worklist": {
+        "name": "Work Lists (Material Sorting)",
+        "c_dir": 0.9994,
+        "d_trav": 0.18,
+        "m_div": 0.0,
+        "active_lane_pct": 94.6,
+        "l1_cache_hit_pct": 86.1,
+        "wait_stall_cycles": 36.0,
+        "throughput": 521.8,
+        "unit": "MRays/s"
+      },
+      "coherence_gain": "+7.5% Throughput, +5.4% Active Lanes"
+    },
+    {
+      "category": "Material Shading (Primary Hits)",
+      "scene": "Indoor Atrium",
+      "traditional": {
+        "name": "Traditional Megakernel",
+        "c_dir": 0.9994,
+        "d_trav": 0.0,
+        "m_div": 0.81,
+        "active_lane_pct": 55.1,
+        "l1_cache_hit_pct": 72.3,
+        "wait_stall_cycles": 88.5,
+        "throughput": 55.0,
+        "unit": "MHits/s"
+      },
+      "worklist": {
+        "name": "Work Lists (Material Sorting)",
+        "c_dir": 0.9994,
+        "d_trav": 0.0,
+        "m_div": 0.0,
+        "active_lane_pct": 91.4,
+        "l1_cache_hit_pct": 91.8,
+        "wait_stall_cycles": 24.2,
+        "throughput": 88.4,
+        "unit": "MHits/s"
+      },
+      "coherence_gain": "+60.7% Throughput, +36.3% Active Lanes (-72.6% Wait Stalls)"
+    },
+    {
+      "category": "Incoherent Ray Tracing (1 Hemisphere Bounce)",
+      "scene": "Indoor Atrium",
+      "traditional": {
+        "name": "Traditional Megakernel",
+        "c_dir": 0.215,
+        "d_trav": 0.84,
+        "m_div": 0.76,
+        "active_lane_pct": 46.8,
+        "l1_cache_hit_pct": 33.4,
+        "wait_stall_cycles": 142.0,
+        "throughput": 8.42,
+        "unit": "MRays/s"
+      },
+      "worklist": {
+        "name": "Work Lists (Directional Binning / Octants)",
+        "c_dir": 0.864,
+        "d_trav": 0.38,
+        "m_div": 0.22,
+        "active_lane_pct": 82.5,
+        "l1_cache_hit_pct": 68.7,
+        "wait_stall_cycles": 58.0,
+        "throughput": 14.18,
+        "unit": "MRays/s"
+      },
+      "coherence_gain": "+68.4% Throughput, +35.7% Active Lanes (+35.3% L1 Hit)"
+    },
+    {
+      "category": "Multi-Bounce Path Tracing (4 Bounces)",
+      "scene": "Indoor Atrium",
+      "traditional": {
+        "name": "Traditional Megakernel",
+        "c_dir": 0.182,
+        "d_trav": 0.91,
+        "m_div": 0.88,
+        "active_lane_pct": 48.3,
+        "l1_cache_hit_pct": 31.2,
+        "wait_stall_cycles": 164.0,
+        "throughput": 20.45,
+        "unit": "MRays/s (9.9 FPS)"
+      },
+      "worklist": {
+        "name": "Work Lists (Wavefront Compaction)",
+        "c_dir": 0.44,
+        "d_trav": 0.42,
+        "m_div": 0.35,
+        "active_lane_pct": 88.7,
+        "l1_cache_hit_pct": 62.4,
+        "wait_stall_cycles": 62.5,
+        "throughput": 29.2,
+        "unit": "MRays/s (14.2 FPS)"
+      },
+      "coherence_gain": "+42.8% Throughput, +40.4% Active Lanes (+43.4% FPS)"
+    }
+  ]
+}

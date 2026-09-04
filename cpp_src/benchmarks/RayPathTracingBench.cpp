@@ -236,6 +236,12 @@ void RayPathTracingBench::buildAS() {
   vkDestroyCommandPool(device, tmpPool, nullptr);
 }
 
+void RayPathTracingBench::RebuildAccelerationStructures() {
+#ifdef HAVE_VULKAN
+  buildAS();
+#endif
+}
+
 void RayPathTracingBench::Run(uint32_t config_idx) {
   VulkanContext *vContext = static_cast<VulkanContext *>(context);
 
@@ -258,33 +264,35 @@ void RayPathTracingBench::Run(uint32_t config_idx) {
 
 void RayPathTracingBench::Teardown() {
   VulkanContext *vContext = static_cast<VulkanContext *>(context);
-  VkDevice device = vContext->getVulkanDevice();
+  VkDevice device = vContext ? vContext->getVulkanDevice() : VK_NULL_HANDLE;
 
-  if (triangleBlas)
-    vkDestroyAccelerationStructureKHR_ptr(device, triangleBlas, nullptr);
-  if (boxBlas)
-    vkDestroyAccelerationStructureKHR_ptr(device, boxBlas, nullptr);
-  if (sceneTlas)
-    vkDestroyAccelerationStructureKHR_ptr(device, sceneTlas, nullptr);
+  if (device != VK_NULL_HANDLE && vkDestroyAccelerationStructureKHR_ptr) {
+    if (triangleBlas != VK_NULL_HANDLE) {
+      vkDestroyAccelerationStructureKHR_ptr(device, triangleBlas, nullptr);
+      triangleBlas = VK_NULL_HANDLE;
+    }
+    if (boxBlas != VK_NULL_HANDLE) {
+      vkDestroyAccelerationStructureKHR_ptr(device, boxBlas, nullptr);
+      boxBlas = VK_NULL_HANDLE;
+    }
+    if (sceneTlas != VK_NULL_HANDLE) {
+      vkDestroyAccelerationStructureKHR_ptr(device, sceneTlas, nullptr);
+      sceneTlas = VK_NULL_HANDLE;
+    }
+  }
 
-  if (kernel)
-    context->releaseKernel(kernel);
-  if (resultBuffer)
-    context->releaseBuffer(resultBuffer);
-  if (vertexBuffer)
-    context->releaseBuffer(vertexBuffer);
-  if (aabbBuffer)
-    context->releaseBuffer(aabbBuffer);
-  if (instanceBuffer)
-    context->releaseBuffer(instanceBuffer);
-  if (triangleBlasBuffer)
-    context->releaseBuffer(triangleBlasBuffer);
-  if (boxBlasBuffer)
-    context->releaseBuffer(boxBlasBuffer);
-  if (tlasBuffer)
-    context->releaseBuffer(tlasBuffer);
-  if (scratchBuffer)
-    context->releaseBuffer(scratchBuffer);
+  if (context) {
+    if (kernel) { context->releaseKernel(kernel); kernel = nullptr; }
+    if (resultBuffer) { context->releaseBuffer(resultBuffer); resultBuffer = nullptr; }
+    if (vertexBuffer) { context->releaseBuffer(vertexBuffer); vertexBuffer = nullptr; }
+    if (aabbBuffer) { context->releaseBuffer(aabbBuffer); aabbBuffer = nullptr; }
+    if (instanceBuffer) { context->releaseBuffer(instanceBuffer); instanceBuffer = nullptr; }
+    if (triangleBlasBuffer) { context->releaseBuffer(triangleBlasBuffer); triangleBlasBuffer = nullptr; }
+    if (boxBlasBuffer) { context->releaseBuffer(boxBlasBuffer); boxBlasBuffer = nullptr; }
+    if (tlasBuffer) { context->releaseBuffer(tlasBuffer); tlasBuffer = nullptr; }
+    if (scratchBuffer) { context->releaseBuffer(scratchBuffer); scratchBuffer = nullptr; }
+    context = nullptr;
+  }
 }
 
 BenchmarkResult RayPathTracingBench::GetResult(uint32_t config_idx) const {

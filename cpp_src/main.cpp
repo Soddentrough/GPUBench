@@ -219,9 +219,26 @@ int main(int argc, char **argv) {
   app.add_flag("--dump-renders,--dump", dump_renders,
                "Dump and analytically compare rendered frames between Megakernel and Work Lists");
 
+  std::string scene_str = "indoor";
+  app.add_option("-s,--scene", scene_str,
+                 "Ray tracing benchmark scenario: indoor, outdoor, all (default: indoor)")
+      ->check(CLI::IsMember({"indoor", "outdoor", "all"}));
+
   std::string resolution_str = "1080p";
   app.add_option("-r,--resolution", resolution_str,
                  "Resolution preset (720p, 1080p, 1440p, 4k, 1024x1024) or custom WxH (default: 1080p)");
+
+  int config_target = -1;
+  app.add_option("-c,--config", config_target,
+                 "Run a specific benchmark configuration index (0-based)");
+
+  bool profile_snapshot = false;
+  app.add_flag("--profile-snapshot", profile_snapshot,
+               "Run in profiling snapshot mode (1 warmup, 1 timed submit for clean profiler traces)");
+
+  bool rra_trace = false;
+  app.add_flag("--rra", rra_trace,
+               "Enable Radeon Raytracing Analyzer (RRA) trace capture (implies --profile-snapshot)");
 
   std::string output_format;
   app.add_option("--output", output_format,
@@ -234,6 +251,12 @@ int main(int argc, char **argv) {
                  "stdout (requires --output)");
 
   CLI11_PARSE(app, argc, argv);
+
+  if (rra_trace) {
+    profile_snapshot = true;
+    setenv("MESA_VK_TRACE", "rra", 0);
+    setenv("MESA_VK_TRACE_FRAME", "1", 0);
+  }
 
   if (!output_file.empty() && output_format.empty()) {
     std::cerr << "Error: --output-file requires --output (json or csv)"
@@ -481,8 +504,10 @@ int main(int argc, char **argv) {
     }
 
     // We need to keep execution_contexts alive until runner finishes
-    BenchmarkRunner runner(context_ptrs, verbose, debug, dump_geometry, dump_renders);
+    BenchmarkRunner runner(context_ptrs, verbose, debug, dump_geometry, dump_renders, scene_str);
     runner.setResolution(render_width, render_height);
+    runner.setTargetConfig(config_target);
+    runner.setProfileSnapshot(profile_snapshot);
     runner.run(benchmarks_to_run);
 
     // Warn about requested benchmark names that matched nothing

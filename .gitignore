@@ -65,3 +65,11 @@ test/
 # Render test output dumps
 renders/
 
+# GPU Profiler binary traces
+profiles/*.rgp
+profiles/*.rra
+*.rra
+
+# Local benchmark result dumps
+gpubench_results_*.json
+

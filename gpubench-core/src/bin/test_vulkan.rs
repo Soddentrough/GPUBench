@@ -19,6 +19,7 @@ fn main() {
         true,
         true,
         false,
+        false,
         |_res| {
             println!("Callback received result");
         }

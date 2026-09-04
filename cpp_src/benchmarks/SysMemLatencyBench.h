@@ -11,7 +11,7 @@ public:
 
   const char *GetName() const override;
   std::vector<std::string> GetAliases() const override {
-    return {"sysmem_latency", "ram_latency", "sl", "system"};
+    return {"sysmem_latency", "ram_latency", "sysmem_lat", "sl"};
   }
   const char *GetMetric() const override;
   bool IsSupported(const DeviceInfo &info,

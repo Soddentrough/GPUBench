@@ -28,6 +28,7 @@ pub mod ffi {
             verbose: bool,
             debug: bool,
             dump_geometry: bool,
+            dump_renders: bool,
             callback: fn(&FfiResultData)
         ) -> Vec<FfiResultData>;
 

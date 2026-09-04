@@ -19,7 +19,8 @@ class BenchmarkRunner {
 public:
   BenchmarkRunner(const std::vector<IComputeContext *> &contexts,
                   bool verbose = false, bool debug = false,
-                  bool dumpGeometry = false, bool dumpRenders = false);
+                  bool dumpGeometry = false, bool dumpRenders = false,
+                  const std::string &scene = "indoor");
   ~BenchmarkRunner();
 
   void run(const std::vector<std::string> &benchmarks_to_run);
@@ -47,6 +48,14 @@ public:
   uint32_t getRenderWidth() const { return renderWidth; }
   uint32_t getRenderHeight() const { return renderHeight; }
 
+  void setScene(const std::string &scene) { sceneName = scene; }
+  const std::string &getScene() const { return sceneName; }
+
+  void setTargetConfig(int config) { targetConfig = config; }
+  int getTargetConfig() const { return targetConfig; }
+  void setProfileSnapshot(bool enable) { profileSnapshot = enable; }
+  bool getProfileSnapshot() const { return profileSnapshot; }
+
 private:
   void discoverBenchmarks();
 
@@ -59,6 +68,9 @@ private:
   bool debug;
   bool dumpGeometry;
   bool dumpRenders;
+  std::string sceneName = "indoor";
   uint32_t renderWidth = 1920;
   uint32_t renderHeight = 1080;
+  int targetConfig = -1;
+  bool profileSnapshot = false;
 };

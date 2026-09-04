@@ -243,17 +243,28 @@ void RayASBuildBench::Run(uint32_t config_idx) {
 
 void RayASBuildBench::Teardown() {
   VulkanContext *vContext = static_cast<VulkanContext *>(context);
-  VkDevice device = vContext->getVulkanDevice();
+  VkDevice device = vContext ? vContext->getVulkanDevice() : VK_NULL_HANDLE;
 
-  if (blas) vkDestroyAccelerationStructureKHR_ptr(device, blas, nullptr);
-  if (tlas) vkDestroyAccelerationStructureKHR_ptr(device, tlas, nullptr);
+  if (device != VK_NULL_HANDLE && vkDestroyAccelerationStructureKHR_ptr) {
+    if (blas != VK_NULL_HANDLE) {
+      vkDestroyAccelerationStructureKHR_ptr(device, blas, nullptr);
+      blas = VK_NULL_HANDLE;
+    }
+    if (tlas != VK_NULL_HANDLE) {
+      vkDestroyAccelerationStructureKHR_ptr(device, tlas, nullptr);
+      tlas = VK_NULL_HANDLE;
+    }
+  }
 
-  if (vertexBuffer) context->releaseBuffer(vertexBuffer);
-  if (instanceBuffer) context->releaseBuffer(instanceBuffer);
-  if (blasBuffer) context->releaseBuffer(blasBuffer);
-  if (tlasBuffer) context->releaseBuffer(tlasBuffer);
-  if (scratchBuffer) context->releaseBuffer(scratchBuffer);
-  if (updateScratchBuffer) context->releaseBuffer(updateScratchBuffer);
+  if (context) {
+    if (vertexBuffer) { context->releaseBuffer(vertexBuffer); vertexBuffer = nullptr; }
+    if (instanceBuffer) { context->releaseBuffer(instanceBuffer); instanceBuffer = nullptr; }
+    if (blasBuffer) { context->releaseBuffer(blasBuffer); blasBuffer = nullptr; }
+    if (tlasBuffer) { context->releaseBuffer(tlasBuffer); tlasBuffer = nullptr; }
+    if (scratchBuffer) { context->releaseBuffer(scratchBuffer); scratchBuffer = nullptr; }
+    if (updateScratchBuffer) { context->releaseBuffer(updateScratchBuffer); updateScratchBuffer = nullptr; }
+    context = nullptr;
+  }
 }
 
 BenchmarkResult RayASBuildBench::GetResult(uint32_t config_idx) const {

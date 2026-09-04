@@ -15,20 +15,48 @@ layout(set = 0, binding = 2) buffer Framebuffer {
     vec4 pixels[];
 } fb;
 
+layout(set = 0, binding = 3) readonly buffer VertexBuffer {
+    float vertices[];
+} vbuf;
+
 layout(push_constant) uniform PushConstants {
     uint rayCount;
-    uint mode;     // 0: Material Divergence, 1: Multi-Bounce Path Tracing, 2: Incoherent GI
-    uint bounces;  // Max bounces (for mode 1)
+    uint mode;            // 0: Primary/Mat, 1: Multi-Bounce Path Tracing, 2: Incoherent GI, 3: BVH, 4: Shading
+    uint bounces;         // Max bounces (for mode 1)
     uint seed;
-    uint dumpRenders; // 1: dump pixels to fb
+    uint dumpRenders;     // 1: dump pixels to fb
     uint width;
     uint height;
+    uint spatialPattern;  // 0: Linear 32x1, 1: Tiled 8x4, 2: Morton 8x4, 3: Morton 4x8
+    uint sceneType;       // 0: Indoor Atrium, 1: Outdoor Landscape
 } pc;
 
 shared uint localRays;
 shared uint localHits;
 
-// PCG Random Generator
+// Scene Type Constants
+const uint SCENE_INDOOR_ATRIUM   = 0u;
+const uint SCENE_OUTDOOR_TERRAIN = 1u;
+
+// Indoor Atrium Primitives
+const uint PRIM_KNOT_PAINT_END  = 1536u;
+const uint PRIM_KNOT_JADE_END   = 3072u;
+const uint PRIM_KNOT_CHROME_END = 4608u;
+const uint PRIM_KNOT_VELVET_END = 6144u;
+const uint PRIM_KNOT_RUST_END   = 7680u;
+const uint PRIM_SPHERE_END      = 9600u;
+const uint PRIM_PEDESTAL_END    = 9728u;
+const uint PRIM_SUZANNE_END     = 10696u;
+const uint PRIM_FLOOR_END       = 27080u;
+const uint PRIM_WALLS_END       = 28104u;
+const uint PRIM_CEILING_END     = 29128u;
+const uint PRIM_COLUMNS_END     = 35272u;
+
+// Outdoor Landscape Primitives
+const uint PRIM_TERRAIN_END     = 32768u;
+const uint PRIM_WATER_END       = 34816u;
+const uint PRIM_TREES_END       = 57216u;
+
 uint pcg_hash(inout uint state) {
     uint oldstate = state;
     state = oldstate * 747796405u + 2891336453u;
@@ -56,136 +84,106 @@ vec3 align_to_normal(vec3 sample_dir, vec3 normal) {
     return tangent * sample_dir.x + bitangent * sample_dir.y + normal * sample_dir.z;
 }
 
-// Procedural 3D Voronoi cellular noise for Car Paint Flakes
-float voronoiFlakes(vec3 p) {
-    vec3 i = floor(p);
-    vec3 f = fract(p);
-    float minDist = 1.0;
-    for (int z = -1; z <= 1; ++z) {
-        for (int y = -1; y <= 1; ++y) {
-            for (int x = -1; x <= 1; ++x) {
-                vec3 g = vec3(float(x), float(y), float(z));
-                vec3 o = fract(sin(vec3(dot(i + g, vec3(127.1, 311.7, 74.7)),
-                                        dot(i + g, vec3(269.5, 183.3, 246.1)),
-                                        dot(i + g, vec3(113.5, 271.9, 124.6)))) * 43758.5453);
-                vec3 diff = g + o - f;
-                minDist = min(minDist, dot(diff, diff));
-            }
-        }
-    }
-    return sqrt(minDist);
+float hash31(vec3 p) {
+    p = fract(p * 0.1031);
+    p += dot(p, p.yzx + 33.33);
+    return fract((p.x + p.y) * p.z);
 }
 
-// 3D Hash and FBM for Weathered Rust
-float hash13(vec3 p3) {
-    p3 = fract(p3 * 0.1031);
-    p3 += dot(p3, p3.yzx + 33.33);
-    return fract((p3.x + p3.y) * p3.z);
+vec3 hash33(vec3 p) {
+    vec3 p3 = fract(p * vec3(0.1031, 0.1030, 0.0973));
+    p3 += dot(p3, p3.yxz + 33.33);
+    return fract((p3.xxy + p3.yxx) * p3.zyx);
 }
 
 float noise3D(vec3 p) {
     vec3 i = floor(p);
     vec3 f = fract(p);
-    vec3 u = f * f * (3.0 - 2.0 * f);
-    return mix(mix(mix(hash13(i + vec3(0,0,0)), hash13(i + vec3(1,0,0)), u.x),
-                   mix(hash13(i + vec3(0,1,0)), hash13(i + vec3(1,1,0)), u.x), u.y),
-               mix(mix(hash13(i + vec3(0,0,1)), hash13(i + vec3(1,0,1)), u.x),
-                   mix(hash13(i + vec3(0,1,1)), hash13(i + vec3(1,1,1)), u.x), u.y), u.z);
-}
-
-float fbmRust(vec3 p) {
-    float v = 0.0;
-    float a = 0.5;
-    vec3 shift = vec3(100.0);
-    for (int o = 0; o < 5; ++o) {
-        v += a * noise3D(p);
-        p = p * 2.04 + shift;
-        a *= 0.5;
-    }
-    return v;
-}
-
-void buildOrthonormalBasis(vec3 n, out vec3 t, out vec3 b) {
-    if (abs(n.z) < 0.999) {
-        t = normalize(cross(n, vec3(0.0, 0.0, 1.0)));
-    } else {
-        t = normalize(cross(n, vec3(0.0, 1.0, 0.0)));
-    }
-    b = cross(n, t);
-}
-
-// Procedural hash & value noise for atmospheric cloud coverage
-float skyHash21(vec2 p) {
-    p = fract(p * vec2(123.34, 456.21));
-    p += dot(p, p + 45.32);
-    return fract(p.x * p.y);
-}
-
-float skyNoise(vec2 p) {
-    vec2 i = floor(p);
-    vec2 f = fract(p);
     f = f * f * (3.0 - 2.0 * f);
-    float a = skyHash21(i);
-    float b = skyHash21(i + vec2(1.0, 0.0));
-    float c = skyHash21(i + vec2(0.0, 1.0));
-    float d = skyHash21(i + vec2(1.0, 1.0));
-    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+    float n000 = hash31(i + vec3(0, 0, 0));
+    float n100 = hash31(i + vec3(1, 0, 0));
+    float n010 = hash31(i + vec3(0, 1, 0));
+    float n110 = hash31(i + vec3(1, 1, 0));
+    float n011 = hash31(i + vec3(0, 0, 1));
+    float n101 = hash31(i + vec3(1, 0, 1));
+    float n011b = hash31(i + vec3(0, 1, 1));
+    float n111 = hash31(i + vec3(1, 1, 1));
+    return mix(
+        mix(mix(n000, n100, f.x), mix(n010, n110, f.x), f.y),
+        mix(mix(n011, n101, f.x), mix(n011b, n111, f.x), f.y),
+        f.z
+    );
 }
 
-float skyCloudFBM(vec2 p) {
+float rustFBM3D(vec3 p) {
     float v = 0.0;
     float a = 0.5;
-    mat2 rot = mat2(0.8, -0.6, 0.6, 0.8);
-    for (int i = 0; i < 3; ++i) {
-        v += a * skyNoise(p);
-        p = rot * p * 2.02 + vec2(1.7, 9.2);
+    mat3 rot = mat3(
+         0.00,  0.80,  0.60,
+        -0.80,  0.36, -0.48,
+        -0.60, -0.48,  0.64
+    );
+    for (int i = 0; i < 4; ++i) {
+        v += a * noise3D(p);
+        p = rot * p * 2.02 + vec3(1.7, 9.2, 0.4);
         a *= 0.5;
     }
     return v;
 }
 
-// Analytic Atmospheric Rayleigh-Mie Sky Model with Procedural Clouds for Ray Miss Evaluation
-vec3 evalAnalyticSky(vec3 dir) {
-    vec3 sunDir = normalize(vec3(0.342, -0.664, 0.664));
-    float cosTheta = clamp(dir.z, 0.0, 1.0);
-    float cosGamma = dot(dir, sunDir);
-
-    // Deep zenith gradient -> atmospheric haze
-    vec3 zenithCol = vec3(0.06, 0.22, 0.62);
-    vec3 horizonCol = vec3(0.58, 0.70, 0.84);
-    float rayleighPhase = 0.75 * (1.0 + cosGamma * cosGamma);
-    vec3 skyGrad = mix(horizonCol, zenithCol, pow(cosTheta, 0.55));
-
-    // Sharp solar disc + Henyey-Greenstein corona
-    float sunDisc = smoothstep(0.9985, 0.9995, cosGamma);
-    const float g = 0.82;
-    const float g2 = g * g;
-    float miePhase = (1.5 * (1.0 - g2) / (2.0 + g2)) * (1.0 + cosGamma * cosGamma) 
-                   / pow(max(1.0 + g2 - 2.0 * g * cosGamma, 0.001), 1.5);
-    vec3 sunColor = vec3(1.0, 0.92, 0.75);
-
-    vec3 sky = skyGrad * rayleighPhase + sunColor * (miePhase * 0.04) + sunColor * (sunDisc * 8.0);
-
-    // Procedural planar cloud deck (Z-up coordinates)
-    if (dir.z > 0.02) {
-        vec2 cloudUV = (dir.xy / (dir.z + 0.05)) * 1.8;
-        float cloudDensity = smoothstep(0.42, 0.75, skyCloudFBM(cloudUV));
-        if (cloudDensity > 0.0) {
-            float sunScatter = clamp(cosGamma, 0.0, 1.0);
-            vec3 cloudLit = vec3(0.72, 0.76, 0.82) * 0.4 + vec3(1.0, 0.96, 0.90) * 1.4 * pow(sunScatter, 3.0);
-            vec3 cloudShadow = vec3(0.35, 0.38, 0.45);
-            vec3 cloudColor = mix(cloudShadow, cloudLit, 0.6 + 0.4 * cosTheta);
-            sky = mix(sky, cloudColor, cloudDensity * 0.85);
-        }
+void getCamera(uint sceneType, out vec3 camPos, out vec3 camForward, out vec3 camRight, out vec3 camUp, out float fov) {
+    if (sceneType == SCENE_OUTDOOR_TERRAIN) {
+        // Outdoor Landscape: Mountain Valley Vista
+        camPos = vec3(0.0, -320.0, 75.0);
+        camForward = vec3(0.0, 0.997375, -0.072412);
+        camRight = vec3(1.0, 0.0, 0.0);
+        camUp = vec3(0.0, 0.072412, 0.997375);
+        fov = 0.45;
     } else {
-        vec3 groundCol = vec3(0.06, 0.06, 0.07);
-        sky = mix(horizonCol * 0.4, groundCol, clamp(-dir.z * 3.0, 0.0, 1.0));
+        // Indoor Atrium / Showroom: Central Sculpture Focus
+        camPos = vec3(-0.5081, -8.1276, 1.5591);
+        camForward = vec3(0.0562, 0.9852, -0.1622);
+        camRight = vec3(0.9984, -0.0570, 0.0000);
+        camUp = vec3(0.0092, 0.1619, 0.9868);
+        fov = 0.2155;
     }
+}
 
+vec3 evalStudioEnvironment(vec3 dir) {
+    float z = dir.z;
+    vec3 baseWall = mix(vec3(0.12, 0.13, 0.16), vec3(0.24, 0.26, 0.30), clamp(z * 1.5, 0.0, 1.0));
+    if (z < 0.0) {
+        baseWall = mix(vec3(0.12, 0.13, 0.16), vec3(0.06, 0.07, 0.08), clamp(-z * 2.0, 0.0, 1.0));
+    }
+    vec3 softboxDir1 = normalize(vec3(0.05, 0.30, 0.95));
+    float sb1 = pow(clamp(dot(dir, softboxDir1), 0.0, 1.0), 80.0) * 6.0;
+    vec3 softboxDir2 = normalize(vec3(-0.75, -0.20, 0.40));
+    float sb2 = pow(clamp(dot(dir, softboxDir2), 0.0, 1.0), 45.0) * 3.5;
+    vec3 softboxDir3 = normalize(vec3(0.65, 0.70, 0.30));
+    float sb3 = pow(clamp(dot(dir, softboxDir3), 0.0, 1.0), 40.0) * 2.5;
+    return baseWall + vec3(1.0, 0.98, 0.95) * sb1 + vec3(0.85, 0.92, 1.0) * sb2 + vec3(1.0, 0.90, 0.80) * sb3;
+}
+
+vec3 evalOutdoorSky(vec3 dir) {
+    vec3 sunDir = normalize(vec3(0.45, 0.35, 0.82));
+    float sunDot = max(dot(dir, sunDir), 0.0);
+    vec3 sky = mix(vec3(0.70, 0.82, 0.95), vec3(0.18, 0.42, 0.82), clamp(dir.z, 0.0, 1.0));
+    if (dir.z < 0.0) {
+        sky = mix(vec3(0.70, 0.82, 0.95), vec3(0.35, 0.30, 0.25), clamp(-dir.z * 2.0, 0.0, 1.0));
+    }
+    // Sun disc and golden glow
+    sky += vec3(1.0, 0.95, 0.85) * pow(sunDot, 120.0) * 8.0;
+    sky += vec3(1.0, 0.85, 0.60) * pow(sunDot, 12.0) * 0.8;
     return sky;
 }
 
-// 4 Realistic Production Lights matching Blender showroom scene
+vec3 evalSky(uint sceneType, vec3 dir) {
+    if (sceneType == SCENE_OUTDOOR_TERRAIN) {
+        return evalOutdoorSky(dir);
+    }
+    return evalStudioEnvironment(dir);
+}
+
 struct SceneLight {
     vec3 dir;
     vec3 color;
@@ -193,190 +191,496 @@ struct SceneLight {
 };
 
 const SceneLight SCENE_LIGHTS[4] = SceneLight[4](
-    SceneLight(vec3(0.342, -0.664, 0.664), vec3(1.0, 0.96, 0.90), 3.4),   // Key Sun
-    SceneLight(vec3(-0.60, 0.70, 0.40), vec3(1.0, 0.75, 0.40), 1.6),     // Warm Rim
-    SceneLight(vec3(-0.55, -0.75, 0.35), vec3(0.65, 0.80, 1.0), 1.4),    // Cool Fill
-    SceneLight(vec3(0.0, 0.20, 0.95), vec3(0.40, 0.35, 0.30), 0.6)       // Ground Bounce
+    SceneLight(vec3(0.28, -0.65, 0.70), vec3(1.0, 0.98, 0.94), 1.00),
+    SceneLight(vec3(-0.65, 0.55, 0.45), vec3(0.85, 0.90, 1.0), 0.35),
+    SceneLight(vec3(-0.50, -0.80, 0.35), vec3(1.0, 0.95, 0.85), 0.45),
+    SceneLight(vec3(0.0, 0.15, 0.98), vec3(0.60, 0.65, 0.70), 0.20)
 );
 
-// 5 Realistic Production Material Archetypes matching Blender showroom scene
-vec3 evalMaterialBSDF(uint matId, vec3 normal, vec3 inDir, vec3 hitPos, inout uint rng) {
-    vec3 viewDir = -inDir;
-    float NdotV = max(dot(normal, viewDir), 0.001);
-    vec3 totalRadiance = vec3(0.0);
-    uint archetype = (matId < 20) ? (matId / 4) : 5;
-
-    for (int l = 0; l < 4; ++l) {
-        vec3 lightDir = normalize(SCENE_LIGHTS[l].dir);
-        vec3 lightCol = SCENE_LIGHTS[l].color * SCENE_LIGHTS[l].intensity;
-        vec3 halfVec = normalize(viewDir + lightDir);
-        float NdotL = max(dot(normal, lightDir), 0.0);
-        float NdotH = max(dot(normal, halfVec), 0.0);
-        float VdotH = max(dot(viewDir, halfVec), 0.0);
-
-        if (NdotL <= 0.0 && archetype != 1 && archetype != 5) continue;
-
-        vec3 color = vec3(0.0);
-        switch (archetype) {
-            case 0: {
-                // Archetype 0: Automotive Clearcoat with Metallic Voronoi Flakes (Crimson Red)
-                float flakeNoise = voronoiFlakes(hitPos * 120.0);
-                vec3 flakeNormal = normalize(normal + (fract(vec3(flakeNoise * 13.0, flakeNoise * 7.0, flakeNoise * 19.0)) - 0.5) * 0.15);
-                float flakeNdotH = max(dot(flakeNormal, halfVec), 0.0);
-                float flakeNdotL = max(dot(flakeNormal, lightDir), 0.0);
-                
-                float a2 = 0.06;
-                float d = flakeNdotH * flakeNdotH * (a2 - 1.0) + 1.0;
-                float D_base = a2 / (3.14159 * d * d + 0.0001);
-                vec3 baseTint = vec3(0.85, 0.03, 0.06); // Crimson red
-                vec3 baseSpec = (D_base * 0.9 * baseTint) / (4.0 * NdotL * NdotV + 0.001) * flakeNdotL;
-
-                float a2_coat = 0.0004;
-                float d_coat = NdotH * NdotH * (a2_coat - 1.0) + 1.0;
-                float D_coat = a2_coat / (3.14159 * d_coat * d_coat + 0.0001);
-                float F_coat = 0.04 + 0.96 * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
-                vec3 coatSpec = vec3((D_coat * F_coat) / (4.0 * NdotL * NdotV + 0.001) * NdotL);
-
-                vec3 absorption = exp(-vec3(0.1, 0.8, 0.7) * 0.05);
-                color = coatSpec + baseSpec * (1.0 - F_coat) * absorption;
-                break;
-            }
-            case 1: {
-                // Archetype 1: Organic Jade / Subsurface Scattering (Mint Green)
-                vec3 baseJade = vec3(0.08, 0.82, 0.48);
-                float wrap = 0.45;
-                float diffuseWrap = max((dot(normal, lightDir) + wrap) / (1.0 + wrap), 0.0);
-                vec3 sssProfile = exp(-vec3(0.35, 0.9, 0.4) * (1.0 - diffuseWrap));
-                float a2 = 0.015;
-                float d = NdotH * NdotH * (a2 - 1.0) + 1.0;
-                float D = a2 / (3.14159 * d * d + 0.0001);
-                float F = 0.05 + 0.95 * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
-                vec3 coat = vec3((D * F) / (4.0 * NdotL * NdotV + 0.001) * NdotL);
-                color = baseJade * diffuseWrap * sssProfile * 2.2 + coat;
-                break;
-            }
-            case 2: {
-                // Archetype 2: Dispersive Chrome / Glass (Mirror Conductor)
-                float a2 = 0.002;
-                float d = NdotH * NdotH * (a2 - 1.0) + 1.0;
-                float D = a2 / (3.14159 * d * d + 0.0001);
-                vec3 baseCol = vec3(0.95, 0.98, 1.0);
-                vec3 F = baseCol + (1.0 - baseCol) * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
-                color = (D * F) / (4.0 * NdotL * NdotV + 0.001) * NdotL + baseCol * (0.05 * NdotL);
-                break;
-            }
-            case 3: {
-                // Archetype 3: Anisotropic Woven Velvet with Charlie Sheen (Deep Purple)
-                vec3 t, b;
-                buildOrthonormalBasis(normal, t, b);
-                float TdotH = dot(t, halfVec);
-                float BdotH = dot(b, halfVec);
-                float ax = 0.04;
-                float ay = 0.36;
-                float d_aniso = (TdotH * TdotH) / (ax * ax) + (BdotH * BdotH) / (ay * ay) + NdotH * NdotH;
-                float D_aniso = 1.0 / (3.14159 * ax * ay * d_aniso * d_aniso + 0.0001);
-                
-                float sin2 = max(1.0 - NdotV * NdotV, 0.0);
-                float sheen = pow(sin2, 1.25) * 1.5;
-                vec3 sheenCol = vec3(0.95, 0.4, 0.8);
-                vec3 baseCol = vec3(0.32, 0.02, 0.25);
-                
-                float weave = 0.5 + 0.5 * sin(dot(hitPos.xy, vec2(80.0)));
-                color = (baseCol * weave * NdotL + sheenCol * sheen + vec3(D_aniso * 0.1) * NdotL);
-                break;
-            }
-            case 4: {
-                // Archetype 4: Weathered Industrial Rust (Multi-octave FBM Procedural)
-                float rustNoise = fbmRust(hitPos * 4.0);
-                float rustMask = smoothstep(0.35, 0.65, rustNoise);
-                
-                vec3 steelCol = vec3(0.42, 0.44, 0.47);
-                float d_steel = NdotH * NdotH * (0.09 - 1.0) + 1.0;
-                float D_steel = 0.09 / (3.14159 * d_steel * d_steel + 0.0001);
-                vec3 steelSpec = steelCol * (D_steel / (4.0 * NdotL * NdotV + 0.001) * NdotL);
-
-                vec3 rustCol = vec3(0.55, 0.16, 0.05);
-                vec3 rustDiff = rustCol * NdotL;
-
-                color = mix(steelSpec, rustDiff, rustMask);
-                break;
-            }
-            case 5: {
-                // Archetype 5: Sleek Dark Charcoal Showroom Floor matching Blender
-                vec3 floorBase = vec3(0.06, 0.06, 0.07);
-                float d_floor = NdotH * NdotH * (0.09 - 1.0) + 1.0;
-                float D_floor = 0.09 / (3.14159 * d_floor * d_floor + 0.0001);
-                vec3 floorSpec = vec3(D_floor * 0.12 / (4.0 * NdotL * NdotV + 0.001) * NdotL);
-                color = floorBase * NdotL + floorSpec;
-                break;
-            }
-        }
-        totalRadiance += color * lightCol;
-    }
-
-    // Specular environment reflection for polished materials
-    vec3 reflDir = reflect(inDir, normal);
-    vec3 skyRefl = evalAnalyticSky(reflDir);
-    if (archetype == 0) {
-        totalRadiance += skyRefl * 0.35 * pow(clamp(1.0 - NdotV, 0.0, 1.0), 4.0);
-    } else if (archetype == 1) {
-        totalRadiance += skyRefl * 0.15 * pow(clamp(1.0 - NdotV, 0.0, 1.0), 5.0);
-    } else if (archetype == 2) {
-        totalRadiance = mix(totalRadiance, skyRefl * 1.2, 0.75);
-    } else if (archetype == 5) {
-        totalRadiance += skyRefl * 0.08 * pow(clamp(1.0 - NdotV, 0.0, 1.0), 3.0);
-    }
-
-    return totalRadiance;
+float computeFloorOcclusion(vec3 hitPos) {
+    float occ = 1.0;
+    float dCenter = length(hitPos.xy - vec2(0.0, 0.2));
+    occ *= clamp(0.20 + 0.80 * smoothstep(0.4, 2.5, dCenter), 0.0, 1.0);
+    float dLeft = length(hitPos.xy - vec2(-1.8, -1.2));
+    occ *= clamp(0.15 + 0.85 * smoothstep(0.3, 2.0, dLeft), 0.0, 1.0);
+    float dFront = length(vec2(hitPos.x, (hitPos.y - (-1.5)) * 2.0));
+    occ *= clamp(0.18 + 0.82 * smoothstep(0.4, 2.2, dFront), 0.0, 1.0);
+    float dSphere = length(hitPos.xy - vec2(-3.24, 0.39));
+    occ *= clamp(0.10 + 0.90 * smoothstep(0.3, 1.4, dSphere), 0.0, 1.0);
+    float dPed = length(hitPos.xy - vec2(-0.46, 0.06));
+    occ *= clamp(0.08 + 0.92 * smoothstep(0.3, 1.2, dPed), 0.0, 1.0);
+    float dSuz = length(hitPos.xy - vec2(2.71, -0.57));
+    occ *= clamp(0.12 + 0.88 * smoothstep(0.3, 1.4, dSuz), 0.0, 1.0);
+    return occ;
 }
 
-vec3 computeSmoothNormal(uint primId, vec3 hitPos, vec3 rayDir) {
-    vec3 normal;
-    if (primId < 65536) {
-        // Continuous Parametric Trefoil Torus Knot tube normal with segment interpolation
-        uint ringIdx = primId / 256;
-        float u0 = (float(ringIdx) / 256.0) * 6.2831853;
-        float u1 = (float((ringIdx + 1) % 256) / 256.0) * 6.2831853;
-
-        float r0 = 2.0 + 0.8 * cos(3.0 * u0);
-        vec3 unrot0 = vec3(r0 * cos(2.0 * u0), r0 * sin(2.0 * u0), -0.8 * sin(3.0 * u0));
-        float r1 = 2.0 + 0.8 * cos(3.0 * u1);
-        vec3 unrot1 = vec3(r1 * cos(2.0 * u1), r1 * sin(2.0 * u1), -0.8 * sin(3.0 * u1));
-
-        mat3 R = mat3(
-            0.907673, -0.094951, -0.408795,
-            0.243210,  0.912837,  0.327990,
-            0.342020, -0.397131,  0.851651
-        );
-        vec3 c0 = R * unrot0 + vec3(0.0, 0.0, 0.45);
-        vec3 c1 = R * unrot1 + vec3(0.0, 0.0, 0.45);
-
-        vec3 seg = c1 - c0;
-        float segLen2 = dot(seg, seg);
-        float tSeg = clamp(dot(hitPos - c0, seg) / max(segLen2, 0.00001), 0.0, 1.0);
-        vec3 center = c0 + tSeg * seg;
-
-        normal = normalize(hitPos - center);
+uint computeMaterialId(uint sceneType, uint primId, vec3 hitPos, vec3 normal) {
+    if (sceneType == SCENE_OUTDOOR_TERRAIN) {
+        if (primId < PRIM_TERRAIN_END) {
+            if (hitPos.z >= 0.0 && hitPos.z <= 2.5 && abs(hitPos.x) < 170.0) {
+                return 7u; // Wet River Stones / Shoreline Boulders
+            }
+            if (hitPos.z > 65.0) {
+                return 3u; // High Mountain Snow & Glacial Ice
+            }
+            if (normal.z < 0.65) {
+                return 4u; // Exposed Granite Cliff Face
+            }
+            if (normal.z < 0.82) {
+                return 0u; // Weathered Sandstone & Scree Slope
+            }
+            return 5u;     // Valley Grassland / Alpine Meadow
+        }
+        if (primId < PRIM_WATER_END) {
+            return 2u;     // Alpine Lake / River Water Plane
+        }
+        uint treeLocalTri = (primId - PRIM_WATER_END) % 224u;
+        if (treeLocalTri < 32u) {
+            return 6u;     // Pine Bark / Timber Trunk
+        }
+        return 1u;         // Translucent Conifer Pine Foliage / Needles
     } else {
-        // Showroom cavity dish: z = -1.5 + 0.035 * (x^2 + y^2)
-        normal = normalize(vec3(-0.07 * hitPos.x, -0.07 * hitPos.y, 1.0));
+        if (primId < PRIM_KNOT_PAINT_END)  return 0u; // Knot Band 0: Ruby Car Paint (Inner Arch)
+        if (primId < PRIM_KNOT_JADE_END)   return 1u; // Knot Band 1: Jade Subsurface (Left Loop)
+        if (primId < PRIM_KNOT_CHROME_END) return 7u; // Knot Band 2: Chrome Mirror (Top Right Arch)
+        if (primId < PRIM_KNOT_VELVET_END) return 3u; // Knot Band 3: Magenta Velvet (Rear Arch)
+        if (primId < PRIM_KNOT_RUST_END)   return 4u; // Knot Band 4: Weathered Rust (Front Tube)
+        if (primId < PRIM_SPHERE_END)      return 1u; // Satellite Jade Sphere
+        if (primId < PRIM_PEDESTAL_END)    return 6u; // Gold Turned Pedestal
+        if (primId < PRIM_SUZANNE_END)     return 2u; // Suzanne Dispersive Glass Head
+        if (primId < PRIM_FLOOR_END)       return 5u; // Showroom Cyclorama Floor
+        if (primId < PRIM_WALLS_END)       return 4u; // Atrium Enclosing Walls (Bronze/Rust panels)
+        if (primId < PRIM_CEILING_END)     return 6u; // Vaulted Ceiling (Gold Coffered)
+        return 1u;                                    // Columns (Carrara Marble)
+    }
+}
+
+uint getArchetype(uint matId) {
+    return matId;
+}
+
+vec3 tonemapACES(vec3 x) {
+    const float a = 2.51;
+    const float b = 0.03;
+    const float c = 2.43;
+    const float d = 0.59;
+    const float e = 0.14;
+    vec3 mapped = clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
+    return pow(mapped, vec3(1.0 / 2.2));
+}
+
+void computePixelCoords(uint idx, uint pattern, uint width, uint height, out uint px_u, out uint py_u) {
+    if (pattern == 1) {
+        uint tilesX = (width + 7) / 8;
+        uint tileIdx = idx / 32;
+        uint inTile = idx % 32;
+        uint tileX = tileIdx % tilesX;
+        uint tileY = tileIdx / tilesX;
+        px_u = tileX * 8 + (inTile % 8);
+        py_u = tileY * 4 + (inTile / 8);
+    } else if (pattern == 2) {
+        uint tilesX = (width + 7) / 8;
+        uint tileIdx = idx / 32;
+        uint inTile = idx % 32;
+        uint tileX = tileIdx % tilesX;
+        uint tileY = tileIdx / tilesX;
+        uint mx = ((inTile >> 0) & 1) | (((inTile >> 2) & 1) << 1) | (((inTile >> 4) & 1) << 2);
+        uint my = ((inTile >> 1) & 1) | (((inTile >> 3) & 1) << 1);
+        px_u = tileX * 8 + mx;
+        py_u = tileY * 4 + my;
+    } else if (pattern == 3) {
+        uint tilesX = (width + 3) / 4;
+        uint tileIdx = idx / 32;
+        uint inTile = idx % 32;
+        uint tileX = tileIdx % tilesX;
+        uint tileY = tileIdx / tilesX;
+        uint mx = ((inTile >> 0) & 1) | (((inTile >> 2) & 1) << 1);
+        uint my = ((inTile >> 1) & 1) | (((inTile >> 3) & 1) << 1) | (((inTile >> 4) & 1) << 2);
+        px_u = tileX * 4 + mx;
+        py_u = tileY * 8 + my;
+    } else {
+        px_u = idx % width;
+        py_u = idx / width;
+    }
+}
+
+vec3 computeSmoothNormal(uint sceneType, uint primId, vec3 hitPos, vec3 rayDir, vec2 bary) {
+    vec3 normal;
+    if (sceneType == SCENE_OUTDOOR_TERRAIN) {
+        if (primId >= PRIM_TERRAIN_END && primId < PRIM_WATER_END) {
+            normal = vec3(0.0, 0.0, 1.0);
+        } else {
+            uint base = primId * 9u;
+            vec3 p0 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
+            vec3 p1 = vec3(vbuf.vertices[base + 3], vbuf.vertices[base + 4], vbuf.vertices[base + 5]);
+            vec3 p2 = vec3(vbuf.vertices[base + 6], vbuf.vertices[base + 7], vbuf.vertices[base + 8]);
+            normal = normalize(cross(p1 - p0, p2 - p0));
+        }
+    } else {
+        if (primId < PRIM_KNOT_RUST_END) {
+            uint segI = (primId / 48u);
+            float u0 = (float(segI) / 160.0) * 6.283185307;
+            float u1 = (float((segI + 1u) % 160u) / 160.0) * 6.283185307;
+
+            float r0 = (2.0 + 0.8 * cos(3.0 * u0)) * 0.835;
+            vec3 unrot0 = vec3(r0 * cos(2.0 * u0), r0 * sin(2.0 * u0), -0.8 * 0.835 * sin(3.0 * u0));
+            float r1 = (2.0 + 0.8 * cos(3.0 * u1)) * 0.835;
+            vec3 unrot1 = vec3(r1 * cos(2.0 * u1), r1 * sin(2.0 * u1), -0.8 * 0.835 * sin(3.0 * u1));
+
+            const mat3 R_knot = mat3(
+                vec3( 0.929662, -0.239757, -0.279722),
+                vec3( 0.326751,  0.887321,  0.325417),
+                vec3( 0.170182, -0.393927,  0.903249)
+            );
+            vec3 c0 = R_knot * unrot0 + vec3(0.0, 0.0, 0.385);
+            vec3 c1 = R_knot * unrot1 + vec3(0.0, 0.0, 0.385);
+
+            vec3 seg = c1 - c0;
+            float segLen2 = dot(seg, seg);
+            float tSeg = clamp(dot(hitPos - c0, seg) / max(segLen2, 0.00001), 0.0, 1.0);
+            vec3 centerPt = c0 + tSeg * seg;
+
+            normal = normalize(hitPos - centerPt);
+        } else if (primId < PRIM_SPHERE_END) {
+            normal = normalize(hitPos - vec3(-3.242, 0.391, -0.509));
+        } else if (primId < PRIM_PEDESTAL_END) {
+            if (hitPos.z >= -0.658) {
+                normal = vec3(0.0, 0.0, 1.0);
+            } else if (hitPos.z <= -1.050) {
+                normal = vec3(0.0, 0.0, -1.0);
+            } else {
+                normal = normalize(vec3(hitPos.x - (-0.460), hitPos.y - 0.060, 0.0));
+            }
+        } else if (primId < PRIM_SUZANNE_END) {
+            uint base = primId * 9u;
+            vec3 p0 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
+            vec3 p1 = vec3(vbuf.vertices[base + 3], vbuf.vertices[base + 4], vbuf.vertices[base + 5]);
+            vec3 p2 = vec3(vbuf.vertices[base + 6], vbuf.vertices[base + 7], vbuf.vertices[base + 8]);
+            normal = normalize(cross(p1 - p0, p2 - p0));
+        } else if (primId < PRIM_FLOOR_END) {
+            float backCurve = (hitPos.y > 1.0) ? 0.044 * (hitPos.y - 1.0) : 0.0;
+            normal = normalize(vec3(0.0, -backCurve, 1.0));
+        } else {
+            uint base = primId * 9u;
+            vec3 p0 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
+            vec3 p1 = vec3(vbuf.vertices[base + 3], vbuf.vertices[base + 4], vbuf.vertices[base + 5]);
+            vec3 p2 = vec3(vbuf.vertices[base + 6], vbuf.vertices[base + 7], vbuf.vertices[base + 8]);
+            normal = normalize(cross(p1 - p0, p2 - p0));
+        }
     }
     if (dot(normal, rayDir) > 0.0) normal = -normal;
     return normal;
 }
 
-uint computeMaterialId(uint primId, vec3 hitPos) {
-    if (primId < 65536) {
-        // 5 broad continuous material sections matching Blender showroom scene (ring // 51)
-        uint ringIdx = primId / 256;
-        uint section = (ringIdx / 51) % 5;
-        uint subQueue = primId % 4;
-        return section * 4 + subQueue;
+#ifndef SPECIALIZED_ARCHETYPE
+#define SPECIALIZED_ARCHETYPE 0xFFFFFFFFu
+#endif
+
+vec3 evalMaterialBSDF(uint sceneType, uint matId, vec3 normal, vec3 inDir, vec3 hitPos, inout uint rng) {
+    vec3 viewDir = -inDir;
+    float NdotV = max(dot(normal, viewDir), 0.001);
+    uint archetype = (SPECIALIZED_ARCHETYPE != 0xFFFFFFFFu) ? SPECIALIZED_ARCHETYPE : getArchetype(matId);
+
+    if (sceneType == SCENE_OUTDOOR_TERRAIN) {
+        // Outdoor Open-World Lighting
+        vec3 sunDir = normalize(vec3(0.45, 0.35, 0.82));
+        vec3 sunColor = vec3(1.0, 0.96, 0.88) * 2.2;
+        vec3 skyColor = vec3(0.35, 0.55, 0.85) * 0.50;
+        vec3 groundColor = vec3(0.20, 0.18, 0.12) * 0.25;
+
+        float NdotL = max(dot(normal, sunDir), 0.0);
+        vec3 halfVec = normalize(viewDir + sunDir);
+        float NdotH = max(dot(normal, halfVec), 0.0);
+        float VdotH = max(dot(viewDir, halfVec), 0.0);
+
+        vec3 color = vec3(0.0);
+        vec3 albedo = vec3(0.5);
+
+        switch (archetype) {
+            case 0: {
+                // Weathered Sandstone & Scree Slope
+                albedo = vec3(0.65, 0.52, 0.40);
+                float D_r = pow(NdotH, 8.0) * 0.15;
+                color = albedo * (NdotL * 0.75 + 0.15) + vec3(D_r);
+                break;
+            }
+            case 1: {
+                // Translucent Conifer Pine Foliage / Needles
+                albedo = vec3(0.08, 0.32, 0.12);
+                float wrappedNdotL = clamp((dot(normal, sunDir) + 0.45) / 1.45, 0.0, 1.0);
+                vec3 transmission = vec3(0.18, 0.48, 0.10) * wrappedNdotL;
+                float D_f = pow(NdotH, 30.0) * 0.4;
+                color = albedo * (NdotL * 0.60 + 0.10) + transmission + vec3(D_f);
+                break;
+            }
+            case 2: {
+                // Alpine Lake / River Water Plane
+                albedo = vec3(0.04, 0.16, 0.22);
+                float F_w = 0.02 + 0.98 * pow(clamp(1.0 - NdotV, 0.0, 1.0), 5.0);
+                float D_w = pow(NdotH, 180.0) * 6.0;
+                vec3 reflDir = reflect(inDir, normal);
+                vec3 reflSky = evalOutdoorSky(reflDir);
+                color = mix(albedo * (NdotL * 0.30 + 0.10), reflSky, F_w) + vec3(D_w) * sunColor;
+                break;
+            }
+            case 3: {
+                // High Mountain Snow & Glacial Ice
+                albedo = vec3(0.92, 0.95, 0.98);
+                float snowWrap = clamp((dot(normal, sunDir) + 0.3) / 1.3, 0.0, 1.0);
+                float snowGlint = pow(NdotH, 60.0) * 0.8;
+                color = albedo * (snowWrap * 0.85 + 0.20) + vec3(snowGlint);
+                break;
+            }
+            case 4: {
+                // Exposed Granite Cliff Face
+                albedo = vec3(0.30, 0.31, 0.34);
+                float cliffNdotL = NdotL * 0.80 + 0.12;
+                color = albedo * cliffNdotL;
+                break;
+            }
+            case 5: {
+                // Valley Grassland / Alpine Meadow
+                albedo = vec3(0.24, 0.44, 0.18);
+                float sheen = pow(clamp(1.0 - VdotH, 0.0, 1.0), 3.0) * 0.30;
+                color = albedo * (NdotL * 0.70 + 0.18) + vec3(sheen);
+                break;
+            }
+            case 6: {
+                // Pine Bark / Timber Trunk
+                albedo = vec3(0.25, 0.17, 0.11);
+                color = albedo * (NdotL * 0.65 + 0.10);
+                break;
+            }
+            case 7: {
+                // Wet River Stones / Shoreline Boulders
+                albedo = vec3(0.18, 0.20, 0.22);
+                float F_wet = 0.06 + 0.94 * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
+                float D_wet = pow(NdotH, 90.0) * 2.5;
+                color = albedo * (NdotL * 0.50 + 0.10) + vec3(D_wet * F_wet);
+                break;
+            }
+        }
+
+        vec3 totalRadiance = color * sunColor + albedo * skyColor * max(normal.z, 0.0) + albedo * groundColor * max(-normal.z, 0.0);
+
+        // Atmospheric Aerial Perspective Haze
+        vec3 camPos, camForward, camRight, camUp;
+        float fov;
+        getCamera(sceneType, camPos, camForward, camRight, camUp, fov);
+        float camDist = length(hitPos - camPos);
+        float hazeFactor = 1.0 - exp(-camDist * 0.0006);
+        vec3 hazeColor = vec3(0.58, 0.72, 0.92);
+        return mix(totalRadiance, hazeColor, hazeFactor);
+
     } else {
-        // Showroom floor: distribute across 12 queues (20..31) so no queue overflows
-        return 20 + ((primId - 65536) % 12);
+        // Indoor Atrium / Showroom Lighting
+        vec3 totalRadiance = vec3(0.0);
+
+        for (int l = 0; l < 4; ++l) {
+            vec3 lightDir = normalize(SCENE_LIGHTS[l].dir);
+            vec3 lightCol = SCENE_LIGHTS[l].color * SCENE_LIGHTS[l].intensity;
+            vec3 halfVec = normalize(viewDir + lightDir);
+            float NdotL = max(dot(normal, lightDir), 0.0);
+            float NdotH = max(dot(normal, halfVec), 0.0);
+            float VdotH = max(dot(viewDir, halfVec), 0.0);
+
+            if (NdotL <= 0.0 && archetype != 1 && archetype != 2 && archetype != 5) continue;
+
+            vec3 color = vec3(0.0);
+
+            switch (archetype) {
+                case 0: {
+                    // Red Metallic Car Paint (Deep Crimson with Gloss Clearcoat)
+                    vec3 carColor = vec3(0.68, 0.01, 0.02);
+                    float D_c = NdotH * NdotH * (0.0003 - 1.0) + 1.0;
+                    float D_clear = 0.0003 / (3.14159 * D_c * D_c + 0.0001);
+                    float F_clear = 0.04 + 0.96 * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
+                    vec3 specClear = vec3((D_clear * F_clear * 0.85) / (4.0 * NdotL * NdotV + 0.001) * NdotL);
+                    float D_m = NdotH * NdotH * (0.035 - 1.0) + 1.0;
+                    float D_base = 0.035 / (3.14159 * D_m * D_m + 0.0001);
+                    vec3 specBase = carColor * (D_base * 0.70 / (4.0 * NdotL * NdotV + 0.001) * NdotL);
+                    color = (carColor * (NdotL * 0.65 + 0.08)) + specBase + specClear;
+                    break;
+                }
+                case 1: {
+                    // Jade / Carrara Marble Subsurface Scattering
+                    vec3 jadeBase = vec3(0.08, 0.88, 0.74);
+                    float wrappedNdotL = clamp((dot(normal, lightDir) + 0.40) / 1.40, 0.0, 1.0);
+                    vec3 sssCol = exp(-vec3(0.40, 0.08, 0.18) * (1.0 - wrappedNdotL) * 2.0) * jadeBase;
+                    float d_j = NdotH * NdotH * (0.006 - 1.0) + 1.0;
+                    float D_j = 0.006 / (3.14159 * d_j * d_j + 0.0001);
+                    float F_j = 0.05 + 0.95 * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
+                    vec3 specJade = vec3(D_j * F_j * 0.65 / (4.0 * NdotL * NdotV + 0.001) * NdotL);
+                    color = sssCol * wrappedNdotL * 0.95 + specJade;
+                    break;
+                }
+                case 2: {
+                    // Dispersive Faceted Crystal Sparkle
+                    float d_g = NdotH * NdotH * (0.0002 - 1.0) + 1.0;
+                    float D_glass = 0.0002 / (3.14159 * d_g * d_g + 0.0001);
+                    float F_g = 0.08 + 0.92 * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
+                    vec3 specGlass = vec3(D_glass * F_g * 1.8 / (4.0 * NdotL * NdotV + 0.001) * NdotL);
+                    float facetGlint = pow(clamp(dot(reflect(inDir, normal), lightDir), 0.0, 1.0), 40.0);
+                    vec3 crystalSparkle = vec3(1.3, 1.25, 1.15) * facetGlint * 3.5;
+                    color = specGlass + crystalSparkle;
+                    break;
+                }
+                case 3: {
+                    // Magenta Velvet (Rich Imperial Violet Grazing Sheen)
+                    vec3 velvetBase = vec3(0.60, 0.02, 0.42);
+                    float invAlpha = 1.0 / 0.35;
+                    float sinThetaH = sqrt(max(0.0, 1.0 - NdotH * NdotH));
+                    float D_charlie = (2.0 + invAlpha) * pow(sinThetaH, invAlpha) / (6.28318);
+                    float F_velvet = pow(clamp(1.0 - VdotH, 0.0, 1.0), 4.0);
+                    vec3 sheen = vec3(0.95, 0.35, 0.85) * (D_charlie * F_velvet * 0.75 * NdotL);
+                    color = velvetBase * (NdotL * 0.40 + 0.06) + sheen;
+                    break;
+                }
+                case 4: {
+                    // Weathered Industrial Rust & Bronze (Terracotta Pitting & Gunmetal)
+                    float rustNoise = rustFBM3D(hitPos * 5.5);
+                    float rustFine = noise3D(hitPos * 24.0) * 0.5 + 0.5;
+                    float rustVal = rustNoise * 0.80 + rustFine * 0.20;
+                    float rustMask = smoothstep(0.46, 0.52, rustVal);
+                    
+                    vec3 steelCol = vec3(0.24, 0.26, 0.30);
+                    vec3 rustCol = vec3(0.95, 0.42, 0.14);
+                    vec3 darkRust = vec3(0.35, 0.16, 0.08);
+                    vec3 patinaCol = vec3(0.20, 0.55, 0.48);
+                    
+                    float patinaMask = smoothstep(0.52, 0.56, rustNoise) * (1.0 - smoothstep(0.56, 0.62, rustNoise));
+                    vec3 activeRust = mix(rustCol, darkRust, rustFine * 0.5);
+                    activeRust = mix(activeRust, patinaCol, patinaMask * 0.50);
+
+                    float d_s = NdotH * NdotH * (0.015 - 1.0) + 1.0;
+                    float D_s = 0.015 / (3.14159 * d_s * d_s + 0.0001);
+                    vec3 steelSpec = steelCol * (D_s * 0.90 / (4.0 * NdotL * NdotV + 0.001) * NdotL);
+                    vec3 steelBase = steelCol * (NdotL * 0.55 + 0.08) + steelSpec;
+                    
+                    float d_r = NdotH * NdotH * (0.50 - 1.0) + 1.0;
+                    float D_r = 0.50 / (3.14159 * d_r * d_r + 0.0001);
+                    vec3 rustSpec = activeRust * (D_r * 0.10 / (4.0 * NdotL * NdotV + 0.001) * NdotL);
+                    vec3 rustBase = activeRust * (NdotL * 0.75 + 0.12) + rustSpec;
+                    
+                    color = mix(steelBase, rustBase, rustMask);
+                    break;
+                }
+                case 5: {
+                    // Neutral Studio / Atrium Floor
+                    vec3 floorBase = vec3(0.24, 0.25, 0.28);
+                    float floorOcc = computeFloorOcclusion(hitPos);
+                    float wallFactor = smoothstep(2.0, 6.0, hitPos.y);
+                    float wallAtten = mix(1.0, 0.85, wallFactor);
+                    float effectiveNdotL = NdotL * ((l == 0) ? floorOcc : clamp(floorOcc * 1.15, 0.0, 1.0)) * wallAtten;
+
+                    vec3 floorSpec = vec3(0.0);
+                    if (l == 0 && wallFactor < 0.5) {
+                        float alpha2 = 0.015;
+                        float d_f = NdotH * NdotH * (alpha2 - 1.0) + 1.0;
+                        float D_f = alpha2 / (3.14159 * d_f * d_f + 0.0001);
+                        float F_f = 0.08 + 0.92 * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
+                        floorSpec = vec3((D_f * F_f * 0.45) / (4.0 * NdotL * NdotV + 0.001) * effectiveNdotL);
+                    }
+                    color = floorBase * (effectiveNdotL * 0.70 + 0.18) + floorSpec;
+                    break;
+                }
+                case 6: {
+                    // Polished Gold Pedestal / Ornaments
+                    vec3 goldBase = vec3(1.00, 0.78, 0.32);
+                    float d_g = NdotH * NdotH * (0.003 - 1.0) + 1.0;
+                    float D_gold = 0.003 / (3.14159 * d_g * d_g + 0.0001);
+                    float F_gold = 0.88 + 0.12 * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
+                    vec3 specGold = goldBase * (D_gold * F_gold / (4.0 * NdotL * NdotV + 0.001) * NdotL);
+                    color = goldBase * (NdotL * 0.40 + 0.05) + specGold * 1.2;
+                    break;
+                }
+                case 7: {
+                    // Polished Chrome Mirror Conductor
+                    vec3 chromeBase = vec3(0.96, 0.96, 0.98);
+                    float d_c = NdotH * NdotH * (0.0001 - 1.0) + 1.0;
+                    float D_c = 0.0001 / (3.14159 * d_c * d_c + 0.0001);
+                    vec3 specChrome = chromeBase * (D_c * 0.98 / (4.0 * NdotL * NdotV + 0.001) * NdotL);
+                    color = specChrome;
+                    break;
+                }
+            }
+            totalRadiance += color * lightCol;
+        }
+
+        vec3 reflDir = reflect(inDir, normal);
+        vec3 envRefl = evalStudioEnvironment(reflDir);
+        if (archetype == 0) {
+            totalRadiance += envRefl * 0.50 * pow(clamp(1.0 - NdotV, 0.0, 1.0), 4.0);
+        } else if (archetype == 1) {
+            totalRadiance += envRefl * 0.25 * pow(clamp(1.0 - NdotV, 0.0, 1.0), 5.0);
+        } else if (archetype == 2) {
+            vec3 refrR = refract(inDir, normal, 1.0 / 1.50);
+            vec3 refrG = refract(inDir, normal, 1.0 / 1.525);
+            vec3 refrB = refract(inDir, normal, 1.0 / 1.56);
+            vec3 skyR = evalStudioEnvironment(refrR);
+            vec3 skyG = evalStudioEnvironment(refrG);
+            vec3 skyB = evalStudioEnvironment(refrB);
+            vec3 interiorTint = vec3(0.82, 0.55, 0.90);
+            vec3 dispersedRefraction = vec3(skyR.r, skyG.g, skyB.b) * interiorTint;
+            float F_glass = 0.08 + 0.92 * pow(clamp(1.0 - NdotV, 0.0, 1.0), 5.0);
+            totalRadiance = mix(dispersedRefraction * 1.2, envRefl * 1.6, F_glass) + totalRadiance;
+        } else if (archetype == 3) {
+            totalRadiance += envRefl * 0.15 * pow(clamp(1.0 - NdotV, 0.0, 1.0), 3.0);
+        } else if (archetype == 6) {
+            vec3 goldBase = vec3(1.00, 0.78, 0.32);
+            totalRadiance += envRefl * goldBase * (0.40 + 0.60 * pow(clamp(1.0 - NdotV, 0.0, 1.0), 5.0));
+        } else if (archetype == 7) {
+            rayQueryEXT chromeQuery;
+            rayQueryInitializeEXT(chromeQuery, topLevelAS, gl_RayFlagsNoneEXT, 0xFF, hitPos + normal * 0.015, 0.001, reflDir, 25.0);
+            while (rayQueryProceedEXT(chromeQuery)) {}
+
+            vec3 reflColor;
+            if (rayQueryGetIntersectionTypeEXT(chromeQuery, true) != 0) {
+                uint rPrim = rayQueryGetIntersectionPrimitiveIndexEXT(chromeQuery, true);
+                if (rPrim < PRIM_KNOT_PAINT_END) reflColor = vec3(0.68, 0.01, 0.02);
+                else if (rPrim < PRIM_KNOT_JADE_END) reflColor = vec3(0.06, 0.75, 0.65);
+                else if (rPrim < PRIM_KNOT_CHROME_END) reflColor = vec3(0.85, 0.85, 0.88);
+                else if (rPrim < PRIM_KNOT_VELVET_END) reflColor = vec3(0.60, 0.02, 0.42);
+                else if (rPrim < PRIM_KNOT_RUST_END) reflColor = vec3(0.80, 0.35, 0.12);
+                else if (rPrim < PRIM_SPHERE_END) reflColor = vec3(0.06, 0.75, 0.65);
+                else if (rPrim < PRIM_PEDESTAL_END) reflColor = vec3(0.90, 0.75, 0.30);
+                else if (rPrim < PRIM_SUZANNE_END) reflColor = vec3(0.75, 0.80, 0.85);
+                else reflColor = vec3(0.20, 0.21, 0.23);
+            } else {
+                reflColor = envRefl;
+            }
+            totalRadiance = mix(totalRadiance, reflColor, 0.96);
+        } else if (archetype == 5) {
+            if (hitPos.y <= 3.0) {
+                rayQueryEXT reflQuery;
+                rayQueryInitializeEXT(reflQuery, topLevelAS, gl_RayFlagsNoneEXT, 0xFF, hitPos + normal * 0.015, 0.001, reflDir, 25.0);
+                while (rayQueryProceedEXT(reflQuery)) {}
+
+                vec3 reflColor;
+                if (rayQueryGetIntersectionTypeEXT(reflQuery, true) != 0) {
+                    uint rPrim = rayQueryGetIntersectionPrimitiveIndexEXT(reflQuery, true);
+                    if (rPrim < PRIM_KNOT_PAINT_END) reflColor = vec3(0.68, 0.01, 0.02);
+                    else if (rPrim < PRIM_KNOT_JADE_END) reflColor = vec3(0.06, 0.75, 0.65);
+                    else if (rPrim < PRIM_KNOT_CHROME_END) reflColor = vec3(0.85, 0.85, 0.88);
+                    else if (rPrim < PRIM_KNOT_VELVET_END) reflColor = vec3(0.60, 0.02, 0.42);
+                    else if (rPrim < PRIM_KNOT_RUST_END) reflColor = vec3(0.80, 0.35, 0.12);
+                    else if (rPrim < PRIM_SPHERE_END) reflColor = vec3(0.06, 0.75, 0.65);
+                    else if (rPrim < PRIM_PEDESTAL_END) reflColor = vec3(0.90, 0.75, 0.30);
+                    else if (rPrim < PRIM_SUZANNE_END) reflColor = vec3(0.75, 0.80, 0.85);
+                    else reflColor = vec3(0.20, 0.21, 0.23);
+                } else {
+                    reflColor = envRefl * 0.25 + vec3(0.04, 0.04, 0.05);
+                }
+
+                float fresnelFloor = pow(clamp(1.0 - NdotV, 0.0, 1.0), 5.0);
+                totalRadiance += reflColor * (0.03 + 0.15 * fresnelFloor);
+            }
+        }
+
+        return totalRadiance;
     }
 }
+
 
 void main() {
     uint idx = gl_GlobalInvocationID.x;
@@ -390,140 +694,134 @@ void main() {
 
     uint rngState = idx + pc.seed;
 
-    // Perspective showroom camera matching Blender view (0, -8.2, 2.0) looking at (0, 0, 0.45)
-    vec3 camPos = vec3(0.0, -8.2, 2.0);
-    vec3 camForward = vec3(0.0, 0.9826, -0.1857);
-    vec3 camRight = vec3(1.0, 0.0, 0.0);
-    vec3 camUp = vec3(0.0, 0.1857, 0.9826);
-    float fov = 0.48; // ~52 deg FoV (38mm lens)
+    vec3 camPos, camForward, camRight, camUp;
+    float fov;
+    getCamera(pc.sceneType, camPos, camForward, camRight, camUp, fov);
+
+    uint px_u, py_u;
+    computePixelCoords(idx, pc.spatialPattern, pc.width, pc.height, px_u, py_u);
+    uint pixelIdx = py_u * pc.width + px_u;
 
     float halfH = float(pc.height) * 0.5;
-    float px = float(idx % pc.width) - float(pc.width) * 0.5 + 0.5;
-    float py = float(idx / pc.width) - halfH + 0.5;
-    vec2 uv = vec2(px / halfH, py / halfH);
-    vec3 origin = camPos;
-    vec3 direction = normalize(camForward + camRight * (uv.x * fov) - camUp * (uv.y * fov));
-    vec3 accumulated = vec3(0.0);
-    vec3 throughput = vec3(1.0);
-    uint threadRays = 0;
-    uint threadHits = 0;
+    float px = float(px_u) - float(pc.width) * 0.5 + 0.5;
+    float py = float(py_u) - halfH + 0.5;
+    vec3 rayDir = normalize(camForward + (px / halfH * fov) * camRight - (py / halfH * fov) * camUp);
+    vec3 rayOrigin = camPos;
+    float tMaxPrimary = (pc.sceneType == SCENE_OUTDOOR_TERRAIN) ? 2500.0 : 50.0;
+    float tMinPrimary = (pc.sceneType == SCENE_OUTDOOR_TERRAIN) ? 0.05 : 0.01;
 
-    if (pc.mode == 0) {
-        // Mode 0: Material Divergence Stress Test (32 materials)
-        threadRays++;
-        rayQueryEXT query;
-        rayQueryInitializeEXT(query, topLevelAS, gl_RayFlagsNoneEXT, 0xFF, origin, 0.01, direction, 50.0);
-        while (rayQueryProceedEXT(query)) {}
-
-        if (rayQueryGetIntersectionTypeEXT(query, true) == gl_RayQueryCommittedIntersectionTriangleEXT) {
-            threadHits++;
-            float t = rayQueryGetIntersectionTEXT(query, true);
-            vec3 hitPos = origin + direction * t;
-            uint primId = rayQueryGetIntersectionPrimitiveIndexEXT(query, true);
-            vec3 normal = computeSmoothNormal(primId, hitPos, direction);
-            uint matId = computeMaterialId(primId, hitPos);
-
-            accumulated = evalMaterialBSDF(matId, normal, direction, hitPos, rngState);
-            if (dot(accumulated, accumulated) >= 0.0) threadHits++;
-        } else {
-            accumulated = evalAnalyticSky(direction);
-        }
-
-        if (pc.dumpRenders != 0) {
-            fb.pixels[idx] = vec4(accumulated, 1.0);
-        }
-    } else if (pc.mode == 1) {
-        // Mode 1: Multi-Bounce Path Tracing with Russian Roulette (SIMD Lane Starvation)
+    if (pc.mode == 1) {
+        // Mode 1: Multi-Bounce Path Tracing with Russian Roulette (Megakernel SIMD Lane Starvation)
+        vec3 curOrigin = rayOrigin;
+        vec3 curDir = rayDir;
         for (uint b = 0; b < pc.bounces; ++b) {
-            threadRays++;
+            atomicAdd(localRays, 1);
             rayQueryEXT query;
-            rayQueryInitializeEXT(query, topLevelAS, gl_RayFlagsNoneEXT, 0xFF, origin, 0.001, direction, 20.0);
+            rayQueryInitializeEXT(query, topLevelAS, gl_RayFlagsNoneEXT, 0xFF, curOrigin, (b == 0 ? tMinPrimary : 0.005), curDir, tMaxPrimary);
             while (rayQueryProceedEXT(query)) {}
 
             if (rayQueryGetIntersectionTypeEXT(query, true) == gl_RayQueryCommittedIntersectionTriangleEXT) {
-                threadHits++;
+                atomicAdd(localHits, 1);
                 float t = rayQueryGetIntersectionTEXT(query, true);
-                vec3 hitPos = origin + direction * t;
+                vec3 hitPos = curOrigin + curDir * t;
                 uint primId = rayQueryGetIntersectionPrimitiveIndexEXT(query, true);
-                vec3 normal = computeSmoothNormal(primId, hitPos, direction);
+                vec2 bary = rayQueryGetIntersectionBarycentricsEXT(query, true);
+                vec3 normal = computeSmoothNormal(pc.sceneType, primId, hitPos, curDir, bary);
 
-                // Hemisphere reflection
                 float u1 = rand_float(rngState);
                 float u2 = rand_float(rngState);
-                direction = align_to_normal(cosine_sample_hemisphere(u1, u2), normal);
-                origin = hitPos + normal * 0.002;
+                curDir = align_to_normal(cosine_sample_hemisphere(u1, u2), normal);
+                curOrigin = hitPos + normal * 0.005;
 
-                throughput *= vec3(0.8);
-
-                // Russian roulette termination (40% termination probability)
-                // In traditional execution, terminated threads must idle until the entire wave completes!
+                // Russian roulette: 40% termination probability on bounce >= 2
+                // Inactive lanes stall while surviving lanes continue looping
                 if (b >= 2 && rand_float(rngState) < 0.4) {
-                    break; // Thread becomes inactive; remaining lanes keep looping
+                    break;
                 }
             } else {
-                accumulated += throughput * evalAnalyticSky(direction);
                 break;
             }
         }
     } else if (pc.mode == 2) {
         // Mode 2: Incoherent Secondary GI (Hemisphere Scattering without Spatial Binning)
-        threadRays++;
+        atomicAdd(localRays, 1);
         rayQueryEXT query1;
-        rayQueryInitializeEXT(query1, topLevelAS, gl_RayFlagsNoneEXT, 0xFF, origin, 0.001, direction, 20.0);
+        rayQueryInitializeEXT(query1, topLevelAS, gl_RayFlagsNoneEXT, 0xFF, rayOrigin, tMinPrimary, rayDir, tMaxPrimary);
         while (rayQueryProceedEXT(query1)) {}
 
         if (rayQueryGetIntersectionTypeEXT(query1, true) == gl_RayQueryCommittedIntersectionTriangleEXT) {
-            threadHits++;
+            atomicAdd(localHits, 1);
             float t = rayQueryGetIntersectionTEXT(query1, true);
-            vec3 hitPos = origin + direction * t;
+            vec3 hitPos = rayOrigin + rayDir * t;
             uint primId = rayQueryGetIntersectionPrimitiveIndexEXT(query1, true);
-            vec3 normal = computeSmoothNormal(primId, hitPos, direction);
+            vec2 bary = rayQueryGetIntersectionBarycentricsEXT(query1, true);
+            vec3 normal = computeSmoothNormal(pc.sceneType, primId, hitPos, rayDir, bary);
 
-            // Incoherent scattering: arbitrary random directions
             float u1 = rand_float(rngState);
             float u2 = rand_float(rngState);
             vec3 incohDir = align_to_normal(cosine_sample_hemisphere(u1, u2), normal);
 
-            // Secondary ray: high BVH cache miss rate when unorganized
-            threadRays++;
+            atomicAdd(localRays, 1);
             rayQueryEXT query2;
-            rayQueryInitializeEXT(query2, topLevelAS, gl_RayFlagsNoneEXT, 0xFF, hitPos + normal * 0.002, 0.001, incohDir, 20.0);
+            float tMaxSec = (pc.sceneType == SCENE_OUTDOOR_TERRAIN) ? 500.0 : 20.0;
+            rayQueryInitializeEXT(query2, topLevelAS, gl_RayFlagsNoneEXT, 0xFF, hitPos + normal * 0.005, 0.001, incohDir, tMaxSec);
             while (rayQueryProceedEXT(query2)) {}
 
             if (rayQueryGetIntersectionTypeEXT(query2, true) != 0) {
-                threadHits++;
-                accumulated += vec3(1.0);
-            } else {
-                accumulated += evalAnalyticSky(incohDir);
+                atomicAdd(localHits, 1);
             }
-        } else {
-            accumulated += evalAnalyticSky(direction);
         }
     } else if (pc.mode == 3) {
-        // Mode 3: Stage Breakdown - Pure BVH Traversal (98K Triangles, No Shading)
-        threadRays++;
+        // Mode 3: Stage Breakdown - Pure BVH Traversal Only
+        atomicAdd(localRays, 1);
         rayQueryEXT query;
-        rayQueryInitializeEXT(query, topLevelAS, gl_RayFlagsNoneEXT, 0xFF, origin, 0.001, direction, 20.0);
+        rayQueryInitializeEXT(query, topLevelAS, gl_RayFlagsNoneEXT, 0xFF, rayOrigin, tMinPrimary, rayDir, tMaxPrimary);
         while (rayQueryProceedEXT(query)) {}
+
         if (rayQueryGetIntersectionTypeEXT(query, true) == gl_RayQueryCommittedIntersectionTriangleEXT) {
-            threadHits++;
+            atomicAdd(localHits, 1);
         }
     } else if (pc.mode == 4) {
-        // Mode 4: Stage Breakdown - Pure Material Shading (Megakernel Divergent, 4 Lights, No BVH)
-        threadRays++;
-        vec3 hitPos = vec3(uv.x * 5.0, uv.y * 5.0, 1.5);
+        // Mode 4: Stage Breakdown - Pure Material Shading (Megakernel Divergent, No BVH)
+        atomicAdd(localRays, 1);
+        atomicAdd(localHits, 1);
+        vec3 hitPos = vec3(float(px_u) * 0.01, float(py_u) * 0.01, 1.5);
         vec3 normal = ((idx % 2) == 0) ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
-        uint matId = idx % 32;
-        accumulated = evalMaterialBSDF(matId, normal, direction, hitPos, rngState);
-        if (dot(accumulated, accumulated) >= 0.0) {
-            threadHits++;
+        uint matId = idx % 8; // Divergent materials across lanes in the wave
+        vec3 pixelColor = evalMaterialBSDF(pc.sceneType, matId, normal, rayDir, hitPos, rngState);
+        if (pc.dumpRenders != 0) {
+            fb.pixels[pixelIdx] = vec4(tonemapACES(pixelColor * 1.0), 1.0);
+        }
+    } else {
+        // Mode 0: Primary Ray Tracing + Divergent Material Shading
+        atomicAdd(localRays, 1);
+
+        rayQueryEXT query;
+        rayQueryInitializeEXT(query, topLevelAS, gl_RayFlagsNoneEXT, 0xFF, rayOrigin, tMinPrimary, rayDir, tMaxPrimary);
+        while (rayQueryProceedEXT(query)) {}
+
+        vec3 pixelColor = vec3(0.0);
+
+        if (rayQueryGetIntersectionTypeEXT(query, true) == gl_RayQueryCommittedIntersectionTriangleEXT) {
+            atomicAdd(localHits, 1);
+            float t = rayQueryGetIntersectionTEXT(query, true);
+            vec3 hitPos = rayOrigin + rayDir * t;
+            uint primId = rayQueryGetIntersectionPrimitiveIndexEXT(query, true);
+            vec2 bary = rayQueryGetIntersectionBarycentricsEXT(query, true);
+            vec3 normal = computeSmoothNormal(pc.sceneType, primId, hitPos, rayDir, bary);
+            uint matId = computeMaterialId(pc.sceneType, primId, hitPos, normal);
+
+            pixelColor = evalMaterialBSDF(pc.sceneType, matId, normal, rayDir, hitPos, rngState);
+        } else {
+            pixelColor = evalSky(pc.sceneType, rayDir);
+        }
+
+        if (pc.dumpRenders != 0) {
+            fb.pixels[pixelIdx] = vec4(tonemapACES(pixelColor * 1.0), 1.0);
         }
     }
 
-    if (threadRays > 0) atomicAdd(localRays, threadRays);
-    if (threadHits > 0) atomicAdd(localHits, threadHits);
     barrier();
-
     if (gl_LocalInvocationID.x == 0) {
         atomicAdd(results.totalRays, localRays);
         atomicAdd(results.totalHits, localHits);

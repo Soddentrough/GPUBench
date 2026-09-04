@@ -79,12 +79,22 @@ void RayMaterialDivergenceBench::buildAS(uint32_t config_idx) {
   VkDevice device = vContext->getVulkanDevice();
   VkQueue queue = vContext->getComputeQueue();
 
-  if (triangleBlas) vkDestroyAccelerationStructureKHR_ptr(device, triangleBlas, nullptr);
-  if (triangleTlas) vkDestroyAccelerationStructureKHR_ptr(device, triangleTlas, nullptr);
-  if (triangleBlasBuffer) context->releaseBuffer(triangleBlasBuffer);
-  if (triangleTlasBuffer) context->releaseBuffer(triangleTlasBuffer);
-  if (instanceBuffer) context->releaseBuffer(instanceBuffer);
-  if (scratchBuffer) context->releaseBuffer(scratchBuffer);
+  if (triangleBlas != VK_NULL_HANDLE) {
+    if (vkDestroyAccelerationStructureKHR_ptr) {
+      vkDestroyAccelerationStructureKHR_ptr(device, triangleBlas, nullptr);
+    }
+    triangleBlas = VK_NULL_HANDLE;
+  }
+  if (triangleTlas != VK_NULL_HANDLE) {
+    if (vkDestroyAccelerationStructureKHR_ptr) {
+      vkDestroyAccelerationStructureKHR_ptr(device, triangleTlas, nullptr);
+    }
+    triangleTlas = VK_NULL_HANDLE;
+  }
+  if (triangleBlasBuffer) { context->releaseBuffer(triangleBlasBuffer); triangleBlasBuffer = nullptr; }
+  if (triangleTlasBuffer) { context->releaseBuffer(triangleTlasBuffer); triangleTlasBuffer = nullptr; }
+  if (instanceBuffer) { context->releaseBuffer(instanceBuffer); instanceBuffer = nullptr; }
+  if (scratchBuffer) { context->releaseBuffer(scratchBuffer); scratchBuffer = nullptr; }
 
   VkDeviceAddress vAddr = vContext->getBufferDeviceAddress(vertexBuffer);
 
@@ -267,19 +277,34 @@ void RayMaterialDivergenceBench::Run(uint32_t config_idx) {
 }
 
 void RayMaterialDivergenceBench::Teardown() {
-  VulkanContext *vContext = static_cast<VulkanContext *>(context);
-  VkDevice device = vContext->getVulkanDevice();
+  if (!context) return;
+  VulkanContext *vContext = dynamic_cast<VulkanContext *>(context);
+  if (vContext) {
+    VkDevice device = vContext->getVulkanDevice();
 
-  if (triangleBlas) vkDestroyAccelerationStructureKHR_ptr(device, triangleBlas, nullptr);
-  if (triangleTlas) vkDestroyAccelerationStructureKHR_ptr(device, triangleTlas, nullptr);
+    if (triangleBlas != VK_NULL_HANDLE) {
+      if (vkDestroyAccelerationStructureKHR_ptr) {
+        vkDestroyAccelerationStructureKHR_ptr(device, triangleBlas, nullptr);
+      }
+      triangleBlas = VK_NULL_HANDLE;
+    }
+    if (triangleTlas != VK_NULL_HANDLE) {
+      if (vkDestroyAccelerationStructureKHR_ptr) {
+        vkDestroyAccelerationStructureKHR_ptr(device, triangleTlas, nullptr);
+      }
+      triangleTlas = VK_NULL_HANDLE;
+    }
+  }
 
-  if (kernel) context->releaseKernel(kernel);
-  if (resultBuffer) context->releaseBuffer(resultBuffer);
-  if (vertexBuffer) context->releaseBuffer(vertexBuffer);
-  if (instanceBuffer) context->releaseBuffer(instanceBuffer);
-  if (triangleBlasBuffer) context->releaseBuffer(triangleBlasBuffer);
-  if (triangleTlasBuffer) context->releaseBuffer(triangleTlasBuffer);
-  if (scratchBuffer) context->releaseBuffer(scratchBuffer);
+  if (kernel) { context->releaseKernel(kernel); kernel = nullptr; }
+  if (resultBuffer) { context->releaseBuffer(resultBuffer); resultBuffer = nullptr; }
+  if (vertexBuffer) { context->releaseBuffer(vertexBuffer); vertexBuffer = nullptr; }
+  if (instanceBuffer) { context->releaseBuffer(instanceBuffer); instanceBuffer = nullptr; }
+  if (triangleBlasBuffer) { context->releaseBuffer(triangleBlasBuffer); triangleBlasBuffer = nullptr; }
+  if (triangleTlasBuffer) { context->releaseBuffer(triangleTlasBuffer); triangleTlasBuffer = nullptr; }
+  if (scratchBuffer) { context->releaseBuffer(scratchBuffer); scratchBuffer = nullptr; }
+  builtConfigIdx = -1;
+  context = nullptr;
 }
 
 BenchmarkResult RayMaterialDivergenceBench::GetResult(uint32_t config_idx) const {

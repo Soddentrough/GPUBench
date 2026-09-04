@@ -312,27 +312,29 @@ void RayAnyHitBench::Run(uint32_t config_idx) {
 
 void RayAnyHitBench::Teardown() {
   VulkanContext *vContext = static_cast<VulkanContext *>(context);
-  VkDevice device = vContext->getVulkanDevice();
+  VkDevice device = vContext ? vContext->getVulkanDevice() : VK_NULL_HANDLE;
 
-  if (triangleBlas)
-    vkDestroyAccelerationStructureKHR_ptr(device, triangleBlas, nullptr);
-  if (triangleTlas)
-    vkDestroyAccelerationStructureKHR_ptr(device, triangleTlas, nullptr);
+  if (device != VK_NULL_HANDLE && vkDestroyAccelerationStructureKHR_ptr) {
+    if (triangleBlas != VK_NULL_HANDLE) {
+      vkDestroyAccelerationStructureKHR_ptr(device, triangleBlas, nullptr);
+      triangleBlas = VK_NULL_HANDLE;
+    }
+    if (triangleTlas != VK_NULL_HANDLE) {
+      vkDestroyAccelerationStructureKHR_ptr(device, triangleTlas, nullptr);
+      triangleTlas = VK_NULL_HANDLE;
+    }
+  }
 
-  if (kernel)
-    context->releaseKernel(kernel);
-  if (resultBuffer)
-    context->releaseBuffer(resultBuffer);
-  if (vertexBuffer)
-    context->releaseBuffer(vertexBuffer);
-  if (instanceBuffer)
-    context->releaseBuffer(instanceBuffer);
-  if (triangleBlasBuffer)
-    context->releaseBuffer(triangleBlasBuffer);
-  if (triangleTlasBuffer)
-    context->releaseBuffer(triangleTlasBuffer);
-  if (scratchBuffer)
-    context->releaseBuffer(scratchBuffer);
+  if (context) {
+    if (kernel) { context->releaseKernel(kernel); kernel = nullptr; }
+    if (resultBuffer) { context->releaseBuffer(resultBuffer); resultBuffer = nullptr; }
+    if (vertexBuffer) { context->releaseBuffer(vertexBuffer); vertexBuffer = nullptr; }
+    if (instanceBuffer) { context->releaseBuffer(instanceBuffer); instanceBuffer = nullptr; }
+    if (triangleBlasBuffer) { context->releaseBuffer(triangleBlasBuffer); triangleBlasBuffer = nullptr; }
+    if (triangleTlasBuffer) { context->releaseBuffer(triangleTlasBuffer); triangleTlasBuffer = nullptr; }
+    if (scratchBuffer) { context->releaseBuffer(scratchBuffer); scratchBuffer = nullptr; }
+    context = nullptr;
+  }
 }
 
 BenchmarkResult RayAnyHitBench::GetResult(uint32_t config_idx) const {

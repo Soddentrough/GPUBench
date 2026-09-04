@@ -13,7 +13,21 @@
 
 class RaySchedulingBench : public IBenchmark {
 public:
-  const char *GetName() const override { return "RayScheduling"; }
+  enum class SceneType : uint32_t {
+    IndoorAtrium = 0,
+    OutdoorLandscape = 1
+  };
+
+  RaySchedulingBench(SceneType scene = SceneType::IndoorAtrium) : sceneType(scene) {}
+
+  const char *GetName() const override {
+    return (sceneType == SceneType::OutdoorLandscape)
+               ? "RayScheduling (Outdoor Landscape)"
+               : "RayScheduling (Indoor Atrium)";
+  }
+
+  void SetSceneType(SceneType type) { sceneType = type; }
+  SceneType GetSceneType() const { return sceneType; }
 
   bool IsSupported(const DeviceInfo &info,
                    IComputeContext *context = nullptr) const override;
@@ -26,18 +40,23 @@ public:
 
   void Setup(IComputeContext &context, const std::string &kernel_dir) override;
   void Run(uint32_t config_idx = 0) override;
+  void RebuildAccelerationStructures() override;
   void Teardown() override;
 
   BenchmarkResult GetResult(uint32_t config_idx = 0) const override;
 
-  uint32_t GetNumConfigs() const override { return 16; }
+  uint32_t GetNumConfigs() const override { return 23; }
   std::vector<std::string> GetAliases() const override {
-    return {"rayscheduling", "rtscheduling", "rayexecutionparadigm", "rayparadigm", "rtparadigm", "workgraphs", "worklists", "dgc", "ser"};
+    if (sceneType == SceneType::OutdoorLandscape) {
+      return {"rayscheduling", "rtscheduling", "outdoor", "landscape", "rayscheduling_outdoor", "worklists", "dgc"};
+    } else {
+      return {"rayscheduling", "rtscheduling", "indoor", "atrium", "rayscheduling_indoor", "worklists", "dgc"};
+    }
   }
   std::string GetConfigName(uint32_t config_idx) const override;
   const char *GetMetric(uint32_t config_idx = 0) const override {
-    if (config_idx == 13 || config_idx == 14) return "MHits/s";
-    if (config_idx == 15) return "MRecords/s";
+    if (config_idx < 4) return "MHits/s";
+    if (config_idx == 17) return "MRecords/s";
     return "MRays/s";
   }
   bool IsConfigSupported(uint32_t config_idx) const override {
@@ -47,10 +66,10 @@ public:
     return unsupportedReason[config_idx];
   }
   SupportLimitation GetConfigSupportLimitation(uint32_t config_idx) const override {
-    if (config_idx == 1 || config_idx == 5 || config_idx == 9) {
+    if (config_idx == 1 || config_idx == 5 || config_idx == 9 || config_idx == 13) {
       return SupportLimitation::kHardware;
     }
-    if (config_idx == 3 || config_idx == 7 || config_idx == 11) {
+    if (config_idx == 3 || config_idx == 7 || config_idx == 11 || config_idx == 15) {
       return SupportLimitation::kApi;
     }
     return SupportLimitation::kNone;
@@ -75,15 +94,15 @@ public:
   uint32_t GetQueueCapacity() const { return queueCapacity; }
 
   void RecordRunResult(uint32_t config_idx, uint64_t total_invocations, double total_time_ms) override {
-    if (config_idx < 16) {
+    if (config_idx < 23) {
       recordedInvocations[config_idx] = total_invocations;
       recordedTimeMs[config_idx] = total_time_ms;
     }
   }
 
 private:
-  uint64_t recordedInvocations[16] = {0};
-  double recordedTimeMs[16] = {0.0};
+  uint64_t recordedInvocations[23] = {0};
+  double recordedTimeMs[23] = {0.0};
   IComputeContext *context = nullptr;
   bool dumpRenders = false;
   ComputeBuffer fbTraditional = nullptr;
@@ -94,7 +113,7 @@ private:
   ComputeKernel kernelTraditional = nullptr;
   ComputeKernel kernelClassify = nullptr;
   ComputeKernel kernelMaterial = nullptr;
-  ComputeKernel kernelMaterialSpecialized[6] = {nullptr};
+  ComputeKernel kernelMaterialSpecialized[8] = {nullptr};
   ComputeKernel kernelBounce = nullptr;
   ComputeKernel kernelWorkGraph = nullptr;
 
@@ -132,7 +151,8 @@ private:
   uint32_t rayCount = 1920 * 1080;
   uint32_t queueCapacity = 262144;
   uint32_t numPrimitives = 4096;
-  mutable double results[16] = {0.0};
-  mutable bool unsupportedConfig[16] = {false};
-  mutable std::string unsupportedReason[16];
+  SceneType sceneType = SceneType::IndoorAtrium;
+  mutable double results[23] = {0.0};
+  mutable bool unsupportedConfig[23] = {false};
+  mutable std::string unsupportedReason[23];
 };

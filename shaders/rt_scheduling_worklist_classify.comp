@@ -2,7 +2,7 @@
 #extension GL_EXT_ray_query : enable
 #extension GL_EXT_ray_flags_primitive_culling : enable
 
-layout(local_size_x = 32) in;
+layout(local_size_x = 64) in;
 
 layout(set = 0, binding = 0) uniform accelerationStructureEXT topLevelAS;
 layout(set = 0, binding = 1) buffer Results {
@@ -11,19 +11,16 @@ layout(set = 0, binding = 1) buffer Results {
     float accumulatedLuminance;
 } results;
 
-// Compacted Ray Payload structure (spilled to VRAM/L2)
 struct CompactRayPayload {
-    vec4 originAndMatId; // xyz: origin, w: uintBitsToFloat(matId)
-    vec4 directionAndSeed; // xyz: dir, w: uintBitsToFloat(rng)
-    vec4 throughputAndMorton; // xyz: throughput, w: uintBitsToFloat(morton)
+    vec4 field0;
+    vec4 field1;
 };
 
 layout(set = 0, binding = 2) buffer WorkListBuffer {
-    uint queueCounters[32]; // Per-material or per-bounce counters
-    CompactRayPayload rayRecords[]; // Compact queue buffer
+    uint queueCounters[32];
+    CompactRayPayload rayRecords[];
 } worklist;
 
-// DispatchIndirectCommand structure matching VkDispatchIndirectCommand
 struct VkDispatchIndirectCommand {
     uint x;
     uint y;
@@ -38,19 +35,52 @@ layout(set = 0, binding = 4) buffer Framebuffer {
     vec4 pixels[];
 } fb;
 
+layout(set = 0, binding = 5) readonly buffer VertexBuffer {
+    float vertices[];
+} vbuf;
+
 layout(push_constant) uniform PushConstants {
     uint rayCount;
-    uint mode;     // 0: Material Divergence, 1: Multi-Bounce Path Tracing, 2: Incoherent GI
-    uint bounce;   // Current bounce index
+    uint mode;            // 0: Material Divergence, 1: Multi-Bounce Path Tracing, 2: Incoherent GI, 3: Compaction microbench
+    uint bounce;          // Current bounce index
     uint seed;
-    uint dumpRenders; // 1: dump pixels to fb
+    uint dumpRenders;     // 1: dump pixels to fb
     uint width;
     uint height;
     uint queueCapacity;
+    uint spatialPattern;  // 0: Linear 32x1, 1: Tiled 8x4, 2: Morton 8x4, 3: Morton 4x8
+    uint sceneType;       // 0: Indoor Atrium, 1: Outdoor Landscape
 } pc;
 
 shared uint localRays;
 shared uint localHits;
+
+shared uint ldsQueueCount[8];
+shared uint ldsQueueBase[8];
+shared uint ldsThreadSlot[64];
+
+// Scene Type Constants
+const uint SCENE_INDOOR_ATRIUM   = 0u;
+const uint SCENE_OUTDOOR_TERRAIN = 1u;
+
+// Indoor Atrium Primitives
+const uint PRIM_KNOT_PAINT_END  = 1536u;
+const uint PRIM_KNOT_JADE_END   = 3072u;
+const uint PRIM_KNOT_CHROME_END = 4608u;
+const uint PRIM_KNOT_VELVET_END = 6144u;
+const uint PRIM_KNOT_RUST_END   = 7680u;
+const uint PRIM_SPHERE_END      = 9600u;
+const uint PRIM_PEDESTAL_END    = 9728u;
+const uint PRIM_SUZANNE_END     = 10696u;
+const uint PRIM_FLOOR_END       = 27080u;
+const uint PRIM_WALLS_END       = 28104u;
+const uint PRIM_CEILING_END     = 29128u;
+const uint PRIM_COLUMNS_END     = 35272u;
+
+// Outdoor Landscape Primitives
+const uint PRIM_TERRAIN_END     = 32768u;
+const uint PRIM_WATER_END       = 34816u;
+const uint PRIM_TREES_END       = 57216u;
 
 uint pcg_hash(inout uint state) {
     uint oldstate = state;
@@ -79,274 +109,421 @@ vec3 align_to_normal(vec3 sample_dir, vec3 normal) {
     return tangent * sample_dir.x + bitangent * sample_dir.y + normal * sample_dir.z;
 }
 
-// Bit interleaving for 3D Morton space-filling curve (spatial traversal coherence)
-uint part1By2(uint x) {
-    x &= 0x000003ff;
-    x = (x ^ (x << 16)) & 0xff0000ff;
-    x = (x ^ (x << 8))  & 0x0300f00f;
-    x = (x ^ (x << 4))  & 0x030c30c3;
-    x = (x ^ (x << 2))  & 0x09249249;
-    return x;
+float hash31(vec3 p) {
+    p = fract(p * 0.1031);
+    p += dot(p, p.yzx + 33.33);
+    return fract((p.x + p.y) * p.z);
 }
 
-uint morton3D(vec3 dir) {
-    vec3 norm = (dir + vec3(1.0)) * 0.5; // map [-1,1] to [0,1]
-    uvec3 u = uvec3(clamp(norm * 1023.0, vec3(0.0), vec3(1023.0)));
-    return (part1By2(u.x) << 2) | (part1By2(u.y) << 1) | part1By2(u.z);
+vec3 hash33(vec3 p) {
+    vec3 p3 = fract(p * vec3(0.1031, 0.1030, 0.0973));
+    p3 += dot(p3, p3.yxz + 33.33);
+    return fract((p3.xxy + p3.yxx) * p3.zyx);
 }
 
-// Procedural hash & value noise for atmospheric cloud coverage
-float skyHash21(vec2 p) {
-    p = fract(p * vec2(123.34, 456.21));
-    p += dot(p, p + 45.32);
-    return fract(p.x * p.y);
-}
-
-float skyNoise(vec2 p) {
-    vec2 i = floor(p);
-    vec2 f = fract(p);
+float noise3D(vec3 p) {
+    vec3 i = floor(p);
+    vec3 f = fract(p);
     f = f * f * (3.0 - 2.0 * f);
-    float a = skyHash21(i);
-    float b = skyHash21(i + vec2(1.0, 0.0));
-    float c = skyHash21(i + vec2(0.0, 1.0));
-    float d = skyHash21(i + vec2(1.0, 1.0));
-    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+    float n000 = hash31(i + vec3(0, 0, 0));
+    float n100 = hash31(i + vec3(1, 0, 0));
+    float n010 = hash31(i + vec3(0, 1, 0));
+    float n110 = hash31(i + vec3(1, 1, 0));
+    float n011 = hash31(i + vec3(0, 0, 1));
+    float n101 = hash31(i + vec3(1, 0, 1));
+    float n011b = hash31(i + vec3(0, 1, 1));
+    float n111 = hash31(i + vec3(1, 1, 1));
+    return mix(
+        mix(mix(n000, n100, f.x), mix(n010, n110, f.x), f.y),
+        mix(mix(n011, n101, f.x), mix(n011b, n111, f.x), f.y),
+        f.z
+    );
 }
 
-float skyCloudFBM(vec2 p) {
+float rustFBM3D(vec3 p) {
     float v = 0.0;
     float a = 0.5;
-    mat2 rot = mat2(0.8, -0.6, 0.6, 0.8);
-    for (int i = 0; i < 3; ++i) {
-        v += a * skyNoise(p);
-        p = rot * p * 2.02 + vec2(1.7, 9.2);
+    mat3 rot = mat3(
+         0.00,  0.80,  0.60,
+        -0.80,  0.36, -0.48,
+        -0.60, -0.48,  0.64
+    );
+    for (int i = 0; i < 4; ++i) {
+        v += a * noise3D(p);
+        p = rot * p * 2.02 + vec3(1.7, 9.2, 0.4);
         a *= 0.5;
     }
     return v;
 }
 
-// Analytic Atmospheric Rayleigh-Mie Sky Model with Procedural Clouds for Ray Miss Evaluation
-vec3 evalAnalyticSky(vec3 dir) {
-    vec3 sunDir = normalize(vec3(0.342, -0.664, 0.664));
-    float cosTheta = clamp(dir.z, 0.0, 1.0);
-    float cosGamma = dot(dir, sunDir);
-
-    // Deep zenith gradient -> atmospheric haze
-    vec3 zenithCol = vec3(0.06, 0.22, 0.62);
-    vec3 horizonCol = vec3(0.58, 0.70, 0.84);
-    float rayleighPhase = 0.75 * (1.0 + cosGamma * cosGamma);
-    vec3 skyGrad = mix(horizonCol, zenithCol, pow(cosTheta, 0.55));
-
-    // Sharp solar disc + Henyey-Greenstein corona
-    float sunDisc = smoothstep(0.9985, 0.9995, cosGamma);
-    const float g = 0.82;
-    const float g2 = g * g;
-    float miePhase = (1.5 * (1.0 - g2) / (2.0 + g2)) * (1.0 + cosGamma * cosGamma) 
-                   / pow(max(1.0 + g2 - 2.0 * g * cosGamma, 0.001), 1.5);
-    vec3 sunColor = vec3(1.0, 0.92, 0.75);
-
-    vec3 sky = skyGrad * rayleighPhase + sunColor * (miePhase * 0.04) + sunColor * (sunDisc * 8.0);
-
-    // Procedural planar cloud deck (Z-up coordinates)
-    if (dir.z > 0.02) {
-        vec2 cloudUV = (dir.xy / (dir.z + 0.05)) * 1.8;
-        float cloudDensity = smoothstep(0.42, 0.75, skyCloudFBM(cloudUV));
-        if (cloudDensity > 0.0) {
-            float sunScatter = clamp(cosGamma, 0.0, 1.0);
-            vec3 cloudLit = vec3(0.72, 0.76, 0.82) * 0.4 + vec3(1.0, 0.96, 0.90) * 1.4 * pow(sunScatter, 3.0);
-            vec3 cloudShadow = vec3(0.35, 0.38, 0.45);
-            vec3 cloudColor = mix(cloudShadow, cloudLit, 0.6 + 0.4 * cosTheta);
-            sky = mix(sky, cloudColor, cloudDensity * 0.85);
-        }
+void getCamera(uint sceneType, out vec3 camPos, out vec3 camForward, out vec3 camRight, out vec3 camUp, out float fov) {
+    if (sceneType == SCENE_OUTDOOR_TERRAIN) {
+        // Outdoor Landscape: Mountain Valley Vista
+        camPos = vec3(0.0, -320.0, 75.0);
+        camForward = vec3(0.0, 0.997375, -0.072412);
+        camRight = vec3(1.0, 0.0, 0.0);
+        camUp = vec3(0.0, 0.072412, 0.997375);
+        fov = 0.45;
     } else {
-        vec3 groundCol = vec3(0.06, 0.06, 0.07);
-        sky = mix(horizonCol * 0.4, groundCol, clamp(-dir.z * 3.0, 0.0, 1.0));
+        // Indoor Atrium / Showroom: Central Sculpture Focus
+        camPos = vec3(-0.5081, -8.1276, 1.5591);
+        camForward = vec3(0.0562, 0.9852, -0.1622);
+        camRight = vec3(0.9984, -0.0570, 0.0000);
+        camUp = vec3(0.0092, 0.1619, 0.9868);
+        fov = 0.2155;
     }
+}
 
+vec3 evalStudioEnvironment(vec3 dir) {
+    float z = dir.z;
+    vec3 baseWall = mix(vec3(0.12, 0.13, 0.16), vec3(0.24, 0.26, 0.30), clamp(z * 1.5, 0.0, 1.0));
+    if (z < 0.0) {
+        baseWall = mix(vec3(0.12, 0.13, 0.16), vec3(0.06, 0.07, 0.08), clamp(-z * 2.0, 0.0, 1.0));
+    }
+    vec3 softboxDir1 = normalize(vec3(0.05, 0.30, 0.95));
+    float sb1 = pow(clamp(dot(dir, softboxDir1), 0.0, 1.0), 80.0) * 6.0;
+    vec3 softboxDir2 = normalize(vec3(-0.75, -0.20, 0.40));
+    float sb2 = pow(clamp(dot(dir, softboxDir2), 0.0, 1.0), 45.0) * 3.5;
+    vec3 softboxDir3 = normalize(vec3(0.65, 0.70, 0.30));
+    float sb3 = pow(clamp(dot(dir, softboxDir3), 0.0, 1.0), 40.0) * 2.5;
+    return baseWall + vec3(1.0, 0.98, 0.95) * sb1 + vec3(0.85, 0.92, 1.0) * sb2 + vec3(1.0, 0.90, 0.80) * sb3;
+}
+
+vec3 evalOutdoorSky(vec3 dir) {
+    vec3 sunDir = normalize(vec3(0.45, 0.35, 0.82));
+    float sunDot = max(dot(dir, sunDir), 0.0);
+    vec3 sky = mix(vec3(0.70, 0.82, 0.95), vec3(0.18, 0.42, 0.82), clamp(dir.z, 0.0, 1.0));
+    if (dir.z < 0.0) {
+        sky = mix(vec3(0.70, 0.82, 0.95), vec3(0.35, 0.30, 0.25), clamp(-dir.z * 2.0, 0.0, 1.0));
+    }
+    // Sun disc and golden glow
+    sky += vec3(1.0, 0.95, 0.85) * pow(sunDot, 120.0) * 8.0;
+    sky += vec3(1.0, 0.85, 0.60) * pow(sunDot, 12.0) * 0.8;
     return sky;
 }
 
-vec3 computeSmoothNormal(uint primId, vec3 hitPos, vec3 rayDir) {
-    vec3 normal;
-    if (primId < 65536) {
-        // Continuous Parametric Trefoil Torus Knot tube normal with segment interpolation
-        uint ringIdx = primId / 256;
-        float u0 = (float(ringIdx) / 256.0) * 6.2831853;
-        float u1 = (float((ringIdx + 1) % 256) / 256.0) * 6.2831853;
+vec3 evalSky(uint sceneType, vec3 dir) {
+    if (sceneType == SCENE_OUTDOOR_TERRAIN) {
+        return evalOutdoorSky(dir);
+    }
+    return evalStudioEnvironment(dir);
+}
 
-        float r0 = 2.0 + 0.8 * cos(3.0 * u0);
-        vec3 unrot0 = vec3(r0 * cos(2.0 * u0), r0 * sin(2.0 * u0), -0.8 * sin(3.0 * u0));
-        float r1 = 2.0 + 0.8 * cos(3.0 * u1);
-        vec3 unrot1 = vec3(r1 * cos(2.0 * u1), r1 * sin(2.0 * u1), -0.8 * sin(3.0 * u1));
+struct SceneLight {
+    vec3 dir;
+    vec3 color;
+    float intensity;
+};
 
-        mat3 R = mat3(
-            0.907673, -0.094951, -0.408795,
-            0.243210,  0.912837,  0.327990,
-            0.342020, -0.397131,  0.851651
-        );
-        vec3 c0 = R * unrot0 + vec3(0.0, 0.0, 0.45);
-        vec3 c1 = R * unrot1 + vec3(0.0, 0.0, 0.45);
+const SceneLight SCENE_LIGHTS[4] = SceneLight[4](
+    SceneLight(vec3(0.28, -0.65, 0.70), vec3(1.0, 0.98, 0.94), 1.00),
+    SceneLight(vec3(-0.65, 0.55, 0.45), vec3(0.85, 0.90, 1.0), 0.35),
+    SceneLight(vec3(-0.50, -0.80, 0.35), vec3(1.0, 0.95, 0.85), 0.45),
+    SceneLight(vec3(0.0, 0.15, 0.98), vec3(0.60, 0.65, 0.70), 0.20)
+);
 
-        vec3 seg = c1 - c0;
-        float segLen2 = dot(seg, seg);
-        float tSeg = clamp(dot(hitPos - c0, seg) / max(segLen2, 0.00001), 0.0, 1.0);
-        vec3 center = c0 + tSeg * seg;
+float computeFloorOcclusion(vec3 hitPos) {
+    float occ = 1.0;
+    float dCenter = length(hitPos.xy - vec2(0.0, 0.2));
+    occ *= clamp(0.20 + 0.80 * smoothstep(0.4, 2.5, dCenter), 0.0, 1.0);
+    float dLeft = length(hitPos.xy - vec2(-1.8, -1.2));
+    occ *= clamp(0.15 + 0.85 * smoothstep(0.3, 2.0, dLeft), 0.0, 1.0);
+    float dFront = length(vec2(hitPos.x, (hitPos.y - (-1.5)) * 2.0));
+    occ *= clamp(0.18 + 0.82 * smoothstep(0.4, 2.2, dFront), 0.0, 1.0);
+    float dSphere = length(hitPos.xy - vec2(-3.24, 0.39));
+    occ *= clamp(0.10 + 0.90 * smoothstep(0.3, 1.4, dSphere), 0.0, 1.0);
+    float dPed = length(hitPos.xy - vec2(-0.46, 0.06));
+    occ *= clamp(0.08 + 0.92 * smoothstep(0.3, 1.2, dPed), 0.0, 1.0);
+    float dSuz = length(hitPos.xy - vec2(2.71, -0.57));
+    occ *= clamp(0.12 + 0.88 * smoothstep(0.3, 1.4, dSuz), 0.0, 1.0);
+    return occ;
+}
 
-        normal = normalize(hitPos - center);
+uint computeMaterialId(uint sceneType, uint primId, vec3 hitPos, vec3 normal) {
+    if (sceneType == SCENE_OUTDOOR_TERRAIN) {
+        if (primId < PRIM_TERRAIN_END) {
+            if (hitPos.z >= 0.0 && hitPos.z <= 2.5 && abs(hitPos.x) < 170.0) {
+                return 7u; // Wet River Stones / Shoreline Boulders
+            }
+            if (hitPos.z > 65.0) {
+                return 3u; // High Mountain Snow & Glacial Ice
+            }
+            if (normal.z < 0.65) {
+                return 4u; // Exposed Granite Cliff Face
+            }
+            if (normal.z < 0.82) {
+                return 0u; // Weathered Sandstone & Scree Slope
+            }
+            return 5u;     // Valley Grassland / Alpine Meadow
+        }
+        if (primId < PRIM_WATER_END) {
+            return 2u;     // Alpine Lake / River Water Plane
+        }
+        uint treeLocalTri = (primId - PRIM_WATER_END) % 224u;
+        if (treeLocalTri < 32u) {
+            return 6u;     // Pine Bark / Timber Trunk
+        }
+        return 1u;         // Translucent Conifer Pine Foliage / Needles
     } else {
-        // Showroom cavity dish: z = -1.5 + 0.035 * (x^2 + y^2)
-        normal = normalize(vec3(-0.07 * hitPos.x, -0.07 * hitPos.y, 1.0));
+        if (primId < PRIM_KNOT_PAINT_END)  return 0u; // Knot Band 0: Ruby Car Paint (Inner Arch)
+        if (primId < PRIM_KNOT_JADE_END)   return 1u; // Knot Band 1: Jade Subsurface (Left Loop)
+        if (primId < PRIM_KNOT_CHROME_END) return 7u; // Knot Band 2: Chrome Mirror (Top Right Arch)
+        if (primId < PRIM_KNOT_VELVET_END) return 3u; // Knot Band 3: Magenta Velvet (Rear Arch)
+        if (primId < PRIM_KNOT_RUST_END)   return 4u; // Knot Band 4: Weathered Rust (Front Tube)
+        if (primId < PRIM_SPHERE_END)      return 1u; // Satellite Jade Sphere
+        if (primId < PRIM_PEDESTAL_END)    return 6u; // Gold Turned Pedestal
+        if (primId < PRIM_SUZANNE_END)     return 2u; // Suzanne Dispersive Glass Head
+        if (primId < PRIM_FLOOR_END)       return 5u; // Showroom Cyclorama Floor
+        if (primId < PRIM_WALLS_END)       return 4u; // Atrium Enclosing Walls (Bronze/Rust panels)
+        if (primId < PRIM_CEILING_END)     return 6u; // Vaulted Ceiling (Gold Coffered)
+        return 1u;                                    // Columns (Carrara Marble)
+    }
+}
+
+uint getArchetype(uint matId) {
+    return matId;
+}
+
+vec3 tonemapACES(vec3 x) {
+    const float a = 2.51;
+    const float b = 0.03;
+    const float c = 2.43;
+    const float d = 0.59;
+    const float e = 0.14;
+    vec3 mapped = clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
+    return pow(mapped, vec3(1.0 / 2.2));
+}
+
+void computePixelCoords(uint idx, uint pattern, uint width, uint height, out uint px_u, out uint py_u) {
+    if (pattern == 1) {
+        uint tilesX = (width + 7) / 8;
+        uint tileIdx = idx / 32;
+        uint inTile = idx % 32;
+        uint tileX = tileIdx % tilesX;
+        uint tileY = tileIdx / tilesX;
+        px_u = tileX * 8 + (inTile % 8);
+        py_u = tileY * 4 + (inTile / 8);
+    } else if (pattern == 2) {
+        uint tilesX = (width + 7) / 8;
+        uint tileIdx = idx / 32;
+        uint inTile = idx % 32;
+        uint tileX = tileIdx % tilesX;
+        uint tileY = tileIdx / tilesX;
+        uint mx = ((inTile >> 0) & 1) | (((inTile >> 2) & 1) << 1) | (((inTile >> 4) & 1) << 2);
+        uint my = ((inTile >> 1) & 1) | (((inTile >> 3) & 1) << 1);
+        px_u = tileX * 8 + mx;
+        py_u = tileY * 4 + my;
+    } else if (pattern == 3) {
+        uint tilesX = (width + 3) / 4;
+        uint tileIdx = idx / 32;
+        uint inTile = idx % 32;
+        uint tileX = tileIdx % tilesX;
+        uint tileY = tileIdx / tilesX;
+        uint mx = ((inTile >> 0) & 1) | (((inTile >> 2) & 1) << 1);
+        uint my = ((inTile >> 1) & 1) | (((inTile >> 3) & 1) << 1) | (((inTile >> 4) & 1) << 2);
+        px_u = tileX * 4 + mx;
+        py_u = tileY * 8 + my;
+    } else {
+        px_u = idx % width;
+        py_u = idx / width;
+    }
+}
+
+vec3 computeSmoothNormal(uint sceneType, uint primId, vec3 hitPos, vec3 rayDir, vec2 bary) {
+    vec3 normal;
+    if (sceneType == SCENE_OUTDOOR_TERRAIN) {
+        if (primId >= PRIM_TERRAIN_END && primId < PRIM_WATER_END) {
+            normal = vec3(0.0, 0.0, 1.0);
+        } else {
+            uint base = primId * 9u;
+            vec3 p0 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
+            vec3 p1 = vec3(vbuf.vertices[base + 3], vbuf.vertices[base + 4], vbuf.vertices[base + 5]);
+            vec3 p2 = vec3(vbuf.vertices[base + 6], vbuf.vertices[base + 7], vbuf.vertices[base + 8]);
+            normal = normalize(cross(p1 - p0, p2 - p0));
+        }
+    } else {
+        if (primId < PRIM_KNOT_RUST_END) {
+            uint segI = (primId / 48u);
+            float u0 = (float(segI) / 160.0) * 6.283185307;
+            float u1 = (float((segI + 1u) % 160u) / 160.0) * 6.283185307;
+
+            float r0 = (2.0 + 0.8 * cos(3.0 * u0)) * 0.835;
+            vec3 unrot0 = vec3(r0 * cos(2.0 * u0), r0 * sin(2.0 * u0), -0.8 * 0.835 * sin(3.0 * u0));
+            float r1 = (2.0 + 0.8 * cos(3.0 * u1)) * 0.835;
+            vec3 unrot1 = vec3(r1 * cos(2.0 * u1), r1 * sin(2.0 * u1), -0.8 * 0.835 * sin(3.0 * u1));
+
+            const mat3 R_knot = mat3(
+                vec3( 0.929662, -0.239757, -0.279722),
+                vec3( 0.326751,  0.887321,  0.325417),
+                vec3( 0.170182, -0.393927,  0.903249)
+            );
+            vec3 c0 = R_knot * unrot0 + vec3(0.0, 0.0, 0.385);
+            vec3 c1 = R_knot * unrot1 + vec3(0.0, 0.0, 0.385);
+
+            vec3 seg = c1 - c0;
+            float segLen2 = dot(seg, seg);
+            float tSeg = clamp(dot(hitPos - c0, seg) / max(segLen2, 0.00001), 0.0, 1.0);
+            vec3 centerPt = c0 + tSeg * seg;
+
+            normal = normalize(hitPos - centerPt);
+        } else if (primId < PRIM_SPHERE_END) {
+            normal = normalize(hitPos - vec3(-3.242, 0.391, -0.509));
+        } else if (primId < PRIM_PEDESTAL_END) {
+            if (hitPos.z >= -0.658) {
+                normal = vec3(0.0, 0.0, 1.0);
+            } else if (hitPos.z <= -1.050) {
+                normal = vec3(0.0, 0.0, -1.0);
+            } else {
+                normal = normalize(vec3(hitPos.x - (-0.460), hitPos.y - 0.060, 0.0));
+            }
+        } else if (primId < PRIM_SUZANNE_END) {
+            uint base = primId * 9u;
+            vec3 p0 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
+            vec3 p1 = vec3(vbuf.vertices[base + 3], vbuf.vertices[base + 4], vbuf.vertices[base + 5]);
+            vec3 p2 = vec3(vbuf.vertices[base + 6], vbuf.vertices[base + 7], vbuf.vertices[base + 8]);
+            normal = normalize(cross(p1 - p0, p2 - p0));
+        } else if (primId < PRIM_FLOOR_END) {
+            float backCurve = (hitPos.y > 1.0) ? 0.044 * (hitPos.y - 1.0) : 0.0;
+            normal = normalize(vec3(0.0, -backCurve, 1.0));
+        } else {
+            uint base = primId * 9u;
+            vec3 p0 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
+            vec3 p1 = vec3(vbuf.vertices[base + 3], vbuf.vertices[base + 4], vbuf.vertices[base + 5]);
+            vec3 p2 = vec3(vbuf.vertices[base + 6], vbuf.vertices[base + 7], vbuf.vertices[base + 8]);
+            normal = normalize(cross(p1 - p0, p2 - p0));
+        }
     }
     if (dot(normal, rayDir) > 0.0) normal = -normal;
     return normal;
 }
 
-uint computeMaterialId(uint primId, vec3 hitPos) {
-    if (primId < 65536) {
-        // 5 broad continuous material sections matching Blender showroom scene (ring // 51)
-        uint ringIdx = primId / 256;
-        uint section = (ringIdx / 51) % 5;
-        uint subQueue = primId % 4;
-        return section * 4 + subQueue;
-    } else {
-        // Showroom floor: distribute across 12 queues (20..31) so no queue overflows
-        return 20 + ((primId - 65536) % 12);
-    }
-}
 
 void main() {
     uint idx = gl_GlobalInvocationID.x;
-    if (idx >= pc.rayCount) return;
+    uint localId = gl_LocalInvocationID.x;
 
-    if (gl_LocalInvocationID.x == 0) {
+    if (localId == 0) {
         localRays = 0;
         localHits = 0;
     }
+    if (localId < 8) {
+        ldsQueueCount[localId] = 0;
+    }
+    ldsThreadSlot[localId] = 0xFFFFFFFFu;
     barrier();
 
-    uint rngState = idx + pc.seed;
-
-    // Perspective showroom camera matching Blender view (0, -8.2, 2.0) looking at (0, 0, 0.45)
-    vec3 camPos = vec3(0.0, -8.2, 2.0);
-    vec3 camForward = vec3(0.0, 0.9826, -0.1857);
-    vec3 camRight = vec3(1.0, 0.0, 0.0);
-    vec3 camUp = vec3(0.0, 0.1857, 0.9826);
-    float fov = 0.48; // ~52 deg FoV (38mm lens)
-
-    float halfH = float(pc.height) * 0.5;
-    float px = float(idx % pc.width) - float(pc.width) * 0.5 + 0.5;
-    float py = float(idx / pc.width) - halfH + 0.5;
-    vec2 uv = vec2(px / halfH, py / halfH);
-    vec3 origin = camPos;
-    vec3 direction = normalize(camForward + camRight * (uv.x * fov) - camUp * (uv.y * fov));
-    uint threadRays = 1;
+    uint threadRays = 0;
     uint threadHits = 0;
+    uint assignedQueue = 0xFFFFFFFFu;
+    vec4 payload0 = vec4(0.0);
+    vec4 payload1 = vec4(0.0);
 
-    if (pc.mode == 3) {
-        // Mode 3: Stage Breakdown - Pure Stream Compaction & Payload Spilling (No BVH)
-        threadHits = 1;
-        uint matId = idx % 32;
-        uint slot = atomicAdd(worklist.queueCounters[matId], 1);
-        if (slot < pc.queueCapacity) {
-            uint recordIdx = matId * pc.queueCapacity + slot;
-            worklist.rayRecords[recordIdx].originAndMatId = vec4(origin, uintBitsToFloat(matId));
-            worklist.rayRecords[recordIdx].directionAndSeed = vec4(direction, uintBitsToFloat(rngState));
-            worklist.rayRecords[recordIdx].throughputAndMorton = vec4(1.0, 1.0, 1.0, 0.0);
-        }
-        if ((slot % 64) == 0) {
-            atomicMax(indirectCmds.commands[matId].x, (slot + 64) / 64);
-            indirectCmds.commands[matId].y = 1;
-            indirectCmds.commands[matId].z = 1;
-        }
-    } else {
-        rayQueryEXT query;
-        rayQueryInitializeEXT(query, topLevelAS, gl_RayFlagsNoneEXT, 0xFF, origin, 0.01, direction, 50.0);
-        while (rayQueryProceedEXT(query)) {}
+    if (idx < pc.rayCount) {
+        threadRays = 1;
+        uint rngState = idx + pc.seed;
 
-        if (rayQueryGetIntersectionTypeEXT(query, true) == gl_RayQueryCommittedIntersectionTriangleEXT) {
+        vec3 camPos, camForward, camRight, camUp;
+        float fov;
+        getCamera(pc.sceneType, camPos, camForward, camRight, camUp, fov);
+
+        uint px_u, py_u;
+        computePixelCoords(idx, pc.spatialPattern, pc.width, pc.height, px_u, py_u);
+        uint pixelIdx = py_u * pc.width + px_u;
+
+        float halfH = float(pc.height) * 0.5;
+        float px = float(px_u) - float(pc.width) * 0.5 + 0.5;
+        float py = float(py_u) - halfH + 0.5;
+        vec2 uv = vec2(px / halfH, py / halfH);
+        vec3 origin = camPos;
+        vec3 direction = normalize(camForward + camRight * (uv.x * fov) - camUp * (uv.y * fov));
+        float tMaxPrimary = (pc.sceneType == SCENE_OUTDOOR_TERRAIN) ? 2500.0 : 50.0;
+        float tMinPrimary = (pc.sceneType == SCENE_OUTDOOR_TERRAIN) ? 0.05 : 0.01;
+
+        if (pc.mode == 3) {
             threadHits = 1;
-            float t = rayQueryGetIntersectionTEXT(query, true);
-            vec3 hitPos = origin + direction * t;
-            uint primId = rayQueryGetIntersectionPrimitiveIndexEXT(query, true);
-            vec3 normal = computeSmoothNormal(primId, hitPos, direction);
+            assignedQueue = idx % 8;
+            ldsThreadSlot[localId] = atomicAdd(ldsQueueCount[assignedQueue], 1);
+            payload0 = vec4(origin, uintBitsToFloat(assignedQueue));
+            payload1 = vec4(direction, uintBitsToFloat(rngState));
+        } else {
+            rayQueryEXT query;
+            rayQueryInitializeEXT(query, topLevelAS, gl_RayFlagsNoneEXT, 0xFF, origin, tMinPrimary, direction, tMaxPrimary);
+            while (rayQueryProceedEXT(query)) {}
 
-            if (pc.mode == 0) {
-                // Work Lists: Stream compaction into 32 material bins
-                uint matId = computeMaterialId(primId, hitPos);
-                uint slot = atomicAdd(worklist.queueCounters[matId], 1);
-                if (slot < pc.queueCapacity) {
-                    uint recordIdx = matId * pc.queueCapacity + slot;
-                    worklist.rayRecords[recordIdx].originAndMatId = vec4(hitPos, uintBitsToFloat(matId));
-                    worklist.rayRecords[recordIdx].directionAndSeed = vec4(direction, uintBitsToFloat(rngState));
-                    worklist.rayRecords[recordIdx].throughputAndMorton = vec4(normal, uintBitsToFloat(idx));
-                }
+            if (rayQueryGetIntersectionTypeEXT(query, true) == gl_RayQueryCommittedIntersectionTriangleEXT) {
+                threadHits = 1;
+                float t = rayQueryGetIntersectionTEXT(query, true);
+                vec3 hitPos = origin + direction * t;
+                uint primId = rayQueryGetIntersectionPrimitiveIndexEXT(query, true);
+                vec2 bary = rayQueryGetIntersectionBarycentricsEXT(query, true);
+                vec3 normal = computeSmoothNormal(pc.sceneType, primId, hitPos, direction, bary);
 
-                // Update indirect dispatch parameters for this material queue
-                if ((slot % 64) == 0) {
-                    atomicMax(indirectCmds.commands[matId].x, (slot + 64) / 64);
-                    indirectCmds.commands[matId].y = 1;
-                    indirectCmds.commands[matId].z = 1;
-                }
-            } else if (pc.mode == 1) {
-                // Work Lists: Wavefront path tracing compaction (Russian roulette filtering)
-                bool survives = (pc.bounce < 2) || (rand_float(rngState) >= 0.4);
-                if (survives) {
-                    // Generate next bounce ray direction
+                if (pc.mode == 0) {
+                    assignedQueue = computeMaterialId(pc.sceneType, primId, hitPos, normal);
+                    ldsThreadSlot[localId] = atomicAdd(ldsQueueCount[assignedQueue], 1);
+                    payload0 = vec4(hitPos, uintBitsToFloat(pixelIdx));
+                    payload1 = vec4(normal, uintBitsToFloat(rngState));
+                } else if (pc.mode == 1) {
+                    bool survives = (pc.bounce < 2) || (rand_float(rngState) >= 0.4);
+                    if (survives) {
+                        float u1 = rand_float(rngState);
+                        float u2 = rand_float(rngState);
+                        vec3 nextDir = align_to_normal(cosine_sample_hemisphere(u1, u2), normal);
+                        assignedQueue = 0;
+                        ldsThreadSlot[localId] = atomicAdd(ldsQueueCount[0], 1);
+                        payload0 = vec4(hitPos + normal * 0.005, uintBitsToFloat(primId));
+                        payload1 = vec4(nextDir, uintBitsToFloat(rngState));
+                    }
+                } else {
                     float u1 = rand_float(rngState);
                     float u2 = rand_float(rngState);
-                    vec3 nextDir = align_to_normal(cosine_sample_hemisphere(u1, u2), normal);
-
-                    uint slot = atomicAdd(worklist.queueCounters[0], 1);
-                    if (slot < pc.queueCapacity) {
-                        worklist.rayRecords[slot].originAndMatId = vec4(hitPos + normal * 0.002, uintBitsToFloat(primId));
-                        worklist.rayRecords[slot].directionAndSeed = vec4(nextDir, uintBitsToFloat(rngState));
-                        worklist.rayRecords[slot].throughputAndMorton = vec4(0.8, 0.8, 0.8, 0.0);
-                    }
-
-                    if ((slot % 64) == 0) {
-                        atomicMax(indirectCmds.commands[0].x, (slot + 64) / 64);
-                        indirectCmds.commands[0].y = 1;
-                        indirectCmds.commands[0].z = 1;
-                    }
+                    vec3 incohDir = align_to_normal(cosine_sample_hemisphere(u1, u2), normal);
+                    assignedQueue = (incohDir.x >= 0.0 ? 1u : 0u) |
+                                    (incohDir.y >= 0.0 ? 2u : 0u) |
+                                    (incohDir.z >= 0.0 ? 4u : 0u);
+                    ldsThreadSlot[localId] = atomicAdd(ldsQueueCount[assignedQueue], 1);
+                    payload0 = vec4(hitPos + normal * 0.005, uintBitsToFloat(primId));
+                    payload1 = vec4(incohDir, uintBitsToFloat(rngState));
                 }
             } else {
-                // Work Lists: Incoherent secondary rays with Directional Octant Binning
-                // The GPU directly bins rays into 8 directional cones (+/-X, +/-Y, +/-Z) at birth,
-                // producing pre-ordered, coherent work lists without needing SER or sorting passes.
-                float u1 = rand_float(rngState);
-                float u2 = rand_float(rngState);
-                vec3 incohDir = align_to_normal(cosine_sample_hemisphere(u1, u2), normal);
-
-                uint octant = (incohDir.x > 0.0 ? 1u : 0u) |
-                              (incohDir.y > 0.0 ? 2u : 0u) |
-                              (incohDir.z > 0.0 ? 4u : 0u);
-
-                uint slot = atomicAdd(worklist.queueCounters[octant], 1);
-                if (slot < pc.queueCapacity) {
-                    uint recordIdx = octant * pc.queueCapacity + slot;
-                    worklist.rayRecords[recordIdx].originAndMatId = vec4(hitPos + normal * 0.002, float(octant));
-                    worklist.rayRecords[recordIdx].directionAndSeed = vec4(incohDir, uintBitsToFloat(rngState));
-                    worklist.rayRecords[recordIdx].throughputAndMorton = vec4(1.0, 1.0, 1.0, 0.0);
+                if (pc.dumpRenders != 0) {
+                    vec3 skyCol = evalSky(pc.sceneType, direction);
+                    fb.pixels[pixelIdx] = vec4(tonemapACES(skyCol * 1.0), 1.0);
                 }
-
-                if ((slot % 64) == 0) {
-                    atomicMax(indirectCmds.commands[octant].x, (slot + 64) / 64);
-                    indirectCmds.commands[octant].y = 1;
-                    indirectCmds.commands[octant].z = 1;
-                }
-            }
-        } else {
-            if (pc.dumpRenders != 0) {
-                fb.pixels[idx] = vec4(evalAnalyticSky(direction), 1.0);
             }
         }
     }
 
     if (threadRays > 0) atomicAdd(localRays, threadRays);
     if (threadHits > 0) atomicAdd(localHits, threadHits);
+
     barrier();
 
-    if (gl_LocalInvocationID.x == 0) {
+    if (localId < 8) {
+        uint qCount = ldsQueueCount[localId];
+        if (qCount > 0) {
+            uint gBase = atomicAdd(worklist.queueCounters[localId], qCount);
+            ldsQueueBase[localId] = gBase;
+            uint total = gBase + qCount;
+            atomicMax(indirectCmds.commands[localId].x, (total + 63) / 64);
+            indirectCmds.commands[localId].y = 1;
+            indirectCmds.commands[localId].z = 1;
+        }
+    }
+
+    barrier();
+
+    if (assignedQueue != 0xFFFFFFFFu) {
+        uint slot = ldsQueueBase[assignedQueue] + ldsThreadSlot[localId];
+        if (slot < pc.queueCapacity) {
+            uint recordIdx = assignedQueue * pc.queueCapacity + slot;
+            worklist.rayRecords[recordIdx].field0 = payload0;
+            worklist.rayRecords[recordIdx].field1 = payload1;
+        }
+    }
+
+    barrier();
+    if (localId == 0) {
         atomicAdd(results.totalRays, localRays);
         atomicAdd(results.totalHits, localHits);
     }

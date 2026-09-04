@@ -26,11 +26,8 @@ class ImageExport {
 public:
   static inline uint8_t floatToSrgb(float x) {
     if (x <= 0.0f) return 0;
-    // Simple exposure & Reinhard tonemapping
-    float mapped = x / (1.0f + x);
-    // Gamma 2.2
-    float gamma = std::pow(mapped, 1.0f / 2.2f);
-    int val = static_cast<int>(gamma * 255.0f + 0.5f);
+    if (x >= 1.0f) return 255;
+    int val = static_cast<int>(x * 255.0f + 0.5f);
     return static_cast<uint8_t>(std::clamp(val, 0, 255));
   }
 
@@ -44,10 +41,21 @@ public:
     return file.good();
   }
 
-  static void convertPPMtoPNG(const std::string &ppmPath, const std::string &pngPath) {
-    std::string cmd = "python3 -c \"from PIL import Image; Image.open('" + ppmPath + "').save('" + pngPath + "')\" 2>/dev/null";
+  static void convertPPMtoPNG(const std::string &ppmPath, const std::string &pngPath,
+                              const std::string &profileJsonPath = "", const std::string &type = "traditional") {
+    std::string cmd;
+    if (!profileJsonPath.empty()) {
+      cmd = "python3 scripts/annotate_render.py \"" + ppmPath + "\" \"" + pngPath + "\" --profile \"" + profileJsonPath + "\" --type " + type + " 2>/dev/null";
+    } else {
+      cmd = "python3 scripts/annotate_render.py \"" + ppmPath + "\" \"" + pngPath + "\" 2>/dev/null";
+    }
     int ret = std::system(cmd.c_str());
-    (void)ret;
+    if (ret != 0) {
+      // Fallback if script not in cwd
+      std::string fbCmd = "python3 -c \"from PIL import Image; Image.open('" + ppmPath + "').save('" + pngPath + "')\" 2>/dev/null";
+      int fbRet = std::system(fbCmd.c_str());
+      (void)fbRet;
+    }
   }
 
   static ImageMetrics compareAndTonemap(

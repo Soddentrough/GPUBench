@@ -21,7 +21,7 @@ pub struct ResultData {
 
 #[derive(Parser, Debug, Clone)]
 #[command(name = "GPUBench")]
-#[command(version = "1.4.1")]
+#[command(version = "1.4.2")]
 #[command(about = "High-performance cross-platform GPU benchmarking tool", long_about = None)]
 pub struct Cli {
     #[arg(short = 'b', long = "benchmarks", value_delimiter = ',')]
@@ -50,6 +50,9 @@ pub struct Cli {
 
     #[arg(long = "dump-geometry", default_value_t = false)]
     pub dump_geometry: bool,
+
+    #[arg(long = "dump-renders", default_value_t = false)]
+    pub dump_renders: bool,
 }
 
 use std::sync::Mutex;
@@ -75,6 +78,7 @@ pub fn run_benchmarks(
     verbose: bool,
     debug: bool,
     dump_geometry: bool,
+    dump_renders: bool,
     callback: fn(&ResultData),
 ) -> Vec<ResultData> {
     static CALLBACK_MUTEX: Mutex<Option<fn(&ResultData)>> = Mutex::new(None);
@@ -118,6 +122,7 @@ pub fn run_benchmarks(
         verbose,
         debug,
         dump_geometry,
+        dump_renders,
         ffi_callback,
     );
     
@@ -268,6 +273,7 @@ pub fn run_cli() {
         cli.verbose,
         cli.debug,
         cli.dump_geometry,
+        cli.dump_renders,
         |_| {},
     );
 

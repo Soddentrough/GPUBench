@@ -46,9 +46,9 @@ std::vector<uint32_t> create_shuffled_indices(size_t size) {
 
 BenchmarkRunner::BenchmarkRunner(const std::vector<IComputeContext *> &contexts,
                                  bool verbose, bool debug, bool dumpGeometry,
-                                 bool dumpRenders)
+                                 bool dumpRenders, const std::string &scene)
     : contexts(contexts), verbose(verbose), debug(debug),
-      dumpGeometry(dumpGeometry), dumpRenders(dumpRenders) {
+      dumpGeometry(dumpGeometry), dumpRenders(dumpRenders), sceneName(scene) {
   for (auto *context : contexts) {
     context->setVerbose(verbose);
   }
@@ -160,6 +160,7 @@ void BenchmarkRunner::discoverBenchmarks() {
   benchmarks.push_back(std::make_unique<Int8Bench>());
   benchmarks.push_back(std::make_unique<Int4Bench>());
   benchmarks.push_back(std::make_unique<MemBandwidthBench>());
+  benchmarks.push_back(std::make_unique<PixelFillRateBench>());
   benchmarks.push_back(std::make_unique<SysMemBandwidthBench>());
   benchmarks.push_back(std::make_unique<SysMemLatencyBench>());
   benchmarks.push_back(std::make_unique<RayTracingBench>());
@@ -171,12 +172,23 @@ void BenchmarkRunner::discoverBenchmarks() {
   benchmarks.push_back(std::make_unique<RayProceduralBench>());
   benchmarks.push_back(std::make_unique<RayMaterialDivergenceBench>());
   benchmarks.push_back(std::make_unique<RayPathTracingBench>());
-  benchmarks.push_back(std::make_unique<PixelFillRateBench>());
-  auto rayScheduling = std::make_unique<RaySchedulingBench>();
-  if (dumpRenders) {
-    rayScheduling->SetDumpRenders(true);
+  if (sceneName == "all") {
+    auto indoor = std::make_unique<RaySchedulingBench>(RaySchedulingBench::SceneType::IndoorAtrium);
+    if (dumpRenders) indoor->SetDumpRenders(true);
+    benchmarks.push_back(std::move(indoor));
+
+    auto outdoor = std::make_unique<RaySchedulingBench>(RaySchedulingBench::SceneType::OutdoorLandscape);
+    if (dumpRenders) outdoor->SetDumpRenders(true);
+    benchmarks.push_back(std::move(outdoor));
+  } else if (sceneName == "outdoor") {
+    auto outdoor = std::make_unique<RaySchedulingBench>(RaySchedulingBench::SceneType::OutdoorLandscape);
+    if (dumpRenders) outdoor->SetDumpRenders(true);
+    benchmarks.push_back(std::move(outdoor));
+  } else {
+    auto indoor = std::make_unique<RaySchedulingBench>(RaySchedulingBench::SceneType::IndoorAtrium);
+    if (dumpRenders) indoor->SetDumpRenders(true);
+    benchmarks.push_back(std::move(indoor));
   }
-  benchmarks.push_back(std::move(rayScheduling));
 
   // Cache Bandwidth
   const size_t l0_size = 16 * 1024; // 16KB L0 cache
@@ -489,41 +501,51 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
             // Benchmark was selected but is not supported on this
             // device/backend (e.g. missing hardware capability). Report it
             // explicitly as UNSUPPORTED instead of skipping silently.
-            ResultData result_data;
-            result_data.backendName =
-                ComputeBackendFactory::getBackendName(context->getBackend());
-            result_data.deviceName = info.name;
-            result_data.benchmarkName = bench->GetName();
-            result_data.metric = "";
-            result_data.operations = 0;
-            result_data.time_ms = 0;
-            result_data.isEmulated = false;
-            result_data.isUnsupported = true;
-            result_data.supportNote = bench->GetSupportNote();
-            switch (bench->GetSupportLimitation()) {
-            case IBenchmark::SupportLimitation::kHardware:
-              result_data.supportCategory = "hardware";
-              break;
-            case IBenchmark::SupportLimitation::kApi:
-              result_data.supportCategory = "api";
-              break;
-            case IBenchmark::SupportLimitation::kToolchain:
-              result_data.supportCategory = "toolchain";
-              break;
-            default:
-              break;
+            std::string bname = bench->GetName();
+            uint32_t num_unsupported_configs = 1;
+            if (bname == "FP8" || bname == "INT4" || bname == "FP16" || bname == "BF16" || bname == "INT8") {
+              num_unsupported_configs = 2;
             }
-            result_data.component = bench->GetComponent(0);
-            result_data.subcategory = bench->GetSubCategory(0);
-            result_data.maxWorkGroupSize = info.maxWorkGroupSize;
-            result_data.deviceIndex = context->getSelectedDeviceIndex();
-            result_data.configIndex = 0;
-            result_data.sortWeight = bench->GetSortWeight();
 
-            formatter->addResult(result_data);
-            // Not counted in numBenchmarksRun: nothing was measured.
-            if (onResult) {
-                onResult(result_data);
+            for (uint32_t ci = 0; ci < num_unsupported_configs; ++ci) {
+              ResultData result_data;
+              result_data.backendName =
+                  ComputeBackendFactory::getBackendName(context->getBackend());
+              result_data.deviceName = info.name;
+              result_data.benchmarkName = (num_unsupported_configs > 1)
+                  ? (bname + (ci == 0 ? " (Vector)" : " (Matrix)"))
+                  : bname;
+              result_data.metric = "";
+              result_data.operations = 0;
+              result_data.time_ms = 0;
+              result_data.isEmulated = false;
+              result_data.isUnsupported = true;
+              result_data.supportNote = bench->GetSupportNote();
+              switch (bench->GetSupportLimitation()) {
+              case IBenchmark::SupportLimitation::kHardware:
+                result_data.supportCategory = "hardware";
+                break;
+              case IBenchmark::SupportLimitation::kApi:
+                result_data.supportCategory = "api";
+                break;
+              case IBenchmark::SupportLimitation::kToolchain:
+                result_data.supportCategory = "toolchain";
+                break;
+              default:
+                break;
+              }
+              result_data.component = bench->GetComponent(ci);
+              result_data.subcategory = bench->GetSubCategory(ci);
+              result_data.maxWorkGroupSize = info.maxWorkGroupSize;
+              result_data.deviceIndex = context->getSelectedDeviceIndex();
+              result_data.configIndex = ci;
+              result_data.sortWeight = bench->GetSortWeight();
+
+              formatter->addResult(result_data);
+              // Not counted in numBenchmarksRun: nothing was measured.
+              if (onResult) {
+                  onResult(result_data);
+              }
             }
           }
         }
@@ -538,6 +560,10 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
               uint32_t num_configs = bench->GetNumConfigs();
 
               for (uint32_t i = 0; i < num_configs; ++i) {
+                if (targetConfig >= 0 && static_cast<int>(i) != targetConfig) {
+                  continue;
+                }
+
                 std::string bench_name = bench->GetName();
                 std::string config_name = bench->GetConfigName(i);
                 if (!config_name.empty()) {
@@ -550,6 +576,25 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
                 } else {
                   std::cout << "  - [" << ComputeBackendFactory::getBackendName(context->getBackend())
                             << "] Running " << bench_name << "..." << std::flush;
+                }
+
+                if (onResult) {
+                  ResultData start_data;
+                  start_data.backendName = ComputeBackendFactory::getBackendName(context->getBackend());
+                  start_data.deviceName = info.name;
+                  start_data.benchmarkName = bench_name;
+                  start_data.component = bench->GetComponent(i);
+                  start_data.subcategory = bench->GetSubCategory(i);
+                  start_data.metric = bench->GetMetric(i);
+                  start_data.operations = 0;
+                  start_data.time_ms = -1.0;
+                  start_data.isEmulated = false;
+                  start_data.isUnsupported = false;
+                  start_data.maxWorkGroupSize = info.maxWorkGroupSize;
+                  start_data.deviceIndex = context->getSelectedDeviceIndex();
+                  start_data.configIndex = i;
+                  start_data.sortWeight = bench->GetSortWeight();
+                  onResult(start_data);
                 }
 
                 if (!bench->IsConfigSupported(i)) {
@@ -595,72 +640,101 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
                   continue;
                 }
 
-                // Warmup (not counted): ramp GPU clocks and fill caches
-                // before the measurement window starts. Skipped for
-                // latency (ns) benchmarks: they are single-thread pointer
-                // chases whose ns-per-step is extremely clock-sensitive,
-                // and pre-heating the GPU measurably distorts them.
-                if (std::string(bench->GetMetric(i)) != "ns") {
-                  auto warmup_start =
-                      std::chrono::high_resolution_clock::now();
-                  double warmup_ms = 0;
-                  while (warmup_ms < 250.0) {
-                    bench->Run(i);
-                    context->waitIdle();
-                    auto now = std::chrono::high_resolution_clock::now();
-                    warmup_ms =
-                        std::chrono::duration_cast<std::chrono::nanoseconds>(
-                            now - warmup_start)
-                            .count() /
-                        1e6;
-                  }
-                }
-
-                // Timed run with adaptive dispatch batching: submit several
-                // dispatches before each waitIdle so the GPU is never left
-                // idle while the CPU records the next command buffer.
                 double total_time_ms = 0;
                 uint64_t total_invocations = 0;
-                uint32_t batch = 1;
-                auto bench_start = std::chrono::high_resolution_clock::now();
-                while (total_time_ms < 2500) {
-                  auto iter_start =
-                      std::chrono::high_resolution_clock::now();
-                  for (uint32_t j = 0; j < batch; ++j) {
-                    bench->Run(i);
-                  }
+
+                if (profileSnapshot) {
+                  // Single warmup run
+                  bench->Run(i);
                   context->waitIdle();
-                  auto iter_end =
-                      std::chrono::high_resolution_clock::now();
-                  double iter_ms =
+                  context->presentFrame();
+
+                  // Rebuild acceleration structures if tracing / profiling requires AS in the captured frame (e.g. RRA)
+                  bench->RebuildAccelerationStructures();
+                  context->waitIdle();
+
+                  // Exactly one timed run for clean profiling snapshot capture
+                  auto iter_start = std::chrono::high_resolution_clock::now();
+                  bench->Run(i);
+                  context->waitIdle();
+                  auto iter_end = std::chrono::high_resolution_clock::now();
+
+                  // Present the frame so profilers (RRA, RGP) finalize trace capture
+                  context->presentFrame();
+                  context->waitIdle();
+
+                  total_time_ms =
                       std::chrono::duration_cast<std::chrono::nanoseconds>(
                           iter_end - iter_start)
                           .count() /
                       1e6;
-                  if (verbose && iter_ms > 500.0) {
-                    std::cerr
-                        << "\n[WARNING] Dispatch batch took " << iter_ms
-                        << " ms — approaching amdgpu TDR timeout!" << std::endl;
+                  total_invocations = 1;
+                } else {
+                  // Warmup (not counted): ramp GPU clocks and fill caches
+                  // before the measurement window starts. Skipped for
+                  // latency (ns) benchmarks: they are single-thread pointer
+                  // chases whose ns-per-step is extremely clock-sensitive,
+                  // and pre-heating the GPU measurably distorts them.
+                  if (std::string(bench->GetMetric(i)) != "ns") {
+                    auto warmup_start =
+                        std::chrono::high_resolution_clock::now();
+                    double warmup_ms = 0;
+                    while (warmup_ms < 250.0) {
+                      bench->Run(i);
+                      context->waitIdle();
+                      auto now = std::chrono::high_resolution_clock::now();
+                      warmup_ms =
+                          std::chrono::duration_cast<std::chrono::nanoseconds>(
+                              now - warmup_start)
+                              .count() /
+                          1e6;
+                    }
                   }
-                  if (iter_ms > 3000.0) {
-                    std::cerr
-                        << "\n[ABORT] Dispatch batch took " << iter_ms
-                        << " ms — aborting benchmark to avoid system crash."
-                        << std::endl;
-                    break;
+
+                  // Timed run with adaptive dispatch batching: submit several
+                  // dispatches before each waitIdle so the GPU is never left
+                  // idle while the CPU records the next command buffer.
+                  uint32_t batch = 1;
+                  auto bench_start = std::chrono::high_resolution_clock::now();
+                  while (total_time_ms < 2500) {
+                    auto iter_start =
+                        std::chrono::high_resolution_clock::now();
+                    for (uint32_t j = 0; j < batch; ++j) {
+                      bench->Run(i);
+                    }
+                    context->waitIdle();
+                    auto iter_end =
+                        std::chrono::high_resolution_clock::now();
+                    double iter_ms =
+                        std::chrono::duration_cast<std::chrono::nanoseconds>(
+                            iter_end - iter_start)
+                            .count() /
+                        1e6;
+                    if (verbose && iter_ms > 500.0) {
+                      std::cerr
+                          << "\n[WARNING] Dispatch batch took " << iter_ms
+                          << " ms — approaching amdgpu TDR timeout!" << std::endl;
+                    }
+                    if (iter_ms > 3000.0) {
+                      std::cerr
+                          << "\n[ABORT] Dispatch batch took " << iter_ms
+                          << " ms — aborting benchmark to avoid system crash."
+                          << std::endl;
+                      break;
+                    }
+                    total_invocations += batch;
+                    // Grow the batch until one batch occupies >= ~25 ms of GPU
+                    // time (cap 64), keeping the pipeline fed for short kernels.
+                    if (iter_ms < 25.0 && batch < 64 && !getenv("GPUBENCH_NO_BATCH")) {
+                      batch = (batch * 2 > 64) ? 64 : batch * 2;
+                    }
+                    auto now = std::chrono::high_resolution_clock::now();
+                    total_time_ms =
+                        std::chrono::duration_cast<std::chrono::nanoseconds>(
+                            now - bench_start)
+                            .count() /
+                        1e6;
                   }
-                  total_invocations += batch;
-                  // Grow the batch until one batch occupies >= ~25 ms of GPU
-                  // time (cap 64), keeping the pipeline fed for short kernels.
-                  if (iter_ms < 25.0 && batch < 64 && !getenv("GPUBENCH_NO_BATCH")) {
-                    batch = (batch * 2 > 64) ? 64 : batch * 2;
-                  }
-                  auto now = std::chrono::high_resolution_clock::now();
-                  total_time_ms =
-                      std::chrono::duration_cast<std::chrono::nanoseconds>(
-                          now - bench_start)
-                          .count() /
-                      1e6;
                 }
 
                 if (!verbose) {
@@ -779,6 +853,25 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
 
             if (verbose) {
               std::cout << "[Sys] Running " << bench_name << "..." << std::endl;
+            }
+
+            if (onResult) {
+              ResultData start_data;
+              start_data.backendName = "System";
+              start_data.deviceName = "Host CPU";
+              start_data.benchmarkName = bench_name;
+              start_data.component = bench->GetComponent(i);
+              start_data.subcategory = bench->GetSubCategory(i);
+              start_data.metric = bench->GetMetric(i);
+              start_data.operations = 0;
+              start_data.time_ms = -1.0;
+              start_data.isEmulated = false;
+              start_data.isUnsupported = false;
+              start_data.maxWorkGroupSize = 0;
+              start_data.deviceIndex = 0xFFFFFFFF;
+              start_data.configIndex = i;
+              start_data.sortWeight = bench->GetSortWeight();
+              onResult(start_data);
             }
 
             double total_time_ms = 0;

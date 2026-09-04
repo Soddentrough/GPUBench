@@ -127,6 +127,11 @@ public:
   void dispatchRayTracingIndirect(ComputeKernel kernel, ComputeBuffer indirectBuffer,
                                  VkDeviceSize offset = 0);
 
+  // Headless presentation hooks for profiling / tracing tools (e.g. RRA)
+  void enableHeadlessSwapchain() override;
+  void presentFrame() override;
+  bool isHeadlessSwapchainEnabled() const override { return headlessSwapchain != VK_NULL_HANDLE; }
+
 public:
   const std::vector<VkPhysicalDevice> &getPhysicalDevices() const {
     return physicalDevices;
@@ -202,4 +207,11 @@ private:
   std::set<std::string> enabledExtensionsSet;
   void printProgressBar(uint32_t current, uint32_t total,
                         const std::string &kernel_name);
+
+  VkSurfaceKHR headlessSurface = VK_NULL_HANDLE;
+  VkSwapchainKHR headlessSwapchain = VK_NULL_HANDLE;
+  std::vector<VkImage> swapchainImages;
+  bool headlessSurfaceSupported = false;
+  bool swapchainSupported = false;
+  void destroyHeadlessSwapchain();
 };

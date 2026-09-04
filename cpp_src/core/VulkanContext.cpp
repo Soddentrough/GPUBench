@@ -66,6 +66,7 @@ VulkanContext::~VulkanContext() {
   if (commandPool != VK_NULL_HANDLE) {
     vkDestroyCommandPool(device, commandPool, nullptr);
   }
+  destroyHeadlessSwapchain();
   if (device != VK_NULL_HANDLE) {
     vkDestroyDevice(device, nullptr);
   }
@@ -113,6 +114,26 @@ void VulkanContext::createInstance() {
   extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
   createInfo.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
 #endif
+
+  uint32_t instExtCount = 0;
+  vkEnumerateInstanceExtensionProperties(nullptr, &instExtCount, nullptr);
+  std::vector<VkExtensionProperties> availableInstExts(instExtCount);
+  vkEnumerateInstanceExtensionProperties(nullptr, &instExtCount, availableInstExts.data());
+  auto hasInstExt = [&](const char *name) {
+    for (const auto &ext : availableInstExts) {
+      if (strcmp(name, ext.extensionName) == 0) return true;
+    }
+    return false;
+  };
+
+  headlessSurfaceSupported = false;
+  if (hasInstExt(VK_KHR_SURFACE_EXTENSION_NAME) &&
+      hasInstExt(VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME)) {
+    extensions.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
+    extensions.push_back(VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME);
+    headlessSurfaceSupported = true;
+  }
+
   createInfo.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
   createInfo.ppEnabledExtensionNames =
       extensions.empty() ? nullptr : extensions.data();
@@ -372,6 +393,7 @@ void VulkanContext::pickPhysicalDevice(uint32_t index) {
       vkDestroyCommandPool(device, commandPool, nullptr);
       commandPool = VK_NULL_HANDLE;
     }
+    destroyHeadlessSwapchain();
     vkDestroyDevice(device, nullptr);
     device = VK_NULL_HANDLE;
   }
@@ -529,11 +551,14 @@ void VulkanContext::createDevice() {
       VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
       VK_KHR_RAY_TRACING_MAINTENANCE_1_EXTENSION_NAME,
       VK_EXT_DEVICE_GENERATED_COMMANDS_EXTENSION_NAME,
+      VK_KHR_SWAPCHAIN_EXTENSION_NAME,
       "VK_EXT_shader_float8",
       "VK_KHR_shader_float_controls2",
       "VK_EXT_ray_tracing_invocation_reorder",
       "VK_NV_ray_tracing_invocation_reorder",
       "VK_AMDX_shader_enqueue"};
+
+  swapchainSupported = hasExt(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
 
   std::vector<const char *> enabledExtensions;
   for (const auto &extension : desiredExtensions) {
@@ -1881,3 +1906,101 @@ ComputeKernel VulkanContext::createRTPipeline(
   kernels[vulkanKernel] = vulkanKernel;
   return vulkanKernel;
 }
+
+void VulkanContext::destroyHeadlessSwapchain() {
+  if (headlessSwapchain != VK_NULL_HANDLE) {
+    vkDestroySwapchainKHR(device, headlessSwapchain, nullptr);
+    headlessSwapchain = VK_NULL_HANDLE;
+    swapchainImages.clear();
+  }
+  if (headlessSurface != VK_NULL_HANDLE) {
+    vkDestroySurfaceKHR(instance, headlessSurface, nullptr);
+    headlessSurface = VK_NULL_HANDLE;
+  }
+}
+
+void VulkanContext::enableHeadlessSwapchain() {
+  if (headlessSwapchain != VK_NULL_HANDLE) {
+    return;
+  }
+  if (!headlessSurfaceSupported || !swapchainSupported) {
+    return;
+  }
+  if (device == VK_NULL_HANDLE || instance == VK_NULL_HANDLE) {
+    return;
+  }
+
+  auto pfnCreateHeadlessSurface =
+      reinterpret_cast<PFN_vkCreateHeadlessSurfaceEXT>(
+          vkGetInstanceProcAddr(instance, "vkCreateHeadlessSurfaceEXT"));
+  if (!pfnCreateHeadlessSurface) {
+    return;
+  }
+
+  if (headlessSurface == VK_NULL_HANDLE) {
+    VkHeadlessSurfaceCreateInfoEXT surfaceInfo{
+        VK_STRUCTURE_TYPE_HEADLESS_SURFACE_CREATE_INFO_EXT};
+    if (pfnCreateHeadlessSurface(instance, &surfaceInfo, nullptr,
+                                &headlessSurface) != VK_SUCCESS) {
+      return;
+    }
+  }
+
+  VkBool32 presentSupported = VK_FALSE;
+  vkGetPhysicalDeviceSurfaceSupportKHR(physicalDevice, computeQueueFamilyIndex,
+                                       headlessSurface, &presentSupported);
+  if (!presentSupported) {
+    return;
+  }
+
+  VkSwapchainCreateInfoKHR sci{VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR};
+  sci.surface = headlessSurface;
+  sci.minImageCount = 2;
+  sci.imageFormat = VK_FORMAT_B8G8R8A8_UNORM;
+  sci.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+  sci.imageExtent = {640, 480};
+  sci.imageArrayLayers = 1;
+  sci.imageUsage =
+      VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+  sci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+  sci.preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+  sci.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+  sci.presentMode = VK_PRESENT_MODE_FIFO_KHR;
+  sci.clipped = VK_TRUE;
+
+  if (vkCreateSwapchainKHR(device, &sci, nullptr, &headlessSwapchain) !=
+      VK_SUCCESS) {
+    headlessSwapchain = VK_NULL_HANDLE;
+    return;
+  }
+
+  uint32_t imgCount = 0;
+  vkGetSwapchainImagesKHR(device, headlessSwapchain, &imgCount, nullptr);
+  swapchainImages.resize(imgCount);
+  vkGetSwapchainImagesKHR(device, headlessSwapchain, &imgCount,
+                          swapchainImages.data());
+}
+
+void VulkanContext::presentFrame() {
+  if (headlessSwapchain == VK_NULL_HANDLE) {
+    enableHeadlessSwapchain();
+  }
+  if (headlessSwapchain == VK_NULL_HANDLE || computeQueue == VK_NULL_HANDLE) {
+    return;
+  }
+
+  uint32_t imageIndex = 0;
+  VkResult res = vkAcquireNextImageKHR(device, headlessSwapchain, UINT64_MAX,
+                                       VK_NULL_HANDLE, VK_NULL_HANDLE,
+                                       &imageIndex);
+  if (res != VK_SUCCESS && res != VK_SUBOPTIMAL_KHR) {
+    return;
+  }
+
+  VkPresentInfoKHR pi{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
+  pi.swapchainCount = 1;
+  pi.pSwapchains = &headlessSwapchain;
+  pi.pImageIndices = &imageIndex;
+  vkQueuePresentKHR(computeQueue, &pi);
+}
+

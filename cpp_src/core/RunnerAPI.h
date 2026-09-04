@@ -12,6 +12,7 @@ std::vector<ResultData> RunBenchmarksAPI(
     const std::vector<uint32_t>& device_indices,
     const std::vector<std::string>& backend_strs,
     bool verbose, bool debug, bool dump_geometry,
+    bool dump_renders = false,
     std::function<void(const ResultData&)> callback = nullptr);
 
 std::vector<std::string> GetAvailableHardwareAPI();

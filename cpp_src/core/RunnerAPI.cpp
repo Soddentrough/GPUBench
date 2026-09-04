@@ -9,6 +9,7 @@ std::vector<ResultData> RunBenchmarksAPI(
     const std::vector<uint32_t>& device_indices,
     const std::vector<std::string>& backend_strs,
     bool verbose, bool debug, bool dump_geometry,
+    bool dump_renders,
     std::function<void(const ResultData&)> callback)
 {
     // Never let C++ exceptions cross the cxx FFI boundary into Rust (that
@@ -62,7 +63,7 @@ std::vector<ResultData> RunBenchmarksAPI(
         context_ptrs.push_back(ctx.get());
     }
 
-    BenchmarkRunner runner(context_ptrs, verbose, debug, dump_geometry);
+    BenchmarkRunner runner(context_ptrs, verbose, debug, dump_geometry, dump_renders);
     if (callback) {
         runner.onResult = callback;
     }

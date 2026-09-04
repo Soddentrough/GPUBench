@@ -23,7 +23,7 @@ public:
 
   const char *GetName() const override;
   std::vector<std::string> GetAliases() const override {
-    return {"sysmem", "ram", "bw", "system"};
+    return {"sysmem_bandwidth", "ram_bandwidth", "sysmem_bw", "sysmem"};
   }
   const char *GetMetric() const override;
   bool IsSupported(const DeviceInfo &info,

@@ -113,6 +113,11 @@ public:
   virtual void releaseKernel(ComputeKernel kernel) = 0;
   virtual void waitIdle() = 0;
 
+  // Headless presentation hooks for profiling / tracing tools (e.g. RRA)
+  virtual void enableHeadlessSwapchain() {}
+  virtual void presentFrame() {}
+  virtual bool isHeadlessSwapchainEnabled() const { return false; }
+
   // Backend-specific accessors (returns nullptr if not applicable)
   virtual VkPhysicalDevice getVulkanPhysicalDevice() const { return nullptr; }
   virtual VkDevice getVulkanDevice() const { return nullptr; }

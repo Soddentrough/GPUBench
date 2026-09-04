@@ -23,6 +23,7 @@ public:
 
   void Setup(IComputeContext &context, const std::string &kernel_dir) override;
   void Run(uint32_t config_idx = 0) override;
+  void RebuildAccelerationStructures() override;
   void Teardown() override;
 
   BenchmarkResult GetResult(uint32_t config_idx = 0) const override;

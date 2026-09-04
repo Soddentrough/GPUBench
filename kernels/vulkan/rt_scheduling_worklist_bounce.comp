@@ -12,115 +12,333 @@ layout(set = 0, binding = 1) buffer Results {
 } results;
 
 struct CompactRayPayload {
-    vec4 originAndMatId;
-    vec4 directionAndSeed;
-    vec4 throughputAndMorton;
+    vec4 field0;
+    vec4 field1;
 };
 
 layout(set = 0, binding = 2) buffer WorkListBuffer {
     uint queueCounters[32];
-    CompactRayPayload rayRecords[1048576];
+    CompactRayPayload rayRecords[];
 } worklist;
 
 layout(push_constant) uniform PushConstants {
-    uint queueIndex;   // Queue index (0 for bounce compaction, or 0..7 for directional octants)
-    uint maxQueueSize; // Base stride (e.g. 16384 for octants, or 0 for single queue)
+    uint queueIndex;
+    uint maxQueueSize;
+    uint sceneType;       // 0: Indoor Atrium, 1: Outdoor Landscape
 } pc;
 
-// Procedural hash & value noise for atmospheric cloud coverage
-float skyHash21(vec2 p) {
-    p = fract(p * vec2(123.34, 456.21));
-    p += dot(p, p + 45.32);
-    return fract(p.x * p.y);
+shared uint ldsRays;
+shared uint ldsHits;
+
+// Scene Type Constants
+const uint SCENE_INDOOR_ATRIUM   = 0u;
+const uint SCENE_OUTDOOR_TERRAIN = 1u;
+
+// Indoor Atrium Primitives
+const uint PRIM_KNOT_PAINT_END  = 1536u;
+const uint PRIM_KNOT_JADE_END   = 3072u;
+const uint PRIM_KNOT_CHROME_END = 4608u;
+const uint PRIM_KNOT_VELVET_END = 6144u;
+const uint PRIM_KNOT_RUST_END   = 7680u;
+const uint PRIM_SPHERE_END      = 9600u;
+const uint PRIM_PEDESTAL_END    = 9728u;
+const uint PRIM_SUZANNE_END     = 10696u;
+const uint PRIM_FLOOR_END       = 27080u;
+const uint PRIM_WALLS_END       = 28104u;
+const uint PRIM_CEILING_END     = 29128u;
+const uint PRIM_COLUMNS_END     = 35272u;
+
+// Outdoor Landscape Primitives
+const uint PRIM_TERRAIN_END     = 32768u;
+const uint PRIM_WATER_END       = 34816u;
+const uint PRIM_TREES_END       = 57216u;
+
+uint pcg_hash(inout uint state) {
+    uint oldstate = state;
+    state = oldstate * 747796405u + 2891336453u;
+    uint word = ((oldstate >> ((oldstate >> 28u) + 4u)) ^ oldstate) * 277803737u;
+    return (word >> 22u) ^ word;
 }
 
-float skyNoise(vec2 p) {
-    vec2 i = floor(p);
-    vec2 f = fract(p);
+float rand_float(inout uint state) {
+    return float(pcg_hash(state) & 0x00FFFFFFu) / 16777216.0;
+}
+
+vec3 cosine_sample_hemisphere(float u1, float u2) {
+    float r = sqrt(u1);
+    float theta = 6.28318530718 * u2;
+    float x = r * cos(theta);
+    float y = r * sin(theta);
+    float z = sqrt(max(0.0, 1.0 - u1));
+    return vec3(x, y, z);
+}
+
+vec3 align_to_normal(vec3 sample_dir, vec3 normal) {
+    vec3 up = abs(normal.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+    vec3 tangent = normalize(cross(up, normal));
+    vec3 bitangent = cross(normal, tangent);
+    return tangent * sample_dir.x + bitangent * sample_dir.y + normal * sample_dir.z;
+}
+
+float hash31(vec3 p) {
+    p = fract(p * 0.1031);
+    p += dot(p, p.yzx + 33.33);
+    return fract((p.x + p.y) * p.z);
+}
+
+vec3 hash33(vec3 p) {
+    vec3 p3 = fract(p * vec3(0.1031, 0.1030, 0.0973));
+    p3 += dot(p3, p3.yxz + 33.33);
+    return fract((p3.xxy + p3.yxx) * p3.zyx);
+}
+
+float noise3D(vec3 p) {
+    vec3 i = floor(p);
+    vec3 f = fract(p);
     f = f * f * (3.0 - 2.0 * f);
-    float a = skyHash21(i);
-    float b = skyHash21(i + vec2(1.0, 0.0));
-    float c = skyHash21(i + vec2(0.0, 1.0));
-    float d = skyHash21(i + vec2(1.0, 1.0));
-    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+    float n000 = hash31(i + vec3(0, 0, 0));
+    float n100 = hash31(i + vec3(1, 0, 0));
+    float n010 = hash31(i + vec3(0, 1, 0));
+    float n110 = hash31(i + vec3(1, 1, 0));
+    float n011 = hash31(i + vec3(0, 0, 1));
+    float n101 = hash31(i + vec3(1, 0, 1));
+    float n011b = hash31(i + vec3(0, 1, 1));
+    float n111 = hash31(i + vec3(1, 1, 1));
+    return mix(
+        mix(mix(n000, n100, f.x), mix(n010, n110, f.x), f.y),
+        mix(mix(n011, n101, f.x), mix(n011b, n111, f.x), f.y),
+        f.z
+    );
 }
 
-float skyCloudFBM(vec2 p) {
+float rustFBM3D(vec3 p) {
     float v = 0.0;
     float a = 0.5;
-    mat2 rot = mat2(0.8, -0.6, 0.6, 0.8);
-    for (int i = 0; i < 3; ++i) {
-        v += a * skyNoise(p);
-        p = rot * p * 2.02 + vec2(1.7, 9.2);
+    mat3 rot = mat3(
+         0.00,  0.80,  0.60,
+        -0.80,  0.36, -0.48,
+        -0.60, -0.48,  0.64
+    );
+    for (int i = 0; i < 4; ++i) {
+        v += a * noise3D(p);
+        p = rot * p * 2.02 + vec3(1.7, 9.2, 0.4);
         a *= 0.5;
     }
     return v;
 }
 
-// Analytic Atmospheric Rayleigh-Mie Sky Model with Procedural Clouds for Ray Miss Evaluation
-vec3 evalAnalyticSky(vec3 dir) {
-    vec3 sunDir = normalize(vec3(0.4, 0.55, 0.72));
-    float cosTheta = clamp(dir.y, 0.0, 1.0);
-    float cosGamma = dot(dir, sunDir);
-
-    // Deep zenith gradient -> atmospheric haze
-    vec3 zenithCol = vec3(0.06, 0.22, 0.62);
-    vec3 horizonCol = vec3(0.58, 0.70, 0.84);
-    float rayleighPhase = 0.75 * (1.0 + cosGamma * cosGamma);
-    vec3 skyGrad = mix(horizonCol, zenithCol, pow(cosTheta, 0.55));
-
-    // Sharp solar disc + Henyey-Greenstein corona
-    float sunDisc = smoothstep(0.9985, 0.9995, cosGamma);
-    const float g = 0.82;
-    const float g2 = g * g;
-    float miePhase = (1.5 * (1.0 - g2) / (2.0 + g2)) * (1.0 + cosGamma * cosGamma) 
-                   / pow(max(1.0 + g2 - 2.0 * g * cosGamma, 0.001), 1.5);
-    vec3 sunColor = vec3(1.0, 0.92, 0.75);
-
-    vec3 sky = skyGrad * rayleighPhase + sunColor * (miePhase * 0.04) + sunColor * (sunDisc * 8.0);
-
-    // Procedural planar cloud deck (projected to altitude plane)
-    if (dir.y > 0.02) {
-        vec2 cloudUV = (dir.xz / (dir.y + 0.05)) * 1.8;
-        float cloudDensity = smoothstep(0.42, 0.75, skyCloudFBM(cloudUV));
-        if (cloudDensity > 0.0) {
-            float sunScatter = clamp(cosGamma, 0.0, 1.0);
-            vec3 cloudLit = vec3(0.72, 0.76, 0.82) * 0.4 + vec3(1.0, 0.96, 0.90) * 1.4 * pow(sunScatter, 3.0);
-            vec3 cloudShadow = vec3(0.35, 0.38, 0.45);
-            vec3 cloudColor = mix(cloudShadow, cloudLit, 0.6 + 0.4 * cosTheta);
-            sky = mix(sky, cloudColor, cloudDensity * 0.85);
-        }
+void getCamera(uint sceneType, out vec3 camPos, out vec3 camForward, out vec3 camRight, out vec3 camUp, out float fov) {
+    if (sceneType == SCENE_OUTDOOR_TERRAIN) {
+        // Outdoor Landscape: Mountain Valley Vista
+        camPos = vec3(0.0, -320.0, 75.0);
+        camForward = vec3(0.0, 0.997375, -0.072412);
+        camRight = vec3(1.0, 0.0, 0.0);
+        camUp = vec3(0.0, 0.072412, 0.997375);
+        fov = 0.45;
     } else {
-        vec3 groundCol = vec3(0.10, 0.09, 0.08);
-        sky = mix(horizonCol * 0.4, groundCol, clamp(-dir.y * 3.0, 0.0, 1.0));
+        // Indoor Atrium / Showroom: Central Sculpture Focus
+        camPos = vec3(-0.5081, -8.1276, 1.5591);
+        camForward = vec3(0.0562, 0.9852, -0.1622);
+        camRight = vec3(0.9984, -0.0570, 0.0000);
+        camUp = vec3(0.0092, 0.1619, 0.9868);
+        fov = 0.2155;
     }
+}
 
+vec3 evalStudioEnvironment(vec3 dir) {
+    float z = dir.z;
+    vec3 baseWall = mix(vec3(0.12, 0.13, 0.16), vec3(0.24, 0.26, 0.30), clamp(z * 1.5, 0.0, 1.0));
+    if (z < 0.0) {
+        baseWall = mix(vec3(0.12, 0.13, 0.16), vec3(0.06, 0.07, 0.08), clamp(-z * 2.0, 0.0, 1.0));
+    }
+    vec3 softboxDir1 = normalize(vec3(0.05, 0.30, 0.95));
+    float sb1 = pow(clamp(dot(dir, softboxDir1), 0.0, 1.0), 80.0) * 6.0;
+    vec3 softboxDir2 = normalize(vec3(-0.75, -0.20, 0.40));
+    float sb2 = pow(clamp(dot(dir, softboxDir2), 0.0, 1.0), 45.0) * 3.5;
+    vec3 softboxDir3 = normalize(vec3(0.65, 0.70, 0.30));
+    float sb3 = pow(clamp(dot(dir, softboxDir3), 0.0, 1.0), 40.0) * 2.5;
+    return baseWall + vec3(1.0, 0.98, 0.95) * sb1 + vec3(0.85, 0.92, 1.0) * sb2 + vec3(1.0, 0.90, 0.80) * sb3;
+}
+
+vec3 evalOutdoorSky(vec3 dir) {
+    vec3 sunDir = normalize(vec3(0.45, 0.35, 0.82));
+    float sunDot = max(dot(dir, sunDir), 0.0);
+    vec3 sky = mix(vec3(0.70, 0.82, 0.95), vec3(0.18, 0.42, 0.82), clamp(dir.z, 0.0, 1.0));
+    if (dir.z < 0.0) {
+        sky = mix(vec3(0.70, 0.82, 0.95), vec3(0.35, 0.30, 0.25), clamp(-dir.z * 2.0, 0.0, 1.0));
+    }
+    // Sun disc and golden glow
+    sky += vec3(1.0, 0.95, 0.85) * pow(sunDot, 120.0) * 8.0;
+    sky += vec3(1.0, 0.85, 0.60) * pow(sunDot, 12.0) * 0.8;
     return sky;
 }
+
+vec3 evalSky(uint sceneType, vec3 dir) {
+    if (sceneType == SCENE_OUTDOOR_TERRAIN) {
+        return evalOutdoorSky(dir);
+    }
+    return evalStudioEnvironment(dir);
+}
+
+struct SceneLight {
+    vec3 dir;
+    vec3 color;
+    float intensity;
+};
+
+const SceneLight SCENE_LIGHTS[4] = SceneLight[4](
+    SceneLight(vec3(0.28, -0.65, 0.70), vec3(1.0, 0.98, 0.94), 1.00),
+    SceneLight(vec3(-0.65, 0.55, 0.45), vec3(0.85, 0.90, 1.0), 0.35),
+    SceneLight(vec3(-0.50, -0.80, 0.35), vec3(1.0, 0.95, 0.85), 0.45),
+    SceneLight(vec3(0.0, 0.15, 0.98), vec3(0.60, 0.65, 0.70), 0.20)
+);
+
+float computeFloorOcclusion(vec3 hitPos) {
+    float occ = 1.0;
+    float dCenter = length(hitPos.xy - vec2(0.0, 0.2));
+    occ *= clamp(0.20 + 0.80 * smoothstep(0.4, 2.5, dCenter), 0.0, 1.0);
+    float dLeft = length(hitPos.xy - vec2(-1.8, -1.2));
+    occ *= clamp(0.15 + 0.85 * smoothstep(0.3, 2.0, dLeft), 0.0, 1.0);
+    float dFront = length(vec2(hitPos.x, (hitPos.y - (-1.5)) * 2.0));
+    occ *= clamp(0.18 + 0.82 * smoothstep(0.4, 2.2, dFront), 0.0, 1.0);
+    float dSphere = length(hitPos.xy - vec2(-3.24, 0.39));
+    occ *= clamp(0.10 + 0.90 * smoothstep(0.3, 1.4, dSphere), 0.0, 1.0);
+    float dPed = length(hitPos.xy - vec2(-0.46, 0.06));
+    occ *= clamp(0.08 + 0.92 * smoothstep(0.3, 1.2, dPed), 0.0, 1.0);
+    float dSuz = length(hitPos.xy - vec2(2.71, -0.57));
+    occ *= clamp(0.12 + 0.88 * smoothstep(0.3, 1.4, dSuz), 0.0, 1.0);
+    return occ;
+}
+
+uint computeMaterialId(uint sceneType, uint primId, vec3 hitPos, vec3 normal) {
+    if (sceneType == SCENE_OUTDOOR_TERRAIN) {
+        if (primId < PRIM_TERRAIN_END) {
+            if (hitPos.z >= 0.0 && hitPos.z <= 2.5 && abs(hitPos.x) < 170.0) {
+                return 7u; // Wet River Stones / Shoreline Boulders
+            }
+            if (hitPos.z > 65.0) {
+                return 3u; // High Mountain Snow & Glacial Ice
+            }
+            if (normal.z < 0.65) {
+                return 4u; // Exposed Granite Cliff Face
+            }
+            if (normal.z < 0.82) {
+                return 0u; // Weathered Sandstone & Scree Slope
+            }
+            return 5u;     // Valley Grassland / Alpine Meadow
+        }
+        if (primId < PRIM_WATER_END) {
+            return 2u;     // Alpine Lake / River Water Plane
+        }
+        uint treeLocalTri = (primId - PRIM_WATER_END) % 224u;
+        if (treeLocalTri < 32u) {
+            return 6u;     // Pine Bark / Timber Trunk
+        }
+        return 1u;         // Translucent Conifer Pine Foliage / Needles
+    } else {
+        if (primId < PRIM_KNOT_PAINT_END)  return 0u; // Knot Band 0: Ruby Car Paint (Inner Arch)
+        if (primId < PRIM_KNOT_JADE_END)   return 1u; // Knot Band 1: Jade Subsurface (Left Loop)
+        if (primId < PRIM_KNOT_CHROME_END) return 7u; // Knot Band 2: Chrome Mirror (Top Right Arch)
+        if (primId < PRIM_KNOT_VELVET_END) return 3u; // Knot Band 3: Magenta Velvet (Rear Arch)
+        if (primId < PRIM_KNOT_RUST_END)   return 4u; // Knot Band 4: Weathered Rust (Front Tube)
+        if (primId < PRIM_SPHERE_END)      return 1u; // Satellite Jade Sphere
+        if (primId < PRIM_PEDESTAL_END)    return 6u; // Gold Turned Pedestal
+        if (primId < PRIM_SUZANNE_END)     return 2u; // Suzanne Dispersive Glass Head
+        if (primId < PRIM_FLOOR_END)       return 5u; // Showroom Cyclorama Floor
+        if (primId < PRIM_WALLS_END)       return 4u; // Atrium Enclosing Walls (Bronze/Rust panels)
+        if (primId < PRIM_CEILING_END)     return 6u; // Vaulted Ceiling (Gold Coffered)
+        return 1u;                                    // Columns (Carrara Marble)
+    }
+}
+
+uint getArchetype(uint matId) {
+    return matId;
+}
+
+vec3 tonemapACES(vec3 x) {
+    const float a = 2.51;
+    const float b = 0.03;
+    const float c = 2.43;
+    const float d = 0.59;
+    const float e = 0.14;
+    vec3 mapped = clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
+    return pow(mapped, vec3(1.0 / 2.2));
+}
+
+void computePixelCoords(uint idx, uint pattern, uint width, uint height, out uint px_u, out uint py_u) {
+    if (pattern == 1) {
+        uint tilesX = (width + 7) / 8;
+        uint tileIdx = idx / 32;
+        uint inTile = idx % 32;
+        uint tileX = tileIdx % tilesX;
+        uint tileY = tileIdx / tilesX;
+        px_u = tileX * 8 + (inTile % 8);
+        py_u = tileY * 4 + (inTile / 8);
+    } else if (pattern == 2) {
+        uint tilesX = (width + 7) / 8;
+        uint tileIdx = idx / 32;
+        uint inTile = idx % 32;
+        uint tileX = tileIdx % tilesX;
+        uint tileY = tileIdx / tilesX;
+        uint mx = ((inTile >> 0) & 1) | (((inTile >> 2) & 1) << 1) | (((inTile >> 4) & 1) << 2);
+        uint my = ((inTile >> 1) & 1) | (((inTile >> 3) & 1) << 1);
+        px_u = tileX * 8 + mx;
+        py_u = tileY * 4 + my;
+    } else if (pattern == 3) {
+        uint tilesX = (width + 3) / 4;
+        uint tileIdx = idx / 32;
+        uint inTile = idx % 32;
+        uint tileX = tileIdx % tilesX;
+        uint tileY = tileIdx / tilesX;
+        uint mx = ((inTile >> 0) & 1) | (((inTile >> 2) & 1) << 1);
+        uint my = ((inTile >> 1) & 1) | (((inTile >> 3) & 1) << 1) | (((inTile >> 4) & 1) << 2);
+        px_u = tileX * 4 + mx;
+        py_u = tileY * 8 + my;
+    } else {
+        px_u = idx % width;
+        py_u = idx / width;
+    }
+}
+
 
 void main() {
     uint threadIdx = gl_GlobalInvocationID.x;
     uint activeCount = worklist.queueCounters[pc.queueIndex];
-    if (threadIdx >= activeCount) return;
 
-    uint recordIdx = pc.queueIndex * pc.maxQueueSize + threadIdx;
-    CompactRayPayload payload = worklist.rayRecords[recordIdx];
-    vec3 origin = payload.originAndMatId.xyz;
-    vec3 direction = payload.directionAndSeed.xyz;
+    if (gl_LocalInvocationID.x == 0) {
+        ldsRays = 0;
+        ldsHits = 0;
+    }
+    barrier();
 
-    rayQueryEXT query;
-    rayQueryInitializeEXT(query, topLevelAS, gl_RayFlagsNoneEXT, 0xFF, origin, 0.001, direction, 20.0);
-    while (rayQueryProceedEXT(query)) {}
+    bool activeRay = (threadIdx < activeCount);
+    if (activeRay) {
+        atomicAdd(ldsRays, 1);
 
-    atomicAdd(results.totalRays, 1);
+        uint recordIdx = pc.queueIndex * pc.maxQueueSize + threadIdx;
+        CompactRayPayload payload = worklist.rayRecords[recordIdx];
+        vec3 origin = payload.field0.xyz;
+        vec3 direction = payload.field1.xyz;
 
-    if (rayQueryGetIntersectionTypeEXT(query, true) != 0) {
-        atomicAdd(results.totalHits, 1);
-    } else {
-        vec3 sky = evalAnalyticSky(direction);
-        uint lum = uint(dot(sky, vec3(299.0, 587.0, 114.0)));
-        if (lum == 0xFFFFFFFFu) {
-            atomicAdd(results.totalHits, 1);
+        float tMaxBounce = (pc.sceneType == SCENE_OUTDOOR_TERRAIN) ? 500.0 : 20.0;
+        rayQueryEXT query;
+        rayQueryInitializeEXT(query, topLevelAS, gl_RayFlagsNoneEXT, 0xFF, origin, 0.005, direction, tMaxBounce);
+        while (rayQueryProceedEXT(query)) {}
+
+        if (rayQueryGetIntersectionTypeEXT(query, true) != 0) {
+            atomicAdd(ldsHits, 1);
+        } else {
+            vec3 sky = evalSky(pc.sceneType, direction);
+            uint lum = uint(dot(sky, vec3(299.0, 587.0, 114.0)));
+            if (lum == 0xFFFFFFFFu) {
+                atomicAdd(ldsHits, 1);
+            }
         }
+    }
+
+    barrier();
+    if (gl_LocalInvocationID.x == 0) {
+        if (ldsRays > 0) atomicAdd(results.totalRays, ldsRays);
+        if (ldsHits > 0) atomicAdd(results.totalHits, ldsHits);
     }
 }

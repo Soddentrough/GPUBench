@@ -39,8 +39,13 @@ GPUBench evaluates how different GPU hardware architectures handle these workloa
 
 1. **Traditional Megakernel**: Traces rays and evaluates all hit shading in a single massive compute pass. Suffering from the "convoy effect," a single complex material forces all lanes to allocate worst-case VGPRs and serializes execution over divergent SIMD branches.
 2. **Traditional + SER (Shader Execution Reordering)**: Leverages hardware reordering (`VK_KHR_ray_tracing_reorder` / NV SER) to dynamically regroup divergent lanes by spatial direction and material hit ID before executing hit shaders.
-3. **Work Lists / DGC (Wavefront Compaction)**: Compacts divergent hits into categorized material queues via atomic work lists and dispatches uniform waves using indirect command generation.
+3. **Work Lists / DGC (Wavefront Compaction)**: Compacts divergent hits into categorized material queues via atomic work lists and dispatches uniform waves using indirect command generation (`vkCmdDispatchIndirect`).
 4. **Work Graphs (Autonomous Node Enqueue)**: Uses GPU-autonomous execution graph pipelines (`VK_AMDX_shader_enqueue`) to dynamically enqueue child nodes without host or CPU round-trips.
+
+#### Dual-Scenario Benchmarking Morphology
+- **Complex Indoor Atrium (`-s indoor`)**: $35,272$ triangles with 0% sky escape, 8 heterogeneous production BSDFs, and 4-bounce path tracing. Work Lists achieve a **4.80x speedup** in material shading and **2.00x speedup** in path tracing.
+- **Open-World Outdoor Landscape (`-s outdoor`)**: $57,216$ triangles spanning $>2000\text{m}$ terrain, river, conifer foliage, and atmospheric Rayleigh-Mie scattering. Work Lists achieve a **1.87x speedup** in incoherent secondary rays and run primary RT at **3,184 FPS** (6,603 MRays/s).
+- **100% Bit-Exact Parity**: Verified bit-exact 120.00 dB PSNR and 0 discrepant pixels between paradigms.
 
 ---
 
@@ -105,21 +110,41 @@ Download the latest release package (`.rpm`, `.deb`, `.tar.gz`) from the [GitHub
 # List all available benchmarks
 gpubench --list-benchmarks
 
-# Run all benchmarks on the default device
+# Run all benchmarks on default device
 gpubench
 
-# Run specific benchmarks on a specific GPU device (e.g. Device 1)
-gpubench -d 1 -b FP32,RayScheduling,RayMaterialDivergence
+# Run Ray Scheduling on a specific GPU device (e.g. Device 1)
+gpubench -d 1 -b RayScheduling
+
+# Select benchmark scene morphology: indoor (default), outdoor, or all
+gpubench -d 1 -b RayScheduling -s outdoor
+gpubench -d 1 -b RayScheduling -s all
+
+# Dump 1080p PPM/PNG render buffers and analytical diff heatmaps to renders/
+gpubench -d 1 -b RayScheduling -s indoor --dump-frames
+
+# Run isolated sub-workload config (0-15) in single-submit profiling mode
+gpubench -d 1 -b RayScheduling -s indoor -c 2 --profile-snapshot
 
 # Export results to JSON
 gpubench -d 1 --json benchmark_results.json
 ```
 
+### Profiling & Telemetry Suite
+
+GPUBench includes turnkey Python tools for automated thread tracing with Mesa RADV / Radeon GPU Profiler (RGP) and AMD ROCm SMI telemetry:
+
+```bash
+# Capture RGP traces, amd-smi power/clock telemetry, and RGA ISA compilation
+python3 scripts/capture_gpu_profiles.py
+```
+
 ## Documentation
 
 - [Installation Guide](INSTALL.md) - Detailed build and install instructions.
+- [Ray Scheduling Architectures](docs/RAY_SCHEDULING_ARCHITECTURE.md) - Deep dive into decoupled scheduling, microarchitectural ISA analysis, and RGP timeline profiling.
+- [Performance Analysis](PERFORMANCE_ANALYSIS.md) - Compute and memory subsystem benchmarking.
 - [Version Requirements](VERSION_REQUIREMENTS.md) - Software and hardware requirements.
-- [Performance Analysis](PERFORMANCE_ANALYSIS.md) - Deep dive into how performance is measured.
 - [OpenCL Backend](OPENCL_BACKEND.md) - Details on the OpenCL implementation.
 - [Windows Packaging](WINDOWS_PACKAGING.md) - Instructions for Windows users.
 
