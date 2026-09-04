@@ -254,8 +254,13 @@ int main(int argc, char **argv) {
 
   if (rra_trace) {
     profile_snapshot = true;
+#ifdef __linux__
     setenv("MESA_VK_TRACE", "rra", 0);
     setenv("MESA_VK_TRACE_FRAME", "1", 0);
+#elif defined(_WIN32)
+    _putenv("MESA_VK_TRACE=rra");
+    _putenv("MESA_VK_TRACE_FRAME=1");
+#endif
   }
 
   if (!output_file.empty() && output_format.empty()) {
