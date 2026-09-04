@@ -392,19 +392,21 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
     unsupportedConfig[i] = false;
     unsupportedReason[i] = "";
   }
-  if (!serSupported) {
-    std::string reason = !hasSERExt
-        ? "extension VK_EXT_ray_tracing_invocation_reorder missing"
-        : "rayTracingInvocationReorder hardware bit not set";
-    unsupportedConfig[1] = true;
-    unsupportedReason[1] = reason;
-    unsupportedConfig[5] = true;
-    unsupportedReason[5] = reason;
-    unsupportedConfig[9] = true;
-    unsupportedReason[9] = reason;
-    unsupportedConfig[13] = true;
-    unsupportedReason[13] = reason;
-  }
+  // SER requires a Ray Tracing Pipeline (raygen with hit objects and reorderThreadEXT).
+  // In this compute-shader based benchmark, SER cannot be dispatched.
+  std::string serReason = !hasSERExt
+      ? "extension VK_EXT_ray_tracing_invocation_reorder missing"
+      : (!serSupported
+          ? "rayTracingInvocationReorder hardware bit not set"
+          : "VK_EXT_ray_tracing_invocation_reorder requires Ray Tracing Pipeline (not supported in compute shaders)");
+  unsupportedConfig[1] = true;
+  unsupportedReason[1] = serReason;
+  unsupportedConfig[5] = true;
+  unsupportedReason[5] = serReason;
+  unsupportedConfig[9] = true;
+  unsupportedReason[9] = serReason;
+  unsupportedConfig[13] = true;
+  unsupportedReason[13] = serReason;
 
   // Check Work Graphs support (VK_AMDX_shader_enqueue)
   bool hasWorkGraphsExt = vContext->isExtensionEnabled("VK_AMDX_shader_enqueue") ||

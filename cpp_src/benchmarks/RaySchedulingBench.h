@@ -100,7 +100,10 @@ public:
       return unsupportedReason[config_idx];
     }
     if (config_idx == 1 || config_idx == 5 || config_idx == 9 || config_idx == 13) {
-      return "extension VK_EXT_ray_tracing_invocation_reorder missing";
+      if (!unsupportedReason[config_idx].empty()) {
+        return unsupportedReason[config_idx];
+      }
+      return "VK_EXT_ray_tracing_invocation_reorder requires Ray Tracing Pipeline (not supported in compute shaders)";
     }
     if (config_idx == 3 || config_idx == 7 || config_idx == 11 || config_idx == 15) {
       return "extension VK_AMDX_shader_enqueue missing";

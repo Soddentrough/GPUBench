@@ -191,6 +191,79 @@ std::vector<DeviceProfile> GetDeviceProfilesAPI() {
                 }
             } catch (...) {}
         }
+        if (profiles.empty() && ComputeBackendFactory::isAvailable(ComputeBackend::OpenCL)) {
+            try {
+                auto ctx = ComputeBackendFactory::create(ComputeBackend::OpenCL, false, false);
+                if (ctx) {
+                    uint32_t i = 0;
+                    for (const auto& dev : ctx->getDevices()) {
+                        DeviceProfile p;
+                        p.backend = "OpenCL";
+                        p.deviceIndex = i;
+                        p.deviceName = dev.name;
+                        p.vendorID = dev.vendorID;
+                        p.deviceID = dev.deviceID;
+                        p.driverName = dev.driverName.empty() ? "OpenCL Driver" : dev.driverName;
+                        p.driverInfo = dev.driverInfo.empty() ? "OpenCL" : dev.driverInfo;
+                        p.driverVersion = dev.driverVersionStr.empty() ? std::to_string(dev.driverVersion) : dev.driverVersionStr;
+                        if (dev.apiVersion > 0) {
+                            uint32_t apiMajor = dev.apiVersion >> 22;
+                            uint32_t apiMinor = (dev.apiVersion >> 12) & 0x3FF;
+                            uint32_t apiPatch = dev.apiVersion & 0xFFF;
+                            p.apiVersion = std::to_string(apiMajor) + "." + std::to_string(apiMinor) + "." + std::to_string(apiPatch);
+                        } else {
+                            p.apiVersion = "OpenCL";
+                        }
+                        p.vramTotalMb = dev.memorySize / (1024 * 1024);
+                        p.subgroupSize = dev.subgroupSize;
+                        p.maxWorkGroupSize = dev.maxWorkGroupSize;
+                        p.rayTracingSupported = dev.rayTracingSupport;
+                        p.serSupported = dev.serSupported;
+                        p.workGraphsSupported = dev.workGraphsSupported;
+                        p.cooperativeMatrixSupported = dev.cooperativeMatrixSupport;
+                        p.float16Supported = dev.fp16Support;
+                        p.int8Supported = dev.int8Support;
+                        profiles.push_back(p);
+                        i++;
+                    }
+                }
+            } catch (...) {}
+        }
+        if (profiles.empty() && ComputeBackendFactory::isAvailable(ComputeBackend::ROCm)) {
+            try {
+                auto ctx = ComputeBackendFactory::create(ComputeBackend::ROCm, false, false);
+                if (ctx) {
+                    uint32_t i = 0;
+                    for (const auto& dev : ctx->getDevices()) {
+                        DeviceProfile p;
+                        p.backend = "ROCm";
+                        p.deviceIndex = i;
+                        p.deviceName = dev.name;
+                        p.vendorID = dev.vendorID;
+                        p.deviceID = dev.deviceID;
+                        p.driverName = dev.driverName.empty() ? "AMD ROCm / HIP" : dev.driverName;
+                        p.driverInfo = dev.driverInfo.empty() ? (dev.archName.empty() ? "HIP Runtime" : dev.archName) : dev.driverInfo;
+                        p.driverVersion = dev.driverVersionStr.empty() ? std::to_string(dev.driverVersion) : dev.driverVersionStr;
+                        if (dev.driverVersion > 0) {
+                            p.apiVersion = "HIP " + std::to_string(dev.driverVersion / 10000000) + "." + std::to_string((dev.driverVersion / 100000) % 100);
+                        } else {
+                            p.apiVersion = "ROCm";
+                        }
+                        p.vramTotalMb = dev.memorySize / (1024 * 1024);
+                        p.subgroupSize = dev.subgroupSize;
+                        p.maxWorkGroupSize = dev.maxWorkGroupSize;
+                        p.rayTracingSupported = dev.rayTracingSupport;
+                        p.serSupported = dev.serSupported;
+                        p.workGraphsSupported = dev.workGraphsSupported;
+                        p.cooperativeMatrixSupported = dev.cooperativeMatrixSupport;
+                        p.float16Supported = dev.fp16Support;
+                        p.int8Supported = dev.int8Support;
+                        profiles.push_back(p);
+                        i++;
+                    }
+                }
+            } catch (...) {}
+        }
     } catch (const std::exception& e) {
         std::cerr << "GetDeviceProfilesAPI failed: " << e.what() << std::endl;
     } catch (...) {

@@ -1787,6 +1787,8 @@ impl Application for GPUBenchApp {
                 struct DeviceReport {
                     device_id: u32,
                     device_name: String,
+                    #[serde(skip_serializing_if = "Option::is_none")]
+                    profile: Option<DeviceProfile>,
                     benchmarks: Vec<WorkloadResultReport>,
                 }
 
@@ -1814,8 +1816,10 @@ impl Application for GPUBenchApp {
                     avg_power_w: f32,
                 }
 
+                let all_profiles = get_device_profiles();
                 let mut device_reports = Vec::new();
                 for (dev_id, dev_name) in &self.active_device_targets {
+                    let dev_profile = all_profiles.iter().find(|p| p.device_index == *dev_id).cloned();
                     let mut b_list = Vec::new();
                     for w in WORKLOADS {
                         if (w.is_system && *dev_id != SYSTEM_DEVICE_ID) || (!w.is_system && *dev_id == SYSTEM_DEVICE_ID) {
@@ -1848,6 +1852,7 @@ impl Application for GPUBenchApp {
                     device_reports.push(DeviceReport {
                         device_id: *dev_id,
                         device_name: dev_name.clone(),
+                        profile: dev_profile,
                         benchmarks: b_list,
                     });
                 }
@@ -1871,7 +1876,7 @@ impl Application for GPUBenchApp {
                     backend: self.selected_backend.clone(),
                     resolution: format!("{} ({}x{})", self.selected_resolution.label(), res_w, res_h),
                     system_info: SystemInfo::collect(),
-                    device_profiles: get_device_profiles(),
+                    device_profiles: all_profiles,
                     devices: self.active_device_targets.iter().map(|(_, n)| n.clone()).collect(),
                     results: device_reports,
                     telemetry: telem_reports,

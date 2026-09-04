@@ -6,6 +6,7 @@
 #include "core/BenchmarkRunner.h"
 #include "core/ComputeBackendFactory.h"
 #include "core/ResultFormatter.h"
+#include "core/RunnerAPI.h"
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
@@ -46,15 +47,22 @@ std::string jsonEscape(const std::string &s) {
       break;
     default:
       out += c;
+      break;
     }
   }
   return out;
 }
 
-// Quote a field for CSV (RFC 4180 style: quote when it contains comma,
-// quote, or newline; double up embedded quotes).
+// Quote a field for CSV (RFC 4180 style).
 std::string csvQuote(const std::string &s) {
-  if (s.find_first_of(",\"\n\r") == std::string::npos) {
+  bool needs_quotes = false;
+  for (char c : s) {
+    if (c == ',' || c == '"' || c == '\n' || c == '\r') {
+      needs_quotes = true;
+      break;
+    }
+  }
+  if (!needs_quotes) {
     return s;
   }
   std::string out = "\"";
@@ -65,32 +73,67 @@ std::string csvQuote(const std::string &s) {
       out += c;
     }
   }
-  out += '"';
+  out += "\"";
   return out;
 }
 
-static double computeResultValue(const ResultData &r) {
-  if (r.metric == "ns") {
-    return (r.operations > 0) ? ((r.time_ms * 1e6) / r.operations) : 0.0;
+double computeResultValue(const ResultData &r) {
+  double value = 0.0;
+  if (r.time_ms > 0.0 && r.operations > 0) {
+    double seconds = r.time_ms / 1000.0;
+    if (r.metric == "TFLOPS" || r.metric == "TOPS") {
+      value = (static_cast<double>(r.operations) / seconds) / 1e12;
+    } else if (r.metric == "GB/s") {
+      value = (static_cast<double>(r.operations) / seconds) / 1e9;
+    } else if (r.metric == "MRays/s" || r.metric == "MHits/s" ||
+               r.metric == "MTris/s" || r.metric == "MInst/s" ||
+               r.metric == "MRecords/s") {
+      value = (static_cast<double>(r.operations) / seconds) / 1e6;
+    } else if (r.metric == "GIS/s") {
+      value = (static_cast<double>(r.operations) / seconds) / 1e9;
+    } else if (r.metric == "GPixels/s") {
+      value = (static_cast<double>(r.operations) / seconds) / 1e9;
+    } else if (r.metric == "ns") {
+      value = (r.time_ms * 1e6) / static_cast<double>(r.operations);
+    }
   }
-  double time_s = r.time_ms / 1000.0;
-  if (time_s <= 0.0) return 0.0;
-
-  if (r.metric == "TFLOPS" || r.metric == "TOPS") {
-    return (r.operations / time_s) / 1e12;
-  } else if (r.metric == "GB/s") {
-    return (r.operations / time_s) / 1e9;
-  } else if (r.metric == "MRays/s" || r.metric == "MHits/s" || r.metric == "MRecords/s" ||
-             r.metric == "MTris/s" || r.metric == "MInst/s") {
-    return (r.operations / time_s) / 1e6;
-  } else if (r.metric == "GRays/s" || r.metric == "GIS/s" || r.metric == "GPixels/s") {
-    return (r.operations / time_s) / 1e9;
-  }
-  return r.operations / time_s;
+  return value;
 }
 
 std::string resultsToJson(const std::vector<ResultData> &results) {
-  std::string out = "[\n";
+  auto profiles = GetDeviceProfilesAPI();
+  std::string out = "{\n";
+  out += "  \"version\": \"" + std::string(GPUBENCH_VERSION) + "\",\n";
+  out += "  \"device_profiles\": [\n";
+  for (size_t d = 0; d < profiles.size(); ++d) {
+    const auto &dp = profiles[d];
+    char vendorHex[16], deviceHex[16];
+    std::snprintf(vendorHex, sizeof(vendorHex), "0x%04X", dp.vendorID);
+    std::snprintf(deviceHex, sizeof(deviceHex), "0x%04X", dp.deviceID);
+
+    out += "    {\n";
+    out += "      \"backend\": \"" + jsonEscape(dp.backend) + "\",\n";
+    out += "      \"device_index\": " + std::to_string(dp.deviceIndex) + ",\n";
+    out += "      \"device_name\": \"" + jsonEscape(dp.deviceName) + "\",\n";
+    out += "      \"vendor_id\": \"" + std::string(vendorHex) + "\",\n";
+    out += "      \"device_id\": \"" + std::string(deviceHex) + "\",\n";
+    out += "      \"driver_name\": \"" + jsonEscape(dp.driverName) + "\",\n";
+    out += "      \"driver_info\": \"" + jsonEscape(dp.driverInfo) + "\",\n";
+    out += "      \"driver_version\": \"" + jsonEscape(dp.driverVersion) + "\",\n";
+    out += "      \"api_version\": \"" + jsonEscape(dp.apiVersion) + "\",\n";
+    out += "      \"vram_total_mb\": " + std::to_string(dp.vramTotalMb) + ",\n";
+    out += "      \"subgroup_size\": " + std::to_string(dp.subgroupSize) + ",\n";
+    out += "      \"max_workgroup_size\": " + std::to_string(dp.maxWorkGroupSize) + ",\n";
+    out += "      \"ray_tracing_supported\": " + std::string(dp.rayTracingSupported ? "true" : "false") + ",\n";
+    out += "      \"ser_supported\": " + std::string(dp.serSupported ? "true" : "false") + ",\n";
+    out += "      \"work_graphs_supported\": " + std::string(dp.workGraphsSupported ? "true" : "false") + ",\n";
+    out += "      \"cooperative_matrix_supported\": " + std::string(dp.cooperativeMatrixSupported ? "true" : "false") + ",\n";
+    out += "      \"float16_supported\": " + std::string(dp.float16Supported ? "true" : "false") + ",\n";
+    out += "      \"int8_supported\": " + std::string(dp.int8Supported ? "true" : "false") + "\n";
+    out += (d + 1 < profiles.size()) ? "    },\n" : "    }\n";
+  }
+  out += "  ],\n";
+  out += "  \"results\": [\n";
   for (size_t i = 0; i < results.size(); ++i) {
     const ResultData &r = results[i];
     std::string devIdxStr = (r.deviceIndex == 0xFFFFFFFF || r.backendName == "System")
@@ -98,40 +141,41 @@ std::string resultsToJson(const std::vector<ResultData> &results) {
                                 : std::to_string(r.deviceIndex);
     double value = computeResultValue(r);
 
-    out += "  {\n";
-    out += "    \"backend\": \"" + jsonEscape(r.backendName) + "\",\n";
-    out += "    \"device\": \"" + jsonEscape(r.deviceName) + "\",\n";
-    out += "    \"device_index\": " + devIdxStr + ",\n";
-    out += "    \"benchmark\": \"" + jsonEscape(r.benchmarkName) + "\",\n";
-    out += "    \"component\": \"" + jsonEscape(r.component) + "\",\n";
-    out += "    \"subcategory\": \"" + jsonEscape(r.subcategory) + "\",\n";
-    out += "    \"metric\": \"" + jsonEscape(r.metric) + "\",\n";
-    out += "    \"value\": " + std::to_string(value) + ",\n";
+    out += "    {\n";
+    out += "      \"backend\": \"" + jsonEscape(r.backendName) + "\",\n";
+    out += "      \"device\": \"" + jsonEscape(r.deviceName) + "\",\n";
+    out += "      \"device_index\": " + devIdxStr + ",\n";
+    out += "      \"benchmark\": \"" + jsonEscape(r.benchmarkName) + "\",\n";
+    out += "      \"component\": \"" + jsonEscape(r.component) + "\",\n";
+    out += "      \"subcategory\": \"" + jsonEscape(r.subcategory) + "\",\n";
+    out += "      \"metric\": \"" + jsonEscape(r.metric) + "\",\n";
+    out += "      \"value\": " + std::to_string(value) + ",\n";
     if (r.benchmarkName.find("RayScheduling") != std::string::npos && r.metric == "MRays/s") {
       uint32_t w = r.width ? r.width : 1920;
       uint32_t h = r.height ? r.height : 1080;
       double fps = (value * 1e6) / static_cast<double>(w * h);
-      out += "    \"fps\": " + std::to_string(fps) + ",\n";
-      out += "    \"resolution\": \"" + std::to_string(w) + "x" + std::to_string(h) + "\",\n";
+      out += "      \"fps\": " + std::to_string(fps) + ",\n";
+      out += "      \"resolution\": \"" + std::to_string(w) + "x" + std::to_string(h) + "\",\n";
     }
-    out += "    \"operations\": " + std::to_string(r.operations) + ",\n";
-    out += "    \"time_ms\": " + std::to_string(r.time_ms) + ",\n";
-    out += std::string("    \"is_emulated\": ") +
+    out += "      \"operations\": " + std::to_string(r.operations) + ",\n";
+    out += "      \"time_ms\": " + std::to_string(r.time_ms) + ",\n";
+    out += std::string("      \"is_emulated\": ") +
            (r.isEmulated ? "true" : "false") + ",\n";
-    out += std::string("    \"unsupported\": ") +
+    out += std::string("      \"unsupported\": ") +
            (r.isUnsupported ? "true" : "false") + ",\n";
     if (r.isUnsupported) {
-      out += "    \"unsupported_category\": \"" +
+      out += "      \"unsupported_category\": \"" +
              jsonEscape(r.supportCategory) + "\",\n";
-      out += "    \"unsupported_reason\": \"" + jsonEscape(r.supportNote) +
+      out += "      \"unsupported_reason\": \"" + jsonEscape(r.supportNote) +
              "\",\n";
     }
-    out += "    \"max_workgroup_size\": " +
+    out += "      \"max_workgroup_size\": " +
            std::to_string(r.maxWorkGroupSize) + ",\n";
-    out += "    \"config_index\": " + std::to_string(r.configIndex) + "\n";
-    out += (i + 1 < results.size()) ? "  },\n" : "  }\n";
+    out += "      \"config_index\": " + std::to_string(r.configIndex) + "\n";
+    out += (i + 1 < results.size()) ? "    },\n" : "    }\n";
   }
-  out += "]\n";
+  out += "  ]\n";
+  out += "}\n";
   return out;
 }
 

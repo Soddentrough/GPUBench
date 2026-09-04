@@ -35,6 +35,23 @@ HARDWARE_BASELINES = {
             ("Memory Bandwidth (R/W)", "GB/s"): (400.0, 450.0, 580.0),
             ("L1 Cache", "GB/s"): (2000.0, 3500.0, 6000.0),
         }
+    },
+    "navi31": {
+        "description": "AMD Radeon RX 7900 XTX / GFX1100 (RDNA3 / Navi 31)",
+        "baselines": {
+            ("FP64", "TFLOPS"): (0.90, 1.15, 1.40),
+            ("FP32", "TFLOPS"): (32.0, 43.5, 65.0),
+            ("FP16 (Vector)", "TFLOPS"): (45.0, 66.0, 125.0),
+            ("FP16 (Matrix)", "TFLOPS"): (90.0, 137.0, 160.0),
+            ("BF16 (Matrix)", "TFLOPS"): (90.0, 137.0, 160.0),
+            ("INT8 (Vector)", "TOPS"): (30.0, 54.0, 125.0),
+            ("INT8 (Matrix)", "TOPS"): (90.0, 140.0, 200.0),
+            ("Memory Bandwidth", "GB/s"): (700.0, 900.0, 960.0),
+            ("Memory Bandwidth (Read)", "GB/s"): (700.0, 900.0, 960.0),
+            ("Memory Bandwidth (Write)", "GB/s"): (650.0, 850.0, 960.0),
+            ("Memory Bandwidth (R/W)", "GB/s"): (600.0, 800.0, 960.0),
+            ("L1 Cache", "GB/s"): (2000.0, 4000.0, 7000.0),
+        }
     }
 }
 
@@ -51,6 +68,8 @@ def identify_arch(device_str: str) -> str:
     dev = device_str.lower()
     if "gfx1201" in dev or "r9700" in dev or "9070" in dev:
         return "gfx1201"
+    if "7900" in dev or "gfx1100" in dev or "navi 31" in dev or "navi31" in dev:
+        return "navi31"
     return "gfx1201"  # Default to target system GPU
 
 
@@ -110,7 +129,7 @@ def canonicalize_bench_name(bench: str, subcat: str) -> str:
         if "matrix" in b or "wmma" in b:
             return "BF16 (Matrix)"
         return "BF16 (Vector)"
-    if "memory bandwidth" in b:
+    if "bandwidth" in b:
         # Avoid matching 'read' inside 'threads'!
         mode_str = "READ"
         if "write" in b:
@@ -119,6 +138,8 @@ def canonicalize_bench_name(bench: str, subcat: str) -> str:
             mode_str = "R/W"
         elif "read " in b or b.startswith("read") or "(read" in b:
             mode_str = "READ"
+        elif "vram" in b or "memory" in b:
+            return "Memory Bandwidth"
 
         for sz in ["1024", "256", "128"]:
             if sz in b:
@@ -129,7 +150,76 @@ def canonicalize_bench_name(bench: str, subcat: str) -> str:
     return bench
 
 
-def evaluate_results(data: List[Dict[str, Any]]) -> bool:
+def extract_benchmark_items(data: Any) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """
+    Extracts flat benchmark result items and device profiles from either:
+    - CLI dict: {"version": ..., "device_profiles": [...], "results": [...]}
+    - GUI dict: {"timestamp": ..., "device_profiles": [...], "results": [{"benchmarks": [...]}]}
+    - Flat list: [{"benchmark": ...}, ...]
+    Returns (benchmark_items, device_profiles).
+    """
+    device_profiles: List[Dict[str, Any]] = []
+    items: List[Dict[str, Any]] = []
+
+    if isinstance(data, dict):
+        device_profiles = data.get("device_profiles", [])
+        raw_results = data.get("results", [])
+        backend_top = data.get("backend", "")
+
+        for entry in raw_results:
+            if isinstance(entry, dict) and "benchmarks" in entry:
+                # GUI DeviceReport format
+                dev_name = entry.get("device_name", "Unknown Device")
+                dev_profile = entry.get("profile")
+                if dev_profile and not device_profiles:
+                    device_profiles.append(dev_profile)
+
+                for bm in entry.get("benchmarks", []):
+                    numeric_val = bm.get("numeric", 0.0)
+                    if numeric_val is None:
+                        numeric_val = 0.0
+                    items.append({
+                        "backend": backend_top or "Vulkan",
+                        "device": dev_name,
+                        "benchmark": bm.get("label", bm.get("id", "")),
+                        "component": bm.get("category", ""),
+                        "subcategory": bm.get("approach", ""),
+                        "metric": bm.get("unit", ""),
+                        "value": float(numeric_val),
+                        "unsupported": bm.get("status", "").lower() == "unsupported",
+                        "unsupported_reason": bm.get("unsupported_reason") or "",
+                    })
+            elif isinstance(entry, dict) and "benchmark" in entry:
+                # CLI ResultData format
+                items.append(entry)
+    elif isinstance(data, list):
+        for entry in data:
+            if isinstance(entry, dict) and "benchmarks" in entry:
+                dev_name = entry.get("device_name", "Unknown Device")
+                for bm in entry.get("benchmarks", []):
+                    numeric_val = bm.get("numeric", 0.0)
+                    if numeric_val is None:
+                        numeric_val = 0.0
+                    items.append({
+                        "backend": "Vulkan",
+                        "device": dev_name,
+                        "benchmark": bm.get("label", bm.get("id", "")),
+                        "component": bm.get("category", ""),
+                        "subcategory": bm.get("approach", ""),
+                        "metric": bm.get("unit", ""),
+                        "value": float(numeric_val),
+                        "unsupported": bm.get("status", "").lower() == "unsupported",
+                        "unsupported_reason": bm.get("unsupported_reason") or "",
+                    })
+            elif isinstance(entry, dict):
+                items.append(entry)
+
+    return items, device_profiles
+
+
+def evaluate_results(raw_data: Any) -> bool:
+    data, device_profiles = extract_benchmark_items(raw_data)
+
     arch = "gfx1201"
     for item in data:
         dev_name = item.get("device", "")
@@ -142,6 +232,22 @@ def evaluate_results(data: List[Dict[str, Any]]) -> bool:
     print(f"{Colors.BOLD}{Colors.CYAN} GPUBench Verification & Regression Analysis{Colors.RESET}")
     print(f" Target Architecture Profile: {Colors.BOLD}{arch_desc}{Colors.RESET}")
     print(f"{Colors.BOLD}{Colors.CYAN}{'='*80}{Colors.RESET}\n")
+
+    if device_profiles:
+        print(f"{Colors.BOLD}Detected GPU Profiles ({len(device_profiles)}):{Colors.RESET}")
+        for p in device_profiles:
+            v_id = p.get("vendor_id", "")
+            d_id = p.get("device_id", "")
+            dev_name = p.get("device_name", "Unknown")
+            backend = p.get("backend", "")
+            vram = p.get("vram_total_mb", 0)
+            driver = p.get("driver_info") or p.get("driver_version") or p.get("driver_name", "")
+            rt_str = "RT: Y" if p.get("ray_tracing_supported") else "RT: N"
+            ser_str = "SER: Y" if p.get("ser_supported") else "SER: N"
+            wg_str = "WG: Y" if p.get("work_graphs_supported") else "WG: N"
+            cm_str = "WMMA: Y" if p.get("cooperative_matrix_supported") else "WMMA: N"
+            print(f" - [{backend}] {dev_name} (Vendor: {v_id}, Device: {d_id}, VRAM: {vram} MB, Driver: {driver}) [{rt_str}, {ser_str}, {wg_str}, {cm_str}]")
+        print()
 
     all_passed = True
     regressions: List[str] = []
@@ -280,7 +386,7 @@ def evaluate_results(data: List[Dict[str, Any]]) -> bool:
         print(f"{'Benchmark':<32} {'Backend':<10} {'Diagnostic Reason':<55} {'Status'}")
         print("-" * 105)
 
-        valid_markers = ["extension ", "bit not set", "No support for ", "lacks ", "not defined", "missing"]
+        valid_markers = ["extension ", "bit not set", "No support for ", "lacks ", "not defined", "missing", "requires "]
 
         for item in unsupported_items:
             bench = item.get("benchmark", "")
