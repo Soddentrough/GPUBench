@@ -1471,8 +1471,26 @@ impl Application for GPUBenchApp {
                     if tests_to_run.is_empty() { return Command::none(); }
 
                     // Estimate total expected configs across all targets
-                    let gpu_configs = 36;
-                    let sys_configs = if has_system { 3 } else { 0 };
+                    let mut gpu_configs = 0;
+                    for t in &tests_to_run {
+                        if t.contains("System Memory") { continue; }
+                        gpu_configs += match t.as_str() {
+                            "Device Memory Bandwidth" => 9,
+                            "Pixel Fill Rate" => 3,
+                            "FP16" | "BF16" | "FP8" | "INT8" | "INT4" => 2,
+                            "RayASBuild" => 3,
+                            "RayPathTracing" => 3,
+                            "RayScheduling" | "RayExecutionParadigm" => 8,
+                            _ => 1,
+                        };
+                    }
+                    let mut sys_configs = 0;
+                    if has_system {
+                        for t in &tests_to_run {
+                            if t == "System Memory Bandwidth" { sys_configs += 2; }
+                            else if t == "System Memory Latency" { sys_configs += 1; }
+                        }
+                    }
                     let total_configs = (gpu_indices.len() * gpu_configs) + sys_configs;
                     self.total_expected_configs = total_configs.max(1);
 
@@ -1554,8 +1572,10 @@ impl Application for GPUBenchApp {
                 for res in results_to_process {
                     self.process_result(&res);
                 }
-                self.completed_configs_count = self.total_expected_configs;
-                self.state = AppState::Complete { total_configs: self.total_expected_configs };
+                let final_count = self.completed_configs_count.max(self.total_expected_configs);
+                self.completed_configs_count = final_count;
+                self.total_expected_configs = final_count;
+                self.state = AppState::Complete { total_configs: final_count };
                 self.current_benchmark = String::from("Complete");
                 return Command::none();
             }
@@ -2433,17 +2453,26 @@ impl Application for GPUBenchApp {
                 ];
 
                 let mut table_column = column![header_row].spacing(12);
+                let mut has_any_category = false;
 
                 for (cat_name, cat_color) in categories {
                     let cat_workloads: Vec<&WorkloadDef> = WORKLOADS.iter()
                         .filter(|w| w.category == cat_name)
                         .filter(|w| !w.is_system || targets.iter().any(|(d, _)| *d == SYSTEM_DEVICE_ID))
                         .filter(|w| !w.category.starts_with("RAY") || self.selected_backend == "VULKAN")
+                        .filter(|w| {
+                            self.is_workload_selected(w)
+                                || targets.iter().any(|(dev_id, _)| {
+                                    self.results_map.get(&(*dev_id, w.id))
+                                        .map_or(false, |c| !c.value_str.is_empty() || c.is_unsupported || c.is_running)
+                                })
+                        })
                         .collect();
 
                     if cat_workloads.is_empty() {
                         continue;
                     }
+                    has_any_category = true;
 
                     let cat_header = row![
                         container(Space::with_width(3)).height(12).style(move |_t: &Theme| container::Appearance {
@@ -2564,6 +2593,17 @@ impl Application for GPUBenchApp {
                     ].spacing(2);
 
                     table_column = table_column.push(cat_panel);
+                }
+
+                if !has_any_category {
+                    table_column = table_column.push(
+                        container(
+                            text("No test results to display. Click 'RUN NEW TEST' to configure and run benchmarks.")
+                                .size(13).style(color!(0x94A3B8))
+                        )
+                        .padding(24)
+                        .center_x()
+                    );
                 }
 
                 // Hardware Thermal & Power Profile Section (on Complete)
@@ -2730,13 +2770,13 @@ impl GPUBenchApp {
             "int4_vec" | "int4_mat" => self.selected_tests.contains("INT4"),
             "gpu_vram_bw" => self.selected_tests.contains("Device Memory Bandwidth"),
             "cache_l0" | "cache_l1" | "cache_l2" | "cache_l3" => {
-                self.selected_tests.contains("Device Memory Bandwidth") || self.selected_tests.iter().any(|t| t.contains("Cache"))
+                self.selected_tests.iter().any(|t| t.contains("Cache"))
             }
             "sys_mem_bw_multi" | "sys_mem_bw_single" => self.selected_tests.contains("System Memory Bandwidth"),
             "sys_mem_lat" => self.selected_tests.contains("System Memory Latency"),
             "rop_rgba8" | "rop_rgba16f" | "rop_blend" => self.selected_tests.contains("Pixel Fill Rate"),
             "rt_triangle" => self.selected_tests.contains("RayTracing"),
-            "rt_divergence" => self.selected_tests.contains("RayDivergence"),
+            "rt_divergence" => self.selected_tests.contains("RayDivergence") || self.selected_tests.contains("RayMaterialDivergence"),
             "rt_anyhit" => self.selected_tests.contains("RayAnyHit"),
             "rt_incoherent" => self.selected_tests.contains("RayIncoherent"),
             "rt_payload" => self.selected_tests.contains("RayPayload"),
@@ -2746,7 +2786,7 @@ impl GPUBenchApp {
             id if id.starts_with("rt_sched_") => {
                 self.selected_tests.iter().any(|t| t.contains("RayScheduling") || t.contains("RayExecutionParadigm"))
             }
-            _ => true,
+            _ => false,
         }
     }
 
