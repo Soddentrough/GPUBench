@@ -13,6 +13,8 @@ std::vector<ResultData> RunBenchmarksAPI(
     const std::vector<std::string>& backend_strs,
     bool verbose, bool debug, bool dump_geometry,
     bool dump_renders = false,
+    uint32_t renderWidth = 0,
+    uint32_t renderHeight = 0,
     std::function<void(const ResultData&)> callback = nullptr);
 
 std::vector<std::string> GetAvailableHardwareAPI();

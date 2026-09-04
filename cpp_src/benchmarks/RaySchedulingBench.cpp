@@ -292,11 +292,11 @@ const char *RaySchedulingBench::GetSubCategory(uint32_t config_idx) const {
 }
 
 int RaySchedulingBench::GetSortWeight(uint32_t config_idx) const {
-  if (config_idx >= 12 && config_idx <= 15) return 610; // Primary Ray Tracing
-  if (config_idx < 4) return 640;                       // Material Shading
-  if (config_idx >= 8 && config_idx <= 11) return 660;  // Incoherent Ray Tracing
-  if (config_idx >= 4 && config_idx <= 7) return 680;   // Path Tracing
-  return 690;                                           // Stage Breakdown
+  if (config_idx >= 12 && config_idx <= 15) return 610 + static_cast<int>(config_idx - 12); // Primary: 610..613
+  if (config_idx < 4) return 630 + static_cast<int>(config_idx);                             // Material: 630..633
+  if (config_idx >= 8 && config_idx <= 11) return 640 + static_cast<int>(config_idx - 8);   // Incoherent: 640..643
+  if (config_idx >= 4 && config_idx <= 7) return 650 + static_cast<int>(config_idx - 4);    // Path Tracing: 650..653
+  return 690 + static_cast<int>(config_idx - 16);                                            // Stage Breakdown: 690..696
 }
 
 void RaySchedulingBench::Setup(IComputeContext &context_ref,

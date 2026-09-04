@@ -584,6 +584,9 @@ void VulkanContext::createDevice() {
     enabledExtensionsSet.insert(ext);
   }
 
+  serSupported = hasExt("VK_EXT_ray_tracing_invocation_reorder") &&
+                 (serFeatures.rayTracingInvocationReorderEXT == VK_TRUE);
+
   VkDeviceCreateInfo createInfo{};
   createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
   createInfo.pNext = &features2; // Enable all modern features

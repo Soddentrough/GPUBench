@@ -10,6 +10,8 @@ std::vector<ResultData> RunBenchmarksAPI(
     const std::vector<std::string>& backend_strs,
     bool verbose, bool debug, bool dump_geometry,
     bool dump_renders,
+    uint32_t renderWidth,
+    uint32_t renderHeight,
     std::function<void(const ResultData&)> callback)
 {
     // Never let C++ exceptions cross the cxx FFI boundary into Rust (that
@@ -64,6 +66,7 @@ std::vector<ResultData> RunBenchmarksAPI(
     }
 
     BenchmarkRunner runner(context_ptrs, verbose, debug, dump_geometry, dump_renders);
+    runner.setResolution(renderWidth, renderHeight);
     if (callback) {
         runner.onResult = callback;
     }

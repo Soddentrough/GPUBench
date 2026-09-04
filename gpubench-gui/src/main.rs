@@ -674,6 +674,7 @@ pub struct WorkloadDef {
     pub approach: &'static str,
     pub default_unit: &'static str,
     pub desc: &'static str,
+    pub api_extensions: &'static str,
     pub is_system: bool,
 }
 
@@ -686,6 +687,7 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         approach: "64-bit IEEE vector FMA",
         default_unit: "TFLOPS",
         desc: "Double-precision 64-bit floating point compute throughput.",
+        api_extensions: "Vulkan / OpenCL / ROCm Core Compute (Float64)",
         is_system: false,
     },
     WorkloadDef {
@@ -695,6 +697,7 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         approach: "32-bit vector FMA",
         default_unit: "TFLOPS",
         desc: "Single-precision 32-bit float compute throughput, standard for graphics and compute shaders.",
+        api_extensions: "Vulkan / OpenCL / ROCm Core Compute (Float32)",
         is_system: false,
     },
     WorkloadDef {
@@ -704,6 +707,7 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         approach: "16-bit packed SIMD",
         default_unit: "TFLOPS",
         desc: "Half-precision 16-bit float SIMD vector throughput.",
+        api_extensions: "VK_KHR_shader_float16_int8 / cl_khr_fp16",
         is_system: false,
     },
     WorkloadDef {
@@ -713,6 +717,7 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         approach: "Cooperative Matrix",
         default_unit: "TFLOPS",
         desc: "Hardware matrix cores half-precision tensor compute throughput using VK_KHR_cooperative_matrix.",
+        api_extensions: "VK_KHR_cooperative_matrix / ROCm WMMA",
         is_system: false,
     },
     WorkloadDef {
@@ -722,6 +727,7 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         approach: "Bfloat16 SIMD",
         default_unit: "TFLOPS",
         desc: "16-bit Brain Floating Point vector throughput for machine learning models.",
+        api_extensions: "VK_KHR_shader_float_controls2 / ROCm BF16",
         is_system: false,
     },
     WorkloadDef {
@@ -731,6 +737,7 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         approach: "Cooperative Matrix",
         default_unit: "TFLOPS",
         desc: "Hardware matrix cores Bfloat16 tensor compute throughput.",
+        api_extensions: "VK_KHR_cooperative_matrix / ROCm WMMA",
         is_system: false,
     },
     WorkloadDef {
@@ -740,6 +747,7 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         approach: "8-bit float vector",
         default_unit: "TFLOPS",
         desc: "Quarter-precision 8-bit float arithmetic (E4M3/E5M2) for modern low-bit AI inference.",
+        api_extensions: "VK_EXT_shader_float8 / ROCm FP8",
         is_system: false,
     },
     WorkloadDef {
@@ -749,6 +757,7 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         approach: "Cooperative Matrix",
         default_unit: "TFLOPS",
         desc: "Hardware 8-bit float matrix multiplication throughput.",
+        api_extensions: "VK_KHR_cooperative_matrix / ROCm WMMA",
         is_system: false,
     },
     WorkloadDef {
@@ -758,6 +767,7 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         approach: "8-bit DP4A integer",
         default_unit: "TOPS",
         desc: "8-bit quantized integer vector throughput.",
+        api_extensions: "VK_KHR_shader_integer_dot_product (DP4A)",
         is_system: false,
     },
     WorkloadDef {
@@ -767,6 +777,7 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         approach: "Cooperative Matrix",
         default_unit: "TOPS",
         desc: "Hardware matrix 8-bit integer tensor throughput.",
+        api_extensions: "VK_KHR_cooperative_matrix / ROCm WMMA",
         is_system: false,
     },
     WorkloadDef {
@@ -776,6 +787,7 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         approach: "4-bit packed integer",
         default_unit: "TOPS",
         desc: "4-bit quantized vector arithmetic.",
+        api_extensions: "Vulkan Subgroup Bit Packing (4-bit INT)",
         is_system: false,
     },
     WorkloadDef {
@@ -785,6 +797,7 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         approach: "Cooperative Matrix",
         default_unit: "TOPS",
         desc: "Hardware matrix 4-bit integer throughput.",
+        api_extensions: "VK_KHR_cooperative_matrix (Sub-byte INT4)",
         is_system: false,
     },
 
@@ -796,6 +809,7 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         approach: "Coalesced device stream",
         default_unit: "GB/s",
         desc: "Peak memory read/write streaming bandwidth across dedicated GPU VRAM bus.",
+        api_extensions: "Vulkan / OpenCL / ROCm Linear Buffer DMA",
         is_system: false,
     },
     WorkloadDef {
@@ -805,6 +819,7 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         approach: "L0 / LDS pointer chase",
         default_unit: "ns",
         desc: "Level 0 vector cache access latency in nanoseconds (lower is better).",
+        api_extensions: "Compute Shared Memory (LDS) Pointer Chase",
         is_system: false,
     },
     WorkloadDef {
@@ -814,6 +829,7 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         approach: "GL1C pointer chase",
         default_unit: "ns",
         desc: "Level 1 cache access latency in nanoseconds (lower is better).",
+        api_extensions: "Hardware Global L1 Cache Pointer Chase",
         is_system: false,
     },
     WorkloadDef {
@@ -823,6 +839,7 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         approach: "GL2C pointer chase",
         default_unit: "ns",
         desc: "Level 2 cache access latency in nanoseconds (lower is better).",
+        api_extensions: "Hardware Global L2 Cache Pointer Chase",
         is_system: false,
     },
     WorkloadDef {
@@ -832,6 +849,7 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         approach: "MALL / Infinity Cache chase",
         default_unit: "ns",
         desc: "Level 3 / Infinity Cache access latency in nanoseconds (lower is better).",
+        api_extensions: "Memory Attached Last Level (MALL) Chase",
         is_system: false,
     },
     WorkloadDef {
@@ -841,6 +859,7 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         approach: "AVX2 multi-thread stream",
         default_unit: "GB/s",
         desc: "Multi-threaded host RAM copy and streaming bandwidth from CPU to system DDR memory.",
+        api_extensions: "x86_64 AVX2 / Non-Temporal Streaming Stores",
         is_system: true,
     },
     WorkloadDef {
@@ -850,6 +869,7 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         approach: "AVX2 single-thread stream",
         default_unit: "GB/s",
         desc: "Single-threaded host system RAM streaming bandwidth.",
+        api_extensions: "x86_64 AVX2 Single-Thread Streaming",
         is_system: true,
     },
     WorkloadDef {
@@ -859,6 +879,7 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         approach: "CPU pointer chase",
         default_unit: "ns",
         desc: "Host memory access latency in nanoseconds (lower is better).",
+        api_extensions: "Hardware DRAM Pointer Chase",
         is_system: true,
     },
 
@@ -870,6 +891,7 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         approach: "Hardware 32-bit ROP",
         default_unit: "GPixels/s",
         desc: "Standard 32-bit RGBA ROP rasterization fill rate.",
+        api_extensions: "Vulkan Graphics Pipeline (VK_FORMAT_R8G8B8A8_UNORM)",
         is_system: false,
     },
     WorkloadDef {
@@ -879,6 +901,7 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         approach: "Hardware 64-bit HDR ROP",
         default_unit: "GPixels/s",
         desc: "64-bit HDR framebuffer rasterization throughput.",
+        api_extensions: "Vulkan Graphics Pipeline (VK_FORMAT_R16G16B16A16_SFLOAT)",
         is_system: false,
     },
     WorkloadDef {
@@ -888,6 +911,7 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         approach: "Hardware ROP blending",
         default_unit: "GPixels/s",
         desc: "ROP hardware alpha blend rasterization rate.",
+        api_extensions: "Vulkan Blend Operations (SrcAlpha, OneMinusSrcAlpha)",
         is_system: false,
     },
 
@@ -900,6 +924,7 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         approach: "Standard game mesh AS build",
         default_unit: "MTris/s",
         desc: "Bottom-level AS construction for standard game assets (1M triangles).",
+        api_extensions: "VK_KHR_acceleration_structure",
         is_system: false,
     },
     WorkloadDef {
@@ -909,6 +934,7 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         approach: "Dynamic mesh BVH refit",
         default_unit: "MTris/s",
         desc: "Dynamic in-place vertex update refit rate (1M triangles).",
+        api_extensions: "VK_KHR_acceleration_structure (VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR)",
         is_system: false,
     },
     WorkloadDef {
@@ -918,6 +944,7 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         approach: "Heavy mesh / L3 cache spill",
         default_unit: "MTris/s",
         desc: "AS construction exceeding L3 Infinity Cache, stressing memory controllers (5M triangles).",
+        api_extensions: "VK_KHR_acceleration_structure",
         is_system: false,
     },
     WorkloadDef {
@@ -927,6 +954,7 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         approach: "Dynamic mesh refit (5M)",
         default_unit: "MTris/s",
         desc: "Dynamic in-place vertex update refit rate for heavy 5M triangle geometry.",
+        api_extensions: "VK_KHR_acceleration_structure (VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR)",
         is_system: false,
     },
     WorkloadDef {
@@ -936,6 +964,7 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         approach: "Massive hero mesh AS build",
         default_unit: "MTris/s",
         desc: "Production-scale high-density mesh construction throughput (10M triangles).",
+        api_extensions: "VK_KHR_acceleration_structure",
         is_system: false,
     },
     WorkloadDef {
@@ -945,6 +974,7 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         approach: "Room & Hallway Hierarchy (5k Meshes)",
         default_unit: "MInst/s",
         desc: "Clustered room/hallway hierarchy with high mesh diversity (~1:4 instancing ratio).",
+        api_extensions: "VK_KHR_acceleration_structure (Top-Level)",
         is_system: false,
     },
     WorkloadDef {
@@ -954,6 +984,7 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         approach: "High-Overlap Foliage (500 Meshes)",
         default_unit: "MInst/s",
         desc: "Dense overlapping foliage canopy on undulating terrain (~1:100 instancing ratio).",
+        api_extensions: "VK_KHR_acceleration_structure (Top-Level)",
         is_system: false,
     },
     WorkloadDef {
@@ -963,6 +994,7 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         approach: "Multi-Scale Geographic (5k Meshes)",
         default_unit: "MInst/s",
         desc: "Vast multi-scale landscape hierarchy (terrain sectors, urban blocks, micro-props).",
+        api_extensions: "VK_KHR_acceleration_structure (Top-Level)",
         is_system: false,
     },
 
@@ -974,6 +1006,7 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         approach: "Monolithic Megakernel",
         default_unit: "MRays/s",
         desc: "Traditional monolithic primary camera ray dispatch.",
+        api_extensions: "VK_KHR_ray_query (Vulkan Compute)",
         is_system: false,
     },
     WorkloadDef {
@@ -983,10 +1016,9 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         approach: "Material Sorting",
         default_unit: "MRays/s",
         desc: "Using ExecuteIndirect (Work Lists): Separates camera ray generation and material shading into dedicated work queues.",
+        api_extensions: "VK_KHR_ray_query, VK_EXT_device_generated_commands",
         is_system: false,
     },
-
-    // Phase 3: Geometry & Primitive Intersection
     WorkloadDef {
         id: "rt_triangle",
         category: "RAY TRACING ACCELERATION",
@@ -994,6 +1026,7 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         approach: "Hardware BVH Ray Query",
         default_unit: "GIS/s",
         desc: "Peak BVH acceleration structure traversal and ray-triangle intersection throughput.",
+        api_extensions: "VK_KHR_ray_query (Ray-Triangle Intersection Engine)",
         is_system: false,
     },
     WorkloadDef {
@@ -1003,6 +1036,7 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         approach: "AnyHit opacity eval",
         default_unit: "GRays/s",
         desc: "Traversal and shader invocation throughput against transparent, alpha-tested geometry.",
+        api_extensions: "VK_KHR_ray_query (Custom AnyHit Opacity Shader)",
         is_system: false,
     },
     WorkloadDef {
@@ -1012,10 +1046,11 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         approach: "Analytical AABB eval",
         default_unit: "GRays/s",
         desc: "Intersection evaluation against mathematically defined procedural primitives (spheres).",
+        api_extensions: "VK_KHR_ray_query (AABB Intersection Traversal)",
         is_system: false,
     },
 
-    // Phase 4: Material Shading & Divergence
+    // Phase 3: Material Shading & Divergence
     WorkloadDef {
         id: "rt_sched_mat_trad",
         category: "RAY TRACING ACCELERATION",
@@ -1023,6 +1058,7 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         approach: "Monolithic Megakernel",
         default_unit: "MHits/s",
         desc: "Traditional monolithic compute shader with dynamic loop branching across heterogeneous materials.",
+        api_extensions: "VK_KHR_ray_query (Dynamic Loop Branching)",
         is_system: false,
     },
     WorkloadDef {
@@ -1032,10 +1068,11 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         approach: "Using ExecuteIndirect (Work Lists)",
         default_unit: "MHits/s",
         desc: "Using ExecuteIndirect (Work Lists): 2-pass parallel compaction into uniform material queues to eliminate branch divergence.",
+        api_extensions: "VK_KHR_ray_query, VK_EXT_device_generated_commands",
         is_system: false,
     },
 
-    // Phase 5: Secondary Rays & Traversal Divergence
+    // Phase 4: Secondary Rays & Traversal Divergence
     WorkloadDef {
         id: "rt_sched_incoh_trad",
         category: "RAY TRACING ACCELERATION",
@@ -1043,6 +1080,7 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         approach: "Monolithic Megakernel",
         default_unit: "MRays/s",
         desc: "Traditional unordered traversal of highly divergent secondary rays.",
+        api_extensions: "VK_KHR_ray_query (Unordered BVH Traversal)",
         is_system: false,
     },
     WorkloadDef {
@@ -1052,6 +1090,7 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         approach: "Directional Binning",
         default_unit: "MRays/s",
         desc: "Using ExecuteIndirect (Work Lists): Sorts scattered secondary rays into directional bins before BVH traversal.",
+        api_extensions: "VK_KHR_ray_query, VK_EXT_device_generated_commands (Octant Binning)",
         is_system: false,
     },
     WorkloadDef {
@@ -1061,6 +1100,7 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         approach: "Cosine diffuse bounce",
         default_unit: "GRays/s",
         desc: "Cache hit rate and traversal speed under randomized non-coherent diffuse bounce distributions.",
+        api_extensions: "VK_KHR_ray_query (Cosine Weighted Sampling)",
         is_system: false,
     },
     WorkloadDef {
@@ -1070,10 +1110,11 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         approach: "Coherence gradient rays",
         default_unit: "GRays/s",
         desc: "BVH traversal throughput under heavy branch and wave execution divergence.",
+        api_extensions: "VK_KHR_ray_query (Wavefront Divergence)",
         is_system: false,
     },
 
-    // Phase 6: Multi-Bounce Path Tracing
+    // Phase 5: Multi-Bounce Path Tracing
     WorkloadDef {
         id: "rt_sched_pt_trad",
         category: "RAY TRACING ACCELERATION",
@@ -1081,6 +1122,7 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         approach: "Monolithic Megakernel",
         default_unit: "MRays/s",
         desc: "Traditional megakernel path tracing where terminated rays leave SIMD lanes idle across multiple bounces.",
+        api_extensions: "VK_KHR_ray_query (Monte Carlo Megakernel)",
         is_system: false,
     },
     WorkloadDef {
@@ -1090,6 +1132,7 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         approach: "Active Ray Compaction",
         default_unit: "MRays/s",
         desc: "Using ExecuteIndirect (Work Lists): Compacts non-terminated bounce rays into packed queues, keeping wavefronts 100% full.",
+        api_extensions: "VK_KHR_ray_query, VK_EXT_device_generated_commands (Ray Compaction)",
         is_system: false,
     },
     WorkloadDef {
@@ -1099,10 +1142,11 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         approach: "Stochastic 8-bounce GI",
         default_unit: "MRays/s",
         desc: "Full multi-bounce stochastic Monte Carlo path tracing with global illumination and cosine sampling.",
+        api_extensions: "VK_KHR_ray_query (8-Bounce Global Illumination)",
         is_system: false,
     },
 
-    // Phase 7: Architectural Stress & Advanced Features
+    // Phase 6: Architectural Stress & Advanced Features
     WorkloadDef {
         id: "rt_payload",
         category: "RAY TRACING ACCELERATION",
@@ -1110,6 +1154,7 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         approach: "16B - 256B register payload",
         default_unit: "GRays/s",
         desc: "Ray traversal performance under heavy recursive register payload pressure.",
+        api_extensions: "VK_KHR_ray_query (Spill-to-Scratch Register Pressure)",
         is_system: false,
     },
     WorkloadDef {
@@ -1118,7 +1163,8 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         label: "Hardware Reordering (SER)",
         approach: "Shader Execution Reordering (SER)",
         default_unit: "MRays/s",
-        desc: "Hardware-level dynamic thread reordering during traversal (VK_NV_ray_tracing_invocation_reorder).",
+        desc: "Hardware-level dynamic thread reordering during traversal (VK_EXT_ray_tracing_invocation_reorder).",
+        api_extensions: "VK_EXT_ray_tracing_invocation_reorder",
         is_system: false,
     },
     WorkloadDef {
@@ -1128,9 +1174,45 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         approach: "Autonomous Node Enqueue",
         default_unit: "MRays/s",
         desc: "Autonomous GPU-driven work creation via node record routing (VK_AMDX_shader_enqueue).",
+        api_extensions: "VK_AMDX_shader_enqueue",
         is_system: false,
     },
 ];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResolutionPreset {
+    Auto,
+    Fhd1080p,
+    Qhd1440p,
+    Uhd4k,
+}
+
+impl ResolutionPreset {
+    pub const ALL: [ResolutionPreset; 4] = [
+        ResolutionPreset::Auto,
+        ResolutionPreset::Fhd1080p,
+        ResolutionPreset::Qhd1440p,
+        ResolutionPreset::Uhd4k,
+    ];
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            ResolutionPreset::Auto => "Auto (Adaptive)",
+            ResolutionPreset::Fhd1080p => "1080p (FHD)",
+            ResolutionPreset::Qhd1440p => "1440p (QHD)",
+            ResolutionPreset::Uhd4k => "4K (UHD)",
+        }
+    }
+
+    pub fn dimensions(&self) -> (u32, u32) {
+        match self {
+            ResolutionPreset::Auto => (0, 0),
+            ResolutionPreset::Fhd1080p => (1920, 1080),
+            ResolutionPreset::Qhd1440p => (2560, 1440),
+            ResolutionPreset::Uhd4k => (3840, 2160),
+        }
+    }
+}
 
 enum AppState {
     Setup {
@@ -1160,6 +1242,7 @@ struct GPUBenchApp {
     selected_devices: HashSet<String>,
     available_tests: Vec<String>,
     dump_renders: bool,
+    selected_resolution: ResolutionPreset,
     
     // Multi-Hardware Telemetry
     monitored_devices: Vec<DeviceTelemetry>,
@@ -1224,6 +1307,7 @@ enum Message {
     Tick,
     SaveResults,
     Retest,
+    ResolutionSelected(ResolutionPreset),
 }
 
 impl Application for GPUBenchApp {
@@ -1267,6 +1351,7 @@ impl Application for GPUBenchApp {
                 available_tests: tests,
                 selected_tests: initial_tests,
                 dump_renders: false,
+                selected_resolution: ResolutionPreset::Auto,
                 current_benchmark: String::from("Waiting to start..."),
                 current_devices_label: String::from(""),
                 monitored_devices: monitored,
@@ -1363,6 +1448,10 @@ impl Application for GPUBenchApp {
             }
             Message::DumpRendersToggled(val) => {
                 self.dump_renders = val;
+                Command::none()
+            }
+            Message::ResolutionSelected(preset) => {
+                self.selected_resolution = preset;
                 Command::none()
             }
             Message::TelemetryDeviceSelected(idx) => {
@@ -1562,6 +1651,7 @@ impl Application for GPUBenchApp {
                     }
 
                     let dump_renders_val = self.dump_renders;
+                    let (res_w, res_h) = self.selected_resolution.dimensions();
 
                     self.state = AppState::Running {
                         progress_receiver: Some(rx),
@@ -1581,6 +1671,8 @@ impl Application for GPUBenchApp {
                                     false,
                                     false,
                                     dump_renders_val,
+                                    res_w,
+                                    res_h,
                                     progress_callback
                                 )
                             }).await
@@ -1992,6 +2084,49 @@ impl Application for GPUBenchApp {
                 .on_press(Message::StartBenchmarks)
                 .style(iced::theme::Button::Custom(Box::new(SleekPrimaryButton)));
 
+                                let resolution_section = {
+                    let mut res_col = column![].spacing(4);
+                    for preset in ResolutionPreset::ALL {
+                        let is_sel = self.selected_resolution == preset;
+                        let btn = button(
+                            row![
+                                text(if is_sel { "(•)" } else { "( )" }).size(10).style(if is_sel { color!(0x818CF8) } else { color!(0x475569) }),
+                                Space::with_width(6),
+                                text(preset.label()).size(10).style(if is_sel { color!(0xF8FAFC) } else { color!(0x94A3B8) })
+                            ].align_items(iced::Alignment::Center)
+                        )
+                        .padding([5, 8])
+                        .width(Length::Fill)
+                        .on_press(Message::ResolutionSelected(preset))
+                        .style(iced::theme::Button::Custom(Box::new(SleekDeviceCheckbox { is_checked: is_sel })));
+
+                        let tip = match preset {
+                            ResolutionPreset::Auto => "Hardware-adaptive: 4K for 16GB+ GPUs, 1440p for 10-12GB GPUs, 1080p for <10GB GPUs",
+                            ResolutionPreset::Fhd1080p => "Fixed 1920x1080 (2.07M rays / 66 MB) — Fits on-chip cache on high-end GPUs",
+                            ResolutionPreset::Qhd1440p => "Fixed 2560x1440 (3.69M rays / 118 MB) — Mid-range cache-stress benchmark",
+                            ResolutionPreset::Uhd4k => "Fixed 3840x2160 (8.29M rays / 265 MB) — Spills L3 Infinity Cache on all GPUs",
+                        };
+
+                        let row_with_tip = tooltip(
+                            btn,
+                            container(text(tip).size(10).style(color!(0xE2E8F0)))
+                                .width(Length::Fixed(240.0))
+                                .padding(8)
+                                .style(|_t: &Theme| container::Appearance {
+                                    background: Some(Background::Color(color!(0x141824))),
+                                    border: Border { radius: 6.0.into(), width: 1.0, color: color!(0x2A3248) },
+                                    ..Default::default()
+                                }),
+                            tooltip::Position::Top
+                        )
+                        .gap(4)
+                        .style(iced::theme::Container::Transparent);
+
+                        res_col = res_col.push(row_with_tip);
+                    }
+                    res_col
+                };
+
                 let dump_renders_btn = {
                     let is_checked = self.dump_renders;
                     let check_box = text(if is_checked { "[X] " } else { "[   ] " })
@@ -2038,6 +2173,10 @@ impl Application for GPUBenchApp {
                         text("TARGET DEVICES").size(10).style(color!(0x64748B)),
                         Space::with_height(4),
                         device_col,
+                        Space::with_height(14),
+                        text("TARGET RESOLUTION").size(10).style(color!(0x64748B)),
+                        Space::with_height(4),
+                        resolution_section,
                         Space::with_height(14),
                         text("OPTIONS").size(10).style(color!(0x64748B)),
                         Space::with_height(4),
@@ -2449,14 +2588,6 @@ impl Application for GPUBenchApp {
                         ],
                         progress_bar(0.0..=total.max(completed.max(1.0)), completed).height(6.0),
                     ].spacing(6).width(Length::Fill),
-                    Space::with_width(16),
-                    button(
-                        container(text("SAVE RESULTS").size(12).style(color!(0xFFFFFF)))
-                            .padding([6, 14])
-                            .center_x()
-                    )
-                    .on_press(Message::SaveResults)
-                    .style(iced::theme::Button::Custom(Box::new(SleekPrimaryButton))),
                 ].align_items(iced::Alignment::Center);
 
                 let targets = if self.active_device_targets.is_empty() {
@@ -2748,6 +2879,100 @@ impl Application for GPUBenchApp {
                     Space::with_height(0).into()
                 };
 
+                let current_workload_card: Element<'_, Message> = {
+                    let is_complete = matches!(self.state, AppState::Complete { .. });
+                    let workload_opt = if is_complete {
+                        None
+                    } else {
+                        find_workload_for_benchmark(&self.current_benchmark)
+                    };
+
+                    if is_complete {
+                        container(
+                            column![
+                                row![
+                                    container(Space::with_width(3)).height(10).style(|_t: &Theme| container::Appearance {
+                                        background: Some(Background::Color(color!(0x10B981))),
+                                        border: Border { radius: 2.0.into(), ..Default::default() },
+                                        ..Default::default()
+                                    }),
+                                    Space::with_width(6),
+                                    text("SUITE FINISHED").size(9).style(color!(0x10B981)),
+                                ].align_items(iced::Alignment::Center),
+                                Space::with_height(4),
+                                text("All tests completed successfully.").size(10).style(color!(0xF8FAFC)),
+                                text(format!("{}/{} configs evaluated.", self.completed_configs_count, self.total_expected_configs)).size(9).style(color!(0x94A3B8)),
+                            ].spacing(2)
+                        )
+                        .padding(10)
+                        .width(Length::Fill)
+                        .style(|_t: &Theme| container::Appearance {
+                            background: Some(Background::Color(color!(0x0C121E))),
+                            border: Border { radius: 8.0.into(), width: 1.0, color: color!(0x1E293B) },
+                            ..Default::default()
+                        })
+                        .into()
+                    } else if let Some(w) = workload_opt {
+                        container(
+                            column![
+                                row![
+                                    container(Space::with_width(3)).height(10).style(|_t: &Theme| container::Appearance {
+                                        background: Some(Background::Color(color!(0x38BDF8))),
+                                        border: Border { radius: 2.0.into(), ..Default::default() },
+                                        ..Default::default()
+                                    }),
+                                    Space::with_width(6),
+                                    text("ACTIVE WORKLOAD").size(9).style(color!(0x38BDF8)),
+                                    Space::with_width(Length::Fill),
+                                    text("RUNNING").size(9).style(color!(0x22D3EE))
+                                ].align_items(iced::Alignment::Center),
+                                Space::with_height(4),
+                                text(w.label).size(11).style(color!(0xF8FAFC)),
+                                text(w.category).size(8).style(color!(0x818CF8)),
+                                Space::with_height(4),
+                                column![
+                                    text("APPROACH / METHOD").size(8).style(color!(0x64748B)),
+                                    text(w.approach).size(9).style(color!(0x38BDF8)),
+                                ].spacing(1),
+                                Space::with_height(3),
+                                column![
+                                    text("WHAT IT MEASURES").size(8).style(color!(0x64748B)),
+                                    text(w.desc).size(9).style(color!(0x94A3B8)),
+                                ].spacing(1),
+                                Space::with_height(3),
+                                column![
+                                    text("API & EXTENSIONS").size(8).style(color!(0x64748B)),
+                                    text(w.api_extensions).size(9).style(color!(0x10B981)),
+                                ].spacing(1),
+                            ].spacing(2)
+                        )
+                        .padding(10)
+                        .width(Length::Fill)
+                        .style(|_t: &Theme| container::Appearance {
+                            background: Some(Background::Color(color!(0x0E1322))),
+                            border: Border { radius: 8.0.into(), width: 1.0, color: color!(0x1E2842) },
+                            ..Default::default()
+                        })
+                        .into()
+                    } else {
+                        container(
+                            column![
+                                text("CURRENT WORKLOAD").size(9).style(color!(0x64748B)),
+                                Space::with_height(3),
+                                text(if self.current_benchmark.is_empty() { "Preparing..." } else { &self.current_benchmark }).size(11).style(color!(0xA5B4FC)),
+                            ].spacing(2)
+                        )
+                        .padding(10)
+                        .width(Length::Fill)
+                        .style(|_t: &Theme| container::Appearance {
+                            background: Some(Background::Color(color!(0x0E1322))),
+                            border: Border { radius: 8.0.into(), width: 1.0, color: color!(0x1E2842) },
+                            ..Default::default()
+                        })
+                        .into()
+                    }
+                };
+
                 let sidebar = container(
                     column![
                         brand_block,
@@ -2760,6 +2985,7 @@ impl Application for GPUBenchApp {
                             column![
                                 row![text("API:").size(10).style(color!(0x64748B)), Space::with_width(Length::Fill), text(format!("{} {}", &self.selected_backend, detect_dynamic_api_version(&self.selected_backend))).size(11).style(color!(0x38BDF8))],
                                 row![text("DEVICES:").size(10).style(color!(0x64748B)), Space::with_width(Length::Fill), text(if self.current_devices_label.is_empty() { "—" } else { &self.current_devices_label }).size(10).style(color!(0xE2E8F0))],
+                                row![text("RES:").size(10).style(color!(0x64748B)), Space::with_width(Length::Fill), text(self.selected_resolution.label()).size(10).style(color!(0xA5B4FC))],
                             ].spacing(3)
                         )
                         .padding(10)
@@ -2769,9 +2995,7 @@ impl Application for GPUBenchApp {
                             ..Default::default()
                         }),
                         Space::with_height(14),
-                        text("CURRENT WORKLOAD").size(10).style(color!(0x64748B)),
-                        Space::with_height(4),
-                        text(if self.current_benchmark.is_empty() { "Complete" } else { &self.current_benchmark }).size(12).style(color!(0xA5B4FC)),
+                        current_workload_card,
                         Space::with_height(Length::Fill),
                         action_buttons
                     ]
@@ -2902,14 +3126,14 @@ impl GPUBenchApp {
         let value_str = if is_unsupported {
             "UNSUPPORTED".to_string()
         } else if res.metric == "ns" {
-            format!("{:.2} ns", value)
+            format!("{} ns", format_num_with_commas(value, 2))
         } else if res.metric == "MRays/s" || res.metric == "MHits/s" {
-            let fps = (value * 1e6) / 2073600.0;
-            format!("{:.1} {} ({:.0} FPS)", value, res.metric, fps)
+            let fps = if res.time_ms > 0.0 { 1000.0 / res.time_ms } else { 0.0 };
+            format!("{} {} ({} FPS)", format_num_with_commas(value, 1), res.metric, format_num_with_commas(fps, 0))
         } else if value < 10.0 {
-            format!("{:.2} {}", value, res.metric)
+            format!("{} {}", format_num_with_commas(value, 2), res.metric)
         } else {
-            format!("{:.1} {}", value, res.metric)
+            format!("{} {}", format_num_with_commas(value, 1), res.metric)
         };
 
         if let Some(wid) = map_result_to_workload_id(res) {
@@ -3018,6 +3242,103 @@ impl GPUBenchApp {
             }
         }
     }
+}
+
+
+fn format_num_with_commas(val: f64, decimals: usize) -> String {
+    let s = format!("{:.*}", decimals, val);
+    let parts: Vec<&str> = s.split('.').collect();
+    let int_part = parts[0];
+    let is_negative = int_part.starts_with('-');
+    let raw_digits = if is_negative { &int_part[1..] } else { int_part };
+    
+    let mut formatted = String::new();
+    let chars: Vec<char> = raw_digits.chars().collect();
+    let len = chars.len();
+    for (i, &ch) in chars.iter().enumerate() {
+        if i > 0 && (len - i) % 3 == 0 {
+            formatted.push(',');
+        }
+        formatted.push(ch);
+    }
+    let res = if is_negative { format!("-{}", formatted) } else { formatted };
+    if parts.len() > 1 && decimals > 0 {
+        format!("{}.{}", res, parts[1])
+    } else {
+        res
+    }
+}
+
+fn find_workload_for_benchmark(bench_name: &str) -> Option<&'static WorkloadDef> {
+    if bench_name.is_empty() {
+        return None;
+    }
+    if bench_name.contains("RayScheduling") || bench_name.contains("RayExecutionParadigm") {
+        if bench_name.contains("Material Shading - Traditional") {
+            return WORKLOADS.iter().find(|w| w.id == "rt_sched_mat_trad");
+        } else if bench_name.contains("Material Shading - Work Lists") {
+            return WORKLOADS.iter().find(|w| w.id == "rt_sched_mat_wl");
+        } else if bench_name.contains("Path Tracing - Traditional") {
+            return WORKLOADS.iter().find(|w| w.id == "rt_sched_pt_trad");
+        } else if bench_name.contains("Path Tracing - Work Lists") {
+            return WORKLOADS.iter().find(|w| w.id == "rt_sched_pt_wl");
+        } else if bench_name.contains("Incoherent Ray Tracing - Traditional") {
+            return WORKLOADS.iter().find(|w| w.id == "rt_sched_incoh_trad");
+        } else if bench_name.contains("Incoherent Ray Tracing - Work Lists") {
+            return WORKLOADS.iter().find(|w| w.id == "rt_sched_incoh_wl");
+        } else if bench_name.contains("Primary Ray Tracing - Traditional") {
+            return WORKLOADS.iter().find(|w| w.id == "rt_sched_prim_trad");
+        } else if bench_name.contains("Primary Ray Tracing - Work Lists") {
+            return WORKLOADS.iter().find(|w| w.id == "rt_sched_prim_wl");
+        } else if bench_name.contains("SER") {
+            return WORKLOADS.iter().find(|w| w.id == "rt_sched_ser");
+        } else if bench_name.contains("Work Graph") {
+            return WORKLOADS.iter().find(|w| w.id == "rt_sched_workgraph");
+        }
+    } else if bench_name.contains("RayTracing") || bench_name.contains("Triangle") {
+        return WORKLOADS.iter().find(|w| w.id == "rt_triangle");
+    } else if bench_name.contains("AnyHit") {
+        return WORKLOADS.iter().find(|w| w.id == "rt_anyhit");
+    } else if bench_name.contains("Procedural") {
+        return WORKLOADS.iter().find(|w| w.id == "rt_procedural");
+    } else if bench_name.contains("Incoherent") {
+        return WORKLOADS.iter().find(|w| w.id == "rt_incoherent");
+    } else if bench_name.contains("Divergence") {
+        return WORKLOADS.iter().find(|w| w.id == "rt_divergence");
+    } else if bench_name.contains("PathTracing") {
+        return WORKLOADS.iter().find(|w| w.id == "rt_pathtracing");
+    } else if bench_name.contains("Payload") {
+        return WORKLOADS.iter().find(|w| w.id == "rt_payload");
+    } else if bench_name.contains("RayASBuild") {
+        if bench_name.contains("1M") {
+            if bench_name.contains("Update") {
+                return WORKLOADS.iter().find(|w| w.id == "rt_blas_update_1m");
+            } else {
+                return WORKLOADS.iter().find(|w| w.id == "rt_blas_build_1m");
+            }
+        } else if bench_name.contains("5M") {
+            if bench_name.contains("Update") {
+                return WORKLOADS.iter().find(|w| w.id == "rt_blas_update_5m");
+            } else {
+                return WORKLOADS.iter().find(|w| w.id == "rt_blas_build_5m");
+            }
+        } else if bench_name.contains("10M") {
+            return WORKLOADS.iter().find(|w| w.id == "rt_blas_build_10m");
+        } else if bench_name.contains("Indoor") {
+            return WORKLOADS.iter().find(|w| w.id == "rt_tlas_indoor");
+        } else if bench_name.contains("Jungle") {
+            return WORKLOADS.iter().find(|w| w.id == "rt_tlas_jungle");
+        } else if bench_name.contains("Open World") {
+            return WORKLOADS.iter().find(|w| w.id == "rt_tlas_openworld");
+        }
+    }
+
+    for w in WORKLOADS {
+        if bench_name.contains(w.label) || bench_name == w.id {
+            return Some(w);
+        }
+    }
+    None
 }
 
 fn map_result_to_workload_id(res: &ResultData) -> Option<&'static str> {

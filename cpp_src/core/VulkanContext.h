@@ -104,8 +104,7 @@ public:
     return isExtensionEnabled("VK_AMDX_shader_enqueue");
   }
   bool isSERSupported() const {
-    return isExtensionEnabled("VK_EXT_ray_tracing_invocation_reorder") ||
-           isExtensionEnabled("VK_NV_ray_tracing_invocation_reorder");
+    return serSupported;
   }
 
   struct IndirectBatchEntry {
@@ -213,5 +212,6 @@ private:
   std::vector<VkImage> swapchainImages;
   bool headlessSurfaceSupported = false;
   bool swapchainSupported = false;
+  bool serSupported = false;
   void destroyHeadlessSwapchain();
 };

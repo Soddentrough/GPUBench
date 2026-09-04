@@ -224,9 +224,9 @@ int main(int argc, char **argv) {
                  "Ray tracing benchmark scenario: indoor, outdoor, all (default: indoor)")
       ->check(CLI::IsMember({"indoor", "outdoor", "all"}));
 
-  std::string resolution_str = "1080p";
+  std::string resolution_str = "auto";
   app.add_option("-r,--resolution", resolution_str,
-                 "Resolution preset (720p, 1080p, 1440p, 4k, 1024x1024) or custom WxH (default: 1080p)");
+                 "Resolution preset (auto, 720p, 1080p, 1440p, 4k, 1024x1024) or custom WxH (default: auto)");
 
   int config_target = -1;
   app.add_option("-c,--config", config_target,
@@ -270,12 +270,15 @@ int main(int argc, char **argv) {
   }
 
   // Parse resolution
-  uint32_t render_width = 1920;
-  uint32_t render_height = 1080;
+  uint32_t render_width = 0;
+  uint32_t render_height = 0;
   std::string res_lower;
   for (char c : resolution_str) res_lower.push_back(std::tolower(static_cast<unsigned char>(c)));
 
-  if (res_lower == "720p") {
+  if (res_lower == "auto") {
+    render_width = 0;
+    render_height = 0;
+  } else if (res_lower == "720p") {
     render_width = 1280;
     render_height = 720;
   } else if (res_lower == "1080p" || res_lower == "fhd") {
@@ -298,15 +301,15 @@ int main(int argc, char **argv) {
         render_height = std::stoul(res_lower.substr(xPos + 1));
       } catch (...) {
         std::cerr << "Warning: Invalid resolution string '" << resolution_str
-                  << "', defaulting to 1080p (1920x1080)" << std::endl;
-        render_width = 1920;
-        render_height = 1080;
+                  << "', defaulting to auto" << std::endl;
+        render_width = 0;
+        render_height = 0;
       }
     } else {
       std::cerr << "Warning: Unrecognized resolution preset '" << resolution_str
-                << "', defaulting to 1080p (1920x1080)" << std::endl;
-      render_width = 1920;
-      render_height = 1080;
+                << "', defaulting to auto" << std::endl;
+      render_width = 0;
+      render_height = 0;
     }
   }
 

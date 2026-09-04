@@ -20,6 +20,8 @@ fn main() {
         true,
         false,
         false,
+        0,
+        0,
         |_res| {
             println!("Callback received result");
         }

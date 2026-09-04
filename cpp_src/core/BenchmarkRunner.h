@@ -69,8 +69,8 @@ private:
   bool dumpGeometry;
   bool dumpRenders;
   std::string sceneName = "indoor";
-  uint32_t renderWidth = 1920;
-  uint32_t renderHeight = 1080;
+  uint32_t renderWidth = 0;
+  uint32_t renderHeight = 0;
   int targetConfig = -1;
   bool profileSnapshot = false;
 };

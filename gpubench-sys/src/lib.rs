@@ -29,6 +29,8 @@ pub mod ffi {
             debug: bool,
             dump_geometry: bool,
             dump_renders: bool,
+            render_width: u32,
+            render_height: u32,
             callback: fn(&FfiResultData)
         ) -> Vec<FfiResultData>;
 

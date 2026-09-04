@@ -21,7 +21,7 @@ pub struct ResultData {
 
 #[derive(Parser, Debug, Clone)]
 #[command(name = "GPUBench")]
-#[command(version = "1.4.3")]
+#[command(version = "1.4.4")]
 #[command(about = "High-performance cross-platform GPU benchmarking tool", long_about = None)]
 pub struct Cli {
     #[arg(short = 'b', long = "benchmarks", value_delimiter = ',')]
@@ -53,6 +53,9 @@ pub struct Cli {
 
     #[arg(long = "dump-renders", default_value_t = false)]
     pub dump_renders: bool,
+
+    #[arg(short = 'r', long = "resolution", default_value = "auto")]
+    pub resolution: String,
 }
 
 use std::sync::Mutex;
@@ -79,6 +82,8 @@ pub fn run_benchmarks(
     debug: bool,
     dump_geometry: bool,
     dump_renders: bool,
+    render_width: u32,
+    render_height: u32,
     callback: fn(&ResultData),
 ) -> Vec<ResultData> {
     static CALLBACK_MUTEX: Mutex<Option<fn(&ResultData)>> = Mutex::new(None);
@@ -123,6 +128,8 @@ pub fn run_benchmarks(
         debug,
         dump_geometry,
         dump_renders,
+        render_width,
+        render_height,
         ffi_callback,
     );
     
@@ -143,6 +150,30 @@ pub fn run_benchmarks(
     }).collect()
 }
 
+fn format_num_with_commas(val: f64, decimals: usize) -> String {
+    let s = format!("{:.*}", decimals, val);
+    let parts: Vec<&str> = s.split('.').collect();
+    let int_part = parts[0];
+    let is_negative = int_part.starts_with('-');
+    let raw_digits = if is_negative { &int_part[1..] } else { int_part };
+
+    let mut formatted = String::new();
+    let chars: Vec<char> = raw_digits.chars().collect();
+    let len = chars.len();
+    for (i, &ch) in chars.iter().enumerate() {
+        if i > 0 && (len - i) % 3 == 0 {
+            formatted.push(',');
+        }
+        formatted.push(ch);
+    }
+    let res = if is_negative { format!("-{}", formatted) } else { formatted };
+    if parts.len() > 1 && decimals > 0 {
+        format!("{}.{}", res, parts[1])
+    } else {
+        res
+    }
+}
+
 /// Compute the display value and unit for a result, mirroring the C++
 /// ResultFormatter logic.
 fn format_result_value(res: &ResultData) -> (f64, String) {
@@ -159,8 +190,8 @@ fn format_result_value(res: &ResultData) -> (f64, String) {
             let val = ops / time_s / 1e6;
             let mut unit = res.metric.clone();
             if res.benchmarkName.contains("RayScheduling") && res.metric == "MRays/s" {
-                let fps = (val * 1e6) / 2073600.0;
-                unit = format!("{} ({:.1} FPS)", res.metric, fps);
+                let fps = if res.time_ms > 0.0 { 1000.0 / res.time_ms } else { 0.0 };
+                unit = format!("{} ({} FPS)", res.metric, format_num_with_commas(fps, 0));
             }
             (val, unit)
         }
@@ -181,7 +212,7 @@ fn print_results_table(results: &[ResultData]) {
             (
                 r.benchmarkName.clone(),
                 r.component.clone(),
-                format!("{:.2}", value),
+                format_num_with_commas(value, 2),
                 unit,
             )
         })
@@ -264,6 +295,20 @@ pub fn run_cli() {
         return;
     }
 
+    let (res_w, res_h) = match cli.resolution.to_lowercase().as_str() {
+        "1080p" => (1920, 1080),
+        "1440p" => (2560, 1440),
+        "4k" => (3840, 2160),
+        "auto" => (0, 0),
+        other => {
+            if let Some((w, h)) = other.split_once('x') {
+                (w.parse().unwrap_or(0), h.parse().unwrap_or(0))
+            } else {
+                (0, 0)
+            }
+        }
+    };
+
     // Empty benchmark list = run all (C++ BenchmarkRunner convention).
     // Empty device list = device 0, empty backend list = auto (C++ RunnerAPI convention).
     let results = run_benchmarks(
@@ -274,6 +319,8 @@ pub fn run_cli() {
         cli.debug,
         cli.dump_geometry,
         cli.dump_renders,
+        res_w,
+        res_h,
         |_| {},
     );
 
