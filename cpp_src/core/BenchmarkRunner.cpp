@@ -163,15 +163,11 @@ void BenchmarkRunner::discoverBenchmarks() {
   benchmarks.push_back(std::make_unique<PixelFillRateBench>());
   benchmarks.push_back(std::make_unique<SysMemBandwidthBench>());
   benchmarks.push_back(std::make_unique<SysMemLatencyBench>());
-  benchmarks.push_back(std::make_unique<RayTracingBench>());
-  benchmarks.push_back(std::make_unique<RayDivergenceBench>());
-  benchmarks.push_back(std::make_unique<RayAnyHitBench>());
-  benchmarks.push_back(std::make_unique<RayIncoherentBench>());
-  benchmarks.push_back(std::make_unique<RayPayloadBench>());
+  // Ray Tracing Acceleration (Real-World Pipeline Order: AS Build -> Primary Rays/Intersection -> Ray Scheduling -> Secondary Rays/Divergence -> Path Tracing -> Payload Pressure)
   benchmarks.push_back(std::make_unique<RayASBuildBench>());
+  benchmarks.push_back(std::make_unique<RayTracingBench>());
+  benchmarks.push_back(std::make_unique<RayAnyHitBench>());
   benchmarks.push_back(std::make_unique<RayProceduralBench>());
-  benchmarks.push_back(std::make_unique<RayMaterialDivergenceBench>());
-  benchmarks.push_back(std::make_unique<RayPathTracingBench>());
   if (sceneName == "all") {
     auto indoor = std::make_unique<RaySchedulingBench>(RaySchedulingBench::SceneType::IndoorAtrium);
     if (dumpRenders) indoor->SetDumpRenders(true);
@@ -189,6 +185,11 @@ void BenchmarkRunner::discoverBenchmarks() {
     if (dumpRenders) indoor->SetDumpRenders(true);
     benchmarks.push_back(std::move(indoor));
   }
+  benchmarks.push_back(std::make_unique<RayMaterialDivergenceBench>());
+  benchmarks.push_back(std::make_unique<RayIncoherentBench>());
+  benchmarks.push_back(std::make_unique<RayDivergenceBench>());
+  benchmarks.push_back(std::make_unique<RayPathTracingBench>());
+  benchmarks.push_back(std::make_unique<RayPayloadBench>());
 
   // Cache Bandwidth
   const size_t l0_size = 16 * 1024; // 16KB L0 cache
@@ -539,7 +540,7 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
               result_data.maxWorkGroupSize = info.maxWorkGroupSize;
               result_data.deviceIndex = context->getSelectedDeviceIndex();
               result_data.configIndex = ci;
-              result_data.sortWeight = bench->GetSortWeight();
+              result_data.sortWeight = bench->GetSortWeight(ci);
 
               formatter->addResult(result_data);
               // Not counted in numBenchmarksRun: nothing was measured.
@@ -593,7 +594,7 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
                   start_data.maxWorkGroupSize = info.maxWorkGroupSize;
                   start_data.deviceIndex = context->getSelectedDeviceIndex();
                   start_data.configIndex = i;
-                  start_data.sortWeight = bench->GetSortWeight();
+                  start_data.sortWeight = bench->GetSortWeight(i);
                   onResult(start_data);
                 }
 
@@ -630,7 +631,7 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
                   result_data.maxWorkGroupSize = info.maxWorkGroupSize;
                   result_data.deviceIndex = context->getSelectedDeviceIndex();
                   result_data.configIndex = i;
-                  result_data.sortWeight = bench->GetSortWeight();
+                  result_data.sortWeight = bench->GetSortWeight(i);
 
                   formatter->addResult(result_data);
                   numBenchmarksRun++;
@@ -765,7 +766,7 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
                 result_data.maxWorkGroupSize = info.maxWorkGroupSize;
                 result_data.deviceIndex = context->getSelectedDeviceIndex();
                 result_data.configIndex = i;
-                result_data.sortWeight = bench->GetSortWeight();
+                result_data.sortWeight = bench->GetSortWeight(i);
                 result_data.width = renderWidth;
                 result_data.height = renderHeight;
 
@@ -870,7 +871,7 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
               start_data.maxWorkGroupSize = 0;
               start_data.deviceIndex = 0xFFFFFFFF;
               start_data.configIndex = i;
-              start_data.sortWeight = bench->GetSortWeight();
+              start_data.sortWeight = bench->GetSortWeight(i);
               onResult(start_data);
             }
 
@@ -905,7 +906,7 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
             result_data.maxWorkGroupSize = 0;
             result_data.deviceIndex = 0xFFFFFFFF;
             result_data.configIndex = i;
-            result_data.sortWeight = bench->GetSortWeight();
+            result_data.sortWeight = bench->GetSortWeight(i);
 
             formatter->addResult(result_data);
             numBenchmarksRun++;

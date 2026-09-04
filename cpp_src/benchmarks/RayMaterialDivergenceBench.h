@@ -30,6 +30,7 @@ public:
   std::string GetConfigName(uint32_t config_idx) const override;
 
   uint32_t GetNumConfigs() const override { return 2; } // Coherent, Divergent
+  int GetSortWeight(uint32_t = 0) const override { return 645; }
   std::vector<std::string> GetAliases() const override {
     return {"raymatdiv", "materialdivergence", "raydivergence"};
   }

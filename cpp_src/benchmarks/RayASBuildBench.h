@@ -29,31 +29,49 @@ public:
   const char *GetSubCategory(uint32_t config_idx) const override;
   std::string GetConfigName(uint32_t config_idx) const override;
 
-  uint32_t GetNumConfigs() const override { return 3; } // BLAS Build, TLAS Build, BLAS Update
+  uint32_t GetNumConfigs() const override { return 8; } // 1M/5M/10M BLAS Build/Update + 3 Real-World Branched TLAS scenes
+  int GetSortWeight(uint32_t config_idx = 0) const override {
+    return 600 + static_cast<int>(config_idx);
+  }
+
+  struct BlasInfo {
+    uint32_t numPrimitives = 0;
+    ComputeBuffer buffer = nullptr;
+    VkAccelerationStructureKHR handle = VK_NULL_HANDLE;
+    VkAccelerationStructureBuildSizesInfoKHR sizes{};
+  };
+
+  struct TlasInfo {
+    std::string name;
+    uint32_t numInstances = 0;
+    ComputeBuffer instanceBuffer = nullptr;
+    ComputeBuffer buffer = nullptr;
+    VkAccelerationStructureKHR handle = VK_NULL_HANDLE;
+    VkAccelerationStructureBuildSizesInfoKHR sizes{};
+  };
 
 private:
   void loadRTProcs(VkDevice device);
 
   IComputeContext *context = nullptr;
 
+  // Single-BLAS benchmark resources (1M, 5M, 10M)
   ComputeBuffer vertexBuffer = nullptr;
-  ComputeBuffer instanceBuffer = nullptr;
   ComputeBuffer scratchBuffer = nullptr;
   ComputeBuffer updateScratchBuffer = nullptr;
+  std::vector<BlasInfo> blases;
 
-  ComputeBuffer blasBuffer = nullptr;
-  ComputeBuffer tlasBuffer = nullptr;
+  // Multi-BLAS scene library (5,000 distinct geometries)
+  ComputeBuffer blasLibVertexBuffer = nullptr;
+  std::vector<ComputeBuffer> blasLibBuffers;
+  std::vector<VkAccelerationStructureKHR> blasLibHandles;
+  std::vector<VkDeviceAddress> blasLibAddrs;
 
-  VkAccelerationStructureKHR blas = VK_NULL_HANDLE;
-  VkAccelerationStructureKHR tlas = VK_NULL_HANDLE;
+  // Real-world branched TLAS scenes
+  std::vector<TlasInfo> tlases;
 
-  uint32_t numPrimitives = 0;
-  uint32_t numInstances = 0;
   std::map<uint32_t, double> buildTimes;
   uint32_t iterations = 0;
-
-  VkAccelerationStructureBuildSizesInfoKHR blasSizes{};
-  VkAccelerationStructureBuildSizesInfoKHR tlasSizes{};
 
   // Function pointers
   PFN_vkGetAccelerationStructureBuildSizesKHR

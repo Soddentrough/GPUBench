@@ -291,6 +291,14 @@ const char *RaySchedulingBench::GetSubCategory(uint32_t config_idx) const {
   return "Stage Breakdown";
 }
 
+int RaySchedulingBench::GetSortWeight(uint32_t config_idx) const {
+  if (config_idx >= 12 && config_idx <= 15) return 610; // Primary Ray Tracing
+  if (config_idx < 4) return 640;                       // Material Shading
+  if (config_idx >= 8 && config_idx <= 11) return 660;  // Incoherent Ray Tracing
+  if (config_idx >= 4 && config_idx <= 7) return 680;   // Path Tracing
+  return 690;                                           // Stage Breakdown
+}
+
 void RaySchedulingBench::Setup(IComputeContext &context_ref,
                              const std::string &kernel_dir) {
   this->context = &context_ref;

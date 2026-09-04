@@ -44,6 +44,7 @@ public:
   void Teardown() override;
 
   BenchmarkResult GetResult(uint32_t config_idx = 0) const override;
+  int GetSortWeight(uint32_t config_idx = 0) const override;
 
   uint32_t GetNumConfigs() const override { return 23; }
   std::vector<std::string> GetAliases() const override {

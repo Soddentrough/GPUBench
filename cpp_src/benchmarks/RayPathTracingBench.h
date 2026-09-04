@@ -29,6 +29,7 @@ public:
   BenchmarkResult GetResult(uint32_t config_idx = 0) const override;
 
   uint32_t GetNumConfigs() const override { return 3; }
+  int GetSortWeight(uint32_t = 0) const override { return 685; }
   std::vector<std::string> GetAliases() const override {
     return {"raypathtracing", "pathtracing", "pt"};
   }

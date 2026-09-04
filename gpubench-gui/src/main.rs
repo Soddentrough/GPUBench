@@ -892,6 +892,101 @@ pub static WORKLOADS: &[WorkloadDef] = &[
     },
 
     // RAY TRACING ACCELERATION
+    // Phase 1: Acceleration Structure Creation & Updates
+    WorkloadDef {
+        id: "rt_blas_build_1m",
+        category: "RAY TRACING ACCELERATION",
+        label: "BLAS Build (1M Tris)",
+        approach: "Standard game mesh AS build",
+        default_unit: "MTris/s",
+        desc: "Bottom-level AS construction for standard game assets (1M triangles).",
+        is_system: false,
+    },
+    WorkloadDef {
+        id: "rt_blas_update_1m",
+        category: "RAY TRACING ACCELERATION",
+        label: "BLAS Update (1M Tris)",
+        approach: "Dynamic mesh BVH refit",
+        default_unit: "MTris/s",
+        desc: "Dynamic in-place vertex update refit rate (1M triangles).",
+        is_system: false,
+    },
+    WorkloadDef {
+        id: "rt_blas_build_5m",
+        category: "RAY TRACING ACCELERATION",
+        label: "BLAS Build (5M Tris)",
+        approach: "Heavy mesh / L3 cache spill",
+        default_unit: "MTris/s",
+        desc: "AS construction exceeding L3 Infinity Cache, stressing memory controllers (5M triangles).",
+        is_system: false,
+    },
+    WorkloadDef {
+        id: "rt_blas_update_5m",
+        category: "RAY TRACING ACCELERATION",
+        label: "BLAS Update (5M Tris)",
+        approach: "Dynamic mesh refit (5M)",
+        default_unit: "MTris/s",
+        desc: "Dynamic in-place vertex update refit rate for heavy 5M triangle geometry.",
+        is_system: false,
+    },
+    WorkloadDef {
+        id: "rt_blas_build_10m",
+        category: "RAY TRACING ACCELERATION",
+        label: "BLAS Build (10M Tris)",
+        approach: "Massive hero mesh AS build",
+        default_unit: "MTris/s",
+        desc: "Production-scale high-density mesh construction throughput (10M triangles).",
+        is_system: false,
+    },
+    WorkloadDef {
+        id: "rt_tlas_indoor",
+        category: "RAY TRACING ACCELERATION",
+        label: "TLAS: Indoor Corridor (20k Inst)",
+        approach: "Room & Hallway Hierarchy (5k Meshes)",
+        default_unit: "MInst/s",
+        desc: "Clustered room/hallway hierarchy with high mesh diversity (~1:4 instancing ratio).",
+        is_system: false,
+    },
+    WorkloadDef {
+        id: "rt_tlas_jungle",
+        category: "RAY TRACING ACCELERATION",
+        label: "TLAS: Dense Jungle (50k Inst)",
+        approach: "High-Overlap Foliage (500 Meshes)",
+        default_unit: "MInst/s",
+        desc: "Dense overlapping foliage canopy on undulating terrain (~1:100 instancing ratio).",
+        is_system: false,
+    },
+    WorkloadDef {
+        id: "rt_tlas_openworld",
+        category: "RAY TRACING ACCELERATION",
+        label: "TLAS: Open World (200k Inst)",
+        approach: "Multi-Scale Geographic (5k Meshes)",
+        default_unit: "MInst/s",
+        desc: "Vast multi-scale landscape hierarchy (terrain sectors, urban blocks, micro-props).",
+        is_system: false,
+    },
+
+    // Phase 2: Primary Rays & Direct Visibility
+    WorkloadDef {
+        id: "rt_sched_prim_trad",
+        category: "RAY TRACING ACCELERATION",
+        label: "Primary Rays (Traditional)",
+        approach: "Monolithic Megakernel",
+        default_unit: "MRays/s",
+        desc: "Traditional monolithic primary camera ray dispatch.",
+        is_system: false,
+    },
+    WorkloadDef {
+        id: "rt_sched_prim_wl",
+        category: "RAY TRACING ACCELERATION",
+        label: "Primary Rays (Work Lists)",
+        approach: "Material Sorting",
+        default_unit: "MRays/s",
+        desc: "Using ExecuteIndirect (Work Lists): Separates camera ray generation and material shading into dedicated work queues.",
+        is_system: false,
+    },
+
+    // Phase 3: Geometry & Primitive Intersection
     WorkloadDef {
         id: "rt_triangle",
         category: "RAY TRACING ACCELERATION",
@@ -899,15 +994,6 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         approach: "Hardware BVH Ray Query",
         default_unit: "GIS/s",
         desc: "Peak BVH acceleration structure traversal and ray-triangle intersection throughput.",
-        is_system: false,
-    },
-    WorkloadDef {
-        id: "rt_divergence",
-        category: "RAY TRACING ACCELERATION",
-        label: "Divergence Traversal",
-        approach: "Coherence gradient rays",
-        default_unit: "GRays/s",
-        desc: "BVH traversal throughput under heavy branch and wave execution divergence.",
         is_system: false,
     },
     WorkloadDef {
@@ -919,6 +1005,37 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         desc: "Traversal and shader invocation throughput against transparent, alpha-tested geometry.",
         is_system: false,
     },
+    WorkloadDef {
+        id: "rt_procedural",
+        category: "RAY TRACING ACCELERATION",
+        label: "Procedural Geometry",
+        approach: "Analytical AABB eval",
+        default_unit: "GRays/s",
+        desc: "Intersection evaluation against mathematically defined procedural primitives (spheres).",
+        is_system: false,
+    },
+
+    // Phase 4: Material Shading & Divergence
+    WorkloadDef {
+        id: "rt_sched_mat_trad",
+        category: "RAY TRACING ACCELERATION",
+        label: "Material Shading (Traditional)",
+        approach: "Monolithic Megakernel",
+        default_unit: "MHits/s",
+        desc: "Traditional monolithic compute shader with dynamic loop branching across heterogeneous materials.",
+        is_system: false,
+    },
+    WorkloadDef {
+        id: "rt_sched_mat_wl",
+        category: "RAY TRACING ACCELERATION",
+        label: "Material Shading (Work Lists)",
+        approach: "Using ExecuteIndirect (Work Lists)",
+        default_unit: "MHits/s",
+        desc: "Using ExecuteIndirect (Work Lists): 2-pass parallel compaction into uniform material queues to eliminate branch divergence.",
+        is_system: false,
+    },
+
+    // Phase 5: Secondary Rays & Traversal Divergence
     WorkloadDef {
         id: "rt_sched_incoh_trad",
         category: "RAY TRACING ACCELERATION",
@@ -947,41 +1064,16 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         is_system: false,
     },
     WorkloadDef {
-        id: "rt_sched_prim_trad",
+        id: "rt_divergence",
         category: "RAY TRACING ACCELERATION",
-        label: "Primary Rays (Traditional)",
-        approach: "Monolithic Megakernel",
-        default_unit: "MRays/s",
-        desc: "Traditional monolithic primary camera ray dispatch.",
+        label: "Divergence Traversal",
+        approach: "Coherence gradient rays",
+        default_unit: "GRays/s",
+        desc: "BVH traversal throughput under heavy branch and wave execution divergence.",
         is_system: false,
     },
-    WorkloadDef {
-        id: "rt_sched_prim_wl",
-        category: "RAY TRACING ACCELERATION",
-        label: "Primary Rays (Work Lists)",
-        approach: "Material Sorting",
-        default_unit: "MRays/s",
-        desc: "Using ExecuteIndirect (Work Lists): Separates camera ray generation and material shading into dedicated work queues.",
-        is_system: false,
-    },
-    WorkloadDef {
-        id: "rt_sched_mat_trad",
-        category: "RAY TRACING ACCELERATION",
-        label: "Material Shading (Traditional)",
-        approach: "Monolithic Megakernel",
-        default_unit: "MHits/s",
-        desc: "Traditional monolithic compute shader with dynamic loop branching across heterogeneous materials.",
-        is_system: false,
-    },
-    WorkloadDef {
-        id: "rt_sched_mat_wl",
-        category: "RAY TRACING ACCELERATION",
-        label: "Material Shading (Work Lists)",
-        approach: "Using ExecuteIndirect (Work Lists)",
-        default_unit: "MHits/s",
-        desc: "Using ExecuteIndirect (Work Lists): 2-pass parallel compaction into uniform material queues to eliminate branch divergence.",
-        is_system: false,
-    },
+
+    // Phase 6: Multi-Bounce Path Tracing
     WorkloadDef {
         id: "rt_sched_pt_trad",
         category: "RAY TRACING ACCELERATION",
@@ -1009,6 +1101,8 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         desc: "Full multi-bounce stochastic Monte Carlo path tracing with global illumination and cosine sampling.",
         is_system: false,
     },
+
+    // Phase 7: Architectural Stress & Advanced Features
     WorkloadDef {
         id: "rt_payload",
         category: "RAY TRACING ACCELERATION",
@@ -1016,42 +1110,6 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         approach: "16B - 256B register payload",
         default_unit: "GRays/s",
         desc: "Ray traversal performance under heavy recursive register payload pressure.",
-        is_system: false,
-    },
-    WorkloadDef {
-        id: "rt_blas_build",
-        category: "RAY TRACING ACCELERATION",
-        label: "BLAS Build (1M Tris)",
-        approach: "Bottom-level AS build",
-        default_unit: "MTris/s",
-        desc: "Hardware bottom-level acceleration structure construction rate.",
-        is_system: false,
-    },
-    WorkloadDef {
-        id: "rt_blas_update",
-        category: "RAY TRACING ACCELERATION",
-        label: "BLAS Update (1M Tris)",
-        approach: "Dynamic in-place BVH refit",
-        default_unit: "MTris/s",
-        desc: "Bottom-level acceleration structure dynamic mesh refit speed.",
-        is_system: false,
-    },
-    WorkloadDef {
-        id: "rt_tlas_build",
-        category: "RAY TRACING ACCELERATION",
-        label: "TLAS Build (10k Inst)",
-        approach: "Top-level hierarchy build",
-        default_unit: "MInst/s",
-        desc: "Top-level instance hierarchy construction throughput.",
-        is_system: false,
-    },
-    WorkloadDef {
-        id: "rt_procedural",
-        category: "RAY TRACING ACCELERATION",
-        label: "Procedural Geometry",
-        approach: "Analytical AABB eval",
-        default_unit: "GRays/s",
-        desc: "Intersection evaluation against mathematically defined procedural primitives (spheres).",
         is_system: false,
     },
     WorkloadDef {
@@ -1478,7 +1536,7 @@ impl Application for GPUBenchApp {
                             "Device Memory Bandwidth" => 9,
                             "Pixel Fill Rate" => 3,
                             "FP16" | "BF16" | "FP8" | "INT8" | "INT4" => 2,
-                            "RayASBuild" => 3,
+                            "RayASBuild" => 8,
                             "RayPathTracing" => 3,
                             "RayScheduling" | "RayExecutionParadigm" => 8,
                             _ => 1,
@@ -2146,14 +2204,14 @@ impl Application for GPUBenchApp {
                 let rt_col = {
                     let is_rt_disabled = selected_backend != "VULKAN";
                     let rt_top = create_pill_grid_with_tooltips("Ray Tracing Acceleration", color!(0x10B981), true, vec![
-                        ("RayTracing", "Ray-Triangle Intersect"),
-                        ("RayDivergence", "Divergence Traversal"),
-                        ("RayAnyHit", "AnyHit Alpha-Tested"),
-                        ("RayIncoherent", "Incoherent Bounces"),
-                        ("RayPayload", "Payload Pressure"),
                         ("RayASBuild", "BLAS & TLAS Build"),
+                        ("RayTracing", "Ray-Triangle Intersect"),
+                        ("RayAnyHit", "AnyHit Alpha-Tested"),
                         ("RayProcedural", "Procedural Geometry"),
                         ("RayMaterialDivergence", "Material Divergence"),
+                        ("RayIncoherent", "Incoherent Bounces"),
+                        ("RayDivergence", "Divergence Traversal"),
+                        ("RayPayload", "Payload Pressure"),
                     ]);
 
                     let is_pt_checked = self.selected_tests.contains("RayPathTracing");
@@ -2780,7 +2838,9 @@ impl GPUBenchApp {
             "rt_anyhit" => self.selected_tests.contains("RayAnyHit"),
             "rt_incoherent" => self.selected_tests.contains("RayIncoherent"),
             "rt_payload" => self.selected_tests.contains("RayPayload"),
-            "rt_blas_build" | "rt_blas_update" | "rt_tlas_build" => self.selected_tests.contains("RayASBuild"),
+            "rt_blas_build_1m" | "rt_blas_update_1m" | "rt_blas_build_5m" | "rt_blas_update_5m"
+            | "rt_blas_build_10m" | "rt_tlas_indoor" | "rt_tlas_jungle" | "rt_tlas_openworld"
+            | "rt_blas_build" | "rt_blas_update" | "rt_tlas_build" | "rt_tlas_build_10k" | "rt_tlas_build_100k" => self.selected_tests.contains("RayASBuild"),
             "rt_procedural" => self.selected_tests.contains("RayProcedural"),
             "rt_pathtracing" => self.selected_tests.contains("RayPathTracing"),
             id if id.starts_with("rt_sched_") => {
@@ -2934,9 +2994,9 @@ impl GPUBenchApp {
                 }
                 "Ray Tracing" => {
                     if res.subcategory == "Alpha-Tested Geometry" { self.gpu_rt_anyhit = self.gpu_rt_anyhit.max(val_f32); }
-                    if res.subcategory == "BLAS Build" { self.gpu_rt_blas_build = self.gpu_rt_blas_build.max(val_f32); }
-                    if res.subcategory == "BLAS Update" { self.gpu_rt_blas_update = self.gpu_rt_blas_update.max(val_f32); }
-                    if res.subcategory == "TLAS Build" { self.gpu_rt_tlas_build = self.gpu_rt_tlas_build.max(val_f32); }
+                    if res.subcategory.starts_with("BLAS Build") { self.gpu_rt_blas_build = self.gpu_rt_blas_build.max(val_f32); }
+                    if res.subcategory.starts_with("BLAS Update") { self.gpu_rt_blas_update = self.gpu_rt_blas_update.max(val_f32); }
+                    if res.subcategory.starts_with("TLAS Build") { self.gpu_rt_tlas_build = self.gpu_rt_tlas_build.max(val_f32); }
                     if res.subcategory == "Incoherent Traversal" { self.gpu_rt_incoherent = self.gpu_rt_incoherent.max(val_f32); }
                     if res.subcategory == "Intersection tests" { self.gpu_rt_intersect = self.gpu_rt_intersect.max(val_f32); }
                     if res.subcategory == "Material Divergence" || res.subcategory == "Execution Divergence" { self.gpu_rt_divergence = self.gpu_rt_divergence.max(val_f32); }
@@ -3035,12 +3095,22 @@ fn map_result_to_workload_id(res: &ResultData) -> Option<&'static str> {
                 Some("rt_pathtracing")
             } else if res.subcategory == "Alpha-Tested Geometry" || res.benchmarkName.contains("AnyHit") {
                 Some("rt_anyhit")
-            } else if res.subcategory == "BLAS Build" {
-                Some("rt_blas_build")
-            } else if res.subcategory == "BLAS Update" {
-                Some("rt_blas_update")
-            } else if res.subcategory == "TLAS Build" {
-                Some("rt_tlas_build")
+            } else if res.subcategory.contains("BLAS Build (1M)") || (res.subcategory == "BLAS Build" && res.configIndex == 0) {
+                Some("rt_blas_build_1m")
+            } else if res.subcategory.contains("BLAS Update (1M)") || (res.subcategory == "BLAS Update" && res.configIndex == 1) {
+                Some("rt_blas_update_1m")
+            } else if res.subcategory.contains("BLAS Build (5M)") || (res.subcategory == "BLAS Build" && res.configIndex == 2) {
+                Some("rt_blas_build_5m")
+            } else if res.subcategory.contains("BLAS Update (5M)") || (res.subcategory == "BLAS Update" && res.configIndex == 3) {
+                Some("rt_blas_update_5m")
+            } else if res.subcategory.contains("BLAS Build (10M)") || (res.subcategory == "BLAS Build" && res.configIndex == 4) {
+                Some("rt_blas_build_10m")
+            } else if res.subcategory.contains("Indoor") || (res.benchmarkName == "RayASBuild" && res.configIndex == 5) {
+                Some("rt_tlas_indoor")
+            } else if res.subcategory.contains("Jungle") || (res.benchmarkName == "RayASBuild" && res.configIndex == 6) {
+                Some("rt_tlas_jungle")
+            } else if res.subcategory.contains("Open World") || (res.benchmarkName == "RayASBuild" && res.configIndex == 7) {
+                Some("rt_tlas_openworld")
             } else if res.subcategory == "Incoherent Traversal" || res.benchmarkName.contains("Incoherent") {
                 Some("rt_incoherent")
             } else if res.subcategory == "Intersection tests" || res.benchmarkName == "RayTracing" {

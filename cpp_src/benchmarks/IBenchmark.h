@@ -65,6 +65,9 @@ public:
     return "";
   }
   virtual int GetSortWeight() const { return 999; }
+  virtual int GetSortWeight(uint32_t /*config_idx*/) const {
+    return GetSortWeight();
+  }
 
   // Exports the scene geometry to an external file (e.g. OBJ) for
   // visualization.
