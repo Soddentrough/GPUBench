@@ -211,6 +211,7 @@ set(LIB_SOURCES
     cpp_src/utils/HardwareTelemetry.cpp
     cpp_src/utils/KernelPath.cpp
     cpp_src/utils/ShaderCache.cpp
+    cpp_src/utils/SleepInhibitor.cpp
 )
 
 # Add backend-specific sources
@@ -229,6 +230,12 @@ endif()
 list(APPEND LIB_SOURCES cpp_src/core/RunnerAPI.cpp)
 
 set(SOURCES cpp_src/main.cpp ${LIB_SOURCES})
+if(WIN32)
+    set_source_files_properties(packaging/windows/gpubench.rc PROPERTIES
+        COMPILE_FLAGS "-I${CMAKE_CURRENT_SOURCE_DIR}/packaging/windows"
+    )
+    list(APPEND SOURCES packaging/windows/gpubench.rc)
+endif()
 
 add_library(gpubench_lib STATIC ${LIB_SOURCES})
 set_target_properties(gpubench_lib PROPERTIES POSITION_INDEPENDENT_CODE ON)
@@ -275,6 +282,10 @@ endif()
 if(HIP_FOUND)
     target_include_directories(gpubench PUBLIC ${HIP_INCLUDE_DIRS})
     target_include_directories(gpubench_lib PUBLIC ${HIP_INCLUDE_DIRS})
+endif()
+
+if(WIN32)
+    target_include_directories(gpubench PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/packaging/windows)
 endif()
 
 # Link libraries
@@ -413,6 +424,37 @@ endif()
 if(WIN32)
     install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/packaging/windows/RunAllBenchmarks.bat"
             DESTINATION .)
+endif()
+
+# Linux desktop integration files
+if(UNIX AND NOT APPLE)
+    # Desktop Entry
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/packaging/linux/io.github.soddentrough.gpubench.desktop"
+            DESTINATION share/applications)
+
+    # AppStream Metainfo
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/packaging/linux/io.github.soddentrough.gpubench.metainfo.xml"
+            DESTINATION share/metainfo)
+
+    # Hicolor Icons
+    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/packaging/linux/icons/hicolor/"
+            DESTINATION share/icons/hicolor)
+
+    # Fallback Pixmap
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/packaging/linux/icons/pixmaps/gpubench.png"
+            DESTINATION share/pixmaps)
+
+    # Shell Completions
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/packaging/linux/completions/gpubench"
+            DESTINATION share/bash-completion/completions)
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/packaging/linux/completions/_gpubench"
+            DESTINATION share/zsh/site-functions)
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/packaging/linux/completions/gpubench.fish"
+            DESTINATION share/fish/vendor_completions.d)
+
+    # Man Page
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/packaging/linux/man/gpubench.1"
+            DESTINATION share/man/man1)
 endif()
 
 # CPack configuration for creating packages

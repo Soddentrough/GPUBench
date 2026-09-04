@@ -589,11 +589,24 @@ pub fn main() -> iced::Result {
         unsafe { std::env::set_var("MESA_VK_IGNORE_CONFORMANCE_WARNING", "1") };
     }
     resolve_kernel_path();
+    let icon_data = include_bytes!("../../packaging/linux/icons/hicolor/256x256/apps/io.github.soddentrough.gpubench.png");
+    let app_icon = image::load_from_memory(icon_data)
+        .ok()
+        .and_then(|img| {
+            let rgba = img.to_rgba8();
+            let (w, h) = rgba.dimensions();
+            iced::window::icon::from_rgba(rgba.into_raw(), w, h).ok()
+        });
+
     GPUBenchApp::run(Settings {
         antialiasing: true,
         window: iced::window::Settings {
             size: iced::Size::new(1280.0, 840.0),
             min_size: Some(iced::Size::new(1080.0, 720.0)),
+            icon: app_icon,
+            platform_specific: iced::window::settings::PlatformSpecific {
+                application_id: String::from("io.github.soddentrough.gpubench"),
+            },
             ..Default::default()
         },
         ..Settings::default()
