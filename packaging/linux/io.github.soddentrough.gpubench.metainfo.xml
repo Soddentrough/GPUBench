@@ -28,6 +28,11 @@
     <binary>gpubench</binary>
   </provides>
   <releases>
+    <release version="1.4.7" date="2026-09-05">
+      <description>
+        <p>Eliminate cross-CU L2 bank contention with 256-byte counter striding, streamline register-to-VRAM wave compaction, and add fair material shading microbenchmarks.</p>
+      </description>
+    </release>
     <release version="1.4.6" date="2026-09-05">
       <description>
         <p>Ray scheduling benchmarks, pinned GUI progress bar, two-column layout, physically-based materials, and comparative rendering grid with explicit resolution annotations.</p>

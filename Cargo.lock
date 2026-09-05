@@ -1489,7 +1489,7 @@ dependencies = [
 
 [[package]]
 name = "gpubench-core"
-version = "1.4.6"
+version = "1.4.7"
 dependencies = [
  "clap",
  "gpubench-sys",
@@ -1499,7 +1499,7 @@ dependencies = [
 
 [[package]]
 name = "gpubench-gui"
-version = "1.4.6"
+version = "1.4.7"
 dependencies = [
  "gpubench-core",
  "gpubench-sys",
@@ -1515,7 +1515,7 @@ dependencies = [
 
 [[package]]
 name = "gpubench-sys"
-version = "1.4.6"
+version = "1.4.7"
 dependencies = [
  "cmake",
  "cxx",

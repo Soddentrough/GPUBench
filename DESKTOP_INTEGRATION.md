@@ -71,7 +71,7 @@ On Windows, user expectation centers on clean Start Menu integration, proper fil
 2.1. Executable Metadata & Manifest (.rc and .manifest)
 Currently gpubench.exe has no version resource. Adding a Windows resource file (packaging/windows/gpubench.rc) and embedding it at compile time provides:
 Embedded Icon: Shows the GPUBench logo in File Explorer instead of the generic console icon.
-Version Information: Product name, company, version (1.4.6.0), description, and copyright visible in File Explorer properties dialog.
+Version Information: Product name, company, version (1.4.7.0), description, and copyright visible in File Explorer properties dialog.
 Application Manifest:
 Per-Monitor V2 High-DPI Awareness: Prevents blurry text or blurry GUI rendering on 4K/scaling setups (dpiAwareness = PerMonitorV2).
 Long Path Support: (longPathAware = true).
@@ -153,7 +153,7 @@ IOPMAssertionRelease(assertionID);
 3.5. Notification Center
 Dispatch notifications via UNUserNotificationCenter or AppleScript bridge (osascript -e 'display notification ...').
 3.6. Packaging: Drag-and-Drop DMG
-Standard macOS disk image (GPUBench-1.4.6-Darwin.dmg) configured with:
+Standard macOS disk image (GPUBench-1.4.7-Darwin.dmg) configured with:
 Custom branded DMG background image.
 Left icon: GPUBench.app.
 Right icon: Symlink to /Applications.
@@ -177,7 +177,7 @@ Create packaging/linux/io.github.soddentrough.gpubench.desktop.
 Update CMakeLists.txt Linux install rules to place .desktop and icons into /usr/share/applications/ and /usr/share/icons/hicolor/.
 Add Wayland app_id to gpubench-gui/src/main.rs.
 Windows Version & Icon Resources:
-Create packaging/windows/gpubench.rc and packaging/windows/gpubench.manifest with version 1.4.6.0, application icon, and High-DPI PerMonitorV2 support.
+Create packaging/windows/gpubench.rc and packaging/windows/gpubench.manifest with version 1.4.7.0, application icon, and High-DPI PerMonitorV2 support.
 Link gpubench.rc into gpubench.exe in CMakeLists.txt when targeting Windows.
 Phase 2: Power & Sleep Safeguards (Benchmark Reliability)
 Implement cross-platform idle-sleep inhibitor module:

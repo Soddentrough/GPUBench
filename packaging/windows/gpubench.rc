@@ -10,8 +10,8 @@
 
 // Version Info
 VS_VERSION_INFO VERSIONINFO
-FILEVERSION     1,4,6,0
-PRODUCTVERSION  1,4,6,0
+FILEVERSION     1,4,7,0
+PRODUCTVERSION  1,4,7,0
 FILEFLAGSMASK   VS_FFI_FILEFLAGSMASK
 #ifdef _DEBUG
 FILEFLAGS       VS_FF_DEBUG
@@ -28,12 +28,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName",      "Soddentrough"
             VALUE "FileDescription",  "GPUBench GPU Compute and Ray Tracing Benchmark"
-            VALUE "FileVersion",      "1.4.6.0"
+            VALUE "FileVersion",      "1.4.7.0"
             VALUE "InternalName",     "gpubench"
             VALUE "LegalCopyright",   "Copyright (C) 2026 Soddentrough"
             VALUE "OriginalFilename", "gpubench.exe"
             VALUE "ProductName",      "GPUBench"
-            VALUE "ProductVersion",   "1.4.6.0"
+            VALUE "ProductVersion",   "1.4.7.0"
         END
     END
     BLOCK "VarFileInfo"
