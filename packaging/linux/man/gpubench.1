@@ -19,7 +19,7 @@ Display program version information and exit.
 Comma-separated list of benchmarks to run (e.g., fp32,fp64,mem_bandwidth,ray_scheduling).
 .TP
 \fB\-g\fR, \fB\-\-groups\fR \fIGROUPS\fR
-Benchmark groups to run: compute, memory, raytracing, graphics, system, or all.
+Benchmark groups to run: compute, memory, graphics (combines raster & raytracing), raster, raytracing, system, or all.
 .TP
 \fB\-\-list\-benchmarks\fR
 List all available benchmarks organized by group.
@@ -40,10 +40,13 @@ List available compute backends.
 Specify compute backend: auto, vulkan, opencl, rocm (default: auto).
 .TP
 \fB\-s\fR, \fB\-\-scene\fR \fISCENE\fR
-Ray tracing scenario: indoor, outdoor, all (default: indoor).
+Ray tracing scenario: showroom, indoor, outdoor, all (default: indoor).
 .TP
 \fB\-r\fR, \fB\-\-resolution\fR \fIRESPRESET\fR
 Resolution preset: auto, 720p, 1080p, 1440p, 4k, 1024x1024, or custom WxH.
+.TP
+\fB\-\-bounces\fR \fIBOUNCES\fR
+Number of light bounces for multi-bounce path tracing (1..8, default: 2).
 .TP
 \fB\-\-output\fR \fIFORMAT\fR
 Machine-readable output format: json or csv.

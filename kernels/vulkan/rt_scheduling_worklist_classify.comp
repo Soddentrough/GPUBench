@@ -37,6 +37,12 @@ layout(set = 0, binding = 5) readonly buffer VertexBuffer {
     float vertices[];
 } vbuf;
 
+#define BINDING_MAT_BUF 6
+#define BINDING_TRI_MAT_BUF 7
+#define BINDING_TEX_HDR_BUF 8
+#define BINDING_TEX_PIX_BUF 9
+#include "pbr_common.glsl"
+
 layout(push_constant) uniform PushConstants {
     uint rayCount;
     uint mode;            // 0: Material Divergence, 1: Multi-Bounce Path Tracing, 2: Incoherent GI, 3: Compaction microbench
@@ -47,7 +53,8 @@ layout(push_constant) uniform PushConstants {
     uint height;
     uint queueCapacity;
     uint spatialPattern;  // 0: Linear 32x1, 1: Tiled 8x4, 2: Morton 8x4, 3: Morton 4x8
-    uint sceneType;       // 0: Indoor Atrium, 1: Outdoor Landscape
+    uint sceneType;       // 0: Showroom Studio, 1: Outdoor Terrain, 2: Indoor Atrium
+    uint isGltf;          // 1 if glTF PBR scene, 0 if procedural
 } pc;
 
 shared vec4 ldsPayload[32];
@@ -57,8 +64,9 @@ shared uint ldsBaseSlot[8];
 
 
 // Scene Type Constants
-const uint SCENE_INDOOR_ATRIUM   = 0u;
+const uint SCENE_SHOWROOM_STUDIO = 0u;
 const uint SCENE_OUTDOOR_TERRAIN = 1u;
+const uint SCENE_INDOOR_ATRIUM   = 2u;
 
 // Indoor Atrium Primitives
 const uint PRIM_KNOT_PAINT_END  = 1536u;
@@ -171,6 +179,26 @@ float rustFBM3D(vec3 p) {
 }
 
 void getCamera(uint sceneType, out vec3 camPos, out vec3 camForward, out vec3 camRight, out vec3 camUp, out float fov) {
+    if (pc.isGltf != 0u) {
+        if (sceneType == SCENE_INDOOR_ATRIUM) {
+            // Sponza Colonnade Nave Grand View
+            camPos = vec3(-1150.0, 280.0, -40.0);
+            camForward = normalize(vec3(1.0, 0.02, 0.0));
+            camRight = vec3(0.0, 0.0, -1.0);
+            camUp = vec3(0.0, 1.0, 0.0);
+            fov = 0.55;
+            return;
+        } else if (sceneType == SCENE_SHOWROOM_STUDIO) {
+            // ToyCar Automotive 3/4 Turntable View (+Y Up)
+            camPos = vec3(360.0, 160.0, 420.0);
+            vec3 target = vec3(0.0, 30.0, 0.0);
+            camForward = normalize(target - camPos);
+            camRight = normalize(cross(camForward, vec3(0.0, 1.0, 0.0)));
+            camUp = cross(camRight, camForward);
+            fov = 0.45;
+            return;
+        }
+    }
     if (sceneType == SCENE_OUTDOOR_TERRAIN) {
         // Outdoor Landscape: Mountain Valley Vista
         camPos = vec3(0.0, -320.0, 75.0);
@@ -178,8 +206,15 @@ void getCamera(uint sceneType, out vec3 camPos, out vec3 camForward, out vec3 ca
         camRight = vec3(1.0, 0.0, 0.0);
         camUp = vec3(0.0, 0.072412, 0.997375);
         fov = 0.45;
+    } else if (sceneType == SCENE_INDOOR_ATRIUM) {
+        // Indoor Atrium: Colonnade & Vaulted Ceiling Grand View
+        camPos = vec3(0.0, -9.6, 1.2);
+        camForward = normalize(vec3(0.0, 9.6, 0.6));
+        camRight = vec3(1.0, 0.0, 0.0);
+        camUp = normalize(cross(camRight, camForward));
+        fov = 0.65;
     } else {
-        // Indoor Atrium / Showroom: Central Sculpture Focus
+        // Showroom Studio: Central Sculpture Focus
         camPos = vec3(-0.5081, -8.1276, 1.5591);
         camForward = vec3(0.0562, 0.9852, -0.1622);
         camRight = vec3(0.9984, -0.0570, 0.0000);
@@ -203,6 +238,17 @@ vec3 evalStudioEnvironment(vec3 dir) {
     return baseWall + vec3(1.0, 0.98, 0.95) * sb1 + vec3(0.85, 0.92, 1.0) * sb2 + vec3(1.0, 0.90, 0.80) * sb3;
 }
 
+vec3 evalAtriumEnvironment(vec3 dir) {
+    float z = dir.z;
+    vec3 baseWall = mix(vec3(0.16, 0.15, 0.15), vec3(0.26, 0.24, 0.22), clamp(z * 1.5, 0.0, 1.0));
+    if (z < 0.0) {
+        baseWall = mix(vec3(0.16, 0.15, 0.15), vec3(0.08, 0.07, 0.06), clamp(-z * 2.0, 0.0, 1.0));
+    }
+    vec3 clerestoryDir = normalize(vec3(0.10, 0.30, 0.95));
+    float cs = pow(clamp(dot(dir, clerestoryDir), 0.0, 1.0), 30.0) * 3.5;
+    return baseWall + vec3(1.0, 0.95, 0.85) * cs;
+}
+
 vec3 evalOutdoorSky(vec3 dir) {
     vec3 sunDir = normalize(vec3(0.45, 0.35, 0.82));
     float sunDot = max(dot(dir, sunDir), 0.0);
@@ -219,6 +265,8 @@ vec3 evalOutdoorSky(vec3 dir) {
 vec3 evalSky(uint sceneType, vec3 dir) {
     if (sceneType == SCENE_OUTDOOR_TERRAIN) {
         return evalOutdoorSky(dir);
+    } else if (sceneType == SCENE_INDOOR_ATRIUM) {
+        return evalAtriumEnvironment(dir);
     }
     return evalStudioEnvironment(dir);
 }
@@ -256,10 +304,17 @@ float computeFloorOcclusion(vec3 hitPos) {
 uint computeMaterialId(uint sceneType, uint primId, vec3 hitPos, vec3 normal) {
     if (sceneType == SCENE_OUTDOOR_TERRAIN) {
         if (primId < PRIM_TERRAIN_END) {
-            if (hitPos.z >= 0.0 && hitPos.z <= 2.5 && abs(hitPos.x) < 170.0) {
+            // Shoreline boulders and river gravel along water margin
+            if (hitPos.z >= -0.2 && hitPos.z <= 2.2 && abs(hitPos.x) < 185.0 && hitPos.y >= -145.0 && hitPos.y <= 930.0) {
                 return 7u; // Wet River Stones / Shoreline Boulders
             }
-            if (hitPos.z > 65.0) {
+            // Multi-frequency harmonic snowline modulation
+            float snowHarmonics = sin(hitPos.x * 0.032 + hitPos.y * 0.018) * 9.5
+                                + cos(hitPos.x * 0.068 - hitPos.y * 0.045) * 4.5
+                                + sin(hitPos.x * 0.130 + hitPos.y * 0.110) * 2.0;
+            // Steep slopes and cliffs shed snow, while gullies and gentle slopes retain snow at lower altitudes
+            float snowAltitude = 60.0 + (1.0 - normal.z) * 28.0 + snowHarmonics;
+            if (hitPos.z > snowAltitude && normal.z >= 0.50) {
                 return 3u; // High Mountain Snow & Glacial Ice
             }
             if (normal.z < 0.65) {
@@ -344,6 +399,24 @@ void computePixelCoords(uint idx, uint pattern, uint width, uint height, out uin
 }
 
 vec3 computeSmoothNormal(uint sceneType, uint primId, vec3 hitPos, vec3 rayDir, vec2 bary) {
+    if (pc.isGltf != 0u) {
+        uint base = primId * 36u;
+        vec3 p0 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
+        vec3 n0 = vec3(vbuf.vertices[base + 3], vbuf.vertices[base + 4], vbuf.vertices[base + 5]);
+        base += 12u;
+        vec3 p1 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
+        vec3 n1 = vec3(vbuf.vertices[base + 3], vbuf.vertices[base + 4], vbuf.vertices[base + 5]);
+        base += 12u;
+        vec3 p2 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
+        vec3 n2 = vec3(vbuf.vertices[base + 3], vbuf.vertices[base + 4], vbuf.vertices[base + 5]);
+
+        float w = 1.0 - bary.x - bary.y;
+        vec3 geomNorm = normalize(cross(p1 - p0, p2 - p0));
+        vec3 smoothNorm = w * n0 + bary.x * n1 + bary.y * n2;
+        vec3 n = (length(smoothNorm) > 1e-4) ? normalize(smoothNorm) : geomNorm;
+        if (dot(n, rayDir) > 0.0) n = -n;
+        return n;
+    }
     vec3 normal;
     if (sceneType == SCENE_OUTDOOR_TERRAIN) {
         if (primId >= PRIM_TERRAIN_END && primId < PRIM_WATER_END) {
@@ -438,8 +511,8 @@ void main() {
         vec2 uv = vec2(px / halfH, py / halfH);
         vec3 origin = camPos;
         vec3 direction = normalize(camForward + camRight * (uv.x * fov) - camUp * (uv.y * fov));
-        float tMaxPrimary = (pc.sceneType == SCENE_OUTDOOR_TERRAIN) ? 2500.0 : 50.0;
-        float tMinPrimary = (pc.sceneType == SCENE_OUTDOOR_TERRAIN) ? 0.05 : 0.01;
+        float tMaxPrimary = (pc.isGltf != 0u) ? 5000.0 : ((pc.sceneType == SCENE_OUTDOOR_TERRAIN) ? 2500.0 : 50.0);
+        float tMinPrimary = (pc.isGltf != 0u) ? 0.1 : ((pc.sceneType == SCENE_OUTDOOR_TERRAIN) ? 0.05 : 0.01);
 
         if (pc.mode == 3) {
             threadHits = 1u;
@@ -455,17 +528,28 @@ void main() {
                 float t = rayQueryGetIntersectionTEXT(query, true);
                 vec3 hitPos = origin + direction * t;
                 uint primId = rayQueryGetIntersectionPrimitiveIndexEXT(query, true);
-                if (pc.mode == 0) {
-                    vec3 normal = vec3(0.0, 0.0, 1.0);
-                    if (pc.sceneType == SCENE_OUTDOOR_TERRAIN && primId < PRIM_TERRAIN_END) {
-                        uint base = primId * 9u;
-                        vec3 p0 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
-                        vec3 p1 = vec3(vbuf.vertices[base + 3], vbuf.vertices[base + 4], vbuf.vertices[base + 5]);
-                        vec3 p2 = vec3(vbuf.vertices[base + 6], vbuf.vertices[base + 7], vbuf.vertices[base + 8]);
-                        normal = normalize(cross(p1 - p0, p2 - p0));
+                if (pc.mode == 5) {
+                    assignedQueue = (pc.spatialPattern == 3u) ? (primId % 3u) : 0u;
+                    vec2 rawBary = rayQueryGetIntersectionBarycentricsEXT(query, true);
+                    payload0 = vec4(t, uintBitsToFloat(pixelIdx), uintBitsToFloat(primId), uintBitsToFloat(packUnorm2x16(rawBary)));
+                } else if (pc.mode == 0) {
+                    if (pc.isGltf != 0u) {
+                        uint matId = triMatBuf.triangleMats[primId];
+                        assignedQueue = matId % 8u;
+                        vec2 rawBary = rayQueryGetIntersectionBarycentricsEXT(query, true);
+                        payload0 = vec4(t, uintBitsToFloat(pixelIdx), uintBitsToFloat(primId), uintBitsToFloat(packUnorm2x16(rawBary)));
+                    } else {
+                        vec3 normal = vec3(0.0, 0.0, 1.0);
+                        if (pc.sceneType == SCENE_OUTDOOR_TERRAIN && primId < PRIM_TERRAIN_END) {
+                            uint base = primId * 9u;
+                            vec3 p0 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
+                            vec3 p1 = vec3(vbuf.vertices[base + 3], vbuf.vertices[base + 4], vbuf.vertices[base + 5]);
+                            vec3 p2 = vec3(vbuf.vertices[base + 6], vbuf.vertices[base + 7], vbuf.vertices[base + 8]);
+                            normal = normalize(cross(p1 - p0, p2 - p0));
+                        }
+                        assignedQueue = computeMaterialId(pc.sceneType, primId, hitPos, normal);
+                        payload0 = vec4(t, uintBitsToFloat(pixelIdx), uintBitsToFloat(primId), 0.0);
                     }
-                    assignedQueue = computeMaterialId(pc.sceneType, primId, hitPos, normal);
-                    payload0 = vec4(t, uintBitsToFloat(pixelIdx), uintBitsToFloat(primId), 0.0);
                 } else {
                     vec2 bary = rayQueryGetIntersectionBarycentricsEXT(query, true);
                     vec3 normal = computeSmoothNormal(pc.sceneType, primId, hitPos, direction, bary);
@@ -474,7 +558,7 @@ void main() {
                         float u2 = rand_float(rngState);
                         vec3 nextDir = align_to_normal(cosine_sample_hemisphere(u1, u2), normal);
                         assignedQueue = 0u;
-                        payload0 = vec4(hitPos + normal * 0.005, uintBitsToFloat(packSnorm2x16(octEncode(nextDir))));
+                        payload0 = vec4(hitPos + normal * (pc.isGltf != 0u ? 0.05 : 0.005), uintBitsToFloat(packSnorm2x16(octEncode(nextDir))));
                     } else {
                         float u1 = rand_float(rngState);
                         float u2 = rand_float(rngState);
@@ -482,13 +566,17 @@ void main() {
                         assignedQueue = (incohDir.x >= 0.0 ? 1u : 0u) |
                                         (incohDir.y >= 0.0 ? 2u : 0u) |
                                         (incohDir.z >= 0.0 ? 4u : 0u);
-                        payload0 = vec4(hitPos + normal * 0.005, uintBitsToFloat(packSnorm2x16(incohDir.xy)));
+                        payload0 = vec4(hitPos + normal * (pc.isGltf != 0u ? 0.05 : 0.005), uintBitsToFloat(packSnorm2x16(incohDir.xy)));
                     }
                 }
             } else {
                 if (pc.dumpRenders != 0) {
-                    vec3 skyCol = evalSky(pc.sceneType, direction);
-                    fb.pixels[pixelIdx] = vec4(tonemapACES(skyCol * 1.0), 1.0);
+                    if (pc.mode == 5) {
+                        fb.pixels[pixelIdx] = vec4(0.02, 0.03, 0.05, 1.0);
+                    } else {
+                        vec3 skyCol = evalSky(pc.sceneType, direction);
+                        fb.pixels[pixelIdx] = vec4(tonemapACES(skyCol * 1.0), 1.0);
+                    }
                 }
             }
         }

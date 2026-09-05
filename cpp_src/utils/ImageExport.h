@@ -42,12 +42,13 @@ public:
   }
 
   static void convertPPMtoPNG(const std::string &ppmPath, const std::string &pngPath,
-                              const std::string &profileJsonPath = "", const std::string &type = "traditional") {
+                              const std::string &profileJsonPath = "", const std::string &type = "traditional",
+                              bool annotate = false) {
     std::string cmd;
-    if (!profileJsonPath.empty()) {
-      cmd = "python3 scripts/annotate_render.py \"" + ppmPath + "\" \"" + pngPath + "\" --profile \"" + profileJsonPath + "\" --type " + type + " 2>/dev/null";
+    if (annotate && !profileJsonPath.empty()) {
+      cmd = "python3 scripts/annotate_render.py \"" + ppmPath + "\" \"" + pngPath + "\" --profile \"" + profileJsonPath + "\" --type " + type + " --annotate 2>/dev/null";
     } else {
-      cmd = "python3 scripts/annotate_render.py \"" + ppmPath + "\" \"" + pngPath + "\" 2>/dev/null";
+      cmd = "python3 scripts/annotate_render.py \"" + ppmPath + "\" \"" + pngPath + "\" --clean 2>/dev/null";
     }
     int ret = std::system(cmd.c_str());
     if (ret != 0) {

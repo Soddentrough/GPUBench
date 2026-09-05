@@ -11,10 +11,14 @@ pub mod ffi {
         time_ms: f64,
         isEmulated: bool,
         isUnsupported: bool,
+        supportNote: String,
+        supportCategory: String,
         maxWorkGroupSize: u32,
         deviceIndex: u32,
         configIndex: u32,
         sortWeight: i32,
+        width: u32,
+        height: u32,
     }
 
     struct FfiDeviceProfile {

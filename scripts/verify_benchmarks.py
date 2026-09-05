@@ -195,7 +195,7 @@ def extract_benchmark_items(data: Any) -> Tuple[List[Dict[str, Any]], List[Dict[
                         "metric": bm.get("unit", ""),
                         "value": float(numeric_val),
                         "unsupported": bm.get("status", "").lower() == "unsupported",
-                        "unsupported_reason": bm.get("unsupported_reason") or "",
+                        "unsupported_reason": bm.get("unsupported_reason") or bm.get("support_note") or "",
                     })
             elif isinstance(entry, dict) and "benchmark" in entry:
                 # CLI ResultData format
@@ -217,7 +217,7 @@ def extract_benchmark_items(data: Any) -> Tuple[List[Dict[str, Any]], List[Dict[
                         "metric": bm.get("unit", ""),
                         "value": float(numeric_val),
                         "unsupported": bm.get("status", "").lower() == "unsupported",
-                        "unsupported_reason": bm.get("unsupported_reason") or "",
+                        "unsupported_reason": bm.get("unsupported_reason") or bm.get("support_note") or "",
                     })
             elif isinstance(entry, dict):
                 items.append(entry)
@@ -359,25 +359,37 @@ def evaluate_results(raw_data: Any) -> bool:
         print("-" * 80)
 
         scenarios = [
-            ("Primary Ray Tracing", "Primary Ray Tracing - Traditional Megakernel", "Primary Ray Tracing - Work Lists (Material Sorting)"),
-            ("Material Shading", "Material Shading - Traditional Megakernel", "Material Shading - Work Lists (Material Sorting)"),
-            ("Incoherent Ray Tracing", "Incoherent Ray Tracing - Traditional Megakernel", "Incoherent Ray Tracing - Work Lists (Directional Binning)"),
-            ("Path Tracing", "Path Tracing - Traditional Megakernel", "Path Tracing - Work Lists (Active Ray Compaction)"),
+            ("Total Scene Render",
+             ["Total Scene Render - Traditional Megakernel", "Primary Ray Tracing - Traditional Megakernel", "Primary Rays (Traditional)", "Total Scene Render (Megakernel)"],
+             ["Total Scene Render - Work Lists", "Primary Ray Tracing - Work Lists", "Primary Rays (Work Lists)", "Total Scene Render (Work Lists)"]),
+            ("Material Shading",
+             ["Material Shading - Traditional Megakernel", "Material Shading (Traditional)"],
+             ["Material Shading - Work Lists", "Material Shading (Work Lists)"]),
+            ("Incoherent Ray Tracing",
+             ["Incoherent Ray Tracing - Traditional Megakernel", "Incoherent Rays (Traditional)"],
+             ["Incoherent Ray Tracing - Work Lists", "Incoherent Rays (Work Lists)"]),
+            ("Path Tracing",
+             ["Path Tracing - Traditional Megakernel", "Path Tracing (Traditional)"],
+             ["Path Tracing - Work Lists", "Path Tracing (Work Lists)"]),
         ]
 
-        for sc_name, mega_key, wl_key in scenarios:
+        for sc_name, mega_keys, wl_keys in scenarios:
             mega_val = None
             wl_val = None
             for k, v in rt_scheduling.items():
-                if mega_key in k:
-                    mega_val = v
-                if wl_key in k:
-                    wl_val = v
+                for mk in mega_keys:
+                    if mk in k:
+                        mega_val = v
+                        break
+                for wk in wl_keys:
+                    if wk in k:
+                        wl_val = v
+                        break
 
             if mega_val is not None and wl_val is not None:
                 speedup = (wl_val / mega_val) if mega_val > 0 else 0.0
                 sp_str = f"{speedup:.2f}x"
-                if sc_name == "Primary Ray Tracing":
+                if sc_name in ("Total Scene Render", "Primary Ray Tracing"):
                     if speedup >= 1.05:
                         st = f"{Colors.GREEN}PASS (Faster){Colors.RESET}"
                     elif speedup >= 0.75:
@@ -448,11 +460,22 @@ def main():
     parser.add_argument("-k", "--backends", type=str, default="opencl,rocm,vulkan", help="Backends to benchmark")
     parser.add_argument("-b", "--benchmarks", type=str, default="fp64,fp32,fp16,int8,ray_scheduling", help="Benchmarks to run")
     parser.add_argument("-r", "--resolution", type=str, default=None, help="Resolution preset (e.g. 1080p, 4k)")
-    parser.add_argument("-s", "--scene", type=str, default=None, help="Scene preset (indoor, outdoor, all)")
+    parser.add_argument("-s", "--scene", type=str, default=None, help="Scene preset (showroom, indoor, outdoor, all)")
     parser.add_argument("--binary", type=str, default="./build/gpubench", help="Path to gpubench binary")
     parser.add_argument("--input", type=str, default=None, help="Evaluate pre-existing JSON result file instead of running")
+    parser.add_argument("--verify-rpm", nargs="?", const="AUTO", default=None, help="Validate RPM package (pass path or omit to auto-discover)")
 
     args = parser.parse_args()
+
+    rpm_passed = True
+    if args.verify_rpm:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        verify_rpm_script = os.path.join(script_dir, "verify_rpm.py")
+        cmd = [sys.executable, verify_rpm_script]
+        if args.verify_rpm != "AUTO":
+            cmd.append(args.verify_rpm)
+        res = subprocess.run(cmd)
+        rpm_passed = (res.returncode == 0)
 
     if args.input:
         with open(args.input, "r") as f:
@@ -460,7 +483,7 @@ def main():
     else:
         data = run_gpubench(args)
 
-    passed = evaluate_results(data)
+    passed = evaluate_results(data) and rpm_passed
     sys.exit(0 if passed else 1)
 
 

@@ -46,10 +46,14 @@ rust::Vec<FfiResultData> gpubench_run_benchmarks(const rust::Vec<rust::String>& 
             r.time_ms = res.time_ms;
             r.isEmulated = res.isEmulated;
             r.isUnsupported = res.isUnsupported;
+            r.supportNote = res.supportNote;
+            r.supportCategory = res.supportCategory;
             r.maxWorkGroupSize = res.maxWorkGroupSize;
             r.deviceIndex = res.deviceIndex;
             r.configIndex = res.configIndex;
             r.sortWeight = res.sortWeight;
+            r.width = res.width;
+            r.height = res.height;
             callback(r);
         });
 
@@ -66,10 +70,14 @@ rust::Vec<FfiResultData> gpubench_run_benchmarks(const rust::Vec<rust::String>& 
         r.time_ms = res.time_ms;
         r.isEmulated = res.isEmulated;
         r.isUnsupported = res.isUnsupported;
+        r.supportNote = res.supportNote;
+        r.supportCategory = res.supportCategory;
         r.maxWorkGroupSize = res.maxWorkGroupSize;
         r.deviceIndex = res.deviceIndex;
         r.configIndex = res.configIndex;
         r.sortWeight = res.sortWeight;
+        r.width = res.width;
+        r.height = res.height;
         ffi_results.push_back(r);
     }
 

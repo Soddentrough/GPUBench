@@ -392,7 +392,7 @@ BenchmarkResult RayTracingBench::GetResult(uint32_t config_idx) const {
   return {(uint64_t)rayCount * 64, 0.0};
 }
 
-const char *RayTracingBench::GetName() const { return "RayTracing"; }
+const char *RayTracingBench::GetName() const { return "RayIntersect"; }
 const char *RayTracingBench::GetComponent(uint32_t config_idx) const {
   return "Ray Tracing";
 }

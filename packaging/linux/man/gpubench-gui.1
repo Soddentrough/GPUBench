@@ -1,0 +1,53 @@
+.TH GPUBENCH-GUI 1 "September 2026" "GPUBench 1.4.5" "User Commands"
+.SH NAME
+gpubench-gui \- Graphical interface for GPU compute and hardware ray tracing benchmarking
+.SH SYNOPSIS
+.B gpubench-gui
+[\fIOPTIONS\fR]
+.SH DESCRIPTION
+.B GPUBench GUI
+is the graphical interface for GPUBench, a cross-backend GPU compute and hardware ray tracing benchmark suite. It features real-time telemetry graphs (GPU clock, temperature, fan speed, power, VRAM), configurable test suites, visual parity inspection with split/diff/heatmap views, and analytical scorecard evaluations. Command line options can be supplied to preconfigure options or run benchmarks non-interactively.
+.SH OPTIONS
+.TP
+.BR \-h ", " \-\-help
+Print help message and exit.
+.TP
+.BR \-v ", " \-\-version
+Display program version information and exit.
+.TP
+.BR \-k ", " \-\-backend " \fIBACKEND\fR"
+Select default compute backend: vulkan, opencl, rocm.
+.TP
+.BR \-g ", " \-\-group ", " \-\-groups " \fINAMES\fR"
+Benchmark group(s) to enable: compute, memory, graphics (combines raster & raytracing), raster, raytracing, system, all.
+.TP
+.BR \-b ", " \-\-benchmark ", " \-\-benchmarks " \fIBENCHMARKS\fR"
+Specific benchmark(s) to enable (comma-separated or multiple flags). Supported identifiers include: fp32, fp64, fp16, bf16, fp8, int8, int4, membw, fillrate, sysmem, syslat, asbuild, triangle, anyhit, procedural, mat_divergence, incoherent, divergence, payload, pathtracing, rayscheduling, all.
+.TP
+.BR \-d ", " \-\-device ", " \-\-devices " \fIDEVICES\fR"
+Target GPU device index(es) (e.g., 0, 1, or 0,1).
+.TP
+.BR \-r ", " \-\-resolution " \fIPRESET\fR"
+Resolution preset: auto, 1080p, 1440p, 4k.
+.TP
+.BR \-\-dump-renders ", " \-\-dump
+Enable visual verification and dump comparison frames to disk.
+.TP
+.BR \-\-auto-start ", " \-\-run
+Automatically begin benchmark execution immediately upon launch.
+.SH EXAMPLES
+.TP
+Launch GUI with Vulkan backend, Ray Tracing group, and GPU 1 selected:
+.B gpubench-gui \-k vulkan \-g raytracing \-d 1
+.TP
+Launch GUI with Compute and Memory benchmarks at 1080p:
+.B gpubench-gui \-g compute,memory \-r 1080p
+.TP
+Run Ray Scheduling benchmark automatically and dump renders:
+.B gpubench-gui \-b rayscheduling \-\-dump-renders \-\-auto-start
+.SH SEE ALSO
+.BR gpubench (1)
+.SH AUTHORS
+GPUBench was written by Soddentrough and contributors.
+.SH REPORTING BUGS
+Report bugs to: <https://github.com/Soddentrough/GPUBench/issues>

@@ -55,6 +55,9 @@ public:
   void setScene(const std::string &scene) { sceneName = scene; }
   const std::string &getScene() const { return sceneName; }
 
+  void setBounceDepth(uint32_t b);
+  uint32_t getBounceDepth() const { return bounceDepth; }
+
   void setTargetConfig(int config) { targetConfig = config; }
   int getTargetConfig() const { return targetConfig; }
   void setProfileSnapshot(bool enable) { profileSnapshot = enable; }
@@ -80,6 +83,7 @@ private:
   std::string sceneName = "indoor";
   uint32_t renderWidth = 0;
   uint32_t renderHeight = 0;
+  uint32_t bounceDepth = 2;
   int targetConfig = -1;
   bool profileSnapshot = false;
 };

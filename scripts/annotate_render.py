@@ -63,13 +63,14 @@ def draw_total_badge(draw, x, y, width, height, title, value_str, sub_str, tag_s
     draw.text((x + 14, y + 25), value_str, fill=(255, 255, 255), font=font_val)
     draw.text((x + 14, y + 51), sub_str, fill=(139, 148, 158), font=font_sub)
 
-def annotate_image(ppm_path, png_path, profile_path, render_type):
+def annotate_image(ppm_path, png_path, profile_path, render_type, annotate=False):
     img = Image.open(ppm_path)
     w, h = img.size
 
-    if not profile_path or not os.path.exists(profile_path):
-        # Plain conversion if no profile provided
+    if not annotate or not profile_path or not os.path.exists(profile_path):
+        # Plain clean conversion without banner
         img.save(png_path)
+        print(f"[annotate_render] Exported clean render to {png_path} ({w}x{h})")
         return
 
     with open(profile_path, "r") as f:
@@ -236,6 +237,9 @@ if __name__ == "__main__":
     parser.add_argument("png_path", help="Path to destination PNG image")
     parser.add_argument("--profile", default="", help="Path to render_profile.json")
     parser.add_argument("--type", default="traditional", choices=["traditional", "worklist", "diff", "difference"])
+    parser.add_argument("--annotate", action="store_true", help="Overlay performance telemetry banner (default: false for clean renders)")
+    parser.add_argument("--clean", action="store_true", help="Export clean image without any banner (default)")
     args = parser.parse_args()
 
-    annotate_image(args.ppm_path, args.png_path, args.profile, args.type)
+    do_annotate = args.annotate and not args.clean
+    annotate_image(args.ppm_path, args.png_path, args.profile, args.type, annotate=do_annotate)

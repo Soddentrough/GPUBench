@@ -163,6 +163,10 @@ jobs:
           cpack -G RPM
           cpack -G TGZ
 
+      - name: Verify RPM Package Quality & File Integrity
+        run: |
+          python3 scripts/verify_rpm.py --skip-install-test
+
       - name: Upload to Release
         uses: softprops/action-gh-release@v1
         with:

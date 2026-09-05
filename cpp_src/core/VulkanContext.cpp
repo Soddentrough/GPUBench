@@ -1706,9 +1706,9 @@ void VulkanContext::dispatchWorkListSequence(
         vkCmdBindDescriptorSets(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
                                 resolveKernel->pipelineLayout, 0, 1,
                                 &resolveKernel->descriptorSet, 0, nullptr);
-        // After Bounce 1 (e==0, wrote to Queue 1), next is Bounce 2 which writes to Queue 0,
-        // so reset Queue 0. After Bounce 2 (e==1, wrote to Queue 0), next is terminal Bounce 3.
-        uint32_t resetQueue = (e == 0) ? 0u : 0xFFFFFFFFu;
+        // For ping-pong bouncing: if next bounce writes to an outQueue, reset that queue.
+        // If next bounce is terminal (outQueue == 0xFFFFFFFFu), resetQueue is 0xFFFFFFFFu.
+        uint32_t resetQueue = (e + 2 < entries.size()) ? static_cast<uint32_t>(e % 2) : 0xFFFFFFFFu;
         vkCmdPushConstants(frame.commandBuffer, resolveKernel->pipelineLayout,
                            VK_SHADER_STAGE_COMPUTE_BIT, 0,
                            sizeof(resetQueue), &resetQueue);

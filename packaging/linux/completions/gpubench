@@ -4,19 +4,23 @@ _gpubench() {
     local cur prev words cword
     _init_completion || return
 
-    local opts="--help --version --benchmarks --benchmark -b --groups --group -g --list-benchmarks --list-groups --device -d --list-devices --list-backends --backend -k --verbose --debug --dump-geometry --dump-renders --dump -s --scene -r --resolution -c --config --profile-snapshot --rra --output --output-file"
+    local opts="--help --version --benchmarks --benchmark -b --groups --group -g --list-benchmarks --list-groups --device -d --list-devices --list-backends --backend -k --verbose --debug --dump-geometry --dump-renders --dump -s --scene -r --resolution --bounces -c --config --profile-snapshot --rra --output --output-file"
 
     case "$prev" in
+        --bounces)
+            COMPREPLY=( $(compgen -W "1 2 3 4 5 6 7 8" -- "$cur") )
+            return 0
+            ;;
         -k|--backend)
             COMPREPLY=( $(compgen -W "auto vulkan opencl rocm" -- "$cur") )
             return 0
             ;;
         -g|--group|--groups)
-            COMPREPLY=( $(compgen -W "compute memory raytracing graphics system all" -- "$cur") )
+            COMPREPLY=( $(compgen -W "compute memory raster graphics raytracing system all" -- "$cur") )
             return 0
             ;;
         -s|--scene)
-            COMPREPLY=( $(compgen -W "indoor outdoor all" -- "$cur") )
+            COMPREPLY=( $(compgen -W "showroom indoor outdoor all" -- "$cur") )
             return 0
             ;;
         -r|--resolution)

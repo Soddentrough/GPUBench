@@ -1,0 +1,19 @@
+#compdef gpubench-gui
+
+_gpubench_gui() {
+    local -a opts
+    opts=(
+        '(-h --help)'{-h,--help}'[Print help message and exit]'
+        '(-v --version)'{-v,--version}'[Display version information and exit]'
+        '(-b --benchmark --benchmarks)'{-b,--benchmark,--benchmarks}'[Benchmark(s) to enable]:benchmark:(fp32 fp64 fp16 bf16 fp8 int8 int4 membw fillrate sysmem syslat asbuild triangle anyhit procedural mat_divergence incoherent divergence payload pathtracing rayscheduling all)'
+        '(-g --group --groups)'{-g,--group,--groups}'[Benchmark group(s) to enable]:group:(compute memory raster graphics raytracing system all)'
+        '(-d --device --devices)'{-d,--device,--devices}'[Target GPU device index(es)]:device:'
+        '(-k --backend)'{-k,--backend}'[Backend to select]:backend:(auto vulkan opencl rocm)'
+        '(--dump --dump-renders)'{--dump,--dump-renders}'[Enable visual verification and render output dumping]'
+        '(--auto-start --run)'{--auto-start,--run}'[Automatically start benchmark suite immediately on launch]'
+        '(-r --resolution)'{-r,--resolution}'[Resolution preset]:resolution:(auto 1080p 1440p 4k)'
+    )
+    _arguments -s $opts
+}
+
+_gpubench_gui "$@"

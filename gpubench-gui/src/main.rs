@@ -544,7 +544,7 @@ fn get_benchmark_description(name: &str) -> &'static str {
         "System Memory Bandwidth" => "Multi-threaded host RAM copy and streaming bandwidth from CPU to system DDR memory.",
         "System Memory Latency" => "Pointer-chasing memory access latency in nanoseconds (lower is better).",
         "Pixel Fill Rate" => "Rasterizer and ROP output fill throughput across 32-bit RGBA, 64-bit HDR, and alpha blending.",
-        "RayTracing" => "Peak BVH acceleration structure traversal and ray-triangle intersection throughput.",
+        "RayTracing" | "RayIntersect" => "Peak BVH acceleration structure traversal and ray-triangle intersection throughput.",
         "RayDivergence" => "BVH traversal throughput under non-uniform ray branches and wavefront execution divergence.",
         "RayAnyHit" => "Traversal and shader invocation throughput against transparent, alpha-tested geometry.",
         "RayIncoherent" => "Cache hit rate and traversal speed under randomized non-coherent diffuse bounce distributions.",
@@ -556,6 +556,114 @@ fn get_benchmark_description(name: &str) -> &'static str {
         "RayScheduling" | "RayExecutionParadigm" => "Comparative ray scheduling architectures: Traditional Megakernel vs Work Lists / DGC vs GPU Work Graphs vs Hardware SER.",
         _ => "GPU workstation benchmark suite.",
     }
+}
+
+pub fn is_benchmark_requested(t: &str, requested_tokens: &[String]) -> bool {
+    let t_lower = t.to_lowercase();
+    let t_norm: String = t_lower.chars().filter(|c| c.is_alphanumeric()).collect();
+
+    for req in requested_tokens {
+        let req_lower = req.to_lowercase();
+        let req_norm: String = req_lower.chars().filter(|c| c.is_alphanumeric()).collect();
+        if req_norm.is_empty() {
+            continue;
+        }
+
+        // 1. "all" matches everything
+        if req_norm == "all" {
+            return true;
+        }
+
+        // 2. Group matches
+        // Compute: FP64, FP32, FP16, BF16, FP8, FP4, INT8, INT4
+        if (req_norm == "compute" || req_norm == "comp")
+            && (t.starts_with("FP") || t.starts_with("BF") || t.starts_with("INT"))
+        {
+            return true;
+        }
+
+        // Memory: Device Memory Bandwidth, Cache
+        if (req_norm == "memory" || req_norm == "mem" || req_norm == "cache" || req_norm == "vram")
+            && (t.contains("Memory") || t.contains("Mem") || t.contains("Cache"))
+            && !t.contains("System")
+        {
+            return true;
+        }
+
+        // Graphics: combines Raster and Ray Tracing
+        if (req_norm == "graphics" || req_norm == "gfx")
+            && (t.contains("Fill Rate") || t.starts_with("Ray"))
+        {
+            return true;
+        }
+
+        // Raster: Pixel Fill Rate
+        if (req_norm == "raster" || req_norm == "rop" || req_norm == "rasterization")
+            && t.contains("Fill Rate")
+        {
+            return true;
+        }
+
+        // Ray Tracing: All Ray* benchmarks
+        if (req_norm == "raytracing" || req_norm == "rt" || req_norm == "ray" || req_norm == "ray_tracing")
+            && t.starts_with("Ray")
+        {
+            return true;
+        }
+
+        // System: System Memory Bandwidth, Latency
+        if (req_norm == "system" || req_norm == "sys" || req_norm == "host")
+            && t.contains("System Memory")
+        {
+            return true;
+        }
+
+        // 3. Direct or normalized benchmark name match
+        if t_norm == req_norm || t_lower == req_lower {
+            return true;
+        }
+
+        // 4. Individual benchmark aliases
+        let matched_alias = match req_norm.as_str() {
+            "fp64" => t == "FP64",
+            "fp32" => t == "FP32",
+            "fp16" => t == "FP16",
+            "bf16" => t == "BF16",
+            "fp8" => t == "FP8",
+            "fp4" => t == "FP4",
+            "int8" => t == "INT8",
+            "int4" => t == "INT4",
+            "membw" | "bandwidth" | "devicememorybandwidth" => t == "Device Memory Bandwidth",
+            "fillrate" | "pixelfill" | "pixelfillrate" => t == "Pixel Fill Rate",
+            "sysmem" | "sysbw" | "systemmemorybandwidth" => t == "System Memory Bandwidth",
+            "syslat" | "latency" | "systemmemorylatency" => t == "System Memory Latency",
+            "asbuild" | "blas" | "tlas" | "rayasbuild" => t == "RayASBuild",
+            "triangle" | "intersect" | "rayintersect" | "raytriangle" => {
+                t == "RayIntersect" || t == "RayTracing"
+            }
+            "anyhit" | "rayanyhit" => t == "RayAnyHit",
+            "procedural" | "rayprocedural" => t == "RayProcedural",
+            "matdivergence" | "materialdivergence" | "raymaterialdivergence" => {
+                t == "RayMaterialDivergence" || t == "RayDivergence"
+            }
+            "incoherent" | "rayincoherent" => t == "RayIncoherent",
+            "divergence" | "raydivergence" => {
+                t == "RayDivergence" || t == "RayMaterialDivergence"
+            }
+            "payload" | "raypayload" => t == "RayPayload",
+            "pathtracing" | "raypathtracing" => t == "RayPathTracing",
+            "rayscheduling" | "scheduling" | "worklists" | "dgc" | "rayexecutionparadigm" => {
+                t == "RayScheduling" || t == "RayExecutionParadigm"
+            }
+            _ => false,
+        };
+
+        if matched_alias {
+            return true;
+        }
+    }
+
+    false
 }
 
 // ============================================================================
@@ -584,7 +692,157 @@ fn resolve_kernel_path() {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct GuiCliArgs {
+    pub backend: Option<String>,
+    pub groups: Vec<String>,
+    pub benchmarks: Vec<String>,
+    pub devices: Vec<String>,
+    pub resolution: Option<String>,
+    pub dump_renders: bool,
+    pub auto_start: bool,
+    pub should_exit: bool,
+}
+
+fn print_gui_help() {
+    println!("GPUBench GUI {}", env!("CARGO_PKG_VERSION"));
+    println!("Cross-platform GPU Hardware Profiling & Ray Tracing Benchmark Suite\n");
+    println!("USAGE:");
+    println!("    gpubench-gui [OPTIONS]\n");
+    println!("OPTIONS:");
+    println!("    -k, --backend <BACKEND>       Backend to select: vulkan, opencl, rocm (default: auto)");
+    println!("    -g, --group, --groups <NAMES> Benchmark group(s) to enable: compute, memory, graphics, raster, raytracing, system, all");
+    println!("                                  (graphics combines raster and raytracing)");
+    println!("    -b, --benchmark <BENCHMARKS>  Specific benchmark(s) to enable (comma-separated or multiple flags)");
+    println!("    -d, --device <DEVICES>        Target GPU device index(es) (e.g. 0, 1, or 0,1)");
+    println!("    -r, --resolution <RES>        Resolution preset: auto, 1080p, 1440p, 4k");
+    println!("        --dump-renders, --dump    Enable visual verification and render output dumping");
+    println!("        --auto-start, --run       Automatically start the benchmark suite immediately on launch");
+    println!("    -h, --help                    Print help information and exit");
+    println!("    -v, --version                 Print version information and exit\n");
+    println!("BENCHMARK GROUPS & INCLUDED TESTS:");
+    println!("    compute     Compute arithmetic units (vector & matrix tensor operations):");
+    println!("                FP64, FP32, FP16, BF16, FP8, INT8, INT4\n");
+    println!("    memory      VRAM and GPU cache hierarchy:");
+    println!("                Device Memory Bandwidth, L0/L1/L2/L3 Cache Bandwidth & Latency\n");
+    println!("    graphics    All 3D graphics rendering pipelines (combines 'raster' and 'raytracing', alias: 'gfx'):");
+    println!("                Runs both fixed-function rasterization (ROP) and hardware ray tracing\n");
+    println!("    raster      Fixed-function rasterization & ROP pixel fill rates (subset of graphics):");
+    println!("                Pixel Fill Rate (RGBA8, RGBA16F HDR, Alpha Blending)\n");
+    println!("    raytracing  Hardware BVH traversal, intersection & scheduling (subset of graphics, alias: 'rt'):");
+    println!("                RayTracing, RayAnyHit, RayProcedural, RayIncoherent, RayMaterialDivergence,");
+    println!("                RayPayload, RayASBuild, RayPathTracing, RayScheduling (Work Lists / SER / Work Graphs),");
+    println!("                Ray Pipeline Breakdown (Linear vs 2D Tiled vs Morton Z-Curve, Queue Compaction)\n");
+    println!("    system      Host CPU & RAM system memory:");
+    println!("                System Memory Bandwidth (Multi & Single-Threaded), System Memory Latency\n");
+    println!("    all         Enable all benchmark groups across target devices\n");
+    println!("EXAMPLES:");
+    println!("    gpubench-gui -k vulkan -g raytracing -d 1");
+    println!("    gpubench-gui -g compute,memory,raster -r 1080p");
+    println!("    gpubench-gui -b rayscheduling --dump-renders --auto-start");
+}
+
+pub fn parse_gui_cli_args() -> GuiCliArgs {
+    let raw_args: Vec<String> = std::env::args().skip(1).collect();
+    parse_gui_cli_args_from(&raw_args)
+}
+
+pub fn parse_gui_cli_args_from(raw_args: &[String]) -> GuiCliArgs {
+    let mut args = GuiCliArgs::default();
+    let mut i = 0;
+    while i < raw_args.len() {
+        let arg = &raw_args[i];
+        if arg == "-h" || arg == "--help" {
+            print_gui_help();
+            args.should_exit = true;
+            return args;
+        }
+        if arg == "-v" || arg == "--version" {
+            println!("gpubench-gui {}", env!("CARGO_PKG_VERSION"));
+            args.should_exit = true;
+            return args;
+        }
+        if arg == "--dump-renders" || arg == "--dump" {
+            args.dump_renders = true;
+            i += 1;
+            continue;
+        }
+        if arg == "--auto-start" || arg == "--run" || arg == "-s" {
+            args.auto_start = true;
+            i += 1;
+            continue;
+        }
+        if let Some(val) = arg.strip_prefix("-k=").or_else(|| arg.strip_prefix("--backend=")) {
+            args.backend = Some(val.to_string());
+            i += 1;
+            continue;
+        }
+        if arg == "-k" || arg == "--backend" {
+            if i + 1 < raw_args.len() {
+                args.backend = Some(raw_args[i + 1].clone());
+                i += 2;
+                continue;
+            }
+        }
+        if let Some(val) = arg.strip_prefix("-g=").or_else(|| arg.strip_prefix("--group=")).or_else(|| arg.strip_prefix("--groups=")) {
+            args.groups.push(val.to_string());
+            i += 1;
+            continue;
+        }
+        if arg == "-g" || arg == "--group" || arg == "--groups" {
+            if i + 1 < raw_args.len() {
+                args.groups.push(raw_args[i + 1].clone());
+                i += 2;
+                continue;
+            }
+        }
+        if let Some(val) = arg.strip_prefix("-b=").or_else(|| arg.strip_prefix("--benchmark=")).or_else(|| arg.strip_prefix("--benchmarks=")) {
+            args.benchmarks.push(val.to_string());
+            i += 1;
+            continue;
+        }
+        if arg == "-b" || arg == "--benchmark" || arg == "--benchmarks" {
+            if i + 1 < raw_args.len() {
+                args.benchmarks.push(raw_args[i + 1].clone());
+                i += 2;
+                continue;
+            }
+        }
+        if let Some(val) = arg.strip_prefix("-d=").or_else(|| arg.strip_prefix("--device=")).or_else(|| arg.strip_prefix("--devices=")) {
+            args.devices.push(val.to_string());
+            i += 1;
+            continue;
+        }
+        if arg == "-d" || arg == "--device" || arg == "--devices" {
+            if i + 1 < raw_args.len() {
+                args.devices.push(raw_args[i + 1].clone());
+                i += 2;
+                continue;
+            }
+        }
+        if let Some(val) = arg.strip_prefix("-r=").or_else(|| arg.strip_prefix("--resolution=")) {
+            args.resolution = Some(val.to_string());
+            i += 1;
+            continue;
+        }
+        if arg == "-r" || arg == "--resolution" {
+            if i + 1 < raw_args.len() {
+                args.resolution = Some(raw_args[i + 1].clone());
+                i += 2;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    args
+}
+
 pub fn main() -> iced::Result {
+    let cli_args = parse_gui_cli_args();
+    if cli_args.should_exit {
+        return Ok(());
+    }
+
     if std::env::var_os("MESA_VK_IGNORE_CONFORMANCE_WARNING").is_none() {
         unsafe { std::env::set_var("MESA_VK_IGNORE_CONFORMANCE_WARNING", "1") };
     }
@@ -599,6 +857,7 @@ pub fn main() -> iced::Result {
         });
 
     GPUBenchApp::run(Settings {
+        flags: cli_args,
         antialiasing: true,
         window: iced::window::Settings {
             size: iced::Size::new(1280.0, 840.0),
@@ -697,6 +956,8 @@ pub struct CellResult {
     pub unit: String,
     pub is_running: bool,
     pub is_unsupported: bool,
+    pub support_note: String,
+    pub support_category: String,
     pub raw_operations: u64,
     pub raw_time_ms: f64,
 }
@@ -918,10 +1179,10 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         is_system: true,
     },
 
-    // GRAPHICS & ROP
+    // RASTERIZATION & ROP
     WorkloadDef {
         id: "rop_rgba8",
-        category: "GRAPHICS & ROP",
+        category: "RASTERIZATION & ROP",
         label: "RGBA8 Color Fill",
         approach: "Hardware 32-bit ROP",
         default_unit: "GPixels/s",
@@ -931,7 +1192,7 @@ pub static WORKLOADS: &[WorkloadDef] = &[
     },
     WorkloadDef {
         id: "rop_rgba16f",
-        category: "GRAPHICS & ROP",
+        category: "RASTERIZATION & ROP",
         label: "RGBA16F HDR Fill",
         approach: "Hardware 64-bit HDR ROP",
         default_unit: "GPixels/s",
@@ -941,7 +1202,7 @@ pub static WORKLOADS: &[WorkloadDef] = &[
     },
     WorkloadDef {
         id: "rop_blend",
-        category: "GRAPHICS & ROP",
+        category: "RASTERIZATION & ROP",
         label: "Alpha Blending Fill",
         approach: "Hardware ROP blending",
         default_unit: "GPixels/s",
@@ -1033,24 +1294,56 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         is_system: false,
     },
 
-    // Phase 2: Primary Rays & Direct Visibility
+    // Phase 2: Total Scene Render (Direct Visibility & Materials)
     WorkloadDef {
         id: "rt_sched_prim_trad",
         category: "RAY TRACING ACCELERATION",
-        label: "Primary Rays (Traditional)",
+        label: "Total Scene Render (Megakernel)",
         approach: "Monolithic Megakernel",
         default_unit: "MRays/s",
-        desc: "Traditional monolithic primary camera ray dispatch.",
+        desc: "Complete end-to-end scene frame generation: camera ray generation, BVH traversal, multi-material BSDF shading, and framebuffer write.",
         api_extensions: "VK_KHR_ray_query (Vulkan Compute)",
         is_system: false,
     },
     WorkloadDef {
         id: "rt_sched_prim_wl",
         category: "RAY TRACING ACCELERATION",
-        label: "Primary Rays (Work Lists)",
-        approach: "Material Sorting",
+        label: "Total Scene Render (Work Lists)",
+        approach: "Subgroup Compaction + Specialized Micro-Kernels",
         default_unit: "MRays/s",
-        desc: "Using ExecuteIndirect (Work Lists): Separates camera ray generation and material shading into dedicated work queues.",
+        desc: "Complete end-to-end scene frame generation using Work Lists / DGC: camera ray generation, wave compaction into material queues, and indirect dispatch of specialized BSDF shaders.",
+        api_extensions: "VK_KHR_ray_query, VK_EXT_device_generated_commands",
+        is_system: false,
+    },
+
+    // Phase 2b: Directional Shadows & Multi-Light Coherence
+    WorkloadDef {
+        id: "rt_sched_shadow_trad",
+        category: "RAY TRACING ACCELERATION",
+        label: "Ray-Traced Shadows (Megakernel)",
+        approach: "Monolithic In-Kernel Traversal",
+        default_unit: "MRays/s",
+        desc: "Directional shadow visibility testing executed directly within monolithic megakernel with early termination flags, exhibiting wave divergence stalls across mixed hit/miss lanes.",
+        api_extensions: "VK_KHR_ray_query (gl_RayFlagsTerminateOnFirstHitEXT)",
+        is_system: false,
+    },
+    WorkloadDef {
+        id: "rt_sched_shadow_wl",
+        category: "RAY TRACING ACCELERATION",
+        label: "Ray-Traced Shadows (Work Lists)",
+        approach: "Wavefront Compaction + Micro-Kernel",
+        default_unit: "MRays/s",
+        desc: "Directional shadow ray testing via Work Lists / DGC: surface hits ballot-compacted into dense queues and dispatched via specialized shadow micro-kernel at 100% active SIMD lane density.",
+        api_extensions: "VK_KHR_ray_query, VK_EXT_device_generated_commands",
+        is_system: false,
+    },
+    WorkloadDef {
+        id: "rt_sched_shadow_bin",
+        category: "RAY TRACING ACCELERATION",
+        label: "Ray-Traced Shadows (Directional Binning)",
+        approach: "Multi-Light Coherent Binning",
+        default_unit: "MRays/s",
+        desc: "Directional shadow testing across multiple scene lights with spatial queue binning, clustering coherent shadow cones into dedicated dispatches.",
         api_extensions: "VK_KHR_ray_query, VK_EXT_device_generated_commands",
         is_system: false,
     },
@@ -1212,6 +1505,78 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         api_extensions: "VK_AMDX_shader_enqueue",
         is_system: false,
     },
+
+    // Phase 7: Ray Pipeline Breakdown
+    WorkloadDef {
+        id: "rt_sched_stage_bvh_linear",
+        category: "RAY PIPELINE BREAKDOWN",
+        label: "BVH Traversal (Linear 1D)",
+        approach: "Linear 1D Scanline Traversal",
+        default_unit: "MRays/s",
+        desc: "Evaluates raw BVH tree traversal without spatial coherency optimizations using linear 1D scanline wavefront dispatch.",
+        api_extensions: "VK_KHR_ray_query",
+        is_system: false,
+    },
+    WorkloadDef {
+        id: "rt_sched_stage_queue_compaction",
+        category: "RAY PIPELINE BREAKDOWN",
+        label: "Queue Compaction Overhead",
+        approach: "Wave Ballot Stream Sort",
+        default_unit: "MRecords/s",
+        desc: "Measures subgroup ballot prefix-sum stream compaction overhead for re-packing active rays into material work lists.",
+        api_extensions: "VK_KHR_shader_subgroup_ballot",
+        is_system: false,
+    },
+    WorkloadDef {
+        id: "rt_sched_stage_bvh_tiled",
+        category: "RAY PIPELINE BREAKDOWN",
+        label: "BVH Traversal (2D Tiled 8x4)",
+        approach: "2D Screen Tiled (8x4)",
+        default_unit: "MRays/s",
+        desc: "Evaluates BVH traversal cache locality and SIMD coherence using 2D screen-space (8x4) rectangular tile ray dispatch.",
+        api_extensions: "VK_KHR_ray_query",
+        is_system: false,
+    },
+    WorkloadDef {
+        id: "rt_sched_stage_bvh_morton8x4",
+        category: "RAY PIPELINE BREAKDOWN",
+        label: "BVH Traversal (Morton 8x4)",
+        approach: "2D Morton Z-Curve (8x4)",
+        default_unit: "MRays/s",
+        desc: "Maximizes BVH node traversal cache reuse by dispatching wavefronts along space-filling Morton Z-order curves (8x4).",
+        api_extensions: "VK_KHR_ray_query",
+        is_system: false,
+    },
+    WorkloadDef {
+        id: "rt_sched_stage_bvh_morton4x8",
+        category: "RAY PIPELINE BREAKDOWN",
+        label: "BVH Traversal (Morton 4x8)",
+        approach: "2D Morton Z-Curve (4x8)",
+        default_unit: "MRays/s",
+        desc: "BVH traversal cache locality evaluating tall Morton Z-curve (4x8) quad layouts across GPU wave frontlines.",
+        api_extensions: "VK_KHR_ray_query",
+        is_system: false,
+    },
+    WorkloadDef {
+        id: "rt_sched_stage_prim_morton_trad",
+        category: "RAY PIPELINE BREAKDOWN",
+        label: "Full Render: Morton + Megakernel",
+        approach: "Morton 8x4 + Megakernel",
+        default_unit: "MRays/s",
+        desc: "End-to-end full scene render combining 2D Morton spatial ray ordering with traditional monolithic megakernel shading.",
+        api_extensions: "VK_KHR_ray_query",
+        is_system: false,
+    },
+    WorkloadDef {
+        id: "rt_sched_stage_prim_morton_wl",
+        category: "RAY PIPELINE BREAKDOWN",
+        label: "Full Render: Morton + Work Lists",
+        approach: "Morton 8x4 + Work Lists (DGC)",
+        default_unit: "MRays/s",
+        desc: "End-to-end full scene render combining 2D Morton ray ordering with wavefront stream compaction and indirect dispatch.",
+        api_extensions: "VK_KHR_ray_query, VK_EXT_device_generated_commands",
+        is_system: false,
+    },
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1249,6 +1614,208 @@ impl ResolutionPreset {
     }
 }
 
+#[allow(dead_code)]
+#[derive(Debug, Clone, serde::Deserialize, Default)]
+struct ParityTraditional {
+    #[serde(default)]
+    fps: f64,
+    #[serde(default)]
+    mrays: f64,
+    #[serde(default)]
+    frame_ms: f64,
+    #[serde(default)]
+    bvh_ms: f64,
+    #[serde(default)]
+    bvh_pct: f64,
+    #[serde(default)]
+    shading_ms: f64,
+    #[serde(default)]
+    shading_pct: f64,
+    #[serde(default)]
+    shading_mhits: f64,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, serde::Deserialize, Default)]
+struct ParityWorklist {
+    #[serde(default)]
+    fps: f64,
+    #[serde(default)]
+    mrays: f64,
+    #[serde(default)]
+    frame_ms: f64,
+    #[serde(default)]
+    bvh_ms: f64,
+    #[serde(default)]
+    bvh_pct: f64,
+    #[serde(default)]
+    compaction_ms: f64,
+    #[serde(default)]
+    compaction_pct: f64,
+    #[serde(default)]
+    compaction_mrecords: f64,
+    #[serde(default)]
+    shading_ms: f64,
+    #[serde(default)]
+    shading_pct: f64,
+    #[serde(default)]
+    shading_mhits: f64,
+    #[serde(default)]
+    shading_speedup: f64,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, serde::Deserialize, Default)]
+struct ParityMetrics {
+    #[serde(default)]
+    psnr: f64,
+    #[serde(default)]
+    mae: f64,
+    #[serde(default)]
+    rmse: f64,
+    #[serde(default)]
+    exact_pixels: u64,
+    #[serde(default)]
+    exact_pct: f64,
+    #[serde(default)]
+    near_exact_pixels: u64,
+    #[serde(default)]
+    near_exact_pct: f64,
+    #[serde(default)]
+    diff_pixels: u64,
+    #[serde(default)]
+    diff_pct: f64,
+    #[serde(default)]
+    status: String,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, serde::Deserialize, Default)]
+struct ParityProfile {
+    #[serde(default)]
+    gpu: String,
+    #[serde(default)]
+    scene: String,
+    #[serde(default)]
+    resolution: String,
+    #[serde(default)]
+    traditional: ParityTraditional,
+    #[serde(default)]
+    worklist: ParityWorklist,
+    #[serde(default)]
+    parity: ParityMetrics,
+}
+
+fn find_renders_file(relative: &str) -> Option<String> {
+    let mut candidates = vec![
+        relative.to_string(),
+        format!("../{}", relative),
+        format!("/home/naoki/Development/GPUBench/{}", relative),
+        format!("/usr/share/gpubench/{}", relative),
+    ];
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(exe_dir) = exe.parent() {
+            candidates.push(exe_dir.join(relative).to_string_lossy().to_string());
+            if let Some(parent) = exe_dir.parent() {
+                candidates.push(parent.join("share/gpubench").join(relative).to_string_lossy().to_string());
+            }
+        }
+    }
+    for cand in candidates {
+        let p = std::path::Path::new(&cand);
+        if p.exists() {
+            if let Ok(canonical) = std::fs::canonicalize(p) {
+                return Some(canonical.to_string_lossy().to_string());
+            }
+            return Some(cand);
+        }
+    }
+    None
+}
+
+fn load_parity_profile() -> Option<(ParityProfile, String)> {
+    for tag in &["showroom", "indoor", "outdoor"] {
+        let rel_path = format!("renders/render_{}_profile.json", tag);
+        if let Some(actual_path) = find_renders_file(&rel_path) {
+            match std::fs::read_to_string(&actual_path) {
+                Ok(content) => match serde_json::from_str::<ParityProfile>(&content) {
+                    Ok(profile) => return Some((profile, tag.to_string())),
+                    Err(e) => eprintln!("[GPUBench GUI] Error parsing profile JSON {}: {}", actual_path, e),
+                },
+                Err(e) => eprintln!("[GPUBench GUI] Error reading profile JSON {}: {}", actual_path, e),
+            }
+        }
+    }
+    if let Some(actual_path) = find_renders_file("renders/render_profile.json") {
+        if let Ok(content) = std::fs::read_to_string(&actual_path) {
+            if let Ok(profile) = serde_json::from_str::<ParityProfile>(&content) {
+                return Some((profile, "indoor".to_string()));
+            }
+        }
+    }
+    None
+}
+
+fn open_file_in_desktop(path: &str) {
+    let p = std::path::Path::new(path);
+    if !p.exists() {
+        eprintln!("[GPUBench GUI] Cannot open non-existent desktop target: {}", path);
+        return;
+    }
+    let abs_path = if let Ok(canonical) = std::fs::canonicalize(p) {
+        canonical.to_string_lossy().to_string()
+    } else {
+        path.to_string()
+    };
+
+    #[cfg(target_os = "windows")]
+    {
+        let _ = std::process::Command::new("cmd")
+            .args(["/C", "start", "", &abs_path])
+            .spawn();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open")
+            .arg(&abs_path)
+            .spawn();
+    }
+    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+    {
+        let _ = std::process::Command::new("xdg-open")
+            .arg(&abs_path)
+            .spawn();
+    }
+}
+
+fn open_render_target(rel: &str) {
+    if let Some(p) = find_renders_file(rel) {
+        open_file_in_desktop(&p);
+    } else {
+        eprintln!("[GPUBench GUI] Render file not found: {}", rel);
+    }
+}
+
+fn parity_stat_box<'a>(label: &'static str, value: String, sub: String, val_color: iced::Color) -> Element<'a, Message> {
+    container(
+        column![
+            text(label).size(10).style(color!(0x64748B)),
+            Space::with_height(2),
+            text(value).size(16).style(val_color),
+            Space::with_height(1),
+            text(sub).size(10).style(color!(0x94A3B8)),
+        ]
+    )
+    .padding(10)
+    .width(Length::FillPortion(1))
+    .style(|_t: &Theme| container::Appearance {
+        background: Some(Background::Color(color!(0x0C0E17))),
+        border: Border { radius: 8.0.into(), width: 1.0, color: color!(0x1E2438) },
+        ..Default::default()
+    })
+    .into()
+}
+
 enum AppState {
     Setup {
         available_backends: Vec<String>,
@@ -1278,6 +1845,7 @@ struct GPUBenchApp {
     available_tests: Vec<String>,
     dump_renders: bool,
     selected_resolution: ResolutionPreset,
+    parity_profile: Option<(ParityProfile, String)>,
     
     // Multi-Hardware Telemetry
     monitored_devices: Vec<DeviceTelemetry>,
@@ -1288,6 +1856,7 @@ struct GPUBenchApp {
     results_map: HashMap<(u32, &'static str), CellResult>,
     completed_configs_count: usize,
     total_expected_configs: usize,
+    validation_error: Option<String>,
 
     // Metrics
     gpu_bw: f32,
@@ -1341,37 +1910,151 @@ enum Message {
     BenchmarksFailed(String),
     Tick,
     SaveResults,
+    SaveResultsComplete(Option<(std::path::PathBuf, String)>),
     Retest,
     ResolutionSelected(ResolutionPreset),
     CopyDiagnostics,
+    OpenTriptych(String),
+    OpenHeatmap(String),
+    OpenRendersFolder,
 }
 
 impl Application for GPUBenchApp {
     type Executor = executor::Default;
     type Message = Message;
     type Theme = Theme;
-    type Flags = ();
+    type Flags = GuiCliArgs;
 
-    fn new(_flags: ()) -> (Self, Command<Message>) {
+    fn new(flags: GuiCliArgs) -> (Self, Command<Message>) {
         let tests = get_available_benchmarks();
-        
         let hw = gpubench_core::get_available_hardware();
         let backends = available_backends(&hw);
-        let selected_backend = backends.first().cloned().unwrap_or_else(|| "VULKAN".to_string());
+
+        let selected_backend = if let Some(ref req) = flags.backend {
+            let req_upper = req.trim().to_uppercase();
+            backends.iter().find(|b| {
+                b.to_uppercase() == req_upper
+                    || (req_upper == "VK" && *b == "VULKAN")
+                    || (req_upper == "CL" && *b == "OPENCL")
+                    || (req_upper == "HIP" && *b == "ROCM")
+            })
+            .cloned()
+            .unwrap_or_else(|| backends.first().cloned().unwrap_or_else(|| "VULKAN".to_string()))
+        } else {
+            backends.first().cloned().unwrap_or_else(|| "VULKAN".to_string())
+        };
+
         let devices = devices_for_backend(&hw, &selected_backend);
-        
+
         let mut initial_devices = HashSet::new();
-        for d in &devices {
-            initial_devices.insert(d.clone());
+        if !flags.devices.is_empty() {
+            let mut tokens = Vec::new();
+            for d in &flags.devices {
+                for t in d.split(',') {
+                    let s = t.trim().to_lowercase();
+                    if !s.is_empty() {
+                        tokens.push(s);
+                    }
+                }
+            }
+            for d in &devices {
+                let d_lower = d.to_lowercase();
+                let matched = tokens.iter().any(|req| {
+                    if req == "all" {
+                        true
+                    } else if req == "system" || req == "cpu" {
+                        d_lower.starts_with("system")
+                    } else if let Ok(idx) = req.parse::<usize>() {
+                        d.starts_with(&format!("{}:", idx))
+                    } else {
+                        d_lower.contains(req)
+                    }
+                });
+                if matched {
+                    initial_devices.insert(d.clone());
+                }
+            }
+            if initial_devices.is_empty() {
+                for d in &devices {
+                    initial_devices.insert(d.clone());
+                }
+            }
+        } else {
+            for d in &devices {
+                initial_devices.insert(d.clone());
+            }
         }
 
         let mut initial_tests = HashSet::new();
-        for t in &tests {
-            initial_tests.insert(t.clone());
+        let filter_by_cli = !flags.groups.is_empty() || !flags.benchmarks.is_empty();
+
+        if filter_by_cli {
+            let mut requested_tokens = Vec::new();
+            for g in &flags.groups {
+                for t in g.split(',') {
+                    let s = t.trim().to_lowercase();
+                    if !s.is_empty() {
+                        requested_tokens.push(s);
+                    }
+                }
+            }
+            for b in &flags.benchmarks {
+                for t in b.split(',') {
+                    let s = t.trim().to_lowercase();
+                    if !s.is_empty() {
+                        requested_tokens.push(s);
+                    }
+                }
+            }
+
+            for t in &tests {
+                if is_benchmark_requested(t, &requested_tokens) {
+                    initial_tests.insert(t.clone());
+                    if t == "RayIntersect" {
+                        initial_tests.insert("RayTracing".to_string());
+                    } else if t == "RayTracing" {
+                        initial_tests.insert("RayIntersect".to_string());
+                    }
+                }
+            }
+
+            if initial_tests.iter().any(|t| t.contains("System Memory")) {
+                if let Some(sys_dev) = devices.iter().find(|d| d.starts_with("System")) {
+                    initial_devices.insert(sys_dev.clone());
+                }
+            }
+        } else {
+            for t in &tests {
+                initial_tests.insert(t.clone());
+            }
         }
+
+        if selected_backend != "VULKAN" {
+            initial_tests.retain(|t| !t.starts_with("Ray"));
+        }
+
+        let selected_resolution = if let Some(ref res) = flags.resolution {
+            match res.trim().to_lowercase().as_str() {
+                "1080p" | "fhd" => ResolutionPreset::Fhd1080p,
+                "1440p" | "qhd" | "2k" => ResolutionPreset::Qhd1440p,
+                "4k" | "uhd" | "2160p" => ResolutionPreset::Uhd4k,
+                _ => ResolutionPreset::Auto,
+            }
+        } else {
+            ResolutionPreset::Auto
+        };
+
+        let dump_renders = flags.dump_renders;
+        let auto_start = flags.auto_start && !initial_tests.is_empty();
 
         let mut monitored = discover_all_devices();
         poll_all_devices(&mut monitored, false);
+
+        let initial_cmd = if auto_start {
+            Command::perform(async {}, |_| Message::StartBenchmarks)
+        } else {
+            Command::none()
+        };
 
         (
             Self {
@@ -1386,8 +2069,9 @@ impl Application for GPUBenchApp {
                 selected_devices: initial_devices,
                 available_tests: tests,
                 selected_tests: initial_tests,
-                dump_renders: false,
-                selected_resolution: ResolutionPreset::Auto,
+                dump_renders,
+                selected_resolution,
+                parity_profile: load_parity_profile(),
                 current_benchmark: String::from("Waiting to start..."),
                 current_devices_label: String::from(""),
                 monitored_devices: monitored,
@@ -1396,6 +2080,7 @@ impl Application for GPUBenchApp {
                 results_map: HashMap::new(),
                 completed_configs_count: 0,
                 total_expected_configs: 1,
+                validation_error: None,
                 gpu_bw: 0.0,
                 sys_mem_bw: 0.0,
                 sys_mem_bw_single: 0.0,
@@ -1429,7 +2114,7 @@ impl Application for GPUBenchApp {
                 gpu_pixel_fill_hdr: 0.0,
                 gpu_pixel_fill_blend: 0.0,
             },
-            Command::none()
+            initial_cmd
         )
     }
 
@@ -1462,6 +2147,7 @@ impl Application for GPUBenchApp {
                         self.selected_tests.retain(|t| !t.starts_with("Ray"));
                     }
                 }
+                self.validation_error = None;
                 Command::none()
             }
             Message::DeviceToggled(device) => {
@@ -1480,6 +2166,7 @@ impl Application for GPUBenchApp {
                         self.selected_tests.insert("System Memory Latency".to_string());
                     }
                 }
+                self.validation_error = None;
                 Command::none()
             }
             Message::DumpRendersToggled(val) => {
@@ -1502,11 +2189,21 @@ impl Application for GPUBenchApp {
                 }
                 if is_checked {
                     self.selected_tests.insert(name.clone());
+                    if name == "RayIntersect" {
+                        self.selected_tests.insert("RayTracing".to_string());
+                    } else if name == "RayTracing" {
+                        self.selected_tests.insert("RayIntersect".to_string());
+                    }
                     if name.contains("System Memory") {
                         self.selected_devices.insert("System: Host CPU & RAM".to_string());
                     }
                 } else {
                     self.selected_tests.remove(&name);
+                    if name == "RayIntersect" {
+                        self.selected_tests.remove("RayTracing");
+                    } else if name == "RayTracing" {
+                        self.selected_tests.remove("RayIntersect");
+                    }
                     if name.contains("System Memory") {
                         let other_sys = if name == "System Memory Bandwidth" {
                             self.selected_tests.contains("System Memory Latency")
@@ -1518,6 +2215,7 @@ impl Application for GPUBenchApp {
                         }
                     }
                 }
+                self.validation_error = None;
                 Command::none()
             }
             Message::TestGroupSelected(group) => {
@@ -1525,7 +2223,7 @@ impl Application for GPUBenchApp {
                     match group.as_str() {
                         "ALL" => {
                             for t in available_tests.iter() {
-                                if self.selected_backend == "VULKAN" || !t.starts_with("Ray") {
+                                if self.selected_backend == "VULKAN" || (!t.starts_with("Ray") && t.as_str() != "Pixel Fill Rate") {
                                     self.selected_tests.insert(t.clone());
                                 }
                             }
@@ -1550,13 +2248,39 @@ impl Application for GPUBenchApp {
                         }
                         "MEMORY" => {
                             let mem: Vec<String> = available_tests.iter()
-                                .filter(|t| t.as_str() == "Device Memory Bandwidth" || t.as_str() == "Pixel Fill Rate")
+                                .filter(|t| t.as_str() == "Device Memory Bandwidth")
                                 .cloned().collect();
                             let all_selected = mem.iter().all(|t| self.selected_tests.contains(t));
                             if all_selected {
                                 for t in &mem { self.selected_tests.remove(t); }
                             } else {
                                 for t in mem { self.selected_tests.insert(t); }
+                            }
+                        }
+                        "RASTER" => {
+                            if self.selected_backend == "VULKAN" {
+                                let raster: Vec<String> = available_tests.iter()
+                                    .filter(|t| t.as_str() == "Pixel Fill Rate")
+                                    .cloned().collect();
+                                let all_selected = raster.iter().all(|t| self.selected_tests.contains(t));
+                                if all_selected {
+                                    for t in &raster { self.selected_tests.remove(t); }
+                                } else {
+                                    for t in raster { self.selected_tests.insert(t); }
+                                }
+                            }
+                        }
+                        "GRAPHICS" => {
+                            if self.selected_backend == "VULKAN" {
+                                let gfx: Vec<String> = available_tests.iter()
+                                    .filter(|t| t.as_str() == "Pixel Fill Rate" || t.starts_with("Ray"))
+                                    .cloned().collect();
+                                let all_selected = gfx.iter().all(|t| self.selected_tests.contains(t));
+                                if all_selected {
+                                    for t in &gfx { self.selected_tests.remove(t); }
+                                } else {
+                                    for t in gfx { self.selected_tests.insert(t); }
+                                }
                             }
                         }
                         "RAY TRACING" => {
@@ -1590,6 +2314,7 @@ impl Application for GPUBenchApp {
                         _ => {}
                     }
                 }
+                self.validation_error = None;
                 Command::none()
             }
             Message::StartBenchmarks => {
@@ -1618,22 +2343,11 @@ impl Application for GPUBenchApp {
                     }
                     gpu_indices.sort();
 
-                    for &idx in &gpu_indices {
-                        let dname = dev_names.iter()
-                            .find(|d| d.starts_with(&format!("{}:", idx)))
-                            .cloned()
-                            .unwrap_or_else(|| format!("GPU {}", idx));
-                        target_devices.push((idx, dname));
+                    if gpu_indices.is_empty() && !has_system {
+                        self.validation_error = Some("Please select at least one target device to start.".to_string());
+                        log_diagnostic("StartBenchmarks blocked: no devices selected. Displayed visual validation reminder.");
+                        return Command::none();
                     }
-                    
-                    if has_system {
-                        dev_names.insert(0, "System".to_string());
-                        target_devices.push((SYSTEM_DEVICE_ID, "System (Host CPU)".to_string()));
-                    }
-                    self.current_devices_label = dev_names.join(", ");
-                    self.active_device_targets = target_devices;
-                    self.results_map.clear();
-                    self.completed_configs_count = 0;
 
                     let mut tests_to_run: Vec<String> = Vec::new();
                     for t in &self.available_tests {
@@ -1651,7 +2365,30 @@ impl Application for GPUBenchApp {
                         tests_to_run.retain(|t| !t.starts_with("Ray"));
                     }
 
-                    if tests_to_run.is_empty() { return Command::none(); }
+                    if tests_to_run.is_empty() {
+                        self.validation_error = Some("Please select at least one benchmark or group to start.".to_string());
+                        log_diagnostic("StartBenchmarks blocked: no benchmarks selected. Displayed visual validation reminder.");
+                        return Command::none();
+                    }
+
+                    self.validation_error = None;
+
+                    for &idx in &gpu_indices {
+                        let dname = dev_names.iter()
+                            .find(|d| d.starts_with(&format!("{}:", idx)))
+                            .cloned()
+                            .unwrap_or_else(|| format!("GPU {}", idx));
+                        target_devices.push((idx, dname));
+                    }
+                    
+                    if has_system {
+                        dev_names.insert(0, "System".to_string());
+                        target_devices.push((SYSTEM_DEVICE_ID, "System (Host CPU)".to_string()));
+                    }
+                    self.current_devices_label = dev_names.join(", ");
+                    self.active_device_targets = target_devices;
+                    self.results_map.clear();
+                    self.completed_configs_count = 0;
 
                     // Estimate total expected configs across all targets
                     let mut gpu_configs = 0;
@@ -1663,7 +2400,7 @@ impl Application for GPUBenchApp {
                             "FP16" | "BF16" | "FP8" | "INT8" | "INT4" => 2,
                             "RayASBuild" => 8,
                             "RayPathTracing" => 3,
-                            "RayScheduling" | "RayExecutionParadigm" => 8,
+                            "RayScheduling" | "RayExecutionParadigm" => 28,
                             _ => 1,
                         };
                     }
@@ -1730,7 +2467,9 @@ impl Application for GPUBenchApp {
             }
             Message::Tick => {
                 let is_running = matches!(self.state, AppState::Running { .. });
-                poll_all_devices(&mut self.monitored_devices, is_running);
+                if is_running {
+                    poll_all_devices(&mut self.monitored_devices, true);
+                }
 
                 let mut results = Vec::new();
                 if let AppState::Running { progress_receiver, .. } = &self.state {
@@ -1766,6 +2505,7 @@ impl Application for GPUBenchApp {
                 let final_count = self.completed_configs_count.max(self.total_expected_configs);
                 self.completed_configs_count = final_count;
                 self.total_expected_configs = final_count;
+                self.parity_profile = load_parity_profile();
                 self.state = AppState::Complete { total_configs: final_count };
                 self.current_benchmark = String::from("Complete");
                 log_diagnostic("=== Benchmark suite completed successfully ===");
@@ -1815,6 +2555,12 @@ impl Application for GPUBenchApp {
                     numeric: f64,
                     unit: String,
                     status: String,
+                    #[serde(skip_serializing_if = "String::is_empty")]
+                    support_note: String,
+                    #[serde(skip_serializing_if = "String::is_empty")]
+                    support_category: String,
+                    #[serde(skip_serializing_if = "String::is_empty")]
+                    unsupported_reason: String,
                     raw_operations: u64,
                     raw_time_ms: f64,
                 }
@@ -1857,6 +2603,9 @@ impl Application for GPUBenchApp {
                                 numeric: cell.numeric,
                                 unit: if cell.unit.is_empty() { w.default_unit.to_string() } else { cell.unit.clone() },
                                 status,
+                                support_note: cell.support_note.clone(),
+                                support_category: cell.support_category.clone(),
+                                unsupported_reason: cell.support_note.clone(),
                                 raw_operations: cell.raw_operations,
                                 raw_time_ms: cell.raw_time_ms,
                             });
@@ -1898,16 +2647,29 @@ impl Application for GPUBenchApp {
                 let filename = format!("gpubench_results_{}.json", now);
                 if let Ok(json_str) = serde_json::to_string_pretty(&report) {
                     let _ = std::fs::write(&filename, &json_str);
-                    if let Some(path) = rfd::FileDialog::new()
-                        .set_file_name(&filename)
-                        .add_filter("JSON Report", &["json"])
-                        .save_file()
-                    {
-                        let _ = std::fs::write(path, &json_str);
-                    }
-                    self.current_benchmark = format!("Results exported: {}", filename);
+                    self.current_benchmark = format!("Results auto-saved: {}. Choose destination in dialog...", filename);
+                    return Command::perform(
+                        async move {
+                            let dialog = rfd::AsyncFileDialog::new()
+                                .set_file_name(&filename)
+                                .add_filter("JSON Report", &["json"]);
+                            if let Some(handle) = dialog.save_file().await {
+                                Some((handle.path().to_path_buf(), json_str))
+                            } else {
+                                None
+                            }
+                        },
+                        Message::SaveResultsComplete,
+                    );
                 }
                 return Command::none();
+            }
+            Message::SaveResultsComplete(maybe_save) => {
+                if let Some((path, json_str)) = maybe_save {
+                    let _ = std::fs::write(&path, &json_str);
+                    self.current_benchmark = format!("Results exported: {}", path.display());
+                }
+                Command::none()
             }
             Message::CopyDiagnostics => {
                 let summary = self.generate_diagnostic_summary();
@@ -1964,6 +2726,41 @@ impl Application for GPUBenchApp {
                 self.gpu_pixel_fill = 0.0;
                 self.gpu_pixel_fill_hdr = 0.0;
                 self.gpu_pixel_fill_blend = 0.0;
+                self.parity_profile = None;
+                return Command::none();
+            }
+            Message::OpenTriptych(tag) => {
+                let grid = "renders/render_comparison_grid.png";
+                let primary_diptych = format!("renders/render_{}_comparison.png", tag);
+                let primary = format!("renders/render_{}_comparison_triptych.png", tag);
+                let fallback = "renders/render_comparison_triptych.png";
+                if find_renders_file(grid).is_some() {
+                    open_render_target(grid);
+                } else if find_renders_file(&primary_diptych).is_some() {
+                    open_render_target(&primary_diptych);
+                } else if find_renders_file(&primary).is_some() {
+                    open_render_target(&primary);
+                } else {
+                    open_render_target(fallback);
+                }
+                return Command::none();
+            }
+            Message::OpenHeatmap(tag) => {
+                let primary = format!("renders/render_{}_difference_heatmap.png", tag);
+                let fallback = "renders/render_difference_heatmap.png";
+                if find_renders_file(&primary).is_some() {
+                    open_render_target(&primary);
+                } else {
+                    open_render_target(fallback);
+                }
+                return Command::none();
+            }
+            Message::OpenRendersFolder => {
+                if let Some(p) = find_renders_file("renders") {
+                    open_file_in_desktop(&p);
+                } else {
+                    open_file_in_desktop("renders");
+                }
                 return Command::none();
             }
         }
@@ -2142,17 +2939,36 @@ impl Application for GPUBenchApp {
                     api_row = api_row.push(api_btn);
                 }
 
-                let start_btn = button(
-                    container(text("START BENCHMARK").size(13).style(color!(0xFFFFFF)))
+                let is_selection_empty = self.selected_tests.is_empty();
+                let start_btn = if is_selection_empty {
+                    button(
+                        container(
+                            column![
+                                text("START BENCHMARK").size(12).style(color!(0x94A3B8)),
+                                Space::with_height(2),
+                                text("Select benchmarks above").size(10).style(color!(0xF59E0B)),
+                            ].align_items(iced::Alignment::Center)
+                        )
                         .width(Length::Fill)
                         .center_x()
-                )
-                .width(Length::Fill)
-                .padding([12, 0])
-                .on_press(Message::StartBenchmarks)
-                .style(iced::theme::Button::Custom(Box::new(SleekPrimaryButton)));
+                    )
+                    .width(Length::Fill)
+                    .padding([8, 0])
+                    .on_press(Message::StartBenchmarks)
+                    .style(iced::theme::Button::Custom(Box::new(SleekSecondaryButton)))
+                } else {
+                    button(
+                        container(text("START BENCHMARK").size(13).style(color!(0xFFFFFF)))
+                            .width(Length::Fill)
+                            .center_x()
+                    )
+                    .width(Length::Fill)
+                    .padding([12, 0])
+                    .on_press(Message::StartBenchmarks)
+                    .style(iced::theme::Button::Custom(Box::new(SleekPrimaryButton)))
+                };
 
-                                let resolution_section = {
+                let resolution_section = {
                     let mut res_col = column![].spacing(4);
                     for preset in ResolutionPreset::ALL {
                         let is_sel = self.selected_resolution == preset;
@@ -2228,31 +3044,56 @@ impl Application for GPUBenchApp {
                     .style(iced::theme::Container::Transparent)
                 };
 
-                let sidebar = container(
-                    column![
-                        brand_block,
-                        Space::with_height(14),
-                        telemetry_panel,
-                        Space::with_height(14),
-                        text("COMPUTE API").size(10).style(color!(0x64748B)),
-                        Space::with_height(4),
-                        api_row,
-                        Space::with_height(14),
-                        text("TARGET DEVICES").size(10).style(color!(0x64748B)),
-                        Space::with_height(4),
-                        device_col,
-                        Space::with_height(14),
-                        text("TARGET RESOLUTION").size(10).style(color!(0x64748B)),
-                        Space::with_height(4),
-                        resolution_section,
-                        Space::with_height(14),
-                        text("OPTIONS").size(10).style(color!(0x64748B)),
-                        Space::with_height(4),
-                        dump_renders_btn,
-                        Space::with_height(Length::Fill),
-                        start_btn
-                    ]
-                )
+                let validation_banner = if let Some(ref err) = self.validation_error {
+                    Some(
+                        container(
+                            row![
+                                text("⚠️").size(12),
+                                Space::with_width(6),
+                                text(err.clone()).size(10).style(color!(0xFBBF24))
+                            ].align_items(iced::Alignment::Center)
+                        )
+                        .padding([8, 10])
+                        .width(Length::Fill)
+                        .style(|_t: &Theme| container::Appearance {
+                            background: Some(Background::Color(color!(0x2D1B00))),
+                            border: Border { radius: 6.0.into(), width: 1.0, color: color!(0xB45309) },
+                            ..Default::default()
+                        })
+                    )
+                } else {
+                    None
+                };
+
+                let mut sidebar_col = column![
+                    brand_block,
+                    Space::with_height(14),
+                    telemetry_panel,
+                    Space::with_height(14),
+                    text("COMPUTE API").size(10).style(color!(0x64748B)),
+                    Space::with_height(4),
+                    api_row,
+                    Space::with_height(14),
+                    text("TARGET DEVICES").size(10).style(color!(0x64748B)),
+                    Space::with_height(4),
+                    device_col,
+                    Space::with_height(14),
+                    text("TARGET RESOLUTION").size(10).style(color!(0x64748B)),
+                    Space::with_height(4),
+                    resolution_section,
+                    Space::with_height(14),
+                    text("OPTIONS").size(10).style(color!(0x64748B)),
+                    Space::with_height(4),
+                    dump_renders_btn,
+                    Space::with_height(Length::Fill),
+                ];
+
+                if let Some(banner) = validation_banner {
+                    sidebar_col = sidebar_col.push(banner).push(Space::with_height(8));
+                }
+                sidebar_col = sidebar_col.push(start_btn);
+
+                let sidebar = container(sidebar_col)
                 .width(Length::Fixed(270.0))
                 .height(Length::Fill)
                 .padding(18)
@@ -2303,9 +3144,20 @@ impl Application for GPUBenchApp {
                     let mut current_row = row![].spacing(8);
                     let mut count = 0;
                     for (key, display_label) in items {
-                        if available_tests.contains(&key.to_string()) {
-                            let is_checked = self.selected_tests.contains(key);
-                            let name = key.to_string();
+                        let is_available = available_tests.contains(&key.to_string())
+                            || (key == "RayTracing" && available_tests.contains(&"RayIntersect".to_string()))
+                            || (key == "RayIntersect" && available_tests.contains(&"RayTracing".to_string()));
+                        if is_available {
+                            let is_checked = self.selected_tests.contains(key)
+                                || (key == "RayTracing" && self.selected_tests.contains("RayIntersect"))
+                                || (key == "RayIntersect" && self.selected_tests.contains("RayTracing"));
+                            let name = if available_tests.contains(&key.to_string()) {
+                                key.to_string()
+                            } else if key == "RayTracing" && available_tests.contains(&"RayIntersect".to_string()) {
+                                "RayIntersect".to_string()
+                            } else {
+                                key.to_string()
+                            };
                             let tip_text = if is_rt_disabled {
                                 "Hardware Ray Tracing requires the Vulkan backend."
                             } else {
@@ -2375,12 +3227,12 @@ impl Application for GPUBenchApp {
 
                 let sys_col = container(
                     column![
-                        create_pill_grid_with_tooltips("GPU Memory & Raster", color!(0x0EA5E9), false, vec![
-                            ("Device Memory Bandwidth", "GPU VRAM Bandwidth"),
+                        create_pill_grid_with_tooltips("Graphics: Rasterization (ROP)", color!(0xF59E0B), false, vec![
                             ("Pixel Fill Rate", "Pixel Fill Rate"),
                         ]),
                         Space::with_height(12),
-                        create_pill_grid_with_tooltips("Host System Memory", color!(0x38BDF8), false, vec![
+                        create_pill_grid_with_tooltips("Memory: VRAM & Host RAM", color!(0x0EA5E9), false, vec![
+                            ("Device Memory Bandwidth", "GPU VRAM Bandwidth"),
                             ("System Memory Bandwidth", "System RAM Bandwidth"),
                             ("System Memory Latency", "System RAM Latency"),
                         ]),
@@ -2410,9 +3262,9 @@ impl Application for GPUBenchApp {
 
                 let rt_col = {
                     let is_rt_disabled = selected_backend != "VULKAN";
-                    let rt_top = create_pill_grid_with_tooltips("Ray Tracing Acceleration", color!(0x10B981), true, vec![
+                    let rt_top = create_pill_grid_with_tooltips("Graphics: Ray Tracing", color!(0x10B981), true, vec![
                         ("RayASBuild", "BLAS & TLAS Build"),
-                        ("RayTracing", "Ray-Triangle Intersect"),
+                        ("RayIntersect", "Ray-Triangle Intersect"),
                         ("RayAnyHit", "AnyHit Alpha-Tested"),
                         ("RayProcedural", "Procedural Geometry"),
                         ("RayMaterialDivergence", "Material Divergence"),
@@ -2509,46 +3361,60 @@ impl Application for GPUBenchApp {
                 let compute_tests: Vec<&String> = available_tests.iter()
                     .filter(|t| !t.starts_with("Ray") && !t.contains("Memory") && !t.contains("SysMem") && !t.contains("Pixel")).collect();
                 let mem_tests: Vec<&String> = available_tests.iter()
-                    .filter(|t| *t == "Device Memory Bandwidth" || *t == "Pixel Fill Rate").collect();
-                let sys_tests: Vec<&String> = available_tests.iter()
-                    .filter(|t| t.contains("System Memory")).collect();
+                    .filter(|t| *t == "Device Memory Bandwidth").collect();
+                let gfx_tests: Vec<&String> = available_tests.iter()
+                    .filter(|t| *t == "Pixel Fill Rate" || t.starts_with("Ray")).collect();
+                let raster_tests: Vec<&String> = available_tests.iter()
+                    .filter(|t| *t == "Pixel Fill Rate").collect();
                 let rt_tests: Vec<&String> = available_tests.iter()
                     .filter(|t| t.starts_with("Ray")).collect();
+                let sys_tests: Vec<&String> = available_tests.iter()
+                    .filter(|t| t.contains("System Memory")).collect();
                 
                 let all_selected = available_tests.iter().all(|t| self.selected_tests.contains(t));
                 let none_selected = self.selected_tests.is_empty();
                 let compute_all = !compute_tests.is_empty() && compute_tests.iter().all(|t| self.selected_tests.contains(*t));
                 let mem_all = !mem_tests.is_empty() && mem_tests.iter().all(|t| self.selected_tests.contains(*t));
-                let sys_all = !sys_tests.is_empty() && sys_tests.iter().all(|t| self.selected_tests.contains(*t));
+                let gfx_all = !gfx_tests.is_empty() && gfx_tests.iter().all(|t| self.selected_tests.contains(*t));
+                let raster_all = !raster_tests.is_empty() && raster_tests.iter().all(|t| self.selected_tests.contains(*t));
                 let rt_all = !rt_tests.is_empty() && rt_tests.iter().all(|t| self.selected_tests.contains(*t));
-                let is_rt_avail = selected_backend == "VULKAN";
+                let sys_all = !sys_tests.is_empty() && sys_tests.iter().all(|t| self.selected_tests.contains(*t));
+                let is_vulkan = selected_backend == "VULKAN";
 
                 let group_toggles = row![
                     button(text("All").size(11).horizontal_alignment(iced::alignment::Horizontal::Center))
-                        .padding([5, 14])
+                        .padding([5, 12])
                         .on_press(Message::TestGroupSelected("ALL".to_string()))
                         .style(iced::theme::Button::Custom(Box::new(SleekGroupChip { is_highlighted: all_selected, is_disabled: false }))),
                     button(text("None").size(11).horizontal_alignment(iced::alignment::Horizontal::Center))
-                        .padding([5, 14])
+                        .padding([5, 12])
                         .on_press(Message::TestGroupSelected("NONE".to_string()))
                         .style(iced::theme::Button::Custom(Box::new(SleekGroupChip { is_highlighted: none_selected, is_disabled: false }))),
                     button(text("Compute").size(11).horizontal_alignment(iced::alignment::Horizontal::Center))
-                        .padding([5, 14])
+                        .padding([5, 12])
                         .on_press(Message::TestGroupSelected("COMPUTE".to_string()))
                         .style(iced::theme::Button::Custom(Box::new(SleekGroupChip { is_highlighted: compute_all, is_disabled: false }))),
                     button(text("Memory").size(11).horizontal_alignment(iced::alignment::Horizontal::Center))
-                        .padding([5, 14])
+                        .padding([5, 12])
                         .on_press(Message::TestGroupSelected("MEMORY".to_string()))
                         .style(iced::theme::Button::Custom(Box::new(SleekGroupChip { is_highlighted: mem_all, is_disabled: false }))),
+                    button(text("Graphics (All)").size(11).horizontal_alignment(iced::alignment::Horizontal::Center))
+                        .padding([5, 12])
+                        .on_press(Message::TestGroupSelected("GRAPHICS".to_string()))
+                        .style(iced::theme::Button::Custom(Box::new(SleekGroupChip { is_highlighted: is_vulkan && gfx_all, is_disabled: !is_vulkan }))),
+                    button(text("Raster").size(11).horizontal_alignment(iced::alignment::Horizontal::Center))
+                        .padding([5, 12])
+                        .on_press(Message::TestGroupSelected("RASTER".to_string()))
+                        .style(iced::theme::Button::Custom(Box::new(SleekGroupChip { is_highlighted: is_vulkan && raster_all, is_disabled: !is_vulkan }))),
                     button(text("Ray Tracing").size(11).horizontal_alignment(iced::alignment::Horizontal::Center))
-                        .padding([5, 14])
+                        .padding([5, 12])
                         .on_press(Message::TestGroupSelected("RAY TRACING".to_string()))
-                        .style(iced::theme::Button::Custom(Box::new(SleekGroupChip { is_highlighted: is_rt_avail && rt_all, is_disabled: !is_rt_avail }))),
+                        .style(iced::theme::Button::Custom(Box::new(SleekGroupChip { is_highlighted: is_vulkan && rt_all, is_disabled: !is_vulkan }))),
                     button(text("System").size(11).horizontal_alignment(iced::alignment::Horizontal::Center))
-                        .padding([5, 14])
+                        .padding([5, 12])
                         .on_press(Message::TestGroupSelected("SYSTEM".to_string()))
                         .style(iced::theme::Button::Custom(Box::new(SleekGroupChip { is_highlighted: sys_all, is_disabled: false }))),
-                ].spacing(6);
+                ].spacing(5);
 
                 let main_area = container(
                     scrollable(
@@ -2670,10 +3536,39 @@ impl Application for GPUBenchApp {
                     ].spacing(6).width(Length::Fill),
                 ].align_items(iced::Alignment::Center);
 
-                let targets = if self.active_device_targets.is_empty() {
-                    vec![(0, "GPU 0".to_string())]
-                } else {
+                let targets = if !self.active_device_targets.is_empty() {
                     self.active_device_targets.clone()
+                } else {
+                    let mut t = Vec::new();
+                    let mut gpu_indices = Vec::new();
+                    let has_system = self.selected_devices.iter().any(|d| d.starts_with("System"));
+                    if has_system {
+                        t.push((SYSTEM_DEVICE_ID, "System (Host CPU)".to_string()));
+                    }
+                    for dev in &self.selected_devices {
+                        if !dev.starts_with("System") {
+                            if let Some(idx_str) = dev.split(':').next() {
+                                if let Ok(idx) = idx_str.parse::<u32>() {
+                                    if !gpu_indices.contains(&idx) {
+                                        gpu_indices.push(idx);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    gpu_indices.sort();
+                    for &idx in &gpu_indices {
+                        let dname = self.selected_devices.iter()
+                            .find(|d| d.starts_with(&format!("{}:", idx)))
+                            .cloned()
+                            .unwrap_or_else(|| format!("GPU {}", idx));
+                        t.push((idx, dname));
+                    }
+                    if t.is_empty() {
+                        vec![(0, "GPU 0".to_string())]
+                    } else {
+                        t
+                    }
                 };
 
                 // Table Header Row
@@ -2715,20 +3610,22 @@ impl Application for GPUBenchApp {
                 }
 
                 let categories = [
-                    ("COMPUTE PIPELINES", color!(0x8B5CF6)),
-                    ("MEMORY & SYSTEM", color!(0x0EA5E9)),
-                    ("GRAPHICS & ROP", color!(0xF59E0B)),
-                    ("RAY TRACING ACCELERATION", color!(0x10B981)),
+                    ("COMPUTE PIPELINES", "COMPUTE PIPELINES", color!(0x8B5CF6)),
+                    ("MEMORY & SYSTEM", "MEMORY & SYSTEM", color!(0x0EA5E9)),
+                    ("RASTERIZATION & ROP", "GRAPHICS: RASTERIZATION (ROP)", color!(0xF59E0B)),
+                    ("RAY TRACING ACCELERATION", "GRAPHICS: RAY TRACING ACCELERATION", color!(0x10B981)),
+                    ("RAY PIPELINE BREAKDOWN", "GRAPHICS: RAY PIPELINE BREAKDOWN", color!(0x06B6D4)),
                 ];
 
                 let mut table_column = column![header_row].spacing(12);
                 let mut has_any_category = false;
 
-                for (cat_name, cat_color) in categories {
+                for (cat_id, cat_display, cat_color) in categories {
                     let cat_workloads: Vec<&WorkloadDef> = WORKLOADS.iter()
-                        .filter(|w| w.category == cat_name)
+                        .filter(|w| w.category == cat_id)
                         .filter(|w| !w.is_system || targets.iter().any(|(d, _)| *d == SYSTEM_DEVICE_ID))
                         .filter(|w| !w.category.starts_with("RAY") || self.selected_backend == "VULKAN")
+                        .filter(|w| w.category != "RASTERIZATION & ROP" || self.selected_backend == "VULKAN")
                         .filter(|w| {
                             self.is_workload_selected(w)
                                 || targets.iter().any(|(dev_id, _)| {
@@ -2750,18 +3647,37 @@ impl Application for GPUBenchApp {
                             ..Default::default()
                         }),
                         Space::with_width(6),
-                        text(cat_name).size(12).style(color!(0xE2E8F0))
+                        text(cat_display).size(12).style(color!(0xE2E8F0))
                     ].align_items(iced::Alignment::Center);
 
                     let mut cat_rows = column![].spacing(4);
 
+                    let is_single_target = targets.len() == 1;
+                    let mut card_list: Vec<Element<'_, Message>> = Vec::new();
+
                     for w in cat_workloads {
                         let is_selected = self.is_workload_selected(w);
+                        let any_running = targets.iter().any(|(dev_id, _)| {
+                            self.results_map.get(&(*dev_id, w.id)).map_or(false, |c| c.is_running)
+                        });
+                        let any_completed = targets.iter().any(|(dev_id, _)| {
+                            self.results_map.get(&(*dev_id, w.id)).map_or(false, |c| !c.value_str.is_empty() || c.is_unsupported)
+                        });
+
+                        let (name_color, approach_color) = if any_running {
+                            (color!(0x38BDF8), color!(0x0284C7)) // Active Cyan
+                        } else if any_completed {
+                            (color!(0xE2E8F0), color!(0x94A3B8)) // Legible completed
+                        } else if is_selected {
+                            (color!(0xF1F5F9), color!(0x818CF8)) // Selected pending
+                        } else {
+                            (color!(0x64748B), color!(0x475569)) // Dimmed unselected
+                        };
 
                         let name_block = column![
-                            text(w.label).size(12).style(if is_selected { color!(0xF1F5F9) } else { color!(0x64748B) }),
-                            text(w.approach).size(10).style(if is_selected { color!(0x818CF8) } else { color!(0x475569) }),
-                        ].spacing(2);
+                            text(w.label).size(12).style(name_color),
+                            text(w.approach).size(10).style(approach_color),
+                        ].spacing(1);
 
                         let info_tip = tooltip(
                             text("ⓘ").size(11).style(color!(0x475569)),
@@ -2790,8 +3706,8 @@ impl Application for GPUBenchApp {
                             row![name_block, Space::with_width(Length::Fill), info_tip]
                                 .align_items(iced::Alignment::Center)
                         )
-                        .width(Length::Fixed(320.0))
-                        .padding([4, 10]);
+                        .width(if is_single_target { Length::Fill } else { Length::Fixed(320.0) })
+                        .padding([3, 6]);
 
                         let mut row_cells = row![left_col].spacing(8).align_items(iced::Alignment::Center);
 
@@ -2800,59 +3716,105 @@ impl Application for GPUBenchApp {
                                 || (!w.is_system && *dev_id == SYSTEM_DEVICE_ID)
                             {
                                 container(text("—").size(11).style(color!(0x334155)))
-                                    .width(Length::FillPortion(1))
+                                    .width(if is_single_target { Length::Fixed(210.0) } else { Length::FillPortion(1) })
                                     .padding([5, 8])
                                     .center_x()
                                     .into()
                             } else {
                                 let cell = self.results_map.get(&(*dev_id, w.id));
-                                let (val_str, text_color, bg_color, border_color) = if let Some(c) = cell {
+                                let (val_str, text_color, bg_color, border_color, note_opt) = if let Some(c) = cell {
                                     if c.is_running {
-                                        ("RUNNING...", color!(0x22D3EE), color!(0x06B6D4, 0.18), color!(0x06B6D4, 0.5))
+                                        ("RUNNING...".to_string(), color!(0x22D3EE), color!(0x06B6D4, 0.18), color!(0x06B6D4, 0.5), None)
                                     } else if c.is_unsupported {
-                                        ("UNSUPPORTED", color!(0xF87171), color!(0xEF4444, 0.12), color!(0xEF4444, 0.35))
+                                        let tag = match c.support_category.as_str() {
+                                            "toolchain" => "UNSUPPORTED (Toolchain)",
+                                            "api" => "UNSUPPORTED (API)",
+                                            "hardware" => "UNSUPPORTED (No HW)",
+                                            _ => "UNSUPPORTED",
+                                        };
+                                        (tag.to_string(), color!(0xF87171), color!(0xEF4444, 0.12), color!(0xEF4444, 0.35), if c.support_note.is_empty() { None } else { Some(c.support_note.clone()) })
                                     } else if !c.value_str.is_empty() {
-                                        (c.value_str.as_str(), color!(0x34D399), color!(0x10B981, 0.14), color!(0x10B981, 0.4))
+                                        (c.value_str.clone(), color!(0x34D399), color!(0x10B981, 0.14), color!(0x10B981, 0.4), None)
                                     } else if matches!(self.state, AppState::Complete { .. }) {
-                                        ("UNSUPPORTED", color!(0xF87171), color!(0xEF4444, 0.12), color!(0xEF4444, 0.35))
+                                        ("UNSUPPORTED".to_string(), color!(0xF87171), color!(0xEF4444, 0.12), color!(0xEF4444, 0.35), None)
                                     } else {
-                                        ("PENDING", color!(0x64748B), color!(0x181C28), color!(0x222838))
+                                        ("PENDING".to_string(), color!(0x64748B), color!(0x181C28), color!(0x222838), None)
                                     }
                                 } else if !is_selected {
-                                    ("—", color!(0x475569), color!(0x10131B), color!(0x161B26))
+                                    ("—".to_string(), color!(0x475569), color!(0x10131B), color!(0x161B26), None)
                                 } else if matches!(self.state, AppState::Complete { .. }) {
-                                    ("UNSUPPORTED", color!(0xF87171), color!(0xEF4444, 0.12), color!(0xEF4444, 0.35))
+                                    ("UNSUPPORTED".to_string(), color!(0xF87171), color!(0xEF4444, 0.12), color!(0xEF4444, 0.35), None)
                                 } else {
-                                    ("PENDING", color!(0x64748B), color!(0x181C28), color!(0x222838))
+                                    ("PENDING".to_string(), color!(0x64748B), color!(0x181C28), color!(0x222838), None)
                                 };
 
-                                container(
-                                    text(val_str).size(11).style(text_color)
+                                let cell_box = container(
+                                    text(val_str).size(10).style(text_color)
                                 )
-                                .width(Length::FillPortion(1))
+                                .width(if is_single_target { Length::Fixed(210.0) } else { Length::FillPortion(1) })
                                 .padding([5, 8])
                                 .center_x()
                                 .style(move |_t: &Theme| container::Appearance {
                                     background: Some(Background::Color(bg_color)),
                                     border: Border { radius: 6.0.into(), width: 1.0, color: border_color },
                                     ..Default::default()
-                                })
-                                .into()
+                                });
+
+                                if let Some(note) = note_opt {
+                                    tooltip(
+                                        cell_box,
+                                        container(
+                                            column![
+                                                text("Unsupported Reason").size(11).style(color!(0xF87171)),
+                                                Space::with_height(2),
+                                                text(note).size(10).style(color!(0xE2E8F0)),
+                                            ]
+                                        )
+                                        .width(Length::Fixed(280.0))
+                                        .padding(8)
+                                        .style(|_t: &Theme| container::Appearance {
+                                            background: Some(Background::Color(color!(0x141824))),
+                                            border: Border { radius: 6.0.into(), width: 1.0, color: color!(0x2A3248) },
+                                            ..Default::default()
+                                        }),
+                                        tooltip::Position::Top
+                                    ).into()
+                                } else {
+                                    cell_box.into()
+                                }
                             };
 
                             row_cells = row_cells.push(cell_element);
                         }
 
                         let row_card = container(row_cells)
-                            .width(Length::Fill)
-                            .padding([4, 6])
+                            .width(if is_single_target { Length::FillPortion(1) } else { Length::Fill })
+                            .padding([4, 8])
                             .style(|_t: &Theme| container::Appearance {
                                 background: Some(Background::Color(color!(0x0C0E16))),
                                 border: Border { radius: 6.0.into(), width: 1.0, color: color!(0x171C2B) },
                                 ..Default::default()
                             });
 
-                        cat_rows = cat_rows.push(row_card);
+                        if is_single_target {
+                            card_list.push(row_card.into());
+                        } else {
+                            cat_rows = cat_rows.push(row_card);
+                        }
+                    }
+
+                    if is_single_target {
+                        while !card_list.is_empty() {
+                            if card_list.len() >= 2 {
+                                let c1 = card_list.remove(0);
+                                let c2 = card_list.remove(0);
+                                cat_rows = cat_rows.push(row![c1, c2].spacing(8).width(Length::Fill));
+                            } else {
+                                let c1 = card_list.remove(0);
+                                let dummy = container(Space::with_width(Length::Fill)).width(Length::FillPortion(1));
+                                cat_rows = cat_rows.push(row![c1, dummy].spacing(8).width(Length::Fill));
+                            }
+                        }
                     }
 
                     let cat_panel = column![
@@ -2928,9 +3890,185 @@ impl Application for GPUBenchApp {
                 } else {
                     column![]
                 };
+                let visual_parity_section = if matches!(self.state, AppState::Complete { .. }) {
+                    if let Some((ref prof, ref tag)) = self.parity_profile {
+                        let passed = prof.parity.diff_pixels == 0;
+                        let badge_color = if passed { color!(0x10B981) } else { color!(0xF59E0B) };
+                        let badge_bg = if passed { color!(0x10B981, 0.15) } else { color!(0xF59E0B, 0.15) };
+                        let badge_text = if passed { "BIT-EXACT MATCH (PASS)" } else { "NEAR-EXACT MATCH" };
+
+                        let card_psnr = parity_stat_box(
+                            "PSNR (FIDELITY)",
+                            format!("{:.2} dB", prof.parity.psnr),
+                            format!("Diff Pixels: {}", prof.parity.diff_pixels),
+                            color!(0x38BDF8),
+                        );
+
+                        let card_exact = parity_stat_box(
+                            "BIT-EXACT RATIO",
+                            format!("{:.2}%", prof.parity.exact_pct),
+                            format!("{} / {}", prof.parity.exact_pixels, prof.parity.exact_pixels + prof.parity.diff_pixels),
+                            color!(0x10B981),
+                        );
+
+                        let card_shading = parity_stat_box(
+                            "MATERIAL DIVERGENCE SPEEDUP",
+                            format!("{:.2}x", prof.worklist.shading_speedup),
+                            format!("{:.0} vs {:.0} MHits/s", prof.worklist.shading_mhits, prof.traditional.shading_mhits),
+                            color!(0xA78BFA),
+                        );
+
+                        let card_compaction = parity_stat_box(
+                            "COMPACTION TIME & OVERHEAD",
+                            format!("{:.2} ms", prof.worklist.compaction_ms),
+                            format!("{:.1}% total frame time", prof.worklist.compaction_pct),
+                            color!(0xF472B6),
+                        );
+
+                        let inspector_buttons = row![
+                            button(
+                                container(text("VIEW ARCHITECTURAL COMPARISON").size(11).style(color!(0xFFFFFF)))
+                                    .padding([6, 12])
+                                    .center_x()
+                            )
+                            .on_press(Message::OpenTriptych(tag.clone()))
+                            .style(iced::theme::Button::Custom(Box::new(SleekPrimaryButton))),
+
+                            button(
+                                container(text("VIEW HEATMAP (10x)").size(11).style(color!(0xCBD5E1)))
+                                    .padding([6, 12])
+                                    .center_x()
+                            )
+                            .on_press(Message::OpenHeatmap(tag.clone()))
+                            .style(iced::theme::Button::Custom(Box::new(SleekSecondaryButton))),
+
+                            button(
+                                container(text("OPEN RENDERS FOLDER").size(11).style(color!(0x94A3B8)))
+                                    .padding([6, 12])
+                                    .center_x()
+                            )
+                            .on_press(Message::OpenRendersFolder)
+                            .style(iced::theme::Button::Custom(Box::new(SleekSecondaryButton))),
+                        ].spacing(8);
+
+                        column![
+                            container(
+                                column![
+                                    row![
+                                        container(Space::with_width(3)).height(14).style(|_t: &Theme| container::Appearance {
+                                            background: Some(Background::Color(color!(0x10B981))),
+                                            border: Border { radius: 2.0.into(), ..Default::default() },
+                                            ..Default::default()
+                                        }),
+                                        Space::with_width(8),
+                                        text("RAY SCHEDULING VISUAL PARITY & ANALYTICAL SCORECARD").size(12).style(color!(0xF1F5F9)),
+                                        Space::with_width(12),
+                                        container(
+                                            text(badge_text).size(10).style(badge_color)
+                                        )
+                                        .padding([2, 8])
+                                        .style(move |_t: &Theme| container::Appearance {
+                                            background: Some(Background::Color(badge_bg)),
+                                            border: Border { radius: 4.0.into(), width: 1.0, color: badge_color },
+                                            ..Default::default()
+                                        }),
+                                        Space::with_width(Length::Fill),
+                                        text(format!("{} | {}", prof.scene, prof.resolution)).size(11).style(color!(0x64748B)),
+                                    ].align_items(iced::Alignment::Center),
+
+                                    Space::with_height(8),
+
+                                    row![card_psnr, card_exact, card_shading, card_compaction].spacing(10),
+
+                                    Space::with_height(10),
+
+                                    inspector_buttons,
+                                ].spacing(2)
+                            )
+                            .padding(14)
+                            .width(Length::Fill)
+                            .style(|_t: &Theme| container::Appearance {
+                                background: Some(Background::Color(color!(0x0A0D15))),
+                                border: Border { radius: 10.0.into(), width: 1.0, color: color!(0x1E253A) },
+                                ..Default::default()
+                            })
+                        ].spacing(2).width(Length::Fill)
+                    } else if find_renders_file("renders/render_comparison_grid.png").is_some()
+                        || find_renders_file("renders/render_comparison_triptych.png").is_some()
+                        || find_renders_file("renders/render_indoor_comparison.png").is_some()
+                    {
+                        let tag = "indoor".to_string();
+                        let inspector_buttons = row![
+                            button(
+                                container(text("VIEW ARCHITECTURAL COMPARISON").size(11).style(color!(0xFFFFFF)))
+                                    .padding([6, 12])
+                                    .center_x()
+                            )
+                            .on_press(Message::OpenTriptych(tag.clone()))
+                            .style(iced::theme::Button::Custom(Box::new(SleekPrimaryButton))),
+
+                            button(
+                                container(text("VIEW HEATMAP (10x)").size(11).style(color!(0xCBD5E1)))
+                                    .padding([6, 12])
+                                    .center_x()
+                            )
+                            .on_press(Message::OpenHeatmap(tag.clone()))
+                            .style(iced::theme::Button::Custom(Box::new(SleekSecondaryButton))),
+
+                            button(
+                                container(text("OPEN RENDERS FOLDER").size(11).style(color!(0x94A3B8)))
+                                    .padding([6, 12])
+                                    .center_x()
+                            )
+                            .on_press(Message::OpenRendersFolder)
+                            .style(iced::theme::Button::Custom(Box::new(SleekSecondaryButton))),
+                        ].spacing(8);
+
+                        column![
+                            container(
+                                column![
+                                    row![
+                                        container(Space::with_width(3)).height(14).style(|_t: &Theme| container::Appearance {
+                                            background: Some(Background::Color(color!(0x10B981))),
+                                            border: Border { radius: 2.0.into(), ..Default::default() },
+                                            ..Default::default()
+                                        }),
+                                        Space::with_width(8),
+                                        text("RAY SCHEDULING COMPARISON RENDERS").size(12).style(color!(0xF1F5F9)),
+                                        Space::with_width(12),
+                                        container(
+                                            text("RENDERS AVAILABLE").size(10).style(color!(0x10B981))
+                                        )
+                                        .padding([2, 8])
+                                        .style(|_t: &Theme| container::Appearance {
+                                            background: Some(Background::Color(color!(0x064E3B, 0.4))),
+                                            border: Border { radius: 4.0.into(), width: 1.0, color: color!(0x10B981) },
+                                            ..Default::default()
+                                        }),
+                                    ].align_items(iced::Alignment::Center),
+
+                                    Space::with_height(10),
+
+                                    inspector_buttons,
+                                ].spacing(2)
+                            )
+                            .padding(14)
+                            .width(Length::Fill)
+                            .style(|_t: &Theme| container::Appearance {
+                                background: Some(Background::Color(color!(0x0A0D15))),
+                                border: Border { radius: 10.0.into(), width: 1.0, color: color!(0x1E253A) },
+                                ..Default::default()
+                            })
+                        ].spacing(2).width(Length::Fill)
+                    } else {
+                        column![]
+                    }
+                } else {
+                    column![]
+                };
 
                 let action_buttons: Element<'_, Message> = if matches!(self.state, AppState::Complete { .. }) {
-                    column![
+                    let mut col = column![
                         button(
                             container(text("EXPORT JSON").size(13).style(color!(0xFFFFFF)))
                                 .width(Length::Fill)
@@ -2954,7 +4092,28 @@ impl Application for GPUBenchApp {
                         .style(iced::theme::Button::Custom(Box::new(SleekSecondaryButton))),
                         
                         Space::with_height(8),
-                        
+                    ];
+
+                    let tag = self.parity_profile.as_ref().map(|(_, t)| t.clone()).unwrap_or_else(|| "indoor".to_string());
+                    if self.parity_profile.is_some()
+                        || find_renders_file("renders/render_comparison_grid.png").is_some()
+                        || find_renders_file("renders/render_comparison_triptych.png").is_some()
+                    {
+                        col = col.push(
+                            button(
+                                container(text("VIEW 2X GRID COMPARISON").size(13).style(color!(0x34D399)))
+                                    .width(Length::Fill)
+                                    .center_x()
+                            )
+                            .width(Length::Fill)
+                            .padding([11, 0])
+                            .on_press(Message::OpenTriptych(tag))
+                            .style(iced::theme::Button::Custom(Box::new(SleekSecondaryButton)))
+                        );
+                        col = col.push(Space::with_height(8));
+                    }
+
+                    col = col.push(
                         button(
                             container(text("RUN NEW TEST").size(13).style(color!(0xCBD5E1)))
                                 .width(Length::Fill)
@@ -2964,9 +4123,9 @@ impl Application for GPUBenchApp {
                         .padding([11, 0])
                         .on_press(Message::Retest)
                         .style(iced::theme::Button::Custom(Box::new(SleekSecondaryButton)))
-                    ]
-                    .width(Length::Fill)
-                    .into()
+                    );
+
+                    col.width(Length::Fill).into()
                 } else {
                     Space::with_height(0).into()
                 };
@@ -3102,15 +4261,21 @@ impl Application for GPUBenchApp {
                 });
 
                 let main_area = container(
-                    scrollable(
-                        column![
-                            global_progress,
-                            table_column,
-                            thermal_profile_section
-                        ]
-                        .spacing(20)
+                    column![
+                        global_progress,
+                        Space::with_height(14),
+                        scrollable(
+                            column![
+                                table_column,
+                                thermal_profile_section,
+                                visual_parity_section
+                            ]
+                            .spacing(20)
+                            .width(Length::Fill)
+                        )
                         .width(Length::Fill)
-                    )
+                        .height(Length::Fill)
+                    ]
                     .width(Length::Fill)
                     .height(Length::Fill)
                 )
@@ -3149,7 +4314,7 @@ impl GPUBenchApp {
             "sys_mem_bw_multi" | "sys_mem_bw_single" => self.selected_tests.contains("System Memory Bandwidth"),
             "sys_mem_lat" => self.selected_tests.contains("System Memory Latency"),
             "rop_rgba8" | "rop_rgba16f" | "rop_blend" => self.selected_tests.contains("Pixel Fill Rate"),
-            "rt_triangle" => self.selected_tests.contains("RayTracing"),
+            "rt_triangle" => self.selected_tests.contains("RayTracing") || self.selected_tests.contains("RayIntersect"),
             "rt_divergence" => self.selected_tests.contains("RayDivergence") || self.selected_tests.contains("RayMaterialDivergence"),
             "rt_anyhit" => self.selected_tests.contains("RayAnyHit"),
             "rt_incoherent" => self.selected_tests.contains("RayIncoherent"),
@@ -3160,7 +4325,7 @@ impl GPUBenchApp {
             "rt_procedural" => self.selected_tests.contains("RayProcedural"),
             "rt_pathtracing" => self.selected_tests.contains("RayPathTracing"),
             id if id.starts_with("rt_sched_") => {
-                self.selected_tests.iter().any(|t| t.contains("RayScheduling") || t.contains("RayExecutionParadigm"))
+                self.selected_tests.iter().any(|t| t.contains("RayScheduling") || t.contains("RayExecutionParadigm") || t.contains("RayShadows"))
             }
             _ => false,
         }
@@ -3220,7 +4385,11 @@ impl GPUBenchApp {
         } else if res.metric == "ns" {
             format!("{} ns", format_num_with_commas(value, 2))
         } else if res.metric == "MRays/s" || res.metric == "MHits/s" {
-            let fps = if res.time_ms > 0.0 { 1000.0 / res.time_ms } else { 0.0 };
+            let (res_w, res_h) = self.selected_resolution.dimensions();
+            let eff_w = if res.width > 0 { res.width } else if res_w > 0 { res_w } else { 1920 };
+            let eff_h = if res.height > 0 { res.height } else if res_h > 0 { res_h } else { 1080 };
+            let rays_per_frame = (eff_w * eff_h).max(1) as f64;
+            let fps = (value * 1e6) / rays_per_frame;
             format!("{} {} ({} FPS)", format_num_with_commas(value, 1), res.metric, format_num_with_commas(fps, 0))
         } else if value < 10.0 {
             format!("{} {}", format_num_with_commas(value, 2), res.metric)
@@ -3235,12 +4404,16 @@ impl GPUBenchApp {
                     if value < entry.numeric {
                         entry.numeric = value;
                         entry.value_str = value_str.clone();
+                        entry.support_note = res.supportNote.clone();
+                        entry.support_category = res.supportCategory.clone();
                         entry.raw_operations = res.operations;
                         entry.raw_time_ms = res.time_ms;
                     }
                 } else if value > entry.numeric {
                     entry.numeric = value;
                     entry.value_str = value_str.clone();
+                    entry.support_note = res.supportNote.clone();
+                    entry.support_category = res.supportCategory.clone();
                     entry.raw_operations = res.operations;
                     entry.raw_time_ms = res.time_ms;
                 }
@@ -3249,6 +4422,8 @@ impl GPUBenchApp {
                 entry.value_str = value_str.clone();
                 entry.unit = res.metric.clone();
                 entry.is_unsupported = is_unsupported;
+                entry.support_note = res.supportNote.clone();
+                entry.support_category = res.supportCategory.clone();
                 entry.raw_operations = res.operations;
                 entry.raw_time_ms = res.time_ms;
             }
@@ -3259,11 +4434,15 @@ impl GPUBenchApp {
                     let mat_entry = self.results_map.entry((dev_key, "fp8_mat")).or_default();
                     mat_entry.value_str = "UNSUPPORTED".to_string();
                     mat_entry.is_unsupported = true;
+                    mat_entry.support_note = res.supportNote.clone();
+                    mat_entry.support_category = res.supportCategory.clone();
                     mat_entry.is_running = false;
                 } else if wid == "int4_vec" && !self.results_map.contains_key(&(dev_key, "int4_mat")) {
                     let mat_entry = self.results_map.entry((dev_key, "int4_mat")).or_default();
                     mat_entry.value_str = "UNSUPPORTED".to_string();
                     mat_entry.is_unsupported = true;
+                    mat_entry.support_note = res.supportNote.clone();
+                    mat_entry.support_category = res.supportCategory.clone();
                     mat_entry.is_running = false;
                 }
             }
@@ -3285,7 +4464,7 @@ impl GPUBenchApp {
         } else {
             match res.component.as_str() {
                 "Memory" => { self.gpu_bw = self.gpu_bw.max(val_f32); }
-                "Graphics" => {
+                "Graphics" | "Raster" => {
                     if res.configIndex == 0 { self.gpu_pixel_fill = self.gpu_pixel_fill.max(val_f32); }
                     else if res.configIndex == 1 { self.gpu_pixel_fill_hdr = self.gpu_pixel_fill_hdr.max(val_f32); }
                     else { self.gpu_pixel_fill_blend = self.gpu_pixel_fill_blend.max(val_f32); }
@@ -3326,7 +4505,10 @@ impl GPUBenchApp {
                     if res.subcategory == "Procedural Intersection" { self.gpu_rt_procedural = self.gpu_rt_procedural.max(val_f32); }
                     if res.subcategory == "Path Tracing" || res.benchmarkName.contains("PathTracing") { self.gpu_rt_pathtracing = self.gpu_rt_pathtracing.max(val_f32); }
                     if (res.benchmarkName.contains("RayScheduling") || res.benchmarkName.contains("RayExecutionParadigm"))
-                        && !res.benchmarkName.contains("Stage Breakdown") {
+                        && !res.benchmarkName.contains("Stage Breakdown")
+                        && !res.benchmarkName.contains("Pipeline Breakdown")
+                        && !res.subcategory.contains("Pipeline Breakdown")
+                        && res.configIndex < 16 {
                         if res.benchmarkName.contains("Work Graphs") {
                             self.gpu_rt_scheduling_workgraph = self.gpu_rt_scheduling_workgraph.max(val_f32);
                         } else if res.benchmarkName.contains("Work Lists") {
@@ -3390,13 +4572,17 @@ impl GPUBenchApp {
                 }
                 if let Some(cell) = self.results_map.get(&(*dev_id, w.id)) {
                     let status = if cell.is_unsupported {
-                        "UNSUPPORTED"
+                        if !cell.support_note.is_empty() {
+                            format!("UNSUPPORTED ({})", cell.support_note)
+                        } else {
+                            "UNSUPPORTED".to_string()
+                        }
                     } else if cell.is_running {
-                        "RUNNING"
+                        "RUNNING".to_string()
                     } else if !cell.value_str.is_empty() {
-                        "COMPLETED"
+                        "COMPLETED".to_string()
                     } else {
-                        "PENDING"
+                        "PENDING".to_string()
                     };
                     s.push_str(&format!("| {} | {} | {} | {} | {:.2} | {} |\n",
                         w.label,
@@ -3470,16 +4656,36 @@ fn find_workload_for_benchmark(bench_name: &str) -> Option<&'static WorkloadDef>
             return WORKLOADS.iter().find(|w| w.id == "rt_sched_incoh_trad");
         } else if bench_name.contains("Incoherent Ray Tracing - Work Lists") {
             return WORKLOADS.iter().find(|w| w.id == "rt_sched_incoh_wl");
-        } else if bench_name.contains("Primary Ray Tracing - Traditional") {
+        } else if bench_name.contains("Total Scene Render - Traditional") || bench_name.contains("Primary Ray Tracing - Traditional") {
             return WORKLOADS.iter().find(|w| w.id == "rt_sched_prim_trad");
-        } else if bench_name.contains("Primary Ray Tracing - Work Lists") {
+        } else if bench_name.contains("Total Scene Render - Work Lists") || bench_name.contains("Primary Ray Tracing - Work Lists") {
             return WORKLOADS.iter().find(|w| w.id == "rt_sched_prim_wl");
         } else if bench_name.contains("SER") {
             return WORKLOADS.iter().find(|w| w.id == "rt_sched_ser");
         } else if bench_name.contains("Work Graph") {
             return WORKLOADS.iter().find(|w| w.id == "rt_sched_workgraph");
+        } else if bench_name.contains("Linear 32x1") {
+            return WORKLOADS.iter().find(|w| w.id == "rt_sched_stage_bvh_linear");
+        } else if bench_name.contains("Queue Compaction") {
+            return WORKLOADS.iter().find(|w| w.id == "rt_sched_stage_queue_compaction");
+        } else if bench_name.contains("2D Tiled 8x4") {
+            return WORKLOADS.iter().find(|w| w.id == "rt_sched_stage_bvh_tiled");
+        } else if bench_name.contains("Morton 8x4") && bench_name.contains("BVH Traversal") {
+            return WORKLOADS.iter().find(|w| w.id == "rt_sched_stage_bvh_morton8x4");
+        } else if bench_name.contains("Morton 4x8") && bench_name.contains("BVH Traversal") {
+            return WORKLOADS.iter().find(|w| w.id == "rt_sched_stage_bvh_morton4x8");
+        } else if bench_name.contains("Morton") && (bench_name.contains("Traditional") || bench_name.contains("Megakernel")) {
+            return WORKLOADS.iter().find(|w| w.id == "rt_sched_stage_prim_morton_trad");
+        } else if bench_name.contains("Morton") && (bench_name.contains("Work Lists") || bench_name.contains("DGC")) {
+            return WORKLOADS.iter().find(|w| w.id == "rt_sched_stage_prim_morton_wl");
+        } else if bench_name.contains("Ray-Traced Shadows - Traditional") || bench_name.contains("Shadows - Traditional") {
+            return WORKLOADS.iter().find(|w| w.id == "rt_sched_shadow_trad");
+        } else if bench_name.contains("Ray-Traced Shadows - Work Lists (Directional Binning") || bench_name.contains("Shadows - Work Lists (Directional Binning") {
+            return WORKLOADS.iter().find(|w| w.id == "rt_sched_shadow_bin");
+        } else if bench_name.contains("Ray-Traced Shadows - Work Lists") || bench_name.contains("Shadows - Work Lists") {
+            return WORKLOADS.iter().find(|w| w.id == "rt_sched_shadow_wl");
         }
-    } else if bench_name.contains("RayTracing") || bench_name.contains("Triangle") {
+    } else if bench_name.contains("RayTracing") || bench_name.contains("RayIntersect") || bench_name.contains("Triangle") {
         return WORKLOADS.iter().find(|w| w.id == "rt_triangle");
     } else if bench_name.contains("AnyHit") {
         return WORKLOADS.iter().find(|w| w.id == "rt_anyhit");
@@ -3562,7 +4768,7 @@ fn map_result_to_workload_id(res: &ResultData) -> Option<&'static str> {
                 Some("gpu_vram_bw")
             }
         }
-        "Graphics" => {
+        "Graphics" | "Raster" => {
             if res.configIndex == 0 {
                 Some("rop_rgba8")
             } else if res.configIndex == 1 {
@@ -3585,14 +4791,38 @@ fn map_result_to_workload_id(res: &ResultData) -> Option<&'static str> {
                     Some("rt_sched_incoh_trad")
                 } else if res.configIndex == 10 || (res.subcategory.contains("Work Lists") && res.subcategory.contains("Incoherent")) {
                     Some("rt_sched_incoh_wl")
-                } else if res.configIndex == 12 || (res.subcategory.contains("Traditional") && res.subcategory.contains("Primary")) {
+                } else if res.configIndex == 12 || (res.subcategory.contains("Traditional") && (res.subcategory.contains("Primary") || res.subcategory.contains("Total Scene Render") || res.subcategory.contains("Scene Render"))) {
                     Some("rt_sched_prim_trad")
-                } else if res.configIndex == 14 || (res.subcategory.contains("Work Lists") && res.subcategory.contains("Primary")) {
+                } else if res.configIndex == 14 || (res.subcategory.contains("Work Lists") && (res.subcategory.contains("Primary") || res.subcategory.contains("Total Scene Render") || res.subcategory.contains("Scene Render"))) {
                     Some("rt_sched_prim_wl")
                 } else if res.configIndex == 1 || res.configIndex == 5 || res.configIndex == 9 || res.configIndex == 13 || res.subcategory.contains("SER") {
                     Some("rt_sched_ser")
                 } else if res.configIndex == 3 || res.configIndex == 7 || res.configIndex == 11 || res.configIndex == 15 || res.subcategory.contains("Work Graph") {
                     Some("rt_sched_workgraph")
+                } else if res.configIndex == 16 || res.benchmarkName.contains("Linear 32x1") || res.benchmarkName.contains("Linear 1D") {
+                    Some("rt_sched_stage_bvh_linear")
+                } else if res.configIndex == 17 || res.benchmarkName.contains("Queue Compaction") {
+                    Some("rt_sched_stage_queue_compaction")
+                } else if res.configIndex == 18 || res.benchmarkName.contains("2D Tiled 8x4") || res.benchmarkName.contains("Screen Tiled") {
+                    Some("rt_sched_stage_bvh_tiled")
+                } else if res.configIndex == 19 || (res.benchmarkName.contains("Morton 8x4") && res.benchmarkName.contains("BVH Traversal")) {
+                    Some("rt_sched_stage_bvh_morton8x4")
+                } else if res.configIndex == 20 || (res.benchmarkName.contains("Morton 4x8") && res.benchmarkName.contains("BVH Traversal")) {
+                    Some("rt_sched_stage_bvh_morton4x8")
+                } else if res.configIndex == 21 || (res.benchmarkName.contains("Morton") && (res.benchmarkName.contains("Megakernel") || res.benchmarkName.contains("Traditional"))) {
+                    Some("rt_sched_stage_prim_morton_trad")
+                } else if res.configIndex == 22 || (res.benchmarkName.contains("Morton") && (res.benchmarkName.contains("Work Lists") || res.benchmarkName.contains("DGC"))) {
+                    Some("rt_sched_stage_prim_morton_wl")
+                } else if res.configIndex == 23 || (res.subcategory.contains("Traditional") && res.subcategory.contains("Shadow")) {
+                    Some("rt_sched_shadow_trad")
+                } else if res.configIndex == 24 {
+                    Some("rt_sched_ser")
+                } else if res.configIndex == 25 || (res.subcategory.contains("Work Lists") && res.subcategory.contains("Shadow") && !res.subcategory.contains("Binning")) {
+                    Some("rt_sched_shadow_wl")
+                } else if res.configIndex == 26 {
+                    Some("rt_sched_workgraph")
+                } else if res.configIndex == 27 || (res.subcategory.contains("Binning") && res.subcategory.contains("Shadow")) {
+                    Some("rt_sched_shadow_bin")
                 } else {
                     None
                 }
@@ -3618,7 +4848,7 @@ fn map_result_to_workload_id(res: &ResultData) -> Option<&'static str> {
                 Some("rt_tlas_openworld")
             } else if res.subcategory == "Incoherent Traversal" || res.benchmarkName.contains("Incoherent") {
                 Some("rt_incoherent")
-            } else if res.subcategory == "Intersection tests" || res.benchmarkName == "RayTracing" {
+            } else if res.subcategory == "Intersection tests" || res.benchmarkName == "RayTracing" || res.benchmarkName == "RayIntersect" {
                 Some("rt_triangle")
             } else if res.subcategory == "Material Divergence" || res.subcategory == "Execution Divergence" || res.benchmarkName.contains("Divergence") {
                 Some("rt_divergence")
@@ -3652,3 +4882,145 @@ fn create_panel<'a>(children: Element<'a, Message>) -> iced::widget::Container<'
             ..Default::default()
         })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_gui_cli_args() {
+        let args = vec![
+            "-k".to_string(), "vulkan".to_string(),
+            "-g".to_string(), "compute,raytracing".to_string(),
+            "-b".to_string(), "rayscheduling".to_string(),
+            "-d".to_string(), "1".to_string(),
+            "-r".to_string(), "1080p".to_string(),
+            "--dump-renders".to_string(),
+            "--auto-start".to_string(),
+        ];
+        let parsed = parse_gui_cli_args_from(&args);
+        assert_eq!(parsed.backend.as_deref(), Some("vulkan"));
+        assert_eq!(parsed.groups, vec!["compute,raytracing"]);
+        assert_eq!(parsed.benchmarks, vec!["rayscheduling"]);
+        assert_eq!(parsed.devices, vec!["1"]);
+        assert_eq!(parsed.resolution.as_deref(), Some("1080p"));
+        assert!(parsed.dump_renders);
+        assert!(parsed.auto_start);
+        assert!(!parsed.should_exit);
+    }
+
+    #[test]
+    fn test_parse_gui_cli_equals_syntax() {
+        let args = vec![
+            "--backend=opencl".to_string(),
+            "--groups=all".to_string(),
+            "--benchmarks=fp32,fp64".to_string(),
+            "--devices=0,1".to_string(),
+            "--resolution=4k".to_string(),
+            "--run".to_string(),
+            "--dump".to_string(),
+        ];
+        let parsed = parse_gui_cli_args_from(&args);
+        assert_eq!(parsed.backend.as_deref(), Some("opencl"));
+        assert_eq!(parsed.groups, vec!["all"]);
+        assert_eq!(parsed.benchmarks, vec!["fp32,fp64"]);
+        assert_eq!(parsed.devices, vec!["0,1"]);
+        assert_eq!(parsed.resolution.as_deref(), Some("4k"));
+        assert!(parsed.dump_renders);
+        assert!(parsed.auto_start);
+        assert!(!parsed.should_exit);
+    }
+
+    #[test]
+    fn test_parse_gui_cli_raster_group() {
+        let args = vec![
+            "-g".to_string(), "raster".to_string(),
+        ];
+        let parsed = parse_gui_cli_args_from(&args);
+        assert_eq!(parsed.groups, vec!["raster"]);
+        assert!(!parsed.should_exit);
+    }
+
+    #[test]
+    fn test_parse_gui_cli_graphics_group() {
+        let args = vec![
+            "-g".to_string(), "raster".to_string(),
+        ];
+        let parsed = parse_gui_cli_args_from(&args);
+        assert_eq!(parsed.groups, vec!["raster"]);
+        assert!(!parsed.should_exit);
+    }
+
+    #[test]
+    fn test_parse_gui_cli_graphics_and_raytracing_benchmarks_flag() {
+        let args = vec![
+            "-k".to_string(), "vulkan".to_string(),
+            "-d".to_string(), "1".to_string(),
+            "-b".to_string(), "graphics,raytracing".to_string(),
+        ];
+        let parsed = parse_gui_cli_args_from(&args);
+        assert_eq!(parsed.backend.as_deref(), Some("vulkan"));
+        assert_eq!(parsed.devices, vec!["1"]);
+        assert_eq!(parsed.benchmarks, vec!["graphics,raytracing"]);
+
+        let mut requested_tokens = Vec::new();
+        for b in &parsed.benchmarks {
+            for t in b.split(',') {
+                let s = t.trim().to_lowercase();
+                if !s.is_empty() {
+                    requested_tokens.push(s);
+                }
+            }
+        }
+
+        // Graphics & Ray Tracing benchmarks should all match
+        assert!(is_benchmark_requested("Pixel Fill Rate", &requested_tokens));
+        assert!(is_benchmark_requested("RayASBuild", &requested_tokens));
+        assert!(is_benchmark_requested("RayIntersect", &requested_tokens));
+        assert!(is_benchmark_requested("RayTracing", &requested_tokens));
+        assert!(is_benchmark_requested("RayScheduling", &requested_tokens));
+        assert!(is_benchmark_requested("RayPathTracing", &requested_tokens));
+        assert!(is_benchmark_requested("RayAnyHit", &requested_tokens));
+        assert!(is_benchmark_requested("RayProcedural", &requested_tokens));
+        assert!(is_benchmark_requested("RayMaterialDivergence", &requested_tokens));
+        assert!(is_benchmark_requested("RayIncoherent", &requested_tokens));
+        assert!(is_benchmark_requested("RayDivergence", &requested_tokens));
+        assert!(is_benchmark_requested("RayPayload", &requested_tokens));
+
+        // Compute and memory benchmarks should NOT match
+        assert!(!is_benchmark_requested("FP32", &requested_tokens));
+        assert!(!is_benchmark_requested("FP64", &requested_tokens));
+        assert!(!is_benchmark_requested("Device Memory Bandwidth", &requested_tokens));
+        assert!(!is_benchmark_requested("System Memory Bandwidth", &requested_tokens));
+        assert!(!is_benchmark_requested("System Memory Latency", &requested_tokens));
+    }
+
+    #[test]
+    fn test_empty_selection_shows_validation_error_and_does_not_autostart() {
+        let args = vec![
+            "-k".to_string(), "vulkan".to_string(),
+            "-d".to_string(), "1".to_string(),
+        ];
+        let parsed = parse_gui_cli_args_from(&args);
+        let (mut app, _cmd) = GPUBenchApp::new(parsed);
+
+        // Deselect all tests (like clicking the "None" group chip)
+        let _ = app.update(Message::TestGroupSelected("NONE".to_string()));
+        assert!(app.selected_tests.is_empty());
+        assert_eq!(app.validation_error, None);
+
+        // Attempting to start benchmark with empty selection must NOT auto-select all tests
+        let _ = app.update(Message::StartBenchmarks);
+        assert!(app.selected_tests.is_empty(), "Empty benchmark selection must not be silently replaced with all benchmarks");
+        assert_eq!(
+            app.validation_error.as_deref(),
+            Some("Please select at least one benchmark or group to start.")
+        );
+
+        // Selecting a group or toggling a test should clear the validation error
+        let _ = app.update(Message::TestGroupSelected("COMPUTE".to_string()));
+        assert!(!app.selected_tests.is_empty());
+        assert_eq!(app.validation_error, None);
+    }
+}
+

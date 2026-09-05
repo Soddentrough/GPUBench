@@ -25,15 +25,21 @@ inline float terrainHeight(float x, float y) {
   // Broad mountain ridges on East and West
   float mountainR = std::abs(x) * 0.25f + 40.0f * std::cos(x * 0.008f) * std::sin(y * 0.006f);
 
-  // Distant mountain massif to the North (y > 400)
+  // Distant mountain massif to the North (y > 200)
   float distantPeaks = (y > 200.0f) ? (y - 200.0f) * 0.22f : 0.0f;
+
+  // Natural southern slope rising toward foreground camera ridge (y < -50)
+  float southRise = (y < -50.0f) ? (-50.0f - y) * 0.16f : 0.0f;
+
+  // Foreground lake basin moraine enclosing the southern shoreline
+  float basinRim = 14.0f * std::exp(-((y + 80.0f) * (y + 80.0f)) / 1600.0f);
 
   // Medium and high frequency terrain detail
   float fbm = 18.0f * std::sin(x * 0.025f + y * 0.015f) +
               9.0f  * std::cos(x * 0.055f - y * 0.045f) +
               4.0f  * std::sin(x * 0.12f  + y * 0.11f);
 
-  float z = (mountainR + distantPeaks) * valley + fbm;
+  float z = (mountainR + distantPeaks) * valley + fbm + southRise + basinRim;
   return std::max(z, -4.0f);
 }
 
@@ -66,8 +72,8 @@ inline void appendTerrain(std::vector<float> &vertices) {
 
 inline void appendWaterPlane(std::vector<float> &vertices) {
   const uint32_t water_n = 32;
-  const float x_min = -160.0f, x_max = 160.0f;
-  const float y_min = -100.0f, y_max = 900.0f;
+  const float x_min = -175.0f, x_max = 175.0f;
+  const float y_min = -110.0f, y_max = 920.0f;
   const float z_water = 0.5f;
 
   for (uint32_t i = 0; i < water_n; ++i) {
@@ -139,12 +145,19 @@ inline void appendFoliageCanopy(std::vector<float> &vertices) {
   // Place 100 trees along the valley slopes and riverbanks
   for (uint32_t i = 0; i < 100; ++i) {
     float x = (rand_f() * 2.0f - 1.0f) * 320.0f;
-    // Don't place in center of river (abs(x) < 25)
+    // Don't place in center of river (abs(x) < 28)
     if (std::abs(x) < 28.0f) {
       x = (x >= 0.0f) ? (x + 35.0f) : (x - 35.0f);
     }
     float y = -250.0f + rand_f() * 950.0f;
     float scale = 1.0f + rand_f() * 0.75f;
+    for (int retry = 0; retry < 6 && terrainHeight(x, y) < 0.8f; ++retry) {
+      x = (rand_f() * 2.0f - 1.0f) * 320.0f;
+      if (std::abs(x) < 28.0f) {
+        x = (x >= 0.0f) ? (x + 35.0f) : (x - 35.0f);
+      }
+      y = -250.0f + rand_f() * 950.0f;
+    }
     appendPineTree(vertices, x, y, scale);
   }
 }

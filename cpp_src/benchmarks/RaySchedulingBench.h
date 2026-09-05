@@ -1,6 +1,7 @@
 #pragma once
 
 #include "IBenchmark.h"
+#include "scene/GltfScene.h"
 #include <string>
 #include <vector>
 #ifdef HAVE_VULKAN
@@ -14,16 +15,21 @@
 class RaySchedulingBench : public IBenchmark {
 public:
   enum class SceneType : uint32_t {
-    IndoorAtrium = 0,
-    OutdoorLandscape = 1
+    Showroom = 0,
+    IndoorAtrium = 1,
+    OutdoorLandscape = 2
   };
 
   RaySchedulingBench(SceneType scene = SceneType::IndoorAtrium) : sceneType(scene) {}
 
   const char *GetName() const override {
-    return (sceneType == SceneType::OutdoorLandscape)
-               ? "RayScheduling (Outdoor Landscape)"
-               : "RayScheduling (Indoor Atrium)";
+    if (sceneType == SceneType::OutdoorLandscape) {
+      return "RayScheduling (Outdoor Landscape)";
+    } else if (sceneType == SceneType::IndoorAtrium) {
+      return "RayScheduling (Indoor Atrium)";
+    } else {
+      return "RayScheduling (Showroom Studio)";
+    }
   }
 
   void SetSceneType(SceneType type) { sceneType = type; }
@@ -67,12 +73,14 @@ public:
   BenchmarkResult GetResult(uint32_t config_idx = 0) const override;
   int GetSortWeight(uint32_t config_idx = 0) const override;
 
-  uint32_t GetNumConfigs() const override { return 23; }
+  uint32_t GetNumConfigs() const override { return 28; }
   std::vector<std::string> GetAliases() const override {
     if (sceneType == SceneType::OutdoorLandscape) {
-      return {"rayscheduling", "rtscheduling", "outdoor", "landscape", "rayscheduling_outdoor", "worklists", "dgc"};
+      return {"rayscheduling", "rtscheduling", "outdoor", "landscape", "rayscheduling_outdoor", "worklists", "dgc", "scene_render", "total_scene_render", "total_frame", "primary", "primary_rays", "shadow", "shadows", "rts", "ray_shadows", "ray_shadow"};
+    } else if (sceneType == SceneType::IndoorAtrium) {
+      return {"rayscheduling", "rtscheduling", "indoor", "atrium", "rayscheduling_indoor", "worklists", "dgc", "scene_render", "total_scene_render", "total_frame", "primary", "primary_rays", "shadow", "shadows", "rts", "ray_shadows", "ray_shadow"};
     } else {
-      return {"rayscheduling", "rtscheduling", "indoor", "atrium", "rayscheduling_indoor", "worklists", "dgc"};
+      return {"rayscheduling", "rtscheduling", "showroom", "studio", "rayscheduling_showroom", "worklists", "dgc", "scene_render", "total_scene_render", "total_frame", "primary", "primary_rays", "shadow", "shadows", "rts", "ray_shadows", "ray_shadow"};
     }
   }
   std::string GetConfigName(uint32_t config_idx) const override;
@@ -99,22 +107,22 @@ public:
     if (!unsupportedReason[config_idx].empty()) {
       return unsupportedReason[config_idx];
     }
-    if (config_idx == 1 || config_idx == 5 || config_idx == 9 || config_idx == 13) {
+    if (config_idx == 1 || config_idx == 5 || config_idx == 9 || config_idx == 13 || config_idx == 24) {
       if (!unsupportedReason[config_idx].empty()) {
         return unsupportedReason[config_idx];
       }
       return "VK_EXT_ray_tracing_invocation_reorder requires Ray Tracing Pipeline (not supported in compute shaders)";
     }
-    if (config_idx == 3 || config_idx == 7 || config_idx == 11 || config_idx == 15) {
+    if (config_idx == 3 || config_idx == 7 || config_idx == 11 || config_idx == 15 || config_idx == 26) {
       return "extension VK_AMDX_shader_enqueue missing";
     }
     return GetSupportNote(info, context);
   }
   SupportLimitation GetConfigSupportLimitation(uint32_t config_idx) const override {
-    if (config_idx == 1 || config_idx == 5 || config_idx == 9 || config_idx == 13) {
+    if (config_idx == 1 || config_idx == 5 || config_idx == 9 || config_idx == 13 || config_idx == 24) {
       return SupportLimitation::kHardware;
     }
-    if (config_idx == 3 || config_idx == 7 || config_idx == 11 || config_idx == 15) {
+    if (config_idx == 3 || config_idx == 7 || config_idx == 11 || config_idx == 15 || config_idx == 26) {
       return SupportLimitation::kApi;
     }
     return SupportLimitation::kNone;
@@ -141,20 +149,23 @@ public:
       queueCapacity *= 2;
     }
   }
+  void SetBounceDepth(uint32_t bounces);
+  uint32_t GetBounceDepth() const { return bounceDepth; }
+
   uint32_t GetRenderWidth() const { return renderWidth; }
   uint32_t GetRenderHeight() const { return renderHeight; }
   uint32_t GetQueueCapacity() const { return queueCapacity; }
 
   void RecordRunResult(uint32_t config_idx, uint64_t total_invocations, double total_time_ms) override {
-    if (config_idx < 23) {
+    if (config_idx < 28) {
       recordedInvocations[config_idx] = total_invocations;
       recordedTimeMs[config_idx] = total_time_ms;
     }
   }
 
 private:
-  uint64_t recordedInvocations[23] = {0};
-  double recordedTimeMs[23] = {0.0};
+  uint64_t recordedInvocations[28] = {0};
+  double recordedTimeMs[28] = {0.0};
   IComputeContext *context = nullptr;
   bool dumpRenders = false;
   ComputeBuffer fbTraditional = nullptr;
@@ -169,6 +180,7 @@ private:
   ComputeKernel kernelBounce = nullptr;
   ComputeKernel kernelBounceTerminal = nullptr;
   ComputeKernel kernelBounceOctant = nullptr;
+  ComputeKernel kernelShadow = nullptr;
   ComputeKernel kernelWorkGraph = nullptr;
   ComputeKernel kernelReset = nullptr;
   ComputeKernel kernelResolve = nullptr;
@@ -177,6 +189,15 @@ private:
   ComputeBuffer resultBuffer = nullptr;
   ComputeBuffer workListBuffer = nullptr;
   ComputeBuffer indirectBuffer = nullptr;
+
+  // glTF Scene & PBR Storage Buffers
+  GltfScene gltfScene;
+  bool isGltf = false;
+  ComputeBuffer materialBuffer = nullptr;
+  ComputeBuffer triangleMaterialBuffer = nullptr;
+  ComputeBuffer texHeaderBuffer = nullptr;
+  ComputeBuffer texPixelBuffer = nullptr;
+  std::string findModelPath(const std::string &modelName) const;
 
 #ifdef HAVE_VULKAN
   VkAccelerationStructureKHR triangleBlas = VK_NULL_HANDLE;
@@ -200,8 +221,12 @@ private:
   std::vector<VulkanContext::IndirectBatchEntry> materialBatchesBreakdown;
   std::vector<VulkanContext::IndirectBatchEntry> bounceBatches;
   std::vector<VulkanContext::IndirectBatchEntry> octantBatches;
+  std::vector<VulkanContext::IndirectBatchEntry> shadowBatches;
+  std::vector<VulkanContext::IndirectBatchEntry> shadowBinBatches;
+  void rebuildBounceBatches();
 #endif
 
+  uint32_t bounceDepth = 2;
   uint32_t renderWidth = 1920;
   uint32_t renderHeight = 1080;
   uint32_t rayCount = 1920 * 1080;
@@ -211,7 +236,7 @@ private:
   uint32_t octantCapacity = 262144;
   uint32_t numPrimitives = 4096;
   SceneType sceneType = SceneType::IndoorAtrium;
-  mutable double results[23] = {0.0};
-  mutable bool unsupportedConfig[23] = {false};
-  mutable std::string unsupportedReason[23];
+  mutable double results[28] = {0.0};
+  mutable bool unsupportedConfig[28] = {false};
+  mutable std::string unsupportedReason[28];
 };

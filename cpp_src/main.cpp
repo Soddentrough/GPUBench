@@ -224,8 +224,27 @@ int main(int argc, char **argv) {
 
   std::vector<std::string> groups_to_run;
   app.add_option("-g,--groups,--group", groups_to_run,
-                 "Benchmark group(s) to run: compute, memory, raytracing, graphics, system")
+                 "Benchmark group(s) to run: compute, memory, graphics, raster, raytracing, system (or all)")
       ->delimiter(',');
+
+  app.footer(
+      "\nBENCHMARK GROUPS & INCLUDED TESTS:\n"
+      "  compute     Compute arithmetic units (vector & matrix tensor operations):\n"
+      "              FP64, FP32, FP16, BF16, FP8, INT8, INT4\n"
+      "  memory      VRAM and GPU cache hierarchy:\n"
+      "              Device Memory Bandwidth, L0/L1/L2/L3 Cache Bandwidth & Latency\n"
+      "  graphics    All 3D graphics rendering pipelines (combines 'raster' and 'raytracing', alias: 'gfx'):\n"
+      "              Runs both fixed-function rasterization (ROP) and hardware ray tracing\n"
+      "  raster      Fixed-function rasterization & ROP pixel fill rates (subset of graphics):\n"
+      "              Pixel Fill Rate (RGBA8, RGBA16F HDR, Alpha Blending)\n"
+      "  raytracing  Hardware BVH traversal, intersection & scheduling (subset of graphics, alias: 'rt'):\n"
+      "              RayTracing, RayAnyHit, RayProcedural, RayIncoherent, RayMaterialDivergence,\n"
+      "              RayPayload, RayASBuild, RayPathTracing, RayScheduling (Work Lists / SER / Work Graphs),\n"
+      "              Pipeline Breakdown (Linear vs 2D Tiled vs Morton Z-Curve, Queue Compaction)\n"
+      "  system      Host CPU & RAM system memory:\n"
+      "              System Memory Bandwidth (Multi & Single-Threaded), System Memory Latency\n"
+      "  all         Run all benchmark groups across enabled devices\n"
+  );
 
   bool list_benchmarks = false;
   app.add_flag("--list-benchmarks", list_benchmarks,
@@ -267,8 +286,8 @@ int main(int argc, char **argv) {
 
   std::string scene_str = "indoor";
   app.add_option("-s,--scene", scene_str,
-                 "Ray tracing benchmark scenario: indoor, outdoor, all (default: indoor)")
-      ->check(CLI::IsMember({"indoor", "outdoor", "all"}));
+                 "Ray tracing benchmark scenario: showroom, indoor, outdoor, all (default: indoor)")
+      ->check(CLI::IsMember({"showroom", "indoor", "outdoor", "all"}));
 
   std::string resolution_str = "auto";
   app.add_option("-r,--resolution", resolution_str,
@@ -277,6 +296,11 @@ int main(int argc, char **argv) {
   int config_target = -1;
   app.add_option("-c,--config", config_target,
                  "Run a specific benchmark configuration index (0-based)");
+
+  uint32_t bounce_depth = 2;
+  app.add_option("--bounces", bounce_depth,
+                 "Ray tracing path tracing bounce depth (1..8, default: 2)")
+      ->check(CLI::Range(1u, 8u));
 
   bool profile_snapshot = false;
   app.add_flag("--profile-snapshot", profile_snapshot,
@@ -513,6 +537,7 @@ int main(int argc, char **argv) {
 
     BenchmarkRunner runner({}, verbose, debug, dump_geometry, dump_renders, scene_str);
     runner.setResolution(render_width, render_height);
+    runner.setBounceDepth(bounce_depth);
     runner.setTargetConfig(config_target);
     runner.setProfileSnapshot(profile_snapshot);
 

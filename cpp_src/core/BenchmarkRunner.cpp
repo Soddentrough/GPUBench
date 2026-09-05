@@ -59,6 +59,15 @@ BenchmarkRunner::BenchmarkRunner(const std::vector<IComputeContext *> &contexts,
 
 BenchmarkRunner::~BenchmarkRunner() {}
 
+void BenchmarkRunner::setBounceDepth(uint32_t b) {
+  bounceDepth = b;
+  for (auto &bench : benchmarks) {
+    if (auto *rs = dynamic_cast<RaySchedulingBench *>(bench.get())) {
+      rs->SetBounceDepth(b);
+    }
+  }
+}
+
 std::vector<std::string> BenchmarkRunner::getAvailableBenchmarks() const {
   std::vector<std::string> names;
   for (const auto &bench : benchmarks) {
@@ -71,8 +80,9 @@ std::vector<BenchmarkGroupInfo> BenchmarkRunner::getAvailableGroups() const {
   std::vector<BenchmarkGroupInfo> groups = {
     {"Compute", "compute", {"comp"}, "Vector and matrix compute arithmetic (FP64 down to INT4)", {}},
     {"Memory", "memory", {"mem", "cache"}, "Device memory bandwidth and cache latency", {}},
-    {"Ray Tracing", "raytracing", {"rt", "ray", "ray tracing", "ray_tracing"}, "Hardware BVH traversal, intersection, and scheduling architectures", {}},
-    {"Graphics", "graphics", {"gfx", "rop"}, "Rasterization and ROP fill rates", {}},
+    {"Graphics", "graphics", {"gfx"}, "Complete 3D graphics rendering pipelines (combines Raster and Ray Tracing)", {}},
+    {"Raster", "raster", {"rop", "rasterization"}, "Fixed-function rasterization and ROP pixel/blend fill rates (subset of Graphics)", {}},
+    {"Ray Tracing", "raytracing", {"rt", "ray", "ray tracing", "ray_tracing"}, "Hardware BVH traversal, intersection, and scheduling architectures (subset of Graphics)", {}},
     {"System", "system", {"sys", "host"}, "Host system memory bandwidth and latency", {}}
   };
 
@@ -80,14 +90,16 @@ std::vector<BenchmarkGroupInfo> BenchmarkRunner::getAvailableGroups() const {
     std::string comp = bench->GetComponent();
     std::string name = bench->GetName();
     if (!bench->IsDeviceDependent() || comp == "System") {
-      groups[4].benchmarks.push_back(name);
+      groups[5].benchmarks.push_back(name);
     } else if (comp == "Compute") {
       groups[0].benchmarks.push_back(name);
     } else if (comp == "Memory") {
       groups[1].benchmarks.push_back(name);
     } else if (comp == "Ray Tracing") {
       groups[2].benchmarks.push_back(name);
-    } else if (comp == "Graphics") {
+      groups[4].benchmarks.push_back(name);
+    } else if (comp == "Graphics" || comp == "Raster") {
+      groups[2].benchmarks.push_back(name);
       groups[3].benchmarks.push_back(name);
     }
   }
@@ -113,26 +125,36 @@ std::vector<std::string> BenchmarkRunner::expandGroups(const std::vector<std::st
     std::string normInput = normalize(input);
     if (normInput.empty()) continue;
 
-    bool isGroup = false;
-    for (const auto &grp : groups) {
-      if (normalize(grp.id) == normInput || normalize(grp.name) == normInput) {
-        isGroup = true;
-      } else {
-        for (const auto &alias : grp.aliases) {
-          if (normalize(alias) == normInput) {
-            isGroup = true;
-            break;
-          }
-        }
-      }
-
-      if (isGroup) {
-        for (const auto &benchName : grp.benchmarks) {
-          if (std::find(expanded.begin(), expanded.end(), benchName) == expanded.end()) {
-            expanded.push_back(benchName);
-          }
-        }
+    bool matchesExactBench = false;
+    for (const auto &bench : benchmarks) {
+      if (normalize(bench->GetName()) == normInput) {
+        matchesExactBench = true;
         break;
+      }
+    }
+
+    bool isGroup = false;
+    if (!matchesExactBench) {
+      for (const auto &grp : groups) {
+        if (normalize(grp.id) == normInput || normalize(grp.name) == normInput) {
+          isGroup = true;
+        } else {
+          for (const auto &alias : grp.aliases) {
+            if (normalize(alias) == normInput) {
+              isGroup = true;
+              break;
+            }
+          }
+        }
+
+        if (isGroup) {
+          for (const auto &benchName : grp.benchmarks) {
+            if (std::find(expanded.begin(), expanded.end(), benchName) == expanded.end()) {
+              expanded.push_back(benchName);
+            }
+          }
+          break;
+        }
       }
     }
 
@@ -170,19 +192,33 @@ void BenchmarkRunner::discoverBenchmarks() {
   benchmarks.push_back(std::make_unique<RayAnyHitBench>());
   benchmarks.push_back(std::make_unique<RayProceduralBench>());
   if (sceneName == "all") {
+    auto showroom = std::make_unique<RaySchedulingBench>(RaySchedulingBench::SceneType::Showroom);
+    showroom->SetBounceDepth(bounceDepth);
+    if (dumpRenders) showroom->SetDumpRenders(true);
+    benchmarks.push_back(std::move(showroom));
+
     auto indoor = std::make_unique<RaySchedulingBench>(RaySchedulingBench::SceneType::IndoorAtrium);
+    indoor->SetBounceDepth(bounceDepth);
     if (dumpRenders) indoor->SetDumpRenders(true);
     benchmarks.push_back(std::move(indoor));
 
     auto outdoor = std::make_unique<RaySchedulingBench>(RaySchedulingBench::SceneType::OutdoorLandscape);
+    outdoor->SetBounceDepth(bounceDepth);
     if (dumpRenders) outdoor->SetDumpRenders(true);
     benchmarks.push_back(std::move(outdoor));
   } else if (sceneName == "outdoor") {
     auto outdoor = std::make_unique<RaySchedulingBench>(RaySchedulingBench::SceneType::OutdoorLandscape);
+    outdoor->SetBounceDepth(bounceDepth);
     if (dumpRenders) outdoor->SetDumpRenders(true);
     benchmarks.push_back(std::move(outdoor));
+  } else if (sceneName == "showroom") {
+    auto showroom = std::make_unique<RaySchedulingBench>(RaySchedulingBench::SceneType::Showroom);
+    showroom->SetBounceDepth(bounceDepth);
+    if (dumpRenders) showroom->SetDumpRenders(true);
+    benchmarks.push_back(std::move(showroom));
   } else {
     auto indoor = std::make_unique<RaySchedulingBench>(RaySchedulingBench::SceneType::IndoorAtrium);
+    indoor->SetBounceDepth(bounceDepth);
     if (dumpRenders) indoor->SetDumpRenders(true);
     benchmarks.push_back(std::move(indoor));
   }
@@ -445,6 +481,8 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
             membw->setDebug(debug);
           } else if (auto *cache = dynamic_cast<CacheBench *>(bench.get())) {
             cache->setDebug(debug);
+          } else if (auto *rs = dynamic_cast<RaySchedulingBench *>(bench.get())) {
+            rs->SetBounceDepth(bounceDepth);
           }
 
           if (verbose) {

@@ -101,7 +101,7 @@ if(Vulkan_FOUND)
         # Pre-compile GLSL to SPIR-V
         add_custom_command(
             OUTPUT ${SPV_SHADER}
-            COMMAND ${GLSLC_EXECUTABLE} -O --target-env=vulkan1.4 ${SHADER} -o ${SPV_SHADER}
+            COMMAND ${GLSLC_EXECUTABLE} -O --target-env=vulkan1.4 -I${CMAKE_CURRENT_SOURCE_DIR}/shaders ${SHADER} -o ${SPV_SHADER}
             DEPENDS ${SHADER}
             COMMENT "Compiling Vulkan shader to SPIR-V: ${SHADER}"
         )
@@ -114,6 +114,19 @@ if(Vulkan_FOUND)
             COMMENT "Copying Vulkan shader source: ${SHADER}"
         )
         list(APPEND VULKAN_SHADERS ${DEST_SHADER} ${SPV_SHADER})
+    endforeach()
+
+    file(GLOB SHADER_HEADERS "shaders/*.glsl" "shaders/*.h")
+    foreach(HEADER ${SHADER_HEADERS})
+        get_filename_component(HEADER_NAME ${HEADER} NAME)
+        set(DEST_HEADER "${CMAKE_CURRENT_BINARY_DIR}/kernels/vulkan/${HEADER_NAME}")
+        add_custom_command(
+            OUTPUT ${DEST_HEADER}
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${HEADER} ${DEST_HEADER}
+            DEPENDS ${HEADER}
+            COMMENT "Copying Vulkan shader header: ${HEADER}"
+        )
+        list(APPEND VULKAN_SHADERS ${DEST_HEADER})
     endforeach()
     add_custom_target(shaders ALL DEPENDS ${VULKAN_SHADERS})
 endif()
@@ -208,6 +221,7 @@ set(LIB_SOURCES
     cpp_src/benchmarks/RayMaterialDivergenceBench.cpp
     cpp_src/benchmarks/RayPathTracingBench.cpp
     cpp_src/benchmarks/RaySchedulingBench.cpp
+    cpp_src/scene/GltfScene.cpp
     cpp_src/utils/HardwareTelemetry.cpp
     cpp_src/utils/KernelPath.cpp
     cpp_src/utils/ShaderCache.cpp
@@ -255,12 +269,14 @@ endif()
 # Include directories
 target_include_directories(gpubench PUBLIC 
     ${CMAKE_CURRENT_SOURCE_DIR}/cpp_src
+    ${CMAKE_CURRENT_SOURCE_DIR}/cpp_src/third_party
     ${CMAKE_CURRENT_SOURCE_DIR}/external
     ${CMAKE_CURRENT_BINARY_DIR}/cpp_src
 )
 
 target_include_directories(gpubench_lib PUBLIC 
     ${CMAKE_CURRENT_SOURCE_DIR}/cpp_src
+    ${CMAKE_CURRENT_SOURCE_DIR}/cpp_src/third_party
     ${CMAKE_CURRENT_SOURCE_DIR}/external
     ${CMAKE_CURRENT_BINARY_DIR}/cpp_src
 )
@@ -446,15 +462,36 @@ if(UNIX AND NOT APPLE)
 
     # Shell Completions
     install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/packaging/linux/completions/gpubench"
+                  "${CMAKE_CURRENT_SOURCE_DIR}/packaging/linux/completions/gpubench-gui"
             DESTINATION share/bash-completion/completions)
     install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/packaging/linux/completions/_gpubench"
+                  "${CMAKE_CURRENT_SOURCE_DIR}/packaging/linux/completions/_gpubench-gui"
             DESTINATION share/zsh/site-functions)
     install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/packaging/linux/completions/gpubench.fish"
+                  "${CMAKE_CURRENT_SOURCE_DIR}/packaging/linux/completions/gpubench-gui.fish"
             DESTINATION share/fish/vendor_completions.d)
 
     # Man Page
     install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/packaging/linux/man/gpubench.1"
+                  "${CMAKE_CURRENT_SOURCE_DIR}/packaging/linux/man/gpubench-gui.1"
             DESTINATION share/man/man1)
+
+    # Benchmark 3D Models
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets/models")
+        install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/assets/models/"
+                DESTINATION share/gpubench/models
+                FILES_MATCHING PATTERN "*.glb")
+    endif()
+
+    # Reference Renders & Stitching Script
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/renders")
+        install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/renders/"
+                DESTINATION share/gpubench/renders
+                FILES_MATCHING PATTERN "*.png" PATTERN "*.json")
+    endif()
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/scripts/make_triptych.py"
+            DESTINATION share/gpubench/scripts
+            PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ)
 endif()
 
 # CPack configuration for creating packages
@@ -522,6 +559,41 @@ elseif(UNIX AND NOT APPLE)
     set(CPACK_RPM_PACKAGE_REQUIRES "vulkan-loader, glibc, libgcc, libstdc++")
     file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tmp")
     set(CPACK_RPM_SPEC_MORE_DEFINE "%define _tmppath ${CMAKE_CURRENT_BINARY_DIR}/tmp")
+
+    # Exclude system directories from RPM filelist to prevent ownership conflicts with filesystem package
+    set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST
+        /etc /etc/init.d /usr /usr/bin
+        /usr/include /usr/lib /usr/libx32 /usr/lib64
+        /usr/share /usr/share/aclocal /usr/share/doc
+        /usr/share/applications
+        /usr/share/bash-completion
+        /usr/share/bash-completion/completions
+        /usr/share/fish
+        /usr/share/fish/vendor_completions.d
+        /usr/share/icons
+        /usr/share/icons/hicolor
+        /usr/share/icons/hicolor/16x16
+        /usr/share/icons/hicolor/16x16/apps
+        /usr/share/icons/hicolor/32x32
+        /usr/share/icons/hicolor/32x32/apps
+        /usr/share/icons/hicolor/48x48
+        /usr/share/icons/hicolor/48x48/apps
+        /usr/share/icons/hicolor/64x64
+        /usr/share/icons/hicolor/64x64/apps
+        /usr/share/icons/hicolor/128x128
+        /usr/share/icons/hicolor/128x128/apps
+        /usr/share/icons/hicolor/256x256
+        /usr/share/icons/hicolor/256x256/apps
+        /usr/share/man
+        /usr/share/man/man1
+        /usr/share/metainfo
+        /usr/share/pixmaps
+        /usr/share/zsh
+        /usr/share/zsh/site-functions
+    )
+    set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION ${CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST})
+
+    set(CPACK_RPM_DEFAULT_DIR_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
     
     # Use sanitized rpmbuild wrapper to protect against environment module syntax errors on Fedora/RHEL
     find_program(SYSTEM_RPMBUILD rpmbuild)
@@ -536,6 +608,9 @@ elseif(UNIX AND NOT APPLE)
         file(WRITE "${CPACK_PROJECT_CONFIG_FILE}"
             "# Sanitize shell environment for rpmbuild\n"
             "set(RPMBUILD_EXECUTABLE \"${CMAKE_CURRENT_BINARY_DIR}/rpmbuild_wrapper.sh\" CACHE FILEPATH \"Sanitized rpmbuild wrapper\" FORCE)\n"
+            "set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST \"${CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST}\")\n"
+            "set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION \"${CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION}\")\n"
+            "set(CPACK_RPM_DEFAULT_DIR_PERMISSIONS \"${CPACK_RPM_DEFAULT_DIR_PERMISSIONS}\")\n"
         )
     endif()
 
@@ -544,6 +619,12 @@ elseif(UNIX AND NOT APPLE)
         COMMAND ${CMAKE_COMMAND} -E env --unset=BASH_FUNC_module%% --unset=BASH_FUNC_ml%% --unset=BASH_FUNC__module_raw%% cpack -G RPM
         WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
         COMMENT "Building RPM package with sanitized shell environment"
+    )
+    add_custom_target(check-rpm
+        COMMAND python3 "${CMAKE_CURRENT_SOURCE_DIR}/scripts/verify_rpm.py" "${CMAKE_CURRENT_BINARY_DIR}/GPUBench-${PROJECT_VERSION}-Linux.rpm"
+        WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
+        DEPENDS package_rpm
+        COMMENT "Running RPM dry-run and structural verification..."
     )
     add_custom_target(package_deb
         COMMAND cpack -G DEB

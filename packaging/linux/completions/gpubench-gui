@@ -1,0 +1,34 @@
+# bash completion for gpubench-gui
+
+_gpubench_gui() {
+    local cur prev words cword
+    _init_completion || return
+
+    local opts="--help -h --version -v --backend -k --group --groups -g --benchmark --benchmarks -b --device --devices -d --resolution -r --dump-renders --dump --auto-start --run"
+
+    case "$prev" in
+        -k|--backend)
+            COMPREPLY=( $(compgen -W "auto vulkan opencl rocm" -- "$cur") )
+            return 0
+            ;;
+        -g|--group|--groups)
+            COMPREPLY=( $(compgen -W "compute memory raster graphics raytracing system all" -- "$cur") )
+            return 0
+            ;;
+        -r|--resolution)
+            COMPREPLY=( $(compgen -W "auto 1080p 1440p 4k" -- "$cur") )
+            return 0
+            ;;
+        -b|--benchmark|--benchmarks)
+            COMPREPLY=( $(compgen -W "fp32 fp64 fp16 bf16 fp8 int8 int4 membw fillrate sysmem syslat asbuild triangle anyhit procedural mat_divergence incoherent divergence payload pathtracing rayscheduling all" -- "$cur") )
+            return 0
+            ;;
+    esac
+
+    if [[ "$cur" == -* ]]; then
+        COMPREPLY=( $(compgen -W "$opts" -- "$cur") )
+        return 0
+    fi
+}
+
+complete -F _gpubench_gui gpubench-gui

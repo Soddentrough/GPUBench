@@ -28,7 +28,8 @@ jobs:
             ocl-icd-opencl-dev \
             opencl-headers \
             cmake \
-            build-essential
+            build-essential \
+            rpm
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -43,6 +44,11 @@ jobs:
         run: |
           cmake --build build --config Release --parallel
           cargo build --workspace --release
+
+      - name: Package RPM & Run Dry-Run Verification
+        run: |
+          cmake --build build --target package_rpm
+          python3 scripts/verify_rpm.py --skip-install-test
 
       - name: Smoke test (list commands)
         run: |

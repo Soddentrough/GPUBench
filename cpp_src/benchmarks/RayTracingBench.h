@@ -53,7 +53,7 @@ public:
   uint32_t GetNumConfigs() const override { return 2; }
   int GetSortWeight(uint32_t = 0) const override { return 615; }
   std::vector<std::string> GetAliases() const override {
-    return {"rt", "raytracing"};
+    return {"triangle", "intersect", "ray_triangle", "ray_intersect", "rt_triangle", "raytriangle", "raytracing_intersect"};
   }
   std::string GetConfigName(uint32_t config_idx) const override;
   const char *GetComponent(uint32_t config_idx = 0) const override;

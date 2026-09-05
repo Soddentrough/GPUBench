@@ -24,20 +24,28 @@ layout(set = 0, binding = 4) readonly buffer VertexBuffer {
     float vertices[];
 } vbuf;
 
+#define BINDING_MAT_BUF 5
+#define BINDING_TRI_MAT_BUF 6
+#define BINDING_TEX_HDR_BUF 7
+#define BINDING_TEX_PIX_BUF 8
+#include "pbr_common.glsl"
+
 layout(push_constant) uniform PushConstants {
     uint materialId;
     uint queueCapacity;
     uint dumpRenders;
     uint width;
     uint height;
-    uint sceneType;       // 0: Indoor Atrium, 1: Outdoor Landscape
+    uint sceneType;       // 0: Showroom Studio, 1: Outdoor Terrain, 2: Indoor Atrium
+    uint isGltf;          // 1 if glTF PBR scene, 0 if procedural
 } pc;
 
 layout(constant_id = 0) const uint SPECIALIZED_ARCHETYPE = 0xFFFFFFFFu;
 
 // Scene Type Constants
-const uint SCENE_INDOOR_ATRIUM   = 0u;
+const uint SCENE_SHOWROOM_STUDIO = 0u;
 const uint SCENE_OUTDOOR_TERRAIN = 1u;
+const uint SCENE_INDOOR_ATRIUM   = 2u;
 
 // Indoor Atrium Primitives
 const uint PRIM_KNOT_PAINT_END  = 1536u;
@@ -145,6 +153,26 @@ float rustFBM3D(vec3 p) {
 }
 
 void getCamera(uint sceneType, out vec3 camPos, out vec3 camForward, out vec3 camRight, out vec3 camUp, out float fov) {
+    if (pc.isGltf != 0u) {
+        if (sceneType == SCENE_INDOOR_ATRIUM) {
+            // Sponza Colonnade Nave Grand View
+            camPos = vec3(-1150.0, 280.0, -40.0);
+            camForward = normalize(vec3(1.0, 0.02, 0.0));
+            camRight = vec3(0.0, 0.0, -1.0);
+            camUp = vec3(0.0, 1.0, 0.0);
+            fov = 0.55;
+            return;
+        } else if (sceneType == SCENE_SHOWROOM_STUDIO) {
+            // ToyCar Automotive 3/4 Turntable View (+Y Up)
+            camPos = vec3(360.0, 160.0, 420.0);
+            vec3 target = vec3(0.0, 30.0, 0.0);
+            camForward = normalize(target - camPos);
+            camRight = normalize(cross(camForward, vec3(0.0, 1.0, 0.0)));
+            camUp = cross(camRight, camForward);
+            fov = 0.45;
+            return;
+        }
+    }
     if (sceneType == SCENE_OUTDOOR_TERRAIN) {
         // Outdoor Landscape: Mountain Valley Vista
         camPos = vec3(0.0, -320.0, 75.0);
@@ -152,8 +180,15 @@ void getCamera(uint sceneType, out vec3 camPos, out vec3 camForward, out vec3 ca
         camRight = vec3(1.0, 0.0, 0.0);
         camUp = vec3(0.0, 0.072412, 0.997375);
         fov = 0.45;
+    } else if (sceneType == SCENE_INDOOR_ATRIUM) {
+        // Indoor Atrium: Colonnade & Vaulted Ceiling Grand View
+        camPos = vec3(0.0, -9.6, 1.2);
+        camForward = normalize(vec3(0.0, 9.6, 0.6));
+        camRight = vec3(1.0, 0.0, 0.0);
+        camUp = normalize(cross(camRight, camForward));
+        fov = 0.65;
     } else {
-        // Indoor Atrium / Showroom: Central Sculpture Focus
+        // Showroom Studio: Central Sculpture Focus
         camPos = vec3(-0.5081, -8.1276, 1.5591);
         camForward = vec3(0.0562, 0.9852, -0.1622);
         camRight = vec3(0.9984, -0.0570, 0.0000);
@@ -177,6 +212,17 @@ vec3 evalStudioEnvironment(vec3 dir) {
     return baseWall + vec3(1.0, 0.98, 0.95) * sb1 + vec3(0.85, 0.92, 1.0) * sb2 + vec3(1.0, 0.90, 0.80) * sb3;
 }
 
+vec3 evalAtriumEnvironment(vec3 dir) {
+    float z = dir.z;
+    vec3 baseWall = mix(vec3(0.16, 0.15, 0.15), vec3(0.26, 0.24, 0.22), clamp(z * 1.5, 0.0, 1.0));
+    if (z < 0.0) {
+        baseWall = mix(vec3(0.16, 0.15, 0.15), vec3(0.08, 0.07, 0.06), clamp(-z * 2.0, 0.0, 1.0));
+    }
+    vec3 clerestoryDir = normalize(vec3(0.10, 0.30, 0.95));
+    float cs = pow(clamp(dot(dir, clerestoryDir), 0.0, 1.0), 30.0) * 3.5;
+    return baseWall + vec3(1.0, 0.95, 0.85) * cs;
+}
+
 vec3 evalOutdoorSky(vec3 dir) {
     vec3 sunDir = normalize(vec3(0.45, 0.35, 0.82));
     float sunDot = max(dot(dir, sunDir), 0.0);
@@ -193,6 +239,8 @@ vec3 evalOutdoorSky(vec3 dir) {
 vec3 evalSky(uint sceneType, vec3 dir) {
     if (sceneType == SCENE_OUTDOOR_TERRAIN) {
         return evalOutdoorSky(dir);
+    } else if (sceneType == SCENE_INDOOR_ATRIUM) {
+        return evalAtriumEnvironment(dir);
     }
     return evalStudioEnvironment(dir);
 }
@@ -230,10 +278,17 @@ float computeFloorOcclusion(vec3 hitPos) {
 uint computeMaterialId(uint sceneType, uint primId, vec3 hitPos, vec3 normal) {
     if (sceneType == SCENE_OUTDOOR_TERRAIN) {
         if (primId < PRIM_TERRAIN_END) {
-            if (hitPos.z >= 0.0 && hitPos.z <= 2.5 && abs(hitPos.x) < 170.0) {
+            // Shoreline boulders and river gravel along water margin
+            if (hitPos.z >= -0.2 && hitPos.z <= 2.2 && abs(hitPos.x) < 185.0 && hitPos.y >= -145.0 && hitPos.y <= 930.0) {
                 return 7u; // Wet River Stones / Shoreline Boulders
             }
-            if (hitPos.z > 65.0) {
+            // Multi-frequency harmonic snowline modulation
+            float snowHarmonics = sin(hitPos.x * 0.032 + hitPos.y * 0.018) * 9.5
+                                + cos(hitPos.x * 0.068 - hitPos.y * 0.045) * 4.5
+                                + sin(hitPos.x * 0.130 + hitPos.y * 0.110) * 2.0;
+            // Steep slopes and cliffs shed snow, while gullies and gentle slopes retain snow at lower altitudes
+            float snowAltitude = 60.0 + (1.0 - normal.z) * 28.0 + snowHarmonics;
+            if (hitPos.z > snowAltitude && normal.z >= 0.50) {
                 return 3u; // High Mountain Snow & Glacial Ice
             }
             if (normal.z < 0.65) {
@@ -406,6 +461,20 @@ vec3 evalMaterialBSDF(uint sceneType, uint matId, vec3 normal, vec3 inDir, vec3 
         float NdotH = max(dot(normal, halfVec), 0.0);
         float VdotH = max(dot(viewDir, halfVec), 0.0);
 
+        if (archetype == 2) {
+            // Realistic alpine lake water surface ripples
+            vec2 waveUV = hitPos.xy * 0.10;
+            float w1 = sin(waveUV.x * 2.8 + waveUV.y * 1.9) * 0.030;
+            float w2 = cos(waveUV.x * 5.4 - waveUV.y * 3.8) * 0.018;
+            float w3 = sin(waveUV.x * 10.5 + waveUV.y * 8.7) * 0.009;
+            normal = normalize(normal + vec3(w1 + w3, w2 + w3, 0.0));
+            NdotL = max(dot(normal, sunDir), 0.0);
+            NdotV = max(dot(normal, viewDir), 0.0);
+            halfVec = normalize(viewDir + sunDir);
+            NdotH = max(dot(normal, halfVec), 0.0);
+            VdotH = max(dot(viewDir, halfVec), 0.0);
+        }
+
         vec3 color = vec3(0.0);
         vec3 albedo = vec3(0.5);
 
@@ -428,12 +497,7 @@ vec3 evalMaterialBSDF(uint sceneType, uint matId, vec3 normal, vec3 inDir, vec3 
             }
             case 2: {
                 // Alpine Lake / River Water Plane
-                albedo = vec3(0.04, 0.16, 0.22);
-                float F_w = 0.02 + 0.98 * pow(clamp(1.0 - NdotV, 0.0, 1.0), 5.0);
-                float D_w = pow(NdotH, 180.0) * 6.0;
-                vec3 reflDir = reflect(inDir, normal);
-                vec3 reflSky = evalOutdoorSky(reflDir);
-                color = mix(albedo * (NdotL * 0.30 + 0.10), reflSky, F_w) + vec3(D_w) * sunColor;
+                albedo = vec3(0.012, 0.042, 0.065);
                 break;
             }
             case 3: {
@@ -474,15 +538,44 @@ vec3 evalMaterialBSDF(uint sceneType, uint matId, vec3 normal, vec3 inDir, vec3 
             }
         }
 
-        vec3 totalRadiance = color * sunColor + albedo * skyColor * max(normal.z, 0.0) + albedo * groundColor * max(-normal.z, 0.0);
+        float sunShadow = 1.0;
+        if (dot(normal, sunDir) > 0.0) {
+            if (traceShadowRay(hitPos, normal, sunDir, 2500.0)) {
+                sunShadow = 0.0;
+            }
+        }
+        vec3 totalRadiance;
+        if (archetype == 2) {
+            // Physically-based water: Fresnel reflection of outdoor sky & mountains
+            float F_w = 0.02 + 0.98 * pow(clamp(1.0 - NdotV, 0.0, 1.0), 5.0);
+            vec3 reflDir = reflect(inDir, normal);
+            vec3 reflSky = evalOutdoorSky(reflDir);
+            float sunGlint = pow(NdotH, 180.0) * 10.0 * sunShadow;
+            vec3 deepWater = vec3(0.012, 0.042, 0.065);
+            totalRadiance = mix(deepWater, reflSky, F_w) + sunColor * sunGlint;
+        } else {
+            totalRadiance = color * sunColor * sunShadow + albedo * skyColor * max(normal.z, 0.0) + albedo * groundColor * max(-normal.z, 0.0);
+        }
 
-        // Atmospheric Aerial Perspective Haze
+        // Atmospheric Aerial Perspective Haze with Horizon Matching
         vec3 camPos, camForward, camRight, camUp;
         float fov;
         getCamera(sceneType, camPos, camForward, camRight, camUp, fov);
-        float camDist = length(hitPos - camPos);
-        float hazeFactor = 1.0 - exp(-camDist * 0.0006);
-        vec3 hazeColor = vec3(0.58, 0.72, 0.92);
+        vec3 rayVec = hitPos - camPos;
+        float camDist = length(rayVec);
+        vec3 rayDirToHit = rayVec / max(camDist, 0.001);
+
+        // Match directional sky color at the horizon
+        vec3 skyHorizon = evalOutdoorSky(rayDirToHit);
+        vec3 hazeColor = mix(vec3(0.65, 0.76, 0.90), skyHorizon, 0.75);
+
+        // Exponential haze ramping seamlessly into 100% sky at terrain boundary
+        float hazeFactor = clamp(1.0 - exp(-camDist * 0.00085), 0.0, 1.0);
+        if (camDist > 1250.0) {
+            float fadeToEnd = smoothstep(1250.0, 1750.0, camDist);
+            hazeFactor = mix(hazeFactor, 1.0, fadeToEnd);
+            hazeColor = skyHorizon;
+        }
         return mix(totalRadiance, hazeColor, hazeFactor);
 
     } else {
@@ -528,14 +621,12 @@ vec3 evalMaterialBSDF(uint sceneType, uint matId, vec3 normal, vec3 inDir, vec3 
                     break;
                 }
                 case 2: {
-                    // Dispersive Faceted Crystal Sparkle
-                    float d_g = NdotH * NdotH * (0.0002 - 1.0) + 1.0;
-                    float D_glass = 0.0002 / (3.14159 * d_g * d_g + 0.0001);
-                    float F_g = 0.08 + 0.92 * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
-                    vec3 specGlass = vec3(D_glass * F_g * 1.8 / (4.0 * NdotL * NdotV + 0.001) * NdotL);
-                    float facetGlint = pow(clamp(dot(reflect(inDir, normal), lightDir), 0.0, 1.0), 40.0);
-                    vec3 crystalSparkle = vec3(1.3, 1.25, 1.15) * facetGlint * 3.5;
-                    color = specGlass + crystalSparkle;
+                    // Automotive Laminated Safety Glass (Dielectric specular transmission)
+                    float d_g = NdotH * NdotH * (0.0004 - 1.0) + 1.0;
+                    float D_glass = 0.0004 / (3.14159 * d_g * d_g + 0.0001);
+                    float F_g = 0.04 + 0.96 * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
+                    vec3 specGlass = vec3(D_glass * F_g * 1.0 / (4.0 * NdotL * NdotV + 0.001) * NdotL);
+                    color = specGlass;
                     break;
                 }
                 case 3: {
@@ -627,16 +718,13 @@ vec3 evalMaterialBSDF(uint sceneType, uint matId, vec3 normal, vec3 inDir, vec3 
         } else if (archetype == 1) {
             totalRadiance += envRefl * 0.25 * pow(clamp(1.0 - NdotV, 0.0, 1.0), 5.0);
         } else if (archetype == 2) {
-            vec3 refrR = refract(inDir, normal, 1.0 / 1.50);
-            vec3 refrG = refract(inDir, normal, 1.0 / 1.525);
-            vec3 refrB = refract(inDir, normal, 1.0 / 1.56);
-            vec3 skyR = evalStudioEnvironment(refrR);
-            vec3 skyG = evalStudioEnvironment(refrG);
-            vec3 skyB = evalStudioEnvironment(refrB);
-            vec3 interiorTint = vec3(0.82, 0.55, 0.90);
-            vec3 dispersedRefraction = vec3(skyR.r, skyG.g, skyB.b) * interiorTint;
-            float F_glass = 0.08 + 0.92 * pow(clamp(1.0 - NdotV, 0.0, 1.0), 5.0);
-            totalRadiance = mix(dispersedRefraction * 1.2, envRefl * 1.6, F_glass) + totalRadiance;
+            vec3 cabinInterior = vec3(0.025, 0.028, 0.032);
+            vec3 refrDir = refract(inDir, normal, 1.0 / 1.52);
+            if (length(refrDir) < 0.01) refrDir = reflDir;
+            vec3 envRefr = evalStudioEnvironment(refrDir);
+            vec3 glassInterior = mix(cabinInterior, envRefr, 0.35) * vec3(0.90, 0.94, 0.96);
+            float F_glass = 0.04 + 0.96 * pow(clamp(1.0 - NdotV, 0.0, 1.0), 5.0);
+            totalRadiance = mix(glassInterior, envRefl, F_glass) + totalRadiance;
         } else if (archetype == 3) {
             totalRadiance += envRefl * 0.15 * pow(clamp(1.0 - NdotV, 0.0, 1.0), 3.0);
         } else if (archetype == 6) {
@@ -723,9 +811,42 @@ void main() {
     vec3 inDir = normalize(camForward + (px / halfH * fov) * camRight - (py / halfH * fov) * camUp);
     vec3 hitPos = camPos + inDir * t;
 
-    vec3 normal = computeSmoothNormal(pc.sceneType, primId, hitPos, inDir);
+    vec3 shadedColor;
+    if (pc.isGltf != 0u) {
+        vec2 bary = unpackUnorm2x16(floatBitsToUint(p.w));
+        uint base = primId * 36u;
+        vec3 p0 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
+        vec3 n0 = vec3(vbuf.vertices[base + 3], vbuf.vertices[base + 4], vbuf.vertices[base + 5]);
+        vec4 t0 = vec4(vbuf.vertices[base + 6], vbuf.vertices[base + 7], vbuf.vertices[base + 8], vbuf.vertices[base + 9]);
+        vec2 uv0 = vec2(vbuf.vertices[base + 10], vbuf.vertices[base + 11]);
 
-    vec3 shadedColor = evalMaterialBSDF(pc.sceneType, pc.materialId, normal, inDir, hitPos, rngState);
+        base += 12u;
+        vec3 p1 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
+        vec3 n1 = vec3(vbuf.vertices[base + 3], vbuf.vertices[base + 4], vbuf.vertices[base + 5]);
+        vec4 t1 = vec4(vbuf.vertices[base + 6], vbuf.vertices[base + 7], vbuf.vertices[base + 8], vbuf.vertices[base + 9]);
+        vec2 uv1 = vec2(vbuf.vertices[base + 10], vbuf.vertices[base + 11]);
+
+        base += 12u;
+        vec3 p2 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
+        vec3 n2 = vec3(vbuf.vertices[base + 3], vbuf.vertices[base + 4], vbuf.vertices[base + 5]);
+        vec4 t2 = vec4(vbuf.vertices[base + 6], vbuf.vertices[base + 7], vbuf.vertices[base + 8], vbuf.vertices[base + 9]);
+        vec2 uv2 = vec2(vbuf.vertices[base + 10], vbuf.vertices[base + 11]);
+
+        float w = 1.0 - bary.x - bary.y;
+        vec3 interpHitPos = w * p0 + bary.x * p1 + bary.y * p2;
+        vec3 geomNormal = normalize(cross(p1 - p0, p2 - p0));
+        vec3 sn = w * n0 + bary.x * n1 + bary.y * n2;
+        vec3 smoothNormal = (length(sn) > 1e-4) ? normalize(sn) : geomNormal;
+        vec4 tangent = w * t0 + bary.x * t1 + bary.y * t2;
+        vec2 uv = w * uv0 + bary.x * uv1 + bary.y * uv2;
+
+        uint matId = triMatBuf.triangleMats[primId];
+        GltfMaterialGpu mat = matBuf.materials[matId];
+        shadedColor = evaluateGltfPbr(mat, interpHitPos, geomNormal, smoothNormal, tangent, uv, inDir, pc.sceneType);
+    } else {
+        vec3 normal = computeSmoothNormal(pc.sceneType, primId, hitPos, inDir);
+        shadedColor = evalMaterialBSDF(pc.sceneType, pc.materialId, normal, inDir, hitPos, rngState);
+    }
 
     if (pc.dumpRenders != 0) {
         fb.pixels[pixelIdx] = vec4(tonemapACES(shadedColor * 1.0), 1.0);
