@@ -424,3 +424,22 @@ All 8 unsupported configurations correctly diagnosed with technical rationale.
 5. **Pack Ray Payloads into 16 Bytes**:
    Store positions as 32-bit floats (or quantized 16-bit halfs where applicable), directions as octahedral `snorm16x2`, and metadata as 32-bit integer IDs. Keeping payload size $\le 16\text{ bytes}$ halves memory bandwidth and doubles cache residency.
 
+---
+
+## 11. Addendum: Validating the Megakernel Fallback
+
+In a recent deep-dive investigation into why the `master` branch's Work Lists implementation performed significantly worse (~6.4 GHits/s) than the Traditional Megakernel (~13.4 GHits/s) on the RX 7900 XTX, we attempted to rewrite the scheduling pipeline to circumvent perceived bottlenecks. The goal was to expand the payload to 48-bytes (to avoid redundant geometry fetches) and use an SoA layout `for` loop to guarantee perfectly coalesced VRAM writes.
+
+The results strongly reinforced the architectural realities of RDNA 3:
+
+1. **VRAM Bandwidth is a Hard Ceiling for DGC:** 
+   Expanding the payload to 48 bytes caused a severe performance drop (from 6.3 GHits/s down to 5.9 GHits/s). This validated the `master` branch's aggressive 16-byte quantization. The RDNA 3 memory subsystem (especially when queue spills cross the Infinity Fabric) simply cannot handle the bandwidth required to stream 48-byte payloads for millions of rays without stalling the CUs, completely negating any ALU savings from skipping geometry fetches.
+
+2. **Global Atomic Contention Remains Unsolved:**
+   Even when utilizing subgroup ballots or LDS compaction to reduce global atomics to one `atomicAdd` per wave, 96 CUs launching rays simultaneously still results in tens of thousands of wavefronts hammering the exact same 8 memory addresses (`queueCounters[0..7]`). This cross-CU L2 cache serialization is a fundamental hardware limitation that Stream Compaction cannot easily bypass.
+
+3. **Megakernels Absorb Divergence Elegantly:**
+   The ultimate finding is that the RDNA 3 architecture (with its massive VGPR files, Wave64/Dual-Issue ALUs, and excellent instruction caching) is uniquely suited to absorb execution divergence. The cost of a monolithic `switch` statement in the Traditional Megakernel is often vastly cheaper than the cost of atomic stream compaction, queue memory bandwidth, and indirect dispatch latency required by Work Lists.
+
+**Best Practice Recommendation:**
+For modern graphics engines targeting AMD RDNA 2/3 hardware, maintaining a Traditional Megakernel fallback is highly recommended. Work Lists / DGC (or native hardware reordering like Nvidia's SER) should be dynamically routed via Vendor ID checks for IHVs that benefit from coherency and have unified, fast L2 atomics. Trying to force a one-size-fits-all Work List scheduling architecture onto AMD hardware will likely result in regressions compared to a well-optimized Megakernel.
