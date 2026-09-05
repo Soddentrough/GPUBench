@@ -1,4 +1,5 @@
 #include "RaySchedulingBench.h"
+#include "AAAForestScene.h"
 #include "IndoorAtriumScene.h"
 #include "OutdoorLandscapeScene.h"
 #include "ShowroomScene.h"
@@ -285,7 +286,7 @@ void RaySchedulingBench::rebuildBounceBatches() {
       uint32_t maxQueueSize;
       uint32_t sceneType;
       uint32_t isGltf;
-    } pcBounce{inQ, outQ, b, 1337u, bounceCapacity, (sceneType == SceneType::OutdoorLandscape) ? 1u : ((sceneType == SceneType::IndoorAtrium) ? 2u : 0u), isGltf ? 1u : 0u};
+    } pcBounce{inQ, outQ, b, 1337u, bounceCapacity, (sceneType == SceneType::AAAOutdoorForest) ? 3u : ((sceneType == SceneType::OutdoorLandscape) ? 1u : ((sceneType == SceneType::IndoorAtrium) ? 2u : 0u)), isGltf ? 1u : 0u};
 
     std::vector<uint8_t> pcData(sizeof(pcBounce));
     std::memcpy(pcData.data(), &pcBounce, sizeof(pcBounce));
@@ -464,6 +465,55 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
       ShowroomScene::buildShowroomScene(vertices);
       numPrimitives = static_cast<uint32_t>(vertices.size() / 9);
     }
+  } else if (sceneType == SceneType::AAAOutdoorForest) {
+    isGltf = true;
+    std::vector<uint32_t> triMats;
+    AAAForestScene::buildForestMesh(vertices, triMats);
+    numPrimitives = static_cast<uint32_t>(vertices.size() / 36);
+    std::cout << "[RayScheduling] Generated high-density AAA Forest scene: " << numPrimitives
+              << " triangles (512x512 terrain, 600 pines, 250 birches, 1200 boulders, 4000 grass/ferns, timber bridge)"
+              << std::endl;
+
+    std::vector<GltfMaterial> natureMats(8);
+    // Mat 0: Leaves & Needles
+    natureMats[0].baseColorFactor[0] = 0.12f; natureMats[0].baseColorFactor[1] = 0.42f; natureMats[0].baseColorFactor[2] = 0.15f; natureMats[0].baseColorFactor[3] = 1.0f;
+    natureMats[0].roughnessFactor = 0.45f; natureMats[0].metallicFactor = 0.0f; natureMats[0].transmissionFactor = 0.45f;
+    natureMats[0].baseColorTexIdx = -1; natureMats[0].normalTexIdx = -1; natureMats[0].metallicRoughnessTexIdx = -1; natureMats[0].occlusionTexIdx = -1;
+    // Mat 1: Bark & Roots
+    natureMats[1].baseColorFactor[0] = 0.28f; natureMats[1].baseColorFactor[1] = 0.18f; natureMats[1].baseColorFactor[2] = 0.12f; natureMats[1].baseColorFactor[3] = 1.0f;
+    natureMats[1].roughnessFactor = 0.85f; natureMats[1].metallicFactor = 0.0f;
+    natureMats[1].baseColorTexIdx = -1; natureMats[1].normalTexIdx = -1; natureMats[1].metallicRoughnessTexIdx = -1; natureMats[1].occlusionTexIdx = -1;
+    // Mat 2: Granite Cliffs & Boulders
+    natureMats[2].baseColorFactor[0] = 0.38f; natureMats[2].baseColorFactor[1] = 0.39f; natureMats[2].baseColorFactor[2] = 0.42f; natureMats[2].baseColorFactor[3] = 1.0f;
+    natureMats[2].roughnessFactor = 0.90f; natureMats[2].metallicFactor = 0.0f;
+    natureMats[2].baseColorTexIdx = -1; natureMats[2].normalTexIdx = -1; natureMats[2].metallicRoughnessTexIdx = -1; natureMats[2].occlusionTexIdx = -1;
+    // Mat 3: Topsoil & Mud
+    natureMats[3].baseColorFactor[0] = 0.30f; natureMats[3].baseColorFactor[1] = 0.22f; natureMats[3].baseColorFactor[2] = 0.16f; natureMats[3].baseColorFactor[3] = 1.0f;
+    natureMats[3].roughnessFactor = 0.95f; natureMats[3].metallicFactor = 0.0f;
+    natureMats[3].baseColorTexIdx = -1; natureMats[3].normalTexIdx = -1; natureMats[3].metallicRoughnessTexIdx = -1; natureMats[3].occlusionTexIdx = -1;
+    // Mat 4: Grass & Ferns
+    natureMats[4].baseColorFactor[0] = 0.22f; natureMats[4].baseColorFactor[1] = 0.48f; natureMats[4].baseColorFactor[2] = 0.18f; natureMats[4].baseColorFactor[3] = 1.0f;
+    natureMats[4].roughnessFactor = 0.60f; natureMats[4].metallicFactor = 0.0f;
+    natureMats[4].baseColorTexIdx = -1; natureMats[4].normalTexIdx = -1; natureMats[4].metallicRoughnessTexIdx = -1; natureMats[4].occlusionTexIdx = -1;
+    // Mat 5: River Water Surface & Bathymetry
+    natureMats[5].baseColorFactor[0] = 0.02f; natureMats[5].baseColorFactor[1] = 0.08f; natureMats[5].baseColorFactor[2] = 0.12f; natureMats[5].baseColorFactor[3] = 0.65f;
+    natureMats[5].roughnessFactor = 0.02f; natureMats[5].metallicFactor = 0.0f; natureMats[5].transmissionFactor = 0.92f; natureMats[5].ior = 1.333f;
+    natureMats[5].baseColorTexIdx = -1; natureMats[5].normalTexIdx = -1; natureMats[5].metallicRoughnessTexIdx = -1; natureMats[5].occlusionTexIdx = -1;
+    // Mat 6: Alpine Snow & Frost
+    natureMats[6].baseColorFactor[0] = 0.92f; natureMats[6].baseColorFactor[1] = 0.95f; natureMats[6].baseColorFactor[2] = 0.98f; natureMats[6].baseColorFactor[3] = 1.0f;
+    natureMats[6].roughnessFactor = 0.30f; natureMats[6].metallicFactor = 0.0f;
+    natureMats[6].baseColorTexIdx = -1; natureMats[6].normalTexIdx = -1; natureMats[6].metallicRoughnessTexIdx = -1; natureMats[6].occlusionTexIdx = -1;
+    // Mat 7: Weathered Timber & Stone
+    natureMats[7].baseColorFactor[0] = 0.45f; natureMats[7].baseColorFactor[1] = 0.38f; natureMats[7].baseColorFactor[2] = 0.32f; natureMats[7].baseColorFactor[3] = 1.0f;
+    natureMats[7].roughnessFactor = 0.75f; natureMats[7].metallicFactor = 0.05f;
+    natureMats[7].baseColorTexIdx = -1; natureMats[7].normalTexIdx = -1; natureMats[7].metallicRoughnessTexIdx = -1; natureMats[7].occlusionTexIdx = -1;
+
+    materialBuffer = context->createBuffer(natureMats.size() * sizeof(GltfMaterial), natureMats.data());
+    triangleMaterialBuffer = context->createBuffer(triMats.size() * sizeof(uint32_t), triMats.data());
+    GltfTextureHeader dummyHeader{};
+    texHeaderBuffer = context->createBuffer(sizeof(GltfTextureHeader), &dummyHeader);
+    uint32_t dummyPixel = 0xFFFFFFFFu;
+    texPixelBuffer = context->createBuffer(sizeof(uint32_t), &dummyPixel);
   } else {
     // Outdoor Landscape
     vertices = OutdoorLandscapeScene::buildOutdoorLandscapeMesh();
@@ -473,27 +523,29 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
   vertexBuffer =
       context->createBuffer(vertices.size() * sizeof(float), vertices.data());
 
-  if (isGltf) {
-    const auto &mats = gltfScene.getMaterials();
-    materialBuffer = context->createBuffer(mats.size() * sizeof(GltfMaterial), mats.data());
+  if (sceneType != SceneType::AAAOutdoorForest) {
+    if (isGltf) {
+      const auto &mats = gltfScene.getMaterials();
+      materialBuffer = context->createBuffer(mats.size() * sizeof(GltfMaterial), mats.data());
 
-    const auto &triMats = gltfScene.getTriangleMaterials();
-    triangleMaterialBuffer = context->createBuffer(triMats.size() * sizeof(uint32_t), triMats.data());
+      const auto &triMats = gltfScene.getTriangleMaterials();
+      triangleMaterialBuffer = context->createBuffer(triMats.size() * sizeof(uint32_t), triMats.data());
 
-    const auto &headers = gltfScene.getTextureHeaders();
-    texHeaderBuffer = context->createBuffer(headers.size() * sizeof(GltfTextureHeader), headers.data());
+      const auto &headers = gltfScene.getTextureHeaders();
+      texHeaderBuffer = context->createBuffer(headers.size() * sizeof(GltfTextureHeader), headers.data());
 
-    const auto &pixels = gltfScene.getPackedPixels();
-    texPixelBuffer = context->createBuffer(pixels.size() * sizeof(uint32_t), pixels.data());
-  } else {
-    GltfMaterial dummyMat{};
-    materialBuffer = context->createBuffer(sizeof(GltfMaterial), &dummyMat);
-    uint32_t dummyTriMat = 0;
-    triangleMaterialBuffer = context->createBuffer(sizeof(uint32_t), &dummyTriMat);
-    GltfTextureHeader dummyHeader{};
-    texHeaderBuffer = context->createBuffer(sizeof(GltfTextureHeader), &dummyHeader);
-    uint32_t dummyPixel = 0xFFFFFFFFu;
-    texPixelBuffer = context->createBuffer(sizeof(uint32_t), &dummyPixel);
+      const auto &pixels = gltfScene.getPackedPixels();
+      texPixelBuffer = context->createBuffer(pixels.size() * sizeof(uint32_t), pixels.data());
+    } else {
+      GltfMaterial dummyMat{};
+      materialBuffer = context->createBuffer(sizeof(GltfMaterial), &dummyMat);
+      uint32_t dummyTriMat = 0;
+      triangleMaterialBuffer = context->createBuffer(sizeof(uint32_t), &dummyTriMat);
+      GltfTextureHeader dummyHeader{};
+      texHeaderBuffer = context->createBuffer(sizeof(GltfTextureHeader), &dummyHeader);
+      uint32_t dummyPixel = 0xFFFFFFFFu;
+      texPixelBuffer = context->createBuffer(sizeof(uint32_t), &dummyPixel);
+    }
   }
 
   buildAS();
@@ -662,7 +714,7 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
       uint32_t sceneType;
       uint32_t isGltf;
       uint32_t mode;
-    } pcMat{m, materialCapacity, dumpRenders ? 1u : 0u, renderWidth, renderHeight, (sceneType == SceneType::OutdoorLandscape) ? 1u : ((sceneType == SceneType::IndoorAtrium) ? 2u : 0u), isGltf ? 1u : 0u, 0u};
+    } pcMat{m, materialCapacity, dumpRenders ? 1u : 0u, renderWidth, renderHeight, (sceneType == SceneType::AAAOutdoorForest) ? 3u : ((sceneType == SceneType::OutdoorLandscape) ? 1u : ((sceneType == SceneType::IndoorAtrium) ? 2u : 0u)), isGltf ? 1u : 0u, 0u};
     std::vector<uint8_t> pcData(sizeof(pcMat));
     std::memcpy(pcData.data(), &pcMat, sizeof(pcMat));
     materialBatches.push_back({m * sizeof(uint32_t) * 3, pcData, kernelMaterialSpecialized[m]});
@@ -698,7 +750,7 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
     uint32_t maxQueueSize;
     uint32_t sceneType;
     uint32_t isGltf;
-  } pcBounce{0, 0xFFFFFFFFu, 1, 1337u, octantCapacity, (sceneType == SceneType::OutdoorLandscape) ? 1u : ((sceneType == SceneType::IndoorAtrium) ? 2u : 0u), isGltf ? 1u : 0u};
+  } pcBounce{0, 0xFFFFFFFFu, 1, 1337u, octantCapacity, (sceneType == SceneType::AAAOutdoorForest) ? 3u : ((sceneType == SceneType::OutdoorLandscape) ? 1u : ((sceneType == SceneType::IndoorAtrium) ? 2u : 0u)), isGltf ? 1u : 0u};
   std::vector<uint8_t> pcData(sizeof(pcBounce));
   std::memcpy(pcData.data(), &pcBounce, sizeof(pcBounce));
   octantBatches.push_back({8 * sizeof(uint32_t) * 3, pcData, kernelBounceOctant});
@@ -714,7 +766,7 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
     uint32_t sceneType;
     uint32_t isGltf;
     uint32_t lightIndex;
-  } pcShadow{0, materialCapacity, dumpRenders ? 1u : 0u, renderWidth, renderHeight, (sceneType == SceneType::OutdoorLandscape) ? 1u : ((sceneType == SceneType::IndoorAtrium) ? 2u : 0u), isGltf ? 1u : 0u, 0};
+  } pcShadow{0, materialCapacity, dumpRenders ? 1u : 0u, renderWidth, renderHeight, (sceneType == SceneType::AAAOutdoorForest) ? 3u : ((sceneType == SceneType::OutdoorLandscape) ? 1u : ((sceneType == SceneType::IndoorAtrium) ? 2u : 0u)), isGltf ? 1u : 0u, 0};
   std::vector<uint8_t> pcShadowData(sizeof(pcShadow));
   std::memcpy(pcShadowData.data(), &pcShadow, sizeof(pcShadow));
   shadowBatches.push_back({0 * sizeof(uint32_t) * 3, pcShadowData, kernelShadow});
@@ -736,7 +788,7 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     return;
 
   uint32_t seed = dumpRenders ? 1337u : rand();
-  uint32_t sceneTypeVal = (sceneType == SceneType::OutdoorLandscape) ? 1u : ((sceneType == SceneType::IndoorAtrium) ? 2u : 0u);
+  uint32_t sceneTypeVal = (sceneType == SceneType::AAAOutdoorForest) ? 3u : ((sceneType == SceneType::OutdoorLandscape) ? 1u : ((sceneType == SceneType::IndoorAtrium) ? 2u : 0u));
   uint32_t isGltfVal = isGltf ? 1u : 0u;
 
   switch (config_idx) {
@@ -939,7 +991,7 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     vContext->setKernelArg(kernelClassify, 10, sizeof(pcClassify), &pcClassify);
 
     vContext->dispatchWorkListSequence(
-        nullptr,
+        kernelReset,
         kernelClassify, (rayCount + 31) / 32, 1, 1,
         kernelResolve,
         kernelMaterial, indirectBuffer, materialBatches);
@@ -1069,7 +1121,7 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     vContext->setKernelArg(kernelClassify, 10, sizeof(pcClassify), &pcClassify);
 
     vContext->dispatchWorkListSequence(
-        nullptr,
+        kernelReset,
         kernelClassify, (rayCount + 31) / 32, 1, 1,
         kernelResolve,
         kernelMaterial, indirectBuffer, materialBatches);
@@ -1201,9 +1253,11 @@ void RaySchedulingBench::performVisualVerification() {
       hdrTrad.data(), hdrWork.data(), width, height, ldrTrad, ldrWork, ldrDiff);
 
   std::filesystem::create_directories("renders");
-  std::string tag = (sceneType == SceneType::OutdoorLandscape)
-                        ? "outdoor"
-                        : ((sceneType == SceneType::IndoorAtrium) ? "indoor" : "showroom");
+  std::string tag = (sceneType == SceneType::AAAOutdoorForest)
+                        ? "forest"
+                        : ((sceneType == SceneType::OutdoorLandscape)
+                               ? "outdoor"
+                               : ((sceneType == SceneType::IndoorAtrium) ? "indoor" : "showroom"));
 
   std::string tradPpm = "renders/render_" + tag + "_traditional_megakernel.ppm";
   std::string workPpm = "renders/render_" + tag + "_worklist_dgc.ppm";
@@ -1295,7 +1349,7 @@ void RaySchedulingBench::performVisualVerification() {
     profFile << std::fixed << std::setprecision(4);
     profFile << "{\n";
     profFile << "  \"gpu\": \"AMD Radeon AI PRO R9700 (GFX1201)\",\n";
-    profFile << "  \"scene\": \"" << (sceneType == SceneType::OutdoorLandscape ? "Outdoor Landscape" : ((sceneType == SceneType::IndoorAtrium) ? "Indoor Atrium" : "Showroom Studio")) << "\",\n";
+    profFile << "  \"scene\": \"" << (sceneType == SceneType::AAAOutdoorForest ? "AAA Outdoor Forest" : ((sceneType == SceneType::OutdoorLandscape) ? "Outdoor Landscape" : ((sceneType == SceneType::IndoorAtrium) ? "Indoor Atrium" : "Showroom Studio"))) << "\",\n";
     profFile << "  \"resolution\": \"" << width << "x" << height << " (" << (width * height) << " primary rays)\",\n";
     profFile << "  \"traditional\": {\n";
     profFile << "    \"fps\": " << fpsTrad << ",\n";
@@ -1363,11 +1417,13 @@ void RaySchedulingBench::performVisualVerification() {
     (void)std::system(blenderCmd.c_str());
   }
 
-  std::string sceneTitle = (sceneType == SceneType::OutdoorLandscape)
-                               ? "OUTDOOR LANDSCAPE SCENARIO"
-                               : ((sceneType == SceneType::IndoorAtrium)
-                                      ? "INDOOR ATRIUM SCENARIO"
-                                      : "SHOWROOM STUDIO SCENARIO");
+  std::string sceneTitle = (sceneType == SceneType::AAAOutdoorForest)
+                               ? "AAA OPEN-WORLD FOREST SCENARIO (1,001,280 Triangles)"
+                               : ((sceneType == SceneType::OutdoorLandscape)
+                                      ? "OUTDOOR LANDSCAPE SCENARIO"
+                                      : ((sceneType == SceneType::IndoorAtrium)
+                                             ? "INDOOR ATRIUM SCENARIO"
+                                             : "SHOWROOM STUDIO SCENARIO"));
   std::cout << std::endl;
   std::cout << "================================================================================" << std::endl;
   std::cout << "       RAY SCHEDULING VISUAL & ANALYTICAL PARITY: " << sceneTitle << std::endl;

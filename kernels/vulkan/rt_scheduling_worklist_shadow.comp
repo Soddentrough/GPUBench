@@ -46,10 +46,18 @@ layout(push_constant) uniform PushConstants {
 const uint SCENE_SHOWROOM_STUDIO = 0u;
 const uint SCENE_OUTDOOR_TERRAIN = 1u;
 const uint SCENE_INDOOR_ATRIUM   = 2u;
+const uint SCENE_AAA_FOREST       = 3u;
 
 void getCamera(uint sceneType, out vec3 camPos, out vec3 camForward, out vec3 camRight, out vec3 camUp, out float fov) {
     if (pc.isGltf != 0u) {
-        if (sceneType == SCENE_INDOOR_ATRIUM) {
+        if (sceneType == SCENE_AAA_FOREST) {
+            camPos = vec3(-35.0, -50.0, 20.0);
+            camForward = normalize(vec3(45.0, 180.0, -14.0));
+            camRight = normalize(cross(camForward, vec3(0.0, 0.0, 1.0)));
+            camUp = cross(camRight, camForward);
+            fov = 0.52;
+            return;
+        } else if (sceneType == SCENE_INDOOR_ATRIUM) {
             camPos = vec3(-1150.0, 280.0, -40.0);
             camForward = normalize(vec3(1.0, 0.02, 0.0));
             camRight = vec3(0.0, 0.0, -1.0);
@@ -96,7 +104,7 @@ vec3 computeSmoothNormal(uint sceneType, uint primId, vec3 hitPos, vec3 inDir, v
 void main() {
     uint threadIdx = gl_GlobalInvocationID.x;
     uint count = worklist.queueCounters[Q_SNAPSHOT_IDX(pc.queueId)];
-    if (threadIdx >= count) return;
+    if (threadIdx >= count || threadIdx >= pc.queueCapacity) return;
 
     if (threadIdx == 0) {
         atomicAdd(results.totalRays, count);

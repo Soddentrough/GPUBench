@@ -33,6 +33,17 @@ def get_scene_paths(scene_tag):
             "profile": "renders/render_outdoor_profile.json",
             "out_names": ["render_outdoor_comparison.png", "render_outdoor_comparison_triptych.png"],
         }
+    elif scene_tag == "forest":
+        return {
+            "title": "AAA OPEN-WORLD FOREST SCENARIO (1,001,280 Triangles)",
+            "subtitle": "512×512 Terrain, 850 Multi-Tier Trees, Riverbed Bathymetry, 4,000 Understory Plants, 8 Nature PBR Shaders",
+            "res_tag": "4K UHD (3840×2160, 8,294,400 primary rays)",
+            "p1": "renders/render_forest_traditional_megakernel.png",
+            "p2": "renders/render_forest_worklist_dgc.png",
+            "p3": "renders/render_forest_difference_heatmap.png",
+            "profile": "renders/render_forest_profile.json",
+            "out_names": ["render_forest_comparison.png", "render_forest_comparison_triptych.png"],
+        }
     elif scene_tag == "showroom":
         return {
             "title": "SHOWROOM STUDIO SCENARIO (108,936 Triangles)",
@@ -203,7 +214,7 @@ def process_scene(scene_tag):
 
 
 def generate_2x_grid():
-    all_scenes = ["showroom", "indoor", "outdoor", "pathtracing"]
+    all_scenes = ["showroom", "indoor", "outdoor", "forest", "pathtracing"]
     scenes = [s for s in all_scenes if os.path.exists(get_scene_paths(s)["p1"]) and os.path.exists(get_scene_paths(s)["p2"]) and os.path.exists(get_scene_paths(s)["profile"])]
     if not scenes:
         scenes = ["indoor"]
@@ -368,6 +379,7 @@ if __name__ == "__main__":
         process_scene("showroom")
         process_scene("indoor")
         process_scene("outdoor")
+        process_scene("forest")
         generate_2x_grid()
     else:
         process_scene(tag)

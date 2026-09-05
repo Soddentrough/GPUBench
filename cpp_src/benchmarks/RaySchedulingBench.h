@@ -17,13 +17,16 @@ public:
   enum class SceneType : uint32_t {
     Showroom = 0,
     IndoorAtrium = 1,
-    OutdoorLandscape = 2
+    OutdoorLandscape = 2,
+    AAAOutdoorForest = 3
   };
 
   RaySchedulingBench(SceneType scene = SceneType::IndoorAtrium) : sceneType(scene) {}
 
   const char *GetName() const override {
-    if (sceneType == SceneType::OutdoorLandscape) {
+    if (sceneType == SceneType::AAAOutdoorForest) {
+      return "RayScheduling (AAA Outdoor Forest)";
+    } else if (sceneType == SceneType::OutdoorLandscape) {
       return "RayScheduling (Outdoor Landscape)";
     } else if (sceneType == SceneType::IndoorAtrium) {
       return "RayScheduling (Indoor Atrium)";
@@ -75,7 +78,9 @@ public:
 
   uint32_t GetNumConfigs() const override { return 28; }
   std::vector<std::string> GetAliases() const override {
-    if (sceneType == SceneType::OutdoorLandscape) {
+    if (sceneType == SceneType::AAAOutdoorForest) {
+      return {"rayscheduling", "rtscheduling", "forest", "aaa_forest", "rayscheduling_forest", "worklists", "dgc", "scene_render", "total_scene_render", "total_frame", "primary", "primary_rays", "shadow", "shadows", "rts", "ray_shadows", "ray_shadow"};
+    } else if (sceneType == SceneType::OutdoorLandscape) {
       return {"rayscheduling", "rtscheduling", "outdoor", "landscape", "rayscheduling_outdoor", "worklists", "dgc", "scene_render", "total_scene_render", "total_frame", "primary", "primary_rays", "shadow", "shadows", "rts", "ray_shadows", "ray_shadow"};
     } else if (sceneType == SceneType::IndoorAtrium) {
       return {"rayscheduling", "rtscheduling", "indoor", "atrium", "rayscheduling_indoor", "worklists", "dgc", "scene_render", "total_scene_render", "total_frame", "primary", "primary_rays", "shadow", "shadows", "rts", "ray_shadows", "ray_shadow"};

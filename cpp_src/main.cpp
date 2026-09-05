@@ -290,8 +290,8 @@ int main(int argc, char **argv) {
 
   std::string scene_str = "indoor";
   app.add_option("-s,--scene", scene_str,
-                 "Ray tracing benchmark scenario: showroom, indoor, outdoor, all (default: indoor)")
-      ->check(CLI::IsMember({"showroom", "indoor", "outdoor", "all"}));
+                 "Ray tracing benchmark scenario: showroom, indoor, outdoor, forest, all (default: indoor)")
+      ->check(CLI::IsMember({"showroom", "indoor", "outdoor", "forest", "aaa_forest", "all"}));
 
   std::string resolution_str = "auto";
   app.add_option("-r,--resolution", resolution_str,

@@ -66,6 +66,7 @@ shared uint ldsBaseSlot[8];
 const uint SCENE_SHOWROOM_STUDIO = 0u;
 const uint SCENE_OUTDOOR_TERRAIN = 1u;
 const uint SCENE_INDOOR_ATRIUM   = 2u;
+const uint SCENE_AAA_FOREST       = 3u;
 
 // Indoor Atrium Primitives
 const uint PRIM_KNOT_PAINT_END  = 1536u;
@@ -179,7 +180,15 @@ float rustFBM3D(vec3 p) {
 
 void getCamera(uint sceneType, out vec3 camPos, out vec3 camForward, out vec3 camRight, out vec3 camUp, out float fov) {
     if (pc.isGltf != 0u) {
-        if (sceneType == SCENE_INDOOR_ATRIUM) {
+        if (sceneType == SCENE_AAA_FOREST) {
+            // AAA Open-World Alpine Forest: Overlook looking down the river canyon towards the timber bridge
+            camPos = vec3(-35.0, -50.0, 20.0);
+            camForward = normalize(vec3(45.0, 180.0, -14.0));
+            camRight = normalize(cross(camForward, vec3(0.0, 0.0, 1.0)));
+            camUp = cross(camRight, camForward);
+            fov = 0.52;
+            return;
+        } else if (sceneType == SCENE_INDOOR_ATRIUM) {
             // Sponza Colonnade Nave Grand View
             camPos = vec3(-1150.0, 280.0, -40.0);
             camForward = normalize(vec3(1.0, 0.02, 0.0));
@@ -248,6 +257,8 @@ vec3 evalAtriumEnvironment(vec3 dir) {
     return baseWall + vec3(1.0, 0.95, 0.85) * cs;
 }
 
+#ifndef EVAL_OUTDOOR_SKY_DEFINED
+#define EVAL_OUTDOOR_SKY_DEFINED
 vec3 evalOutdoorSky(vec3 dir) {
     vec3 sunDir = normalize(vec3(0.45, 0.35, 0.82));
     float sunDot = max(dot(dir, sunDir), 0.0);
@@ -260,6 +271,7 @@ vec3 evalOutdoorSky(vec3 dir) {
     sky += vec3(1.0, 0.85, 0.60) * pow(sunDot, 12.0) * 0.8;
     return sky;
 }
+#endif
 
 vec3 evalSky(uint sceneType, vec3 dir) {
     if (sceneType == SCENE_OUTDOOR_TERRAIN) {

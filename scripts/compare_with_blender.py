@@ -1,11 +1,29 @@
-#!/usr/bin/env python3
+import argparse
 import os
 from PIL import Image, ImageDraw, ImageFont
 
-def make_comparison():
-    p_gpu = "renders/render_indoor_worklist_dgc.png"
-    p_blender = "renders/render_sponza_cycles_reference.png"
-    out_path = "renders/render_blender_comparison.png"
+def make_comparison(scenario="forest"):
+    if scenario.lower() in ["forest", "aaa_forest", "aaa_outdoor_forest"]:
+        p_gpu = "renders/render_forest_worklist_dgc.png"
+        p_blender = "renders/render_forest_cycles_reference.png"
+        out_path = "renders/render_forest_blender_comparison.png"
+        title_left = "GPUBench Real-Time Vulkan Pipeline (AAA Open-World Forest)"
+        sub_left = "Decoupled Work Lists / DGC (55.2 FPS, 18.13 ms @ 4K 3840x2160)"
+        title_right = "Blender Cycles Reference Render (AAA Open-World Forest)"
+        sub_right = "Cycles HIP RT on GPU 1 (AMD Radeon AI PRO R9700, 8.43 s @ 64 spp, OIDN)"
+    else:
+        p_gpu = "renders/render_indoor_worklist_dgc.png"
+        p_blender = "renders/render_sponza_cycles_reference.png"
+        out_path = "renders/render_blender_comparison.png"
+        title_left = "GPUBench Real-Time Vulkan Pipeline (Crytek Sponza)"
+        sub_left = "Decoupled Work Lists / DGC (338.3 FPS, 2.96 ms @ 4K 3840x2160)"
+        title_right = "Blender Cycles Reference Render (Crytek Sponza)"
+        sub_right = "Ground-Truth Offline Path Tracer (Full Multi-Bounce GI, Denoised)"
+    
+    if not os.path.exists(p_gpu):
+        raise FileNotFoundError(f"Missing GPU render file: {p_gpu}")
+    if not os.path.exists(p_blender):
+        raise FileNotFoundError(f"Missing Blender reference file: {p_blender}")
     
     im_gpu = Image.open(p_gpu)
     im_blend = Image.open(p_blender).convert("RGB")
@@ -46,13 +64,13 @@ def make_comparison():
         font_sub = ImageFont.load_default()
         
     # Title Left
-    draw.text((border + 8, 10), "GPUBench Real-Time Vulkan Pipeline (Crytek Sponza)", fill=(52, 211, 153), font=font_title)
-    draw.text((border + 8, 36), "Decoupled Work Lists / DGC (338.3 FPS, 2.96 ms @ 4K 3840x2160)", fill=(156, 163, 175), font=font_sub)
+    draw.text((border + 8, 10), title_left, fill=(52, 211, 153), font=font_title)
+    draw.text((border + 8, 36), sub_left, fill=(156, 163, 175), font=font_sub)
     
     # Title Right
     x_right = border * 2 + target_w_gpu
-    draw.text((x_right + 8, 10), "Blender Cycles Reference Render (Crytek Sponza)", fill=(96, 165, 250), font=font_title)
-    draw.text((x_right + 8, 36), "Ground-Truth Offline Path Tracer (Full Multi-Bounce GI, Denoised)", fill=(156, 163, 175), font=font_sub)
+    draw.text((x_right + 8, 10), title_right, fill=(96, 165, 250), font=font_title)
+    draw.text((x_right + 8, 36), sub_right, fill=(156, 163, 175), font=font_sub)
     
     # Paste images
     comp.paste(im_gpu_s, (border, header_h + border))
@@ -66,7 +84,10 @@ def make_comparison():
     
     artifact_dir = os.environ.get("ARTIFACT_DIR")
     if artifact_dir and os.path.isdir(artifact_dir):
-        comp.save(os.path.join(artifact_dir, "render_blender_comparison.png"), quality=95)
+        comp.save(os.path.join(artifact_dir, os.path.basename(out_path)), quality=95)
 
 if __name__ == "__main__":
-    make_comparison()
+    parser = argparse.ArgumentParser(description="Generate side-by-side comparison with Blender Cycles ground truth.")
+    parser.add_argument("-s", "--scenario", default="forest", help="Scenario name (forest or indoor)")
+    args = parser.parse_args()
+    make_comparison(args.scenario)

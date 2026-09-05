@@ -49,6 +49,7 @@ layout(constant_id = 0) const uint SPECIALIZED_ARCHETYPE = 0xFFFFFFFFu;
 const uint SCENE_SHOWROOM_STUDIO = 0u;
 const uint SCENE_OUTDOOR_TERRAIN = 1u;
 const uint SCENE_INDOOR_ATRIUM   = 2u;
+const uint SCENE_AAA_FOREST       = 3u;
 
 // Indoor Atrium Primitives
 const uint PRIM_KNOT_PAINT_END  = 1536u;
@@ -157,7 +158,15 @@ float rustFBM3D(vec3 p) {
 
 void getCamera(uint sceneType, out vec3 camPos, out vec3 camForward, out vec3 camRight, out vec3 camUp, out float fov) {
     if (pc.isGltf != 0u) {
-        if (sceneType == SCENE_INDOOR_ATRIUM) {
+        if (sceneType == SCENE_AAA_FOREST) {
+            // AAA Open-World Alpine Forest: Overlook looking down the river canyon towards the timber bridge
+            camPos = vec3(-35.0, -50.0, 20.0);
+            camForward = normalize(vec3(45.0, 180.0, -14.0));
+            camRight = normalize(cross(camForward, vec3(0.0, 0.0, 1.0)));
+            camUp = cross(camRight, camForward);
+            fov = 0.52;
+            return;
+        } else if (sceneType == SCENE_INDOOR_ATRIUM) {
             // Sponza Colonnade Nave Grand View
             camPos = vec3(-1150.0, 280.0, -40.0);
             camForward = normalize(vec3(1.0, 0.02, 0.0));
@@ -226,6 +235,8 @@ vec3 evalAtriumEnvironment(vec3 dir) {
     return baseWall + vec3(1.0, 0.95, 0.85) * cs;
 }
 
+#ifndef EVAL_OUTDOOR_SKY_DEFINED
+#define EVAL_OUTDOOR_SKY_DEFINED
 vec3 evalOutdoorSky(vec3 dir) {
     vec3 sunDir = normalize(vec3(0.45, 0.35, 0.82));
     float sunDot = max(dot(dir, sunDir), 0.0);
@@ -238,6 +249,7 @@ vec3 evalOutdoorSky(vec3 dir) {
     sky += vec3(1.0, 0.85, 0.60) * pow(sunDot, 12.0) * 0.8;
     return sky;
 }
+#endif
 
 vec3 evalSky(uint sceneType, vec3 dir) {
     if (sceneType == SCENE_OUTDOOR_TERRAIN) {
@@ -588,6 +600,10 @@ vec3 evalMaterialBSDF(uint sceneType, uint matId, vec3 normal, vec3 inDir, vec3 
         for (int l = 0; l < 4; ++l) {
             vec3 lightDir = normalize(SCENE_LIGHTS[l].dir);
             vec3 lightCol = SCENE_LIGHTS[l].color * SCENE_LIGHTS[l].intensity;
+            if (l == 0 && archetype != 2) {
+                float shadowVis = traceAreaShadow(hitPos, normal, lightDir, 25.0, 0.045, rng, 4);
+                lightCol *= shadowVis;
+            }
             vec3 halfVec = normalize(viewDir + lightDir);
             float NdotL = max(dot(normal, lightDir), 0.0);
             float NdotH = max(dot(normal, halfVec), 0.0);
@@ -676,6 +692,8 @@ vec3 evalMaterialBSDF(uint sceneType, uint matId, vec3 normal, vec3 inDir, vec3 
                     // Neutral Studio / Atrium Floor
                     vec3 floorBase = vec3(0.24, 0.25, 0.28);
                     float floorOcc = computeFloorOcclusion(hitPos);
+                    float rtao = computeRTAO(hitPos, normal, rng, 4, 15.0);
+                    floorOcc *= rtao;
                     float wallFactor = smoothstep(2.0, 6.0, hitPos.y);
                     float wallAtten = mix(1.0, 0.85, wallFactor);
                     float effectiveNdotL = NdotL * ((l == 0) ? floorOcc : clamp(floorOcc * 1.15, 0.0, 1.0)) * wallAtten;
@@ -721,13 +739,29 @@ vec3 evalMaterialBSDF(uint sceneType, uint matId, vec3 normal, vec3 inDir, vec3 
         } else if (archetype == 1) {
             totalRadiance += envRefl * 0.25 * pow(clamp(1.0 - NdotV, 0.0, 1.0), 5.0);
         } else if (archetype == 2) {
-            vec3 cabinInterior = vec3(0.025, 0.028, 0.032);
             vec3 refrDir = refract(inDir, normal, 1.0 / 1.52);
             if (length(refrDir) < 0.01) refrDir = reflDir;
-            vec3 envRefr = evalStudioEnvironment(refrDir);
-            vec3 glassInterior = mix(cabinInterior, envRefr, 0.35) * vec3(0.90, 0.94, 0.96);
+            rayQueryEXT glassQuery;
+            rayQueryInitializeEXT(glassQuery, topLevelAS, gl_RayFlagsOpaqueEXT, 0xFF, hitPos + refrDir * 0.02, 0.001, refrDir, 25.0);
+            while (rayQueryProceedEXT(glassQuery)) {}
+
+            vec3 transmittedCol;
+            if (rayQueryGetIntersectionTypeEXT(glassQuery, true) != 0) {
+                uint rPrim = rayQueryGetIntersectionPrimitiveIndexEXT(glassQuery, true);
+                if (rPrim < PRIM_KNOT_PAINT_END) transmittedCol = vec3(0.68, 0.01, 0.02);
+                else if (rPrim < PRIM_KNOT_JADE_END) transmittedCol = vec3(0.06, 0.75, 0.65);
+                else if (rPrim < PRIM_KNOT_CHROME_END) transmittedCol = vec3(0.85, 0.85, 0.88);
+                else if (rPrim < PRIM_KNOT_VELVET_END) transmittedCol = vec3(0.60, 0.02, 0.42);
+                else if (rPrim < PRIM_KNOT_RUST_END) transmittedCol = vec3(0.80, 0.35, 0.12);
+                else if (rPrim < PRIM_SPHERE_END) transmittedCol = vec3(0.06, 0.75, 0.65);
+                else if (rPrim < PRIM_PEDESTAL_END) transmittedCol = vec3(0.90, 0.75, 0.30);
+                else if (rPrim < PRIM_SUZANNE_END) transmittedCol = vec3(0.75, 0.80, 0.85);
+                else transmittedCol = vec3(0.24, 0.25, 0.28);
+            } else {
+                transmittedCol = evalStudioEnvironment(refrDir);
+            }
             float F_glass = 0.04 + 0.96 * pow(clamp(1.0 - NdotV, 0.0, 1.0), 5.0);
-            totalRadiance = mix(glassInterior, envRefl, F_glass) + totalRadiance;
+            totalRadiance = mix(transmittedCol * vec3(0.90, 0.94, 0.96), envRefl, F_glass) + totalRadiance;
         } else if (archetype == 3) {
             totalRadiance += envRefl * 0.15 * pow(clamp(1.0 - NdotV, 0.0, 1.0), 3.0);
         } else if (archetype == 6) {
@@ -789,7 +823,7 @@ vec3 evalMaterialBSDF(uint sceneType, uint matId, vec3 normal, vec3 inDir, vec3 
 void main() {
     uint threadIdx = gl_GlobalInvocationID.x;
     uint count = worklist.queueCounters[Q_SNAPSHOT_IDX(pc.materialId)];
-    if (threadIdx >= count) return;
+    if (threadIdx >= count || threadIdx >= pc.queueCapacity) return;
 
     if (threadIdx == 0) {
         atomicAdd(results.totalHits, count);
@@ -822,7 +856,7 @@ void main() {
             vec3 dummyNorm = ((threadIdx % 2) == 0) ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
             vec4 dummyTan = vec4(1.0, 0.0, 0.0, 1.0);
             vec2 dummyUv = vec2(float(px_u) / float(pc.width), float(py_u) / float(pc.height));
-            shadedColor = evaluateGltfPbr(mat, dummyPos, dummyNorm, dummyNorm, dummyTan, dummyUv, inDir, pc.sceneType, false);
+            shadedColor = evaluateGltfPbr(mat, dummyPos, dummyNorm, dummyNorm, dummyTan, dummyUv, inDir, pc.sceneType, false, rngState);
         } else {
             vec3 hitPos = vec3(float(px_u) * 0.01, float(py_u) * 0.01, 1.5);
             vec3 normal = ((threadIdx % 2) == 0) ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
@@ -859,7 +893,7 @@ void main() {
 
             uint matId = triMatBuf.triangleMats[primId];
             GltfMaterialGpu mat = matBuf.materials[matId];
-            shadedColor = evaluateGltfPbr(mat, interpHitPos, geomNormal, smoothNormal, tangent, uv, inDir, pc.sceneType);
+            shadedColor = evaluateGltfPbr(mat, interpHitPos, geomNormal, smoothNormal, tangent, uv, inDir, pc.sceneType, rngState);
         } else {
             vec3 normal = computeSmoothNormal(pc.sceneType, primId, hitPos, inDir);
             shadedColor = evalMaterialBSDF(pc.sceneType, pc.materialId, normal, inDir, hitPos, rngState);

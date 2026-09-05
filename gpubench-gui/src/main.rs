@@ -1757,7 +1757,7 @@ fn find_renders_file(relative: &str) -> Option<String> {
 
 fn load_parity_profile() -> Option<(ParityProfile, String)> {
     let mut candidates = Vec::new();
-    for tag in &["showroom", "indoor", "outdoor", "pathtracing"] {
+    for tag in &["showroom", "indoor", "outdoor", "forest", "pathtracing"] {
         let rel_path = format!("renders/render_{}_profile.json", tag);
         if let Some(actual_path) = find_renders_file(&rel_path) {
             let mtime = std::fs::metadata(&actual_path)

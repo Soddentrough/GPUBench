@@ -206,11 +206,21 @@ void BenchmarkRunner::discoverBenchmarks() {
     outdoor->SetBounceDepth(bounceDepth);
     if (dumpRenders) outdoor->SetDumpRenders(true);
     benchmarks.push_back(std::move(outdoor));
+
+    auto forest = std::make_unique<RaySchedulingBench>(RaySchedulingBench::SceneType::AAAOutdoorForest);
+    forest->SetBounceDepth(bounceDepth);
+    if (dumpRenders) forest->SetDumpRenders(true);
+    benchmarks.push_back(std::move(forest));
   } else if (sceneName == "outdoor") {
     auto outdoor = std::make_unique<RaySchedulingBench>(RaySchedulingBench::SceneType::OutdoorLandscape);
     outdoor->SetBounceDepth(bounceDepth);
     if (dumpRenders) outdoor->SetDumpRenders(true);
     benchmarks.push_back(std::move(outdoor));
+  } else if (sceneName == "forest" || sceneName == "aaa_forest") {
+    auto forest = std::make_unique<RaySchedulingBench>(RaySchedulingBench::SceneType::AAAOutdoorForest);
+    forest->SetBounceDepth(bounceDepth);
+    if (dumpRenders) forest->SetDumpRenders(true);
+    benchmarks.push_back(std::move(forest));
   } else if (sceneName == "showroom") {
     auto showroom = std::make_unique<RaySchedulingBench>(RaySchedulingBench::SceneType::Showroom);
     showroom->SetBounceDepth(bounceDepth);

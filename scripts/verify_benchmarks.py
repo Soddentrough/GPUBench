@@ -460,7 +460,7 @@ def main():
     parser.add_argument("-k", "--backends", type=str, default="opencl,rocm,vulkan", help="Backends to benchmark")
     parser.add_argument("-b", "--benchmarks", type=str, default="fp64,fp32,fp16,int8,ray_scheduling", help="Benchmarks to run")
     parser.add_argument("-r", "--resolution", type=str, default=None, help="Resolution preset (e.g. 1080p, 4k)")
-    parser.add_argument("-s", "--scene", type=str, default=None, help="Scene preset (showroom, indoor, outdoor, all)")
+    parser.add_argument("-s", "--scene", type=str, default=None, help="Scene preset (showroom, indoor, outdoor, forest, all)")
     parser.add_argument("--binary", type=str, default="./build/gpubench", help="Path to gpubench binary")
     parser.add_argument("--input", type=str, default=None, help="Evaluate pre-existing JSON result file instead of running")
     parser.add_argument("--verify-rpm", nargs="?", const="AUTO", default=None, help="Validate RPM package (pass path or omit to auto-discover)")
