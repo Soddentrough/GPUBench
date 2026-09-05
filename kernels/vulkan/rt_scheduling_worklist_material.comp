@@ -40,8 +40,6 @@ layout(push_constant) uniform PushConstants {
     uint isGltf;          // 1 if glTF PBR scene, 0 if procedural
 } pc;
 
-layout(constant_id = 0) const uint SPECIALIZED_ARCHETYPE = 0xFFFFFFFFu;
-
 // Scene Type Constants
 const uint SCENE_SHOWROOM_STUDIO = 0u;
 const uint SCENE_OUTDOOR_TERRAIN = 1u;

@@ -173,6 +173,30 @@ bool GltfScene::loadFromFile(const std::string& filepath, std::string& outError)
         mat.ior = srcMat.ior.ior;
       }
 
+      // Map glTF materials to the 8 production AAA BSDF archetypes
+      std::string matName = srcMat.name ? srcMat.name : "";
+      std::transform(matName.begin(), matName.end(), matName.begin(), ::tolower);
+
+      if (mat.transmissionFactor > 0.05f || matName.find("glass") != std::string::npos || matName.find("window") != std::string::npos) {
+        mat.archetype = 2; // Dielectric Transmission / Glass
+      } else if (matName.find("fabric") != std::string::npos || matName.find("curtain") != std::string::npos || matName.find("banner") != std::string::npos || matName.find("cloth") != std::string::npos) {
+        mat.archetype = 3; // Anisotropic Velvet / Fabric Sheen
+      } else if (mat.alphaMode == 1 || matName.find("leaf") != std::string::npos || matName.find("leaves") != std::string::npos || matName.find("plant") != std::string::npos || matName.find("ivy") != std::string::npos || matName.find("flora") != std::string::npos) {
+        mat.archetype = 7; // Alpha-Tested Foliage / Cutouts
+      } else if (matName.find("lion") != std::string::npos || matName.find("statue") != std::string::npos || matName.find("column") != std::string::npos || matName.find("pillar") != std::string::npos || matName.find("arch") != std::string::npos) {
+        mat.archetype = 1; // Subsurface Scattering (Marble / Stone)
+      } else if (matName.find("paint") != std::string::npos || matName.find("body") != std::string::npos || matName.find("hood") != std::string::npos || matName.find("car") != std::string::npos) {
+        mat.archetype = 6; // Clearcoat Automotive Paint
+      } else if (matName.find("floor") != std::string::npos || matName.find("terrazzo") != std::string::npos || matName.find("ground") != std::string::npos || matName.find("pavement") != std::string::npos) {
+        mat.archetype = 5; // Polished Architectural Stone / Terrazzo
+      } else if (matName.find("wall") != std::string::npos || matName.find("rust") != std::string::npos || matName.find("roof") != std::string::npos || matName.find("brick") != std::string::npos || matName.find("wood") != std::string::npos) {
+        mat.archetype = 4; // Weathered Multi-Layered Rust / Stone
+      } else if (mat.metallicFactor > 0.5f || matName.find("metal") != std::string::npos || matName.find("brass") != std::string::npos || matName.find("gold") != std::string::npos || matName.find("chain") != std::string::npos) {
+        mat.archetype = 0; // Standard Conductor PBR
+      } else {
+        mat.archetype = static_cast<uint32_t>(m % 8); // Spread unclassified materials across 0..7
+      }
+
       materials_.push_back(mat);
     }
   }

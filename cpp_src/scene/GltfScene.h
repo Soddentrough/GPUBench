@@ -27,6 +27,10 @@ struct alignas(16) GltfMaterial {
   float normalScale{1.0f};                           // 4B  (offset 68)
   float alphaCutoff{0.5f};                           // 4B  (offset 72)
   uint32_t alphaMode{0};                             // 4B  (offset 76)
+  uint32_t archetype{0};                             // 4B  (offset 80)
+  uint32_t extraParam1{0};                           // 4B  (offset 84)
+  uint32_t extraParam2{0};                           // 4B  (offset 88)
+  uint32_t pad1{0};                                  // 4B  (offset 92)
 };
 
 struct GltfTexture {
