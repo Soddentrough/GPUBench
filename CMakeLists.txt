@@ -271,6 +271,7 @@ target_include_directories(gpubench PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/cpp_src
     ${CMAKE_CURRENT_SOURCE_DIR}/cpp_src/third_party
     ${CMAKE_CURRENT_SOURCE_DIR}/external
+    ${CMAKE_CURRENT_SOURCE_DIR}/external/vulkan/Include
     ${CMAKE_CURRENT_BINARY_DIR}/cpp_src
 )
 
@@ -278,6 +279,7 @@ target_include_directories(gpubench_lib PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/cpp_src
     ${CMAKE_CURRENT_SOURCE_DIR}/cpp_src/third_party
     ${CMAKE_CURRENT_SOURCE_DIR}/external
+    ${CMAKE_CURRENT_SOURCE_DIR}/external/vulkan/Include
     ${CMAKE_CURRENT_BINARY_DIR}/cpp_src
 )
 
@@ -361,8 +363,15 @@ add_custom_command(TARGET gpubench POST_BUILD
 # GPUBENCH_REQUIRE_GUI (default ON): require cargo for the Rust GUI build.
 # Set -DGPUBENCH_REQUIRE_GUI=OFF to build/package a CLI-only release without cargo.
 option(GPUBENCH_REQUIRE_GUI "Require cargo to build the Rust GUI (disable for CLI-only builds)" ON)
+option(GPUBENCH_BUILD_RUST_GUI "Build Rust GUI and workspace via Cargo" ON)
+
+# If CMake is being invoked from inside cargo (e.g. gpubench-sys build.rs), disable recursive cargo invocation
+if(DEFINED ENV{CARGO_PKG_NAME} OR DEFINED ENV{CARGO_MANIFEST_DIR})
+    set(GPUBENCH_BUILD_RUST_GUI OFF)
+endif()
+
 find_program(CARGO_EXECUTABLE cargo)
-if(CARGO_EXECUTABLE)
+if(CARGO_EXECUTABLE AND GPUBENCH_BUILD_RUST_GUI)
     message(STATUS "Cargo found: ${CARGO_EXECUTABLE}. Configuring Rust GUI build.")
     
     # Custom target to compile Rust workspace
@@ -376,15 +385,25 @@ if(CARGO_EXECUTABLE)
     add_dependencies(gpubench gpubench_rust_gui)
 
     # Install the Rust GUI binary (only when the GUI is actually built)
-    if(GPUBENCH_REQUIRE_GUI OR CARGO_EXECUTABLE)
-        if(WIN32)
-            install(PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/target/release/gpubench-gui.exe"
-                    DESTINATION bin
-                    OPTIONAL)
-        else()
-            install(PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/target/release/gpubench-gui"
-                    DESTINATION bin)
-        endif()
+    if(WIN32)
+        install(PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/target/release/gpubench-gui.exe"
+                DESTINATION bin
+                OPTIONAL)
+    else()
+        install(PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/target/release/gpubench-gui"
+                DESTINATION bin
+                OPTIONAL)
+    endif()
+elseif(NOT GPUBENCH_BUILD_RUST_GUI)
+    message(STATUS "GPUBENCH_BUILD_RUST_GUI is OFF (or invoked from cargo). Skipping gpubench_rust_gui target.")
+    if(WIN32)
+        install(PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/target/release/gpubench-gui.exe"
+                DESTINATION bin
+                OPTIONAL)
+    else()
+        install(PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/target/release/gpubench-gui"
+                DESTINATION bin
+                OPTIONAL)
     endif()
 else()
     if(GPUBENCH_REQUIRE_GUI)

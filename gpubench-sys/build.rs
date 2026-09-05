@@ -1,5 +1,7 @@
 fn main() {
     let dst = cmake::Config::new("..")
+        .define("GPUBENCH_BUILD_RUST_GUI", "OFF")
+        .define("GPUBENCH_REQUIRE_GUI", "OFF")
         .build_target("gpubench_lib")
         .build();
 
@@ -26,10 +28,7 @@ fn main() {
         .file("src/bridge.cpp")
         .include("../cpp_src")
         .include("../external")
-        .define("HAVE_VULKAN", None)
-        .define("HAVE_OPENCL", None)
-        .define("HAVE_ROCM", None)
-        .define("__HIP_PLATFORM_AMD__", None)
+        .include("../external/vulkan/Include")
         .flag_if_supported("-std=c++17")
         .flag_if_supported("-Wno-maybe-uninitialized")
         .compile("gpubench-cxx");

@@ -884,6 +884,7 @@ pub fn main() -> iced::Result {
             size: iced::Size::new(1280.0, 840.0),
             min_size: Some(iced::Size::new(1080.0, 720.0)),
             icon: app_icon,
+            #[cfg(target_os = "linux")]
             platform_specific: iced::window::settings::PlatformSpecific {
                 application_id: String::from("io.github.soddentrough.gpubench"),
             },

@@ -296,6 +296,7 @@ const std::vector<DeviceInfo> &VulkanContext::getDevices() const {
           hasExt(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) &&
           hasExt(VK_KHR_RAY_QUERY_EXTENSION_NAME);
 
+#if defined(VK_EXT_RAY_TRACING_INVOCATION_REORDER_EXTENSION_NAME)
       VkPhysicalDeviceRayTracingInvocationReorderFeaturesEXT serFeatures{
           VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_INVOCATION_REORDER_FEATURES_EXT};
       bool hasSERExt = hasExt(VK_EXT_RAY_TRACING_INVOCATION_REORDER_EXTENSION_NAME) ||
@@ -309,6 +310,23 @@ const std::vector<DeviceInfo> &VulkanContext::getDevices() const {
       } else {
         info.serSupported = false;
       }
+#elif defined(VK_NV_RAY_TRACING_INVOCATION_REORDER_EXTENSION_NAME)
+      VkPhysicalDeviceRayTracingInvocationReorderFeaturesNV serFeatures{
+          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_INVOCATION_REORDER_FEATURES_NV};
+      bool hasSERExt = hasExt(VK_NV_RAY_TRACING_INVOCATION_REORDER_EXTENSION_NAME);
+      if (hasSERExt) {
+        VkPhysicalDeviceFeatures2 f2_ser{};
+        f2_ser.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+        f2_ser.pNext = &serFeatures;
+        vkGetPhysicalDeviceFeatures2(device, &f2_ser);
+        info.serSupported = (serFeatures.rayTracingInvocationReorder == VK_TRUE);
+      } else {
+        info.serSupported = false;
+      }
+#else
+      info.serSupported = hasExt("VK_EXT_ray_tracing_invocation_reorder") ||
+                          hasExt("VK_NV_ray_tracing_invocation_reorder");
+#endif
       info.workGraphsSupported = hasExt("VK_AMDX_shader_enqueue") || hasExt("VK_KHR_work_graphs");
 
       deviceInfos.push_back(info);
@@ -436,6 +454,7 @@ DeviceInfo VulkanContext::getCurrentDeviceInfo() const {
       hasExt(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) &&
       hasExt(VK_KHR_RAY_QUERY_EXTENSION_NAME);
 
+#if defined(VK_EXT_RAY_TRACING_INVOCATION_REORDER_EXTENSION_NAME)
   VkPhysicalDeviceRayTracingInvocationReorderFeaturesEXT serFeatures{
       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_INVOCATION_REORDER_FEATURES_EXT};
   bool hasSERExt = hasExt(VK_EXT_RAY_TRACING_INVOCATION_REORDER_EXTENSION_NAME) ||
@@ -449,6 +468,23 @@ DeviceInfo VulkanContext::getCurrentDeviceInfo() const {
   } else {
     info.serSupported = false;
   }
+#elif defined(VK_NV_RAY_TRACING_INVOCATION_REORDER_EXTENSION_NAME)
+  VkPhysicalDeviceRayTracingInvocationReorderFeaturesNV serFeatures{
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_INVOCATION_REORDER_FEATURES_NV};
+  bool hasSERExt = hasExt(VK_NV_RAY_TRACING_INVOCATION_REORDER_EXTENSION_NAME);
+  if (hasSERExt) {
+    VkPhysicalDeviceFeatures2 f2_ser{};
+    f2_ser.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    f2_ser.pNext = &serFeatures;
+    vkGetPhysicalDeviceFeatures2(physicalDevice, &f2_ser);
+    info.serSupported = (serFeatures.rayTracingInvocationReorder == VK_TRUE);
+  } else {
+    info.serSupported = false;
+  }
+#else
+  info.serSupported = hasExt("VK_EXT_ray_tracing_invocation_reorder") ||
+                      hasExt("VK_NV_ray_tracing_invocation_reorder");
+#endif
   info.workGraphsSupported = hasExt("VK_AMDX_shader_enqueue") || hasExt("VK_KHR_work_graphs");
 
   return info;
