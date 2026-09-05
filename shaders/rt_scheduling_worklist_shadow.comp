@@ -11,8 +11,10 @@ layout(set = 0, binding = 1) buffer Results {
     float accumulatedLuminance;
 } results;
 
+#include "rt_scheduling_common.glsl"
+
 layout(set = 0, binding = 2) buffer WorkListBuffer {
-    uint queueCounters[32];
+    uint queueCounters[Q_HEADER_UINT_CAP];
     vec4 rayRecords[];
 } worklist;
 
@@ -93,7 +95,7 @@ vec3 computeSmoothNormal(uint sceneType, uint primId, vec3 hitPos, vec3 inDir, v
 
 void main() {
     uint threadIdx = gl_GlobalInvocationID.x;
-    uint count = worklist.queueCounters[pc.queueId + 16];
+    uint count = worklist.queueCounters[Q_SNAPSHOT_IDX(pc.queueId)];
     if (threadIdx >= count) return;
 
     if (threadIdx == 0) {

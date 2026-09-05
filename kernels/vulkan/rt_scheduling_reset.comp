@@ -2,8 +2,10 @@
 
 layout(local_size_x = 32) in;
 
+#include "rt_scheduling_common.glsl"
+
 layout(set = 0, binding = 0) buffer WorkListBuffer {
-    uint queueCounters[32];
+    uint queueCounters[Q_HEADER_UINT_CAP];
 } worklist;
 
 struct VkDispatchIndirectCommand {
@@ -18,10 +20,16 @@ layout(set = 0, binding = 1) buffer IndirectCommandsBuffer {
 
 void main() {
     uint id = gl_LocalInvocationID.x;
-    if (id < 32) {
-        worklist.queueCounters[id] = 0;
-        indirectCmds.commands[id].x = 0;
-        indirectCmds.commands[id].y = 1;
-        indirectCmds.commands[id].z = 1;
+    if (id < 16u) {
+        worklist.queueCounters[Q_COUNTER_IDX(id)] = 0u;
+        worklist.queueCounters[Q_SNAPSHOT_IDX(id)] = 0u;
+    }
+    if (id < 8u) {
+        worklist.queueCounters[Q_PREFIX_IDX(id)] = 0u;
+    }
+    if (id < 32u) {
+        indirectCmds.commands[id].x = 0u;
+        indirectCmds.commands[id].y = 1u;
+        indirectCmds.commands[id].z = 1u;
     }
 }

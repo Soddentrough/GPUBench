@@ -14,8 +14,10 @@ layout(set = 0, binding = 1) buffer Results {
     float accumulatedLuminance;
 } results;
 
+#include "rt_scheduling_common.glsl"
+
 layout(set = 0, binding = 2) buffer WorkListBuffer {
-    uint queueCounters[32];
+    uint queueCounters[Q_HEADER_UINT_CAP];
     vec4 rayRecords[];
 } worklist;
 
@@ -57,9 +59,6 @@ layout(push_constant) uniform PushConstants {
     uint isGltf;          // 1 if glTF PBR scene, 0 if procedural
 } pc;
 
-shared vec4 ldsPayload[32];
-shared uint ldsVramIndex[32];
-shared uint ldsOffsets[9];
 shared uint ldsBaseSlot[8];
 
 
@@ -601,24 +600,12 @@ void main() {
     uint c6 = subgroupBallotBitCount(b6);
     uint c7 = subgroupBallotBitCount(b7);
 
-    if (gl_LocalInvocationID.x == 0u) {
-        ldsOffsets[0] = 0u;
-        ldsOffsets[1] = c0;
-        ldsOffsets[2] = c0 + c1;
-        ldsOffsets[3] = c0 + c1 + c2;
-        ldsOffsets[4] = c0 + c1 + c2 + c3;
-        ldsOffsets[5] = c0 + c1 + c2 + c3 + c4;
-        ldsOffsets[6] = c0 + c1 + c2 + c3 + c4 + c5;
-        ldsOffsets[7] = c0 + c1 + c2 + c3 + c4 + c5 + c6;
-        ldsOffsets[8] = c0 + c1 + c2 + c3 + c4 + c5 + c6 + c7;
-    }
-
     if (gl_LocalInvocationID.x < 8u) {
         uint q = gl_LocalInvocationID.x;
         uint cnt = (q == 0u ? c0 : (q == 1u ? c1 : (q == 2u ? c2 : (q == 3u ? c3 : (q == 4u ? c4 : (q == 5u ? c5 : (q == 6u ? c6 : c7)))))));
         uint base = 0u;
         if (cnt > 0u) {
-            base = atomicAdd(worklist.queueCounters[q], cnt);
+            base = atomicAdd(worklist.queueCounters[Q_COUNTER_IDX(q)], cnt);
         }
         ldsBaseSlot[q] = base;
     }
@@ -628,19 +615,9 @@ void main() {
         uint q = assignedQueue;
         uvec4 myBallot = (q == 0u ? b0 : (q == 1u ? b1 : (q == 2u ? b2 : (q == 3u ? b3 : (q == 4u ? b4 : (q == 5u ? b5 : (q == 6u ? b6 : b7)))))));
         uint rankInQueue = subgroupBallotExclusiveBitCount(myBallot);
-        uint ldsSlot = ldsOffsets[q] + rankInQueue;
         uint vramSlot = ldsBaseSlot[q] + rankInQueue;
-
-        ldsPayload[ldsSlot] = payload0;
-        ldsVramIndex[ldsSlot] = (vramSlot < pc.queueCapacity) ? (q * pc.queueCapacity + vramSlot) : 0xFFFFFFFFu;
-    }
-    barrier();
-
-    uint totalRaysInWave = ldsOffsets[8];
-    if (gl_LocalInvocationID.x < totalRaysInWave) {
-        uint targetVram = ldsVramIndex[gl_LocalInvocationID.x];
-        if (targetVram != 0xFFFFFFFFu) {
-            worklist.rayRecords[targetVram] = ldsPayload[gl_LocalInvocationID.x];
+        if (vramSlot < pc.queueCapacity) {
+            worklist.rayRecords[q * pc.queueCapacity + vramSlot] = payload0;
         }
     }
 

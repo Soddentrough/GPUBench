@@ -407,12 +407,14 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
   fbTraditional = context->createBuffer(rayCount * sizeof(float) * 4);
   fbWorkList = context->createBuffer(rayCount * sizeof(float) * 4);
 
-  // WorkList storage buffer: 32 counters (128B) + 8 * maxCapacity * 16B records
+  // WorkList storage buffer: 4096 uint header (16KB) with 256B strided counters + 8 * maxCapacity * 16B records
+  constexpr size_t kWorkListHeaderUints = 4096;
+  constexpr size_t kWorkListCounterStride = 64;
   uint32_t maxCapacity = std::max(rayCount, materialCapacity);
-  size_t workListSize = sizeof(uint32_t) * 32 + (size_t)8 * maxCapacity * sizeof(float) * 4;
+  size_t workListSize = sizeof(uint32_t) * kWorkListHeaderUints + (size_t)8 * maxCapacity * sizeof(float) * 4;
   workListBuffer = context->createBuffer(workListSize);
-  uint32_t initialCounters[32] = {0};
-  context->writeBuffer(workListBuffer, 0, sizeof(initialCounters), initialCounters);
+  std::vector<uint32_t> initialCounters(kWorkListHeaderUints, 0);
+  context->writeBuffer(workListBuffer, 0, initialCounters.size() * sizeof(uint32_t), initialCounters.data());
 
   // Indirect dispatch commands: 32 * VkDispatchIndirectCommand (384B)
   size_t indirectSize = sizeof(uint32_t) * 3 * 32;
@@ -659,26 +661,28 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
       uint32_t height;
       uint32_t sceneType;
       uint32_t isGltf;
-    } pcMat{m, materialCapacity, dumpRenders ? 1u : 0u, renderWidth, renderHeight, (sceneType == SceneType::OutdoorLandscape) ? 1u : ((sceneType == SceneType::IndoorAtrium) ? 2u : 0u), isGltf ? 1u : 0u};
+      uint32_t mode;
+    } pcMat{m, materialCapacity, dumpRenders ? 1u : 0u, renderWidth, renderHeight, (sceneType == SceneType::OutdoorLandscape) ? 1u : ((sceneType == SceneType::IndoorAtrium) ? 2u : 0u), isGltf ? 1u : 0u, 0u};
     std::vector<uint8_t> pcData(sizeof(pcMat));
     std::memcpy(pcData.data(), &pcMat, sizeof(pcMat));
     materialBatches.push_back({m * sizeof(uint32_t) * 3, pcData, kernelMaterialSpecialized[m]});
 
     pcMat.dumpRenders = 0u;
+    pcMat.mode = 1u;
     std::memcpy(pcData.data(), &pcMat, sizeof(pcMat));
     materialBatchesBreakdown.push_back({m * sizeof(uint32_t) * 3, pcData, kernelMaterialSpecialized[m]});
   }
 
   // Pre-initialize indirectBuffer commands and workList counters for isolated stage testing
   std::vector<uint32_t> initCmds(32 * 3, 0);
-  std::vector<uint32_t> initCounters(32, 0);
+  std::vector<uint32_t> initCounters(kWorkListHeaderUints, 0);
   uint32_t perQueue = rayCount / 8;
   for (uint32_t m = 0; m < 8; ++m) {
     initCmds[m * 3 + 0] = (perQueue + 31) / 32;
     initCmds[m * 3 + 1] = 1;
     initCmds[m * 3 + 2] = 1;
-    initCounters[m] = perQueue;
-    initCounters[m + 16] = perQueue;
+    initCounters[m * kWorkListCounterStride] = perQueue;
+    initCounters[(16 + m) * kWorkListCounterStride] = perQueue;
   }
   context->writeBuffer(indirectBuffer, 0, initCmds.size() * sizeof(uint32_t), initCmds.data());
   context->writeBuffer(workListBuffer, 0, initCounters.size() * sizeof(uint32_t), initCounters.data());
@@ -915,7 +919,8 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
         uint32_t height;
         uint32_t sceneType;
         uint32_t isGltf;
-      } pcMat{m, materialCapacity, dumpRenders ? 1u : 0u, renderWidth, renderHeight, sceneTypeVal, isGltfVal};
+        uint32_t mode;
+      } pcMat{m, materialCapacity, dumpRenders ? 1u : 0u, renderWidth, renderHeight, sceneTypeVal, isGltfVal, 0u};
       std::memcpy(materialBatches[m].pushConstants.data(), &pcMat, sizeof(pcMat));
     }
     struct {

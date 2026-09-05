@@ -14,8 +14,10 @@ layout(set = 0, binding = 1) buffer Results {
     float accumulatedLuminance;
 } results;
 
+#include "rt_scheduling_common.glsl"
+
 layout(set = 0, binding = 2) buffer WorkListBuffer {
-    uint queueCounters[32];
+    uint queueCounters[Q_HEADER_UINT_CAP];
     vec4 rayRecords[];
 } worklist;
 
@@ -205,19 +207,19 @@ void main() {
         if (gl_LocalInvocationID.x == 0u) {
             uint myOct = 0u;
             for (uint i = 1u; i < 8u; ++i) {
-                if (waveId >= worklist.queueCounters[24 + i]) {
+                if (waveId >= worklist.queueCounters[Q_PREFIX_IDX(i)]) {
                     myOct = i;
                 }
             }
             oct = myOct;
-            waveOffsetInOct = waveId - worklist.queueCounters[24 + myOct];
-            activeCount = min(worklist.queueCounters[myOct + 16], pc.maxQueueSize);
+            waveOffsetInOct = waveId - worklist.queueCounters[Q_PREFIX_IDX(myOct)];
+            activeCount = min(worklist.queueCounters[Q_SNAPSHOT_IDX(myOct)], pc.maxQueueSize);
         }
         oct = subgroupBroadcastFirst(oct);
         waveOffsetInOct = subgroupBroadcastFirst(waveOffsetInOct);
         activeCount = subgroupBroadcastFirst(activeCount);
     } else {
-        activeCount = min((pc.outQueue >= 32u) ? worklist.queueCounters[oct + 16] : worklist.queueCounters[oct], pc.maxQueueSize);
+        activeCount = min((pc.outQueue >= 32u) ? worklist.queueCounters[Q_SNAPSHOT_IDX(oct)] : worklist.queueCounters[Q_COUNTER_IDX(oct)], pc.maxQueueSize);
     }
 
     uint rayIdx = (BOUNCE_MODE == 2u) ? (waveOffsetInOct * 32u + gl_LocalInvocationID.x) : gl_GlobalInvocationID.x;
@@ -282,7 +284,7 @@ void main() {
             uint firstLane = subgroupBallotFindLSB(ballot);
             uint baseSlot = 0u;
             if (gl_SubgroupInvocationID == firstLane) {
-                baseSlot = atomicAdd(worklist.queueCounters[pc.outQueue], count);
+                baseSlot = atomicAdd(worklist.queueCounters[Q_COUNTER_IDX(pc.outQueue)], count);
             }
             baseSlot = subgroupBroadcast(baseSlot, firstLane);
             if (nextRayActive) {
