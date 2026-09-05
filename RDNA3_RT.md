@@ -426,20 +426,41 @@ All 8 unsupported configurations correctly diagnosed with technical rationale.
 
 ---
 
-## 11. Addendum: Validating the Megakernel Fallback
+## 11. Addendum: Architectural Synthesis & Divergence Trade-Off Analysis
 
-In a recent deep-dive investigation into why the `master` branch's Work Lists implementation performed significantly worse (~6.4 GHits/s) than the Traditional Megakernel (~13.4 GHits/s) on the RX 7900 XTX, we attempted to rewrite the scheduling pipeline to circumvent perceived bottlenecks. The goal was to expand the payload to 48-bytes (to avoid redundant geometry fetches) and use an SoA layout `for` loop to guarantee perfectly coalesced VRAM writes.
+An earlier revision observed the Traditional Megakernel outperforming Work Lists (~11.8–13.4 GHits/s vs. ~4.8–6.4 GHits/s) in the `Material Shading` benchmark on the RX 7900 XTX and prematurely concluded that *"Megakernels absorb divergence elegantly on RDNA 3."*
 
-The results strongly reinforced the architectural realities of RDNA 3:
+Subsequent source-level profiling and low-level disassembly disproved that conclusion, uncovering a critical benchmark parity flaw and clarifying the true microarchitectural trade-offs:
 
-1. **VRAM Bandwidth is a Hard Ceiling for DGC:** 
-   Expanding the payload to 48 bytes caused a severe performance drop (from 6.3 GHits/s down to 5.9 GHits/s). This validated the `master` branch's aggressive 16-byte quantization. The RDNA 3 memory subsystem (especially when queue spills cross the Infinity Fabric) simply cannot handle the bandwidth required to stream 48-byte payloads for millions of rays without stalling the CUs, completely negating any ALU savings from skipping geometry fetches.
+### 11.1. Root Cause: The glTF Material Shading Benchmark Disparity
+In the `sponza.glb` (Indoor Atrium) scene, the two implementations were executing entirely disparate workloads:
+- **Traditional Megakernel** (`rt_scheduling_traditional.comp`): Mode 4 explicitly called `evaluateGltfPbr(..., false)` with `enableShadows = false`. It used dummy registers, bypassing all vertex buffer reads, normal map texture sampling, and secondary ray query traversals. It was purely measuring isolated ALU arithmetic.
+- **Work Lists (DGC)** (`rt_scheduling_worklist_material.comp`): Mode 4 called `evaluateGltfPbr(...)` without specifying the shadow flag, defaulting to `enableShadows = true`. For every ray, it fetched 36 floats of vertex data from VRAM, unpacked barycentrics, sampled PBR textures, and **launched a full hardware ray query BVH traversal (`traceShadowRay`) across all 262,267 triangles in Sponza**.
 
-2. **Global Atomic Contention Remains Unsolved:**
-   Even when utilizing subgroup ballots or LDS compaction to reduce global atomics to one `atomicAdd` per wave, 96 CUs launching rays simultaneously still results in tens of thousands of wavefronts hammering the exact same 8 memory addresses (`queueCounters[0..7]`). This cross-CU L2 cache serialization is a fundamental hardware limitation that Stream Compaction cannot easily bypass.
+When benchmarked under true apples-to-apples workloads without shadow disparities:
+- **Procedural Showroom Studio** (8 heterogeneous BSDF archetypes): Work Lists delivers **11,928.25 MHits/s** vs. Megakernel's **10,031.10 MHits/s** (**1.19x speedup** on RX 7900 XTX / RDNA 3).
+- **Procedural Indoor Atrium** (on RDNA 4 / R9700): Work Lists achieves **16,414.84 MHits/s** vs. Megakernel's **3,422.78 MHits/s** (**4.80x speedup**).
 
-3. **Megakernels Absorb Divergence Elegantly:**
-   The ultimate finding is that the RDNA 3 architecture (with its massive VGPR files, Wave64/Dual-Issue ALUs, and excellent instruction caching) is uniquely suited to absorb execution divergence. The cost of a monolithic `switch` statement in the Traditional Megakernel is often vastly cheaper than the cost of atomic stream compaction, queue memory bandwidth, and indirect dispatch latency required by Work Lists.
+### 11.2. The Divergence Break-Even Equation
+Why does the Megakernel still win or tie in **Total Scene Render** (2,184 vs. 1,909 MRays/s) and **Directional Shadows** (3,192 vs. 2,302 MRays/s)?
 
-**Best Practice Recommendation:**
-For modern graphics engines targeting AMD RDNA 2/3 hardware, maintaining a Traditional Megakernel fallback is highly recommended. Work Lists / DGC (or native hardware reordering like Nvidia's SER) should be dynamically routed via Vendor ID checks for IHVs that benefit from coherency and have unified, fast L2 atomics. Trying to force a one-size-fits-all Work List scheduling architecture onto AMD hardware will likely result in regressions compared to a well-optimized Megakernel.
+The answer is not that RDNA 3 magically "absorbs" divergence without cost, but rather that ray compaction introduces a fixed non-ALU tax that must be amortized:
+$$\text{ALU Cycles Saved by Compaction} > \text{VRAM Payload Round-Trip} + \text{Atomic Contention} + \text{Pipeline Barriers} + \text{CP Dispatch Overhead}$$
+
+1. **Spatial Coherence of Primary Rays**:
+   Adjacent rays in an $8 \times 4$ pixel tile (Wave32) hit identical or adjacent geometry ~90% of the time. The effective number of divergent branches per wave is typically only **1.1 to 1.3**. The Megakernel experiences near-zero branch divergence penalty across 90% of waves.
+2. **Register File Bandwidth (40 TB/s) vs. VRAM Spilling (960 GB/s)**:
+   The Megakernel preserves all ray coordinates, hit attributes, and BSDF states in **VGPRs (Vector Registers)**. At 2.5 GHz across 96 CUs, aggregate on-chip VGPR bandwidth exceeds **40,000 GB/s** at zero latency.
+   Work Lists must spill ray payloads to `worklist.rayRecords` in VRAM. For 2.07M rays (1080p) or 8.29M rays (4K), writing and reading 16-byte payloads incurs tens of gigabytes per second of memory traffic and exposes memory controller queue latency.
+3. **Pipeline Synchronization & Command Processor Stalls**:
+   Work Lists requires a compaction dispatch, a pipeline barrier, an indirect argument resolve pass, another barrier, and multiple indirect dispatches. The Asynchronous Compute Engine (MEC) in the Command Processor must synchronize L2 caches before parsing indirect commands, introducing execution bubbles where CUs sit partially drained.
+
+### 11.3. Microarchitectural Differences: Why RDNA 4 Leans Further Toward DGC
+- **Monolithic Die vs. Chiplet IFOP**: RDNA 4 features a unified monolithic die with doubled L1/L2 interconnect bandwidth. On RDNA 3 (Navi 31), queue spills exceeding the GCD's 6MB L2 cache cross the Infinity Fabric On-Package (IFOP) to reach Infinity Cache / GDDR6, incurring ~140 ns round-trip latency.
+- **Hardware BVH Traversal (RAv3)**: RDNA 4 offloads BVH stack management to fixed-function hardware, drastically reducing shader VGPR footprint. RDNA 3 maintains the traversal stack in software registers, compounding register pressure in monolithic megakernels.
+- **Next-Gen Command Processor**: RDNA 4 incorporates lower-latency indirect dispatch execution, substantially shortening the dispatch bubble between compaction and shading.
+
+### 11.4. Production Best Practices & Architectural Guidance
+1. **Never Compact Coherent Rays**: Primary camera rays and directional shadow rays should be traced and shaded in monolithic single-pass kernels.
+2. **Apply Work Lists to Heavy Divergence**: Reserve stream compaction for secondary diffuse bounces, path tracing, and scenes with 8+ complex, compute-intensive material BSDFs where SIMD masking overhead exceeds 1,000+ ALU cycles per wave.
+3. **Quantize Payloads Aggressively**: Keep ray records $\le 16\text{ bytes}$ (packed octahedral directions, half-float positions) to fit within on-chip caches and avoid DRAM round-trips.
