@@ -27,6 +27,22 @@ std::string RaySchedulingBench::findModelPath(const std::string &modelName) cons
   return "";
 }
 
+std::string RaySchedulingBench::findScriptPath(const std::string &scriptName) const {
+  std::vector<std::string> searchPaths = {
+    "scripts/" + scriptName,
+    "../scripts/" + scriptName,
+    "/usr/share/gpubench/scripts/" + scriptName,
+    "/usr/local/share/gpubench/scripts/" + scriptName,
+    "share/gpubench/scripts/" + scriptName
+  };
+  for (const auto &p : searchPaths) {
+    if (std::filesystem::exists(p)) {
+      return p;
+    }
+  }
+  return "";
+}
+
 #ifdef HAVE_VULKAN
 void RaySchedulingBench::loadRTProcs(VkDevice device) {
   vkGetAccelerationStructureBuildSizesKHR_ptr =
@@ -1328,13 +1344,18 @@ void RaySchedulingBench::performVisualVerification() {
     gpubench::ImageExport::convertPPMtoPNG("renders/render_difference_heatmap.ppm", "renders/render_difference_heatmap.png", profileJson, "diff");
   }
 
-  // Automatically stitch comparison triptych and 2x grid
-  std::string triptychCmd = "python3 scripts/make_triptych.py " + tag + " 2>/dev/null";
-  (void)std::system(triptychCmd.c_str());
-  std::string gridCmd = "python3 scripts/make_triptych.py grid 2>/dev/null";
-  (void)std::system(gridCmd.c_str());
-  if (sceneType == SceneType::IndoorAtrium || sceneType == SceneType::Showroom) {
-    (void)std::system("python3 scripts/compare_with_blender.py 2>/dev/null");
+  // Automatically stitch comparison image and 2x grid
+  std::string scriptPath = findScriptPath("make_triptych.py");
+  if (!scriptPath.empty()) {
+    std::string triptychCmd = "python3 " + scriptPath + " " + tag;
+    (void)std::system(triptychCmd.c_str());
+    std::string gridCmd = "python3 " + scriptPath + " grid";
+    (void)std::system(gridCmd.c_str());
+  }
+  std::string blenderScript = findScriptPath("compare_with_blender.py");
+  if (!blenderScript.empty() && (sceneType == SceneType::IndoorAtrium || sceneType == SceneType::Showroom)) {
+    std::string blenderCmd = "python3 " + blenderScript;
+    (void)std::system(blenderCmd.c_str());
   }
 
   std::string sceneTitle = (sceneType == SceneType::OutdoorLandscape)

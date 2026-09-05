@@ -692,7 +692,7 @@ fn resolve_kernel_path() {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct GuiCliArgs {
     pub backend: Option<String>,
     pub groups: Vec<String>,
@@ -702,6 +702,21 @@ pub struct GuiCliArgs {
     pub dump_renders: bool,
     pub auto_start: bool,
     pub should_exit: bool,
+}
+
+impl Default for GuiCliArgs {
+    fn default() -> Self {
+        Self {
+            backend: None,
+            groups: Vec::new(),
+            benchmarks: Vec::new(),
+            devices: Vec::new(),
+            resolution: None,
+            dump_renders: true,
+            auto_start: false,
+            should_exit: false,
+        }
+    }
 }
 
 fn print_gui_help() {
@@ -716,7 +731,8 @@ fn print_gui_help() {
     println!("    -b, --benchmark <BENCHMARKS>  Specific benchmark(s) to enable (comma-separated or multiple flags)");
     println!("    -d, --device <DEVICES>        Target GPU device index(es) (e.g. 0, 1, or 0,1)");
     println!("    -r, --resolution <RES>        Resolution preset: auto, 1080p, 1440p, 4k");
-    println!("        --dump-renders, --dump    Enable visual verification and render output dumping");
+    println!("        --dump-renders, --dump    Enable visual verification and render output dumping (default: enabled)");
+    println!("        --no-dump-renders, --no-dump Disable visual verification and render output dumping");
     println!("        --auto-start, --run       Automatically start the benchmark suite immediately on launch");
     println!("    -h, --help                    Print help information and exit");
     println!("    -v, --version                 Print version information and exit\n");
@@ -739,7 +755,7 @@ fn print_gui_help() {
     println!("EXAMPLES:");
     println!("    gpubench-gui -k vulkan -g raytracing -d 1");
     println!("    gpubench-gui -g compute,memory,raster -r 1080p");
-    println!("    gpubench-gui -b rayscheduling --dump-renders --auto-start");
+    println!("    gpubench-gui -b rayscheduling --auto-start");
 }
 
 pub fn parse_gui_cli_args() -> GuiCliArgs {
@@ -761,6 +777,11 @@ pub fn parse_gui_cli_args_from(raw_args: &[String]) -> GuiCliArgs {
             println!("gpubench-gui {}", env!("CARGO_PKG_VERSION"));
             args.should_exit = true;
             return args;
+        }
+        if arg == "--no-dump-renders" || arg == "--no-dump" {
+            args.dump_renders = false;
+            i += 1;
+            continue;
         }
         if arg == "--dump-renders" || arg == "--dump" {
             args.dump_renders = true;
@@ -1734,23 +1755,31 @@ fn find_renders_file(relative: &str) -> Option<String> {
 }
 
 fn load_parity_profile() -> Option<(ParityProfile, String)> {
-    for tag in &["showroom", "indoor", "outdoor"] {
+    let mut candidates = Vec::new();
+    for tag in &["showroom", "indoor", "outdoor", "pathtracing"] {
         let rel_path = format!("renders/render_{}_profile.json", tag);
         if let Some(actual_path) = find_renders_file(&rel_path) {
-            match std::fs::read_to_string(&actual_path) {
-                Ok(content) => match serde_json::from_str::<ParityProfile>(&content) {
-                    Ok(profile) => return Some((profile, tag.to_string())),
-                    Err(e) => eprintln!("[GPUBench GUI] Error parsing profile JSON {}: {}", actual_path, e),
-                },
-                Err(e) => eprintln!("[GPUBench GUI] Error reading profile JSON {}: {}", actual_path, e),
-            }
+            let mtime = std::fs::metadata(&actual_path)
+                .and_then(|m| m.modified())
+                .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+            candidates.push((actual_path, tag.to_string(), mtime));
         }
     }
     if let Some(actual_path) = find_renders_file("renders/render_profile.json") {
-        if let Ok(content) = std::fs::read_to_string(&actual_path) {
-            if let Ok(profile) = serde_json::from_str::<ParityProfile>(&content) {
-                return Some((profile, "indoor".to_string()));
-            }
+        let mtime = std::fs::metadata(&actual_path)
+            .and_then(|m| m.modified())
+            .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+        candidates.push((actual_path, "indoor".to_string(), mtime));
+    }
+    candidates.sort_by(|a, b| b.2.cmp(&a.2));
+
+    for (actual_path, tag, _) in candidates {
+        match std::fs::read_to_string(&actual_path) {
+            Ok(content) => match serde_json::from_str::<ParityProfile>(&content) {
+                Ok(profile) => return Some((profile, tag)),
+                Err(e) => eprintln!("[GPUBench GUI] Error parsing profile JSON {}: {}", actual_path, e),
+            },
+            Err(e) => eprintln!("[GPUBench GUI] Error reading profile JSON {}: {}", actual_path, e),
         }
     }
     None
@@ -2071,7 +2100,7 @@ impl Application for GPUBenchApp {
                 selected_tests: initial_tests,
                 dump_renders,
                 selected_resolution,
-                parity_profile: load_parity_profile(),
+                parity_profile: None,
                 current_benchmark: String::from("Waiting to start..."),
                 current_devices_label: String::from(""),
                 monitored_devices: monitored,
@@ -2389,6 +2418,7 @@ impl Application for GPUBenchApp {
                     self.active_device_targets = target_devices;
                     self.results_map.clear();
                     self.completed_configs_count = 0;
+                    self.parity_profile = None;
 
                     // Estimate total expected configs across all targets
                     let mut gpu_configs = 0;
@@ -2505,7 +2535,15 @@ impl Application for GPUBenchApp {
                 let final_count = self.completed_configs_count.max(self.total_expected_configs);
                 self.completed_configs_count = final_count;
                 self.total_expected_configs = final_count;
-                self.parity_profile = load_parity_profile();
+                let ran_ray_scheduling = self.selected_tests.iter().any(|t| {
+                    let tl = t.to_lowercase();
+                    tl.contains("ray") || tl == "graphics" || tl == "all" || tl == "raytracing"
+                });
+                self.parity_profile = if ran_ray_scheduling && self.dump_renders {
+                    load_parity_profile()
+                } else {
+                    None
+                };
                 self.state = AppState::Complete { total_configs: final_count };
                 self.current_benchmark = String::from("Complete");
                 log_diagnostic("=== Benchmark suite completed successfully ===");
@@ -2734,7 +2772,9 @@ impl Application for GPUBenchApp {
                 let primary_diptych = format!("renders/render_{}_comparison.png", tag);
                 let primary = format!("renders/render_{}_comparison_triptych.png", tag);
                 let fallback = "renders/render_comparison_triptych.png";
-                if find_renders_file(grid).is_some() {
+                if tag != "all" && tag != "grid" && find_renders_file(&primary_diptych).is_some() {
+                    open_render_target(&primary_diptych);
+                } else if find_renders_file(grid).is_some() {
                     open_render_target(grid);
                 } else if find_renders_file(&primary_diptych).is_some() {
                     open_render_target(&primary_diptych);
@@ -3927,7 +3967,7 @@ impl Application for GPUBenchApp {
 
                         let inspector_buttons = row![
                             button(
-                                container(text("VIEW ARCHITECTURAL COMPARISON").size(11).style(color!(0xFFFFFF)))
+                                container(text("VIEW PERFORMANCE COMPARISON").size(11).style(color!(0xFFFFFF)))
                                     .padding([6, 12])
                                     .center_x()
                             )
@@ -3993,73 +4033,6 @@ impl Application for GPUBenchApp {
                                 ..Default::default()
                             })
                         ].spacing(2).width(Length::Fill)
-                    } else if find_renders_file("renders/render_comparison_grid.png").is_some()
-                        || find_renders_file("renders/render_comparison_triptych.png").is_some()
-                        || find_renders_file("renders/render_indoor_comparison.png").is_some()
-                    {
-                        let tag = "indoor".to_string();
-                        let inspector_buttons = row![
-                            button(
-                                container(text("VIEW ARCHITECTURAL COMPARISON").size(11).style(color!(0xFFFFFF)))
-                                    .padding([6, 12])
-                                    .center_x()
-                            )
-                            .on_press(Message::OpenTriptych(tag.clone()))
-                            .style(iced::theme::Button::Custom(Box::new(SleekPrimaryButton))),
-
-                            button(
-                                container(text("VIEW HEATMAP (10x)").size(11).style(color!(0xCBD5E1)))
-                                    .padding([6, 12])
-                                    .center_x()
-                            )
-                            .on_press(Message::OpenHeatmap(tag.clone()))
-                            .style(iced::theme::Button::Custom(Box::new(SleekSecondaryButton))),
-
-                            button(
-                                container(text("OPEN RENDERS FOLDER").size(11).style(color!(0x94A3B8)))
-                                    .padding([6, 12])
-                                    .center_x()
-                            )
-                            .on_press(Message::OpenRendersFolder)
-                            .style(iced::theme::Button::Custom(Box::new(SleekSecondaryButton))),
-                        ].spacing(8);
-
-                        column![
-                            container(
-                                column![
-                                    row![
-                                        container(Space::with_width(3)).height(14).style(|_t: &Theme| container::Appearance {
-                                            background: Some(Background::Color(color!(0x10B981))),
-                                            border: Border { radius: 2.0.into(), ..Default::default() },
-                                            ..Default::default()
-                                        }),
-                                        Space::with_width(8),
-                                        text("RAY SCHEDULING COMPARISON RENDERS").size(12).style(color!(0xF1F5F9)),
-                                        Space::with_width(12),
-                                        container(
-                                            text("RENDERS AVAILABLE").size(10).style(color!(0x10B981))
-                                        )
-                                        .padding([2, 8])
-                                        .style(|_t: &Theme| container::Appearance {
-                                            background: Some(Background::Color(color!(0x064E3B, 0.4))),
-                                            border: Border { radius: 4.0.into(), width: 1.0, color: color!(0x10B981) },
-                                            ..Default::default()
-                                        }),
-                                    ].align_items(iced::Alignment::Center),
-
-                                    Space::with_height(10),
-
-                                    inspector_buttons,
-                                ].spacing(2)
-                            )
-                            .padding(14)
-                            .width(Length::Fill)
-                            .style(|_t: &Theme| container::Appearance {
-                                background: Some(Background::Color(color!(0x0A0D15))),
-                                border: Border { radius: 10.0.into(), width: 1.0, color: color!(0x1E253A) },
-                                ..Default::default()
-                            })
-                        ].spacing(2).width(Length::Fill)
                     } else {
                         column![]
                     }
@@ -4095,13 +4068,10 @@ impl Application for GPUBenchApp {
                     ];
 
                     let tag = self.parity_profile.as_ref().map(|(_, t)| t.clone()).unwrap_or_else(|| "indoor".to_string());
-                    if self.parity_profile.is_some()
-                        || find_renders_file("renders/render_comparison_grid.png").is_some()
-                        || find_renders_file("renders/render_comparison_triptych.png").is_some()
-                    {
+                    if self.parity_profile.is_some() {
                         col = col.push(
                             button(
-                                container(text("VIEW 2X GRID COMPARISON").size(13).style(color!(0x34D399)))
+                                container(text("VIEW PERFORMANCE COMPARISON").size(13).style(color!(0x34D399)))
                                     .width(Length::Fill)
                                     .center_x()
                             )

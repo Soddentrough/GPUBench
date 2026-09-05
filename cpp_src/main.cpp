@@ -280,9 +280,13 @@ int main(int argc, char **argv) {
   app.add_flag("--dump-geometry", dump_geometry,
                "Dump ray tracing geometry to OBJ files");
 
-  bool dump_renders = false;
+  bool dump_renders = true;
   app.add_flag("--dump-renders,--dump", dump_renders,
-               "Dump and analytically compare rendered frames between Megakernel and Work Lists");
+               "Dump and analytically compare rendered frames between Megakernel and Work Lists (default: enabled)")
+      ->default_val(true);
+  bool no_dump_renders = false;
+  app.add_flag("--no-dump-renders,--no-dump", no_dump_renders,
+               "Disable render dumping and image comparisons");
 
   std::string scene_str = "indoor";
   app.add_option("-s,--scene", scene_str,
@@ -533,6 +537,10 @@ int main(int argc, char **argv) {
         }
       }
       return EXIT_SUCCESS;
+    }
+
+    if (no_dump_renders) {
+      dump_renders = false;
     }
 
     BenchmarkRunner runner({}, verbose, debug, dump_geometry, dump_renders, scene_str);
