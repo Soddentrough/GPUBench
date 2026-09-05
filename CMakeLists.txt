@@ -245,9 +245,15 @@ list(APPEND LIB_SOURCES cpp_src/core/RunnerAPI.cpp)
 
 set(SOURCES cpp_src/main.cpp ${LIB_SOURCES})
 if(WIN32)
-    set_source_files_properties(packaging/windows/gpubench.rc PROPERTIES
-        COMPILE_FLAGS "-I${CMAKE_CURRENT_SOURCE_DIR}/packaging/windows"
-    )
+    if(MINGW)
+        set_source_files_properties(packaging/windows/gpubench.rc PROPERTIES
+            COMPILE_FLAGS "-I${CMAKE_CURRENT_SOURCE_DIR}/packaging/windows -DEMBED_RC_MANIFEST"
+        )
+    else()
+        set_source_files_properties(packaging/windows/gpubench.rc PROPERTIES
+            COMPILE_FLAGS "-I${CMAKE_CURRENT_SOURCE_DIR}/packaging/windows"
+        )
+    endif()
     list(APPEND SOURCES packaging/windows/gpubench.rc)
     if(MSVC)
         list(APPEND SOURCES packaging/windows/gpubench.manifest)
