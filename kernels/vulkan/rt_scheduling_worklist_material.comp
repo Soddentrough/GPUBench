@@ -2,7 +2,7 @@
 #extension GL_EXT_ray_query : enable
 #extension GL_EXT_ray_flags_primitive_culling : enable
 
-layout(local_size_x = 64) in;
+layout(local_size_x = 32) in;
 
 layout(set = 0, binding = 0) uniform accelerationStructureEXT topLevelAS;
 layout(set = 0, binding = 1) buffer Results {
@@ -11,14 +11,9 @@ layout(set = 0, binding = 1) buffer Results {
     float accumulatedLuminance;
 } results;
 
-struct CompactRayPayload {
-    vec4 field0;
-    vec4 field1;
-};
-
 layout(set = 0, binding = 2) buffer WorkListBuffer {
     uint queueCounters[32];
-    CompactRayPayload rayRecords[];
+    vec4 rayRecords[];
 } worklist;
 
 layout(set = 0, binding = 3) buffer Framebuffer {
@@ -72,6 +67,18 @@ uint pcg_hash(inout uint state) {
 
 float rand_float(inout uint state) {
     return float(pcg_hash(state) & 0x00FFFFFFu) / 16777216.0;
+}
+
+vec2 signNotZero(vec2 v) {
+    return vec2(v.x >= 0.0 ? 1.0 : -1.0, v.y >= 0.0 ? 1.0 : -1.0);
+}
+
+vec3 octDecode(vec2 f) {
+    vec3 n = vec3(f.x, f.y, 1.0 - abs(f.x) - abs(f.y));
+    float t = clamp(-n.z, 0.0, 1.0);
+    n.x += (n.x >= 0.0) ? -t : t;
+    n.y += (n.y >= 0.0) ? -t : t;
+    return normalize(n);
 }
 
 vec3 cosine_sample_hemisphere(float u1, float u2) {
@@ -313,6 +320,74 @@ void computePixelCoords(uint idx, uint pattern, uint width, uint height, out uin
 #ifndef SPECIALIZED_ARCHETYPE
 #define SPECIALIZED_ARCHETYPE 0xFFFFFFFFu
 #endif
+
+vec3 computeSmoothNormal(uint sceneType, uint primId, vec3 hitPos, vec3 rayDir) {
+    vec3 normal;
+    if (sceneType == SCENE_OUTDOOR_TERRAIN) {
+        if (primId >= PRIM_TERRAIN_END && primId < PRIM_WATER_END) {
+            normal = vec3(0.0, 0.0, 1.0);
+        } else {
+            uint base = primId * 9u;
+            vec3 p0 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
+            vec3 p1 = vec3(vbuf.vertices[base + 3], vbuf.vertices[base + 4], vbuf.vertices[base + 5]);
+            vec3 p2 = vec3(vbuf.vertices[base + 6], vbuf.vertices[base + 7], vbuf.vertices[base + 8]);
+            normal = normalize(cross(p1 - p0, p2 - p0));
+        }
+    } else {
+        if (primId < PRIM_KNOT_RUST_END) {
+            uint segI = (primId / 48u);
+            float u0 = (float(segI) / 160.0) * 6.283185307;
+            float u1 = (float((segI + 1u) % 160u) / 160.0) * 6.283185307;
+
+            float r0 = (2.0 + 0.8 * cos(3.0 * u0)) * 0.835;
+            vec3 unrot0 = vec3(r0 * cos(2.0 * u0), r0 * sin(2.0 * u0), -0.8 * 0.835 * sin(3.0 * u0));
+            float r1 = (2.0 + 0.8 * cos(3.0 * u1)) * 0.835;
+            vec3 unrot1 = vec3(r1 * cos(2.0 * u1), r1 * sin(2.0 * u1), -0.8 * 0.835 * sin(3.0 * u1));
+
+            const mat3 R_knot = mat3(
+                vec3( 0.929662, -0.239757, -0.279722),
+                vec3( 0.326751,  0.887321,  0.325417),
+                vec3( 0.170182, -0.393927,  0.903249)
+            );
+            vec3 c0 = R_knot * unrot0 + vec3(0.0, 0.0, 0.385);
+            vec3 c1 = R_knot * unrot1 + vec3(0.0, 0.0, 0.385);
+
+            vec3 seg = c1 - c0;
+            float segLen2 = dot(seg, seg);
+            float tSeg = clamp(dot(hitPos - c0, seg) / max(segLen2, 0.00001), 0.0, 1.0);
+            vec3 centerPt = c0 + tSeg * seg;
+
+            normal = normalize(hitPos - centerPt);
+        } else if (primId < PRIM_SPHERE_END) {
+            normal = normalize(hitPos - vec3(-3.242, 0.391, -0.509));
+        } else if (primId < PRIM_PEDESTAL_END) {
+            if (hitPos.z >= -0.658) {
+                normal = vec3(0.0, 0.0, 1.0);
+            } else if (hitPos.z <= -1.050) {
+                normal = vec3(0.0, 0.0, -1.0);
+            } else {
+                normal = normalize(vec3(hitPos.x - (-0.460), hitPos.y - 0.060, 0.0));
+            }
+        } else if (primId < PRIM_SUZANNE_END) {
+            uint base = primId * 9u;
+            vec3 p0 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
+            vec3 p1 = vec3(vbuf.vertices[base + 3], vbuf.vertices[base + 4], vbuf.vertices[base + 5]);
+            vec3 p2 = vec3(vbuf.vertices[base + 6], vbuf.vertices[base + 7], vbuf.vertices[base + 8]);
+            normal = normalize(cross(p1 - p0, p2 - p0));
+        } else if (primId < PRIM_FLOOR_END) {
+            float backCurve = (hitPos.y > 1.0) ? 0.044 * (hitPos.y - 1.0) : 0.0;
+            normal = normalize(vec3(0.0, -backCurve, 1.0));
+        } else {
+            uint base = primId * 9u;
+            vec3 p0 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
+            vec3 p1 = vec3(vbuf.vertices[base + 3], vbuf.vertices[base + 4], vbuf.vertices[base + 5]);
+            vec3 p2 = vec3(vbuf.vertices[base + 6], vbuf.vertices[base + 7], vbuf.vertices[base + 8]);
+            normal = normalize(cross(p1 - p0, p2 - p0));
+        }
+    }
+    if (dot(normal, rayDir) > 0.0) normal = -normal;
+    return normal;
+}
 
 vec3 evalMaterialBSDF(uint sceneType, uint matId, vec3 normal, vec3 inDir, vec3 hitPos, inout uint rng) {
     vec3 viewDir = -inDir;
@@ -569,7 +644,7 @@ vec3 evalMaterialBSDF(uint sceneType, uint matId, vec3 normal, vec3 inDir, vec3 
             totalRadiance += envRefl * goldBase * (0.40 + 0.60 * pow(clamp(1.0 - NdotV, 0.0, 1.0), 5.0));
         } else if (archetype == 7) {
             rayQueryEXT chromeQuery;
-            rayQueryInitializeEXT(chromeQuery, topLevelAS, gl_RayFlagsNoneEXT, 0xFF, hitPos + normal * 0.015, 0.001, reflDir, 25.0);
+            rayQueryInitializeEXT(chromeQuery, topLevelAS, gl_RayFlagsOpaqueEXT, 0xFF, hitPos + normal * 0.015, 0.001, reflDir, 25.0);
             while (rayQueryProceedEXT(chromeQuery)) {}
 
             vec3 reflColor;
@@ -591,7 +666,7 @@ vec3 evalMaterialBSDF(uint sceneType, uint matId, vec3 normal, vec3 inDir, vec3 
         } else if (archetype == 5) {
             if (hitPos.y <= 3.0) {
                 rayQueryEXT reflQuery;
-                rayQueryInitializeEXT(reflQuery, topLevelAS, gl_RayFlagsNoneEXT, 0xFF, hitPos + normal * 0.015, 0.001, reflDir, 25.0);
+                rayQueryInitializeEXT(reflQuery, topLevelAS, gl_RayFlagsOpaqueEXT, 0xFF, hitPos + normal * 0.015, 0.001, reflDir, 25.0);
                 while (rayQueryProceedEXT(reflQuery)) {}
 
                 vec3 reflColor;
@@ -622,7 +697,7 @@ vec3 evalMaterialBSDF(uint sceneType, uint matId, vec3 normal, vec3 inDir, vec3 
 
 void main() {
     uint threadIdx = gl_GlobalInvocationID.x;
-    uint count = worklist.queueCounters[pc.materialId];
+    uint count = worklist.queueCounters[pc.materialId + 16];
     if (threadIdx >= count) return;
 
     if (threadIdx == 0) {
@@ -630,11 +705,11 @@ void main() {
     }
 
     uint recordIdx = pc.materialId * pc.queueCapacity + threadIdx;
-    CompactRayPayload payload = worklist.rayRecords[recordIdx];
-    vec3 hitPos = payload.field0.xyz;
-    uint pixelIdx = floatBitsToUint(payload.field0.w);
-    vec3 normal = payload.field1.xyz;
-    uint rngState = floatBitsToUint(payload.field1.w);
+    vec4 p = worklist.rayRecords[recordIdx];
+    float t = p.x;
+    uint pixelIdx = floatBitsToUint(p.y);
+    uint primId = floatBitsToUint(p.z);
+    uint rngState = pixelIdx;
 
     vec3 camPos, camForward, camRight, camUp;
     float fov;
@@ -646,6 +721,9 @@ void main() {
     float px = float(px_u) - float(pc.width) * 0.5 + 0.5;
     float py = float(py_u) - halfH + 0.5;
     vec3 inDir = normalize(camForward + (px / halfH * fov) * camRight - (py / halfH * fov) * camUp);
+    vec3 hitPos = camPos + inDir * t;
+
+    vec3 normal = computeSmoothNormal(pc.sceneType, primId, hitPos, inDir);
 
     vec3 shadedColor = evalMaterialBSDF(pc.sceneType, pc.materialId, normal, inDir, hitPos, rngState);
 

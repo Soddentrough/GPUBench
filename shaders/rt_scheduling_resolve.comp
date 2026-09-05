@@ -1,0 +1,53 @@
+#version 460
+#extension GL_KHR_shader_subgroup_basic : enable
+#extension GL_KHR_shader_subgroup_arithmetic : enable
+
+layout(local_size_x = 32) in;
+
+layout(set = 0, binding = 0) buffer WorkListBuffer {
+    uint queueCounters[32];
+} worklist;
+
+struct VkDispatchIndirectCommand {
+    uint x;
+    uint y;
+    uint z;
+};
+
+layout(set = 0, binding = 1) buffer IndirectCommandsBuffer {
+    VkDispatchIndirectCommand commands[32];
+} indirectCmds;
+
+layout(push_constant) uniform ResolvePC {
+    uint resetQueue;
+} rpc;
+
+void main() {
+    uint id = gl_LocalInvocationID.x;
+    if (id < 16) {
+        uint count = worklist.queueCounters[id];
+        indirectCmds.commands[id].x = (count + 31u) / 32u;
+        indirectCmds.commands[id].y = (count > 0u) ? 1u : 0u;
+        indirectCmds.commands[id].z = (count > 0u) ? 1u : 0u;
+        worklist.queueCounters[id + 16] = count;
+        if (rpc.resetQueue == 0xFFFFFFFFu) {
+            worklist.queueCounters[id] = 0u;
+        }
+    }
+    if (id == 0 && rpc.resetQueue < 32u) {
+        worklist.queueCounters[rpc.resetQueue] = 0u;
+    }
+
+    // Consolidated command for octants 0..7 at commands[8]
+    uint waves = (id < 8) ? indirectCmds.commands[id].x : 0u;
+    uint pref = subgroupExclusiveAdd(waves);
+    if (id < 8) {
+        worklist.queueCounters[24 + id] = pref;
+    }
+    if (id == 7) {
+        uint totalWaves = pref + waves;
+        indirectCmds.commands[8].x = totalWaves;
+        indirectCmds.commands[8].y = (totalWaves > 0u) ? 1u : 0u;
+        indirectCmds.commands[8].z = (totalWaves > 0u) ? 1u : 0u;
+    }
+}

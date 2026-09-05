@@ -314,7 +314,10 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
   }
 
   rayCount = renderWidth * renderHeight;
-  queueCapacity = rayCount;
+  octantCapacity = std::max(1024u, (rayCount * 35u) / 100u);
+  materialCapacity = rayCount;
+  bounceCapacity = rayCount;
+  queueCapacity = materialCapacity;
   resultBuffer = context->createBuffer(sizeof(uint32_t) * 4);
   uint32_t zeros[4] = {0, 0, 0, 0};
   context->writeBuffer(resultBuffer, 0, sizeof(zeros), zeros);
@@ -323,9 +326,12 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
   fbTraditional = context->createBuffer(rayCount * sizeof(float) * 4);
   fbWorkList = context->createBuffer(rayCount * sizeof(float) * 4);
 
-  // WorkList storage buffer: 32 counters (128B) + 8 * queueCapacity * 32B records
-  size_t workListSize = sizeof(uint32_t) * 32 + (size_t)8 * queueCapacity * sizeof(float) * 8;
+  // WorkList storage buffer: 32 counters (128B) + 8 * maxCapacity * 16B records
+  uint32_t maxCapacity = std::max(rayCount, materialCapacity);
+  size_t workListSize = sizeof(uint32_t) * 32 + (size_t)8 * maxCapacity * sizeof(float) * 4;
   workListBuffer = context->createBuffer(workListSize);
+  uint32_t initialCounters[32] = {0};
+  context->writeBuffer(workListBuffer, 0, sizeof(initialCounters), initialCounters);
 
   // Indirect dispatch commands: 32 * VkDispatchIndirectCommand (384B)
   size_t indirectSize = sizeof(uint32_t) * 3 * 32;
@@ -380,9 +386,35 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
     vContext->setKernelArg(kernelMaterialSpecialized[arch], 4, vertexBuffer);
   }
   kernelBounce = vContext->createKernel(
-      (kdir / "vulkan" / "rt_scheduling_worklist_bounce.comp").string(), "main", 3);
+      (kdir / "vulkan" / "rt_scheduling_worklist_bounce.comp").string(), "main", 4);
+  vContext->setKernelAS(kernelBounce, 0, (AccelerationStructure)sceneTlas);
+  vContext->setKernelArg(kernelBounce, 1, resultBuffer);
+  vContext->setKernelArg(kernelBounce, 2, workListBuffer);
+  vContext->setKernelArg(kernelBounce, 3, vertexBuffer);
+
+  kernelBounceTerminal = vContext->createKernelWithSpec(
+      (kdir / "vulkan" / "rt_scheduling_worklist_bounce.comp").string(), "main", 4, 0, 1u);
+  vContext->setKernelAS(kernelBounceTerminal, 0, (AccelerationStructure)sceneTlas);
+  vContext->setKernelArg(kernelBounceTerminal, 1, resultBuffer);
+  vContext->setKernelArg(kernelBounceTerminal, 2, workListBuffer);
+  vContext->setKernelArg(kernelBounceTerminal, 3, vertexBuffer);
+
+  kernelBounceOctant = vContext->createKernelWithSpec(
+      (kdir / "vulkan" / "rt_scheduling_worklist_bounce.comp").string(), "main", 4, 0, 2u);
+  vContext->setKernelAS(kernelBounceOctant, 0, (AccelerationStructure)sceneTlas);
+  vContext->setKernelArg(kernelBounceOctant, 1, resultBuffer);
+  vContext->setKernelArg(kernelBounceOctant, 2, workListBuffer);
+  vContext->setKernelArg(kernelBounceOctant, 3, vertexBuffer);
   kernelWorkGraph = vContext->createKernel(
       (kdir / "vulkan" / "rt_scheduling_workgraph.comp").string(), "main", 2);
+  kernelReset = vContext->createKernel(
+      (kdir / "vulkan" / "rt_scheduling_reset.comp").string(), "main", 2);
+  vContext->setKernelArg(kernelReset, 0, workListBuffer);
+  vContext->setKernelArg(kernelReset, 1, indirectBuffer);
+  kernelResolve = vContext->createKernel(
+      (kdir / "vulkan" / "rt_scheduling_resolve.comp").string(), "main", 2);
+  vContext->setKernelArg(kernelResolve, 0, workListBuffer);
+  vContext->setKernelArg(kernelResolve, 1, indirectBuffer);
 
   // Check hardware SER support
   bool hasSERExt = vContext->isExtensionEnabled("VK_EXT_ray_tracing_invocation_reorder") ||
@@ -437,7 +469,7 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
       uint32_t width;
       uint32_t height;
       uint32_t sceneType;
-    } pcMat{m, queueCapacity, dumpRenders ? 1u : 0u, renderWidth, renderHeight, static_cast<uint32_t>(sceneType)};
+    } pcMat{m, materialCapacity, dumpRenders ? 1u : 0u, renderWidth, renderHeight, static_cast<uint32_t>(sceneType)};
     std::vector<uint8_t> pcData(sizeof(pcMat));
     std::memcpy(pcData.data(), &pcMat, sizeof(pcMat));
     materialBatches.push_back({m * sizeof(uint32_t) * 3, pcData, kernelMaterialSpecialized[m]});
@@ -452,37 +484,71 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
   std::vector<uint32_t> initCounters(32, 0);
   uint32_t perQueue = rayCount / 8;
   for (uint32_t m = 0; m < 8; ++m) {
-    initCmds[m * 3 + 0] = (perQueue + 63) / 64;
+    initCmds[m * 3 + 0] = (perQueue + 31) / 32;
     initCmds[m * 3 + 1] = 1;
     initCmds[m * 3 + 2] = 1;
     initCounters[m] = perQueue;
+    initCounters[m + 16] = perQueue;
   }
   context->writeBuffer(indirectBuffer, 0, initCmds.size() * sizeof(uint32_t), initCmds.data());
   context->writeBuffer(workListBuffer, 0, initCounters.size() * sizeof(uint32_t), initCounters.data());
 
   bounceBatches.reserve(3);
-  for (uint32_t b = 1; b < 4; ++b) {
+  // Bounce 1: reads Queue 0, compacts into Queue 1
+  {
     struct {
-      uint32_t queueIndex;
+      uint32_t inQueue;
+      uint32_t outQueue;
+      uint32_t bounceIndex;
+      uint32_t seed;
       uint32_t maxQueueSize;
       uint32_t sceneType;
-    } pcBounce{0, queueCapacity, static_cast<uint32_t>(sceneType)};
+    } pcBounce{0, 1, 1, 1337u, bounceCapacity, static_cast<uint32_t>(sceneType)};
     std::vector<uint8_t> pcData(sizeof(pcBounce));
     std::memcpy(pcData.data(), &pcBounce, sizeof(pcBounce));
     bounceBatches.push_back({0, pcData});
   }
-
-  octantBatches.reserve(8);
-  for (uint32_t oct = 0; oct < 8; ++oct) {
+  // Bounce 2: reads Queue 1, compacts into Queue 0
+  {
     struct {
-      uint32_t queueIndex;
+      uint32_t inQueue;
+      uint32_t outQueue;
+      uint32_t bounceIndex;
+      uint32_t seed;
       uint32_t maxQueueSize;
       uint32_t sceneType;
-    } pcBounce{oct, queueCapacity, static_cast<uint32_t>(sceneType)};
+    } pcBounce{1, 0, 2, 1337u, bounceCapacity, static_cast<uint32_t>(sceneType)};
     std::vector<uint8_t> pcData(sizeof(pcBounce));
     std::memcpy(pcData.data(), &pcBounce, sizeof(pcBounce));
-    octantBatches.push_back({oct * sizeof(uint32_t) * 3, pcData});
+    bounceBatches.push_back({sizeof(uint32_t) * 3, pcData});
   }
+  // Bounce 3: reads Queue 0, terminal bounce
+  {
+    struct {
+      uint32_t inQueue;
+      uint32_t outQueue;
+      uint32_t bounceIndex;
+      uint32_t seed;
+      uint32_t maxQueueSize;
+      uint32_t sceneType;
+    } pcBounce{0, 0xFFFFFFFFu, 3, 1337u, bounceCapacity, static_cast<uint32_t>(sceneType)};
+    std::vector<uint8_t> pcData(sizeof(pcBounce));
+    std::memcpy(pcData.data(), &pcBounce, sizeof(pcBounce));
+    bounceBatches.push_back({0, pcData, kernelBounceTerminal});
+  }
+
+  octantBatches.clear();
+  struct {
+    uint32_t inQueue;
+    uint32_t outQueue;
+    uint32_t bounceIndex;
+    uint32_t seed;
+    uint32_t maxQueueSize;
+    uint32_t sceneType;
+  } pcBounce{0, 0xFFFFFFFFu, 1, 1337u, octantCapacity, static_cast<uint32_t>(sceneType)};
+  std::vector<uint8_t> pcData(sizeof(pcBounce));
+  std::memcpy(pcData.data(), &pcBounce, sizeof(pcBounce));
+  octantBatches.push_back({8 * sizeof(uint32_t) * 3, pcData, kernelBounceOctant});
 #endif
 }
 
@@ -497,10 +563,6 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
 
   switch (config_idx) {
   case 0: { // Material Divergence - Traditional Megakernel (Pure Shading Microbenchmark, 4 Lights)
-    vContext->setKernelAS(kernelTraditional, 0, (AccelerationStructure)sceneTlas);
-    vContext->setKernelArg(kernelTraditional, 1, resultBuffer);
-    vContext->setKernelArg(kernelTraditional, 2, fbTraditional);
-    vContext->setKernelArg(kernelTraditional, 3, vertexBuffer);
     struct {
       uint32_t rayCount;
       uint32_t mode;
@@ -525,8 +587,6 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     break;
   }
   case 3: { // Material Divergence - Work Graphs
-    vContext->setKernelAS(kernelWorkGraph, 0, (AccelerationStructure)sceneTlas);
-    vContext->setKernelArg(kernelWorkGraph, 1, resultBuffer);
     struct {
       uint32_t rayCount;
       uint32_t mode;
@@ -538,10 +598,6 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     break;
   }
   case 4: { // Path Tracing - Traditional Megakernel
-    vContext->setKernelAS(kernelTraditional, 0, (AccelerationStructure)sceneTlas);
-    vContext->setKernelArg(kernelTraditional, 1, resultBuffer);
-    vContext->setKernelArg(kernelTraditional, 2, fbTraditional);
-    vContext->setKernelArg(kernelTraditional, 3, vertexBuffer);
     struct {
       uint32_t rayCount;
       uint32_t mode;
@@ -562,12 +618,6 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     break;
   }
   case 6: { // Multi-Bounce Path Tracing - Work Lists / DGC (Wavefront Compaction)
-    vContext->setKernelAS(kernelClassify, 0, (AccelerationStructure)sceneTlas);
-    vContext->setKernelArg(kernelClassify, 1, resultBuffer);
-    vContext->setKernelArg(kernelClassify, 2, workListBuffer);
-    vContext->setKernelArg(kernelClassify, 3, indirectBuffer);
-    vContext->setKernelArg(kernelClassify, 4, fbWorkList);
-    vContext->setKernelArg(kernelClassify, 5, vertexBuffer);
     struct {
       uint32_t rayCount;
       uint32_t mode;
@@ -579,23 +629,17 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
       uint32_t queueCapacity;
       uint32_t spatialPattern;
       uint32_t sceneType;
-    } pcClassify{rayCount, 1, 0, seed, 0, renderWidth, renderHeight, queueCapacity, 0, sceneTypeVal};
+    } pcClassify{rayCount, 1, 0, seed, 0, renderWidth, renderHeight, bounceCapacity, 2, sceneTypeVal};
     vContext->setKernelArg(kernelClassify, 6, sizeof(pcClassify), &pcClassify);
 
-    vContext->setKernelAS(kernelBounce, 0, (AccelerationStructure)sceneTlas);
-    vContext->setKernelArg(kernelBounce, 1, resultBuffer);
-    vContext->setKernelArg(kernelBounce, 2, workListBuffer);
-
     vContext->dispatchWorkListSequence(
-        workListBuffer, sizeof(uint32_t) * 32,
-        indirectBuffer, sizeof(uint32_t) * 32 * 3,
-        kernelClassify, (rayCount + 63) / 64, 1, 1,
-        kernelBounce, indirectBuffer, bounceBatches);
+        kernelReset,
+        kernelClassify, (rayCount + 31) / 32, 1, 1,
+        kernelResolve,
+        kernelBounce, indirectBuffer, bounceBatches, true /* isPingPong */);
     break;
   }
   case 7: { // Multi-Bounce Path Tracing - Work Graphs
-    vContext->setKernelAS(kernelWorkGraph, 0, (AccelerationStructure)sceneTlas);
-    vContext->setKernelArg(kernelWorkGraph, 1, resultBuffer);
     struct {
       uint32_t rayCount;
       uint32_t mode;
@@ -607,10 +651,6 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     break;
   }
   case 8: { // Incoherent Ray Tracing - Traditional Megakernel
-    vContext->setKernelAS(kernelTraditional, 0, (AccelerationStructure)sceneTlas);
-    vContext->setKernelArg(kernelTraditional, 1, resultBuffer);
-    vContext->setKernelArg(kernelTraditional, 2, fbTraditional);
-    vContext->setKernelArg(kernelTraditional, 3, vertexBuffer);
     struct {
       uint32_t rayCount;
       uint32_t mode;
@@ -633,12 +673,6 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
   case 10: { // Incoherent Ray Tracing - Work Lists (Directional Binning)
     // Pass 1 & 2: Traversal, directional octant binning, and coherent secondary ray dispatches
     // executed in a single command stream on the GPU.
-    vContext->setKernelAS(kernelClassify, 0, (AccelerationStructure)sceneTlas);
-    vContext->setKernelArg(kernelClassify, 1, resultBuffer);
-    vContext->setKernelArg(kernelClassify, 2, workListBuffer);
-    vContext->setKernelArg(kernelClassify, 3, indirectBuffer);
-    vContext->setKernelArg(kernelClassify, 4, fbWorkList);
-    vContext->setKernelArg(kernelClassify, 5, vertexBuffer);
     struct {
       uint32_t rayCount;
       uint32_t mode;
@@ -650,23 +684,17 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
       uint32_t queueCapacity;
       uint32_t spatialPattern;
       uint32_t sceneType;
-    } pcClassify{rayCount, 2, 0, seed, 0, renderWidth, renderHeight, queueCapacity, 0, sceneTypeVal};
+    } pcClassify{rayCount, 2, 0, seed, 0, renderWidth, renderHeight, octantCapacity, 1, sceneTypeVal};
     vContext->setKernelArg(kernelClassify, 6, sizeof(pcClassify), &pcClassify);
 
-    vContext->setKernelAS(kernelBounce, 0, (AccelerationStructure)sceneTlas);
-    vContext->setKernelArg(kernelBounce, 1, resultBuffer);
-    vContext->setKernelArg(kernelBounce, 2, workListBuffer);
-
     vContext->dispatchWorkListSequence(
-        workListBuffer, sizeof(uint32_t) * 32,
-        indirectBuffer, sizeof(uint32_t) * 32 * 3,
-        kernelClassify, (rayCount + 63) / 64, 1, 1,
-        kernelBounce, indirectBuffer, octantBatches);
+        nullptr,
+        kernelClassify, (rayCount + 31) / 32, 1, 1,
+        kernelResolve,
+        kernelBounceOctant, indirectBuffer, octantBatches);
     break;
   }
   case 11: { // Incoherent Rays - Work Graphs (Autonomous Directional Node Enqueue)
-    vContext->setKernelAS(kernelWorkGraph, 0, (AccelerationStructure)sceneTlas);
-    vContext->setKernelArg(kernelWorkGraph, 1, resultBuffer);
     struct {
       uint32_t rayCount;
       uint32_t mode;
@@ -678,10 +706,6 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     break;
   }
   case 12: { // Primary Ray Tracing - Traditional Megakernel
-    vContext->setKernelAS(kernelTraditional, 0, (AccelerationStructure)sceneTlas);
-    vContext->setKernelArg(kernelTraditional, 1, resultBuffer);
-    vContext->setKernelArg(kernelTraditional, 2, fbTraditional);
-    vContext->setKernelArg(kernelTraditional, 3, vertexBuffer);
     struct {
       uint32_t rayCount;
       uint32_t mode;
@@ -710,15 +734,9 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
         uint32_t width;
         uint32_t height;
         uint32_t sceneType;
-      } pcMat{m, queueCapacity, dumpRenders ? 1u : 0u, renderWidth, renderHeight, sceneTypeVal};
+      } pcMat{m, materialCapacity, dumpRenders ? 1u : 0u, renderWidth, renderHeight, sceneTypeVal};
       std::memcpy(materialBatches[m].pushConstants.data(), &pcMat, sizeof(pcMat));
     }
-    vContext->setKernelAS(kernelClassify, 0, (AccelerationStructure)sceneTlas);
-    vContext->setKernelArg(kernelClassify, 1, resultBuffer);
-    vContext->setKernelArg(kernelClassify, 2, workListBuffer);
-    vContext->setKernelArg(kernelClassify, 3, indirectBuffer);
-    vContext->setKernelArg(kernelClassify, 4, fbWorkList);
-    vContext->setKernelArg(kernelClassify, 5, vertexBuffer);
     struct {
       uint32_t rayCount;
       uint32_t mode;
@@ -730,19 +748,13 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
       uint32_t queueCapacity;
       uint32_t spatialPattern;
       uint32_t sceneType;
-    } pcClassify{rayCount, 0, 0, seed, dumpRenders ? 1u : 0u, renderWidth, renderHeight, queueCapacity, 0, sceneTypeVal};
+    } pcClassify{rayCount, 0, 0, seed, dumpRenders ? 1u : 0u, renderWidth, renderHeight, materialCapacity, 2, sceneTypeVal};
     vContext->setKernelArg(kernelClassify, 6, sizeof(pcClassify), &pcClassify);
 
-    vContext->setKernelAS(kernelMaterial, 0, (AccelerationStructure)sceneTlas);
-    vContext->setKernelArg(kernelMaterial, 1, resultBuffer);
-    vContext->setKernelArg(kernelMaterial, 2, workListBuffer);
-    vContext->setKernelArg(kernelMaterial, 3, fbWorkList);
-    vContext->setKernelArg(kernelMaterial, 4, vertexBuffer);
-
     vContext->dispatchWorkListSequence(
-        workListBuffer, sizeof(uint32_t) * 32,
-        indirectBuffer, sizeof(uint32_t) * 32 * 3,
-        kernelClassify, (rayCount + 63) / 64, 1, 1,
+        nullptr,
+        kernelClassify, (rayCount + 31) / 32, 1, 1,
+        kernelResolve,
         kernelMaterial, indirectBuffer, materialBatches);
     break;
   }
@@ -751,10 +763,6 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     break;
   }
   case 16: { // Stage Breakdown - BVH Traversal (Linear 32x1, Baseline)
-    vContext->setKernelAS(kernelTraditional, 0, (AccelerationStructure)sceneTlas);
-    vContext->setKernelArg(kernelTraditional, 1, resultBuffer);
-    vContext->setKernelArg(kernelTraditional, 2, fbTraditional);
-    vContext->setKernelArg(kernelTraditional, 3, vertexBuffer);
     struct {
       uint32_t rayCount;
       uint32_t mode;
@@ -771,12 +779,6 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     break;
   }
   case 17: { // Stage Breakdown - Queue Compaction Overhead
-    vContext->setKernelAS(kernelClassify, 0, (AccelerationStructure)sceneTlas);
-    vContext->setKernelArg(kernelClassify, 1, resultBuffer);
-    vContext->setKernelArg(kernelClassify, 2, workListBuffer);
-    vContext->setKernelArg(kernelClassify, 3, indirectBuffer);
-    vContext->setKernelArg(kernelClassify, 4, fbWorkList);
-    vContext->setKernelArg(kernelClassify, 5, vertexBuffer);
     struct {
       uint32_t rayCount;
       uint32_t mode;
@@ -788,16 +790,12 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
       uint32_t queueCapacity;
       uint32_t spatialPattern;
       uint32_t sceneType;
-    } pcClassify{rayCount, 3, 0, seed, 0, renderWidth, renderHeight, queueCapacity, 0, sceneTypeVal};
+    } pcClassify{rayCount, 3, 0, seed, 0, renderWidth, renderHeight, octantCapacity, 0, sceneTypeVal};
     vContext->setKernelArg(kernelClassify, 6, sizeof(pcClassify), &pcClassify);
-    vContext->dispatch(kernelClassify, (rayCount + 63) / 64, 1, 1, 64, 1, 1);
+    vContext->dispatch(kernelClassify, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     break;
   }
   case 18: { // Stage Breakdown - BVH Traversal (2D Tiled 8x4)
-    vContext->setKernelAS(kernelTraditional, 0, (AccelerationStructure)sceneTlas);
-    vContext->setKernelArg(kernelTraditional, 1, resultBuffer);
-    vContext->setKernelArg(kernelTraditional, 2, fbTraditional);
-    vContext->setKernelArg(kernelTraditional, 3, vertexBuffer);
     struct {
       uint32_t rayCount;
       uint32_t mode;
@@ -814,10 +812,6 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     break;
   }
   case 19: { // Stage Breakdown - BVH Traversal (2D Morton 8x4)
-    vContext->setKernelAS(kernelTraditional, 0, (AccelerationStructure)sceneTlas);
-    vContext->setKernelArg(kernelTraditional, 1, resultBuffer);
-    vContext->setKernelArg(kernelTraditional, 2, fbTraditional);
-    vContext->setKernelArg(kernelTraditional, 3, vertexBuffer);
     struct {
       uint32_t rayCount;
       uint32_t mode;
@@ -834,10 +828,6 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     break;
   }
   case 20: { // Stage Breakdown - BVH Traversal (2D Morton 4x8)
-    vContext->setKernelAS(kernelTraditional, 0, (AccelerationStructure)sceneTlas);
-    vContext->setKernelArg(kernelTraditional, 1, resultBuffer);
-    vContext->setKernelArg(kernelTraditional, 2, fbTraditional);
-    vContext->setKernelArg(kernelTraditional, 3, vertexBuffer);
     struct {
       uint32_t rayCount;
       uint32_t mode;
@@ -854,10 +844,6 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     break;
   }
   case 21: { // Stage Breakdown - Primary Ray Tracing (2D Morton 8x4, Traditional Megakernel)
-    vContext->setKernelAS(kernelTraditional, 0, (AccelerationStructure)sceneTlas);
-    vContext->setKernelArg(kernelTraditional, 1, resultBuffer);
-    vContext->setKernelArg(kernelTraditional, 2, fbTraditional);
-    vContext->setKernelArg(kernelTraditional, 3, vertexBuffer);
     struct {
       uint32_t rayCount;
       uint32_t mode;
@@ -874,12 +860,6 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     break;
   }
   case 22: { // Stage Breakdown - Primary Ray Tracing (2D Morton 8x4, Work Lists)
-    vContext->setKernelAS(kernelClassify, 0, (AccelerationStructure)sceneTlas);
-    vContext->setKernelArg(kernelClassify, 1, resultBuffer);
-    vContext->setKernelArg(kernelClassify, 2, workListBuffer);
-    vContext->setKernelArg(kernelClassify, 3, indirectBuffer);
-    vContext->setKernelArg(kernelClassify, 4, fbWorkList);
-    vContext->setKernelArg(kernelClassify, 5, vertexBuffer);
     struct {
       uint32_t rayCount;
       uint32_t mode;
@@ -891,19 +871,13 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
       uint32_t queueCapacity;
       uint32_t spatialPattern;
       uint32_t sceneType;
-    } pcClassify{rayCount, 0, 0, seed, 0, renderWidth, renderHeight, queueCapacity, 2, sceneTypeVal};
+    } pcClassify{rayCount, 0, 0, seed, 0, renderWidth, renderHeight, materialCapacity, 2, sceneTypeVal};
     vContext->setKernelArg(kernelClassify, 6, sizeof(pcClassify), &pcClassify);
 
-    vContext->setKernelAS(kernelMaterial, 0, (AccelerationStructure)sceneTlas);
-    vContext->setKernelArg(kernelMaterial, 1, resultBuffer);
-    vContext->setKernelArg(kernelMaterial, 2, workListBuffer);
-    vContext->setKernelArg(kernelMaterial, 3, fbWorkList);
-    vContext->setKernelArg(kernelMaterial, 4, vertexBuffer);
-
     vContext->dispatchWorkListSequence(
-        workListBuffer, sizeof(uint32_t) * 32,
-        indirectBuffer, sizeof(uint32_t) * 32 * 3,
-        kernelClassify, (rayCount + 63) / 64, 1, 1,
+        nullptr,
+        kernelClassify, (rayCount + 31) / 32, 1, 1,
+        kernelResolve,
         kernelMaterial, indirectBuffer, materialBatches);
     break;
   }
@@ -1191,9 +1165,25 @@ void RaySchedulingBench::Teardown() {
     context->releaseKernel(kernelBounce);
     kernelBounce = nullptr;
   }
+  if (kernelBounceTerminal) {
+    context->releaseKernel(kernelBounceTerminal);
+    kernelBounceTerminal = nullptr;
+  }
+  if (kernelBounceOctant) {
+    context->releaseKernel(kernelBounceOctant);
+    kernelBounceOctant = nullptr;
+  }
   if (kernelWorkGraph) {
     context->releaseKernel(kernelWorkGraph);
     kernelWorkGraph = nullptr;
+  }
+  if (kernelReset) {
+    context->releaseKernel(kernelReset);
+    kernelReset = nullptr;
+  }
+  if (kernelResolve) {
+    context->releaseKernel(kernelResolve);
+    kernelResolve = nullptr;
   }
 
   if (resultBuffer) {

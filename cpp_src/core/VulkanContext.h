@@ -118,11 +118,12 @@ public:
   void dispatchIndirectSequence(ComputeKernel kernel, ComputeBuffer indirectBuffer,
                                 const std::vector<IndirectBatchEntry> &entries);
   void dispatchWorkListSequence(
-      ComputeBuffer clearBuf1, size_t clearSize1,
-      ComputeBuffer clearBuf2, size_t clearSize2,
+      ComputeKernel resetKernel,
       ComputeKernel classifyKernel, uint32_t grid_x, uint32_t grid_y, uint32_t grid_z,
+      ComputeKernel resolveKernel,
       ComputeKernel secondKernel, ComputeBuffer indirectBuffer,
-      const std::vector<IndirectBatchEntry> &entries);
+      const std::vector<IndirectBatchEntry> &entries,
+      bool isPingPong = false);
   void dispatchRayTracingIndirect(ComputeKernel kernel, ComputeBuffer indirectBuffer,
                                  VkDeviceSize offset = 0);
 

@@ -1,0 +1,27 @@
+#version 460
+
+layout(local_size_x = 32) in;
+
+layout(set = 0, binding = 0) buffer WorkListBuffer {
+    uint queueCounters[32];
+} worklist;
+
+struct VkDispatchIndirectCommand {
+    uint x;
+    uint y;
+    uint z;
+};
+
+layout(set = 0, binding = 1) buffer IndirectCommandsBuffer {
+    VkDispatchIndirectCommand commands[32];
+} indirectCmds;
+
+void main() {
+    uint id = gl_LocalInvocationID.x;
+    if (id < 32) {
+        worklist.queueCounters[id] = 0;
+        indirectCmds.commands[id].x = 0;
+        indirectCmds.commands[id].y = 1;
+        indirectCmds.commands[id].z = 1;
+    }
+}

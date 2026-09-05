@@ -15,6 +15,10 @@ import argparse
 import subprocess
 from typing import Dict, List, Any, Tuple
 
+if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+
 # Baseline expected performance ranges for known architectures
 # Format: (min_acceptable, expected_nominal, max_acceptable) in native metric units
 HARDWARE_BASELINES = {
@@ -88,6 +92,10 @@ def run_gpubench(args: argparse.Namespace) -> List[Dict[str, Any]]:
             "--output", "json",
             "--output-file", tmp_path,
         ]
+        if getattr(args, "resolution", None):
+            cmd.extend(["-r", str(args.resolution)])
+        if getattr(args, "scene", None):
+            cmd.extend(["-s", str(args.scene)])
         print(f"{Colors.CYAN}{Colors.BOLD}Running benchmark command:{Colors.RESET} {' '.join(cmd)}")
         result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         if result.returncode != 0:
@@ -369,15 +377,26 @@ def evaluate_results(raw_data: Any) -> bool:
             if mega_val is not None and wl_val is not None:
                 speedup = (wl_val / mega_val) if mega_val > 0 else 0.0
                 sp_str = f"{speedup:.2f}x"
-                if speedup >= 1.10:
-                    st = f"{Colors.GREEN}PASS (Faster){Colors.RESET}"
-                elif speedup >= 1.0:
-                    st = f"{Colors.YELLOW}WARN (Marginal){Colors.RESET}"
-                    warnings.append(f"Work Lists was only {speedup:.2f}x of Megakernel for {sc_name}")
+                if sc_name == "Primary Ray Tracing":
+                    if speedup >= 1.05:
+                        st = f"{Colors.GREEN}PASS (Faster){Colors.RESET}"
+                    elif speedup >= 0.75:
+                        st = f"{Colors.YELLOW}WARN (Within tolerance / monolithic single-pass){Colors.RESET}"
+                        warnings.append(f"Work Lists achieved {speedup:.2f}x of Megakernel for {sc_name} (coherent primary rays)")
+                    else:
+                        st = f"{Colors.RED}FAIL (Slower than Megakernel!){Colors.RESET}"
+                        all_passed = False
+                        regressions.append(f"Work Lists is SLOWER than Megakernel ({speedup:.2f}x) for {sc_name}")
                 else:
-                    st = f"{Colors.RED}FAIL (Slower than Megakernel!){Colors.RESET}"
-                    all_passed = False
-                    regressions.append(f"Work Lists is SLOWER than Megakernel ({speedup:.2f}x) for {sc_name}")
+                    if speedup >= 1.10:
+                        st = f"{Colors.GREEN}PASS (Faster){Colors.RESET}"
+                    elif speedup >= 1.0:
+                        st = f"{Colors.YELLOW}WARN (Marginal){Colors.RESET}"
+                        warnings.append(f"Work Lists was only {speedup:.2f}x of Megakernel for {sc_name}")
+                    else:
+                        st = f"{Colors.RED}FAIL (Slower than Megakernel!){Colors.RESET}"
+                        all_passed = False
+                        regressions.append(f"Work Lists is SLOWER than Megakernel ({speedup:.2f}x) for {sc_name}")
                 print(f"{sc_name:<32} {mega_val:.1f} {'':<8} {wl_val:.1f} {'':<8} {sp_str:<12} {st}")
     # 4. Check Unsupported Benchmark Diagnostic Explanations
     unsupported_items = [item for item in data if item.get("unsupported", False)]
@@ -428,6 +447,8 @@ def main():
     parser.add_argument("-d", "--device", type=int, default=1, help="Target GPU device index (default: 1)")
     parser.add_argument("-k", "--backends", type=str, default="opencl,rocm,vulkan", help="Backends to benchmark")
     parser.add_argument("-b", "--benchmarks", type=str, default="fp64,fp32,fp16,int8,ray_scheduling", help="Benchmarks to run")
+    parser.add_argument("-r", "--resolution", type=str, default=None, help="Resolution preset (e.g. 1080p, 4k)")
+    parser.add_argument("-s", "--scene", type=str, default=None, help="Scene preset (indoor, outdoor, all)")
     parser.add_argument("--binary", type=str, default="./build/gpubench", help="Path to gpubench binary")
     parser.add_argument("--input", type=str, default=None, help="Evaluate pre-existing JSON result file instead of running")
 

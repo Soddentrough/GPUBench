@@ -167,7 +167,11 @@ private:
   ComputeKernel kernelMaterial = nullptr;
   ComputeKernel kernelMaterialSpecialized[8] = {nullptr};
   ComputeKernel kernelBounce = nullptr;
+  ComputeKernel kernelBounceTerminal = nullptr;
+  ComputeKernel kernelBounceOctant = nullptr;
   ComputeKernel kernelWorkGraph = nullptr;
+  ComputeKernel kernelReset = nullptr;
+  ComputeKernel kernelResolve = nullptr;
 
   // Storage Buffers
   ComputeBuffer resultBuffer = nullptr;
@@ -201,7 +205,10 @@ private:
   uint32_t renderWidth = 1920;
   uint32_t renderHeight = 1080;
   uint32_t rayCount = 1920 * 1080;
-  uint32_t queueCapacity = 262144;
+  uint32_t queueCapacity = 850000;
+  uint32_t materialCapacity = 850000;
+  uint32_t bounceCapacity = 1500000;
+  uint32_t octantCapacity = 262144;
   uint32_t numPrimitives = 4096;
   SceneType sceneType = SceneType::IndoorAtrium;
   mutable double results[23] = {0.0};
