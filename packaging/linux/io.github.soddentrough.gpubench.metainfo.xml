@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.soddentrough.gpubench</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>GPUBench</name>
+  <summary>Modern cross-backend GPU compute and ray tracing benchmark</summary>
+  <description>
+    <p>
+      GPUBench is a modern, cross-backend GPU compute and hardware-accelerated ray tracing benchmarking utility supporting Vulkan, AMD ROCm/HIP, and OpenCL.
+    </p>
+    <p>Features include:</p>
+    <ul>
+      <li>Comprehensive floating-point throughput testing (FP64, FP32, FP16, BF16, FP8, FP4, INT8, INT4).</li>
+      <li>VRAM bandwidth streaming and multi-level cache latency profiling.</li>
+      <li>Hardware ray tracing traversal, acceleration structure builds/refits, and wavefront scheduling.</li>
+      <li>Live hardware telemetry including GPU clocks, temperature, power draw, and VRAM utilization.</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">io.github.soddentrough.gpubench.desktop</launchable>
+  <url type="homepage">https://github.com/Soddentrough/GPUBench</url>
+  <url type="bugtracker">https://github.com/Soddentrough/GPUBench/issues</url>
+  <developer id="io.github.soddentrough">
+    <name>Soddentrough</name>
+  </developer>
+  <provides>
+    <binary>gpubench-gui</binary>
+    <binary>gpubench</binary>
+  </provides>
+  <releases>
+    <release version="1.4.5" date="2026-09-04">
+      <description>
+        <p>Added complete GPU profile telemetry embedding in JSON exports, ray scheduling wavefront compaction, and cross-platform desktop integration.</p>
+      </description>
+    </release>
+  </releases>
+  <content_rating type="oars-1.1" />
+</component>

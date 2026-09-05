@@ -1,0 +1,19 @@
+[Desktop Entry]
+Type=Application
+Version=1.5
+Name=GPUBench
+GenericName=GPU Compute Benchmark
+Comment=Modern cross-backend Vulkan, ROCm, and OpenCL benchmarking utility
+Exec=gpubench-gui %F
+Icon=io.github.soddentrough.gpubench
+Terminal=false
+Categories=System;Monitor;X-Benchmark;
+Keywords=GPU;Benchmark;Vulkan;ROCm;OpenCL;RayTracing;Compute;Hardware;
+StartupNotify=true
+StartupWMClass=gpubench-gui
+MimeType=application/x-gpubench+json;
+Actions=RunCLI;
+
+[Desktop Action RunCLI]
+Name=Run Benchmark (Terminal)
+Exec=x-terminal-emulator -e gpubench

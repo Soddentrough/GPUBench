@@ -1,0 +1,46 @@
+# bash completion for gpubench
+
+_gpubench() {
+    local cur prev words cword
+    _init_completion || return
+
+    local opts="--help --version --benchmarks --benchmark -b --groups --group -g --list-benchmarks --list-groups --device -d --list-devices --list-backends --backend -k --verbose --debug --dump-geometry --dump-renders --dump -s --scene -r --resolution -c --config --profile-snapshot --rra --output --output-file"
+
+    case "$prev" in
+        -k|--backend)
+            COMPREPLY=( $(compgen -W "auto vulkan opencl rocm" -- "$cur") )
+            return 0
+            ;;
+        -g|--group|--groups)
+            COMPREPLY=( $(compgen -W "compute memory raytracing graphics system all" -- "$cur") )
+            return 0
+            ;;
+        -s|--scene)
+            COMPREPLY=( $(compgen -W "indoor outdoor all" -- "$cur") )
+            return 0
+            ;;
+        -r|--resolution)
+            COMPREPLY=( $(compgen -W "auto 720p 1080p 1440p 4k 1024x1024" -- "$cur") )
+            return 0
+            ;;
+        --output)
+            COMPREPLY=( $(compgen -W "json csv" -- "$cur") )
+            return 0
+            ;;
+        --output-file)
+            _filedir
+            return 0
+            ;;
+        -b|--benchmark|--benchmarks)
+            COMPREPLY=( $(compgen -W "fp32 fp64 fp16 bf16 fp8 fp4 int8 int4 mem_bandwidth l1_cache pixel_fill ray_scheduling all" -- "$cur") )
+            return 0
+            ;;
+    esac
+
+    if [[ "$cur" == -* ]]; then
+        COMPREPLY=( $(compgen -W "$opts" -- "$cur") )
+        return 0
+    fi
+}
+
+complete -F _gpubench gpubench

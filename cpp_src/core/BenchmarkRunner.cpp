@@ -25,6 +25,7 @@
 #include "core/ComputeBackendFactory.h"
 #include "core/ResultFormatter.h"
 #include "utils/KernelPath.h"
+#include "utils/SleepInhibitor.h"
 // #include "benchmarks/Fp6Bench.h" // Temporarily disabled
 #include <algorithm>
 #include <chrono>
@@ -936,6 +937,7 @@ void BenchmarkRunner::printReport() {
 }
 
 void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
+  utils::SleepInhibitor sleepInhibitor("Running GPU compute benchmarks");
   initRunConfig(benchmarks_to_run);
 
   for (auto *context : contexts) {

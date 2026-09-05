@@ -1,0 +1,58 @@
+.TH GPUBENCH 1 "September 2026" "GPUBench 1.4.5" "User Commands"
+.SH NAME
+gpubench \- Modern cross-backend GPU compute and hardware ray tracing benchmark
+.SH SYNOPSIS
+.B gpubench
+[\fIOPTIONS\fR]
+.SH DESCRIPTION
+.B GPUBench
+is a high-performance cross-backend GPU compute and ray tracing benchmarking utility supporting Vulkan 1.4, AMD ROCm/HIP, and OpenCL. It evaluates raw compute capabilities (FP64, FP32, FP16, BF16, FP8, INT8), VRAM and cache bandwidth, hardware-accelerated BVH traversal, and dynamic wavefront ray scheduling (Work Lists / DGC).
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help message and exit.
+.TP
+\fB\-\-version\fR
+Display program version information and exit.
+.TP
+\fB\-b\fR, \fB\-\-benchmarks\fR \fIBENCHMARKS\fR
+Comma-separated list of benchmarks to run (e.g., fp32,fp64,mem_bandwidth,ray_scheduling).
+.TP
+\fB\-g\fR, \fB\-\-groups\fR \fIGROUPS\fR
+Benchmark groups to run: compute, memory, raytracing, graphics, system, or all.
+.TP
+\fB\-\-list\-benchmarks\fR
+List all available benchmarks organized by group.
+.TP
+\fB\-\-list\-groups\fR
+List available benchmark groups.
+.TP
+\fB\-d\fR, \fB\-\-device\fR \fIINDEX\fR
+Specify target GPU device index (e.g., 0, 1).
+.TP
+\fB\-l\fR, \fB\-\-list\-devices\fR
+List all detected GPU compute devices across backends.
+.TP
+\fB\-\-list\-backends\fR
+List available compute backends.
+.TP
+\fB\-k\fR, \fB\-\-backend\fR \fIBACKEND\fR
+Specify compute backend: auto, vulkan, opencl, rocm (default: auto).
+.TP
+\fB\-s\fR, \fB\-\-scene\fR \fISCENE\fR
+Ray tracing scenario: indoor, outdoor, all (default: indoor).
+.TP
+\fB\-r\fR, \fB\-\-resolution\fR \fIRESPRESET\fR
+Resolution preset: auto, 720p, 1080p, 1440p, 4k, 1024x1024, or custom WxH.
+.TP
+\fB\-\-output\fR \fIFORMAT\fR
+Machine-readable output format: json or csv.
+.TP
+\fB\-\-output\-file\fR \fIFILE\fR
+Write machine-readable output to this file instead of stdout.
+.SH SEE ALSO
+.BR gpubench-gui (1)
+.SH AUTHORS
+GPUBench was written by Soddentrough and contributors.
+.SH REPORTING BUGS
+Report bugs to: <https://github.com/Soddentrough/GPUBench/issues>
