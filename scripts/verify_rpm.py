@@ -192,6 +192,8 @@ def verify_directories(entries: List[Dict[str, Any]]) -> Tuple[bool, List[str], 
     for item in entries:
         if item["is_dir"]:
             p = item["path"].rstrip("/")
+            if p.startswith("/usr/lib/.build-id"):
+                continue
             owned_dirs.append(p)
             if p in FORBIDDEN_OWNED_DIRS:
                 errors.append(
@@ -231,6 +233,9 @@ def verify_permissions(entries: List[Dict[str, Any]]) -> Tuple[bool, List[str]]:
             # Directories must be drwxr-xr-x
             if not mode.startswith("drwxr-xr-x"):
                 errors.append(f"Directory '{path}' has non-standard permissions: '{mode}' (expected 'drwxr-xr-x')")
+        elif mode.startswith("l"):
+            # Symlinks always show lrwxrwxrwx in POSIX/rpm
+            continue
         else:
             # Data/asset files: should not have unnecessary execute bits
             if "x" in mode[1:4] and not path.endswith(".sh"):

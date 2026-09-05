@@ -249,6 +249,9 @@ if(WIN32)
         COMPILE_FLAGS "-I${CMAKE_CURRENT_SOURCE_DIR}/packaging/windows"
     )
     list(APPEND SOURCES packaging/windows/gpubench.rc)
+    if(MSVC)
+        list(APPEND SOURCES packaging/windows/gpubench.manifest)
+    endif()
 endif()
 
 add_library(gpubench_lib STATIC ${LIB_SOURCES})
@@ -330,6 +333,11 @@ if(HIP_FOUND)
     # endif()
     target_compile_definitions(gpubench PRIVATE HAVE_HIPRTC __HIP_PLATFORM_AMD__)
     target_compile_definitions(gpubench_lib PRIVATE HAVE_HIPRTC __HIP_PLATFORM_AMD__)
+endif()
+
+if(APPLE)
+    target_link_libraries(gpubench PRIVATE "-framework IOKit" "-framework CoreFoundation")
+    target_link_libraries(gpubench_lib PRIVATE "-framework IOKit" "-framework CoreFoundation")
 endif()
 
 # Compiler definitions for conditional compilation
@@ -577,12 +585,13 @@ elseif(UNIX AND NOT APPLE)
     # OpenCL/ROCm are OPTIONAL due to dynamic loading
     set(CPACK_RPM_PACKAGE_REQUIRES "vulkan-loader, glibc, libgcc, libstdc++")
     file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tmp")
-    set(CPACK_RPM_SPEC_MORE_DEFINE "%define _tmppath ${CMAKE_CURRENT_BINARY_DIR}/tmp")
+    set(CPACK_RPM_SPEC_MORE_DEFINE "%define _tmppath ${CMAKE_CURRENT_BINARY_DIR}/tmp\n%define _build_id_links none")
 
     # Exclude system directories from RPM filelist to prevent ownership conflicts with filesystem package
     set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST
         /etc /etc/init.d /usr /usr/bin
         /usr/include /usr/lib /usr/libx32 /usr/lib64
+        /usr/lib/.build-id
         /usr/share /usr/share/aclocal /usr/share/doc
         /usr/share/applications
         /usr/share/bash-completion

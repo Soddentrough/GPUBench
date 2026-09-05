@@ -3,8 +3,10 @@
 // Icon
 1 ICON "icon.ico"
 
-// Manifest
+// Manifest (embedded directly for MinGW; MSVC linker handles via /MANIFESTINPUT)
+#ifndef _MSC_VER
 1 RT_MANIFEST "gpubench.manifest"
+#endif
 
 // Version Info
 VS_VERSION_INFO VERSIONINFO
