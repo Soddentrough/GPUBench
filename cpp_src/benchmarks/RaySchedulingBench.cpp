@@ -421,6 +421,9 @@ const char *RaySchedulingBench::GetSubCategory(uint32_t config_idx) const {
 }
 
 std::string RaySchedulingBench::GetConfigCaveat(uint32_t config_idx) const {
+  if (config_idx == 2 && isDGCAvailable && !isDGCExecutionSetAvailable) {
+    return "VK_EXT_device_generated_commands IndirectExecutionSet pipeline binding unsupported for compute on this driver; executed via standard indirect dispatch fallback.";
+  }
   if (!isDGCAvailable) {
     if (config_idx == 2 || config_idx == 6 || config_idx == 10 ||
         config_idx == 14 || config_idx == 22 || config_idx == 25 ||
@@ -884,54 +887,74 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
 
       dgcLayoutStandard = vContext->createIndirectCommandsLayout(layoutInfoStd);
 
-      // 2. Specialized IndirectCommandsLayout (ExecutionSet Token + PushConstant Token + Dispatch Token)
-      VkIndirectCommandsExecutionSetTokenEXT execToken{};
-      execToken.type = VK_INDIRECT_EXECUTION_SET_INFO_TYPE_PIPELINES_EXT;
-      execToken.shaderStages = VK_SHADER_STAGE_COMPUTE_BIT;
+      // 2. Specialized IndirectCommandsLayout & ExecutionSet (only if driver supports compute pipeline binding in DGC)
+      if (vContext->isDGCExecutionSetSupported()) {
+        try {
+          VkIndirectCommandsExecutionSetTokenEXT execToken{};
+          execToken.type = VK_INDIRECT_EXECUTION_SET_INFO_TYPE_PIPELINES_EXT;
+          execToken.shaderStages = VK_SHADER_STAGE_COMPUTE_BIT;
 
-      VkIndirectCommandsLayoutTokenEXT tokensSpec[3]{};
-      tokensSpec[0].sType = VK_STRUCTURE_TYPE_INDIRECT_COMMANDS_LAYOUT_TOKEN_EXT;
-      tokensSpec[0].type = VK_INDIRECT_COMMANDS_TOKEN_TYPE_EXECUTION_SET_EXT;
-      tokensSpec[0].data.pExecutionSet = &execToken;
-      tokensSpec[0].offset = 0; // pipelineIndex at offset 0
+          VkIndirectCommandsLayoutTokenEXT tokensSpec[3]{};
+          tokensSpec[0].sType = VK_STRUCTURE_TYPE_INDIRECT_COMMANDS_LAYOUT_TOKEN_EXT;
+          tokensSpec[0].type = VK_INDIRECT_COMMANDS_TOKEN_TYPE_EXECUTION_SET_EXT;
+          tokensSpec[0].data.pExecutionSet = &execToken;
+          tokensSpec[0].offset = 0; // pipelineIndex at offset 0
 
-      tokensSpec[1].sType = VK_STRUCTURE_TYPE_INDIRECT_COMMANDS_LAYOUT_TOKEN_EXT;
-      tokensSpec[1].type = VK_INDIRECT_COMMANDS_TOKEN_TYPE_PUSH_CONSTANT_EXT;
-      tokensSpec[1].data.pPushConstant = &pcToken;
-      tokensSpec[1].offset = sizeof(uint32_t); // offset 4
+          tokensSpec[1].sType = VK_STRUCTURE_TYPE_INDIRECT_COMMANDS_LAYOUT_TOKEN_EXT;
+          tokensSpec[1].type = VK_INDIRECT_COMMANDS_TOKEN_TYPE_PUSH_CONSTANT_EXT;
+          tokensSpec[1].data.pPushConstant = &pcToken;
+          tokensSpec[1].offset = sizeof(uint32_t); // offset 4
 
-      tokensSpec[2].sType = VK_STRUCTURE_TYPE_INDIRECT_COMMANDS_LAYOUT_TOKEN_EXT;
-      tokensSpec[2].type = VK_INDIRECT_COMMANDS_TOKEN_TYPE_DISPATCH_EXT;
-      tokensSpec[2].offset = sizeof(uint32_t) * 9; // offset 36
+          tokensSpec[2].sType = VK_STRUCTURE_TYPE_INDIRECT_COMMANDS_LAYOUT_TOKEN_EXT;
+          tokensSpec[2].type = VK_INDIRECT_COMMANDS_TOKEN_TYPE_DISPATCH_EXT;
+          tokensSpec[2].offset = sizeof(uint32_t) * 9; // offset 36
 
-      VkIndirectCommandsLayoutCreateInfoEXT layoutInfoSpec{VK_STRUCTURE_TYPE_INDIRECT_COMMANDS_LAYOUT_CREATE_INFO_EXT};
-      layoutInfoSpec.shaderStages = VK_SHADER_STAGE_COMPUTE_BIT;
-      layoutInfoSpec.indirectStride = sizeof(uint32_t) * 12; // 48 bytes
-      layoutInfoSpec.pipelineLayout = vContext->getVkPipelineLayout(kernelMaterialSpecialized[0]);
-      layoutInfoSpec.tokenCount = 3;
-      layoutInfoSpec.pTokens = tokensSpec;
+          VkIndirectCommandsLayoutCreateInfoEXT layoutInfoSpec{VK_STRUCTURE_TYPE_INDIRECT_COMMANDS_LAYOUT_CREATE_INFO_EXT};
+          layoutInfoSpec.shaderStages = VK_SHADER_STAGE_COMPUTE_BIT;
+          layoutInfoSpec.indirectStride = sizeof(uint32_t) * 12; // 48 bytes
+          layoutInfoSpec.pipelineLayout = vContext->getVkPipelineLayout(kernelMaterialSpecialized[0]);
+          layoutInfoSpec.tokenCount = 3;
+          layoutInfoSpec.pTokens = tokensSpec;
 
-      dgcLayoutSpecialized = vContext->createIndirectCommandsLayout(layoutInfoSpec);
+          dgcLayoutSpecialized = vContext->createIndirectCommandsLayout(layoutInfoSpec);
 
-      // 3. Indirect Execution Set with 8 specialized material pipelines
-      VkIndirectExecutionSetPipelineInfoEXT iesPipeInfo{VK_STRUCTURE_TYPE_INDIRECT_EXECUTION_SET_PIPELINE_INFO_EXT};
-      iesPipeInfo.initialPipeline = vContext->getVkPipeline(kernelMaterialSpecialized[0]);
-      iesPipeInfo.maxPipelineCount = 8;
+          // 3. Indirect Execution Set with 8 specialized material pipelines
+          VkIndirectExecutionSetPipelineInfoEXT iesPipeInfo{VK_STRUCTURE_TYPE_INDIRECT_EXECUTION_SET_PIPELINE_INFO_EXT};
+          iesPipeInfo.initialPipeline = vContext->getVkPipeline(kernelMaterialSpecialized[0]);
+          iesPipeInfo.maxPipelineCount = 8;
 
-      VkIndirectExecutionSetCreateInfoEXT iesInfo{VK_STRUCTURE_TYPE_INDIRECT_EXECUTION_SET_CREATE_INFO_EXT};
-      iesInfo.type = VK_INDIRECT_EXECUTION_SET_INFO_TYPE_PIPELINES_EXT;
-      iesInfo.info.pPipelineInfo = &iesPipeInfo;
+          VkIndirectExecutionSetCreateInfoEXT iesInfo{VK_STRUCTURE_TYPE_INDIRECT_EXECUTION_SET_CREATE_INFO_EXT};
+          iesInfo.type = VK_INDIRECT_EXECUTION_SET_INFO_TYPE_PIPELINES_EXT;
+          iesInfo.info.pPipelineInfo = &iesPipeInfo;
 
-      dgcExecutionSetSpecialized = vContext->createIndirectExecutionSet(iesInfo);
-      for (uint32_t m = 0; m < 8; ++m) {
-        vContext->updateIndirectExecutionSetPipeline(dgcExecutionSetSpecialized, m, kernelMaterialSpecialized[m]);
+          dgcExecutionSetSpecialized = vContext->createIndirectExecutionSet(iesInfo);
+          for (uint32_t m = 0; m < 8; ++m) {
+            vContext->updateIndirectExecutionSetPipeline(dgcExecutionSetSpecialized, m, kernelMaterialSpecialized[m]);
+          }
+          isDGCExecutionSetAvailable = true;
+        } catch (const std::exception &e) {
+          std::cerr << "Warning: DGC ExecutionSet initialization failed (" << e.what()
+                    << "), specialized PSOs will use indirect dispatch fallback." << std::endl;
+          if (dgcLayoutSpecialized != VK_NULL_HANDLE) {
+            vContext->destroyIndirectCommandsLayout(dgcLayoutSpecialized);
+            dgcLayoutSpecialized = VK_NULL_HANDLE;
+          }
+          if (dgcExecutionSetSpecialized != VK_NULL_HANDLE) {
+            vContext->destroyIndirectExecutionSet(dgcExecutionSetSpecialized);
+            dgcExecutionSetSpecialized = VK_NULL_HANDLE;
+          }
+          isDGCExecutionSetAvailable = false;
+        }
       }
 
       // 4. Query preprocess memory requirements & allocate preprocess buffer
       VkDeviceSize memReqStd = vContext->getGeneratedCommandsMemoryRequirements(
           dgcLayoutStandard, VK_NULL_HANDLE, 32, kernelMaterial);
-      VkDeviceSize memReqSpec = vContext->getGeneratedCommandsMemoryRequirements(
-          dgcLayoutSpecialized, dgcExecutionSetSpecialized, 32, nullptr);
+      VkDeviceSize memReqSpec = 0;
+      if (isDGCExecutionSetAvailable) {
+        memReqSpec = vContext->getGeneratedCommandsMemoryRequirements(
+            dgcLayoutSpecialized, dgcExecutionSetSpecialized, 32, nullptr);
+      }
       dgcPreprocessBufferSize = std::max(memReqStd, memReqSpec);
       if (dgcPreprocessBufferSize == 0) {
         dgcPreprocessBufferSize = 2048;
@@ -950,11 +973,13 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
       dgcInfoStandard.preprocessBufferSize = dgcPreprocessBufferSize;
       dgcInfoStandard.maxSequenceCount = 32;
 
-      dgcInfoSpecialized = dgcInfoStandard;
-      dgcInfoSpecialized.layout = dgcLayoutSpecialized;
-      dgcInfoSpecialized.executionSet = dgcExecutionSetSpecialized;
-      dgcInfoSpecialized.sequenceBufferOffset = sizeof(uint32_t) * 12 * 32;
-      dgcInfoSpecialized.maxSequenceCount = 8;
+      if (isDGCExecutionSetAvailable) {
+        dgcInfoSpecialized = dgcInfoStandard;
+        dgcInfoSpecialized.layout = dgcLayoutSpecialized;
+        dgcInfoSpecialized.executionSet = dgcExecutionSetSpecialized;
+        dgcInfoSpecialized.sequenceBufferOffset = sizeof(uint32_t) * 12 * 32;
+        dgcInfoSpecialized.maxSequenceCount = 8;
+      }
 
       dgcInfoOctant = dgcInfoStandard;
       dgcInfoOctant.maxSequenceCount = 1;
@@ -1093,7 +1118,7 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     break;
   }
   case 2: { // Material Divergence - Work Lists / DGC (Specialized Micro-Kernels, Pure Shading)
-    if (isDGCAvailable) {
+    if (isDGCAvailable && isDGCExecutionSetAvailable) {
       vContext->dispatchDGCSequence(kernelMaterialSpecialized[0], dgcInfoSpecialized);
     } else {
       vContext->dispatchIndirectSequence(kernelMaterial, indirectBuffer, materialBatchesBreakdown);
@@ -1474,7 +1499,7 @@ void RaySchedulingBench::performVisualVerification() {
   if (profFile.is_open()) {
     profFile << std::fixed << std::setprecision(4);
     profFile << "{\n";
-    profFile << "  \"gpu\": \"AMD Radeon AI PRO R9700 (GFX1201)\",\n";
+    profFile << "  \"gpu\": \"" << context->getCurrentDeviceInfo().name << "\",\n";
     profFile << "  \"scene\": \"" << (sceneType == SceneType::AAAOutdoorForest ? "Open-World Forest" : ((sceneType == SceneType::OutdoorLandscape) ? "Outdoor Landscape" : ((sceneType == SceneType::IndoorAtrium) ? "Indoor Atrium" : "Showroom Studio"))) << "\",\n";
     profFile << "  \"resolution\": \"" << width << "x" << height << " (" << (width * height) << " primary rays)\",\n";
     profFile << "  \"traditional\": {\n";
@@ -1564,7 +1589,7 @@ void RaySchedulingBench::performVisualVerification() {
     float pt1DiffPct = (float)pt1Metrics.diffPixels / (float)pt1Metrics.totalPixels * 100.0f;
     pt1Prof << std::fixed << std::setprecision(4);
     pt1Prof << "{\n";
-    pt1Prof << "  \"gpu\": \"AMD Radeon AI PRO R9700 (GFX1201)\",\n";
+    pt1Prof << "  \"gpu\": \"" << context->getCurrentDeviceInfo().name << "\",\n";
     pt1Prof << "  \"scene\": \"" << (sceneType == SceneType::AAAOutdoorForest ? "Open-World Forest" : ((sceneType == SceneType::OutdoorLandscape) ? "Outdoor Landscape" : ((sceneType == SceneType::IndoorAtrium) ? "Indoor Atrium" : "Showroom Studio"))) << " - Path Tracing (1 SPP)\",\n";
     pt1Prof << "  \"resolution\": \"" << width << "x" << height << " (" << (width * height) << " primary rays)\",\n";
     pt1Prof << "  \"traditional\": { \"fps\": " << pt1FpsTrad << ", \"mrays\": " << pt1MRaysTrad << ", \"frame_ms\": " << pt1MsTrad << " },\n";
@@ -1630,7 +1655,7 @@ void RaySchedulingBench::performVisualVerification() {
     float pt16DiffPct = (float)pt16Metrics.diffPixels / (float)pt16Metrics.totalPixels * 100.0f;
     pt16Prof << std::fixed << std::setprecision(4);
     pt16Prof << "{\n";
-    pt16Prof << "  \"gpu\": \"AMD Radeon AI PRO R9700 (GFX1201)\",\n";
+    pt16Prof << "  \"gpu\": \"" << context->getCurrentDeviceInfo().name << "\",\n";
     pt16Prof << "  \"scene\": \"" << (sceneType == SceneType::AAAOutdoorForest ? "Open-World Forest" : ((sceneType == SceneType::OutdoorLandscape) ? "Outdoor Landscape" : ((sceneType == SceneType::IndoorAtrium) ? "Indoor Atrium" : "Showroom Studio"))) << " - Path Tracing (16 SPP)\",\n";
     pt16Prof << "  \"resolution\": \"" << width << "x" << height << " (" << (width * height) << " primary rays)\",\n";
     pt16Prof << "  \"traditional\": { \"fps\": " << pt16FpsTrad << ", \"mrays\": " << pt16MRaysTrad << ", \"frame_ms\": " << pt16MsTrad << " },\n";
@@ -1661,26 +1686,35 @@ void RaySchedulingBench::performVisualVerification() {
   // Automatically stitch comparison image and 2x grid
   std::string scriptPath = findScriptPath("make_triptych.py");
   if (!scriptPath.empty()) {
-    std::string triptychCmd = "python3 " + scriptPath + " " + tag;
+#ifdef _WIN32
+    std::string py = "python ";
+#else
+    std::string py = "python3 ";
+#endif
+    std::string triptychCmd = py + scriptPath + " " + tag;
     (void)std::system(triptychCmd.c_str());
-    std::string pt1Cmd = "python3 " + scriptPath + " " + tag + "_pt1";
+    std::string pt1Cmd = py + scriptPath + " " + tag + "_pt1";
     (void)std::system(pt1Cmd.c_str());
-    std::string pt16Cmd = "python3 " + scriptPath + " " + tag + "_pt16";
+    std::string pt16Cmd = py + scriptPath + " " + tag + "_pt16";
     (void)std::system(pt16Cmd.c_str());
-    std::string techCmd = "python3 " + scriptPath + " " + tag + "_tech";
+    std::string techCmd = py + scriptPath + " " + tag + "_tech";
     (void)std::system(techCmd.c_str());
-    std::string gridCmd = "python3 " + scriptPath + " grid";
+    std::string gridCmd = py + scriptPath + " grid";
     (void)std::system(gridCmd.c_str());
-    std::string techGridCmd = "python3 " + scriptPath + " technique_grid";
+    std::string techGridCmd = py + scriptPath + " technique_grid";
     (void)std::system(techGridCmd.c_str());
-    std::string ptGridCmd = "python3 " + scriptPath + " pt_grid";
+    std::string ptGridCmd = py + scriptPath + " pt_grid";
     (void)std::system(ptGridCmd.c_str());
-    std::string pipeCmd = "python3 " + scriptPath + " " + tag + "_pipeline";
+    std::string pipeCmd = py + scriptPath + " " + tag + "_pipeline";
     (void)std::system(pipeCmd.c_str());
   }
   std::string blenderScript = findScriptPath("compare_with_blender.py");
   if (!blenderScript.empty() && (sceneType == SceneType::IndoorAtrium || sceneType == SceneType::Showroom)) {
+#ifdef _WIN32
+    std::string blenderCmd = "python " + blenderScript;
+#else
     std::string blenderCmd = "python3 " + blenderScript;
+#endif
     (void)std::system(blenderCmd.c_str());
   }
 
@@ -1880,7 +1914,7 @@ void RaySchedulingBench::dumpPipelineBreakdown(const std::string &tag) {
   if (jf.is_open()) {
     jf << std::fixed << std::setprecision(4);
     jf << "{\n";
-    jf << "  \"gpu\": \"AMD Radeon AI PRO R9700 (GFX1201)\",\n";
+    jf << "  \"gpu\": \"" << context->getCurrentDeviceInfo().name << "\",\n";
     jf << "  \"scene\": \"" << (sceneType == SceneType::AAAOutdoorForest ? "Open-World Forest" : ((sceneType == SceneType::OutdoorLandscape) ? "Outdoor Landscape" : ((sceneType == SceneType::IndoorAtrium) ? "Indoor Atrium" : "Showroom Studio"))) << "\",\n";
     jf << "  \"tag\": \"" << tag << "\",\n";
     jf << "  \"resolution\": \"" << width << "x" << height << "\",\n";

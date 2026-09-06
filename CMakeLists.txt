@@ -374,6 +374,26 @@ add_custom_command(TARGET gpubench POST_BUILD
     COMMENT "Copying kernels directory to project root"
 )
 
+# Copy MinGW runtime DLLs to build directory so binary runs standalone out of the box
+if(MINGW)
+    find_program(MINGW_GCC gcc)
+    if(MINGW_GCC)
+        get_filename_component(MINGW_BIN_DIR ${MINGW_GCC} DIRECTORY)
+        add_custom_command(TARGET gpubench POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${MINGW_BIN_DIR}/libstdc++-6.dll"
+            "${CMAKE_CURRENT_BINARY_DIR}/"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${MINGW_BIN_DIR}/libgcc_s_seh-1.dll"
+            "${CMAKE_CURRENT_BINARY_DIR}/"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${MINGW_BIN_DIR}/libwinpthread-1.dll"
+            "${CMAKE_CURRENT_BINARY_DIR}/"
+            COMMENT "Copying MinGW runtime DLLs to binary directory"
+        )
+    endif()
+endif()
+
 # Build and package Rust GUI if Cargo is available
 # GPUBENCH_REQUIRE_GUI (default ON): require cargo for the Rust GUI build.
 # Set -DGPUBENCH_REQUIRE_GUI=OFF to build/package a CLI-only release without cargo.

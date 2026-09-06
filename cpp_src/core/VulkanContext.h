@@ -100,6 +100,9 @@ public:
   bool isDGCSupported() const {
     return dgcSupported;
   }
+  bool isDGCExecutionSetSupported() const {
+    return dgcExecutionSetSupported;
+  }
   bool isMaintenance5Supported() const {
     return maintenance5Supported;
   }
@@ -268,6 +271,7 @@ private:
   bool serSupported = false;
   bool maintenance5Supported = false;
   bool dgcSupported = false;
+  bool dgcExecutionSetSupported = false;
 
   // DGC (VK_EXT_device_generated_commands) function pointers
   PFN_vkGetGeneratedCommandsMemoryRequirementsEXT vkGetGeneratedCommandsMemoryRequirementsEXT_ptr = nullptr;

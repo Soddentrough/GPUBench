@@ -141,6 +141,7 @@ public:
     return GetConfigSupportLimitation(config_idx);
   }
   bool IsDGCAvailable() const { return isDGCAvailable; }
+  bool IsDGCExecutionSetAvailable() const { return isDGCExecutionSetAvailable; }
   std::string GetConfigCaveat(uint32_t config_idx = 0) const override;
   std::string GetConfigCaveat(uint32_t config_idx,
                               const DeviceInfo &info,
@@ -248,6 +249,7 @@ private:
 
   // DGC (VK_EXT_device_generated_commands) Objects & Execution Infos
   bool isDGCAvailable = false;
+  bool isDGCExecutionSetAvailable = false;
   VkIndirectCommandsLayoutEXT dgcLayoutStandard = VK_NULL_HANDLE;
   VkIndirectCommandsLayoutEXT dgcLayoutSpecialized = VK_NULL_HANDLE;
   VkIndirectExecutionSetEXT dgcExecutionSetSpecialized = VK_NULL_HANDLE;

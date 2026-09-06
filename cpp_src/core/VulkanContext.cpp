@@ -134,11 +134,12 @@ void VulkanContext::createInstance() {
   };
 
   headlessSurfaceSupported = false;
-  if (hasInstExt(VK_KHR_SURFACE_EXTENSION_NAME) &&
-      hasInstExt(VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME)) {
+  if (hasInstExt(VK_KHR_SURFACE_EXTENSION_NAME)) {
     extensions.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
-    extensions.push_back(VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME);
-    headlessSurfaceSupported = true;
+    if (hasInstExt(VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME)) {
+      extensions.push_back(VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME);
+      headlessSurfaceSupported = true;
+    }
   }
 
   createInfo.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
@@ -746,8 +747,14 @@ void VulkanContext::createDevice() {
     throw std::runtime_error("failed to create logical device!");
   }
 
-  // Load DGC function pointers if extension is enabled
+  // Load DGC function pointers and query DGC properties if extension is enabled
   if (hasExt(VK_EXT_DEVICE_GENERATED_COMMANDS_EXTENSION_NAME)) {
+    VkPhysicalDeviceDeviceGeneratedCommandsPropertiesEXT dgcProperties{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEVICE_GENERATED_COMMANDS_PROPERTIES_EXT};
+    VkPhysicalDeviceProperties2 props2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
+    props2.pNext = &dgcProperties;
+    vkGetPhysicalDeviceProperties2(physicalDevice, &props2);
+
     vkGetGeneratedCommandsMemoryRequirementsEXT_ptr =
         (PFN_vkGetGeneratedCommandsMemoryRequirementsEXT)vkGetDeviceProcAddr(
             device, "vkGetGeneratedCommandsMemoryRequirementsEXT");
@@ -774,16 +781,21 @@ void VulkanContext::createDevice() {
             device, "vkUpdateIndirectExecutionSetPipelineEXT");
 
     dgcSupported = (dgcFeatures.deviceGeneratedCommands == VK_TRUE) &&
+                   ((dgcProperties.supportedIndirectCommandsShaderStages & VK_SHADER_STAGE_COMPUTE_BIT) != 0) &&
                    (vkGetGeneratedCommandsMemoryRequirementsEXT_ptr != nullptr) &&
                    (vkCmdPreprocessGeneratedCommandsEXT_ptr != nullptr) &&
                    (vkCmdExecuteGeneratedCommandsEXT_ptr != nullptr) &&
                    (vkCreateIndirectCommandsLayoutEXT_ptr != nullptr) &&
-                   (vkDestroyIndirectCommandsLayoutEXT_ptr != nullptr) &&
+                   (vkDestroyIndirectCommandsLayoutEXT_ptr != nullptr);
+
+    dgcExecutionSetSupported = dgcSupported &&
+                   ((dgcProperties.supportedIndirectCommandsShaderStagesPipelineBinding & VK_SHADER_STAGE_COMPUTE_BIT) != 0) &&
                    (vkCreateIndirectExecutionSetEXT_ptr != nullptr) &&
                    (vkDestroyIndirectExecutionSetEXT_ptr != nullptr) &&
                    (vkUpdateIndirectExecutionSetPipelineEXT_ptr != nullptr);
   } else {
     dgcSupported = false;
+    dgcExecutionSetSupported = false;
   }
   vkGetBufferDeviceAddressKHR_ptr =
       (PFN_vkGetBufferDeviceAddressKHR)vkGetDeviceProcAddr(
@@ -849,9 +861,10 @@ ComputeBuffer VulkanContext::createBuffer(size_t size, const void *host_ptr) {
   bufferInfo.size = size;
   bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
                      VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-                     VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+                     VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                     VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
 
-  if (getCurrentDeviceInfo().rayTracingSupport) {
+  if (getCurrentDeviceInfo().rayTracingSupport || dgcSupported) {
     bufferInfo.usage |=
         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
         VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
@@ -876,7 +889,7 @@ ComputeBuffer VulkanContext::createBuffer(size_t size, const void *host_ptr) {
       memRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
   VkMemoryAllocateFlagsInfo flagsInfo{};
-  if (getCurrentDeviceInfo().rayTracingSupport) {
+  if (getCurrentDeviceInfo().rayTracingSupport || dgcSupported) {
     flagsInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
     flagsInfo.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
     allocInfo.pNext = &flagsInfo;
@@ -890,11 +903,15 @@ ComputeBuffer VulkanContext::createBuffer(size_t size, const void *host_ptr) {
 
   vkBindBufferMemory(device, vulkanBuffer->buffer, vulkanBuffer->memory, 0);
 
-  if (getCurrentDeviceInfo().rayTracingSupport) {
+  if (getCurrentDeviceInfo().rayTracingSupport || dgcSupported) {
     VkBufferDeviceAddressInfo bdaInfo{
         VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO};
     bdaInfo.buffer = vulkanBuffer->buffer;
-    vulkanBuffer->address = vkGetBufferDeviceAddress(device, &bdaInfo);
+    if (vkGetBufferDeviceAddressKHR_ptr) {
+      vulkanBuffer->address = vkGetBufferDeviceAddressKHR_ptr(device, &bdaInfo);
+    } else {
+      vulkanBuffer->address = vkGetBufferDeviceAddress(device, &bdaInfo);
+    }
   } else {
     vulkanBuffer->address = 0;
   }
