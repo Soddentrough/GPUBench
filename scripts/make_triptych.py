@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from datetime import datetime
 import json
 import os
 import shutil
@@ -35,7 +36,7 @@ def get_scene_paths(scene_tag):
         }
     elif scene_tag == "forest":
         return {
-            "title": "AAA OPEN-WORLD FOREST SCENARIO (1,001,280 Triangles)",
+            "title": "OPEN-WORLD FOREST SCENARIO (1,001,280 Triangles)",
             "subtitle": "512×512 Terrain, 850 Multi-Tier Trees, Riverbed Bathymetry, 4,000 Understory Plants, 8 Nature PBR Shaders",
             "res_tag": "4K UHD (3840×2160, 8,294,400 primary rays)",
             "p1": "renders/render_forest_traditional_megakernel.png",
@@ -134,12 +135,23 @@ def process_scene(scene_tag):
     # 1. Main Header Banner
     draw.rectangle([(0, 0), (total_w, banner_h - 56)], fill=(15, 23, 42))
     draw.text((pad + 12, 16), "GPUBENCH ARCHITECTURAL RAY SCHEDULING BENCHMARK", fill=(248, 250, 252), font=title_font)
+    timestamp_str = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
     draw.text(
         (pad + 12, 70),
-        f"AMD Radeon AI PRO R9700 (GFX1201 / Vulkan 1.4)  •  {cfg['title']}  •  Performance Comparison",
+        f"AMD Radeon AI PRO R9700 (GFX1201 / Vulkan 1.4)  •  {cfg['title']}  •  Performance Comparison  •  Rendered: {timestamp_str}",
         fill=(148, 163, 184),
         font=subtitle_font,
     )
+
+    # Header Timestamp Badge (Top-Right)
+    ts_badge_text = f"RENDERED: {timestamp_str}"
+    ts_tbox = draw.textbbox((0, 0), ts_badge_text, font=pill_font)
+    ts_w = ts_tbox[2] - ts_tbox[0] + 28
+    ts_h = 34
+    ts_x = total_w - pad - ts_w - 12
+    ts_y = 20
+    draw.rounded_rectangle([(ts_x, ts_y), (ts_x + ts_w, ts_y + ts_h)], radius=6, fill=(24, 32, 47), outline=(56, 189, 248, 200), width=1)
+    draw.text((ts_x + 14, ts_y + 7), ts_badge_text, fill=(241, 245, 249), font=pill_font)
 
     # Column Headers
     y_col = banner_h - 52
@@ -214,20 +226,21 @@ def process_scene(scene_tag):
 
 
 def generate_2x_grid():
-    all_scenes = ["showroom", "indoor", "outdoor", "forest", "pathtracing"]
+    all_scenes = ["showroom", "indoor", "outdoor", "forest"]
     scenes = [s for s in all_scenes if os.path.exists(get_scene_paths(s)["p1"]) and os.path.exists(get_scene_paths(s)["p2"]) and os.path.exists(get_scene_paths(s)["profile"])]
     if not scenes:
         scenes = ["indoor"]
     if len(scenes) == 1:
         process_scene(scenes[0])
         single_comp = os.path.join("renders", f"render_{scenes[0]}_comparison.png")
-        if os.path.exists(single_comp):
-            shutil.copy(single_comp, "renders/render_comparison_grid.png")
-            print(f"[make_triptych] Single active scene {scenes[0]}: synchronized to renders/render_comparison_grid.png")
+        grid_target = "renders/render_comparison_grid.png"
+        if not os.path.exists(grid_target) and os.path.exists(single_comp):
+            shutil.copy(single_comp, grid_target)
+            print(f"[make_triptych] Single active scene {scenes[0]}: initialized to {grid_target}")
             artifact_dir = os.environ.get("ARTIFACT_DIR")
             if artifact_dir and os.path.isdir(artifact_dir):
                 shutil.copy(single_comp, os.path.join(artifact_dir, "render_comparison_grid.png"))
-            return
+        return
     cell_w, cell_h = 1600, 900
     pad = 20
     banner_h = 190
@@ -250,12 +263,23 @@ def generate_2x_grid():
     # 1. Main Header Banner
     draw.rectangle([(0, 0), (grid_w, banner_h - 56)], fill=(15, 23, 42))
     draw.text((pad + 12, 16), "GPUBENCH ARCHITECTURAL RAY SCHEDULING BENCHMARK", fill=(248, 250, 252), font=title_font)
+    timestamp_str = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
     draw.text(
         (pad + 12, 74),
-        "AMD Radeon AI PRO R9700 (GFX1201 / Vulkan 1.4)  •  4-Scenario Comparative Grid  •  Bit-Exact Visual Parity & Speedup",
+        f"AMD Radeon AI PRO R9700 (GFX1201 / Vulkan 1.4)  •  4-Scenario Comparative Grid  •  Bit-Exact Visual Parity & Speedup  •  Rendered: {timestamp_str}",
         fill=(148, 163, 184),
         font=subtitle_font,
     )
+
+    # Header Timestamp Badge (Top-Right)
+    ts_badge_text = f"RENDERED: {timestamp_str}"
+    ts_tbox = draw.textbbox((0, 0), ts_badge_text, font=pill_font)
+    ts_w = ts_tbox[2] - ts_tbox[0] + 28
+    ts_h = 36
+    ts_x = grid_w - pad - ts_w - 12
+    ts_y = 20
+    draw.rounded_rectangle([(ts_x, ts_y), (ts_x + ts_w, ts_y + ts_h)], radius=6, fill=(24, 32, 47), outline=(56, 189, 248, 200), width=1)
+    draw.text((ts_x + 14, ts_y + 8), ts_badge_text, fill=(241, 245, 249), font=pill_font)
 
     # Column Headers
     y_col = banner_h - 52

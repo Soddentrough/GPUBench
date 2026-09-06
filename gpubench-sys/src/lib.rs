@@ -56,7 +56,8 @@ pub mod ffi {
             dump_renders: bool,
             render_width: u32,
             render_height: u32,
-            callback: fn(&FfiResultData)
+            callback: fn(&FfiResultData),
+            scene: String,
         ) -> Vec<FfiResultData>;
 
         fn gpubench_get_available_hardware() -> Vec<String>;

@@ -42,10 +42,12 @@ GPUBench evaluates how different GPU hardware architectures handle these workloa
 3. **Work Lists / DGC (Wavefront Compaction)**: Compacts divergent hits into categorized material queues via atomic work lists and dispatches uniform waves using indirect command generation (`vkCmdDispatchIndirect`).
 4. **Work Graphs (Autonomous Node Enqueue)**: Uses GPU-autonomous execution graph pipelines (`VK_AMDX_shader_enqueue`) to dynamically enqueue child nodes without host or CPU round-trips.
 
-#### Dual-Scenario Benchmarking Morphology
-- **Complex Indoor Atrium (`-s indoor`)**: $35,272$ triangles with 0% sky escape, 8 heterogeneous production BSDFs, and 4-bounce path tracing. Work Lists achieve a **4.80x speedup** in material shading and **2.00x speedup** in path tracing.
-- **Open-World Outdoor Landscape (`-s outdoor`)**: $57,216$ triangles spanning $>2000\text{m}$ terrain, river, conifer foliage, and atmospheric Rayleigh-Mie scattering. Work Lists achieve a **1.87x speedup** in incoherent secondary rays and run primary RT at **3,184 FPS** (6,603 MRays/s).
-- **100% Bit-Exact Parity**: Verified bit-exact 120.00 dB PSNR and 0 discrepant pixels between paradigms.
+#### Four-Scenario Benchmarking Morphology
+- **Showroom Studio (`-s showroom`)**: $108,936$ triangles featuring the Khronos ToyCar glTF asset with clearcoat, decals, and velvet pedestal. Work Lists achieve **101.3 FPS** vs. Megakernel **57.6 FPS** (**1.76x speedup**).
+- **Complex Indoor Atrium (`-s indoor`)**: $262,267$ triangles featuring Crytek Sponza glTF with 25 PBR materials and 0% sky escape. Work Lists achieve **68.0 FPS** vs. Megakernel **30.5 FPS** (**2.23x speedup**).
+- **Open-World Outdoor Landscape (`-s outdoor`)**: $57,216$ triangles spanning $>2000\text{m}$ alpine terrain, lake, conifer foliage, and Rayleigh-Mie atmospheric scattering. Work Lists achieve **420.0 FPS** vs. Megakernel **185.8 FPS** (**2.26x speedup**).
+- **Open-World Forest (`-s forest`)**: $1,001,280$ triangles featuring high-density 512×512 terrain, river bathymetry, 850 trees, and 8 nature PBR shaders. Work Lists achieve **55.0 FPS** vs. Megakernel **27.0 FPS** (**2.04x speedup**).
+- **100% Bit-Exact Analytical Parity**: Verified bit-exact 120.00 dB PSNR, 0.000000 MAE, and 0 discrepant pixels across all 8,294,400 pixels at 4K UHD across all four scenarios.
 
 ---
 
@@ -116,18 +118,18 @@ gpubench
 # Run Ray Scheduling on a specific GPU device (e.g. Device 1)
 gpubench -d 1 -b RayScheduling
 
-# Select benchmark scene morphology: indoor (default), outdoor, or all
-gpubench -d 1 -b RayScheduling -s outdoor
-gpubench -d 1 -b RayScheduling -s all
+# Select benchmark scene morphology: showroom, indoor, outdoor, forest, or all
+gpubench -d 1 -b rayscheduling -s forest
+gpubench -d 1 -b rayscheduling -s all
 
-# Dump 1080p PPM/PNG render buffers and analytical diff heatmaps to renders/
-gpubench -d 1 -b RayScheduling -s indoor --dump-frames
+# Dump 4K UHD PPM/PNG render buffers, diff heatmaps, and 4-scenario comparative grid
+gpubench -d 1 -b rayscheduling -s all --dump-renders
 
-# Run isolated sub-workload config (0-15) in single-submit profiling mode
-gpubench -d 1 -b RayScheduling -s indoor -c 2 --profile-snapshot
+# Run specific config (e.g. Config 21: Megakernel, Config 22: Work Lists) in profiling snapshot mode
+gpubench -d 1 -b rayscheduling -s forest -c 22 --profile-snapshot
 
-# Export results to JSON
-gpubench -d 1 --json benchmark_results.json
+# Export machine-readable results to JSON
+gpubench -d 1 -b rayscheduling -s all --output json --output-file benchmark_results.json
 ```
 
 ### Profiling & Telemetry Suite

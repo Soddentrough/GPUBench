@@ -71,7 +71,13 @@ void BenchmarkRunner::setBounceDepth(uint32_t b) {
 std::vector<std::string> BenchmarkRunner::getAvailableBenchmarks() const {
   std::vector<std::string> names;
   for (const auto &bench : benchmarks) {
-    names.push_back(bench->GetName());
+    std::string name = bench->GetName();
+    if (dynamic_cast<RaySchedulingBench *>(bench.get())) {
+      name = "RayScheduling";
+    }
+    if (std::find(names.begin(), names.end(), name) == names.end()) {
+      names.push_back(name);
+    }
   }
   return names;
 }
@@ -89,18 +95,28 @@ std::vector<BenchmarkGroupInfo> BenchmarkRunner::getAvailableGroups() const {
   for (const auto &bench : benchmarks) {
     std::string comp = bench->GetComponent();
     std::string name = bench->GetName();
+    if (dynamic_cast<RaySchedulingBench *>(bench.get())) {
+      name = "RayScheduling";
+    }
     if (!bench->IsDeviceDependent() || comp == "System") {
-      groups[5].benchmarks.push_back(name);
+      if (std::find(groups[5].benchmarks.begin(), groups[5].benchmarks.end(), name) == groups[5].benchmarks.end())
+        groups[5].benchmarks.push_back(name);
     } else if (comp == "Compute") {
-      groups[0].benchmarks.push_back(name);
+      if (std::find(groups[0].benchmarks.begin(), groups[0].benchmarks.end(), name) == groups[0].benchmarks.end())
+        groups[0].benchmarks.push_back(name);
     } else if (comp == "Memory") {
-      groups[1].benchmarks.push_back(name);
+      if (std::find(groups[1].benchmarks.begin(), groups[1].benchmarks.end(), name) == groups[1].benchmarks.end())
+        groups[1].benchmarks.push_back(name);
     } else if (comp == "Ray Tracing") {
-      groups[2].benchmarks.push_back(name);
-      groups[4].benchmarks.push_back(name);
+      if (std::find(groups[2].benchmarks.begin(), groups[2].benchmarks.end(), name) == groups[2].benchmarks.end())
+        groups[2].benchmarks.push_back(name);
+      if (std::find(groups[4].benchmarks.begin(), groups[4].benchmarks.end(), name) == groups[4].benchmarks.end())
+        groups[4].benchmarks.push_back(name);
     } else if (comp == "Graphics" || comp == "Raster") {
-      groups[2].benchmarks.push_back(name);
-      groups[3].benchmarks.push_back(name);
+      if (std::find(groups[2].benchmarks.begin(), groups[2].benchmarks.end(), name) == groups[2].benchmarks.end())
+        groups[2].benchmarks.push_back(name);
+      if (std::find(groups[3].benchmarks.begin(), groups[3].benchmarks.end(), name) == groups[3].benchmarks.end())
+        groups[3].benchmarks.push_back(name);
     }
   }
 
@@ -128,6 +144,10 @@ std::vector<std::string> BenchmarkRunner::expandGroups(const std::vector<std::st
     bool matchesExactBench = false;
     for (const auto &bench : benchmarks) {
       if (normalize(bench->GetName()) == normInput) {
+        matchesExactBench = true;
+        break;
+      }
+      if (dynamic_cast<RaySchedulingBench *>(bench.get()) && (normInput == "rayscheduling" || normInput == "rayexecutionparadigm")) {
         matchesExactBench = true;
         break;
       }
@@ -339,6 +359,18 @@ static bool benchmarkMatches(const IBenchmark *bench, const std::string &run_nam
   for (const auto &alias : bench->GetAliases()) {
     if (normalize(alias) == normRun) return true;
   }
+
+  // Ray Scheduling benchmark alias & prefix matching
+  if (dynamic_cast<const RaySchedulingBench *>(bench)) {
+    if (normRun == "rayscheduling" || normRun == "rayexecutionparadigm") {
+      return true;
+    }
+    // Also match legacy scene-qualified monikers (e.g. "rayschedulingindooratrium")
+    if (normRun.rfind("rayscheduling", 0) == 0) {
+      return true;
+    }
+  }
+
   return false;
 }
 

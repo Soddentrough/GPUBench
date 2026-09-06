@@ -12,7 +12,8 @@ rust::Vec<FfiResultData> gpubench_run_benchmarks(const rust::Vec<rust::String>& 
                                                  bool dump_renders,
                                                  uint32_t render_width,
                                                  uint32_t render_height,
-                                                 rust::Fn<void(const FfiResultData&)> callback);
+                                                 rust::Fn<void(const FfiResultData&)> callback,
+                                                 rust::String scene_rust);
 
 rust::Vec<rust::String> gpubench_get_available_hardware();
 rust::Vec<rust::String> gpubench_get_available_benchmarks();

@@ -22,6 +22,7 @@ fn main() {
         false,
         0,
         0,
+        "all",
         |_res| {
             println!("Callback received result");
         }

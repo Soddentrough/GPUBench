@@ -1,5 +1,5 @@
-cmake_minimum_required(VERSION 3.16)
-project(GPUBench VERSION 1.4.7)
+cmake_minimum_required(VERSION 3.20)
+project(GPUBench VERSION 1.5.0)
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_CXX_STANDARD 17)
@@ -93,6 +93,19 @@ if(Vulkan_FOUND)
     )
     file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/kernels/vulkan)
     
+    file(GLOB SHADER_HEADERS "shaders/*.glsl" "shaders/*.h")
+    foreach(HEADER ${SHADER_HEADERS})
+        get_filename_component(HEADER_NAME ${HEADER} NAME)
+        set(DEST_HEADER "${CMAKE_CURRENT_BINARY_DIR}/kernels/vulkan/${HEADER_NAME}")
+        add_custom_command(
+            OUTPUT ${DEST_HEADER}
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${HEADER} ${DEST_HEADER}
+            DEPENDS ${HEADER}
+            COMMENT "Copying Vulkan shader header: ${HEADER}"
+        )
+        list(APPEND VULKAN_SHADERS ${DEST_HEADER})
+    endforeach()
+
     foreach(SHADER ${SHADERS})
         get_filename_component(SHADER_NAME ${SHADER} NAME)
         set(DEST_SHADER "${CMAKE_CURRENT_BINARY_DIR}/kernels/vulkan/${SHADER_NAME}")
@@ -102,7 +115,7 @@ if(Vulkan_FOUND)
         add_custom_command(
             OUTPUT ${SPV_SHADER}
             COMMAND ${GLSLC_EXECUTABLE} -O --target-env=vulkan1.4 -I${CMAKE_CURRENT_SOURCE_DIR}/shaders ${SHADER} -o ${SPV_SHADER}
-            DEPENDS ${SHADER}
+            DEPENDS ${SHADER} ${SHADER_HEADERS}
             COMMENT "Compiling Vulkan shader to SPIR-V: ${SHADER}"
         )
         
@@ -116,18 +129,6 @@ if(Vulkan_FOUND)
         list(APPEND VULKAN_SHADERS ${DEST_SHADER} ${SPV_SHADER})
     endforeach()
 
-    file(GLOB SHADER_HEADERS "shaders/*.glsl" "shaders/*.h")
-    foreach(HEADER ${SHADER_HEADERS})
-        get_filename_component(HEADER_NAME ${HEADER} NAME)
-        set(DEST_HEADER "${CMAKE_CURRENT_BINARY_DIR}/kernels/vulkan/${HEADER_NAME}")
-        add_custom_command(
-            OUTPUT ${DEST_HEADER}
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${HEADER} ${DEST_HEADER}
-            DEPENDS ${HEADER}
-            COMMENT "Copying Vulkan shader header: ${HEADER}"
-        )
-        list(APPEND VULKAN_SHADERS ${DEST_HEADER})
-    endforeach()
     add_custom_target(shaders ALL DEPENDS ${VULKAN_SHADERS})
 endif()
 
@@ -574,6 +575,13 @@ elseif(UNIX AND NOT APPLE)
     # DEB package settings
     set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Soddentrough <https://github.com/Soddentrough/GPUBench>")
     set(CPACK_DEBIAN_PACKAGE_SECTION "utils")
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+        set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "amd64")
+    elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|ARM64")
+        set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "arm64")
+    else()
+        set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "${CMAKE_SYSTEM_PROCESSOR}")
+    endif()
     # DEB package dependencies (Debian package names; libvulkan1 is the Vulkan loader).
     # OpenCL/ROCm stay OPTIONAL -- they are resolved at runtime via dynamic loading,
     # so they are intentionally not listed here (mirrors the RPM policy below).
@@ -661,14 +669,14 @@ elseif(UNIX AND NOT APPLE)
         COMMENT "Running RPM dry-run and structural verification..."
     )
     add_custom_target(package_deb
-        COMMAND cpack -G DEB
+        COMMAND ${CMAKE_COMMAND} -E env --unset=BASH_FUNC_module%% --unset=BASH_FUNC_ml%% --unset=BASH_FUNC__module_raw%% cpack -G DEB
         WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
-        COMMENT "Building DEB package"
+        COMMENT "Building DEB package with sanitized shell environment"
     )
     add_custom_target(package_tgz
-        COMMAND cpack -G TGZ
+        COMMAND ${CMAKE_COMMAND} -E env --unset=BASH_FUNC_module%% --unset=BASH_FUNC_ml%% --unset=BASH_FUNC__module_raw%% cpack -G TGZ
         WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
-        COMMENT "Building TGZ package"
+        COMMENT "Building TGZ package with sanitized shell environment"
     )
     add_custom_target(package_linux
         COMMAND ${CMAKE_COMMAND} -E env --unset=BASH_FUNC_module%% --unset=BASH_FUNC_ml%% --unset=BASH_FUNC__module_raw%% cpack -G "TGZ\\;DEB\\;RPM"

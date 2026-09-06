@@ -4,6 +4,7 @@ annotate_render.py: Adds a sleek, high-contrast step-by-step performance profile
 banner to the bottom of ray tracing render outputs from GPUBench.
 """
 
+from datetime import datetime
 import argparse
 import json
 import os
@@ -78,7 +79,8 @@ def annotate_image(ppm_path, png_path, profile_path, render_type, annotate=False
 
     gpu_name = data.get("gpu", "AMD Radeon AI PRO R9700 (GFX1201)")
     res_str = data.get("resolution", f"{w}x{h} ({w*h:,} rays)")
-    target_info = f"{gpu_name} | {res_str}"
+    timestamp_str = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
+    target_info = f"{gpu_name} | {res_str} | Rendered: {timestamp_str}"
 
     banner_h = 135
     canvas = Image.new("RGB", (w, h + banner_h), (13, 17, 23)) # Dark slate GitHub style

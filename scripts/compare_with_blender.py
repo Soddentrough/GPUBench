@@ -7,9 +7,9 @@ def make_comparison(scenario="forest"):
         p_gpu = "renders/render_forest_worklist_dgc.png"
         p_blender = "renders/render_forest_cycles_reference.png"
         out_path = "renders/render_forest_blender_comparison.png"
-        title_left = "GPUBench Real-Time Vulkan Pipeline (AAA Open-World Forest)"
+        title_left = "GPUBench Real-Time Vulkan Pipeline (Open-World Forest)"
         sub_left = "Decoupled Work Lists / DGC (55.2 FPS, 18.13 ms @ 4K 3840x2160)"
-        title_right = "Blender Cycles Reference Render (AAA Open-World Forest)"
+        title_right = "Blender Cycles Reference Render (Open-World Forest)"
         sub_right = "Cycles HIP RT on GPU 1 (AMD Radeon AI PRO R9700, 8.43 s @ 64 spp, OIDN)"
     else:
         p_gpu = "renders/render_indoor_worklist_dgc.png"

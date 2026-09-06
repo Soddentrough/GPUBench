@@ -355,54 +355,74 @@ vec3 evaluateGltfPbr(
             vec3 envRefl = mix(vec3(0.12, 0.13, 0.16), vec3(0.40, 0.44, 0.50), clamp(R.y * 1.5, 0.0, 1.0));
             vec3 envRefr = mix(vec3(0.06, 0.07, 0.09), vec3(0.18, 0.20, 0.24), clamp(refrDir.y * 1.5, 0.0, 1.0));
 
-            // Trace secondary refraction ray through the glass into interior/backdrop
-            vec3 transmittedRadiance = envRefr;
+            // Subtle automotive safety glass tint (slight cool solar smoke tint)
+            vec3 glassTint = mix(vec3(0.92, 0.95, 0.96), mat.baseColorFactor.rgb, 0.08);
+
+            // Trace secondary refraction ray through the glass shell into cabin interior / backdrop
+            vec3 transmittedRadiance = envRefr * glassTint;
             if (!tir) {
-                rayQueryEXT refrQuery;
-                vec3 refrOrig = hitPos + refrDir * 0.05;
-                rayQueryInitializeEXT(refrQuery, topLevelAS, gl_RayFlagsOpaqueEXT, 0xFF, refrOrig, 0.02, refrDir, 2500.0);
-                while (rayQueryProceedEXT(refrQuery)) {}
+                // Advance origin past the ~0.15 unit glass shell into interior cabin
+                vec3 curOrig = hitPos + refrDir * 0.35;
+                vec3 curDir = refrDir;
 
-                if (rayQueryGetIntersectionTypeEXT(refrQuery, true) == gl_RayQueryCommittedIntersectionTriangleEXT) {
-                    float tRefr = rayQueryGetIntersectionTEXT(refrQuery, true);
-                    uint primRefr = rayQueryGetIntersectionPrimitiveIndexEXT(refrQuery, true);
-                    vec2 baryRefr = rayQueryGetIntersectionBarycentricsEXT(refrQuery, true);
+                for (int step = 0; step < 2; ++step) {
+                    rayQueryEXT refrQuery;
+                    rayQueryInitializeEXT(refrQuery, topLevelAS, gl_RayFlagsOpaqueEXT, 0xFF, curOrig, 0.05, curDir, 2500.0);
+                    while (rayQueryProceedEXT(refrQuery)) {}
 
-                    // Interpolate interior hit attributes
-                    uint baseR = primRefr * 36u;
-                    vec3 rp0 = vec3(vbuf.vertices[baseR + 0], vbuf.vertices[baseR + 1], vbuf.vertices[baseR + 2]);
-                    vec3 rn0 = vec3(vbuf.vertices[baseR + 3], vbuf.vertices[baseR + 4], vbuf.vertices[baseR + 5]);
-                    vec2 ruv0 = vec2(vbuf.vertices[baseR + 10], vbuf.vertices[baseR + 11]);
+                    if (rayQueryGetIntersectionTypeEXT(refrQuery, true) == gl_RayQueryCommittedIntersectionTriangleEXT) {
+                        float tRefr = rayQueryGetIntersectionTEXT(refrQuery, true);
+                        uint primRefr = rayQueryGetIntersectionPrimitiveIndexEXT(refrQuery, true);
+                        uint rMatId = triMatBuf.triangleMats[primRefr];
+                        GltfMaterialGpu rMat = matBuf.materials[rMatId];
 
-                    baseR += 12u;
-                    vec3 rp1 = vec3(vbuf.vertices[baseR + 0], vbuf.vertices[baseR + 1], vbuf.vertices[baseR + 2]);
-                    vec3 rn1 = vec3(vbuf.vertices[baseR + 3], vbuf.vertices[baseR + 4], vbuf.vertices[baseR + 5]);
-                    vec2 ruv1 = vec2(vbuf.vertices[baseR + 10], vbuf.vertices[baseR + 11]);
+                        // If the ray hits glass again (e.g. inner glass boundary or rear window when viewed through windshield),
+                        // continue past it towards the showroom environment rather than treating glass as opaque diffuse.
+                        if (rMat.transmissionFactor > 0.05) {
+                            curOrig = curOrig + curDir * (tRefr + 0.35);
+                            continue;
+                        }
 
-                    baseR += 12u;
-                    vec3 rp2 = vec3(vbuf.vertices[baseR + 0], vbuf.vertices[baseR + 1], vbuf.vertices[baseR + 2]);
-                    vec3 rn2 = vec3(vbuf.vertices[baseR + 3], vbuf.vertices[baseR + 4], vbuf.vertices[baseR + 5]);
-                    vec2 ruv2 = vec2(vbuf.vertices[baseR + 10], vbuf.vertices[baseR + 11]);
+                        // Interpolate opaque interior hit attributes (dashboard, upholstery, chassis floor)
+                        vec2 baryRefr = rayQueryGetIntersectionBarycentricsEXT(refrQuery, true);
+                        uint baseR = primRefr * 36u;
+                        vec3 rp0 = vec3(vbuf.vertices[baseR + 0], vbuf.vertices[baseR + 1], vbuf.vertices[baseR + 2]);
+                        vec3 rn0 = vec3(vbuf.vertices[baseR + 3], vbuf.vertices[baseR + 4], vbuf.vertices[baseR + 5]);
+                        vec2 ruv0 = vec2(vbuf.vertices[baseR + 10], vbuf.vertices[baseR + 11]);
 
-                    float rw = 1.0 - baryRefr.x - baryRefr.y;
-                    vec3 rHitPos = rw * rp0 + baryRefr.x * rp1 + baryRefr.y * rp2;
-                    vec3 rNorm = normalize(rw * rn0 + baryRefr.x * rn1 + baryRefr.y * rn2);
-                    vec2 rUv = rw * ruv0 + baryRefr.x * ruv1 + baryRefr.y * ruv2;
+                        baseR += 12u;
+                        vec3 rp1 = vec3(vbuf.vertices[baseR + 0], vbuf.vertices[baseR + 1], vbuf.vertices[baseR + 2]);
+                        vec3 rn1 = vec3(vbuf.vertices[baseR + 3], vbuf.vertices[baseR + 4], vbuf.vertices[baseR + 5]);
+                        vec2 ruv1 = vec2(vbuf.vertices[baseR + 10], vbuf.vertices[baseR + 11]);
 
-                    uint rMatId = triMatBuf.triangleMats[primRefr];
-                    GltfMaterialGpu rMat = matBuf.materials[rMatId];
-                    vec4 rBaseCol = (rMat.baseColorTexIdx >= 0) ? sampleTexture(uint(rMat.baseColorTexIdx), rUv) : vec4(1.0);
-                    vec3 interiorAlbedo = pow(rBaseCol.rgb, vec3(2.2)) * rMat.baseColorFactor.rgb;
+                        baseR += 12u;
+                        vec3 rp2 = vec3(vbuf.vertices[baseR + 0], vbuf.vertices[baseR + 1], vbuf.vertices[baseR + 2]);
+                        vec3 rn2 = vec3(vbuf.vertices[baseR + 3], vbuf.vertices[baseR + 4], vbuf.vertices[baseR + 5]);
+                        vec2 ruv2 = vec2(vbuf.vertices[baseR + 10], vbuf.vertices[baseR + 11]);
 
-                    // Light the interior surface with studio key light & softbox ambient
-                    float rNdotL = max(dot(rNorm, studioDir[0]), 0.0);
-                    float rShadow = (rNdotL > 0.0) ? (traceShadowRay(rHitPos, rNorm, studioDir[0], 5000.0) ? 0.2 : 1.0) : 0.2;
-                    vec3 interiorLight = interiorAlbedo * (studioColor[0] * rNdotL * rShadow + vec3(0.35, 0.38, 0.42));
+                        float rw = 1.0 - baryRefr.x - baryRefr.y;
+                        vec3 rHitPos = rw * rp0 + baryRefr.x * rp1 + baryRefr.y * rp2;
+                        vec3 rNorm = normalize(rw * rn0 + baryRefr.x * rn1 + baryRefr.y * rn2);
+                        vec2 rUv = rw * ruv0 + baryRefr.x * ruv1 + baryRefr.y * ruv2;
 
-                    // Beer-Lambert physical volumetric absorption through glass thickness
-                    vec3 absorption = vec3(0.08, 0.04, 0.03); // Slight dark smoke tint
-                    vec3 transmissionColor = exp(-absorption * min(tRefr, 50.0));
-                    transmittedRadiance = interiorLight * transmissionColor;
+                        vec4 rBaseCol = (rMat.baseColorTexIdx >= 0) ? sampleTexture(uint(rMat.baseColorTexIdx), rUv) : vec4(1.0);
+                        vec3 interiorAlbedo = pow(rBaseCol.rgb, vec3(2.2)) * rMat.baseColorFactor.rgb;
+
+                        // Light the interior surface with studio key light & softbox ambient
+                        float rNdotL = max(dot(rNorm, studioDir[0]), 0.0);
+                        float rShadow = (rNdotL > 0.0) ? (traceShadowRay(rHitPos, rNorm, studioDir[0], 5000.0) ? 0.25 : 1.0) : 0.25;
+                        vec3 interiorLight = interiorAlbedo * (studioColor[0] * rNdotL * rShadow + vec3(0.35, 0.38, 0.42));
+
+                        // Beer-Lambert physical volumetric absorption through cabin depth
+                        vec3 absorption = vec3(0.04, 0.02, 0.015);
+                        vec3 transmissionColor = exp(-absorption * min(tRefr, 50.0));
+                        transmittedRadiance = interiorLight * transmissionColor * glassTint;
+                        break;
+                    } else {
+                        // Exited cabin without hitting opaque geometry: sample showroom environment
+                        transmittedRadiance = envRefr * glassTint;
+                        break;
+                    }
                 }
             }
 

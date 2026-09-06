@@ -145,14 +145,14 @@ bool GltfScene::loadFromFile(const std::string& filepath, std::string& outError)
         for (int c = 0; c < 4; ++c) mat.baseColorFactor[c] = pbr.base_color_factor[c];
         mat.metallicFactor = pbr.metallic_factor;
         mat.roughnessFactor = pbr.roughness_factor;
-        mat.baseColorTexIdx = getTextureIndex(pbr.base_color_texture, 0);
-        mat.metallicRoughnessTexIdx = getTextureIndex(pbr.metallic_roughness_texture, 2);
+        mat.baseColorTexIdx = getTextureIndex(pbr.base_color_texture, -1);
+        mat.metallicRoughnessTexIdx = getTextureIndex(pbr.metallic_roughness_texture, -1);
       }
 
-      mat.normalTexIdx = getTextureIndex(srcMat.normal_texture, 1);
+      mat.normalTexIdx = getTextureIndex(srcMat.normal_texture, -1);
       mat.normalScale = srcMat.normal_texture.scale;
 
-      mat.occlusionTexIdx = getTextureIndex(srcMat.occlusion_texture, 0);
+      mat.occlusionTexIdx = getTextureIndex(srcMat.occlusion_texture, -1);
 
       if (srcMat.has_emissive_strength) {
         for (int c = 0; c < 3; ++c) {

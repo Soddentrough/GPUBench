@@ -28,6 +28,11 @@
     <binary>gpubench</binary>
   </provides>
   <releases>
+    <release version="1.5.0" date="2026-09-06">
+      <description>
+        <p>Open-world forest scenario with Snell refraction and anisotropic bark, dielectric glass and windshield shader overhaul, master 42-material evaluation suite, hardware-aware VRAM auto-scaling, and multi-scene ray scheduling discovery fix.</p>
+      </description>
+    </release>
     <release version="1.4.7" date="2026-09-05">
       <description>
         <p>Eliminate cross-CU L2 bank contention with 256-byte counter striding, streamline register-to-VRAM wave compaction, and add fair material shading microbenchmarks.</p>

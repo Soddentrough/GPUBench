@@ -1,7 +1,7 @@
 
 use clap::Parser;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 #[allow(non_snake_case)]
 pub struct ResultData {
     pub backendName: String,
@@ -25,7 +25,7 @@ pub struct ResultData {
 
 #[derive(Parser, Debug, Clone)]
 #[command(name = "GPUBench")]
-#[command(version = "1.4.7")]
+#[command(version = "1.5.0")]
 #[command(about = "High-performance cross-platform GPU benchmarking tool", long_about = None)]
 pub struct Cli {
     #[arg(short = 'b', long = "benchmarks", value_delimiter = ',')]
@@ -60,6 +60,9 @@ pub struct Cli {
 
     #[arg(short = 'r', long = "resolution", default_value = "auto")]
     pub resolution: String,
+
+    #[arg(short = 's', long = "scene", default_value = "all")]
+    pub scene: String,
 }
 
 pub mod sysinfo;
@@ -139,6 +142,7 @@ pub fn run_benchmarks(
     dump_renders: bool,
     render_width: u32,
     render_height: u32,
+    scene: &str,
     callback: fn(&ResultData),
 ) -> Vec<ResultData> {
     static CALLBACK_MUTEX: Mutex<Option<fn(&ResultData)>> = Mutex::new(None);
@@ -190,6 +194,7 @@ pub fn run_benchmarks(
         render_width,
         render_height,
         ffi_callback,
+        scene.to_string(),
     );
     
     ffi_results.into_iter().map(|ffi_res| ResultData {
@@ -384,6 +389,7 @@ pub fn run_cli() {
         cli.dump_renders,
         res_w,
         res_h,
+        &cli.scene,
         |_| {},
     );
 

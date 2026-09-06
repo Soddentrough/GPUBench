@@ -239,7 +239,7 @@ impl iced::widget::button::StyleSheet for SleekDeviceTab {
 // Hardware Telemetry & Dynamic API Detection
 // ============================================================================
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct DeviceTelemetry {
     pub id: String,
     pub name: String,
@@ -653,7 +653,7 @@ pub fn is_benchmark_requested(t: &str, requested_tokens: &[String]) -> bool {
             "payload" | "raypayload" => t == "RayPayload",
             "pathtracing" | "raypathtracing" => t == "RayPathTracing",
             "rayscheduling" | "scheduling" | "worklists" | "dgc" | "rayexecutionparadigm" => {
-                t == "RayScheduling" || t == "RayExecutionParadigm"
+                t == "RayScheduling" || t == "RayExecutionParadigm" || t.starts_with("RayScheduling")
             }
             _ => false,
         };
@@ -699,6 +699,7 @@ pub struct GuiCliArgs {
     pub benchmarks: Vec<String>,
     pub devices: Vec<String>,
     pub resolution: Option<String>,
+    pub scene: Option<String>,
     pub dump_renders: bool,
     pub auto_start: bool,
     pub should_exit: bool,
@@ -712,6 +713,7 @@ impl Default for GuiCliArgs {
             benchmarks: Vec::new(),
             devices: Vec::new(),
             resolution: None,
+            scene: None,
             dump_renders: true,
             auto_start: false,
             should_exit: false,
@@ -731,6 +733,7 @@ fn print_gui_help() {
     println!("    -b, --benchmark <BENCHMARKS>  Specific benchmark(s) to enable (comma-separated or multiple flags)");
     println!("    -d, --device <DEVICES>        Target GPU device index(es) (e.g. 0, 1, or 0,1)");
     println!("    -r, --resolution <RES>        Resolution preset: auto, 1080p, 1440p, 4k");
+    println!("    -s, --scene <SCENE>           Ray tracing scene preset: all, indoor, forest, outdoor, showroom (default: all)");
     println!("        --dump-renders, --dump    Enable visual verification and render output dumping (default: enabled)");
     println!("        --no-dump-renders, --no-dump Disable visual verification and render output dumping");
     println!("        --auto-start, --run       Automatically start the benchmark suite immediately on launch");
@@ -755,7 +758,7 @@ fn print_gui_help() {
     println!("EXAMPLES:");
     println!("    gpubench-gui -k vulkan -g raytracing -d 1");
     println!("    gpubench-gui -g compute,memory,raster -r 1080p");
-    println!("    gpubench-gui -b rayscheduling --auto-start");
+    println!("    gpubench-gui -b rayscheduling -s all --auto-start");
 }
 
 pub fn parse_gui_cli_args() -> GuiCliArgs {
@@ -788,7 +791,7 @@ pub fn parse_gui_cli_args_from(raw_args: &[String]) -> GuiCliArgs {
             i += 1;
             continue;
         }
-        if arg == "--auto-start" || arg == "--run" || arg == "-s" {
+        if arg == "--auto-start" || arg == "--run" {
             args.auto_start = true;
             i += 1;
             continue;
@@ -805,6 +808,11 @@ pub fn parse_gui_cli_args_from(raw_args: &[String]) -> GuiCliArgs {
                 continue;
             }
         }
+        if arg.starts_with("-k") && arg.len() > 2 && !arg.starts_with("--") {
+            args.backend = Some(arg[2..].to_string());
+            i += 1;
+            continue;
+        }
         if let Some(val) = arg.strip_prefix("-g=").or_else(|| arg.strip_prefix("--group=")).or_else(|| arg.strip_prefix("--groups=")) {
             args.groups.push(val.to_string());
             i += 1;
@@ -816,6 +824,11 @@ pub fn parse_gui_cli_args_from(raw_args: &[String]) -> GuiCliArgs {
                 i += 2;
                 continue;
             }
+        }
+        if arg.starts_with("-g") && arg.len() > 2 && !arg.starts_with("--") {
+            args.groups.push(arg[2..].to_string());
+            i += 1;
+            continue;
         }
         if let Some(val) = arg.strip_prefix("-b=").or_else(|| arg.strip_prefix("--benchmark=")).or_else(|| arg.strip_prefix("--benchmarks=")) {
             args.benchmarks.push(val.to_string());
@@ -829,6 +842,11 @@ pub fn parse_gui_cli_args_from(raw_args: &[String]) -> GuiCliArgs {
                 continue;
             }
         }
+        if arg.starts_with("-b") && arg.len() > 2 && !arg.starts_with("--") {
+            args.benchmarks.push(arg[2..].to_string());
+            i += 1;
+            continue;
+        }
         if let Some(val) = arg.strip_prefix("-d=").or_else(|| arg.strip_prefix("--device=")).or_else(|| arg.strip_prefix("--devices=")) {
             args.devices.push(val.to_string());
             i += 1;
@@ -841,6 +859,11 @@ pub fn parse_gui_cli_args_from(raw_args: &[String]) -> GuiCliArgs {
                 continue;
             }
         }
+        if arg.starts_with("-d") && arg.len() > 2 && !arg.starts_with("--") {
+            args.devices.push(arg[2..].to_string());
+            i += 1;
+            continue;
+        }
         if let Some(val) = arg.strip_prefix("-r=").or_else(|| arg.strip_prefix("--resolution=")) {
             args.resolution = Some(val.to_string());
             i += 1;
@@ -852,6 +875,28 @@ pub fn parse_gui_cli_args_from(raw_args: &[String]) -> GuiCliArgs {
                 i += 2;
                 continue;
             }
+        }
+        if arg.starts_with("-r") && arg.len() > 2 && !arg.starts_with("--") {
+            args.resolution = Some(arg[2..].to_string());
+            i += 1;
+            continue;
+        }
+        if let Some(val) = arg.strip_prefix("-s=").or_else(|| arg.strip_prefix("--scene=")) {
+            args.scene = Some(val.to_string());
+            i += 1;
+            continue;
+        }
+        if arg == "-s" || arg == "--scene" {
+            if i + 1 < raw_args.len() {
+                args.scene = Some(raw_args[i + 1].clone());
+                i += 2;
+                continue;
+            }
+        }
+        if arg.starts_with("-s") && arg.len() > 2 && !arg.starts_with("--") {
+            args.scene = Some(arg[2..].to_string());
+            i += 1;
+            continue;
         }
         i += 1;
     }
@@ -881,8 +926,8 @@ pub fn main() -> iced::Result {
         flags: cli_args,
         antialiasing: true,
         window: iced::window::Settings {
-            size: iced::Size::new(1280.0, 840.0),
-            min_size: Some(iced::Size::new(1080.0, 720.0)),
+            size: iced::Size::new(1280.0, 980.0),
+            min_size: Some(iced::Size::new(960.0, 640.0)),
             icon: app_icon,
             #[cfg(target_os = "linux")]
             platform_specific: iced::window::settings::PlatformSpecific {
@@ -967,6 +1012,60 @@ fn devices_for_backend(hw: &[String], selected_backend: &str) -> Vec<String> {
         }
     }
     devices
+}
+
+fn match_device(dev_str: &str, tok: &str) -> bool {
+    let tok_clean = tok.trim();
+    if tok_clean.is_empty() {
+        return false;
+    }
+    if tok_clean.eq_ignore_ascii_case("all") {
+        return true;
+    }
+    if dev_str.eq_ignore_ascii_case(tok_clean) {
+        return true;
+    }
+
+    // Parse device index prefix from "0: Name", "1: Name"
+    let dev_idx_opt = if dev_str.starts_with("System") {
+        Some(SYSTEM_DEVICE_ID)
+    } else {
+        dev_str.split(':').next().and_then(|s| s.trim().parse::<u32>().ok())
+    };
+
+    // 1. Direct numeric match: e.g. "1" or "0" or "999"
+    if let Ok(num) = tok_clean.parse::<u32>() {
+        if let Some(dev_idx) = dev_idx_opt {
+            return dev_idx == num;
+        }
+    }
+
+    let tok_lower = tok_clean.to_lowercase();
+
+    // 2. "gpu 1", "gpu1", "gpu:1", "device 1", "device1", "d1"
+    if let Some(rest) = tok_lower.strip_prefix("gpu")
+        .or_else(|| tok_lower.strip_prefix("device"))
+        .or_else(|| tok_lower.strip_prefix('d')) 
+    {
+        let num_str = rest.trim_start_matches(|c: char| c == ' ' || c == ':' || c == '-' || c == '_');
+        if let Ok(num) = num_str.parse::<u32>() {
+            if let Some(dev_idx) = dev_idx_opt {
+                return dev_idx == num;
+            }
+        }
+    }
+
+    // 3. "system", "cpu", "host", "ram"
+    if tok_lower == "system" || tok_lower == "cpu" || tok_lower == "host" || tok_lower == "ram" {
+        return dev_str.starts_with("System");
+    }
+
+    // 4. Substring match on device name (e.g. "r9700", "radeon")
+    if dev_str.to_lowercase().contains(&tok_lower) {
+        return true;
+    }
+
+    false
 }
 
 pub const SYSTEM_DEVICE_ID: u32 = 999;
@@ -1580,9 +1679,89 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         is_system: false,
     },
     WorkloadDef {
+        id: "rt_sched_full_showroom_trad",
+        category: "RAY PIPELINE BREAKDOWN",
+        label: "Full Scene Render: Megakernel (Showroom)",
+        approach: "Morton 8x4 + Megakernel (109k Tris)",
+        default_unit: "MRays/s",
+        desc: "End-to-end full scene render of Showroom Studio (109k Tris) combining 2D Morton spatial ray ordering with monolithic megakernel shading.",
+        api_extensions: "VK_KHR_ray_query",
+        is_system: false,
+    },
+    WorkloadDef {
+        id: "rt_sched_full_showroom_wl",
+        category: "RAY PIPELINE BREAKDOWN",
+        label: "Full Scene Render: Work Lists (Showroom)",
+        approach: "Morton 8x4 + Work Lists / DGC (109k Tris)",
+        default_unit: "MRays/s",
+        desc: "End-to-end full scene render of Showroom Studio (109k Tris) combining 2D Morton ray ordering with wavefront stream compaction and indirect dispatch.",
+        api_extensions: "VK_KHR_ray_query, VK_EXT_device_generated_commands",
+        is_system: false,
+    },
+    WorkloadDef {
+        id: "rt_sched_full_indoor_trad",
+        category: "RAY PIPELINE BREAKDOWN",
+        label: "Full Scene Render: Megakernel (Indoor)",
+        approach: "Morton 8x4 + Megakernel (262k Tris)",
+        default_unit: "MRays/s",
+        desc: "End-to-end full scene render of Indoor Atrium (262k Tris) combining 2D Morton spatial ray ordering with monolithic megakernel shading.",
+        api_extensions: "VK_KHR_ray_query",
+        is_system: false,
+    },
+    WorkloadDef {
+        id: "rt_sched_full_indoor_wl",
+        category: "RAY PIPELINE BREAKDOWN",
+        label: "Full Scene Render: Work Lists (Indoor)",
+        approach: "Morton 8x4 + Work Lists / DGC (262k Tris)",
+        default_unit: "MRays/s",
+        desc: "End-to-end full scene render of Indoor Atrium (262k Tris) combining 2D Morton ray ordering with wavefront stream compaction and indirect dispatch.",
+        api_extensions: "VK_KHR_ray_query, VK_EXT_device_generated_commands",
+        is_system: false,
+    },
+    WorkloadDef {
+        id: "rt_sched_full_outdoor_trad",
+        category: "RAY PIPELINE BREAKDOWN",
+        label: "Full Scene Render: Megakernel (Outdoor)",
+        approach: "Morton 8x4 + Megakernel (57k Tris)",
+        default_unit: "MRays/s",
+        desc: "End-to-end full scene render of Outdoor Landscape (57k Tris) combining 2D Morton spatial ray ordering with monolithic megakernel shading.",
+        api_extensions: "VK_KHR_ray_query",
+        is_system: false,
+    },
+    WorkloadDef {
+        id: "rt_sched_full_outdoor_wl",
+        category: "RAY PIPELINE BREAKDOWN",
+        label: "Full Scene Render: Work Lists (Outdoor)",
+        approach: "Morton 8x4 + Work Lists / DGC (57k Tris)",
+        default_unit: "MRays/s",
+        desc: "End-to-end full scene render of Outdoor Landscape (57k Tris) combining 2D Morton ray ordering with wavefront stream compaction and indirect dispatch.",
+        api_extensions: "VK_KHR_ray_query, VK_EXT_device_generated_commands",
+        is_system: false,
+    },
+    WorkloadDef {
+        id: "rt_sched_full_forest_trad",
+        category: "RAY PIPELINE BREAKDOWN",
+        label: "Full Scene Render: Megakernel (Forest)",
+        approach: "Morton 8x4 + Megakernel (1.0M Tris)",
+        default_unit: "MRays/s",
+        desc: "End-to-end full scene render of Open-World Forest (1.0M Tris) combining 2D Morton spatial ray ordering with monolithic megakernel shading.",
+        api_extensions: "VK_KHR_ray_query",
+        is_system: false,
+    },
+    WorkloadDef {
+        id: "rt_sched_full_forest_wl",
+        category: "RAY PIPELINE BREAKDOWN",
+        label: "Full Scene Render: Work Lists (Forest)",
+        approach: "Morton 8x4 + Work Lists / DGC (1.0M Tris)",
+        default_unit: "MRays/s",
+        desc: "End-to-end full scene render of Open-World Forest (1.0M Tris) combining 2D Morton ray ordering with wavefront stream compaction and indirect dispatch.",
+        api_extensions: "VK_KHR_ray_query, VK_EXT_device_generated_commands",
+        is_system: false,
+    },
+    WorkloadDef {
         id: "rt_sched_stage_prim_morton_trad",
         category: "RAY PIPELINE BREAKDOWN",
-        label: "Full Render: Morton + Megakernel",
+        label: "Full Scene Render: Megakernel",
         approach: "Morton 8x4 + Megakernel",
         default_unit: "MRays/s",
         desc: "End-to-end full scene render combining 2D Morton spatial ray ordering with traditional monolithic megakernel shading.",
@@ -1592,7 +1771,7 @@ pub static WORKLOADS: &[WorkloadDef] = &[
     WorkloadDef {
         id: "rt_sched_stage_prim_morton_wl",
         category: "RAY PIPELINE BREAKDOWN",
-        label: "Full Render: Morton + Work Lists",
+        label: "Full Scene Render: Work Lists",
         approach: "Morton 8x4 + Work Lists (DGC)",
         default_unit: "MRays/s",
         desc: "End-to-end full scene render combining 2D Morton ray ordering with wavefront stream compaction and indirect dispatch.",
@@ -1603,15 +1782,13 @@ pub static WORKLOADS: &[WorkloadDef] = &[
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResolutionPreset {
-    Auto,
     Fhd1080p,
     Qhd1440p,
     Uhd4k,
 }
 
 impl ResolutionPreset {
-    pub const ALL: [ResolutionPreset; 4] = [
-        ResolutionPreset::Auto,
+    pub const ALL: [ResolutionPreset; 3] = [
         ResolutionPreset::Fhd1080p,
         ResolutionPreset::Qhd1440p,
         ResolutionPreset::Uhd4k,
@@ -1619,7 +1796,6 @@ impl ResolutionPreset {
 
     pub fn label(&self) -> &'static str {
         match self {
-            ResolutionPreset::Auto => "Auto (Adaptive)",
             ResolutionPreset::Fhd1080p => "1080p (FHD)",
             ResolutionPreset::Qhd1440p => "1440p (QHD)",
             ResolutionPreset::Uhd4k => "4K (UHD)",
@@ -1628,10 +1804,87 @@ impl ResolutionPreset {
 
     pub fn dimensions(&self) -> (u32, u32) {
         match self {
-            ResolutionPreset::Auto => (0, 0),
             ResolutionPreset::Fhd1080p => (1920, 1080),
             ResolutionPreset::Qhd1440p => (2560, 1440),
             ResolutionPreset::Uhd4k => (3840, 2160),
+        }
+    }
+
+    pub fn detect_from_devices(devices: &[DeviceTelemetry], initial_devices: &HashSet<String>) -> Self {
+        let target_gpu = devices.iter().find(|d| {
+            if !d.is_gpu { return false; }
+            initial_devices.iter().any(|id| {
+                if let Some(idx_str) = id.split(':').next() {
+                    if let Ok(idx) = idx_str.trim().parse::<u32>() {
+                        return d.id == format!("GPU {}", idx);
+                    }
+                }
+                id.contains(&d.id) || id.contains(&d.name)
+            })
+        }).or_else(|| {
+            devices.iter().find(|d| d.is_gpu && d.id.contains("1"))
+                .or_else(|| devices.iter().find(|d| d.is_gpu))
+        });
+
+        if let Some(gpu) = target_gpu {
+            if gpu.vram_total >= 15000 {
+                ResolutionPreset::Uhd4k
+            } else if gpu.vram_total >= 9000 {
+                ResolutionPreset::Qhd1440p
+            } else {
+                ResolutionPreset::Fhd1080p
+            }
+        } else {
+            ResolutionPreset::Uhd4k
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScenePreset {
+    All,
+    Indoor,
+    Forest,
+    Outdoor,
+    Showroom,
+}
+
+impl ScenePreset {
+    pub const ALL: [ScenePreset; 5] = [
+        ScenePreset::All,
+        ScenePreset::Indoor,
+        ScenePreset::Forest,
+        ScenePreset::Outdoor,
+        ScenePreset::Showroom,
+    ];
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            ScenePreset::All => "All (4 Scenes)",
+            ScenePreset::Indoor => "Indoor Atrium (262k Tris)",
+            ScenePreset::Forest => "Open-World Forest (1.0M Tris)",
+            ScenePreset::Outdoor => "Outdoor Landscape (57k Tris)",
+            ScenePreset::Showroom => "Showroom Studio (109k Tris)",
+        }
+    }
+
+    pub fn id_str(&self) -> &'static str {
+        match self {
+            ScenePreset::All => "all",
+            ScenePreset::Indoor => "indoor",
+            ScenePreset::Forest => "forest",
+            ScenePreset::Outdoor => "outdoor",
+            ScenePreset::Showroom => "showroom",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "all" => ScenePreset::All,
+            "forest" | "aaa_forest" => ScenePreset::Forest,
+            "outdoor" => ScenePreset::Outdoor,
+            "showroom" => ScenePreset::Showroom,
+            _ => ScenePreset::Indoor,
         }
     }
 }
@@ -1875,6 +2128,7 @@ struct GPUBenchApp {
     available_tests: Vec<String>,
     dump_renders: bool,
     selected_resolution: ResolutionPreset,
+    selected_scene: ScenePreset,
     parity_profile: Option<(ParityProfile, String)>,
     
     // Multi-Hardware Telemetry
@@ -1925,6 +2179,10 @@ struct GPUBenchApp {
     gpu_pixel_fill: f32,
     gpu_pixel_fill_hdr: f32,
     gpu_pixel_fill_blend: f32,
+
+    // Dynamic Viewport Dimensions
+    window_width: u32,
+    window_height: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -1939,10 +2197,12 @@ enum Message {
     BenchmarksComplete,
     BenchmarksFailed(String),
     Tick,
+    WindowResized(u32, u32),
     SaveResults,
     SaveResultsComplete(Option<(std::path::PathBuf, String)>),
     Retest,
     ResolutionSelected(ResolutionPreset),
+    SceneSelected(ScenePreset),
     CopyDiagnostics,
     OpenTriptych(String),
     OpenHeatmap(String),
@@ -1979,37 +2239,23 @@ impl Application for GPUBenchApp {
         let mut initial_devices = HashSet::new();
         if !flags.devices.is_empty() {
             let mut tokens = Vec::new();
-            for d in &flags.devices {
-                for t in d.split(',') {
-                    let s = t.trim().to_lowercase();
-                    if !s.is_empty() {
-                        tokens.push(s);
+            for item in &flags.devices {
+                for t in item.split(',') {
+                    let trimmed = t.trim();
+                    if !trimmed.is_empty() {
+                        tokens.push(trimmed.to_string());
                     }
                 }
             }
-            for d in &devices {
-                let d_lower = d.to_lowercase();
-                let matched = tokens.iter().any(|req| {
-                    if req == "all" {
-                        true
-                    } else if req == "system" || req == "cpu" {
-                        d_lower.starts_with("system")
-                    } else if let Ok(idx) = req.parse::<usize>() {
-                        d.starts_with(&format!("{}:", idx))
-                    } else {
-                        d_lower.contains(req)
+            for tok in &tokens {
+                for dev_str in &devices {
+                    if match_device(dev_str, tok) {
+                        initial_devices.insert(dev_str.clone());
                     }
-                });
-                if matched {
-                    initial_devices.insert(d.clone());
                 }
             }
-            if initial_devices.is_empty() {
-                for d in &devices {
-                    initial_devices.insert(d.clone());
-                }
-            }
-        } else {
+        }
+        if initial_devices.is_empty() {
             for d in &devices {
                 initial_devices.insert(d.clone());
             }
@@ -2048,7 +2294,7 @@ impl Application for GPUBenchApp {
                 }
             }
 
-            if initial_tests.iter().any(|t| t.contains("System Memory")) {
+            if flags.devices.is_empty() && initial_tests.iter().any(|t| t.contains("System Memory")) {
                 if let Some(sys_dev) = devices.iter().find(|d| d.starts_with("System")) {
                     initial_devices.insert(sys_dev.clone());
                 }
@@ -2063,27 +2309,47 @@ impl Application for GPUBenchApp {
             initial_tests.retain(|t| !t.starts_with("Ray"));
         }
 
+        let mut monitored = discover_all_devices();
+        poll_all_devices(&mut monitored, false);
+
         let selected_resolution = if let Some(ref res) = flags.resolution {
             match res.trim().to_lowercase().as_str() {
                 "1080p" | "fhd" => ResolutionPreset::Fhd1080p,
                 "1440p" | "qhd" | "2k" => ResolutionPreset::Qhd1440p,
                 "4k" | "uhd" | "2160p" => ResolutionPreset::Uhd4k,
-                _ => ResolutionPreset::Auto,
+                _ => ResolutionPreset::detect_from_devices(&monitored, &initial_devices),
             }
         } else {
-            ResolutionPreset::Auto
+            ResolutionPreset::detect_from_devices(&monitored, &initial_devices)
+        };
+
+        let selected_scene = if let Some(ref sc) = flags.scene {
+            ScenePreset::from_str(sc)
+        } else {
+            ScenePreset::All
         };
 
         let dump_renders = flags.dump_renders;
         let auto_start = flags.auto_start && !initial_tests.is_empty();
 
-        let mut monitored = discover_all_devices();
-        poll_all_devices(&mut monitored, false);
-
         let initial_cmd = if auto_start {
             Command::perform(async {}, |_| Message::StartBenchmarks)
         } else {
             Command::none()
+        };
+
+        let selected_telemetry_device = {
+            let target_gpu_idx = initial_devices.iter()
+                .filter(|d| !d.starts_with("System"))
+                .filter_map(|d| d.split(':').next().and_then(|s| s.trim().parse::<u32>().ok()))
+                .next();
+
+            if let Some(gpu_idx) = target_gpu_idx {
+                monitored.iter().position(|m| m.is_gpu && m.id == format!("GPU {}", gpu_idx))
+                    .unwrap_or(0)
+            } else {
+                0
+            }
         };
 
         (
@@ -2101,11 +2367,12 @@ impl Application for GPUBenchApp {
                 selected_tests: initial_tests,
                 dump_renders,
                 selected_resolution,
+                selected_scene,
                 parity_profile: None,
                 current_benchmark: String::from("Waiting to start..."),
                 current_devices_label: String::from(""),
                 monitored_devices: monitored,
-                selected_telemetry_device: 0,
+                selected_telemetry_device,
                 active_device_targets: Vec::new(),
                 results_map: HashMap::new(),
                 completed_configs_count: 0,
@@ -2143,6 +2410,8 @@ impl Application for GPUBenchApp {
                 gpu_pixel_fill: 0.0,
                 gpu_pixel_fill_hdr: 0.0,
                 gpu_pixel_fill_blend: 0.0,
+                window_width: 1280,
+                window_height: 980,
             },
             initial_cmd
         )
@@ -2153,11 +2422,24 @@ impl Application for GPUBenchApp {
     }
 
     fn subscription(&self) -> iced::Subscription<Message> {
-        iced::time::every(std::time::Duration::from_millis(500)).map(|_| Message::Tick)
+        let tick_sub = iced::time::every(std::time::Duration::from_millis(500)).map(|_| Message::Tick);
+        let resize_sub = iced::event::listen_with(|event, _| {
+            if let iced::Event::Window(_, iced::window::Event::Resized { width, height }) = event {
+                Some(Message::WindowResized(width, height))
+            } else {
+                None
+            }
+        });
+        iced::Subscription::batch([tick_sub, resize_sub])
     }
 
     fn update(&mut self, message: Message) -> Command<Message> {
         match message {
+            Message::WindowResized(width, height) => {
+                self.window_width = width;
+                self.window_height = height;
+                Command::none()
+            }
             Message::BackendSelected(backend) => {
                 if let AppState::Setup { selected_backend, available_devices, .. } = &mut self.state {
                     *selected_backend = backend.clone();
@@ -2168,9 +2450,28 @@ impl Application for GPUBenchApp {
                     *available_devices = new_devices.clone();
                     self.available_devices = new_devices.clone();
                     
+                    // Preserve selected device indices if possible across backend change
+                    let prev_indices: Vec<u32> = self.selected_devices.iter()
+                        .filter_map(|d| d.split(':').next().and_then(|s| s.trim().parse::<u32>().ok()))
+                        .collect();
+                    let had_system = self.selected_devices.iter().any(|d| d.starts_with("System"));
+
                     self.selected_devices.clear();
                     for d in &self.available_devices {
-                        self.selected_devices.insert(d.clone());
+                        if d.starts_with("System") {
+                            if had_system {
+                                self.selected_devices.insert(d.clone());
+                            }
+                        } else if let Some(idx) = d.split(':').next().and_then(|s| s.trim().parse::<u32>().ok()) {
+                            if prev_indices.contains(&idx) {
+                                self.selected_devices.insert(d.clone());
+                            }
+                        }
+                    }
+                    if self.selected_devices.is_empty() {
+                        for d in &self.available_devices {
+                            self.selected_devices.insert(d.clone());
+                        }
                     }
 
                     if backend != "VULKAN" {
@@ -2207,6 +2508,10 @@ impl Application for GPUBenchApp {
                 self.selected_resolution = preset;
                 Command::none()
             }
+            Message::SceneSelected(preset) => {
+                self.selected_scene = preset;
+                Command::none()
+            }
             Message::TelemetryDeviceSelected(idx) => {
                 if idx < self.monitored_devices.len() {
                     self.selected_telemetry_device = idx;
@@ -2223,6 +2528,8 @@ impl Application for GPUBenchApp {
                         self.selected_tests.insert("RayTracing".to_string());
                     } else if name == "RayTracing" {
                         self.selected_tests.insert("RayIntersect".to_string());
+                    } else if name == "RayScheduling" {
+                        self.selected_tests.insert("RayExecutionParadigm".to_string());
                     }
                     if name.contains("System Memory") {
                         self.selected_devices.insert("System: Host CPU & RAM".to_string());
@@ -2233,6 +2540,9 @@ impl Application for GPUBenchApp {
                         self.selected_tests.remove("RayTracing");
                     } else if name == "RayTracing" {
                         self.selected_tests.remove("RayIntersect");
+                    } else if name == "RayScheduling" {
+                        self.selected_tests.remove("RayExecutionParadigm");
+                        self.selected_tests.retain(|t| !t.starts_with("RayScheduling"));
                     }
                     if name.contains("System Memory") {
                         let other_sys = if name == "System Memory Bandwidth" {
@@ -2381,10 +2691,24 @@ impl Application for GPUBenchApp {
 
                     let mut tests_to_run: Vec<String> = Vec::new();
                     for t in &self.available_tests {
-                        if self.selected_tests.contains(t) {
+                        if self.selected_tests.contains(t)
+                            || (t == "RayScheduling" && (self.selected_tests.contains("RayExecutionParadigm") || self.selected_tests.iter().any(|s| s.starts_with("RayScheduling"))))
+                        {
                             tests_to_run.push(t.clone());
                         }
                     }
+                    if b_str == "VULKAN"
+                        && (self.selected_tests.contains("RayScheduling") || self.selected_tests.contains("RayExecutionParadigm") || self.selected_tests.iter().any(|s| s.starts_with("RayScheduling")))
+                        && !tests_to_run.iter().any(|t| t == "RayScheduling")
+                    {
+                        tests_to_run.push("RayScheduling".to_string());
+                    }
+                    for t in &mut tests_to_run {
+                        if t.starts_with("RayScheduling") || t.starts_with("RayExecutionParadigm") {
+                            *t = "RayScheduling".to_string();
+                        }
+                    }
+                    tests_to_run.dedup();
                     if !has_system {
                         tests_to_run.retain(|t| !t.contains("System Memory") && !t.contains("SysMem"));
                     }
@@ -2431,7 +2755,9 @@ impl Application for GPUBenchApp {
                             "FP16" | "BF16" | "FP8" | "INT8" | "INT4" => 2,
                             "RayASBuild" => 8,
                             "RayPathTracing" => 3,
-                            "RayScheduling" | "RayExecutionParadigm" => 28,
+                            "RayScheduling" | "RayExecutionParadigm" => {
+                                if self.selected_scene == ScenePreset::All { 28 * 4 } else { 28 }
+                            }
                             _ => 1,
                         };
                     }
@@ -2456,10 +2782,11 @@ impl Application for GPUBenchApp {
 
                     let dump_renders_val = self.dump_renders;
                     let (res_w, res_h) = self.selected_resolution.dimensions();
+                    let scene_str = self.selected_scene.id_str().to_string();
 
                     log_diagnostic(&format!(
-                        "=== Benchmark run started: backend='{}', resolution='{}' ({}x{}), devices={:?}, tests={:?} ===",
-                        b_str, self.selected_resolution.label(), res_w, res_h, dev_names, tests_to_run
+                        "=== Benchmark run started: backend='{}', resolution='{}' ({}x{}), scene='{}', devices={:?}, tests={:?} ===",
+                        b_str, self.selected_resolution.label(), res_w, res_h, self.selected_scene.label(), dev_names, tests_to_run
                     ));
 
                     self.state = AppState::Running {
@@ -2482,6 +2809,7 @@ impl Application for GPUBenchApp {
                                     dump_renders_val,
                                     res_w,
                                     res_h,
+                                    &scene_str,
                                     progress_callback
                                 )
                             }).await
@@ -2773,12 +3101,12 @@ impl Application for GPUBenchApp {
                 let primary_diptych = format!("renders/render_{}_comparison.png", tag);
                 let primary = format!("renders/render_{}_comparison_triptych.png", tag);
                 let fallback = "renders/render_comparison_triptych.png";
-                if tag != "all" && tag != "grid" && find_renders_file(&primary_diptych).is_some() {
-                    open_render_target(&primary_diptych);
-                } else if find_renders_file(grid).is_some() {
+                if (self.selected_scene == ScenePreset::All || tag == "all" || tag == "grid") && find_renders_file(grid).is_some() {
                     open_render_target(grid);
                 } else if find_renders_file(&primary_diptych).is_some() {
                     open_render_target(&primary_diptych);
+                } else if find_renders_file(grid).is_some() {
+                    open_render_target(grid);
                 } else if find_renders_file(&primary).is_some() {
                     open_render_target(&primary);
                 } else {
@@ -2882,11 +3210,18 @@ impl Application for GPUBenchApp {
 
                     hud_content = hud_content.push(
                         column![
-                            // GPU Utilization
-                            column![
-                                row![text("GPU UTIL").size(8).style(color!(0x94A3B8)), Space::with_width(Length::Fill), text(util_str).size(9).style(util_color)],
-                                progress_bar(0.0..=1.0, util_pct).height(3.0)
-                            ].spacing(1),
+                            // GPU Utilization and Power side-by-side
+                            row![
+                                column![
+                                    row![text("GPU UTIL").size(8).style(color!(0x94A3B8)), Space::with_width(Length::Fill), text(util_str).size(9).style(util_color)],
+                                    progress_bar(0.0..=1.0, util_pct).height(3.0)
+                                ].width(Length::FillPortion(1)).spacing(1),
+                                Space::with_width(10),
+                                column![
+                                    row![text("POWER").size(8).style(color!(0x94A3B8)), Space::with_width(Length::Fill), text(power_str).size(9).style(color!(0x38BDF8))],
+                                    progress_bar(0.0..=1.0, power_pct).height(3.0)
+                                ].width(Length::FillPortion(1)).spacing(1),
+                            ].align_items(iced::Alignment::Center),
                             // Temperatures
                             row![
                                 column![text("EDGE").size(7).style(color!(0x64748B)), text(edge_str).size(9).style(temp_color)].spacing(1),
@@ -2895,11 +3230,6 @@ impl Application for GPUBenchApp {
                                 Space::with_width(Length::Fill),
                                 column![text("VRAM").size(7).style(color!(0x64748B)), text(mem_t_str).size(9).style(color!(0xA5B4FC))].spacing(1),
                             ],
-                            // Power gauge
-                            column![
-                                row![text("POWER").size(8).style(color!(0x94A3B8)), Space::with_width(Length::Fill), text(power_str).size(9).style(color!(0x38BDF8))],
-                                progress_bar(0.0..=1.0, power_pct).height(3.0)
-                            ].spacing(1),
                             // Clocks
                             row![
                                 column![text("CORE CLK").size(7).style(color!(0x64748B)), text(sclk_str).size(9).style(color!(0xF1F5F9))].spacing(1),
@@ -2917,22 +3247,23 @@ impl Application for GPUBenchApp {
                     let temp_str = if dev.temp > 0.0 { format!("{:.1} °C", dev.temp) } else { "-- °C".to_string() };
                     let temp_pct = (dev.temp / 100.0).clamp(0.0, 1.0);
                     hud_content = hud_content.push(
-                        column![
+                        row![
                             column![
                                 row![text("CPU TEMP").size(8).style(color!(0x94A3B8)), Space::with_width(Length::Fill), text(temp_str).size(9).style(temp_color)],
                                 progress_bar(0.0..=1.0, temp_pct).height(3.0)
-                            ].spacing(1),
+                            ].width(Length::FillPortion(1)).spacing(1),
+                            Space::with_width(10),
                             column![
                                 row![text("CPU POWER").size(8).style(color!(0x94A3B8)), Space::with_width(Length::Fill), text(power_str).size(9).style(color!(0x38BDF8))],
                                 progress_bar(0.0..=1.0, power_pct).height(3.0)
-                            ].spacing(1),
-                        ].spacing(4)
+                            ].width(Length::FillPortion(1)).spacing(1),
+                        ].align_items(iced::Alignment::Center)
                     );
                 }
             }
 
             container(hud_content)
-                .padding(12)
+                .padding([10, 12])
                 .style(|_t: &Theme| container::Appearance {
                     background: Some(Background::Color(color!(0x11141E))),
                     border: Border { radius: 10.0.into(), width: 1.0, color: color!(0x1F2536) },
@@ -2981,52 +3312,63 @@ impl Application for GPUBenchApp {
                 }
 
                 let is_selection_empty = self.selected_tests.is_empty();
+                let sel_count = self.selected_tests.len();
                 let start_btn = if is_selection_empty {
                     button(
                         container(
                             column![
-                                text("START BENCHMARK").size(12).style(color!(0x94A3B8)),
+                                row![
+                                    text("▶").size(12).style(color!(0x94A3B8)),
+                                    Space::with_width(6),
+                                    text("BEGIN TESTING").size(13).style(color!(0x94A3B8)),
+                                ].align_items(iced::Alignment::Center),
                                 Space::with_height(2),
-                                text("Select benchmarks above").size(10).style(color!(0xF59E0B)),
+                                text("Select at least 1 benchmark").size(10).style(color!(0xF59E0B)),
                             ].align_items(iced::Alignment::Center)
                         )
                         .width(Length::Fill)
                         .center_x()
                     )
                     .width(Length::Fill)
-                    .padding([8, 0])
+                    .padding([10, 0])
                     .on_press(Message::StartBenchmarks)
                     .style(iced::theme::Button::Custom(Box::new(SleekSecondaryButton)))
                 } else {
                     button(
-                        container(text("START BENCHMARK").size(13).style(color!(0xFFFFFF)))
-                            .width(Length::Fill)
-                            .center_x()
+                        container(
+                            column![
+                                row![
+                                    text("▶").size(13).style(color!(0xFFFFFF)),
+                                    Space::with_width(6),
+                                    text("BEGIN TESTING").size(14).style(color!(0xFFFFFF)),
+                                ].align_items(iced::Alignment::Center),
+                                Space::with_height(2),
+                                text(format!("{} benchmark{} selected", sel_count, if sel_count == 1 { "" } else { "s" }))
+                                    .size(10).style(color!(0xC7D2FE)),
+                            ].align_items(iced::Alignment::Center)
+                        )
+                        .width(Length::Fill)
+                        .center_x()
                     )
                     .width(Length::Fill)
-                    .padding([12, 0])
+                    .padding([10, 0])
                     .on_press(Message::StartBenchmarks)
                     .style(iced::theme::Button::Custom(Box::new(SleekPrimaryButton)))
                 };
 
                 let resolution_section = {
-                    let mut res_col = column![].spacing(4);
+                    let mut res_row = row![].spacing(6);
                     for preset in ResolutionPreset::ALL {
                         let is_sel = self.selected_resolution == preset;
                         let btn = button(
-                            row![
-                                text(if is_sel { "(•)" } else { "( )" }).size(10).style(if is_sel { color!(0x818CF8) } else { color!(0x475569) }),
-                                Space::with_width(6),
-                                text(preset.label()).size(10).style(if is_sel { color!(0xF8FAFC) } else { color!(0x94A3B8) })
-                            ].align_items(iced::Alignment::Center)
+                            text(preset.label()).size(10).horizontal_alignment(iced::alignment::Horizontal::Center)
                         )
-                        .padding([5, 8])
+                        .padding([6, 2])
                         .width(Length::Fill)
                         .on_press(Message::ResolutionSelected(preset))
-                        .style(iced::theme::Button::Custom(Box::new(SleekDeviceCheckbox { is_checked: is_sel })));
+                        .style(iced::theme::Button::Custom(Box::new(SleekPillToggle { is_active: is_sel, is_api_selector: false })));
 
                         let tip = match preset {
-                            ResolutionPreset::Auto => "Hardware-adaptive: 4K for 16GB+ GPUs, 1440p for 10-12GB GPUs, 1080p for <10GB GPUs",
                             ResolutionPreset::Fhd1080p => "Fixed 1920x1080 (2.07M rays / 66 MB) — Fits on-chip cache on high-end GPUs",
                             ResolutionPreset::Qhd1440p => "Fixed 2560x1440 (3.69M rays / 118 MB) — Mid-range cache-stress benchmark",
                             ResolutionPreset::Uhd4k => "Fixed 3840x2160 (8.29M rays / 265 MB) — Spills L3 Infinity Cache on all GPUs",
@@ -3047,10 +3389,59 @@ impl Application for GPUBenchApp {
                         .gap(4)
                         .style(iced::theme::Container::Transparent);
 
-                        res_col = res_col.push(row_with_tip);
+                        res_row = res_row.push(row_with_tip);
                     }
-                    res_col
+                    res_row
                 };
+
+                let make_scene_btn = |preset: ScenePreset, label: &str, is_sel: bool| {
+                    let btn = button(
+                        row![
+                            text(if is_sel { "(•)" } else { "( )" }).size(9).style(if is_sel { color!(0x10B981) } else { color!(0x475569) }),
+                            Space::with_width(4),
+                            text(label).size(10).style(if is_sel { color!(0xF8FAFC) } else { color!(0x94A3B8) })
+                        ].align_items(iced::Alignment::Center)
+                    )
+                    .padding([5, 6])
+                    .width(Length::Fill)
+                    .on_press(Message::SceneSelected(preset))
+                    .style(iced::theme::Button::Custom(Box::new(SleekDeviceCheckbox { is_checked: is_sel })));
+
+                    let tip = match preset {
+                        ScenePreset::All => "Executes all 4 scenarios sequentially (Showroom -> Indoor -> Outdoor -> Forest) and produces comparative grid",
+                        ScenePreset::Indoor => "Crytek Sponza Atrium (262k Tris, 25 materials, Cook-Torrance GGX & normal maps)",
+                        ScenePreset::Forest => "High-density Open-World Forest (1.0M Tris, 850 trees, terrain, water bathymetry, 8 PBR nature shaders)",
+                        ScenePreset::Outdoor => "Mountain Valley Landscape (57k Tris, alpine lake, 100 conifer trees, Rayleigh-Mie atmosphere)",
+                        ScenePreset::Showroom => "Khronos ToyCar Studio (109k Tris, metallic flake clearcoat, decals, turntable pedestal)",
+                    };
+
+                    tooltip(
+                        btn,
+                        container(text(tip).size(10).style(color!(0xE2E8F0)))
+                            .width(Length::Fixed(250.0))
+                            .padding(8)
+                            .style(|_t: &Theme| container::Appearance {
+                                background: Some(Background::Color(color!(0x141824))),
+                                border: Border { radius: 6.0.into(), width: 1.0, color: color!(0x2A3248) },
+                                ..Default::default()
+                            }),
+                        tooltip::Position::Top
+                    )
+                    .gap(4)
+                    .style(iced::theme::Container::Transparent)
+                };
+
+                let scene_section = column![
+                    make_scene_btn(ScenePreset::All, "All (4 Scenes)", self.selected_scene == ScenePreset::All),
+                    row![
+                        make_scene_btn(ScenePreset::Indoor, "Indoor (262k)", self.selected_scene == ScenePreset::Indoor),
+                        make_scene_btn(ScenePreset::Forest, "Forest (1.0M)", self.selected_scene == ScenePreset::Forest),
+                    ].spacing(6),
+                    row![
+                        make_scene_btn(ScenePreset::Outdoor, "Outdoor (57k)", self.selected_scene == ScenePreset::Outdoor),
+                        make_scene_btn(ScenePreset::Showroom, "Showroom (109k)", self.selected_scene == ScenePreset::Showroom),
+                    ].spacing(6),
+                ].spacing(4);
 
                 let dump_renders_btn = {
                     let is_checked = self.dump_renders;
@@ -3106,45 +3497,61 @@ impl Application for GPUBenchApp {
                     None
                 };
 
-                let mut sidebar_col = column![
+                let sidebar_scroll_content = column![
                     brand_block,
-                    Space::with_height(14),
+                    Space::with_height(10),
                     telemetry_panel,
-                    Space::with_height(14),
+                    Space::with_height(10),
                     text("COMPUTE API").size(10).style(color!(0x64748B)),
                     Space::with_height(4),
                     api_row,
-                    Space::with_height(14),
+                    Space::with_height(10),
                     text("TARGET DEVICES").size(10).style(color!(0x64748B)),
                     Space::with_height(4),
                     device_col,
-                    Space::with_height(14),
+                    Space::with_height(10),
                     text("TARGET RESOLUTION").size(10).style(color!(0x64748B)),
                     Space::with_height(4),
                     resolution_section,
-                    Space::with_height(14),
+                    Space::with_height(10),
+                    text("RAY TRACING SCENE").size(10).style(color!(0x64748B)),
+                    Space::with_height(4),
+                    scene_section,
+                    Space::with_height(10),
                     text("OPTIONS").size(10).style(color!(0x64748B)),
                     Space::with_height(4),
                     dump_renders_btn,
-                    Space::with_height(Length::Fill),
+                    Space::with_height(6),
                 ];
 
+                let mut footer_col = column![].spacing(6);
                 if let Some(banner) = validation_banner {
-                    sidebar_col = sidebar_col.push(banner).push(Space::with_height(8));
+                    footer_col = footer_col.push(banner);
                 }
-                sidebar_col = sidebar_col.push(start_btn);
+                footer_col = footer_col.push(start_btn);
+
+                let sidebar_col = column![
+                    scrollable(
+                        container(sidebar_scroll_content)
+                            .padding([0, 4, 0, 0])
+                            .width(Length::Fill)
+                    ).height(Length::Fill),
+                    container(footer_col)
+                        .padding([8, 0])
+                        .width(Length::Fill),
+                ];
 
                 let sidebar = container(sidebar_col)
-                .width(Length::Fixed(270.0))
+                .width(Length::Fixed(self.dynamic_sidebar_width()))
                 .height(Length::Fill)
-                .padding(18)
+                .padding(16)
                 .style(|_t: &Theme| container::Appearance {
                     background: Some(Background::Color(color!(0x0A0B10))),
                     border: Border { color: color!(0x1A1E2B), width: 1.0, ..Default::default() },
                     ..Default::default()
                 });
 
-                let create_pill_grid_with_tooltips = |title: &str, accent_color: iced::Color, is_rt: bool, items: Vec<(&str, &str)>| {
+                let create_pill_grid_with_tooltips = |title: &str, accent_color: iced::Color, is_rt: bool, items: Vec<(&str, &str)>| -> iced::widget::Column<'_, Message> {
                     let is_rt_disabled = is_rt && selected_backend != "VULKAN";
                     
                     let header_row = if is_rt_disabled {
@@ -3349,7 +3756,9 @@ impl Application for GPUBenchApp {
                     .gap(4)
                     .style(iced::theme::Container::Transparent);
 
-                    let is_scheduling_checked = self.selected_tests.contains("RayScheduling") || self.selected_tests.contains("RayExecutionParadigm");
+                    let is_scheduling_checked = self.selected_tests.contains("RayScheduling")
+                        || self.selected_tests.contains("RayExecutionParadigm")
+                        || self.selected_tests.iter().any(|t| t.starts_with("RayScheduling"));
                     let scheduling_tip_text = if is_rt_disabled {
                         "Hardware Ray Tracing requires the Vulkan backend."
                     } else {
@@ -3457,6 +3866,51 @@ impl Application for GPUBenchApp {
                         .style(iced::theme::Button::Custom(Box::new(SleekGroupChip { is_highlighted: sys_all, is_disabled: false }))),
                 ].spacing(5);
 
+                let header_start_btn = if is_selection_empty {
+                    button(
+                        row![
+                            text("▶").size(11).style(color!(0x94A3B8)),
+                            Space::with_width(6),
+                            text("BEGIN TESTING").size(11).style(color!(0x94A3B8)),
+                        ].align_items(iced::Alignment::Center)
+                    )
+                    .padding([6, 14])
+                    .on_press(Message::StartBenchmarks)
+                    .style(iced::theme::Button::Custom(Box::new(SleekSecondaryButton)))
+                } else {
+                    button(
+                        row![
+                            text("▶").size(11).style(color!(0xFFFFFF)),
+                            Space::with_width(6),
+                            text(format!("BEGIN TESTING ({})", sel_count)).size(11).style(color!(0xFFFFFF)),
+                        ].align_items(iced::Alignment::Center)
+                    )
+                    .padding([6, 16])
+                    .on_press(Message::StartBenchmarks)
+                    .style(iced::theme::Button::Custom(Box::new(SleekPrimaryButton)))
+                };
+
+                let test_categories_grid: Element<'_, Message> = if self.dynamic_main_width() >= 880.0 {
+                    row![
+                        comp_col.width(Length::FillPortion(1)),
+                        sys_col.width(Length::FillPortion(1)),
+                        rt_col.width(Length::FillPortion(1)),
+                    ].spacing(16).into()
+                } else if self.dynamic_main_width() >= 560.0 {
+                    row![
+                        column![comp_col, Space::with_height(16), sys_col].spacing(0).width(Length::FillPortion(1)),
+                        rt_col.width(Length::FillPortion(1)),
+                    ].spacing(16).into()
+                } else {
+                    column![
+                        comp_col.width(Length::Fill),
+                        Space::with_height(16),
+                        sys_col.width(Length::Fill),
+                        Space::with_height(16),
+                        rt_col.width(Length::Fill),
+                    ].spacing(0).into()
+                };
+
                 let main_area = container(
                     scrollable(
                         column![
@@ -3466,14 +3920,15 @@ impl Application for GPUBenchApp {
                                     text("Select GPU compute, memory, and ray tracing benchmarks to profile").size(12).style(color!(0x64748B))
                                 ].spacing(2),
                                 Space::with_width(Length::Fill),
-                                group_toggles
+                                header_start_btn,
                             ].align_items(iced::Alignment::Center),
-                            Space::with_height(20),
+                            Space::with_height(10),
                             row![
-                                comp_col.width(Length::FillPortion(1)),
-                                sys_col.width(Length::FillPortion(1)),
-                                rt_col.width(Length::FillPortion(1)),
-                            ].spacing(16)
+                                group_toggles,
+                                Space::with_width(Length::Fill),
+                            ].align_items(iced::Alignment::Center),
+                            Space::with_height(16),
+                            test_categories_grid,
                         ]
                     ).height(Length::Fill)
                 )
@@ -3519,9 +3974,9 @@ impl Application for GPUBenchApp {
                         retry_btn
                     ]
                 )
-                .width(Length::Fixed(270.0))
+                .width(Length::Fixed(self.dynamic_sidebar_width()))
                 .height(Length::Fill)
-                .padding(20)
+                .padding(16)
                 .style(|_t: &Theme| container::Appearance {
                     background: Some(Background::Color(color!(0x0A0B10))),
                     border: Border { color: color!(0x1A1E2B), width: 1.0, ..Default::default() },
@@ -3845,16 +4300,19 @@ impl Application for GPUBenchApp {
                     }
 
                     if is_single_target {
+                        let num_cols = self.dynamic_test_columns();
                         while !card_list.is_empty() {
-                            if card_list.len() >= 2 {
-                                let c1 = card_list.remove(0);
-                                let c2 = card_list.remove(0);
-                                cat_rows = cat_rows.push(row![c1, c2].spacing(8).width(Length::Fill));
-                            } else {
-                                let c1 = card_list.remove(0);
-                                let dummy = container(Space::with_width(Length::Fill)).width(Length::FillPortion(1));
-                                cat_rows = cat_rows.push(row![c1, dummy].spacing(8).width(Length::Fill));
+                            let mut row_items = row![].spacing(8).width(Length::Fill);
+                            let take_count = card_list.len().min(num_cols);
+                            for _ in 0..take_count {
+                                let card = card_list.remove(0);
+                                row_items = row_items.push(card);
                             }
+                            for _ in take_count..num_cols {
+                                let dummy = container(Space::with_width(Length::Fill)).width(Length::FillPortion(1));
+                                row_items = row_items.push(dummy);
+                            }
+                            cat_rows = cat_rows.push(row_items);
                         }
                     }
 
@@ -4195,6 +4653,53 @@ impl Application for GPUBenchApp {
                     }
                 };
 
+                let live_suite_stats_card = container(
+                    column![
+                        row![
+                            container(Space::with_width(3)).height(10).style(|_t: &Theme| container::Appearance {
+                                background: Some(Background::Color(color!(0x818CF8))),
+                                border: Border { radius: 2.0.into(), ..Default::default() },
+                                ..Default::default()
+                            }),
+                            Space::with_width(6),
+                            text("EXECUTION METRICS").size(9).style(color!(0x818CF8)),
+                        ].align_items(iced::Alignment::Center),
+                        Space::with_height(6),
+                        row![
+                            text("Completed:").size(10).style(color!(0x64748B)),
+                            Space::with_width(Length::Fill),
+                            text(format!("{}/{}", self.completed_configs_count, self.total_expected_configs)).size(10).style(color!(0xE2E8F0)),
+                        ],
+                        row![
+                            text("Evaluated:").size(10).style(color!(0x64748B)),
+                            Space::with_width(Length::Fill),
+                            text(if self.completed_configs_count > 0 {
+                                let passed = self.results_map.values().filter(|c| !c.value_str.is_empty()).count();
+                                format!("{} completed", passed)
+                            } else {
+                                "—".to_string()
+                            }).size(10).style(color!(0x34D399)),
+                        ],
+                        row![
+                            text("Diagnostics:").size(10).style(color!(0x64748B)),
+                            Space::with_width(Length::Fill),
+                            text(if self.completed_configs_count > 0 {
+                                let unsupp = self.results_map.values().filter(|c| c.is_unsupported).count();
+                                format!("{} notes", unsupp)
+                            } else {
+                                "—".to_string()
+                            }).size(10).style(color!(0x94A3B8)),
+                        ],
+                    ].spacing(3)
+                )
+                .padding(10)
+                .width(Length::Fill)
+                .style(|_t: &Theme| container::Appearance {
+                    background: Some(Background::Color(color!(0x11141E))),
+                    border: Border { radius: 8.0.into(), width: 1.0, color: color!(0x1A202C) },
+                    ..Default::default()
+                });
+
                 let sidebar = container(
                     column![
                         brand_block,
@@ -4208,6 +4713,7 @@ impl Application for GPUBenchApp {
                                 row![text("API:").size(10).style(color!(0x64748B)), Space::with_width(Length::Fill), text(format!("{} {}", &self.selected_backend, detect_dynamic_api_version(&self.selected_backend))).size(11).style(color!(0x38BDF8))],
                                 row![text("DEVICES:").size(10).style(color!(0x64748B)), Space::with_width(Length::Fill), text(if self.current_devices_label.is_empty() { "—" } else { &self.current_devices_label }).size(10).style(color!(0xE2E8F0))],
                                 row![text("RES:").size(10).style(color!(0x64748B)), Space::with_width(Length::Fill), text(self.selected_resolution.label()).size(10).style(color!(0xA5B4FC))],
+                                row![text("SCENE:").size(10).style(color!(0x64748B)), Space::with_width(Length::Fill), text(self.selected_scene.label()).size(10).style(color!(0x34D399))],
                             ].spacing(3)
                         )
                         .padding(10)
@@ -4218,13 +4724,15 @@ impl Application for GPUBenchApp {
                         }),
                         Space::with_height(14),
                         current_workload_card,
+                        Space::with_height(14),
+                        live_suite_stats_card,
                         Space::with_height(Length::Fill),
                         action_buttons
                     ]
                 )
-                .width(Length::Fixed(270.0))
+                .width(Length::Fixed(self.dynamic_sidebar_width()))
                 .height(Length::Fill)
-                .padding(18)
+                .padding(16)
                 .style(|_t: &Theme| container::Appearance {
                     background: Some(Background::Color(color!(0x0A0B10))),
                     border: Border { color: color!(0x1A1E2B), width: 1.0, ..Default::default() },
@@ -4269,6 +4777,35 @@ impl Application for GPUBenchApp {
 }
 
 impl GPUBenchApp {
+    fn dynamic_sidebar_width(&self) -> f32 {
+        if self.window_width >= 1600 {
+            360.0
+        } else if self.window_width >= 1200 {
+            330.0
+        } else if self.window_width >= 960 {
+            290.0
+        } else {
+            260.0
+        }
+    }
+
+    fn dynamic_main_width(&self) -> f32 {
+        (self.window_width as f32 - self.dynamic_sidebar_width() - 48.0).max(300.0)
+    }
+
+    fn dynamic_test_columns(&self) -> usize {
+        let mw = self.dynamic_main_width();
+        if mw >= 1350.0 {
+            4
+        } else if mw >= 960.0 {
+            3
+        } else if mw >= 560.0 {
+            2
+        } else {
+            1
+        }
+    }
+
     fn is_workload_selected(&self, w: &WorkloadDef) -> bool {
         match w.id {
             "fp64" => self.selected_tests.contains("FP64"),
@@ -4295,6 +4832,25 @@ impl GPUBenchApp {
             | "rt_blas_build" | "rt_blas_update" | "rt_tlas_build" | "rt_tlas_build_10k" | "rt_tlas_build_100k" => self.selected_tests.contains("RayASBuild"),
             "rt_procedural" => self.selected_tests.contains("RayProcedural"),
             "rt_pathtracing" => self.selected_tests.contains("RayPathTracing"),
+            "rt_sched_full_showroom_trad" | "rt_sched_full_showroom_wl" => {
+                (self.selected_scene == ScenePreset::All || self.selected_scene == ScenePreset::Showroom)
+                    && self.selected_tests.iter().any(|t| t.contains("RayScheduling") || t.contains("RayExecutionParadigm") || t.contains("RayShadows"))
+            }
+            "rt_sched_full_indoor_trad" | "rt_sched_full_indoor_wl" => {
+                (self.selected_scene == ScenePreset::All || self.selected_scene == ScenePreset::Indoor)
+                    && self.selected_tests.iter().any(|t| t.contains("RayScheduling") || t.contains("RayExecutionParadigm") || t.contains("RayShadows"))
+            }
+            "rt_sched_full_outdoor_trad" | "rt_sched_full_outdoor_wl" => {
+                (self.selected_scene == ScenePreset::All || self.selected_scene == ScenePreset::Outdoor)
+                    && self.selected_tests.iter().any(|t| t.contains("RayScheduling") || t.contains("RayExecutionParadigm") || t.contains("RayShadows"))
+            }
+            "rt_sched_full_forest_trad" | "rt_sched_full_forest_wl" => {
+                (self.selected_scene == ScenePreset::All || self.selected_scene == ScenePreset::Forest)
+                    && self.selected_tests.iter().any(|t| t.contains("RayScheduling") || t.contains("RayExecutionParadigm") || t.contains("RayShadows"))
+            }
+            "rt_sched_stage_prim_morton_trad" | "rt_sched_stage_prim_morton_wl" => {
+                false
+            }
             id if id.starts_with("rt_sched_") => {
                 self.selected_tests.iter().any(|t| t.contains("RayScheduling") || t.contains("RayExecutionParadigm") || t.contains("RayShadows"))
             }
@@ -4508,7 +5064,8 @@ impl GPUBenchApp {
         s.push_str(&format!("- **CPU**: {} ({} logical threads)\n", sys.cpu_model, sys.cpu_logical_cores));
         s.push_str(&format!("- **Total System RAM**: {:.1} GB\n", sys.total_ram_gb));
         s.push_str(&format!("- **Selected Backend**: {}\n", self.selected_backend));
-        s.push_str(&format!("- **Selected Resolution**: {} ({}x{})\n\n", self.selected_resolution.label(), res_w, res_h));
+        s.push_str(&format!("- **Selected Resolution**: {} ({}x{})\n", self.selected_resolution.label(), res_w, res_h));
+        s.push_str(&format!("- **Selected RT Scene**: {}\n\n", self.selected_scene.label()));
 
         s.push_str("## Detected GPU Profiles\n\n");
         if profiles.is_empty() {
@@ -4645,10 +5202,30 @@ fn find_workload_for_benchmark(bench_name: &str) -> Option<&'static WorkloadDef>
             return WORKLOADS.iter().find(|w| w.id == "rt_sched_stage_bvh_morton8x4");
         } else if bench_name.contains("Morton 4x8") && bench_name.contains("BVH Traversal") {
             return WORKLOADS.iter().find(|w| w.id == "rt_sched_stage_bvh_morton4x8");
-        } else if bench_name.contains("Morton") && (bench_name.contains("Traditional") || bench_name.contains("Megakernel")) {
-            return WORKLOADS.iter().find(|w| w.id == "rt_sched_stage_prim_morton_trad");
-        } else if bench_name.contains("Morton") && (bench_name.contains("Work Lists") || bench_name.contains("DGC")) {
-            return WORKLOADS.iter().find(|w| w.id == "rt_sched_stage_prim_morton_wl");
+        } else if (bench_name.contains("Full Scene Render") || bench_name.contains("Full Render") || bench_name.contains("Morton")) && (bench_name.contains("Traditional") || bench_name.contains("Megakernel")) {
+            if bench_name.contains("Forest") {
+                return WORKLOADS.iter().find(|w| w.id == "rt_sched_full_forest_trad");
+            } else if bench_name.contains("Outdoor") {
+                return WORKLOADS.iter().find(|w| w.id == "rt_sched_full_outdoor_trad");
+            } else if bench_name.contains("Showroom") {
+                return WORKLOADS.iter().find(|w| w.id == "rt_sched_full_showroom_trad");
+            } else if bench_name.contains("Indoor") {
+                return WORKLOADS.iter().find(|w| w.id == "rt_sched_full_indoor_trad");
+            } else {
+                return WORKLOADS.iter().find(|w| w.id == "rt_sched_stage_prim_morton_trad");
+            }
+        } else if (bench_name.contains("Full Scene Render") || bench_name.contains("Full Render") || bench_name.contains("Morton")) && (bench_name.contains("Work Lists") || bench_name.contains("DGC")) {
+            if bench_name.contains("Forest") {
+                return WORKLOADS.iter().find(|w| w.id == "rt_sched_full_forest_wl");
+            } else if bench_name.contains("Outdoor") {
+                return WORKLOADS.iter().find(|w| w.id == "rt_sched_full_outdoor_wl");
+            } else if bench_name.contains("Showroom") {
+                return WORKLOADS.iter().find(|w| w.id == "rt_sched_full_showroom_wl");
+            } else if bench_name.contains("Indoor") {
+                return WORKLOADS.iter().find(|w| w.id == "rt_sched_full_indoor_wl");
+            } else {
+                return WORKLOADS.iter().find(|w| w.id == "rt_sched_stage_prim_morton_wl");
+            }
         } else if bench_name.contains("Ray-Traced Shadows - Traditional") || bench_name.contains("Shadows - Traditional") {
             return WORKLOADS.iter().find(|w| w.id == "rt_sched_shadow_trad");
         } else if bench_name.contains("Ray-Traced Shadows - Work Lists (Directional Binning") || bench_name.contains("Shadows - Work Lists (Directional Binning") {
@@ -4713,7 +5290,21 @@ fn map_result_to_workload_id(res: &ResultData) -> Option<&'static str> {
         }
     }
 
-    match res.component.as_str() {
+    let comp = if res.component.is_empty() {
+        if res.benchmarkName.starts_with("Ray") {
+            "Ray Tracing"
+        } else if res.benchmarkName.starts_with("FP") || res.benchmarkName.starts_with("BF") || res.benchmarkName.starts_with("INT") {
+            "Compute"
+        } else if res.benchmarkName.contains("Fill Rate") {
+            "Graphics"
+        } else {
+            ""
+        }
+    } else {
+        res.component.as_str()
+    };
+
+    match comp {
         "Compute" => {
             match res.subcategory.as_str() {
                 "FP64" => Some("fp64"),
@@ -4780,10 +5371,30 @@ fn map_result_to_workload_id(res: &ResultData) -> Option<&'static str> {
                     Some("rt_sched_stage_bvh_morton8x4")
                 } else if res.configIndex == 20 || (res.benchmarkName.contains("Morton 4x8") && res.benchmarkName.contains("BVH Traversal")) {
                     Some("rt_sched_stage_bvh_morton4x8")
-                } else if res.configIndex == 21 || (res.benchmarkName.contains("Morton") && (res.benchmarkName.contains("Megakernel") || res.benchmarkName.contains("Traditional"))) {
-                    Some("rt_sched_stage_prim_morton_trad")
-                } else if res.configIndex == 22 || (res.benchmarkName.contains("Morton") && (res.benchmarkName.contains("Work Lists") || res.benchmarkName.contains("DGC"))) {
-                    Some("rt_sched_stage_prim_morton_wl")
+                } else if res.configIndex == 21 || ((res.benchmarkName.contains("Full Scene Render") || res.benchmarkName.contains("Full Render") || res.benchmarkName.contains("Morton")) && (res.benchmarkName.contains("Megakernel") || res.benchmarkName.contains("Traditional"))) {
+                    if res.benchmarkName.contains("Forest") {
+                        Some("rt_sched_full_forest_trad")
+                    } else if res.benchmarkName.contains("Outdoor") {
+                        Some("rt_sched_full_outdoor_trad")
+                    } else if res.benchmarkName.contains("Showroom") {
+                        Some("rt_sched_full_showroom_trad")
+                    } else if res.benchmarkName.contains("Indoor") {
+                        Some("rt_sched_full_indoor_trad")
+                    } else {
+                        Some("rt_sched_stage_prim_morton_trad")
+                    }
+                } else if res.configIndex == 22 || ((res.benchmarkName.contains("Full Scene Render") || res.benchmarkName.contains("Full Render") || res.benchmarkName.contains("Morton")) && (res.benchmarkName.contains("Work Lists") || res.benchmarkName.contains("DGC"))) {
+                    if res.benchmarkName.contains("Forest") {
+                        Some("rt_sched_full_forest_wl")
+                    } else if res.benchmarkName.contains("Outdoor") {
+                        Some("rt_sched_full_outdoor_wl")
+                    } else if res.benchmarkName.contains("Showroom") {
+                        Some("rt_sched_full_showroom_wl")
+                    } else if res.benchmarkName.contains("Indoor") {
+                        Some("rt_sched_full_indoor_wl")
+                    } else {
+                        Some("rt_sched_stage_prim_morton_wl")
+                    }
                 } else if res.configIndex == 23 || (res.subcategory.contains("Traditional") && res.subcategory.contains("Shadow")) {
                     Some("rt_sched_shadow_trad")
                 } else if res.configIndex == 24 {
@@ -4992,6 +5603,203 @@ mod tests {
         let _ = app.update(Message::TestGroupSelected("COMPUTE".to_string()));
         assert!(!app.selected_tests.is_empty());
         assert_eq!(app.validation_error, None);
+    }
+
+    #[test]
+    fn test_resolution_presets_and_detection() {
+        assert_eq!(ResolutionPreset::ALL.len(), 3);
+        assert_eq!(ResolutionPreset::ALL[0], ResolutionPreset::Fhd1080p);
+        assert_eq!(ResolutionPreset::ALL[1], ResolutionPreset::Qhd1440p);
+        assert_eq!(ResolutionPreset::ALL[2], ResolutionPreset::Uhd4k);
+
+        // Test VRAM detection tiers
+        let mut dev32gb = DeviceTelemetry::default();
+        dev32gb.is_gpu = true;
+        dev32gb.id = "GPU 1".to_string();
+        dev32gb.vram_total = 32768; // 32 GB R9700
+
+        let mut dev12gb = DeviceTelemetry::default();
+        dev12gb.is_gpu = true;
+        dev12gb.id = "GPU 0".to_string();
+        dev12gb.vram_total = 12288; // 12 GB
+
+        let mut dev8gb = DeviceTelemetry::default();
+        dev8gb.is_gpu = true;
+        dev8gb.id = "GPU 2".to_string();
+        dev8gb.vram_total = 8192; // 8 GB
+
+        let mut initial = HashSet::new();
+        initial.insert("GPU 1".to_string());
+        assert_eq!(ResolutionPreset::detect_from_devices(&[dev32gb.clone()], &initial), ResolutionPreset::Uhd4k);
+
+        initial.clear();
+        initial.insert("GPU 0".to_string());
+        assert_eq!(ResolutionPreset::detect_from_devices(&[dev12gb.clone()], &initial), ResolutionPreset::Qhd1440p);
+
+        initial.clear();
+        initial.insert("GPU 2".to_string());
+        assert_eq!(ResolutionPreset::detect_from_devices(&[dev8gb.clone()], &initial), ResolutionPreset::Fhd1080p);
+
+        // Verify scene naming does not contain "AAA"
+        assert_eq!(ScenePreset::Forest.label(), "Open-World Forest (1.0M Tris)");
+        assert!(!ScenePreset::Forest.label().contains("AAA"));
+
+        // Verify live GPUBenchApp startup selects 4K UHD automatically on this 32GB R9700 host
+        let (app, _) = GPUBenchApp::new(GuiCliArgs::default());
+        assert_eq!(app.selected_resolution, ResolutionPreset::Uhd4k);
+    }
+
+    #[test]
+    fn test_device_cli_flags_respected() {
+        // 1. Test "-d 1" specifically selects GPU 1 and excludes other GPUs and System Memory
+        let args_d1 = vec!["-k".to_string(), "vulkan".to_string(), "-d".to_string(), "1".to_string()];
+        let parsed_d1 = parse_gui_cli_args_from(&args_d1);
+        assert_eq!(parsed_d1.devices, vec!["1"]);
+        let (app_d1, _) = GPUBenchApp::new(parsed_d1);
+        assert_eq!(app_d1.selected_devices.len(), 1, "Passing -d 1 must select exactly 1 device");
+        let selected_dev = app_d1.selected_devices.iter().next().unwrap();
+        assert!(selected_dev.starts_with("1:"), "Selected device must start with '1:', got: {}", selected_dev);
+        assert!(!selected_dev.contains("System"), "Passing -d 1 must not select System Memory");
+
+        // Telemetry HUD must focus on GPU 1
+        assert_eq!(app_d1.selected_telemetry_device, 1);
+        if let Some(target_monitored) = app_d1.monitored_devices.get(app_d1.selected_telemetry_device) {
+            assert_eq!(target_monitored.id, "GPU 1", "Telemetry HUD must target GPU 1");
+        }
+
+        // 2. Test "-d1" (compact syntax)
+        let args_d1_compact = vec!["-d1".to_string()];
+        let parsed_compact = parse_gui_cli_args_from(&args_d1_compact);
+        assert_eq!(parsed_compact.devices, vec!["1"]);
+        let (app_compact, _) = GPUBenchApp::new(parsed_compact);
+        assert_eq!(app_compact.selected_devices.len(), 1);
+        assert!(app_compact.selected_devices.iter().next().unwrap().starts_with("1:"));
+
+        // 3. Test "--device=0" specifically selects GPU 0
+        let args_d0 = vec!["--device=0".to_string()];
+        let parsed_d0 = parse_gui_cli_args_from(&args_d0);
+        assert_eq!(parsed_d0.devices, vec!["0"]);
+        let (app_d0, _) = GPUBenchApp::new(parsed_d0);
+        assert_eq!(app_d0.selected_devices.len(), 1);
+        let selected_dev_0 = app_d0.selected_devices.iter().next().unwrap();
+        assert!(selected_dev_0.starts_with("0:"), "Selected device must start with '0:', got: {}", selected_dev_0);
+
+        // 4. Test "--devices=0,1" selects both GPU 0 and GPU 1
+        let args_d01 = vec!["--devices=0,1".to_string()];
+        let parsed_d01 = parse_gui_cli_args_from(&args_d01);
+        let (app_d01, _) = GPUBenchApp::new(parsed_d01);
+        assert_eq!(app_d01.selected_devices.len(), 2);
+        assert!(app_d01.selected_devices.iter().any(|d| d.starts_with("0:")));
+        assert!(app_d01.selected_devices.iter().any(|d| d.starts_with("1:")));
+        assert!(!app_d01.selected_devices.iter().any(|d| d.starts_with("System")));
+
+        // 5. Test "-d 'GPU 1'" or "-d gpu1"
+        let args_gpu1 = vec!["-d".to_string(), "gpu 1".to_string()];
+        let parsed_gpu1 = parse_gui_cli_args_from(&args_gpu1);
+        let (app_gpu1, _) = GPUBenchApp::new(parsed_gpu1);
+        assert_eq!(app_gpu1.selected_devices.len(), 1);
+        assert!(app_gpu1.selected_devices.iter().next().unwrap().starts_with("1:"));
+    }
+
+    #[test]
+    fn test_dynamic_layout_scaling() {
+        let (mut app, _) = GPUBenchApp::new(GuiCliArgs::default());
+
+        // Initial default size should be 1280x980
+        assert_eq!(app.window_width, 1280);
+        assert_eq!(app.window_height, 980);
+        assert_eq!(app.dynamic_sidebar_width(), 330.0);
+        assert_eq!(app.dynamic_main_width(), 1280.0 - 330.0 - 48.0);
+        assert_eq!(app.dynamic_test_columns(), 2);
+
+        // Test window resizing via WindowResized message
+        let _ = app.update(Message::WindowResized(800, 600));
+        assert_eq!(app.window_width, 800);
+        assert_eq!(app.window_height, 600);
+        assert_eq!(app.dynamic_sidebar_width(), 260.0);
+        assert_eq!(app.dynamic_main_width(), 492.0);
+        assert_eq!(app.dynamic_test_columns(), 1);
+
+        // Intermediate size: 1000px width
+        let _ = app.update(Message::WindowResized(1000, 700));
+        assert_eq!(app.dynamic_sidebar_width(), 290.0);
+        assert_eq!(app.dynamic_main_width(), 662.0);
+        assert_eq!(app.dynamic_test_columns(), 2);
+
+        // QHD width: 1440px
+        let _ = app.update(Message::WindowResized(1440, 900));
+        assert_eq!(app.dynamic_sidebar_width(), 330.0);
+        assert_eq!(app.dynamic_main_width(), 1062.0);
+        assert_eq!(app.dynamic_test_columns(), 3);
+
+        // 1080p full width: 1920px -> 4 columns
+        let _ = app.update(Message::WindowResized(1920, 1080));
+        assert_eq!(app.dynamic_sidebar_width(), 360.0);
+        assert_eq!(app.dynamic_main_width(), 1512.0);
+        assert_eq!(app.dynamic_test_columns(), 4);
+
+        // Ultrawide: 3440px -> 4 columns
+        let _ = app.update(Message::WindowResized(3440, 1440));
+        assert_eq!(app.dynamic_sidebar_width(), 360.0);
+        assert_eq!(app.dynamic_test_columns(), 4);
+    }
+
+    #[test]
+    fn test_rayscheduling_selection_and_scene_mapping() {
+        let (mut app, _) = GPUBenchApp::new(GuiCliArgs::default());
+
+        // Verify available_tests contains canonical "RayScheduling"
+        assert!(app.available_tests.contains(&"RayScheduling".to_string()));
+
+        // Toggle RayScheduling
+        let _ = app.update(Message::TestToggled("RayScheduling".to_string(), true));
+        assert!(app.selected_tests.contains("RayScheduling"));
+
+        // With ScenePreset::All, all 8 scene render workloads must be selected
+        app.selected_scene = ScenePreset::All;
+        let get_workload = |id: &str| WORKLOADS.iter().find(|w| w.id == id).unwrap();
+        assert!(app.is_workload_selected(get_workload("rt_sched_full_showroom_trad")));
+        assert!(app.is_workload_selected(get_workload("rt_sched_full_showroom_wl")));
+        assert!(app.is_workload_selected(get_workload("rt_sched_full_indoor_trad")));
+        assert!(app.is_workload_selected(get_workload("rt_sched_full_indoor_wl")));
+        assert!(app.is_workload_selected(get_workload("rt_sched_full_outdoor_trad")));
+        assert!(app.is_workload_selected(get_workload("rt_sched_full_outdoor_wl")));
+        assert!(app.is_workload_selected(get_workload("rt_sched_full_forest_trad")));
+        assert!(app.is_workload_selected(get_workload("rt_sched_full_forest_wl")));
+
+        // Verify result mapping for each scene produces correct workload ID
+        let mut res = ResultData::default();
+        res.configIndex = 21;
+        res.benchmarkName = "RayScheduling (Showroom Studio) (Full Scene Render - Megakernel)".to_string();
+        assert_eq!(map_result_to_workload_id(&res), Some("rt_sched_full_showroom_trad"));
+
+        res.configIndex = 22;
+        res.benchmarkName = "RayScheduling (Showroom Studio) (Full Scene Render - Work Lists)".to_string();
+        assert_eq!(map_result_to_workload_id(&res), Some("rt_sched_full_showroom_wl"));
+
+        res.configIndex = 21;
+        res.benchmarkName = "RayScheduling (Indoor Atrium) (Full Scene Render - Megakernel)".to_string();
+        assert_eq!(map_result_to_workload_id(&res), Some("rt_sched_full_indoor_trad"));
+
+        res.configIndex = 22;
+        res.benchmarkName = "RayScheduling (Indoor Atrium) (Full Scene Render - Work Lists)".to_string();
+        assert_eq!(map_result_to_workload_id(&res), Some("rt_sched_full_indoor_wl"));
+
+        res.configIndex = 21;
+        res.benchmarkName = "RayScheduling (Outdoor Landscape) (Full Scene Render - Megakernel)".to_string();
+        assert_eq!(map_result_to_workload_id(&res), Some("rt_sched_full_outdoor_trad"));
+
+        res.configIndex = 22;
+        res.benchmarkName = "RayScheduling (Outdoor Landscape) (Full Scene Render - Work Lists)".to_string();
+        assert_eq!(map_result_to_workload_id(&res), Some("rt_sched_full_outdoor_wl"));
+
+        res.configIndex = 21;
+        res.benchmarkName = "RayScheduling (Open-World Forest) (Full Scene Render - Megakernel)".to_string();
+        assert_eq!(map_result_to_workload_id(&res), Some("rt_sched_full_forest_trad"));
+
+        res.configIndex = 22;
+        res.benchmarkName = "RayScheduling (Open-World Forest) (Full Scene Render - Work Lists)".to_string();
+        assert_eq!(map_result_to_workload_id(&res), Some("rt_sched_full_forest_wl"));
     }
 }
 

@@ -25,7 +25,7 @@ public:
 
   const char *GetName() const override {
     if (sceneType == SceneType::AAAOutdoorForest) {
-      return "RayScheduling (AAA Outdoor Forest)";
+      return "RayScheduling (Open-World Forest)";
     } else if (sceneType == SceneType::OutdoorLandscape) {
       return "RayScheduling (Outdoor Landscape)";
     } else if (sceneType == SceneType::IndoorAtrium) {

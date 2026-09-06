@@ -360,8 +360,8 @@ def evaluate_results(raw_data: Any) -> bool:
 
         scenarios = [
             ("Total Scene Render",
-             ["Total Scene Render - Traditional Megakernel", "Primary Ray Tracing - Traditional Megakernel", "Primary Rays (Traditional)", "Total Scene Render (Megakernel)"],
-             ["Total Scene Render - Work Lists", "Primary Ray Tracing - Work Lists", "Primary Rays (Work Lists)", "Total Scene Render (Work Lists)"]),
+             ["Total Scene Render - Traditional Megakernel", "Primary Ray Tracing - Traditional Megakernel", "Primary Rays (Traditional)", "Total Scene Render (Megakernel)", "Full Scene Render - Megakernel", "Full Scene Render: Megakernel"],
+             ["Total Scene Render - Work Lists", "Primary Ray Tracing - Work Lists", "Primary Rays (Work Lists)", "Total Scene Render (Work Lists)", "Full Scene Render - Work Lists", "Full Scene Render: Work Lists"]),
             ("Material Shading",
              ["Material Shading - Traditional Megakernel", "Material Shading (Traditional)"],
              ["Material Shading - Work Lists", "Material Shading (Work Lists)"]),

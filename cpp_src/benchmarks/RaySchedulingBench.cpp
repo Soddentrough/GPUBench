@@ -340,9 +340,9 @@ std::string RaySchedulingBench::GetConfigName(uint32_t config_idx) const {
   case 20:
     return "BVH Traversal - 2D Morton Z-Curve (4x8)";
   case 21:
-    return "Full Render - Morton 8x4 + Megakernel";
+    return "Full Scene Render - Megakernel";
   case 22:
-    return "Full Render - Morton 8x4 + Work Lists";
+    return "Full Scene Render - Work Lists";
   case 23:
     return "Directional Shadows - Traditional Megakernel";
   case 24:
@@ -470,7 +470,7 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
     std::vector<uint32_t> triMats;
     AAAForestScene::buildForestMesh(vertices, triMats);
     numPrimitives = static_cast<uint32_t>(vertices.size() / 36);
-    std::cout << "[RayScheduling] Generated high-density AAA Forest scene: " << numPrimitives
+    std::cout << "[RayScheduling] Generated high-density Open-World Forest scene: " << numPrimitives
               << " triangles (512x512 terrain, 600 pines, 250 birches, 1200 boulders, 4000 grass/ferns, timber bridge)"
               << std::endl;
 
@@ -1349,7 +1349,7 @@ void RaySchedulingBench::performVisualVerification() {
     profFile << std::fixed << std::setprecision(4);
     profFile << "{\n";
     profFile << "  \"gpu\": \"AMD Radeon AI PRO R9700 (GFX1201)\",\n";
-    profFile << "  \"scene\": \"" << (sceneType == SceneType::AAAOutdoorForest ? "AAA Outdoor Forest" : ((sceneType == SceneType::OutdoorLandscape) ? "Outdoor Landscape" : ((sceneType == SceneType::IndoorAtrium) ? "Indoor Atrium" : "Showroom Studio"))) << "\",\n";
+    profFile << "  \"scene\": \"" << (sceneType == SceneType::AAAOutdoorForest ? "Open-World Forest" : ((sceneType == SceneType::OutdoorLandscape) ? "Outdoor Landscape" : ((sceneType == SceneType::IndoorAtrium) ? "Indoor Atrium" : "Showroom Studio"))) << "\",\n";
     profFile << "  \"resolution\": \"" << width << "x" << height << " (" << (width * height) << " primary rays)\",\n";
     profFile << "  \"traditional\": {\n";
     profFile << "    \"fps\": " << fpsTrad << ",\n";
@@ -1418,7 +1418,7 @@ void RaySchedulingBench::performVisualVerification() {
   }
 
   std::string sceneTitle = (sceneType == SceneType::AAAOutdoorForest)
-                               ? "AAA OPEN-WORLD FOREST SCENARIO (1,001,280 Triangles)"
+                               ? "OPEN-WORLD FOREST SCENARIO (1,001,280 Triangles)"
                                : ((sceneType == SceneType::OutdoorLandscape)
                                       ? "OUTDOOR LANDSCAPE SCENARIO"
                                       : ((sceneType == SceneType::IndoorAtrium)
