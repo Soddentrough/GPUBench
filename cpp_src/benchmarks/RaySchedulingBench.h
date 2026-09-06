@@ -236,6 +236,21 @@ private:
   std::vector<VulkanContext::IndirectBatchEntry> shadowBatches;
   std::vector<VulkanContext::IndirectBatchEntry> shadowBinBatches;
   void rebuildBounceBatches();
+
+  // DGC (VK_EXT_device_generated_commands) Objects & Execution Infos
+  VkIndirectCommandsLayoutEXT dgcLayoutStandard = VK_NULL_HANDLE;
+  VkIndirectCommandsLayoutEXT dgcLayoutSpecialized = VK_NULL_HANDLE;
+  VkIndirectExecutionSetEXT dgcExecutionSetSpecialized = VK_NULL_HANDLE;
+  ComputeBuffer dgcSequenceBuffer = nullptr;
+  ComputeBuffer dgcSequenceCountBuffer = nullptr;
+  ComputeBuffer dgcPreprocessBuffer = nullptr;
+  VkDeviceSize dgcPreprocessBufferSize = 0;
+
+  VulkanContext::DGCExecutionInfo dgcInfoStandard;
+  VulkanContext::DGCExecutionInfo dgcInfoSpecialized;
+  VulkanContext::DGCExecutionInfo dgcInfoOctant;
+  std::vector<VulkanContext::DGCExecutionInfo> dgcBounceBatches;
+  void rebuildDGCBounceBatches();
 #endif
 
   uint32_t bounceDepth = 2;

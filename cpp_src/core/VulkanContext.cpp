@@ -621,6 +621,10 @@ void VulkanContext::createDevice() {
       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEVICE_GENERATED_COMMANDS_FEATURES_EXT,
       nullptr, VK_FALSE, VK_FALSE};
 
+  VkPhysicalDeviceMaintenance5FeaturesKHR maintenance5Features{
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_5_FEATURES_KHR,
+      nullptr, VK_FALSE};
+
   VkPhysicalDeviceShaderEnqueueFeaturesAMDX enqueueFeatures{
       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ENQUEUE_FEATURES_AMDX,
       nullptr, VK_FALSE, VK_FALSE};
@@ -657,6 +661,9 @@ void VulkanContext::createDevice() {
   if (hasExt(VK_EXT_DEVICE_GENERATED_COMMANDS_EXTENSION_NAME)) {
       *currentPNext = &dgcFeatures; currentPNext = &dgcFeatures.pNext;
   }
+  if (hasExt("VK_KHR_maintenance5")) {
+      *currentPNext = &maintenance5Features; currentPNext = &maintenance5Features.pNext;
+  }
   if (hasExt("VK_AMDX_shader_enqueue")) {
       *currentPNext = &enqueueFeatures; currentPNext = &enqueueFeatures.pNext;
   }
@@ -681,6 +688,7 @@ void VulkanContext::createDevice() {
       VK_KHR_RAY_TRACING_MAINTENANCE_1_EXTENSION_NAME,
       VK_EXT_DEVICE_GENERATED_COMMANDS_EXTENSION_NAME,
       VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+      "VK_KHR_maintenance5",
       "VK_EXT_shader_float8",
       "VK_KHR_shader_float_controls2",
       "VK_EXT_ray_tracing_invocation_reorder",
@@ -719,6 +727,9 @@ void VulkanContext::createDevice() {
   subgroupSizeControlSupported = hasExt(VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME) &&
                                  (subgroupSizeFeatures.subgroupSizeControl == VK_TRUE);
 
+  maintenance5Supported = hasExt("VK_KHR_maintenance5") &&
+                          (maintenance5Features.maintenance5 == VK_TRUE);
+
   VkDeviceCreateInfo createInfo{};
   createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
   createInfo.pNext = &features2; // Enable all modern features
@@ -734,6 +745,37 @@ void VulkanContext::createDevice() {
       VK_SUCCESS) {
     throw std::runtime_error("failed to create logical device!");
   }
+
+  // Load DGC function pointers if extension is enabled
+  if (hasExt(VK_EXT_DEVICE_GENERATED_COMMANDS_EXTENSION_NAME)) {
+    vkGetGeneratedCommandsMemoryRequirementsEXT_ptr =
+        (PFN_vkGetGeneratedCommandsMemoryRequirementsEXT)vkGetDeviceProcAddr(
+            device, "vkGetGeneratedCommandsMemoryRequirementsEXT");
+    vkCmdPreprocessGeneratedCommandsEXT_ptr =
+        (PFN_vkCmdPreprocessGeneratedCommandsEXT)vkGetDeviceProcAddr(
+            device, "vkCmdPreprocessGeneratedCommandsEXT");
+    vkCmdExecuteGeneratedCommandsEXT_ptr =
+        (PFN_vkCmdExecuteGeneratedCommandsEXT)vkGetDeviceProcAddr(
+            device, "vkCmdExecuteGeneratedCommandsEXT");
+    vkCreateIndirectCommandsLayoutEXT_ptr =
+        (PFN_vkCreateIndirectCommandsLayoutEXT)vkGetDeviceProcAddr(
+            device, "vkCreateIndirectCommandsLayoutEXT");
+    vkDestroyIndirectCommandsLayoutEXT_ptr =
+        (PFN_vkDestroyIndirectCommandsLayoutEXT)vkGetDeviceProcAddr(
+            device, "vkDestroyIndirectCommandsLayoutEXT");
+    vkCreateIndirectExecutionSetEXT_ptr =
+        (PFN_vkCreateIndirectExecutionSetEXT)vkGetDeviceProcAddr(
+            device, "vkCreateIndirectExecutionSetEXT");
+    vkDestroyIndirectExecutionSetEXT_ptr =
+        (PFN_vkDestroyIndirectExecutionSetEXT)vkGetDeviceProcAddr(
+            device, "vkDestroyIndirectExecutionSetEXT");
+    vkUpdateIndirectExecutionSetPipelineEXT_ptr =
+        (PFN_vkUpdateIndirectExecutionSetPipelineEXT)vkGetDeviceProcAddr(
+            device, "vkUpdateIndirectExecutionSetPipelineEXT");
+  }
+  vkGetBufferDeviceAddressKHR_ptr =
+      (PFN_vkGetBufferDeviceAddressKHR)vkGetDeviceProcAddr(
+          device, "vkGetBufferDeviceAddressKHR");
 
   vkGetDeviceQueue(device, computeQueueFamilyIndex, 0, &computeQueue);
 
@@ -1237,7 +1279,12 @@ ComputeKernel VulkanContext::createKernelInternal(const std::string &file_name,
     pipelineInfo.stage.pSpecializationInfo = &specInfo;
   }
 
-
+  VkPipelineCreateFlags2CreateInfoKHR pipeFlags2{
+      VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO_KHR};
+  if (isDGCSupported() && maintenance5Supported) {
+    pipeFlags2.flags = VK_PIPELINE_CREATE_2_INDIRECT_BINDABLE_BIT_EXT;
+    pipelineInfo.pNext = &pipeFlags2;
+  }
 
   VkResult result =
       vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo,
@@ -1594,7 +1641,9 @@ void VulkanContext::dispatchWorkListSequence(
     ComputeKernel resolveKernel_handle,
     ComputeKernel secondKernel_handle, ComputeBuffer indirectBuffer,
     const std::vector<IndirectBatchEntry> &entries,
-    bool isPingPong) {
+    bool isPingPong,
+    const DGCExecutionInfo *dgcInfo,
+    uint32_t dgcMode) {
   auto *classifyKernel = kernels[classifyKernel_handle];
   auto *secondKernel = kernels[secondKernel_handle];
   if (!classifyKernel || !secondKernel)
@@ -1658,6 +1707,8 @@ void VulkanContext::dispatchWorkListSequence(
   }
   vkCmdDispatch(frame.commandBuffer, grid_x, grid_y, grid_z);
 
+  bool useDGC = (dgcInfo != nullptr) && isDGCSupported() && (vkCmdExecuteGeneratedCommandsEXT_ptr != nullptr);
+
   // 3. Resolve: Convert queue counters to indirect dispatch commands (32 threads, 1 wave, <0.5 us)
   if (resolveKernel_handle) {
     auto *resolveKernel = kernels[resolveKernel_handle];
@@ -1676,9 +1727,16 @@ void VulkanContext::dispatchWorkListSequence(
                               resolveKernel->pipelineLayout, 0, 1,
                               &resolveKernel->descriptorSet, 0, nullptr);
       uint32_t resetQueue = isPingPong ? 1u : 0xFFFFFFFFu;
-      vkCmdPushConstants(frame.commandBuffer, resolveKernel->pipelineLayout,
-                         VK_SHADER_STAGE_COMPUTE_BIT, 0,
-                         sizeof(resetQueue), &resetQueue);
+      if (useDGC) {
+        struct { uint32_t resetQueue; uint32_t dgcMode; uint32_t bounceIndex; } rpcResolve{resetQueue, dgcMode, 0u};
+        vkCmdPushConstants(frame.commandBuffer, resolveKernel->pipelineLayout,
+                           VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                           sizeof(rpcResolve), &rpcResolve);
+      } else {
+        vkCmdPushConstants(frame.commandBuffer, resolveKernel->pipelineLayout,
+                           VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                           sizeof(resetQueue), &resetQueue);
+      }
       vkCmdDispatch(frame.commandBuffer, 1, 1, 1);
 
       VkMemoryBarrier resolveBarrier{};
@@ -1686,7 +1744,7 @@ void VulkanContext::dispatchWorkListSequence(
       resolveBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
       resolveBarrier.dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_SHADER_READ_BIT;
       vkCmdPipelineBarrier(frame.commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                           VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                           VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_COMMAND_PREPROCESS_BIT_EXT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                            0, 1, &resolveBarrier, 0, nullptr, 0, nullptr);
     }
   } else {
@@ -1695,81 +1753,169 @@ void VulkanContext::dispatchWorkListSequence(
     passBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
     passBarrier.dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_SHADER_READ_BIT;
     vkCmdPipelineBarrier(frame.commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                         VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_COMMAND_PREPROCESS_BIT_EXT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                          0, 1, &passBarrier, 0, nullptr, 0, nullptr);
   }
 
-  // 4. Pass 2: Uniform Indirect Dispatches (DGC / Work Lists)
+  // 4. Pass 2: Indirect Dispatches (DGC or Legacy Fallback)
   vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
                     secondKernel->pipeline);
   vkCmdBindDescriptorSets(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
                           secondKernel->pipelineLayout, 0, 1,
                           &secondKernel->descriptorSet, 0, nullptr);
 
-  VkBuffer vkIndirect = getVkBuffer(indirectBuffer);
-  VulkanKernel *lastBound = secondKernel;
-  for (size_t e = 0; e < entries.size(); ++e) {
-    const auto &entry = entries[e];
-    VulkanKernel *kToBind = entry.specializedKernel ? kernels[entry.specializedKernel] : secondKernel;
-    if (kToBind && kToBind != lastBound) {
-      vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
-                        kToBind->pipeline);
-      vkCmdBindDescriptorSets(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
-                              kToBind->pipelineLayout, 0, 1,
-                              &kToBind->descriptorSet, 0, nullptr);
-      lastBound = kToBind;
-    }
-    if (!entry.pushConstants.empty()) {
-      vkCmdPushConstants(frame.commandBuffer, lastBound->pipelineLayout,
-                         VK_SHADER_STAGE_COMPUTE_BIT, 0,
-                         entry.pushConstants.size(),
-                         entry.pushConstants.data());
-    }
-    vkCmdDispatchIndirect(frame.commandBuffer, vkIndirect, entry.offset);
+  if (useDGC) {
+    if (!isPingPong) {
+      // Direct DGC execution with dynamic sequence pruning
+      VkGeneratedCommandsPipelineInfoEXT pipeInfo{VK_STRUCTURE_TYPE_GENERATED_COMMANDS_PIPELINE_INFO_EXT};
+      pipeInfo.pipeline = secondKernel->pipeline;
 
-    // If ping-pong compaction between bounces, resolve next bounce's indirect command
-    if (isPingPong && (e + 1 < entries.size()) && resolveKernel_handle) {
-      auto *resolveKernel = kernels[resolveKernel_handle];
-      if (resolveKernel) {
-        VkMemoryBarrier bounceBarrier{};
-        bounceBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-        bounceBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-        bounceBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-        vkCmdPipelineBarrier(frame.commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &bounceBarrier, 0,
-                             nullptr, 0, nullptr);
+      VkGeneratedCommandsInfoEXT genCmds{VK_STRUCTURE_TYPE_GENERATED_COMMANDS_INFO_EXT};
+      if (dgcInfo->executionSet == VK_NULL_HANDLE) {
+        genCmds.pNext = &pipeInfo;
+      }
+      genCmds.shaderStages = VK_SHADER_STAGE_COMPUTE_BIT;
+      genCmds.indirectExecutionSet = dgcInfo->executionSet;
+      genCmds.indirectCommandsLayout = dgcInfo->layout;
+      genCmds.indirectAddress = getBufferDeviceAddress(dgcInfo->sequenceBuffer) + dgcInfo->sequenceBufferOffset;
+      genCmds.indirectAddressSize = dgcInfo->sequenceBufferSize;
+      genCmds.preprocessAddress = getBufferDeviceAddress(dgcInfo->preprocessBuffer);
+      genCmds.preprocessSize = dgcInfo->preprocessBufferSize;
+      genCmds.maxSequenceCount = dgcInfo->maxSequenceCount;
+      genCmds.sequenceCountAddress = dgcInfo->sequenceCountBuffer ?
+          (getBufferDeviceAddress(dgcInfo->sequenceCountBuffer) + dgcInfo->sequenceCountBufferOffset) : 0;
+      genCmds.maxDrawCount = 0;
 
+      vkCmdExecuteGeneratedCommandsEXT_ptr(frame.commandBuffer, VK_FALSE, &genCmds);
+    } else {
+      // Multi-bounce ping-pong compaction via DGC
+      VulkanKernel *lastBound = secondKernel;
+      for (size_t e = 0; e < entries.size(); ++e) {
+        const auto &entry = entries[e];
+        VulkanKernel *kToBind = entry.specializedKernel ? kernels[entry.specializedKernel] : secondKernel;
+        if (kToBind && kToBind != lastBound) {
+          vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, kToBind->pipeline);
+          vkCmdBindDescriptorSets(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                                  kToBind->pipelineLayout, 0, 1, &kToBind->descriptorSet, 0, nullptr);
+          lastBound = kToBind;
+        }
+
+        VkGeneratedCommandsPipelineInfoEXT pipeInfo{VK_STRUCTURE_TYPE_GENERATED_COMMANDS_PIPELINE_INFO_EXT};
+        pipeInfo.pipeline = lastBound->pipeline;
+
+        VkGeneratedCommandsInfoEXT genCmds{VK_STRUCTURE_TYPE_GENERATED_COMMANDS_INFO_EXT};
+        if (dgcInfo->executionSet == VK_NULL_HANDLE) {
+          genCmds.pNext = &pipeInfo;
+        }
+        genCmds.shaderStages = VK_SHADER_STAGE_COMPUTE_BIT;
+        genCmds.indirectExecutionSet = dgcInfo->executionSet;
+        genCmds.indirectCommandsLayout = dgcInfo->layout;
+        genCmds.indirectAddress = getBufferDeviceAddress(dgcInfo->sequenceBuffer) + dgcInfo->sequenceBufferOffset + e * sizeof(uint32_t) * 12;
+        genCmds.indirectAddressSize = sizeof(uint32_t) * 12;
+        genCmds.preprocessAddress = getBufferDeviceAddress(dgcInfo->preprocessBuffer);
+        genCmds.preprocessSize = dgcInfo->preprocessBufferSize;
+        genCmds.maxSequenceCount = 1;
+        genCmds.sequenceCountAddress = dgcInfo->sequenceCountBuffer ?
+            (getBufferDeviceAddress(dgcInfo->sequenceCountBuffer) + dgcInfo->sequenceCountBufferOffset) : 0;
+        genCmds.maxDrawCount = 0;
+
+        vkCmdExecuteGeneratedCommandsEXT_ptr(frame.commandBuffer, VK_FALSE, &genCmds);
+
+        if (e + 1 < entries.size() && resolveKernel_handle) {
+          auto *resolveKernel = kernels[resolveKernel_handle];
+          if (resolveKernel) {
+            VkMemoryBarrier bounceBarrier{};
+            bounceBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+            bounceBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+            bounceBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+            vkCmdPipelineBarrier(frame.commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                                 VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &bounceBarrier, 0, nullptr, 0, nullptr);
+
+            vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, resolveKernel->pipeline);
+            vkCmdBindDescriptorSets(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                                    resolveKernel->pipelineLayout, 0, 1, &resolveKernel->descriptorSet, 0, nullptr);
+            uint32_t nextBounce = static_cast<uint32_t>(e + 1);
+            uint32_t resetQueue = (nextBounce + 1 < entries.size()) ? static_cast<uint32_t>((nextBounce + 1) % 2) : 0xFFFFFFFFu;
+            struct { uint32_t resetQueue; uint32_t dgcMode; uint32_t bounceIndex; } rpcBounce{resetQueue, 3u, nextBounce};
+            vkCmdPushConstants(frame.commandBuffer, resolveKernel->pipelineLayout,
+                               VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(rpcBounce), &rpcBounce);
+            vkCmdDispatch(frame.commandBuffer, 1, 1, 1);
+
+            VkMemoryBarrier resolveBarrier{};
+            resolveBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+            resolveBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+            resolveBarrier.dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_SHADER_READ_BIT;
+            vkCmdPipelineBarrier(frame.commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                                 VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_COMMAND_PREPROCESS_BIT_EXT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                                 0, 1, &resolveBarrier, 0, nullptr, 0, nullptr);
+          }
+        }
+      }
+    }
+  } else {
+    // Legacy fallback path: CPU indirect command dispatch loop
+    VkBuffer vkIndirect = getVkBuffer(indirectBuffer);
+    VulkanKernel *lastBound = secondKernel;
+    for (size_t e = 0; e < entries.size(); ++e) {
+      const auto &entry = entries[e];
+      VulkanKernel *kToBind = entry.specializedKernel ? kernels[entry.specializedKernel] : secondKernel;
+      if (kToBind && kToBind != lastBound) {
         vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
-                          resolveKernel->pipeline);
+                          kToBind->pipeline);
         vkCmdBindDescriptorSets(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
-                                resolveKernel->pipelineLayout, 0, 1,
-                                &resolveKernel->descriptorSet, 0, nullptr);
-        // For ping-pong bouncing: if next bounce writes to an outQueue, reset that queue.
-        // If next bounce is terminal (outQueue == 0xFFFFFFFFu), resetQueue is 0xFFFFFFFFu.
-        uint32_t resetQueue = (e + 2 < entries.size()) ? static_cast<uint32_t>(e % 2) : 0xFFFFFFFFu;
-        vkCmdPushConstants(frame.commandBuffer, resolveKernel->pipelineLayout,
+                                kToBind->pipelineLayout, 0, 1,
+                                &kToBind->descriptorSet, 0, nullptr);
+        lastBound = kToBind;
+      }
+      if (!entry.pushConstants.empty()) {
+        vkCmdPushConstants(frame.commandBuffer, lastBound->pipelineLayout,
                            VK_SHADER_STAGE_COMPUTE_BIT, 0,
-                           sizeof(resetQueue), &resetQueue);
-        vkCmdDispatch(frame.commandBuffer, 1, 1, 1);
+                           entry.pushConstants.size(),
+                           entry.pushConstants.data());
+      }
+      vkCmdDispatchIndirect(frame.commandBuffer, vkIndirect, entry.offset);
 
-        VkMemoryBarrier resolveBarrier{};
-        resolveBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-        resolveBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-        resolveBarrier.dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_SHADER_READ_BIT;
-        vkCmdPipelineBarrier(frame.commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                             VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                             0, 1, &resolveBarrier, 0, nullptr, 0, nullptr);
+      // If ping-pong compaction between bounces, resolve next bounce's indirect command
+      if (isPingPong && (e + 1 < entries.size()) && resolveKernel_handle) {
+        auto *resolveKernel = kernels[resolveKernel_handle];
+        if (resolveKernel) {
+          VkMemoryBarrier bounceBarrier{};
+          bounceBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+          bounceBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+          bounceBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+          vkCmdPipelineBarrier(frame.commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                               VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &bounceBarrier, 0,
+                               nullptr, 0, nullptr);
 
-        vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
-                          secondKernel->pipeline);
-        vkCmdBindDescriptorSets(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
-                                secondKernel->pipelineLayout, 0, 1,
-                                &secondKernel->descriptorSet, 0, nullptr);
-        lastBound = secondKernel;
+          vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                            resolveKernel->pipeline);
+          vkCmdBindDescriptorSets(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                                  resolveKernel->pipelineLayout, 0, 1,
+                                  &resolveKernel->descriptorSet, 0, nullptr);
+          uint32_t resetQueue = (e + 2 < entries.size()) ? static_cast<uint32_t>(e % 2) : 0xFFFFFFFFu;
+          vkCmdPushConstants(frame.commandBuffer, resolveKernel->pipelineLayout,
+                             VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                             sizeof(resetQueue), &resetQueue);
+          vkCmdDispatch(frame.commandBuffer, 1, 1, 1);
+
+          VkMemoryBarrier resolveBarrier{};
+          resolveBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+          resolveBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+          resolveBarrier.dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_SHADER_READ_BIT;
+          vkCmdPipelineBarrier(frame.commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                               VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                               0, 1, &resolveBarrier, 0, nullptr, 0, nullptr);
+
+          vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                            secondKernel->pipeline);
+          vkCmdBindDescriptorSets(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                                  secondKernel->pipelineLayout, 0, 1,
+                                  &secondKernel->descriptorSet, 0, nullptr);
+          lastBound = secondKernel;
+        }
       }
     }
   }
-
 
   vkEndCommandBuffer(frame.commandBuffer);
 
@@ -2268,5 +2414,351 @@ void VulkanContext::presentFrame() {
   pi.pSwapchains = &headlessSwapchain;
   pi.pImageIndices = &imageIndex;
   vkQueuePresentKHR(computeQueue, &pi);
+}
+
+VkPipeline VulkanContext::getVkPipeline(ComputeKernel kernel) const {
+  auto it = kernels.find(kernel);
+  if (it != kernels.end() && it->second) {
+    return it->second->pipeline;
+  }
+  return VK_NULL_HANDLE;
+}
+
+VkPipelineLayout VulkanContext::getVkPipelineLayout(ComputeKernel kernel) const {
+  auto it = kernels.find(kernel);
+  if (it != kernels.end() && it->second) {
+    return it->second->pipelineLayout;
+  }
+  return VK_NULL_HANDLE;
+}
+
+ComputeBuffer VulkanContext::createPreprocessBuffer(size_t size) {
+  auto *vulkanBuffer = new VulkanBuffer();
+
+  VkBufferUsageFlags2CreateInfoKHR usage2Info{
+      VK_STRUCTURE_TYPE_BUFFER_USAGE_FLAGS_2_CREATE_INFO_KHR};
+  usage2Info.usage = VK_BUFFER_USAGE_2_PREPROCESS_BUFFER_BIT_EXT |
+                     VK_BUFFER_USAGE_2_SHADER_DEVICE_ADDRESS_BIT_KHR |
+                     VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT_KHR;
+
+  VkBufferCreateInfo bufferInfo{};
+  bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+  bufferInfo.pNext = &usage2Info;
+  bufferInfo.size = size;
+  bufferInfo.usage = 0;
+  bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+  if (vkCreateBuffer(device, &bufferInfo, nullptr, &vulkanBuffer->buffer) != VK_SUCCESS) {
+    delete vulkanBuffer;
+    throw std::runtime_error("failed to create preprocess buffer!");
+  }
+
+  VkMemoryRequirements memRequirements;
+  vkGetBufferMemoryRequirements(device, vulkanBuffer->buffer, &memRequirements);
+
+  VkMemoryAllocateInfo allocInfo{};
+  allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+  allocInfo.allocationSize = memRequirements.size;
+  allocInfo.memoryTypeIndex = findMemoryType(
+      memRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+  VkMemoryAllocateFlagsInfo flagsInfo{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO};
+  flagsInfo.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
+  allocInfo.pNext = &flagsInfo;
+
+  if (vkAllocateMemory(device, &allocInfo, nullptr, &vulkanBuffer->memory) != VK_SUCCESS) {
+    delete vulkanBuffer;
+    throw std::runtime_error("failed to allocate preprocess buffer memory!");
+  }
+
+  vkBindBufferMemory(device, vulkanBuffer->buffer, vulkanBuffer->memory, 0);
+
+  VkBufferDeviceAddressInfo bdaInfo{VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO};
+  bdaInfo.buffer = vulkanBuffer->buffer;
+  if (vkGetBufferDeviceAddressKHR_ptr) {
+    vulkanBuffer->address = vkGetBufferDeviceAddressKHR_ptr(device, &bdaInfo);
+  } else {
+    vulkanBuffer->address = vkGetBufferDeviceAddress(device, &bdaInfo);
+  }
+
+  buffers[vulkanBuffer] = vulkanBuffer;
+  return vulkanBuffer;
+}
+
+VkIndirectCommandsLayoutEXT VulkanContext::createIndirectCommandsLayout(
+    const VkIndirectCommandsLayoutCreateInfoEXT &createInfo) {
+  if (!vkCreateIndirectCommandsLayoutEXT_ptr) {
+    throw std::runtime_error("vkCreateIndirectCommandsLayoutEXT is not available");
+  }
+  VkIndirectCommandsLayoutEXT layout = VK_NULL_HANDLE;
+  VkResult res = vkCreateIndirectCommandsLayoutEXT_ptr(device, &createInfo, nullptr, &layout);
+  if (res != VK_SUCCESS) {
+    throw std::runtime_error("vkCreateIndirectCommandsLayoutEXT failed with result: " +
+                             std::to_string(res));
+  }
+  return layout;
+}
+
+void VulkanContext::destroyIndirectCommandsLayout(VkIndirectCommandsLayoutEXT layout) {
+  if (layout != VK_NULL_HANDLE && vkDestroyIndirectCommandsLayoutEXT_ptr) {
+    vkDestroyIndirectCommandsLayoutEXT_ptr(device, layout, nullptr);
+  }
+}
+
+VkIndirectExecutionSetEXT VulkanContext::createIndirectExecutionSet(
+    const VkIndirectExecutionSetCreateInfoEXT &createInfo) {
+  if (!vkCreateIndirectExecutionSetEXT_ptr) {
+    throw std::runtime_error("vkCreateIndirectExecutionSetEXT is not available");
+  }
+  VkIndirectExecutionSetEXT set = VK_NULL_HANDLE;
+  VkResult res = vkCreateIndirectExecutionSetEXT_ptr(device, &createInfo, nullptr, &set);
+  if (res != VK_SUCCESS) {
+    throw std::runtime_error("vkCreateIndirectExecutionSetEXT failed with result: " +
+                             std::to_string(res));
+  }
+  return set;
+}
+
+void VulkanContext::updateIndirectExecutionSetPipeline(VkIndirectExecutionSetEXT set,
+                                                       uint32_t index,
+                                                       ComputeKernel kernel) {
+  if (!vkUpdateIndirectExecutionSetPipelineEXT_ptr || set == VK_NULL_HANDLE) {
+    return;
+  }
+  VkWriteIndirectExecutionSetPipelineEXT writeInfo{
+      VK_STRUCTURE_TYPE_WRITE_INDIRECT_EXECUTION_SET_PIPELINE_EXT};
+  writeInfo.index = index;
+  writeInfo.pipeline = getVkPipeline(kernel);
+  vkUpdateIndirectExecutionSetPipelineEXT_ptr(device, set, 1, &writeInfo);
+}
+
+void VulkanContext::destroyIndirectExecutionSet(VkIndirectExecutionSetEXT set) {
+  if (set != VK_NULL_HANDLE && vkDestroyIndirectExecutionSetEXT_ptr) {
+    vkDestroyIndirectExecutionSetEXT_ptr(device, set, nullptr);
+  }
+}
+
+VkDeviceSize VulkanContext::getGeneratedCommandsMemoryRequirements(
+    VkIndirectCommandsLayoutEXT layout,
+    VkIndirectExecutionSetEXT execSet,
+    uint32_t maxSequenceCount,
+    ComputeKernel fallbackKernel) {
+  if (!vkGetGeneratedCommandsMemoryRequirementsEXT_ptr || layout == VK_NULL_HANDLE) {
+    return 0;
+  }
+  VkGeneratedCommandsPipelineInfoEXT pipelineInfo{
+      VK_STRUCTURE_TYPE_GENERATED_COMMANDS_PIPELINE_INFO_EXT};
+  VkGeneratedCommandsMemoryRequirementsInfoEXT memReqInfo{
+      VK_STRUCTURE_TYPE_GENERATED_COMMANDS_MEMORY_REQUIREMENTS_INFO_EXT};
+  if (execSet == VK_NULL_HANDLE && fallbackKernel != nullptr) {
+    pipelineInfo.pipeline = getVkPipeline(fallbackKernel);
+    memReqInfo.pNext = &pipelineInfo;
+  }
+  memReqInfo.indirectExecutionSet = execSet;
+  memReqInfo.indirectCommandsLayout = layout;
+  memReqInfo.maxSequenceCount = maxSequenceCount;
+
+  VkMemoryRequirements2 memReqs2{VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2};
+  vkGetGeneratedCommandsMemoryRequirementsEXT_ptr(device, &memReqInfo, &memReqs2);
+  return std::max<VkDeviceSize>(memReqs2.memoryRequirements.size, 256);
+}
+
+void VulkanContext::dispatchDGCWorkListSequence(
+    ComputeKernel resetKernel_handle,
+    ComputeKernel classifyKernel_handle, uint32_t grid_x, uint32_t grid_y, uint32_t grid_z,
+    ComputeKernel resolveKernel_handle,
+    ComputeKernel secondKernel_handle,
+    const DGCExecutionInfo &dgcInfo,
+    const void *resolvePc, size_t resolvePcSize) {
+  if (!isDGCSupported() || !vkCmdExecuteGeneratedCommandsEXT_ptr) {
+    throw std::runtime_error("VK_EXT_device_generated_commands not supported on this device");
+  }
+
+  auto *classifyKernel = kernels[classifyKernel_handle];
+  auto *secondKernel = kernels[secondKernel_handle];
+  if (!classifyKernel || !secondKernel) return;
+
+  auto &frame = inFlightFrames[currentFrameIndex];
+  if (frame.inUse) {
+    VkResult waitResult = vkWaitForFences(device, 1, &frame.fence, VK_TRUE, 3000000000ULL);
+    if (waitResult == VK_TIMEOUT) {
+      throw std::runtime_error("GPU dispatch timed out in dispatchDGCWorkListSequence");
+    } else if (waitResult != VK_SUCCESS) {
+      throw std::runtime_error("vkWaitForFences failed: " + std::to_string(waitResult));
+    }
+    vkResetFences(device, 1, &frame.fence);
+    frame.inUse = false;
+  }
+
+  vkResetCommandBuffer(frame.commandBuffer, 0);
+  VkCommandBufferBeginInfo beginInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+  beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  vkBeginCommandBuffer(frame.commandBuffer, &beginInfo);
+
+  // 1. Reset
+  if (resetKernel_handle) {
+    auto *resetKernel = kernels[resetKernel_handle];
+    if (resetKernel) {
+      vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, resetKernel->pipeline);
+      vkCmdBindDescriptorSets(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                              resetKernel->pipelineLayout, 0, 1, &resetKernel->descriptorSet, 0, nullptr);
+      vkCmdDispatch(frame.commandBuffer, 1, 1, 1);
+
+      VkMemoryBarrier resetBarrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
+      resetBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+      resetBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+      vkCmdPipelineBarrier(frame.commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                           VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &resetBarrier, 0, nullptr, 0, nullptr);
+    }
+  }
+
+  // 2. Classify
+  vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, classifyKernel->pipeline);
+  vkCmdBindDescriptorSets(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                          classifyKernel->pipelineLayout, 0, 1, &classifyKernel->descriptorSet, 0, nullptr);
+  if (!classifyKernel->pushConstantData.empty()) {
+    vkCmdPushConstants(frame.commandBuffer, classifyKernel->pipelineLayout,
+                       VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                       classifyKernel->pushConstantData.size(),
+                       classifyKernel->pushConstantData.data());
+  }
+  vkCmdDispatch(frame.commandBuffer, grid_x, grid_y, grid_z);
+
+  // 3. Barrier: Classify -> Resolve
+  VkMemoryBarrier classifyBarrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
+  classifyBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+  classifyBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+  vkCmdPipelineBarrier(frame.commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                       VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &classifyBarrier, 0, nullptr, 0, nullptr);
+
+  // 4. Resolve: GPU outputs DGC sequence items and dynamic sequence count
+  if (resolveKernel_handle) {
+    auto *resolveKernel = kernels[resolveKernel_handle];
+    if (resolveKernel) {
+      vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, resolveKernel->pipeline);
+      vkCmdBindDescriptorSets(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                              resolveKernel->pipelineLayout, 0, 1, &resolveKernel->descriptorSet, 0, nullptr);
+      if (resolvePc && resolvePcSize > 0) {
+        vkCmdPushConstants(frame.commandBuffer, resolveKernel->pipelineLayout,
+                           VK_SHADER_STAGE_COMPUTE_BIT, 0, resolvePcSize, resolvePc);
+      }
+      vkCmdDispatch(frame.commandBuffer, 1, 1, 1);
+    }
+  }
+
+  // 5. Barrier: Resolve -> DGC Execution
+  VkMemoryBarrier dgcBarrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
+  dgcBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+  dgcBarrier.dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_SHADER_READ_BIT;
+  vkCmdPipelineBarrier(frame.commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                       VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_COMMAND_PREPROCESS_BIT_EXT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                       0, 1, &dgcBarrier, 0, nullptr, 0, nullptr);
+
+  // 6. Bind base pipeline and descriptor set
+  vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, secondKernel->pipeline);
+  vkCmdBindDescriptorSets(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                          secondKernel->pipelineLayout, 0, 1, &secondKernel->descriptorSet, 0, nullptr);
+
+  // 7. Execute Generated Commands (DGC)
+  VkGeneratedCommandsPipelineInfoEXT pipeInfo{VK_STRUCTURE_TYPE_GENERATED_COMMANDS_PIPELINE_INFO_EXT};
+  pipeInfo.pipeline = secondKernel->pipeline;
+
+  VkGeneratedCommandsInfoEXT genCmds{VK_STRUCTURE_TYPE_GENERATED_COMMANDS_INFO_EXT};
+  if (dgcInfo.executionSet == VK_NULL_HANDLE) {
+    genCmds.pNext = &pipeInfo;
+  }
+  genCmds.shaderStages = VK_SHADER_STAGE_COMPUTE_BIT;
+  genCmds.indirectExecutionSet = dgcInfo.executionSet;
+  genCmds.indirectCommandsLayout = dgcInfo.layout;
+  genCmds.indirectAddress = getBufferDeviceAddress(dgcInfo.sequenceBuffer) + dgcInfo.sequenceBufferOffset;
+  genCmds.indirectAddressSize = dgcInfo.sequenceBufferSize;
+  genCmds.preprocessAddress = getBufferDeviceAddress(dgcInfo.preprocessBuffer);
+  genCmds.preprocessSize = dgcInfo.preprocessBufferSize;
+  genCmds.maxSequenceCount = dgcInfo.maxSequenceCount;
+  genCmds.sequenceCountAddress = dgcInfo.sequenceCountBuffer ?
+      (getBufferDeviceAddress(dgcInfo.sequenceCountBuffer) + dgcInfo.sequenceCountBufferOffset) : 0;
+  genCmds.maxDrawCount = 0;
+
+  vkCmdExecuteGeneratedCommandsEXT_ptr(frame.commandBuffer, VK_FALSE, &genCmds);
+
+  vkEndCommandBuffer(frame.commandBuffer);
+
+  VkSubmitInfo submitInfo{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+  submitInfo.commandBufferCount = 1;
+  submitInfo.pCommandBuffers = &frame.commandBuffer;
+
+  VkResult submitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, frame.fence);
+  if (submitRes != VK_SUCCESS) {
+    throw std::runtime_error("vkQueueSubmit failed in dispatchDGCWorkListSequence: " +
+                             std::to_string(submitRes));
+  }
+  frame.inUse = true;
+  currentFrameIndex = (currentFrameIndex + 1) % kMaxInFlight;
+}
+
+void VulkanContext::dispatchDGCSequence(ComputeKernel kernel_handle,
+                                       const DGCExecutionInfo &dgcInfo) {
+  if (!isDGCSupported() || !vkCmdExecuteGeneratedCommandsEXT_ptr) {
+    throw std::runtime_error("VK_EXT_device_generated_commands not supported on this device");
+  }
+
+  auto *kernel = kernels[kernel_handle];
+  if (!kernel) return;
+
+  auto &frame = inFlightFrames[currentFrameIndex];
+  if (frame.inUse) {
+    VkResult waitResult = vkWaitForFences(device, 1, &frame.fence, VK_TRUE, 3000000000ULL);
+    if (waitResult == VK_TIMEOUT) {
+      throw std::runtime_error("GPU dispatch timed out in dispatchDGCSequence");
+    } else if (waitResult != VK_SUCCESS) {
+      throw std::runtime_error("vkWaitForFences failed: " + std::to_string(waitResult));
+    }
+    vkResetFences(device, 1, &frame.fence);
+    frame.inUse = false;
+  }
+
+  vkResetCommandBuffer(frame.commandBuffer, 0);
+  VkCommandBufferBeginInfo beginInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+  beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  vkBeginCommandBuffer(frame.commandBuffer, &beginInfo);
+
+  vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, kernel->pipeline);
+  vkCmdBindDescriptorSets(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                          kernel->pipelineLayout, 0, 1, &kernel->descriptorSet, 0, nullptr);
+
+  VkGeneratedCommandsPipelineInfoEXT pipeInfo{VK_STRUCTURE_TYPE_GENERATED_COMMANDS_PIPELINE_INFO_EXT};
+  pipeInfo.pipeline = kernel->pipeline;
+
+  VkGeneratedCommandsInfoEXT genCmds{VK_STRUCTURE_TYPE_GENERATED_COMMANDS_INFO_EXT};
+  if (dgcInfo.executionSet == VK_NULL_HANDLE) {
+    genCmds.pNext = &pipeInfo;
+  }
+  genCmds.shaderStages = VK_SHADER_STAGE_COMPUTE_BIT;
+  genCmds.indirectExecutionSet = dgcInfo.executionSet;
+  genCmds.indirectCommandsLayout = dgcInfo.layout;
+  genCmds.indirectAddress = getBufferDeviceAddress(dgcInfo.sequenceBuffer) + dgcInfo.sequenceBufferOffset;
+  genCmds.indirectAddressSize = dgcInfo.sequenceBufferSize;
+  genCmds.preprocessAddress = getBufferDeviceAddress(dgcInfo.preprocessBuffer);
+  genCmds.preprocessSize = dgcInfo.preprocessBufferSize;
+  genCmds.maxSequenceCount = dgcInfo.maxSequenceCount;
+  genCmds.sequenceCountAddress = dgcInfo.sequenceCountBuffer ?
+      (getBufferDeviceAddress(dgcInfo.sequenceCountBuffer) + dgcInfo.sequenceCountBufferOffset) : 0;
+  genCmds.maxDrawCount = 0;
+
+  vkCmdExecuteGeneratedCommandsEXT_ptr(frame.commandBuffer, VK_FALSE, &genCmds);
+
+  vkEndCommandBuffer(frame.commandBuffer);
+
+  VkSubmitInfo submitInfo{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+  submitInfo.commandBufferCount = 1;
+  submitInfo.pCommandBuffers = &frame.commandBuffer;
+
+  VkResult submitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, frame.fence);
+  if (submitRes != VK_SUCCESS) {
+    throw std::runtime_error("vkQueueSubmit failed in dispatchDGCSequence: " +
+                             std::to_string(submitRes));
+  }
+  frame.inUse = true;
+  currentFrameIndex = (currentFrameIndex + 1) % kMaxInFlight;
 }
 

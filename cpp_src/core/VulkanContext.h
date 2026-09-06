@@ -100,6 +100,9 @@ public:
   bool isDGCSupported() const {
     return isExtensionEnabled("VK_EXT_device_generated_commands");
   }
+  bool isMaintenance5Supported() const {
+    return maintenance5Supported;
+  }
   bool isWorkGraphsSupported() const {
     return isExtensionEnabled("VK_AMDX_shader_enqueue");
   }
@@ -113,6 +116,19 @@ public:
     ComputeKernel specializedKernel = nullptr;
   };
 
+  struct DGCExecutionInfo {
+    VkIndirectCommandsLayoutEXT layout = VK_NULL_HANDLE;
+    VkIndirectExecutionSetEXT executionSet = VK_NULL_HANDLE;
+    ComputeBuffer sequenceBuffer = nullptr;
+    VkDeviceSize sequenceBufferOffset = 0;
+    VkDeviceSize sequenceBufferSize = 0;
+    ComputeBuffer sequenceCountBuffer = nullptr;
+    VkDeviceSize sequenceCountBufferOffset = 0;
+    ComputeBuffer preprocessBuffer = nullptr;
+    VkDeviceSize preprocessBufferSize = 0;
+    uint32_t maxSequenceCount = 0;
+  };
+
   void dispatchIndirect(ComputeKernel kernel, ComputeBuffer indirectBuffer,
                         VkDeviceSize offset = 0);
   void dispatchIndirectSequence(ComputeKernel kernel, ComputeBuffer indirectBuffer,
@@ -123,9 +139,44 @@ public:
       ComputeKernel resolveKernel,
       ComputeKernel secondKernel, ComputeBuffer indirectBuffer,
       const std::vector<IndirectBatchEntry> &entries,
-      bool isPingPong = false);
+      bool isPingPong = false,
+      const DGCExecutionInfo *dgcInfo = nullptr,
+      uint32_t dgcMode = 0);
   void dispatchRayTracingIndirect(ComputeKernel kernel, ComputeBuffer indirectBuffer,
                                  VkDeviceSize offset = 0);
+
+  // Native Vulkan Device-Generated Commands (VK_EXT_device_generated_commands)
+  VkIndirectCommandsLayoutEXT createIndirectCommandsLayout(
+      const VkIndirectCommandsLayoutCreateInfoEXT &createInfo);
+  void destroyIndirectCommandsLayout(VkIndirectCommandsLayoutEXT layout);
+
+  VkIndirectExecutionSetEXT createIndirectExecutionSet(
+      const VkIndirectExecutionSetCreateInfoEXT &createInfo);
+  void updateIndirectExecutionSetPipeline(VkIndirectExecutionSetEXT set,
+                                         uint32_t index,
+                                         ComputeKernel kernel);
+  void destroyIndirectExecutionSet(VkIndirectExecutionSetEXT set);
+
+  VkDeviceSize getGeneratedCommandsMemoryRequirements(
+      VkIndirectCommandsLayoutEXT layout,
+      VkIndirectExecutionSetEXT execSet,
+      uint32_t maxSequenceCount,
+      ComputeKernel fallbackKernel = nullptr);
+
+  ComputeBuffer createPreprocessBuffer(size_t size);
+  VkPipeline getVkPipeline(ComputeKernel kernel) const;
+  VkPipelineLayout getVkPipelineLayout(ComputeKernel kernel) const;
+
+  void dispatchDGCWorkListSequence(
+      ComputeKernel resetKernel,
+      ComputeKernel classifyKernel, uint32_t grid_x, uint32_t grid_y, uint32_t grid_z,
+      ComputeKernel resolveKernel,
+      ComputeKernel secondKernel,
+      const DGCExecutionInfo &dgcInfo,
+      const void *resolvePc = nullptr, size_t resolvePcSize = 0);
+
+  void dispatchDGCSequence(ComputeKernel kernel,
+                           const DGCExecutionInfo &dgcInfo);
 
   // Headless presentation hooks for profiling / tracing tools (e.g. RRA)
   void enableHeadlessSwapchain() override;
@@ -215,5 +266,18 @@ private:
   bool headlessSurfaceSupported = false;
   bool swapchainSupported = false;
   bool serSupported = false;
+  bool maintenance5Supported = false;
+
+  // DGC (VK_EXT_device_generated_commands) function pointers
+  PFN_vkGetGeneratedCommandsMemoryRequirementsEXT vkGetGeneratedCommandsMemoryRequirementsEXT_ptr = nullptr;
+  PFN_vkCmdPreprocessGeneratedCommandsEXT vkCmdPreprocessGeneratedCommandsEXT_ptr = nullptr;
+  PFN_vkCmdExecuteGeneratedCommandsEXT vkCmdExecuteGeneratedCommandsEXT_ptr = nullptr;
+  PFN_vkCreateIndirectCommandsLayoutEXT vkCreateIndirectCommandsLayoutEXT_ptr = nullptr;
+  PFN_vkDestroyIndirectCommandsLayoutEXT vkDestroyIndirectCommandsLayoutEXT_ptr = nullptr;
+  PFN_vkCreateIndirectExecutionSetEXT vkCreateIndirectExecutionSetEXT_ptr = nullptr;
+  PFN_vkDestroyIndirectExecutionSetEXT vkDestroyIndirectExecutionSetEXT_ptr = nullptr;
+  PFN_vkUpdateIndirectExecutionSetPipelineEXT vkUpdateIndirectExecutionSetPipelineEXT_ptr = nullptr;
+  PFN_vkGetBufferDeviceAddressKHR vkGetBufferDeviceAddressKHR_ptr = nullptr;
+
   void destroyHeadlessSwapchain();
 };

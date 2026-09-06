@@ -224,49 +224,49 @@ void BenchmarkRunner::discoverBenchmarks() {
     auto showroom = std::make_unique<RaySchedulingBench>(RaySchedulingBench::SceneType::Showroom);
     showroom->SetBounceDepth(bounceDepth);
     showroom->SetSamplesPerPixel(samplesPerPixel);
-    if (dumpRenders) showroom->SetDumpRenders(true);
+    showroom->SetDumpRenders(dumpRenders);
     benchmarks.push_back(std::move(showroom));
 
     auto indoor = std::make_unique<RaySchedulingBench>(RaySchedulingBench::SceneType::IndoorAtrium);
     indoor->SetBounceDepth(bounceDepth);
     indoor->SetSamplesPerPixel(samplesPerPixel);
-    if (dumpRenders) indoor->SetDumpRenders(true);
+    indoor->SetDumpRenders(dumpRenders);
     benchmarks.push_back(std::move(indoor));
 
     auto outdoor = std::make_unique<RaySchedulingBench>(RaySchedulingBench::SceneType::OutdoorLandscape);
     outdoor->SetBounceDepth(bounceDepth);
     outdoor->SetSamplesPerPixel(samplesPerPixel);
-    if (dumpRenders) outdoor->SetDumpRenders(true);
+    outdoor->SetDumpRenders(dumpRenders);
     benchmarks.push_back(std::move(outdoor));
 
     auto forest = std::make_unique<RaySchedulingBench>(RaySchedulingBench::SceneType::AAAOutdoorForest);
     forest->SetBounceDepth(bounceDepth);
     forest->SetSamplesPerPixel(samplesPerPixel);
-    if (dumpRenders) forest->SetDumpRenders(true);
+    forest->SetDumpRenders(dumpRenders);
     benchmarks.push_back(std::move(forest));
   } else if (sceneName == "outdoor") {
     auto outdoor = std::make_unique<RaySchedulingBench>(RaySchedulingBench::SceneType::OutdoorLandscape);
     outdoor->SetBounceDepth(bounceDepth);
     outdoor->SetSamplesPerPixel(samplesPerPixel);
-    if (dumpRenders) outdoor->SetDumpRenders(true);
+    outdoor->SetDumpRenders(dumpRenders);
     benchmarks.push_back(std::move(outdoor));
   } else if (sceneName == "forest" || sceneName == "aaa_forest") {
     auto forest = std::make_unique<RaySchedulingBench>(RaySchedulingBench::SceneType::AAAOutdoorForest);
     forest->SetBounceDepth(bounceDepth);
     forest->SetSamplesPerPixel(samplesPerPixel);
-    if (dumpRenders) forest->SetDumpRenders(true);
+    forest->SetDumpRenders(dumpRenders);
     benchmarks.push_back(std::move(forest));
   } else if (sceneName == "showroom") {
     auto showroom = std::make_unique<RaySchedulingBench>(RaySchedulingBench::SceneType::Showroom);
     showroom->SetBounceDepth(bounceDepth);
     showroom->SetSamplesPerPixel(samplesPerPixel);
-    if (dumpRenders) showroom->SetDumpRenders(true);
+    showroom->SetDumpRenders(dumpRenders);
     benchmarks.push_back(std::move(showroom));
   } else {
     auto indoor = std::make_unique<RaySchedulingBench>(RaySchedulingBench::SceneType::IndoorAtrium);
     indoor->SetBounceDepth(bounceDepth);
     indoor->SetSamplesPerPixel(samplesPerPixel);
-    if (dumpRenders) indoor->SetDumpRenders(true);
+    indoor->SetDumpRenders(dumpRenders);
     benchmarks.push_back(std::move(indoor));
   }
   benchmarks.push_back(std::make_unique<RayMaterialDivergenceBench>());
