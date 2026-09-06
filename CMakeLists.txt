@@ -1,5 +1,5 @@
-cmake_minimum_required(VERSION 3.20)
-project(GPUBench VERSION 1.5.0)
+cmake_minimum_required(VERSION 3.22)
+project(GPUBench VERSION 1.5.1)
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_CXX_STANDARD 17)

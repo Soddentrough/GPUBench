@@ -28,6 +28,11 @@
     <binary>gpubench</binary>
   </provides>
   <releases>
+    <release version="1.5.1" date="2026-09-07">
+      <description>
+        <p>Native Vulkan Device-Generated Commands (VK_EXT_device_generated_commands) for ray and path tracing Work Lists with hardware predication, autonomous GPU dispatch, and comprehensive GFX1201 hardware profiling documentation.</p>
+      </description>
+    </release>
     <release version="1.5.0" date="2026-09-06">
       <description>
         <p>Open-world forest scenario with Snell refraction and anisotropic bark, dielectric glass and windshield shader overhaul, master 42-material evaluation suite, hardware-aware VRAM auto-scaling, and multi-scene ray scheduling discovery fix.</p>
