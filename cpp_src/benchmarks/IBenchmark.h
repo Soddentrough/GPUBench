@@ -74,6 +74,16 @@ public:
     (void)context;
     return GetConfigSupportNote(config_idx);
   }
+  // Optional human-readable note explaining a performance or API caveat when
+  // a benchmark is supported and completes, but utilized a fallback or emulation path.
+  virtual std::string GetConfigCaveat(uint32_t config_idx = 0) const { return ""; }
+  virtual std::string GetConfigCaveat(uint32_t config_idx,
+                                      const DeviceInfo &info,
+                                      IComputeContext *context = nullptr) const {
+    (void)info;
+    (void)context;
+    return GetConfigCaveat(config_idx);
+  }
   virtual SupportLimitation GetConfigSupportLimitation(uint32_t config_idx) const {
     return GetSupportLimitation();
   }

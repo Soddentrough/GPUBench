@@ -247,11 +247,15 @@ void ResultFormatter::print() {
                   double fps = (value * 1e6) / static_cast<double>(w * h);
                   unit += " (" + formatDouble(fps, 1) + " FPS)";
                 }
+                if (!res.supportNote.empty()) {
+                  unit += " [" + res.supportNote + "]";
+                }
               }
 
+              const std::string &statusColor = res.isUnsupported ? RED : (!res.supportNote.empty() ? YELLOW : GREEN);
               std::cout << " : " << std::setw(12) << std::right << YELLOW
                         << backend << RESET << " | " << BOLD
-                        << (res.isUnsupported ? RED : GREEN) << std::setw(10)
+                        << statusColor << std::setw(10)
                         << valStr << RESET << unit;
               firstBackend = false;
             }

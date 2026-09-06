@@ -22,7 +22,17 @@ layout(set = 0, binding = 1) buffer IndirectCommandsBuffer {
 
 layout(push_constant) uniform ResolvePC {
     uint resetQueue;
+    uint dgcMode; // 0: legacy only, 1: standard compacted DGC, 2: consolidated octant DGC
 } rpc;
+
+layout(std430, set = 0, binding = 2) buffer DGCSequenceCountBuffer {
+    uint dynamicSequenceCount;
+} dgcCount;
+
+layout(std430, set = 0, binding = 3) buffer DGCSequenceBuffer {
+    DGCSequenceItem templates[32];
+    DGCSequenceItem compacted[32];
+} dgcData;
 
 void main() {
     uint id = gl_LocalInvocationID.x;
@@ -51,5 +61,86 @@ void main() {
         indirectCmds.commands[8].x = totalWaves;
         indirectCmds.commands[8].y = (totalWaves > 0u) ? 1u : 0u;
         indirectCmds.commands[8].z = (totalWaves > 0u) ? 1u : 0u;
+    }
+
+    // DGC Dynamic Token Generation & Active Queue Pruning
+    if (rpc.dgcMode == 1u) {
+        bool isActive = false;
+        uint count = 0u;
+        if (id < 16u) {
+            count = worklist.queueCounters[Q_SNAPSHOT_IDX(id)];
+            isActive = (count > 0u);
+        }
+
+        uint activeMask = isActive ? 1u : 0u;
+        uint slot = subgroupExclusiveAdd(activeMask);
+        uint totalActive = subgroupAdd(activeMask);
+
+        if (isActive) {
+            DGCSequenceItem item = dgcData.templates[id];
+            item.cmdX = (count + 31u) / 32u;
+            item.cmdY = 1u;
+            item.cmdZ = 1u;
+            dgcData.compacted[slot] = item;
+        }
+
+        if (id == 0u) {
+            dgcCount.dynamicSequenceCount = totalActive;
+        }
+    } else if (rpc.dgcMode == 2u) {
+        // Consolidated Octant Mode (Config 10)
+        if (id == 7u) {
+            uint totalWaves = indirectCmds.commands[8].x;
+            if (totalWaves > 0u) {
+                DGCSequenceItem item = dgcData.templates[8];
+                item.cmdX = totalWaves;
+                item.cmdY = 1u;
+                item.cmdZ = 1u;
+                dgcData.compacted[0] = item;
+                dgcCount.dynamicSequenceCount = 1u;
+            } else {
+                dgcCount.dynamicSequenceCount = 0u;
+            }
+        }
+    } else if (rpc.dgcMode == 3u) {
+        // Ping-Pong Bounce Mode (Config 6 & 29)
+        if (id == 0u) {
+            uint inQ = (rpc.resetQueue == 1u) ? 0u : ((rpc.resetQueue == 0u) ? 1u : 0u);
+            uint count = worklist.queueCounters[Q_SNAPSHOT_IDX(inQ)];
+            if (count > 0u) {
+                DGCSequenceItem item = dgcData.templates[inQ];
+                item.cmdX = (count + 31u) / 32u;
+                item.cmdY = 1u;
+                item.cmdZ = 1u;
+                dgcData.compacted[0] = item;
+                dgcCount.dynamicSequenceCount = 1u;
+            } else {
+                dgcCount.dynamicSequenceCount = 0u;
+            }
+        }
+    } else if (rpc.dgcMode == 4u) {
+        // Directional Shadows (Config 25 & 27)
+        bool isActive = false;
+        uint count = 0u;
+        if (id < 3u) {
+            count = worklist.queueCounters[Q_SNAPSHOT_IDX(id)];
+            isActive = (count > 0u);
+        }
+
+        uint activeMask = isActive ? 1u : 0u;
+        uint slot = subgroupExclusiveAdd(activeMask);
+        uint totalActive = subgroupAdd(activeMask);
+
+        if (isActive) {
+            DGCSequenceItem item = dgcData.templates[9u + id];
+            item.cmdX = (count + 31u) / 32u;
+            item.cmdY = 1u;
+            item.cmdZ = 1u;
+            dgcData.compacted[slot] = item;
+        }
+
+        if (id == 0u) {
+            dgcCount.dynamicSequenceCount = totalActive;
+        }
     }
 }

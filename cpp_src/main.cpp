@@ -168,6 +168,9 @@ std::string resultsToJson(const std::vector<ResultData> &results) {
              jsonEscape(r.supportCategory) + "\",\n";
       out += "      \"unsupported_reason\": \"" + jsonEscape(r.supportNote) +
              "\",\n";
+    } else if (!r.supportNote.empty()) {
+      out += "      \"support_note\": \"" + jsonEscape(r.supportNote) + "\",\n";
+      out += "      \"caveat\": \"" + jsonEscape(r.supportNote) + "\",\n";
     }
     out += "      \"max_workgroup_size\": " +
            std::to_string(r.maxWorkGroupSize) + ",\n";

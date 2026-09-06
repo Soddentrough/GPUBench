@@ -2977,7 +2977,11 @@ impl Application for GPUBenchApp {
                             } else if cell.is_running {
                                 "running".to_string()
                             } else if !cell.value_str.is_empty() {
-                                "completed".to_string()
+                                if !cell.support_note.is_empty() {
+                                    "completed (fallback)".to_string()
+                                } else {
+                                    "completed".to_string()
+                                }
                             } else {
                                 "pending".to_string()
                             };
@@ -4345,7 +4349,11 @@ impl Application for GPUBenchApp {
                                         };
                                         (tag.to_string(), color!(0xF87171), color!(0xEF4444, 0.12), color!(0xEF4444, 0.35), if c.support_note.is_empty() { None } else { Some(c.support_note.clone()) })
                                     } else if !c.value_str.is_empty() {
-                                        (c.value_str.clone(), color!(0x34D399), color!(0x10B981, 0.14), color!(0x10B981, 0.4), None)
+                                        if !c.support_note.is_empty() {
+                                            (c.value_str.clone(), color!(0xFBBF24), color!(0xF59E0B, 0.16), color!(0xF59E0B, 0.45), Some(c.support_note.clone()))
+                                        } else {
+                                            (c.value_str.clone(), color!(0x34D399), color!(0x10B981, 0.14), color!(0x10B981, 0.4), None)
+                                        }
                                     } else if matches!(self.state, AppState::Complete { .. }) {
                                         ("UNSUPPORTED".to_string(), color!(0xF87171), color!(0xEF4444, 0.12), color!(0xEF4444, 0.35), None)
                                     } else {
@@ -4372,20 +4380,27 @@ impl Application for GPUBenchApp {
                                 });
 
                                 if let Some(note) = note_opt {
+                                    let is_caveat = cell.map_or(false, |c| !c.is_unsupported && !c.support_note.is_empty());
                                     tooltip(
                                         cell_box,
                                         container(
                                             column![
-                                                text("Unsupported Reason").size(11).style(color!(0xF87171)),
+                                                text(if is_caveat { "Result Caveat (API Fallback)" } else { "Unsupported Reason" })
+                                                    .size(11)
+                                                    .style(if is_caveat { color!(0xFBBF24) } else { color!(0xF87171) }),
                                                 Space::with_height(2),
                                                 text(note).size(10).style(color!(0xE2E8F0)),
                                             ]
                                         )
                                         .width(Length::Fixed(280.0))
                                         .padding(8)
-                                        .style(|_t: &Theme| container::Appearance {
+                                        .style(move |_t: &Theme| container::Appearance {
                                             background: Some(Background::Color(color!(0x141824))),
-                                            border: Border { radius: 6.0.into(), width: 1.0, color: color!(0x2A3248) },
+                                            border: Border {
+                                                radius: 6.0.into(),
+                                                width: 1.0,
+                                                color: if is_caveat { color!(0xF59E0B, 0.45) } else { color!(0x2A3248) },
+                                            },
                                             ..Default::default()
                                         }),
                                         tooltip::Position::Top
@@ -5351,7 +5366,11 @@ impl GPUBenchApp {
                     } else if cell.is_running {
                         "RUNNING".to_string()
                     } else if !cell.value_str.is_empty() {
-                        "COMPLETED".to_string()
+                        if !cell.support_note.is_empty() {
+                            format!("COMPLETED ({})", cell.support_note)
+                        } else {
+                            "COMPLETED".to_string()
+                        }
                     } else {
                         "PENDING".to_string()
                     };
@@ -6081,6 +6100,49 @@ mod tests {
 
         // Test rendering view at minimum window size (960x640)
         let _ = app.update(Message::WindowResized(960, 640));
+        let _ = app.view();
+    }
+
+    #[test]
+    fn test_result_with_caveat_fallback_reporting() {
+        let (mut app, _) = GPUBenchApp::new(GuiCliArgs::default());
+        app.active_device_targets = vec![(1, "AMD Radeon AI PRO R9700".to_string())];
+
+        // 1. Normal completed result
+        let mut cell_normal = CellResult::default();
+        cell_normal.value_str = "120.5".to_string();
+        cell_normal.unit = "MRays/s".to_string();
+        app.results_map.insert((1, "rt_sched_pt_trad"), cell_normal);
+
+        // 2. Completed result with caveat (API fallback)
+        let mut cell_caveat = CellResult::default();
+        cell_caveat.value_str = "115.2".to_string();
+        cell_caveat.unit = "MRays/s".to_string();
+        cell_caveat.support_note = "Indirect Dispatch (Vulkan DGC fallback)".to_string();
+        app.results_map.insert((1, "rt_sched_pt_wl"), cell_caveat);
+
+        // 3. Unsupported result with reason
+        let mut cell_unsupported = CellResult::default();
+        cell_unsupported.is_unsupported = true;
+        cell_unsupported.support_note = "Work Graphs unsupported on LLPC".to_string();
+        app.results_map.insert((1, "rt_sched_workgraph"), cell_unsupported);
+
+        // Verify diagnostic summary formatting
+        let summary = app.generate_diagnostic_summary();
+        assert!(
+            summary.contains("| Scene Path Tracing: Megakernel (Multi-Bounce) | 120.5 | MRays/s | 0 | 0.00 | COMPLETED |"),
+            "Summary must show COMPLETED for standard completed result"
+        );
+        assert!(
+            summary.contains("| Scene Path Tracing: Work Lists (Multi-Bounce) | 115.2 | MRays/s | 0 | 0.00 | COMPLETED (Indirect Dispatch (Vulkan DGC fallback)) |"),
+            "Summary must show COMPLETED with caveat explanation for fallback result"
+        );
+        assert!(
+            summary.contains("UNSUPPORTED (Work Graphs unsupported on LLPC)"),
+            "Summary must show UNSUPPORTED with reason"
+        );
+
+        // Ensure view() executes without panicking when caveat tooltip is constructed
         let _ = app.view();
     }
 }

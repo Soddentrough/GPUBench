@@ -553,10 +553,8 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
           bench->Setup(*context, KernelPath::find());
           runnable.push_back(bench.get());
         } catch (const std::exception &e) {
-          if (verbose) {
-            std::cerr << "Error setting up " << bench->GetName() << ": "
-                      << e.what() << std::endl;
-          }
+          std::cerr << "Error setting up " << bench->GetName() << ": "
+                    << e.what() << std::endl;
           try {
             bench->Teardown();
           } catch (...) {
@@ -831,6 +829,10 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
             bench_result.operations * total_invocations;
         result_data.time_ms = total_time_ms;
         result_data.isEmulated = bench->IsEmulated(i);
+        result_data.supportNote = bench->GetConfigCaveat(i, info, context);
+        if (result_data.supportNote.empty() && result_data.isEmulated) {
+          result_data.supportNote = "Emulated via software unpack";
+        }
         result_data.component = bench->GetComponent(i);
         result_data.subcategory = bench->GetSubCategory(i);
         result_data.maxWorkGroupSize = info.maxWorkGroupSize;

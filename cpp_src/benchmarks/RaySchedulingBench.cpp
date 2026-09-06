@@ -420,6 +420,17 @@ const char *RaySchedulingBench::GetSubCategory(uint32_t config_idx) const {
   return "Pipeline Breakdown";
 }
 
+std::string RaySchedulingBench::GetConfigCaveat(uint32_t config_idx) const {
+  if (!isDGCAvailable) {
+    if (config_idx == 2 || config_idx == 6 || config_idx == 10 ||
+        config_idx == 14 || config_idx == 22 || config_idx == 25 ||
+        config_idx == 27 || config_idx == 29) {
+      return "VK_EXT_device_generated_commands unavailable; executed via standard indirect dispatch (vkCmdDispatchIndirect) fallback.";
+    }
+  }
+  return "";
+}
+
 int RaySchedulingBench::GetSortWeight(uint32_t config_idx) const {
   if (config_idx == 21 || config_idx == 22) return 600 + static_cast<int>(config_idx - 21); // Scene RT (PBR): 600, 601
   if (config_idx >= 4 && config_idx <= 7) return 605 + static_cast<int>(config_idx - 4);    // Scene Path Tracing: 605..608
@@ -845,161 +856,188 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
   }
 
   // Native Vulkan Device-Generated Commands (VK_EXT_device_generated_commands)
+  isDGCAvailable = false;
   if (vContext->isDGCSupported()) {
-    // 1. Standard IndirectCommandsLayout (PushConstant Token + Dispatch Token)
-    VkIndirectCommandsPushConstantTokenEXT pcToken{};
-    pcToken.updateRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-    pcToken.updateRange.offset = 0;
-    pcToken.updateRange.size = sizeof(uint32_t) * 8; // 32 bytes
+    try {
+      // 1. Standard IndirectCommandsLayout (PushConstant Token + Dispatch Token)
+      VkIndirectCommandsPushConstantTokenEXT pcToken{};
+      pcToken.updateRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+      pcToken.updateRange.offset = 0;
+      pcToken.updateRange.size = sizeof(uint32_t) * 8; // 32 bytes
 
-    VkIndirectCommandsLayoutTokenEXT tokensStd[2]{};
-    tokensStd[0].sType = VK_STRUCTURE_TYPE_INDIRECT_COMMANDS_LAYOUT_TOKEN_EXT;
-    tokensStd[0].type = VK_INDIRECT_COMMANDS_TOKEN_TYPE_PUSH_CONSTANT_EXT;
-    tokensStd[0].data.pPushConstant = &pcToken;
-    tokensStd[0].offset = sizeof(uint32_t); // offset 4 (pc field)
+      VkIndirectCommandsLayoutTokenEXT tokensStd[2]{};
+      tokensStd[0].sType = VK_STRUCTURE_TYPE_INDIRECT_COMMANDS_LAYOUT_TOKEN_EXT;
+      tokensStd[0].type = VK_INDIRECT_COMMANDS_TOKEN_TYPE_PUSH_CONSTANT_EXT;
+      tokensStd[0].data.pPushConstant = &pcToken;
+      tokensStd[0].offset = sizeof(uint32_t); // offset 4 (pc field)
 
-    tokensStd[1].sType = VK_STRUCTURE_TYPE_INDIRECT_COMMANDS_LAYOUT_TOKEN_EXT;
-    tokensStd[1].type = VK_INDIRECT_COMMANDS_TOKEN_TYPE_DISPATCH_EXT;
-    tokensStd[1].offset = sizeof(uint32_t) * 9; // offset 36 (dispatch cmd)
+      tokensStd[1].sType = VK_STRUCTURE_TYPE_INDIRECT_COMMANDS_LAYOUT_TOKEN_EXT;
+      tokensStd[1].type = VK_INDIRECT_COMMANDS_TOKEN_TYPE_DISPATCH_EXT;
+      tokensStd[1].offset = sizeof(uint32_t) * 9; // offset 36 (dispatch cmd)
 
-    VkIndirectCommandsLayoutCreateInfoEXT layoutInfoStd{VK_STRUCTURE_TYPE_INDIRECT_COMMANDS_LAYOUT_CREATE_INFO_EXT};
-    layoutInfoStd.shaderStages = VK_SHADER_STAGE_COMPUTE_BIT;
-    layoutInfoStd.indirectStride = sizeof(uint32_t) * 12; // 48 bytes
-    layoutInfoStd.pipelineLayout = vContext->getVkPipelineLayout(kernelBounce);
-    layoutInfoStd.tokenCount = 2;
-    layoutInfoStd.pTokens = tokensStd;
+      VkIndirectCommandsLayoutCreateInfoEXT layoutInfoStd{VK_STRUCTURE_TYPE_INDIRECT_COMMANDS_LAYOUT_CREATE_INFO_EXT};
+      layoutInfoStd.shaderStages = VK_SHADER_STAGE_COMPUTE_BIT;
+      layoutInfoStd.indirectStride = sizeof(uint32_t) * 12; // 48 bytes
+      layoutInfoStd.pipelineLayout = vContext->getVkPipelineLayout(kernelBounce);
+      layoutInfoStd.tokenCount = 2;
+      layoutInfoStd.pTokens = tokensStd;
 
-    dgcLayoutStandard = vContext->createIndirectCommandsLayout(layoutInfoStd);
+      dgcLayoutStandard = vContext->createIndirectCommandsLayout(layoutInfoStd);
 
-    // 2. Specialized IndirectCommandsLayout (ExecutionSet Token + PushConstant Token + Dispatch Token)
-    VkIndirectCommandsExecutionSetTokenEXT execToken{};
-    execToken.type = VK_INDIRECT_EXECUTION_SET_INFO_TYPE_PIPELINES_EXT;
+      // 2. Specialized IndirectCommandsLayout (ExecutionSet Token + PushConstant Token + Dispatch Token)
+      VkIndirectCommandsExecutionSetTokenEXT execToken{};
+      execToken.type = VK_INDIRECT_EXECUTION_SET_INFO_TYPE_PIPELINES_EXT;
+      execToken.shaderStages = VK_SHADER_STAGE_COMPUTE_BIT;
 
-    VkIndirectCommandsLayoutTokenEXT tokensSpec[3]{};
-    tokensSpec[0].sType = VK_STRUCTURE_TYPE_INDIRECT_COMMANDS_LAYOUT_TOKEN_EXT;
-    tokensSpec[0].type = VK_INDIRECT_COMMANDS_TOKEN_TYPE_EXECUTION_SET_EXT;
-    tokensSpec[0].data.pExecutionSet = &execToken;
-    tokensSpec[0].offset = 0; // pipelineIndex at offset 0
+      VkIndirectCommandsLayoutTokenEXT tokensSpec[3]{};
+      tokensSpec[0].sType = VK_STRUCTURE_TYPE_INDIRECT_COMMANDS_LAYOUT_TOKEN_EXT;
+      tokensSpec[0].type = VK_INDIRECT_COMMANDS_TOKEN_TYPE_EXECUTION_SET_EXT;
+      tokensSpec[0].data.pExecutionSet = &execToken;
+      tokensSpec[0].offset = 0; // pipelineIndex at offset 0
 
-    tokensSpec[1].sType = VK_STRUCTURE_TYPE_INDIRECT_COMMANDS_LAYOUT_TOKEN_EXT;
-    tokensSpec[1].type = VK_INDIRECT_COMMANDS_TOKEN_TYPE_PUSH_CONSTANT_EXT;
-    tokensSpec[1].data.pPushConstant = &pcToken;
-    tokensSpec[1].offset = sizeof(uint32_t); // offset 4
+      tokensSpec[1].sType = VK_STRUCTURE_TYPE_INDIRECT_COMMANDS_LAYOUT_TOKEN_EXT;
+      tokensSpec[1].type = VK_INDIRECT_COMMANDS_TOKEN_TYPE_PUSH_CONSTANT_EXT;
+      tokensSpec[1].data.pPushConstant = &pcToken;
+      tokensSpec[1].offset = sizeof(uint32_t); // offset 4
 
-    tokensSpec[2].sType = VK_STRUCTURE_TYPE_INDIRECT_COMMANDS_LAYOUT_TOKEN_EXT;
-    tokensSpec[2].type = VK_INDIRECT_COMMANDS_TOKEN_TYPE_DISPATCH_EXT;
-    tokensSpec[2].offset = sizeof(uint32_t) * 9; // offset 36
+      tokensSpec[2].sType = VK_STRUCTURE_TYPE_INDIRECT_COMMANDS_LAYOUT_TOKEN_EXT;
+      tokensSpec[2].type = VK_INDIRECT_COMMANDS_TOKEN_TYPE_DISPATCH_EXT;
+      tokensSpec[2].offset = sizeof(uint32_t) * 9; // offset 36
 
-    VkIndirectCommandsLayoutCreateInfoEXT layoutInfoSpec{VK_STRUCTURE_TYPE_INDIRECT_COMMANDS_LAYOUT_CREATE_INFO_EXT};
-    layoutInfoSpec.shaderStages = VK_SHADER_STAGE_COMPUTE_BIT;
-    layoutInfoSpec.indirectStride = sizeof(uint32_t) * 12; // 48 bytes
-    layoutInfoSpec.pipelineLayout = vContext->getVkPipelineLayout(kernelMaterialSpecialized[0]);
-    layoutInfoSpec.tokenCount = 3;
-    layoutInfoSpec.pTokens = tokensSpec;
+      VkIndirectCommandsLayoutCreateInfoEXT layoutInfoSpec{VK_STRUCTURE_TYPE_INDIRECT_COMMANDS_LAYOUT_CREATE_INFO_EXT};
+      layoutInfoSpec.shaderStages = VK_SHADER_STAGE_COMPUTE_BIT;
+      layoutInfoSpec.indirectStride = sizeof(uint32_t) * 12; // 48 bytes
+      layoutInfoSpec.pipelineLayout = vContext->getVkPipelineLayout(kernelMaterialSpecialized[0]);
+      layoutInfoSpec.tokenCount = 3;
+      layoutInfoSpec.pTokens = tokensSpec;
 
-    dgcLayoutSpecialized = vContext->createIndirectCommandsLayout(layoutInfoSpec);
+      dgcLayoutSpecialized = vContext->createIndirectCommandsLayout(layoutInfoSpec);
 
-    // 3. Indirect Execution Set with 8 specialized material pipelines
-    VkIndirectExecutionSetPipelineInfoEXT iesPipeInfo{VK_STRUCTURE_TYPE_INDIRECT_EXECUTION_SET_PIPELINE_INFO_EXT};
-    iesPipeInfo.initialPipeline = vContext->getVkPipeline(kernelMaterialSpecialized[0]);
-    iesPipeInfo.maxPipelineCount = 8;
+      // 3. Indirect Execution Set with 8 specialized material pipelines
+      VkIndirectExecutionSetPipelineInfoEXT iesPipeInfo{VK_STRUCTURE_TYPE_INDIRECT_EXECUTION_SET_PIPELINE_INFO_EXT};
+      iesPipeInfo.initialPipeline = vContext->getVkPipeline(kernelMaterialSpecialized[0]);
+      iesPipeInfo.maxPipelineCount = 8;
 
-    VkIndirectExecutionSetCreateInfoEXT iesInfo{VK_STRUCTURE_TYPE_INDIRECT_EXECUTION_SET_CREATE_INFO_EXT};
-    iesInfo.type = VK_INDIRECT_EXECUTION_SET_INFO_TYPE_PIPELINES_EXT;
-    iesInfo.info.pPipelineInfo = &iesPipeInfo;
+      VkIndirectExecutionSetCreateInfoEXT iesInfo{VK_STRUCTURE_TYPE_INDIRECT_EXECUTION_SET_CREATE_INFO_EXT};
+      iesInfo.type = VK_INDIRECT_EXECUTION_SET_INFO_TYPE_PIPELINES_EXT;
+      iesInfo.info.pPipelineInfo = &iesPipeInfo;
 
-    dgcExecutionSetSpecialized = vContext->createIndirectExecutionSet(iesInfo);
-    for (uint32_t m = 0; m < 8; ++m) {
-      vContext->updateIndirectExecutionSetPipeline(dgcExecutionSetSpecialized, m, kernelMaterialSpecialized[m]);
+      dgcExecutionSetSpecialized = vContext->createIndirectExecutionSet(iesInfo);
+      for (uint32_t m = 0; m < 8; ++m) {
+        vContext->updateIndirectExecutionSetPipeline(dgcExecutionSetSpecialized, m, kernelMaterialSpecialized[m]);
+      }
+
+      // 4. Query preprocess memory requirements & allocate preprocess buffer
+      VkDeviceSize memReqStd = vContext->getGeneratedCommandsMemoryRequirements(
+          dgcLayoutStandard, VK_NULL_HANDLE, 32, kernelMaterial);
+      VkDeviceSize memReqSpec = vContext->getGeneratedCommandsMemoryRequirements(
+          dgcLayoutSpecialized, dgcExecutionSetSpecialized, 32, nullptr);
+      dgcPreprocessBufferSize = std::max(memReqStd, memReqSpec);
+      if (dgcPreprocessBufferSize == 0) {
+        dgcPreprocessBufferSize = 2048;
+      }
+      dgcPreprocessBuffer = vContext->createPreprocessBuffer(dgcPreprocessBufferSize);
+
+      // 5. Initialize DGCExecutionInfo structures
+      dgcInfoStandard.layout = dgcLayoutStandard;
+      dgcInfoStandard.executionSet = VK_NULL_HANDLE;
+      dgcInfoStandard.sequenceBuffer = dgcSequenceBuffer;
+      dgcInfoStandard.sequenceBufferOffset = sizeof(uint32_t) * 12 * 32; // compacted[0] at offset 1536
+      dgcInfoStandard.sequenceBufferSize = sizeof(uint32_t) * 12 * 32;
+      dgcInfoStandard.sequenceCountBuffer = dgcSequenceCountBuffer;
+      dgcInfoStandard.sequenceCountBufferOffset = 0;
+      dgcInfoStandard.preprocessBuffer = dgcPreprocessBuffer;
+      dgcInfoStandard.preprocessBufferSize = dgcPreprocessBufferSize;
+      dgcInfoStandard.maxSequenceCount = 32;
+
+      dgcInfoSpecialized = dgcInfoStandard;
+      dgcInfoSpecialized.layout = dgcLayoutSpecialized;
+      dgcInfoSpecialized.executionSet = dgcExecutionSetSpecialized;
+      dgcInfoSpecialized.sequenceBufferOffset = sizeof(uint32_t) * 12 * 32;
+      dgcInfoSpecialized.maxSequenceCount = 8;
+
+      dgcInfoOctant = dgcInfoStandard;
+      dgcInfoOctant.maxSequenceCount = 1;
+
+      // 6. Pre-seed templates in dgcSequenceBuffer
+      uint32_t sceneTypeVal = (sceneType == SceneType::AAAOutdoorForest) ? 3u : ((sceneType == SceneType::OutdoorLandscape) ? 1u : ((sceneType == SceneType::IndoorAtrium) ? 2u : 0u));
+      uint32_t isGltfVal = isGltf ? 1u : 0u;
+
+      // Material templates: slots 0..7
+      for (uint32_t m = 0; m < 8; ++m) {
+        uint32_t pc[8] = {
+            m, materialCapacity, dumpRenders ? 1u : 0u, renderWidth, renderHeight,
+            sceneTypeVal, isGltfVal, 0u
+        };
+        uint32_t item[12] = {
+            m, pc[0], pc[1], pc[2], pc[3], pc[4], pc[5], pc[6], pc[7], 0, 1, 1
+        };
+        context->writeBuffer(dgcSequenceBuffer, m * sizeof(item), sizeof(item), item);
+      }
+
+      // Octant template: slot 8
+      {
+        uint32_t pc[8] = {
+            0, 0xFFFFFFFFu, 1, 1337u, octantCapacity, sceneTypeVal, isGltfVal, 0u
+        };
+        uint32_t item[12] = {
+            0, pc[0], pc[1], pc[2], pc[3], pc[4], pc[5], pc[6], pc[7], 0, 1, 1
+        };
+        context->writeBuffer(dgcSequenceBuffer, 8 * sizeof(item), sizeof(item), item);
+      }
+
+      // Shadow templates: slots 9..11
+      for (uint32_t l = 0; l < 3; ++l) {
+        uint32_t pc[8] = {
+            l, materialCapacity, dumpRenders ? 1u : 0u, renderWidth, renderHeight,
+            sceneTypeVal, isGltfVal, l
+        };
+        uint32_t item[12] = {
+            0, pc[0], pc[1], pc[2], pc[3], pc[4], pc[5], pc[6], pc[7], 0, 1, 1
+        };
+        context->writeBuffer(dgcSequenceBuffer, (9 + l) * sizeof(item), sizeof(item), item);
+      }
+
+      // Pre-seed compacted[0..7] for isolated Config 2 testing
+      for (uint32_t m = 0; m < 8; ++m) {
+        uint32_t pc[8] = {
+            m, materialCapacity, 0u, renderWidth, renderHeight, sceneTypeVal, isGltfVal, 1u
+        };
+        uint32_t item[12] = {
+            m, pc[0], pc[1], pc[2], pc[3], pc[4], pc[5], pc[6], pc[7],
+            (perQueue + 31) / 32, 1, 1
+        };
+        context->writeBuffer(dgcSequenceBuffer, (32 + m) * sizeof(item), sizeof(item), item);
+      }
+
+      uint32_t initDgcCount = 8;
+      context->writeBuffer(dgcSequenceCountBuffer, 0, sizeof(initDgcCount), &initDgcCount);
+
+      rebuildDGCBounceBatches();
+      isDGCAvailable = true;
+    } catch (const std::exception &e) {
+      std::cerr << "Warning: DGC initialization failed (" << e.what()
+                << "), falling back to standard indirect dispatch." << std::endl;
+      if (vContext) {
+        if (dgcLayoutStandard != VK_NULL_HANDLE) {
+          vContext->destroyIndirectCommandsLayout(dgcLayoutStandard);
+          dgcLayoutStandard = VK_NULL_HANDLE;
+        }
+        if (dgcLayoutSpecialized != VK_NULL_HANDLE) {
+          vContext->destroyIndirectCommandsLayout(dgcLayoutSpecialized);
+          dgcLayoutSpecialized = VK_NULL_HANDLE;
+        }
+        if (dgcExecutionSetSpecialized != VK_NULL_HANDLE) {
+          vContext->destroyIndirectExecutionSet(dgcExecutionSetSpecialized);
+          dgcExecutionSetSpecialized = VK_NULL_HANDLE;
+        }
+      }
+      if (dgcPreprocessBuffer) {
+        context->releaseBuffer(dgcPreprocessBuffer);
+        dgcPreprocessBuffer = nullptr;
+      }
+      isDGCAvailable = false;
     }
-
-    // 4. Query preprocess memory requirements & allocate preprocess buffer
-    VkDeviceSize memReqStd = vContext->getGeneratedCommandsMemoryRequirements(
-        dgcLayoutStandard, VK_NULL_HANDLE, 32, kernelMaterial);
-    VkDeviceSize memReqSpec = vContext->getGeneratedCommandsMemoryRequirements(
-        dgcLayoutSpecialized, dgcExecutionSetSpecialized, 32, nullptr);
-    dgcPreprocessBufferSize = std::max(memReqStd, memReqSpec);
-    if (dgcPreprocessBufferSize == 0) {
-      dgcPreprocessBufferSize = 2048;
-    }
-    dgcPreprocessBuffer = vContext->createPreprocessBuffer(dgcPreprocessBufferSize);
-
-    // 5. Initialize DGCExecutionInfo structures
-    dgcInfoStandard.layout = dgcLayoutStandard;
-    dgcInfoStandard.executionSet = VK_NULL_HANDLE;
-    dgcInfoStandard.sequenceBuffer = dgcSequenceBuffer;
-    dgcInfoStandard.sequenceBufferOffset = sizeof(uint32_t) * 12 * 32; // compacted[0] at offset 1536
-    dgcInfoStandard.sequenceBufferSize = sizeof(uint32_t) * 12 * 32;
-    dgcInfoStandard.sequenceCountBuffer = dgcSequenceCountBuffer;
-    dgcInfoStandard.sequenceCountBufferOffset = 0;
-    dgcInfoStandard.preprocessBuffer = dgcPreprocessBuffer;
-    dgcInfoStandard.preprocessBufferSize = dgcPreprocessBufferSize;
-    dgcInfoStandard.maxSequenceCount = 32;
-
-    dgcInfoSpecialized = dgcInfoStandard;
-    dgcInfoSpecialized.layout = dgcLayoutSpecialized;
-    dgcInfoSpecialized.executionSet = dgcExecutionSetSpecialized;
-    dgcInfoSpecialized.sequenceBufferOffset = sizeof(uint32_t) * 12 * 32;
-    dgcInfoSpecialized.maxSequenceCount = 8;
-
-    dgcInfoOctant = dgcInfoStandard;
-    dgcInfoOctant.maxSequenceCount = 1;
-
-    // 6. Pre-seed templates in dgcSequenceBuffer
-    uint32_t sceneTypeVal = (sceneType == SceneType::AAAOutdoorForest) ? 3u : ((sceneType == SceneType::OutdoorLandscape) ? 1u : ((sceneType == SceneType::IndoorAtrium) ? 2u : 0u));
-    uint32_t isGltfVal = isGltf ? 1u : 0u;
-
-    // Material templates: slots 0..7
-    for (uint32_t m = 0; m < 8; ++m) {
-      uint32_t pc[8] = {
-          m, materialCapacity, dumpRenders ? 1u : 0u, renderWidth, renderHeight,
-          sceneTypeVal, isGltfVal, 0u
-      };
-      uint32_t item[12] = {
-          m, pc[0], pc[1], pc[2], pc[3], pc[4], pc[5], pc[6], pc[7], 0, 1, 1
-      };
-      context->writeBuffer(dgcSequenceBuffer, m * sizeof(item), sizeof(item), item);
-    }
-
-    // Octant template: slot 8
-    {
-      uint32_t pc[8] = {
-          0, 0xFFFFFFFFu, 1, 1337u, octantCapacity, sceneTypeVal, isGltfVal, 0u
-      };
-      uint32_t item[12] = {
-          0, pc[0], pc[1], pc[2], pc[3], pc[4], pc[5], pc[6], pc[7], 0, 1, 1
-      };
-      context->writeBuffer(dgcSequenceBuffer, 8 * sizeof(item), sizeof(item), item);
-    }
-
-    // Shadow templates: slots 9..11
-    for (uint32_t l = 0; l < 3; ++l) {
-      uint32_t pc[8] = {
-          l, materialCapacity, dumpRenders ? 1u : 0u, renderWidth, renderHeight,
-          sceneTypeVal, isGltfVal, l
-      };
-      uint32_t item[12] = {
-          0, pc[0], pc[1], pc[2], pc[3], pc[4], pc[5], pc[6], pc[7], 0, 1, 1
-      };
-      context->writeBuffer(dgcSequenceBuffer, (9 + l) * sizeof(item), sizeof(item), item);
-    }
-
-    // Pre-seed compacted[0..7] for isolated Config 2 testing
-    for (uint32_t m = 0; m < 8; ++m) {
-      uint32_t pc[8] = {
-          m, materialCapacity, 0u, renderWidth, renderHeight, sceneTypeVal, isGltfVal, 1u
-      };
-      uint32_t item[12] = {
-          m, pc[0], pc[1], pc[2], pc[3], pc[4], pc[5], pc[6], pc[7],
-          (perQueue + 31) / 32, 1, 1
-      };
-      context->writeBuffer(dgcSequenceBuffer, (32 + m) * sizeof(item), sizeof(item), item);
-    }
-
-    uint32_t initDgcCount = 8;
-    context->writeBuffer(dgcSequenceCountBuffer, 0, sizeof(initDgcCount), &initDgcCount);
-
-    rebuildDGCBounceBatches();
   }
 #endif
 }
@@ -1055,7 +1093,7 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     break;
   }
   case 2: { // Material Divergence - Work Lists / DGC (Specialized Micro-Kernels, Pure Shading)
-    if (vContext->isDGCSupported()) {
+    if (isDGCAvailable) {
       vContext->dispatchDGCSequence(kernelMaterialSpecialized[0], dgcInfoSpecialized);
     } else {
       vContext->dispatchIndirectSequence(kernelMaterial, indirectBuffer, materialBatchesBreakdown);
@@ -1094,7 +1132,7 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
           kernelClassify, (rayCount + 31) / 32, 1, 1,
           kernelResolve,
           kernelBounce, indirectBuffer, bounceBatches, true /* isPingPong */,
-          &dgcInfoStandard, 3u /* dgcMode = 3 */);
+          isDGCAvailable ? &dgcInfoStandard : nullptr, isDGCAvailable ? 3u : 0u);
     }
     break;
   }
@@ -1129,7 +1167,7 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
         kernelResolve,
         kernelBounceOctant, indirectBuffer, octantBatches,
         false /* isPingPong */,
-        &dgcInfoOctant, 2u /* dgcMode = 2 */);
+        isDGCAvailable ? &dgcInfoOctant : nullptr, isDGCAvailable ? 2u : 0u);
     break;
   }
   case 11: { // Incoherent Rays - Work Graphs (Autonomous Directional Node Enqueue)
@@ -1176,7 +1214,7 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
         kernelResolve,
         kernelMaterial, indirectBuffer, materialBatches,
         false /* isPingPong */,
-        &dgcInfoStandard, 1u /* dgcMode = 1 */);
+        isDGCAvailable ? &dgcInfoStandard : nullptr, isDGCAvailable ? 1u : 0u);
     break;
   }
   case 15: { // Primary Ray Pipeline - Work Graphs
@@ -1229,7 +1267,7 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
         kernelResolve,
         kernelMaterial, indirectBuffer, materialBatches,
         false /* isPingPong */,
-        &dgcInfoStandard, 1u /* dgcMode = 1 */);
+        isDGCAvailable ? &dgcInfoStandard : nullptr, isDGCAvailable ? 1u : 0u);
     break;
   }
   case 23: { // Ray-Traced Shadows - Traditional Megakernel (Directional Shadow Rays, In-Kernel Traversal)
@@ -1265,7 +1303,7 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
         kernelResolve,
         kernelShadow, indirectBuffer, shadowBatches,
         false /* isPingPong */,
-        &dgcInfoStandard, 4u /* dgcMode = 4 */);
+        isDGCAvailable ? &dgcInfoStandard : nullptr, isDGCAvailable ? 4u : 0u);
     break;
   }
   case 26: { // Ray-Traced Shadows - Work Graphs (Hardware-Scheduled Micro-Dispatches)
@@ -1295,7 +1333,7 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
         kernelResolve,
         kernelShadow, indirectBuffer, shadowBinBatches,
         false /* isPingPong */,
-        &dgcInfoStandard, 4u /* dgcMode = 4 */);
+        isDGCAvailable ? &dgcInfoStandard : nullptr, isDGCAvailable ? 4u : 0u);
     break;
   }
   case 28: { // Full Scene Path Tracing (16 SPP) - Traditional Megakernel
@@ -1314,7 +1352,7 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
           kernelClassify, (rayCount + 31) / 32, 1, 1,
           kernelResolve,
           kernelBounce, indirectBuffer, bounceBatches, true /* isPingPong */,
-          &dgcInfoStandard, 3u /* dgcMode = 3 */);
+          isDGCAvailable ? &dgcInfoStandard : nullptr, isDGCAvailable ? 3u : 0u);
     }
     break;
   }

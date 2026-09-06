@@ -140,6 +140,15 @@ public:
     (void)context;
     return GetConfigSupportLimitation(config_idx);
   }
+  bool IsDGCAvailable() const { return isDGCAvailable; }
+  std::string GetConfigCaveat(uint32_t config_idx = 0) const override;
+  std::string GetConfigCaveat(uint32_t config_idx,
+                              const DeviceInfo &info,
+                              IComputeContext *context = nullptr) const override {
+    (void)info;
+    (void)context;
+    return GetConfigCaveat(config_idx);
+  }
   const char *GetComponent(uint32_t config_idx = 0) const override { return "Ray Tracing"; }
   const char *GetSubCategory(uint32_t config_idx = 0) const override;
 
@@ -238,6 +247,7 @@ private:
   void rebuildBounceBatches();
 
   // DGC (VK_EXT_device_generated_commands) Objects & Execution Infos
+  bool isDGCAvailable = false;
   VkIndirectCommandsLayoutEXT dgcLayoutStandard = VK_NULL_HANDLE;
   VkIndirectCommandsLayoutEXT dgcLayoutSpecialized = VK_NULL_HANDLE;
   VkIndirectExecutionSetEXT dgcExecutionSetSpecialized = VK_NULL_HANDLE;

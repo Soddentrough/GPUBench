@@ -772,6 +772,18 @@ void VulkanContext::createDevice() {
     vkUpdateIndirectExecutionSetPipelineEXT_ptr =
         (PFN_vkUpdateIndirectExecutionSetPipelineEXT)vkGetDeviceProcAddr(
             device, "vkUpdateIndirectExecutionSetPipelineEXT");
+
+    dgcSupported = (dgcFeatures.deviceGeneratedCommands == VK_TRUE) &&
+                   (vkGetGeneratedCommandsMemoryRequirementsEXT_ptr != nullptr) &&
+                   (vkCmdPreprocessGeneratedCommandsEXT_ptr != nullptr) &&
+                   (vkCmdExecuteGeneratedCommandsEXT_ptr != nullptr) &&
+                   (vkCreateIndirectCommandsLayoutEXT_ptr != nullptr) &&
+                   (vkDestroyIndirectCommandsLayoutEXT_ptr != nullptr) &&
+                   (vkCreateIndirectExecutionSetEXT_ptr != nullptr) &&
+                   (vkDestroyIndirectExecutionSetEXT_ptr != nullptr) &&
+                   (vkUpdateIndirectExecutionSetPipelineEXT_ptr != nullptr);
+  } else {
+    dgcSupported = false;
   }
   vkGetBufferDeviceAddressKHR_ptr =
       (PFN_vkGetBufferDeviceAddressKHR)vkGetDeviceProcAddr(
@@ -1707,7 +1719,7 @@ void VulkanContext::dispatchWorkListSequence(
   }
   vkCmdDispatch(frame.commandBuffer, grid_x, grid_y, grid_z);
 
-  bool useDGC = (dgcInfo != nullptr) && isDGCSupported() && (vkCmdExecuteGeneratedCommandsEXT_ptr != nullptr);
+  bool useDGC = (dgcInfo != nullptr) && isDGCSupported() && (vkCmdExecuteGeneratedCommandsEXT_ptr != nullptr) && (dgcInfo->layout != VK_NULL_HANDLE);
 
   // 3. Resolve: Convert queue counters to indirect dispatch commands (32 threads, 1 wave, <0.5 us)
   if (resolveKernel_handle) {
@@ -1733,9 +1745,10 @@ void VulkanContext::dispatchWorkListSequence(
                            VK_SHADER_STAGE_COMPUTE_BIT, 0,
                            sizeof(rpcResolve), &rpcResolve);
       } else {
+        struct { uint32_t resetQueue; uint32_t dgcMode; uint32_t bounceIndex; } rpcResolve{resetQueue, 0u, 0u};
         vkCmdPushConstants(frame.commandBuffer, resolveKernel->pipelineLayout,
                            VK_SHADER_STAGE_COMPUTE_BIT, 0,
-                           sizeof(resetQueue), &resetQueue);
+                           sizeof(rpcResolve), &rpcResolve);
       }
       vkCmdDispatch(frame.commandBuffer, 1, 1, 1);
 
@@ -1893,9 +1906,10 @@ void VulkanContext::dispatchWorkListSequence(
                                   resolveKernel->pipelineLayout, 0, 1,
                                   &resolveKernel->descriptorSet, 0, nullptr);
           uint32_t resetQueue = (e + 2 < entries.size()) ? static_cast<uint32_t>(e % 2) : 0xFFFFFFFFu;
+          struct { uint32_t resetQueue; uint32_t dgcMode; uint32_t bounceIndex; } rpcBounce{resetQueue, 0u, 0u};
           vkCmdPushConstants(frame.commandBuffer, resolveKernel->pipelineLayout,
                              VK_SHADER_STAGE_COMPUTE_BIT, 0,
-                             sizeof(resetQueue), &resetQueue);
+                             sizeof(rpcBounce), &rpcBounce);
           vkCmdDispatch(frame.commandBuffer, 1, 1, 1);
 
           VkMemoryBarrier resolveBarrier{};

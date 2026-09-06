@@ -98,7 +98,7 @@ public:
     return isExtensionEnabled("VK_KHR_ray_tracing_maintenance1");
   }
   bool isDGCSupported() const {
-    return isExtensionEnabled("VK_EXT_device_generated_commands");
+    return dgcSupported;
   }
   bool isMaintenance5Supported() const {
     return maintenance5Supported;
@@ -267,6 +267,7 @@ private:
   bool swapchainSupported = false;
   bool serSupported = false;
   bool maintenance5Supported = false;
+  bool dgcSupported = false;
 
   // DGC (VK_EXT_device_generated_commands) function pointers
   PFN_vkGetGeneratedCommandsMemoryRequirementsEXT vkGetGeneratedCommandsMemoryRequirementsEXT_ptr = nullptr;
