@@ -239,7 +239,7 @@ int main(int argc, char **argv) {
       "              Pixel Fill Rate (RGBA8, RGBA16F HDR, Alpha Blending)\n"
       "  raytracing  Hardware BVH traversal, intersection & scheduling (subset of graphics, alias: 'rt'):\n"
       "              RayTracing, RayAnyHit, RayProcedural, RayIncoherent, RayMaterialDivergence,\n"
-      "              RayPayload, RayASBuild, RayPathTracing, RayScheduling (Work Lists / SER / Work Graphs),\n"
+      "              RayPayload, RayASBuild, RayScheduling (Scene Ray Tracing & Path Tracing - Work Lists / SER / Work Graphs),\n"
       "              Pipeline Breakdown (Linear vs 2D Tiled vs Morton Z-Curve, Queue Compaction)\n"
       "  system      Host CPU & RAM system memory:\n"
       "              System Memory Bandwidth (Multi & Single-Threaded), System Memory Latency\n"
@@ -305,6 +305,11 @@ int main(int argc, char **argv) {
   app.add_option("--bounces", bounce_depth,
                  "Ray tracing path tracing bounce depth (1..8, default: 2)")
       ->check(CLI::Range(1u, 8u));
+
+  uint32_t samples_per_pixel = 1;
+  app.add_option("--spp", samples_per_pixel,
+                 "Ray tracing path tracing samples per pixel (1..256, default: 1)")
+      ->check(CLI::Range(1u, 256u));
 
   bool profile_snapshot = false;
   app.add_flag("--profile-snapshot", profile_snapshot,
@@ -546,6 +551,7 @@ int main(int argc, char **argv) {
     BenchmarkRunner runner({}, verbose, debug, dump_geometry, dump_renders, scene_str);
     runner.setResolution(render_width, render_height);
     runner.setBounceDepth(bounce_depth);
+    runner.setSamplesPerPixel(samples_per_pixel);
     runner.setTargetConfig(config_target);
     runner.setProfileSnapshot(profile_snapshot);
 

@@ -2,6 +2,7 @@
 
 #include "IBenchmark.h"
 #include "scene/GltfScene.h"
+#include <algorithm>
 #include <string>
 #include <vector>
 #ifdef HAVE_VULKAN
@@ -76,7 +77,7 @@ public:
   BenchmarkResult GetResult(uint32_t config_idx = 0) const override;
   int GetSortWeight(uint32_t config_idx = 0) const override;
 
-  uint32_t GetNumConfigs() const override { return 28; }
+  uint32_t GetNumConfigs() const override { return 30; }
   std::vector<std::string> GetAliases() const override {
     if (sceneType == SceneType::AAAOutdoorForest) {
       return {"rayscheduling", "rtscheduling", "forest", "aaa_forest", "rayscheduling_forest", "worklists", "dgc", "scene_render", "total_scene_render", "total_frame", "primary", "primary_rays", "shadow", "shadows", "rts", "ray_shadows", "ray_shadow"};
@@ -157,26 +158,31 @@ public:
   void SetBounceDepth(uint32_t bounces);
   uint32_t GetBounceDepth() const { return bounceDepth; }
 
+  void SetSamplesPerPixel(uint32_t spp) { samplesPerPixel = std::clamp(spp, 1u, 256u); }
+  uint32_t GetSamplesPerPixel() const { return samplesPerPixel; }
+
   uint32_t GetRenderWidth() const { return renderWidth; }
   uint32_t GetRenderHeight() const { return renderHeight; }
   uint32_t GetQueueCapacity() const { return queueCapacity; }
 
   void RecordRunResult(uint32_t config_idx, uint64_t total_invocations, double total_time_ms) override {
-    if (config_idx < 28) {
+    if (config_idx < 30) {
       recordedInvocations[config_idx] = total_invocations;
       recordedTimeMs[config_idx] = total_time_ms;
     }
   }
 
 private:
-  uint64_t recordedInvocations[28] = {0};
-  double recordedTimeMs[28] = {0.0};
+  uint64_t recordedInvocations[30] = {0};
+  double recordedTimeMs[30] = {0.0};
   IComputeContext *context = nullptr;
   std::string findScriptPath(const std::string &scriptName) const;
   bool dumpRenders = true;
   ComputeBuffer fbTraditional = nullptr;
   ComputeBuffer fbWorkList = nullptr;
   void performVisualVerification();
+  void dumpPipelineBreakdown(const std::string &tag);
+  double bvhBuildTimeMs = 0.0;
 
   // Compute Kernels
   ComputeKernel kernelTraditional = nullptr;
@@ -233,6 +239,7 @@ private:
 #endif
 
   uint32_t bounceDepth = 2;
+  uint32_t samplesPerPixel = 1;
   uint32_t renderWidth = 1920;
   uint32_t renderHeight = 1080;
   uint32_t rayCount = 1920 * 1080;
@@ -242,7 +249,7 @@ private:
   uint32_t octantCapacity = 262144;
   uint32_t numPrimitives = 4096;
   SceneType sceneType = SceneType::IndoorAtrium;
-  mutable double results[28] = {0.0};
-  mutable bool unsupportedConfig[28] = {false};
-  mutable std::string unsupportedReason[28];
+  mutable double results[30] = {0.0};
+  mutable bool unsupportedConfig[30] = {false};
+  mutable std::string unsupportedReason[30];
 };

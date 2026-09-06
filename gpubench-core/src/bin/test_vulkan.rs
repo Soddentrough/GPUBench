@@ -23,6 +23,7 @@ fn main() {
         0,
         0,
         "all",
+        1,
         |_res| {
             println!("Callback received result");
         }

@@ -359,18 +359,24 @@ def evaluate_results(raw_data: Any) -> bool:
         print("-" * 80)
 
         scenarios = [
-            ("Total Scene Render",
-             ["Total Scene Render - Traditional Megakernel", "Primary Ray Tracing - Traditional Megakernel", "Primary Rays (Traditional)", "Total Scene Render (Megakernel)", "Full Scene Render - Megakernel", "Full Scene Render: Megakernel"],
-             ["Total Scene Render - Work Lists", "Primary Ray Tracing - Work Lists", "Primary Rays (Work Lists)", "Total Scene Render (Work Lists)", "Full Scene Render - Work Lists", "Full Scene Render: Work Lists"]),
+            ("Scene Ray Tracing (PBR)",
+             ["Full Scene Ray Tracing (PBR) - Megakernel", "Full Scene Render - Megakernel", "Full Scene Render: Megakernel", "Total Scene Render - Traditional Megakernel", "Primary Ray Tracing - Traditional Megakernel", "Primary Rays (Traditional)", "Total Scene Render (Megakernel)"],
+             ["Full Scene Ray Tracing (PBR) - Work Lists", "Full Scene Render - Work Lists", "Full Scene Render: Work Lists", "Total Scene Render - Work Lists", "Primary Ray Tracing - Work Lists", "Primary Rays (Work Lists)", "Total Scene Render (Work Lists)"]),
             ("Material Shading",
              ["Material Shading - Traditional Megakernel", "Material Shading (Traditional)"],
              ["Material Shading - Work Lists", "Material Shading (Work Lists)"]),
             ("Incoherent Ray Tracing",
              ["Incoherent Ray Tracing - Traditional Megakernel", "Incoherent Rays (Traditional)"],
              ["Incoherent Ray Tracing - Work Lists", "Incoherent Rays (Work Lists)"]),
-            ("Path Tracing",
-             ["Path Tracing - Traditional Megakernel", "Path Tracing (Traditional)"],
-             ["Path Tracing - Work Lists", "Path Tracing (Work Lists)"]),
+            ("Scene Path Tracing (1 SPP)",
+             ["Full Scene Path Tracing (1 SPP) - Traditional Megakernel", "Full Scene Path Tracing - Traditional Megakernel", "Path Tracing - Traditional Megakernel", "Path Tracing (Traditional)"],
+             ["Full Scene Path Tracing (1 SPP) - Work Lists", "Full Scene Path Tracing - Work Lists", "Path Tracing - Work Lists", "Path Tracing (Work Lists)"]),
+            ("Scene Path Tracing (16 SPP)",
+             ["Full Scene Path Tracing (16 SPP) - Traditional Megakernel", "Path Tracing (16 SPP) - Traditional"],
+             ["Full Scene Path Tracing (16 SPP) - Work Lists", "Path Tracing (16 SPP) - Work Lists"]),
+            ("Directional Shadows",
+             ["Directional Shadows - Traditional Megakernel"],
+             ["Directional Shadows - Work Lists (Wavefront Compaction)"]),
         ]
 
         for sc_name, mega_keys, wl_keys in scenarios:
@@ -389,7 +395,7 @@ def evaluate_results(raw_data: Any) -> bool:
             if mega_val is not None and wl_val is not None:
                 speedup = (wl_val / mega_val) if mega_val > 0 else 0.0
                 sp_str = f"{speedup:.2f}x"
-                if sc_name in ("Total Scene Render", "Primary Ray Tracing"):
+                if sc_name in ("Scene Ray Tracing (PBR)", "Total Scene Render", "Primary Ray Tracing"):
                     if speedup >= 1.05:
                         st = f"{Colors.GREEN}PASS (Faster){Colors.RESET}"
                     elif speedup >= 0.75:

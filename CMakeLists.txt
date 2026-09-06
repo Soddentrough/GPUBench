@@ -563,6 +563,8 @@ if(WIN32)
         "RunAllBenchmarks.bat" "Run All Benchmarks"
         "https://github.com/Soddentrough/GPUBench" "GPUBench Website"
     )
+    set(CPACK_NSIS_MUI_FINISHPAGE_RUN "bin\\\\gpubench-gui.exe")
+    set(CPACK_NSIS_DEFINES "!define MUI_FINISHPAGE_RUN_TEXT \"Start GPUBench\"")
     
     # Include Visual C++ Redistributable if needed
     # set(CPACK_NSIS_EXTRA_INSTALL_COMMANDS "ExecWait '$INSTDIR\\\\vcredist_x64.exe /quiet'")

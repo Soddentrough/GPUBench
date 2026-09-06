@@ -31,6 +31,9 @@ runner.bat
 test.cpp
 test_minimal.cpp
 
+# Results files
+gpubench_results*
+
 # Specific logs
 build_error.log
 build_error.txt

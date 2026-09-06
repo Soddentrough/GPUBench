@@ -63,6 +63,9 @@ pub struct Cli {
 
     #[arg(short = 's', long = "scene", default_value = "all")]
     pub scene: String,
+
+    #[arg(long = "spp", default_value_t = 1)]
+    pub samples_per_pixel: u32,
 }
 
 pub mod sysinfo;
@@ -143,6 +146,7 @@ pub fn run_benchmarks(
     render_width: u32,
     render_height: u32,
     scene: &str,
+    samples_per_pixel: u32,
     callback: fn(&ResultData),
 ) -> Vec<ResultData> {
     static CALLBACK_MUTEX: Mutex<Option<fn(&ResultData)>> = Mutex::new(None);
@@ -195,6 +199,7 @@ pub fn run_benchmarks(
         render_height,
         ffi_callback,
         scene.to_string(),
+        samples_per_pixel,
     );
     
     ffi_results.into_iter().map(|ffi_res| ResultData {
@@ -390,6 +395,7 @@ pub fn run_cli() {
         res_w,
         res_h,
         &cli.scene,
+        cli.samples_per_pixel,
         |_| {},
     );
 

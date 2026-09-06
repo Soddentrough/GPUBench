@@ -13,7 +13,8 @@ std::vector<ResultData> RunBenchmarksAPI(
     uint32_t renderWidth,
     uint32_t renderHeight,
     std::function<void(const ResultData&)> callback,
-    const std::string& scene)
+    const std::string& scene,
+    uint32_t samples_per_pixel)
 {
     // Never let C++ exceptions cross the cxx FFI boundary into Rust (that
     // would call std::terminate). On error, return an empty result list.
@@ -41,6 +42,7 @@ std::vector<ResultData> RunBenchmarksAPI(
 
     BenchmarkRunner runner({}, verbose, debug, dump_geometry, dump_renders, scene.empty() ? "all" : scene);
     runner.setResolution(renderWidth, renderHeight);
+    runner.setSamplesPerPixel(samples_per_pixel);
     if (callback) {
         runner.onResult = callback;
     }

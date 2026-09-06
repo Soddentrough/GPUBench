@@ -13,8 +13,8 @@ def make_comparison(scenario="forest"):
         sub_right = "Cycles HIP RT on GPU 1 (AMD Radeon AI PRO R9700, 8.43 s @ 64 spp, OIDN)"
     else:
         p_gpu = "renders/render_indoor_worklist_dgc.png"
-        p_blender = "renders/render_sponza_cycles_reference.png"
-        out_path = "renders/render_blender_comparison.png"
+        p_blender = "renders/render_indoor_cycles_reference.png"
+        out_path = "renders/render_indoor_blender_comparison.png"
         title_left = "GPUBench Real-Time Vulkan Pipeline (Crytek Sponza)"
         sub_left = "Decoupled Work Lists / DGC (338.3 FPS, 2.96 ms @ 4K 3840x2160)"
         title_right = "Blender Cycles Reference Render (Crytek Sponza)"

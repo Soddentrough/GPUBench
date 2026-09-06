@@ -58,6 +58,7 @@ pub mod ffi {
             render_height: u32,
             callback: fn(&FfiResultData),
             scene: String,
+            samples_per_pixel: u32,
         ) -> Vec<FfiResultData>;
 
         fn gpubench_get_available_hardware() -> Vec<String>;

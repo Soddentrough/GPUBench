@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <iomanip>
@@ -24,11 +25,12 @@ struct ImageMetrics {
 
 class ImageExport {
 public:
-  static inline uint8_t floatToSrgb(float x) {
-    if (x <= 0.0f) return 0;
-    if (x >= 1.0f) return 255;
-    int val = static_cast<int>(x * 255.0f + 0.5f);
-    return static_cast<uint8_t>(std::clamp(val, 0, 255));
+  static uint8_t floatToSrgb(float linear) {
+    linear = std::clamp(linear, 0.0f, 1.0f);
+    if (linear <= 0.0031308f) {
+      return static_cast<uint8_t>(linear * 12.92f * 255.0f + 0.5f);
+    }
+    return static_cast<uint8_t>((1.055f * std::pow(linear, 1.0f / 2.4f) - 0.055f) * 255.0f + 0.5f);
   }
 
   static bool writePPM(const std::string &path, uint32_t width, uint32_t height,
@@ -57,6 +59,7 @@ public:
       int fbRet = std::system(fbCmd.c_str());
       (void)fbRet;
     }
+    std::remove(ppmPath.c_str());
   }
 
   static ImageMetrics compareAndTonemap(

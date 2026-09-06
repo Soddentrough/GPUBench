@@ -17,7 +17,8 @@ rust::Vec<FfiResultData> gpubench_run_benchmarks(const rust::Vec<rust::String>& 
                                                  uint32_t render_width,
                                                  uint32_t render_height,
                                                  rust::Fn<void(const FfiResultData&)> callback,
-                                                 rust::String scene_rust) {
+                                                 rust::String scene_rust,
+                                                 uint32_t samples_per_pixel) {
     
     std::vector<std::string> benchmarks_to_run;
     for (const auto& b : benchmarks_to_run_rust) {
@@ -60,7 +61,8 @@ rust::Vec<FfiResultData> gpubench_run_benchmarks(const rust::Vec<rust::String>& 
             r.height = res.height;
             callback(r);
         },
-        scene_str);
+        scene_str,
+        samples_per_pixel);
 
     rust::Vec<FfiResultData> ffi_results;
     for (const auto& res : raw_results) {

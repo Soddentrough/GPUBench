@@ -326,6 +326,22 @@ bool traceShadowRay(vec3 origin, vec3 normal, vec3 lightDir, float maxDist) {
     return (rayQueryGetIntersectionTypeEXT(sQuery, true) != gl_RayQueryCommittedIntersectionNoneEXT);
 }
 
+void getSceneSunParams(uint sceneType, out vec3 sunDir, out vec3 sunColor) {
+    if (sceneType == 2u) { // Indoor Atrium (Sponza)
+        sunDir = normalize(vec3(0.35, 0.90, -0.25));
+        sunColor = vec3(1.0, 0.95, 0.88) * 4.5;
+    } else if (sceneType == 0u) { // Showroom Studio (ToyCar)
+        sunDir = normalize(vec3(0.6, 0.8, 0.5));
+        sunColor = vec3(1.0, 0.97, 0.92) * 3.5;
+    } else if (sceneType == 3u) { // Open-World Forest
+        sunDir = normalize(vec3(0.42, 0.38, 0.78));
+        sunColor = vec3(1.0, 0.94, 0.84) * 3.8;
+    } else { // Outdoor Landscape
+        sunDir = normalize(vec3(0.45, 0.35, 0.82));
+        sunColor = vec3(1.0, 0.95, 0.85) * 3.5;
+    }
+}
+
 float traceAreaShadow(vec3 origin, vec3 normal, vec3 lightDir, float maxDist, float lightRadius, inout uint rng, int numSamples) {
     vec3 up = abs(lightDir.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
     vec3 tangent = normalize(cross(up, lightDir));

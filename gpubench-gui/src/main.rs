@@ -551,9 +551,8 @@ fn get_benchmark_description(name: &str) -> &'static str {
         "RayPayload" => "Ray traversal performance under heavy recursive register payload pressure.",
         "RayASBuild" => "Acceleration structure construction (BLAS/TLAS) and dynamic mesh refit throughput.",
         "RayProcedural" => "Intersection evaluation against mathematically defined procedural primitives (spheres, curves).",
-        "RayMaterialDivergence" => "Shading dispatch throughput when secondary rays scatter across dissimilar materials.",
-        "RayPathTracing" => "Full multi-bounce stochastic Monte Carlo path tracing with global illumination and cosine sampling.",
-        "RayScheduling" | "RayExecutionParadigm" => "Comparative ray scheduling architectures: Traditional Megakernel vs Work Lists / DGC vs GPU Work Graphs vs Hardware SER.",
+        "RayPathTracing" => "Legacy synthetic grid path tracing (retired in favor of Full Scene Path Tracing).",
+        "RayScheduling" | "RayExecutionParadigm" => "Comparative ray scheduling: Full Scene PBR Ray Tracing & Multi-Bounce Path Tracing across Showroom, Indoor Atrium, Outdoor Landscape, and Open-World Forest.",
         _ => "GPU workstation benchmark suite.",
     }
 }
@@ -650,8 +649,9 @@ pub fn is_benchmark_requested(t: &str, requested_tokens: &[String]) -> bool {
             "divergence" | "raydivergence" => {
                 t == "RayDivergence" || t == "RayMaterialDivergence"
             }
-            "payload" | "raypayload" => t == "RayPayload",
-            "pathtracing" | "raypathtracing" => t == "RayPathTracing",
+            "pathtracing" | "raypathtracing" => {
+                t == "RayScheduling" || t.starts_with("RayScheduling") || t == "RayPathTracing"
+            }
             "rayscheduling" | "scheduling" | "worklists" | "dgc" | "rayexecutionparadigm" => {
                 t == "RayScheduling" || t == "RayExecutionParadigm" || t.starts_with("RayScheduling")
             }
@@ -700,6 +700,7 @@ pub struct GuiCliArgs {
     pub devices: Vec<String>,
     pub resolution: Option<String>,
     pub scene: Option<String>,
+    pub spp: u32,
     pub dump_renders: bool,
     pub auto_start: bool,
     pub should_exit: bool,
@@ -714,6 +715,7 @@ impl Default for GuiCliArgs {
             devices: Vec::new(),
             resolution: None,
             scene: None,
+            spp: 1,
             dump_renders: true,
             auto_start: false,
             should_exit: false,
@@ -750,7 +752,7 @@ fn print_gui_help() {
     println!("                Pixel Fill Rate (RGBA8, RGBA16F HDR, Alpha Blending)\n");
     println!("    raytracing  Hardware BVH traversal, intersection & scheduling (subset of graphics, alias: 'rt'):");
     println!("                RayTracing, RayAnyHit, RayProcedural, RayIncoherent, RayMaterialDivergence,");
-    println!("                RayPayload, RayASBuild, RayPathTracing, RayScheduling (Work Lists / SER / Work Graphs),");
+    println!("                RayPayload, RayASBuild, RayScheduling (Scene Ray Tracing & Path Tracing),");
     println!("                Ray Pipeline Breakdown (Linear vs 2D Tiled vs Morton Z-Curve, Queue Compaction)\n");
     println!("    system      Host CPU & RAM system memory:");
     println!("                System Memory Bandwidth (Multi & Single-Threaded), System Memory Latency\n");
@@ -795,6 +797,22 @@ pub fn parse_gui_cli_args_from(raw_args: &[String]) -> GuiCliArgs {
             args.auto_start = true;
             i += 1;
             continue;
+        }
+        if let Some(val) = arg.strip_prefix("--spp=") {
+            if let Ok(num) = val.parse::<u32>() {
+                args.spp = num.clamp(1, 256);
+            }
+            i += 1;
+            continue;
+        }
+        if arg == "--spp" {
+            if i + 1 < raw_args.len() {
+                if let Ok(num) = raw_args[i + 1].parse::<u32>() {
+                    args.spp = num.clamp(1, 256);
+                }
+                i += 2;
+                continue;
+            }
         }
         if let Some(val) = arg.strip_prefix("-k=").or_else(|| arg.strip_prefix("--backend=")) {
             args.backend = Some(val.to_string());
@@ -926,8 +944,8 @@ pub fn main() -> iced::Result {
         flags: cli_args,
         antialiasing: true,
         window: iced::window::Settings {
-            size: iced::Size::new(1280.0, 980.0),
-            min_size: Some(iced::Size::new(960.0, 640.0)),
+            size: iced::Size::new(1120.0, 640.0),
+            min_size: Some(iced::Size::new(760.0, 460.0)),
             icon: app_icon,
             #[cfg(target_os = "linux")]
             platform_specific: iced::window::settings::PlatformSpecific {
@@ -1415,29 +1433,7 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         is_system: false,
     },
 
-    // Phase 2: Total Scene Render (Direct Visibility & Materials)
-    WorkloadDef {
-        id: "rt_sched_prim_trad",
-        category: "RAY TRACING ACCELERATION",
-        label: "Total Scene Render (Megakernel)",
-        approach: "Monolithic Megakernel",
-        default_unit: "MRays/s",
-        desc: "Complete end-to-end scene frame generation: camera ray generation, BVH traversal, multi-material BSDF shading, and framebuffer write.",
-        api_extensions: "VK_KHR_ray_query (Vulkan Compute)",
-        is_system: false,
-    },
-    WorkloadDef {
-        id: "rt_sched_prim_wl",
-        category: "RAY TRACING ACCELERATION",
-        label: "Total Scene Render (Work Lists)",
-        approach: "Subgroup Compaction + Specialized Micro-Kernels",
-        default_unit: "MRays/s",
-        desc: "Complete end-to-end scene frame generation using Work Lists / DGC: camera ray generation, wave compaction into material queues, and indirect dispatch of specialized BSDF shaders.",
-        api_extensions: "VK_KHR_ray_query, VK_EXT_device_generated_commands",
-        is_system: false,
-    },
-
-    // Phase 2b: Directional Shadows & Multi-Light Coherence
+    // Phase 2: Directional Shadows & Multi-Light Coherence
     WorkloadDef {
         id: "rt_sched_shadow_trad",
         category: "RAY TRACING ACCELERATION",
@@ -1567,31 +1563,21 @@ pub static WORKLOADS: &[WorkloadDef] = &[
     WorkloadDef {
         id: "rt_sched_pt_trad",
         category: "RAY TRACING ACCELERATION",
-        label: "Path Tracing (Traditional)",
+        label: "Scene Path Tracing: Megakernel (Multi-Bounce)",
         approach: "Monolithic Megakernel",
         default_unit: "MRays/s",
-        desc: "Traditional megakernel path tracing where terminated rays leave SIMD lanes idle across multiple bounces.",
+        desc: "Multi-bounce stochastic path tracing on the active scene (1 primary + indirect diffuse bounces) where terminated rays leave SIMD lanes idle across multiple bounces in a monolithic megakernel.",
         api_extensions: "VK_KHR_ray_query (Monte Carlo Megakernel)",
         is_system: false,
     },
     WorkloadDef {
         id: "rt_sched_pt_wl",
         category: "RAY TRACING ACCELERATION",
-        label: "Path Tracing (Work Lists)",
+        label: "Scene Path Tracing: Work Lists (Multi-Bounce)",
         approach: "Active Ray Compaction",
         default_unit: "MRays/s",
-        desc: "Using ExecuteIndirect (Work Lists): Compacts non-terminated bounce rays into packed queues, keeping wavefronts 100% full.",
+        desc: "Multi-bounce stochastic path tracing on the active scene: active rays ballot-compacted into dense queues after each bounce, keeping wavefronts 100% occupied.",
         api_extensions: "VK_KHR_ray_query, VK_EXT_device_generated_commands (Ray Compaction)",
-        is_system: false,
-    },
-    WorkloadDef {
-        id: "rt_pathtracing",
-        category: "RAY TRACING ACCELERATION",
-        label: "Multi-Bounce Path Tracing",
-        approach: "Stochastic 8-bounce GI",
-        default_unit: "MRays/s",
-        desc: "Full multi-bounce stochastic Monte Carlo path tracing with global illumination and cosine sampling.",
-        api_extensions: "VK_KHR_ray_query (8-Bounce Global Illumination)",
         is_system: false,
     },
 
@@ -1681,100 +1667,100 @@ pub static WORKLOADS: &[WorkloadDef] = &[
     WorkloadDef {
         id: "rt_sched_full_showroom_trad",
         category: "RAY PIPELINE BREAKDOWN",
-        label: "Full Scene Render: Megakernel (Showroom)",
+        label: "Scene Ray Tracing: Megakernel (Showroom)",
         approach: "Morton 8x4 + Megakernel (109k Tris)",
         default_unit: "MRays/s",
-        desc: "End-to-end full scene render of Showroom Studio (109k Tris) combining 2D Morton spatial ray ordering with monolithic megakernel shading.",
+        desc: "End-to-end PBR ray tracing (primary, area soft shadows, RTAO, and BSDF shading) of Showroom Studio (109k Tris) combining 2D Morton spatial ray ordering with monolithic megakernel shading.",
         api_extensions: "VK_KHR_ray_query",
         is_system: false,
     },
     WorkloadDef {
         id: "rt_sched_full_showroom_wl",
         category: "RAY PIPELINE BREAKDOWN",
-        label: "Full Scene Render: Work Lists (Showroom)",
+        label: "Scene Ray Tracing: Work Lists (Showroom)",
         approach: "Morton 8x4 + Work Lists / DGC (109k Tris)",
         default_unit: "MRays/s",
-        desc: "End-to-end full scene render of Showroom Studio (109k Tris) combining 2D Morton ray ordering with wavefront stream compaction and indirect dispatch.",
+        desc: "End-to-end PBR ray tracing of Showroom Studio (109k Tris) combining 2D Morton ray ordering with wavefront stream compaction and indirect dispatch.",
         api_extensions: "VK_KHR_ray_query, VK_EXT_device_generated_commands",
         is_system: false,
     },
     WorkloadDef {
         id: "rt_sched_full_indoor_trad",
         category: "RAY PIPELINE BREAKDOWN",
-        label: "Full Scene Render: Megakernel (Indoor)",
+        label: "Scene Ray Tracing: Megakernel (Indoor)",
         approach: "Morton 8x4 + Megakernel (262k Tris)",
         default_unit: "MRays/s",
-        desc: "End-to-end full scene render of Indoor Atrium (262k Tris) combining 2D Morton spatial ray ordering with monolithic megakernel shading.",
+        desc: "End-to-end PBR ray tracing (primary, area soft shadows, RTAO, and BSDF shading) of Indoor Atrium (262k Tris) combining 2D Morton spatial ray ordering with monolithic megakernel shading.",
         api_extensions: "VK_KHR_ray_query",
         is_system: false,
     },
     WorkloadDef {
         id: "rt_sched_full_indoor_wl",
         category: "RAY PIPELINE BREAKDOWN",
-        label: "Full Scene Render: Work Lists (Indoor)",
+        label: "Scene Ray Tracing: Work Lists (Indoor)",
         approach: "Morton 8x4 + Work Lists / DGC (262k Tris)",
         default_unit: "MRays/s",
-        desc: "End-to-end full scene render of Indoor Atrium (262k Tris) combining 2D Morton ray ordering with wavefront stream compaction and indirect dispatch.",
+        desc: "End-to-end PBR ray tracing of Indoor Atrium (262k Tris) combining 2D Morton ray ordering with wavefront stream compaction and indirect dispatch.",
         api_extensions: "VK_KHR_ray_query, VK_EXT_device_generated_commands",
         is_system: false,
     },
     WorkloadDef {
         id: "rt_sched_full_outdoor_trad",
         category: "RAY PIPELINE BREAKDOWN",
-        label: "Full Scene Render: Megakernel (Outdoor)",
+        label: "Scene Ray Tracing: Megakernel (Outdoor)",
         approach: "Morton 8x4 + Megakernel (57k Tris)",
         default_unit: "MRays/s",
-        desc: "End-to-end full scene render of Outdoor Landscape (57k Tris) combining 2D Morton spatial ray ordering with monolithic megakernel shading.",
+        desc: "End-to-end PBR ray tracing (primary, area soft shadows, RTAO, and BSDF shading) of Outdoor Landscape (57k Tris) combining 2D Morton spatial ray ordering with monolithic megakernel shading.",
         api_extensions: "VK_KHR_ray_query",
         is_system: false,
     },
     WorkloadDef {
         id: "rt_sched_full_outdoor_wl",
         category: "RAY PIPELINE BREAKDOWN",
-        label: "Full Scene Render: Work Lists (Outdoor)",
+        label: "Scene Ray Tracing: Work Lists (Outdoor)",
         approach: "Morton 8x4 + Work Lists / DGC (57k Tris)",
         default_unit: "MRays/s",
-        desc: "End-to-end full scene render of Outdoor Landscape (57k Tris) combining 2D Morton ray ordering with wavefront stream compaction and indirect dispatch.",
+        desc: "End-to-end PBR ray tracing of Outdoor Landscape (57k Tris) combining 2D Morton ray ordering with wavefront stream compaction and indirect dispatch.",
         api_extensions: "VK_KHR_ray_query, VK_EXT_device_generated_commands",
         is_system: false,
     },
     WorkloadDef {
         id: "rt_sched_full_forest_trad",
         category: "RAY PIPELINE BREAKDOWN",
-        label: "Full Scene Render: Megakernel (Forest)",
+        label: "Scene Ray Tracing: Megakernel (Forest)",
         approach: "Morton 8x4 + Megakernel (1.0M Tris)",
         default_unit: "MRays/s",
-        desc: "End-to-end full scene render of Open-World Forest (1.0M Tris) combining 2D Morton spatial ray ordering with monolithic megakernel shading.",
+        desc: "End-to-end PBR ray tracing (primary, area soft shadows, RTAO, and BSDF shading) of Open-World Forest (1.0M Tris) combining 2D Morton spatial ray ordering with monolithic megakernel shading.",
         api_extensions: "VK_KHR_ray_query",
         is_system: false,
     },
     WorkloadDef {
         id: "rt_sched_full_forest_wl",
         category: "RAY PIPELINE BREAKDOWN",
-        label: "Full Scene Render: Work Lists (Forest)",
+        label: "Scene Ray Tracing: Work Lists (Forest)",
         approach: "Morton 8x4 + Work Lists / DGC (1.0M Tris)",
         default_unit: "MRays/s",
-        desc: "End-to-end full scene render of Open-World Forest (1.0M Tris) combining 2D Morton ray ordering with wavefront stream compaction and indirect dispatch.",
+        desc: "End-to-end PBR ray tracing of Open-World Forest (1.0M Tris) combining 2D Morton ray ordering with wavefront stream compaction and indirect dispatch.",
         api_extensions: "VK_KHR_ray_query, VK_EXT_device_generated_commands",
         is_system: false,
     },
     WorkloadDef {
         id: "rt_sched_stage_prim_morton_trad",
         category: "RAY PIPELINE BREAKDOWN",
-        label: "Full Scene Render: Megakernel",
+        label: "Scene Ray Tracing: Megakernel (PBR)",
         approach: "Morton 8x4 + Megakernel",
         default_unit: "MRays/s",
-        desc: "End-to-end full scene render combining 2D Morton spatial ray ordering with traditional monolithic megakernel shading.",
+        desc: "End-to-end PBR ray tracing combining 2D Morton spatial ray ordering with traditional monolithic megakernel shading.",
         api_extensions: "VK_KHR_ray_query",
         is_system: false,
     },
     WorkloadDef {
         id: "rt_sched_stage_prim_morton_wl",
         category: "RAY PIPELINE BREAKDOWN",
-        label: "Full Scene Render: Work Lists",
+        label: "Scene Ray Tracing: Work Lists (PBR)",
         approach: "Morton 8x4 + Work Lists (DGC)",
         default_unit: "MRays/s",
-        desc: "End-to-end full scene render combining 2D Morton ray ordering with wavefront stream compaction and indirect dispatch.",
+        desc: "End-to-end PBR ray tracing combining 2D Morton ray ordering with wavefront stream compaction and indirect dispatch.",
         api_extensions: "VK_KHR_ray_query, VK_EXT_device_generated_commands",
         is_system: false,
     },
@@ -2152,6 +2138,7 @@ struct GPUBenchApp {
     dump_renders: bool,
     selected_resolution: ResolutionPreset,
     selected_scene: ScenePreset,
+    spp: u32,
     parity_profile: Option<(ParityProfile, String)>,
     
     // Multi-Hardware Telemetry
@@ -2226,6 +2213,7 @@ enum Message {
     Retest,
     ResolutionSelected(ResolutionPreset),
     SceneSelected(ScenePreset),
+    SppSelected(u32),
     CopyDiagnostics,
     OpenTriptych(String),
     OpenHeatmap(String),
@@ -2356,9 +2344,12 @@ impl Application for GPUBenchApp {
         let auto_start = flags.auto_start && !initial_tests.is_empty();
 
         let initial_cmd = if auto_start {
-            Command::perform(async {}, |_| Message::StartBenchmarks)
+            Command::batch([
+                iced::window::maximize(iced::window::Id::MAIN, true),
+                Command::perform(async {}, |_| Message::StartBenchmarks),
+            ])
         } else {
-            Command::none()
+            iced::window::maximize(iced::window::Id::MAIN, true)
         };
 
         let selected_telemetry_device = {
@@ -2391,6 +2382,7 @@ impl Application for GPUBenchApp {
                 dump_renders,
                 selected_resolution,
                 selected_scene,
+                spp: flags.spp.clamp(1, 256),
                 parity_profile: None,
                 current_benchmark: String::from("Waiting to start..."),
                 current_devices_label: String::from(""),
@@ -2433,8 +2425,8 @@ impl Application for GPUBenchApp {
                 gpu_pixel_fill: 0.0,
                 gpu_pixel_fill_hdr: 0.0,
                 gpu_pixel_fill_blend: 0.0,
-                window_width: 1280,
-                window_height: 980,
+                window_width: 1120,
+                window_height: 640,
             },
             initial_cmd
         )
@@ -2533,6 +2525,10 @@ impl Application for GPUBenchApp {
             }
             Message::SceneSelected(preset) => {
                 self.selected_scene = preset;
+                Command::none()
+            }
+            Message::SppSelected(spp) => {
+                self.spp = spp.clamp(1, 256);
                 Command::none()
             }
             Message::TelemetryDeviceSelected(idx) => {
@@ -2777,9 +2773,8 @@ impl Application for GPUBenchApp {
                             "Pixel Fill Rate" => 3,
                             "FP16" | "BF16" | "FP8" | "INT8" | "INT4" => 2,
                             "RayASBuild" => 8,
-                            "RayPathTracing" => 3,
                             "RayScheduling" | "RayExecutionParadigm" => {
-                                if self.selected_scene == ScenePreset::All { 28 * 4 } else { 28 }
+                                if self.selected_scene == ScenePreset::All { 30 * 4 } else { 30 }
                             }
                             _ => 1,
                         };
@@ -2806,10 +2801,11 @@ impl Application for GPUBenchApp {
                     let dump_renders_val = self.dump_renders;
                     let (res_w, res_h) = self.selected_resolution.dimensions();
                     let scene_str = self.selected_scene.id_str().to_string();
+                    let spp_val = self.spp;
 
                     log_diagnostic(&format!(
-                        "=== Benchmark run started: backend='{}', resolution='{}' ({}x{}), scene='{}', devices={:?}, tests={:?} ===",
-                        b_str, self.selected_resolution.label(), res_w, res_h, self.selected_scene.label(), dev_names, tests_to_run
+                        "=== Benchmark run started: backend='{}', resolution='{}' ({}x{}), scene='{}', spp={}, devices={:?}, tests={:?} ===",
+                        b_str, self.selected_resolution.label(), res_w, res_h, self.selected_scene.label(), spp_val, dev_names, tests_to_run
                     ));
 
                     self.state = AppState::Running {
@@ -2833,6 +2829,7 @@ impl Application for GPUBenchApp {
                                     res_w,
                                     res_h,
                                     &scene_str,
+                                    spp_val,
                                     progress_callback
                                 )
                             }).await
@@ -3121,6 +3118,59 @@ impl Application for GPUBenchApp {
             }
             Message::OpenTriptych(tag) => {
                 let grid = "renders/render_comparison_grid.png";
+                let tech_grid = "renders/render_technique_grid.png";
+                let pt_grid = "renders/render_pathtracing_grid.png";
+
+                if tag == "technique_grid" || tag == "tech_grid" || tag == "techniques" {
+                    if find_renders_file(tech_grid).is_some() {
+                        open_render_target(tech_grid);
+                        return Command::none();
+                    }
+                } else if tag == "pt_grid" || tag == "pathtracing_grid" || tag == "pathtracing" {
+                    if find_renders_file(pt_grid).is_some() {
+                        open_render_target(pt_grid);
+                        return Command::none();
+                    }
+                } else if tag.ends_with("_tech") {
+                    let base = tag.trim_end_matches("_tech");
+                    let tech_comp = format!("renders/render_{}_technique_comparison.png", base);
+                    if find_renders_file(&tech_comp).is_some() {
+                        open_render_target(&tech_comp);
+                        return Command::none();
+                    } else if find_renders_file(tech_grid).is_some() {
+                        open_render_target(tech_grid);
+                        return Command::none();
+                    }
+                } else if tag.ends_with("_pt16") {
+                    let base = tag.trim_end_matches("_pt16");
+                    let pt16_comp = format!("renders/render_{}_pathtracing_16spp_comparison.png", base);
+                    if find_renders_file(&pt16_comp).is_some() {
+                        open_render_target(&pt16_comp);
+                        return Command::none();
+                    } else if find_renders_file(pt_grid).is_some() {
+                        open_render_target(pt_grid);
+                        return Command::none();
+                    }
+                } else if tag.ends_with("_pt1") {
+                    let base = tag.trim_end_matches("_pt1");
+                    let pt1_comp = format!("renders/render_{}_pathtracing_1spp_comparison.png", base);
+                    if find_renders_file(&pt1_comp).is_some() {
+                        open_render_target(&pt1_comp);
+                        return Command::none();
+                    }
+                } else if tag.ends_with("_pipeline") || tag == "pipeline" {
+                    let base = if tag == "pipeline" { "indoor" } else { tag.trim_end_matches("_pipeline") };
+                    let pipe_comp = format!("renders/render_{}_pipeline_breakdown.png", base);
+                    let pipe_fallback = "renders/render_pipeline_breakdown.png";
+                    if find_renders_file(&pipe_comp).is_some() {
+                        open_render_target(&pipe_comp);
+                        return Command::none();
+                    } else if find_renders_file(pipe_fallback).is_some() {
+                        open_render_target(pipe_fallback);
+                        return Command::none();
+                    }
+                }
+
                 let primary_diptych = format!("renders/render_{}_comparison.png", tag);
                 let primary = format!("renders/render_{}_comparison_triptych.png", tag);
                 let fallback = "renders/render_comparison_triptych.png";
@@ -3340,11 +3390,7 @@ impl Application for GPUBenchApp {
                     button(
                         container(
                             column![
-                                row![
-                                    text("▶").size(12).style(color!(0x94A3B8)),
-                                    Space::with_width(6),
-                                    text("BEGIN TESTING").size(13).style(color!(0x94A3B8)),
-                                ].align_items(iced::Alignment::Center),
+                                text("BEGIN TESTING").size(13).style(color!(0x94A3B8)),
                                 Space::with_height(2),
                                 text("Select at least 1 benchmark").size(10).style(color!(0xF59E0B)),
                             ].align_items(iced::Alignment::Center)
@@ -3360,11 +3406,7 @@ impl Application for GPUBenchApp {
                     button(
                         container(
                             column![
-                                row![
-                                    text("▶").size(13).style(color!(0xFFFFFF)),
-                                    Space::with_width(6),
-                                    text("BEGIN TESTING").size(14).style(color!(0xFFFFFF)),
-                                ].align_items(iced::Alignment::Center),
+                                text("BEGIN TESTING").size(14).style(color!(0xFFFFFF)),
                                 Space::with_height(2),
                                 text(format!("{} benchmark{} selected", sel_count, if sel_count == 1 { "" } else { "s" }))
                                     .size(10).style(color!(0xC7D2FE)),
@@ -3466,6 +3508,22 @@ impl Application for GPUBenchApp {
                     ].spacing(6),
                 ].spacing(4);
 
+                let spp_section = {
+                    let make_spp_btn = |val: u32, lbl: &str, is_sel: bool| {
+                        button(text(lbl).size(10).horizontal_alignment(iced::alignment::Horizontal::Center))
+                            .padding([4, 6])
+                            .width(Length::Fill)
+                            .on_press(Message::SppSelected(val))
+                            .style(iced::theme::Button::Custom(Box::new(SleekPillToggle { is_active: is_sel, is_api_selector: false })))
+                    };
+                    row![
+                        make_spp_btn(1, "1 SPP", self.spp == 1),
+                        make_spp_btn(4, "4 SPP", self.spp == 4),
+                        make_spp_btn(16, "16 SPP", self.spp == 16),
+                        make_spp_btn(64, "64 SPP", self.spp == 64),
+                    ].spacing(4)
+                };
+
                 let dump_renders_btn = {
                     let is_checked = self.dump_renders;
                     let check_box = text(if is_checked { "[X] " } else { "[   ] " })
@@ -3541,30 +3599,33 @@ impl Application for GPUBenchApp {
                     Space::with_height(4),
                     scene_section,
                     Space::with_height(10),
+                    text("PATH TRACING QUALITY").size(10).style(color!(0x64748B)),
+                    Space::with_height(4),
+                    spp_section,
+                    Space::with_height(10),
                     text("OPTIONS").size(10).style(color!(0x64748B)),
                     Space::with_height(4),
                     dump_renders_btn,
                     Space::with_height(6),
                 ];
 
-                let mut footer_col = column![].spacing(6);
+                let mut sidebar_items = sidebar_scroll_content;
+                sidebar_items = sidebar_items.push(Space::with_height(10));
                 if let Some(banner) = validation_banner {
-                    footer_col = footer_col.push(banner);
+                    sidebar_items = sidebar_items.push(banner);
+                    sidebar_items = sidebar_items.push(Space::with_height(6));
                 }
-                footer_col = footer_col.push(start_btn);
+                sidebar_items = sidebar_items.push(start_btn);
+                sidebar_items = sidebar_items.push(Space::with_height(8));
 
-                let sidebar_col = column![
+                let sidebar = container(
                     scrollable(
-                        container(sidebar_scroll_content)
+                        container(sidebar_items)
                             .padding([0, 4, 0, 0])
                             .width(Length::Fill)
-                    ).height(Length::Fill),
-                    container(footer_col)
-                        .padding([8, 0])
-                        .width(Length::Fill),
-                ];
-
-                let sidebar = container(sidebar_col)
+                    )
+                    .height(Length::Fill)
+                )
                 .width(Length::Fixed(self.dynamic_sidebar_width()))
                 .height(Length::Fill)
                 .padding(16)
@@ -3744,41 +3805,6 @@ impl Application for GPUBenchApp {
                         ("RayPayload", "Payload Pressure"),
                     ]);
 
-                    let is_pt_checked = self.selected_tests.contains("RayPathTracing");
-                    let pt_tip_text = if is_rt_disabled {
-                        "Hardware Ray Tracing requires the Vulkan backend."
-                    } else {
-                        get_benchmark_description("RayPathTracing")
-                    };
-
-                    let pt_btn = if is_rt_disabled {
-                        button(text("Path Tracing (Full Stochastic GI)").size(12).horizontal_alignment(iced::alignment::Horizontal::Center))
-                            .padding([10, 0])
-                            .width(Length::Fill)
-                            .style(iced::theme::Button::Custom(Box::new(SleekDisabledPill)))
-                    } else {
-                        button(text("Path Tracing (Full Stochastic GI)").size(12).horizontal_alignment(iced::alignment::Horizontal::Center))
-                            .padding([10, 0])
-                            .width(Length::Fill)
-                            .on_press(Message::TestToggled("RayPathTracing".to_string(), !is_pt_checked))
-                            .style(iced::theme::Button::Custom(Box::new(SleekPillToggle { is_active: is_pt_checked, is_api_selector: false })))
-                    };
-
-                    let pt_with_tip = tooltip(
-                        pt_btn,
-                        container(text(pt_tip_text).size(11).style(color!(0xE2E8F0)))
-                            .width(Length::Fixed(260.0))
-                            .padding(8)
-                            .style(|_t: &Theme| container::Appearance {
-                                background: Some(Background::Color(color!(0x141824))),
-                                border: Border { radius: 6.0.into(), width: 1.0, color: color!(0x2A3248) },
-                                ..Default::default()
-                            }),
-                        tooltip::Position::Top
-                    )
-                    .gap(4)
-                    .style(iced::theme::Container::Transparent);
-
                     let is_scheduling_checked = self.selected_tests.contains("RayScheduling")
                         || self.selected_tests.contains("RayExecutionParadigm")
                         || self.selected_tests.iter().any(|t| t.starts_with("RayScheduling"));
@@ -3789,12 +3815,12 @@ impl Application for GPUBenchApp {
                     };
 
                     let scheduling_btn = if is_rt_disabled {
-                        button(text("Ray Scheduling (Megakernel vs Work Lists vs Work Graphs vs SER)").size(12).horizontal_alignment(iced::alignment::Horizontal::Center))
+                        button(text("Scene Ray Tracing & Path Tracing (PBR RT & Multi-Bounce GI: Megakernel vs Work Lists)").size(12).horizontal_alignment(iced::alignment::Horizontal::Center))
                             .padding([10, 0])
                             .width(Length::Fill)
                             .style(iced::theme::Button::Custom(Box::new(SleekDisabledPill)))
                     } else {
-                        button(text("Ray Scheduling (Megakernel vs Work Lists vs Work Graphs vs SER)").size(12).horizontal_alignment(iced::alignment::Horizontal::Center))
+                        button(text("Scene Ray Tracing & Path Tracing (PBR RT & Multi-Bounce GI: Megakernel vs Work Lists)").size(12).horizontal_alignment(iced::alignment::Horizontal::Center))
                             .padding([10, 0])
                             .width(Length::Fill)
                             .on_press(Message::TestToggled("RayScheduling".to_string(), !is_scheduling_checked))
@@ -3819,7 +3845,6 @@ impl Application for GPUBenchApp {
                     container(
                         column![
                             rt_top,
-                            pt_with_tip,
                             scheduling_with_tip
                         ].spacing(8)
                     )
@@ -3891,22 +3916,14 @@ impl Application for GPUBenchApp {
 
                 let header_start_btn = if is_selection_empty {
                     button(
-                        row![
-                            text("▶").size(11).style(color!(0x94A3B8)),
-                            Space::with_width(6),
-                            text("BEGIN TESTING").size(11).style(color!(0x94A3B8)),
-                        ].align_items(iced::Alignment::Center)
+                        text("BEGIN TESTING").size(11).style(color!(0x94A3B8))
                     )
                     .padding([6, 14])
                     .on_press(Message::StartBenchmarks)
                     .style(iced::theme::Button::Custom(Box::new(SleekSecondaryButton)))
                 } else {
                     button(
-                        row![
-                            text("▶").size(11).style(color!(0xFFFFFF)),
-                            Space::with_width(6),
-                            text(format!("BEGIN TESTING ({})", sel_count)).size(11).style(color!(0xFFFFFF)),
-                        ].align_items(iced::Alignment::Center)
+                        text(format!("BEGIN TESTING ({})", sel_count)).size(11).style(color!(0xFFFFFF))
                     )
                     .padding([6, 16])
                     .on_press(Message::StartBenchmarks)
@@ -4044,16 +4061,91 @@ impl Application for GPUBenchApp {
                     _ => (1.0, 0.0),
                 };
 
-                let global_progress = row![
+                let is_complete = matches!(state, AppState::Complete { .. });
+                let ran_ray = self.selected_tests.iter().any(|t| {
+                    let tl = t.to_lowercase();
+                    tl.contains("ray") || tl == "graphics" || tl == "all" || tl == "raytracing"
+                });
+                let has_renders = self.parity_profile.is_some() || (ran_ray && self.dump_renders);
+                let render_tag = self.parity_profile.as_ref().map(|(_, t)| t.clone()).unwrap_or_else(|| "indoor".to_string());
+
+                let header_actions: Element<'_, Message> = if is_complete {
+                    let mut act_row = row![].spacing(8).align_items(iced::Alignment::Center);
+                    if has_renders {
+                        let is_all = self.selected_scene == ScenePreset::All;
+                        act_row = act_row.push(
+                            button(
+                                text(if is_all { "HYBRID RT GRID" } else { "HYBRID RT RENDERS" }).size(11).style(color!(0x38BDF8))
+                            )
+                            .padding([6, 12])
+                            .on_press(Message::OpenTriptych(if is_all { "grid".to_string() } else { render_tag.clone() }))
+                            .style(iced::theme::Button::Custom(Box::new(SleekSecondaryButton)))
+                        );
+                        act_row = act_row.push(
+                            button(
+                                text(if is_all { "PATH TRACING GRID" } else { "PATH TRACING (16 SPP)" }).size(11).style(color!(0x34D399))
+                            )
+                            .padding([6, 12])
+                            .on_press(Message::OpenTriptych(if is_all { "pt_grid".to_string() } else { format!("{}_pt16", render_tag) }))
+                            .style(iced::theme::Button::Custom(Box::new(SleekSecondaryButton)))
+                        );
+                        act_row = act_row.push(
+                            button(
+                                text(if is_all { "TECHNIQUE GRID" } else { "HYBRID VS PATH TRACING" }).size(11).style(color!(0xFBBF24))
+                            )
+                            .padding([6, 12])
+                            .on_press(Message::OpenTriptych(if is_all { "technique_grid".to_string() } else { format!("{}_tech", render_tag) }))
+                            .style(iced::theme::Button::Custom(Box::new(SleekSecondaryButton)))
+                        );
+                        act_row = act_row.push(
+                            button(
+                                text("PIPELINE BREAKDOWN").size(11).style(color!(0xC084FC))
+                            )
+                            .padding([6, 12])
+                            .on_press(Message::OpenTriptych(if is_all { "indoor_pipeline".to_string() } else { format!("{}_pipeline", render_tag) }))
+                            .style(iced::theme::Button::Custom(Box::new(SleekSecondaryButton)))
+                        );
+                    }
+                    act_row = act_row.push(
+                        button(
+                            text("EXPORT JSON").size(11).style(color!(0xFFFFFF))
+                        )
+                        .padding([6, 12])
+                        .on_press(Message::SaveResults)
+                        .style(iced::theme::Button::Custom(Box::new(SleekPrimaryButton)))
+                    );
+                    act_row = act_row.push(
+                        button(
+                            text("RUN NEW TEST").size(11).style(color!(0xCBD5E1))
+                        )
+                        .padding([6, 12])
+                        .on_press(Message::Retest)
+                        .style(iced::theme::Button::Custom(Box::new(SleekSecondaryButton)))
+                    );
+                    act_row.into()
+                } else {
+                    row![].into()
+                };
+
+                let mut progress_row = row![
                     column![
                         row![
-                            text("Suite Execution Progress").size(13).style(color!(0xF8FAFC)),
+                            text(if is_complete { "Suite Execution Complete" } else { "Suite Execution Progress" })
+                                .size(13).style(color!(0xF8FAFC)),
                             Space::with_width(Length::Fill),
-                            text(format!("{:.0} of {:.0} configs completed", completed, total)).size(12).style(color!(0x818CF8))
+                            text(format!("{:.0} of {:.0} configs completed", completed, total))
+                                .size(12).style(if is_complete { color!(0x10B981) } else { color!(0x818CF8) })
                         ],
                         progress_bar(0.0..=total.max(completed.max(1.0)), completed).height(6.0),
                     ].spacing(6).width(Length::Fill),
                 ].align_items(iced::Alignment::Center);
+
+                if is_complete {
+                    progress_row = progress_row.push(Space::with_width(16));
+                    progress_row = progress_row.push(header_actions);
+                }
+
+                let global_progress = progress_row;
 
                 let targets = if !self.active_device_targets.is_empty() {
                     self.active_device_targets.clone()
@@ -4458,12 +4550,36 @@ impl Application for GPUBenchApp {
 
                         let inspector_buttons = row![
                             button(
-                                container(text("VIEW PERFORMANCE COMPARISON").size(11).style(color!(0xFFFFFF)))
+                                container(text("HYBRID RT (PBR)").size(11).style(color!(0x38BDF8)))
                                     .padding([6, 12])
                                     .center_x()
                             )
                             .on_press(Message::OpenTriptych(tag.clone()))
+                            .style(iced::theme::Button::Custom(Box::new(SleekSecondaryButton))),
+
+                            button(
+                                container(text("PATH TRACING (16 SPP)").size(11).style(color!(0x34D399)))
+                                    .padding([6, 12])
+                                    .center_x()
+                            )
+                            .on_press(Message::OpenTriptych(format!("{}_pt16", tag)))
+                            .style(iced::theme::Button::Custom(Box::new(SleekSecondaryButton))),
+
+                            button(
+                                container(text("HYBRID VS PATH TRACING").size(11).style(color!(0xFBBF24)))
+                                    .padding([6, 12])
+                                    .center_x()
+                            )
+                            .on_press(Message::OpenTriptych(format!("{}_tech", tag)))
                             .style(iced::theme::Button::Custom(Box::new(SleekPrimaryButton))),
+
+                            button(
+                                container(text("PIPELINE BREAKDOWN").size(11).style(color!(0xC084FC)))
+                                    .padding([6, 12])
+                                    .center_x()
+                            )
+                            .on_press(Message::OpenTriptych(format!("{}_pipeline", tag)))
+                            .style(iced::theme::Button::Custom(Box::new(SleekSecondaryButton))),
 
                             button(
                                 container(text("VIEW HEATMAP (10x)").size(11).style(color!(0xCBD5E1)))
@@ -4530,11 +4646,27 @@ impl Application for GPUBenchApp {
                     }) {
                         let inspector_buttons = row![
                             button(
-                                container(text("VIEW PERFORMANCE COMPARISON").size(11).style(color!(0xFFFFFF)))
+                                container(text("HYBRID RT RENDERS").size(11).style(color!(0x38BDF8)))
                                     .padding([6, 12])
                                     .center_x()
                             )
-                            .on_press(Message::OpenTriptych("all".to_string()))
+                            .on_press(Message::OpenTriptych("grid".to_string()))
+                            .style(iced::theme::Button::Custom(Box::new(SleekSecondaryButton))),
+
+                            button(
+                                container(text("PATH TRACING (16 SPP)").size(11).style(color!(0x34D399)))
+                                    .padding([6, 12])
+                                    .center_x()
+                            )
+                            .on_press(Message::OpenTriptych("pt_grid".to_string()))
+                            .style(iced::theme::Button::Custom(Box::new(SleekSecondaryButton))),
+
+                            button(
+                                container(text("HYBRID VS PATH TRACING").size(11).style(color!(0xFBBF24)))
+                                    .padding([6, 12])
+                                    .center_x()
+                            )
+                            .on_press(Message::OpenTriptych("technique_grid".to_string()))
                             .style(iced::theme::Button::Custom(Box::new(SleekPrimaryButton))),
 
                             button(
@@ -4820,18 +4952,20 @@ impl Application for GPUBenchApp {
                     live_suite_stats_card,
                 ];
 
-                let sidebar_col = column![
+                let mut sidebar_items = sidebar_scroll_content;
+                if matches!(self.state, AppState::Complete { .. }) {
+                    sidebar_items = sidebar_items.push(Space::with_height(10));
+                    sidebar_items = sidebar_items.push(action_buttons);
+                    sidebar_items = sidebar_items.push(Space::with_height(8));
+                }
+
+                let sidebar = container(
                     scrollable(
-                        container(sidebar_scroll_content)
+                        container(sidebar_items)
                             .padding([0, 4, 0, 0])
                             .width(Length::Fill)
-                    ).height(Length::Fill),
-                    container(action_buttons)
-                        .padding([8, 0])
-                        .width(Length::Fill),
-                ];
-
-                let sidebar = container(sidebar_col)
+                    ).height(Length::Fill)
+                )
                 .width(Length::Fixed(self.dynamic_sidebar_width()))
                 .height(Length::Fill)
                 .padding(16)
@@ -4941,7 +5075,6 @@ impl GPUBenchApp {
             | "rt_blas_build_10m" | "rt_tlas_indoor" | "rt_tlas_jungle" | "rt_tlas_openworld"
             | "rt_blas_build" | "rt_blas_update" | "rt_tlas_build" | "rt_tlas_build_10k" | "rt_tlas_build_100k" => self.selected_tests.contains("RayASBuild"),
             "rt_procedural" => self.selected_tests.contains("RayProcedural"),
-            "rt_pathtracing" => self.selected_tests.contains("RayPathTracing"),
             "rt_sched_full_showroom_trad" | "rt_sched_full_showroom_wl" => {
                 (self.selected_scene == ScenePreset::All || self.selected_scene == ScenePreset::Showroom)
                     && self.selected_tests.iter().any(|t| t.contains("RayScheduling") || t.contains("RayExecutionParadigm") || t.contains("RayShadows"))
@@ -5286,18 +5419,14 @@ fn find_workload_for_benchmark(bench_name: &str) -> Option<&'static WorkloadDef>
             return WORKLOADS.iter().find(|w| w.id == "rt_sched_mat_trad");
         } else if bench_name.contains("Material Shading - Work Lists") {
             return WORKLOADS.iter().find(|w| w.id == "rt_sched_mat_wl");
-        } else if bench_name.contains("Path Tracing - Traditional") {
+        } else if bench_name.contains("Path Tracing") && (bench_name.contains("Traditional") || bench_name.contains("Megakernel")) {
             return WORKLOADS.iter().find(|w| w.id == "rt_sched_pt_trad");
-        } else if bench_name.contains("Path Tracing - Work Lists") {
+        } else if bench_name.contains("Path Tracing") && (bench_name.contains("Work Lists") || bench_name.contains("DGC")) {
             return WORKLOADS.iter().find(|w| w.id == "rt_sched_pt_wl");
         } else if bench_name.contains("Incoherent Ray Tracing - Traditional") {
             return WORKLOADS.iter().find(|w| w.id == "rt_sched_incoh_trad");
         } else if bench_name.contains("Incoherent Ray Tracing - Work Lists") {
             return WORKLOADS.iter().find(|w| w.id == "rt_sched_incoh_wl");
-        } else if bench_name.contains("Total Scene Render - Traditional") || bench_name.contains("Primary Ray Tracing - Traditional") {
-            return WORKLOADS.iter().find(|w| w.id == "rt_sched_prim_trad");
-        } else if bench_name.contains("Total Scene Render - Work Lists") || bench_name.contains("Primary Ray Tracing - Work Lists") {
-            return WORKLOADS.iter().find(|w| w.id == "rt_sched_prim_wl");
         } else if bench_name.contains("SER") {
             return WORKLOADS.iter().find(|w| w.id == "rt_sched_ser");
         } else if bench_name.contains("Work Graph") {
@@ -5312,7 +5441,7 @@ fn find_workload_for_benchmark(bench_name: &str) -> Option<&'static WorkloadDef>
             return WORKLOADS.iter().find(|w| w.id == "rt_sched_stage_bvh_morton8x4");
         } else if bench_name.contains("Morton 4x8") && bench_name.contains("BVH Traversal") {
             return WORKLOADS.iter().find(|w| w.id == "rt_sched_stage_bvh_morton4x8");
-        } else if (bench_name.contains("Full Scene Render") || bench_name.contains("Full Render") || bench_name.contains("Morton")) && (bench_name.contains("Traditional") || bench_name.contains("Megakernel")) {
+        } else if (bench_name.contains("Full Scene Render") || bench_name.contains("Full Render") || bench_name.contains("Scene Ray Tracing") || bench_name.contains("Ray Tracing (PBR)") || bench_name.contains("Morton")) && (bench_name.contains("Traditional") || bench_name.contains("Megakernel")) {
             if bench_name.contains("Forest") {
                 return WORKLOADS.iter().find(|w| w.id == "rt_sched_full_forest_trad");
             } else if bench_name.contains("Outdoor") {
@@ -5324,7 +5453,7 @@ fn find_workload_for_benchmark(bench_name: &str) -> Option<&'static WorkloadDef>
             } else {
                 return WORKLOADS.iter().find(|w| w.id == "rt_sched_stage_prim_morton_trad");
             }
-        } else if (bench_name.contains("Full Scene Render") || bench_name.contains("Full Render") || bench_name.contains("Morton")) && (bench_name.contains("Work Lists") || bench_name.contains("DGC")) {
+        } else if (bench_name.contains("Full Scene Render") || bench_name.contains("Full Render") || bench_name.contains("Scene Ray Tracing") || bench_name.contains("Ray Tracing (PBR)") || bench_name.contains("Morton")) && (bench_name.contains("Work Lists") || bench_name.contains("DGC")) {
             if bench_name.contains("Forest") {
                 return WORKLOADS.iter().find(|w| w.id == "rt_sched_full_forest_wl");
             } else if bench_name.contains("Outdoor") {
@@ -5455,18 +5584,14 @@ fn map_result_to_workload_id(res: &ResultData) -> Option<&'static str> {
                     Some("rt_sched_mat_trad")
                 } else if res.configIndex == 2 || (res.subcategory.contains("Work Lists") && res.subcategory.contains("Material")) {
                     Some("rt_sched_mat_wl")
-                } else if res.configIndex == 4 || (res.subcategory.contains("Traditional") && res.subcategory.contains("Path Tracing")) {
+                } else if res.configIndex == 4 || (res.benchmarkName.contains("Path Tracing") && (res.benchmarkName.contains("Traditional") || res.benchmarkName.contains("Megakernel"))) || (res.subcategory.contains("Path Tracing") && (res.subcategory.contains("Traditional") || res.benchmarkName.contains("Traditional"))) {
                     Some("rt_sched_pt_trad")
-                } else if res.configIndex == 6 || (res.subcategory.contains("Work Lists") && res.subcategory.contains("Path Tracing")) {
+                } else if res.configIndex == 6 || (res.benchmarkName.contains("Path Tracing") && (res.benchmarkName.contains("Work Lists") || res.benchmarkName.contains("DGC"))) || (res.subcategory.contains("Path Tracing") && (res.subcategory.contains("Work Lists") || res.benchmarkName.contains("Work Lists"))) {
                     Some("rt_sched_pt_wl")
                 } else if res.configIndex == 8 || (res.subcategory.contains("Traditional") && res.subcategory.contains("Incoherent")) {
                     Some("rt_sched_incoh_trad")
                 } else if res.configIndex == 10 || (res.subcategory.contains("Work Lists") && res.subcategory.contains("Incoherent")) {
                     Some("rt_sched_incoh_wl")
-                } else if res.configIndex == 12 || (res.subcategory.contains("Traditional") && (res.subcategory.contains("Primary") || res.subcategory.contains("Total Scene Render") || res.subcategory.contains("Scene Render"))) {
-                    Some("rt_sched_prim_trad")
-                } else if res.configIndex == 14 || (res.subcategory.contains("Work Lists") && (res.subcategory.contains("Primary") || res.subcategory.contains("Total Scene Render") || res.subcategory.contains("Scene Render"))) {
-                    Some("rt_sched_prim_wl")
                 } else if res.configIndex == 1 || res.configIndex == 5 || res.configIndex == 9 || res.configIndex == 13 || res.subcategory.contains("SER") {
                     Some("rt_sched_ser")
                 } else if res.configIndex == 3 || res.configIndex == 7 || res.configIndex == 11 || res.configIndex == 15 || res.subcategory.contains("Work Graph") {
@@ -5481,7 +5606,7 @@ fn map_result_to_workload_id(res: &ResultData) -> Option<&'static str> {
                     Some("rt_sched_stage_bvh_morton8x4")
                 } else if res.configIndex == 20 || (res.benchmarkName.contains("Morton 4x8") && res.benchmarkName.contains("BVH Traversal")) {
                     Some("rt_sched_stage_bvh_morton4x8")
-                } else if res.configIndex == 21 || ((res.benchmarkName.contains("Full Scene Render") || res.benchmarkName.contains("Full Render") || res.benchmarkName.contains("Morton")) && (res.benchmarkName.contains("Megakernel") || res.benchmarkName.contains("Traditional"))) {
+                } else if res.configIndex == 21 || ((res.benchmarkName.contains("Full Scene Ray Tracing") || res.benchmarkName.contains("Full Scene Render") || res.benchmarkName.contains("Full Render") || res.benchmarkName.contains("Morton")) && (res.benchmarkName.contains("Megakernel") || res.benchmarkName.contains("Traditional"))) {
                     if res.benchmarkName.contains("Forest") {
                         Some("rt_sched_full_forest_trad")
                     } else if res.benchmarkName.contains("Outdoor") {
@@ -5493,7 +5618,7 @@ fn map_result_to_workload_id(res: &ResultData) -> Option<&'static str> {
                     } else {
                         Some("rt_sched_stage_prim_morton_trad")
                     }
-                } else if res.configIndex == 22 || ((res.benchmarkName.contains("Full Scene Render") || res.benchmarkName.contains("Full Render") || res.benchmarkName.contains("Morton")) && (res.benchmarkName.contains("Work Lists") || res.benchmarkName.contains("DGC"))) {
+                } else if res.configIndex == 22 || ((res.benchmarkName.contains("Full Scene Ray Tracing") || res.benchmarkName.contains("Full Scene Render") || res.benchmarkName.contains("Full Render") || res.benchmarkName.contains("Morton")) && (res.benchmarkName.contains("Work Lists") || res.benchmarkName.contains("DGC"))) {
                     if res.benchmarkName.contains("Forest") {
                         Some("rt_sched_full_forest_wl")
                     } else if res.benchmarkName.contains("Outdoor") {
@@ -5589,6 +5714,7 @@ mod tests {
             "-r".to_string(), "1080p".to_string(),
             "--dump-renders".to_string(),
             "--auto-start".to_string(),
+            "--spp".to_string(), "16".to_string(),
         ];
         let parsed = parse_gui_cli_args_from(&args);
         assert_eq!(parsed.backend.as_deref(), Some("vulkan"));
@@ -5596,6 +5722,7 @@ mod tests {
         assert_eq!(parsed.benchmarks, vec!["rayscheduling"]);
         assert_eq!(parsed.devices, vec!["1"]);
         assert_eq!(parsed.resolution.as_deref(), Some("1080p"));
+        assert_eq!(parsed.spp, 16);
         assert!(parsed.dump_renders);
         assert!(parsed.auto_start);
         assert!(!parsed.should_exit);
@@ -5611,6 +5738,7 @@ mod tests {
             "--resolution=4k".to_string(),
             "--run".to_string(),
             "--dump".to_string(),
+            "--spp=32".to_string(),
         ];
         let parsed = parse_gui_cli_args_from(&args);
         assert_eq!(parsed.backend.as_deref(), Some("opencl"));
@@ -5618,6 +5746,7 @@ mod tests {
         assert_eq!(parsed.benchmarks, vec!["fp32,fp64"]);
         assert_eq!(parsed.devices, vec!["0,1"]);
         assert_eq!(parsed.resolution.as_deref(), Some("4k"));
+        assert_eq!(parsed.spp, 32);
         assert!(parsed.dump_renders);
         assert!(parsed.auto_start);
         assert!(!parsed.should_exit);
@@ -5815,11 +5944,11 @@ mod tests {
     fn test_dynamic_layout_scaling() {
         let (mut app, _) = GPUBenchApp::new(GuiCliArgs::default());
 
-        // Initial default size should be 1280x980
-        assert_eq!(app.window_width, 1280);
-        assert_eq!(app.window_height, 980);
-        assert_eq!(app.dynamic_sidebar_width(), 330.0);
-        assert_eq!(app.dynamic_main_width(), 1280.0 - 330.0 - 48.0);
+        // Initial default size should be 1120x640 (optimized for scaled displays before maximize)
+        assert_eq!(app.window_width, 1120);
+        assert_eq!(app.window_height, 640);
+        assert_eq!(app.dynamic_sidebar_width(), 290.0);
+        assert_eq!(app.dynamic_main_width(), 1120.0 - 290.0 - 48.0);
         assert_eq!(app.dynamic_test_columns(), 2);
 
         // Test window resizing via WindowResized message
@@ -5877,8 +6006,41 @@ mod tests {
         assert!(app.is_workload_selected(get_workload("rt_sched_full_forest_trad")));
         assert!(app.is_workload_selected(get_workload("rt_sched_full_forest_wl")));
 
-        // Verify result mapping for each scene produces correct workload ID
+        // Verify result mapping for each scene produces correct workload ID (both new PBR name and legacy name)
         let mut res = ResultData::default();
+        res.configIndex = 21;
+        res.benchmarkName = "RayScheduling (Showroom Studio) (Full Scene Ray Tracing (PBR) - Megakernel)".to_string();
+        assert_eq!(map_result_to_workload_id(&res), Some("rt_sched_full_showroom_trad"));
+
+        res.configIndex = 22;
+        res.benchmarkName = "RayScheduling (Showroom Studio) (Full Scene Ray Tracing (PBR) - Work Lists)".to_string();
+        assert_eq!(map_result_to_workload_id(&res), Some("rt_sched_full_showroom_wl"));
+
+        res.configIndex = 21;
+        res.benchmarkName = "RayScheduling (Indoor Atrium) (Full Scene Ray Tracing (PBR) - Megakernel)".to_string();
+        assert_eq!(map_result_to_workload_id(&res), Some("rt_sched_full_indoor_trad"));
+
+        res.configIndex = 22;
+        res.benchmarkName = "RayScheduling (Indoor Atrium) (Full Scene Ray Tracing (PBR) - Work Lists)".to_string();
+        assert_eq!(map_result_to_workload_id(&res), Some("rt_sched_full_indoor_wl"));
+
+        res.configIndex = 21;
+        res.benchmarkName = "RayScheduling (Outdoor Landscape) (Full Scene Ray Tracing (PBR) - Megakernel)".to_string();
+        assert_eq!(map_result_to_workload_id(&res), Some("rt_sched_full_outdoor_trad"));
+
+        res.configIndex = 22;
+        res.benchmarkName = "RayScheduling (Outdoor Landscape) (Full Scene Ray Tracing (PBR) - Work Lists)".to_string();
+        assert_eq!(map_result_to_workload_id(&res), Some("rt_sched_full_outdoor_wl"));
+
+        res.configIndex = 21;
+        res.benchmarkName = "RayScheduling (Open-World Forest) (Full Scene Ray Tracing (PBR) - Megakernel)".to_string();
+        assert_eq!(map_result_to_workload_id(&res), Some("rt_sched_full_forest_trad"));
+
+        res.configIndex = 22;
+        res.benchmarkName = "RayScheduling (Open-World Forest) (Full Scene Ray Tracing (PBR) - Work Lists)".to_string();
+        assert_eq!(map_result_to_workload_id(&res), Some("rt_sched_full_forest_wl"));
+
+        // Backward compatibility check with legacy "Full Scene Render" names
         res.configIndex = 21;
         res.benchmarkName = "RayScheduling (Showroom Studio) (Full Scene Render - Megakernel)".to_string();
         assert_eq!(map_result_to_workload_id(&res), Some("rt_sched_full_showroom_trad"));
@@ -5887,29 +6049,14 @@ mod tests {
         res.benchmarkName = "RayScheduling (Showroom Studio) (Full Scene Render - Work Lists)".to_string();
         assert_eq!(map_result_to_workload_id(&res), Some("rt_sched_full_showroom_wl"));
 
-        res.configIndex = 21;
-        res.benchmarkName = "RayScheduling (Indoor Atrium) (Full Scene Render - Megakernel)".to_string();
-        assert_eq!(map_result_to_workload_id(&res), Some("rt_sched_full_indoor_trad"));
+        // Path Tracing workload mapping
+        res.configIndex = 4;
+        res.benchmarkName = "RayScheduling (Full Scene Path Tracing - Traditional Megakernel)".to_string();
+        assert_eq!(map_result_to_workload_id(&res), Some("rt_sched_pt_trad"));
 
-        res.configIndex = 22;
-        res.benchmarkName = "RayScheduling (Indoor Atrium) (Full Scene Render - Work Lists)".to_string();
-        assert_eq!(map_result_to_workload_id(&res), Some("rt_sched_full_indoor_wl"));
-
-        res.configIndex = 21;
-        res.benchmarkName = "RayScheduling (Outdoor Landscape) (Full Scene Render - Megakernel)".to_string();
-        assert_eq!(map_result_to_workload_id(&res), Some("rt_sched_full_outdoor_trad"));
-
-        res.configIndex = 22;
-        res.benchmarkName = "RayScheduling (Outdoor Landscape) (Full Scene Render - Work Lists)".to_string();
-        assert_eq!(map_result_to_workload_id(&res), Some("rt_sched_full_outdoor_wl"));
-
-        res.configIndex = 21;
-        res.benchmarkName = "RayScheduling (Open-World Forest) (Full Scene Render - Megakernel)".to_string();
-        assert_eq!(map_result_to_workload_id(&res), Some("rt_sched_full_forest_trad"));
-
-        res.configIndex = 22;
-        res.benchmarkName = "RayScheduling (Open-World Forest) (Full Scene Render - Work Lists)".to_string();
-        assert_eq!(map_result_to_workload_id(&res), Some("rt_sched_full_forest_wl"));
+        res.configIndex = 6;
+        res.benchmarkName = "RayScheduling (Full Scene Path Tracing - Work Lists (DGC))".to_string();
+        assert_eq!(map_result_to_workload_id(&res), Some("rt_sched_pt_wl"));
     }
 
     #[test]

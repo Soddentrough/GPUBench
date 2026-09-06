@@ -58,6 +58,9 @@ public:
   void setBounceDepth(uint32_t b);
   uint32_t getBounceDepth() const { return bounceDepth; }
 
+  void setSamplesPerPixel(uint32_t spp);
+  uint32_t getSamplesPerPixel() const { return samplesPerPixel; }
+
   void setTargetConfig(int config) { targetConfig = config; }
   int getTargetConfig() const { return targetConfig; }
   void setProfileSnapshot(bool enable) { profileSnapshot = enable; }
@@ -84,6 +87,7 @@ private:
   uint32_t renderWidth = 0;
   uint32_t renderHeight = 0;
   uint32_t bounceDepth = 2;
+  uint32_t samplesPerPixel = 1;
   int targetConfig = -1;
   bool profileSnapshot = false;
 };

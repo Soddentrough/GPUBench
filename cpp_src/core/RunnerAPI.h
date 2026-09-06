@@ -16,7 +16,8 @@ std::vector<ResultData> RunBenchmarksAPI(
     uint32_t renderWidth = 0,
     uint32_t renderHeight = 0,
     std::function<void(const ResultData&)> callback = nullptr,
-    const std::string& scene = "all");
+    const std::string& scene = "all",
+    uint32_t samples_per_pixel = 1);
 
 struct DeviceProfile {
     std::string backend;

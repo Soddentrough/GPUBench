@@ -31,6 +31,10 @@ layout(set = 0, binding = 3) readonly buffer VertexBuffer {
 #define BINDING_TEX_PIX_BUF 7
 #include "pbr_common.glsl"
 
+layout(set = 0, binding = 8) buffer Framebuffer {
+    vec4 pixels[];
+} fb;
+
 layout(push_constant) uniform PushConstants {
     uint inQueue;
     uint outQueue;
@@ -296,12 +300,10 @@ void main() {
         }
     }
 
-    if (gl_WorkGroupID.x == 0) {
-        uint waveRays = subgroupAdd(threadRays);
-        uint waveHits = subgroupAdd(threadHits);
-        if (subgroupElect()) {
-            if (waveRays > 0u) atomicAdd(results.totalRays, waveRays);
-            if (waveHits > 0u) atomicAdd(results.totalHits, waveHits);
-        }
+    uint waveRays = subgroupAdd(threadRays);
+    uint waveHits = subgroupAdd(threadHits);
+    if (subgroupElect()) {
+        if (waveRays > 0u) atomicAdd(results.totalRays, waveRays);
+        if (waveHits > 0u) atomicAdd(results.totalHits, waveHits);
     }
 }
