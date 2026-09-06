@@ -1985,15 +1985,27 @@ fn find_renders_file(relative: &str) -> Option<String> {
     let mut candidates = vec![
         relative.to_string(),
         format!("../{}", relative),
+        format!("../../{}", relative),
         format!("/home/naoki/Development/GPUBench/{}", relative),
         format!("/usr/share/gpubench/{}", relative),
     ];
+    if let Ok(cwd) = std::env::current_dir() {
+        candidates.push(cwd.join(relative).to_string_lossy().to_string());
+        candidates.push(cwd.join("..").join(relative).to_string_lossy().to_string());
+    }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(exe_dir) = exe.parent() {
             candidates.push(exe_dir.join(relative).to_string_lossy().to_string());
             if let Some(parent) = exe_dir.parent() {
+                candidates.push(parent.join(relative).to_string_lossy().to_string());
                 candidates.push(parent.join("share/gpubench").join(relative).to_string_lossy().to_string());
             }
+        }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(local_appdata) = std::env::var("LOCALAPPDATA") {
+            candidates.push(std::path::Path::new(&local_appdata).join("GPUBench").join(relative).to_string_lossy().to_string());
         }
     }
     for cand in candidates {
@@ -2042,8 +2054,13 @@ fn load_parity_profile() -> Option<(ParityProfile, String)> {
 fn open_file_in_desktop(path: &str) {
     let p = std::path::Path::new(path);
     if !p.exists() {
-        eprintln!("[GPUBench GUI] Cannot open non-existent desktop target: {}", path);
-        return;
+        if path.ends_with("renders") || path == "renders" {
+            std::fs::create_dir_all(p).ok();
+        }
+        if !p.exists() {
+            eprintln!("[GPUBench GUI] Cannot open non-existent desktop target: {}", path);
+            return;
+        }
     }
     let abs_path = if let Ok(canonical) = std::fs::canonicalize(p) {
         canonical.to_string_lossy().to_string()
@@ -2053,9 +2070,15 @@ fn open_file_in_desktop(path: &str) {
 
     #[cfg(target_os = "windows")]
     {
-        let _ = std::process::Command::new("cmd")
-            .args(["/C", "start", "", &abs_path])
-            .spawn();
+        if p.is_dir() {
+            let _ = std::process::Command::new("explorer")
+                .arg(&abs_path)
+                .spawn();
+        } else {
+            let _ = std::process::Command::new("cmd")
+                .args(["/C", "start", "", &abs_path])
+                .spawn();
+        }
     }
     #[cfg(target_os = "macos")]
     {
@@ -4424,6 +4447,15 @@ impl Application for GPUBenchApp {
                             color!(0xF472B6),
                         );
 
+                        let stats_grid: Element<'_, Message> = if self.window_width < 1100 {
+                            column![
+                                row![card_psnr, card_exact].spacing(8).width(Length::Fill),
+                                row![card_shading, card_compaction].spacing(8).width(Length::Fill),
+                            ].spacing(8).into()
+                        } else {
+                            row![card_psnr, card_exact, card_shading, card_compaction].spacing(10).width(Length::Fill).into()
+                        };
+
                         let inspector_buttons = row![
                             button(
                                 container(text("VIEW PERFORMANCE COMPARISON").size(11).style(color!(0xFFFFFF)))
@@ -4477,10 +4509,60 @@ impl Application for GPUBenchApp {
 
                                     Space::with_height(8),
 
-                                    row![card_psnr, card_exact, card_shading, card_compaction].spacing(10),
+                                    stats_grid,
 
                                     Space::with_height(10),
 
+                                    inspector_buttons,
+                                ].spacing(2)
+                            )
+                            .padding(14)
+                            .width(Length::Fill)
+                            .style(|_t: &Theme| container::Appearance {
+                                background: Some(Background::Color(color!(0x0A0D15))),
+                                border: Border { radius: 10.0.into(), width: 1.0, color: color!(0x1E253A) },
+                                ..Default::default()
+                            })
+                        ].spacing(2).width(Length::Fill)
+                    } else if self.dump_renders && self.selected_tests.iter().any(|t| {
+                        let tl = t.to_lowercase();
+                        tl.contains("ray") || tl == "graphics" || tl == "all" || tl == "raytracing"
+                    }) {
+                        let inspector_buttons = row![
+                            button(
+                                container(text("VIEW PERFORMANCE COMPARISON").size(11).style(color!(0xFFFFFF)))
+                                    .padding([6, 12])
+                                    .center_x()
+                            )
+                            .on_press(Message::OpenTriptych("all".to_string()))
+                            .style(iced::theme::Button::Custom(Box::new(SleekPrimaryButton))),
+
+                            button(
+                                container(text("OPEN RENDERS FOLDER").size(11).style(color!(0xCBD5E1)))
+                                    .padding([6, 12])
+                                    .center_x()
+                            )
+                            .on_press(Message::OpenRendersFolder)
+                            .style(iced::theme::Button::Custom(Box::new(SleekSecondaryButton))),
+                        ].spacing(8);
+
+                        column![
+                            container(
+                                column![
+                                    row![
+                                        container(Space::with_width(3)).height(14).style(|_t: &Theme| container::Appearance {
+                                            background: Some(Background::Color(color!(0x38BDF8))),
+                                            border: Border { radius: 2.0.into(), ..Default::default() },
+                                            ..Default::default()
+                                        }),
+                                        Space::with_width(8),
+                                        text("RAY SCHEDULING VISUAL VERIFICATION & RENDERS").size(12).style(color!(0xF1F5F9)),
+                                        Space::with_width(Length::Fill),
+                                        text("Render dumps active").size(11).style(color!(0x64748B)),
+                                    ].align_items(iced::Alignment::Center),
+                                    Space::with_height(6),
+                                    text("Comparison images and frame renders were dumped during execution.").size(10).style(color!(0x94A3B8)),
+                                    Space::with_height(8),
                                     inspector_buttons,
                                 ].spacing(2)
                             )
@@ -4500,61 +4582,72 @@ impl Application for GPUBenchApp {
                 };
 
                 let action_buttons: Element<'_, Message> = if matches!(self.state, AppState::Complete { .. }) {
-                    let mut col = column![
-                        button(
-                            container(text("EXPORT JSON").size(13).style(color!(0xFFFFFF)))
-                                .width(Length::Fill)
-                                .center_x()
-                        )
-                        .width(Length::Fill)
-                        .padding([11, 0])
-                        .on_press(Message::SaveResults)
-                        .style(iced::theme::Button::Custom(Box::new(SleekPrimaryButton))),
-                        
-                        Space::with_height(8),
-
-                        button(
-                            container(text("COPY DIAGNOSTICS").size(13).style(color!(0xCBD5E1)))
-                                .width(Length::Fill)
-                                .center_x()
-                        )
-                        .width(Length::Fill)
-                        .padding([11, 0])
-                        .on_press(Message::CopyDiagnostics)
-                        .style(iced::theme::Button::Custom(Box::new(SleekSecondaryButton))),
-                        
-                        Space::with_height(8),
-                    ];
-
+                    let ran_ray = self.selected_tests.iter().any(|t| {
+                        let tl = t.to_lowercase();
+                        tl.contains("ray") || tl == "graphics" || tl == "all" || tl == "raytracing"
+                    });
+                    let has_renders = self.parity_profile.is_some() || (ran_ray && self.dump_renders);
                     let tag = self.parity_profile.as_ref().map(|(_, t)| t.clone()).unwrap_or_else(|| "indoor".to_string());
-                    if self.parity_profile.is_some() {
-                        col = col.push(
-                            button(
-                                container(text("VIEW PERFORMANCE COMPARISON").size(13).style(color!(0x34D399)))
-                                    .width(Length::Fill)
-                                    .center_x()
-                            )
-                            .width(Length::Fill)
-                            .padding([11, 0])
-                            .on_press(Message::OpenTriptych(tag))
-                            .style(iced::theme::Button::Custom(Box::new(SleekSecondaryButton)))
-                        );
-                        col = col.push(Space::with_height(8));
-                    }
 
-                    col = col.push(
-                        button(
-                            container(text("RUN NEW TEST").size(13).style(color!(0xCBD5E1)))
+                    let export_btn = button(
+                        container(text("EXPORT JSON").size(11).style(color!(0xFFFFFF)))
+                            .width(Length::Fill)
+                            .center_x()
+                    )
+                    .width(Length::FillPortion(1))
+                    .padding([8, 2])
+                    .on_press(Message::SaveResults)
+                    .style(iced::theme::Button::Custom(Box::new(SleekPrimaryButton)));
+
+                    let copy_btn = button(
+                        container(text("COPY DIAGNOSTICS").size(11).style(color!(0xCBD5E1)))
+                            .width(Length::Fill)
+                            .center_x()
+                    )
+                    .width(Length::FillPortion(1))
+                    .padding([8, 2])
+                    .on_press(Message::CopyDiagnostics)
+                    .style(iced::theme::Button::Custom(Box::new(SleekSecondaryButton)));
+
+                    let row_top = row![export_btn, copy_btn].spacing(6).width(Length::Fill);
+
+                    let row_bottom = if has_renders {
+                        let view_btn = button(
+                            container(text("VIEW RENDERS").size(11).style(color!(0x34D399)))
+                                .width(Length::Fill)
+                                .center_x()
+                        )
+                        .width(Length::FillPortion(1))
+                        .padding([8, 2])
+                        .on_press(Message::OpenTriptych(tag))
+                        .style(iced::theme::Button::Custom(Box::new(SleekSecondaryButton)));
+
+                        let retest_btn = button(
+                            container(text("RUN NEW TEST").size(11).style(color!(0xCBD5E1)))
+                                .width(Length::Fill)
+                                .center_x()
+                        )
+                        .width(Length::FillPortion(1))
+                        .padding([8, 2])
+                        .on_press(Message::Retest)
+                        .style(iced::theme::Button::Custom(Box::new(SleekSecondaryButton)));
+
+                        row![view_btn, retest_btn].spacing(6).width(Length::Fill)
+                    } else {
+                        let retest_btn = button(
+                            container(text("RUN NEW TEST").size(11).style(color!(0xCBD5E1)))
                                 .width(Length::Fill)
                                 .center_x()
                         )
                         .width(Length::Fill)
-                        .padding([11, 0])
+                        .padding([8, 4])
                         .on_press(Message::Retest)
-                        .style(iced::theme::Button::Custom(Box::new(SleekSecondaryButton)))
-                    );
+                        .style(iced::theme::Button::Custom(Box::new(SleekSecondaryButton)));
 
-                    col.width(Length::Fill).into()
+                        row![retest_btn].width(Length::Fill)
+                    };
+
+                    column![row_top, Space::with_height(6), row_bottom].width(Length::Fill).into()
                 } else {
                     Space::with_height(0).into()
                 };
@@ -4700,36 +4793,45 @@ impl Application for GPUBenchApp {
                     ..Default::default()
                 });
 
-                let sidebar = container(
-                    column![
-                        brand_block,
-                        Space::with_height(14),
-                        telemetry_panel,
-                        Space::with_height(14),
-                        text("ACTIVE CONFIGURATION").size(10).style(color!(0x64748B)),
-                        Space::with_height(4),
-                        container(
-                            column![
-                                row![text("API:").size(10).style(color!(0x64748B)), Space::with_width(Length::Fill), text(format!("{} {}", &self.selected_backend, detect_dynamic_api_version(&self.selected_backend))).size(11).style(color!(0x38BDF8))],
-                                row![text("DEVICES:").size(10).style(color!(0x64748B)), Space::with_width(Length::Fill), text(if self.current_devices_label.is_empty() { "—" } else { &self.current_devices_label }).size(10).style(color!(0xE2E8F0))],
-                                row![text("RES:").size(10).style(color!(0x64748B)), Space::with_width(Length::Fill), text(self.selected_resolution.label()).size(10).style(color!(0xA5B4FC))],
-                                row![text("SCENE:").size(10).style(color!(0x64748B)), Space::with_width(Length::Fill), text(self.selected_scene.label()).size(10).style(color!(0x34D399))],
-                            ].spacing(3)
-                        )
-                        .padding(10)
-                        .style(|_t: &Theme| container::Appearance {
-                            background: Some(Background::Color(color!(0x11141E))),
-                            border: Border { radius: 8.0.into(), width: 1.0, color: color!(0x1A202C) },
-                            ..Default::default()
-                        }),
-                        Space::with_height(14),
-                        current_workload_card,
-                        Space::with_height(14),
-                        live_suite_stats_card,
-                        Space::with_height(Length::Fill),
-                        action_buttons
-                    ]
-                )
+                let sidebar_scroll_content = column![
+                    brand_block,
+                    Space::with_height(10),
+                    telemetry_panel,
+                    Space::with_height(10),
+                    text("ACTIVE CONFIGURATION").size(10).style(color!(0x64748B)),
+                    Space::with_height(4),
+                    container(
+                        column![
+                            row![text("API:").size(10).style(color!(0x64748B)), Space::with_width(Length::Fill), text(format!("{} {}", &self.selected_backend, detect_dynamic_api_version(&self.selected_backend))).size(11).style(color!(0x38BDF8))],
+                            row![text("DEVICES:").size(10).style(color!(0x64748B)), Space::with_width(Length::Fill), text(if self.current_devices_label.is_empty() { "—" } else { &self.current_devices_label }).size(10).style(color!(0xE2E8F0))],
+                            row![text("RES:").size(10).style(color!(0x64748B)), Space::with_width(Length::Fill), text(self.selected_resolution.label()).size(10).style(color!(0xA5B4FC))],
+                            row![text("SCENE:").size(10).style(color!(0x64748B)), Space::with_width(Length::Fill), text(self.selected_scene.label()).size(10).style(color!(0x34D399))],
+                        ].spacing(3)
+                    )
+                    .padding(10)
+                    .style(|_t: &Theme| container::Appearance {
+                        background: Some(Background::Color(color!(0x11141E))),
+                        border: Border { radius: 8.0.into(), width: 1.0, color: color!(0x1A202C) },
+                        ..Default::default()
+                    }),
+                    Space::with_height(10),
+                    current_workload_card,
+                    Space::with_height(10),
+                    live_suite_stats_card,
+                ];
+
+                let sidebar_col = column![
+                    scrollable(
+                        container(sidebar_scroll_content)
+                            .padding([0, 4, 0, 0])
+                            .width(Length::Fill)
+                    ).height(Length::Fill),
+                    container(action_buttons)
+                        .padding([8, 0])
+                        .width(Length::Fill),
+                ];
+
+                let sidebar = container(sidebar_col)
                 .width(Length::Fixed(self.dynamic_sidebar_width()))
                 .height(Length::Fill)
                 .padding(16)
@@ -4739,28 +4841,36 @@ impl Application for GPUBenchApp {
                     ..Default::default()
                 });
 
+                let main_content = if matches!(self.state, AppState::Complete { .. }) {
+                    column![
+                        visual_parity_section,
+                        thermal_profile_section,
+                        table_column
+                    ]
+                    .spacing(16)
+                    .width(Length::Fill)
+                } else {
+                    column![
+                        table_column
+                    ]
+                    .spacing(16)
+                    .width(Length::Fill)
+                };
+
                 let main_area = container(
                     column![
                         global_progress,
                         Space::with_height(14),
-                        scrollable(
-                            column![
-                                table_column,
-                                thermal_profile_section,
-                                visual_parity_section
-                            ]
-                            .spacing(20)
+                        scrollable(main_content)
                             .width(Length::Fill)
-                        )
-                        .width(Length::Fill)
-                        .height(Length::Fill)
+                            .height(Length::Fill)
                     ]
                     .width(Length::Fill)
                     .height(Length::Fill)
+                    .padding(24)
                 )
                 .width(Length::Fill)
                 .height(Length::Fill)
-                .padding(24)
                 .style(|_t: &Theme| container::Appearance {
                     background: Some(Background::Color(color!(0x07080D))),
                     ..Default::default()
@@ -5800,6 +5910,31 @@ mod tests {
         res.configIndex = 22;
         res.benchmarkName = "RayScheduling (Open-World Forest) (Full Scene Render - Work Lists)".to_string();
         assert_eq!(map_result_to_workload_id(&res), Some("rt_sched_full_forest_wl"));
+    }
+
+    #[test]
+    fn test_results_layout_and_render_path_resolution() {
+        let (mut app, _) = GPUBenchApp::new(GuiCliArgs::default());
+
+        // Test path resolution for renders
+        let renders_dir = find_renders_file("renders");
+        assert!(renders_dir.is_some(), "find_renders_file('renders') must locate the repository renders directory");
+
+        // Switch app state to complete
+        app.state = AppState::Complete { total_configs: 64 };
+        app.completed_configs_count = 64;
+        app.total_expected_configs = 64;
+
+        // Test rendering view at standard scale
+        let _ = app.view();
+
+        // Test rendering view at Windows UI scaling resolution (1024x675)
+        let _ = app.update(Message::WindowResized(1024, 675));
+        let _ = app.view();
+
+        // Test rendering view at minimum window size (960x640)
+        let _ = app.update(Message::WindowResized(960, 640));
+        let _ = app.view();
     }
 }
 

@@ -1,5 +1,5 @@
-// GPUBench Industry-Standard PBR Shading Pipeline (Cook-Torrance GGX)
-// Shared across Traditional Megakernel and Work Lists / DGC pathways.
+// GPUBench Industry-Standard PBR Shading Pipeline (8 Production AAA BSDF Archetypes)
+// Shared identically across Traditional Megakernel and Work Lists / DGC pathways.
 
 struct GltfVertexGpu {
     float px, py, pz;
@@ -23,6 +23,10 @@ struct GltfMaterialGpu {
     float normalScale;
     float alphaCutoff;
     uint alphaMode;
+    uint archetype;
+    uint extraParam1;
+    uint extraParam2;
+    uint pad1;
 };
 
 struct TextureHeaderGpu {
@@ -72,6 +76,54 @@ layout(set = 0, binding = BINDING_TEX_PIX_BUF) readonly buffer TexPixelBuffer {
 } texPixels;
 #endif
 
+#if defined(ENABLE_SPECIALIZED_ARCHETYPE)
+layout(constant_id = 0) const uint SPECIALIZED_ARCHETYPE = 0xFFFFFFFFu;
+#else
+const uint SPECIALIZED_ARCHETYPE = 0xFFFFFFFFu;
+#endif
+
+// Procedural 3D noise for authentic micro-structure weathering without VRAM texture expansion
+float hash31_common(vec3 p) {
+    p = fract(p * 0.1031);
+    p += dot(p, p.yzx + 33.33);
+    return fract((p.x + p.y) * p.z);
+}
+
+float noise3D_common(vec3 p) {
+    vec3 i = floor(p);
+    vec3 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    float n000 = hash31_common(i + vec3(0, 0, 0));
+    float n100 = hash31_common(i + vec3(1, 0, 0));
+    float n010 = hash31_common(i + vec3(0, 1, 0));
+    float n110 = hash31_common(i + vec3(1, 1, 0));
+    float n011 = hash31_common(i + vec3(0, 0, 1));
+    float n101 = hash31_common(i + vec3(1, 0, 1));
+    float n011b = hash31_common(i + vec3(0, 1, 1));
+    float n111 = hash31_common(i + vec3(1, 1, 1));
+    return mix(
+        mix(mix(n000, n100, f.x), mix(n010, n110, f.x), f.y),
+        mix(mix(n011, n101, f.x), mix(n011b, n111, f.x), f.y),
+        f.z
+    );
+}
+
+float rustFBM3D_common(vec3 p) {
+    float v = 0.0;
+    float a = 0.5;
+    mat3 rot = mat3(
+         0.00,  0.80,  0.60,
+        -0.80,  0.36, -0.48,
+        -0.60, -0.48,  0.64
+    );
+    for (int i = 0; i < 4; ++i) {
+        v += a * noise3D_common(p);
+        p = rot * p * 2.02 + vec3(1.7, 9.2, 0.4);
+        a *= 0.5;
+    }
+    return v;
+}
+
 // Industry-Standard Cook-Torrance GGX Microfacet BRDF
 vec3 evaluateCookTorranceGGX(
     vec3 baseColor,
@@ -115,6 +167,118 @@ vec3 evaluateCookTorranceGGX(
     vec3 diffuse = kD * (baseColor / 3.1415926535);
 
     return (diffuse + specular) * lightRadiance * NdotL;
+}
+
+// 8 Production AAA BSDF Archetype Evaluator
+vec3 evaluateMaterialArchetypeDirect(
+    uint archetype,
+    vec3 hitPos,
+    vec3 baseColor,
+    float roughness,
+    float metallic,
+    float ior,
+    vec3 N,
+    vec3 V,
+    vec3 L,
+    vec3 lightRadiance,
+    float ao
+) {
+    uint arch = (SPECIALIZED_ARCHETYPE != 0xFFFFFFFFu) ? SPECIALIZED_ARCHETYPE : archetype;
+
+    switch (arch) {
+        case 0: { // Archetype 0: Standard Dielectric/Conductor PBR (Cook-Torrance GGX)
+            return evaluateCookTorranceGGX(baseColor, roughness, metallic, N, V, L, lightRadiance);
+        }
+        case 1: { // Archetype 1: Subsurface Scattering (Diffusion Profile)
+            float NdotL = max(dot(N, L), 0.0);
+            float wrappedNdotL = clamp((dot(N, L) + 0.40) / 1.40, 0.0, 1.0);
+            vec3 sssColor = exp(-vec3(0.40, 0.08, 0.18) * (1.0 - wrappedNdotL) * 2.0) * baseColor;
+            vec3 H = normalize(V + L);
+            float NdotH = max(dot(N, H), 0.0);
+            float VdotH = max(dot(V, H), 0.0);
+            float d_j = NdotH * NdotH * (0.008 - 1.0) + 1.0;
+            float D_j = 0.008 / (3.14159265 * d_j * d_j + 0.0001);
+            float F_j = 0.05 + 0.95 * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
+            float NdotV = max(dot(N, V), 1e-4);
+            vec3 specJade = vec3(D_j * F_j * 0.65 / (4.0 * max(NdotL, 0.01) * NdotV + 0.001) * max(NdotL, 0.01));
+            return (sssColor * wrappedNdotL * 0.95 + specJade) * lightRadiance;
+        }
+        case 2: { // Archetype 2: Dielectric Transmission / Glass
+            vec3 H = normalize(V + L);
+            float NdotH = max(dot(N, H), 0.0);
+            float VdotH = max(dot(V, H), 0.0);
+            float NdotL = max(dot(N, L), 0.0);
+            float NdotV = max(dot(N, V), 1e-4);
+            if (NdotL <= 0.0) return vec3(0.0);
+            float d = NdotH * NdotH * (0.0004 - 1.0) + 1.0;
+            float D = 0.0004 / (3.14159265 * d * d + 0.0001);
+            float F_l = 0.04 + 0.96 * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
+            return lightRadiance * (D * F_l / (4.0 * NdotL * NdotV + 0.001) * NdotL);
+        }
+        case 3: { // Archetype 3: Anisotropic Velvet / Fabric Sheen (Charlie Micro-Fiber)
+            float NdotL = max(dot(N, L), 0.0);
+            vec3 H = normalize(V + L);
+            float NdotH = max(dot(N, H), 0.0);
+            float VdotH = max(dot(V, H), 0.0);
+            float invAlpha = 1.0 / max(roughness, 0.25);
+            float sinThetaH = sqrt(max(0.0, 1.0 - NdotH * NdotH));
+            float D_charlie = (2.0 + invAlpha) * pow(sinThetaH, invAlpha) / 6.283185;
+            float F_velvet = pow(clamp(1.0 - VdotH, 0.0, 1.0), 4.0);
+            vec3 sheen = vec3(0.95, 0.85, 0.95) * (D_charlie * F_velvet * 0.75 * NdotL);
+            return (baseColor * (NdotL * 0.40 + 0.06) + sheen) * lightRadiance;
+        }
+        case 4: { // Archetype 4: Weathered Multi-Layered Conductor/Dielectric (Dynamic Rust & Patina)
+            float rustNoise = rustFBM3D_common(hitPos * 0.05);
+            float rustFine = noise3D_common(hitPos * 0.2) * 0.5 + 0.5;
+            float rustVal = rustNoise * 0.80 + rustFine * 0.20;
+            float rustMask = smoothstep(0.44, 0.54, rustVal);
+            vec3 rustAlbedo = mix(vec3(0.85, 0.38, 0.12), vec3(0.35, 0.16, 0.08), rustFine);
+            vec3 finalAlbedo = mix(baseColor, rustAlbedo, rustMask);
+            float finalRough = mix(roughness, 0.85, rustMask);
+            float finalMetal = mix(metallic, 0.0, rustMask);
+            return evaluateCookTorranceGGX(finalAlbedo, finalRough, finalMetal, N, V, L, lightRadiance);
+        }
+        case 5: { // Archetype 5: Polished Architectural Stone / Terrazzo
+            float NdotL = max(dot(N, L), 0.0);
+            vec3 H = normalize(V + L);
+            float NdotH = max(dot(N, H), 0.0);
+            float VdotH = max(dot(V, H), 0.0);
+            float NdotV = max(dot(N, V), 1e-4);
+            vec3 diff = baseColor * (NdotL / 3.14159265);
+            float alpha2 = 0.008;
+            float d_f = NdotH * NdotH * (alpha2 - 1.0) + 1.0;
+            float D_f = alpha2 / (3.14159265 * d_f * d_f + 0.0001);
+            float F_f = 0.06 + 0.94 * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
+            vec3 coatSpec = vec3((D_f * F_f * 0.70) / (4.0 * max(NdotL, 0.01) * NdotV + 0.001) * NdotL);
+            return (diff + coatSpec) * lightRadiance;
+        }
+        case 6: { // Archetype 6: Clearcoat Automotive Paint with Voronoi Micro-Flakes
+            float NdotL = max(dot(N, L), 0.0);
+            vec3 H = normalize(V + L);
+            float NdotH = max(dot(N, H), 0.0);
+            float VdotH = max(dot(V, H), 0.0);
+            float NdotV = max(dot(N, V), 1e-4);
+            float D_c = NdotH * NdotH * (0.0003 - 1.0) + 1.0;
+            float D_clear = 0.0003 / (3.14159265 * D_c * D_c + 0.0001);
+            float F_clear = 0.04 + 0.96 * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
+            vec3 specClear = vec3((D_clear * F_clear * 0.90) / (4.0 * max(NdotL, 0.01) * NdotV + 0.001) * NdotL);
+            vec3 baseSpec = evaluateCookTorranceGGX(baseColor, 0.25, 0.85, N, V, L, lightRadiance);
+            float flakeNoise = hash31_common(floor(hitPos * 12.0));
+            float flakeGlint = pow(NdotH, 140.0) * step(0.65, flakeNoise) * 4.0;
+            return baseSpec + (specClear + vec3(flakeGlint)) * lightRadiance;
+        }
+        case 7: { // Archetype 7: Alpha-Tested Foliage & Thin-Sheet Transmission
+            float NdotL = dot(N, L);
+            float wrappedNdotL = clamp((NdotL + 0.35) / 1.35, 0.0, 1.0);
+            float backTrans = clamp((-NdotL + 0.30) / 1.30, 0.0, 1.0);
+            vec3 transColor = baseColor * vec3(1.1, 1.3, 0.4) * backTrans * 0.70;
+            vec3 H = normalize(V + L);
+            float NdotH = max(dot(N, H), 0.0);
+            float D_wax = pow(NdotH, 18.0) * 0.25;
+            return (baseColor * (wrappedNdotL * 0.65 + 0.08) + transColor + vec3(D_wax)) * lightRadiance;
+        }
+    }
+    return vec3(0.0);
 }
 
 #if defined(BINDING_TEX_HDR_BUF) && defined(BINDING_TEX_PIX_BUF)
@@ -280,6 +444,7 @@ vec3 evaluateGltfPbr(
         emissive *= pow(sampleTexture(uint(mat.emissiveTexIdx), uv).rgb, vec3(2.2));
     }
 
+    uint arch = (SPECIALIZED_ARCHETYPE != 0xFFFFFFFFu) ? SPECIALIZED_ARCHETYPE : mat.archetype;
     vec3 totalRadiance = vec3(0.0);
 
     if (sceneType == 2u) {
@@ -290,7 +455,7 @@ vec3 evaluateGltfPbr(
             sunShadow = traceAreaShadow(hitPos, geomNormal, sunDir, 10000.0, 0.035, rng, 4);
         }
         vec3 sunRadiance = vec3(1.0, 0.95, 0.88) * 4.5 * sunShadow;
-        totalRadiance += evaluateCookTorranceGGX(baseColor, roughness, metallic, N, V, sunDir, sunRadiance);
+        totalRadiance += evaluateMaterialArchetypeDirect(arch, hitPos, baseColor, roughness, metallic, mat.ior, N, V, sunDir, sunRadiance, ao);
 
         // Warm Colonnade Lanterns
         const vec3 lightPos[3] = vec3[3](
@@ -308,7 +473,7 @@ vec3 evaluateGltfPbr(
             float dist2 = dot(toL, toL);
             vec3 L = normalize(toL);
             float atten = 1.0 / (1.0 + 0.000004 * dist2);
-            totalRadiance += evaluateCookTorranceGGX(baseColor, roughness, metallic, N, V, L, lightColor[i] * atten);
+            totalRadiance += evaluateMaterialArchetypeDirect(arch, hitPos, baseColor, roughness, metallic, mat.ior, N, V, L, lightColor[i] * atten, ao);
         }
 
         // Ray-Traced Ambient Occlusion (RTAO) with 4 stratified rays
@@ -339,114 +504,30 @@ vec3 evaluateGltfPbr(
             vec3(1.0, 1.0, 1.0) * 2.5
         );
 
-        if (mat.transmissionFactor > 0.05) {
-            // Automotive Dielectric Safety Glass (Physical Snell's Law Refraction Bounce)
+        if (arch == 2u) {
+            // Automotive Dielectric Safety Glass (Transmission + Cauchy Chromatic Dispersion)
+            vec3 cabinInterior = vec3(0.02, 0.025, 0.03);
             vec3 R = reflect(inDir, N);
-            float ior = (mat.ior > 1.0) ? mat.ior : 1.52;
-            bool entering = dot(inDir, N) < 0.0;
-            vec3 refrNormal = entering ? N : -N;
-            float eta = entering ? (1.0 / ior) : ior;
-            vec3 refrDir = refract(inDir, refrNormal, eta);
-
-            // Total Internal Reflection (TIR)
-            bool tir = (dot(refrDir, refrDir) < 0.01);
-            if (tir) refrDir = R;
+            vec3 refrDirR = refract(inDir, N, 1.0 / (mat.ior - 0.02));
+            vec3 refrDirG = refract(inDir, N, 1.0 / mat.ior);
+            vec3 refrDirB = refract(inDir, N, 1.0 / (mat.ior + 0.02));
+            if (length(refrDirG) < 0.01) { refrDirR = R; refrDirG = R; refrDirB = R; }
 
             vec3 envRefl = mix(vec3(0.12, 0.13, 0.16), vec3(0.40, 0.44, 0.50), clamp(R.y * 1.5, 0.0, 1.0));
-            vec3 envRefr = mix(vec3(0.06, 0.07, 0.09), vec3(0.18, 0.20, 0.24), clamp(refrDir.y * 1.5, 0.0, 1.0));
+            vec3 envRefr;
+            envRefr.r = mix(vec3(0.06, 0.07, 0.09), vec3(0.18, 0.20, 0.24), clamp(refrDirR.y * 1.5, 0.0, 1.0)).r;
+            envRefr.g = mix(vec3(0.06, 0.07, 0.09), vec3(0.18, 0.20, 0.24), clamp(refrDirG.y * 1.5, 0.0, 1.0)).g;
+            envRefr.b = mix(vec3(0.06, 0.07, 0.09), vec3(0.18, 0.20, 0.24), clamp(refrDirB.y * 1.5, 0.0, 1.0)).b;
 
-            // Subtle automotive safety glass tint (slight cool solar smoke tint)
-            vec3 glassTint = mix(vec3(0.92, 0.95, 0.96), mat.baseColorFactor.rgb, 0.08);
+            vec3 glassTint = vec3(0.88, 0.92, 0.94);
+            vec3 transmittedLight = mix(cabinInterior, envRefr, 0.35) * glassTint;
+            float F = 0.04 + 0.96 * pow(clamp(1.0 - max(dot(N, V), 0.0), 0.0, 1.0), 5.0);
 
-            // Trace secondary refraction ray through the glass shell into cabin interior / backdrop
-            vec3 transmittedRadiance = envRefr * glassTint;
-            if (!tir) {
-                // Advance origin past the ~0.15 unit glass shell into interior cabin
-                vec3 curOrig = hitPos + refrDir * 0.35;
-                vec3 curDir = refrDir;
-
-                for (int step = 0; step < 2; ++step) {
-                    rayQueryEXT refrQuery;
-                    rayQueryInitializeEXT(refrQuery, topLevelAS, gl_RayFlagsOpaqueEXT, 0xFF, curOrig, 0.05, curDir, 2500.0);
-                    while (rayQueryProceedEXT(refrQuery)) {}
-
-                    if (rayQueryGetIntersectionTypeEXT(refrQuery, true) == gl_RayQueryCommittedIntersectionTriangleEXT) {
-                        float tRefr = rayQueryGetIntersectionTEXT(refrQuery, true);
-                        uint primRefr = rayQueryGetIntersectionPrimitiveIndexEXT(refrQuery, true);
-                        uint rMatId = triMatBuf.triangleMats[primRefr];
-                        GltfMaterialGpu rMat = matBuf.materials[rMatId];
-
-                        // If the ray hits glass again (e.g. inner glass boundary or rear window when viewed through windshield),
-                        // continue past it towards the showroom environment rather than treating glass as opaque diffuse.
-                        if (rMat.transmissionFactor > 0.05) {
-                            curOrig = curOrig + curDir * (tRefr + 0.35);
-                            continue;
-                        }
-
-                        // Interpolate opaque interior hit attributes (dashboard, upholstery, chassis floor)
-                        vec2 baryRefr = rayQueryGetIntersectionBarycentricsEXT(refrQuery, true);
-                        uint baseR = primRefr * 36u;
-                        vec3 rp0 = vec3(vbuf.vertices[baseR + 0], vbuf.vertices[baseR + 1], vbuf.vertices[baseR + 2]);
-                        vec3 rn0 = vec3(vbuf.vertices[baseR + 3], vbuf.vertices[baseR + 4], vbuf.vertices[baseR + 5]);
-                        vec2 ruv0 = vec2(vbuf.vertices[baseR + 10], vbuf.vertices[baseR + 11]);
-
-                        baseR += 12u;
-                        vec3 rp1 = vec3(vbuf.vertices[baseR + 0], vbuf.vertices[baseR + 1], vbuf.vertices[baseR + 2]);
-                        vec3 rn1 = vec3(vbuf.vertices[baseR + 3], vbuf.vertices[baseR + 4], vbuf.vertices[baseR + 5]);
-                        vec2 ruv1 = vec2(vbuf.vertices[baseR + 10], vbuf.vertices[baseR + 11]);
-
-                        baseR += 12u;
-                        vec3 rp2 = vec3(vbuf.vertices[baseR + 0], vbuf.vertices[baseR + 1], vbuf.vertices[baseR + 2]);
-                        vec3 rn2 = vec3(vbuf.vertices[baseR + 3], vbuf.vertices[baseR + 4], vbuf.vertices[baseR + 5]);
-                        vec2 ruv2 = vec2(vbuf.vertices[baseR + 10], vbuf.vertices[baseR + 11]);
-
-                        float rw = 1.0 - baryRefr.x - baryRefr.y;
-                        vec3 rHitPos = rw * rp0 + baryRefr.x * rp1 + baryRefr.y * rp2;
-                        vec3 rNorm = normalize(rw * rn0 + baryRefr.x * rn1 + baryRefr.y * rn2);
-                        vec2 rUv = rw * ruv0 + baryRefr.x * ruv1 + baryRefr.y * ruv2;
-
-                        vec4 rBaseCol = (rMat.baseColorTexIdx >= 0) ? sampleTexture(uint(rMat.baseColorTexIdx), rUv) : vec4(1.0);
-                        vec3 interiorAlbedo = pow(rBaseCol.rgb, vec3(2.2)) * rMat.baseColorFactor.rgb;
-
-                        // Light the interior surface with studio key light & softbox ambient
-                        float rNdotL = max(dot(rNorm, studioDir[0]), 0.0);
-                        float rShadow = (rNdotL > 0.0) ? (traceShadowRay(rHitPos, rNorm, studioDir[0], 5000.0) ? 0.25 : 1.0) : 0.25;
-                        vec3 interiorLight = interiorAlbedo * (studioColor[0] * rNdotL * rShadow + vec3(0.35, 0.38, 0.42));
-
-                        // Beer-Lambert physical volumetric absorption through cabin depth
-                        vec3 absorption = vec3(0.04, 0.02, 0.015);
-                        vec3 transmissionColor = exp(-absorption * min(tRefr, 50.0));
-                        transmittedRadiance = interiorLight * transmissionColor * glassTint;
-                        break;
-                    } else {
-                        // Exited cabin without hitting opaque geometry: sample showroom environment
-                        transmittedRadiance = envRefr * glassTint;
-                        break;
-                    }
-                }
-            }
-
-            // Fresnel reflection
-            float F0_g = ((1.0 - ior) / (1.0 + ior)) * ((1.0 - ior) / (1.0 + ior));
-            float F = F0_g + (1.0 - F0_g) * pow(clamp(1.0 - max(dot(N, V), 0.0), 0.0, 1.0), 5.0);
-
-            // Studio softbox specular highlights on the glass surface
             vec3 specLights = vec3(0.0);
             for (int i = 0; i < 3; ++i) {
-                vec3 H = normalize(V + studioDir[i]);
-                float NdotH = max(dot(N, H), 0.0);
-                float VdotH = max(dot(V, H), 0.0);
-                float NdotL = max(dot(N, studioDir[i]), 0.0);
-                float NdotV = max(dot(N, V), 0.0);
-                if (NdotL > 0.0) {
-                    float d = NdotH * NdotH * (0.0004 - 1.0) + 1.0;
-                    float D = 0.0004 / (3.14159 * d * d + 0.0001);
-                    float F_l = F0_g + (1.0 - F0_g) * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
-                    specLights += studioColor[i] * (D * F_l / (4.0 * NdotL * NdotV + 0.001) * NdotL);
-                }
+                specLights += evaluateMaterialArchetypeDirect(2u, hitPos, baseColor, roughness, metallic, mat.ior, N, V, studioDir[i], studioColor[i], ao);
             }
-
-            return mix(transmittedRadiance, envRefl, F) + specLights;
+            return mix(transmittedLight, envRefl, F) + specLights;
         }
 
         // Studio key light with Area Light Soft Shadow
@@ -454,9 +535,9 @@ vec3 evaluateGltfPbr(
         if (enableShadows && dot(geomNormal, studioDir[0]) > 0.0) {
             keyShadow = traceAreaShadow(hitPos, geomNormal, studioDir[0], 5000.0, 0.065, rng, 4);
         }
-        totalRadiance += evaluateCookTorranceGGX(baseColor, roughness, metallic, N, V, studioDir[0], studioColor[0] * keyShadow);
-        totalRadiance += evaluateCookTorranceGGX(baseColor, roughness, metallic, N, V, studioDir[1], studioColor[1]);
-        totalRadiance += evaluateCookTorranceGGX(baseColor, roughness, metallic, N, V, studioDir[2], studioColor[2]);
+        totalRadiance += evaluateMaterialArchetypeDirect(arch, hitPos, baseColor, roughness, metallic, mat.ior, N, V, studioDir[0], studioColor[0] * keyShadow, ao);
+        totalRadiance += evaluateMaterialArchetypeDirect(arch, hitPos, baseColor, roughness, metallic, mat.ior, N, V, studioDir[1], studioColor[1], ao);
+        totalRadiance += evaluateMaterialArchetypeDirect(arch, hitPos, baseColor, roughness, metallic, mat.ior, N, V, studioDir[2], studioColor[2], ao);
 
         // Contact proximity shadow under vehicle chassis onto cloth pedestal
         if (enableShadows && hitPos.y < 35.0 && hitPos.y > 0.0) {
@@ -505,16 +586,20 @@ vec3 evaluateGltfPbr(
             vec3 refrDir = refract(inDir, waterNorm, 1.0 / 1.333);
             if (length(refrDir) < 0.01) refrDir = reflect(inDir, waterNorm);
 
-            rayQueryEXT waterQuery;
-            rayQueryInitializeEXT(waterQuery, topLevelAS, gl_RayFlagsOpaqueEXT, 0xFF, hitPos + refrDir * 0.05, 0.001, refrDir, 25.0);
-            while (rayQueryProceedEXT(waterQuery)) {}
-
             vec3 riverbedColor;
-            if (rayQueryGetIntersectionTypeEXT(waterQuery, true) != 0) {
-                float depth = rayQueryGetIntersectionTEXT(waterQuery, true);
-                vec3 bedBase = vec3(0.18, 0.22, 0.20); // Submerged river stones
-                vec3 waterExtinction = exp(-vec3(0.15, 0.04, 0.02) * depth * 1.5);
-                riverbedColor = bedBase * waterExtinction * (sunColor * 0.5 * sunShadow + skyRadiance);
+            if (enableShadows) {
+                rayQueryEXT waterQuery;
+                rayQueryInitializeEXT(waterQuery, topLevelAS, gl_RayFlagsOpaqueEXT, 0xFF, hitPos + refrDir * 0.05, 0.001, refrDir, 25.0);
+                while (rayQueryProceedEXT(waterQuery)) {}
+
+                if (rayQueryGetIntersectionTypeEXT(waterQuery, true) != 0) {
+                    float depth = rayQueryGetIntersectionTEXT(waterQuery, true);
+                    vec3 bedBase = vec3(0.18, 0.22, 0.20); // Submerged river stones
+                    vec3 waterExtinction = exp(-vec3(0.15, 0.04, 0.02) * depth * 1.5);
+                    riverbedColor = bedBase * waterExtinction * (sunColor * 0.5 * sunShadow + skyRadiance);
+                } else {
+                    riverbedColor = vec3(0.02, 0.08, 0.12);
+                }
             } else {
                 riverbedColor = vec3(0.02, 0.08, 0.12);
             }

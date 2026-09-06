@@ -1,8 +1,11 @@
 #version 460
 #extension GL_EXT_ray_query : enable
 #extension GL_EXT_ray_flags_primitive_culling : enable
+#extension GL_KHR_shader_subgroup_basic : enable
+#extension GL_KHR_shader_subgroup_ballot : enable
+#extension GL_KHR_shader_subgroup_arithmetic : enable
 
-layout(local_size_x = 32) in;
+layout(local_size_x = 8, local_size_y = 4) in;
 
 layout(set = 0, binding = 0) uniform accelerationStructureEXT topLevelAS;
 layout(set = 0, binding = 1) buffer Results {
@@ -38,8 +41,6 @@ layout(push_constant) uniform PushConstants {
     uint isGltf;          // 1 if glTF PBR scene, 0 if procedural
 } pc;
 
-shared uint localRays;
-shared uint localHits;
 
 // Scene Type Constants
 const uint SCENE_SHOWROOM_STUDIO = 0u;
@@ -457,9 +458,6 @@ vec3 computeSmoothNormal(uint sceneType, uint primId, vec3 hitPos, vec3 rayDir, 
     return normal;
 }
 
-#ifndef SPECIALIZED_ARCHETYPE
-#define SPECIALIZED_ARCHETYPE 0xFFFFFFFFu
-#endif
 
 vec3 evalMaterialBSDF(uint sceneType, uint matId, vec3 normal, vec3 inDir, vec3 hitPos, inout uint rng) {
     vec3 viewDir = -inDir;
@@ -823,14 +821,11 @@ vec3 evalMaterialBSDF(uint sceneType, uint matId, vec3 normal, vec3 inDir, vec3 
 
 
 void main() {
-    uint idx = gl_GlobalInvocationID.x;
+    uint idx = (gl_NumWorkGroups.y > 1u) ? (gl_GlobalInvocationID.y * pc.width + gl_GlobalInvocationID.x) : (gl_WorkGroupID.x * 32u + gl_LocalInvocationIndex);
     if (idx >= pc.rayCount) return;
 
-    if (gl_LocalInvocationID.x == 0) {
-        localRays = 0;
-        localHits = 0;
-    }
-    barrier();
+    uint threadRays = 0u;
+    uint threadHits = 0u;
 
     uint rngState = idx + pc.seed;
 
@@ -855,13 +850,13 @@ void main() {
         vec3 curOrigin = rayOrigin;
         vec3 curDir = rayDir;
         for (uint b = 0; b < pc.bounces; ++b) {
-            atomicAdd(localRays, 1);
+            threadRays++;
             rayQueryEXT query;
-            rayQueryInitializeEXT(query, topLevelAS, gl_RayFlagsNoneEXT, 0xFF, curOrigin, (b == 0 ? tMinPrimary : (pc.isGltf != 0u ? 0.05 : 0.005)), curDir, tMaxPrimary);
+            rayQueryInitializeEXT(query, topLevelAS, gl_RayFlagsOpaqueEXT, 0xFF, curOrigin, (b == 0 ? tMinPrimary : (pc.isGltf != 0u ? 0.05 : 0.005)), curDir, tMaxPrimary);
             while (rayQueryProceedEXT(query)) {}
 
             if (rayQueryGetIntersectionTypeEXT(query, true) == gl_RayQueryCommittedIntersectionTriangleEXT) {
-                atomicAdd(localHits, 1);
+                threadHits++;
                 float t = rayQueryGetIntersectionTEXT(query, true);
                 vec3 hitPos = curOrigin + curDir * t;
                 uint primId = rayQueryGetIntersectionPrimitiveIndexEXT(query, true);
@@ -884,13 +879,13 @@ void main() {
         }
     } else if (pc.mode == 2) {
         // Mode 2: Incoherent Secondary GI (Hemisphere Scattering without Spatial Binning)
-        atomicAdd(localRays, 1);
+        threadRays++;
         rayQueryEXT query1;
-        rayQueryInitializeEXT(query1, topLevelAS, gl_RayFlagsNoneEXT, 0xFF, rayOrigin, tMinPrimary, rayDir, tMaxPrimary);
+        rayQueryInitializeEXT(query1, topLevelAS, gl_RayFlagsOpaqueEXT, 0xFF, rayOrigin, tMinPrimary, rayDir, tMaxPrimary);
         while (rayQueryProceedEXT(query1)) {}
 
         if (rayQueryGetIntersectionTypeEXT(query1, true) == gl_RayQueryCommittedIntersectionTriangleEXT) {
-            atomicAdd(localHits, 1);
+            threadHits++;
             float t = rayQueryGetIntersectionTEXT(query1, true);
             vec3 hitPos = rayOrigin + rayDir * t;
             uint primId = rayQueryGetIntersectionPrimitiveIndexEXT(query1, true);
@@ -901,30 +896,30 @@ void main() {
             float u2 = rand_float(rngState);
             vec3 incohDir = align_to_normal(cosine_sample_hemisphere(u1, u2), normal);
 
-            atomicAdd(localRays, 1);
+            threadRays++;
             rayQueryEXT query2;
             float tMaxSec = (pc.isGltf != 0u) ? 5000.0 : ((pc.sceneType == SCENE_OUTDOOR_TERRAIN) ? 500.0 : 20.0);
-            rayQueryInitializeEXT(query2, topLevelAS, gl_RayFlagsNoneEXT, 0xFF, hitPos + normal * (pc.isGltf != 0u ? 0.05 : 0.005), 0.001, incohDir, tMaxSec);
+            rayQueryInitializeEXT(query2, topLevelAS, gl_RayFlagsOpaqueEXT, 0xFF, hitPos + normal * (pc.isGltf != 0u ? 0.05 : 0.005), 0.001, incohDir, tMaxSec);
             while (rayQueryProceedEXT(query2)) {}
 
             if (rayQueryGetIntersectionTypeEXT(query2, true) != 0) {
-                atomicAdd(localHits, 1);
+                threadHits++;
             }
         }
     } else if (pc.mode == 3) {
         // Mode 3: Stage Breakdown - Pure BVH Traversal Only
-        atomicAdd(localRays, 1);
+        threadRays++;
         rayQueryEXT query;
-        rayQueryInitializeEXT(query, topLevelAS, gl_RayFlagsNoneEXT, 0xFF, rayOrigin, tMinPrimary, rayDir, tMaxPrimary);
+        rayQueryInitializeEXT(query, topLevelAS, gl_RayFlagsOpaqueEXT, 0xFF, rayOrigin, tMinPrimary, rayDir, tMaxPrimary);
         while (rayQueryProceedEXT(query)) {}
 
         if (rayQueryGetIntersectionTypeEXT(query, true) == gl_RayQueryCommittedIntersectionTriangleEXT) {
-            atomicAdd(localHits, 1);
+            threadHits++;
         }
     } else if (pc.mode == 4) {
         // Mode 4: Stage Breakdown - Pure Material Shading (Megakernel Divergent, No BVH)
-        atomicAdd(localRays, 1);
-        atomicAdd(localHits, 1);
+        threadRays++;
+        threadHits++;
         vec3 pixelColor;
         if (pc.isGltf != 0u) {
             uint matId = idx % 8u;
@@ -948,7 +943,7 @@ void main() {
         // Tests visibility from primary surface hits to key light / sun.
         // Heavy SIMD divergence: lanes with occluders terminate early, open-sky lanes traverse full BVH.
         rayQueryEXT query;
-        rayQueryInitializeEXT(query, topLevelAS, gl_RayFlagsNoneEXT, 0xFF, rayOrigin, tMinPrimary, rayDir, tMaxPrimary);
+        rayQueryInitializeEXT(query, topLevelAS, gl_RayFlagsOpaqueEXT, 0xFF, rayOrigin, tMinPrimary, rayDir, tMaxPrimary);
         while (rayQueryProceedEXT(query)) {}
 
         if (rayQueryGetIntersectionTypeEXT(query, true) == gl_RayQueryCommittedIntersectionTriangleEXT) {
@@ -980,12 +975,12 @@ void main() {
                 maxDist = 2500.0;
             }
 
-            atomicAdd(localRays, 1);
+            threadRays++;
             bool occluded = false;
             if (dot(geomNormal, lightDir) > 0.0) {
                 occluded = traceShadowRay(hitPos, geomNormal, lightDir, maxDist);
                 if (occluded) {
-                    atomicAdd(localHits, 1);
+                    threadHits++;
                 }
             }
 
@@ -1000,16 +995,16 @@ void main() {
         }
     } else {
         // Mode 0: Primary Ray Tracing + Divergent Material Shading
-        atomicAdd(localRays, 1);
+        threadRays++;
 
         rayQueryEXT query;
-        rayQueryInitializeEXT(query, topLevelAS, gl_RayFlagsNoneEXT, 0xFF, rayOrigin, tMinPrimary, rayDir, tMaxPrimary);
+        rayQueryInitializeEXT(query, topLevelAS, gl_RayFlagsOpaqueEXT, 0xFF, rayOrigin, tMinPrimary, rayDir, tMaxPrimary);
         while (rayQueryProceedEXT(query)) {}
 
         vec3 pixelColor = vec3(0.0);
 
         if (rayQueryGetIntersectionTypeEXT(query, true) == gl_RayQueryCommittedIntersectionTriangleEXT) {
-            atomicAdd(localHits, 1);
+            threadHits++;
             float t = rayQueryGetIntersectionTEXT(query, true);
             vec3 hitPos = rayOrigin + rayDir * t;
             uint primId = rayQueryGetIntersectionPrimitiveIndexEXT(query, true);
@@ -1061,9 +1056,10 @@ void main() {
         }
     }
 
-    barrier();
-    if (gl_LocalInvocationID.x == 0) {
-        atomicAdd(results.totalRays, localRays);
-        atomicAdd(results.totalHits, localHits);
+    uint waveRays = subgroupAdd(threadRays);
+    uint waveHits = subgroupAdd(threadHits);
+    if (subgroupElect()) {
+        if (waveRays > 0u) atomicAdd(results.totalRays, waveRays);
+        if (waveHits > 0u) atomicAdd(results.totalHits, waveHits);
     }
 }

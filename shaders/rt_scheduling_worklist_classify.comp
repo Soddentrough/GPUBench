@@ -5,7 +5,7 @@
 #extension GL_KHR_shader_subgroup_ballot : enable
 #extension GL_KHR_shader_subgroup_arithmetic : enable
 
-layout(local_size_x = 32) in;
+layout(local_size_x = 8, local_size_y = 4) in;
 
 layout(set = 0, binding = 0) uniform accelerationStructureEXT topLevelAS;
 layout(set = 0, binding = 1) buffer Results {
@@ -58,8 +58,6 @@ layout(push_constant) uniform PushConstants {
     uint sceneType;       // 0: Showroom Studio, 1: Outdoor Terrain, 2: Indoor Atrium
     uint isGltf;          // 1 if glTF PBR scene, 0 if procedural
 } pc;
-
-shared uint ldsBaseSlot[8];
 
 
 // Scene Type Constants
@@ -497,7 +495,7 @@ vec3 computeSmoothNormal(uint sceneType, uint primId, vec3 hitPos, vec3 rayDir, 
 
 
 void main() {
-    uint idx = gl_GlobalInvocationID.x;
+    uint idx = (gl_NumWorkGroups.y > 1u) ? (gl_GlobalInvocationID.y * pc.width + gl_GlobalInvocationID.x) : (gl_WorkGroupID.x * 32u + gl_LocalInvocationIndex);
 
     uint threadRays = 0u;
     uint threadHits = 0u;
@@ -546,7 +544,7 @@ void main() {
                 } else if (pc.mode == 0) {
                     if (pc.isGltf != 0u) {
                         uint matId = triMatBuf.triangleMats[primId];
-                        assignedQueue = matId % 8u;
+                        assignedQueue = matBuf.materials[matId].archetype;
                         vec2 rawBary = rayQueryGetIntersectionBarycentricsEXT(query, true);
                         payload0 = vec4(t, uintBitsToFloat(pixelIdx), uintBitsToFloat(primId), uintBitsToFloat(packUnorm2x16(rawBary)));
                     } else {
@@ -593,53 +591,33 @@ void main() {
         }
     }
 
-    // Coalesced Wave-Level Stream Compaction into Contiguous VRAM Queues
-    uvec4 b0 = subgroupBallot(assignedQueue == 0u);
-    uvec4 b1 = subgroupBallot(assignedQueue == 1u);
-    uvec4 b2 = subgroupBallot(assignedQueue == 2u);
-    uvec4 b3 = subgroupBallot(assignedQueue == 3u);
-    uvec4 b4 = subgroupBallot(assignedQueue == 4u);
-    uvec4 b5 = subgroupBallot(assignedQueue == 5u);
-    uvec4 b6 = subgroupBallot(assignedQueue == 6u);
-    uvec4 b7 = subgroupBallot(assignedQueue == 7u);
-
-    uint c0 = subgroupBallotBitCount(b0);
-    uint c1 = subgroupBallotBitCount(b1);
-    uint c2 = subgroupBallotBitCount(b2);
-    uint c3 = subgroupBallotBitCount(b3);
-    uint c4 = subgroupBallotBitCount(b4);
-    uint c5 = subgroupBallotBitCount(b5);
-    uint c6 = subgroupBallotBitCount(b6);
-    uint c7 = subgroupBallotBitCount(b7);
-
-    if (gl_LocalInvocationID.x < 8u) {
-        uint q = gl_LocalInvocationID.x;
-        uint cnt = (q == 0u ? c0 : (q == 1u ? c1 : (q == 2u ? c2 : (q == 3u ? c3 : (q == 4u ? c4 : (q == 5u ? c5 : (q == 6u ? c6 : c7)))))));
-        uint base = 0u;
-        if (cnt > 0u) {
-            base = atomicAdd(worklist.queueCounters[Q_COUNTER_IDX(q)], cnt);
-        }
-        ldsBaseSlot[q] = base;
-    }
-    barrier();
-
-    if (assignedQueue < 8u) {
-        uint q = assignedQueue;
-        uvec4 myBallot = (q == 0u ? b0 : (q == 1u ? b1 : (q == 2u ? b2 : (q == 3u ? b3 : (q == 4u ? b4 : (q == 5u ? b5 : (q == 6u ? b6 : b7)))))));
-        uint rankInQueue = subgroupBallotExclusiveBitCount(myBallot);
-        uint vramSlot = ldsBaseSlot[q] + rankInQueue;
-        if (vramSlot < pc.queueCapacity) {
-            worklist.rayRecords[q * pc.queueCapacity + vramSlot] = payload0;
+    // Coalesced Zero-LDS Wave-Level Stream Compaction into Contiguous VRAM Queues
+    for (uint q = 0u; q < 8u; ++q) {
+        bool match = (assignedQueue == q);
+        uvec4 ballot = subgroupBallot(match);
+        uint count = subgroupBallotBitCount(ballot);
+        if (count > 0u) {
+            uint slotInWave = subgroupBallotExclusiveBitCount(ballot);
+            uint firstLane = subgroupBallotFindLSB(ballot);
+            uint baseSlot = 0u;
+            if (gl_SubgroupInvocationID == firstLane) {
+                baseSlot = atomicAdd(worklist.queueCounters[Q_COUNTER_IDX(q)], count);
+            }
+            baseSlot = subgroupBroadcast(baseSlot, firstLane);
+            if (match) {
+                uint slot = baseSlot + slotInWave;
+                if (slot < pc.queueCapacity) {
+                    worklist.rayRecords[q * pc.queueCapacity + slot] = payload0;
+                }
+            }
         }
     }
 
     // Subgroup Reduction for Global Result Counters
-    if (gl_WorkGroupID.x == 0) {
-        uint waveRays = subgroupAdd(threadRays);
-        uint waveHits = subgroupAdd(threadHits);
-        if (subgroupElect()) {
-            if (waveRays > 0u) atomicAdd(results.totalRays, waveRays);
-            if (waveHits > 0u) atomicAdd(results.totalHits, waveHits);
-        }
+    uint waveRays = subgroupAdd(threadRays);
+    uint waveHits = subgroupAdd(threadHits);
+    if (subgroupElect()) {
+        if (waveRays > 0u) atomicAdd(results.totalRays, waveRays);
+        if (waveHits > 0u) atomicAdd(results.totalHits, waveHits);
     }
 }

@@ -1160,7 +1160,9 @@ ComputeKernel VulkanContext::createKernelInternal(const std::string &file_name,
 
   // This is a simplified setup. A real application would inspect the shader for
   // bindings.
-  bool is_rt = (file_name.find("rt_") != std::string::npos);
+  bool is_rt = (file_name.find("rt_") != std::string::npos &&
+                file_name.find("reset") == std::string::npos &&
+                file_name.find("resolve") == std::string::npos);
 
   std::vector<VkDescriptorSetLayoutBinding> bindings;
   for (uint32_t i = 0; i < num_buffer_args; ++i) {
