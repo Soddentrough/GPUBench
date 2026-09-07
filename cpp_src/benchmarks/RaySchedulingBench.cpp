@@ -28,22 +28,6 @@ std::string RaySchedulingBench::findModelPath(const std::string &modelName) cons
   return "";
 }
 
-std::string RaySchedulingBench::findScriptPath(const std::string &scriptName) const {
-  std::vector<std::string> searchPaths = {
-    "scripts/" + scriptName,
-    "../scripts/" + scriptName,
-    "/usr/share/gpubench/scripts/" + scriptName,
-    "/usr/local/share/gpubench/scripts/" + scriptName,
-    "share/gpubench/scripts/" + scriptName
-  };
-  for (const auto &p : searchPaths) {
-    if (std::filesystem::exists(p)) {
-      return p;
-    }
-  }
-  return "";
-}
-
 #ifdef HAVE_VULKAN
 void RaySchedulingBench::loadRTProcs(VkDevice device) {
   vkGetAccelerationStructureBuildSizesKHR_ptr =
@@ -422,13 +406,13 @@ const char *RaySchedulingBench::GetSubCategory(uint32_t config_idx) const {
 
 std::string RaySchedulingBench::GetConfigCaveat(uint32_t config_idx) const {
   if (config_idx == 2 && isDGCAvailable && !isDGCExecutionSetAvailable) {
-    return "VK_EXT_device_generated_commands IndirectExecutionSet pipeline binding unsupported for compute on this driver; executed via standard indirect dispatch fallback.";
+    return "VK_EXT_device_generated_commands IndirectExecutionSet pipeline binding unsupported for compute on this driver; executed via Vulkan 1.0 Core (vkCmdDispatchIndirect) fallback.";
   }
   if (!isDGCAvailable) {
     if (config_idx == 2 || config_idx == 6 || config_idx == 10 ||
         config_idx == 14 || config_idx == 22 || config_idx == 25 ||
         config_idx == 27 || config_idx == 29) {
-      return "VK_EXT_device_generated_commands unavailable; executed via standard indirect dispatch (vkCmdDispatchIndirect) fallback.";
+      return "VK_EXT_device_generated_commands unavailable; executed via Vulkan 1.0 Core (vkCmdDispatchIndirect) fallback.";
     }
   }
   return "";
@@ -1416,17 +1400,13 @@ void RaySchedulingBench::performVisualVerification() {
                                ? "outdoor"
                                : ((sceneType == SceneType::IndoorAtrium) ? "indoor" : "showroom"));
 
-  std::string tradPpm = "renders/render_" + tag + "_traditional_megakernel.ppm";
-  std::string workPpm = "renders/render_" + tag + "_worklist_dgc.ppm";
-  std::string diffPpm = "renders/render_" + tag + "_difference_heatmap.ppm";
-
   std::string tradPng = "renders/render_" + tag + "_traditional_megakernel.png";
   std::string workPng = "renders/render_" + tag + "_worklist_dgc.png";
   std::string diffPng = "renders/render_" + tag + "_difference_heatmap.png";
 
-  gpubench::ImageExport::writePPM(tradPpm, width, height, ldrTrad);
-  gpubench::ImageExport::writePPM(workPpm, width, height, ldrWork);
-  gpubench::ImageExport::writePPM(diffPpm, width, height, ldrDiff);
+  gpubench::ImageExport::writePNG(tradPng, width, height, ldrTrad);
+  gpubench::ImageExport::writePNG(workPng, width, height, ldrWork);
+  gpubench::ImageExport::writePNG(diffPng, width, height, ldrDiff);
 
   // Extract timings for captioned telemetry slate (using recorded benchmark results or live measurements)
   double timeSecTrad = 0.0;
@@ -1544,9 +1524,7 @@ void RaySchedulingBench::performVisualVerification() {
     profFile.close();
   }
 
-  gpubench::ImageExport::convertPPMtoPNG(tradPpm, tradPng, profileJson, "traditional");
-  gpubench::ImageExport::convertPPMtoPNG(workPpm, workPng, profileJson, "worklist");
-  gpubench::ImageExport::convertPPMtoPNG(diffPpm, diffPng, profileJson, "diff");
+
 
   // Render and dump 1 SPP Path Tracing
   uint32_t savedSpp = samplesPerPixel;
@@ -1559,15 +1537,12 @@ void RaySchedulingBench::performVisualVerification() {
   context->readBuffer(fbWorkList, 0, bufferSize, hdrWork.data());
   auto pt1Metrics = gpubench::ImageExport::compareAndTonemap(
       hdrTrad.data(), hdrWork.data(), width, height, ldrTrad, ldrWork, ldrDiff);
-  std::string pt1TradPpm = "renders/render_" + tag + "_pathtracing_1spp_traditional.ppm";
-  std::string pt1WorkPpm = "renders/render_" + tag + "_pathtracing_1spp_worklist.ppm";
-  std::string pt1DiffPpm = "renders/render_" + tag + "_pathtracing_1spp_difference.ppm";
   std::string pt1TradPng = "renders/render_" + tag + "_pathtracing_1spp_traditional.png";
   std::string pt1WorkPng = "renders/render_" + tag + "_pathtracing_1spp_worklist.png";
   std::string pt1DiffPng = "renders/render_" + tag + "_pathtracing_1spp_difference.png";
-  gpubench::ImageExport::writePPM(pt1TradPpm, width, height, ldrTrad);
-  gpubench::ImageExport::writePPM(pt1WorkPpm, width, height, ldrWork);
-  gpubench::ImageExport::writePPM(pt1DiffPpm, width, height, ldrDiff);
+  gpubench::ImageExport::writePNG(pt1TradPng, width, height, ldrTrad);
+  gpubench::ImageExport::writePNG(pt1WorkPng, width, height, ldrWork);
+  gpubench::ImageExport::writePNG(pt1DiffPng, width, height, ldrDiff);
 
   double pt1TimeTrad = (recordedInvocations[4] > 0 && recordedTimeMs[4] > 0.0)
       ? (recordedTimeMs[4] / 1000.0) / static_cast<double>(recordedInvocations[4]) : timeSecTrad;
@@ -1610,10 +1585,6 @@ void RaySchedulingBench::performVisualVerification() {
     pt1Prof.close();
   }
 
-  gpubench::ImageExport::convertPPMtoPNG(pt1TradPpm, pt1TradPng, pt1ProfileJson, "traditional");
-  gpubench::ImageExport::convertPPMtoPNG(pt1WorkPpm, pt1WorkPng, pt1ProfileJson, "worklist");
-  gpubench::ImageExport::convertPPMtoPNG(pt1DiffPpm, pt1DiffPng, pt1ProfileJson, "diff");
-
   // Render and dump 16 SPP Path Tracing
   Run(28);
   context->waitIdle();
@@ -1625,15 +1596,12 @@ void RaySchedulingBench::performVisualVerification() {
       hdrTrad.data(), hdrWork.data(), width, height, ldrTrad, ldrWork, ldrDiff);
   samplesPerPixel = savedSpp;
 
-  std::string pt16TradPpm = "renders/render_" + tag + "_pathtracing_16spp_traditional.ppm";
-  std::string pt16WorkPpm = "renders/render_" + tag + "_pathtracing_16spp_worklist.ppm";
-  std::string pt16DiffPpm = "renders/render_" + tag + "_pathtracing_16spp_difference.ppm";
   std::string pt16TradPng = "renders/render_" + tag + "_pathtracing_16spp_traditional.png";
   std::string pt16WorkPng = "renders/render_" + tag + "_pathtracing_16spp_worklist.png";
   std::string pt16DiffPng = "renders/render_" + tag + "_pathtracing_16spp_difference.png";
-  gpubench::ImageExport::writePPM(pt16TradPpm, width, height, ldrTrad);
-  gpubench::ImageExport::writePPM(pt16WorkPpm, width, height, ldrWork);
-  gpubench::ImageExport::writePPM(pt16DiffPpm, width, height, ldrDiff);
+  gpubench::ImageExport::writePNG(pt16TradPng, width, height, ldrTrad);
+  gpubench::ImageExport::writePNG(pt16WorkPng, width, height, ldrWork);
+  gpubench::ImageExport::writePNG(pt16DiffPng, width, height, ldrDiff);
 
   double pt16TimeTrad = (recordedInvocations[28] > 0 && recordedTimeMs[28] > 0.0)
       ? (recordedTimeMs[28] / 1000.0) / static_cast<double>(recordedInvocations[28]) : (pt1TimeTrad * 16.0);
@@ -1676,47 +1644,8 @@ void RaySchedulingBench::performVisualVerification() {
     pt16Prof.close();
   }
 
-  gpubench::ImageExport::convertPPMtoPNG(pt16TradPpm, pt16TradPng, pt16ProfileJson, "traditional");
-  gpubench::ImageExport::convertPPMtoPNG(pt16WorkPpm, pt16WorkPng, pt16ProfileJson, "worklist");
-  gpubench::ImageExport::convertPPMtoPNG(pt16DiffPpm, pt16DiffPng, pt16ProfileJson, "diff");
-
   // Step-by-step pipeline decomposition breakdown
   dumpPipelineBreakdown(tag);
-
-  // Automatically stitch comparison image and 2x grid
-  std::string scriptPath = findScriptPath("make_triptych.py");
-  if (!scriptPath.empty()) {
-#ifdef _WIN32
-    std::string py = "python ";
-#else
-    std::string py = "python3 ";
-#endif
-    std::string triptychCmd = py + scriptPath + " " + tag;
-    (void)std::system(triptychCmd.c_str());
-    std::string pt1Cmd = py + scriptPath + " " + tag + "_pt1";
-    (void)std::system(pt1Cmd.c_str());
-    std::string pt16Cmd = py + scriptPath + " " + tag + "_pt16";
-    (void)std::system(pt16Cmd.c_str());
-    std::string techCmd = py + scriptPath + " " + tag + "_tech";
-    (void)std::system(techCmd.c_str());
-    std::string gridCmd = py + scriptPath + " grid";
-    (void)std::system(gridCmd.c_str());
-    std::string techGridCmd = py + scriptPath + " technique_grid";
-    (void)std::system(techGridCmd.c_str());
-    std::string ptGridCmd = py + scriptPath + " pt_grid";
-    (void)std::system(ptGridCmd.c_str());
-    std::string pipeCmd = py + scriptPath + " " + tag + "_pipeline";
-    (void)std::system(pipeCmd.c_str());
-  }
-  std::string blenderScript = findScriptPath("compare_with_blender.py");
-  if (!blenderScript.empty() && (sceneType == SceneType::IndoorAtrium || sceneType == SceneType::Showroom)) {
-#ifdef _WIN32
-    std::string blenderCmd = "python " + blenderScript;
-#else
-    std::string blenderCmd = "python3 " + blenderScript;
-#endif
-    (void)std::system(blenderCmd.c_str());
-  }
 
   std::string sceneTitle = (sceneType == SceneType::AAAOutdoorForest)
                                 ? "OPEN-WORLD FOREST SCENARIO (1,001,280 Triangles)"
@@ -1862,7 +1791,6 @@ void RaySchedulingBench::dumpPipelineBreakdown(const std::string &tag) {
     double timeMs;
     double mrays;
     double fps;
-    std::string ppmPath;
     std::string pngPath;
   };
   std::vector<StageResult> stageResults;
@@ -1900,12 +1828,10 @@ void RaySchedulingBench::dumpPipelineBreakdown(const std::string &tag) {
       ldrBuf[i * 3 + 2] = gpubench::ImageExport::floatToSrgb(hdrBuf[i * 4 + 2]);
     }
 
-    std::string ppmPath = "renders/render_" + tag + "_" + st.id + ".ppm";
     std::string pngPath = "renders/render_" + tag + "_" + st.id + ".png";
-    gpubench::ImageExport::writePPM(ppmPath, width, height, ldrBuf);
-    gpubench::ImageExport::convertPPMtoPNG(ppmPath, pngPath);
+    gpubench::ImageExport::writePNG(pngPath, width, height, ldrBuf);
 
-    stageResults.push_back({st.id, st.title, st.passType, timeMs, mrays, fps, ppmPath, pngPath});
+    stageResults.push_back({st.id, st.title, st.passType, timeMs, mrays, fps, pngPath});
   }
 
   // Dump telemetry breakdown JSON

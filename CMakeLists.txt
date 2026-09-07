@@ -224,6 +224,7 @@ set(LIB_SOURCES
     cpp_src/benchmarks/RaySchedulingBench.cpp
     cpp_src/scene/GltfScene.cpp
     cpp_src/utils/HardwareTelemetry.cpp
+    cpp_src/utils/ImageExport.cpp
     cpp_src/utils/KernelPath.cpp
     cpp_src/utils/ShaderCache.cpp
     cpp_src/utils/SleepInhibitor.cpp

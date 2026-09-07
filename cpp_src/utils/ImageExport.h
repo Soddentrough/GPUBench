@@ -43,31 +43,12 @@ public:
     return file.good();
   }
 
+  static bool writePNG(const std::string &path, uint32_t width, uint32_t height,
+                       const std::vector<uint8_t> &rgbData);
+
   static void convertPPMtoPNG(const std::string &ppmPath, const std::string &pngPath,
                               const std::string &profileJsonPath = "", const std::string &type = "traditional",
-                              bool annotate = false) {
-#ifdef _WIN32
-    std::string pythonExe = "python ";
-    std::string devNull = " 2>NUL";
-#else
-    std::string pythonExe = "python3 ";
-    std::string devNull = " 2>/dev/null";
-#endif
-    std::string cmd;
-    if (annotate && !profileJsonPath.empty()) {
-      cmd = pythonExe + "scripts/annotate_render.py \"" + ppmPath + "\" \"" + pngPath + "\" --profile \"" + profileJsonPath + "\" --type " + type + " --annotate" + devNull;
-    } else {
-      cmd = pythonExe + "scripts/annotate_render.py \"" + ppmPath + "\" \"" + pngPath + "\" --clean" + devNull;
-    }
-    int ret = std::system(cmd.c_str());
-    if (ret != 0) {
-      // Fallback if script not in cwd
-      std::string fbCmd = pythonExe + "-c \"from PIL import Image; Image.open('" + ppmPath + "').save('" + pngPath + "')\"" + devNull;
-      int fbRet = std::system(fbCmd.c_str());
-      (void)fbRet;
-    }
-    std::remove(ppmPath.c_str());
-  }
+                              bool annotate = false);
 
   static ImageMetrics compareAndTonemap(
       const float *hdrA, const float *hdrB,

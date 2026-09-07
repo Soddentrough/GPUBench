@@ -557,6 +557,33 @@ fn get_benchmark_description(name: &str) -> &'static str {
     }
 }
 
+pub fn get_benchmark_api_extensions(name: &str) -> &'static str {
+    match name {
+        "FP64" => "Vulkan / OpenCL / ROCm Core Compute (Float64)",
+        "FP32" => "Vulkan / OpenCL / ROCm Core Compute (Float32)",
+        "FP16" => "VK_KHR_shader_float16_int8 / cl_khr_fp16",
+        "BF16" => "VK_KHR_shader_float_controls2 / ROCm BF16",
+        "FP8" => "VK_EXT_shader_float8 / ROCm FP8",
+        "FP4" => "Vulkan Subgroup Bit Packing (4-bit Float)",
+        "INT8" => "VK_KHR_shader_integer_dot_product (DP4A)",
+        "INT4" => "Vulkan Subgroup Bit Packing (4-bit INT)",
+        "Device Memory Bandwidth" => "Vulkan / OpenCL / ROCm Linear Buffer DMA",
+        "System Memory Bandwidth" => "x86_64 AVX2 / Non-Temporal Streaming Stores",
+        "System Memory Latency" => "Hardware DRAM Pointer Chase",
+        "Pixel Fill Rate" => "Vulkan Graphics Pipeline (Rasterization & Blending)",
+        "RayASBuild" => "VK_KHR_acceleration_structure",
+        "RayTracing" | "RayIntersect" => "VK_KHR_ray_query",
+        "RayAnyHit" => "VK_KHR_ray_query (gl_RayFlagsCullNoOpaqueEXT / Custom Opacity)",
+        "RayProcedural" => "VK_KHR_ray_query (AABB Procedural Intersection)",
+        "RayScheduling" | "RayExecutionParadigm" => "VK_KHR_ray_query, VK_EXT_device_generated_commands",
+        "RayMaterialDivergence" => "VK_KHR_ray_query (Dynamic Material Branching)",
+        "RayIncoherent" => "VK_KHR_ray_query (Unordered BVH Diffuse Bounce Traversal)",
+        "RayDivergence" => "VK_KHR_ray_query (Wavefront Divergence)",
+        "RayPayload" => "VK_KHR_ray_query (Spill-to-Scratch Register Pressure)",
+        _ => "Vulkan / OpenCL / System Standard API",
+    }
+}
+
 pub fn is_benchmark_requested(t: &str, requested_tokens: &[String]) -> bool {
     let t_lower = t.to_lowercase();
     let t_norm: String = t_lower.chars().filter(|c| c.is_alphanumeric()).collect();
@@ -2056,15 +2083,9 @@ fn open_file_in_desktop(path: &str) {
 
     #[cfg(target_os = "windows")]
     {
-        if p.is_dir() {
-            let _ = std::process::Command::new("explorer")
-                .arg(&abs_path)
-                .spawn();
-        } else {
-            let _ = std::process::Command::new("cmd")
-                .args(["/C", "start", "", &abs_path])
-                .spawn();
-        }
+        let _ = std::process::Command::new("explorer")
+            .arg(&abs_path)
+            .spawn();
     }
     #[cfg(target_os = "macos")]
     {
@@ -2773,6 +2794,13 @@ impl Application for GPUBenchApp {
                             "Pixel Fill Rate" => 3,
                             "FP16" | "BF16" | "FP8" | "INT8" | "INT4" => 2,
                             "RayASBuild" => 8,
+                            "RayTracing" | "RayIntersect" => 2,
+                            "RayAnyHit" => 5,
+                            "RayProcedural" => 1,
+                            "RayMaterialDivergence" => 2,
+                            "RayIncoherent" => 2,
+                            "RayDivergence" => 5,
+                            "RayPayload" => 3,
                             "RayScheduling" | "RayExecutionParadigm" => {
                                 if self.selected_scene == ScenePreset::All { 30 * 4 } else { 30 }
                             }
@@ -3713,16 +3741,25 @@ impl Application for GPUBenchApp {
                                     .style(iced::theme::Button::Custom(Box::new(SleekPillToggle { is_active: is_checked, is_api_selector: false })))
                             };
 
+                            let ext_text = get_benchmark_api_extensions(key);
                             let pill_with_tip = tooltip(
                                 pill_btn,
-                                container(text(tip_text).size(11).style(color!(0xE2E8F0)))
-                                    .width(Length::Fixed(260.0))
-                                    .padding(8)
-                                    .style(|_t: &Theme| container::Appearance {
-                                        background: Some(Background::Color(color!(0x141824))),
-                                        border: Border { radius: 6.0.into(), width: 1.0, color: color!(0x2A3248) },
-                                        ..Default::default()
-                                    }),
+                                container(
+                                    column![
+                                        text(display_label).size(12).style(color!(0xF8FAFC)),
+                                        Space::with_height(2),
+                                        text(format!("API Extension(s): {}", ext_text)).size(10).style(color!(0xA78BFA)),
+                                        Space::with_height(3),
+                                        text(tip_text).size(10).style(color!(0xCBD5E1)),
+                                    ].spacing(2)
+                                )
+                                .width(Length::Fixed(290.0))
+                                .padding(10)
+                                .style(|_t: &Theme| container::Appearance {
+                                    background: Some(Background::Color(color!(0x141824))),
+                                    border: Border { radius: 6.0.into(), width: 1.0, color: color!(0x2A3248) },
+                                    ..Default::default()
+                                }),
                                 tooltip::Position::Top
                             )
                             .gap(4)
@@ -4294,18 +4331,43 @@ impl Application for GPUBenchApp {
                             text(w.approach).size(10).style(approach_color),
                         ].spacing(1);
 
+                        let help_badge = container(
+                            text("?").size(10).style(color!(0x94A3B8))
+                        )
+                        .width(Length::Fixed(16.0))
+                        .height(Length::Fixed(16.0))
+                        .center_x()
+                        .center_y()
+                        .style(|_t: &Theme| container::Appearance {
+                            background: Some(Background::Color(color!(0x1E293B))),
+                            border: Border {
+                                radius: 8.0.into(),
+                                width: 1.0,
+                                color: color!(0x334155),
+                            },
+                            ..Default::default()
+                        });
+
+                        let left_content = row![
+                            name_block,
+                            Space::with_width(Length::Fill),
+                            help_badge,
+                        ]
+                        .align_items(iced::Alignment::Center);
+
                         let info_tip = tooltip(
-                            text("ⓘ").size(11).style(color!(0x475569)),
+                            left_content,
                             container(
                                 column![
                                     text(w.label).size(12).style(color!(0xF8FAFC)),
                                     Space::with_height(2),
                                     text(format!("Method: {}", w.approach)).size(10).style(color!(0x38BDF8)),
+                                    text(format!("API Extension(s): {}", w.api_extensions)).size(10).style(color!(0xA78BFA)),
                                     Space::with_height(4),
                                     text(w.desc).size(10).style(color!(0xCBD5E1)),
                                 ].spacing(2)
                             )
-                            .width(Length::Fixed(290.0))
+                            .width(Length::Fixed(320.0))
                             .padding(10)
                             .style(|_t: &Theme| container::Appearance {
                                 background: Some(Background::Color(color!(0x141824))),
@@ -4317,12 +4379,9 @@ impl Application for GPUBenchApp {
                         .gap(4)
                         .style(iced::theme::Container::Transparent);
 
-                        let left_col = container(
-                            row![name_block, Space::with_width(Length::Fill), info_tip]
-                                .align_items(iced::Alignment::Center)
-                        )
-                        .width(if is_single_target { Length::Fill } else { Length::Fixed(320.0) })
-                        .padding([3, 6]);
+                        let left_col = container(info_tip)
+                            .width(if is_single_target { Length::Fill } else { Length::Fixed(320.0) })
+                            .padding([3, 6]);
 
                         let mut row_cells = row![left_col].spacing(8).align_items(iced::Alignment::Center);
 
@@ -5234,6 +5293,7 @@ impl GPUBenchApp {
         }
 
         self.completed_configs_count += 1;
+        self.total_expected_configs = self.total_expected_configs.max(self.completed_configs_count);
 
         // Legacy fields for backward compatibility
         let val_f32 = value as f32;

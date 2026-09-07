@@ -186,7 +186,6 @@ private:
   uint64_t recordedInvocations[30] = {0};
   double recordedTimeMs[30] = {0.0};
   IComputeContext *context = nullptr;
-  std::string findScriptPath(const std::string &scriptName) const;
   bool dumpRenders = true;
   ComputeBuffer fbTraditional = nullptr;
   ComputeBuffer fbWorkList = nullptr;

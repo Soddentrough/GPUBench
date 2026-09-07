@@ -1,5 +1,3 @@
-#[cfg(target_os = "windows")]
-use std::process::Command;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SystemInfo {
@@ -91,60 +89,180 @@ fn detect_total_ram_gb() -> f64 {
 }
 
 #[cfg(target_os = "windows")]
+mod win32 {
+    #[repr(C)]
+    pub struct MEMORYSTATUSEX {
+        pub dwLength: u32,
+        pub dwMemoryLoad: u32,
+        pub ullTotalPhys: u64,
+        pub ullAvailPhys: u64,
+        pub ullTotalPageFile: u64,
+        pub ullAvailPageFile: u64,
+        pub ullTotalVirtual: u64,
+        pub ullAvailVirtual: u64,
+        pub ullAvailExtendedVirtual: u64,
+    }
+
+    #[repr(C)]
+    pub struct OSVERSIONINFOEXW {
+        pub dwOSVersionInfoSize: u32,
+        pub dwMajorVersion: u32,
+        pub dwMinorVersion: u32,
+        pub dwBuildNumber: u32,
+        pub dwPlatformId: u32,
+        pub szCSDVersion: [u16; 128],
+        pub wServicePackMajor: u16,
+        pub wServicePackMinor: u16,
+        pub wSuiteMask: u16,
+        pub wProductType: u8,
+        pub wReserved: u8,
+    }
+
+    pub const HKEY_LOCAL_MACHINE: isize = 0x80000002_u32 as i32 as isize;
+    pub const KEY_READ: u32 = 0x20019;
+
+    #[link(name = "kernel32")]
+    #[link(name = "advapi32")]
+    #[link(name = "ntdll")]
+    extern "system" {
+        pub fn GlobalMemoryStatusEx(lpBuffer: *mut MEMORYSTATUSEX) -> i32;
+        pub fn RtlGetVersion(lpVersionInformation: *mut OSVERSIONINFOEXW) -> i32;
+        pub fn RegOpenKeyExA(
+            hKey: isize,
+            lpSubKey: *const u8,
+            ulOptions: u32,
+            samDesired: u32,
+            phkResult: *mut isize,
+        ) -> i32;
+        pub fn RegQueryValueExA(
+            hKey: isize,
+            lpValueName: *const u8,
+            lpReserved: *mut u32,
+            lpType: *mut u32,
+            lpData: *mut u8,
+            lpcbData: *mut u32,
+        ) -> i32;
+        pub fn RegCloseKey(hKey: isize) -> i32;
+    }
+}
+
+#[cfg(target_os = "windows")]
 fn detect_os_and_kernel() -> (String, String) {
     let mut os_name = "Windows".to_string();
     let mut kernel_version = "Unknown".to_string();
 
-    // Query 'cmd /c ver' -> e.g. "Microsoft Windows [Version 10.0.26100.1742]"
-    if let Ok(output) = Command::new("cmd").args(["/c", "ver"]).output() {
-        let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if !s.is_empty() {
-            os_name = s.clone();
-            if let Some(start) = s.find("[Version ") {
-                if let Some(end) = s[start..].find(']') {
-                    kernel_version = s[start + 9..start + end].trim().to_string();
-                }
-            }
+    // 1. Read exact OS build version via RtlGetVersion
+    let mut osinfo = win32::OSVERSIONINFOEXW {
+        dwOSVersionInfoSize: std::mem::size_of::<win32::OSVERSIONINFOEXW>() as u32,
+        dwMajorVersion: 0,
+        dwMinorVersion: 0,
+        dwBuildNumber: 0,
+        dwPlatformId: 0,
+        szCSDVersion: [0; 128],
+        wServicePackMajor: 0,
+        wServicePackMinor: 0,
+        wSuiteMask: 0,
+        wProductType: 0,
+        wReserved: 0,
+    };
+    if unsafe { win32::RtlGetVersion(&mut osinfo) } == 0 {
+        kernel_version = format!("{}.{}.{}", osinfo.dwMajorVersion, osinfo.dwMinorVersion, osinfo.dwBuildNumber);
+        if osinfo.dwBuildNumber >= 22000 {
+            os_name = format!("Microsoft Windows 11 (Build {})", osinfo.dwBuildNumber);
+        } else if osinfo.dwMajorVersion == 10 {
+            os_name = format!("Microsoft Windows 10 (Build {})", osinfo.dwBuildNumber);
+        } else {
+            os_name = format!("Microsoft Windows {}.{} (Build {})", osinfo.dwMajorVersion, osinfo.dwMinorVersion, osinfo.dwBuildNumber);
         }
     }
-    (os_name, kernel_version)
-}
 
-#[cfg(target_os = "windows")]
-fn detect_cpu_model() -> String {
-    // 1. Try registry query
-    if let Ok(output) = Command::new("reg")
-        .args(["query", r"HKLM\HARDWARE\DESCRIPTION\System\CentralProcessor\0", "/v", "ProcessorNameString"])
-        .output()
-    {
-        let s = String::from_utf8_lossy(&output.stdout);
-        for line in s.lines() {
-            if line.contains("ProcessorNameString") {
-                if let Some(pos) = line.find("REG_SZ") {
-                    let name = line[pos + 6..].trim();
-                    if !name.is_empty() {
-                        return name.to_string();
+    // 2. Try reading ProductName from registry to get e.g. "Windows 11 Pro"
+    unsafe {
+        let subkey = b"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\0";
+        let val_name = b"ProductName\0";
+        let mut hkey: isize = 0;
+        if win32::RegOpenKeyExA(win32::HKEY_LOCAL_MACHINE, subkey.as_ptr(), 0, win32::KEY_READ, &mut hkey) == 0 {
+            let mut buf = [0u8; 256];
+            let mut size = buf.len() as u32;
+            let mut val_type = 0u32;
+            let ret = win32::RegQueryValueExA(
+                hkey,
+                val_name.as_ptr(),
+                std::ptr::null_mut(),
+                &mut val_type,
+                buf.as_mut_ptr(),
+                &mut size,
+            );
+            win32::RegCloseKey(hkey);
+            if ret == 0 && size > 1 {
+                let bytes = &buf[..((size - 1) as usize)];
+                if let Ok(name) = std::str::from_utf8(bytes) {
+                    let cleaned = name.trim();
+                    if !cleaned.is_empty() {
+                        if osinfo.dwBuildNumber >= 22000 && cleaned.contains("Windows 10") {
+                            os_name = cleaned.replace("Windows 10", "Windows 11");
+                        } else {
+                            os_name = cleaned.to_string();
+                        }
                     }
                 }
             }
         }
     }
-    // 2. Fallback to PROCESSOR_IDENTIFIER
+
+    (os_name, kernel_version)
+}
+
+#[cfg(target_os = "windows")]
+fn detect_cpu_model() -> String {
+    unsafe {
+        let subkey = b"HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0\0";
+        let val_name = b"ProcessorNameString\0";
+        let mut hkey: isize = 0;
+        if win32::RegOpenKeyExA(win32::HKEY_LOCAL_MACHINE, subkey.as_ptr(), 0, win32::KEY_READ, &mut hkey) == 0 {
+            let mut buf = [0u8; 256];
+            let mut size = buf.len() as u32;
+            let mut val_type = 0u32;
+            let ret = win32::RegQueryValueExA(
+                hkey,
+                val_name.as_ptr(),
+                std::ptr::null_mut(),
+                &mut val_type,
+                buf.as_mut_ptr(),
+                &mut size,
+            );
+            win32::RegCloseKey(hkey);
+            if ret == 0 && size > 1 {
+                let bytes = &buf[..((size - 1) as usize)];
+                if let Ok(name) = std::str::from_utf8(bytes) {
+                    let cleaned = name.trim();
+                    if !cleaned.is_empty() {
+                        return cleaned.to_string();
+                    }
+                }
+            }
+        }
+    }
     std::env::var("PROCESSOR_IDENTIFIER").unwrap_or_else(|_| "Generic Windows CPU".to_string())
 }
 
 #[cfg(target_os = "windows")]
 fn detect_total_ram_gb() -> f64 {
-    // Query powershell CIM instance: (Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory
-    if let Ok(output) = Command::new("powershell")
-        .args(["-NoProfile", "-Command", "(Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory"])
-        .output()
-    {
-        let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if let Ok(bytes) = s.parse::<f64>() {
-            let gb = bytes / 1024.0 / 1024.0 / 1024.0;
-            return (gb * 10.0).round() / 10.0;
-        }
+    let mut mem = win32::MEMORYSTATUSEX {
+        dwLength: std::mem::size_of::<win32::MEMORYSTATUSEX>() as u32,
+        dwMemoryLoad: 0,
+        ullTotalPhys: 0,
+        ullAvailPhys: 0,
+        ullTotalPageFile: 0,
+        ullAvailPageFile: 0,
+        ullTotalVirtual: 0,
+        ullAvailVirtual: 0,
+        ullAvailExtendedVirtual: 0,
+    };
+    let success = unsafe { win32::GlobalMemoryStatusEx(&mut mem) };
+    if success != 0 && mem.ullTotalPhys > 0 {
+        let gb = mem.ullTotalPhys as f64 / 1024.0 / 1024.0 / 1024.0;
+        return (gb * 10.0).round() / 10.0;
     }
     0.0
 }
