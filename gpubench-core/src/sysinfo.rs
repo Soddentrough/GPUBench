@@ -124,7 +124,7 @@ mod win32 {
     #[link(name = "kernel32")]
     #[link(name = "advapi32")]
     #[link(name = "ntdll")]
-    extern "system" {
+    unsafe extern "system" {
         pub fn GlobalMemoryStatusEx(lpBuffer: *mut MEMORYSTATUSEX) -> i32;
         pub fn RtlGetVersion(lpVersionInformation: *mut OSVERSIONINFOEXW) -> i32;
         pub fn RegOpenKeyExA(
