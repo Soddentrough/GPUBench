@@ -575,6 +575,8 @@ if(WIN32)
     set(CPACK_NSIS_PACKAGE_NAME "GPUBench")
     set(CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL ON)
     set(CPACK_NSIS_MODIFY_PATH ON)
+    set(CPACK_NSIS_MANIFEST_DPI_AWARE ON)
+    set(CPACK_NSIS_COMPRESSOR "/SOLID lzma")
     set(CPACK_NSIS_MUI_ICON "${CMAKE_CURRENT_SOURCE_DIR}/packaging/windows/icon.ico")
     set(CPACK_NSIS_MUI_UNIICON "${CMAKE_CURRENT_SOURCE_DIR}/packaging/windows/icon.ico")
     set(CPACK_NSIS_HELP_LINK "https://github.com/Soddentrough/GPUBench")
@@ -587,7 +589,18 @@ if(WIN32)
         "https://github.com/Soddentrough/GPUBench" "GPUBench Website"
     )
     set(CPACK_NSIS_MUI_FINISHPAGE_RUN "gpubench-gui.exe")
-    set(CPACK_NSIS_DEFINES "!define MUI_FINISHPAGE_RUN_TEXT \"Start GPUBench\"")
+    set(CPACK_NSIS_DEFINES "
+!define MUI_FINISHPAGE_RUN_TEXT \"Start GPUBench\"
+VIProductVersion \"${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}.0\"
+VIFileVersion \"${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}.0\"
+VIAddVersionKey /LANG=1033 \"ProductName\" \"GPUBench\"
+VIAddVersionKey /LANG=1033 \"ProductVersion\" \"${PROJECT_FULL_VERSION}\"
+VIAddVersionKey /LANG=1033 \"CompanyName\" \"Soddentrough\"
+VIAddVersionKey /LANG=1033 \"LegalCopyright\" \"Copyright (C) 2026 Soddentrough\"
+VIAddVersionKey /LANG=1033 \"FileDescription\" \"GPUBench Installer\"
+VIAddVersionKey /LANG=1033 \"OriginalFilename\" \"GPUBench-${PROJECT_FULL_VERSION}-win64.exe\"
+VIAddVersionKey /LANG=1033 \"FileVersion\" \"${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}.0\"
+")
     
     # Include Visual C++ Redistributable if needed
     # set(CPACK_NSIS_EXTRA_INSTALL_COMMANDS "ExecWait '$INSTDIR\\\\vcredist_x64.exe /quiet'")
