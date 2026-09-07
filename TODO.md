@@ -69,3 +69,12 @@
   - Cloudflare Worker or Actix-web server running Postgres/ClickHouse database.
   - Rate limiting, anti-cheat validation, and duplicate submission filtering.
   - Web UI for interactive filtering by GPU model, driver version, backend API, and date.
+
+### Windows Packaging & Distribution Security
+- **Windows Code Signing & Authenticode Certification**:
+  - Integrate Authenticode digital signing for Windows binaries (`gpubench.exe`, `gpubench-gui.exe`) and installer (`GPUBench-*-win64.exe`) in `.github/workflows/release.yml`.
+  - Configure SignPath.io (free for open-source GitHub projects) or a trusted code signing certificate with `signtool.exe` to establish reputation and prevent browser / SmartScreen warnings.
+  - Establish persistent developer reputation across version releases to prevent SmartScreen "unrecognized app" / "uncommonly downloaded" download blocks.
+- **Windows Defender False-Positive Triage & Submission**:
+  - Maintain a proactive release workflow to submit newly generated release artifacts to Microsoft Security Intelligence (WDSI) upon publishing.
+  - Explore Inno Setup or WiX Toolset (.msi) generator alternatives in CPack to reduce heuristic AV flags associated with NSIS self-extracting archive stubs.

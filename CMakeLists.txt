@@ -564,6 +564,9 @@ set(CPACK_RESOURCE_FILE_README "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
 
 # Platform-specific package settings
 if(WIN32)
+    # Ensure CPack preserves quotes and special characters verbatim
+    set(CPACK_VERBATIM_VARIABLES YES)
+
     # Windows-specific packaging
     set(CPACK_GENERATOR "ZIP;NSIS")
     
@@ -583,7 +586,7 @@ if(WIN32)
         "RunAllBenchmarks.bat" "Run All Benchmarks"
         "https://github.com/Soddentrough/GPUBench" "GPUBench Website"
     )
-    set(CPACK_NSIS_MUI_FINISHPAGE_RUN "bin\\\\gpubench-gui.exe")
+    set(CPACK_NSIS_MUI_FINISHPAGE_RUN "gpubench-gui.exe")
     set(CPACK_NSIS_DEFINES "!define MUI_FINISHPAGE_RUN_TEXT \"Start GPUBench\"")
     
     # Include Visual C++ Redistributable if needed

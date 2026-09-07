@@ -195,6 +195,11 @@ See `packaging/windows/ICON_PLACEHOLDER.txt` for detailed instructions.
 - Check that GPU drivers are up to date
 - Test on clean Windows VM before distributing
 
+### SmartScreen / Antivirus Warning on Download
+- **Cause**: Unsigned release executables have low initial download reputation in Microsoft SmartScreen / Google Safe Browsing. Additionally, NSIS self-extracting archive wrappers frequently trigger heuristic machine-learning false positives (`!ml`) in Windows Defender.
+- **Workaround for Users**: Choose "Keep" / "Keep anyway" in the browser and "More info -> Run anyway" in SmartScreen. Alternatively, use the portable ZIP package (`GPUBench-*-win64.zip`) which does not contain an NSIS executable wrapper.
+- **Maintainer Triage**: Submit newly published installer binaries to [Microsoft Security Intelligence (WDSI)](https://www.microsoft.com/en-us/wdsi/filesubmission) as a "Software Developer" false positive. Definitions are typically updated within hours.
+
 ## Distribution Checklist
 
 Before releasing:

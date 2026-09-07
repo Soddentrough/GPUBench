@@ -5,12 +5,28 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      platform:
+        description: 'Platform to build (all, windows, macos, linux)'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - windows
+          - macos
+          - linux
+      tag_name:
+        description: 'Release tag to publish/upload to'
+        required: false
+        default: 'v1.5.1'
 
 permissions:
   contents: write
 
 jobs:
   build-windows:
+    if: ${{ github.event_name == 'push' || inputs.platform == 'all' || inputs.platform == 'windows' }}
     runs-on: windows-latest
     steps:
       - name: Checkout repository
@@ -54,15 +70,17 @@ jobs:
           cpack -G NSIS -C Release
 
       - name: Upload to Release
-        uses: softprops/action-gh-release@v1
-        with:
-          files: |
-            build/GPUBench-*-win64.zip
-            build/GPUBench-*-win64.exe
+        shell: pwsh
+        run: |
+          $tag = if ("${{ github.event_name }}" -eq "push") { "${{ github.ref_name }}" } else { "${{ inputs.tag_name }}" }
+          if (-not $tag) { $tag = "v1.5.1" }
+          Write-Host "Uploading Windows packages to release $tag..."
+          gh release upload $tag (Get-Item build/GPUBench-*-win64.zip).FullName (Get-Item build/GPUBench-*-win64.exe).FullName --clobber
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-macos:
+    if: ${{ github.event_name == 'push' || inputs.platform == 'all' || inputs.platform == 'macos' }}
     runs-on: macos-latest
     steps:
       - name: Checkout repository
@@ -106,15 +124,19 @@ jobs:
           cpack -G TGZ -C Release
 
       - name: Upload to Release
-        uses: softprops/action-gh-release@v1
-        with:
-          files: |
-            build/GPUBench-*-Darwin.dmg
-            build/GPUBench-*-Darwin.tar.gz
+        run: |
+          TAG="${{ github.ref_name }}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag_name }}"
+          fi
+          [ -z "$TAG" ] && TAG="v1.5.1"
+          Write-Host "Uploading macOS packages to release $TAG..." 2>/dev/null || echo "Uploading macOS packages to release $TAG..."
+          gh release upload "$TAG" build/GPUBench-*-Darwin.dmg build/GPUBench-*-Darwin.tar.gz --clobber
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-linux:
+    if: ${{ github.event_name == 'push' || inputs.platform == 'all' || inputs.platform == 'linux' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -168,11 +190,13 @@ jobs:
           python3 scripts/verify_rpm.py --skip-install-test
 
       - name: Upload to Release
-        uses: softprops/action-gh-release@v1
-        with:
-          files: |
-            build/GPUBench-*-Linux.deb
-            build/GPUBench-*-Linux.rpm
-            build/GPUBench-*-Linux.tar.gz
+        run: |
+          TAG="${{ github.ref_name }}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag_name }}"
+          fi
+          [ -z "$TAG" ] && TAG="v1.5.1"
+          echo "Uploading Linux packages to release $TAG..."
+          gh release upload "$TAG" build/GPUBench-*-Linux.deb build/GPUBench-*-Linux.rpm build/GPUBench-*-Linux.tar.gz --clobber
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
