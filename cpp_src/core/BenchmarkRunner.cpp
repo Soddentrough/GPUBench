@@ -18,7 +18,7 @@
 #include "benchmarks/RayPathTracingBench.h"
 #include "benchmarks/RayPayloadBench.h"
 #include "benchmarks/RayProceduralBench.h"
-#include "benchmarks/RayTracingBench.h"
+#include "benchmarks/RayIntersectBench.h"
 #include "benchmarks/RaySchedulingBench.h"
 #include "benchmarks/SysMemBandwidthBench.h"
 #include "benchmarks/SysMemLatencyBench.h"
@@ -35,13 +35,27 @@
 #include <random>
 #include <string>
 #include <thread>
+#ifdef _WIN32
+#include <io.h>
+#define isatty _isatty
+#define fileno _fileno
+#else
+#include <unistd.h>
+#endif
 
-// Helper function to create a shuffled index array for pointer chasing
+// Helper function to create a shuffled index array forming a single Hamiltonian cycle for pointer chasing
 std::vector<uint32_t> create_shuffled_indices(size_t size) {
-  std::vector<uint32_t> indices(size);
-  std::iota(indices.begin(), indices.end(), 0);
+  if (size == 0) return {};
+  if (size == 1) return {0};
+  std::vector<uint32_t> perm(size);
+  std::iota(perm.begin(), perm.end(), 0);
   std::mt19937 g(1337); // Use a fixed seed for reproducibility
-  std::shuffle(indices.begin(), indices.end(), g);
+  std::shuffle(perm.begin(), perm.end(), g);
+  std::vector<uint32_t> indices(size);
+  for (size_t i = 0; i < size - 1; ++i) {
+    indices[perm[i]] = perm[i + 1];
+  }
+  indices[perm[size - 1]] = perm[0];
   return indices;
 }
 
@@ -217,56 +231,64 @@ void BenchmarkRunner::discoverBenchmarks() {
   benchmarks.push_back(std::make_unique<SysMemLatencyBench>());
   // Ray Tracing Acceleration (Real-World Pipeline Order: AS Build -> Primary Rays/Intersection -> Ray Scheduling -> Secondary Rays/Divergence -> Path Tracing -> Payload Pressure)
   benchmarks.push_back(std::make_unique<RayASBuildBench>());
-  benchmarks.push_back(std::make_unique<RayTracingBench>());
+  benchmarks.push_back(std::make_unique<RayIntersectBench>());
   benchmarks.push_back(std::make_unique<RayAnyHitBench>());
   benchmarks.push_back(std::make_unique<RayProceduralBench>());
   if (sceneName == "all") {
     auto showroom = std::make_unique<RaySchedulingBench>(RaySchedulingBench::SceneType::Showroom);
     showroom->SetBounceDepth(bounceDepth);
     showroom->SetSamplesPerPixel(samplesPerPixel);
-    showroom->SetDumpRenders(dumpRenders);
+    showroom->SetDumpRenders(dumpRenders || verifyParity);
+    showroom->SetVerifyParity(verifyParity);
     benchmarks.push_back(std::move(showroom));
 
     auto indoor = std::make_unique<RaySchedulingBench>(RaySchedulingBench::SceneType::IndoorAtrium);
     indoor->SetBounceDepth(bounceDepth);
     indoor->SetSamplesPerPixel(samplesPerPixel);
-    indoor->SetDumpRenders(dumpRenders);
+    indoor->SetDumpRenders(dumpRenders || verifyParity);
+    indoor->SetVerifyParity(verifyParity);
     benchmarks.push_back(std::move(indoor));
 
     auto outdoor = std::make_unique<RaySchedulingBench>(RaySchedulingBench::SceneType::OutdoorLandscape);
     outdoor->SetBounceDepth(bounceDepth);
     outdoor->SetSamplesPerPixel(samplesPerPixel);
-    outdoor->SetDumpRenders(dumpRenders);
+    outdoor->SetDumpRenders(dumpRenders || verifyParity);
+    outdoor->SetVerifyParity(verifyParity);
     benchmarks.push_back(std::move(outdoor));
 
     auto forest = std::make_unique<RaySchedulingBench>(RaySchedulingBench::SceneType::AAAOutdoorForest);
     forest->SetBounceDepth(bounceDepth);
     forest->SetSamplesPerPixel(samplesPerPixel);
-    forest->SetDumpRenders(dumpRenders);
+    forest->SetDumpRenders(dumpRenders || verifyParity);
+    forest->SetVerifyParity(verifyParity);
     benchmarks.push_back(std::move(forest));
   } else if (sceneName == "outdoor") {
     auto outdoor = std::make_unique<RaySchedulingBench>(RaySchedulingBench::SceneType::OutdoorLandscape);
     outdoor->SetBounceDepth(bounceDepth);
     outdoor->SetSamplesPerPixel(samplesPerPixel);
-    outdoor->SetDumpRenders(dumpRenders);
+    outdoor->SetDumpRenders(dumpRenders || verifyParity);
+    outdoor->SetVerifyParity(verifyParity);
     benchmarks.push_back(std::move(outdoor));
   } else if (sceneName == "forest" || sceneName == "aaa_forest") {
     auto forest = std::make_unique<RaySchedulingBench>(RaySchedulingBench::SceneType::AAAOutdoorForest);
     forest->SetBounceDepth(bounceDepth);
     forest->SetSamplesPerPixel(samplesPerPixel);
-    forest->SetDumpRenders(dumpRenders);
+    forest->SetDumpRenders(dumpRenders || verifyParity);
+    forest->SetVerifyParity(verifyParity);
     benchmarks.push_back(std::move(forest));
   } else if (sceneName == "showroom") {
     auto showroom = std::make_unique<RaySchedulingBench>(RaySchedulingBench::SceneType::Showroom);
     showroom->SetBounceDepth(bounceDepth);
     showroom->SetSamplesPerPixel(samplesPerPixel);
-    showroom->SetDumpRenders(dumpRenders);
+    showroom->SetDumpRenders(dumpRenders || verifyParity);
+    showroom->SetVerifyParity(verifyParity);
     benchmarks.push_back(std::move(showroom));
   } else {
     auto indoor = std::make_unique<RaySchedulingBench>(RaySchedulingBench::SceneType::IndoorAtrium);
     indoor->SetBounceDepth(bounceDepth);
     indoor->SetSamplesPerPixel(samplesPerPixel);
-    indoor->SetDumpRenders(dumpRenders);
+    indoor->SetDumpRenders(dumpRenders || verifyParity);
+    indoor->SetVerifyParity(verifyParity);
     benchmarks.push_back(std::move(indoor));
   }
   benchmarks.push_back(std::make_unique<RayMaterialDivergenceBench>());
@@ -502,9 +524,39 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
     }
     context->setExpectedKernelCount(totalKernels);
 
-    std::cout << "Preparing benchmarks (compiling kernels, uploading "
-                 "data, building acceleration structures)..."
-              << std::endl;
+    bool hasVisualVerification = false;
+    for (const auto &bench : benchmarks) {
+      if (isSelected(bench.get()) && bench->IsSupported(info, context) && bench->HasVisualVerification()) {
+        hasVisualVerification = true;
+        break;
+      }
+    }
+
+    if (!verbose && !onResult) {
+      std::string backendStr = ComputeBackendFactory::getBackendName(context->getBackend());
+      int vramGb = static_cast<int>(std::round(info.memorySize / (1024.0 * 1024.0 * 1024.0)));
+      std::string line1_plain = "Target Device : [GPU " + std::to_string(context->getSelectedDeviceIndex()) + "] " + info.name;
+      std::string line2_plain = "Backend / API : " + backendStr + " | VRAM: " + std::to_string(vramGb) + " GB GDDR";
+      size_t innerCardW = 72;
+      size_t pad1 = (innerCardW > line1_plain.length()) ? (innerCardW - line1_plain.length()) : 0;
+      size_t pad2 = (innerCardW > line2_plain.length()) ? (innerCardW - line2_plain.length()) : 0;
+
+      std::cout << "\n\033[1m\033[36m╭─ GPUBench v" << GPUBENCH_VERSION << " ────────────────────────────────────────────────────────╮\033[0m\n";
+      std::cout << "\033[1m\033[36m│\033[0m \033[1mTarget Device\033[0m : [GPU " << context->getSelectedDeviceIndex() << "] \033[33m" << info.name << "\033[0m"
+                << std::string(pad1, ' ') << " \033[1m\033[36m│\033[0m\n";
+      std::cout << "\033[1m\033[36m│\033[0m \033[1mBackend / API\033[0m : \033[32m" << backendStr << "\033[0m | \033[1mVRAM\033[0m: \033[32m" << vramGb << " GB GDDR\033[0m"
+                << std::string(pad2, ' ') << " \033[1m\033[36m│\033[0m\n";
+      std::cout << "\033[1m\033[36m╰──────────────────────────────────────────────────────────────────────────╯\033[0m\n\n";
+      if (hasVisualVerification) {
+        std::cout << "  \033[1m[1/3] Preparation Phase\033[0m (compiling kernels, uploading data, building BVHs)..." << std::endl;
+      } else {
+        std::cout << "  \033[1m[1/2] Preparation Phase\033[0m (compiling kernels, uploading data, building BVHs)..." << std::endl;
+      }
+    } else {
+      std::cout << "Preparing benchmarks (compiling kernels, uploading "
+                   "data, building acceleration structures)..."
+                << std::endl;
+    }
     uint32_t effectiveWidth = renderWidth;
     uint32_t effectiveHeight = renderHeight;
     if (effectiveWidth == 0 || effectiveHeight == 0) {
@@ -613,7 +665,6 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
       }
     }
 
-    std::cout << "\nPreparation complete. Running benchmarks..." << std::endl;
     struct BenchmarkTask {
       IBenchmark *bench;
       uint32_t configIndex;
@@ -636,7 +687,20 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
                        return a.sortWeight < b.sortWeight;
                      });
 
+    const bool isInteractive = !verbose && !onResult && isatty(fileno(stdout));
+    if (!verbose && !onResult) {
+      std::cout << "\r\033[K  \033[32m✔\033[0m Preparation complete.\n\n";
+      if (hasVisualVerification) {
+        std::cout << "  \033[1m[2/3] Running Benchmarks\033[0m ("
+                  << tasks.size() << " workloads)..." << std::endl;
+      } else {
+        std::cout << "  \033[1m[2/2] Running Benchmarks\033[0m ("
+                  << tasks.size() << " workloads)..." << std::endl;
+      }
+    }
+
     IBenchmark *prevBench = nullptr;
+    size_t taskIdx = 0;
     for (const auto &task : tasks) {
       auto *bench = task.bench;
       uint32_t i = task.configIndex;
@@ -656,6 +720,24 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
         if (verbose) {
           std::cout << "[D" << context->getSelectedDeviceIndex()
                     << "] Running " << bench_name << "..." << std::endl;
+        } else if (isInteractive) {
+          std::string disp = bench_name;
+          if (disp.rfind("RayScheduling (", 0) == 0) {
+            size_t secondOpen = disp.find(") (");
+            if (secondOpen != std::string::npos && disp.back() == ')') {
+              disp = disp.substr(secondOpen + 3, disp.length() - (secondOpen + 4));
+            }
+          } else if (disp.rfind("RayASBuild (", 0) == 0 && disp.back() == ')') {
+            disp = disp.substr(12, disp.length() - 13);
+          } else {
+            size_t firstOpen = disp.find(" (");
+            if (firstOpen != std::string::npos && disp.back() == ')') {
+              disp = disp.substr(firstOpen + 2, disp.length() - (firstOpen + 3));
+            }
+          }
+          if (disp.length() > 50) disp = disp.substr(0, 47) + "...";
+          std::cout << "\r\033[K  \033[36m⠋\033[0m [" << (taskIdx + 1) << "/" << tasks.size() << "] "
+                    << disp << "..." << std::flush;
         } else {
           std::cout << "  - [" << ComputeBackendFactory::getBackendName(context->getBackend())
                     << "] Running " << bench_name << "..." << std::flush;
@@ -687,13 +769,14 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
           if (note.empty()) {
             note = bench->GetSupportNote(info, context);
           }
-          if (!verbose) {
+          if (!verbose && !isInteractive) {
             if (!note.empty()) {
               std::cout << " Unsupported (" << note << ")." << std::endl;
             } else {
               std::cout << " Unsupported." << std::endl;
             }
           }
+          taskIdx++;
           ResultData result_data;
           result_data.backendName = ComputeBackendFactory::getBackendName(context->getBackend());
           result_data.deviceName = info.name;
@@ -806,7 +889,7 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
           }
         }
 
-        if (!verbose) {
+        if (!verbose && !isInteractive) {
           std::cout << " Done." << std::endl;
         }
 
@@ -844,10 +927,12 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
 
         formatter->addResult(result_data);
         numBenchmarksRun++;
+        taskIdx++;
         if (onResult) {
           onResult(result_data);
         }
       } catch (const std::exception &e) {
+        taskIdx++;
         if (!verbose) {
           std::cout << " Failed (" << e.what() << ")" << std::endl;
         } else {
@@ -869,14 +954,64 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
       }
     }
 
+    if (hasVisualVerification) {
+      if (!verbose && !onResult) {
+        std::cout << "\r\033[K  \033[32m✔\033[0m Benchmark execution complete ("
+                  << tasks.size() << " workloads).\n\n  \033[1m[3/3] Visual Parity & Frame Export\033[0m..." << std::endl;
+      }
+      for (auto *bench : runnable) {
+        if (bench->HasVisualVerification()) {
+          try {
+            bench->RunVisualVerification(isInteractive);
+          } catch (const std::exception &e) {
+            parityFailure = true;
+            if (verbose || verifyParity) {
+              std::cerr << "Visual verification error on " << bench->GetName() << ": " << e.what() << std::endl;
+            }
+          } catch (...) {
+            parityFailure = true;
+            if (verbose || verifyParity) {
+              std::cerr << "Visual verification error on " << bench->GetName() << ": unknown exception" << std::endl;
+            }
+          }
+        }
+      }
+      if (!verbose && !onResult) {
+        std::cout << "\r\033[K  \033[32m✔\033[0m Visual parity verification & frame export complete.\n" << std::endl;
+      }
+    } else {
+      if (isInteractive) {
+        std::cout << "\r\033[K  \033[32m✔\033[0m Benchmark suite completed ("
+                  << tasks.size() << " workloads).\n" << std::endl;
+      }
+    }
+
     for (auto *bench : runnable) {
       try {
         bench->Teardown();
       } catch (const std::exception &e) {
-        if (verbose) {
+        if (bench->HasParityFailure()) {
+          parityFailure = true;
+        }
+        std::string err = e.what();
+        if (err.find("parity") != std::string::npos || err.find("Parity") != std::string::npos) {
+          parityFailure = true;
+        }
+        if (verbose || verifyParity) {
           std::cerr << "Error tearing down " << bench->GetName() << ": "
                     << e.what() << std::endl;
         }
+      } catch (...) {
+        if (bench->HasParityFailure()) {
+          parityFailure = true;
+        }
+        if (verbose || verifyParity) {
+          std::cerr << "Error tearing down " << bench->GetName() << ": unknown exception"
+                    << std::endl;
+        }
+      }
+      if (bench->HasParityFailure()) {
+        parityFailure = true;
       }
     }
   } catch (const std::exception &e) {

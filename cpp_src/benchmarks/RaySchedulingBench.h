@@ -76,8 +76,9 @@ public:
 
   BenchmarkResult GetResult(uint32_t config_idx = 0) const override;
   int GetSortWeight(uint32_t config_idx = 0) const override;
+  uint32_t GetExpectedKernelCount() const override { return 20; }
 
-  uint32_t GetNumConfigs() const override { return 30; }
+  uint32_t GetNumConfigs() const override { return 34; }
   std::vector<std::string> GetAliases() const override {
     if (sceneType == SceneType::AAAOutdoorForest) {
       return {"rayscheduling", "rtscheduling", "forest", "aaa_forest", "rayscheduling_forest", "worklists", "dgc", "scene_render", "total_scene_render", "total_frame", "primary", "primary_rays", "shadow", "shadows", "rts", "ray_shadows", "ray_shadow"};
@@ -92,9 +93,13 @@ public:
   std::string GetConfigName(uint32_t config_idx) const override;
   const char *GetMetric(uint32_t config_idx = 0) const override {
     if (config_idx < 4) return "MHits/s";
-    if (config_idx == 17) return "MRecords/s";
+    if (config_idx == 17 || config_idx == 31) return "MRecords/s";
+    if (config_idx == 33) return "GB/s";
     return "MRays/s";
   }
+  void SetVerifyParity(bool verify) override { verifyParity = verify; }
+  bool GetVerifyParity() const { return verifyParity; }
+  bool HasParityFailure() const override { return parityFailure; }
   bool IsConfigSupported(uint32_t config_idx) const override {
     return !unsupportedConfig[config_idx];
   }
@@ -176,21 +181,26 @@ public:
   uint32_t GetQueueCapacity() const { return queueCapacity; }
 
   void RecordRunResult(uint32_t config_idx, uint64_t total_invocations, double total_time_ms) override {
-    if (config_idx < 30) {
+    if (config_idx < 36) {
       recordedInvocations[config_idx] = total_invocations;
       recordedTimeMs[config_idx] = total_time_ms;
     }
   }
 
+  bool HasVisualVerification() const override { return dumpRenders || verifyParity; }
+  void RunVisualVerification(bool isInteractive = false) override;
+
 private:
-  uint64_t recordedInvocations[30] = {0};
-  double recordedTimeMs[30] = {0.0};
+  uint64_t recordedInvocations[36] = {0};
+  double recordedTimeMs[36] = {0.0};
   IComputeContext *context = nullptr;
-  bool dumpRenders = true;
+  bool dumpRenders = false;
+  bool verifyParity = false;
+  bool parityFailure = false;
   ComputeBuffer fbTraditional = nullptr;
   ComputeBuffer fbWorkList = nullptr;
-  void performVisualVerification();
-  void dumpPipelineBreakdown(const std::string &tag);
+  void performVisualVerification(bool isInteractive = false);
+  void dumpPipelineBreakdown(const std::string &tag, bool isInteractive = false);
   double bvhBuildTimeMs = 0.0;
 
   // Compute Kernels
@@ -205,6 +215,7 @@ private:
   ComputeKernel kernelWorkGraph = nullptr;
   ComputeKernel kernelReset = nullptr;
   ComputeKernel kernelResolve = nullptr;
+  ComputeKernel kernelPersistent = nullptr;
 
   // Storage Buffers
   ComputeBuffer resultBuffer = nullptr;
@@ -275,7 +286,7 @@ private:
   uint32_t octantCapacity = 262144;
   uint32_t numPrimitives = 4096;
   SceneType sceneType = SceneType::IndoorAtrium;
-  mutable double results[30] = {0.0};
-  mutable bool unsupportedConfig[30] = {false};
-  mutable std::string unsupportedReason[30];
+  mutable double results[36] = {0.0};
+  mutable bool unsupportedConfig[36] = {false};
+  mutable std::string unsupportedReason[36];
 };

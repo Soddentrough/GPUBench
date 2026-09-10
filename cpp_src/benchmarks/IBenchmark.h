@@ -29,6 +29,10 @@ public:
   virtual void RebuildAccelerationStructures() {}
   virtual bool ValidateResults(uint32_t config_idx = 0) const { return true; }
   virtual bool IsEmulated(uint32_t config_idx = 0) const { return false; }
+  virtual void SetVerifyParity(bool verify) {}
+  virtual bool HasParityFailure() const { return false; }
+  virtual bool HasVisualVerification() const { return false; }
+  virtual void RunVisualVerification(bool isInteractive = false) { (void)isInteractive; }
   // Why a benchmark is unsupported (only meaningful when IsSupported()
   // returns false). Used to clearly distinguish hardware limitations from
   // API/toolchain limitations in reports.

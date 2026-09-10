@@ -244,6 +244,7 @@ private:
 
   std::map<ComputeBuffer, VulkanBuffer *> buffers;
   std::map<ComputeKernel, VulkanKernel *> kernels;
+  VulkanKernel *getKernel(ComputeKernel handle) const;
 
   mutable std::vector<DeviceInfo> deviceInfos;
   uint32_t selectedDeviceIndex = 0;

@@ -19,7 +19,7 @@ class BenchmarkRunner {
 public:
   BenchmarkRunner(const std::vector<IComputeContext *> &contexts,
                   bool verbose = false, bool debug = false,
-                  bool dumpGeometry = false, bool dumpRenders = true,
+                  bool dumpGeometry = false, bool dumpRenders = false,
                   const std::string &scene = "indoor");
   ~BenchmarkRunner();
 
@@ -66,6 +66,10 @@ public:
   void setProfileSnapshot(bool enable) { profileSnapshot = enable; }
   bool getProfileSnapshot() const { return profileSnapshot; }
 
+  void setVerifyParity(bool enable) { verifyParity = enable; }
+  bool getVerifyParity() const { return verifyParity; }
+  bool hasParityFailure() const { return parityFailure; }
+
 private:
   void discoverBenchmarks();
   void printBanner();
@@ -83,6 +87,8 @@ private:
   bool debug;
   bool dumpGeometry;
   bool dumpRenders;
+  bool verifyParity = false;
+  bool parityFailure = false;
   std::string sceneName = "indoor";
   uint32_t renderWidth = 0;
   uint32_t renderHeight = 0;

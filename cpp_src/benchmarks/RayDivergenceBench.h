@@ -52,7 +52,7 @@ public:
   void DumpGeometry() const override;
 
   uint32_t GetNumConfigs() const override { return 5; }
-  int GetSortWeight(uint32_t = 0) const override { return 648; }
+  int GetSortWeight(uint32_t = 0) const override { return 680; }
   std::vector<std::string> GetAliases() const override {
     return {"raydiv", "divergence", "materialdivergence", "raymaterialdivergence"};
   }

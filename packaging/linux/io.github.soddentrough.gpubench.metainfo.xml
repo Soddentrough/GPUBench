@@ -28,6 +28,11 @@
     <binary>gpubench</binary>
   </provides>
   <releases>
+    <release version="1.5.2" date="2026-09-10">
+      <description>
+        <p>Modern rich CLI terminal interface with Unicode box cards, non-overlapping subcategory groupings, dynamic progress ticker, decoupled visual parity verification, and architectural speedup metrics.</p>
+      </description>
+    </release>
     <release version="1.5.1" date="2026-09-07">
       <description>
         <p>Native Vulkan Device-Generated Commands (VK_EXT_device_generated_commands) for ray and path tracing Work Lists with hardware predication, autonomous GPU dispatch, and comprehensive GFX1201 hardware profiling documentation.</p>

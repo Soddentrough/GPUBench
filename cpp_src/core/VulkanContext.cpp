@@ -1,5 +1,6 @@
 #include "VulkanContext.h"
 #include "utils/ShaderCache.h"
+#include <algorithm>
 #include <cstring>
 #include <fstream>
 #include <iostream>
@@ -57,10 +58,18 @@ VulkanContext::~VulkanContext() {
   } catch (...) {
   }
   while (!kernels.empty()) {
-    releaseKernel(kernels.begin()->first);
+    try {
+      releaseKernel(kernels.begin()->first);
+    } catch (...) {
+      kernels.erase(kernels.begin());
+    }
   }
   while (!buffers.empty()) {
-    releaseBuffer(buffers.begin()->first);
+    try {
+      releaseBuffer(buffers.begin()->first);
+    } catch (...) {
+      buffers.erase(buffers.begin());
+    }
   }
   if (device != VK_NULL_HANDLE) {
     for (size_t i = 0; i < kMaxInFlight; ++i) {
@@ -72,13 +81,19 @@ VulkanContext::~VulkanContext() {
   }
   if (commandPool != VK_NULL_HANDLE) {
     vkDestroyCommandPool(device, commandPool, nullptr);
+    commandPool = VK_NULL_HANDLE;
   }
-  destroyHeadlessSwapchain();
+  try {
+    destroyHeadlessSwapchain();
+  } catch (...) {
+  }
   if (device != VK_NULL_HANDLE) {
     vkDestroyDevice(device, nullptr);
+    device = VK_NULL_HANDLE;
   }
   if (instance != VK_NULL_HANDLE) {
     vkDestroyInstance(instance, nullptr);
+    instance = VK_NULL_HANDLE;
   }
 }
 
@@ -927,11 +942,20 @@ ComputeBuffer VulkanContext::createBuffer(size_t size, const void *host_ptr) {
 
 void VulkanContext::writeBuffer(ComputeBuffer buffer, size_t offset,
                                 size_t size, const void *host_ptr) {
-  VulkanBuffer stagingBuffer;
+  if (size == 0) return;
+  auto it = buffers.find(buffer);
+  if (it == buffers.end() || !it->second) {
+    throw std::runtime_error("Invalid buffer handle in writeBuffer");
+  }
+  VkBuffer dstBuffer = it->second->buffer;
 
+  constexpr size_t kMaxChunkSize = 64ULL * 1024ULL * 1024ULL; // 64 MB chunk cap
+  const size_t chunkSize = std::min(size, kMaxChunkSize);
+
+  VulkanBuffer stagingBuffer;
   VkBufferCreateInfo bufferInfo{};
   bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-  bufferInfo.size = size;
+  bufferInfo.size = chunkSize;
   bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
   bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
@@ -952,15 +976,18 @@ void VulkanContext::writeBuffer(ComputeBuffer buffer, size_t offset,
 
   if (vkAllocateMemory(device, &allocInfo, nullptr, &stagingBuffer.memory) !=
       VK_SUCCESS) {
+    vkDestroyBuffer(device, stagingBuffer.buffer, nullptr);
     throw std::runtime_error("failed to allocate staging buffer memory!");
   }
 
   vkBindBufferMemory(device, stagingBuffer.buffer, stagingBuffer.memory, 0);
 
-  void *data;
-  vkMapMemory(device, stagingBuffer.memory, 0, size, 0, &data);
-  memcpy(data, host_ptr, size);
-  vkUnmapMemory(device, stagingBuffer.memory);
+  void *mappedData = nullptr;
+  if (vkMapMemory(device, stagingBuffer.memory, 0, chunkSize, 0, &mappedData) != VK_SUCCESS) {
+    vkDestroyBuffer(device, stagingBuffer.buffer, nullptr);
+    vkFreeMemory(device, stagingBuffer.memory, nullptr);
+    throw std::runtime_error("failed to map staging buffer memory!");
+  }
 
   VkCommandBufferAllocateInfo cmdAllocInfo{};
   cmdAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -968,32 +995,64 @@ void VulkanContext::writeBuffer(ComputeBuffer buffer, size_t offset,
   cmdAllocInfo.commandPool = commandPool;
   cmdAllocInfo.commandBufferCount = 1;
 
-  VkCommandBuffer commandBuffer;
-  vkAllocateCommandBuffers(device, &cmdAllocInfo, &commandBuffer);
+  VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
+  if (vkAllocateCommandBuffers(device, &cmdAllocInfo, &commandBuffer) != VK_SUCCESS) {
+    vkUnmapMemory(device, stagingBuffer.memory);
+    vkDestroyBuffer(device, stagingBuffer.buffer, nullptr);
+    vkFreeMemory(device, stagingBuffer.memory, nullptr);
+    throw std::runtime_error("failed to allocate transfer command buffer!");
+  }
 
-  VkCommandBufferBeginInfo beginInfo{};
-  beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-  beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  const uint8_t *srcBytes = static_cast<const uint8_t *>(host_ptr);
+  size_t bytesWritten = 0;
 
-  vkBeginCommandBuffer(commandBuffer, &beginInfo);
+  try {
+    while (bytesWritten < size) {
+      size_t curChunk = std::min(size - bytesWritten, chunkSize);
+      memcpy(mappedData, srcBytes + bytesWritten, curChunk);
 
-  VkBufferCopy copyRegion{};
-  copyRegion.srcOffset = 0;
-  copyRegion.dstOffset = offset;
-  copyRegion.size = size;
-  vkCmdCopyBuffer(commandBuffer, stagingBuffer.buffer,
-                  buffers.at(buffer)->buffer, 1, &copyRegion);
+      VkCommandBufferBeginInfo beginInfo{};
+      beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+      beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+      vkBeginCommandBuffer(commandBuffer, &beginInfo);
 
-  vkEndCommandBuffer(commandBuffer);
+      VkBufferCopy copyRegion{};
+      copyRegion.srcOffset = 0;
+      copyRegion.dstOffset = offset + bytesWritten;
+      copyRegion.size = curChunk;
+      vkCmdCopyBuffer(commandBuffer, stagingBuffer.buffer, dstBuffer, 1, &copyRegion);
 
-  VkSubmitInfo submitInfo{};
-  submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-  submitInfo.commandBufferCount = 1;
-  submitInfo.pCommandBuffers = &commandBuffer;
+      vkEndCommandBuffer(commandBuffer);
 
-  vkQueueSubmit(computeQueue, 1, &submitInfo, VK_NULL_HANDLE);
-  vkQueueWaitIdle(computeQueue);
+      VkSubmitInfo submitInfo{};
+      submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+      submitInfo.commandBufferCount = 1;
+      submitInfo.pCommandBuffers = &commandBuffer;
 
+      VkResult submitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, VK_NULL_HANDLE);
+      if (submitRes != VK_SUCCESS) {
+        throw std::runtime_error("vkQueueSubmit failed in writeBuffer with result: " +
+                                 std::to_string(submitRes));
+      }
+      VkResult waitRes = vkQueueWaitIdle(computeQueue);
+      if (waitRes != VK_SUCCESS) {
+        throw std::runtime_error("vkQueueWaitIdle failed in writeBuffer with result: " +
+                                 std::to_string(waitRes));
+      }
+
+      bytesWritten += curChunk;
+    }
+  } catch (...) {
+    vkUnmapMemory(device, stagingBuffer.memory);
+    if (commandBuffer != VK_NULL_HANDLE) {
+      vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
+    }
+    vkDestroyBuffer(device, stagingBuffer.buffer, nullptr);
+    vkFreeMemory(device, stagingBuffer.memory, nullptr);
+    throw;
+  }
+
+  vkUnmapMemory(device, stagingBuffer.memory);
   vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
   vkDestroyBuffer(device, stagingBuffer.buffer, nullptr);
   vkFreeMemory(device, stagingBuffer.memory, nullptr);
@@ -1001,11 +1060,20 @@ void VulkanContext::writeBuffer(ComputeBuffer buffer, size_t offset,
 
 void VulkanContext::readBuffer(ComputeBuffer buffer, size_t offset, size_t size,
                                void *host_ptr) const {
-  VulkanBuffer stagingBuffer;
+  if (size == 0) return;
+  auto it = buffers.find(buffer);
+  if (it == buffers.end() || !it->second) {
+    throw std::runtime_error("Invalid buffer handle in readBuffer");
+  }
+  VkBuffer srcBuffer = it->second->buffer;
 
+  constexpr size_t kMaxChunkSize = 64ULL * 1024ULL * 1024ULL; // 64 MB chunk cap
+  const size_t chunkSize = std::min(size, kMaxChunkSize);
+
+  VulkanBuffer stagingBuffer;
   VkBufferCreateInfo bufferInfo{};
   bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-  bufferInfo.size = size;
+  bufferInfo.size = chunkSize;
   bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
   bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
@@ -1026,10 +1094,18 @@ void VulkanContext::readBuffer(ComputeBuffer buffer, size_t offset, size_t size,
 
   if (vkAllocateMemory(device, &allocInfo, nullptr, &stagingBuffer.memory) !=
       VK_SUCCESS) {
+    vkDestroyBuffer(device, stagingBuffer.buffer, nullptr);
     throw std::runtime_error("failed to allocate staging buffer memory!");
   }
 
   vkBindBufferMemory(device, stagingBuffer.buffer, stagingBuffer.memory, 0);
+
+  void *mappedData = nullptr;
+  if (vkMapMemory(device, stagingBuffer.memory, 0, chunkSize, 0, &mappedData) != VK_SUCCESS) {
+    vkDestroyBuffer(device, stagingBuffer.buffer, nullptr);
+    vkFreeMemory(device, stagingBuffer.memory, nullptr);
+    throw std::runtime_error("failed to map staging buffer memory!");
+  }
 
   VkCommandBufferAllocateInfo cmdAllocInfo{};
   cmdAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -1037,37 +1113,64 @@ void VulkanContext::readBuffer(ComputeBuffer buffer, size_t offset, size_t size,
   cmdAllocInfo.commandPool = commandPool;
   cmdAllocInfo.commandBufferCount = 1;
 
-  VkCommandBuffer commandBuffer;
-  vkAllocateCommandBuffers(device, &cmdAllocInfo, &commandBuffer);
+  VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
+  if (vkAllocateCommandBuffers(device, &cmdAllocInfo, &commandBuffer) != VK_SUCCESS) {
+    vkUnmapMemory(device, stagingBuffer.memory);
+    vkDestroyBuffer(device, stagingBuffer.buffer, nullptr);
+    vkFreeMemory(device, stagingBuffer.memory, nullptr);
+    throw std::runtime_error("failed to allocate transfer command buffer!");
+  }
 
-  VkCommandBufferBeginInfo beginInfo{};
-  beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-  beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  uint8_t *dstBytes = static_cast<uint8_t *>(host_ptr);
+  size_t bytesRead = 0;
 
-  vkBeginCommandBuffer(commandBuffer, &beginInfo);
+  try {
+    while (bytesRead < size) {
+      size_t curChunk = std::min(size - bytesRead, chunkSize);
 
-  VkBufferCopy copyRegion{};
-  copyRegion.srcOffset = offset;
-  copyRegion.dstOffset = 0;
-  copyRegion.size = size;
-  vkCmdCopyBuffer(commandBuffer, buffers.at(buffer)->buffer,
-                  stagingBuffer.buffer, 1, &copyRegion);
+      VkCommandBufferBeginInfo beginInfo{};
+      beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+      beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+      vkBeginCommandBuffer(commandBuffer, &beginInfo);
 
-  vkEndCommandBuffer(commandBuffer);
+      VkBufferCopy copyRegion{};
+      copyRegion.srcOffset = offset + bytesRead;
+      copyRegion.dstOffset = 0;
+      copyRegion.size = curChunk;
+      vkCmdCopyBuffer(commandBuffer, srcBuffer, stagingBuffer.buffer, 1, &copyRegion);
 
-  VkSubmitInfo submitInfo{};
-  submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-  submitInfo.commandBufferCount = 1;
-  submitInfo.pCommandBuffers = &commandBuffer;
+      vkEndCommandBuffer(commandBuffer);
 
-  vkQueueSubmit(computeQueue, 1, &submitInfo, VK_NULL_HANDLE);
-  vkQueueWaitIdle(computeQueue);
+      VkSubmitInfo submitInfo{};
+      submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+      submitInfo.commandBufferCount = 1;
+      submitInfo.pCommandBuffers = &commandBuffer;
 
-  void *data;
-  vkMapMemory(device, stagingBuffer.memory, 0, size, 0, &data);
-  memcpy(host_ptr, data, size);
+      VkResult submitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, VK_NULL_HANDLE);
+      if (submitRes != VK_SUCCESS) {
+        throw std::runtime_error("vkQueueSubmit failed in readBuffer with result: " +
+                                 std::to_string(submitRes));
+      }
+      VkResult waitRes = vkQueueWaitIdle(computeQueue);
+      if (waitRes != VK_SUCCESS) {
+        throw std::runtime_error("vkQueueWaitIdle failed in readBuffer with result: " +
+                                 std::to_string(waitRes));
+      }
+
+      memcpy(dstBytes + bytesRead, mappedData, curChunk);
+      bytesRead += curChunk;
+    }
+  } catch (...) {
+    vkUnmapMemory(device, stagingBuffer.memory);
+    if (commandBuffer != VK_NULL_HANDLE) {
+      vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
+    }
+    vkDestroyBuffer(device, stagingBuffer.buffer, nullptr);
+    vkFreeMemory(device, stagingBuffer.memory, nullptr);
+    throw;
+  }
+
   vkUnmapMemory(device, stagingBuffer.memory);
-
   vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
   vkDestroyBuffer(device, stagingBuffer.buffer, nullptr);
   vkFreeMemory(device, stagingBuffer.memory, nullptr);
@@ -1077,9 +1180,17 @@ void VulkanContext::releaseBuffer(ComputeBuffer buffer) {
   auto it = buffers.find(buffer);
   if (it != buffers.end()) {
     VulkanBuffer *vulkanBuffer = it->second;
-    vkDestroyBuffer(device, vulkanBuffer->buffer, nullptr);
-    vkFreeMemory(device, vulkanBuffer->memory, nullptr);
-    delete vulkanBuffer;
+    if (vulkanBuffer) {
+      if (vulkanBuffer->buffer != VK_NULL_HANDLE) {
+        vkDestroyBuffer(device, vulkanBuffer->buffer, nullptr);
+        vulkanBuffer->buffer = VK_NULL_HANDLE;
+      }
+      if (vulkanBuffer->memory != VK_NULL_HANDLE) {
+        vkFreeMemory(device, vulkanBuffer->memory, nullptr);
+        vulkanBuffer->memory = VK_NULL_HANDLE;
+      }
+      delete vulkanBuffer;
+    }
     buffers.erase(it);
   }
 }
@@ -1087,7 +1198,7 @@ void VulkanContext::releaseBuffer(ComputeBuffer buffer) {
 VkDeviceAddress
 VulkanContext::getBufferDeviceAddress(ComputeBuffer buffer) const {
   auto it = buffers.find(buffer);
-  if (it != buffers.end()) {
+  if (it != buffers.end() && it->second) {
     return it->second->address;
   }
   return 0;
@@ -1095,7 +1206,7 @@ VulkanContext::getBufferDeviceAddress(ComputeBuffer buffer) const {
 
 VkBuffer VulkanContext::getVkBuffer(ComputeBuffer buffer) const {
   auto it = buffers.find(buffer);
-  if (it != buffers.end()) {
+  if (it != buffers.end() && it->second) {
     return it->second->buffer;
   }
   return VK_NULL_HANDLE;
@@ -1529,7 +1640,7 @@ void VulkanContext::dispatch(ComputeKernel kernel, uint32_t grid_x,
 void VulkanContext::dispatchIndirect(ComputeKernel kernel_handle,
                                      ComputeBuffer indirectBuffer,
                                      VkDeviceSize offset) {
-  auto *vulkanKernel = kernels[kernel_handle];
+  auto *vulkanKernel = getKernel(kernel_handle);
   if (!vulkanKernel)
     return;
 
@@ -1592,7 +1703,7 @@ void VulkanContext::dispatchIndirect(ComputeKernel kernel_handle,
 void VulkanContext::dispatchIndirectSequence(
     ComputeKernel kernel_handle, ComputeBuffer indirectBuffer,
     const std::vector<IndirectBatchEntry> &entries) {
-  auto *vulkanKernel = kernels[kernel_handle];
+  auto *vulkanKernel = getKernel(kernel_handle);
   if (!vulkanKernel || entries.empty())
     return;
 
@@ -1629,7 +1740,8 @@ void VulkanContext::dispatchIndirectSequence(
   VulkanKernel *lastBound = vulkanKernel;
 
   for (const auto &entry : entries) {
-    VulkanKernel *kToBind = entry.specializedKernel ? kernels[entry.specializedKernel] : vulkanKernel;
+    VulkanKernel *kToBind = entry.specializedKernel ? getKernel(entry.specializedKernel) : vulkanKernel;
+    if (!kToBind) kToBind = vulkanKernel;
     if (kToBind && kToBind != lastBound) {
       vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
                         kToBind->pipeline);
@@ -1673,8 +1785,8 @@ void VulkanContext::dispatchWorkListSequence(
     bool isPingPong,
     const DGCExecutionInfo *dgcInfo,
     uint32_t dgcMode) {
-  auto *classifyKernel = kernels[classifyKernel_handle];
-  auto *secondKernel = kernels[secondKernel_handle];
+  auto *classifyKernel = getKernel(classifyKernel_handle);
+  auto *secondKernel = getKernel(secondKernel_handle);
   if (!classifyKernel || !secondKernel)
     return;
 
@@ -1703,7 +1815,7 @@ void VulkanContext::dispatchWorkListSequence(
 
   // 1. Reset queue counters & indirect commands on compute queue (zero transfer bubbles)
   if (resetKernel_handle) {
-    auto *resetKernel = kernels[resetKernel_handle];
+    auto *resetKernel = getKernel(resetKernel_handle);
     if (resetKernel) {
       vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
                         resetKernel->pipeline);
@@ -1740,7 +1852,7 @@ void VulkanContext::dispatchWorkListSequence(
 
   // 3. Resolve: Convert queue counters to indirect dispatch commands (32 threads, 1 wave, <0.5 us)
   if (resolveKernel_handle) {
-    auto *resolveKernel = kernels[resolveKernel_handle];
+    auto *resolveKernel = getKernel(resolveKernel_handle);
     if (resolveKernel) {
       VkMemoryBarrier classifyBarrier{};
       classifyBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
@@ -1822,7 +1934,8 @@ void VulkanContext::dispatchWorkListSequence(
       VulkanKernel *lastBound = secondKernel;
       for (size_t e = 0; e < entries.size(); ++e) {
         const auto &entry = entries[e];
-        VulkanKernel *kToBind = entry.specializedKernel ? kernels[entry.specializedKernel] : secondKernel;
+        VulkanKernel *kToBind = entry.specializedKernel ? getKernel(entry.specializedKernel) : secondKernel;
+        if (!kToBind) kToBind = secondKernel;
         if (kToBind && kToBind != lastBound) {
           vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, kToBind->pipeline);
           vkCmdBindDescriptorSets(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
@@ -1840,7 +1953,7 @@ void VulkanContext::dispatchWorkListSequence(
         genCmds.shaderStages = VK_SHADER_STAGE_COMPUTE_BIT;
         genCmds.indirectExecutionSet = dgcInfo->executionSet;
         genCmds.indirectCommandsLayout = dgcInfo->layout;
-        genCmds.indirectAddress = getBufferDeviceAddress(dgcInfo->sequenceBuffer) + dgcInfo->sequenceBufferOffset + e * sizeof(uint32_t) * 12;
+        genCmds.indirectAddress = getBufferDeviceAddress(dgcInfo->sequenceBuffer) + dgcInfo->sequenceBufferOffset;
         genCmds.indirectAddressSize = sizeof(uint32_t) * 12;
         genCmds.preprocessAddress = getBufferDeviceAddress(dgcInfo->preprocessBuffer);
         genCmds.preprocessSize = dgcInfo->preprocessBufferSize;
@@ -1852,7 +1965,7 @@ void VulkanContext::dispatchWorkListSequence(
         vkCmdExecuteGeneratedCommandsEXT_ptr(frame.commandBuffer, VK_FALSE, &genCmds);
 
         if (e + 1 < entries.size() && resolveKernel_handle) {
-          auto *resolveKernel = kernels[resolveKernel_handle];
+          auto *resolveKernel = getKernel(resolveKernel_handle);
           if (resolveKernel) {
             VkMemoryBarrier bounceBarrier{};
             bounceBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
@@ -1888,7 +2001,8 @@ void VulkanContext::dispatchWorkListSequence(
     VulkanKernel *lastBound = secondKernel;
     for (size_t e = 0; e < entries.size(); ++e) {
       const auto &entry = entries[e];
-      VulkanKernel *kToBind = entry.specializedKernel ? kernels[entry.specializedKernel] : secondKernel;
+      VulkanKernel *kToBind = entry.specializedKernel ? getKernel(entry.specializedKernel) : secondKernel;
+      if (!kToBind) kToBind = secondKernel;
       if (kToBind && kToBind != lastBound) {
         vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
                           kToBind->pipeline);
@@ -1907,7 +2021,7 @@ void VulkanContext::dispatchWorkListSequence(
 
       // If ping-pong compaction between bounces, resolve next bounce's indirect command
       if (isPingPong && (e + 1 < entries.size()) && resolveKernel_handle) {
-        auto *resolveKernel = kernels[resolveKernel_handle];
+        auto *resolveKernel = getKernel(resolveKernel_handle);
         if (resolveKernel) {
           VkMemoryBarrier bounceBarrier{};
           bounceBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
@@ -1968,7 +2082,7 @@ void VulkanContext::dispatchWorkListSequence(
 void VulkanContext::dispatchRayTracingIndirect(ComputeKernel kernel_handle,
                                              ComputeBuffer indirectBuffer,
                                              VkDeviceSize offset) {
-  auto *vulkanKernel = kernels[kernel_handle];
+  auto *vulkanKernel = getKernel(kernel_handle);
   if (!vulkanKernel || !vulkanKernel->isRTPipeline)
     return;
 
@@ -2036,22 +2150,44 @@ void VulkanContext::dispatchRayTracingIndirect(ComputeKernel kernel_handle,
   currentFrameIndex = (currentFrameIndex + 1) % kMaxInFlight;
 }
 
+VulkanContext::VulkanKernel *VulkanContext::getKernel(ComputeKernel handle) const {
+  if (!handle) return nullptr;
+  auto it = kernels.find(handle);
+  return (it != kernels.end()) ? it->second : nullptr;
+}
+
 void VulkanContext::releaseKernel(ComputeKernel kernel) {
   auto it = kernels.find(kernel);
   if (it != kernels.end()) {
     VulkanKernel *vulkanKernel = it->second;
-    vkDestroyPipeline(device, vulkanKernel->pipeline, nullptr);
-    vkDestroyPipelineLayout(device, vulkanKernel->pipelineLayout, nullptr);
-    vkDestroyDescriptorSetLayout(device, vulkanKernel->descriptorSetLayout,
-                                 nullptr);
-    if (vulkanKernel->shaderModule) {
-      vkDestroyShaderModule(device, vulkanKernel->shaderModule, nullptr);
+    if (vulkanKernel) {
+      if (vulkanKernel->pipeline != VK_NULL_HANDLE) {
+        vkDestroyPipeline(device, vulkanKernel->pipeline, nullptr);
+        vulkanKernel->pipeline = VK_NULL_HANDLE;
+      }
+      if (vulkanKernel->pipelineLayout != VK_NULL_HANDLE) {
+        vkDestroyPipelineLayout(device, vulkanKernel->pipelineLayout, nullptr);
+        vulkanKernel->pipelineLayout = VK_NULL_HANDLE;
+      }
+      if (vulkanKernel->descriptorSetLayout != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(device, vulkanKernel->descriptorSetLayout,
+                                     nullptr);
+        vulkanKernel->descriptorSetLayout = VK_NULL_HANDLE;
+      }
+      if (vulkanKernel->shaderModule != VK_NULL_HANDLE) {
+        vkDestroyShaderModule(device, vulkanKernel->shaderModule, nullptr);
+        vulkanKernel->shaderModule = VK_NULL_HANDLE;
+      }
+      if (vulkanKernel->sbtBuffer) {
+        releaseBuffer(vulkanKernel->sbtBuffer);
+        vulkanKernel->sbtBuffer = nullptr;
+      }
+      if (vulkanKernel->descriptorPool != VK_NULL_HANDLE) {
+        vkDestroyDescriptorPool(device, vulkanKernel->descriptorPool, nullptr);
+        vulkanKernel->descriptorPool = VK_NULL_HANDLE;
+      }
+      delete vulkanKernel;
     }
-    if (vulkanKernel->sbtBuffer) {
-      releaseBuffer(vulkanKernel->sbtBuffer);
-    }
-    vkDestroyDescriptorPool(device, vulkanKernel->descriptorPool, nullptr);
-    delete vulkanKernel;
     kernels.erase(it);
   }
 }
@@ -2076,12 +2212,9 @@ void VulkanContext::notifyKernelCreated(const std::string &file_name) {
 
 void VulkanContext::printProgressBar(uint32_t current, uint32_t total,
                                      const std::string &kernel_name) {
-  // Note: no verbose guard here. This is only called from
-  // notifyKernelCreated() in non-verbose mode (matching the OpenCL/ROCm
-  // contexts), where the progress bar is the only setup feedback shown.
-  const int barWidth = 30;
-  float progress = static_cast<float>(current) / total;
-  int pos = static_cast<int>(barWidth * progress);
+  const int barWidth = 28;
+  float progress = std::clamp(static_cast<float>(current) / std::max(1u, total), 0.0f, 1.0f);
+  int pos = std::clamp(static_cast<int>(barWidth * progress), 0, barWidth);
 
   std::string short_name = kernel_name;
   size_t last_slash = kernel_name.find_last_of("/\\");
@@ -2089,17 +2222,18 @@ void VulkanContext::printProgressBar(uint32_t current, uint32_t total,
     short_name = kernel_name.substr(last_slash + 1);
   }
 
-  std::cout << "\r\033[K[";
+  std::cout << "\r\033[K  Progress: [";
   for (int i = 0; i < barWidth; ++i) {
     if (i < pos)
-      std::cout << "#";
-    else if (i == pos)
-      std::cout << ">";
+      std::cout << "━";
+    else if (i == pos && pos < barWidth)
+      std::cout << "╸";
     else
       std::cout << " ";
   }
-  std::cout << "] " << int(progress * 100.0) << "% Compiling " << short_name
-            << (current == total ? "\n" : "") << std::flush;
+  std::cout << "] " << std::setw(3) << int(progress * 100.0) << "% (" << std::min(current, total) << "/" << total
+            << ") Compiling " << short_name
+            << (current >= total ? "\n" : "") << std::flush;
 }
 
 ComputeKernel VulkanContext::createRTPipeline(
@@ -2605,8 +2739,8 @@ void VulkanContext::dispatchDGCWorkListSequence(
     throw std::runtime_error("VK_EXT_device_generated_commands not supported on this device");
   }
 
-  auto *classifyKernel = kernels[classifyKernel_handle];
-  auto *secondKernel = kernels[secondKernel_handle];
+  auto *classifyKernel = getKernel(classifyKernel_handle);
+  auto *secondKernel = getKernel(secondKernel_handle);
   if (!classifyKernel || !secondKernel) return;
 
   auto &frame = inFlightFrames[currentFrameIndex];
@@ -2628,7 +2762,7 @@ void VulkanContext::dispatchDGCWorkListSequence(
 
   // 1. Reset
   if (resetKernel_handle) {
-    auto *resetKernel = kernels[resetKernel_handle];
+    auto *resetKernel = getKernel(resetKernel_handle);
     if (resetKernel) {
       vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, resetKernel->pipeline);
       vkCmdBindDescriptorSets(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
@@ -2664,7 +2798,7 @@ void VulkanContext::dispatchDGCWorkListSequence(
 
   // 4. Resolve: GPU outputs DGC sequence items and dynamic sequence count
   if (resolveKernel_handle) {
-    auto *resolveKernel = kernels[resolveKernel_handle];
+    auto *resolveKernel = getKernel(resolveKernel_handle);
     if (resolveKernel) {
       vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, resolveKernel->pipeline);
       vkCmdBindDescriptorSets(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
@@ -2733,7 +2867,7 @@ void VulkanContext::dispatchDGCSequence(ComputeKernel kernel_handle,
     throw std::runtime_error("VK_EXT_device_generated_commands not supported on this device");
   }
 
-  auto *kernel = kernels[kernel_handle];
+  auto *kernel = getKernel(kernel_handle);
   if (!kernel) return;
 
   auto &frame = inFlightFrames[currentFrameIndex];

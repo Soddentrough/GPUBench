@@ -150,7 +150,7 @@ void RayASBuildBench::Setup(IComputeContext &context_ref,
     maxBuildScratch = std::max(maxBuildScratch, (size_t)libSizes[b].buildScratchSize);
   }
 
-  // Batch build the 5,000 BLASes in a temporary command buffer
+  // Batch build the 5,000 BLASes in chunks to avoid GPU ring timeouts on display adapters
   {
     VkQueue queue = vContext->getComputeQueue();
     VkCommandPoolCreateInfo cpInfo{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
@@ -170,57 +170,62 @@ void RayASBuildBench::Setup(IComputeContext &context_ref,
     ComputeBuffer libScratch = context_ref.createBuffer(maxBuildScratch);
     VkDeviceAddress libScratchAddr = vContext->getBufferDeviceAddress(libScratch);
 
-    VkCommandBufferBeginInfo bBegin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
-    vkBeginCommandBuffer(cmd, &bBegin);
+    constexpr uint32_t kBatchChunk = 250;
+    for (uint32_t bStart = 0; bStart < numBlasLib; bStart += kBatchChunk) {
+      uint32_t bEnd = std::min(bStart + kBatchChunk, numBlasLib);
 
-    for (uint32_t b = 0; b < numBlasLib; ++b) {
-      VkAccelerationStructureGeometryKHR geom{
-          VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR};
-      geom.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
-      geom.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
-      geom.geometry.triangles.sType =
-          VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
-      geom.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
-      geom.geometry.triangles.vertexData.deviceAddress =
-          vAddr + (b * 1000 * 9 * sizeof(float));
-      geom.geometry.triangles.vertexStride = sizeof(float) * 3;
-      geom.geometry.triangles.maxVertex = libPrims[b] * 3 - 1;
-      geom.geometry.triangles.indexType = VK_INDEX_TYPE_NONE_KHR;
+      VkCommandBufferBeginInfo bBegin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+      vkBeginCommandBuffer(cmd, &bBegin);
 
-      VkAccelerationStructureBuildGeometryInfoKHR bInfo{
-          VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR};
-      bInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-      bInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
-      bInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
-      bInfo.geometryCount = 1;
-      bInfo.pGeometries = &geom;
-      bInfo.dstAccelerationStructure = blasLibHandles[b];
-      bInfo.scratchData.deviceAddress = libScratchAddr;
+      for (uint32_t b = bStart; b < bEnd; ++b) {
+        VkAccelerationStructureGeometryKHR geom{
+            VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR};
+        geom.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
+        geom.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+        geom.geometry.triangles.sType =
+            VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
+        geom.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
+        geom.geometry.triangles.vertexData.deviceAddress =
+            vAddr + (b * 1000 * 9 * sizeof(float));
+        geom.geometry.triangles.vertexStride = sizeof(float) * 3;
+        geom.geometry.triangles.maxVertex = libPrims[b] * 3 - 1;
+        geom.geometry.triangles.indexType = VK_INDEX_TYPE_NONE_KHR;
 
-      VkAccelerationStructureBuildRangeInfoKHR range{};
-      range.primitiveCount = libPrims[b];
-      const VkAccelerationStructureBuildRangeInfoKHR *pRange = &range;
+        VkAccelerationStructureBuildGeometryInfoKHR bInfo{
+            VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR};
+        bInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+        bInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+        bInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+        bInfo.geometryCount = 1;
+        bInfo.pGeometries = &geom;
+        bInfo.dstAccelerationStructure = blasLibHandles[b];
+        bInfo.scratchData.deviceAddress = libScratchAddr;
 
-      vkCmdBuildAccelerationStructuresKHR_ptr(cmd, 1, &bInfo, &pRange);
+        VkAccelerationStructureBuildRangeInfoKHR range{};
+        range.primitiveCount = libPrims[b];
+        const VkAccelerationStructureBuildRangeInfoKHR *pRange = &range;
 
-      if (b + 1 < numBlasLib) {
-        VkMemoryBarrier mb{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
-        mb.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR | VK_ACCESS_SHADER_WRITE_BIT;
-        mb.dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR |
-                           VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR |
-                           VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
-                             VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
-                             0, 1, &mb, 0, nullptr, 0, nullptr);
+        vkCmdBuildAccelerationStructuresKHR_ptr(cmd, 1, &bInfo, &pRange);
+
+        if (b + 1 < bEnd) {
+          VkMemoryBarrier mb{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
+          mb.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR | VK_ACCESS_SHADER_WRITE_BIT;
+          mb.dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR |
+                             VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR |
+                             VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+          vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+                               VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+                               0, 1, &mb, 0, nullptr, 0, nullptr);
+        }
       }
-    }
-    vkEndCommandBuffer(cmd);
+      vkEndCommandBuffer(cmd);
 
-    VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
-    submit.commandBufferCount = 1;
-    submit.pCommandBuffers = &cmd;
-    vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE);
-    vkQueueWaitIdle(queue);
+      VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+      submit.commandBufferCount = 1;
+      submit.pCommandBuffers = &cmd;
+      vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE);
+      vkQueueWaitIdle(queue);
+    }
 
     vkDestroyCommandPool(device, tmpPool, nullptr);
     context_ref.releaseBuffer(libScratch);
@@ -558,17 +563,8 @@ const char *RayASBuildBench::GetMetric(uint32_t config_idx) const {
   return "MTris/s";
 }
 const char *RayASBuildBench::GetSubCategory(uint32_t config_idx) const {
-  switch (config_idx) {
-  case 0: return "BLAS Build (1M)";
-  case 1: return "BLAS Update (1M)";
-  case 2: return "BLAS Build (5M)";
-  case 3: return "BLAS Update (5M)";
-  case 4: return "BLAS Build (10M)";
-  case 5: return "TLAS: Indoor Corridor";
-  case 6: return "TLAS: Dense Jungle";
-  case 7: return "TLAS: Open World";
-  default: return "AS Build";
-  }
+  if (config_idx < 5) return "BLAS Build & Update";
+  return "TLAS Construction";
 }
 
 std::string RayASBuildBench::GetConfigName(uint32_t config_idx) const {
@@ -578,9 +574,9 @@ std::string RayASBuildBench::GetConfigName(uint32_t config_idx) const {
   case 2: return "BLAS Build (5M Tris)";
   case 3: return "BLAS Update (5M Tris)";
   case 4: return "BLAS Build (10M Tris)";
-  case 5: return "TLAS: Indoor Corridor (20K Inst, 5K Meshes)";
-  case 6: return "TLAS: Dense Jungle (50K Inst, 500 Meshes)";
-  case 7: return "TLAS: Massive Open World (200K Inst, 5K Meshes)";
+  case 5: return "Indoor Corridor (20K Inst, 5K Meshes)";
+  case 6: return "Dense Jungle (50K Inst, 500 Meshes)";
+  case 7: return "Massive Open World (200K Inst, 5K Meshes)";
   default: return "Unknown";
   }
 }

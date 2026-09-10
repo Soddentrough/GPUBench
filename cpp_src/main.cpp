@@ -1,7 +1,7 @@
 #include "CLI11.hpp"
 #include "benchmarks/RayAnyHitBench.h"
 #include "benchmarks/RayDivergenceBench.h"
-#include "benchmarks/RayTracingBench.h"
+#include "benchmarks/RayIntersectBench.h"
 #include "benchmarks/RayPathTracingBench.h"
 #include "core/BenchmarkRunner.h"
 #include "core/ComputeBackendFactory.h"
@@ -241,7 +241,7 @@ int main(int argc, char **argv) {
       "  raster      Fixed-function rasterization & ROP pixel fill rates (subset of graphics):\n"
       "              Pixel Fill Rate (RGBA8, RGBA16F HDR, Alpha Blending)\n"
       "  raytracing  Hardware BVH traversal, intersection & scheduling (subset of graphics, alias: 'rt'):\n"
-      "              RayTracing, RayAnyHit, RayProcedural, RayIncoherent, RayMaterialDivergence,\n"
+      "              RayIntersect, RayAnyHit, RayProcedural, RayIncoherent, RayMaterialDivergence,\n"
       "              RayPayload, RayASBuild, RayScheduling (Scene Ray Tracing & Path Tracing - Work Lists / SER / Work Graphs),\n"
       "              Pipeline Breakdown (Linear vs 2D Tiled vs Morton Z-Curve, Queue Compaction)\n"
       "  system      Host CPU & RAM system memory:\n"
@@ -283,13 +283,16 @@ int main(int argc, char **argv) {
   app.add_flag("--dump-geometry", dump_geometry,
                "Dump ray tracing geometry to OBJ files");
 
-  bool dump_renders = true;
+  bool dump_renders = false;
   app.add_flag("--dump-renders,--dump", dump_renders,
-               "Dump and analytically compare rendered frames between Megakernel and Work Lists (default: enabled)")
-      ->default_val(true);
+               "Dump and analytically compare rendered frames between Megakernel and Work Lists (default: disabled)");
   bool no_dump_renders = false;
   app.add_flag("--no-dump-renders,--no-dump", no_dump_renders,
                "Disable render dumping and image comparisons");
+
+  bool verify_parity = false;
+  app.add_flag("--verify-parity", verify_parity,
+               "Enforce visual parity gating between Megakernel and Work Lists (fails if PSNR < 45 dB or discrepancy > 0.01%)");
 
   std::string scene_str = "indoor";
   app.add_option("-s,--scene", scene_str,
@@ -550,6 +553,10 @@ int main(int argc, char **argv) {
     if (no_dump_renders) {
       dump_renders = false;
     }
+    if (verify_parity) {
+      dump_renders = true;
+      no_dump_renders = false;
+    }
 
     BenchmarkRunner runner({}, verbose, debug, dump_geometry, dump_renders, scene_str);
     runner.setResolution(render_width, render_height);
@@ -557,6 +564,7 @@ int main(int argc, char **argv) {
     runner.setSamplesPerPixel(samples_per_pixel);
     runner.setTargetConfig(config_target);
     runner.setProfileSnapshot(profile_snapshot);
+    runner.setVerifyParity(verify_parity);
 
     std::vector<uint32_t> target_indices = device_indices;
     if (target_indices.empty()) {
@@ -640,6 +648,10 @@ int main(int argc, char **argv) {
       return EXIT_FAILURE;
     }
     if (hadUnmatched) {
+      return EXIT_FAILURE;
+    }
+    if (runner.hasParityFailure()) {
+      std::cerr << "Error: Visual parity verification failed." << std::endl;
       return EXIT_FAILURE;
     }
 

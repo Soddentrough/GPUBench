@@ -502,6 +502,7 @@ void main() {
     uint threadHits = 0u;
     uint assignedQueue = 0xFFFFFFFFu;
     vec4 payload0 = vec4(0.0);
+    vec4 payload1 = vec4(0.0);
 
     if (idx < pc.rayCount) {
         threadRays = 1u;
@@ -538,8 +539,34 @@ void main() {
             payload0 = vec4(origin, uintBitsToFloat(packSnorm2x16(octEncode(direction))));
         } else {
             rayQueryEXT query;
-            rayQueryInitializeEXT(query, topLevelAS, gl_RayFlagsOpaqueEXT, 0xFF, origin, tMinPrimary, direction, tMaxPrimary);
-            while (rayQueryProceedEXT(query)) {}
+            uint rFlags = (pc.mode == 7u) ? gl_RayFlagsNoneEXT : gl_RayFlagsOpaqueEXT;
+            rayQueryInitializeEXT(query, topLevelAS, rFlags, 0xFF, origin, tMinPrimary, direction, tMaxPrimary);
+            while (rayQueryProceedEXT(query)) {
+                if (pc.mode == 7u && rayQueryGetIntersectionTypeEXT(query, false) == gl_RayQueryCandidateIntersectionTriangleEXT) {
+                    if (pc.isGltf != 0u) {
+                        uint candTri = rayQueryGetIntersectionPrimitiveIndexEXT(query, false);
+                        uint candMatId = triMatBuf.triangleMats[candTri];
+                        GltfMaterialGpu candMat = matBuf.materials[candMatId];
+                        if (candMat.alphaMode == 1u /* MASK */) {
+                            vec2 candBary = rayQueryGetIntersectionBarycentricsEXT(query, false);
+                            uint b = candTri * 36u;
+                            vec2 uv0 = vec2(vbuf.vertices[b + 10], vbuf.vertices[b + 11]);
+                            vec2 uv1 = vec2(vbuf.vertices[b + 22], vbuf.vertices[b + 23]);
+                            vec2 uv2 = vec2(vbuf.vertices[b + 34], vbuf.vertices[b + 35]);
+                            float cw = 1.0 - candBary.x - candBary.y;
+                            vec2 cuv = cw * uv0 + candBary.x * uv1 + candBary.y * uv2;
+                            float calpha = candMat.baseColorFactor.a;
+                            if (candMat.baseColorTexIdx >= 0) {
+                                calpha *= sampleTexture(uint(candMat.baseColorTexIdx), cuv).a;
+                            }
+                            if (calpha < candMat.alphaCutoff) {
+                                continue; // Skip transparent pixel (pass-through)
+                            }
+                        }
+                    }
+                    rayQueryConfirmIntersectionEXT(query);
+                }
+            }
 
             if (rayQueryGetIntersectionTypeEXT(query, true) == gl_RayQueryCommittedIntersectionTriangleEXT) {
                 threadHits = 1u;
@@ -550,6 +577,40 @@ void main() {
                     assignedQueue = (pc.spatialPattern == 3u) ? (primId % 3u) : 0u;
                     vec2 rawBary = rayQueryGetIntersectionBarycentricsEXT(query, true);
                     payload0 = vec4(t, uintBitsToFloat(pixelIdx), uintBitsToFloat(primId), uintBitsToFloat(packUnorm2x16(rawBary)));
+                } else if (pc.mode == 6 || pc.mode == 7) {
+                    assignedQueue = 0u;
+                    vec2 rawBary = rayQueryGetIntersectionBarycentricsEXT(query, true);
+                    vec3 normal = computeSmoothNormal(pc.sceneType, primId, hitPos, direction, rawBary);
+                    vec2 bary = unpackUnorm2x16(packUnorm2x16(rawBary));
+                    vec2 hitUv = vec2(0.0);
+                    if (pc.isGltf != 0u) {
+                        uint b = primId * 36u;
+                        vec2 uv0 = vec2(vbuf.vertices[b + 10], vbuf.vertices[b + 11]);
+                        vec2 uv1 = vec2(vbuf.vertices[b + 22], vbuf.vertices[b + 23]);
+                        vec2 uv2 = vec2(vbuf.vertices[b + 34], vbuf.vertices[b + 35]);
+                        float w = 1.0 - bary.x - bary.y;
+                        hitUv = w * uv0 + bary.x * uv1 + bary.y * uv2;
+                    }
+                    // 32-Byte Packed Hybrid Payload (2 x vec4)
+                    payload0 = vec4(hitPos, uintBitsToFloat(packSnorm2x16(octEncode(normal))));
+                    payload1 = vec4(uintBitsToFloat(packHalf2x16(hitUv)), uintBitsToFloat(packUnorm2x16(rawBary)), uintBitsToFloat(primId), uintBitsToFloat(pixelIdx));
+
+                    if (pc.mode == 7u && pc.dumpRenders != 0u) {
+                        vec3 albedo = vec3(0.72);
+                        if (pc.isGltf != 0u) {
+                            uint matId = triMatBuf.triangleMats[primId];
+                            GltfMaterialGpu mat = matBuf.materials[matId];
+                            albedo = mat.baseColorFactor.rgb;
+                            if (mat.baseColorTexIdx >= 0) {
+                                albedo *= pow(sampleTexture(uint(mat.baseColorTexIdx), hitUv).rgb, vec3(2.2));
+                            }
+                        }
+                        vec3 sunDir, sunColor;
+                        getSceneSunParams(pc.sceneType, sunDir, sunColor);
+                        float NdotL = max(0.0, dot(normal, sunDir));
+                        vec3 color = albedo * 0.15 + albedo * sunColor * NdotL;
+                        fb.pixels[pixelIdx] = vec4(tonemapACES(color), 1.0);
+                    }
                 } else if (pc.mode == 0) {
                     if (pc.isGltf != 0u) {
                         uint matId = triMatBuf.triangleMats[primId];
@@ -787,8 +848,8 @@ void main() {
     }
 
     // Coalesced Zero-LDS Wave-Level Stream Compaction into Contiguous VRAM Queues
-    for (uint q = 0u; q < 8u; ++q) {
-        bool match = (assignedQueue == q);
+    if (pc.mode == 6u || pc.mode == 7u) {
+        bool match = (assignedQueue == 0u);
         uvec4 ballot = subgroupBallot(match);
         uint count = subgroupBallotBitCount(ballot);
         if (count > 0u) {
@@ -796,13 +857,35 @@ void main() {
             uint firstLane = subgroupBallotFindLSB(ballot);
             uint baseSlot = 0u;
             if (gl_SubgroupInvocationID == firstLane) {
-                baseSlot = atomicAdd(worklist.queueCounters[Q_COUNTER_IDX(q)], count);
+                baseSlot = atomicAdd(worklist.queueCounters[Q_COUNTER_IDX(0u)], count);
             }
             baseSlot = subgroupBroadcast(baseSlot, firstLane);
             if (match) {
                 uint slot = baseSlot + slotInWave;
                 if (slot < pc.queueCapacity) {
-                    worklist.rayRecords[q * pc.queueCapacity + slot] = payload0;
+                    worklist.rayRecords[slot * 2u] = payload0;
+                    worklist.rayRecords[slot * 2u + 1u] = payload1;
+                }
+            }
+        }
+    } else {
+        for (uint q = 0u; q < 8u; ++q) {
+            bool match = (assignedQueue == q);
+            uvec4 ballot = subgroupBallot(match);
+            uint count = subgroupBallotBitCount(ballot);
+            if (count > 0u) {
+                uint slotInWave = subgroupBallotExclusiveBitCount(ballot);
+                uint firstLane = subgroupBallotFindLSB(ballot);
+                uint baseSlot = 0u;
+                if (gl_SubgroupInvocationID == firstLane) {
+                    baseSlot = atomicAdd(worklist.queueCounters[Q_COUNTER_IDX(q)], count);
+                }
+                baseSlot = subgroupBroadcast(baseSlot, firstLane);
+                if (match) {
+                    uint slot = baseSlot + slotInWave;
+                    if (slot < pc.queueCapacity) {
+                        worklist.rayRecords[q * pc.queueCapacity + slot] = payload0;
+                    }
                 }
             }
         }

@@ -1,4 +1,4 @@
-#include "RayTracingBench.h"
+#include "RayIntersectBench.h"
 #include "core/VulkanContext.h"
 #include <algorithm>
 #include <chrono>
@@ -7,13 +7,13 @@
 #include <fstream>
 #include <iostream>
 
-bool RayTracingBench::IsSupported(const DeviceInfo &info,
+bool RayIntersectBench::IsSupported(const DeviceInfo &info,
                                   IComputeContext *context) const {
   return info.rayTracingSupport &&
          (context && context->getBackend() == ComputeBackend::Vulkan);
 }
 
-void RayTracingBench::loadRTProcs(VkDevice device) {
+void RayIntersectBench::loadRTProcs(VkDevice device) {
   vkGetAccelerationStructureBuildSizesKHR_ptr =
       (PFN_vkGetAccelerationStructureBuildSizesKHR)vkGetDeviceProcAddr(
           device, "vkGetAccelerationStructureBuildSizesKHR");
@@ -31,12 +31,12 @@ void RayTracingBench::loadRTProcs(VkDevice device) {
           device, "vkDestroyAccelerationStructureKHR");
 }
 
-void RayTracingBench::Setup(IComputeContext &context,
+void RayIntersectBench::Setup(IComputeContext &context,
                             const std::string &kernel_dir) {
   this->context = &context;
   VulkanContext *vContext = dynamic_cast<VulkanContext *>(&context);
   if (!vContext)
-    throw std::runtime_error("RayTracingBench requires VulkanContext");
+    throw std::runtime_error("RayIntersectBench requires VulkanContext");
 
   loadRTProcs(vContext->getVulkanDevice());
 
@@ -102,7 +102,7 @@ void RayTracingBench::Setup(IComputeContext &context,
   kernel = context.createKernel(kernel_file.string(), "main", 2);
 }
 
-void RayTracingBench::buildAS() {
+void RayIntersectBench::buildAS() {
   VulkanContext *vContext = static_cast<VulkanContext *>(context);
   VkDevice device = vContext->getVulkanDevice();
   VkQueue queue = vContext->getComputeQueue();
@@ -334,7 +334,7 @@ void RayTracingBench::buildAS() {
   vkDestroyCommandPool(device, tmpPool, nullptr);
 }
 
-void RayTracingBench::Run(uint32_t config_idx) {
+void RayIntersectBench::Run(uint32_t config_idx) {
   VulkanContext *vContext = static_cast<VulkanContext *>(context);
   VkAccelerationStructureKHR activeTlas =
       (config_idx == 0) ? triangleTlas : boxTlas;
@@ -349,7 +349,7 @@ void RayTracingBench::Run(uint32_t config_idx) {
   vContext->dispatch(kernel, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
 }
 
-void RayTracingBench::Teardown() {
+void RayIntersectBench::Teardown() {
   VulkanContext *vContext = static_cast<VulkanContext *>(context);
   VkDevice device = vContext ? vContext->getVulkanDevice() : VK_NULL_HANDLE;
 
@@ -387,25 +387,25 @@ void RayTracingBench::Teardown() {
   }
 }
 
-BenchmarkResult RayTracingBench::GetResult(uint32_t config_idx) const {
+BenchmarkResult RayIntersectBench::GetResult(uint32_t config_idx) const {
   // Each ray hits exactly 64 layers in our structured grid
   return {(uint64_t)rayCount * 64, 0.0};
 }
 
-const char *RayTracingBench::GetName() const { return "RayIntersect"; }
-const char *RayTracingBench::GetComponent(uint32_t config_idx) const {
+const char *RayIntersectBench::GetName() const { return "RayIntersect"; }
+const char *RayIntersectBench::GetComponent(uint32_t config_idx) const {
   return "Ray Tracing";
 }
-const char *RayTracingBench::GetMetric() const { return "GIS/s"; }
-const char *RayTracingBench::GetSubCategory(uint32_t config_idx) const {
-  return "Intersection tests";
+const char *RayIntersectBench::GetMetric() const { return "GIS/s"; }
+const char *RayIntersectBench::GetSubCategory(uint32_t config_idx) const {
+  return "Intersection Tests";
 }
 
-std::string RayTracingBench::GetConfigName(uint32_t config_idx) const {
+std::string RayIntersectBench::GetConfigName(uint32_t config_idx) const {
   return config_idx == 0 ? "Ray-Triangle" : "Ray-Box";
 }
 
-void RayTracingBench::DumpGeometry() const {
+void RayIntersectBench::DumpGeometry() const {
   std::ofstream objFile("raytracing_scene.obj");
   uint32_t gridSize = 16;
   uint32_t layers = 64;

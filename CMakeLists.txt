@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(GPUBench VERSION 1.5.1)
+project(GPUBench VERSION 1.5.2)
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_CXX_STANDARD 17)
@@ -212,7 +212,7 @@ set(LIB_SOURCES
     cpp_src/benchmarks/SysMemLatencyBench.cpp
     cpp_src/benchmarks/CacheBench.cpp
     cpp_src/benchmarks/PixelFillRateBench.cpp
-    cpp_src/benchmarks/RayTracingBench.cpp
+    cpp_src/benchmarks/RayIntersectBench.cpp
     cpp_src/benchmarks/RayDivergenceBench.cpp
     cpp_src/benchmarks/RayAnyHitBench.cpp
     cpp_src/benchmarks/RayIncoherentBench.cpp
@@ -706,6 +706,12 @@ elseif(UNIX AND NOT APPLE)
         WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
         DEPENDS package_rpm
         COMMENT "Running RPM dry-run and structural verification..."
+    )
+    add_custom_target(check-parity
+        COMMAND ${CMAKE_COMMAND} -E env MESA_VK_IGNORE_CONFORMANCE_WARNING=1 "${CMAKE_CURRENT_BINARY_DIR}/gpubench" -d 1 -b rayscheduling --profile-snapshot --verify-parity
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+        DEPENDS gpubench
+        COMMENT "Running automated visual parity gate between Megakernel and Work Lists on GPU 1..."
     )
     add_custom_target(package_deb
         COMMAND ${CMAKE_COMMAND} -E env --unset=BASH_FUNC_module%% --unset=BASH_FUNC_ml%% --unset=BASH_FUNC__module_raw%% cpack -G DEB

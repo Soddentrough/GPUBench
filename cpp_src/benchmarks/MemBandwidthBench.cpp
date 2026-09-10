@@ -101,14 +101,15 @@ void MemBandwidthBench::Setup(IComputeContext &context,
   inputBuffer = this->context->createBuffer(bufferSize);
   outputBuffer = this->context->createBuffer(bufferSize);
 
-  // Initialize input buffer with test data to prevent reading uninitialized
-  // memory
-  std::vector<float> testData(bufferSize / sizeof(float), 1.0f);
-  this->context->writeBuffer(inputBuffer, 0, bufferSize, testData.data());
-
-  // Initialize output buffer as well to ensure pages are mapped/resident
-  // (prevents page faults on unified memory)
-  this->context->writeBuffer(outputBuffer, 0, bufferSize, testData.data());
+  // Initialize input and output buffers with test data in safe chunks
+  constexpr size_t initChunkSize = 64 * 1024 * 1024; // 64 MB max host allocation
+  size_t testDataSize = std::min<size_t>(bufferSize, initChunkSize);
+  std::vector<float> testData(testDataSize / sizeof(float), 1.0f);
+  for (size_t off = 0; off < bufferSize; off += initChunkSize) {
+    size_t cur = std::min<size_t>(bufferSize - off, initChunkSize);
+    this->context->writeBuffer(inputBuffer, off, cur, testData.data());
+    this->context->writeBuffer(outputBuffer, off, cur, testData.data());
+  }
 
   this->context->waitIdle();
 
@@ -184,9 +185,11 @@ void MemBandwidthBench::Teardown() {
 
   if (inputBuffer) {
     context->releaseBuffer(inputBuffer);
+    inputBuffer = nullptr;
   }
   if (outputBuffer) {
     context->releaseBuffer(outputBuffer);
+    outputBuffer = nullptr;
   }
 }
 

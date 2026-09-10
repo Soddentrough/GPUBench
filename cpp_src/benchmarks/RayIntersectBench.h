@@ -7,7 +7,7 @@
 #include <vulkan/vulkan.h>
 #endif
 
-class RayTracingBench : public IBenchmark {
+class RayIntersectBench : public IBenchmark {
 public:
   const char *GetName() const override;
   const char *GetMetric() const override;
@@ -51,9 +51,9 @@ public:
   void DumpGeometry() const override;
 
   uint32_t GetNumConfigs() const override { return 2; }
-  int GetSortWeight(uint32_t = 0) const override { return 615; }
+  int GetSortWeight(uint32_t = 0) const override { return 670; }
   std::vector<std::string> GetAliases() const override {
-    return {"triangle", "intersect", "ray_triangle", "ray_intersect", "rt_triangle", "raytriangle", "raytracing_intersect"};
+    return {"triangle", "intersect", "ray_triangle", "ray_intersect", "rt_triangle", "raytriangle", "raytracing_intersect", "rayintersect", "raytracing"};
   }
   std::string GetConfigName(uint32_t config_idx) const override;
   const char *GetComponent(uint32_t config_idx = 0) const override;

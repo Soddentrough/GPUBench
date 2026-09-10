@@ -1,9 +1,13 @@
 fn main() {
-    let dst = cmake::Config::new("..")
-        .define("GPUBENCH_BUILD_RUST_GUI", "OFF")
+    let mut cfg = cmake::Config::new("..");
+    cfg.define("GPUBENCH_BUILD_RUST_GUI", "OFF")
         .define("GPUBENCH_REQUIRE_GUI", "OFF")
-        .build_target("gpubench_lib")
-        .build();
+        .build_target("gpubench_lib");
+
+    if std::path::Path::new("/usr/lib64/rocm/llvm/bin/clang++").exists() {
+        cfg.define("CMAKE_HIP_COMPILER", "/usr/lib64/rocm/llvm/bin/clang++");
+    }
+    let dst = cfg.build();
 
     println!("cargo:rustc-link-search=native={}/build", dst.display());
     println!("cargo:rustc-link-search=native={}/build/Release", dst.display());

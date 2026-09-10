@@ -346,21 +346,24 @@ const char *RayDivergenceBench::GetComponent(uint32_t config_idx) const {
 }
 const char *RayDivergenceBench::GetMetric() const { return "MRays/s"; }
 const char *RayDivergenceBench::GetSubCategory(uint32_t config_idx) const {
-  return "Material Divergence";
+  return "Ray Directional Coherence";
 }
 
 std::string RayDivergenceBench::GetConfigName(uint32_t config_idx) const {
-  int coherencePercentage = 100 - (config_idx * 25);
-  std::string label = std::to_string(coherencePercentage) + "% Coherence";
-
-  if (coherencePercentage == 100)
-    label += " (Perfect Mirror)";
-  else if (coherencePercentage == 50)
-    label += " (Half Diffuse)";
-  else if (coherencePercentage == 0)
-    label += " (Perfectly Diffuse)";
-
-  return label;
+  switch (config_idx) {
+  case 0:
+    return "Primary rays (coherent) - 100% Mirror";
+  case 1:
+    return "Narrow cone dispersion - 75% Coherence";
+  case 2:
+    return "Medium cone dispersion - 50% Coherence";
+  case 3:
+    return "Wide cone dispersion - 25% Coherence";
+  case 4:
+    return "Secondary bounce rays - 0% Diffuse";
+  default:
+    return "Coherence Level " + std::to_string(config_idx);
+  }
 }
 
 void RayDivergenceBench::generateGeometry(std::vector<float> &vertices) const {

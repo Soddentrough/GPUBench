@@ -308,9 +308,10 @@ const char *RayIncoherentBench::GetComponent(uint32_t config_idx) const {
 }
 const char *RayIncoherentBench::GetMetric() const { return "MRays/s"; }
 const char *RayIncoherentBench::GetSubCategory(uint32_t config_idx) const {
-  return "Incoherent Traversal";
+  return "Ray Directional Coherence";
 }
 
 std::string RayIncoherentBench::GetConfigName(uint32_t config_idx) const {
-  return config_idx == 0 ? "Coherent (Primary)" : "Incoherent (Diffuse Bounces)";
+  return config_idx == 0 ? "Primary rays (coherent)"
+                         : "Secondary bounce rays (incoherent)";
 }

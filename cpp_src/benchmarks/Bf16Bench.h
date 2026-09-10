@@ -11,6 +11,9 @@ public:
   }
   std::string GetSupportNote(const DeviceInfo &info,
                              IComputeContext *context = nullptr) const override {
+    if (context && context->getBackend() == ComputeBackend::Vulkan) {
+      return "No native BFloat16 arithmetic types in Vulkan GLSL toolchain (glslc lacks native bfloat16 type; would run as FP16)";
+    }
     if (context && context->getBackend() == ComputeBackend::OpenCL) {
       return "No support for native BFloat16 floating-point arithmetic in OpenCL API (extension cl_khr_bfloat16 missing)";
     }
@@ -20,13 +23,16 @@ public:
     if (!info.bf16Support) {
       return "shaderBfloat16 hardware bit not set";
     }
-    return "HIP toolchain clang emulates bf16 via FP32 (no native hip_bfloat162/__hfma2 in headers)";
+    return "No native BFloat16 arithmetic types available in current toolchain";
   }
   SupportLimitation GetSupportLimitation() const override {
     return SupportLimitation::kToolchain;
   }
   SupportLimitation GetSupportLimitation(const DeviceInfo &info,
                                          IComputeContext *context = nullptr) const override {
+    if (context && context->getBackend() == ComputeBackend::Vulkan) {
+      return SupportLimitation::kToolchain;
+    }
     if (context && context->getBackend() == ComputeBackend::OpenCL) {
       return SupportLimitation::kApi;
     }

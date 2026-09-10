@@ -137,7 +137,7 @@ Every benchmark and test related to Ray Tracing and Path Tracing in GPUBench was
 
 | Benchmark Class | File | Pipeline API | Traversal Paradigm | Dispatch Mechanism | Validated API Conformance | Finding / Assessment |
 | :--- | :--- | :--- | :--- | :--- | :---: | :--- |
-| **`RayTracingBench`** | `RayTracingBench.cpp` | `VK_KHR_ray_query` | Compute Ray Query | `vkCmdDispatch` | **YES** | Conforming raw Ray-Triangle / Ray-Box GIS/s test. |
+| **`RayIntersectBench`** | `RayIntersectBench.cpp` | `VK_KHR_ray_query` | Compute Ray Query | `vkCmdDispatch` | **YES** | Conforming raw Ray-Triangle / Ray-Box GIS/s test. |
 | **`RayPathTracingBench`** | `RayPathTracingBench.cpp` | `VK_KHR_ray_query` | Compute Ray Query | `vkCmdDispatch` | **RETIRED** | Synthetic grid test retired in `BenchmarkRunner.cpp`. Early path termination inverted per-bounce metric. |
 | **`RaySchedulingBench` (Megakernel)** | `RaySchedulingBench.cpp` | `VK_KHR_ray_query` | Compute Ray Query | `vkCmdDispatch` | **YES** | Conforming monolithic compute ray query on real glTF scenes. |
 | **`RaySchedulingBench` (Work Lists)** | `RaySchedulingBench.cpp` | `VK_KHR_ray_query` | Compute Ray Query | `vkCmdDispatchIndirect` | **YES (Indirect)** | Software wavefront compaction queues; **not true DGC**. |
