@@ -260,13 +260,13 @@ void ResultFormatter::print() {
   const std::string MAGENTA = "\033[35m";
   const std::string BLUE = "\033[34m";
 
-  const size_t cardBoxWidth = 124;
-  const size_t cardInnerWidth = cardBoxWidth - 4; // 120
+  const size_t cardBoxWidth = 128;
+  const size_t cardInnerWidth = cardBoxWidth - 4; // 124
 
   const size_t w1 = 44;
   const size_t w2 = 8;
-  const size_t w3 = 17;
-  const size_t w4 = 42;
+  const size_t w3 = 22;
+  const size_t w4 = 41;
 
   std::cout << std::endl;
   for (uint32_t devIdx : deviceIndices) {
@@ -452,6 +452,13 @@ void ResultFormatter::print() {
                 }
               }
 
+              std::string backendStr = backend;
+              if (backendStr.length() > w2) {
+                backendStr = backendStr.substr(0, w2);
+              }
+              if (valStr.length() > w3) {
+                valStr = valStr.substr(0, w3);
+              }
               if (noteStr.length() > w4) {
                 noteStr = noteStr.substr(0, w4 - 2) + "..";
               }
@@ -459,7 +466,7 @@ void ResultFormatter::print() {
               std::cout << BOLD << CYAN << "  │ " << RESET
                         << (firstBackend ? displayName : std::string(w1, ' '))
                         << std::setw(w1 - (firstBackend ? displayName.length() : 0)) << ""
-                        << BOLD << CYAN << " │ " << RESET << YELLOW << std::left << std::setw(w2) << backend << RESET
+                        << BOLD << CYAN << " │ " << RESET << YELLOW << std::left << std::setw(w2) << backendStr << RESET
                         << BOLD << CYAN << " │ " << RESET << statusColor << BOLD << std::right << std::setw(w3) << valStr << RESET
                         << BOLD << CYAN << " │ " << RESET << DIM << std::left << std::setw(w4) << noteStr << RESET
                         << BOLD << CYAN << " │" << RESET << "\n";
