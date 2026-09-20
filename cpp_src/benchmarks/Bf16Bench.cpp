@@ -5,11 +5,6 @@
 bool Bf16Bench::IsSupported(const DeviceInfo &info,
                             IComputeContext *context) const {
   this->lastCheckedContext = context;
-  if (context && context->getBackend() == ComputeBackend::Vulkan) {
-    // Vulkan SPIR-V/GLSL toolchain (glslc/glslang) lacks native BFloat16
-    // arithmetic types; shaders would fall back to FP16 math.
-    return false;
-  }
   if (context && context->getBackend() == ComputeBackend::ROCm) {
     // The current HIP toolchain (TheRock/LLVM clang 23) emulates bf16
     // arithmetic via FP32 with software rounding on the scalar unit, and

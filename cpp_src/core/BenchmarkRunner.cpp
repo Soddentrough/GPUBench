@@ -419,6 +419,13 @@ static bool benchmarkMatches(const IBenchmark *bench, const std::string &run_nam
     }
   }
 
+  // Cache latency benchmark alias & general cache matching
+  if (dynamic_cast<const CacheBench *>(bench)) {
+    if (normRun == "cache" || normRun == "cachelatency" || normRun == "caches" || normRun == "cachelat") {
+      return true;
+    }
+  }
+
   return false;
 }
 

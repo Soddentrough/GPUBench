@@ -541,6 +541,7 @@ fn get_benchmark_description(name: &str) -> &'static str {
         "INT8" => "8-bit integer tensor and dot-product (DP4A) throughput for quantized neural network inference.",
         "INT4" => "4-bit integer quantized vector compute throughput for heavily compressed models.",
         "Device Memory Bandwidth" => "Peak streaming read/write bandwidth across the dedicated GPU VRAM bus.",
+        "Cache Latency" => "Pointer-chasing memory access latency across GPU L0, L1, L2, and L3 (Infinity) caches.",
         "System Memory Bandwidth" => "Multi-threaded host RAM copy and streaming bandwidth from CPU to system DDR memory.",
         "System Memory Latency" => "Pointer-chasing memory access latency in nanoseconds (lower is better).",
         "Pixel Fill Rate" => "Rasterizer and ROP output fill throughput across 32-bit RGBA, 64-bit HDR, and alpha blending.",
@@ -568,6 +569,7 @@ pub fn get_benchmark_api_extensions(name: &str) -> &'static str {
         "INT8" => "VK_KHR_shader_integer_dot_product (DP4A)",
         "INT4" => "Vulkan Subgroup Bit Packing (4-bit INT)",
         "Device Memory Bandwidth" => "Vulkan / OpenCL / ROCm Linear Buffer DMA",
+        "Cache Latency" => "Vulkan / ROCm / OpenCL Local & Shared Memory Hierarchy",
         "System Memory Bandwidth" => "x86_64 AVX2 / Non-Temporal Streaming Stores",
         "System Memory Latency" => "Hardware DRAM Pointer Chase",
         "Pixel Fill Rate" => "Vulkan Graphics Pipeline (Rasterization & Blending)",
@@ -660,6 +662,7 @@ pub fn is_benchmark_requested(t: &str, requested_tokens: &[String]) -> bool {
             "int8" => t == "INT8",
             "int4" => t == "INT4",
             "membw" | "bandwidth" | "devicememorybandwidth" => t == "Device Memory Bandwidth",
+            "cache" | "cachelat" | "cachelatency" => t.contains("Cache") || t == "Cache Latency",
             "fillrate" | "pixelfill" | "pixelfillrate" => t == "Pixel Fill Rate",
             "sysmem" | "sysbw" | "systemmemorybandwidth" => t == "System Memory Bandwidth",
             "syslat" | "latency" | "systemmemorylatency" => t == "System Memory Latency",
@@ -2324,6 +2327,9 @@ impl Application for GPUBenchApp {
                     }
                 }
             }
+            if initial_tests.iter().any(|t| t.contains("Cache")) {
+                initial_tests.insert("Cache Latency".to_string());
+            }
 
             if flags.devices.is_empty() && initial_tests.iter().any(|t| t.contains("System Memory")) {
                 if let Some(sys_dev) = devices.iter().find(|d| d.starts_with("System")) {
@@ -2334,6 +2340,7 @@ impl Application for GPUBenchApp {
             for t in &tests {
                 initial_tests.insert(t.clone());
             }
+            initial_tests.insert("Cache Latency".to_string());
         }
 
         if selected_backend != "VULKAN" {
@@ -2566,6 +2573,11 @@ impl Application for GPUBenchApp {
                         self.selected_tests.insert("RayIntersect".to_string());
                     } else if name == "RayScheduling" {
                         self.selected_tests.insert("RayExecutionParadigm".to_string());
+                    } else if name == "Cache Latency" {
+                        self.selected_tests.insert("L0 Cache Latency".to_string());
+                        self.selected_tests.insert("L1 Cache Latency".to_string());
+                        self.selected_tests.insert("L2 Cache Latency".to_string());
+                        self.selected_tests.insert("L3 Cache Latency".to_string());
                     }
                     if name.contains("System Memory") {
                         self.selected_devices.insert("System: Host CPU & RAM".to_string());
@@ -2579,6 +2591,11 @@ impl Application for GPUBenchApp {
                     } else if name == "RayScheduling" {
                         self.selected_tests.remove("RayExecutionParadigm");
                         self.selected_tests.retain(|t| !t.starts_with("RayScheduling"));
+                    } else if name == "Cache Latency" {
+                        self.selected_tests.remove("L0 Cache Latency");
+                        self.selected_tests.remove("L1 Cache Latency");
+                        self.selected_tests.remove("L2 Cache Latency");
+                        self.selected_tests.remove("L3 Cache Latency");
                     }
                     if name.contains("System Memory") {
                         let other_sys = if name == "System Memory Bandwidth" {
@@ -2624,13 +2641,15 @@ impl Application for GPUBenchApp {
                         }
                         "MEMORY" => {
                             let mem: Vec<String> = available_tests.iter()
-                                .filter(|t| t.as_str() == "Device Memory Bandwidth")
+                                .filter(|t| t.as_str() == "Device Memory Bandwidth" || t.as_str() == "Cache Latency" || t.contains("Cache"))
                                 .cloned().collect();
                             let all_selected = mem.iter().all(|t| self.selected_tests.contains(t));
                             if all_selected {
                                 for t in &mem { self.selected_tests.remove(t); }
+                                self.selected_tests.remove("Cache Latency");
                             } else {
                                 for t in mem { self.selected_tests.insert(t); }
+                                self.selected_tests.insert("Cache Latency".to_string());
                             }
                         }
                         "RASTER" => {
@@ -2729,6 +2748,7 @@ impl Application for GPUBenchApp {
                     for t in &self.available_tests {
                         if self.selected_tests.contains(t)
                             || (t == "RayScheduling" && (self.selected_tests.contains("RayExecutionParadigm") || self.selected_tests.iter().any(|s| s.starts_with("RayScheduling"))))
+                            || (t.contains("Cache") && (self.selected_tests.contains("Cache Latency") || self.selected_tests.contains("Cache")))
                         {
                             tests_to_run.push(t.clone());
                         }
@@ -2787,6 +2807,7 @@ impl Application for GPUBenchApp {
                         if t.contains("System Memory") { continue; }
                         gpu_configs += match t.as_str() {
                             "Device Memory Bandwidth" => 9,
+                            "Cache Latency" | "Cache" => 4,
                             "Pixel Fill Rate" => 3,
                             "FP16" | "BF16" | "FP8" | "INT8" | "INT4" => 2,
                             "RayASBuild" => 8,
@@ -3706,11 +3727,13 @@ impl Application for GPUBenchApp {
                     for (key, display_label) in items {
                         let is_available = available_tests.contains(&key.to_string())
                             || (key == "RayTracing" && available_tests.contains(&"RayIntersect".to_string()))
-                            || (key == "RayIntersect" && available_tests.contains(&"RayTracing".to_string()));
+                            || (key == "RayIntersect" && available_tests.contains(&"RayTracing".to_string()))
+                            || (key == "Cache Latency" && available_tests.iter().any(|t| t.contains("Cache")));
                         if is_available {
                             let is_checked = self.selected_tests.contains(key)
                                 || (key == "RayTracing" && self.selected_tests.contains("RayIntersect"))
-                                || (key == "RayIntersect" && self.selected_tests.contains("RayTracing"));
+                                || (key == "RayIntersect" && self.selected_tests.contains("RayTracing"))
+                                || (key == "Cache Latency" && (self.selected_tests.contains("Cache Latency") || available_tests.iter().any(|t| t.contains("Cache") && self.selected_tests.contains(t))));
                             let name = if available_tests.contains(&key.to_string()) {
                                 key.to_string()
                             } else if key == "RayTracing" && available_tests.contains(&"RayIntersect".to_string()) {
@@ -3802,6 +3825,7 @@ impl Application for GPUBenchApp {
                         Space::with_height(12),
                         create_pill_grid_with_tooltips("Memory: VRAM & Host RAM", color!(0x0EA5E9), false, vec![
                             ("Device Memory Bandwidth", "GPU VRAM Bandwidth"),
+                            ("Cache Latency", "Cache Latency"),
                             ("System Memory Bandwidth", "System RAM Bandwidth"),
                             ("System Memory Latency", "System RAM Latency"),
                         ]),
@@ -3896,7 +3920,7 @@ impl Application for GPUBenchApp {
                 let compute_tests: Vec<&String> = available_tests.iter()
                     .filter(|t| !t.starts_with("Ray") && !t.contains("Memory") && !t.contains("SysMem") && !t.contains("Pixel")).collect();
                 let mem_tests: Vec<&String> = available_tests.iter()
-                    .filter(|t| *t == "Device Memory Bandwidth").collect();
+                    .filter(|t| *t == "Device Memory Bandwidth" || t.as_str() == "Cache Latency" || t.contains("Cache")).collect();
                 let gfx_tests: Vec<&String> = available_tests.iter()
                     .filter(|t| *t == "Pixel Fill Rate" || t.starts_with("Ray")).collect();
                 let raster_tests: Vec<&String> = available_tests.iter()
@@ -5722,26 +5746,56 @@ fn map_result_to_workload_id(res: &ResultData) -> Option<&'static str> {
                 Some("rt_pathtracing")
             } else if res.subcategory == "Alpha-Tested Geometry" || res.benchmarkName.contains("AnyHit") {
                 Some("rt_anyhit")
-            } else if res.subcategory.contains("BLAS Build (1M)") || (res.subcategory == "BLAS Build" && res.configIndex == 0) {
-                Some("rt_blas_build_1m")
-            } else if res.subcategory.contains("BLAS Update (1M)") || (res.subcategory == "BLAS Update" && res.configIndex == 1) {
-                Some("rt_blas_update_1m")
-            } else if res.subcategory.contains("BLAS Build (5M)") || (res.subcategory == "BLAS Build" && res.configIndex == 2) {
-                Some("rt_blas_build_5m")
-            } else if res.subcategory.contains("BLAS Update (5M)") || (res.subcategory == "BLAS Update" && res.configIndex == 3) {
-                Some("rt_blas_update_5m")
-            } else if res.subcategory.contains("BLAS Build (10M)") || (res.subcategory == "BLAS Build" && res.configIndex == 4) {
-                Some("rt_blas_build_10m")
-            } else if res.subcategory.contains("Indoor") || (res.benchmarkName == "RayASBuild" && res.configIndex == 5) {
-                Some("rt_tlas_indoor")
-            } else if res.subcategory.contains("Jungle") || (res.benchmarkName == "RayASBuild" && res.configIndex == 6) {
-                Some("rt_tlas_jungle")
-            } else if res.subcategory.contains("Open World") || (res.benchmarkName == "RayASBuild" && res.configIndex == 7) {
-                Some("rt_tlas_openworld")
+            } else if res.benchmarkName.starts_with("RayASBuild")
+                || res.subcategory.contains("BLAS")
+                || res.subcategory.contains("TLAS")
+            {
+                match res.configIndex {
+                    0 => Some("rt_blas_build_1m"),
+                    1 => Some("rt_blas_update_1m"),
+                    2 => Some("rt_blas_build_5m"),
+                    3 => Some("rt_blas_update_5m"),
+                    4 => Some("rt_blas_build_10m"),
+                    5 => Some("rt_tlas_indoor"),
+                    6 => Some("rt_tlas_jungle"),
+                    7 => Some("rt_tlas_openworld"),
+                    _ => {
+                        if res.benchmarkName.contains("1M") {
+                            if res.benchmarkName.contains("Update") {
+                                Some("rt_blas_update_1m")
+                            } else {
+                                Some("rt_blas_build_1m")
+                            }
+                        } else if res.benchmarkName.contains("5M") {
+                            if res.benchmarkName.contains("Update") {
+                                Some("rt_blas_update_5m")
+                            } else {
+                                Some("rt_blas_build_5m")
+                            }
+                        } else if res.benchmarkName.contains("10M") {
+                            Some("rt_blas_build_10m")
+                        } else if res.benchmarkName.contains("Indoor") {
+                            Some("rt_tlas_indoor")
+                        } else if res.benchmarkName.contains("Jungle") {
+                            Some("rt_tlas_jungle")
+                        } else if res.benchmarkName.contains("Open World") {
+                            Some("rt_tlas_openworld")
+                        } else {
+                            None
+                        }
+                    }
+                }
             } else if res.subcategory == "Incoherent Traversal" || res.benchmarkName.contains("Incoherent") {
                 Some("rt_incoherent")
-            } else if res.subcategory == "Intersection tests" || res.benchmarkName == "RayTracing" || res.benchmarkName == "RayIntersect" {
-                Some("rt_triangle")
+            } else if res.subcategory.eq_ignore_ascii_case("Intersection Tests")
+                || res.benchmarkName.starts_with("RayIntersect")
+                || res.benchmarkName.starts_with("RayTracing")
+            {
+                if res.configIndex == 0 || res.benchmarkName.contains("Triangle") || !res.benchmarkName.contains("Box") {
+                    Some("rt_triangle")
+                } else {
+                    None
+                }
             } else if res.subcategory == "Material Divergence" || res.subcategory == "Execution Divergence" || res.benchmarkName.contains("Divergence") {
                 Some("rt_divergence")
             } else if res.subcategory == "Payload Register Pressure" || res.benchmarkName.contains("Payload") {
@@ -6200,6 +6254,71 @@ mod tests {
 
         // Ensure view() executes without panicking when caveat tooltip is constructed
         let _ = app.view();
+    }
+
+    #[test]
+    fn test_blas_tlas_and_ray_intersect_result_mapping() {
+        // Test BLAS Build & Update mappings
+        let blas_configs = [
+            (0, "RayASBuild (BLAS Build (1M Tris))", "BLAS Build & Update", "rt_blas_build_1m"),
+            (1, "RayASBuild (BLAS Update (1M Tris))", "BLAS Build & Update", "rt_blas_update_1m"),
+            (2, "RayASBuild (BLAS Build (5M Tris))", "BLAS Build & Update", "rt_blas_build_5m"),
+            (3, "RayASBuild (BLAS Update (5M Tris))", "BLAS Build & Update", "rt_blas_update_5m"),
+            (4, "RayASBuild (BLAS Build (10M Tris))", "BLAS Build & Update", "rt_blas_build_10m"),
+        ];
+
+        for (cfg_idx, name, subcat, expected_id) in blas_configs {
+            let mut res = ResultData::default();
+            res.configIndex = cfg_idx;
+            res.benchmarkName = name.to_string();
+            res.subcategory = subcat.to_string();
+            res.component = "Ray Tracing".to_string();
+            assert_eq!(map_result_to_workload_id(&res), Some(expected_id), "Failed for {}", name);
+        }
+
+        // Test TLAS Construction mappings
+        let tlas_configs = [
+            (5, "RayASBuild (Indoor Corridor (20K Inst, 5K Meshes))", "TLAS Construction", "rt_tlas_indoor"),
+            (6, "RayASBuild (Dense Jungle (50K Inst, 500 Meshes))", "TLAS Construction", "rt_tlas_jungle"),
+            (7, "RayASBuild (Massive Open World (200K Inst, 5K Meshes))", "TLAS Construction", "rt_tlas_openworld"),
+        ];
+
+        for (cfg_idx, name, subcat, expected_id) in tlas_configs {
+            let mut res = ResultData::default();
+            res.configIndex = cfg_idx;
+            res.benchmarkName = name.to_string();
+            res.subcategory = subcat.to_string();
+            res.component = "Ray Tracing".to_string();
+            assert_eq!(map_result_to_workload_id(&res), Some(expected_id), "Failed for {}", name);
+        }
+
+        // Test RayIntersect (Ray-Triangle) mapping
+        let mut res = ResultData::default();
+        res.configIndex = 0;
+        res.benchmarkName = "RayIntersect (Ray-Triangle)".to_string();
+        res.subcategory = "Intersection Tests".to_string();
+        res.component = "Ray Tracing".to_string();
+        assert_eq!(map_result_to_workload_id(&res), Some("rt_triangle"));
+
+        // Also test RayIntersect without subcategory or legacy name
+        res.benchmarkName = "RayIntersect".to_string();
+        res.subcategory = "".to_string();
+        assert_eq!(map_result_to_workload_id(&res), Some("rt_triangle"));
+
+        // Test BF16 mappings
+        let mut bf16_vec = ResultData::default();
+        bf16_vec.configIndex = 0;
+        bf16_vec.benchmarkName = "BF16 (Vector)".to_string();
+        bf16_vec.subcategory = "BF16".to_string();
+        bf16_vec.component = "Compute".to_string();
+        assert_eq!(map_result_to_workload_id(&bf16_vec), Some("bf16_vec"));
+
+        let mut bf16_mat = ResultData::default();
+        bf16_mat.configIndex = 1;
+        bf16_mat.benchmarkName = "BF16 (Matrix)".to_string();
+        bf16_mat.subcategory = "BF16".to_string();
+        bf16_mat.component = "Compute".to_string();
+        assert_eq!(map_result_to_workload_id(&bf16_mat), Some("bf16_mat"));
     }
 }
 
