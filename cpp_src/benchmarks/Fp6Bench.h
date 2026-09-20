@@ -1,0 +1,48 @@
+#pragma once
+
+#include "benchmarks/IBenchmark.h"
+
+class Fp6Bench : public IBenchmark {
+public:
+  const char *GetName() const override { return "FP6"; }
+  bool IsSupported(const DeviceInfo &device,
+                   IComputeContext *context = nullptr) const override;
+  std::string GetSupportNote() const override {
+    return "shaderFloat6 hardware bit not set (no native 6-bit floating point hardware support)";
+  }
+  std::string GetSupportNote(const DeviceInfo &info,
+                             IComputeContext *context = nullptr) const override {
+    (void)info;
+    (void)context;
+    return "shaderFloat6 hardware bit not set (no native 6-bit floating point hardware support)";
+  }
+  SupportLimitation GetSupportLimitation() const override {
+    return SupportLimitation::kHardware;
+  }
+  SupportLimitation GetSupportLimitation(const DeviceInfo &info,
+                                         IComputeContext *context = nullptr) const override {
+    (void)info;
+    (void)context;
+    return SupportLimitation::kHardware;
+  }
+  void Setup(IComputeContext &context, const std::string &build_dir) override;
+  void Run(uint32_t config_idx = 0) override;
+  BenchmarkResult GetResult(uint32_t config_idx = 0) const override;
+  const char *GetComponent(uint32_t config_idx = 0) const override {
+    return "Compute";
+  }
+  const char *GetSubCategory(uint32_t config_idx = 0) const override {
+    return "FP6";
+  }
+  int GetSortWeight() const override { return 50; }
+  void Teardown() override;
+  bool IsEmulated(uint32_t config_idx = 0) const override { return is_emulated; }
+
+private:
+  IComputeContext *context = nullptr;
+  ComputeKernel kernel = nullptr;
+  ComputeBuffer buffer = nullptr;
+  uint64_t operations = 0;
+  bool is_emulated = true;
+  mutable std::string name = "FP6";
+};

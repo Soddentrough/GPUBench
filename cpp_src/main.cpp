@@ -1,0 +1,704 @@
+#include "CLI11.hpp"
+#include "benchmarks/RayAnyHitBench.h"
+#include "benchmarks/RayDivergenceBench.h"
+#include "benchmarks/RayIntersectBench.h"
+#include "benchmarks/RayPathTracingBench.h"
+#include "benchmarks/RayRawTraversalBench.h"
+#include "core/BenchmarkRunner.h"
+#include "core/ComputeBackendFactory.h"
+#include "core/ResultFormatter.h"
+#include "core/RunnerAPI.h"
+
+void SetRunnerTargetConfigs(const std::vector<int> &configs);
+#include <cstdlib>
+#include <fstream>
+#include <iostream>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
+#ifdef HAVE_VULKAN
+#include <vulkan/vulkan.h>
+#endif
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
+namespace {
+
+// Escape a string for inclusion in a JSON double-quoted value.
+std::string jsonEscape(const std::string &s) {
+  std::string out;
+  out.reserve(s.size() + 8);
+  for (char c : s) {
+    switch (c) {
+    case '"':
+      out += "\\\"";
+      break;
+    case '\\':
+      out += "\\\\";
+      break;
+    case '\n':
+      out += "\\n";
+      break;
+    case '\r':
+      out += "\\r";
+      break;
+    case '\t':
+      out += "\\t";
+      break;
+    default:
+      out += c;
+      break;
+    }
+  }
+  return out;
+}
+
+// Quote a field for CSV (RFC 4180 style).
+std::string csvQuote(const std::string &s) {
+  bool needs_quotes = false;
+  for (char c : s) {
+    if (c == ',' || c == '"' || c == '\n' || c == '\r') {
+      needs_quotes = true;
+      break;
+    }
+  }
+  if (!needs_quotes) {
+    return s;
+  }
+  std::string out = "\"";
+  for (char c : s) {
+    if (c == '"') {
+      out += "\"\"";
+    } else {
+      out += c;
+    }
+  }
+  out += "\"";
+  return out;
+}
+
+double computeResultValue(const ResultData &r) {
+  double value = 0.0;
+  if (r.time_ms > 0.0 && r.operations > 0) {
+    double seconds = r.time_ms / 1000.0;
+    if (r.metric == "TFLOPS" || r.metric == "TOPS") {
+      value = (static_cast<double>(r.operations) / seconds) / 1e12;
+    } else if (r.metric == "GB/s") {
+      value = (static_cast<double>(r.operations) / seconds) / 1e9;
+    } else if (r.metric == "MRays/s" || r.metric == "MHits/s" ||
+               r.metric == "MTris/s" || r.metric == "MInst/s" ||
+               r.metric == "MRecords/s") {
+      value = (static_cast<double>(r.operations) / seconds) / 1e6;
+    } else if (r.metric == "GIS/s") {
+      value = (static_cast<double>(r.operations) / seconds) / 1e9;
+    } else if (r.metric == "GPixels/s") {
+      value = (static_cast<double>(r.operations) / seconds) / 1e9;
+    } else if (r.metric == "ns") {
+      value = (r.time_ms * 1e6) / static_cast<double>(r.operations);
+    }
+  }
+  return value;
+}
+
+std::string resultsToJson(const std::vector<ResultData> &results) {
+  auto profiles = GetDeviceProfilesAPI();
+  std::string out = "{\n";
+  out += "  \"version\": \"" + std::string(GPUBENCH_VERSION) + "\",\n";
+  out += "  \"device_profiles\": [\n";
+  for (size_t d = 0; d < profiles.size(); ++d) {
+    const auto &dp = profiles[d];
+    char vendorHex[16], deviceHex[16];
+    std::snprintf(vendorHex, sizeof(vendorHex), "0x%04X", dp.vendorID);
+    std::snprintf(deviceHex, sizeof(deviceHex), "0x%04X", dp.deviceID);
+
+    out += "    {\n";
+    out += "      \"backend\": \"" + jsonEscape(dp.backend) + "\",\n";
+    out += "      \"device_index\": " + std::to_string(dp.deviceIndex) + ",\n";
+    out += "      \"device_name\": \"" + jsonEscape(dp.deviceName) + "\",\n";
+    out += "      \"vendor_id\": \"" + std::string(vendorHex) + "\",\n";
+    out += "      \"device_id\": \"" + std::string(deviceHex) + "\",\n";
+    out += "      \"driver_name\": \"" + jsonEscape(dp.driverName) + "\",\n";
+    out += "      \"driver_info\": \"" + jsonEscape(dp.driverInfo) + "\",\n";
+    out += "      \"driver_version\": \"" + jsonEscape(dp.driverVersion) + "\",\n";
+    out += "      \"api_version\": \"" + jsonEscape(dp.apiVersion) + "\",\n";
+    out += "      \"vram_total_mb\": " + std::to_string(dp.vramTotalMb) + ",\n";
+    out += "      \"subgroup_size\": " + std::to_string(dp.subgroupSize) + ",\n";
+    out += "      \"max_workgroup_size\": " + std::to_string(dp.maxWorkGroupSize) + ",\n";
+    out += "      \"ray_tracing_supported\": " + std::string(dp.rayTracingSupported ? "true" : "false") + ",\n";
+    out += "      \"ser_supported\": " + std::string(dp.serSupported ? "true" : "false") + ",\n";
+    out += "      \"work_graphs_supported\": " + std::string(dp.workGraphsSupported ? "true" : "false") + ",\n";
+    out += "      \"cooperative_matrix_supported\": " + std::string(dp.cooperativeMatrixSupported ? "true" : "false") + ",\n";
+    out += "      \"float16_supported\": " + std::string(dp.float16Supported ? "true" : "false") + ",\n";
+    out += "      \"int8_supported\": " + std::string(dp.int8Supported ? "true" : "false") + "\n";
+    out += (d + 1 < profiles.size()) ? "    },\n" : "    }\n";
+  }
+  out += "  ],\n";
+  out += "  \"results\": [\n";
+  for (size_t i = 0; i < results.size(); ++i) {
+    const ResultData &r = results[i];
+    std::string devIdxStr = (r.deviceIndex == 0xFFFFFFFF || r.backendName == "System")
+                                ? "null"
+                                : std::to_string(r.deviceIndex);
+    double value = computeResultValue(r);
+
+    out += "    {\n";
+    out += "      \"backend\": \"" + jsonEscape(r.backendName) + "\",\n";
+    out += "      \"device\": \"" + jsonEscape(r.deviceName) + "\",\n";
+    out += "      \"device_index\": " + devIdxStr + ",\n";
+    out += "      \"benchmark\": \"" + jsonEscape(r.benchmarkName) + "\",\n";
+    out += "      \"component\": \"" + jsonEscape(r.component) + "\",\n";
+    out += "      \"subcategory\": \"" + jsonEscape(r.subcategory) + "\",\n";
+    out += "      \"metric\": \"" + jsonEscape(r.metric) + "\",\n";
+    out += "      \"value\": " + std::to_string(value) + ",\n";
+    if (r.benchmarkName.find("RayScheduling") != std::string::npos && r.metric == "MRays/s") {
+      uint32_t w = r.width ? r.width : 1920;
+      uint32_t h = r.height ? r.height : 1080;
+      double fps = (value * 1e6) / static_cast<double>(w * h);
+      out += "      \"fps\": " + std::to_string(fps) + ",\n";
+      out += "      \"resolution\": \"" + std::to_string(w) + "x" + std::to_string(h) + "\",\n";
+    }
+    if (r.benchmarkName.find("RayRawTraversal") != std::string::npos) {
+      double peakGis = (r.configIndex == 0) ? 300.8 : 1203.2;
+      double time_s = r.time_ms / 1000.0;
+      double throughputGis = 0.0;
+      if (time_s > 0.0) {
+        uint64_t ops = (r.configIndex == 0) ? r.operations : (r.operations * 64);
+        throughputGis = (static_cast<double>(ops) / time_s) / 1e9;
+      }
+      double pctPeak = (peakGis > 0.0) ? ((throughputGis / peakGis) * 100.0) : 0.0;
+      char buf[64];
+      std::snprintf(buf, sizeof(buf), "%.1f%% of %s Boost Peak", pctPeak,
+                    (r.configIndex == 0 ? "300.8 GIS/s" : "1.20 TIS/s"));
+      std::string detailsStr(buf);
+      out += "      \"peak_type\": \"" + std::string(r.configIndex == 0 ? "Triangle" : "Box") + "\",\n";
+      out += "      \"theoretical_peak_gis\": " + std::to_string(peakGis) + ",\n";
+      out += "      \"throughput_gis\": " + std::to_string(throughputGis) + ",\n";
+      out += "      \"pct_theoretical_peak\": " + std::to_string(pctPeak) + ",\n";
+      out += "      \"details_speedup\": \"" + jsonEscape(detailsStr) + "\",\n";
+    }
+    out += "      \"operations\": " + std::to_string(r.operations) + ",\n";
+    out += "      \"time_ms\": " + std::to_string(r.time_ms) + ",\n";
+    out += std::string("      \"is_emulated\": ") +
+           (r.isEmulated ? "true" : "false") + ",\n";
+    out += std::string("      \"unsupported\": ") +
+           (r.isUnsupported ? "true" : "false") + ",\n";
+    if (r.isUnsupported) {
+      out += "      \"unsupported_category\": \"" +
+             jsonEscape(r.supportCategory) + "\",\n";
+      out += "      \"unsupported_reason\": \"" + jsonEscape(r.supportNote) +
+             "\",\n";
+    } else if (!r.supportNote.empty()) {
+      out += "      \"support_note\": \"" + jsonEscape(r.supportNote) + "\",\n";
+      out += "      \"caveat\": \"" + jsonEscape(r.supportNote) + "\",\n";
+    }
+    out += "      \"max_workgroup_size\": " +
+           std::to_string(r.maxWorkGroupSize) + ",\n";
+    out += "      \"config_index\": " + std::to_string(r.configIndex) + "\n";
+    out += (i + 1 < results.size()) ? "    },\n" : "    }\n";
+  }
+  out += "  ]\n";
+  out += "}\n";
+  return out;
+}
+
+std::string resultsToCsv(const std::vector<ResultData> &results) {
+  std::string out =
+      "backend,device,device_index,benchmark,component,subcategory,metric,"
+      "value,operations,time_ms,is_emulated,unsupported,unsupported_reason,max_workgroup_size,config_index\n";
+  for (const ResultData &r : results) {
+    std::string devIdxStr = (r.deviceIndex == 0xFFFFFFFF || r.backendName == "System")
+                                ? ""
+                                : std::to_string(r.deviceIndex);
+    double value = computeResultValue(r);
+    out += csvQuote(r.backendName) + "," + csvQuote(r.deviceName) + "," +
+           devIdxStr + "," + csvQuote(r.benchmarkName) +
+           "," + csvQuote(r.component) + "," + csvQuote(r.subcategory) + "," +
+           csvQuote(r.metric) + "," + std::to_string(value) + "," +
+           std::to_string(r.operations) + "," + std::to_string(r.time_ms) +
+           "," + (r.isEmulated ? "true" : "false") + "," +
+           (r.isUnsupported ? "true" : "false") + "," +
+           csvQuote(r.supportNote) + "," +
+           std::to_string(r.maxWorkGroupSize) + "," +
+           std::to_string(r.configIndex) + "\n";
+  }
+  return out;
+}
+
+} // namespace
+
+int main(int argc, char **argv) {
+#ifdef _WIN32
+  // Set console output to UTF-8
+  SetConsoleOutputCP(CP_UTF8);
+#endif
+
+#ifdef __linux__
+  // Suppress Mesa/RADV conformance warnings to keep the output clean
+  setenv("MESA_VK_IGNORE_CONFORMANCE_WARNING", "1", 1);
+#endif
+  CLI::App app{"GPUBench"};
+  app.set_version_flag("--version", GPUBENCH_VERSION);
+
+  std::vector<std::string> benchmarks_to_run;
+  app.add_option("-b,--benchmarks,--benchmark", benchmarks_to_run,
+                 "Benchmarks to run (comma-separated, can also be a group name)")
+      ->delimiter(',');
+
+  std::vector<std::string> groups_to_run;
+  app.add_option("-g,--groups,--group", groups_to_run,
+                 "Benchmark group(s) to run: compute, memory, graphics, raster, raytracing, system (or all)")
+      ->delimiter(',');
+
+  app.footer(
+      "\nBENCHMARK GROUPS & INCLUDED TESTS:\n"
+      "  compute     Compute arithmetic units (vector & matrix tensor operations):\n"
+      "              FP64, FP32, FP16, BF16, FP8, INT8, INT4\n"
+      "  memory      VRAM and GPU cache hierarchy:\n"
+      "              Device Memory Bandwidth, L0/L1/L2/L3 Cache Bandwidth & Latency\n"
+      "  graphics    All 3D graphics rendering pipelines (combines 'raster' and 'raytracing', alias: 'gfx'):\n"
+      "              Runs both fixed-function rasterization (ROP) and hardware ray tracing\n"
+      "  raster      Fixed-function rasterization & ROP pixel fill rates (subset of graphics):\n"
+      "              Pixel Fill Rate (RGBA8, RGBA16F HDR, Alpha Blending)\n"
+      "  raytracing  Hardware BVH traversal, intersection & scheduling (subset of graphics, alias: 'rt'):\n"
+      "              RayRawTraversal (Raw BVH Traversal: Coherent Triangles & Deep Multi-Layer BVH8),\n"
+      "              RayIntersect, RayAnyHit, RayProcedural, RayIncoherent, RayMaterialDivergence,\n"
+      "              RayPayload, RayASBuild, RayScheduling (Scene Ray Tracing & Path Tracing - Work Lists / SER / Work Graphs),\n"
+      "              Pipeline Breakdown (Linear vs 2D Tiled vs Morton Z-Curve, Queue Compaction)\n"
+      "  system      Host CPU & RAM system memory:\n"
+      "              System Memory Bandwidth (Multi & Single-Threaded), System Memory Latency\n"
+      "  all         Run all benchmark groups across enabled devices\n"
+  );
+
+  bool list_benchmarks = false;
+  app.add_flag("--list-benchmarks,--list", list_benchmarks,
+               "List available benchmarks (organized by group)");
+
+  bool list_groups = false;
+  app.add_flag("--list-groups", list_groups,
+               "List available benchmark groups");
+
+  std::vector<uint32_t> device_indices;
+  app.add_option("-d,--device", device_indices,
+                 "Device(s) to use (comma-separated)")
+      ->delimiter(',');
+
+  bool list_devices = false;
+  app.add_flag("-l,--list-devices", list_devices, "List available devices");
+
+  bool list_backends = false;
+  app.add_flag("--list-backends", list_backends, "List available backends");
+
+  std::vector<std::string> backend_strs;
+  app.add_option("-k,--backend", backend_strs,
+                 "Backend to use: auto, vulkan, opencl, rocm (default: auto)")
+      ->delimiter(',');
+
+  bool verbose = false;
+  app.add_flag("--verbose", verbose, "Enable verbose logging");
+
+  bool debug = false;
+  app.add_flag("--debug", debug, "Enable debug logging (implies verbose)");
+
+  bool dump_geometry = false;
+  app.add_flag("--dump-geometry", dump_geometry,
+               "Dump ray tracing geometry to OBJ files");
+
+  bool dump_renders = false;
+  app.add_flag("--dump-renders,--dump", dump_renders,
+               "Dump and analytically compare rendered frames between Megakernel and Work Lists (default: disabled)");
+  bool no_dump_renders = false;
+  app.add_flag("--no-dump-renders,--no-dump", no_dump_renders,
+               "Disable render dumping and image comparisons");
+
+  bool verify_parity = false;
+  app.add_flag("--verify-parity", verify_parity,
+               "Enforce visual parity gating between Megakernel and Work Lists (fails if PSNR < 45 dB or discrepancy > 0.01%)");
+
+  std::string scene_str = "indoor";
+  app.add_option("-s,--scene", scene_str,
+                 "Ray tracing benchmark scenario: showroom, indoor, outdoor, forest, all (default: indoor)")
+      ->check(CLI::IsMember({"showroom", "indoor", "outdoor", "forest", "aaa_forest", "all"}));
+
+  std::string resolution_str = "auto";
+  app.add_option("-r,--resolution", resolution_str,
+                 "Resolution preset (auto, 720p, 1080p, 1440p, 4k, 1024x1024) or custom WxH (default: auto)");
+
+  std::vector<int> config_targets;
+  app.add_option("-c,--config", config_targets,
+                 "Run specific benchmark configuration index(es) (0-based, comma-separated)")
+      ->delimiter(',');
+
+  uint32_t bounce_depth = 2;
+  app.add_option("--bounces", bounce_depth,
+                 "Ray tracing path tracing bounce depth (1..8, default: 2)")
+      ->check(CLI::Range(1u, 8u));
+
+  uint32_t samples_per_pixel = 1;
+  app.add_option("--spp", samples_per_pixel,
+                 "Ray tracing path tracing samples per pixel (1..256, default: 1)")
+      ->check(CLI::Range(1u, 256u));
+
+  bool profile_snapshot = false;
+  app.add_flag("--profile-snapshot", profile_snapshot,
+               "Run in profiling snapshot mode (1 warmup, 1 timed submit for clean profiler traces)");
+
+  bool rra_trace = false;
+  app.add_flag("--rra", rra_trace,
+               "Enable Radeon Raytracing Analyzer (RRA) trace capture (implies --profile-snapshot)");
+
+  std::string output_format;
+  app.add_option("--output", output_format,
+                 "Machine-readable output format: json or csv")
+      ->check(CLI::IsMember({"json", "csv"}));
+
+  std::string output_file;
+  app.add_option("--output-file", output_file,
+                 "Write machine-readable output to this file instead of "
+                 "stdout (requires --output)");
+
+  CLI11_PARSE(app, argc, argv);
+
+  if (rra_trace) {
+    profile_snapshot = true;
+#ifdef __linux__
+    setenv("MESA_VK_TRACE", "rra", 0);
+    setenv("MESA_VK_TRACE_FRAME", "1", 0);
+#elif defined(_WIN32)
+    _putenv("MESA_VK_TRACE=rra");
+    _putenv("MESA_VK_TRACE_FRAME=1");
+#endif
+  }
+
+  if (!output_file.empty() && output_format.empty()) {
+    std::cerr << "Error: --output-file requires --output (json or csv)"
+              << std::endl;
+    return EXIT_FAILURE;
+  }
+
+  // Parse resolution
+  uint32_t render_width = 0;
+  uint32_t render_height = 0;
+  std::string res_lower;
+  for (char c : resolution_str) res_lower.push_back(std::tolower(static_cast<unsigned char>(c)));
+
+  if (res_lower == "auto") {
+    render_width = 0;
+    render_height = 0;
+  } else if (res_lower == "720p") {
+    render_width = 1280;
+    render_height = 720;
+  } else if (res_lower == "1080p" || res_lower == "fhd") {
+    render_width = 1920;
+    render_height = 1080;
+  } else if (res_lower == "1440p" || res_lower == "2k" || res_lower == "qhd") {
+    render_width = 2560;
+    render_height = 1440;
+  } else if (res_lower == "4k" || res_lower == "2160p" || res_lower == "uhd") {
+    render_width = 3840;
+    render_height = 2160;
+  } else if (res_lower == "1024x1024") {
+    render_width = 1024;
+    render_height = 1024;
+  } else {
+    auto xPos = res_lower.find('x');
+    if (xPos != std::string::npos) {
+      try {
+        render_width = std::stoul(res_lower.substr(0, xPos));
+        render_height = std::stoul(res_lower.substr(xPos + 1));
+      } catch (...) {
+        std::cerr << "Warning: Invalid resolution string '" << resolution_str
+                  << "', defaulting to auto" << std::endl;
+        render_width = 0;
+        render_height = 0;
+      }
+    } else {
+      std::cerr << "Warning: Unrecognized resolution preset '" << resolution_str
+                << "', defaulting to auto" << std::endl;
+      render_width = 0;
+      render_height = 0;
+    }
+  }
+
+  // Debug implies verbose
+  if (debug) {
+    verbose = true;
+  }
+
+  if (list_groups) {
+    BenchmarkRunner runner({});
+    std::cout << "Available benchmark groups:" << std::endl << std::endl;
+    for (const auto &grp : runner.getAvailableGroups()) {
+      std::cout << "  " << grp.name << "  (flag: -g " << grp.id << ")" << std::endl;
+      std::cout << "    Description: " << grp.description << std::endl;
+      std::cout << "    Benchmarks:  ";
+      for (size_t i = 0; i < grp.benchmarks.size(); ++i) {
+        std::cout << grp.benchmarks[i] << (i + 1 < grp.benchmarks.size() ? ", " : "");
+      }
+      std::cout << std::endl << std::endl;
+    }
+    return EXIT_SUCCESS;
+  }
+
+  if (list_benchmarks) {
+    BenchmarkRunner runner({});
+    std::cout << "Available benchmarks (grouped):" << std::endl;
+    for (const auto &grp : runner.getAvailableGroups()) {
+      std::cout << std::endl << "[" << grp.name << "]  (run group with: -g " << grp.id << ")" << std::endl;
+      for (const auto &name : grp.benchmarks) {
+        std::cout << "  - " << name << std::endl;
+        if (name == "RayRawTraversal") {
+          RayRawTraversalBench rawBench;
+          for (uint32_t c = 0; c < rawBench.GetNumConfigs(); ++c) {
+            std::cout << "      [" << c << "] " << rawBench.GetConfigName(c) << std::endl;
+          }
+        }
+      }
+    }
+    std::cout << std::endl;
+    return EXIT_SUCCESS;
+  }
+
+  for (const auto &grp : groups_to_run) {
+    benchmarks_to_run.push_back(grp);
+  }
+
+  if (verbose) {
+    std::cout << "Benchmarks to run: " << std::endl;
+    for (const auto &name : benchmarks_to_run) {
+      std::cout << "- " << name << std::endl;
+    }
+  }
+
+  // If machine-readable output is requested to stdout, divert diagnostic
+  // logging (banners, progress, tables) to stderr so stdout is pure JSON/CSV.
+  std::streambuf *orig_cout = nullptr;
+  if (!output_format.empty() && output_file.empty()) {
+    orig_cout = std::cout.rdbuf(std::cerr.rdbuf());
+  }
+
+  try {
+    std::cout << "GPUBench version " << GPUBENCH_VERSION << std::endl
+              << std::endl;
+    // Create compute contexts for specified backends
+    std::vector<std::unique_ptr<IComputeContext>> contexts;
+    if (backend_strs.empty() ||
+        (backend_strs.size() == 1 && backend_strs[0] == "auto")) {
+      // Default to Vulkan, fall back to OpenCL, then ROCm. A backend can be
+      // compiled in but fail at runtime (missing driver/GPU), so attempt
+      // creation in order and fall through on failure.
+      const ComputeBackend auto_order[] = {
+          ComputeBackend::Vulkan, ComputeBackend::OpenCL, ComputeBackend::ROCm};
+      for (ComputeBackend backend : auto_order) {
+        if (!ComputeBackendFactory::isAvailable(backend)) {
+          continue;
+        }
+        try {
+          contexts.push_back(
+              ComputeBackendFactory::create(backend, verbose, debug));
+          break;
+        } catch (const std::exception &e) {
+          std::cerr << "Backend "
+                    << ComputeBackendFactory::getBackendName(backend)
+                    << " failed to initialize (" << e.what()
+                    << "), trying next backend..." << std::endl;
+        }
+      }
+      if (contexts.empty()) {
+        std::cerr << "No compute backend available." << std::endl;
+        return EXIT_FAILURE;
+      }
+    } else {
+      for (const auto &backend_str : backend_strs) {
+        if (backend_str == "vulkan") {
+          if (ComputeBackendFactory::isAvailable(ComputeBackend::Vulkan)) {
+            contexts.push_back(
+                ComputeBackendFactory::create(ComputeBackend::Vulkan, verbose, debug));
+          }
+        } else if (backend_str == "opencl") {
+          if (ComputeBackendFactory::isAvailable(ComputeBackend::OpenCL)) {
+            contexts.push_back(
+                ComputeBackendFactory::create(ComputeBackend::OpenCL, verbose, debug));
+          }
+        } else if (backend_str == "rocm") {
+          if (ComputeBackendFactory::isAvailable(ComputeBackend::ROCm)) {
+            contexts.push_back(
+                ComputeBackendFactory::create(ComputeBackend::ROCm, verbose, debug));
+          }
+        } else {
+          std::cerr << "Unknown or unavailable backend: " << backend_str
+                    << std::endl;
+        }
+      }
+    }
+
+    if (contexts.empty() && !list_backends) {
+      std::cerr << "No valid compute backends found." << std::endl;
+      return EXIT_FAILURE;
+    }
+
+    if (list_backends) {
+      // Report both compile-time support and runtime availability (a
+      // lightweight context creation probe) for each backend.
+      auto reportBackend = [](const char *name, ComputeBackend backend) {
+        if (!ComputeBackendFactory::isAvailable(backend)) {
+          std::cout << "- " << name << ": Not Supported (not compiled in)"
+                    << std::endl;
+          return;
+        }
+        bool runtime = ComputeBackendFactory::isRuntimeAvailable(backend);
+        std::cout << "- " << name << ": Supported, runtime "
+                  << (runtime ? "available" : "UNAVAILABLE (driver/GPU "
+                                             "missing or init failed)")
+                  << std::endl;
+      };
+      std::cout << "Available backends:" << std::endl;
+      reportBackend("vulkan", ComputeBackend::Vulkan);
+      reportBackend("opencl", ComputeBackend::OpenCL);
+      reportBackend("rocm", ComputeBackend::ROCm);
+      return EXIT_SUCCESS;
+    }
+
+    if (list_devices) {
+      for (const auto &context : contexts) {
+        std::cout << "Backend: "
+                  << ComputeBackendFactory::getBackendName(
+                         context->getBackend())
+                  << std::endl;
+        const auto &devices = context->getDevices();
+        for (size_t i = 0; i < devices.size(); ++i) {
+          const auto &d = devices[i];
+          std::cout << "  " << i << ": " << d.name;
+          if (!d.driverName.empty() || !d.driverVersionStr.empty()) {
+            std::cout << " [Driver: " << d.driverName << " " << d.driverVersionStr << "]";
+          }
+          std::cout << std::endl;
+        }
+      }
+      return EXIT_SUCCESS;
+    }
+
+    if (no_dump_renders) {
+      dump_renders = false;
+    }
+    if (verify_parity) {
+      dump_renders = true;
+      no_dump_renders = false;
+    }
+
+    BenchmarkRunner runner({}, verbose, debug, dump_geometry, dump_renders, scene_str);
+    runner.setResolution(render_width, render_height);
+    runner.setBounceDepth(bounce_depth);
+    runner.setSamplesPerPixel(samples_per_pixel);
+    if (!config_targets.empty()) {
+      if (config_targets.size() == 1) {
+        runner.setTargetConfig(config_targets[0]);
+      }
+      SetRunnerTargetConfigs(config_targets);
+    }
+    runner.setProfileSnapshot(profile_snapshot);
+    runner.setVerifyParity(verify_parity);
+
+    std::vector<uint32_t> target_indices = device_indices;
+    if (target_indices.empty()) {
+      target_indices.push_back(0);
+    }
+
+    std::vector<ComputeBackend> target_backends;
+    for (const auto &proto_context : contexts) {
+      target_backends.push_back(proto_context->getBackend());
+    }
+    // Drop prototype contexts to free any early probe allocations before benchmark execution
+    contexts.clear();
+
+    // Execute each backend and device sequentially.
+    // Each context is instantiated, executed, and immediately destroyed to prevent
+    // cross-runtime resource contention (e.g. HIP vs Vulkan on display GPU).
+    for (ComputeBackend backend : target_backends) {
+      for (uint32_t device_idx : target_indices) {
+        std::unique_ptr<IComputeContext> new_context =
+            ComputeBackendFactory::create(backend, verbose, debug);
+
+        if (new_context) {
+          if (device_idx < new_context->getDevices().size()) {
+            new_context->pickDevice(device_idx);
+            runner.runForContext(new_context.get(), benchmarks_to_run);
+          } else {
+            std::cerr << "Warning: Device index " << device_idx
+                      << " out of range for backend "
+                      << ComputeBackendFactory::getBackendName(backend)
+                      << std::endl;
+          }
+        }
+        // Context is destroyed here before next device/backend initializes
+      }
+    }
+
+    runner.runHostBenchmarks(benchmarks_to_run);
+    if (!runner.onResult) {
+      runner.printReport();
+    }
+
+    // Warn about requested benchmark names that matched nothing
+    bool hadUnmatched = false;
+    for (const auto &name : runner.getUnmatchedBenchmarks()) {
+      std::cerr << "Warning: no benchmark matched '" << name
+                << "' (see --list-benchmarks)" << std::endl;
+      hadUnmatched = true;
+    }
+
+    // Machine-readable output (in addition to the human report above)
+    if (!output_format.empty()) {
+      std::string payload = (output_format == "json")
+                                ? resultsToJson(runner.getResults())
+                                : resultsToCsv(runner.getResults());
+      if (!output_file.empty()) {
+        std::ofstream ofs(output_file, std::ios::out | std::ios::trunc);
+        if (!ofs) {
+          std::cerr << "Error: could not open output file '" << output_file
+                    << "'" << std::endl;
+          return EXIT_FAILURE;
+        }
+        ofs << payload;
+      } else {
+        if (orig_cout) {
+          std::cout.rdbuf(orig_cout);
+          orig_cout = nullptr;
+        }
+        std::cout << payload;
+      }
+    }
+
+    if (orig_cout) {
+      std::cout.rdbuf(orig_cout);
+      orig_cout = nullptr;
+    }
+
+    // Exit non-zero when nothing ran (bogus benchmark names, out-of-range
+    // device indices, etc.) so scripts can detect failure.
+    if (runner.getNumBenchmarksRun() == 0 && runner.getResults().empty()) {
+      std::cerr << "Error: no benchmarks were run." << std::endl;
+      return EXIT_FAILURE;
+    }
+    if (hadUnmatched) {
+      return EXIT_FAILURE;
+    }
+    if (runner.hasParityFailure()) {
+      std::cerr << "Error: Visual parity verification failed." << std::endl;
+      return EXIT_FAILURE;
+    }
+
+    // execution_contexts will be destroyed here, cleaning up resources
+
+  } catch (const std::exception &e) {
+    if (orig_cout) {
+      std::cout.rdbuf(orig_cout);
+    }
+    std::cerr << "An error occurred: " << e.what() << std::endl;
+    return EXIT_FAILURE;
+  }
+
+  return EXIT_SUCCESS;
+}

@@ -1,0 +1,29 @@
+#version 450
+
+layout(local_size_x = 256) in;
+
+layout(set = 0, binding = 0) volatile buffer Data {
+    vec4 data[];
+} Buffer;
+
+layout(push_constant) uniform PushConstants {
+    uint mask;
+} pushConstants;
+
+void main() {
+    uint globalId = gl_GlobalInvocationID.x;
+    uint idx = globalId & pushConstants.mask;
+    vec4 sum = vec4(0.0);
+
+    for (uint i = 0; i < 500; i++) {
+        uint base = (idx + i * 32) & pushConstants.mask;
+        sum += Buffer.data[(base + 0) & pushConstants.mask];
+        sum += Buffer.data[(base + 8) & pushConstants.mask];
+        sum += Buffer.data[(base + 16) & pushConstants.mask];
+        sum += Buffer.data[(base + 24) & pushConstants.mask];
+    }
+
+    if (sum.x < 0.0) {
+        Buffer.data[idx] = sum;
+    }
+}

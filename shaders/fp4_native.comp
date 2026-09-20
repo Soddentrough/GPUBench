@@ -1,0 +1,15 @@
+#version 450
+// extension GL_EXT_shader_explicit_arithmetic_types_float4 : enable // Hypothetical
+
+layout(local_size_x = 64) in;
+
+// Placeholder for FP4 native. 
+// Likely packed in uint8 or similar.
+layout(set = 0, binding = 0) buffer InputA { uint a[]; };
+layout(set = 0, binding = 1) buffer InputB { uint b[]; };
+layout(set = 0, binding = 2) buffer OutputC { uint c[]; };
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    // Native FP4 logic would go here
+}

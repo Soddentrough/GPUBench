@@ -1,0 +1,121 @@
+#pragma once
+
+#include "core/IComputeContext.h"
+#include <cstdint>
+#include <string>
+#include <vector>
+
+struct BenchmarkResult {
+  uint64_t operations;
+  double elapsedTime; // in milliseconds
+};
+
+class IBenchmark {
+public:
+  virtual ~IBenchmark() = default;
+  virtual const char *GetName() const = 0;
+  virtual std::vector<std::string> GetAliases() const { return {}; }
+  virtual const char *GetMetric() const { return "TFLOPS"; }
+  virtual const char *GetMetric(uint32_t config_idx) const { return GetMetric(); }
+  virtual bool IsSupported(const DeviceInfo &info,
+                           IComputeContext *context = nullptr) const = 0;
+  virtual void Setup(IComputeContext &context,
+                     const std::string &kernel_dir) = 0;
+  virtual void SetResolution(uint32_t w, uint32_t h) {}
+  virtual void Run(uint32_t config_idx = 0) = 0;
+  virtual void Teardown() = 0;
+  virtual BenchmarkResult GetResult(uint32_t config_idx = 0) const = 0;
+  virtual void RecordRunResult(uint32_t config_idx, uint64_t total_invocations, double total_time_ms) {}
+  virtual void RebuildAccelerationStructures() {}
+  virtual bool ValidateResults(uint32_t config_idx = 0) const { return true; }
+  virtual bool IsEmulated(uint32_t config_idx = 0) const { return false; }
+  virtual void SetVerifyParity(bool verify) {}
+  virtual bool HasParityFailure() const { return false; }
+  virtual bool HasVisualVerification() const { return false; }
+  virtual void RunVisualVerification(bool isInteractive = false) { (void)isInteractive; }
+  // Why a benchmark is unsupported (only meaningful when IsSupported()
+  // returns false). Used to clearly distinguish hardware limitations from
+  // API/toolchain limitations in reports.
+  enum class SupportLimitation {
+    kNone,      // supported, or reason unknown
+    kHardware,  // the GPU physically lacks the capability
+    kApi,       // the GPU has it, but the compute API cannot express it
+    kToolchain, // GPU + API support it, but no shader compiler can emit it
+  };
+  virtual SupportLimitation GetSupportLimitation() const {
+    return SupportLimitation::kNone;
+  }
+  virtual SupportLimitation GetSupportLimitation(const DeviceInfo &info,
+                                                IComputeContext *context = nullptr) const {
+    (void)info;
+    (void)context;
+    return GetSupportLimitation();
+  }
+  // Optional human-readable note explaining a capability limitation (shown
+  // by --list-benchmarks and useful when IsSupported() returns false).
+  // Empty string means no note.
+  virtual std::string GetSupportNote() const { return ""; }
+  virtual std::string GetSupportNote(const DeviceInfo &info,
+                                     IComputeContext *context = nullptr) const {
+    (void)info;
+    (void)context;
+    return GetSupportNote();
+  }
+  virtual uint32_t GetNumConfigs() const { return 1; }
+  virtual std::string GetConfigName(uint32_t config_idx) const { return ""; }
+  virtual bool IsConfigSupported(uint32_t config_idx) const { return true; }
+  virtual bool IsConfigSupported(uint32_t config_idx, const DeviceInfo &info,
+                                 IComputeContext *context = nullptr) const {
+    (void)info;
+    (void)context;
+    return IsConfigSupported(config_idx);
+  }
+  virtual std::string GetConfigSupportNote(uint32_t config_idx) const { return ""; }
+  virtual std::string GetConfigSupportNote(uint32_t config_idx,
+                                           const DeviceInfo &info,
+                                           IComputeContext *context = nullptr) const {
+    (void)info;
+    (void)context;
+    return GetConfigSupportNote(config_idx);
+  }
+  // Optional human-readable note explaining a performance or API caveat when
+  // a benchmark is supported and completes, but utilized a fallback or emulation path.
+  virtual std::string GetConfigCaveat(uint32_t config_idx = 0) const { return ""; }
+  virtual std::string GetConfigCaveat(uint32_t config_idx,
+                                      const DeviceInfo &info,
+                                      IComputeContext *context = nullptr) const {
+    (void)info;
+    (void)context;
+    return GetConfigCaveat(config_idx);
+  }
+  virtual SupportLimitation GetConfigSupportLimitation(uint32_t config_idx) const {
+    return GetSupportLimitation();
+  }
+  virtual SupportLimitation GetConfigSupportLimitation(uint32_t config_idx,
+                                                       const DeviceInfo &info,
+                                                       IComputeContext *context = nullptr) const {
+    (void)info;
+    (void)context;
+    return GetConfigSupportLimitation(config_idx);
+  }
+  virtual uint32_t GetExpectedKernelCount() const { return 1; }
+
+  // Returns true if this benchmark depends on the selected GPU device context.
+  // Returns false if it is a system-wide or host-only benchmark (runs once).
+  virtual bool IsDeviceDependent() const { return true; }
+
+  virtual const char *GetComponent(uint32_t config_idx = 0) const {
+    return "Other";
+  }
+  virtual const char *GetSubCategory(uint32_t config_idx = 0) const {
+    return "";
+  }
+  virtual int GetSortWeight() const { return 999; }
+  virtual int GetSortWeight(uint32_t /*config_idx*/) const {
+    return GetSortWeight();
+  }
+
+  // Exports the scene geometry to an external file (e.g. OBJ) for
+  // visualization.
+  virtual void DumpGeometry() const {}
+};

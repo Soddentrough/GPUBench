@@ -1,0 +1,39 @@
+#version 450
+
+layout(local_size_x = 256) in;
+
+layout(set = 0, binding = 0) volatile buffer Data {
+    vec4 data[];
+} Buffer;
+
+layout(push_constant) uniform PushConstants {
+    uint stride;
+    uint mask;
+    uint iterations;
+} pushConstants;
+
+void main() {
+    uint globalId = gl_GlobalInvocationID.x;
+    uint idx = (globalId * pushConstants.stride) & pushConstants.mask;
+    vec4 sum = vec4(0.0);
+
+    for (uint i = 0; i < pushConstants.iterations; i++) {
+        // Base offset for this iteration unroll
+        // Multiply by 8 to avoid overlapping with next iteration
+        uint base = (idx + i * pushConstants.stride * 8) & pushConstants.mask;
+        
+        sum += Buffer.data[(base + 0 * pushConstants.stride) & pushConstants.mask];
+        sum += Buffer.data[(base + 1 * pushConstants.stride) & pushConstants.mask];
+        sum += Buffer.data[(base + 2 * pushConstants.stride) & pushConstants.mask];
+        sum += Buffer.data[(base + 3 * pushConstants.stride) & pushConstants.mask];
+        sum += Buffer.data[(base + 4 * pushConstants.stride) & pushConstants.mask];
+        sum += Buffer.data[(base + 5 * pushConstants.stride) & pushConstants.mask];
+        sum += Buffer.data[(base + 6 * pushConstants.stride) & pushConstants.mask];
+        sum += Buffer.data[(base + 7 * pushConstants.stride) & pushConstants.mask];
+    }
+
+    // Always false for initialized data, but compiler must execute the loop
+    if (sum.x < -1e30) {
+        Buffer.data[globalId & pushConstants.mask] = sum;
+    }
+}

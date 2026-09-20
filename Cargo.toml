@@ -1,0 +1,7 @@
+[workspace]
+members = [
+    "gpubench-sys",
+    "gpubench-core",
+    "gpubench-gui", "test_ash",
+]
+resolver = "2"

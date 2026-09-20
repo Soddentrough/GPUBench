@@ -1,0 +1,41 @@
+#version 460
+#extension GL_EXT_ray_tracing : require
+
+struct SphereHit {
+    vec3 normal;
+};
+
+hitAttributeEXT SphereHit hitAttr;
+
+layout(binding = 2, set = 0) buffer SphereData {
+    vec4 spheres[]; // xyz: center, w: radius
+};
+
+void main() {
+    vec4 sphere = spheres[gl_PrimitiveID];
+    vec3 center = sphere.xyz;
+    float radius = sphere.w;
+
+    vec3 origin = gl_ObjectRayOriginEXT;
+    vec3 dir = gl_ObjectRayDirectionEXT;
+
+    vec3 oc = origin - center;
+    float a = dot(dir, dir);
+    float b = 2.0 * dot(oc, dir);
+    float c = dot(oc, oc) - radius * radius;
+    float discriminant = b * b - 4.0 * a * c;
+
+    if (discriminant >= 0.0) {
+        float t1 = (-b - sqrt(discriminant)) / (2.0 * a);
+        float t2 = (-b + sqrt(discriminant)) / (2.0 * a);
+        
+        float t = t1;
+        if (t < gl_RayTminEXT) t = t2;
+        
+        if (t >= gl_RayTminEXT && t <= gl_RayTmaxEXT) {
+            vec3 hitPoint = origin + t * dir;
+            hitAttr.normal = normalize(hitPoint - center);
+            reportIntersectionEXT(t, 0);
+        }
+    }
+}

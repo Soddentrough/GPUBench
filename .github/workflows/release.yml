@@ -1,0 +1,202 @@
+name: Release Build
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: 'Platform to build (all, windows, macos, linux)'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - windows
+          - macos
+          - linux
+      tag_name:
+        description: 'Release tag to publish/upload to'
+        required: false
+        default: 'v1.0.0'
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    if: ${{ github.event_name == 'push' || inputs.platform == 'all' || inputs.platform == 'windows' }}
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Install Vulkan SDK
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://sdk.lunarg.com/sdk/download/latest/windows/vulkan_sdk.exe" -OutFile VulkanSDK.exe
+          Start-Process -FilePath .\VulkanSDK.exe -ArgumentList "--root", "C:\VulkanSDK", "--accept-licenses", "--default-answer", "--confirm-command", "install" -NoNewWindow -Wait
+          echo "VULKAN_SDK=C:\VulkanSDK" >> $env:GITHUB_ENV
+          echo "C:\VulkanSDK\Bin" >> $env:GITHUB_PATH
+
+      - name: Install NSIS
+        shell: pwsh
+        run: |
+          choco install nsis -y
+          echo "C:\Program Files (x86)\NSIS" >> $env:GITHUB_PATH
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo workspace
+        uses: Swatinem/rust-cache@v2
+
+      - name: Configure CMake
+        run: |
+          mkdir build
+          cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="GPUBench"
+
+      - name: Build C++ Target
+        run: |
+          cd build
+          cmake --build . --config Release
+
+      - name: Package with CPack
+        run: |
+          cd build
+          cpack -G ZIP -C Release
+          cpack -G NSIS -C Release
+
+      - name: Upload to Release
+        shell: pwsh
+        run: |
+          $tag = if ("${{ github.event_name }}" -eq "push") { "${{ github.ref_name }}" } else { "${{ inputs.tag_name }}" }
+          if (-not $tag) { $tag = "v1.0.0" }
+          Write-Host "Uploading Windows packages to release $tag..."
+          gh release upload $tag (Get-Item build/GPUBench-*-win64.zip).FullName (Get-Item build/GPUBench-*-win64.exe).FullName --clobber
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-macos:
+    if: ${{ github.event_name == 'push' || inputs.platform == 'all' || inputs.platform == 'macos' }}
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Install Vulkan SDK
+        run: |
+          VERSION=$(curl -sL https://vulkan.lunarg.com/sdk/latest/mac.txt)
+          echo "Downloading Vulkan SDK version $VERSION"
+          curl -L -o vulkan_sdk.zip "https://sdk.lunarg.com/sdk/download/$VERSION/mac/vulkan_sdk.zip?Human=true"
+          unzip -q vulkan_sdk.zip
+          ./vulkansdk-macOS-*/Contents/MacOS/vulkansdk-macOS-* \
+            --root "$GITHUB_WORKSPACE/VulkanSDK" \
+            --accept-licenses \
+            --default-answer \
+            --confirm-command install
+          echo "VULKAN_SDK=$GITHUB_WORKSPACE/VulkanSDK/macOS" >> $GITHUB_ENV
+          echo "$GITHUB_WORKSPACE/VulkanSDK/macOS/bin" >> $GITHUB_PATH
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo workspace
+        uses: Swatinem/rust-cache@v2
+
+      - name: Configure CMake
+        run: |
+          mkdir build
+          cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="GPUBench"
+
+      - name: Build C++ Target
+        run: |
+          cd build
+          cmake --build . --config Release
+
+      - name: Package with CPack
+        run: |
+          cd build
+          cpack -G DragNDrop -C Release
+          cpack -G TGZ -C Release
+
+      - name: Upload to Release
+        run: |
+          TAG="${{ github.ref_name }}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag_name }}"
+          fi
+          [ -z "$TAG" ] && TAG="v1.0.0"
+          Write-Host "Uploading macOS packages to release $TAG..." 2>/dev/null || echo "Uploading macOS packages to release $TAG..."
+          gh release upload "$TAG" build/GPUBench-*-Darwin.dmg build/GPUBench-*-Darwin.tar.gz --clobber
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-linux:
+    if: ${{ github.event_name == 'push' || inputs.platform == 'all' || inputs.platform == 'linux' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Install Vulkan SDK (LunarG apt repo)
+        run: |
+          wget -qO - https://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo apt-key add -
+          CODENAME=$(. /etc/os-release && echo $VERSION_CODENAME)
+          sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-$CODENAME.list \
+            https://packages.lunarg.com/vulkan/lunarg-vulkan-$CODENAME.list
+          sudo apt-get update
+          sudo apt-get install -y vulkan-sdk
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            ocl-icd-opencl-dev \
+            opencl-headers \
+            cmake \
+            build-essential \
+            rpm
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo workspace
+        uses: Swatinem/rust-cache@v2
+
+      - name: Configure CMake
+        run: |
+          mkdir build
+          cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="GPUBench"
+
+      - name: Build C++ Target
+        run: |
+          cd build
+          cmake --build . --config Release --parallel
+
+      - name: Package with CPack
+        run: |
+          cd build
+          cpack -G DEB
+          cpack -G RPM
+          cpack -G TGZ
+
+      - name: Verify RPM Package Quality & File Integrity
+        run: |
+          python3 scripts/verify_rpm.py --skip-install-test
+
+      - name: Upload to Release
+        run: |
+          TAG="${{ github.ref_name }}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag_name }}"
+          fi
+          [ -z "$TAG" ] && TAG="v1.0.0"
+          echo "Uploading Linux packages to release $TAG..."
+          gh release upload "$TAG" build/GPUBench-*-Linux.deb build/GPUBench-*-Linux.rpm build/GPUBench-*-Linux.tar.gz --clobber
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

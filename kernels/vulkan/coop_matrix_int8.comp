@@ -1,0 +1,55 @@
+#version 460
+#extension GL_KHR_cooperative_matrix : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int8 : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int32 : require
+#extension GL_KHR_memory_scope_semantics : require
+
+layout (local_size_x = 32, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) buffer DataA {
+    int8_t data[];
+} BufferA;
+
+layout(set = 0, binding = 1) buffer DataC {
+    int32_t data[];
+} BufferC;
+
+void main() {
+    coopmat<int8_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseA> matA;
+    coopmat<int8_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseB> matB;
+    
+    coopmat<int32_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC0 = coopmat<int32_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(0);
+    coopmat<int32_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC1 = coopmat<int32_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(0);
+    coopmat<int32_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC2 = coopmat<int32_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(0);
+    coopmat<int32_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC3 = coopmat<int32_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(0);
+    coopmat<int32_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC4 = coopmat<int32_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(0);
+    coopmat<int32_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC5 = coopmat<int32_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(0);
+    coopmat<int32_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC6 = coopmat<int32_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(0);
+    coopmat<int32_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC7 = coopmat<int32_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(0);
+
+    // Use non-suffixed names.
+    uint gid = gl_WorkGroupID.x;
+    coopMatLoad(matA, BufferA.data, (gid % 8192) * 256, 16u, 0);
+    coopMatLoad(matB, BufferA.data, (gid % 8192) * 256, 16u, 0);
+
+    for (int i = 0; i < 4096; ++i) {
+        matC0 = coopMatMulAdd(matA, matB, matC0);
+        matC1 = coopMatMulAdd(matA, matB, matC1);
+        matC2 = coopMatMulAdd(matA, matB, matC2);
+        matC3 = coopMatMulAdd(matA, matB, matC3);
+        matC4 = coopMatMulAdd(matA, matB, matC4);
+        matC5 = coopMatMulAdd(matA, matB, matC5);
+        matC6 = coopMatMulAdd(matA, matB, matC6);
+        matC7 = coopMatMulAdd(matA, matB, matC7);
+    }
+
+    matC0 = matC0 + matC1;
+    matC2 = matC2 + matC3;
+    matC4 = matC4 + matC5;
+    matC6 = matC6 + matC7;
+    matC0 = matC0 + matC2;
+    matC4 = matC4 + matC6;
+    matC0 = matC0 + matC4;
+
+    coopMatStore(matC0, BufferC.data, (gid % 2048) * 256, 16u, 0);
+}

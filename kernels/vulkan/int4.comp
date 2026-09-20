@@ -1,0 +1,40 @@
+#version 460
+// Requires Vulkan 1.4+
+#extension GL_EXT_shader_8bit_storage : require
+#extension GL_EXT_shader_explicit_arithmetic_types : require
+
+layout (local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) buffer Data {
+    i8vec4 data[];
+} InOutBuffer;
+
+// Add push constants for buffer size safety
+layout(push_constant) uniform Constants {
+    uint bufferSize;
+};
+
+void main() {
+    uint index = gl_GlobalInvocationID.x;
+    if (index >= bufferSize) return;
+
+    // Use packed i8vec4 for 4x throughput
+    // Emulate 4-bit operations (values kept in 0-15 range)
+    i8vec4 val1 = InOutBuffer.data[index] & i8vec4(0x0F);
+    i8vec4 val2 = i8vec4(1, 2, 3, 4);
+    
+    // Explicit constants to avoid large literal array in registers
+    const i8vec4 multiplier = i8vec4(3);
+    const i8vec4 mask = i8vec4(0x0F);
+
+    // Each iteration performs 4 i8vec4 multiply-adds = 4 * 4 * 2 = 32 INT4 ops
+    // Reduced complexity per iteration to stress the compiler less
+    for (int i = 0; i < 32768; ++i) {
+        val1 = (val1 * multiplier + val2) & mask;
+        val2 = (val2 * multiplier + val1) & mask;
+        val1 = (val1 * multiplier + val2) & mask;
+        val2 = (val2 * multiplier + val1) & mask;
+    }
+    
+    InOutBuffer.data[index] = val1 + val2;
+}
