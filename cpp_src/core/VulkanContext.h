@@ -71,6 +71,7 @@ public:
   void setExpectedKernelCount(uint32_t count) override;
   void notifyKernelCreated(const std::string &kernel_name) override;
   void setVerbose(bool v) override { verbose = v; }
+  bool isVerbose() const override { return verbose; }
 
   VkPhysicalDevice getVulkanPhysicalDevice() const override {
     return physicalDevice;

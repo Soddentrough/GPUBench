@@ -56,6 +56,12 @@ else()
 endif()
 
 # Try to find HIP for ROCm backend
+if(EXISTS "/opt/rocm/core-10.0")
+    if(NOT DEFINED CMAKE_HIP_COMPILER AND EXISTS "/opt/rocm/core-10.0/lib/llvm/bin/clang++")
+        set(CMAKE_HIP_COMPILER "/opt/rocm/core-10.0/lib/llvm/bin/clang++" CACHE FILEPATH "HIP compiler")
+    endif()
+    set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} --rocm-path=/opt/rocm/core-10.0 --rocm-device-lib-path=/opt/rocm/core-10.0/lib/llvm/amdgcn/bitcode")
+endif()
 find_package(HIP)
 if(HIP_FOUND)
     message(STATUS "HIP (ROCm) found: ${HIP_LIBRARIES}")
@@ -201,6 +207,7 @@ endif()
 set(LIB_SOURCES
     cpp_src/core/BenchmarkRunner.cpp
     cpp_src/core/ResultFormatter.cpp
+    cpp_src/core/ResultImporter.cpp
     cpp_src/benchmarks/Fp32Bench.cpp
     cpp_src/benchmarks/Fp64Bench.cpp
     cpp_src/benchmarks/Fp16Bench.cpp
@@ -398,62 +405,72 @@ if(MINGW)
     endif()
 endif()
 
-# Build and package Rust GUI if Cargo is available
-# GPUBENCH_REQUIRE_GUI (default ON): require cargo for the Rust GUI build.
-# Set -DGPUBENCH_REQUIRE_GUI=OFF to build/package a CLI-only release without cargo.
-option(GPUBENCH_REQUIRE_GUI "Require cargo to build the Rust GUI (disable for CLI-only builds)" ON)
-option(GPUBENCH_BUILD_RUST_GUI "Build Rust GUI and workspace via Cargo" ON)
+# Build Native C++ Workstation GUI (Option D: Dear ImGui + ImPlot + Vulkan/SDL3)
+option(GPUBENCH_BUILD_GUI "Build native C++ Dear ImGui workstation GUI" ON)
 
-# If CMake is being invoked from inside cargo (e.g. gpubench-sys build.rs), disable recursive cargo invocation
-if(DEFINED ENV{CARGO_PKG_NAME} OR DEFINED ENV{CARGO_MANIFEST_DIR})
-    set(GPUBENCH_BUILD_RUST_GUI OFF)
-endif()
-
-find_program(CARGO_EXECUTABLE cargo)
-if(CARGO_EXECUTABLE AND GPUBENCH_BUILD_RUST_GUI)
-    message(STATUS "Cargo found: ${CARGO_EXECUTABLE}. Configuring Rust GUI build.")
-    
-    # Custom target to compile Rust workspace
-    add_custom_target(gpubench_rust_gui ALL
-        COMMAND ${CARGO_EXECUTABLE} build --release --workspace
-        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-        COMMENT "Building Rust GUI and core library"
-    )
-    
-    # Ensure C++ gpubench target depends on it
-    add_dependencies(gpubench gpubench_rust_gui)
-
-    # Install the Rust GUI binary (only when the GUI is actually built)
-    if(WIN32)
-        install(PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/target/release/gpubench-gui.exe"
-                DESTINATION bin
-                OPTIONAL)
-    else()
-        install(PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/target/release/gpubench-gui"
-                DESTINATION bin
-                OPTIONAL)
+if(GPUBENCH_BUILD_GUI)
+    find_package(SDL3 QUIET)
+    if(NOT SDL3_FOUND)
+        find_package(PkgConfig QUIET)
+        if(PkgConfig_FOUND)
+            pkg_check_modules(SDL3 sdl3)
+        endif()
     endif()
-elseif(NOT GPUBENCH_BUILD_RUST_GUI)
-    message(STATUS "GPUBENCH_BUILD_RUST_GUI is OFF (or invoked from cargo). Skipping gpubench_rust_gui target.")
-    if(WIN32)
-        install(PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/target/release/gpubench-gui.exe"
-                DESTINATION bin
-                OPTIONAL)
+
+    if(SDL3_FOUND AND Vulkan_FOUND)
+        message(STATUS "Configuring native C++ GPUBench GUI (Dear ImGui + ImPlot + Vulkan/SDL3)")
+
+        set(IMGUI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/cpp_src/third_party/imgui")
+        set(IMPLOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/cpp_src/third_party/implot")
+
+        set(GUI_SOURCES
+            cpp_src/gui/main.cpp
+            cpp_src/gui/GuiApp.cpp
+            cpp_src/gui/TelemetryWorker.cpp
+            cpp_src/gui/VulkanContext.cpp
+            ${IMGUI_DIR}/imgui.cpp
+            ${IMGUI_DIR}/imgui_draw.cpp
+            ${IMGUI_DIR}/imgui_tables.cpp
+            ${IMGUI_DIR}/imgui_widgets.cpp
+            ${IMGUI_DIR}/backends/imgui_impl_sdl3.cpp
+            ${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp
+            ${IMPLOT_DIR}/implot.cpp
+            ${IMPLOT_DIR}/implot_items.cpp
+        )
+
+        add_executable(gpubench-gui ${GUI_SOURCES})
+        set_target_properties(gpubench-gui PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+
+        target_include_directories(gpubench-gui PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/cpp_src
+            ${CMAKE_CURRENT_SOURCE_DIR}/cpp_src/gui
+            ${IMGUI_DIR}
+            ${IMGUI_DIR}/backends
+            ${IMPLOT_DIR}
+            ${Vulkan_INCLUDE_DIRS}
+        )
+
+        if(TARGET SDL3::SDL3)
+            target_link_libraries(gpubench-gui PRIVATE SDL3::SDL3)
+        elseif(SDL3_LIBRARIES)
+            target_include_directories(gpubench-gui PRIVATE ${SDL3_INCLUDE_DIRS})
+            target_link_libraries(gpubench-gui PRIVATE ${SDL3_LIBRARIES})
+        endif()
+
+        target_link_libraries(gpubench-gui PRIVATE
+            gpubench_lib
+            Vulkan::Vulkan
+            ${CMAKE_DL_LIBS}
+            Threads::Threads
+        )
+
+        if(MSVC)
+            set_property(TARGET gpubench-gui PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+        endif()
+
+        install(TARGETS gpubench-gui DESTINATION bin)
     else()
-        install(PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/target/release/gpubench-gui"
-                DESTINATION bin
-                OPTIONAL)
-    endif()
-else()
-    if(GPUBENCH_REQUIRE_GUI)
-        message(FATAL_ERROR
-            "Cargo (Rust toolchain) not found, but GPUBENCH_REQUIRE_GUI is ON. "
-            "The Rust GUI (gpubench-gui) is required for the default build. "
-            "Install Rust (https://rustup.rs) or configure with "
-            "-DGPUBENCH_REQUIRE_GUI=OFF to build and package the CLI only.")
-    else()
-        message(WARNING "Cargo not found and GPUBENCH_REQUIRE_GUI=OFF: "
-            "skipping Rust GUI build and install (CLI-only build).")
+        message(WARNING "SDL3 or Vulkan not found. Native C++ GUI will not be built.")
     endif()
 endif()
 
@@ -627,7 +644,7 @@ elseif(UNIX AND NOT APPLE)
     # DEB package dependencies (Debian package names; libvulkan1 is the Vulkan loader).
     # OpenCL/ROCm stay OPTIONAL -- they are resolved at runtime via dynamic loading,
     # so they are intentionally not listed here (mirrors the RPM policy below).
-    set(CPACK_DEBIAN_PACKAGE_DEPENDS "libvulkan1, libc6, libstdc++6")
+    set(CPACK_DEBIAN_PACKAGE_DEPENDS "libvulkan1, libc6, libstdc++6, libsdl3-0")
     
     # RPM package settings
     set(CPACK_RPM_PACKAGE_LICENSE "MIT")
@@ -639,7 +656,7 @@ elseif(UNIX AND NOT APPLE)
     # Manually specify minimal required dependencies
     # We only REQUIRE Vulkan loader and standard libraries
     # OpenCL/ROCm are OPTIONAL due to dynamic loading
-    set(CPACK_RPM_PACKAGE_REQUIRES "vulkan-loader, glibc, libgcc, libstdc++")
+    set(CPACK_RPM_PACKAGE_REQUIRES "vulkan-loader, glibc, libgcc, libstdc++, SDL3")
     file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tmp")
     set(CPACK_RPM_SPEC_MORE_DEFINE "%define _tmppath ${CMAKE_CURRENT_BINARY_DIR}/tmp\n%define _build_id_links none")
 
@@ -714,7 +731,7 @@ elseif(UNIX AND NOT APPLE)
         COMMAND ${CMAKE_COMMAND} -E env MESA_VK_IGNORE_CONFORMANCE_WARNING=1 "${CMAKE_CURRENT_BINARY_DIR}/gpubench" -d 1 -b rayscheduling --profile-snapshot --verify-parity
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
         DEPENDS gpubench
-        COMMENT "Running automated visual parity gate between Megakernel and Work Lists on GPU 1..."
+        COMMENT "Running automated visual parity gate between Megakernel and Device-Generated Commands (DGC) on GPU 1..."
     )
     add_custom_target(package_deb
         COMMAND ${CMAKE_COMMAND} -E env --unset=BASH_FUNC_module%% --unset=BASH_FUNC_ml%% --unset=BASH_FUNC__module_raw%% cpack -G DEB

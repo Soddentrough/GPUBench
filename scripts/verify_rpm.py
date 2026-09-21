@@ -266,7 +266,7 @@ def verify_dry_run_transaction(rpm_path: str) -> Tuple[bool, str, List[str]]:
     Checks if active rpmdb has any file or directory conflicts.
     """
     errors: List[str] = []
-    cmd = ["rpm", "-U", "--test", "--replacepkgs", "--ignoresize", rpm_path]
+    cmd = ["rpm", "-U", "--test", "--replacepkgs", "--oldpackage", "--ignoresize", rpm_path]
     code, out, err = run_cmd(cmd)
 
     output = (out + "\n" + err).strip()

@@ -14,10 +14,14 @@ In a **Traditional Megakernel** approach, ray traversal, intersection, material 
 
 GPUBench implements and contrasts modern ray scheduling paradigms to decouple these stages:
 - **Traditional Megakernel**: Monolithic compute dispatch (`vkCmdDispatch`).
-- **Work Lists / Device-Generated Commands (DGC)**: Decoupled micro-kernels where hit records are classified into uniform queues and executed via GPU-driven indirect dispatches (`vkCmdDispatchIndirect`).
+- **Device-Generated Commands (DGC)**: Decoupled micro-kernels where hit records are classified into uniform queues and executed via GPU-driven command generation (`VK_EXT_device_generated_commands` / `vkCmdExecuteGeneratedCommandsEXT`).
 - **Active-Ray Compaction**: Atomic queue compaction repacking surviving path-tracing rays into dense wavefronts after every bounce using wave ballot stream sort.
 - **Shader Execution Reordering (SER)**: Hardware ray reordering (`VK_KHR_ray_tracing_reorder` / `VK_EXT_ray_tracing_invocation_reorder`).
 - **Work Graphs**: Autonomous GPU node enqueue (`VK_AMDX_shader_enqueue`).
+
+> [!NOTE]
+> **Vulkan DGC vs. DirectX 12 Work Lists**:
+> In DirectX 12, "Work Lists" refers to an evaluation-stage model extending `ExecuteIndirect`. In Vulkan, GPU-driven work creation and indirect command execution are standardized through **Device-Generated Commands (DGC)** (`VK_EXT_device_generated_commands`) utilizing Indirect Execution Sets (`VkIndirectExecutionSetEXT`) and Indirect Commands Layouts (`VkIndirectCommandsLayoutEXT`), paired with wavefront compaction queues. GPUBench strictly targets the Vulkan DGC specification.
 
 ---
 
@@ -66,14 +70,14 @@ Benchmarks and shader diagnostics were evaluated on the **AMD Radeon AI PRO R970
 
 ### 3.1 4K UHD Performance Summary (AMD Radeon AI PRO R9700)
 
-| Benchmark Scenario | Triangles | Traditional Megakernel | Decoupled Work Lists / DGC | Speedup | Bit-Exact Match | PSNR |
+| Benchmark Scenario | Triangles | Megakernel | DGC | Speedup | Bit-Exact Match | PSNR |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | **Showroom Studio** | 108,936 | 57.6 FPS (17.37 ms) | **101.3 FPS (9.87 ms)** | **1.76x** | 8,294,400 / 8,294,400 (100%) | 120.0 dB |
 | **Indoor Atrium** | 262,267 | 30.5 FPS (32.77 ms) | **68.0 FPS (14.70 ms)** | **2.23x** | 8,294,400 / 8,294,400 (100%) | 120.0 dB |
 | **Outdoor Landscape** | 57,216 | 185.8 FPS (5.38 ms) | **420.0 FPS (2.38 ms)** | **2.26x** | 8,294,400 / 8,294,400 (100%) | 120.0 dB |
 | **Open-World Forest** | 1,001,280 | 27.0 FPS (37.00 ms) | **55.0 FPS (18.18 ms)** | **2.04x** | 8,294,400 / 8,294,400 (100%) | 120.0 dB |
 
-Across all scenarios, Work Lists / DGC reduces frame render times by **43% to 56%**, doubling interactive framerates while preserving identical image output.
+Across all scenarios, Device-Generated Commands (DGC) reduces frame render times by **43% to 56%**, doubling interactive framerates while preserving identical image output.
 
 ---
 
@@ -105,7 +109,7 @@ Querying compiler statistics directly via `RADV_DEBUG=shaderstats` reveals why t
    - The compiler must allocate **240 VGPRs** (out of a hardware maximum of 256 per thread) and 15.4 KB of LDS per workgroup.
    - Because each SIMD possesses only 1536 Wave32 VGPRs, the register file runs out after allocating **only 2 waves per SIMD (12.5% theoretical occupancy)**.
    - When those 2 waves stall on memory reads or BVH node traversal, the SIMD has **no other waves to schedule**, causing the execution ALUs to sit idle (~54% active ALU utilization).
-2. **Work Lists Unleash 100% Occupancy**:
+2. **Compacted Queues & DGC Unleash 100% Occupancy**:
    - By separating the monolithic pipeline into distinct stages, lightweight passes (`bounce`, `shadow`, and `compaction`) consume only 24–48 VGPRs.
    - This allows the hardware scheduler to place **16 waves per SIMD (100% full hardware occupancy)**, saturating all 128 SIMD units across all 64 CUs.
    - Even the specialized material shaders achieve **4 waves/SIMD (25% occupancy)**—double the occupancy of the megakernel—while executing 100% coherent SIMD lanes.
@@ -122,7 +126,7 @@ During benchmark passes, external GPU monitoring tools (such as desktop widgets 
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
 | **Device Memory Bandwidth** | **80.4%** | **90.7%** | **100%** | **3468 MHz** | **1258 MHz (DPM 5)** | **263.0 W** |
 | **Ray Scheduling (Showroom Megakernel)** | **10.9%** | **55.8%** | **100%** | **3364 MHz** | **1258 MHz (DPM 5)** | **290.0 W** |
-| **Ray Scheduling (Showroom Work Lists)** | **10.6%** | **54.2%** | **100%** | **3253 MHz** | **1124 MHz (DPM 4)** | **281.0 W** |
+| **Ray Scheduling (Showroom DGC)** | **10.6%** | **54.2%** | **100%** | **3253 MHz** | **1124 MHz (DPM 4)** | **281.0 W** |
 | **Ray Scheduling (All 4 Scenes Complete)** | **42.6%** | **85.5%** | **100%** | **3399 MHz** | **1258 MHz (DPM 5)** | **379.0 W** |
 
 ### 4.2 Root Cause Analysis
@@ -147,7 +151,7 @@ During benchmark passes, external GPU monitoring tools (such as desktop widgets 
 ## 5. Analytical Parity & Ground-Truth Verification
 
 ### 5.1 Bit-Exact Visual Parity (3840×2160)
-To guarantee mathematical correctness between the monolithic megakernel and decoupled work lists, every rendered frame is verified pixel-by-pixel:
+To guarantee mathematical correctness between the monolithic megakernel and decoupled Device-Generated Commands (DGC), every rendered frame is verified pixel-by-pixel:
 
 ```
 ================================================================================
@@ -166,7 +170,7 @@ All four scenarios produce identical color values, confirming zero visual or mat
 ### 5.2 Blender Cycles Ground Truth (HIP RT)
 The Open-World Forest geometry and nature PBR shaders were ported to **Blender 5.2 (Cycles Path Tracer)** for offline reference validation on GPU 1:
 - Running on the exact same hardware (**AMD Radeon AI PRO R9700**) with **hardware HIP RT**, Blender Cycles required **8.43 seconds** (64 spp with OIDN) to render the offline reference.
-- GPUBench's decoupled Work Lists pipeline renders the frame in real time at **55.0 FPS (18.18 ms)**, matching perspective, thin-surface foliage subsurface transmission, and riverbed refraction.
+- GPUBench's decoupled Device-Generated Commands (DGC) pipeline renders the frame in real time at **55.0 FPS (18.18 ms)**, matching perspective, thin-surface foliage subsurface transmission, and riverbed refraction.
 
 ---
 
@@ -187,7 +191,7 @@ gpubench -d 1 -b rayscheduling -s forest
 # Dump 4K UHD PNG/PPM frames, difference heatmaps, and 4-scenario comparative grid
 gpubench -d 1 -b rayscheduling -s all --dump-renders
 
-# Run a specific benchmark configuration (e.g. Config 21: Megakernel, Config 22: Work Lists)
+# Run a specific benchmark configuration (e.g. Config 21: Primary Rays (Megakernel), Config 22: Primary Rays (DGC))
 gpubench -d 1 -b rayscheduling -s forest -c 21
 gpubench -d 1 -b rayscheduling -s forest -c 22
 

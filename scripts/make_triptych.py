@@ -221,7 +221,7 @@ def process_scene(scene_tag):
     x_col1 = pad + cell_w + pad
     draw.rectangle([(x_col1, y_col), (x_col1 + cell_w, banner_h - 8)], fill=(24, 32, 47))
     draw.text((x_col1 + 20, y_col + 8), "OPTIMIZED DGC APPROACH", fill=(52, 211, 153), font=col_hdr_font)
-    draw.text((x_col1 + 450, y_col + 13), "Subgroup Wavefront Compaction & Dynamic Work Lists", fill=(148, 163, 184), font=col_sub_font)
+    draw.text((x_col1 + 450, y_col + 13), "Subgroup Wavefront Compaction & Vulkan DGC", fill=(148, 163, 184), font=col_sub_font)
 
     # Row Bar with Live Performance Metrics
     current_y = banner_h
@@ -247,7 +247,7 @@ def process_scene(scene_tag):
         im1 = im1.resize((cell_w, cell_h), Image.Resampling.LANCZOS)
     img.paste(im1, (x_col0, current_y))
 
-    # Paste Right Image (Work Lists)
+    # Paste Right Image (DGC)
     if im2.size != (cell_w, cell_h):
         im2 = im2.resize((cell_w, cell_h), Image.Resampling.LANCZOS)
     img.paste(im2, (x_col1, current_y))
@@ -346,7 +346,7 @@ def generate_2x_grid():
     x_col1 = pad + cell_w + pad
     draw.rectangle([(x_col1, y_col), (x_col1 + cell_w, banner_h - 8)], fill=(24, 32, 47))
     draw.text((x_col1 + 20, y_col + 8), "OPTIMIZED DGC APPROACH", fill=(52, 211, 153), font=col_hdr_font)
-    draw.text((x_col1 + 470, y_col + 13), "Subgroup Wavefront Compaction & Dynamic Work Lists", fill=(148, 163, 184), font=col_sub_font)
+    draw.text((x_col1 + 470, y_col + 13), "Subgroup Wavefront Compaction & Vulkan DGC", fill=(148, 163, 184), font=col_sub_font)
 
     current_y = banner_h
 
@@ -405,7 +405,7 @@ def generate_2x_grid():
             draw.rectangle([(x_col0, current_y), (x_col0 + cell_w, current_y + cell_h)], fill=(20, 24, 36))
             draw.text((x_col0 + 100, current_y + 300), f"Render missing: {p1}", fill=(248, 113, 113), font=title_font)
 
-        # Render Right Image (Work Lists)
+        # Render Right Image (DGC)
         if os.path.exists(p2):
             im2 = Image.open(p2).convert("RGB")
             if im2.size != (cell_w, cell_h):
@@ -557,7 +557,7 @@ def generate_technique_comparison(base_scene):
     draw.text((pad + 16, current_y + 44), f"Resolution: {cfg.get('res_tag', '')}  •  {cfg['subtitle']}", fill=(148, 163, 184), font=col_sub_font)
 
     perf_str = f"Hybrid RT: {hyb_fps:.1f} FPS ({hyb_ms:.2f} ms)  •  PT 1 SPP: {pt1_fps:.1f} FPS ({pt1_ms:.2f} ms)  •  PT 16 SPP: {pt16_fps:.1f} FPS ({pt16_ms:.2f} ms)"
-    parity_str = "Full Material Texturing  •  Indirect Diffuse GI Bounces  •  100% Bit-Exact Work List Parity"
+    parity_str = "Full Material Texturing  •  Indirect Diffuse GI Bounces  •  100% Bit-Exact DGC Parity"
 
     tbox_p = draw.textbbox((0, 0), perf_str, font=meta_font)
     tw_p = tbox_p[2] - tbox_p[0]
@@ -848,7 +848,7 @@ def generate_pathtracing_grid():
     x_col1 = pad + cell_w + pad
     draw.rectangle([(x_col1, y_col), (x_col1 + cell_w, banner_h - 8)], fill=(24, 32, 47))
     draw.text((x_col1 + 20, y_col + 8), "OPTIMIZED DGC APPROACH (16 SPP)", fill=(52, 211, 153), font=col_hdr_font)
-    draw.text((x_col1 + 540, y_col + 13), "Subgroup Wavefront Compaction & Dynamic Work Lists", fill=(148, 163, 184), font=col_sub_font)
+    draw.text((x_col1 + 540, y_col + 13), "Subgroup Wavefront Compaction & Vulkan DGC", fill=(148, 163, 184), font=col_sub_font)
 
     current_y = banner_h
 

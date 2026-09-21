@@ -12,7 +12,7 @@
 This document serves as the standard operational guide for profiling, verifying, and validating compute, ray tracing, and path tracing pipelines in GPUBench.
 
 Specifically, it details how to:
-1. **Verify Native Execution Pathways**: Prove that GPU workloads labeled as **Device-Generated Commands (Work Lists / DGC)** execute autonomously on the GPU Command Processor (CP) via `vkCmdExecuteGeneratedCommandsEXT`, rather than falling back to host-recorded CPU dispatches.
+1. **Verify Native Execution Pathways**: Prove that GPU workloads labeled as **Device-Generated Commands (DGC)** execute autonomously on the GPU Command Processor (CP) via `vkCmdExecuteGeneratedCommandsEXT`, rather than falling back to host-recorded CPU dispatches.
 2. **Inspect Hardware Command Processor Packets**: Trace indirect buffers, DMA prefetch, pipeline register updates, and hardware predication using `RADV_DEBUG=dumpibs`.
 3. **Analyze Shader ISA & Register Pressure**: Disassemble SPIR-V compute kernels targeting GFX1201 to evaluate VGPR/SGPR allocations, instruction sizes, scratch spills, and theoretical SIMD wave occupancy using **Radeon GPU Analyzer (RGA)**.
 4. **Capture Live Compiler Telemetry**: Inspect ACO (AMD Compiler) live stats, including subgroup occupancy and dual-issue VOPD vector instructions, using `RADV_DEBUG=shaderstats`.
@@ -121,7 +121,7 @@ Compilation statistics for all `rt_scheduling` compute kernels targeting GFX1201
    - Because each Compute Unit has a fixed physical register file, this forces the hardware scheduler to throttle down to only **2–3 active waves per SIMD**.
    - When divergent rays cause high-latency BVH traversal stalls (cache misses), the SIMD unit sits idle because there are not enough in-flight waves to hide memory latency.
 2. **Micro-kernel Latency Hiding**:
-   - The Work List / DGC pipeline splits execution into specialized micro-kernels.
+   - The Device-Generated Commands (DGC) pipeline splits execution into specialized micro-kernels.
    - `resolve` uses only **19 VGPRs**, `shadow` uses **34 VGPRs**, and `bounce` uses **49 VGPRs**.
    - This unlocks the **maximum hardware occupancy of 16 waves per SIMD**, ensuring continuous arithmetic execution while other waves wait for memory fetches.
 3. **L1 Instruction Cache (L1I) Footprint**:
@@ -225,14 +225,14 @@ During execution, look for these packets emitted by the GPU Command Processor:
 
 | Config Index | Benchmark Test Name | `INDIRECT_BUFFER` Packets | Predicated Dispatches | Register Sets (`SET_SH_REG`) | Memory Barriers (`ACQUIRE`/`REL`) |
 |---|---|---|---|---|---|
-| **Config 2** | Material Shading - Work Lists (DGC) | 4 | 2 | 10 | 6 / 2 |
-| **Config 6** | Full Scene Path Tracing (1 SPP) - Work Lists (DGC) | 6 | 4 | 24 | 18 / 2 |
-| **Config 10** | Incoherent Ray Tracing - Work Lists (DGC) | 4 | 2 | 16 | 10 / 2 |
-| **Config 14** | Total Scene Render - Work Lists (DGC) | 4 | 2 | 18 | 12 / 2 |
-| **Config 22** | Full Scene Ray Tracing (PBR - Morton Z) - Work Lists (DGC) | 4 | 2 | 18 | 12 / 2 |
-| **Config 25** | Directional Shadows - Work Lists (Wavefront Compaction) | 4 | 2 | 18 | 12 / 2 |
-| **Config 27** | Directional Shadows - Multi-Light Directional Binning (DGC) | 4 | 2 | 18 | 12 / 2 |
-| **Config 29** | Full Scene Path Tracing (16 SPP) - Work Lists (DGC) | 96 | 64 | 384 | 288 / 32 |
+| **Config 2** | Material Shading (DGC) | 4 | 2 | 10 | 6 / 2 |
+| **Config 6** | Path Tracing (1 SPP) (DGC) | 6 | 4 | 24 | 18 / 2 |
+| **Config 10** | Incoherent Diffuse GI (DGC) | 4 | 2 | 16 | 10 / 2 |
+| **Config 14** | Scene Render: Full Frame (DGC) | 4 | 2 | 18 | 12 / 2 |
+| **Config 22** | Primary Rays (DGC) | 4 | 2 | 18 | 12 / 2 |
+| **Config 25** | Shadows (DGC) | 4 | 2 | 18 | 12 / 2 |
+| **Config 27** | Shadows (Multi-Light Binning) | 4 | 2 | 18 | 12 / 2 |
+| **Config 29** | Path Tracing (16 SPP) (DGC) | 96 | 64 | 384 | 288 / 32 |
 
 ---
 
@@ -284,7 +284,7 @@ Tested across all 8 configurations against baseline monolithic megakernels at 4K
 | **Full Scene Path Tracing** (16 SPP Multi-Bounce) | Config 28 | Config 29 | 13.41 MRays/s | **101.24 MRays/s** | **7.55x** | 100.00% (PSNR 120 dB) |
 
 ### 8.2 Visual & Analytical Parity Verification
-When `--dump-renders` is enabled, GPUBench compares the rendered 4K framebuffer outputs pixel-by-pixel between the Megakernel and Work Lists / DGC:
+When `--dump-renders` is enabled, GPUBench compares the rendered 4K framebuffer outputs pixel-by-pixel between the Megakernel and Device-Generated Commands (DGC):
 - **Max Color Delta**: 0.000000 (0 / 255)
 - **Mean Absolute Error (MAE)**: 0.000000
 - **Root Mean Squared Error (RMSE)**: 0.000000

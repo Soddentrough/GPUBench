@@ -6,6 +6,7 @@
 #include "core/ResultFormatter.h"
 
 #include <functional>
+#include <atomic>
 
 std::vector<ResultData> RunBenchmarksAPI(
     const std::vector<std::string>& benchmarks_to_run,
@@ -17,7 +18,8 @@ std::vector<ResultData> RunBenchmarksAPI(
     uint32_t renderHeight = 0,
     std::function<void(const ResultData&)> callback = nullptr,
     const std::string& scene = "all",
-    uint32_t samples_per_pixel = 1);
+    uint32_t samples_per_pixel = 1,
+    std::atomic<bool>* cancel_token = nullptr);
 
 struct DeviceProfile {
     std::string backend;
@@ -43,3 +45,14 @@ struct DeviceProfile {
 std::vector<std::string> GetAvailableHardwareAPI();
 std::vector<std::string> GetAvailableBenchmarksAPI();
 std::vector<DeviceProfile> GetDeviceProfilesAPI();
+
+struct BenchmarkSupportInfo {
+    std::string id;
+    bool isSupported{true};
+    std::string reason;
+    std::string limitationCategory;
+};
+
+std::vector<BenchmarkSupportInfo> ProbeBenchmarkSupportAPI(
+    const std::string& backend_name,
+    uint32_t device_idx);

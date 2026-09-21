@@ -291,13 +291,42 @@ void BenchmarkRunner::discoverBenchmarks() {
     showroom->SetDumpRenders(dumpRenders || verifyParity);
     showroom->SetVerifyParity(verifyParity);
     benchmarks.push_back(std::move(showroom));
-  } else {
+  } else if (sceneName == "indoor") {
     auto indoor = std::make_unique<RaySchedulingBench>(RaySchedulingBench::SceneType::IndoorAtrium);
     indoor->SetBounceDepth(bounceDepth);
     indoor->SetSamplesPerPixel(samplesPerPixel);
     indoor->SetDumpRenders(dumpRenders || verifyParity);
     indoor->SetVerifyParity(verifyParity);
     benchmarks.push_back(std::move(indoor));
+  } else {
+    // Default fallback: all scenes
+    auto showroom = std::make_unique<RaySchedulingBench>(RaySchedulingBench::SceneType::Showroom);
+    showroom->SetBounceDepth(bounceDepth);
+    showroom->SetSamplesPerPixel(samplesPerPixel);
+    showroom->SetDumpRenders(dumpRenders || verifyParity);
+    showroom->SetVerifyParity(verifyParity);
+    benchmarks.push_back(std::move(showroom));
+
+    auto indoor = std::make_unique<RaySchedulingBench>(RaySchedulingBench::SceneType::IndoorAtrium);
+    indoor->SetBounceDepth(bounceDepth);
+    indoor->SetSamplesPerPixel(samplesPerPixel);
+    indoor->SetDumpRenders(dumpRenders || verifyParity);
+    indoor->SetVerifyParity(verifyParity);
+    benchmarks.push_back(std::move(indoor));
+
+    auto outdoor = std::make_unique<RaySchedulingBench>(RaySchedulingBench::SceneType::OutdoorLandscape);
+    outdoor->SetBounceDepth(bounceDepth);
+    outdoor->SetSamplesPerPixel(samplesPerPixel);
+    outdoor->SetDumpRenders(dumpRenders || verifyParity);
+    outdoor->SetVerifyParity(verifyParity);
+    benchmarks.push_back(std::move(outdoor));
+
+    auto forest = std::make_unique<RaySchedulingBench>(RaySchedulingBench::SceneType::AAAOutdoorForest);
+    forest->SetBounceDepth(bounceDepth);
+    forest->SetSamplesPerPixel(samplesPerPixel);
+    forest->SetDumpRenders(dumpRenders || verifyParity);
+    forest->SetVerifyParity(verifyParity);
+    benchmarks.push_back(std::move(forest));
   }
   benchmarks.push_back(std::make_unique<RayMaterialDivergenceBench>());
   benchmarks.push_back(std::make_unique<RayIncoherentBench>());
@@ -721,6 +750,12 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
     IBenchmark *prevBench = nullptr;
     size_t taskIdx = 0;
     for (const auto &task : tasks) {
+      if (cancelToken && cancelToken->load()) {
+        if (!verbose && !onResult) {
+          std::cout << "\n  \033[33m⚠\033[0m Benchmark run cancelled by user." << std::endl;
+        }
+        break;
+      }
       auto *bench = task.bench;
       uint32_t i = task.configIndex;
 
@@ -959,6 +994,28 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
         }
 
         std::string errStr = e.what();
+        if (onResult) {
+          ResultData fail_data;
+          fail_data.backendName = ComputeBackendFactory::getBackendName(context->getBackend());
+          fail_data.deviceName = info.name;
+          fail_data.benchmarkName = bench_name;
+          fail_data.component = bench->GetComponent(i);
+          fail_data.subcategory = bench->GetSubCategory(i);
+          fail_data.metric = bench->GetMetric(i);
+          fail_data.operations = 0;
+          fail_data.time_ms = -2.0; // Signals error/failure
+          fail_data.isEmulated = false;
+          fail_data.isUnsupported = false;
+          fail_data.maxWorkGroupSize = info.maxWorkGroupSize;
+          fail_data.deviceIndex = context->getSelectedDeviceIndex();
+          fail_data.configIndex = i;
+          fail_data.sortWeight = bench->GetSortWeight(i);
+          fail_data.width = effectiveWidth;
+          fail_data.height = effectiveHeight;
+          fail_data.errorString = errStr;
+          onResult(fail_data);
+        }
+
         bool isLost = (errStr.find("DEVICE_LOST") != std::string::npos ||
                        errStr.find("timed out") != std::string::npos ||
                        errStr.find("timeout") != std::string::npos ||
@@ -1100,6 +1157,9 @@ void BenchmarkRunner::runHostBenchmarks(const std::vector<std::string> &benchmar
         uint32_t num_configs = bench->GetNumConfigs();
 
         for (uint32_t i = 0; i < num_configs; ++i) {
+          if (cancelToken && cancelToken->load()) {
+            break;
+          }
           std::string bench_name = bench->GetName();
           std::string config_name = bench->GetConfigName(i);
           if (!config_name.empty()) {
@@ -1133,6 +1193,9 @@ void BenchmarkRunner::runHostBenchmarks(const std::vector<std::string> &benchmar
           uint64_t total_invocations = 0;
           auto bench_start = std::chrono::high_resolution_clock::now();
           while (total_time_ms < 5000) {
+            if (cancelToken && cancelToken->load()) {
+              break;
+            }
             bench->Run(i);
             total_invocations++;
             auto now = std::chrono::high_resolution_clock::now();
@@ -1196,10 +1259,15 @@ void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {
   initRunConfig(benchmarks_to_run);
 
   for (auto *context : contexts) {
+    if (cancelToken && cancelToken->load()) {
+      break;
+    }
     runForContext(context, benchmarks_to_run);
   }
 
-  runHostBenchmarks(benchmarks_to_run);
+  if (!cancelToken || !cancelToken->load()) {
+    runHostBenchmarks(benchmarks_to_run);
+  }
 
   if (!onResult) {
     printReport();

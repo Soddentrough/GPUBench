@@ -76,18 +76,18 @@ public:
 
   BenchmarkResult GetResult(uint32_t config_idx = 0) const override;
   int GetSortWeight(uint32_t config_idx = 0) const override;
-  uint32_t GetExpectedKernelCount() const override { return 20; }
+  uint32_t GetExpectedKernelCount() const override { return 22; }
 
-  uint32_t GetNumConfigs() const override { return 34; }
+  uint32_t GetNumConfigs() const override { return 36; }
   std::vector<std::string> GetAliases() const override {
     if (sceneType == SceneType::AAAOutdoorForest) {
-      return {"rayscheduling", "rtscheduling", "forest", "aaa_forest", "rayscheduling_forest", "worklists", "dgc", "scene_render", "total_scene_render", "total_frame", "primary", "primary_rays", "shadow", "shadows", "rts", "ray_shadows", "ray_shadow"};
+      return {"rayscheduling", "rtscheduling", "forest", "aaa_forest", "rayscheduling_forest", "wavefront_queues", "dgc", "scene_render", "total_scene_render", "total_frame", "primary", "primary_rays", "shadow", "shadows", "rts", "ray_shadows", "ray_shadow"};
     } else if (sceneType == SceneType::OutdoorLandscape) {
-      return {"rayscheduling", "rtscheduling", "outdoor", "landscape", "rayscheduling_outdoor", "worklists", "dgc", "scene_render", "total_scene_render", "total_frame", "primary", "primary_rays", "shadow", "shadows", "rts", "ray_shadows", "ray_shadow"};
+      return {"rayscheduling", "rtscheduling", "outdoor", "landscape", "rayscheduling_outdoor", "wavefront_queues", "dgc", "scene_render", "total_scene_render", "total_frame", "primary", "primary_rays", "shadow", "shadows", "rts", "ray_shadows", "ray_shadow"};
     } else if (sceneType == SceneType::IndoorAtrium) {
-      return {"rayscheduling", "rtscheduling", "indoor", "atrium", "rayscheduling_indoor", "worklists", "dgc", "scene_render", "total_scene_render", "total_frame", "primary", "primary_rays", "shadow", "shadows", "rts", "ray_shadows", "ray_shadow"};
+      return {"rayscheduling", "rtscheduling", "indoor", "atrium", "rayscheduling_indoor", "wavefront_queues", "dgc", "scene_render", "total_scene_render", "total_frame", "primary", "primary_rays", "shadow", "shadows", "rts", "ray_shadows", "ray_shadow"};
     } else {
-      return {"rayscheduling", "rtscheduling", "showroom", "studio", "rayscheduling_showroom", "worklists", "dgc", "scene_render", "total_scene_render", "total_frame", "primary", "primary_rays", "shadow", "shadows", "rts", "ray_shadows", "ray_shadow"};
+      return {"rayscheduling", "rtscheduling", "showroom", "studio", "rayscheduling_showroom", "wavefront_queues", "dgc", "scene_render", "total_scene_render", "total_frame", "primary", "primary_rays", "shadow", "shadows", "rts", "ray_shadows", "ray_shadow"};
     }
   }
   std::string GetConfigName(uint32_t config_idx) const override;
@@ -118,11 +118,11 @@ public:
     if (!unsupportedReason[config_idx].empty()) {
       return unsupportedReason[config_idx];
     }
-    if (config_idx == 1 || config_idx == 5 || config_idx == 9 || config_idx == 13 || config_idx == 24) {
+    if (config_idx == 1 || config_idx == 5 || config_idx == 9 || config_idx == 13 || config_idx == 24 || config_idx == 35) {
       if (!unsupportedReason[config_idx].empty()) {
         return unsupportedReason[config_idx];
       }
-      return "VK_EXT_ray_tracing_invocation_reorder requires Ray Tracing Pipeline (not supported in compute shaders)";
+      return "VK_EXT_ray_tracing_invocation_reorder requires Ray Tracing Pipeline with hardware SER support";
     }
     if (config_idx == 3 || config_idx == 7 || config_idx == 11 || config_idx == 15 || config_idx == 26) {
       return "extension VK_AMDX_shader_enqueue missing";
@@ -130,7 +130,7 @@ public:
     return GetSupportNote(info, context);
   }
   SupportLimitation GetConfigSupportLimitation(uint32_t config_idx) const override {
-    if (config_idx == 1 || config_idx == 5 || config_idx == 9 || config_idx == 13 || config_idx == 24) {
+    if (config_idx == 1 || config_idx == 5 || config_idx == 9 || config_idx == 13 || config_idx == 24 || config_idx == 35) {
       return SupportLimitation::kHardware;
     }
     if (config_idx == 3 || config_idx == 7 || config_idx == 11 || config_idx == 15 || config_idx == 26) {
@@ -203,8 +203,10 @@ private:
   void dumpPipelineBreakdown(const std::string &tag, bool isInteractive = false);
   double bvhBuildTimeMs = 0.0;
 
-  // Compute Kernels
+  // Compute & RT Kernels
   ComputeKernel kernelTraditional = nullptr;
+  ComputeKernel kernelRTP = nullptr;
+  ComputeKernel kernelRTPSER = nullptr;
   ComputeKernel kernelClassify = nullptr;
   ComputeKernel kernelMaterial = nullptr;
   ComputeKernel kernelMaterialSpecialized[8] = {nullptr};

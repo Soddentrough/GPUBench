@@ -81,6 +81,7 @@ public:
   virtual uint32_t getSelectedDeviceIndex() const = 0;
 
   virtual void setVerbose(bool v) {}
+  virtual bool isVerbose() const { return false; }
 
   // Compilation progress tracking
   virtual void setExpectedKernelCount(uint32_t count) {}

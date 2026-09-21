@@ -7,15 +7,23 @@
 #include "core/BenchmarkRunner.h"
 #include "core/ComputeBackendFactory.h"
 #include "core/ResultFormatter.h"
+#include "core/ResultImporter.h"
 #include "core/RunnerAPI.h"
 
 void SetRunnerTargetConfigs(const std::vector<int> &configs);
+#include <cctype>
+#include <chrono>
 #include <cstdlib>
+#include <ctime>
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
 #include <string>
 #include <vector>
+
+#ifndef _WIN32
+#include <unistd.h>
+#endif
 
 #ifdef HAVE_VULKAN
 #include <vulkan/vulkan.h>
@@ -25,209 +33,7 @@ void SetRunnerTargetConfigs(const std::vector<int> &configs);
 #include <windows.h>
 #endif
 
-namespace {
 
-// Escape a string for inclusion in a JSON double-quoted value.
-std::string jsonEscape(const std::string &s) {
-  std::string out;
-  out.reserve(s.size() + 8);
-  for (char c : s) {
-    switch (c) {
-    case '"':
-      out += "\\\"";
-      break;
-    case '\\':
-      out += "\\\\";
-      break;
-    case '\n':
-      out += "\\n";
-      break;
-    case '\r':
-      out += "\\r";
-      break;
-    case '\t':
-      out += "\\t";
-      break;
-    default:
-      out += c;
-      break;
-    }
-  }
-  return out;
-}
-
-// Quote a field for CSV (RFC 4180 style).
-std::string csvQuote(const std::string &s) {
-  bool needs_quotes = false;
-  for (char c : s) {
-    if (c == ',' || c == '"' || c == '\n' || c == '\r') {
-      needs_quotes = true;
-      break;
-    }
-  }
-  if (!needs_quotes) {
-    return s;
-  }
-  std::string out = "\"";
-  for (char c : s) {
-    if (c == '"') {
-      out += "\"\"";
-    } else {
-      out += c;
-    }
-  }
-  out += "\"";
-  return out;
-}
-
-double computeResultValue(const ResultData &r) {
-  double value = 0.0;
-  if (r.time_ms > 0.0 && r.operations > 0) {
-    double seconds = r.time_ms / 1000.0;
-    if (r.metric == "TFLOPS" || r.metric == "TOPS") {
-      value = (static_cast<double>(r.operations) / seconds) / 1e12;
-    } else if (r.metric == "GB/s") {
-      value = (static_cast<double>(r.operations) / seconds) / 1e9;
-    } else if (r.metric == "MRays/s" || r.metric == "MHits/s" ||
-               r.metric == "MTris/s" || r.metric == "MInst/s" ||
-               r.metric == "MRecords/s") {
-      value = (static_cast<double>(r.operations) / seconds) / 1e6;
-    } else if (r.metric == "GIS/s") {
-      value = (static_cast<double>(r.operations) / seconds) / 1e9;
-    } else if (r.metric == "GPixels/s") {
-      value = (static_cast<double>(r.operations) / seconds) / 1e9;
-    } else if (r.metric == "ns") {
-      value = (r.time_ms * 1e6) / static_cast<double>(r.operations);
-    }
-  }
-  return value;
-}
-
-std::string resultsToJson(const std::vector<ResultData> &results) {
-  auto profiles = GetDeviceProfilesAPI();
-  std::string out = "{\n";
-  out += "  \"version\": \"" + std::string(GPUBENCH_VERSION) + "\",\n";
-  out += "  \"device_profiles\": [\n";
-  for (size_t d = 0; d < profiles.size(); ++d) {
-    const auto &dp = profiles[d];
-    char vendorHex[16], deviceHex[16];
-    std::snprintf(vendorHex, sizeof(vendorHex), "0x%04X", dp.vendorID);
-    std::snprintf(deviceHex, sizeof(deviceHex), "0x%04X", dp.deviceID);
-
-    out += "    {\n";
-    out += "      \"backend\": \"" + jsonEscape(dp.backend) + "\",\n";
-    out += "      \"device_index\": " + std::to_string(dp.deviceIndex) + ",\n";
-    out += "      \"device_name\": \"" + jsonEscape(dp.deviceName) + "\",\n";
-    out += "      \"vendor_id\": \"" + std::string(vendorHex) + "\",\n";
-    out += "      \"device_id\": \"" + std::string(deviceHex) + "\",\n";
-    out += "      \"driver_name\": \"" + jsonEscape(dp.driverName) + "\",\n";
-    out += "      \"driver_info\": \"" + jsonEscape(dp.driverInfo) + "\",\n";
-    out += "      \"driver_version\": \"" + jsonEscape(dp.driverVersion) + "\",\n";
-    out += "      \"api_version\": \"" + jsonEscape(dp.apiVersion) + "\",\n";
-    out += "      \"vram_total_mb\": " + std::to_string(dp.vramTotalMb) + ",\n";
-    out += "      \"subgroup_size\": " + std::to_string(dp.subgroupSize) + ",\n";
-    out += "      \"max_workgroup_size\": " + std::to_string(dp.maxWorkGroupSize) + ",\n";
-    out += "      \"ray_tracing_supported\": " + std::string(dp.rayTracingSupported ? "true" : "false") + ",\n";
-    out += "      \"ser_supported\": " + std::string(dp.serSupported ? "true" : "false") + ",\n";
-    out += "      \"work_graphs_supported\": " + std::string(dp.workGraphsSupported ? "true" : "false") + ",\n";
-    out += "      \"cooperative_matrix_supported\": " + std::string(dp.cooperativeMatrixSupported ? "true" : "false") + ",\n";
-    out += "      \"float16_supported\": " + std::string(dp.float16Supported ? "true" : "false") + ",\n";
-    out += "      \"int8_supported\": " + std::string(dp.int8Supported ? "true" : "false") + "\n";
-    out += (d + 1 < profiles.size()) ? "    },\n" : "    }\n";
-  }
-  out += "  ],\n";
-  out += "  \"results\": [\n";
-  for (size_t i = 0; i < results.size(); ++i) {
-    const ResultData &r = results[i];
-    std::string devIdxStr = (r.deviceIndex == 0xFFFFFFFF || r.backendName == "System")
-                                ? "null"
-                                : std::to_string(r.deviceIndex);
-    double value = computeResultValue(r);
-
-    out += "    {\n";
-    out += "      \"backend\": \"" + jsonEscape(r.backendName) + "\",\n";
-    out += "      \"device\": \"" + jsonEscape(r.deviceName) + "\",\n";
-    out += "      \"device_index\": " + devIdxStr + ",\n";
-    out += "      \"benchmark\": \"" + jsonEscape(r.benchmarkName) + "\",\n";
-    out += "      \"component\": \"" + jsonEscape(r.component) + "\",\n";
-    out += "      \"subcategory\": \"" + jsonEscape(r.subcategory) + "\",\n";
-    out += "      \"metric\": \"" + jsonEscape(r.metric) + "\",\n";
-    out += "      \"value\": " + std::to_string(value) + ",\n";
-    if (r.benchmarkName.find("RayScheduling") != std::string::npos && r.metric == "MRays/s") {
-      uint32_t w = r.width ? r.width : 1920;
-      uint32_t h = r.height ? r.height : 1080;
-      double fps = (value * 1e6) / static_cast<double>(w * h);
-      out += "      \"fps\": " + std::to_string(fps) + ",\n";
-      out += "      \"resolution\": \"" + std::to_string(w) + "x" + std::to_string(h) + "\",\n";
-    }
-    if (r.benchmarkName.find("RayRawTraversal") != std::string::npos) {
-      double peakGis = (r.configIndex == 0) ? 300.8 : 1203.2;
-      double time_s = r.time_ms / 1000.0;
-      double throughputGis = 0.0;
-      if (time_s > 0.0) {
-        uint64_t ops = (r.configIndex == 0) ? r.operations : (r.operations * 64);
-        throughputGis = (static_cast<double>(ops) / time_s) / 1e9;
-      }
-      double pctPeak = (peakGis > 0.0) ? ((throughputGis / peakGis) * 100.0) : 0.0;
-      char buf[64];
-      std::snprintf(buf, sizeof(buf), "%.1f%% of %s Boost Peak", pctPeak,
-                    (r.configIndex == 0 ? "300.8 GIS/s" : "1.20 TIS/s"));
-      std::string detailsStr(buf);
-      out += "      \"peak_type\": \"" + std::string(r.configIndex == 0 ? "Triangle" : "Box") + "\",\n";
-      out += "      \"theoretical_peak_gis\": " + std::to_string(peakGis) + ",\n";
-      out += "      \"throughput_gis\": " + std::to_string(throughputGis) + ",\n";
-      out += "      \"pct_theoretical_peak\": " + std::to_string(pctPeak) + ",\n";
-      out += "      \"details_speedup\": \"" + jsonEscape(detailsStr) + "\",\n";
-    }
-    out += "      \"operations\": " + std::to_string(r.operations) + ",\n";
-    out += "      \"time_ms\": " + std::to_string(r.time_ms) + ",\n";
-    out += std::string("      \"is_emulated\": ") +
-           (r.isEmulated ? "true" : "false") + ",\n";
-    out += std::string("      \"unsupported\": ") +
-           (r.isUnsupported ? "true" : "false") + ",\n";
-    if (r.isUnsupported) {
-      out += "      \"unsupported_category\": \"" +
-             jsonEscape(r.supportCategory) + "\",\n";
-      out += "      \"unsupported_reason\": \"" + jsonEscape(r.supportNote) +
-             "\",\n";
-    } else if (!r.supportNote.empty()) {
-      out += "      \"support_note\": \"" + jsonEscape(r.supportNote) + "\",\n";
-      out += "      \"caveat\": \"" + jsonEscape(r.supportNote) + "\",\n";
-    }
-    out += "      \"max_workgroup_size\": " +
-           std::to_string(r.maxWorkGroupSize) + ",\n";
-    out += "      \"config_index\": " + std::to_string(r.configIndex) + "\n";
-    out += (i + 1 < results.size()) ? "    },\n" : "    }\n";
-  }
-  out += "  ]\n";
-  out += "}\n";
-  return out;
-}
-
-std::string resultsToCsv(const std::vector<ResultData> &results) {
-  std::string out =
-      "backend,device,device_index,benchmark,component,subcategory,metric,"
-      "value,operations,time_ms,is_emulated,unsupported,unsupported_reason,max_workgroup_size,config_index\n";
-  for (const ResultData &r : results) {
-    std::string devIdxStr = (r.deviceIndex == 0xFFFFFFFF || r.backendName == "System")
-                                ? ""
-                                : std::to_string(r.deviceIndex);
-    double value = computeResultValue(r);
-    out += csvQuote(r.backendName) + "," + csvQuote(r.deviceName) + "," +
-           devIdxStr + "," + csvQuote(r.benchmarkName) +
-           "," + csvQuote(r.component) + "," + csvQuote(r.subcategory) + "," +
-           csvQuote(r.metric) + "," + std::to_string(value) + "," +
-           std::to_string(r.operations) + "," + std::to_string(r.time_ms) +
-           "," + (r.isEmulated ? "true" : "false") + "," +
-           (r.isUnsupported ? "true" : "false") + "," +
-           csvQuote(r.supportNote) + "," +
-           std::to_string(r.maxWorkGroupSize) + "," +
-           std::to_string(r.configIndex) + "\n";
-  }
-  return out;
-}
-
-} // namespace
 
 int main(int argc, char **argv) {
 #ifdef _WIN32
@@ -265,7 +71,7 @@ int main(int argc, char **argv) {
       "  raytracing  Hardware BVH traversal, intersection & scheduling (subset of graphics, alias: 'rt'):\n"
       "              RayRawTraversal (Raw BVH Traversal: Coherent Triangles & Deep Multi-Layer BVH8),\n"
       "              RayIntersect, RayAnyHit, RayProcedural, RayIncoherent, RayMaterialDivergence,\n"
-      "              RayPayload, RayASBuild, RayScheduling (Scene Ray Tracing & Path Tracing - Work Lists / SER / Work Graphs),\n"
+      "              RayPayload, RayASBuild, RayScheduling (Megakernel vs DGC / SER / Work Graphs),\n"
       "              Pipeline Breakdown (Linear vs 2D Tiled vs Morton Z-Curve, Queue Compaction)\n"
       "  system      Host CPU & RAM system memory:\n"
       "              System Memory Bandwidth (Multi & Single-Threaded), System Memory Latency\n"
@@ -308,18 +114,18 @@ int main(int argc, char **argv) {
 
   bool dump_renders = false;
   app.add_flag("--dump-renders,--dump", dump_renders,
-               "Dump and analytically compare rendered frames between Megakernel and Work Lists (default: disabled)");
+               "Dump and analytically compare rendered frames between Megakernel and DGC (default: disabled)");
   bool no_dump_renders = false;
   app.add_flag("--no-dump-renders,--no-dump", no_dump_renders,
                "Disable render dumping and image comparisons");
 
   bool verify_parity = false;
   app.add_flag("--verify-parity", verify_parity,
-               "Enforce visual parity gating between Megakernel and Work Lists (fails if PSNR < 45 dB or discrepancy > 0.01%)");
+               "Enforce visual parity gating between Megakernel and DGC (fails if PSNR < 45 dB or discrepancy > 0.01%)");
 
-  std::string scene_str = "indoor";
+  std::string scene_str = "all";
   app.add_option("-s,--scene", scene_str,
-                 "Ray tracing benchmark scenario: showroom, indoor, outdoor, forest, all (default: indoor)")
+                 "Ray tracing benchmark scenario: showroom, indoor, outdoor, forest, all (default: all)")
       ->check(CLI::IsMember({"showroom", "indoor", "outdoor", "forest", "aaa_forest", "all"}));
 
   std::string resolution_str = "auto";
@@ -349,17 +155,112 @@ int main(int argc, char **argv) {
   app.add_flag("--rra", rra_trace,
                "Enable Radeon Raytracing Analyzer (RRA) trace capture (implies --profile-snapshot)");
 
-  std::string output_format;
-  app.add_option("--output", output_format,
-                 "Machine-readable output format: json or csv")
-      ->check(CLI::IsMember({"json", "csv"}));
+  std::string output_json_path;
+  CLI::Option *opt_output_json = app.add_option(
+      "-o,--output-json", output_json_path,
+      "Write benchmark results to JSON file (optional file path, defaults to gpubench_<hostname>_<timestamp>.json)")
+      ->expected(0, 1);
 
-  std::string output_file;
-  app.add_option("--output-file", output_file,
-                 "Write machine-readable output to this file instead of "
-                 "stdout (requires --output)");
+  std::string legacy_output_format;
+  CLI::Option *opt_legacy_output = app.add_option(
+      "--output", legacy_output_format,
+      "Legacy output format: json (deprecated, use --output-json)")
+      ->check(CLI::IsMember({"json"}))
+      ->group("");
+
+  std::string legacy_output_file;
+  CLI::Option *opt_legacy_file = app.add_option(
+      "--output-file", legacy_output_file,
+      "Legacy output file path (deprecated, use --output-json [FILE])")
+      ->group("");
+
+  std::vector<std::string> import_files;
+  app.add_option("-i,--import,--input", import_files,
+                 "Load and display results from benchmark JSON report file(s)")
+      ->expected(1, -1);
+
+  std::vector<std::string> compare_files;
+  app.add_option("--compare", compare_files,
+                 "Compare benchmark JSON report files side-by-side (e.g. --compare fileA.json fileB.json [fileC.json ...])")
+      ->expected(1, -1);
 
   CLI11_PARSE(app, argc, argv);
+
+  bool want_json_output = false;
+  if (opt_output_json->count() > 0) {
+    want_json_output = true;
+    if (output_json_path.empty()) {
+      output_json_path = getDefaultJsonFilename();
+    }
+  } else if (!legacy_output_file.empty() || !legacy_output_format.empty()) {
+    want_json_output = true;
+    if (!legacy_output_file.empty()) {
+      output_json_path = legacy_output_file;
+    } else {
+      output_json_path = "-";
+    }
+  }
+
+  // Collect all files specified across --compare and -i/--import
+  std::vector<std::string> all_compare_files;
+  for (const auto &f : compare_files) {
+    if (!f.empty()) all_compare_files.push_back(f);
+  }
+  for (const auto &f : import_files) {
+    if (!f.empty() && std::find(all_compare_files.begin(), all_compare_files.end(), f) == all_compare_files.end()) {
+      all_compare_files.push_back(f);
+    }
+  }
+
+  // Handle multi-run comparison mode (>= 2 files)
+  if (all_compare_files.size() >= 2) {
+    std::vector<ImportedRun> runs;
+    std::string err;
+    if (!ResultImporter::loadFromFiles(all_compare_files, runs, err)) {
+      std::cerr << "Error: " << err << std::endl;
+      return EXIT_FAILURE;
+    }
+    ResultFormatter::printComparison(runs);
+    return EXIT_SUCCESS;
+  }
+
+  if (!compare_files.empty() && all_compare_files.size() < 2) {
+    std::cerr << "Error: --compare requires at least two JSON report files (e.g. --compare fileA.json fileB.json [fileC.json ...])" << std::endl;
+    return EXIT_FAILURE;
+  }
+
+  // Handle single imported result file
+  if (!import_files.empty()) {
+    ImportedRun run;
+    std::string err;
+    if (!ResultImporter::loadFromFile(import_files[0], run, err)) {
+      std::cerr << "Error: " << err << std::endl;
+      return EXIT_FAILURE;
+    }
+
+    ResultFormatter formatter;
+    for (const auto &res : run.results) {
+      formatter.addResult(res);
+    }
+    formatter.print();
+
+    // Also support re-exporting to json if requested
+    if (want_json_output) {
+      std::string payload = resultsToJson(run.results);
+      if (output_json_path == "-" || output_json_path == "stdout") {
+        std::cout << payload;
+      } else {
+        std::ofstream ofs(output_json_path, std::ios::out | std::ios::trunc);
+        if (!ofs) {
+          std::cerr << "Error: could not open output file '" << output_json_path << "'" << std::endl;
+          return EXIT_FAILURE;
+        }
+        ofs << payload;
+        std::cout << "\n  [JSON Report] Saved to: " << output_json_path << "\n" << std::endl;
+      }
+    }
+    return EXIT_SUCCESS;
+  }
 
   if (rra_trace) {
     profile_snapshot = true;
@@ -370,12 +271,6 @@ int main(int argc, char **argv) {
     _putenv("MESA_VK_TRACE=rra");
     _putenv("MESA_VK_TRACE_FRAME=1");
 #endif
-  }
-
-  if (!output_file.empty() && output_format.empty()) {
-    std::cerr << "Error: --output-file requires --output (json or csv)"
-              << std::endl;
-    return EXIT_FAILURE;
   }
 
   // Parse resolution
@@ -473,9 +368,9 @@ int main(int argc, char **argv) {
   }
 
   // If machine-readable output is requested to stdout, divert diagnostic
-  // logging (banners, progress, tables) to stderr so stdout is pure JSON/CSV.
+  // logging (banners, progress, tables) to stderr so stdout is pure JSON.
   std::streambuf *orig_cout = nullptr;
-  if (!output_format.empty() && output_file.empty()) {
+  if (want_json_output && (output_json_path == "-" || output_json_path == "stdout")) {
     orig_cout = std::cout.rdbuf(std::cerr.rdbuf());
   }
 
@@ -650,24 +545,23 @@ int main(int argc, char **argv) {
     }
 
     // Machine-readable output (in addition to the human report above)
-    if (!output_format.empty()) {
-      std::string payload = (output_format == "json")
-                                ? resultsToJson(runner.getResults())
-                                : resultsToCsv(runner.getResults());
-      if (!output_file.empty()) {
-        std::ofstream ofs(output_file, std::ios::out | std::ios::trunc);
-        if (!ofs) {
-          std::cerr << "Error: could not open output file '" << output_file
-                    << "'" << std::endl;
-          return EXIT_FAILURE;
-        }
-        ofs << payload;
-      } else {
+    if (want_json_output) {
+      std::string payload = resultsToJson(runner.getResults());
+      if (output_json_path == "-" || output_json_path == "stdout") {
         if (orig_cout) {
           std::cout.rdbuf(orig_cout);
           orig_cout = nullptr;
         }
         std::cout << payload;
+      } else {
+        std::ofstream ofs(output_json_path, std::ios::out | std::ios::trunc);
+        if (!ofs) {
+          std::cerr << "\nError: could not write JSON output to '" << output_json_path
+                    << "'" << std::endl;
+          return EXIT_FAILURE;
+        }
+        ofs << payload;
+        std::cout << "\n  [JSON Report] Saved to: " << output_json_path << "\n" << std::endl;
       }
     }
 

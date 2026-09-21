@@ -97,7 +97,7 @@ When implementing or debugging Vulkan DGC (`VK_EXT_device_generated_commands`) o
 
 1. **Standard DGC (Indirect Dispatches + Push Constants)**:
    - Supported on compute stages (`VK_SHADER_STAGE_COMPUTE_BIT`).
-   - Powers native DGC work list ray scheduling, achieving significant speedups over megakernels.
+   - Powers native DGC ray scheduling via wavefront compaction queues, achieving significant speedups over megakernels.
 2. **DGC Execution Set Pipeline Binding (`VK_INDIRECT_COMMANDS_TOKEN_TYPE_EXECUTION_SET_EXT`)**:
    - `VkPhysicalDeviceDeviceGeneratedCommandsPropertiesEXT::supportedIndirectCommandsShaderStagesPipelineBinding` is `0` (None) on AMD Windows driver 26.8.1 for compute shaders.
    - Dynamic pipeline switching within compute DGC sequences is not supported on this driver.

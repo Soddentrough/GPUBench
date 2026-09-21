@@ -4,7 +4,7 @@ _gpubench() {
     local cur prev words cword
     _init_completion || return
 
-    local opts="--help --version --benchmarks --benchmark -b --groups --group -g --list-benchmarks --list-groups --device -d --list-devices --list-backends --backend -k --verbose --debug --dump-geometry --dump-renders --dump -s --scene -r --resolution --bounces -c --config --profile-snapshot --rra --output --output-file"
+    local opts="--help --version --benchmarks --benchmark -b --groups --group -g --list-benchmarks --list-groups --device -d --list-devices --list-backends --backend -k --verbose --debug --dump-geometry --dump-renders --dump -s --scene -r --resolution --bounces -c --config --profile-snapshot --rra -o --output-json --output-file -i --import --compare"
 
     case "$prev" in
         --bounces)
@@ -20,19 +20,15 @@ _gpubench() {
             return 0
             ;;
         -s|--scene)
-            COMPREPLY=( $(compgen -W "showroom indoor outdoor all" -- "$cur") )
+            COMPREPLY=( $(compgen -W "all showroom indoor outdoor forest" -- "$cur") )
             return 0
             ;;
         -r|--resolution)
             COMPREPLY=( $(compgen -W "auto 720p 1080p 1440p 4k 1024x1024" -- "$cur") )
             return 0
             ;;
-        --output)
-            COMPREPLY=( $(compgen -W "json csv" -- "$cur") )
-            return 0
-            ;;
-        --output-file)
-            _filedir
+        -o|--output-json|--output-file|-i|--import|--compare)
+            _filedir json
             return 0
             ;;
         -b|--benchmark|--benchmarks)

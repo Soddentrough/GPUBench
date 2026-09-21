@@ -8,7 +8,7 @@ def make_comparison(scenario="forest"):
         p_blender = "renders/render_forest_cycles_reference.png"
         out_path = "renders/render_forest_blender_comparison.png"
         title_left = "GPUBench Real-Time Vulkan Pipeline (Open-World Forest)"
-        sub_left = "Decoupled Work Lists / DGC (55.2 FPS, 18.13 ms @ 4K 3840x2160)"
+        sub_left = "Decoupled DGC (55.2 FPS, 18.13 ms @ 4K 3840x2160)"
         title_right = "Blender Cycles Reference Render (Open-World Forest)"
         sub_right = "Cycles HIP RT on GPU 1 (AMD Radeon AI PRO R9700, 8.43 s @ 64 spp, OIDN)"
     else:
@@ -16,7 +16,7 @@ def make_comparison(scenario="forest"):
         p_blender = "renders/render_indoor_cycles_reference.png"
         out_path = "renders/render_indoor_blender_comparison.png"
         title_left = "GPUBench Real-Time Vulkan Pipeline (Crytek Sponza)"
-        sub_left = "Decoupled Work Lists / DGC (338.3 FPS, 2.96 ms @ 4K 3840x2160)"
+        sub_left = "Decoupled DGC (338.3 FPS, 2.96 ms @ 4K 3840x2160)"
         title_right = "Blender Cycles Reference Render (Crytek Sponza)"
         sub_right = "Ground-Truth Offline Path Tracer (Full Multi-Bounce GI, Denoised)"
     

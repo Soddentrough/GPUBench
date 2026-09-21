@@ -29,7 +29,10 @@ struct ResultData {
   int sortWeight;
   uint32_t width = 0;
   uint32_t height = 0;
+  std::string errorString;
 };
+
+struct ImportedRun;
 
 class ResultFormatter {
 public:
@@ -40,8 +43,17 @@ public:
   void print();
   const std::vector<ResultData>& getResults() const { return results; }
 
+  static void printComparison(const ImportedRun &runA, const ImportedRun &runB);
+  static void printComparison(const std::vector<ImportedRun> &runs);
+
+  static std::string formatNumber(uint64_t n);
+  static std::string formatDouble(double value, int precision);
+
 private:
-  std::string formatNumber(uint64_t n);
-  std::string formatDouble(double value, int precision);
   std::vector<ResultData> results;
 };
+
+double computeResultValue(const ResultData &r);
+std::string cleanWorkloadName(const std::string &rawName, const std::string &subcat);
+std::string getDefaultJsonFilename();
+std::string resultsToJson(const std::vector<ResultData> &results);

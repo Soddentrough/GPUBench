@@ -322,80 +322,84 @@ void RaySchedulingBench::rebuildDGCBounceBatches() {
 std::string RaySchedulingBench::GetConfigName(uint32_t config_idx) const {
   switch (config_idx) {
   case 0:
-    return "Material Shading - Traditional Megakernel";
+    return "Stage: Material Shading (Megakernel)";
   case 1:
-    return "Material Shading - Hardware Reordering (SER)";
+    return "Stage: Material Shading (RTP + SER)";
   case 2:
-    return "Material Shading - Work Lists (DGC)";
+    return "Stage: Material Shading (DGC)";
   case 3:
-    return "Material Shading - Work Graphs";
+    return "Stage: Material Shading (Work Graphs)";
   case 4:
-    return "Full Scene Path Tracing (" + std::to_string(samplesPerPixel) + " SPP) - Traditional Megakernel";
+    return "Path Tracing (" + std::to_string(samplesPerPixel) + " SPP) (Megakernel)";
   case 5:
-    return "Full Scene Path Tracing (" + std::to_string(samplesPerPixel) + " SPP) - Hardware Reordering (SER)";
+    return "Path Tracing (" + std::to_string(samplesPerPixel) + " SPP) (RTP + SER)";
   case 6:
-    return "Full Scene Path Tracing (" + std::to_string(samplesPerPixel) + " SPP) - Work Lists (DGC)";
+    return "Path Tracing (" + std::to_string(samplesPerPixel) + " SPP) (DGC)";
   case 7:
-    return "Full Scene Path Tracing (" + std::to_string(samplesPerPixel) + " SPP) - Work Graphs";
+    return "Path Tracing (" + std::to_string(samplesPerPixel) + " SPP) (Work Graphs)";
   case 8:
-    return "Incoherent Ray Tracing - Traditional Megakernel";
+    return "Incoherent Diffuse GI (Megakernel)";
   case 9:
-    return "Incoherent Ray Tracing - Hardware Reordering (SER)";
+    return "Incoherent Diffuse GI (RTP + SER)";
   case 10:
-    return "Incoherent Ray Tracing - Work Lists (DGC)";
+    return "Incoherent Diffuse GI (DGC)";
   case 11:
-    return "Incoherent Ray Tracing - Work Graphs";
+    return "Incoherent Diffuse GI (Work Graphs)";
   case 12:
-    return "Total Scene Render - Traditional Megakernel";
+    return "Scene Render: Full Frame (Megakernel)";
   case 13:
-    return "Total Scene Render - Hardware Reordering (SER)";
+    return "Scene Render: Full Frame (RTP + SER)";
   case 14:
-    return "Total Scene Render - Work Lists (DGC)";
+    return "Scene Render: Full Frame (DGC)";
   case 15:
-    return "Total Scene Render - Work Graphs";
+    return "Scene Render: Full Frame (Work Graphs)";
   case 16:
-    return "BVH Traversal - Linear 1D Scanline (Baseline)";
+    return "Stage: BVH Traversal - Linear 1D Scanline";
   case 17:
-    return "Queue Compaction - Wave Ballot Stream Sort";
+    return "Stage: Queue Compaction - Wave Ballot Stream Sort";
   case 18:
-    return "BVH Traversal - 2D Screen Tiled (8x4)";
+    return "Stage: BVH Traversal - 2D Screen Tiled (8x4)";
   case 19:
-    return "BVH Traversal - 2D Morton Z-Curve (8x4)";
+    return "Stage: BVH Traversal - 2D Morton Z-Curve (8x4)";
   case 20:
-    return "BVH Traversal - 2D Morton Z-Curve (4x8)";
+    return "Stage: BVH Traversal - 2D Morton Z-Curve (4x8)";
   case 21:
-    return "Full Scene Ray Tracing (PBR) - Megakernel";
+    return "Primary Rays (Megakernel)";
   case 22:
-    return "Full Scene Ray Tracing (PBR) - Work Lists";
+    return "Primary Rays (DGC)";
   case 23:
-    return "Directional Shadows - Traditional Megakernel";
+    return "Stage: Directional Shadows (Megakernel)";
   case 24:
-    return "Directional Shadows - Hardware Reordering (SER)";
+    return "Stage: Directional Shadows (RTP + SER)";
   case 25:
-    return "Directional Shadows - Work Lists (Wavefront Compaction)";
+    return "Stage: Directional Shadows (DGC)";
   case 26:
-    return "Directional Shadows - Work Graphs";
+    return "Stage: Directional Shadows (Work Graphs)";
   case 27:
-    return "Directional Shadows - Multi-Light Directional Binning";
+    return "Stage: Directional Shadows - Multi-Light Directional Binning";
   case 28:
-    return "Full Scene Path Tracing (16 SPP) - Traditional Megakernel";
+    return "Path Tracing (16 SPP) (Megakernel)";
   case 29:
-    return "Full Scene Path Tracing (16 SPP) - Work Lists (DGC)";
+    return "Path Tracing (16 SPP) (DGC)";
   case 30:
-    return "Full Scene Path Tracing (" + std::to_string(samplesPerPixel) + " SPP) - Persistent Wavefront Work Queue";
+    return "Path Tracing (" + std::to_string(samplesPerPixel) + " SPP) - Persistent Wavefront Queue";
   case 31:
-    return "Queue Compaction - Single-Pass Unified Stream";
+    return "Stage: Queue Compaction - Single-Pass Unified Stream";
   case 32:
-    return "Scene Ray Tracing - Alpha-Mask Cutout Traversal Divergence";
+    return "Stage: Traversal Divergence - Alpha Cutout Geometry";
   case 33:
-    return "Queue Memory - VRAM Round-Trip Bandwidth (Wavefront Tax)";
+    return "Stage: Queue Memory - VRAM Round-Trip Bandwidth";
+  case 34:
+    return "Primary Rays (Dedicated RTP)";
+  case 35:
+    return "Primary Rays (RTP + SER)";
   default:
     return "Unknown";
   }
 }
 
 const char *RaySchedulingBench::GetSubCategory(uint32_t config_idx) const {
-  if (config_idx == 21 || config_idx == 22 || config_idx == 32)
+  if (config_idx == 21 || config_idx == 22 || config_idx == 32 || config_idx == 34 || config_idx == 35)
     return "Scene Ray Tracing (PBR)";
   if (config_idx >= 23 && config_idx <= 27)
     return "Directional Shadows";
@@ -428,7 +432,9 @@ std::string RaySchedulingBench::GetConfigCaveat(uint32_t config_idx) const {
 
 int RaySchedulingBench::GetSortWeight(uint32_t config_idx) const {
   if (config_idx == 21 || config_idx == 22) return 620 + static_cast<int>(config_idx - 21); // Scene RT (PBR): 620, 621
-  if (config_idx == 32) return 622;                                                           // Scene RT (Alpha Cutout): 622
+  if (config_idx == 34) return 622;                                                           // Scene RT (PBR) - RTP: 622
+  if (config_idx == 35) return 623;                                                           // Scene RT (PBR) - RTP+SER: 623
+  if (config_idx == 32) return 624;                                                           // Scene RT (Alpha Cutout): 624
   if (config_idx >= 4 && config_idx <= 7) return 625 + static_cast<int>(config_idx - 4);    // Scene Path Tracing: 625..628
   if (config_idx == 30) return 629;                                                           // Scene Path Tracing (Persistent Wavefront): 629
   if (config_idx == 28) return 630;                                                           // Scene Path Tracing 16 SPP Mega: 630
@@ -751,31 +757,85 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
   vContext->setKernelArg(kernelPersistent, 7, texHeaderBuffer);
   vContext->setKernelArg(kernelPersistent, 8, texPixelBuffer);
 
-  // Check hardware SER support
+  // Load RTP Baseline Pipeline
+  try {
+    kernelRTP = vContext->createRTPipeline(
+        (kdir / "vulkan" / "rt_scheduling.rgen").string(),
+        (kdir / "vulkan" / "rt_scheduling.rmiss").string(),
+        {(kdir / "vulkan" / "rt_scheduling.rchit").string()},
+        {}, {}, 8);
+    vContext->setKernelAS(kernelRTP, 0, (AccelerationStructure)sceneTlas);
+    vContext->setKernelArg(kernelRTP, 1, resultBuffer);
+    vContext->setKernelArg(kernelRTP, 2, fbTraditional);
+    vContext->setKernelArg(kernelRTP, 3, vertexBuffer);
+    vContext->setKernelArg(kernelRTP, 4, materialBuffer);
+    vContext->setKernelArg(kernelRTP, 5, triangleMaterialBuffer);
+    vContext->setKernelArg(kernelRTP, 6, texHeaderBuffer);
+    vContext->setKernelArg(kernelRTP, 7, texPixelBuffer);
+  } catch (const std::exception &e) {
+    if (vContext->isVerbose()) {
+      std::cerr << "[RayScheduling] Warning: Failed to create RTP pipeline: " << e.what() << std::endl;
+    }
+    kernelRTP = nullptr;
+  }
+
+  // Check hardware SER support & Load RTP+SER Pipeline
   bool hasSERExt = vContext->isExtensionEnabled("VK_EXT_ray_tracing_invocation_reorder") ||
                    vContext->isExtensionEnabled("VK_NV_ray_tracing_invocation_reorder");
   bool serSupported = vContext->isSERSupported();
-  for (int i = 0; i < 33; ++i) {
+
+  if (serSupported) {
+    try {
+      kernelRTPSER = vContext->createRTPipeline(
+          (kdir / "vulkan" / "rt_scheduling_ser.rgen").string(),
+          (kdir / "vulkan" / "rt_scheduling.rmiss").string(),
+          {(kdir / "vulkan" / "rt_scheduling.rchit").string()},
+          {}, {}, 8);
+      vContext->setKernelAS(kernelRTPSER, 0, (AccelerationStructure)sceneTlas);
+      vContext->setKernelArg(kernelRTPSER, 1, resultBuffer);
+      vContext->setKernelArg(kernelRTPSER, 2, fbTraditional);
+      vContext->setKernelArg(kernelRTPSER, 3, vertexBuffer);
+      vContext->setKernelArg(kernelRTPSER, 4, materialBuffer);
+      vContext->setKernelArg(kernelRTPSER, 5, triangleMaterialBuffer);
+      vContext->setKernelArg(kernelRTPSER, 6, texHeaderBuffer);
+      vContext->setKernelArg(kernelRTPSER, 7, texPixelBuffer);
+    } catch (const std::exception &e) {
+      if (vContext->isVerbose()) {
+        std::cerr << "[RayScheduling] Warning: Failed to create RTP+SER pipeline: " << e.what() << std::endl;
+      }
+      kernelRTPSER = nullptr;
+    }
+  }
+
+  for (int i = 0; i < 36; ++i) {
     unsupportedConfig[i] = false;
     unsupportedReason[i] = "";
   }
-  // SER requires a Ray Tracing Pipeline (raygen with hit objects and reorderThreadEXT).
-  // In this compute-shader based benchmark, SER cannot be dispatched.
-  std::string serReason = !hasSERExt
-      ? "extension VK_EXT_ray_tracing_invocation_reorder missing"
-      : (!serSupported
-          ? "rayTracingInvocationReorder hardware bit not set"
-          : "VK_EXT_ray_tracing_invocation_reorder requires Ray Tracing Pipeline (not supported in compute shaders)");
-  unsupportedConfig[1] = true;
-  unsupportedReason[1] = serReason;
-  unsupportedConfig[5] = true;
-  unsupportedReason[5] = serReason;
-  unsupportedConfig[9] = true;
-  unsupportedReason[9] = serReason;
-  unsupportedConfig[13] = true;
-  unsupportedReason[13] = serReason;
-  unsupportedConfig[24] = true;
-  unsupportedReason[24] = serReason;
+
+  if (!kernelRTP) {
+    unsupportedConfig[34] = true;
+    unsupportedReason[34] = "Vulkan Ray Tracing Pipeline creation failed";
+  }
+
+  if (!kernelRTPSER) {
+    std::string serReason = !hasSERExt
+        ? "extension VK_EXT_ray_tracing_invocation_reorder missing"
+        : (!serSupported
+            ? "rayTracingInvocationReorder hardware bit not set"
+            : "RTP SER pipeline compilation or creation failed");
+    unsupportedConfig[1] = true;
+    unsupportedReason[1] = serReason;
+    unsupportedConfig[5] = true;
+    unsupportedReason[5] = serReason;
+    unsupportedConfig[9] = true;
+    unsupportedReason[9] = serReason;
+    unsupportedConfig[13] = true;
+    unsupportedReason[13] = serReason;
+    unsupportedConfig[24] = true;
+    unsupportedReason[24] = serReason;
+    unsupportedConfig[35] = true;
+    unsupportedReason[35] = serReason;
+  }
 
   // Check Work Graphs support (VK_AMDX_shader_enqueue)
   bool hasWorkGraphsExt = vContext->isExtensionEnabled("VK_AMDX_shader_enqueue") ||
@@ -797,7 +857,7 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
     unsupportedReason[26] = reason;
   }
 
-  // Pre-generate static indirect batches for Work Lists dispatches with specialized PSOs
+  // Pre-generate static indirect batches for Wavefront/DGC dispatches with specialized PSOs
   materialBatches.reserve(8);
   materialBatchesBreakdown.reserve(8);
   for (uint32_t m = 0; m < 8; ++m) {
@@ -1130,11 +1190,15 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     vContext->dispatch(kernelTraditional, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     break;
   }
-  case 1: { // Material Divergence - Traditional + SER
-    // Checked via unsupportedConfig
+  case 1: { // Stage: Material Shading - RTP + Hardware SER
+    if (kernelRTPSER) {
+      PushConstantsTraditional pc{rayCount, 4, 1, seed, 0, renderWidth, renderHeight, 0, sceneTypeVal, isGltfVal, 1u};
+      vContext->setKernelArg(kernelRTPSER, 8, sizeof(pc), &pc);
+      vContext->dispatch(kernelRTPSER, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
+    }
     break;
   }
-  case 2: { // Material Divergence - Work Lists / DGC (Specialized Micro-Kernels, Pure Shading)
+  case 2: { // Material Divergence - Device-Generated Commands (DGC) (Specialized Micro-Kernels, Pure Shading)
     if (isDGCAvailable && isDGCExecutionSetAvailable) {
       vContext->dispatchDGCSequence(kernelMaterialSpecialized[0], dgcInfoSpecialized);
     } else {
@@ -1159,11 +1223,15 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     vContext->dispatch(kernelTraditional, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     break;
   }
-  case 5: { // Multi-Bounce Path Tracing - Traditional + SER
-    // Checked via unsupportedConfig
+  case 5: { // Path Tracing - RTP + Hardware SER
+    if (kernelRTPSER) {
+      PushConstantsTraditional pc{rayCount, 1, 1 + bounceDepth, seed, dumpRenders ? 1u : 0u, renderWidth, renderHeight, 0, sceneTypeVal, isGltfVal, samplesPerPixel};
+      vContext->setKernelArg(kernelRTPSER, 8, sizeof(pc), &pc);
+      vContext->dispatch(kernelRTPSER, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
+    }
     break;
   }
-  case 6: { // Multi-Bounce Path Tracing - Work Lists / DGC (Wavefront Compaction)
+  case 6: { // Multi-Bounce Path Tracing - Device-Generated Commands (DGC) (Wavefront Compaction)
     uint32_t passes = (samplesPerPixel > 1) ? samplesPerPixel : 1u;
     for (uint32_t s = 0; s < passes; ++s) {
       PushConstantsClassify pcClassify{rayCount, 1, s, seed + s * 7919u, dumpRenders ? 1u : 0u, renderWidth, renderHeight, bounceCapacity, 2, sceneTypeVal, isGltfVal, passes};
@@ -1195,11 +1263,15 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     vContext->dispatch(kernelTraditional, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     break;
   }
-  case 9: { // Incoherent Ray Tracing - Traditional + SER
-    // Checked via unsupportedConfig
+  case 9: { // Incoherent Ray Tracing - RTP + Hardware SER
+    if (kernelRTPSER) {
+      PushConstantsTraditional pc{rayCount, 2, 1, seed, 0, renderWidth, renderHeight, 0, sceneTypeVal, isGltfVal, 1u};
+      vContext->setKernelArg(kernelRTPSER, 8, sizeof(pc), &pc);
+      vContext->dispatch(kernelRTPSER, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
+    }
     break;
   }
-  case 10: { // Incoherent Ray Tracing - Work Lists (Directional Binning)
+  case 10: { // Incoherent Ray Tracing - Wavefront Compaction (Directional Binning)
     PushConstantsClassify pcClassify{rayCount, 2, 0, seed, 0, renderWidth, renderHeight, octantCapacity, 1, sceneTypeVal, isGltfVal, 1u};
     vContext->setKernelArg(kernelClassify, 10, sizeof(pcClassify), &pcClassify);
 
@@ -1229,11 +1301,15 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     vContext->dispatch(kernelTraditional, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     break;
   }
-  case 13: { // Primary Ray Tracing - Traditional + SER
-    // Checked via unsupportedConfig
+  case 13: { // Primary Ray Tracing - RTP + Hardware SER
+    if (kernelRTPSER) {
+      PushConstantsTraditional pc{rayCount, 0, 1, seed, dumpRenders ? 1u : 0u, renderWidth, renderHeight, 0, sceneTypeVal, isGltfVal, 1u};
+      vContext->setKernelArg(kernelRTPSER, 8, sizeof(pc), &pc);
+      vContext->dispatch(kernelRTPSER, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
+    }
     break;
   }
-  case 14: { // Primary Ray Tracing - Work Lists (Material Sorting)
+  case 14: { // Primary Ray Tracing - Wavefront Compaction (Material Sorting)
     for (uint32_t m = 0; m < materialBatches.size(); ++m) {
       struct {
         uint32_t materialId;
@@ -1299,7 +1375,7 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     vContext->dispatch(kernelTraditional, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     break;
   }
-  case 22: { // Stage Breakdown - Primary Ray Tracing (2D Morton 8x4, Work Lists)
+  case 22: { // Stage Breakdown - Primary Ray Tracing (2D Morton 8x4, Wavefront DGC)
     PushConstantsClassify pcClassify{rayCount, 0, 0, seed, dumpRenders ? 1u : 0u, renderWidth, renderHeight, materialCapacity, 2, sceneTypeVal, isGltfVal, 1u};
     vContext->setKernelArg(kernelClassify, 10, sizeof(pcClassify), &pcClassify);
 
@@ -1318,11 +1394,15 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     vContext->dispatch(kernelTraditional, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     break;
   }
-  case 24: { // Ray-Traced Shadows - Traditional + SER
-    // Checked via unsupportedConfig
+  case 24: { // Ray-Traced Shadows - RTP + Hardware SER
+    if (kernelRTPSER) {
+      PushConstantsTraditional pc{rayCount, 5, 1, seed, dumpRenders ? 1u : 0u, renderWidth, renderHeight, 0, sceneTypeVal, isGltfVal, 1u};
+      vContext->setKernelArg(kernelRTPSER, 8, sizeof(pc), &pc);
+      vContext->dispatch(kernelRTPSER, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
+    }
     break;
   }
-  case 25: { // Ray-Traced Shadows - Work Lists (Wavefront Compaction + Shadow Micro-Kernel)
+  case 25: { // Ray-Traced Shadows - Wavefront Compaction (Wavefront Compaction + Shadow Micro-Kernel)
     for (uint32_t b = 0; b < shadowBatches.size(); ++b) {
       struct {
         uint32_t queueId;
@@ -1352,7 +1432,7 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     // Checked via unsupportedConfig
     break;
   }
-  case 27: { // Ray-Traced Shadows - Work Lists (Directional Binning, Multi-Light Coherence)
+  case 27: { // Ray-Traced Shadows - Directional Binning (Directional Binning, Multi-Light Coherence)
     for (uint32_t b = 0; b < shadowBinBatches.size(); ++b) {
       struct {
         uint32_t queueId;
@@ -1384,7 +1464,7 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     vContext->dispatch(kernelTraditional, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     break;
   }
-  case 29: { // Full Scene Path Tracing (16 SPP) - Work Lists (DGC)
+  case 29: { // Full Scene Path Tracing (16 SPP) - Device-Generated Commands (DGC)
     for (uint32_t s = 0; s < 16; ++s) {
       PushConstantsClassify pcClassify{rayCount, 1, s, seed + s * 7919u, dumpRenders ? 1u : 0u, renderWidth, renderHeight, bounceCapacity, 2, sceneTypeVal, isGltfVal, 16u};
       vContext->setKernelArg(kernelClassify, 10, sizeof(pcClassify), &pcClassify);
@@ -1438,6 +1518,22 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     PushConstantsClassify pcClassify{rayCount, 6, 0, seed, 0, renderWidth, renderHeight, materialCapacity, 2, sceneTypeVal, isGltfVal, 1u};
     vContext->setKernelArg(kernelClassify, 10, sizeof(pcClassify), &pcClassify);
     vContext->dispatch(kernelClassify, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
+    break;
+  }
+  case 34: { // Scene Ray Tracing (PBR) - Dedicated Ray Tracing Pipeline (RTP)
+    if (kernelRTP) {
+      PushConstantsTraditional pc{rayCount, 0, 1, seed, dumpRenders ? 1u : 0u, renderWidth, renderHeight, 2, sceneTypeVal, isGltfVal, 1u};
+      vContext->setKernelArg(kernelRTP, 8, sizeof(pc), &pc);
+      vContext->dispatch(kernelRTP, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
+    }
+    break;
+  }
+  case 35: { // Scene Ray Tracing (PBR) - RTP + Hardware SER
+    if (kernelRTPSER) {
+      PushConstantsTraditional pc{rayCount, 0, 1, seed, dumpRenders ? 1u : 0u, renderWidth, renderHeight, 2, sceneTypeVal, isGltfVal, 1u};
+      vContext->setKernelArg(kernelRTPSER, 8, sizeof(pc), &pc);
+      vContext->dispatch(kernelRTPSER, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
+    }
     break;
   }
   }
@@ -1754,14 +1850,14 @@ void RaySchedulingBench::performVisualVerification(bool isInteractive) {
   std::cout << "\n\033[1m\033[36m╭─ Ray Scheduling Visual & Analytical Parity: " << sceneTitle << " ─────────────────────────────────────╮\033[0m\n";
   std::cout << "│ \033[1mResolution\033[0m          : " << width << " x " << height << " (" << (width * height) << " rays)\n";
   std::cout << "│ \033[1mMegakernel Render\033[0m   : \033[33m" << tradPng << "\033[0m\n";
-  std::cout << "│ \033[1mWork Lists Render\033[0m   : \033[33m" << workPng << "\033[0m\n";
+  std::cout << "│ \033[1mDGC Render\033[0m          : \033[33m" << workPng << "\033[0m\n";
   std::cout << "│ \033[1mDifference Heatmap\033[0m  : \033[33m" << diffPng << "\033[0m (10x amplified)\n";
   std::cout << "├───────────────────────────────────────────────────────────────────────────────────────────────────┤\n";
   std::cout << "│ \033[1mFull Scene Ray Tracing (PBR) Performance (" << width << "x" << height << "):\033[0m\n";
   std::cout << "│   • Traditional Megakernel : \033[36m" << std::fixed << std::setprecision(2) << mraysTrad
             << " MRays/s\033[0m | \033[32m" << std::setprecision(1) << fpsTrad << " FPS\033[0m ("
             << std::setprecision(2) << frameMsTrad << " ms/frame)\n";
-  std::cout << "│   • Work Lists / DGC       : \033[36m" << std::fixed << std::setprecision(2) << mraysWork
+  std::cout << "│   • DGC                    : \033[36m" << std::fixed << std::setprecision(2) << mraysWork
             << " MRays/s\033[0m | \033[32m" << std::setprecision(1) << fpsWork << " FPS\033[0m ("
             << std::setprecision(2) << frameMsWork << " ms/frame) [\033[1m\033[32m"
             << std::setprecision(2) << speedup << "x speedup\033[0m]\n";
@@ -1826,7 +1922,7 @@ void RaySchedulingBench::performVisualVerification(bool isInteractive) {
       std::cerr << "  - Scene Path Tracing (16 SPP) failed: PSNR=" << pt16Metrics.psnr << " dB, Discrepant=" << pt16Metrics.diffPixels << "\n";
     }
     if (verifyParity) {
-      throw std::runtime_error("Visual parity verification failed: rendered frames between Traditional Megakernel and Work Lists / DGC diverged beyond acceptable threshold (PSNR < 45 dB or discrepancy > 0.01%).");
+      throw std::runtime_error("Visual parity verification failed: rendered frames between Megakernel and DGC diverged beyond acceptable threshold (PSNR < 45 dB or discrepancy > 0.01%).");
     }
   }
 #endif
@@ -2065,6 +2161,14 @@ void RaySchedulingBench::Teardown() {
   if (kernelPersistent) {
     context->releaseKernel(kernelPersistent);
     kernelPersistent = nullptr;
+  }
+  if (kernelRTP) {
+    context->releaseKernel(kernelRTP);
+    kernelRTP = nullptr;
+  }
+  if (kernelRTPSER) {
+    context->releaseKernel(kernelRTPSER);
+    kernelRTPSER = nullptr;
   }
 
   if (resultBuffer) {

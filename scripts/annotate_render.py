@@ -157,7 +157,7 @@ def annotate_image(ppm_path, png_path, profile_path, render_type, annotate=False
 
         # Header Badge
         draw_header_badge(draw, 30, by, 
-                          "Work Lists / DGC (Decoupled)", 
+                          "Vulkan DGC (Decoupled)", 
                           "Subgroup Compaction + Specialized Shaders", 
                           target_info, accent)
 
@@ -202,7 +202,7 @@ def annotate_image(ppm_path, png_path, profile_path, render_type, annotate=False
         # Header Badge
         draw_header_badge(draw, 30, by, 
                           "Visual Parity Heatmap (10x)", 
-                          "Megakernel vs Work Lists Difference Domain", 
+                          "Megakernel vs DGC Difference Domain", 
                           target_info, accent)
 
         # Card 1: PSNR & Error Metrics

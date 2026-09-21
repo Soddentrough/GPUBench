@@ -352,17 +352,17 @@ const char *RayDivergenceBench::GetSubCategory(uint32_t config_idx) const {
 std::string RayDivergenceBench::GetConfigName(uint32_t config_idx) const {
   switch (config_idx) {
   case 0:
-    return "Primary rays (coherent) - 100% Mirror";
+    return "Traversal: Isolated Microbenchmark - 100% Mirror (RTP)";
   case 1:
-    return "Narrow cone dispersion - 75% Coherence";
+    return "Traversal: Isolated Microbenchmark - 75% Coherence (RTP)";
   case 2:
-    return "Medium cone dispersion - 50% Coherence";
+    return "Traversal: Isolated Microbenchmark - 50% Coherence (RTP)";
   case 3:
-    return "Wide cone dispersion - 25% Coherence";
+    return "Traversal: Isolated Microbenchmark - 25% Coherence (RTP)";
   case 4:
-    return "Secondary bounce rays - 0% Diffuse";
+    return "Traversal: Isolated Microbenchmark - 0% Diffuse (RTP)";
   default:
-    return "Coherence Level " + std::to_string(config_idx);
+    return "Traversal: Isolated Microbenchmark - Level " + std::to_string(config_idx);
   }
 }
 

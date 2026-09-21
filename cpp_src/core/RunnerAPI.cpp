@@ -3,6 +3,8 @@
 #include "core/ComputeBackendFactory.h"
 #include <iostream>
 #include <memory>
+#include <mutex>
+#include <map>
 
 std::vector<ResultData> RunBenchmarksAPI(
     const std::vector<std::string>& benchmarks_to_run,
@@ -14,7 +16,8 @@ std::vector<ResultData> RunBenchmarksAPI(
     uint32_t renderHeight,
     std::function<void(const ResultData&)> callback,
     const std::string& scene,
-    uint32_t samples_per_pixel)
+    uint32_t samples_per_pixel,
+    std::atomic<bool>* cancel_token)
 {
     // Never let C++ exceptions cross the cxx FFI boundary into Rust (that
     // would call std::terminate). On error, return an empty result list.
@@ -43,13 +46,26 @@ std::vector<ResultData> RunBenchmarksAPI(
     BenchmarkRunner runner({}, verbose, debug, dump_geometry, dump_renders, scene.empty() ? "all" : scene);
     runner.setResolution(renderWidth, renderHeight);
     runner.setSamplesPerPixel(samples_per_pixel);
+    if (cancel_token) {
+        runner.setCancelToken(cancel_token);
+    }
     if (callback) {
         runner.onResult = callback;
     }
 
     std::vector<uint32_t> target_indices = device_indices;
+    // Only default to GPU 0 if no device was specified AND there are non-host workloads to run
     if (target_indices.empty()) {
-        target_indices.push_back(0);
+        bool hasGpuWorkloads = false;
+        for (const auto& b : benchmarks_to_run) {
+            if (b.find("System Memory") == std::string::npos && b.find("SysMem") == std::string::npos) {
+                hasGpuWorkloads = true;
+                break;
+            }
+        }
+        if (hasGpuWorkloads) {
+            target_indices.push_back(0);
+        }
     }
 
     std::vector<ComputeBackend> target_backends;
@@ -59,7 +75,9 @@ std::vector<ResultData> RunBenchmarksAPI(
     contexts.clear();
 
     for (ComputeBackend backend : target_backends) {
+        if (cancel_token && cancel_token->load()) break;
         for (uint32_t device_idx : target_indices) {
+            if (cancel_token && cancel_token->load()) break;
             std::unique_ptr<IComputeContext> new_context =
                 ComputeBackendFactory::create(backend, verbose, debug);
             if (new_context) {
@@ -71,7 +89,9 @@ std::vector<ResultData> RunBenchmarksAPI(
         }
     }
 
-    runner.runHostBenchmarks(benchmarks_to_run);
+    if (!cancel_token || !cancel_token->load()) {
+        runner.runHostBenchmarks(benchmarks_to_run);
+    }
     return runner.getResults();
     } catch (const std::exception& e) {
         std::cerr << "RunBenchmarksAPI failed: " << e.what() << std::endl;
@@ -273,5 +293,73 @@ std::vector<DeviceProfile> GetDeviceProfilesAPI() {
         std::cerr << "GetDeviceProfilesAPI failed: unknown error" << std::endl;
     }
     return profiles;
+}
+
+std::vector<BenchmarkSupportInfo> ProbeBenchmarkSupportAPI(
+    const std::string& backend_name,
+    uint32_t device_idx)
+{
+    static std::map<std::pair<std::string, uint32_t>, std::vector<BenchmarkSupportInfo>> s_supportCache;
+    static std::mutex s_supportCacheMutex;
+
+    {
+        std::lock_guard<std::mutex> lock(s_supportCacheMutex);
+        auto it = s_supportCache.find({backend_name, device_idx});
+        if (it != s_supportCache.end()) {
+            return it->second;
+        }
+    }
+
+    std::vector<BenchmarkSupportInfo> results;
+    try {
+        ComputeBackend backend = ComputeBackend::Vulkan;
+        if (backend_name == "rocm") backend = ComputeBackend::ROCm;
+        else if (backend_name == "opencl") backend = ComputeBackend::OpenCL;
+
+        if (ComputeBackendFactory::isAvailable(backend)) {
+            auto ctx = ComputeBackendFactory::create(backend, false, false);
+            if (ctx) {
+                const auto& devices = ctx->getDevices();
+                if (device_idx < devices.size()) {
+                    ctx->pickDevice(device_idx);
+                    DeviceInfo info = ctx->getCurrentDeviceInfo();
+                    BenchmarkRunner runner({}, false, false, false, false, "all");
+                    for (const auto& bench : runner.getBenchmarkList()) {
+                        BenchmarkSupportInfo item;
+                        item.id = bench->GetName();
+                        item.isSupported = bench->IsSupported(info, ctx.get());
+                        if (!item.isSupported) {
+                            item.reason = bench->GetSupportNote(info, ctx.get());
+                            switch (bench->GetSupportLimitation(info, ctx.get())) {
+                            case IBenchmark::SupportLimitation::kHardware:
+                                item.limitationCategory = "Hardware Limitation";
+                                break;
+                            case IBenchmark::SupportLimitation::kApi:
+                                item.limitationCategory = "API Limitation";
+                                break;
+                            case IBenchmark::SupportLimitation::kToolchain:
+                                item.limitationCategory = "Toolchain Limitation";
+                                break;
+                            default:
+                                item.limitationCategory = "Unsupported";
+                                break;
+                            }
+                        }
+                        results.push_back(item);
+                    }
+                }
+            }
+        }
+
+        if (!results.empty()) {
+            std::lock_guard<std::mutex> lock(s_supportCacheMutex);
+            s_supportCache[{backend_name, device_idx}] = results;
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "ProbeBenchmarkSupportAPI failed: " << e.what() << std::endl;
+    } catch (...) {
+        std::cerr << "ProbeBenchmarkSupportAPI failed: unknown error" << std::endl;
+    }
+    return results;
 }
 

@@ -1,23 +1,27 @@
-# Architectural Analysis: Ray Tracing Scheduling, Work Lists (DGC), and Megakernels on AMD RDNA 3
+# Architectural Analysis: Ray Tracing Scheduling, Device-Generated Commands (DGC), and Megakernels on AMD RDNA 3
 
 **Author**: GPUBench Technical Architecture Team  
 **Scope**: AMD RDNA 3 Architecture (Navi 3x / GFX1100 / RX 7900 Series), Vulkan 1.4 Ray Query & Compute  
 **Target Codebase**: `cpp_src/benchmarks/RaySchedulingBench.*`, `kernels/vulkan/rt_scheduling_*.comp`  
+
+> [!NOTE]
+> **Vulkan Device-Generated Commands (DGC) vs. DirectX 12 Terminology**:
+> In DirectX 12, GPU-driven dispatch is often associated with early evaluation proposals like "Work Lists". In Vulkan, GPU-driven work creation and indirect dispatch are standardized via **Device-Generated Commands (DGC)** (`VK_EXT_device_generated_commands`) utilizing Indirect Execution Sets (`VkIndirectExecutionSetEXT`) and Indirect Commands Layouts (`VkIndirectCommandsLayoutEXT`), paired with wavefront compaction queues. GPUBench strictly implements the Vulkan DGC specification.
 
 ---
 
 ## 1. Executive Summary & Core Architectural Premise
 
 A previous preliminary observation suggested:
-> *"On RDNA3 (unlike RDNA4 where ray compaction is ~2x faster across all tests), for primary and semi-coherent rays, the overhead of global memory queue atomic writes (atomicAdd) and indirect dispatch slightly exceeds the divergence cost of the monolithic megakernel. Only under heavy divergence (Material Shading) does Work Lists pull ahead by 1.76x."*
+> *"On RDNA3 (unlike RDNA4 where ray compaction is ~2x faster across all tests), for primary and semi-coherent rays, the overhead of global memory queue atomic writes (atomicAdd) and indirect dispatch slightly exceeds the divergence cost of the monolithic megakernel. Only under heavy divergence (Material Shading) does DGC pull ahead by 1.76x."*
 
 **This observation is fundamentally flawed.** 
 
-Device-Generated Commands (DGC), stream compaction, and Work Lists **should not be slower than a monolithic megakernel on AMD RDNA 3**—even for primary and semi-coherent rays. 
+Device-Generated Commands (DGC), stream compaction, and wavefront compaction queues **should not be slower than a monolithic megakernel on AMD RDNA 3**—even for primary and semi-coherent rays. 
 
-When a benchmark or engine implementation shows a monolithic megakernel outperforming a Work List / wavefront-scheduled pipeline on RDNA 3, it is **not** an inherent architectural limitation of the RDNA 3 hardware. Rather, it indicates an **implementation impedance mismatch** where the Work List pipeline introduces avoidable overheads (such as uncompressed global memory round-trips, chiplet fabric transit latency, transfer engine queue clears, multi-wave LDS contention, and Command Processor dispatch serialization) that mask the inherent architectural advantages of wavefront scheduling.
+When a benchmark or engine implementation shows a monolithic megakernel outperforming a DGC / wavefront-scheduled pipeline on RDNA 3, it is **not** an inherent architectural limitation of the RDNA 3 hardware. Rather, it indicates an **implementation impedance mismatch** where the indirect wavefront pipeline introduces avoidable overheads (such as uncompressed global memory round-trips, chiplet fabric transit latency, transfer engine queue clears, multi-wave LDS contention, and Command Processor dispatch serialization) that mask the inherent architectural advantages of wavefront scheduling.
 
-Under proper architectural alignment, Work Lists on RDNA 3 provide superior hardware utilization, drastically lower VGPR pressure, higher wave occupancy, and better cache hit rates across all ray tracing workloads.
+Under proper architectural alignment, DGC and wavefront compaction queues on RDNA 3 provide superior hardware utilization, drastically lower VGPR pressure, higher wave occupancy, and better cache hit rates across all ray tracing workloads.
 
 ---
 
@@ -90,11 +94,11 @@ To understand the interaction between ray scheduling paradigms and the hardware,
 
 ---
 
-## 3. The Theoretical Superiority of Work Lists on RDNA 3
+## 3. The Theoretical Superiority of DGC & Wavefront Queues on RDNA 3
 
-To see why Work Lists / DGC should outperform a megakernel on RDNA 3, consider the fundamental failure modes of a monolithic megakernel:
+To see why DGC and wavefront compaction queues should outperform a megakernel on RDNA 3, consider the fundamental failure modes of a monolithic megakernel:
 
-| Architectural Metric | Monolithic Megakernel | Work Lists / DGC Pipeline |
+| Architectural Metric | Monolithic Megakernel | DGC / Wavefront Compaction Pipeline |
 | :--- | :--- | :--- |
 | **Shader Scope** | Huge monolithic shader (Traversal + Stack + 8+ Materials + Light eval + Noise + ACES tonemapping). | Decomposed micro-kernels: (1) Traversal, (2) Compaction, (3) Specialized Shaders. |
 | **VGPR Allocation** | **Extremely High (96–160+ VGPRs)**. Traversal stack, RNG, hit state, material parameters must stay live across all code. | **Extremely Low (24–40 VGPRs)**. Shaders only need registers for their specific, isolated stage. |
@@ -103,21 +107,21 @@ To see why Work Lists / DGC should outperform a megakernel on RDNA 3, consider t
 | **Ray Accelerator Saturation** | Inactive/diverged lanes in a wave waste Ray Accelerator issue slots. | Fully compacted waves issue 32 active ray queries simultaneously, keeping RAv2 at peak utilization. |
 | **Dual-Issue VOPD Opportunities** | Large register footprint limits register operand pairing needed for VOPD co-issue. | Tight, specialized kernels maximize dual-issue math pairing in shading and lighting loops. |
 
-Given these immense theoretical advantages, why did the benchmark report Work Lists as slower on RDNA 3 for primary rays and incoherent rays?
+Given these immense theoretical advantages, why did the initial benchmark report DGC as slower on RDNA 3 for primary rays and incoherent rays?
 
 ---
 
 ## 4. Root Cause Analysis: Deconstructing the Benchmark Inversion
 
-Detailed profiling of `RaySchedulingBench` reveals **six distinct implementation bottlenecks** that artificially penalized the Work List implementation on RDNA 3:
+Detailed profiling of `RaySchedulingBench` reveals **six distinct implementation bottlenecks** that artificially penalized the decoupled indirect implementation on RDNA 3:
 
 ### 4.1. The Primary Ray Compaction Fallacy (Algorithmic Anti-Pattern)
 - **What the Benchmark Did**:
-  In `case 14` (Primary Ray Tracing - Work Lists), the benchmark launched a classification pass that traced primary camera rays, generated hit records, performed LDS stream compaction, atomically incremented global queue counters, wrote 32-byte records to VRAM, executed a pipeline barrier, and dispatched 8 indirect material kernels.
+  In `case 14` (Primary Rays (DGC)), the benchmark launched a classification pass that traced primary camera rays, generated hit records, performed LDS stream compaction, atomically incremented global queue counters, wrote 32-byte records to VRAM, executed a pipeline barrier, and dispatched 8 indirect material kernels.
 - **The Architectural Flaw**:
   Primary camera rays generated from a 2D viewport grid are **already 100% spatially and directionally coherent**. Neighboring rays in an $8 \times 4$ pixel tile trace virtually identical paths through the top levels of the BVH and hit contiguous geometry.
 - **Why Megakernel Won on Primary Rays**:
-  The monolithic megakernel (`case 12`) performed traversal and simple shading in a single pass, writing directly to the framebuffer without touching global queues. The Work List pipeline introduced:
+  The monolithic megakernel (`case 12`) performed traversal and simple shading in a single pass, writing directly to the framebuffer without touching global queues. The DGC compaction pipeline introduced:
   - 1 classification dispatch
   - Global memory queue writes
   - Global memory queue reads
@@ -147,7 +151,7 @@ Detailed profiling of `RaySchedulingBench` reveals **six distinct implementation
                        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &barrier, ...);
   ```
 - **The Overhead**:
-  Before every single Work List dispatch, the host records two `vkCmdFillBuffer` commands executed by the GPU DMA engine (SDMA) to zero out queue counters and indirect dispatch arguments, followed by a transfer-to-compute barrier.
+  Before every single indirect queue dispatch, the host records two `vkCmdFillBuffer` commands executed by the GPU DMA engine (SDMA) to zero out queue counters and indirect dispatch arguments, followed by a transfer-to-compute barrier.
 - **Microarchitectural Impact**:
   Switching pipeline contexts between the transfer engine and compute queues forces a **pipeline bubble**. The compute units must drain their active waves, wait for the DMA engine to complete, synchronize cache lines, and then resume execution. This barrier stall adds a fixed 20–50 $\mu$s overhead per iteration.
 
@@ -208,9 +212,9 @@ Detailed profiling of `RaySchedulingBench` reveals **six distinct implementation
 
 Despite all the implementation overheads described above, look at what happened in **Material Shading**:
 - **Traditional Megakernel**: $5{,}195.9\text{ MHits/s}$
-- **Work Lists (DGC)**: $\mathbf{14{,}875.5\text{ MHits/s}}$ (**2.86x Faster!**)
+- **DGC**: $\mathbf{14{,}875.5\text{ MHits/s}}$ (**2.86x Faster!**)
 
-### Why Did Work Lists Crush the Megakernel Here?
+### Why Did DGC Crush the Megakernel Here?
 In the Material Shading workload:
 1. The scene features **8 drastically different material types**:
    - Car Paint (dual-specular clearcoat)
@@ -225,18 +229,18 @@ In the Material Shading workload:
    Every Wave32 covering adjacent pixels hit different materials. Because GPUs execute SIMD in lockstep, **a wave must execute all 8 branches sequentially**, masking off lanes that do not belong to that material:
    $$\text{SIMD Efficiency} \approx \frac{1}{8} = 12.5\%$$
    Seven out of eight ALUs sat idle during every cycle of material evaluation.
-3. **In the Work List Pipeline**:
+3. **In the DGC Pipeline**:
    Hits were classified and sorted by material index into compact queues.
    Each specialized indirect dispatch launched **homogeneous Wave32s**: every lane executed the exact same material shader.
    SIMD lane utilization jumped to **100%**, delivering a **2.86x net throughput gain** even after paying the queue overhead!
 
-> **Key Takeaway**: This proves the core architectural theory. When divergence is real, Work Lists dominate RDNA 3. The apparent "slowness" in primary and incoherent tests was caused solely by artificial overhead in the compaction implementation, not the RDNA 3 architecture.
+> **Key Takeaway**: This proves the core architectural theory. When divergence is real, DGC and wavefront compaction dominate RDNA 3. The apparent "slowness" in primary and incoherent tests was caused solely by artificial overhead in the compaction implementation, not the RDNA 3 architecture.
 
 ---
 
-## 6. The Architectural Blueprint: Optimal Work Lists / DGC on RDNA 3
+## 6. The Architectural Blueprint: Optimal DGC & Wavefront Compaction on RDNA 3
 
-To achieve maximum performance across *all* ray tracing workloads on RDNA 3, a Work List / DGC pipeline must be architected according to the following principles:
+To achieve maximum performance across *all* ray tracing workloads on RDNA 3, a DGC / wavefront compaction pipeline must be architected according to the following principles:
 
 ```
 +-----------------------------------------------------------------------------------+
@@ -300,7 +304,7 @@ Ensures 1:1 mapping between workgroups and RDNA 3 hardware Wave32 slots, maximiz
 
 ## 7. RDNA 3 vs. RDNA 4: Why RDNA 4 Masked These Bottlenecks
 
-In our tests on RDNA 4 (GFX1201 / Radeon AI PRO R9700), Work Lists showed an immediate ~2x speedup across *all* tests, including primary rays. Why was RDNA 4 forgiving of these implementation flaws while RDNA 3 exposed them?
+In our tests on RDNA 4 (GFX1201 / Radeon AI PRO R9700), DGC showed an immediate ~2x speedup across *all* tests, including primary rays. Why was RDNA 4 forgiving of these implementation flaws while RDNA 3 exposed them?
 
 | Architectural Feature | AMD RDNA 3 (Navi 31) | AMD RDNA 4 (Navi 48 / GFX1201) |
 | :--- | :--- | :--- |
@@ -319,9 +323,9 @@ On RDNA 4, the monolithic die and higher bandwidth masked the memory traffic of 
 1. **The Inversion was an Artifact of Implementation, Not Hardware**:
    The claim that RDNA 3's atomic and indirect dispatch overhead exceeds megakernel divergence cost is **incorrect**. The performance deficit observed on primary and semi-coherent rays was caused by uncompressed global memory queues, DMA buffer clear bubbles, multi-wave LDS bank conflicts, uncoalesced VRAM stores, and primary ray compaction redundancy.
 2. **Primary Rays Should Never Be Compacted**:
-   Primary rays are already coherent. Applying Work Lists to primary ray traversal is an architectural anti-pattern. Work Lists should begin *after* the primary hit, sorting rays by hit material or secondary bounce direction.
+   Primary rays are already coherent. Applying stream compaction to primary ray traversal is an architectural anti-pattern. Wavefront compaction queues should begin *after* the primary hit, sorting rays by hit material or secondary bounce direction.
 3. **Material Divergence Demonstrates True Potential**:
-   When divergence actually exists (as in Material Shading), Work Lists outperformed the monolithic megakernel by up to **1.89x (9,849.7 vs 5,122.8 MHits/s)** on RDNA 3, proving that wavefront compaction is massively beneficial to RDNA 3 execution units.
+   When divergence actually exists (as in Material Shading), DGC outperformed the monolithic megakernel by up to **1.89x (9,849.7 vs 5,122.8 MHits/s)** on RDNA 3, proving that wavefront compaction is massively beneficial to RDNA 3 execution units.
 4. **Secondary Traversal Coherence is Proven**:
    In isolation, coherent octant-binned secondary ray traversal achieved **4,557 MRays/s (1.82 ms)** vs the Megakernel's **3,822 MRays/s (2.17 ms)**—a **1.19x speedup** directly attributable to the elimination of intra-wave SIMD branch divergence.
 
@@ -367,19 +371,19 @@ During deep optimization of `RaySchedulingBench` on an AMD Radeon RX 7900 XTX (N
 - **Hypothesis**: Grouping secondary rays into octants eliminates SIMD divergence during BVH traversal.
 - **Empirical Measurement**:
   - Traditional Megakernel secondary traversal: **2.17 ms** (3,822 MRays/s).
-  - Work Lists consolidated octant traversal (`bounce.comp`): **1.82 ms** (4,557 MRays/s).
+  - DGC consolidated octant traversal (`bounce.comp`): **1.82 ms** (4,557 MRays/s).
 - **Outcome**: **1.19x faster BVH traversal** in isolation, proving that directional binning produces substantial ray traversal coherence on AMD RDNA 3 hardware.
 
 ---
 
-### 9.2. Empirical Benchmark Matrix: Megakernel vs. Work Lists (AMD Radeon RX 7900 XTX)
+### 9.2. Empirical Benchmark Matrix: Megakernel vs. DGC (AMD Radeon RX 7900 XTX)
 
 Following the removal of user LDS from RT shaders, native 8x4 Wave32 mapping, and the implementation of 8 production AAA BSDF archetypes, benchmarks were executed across all three scenarios at 1080p and 4K resolutions:
 
 #### Scenario 1: Showroom Studio (`toycar.glb`)
 *Automotive studio with high material divergence: clearcoat paint, glass windshields, velvet upholstery, metallic rims, rubber tires.*
 
-| Metric | Resolution | Megakernel | Work Lists (DGC) | Speedup | Parity (PSNR) |
+| Metric | Resolution | Megakernel | DGC | Speedup | Parity (PSNR) |
 |:---|:---:|:---:|:---:|:---:|:---:|
 | **Total Scene Render** | **1080p** | 3,891.41 MRays/s | **5,179.62 MRays/s** | **+33.1% (1.33x)** | **95.21 dB (99.99%)** |
 | **Material Shading** | 1080p | 6,902.40 MHits/s | **29,315.12 MHits/s** | **+324.7% (4.25x)** | — |
@@ -395,7 +399,7 @@ Following the removal of user LDS from RT shaders, native 8x4 Wave32 mapping, an
 #### Scenario 2: Indoor Atrium (`sponza.glb`)
 *Complex interior architectural geometry with columns, banners, stone floors, and foliage cutouts.*
 
-| Metric | Resolution | Megakernel | Work Lists (DGC) | Speedup | Parity (PSNR) |
+| Metric | Resolution | Megakernel | DGC | Speedup | Parity (PSNR) |
 |:---|:---:|:---:|:---:|:---:|:---:|
 | **Total Scene Render** | **1080p** | 1,760.54 MRays/s | **2,064.44 MRays/s** | **+17.3% (1.17x)** | **111.30 dB (100% exact)** |
 | **Material Shading** | 1080p | 8,118.54 MHits/s | **14,691.02 MHits/s** | **+80.9% (1.81x)** | — |
@@ -411,7 +415,7 @@ Following the removal of user LDS from RT shaders, native 8x4 Wave32 mapping, an
 #### Scenario 3: Outdoor Landscape (Procedural Terrain & Foliage)
 *Vast outdoor terrain with dense foliage cutouts, procedural rocks, water, and directional sunlight.*
 
-| Metric | Resolution | Megakernel | Work Lists (DGC) | Speedup | Parity (PSNR) |
+| Metric | Resolution | Megakernel | DGC | Speedup | Parity (PSNR) |
 |:---|:---:|:---:|:---:|:---:|:---:|
 | **Total Scene Render** | **1080p** | 3,342.44 MRays/s | **3,943.88 MRays/s** | **+18.0% (1.18x)** | **120.00 dB (100% exact)** |
 | **Material Shading** | 1080p | 10,034.22 MHits/s | **12,058.33 MHits/s** | **+20.2% (1.20x)** | — |
@@ -460,18 +464,18 @@ Following the removal of user LDS from RT shaders, native 8x4 Wave32 mapping, an
 
 ## 11. Addendum: Architectural Synthesis & Divergence Trade-Off Analysis
 
-An earlier revision observed the Traditional Megakernel outperforming Work Lists (~11.8–13.4 GHits/s vs. ~4.8–6.4 GHits/s) in the `Material Shading` benchmark on the RX 7900 XTX and prematurely concluded that *"Megakernels absorb divergence elegantly on RDNA 3."*
+An earlier revision observed the Traditional Megakernel outperforming DGC (~11.8–13.4 GHits/s vs. ~4.8–6.4 GHits/s) in the `Material Shading` benchmark on the RX 7900 XTX and prematurely concluded that *"Megakernels absorb divergence elegantly on RDNA 3."*
 
 Subsequent source-level profiling and low-level disassembly disproved that conclusion, uncovering a critical benchmark parity flaw and clarifying the true microarchitectural trade-offs:
 
 ### 11.1. Root Cause: The glTF Material Shading Benchmark Disparity
 In the `sponza.glb` (Indoor Atrium) scene, the two implementations were executing entirely disparate workloads:
 - **Traditional Megakernel** (`rt_scheduling_traditional.comp`): Mode 4 explicitly called `evaluateGltfPbr(..., false)` with `enableShadows = false`. It used dummy registers, bypassing all vertex buffer reads, normal map texture sampling, and secondary ray query traversals. It was purely measuring isolated ALU arithmetic.
-- **Work Lists (DGC)** (`rt_scheduling_worklist_material.comp`): Mode 4 called `evaluateGltfPbr(...)` without specifying the shadow flag, defaulting to `enableShadows = true`. For every ray, it fetched 36 floats of vertex data from VRAM, unpacked barycentrics, sampled PBR textures, and **launched a full hardware ray query BVH traversal (`traceShadowRay`) across all 262,267 triangles in Sponza**.
+- **DGC** (`rt_scheduling_worklist_material.comp`): Mode 4 called `evaluateGltfPbr(...)` without specifying the shadow flag, defaulting to `enableShadows = true`. For every ray, it fetched 36 floats of vertex data from VRAM, unpacked barycentrics, sampled PBR textures, and **launched a full hardware ray query BVH traversal (`traceShadowRay`) across all 262,267 triangles in Sponza**.
 
 When benchmarked under true apples-to-apples workloads without shadow disparities:
-- **Procedural Showroom Studio** (8 heterogeneous BSDF archetypes): Work Lists delivers **29,315.12 MHits/s** vs. Megakernel's **6,902.40 MHits/s** (**4.25x speedup** on RX 7900 XTX at 1080p, scaling to **4.68x** at 4K).
-- **Procedural Indoor Atrium** (on RDNA 4 / R9700): Work Lists achieves **16,414.84 MHits/s** vs. Megakernel's **3,422.78 MHits/s** (**4.80x speedup**).
+- **Procedural Showroom Studio** (8 heterogeneous BSDF archetypes): DGC delivers **29,315.12 MHits/s** vs. Megakernel's **6,902.40 MHits/s** (**4.25x speedup** on RX 7900 XTX at 1080p, scaling to **4.68x** at 4K).
+- **Procedural Indoor Atrium** (on RDNA 4 / R9700): DGC achieves **16,414.84 MHits/s** vs. Megakernel's **3,422.78 MHits/s** (**4.80x speedup**).
 
 ### 11.2. The Resolution of the Total Scene Render Deficit
 In earlier tests, the Megakernel appeared to win or tie in **Total Scene Render** (2,184 vs. 1,909 MRays/s) and **Directional Shadows** (3,192 vs. 2,302 MRays/s). Detailed hardware profiling identified two root causes:
@@ -485,7 +489,7 @@ Once both issues were resolved:
 With realistic material diversity and zero-LDS stream compaction:
 $$\text{ALU Cycles Saved by Compaction} \gg \text{VRAM Payload Round-Trip} + \text{Atomic Contention} + \text{Pipeline Barriers} + \text{CP Dispatch Overhead}$$
 
-Work Lists decisively outperformed the Megakernel across all metrics on the RX 7900 XTX:
+DGC decisively outperformed the Megakernel across all metrics on the RX 7900 XTX:
 - **Total Scene Render**: **1.05x to 1.33x faster** (up to 5,651 vs. 4,464 MRays/s at 4K).
 - **Material Shading**: **1.68x to 4.68x faster** (up to 34,128 vs. 7,286 MHits/s at 4K).
 - **Path Tracing**: **1.20x to 1.43x faster** (up to 2,988 vs. 2,192 MRays/s at 4K).
@@ -498,13 +502,13 @@ Work Lists decisively outperformed the Megakernel across all metrics on the RX 7
 
 ### 11.4. Production Best Practices & Architectural Guidance
 1. **Never Compact Primary Rays Before First Hit**: Primary camera rays are already spatially and directionally coherent; compacting them prior to first hit is an algorithmic anti-pattern.
-2. **Apply Work Lists After Hit for Material & Secondary Bounce Compaction**: When scenes feature realistic multi-material diversity (8+ BSDF archetypes) or secondary divergent bounces (diffuse GI, path tracing), Work Lists delivers massive speedups (+5% to +33% total frame render, +325% to +368% material shading).
+2. **Apply DGC Wavefront Compaction After Hit for Material & Secondary Bounces**: When scenes feature realistic multi-material diversity (8+ BSDF archetypes) or secondary divergent bounces (diffuse GI, path tracing), DGC delivers massive speedups (+5% to +33% total frame render, +325% to +368% material shading).
 3. **Zero LDS in RT Shaders**: Never allocate LDS or insert workgroup barriers in ray traversal or stream compaction shaders. Rely strictly on subgroup ballot intrinsics and leader atomics to maintain maximum WGP wave residency.
 4. **Quantize Payloads Aggressively**: Keep ray records $\le 16\text{ bytes}$ (packed octahedral directions, half-float positions) to fit within on-chip caches and avoid DRAM round-trips.
 
 ---
 
-## 12. Addendum: Resolving Cross-CU Atomic Contention & Validating Vendor-Neutral Work Lists
+## 12. Addendum: Resolving Cross-CU Atomic Contention & Validating Vendor-Neutral Wavefront Compaction Queues
 
 In previous investigations on 96-CU hardware (such as the RX 7900 XTX), an experimental rewrite attempted to expand payloads to 48 bytes (to avoid geometry refetches) and use an SoA layout loop. That experiment caused severe regressions (falling to ~5.9 GHits/s), leading to the premature hypothesis that cross-CU atomic contention on 8 queues was an inescapable hardware wall requiring vendor-specific code branching.
 

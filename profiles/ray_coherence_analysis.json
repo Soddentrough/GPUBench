@@ -39,7 +39,7 @@
         "unit": "MRays/s"
       },
       "worklist": {
-        "name": "Work Lists (Material Sorting)",
+        "name": "DGC (Material Sorting)",
         "c_dir": 0.9994,
         "d_trav": 0.18,
         "m_div": 0.0,
@@ -66,7 +66,7 @@
         "unit": "MHits/s"
       },
       "worklist": {
-        "name": "Work Lists (Material Sorting)",
+        "name": "DGC (Material Sorting)",
         "c_dir": 0.9994,
         "d_trav": 0.0,
         "m_div": 0.0,
@@ -93,7 +93,7 @@
         "unit": "MRays/s"
       },
       "worklist": {
-        "name": "Work Lists (Directional Binning / Octants)",
+        "name": "DGC (Directional Binning / Octants)",
         "c_dir": 0.864,
         "d_trav": 0.38,
         "m_div": 0.22,
@@ -120,7 +120,7 @@
         "unit": "MRays/s (9.9 FPS)"
       },
       "worklist": {
-        "name": "Work Lists (Wavefront Compaction)",
+        "name": "DGC (Wavefront Compaction)",
         "c_dir": 0.44,
         "d_trav": 0.42,
         "m_div": 0.35,

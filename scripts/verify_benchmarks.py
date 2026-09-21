@@ -5,7 +5,7 @@ GPUBench Automated Benchmark Verification & Regression Detection Suite
 Validates benchmark results against:
 1. Published theoretical hardware specs and baseline expected ranges.
 2. Cross-backend parity (OpenCL, ROCm, Vulkan within ~±10%).
-3. Logical invariants (e.g. Work Lists > Megakernel in ray tracing).
+3. Logical invariants (e.g. DGC > Megakernel in ray tracing).
 """
 
 import sys
@@ -352,70 +352,70 @@ def evaluate_results(raw_data: Any) -> bool:
 
         print(f"{name:<24} {', '.join(backends):<22} {diff_str:<16} {status}")
 
-    # 3. Check Logical Invariants (e.g. Work Lists > Megakernel)
+    # 3. Check Logical Invariants (e.g. DGC > Megakernel)
     if rt_scheduling:
         print(f"\n{Colors.BOLD}3. Logical Invariant Checks (Ray Tracing Scheduling):{Colors.RESET}")
-        print(f"{'Workload Scenario':<32} {'Megakernel':<15} {'Work Lists':<15} {'Speedup':<12} {'Status'}")
+        print(f"{'Workload Scenario':<32} {'Megakernel':<15} {'DGC':<15} {'Speedup':<12} {'Status'}")
         print("-" * 80)
 
         scenarios = [
             ("Scene Ray Tracing (PBR)",
-             ["Full Scene Ray Tracing (PBR) - Megakernel", "Full Scene Render - Megakernel", "Full Scene Render: Megakernel", "Total Scene Render - Traditional Megakernel", "Primary Ray Tracing - Traditional Megakernel", "Primary Rays (Traditional)", "Total Scene Render (Megakernel)"],
-             ["Full Scene Ray Tracing (PBR) - Work Lists", "Full Scene Render - Work Lists", "Full Scene Render: Work Lists", "Total Scene Render - Work Lists", "Primary Ray Tracing - Work Lists", "Primary Rays (Work Lists)", "Total Scene Render (Work Lists)"]),
+             ["Full Scene Ray Tracing (PBR) - Megakernel", "Full Scene Render - Megakernel", "Full Scene Render: Megakernel", "Total Scene Render - Traditional Megakernel", "Primary Ray Tracing - Traditional Megakernel", "Primary Rays (Traditional)", "Primary Rays (Megakernel)", "Total Scene Render (Megakernel)"],
+             ["Primary Rays (DGC)", "Full Scene Ray Tracing (PBR) - DGC", "Full Scene Ray Tracing (PBR) - Device-Generated Commands", "Full Scene Render - DGC", "Total Scene Render - DGC", "Full Scene Ray Tracing (PBR) - Work Lists", "Primary Rays (Work Lists)", "Total Scene Render (Work Lists)"]),
             ("Material Shading",
-             ["Material Shading - Traditional Megakernel", "Material Shading (Traditional)"],
-             ["Material Shading - Work Lists", "Material Shading (Work Lists)"]),
+             ["Material Shading (Megakernel)", "Material (Megakernel)", "Material Shading - Traditional Megakernel", "Material Shading (Traditional)"],
+             ["Material Shading (DGC)", "Material (DGC)", "Material Shading - DGC", "Material Shading - Work Lists", "Material Shading (Work Lists)"]),
             ("Incoherent Ray Tracing",
-             ["Incoherent Ray Tracing - Traditional Megakernel", "Incoherent Rays (Traditional)"],
-             ["Incoherent Ray Tracing - Work Lists", "Incoherent Rays (Work Lists)"]),
+             ["Incoherent Diffuse GI (Megakernel)", "Incoherent Rays (Megakernel)", "Incoherent Ray Tracing - Traditional Megakernel", "Incoherent Rays (Traditional)"],
+             ["Incoherent Diffuse GI (DGC)", "Incoherent Rays (DGC)", "Incoherent Ray Tracing - DGC", "Incoherent Ray Tracing - Work Lists", "Incoherent Rays (Work Lists)"]),
             ("Scene Path Tracing (1 SPP)",
-             ["Full Scene Path Tracing (1 SPP) - Traditional Megakernel", "Full Scene Path Tracing - Traditional Megakernel", "Path Tracing - Traditional Megakernel", "Path Tracing (Traditional)"],
-             ["Full Scene Path Tracing (1 SPP) - Work Lists", "Full Scene Path Tracing - Work Lists", "Path Tracing - Work Lists", "Path Tracing (Work Lists)"]),
+             ["Path Tracing (1 SPP) (Megakernel)", "Full Scene Path Tracing (1 SPP) - Traditional Megakernel", "Path Tracing (Traditional)"],
+             ["Path Tracing (1 SPP) (DGC)", "Full Scene Path Tracing (1 SPP) (DGC)", "Full Scene Path Tracing (1 SPP) - DGC", "Full Scene Path Tracing (1 SPP) - Work Lists"]),
             ("Scene Path Tracing (16 SPP)",
-             ["Full Scene Path Tracing (16 SPP) - Traditional Megakernel", "Path Tracing (16 SPP) - Traditional"],
-             ["Full Scene Path Tracing (16 SPP) - Work Lists", "Path Tracing (16 SPP) - Work Lists"]),
+             ["Path Tracing (16 SPP) (Megakernel)", "Full Scene Path Tracing (16 SPP) - Traditional Megakernel", "Bounce Rays 16 SPP (Megakernel)"],
+             ["Path Tracing (16 SPP) (DGC)", "Full Scene Path Tracing (16 SPP) (DGC)", "Bounce Rays 16 SPP (DGC)", "Full Scene Path Tracing (16 SPP) - Work Lists"]),
             ("Directional Shadows",
-             ["Directional Shadows - Traditional Megakernel"],
-             ["Directional Shadows - Work Lists (Wavefront Compaction)"]),
+             ["Shadows (Megakernel)", "Directional Shadows (Megakernel)", "Directional Shadows - Traditional Megakernel"],
+             ["Shadows (DGC)", "Directional Shadows (DGC)", "Directional Shadows - DGC", "Directional Shadows - Work Lists (Wavefront Compaction)"]),
         ]
 
-        for sc_name, mega_keys, wl_keys in scenarios:
+        for sc_name, mega_keys, dgc_keys in scenarios:
             mega_val = None
-            wl_val = None
+            dgc_val = None
             for k, v in rt_scheduling.items():
                 for mk in mega_keys:
                     if mk in k:
                         mega_val = v
                         break
-                for wk in wl_keys:
-                    if wk in k:
-                        wl_val = v
+                for dk in dgc_keys:
+                    if dk in k:
+                        dgc_val = v
                         break
 
-            if mega_val is not None and wl_val is not None:
-                speedup = (wl_val / mega_val) if mega_val > 0 else 0.0
+            if mega_val is not None and dgc_val is not None:
+                speedup = (dgc_val / mega_val) if mega_val > 0 else 0.0
                 sp_str = f"{speedup:.2f}x"
                 if sc_name in ("Scene Ray Tracing (PBR)", "Total Scene Render", "Primary Ray Tracing"):
                     if speedup >= 1.05:
                         st = f"{Colors.GREEN}PASS (Faster){Colors.RESET}"
                     elif speedup >= 0.75:
                         st = f"{Colors.YELLOW}WARN (Within tolerance / monolithic single-pass){Colors.RESET}"
-                        warnings.append(f"Work Lists achieved {speedup:.2f}x of Megakernel for {sc_name} (coherent primary rays)")
+                        warnings.append(f"DGC achieved {speedup:.2f}x of Megakernel for {sc_name} (coherent primary rays)")
                     else:
                         st = f"{Colors.RED}FAIL (Slower than Megakernel!){Colors.RESET}"
                         all_passed = False
-                        regressions.append(f"Work Lists is SLOWER than Megakernel ({speedup:.2f}x) for {sc_name}")
+                        regressions.append(f"DGC is SLOWER than Megakernel ({speedup:.2f}x) for {sc_name}")
                 else:
                     if speedup >= 1.10:
                         st = f"{Colors.GREEN}PASS (Faster){Colors.RESET}"
                     elif speedup >= 1.0:
                         st = f"{Colors.YELLOW}WARN (Marginal){Colors.RESET}"
-                        warnings.append(f"Work Lists was only {speedup:.2f}x of Megakernel for {sc_name}")
+                        warnings.append(f"DGC was only {speedup:.2f}x of Megakernel for {sc_name}")
                     else:
                         st = f"{Colors.RED}FAIL (Slower than Megakernel!){Colors.RESET}"
                         all_passed = False
-                        regressions.append(f"Work Lists is SLOWER than Megakernel ({speedup:.2f}x) for {sc_name}")
-                print(f"{sc_name:<32} {mega_val:.1f} {'':<8} {wl_val:.1f} {'':<8} {sp_str:<12} {st}")
+                        regressions.append(f"DGC is SLOWER than Megakernel ({speedup:.2f}x) for {sc_name}")
+                print(f"{sc_name:<32} {mega_val:.1f} {'':<8} {dgc_val:.1f} {'':<8} {sp_str:<12} {st}")
     # 4. Check Unsupported Benchmark Diagnostic Explanations
     unsupported_items = [item for item in data if item.get("unsupported", False)]
     if unsupported_items:

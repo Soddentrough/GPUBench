@@ -9,7 +9,7 @@ GPUBench is a high-performance cross-platform GPU benchmarking tool designed to 
 
 - **Multi-Backend Support**: Benchmarks using Vulkan, OpenCL, and ROCm/HIP.
 - **Hardware Ray Tracing Suite**:
-  - **Ray Scheduling Architectures**: Megakernel vs. Hardware Shader Execution Reordering (SER) vs. Work Lists / Device-Generated Commands (DGC) vs. Autonomous Work Graphs (`VK_AMDX_shader_enqueue`).
+  - **Ray Scheduling Architectures**: Megakernel vs. Hardware Shader Execution Reordering (SER) vs. Device-Generated Commands (DGC) vs. Autonomous Work Graphs (`VK_AMDX_shader_enqueue`).
   - **Real-World Material Divergence**: Realistic heterogeneous material distributions testing VGPR allocation pressure and SIMD wave divergence.
   - **Spatial Ray Divergence**: Parametric cone divergence measuring BVH traversal cache hit rates.
   - **Multi-Layer Alpha Testing**: AnyHit alpha evaluation through 16 stacked cutout planes.
@@ -125,7 +125,7 @@ $ gpubench -d 1
   │ Workload                                     │ Backend  │             Throughput │ Details / Speedup                         │
   ├──────────────────────────────────────────────┼──────────┼────────────────────────┼───────────────────────────────────────────┤
   │ Megakernel                                   │ Vulkan   │         207.34 MRays/s │ [Baseline] [25.0 FPS]                     │
-  │ Work Lists                                   │ Vulkan   │         558.19 MRays/s │ └──> 2.69x (+169.2%) [67.3 FPS]           │
+  │ DGC                                          │ Vulkan   │         558.19 MRays/s │ └──> 2.69x (+169.2%) [67.3 FPS]           │
   ╰──────────────────────────────────────────────┴──────────┴────────────────────────┴───────────────────────────────────────────╯
 
   ╭─ Executive Performance Summary & Architectural Takeaways ────────────────────────────────────────────────────────────────────╮
@@ -147,14 +147,14 @@ GPUBench evaluates how different GPU hardware architectures handle these workloa
 
 1. **Traditional Megakernel**: Traces rays and evaluates all hit shading in a single massive compute pass. Suffering from the "convoy effect," a single complex material forces all lanes to allocate worst-case VGPRs and serializes execution over divergent SIMD branches.
 2. **Traditional + SER (Shader Execution Reordering)**: Leverages hardware reordering (`VK_KHR_ray_tracing_reorder` / NV SER) to dynamically regroup divergent lanes by spatial direction and material hit ID before executing hit shaders.
-3. **Work Lists / DGC (Wavefront Compaction)**: Compacts divergent hits into categorized material queues via atomic work lists and dispatches uniform waves using indirect command generation (`vkCmdDispatchIndirect`).
+3. **Device-Generated Commands (DGC / Wavefront Compaction)**: Compacts divergent hits into categorized material queues via ballot/atomic compaction and dispatches uniform waves using GPU-driven command generation (`VK_EXT_device_generated_commands`).
 4. **Work Graphs (Autonomous Node Enqueue)**: Uses GPU-autonomous execution graph pipelines (`VK_AMDX_shader_enqueue`) to dynamically enqueue child nodes without host or CPU round-trips.
 
 #### Four-Scenario Benchmarking Morphology
-- **Showroom Studio (`-s showroom`)**: $108,936$ triangles featuring the Khronos ToyCar glTF asset with clearcoat, decals, and velvet pedestal. Work Lists achieve **101.3 FPS** vs. Megakernel **57.6 FPS** (**1.76x speedup**).
-- **Complex Indoor Atrium (`-s indoor`)**: $262,267$ triangles featuring Crytek Sponza glTF with 25 PBR materials and 0% sky escape. Work Lists achieve **68.0 FPS** vs. Megakernel **30.5 FPS** (**2.23x speedup**).
-- **Open-World Outdoor Landscape (`-s outdoor`)**: $57,216$ triangles spanning $>2000\text{m}$ alpine terrain, lake, conifer foliage, and Rayleigh-Mie atmospheric scattering. Work Lists achieve **420.0 FPS** vs. Megakernel **185.8 FPS** (**2.26x speedup**).
-- **Open-World Forest (`-s forest`)**: $1,001,280$ triangles featuring high-density 512×512 terrain, river bathymetry, 850 trees, and 8 nature PBR shaders. Work Lists achieve **55.0 FPS** vs. Megakernel **27.0 FPS** (**2.04x speedup**).
+- **Showroom Studio (`-s showroom`)**: $108,936$ triangles featuring the Khronos ToyCar glTF asset with clearcoat, decals, and velvet pedestal. Device-Generated Commands (DGC) achieve **101.3 FPS** vs. Megakernel **57.6 FPS** (**1.76x speedup**).
+- **Complex Indoor Atrium (`-s indoor`)**: $262,267$ triangles featuring Crytek Sponza glTF with 25 PBR materials and 0% sky escape. Device-Generated Commands (DGC) achieve **68.0 FPS** vs. Megakernel **30.5 FPS** (**2.23x speedup**).
+- **Open-World Outdoor Landscape (`-s outdoor`)**: $57,216$ triangles spanning $>2000\text{m}$ alpine terrain, lake, conifer foliage, and Rayleigh-Mie atmospheric scattering. Device-Generated Commands (DGC) achieve **420.0 FPS** vs. Megakernel **185.8 FPS** (**2.26x speedup**).
+- **Open-World Forest (`-s forest`)**: $1,001,280$ triangles featuring high-density 512×512 terrain, river bathymetry, 850 trees, and 8 nature PBR shaders. Device-Generated Commands (DGC) achieve **55.0 FPS** vs. Megakernel **27.0 FPS** (**2.04x speedup**).
 - **100% Bit-Exact Analytical Parity**: Verified bit-exact 120.00 dB PSNR, 0.000000 MAE, and 0 discrepant pixels across all 8,294,400 pixels at 4K UHD across all four scenarios.
 
 ---
@@ -233,7 +233,7 @@ gpubench -d 1 -b rayscheduling -s all
 # Dump 4K UHD PPM/PNG render buffers, diff heatmaps, and 4-scenario comparative grid
 gpubench -d 1 -b rayscheduling -s all --dump-renders
 
-# Run specific config (e.g. Config 21: Megakernel, Config 22: Work Lists) in profiling snapshot mode
+# Run specific config (e.g. Config 21: Primary Rays (Megakernel), Config 22: Primary Rays (DGC)) in profiling snapshot mode
 gpubench -d 1 -b rayscheduling -s forest -c 22 --profile-snapshot
 
 # Export machine-readable results to JSON

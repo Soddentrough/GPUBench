@@ -1,5 +1,5 @@
 // GPUBench Industry-Standard PBR Shading Pipeline (8 Production AAA BSDF Archetypes)
-// Shared identically across Traditional Megakernel and Work Lists / DGC pathways.
+// Shared identically across Traditional Megakernel and DGC pathways.
 
 struct GltfVertexGpu {
     float px, py, pz;

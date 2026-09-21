@@ -6,6 +6,7 @@
 #include <memory>
 #include <vector>
 #include <functional>
+#include <atomic>
 
 struct BenchmarkGroupInfo {
   std::string name;
@@ -20,7 +21,7 @@ public:
   BenchmarkRunner(const std::vector<IComputeContext *> &contexts,
                   bool verbose = false, bool debug = false,
                   bool dumpGeometry = false, bool dumpRenders = false,
-                  const std::string &scene = "indoor");
+                  const std::string &scene = "all");
   ~BenchmarkRunner();
 
   void run(const std::vector<std::string> &benchmarks_to_run);
@@ -28,6 +29,9 @@ public:
   void runHostBenchmarks(const std::vector<std::string> &benchmarks_to_run);
   void printReport();
   void initRunConfig(const std::vector<std::string> &benchmarks_to_run);
+
+  void setCancelToken(std::atomic<bool> *token) { cancelToken = token; }
+  std::atomic<bool> *getCancelToken() const { return cancelToken; }
 
   std::function<void(const ResultData&)> onResult;
 
@@ -70,6 +74,8 @@ public:
   bool getVerifyParity() const { return verifyParity; }
   bool hasParityFailure() const { return parityFailure; }
 
+  const std::vector<std::unique_ptr<IBenchmark>>& getBenchmarkList() const { return benchmarks; }
+
 private:
   void discoverBenchmarks();
   void printBanner();
@@ -89,11 +95,12 @@ private:
   bool dumpRenders;
   bool verifyParity = false;
   bool parityFailure = false;
-  std::string sceneName = "indoor";
+  std::string sceneName = "all";
   uint32_t renderWidth = 0;
   uint32_t renderHeight = 0;
   uint32_t bounceDepth = 2;
   uint32_t samplesPerPixel = 1;
   int targetConfig = -1;
   bool profileSnapshot = false;
+  std::atomic<bool> *cancelToken = nullptr;
 };

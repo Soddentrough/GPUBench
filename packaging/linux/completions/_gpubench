@@ -17,14 +17,15 @@ _gpubench() {
         '--debug[Enable debug logging]'
         '--dump-geometry[Dump ray tracing geometry to OBJ files]'
         '(--dump --dump-renders)'{--dump,--dump-renders}'[Dump and compare rendered frames]'
-        '(-s --scene)'{-s,--scene}'[Ray tracing benchmark scenario]:scene:(showroom indoor outdoor all)'
+        '(-s --scene)'{-s,--scene}'[Ray tracing benchmark scenario]:scene:(all showroom indoor outdoor forest)'
         '(-r --resolution)'{-r,--resolution}'[Resolution preset]:resolution:(auto 720p 1080p 1440p 4k 1024x1024)'
         '--bounces[Number of light bounces for path tracing (1..8)]:bounces:(1 2 3 4 5 6 7 8)'
         '(-c --config)'{-c,--config}'[Configuration index]:config:'
         '--profile-snapshot[Run in profiling snapshot mode]'
         '--rra[Enable Radeon Raytracing Analyzer trace capture]'
-        '--output[Machine-readable output format]:format:(json csv)'
-        '--output-file[Write machine-readable output to file]:file:_files'
+        '(-o --output-json)'{-o,--output-json}'[Write benchmark results to JSON file]:file:_files -g "*.json"'
+        '(-i --import --input)'{-i,--import,--input}'[Load and display results from JSON file(s)]:file:_files -g "*.json"'
+        '--compare[Compare benchmark JSON report files]:file:_files -g "*.json"'
     )
     _arguments -s $opts
 }

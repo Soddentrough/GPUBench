@@ -14,11 +14,10 @@ complete -c gpubench -l verbose -d "Enable verbose logging"
 complete -c gpubench -l debug -d "Enable debug logging"
 complete -c gpubench -l dump-geometry -d "Dump ray tracing geometry to OBJ files"
 complete -c gpubench -l dump -l dump-renders -d "Dump and compare rendered frames"
-complete -c gpubench -s s -l scene -d "Ray tracing benchmark scenario" -r -a "showroom indoor outdoor all"
+complete -c gpubench -s s -l scene -d "Ray tracing benchmark scenario" -r -a "all showroom indoor outdoor forest"
 complete -c gpubench -s r -l resolution -d "Resolution preset" -r -a "auto 720p 1080p 1440p 4k 1024x1024"
 complete -c gpubench -l bounces -d "Number of light bounces for path tracing (1..8)" -r -a "1 2 3 4 5 6 7 8"
 complete -c gpubench -s c -l config -d "Run specific config index" -r
 complete -c gpubench -l profile-snapshot -d "Profiling snapshot mode"
 complete -c gpubench -l rra -d "Radeon Raytracing Analyzer capture"
-complete -c gpubench -l output -d "Output format" -r -a "json csv"
-complete -c gpubench -l output-file -d "Output file path" -r -F
+complete -c gpubench -s o -l output-json -d "Write benchmark results to JSON report file" -r -F

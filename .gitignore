@@ -33,6 +33,7 @@ test_minimal.cpp
 
 # Results files
 gpubench_results*
+gpubench_*.json
 
 # Specific logs
 build_error.log
@@ -81,4 +82,5 @@ raw_traversal_scene.obj
 .agents/
 ORIGINAL_REQUEST.md
 PROJECT.md
+imgui.ini
 

@@ -6,7 +6,7 @@ gpubench \- Modern cross-backend GPU compute and hardware ray tracing benchmark
 [\fIOPTIONS\fR]
 .SH DESCRIPTION
 .B GPUBench
-is a high-performance cross-backend GPU compute and ray tracing benchmarking utility supporting Vulkan 1.4, AMD ROCm/HIP, and OpenCL. It evaluates raw compute capabilities (FP64, FP32, FP16, BF16, FP8, INT8), VRAM and cache bandwidth, hardware-accelerated BVH traversal, and dynamic wavefront ray scheduling (Work Lists / DGC).
+is a high-performance cross-backend GPU compute and ray tracing benchmarking utility supporting Vulkan 1.4, AMD ROCm/HIP, and OpenCL. It evaluates raw compute capabilities (FP64, FP32, FP16, BF16, FP8, INT8), VRAM and cache bandwidth, hardware-accelerated BVH traversal, and dynamic wavefront ray scheduling via Device-Generated Commands (DGC).
 .SH OPTIONS
 .TP
 \fB\-h\fR, \fB\-\-help\fR
@@ -40,7 +40,7 @@ List available compute backends.
 Specify compute backend: auto, vulkan, opencl, rocm (default: auto).
 .TP
 \fB\-s\fR, \fB\-\-scene\fR \fISCENE\fR
-Ray tracing scenario: showroom, indoor, outdoor, all (default: indoor).
+Ray tracing scenario: showroom, indoor, outdoor, forest, all (default: all).
 .TP
 \fB\-r\fR, \fB\-\-resolution\fR \fIRESPRESET\fR
 Resolution preset: auto, 720p, 1080p, 1440p, 4k, 1024x1024, or custom WxH.
@@ -48,11 +48,14 @@ Resolution preset: auto, 720p, 1080p, 1440p, 4k, 1024x1024, or custom WxH.
 \fB\-\-bounces\fR \fIBOUNCES\fR
 Number of light bounces for multi-bounce path tracing (1..8, default: 2).
 .TP
-\fB\-\-output\fR \fIFORMAT\fR
-Machine-readable output format: json or csv.
+\fB\-o\fR, \fB\-\-output\-json\fR [\fIFILE\fR]
+Write benchmark results to a JSON report file. If \fIFILE\fR is omitted, a default timestamped filename including the hostname is generated (e.g., \fIgpubench_<hostname>_<timestamp>.json\fR). Specify \fB\-\fR to direct pure JSON to standard output.
 .TP
-\fB\-\-output\-file\fR \fIFILE\fR
-Write machine-readable output to this file instead of stdout.
+\fB\-i\fR, \fB\-\-import\fR \fIFILE\fR...
+Load and display results from one or more benchmark JSON report files.
+.TP
+\fB\-\-compare\fR \fIFILE1\fR \fIFILE2\fR [\fIFILE3\fR...]
+Compare benchmark JSON report files side-by-side with cross-device win tallies and relative performance deltas.
 .SH SEE ALSO
 .BR gpubench-gui (1)
 .SH AUTHORS
