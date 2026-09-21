@@ -171,6 +171,9 @@ private:
 
     std::string m_currentBenchmarkName;
     std::string m_currentlyRunningTestId;
+    ResultData m_currentlyRunningResult;
+    bool m_hasCurrentlyRunningResult{false};
+    bool matchesItem(const ResultData& r, const BenchmarkItem& itm, uint32_t activeDev) const;
     size_t m_completedTasks{0};
     size_t m_totalTasks{0};
     std::chrono::steady_clock::time_point m_benchmarkStartTime;

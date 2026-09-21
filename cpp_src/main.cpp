@@ -71,7 +71,7 @@ int main(int argc, char **argv) {
       "  raytracing  Hardware BVH traversal, intersection & scheduling (subset of graphics, alias: 'rt'):\n"
       "              RayRawTraversal (Raw BVH Traversal: Coherent Triangles & Deep Multi-Layer BVH8),\n"
       "              RayIntersect, RayAnyHit, RayProcedural, RayIncoherent, RayMaterialDivergence,\n"
-      "              RayPayload, RayASBuild, RayScheduling (Megakernel vs DGC / SER / Work Graphs),\n"
+      "              RayPayload, RayASBuild, RayScheduling (Megakernel vs DGC / SER),\n"
       "              Pipeline Breakdown (Linear vs 2D Tiled vs Morton Z-Curve, Queue Compaction)\n"
       "  system      Host CPU & RAM system memory:\n"
       "              System Memory Bandwidth (Multi & Single-Threaded), System Memory Latency\n"

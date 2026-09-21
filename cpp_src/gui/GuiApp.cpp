@@ -253,7 +253,7 @@ void GuiApp::initializeBenchmarkCategories() {
         sub.description = "Peak floating-point and integer vector/matrix throughput (FP64 down to INT4)";
         sub.items = {
             {"FP64", "FP64", "FP64 Double Precision", "Compute", "TFLOPS", "64-bit IEEE 754 floating-point peak throughput", true},
-            {"FP32", "FP32", "FP32 Single Precision (Baseline)", "Compute", "TFLOPS", "32-bit floating-point peak TFLOPS (dual-issue FMA)", true},
+            {"FP32", "FP32", "FP32 Single Precision", "Compute", "TFLOPS", "32-bit floating-point peak TFLOPS (dual-issue FMA)", true},
             {"FP16", "FP16", "FP16 Half Precision - Vector", "Compute", "TFLOPS", "Packed 16-bit half-precision vector arithmetic", true},
             {"FP16", "FP16", "FP16 Half Precision - Matrix (WMMA)", "Compute", "TFLOPS", "Cooperative matrix / tensor half-precision throughput", true},
             {"BF16", "BF16", "BF16 Bfloat16 - Vector", "Compute", "TFLOPS", "Packed 16-bit bfloat16 vector arithmetic", true},
@@ -326,31 +326,26 @@ void GuiApp::initializeBenchmarkCategories() {
             {"RayPathTracing", "Scene Path Tracing (Multi-Bounce)", "Bounce Rays (Megakernel)", "Ray Tracing", "MRays/s", "Multi-bounce diffuse path tracing using compute megakernel", true},
             {"RayPathTracing", "Scene Path Tracing (Multi-Bounce)", "Bounce Rays (RTP + SER)", "Ray Tracing", "MRays/s", "Multi-bounce path tracing with dedicated RTP and Hardware SER", true},
             {"RayPathTracing", "Scene Path Tracing (Multi-Bounce)", "Bounce Rays (DGC)", "Ray Tracing", "MRays/s", "Multi-bounce path tracing with compacted wavefront work queues", true},
-            {"RayPathTracing", "Scene Path Tracing (Multi-Bounce)", "Bounce Rays (Work Graphs)", "Ray Tracing", "MRays/s", "Autonomous GPU work graph path tracing execution", true},
             {"RayPathTracing", "Scene Path Tracing (Multi-Bounce)", "Bounce Rays (Persistent Queue)", "Ray Tracing", "MRays/s", "Persistent wavefront work stealing queue path tracing", true},
             {"RayPathTracing", "Scene Path Tracing (16 SPP)", "Bounce Rays 16 SPP (Megakernel)", "Ray Tracing", "MRays/s", "High-sample 16 SPP path tracing using compute megakernel", true},
             {"RayPathTracing", "Scene Path Tracing (16 SPP)", "Bounce Rays 16 SPP (DGC)", "Ray Tracing", "MRays/s", "High-sample 16 SPP path tracing with compacted wavefront queues", true},
             {"RayScheduling", "Total Scene Render", "Full Frame (Megakernel)", "Ray Tracing", "MRays/s", "Complete full-frame scene rendering via compute megakernel", true},
             {"RayScheduling", "Total Scene Render", "Full Frame (RTP + SER)", "Ray Tracing", "MRays/s", "Complete full-frame scene rendering via RTP + Hardware SER", true},
-            {"RayScheduling", "Total Scene Render", "Full Frame (DGC)", "Ray Tracing", "MRays/s", "Complete full-frame scene rendering via Device-Generated Commands (DGC)", true},
-            {"RayScheduling", "Total Scene Render", "Full Frame (Work Graphs)", "Ray Tracing", "MRays/s", "Complete full-frame scene rendering via work graphs", true}
+            {"RayScheduling", "Total Scene Render", "Full Frame (DGC)", "Ray Tracing", "MRays/s", "Complete full-frame scene rendering via Device-Generated Commands (DGC)", true}
         }});
 
-        // Subgroup 3: Pipeline Stages & Scheduling (20 tests)
+        // Subgroup 3: Pipeline Stages & Scheduling (16 tests)
         cat.subgroups.push_back({"Pipeline Stages & Scheduling", "Ray Tracing", "RayScheduling", "Isolated rendering pipeline phases, shadows, shading, and queue compaction", {
             {"RayScheduling", "Directional Shadows", "Shadows (Megakernel)", "Ray Tracing", "MRays/s", "Primary directional light shadow ray casting via megakernel", true},
             {"RayScheduling", "Directional Shadows", "Shadows (RTP + SER)", "Ray Tracing", "MRays/s", "Directional shadows via dedicated RTP and SER", true},
             {"RayScheduling", "Directional Shadows", "Shadows (DGC)", "Ray Tracing", "MRays/s", "Directional shadows with compacted wavefront stream", true},
-            {"RayScheduling", "Directional Shadows", "Shadows (Work Graphs)", "Ray Tracing", "MRays/s", "Directional shadows scheduled via autonomous work graphs", true},
             {"RayScheduling", "Directional Shadows", "Shadows (Multi-Light Binning)", "Ray Tracing", "MRays/s", "Shadow rays binned and dispatched across multiple directional lights", true},
             {"RayScheduling", "Material Shading", "Material (Megakernel)", "Ray Tracing", "MHits/s", "PBR material BSDF evaluation in monolithic compute pass", true},
             {"RayScheduling", "Material Shading", "Material (RTP + SER)", "Ray Tracing", "MHits/s", "Material shading via dedicated closest-hit shaders and SER", true},
             {"RayScheduling", "Material Shading", "Material (DGC)", "Ray Tracing", "MHits/s", "Material evaluation via sorted material work queues", true},
-            {"RayScheduling", "Material Shading", "Material (Work Graphs)", "Ray Tracing", "MHits/s", "Material evaluation scheduled via work graphs", true},
             {"RayScheduling", "Incoherent Ray Tracing", "Incoherent Rays (Megakernel)", "Ray Tracing", "MRays/s", "Diffuse GI bounce traversal with high memory incoherence", true},
             {"RayScheduling", "Incoherent Ray Tracing", "Incoherent Rays (RTP + SER)", "Ray Tracing", "MRays/s", "Incoherent diffuse rays reordered via hardware SER", true},
             {"RayScheduling", "Incoherent Ray Tracing", "Incoherent Rays (DGC)", "Ray Tracing", "MRays/s", "Incoherent diffuse rays sorted and compacted via wavefront queues", true},
-            {"RayScheduling", "Incoherent Ray Tracing", "Incoherent Rays (Work Graphs)", "Ray Tracing", "MRays/s", "Incoherent rays managed via work graph node scheduling", true},
             {"RayScheduling", "Pipeline Breakdown", "Linear 1D Scanline", "Ray Tracing", "MRays/s", "Linear scanline ray dispatch traversal baseline", true},
             {"RayScheduling", "Pipeline Breakdown", "Wave Ballot Compaction", "Ray Tracing", "MRecords/s", "SIMD wave ballot compaction of active ray streams", true},
             {"RayScheduling", "Pipeline Breakdown", "2D Screen Tiled (8x4)", "Ray Tracing", "MRays/s", "2D 8x4 tiled ray dispatch for spatial coherence", true},
@@ -882,6 +877,130 @@ void GuiApp::renderRightWorkspace(float width, float height) {
     ImGui::EndChild();
 }
 
+bool GuiApp::matchesItem(const ResultData& r, const BenchmarkItem& itm, uint32_t activeDev) const {
+    if (r.deviceIndex != activeDev) return false;
+
+    // Subcategory matching with normalization
+    if (!itm.subcategory.empty() && !r.subcategory.empty()) {
+        bool subMatches = (itm.subcategory == r.subcategory);
+        if (!subMatches) {
+            if (itm.subcategory.find(r.subcategory) != std::string::npos ||
+                r.subcategory.find(itm.subcategory) != std::string::npos) {
+                subMatches = true;
+            }
+            if (itm.category == "System" || itm.category == "Host System") {
+                if (r.deviceIndex != 0xFFFFFFFF) subMatches = false;
+            } else {
+                if (r.deviceIndex == 0xFFFFFFFF) subMatches = false;
+            }
+        }
+        if (!subMatches) return false;
+    }
+
+    // Cache Latency matching
+    if (itm.subcategory == "Cache Latency" || r.subcategory == "Latency") {
+        if (r.deviceIndex != 0xFFFFFFFF) {
+            if (itm.name.find("L0") != std::string::npos && r.benchmarkName.find("L0") != std::string::npos) return true;
+            if (itm.name.find("L1") != std::string::npos && r.benchmarkName.find("L1") != std::string::npos) return true;
+            if (itm.name.find("L2") != std::string::npos && r.benchmarkName.find("L2") != std::string::npos) return true;
+            if (itm.name.find("L3") != std::string::npos && r.benchmarkName.find("L3") != std::string::npos) return true;
+        }
+    }
+
+    // VRAM Bandwidth matching
+    if (itm.subcategory == "VRAM Bandwidth" || r.subcategory == "Bandwidth" || itm.id == "Device Memory Bandwidth") {
+        if (r.deviceIndex != 0xFFFFFFFF) {
+            for (const char* tGrp : {"128", "256", "1024"}) {
+                if (itm.name.find(tGrp) != std::string::npos && r.benchmarkName.find(tGrp) != std::string::npos) {
+                    bool itmIsRW = (itm.name.find("Read / Write") != std::string::npos || itm.name.find("R/W") != std::string::npos);
+                    bool rIsRW = (r.benchmarkName.find("Read / Write") != std::string::npos || r.benchmarkName.find("R/W") != std::string::npos);
+                    if (itmIsRW && rIsRW) return true;
+                    if (!itmIsRW && !rIsRW) {
+                        if (itm.name.find("Read") != std::string::npos && r.benchmarkName.find("Read") != std::string::npos) return true;
+                        if (itm.name.find("Write") != std::string::npos && r.benchmarkName.find("Write") != std::string::npos) return true;
+                    }
+                }
+            }
+        }
+    }
+
+    // Host Memory matching
+    if (itm.category == "System" || itm.category == "Host System") {
+        if (r.deviceIndex == 0xFFFFFFFF) {
+            if (itm.name.find("Pointer Chasing") != std::string::npos && r.metric == "ns") return true;
+            bool is1T_itm = (itm.name.find("1T") != std::string::npos || itm.name.find("Single-Threaded") != std::string::npos);
+            bool is1T_r = (r.benchmarkName.find("1 Thread") != std::string::npos || r.benchmarkName.find("1T") != std::string::npos);
+            if (is1T_itm == is1T_r && r.metric != "ns") {
+                if (itm.name.find("Read") != std::string::npos && r.benchmarkName.find("Read") != std::string::npos) return true;
+                if (itm.name.find("Write") != std::string::npos && r.benchmarkName.find("Write") != std::string::npos) return true;
+                if (itm.name.find("Copy") != std::string::npos && r.benchmarkName.find("Copy") != std::string::npos) return true;
+            }
+        }
+    }
+
+    // Compute Precision matching
+    if (itm.category == "Compute") {
+        if (itm.name.find("Matrix") != std::string::npos) {
+            return (r.benchmarkName.find("Matrix") != std::string::npos);
+        } else if (itm.name.find("Vector") != std::string::npos) {
+            return (r.benchmarkName.find("Matrix") == std::string::npos);
+        }
+        return true;
+    }
+
+    std::string clean = cleanWorkloadName(r.benchmarkName, r.subcategory);
+    if (clean == itm.name || r.benchmarkName == itm.name) return true;
+    if (clean.find(itm.name) != std::string::npos || itm.name.find(clean) != std::string::npos) return true;
+
+    // RayASBuild matching
+    if (itm.id == "RayASBuild") {
+        for (const char* tlasKey : {"Indoor Corridor", "Dense Jungle", "Massive Open World"}) {
+            if (itm.name.find(tlasKey) != std::string::npos && clean.find(tlasKey) != std::string::npos) return true;
+        }
+        for (const char* trisKey : {"1M", "5M", "10M"}) {
+            if (itm.name.find(trisKey) != std::string::npos && clean.find(trisKey) != std::string::npos) {
+                bool isUpdateItm = (itm.name.find("Update") != std::string::npos);
+                bool isUpdateR = (clean.find("Update") != std::string::npos);
+                if (isUpdateItm == isUpdateR) return true;
+            }
+        }
+    }
+
+    // RayScheduling / RayPathTracing dispatch keyword matching
+    if (itm.id == "RayScheduling" || itm.id == "RayPathTracing") {
+        if (itm.name.find("Multi-Light") != std::string::npos && clean.find("Multi-Light") != std::string::npos) return true;
+        if (itm.name.find("Persistent") != std::string::npos && clean.find("Persistent") != std::string::npos) return true;
+        if (itm.name.find("Alpha Cutout") != std::string::npos && clean.find("Alpha") != std::string::npos) return true;
+        if (itm.name.find("SER") != std::string::npos && clean.find("SER") != std::string::npos) return true;
+        if (itm.name.find("Dedicated") != std::string::npos && clean.find("Dedicated") != std::string::npos) return true;
+        if (itm.name.find("DGC") != std::string::npos && (clean.find("DGC") != std::string::npos || clean.find("Work Lists") != std::string::npos)) return true;
+        if (itm.name.find("Megakernel") != std::string::npos && clean.find("Megakernel") != std::string::npos) return true;
+        // Traversal Scheduling
+        for (const char* schedKey : {"Scanline", "Wave Ballot", "8x4", "4x4", "8x8", "Single-Pass", "Round-Trip"}) {
+            if (itm.name.find(schedKey) != std::string::npos && clean.find(schedKey) != std::string::npos) return true;
+        }
+    }
+
+    // BVH & Divergence Stress matching
+    for (const char* pct : {"100%", "75%", "50%", "25%", "10%"}) {
+        if (itm.name.find(pct) != std::string::npos && clean.find(pct) != std::string::npos) return true;
+    }
+    for (const char* deg : {"0 deg", "15 deg", "45 deg", "75 deg", "90 deg", "180 deg", "Microbench"}) {
+        if (itm.name.find(deg) != std::string::npos && clean.find(deg) != std::string::npos) return true;
+    }
+    for (const char* pl : {"16B", "128B", "256B"}) {
+        if (itm.name.find(pl) != std::string::npos && clean.find(pl) != std::string::npos) return true;
+    }
+    if (itm.name.find("Uniform") != std::string::npos && clean.find("Uniform") != std::string::npos) return true;
+    if (itm.name.find("Divergent") != std::string::npos && clean.find("Divergent") != std::string::npos) return true;
+    if (itm.name.find("Ray-Triangle") != std::string::npos && clean.find("Ray-Triangle") != std::string::npos) return true;
+    if (itm.name.find("Ray-Box") != std::string::npos && clean.find("Ray-Box") != std::string::npos) return true;
+    if (itm.name.find("Coherent") != std::string::npos && clean.find("Coherent") != std::string::npos) return true;
+    if (itm.name.find("Deep Box") != std::string::npos && clean.find("Box") != std::string::npos) return true;
+    if (itm.name.find("Spheres") != std::string::npos && clean.find("Spheres") != std::string::npos) return true;
+
+    return false;
+}
 
 GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
     const BenchmarkItem& item,
@@ -946,135 +1065,9 @@ GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
         return std::string(buf);
     };
 
-    auto matchesItem = [&](const ResultData& r, const BenchmarkItem& itm) -> bool {
-        if (r.deviceIndex != activeDev) return false;
-
-        // Subcategory matching with normalization
-        if (!itm.subcategory.empty() && !r.subcategory.empty()) {
-            bool subMatches = (itm.subcategory == r.subcategory);
-            if (!subMatches) {
-                if (itm.subcategory.find(r.subcategory) != std::string::npos ||
-                    r.subcategory.find(itm.subcategory) != std::string::npos) {
-                    subMatches = true;
-                }
-                if (itm.category == "System" || itm.category == "Host System") {
-                    if (r.deviceIndex != 0xFFFFFFFF) subMatches = false;
-                } else {
-                    if (r.deviceIndex == 0xFFFFFFFF) subMatches = false;
-                }
-            }
-            if (!subMatches) return false;
-        }
-
-        // Cache Latency matching
-        if (itm.subcategory == "Cache Latency" || r.subcategory == "Latency") {
-            if (r.deviceIndex != 0xFFFFFFFF) {
-                if (itm.name.find("L0") != std::string::npos && r.benchmarkName.find("L0") != std::string::npos) return true;
-                if (itm.name.find("L1") != std::string::npos && r.benchmarkName.find("L1") != std::string::npos) return true;
-                if (itm.name.find("L2") != std::string::npos && r.benchmarkName.find("L2") != std::string::npos) return true;
-                if (itm.name.find("L3") != std::string::npos && r.benchmarkName.find("L3") != std::string::npos) return true;
-            }
-        }
-
-        // VRAM Bandwidth matching
-        if (itm.subcategory == "VRAM Bandwidth" || r.subcategory == "Bandwidth" || itm.id == "Device Memory Bandwidth") {
-            if (r.deviceIndex != 0xFFFFFFFF) {
-                for (const char* tGrp : {"128", "256", "1024"}) {
-                    if (itm.name.find(tGrp) != std::string::npos && r.benchmarkName.find(tGrp) != std::string::npos) {
-                        bool itmIsRW = (itm.name.find("Read / Write") != std::string::npos || itm.name.find("R/W") != std::string::npos);
-                        bool rIsRW = (r.benchmarkName.find("Read / Write") != std::string::npos || r.benchmarkName.find("R/W") != std::string::npos);
-                        if (itmIsRW && rIsRW) return true;
-                        if (!itmIsRW && !rIsRW) {
-                            if (itm.name.find("Read") != std::string::npos && r.benchmarkName.find("Read") != std::string::npos) return true;
-                            if (itm.name.find("Write") != std::string::npos && r.benchmarkName.find("Write") != std::string::npos) return true;
-                        }
-                    }
-                }
-            }
-        }
-
-        // Host Memory matching
-        if (itm.category == "System" || itm.category == "Host System") {
-            if (r.deviceIndex == 0xFFFFFFFF) {
-                if (itm.name.find("Pointer Chasing") != std::string::npos && r.metric == "ns") return true;
-                bool is1T_itm = (itm.name.find("1T") != std::string::npos || itm.name.find("Single-Threaded") != std::string::npos);
-                bool is1T_r = (r.benchmarkName.find("1 Thread") != std::string::npos || r.benchmarkName.find("1T") != std::string::npos);
-                if (is1T_itm == is1T_r && r.metric != "ns") {
-                    if (itm.name.find("Read") != std::string::npos && r.benchmarkName.find("Read") != std::string::npos) return true;
-                    if (itm.name.find("Write") != std::string::npos && r.benchmarkName.find("Write") != std::string::npos) return true;
-                    if (itm.name.find("Copy") != std::string::npos && r.benchmarkName.find("Copy") != std::string::npos) return true;
-                }
-            }
-        }
-
-        // Compute Precision matching
-        if (itm.category == "Compute") {
-            if (itm.name.find("Matrix") != std::string::npos) {
-                return (r.benchmarkName.find("Matrix") != std::string::npos);
-            } else if (itm.name.find("Vector") != std::string::npos) {
-                return (r.benchmarkName.find("Matrix") == std::string::npos);
-            }
-            return true;
-        }
-
-        std::string clean = cleanWorkloadName(r.benchmarkName, r.subcategory);
-        if (clean == itm.name || r.benchmarkName == itm.name) return true;
-        if (clean.find(itm.name) != std::string::npos || itm.name.find(clean) != std::string::npos) return true;
-
-        // RayASBuild matching
-        if (itm.id == "RayASBuild") {
-            for (const char* tlasKey : {"Indoor Corridor", "Dense Jungle", "Massive Open World"}) {
-                if (itm.name.find(tlasKey) != std::string::npos && clean.find(tlasKey) != std::string::npos) return true;
-            }
-            for (const char* trisKey : {"1M", "5M", "10M"}) {
-                if (itm.name.find(trisKey) != std::string::npos && clean.find(trisKey) != std::string::npos) {
-                    bool isUpdateItm = (itm.name.find("Update") != std::string::npos);
-                    bool isUpdateR = (clean.find("Update") != std::string::npos);
-                    if (isUpdateItm == isUpdateR) return true;
-                }
-            }
-        }
-
-        // RayScheduling / RayPathTracing dispatch keyword matching
-        if (itm.id == "RayScheduling" || itm.id == "RayPathTracing") {
-            if (itm.name.find("Multi-Light") != std::string::npos && clean.find("Multi-Light") != std::string::npos) return true;
-            if (itm.name.find("Persistent") != std::string::npos && clean.find("Persistent") != std::string::npos) return true;
-            if (itm.name.find("Work Graphs") != std::string::npos && clean.find("Work Graphs") != std::string::npos) return true;
-            if (itm.name.find("Alpha Cutout") != std::string::npos && clean.find("Alpha") != std::string::npos) return true;
-            if (itm.name.find("SER") != std::string::npos && clean.find("SER") != std::string::npos) return true;
-            if (itm.name.find("Dedicated") != std::string::npos && clean.find("Dedicated") != std::string::npos) return true;
-            if (itm.name.find("DGC") != std::string::npos && (clean.find("DGC") != std::string::npos || clean.find("Work Lists") != std::string::npos)) return true;
-            if (itm.name.find("Megakernel") != std::string::npos && clean.find("Megakernel") != std::string::npos) return true;
-            // Traversal Scheduling
-            for (const char* schedKey : {"Scanline", "Wave Ballot", "8x4", "4x4", "8x8", "Single-Pass", "Round-Trip"}) {
-                if (itm.name.find(schedKey) != std::string::npos && clean.find(schedKey) != std::string::npos) return true;
-            }
-        }
-
-        // BVH & Divergence Stress matching
-        for (const char* pct : {"100%", "75%", "50%", "25%", "10%"}) {
-            if (itm.name.find(pct) != std::string::npos && clean.find(pct) != std::string::npos) return true;
-        }
-        for (const char* deg : {"0 deg", "15 deg", "45 deg", "75 deg", "90 deg", "180 deg", "Microbench"}) {
-            if (itm.name.find(deg) != std::string::npos && clean.find(deg) != std::string::npos) return true;
-        }
-        for (const char* pl : {"16B", "128B", "256B"}) {
-            if (itm.name.find(pl) != std::string::npos && clean.find(pl) != std::string::npos) return true;
-        }
-        if (itm.name.find("Uniform") != std::string::npos && clean.find("Uniform") != std::string::npos) return true;
-        if (itm.name.find("Divergent") != std::string::npos && clean.find("Divergent") != std::string::npos) return true;
-        if (itm.name.find("Ray-Triangle") != std::string::npos && clean.find("Ray-Triangle") != std::string::npos) return true;
-        if (itm.name.find("Ray-Box") != std::string::npos && clean.find("Ray-Box") != std::string::npos) return true;
-        if (itm.name.find("Coherent") != std::string::npos && clean.find("Coherent") != std::string::npos) return true;
-        if (itm.name.find("Deep Box") != std::string::npos && clean.find("Box") != std::string::npos) return true;
-        if (itm.name.find("Spheres") != std::string::npos && clean.find("Spheres") != std::string::npos) return true;
-
-        return false;
-    };
-
     const ResultData* curRes = nullptr;
     for (const auto& r : m_allResults) {
-        if (matchesItem(r, item)) {
+        if (matchesItem(r, item, activeDev)) {
             curRes = &r;
             if (r.time_ms > 0.0) break;
         }
@@ -1092,6 +1085,22 @@ GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
                 info.isBaseline = true;
                 info.deltaText = "[Baseline]";
                 info.deltaColor = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
+            } else if (item.id == "INT8") {
+                if (item.name.find("Vector") != std::string::npos) {
+                    info.isBaseline = true;
+                    info.deltaText = "[Baseline]";
+                    info.deltaColor = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
+                } else {
+                    baselineName = "INT8_Vector";
+                }
+            } else if (item.id == "INT4") {
+                if (item.name.find("Vector") != std::string::npos) {
+                    info.isBaseline = true;
+                    info.deltaText = "[Baseline]";
+                    info.deltaColor = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
+                } else {
+                    baselineName = "INT4_Vector";
+                }
             } else {
                 baselineName = "FP32";
             }
@@ -1148,6 +1157,16 @@ GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
                             baselineRes = &r;
                             break;
                         }
+                    } else if (baselineName == "INT8_Vector") {
+                        if (r.benchmarkName.find("INT8") != std::string::npos && r.benchmarkName.find("Vector") != std::string::npos) {
+                            baselineRes = &r;
+                            break;
+                        }
+                    } else if (baselineName == "INT4_Vector") {
+                        if (r.benchmarkName.find("INT4") != std::string::npos && r.benchmarkName.find("Vector") != std::string::npos) {
+                            baselineRes = &r;
+                            break;
+                        }
                     } else if (r.subcategory == item.subcategory) {
                         std::string cName = cleanWorkloadName(r.benchmarkName, r.subcategory);
                         if (cName.find(baselineName) != std::string::npos || r.benchmarkName.find(baselineName) != std::string::npos) {
@@ -1160,7 +1179,8 @@ GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
         }
 
         if (baselineRes && baselineRes->time_ms > 0.0 && baselineRes->operations > 0 &&
-            curRes->time_ms > 0.0 && curRes->operations > 0) {
+            curRes->time_ms > 0.0 && curRes->operations > 0 &&
+            baselineRes->metric == curRes->metric) {
             double curOps = (static_cast<double>(curRes->operations) / curRes->time_ms) * 1000.0;
             double baseOps = (static_cast<double>(baselineRes->operations) / baselineRes->time_ms) * 1000.0;
             if (baseOps > 0.0) {
@@ -1631,9 +1651,9 @@ void GuiApp::renderBenchmarkSuitePanel() {
                     ImGui::Checkbox(item.name.c_str(), &item.selected);
                 }
 
-                bool isCurrentlyTesting = (m_execState == ExecutionState::Running &&
-                    (m_currentlyRunningTestId == item.id || m_currentlyRunningTestId == item.subcategory ||
-                     m_currentlyRunningTestId == item.name));
+                bool isCurrentlyTesting = !isUnsupported && (m_execState == ExecutionState::Running &&
+                    m_hasCurrentlyRunningResult &&
+                    matchesItem(m_currentlyRunningResult, item, m_telemetryGpuIndex));
 
                 float checkRightX = ImGui::GetItemRectMax().x;
                 float rightTargetX = startX + contentW - 10.0f;
@@ -1655,6 +1675,15 @@ void GuiApp::renderBenchmarkSuitePanel() {
                         ImGui::SameLine(0, 8.0f);
                         ImGui::TextColored(dispInfo.deltaColor, "%s", dispInfo.deltaText.c_str());
                     }
+                } else if (isUnsupported) {
+                    float textW = ImGui::CalcTextSize("[UNSUPPORTED]").x;
+                    if (rightTargetX - textW > checkRightX + 10.0f) {
+                        ImGui::SameLine(0, 0);
+                        ImGui::SetCursorScreenPos(ImVec2(rightTargetX - textW, curRowY + (frameH - ImGui::GetTextLineHeight()) * 0.5f));
+                    } else {
+                        ImGui::SameLine(0, 10.0f);
+                    }
+                    ImGui::TextColored(ImVec4(0.85f, 0.55f, 0.15f, 1.0f), "[UNSUPPORTED]");
                 } else if (isCurrentlyTesting) {
                     float textW = ImGui::CalcTextSize("[RUNNING...]").x;
                     if (rightTargetX - textW > checkRightX + 10.0f) {
@@ -1665,15 +1694,6 @@ void GuiApp::renderBenchmarkSuitePanel() {
                     }
                     float pulse = 0.5f + 0.5f * sinf(static_cast<float>(ImGui::GetTime()) * 8.0f);
                     ImGui::TextColored(ImVec4(0.20f + 0.20f * pulse, 0.80f + 0.20f * pulse, 1.0f, 1.0f), "[RUNNING...]");
-                } else if (isUnsupported) {
-                    float textW = ImGui::CalcTextSize("[UNSUPPORTED]").x;
-                    if (rightTargetX - textW > checkRightX + 10.0f) {
-                        ImGui::SameLine(0, 0);
-                        ImGui::SetCursorScreenPos(ImVec2(rightTargetX - textW, curRowY + (frameH - ImGui::GetTextLineHeight()) * 0.5f));
-                    } else {
-                        ImGui::SameLine(0, 10.0f);
-                    }
-                    ImGui::TextColored(ImVec4(0.85f, 0.55f, 0.15f, 1.0f), "[UNSUPPORTED]");
                 } else {
                     std::string badge = "[" + item.metricType + "]";
                     float textW = ImGui::CalcTextSize(badge.c_str()).x;
@@ -2838,7 +2858,7 @@ void GuiApp::startBenchmarks() {
         else if (b == "RayDivergence") gpu_configs += 5;
         else if (b == "RayPayload") gpu_configs += 3;
         else if (b == "RayScheduling") {
-            gpu_configs += (m_scene == "all" ? 30 * 4 : 30);
+            gpu_configs += (m_scene == "all" ? 31 * 4 : 31);
         }
         else gpu_configs += 1;
     }
@@ -2855,6 +2875,7 @@ void GuiApp::startBenchmarks() {
     m_allResults.clear();
     m_latestResults.clear();
     m_currentlyRunningTestId.clear();
+    m_hasCurrentlyRunningResult = false;
     m_benchmarkStartTime = std::chrono::steady_clock::now();
 
     if (m_execThread.joinable()) {
@@ -2893,6 +2914,7 @@ void GuiApp::startBenchmarks() {
             m_switchToScorecard = true;
         }
         m_currentlyRunningTestId.clear();
+        m_hasCurrentlyRunningResult = false;
     });
 }
 
@@ -2924,10 +2946,15 @@ void GuiApp::processIncomingResults() {
                 m_latestResults[res.benchmarkName] = res;
                 if (!res.subcategory.empty()) m_latestResults[res.subcategory] = res;
                 if (m_currentlyRunningTestId == baseName) m_currentlyRunningTestId.clear();
+                if (m_hasCurrentlyRunningResult && m_currentlyRunningResult.benchmarkName == res.benchmarkName) {
+                    m_hasCurrentlyRunningResult = false;
+                }
             } else if (res.time_ms == -1.0) {
                 std::string devTag = (res.deviceIndex == 0xFFFFFFFF) ? "Host CPU" : ("GPU " + std::to_string(res.deviceIndex));
                 m_currentBenchmarkName = res.benchmarkName + " on [" + devTag + "]";
                 m_currentlyRunningTestId = baseName;
+                m_currentlyRunningResult = res;
+                m_hasCurrentlyRunningResult = true;
                 if (res.deviceIndex < 2 && !m_telemetryDualGpuMode) {
                     m_telemetryGpuIndex = res.deviceIndex;
                 }
@@ -2953,6 +2980,9 @@ void GuiApp::processIncomingResults() {
             m_latestResults[res.benchmarkName] = res;
             if (!res.subcategory.empty()) m_latestResults[res.subcategory] = res;
             if (m_currentlyRunningTestId == baseName) m_currentlyRunningTestId.clear();
+            if (m_hasCurrentlyRunningResult && m_currentlyRunningResult.benchmarkName == res.benchmarkName) {
+                m_hasCurrentlyRunningResult = false;
+            }
         }
     }
 }
