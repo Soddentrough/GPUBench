@@ -298,8 +298,8 @@ void RayAnyHitBench::Run(uint32_t config_idx) {
   vContext->setKernelArg(kernel, 1, resultBuffer);
 
   // config_idx 0 = 100% Solid (1.0 alpha density) -> Almost all rays hit opaque
-  // config_idx 4 = 0% Solid (0.0 alpha density) -> All rays pass through
-  float alphaDensity = 1.0f - (float(config_idx) * 0.25f);
+  // config_idx 1 = 50% Solid (0.5 alpha density) -> Cutout stress with any-hit evaluation
+  float alphaDensity = (config_idx == 0) ? 1.0f : 0.5f;
   uint32_t seed = config_idx * 1337;
 
   // Push Constants: rayCount, alphaDensity, seed
@@ -351,13 +351,6 @@ const char *RayAnyHitBench::GetSubCategory(uint32_t config_idx) const {
 }
 
 std::string RayAnyHitBench::GetConfigName(uint32_t config_idx) const {
-  int solidPercentage = 100 - (config_idx * 25);
-  std::string label = std::to_string(solidPercentage) + "% Solid";
-
-  if (solidPercentage == 100)
-    label += " (Min AnyHit Ignore)";
-  else if (solidPercentage == 0)
-    label += " (Max AnyHit Ignore)";
-
-  return label;
+  if (config_idx == 0) return "100% Solid (Opaque Baseline)";
+  return "50% Solid (Cutout Stress)";
 }

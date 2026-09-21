@@ -316,25 +316,25 @@ void GuiApp::initializeBenchmarkCategories() {
             {"RayASBuild", "TLAS Construction", "TLAS: Massive Open World (200K Instances)", "Ray Tracing", "MInst/s", "Top-level AS instance hierarchy construction (Massive Open World)", true}
         }});
 
-        // Subgroup 2: Primary & Bounce Ray Tracing (16 tests)
+        // Subgroup 2: Primary & Bounce Ray Tracing (14 tests)
         cat.subgroups.push_back({"Primary & Bounce Ray Tracing", "Ray Tracing", "RayScheduling", "Primary camera ray tracing and multi-bounce path tracing across dispatches", {
             {"RayScheduling", "Scene Ray Tracing (PBR)", "Primary Rays (Megakernel)", "Ray Tracing", "MRays/s", "PBR primary ray tracing baseline using unified compute dispatch and rayQueryEXT", true},
             {"RayScheduling", "Scene Ray Tracing (PBR)", "Primary Rays (DGC)", "Ray Tracing", "MRays/s", "PBR primary ray tracing with wavefront stream compaction and indirect dispatch", true},
-            {"RayScheduling", "Scene Ray Tracing (PBR)", "Primary Rays (Dedicated RTP)", "Ray Tracing", "MRays/s", "Dedicated ray tracing pipeline using vkCmdTraceRaysKHR and SBT", true},
+            {"RayScheduling", "Scene Ray Tracing (PBR)", "Primary Rays (RTP)", "Ray Tracing", "MRays/s", "Dedicated ray tracing pipeline using vkCmdTraceRaysKHR and SBT", true},
             {"RayScheduling", "Scene Ray Tracing (PBR)", "Primary Rays (RTP + SER)", "Ray Tracing", "MRays/s", "Dedicated ray tracing pipeline with Shader Execution Reordering", true},
             {"RayScheduling", "Scene Ray Tracing (PBR)", "Primary Rays (Alpha Cutout)", "Ray Tracing", "MRays/s", "PBR primary ray tracing with alpha-tested cutout geometry evaluation", true},
-            {"RayPathTracing", "Scene Path Tracing (Multi-Bounce)", "Bounce Rays (Megakernel)", "Ray Tracing", "MRays/s", "Multi-bounce diffuse path tracing using compute megakernel", true},
-            {"RayPathTracing", "Scene Path Tracing (Multi-Bounce)", "Bounce Rays (RTP + SER)", "Ray Tracing", "MRays/s", "Multi-bounce path tracing with dedicated RTP and Hardware SER", true},
-            {"RayPathTracing", "Scene Path Tracing (Multi-Bounce)", "Bounce Rays (DGC)", "Ray Tracing", "MRays/s", "Multi-bounce path tracing with compacted wavefront work queues", true},
-            {"RayPathTracing", "Scene Path Tracing (Multi-Bounce)", "Bounce Rays (Persistent Queue)", "Ray Tracing", "MRays/s", "Persistent wavefront work stealing queue path tracing", true},
-            {"RayPathTracing", "Scene Path Tracing (16 SPP)", "Bounce Rays 16 SPP (Megakernel)", "Ray Tracing", "MRays/s", "High-sample 16 SPP path tracing using compute megakernel", true},
-            {"RayPathTracing", "Scene Path Tracing (16 SPP)", "Bounce Rays 16 SPP (DGC)", "Ray Tracing", "MRays/s", "High-sample 16 SPP path tracing with compacted wavefront queues", true},
+            {"RayScheduling", "Scene Path Tracing (Multi-Bounce)", "Bounce Rays (Megakernel)", "Ray Tracing", "MRays/s", "Multi-bounce diffuse path tracing using compute megakernel", true},
+            {"RayScheduling", "Scene Path Tracing (Multi-Bounce)", "Bounce Rays (RTP + SER)", "Ray Tracing", "MRays/s", "Multi-bounce path tracing with dedicated RTP and Hardware SER", true},
+            {"RayScheduling", "Scene Path Tracing (Multi-Bounce)", "Bounce Rays (DGC)", "Ray Tracing", "MRays/s", "Multi-bounce path tracing with compacted wavefront work queues", true},
+            {"RayScheduling", "Scene Path Tracing (Multi-Bounce)", "Bounce Rays (Persistent Queue)", "Ray Tracing", "MRays/s", "Persistent wavefront work stealing queue path tracing", true},
+            {"RayScheduling", "Scene Path Tracing (16 SPP)", "Bounce Rays 16 SPP (Megakernel)", "Ray Tracing", "MRays/s", "High-sample 16 SPP path tracing using compute megakernel", true},
+            {"RayScheduling", "Scene Path Tracing (16 SPP)", "Bounce Rays 16 SPP (DGC)", "Ray Tracing", "MRays/s", "High-sample 16 SPP path tracing with compacted wavefront queues", true},
             {"RayScheduling", "Total Scene Render", "Full Frame (Megakernel)", "Ray Tracing", "MRays/s", "Complete full-frame scene rendering via compute megakernel", true},
             {"RayScheduling", "Total Scene Render", "Full Frame (RTP + SER)", "Ray Tracing", "MRays/s", "Complete full-frame scene rendering via RTP + Hardware SER", true},
             {"RayScheduling", "Total Scene Render", "Full Frame (DGC)", "Ray Tracing", "MRays/s", "Complete full-frame scene rendering via Device-Generated Commands (DGC)", true}
         }});
 
-        // Subgroup 3: Pipeline Stages & Scheduling (16 tests)
+        // Subgroup 3: Pipeline Stages & Scheduling (17 tests)
         cat.subgroups.push_back({"Pipeline Stages & Scheduling", "Ray Tracing", "RayScheduling", "Isolated rendering pipeline phases, shadows, shading, and queue compaction", {
             {"RayScheduling", "Directional Shadows", "Shadows (Megakernel)", "Ray Tracing", "MRays/s", "Primary directional light shadow ray casting via megakernel", true},
             {"RayScheduling", "Directional Shadows", "Shadows (RTP + SER)", "Ray Tracing", "MRays/s", "Directional shadows via dedicated RTP and SER", true},
@@ -355,27 +355,20 @@ void GuiApp::initializeBenchmarkCategories() {
             {"RayScheduling", "Pipeline Breakdown", "VRAM Queue Round-Trip", "Ray Tracing", "GB/s", "Ray queue intermediate VRAM round-trip streaming bandwidth", true}
         }});
 
-        // Subgroup 4: Hardware BVH & Divergence Stress (22 tests)
+        // Subgroup 4: Hardware BVH & Divergence Stress (15 tests)
         cat.subgroups.push_back({"Hardware BVH & Divergence Stress", "Ray Tracing", "RayRawTraversal", "Hardware ray-box, triangle traversal, alpha foliage, and SIMD divergence", {
             {"RayRawTraversal", "Hardware BVH Traversal", "Raw Traversal - Coherent Triangles", "Ray Tracing", "GIS/s", "Raw hardware BVH traversal of coherent triangle geometry", true},
             {"RayRawTraversal", "Hardware BVH Traversal", "Raw Traversal - Deep Box Stress", "Ray Tracing", "MRays/s", "Deep multi-layer BVH box traversal stress", true},
             {"RayIntersect", "Intersection Tests", "Primitive Intersect - Ray-Triangle", "Ray Tracing", "GIS/s", "Hardware ray-triangle intersection test rate", true},
             {"RayIntersect", "Intersection Tests", "Primitive Intersect - Ray-Box", "Ray Tracing", "GIS/s", "Hardware ray-AABB box intersection test rate", true},
-            {"RayAnyHit", "Alpha-Tested Foliage Geometry", "Alpha Foliage Opacity - 100% Solid (Baseline)", "Ray Tracing", "MRays/s", "100% opaque alpha evaluation baseline", true},
-            {"RayAnyHit", "Alpha-Tested Foliage Geometry", "Alpha Foliage Opacity - 75% Solid", "Ray Tracing", "MRays/s", "75% solid / 25% transparent any-hit evaluation", true},
-            {"RayAnyHit", "Alpha-Tested Foliage Geometry", "Alpha Foliage Opacity - 50% Solid", "Ray Tracing", "MRays/s", "50% solid / 50% transparent any-hit evaluation", true},
-            {"RayAnyHit", "Alpha-Tested Foliage Geometry", "Alpha Foliage Opacity - 25% Solid", "Ray Tracing", "MRays/s", "25% solid / 75% transparent any-hit evaluation", true},
-            {"RayAnyHit", "Alpha-Tested Foliage Geometry", "Alpha Foliage Opacity - 10% Solid", "Ray Tracing", "MRays/s", "10% solid / 90% pass-through any-hit stress", true},
+            {"RayAnyHit", "Alpha-Tested Geometry", "Alpha Foliage - 100% Solid (Baseline)", "Ray Tracing", "MRays/s", "100% opaque alpha evaluation baseline", true},
+            {"RayAnyHit", "Alpha-Tested Geometry", "Alpha Foliage - 50% Solid (Cutout Stress)", "Ray Tracing", "MRays/s", "50% solid / 50% transparent any-hit evaluation", true},
             {"RayProcedural", "Procedural Geometry", "Procedural Geometry - AABB Spheres", "Ray Tracing", "MRays/s", "Procedural analytical sphere intersection in bounding box", true},
-            {"RayMaterialDivergence", "Material Divergence", "Material Divergence - Uniform (1 BSDF)", "Ray Tracing", "MRays/s", "Homogeneous material hit dispatch (1 BSDF shader)", true},
-            {"RayMaterialDivergence", "Material Divergence", "Material Divergence - Divergent (4 BSDFs)", "Ray Tracing", "MRays/s", "Heterogeneous material hit dispatch (4 divergent BSDF shaders)", true},
-            {"RayIncoherent", "Ray Directional Coherence", "Directional Coherence - 0 deg (Primary Rays)", "Ray Tracing", "MRays/s", "Primary camera rays with high spatial coherence", true},
-            {"RayIncoherent", "Ray Directional Coherence", "Directional Coherence - 15 deg", "Ray Tracing", "MRays/s", "Mild directional cone scattering", true},
-            {"RayDivergence", "Ray Directional Coherence", "Directional Coherence - 45 deg", "Ray Tracing", "MRays/s", "Moderate directional divergence traversal", true},
-            {"RayDivergence", "Ray Directional Coherence", "Directional Coherence - 75 deg", "Ray Tracing", "MRays/s", "Significant directional divergence traversal", true},
-            {"RayDivergence", "Ray Directional Coherence", "Directional Coherence - 90 deg (Hemispherical)", "Ray Tracing", "MRays/s", "Hemispherical diffuse cosine scattering", true},
-            {"RayDivergence", "Ray Directional Coherence", "Directional Coherence - 180 deg (Spherical)", "Ray Tracing", "MRays/s", "Full spherical isotropic scattering (maximum divergence)", true},
-            {"RayDivergence", "Ray Directional Coherence", "Directional Coherence - Traversal Microbench", "Ray Tracing", "MRays/s", "Isolated ray traversal at 100% directional coherence", true},
+            {"RayDivergence", "Ray Directional Coherence", "Directional Coherence - 100% Mirror (Coherent)", "Ray Tracing", "MRays/s", "Directional coherence sweep - 100% mirror reflection", true},
+            {"RayDivergence", "Ray Directional Coherence", "Directional Coherence - 75% Coherence", "Ray Tracing", "MRays/s", "Directional coherence sweep - 75% specular reflection", true},
+            {"RayDivergence", "Ray Directional Coherence", "Directional Coherence - 50% Coherence", "Ray Tracing", "MRays/s", "Directional coherence sweep - 50% directional scattering", true},
+            {"RayDivergence", "Ray Directional Coherence", "Directional Coherence - 25% Coherence", "Ray Tracing", "MRays/s", "Directional coherence sweep - 25% directional scattering", true},
+            {"RayDivergence", "Ray Directional Coherence", "Directional Coherence - 0% Diffuse (Incoherent)", "Ray Tracing", "MRays/s", "Directional coherence sweep - 0% diffuse isotropic scattering", true},
             {"RayPayload", "Payload Register Pressure", "Payload Pressure - 16B Payload", "Ray Tracing", "MRays/s", "Minimal 16-byte payload register footprint", true},
             {"RayPayload", "Payload Register Pressure", "Payload Pressure - 128B Payload", "Ray Tracing", "MRays/s", "Standard 128-byte path tracing payload footprint", true},
             {"RayPayload", "Payload Register Pressure", "Payload Pressure - 256B Payload", "Ray Tracing", "MRays/s", "Heavy 256-byte production BSDF payload footprint", true}
@@ -966,12 +959,17 @@ bool GuiApp::matchesItem(const ResultData& r, const BenchmarkItem& itm, uint32_t
         }
     }
 
-    // RayScheduling / RayPathTracing dispatch keyword matching
+    // RayScheduling dispatch keyword matching
     if (itm.id == "RayScheduling" || itm.id == "RayPathTracing") {
         if (itm.name.find("Multi-Light") != std::string::npos && clean.find("Multi-Light") != std::string::npos) return true;
         if (itm.name.find("Persistent") != std::string::npos && clean.find("Persistent") != std::string::npos) return true;
         if (itm.name.find("Alpha Cutout") != std::string::npos && clean.find("Alpha") != std::string::npos) return true;
         if (itm.name.find("SER") != std::string::npos && clean.find("SER") != std::string::npos) return true;
+        if (itm.name.find("RTP") != std::string::npos && clean.find("RTP") != std::string::npos) {
+            bool itmHasSER = (itm.name.find("SER") != std::string::npos);
+            bool cleanHasSER = (clean.find("SER") != std::string::npos);
+            if (itmHasSER == cleanHasSER) return true;
+        }
         if (itm.name.find("Dedicated") != std::string::npos && clean.find("Dedicated") != std::string::npos) return true;
         if (itm.name.find("DGC") != std::string::npos && (clean.find("DGC") != std::string::npos || clean.find("Work Lists") != std::string::npos)) return true;
         if (itm.name.find("Megakernel") != std::string::npos && clean.find("Megakernel") != std::string::npos) return true;
@@ -982,17 +980,15 @@ bool GuiApp::matchesItem(const ResultData& r, const BenchmarkItem& itm, uint32_t
     }
 
     // BVH & Divergence Stress matching
-    for (const char* pct : {"100%", "75%", "50%", "25%", "10%"}) {
+    for (const char* pct : {"100%", "75%", "50%", "25%", "10%", "0%"}) {
         if (itm.name.find(pct) != std::string::npos && clean.find(pct) != std::string::npos) return true;
     }
-    for (const char* deg : {"0 deg", "15 deg", "45 deg", "75 deg", "90 deg", "180 deg", "Microbench"}) {
+    for (const char* deg : {"45 deg", "75 deg", "90 deg", "180 deg", "Microbench", "Mirror", "Diffuse"}) {
         if (itm.name.find(deg) != std::string::npos && clean.find(deg) != std::string::npos) return true;
     }
     for (const char* pl : {"16B", "128B", "256B"}) {
         if (itm.name.find(pl) != std::string::npos && clean.find(pl) != std::string::npos) return true;
     }
-    if (itm.name.find("Uniform") != std::string::npos && clean.find("Uniform") != std::string::npos) return true;
-    if (itm.name.find("Divergent") != std::string::npos && clean.find("Divergent") != std::string::npos) return true;
     if (itm.name.find("Ray-Triangle") != std::string::npos && clean.find("Ray-Triangle") != std::string::npos) return true;
     if (itm.name.find("Ray-Box") != std::string::npos && clean.find("Ray-Box") != std::string::npos) return true;
     if (itm.name.find("Coherent") != std::string::npos && clean.find("Coherent") != std::string::npos) return true;
@@ -2447,8 +2443,6 @@ void GuiApp::renderResultsScorecard() {
                 } else if (res.benchmarkName.find("Megakernel") != std::string::npos ||
                            res.benchmarkName.find("Traditional") != std::string::npos ||
                            res.benchmarkName.find("Scanline (Baseline)") != std::string::npos ||
-                           (res.benchmarkName.find("RayMaterialDivergence") != std::string::npos && res.configIndex == 0) ||
-                           (res.benchmarkName.find("RayIncoherent") != std::string::npos && res.configIndex == 0) ||
                            (res.benchmarkName.find("RayDivergence") != std::string::npos && res.configIndex == 0) ||
                            (res.benchmarkName.find("RayPayload") != std::string::npos && res.configIndex == 0) ||
                            (res.benchmarkName.find("RayAnyHit") != std::string::npos && res.configIndex == 0)) {
@@ -2456,23 +2450,7 @@ void GuiApp::renderResultsScorecard() {
                     deltaCol = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
                 } else if (res.time_ms > 0.0 && curOpsPerSec > 0.0) {
                     double baseOps = 0.0;
-                    if (res.benchmarkName.find("RayMaterialDivergence") != std::string::npos) {
-                        for (const auto& other : m_allResults) {
-                            if (other.deviceIndex == res.deviceIndex && other.benchmarkName.find("RayMaterialDivergence") != std::string::npos &&
-                                other.configIndex == 0 && other.time_ms > 0.0) {
-                                baseOps = (static_cast<double>(other.operations) / other.time_ms) * 1000.0;
-                                break;
-                            }
-                        }
-                    } else if (res.benchmarkName.find("RayIncoherent") != std::string::npos) {
-                        for (const auto& other : m_allResults) {
-                            if (other.deviceIndex == res.deviceIndex && other.benchmarkName.find("RayIncoherent") != std::string::npos &&
-                                other.configIndex == 0 && other.time_ms > 0.0) {
-                                baseOps = (static_cast<double>(other.operations) / other.time_ms) * 1000.0;
-                                break;
-                            }
-                        }
-                    } else if (res.benchmarkName.find("RayDivergence") != std::string::npos) {
+                    if (res.benchmarkName.find("RayDivergence") != std::string::npos) {
                         for (const auto& other : m_allResults) {
                             if (other.deviceIndex == res.deviceIndex && other.benchmarkName.find("RayDivergence") != std::string::npos &&
                                 other.configIndex == 0 && other.time_ms > 0.0) {
@@ -2851,10 +2829,8 @@ void GuiApp::startBenchmarks() {
         else if (b == "FP16" || b == "BF16" || b == "FP8" || b == "INT8" || b == "INT4") gpu_configs += 2;
         else if (b == "RayASBuild") gpu_configs += 8;
         else if (b == "RayIntersect") gpu_configs += 2;
-        else if (b == "RayAnyHit") gpu_configs += 5;
+        else if (b == "RayAnyHit") gpu_configs += 2;
         else if (b == "RayProcedural") gpu_configs += 1;
-        else if (b == "RayMaterialDivergence") gpu_configs += 2;
-        else if (b == "RayIncoherent") gpu_configs += 2;
         else if (b == "RayDivergence") gpu_configs += 5;
         else if (b == "RayPayload") gpu_configs += 3;
         else if (b == "RayScheduling") {

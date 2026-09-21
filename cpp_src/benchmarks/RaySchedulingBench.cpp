@@ -380,7 +380,7 @@ std::string RaySchedulingBench::GetConfigName(uint32_t config_idx) const {
   case 28:
     return "Stage: Queue Memory - VRAM Round-Trip Bandwidth";
   case 29:
-    return "Primary Rays (Dedicated RTP)";
+    return "Primary Rays (RTP)";
   case 30:
     return "Primary Rays (RTP + SER)";
   default:

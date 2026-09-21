@@ -770,7 +770,7 @@ bool ResultImporter::loadFromFile(const std::string &filepath, ImportedRun &outR
         } else if (id == "rt_sched_full_showroom_rtp") {
           rd.component = "Ray Tracing";
           rd.subcategory = "Scene Ray Tracing (Showroom)";
-          rd.benchmarkName = "RayScheduling (Showroom (Dedicated RTP))";
+          rd.benchmarkName = "RayScheduling (Showroom (RTP))";
           rd.sortWeight = 602;
           rd.configIndex = 2;
         } else if (id == "rt_sched_full_showroom_ser") {
@@ -794,7 +794,7 @@ bool ResultImporter::loadFromFile(const std::string &filepath, ImportedRun &outR
         } else if (id == "rt_sched_full_indoor_rtp") {
           rd.component = "Ray Tracing";
           rd.subcategory = "Scene Ray Tracing (Indoor)";
-          rd.benchmarkName = "RayScheduling (Indoor (Dedicated RTP))";
+          rd.benchmarkName = "RayScheduling (Indoor (RTP))";
           rd.sortWeight = 612;
           rd.configIndex = 2;
         } else if (id == "rt_sched_full_indoor_ser") {
@@ -818,7 +818,7 @@ bool ResultImporter::loadFromFile(const std::string &filepath, ImportedRun &outR
         } else if (id == "rt_sched_full_outdoor_rtp") {
           rd.component = "Ray Tracing";
           rd.subcategory = "Scene Ray Tracing (Outdoor)";
-          rd.benchmarkName = "RayScheduling (Outdoor (Dedicated RTP))";
+          rd.benchmarkName = "RayScheduling (Outdoor (RTP))";
           rd.sortWeight = 622;
           rd.configIndex = 2;
         } else if (id == "rt_sched_full_outdoor_ser") {
@@ -842,7 +842,7 @@ bool ResultImporter::loadFromFile(const std::string &filepath, ImportedRun &outR
         } else if (id == "rt_sched_full_forest_rtp") {
           rd.component = "Ray Tracing";
           rd.subcategory = "Scene Ray Tracing (Forest)";
-          rd.benchmarkName = "RayScheduling (Forest (Dedicated RTP))";
+          rd.benchmarkName = "RayScheduling (Forest (RTP))";
           rd.sortWeight = 632;
           rd.configIndex = 2;
         } else if (id == "rt_sched_full_forest_ser") {

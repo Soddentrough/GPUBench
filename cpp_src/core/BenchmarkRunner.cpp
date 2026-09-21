@@ -13,9 +13,6 @@
 #include "benchmarks/RayAnyHitBench.h"
 #include "benchmarks/RayASBuildBench.h"
 #include "benchmarks/RayDivergenceBench.h"
-#include "benchmarks/RayIncoherentBench.h"
-#include "benchmarks/RayMaterialDivergenceBench.h"
-#include "benchmarks/RayPathTracingBench.h"
 #include "benchmarks/RayPayloadBench.h"
 #include "benchmarks/RayProceduralBench.h"
 #include "benchmarks/RayIntersectBench.h"
@@ -328,11 +325,7 @@ void BenchmarkRunner::discoverBenchmarks() {
     forest->SetVerifyParity(verifyParity);
     benchmarks.push_back(std::move(forest));
   }
-  benchmarks.push_back(std::make_unique<RayMaterialDivergenceBench>());
-  benchmarks.push_back(std::make_unique<RayIncoherentBench>());
   benchmarks.push_back(std::make_unique<RayDivergenceBench>());
-  // Note: Standalone synthetic 16k-triangle grid RayPathTracingBench is retired in favor of
-  // Full Scene Path Tracing (Multi-Bounce) on real-world scenes in RaySchedulingBench.
   benchmarks.push_back(std::make_unique<RayPayloadBench>());
 
   // Cache Bandwidth

@@ -548,11 +548,9 @@ fn get_benchmark_description(name: &str) -> &'static str {
         "RayTracing" | "RayIntersect" => "Peak BVH acceleration structure traversal and ray-triangle intersection throughput.",
         "RayDivergence" => "BVH traversal throughput under non-uniform ray branches and wavefront execution divergence.",
         "RayAnyHit" => "Traversal and shader invocation throughput against transparent, alpha-tested geometry.",
-        "RayIncoherent" => "Cache hit rate and traversal speed under randomized non-coherent diffuse bounce distributions.",
         "RayPayload" => "Ray traversal performance under heavy recursive register payload pressure.",
         "RayASBuild" => "Acceleration structure construction (BLAS/TLAS) and dynamic mesh refit throughput.",
         "RayProcedural" => "Intersection evaluation against mathematically defined procedural primitives (spheres, curves).",
-        "RayPathTracing" => "Legacy synthetic grid path tracing (retired in favor of Full Scene Path Tracing).",
         "RayScheduling" | "RayExecutionParadigm" => "Comparative ray scheduling: Full Scene PBR Ray Tracing & Multi-Bounce Path Tracing across Showroom, Indoor Atrium, Outdoor Landscape, and Open-World Forest.",
         _ => "GPU workstation benchmark suite.",
     }
@@ -578,8 +576,6 @@ pub fn get_benchmark_api_extensions(name: &str) -> &'static str {
         "RayAnyHit" => "VK_KHR_ray_query (gl_RayFlagsCullNoOpaqueEXT / Custom Opacity)",
         "RayProcedural" => "VK_KHR_ray_query (AABB Procedural Intersection)",
         "RayScheduling" | "RayExecutionParadigm" => "VK_KHR_ray_query, VK_EXT_device_generated_commands",
-        "RayMaterialDivergence" => "VK_KHR_ray_query (Dynamic Material Branching)",
-        "RayIncoherent" => "VK_KHR_ray_query (Unordered BVH Diffuse Bounce Traversal)",
         "RayDivergence" => "VK_KHR_ray_query (Wavefront Divergence)",
         "RayPayload" => "VK_KHR_ray_query (Spill-to-Scratch Register Pressure)",
         _ => "Vulkan / OpenCL / System Standard API",
@@ -672,15 +668,12 @@ pub fn is_benchmark_requested(t: &str, requested_tokens: &[String]) -> bool {
             }
             "anyhit" | "rayanyhit" => t == "RayAnyHit",
             "procedural" | "rayprocedural" => t == "RayProcedural",
-            "matdivergence" | "materialdivergence" | "raymaterialdivergence" => {
-                t == "RayMaterialDivergence" || t == "RayDivergence"
-            }
-            "incoherent" | "rayincoherent" => t == "RayIncoherent",
-            "divergence" | "raydivergence" => {
-                t == "RayDivergence" || t == "RayMaterialDivergence"
+            "matdivergence" | "materialdivergence" | "raymaterialdivergence"
+            | "incoherent" | "rayincoherent" | "divergence" | "raydivergence" => {
+                t == "RayDivergence"
             }
             "pathtracing" | "raypathtracing" => {
-                t == "RayScheduling" || t.starts_with("RayScheduling") || t == "RayPathTracing"
+                t == "RayScheduling" || t.starts_with("RayScheduling")
             }
             "rayscheduling" | "scheduling" | "worklists" | "dgc" | "rayexecutionparadigm" => {
                 t == "RayScheduling" || t == "RayExecutionParadigm" || t.starts_with("RayScheduling")
@@ -781,7 +774,7 @@ fn print_gui_help() {
     println!("    raster      Fixed-function rasterization & ROP pixel fill rates (subset of graphics):");
     println!("                Pixel Fill Rate (RGBA8, RGBA16F HDR, Alpha Blending)\n");
     println!("    raytracing  Hardware BVH traversal, intersection & scheduling (subset of graphics, alias: 'rt'):");
-    println!("                RayTracing, RayAnyHit, RayProcedural, RayIncoherent, RayMaterialDivergence,");
+    println!("                RayTracing, RayAnyHit, RayProcedural, RayDivergence,");
     println!("                RayPayload, RayASBuild, RayScheduling (Scene Ray Tracing & Path Tracing),");
     println!("                Ray Pipeline Breakdown (Linear vs 2D Tiled vs Morton Z-Curve, Queue Compaction)\n");
     println!("    system      Host CPU & RAM system memory:");
@@ -1717,8 +1710,8 @@ pub static WORKLOADS: &[WorkloadDef] = &[
     WorkloadDef {
         id: "rt_sched_full_showroom_rtp",
         category: "RAY PIPELINE BREAKDOWN",
-        label: "Scene RT: Showroom (Dedicated RTP)",
-        approach: "Morton 8x4 + Dedicated RTP (109k Tris)",
+        label: "Scene RT: Showroom (RTP)",
+        approach: "Morton 8x4 + RTP (109k Tris)",
         default_unit: "MRays/s",
         desc: "End-to-end PBR ray tracing of Showroom Studio (109k Tris) combining 2D Morton ray ordering with dedicated Vulkan Ray Tracing Pipeline (vkCmdTraceRaysKHR).",
         api_extensions: "VK_KHR_ray_tracing_pipeline",
@@ -1757,8 +1750,8 @@ pub static WORKLOADS: &[WorkloadDef] = &[
     WorkloadDef {
         id: "rt_sched_full_indoor_rtp",
         category: "RAY PIPELINE BREAKDOWN",
-        label: "Scene RT: Indoor (Dedicated RTP)",
-        approach: "Morton 8x4 + Dedicated RTP (262k Tris)",
+        label: "Scene RT: Indoor (RTP)",
+        approach: "Morton 8x4 + RTP (262k Tris)",
         default_unit: "MRays/s",
         desc: "End-to-end PBR ray tracing of Indoor Atrium (262k Tris) combining 2D Morton ray ordering with dedicated Vulkan Ray Tracing Pipeline (vkCmdTraceRaysKHR).",
         api_extensions: "VK_KHR_ray_tracing_pipeline",
@@ -1797,8 +1790,8 @@ pub static WORKLOADS: &[WorkloadDef] = &[
     WorkloadDef {
         id: "rt_sched_full_outdoor_rtp",
         category: "RAY PIPELINE BREAKDOWN",
-        label: "Scene RT: Outdoor (Dedicated RTP)",
-        approach: "Morton 8x4 + Dedicated RTP (57k Tris)",
+        label: "Scene RT: Outdoor (RTP)",
+        approach: "Morton 8x4 + RTP (57k Tris)",
         default_unit: "MRays/s",
         desc: "End-to-end PBR ray tracing of Outdoor Landscape (57k Tris) combining 2D Morton ray ordering with dedicated Vulkan Ray Tracing Pipeline (vkCmdTraceRaysKHR).",
         api_extensions: "VK_KHR_ray_tracing_pipeline",
@@ -1837,8 +1830,8 @@ pub static WORKLOADS: &[WorkloadDef] = &[
     WorkloadDef {
         id: "rt_sched_full_forest_rtp",
         category: "RAY PIPELINE BREAKDOWN",
-        label: "Scene RT: Forest (Dedicated RTP)",
-        approach: "Morton 8x4 + Dedicated RTP (1.0M Tris)",
+        label: "Scene RT: Forest (RTP)",
+        approach: "Morton 8x4 + RTP (1.0M Tris)",
         default_unit: "MRays/s",
         desc: "End-to-end PBR ray tracing of Open-World Forest (1.0M Tris) combining 2D Morton ray ordering with dedicated Vulkan Ray Tracing Pipeline (vkCmdTraceRaysKHR).",
         api_extensions: "VK_KHR_ray_tracing_pipeline",
@@ -1877,8 +1870,8 @@ pub static WORKLOADS: &[WorkloadDef] = &[
     WorkloadDef {
         id: "rt_sched_stage_prim_morton_rtp",
         category: "RAY PIPELINE BREAKDOWN",
-        label: "Primary Rays (Dedicated RTP)",
-        approach: "Morton 8x4 + Dedicated RTP",
+        label: "Primary Rays (RTP)",
+        approach: "Morton 8x4 + RTP",
         default_unit: "MRays/s",
         desc: "End-to-end PBR ray tracing combining 2D Morton ray ordering with dedicated Vulkan Ray Tracing Pipeline (vkCmdTraceRaysKHR).",
         api_extensions: "VK_KHR_ray_tracing_pipeline",
@@ -2915,14 +2908,12 @@ impl Application for GPUBenchApp {
                             "FP16" | "BF16" | "FP8" | "INT8" | "INT4" => 2,
                             "RayASBuild" => 8,
                             "RayTracing" | "RayIntersect" => 2,
-                            "RayAnyHit" => 5,
+                            "RayAnyHit" => 2,
                             "RayProcedural" => 1,
-                            "RayMaterialDivergence" => 2,
-                            "RayIncoherent" => 2,
                             "RayDivergence" => 5,
                             "RayPayload" => 3,
                             "RayScheduling" | "RayExecutionParadigm" => {
-                                if self.selected_scene == ScenePreset::All { 30 * 4 } else { 30 }
+                                if self.selected_scene == ScenePreset::All { 31 * 4 } else { 31 }
                             }
                             _ => 1,
                         };
@@ -3991,8 +3982,6 @@ impl Application for GPUBenchApp {
                         ("RayIntersect", "Ray-Triangle Intersect"),
                         ("RayAnyHit", "AnyHit Alpha-Tested"),
                         ("RayProcedural", "Procedural Geometry"),
-                        ("RayMaterialDivergence", "Material Divergence"),
-                        ("RayIncoherent", "Incoherent Bounces"),
                         ("RayDivergence", "Divergence Traversal"),
                         ("RayPayload", "Payload Pressure"),
                     ]);
@@ -5310,9 +5299,8 @@ impl GPUBenchApp {
             "sys_mem_lat" => self.selected_tests.contains("System Memory Latency"),
             "rop_rgba8" | "rop_rgba16f" | "rop_blend" => self.selected_tests.contains("Pixel Fill Rate"),
             "rt_triangle" => self.selected_tests.contains("RayTracing") || self.selected_tests.contains("RayIntersect"),
-            "rt_divergence" => self.selected_tests.contains("RayDivergence") || self.selected_tests.contains("RayMaterialDivergence"),
+            "rt_divergence" | "rt_incoherent" => self.selected_tests.contains("RayDivergence"),
             "rt_anyhit" => self.selected_tests.contains("RayAnyHit"),
-            "rt_incoherent" => self.selected_tests.contains("RayIncoherent"),
             "rt_payload" => self.selected_tests.contains("RayPayload"),
             "rt_blas_build_1m" | "rt_blas_update_1m" | "rt_blas_build_5m" | "rt_blas_update_5m"
             | "rt_blas_build_10m" | "rt_tlas_indoor" | "rt_tlas_jungle" | "rt_tlas_openworld"
@@ -6225,11 +6213,8 @@ mod tests {
         assert!(is_benchmark_requested("RayIntersect", &requested_tokens));
         assert!(is_benchmark_requested("RayTracing", &requested_tokens));
         assert!(is_benchmark_requested("RayScheduling", &requested_tokens));
-        assert!(is_benchmark_requested("RayPathTracing", &requested_tokens));
         assert!(is_benchmark_requested("RayAnyHit", &requested_tokens));
         assert!(is_benchmark_requested("RayProcedural", &requested_tokens));
-        assert!(is_benchmark_requested("RayMaterialDivergence", &requested_tokens));
-        assert!(is_benchmark_requested("RayIncoherent", &requested_tokens));
         assert!(is_benchmark_requested("RayDivergence", &requested_tokens));
         assert!(is_benchmark_requested("RayPayload", &requested_tokens));
 

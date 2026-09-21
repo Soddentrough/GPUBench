@@ -225,12 +225,9 @@ set(LIB_SOURCES
     cpp_src/benchmarks/RayRawTraversalBench.cpp
     cpp_src/benchmarks/RayDivergenceBench.cpp
     cpp_src/benchmarks/RayAnyHitBench.cpp
-    cpp_src/benchmarks/RayIncoherentBench.cpp
     cpp_src/benchmarks/RayPayloadBench.cpp
     cpp_src/benchmarks/RayASBuildBench.cpp
     cpp_src/benchmarks/RayProceduralBench.cpp
-    cpp_src/benchmarks/RayMaterialDivergenceBench.cpp
-    cpp_src/benchmarks/RayPathTracingBench.cpp
     cpp_src/benchmarks/RaySchedulingBench.cpp
     cpp_src/scene/GltfScene.cpp
     cpp_src/utils/HardwareTelemetry.cpp

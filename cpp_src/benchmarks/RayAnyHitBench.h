@@ -12,7 +12,7 @@ public:
   void Teardown() override;
 
   BenchmarkResult GetResult(uint32_t config_idx) const override;
-  uint32_t GetNumConfigs() const override { return 5; }
+  uint32_t GetNumConfigs() const override { return 2; }
   int GetSortWeight(uint32_t = 0) const override { return 672; }
   const char *GetName() const override;
   const char *GetComponent(uint32_t config_idx) const override;

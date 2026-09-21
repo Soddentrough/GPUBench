@@ -534,35 +534,7 @@ void ResultFormatter::print() {
                   std::string localBaseMetric = "";
                   bool isLocalBase = false;
 
-                  if (res.benchmarkName.find("RayMaterialDivergence") != std::string::npos) {
-                    if (res.configIndex == 0) isLocalBase = true;
-                    else {
-                      for (const auto &bp : subcat.benchmarks) {
-                        if (bp.second.count(backend)) {
-                          const auto &br = bp.second.at(backend);
-                          if (br.benchmarkName.find("RayMaterialDivergence") != std::string::npos && br.configIndex == 0 && br.time_ms > 0.0) {
-                            localBaseVal = static_cast<double>(br.operations) / (br.time_ms / 1000.0) / 1e6;
-                            localBaseMetric = br.metric;
-                            break;
-                          }
-                        }
-                      }
-                    }
-                  } else if (res.benchmarkName.find("RayIncoherent") != std::string::npos) {
-                    if (res.configIndex == 0) isLocalBase = true;
-                    else {
-                      for (const auto &bp : subcat.benchmarks) {
-                        if (bp.second.count(backend)) {
-                          const auto &br = bp.second.at(backend);
-                          if (br.benchmarkName.find("RayIncoherent") != std::string::npos && br.configIndex == 0 && br.time_ms > 0.0) {
-                            localBaseVal = static_cast<double>(br.operations) / (br.time_ms / 1000.0) / 1e6;
-                            localBaseMetric = br.metric;
-                            break;
-                          }
-                        }
-                      }
-                    }
-                  } else if (res.benchmarkName.find("RayDivergence") != std::string::npos) {
+                  if (res.benchmarkName.find("RayDivergence") != std::string::npos) {
                     if (res.configIndex == 0) isLocalBase = true;
                     else {
                       for (const auto &bp : subcat.benchmarks) {
