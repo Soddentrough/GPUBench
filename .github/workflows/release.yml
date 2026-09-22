@@ -158,6 +158,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
+            libvulkan-dev \
+            libvulkan1 \
             ocl-icd-opencl-dev \
             opencl-headers \
             cmake \

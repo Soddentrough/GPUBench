@@ -19,6 +19,8 @@ if(WIN32)
     add_compile_definitions(NOMINMAX)
 endif()
 
+find_package(Threads REQUIRED)
+
 # Generate config header with install paths
 configure_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/cpp_src/utils/Config.h.in

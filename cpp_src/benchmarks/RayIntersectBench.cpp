@@ -375,6 +375,7 @@ void RayIntersectBench::Teardown() {
   if (context) {
     if (kernel) { context->releaseKernel(kernel); kernel = nullptr; }
     if (resultBuffer) { context->releaseBuffer(resultBuffer); resultBuffer = nullptr; }
+#ifdef HAVE_VULKAN
     if (vertexBuffer) { context->releaseBuffer(vertexBuffer); vertexBuffer = nullptr; }
     if (aabbBuffer) { context->releaseBuffer(aabbBuffer); aabbBuffer = nullptr; }
     if (instanceBuffer) { context->releaseBuffer(instanceBuffer); instanceBuffer = nullptr; }
@@ -383,6 +384,7 @@ void RayIntersectBench::Teardown() {
     if (triangleTlasBuffer) { context->releaseBuffer(triangleTlasBuffer); triangleTlasBuffer = nullptr; }
     if (boxTlasBuffer) { context->releaseBuffer(boxTlasBuffer); boxTlasBuffer = nullptr; }
     if (scratchBuffer) { context->releaseBuffer(scratchBuffer); scratchBuffer = nullptr; }
+#endif
     context = nullptr;
   }
 }
