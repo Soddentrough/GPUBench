@@ -2219,70 +2219,141 @@ void GuiApp::renderSidebarTelemetry() {
     ImPlot::PushStyleVar(ImPlotStyleVar_PlotPadding, ImVec2(6, 4));
     ImPlot::PushStyleVar(ImPlotStyleVar_LabelPadding, ImVec2(4, 2));
 
+    // Color definitions for telemetry traces & legend
+    const ImVec4 colGpu0Shader   = ImVec4(0.35f, 0.85f, 0.45f, 1.0f); // Green
+    const ImVec4 colGpu1Shader   = ImVec4(0.95f, 0.38f, 0.35f, 1.0f); // Coral Red
+    const ImVec4 colSingleShader = ImVec4(0.38f, 0.75f, 1.00f, 1.0f); // Sky Blue
+    const ImVec4 colSingleMem    = ImVec4(0.25f, 0.90f, 0.80f, 1.0f); // Cyan
+
+    const ImVec4 colGpu0Temp  = ImVec4(0.35f, 0.85f, 0.45f, 1.0f); // Green
+    const ImVec4 colGpu0Power = ImVec4(0.95f, 0.38f, 0.35f, 1.0f); // Red
+    const ImVec4 colGpu1Temp  = ImVec4(0.68f, 0.52f, 0.98f, 1.0f); // Purple
+    const ImVec4 colGpu1Power = ImVec4(0.95f, 0.72f, 0.30f, 1.0f); // Amber
+
+    const ImVec4 colSingleTemp  = ImVec4(0.35f, 0.85f, 0.55f, 1.0f); // Emerald Green
+    const ImVec4 colSinglePower = ImVec4(0.95f, 0.72f, 0.30f, 1.0f); // Amber Gold
+
+    auto renderLegendChip = [](const char* label, ImVec4 color) {
+        ImVec2 p = ImGui::GetCursorScreenPos();
+        float lineH = ImGui::GetTextLineHeight();
+        float boxSize = 7.0f;
+        float boxOffsetY = (lineH - boxSize) * 0.5f;
+        ImDrawList* drawList = ImGui::GetWindowDrawList();
+        ImU32 col = ImGui::GetColorU32(color);
+        drawList->AddRectFilled(ImVec2(p.x, p.y + boxOffsetY), ImVec2(p.x + boxSize, p.y + boxOffsetY + boxSize), col, 1.5f);
+        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + boxSize + 5.0f);
+        ImGui::TextColored(ImVec4(0.80f, 0.85f, 0.92f, 1.0f), "%s", label);
+    };
+
+    ImPlotFlags plotFlags = ImPlotFlags_NoTitle | ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText;
+
     // Graph 1: Frequencies (Shader & Memory Clock)
-    if (ImPlot::BeginPlot("##sidebar_clocks", ImVec2(-1, plotH), ImPlotFlags_NoTitle | ImPlotFlags_NoMouseText)) {
+    if (ImPlot::BeginPlot("##sidebar_clocks", ImVec2(-1, plotH), plotFlags)) {
         ImPlot::SetupAxes(nullptr, "MHz", ImPlotAxisFlags_NoLabel, ImPlotAxisFlags_None);
         ImPlot::SetupAxisLimits(ImAxis_X1, minT, curT + 0.5f, ImPlotCond_Always);
         ImPlot::SetupAxisLimits(ImAxis_Y1, 0, 3500, ImPlotCond_Once);
-        ImPlot::SetupLegend(ImPlotLocation_NorthWest, ImPlotLegendFlags_NoButtons);
 
         if (m_telemetryDualGpuMode) {
             if (snap0.timeHistory.size() > 1) {
-                ImPlot::PlotLine("GPU 0 Shader", snap0.timeHistory.data(), snap0.sclkHistory.data(),
+                ImPlot::SetNextLineStyle(colGpu0Shader, 1.5f);
+                ImPlot::PlotLine("##g0s", snap0.timeHistory.data(), snap0.sclkHistory.data(),
                                  static_cast<int>(snap0.sclkHistory.size()), 0, static_cast<int>(snap0.sclkHistory.offset()));
             }
             if (snap1.timeHistory.size() > 1) {
-                ImPlot::PlotLine("GPU 1 Shader", snap1.timeHistory.data(), snap1.sclkHistory.data(),
+                ImPlot::SetNextLineStyle(colGpu1Shader, 1.5f);
+                ImPlot::PlotLine("##g1s", snap1.timeHistory.data(), snap1.sclkHistory.data(),
                                  static_cast<int>(snap1.sclkHistory.size()), 0, static_cast<int>(snap1.sclkHistory.offset()));
             }
         } else {
             if (activeSnap.timeHistory.size() > 1) {
-                ImPlot::PlotLine("Shader", activeSnap.timeHistory.data(), activeSnap.sclkHistory.data(),
+                ImPlot::SetNextLineStyle(colSingleShader, 1.5f);
+                ImPlot::PlotLine("##sclk", activeSnap.timeHistory.data(), activeSnap.sclkHistory.data(),
                                  static_cast<int>(activeSnap.sclkHistory.size()), 0, static_cast<int>(activeSnap.sclkHistory.offset()));
-                ImPlot::PlotLine("Memory", activeSnap.timeHistory.data(), activeSnap.mclkHistory.data(),
+                ImPlot::SetNextLineStyle(colSingleMem, 1.5f);
+                ImPlot::PlotLine("##mclk", activeSnap.timeHistory.data(), activeSnap.mclkHistory.data(),
                                  static_cast<int>(activeSnap.mclkHistory.size()), 0, static_cast<int>(activeSnap.mclkHistory.offset()));
             }
         }
         ImPlot::EndPlot();
     }
 
+    // Legend below Graph 1
+    if (ImGui::BeginTable("LegendClocks", 2, ImGuiTableFlags_SizingStretchSame)) {
+        ImGui::TableNextColumn();
+        if (m_telemetryDualGpuMode) {
+            renderLegendChip("GPU 0 Shader", colGpu0Shader);
+            ImGui::TableNextColumn();
+            renderLegendChip("GPU 1 Shader", colGpu1Shader);
+        } else {
+            renderLegendChip("Shader Clock", colSingleShader);
+            ImGui::TableNextColumn();
+            renderLegendChip("Memory Clock", colSingleMem);
+        }
+        ImGui::EndTable();
+    }
+
     ImGui::Spacing();
 
     // Graph 2: Thermals & Power Dynamics
-    if (ImPlot::BeginPlot("##sidebar_thermals", ImVec2(-1, plotH), ImPlotFlags_NoTitle | ImPlotFlags_NoMouseText)) {
+    if (ImPlot::BeginPlot("##sidebar_thermals", ImVec2(-1, plotH), plotFlags)) {
         ImPlot::SetupAxes(nullptr, "°C", ImPlotAxisFlags_NoLabel, ImPlotAxisFlags_None);
         ImPlot::SetupAxis(ImAxis_Y2, "W", ImPlotAxisFlags_AuxDefault);
         ImPlot::SetupAxisLimits(ImAxis_X1, minT, curT + 0.5f, ImPlotCond_Always);
         ImPlot::SetupAxisLimits(ImAxis_Y1, 20, 110, ImPlotCond_Once);
         ImPlot::SetupAxisLimits(ImAxis_Y2, 0, 350, ImPlotCond_Once);
-        ImPlot::SetupLegend(ImPlotLocation_NorthWest, ImPlotLegendFlags_NoButtons);
 
         if (m_telemetryDualGpuMode) {
             if (snap0.timeHistory.size() > 1) {
-                ImPlot::PlotLine("GPU 0 Temp", snap0.timeHistory.data(), snap0.tempJctHistory.data(),
+                ImPlot::SetNextLineStyle(colGpu0Temp, 1.5f);
+                ImPlot::PlotLine("##g0t", snap0.timeHistory.data(), snap0.tempJctHistory.data(),
                                  static_cast<int>(snap0.tempJctHistory.size()), 0, static_cast<int>(snap0.tempJctHistory.offset()));
                 ImPlot::SetAxes(ImAxis_X1, ImAxis_Y2);
-                ImPlot::PlotLine("GPU 0 Power", snap0.timeHistory.data(), snap0.powerHistory.data(),
+                ImPlot::SetNextLineStyle(colGpu0Power, 1.5f);
+                ImPlot::PlotLine("##g0p", snap0.timeHistory.data(), snap0.powerHistory.data(),
                                  static_cast<int>(snap0.powerHistory.size()), 0, static_cast<int>(snap0.powerHistory.offset()));
             }
             if (snap1.timeHistory.size() > 1) {
                 ImPlot::SetAxes(ImAxis_X1, ImAxis_Y1);
-                ImPlot::PlotLine("GPU 1 Temp", snap1.timeHistory.data(), snap1.tempJctHistory.data(),
+                ImPlot::SetNextLineStyle(colGpu1Temp, 1.5f);
+                ImPlot::PlotLine("##g1t", snap1.timeHistory.data(), snap1.tempJctHistory.data(),
                                  static_cast<int>(snap1.tempJctHistory.size()), 0, static_cast<int>(snap1.tempJctHistory.offset()));
                 ImPlot::SetAxes(ImAxis_X1, ImAxis_Y2);
-                ImPlot::PlotLine("GPU 1 Power", snap1.timeHistory.data(), snap1.powerHistory.data(),
+                ImPlot::SetNextLineStyle(colGpu1Power, 1.5f);
+                ImPlot::PlotLine("##g1p", snap1.timeHistory.data(), snap1.powerHistory.data(),
                                  static_cast<int>(snap1.powerHistory.size()), 0, static_cast<int>(snap1.powerHistory.offset()));
             }
         } else {
             if (activeSnap.timeHistory.size() > 1) {
-                ImPlot::PlotLine("Temp", activeSnap.timeHistory.data(), activeSnap.tempJctHistory.data(),
+                ImPlot::SetNextLineStyle(colSingleTemp, 1.5f);
+                ImPlot::PlotLine("##jct", activeSnap.timeHistory.data(), activeSnap.tempJctHistory.data(),
                                  static_cast<int>(activeSnap.tempJctHistory.size()), 0, static_cast<int>(activeSnap.tempJctHistory.offset()));
                 ImPlot::SetAxes(ImAxis_X1, ImAxis_Y2);
-                ImPlot::PlotLine("Power", activeSnap.timeHistory.data(), activeSnap.powerHistory.data(),
+                ImPlot::SetNextLineStyle(colSinglePower, 1.5f);
+                ImPlot::PlotLine("##pwr", activeSnap.timeHistory.data(), activeSnap.powerHistory.data(),
                                  static_cast<int>(activeSnap.powerHistory.size()), 0, static_cast<int>(activeSnap.powerHistory.offset()));
             }
         }
         ImPlot::EndPlot();
+    }
+
+    // Legend below Graph 2
+    if (ImGui::BeginTable("LegendThermals", 2, ImGuiTableFlags_SizingStretchSame)) {
+        if (m_telemetryDualGpuMode) {
+            ImGui::TableNextColumn();
+            renderLegendChip("GPU 0 Temp", colGpu0Temp);
+            ImGui::TableNextColumn();
+            renderLegendChip("GPU 0 Power", colGpu0Power);
+            ImGui::TableNextColumn();
+            renderLegendChip("GPU 1 Temp", colGpu1Temp);
+            ImGui::TableNextColumn();
+            renderLegendChip("GPU 1 Power", colGpu1Power);
+        } else {
+            ImGui::TableNextColumn();
+            renderLegendChip("Junction Temp", colSingleTemp);
+            ImGui::TableNextColumn();
+            renderLegendChip("Board Power", colSinglePower);
+        }
+        ImGui::EndTable();
     }
 
     ImPlot::PopStyleVar(2);
