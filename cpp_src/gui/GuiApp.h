@@ -130,10 +130,10 @@ private:
 
     // UI Panels
     void renderLeftSidebar(float width, float height);
+    void renderSidebarTelemetry();
     void renderRightWorkspace(float width, float height);
     void renderBenchmarkSuitePanel();
     void renderLiveTelemetryDock();
-    void renderTelemetryHUD();
     void renderResultsScorecard();
     void renderRayTracingViewport();
     void renderSettingsModal();

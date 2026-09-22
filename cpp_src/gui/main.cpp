@@ -54,7 +54,7 @@ int main(int argc, char** argv) {
     }
 
     gpubench::gui::VulkanContext vulkanContext;
-    if (!vulkanContext.init("GPUBench v1.0.0 — Workstation GPU Profiler", 1440, 990)) {
+    if (!vulkanContext.init("GPUBench v1.0.0 — Workstation GPU Profiler", 1480, 1180)) {
         std::cerr << "Failed to initialize Vulkan GUI context!" << std::endl;
         return 1;
     }

@@ -22,10 +22,25 @@ bool VulkanContext::init(const char* title, int width, int height) {
     // Set Wayland app id if applicable
     SDL_SetHint(SDL_HINT_APP_NAME, "GPUBench");
 
+    int winW = width;
+    int winH = height;
+    SDL_DisplayID displayID = SDL_GetPrimaryDisplay();
+    if (displayID != 0) {
+        SDL_Rect usableBounds{};
+        if (SDL_GetDisplayUsableBounds(displayID, &usableBounds)) {
+            if (usableBounds.h > 0 && winH > usableBounds.h - 60) {
+                winH = std::max(900, usableBounds.h - 60);
+            }
+            if (usableBounds.w > 0 && winW > usableBounds.w - 40) {
+                winW = std::max(1280, usableBounds.w - 40);
+            }
+        }
+    }
+
     m_window = SDL_CreateWindow(
         title,
-        width,
-        height,
+        winW,
+        winH,
         SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY
     );
 
