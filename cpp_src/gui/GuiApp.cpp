@@ -20,6 +20,9 @@
 #endif
 #include <windows.h>
 #include <intrin.h>
+#elif defined(__APPLE__)
+#include <sys/utsname.h>
+#include <sys/sysctl.h>
 #else
 #include <sys/utsname.h>
 #include <sys/sysinfo.h>
@@ -118,6 +121,27 @@ static void getHostSystemInfo(std::string& outCpuModel, std::string& outCpuArch,
     if (GlobalMemoryStatusEx(&memStatus)) {
         outRamMb = memStatus.ullTotalPhys / (1024 * 1024);
     }
+#elif defined(__APPLE__)
+    outOsDriver = "macOS";
+    struct utsname un;
+    if (uname(&un) == 0) {
+        outOsDriver = std::string(un.sysname) + " " + std::string(un.release);
+    }
+
+    char cpuBrand[256] = {0};
+    size_t cpuBrandLen = sizeof(cpuBrand);
+    if (sysctlbyname("machdep.cpu.brand_string", cpuBrand, &cpuBrandLen, NULL, 0) == 0) {
+        outCpuModel = cpuBrand;
+    }
+
+    int64_t memBytes = 0;
+    size_t memBytesLen = sizeof(memBytes);
+    if (sysctlbyname("hw.memsize", &memBytes, &memBytesLen, NULL, 0) == 0) {
+        outRamMb = static_cast<uint64_t>(memBytes) / (1024 * 1024);
+    }
+#if defined(__arm64__) || defined(__aarch64__)
+    outCpuArch = "Apple Silicon (ARM64)";
+#endif
 #else
     outOsDriver = "Linux";
     struct utsname un;

@@ -99,6 +99,10 @@ bool VulkanContext::init(const char* title, int width, int height, float scaleOv
         "C:\\Windows\\Fonts\\segoeui.ttf",
         "C:\\Windows\\Fonts\\arial.ttf",
         "C:\\Windows\\Fonts\\calibri.ttf",
+#elif defined(__APPLE__)
+        "/System/Library/Fonts/SFNS.ttf",
+        "/System/Library/Fonts/Supplemental/Arial.ttf",
+        "/Library/Fonts/Arial.ttf",
 #endif
         "/usr/share/fonts/adwaita-sans-fonts/AdwaitaSans-Regular.ttf",
         "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf",
