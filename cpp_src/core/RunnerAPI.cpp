@@ -5,6 +5,8 @@
 #include <memory>
 #include <mutex>
 #include <map>
+#include <algorithm>
+#include <cctype>
 
 std::vector<ResultData> RunBenchmarksAPI(
     const std::vector<std::string>& benchmarks_to_run,
@@ -361,5 +363,182 @@ std::vector<BenchmarkSupportInfo> ProbeBenchmarkSupportAPI(
         std::cerr << "ProbeBenchmarkSupportAPI failed: unknown error" << std::endl;
     }
     return results;
+}
+
+ComputeApiSupportInfo ProbeComputeApiSupportAPI(const std::string& backend_name) {
+    static std::map<std::string, ComputeApiSupportInfo> s_apiSupportCache;
+    static std::mutex s_apiSupportCacheMutex;
+
+    std::string lower = backend_name;
+    std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+
+    {
+        std::lock_guard<std::mutex> lock(s_apiSupportCacheMutex);
+        auto it = s_apiSupportCache.find(lower);
+        if (it != s_apiSupportCache.end()) {
+            return it->second;
+        }
+    }
+
+    ComputeApiSupportInfo info;
+    info.name = lower;
+
+    if (lower == "vulkan") {
+        info.label = "Vulkan";
+#ifdef HAVE_VULKAN
+        try {
+            auto ctx = ComputeBackendFactory::create(ComputeBackend::Vulkan, false, false);
+            if (ctx) {
+                const auto& devices = ctx->getDevices();
+                if (devices.empty()) {
+                    info.isSupported = false;
+                    info.reason = "Vulkan runtime initialized, but no compatible Vulkan compute devices were found.";
+                    info.missingRequirement = "Compatible Vulkan-capable graphics hardware or vendor ICD driver.";
+                } else {
+                    info.isSupported = true;
+                    info.reason = "Vulkan compute backend is operational with " + std::to_string(devices.size()) + " detected device(s).";
+                    info.missingRequirement = "";
+                }
+            } else {
+                info.isSupported = false;
+                info.reason = "Vulkan context could not be instantiated.";
+                info.missingRequirement = "Vulkan loader runtime (vulkan-1.dll / libvulkan.so.1).";
+            }
+        } catch (const std::exception& e) {
+            info.isSupported = false;
+            info.reason = std::string("Vulkan runtime initialization failed: ") + e.what();
+            info.missingRequirement = "Vulkan ICD driver or loader runtime (vulkan-1.dll).";
+        } catch (...) {
+            info.isSupported = false;
+            info.reason = "Vulkan runtime initialization failed with an unknown error.";
+            info.missingRequirement = "Vulkan ICD driver or loader runtime.";
+        }
+#else
+        info.isSupported = false;
+        info.reason = "Vulkan compute backend was not compiled into this GPUBench binary.";
+        info.missingRequirement = "Vulkan SDK headers and libraries (vulkan/vulkan.h, Vulkan-1) at build time.";
+#endif
+    } else if (lower == "rocm") {
+        info.label = "ROCm";
+#ifdef HAVE_ROCM
+        try {
+            auto ctx = ComputeBackendFactory::create(ComputeBackend::ROCm, false, false);
+            if (ctx) {
+                const auto& devices = ctx->getDevices();
+                if (devices.empty()) {
+                    info.isSupported = false;
+                    info.reason = "ROCm/HIP runtime initialized, but no compatible AMD ROCm devices were detected.";
+                    info.missingRequirement = "Compatible AMD GPU with ROCm/KFD kernel driver support.";
+                } else {
+                    info.isSupported = true;
+                    info.reason = "AMD ROCm (HIP) backend is operational with " + std::to_string(devices.size()) + " detected device(s).";
+                    info.missingRequirement = "";
+                }
+            } else {
+                info.isSupported = false;
+                info.reason = "ROCm context could not be created.";
+                info.missingRequirement = "ROCm / HIP runtime libraries (amdhip64).";
+            }
+        } catch (const std::exception& e) {
+            info.isSupported = false;
+            info.reason = std::string("ROCm initialization failed: ") + e.what();
+            info.missingRequirement = "AMD ROCm driver and HIP runtime stack.";
+        } catch (...) {
+            info.isSupported = false;
+            info.reason = "ROCm initialization failed with an unknown error.";
+            info.missingRequirement = "AMD ROCm driver and HIP runtime stack.";
+        }
+#else
+        info.isSupported = false;
+#ifdef _WIN32
+        info.reason = "AMD ROCm (HIP) compute backend is not supported on Windows.";
+        info.missingRequirement = "Linux operating system with AMD ROCm kernel driver (amdgpu/kfd) and HIP runtime.";
+#else
+        info.reason = "ROCm compute backend was not compiled into this GPUBench binary.";
+        info.missingRequirement = "AMD ROCm development packages and HIP runtime headers at build time.";
+#endif
+#endif
+    } else if (lower == "opencl") {
+        info.label = "OpenCL";
+#ifdef HAVE_OPENCL
+        try {
+            auto ctx = ComputeBackendFactory::create(ComputeBackend::OpenCL, false, false);
+            if (ctx) {
+                const auto& devices = ctx->getDevices();
+                if (devices.empty()) {
+                    info.isSupported = false;
+                    info.reason = "OpenCL runtime initialized, but no OpenCL compute devices were enumerated.";
+                    info.missingRequirement = "OpenCL ICD vendor driver (AMD, NVIDIA, or Intel OpenCL runtime).";
+                } else {
+                    info.isSupported = true;
+                    info.reason = "OpenCL compute backend is operational with " + std::to_string(devices.size()) + " detected device(s).";
+                    info.missingRequirement = "";
+                }
+            } else {
+                info.isSupported = false;
+                info.reason = "OpenCL context could not be created.";
+                info.missingRequirement = "OpenCL ICD loader (OpenCL.dll / libOpenCL.so).";
+            }
+        } catch (const std::exception& e) {
+            info.isSupported = false;
+            info.reason = std::string("OpenCL initialization failed: ") + e.what();
+            info.missingRequirement = "OpenCL ICD loader (OpenCL.dll / libOpenCL.so) or vendor runtime.";
+        } catch (...) {
+            info.isSupported = false;
+            info.reason = "OpenCL initialization failed with an unknown error.";
+            info.missingRequirement = "OpenCL ICD loader or vendor runtime.";
+        }
+#else
+        info.isSupported = false;
+        info.reason = "OpenCL compute backend was not compiled into this GPUBench binary.";
+        info.missingRequirement = "OpenCL SDK development headers (CL/cl.h) and ICD loader library at build time.";
+#endif
+    } else if (lower == "auto") {
+        info.label = "Auto";
+        auto vInfo = ProbeComputeApiSupportAPI("vulkan");
+        auto rInfo = ProbeComputeApiSupportAPI("rocm");
+        auto oInfo = ProbeComputeApiSupportAPI("opencl");
+
+        if (vInfo.isSupported) {
+            info.isSupported = true;
+            info.reason = "Auto selects Vulkan (highest priority available backend on this workstation).";
+            info.missingRequirement = "";
+        } else if (rInfo.isSupported) {
+            info.isSupported = true;
+            info.reason = "Auto selects ROCm (HIP).";
+            info.missingRequirement = "";
+        } else if (oInfo.isSupported) {
+            info.isSupported = true;
+            info.reason = "Auto selects OpenCL.";
+            info.missingRequirement = "";
+        } else {
+            info.isSupported = false;
+            info.reason = "No compatible compute backend runtime is available on this system.";
+            info.missingRequirement = "A functional graphics driver and runtime supporting Vulkan, ROCm, or OpenCL.";
+        }
+    } else {
+        info.label = backend_name;
+        info.isSupported = false;
+        info.reason = "Unknown compute API: " + backend_name;
+        info.missingRequirement = "Valid compute backend identifier (Vulkan, ROCm, OpenCL, Auto).";
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(s_apiSupportCacheMutex);
+        s_apiSupportCache[lower] = info;
+    }
+
+    return info;
+}
+
+std::vector<ComputeApiSupportInfo> GetAllComputeApiSupportAPI() {
+    return {
+        ProbeComputeApiSupportAPI("vulkan"),
+        ProbeComputeApiSupportAPI("rocm"),
+        ProbeComputeApiSupportAPI("opencl"),
+        ProbeComputeApiSupportAPI("auto")
+    };
 }
 

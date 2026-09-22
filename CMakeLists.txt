@@ -456,7 +456,7 @@ if(GPUBENCH_BUILD_GUI)
             ${IMPLOT_DIR}/implot_items.cpp
         )
 
-        add_executable(gpubench-gui ${GUI_SOURCES})
+        add_executable(gpubench-gui WIN32 ${GUI_SOURCES})
         set_target_properties(gpubench-gui PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 
         target_include_directories(gpubench-gui PRIVATE

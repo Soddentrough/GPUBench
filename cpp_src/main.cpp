@@ -336,6 +336,21 @@ int main(int argc, char **argv) {
     return EXIT_SUCCESS;
   }
 
+  if (list_backends) {
+    auto apiList = GetAllComputeApiSupportAPI();
+    std::cout << "Compute API Support & Diagnostics:" << std::endl << std::endl;
+    for (const auto &api : apiList) {
+      std::cout << "  [" << (api.isSupported ? "+" : "-") << "] " << api.label << ": "
+                << (api.isSupported ? "SUPPORTED / AVAILABLE" : "UNSUPPORTED") << std::endl;
+      std::cout << "      Status Note: " << api.reason << std::endl;
+      if (!api.missingRequirement.empty()) {
+        std::cout << "      Missing:     " << api.missingRequirement << std::endl;
+      }
+      std::cout << std::endl;
+    }
+    return EXIT_SUCCESS;
+  }
+
   if (list_benchmarks) {
     BenchmarkRunner runner({});
     std::cout << "Available benchmarks (grouped):" << std::endl;

@@ -93,6 +93,11 @@ public:
     void setSelectedDevices(const std::vector<int>& deviceIndices);
     void setSelectedBackend(const std::string& backend);
     void selectOnlyBenchmark(const std::string& benchmarkId);
+    void setRenderResolution(uint32_t width, uint32_t height) { m_renderWidth = width; m_renderHeight = height; }
+    void setDumpRenders(bool dump) { m_dumpRenders = dump; }
+    uint32_t getRenderWidth() const { return m_renderWidth; }
+    uint32_t getRenderHeight() const { return m_renderHeight; }
+    bool getDumpRenders() const { return m_dumpRenders; }
 
     void startBenchmarks();
     void abortBenchmarks();
@@ -166,6 +171,7 @@ private:
     // Hardware & Device Selection
     std::vector<SelectableDevice> m_devices;
     std::string m_selectedBackend{"vulkan"};
+    std::vector<ComputeApiSupportInfo> m_apiSupportList;
     uint32_t m_telemetryGpuIndex{0}; // Which GPU to inspect in Telemetry HUD (default GPU 0 Primary)
     bool m_telemetryDualGpuMode{false}; // Dual GPU comparative overlay
     void updateTelemetrySelection();
@@ -200,10 +206,10 @@ private:
 
     // Settings
     std::string m_scene{"all"};
-    uint32_t m_renderWidth{1280};
-    uint32_t m_renderHeight{720};
+    uint32_t m_renderWidth{3840};
+    uint32_t m_renderHeight{2160};
     uint32_t m_samplesPerPixel{1};
-    bool m_dumpRenders{true};
+    bool m_dumpRenders{false};
     bool m_showSettingsModal{false};
 
     // Parity Split Slider & Viewport Configuration

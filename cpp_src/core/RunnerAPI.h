@@ -56,3 +56,14 @@ struct BenchmarkSupportInfo {
 std::vector<BenchmarkSupportInfo> ProbeBenchmarkSupportAPI(
     const std::string& backend_name,
     uint32_t device_idx);
+
+struct ComputeApiSupportInfo {
+    std::string name;               // "vulkan", "rocm", "opencl", "auto"
+    std::string label;              // "Vulkan", "ROCm", "OpenCL", "Auto"
+    bool isSupported{false};
+    std::string reason;             // Why it is supported or unsupported
+    std::string missingRequirement; // Specific requirement missing (SDK, driver, OS)
+};
+
+ComputeApiSupportInfo ProbeComputeApiSupportAPI(const std::string& backend_name);
+std::vector<ComputeApiSupportInfo> GetAllComputeApiSupportAPI();
