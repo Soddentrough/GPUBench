@@ -83,3 +83,11 @@
 - **Windows Defender False-Positive Triage & Submission**:
   - Maintain a proactive release workflow to submit newly generated release artifacts to Microsoft Security Intelligence (WDSI) upon publishing.
   - Explore Inno Setup or WiX Toolset (.msi) generator alternatives in CPack to reduce heuristic AV flags associated with NSIS self-extracting archive stubs.
+
+### Architectural Backlog (Best Practices)
+- **Resource Management & RAII**: Transition Vulkan buffer (`VulkanBuffer`) and kernel (`VulkanKernel`) handles to full RAII semantics using C++ smart pointers with custom deleters or `Vulkan-Hpp` to guarantee leak-free teardowns.
+- **Vulkan Memory Allocator (VMA)**: Integrate AMD's VMA library into `VulkanContext` to pool device memory allocations, eliminate the 4,096 allocation cap limitation, and reduce VRAM fragmentation.
+- **Dynamic Workgroup Dispatch Scaling**: Scale dispatch workgroup counts dynamically at runtime based on enumerated Compute Unit / Streaming Multiprocessor counts (`numWorkgroups = CUs * wave_multiplier`), adapting to low-power IGPs and high-CU discrete GPUs alike.
+- **Modular Execution Engine**: Decouple `BenchmarkRunner::run()` timing loops from terminal/GUI reporting into reusable template abstractions and dedicated logging interfaces.
+- **Teardown Null-Safety**: Implement explicit initialization and null checks across all benchmark `Teardown()` routines to ensure resilience if `Setup()` aborts early.
+
