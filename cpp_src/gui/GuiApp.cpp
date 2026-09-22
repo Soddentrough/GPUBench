@@ -967,20 +967,80 @@ void GuiApp::updateAndRender() {
 
 void GuiApp::renderLeftSidebar(float width, float height) {
     ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.10f, 0.12f, 0.17f, 1.00f));
-    ImGui::BeginChild("LeftSidebar", ImVec2(width, height), true);
+    ImGui::BeginChild("LeftSidebar", ImVec2(width, height), true, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
 
-    // 1. Brand Block
+    // 1. Top Brand & Prominent Start Action Block (Pinned at top left)
     ImGui::AlignTextToFramePadding();
     ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.00f, 1.00f), "GPUBench");
     ImGui::SameLine();
     ImGui::TextColored(ImVec4(0.60f, 0.70f, 0.90f, 1.00f), "v1.0.0");
-    ImGui::TextDisabled("Workstation Multi-GPU Benchmark");
 
-    // 2. Target Accelerators (Multi-Selection)
+    ImGui::Spacing();
+
+    size_t selectedTests = 0;
+    for (const auto& cat : m_categories) {
+        for (const auto& sub : cat.subgroups) {
+            for (const auto& item : sub.items) {
+                if (item.selected && (!m_hideUnsupported || item.isSupported)) selectedTests++;
+            }
+        }
+    }
+
+    if (m_execState == ExecutionState::Running) {
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.85f, 0.20f, 0.20f, 1.00f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.95f, 0.25f, 0.25f, 1.00f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(1.00f, 0.30f, 0.30f, 1.00f));
+        if (ImGui::Button("ABORT BENCHMARK", ImVec2(-1, s(38.0f)))) {
+            abortBenchmarks();
+        }
+        ImGui::PopStyleColor(3);
+    } else {
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.45f, 0.95f, 1.00f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.28f, 0.55f, 1.00f, 1.00f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.35f, 0.65f, 1.00f, 1.00f));
+        std::string runLabel = (selectedTests > 1)
+            ? ("START BENCHMARKS (" + std::to_string(selectedTests) + ")")
+            : (selectedTests == 1 ? "START BENCHMARK (1)" : "START BENCHMARK");
+        if (ImGui::Button(runLabel.c_str(), ImVec2(-1, s(38.0f)))) {
+            startBenchmarks();
+        }
+        ImGui::PopStyleColor(3);
+    }
+
+    if (m_execState == ExecutionState::Running) {
+        ImGui::Spacing();
+        float progress = (m_totalTasks > 0) ? (static_cast<float>(m_completedTasks) / static_cast<float>(m_totalTasks)) : 0.0f;
+        progress = std::clamp(progress, 0.0f, 1.0f);
+        std::string progText = std::to_string(m_completedTasks) + "/" + std::to_string(m_totalTasks) + " (" + std::to_string(static_cast<int>(progress * 100.0f)) + "%)";
+        ImGui::ProgressBar(progress, ImVec2(-1, s(20.0f)), progText.c_str());
+        ImGui::TextDisabled("%s", m_currentBenchmarkName.c_str());
+    } else if (m_execState == ExecutionState::Completed) {
+        ImGui::Spacing();
+        ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.18f, 0.80f, 0.44f, 1.00f));
+        ImGui::ProgressBar(1.0f, ImVec2(-1, s(20.0f)), "Complete");
+        ImGui::PopStyleColor();
+        ImGui::TextColored(ImVec4(0.35f, 0.85f, 0.55f, 1.0f), "[PASSED] %zu workloads recorded", m_allResults.size());
+    } else if (m_execState == ExecutionState::Cancelled) {
+        ImGui::Spacing();
+        ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.85f, 0.55f, 0.15f, 1.00f));
+        ImGui::ProgressBar(1.0f, ImVec2(-1, s(20.0f)), "Cancelled");
+        ImGui::PopStyleColor();
+        ImGui::TextColored(ImVec4(0.95f, 0.65f, 0.20f, 1.0f), "[!] Cancelled by user");
+    } else if (!m_statusMessage.empty()) {
+        ImGui::Spacing();
+        ImGui::TextColored(ImVec4(0.95f, 0.40f, 0.30f, 1.0f), "%s", m_statusMessage.c_str());
+    }
+
     ImGui::Spacing();
     ImGui::Separator();
     ImGui::Spacing();
 
+    // 2. Scrollable Body (Target Accelerators, Telemetry, API, Resolution, Export)
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+    ImGui::BeginChild("LeftSidebarScroll", ImVec2(0, 0), false);
+    ImGui::PopStyleVar();
+
+    // 2. Target Accelerators (Multi-Selection)
     ImGui::TextColored(ImVec4(0.65f, 0.75f, 0.90f, 1.0f), "TARGET ACCELERATORS");
 
     // Presets with active highlights
@@ -1349,60 +1409,6 @@ void GuiApp::renderLeftSidebar(float width, float height) {
         ImGui::TextDisabled("In-memory only (max throughput)");
     }
 
-    // 5. Big Action Button & Live Progress
-    ImGui::Spacing();
-    ImGui::Separator();
-    ImGui::Spacing();
-
-    size_t selectedTests = 0;
-    for (const auto& cat : m_categories) {
-        for (const auto& sub : cat.subgroups) {
-            for (const auto& item : sub.items) {
-                if (item.selected && (!m_hideUnsupported || item.isSupported)) selectedTests++;
-            }
-        }
-    }
-
-    if (m_execState == ExecutionState::Running) {
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.85f, 0.20f, 0.20f, 1.00f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.95f, 0.25f, 0.25f, 1.00f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(1.00f, 0.30f, 0.30f, 1.00f));
-        if (ImGui::Button("ABORT BENCHMARK", ImVec2(-1, s(38.0f)))) {
-            abortBenchmarks();
-        }
-        ImGui::PopStyleColor(3);
-    } else {
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.45f, 0.95f, 1.00f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.28f, 0.55f, 1.00f, 1.00f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.35f, 0.65f, 1.00f, 1.00f));
-        std::string runLabel = "RUN BENCHMARKS (" + std::to_string(selectedTests) + ")";
-        if (ImGui::Button(runLabel.c_str(), ImVec2(-1, s(38.0f)))) {
-            startBenchmarks();
-        }
-        ImGui::PopStyleColor(3);
-    }
-
-    ImGui::Spacing();
-    if (m_execState == ExecutionState::Running) {
-        float progress = (m_totalTasks > 0) ? (static_cast<float>(m_completedTasks) / static_cast<float>(m_totalTasks)) : 0.0f;
-        progress = std::clamp(progress, 0.0f, 1.0f);
-        std::string progText = std::to_string(m_completedTasks) + "/" + std::to_string(m_totalTasks) + " (" + std::to_string(static_cast<int>(progress * 100.0f)) + "%)";
-        ImGui::ProgressBar(progress, ImVec2(-1, s(20.0f)), progText.c_str());
-        ImGui::TextDisabled("%s", m_currentBenchmarkName.c_str());
-    } else if (m_execState == ExecutionState::Completed) {
-        ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.18f, 0.80f, 0.44f, 1.00f));
-        ImGui::ProgressBar(1.0f, ImVec2(-1, s(20.0f)), "Complete");
-        ImGui::PopStyleColor();
-        ImGui::TextColored(ImVec4(0.35f, 0.85f, 0.55f, 1.0f), "[PASSED] %zu workloads recorded", m_allResults.size());
-    } else if (m_execState == ExecutionState::Cancelled) {
-        ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.85f, 0.55f, 0.15f, 1.00f));
-        ImGui::ProgressBar(1.0f, ImVec2(-1, s(20.0f)), "Cancelled");
-        ImGui::PopStyleColor();
-        ImGui::TextColored(ImVec4(0.95f, 0.65f, 0.20f, 1.0f), "[!] Cancelled by user");
-    } else if (!m_statusMessage.empty()) {
-        ImGui::TextColored(ImVec4(0.95f, 0.40f, 0.30f, 1.0f), "%s", m_statusMessage.c_str());
-    }
-
     // Export Buttons: ALWAYS visible by default!
     ImGui::Spacing();
     ImGui::Separator();
@@ -1436,7 +1442,8 @@ void GuiApp::renderLeftSidebar(float width, float height) {
         ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s", m_exportNotificationText.c_str());
     }
 
-    ImGui::EndChild();
+    ImGui::EndChild(); // LeftSidebarScroll
+    ImGui::EndChild(); // LeftSidebar
     ImGui::PopStyleColor();
 }
 
@@ -3041,7 +3048,7 @@ void GuiApp::renderResultsScorecard() {
         ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.10f, 0.12f, 0.18f, 1.0f));
         ImGui::BeginChild("EmptyScorecardPrompt", ImVec2(0, s(64.0f)), true);
         ImGui::TextColored(ImVec4(0.70f, 0.78f, 0.90f, 1.0f), "No benchmark results recorded yet.");
-        ImGui::TextDisabled("Select workloads on the 'Benchmark Suite' tab and click 'RUN BENCHMARKS' to generate performance scorecards.");
+        ImGui::TextDisabled("Select workloads on the 'Benchmark Suite' tab and click 'START BENCHMARK' to generate performance scorecards.");
         ImGui::EndChild();
         ImGui::PopStyleColor();
         ImGui::Spacing();
