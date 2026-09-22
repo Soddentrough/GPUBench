@@ -418,6 +418,21 @@ if(GPUBENCH_BUILD_GUI)
         endif()
     endif()
 
+    if(NOT SDL3_FOUND AND Vulkan_FOUND)
+        include(FetchContent)
+        message(STATUS "SDL3 not found on system; fetching SDL3 via FetchContent...")
+        FetchContent_Declare(
+            SDL3
+            GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
+            GIT_TAG release-3.2.8
+            GIT_SHALLOW TRUE
+        )
+        set(SDL_TEST_ENABLE OFF CACHE BOOL "" FORCE)
+        set(SDL_SHARED ON CACHE BOOL "" FORCE)
+        FetchContent_MakeAvailable(SDL3)
+        set(SDL3_FOUND TRUE)
+    endif()
+
     if(SDL3_FOUND AND Vulkan_FOUND)
         message(STATUS "Configuring native C++ GPUBench GUI (Dear ImGui + ImPlot + Vulkan/SDL3)")
 

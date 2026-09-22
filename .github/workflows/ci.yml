@@ -32,7 +32,15 @@ jobs:
             opencl-headers \
             cmake \
             build-essential \
-            rpm
+            rpm \
+            libx11-dev \
+            libxext-dev \
+            libxrandr-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxinerama-dev \
+            libwayland-dev \
+            libxkbcommon-dev
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
