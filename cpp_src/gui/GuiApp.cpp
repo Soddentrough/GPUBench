@@ -2938,7 +2938,6 @@ void GuiApp::startBenchmarks() {
             m_execState = ExecutionState::Cancelled;
         } else {
             m_execState = ExecutionState::Completed;
-            m_switchToScorecard = true;
         }
         m_currentlyRunningTestId.clear();
         m_hasCurrentlyRunningResult = false;
