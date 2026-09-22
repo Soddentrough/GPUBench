@@ -482,9 +482,7 @@ if(GPUBENCH_BUILD_GUI)
             Threads::Threads
         )
 
-        if(MSVC)
-            set_property(TARGET gpubench-gui PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-        endif()
+
 
         install(TARGETS gpubench-gui DESTINATION bin)
     else()
