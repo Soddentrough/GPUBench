@@ -15,6 +15,10 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
 endif()
 
+if(WIN32)
+    add_compile_definitions(NOMINMAX)
+endif()
+
 # Generate config header with install paths
 configure_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/cpp_src/utils/Config.h.in

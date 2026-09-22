@@ -16,6 +16,9 @@
 #include <vector>
 
 #ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <windows.h>
 #else
 #include <unistd.h>
@@ -252,7 +255,7 @@ void ResultFormatter::print() {
 
     auto &subcatGroup = organizedData[res.deviceIndex][{compWeight, res.component}][res.subcategory];
     subcatGroup.name = res.subcategory;
-    subcatGroup.minSortWeight = std::min(subcatGroup.minSortWeight, res.sortWeight);
+    subcatGroup.minSortWeight = (std::min)(subcatGroup.minSortWeight, res.sortWeight);
     subcatGroup.benchmarks[{res.sortWeight, res.configIndex, cleanName}][res.backendName] = res;
 
     // Track metrics for executive summary
@@ -844,7 +847,7 @@ void ResultFormatter::printComparison(const std::vector<ImportedRun> &runs) {
       std::string cName = cleanWorkloadName(res.benchmarkName, res.subcategory);
       auto &subcat = compData[std::make_pair(compWeight, res.component)][res.subcategory];
       subcat.name = res.subcategory;
-      subcat.minSortWeight = std::min(subcat.minSortWeight, res.sortWeight);
+      subcat.minSortWeight = (std::min)(subcat.minSortWeight, res.sortWeight);
 
       auto key = std::make_pair(res.sortWeight, res.configIndex);
       if (subcat.workloads.find(key) == subcat.workloads.end()) {
