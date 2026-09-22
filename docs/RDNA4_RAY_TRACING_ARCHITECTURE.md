@@ -14,25 +14,25 @@
 
 ---
 
-## 1. Executive Summary: The Generational Paradigm Shift
+## 1. Executive Summary: Architectural Transition
 
-The transition from AMD RDNA 3 (Navi 31 / GFX1100) to **AMD RDNA 4 (Navi 48 / GFX1201)** represents the most substantial microarchitectural overhaul of AMD's ray tracing subsystem since the introduction of hardware acceleration in RDNA 2.
+The transition from AMD RDNA 3 (Navi 31 / GFX1100) to **AMD RDNA 4 (Navi 48 / GFX1201)** introduces fundamental structural changes to AMD's ray tracing pipeline.
 
-In RDNA 2 and RDNA 3, AMD utilized a **hybrid ray tracing model**: fixed-function Ray Accelerators (RAv1 and RAv2) evaluated ray-box and ray-triangle intersection math, but the **bounding volume hierarchy (BVH) traversal loop, traversal stack management, node fetching, and instance transforms were software-driven** by shader code via the `image_bvh_intersect_ray` instruction. 
+In RDNA 2 and RDNA 3, AMD implemented a **hybrid ray tracing model**: fixed-function Ray Accelerators (RAv1 and RAv2) evaluated ray-box and ray-triangle intersection math, while the **bounding volume hierarchy (BVH) traversal loop, traversal stack management, node fetching, and instance transforms were executed in shader instructions** via the `image_bvh_intersect_ray` instruction. 
 
-While cost-effective in silicon area, this hybrid approach had severe microarchitectural drawbacks:
-1. **Excessive Vector Register (VGPR) Pressure**: Traversal stacks, hit candidate registers, and ray state occupied significant space in the Vector General Purpose Register (VGPR) file. In monolithic megakernels, register usage routinely escalated to **160–240 VGPRs**, collapsing active SIMD wave occupancy down to **2 waves per SIMD (12.5% occupancy)**.
-2. **Chiplet Interconnect Latency (Navi 31)**: On chiplet-based RDNA 3 hardware, memory spills exceeding the Graphics Compute Die's (GCD) 6MB L2 cache crossed the Infinity Fabric On-Package (IFOP) to reaching Memory Cache Dies (MCDs), incurring a **~140–150 ns round-trip latency penalty**.
-3. **Execution Serialization on Divergent Rays**: When secondary rays scattered, SIMD32 wavefronts suffered catastrophic lane masking, with active ALU utilization plunging to **12.5%–25%**.
+While requiring less dedicated silicon area, this model imposed specific microarchitectural trade-offs:
+1. **Vector Register (VGPR) Allocation**: Traversal stacks, hit candidate state, and ray descriptors occupied space in the Vector General Purpose Register (VGPR) file. In monolithic megakernels, register usage reached **160–240 VGPRs**, reducing active SIMD wave occupancy to **2 waves per SIMD (12.5% occupancy)**.
+2. **Chiplet Interconnect Latency (Navi 31)**: On chiplet-based RDNA 3 hardware, memory accesses that missed the Graphics Compute Die's (GCD) 6MB L2 cache crossed the Infinity Fabric On-Package (IFOP) to the external Memory Cache Dies (MCDs), adding approximately **140–150 ns of round-trip latency**.
+3. **Branch Divergence on Non-Uniform Rays**: When secondary rays scattered across diverse directions or hit different materials, SIMD32 wavefronts experienced lane masking, reducing active ALU utilization to **12.5%–25%**.
 
-### The RDNA 4 Solution
-AMD RDNA 4 resolves these architectural bottlenecks through four pillars:
-1. **Third-Generation Ray Accelerator (RAv3) with Hardware BVH Traversal**: The entire BVH traversal loop and traversal stack are offloaded to dedicated hardware logic, removing the traversal stack from shader VGPRs and cutting register pressure by up to **80%**.
-2. **Hardware Instance Transform Evaluation**: World-to-object space matrix multiplication is computed in dedicated silicon during TLAS-to-BLAS transitions, freeing ALU issue ports.
-3. **Native Hardware Shader Execution Reordering (SER)**: Support for `GL_EXT_shader_invocation_reorder` enables on-the-fly dynamic ray sorting and spatial coherence restoration in silicon before shader execution.
-4. **Monolithic 4nm Silicon & Doubled Interconnect Bandwidth**: Navi 48 returns to a unified monolithic die topology, completely eliminating IFOP inter-die transit latency and doubling internal L1/L2 bandwidth.
+### The RDNA 4 Architectural Approach
+AMD RDNA 4 alters this balance through four architectural modifications:
+1. **Third-Generation Ray Accelerator (RAv3) with Hardware BVH Traversal**: The traversal loop and traversal stack are offloaded to dedicated hardware logic, reducing traversal stack residency in shader VGPRs.
+2. **Hardware Instance Transform Evaluation**: World-to-object space matrix multiplication is evaluated in dedicated silicon during TLAS-to-BLAS transitions, reducing shader instruction counts.
+3. **Hardware Shader Execution Reordering (SER)**: Support for `GL_EXT_shader_invocation_reorder` allows dynamic sorting of rays by spatial and shader coherence prior to shading.
+4. **Monolithic 4nm Topology & Increased Interconnect Bandwidth**: Navi 48 utilizes a single monolithic die, avoiding IFOP inter-die transit latency and increasing internal L1/L2 bandwidth.
 
-As demonstrated by empirical benchmarks on the **AMD Radeon AI PRO R9700 (GFX1201)**, these advancements deliver **1.76x to 2.26x total frame speedups** at 4K UHD across complex scenes and up to a **4.80x speedup (16,415 vs. 3,423 MHits/s)** in heterogeneous material shading.
+Empirical benchmarks on the **AMD Radeon AI PRO R9700 (GFX1201)** demonstrate **1.76x to 2.26x total frame speedups** at 4K UHD across complex scenes and up to a **4.80x speedup (16,415 vs. 3,423 MHits/s)** in heterogeneous material shading.
 
 ---
 
@@ -86,19 +86,19 @@ The following diagram illustrates the compute and ray tracing pipeline of the AM
     - $\le 48\text{ VGPRs}$: $10\text{ to }16\text{ waves per SIMD}$ ($62.5\%\text{ to }100\%\text{ occupancy}$).
     - $64\text{ VGPRs}$: $8\text{ waves per SIMD}$ ($50.0\%\text{ occupancy}$).
     - $128\text{ VGPRs}$: $4\text{ waves per SIMD}$ ($25.0\%\text{ occupancy}$).
-    - $\ge 240\text{ VGPRs}$: $2\text{ waves per SIMD}$ ($12.5\%\text{ occupancy}$, catastrophic latency stalling).
+    - $\ge 240\text{ VGPRs}$: $2\text{ waves per SIMD}$ ($12.5\%\text{ occupancy}$, limiting memory latency hiding capability).
 
 ### 2.2. Monolithic 4nm Silicon vs. RDNA 3 Chiplet Topology
-A major source of performance variance on RDNA 3 was the physical packaging of Navi 31:
-- On RDNA 3, memory accesses that missed the Graphics Compute Die's (GCD) 6MB L2 cache had to travel over the Infinity Fabric On-Package (IFOP) links to the external Memory Cache Dies (MCDs). This added **140–150 ns of latency** to every queue spill or counter contention.
-- On RDNA 4 (Navi 48), the entire GPU—including compute units, caches, ray tracing units, and memory interfaces—is fabricated on a **single unified 4nm monolithic die**.
-- **Architectural Consequence**: Internal L1-to-L2 bandwidth is more than doubled, and memory queue traversals experience flat, predictable on-chip latency. Queue-based scheduling paradigms like DGC and stream compaction encounter virtually zero interconnect penalty.
+A key operational difference between RDNA 3 and RDNA 4 is the physical die packaging:
+- On RDNA 3 (Navi 31), memory accesses that missed the Graphics Compute Die's (GCD) 6MB L2 cache traveled over Infinity Fabric On-Package (IFOP) links to the external Memory Cache Dies (MCDs), adding approximately **140–150 ns of round-trip latency**.
+- On RDNA 4 (Navi 48), the compute units, caches, ray tracing hardware, and memory interfaces reside on a **single monolithic 4nm die**.
+- **Architectural Consequence**: Internal L1-to-L2 bandwidth is increased, and memory queue accesses operate with flat on-chip cache latency rather than inter-die fabric latency.
 
 ---
 
-## 3. Third-Generation Ray Accelerator (RAv3): Deep Dive
+## 3. Third-Generation Ray Accelerator (RAv3) Architecture
 
-The architectural center of RDNA 4 is the **Ray Accelerator v3 (RAv3)**. Unlike previous generations, RAv3 is a full-fledged fixed-function coprocessor embedded alongside the texture and memory load-store units.
+The core of RDNA 4's ray tracing capability is the **Ray Accelerator v3 (RAv3)**, integrated alongside the texture and memory load-store units.
 
 | Architectural Capability | RDNA 2 (RAv1) | RDNA 3 (RAv2) | RDNA 4 (RAv3) |
 | :--- | :--- | :--- | :--- |
@@ -266,14 +266,14 @@ Code Size:        122,048 bytes (119.2 KB)
 VGPRs Allocated:  240 registers (Hardware limit reached)
 LDS Allocated:    15,360 bytes
 Waves per SIMD:   2 waves
-SIMD Occupancy:   12.5% (Severe latency-hiding starvation)
+SIMD Occupancy:   12.5% (2 of 16 wave slots active)
 
 === DGC Classification Kernel (rt_scheduling_device_generated_commands_classify.comp) ===
 Code Size:        9,624 bytes (9.4 KB)
 VGPRs Allocated:  48 registers
 LDS Allocated:    3,072 bytes
 Waves per SIMD:   11 waves
-SIMD Occupancy:   68.8% (Optimal throughput saturation)
+SIMD Occupancy:   68.8% (11 of 16 wave slots active)
 
 === DGC Specialized Shading Kernel (rt_scheduling_device_generated_commands_material.comp) ===
 Code Size:        102,604 bytes (100.2 KB)
