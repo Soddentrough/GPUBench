@@ -120,7 +120,7 @@ void TelemetryWorker::discoverDevices() {
         snap.deviceIndex = static_cast<uint32_t>(i);
         std::string productName = readSysfsString(m_devicePaths[i].drmDeviceDir + "/product_name");
         if (productName.empty()) {
-            productName = readSysfsString(m_devicePaths[i].hwmonDir + "/name", "AMD Radeon AI PRO R9700");
+            productName = readSysfsString(m_devicePaths[i].hwmonDir + "/name", "AMD Radeon GPU");
         }
         snap.name = "GPU " + std::to_string(i) + ": " + productName;
         try {

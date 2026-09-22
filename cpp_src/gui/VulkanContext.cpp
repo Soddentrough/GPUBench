@@ -2,6 +2,17 @@
 #include <iostream>
 #include <stdexcept>
 #include <vector>
+#include <cmath>
+
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 namespace gpubench::gui {
 
@@ -11,7 +22,7 @@ VulkanContext::~VulkanContext() {
     shutdown();
 }
 
-bool VulkanContext::init(const char* title, int width, int height) {
+bool VulkanContext::init(const char* title, int width, int height, float scaleOverride) {
     if (m_initialized) return true;
 
     if (!SDL_Init(SDL_INIT_VIDEO)) {
@@ -25,14 +36,24 @@ bool VulkanContext::init(const char* title, int width, int height) {
     int winW = width;
     int winH = height;
     SDL_DisplayID displayID = SDL_GetPrimaryDisplay();
+    float detectedScale = 1.0f;
     if (displayID != 0) {
+        float contentScale = SDL_GetDisplayContentScale(displayID);
+        if (contentScale > 0.0f) {
+            detectedScale = contentScale;
+        }
         SDL_Rect usableBounds{};
         if (SDL_GetDisplayUsableBounds(displayID, &usableBounds)) {
-            if (usableBounds.h > 0 && winH > usableBounds.h - 60) {
-                winH = std::max(900, usableBounds.h - 60);
+            float sFactor = (scaleOverride > 0.0f) ? scaleOverride : detectedScale;
+            if (sFactor > 1.2f) {
+                winW = static_cast<int>(winW * std::min(sFactor, 1.8f));
+                winH = static_cast<int>(winH * std::min(sFactor, 1.6f));
             }
-            if (usableBounds.w > 0 && winW > usableBounds.w - 40) {
-                winW = std::max(1280, usableBounds.w - 40);
+            if (usableBounds.h > 0 && winH > usableBounds.h - 80) {
+                winH = std::max(600, usableBounds.h - 80);
+            }
+            if (usableBounds.w > 0 && winW > usableBounds.w - 60) {
+                winW = std::max(800, usableBounds.w - 60);
             }
         }
     }
@@ -47,6 +68,15 @@ bool VulkanContext::init(const char* title, int width, int height) {
     if (!m_window) {
         std::cerr << "Failed to create SDL3 window: " << SDL_GetError() << std::endl;
         return false;
+    }
+
+    float winScale = SDL_GetWindowDisplayScale(m_window);
+    if (winScale > 0.0f) {
+        detectedScale = winScale;
+    }
+    m_displayScale = (scaleOverride > 0.0f) ? scaleOverride : detectedScale;
+    if (m_displayScale <= 0.0f) {
+        m_displayScale = 1.0f;
     }
 
     if (!setupVulkan()) {
@@ -65,15 +95,30 @@ bool VulkanContext::init(const char* title, int width, int height) {
 
     // Load high-resolution system TrueType font for workstation UI
     const char* fontCandidates[] = {
+#if defined(_WIN32)
+        "C:\\Windows\\Fonts\\segoeui.ttf",
+        "C:\\Windows\\Fonts\\arial.ttf",
+        "C:\\Windows\\Fonts\\calibri.ttf",
+#endif
         "/usr/share/fonts/adwaita-sans-fonts/AdwaitaSans-Regular.ttf",
-        "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf"
+        "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/google-noto/NotoSans-Regular.ttf"
     };
+
+    float baseFontSize = 16.0f;
+    float scaledFontSize = std::round(baseFontSize * m_displayScale);
+
     bool fontLoaded = false;
     for (const char* fontPath : fontCandidates) {
         FILE* f = fopen(fontPath, "rb");
         if (f) {
             fclose(f);
-            io.Fonts->AddFontFromFileTTF(fontPath, 17.0f);
+            ImFontConfig fontCfg;
+            fontCfg.OversampleH = 2;
+            fontCfg.OversampleV = 2;
+            fontCfg.PixelSnapH = true;
+            io.Fonts->AddFontFromFileTTF(fontPath, scaledFontSize, &fontCfg);
             fontLoaded = true;
             break;
         }
@@ -83,6 +128,19 @@ bool VulkanContext::init(const char* title, int width, int height) {
     }
 
     setupVulkanWindow(fbWidth, fbHeight);
+
+    SDL_SetWindowPosition(m_window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+    SDL_ShowWindow(m_window);
+    SDL_RaiseWindow(m_window);
+
+#if defined(_WIN32)
+    HWND hwnd = (HWND)SDL_GetPointerProperty(SDL_GetWindowProperties(m_window), SDL_PROP_WINDOW_WIN32_HWND_POINTER, NULL);
+    if (hwnd) {
+        ShowWindow(hwnd, SW_SHOWNORMAL);
+        UpdateWindow(hwnd);
+        SetForegroundWindow(hwnd);
+    }
+#endif
 
     m_initialized = true;
     return true;

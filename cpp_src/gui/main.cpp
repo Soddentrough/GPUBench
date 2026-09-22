@@ -1,6 +1,7 @@
 #include "VulkanContext.h"
 #include "GuiApp.h"
 #include <implot.h>
+#include <SDL3/SDL.h>
 
 #include <iostream>
 #include <string>
@@ -13,6 +14,7 @@ int main(int argc, char** argv) {
     std::string preselectedTest = "";
     bool autoRun = false;
     bool exitOnComplete = false;
+    float uiScaleOverride = 0.0f;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -28,6 +30,7 @@ int main(int argc, char** argv) {
                       << "      --auto-run          Automatically start benchmarks upon launch\n"
                       << "      --exit-on-complete  Exit automatically when benchmark run finishes\n"
                       << "      --frames <count>    Run for specified number of frames and exit\n"
+                      << "      --ui-scale <scale>  UI scaling factor (default: auto-detected from DPI, e.g. 1.0, 1.5, 2.0, 2.5)\n"
                       << "  -h, --help              Display this help message\n"
                       << "  -v, --version           Display version information\n\n";
             return 0;
@@ -50,20 +53,27 @@ int main(int argc, char** argv) {
             exitOnComplete = true;
         } else if (arg == "--frames" && i + 1 < argc) {
             maxFrames = std::stoi(argv[++i]);
+        } else if ((arg == "--ui-scale" || arg == "--scale") && i + 1 < argc) {
+            try {
+                uiScaleOverride = std::stof(argv[++i]);
+            } catch (...) {}
         }
     }
 
     gpubench::gui::VulkanContext vulkanContext;
-    if (!vulkanContext.init("GPUBench v1.0.0 — Workstation GPU Profiler", 1480, 1180)) {
+    if (!vulkanContext.init("GPUBench v1.0.0 - Workstation GPU Profiler", 1480, 1180, uiScaleOverride)) {
         std::cerr << "Failed to initialize Vulkan GUI context!" << std::endl;
         return 1;
     }
+    float effectiveScale = vulkanContext.getDisplayScale();
+    std::cout << "[GPUBench GUI] Initialized. Video driver: " << (SDL_GetCurrentVideoDriver() ? SDL_GetCurrentVideoDriver() : "null")
+              << " | Display scale: " << effectiveScale << "x" << std::endl;
 
     // Initialize ImPlot Context
     ImPlot::CreateContext();
 
     gpubench::gui::GuiApp app;
-    app.init();
+    app.init(effectiveScale);
     if (!preselectedDevices.empty()) {
         app.setSelectedDevices(preselectedDevices);
     }

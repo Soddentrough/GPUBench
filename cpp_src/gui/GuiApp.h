@@ -4,6 +4,7 @@
 #include "core/RunnerAPI.h"
 #include "core/ResultFormatter.h"
 #include <imgui.h>
+#include <implot.h>
 
 #include <vector>
 #include <string>
@@ -12,6 +13,7 @@
 #include <thread>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 
 namespace gpubench::gui {
 
@@ -75,9 +77,14 @@ public:
     GuiApp();
     ~GuiApp();
 
-    void init();
+    void init(float uiScale = 1.0f);
     void updateAndRender();
     void processEvents();
+
+    void setUiScale(float scale);
+    float getUiScale() const { return m_uiScale; }
+    float getBaseScale() const { return m_baseScale; }
+    float s(float v) const { return std::round(v * m_uiScale); }
 
     bool shouldQuit() const { return m_shouldQuit; }
     void requestQuit() { m_shouldQuit = true; }
@@ -124,9 +131,20 @@ public:
         uint32_t targetDeviceIndex) const;
 
 private:
-    void setupDarkTheme();
+    void setupDarkTheme(float scale = 1.0f);
     void initializeBenchmarkCategories();
     void discoverHardware();
+
+    void updateZoomShortcuts();
+    void renderZoomToast();
+
+    float m_uiScale{1.0f};
+    float m_baseScale{1.0f};
+    ImGuiStyle m_baseStyle{};
+    bool m_baseStyleInitialized{false};
+    ImPlotStyle m_basePlotStyle{};
+    bool m_basePlotStyleInitialized{false};
+    float m_zoomToastTimer{0.0f};
 
     // UI Panels
     void renderLeftSidebar(float width, float height);

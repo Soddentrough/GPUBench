@@ -18,8 +18,10 @@ public:
     VulkanContext();
     ~VulkanContext();
 
-    bool init(const char* title, int width, int height);
+    bool init(const char* title, int width, int height, float scaleOverride = 0.0f);
     void shutdown();
+
+    float getDisplayScale() const { return m_displayScale; }
 
     void beginFrame();
     void endFrame();
@@ -56,6 +58,7 @@ private:
     uint32_t m_minImageCount{2};
     bool m_swapchainRebuild{false};
     bool m_initialized{false};
+    float m_displayScale{1.0f};
     VkClearColorValue m_clearColor{{0.08f, 0.09f, 0.12f, 1.00f}};
 };
 

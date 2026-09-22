@@ -45,6 +45,7 @@ The root [`build_windows.bat`](build_windows.bat) script automates environment d
 | `.\build_windows.bat` | Build GPUBench Release target and bundle MinGW DLLs |
 | `.\build_windows.bat test` | Build and list detected Vulkan devices (`gpubench.exe -l`) |
 | `.\build_windows.bat run [args...]` | Build and run `gpubench.exe` with forwarded arguments |
+| `.\build_windows.bat gui [args...]` | Build and launch `gpubench-gui.exe` (Dear ImGui Workstation GUI) |
 | `.\build_windows.bat clean` | Wipe `build-release/` directory and perform a fresh build |
 | `.\build_windows.bat package` | Build and create a standalone CPack release `.zip` archive |
 

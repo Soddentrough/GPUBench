@@ -9,8 +9,209 @@
 #include <algorithm>
 #include <cmath>
 #include <functional>
+#include <thread>
+
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <intrin.h>
+#else
+#include <sys/utsname.h>
+#include <sys/sysinfo.h>
+#endif
 
 namespace gpubench::gui {
+
+namespace {
+
+static std::string detectGpuArchitecture(const std::string& name, uint32_t vendorID, uint32_t deviceID) {
+    (void)deviceID;
+    std::string lower = name;
+    std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+
+    if (vendorID == 0x1002 || lower.find("amd") != std::string::npos || lower.find("radeon") != std::string::npos) {
+        // RDNA 4
+        if (lower.find("r9700") != std::string::npos || lower.find("gfx12") != std::string::npos || 
+            lower.find("rdna 4") != std::string::npos || lower.find("rdna4") != std::string::npos) {
+            return "gfx1201 (RDNA 4)";
+        }
+        // RDNA 3 / 3.5
+        if (lower.find("7900") != std::string::npos) return "gfx1100 (RDNA 3)";
+        if (lower.find("7800") != std::string::npos || lower.find("7700") != std::string::npos) return "gfx1101 (RDNA 3)";
+        if (lower.find("7600") != std::string::npos) return "gfx1102 (RDNA 3)";
+        if (lower.find("890m") != std::string::npos || lower.find("880m") != std::string::npos || lower.find("gfx115") != std::string::npos) return "gfx1150 (RDNA 3.5)";
+        if (lower.find("gfx11") != std::string::npos || lower.find("rdna 3") != std::string::npos || lower.find("rdna3") != std::string::npos) {
+            return "RDNA 3";
+        }
+        // RDNA 2
+        if (lower.find("6900") != std::string::npos || lower.find("6800") != std::string::npos) return "gfx1030 (RDNA 2)";
+        if (lower.find("6700") != std::string::npos) return "gfx1031 (RDNA 2)";
+        if (lower.find("6600") != std::string::npos) return "gfx1032 (RDNA 2)";
+        if (lower.find("gfx103") != std::string::npos || lower.find("rdna 2") != std::string::npos || lower.find("rdna2") != std::string::npos) {
+            return "RDNA 2";
+        }
+        // RDNA 1
+        if (lower.find("5700") != std::string::npos || lower.find("5600") != std::string::npos || lower.find("gfx101") != std::string::npos) {
+            return "gfx1010 (RDNA 1)";
+        }
+        // CDNA
+        if (lower.find("mi300") != std::string::npos || lower.find("gfx942") != std::string::npos) return "gfx942 (CDNA 3)";
+        if (lower.find("mi200") != std::string::npos || lower.find("gfx90a") != std::string::npos) return "gfx90a (CDNA 2)";
+        if (lower.find("mi100") != std::string::npos || lower.find("gfx908") != std::string::npos) return "gfx908 (CDNA 1)";
+        // Vega / GCN
+        if (lower.find("vega") != std::string::npos || lower.find("gfx90") != std::string::npos) return "Vega (GCN 5)";
+        if (lower.find("polaris") != std::string::npos || lower.find("rx 580") != std::string::npos || lower.find("rx 570") != std::string::npos) return "Polaris (GCN 4)";
+        return "AMD Radeon (Vulkan)";
+    }
+
+    if (vendorID == 0x10DE || lower.find("nvidia") != std::string::npos || lower.find("geforce") != std::string::npos || lower.find("rtx") != std::string::npos) {
+        if (lower.find("5090") != std::string::npos || lower.find("5080") != std::string::npos) return "Blackwell";
+        if (lower.find("4090") != std::string::npos || lower.find("4080") != std::string::npos || lower.find("4070") != std::string::npos) return "Ada Lovelace";
+        if (lower.find("3090") != std::string::npos || lower.find("3080") != std::string::npos || lower.find("3070") != std::string::npos) return "Ampere";
+        if (lower.find("2080") != std::string::npos || lower.find("2070") != std::string::npos) return "Turing";
+        return "NVIDIA";
+    }
+
+    if (vendorID == 0x8086 || lower.find("intel") != std::string::npos || lower.find("arc") != std::string::npos) {
+        if (lower.find("b580") != std::string::npos || lower.find("battlemage") != std::string::npos) return "Battlemage (Xe2)";
+        if (lower.find("a770") != std::string::npos || lower.find("a750") != std::string::npos || lower.find("alchemist") != std::string::npos) return "Alchemist (Xe-HPG)";
+        return "Intel Xe";
+    }
+
+    return "Discrete GPU";
+}
+
+static void getHostSystemInfo(std::string& outCpuModel, std::string& outCpuArch, std::string& outOsDriver, uint64_t& outRamMb) {
+    outCpuModel = "Host CPU";
+    outCpuArch = "x86_64";
+    outOsDriver = "Host OS";
+    outRamMb = 32768;
+
+#ifdef _WIN32
+    outOsDriver = "Windows 11 / 10";
+
+    int cpuInfo[4] = {-1};
+    __cpuid(cpuInfo, (int)0x80000000);
+    unsigned int nExIds = static_cast<unsigned int>(cpuInfo[0]);
+    if (nExIds >= 0x80000004) {
+        char brand[65] = {0};
+        __cpuid(reinterpret_cast<int*>(brand), (int)0x80000002);
+        __cpuid(reinterpret_cast<int*>(brand + 16), (int)0x80000003);
+        __cpuid(reinterpret_cast<int*>(brand + 32), (int)0x80000004);
+        std::string raw(brand);
+        size_t s = raw.find_first_not_of(" \t\r\n");
+        if (s != std::string::npos) {
+            size_t e = raw.find_last_not_of(" \t\r\n");
+            outCpuModel = raw.substr(s, e - s + 1);
+        } else if (!raw.empty()) {
+            outCpuModel = raw;
+        }
+    }
+
+    MEMORYSTATUSEX memStatus;
+    memStatus.dwLength = sizeof(memStatus);
+    if (GlobalMemoryStatusEx(&memStatus)) {
+        outRamMb = memStatus.ullTotalPhys / (1024 * 1024);
+    }
+#else
+    outOsDriver = "Linux";
+    struct utsname un;
+    if (uname(&un) == 0) {
+        outOsDriver = std::string(un.sysname) + " " + std::string(un.release);
+    }
+
+    std::ifstream cpuFile("/proc/cpuinfo");
+    if (cpuFile.is_open()) {
+        std::string line;
+        while (std::getline(cpuFile, line)) {
+            if (line.rfind("model name", 0) == 0) {
+                size_t colon = line.find(':');
+                if (colon != std::string::npos) {
+                    std::string val = line.substr(colon + 1);
+                    size_t s = val.find_first_not_of(" \t\r\n");
+                    if (s != std::string::npos) {
+                        size_t e = val.find_last_not_of(" \t\r\n");
+                        outCpuModel = val.substr(s, e - s + 1);
+                    } else if (!val.empty()) {
+                        outCpuModel = val;
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    struct sysinfo si;
+    if (sysinfo(&si) == 0) {
+        outRamMb = (static_cast<uint64_t>(si.totalram) * si.mem_unit) / (1024 * 1024);
+    }
+#endif
+
+    std::string lowerModel = outCpuModel;
+    std::transform(lowerModel.begin(), lowerModel.end(), lowerModel.begin(), ::tolower);
+    if (lowerModel.find("zen 5") != std::string::npos || lowerModel.find("9950") != std::string::npos || 
+        lowerModel.find("9900") != std::string::npos || lowerModel.find("9700") != std::string::npos || 
+        lowerModel.find("9800") != std::string::npos) {
+        outCpuArch = "x86_64 Zen 5";
+    } else if (lowerModel.find("zen 4") != std::string::npos || lowerModel.find("7800x3d") != std::string::npos || 
+               lowerModel.find("7950") != std::string::npos || lowerModel.find("7900") != std::string::npos || 
+               lowerModel.find("7700") != std::string::npos || lowerModel.find("7600") != std::string::npos) {
+        outCpuArch = "x86_64 Zen 4";
+    } else if (lowerModel.find("zen 3") != std::string::npos || lowerModel.find("5950") != std::string::npos || 
+               lowerModel.find("5900") != std::string::npos || lowerModel.find("5800") != std::string::npos || 
+               lowerModel.find("5600") != std::string::npos) {
+        outCpuArch = "x86_64 Zen 3";
+    } else if (lowerModel.find("zen 2") != std::string::npos || lowerModel.find("3970") != std::string::npos || 
+               lowerModel.find("3950") != std::string::npos || lowerModel.find("3900") != std::string::npos || 
+               lowerModel.find("3700") != std::string::npos || lowerModel.find("3600") != std::string::npos) {
+        outCpuArch = "x86_64 Zen 2";
+    } else if (lowerModel.find("intel") != std::string::npos) {
+        outCpuArch = "x86_64 Intel";
+    } else {
+        outCpuArch = "x86_64";
+    }
+}
+
+static std::string formatCardDeviceSubtitle(const SelectableDevice& dev) {
+    std::string name = dev.name;
+    if (dev.isSystem) {
+        size_t procPos = name.find(" Processor");
+        if (procPos != std::string::npos) {
+            name = name.substr(0, procPos);
+            size_t corePos = name.rfind("-Core");
+            if (corePos != std::string::npos) {
+                size_t spaceBefore = name.rfind(' ', corePos);
+                if (spaceBefore != std::string::npos) {
+                    name = name.substr(0, spaceBefore);
+                }
+            }
+        }
+        size_t rPos;
+        while ((rPos = name.find("(R)")) != std::string::npos) name.erase(rPos, 3);
+        while ((rPos = name.find("(TM)")) != std::string::npos) name.erase(rPos, 4);
+        while (name.find("  ") != std::string::npos) {
+            name.replace(name.find("  "), 2, " ");
+        }
+        size_t s = name.find_first_not_of(" \t\r\n");
+        if (s != std::string::npos) {
+            size_t e = name.find_last_not_of(" \t\r\n");
+            name = name.substr(s, e - s + 1);
+        }
+        return name;
+    } else {
+        if (name.empty()) {
+            return "GPU " + std::to_string(dev.deviceIndex);
+        }
+        return name;
+    }
+}
+
+} // anonymous namespace
 
 GuiApp::GuiApp() {
     m_benchmarkStartTime = std::chrono::steady_clock::now();
@@ -24,12 +225,118 @@ GuiApp::~GuiApp() {
     m_telemetryWorker.stop();
 }
 
-void GuiApp::init() {
-    setupDarkTheme();
+void GuiApp::init(float uiScale) {
+    m_baseScale = uiScale > 0.0f ? uiScale : 1.0f;
+    m_uiScale = m_baseScale;
+
+    // First initialize base unscaled theme metrics
+    setupDarkTheme(1.0f);
+
+    if (ImPlot::GetCurrentContext()) {
+        m_basePlotStyle = ImPlot::GetStyle();
+        m_basePlotStyleInitialized = true;
+    }
+
+    // Apply effective target scale
+    setUiScale(m_uiScale);
+    m_zoomToastTimer = 0.0f; // Don't show toast on initial boot
+
     initializeBenchmarkCategories();
     discoverHardware();
     updateBenchmarkSupport();
     m_telemetryWorker.start();
+}
+
+void GuiApp::setUiScale(float scale) {
+    scale = std::clamp(scale, 0.75f, 4.0f);
+    if (std::abs(scale - m_uiScale) < 0.005f && m_zoomToastTimer > 0.0f) return;
+    m_uiScale = scale;
+    setupDarkTheme(m_uiScale);
+
+    ImGuiIO& io = ImGui::GetIO();
+    if (m_baseScale > 0.0f) {
+        io.FontGlobalScale = m_uiScale / m_baseScale;
+    }
+
+    if (m_basePlotStyleInitialized && ImPlot::GetCurrentContext()) {
+        ImPlotStyle& plotStyle = ImPlot::GetStyle();
+        plotStyle = m_basePlotStyle;
+        plotStyle.LineWeight *= m_uiScale;
+        plotStyle.MarkerSize *= m_uiScale;
+        plotStyle.MarkerWeight *= m_uiScale;
+        plotStyle.PlotBorderSize *= m_uiScale;
+        plotStyle.MajorTickLen = ImVec2(m_basePlotStyle.MajorTickLen.x * m_uiScale, m_basePlotStyle.MajorTickLen.y * m_uiScale);
+        plotStyle.MinorTickLen = ImVec2(m_basePlotStyle.MinorTickLen.x * m_uiScale, m_basePlotStyle.MinorTickLen.y * m_uiScale);
+        plotStyle.MajorTickSize = ImVec2(m_basePlotStyle.MajorTickSize.x * m_uiScale, m_basePlotStyle.MajorTickSize.y * m_uiScale);
+        plotStyle.MinorTickSize = ImVec2(m_basePlotStyle.MinorTickSize.x * m_uiScale, m_basePlotStyle.MinorTickSize.y * m_uiScale);
+        plotStyle.MajorGridSize = ImVec2(m_basePlotStyle.MajorGridSize.x * m_uiScale, m_basePlotStyle.MajorGridSize.y * m_uiScale);
+        plotStyle.MinorGridSize = ImVec2(m_basePlotStyle.MinorGridSize.x * m_uiScale, m_basePlotStyle.MinorGridSize.y * m_uiScale);
+        plotStyle.PlotPadding = ImVec2(m_basePlotStyle.PlotPadding.x * m_uiScale, m_basePlotStyle.PlotPadding.y * m_uiScale);
+        plotStyle.LabelPadding = ImVec2(m_basePlotStyle.LabelPadding.x * m_uiScale, m_basePlotStyle.LabelPadding.y * m_uiScale);
+        plotStyle.LegendPadding = ImVec2(m_basePlotStyle.LegendPadding.x * m_uiScale, m_basePlotStyle.LegendPadding.y * m_uiScale);
+        plotStyle.LegendInnerPadding = ImVec2(m_basePlotStyle.LegendInnerPadding.x * m_uiScale, m_basePlotStyle.LegendInnerPadding.y * m_uiScale);
+        plotStyle.LegendSpacing = ImVec2(m_basePlotStyle.LegendSpacing.x * m_uiScale, m_basePlotStyle.LegendSpacing.y * m_uiScale);
+    }
+
+    m_zoomToastTimer = 1.6f;
+}
+
+void GuiApp::updateZoomShortcuts() {
+    ImGuiIO& io = ImGui::GetIO();
+    if (io.KeyCtrl) {
+        if (std::abs(io.MouseWheel) > 0.01f) {
+            float step = (io.MouseWheel > 0.0f) ? 0.1f : -0.1f;
+            setUiScale(std::round((m_uiScale + step) * 10.0f) / 10.0f);
+            io.MouseWheel = 0.0f;
+            io.MouseWheelH = 0.0f;
+        } else if (ImGui::IsKeyPressed(ImGuiKey_Equal) || ImGui::IsKeyPressed(ImGuiKey_KeypadAdd)) {
+            setUiScale(std::round((m_uiScale + 0.1f) * 10.0f) / 10.0f);
+        } else if (ImGui::IsKeyPressed(ImGuiKey_Minus) || ImGui::IsKeyPressed(ImGuiKey_KeypadSubtract)) {
+            setUiScale(std::round((m_uiScale - 0.1f) * 10.0f) / 10.0f);
+        } else if (ImGui::IsKeyPressed(ImGuiKey_0) || ImGui::IsKeyPressed(ImGuiKey_Keypad0)) {
+            setUiScale(m_baseScale);
+        }
+    }
+}
+
+void GuiApp::renderZoomToast() {
+    if (m_zoomToastTimer <= 0.0f) return;
+
+    ImGuiIO& io = ImGui::GetIO();
+    m_zoomToastTimer -= io.DeltaTime;
+    float alpha = std::clamp(m_zoomToastTimer / 0.35f, 0.0f, 1.0f);
+
+    const ImGuiViewport* vp = ImGui::GetMainViewport();
+    ImVec2 toastPos = ImVec2(vp->WorkPos.x + vp->WorkSize.x - s(250.0f), vp->WorkPos.y + s(16.0f));
+    ImGui::SetNextWindowPos(toastPos, ImGuiCond_Always);
+    ImGui::SetNextWindowBgAlpha(0.92f * alpha);
+
+    ImGuiWindowFlags toastFlags = ImGuiWindowFlags_NoDecoration 
+                                | ImGuiWindowFlags_AlwaysAutoResize 
+                                | ImGuiWindowFlags_NoSavedSettings 
+                                | ImGuiWindowFlags_NoFocusOnAppearing 
+                                | ImGuiWindowFlags_NoNav
+                                | ImGuiWindowFlags_NoMove;
+
+    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.38f, 0.75f, 1.0f, 0.75f * alpha));
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, alpha));
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.08f, 0.10f, 0.15f, 0.95f * alpha));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, s(6.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(s(12.0f), s(8.0f)));
+
+    if (ImGui::Begin("##ZoomToastOverlay", nullptr, toastFlags)) {
+        int zoomPct = static_cast<int>(std::round((m_uiScale / m_baseScale) * 100.0f));
+        int absPct = static_cast<int>(std::round(m_uiScale * 100.0f));
+        ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.0f, alpha), "Zoom: %d%%", zoomPct);
+        ImGui::SameLine();
+        ImGui::TextDisabled("(%.1fx / %d%% DPI)", m_uiScale, absPct);
+        if (std::abs(m_uiScale - m_baseScale) > 0.01f) {
+            ImGui::TextDisabled("Press Ctrl+0 to reset");
+        }
+    }
+    ImGui::End();
+    ImGui::PopStyleVar(2);
+    ImGui::PopStyleColor(3);
 }
 
 void GuiApp::setSelectedDevice(int deviceIndex) {
@@ -177,9 +484,11 @@ void GuiApp::selectOnlyBenchmark(const std::string& benchmarkId) {
     }
 }
 
-void GuiApp::setupDarkTheme() {
+void GuiApp::setupDarkTheme(float scale) {
     ImGuiStyle& style = ImGui::GetStyle();
-    ImVec4* colors = style.Colors;
+
+    if (!m_baseStyleInitialized) {
+        ImVec4* colors = style.Colors;
 
     // Professional High-Contrast Workstation Dark Theme
     colors[ImGuiCol_Text]                  = ImVec4(0.96f, 0.97f, 0.99f, 1.00f);
@@ -223,18 +532,27 @@ void GuiApp::setupDarkTheme() {
     colors[ImGuiCol_TableRowBg]            = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
     colors[ImGuiCol_TableRowBgAlt]         = ImVec4(0.12f, 0.15f, 0.21f, 0.50f);
 
-    style.WindowRounding    = 0.0f;
-    style.ChildRounding     = 8.0f;
-    style.FrameRounding     = 6.0f;
-    style.PopupRounding     = 6.0f;
-    style.ScrollbarRounding = 6.0f;
-    style.GrabRounding      = 4.0f;
-    style.TabRounding       = 6.0f;
-    style.WindowBorderSize  = 0.0f;
-    style.FrameBorderSize   = 1.0f;
-    style.ItemSpacing       = ImVec2(10.0f, 8.0f);
-    style.FramePadding      = ImVec2(10.0f, 6.0f);
-    style.ItemInnerSpacing  = ImVec2(6.0f, 4.0f);
+        style.WindowRounding    = 0.0f;
+        style.ChildRounding     = 8.0f;
+        style.FrameRounding     = 6.0f;
+        style.PopupRounding     = 6.0f;
+        style.ScrollbarRounding = 6.0f;
+        style.GrabRounding      = 4.0f;
+        style.TabRounding       = 6.0f;
+        style.WindowBorderSize  = 0.0f;
+        style.FrameBorderSize   = 1.0f;
+        style.ItemSpacing       = ImVec2(10.0f, 8.0f);
+        style.FramePadding      = ImVec2(10.0f, 6.0f);
+        style.ItemInnerSpacing  = ImVec2(6.0f, 4.0f);
+
+        m_baseStyle = style;
+        m_baseStyleInitialized = true;
+    }
+
+    style = m_baseStyle;
+    if (scale > 1.01f || scale < 0.99f) {
+        style.ScaleAllSizes(scale);
+    }
 }
 
 void GuiApp::initializeBenchmarkCategories() {
@@ -422,9 +740,9 @@ void GuiApp::discoverHardware() {
         dev.deviceIndex = prof.deviceIndex;
         dev.name = prof.deviceName;
         dev.backend = prof.backend;
-        dev.architecture = "gfx1201 (RDNA 4)";
-        dev.driver = prof.driverName + " " + prof.driverVersion;
-        dev.vramTotalMb = prof.vramTotalMb > 0 ? prof.vramTotalMb : 32624;
+        dev.architecture = detectGpuArchitecture(prof.deviceName, prof.vendorID, prof.deviceID);
+        dev.driver = prof.driverName + (!prof.driverVersion.empty() ? (" " + prof.driverVersion) : "");
+        dev.vramTotalMb = prof.vramTotalMb;
         dev.isSystem = false;
         // Default GPU 0 (Primary) to selected
         dev.selected = (prof.deviceIndex == 0);
@@ -444,6 +762,8 @@ void GuiApp::discoverHardware() {
                     std::string idxStr = entry.substr(p1 + 1, p2 - (p1 + 1));
                     std::string devName = entry.substr(p2 + 1);
 
+                    if (backend == "System") continue; // Handled dynamically below
+
                     SelectableDevice dev;
                     try {
                         dev.deviceIndex = std::stoul(idxStr);
@@ -452,9 +772,9 @@ void GuiApp::discoverHardware() {
                     }
                     dev.name = devName;
                     dev.backend = backend;
-                    dev.architecture = "gfx1201 (RDNA 4)";
-                    dev.driver = "radv 26.2.2";
-                    dev.vramTotalMb = 32624;
+                    dev.architecture = detectGpuArchitecture(devName, 0, 0);
+                    dev.driver = backend;
+                    dev.vramTotalMb = 0;
                     dev.isSystem = false;
                     dev.selected = (dev.deviceIndex == 0);
                     m_devices.push_back(dev);
@@ -463,14 +783,24 @@ void GuiApp::discoverHardware() {
         }
     }
 
-    // Always append Host CPU & RAM system entry
+    // Dynamically query Host CPU & RAM system entry
+    std::string cpuModel, cpuArch, osDriver;
+    uint64_t ramMb = 0;
+    getHostSystemInfo(cpuModel, cpuArch, osDriver, ramMb);
+
+    unsigned int numThreads = std::thread::hardware_concurrency();
+    std::string cpuFullName = cpuModel;
+    if (numThreads > 0 && cpuFullName.find("Thread") == std::string::npos && cpuFullName.find("C/") == std::string::npos) {
+        cpuFullName += " (" + std::to_string(numThreads) + " Threads)";
+    }
+
     SelectableDevice sysDev;
     sysDev.deviceIndex = 0xFFFFFFFF;
-    sysDev.name = "AMD Ryzen Threadripper 3970X (32C/64T)";
+    sysDev.name = cpuFullName;
     sysDev.backend = "System";
-    sysDev.architecture = "x86_64 Zen 2";
-    sysDev.driver = "Host Linux 6.x";
-    sysDev.vramTotalMb = 65536; // 64 GB RAM
+    sysDev.architecture = cpuArch;
+    sysDev.driver = osDriver;
+    sysDev.vramTotalMb = ramMb;
     sysDev.isSystem = true;
     m_devices.push_back(sysDev);
 
@@ -487,6 +817,7 @@ void GuiApp::processEvents() {
 
 void GuiApp::updateAndRender() {
     processIncomingResults();
+    updateZoomShortcuts();
 
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->WorkPos);
@@ -501,10 +832,10 @@ void GuiApp::updateAndRender() {
 
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10.0f, 10.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(s(10.0f), s(10.0f)));
 
     if (ImGui::Begin("GPUBenchWorkstationRoot", nullptr, rootFlags)) {
-        float sidebarWidth = 350.0f;
+        float sidebarWidth = s(350.0f);
         float fullHeight = ImGui::GetContentRegionAvail().y;
 
         // Left Workstation Sidebar Rail (Controls, Devices, Telemetry, Actions)
@@ -521,6 +852,8 @@ void GuiApp::updateAndRender() {
     if (m_showSettingsModal) {
         renderSettingsModal();
     }
+
+    renderZoomToast();
 }
 
 void GuiApp::renderLeftSidebar(float width, float height) {
@@ -578,19 +911,26 @@ void GuiApp::renderLeftSidebar(float width, float height) {
         return clicked;
     };
 
+    size_t gpuCount = 0;
+    for (const auto& dev : m_devices) {
+        if (!dev.isSystem) gpuCount++;
+    }
+
     if (presetPill("GPU 0", onlyGpu0)) {
         for (auto& dev : m_devices) dev.selected = (dev.deviceIndex == 0 && !dev.isSystem);
         updateTelemetrySelection();
     }
-    ImGui::SameLine();
-    if (presetPill("GPU 1", onlyGpu1)) {
-        for (auto& dev : m_devices) dev.selected = (dev.deviceIndex == 1 && !dev.isSystem);
-        updateTelemetrySelection();
-    }
-    ImGui::SameLine();
-    if (presetPill("Dual GPUs", dualGpu)) {
-        for (auto& dev : m_devices) dev.selected = !dev.isSystem;
-        updateTelemetrySelection();
+    if (gpuCount > 1) {
+        ImGui::SameLine();
+        if (presetPill("GPU 1", onlyGpu1)) {
+            for (auto& dev : m_devices) dev.selected = (dev.deviceIndex == 1 && !dev.isSystem);
+            updateTelemetrySelection();
+        }
+        ImGui::SameLine();
+        if (presetPill("Dual GPUs", dualGpu)) {
+            for (auto& dev : m_devices) dev.selected = !dev.isSystem;
+            updateTelemetrySelection();
+        }
     }
     ImGui::SameLine();
     if (presetPill("+ Host", false)) {
@@ -611,40 +951,43 @@ void GuiApp::renderLeftSidebar(float width, float height) {
         ImGui::PushID(static_cast<int>(i));
 
         if (dev.selected) {
-            ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.38f, 0.78f, 1.00f, 0.90f));
-            ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.12f, 0.16f, 0.24f, 1.00f));
+            ImVec4 borderCol = dev.isSystem ? ImVec4(0.95f, 0.75f, 0.30f, 0.90f) : ImVec4(0.20f, 0.65f, 1.0f, 0.85f);
+            ImVec4 bgCol = dev.isSystem ? ImVec4(0.18f, 0.15f, 0.10f, 0.85f) : ImVec4(0.12f, 0.18f, 0.28f, 0.85f);
+            ImGui::PushStyleColor(ImGuiCol_Border, borderCol);
+            ImGui::PushStyleColor(ImGuiCol_ChildBg, bgCol);
         } else {
             ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.20f, 0.25f, 0.35f, 0.45f));
             ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.08f, 0.10f, 0.14f, 0.70f));
         }
 
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8.0f, 6.0f));
-        ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6.0f);
-        ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize, 1.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(s(8.0f), s(6.0f)));
+        ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, s(6.0f));
+        ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize, s(1.0f));
 
-        // Explicit NoScrollbar flags and 54px height
-        ImGui::BeginChild("DevCard", ImVec2(0, 54.0f), true, 
+        // Explicit NoScrollbar flags and scaled height
+        ImGui::BeginChild("DevCard", ImVec2(0, s(54.0f)), true, 
                           ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
 
         if (ImGui::BeginTable("DevCardTbl", 2, ImGuiTableFlags_None)) {
             ImGui::TableSetupColumn("DevCol", ImGuiTableColumnFlags_WidthStretch);
-            ImGui::TableSetupColumn("BadgeCol", ImGuiTableColumnFlags_WidthFixed, 68.0f);
+            ImGui::TableSetupColumn("BadgeCol", ImGuiTableColumnFlags_WidthFixed, s(76.0f));
             ImGui::TableNextRow();
 
             ImGui::TableSetColumnIndex(0);
-            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(3.0f, 3.0f));
-            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 2.0f);
+            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(s(3.0f), s(3.0f)));
+            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + s(2.0f));
             if (ImGui::Checkbox("##dev_sel", &dev.selected)) {
                 updateTelemetrySelection();
             }
             ImGui::PopStyleVar();
 
-            ImGui::SameLine(0, 8.0f);
+            ImGui::SameLine(0, s(8.0f));
             ImGui::BeginGroup();
             if (dev.isSystem) {
                 ImVec4 titleCol = dev.selected ? ImVec4(0.98f, 0.85f, 0.45f, 1.0f) : ImVec4(0.80f, 0.75f, 0.55f, 0.85f);
                 ImGui::TextColored(titleCol, "Host CPU & RAM");
-                ImGui::TextDisabled("AMD Threadripper 3970X");
+                std::string sub = formatCardDeviceSubtitle(dev);
+                ImGui::TextDisabled("%s", sub.c_str());
             } else {
                 bool isPrimary = (dev.deviceIndex == 0);
                 std::string title = isPrimary ? "GPU 0 (Primary)" : ("GPU " + std::to_string(dev.deviceIndex) + " (Secondary)");
@@ -652,20 +995,22 @@ void GuiApp::renderLeftSidebar(float width, float height) {
                     ? (isPrimary ? ImVec4(0.38f, 0.85f, 1.00f, 1.0f) : ImVec4(0.72f, 0.85f, 0.98f, 1.0f))
                     : ImVec4(0.60f, 0.68f, 0.80f, 0.8f);
                 ImGui::TextColored(titleCol, "%s", title.c_str());
-                ImGui::TextDisabled("Radeon AI PRO R9700");
+                std::string sub = formatCardDeviceSubtitle(dev);
+                ImGui::TextDisabled("%s", sub.c_str());
             }
             ImGui::EndGroup();
 
             ImGui::TableSetColumnIndex(1);
-            const char* badgeStr = dev.isSystem ? "[64 GB]" : "[32 GB]";
+            uint64_t memGb = (dev.vramTotalMb + 512) / 1024;
+            std::string badgeStr = dev.vramTotalMb > 0 ? ("[" + std::to_string(memGb) + " GB]") : "[N/A]";
             ImVec4 badgeCol = dev.isSystem ? ImVec4(0.90f, 0.75f, 0.35f, 0.85f) : ImVec4(0.38f, 0.75f, 1.00f, 0.85f);
-            float badgeW = ImGui::CalcTextSize(badgeStr).x;
+            float badgeW = ImGui::CalcTextSize(badgeStr.c_str()).x;
             float availW = ImGui::GetContentRegionAvail().x;
             if (availW > badgeW) {
                 ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (availW - badgeW));
             }
-            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 2.0f);
-            ImGui::TextColored(badgeCol, "%s", badgeStr);
+            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + s(2.0f));
+            ImGui::TextColored(badgeCol, "%s", badgeStr.c_str());
 
             ImGui::EndTable();
         }
@@ -685,9 +1030,20 @@ void GuiApp::renderLeftSidebar(float width, float height) {
         // Tooltip with detailed device information
         if (ImGui::IsItemHovered()) {
             if (dev.isSystem) {
-                ImGui::SetTooltip("Host System Memory & CPU\nCPU: AMD Ryzen Threadripper 3970X (32C/64T)\nRAM: 64 GB DDR4\nRuns multi-threaded & single-threaded DDR bandwidth and pointer-chasing latency benchmarks");
+                uint64_t ramGb = (dev.vramTotalMb + 512) / 1024;
+                ImGui::SetTooltip("Host System Memory & CPU\nCPU: %s\nArchitecture: %s\nRAM: %llu GB (%llu MB)\nOS / Platform: %s\nRuns multi-threaded & single-threaded DDR bandwidth and pointer-chasing latency benchmarks",
+                                  dev.name.c_str(),
+                                  dev.architecture.c_str(),
+                                  static_cast<unsigned long long>(ramGb),
+                                  static_cast<unsigned long long>(dev.vramTotalMb),
+                                  dev.driver.c_str());
             } else {
-                ImGui::SetTooltip("AMD Radeon AI PRO R9700\nArchitecture: gfx1201 (RDNA 4)\nVRAM: 32 GB GDDR6 (32,624 MB)\nDriver: %s\nRole: %s",
+                uint64_t vramGb = (dev.vramTotalMb + 512) / 1024;
+                ImGui::SetTooltip("%s\nArchitecture: %s\nVRAM: %llu GB (%llu MB)\nDriver: %s\nRole: %s",
+                                  dev.name.c_str(),
+                                  dev.architecture.c_str(),
+                                  static_cast<unsigned long long>(vramGb),
+                                  static_cast<unsigned long long>(dev.vramTotalMb),
                                   dev.driver.c_str(),
                                   dev.deviceIndex == 0 ? "Primary Target GPU (-d 0)" : "Secondary Accelerator GPU (-d 1)");
             }
@@ -761,7 +1117,7 @@ void GuiApp::renderLeftSidebar(float width, float height) {
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.85f, 0.20f, 0.20f, 1.00f));
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.95f, 0.25f, 0.25f, 1.00f));
         ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(1.00f, 0.30f, 0.30f, 1.00f));
-        if (ImGui::Button("ABORT BENCHMARK", ImVec2(-1, 38))) {
+        if (ImGui::Button("ABORT BENCHMARK", ImVec2(-1, s(38.0f)))) {
             abortBenchmarks();
         }
         ImGui::PopStyleColor(3);
@@ -770,7 +1126,7 @@ void GuiApp::renderLeftSidebar(float width, float height) {
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.28f, 0.55f, 1.00f, 1.00f));
         ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.35f, 0.65f, 1.00f, 1.00f));
         std::string runLabel = "RUN BENCHMARKS (" + std::to_string(selectedTests) + ")";
-        if (ImGui::Button(runLabel.c_str(), ImVec2(-1, 38))) {
+        if (ImGui::Button(runLabel.c_str(), ImVec2(-1, s(38.0f)))) {
             startBenchmarks();
         }
         ImGui::PopStyleColor(3);
@@ -781,16 +1137,16 @@ void GuiApp::renderLeftSidebar(float width, float height) {
         float progress = (m_totalTasks > 0) ? (static_cast<float>(m_completedTasks) / static_cast<float>(m_totalTasks)) : 0.0f;
         progress = std::clamp(progress, 0.0f, 1.0f);
         std::string progText = std::to_string(m_completedTasks) + "/" + std::to_string(m_totalTasks) + " (" + std::to_string(static_cast<int>(progress * 100.0f)) + "%)";
-        ImGui::ProgressBar(progress, ImVec2(-1, 20.0f), progText.c_str());
+        ImGui::ProgressBar(progress, ImVec2(-1, s(20.0f)), progText.c_str());
         ImGui::TextDisabled("%s", m_currentBenchmarkName.c_str());
     } else if (m_execState == ExecutionState::Completed) {
         ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.18f, 0.80f, 0.44f, 1.00f));
-        ImGui::ProgressBar(1.0f, ImVec2(-1, 20.0f), "Complete");
+        ImGui::ProgressBar(1.0f, ImVec2(-1, s(20.0f)), "Complete");
         ImGui::PopStyleColor();
         ImGui::TextColored(ImVec4(0.35f, 0.85f, 0.55f, 1.0f), "[PASSED] %zu workloads recorded", m_allResults.size());
     } else if (m_execState == ExecutionState::Cancelled) {
         ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.85f, 0.55f, 0.15f, 1.00f));
-        ImGui::ProgressBar(1.0f, ImVec2(-1, 20.0f), "Cancelled");
+        ImGui::ProgressBar(1.0f, ImVec2(-1, s(20.0f)), "Cancelled");
         ImGui::PopStyleColor();
         ImGui::TextColored(ImVec4(0.95f, 0.65f, 0.20f, 1.0f), "[!] Cancelled by user");
     } else if (!m_statusMessage.empty()) {
@@ -816,7 +1172,7 @@ void GuiApp::renderLeftSidebar(float width, float height) {
     }
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.28f, 0.55f, 1.00f, 1.0f));
 
-    if (ImGui::Button("Export JSON Report", ImVec2(-1, 28.0f))) {
+    if (ImGui::Button("Export JSON Report", ImVec2(-1, s(28.0f)))) {
         exportResultsToJson("");
     }
     ImGui::PopStyleColor(2);
@@ -1223,15 +1579,15 @@ void GuiApp::renderBenchmarkSuitePanel() {
     if (m_execState == ExecutionState::Completed) {
         ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.12f, 0.18f, 0.25f, 0.95f));
         ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.30f, 0.65f, 0.95f, 0.85f));
-        ImGui::BeginChild("CompletedSuiteBanner", ImVec2(0, 42.0f), true);
+        ImGui::BeginChild("CompletedSuiteBanner", ImVec2(0, s(42.0f)), true);
         ImGui::AlignTextToFramePadding();
         ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "[PASSED] Benchmark suite finished (%zu results recorded).", m_allResults.size());
         ImGui::SameLine();
         ImGui::TextDisabled("| Selection locked to preserve results.");
         
-        float btnW = 150.0f;
-        float rightX = ImGui::GetWindowWidth() - (btnW * 2.0f + 30.0f);
-        if (rightX > ImGui::GetCursorPosX() + 10.0f) {
+        float btnW = s(160.0f);
+        float rightX = ImGui::GetWindowWidth() - (btnW * 2.0f + s(30.0f));
+        if (rightX > ImGui::GetCursorPosX() + s(10.0f)) {
             ImGui::SameLine(rightX);
         } else {
             ImGui::SameLine();
@@ -1533,18 +1889,18 @@ void GuiApp::renderBenchmarkSuitePanel() {
         bool isPartSel = (selectedCount > 0 && selectedCount < visibleCount);
 
         float availW = ImGui::GetContentRegionAvail().x;
-        float headerH = 30.0f;
+        float headerH = s(30.0f);
         ImVec2 p0 = ImGui::GetCursorScreenPos();
         ImVec2 p1 = ImVec2(p0.x + availW, p0.y + headerH);
 
         ImVec4 headerBg = sub.collapsed ? ImVec4(0.12f, 0.15f, 0.22f, 0.85f) : ImVec4(0.15f, 0.20f, 0.30f, 0.95f);
         ImDrawList* drawList = ImGui::GetWindowDrawList();
-        drawList->AddRectFilled(p0, p1, ImGui::GetColorU32(headerBg), 5.0f);
-        drawList->AddRect(p0, p1, ImGui::GetColorU32(ImVec4(0.25f, 0.32f, 0.45f, 0.6f)), 5.0f);
+        drawList->AddRectFilled(p0, p1, ImGui::GetColorU32(headerBg), s(5.0f));
+        drawList->AddRect(p0, p1, ImGui::GetColorU32(ImVec4(0.25f, 0.32f, 0.45f, 0.6f)), s(5.0f));
 
         // Draw crisp geometric triangle for chevron
-        ImVec2 center = ImVec2(p0.x + 13.0f, p0.y + headerH * 0.5f);
-        float r = 4.0f;
+        ImVec2 center = ImVec2(p0.x + s(13.0f), p0.y + headerH * 0.5f);
+        float r = s(4.0f);
         ImU32 triCol = ImGui::GetColorU32(ImVec4(0.60f, 0.80f, 1.0f, 1.0f));
         if (sub.collapsed) {
             // Right-pointing triangle
@@ -1566,14 +1922,14 @@ void GuiApp::renderBenchmarkSuitePanel() {
 
         // Clickable chevron area for collapse/expand
         ImGui::SetCursorScreenPos(p0);
-        if (ImGui::InvisibleButton("##chev_click", ImVec2(24.0f, headerH))) {
+        if (ImGui::InvisibleButton("##chev_click", ImVec2(s(24.0f), headerH))) {
             sub.collapsed = !sub.collapsed;
         }
 
-        // Group-level select/deselect checkbox (starts at x = 26px, width ~26px)
+        // Group-level select/deselect checkbox
         float frameH = ImGui::GetFrameHeight();
         float cbOffsetY = (headerH - frameH) * 0.5f;
-        ImGui::SetCursorScreenPos(ImVec2(p0.x + 26.0f, p0.y + cbOffsetY));
+        ImGui::SetCursorScreenPos(ImVec2(p0.x + s(26.0f), p0.y + cbOffsetY));
         if (!canEditWorkloads) ImGui::BeginDisabled(true);
         bool cbVal = isAllSel;
         if (isPartSel) {
@@ -1589,18 +1945,18 @@ void GuiApp::renderBenchmarkSuitePanel() {
         if (isPartSel) ImGui::PopStyleColor();
         if (!canEditWorkloads) ImGui::EndDisabled();
 
-        // Subgroup Name and count (starts at x = 56px, past the parent checkbox)
+        // Subgroup Name and count
         float textOffsetY = (headerH - ImGui::GetTextLineHeight()) * 0.5f;
-        ImGui::SetCursorScreenPos(ImVec2(p0.x + 56.0f, p0.y + textOffsetY));
+        ImGui::SetCursorScreenPos(ImVec2(p0.x + s(56.0f), p0.y + textOffsetY));
         ImGui::TextColored(ImVec4(0.95f, 0.96f, 0.98f, 1.0f), "%s", sub.name.c_str());
 
-        ImGui::SameLine(0, 6.0f);
+        ImGui::SameLine(0, s(6.0f));
         ImGui::TextDisabled("(%zu/%zu)", selectedCount, visibleCount);
         float titleEndX = ImGui::GetCursorScreenPos().x;
 
         // Clickable title area for collapse/expand
-        ImGui::SetCursorScreenPos(ImVec2(p0.x + 56.0f, p0.y));
-        if (ImGui::InvisibleButton("##title_click", ImVec2(titleEndX - (p0.x + 56.0f), headerH))) {
+        ImGui::SetCursorScreenPos(ImVec2(p0.x + s(56.0f), p0.y));
+        if (ImGui::InvisibleButton("##title_click", ImVec2(titleEndX - (p0.x + s(56.0f)), headerH))) {
             sub.collapsed = !sub.collapsed;
         }
 
@@ -1637,16 +1993,16 @@ void GuiApp::renderBenchmarkSuitePanel() {
             badgeColor = ImVec4(0.35f, 0.65f, 0.95f, 0.85f);
         }
         float badgeW = ImGui::CalcTextSize(rightBadge.c_str()).x;
-        ImGui::SetCursorScreenPos(ImVec2(p0.x + availW - badgeW - 10.0f, p0.y + textOffsetY));
+        ImGui::SetCursorScreenPos(ImVec2(p0.x + availW - badgeW - s(10.0f), p0.y + textOffsetY));
         ImGui::TextColored(badgeColor, "%s", rightBadge.c_str());
 
-        // Place cursor clearly BELOW the header banner with 6px margin
-        ImGui::SetCursorScreenPos(ImVec2(p0.x, p1.y + 6.0f));
+        // Place cursor clearly BELOW the header banner with margin
+        ImGui::SetCursorScreenPos(ImVec2(p0.x, p1.y + s(6.0f)));
 
         // Render Indented Items if Expanded
         if (!sub.collapsed) {
-            float childStartX = p0.x + 36.0f; // 10px indent from parent checkbox
-            float childContentW = (p0.x + availW) - childStartX - 10.0f;
+            float childStartX = p0.x + s(36.0f); // indent from parent checkbox
+            float childContentW = (p0.x + availW) - childStartX - s(10.0f);
 
             // Check if any visible item in this subgroup has a comparison
             bool hasAnyComparison = false;
@@ -1679,10 +2035,10 @@ void GuiApp::renderBenchmarkSuitePanel() {
                 }
             }
 
-            float rightTargetX = childStartX + childContentW - 10.0f;
-            float speedupColW = 46.0f;
-            float branchX = hasAnyComparison ? (rightTargetX - speedupColW - 14.0f) : rightTargetX;
-            float scoreMaxRightX = hasAnyComparison ? (branchX - 10.0f) : rightTargetX;
+            float rightTargetX = childStartX + childContentW - s(10.0f);
+            float speedupColW = s(55.0f);
+            float branchX = hasAnyComparison ? (rightTargetX - speedupColW - s(14.0f)) : rightTargetX;
+            float scoreMaxRightX = hasAnyComparison ? (branchX - s(10.0f)) : rightTargetX;
 
             int activeBaseline = -1;
             int activeLastComp = -1;
@@ -1717,46 +2073,46 @@ void GuiApp::renderBenchmarkSuitePanel() {
                 // Render score / status
                 if (dispInfo.hasResult && !dispInfo.primaryResult.isUnsupported && dispInfo.primaryResult.time_ms > 0.0) {
                     float scoreW = ImGui::CalcTextSize(dispInfo.scoreText.c_str()).x;
-                    if (scoreMaxRightX - scoreW > checkRightX + 10.0f) {
+                    if (scoreMaxRightX - scoreW > checkRightX + s(10.0f)) {
                         ImGui::SameLine(0, 0);
                         ImGui::SetCursorScreenPos(ImVec2(scoreMaxRightX - scoreW, curRowY + (frameH - ImGui::GetTextLineHeight()) * 0.5f));
                     } else {
-                        ImGui::SameLine(0, 8.0f);
+                        ImGui::SameLine(0, s(8.0f));
                     }
                     ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s", dispInfo.scoreText.c_str());
                 } else if (isUnsupported) {
                     float textW = ImGui::CalcTextSize("[UNSUPPORTED]").x;
-                    if (scoreMaxRightX - textW > checkRightX + 10.0f) {
+                    if (scoreMaxRightX - textW > checkRightX + s(10.0f)) {
                         ImGui::SameLine(0, 0);
                         ImGui::SetCursorScreenPos(ImVec2(scoreMaxRightX - textW, curRowY + (frameH - ImGui::GetTextLineHeight()) * 0.5f));
                     } else {
-                        ImGui::SameLine(0, 10.0f);
+                        ImGui::SameLine(0, s(10.0f));
                     }
                     ImGui::TextColored(ImVec4(0.85f, 0.55f, 0.15f, 1.0f), "[UNSUPPORTED]");
                 } else if (isCurrentlyTesting) {
                     float textW = ImGui::CalcTextSize("[RUNNING...]").x;
-                    if (scoreMaxRightX - textW > checkRightX + 10.0f) {
+                    if (scoreMaxRightX - textW > checkRightX + s(10.0f)) {
                         ImGui::SameLine(0, 0);
                         ImGui::SetCursorScreenPos(ImVec2(scoreMaxRightX - textW, curRowY + (frameH - ImGui::GetTextLineHeight()) * 0.5f));
                     } else {
-                        ImGui::SameLine(0, 10.0f);
+                        ImGui::SameLine(0, s(10.0f));
                     }
                     float pulse = 0.5f + 0.5f * sinf(static_cast<float>(ImGui::GetTime()) * 8.0f);
                     ImGui::TextColored(ImVec4(0.20f + 0.20f * pulse, 0.80f + 0.20f * pulse, 1.0f, 1.0f), "[RUNNING...]");
                 } else {
                     std::string badge = "[" + item.metricType + "]";
                     float textW = ImGui::CalcTextSize(badge.c_str()).x;
-                    if (scoreMaxRightX - textW > checkRightX + 10.0f) {
+                    if (scoreMaxRightX - textW > checkRightX + s(10.0f)) {
                         ImGui::SameLine(0, 0);
                         ImGui::SetCursorScreenPos(ImVec2(scoreMaxRightX - textW, curRowY + (frameH - ImGui::GetTextLineHeight()) * 0.5f));
                     } else {
-                        ImGui::SameLine(0, 10.0f);
+                        ImGui::SameLine(0, s(10.0f));
                     }
                     ImGui::TextColored(ImVec4(0.35f, 0.65f, 0.95f, 0.85f), "%s", badge.c_str());
                 }
 
                 // Connecting line logic
-                if (hasAnyComparison && branchX > checkRightX + 20.0f) {
+                if (hasAnyComparison && branchX > checkRightX + s(20.0f)) {
                     ImU32 trunkCol = IM_COL32(70, 140, 220, 190);
 
                     // Check if this item starts a baseline connection
@@ -1766,25 +2122,25 @@ void GuiApp::renderBenchmarkSuitePanel() {
                         prevTrunkY = curCenterY;
 
                         // Baseline anchor node and tick
-                        drawList->AddLine(ImVec2(scoreMaxRightX + 4.0f, curCenterY), ImVec2(branchX, curCenterY), trunkCol, 1.5f);
-                        drawList->AddCircleFilled(ImVec2(branchX, curCenterY), 2.5f, IM_COL32(97, 191, 255, 240));
+                        drawList->AddLine(ImVec2(scoreMaxRightX + s(4.0f), curCenterY), ImVec2(branchX, curCenterY), trunkCol, s(1.5f));
+                        drawList->AddCircleFilled(ImVec2(branchX, curCenterY), s(2.5f), IM_COL32(97, 191, 255, 240));
                     } else if (activeBaseline >= 0 && static_cast<int>(iIdx) <= activeLastComp) {
                         // Draw vertical trunk segment from previous row to this row
-                        drawList->AddLine(ImVec2(branchX, prevTrunkY), ImVec2(branchX, curCenterY), trunkCol, 1.5f);
+                        drawList->AddLine(ImVec2(branchX, prevTrunkY), ImVec2(branchX, curCenterY), trunkCol, s(1.5f));
                         prevTrunkY = curCenterY;
 
                         // If this item is a comparison item with result
                         if (dispInfo.hasComparison && dispInfo.hasResult && !isUnsupported) {
                             ImU32 branchCol = ImGui::GetColorU32(dispInfo.deltaColor);
                             // Horizontal branch line
-                            drawList->AddLine(ImVec2(branchX, curCenterY), ImVec2(branchX + 10.0f, curCenterY), branchCol, 1.5f);
+                            drawList->AddLine(ImVec2(branchX, curCenterY), ImVec2(branchX + s(10.0f), curCenterY), branchCol, s(1.5f));
                             // Arrow head
-                            drawList->AddLine(ImVec2(branchX + 6.0f, curCenterY - 3.5f), ImVec2(branchX + 10.0f, curCenterY), branchCol, 1.5f);
-                            drawList->AddLine(ImVec2(branchX + 6.0f, curCenterY + 3.5f), ImVec2(branchX + 10.0f, curCenterY), branchCol, 1.5f);
+                            drawList->AddLine(ImVec2(branchX + s(6.0f), curCenterY - s(3.5f)), ImVec2(branchX + s(10.0f), curCenterY), branchCol, s(1.5f));
+                            drawList->AddLine(ImVec2(branchX + s(6.0f), curCenterY + s(3.5f)), ImVec2(branchX + s(10.0f), curCenterY), branchCol, s(1.5f));
 
                             // Speedup text
                             ImGui::SameLine(0, 0);
-                            ImGui::SetCursorScreenPos(ImVec2(branchX + 14.0f, curRowY + (frameH - ImGui::GetTextLineHeight()) * 0.5f));
+                            ImGui::SetCursorScreenPos(ImVec2(branchX + s(14.0f), curRowY + (frameH - ImGui::GetTextLineHeight()) * 0.5f));
                             ImGui::TextColored(dispInfo.deltaColor, "%s", dispInfo.deltaText.c_str());
                         }
 
@@ -1814,7 +2170,7 @@ void GuiApp::renderBenchmarkSuitePanel() {
 
         // Clean separation gap between subgroups
         ImGui::Spacing();
-        ImGui::Dummy(ImVec2(0, 3.0f));
+        ImGui::Dummy(ImVec2(0, s(3.0f)));
         ImGui::PopID();
     };
 
@@ -1928,11 +2284,11 @@ void GuiApp::renderLiveTelemetryDock() {
     }
 
     // Time window selector
-    float winSelX = ImGui::GetWindowWidth() - 250.0f;
-    if (winSelX > ImGui::GetCursorPosX() + 20.0f) {
+    float winSelX = ImGui::GetWindowWidth() - s(260.0f);
+    if (winSelX > ImGui::GetCursorPosX() + s(20.0f)) {
         ImGui::SameLine(winSelX);
     } else {
-        ImGui::SameLine(0, 20.0f);
+        ImGui::SameLine(0, s(20.0f));
     }
     ImGui::TextDisabled("Window:");
     ImGui::SameLine();
@@ -1958,33 +2314,33 @@ void GuiApp::renderLiveTelemetryDock() {
         float t1 = static_cast<float>(snap1.vramTotalBytes / (1024 * 1024));
         if (t1 < 1000.0f) t1 = 32624.0f;
 
-        auto renderDualGpuRow = [](const char* label, ImVec4 col, const DeviceTelemetrySnapshot& snap, float vMb, float tMb) {
+        auto renderDualGpuRow = [this](const char* label, ImVec4 col, const DeviceTelemetrySnapshot& snap, float vMb, float tMb) {
             float startX = ImGui::GetCursorPosX();
             ImGui::TextColored(col, "%s", label);
-            ImGui::SameLine(startX + 140.0f);
+            ImGui::SameLine(startX + s(140.0f));
             ImGui::TextDisabled("Shader:");
-            ImGui::SameLine(startX + 195.0f);
+            ImGui::SameLine(startX + s(195.0f));
             ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.0f, 1.0f), "%4.0f MHz", snap.sclkMhz);
 
-            ImGui::SameLine(startX + 270.0f);
+            ImGui::SameLine(startX + s(270.0f));
             ImGui::TextDisabled("| Mem:");
-            ImGui::SameLine(startX + 315.0f);
+            ImGui::SameLine(startX + s(315.0f));
             ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.0f, 1.0f), "%4.0f MHz", snap.mclkMhz);
 
-            ImGui::SameLine(startX + 390.0f);
+            ImGui::SameLine(startX + s(390.0f));
             ImGui::TextDisabled("| Pwr:");
-            ImGui::SameLine(startX + 435.0f);
+            ImGui::SameLine(startX + s(435.0f));
             ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f), "%5.1f W", snap.powerWatts);
 
-            ImGui::SameLine(startX + 510.0f);
+            ImGui::SameLine(startX + s(510.0f));
             ImGui::TextDisabled("| Temp:");
-            ImGui::SameLine(startX + 560.0f);
+            ImGui::SameLine(startX + s(560.0f));
             ImVec4 tColor = (snap.tempJctC > 80.0f) ? ImVec4(0.95f, 0.3f, 0.3f, 1.0f) : ImVec4(0.35f, 0.85f, 0.65f, 1.0f);
             ImGui::TextColored(tColor, "%4.0f C", snap.tempJctC);
 
-            ImGui::SameLine(startX + 630.0f);
+            ImGui::SameLine(startX + s(630.0f));
             ImGui::TextDisabled("| VRAM:");
-            ImGui::SameLine(startX + 685.0f);
+            ImGui::SameLine(startX + s(685.0f));
             float vPct = (tMb > 0.0f) ? (vMb / tMb) * 100.0f : 0.0f;
             ImGui::TextColored(ImVec4(0.70f, 0.80f, 0.95f, 1.0f), "%5.0f / %5.0f MB (%2.0f%%)", vMb, tMb, vPct);
         };
@@ -1999,28 +2355,28 @@ void GuiApp::renderLiveTelemetryDock() {
 
         float startX = ImGui::GetCursorPosX();
         ImGui::TextDisabled("Shader Clk:");
-        ImGui::SameLine(startX + 88.0f);
+        ImGui::SameLine(startX + s(88.0f));
         ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.0f, 1.0f), "%4.0f MHz", snap.sclkMhz);
 
-        ImGui::SameLine(startX + 185.0f);
+        ImGui::SameLine(startX + s(185.0f));
         ImGui::TextDisabled("| Mem Clk:");
-        ImGui::SameLine(startX + 270.0f);
+        ImGui::SameLine(startX + s(270.0f));
         ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.0f, 1.0f), "%4.0f MHz", snap.mclkMhz);
 
-        ImGui::SameLine(startX + 365.0f);
+        ImGui::SameLine(startX + s(365.0f));
         ImGui::TextDisabled("| Power:");
-        ImGui::SameLine(startX + 430.0f);
+        ImGui::SameLine(startX + s(430.0f));
         ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f), "%5.1f W", snap.powerWatts);
 
-        ImGui::SameLine(startX + 515.0f);
+        ImGui::SameLine(startX + s(515.0f));
         ImGui::TextDisabled("| Junction:");
-        ImGui::SameLine(startX + 590.0f);
+        ImGui::SameLine(startX + s(590.0f));
         ImVec4 tColor = (snap.tempJctC > 80.0f) ? ImVec4(0.95f, 0.3f, 0.3f, 1.0f) : ImVec4(0.35f, 0.85f, 0.65f, 1.0f);
         ImGui::TextColored(tColor, "%4.1f C", snap.tempJctC);
 
-        ImGui::SameLine(startX + 675.0f);
+        ImGui::SameLine(startX + s(675.0f));
         ImGui::TextDisabled("| VRAM:");
-        ImGui::SameLine(startX + 735.0f);
+        ImGui::SameLine(startX + s(735.0f));
         ImGui::TextColored(ImVec4(0.70f, 0.80f, 0.95f, 1.0f), "%5.0f / %5.0f MB (%2.0f%%)", vramMb, totalVramMb, vramPct);
     }
 
@@ -2036,8 +2392,8 @@ void GuiApp::renderLiveTelemetryDock() {
     float minT = std::max(0.0f, curT - m_telemetryTimeWindow);
 
     float availW = ImGui::GetContentRegionAvail().x;
-    float graphW = (availW - 14.0f) * 0.5f;
-    float graphH = 175.0f;
+    float graphW = (availW - s(14.0f)) * 0.5f;
+    float graphH = s(175.0f);
 
     // Left graph: Clocks (Shader & Memory)
     if (ImPlot::BeginPlot("##suite_clocks", ImVec2(graphW, graphH), ImPlotFlags_NoTitle)) {
@@ -2150,8 +2506,8 @@ void GuiApp::renderSidebarTelemetry() {
     }
 
     // Time window selector on the right
-    float winRightX = ImGui::GetWindowWidth() - 110.0f;
-    if (winRightX > ImGui::GetCursorPosX() + 10.0f) {
+    float winRightX = ImGui::GetWindowWidth() - s(125.0f);
+    if (winRightX > ImGui::GetCursorPosX() + s(10.0f)) {
         ImGui::SameLine(winRightX);
     } else {
         ImGui::SameLine();
@@ -2179,21 +2535,21 @@ void GuiApp::renderSidebarTelemetry() {
     // 4 Digital Readout Cards (2x2 grid)
     if (ImGui::BeginTable("SidebarGaugeGrid", 2, ImGuiTableFlags_SizingStretchSame)) {
         ImGui::TableNextColumn();
-        ImGui::BeginChild("SGB1", ImVec2(0, 38.0f), true, ImGuiWindowFlags_NoScrollbar);
+        ImGui::BeginChild("SGB1", ImVec2(0, s(38.0f)), true, ImGuiWindowFlags_NoScrollbar);
         ImGui::TextDisabled("Shader Clk");
         ImGui::SameLine();
         ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.0f, 1.0f), "%.0f MHz", activeSnap.sclkMhz);
         ImGui::EndChild();
 
         ImGui::TableNextColumn();
-        ImGui::BeginChild("SGB2", ImVec2(0, 38.0f), true, ImGuiWindowFlags_NoScrollbar);
+        ImGui::BeginChild("SGB2", ImVec2(0, s(38.0f)), true, ImGuiWindowFlags_NoScrollbar);
         ImGui::TextDisabled("Board Pwr");
         ImGui::SameLine();
         ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f), "%.1f W", activeSnap.powerWatts);
         ImGui::EndChild();
 
         ImGui::TableNextColumn();
-        ImGui::BeginChild("SGB3", ImVec2(0, 38.0f), true, ImGuiWindowFlags_NoScrollbar);
+        ImGui::BeginChild("SGB3", ImVec2(0, s(38.0f)), true, ImGuiWindowFlags_NoScrollbar);
         ImGui::TextDisabled("Jct Temp");
         ImGui::SameLine();
         ImVec4 tColor = (activeSnap.tempJctC > 80.0f) ? ImVec4(0.95f, 0.3f, 0.3f, 1.0f) : ImVec4(0.35f, 0.85f, 0.65f, 1.0f);
@@ -2201,7 +2557,7 @@ void GuiApp::renderSidebarTelemetry() {
         ImGui::EndChild();
 
         ImGui::TableNextColumn();
-        ImGui::BeginChild("SGB4", ImVec2(0, 38.0f), true, ImGuiWindowFlags_NoScrollbar);
+        ImGui::BeginChild("SGB4", ImVec2(0, s(38.0f)), true, ImGuiWindowFlags_NoScrollbar);
         ImGui::TextDisabled("VRAM");
         ImGui::SameLine();
         float vMb = static_cast<float>(activeSnap.vramUsedBytes / (1024 * 1024));
@@ -2224,10 +2580,10 @@ void GuiApp::renderSidebarTelemetry() {
     }
     float minT = std::max(0.0f, curT - m_telemetryTimeWindow);
 
-    float plotH = 120.0f;
+    float plotH = s(120.0f);
 
-    ImPlot::PushStyleVar(ImPlotStyleVar_PlotPadding, ImVec2(6, 4));
-    ImPlot::PushStyleVar(ImPlotStyleVar_LabelPadding, ImVec2(4, 2));
+    ImPlot::PushStyleVar(ImPlotStyleVar_PlotPadding, ImVec2(s(6.0f), s(4.0f)));
+    ImPlot::PushStyleVar(ImPlotStyleVar_LabelPadding, ImVec2(s(4.0f), s(2.0f)));
 
     // Color definitions for telemetry traces & legend
     const ImVec4 colGpu0Shader   = ImVec4(0.35f, 0.85f, 0.45f, 1.0f); // Green
@@ -2243,15 +2599,15 @@ void GuiApp::renderSidebarTelemetry() {
     const ImVec4 colSingleTemp  = ImVec4(0.35f, 0.85f, 0.55f, 1.0f); // Emerald Green
     const ImVec4 colSinglePower = ImVec4(0.95f, 0.72f, 0.30f, 1.0f); // Amber Gold
 
-    auto renderLegendChip = [](const char* label, ImVec4 color) {
+    auto renderLegendChip = [this](const char* label, ImVec4 color) {
         ImVec2 p = ImGui::GetCursorScreenPos();
         float lineH = ImGui::GetTextLineHeight();
-        float boxSize = 7.0f;
+        float boxSize = s(7.0f);
         float boxOffsetY = (lineH - boxSize) * 0.5f;
         ImDrawList* drawList = ImGui::GetWindowDrawList();
         ImU32 col = ImGui::GetColorU32(color);
-        drawList->AddRectFilled(ImVec2(p.x, p.y + boxOffsetY), ImVec2(p.x + boxSize, p.y + boxOffsetY + boxSize), col, 1.5f);
-        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + boxSize + 5.0f);
+        drawList->AddRectFilled(ImVec2(p.x, p.y + boxOffsetY), ImVec2(p.x + boxSize, p.y + boxOffsetY + boxSize), col, s(1.5f));
+        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + boxSize + s(5.0f));
         ImGui::TextColored(ImVec4(0.80f, 0.85f, 0.92f, 1.0f), "%s", label);
     };
 
@@ -2265,21 +2621,21 @@ void GuiApp::renderSidebarTelemetry() {
 
         if (m_telemetryDualGpuMode) {
             if (snap0.timeHistory.size() > 1) {
-                ImPlot::SetNextLineStyle(colGpu0Shader, 1.5f);
+                ImPlot::SetNextLineStyle(colGpu0Shader, s(1.5f));
                 ImPlot::PlotLine("##g0s", snap0.timeHistory.data(), snap0.sclkHistory.data(),
                                  static_cast<int>(snap0.sclkHistory.size()), 0, static_cast<int>(snap0.sclkHistory.offset()));
             }
             if (snap1.timeHistory.size() > 1) {
-                ImPlot::SetNextLineStyle(colGpu1Shader, 1.5f);
+                ImPlot::SetNextLineStyle(colGpu1Shader, s(1.5f));
                 ImPlot::PlotLine("##g1s", snap1.timeHistory.data(), snap1.sclkHistory.data(),
                                  static_cast<int>(snap1.sclkHistory.size()), 0, static_cast<int>(snap1.sclkHistory.offset()));
             }
         } else {
             if (activeSnap.timeHistory.size() > 1) {
-                ImPlot::SetNextLineStyle(colSingleShader, 1.5f);
+                ImPlot::SetNextLineStyle(colSingleShader, s(1.5f));
                 ImPlot::PlotLine("##sclk", activeSnap.timeHistory.data(), activeSnap.sclkHistory.data(),
                                  static_cast<int>(activeSnap.sclkHistory.size()), 0, static_cast<int>(activeSnap.sclkHistory.offset()));
-                ImPlot::SetNextLineStyle(colSingleMem, 1.5f);
+                ImPlot::SetNextLineStyle(colSingleMem, s(1.5f));
                 ImPlot::PlotLine("##mclk", activeSnap.timeHistory.data(), activeSnap.mclkHistory.data(),
                                  static_cast<int>(activeSnap.mclkHistory.size()), 0, static_cast<int>(activeSnap.mclkHistory.offset()));
             }
@@ -2314,31 +2670,31 @@ void GuiApp::renderSidebarTelemetry() {
 
         if (m_telemetryDualGpuMode) {
             if (snap0.timeHistory.size() > 1) {
-                ImPlot::SetNextLineStyle(colGpu0Temp, 1.5f);
+                ImPlot::SetNextLineStyle(colGpu0Temp, s(1.5f));
                 ImPlot::PlotLine("##g0t", snap0.timeHistory.data(), snap0.tempJctHistory.data(),
                                  static_cast<int>(snap0.tempJctHistory.size()), 0, static_cast<int>(snap0.tempJctHistory.offset()));
                 ImPlot::SetAxes(ImAxis_X1, ImAxis_Y2);
-                ImPlot::SetNextLineStyle(colGpu0Power, 1.5f);
+                ImPlot::SetNextLineStyle(colGpu0Power, s(1.5f));
                 ImPlot::PlotLine("##g0p", snap0.timeHistory.data(), snap0.powerHistory.data(),
                                  static_cast<int>(snap0.powerHistory.size()), 0, static_cast<int>(snap0.powerHistory.offset()));
             }
             if (snap1.timeHistory.size() > 1) {
                 ImPlot::SetAxes(ImAxis_X1, ImAxis_Y1);
-                ImPlot::SetNextLineStyle(colGpu1Temp, 1.5f);
+                ImPlot::SetNextLineStyle(colGpu1Temp, s(1.5f));
                 ImPlot::PlotLine("##g1t", snap1.timeHistory.data(), snap1.tempJctHistory.data(),
                                  static_cast<int>(snap1.tempJctHistory.size()), 0, static_cast<int>(snap1.tempJctHistory.offset()));
                 ImPlot::SetAxes(ImAxis_X1, ImAxis_Y2);
-                ImPlot::SetNextLineStyle(colGpu1Power, 1.5f);
+                ImPlot::SetNextLineStyle(colGpu1Power, s(1.5f));
                 ImPlot::PlotLine("##g1p", snap1.timeHistory.data(), snap1.powerHistory.data(),
                                  static_cast<int>(snap1.powerHistory.size()), 0, static_cast<int>(snap1.powerHistory.offset()));
             }
         } else {
             if (activeSnap.timeHistory.size() > 1) {
-                ImPlot::SetNextLineStyle(colSingleTemp, 1.5f);
+                ImPlot::SetNextLineStyle(colSingleTemp, s(1.5f));
                 ImPlot::PlotLine("##jct", activeSnap.timeHistory.data(), activeSnap.tempJctHistory.data(),
                                  static_cast<int>(activeSnap.tempJctHistory.size()), 0, static_cast<int>(activeSnap.tempJctHistory.offset()));
                 ImPlot::SetAxes(ImAxis_X1, ImAxis_Y2);
-                ImPlot::SetNextLineStyle(colSinglePower, 1.5f);
+                ImPlot::SetNextLineStyle(colSinglePower, s(1.5f));
                 ImPlot::PlotLine("##pwr", activeSnap.timeHistory.data(), activeSnap.powerHistory.data(),
                                  static_cast<int>(activeSnap.powerHistory.size()), 0, static_cast<int>(activeSnap.powerHistory.offset()));
             }
@@ -2396,7 +2752,7 @@ void GuiApp::renderResultsScorecard() {
 
         ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.11f, 0.14f, 0.20f, 1.0f));
         ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.24f, 0.36f, 0.55f, 0.6f));
-        ImGui::BeginChild("ScorecardSummaryCard", ImVec2(0, 56.0f), true);
+        ImGui::BeginChild("ScorecardSummaryCard", ImVec2(0, s(56.0f)), true);
 
         ImGui::TextDisabled("Workloads:"); ImGui::SameLine();
         ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%zu Passed", passedCount);
@@ -2409,7 +2765,7 @@ void GuiApp::renderResultsScorecard() {
             ImGui::TextColored(ImVec4(0.95f, 0.30f, 0.30f, 1.0f), "| %zu Failed", failedCount);
         }
 
-        ImGui::SameLine(320.0f);
+        ImGui::SameLine(s(320.0f));
         if (peakCompute > 0.0) {
             ImGui::TextDisabled("Peak Compute:"); ImGui::SameLine();
             ImGui::TextColored(ImVec4(0.38f, 0.78f, 1.00f, 1.0f), "%.2f TFLOPS", peakCompute);
@@ -2430,7 +2786,7 @@ void GuiApp::renderResultsScorecard() {
         ImGui::Spacing();
     } else {
         ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.10f, 0.12f, 0.18f, 1.0f));
-        ImGui::BeginChild("EmptyScorecardPrompt", ImVec2(0, 64.0f), true);
+        ImGui::BeginChild("EmptyScorecardPrompt", ImVec2(0, s(64.0f)), true);
         ImGui::TextColored(ImVec4(0.70f, 0.78f, 0.90f, 1.0f), "No benchmark results recorded yet.");
         ImGui::TextDisabled("Select workloads on the 'Benchmark Suite' tab and click 'RUN BENCHMARKS' to generate performance scorecards.");
         ImGui::EndChild();
@@ -2454,7 +2810,7 @@ void GuiApp::renderResultsScorecard() {
     ImGui::RadioButton("Host System", &m_activeScorecardFilter, 5);
 
     // Device Filter
-    ImGui::SameLine(ImGui::GetWindowWidth() - 670);
+    ImGui::SameLine(ImGui::GetWindowWidth() - s(670.0f));
     ImGui::Text("Device:");
     ImGui::SameLine();
     ImGui::RadioButton("All Devices", &m_activeDeviceScorecardFilter, -1);
@@ -2474,7 +2830,7 @@ void GuiApp::renderResultsScorecard() {
     }
 
     // Export Button
-    ImGui::SameLine(ImGui::GetWindowWidth() - 140);
+    ImGui::SameLine(ImGui::GetWindowWidth() - s(175.0f));
     if (ImGui::Button("Export JSON Report")) {
         exportResultsToJson("");
     }
@@ -2486,15 +2842,15 @@ void GuiApp::renderResultsScorecard() {
                                   ImGuiTableFlags_ScrollY;
 
     if (ImGui::BeginTable("ResultsTable", 9, flags, ImVec2(0, -1))) {
-        ImGui::TableSetupColumn("Status", ImGuiTableColumnFlags_WidthFixed, 85.0f);
-        ImGui::TableSetupColumn("Device", ImGuiTableColumnFlags_WidthFixed, 90.0f);
-        ImGui::TableSetupColumn("Backend", ImGuiTableColumnFlags_WidthFixed, 85.0f);
-        ImGui::TableSetupColumn("Component", ImGuiTableColumnFlags_WidthFixed, 100.0f);
+        ImGui::TableSetupColumn("Status", ImGuiTableColumnFlags_WidthFixed, s(85.0f));
+        ImGui::TableSetupColumn("Device", ImGuiTableColumnFlags_WidthFixed, s(90.0f));
+        ImGui::TableSetupColumn("Backend", ImGuiTableColumnFlags_WidthFixed, s(85.0f));
+        ImGui::TableSetupColumn("Component", ImGuiTableColumnFlags_WidthFixed, s(100.0f));
         ImGui::TableSetupColumn("Benchmark", ImGuiTableColumnFlags_WidthStretch);
-        ImGui::TableSetupColumn("Metric", ImGuiTableColumnFlags_WidthFixed, 95.0f);
-        ImGui::TableSetupColumn("Score / Throughput", ImGuiTableColumnFlags_WidthFixed, 140.0f);
-        ImGui::TableSetupColumn("Speedup / Delta", ImGuiTableColumnFlags_WidthFixed, 155.0f);
-        ImGui::TableSetupColumn("Time (ms)", ImGuiTableColumnFlags_WidthFixed, 75.0f);
+        ImGui::TableSetupColumn("Metric", ImGuiTableColumnFlags_WidthFixed, s(95.0f));
+        ImGui::TableSetupColumn("Score / Throughput", ImGuiTableColumnFlags_WidthFixed, s(140.0f));
+        ImGui::TableSetupColumn("Speedup / Delta", ImGuiTableColumnFlags_WidthFixed, s(155.0f));
+        ImGui::TableSetupColumn("Time (ms)", ImGuiTableColumnFlags_WidthFixed, s(75.0f));
         ImGui::TableHeadersRow();
 
         for (const auto& res : m_allResults) {
@@ -2773,19 +3129,19 @@ void GuiApp::renderRayTracingViewport() {
     ImGui::Spacing();
     ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.12f, 0.18f, 0.26f, 1.0f));
     ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.25f, 0.55f, 0.85f, 0.7f));
-    ImGui::BeginChild("ParityBanner", ImVec2(0, 36.0f), true, ImGuiWindowFlags_NoScrollbar);
+    ImGui::BeginChild("ParityBanner", ImVec2(0, s(36.0f)), true, ImGuiWindowFlags_NoScrollbar);
     ImGui::AlignTextToFramePadding();
     ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "[PARITY: 100.00%% MATCH]");
-    ImGui::SameLine(0, 20.0f);
+    ImGui::SameLine(0, s(20.0f));
     ImGui::TextDisabled("PSNR:"); ImGui::SameLine();
     ImGui::TextColored(ImVec4(0.95f, 0.95f, 0.95f, 1.0f), "120.0 dB (PASS)");
-    ImGui::SameLine(0, 16.0f);
+    ImGui::SameLine(0, s(16.0f));
     ImGui::TextDisabled("Wavefront Queue:"); ImGui::SameLine();
     ImGui::TextColored(ImVec4(0.95f, 0.95f, 0.95f, 1.0f), "225.0 MB");
-    ImGui::SameLine(0, 16.0f);
+    ImGui::SameLine(0, s(16.0f));
     ImGui::TextDisabled("Queue Traffic:"); ImGui::SameLine();
     ImGui::TextColored(ImVec4(0.95f, 0.95f, 0.95f, 1.0f), "56.2 MB/pass");
-    ImGui::SameLine(0, 16.0f);
+    ImGui::SameLine(0, s(16.0f));
     ImGui::TextDisabled("Outliers:"); ImGui::SameLine();
     ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "0.00%%");
     ImGui::EndChild();
@@ -2795,12 +3151,12 @@ void GuiApp::renderRayTracingViewport() {
     ImGui::Spacing();
     if (ImGui::BeginTable("RtTechCompareTable", 2, ImGuiTableFlags_SizingStretchSame)) {
         ImGui::TableNextColumn();
-        ImGui::BeginChild("TechACard", ImVec2(0, 95.0f), true);
+        ImGui::BeginChild("TechACard", ImVec2(0, s(95.0f)), true);
         ImGui::TextColored(ImVec4(0.40f, 0.78f, 1.00f, 1.0f), "Technique A: Megakernel (Reference)");
         ImGui::TextDisabled("Architecture: Monolithic Ray Query kernel (Stackless traversal)");
         ImGui::Text("Throughput: "); ImGui::SameLine();
         ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.0f, 1.0f), "%s", techAScore);
-        ImGui::SameLine(0, 16.0f);
+        ImGui::SameLine(0, s(16.0f));
         ImGui::TextDisabled("VGPR Pressure:"); ImGui::SameLine();
         ImGui::TextColored(ImVec4(0.95f, 0.65f, 0.35f, 1.0f), "128 VGPRs");
         ImGui::TextDisabled("SIMD Utilization:"); ImGui::SameLine();
@@ -2808,12 +3164,12 @@ void GuiApp::renderRayTracingViewport() {
         ImGui::EndChild();
 
         ImGui::TableNextColumn();
-        ImGui::BeginChild("TechBCard", ImVec2(0, 95.0f), true);
+        ImGui::BeginChild("TechBCard", ImVec2(0, s(95.0f)), true);
         ImGui::TextColored(ImVec4(0.98f, 0.72f, 0.35f, 1.0f), "Technique B: Compacted Wavefront (DGC / SER)");
         ImGui::TextDisabled("Architecture: Shader Execution Reordering & Clustered Ray Bins");
         ImGui::Text("Throughput: "); ImGui::SameLine();
         ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s", techBScore);
-        ImGui::SameLine(0, 16.0f);
+        ImGui::SameLine(0, s(16.0f));
         ImGui::TextDisabled("VGPR Pressure:"); ImGui::SameLine();
         ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "64 VGPRs");
         ImGui::TextDisabled("SIMD Utilization:"); ImGui::SameLine();
@@ -2827,15 +3183,15 @@ void GuiApp::renderRayTracingViewport() {
     ImGui::SliderFloat("Parity Split Ratio", &m_paritySplitRatio, 0.05f, 0.95f, "Split: %.2f");
 
     // Viewport Canvas with Procedural Cornell Box & Ray Tracing Visualization
-    ImVec2 viewportSize(ImGui::GetContentRegionAvail().x, ImGui::GetContentRegionAvail().y - 10.0f);
-    if (viewportSize.y < 280.0f) viewportSize.y = 280.0f;
+    ImVec2 viewportSize(ImGui::GetContentRegionAvail().x, ImGui::GetContentRegionAvail().y - s(10.0f));
+    if (viewportSize.y < s(280.0f)) viewportSize.y = s(280.0f);
     ImVec2 p0 = ImGui::GetCursorScreenPos();
     ImVec2 p1 = ImVec2(p0.x + viewportSize.x, p0.y + viewportSize.y);
     ImDrawList* drawList = ImGui::GetWindowDrawList();
 
     // Draw background
-    drawList->AddRectFilled(p0, p1, IM_COL32(10, 12, 18, 255), 6.0f);
-    drawList->AddRect(p0, p1, IM_COL32(35, 45, 65, 255), 6.0f);
+    drawList->AddRectFilled(p0, p1, IM_COL32(10, 12, 18, 255), s(6.0f));
+    drawList->AddRect(p0, p1, IM_COL32(35, 45, 65, 255), s(6.0f));
 
     float splitX = p0.x + viewportSize.x * m_paritySplitRatio;
 
@@ -2847,16 +3203,16 @@ void GuiApp::renderRayTracingViewport() {
     // Cornell Box Walls
     drawList->AddRectFilled(ImVec2(cx - scale, cy - scale), ImVec2(cx + scale, cy + scale), IM_COL32(38, 40, 48, 255));
     // Left Red Wall
-    ImVec2 leftWall[4] = { ImVec2(p0.x + 20, p0.y + 20), ImVec2(cx - scale, cy - scale), ImVec2(cx - scale, cy + scale), ImVec2(p0.x + 20, p1.y - 20) };
+    ImVec2 leftWall[4] = { ImVec2(p0.x + s(20.0f), p0.y + s(20.0f)), ImVec2(cx - scale, cy - scale), ImVec2(cx - scale, cy + scale), ImVec2(p0.x + s(20.0f), p1.y - s(20.0f)) };
     drawList->AddConvexPolyFilled(leftWall, 4, IM_COL32(150, 40, 40, 255));
     // Right Green Wall
-    ImVec2 rightWall[4] = { ImVec2(p1.x - 20, p0.y + 20), ImVec2(p1.x - 20, p1.y - 20), ImVec2(cx + scale, cy + scale), ImVec2(cx + scale, cy - scale) };
+    ImVec2 rightWall[4] = { ImVec2(p1.x - s(20.0f), p0.y + s(20.0f)), ImVec2(p1.x - s(20.0f), p1.y - s(20.0f)), ImVec2(cx + scale, cy + scale), ImVec2(cx + scale, cy - scale) };
     drawList->AddConvexPolyFilled(rightWall, 4, IM_COL32(40, 130, 50, 255));
     // Floor
-    ImVec2 floorPoly[4] = { ImVec2(p0.x + 20, p1.y - 20), ImVec2(cx - scale, cy + scale), ImVec2(cx + scale, cy + scale), ImVec2(p1.x - 20, p1.y - 20) };
+    ImVec2 floorPoly[4] = { ImVec2(p0.x + s(20.0f), p1.y - s(20.0f)), ImVec2(cx - scale, cy + scale), ImVec2(cx + scale, cy + scale), ImVec2(p1.x - s(20.0f), p1.y - s(20.0f)) };
     drawList->AddConvexPolyFilled(floorPoly, 4, IM_COL32(48, 50, 58, 255));
     // Ceiling Light
-    drawList->AddRectFilled(ImVec2(cx - scale * 0.4f, p0.y + 25), ImVec2(cx + scale * 0.4f, cy - scale * 0.85f), IM_COL32(255, 250, 220, 255), 4.0f);
+    drawList->AddRectFilled(ImVec2(cx - scale * 0.4f, p0.y + s(25.0f)), ImVec2(cx + scale * 0.4f, cy - scale * 0.85f), IM_COL32(255, 250, 220, 255), s(4.0f));
 
     // Objects inside Cornell Box
     // Cube
@@ -2864,45 +3220,45 @@ void GuiApp::renderRayTracingViewport() {
     float cubeSize = scale * 0.40f;
     drawList->AddRectFilled(ImVec2(cubePos.x - cubeSize * 0.5f, cubePos.y - cubeSize * 0.5f),
                             ImVec2(cubePos.x + cubeSize * 0.5f, cubePos.y + cubeSize * 0.5f),
-                            IM_COL32(190, 195, 205, 255), 2.0f);
+                            IM_COL32(190, 195, 205, 255), s(2.0f));
     // Reflective Sphere
     ImVec2 spherePos(cx + scale * 0.40f, cy + scale * 0.40f);
     float sphereRadius = scale * 0.30f;
     drawList->AddCircleFilled(spherePos, sphereRadius, IM_COL32(110, 170, 230, 255), 32);
-    drawList->AddCircle(spherePos, sphereRadius, IM_COL32(200, 230, 255, 255), 32, 1.5f);
+    drawList->AddCircle(spherePos, sphereRadius, IM_COL32(200, 230, 255, 255), 32, s(1.5f));
 
     // Ray Paths Visualization
     if (m_showRtRayPaths) {
         ImVec2 lightSrc(cx, cy - scale * 0.85f);
         // Primary and shadow rays on Technique A
-        if (splitX > p0.x + 30.0f) {
-            drawList->AddLine(lightSrc, cubePos, IM_COL32(255, 220, 100, 140), 1.5f);
-            drawList->AddLine(cubePos, ImVec2(cx - scale, cy), IM_COL32(255, 200, 80, 100), 1.0f);
-            drawList->AddLine(lightSrc, spherePos, IM_COL32(255, 220, 100, 140), 1.5f);
+        if (splitX > p0.x + s(30.0f)) {
+            drawList->AddLine(lightSrc, cubePos, IM_COL32(255, 220, 100, 140), s(1.5f));
+            drawList->AddLine(cubePos, ImVec2(cx - scale, cy), IM_COL32(255, 200, 80, 100), s(1.0f));
+            drawList->AddLine(lightSrc, spherePos, IM_COL32(255, 220, 100, 140), s(1.5f));
         }
         // Reflected and coherent bins on Technique B
-        if (splitX < p1.x - 30.0f) {
-            drawList->AddLine(spherePos, ImVec2(cx + scale, cy), IM_COL32(0, 230, 255, 160), 1.8f);
-            drawList->AddLine(spherePos, ImVec2(p1.x - 40, cy - 20), IM_COL32(0, 200, 255, 120), 1.2f);
+        if (splitX < p1.x - s(30.0f)) {
+            drawList->AddLine(spherePos, ImVec2(cx + scale, cy), IM_COL32(0, 230, 255, 160), s(1.8f));
+            drawList->AddLine(spherePos, ImVec2(p1.x - s(40.0f), cy - s(20.0f)), IM_COL32(0, 200, 255, 120), s(1.2f));
         }
     }
 
     // Split Divider Line
-    drawList->AddLine(ImVec2(splitX, p0.y), ImVec2(splitX, p1.y), IM_COL32(0, 216, 246, 255), 2.5f);
-    drawList->AddCircleFilled(ImVec2(splitX, cy), 8.0f, IM_COL32(0, 216, 246, 255));
-    drawList->AddCircle(ImVec2(splitX, cy), 8.0f, IM_COL32(255, 255, 255, 255), 16, 2.0f);
+    drawList->AddLine(ImVec2(splitX, p0.y), ImVec2(splitX, p1.y), IM_COL32(0, 216, 246, 255), s(2.5f));
+    drawList->AddCircleFilled(ImVec2(splitX, cy), s(8.0f), IM_COL32(0, 216, 246, 255));
+    drawList->AddCircle(ImVec2(splitX, cy), s(8.0f), IM_COL32(255, 255, 255, 255), 16, s(2.0f));
 
     // Technique Labels on Canvas
-    drawList->AddText(ImVec2(p0.x + 16, p0.y + 14), IM_COL32(100, 200, 255, 255), "Technique A: Megakernel (Reference)");
-    drawList->AddText(ImVec2(splitX + 16, p0.y + 14), IM_COL32(255, 180, 100, 255), "Technique B: Compacted Wavefront (DGC)");
+    drawList->AddText(ImVec2(p0.x + s(16.0f), p0.y + s(14.0f)), IM_COL32(100, 200, 255, 255), "Technique A: Megakernel (Reference)");
+    drawList->AddText(ImVec2(splitX + s(16.0f), p0.y + s(14.0f)), IM_COL32(255, 180, 100, 255), "Technique B: Compacted Wavefront (DGC)");
 
     // Canvas Telemetry HUD Overlay
-    drawList->AddText(ImVec2(p0.x + 16, p1.y - 44), IM_COL32(180, 190, 210, 230), "%s", sceneDetails);
-    drawList->AddText(ImVec2(p0.x + 16, p1.y - 24), IM_COL32(140, 160, 190, 230), "Spatial Reordering: 2D Morton Z-Curve (4x8) [1.16x BVH Cache Locality Speedup]");
+    drawList->AddText(ImVec2(p0.x + s(16.0f), p1.y - s(44.0f)), IM_COL32(180, 190, 210, 230), "%s", sceneDetails);
+    drawList->AddText(ImVec2(p0.x + s(16.0f), p1.y - s(24.0f)), IM_COL32(140, 160, 190, 230), "Spatial Reordering: 2D Morton Z-Curve (4x8) [1.16x BVH Cache Locality Speedup]");
 
     // Interactive split slider handle
-    ImGui::SetCursorScreenPos(ImVec2(splitX - 12.0f, p0.y));
-    ImGui::InvisibleButton("##split_viewport_handle", ImVec2(24.0f, viewportSize.y));
+    ImGui::SetCursorScreenPos(ImVec2(splitX - s(12.0f), p0.y));
+    ImGui::InvisibleButton("##split_viewport_handle", ImVec2(s(24.0f), viewportSize.y));
     if (ImGui::IsItemActive()) {
         float mouseX = ImGui::GetIO().MousePos.x;
         m_paritySplitRatio = std::clamp((mouseX - p0.x) / viewportSize.x, 0.05f, 0.95f);
@@ -2930,7 +3286,22 @@ void GuiApp::renderSettingsModal() {
         ImGui::Separator();
         ImGui::Spacing();
 
-        if (ImGui::Button("Close", ImVec2(120, 0))) {
+        ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.00f, 1.00f), "User Interface Scaling:");
+        float curZoom = m_uiScale;
+        if (ImGui::SliderFloat("Zoom Level", &curZoom, 0.75f, 3.5f, "%.1fx")) {
+            setUiScale(curZoom);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Reset Default")) {
+            setUiScale(m_baseScale);
+        }
+        ImGui::TextDisabled("Tip: Hold CTRL and scroll mouse wheel anywhere to zoom in/out (Ctrl+0 to reset).");
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        if (ImGui::Button("Close", ImVec2(s(120.0f), 0))) {
             m_showSettingsModal = false;
             ImGui::CloseCurrentPopup();
         }

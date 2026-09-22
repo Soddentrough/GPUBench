@@ -9,6 +9,7 @@ setlocal enabledelayedexpansion
 ::   build_windows.bat clean          Clean build-release directory before building
 ::   build_windows.bat test           Build and list available Vulkan devices
 ::   build_windows.bat run [args...]  Build and execute gpubench.exe with args
+::   build_windows.bat gui [args...]  Build and execute gpubench-gui.exe with args
 ::   build_windows.bat package        Build and create CPack ZIP release archive
 :: Flags:
 ::   --no-pause                       Do not prompt on error (useful for scripts/CI)
@@ -49,6 +50,11 @@ if /i "%~1"=="package" (
 )
 if /i "%~1"=="run" (
     set "ACTION=run"
+    shift
+    goto collect_run_args
+)
+if /i "%~1"=="gui" (
+    set "ACTION=gui"
     shift
     goto collect_run_args
 )
@@ -132,6 +138,9 @@ if not "%MINGW_BIN%"=="" (
         )
     )
 )
+if exist "build-release\_deps\sdl3-build\SDL3.dll" (
+    copy /y "build-release\_deps\sdl3-build\SDL3.dll" "build-release\" >nul 2>&1
+)
 
 echo [GPUBench] Build successful: build-release\gpubench.exe
 
@@ -147,6 +156,13 @@ if "%ACTION%"=="run" (
     echo.
     echo [GPUBench] Running: build-release\gpubench.exe !RUN_ARGS!
     build-release\gpubench.exe !RUN_ARGS!
+    exit /b !errorlevel!
+)
+
+if "%ACTION%"=="gui" (
+    echo.
+    echo [GPUBench] Launching GUI: build-release\gpubench-gui.exe !RUN_ARGS!
+    build-release\gpubench-gui.exe !RUN_ARGS!
     exit /b !errorlevel!
 )
 

@@ -484,6 +484,16 @@ if(GPUBENCH_BUILD_GUI)
 
 
 
+        if(WIN32 AND TARGET SDL3-shared)
+            add_custom_command(TARGET gpubench-gui POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_FILE:SDL3-shared>
+                ${CMAKE_CURRENT_BINARY_DIR}/
+                COMMENT "Copying SDL3 runtime DLL to binary directory"
+            )
+            install(TARGETS SDL3-shared DESTINATION bin)
+        endif()
+
         install(TARGETS gpubench-gui DESTINATION bin)
     else()
         message(WARNING "SDL3 or Vulkan not found. Native C++ GUI will not be built.")
