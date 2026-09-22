@@ -1,6 +1,7 @@
 #pragma once
 
 #include "TelemetryWorker.h"
+#include "VulkanContext.h"
 #include "core/RunnerAPI.h"
 #include "core/ResultFormatter.h"
 #include <imgui.h>
@@ -77,7 +78,7 @@ public:
     GuiApp();
     ~GuiApp();
 
-    void init(float uiScale = 1.0f);
+    void init(VulkanContext* vulkanContext = nullptr, float uiScale = 1.0f);
     void updateAndRender();
     void processEvents();
 
@@ -212,9 +213,19 @@ private:
     bool m_dumpRenders{false};
     bool m_showSettingsModal{false};
 
-    // Parity Split Slider & Viewport Configuration
+    // Vulkan GUI Context & Texture Management
+    VulkanContext* m_vulkanContext{nullptr};
+    std::unordered_map<std::string, VulkanContext::TextureResource> m_textureCache;
+    VulkanContext::TextureResource getOrLoadTexture(const std::string& relPath);
+
+    // Ray Tracing Viewport Configuration & State
+    int m_rtViewportMode{0};   // 0: Scenes & Parity, 1: Pipeline Passes, 2: PBR Materials, 3: Geometry & BVH
+    int m_rtSceneIndex{0};      // 0: Showroom Studio, 1: Indoor Atrium, 2: Open-World Forest, 3: Outdoor Landscape
+    int m_rtParityViewMode{0};  // 0: Split Slider, 1: Technique A Solo, 2: Technique B Solo, 3: Difference Heatmap, 4: Side-by-Side
     float m_paritySplitRatio{0.5f};
-    std::string m_selectedRtScene{"Cornell Box (Architectural / GI)"};
+    int m_rtPassIndex{0};       // 0: BVH Heatmap, 1: G-Buffer Normals, 2: Shadows, 3: RTAO, 4: Direct PBR, 5: Indirect GI, 6: Path Traced
+    int m_rtMaterialIndex{0};   // 0: Lineup, 1: Car Paint, 2: Subsurface, 3: Velvet, 4: Glass, 5: Rust, 6: Range
+    int m_rtGeometryIndex{0};   // 0: Vehicle Wireframe & BVH, 1: Alpha Cutout Layers, 2: Scene BVH Heatmap
     int m_rtBounces{4};
     bool m_showRtRayPaths{true};
     bool m_showRtBvhHeatmap{false};

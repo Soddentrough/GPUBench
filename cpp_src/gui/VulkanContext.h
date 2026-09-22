@@ -37,6 +37,24 @@ public:
 
     bool isInitialized() const { return m_initialized; }
 
+    struct TextureResource {
+        VkDescriptorSet descriptorSet{VK_NULL_HANDLE};
+        VkImage image{VK_NULL_HANDLE};
+        VkDeviceMemory memory{VK_NULL_HANDLE};
+        VkImageView imageView{VK_NULL_HANDLE};
+        VkSampler sampler{VK_NULL_HANDLE};
+        int width{0};
+        int height{0};
+        int channels{0};
+
+        bool isValid() const { return descriptorSet != VK_NULL_HANDLE; }
+    };
+
+    TextureResource loadTextureFromFile(const std::string& filepath);
+    TextureResource createTextureRgba(int width, int height, const uint8_t* rgbaPixels);
+    void destroyTexture(TextureResource& tex);
+    uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const;
+
 private:
     bool setupVulkan();
     void setupVulkanWindow(int width, int height);
@@ -53,6 +71,7 @@ private:
     VkQueue m_queue{VK_NULL_HANDLE};
     VkPipelineCache m_pipelineCache{VK_NULL_HANDLE};
     VkDescriptorPool m_descriptorPool{VK_NULL_HANDLE};
+    VkCommandPool m_transientCommandPool{VK_NULL_HANDLE};
 
     ImGui_ImplVulkanH_Window m_mainWindowData;
     uint32_t m_minImageCount{2};

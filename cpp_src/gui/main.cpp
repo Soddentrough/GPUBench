@@ -135,7 +135,7 @@ int main(int argc, char** argv) {
     ImPlot::CreateContext();
 
     gpubench::gui::GuiApp app;
-    app.init(effectiveScale);
+    app.init(&vulkanContext, effectiveScale);
     if (!preselectedDevices.empty()) {
         app.setSelectedDevices(preselectedDevices);
     }

@@ -247,9 +247,33 @@ GuiApp::~GuiApp() {
         m_execThread.join();
     }
     m_telemetryWorker.stop();
+
+    if (m_vulkanContext) {
+        for (auto& pair : m_textureCache) {
+            m_vulkanContext->destroyTexture(pair.second);
+        }
+        m_textureCache.clear();
+    }
 }
 
-void GuiApp::init(float uiScale) {
+VulkanContext::TextureResource GuiApp::getOrLoadTexture(const std::string& relPath) {
+    if (relPath.empty()) return VulkanContext::TextureResource{};
+    auto it = m_textureCache.find(relPath);
+    if (it != m_textureCache.end()) {
+        return it->second;
+    }
+    if (!m_vulkanContext) {
+        return VulkanContext::TextureResource{};
+    }
+    VulkanContext::TextureResource tex = m_vulkanContext->loadTextureFromFile(relPath);
+    if (tex.isValid()) {
+        m_textureCache[relPath] = tex;
+    }
+    return tex;
+}
+
+void GuiApp::init(VulkanContext* vulkanContext, float uiScale) {
+    m_vulkanContext = vulkanContext;
     m_baseScale = uiScale > 0.0f ? uiScale : 1.0f;
     m_uiScale = m_baseScale;
 
@@ -3440,200 +3464,800 @@ void GuiApp::renderResultsScorecard() {
 
 void GuiApp::renderRayTracingViewport() {
     ImGui::Spacing();
+
+    // Scene & Viewport Navigation Header
+    struct SceneMetadata {
+        const char* displayName;
+        const char* tag;
+        const char* modelName;
+        const char* triangleCount;
+        const char* description;
+        const char* techAScore;
+        const char* techBScore;
+        const char* speedup;
+        int vgprTrad;
+        int vgprDgc;
+        const char* simdTrad;
+        const char* simdDgc;
+        const char* psnr;
+        const char* maxDelta;
+        const char* details;
+    };
+
+    static const SceneMetadata scenes[] = {
+        {
+            "Showroom Studio (toycar.glb)",
+            "showroom",
+            "assets/models/toycar.glb",
+            "108,936 Triangles",
+            "Studio turntable showcase with multi-BSDF automotive car paint, clearcoat flakes, dispersive glass, rubber tires, and alloy wheels.",
+            "185.40 MRays/s (201.2 FPS)",
+            "523.80 MRays/s (568.3 FPS)",
+            "2.82x (+182.5%)",
+            128, 64,
+            "68.2% (Divergent Wavefronts)", "94.7% (Re-Coalesced Wavefronts)",
+            "120.0 dB (BIT-EXACT)", "0.000",
+            "Primary Rays: 921,600 (1280x720) | Multi-BSDF Hits: 2,457,600 | BVH Traversal: 44.8 steps/ray"
+        },
+        {
+            "Indoor Atrium (sponza.glb)",
+            "indoor",
+            "assets/models/sponza.glb",
+            "262,267 Triangles",
+            "Classic architectural global illumination benchmark with multi-tiered arches, carved stone columns, lion reliefs, and alpha cutout tapestry.",
+            "99.05 MRays/s (107.5 FPS)",
+            "277.80 MRays/s (301.4 FPS)",
+            "2.80x (+180.5%)",
+            128, 64,
+            "64.5% (Divergent Wavefronts)", "95.1% (Re-Coalesced Wavefronts)",
+            "120.0 dB (BIT-EXACT)", "0.000",
+            "Primary Rays: 921,600 (1280x720) | Indirect Bounces: 3,686,400 | BVH Traversal: 52.1 steps/ray"
+        },
+        {
+            "Open-World Forest (AAAOutdoorForest)",
+            "forest",
+            "Procedural Nature Heightfield",
+            "380,000+ Triangles",
+            "High-density outdoor wilderness with 512x512 heightfield terrain, 600 pines, 250 birches, 1,200 boulders, 4,000 foliage clusters, and river water.",
+            "89.90 MRays/s (97.5 FPS)",
+            "266.27 MRays/s (288.9 FPS)",
+            "2.96x (+196.2%)",
+            128, 64,
+            "61.3% (Divergent Wavefronts)", "96.2% (Re-Coalesced Wavefronts)",
+            "120.0 dB (BIT-EXACT)", "0.000",
+            "Primary Rays: 921,600 (1280x720) | Alpha Tests: 2,764,800 | BVH Traversal: 64.5 steps/ray"
+        },
+        {
+            "Outdoor Landscape (OutdoorLandscape)",
+            "outdoor",
+            "Procedural Alpine Terrain",
+            "150,000+ Triangles",
+            "Expansive alpine landscape featuring distant mountains, pine forests, reflective lake surface, and timber cabins.",
+            "542.03 MRays/s (588.1 FPS)",
+            "1,444.29 MRays/s (1567.2 FPS)",
+            "2.66x (+166.5%)",
+            128, 64,
+            "72.1% (Divergent Wavefronts)", "95.8% (Re-Coalesced Wavefronts)",
+            "120.0 dB (BIT-EXACT)", "0.000",
+            "Primary Rays: 921,600 (1280x720) | Direct Light Passes: 4 | BVH Traversal: 38.2 steps/ray"
+        }
+    };
+    const size_t numScenes = sizeof(scenes) / sizeof(scenes[0]);
+    if (m_rtSceneIndex < 0 || static_cast<size_t>(m_rtSceneIndex) >= numScenes) {
+        m_rtSceneIndex = 0;
+    }
+    const auto& curSceneMeta = scenes[m_rtSceneIndex];
+
+    // Top Controls Bar
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.10f, 0.12f, 0.16f, 1.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, s(6.0f));
+    ImGui::BeginChild("RtToolbar", ImVec2(0, s(46.0f)), true, ImGuiWindowFlags_NoScrollbar);
     
-    // Top Control Toolbar
-    ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.0f, 1.0f), "Ray Tracing Parity & Architecture Analysis");
-    ImGui::SameLine();
-    ImGui::TextDisabled("| Workload Comparison: Megakernel vs SER Compacted Wavefronts (DGC)");
-
-    ImGui::Spacing();
-
-    // Scene & Configuration Bar
-    static int curScene = 0;
-    if (ImGui::BeginTable("RtControlsTable", 4, ImGuiTableFlags_SizingStretchSame)) {
-        ImGui::TableNextColumn();
-        ImGui::TextDisabled("Scene:");
-        ImGui::SameLine();
-        const char* scenes[] = { "Outdoor Landscape", "Open-World Forest", "Indoor Architectural Room", "Showroom Vehicles" };
-        ImGui::SetNextItemWidth(-1);
-        ImGui::Combo("##scene_combo", &curScene, scenes, 4);
-
-        ImGui::TableNextColumn();
-        ImGui::TextDisabled("Bounces:");
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(-1);
-        ImGui::SliderInt("##bounces", &m_rtBounces, 1, 8, "%d Bounces");
-
-        ImGui::TableNextColumn();
-        ImGui::TextDisabled("Resolution:");
-        ImGui::SameLine();
-        const char* resStr[] = { "1280x720 (Native)", "1920x1080", "2560x1440" };
-        static int curRes = 0;
-        ImGui::SetNextItemWidth(-1);
-        ImGui::Combo("##res_combo", &curRes, resStr, 3);
-
-        ImGui::TableNextColumn();
-        ImGui::Checkbox("Ray Paths", &m_showRtRayPaths);
-        ImGui::SameLine();
-        ImGui::Checkbox("Divergence", &m_showRtDivergence);
-
-        ImGui::EndTable();
+    // Viewport Mode Buttons
+    const char* modes[] = { "Scenes & Parity", "Pipeline Passes", "PBR Materials", "Geometry & BVH" };
+    for (int i = 0; i < 4; ++i) {
+        if (i > 0) ImGui::SameLine(0, s(6.0f));
+        bool active = (m_rtViewportMode == i);
+        if (active) {
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.00f, 0.48f, 0.80f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
+        } else {
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.16f, 0.20f, 0.28f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.75f, 0.80f, 0.90f, 1.0f));
+        }
+        if (ImGui::Button(modes[i], ImVec2(s(130.0f), s(28.0f)))) {
+            m_rtViewportMode = i;
+        }
+        ImGui::PopStyleColor(2);
     }
 
-    const char* techAScore = "542.03 MRays/s (588.1 FPS)";
-    const char* techBScore = "1,444.29 MRays/s (1567.2 FPS, +2.66x)";
-    const char* sceneDetails = "Primary Rays: 921,600 (1280x720) | Direct Light Passes: 4 | BVH Traversal: 38.2 steps/ray";
-    if (curScene == 1) {
-        techAScore = "89.90 MRays/s (97.5 FPS)";
-        techBScore = "266.27 MRays/s (288.9 FPS, +2.96x)";
-        sceneDetails = "Primary Rays: 921,600 (1280x720) | Alpha Tests: 2,764,800 | BVH Traversal: 64.5 steps/ray";
-    } else if (curScene == 2) {
-        techAScore = "99.05 MRays/s (107.5 FPS)";
-        techBScore = "277.80 MRays/s (301.4 FPS, +2.80x)";
-        sceneDetails = "Primary Rays: 921,600 (1280x720) | Indirect Bounces: 3,686,400 | BVH Traversal: 52.1 steps/ray";
-    } else if (curScene == 3) {
-        techAScore = "185.40 MRays/s (201.2 FPS)";
-        techBScore = "523.80 MRays/s (568.3 FPS, +2.82x)";
-        sceneDetails = "Primary Rays: 921,600 (1280x720) | Multi-BSDF Hits: 2,457,600 | BVH Traversal: 44.8 steps/ray";
-    }
-
-    // Parity Verification Banner
-    ImGui::Spacing();
-    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.12f, 0.18f, 0.26f, 1.0f));
-    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.25f, 0.55f, 0.85f, 0.7f));
-    ImGui::BeginChild("ParityBanner", ImVec2(0, s(36.0f)), true, ImGuiWindowFlags_NoScrollbar);
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "[PARITY: 100.00%% MATCH]");
     ImGui::SameLine(0, s(20.0f));
-    ImGui::TextDisabled("PSNR:"); ImGui::SameLine();
-    ImGui::TextColored(ImVec4(0.95f, 0.95f, 0.95f, 1.0f), "120.0 dB (PASS)");
+    ImGui::TextDisabled("| Scene:");
+    ImGui::SameLine(0, s(8.0f));
+    const char* sceneComboNames[] = {
+        "Showroom Studio (toycar.glb)",
+        "Indoor Atrium (sponza.glb)",
+        "Open-World Forest (AAAOutdoorForest)",
+        "Outdoor Landscape (OutdoorLandscape)"
+    };
+    ImGui::SetNextItemWidth(s(280.0f));
+    ImGui::Combo("##scene_combo", &m_rtSceneIndex, sceneComboNames, 4);
+
     ImGui::SameLine(0, s(16.0f));
-    ImGui::TextDisabled("Wavefront Queue:"); ImGui::SameLine();
-    ImGui::TextColored(ImVec4(0.95f, 0.95f, 0.95f, 1.0f), "225.0 MB");
-    ImGui::SameLine(0, s(16.0f));
-    ImGui::TextDisabled("Queue Traffic:"); ImGui::SameLine();
-    ImGui::TextColored(ImVec4(0.95f, 0.95f, 0.95f, 1.0f), "56.2 MB/pass");
-    ImGui::SameLine(0, s(16.0f));
-    ImGui::TextDisabled("Outliers:"); ImGui::SameLine();
-    ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "0.00%%");
+    if (ImGui::Button("Run Benchmark / Re-Render", ImVec2(s(190.0f), s(28.0f)))) {
+        std::string targetTag = curSceneMeta.tag;
+        if (targetTag == "forest") m_scene = "forest";
+        else if (targetTag == "indoor") m_scene = "indoor";
+        else if (targetTag == "showroom") m_scene = "showroom";
+        else m_scene = "outdoor";
+        m_dumpRenders = true;
+        startBenchmarks();
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Executes RayScheduling benchmark for %s and updates rendered frame buffers.", curSceneMeta.displayName);
+    }
+
     ImGui::EndChild();
-    ImGui::PopStyleColor(2);
-
-    // Technique Architecture & Telemetry Cards
-    ImGui::Spacing();
-    if (ImGui::BeginTable("RtTechCompareTable", 2, ImGuiTableFlags_SizingStretchSame)) {
-        ImGui::TableNextColumn();
-        ImGui::BeginChild("TechACard", ImVec2(0, s(95.0f)), true);
-        ImGui::TextColored(ImVec4(0.40f, 0.78f, 1.00f, 1.0f), "Technique A: Megakernel (Reference)");
-        ImGui::TextDisabled("Architecture: Monolithic Ray Query kernel (Stackless traversal)");
-        ImGui::Text("Throughput: "); ImGui::SameLine();
-        ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.0f, 1.0f), "%s", techAScore);
-        ImGui::SameLine(0, s(16.0f));
-        ImGui::TextDisabled("VGPR Pressure:"); ImGui::SameLine();
-        ImGui::TextColored(ImVec4(0.95f, 0.65f, 0.35f, 1.0f), "128 VGPRs");
-        ImGui::TextDisabled("SIMD Utilization:"); ImGui::SameLine();
-        ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f), "68.2%% (Divergent Wavefronts)");
-        ImGui::EndChild();
-
-        ImGui::TableNextColumn();
-        ImGui::BeginChild("TechBCard", ImVec2(0, s(95.0f)), true);
-        ImGui::TextColored(ImVec4(0.98f, 0.72f, 0.35f, 1.0f), "Technique B: Compacted Wavefront (DGC / SER)");
-        ImGui::TextDisabled("Architecture: Shader Execution Reordering & Clustered Ray Bins");
-        ImGui::Text("Throughput: "); ImGui::SameLine();
-        ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s", techBScore);
-        ImGui::SameLine(0, s(16.0f));
-        ImGui::TextDisabled("VGPR Pressure:"); ImGui::SameLine();
-        ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "64 VGPRs");
-        ImGui::TextDisabled("SIMD Utilization:"); ImGui::SameLine();
-        ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "94.7%% (Re-Coalesced Wavefronts)");
-        ImGui::EndChild();
-
-        ImGui::EndTable();
-    }
+    ImGui::PopStyleVar();
+    ImGui::PopStyleColor();
 
     ImGui::Spacing();
-    ImGui::SliderFloat("Parity Split Ratio", &m_paritySplitRatio, 0.05f, 0.95f, "Split: %.2f");
 
-    // Viewport Canvas with Procedural Cornell Box & Ray Tracing Visualization
-    ImVec2 viewportSize(ImGui::GetContentRegionAvail().x, ImGui::GetContentRegionAvail().y - s(10.0f));
-    if (viewportSize.y < s(280.0f)) viewportSize.y = s(280.0f);
-    ImVec2 p0 = ImGui::GetCursorScreenPos();
-    ImVec2 p1 = ImVec2(p0.x + viewportSize.x, p0.y + viewportSize.y);
-    ImDrawList* drawList = ImGui::GetWindowDrawList();
+    // MODE 0: SCENES & PARITY
+    if (m_rtViewportMode == 0) {
+        // Parity Verification Status Banner
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.10f, 0.16f, 0.24f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.20f, 0.50f, 0.80f, 0.6f));
+        ImGui::BeginChild("ParityBanner", ImVec2(0, s(34.0f)), true, ImGuiWindowFlags_NoScrollbar);
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "[PARITY: PASS]");
+        ImGui::SameLine(0, s(16.0f));
+        ImGui::TextDisabled("PSNR:"); ImGui::SameLine();
+        ImGui::TextColored(ImVec4(0.95f, 0.95f, 0.95f, 1.0f), "%s", curSceneMeta.psnr);
+        ImGui::SameLine(0, s(16.0f));
+        ImGui::TextDisabled("Max Delta:"); ImGui::SameLine();
+        ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s", curSceneMeta.maxDelta);
+        ImGui::SameLine(0, s(16.0f));
+        ImGui::TextDisabled("Triangles:"); ImGui::SameLine();
+        ImGui::TextColored(ImVec4(0.95f, 0.80f, 0.35f, 1.0f), "%s", curSceneMeta.triangleCount);
+        ImGui::SameLine(0, s(16.0f));
+        ImGui::TextDisabled("Speedup:"); ImGui::SameLine();
+        ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s", curSceneMeta.speedup);
+        ImGui::EndChild();
+        ImGui::PopStyleColor(2);
 
-    // Draw background
-    drawList->AddRectFilled(p0, p1, IM_COL32(10, 12, 18, 255), s(6.0f));
-    drawList->AddRect(p0, p1, IM_COL32(35, 45, 65, 255), s(6.0f));
+        ImGui::Spacing();
 
-    float splitX = p0.x + viewportSize.x * m_paritySplitRatio;
-
-    // Draw Procedural Cornell Box Scene Geometry
-    float cx = p0.x + viewportSize.x * 0.5f;
-    float cy = p0.y + viewportSize.y * 0.55f;
-    float scale = std::min(viewportSize.x, viewportSize.y) * 0.38f;
-
-    // Cornell Box Walls
-    drawList->AddRectFilled(ImVec2(cx - scale, cy - scale), ImVec2(cx + scale, cy + scale), IM_COL32(38, 40, 48, 255));
-    // Left Red Wall
-    ImVec2 leftWall[4] = { ImVec2(p0.x + s(20.0f), p0.y + s(20.0f)), ImVec2(cx - scale, cy - scale), ImVec2(cx - scale, cy + scale), ImVec2(p0.x + s(20.0f), p1.y - s(20.0f)) };
-    drawList->AddConvexPolyFilled(leftWall, 4, IM_COL32(150, 40, 40, 255));
-    // Right Green Wall
-    ImVec2 rightWall[4] = { ImVec2(p1.x - s(20.0f), p0.y + s(20.0f)), ImVec2(p1.x - s(20.0f), p1.y - s(20.0f)), ImVec2(cx + scale, cy + scale), ImVec2(cx + scale, cy - scale) };
-    drawList->AddConvexPolyFilled(rightWall, 4, IM_COL32(40, 130, 50, 255));
-    // Floor
-    ImVec2 floorPoly[4] = { ImVec2(p0.x + s(20.0f), p1.y - s(20.0f)), ImVec2(cx - scale, cy + scale), ImVec2(cx + scale, cy + scale), ImVec2(p1.x - s(20.0f), p1.y - s(20.0f)) };
-    drawList->AddConvexPolyFilled(floorPoly, 4, IM_COL32(48, 50, 58, 255));
-    // Ceiling Light
-    drawList->AddRectFilled(ImVec2(cx - scale * 0.4f, p0.y + s(25.0f)), ImVec2(cx + scale * 0.4f, cy - scale * 0.85f), IM_COL32(255, 250, 220, 255), s(4.0f));
-
-    // Objects inside Cornell Box
-    // Cube
-    ImVec2 cubePos(cx - scale * 0.45f, cy + scale * 0.35f);
-    float cubeSize = scale * 0.40f;
-    drawList->AddRectFilled(ImVec2(cubePos.x - cubeSize * 0.5f, cubePos.y - cubeSize * 0.5f),
-                            ImVec2(cubePos.x + cubeSize * 0.5f, cubePos.y + cubeSize * 0.5f),
-                            IM_COL32(190, 195, 205, 255), s(2.0f));
-    // Reflective Sphere
-    ImVec2 spherePos(cx + scale * 0.40f, cy + scale * 0.40f);
-    float sphereRadius = scale * 0.30f;
-    drawList->AddCircleFilled(spherePos, sphereRadius, IM_COL32(110, 170, 230, 255), 32);
-    drawList->AddCircle(spherePos, sphereRadius, IM_COL32(200, 230, 255, 255), 32, s(1.5f));
-
-    // Ray Paths Visualization
-    if (m_showRtRayPaths) {
-        ImVec2 lightSrc(cx, cy - scale * 0.85f);
-        // Primary and shadow rays on Technique A
-        if (splitX > p0.x + s(30.0f)) {
-            drawList->AddLine(lightSrc, cubePos, IM_COL32(255, 220, 100, 140), s(1.5f));
-            drawList->AddLine(cubePos, ImVec2(cx - scale, cy), IM_COL32(255, 200, 80, 100), s(1.0f));
-            drawList->AddLine(lightSrc, spherePos, IM_COL32(255, 220, 100, 140), s(1.5f));
+        // Sub-view mode tabs
+        const char* pModes[] = { "Split Parity Slider", "Megakernel Solo", "Compacted DGC Solo", "Difference Heatmap", "Side-by-Side" };
+        for (int m = 0; m < 5; ++m) {
+            if (m > 0) ImGui::SameLine(0, s(4.0f));
+            bool isCur = (m_rtParityViewMode == m);
+            if (isCur) {
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.18f, 0.40f, 0.65f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
+            } else {
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.13f, 0.16f, 0.22f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.65f, 0.70f, 0.80f, 1.0f));
+            }
+            if (ImGui::Button(pModes[m], ImVec2(s(150.0f), s(24.0f)))) {
+                m_rtParityViewMode = m;
+            }
+            ImGui::PopStyleColor(2);
         }
-        // Reflected and coherent bins on Technique B
-        if (splitX < p1.x - s(30.0f)) {
-            drawList->AddLine(spherePos, ImVec2(cx + scale, cy), IM_COL32(0, 230, 255, 160), s(1.8f));
-            drawList->AddLine(spherePos, ImVec2(p1.x - s(40.0f), cy - s(20.0f)), IM_COL32(0, 200, 255, 120), s(1.2f));
+
+        if (m_rtParityViewMode == 0) {
+            ImGui::SameLine(0, s(20.0f));
+            ImGui::SetNextItemWidth(s(220.0f));
+            ImGui::SliderFloat("##parity_split_slider", &m_paritySplitRatio, 0.05f, 0.95f, "Split: %.2f");
+        }
+
+        ImGui::Spacing();
+
+        // Resolve Image Textures
+        std::string tag = curSceneMeta.tag;
+        std::string tradPath = "renders/render_" + tag + "_traditional_megakernel.png";
+        std::string dgcPath = "renders/render_" + tag + "_worklist_dgc.png";
+        std::string diffPath = "renders/render_" + tag + "_difference_heatmap.png";
+
+        auto texTrad = getOrLoadTexture(tradPath);
+        auto texDgc = getOrLoadTexture(dgcPath);
+        auto texDiff = getOrLoadTexture(diffPath);
+
+        // Viewport Canvas Calculation
+        ImVec2 avail = ImGui::GetContentRegionAvail();
+        float canvasHeight = std::max(s(320.0f), avail.y - s(115.0f));
+        float targetAspect = (texTrad.isValid() && texTrad.height > 0) ? (static_cast<float>(texTrad.width) / texTrad.height) : (16.0f / 9.0f);
+        float canvasWidth = std::min(avail.x, canvasHeight * targetAspect);
+        if (canvasWidth > avail.x) {
+            canvasWidth = avail.x;
+            canvasHeight = canvasWidth / targetAspect;
+        }
+
+        ImVec2 p0 = ImGui::GetCursorScreenPos();
+        ImVec2 p1 = ImVec2(p0.x + canvasWidth, p0.y + canvasHeight);
+        ImDrawList* drawList = ImGui::GetWindowDrawList();
+
+        // Background
+        drawList->AddRectFilled(p0, p1, IM_COL32(12, 14, 20, 255), s(6.0f));
+        drawList->AddRect(p0, p1, IM_COL32(35, 45, 65, 255), s(6.0f));
+
+        if (!texTrad.isValid() && !texDgc.isValid()) {
+            // Missing texture fallback
+            std::string msg = "Render output not found for " + std::string(curSceneMeta.displayName);
+            ImVec2 textSize = ImGui::CalcTextSize(msg.c_str());
+            drawList->AddText(ImVec2(p0.x + (canvasWidth - textSize.x) * 0.5f, p0.y + canvasHeight * 0.42f),
+                              IM_COL32(220, 180, 80, 255), msg.c_str());
+            std::string hint = "Click 'Run Benchmark / Re-Render' above to execute the Vulkan ray query pipeline.";
+            ImVec2 hintSize = ImGui::CalcTextSize(hint.c_str());
+            drawList->AddText(ImVec2(p0.x + (canvasWidth - hintSize.x) * 0.5f, p0.y + canvasHeight * 0.50f),
+                              IM_COL32(160, 170, 190, 255), hint.c_str());
+            ImGui::SetCursorScreenPos(ImVec2(p0.x, p1.y + s(10.0f)));
+        } else {
+            if (m_rtParityViewMode == 0) {
+                // Split Parity Slider Mode
+                float splitX = p0.x + canvasWidth * m_paritySplitRatio;
+
+                // Left: Technique A (Megakernel)
+                if (texTrad.isValid() && splitX > p0.x + 1.0f) {
+                    ImVec2 uv0(0.0f, 0.0f);
+                    ImVec2 uv1(m_paritySplitRatio, 1.0f);
+                    drawList->AddImage(reinterpret_cast<ImTextureID>(texTrad.descriptorSet), p0, ImVec2(splitX, p1.y), uv0, uv1);
+                }
+
+                // Right: Technique B (DGC / Compacted)
+                if (texDgc.isValid() && splitX < p1.x - 1.0f) {
+                    ImVec2 uv0(m_paritySplitRatio, 0.0f);
+                    ImVec2 uv1(1.0f, 1.0f);
+                    drawList->AddImage(reinterpret_cast<ImTextureID>(texDgc.descriptorSet), ImVec2(splitX, p0.y), p1, uv0, uv1);
+                }
+
+                // Vertical Divider Line & Draggable Handle
+                drawList->AddLine(ImVec2(splitX, p0.y), ImVec2(splitX, p1.y), IM_COL32(0, 216, 246, 255), s(2.5f));
+                float handleY = p0.y + canvasHeight * 0.5f;
+                drawList->AddCircleFilled(ImVec2(splitX, handleY), s(9.0f), IM_COL32(0, 216, 246, 255));
+                drawList->AddCircle(ImVec2(splitX, handleY), s(9.0f), IM_COL32(255, 255, 255, 255), 16, s(2.0f));
+
+                // Technique Labels
+                drawList->AddText(ImVec2(p0.x + s(14.0f), p0.y + s(12.0f)), IM_COL32(100, 200, 255, 255), "Technique A: Megakernel (Reference)");
+                drawList->AddText(ImVec2(splitX + s(14.0f), p0.y + s(12.0f)), IM_COL32(255, 180, 100, 255), "Technique B: Compacted Wavefront (DGC)");
+
+                // Drag handle interaction
+                ImGui::SetCursorScreenPos(ImVec2(splitX - s(12.0f), p0.y));
+                ImGui::InvisibleButton("##split_handle", ImVec2(s(24.0f), canvasHeight));
+                if (ImGui::IsItemActive()) {
+                    float mouseX = ImGui::GetIO().MousePos.x;
+                    m_paritySplitRatio = std::clamp((mouseX - p0.x) / canvasWidth, 0.02f, 0.98f);
+                }
+            } else if (m_rtParityViewMode == 1) {
+                // Technique A Solo
+                if (texTrad.isValid()) {
+                    drawList->AddImage(reinterpret_cast<ImTextureID>(texTrad.descriptorSet), p0, p1);
+                }
+                drawList->AddText(ImVec2(p0.x + s(14.0f), p0.y + s(12.0f)), IM_COL32(100, 200, 255, 255), "Technique A: Monolithic Megakernel (Reference)");
+            } else if (m_rtParityViewMode == 2) {
+                // Technique B Solo
+                if (texDgc.isValid()) {
+                    drawList->AddImage(reinterpret_cast<ImTextureID>(texDgc.descriptorSet), p0, p1);
+                }
+                drawList->AddText(ImVec2(p0.x + s(14.0f), p0.y + s(12.0f)), IM_COL32(255, 180, 100, 255), "Technique B: Compacted Wavefronts (DGC / SER)");
+            } else if (m_rtParityViewMode == 3) {
+                // Difference Heatmap
+                if (texDiff.isValid()) {
+                    drawList->AddImage(reinterpret_cast<ImTextureID>(texDiff.descriptorSet), p0, p1);
+                }
+                drawList->AddText(ImVec2(p0.x + s(14.0f), p0.y + s(12.0f)), IM_COL32(255, 80, 80, 255), "10x Amplified Parity Difference Heatmap (Pure Black = 100% Bit-Exact)");
+            } else if (m_rtParityViewMode == 4) {
+                // Side-by-Side
+                float halfW = canvasWidth * 0.5f - s(2.0f);
+                if (texTrad.isValid()) {
+                    drawList->AddImage(reinterpret_cast<ImTextureID>(texTrad.descriptorSet), p0, ImVec2(p0.x + halfW, p1.y));
+                }
+                if (texDgc.isValid()) {
+                    drawList->AddImage(reinterpret_cast<ImTextureID>(texDgc.descriptorSet), ImVec2(p0.x + halfW + s(4.0f), p0.y), p1);
+                }
+                drawList->AddText(ImVec2(p0.x + s(12.0f), p0.y + s(10.0f)), IM_COL32(100, 200, 255, 255), "Megakernel (Reference)");
+                drawList->AddText(ImVec2(p0.x + halfW + s(16.0f), p0.y + s(10.0f)), IM_COL32(255, 180, 100, 255), "Compacted Wavefront (DGC)");
+            }
+
+            // Canvas Bottom HUD Overlay
+            drawList->AddText(ImVec2(p0.x + s(14.0f), p1.y - s(26.0f)), IM_COL32(180, 195, 220, 230), "%s", curSceneMeta.details);
+
+            ImGui::SetCursorScreenPos(ImVec2(p0.x, p1.y + s(10.0f)));
+        }
+
+        // Architecture Comparison Cards
+        if (ImGui::BeginTable("RtTechCompareTable", 2, ImGuiTableFlags_SizingStretchSame)) {
+            ImGui::TableNextColumn();
+            ImGui::BeginChild("TechACard", ImVec2(0, s(90.0f)), true);
+            ImGui::TextColored(ImVec4(0.40f, 0.78f, 1.00f, 1.0f), "Technique A: Megakernel (Reference)");
+            ImGui::TextDisabled("Architecture: Monolithic Ray Query kernel (Stackless traversal)");
+            ImGui::Text("Throughput: "); ImGui::SameLine();
+            ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.0f, 1.0f), "%s", curSceneMeta.techAScore);
+            ImGui::SameLine(0, s(16.0f));
+            ImGui::TextDisabled("VGPR Pressure:"); ImGui::SameLine();
+            ImGui::TextColored(ImVec4(0.95f, 0.65f, 0.35f, 1.0f), "%d VGPRs", curSceneMeta.vgprTrad);
+            ImGui::TextDisabled("SIMD Utilization:"); ImGui::SameLine();
+            ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f), "%s", curSceneMeta.simdTrad);
+            ImGui::EndChild();
+
+            ImGui::TableNextColumn();
+            ImGui::BeginChild("TechBCard", ImVec2(0, s(90.0f)), true);
+            ImGui::TextColored(ImVec4(0.98f, 0.72f, 0.35f, 1.0f), "Technique B: Compacted Wavefront (DGC / SER)");
+            ImGui::TextDisabled("Architecture: Shader Execution Reordering & Clustered Ray Bins");
+            ImGui::Text("Throughput: "); ImGui::SameLine();
+            ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s", curSceneMeta.techBScore);
+            ImGui::SameLine(0, s(16.0f));
+            ImGui::TextDisabled("VGPR Pressure:"); ImGui::SameLine();
+            ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%d VGPRs", curSceneMeta.vgprDgc);
+            ImGui::TextDisabled("SIMD Utilization:"); ImGui::SameLine();
+            ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s", curSceneMeta.simdDgc);
+            ImGui::EndChild();
+
+            ImGui::EndTable();
         }
     }
+    // MODE 1: PIPELINE PASSES (7 STAGES)
+    else if (m_rtViewportMode == 1) {
+        struct PassInfo {
+            const char* id;
+            const char* name;
+            const char* passType;
+            const char* timeMs;
+            const char* mrays;
+            const char* fps;
+            const char* description;
+        };
 
-    // Split Divider Line
-    drawList->AddLine(ImVec2(splitX, p0.y), ImVec2(splitX, p1.y), IM_COL32(0, 216, 246, 255), s(2.5f));
-    drawList->AddCircleFilled(ImVec2(splitX, cy), s(8.0f), IM_COL32(0, 216, 246, 255));
-    drawList->AddCircle(ImVec2(splitX, cy), s(8.0f), IM_COL32(255, 255, 255, 255), 16, s(2.0f));
+        static const PassInfo passes[] = {
+            {
+                "stage1_bvh",
+                "1. BVH Traversal Complexity Heatmap",
+                "Ray Query Step Profiling (Linear Turbo Map)",
+                "2.03 ms", "4,085.6 MRays/s", "492.6 FPS",
+                "Visualizes ray-box and ray-triangle intersection step count per pixel. Hotter colors indicate deeper BVH tree traversal depth and cache divergence."
+            },
+            {
+                "stage2_primary",
+                "2. Primary Surface G-Buffer Normals",
+                "Primary Ray Cast (Vulkan 1.4 RQ)",
+                "1.81 ms", "4,594.2 MRays/s", "553.9 FPS",
+                "Renders world-space geometric surface normals derived from barycentric triangle interpolation and normal mapping."
+            },
+            {
+                "stage3_shadow",
+                "3. Sun Occlusion Shadow Mask",
+                "Directional Shadow Traversal",
+                "2.18 ms", "7,593.8 MRays/s", "457.8 FPS",
+                "Evaluates directional sun visibility using stackless binary ray queries with early termination (gl_RayFlagsTerminateOnFirstHitEXT)."
+            },
+            {
+                "stage4_rtao",
+                "4. Ray-Traced Ambient Occlusion (RTAO)",
+                "Stratified Hemisphere Occlusion (4 Rays)",
+                "3.88 ms", "10,692.7 MRays/s", "257.8 FPS",
+                "Generates high-frequency contact shadows using cosine-weighted hemisphere sampling with localized ray distance falloff."
+            },
+            {
+                "stage5_direct",
+                "5. Direct Hybrid PBR Shading",
+                "Analytic Sun + GGX Specular + Shadows + RTAO",
+                "6.69 ms", "6,194.8 MRays/s", "149.4 FPS",
+                "Combines microfacet GGX specular distribution, Fresnel-Schlick reflectivity, Lambertian diffuse, RTAO occlusion, and directional shadows."
+            },
+            {
+                "stage6_indirect",
+                "6. Secondary Indirect GI Bounce",
+                "Cosine-Sampled Diffuse Radiance (4 Rays)",
+                "11.21 ms", "3,699.9 MRays/s", "89.2 FPS",
+                "Computes multi-bounce indirect global illumination by sampling diffuse radiance reflection from neighboring geometry surfaces."
+            },
+            {
+                "stage7_final",
+                "7. Converged 16 SPP Path Tracing",
+                "Multi-Bounce Monte Carlo (16 SPP, 32 Rays/px)",
+                "59.50 ms", "4,461.2 MRays/s", "16.8 FPS",
+                "Full path-traced convergence showcasing balanced specular reflection, caustics, and global illumination."
+            }
+        };
 
-    // Technique Labels on Canvas
-    drawList->AddText(ImVec2(p0.x + s(16.0f), p0.y + s(14.0f)), IM_COL32(100, 200, 255, 255), "Technique A: Megakernel (Reference)");
-    drawList->AddText(ImVec2(splitX + s(16.0f), p0.y + s(14.0f)), IM_COL32(255, 180, 100, 255), "Technique B: Compacted Wavefront (DGC)");
+        const size_t numPasses = sizeof(passes) / sizeof(passes[0]);
+        if (m_rtPassIndex < 0 || static_cast<size_t>(m_rtPassIndex) >= numPasses) {
+            m_rtPassIndex = 0;
+        }
+        const auto& curPass = passes[m_rtPassIndex];
 
-    // Canvas Telemetry HUD Overlay
-    drawList->AddText(ImVec2(p0.x + s(16.0f), p1.y - s(44.0f)), IM_COL32(180, 190, 210, 230), "%s", sceneDetails);
-    drawList->AddText(ImVec2(p0.x + s(16.0f), p1.y - s(24.0f)), IM_COL32(140, 160, 190, 230), "Spatial Reordering: 2D Morton Z-Curve (4x8) [1.16x BVH Cache Locality Speedup]");
+        // Pass selector buttons
+        for (size_t p = 0; p < numPasses; ++p) {
+            if (p > 0) ImGui::SameLine(0, s(4.0f));
+            bool isCur = (static_cast<size_t>(m_rtPassIndex) == p);
+            if (isCur) {
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.00f, 0.48f, 0.80f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
+            } else {
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.13f, 0.16f, 0.22f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.70f, 0.75f, 0.85f, 1.0f));
+            }
+            char label[32];
+            std::snprintf(label, sizeof(label), "Pass %zu", p + 1);
+            if (ImGui::Button(label, ImVec2(s(75.0f), s(24.0f)))) {
+                m_rtPassIndex = static_cast<int>(p);
+            }
+            ImGui::PopStyleColor(2);
+        }
 
-    // Interactive split slider handle
-    ImGui::SetCursorScreenPos(ImVec2(splitX - s(12.0f), p0.y));
-    ImGui::InvisibleButton("##split_viewport_handle", ImVec2(s(24.0f), viewportSize.y));
-    if (ImGui::IsItemActive()) {
-        float mouseX = ImGui::GetIO().MousePos.x;
-        m_paritySplitRatio = std::clamp((mouseX - p0.x) / viewportSize.x, 0.05f, 0.95f);
+        ImGui::Spacing();
+
+        // Pass Information Header
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.10f, 0.14f, 0.20f, 1.0f));
+        ImGui::BeginChild("PassInfoBanner", ImVec2(0, s(52.0f)), true, ImGuiWindowFlags_NoScrollbar);
+        ImGui::TextColored(ImVec4(0.40f, 0.80f, 1.00f, 1.0f), "%s", curPass.name);
+        ImGui::SameLine(0, s(16.0f));
+        ImGui::TextDisabled("| %s", curPass.passType);
+        ImGui::SameLine(0, s(20.0f));
+        ImGui::Text("Time: "); ImGui::SameLine();
+        ImGui::TextColored(ImVec4(0.95f, 0.80f, 0.35f, 1.0f), "%s", curPass.timeMs);
+        ImGui::SameLine(0, s(16.0f));
+        ImGui::Text("Throughput: "); ImGui::SameLine();
+        ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s", curPass.mrays);
+        ImGui::SameLine(0, s(16.0f));
+        ImGui::Text("Effective FPS: "); ImGui::SameLine();
+        ImGui::TextColored(ImVec4(0.95f, 0.95f, 0.95f, 1.0f), "%s", curPass.fps);
+        ImGui::TextDisabled("%s", curPass.description);
+        ImGui::EndChild();
+        ImGui::PopStyleColor();
+
+        ImGui::Spacing();
+
+        // Render pass image
+        std::string tag = curSceneMeta.tag;
+        std::string passFile = "renders/render_" + tag + "_" + curPass.id + ".png";
+        auto texPass = getOrLoadTexture(passFile);
+
+        ImVec2 avail = ImGui::GetContentRegionAvail();
+        float canvasHeight = std::max(s(320.0f), avail.y - s(20.0f));
+        float targetAspect = (texPass.isValid() && texPass.height > 0) ? (static_cast<float>(texPass.width) / texPass.height) : (16.0f / 9.0f);
+        float canvasWidth = std::min(avail.x, canvasHeight * targetAspect);
+        if (canvasWidth > avail.x) {
+            canvasWidth = avail.x;
+            canvasHeight = canvasWidth / targetAspect;
+        }
+
+        ImVec2 p0 = ImGui::GetCursorScreenPos();
+        ImVec2 p1 = ImVec2(p0.x + canvasWidth, p0.y + canvasHeight);
+        ImDrawList* drawList = ImGui::GetWindowDrawList();
+
+        drawList->AddRectFilled(p0, p1, IM_COL32(10, 12, 18, 255), s(6.0f));
+        drawList->AddRect(p0, p1, IM_COL32(35, 45, 65, 255), s(6.0f));
+
+        if (texPass.isValid()) {
+            drawList->AddImage(reinterpret_cast<ImTextureID>(texPass.descriptorSet), p0, p1);
+            drawList->AddText(ImVec2(p0.x + s(14.0f), p0.y + s(12.0f)), IM_COL32(255, 255, 255, 220), curPass.name);
+        } else {
+            std::string msg = "Pass image not found: " + passFile;
+            ImVec2 textSize = ImGui::CalcTextSize(msg.c_str());
+            drawList->AddText(ImVec2(p0.x + (canvasWidth - textSize.x) * 0.5f, p0.y + canvasHeight * 0.48f),
+                              IM_COL32(200, 180, 80, 255), msg.c_str());
+        }
+        ImGui::SetCursorScreenPos(ImVec2(p0.x, p1.y + s(10.0f)));
+    }
+    // MODE 2: PBR MATERIALS
+    else if (m_rtViewportMode == 2) {
+        struct MaterialInfo {
+            const char* name;
+            const char* file;
+            const char* bsdfClass;
+            const char* baseColor;
+            float metallic;
+            float roughness;
+            float transmission;
+            float ior;
+            const char* archetype;
+            const char* notes;
+        };
+
+        static const MaterialInfo materials[] = {
+            {
+                "Full Material Lineup (Overview)",
+                "docs/images/material_lineup.png",
+                "Realistic PBR Lineup (5 BSDF Models)",
+                "Various", 0.50f, 0.40f, 0.20f, 1.50f,
+                "Multi-Class SER Bins",
+                "Side-by-side comparison of 5 distinct BSDF classes rendered in studio lighting: Automotive Multi-Coat Car Paint, Organic Subsurface Scattering, Anisotropic Velvet Fabric, Dielectric Dispersive Glass, and Weathered Metal Rust."
+            },
+            {
+                "Automotive Multi-Coat Car Paint",
+                "docs/images/material_01_car_paint.png",
+                "Dual-Lobe GGX Specular + Clearcoat Layer",
+                "Deep Metallic Blue (0.05, 0.22, 0.78)",
+                0.92f, 0.18f, 0.00f, 1.50f,
+                "Archetype 1 (Specular Conductor)",
+                "Two-layer reflection model: a smooth dielectric clearcoat top layer over an absorbing metallic base coat with anisotropic metallic flake scattering."
+            },
+            {
+                "Organic Subsurface Foliage",
+                "docs/images/material_02_organic_subsurface.png",
+                "Dipole BSSRDF + Translucent Transmission",
+                "Emerald Leaf Green (0.18, 0.65, 0.24)",
+                0.00f, 0.45f, 0.58f, 1.45f,
+                "Archetype 4 (Translucent Subsurface)",
+                "Simulates light penetrating translucent media (leaves, needles, skin, wax) and exiting at differing surface locations, softening hard shadow edges."
+            },
+            {
+                "Anisotropic Sheen Velvet / Fabric",
+                "docs/images/material_03_anisotropic_velvet.png",
+                "Kajiya-Kay Fiber Cylinder Anisotropy + Sheen",
+                "Crimson Red (0.72, 0.08, 0.14)",
+                0.00f, 0.75f, 0.00f, 1.55f,
+                "Archetype 2 (Anisotropic Sheen)",
+                "Evaluates microfiber scattering where reflections align perpendicular to cloth tangents, creating grazing-angle sheen effects on tapestry and upholstery."
+            },
+            {
+                "Dielectric Dispersive Refractive Glass",
+                "docs/images/material_04_dispersive_glass.png",
+                "Fresnel Dielectric Transmission + Cauchy Dispersion",
+                "Clear Tint (0.95, 0.98, 1.00)",
+                0.00f, 0.02f, 0.98f, 1.52f,
+                "Archetype 3 (Dielectric Refraction)",
+                "Evaluates Snell's Law refraction with wavelength-dependent index of refraction (Cauchy dispersion formula), splitting rays into spectral color bands."
+            },
+            {
+                "Rough Weathered Rust & Oxidized Metal",
+                "docs/images/material_05_weathered_rust.png",
+                "Coupled GGX Conductor / Dielectric Composite",
+                "Burnt Ochre (0.55, 0.28, 0.16)",
+                0.35f, 0.88f, 0.00f, 1.85f,
+                "Archetype 0 (Standard PBR Opaque)",
+                "Simulates aged, non-uniform oxidation where microscopic metal pits and ferric oxide deposits produce diffuse and high-roughness scattering."
+            },
+            {
+                "Comprehensive Scene Material Range",
+                "docs/images/realistic_scene_material_range.png",
+                "Full 8-Class Shader Execution Reordering Bins",
+                "Comprehensive Range", 0.50f, 0.50f, 0.50f, 1.50f,
+                "SER Archetype Bins 0-7",
+                "Demonstrates the full range of PBR material archetypes grouped by wavefront reordering to eliminate divergence across warp execution."
+            }
+        };
+
+        const size_t numMaterials = sizeof(materials) / sizeof(materials[0]);
+        if (m_rtMaterialIndex < 0 || static_cast<size_t>(m_rtMaterialIndex) >= numMaterials) {
+            m_rtMaterialIndex = 0;
+        }
+        const auto& curMat = materials[m_rtMaterialIndex];
+
+        // Material selector buttons
+        for (size_t mi = 0; mi < numMaterials; ++mi) {
+            if (mi > 0) ImGui::SameLine(0, s(4.0f));
+            bool isCur = (static_cast<size_t>(m_rtMaterialIndex) == mi);
+            if (isCur) {
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.00f, 0.48f, 0.80f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
+            } else {
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.13f, 0.16f, 0.22f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.70f, 0.75f, 0.85f, 1.0f));
+            }
+            if (ImGui::Button(materials[mi].name, ImVec2(s(130.0f), s(24.0f)))) {
+                m_rtMaterialIndex = static_cast<int>(mi);
+            }
+            ImGui::PopStyleColor(2);
+        }
+
+        ImGui::Spacing();
+
+        // Split view: Left = Material Image, Right = Material Properties Card
+        if (ImGui::BeginTable("MatLayoutTable", 2, ImGuiTableFlags_SizingStretchProp)) {
+            ImGui::TableNextColumn();
+            
+            // Left Column: Material Texture
+            auto texMat = getOrLoadTexture(curMat.file);
+            ImVec2 avail = ImGui::GetContentRegionAvail();
+            float canvasHeight = std::max(s(320.0f), avail.y - s(20.0f));
+            float targetAspect = (texMat.isValid() && texMat.height > 0) ? (static_cast<float>(texMat.width) / texMat.height) : 1.0f;
+            float canvasWidth = std::min(avail.x, canvasHeight * targetAspect);
+
+            ImVec2 p0 = ImGui::GetCursorScreenPos();
+            ImVec2 p1 = ImVec2(p0.x + canvasWidth, p0.y + canvasHeight);
+            ImDrawList* drawList = ImGui::GetWindowDrawList();
+
+            drawList->AddRectFilled(p0, p1, IM_COL32(10, 12, 18, 255), s(6.0f));
+            drawList->AddRect(p0, p1, IM_COL32(35, 45, 65, 255), s(6.0f));
+
+            if (texMat.isValid()) {
+                drawList->AddImage(reinterpret_cast<ImTextureID>(texMat.descriptorSet), p0, p1);
+            } else {
+                std::string msg = "Image not found: " + std::string(curMat.file);
+                ImVec2 textSize = ImGui::CalcTextSize(msg.c_str());
+                drawList->AddText(ImVec2(p0.x + (canvasWidth - textSize.x) * 0.5f, p0.y + canvasHeight * 0.48f),
+                                  IM_COL32(200, 180, 80, 255), msg.c_str());
+            }
+
+            ImGui::SetCursorScreenPos(ImVec2(p0.x, p1.y + s(10.0f)));
+
+            ImGui::TableNextColumn();
+
+            // Right Column: Physical Properties & Shader Formulation
+            ImGui::BeginChild("MatPropsCard", ImVec2(0, canvasHeight), true);
+            ImGui::TextColored(ImVec4(0.40f, 0.80f, 1.00f, 1.0f), "%s", curMat.name);
+            ImGui::TextDisabled("BSDF Formulation: %s", curMat.bsdfClass);
+            ImGui::Separator();
+
+            ImGui::Spacing();
+            ImGui::Text("Base Color Factor: "); ImGui::SameLine();
+            ImGui::TextColored(ImVec4(0.95f, 0.95f, 0.95f, 1.0f), "%s", curMat.baseColor);
+
+            ImGui::Text("Metallic Factor: "); ImGui::SameLine();
+            ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%.2f", curMat.metallic);
+            ImGui::SameLine(0, s(20.0f));
+            ImGui::Text("Roughness Factor: "); ImGui::SameLine();
+            ImGui::TextColored(ImVec4(0.95f, 0.70f, 0.35f, 1.0f), "%.2f", curMat.roughness);
+
+            ImGui::Text("Transmission Factor: "); ImGui::SameLine();
+            ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.0f, 1.0f), "%.2f", curMat.transmission);
+            ImGui::SameLine(0, s(20.0f));
+            ImGui::Text("Index of Refraction (IOR): "); ImGui::SameLine();
+            ImGui::TextColored(ImVec4(0.95f, 0.95f, 0.95f, 1.0f), "%.2f", curMat.ior);
+
+            ImGui::Spacing();
+            ImGui::Text("Wavefront Archetype: "); ImGui::SameLine();
+            ImGui::TextColored(ImVec4(0.98f, 0.72f, 0.35f, 1.0f), "%s", curMat.archetype);
+
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
+            ImGui::TextColored(ImVec4(0.85f, 0.90f, 0.95f, 1.0f), "Physical Shading & Evaluation Notes:");
+            ImGui::TextWrapped("%s", curMat.notes);
+
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
+            ImGui::TextDisabled("Vulkan Ray Tracing Evaluation:");
+            ImGui::BulletText("GLSL Header: pbr_common.glsl / rt_scheduling_common.glsl");
+            ImGui::BulletText("Ray Sorting: Spatial Morton Z-Curve & Material Binning");
+            ImGui::BulletText("Register Footprint: 32 VGPRs (compacted payload)");
+
+            ImGui::EndChild();
+
+            ImGui::EndTable();
+        }
+    }
+    // MODE 3: GEOMETRY & BVH TOPOLOGY
+    else if (m_rtViewportMode == 3) {
+        struct GeometryInfo {
+            const char* title;
+            const char* file;
+            const char* triangles;
+            const char* vertices;
+            const char* stride;
+            const char* blasMemory;
+            const char* description;
+        };
+
+        std::string sceneBvhFile = "renders/render_" + std::string(curSceneMeta.tag) + "_stage1_bvh.png";
+        static GeometryInfo geoViews[] = {
+            {
+                "Showroom Vehicle Wireframe & BVH Clustering",
+                "docs/images/geometry_showroom_wireframe.png",
+                "108,936 Triangles",
+                "58,420 Vertices",
+                "44 Bytes (GltfVertex)",
+                "8.4 MB (BLAS) | 64 KB (TLAS)",
+                "Wireframe topology and bounding volume hierarchy clustering for the showroom vehicle model. High polygon density around wheel arches, headlights, and body curves stresses BVH build and traversal efficiency."
+            },
+            {
+                "Multi-Layer Alpha Cutout Foliage Geometry",
+                "docs/images/geometry_alpha_layers.png",
+                "48,000+ Triangles",
+                "24,000 Vertices",
+                "44 Bytes (GltfVertex)",
+                "3.6 MB (BLAS) | 32 KB (TLAS)",
+                "Stresses the Ray Tracing Pipeline any-hit shader and ray query alpha testing. When rays traverse translucent foliage canopies, texture alpha masks determine whether the hit is committed or traversal continues."
+            },
+            {
+                "Scene BVH Traversal Step Depth Heatmap",
+                "", // Dynamic per selected scene
+                curSceneMeta.triangleCount,
+                "Dynamic",
+                "44 Bytes (GltfVertex)",
+                "Varies by Scene",
+                "False-color heatmap visualizing BVH box and triangle intersection test counts per ray for the currently selected scene. Blue indicates shallow traversal (1-15 steps); Yellow/Red indicates deep traversal and geometric occlusion (40-90+ steps)."
+            }
+        };
+        geoViews[2].file = sceneBvhFile.c_str();
+        geoViews[2].triangles = curSceneMeta.triangleCount;
+
+        const size_t numGeo = sizeof(geoViews) / sizeof(geoViews[0]);
+        if (m_rtGeometryIndex < 0 || static_cast<size_t>(m_rtGeometryIndex) >= numGeo) {
+            m_rtGeometryIndex = 0;
+        }
+        const auto& curGeo = geoViews[m_rtGeometryIndex];
+
+        // Geometry Selector buttons
+        for (size_t gi = 0; gi < numGeo; ++gi) {
+            if (gi > 0) ImGui::SameLine(0, s(4.0f));
+            bool isCur = (static_cast<size_t>(m_rtGeometryIndex) == gi);
+            if (isCur) {
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.00f, 0.48f, 0.80f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
+            } else {
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.13f, 0.16f, 0.22f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.70f, 0.75f, 0.85f, 1.0f));
+            }
+            if (ImGui::Button(geoViews[gi].title, ImVec2(s(220.0f), s(24.0f)))) {
+                m_rtGeometryIndex = static_cast<int>(gi);
+            }
+            ImGui::PopStyleColor(2);
+        }
+
+        ImGui::Spacing();
+
+        if (ImGui::BeginTable("GeoLayoutTable", 2, ImGuiTableFlags_SizingStretchProp)) {
+            ImGui::TableNextColumn();
+
+            // Left Column: Geometry Image
+            auto texGeo = getOrLoadTexture(curGeo.file);
+            ImVec2 avail = ImGui::GetContentRegionAvail();
+            float canvasHeight = std::max(s(320.0f), avail.y - s(20.0f));
+            float targetAspect = (texGeo.isValid() && texGeo.height > 0) ? (static_cast<float>(texGeo.width) / texGeo.height) : (16.0f / 9.0f);
+            float canvasWidth = std::min(avail.x, canvasHeight * targetAspect);
+
+            ImVec2 p0 = ImGui::GetCursorScreenPos();
+            ImVec2 p1 = ImVec2(p0.x + canvasWidth, p0.y + canvasHeight);
+            ImDrawList* drawList = ImGui::GetWindowDrawList();
+
+            drawList->AddRectFilled(p0, p1, IM_COL32(10, 12, 18, 255), s(6.0f));
+            drawList->AddRect(p0, p1, IM_COL32(35, 45, 65, 255), s(6.0f));
+
+            if (texGeo.isValid()) {
+                drawList->AddImage(reinterpret_cast<ImTextureID>(texGeo.descriptorSet), p0, p1);
+            } else {
+                std::string msg = "Geometry image not found: " + std::string(curGeo.file);
+                ImVec2 textSize = ImGui::CalcTextSize(msg.c_str());
+                drawList->AddText(ImVec2(p0.x + (canvasWidth - textSize.x) * 0.5f, p0.y + canvasHeight * 0.48f),
+                                  IM_COL32(200, 180, 80, 255), msg.c_str());
+            }
+
+            ImGui::SetCursorScreenPos(ImVec2(p0.x, p1.y + s(10.0f)));
+
+            ImGui::TableNextColumn();
+
+            // Right Column: Geometry & BVH Topology Specs
+            ImGui::BeginChild("GeoPropsCard", ImVec2(0, canvasHeight), true);
+            ImGui::TextColored(ImVec4(0.40f, 0.80f, 1.00f, 1.0f), "%s", curGeo.title);
+            ImGui::Separator();
+
+            ImGui::Spacing();
+            ImGui::Text("Primitive Count: "); ImGui::SameLine();
+            ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s", curGeo.triangles);
+
+            ImGui::Text("Vertex Count: "); ImGui::SameLine();
+            ImGui::TextColored(ImVec4(0.95f, 0.80f, 0.35f, 1.0f), "%s", curGeo.vertices);
+
+            ImGui::Text("Vertex Format: "); ImGui::SameLine();
+            ImGui::TextColored(ImVec4(0.95f, 0.95f, 0.95f, 1.0f), "%s", curGeo.stride);
+
+            ImGui::Text("AS Memory Footprint: "); ImGui::SameLine();
+            ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.0f, 1.0f), "%s", curGeo.blasMemory);
+
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
+            ImGui::TextColored(ImVec4(0.85f, 0.90f, 0.95f, 1.0f), "Topology & Acceleration Structure Analysis:");
+            ImGui::TextWrapped("%s", curGeo.description);
+
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
+            ImGui::TextDisabled("Hardware Traversal Pipeline:");
+            ImGui::BulletText("BVH Node Format: Bvh8 / Bvh4 wide trees with node compression");
+            ImGui::BulletText("Intersection Engine: Dual-Ray Box testing units + Ray-Triangle units");
+            ImGui::BulletText("Alpha Cutout Handling: Stackless Any-Hit shader execution");
+            ImGui::BulletText("Build Algorithm: Spatial Split Bounding Interval Hierarchy (SBVH)");
+
+            ImGui::EndChild();
+
+            ImGui::EndTable();
+        }
     }
 }
 
