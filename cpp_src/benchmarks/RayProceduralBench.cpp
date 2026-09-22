@@ -282,7 +282,7 @@ const char *RayProceduralBench::GetComponent(uint32_t config_idx) const {
 }
 const char *RayProceduralBench::GetMetric() const { return "MRays/s"; }
 const char *RayProceduralBench::GetSubCategory(uint32_t config_idx) const {
-  return "Procedural Intersection";
+  return "Procedural Geometry";
 }
 
 std::string RayProceduralBench::GetConfigName(uint32_t config_idx) const {

@@ -881,6 +881,11 @@ bool GuiApp::matchesItem(const ResultData& r, const BenchmarkItem& itm, uint32_t
                 r.subcategory.find(itm.subcategory) != std::string::npos) {
                 subMatches = true;
             }
+            if (itm.subcategory.find("Procedural") != std::string::npos &&
+                (r.subcategory.find("Procedural") != std::string::npos ||
+                 r.subcategory.find("Intersection") != std::string::npos)) {
+                subMatches = true;
+            }
             if (itm.category == "System" || itm.category == "Host System") {
                 if (r.deviceIndex != 0xFFFFFFFF) subMatches = false;
             } else {
@@ -994,6 +999,11 @@ bool GuiApp::matchesItem(const ResultData& r, const BenchmarkItem& itm, uint32_t
     if (itm.name.find("Coherent") != std::string::npos && clean.find("Coherent") != std::string::npos) return true;
     if (itm.name.find("Deep Box") != std::string::npos && clean.find("Box") != std::string::npos) return true;
     if (itm.name.find("Spheres") != std::string::npos && clean.find("Spheres") != std::string::npos) return true;
+    if (itm.id == "RayProcedural" || itm.name.find("Procedural") != std::string::npos) {
+        if (r.benchmarkName.find("RayProcedural") != std::string::npos ||
+            clean.find("Spheres") != std::string::npos ||
+            clean.find("Procedural") != std::string::npos) return true;
+    }
 
     return false;
 }

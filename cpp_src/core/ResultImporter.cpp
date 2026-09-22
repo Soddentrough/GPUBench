@@ -637,7 +637,7 @@ bool ResultImporter::loadFromFile(const std::string &filepath, ImportedRun &outR
           rd.configIndex = 0;
         } else if (id == "rt_procedural") {
           rd.component = "Ray Tracing";
-          rd.subcategory = "Ray Intersection";
+          rd.subcategory = "Procedural Geometry";
           rd.benchmarkName = "RayProcedural (Procedural Geometry)";
           rd.sortWeight = 360;
           rd.configIndex = 0;
