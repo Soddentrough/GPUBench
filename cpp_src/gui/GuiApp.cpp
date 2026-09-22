@@ -784,21 +784,21 @@ void GuiApp::initializeBenchmarkCategories() {
 
         // Subgroup 4: Hardware BVH & Divergence Stress (15 tests)
         cat.subgroups.push_back({"Hardware BVH & Divergence Stress", "Ray Tracing", "RayRawTraversal", "Hardware ray-box, triangle traversal, alpha foliage, and SIMD divergence", {
-            {"RayRawTraversal", "Hardware BVH Traversal", "Raw Traversal - Coherent Triangles", "Ray Tracing", "GIS/s", "Raw hardware BVH traversal of coherent triangle geometry", true},
-            {"RayRawTraversal", "Hardware BVH Traversal", "Raw Traversal - Deep Box Stress", "Ray Tracing", "MRays/s", "Deep multi-layer BVH box traversal stress", true},
-            {"RayIntersect", "Intersection Tests", "Primitive Intersect - Ray-Triangle", "Ray Tracing", "GIS/s", "Hardware ray-triangle intersection test rate", true},
-            {"RayIntersect", "Intersection Tests", "Primitive Intersect - Ray-Box", "Ray Tracing", "GIS/s", "Hardware ray-AABB box intersection test rate", true},
-            {"RayAnyHit", "Alpha-Tested Geometry", "Alpha Foliage - 100% Solid (Baseline)", "Ray Tracing", "MRays/s", "100% opaque alpha evaluation baseline", true},
-            {"RayAnyHit", "Alpha-Tested Geometry", "Alpha Foliage - 50% Solid (Cutout Stress)", "Ray Tracing", "MRays/s", "50% solid / 50% transparent any-hit evaluation", true},
-            {"RayProcedural", "Procedural Geometry", "Procedural Geometry - AABB Spheres", "Ray Tracing", "MRays/s", "Procedural analytical sphere intersection in bounding box", true},
-            {"RayDivergence", "Ray Directional Coherence", "Directional Coherence - 100% Mirror (Coherent)", "Ray Tracing", "MRays/s", "Directional coherence sweep - 100% mirror reflection", true},
-            {"RayDivergence", "Ray Directional Coherence", "Directional Coherence - 75% Coherence", "Ray Tracing", "MRays/s", "Directional coherence sweep - 75% specular reflection", true},
-            {"RayDivergence", "Ray Directional Coherence", "Directional Coherence - 50% Coherence", "Ray Tracing", "MRays/s", "Directional coherence sweep - 50% directional scattering", true},
-            {"RayDivergence", "Ray Directional Coherence", "Directional Coherence - 25% Coherence", "Ray Tracing", "MRays/s", "Directional coherence sweep - 25% directional scattering", true},
-            {"RayDivergence", "Ray Directional Coherence", "Directional Coherence - 0% Diffuse (Incoherent)", "Ray Tracing", "MRays/s", "Directional coherence sweep - 0% diffuse isotropic scattering", true},
-            {"RayPayload", "Payload Register Pressure", "Payload Pressure - 16B Payload", "Ray Tracing", "MRays/s", "Minimal 16-byte payload register footprint", true},
-            {"RayPayload", "Payload Register Pressure", "Payload Pressure - 128B Payload", "Ray Tracing", "MRays/s", "Standard 128-byte path tracing payload footprint", true},
-            {"RayPayload", "Payload Register Pressure", "Payload Pressure - 256B Payload", "Ray Tracing", "MRays/s", "Heavy 256-byte production BSDF payload footprint", true}
+            {"RayRawTraversal", "Hardware BVH Traversal", "Coherent Triangles", "Ray Tracing", "GIS/s", "Raw hardware BVH traversal of coherent triangle geometry", true},
+            {"RayRawTraversal", "Hardware BVH Traversal", "Deep Box Stress", "Ray Tracing", "MRays/s", "Deep multi-layer BVH box traversal stress", true},
+            {"RayIntersect", "Intersection Tests", "Ray-Triangle", "Ray Tracing", "GIS/s", "Hardware ray-triangle intersection test rate", true},
+            {"RayIntersect", "Intersection Tests", "Ray-Box", "Ray Tracing", "GIS/s", "Hardware ray-AABB box intersection test rate", true},
+            {"RayAnyHit", "Alpha-Tested Geometry", "100% Solid (Baseline)", "Ray Tracing", "MRays/s", "100% opaque alpha evaluation baseline", true},
+            {"RayAnyHit", "Alpha-Tested Geometry", "50% Solid (Cutout Stress)", "Ray Tracing", "MRays/s", "50% solid / 50% transparent any-hit evaluation", true},
+            {"RayProcedural", "Procedural Geometry", "AABB Spheres", "Ray Tracing", "MRays/s", "Procedural analytical sphere intersection in bounding box", true},
+            {"RayDivergence", "Ray Directional Coherence", "100% Mirror (Coherent)", "Ray Tracing", "MRays/s", "Directional coherence sweep - 100% mirror reflection", true},
+            {"RayDivergence", "Ray Directional Coherence", "75% Coherence", "Ray Tracing", "MRays/s", "Directional coherence sweep - 75% specular reflection", true},
+            {"RayDivergence", "Ray Directional Coherence", "50% Coherence", "Ray Tracing", "MRays/s", "Directional coherence sweep - 50% directional scattering", true},
+            {"RayDivergence", "Ray Directional Coherence", "25% Coherence", "Ray Tracing", "MRays/s", "Directional coherence sweep - 25% directional scattering", true},
+            {"RayDivergence", "Ray Directional Coherence", "0% Diffuse (Incoherent)", "Ray Tracing", "MRays/s", "Directional coherence sweep - 0% diffuse isotropic scattering", true},
+            {"RayPayload", "Payload Register Pressure", "16B Payload", "Ray Tracing", "MRays/s", "Minimal 16-byte payload register footprint", true},
+            {"RayPayload", "Payload Register Pressure", "128B Payload", "Ray Tracing", "MRays/s", "Standard 128-byte path tracing payload footprint", true},
+            {"RayPayload", "Payload Register Pressure", "256B Payload", "Ray Tracing", "MRays/s", "Heavy 256-byte production BSDF payload footprint", true}
         }});
 
         m_categories.push_back(cat);
@@ -811,9 +811,9 @@ void GuiApp::initializeBenchmarkCategories() {
         cat.description = "Fixed-function rasterizer ROP throughput and blending";
 
         cat.subgroups.push_back({"Graphics & ROP Fill Rate", "Graphics", "Pixel Fill Rate", "Fixed-function rasterizer fill rate across color formats", {
-            {"Pixel Fill Rate", "ROP & Fill Rate", "RGBA8 32-bit Color Fill", "Graphics", "GPixels/s", "Fixed-function 32-bit RGBA8 color raster fill rate", true},
-            {"Pixel Fill Rate", "ROP & Fill Rate", "RGBA16F 64-bit HDR Fill", "Graphics", "GPixels/s", "Fixed-function 64-bit RGBA16F HDR color raster fill rate", true},
-            {"Pixel Fill Rate", "ROP & Fill Rate", "Alpha Blending Fill (SRC_ALPHA)", "Graphics", "GPixels/s", "Fixed-function alpha blending (SRC_ALPHA, ONE_MINUS_SRC_ALPHA) fill rate", true}
+            {"Pixel Fill Rate", "ROP Throughput", "RGBA8 Color Fill", "Graphics", "GPixels/s", "Fixed-function 32-bit RGBA8 color raster fill rate", true},
+            {"Pixel Fill Rate", "ROP Throughput", "RGBA16F HDR Fill", "Graphics", "GPixels/s", "Fixed-function 64-bit RGBA16F HDR color raster fill rate", true},
+            {"Pixel Fill Rate", "ROP Throughput", "Alpha Blending Fill", "Graphics", "GPixels/s", "Fixed-function alpha blending (SRC_ALPHA, ONE_MINUS_SRC_ALPHA) fill rate", true}
         }});
 
         m_categories.push_back(cat);
@@ -1483,7 +1483,9 @@ void GuiApp::renderRightWorkspace(float width, float height) {
 }
 
 bool GuiApp::matchesItem(const ResultData& r, const BenchmarkItem& itm, uint32_t activeDev) const {
-    if (r.deviceIndex != activeDev) return false;
+    bool isHostItem = (itm.category == "System" || itm.category == "Host System" || itm.category == "System Memory");
+    uint32_t expectedDev = isHostItem ? 0xFFFFFFFF : activeDev;
+    if (r.deviceIndex != expectedDev) return false;
 
     // Subcategory matching with normalization
     if (!itm.subcategory.empty() && !r.subcategory.empty()) {
@@ -1491,6 +1493,10 @@ bool GuiApp::matchesItem(const ResultData& r, const BenchmarkItem& itm, uint32_t
         if (!subMatches) {
             if (itm.subcategory.find(r.subcategory) != std::string::npos ||
                 r.subcategory.find(itm.subcategory) != std::string::npos) {
+                subMatches = true;
+            }
+            if ((itm.subcategory.find("ROP") != std::string::npos || itm.subcategory.find("Fill Rate") != std::string::npos) &&
+                (r.subcategory.find("ROP") != std::string::npos || r.subcategory.find("Fill Rate") != std::string::npos)) {
                 subMatches = true;
             }
             if (itm.subcategory.find("Procedural") != std::string::npos &&
@@ -1559,6 +1565,20 @@ bool GuiApp::matchesItem(const ResultData& r, const BenchmarkItem& itm, uint32_t
     }
 
     std::string clean = cleanWorkloadName(r.benchmarkName, r.subcategory);
+
+    // Graphics / Pixel Fill Rate (ROP Throughput) matching
+    if (itm.id == "Pixel Fill Rate" || r.benchmarkName.find("Pixel Fill Rate") != std::string::npos ||
+        itm.subcategory == "ROP Throughput" || r.subcategory == "ROP Throughput") {
+        if (r.deviceIndex != 0xFFFFFFFF) {
+            if ((itm.name.find("RGBA8") != std::string::npos) &&
+                (r.benchmarkName.find("RGBA8") != std::string::npos || clean.find("RGBA8") != std::string::npos)) return true;
+            if ((itm.name.find("RGBA16") != std::string::npos || itm.name.find("HDR") != std::string::npos) &&
+                (r.benchmarkName.find("RGBA16") != std::string::npos || clean.find("RGBA16") != std::string::npos)) return true;
+            if ((itm.name.find("Alpha") != std::string::npos || itm.name.find("Blend") != std::string::npos) &&
+                (r.benchmarkName.find("Alpha") != std::string::npos || clean.find("Alpha") != std::string::npos)) return true;
+        }
+    }
+
     if (clean == itm.name || r.benchmarkName == itm.name) return true;
     if (clean.find(itm.name) != std::string::npos || itm.name.find(clean) != std::string::npos) return true;
 
@@ -1711,12 +1731,12 @@ GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
         if (item.category == "Compute") {
             if (item.id == "FP32") {
                 info.isBaseline = true;
-                info.deltaText = "";
+                info.deltaText = "[Baseline]";
                 info.deltaColor = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
             } else if (item.id == "INT8") {
                 if (item.name.find("Vector") != std::string::npos) {
                     info.isBaseline = true;
-                    info.deltaText = "";
+                    info.deltaText = "[Baseline]";
                     info.deltaColor = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
                 } else {
                     baselineName = "INT8_Vector";
@@ -1724,7 +1744,7 @@ GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
             } else if (item.id == "INT4") {
                 if (item.name.find("Vector") != std::string::npos) {
                     info.isBaseline = true;
-                    info.deltaText = "";
+                    info.deltaText = "[Baseline]";
                     info.deltaColor = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
                 } else {
                     baselineName = "INT4_Vector";
@@ -1734,13 +1754,13 @@ GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
             }
         } else if (item.name.find("Vector ALU") != std::string::npos || item.name == "Vector") {
             info.isBaseline = true;
-            info.deltaText = "";
+            info.deltaText = "[Baseline]";
             info.deltaColor = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
         } else if (item.name.find("Matrix") != std::string::npos) {
             baselineName = "Vector";
         } else if (item.name.find("FP32") != std::string::npos) {
             info.isBaseline = true;
-            info.deltaText = "";
+            info.deltaText = "[Baseline]";
             info.deltaColor = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
         } else if (item.name == "Compute Megakernel" || item.name.find("Compute Megakernel") != std::string::npos ||
                    item.name.find("Megakernel") != std::string::npos ||
@@ -1750,10 +1770,12 @@ GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
                    item.name.find("Coherent Material") != std::string::npos ||
                    item.name.find("0 deg Divergence") != std::string::npos ||
                    item.name.find("0 deg (Primary Rays)") != std::string::npos ||
+                   item.name.find("100% Mirror") != std::string::npos ||
                    item.name.find("16B Payload") != std::string::npos ||
+                   item.name.find("16B") != std::string::npos ||
                    item.name.find("4 Bytes") != std::string::npos) {
             info.isBaseline = true;
-            info.deltaText = "";
+            info.deltaText = "[Baseline]";
             info.deltaColor = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
         } else {
             // Find appropriate baseline for this subcategory
@@ -1764,12 +1786,12 @@ GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
                 item.subcategory.find("Material Shading") != std::string::npos ||
                 item.subcategory.find("Incoherent Ray Tracing") != std::string::npos) {
                 baselineName = "Megakernel";
-            } else if (item.subcategory.find("Alpha-Tested") != std::string::npos || item.name.find("Alpha Foliage") != std::string::npos) {
+            } else if (item.subcategory.find("Alpha-Tested") != std::string::npos || item.name.find("Solid") != std::string::npos) {
                 baselineName = "100% Solid";
             } else if (item.subcategory.find("Material Divergence") != std::string::npos || item.name.find("Material Divergence") != std::string::npos) {
                 baselineName = "Uniform";
-            } else if (item.subcategory.find("Ray Directional Coherence") != std::string::npos || item.name.find("Directional Coherence") != std::string::npos) {
-                baselineName = "0 deg";
+            } else if (item.subcategory.find("Ray Directional Coherence") != std::string::npos || item.name.find("Coherence") != std::string::npos || item.name.find("Mirror") != std::string::npos) {
+                baselineName = "Mirror";
             } else if (item.subcategory.find("Payload Register Pressure") != std::string::npos || item.name.find("Payload") != std::string::npos) {
                 baselineName = "16B";
             } else if (item.subcategory.find("Pipeline Breakdown") != std::string::npos || item.name.find("Traversal Scheduling") != std::string::npos) {
@@ -1818,7 +1840,14 @@ GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
                 info.percentDelta = (info.speedupRatio - 1.0) * 100.0;
 
                 char dBuf[64];
-                snprintf(dBuf, sizeof(dBuf), "%.2fx", info.speedupRatio);
+                if (std::abs(info.percentDelta) >= 0.1) {
+                    snprintf(dBuf, sizeof(dBuf), "%.2fx (%s%.1f%%)",
+                             info.speedupRatio,
+                             info.percentDelta >= 0.0 ? "+" : "",
+                             info.percentDelta);
+                } else {
+                    snprintf(dBuf, sizeof(dBuf), "%.2fx", info.speedupRatio);
+                }
                 info.deltaText = dBuf;
                 info.deltaColor = (info.speedupRatio >= 1.0) ? ImVec4(0.35f, 0.95f, 0.55f, 1.0f) : ImVec4(0.70f, 0.75f, 0.85f, 1.0f);
             }
@@ -2280,7 +2309,8 @@ void GuiApp::renderBenchmarkSuitePanel() {
             bool hasAnyComparison = false;
             for (const auto& itm : sub.items) {
                 BenchmarkDisplayInfo d = getBenchmarkDisplayInfo(itm, m_telemetryGpuIndex);
-                if (d.hasResult && d.hasComparison && !d.primaryResult.isUnsupported) {
+                if ((d.hasResult && d.hasComparison && !d.primaryResult.isUnsupported) ||
+                    (d.isBaseline && sub.items.size() > 1)) {
                     hasAnyComparison = true;
                     break;
                 }
@@ -2288,7 +2318,7 @@ void GuiApp::renderBenchmarkSuitePanel() {
 
             // Fixed columns for Score and Speedup guarantee visibility regardless of name length
             float scoreColW = std::max(s(115.0f), ImGui::CalcTextSize("9999.9 GB/s").x + s(10.0f));
-            float deltaColW = hasAnyComparison ? std::max(s(55.0f), ImGui::CalcTextSize("9.99x").x + s(10.0f)) : 0.0f;
+            float deltaColW = hasAnyComparison ? std::max(s(145.0f), ImGui::CalcTextSize("[Baseline]").x + s(50.0f)) : 0.0f;
             int numSubCols = hasAnyComparison ? 3 : 2;
 
             std::string tblId = "SubTbl_" + sub.name;
@@ -2298,6 +2328,11 @@ void GuiApp::renderBenchmarkSuitePanel() {
                 if (hasAnyComparison) {
                     ImGui::TableSetupColumn("Delta", ImGuiTableColumnFlags_WidthFixed, deltaColW);
                 }
+
+                float activeBaselineX = -1.0f;
+                float activeBaselineY = -1.0f;
+                bool hasActiveBaseline = false;
+                std::string activeBaselineSubcat = "";
 
                 for (size_t iIdx = 0; iIdx < sub.items.size(); ++iIdx) {
                     auto& item = sub.items[iIdx];
@@ -2363,11 +2398,48 @@ void GuiApp::renderBenchmarkSuitePanel() {
                         ImGui::TextColored(ImVec4(0.35f, 0.65f, 0.95f, 0.85f), "%s", badge.c_str());
                     }
 
-                    // Col 2: Delta Speedup (if applicable)
+                    // Col 2: Delta Speedup / Baseline Connecting Branch
                     if (hasAnyComparison) {
                         ImGui::TableNextColumn();
-                        if (dispInfo.hasComparison && dispInfo.hasResult && !isUnsupported && !dispInfo.deltaText.empty()) {
+                        ImVec2 cellPos = ImGui::GetCursorScreenPos();
+                        float textH = ImGui::GetTextLineHeight();
+                        float curCenterY = cellPos.y + textH * 0.5f;
+
+                        if (dispInfo.isBaseline) {
+                            activeBaselineX = cellPos.x + s(10.0f);
+                            activeBaselineY = curCenterY;
+                            hasActiveBaseline = true;
+                            activeBaselineSubcat = item.subcategory;
+
+                            ImVec4 baseColor = (dispInfo.hasResult && dispInfo.primaryResult.time_ms > 0.0) 
+                                ? ImVec4(0.38f, 0.75f, 1.00f, 0.95f) 
+                                : ImVec4(0.42f, 0.52f, 0.65f, 0.70f);
+                            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + s(6.0f));
+                            ImGui::TextColored(baseColor, "[Baseline]");
+                        } else if (dispInfo.hasComparison && dispInfo.hasResult && !isUnsupported && !dispInfo.deltaText.empty()) {
+                            float stemX = (hasActiveBaseline && activeBaselineX > 0.0f) ? activeBaselineX : (cellPos.x + s(10.0f));
+                            ImDrawList* drawList = ImGui::GetWindowDrawList();
+                            ImU32 branchCol = ImGui::GetColorU32(ImVec4(0.38f, 0.65f, 0.90f, 0.65f));
+                            float branchLen = s(12.0f);
+
+                            if (hasActiveBaseline && activeBaselineY > 0.0f && item.subcategory == activeBaselineSubcat) {
+                                // Draw vertical connecting stem from baseline down to current speedup row
+                                drawList->AddLine(ImVec2(stemX, activeBaselineY + s(8.0f)), ImVec2(stemX, curCenterY), branchCol, s(1.5f));
+                            }
+                            // Draw horizontal branch pointing to speedup value
+                            drawList->AddLine(ImVec2(stemX, curCenterY), ImVec2(stemX + branchLen, curCenterY), branchCol, s(1.5f));
+                            // Directional pointer arrow
+                            float arrowSz = s(3.5f);
+                            drawList->AddLine(ImVec2(stemX + branchLen - arrowSz, curCenterY - arrowSz), ImVec2(stemX + branchLen, curCenterY), branchCol, s(1.5f));
+                            drawList->AddLine(ImVec2(stemX + branchLen - arrowSz, curCenterY + arrowSz), ImVec2(stemX + branchLen, curCenterY), branchCol, s(1.5f));
+
+                            // Offset text past branch indicator
+                            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + s(24.0f));
                             ImGui::TextColored(dispInfo.deltaColor, "%s", dispInfo.deltaText.c_str());
+                        } else {
+                            if (!item.subcategory.empty() && item.subcategory != activeBaselineSubcat) {
+                                hasActiveBaseline = false;
+                            }
                         }
                     }
 
@@ -3241,7 +3313,7 @@ void GuiApp::renderResultsScorecard() {
                 deltaStr = "-";
             } else if (res.component == "Compute") {
                 if (res.benchmarkName.find("FP32") != std::string::npos) {
-                    deltaStr = "-";
+                    deltaStr = "[Baseline]";
                     deltaCol = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
                 } else if (res.benchmarkName.find("FP64") != std::string::npos) {
                     deltaStr = "-";
@@ -3259,8 +3331,13 @@ void GuiApp::renderResultsScorecard() {
                     }
                     if (baseOps > 0.0) {
                         double ratio = curOpsPerSec / baseOps;
+                        double pct = (ratio - 1.0) * 100.0;
                         char dBuf[48];
-                        snprintf(dBuf, sizeof(dBuf), "%.2fx", ratio);
+                        if (std::abs(pct) >= 0.1) {
+                            snprintf(dBuf, sizeof(dBuf), "%.2fx (%s%.1f%%)", ratio, (pct >= 0 ? "+" : ""), pct);
+                        } else {
+                            snprintf(dBuf, sizeof(dBuf), "%.2fx", ratio);
+                        }
                         deltaStr = dBuf;
                         deltaCol = (ratio >= 1.0) ? ImVec4(0.30f, 0.92f, 0.85f, 1.0f) : ImVec4(0.92f, 0.65f, 0.35f, 1.0f);
                     }
@@ -3290,7 +3367,7 @@ void GuiApp::renderResultsScorecard() {
                            (res.benchmarkName.find("RayDivergence") != std::string::npos && res.configIndex == 0) ||
                            (res.benchmarkName.find("RayPayload") != std::string::npos && res.configIndex == 0) ||
                            (res.benchmarkName.find("RayAnyHit") != std::string::npos && res.configIndex == 0)) {
-                    deltaStr = "-";
+                    deltaStr = "[Baseline]";
                     deltaCol = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
                 } else if (res.time_ms > 0.0 && curOpsPerSec > 0.0) {
                     double baseOps = 0.0;
@@ -3333,8 +3410,13 @@ void GuiApp::renderResultsScorecard() {
 
                     if (baseOps > 0.0) {
                         double ratio = curOpsPerSec / baseOps;
+                        double pct = (ratio - 1.0) * 100.0;
                         char dBuf[48];
-                        snprintf(dBuf, sizeof(dBuf), "%.2fx", ratio);
+                        if (std::abs(pct) >= 0.1) {
+                            snprintf(dBuf, sizeof(dBuf), "%.2fx (%s%.1f%%)", ratio, (pct >= 0 ? "+" : ""), pct);
+                        } else {
+                            snprintf(dBuf, sizeof(dBuf), "%.2fx", ratio);
+                        }
                         deltaStr = dBuf;
                         deltaCol = (ratio >= 1.0) ? ImVec4(0.30f, 0.92f, 0.85f, 1.0f) : ImVec4(0.92f, 0.65f, 0.35f, 1.0f);
                     }
@@ -3629,6 +3711,21 @@ void GuiApp::startBenchmarks() {
         }
     }
 
+    // Auto-enable host device if user selected any host system benchmarks
+    bool hasSelectedHostBenchmarks = false;
+    for (const auto& b : selectedBenchmarks) {
+        if (b.find("System Memory") != std::string::npos || b == "Host System") {
+            hasSelectedHostBenchmarks = true;
+            break;
+        }
+    }
+    if (hasSelectedHostBenchmarks) {
+        hasSystemDevice = true;
+        for (auto& dev : m_devices) {
+            if (dev.isSystem) dev.selected = true;
+        }
+    }
+
     if (targetGpus.empty() && !hasSystemDevice) {
         m_statusMessage = "Select at least one GPU or host device.";
         return;
@@ -3700,7 +3797,7 @@ void GuiApp::startBenchmarks() {
     size_t sys_configs = 0;
     if (hasSystemDevice) {
         for (const auto& b : engineBenchmarks) {
-            if (b == "System Memory Bandwidth") sys_configs += 2;
+            if (b == "System Memory Bandwidth") sys_configs += 6;
             if (b == "System Memory Latency") sys_configs += 1;
         }
     }
