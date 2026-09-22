@@ -349,8 +349,8 @@ void GuiApp::initializeBenchmarkCategories() {
             {"RayScheduling", "Pipeline Breakdown", "Linear 1D Scanline", "Ray Tracing", "MRays/s", "Linear scanline ray dispatch traversal baseline", true},
             {"RayScheduling", "Pipeline Breakdown", "Wave Ballot Compaction", "Ray Tracing", "MRecords/s", "SIMD wave ballot compaction of active ray streams", true},
             {"RayScheduling", "Pipeline Breakdown", "2D Screen Tiled (8x4)", "Ray Tracing", "MRays/s", "2D 8x4 tiled ray dispatch for spatial coherence", true},
-            {"RayScheduling", "Pipeline Breakdown", "2D Morton (4x4)", "Ray Tracing", "MRays/s", "4x4 Morton Z-order curve spatial traversal order", true},
-            {"RayScheduling", "Pipeline Breakdown", "2D Morton (8x8)", "Ray Tracing", "MRays/s", "8x8 Morton Z-order curve spatial traversal order", true},
+            {"RayScheduling", "Pipeline Breakdown", "2D Morton (8x4)", "Ray Tracing", "MRays/s", "8x4 Morton Z-order curve spatial traversal order", true},
+            {"RayScheduling", "Pipeline Breakdown", "2D Morton (4x8)", "Ray Tracing", "MRays/s", "4x8 Morton Z-order curve spatial traversal order", true},
             {"RayScheduling", "Pipeline Breakdown", "Queue Compaction (Single-Pass)", "Ray Tracing", "MRecords/s", "Single-pass prefix sum wave stream compaction", true},
             {"RayScheduling", "Pipeline Breakdown", "VRAM Queue Round-Trip", "Ray Tracing", "GB/s", "Ray queue intermediate VRAM round-trip streaming bandwidth", true}
         }});
@@ -965,6 +965,9 @@ bool GuiApp::matchesItem(const ResultData& r, const BenchmarkItem& itm, uint32_t
 
     // RayScheduling dispatch keyword matching
     if (itm.id == "RayScheduling" || itm.id == "RayPathTracing") {
+        if (!itm.subcategory.empty() && !r.subcategory.empty() && r.subcategory != itm.subcategory) {
+            return false;
+        }
         if (itm.name.find("Multi-Light") != std::string::npos && clean.find("Multi-Light") != std::string::npos) return true;
         if (itm.name.find("Persistent") != std::string::npos && clean.find("Persistent") != std::string::npos) return true;
         if (itm.name.find("Alpha Cutout") != std::string::npos && clean.find("Alpha") != std::string::npos) return true;
@@ -978,7 +981,14 @@ bool GuiApp::matchesItem(const ResultData& r, const BenchmarkItem& itm, uint32_t
         if (itm.name.find("DGC") != std::string::npos && (clean.find("DGC") != std::string::npos || clean.find("Work Lists") != std::string::npos)) return true;
         if (itm.name.find("Megakernel") != std::string::npos && clean.find("Megakernel") != std::string::npos) return true;
         // Traversal Scheduling
-        for (const char* schedKey : {"Scanline", "Wave Ballot", "8x4", "4x4", "8x8", "Single-Pass", "Round-Trip"}) {
+        if (itm.name.find("Morton") != std::string::npos && clean.find("Morton") != std::string::npos) {
+            if (itm.name.find("8x4") != std::string::npos && clean.find("8x4") != std::string::npos) return true;
+            if (itm.name.find("4x8") != std::string::npos && clean.find("4x8") != std::string::npos) return true;
+            if (itm.name.find("4x4") != std::string::npos && clean.find("8x4") != std::string::npos) return true;
+            if (itm.name.find("8x8") != std::string::npos && clean.find("4x8") != std::string::npos) return true;
+        }
+        if (itm.name.find("Screen Tiled") != std::string::npos && clean.find("Screen Tiled") != std::string::npos) return true;
+        for (const char* schedKey : {"Scanline", "Wave Ballot", "Single-Pass", "Round-Trip"}) {
             if (itm.name.find(schedKey) != std::string::npos && clean.find(schedKey) != std::string::npos) return true;
         }
     }

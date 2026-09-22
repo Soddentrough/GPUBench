@@ -213,6 +213,7 @@ private:
   ComputeBuffer resultBuffer = nullptr;
   ComputeBuffer workListBuffer = nullptr;
   ComputeBuffer indirectBuffer = nullptr;
+  ComputeBuffer indirectMaterialBuffer = nullptr;
 
   // glTF Scene & PBR Storage Buffers
   GltfScene gltfScene;
@@ -257,6 +258,7 @@ private:
   VkIndirectExecutionSetEXT dgcExecutionSetSpecialized = VK_NULL_HANDLE;
   ComputeBuffer dgcSequenceBuffer = nullptr;
   ComputeBuffer dgcSequenceCountBuffer = nullptr;
+  ComputeBuffer dgcSpecializedSequenceBuffer = nullptr;
   ComputeBuffer dgcPreprocessBuffer = nullptr;
   VkDeviceSize dgcPreprocessBufferSize = 0;
 

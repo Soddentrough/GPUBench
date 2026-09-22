@@ -818,7 +818,7 @@ vec3 evalMaterialBSDF(uint sceneType, uint matId, vec3 normal, vec3 inDir, vec3 
 
 void main() {
     uint threadIdx = gl_GlobalInvocationID.x;
-    uint count = worklist.queueCounters[Q_SNAPSHOT_IDX(pc.materialId)];
+    uint count = (pc.mode == 1u) ? pc.queueCapacity : worklist.queueCounters[Q_SNAPSHOT_IDX(pc.materialId)];
     if (threadIdx >= count || threadIdx >= pc.queueCapacity) return;
 
     if (threadIdx == 0) {
@@ -828,7 +828,7 @@ void main() {
     uint recordIdx = pc.materialId * pc.queueCapacity + threadIdx;
     vec4 p = worklist.rayRecords[recordIdx];
     float t = p.x;
-    uint pixelIdx = floatBitsToUint(p.y);
+    uint pixelIdx = (pc.mode == 1u) ? (pc.materialId * pc.queueCapacity + threadIdx) : floatBitsToUint(p.y);
     uint primId = floatBitsToUint(p.z);
     uint rngState = pixelIdx;
 

@@ -15,24 +15,24 @@ PROFILES_DIR = "profiles"
 
 TESTS = [
     # Indoor Atrium
-    {"scene": "indoor", "config": 0, "name": "Material Shading", "paradigm": "Traditional Megakernel", "slug": "indoor_material_traditional", "shader": "rt_scheduling_traditional.comp"},
-    {"scene": "indoor", "config": 2, "name": "Material Shading", "paradigm": "DGC (Material Sorting)", "slug": "indoor_material_worklist", "shader": "rt_scheduling_worklist_material.comp"},
-    {"scene": "indoor", "config": 4, "name": "Path Tracing (4 Bounces)", "paradigm": "Traditional Megakernel", "slug": "indoor_pathtracing_traditional", "shader": "rt_scheduling_traditional.comp"},
-    {"scene": "indoor", "config": 6, "name": "Path Tracing (4 Bounces)", "paradigm": "DGC (Active Ray Compaction)", "slug": "indoor_pathtracing_worklist", "shader": "rt_scheduling_worklist_bounce.comp"},
-    {"scene": "indoor", "config": 8, "name": "Incoherent Secondary Rays", "paradigm": "Traditional Megakernel", "slug": "indoor_incoherent_traditional", "shader": "rt_scheduling_traditional.comp"},
-    {"scene": "indoor", "config": 10, "name": "Incoherent Secondary Rays", "paradigm": "DGC (Directional Binning)", "slug": "indoor_incoherent_worklist", "shader": "rt_scheduling_worklist_classify.comp"},
-    {"scene": "indoor", "config": 12, "name": "Primary Ray Tracing", "paradigm": "Traditional Megakernel", "slug": "indoor_primary_traditional", "shader": "rt_scheduling_traditional.comp"},
-    {"scene": "indoor", "config": 14, "name": "Primary Ray Tracing", "paradigm": "DGC (Decoupled Micro-Kernels)", "slug": "indoor_primary_worklist", "shader": "rt_scheduling_worklist_material.comp"},
+    {"scene": "indoor", "config": 0, "name": "Material Shading", "paradigm": "Traditional Megakernel", "slug": "indoor_material_traditional", "shader": "rt_scheduling_traditional_megakernel.comp"},
+    {"scene": "indoor", "config": 2, "name": "Material Shading", "paradigm": "DGC (Material Sorting)", "slug": "indoor_material_dgc", "shader": "rt_scheduling_device_generated_commands_material.comp"},
+    {"scene": "indoor", "config": 4, "name": "Path Tracing (4 Bounces)", "paradigm": "Traditional Megakernel", "slug": "indoor_pathtracing_traditional", "shader": "rt_scheduling_traditional_megakernel.comp"},
+    {"scene": "indoor", "config": 6, "name": "Path Tracing (4 Bounces)", "paradigm": "DGC (Active Ray Compaction)", "slug": "indoor_pathtracing_dgc", "shader": "rt_scheduling_device_generated_commands_bounce.comp"},
+    {"scene": "indoor", "config": 8, "name": "Incoherent Secondary Rays", "paradigm": "Traditional Megakernel", "slug": "indoor_incoherent_traditional", "shader": "rt_scheduling_traditional_megakernel.comp"},
+    {"scene": "indoor", "config": 10, "name": "Incoherent Secondary Rays", "paradigm": "DGC (Directional Binning)", "slug": "indoor_incoherent_dgc", "shader": "rt_scheduling_device_generated_commands_classify.comp"},
+    {"scene": "indoor", "config": 12, "name": "Primary Ray Tracing", "paradigm": "Traditional Megakernel", "slug": "indoor_primary_traditional", "shader": "rt_scheduling_traditional_megakernel.comp"},
+    {"scene": "indoor", "config": 14, "name": "Primary Ray Tracing", "paradigm": "DGC (Decoupled Micro-Kernels)", "slug": "indoor_primary_dgc", "shader": "rt_scheduling_device_generated_commands_material.comp"},
 
     # Outdoor Landscape
-    {"scene": "outdoor", "config": 0, "name": "Material Shading", "paradigm": "Traditional Megakernel", "slug": "outdoor_material_traditional", "shader": "rt_scheduling_traditional.comp"},
-    {"scene": "outdoor", "config": 2, "name": "Material Shading", "paradigm": "DGC (Material Sorting)", "slug": "outdoor_material_worklist", "shader": "rt_scheduling_worklist_material.comp"},
-    {"scene": "outdoor", "config": 4, "name": "Path Tracing (4 Bounces)", "paradigm": "Traditional Megakernel", "slug": "outdoor_pathtracing_traditional", "shader": "rt_scheduling_traditional.comp"},
-    {"scene": "outdoor", "config": 6, "name": "Path Tracing (4 Bounces)", "paradigm": "DGC (Active Ray Compaction)", "slug": "outdoor_pathtracing_worklist", "shader": "rt_scheduling_worklist_bounce.comp"},
-    {"scene": "outdoor", "config": 8, "name": "Incoherent Secondary Rays", "paradigm": "Traditional Megakernel", "slug": "outdoor_incoherent_traditional", "shader": "rt_scheduling_traditional.comp"},
-    {"scene": "outdoor", "config": 10, "name": "Incoherent Secondary Rays", "paradigm": "DGC (Directional Binning)", "slug": "outdoor_incoherent_worklist", "shader": "rt_scheduling_worklist_classify.comp"},
-    {"scene": "outdoor", "config": 12, "name": "Primary Ray Tracing", "paradigm": "Traditional Megakernel", "slug": "outdoor_primary_traditional", "shader": "rt_scheduling_traditional.comp"},
-    {"scene": "outdoor", "config": 14, "name": "Primary Ray Tracing", "paradigm": "DGC (Decoupled Micro-Kernels)", "slug": "outdoor_primary_worklist", "shader": "rt_scheduling_worklist_material.comp"},
+    {"scene": "outdoor", "config": 0, "name": "Material Shading", "paradigm": "Traditional Megakernel", "slug": "outdoor_material_traditional", "shader": "rt_scheduling_traditional_megakernel.comp"},
+    {"scene": "outdoor", "config": 2, "name": "Material Shading", "paradigm": "DGC (Material Sorting)", "slug": "outdoor_material_dgc", "shader": "rt_scheduling_device_generated_commands_material.comp"},
+    {"scene": "outdoor", "config": 4, "name": "Path Tracing (4 Bounces)", "paradigm": "Traditional Megakernel", "slug": "outdoor_pathtracing_traditional", "shader": "rt_scheduling_traditional_megakernel.comp"},
+    {"scene": "outdoor", "config": 6, "name": "Path Tracing (4 Bounces)", "paradigm": "DGC (Active Ray Compaction)", "slug": "outdoor_pathtracing_dgc", "shader": "rt_scheduling_device_generated_commands_bounce.comp"},
+    {"scene": "outdoor", "config": 8, "name": "Incoherent Secondary Rays", "paradigm": "Traditional Megakernel", "slug": "outdoor_incoherent_traditional", "shader": "rt_scheduling_traditional_megakernel.comp"},
+    {"scene": "outdoor", "config": 10, "name": "Incoherent Secondary Rays", "paradigm": "DGC (Directional Binning)", "slug": "outdoor_incoherent_dgc", "shader": "rt_scheduling_device_generated_commands_classify.comp"},
+    {"scene": "outdoor", "config": 12, "name": "Primary Ray Tracing", "paradigm": "Traditional Megakernel", "slug": "outdoor_primary_traditional", "shader": "rt_scheduling_traditional_megakernel.comp"},
+    {"scene": "outdoor", "config": 14, "name": "Primary Ray Tracing", "paradigm": "DGC (Decoupled Micro-Kernels)", "slug": "outdoor_primary_dgc", "shader": "rt_scheduling_device_generated_commands_material.comp"},
 ]
 
 def query_amd_smi():
@@ -169,10 +169,10 @@ def run_test(test_info):
 
 def analyze_shaders_rga():
     shaders = [
-        "rt_scheduling_traditional.comp",
-        "rt_scheduling_worklist_classify.comp",
-        "rt_scheduling_worklist_material.comp",
-        "rt_scheduling_worklist_bounce.comp"
+        "rt_scheduling_traditional_megakernel.comp",
+        "rt_scheduling_device_generated_commands_classify.comp",
+        "rt_scheduling_device_generated_commands_material.comp",
+        "rt_scheduling_device_generated_commands_bounce.comp"
     ]
     rga_results = {}
     for s in shaders:

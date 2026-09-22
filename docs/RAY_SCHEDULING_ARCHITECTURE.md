@@ -95,12 +95,12 @@ Querying compiler statistics directly via `RADV_DEBUG=shaderstats` reveals why t
 
 | Compute Kernel | Pipeline Stage | Code Size | VGPRs | LDS Allocation | Waves / SIMD | Theoretical SIMD Occupancy |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: |
-| **`rt_scheduling_traditional.comp`** | **Megakernel** | **119.2 KB** | **240** | **15,360 B** | **2 waves** | **12.5%** *(Critical Bottleneck)* |
-| **`rt_scheduling_worklist_classify.comp`** | Ray Hit Classification | 9.4 KB | 48 | 3,072 B | **11 waves** | **68.8%** |
-| **`rt_scheduling_worklist_material.comp`** | Specialized PBR Shading | 100.2 KB | 240 | 8,192 B | **4 waves** | **25.0%** *(2x Megakernel)* |
-| **`rt_scheduling_worklist_bounce.comp`** | Ray Generation / Bounces | 4.8 KB | 48 | 2,048 B | **16 waves** | **100.0% (MAX OCCUPANCY)** |
-| **`rt_scheduling_worklist_shadow.comp`** | Directional Shadows | 3.1 KB | 48 | 2,048 B | **16 waves** | **100.0% (MAX OCCUPANCY)** |
-| **`rt_scheduling_workgraph.comp`** | Stream Compaction | 156 B | 24 | 0 B | **16 waves** | **100.0% (MAX OCCUPANCY)** |
+| **`rt_scheduling_traditional_megakernel.comp`** | **Megakernel** | **119.2 KB** | **240** | **15,360 B** | **2 waves** | **12.5%** *(Critical Bottleneck)* |
+| **`rt_scheduling_device_generated_commands_classify.comp`** | Ray Hit Classification | 9.4 KB | 48 | 3,072 B | **11 waves** | **68.8%** |
+| **`rt_scheduling_device_generated_commands_material.comp`** | Specialized PBR Shading | 100.2 KB | 240 | 8,192 B | **4 waves** | **25.0%** *(2x Megakernel)* |
+| **`rt_scheduling_device_generated_commands_bounce.comp`** | Ray Generation / Bounces | 4.8 KB | 48 | 2,048 B | **16 waves** | **100.0% (MAX OCCUPANCY)** |
+| **`rt_scheduling_device_generated_commands_shadow.comp`** | Directional Shadows | 3.1 KB | 48 | 2,048 B | **16 waves** | **100.0% (MAX OCCUPANCY)** |
+| **`rt_scheduling_persistent.comp`** | Persistent Wavefront Queue | 27.8 KB | 48 | 2,048 B | **16 waves** | **100.0% (MAX OCCUPANCY)** |
 | **`rt_scheduling_resolve.comp`** | Framebuffer Resolve | 444 B | 96 | 0 B | **16 waves** | **100.0% (MAX OCCUPANCY)** |
 
 #### Architectural Takeaways:

@@ -9,7 +9,7 @@ GPUBench is a high-performance cross-platform GPU benchmarking tool designed to 
 
 - **Multi-Backend Support**: Benchmarks using Vulkan, OpenCL, and ROCm/HIP.
 - **Hardware Ray Tracing Suite**:
-  - **Ray Scheduling Architectures**: Megakernel vs. Hardware Shader Execution Reordering (SER) vs. Device-Generated Commands (DGC) vs. Autonomous Work Graphs (`VK_AMDX_shader_enqueue`).
+  - **Ray Scheduling Architectures**: Megakernel vs. Hardware Shader Execution Reordering (SER) vs. Device-Generated Commands (DGC).
   - **Real-World Material Divergence**: Realistic heterogeneous material distributions testing VGPR allocation pressure and SIMD wave divergence.
   - **Spatial Ray Divergence**: Parametric cone divergence measuring BVH traversal cache hit rates.
   - **Multi-Layer Alpha Testing**: AnyHit alpha evaluation through 16 stacked cutout planes.
@@ -143,12 +143,11 @@ $ gpubench -d 1
 
 Modern ray tracing performance in production games and visual effects engines is rarely bound by simple triangle intersection; it is bound by **divergence**—both spatial ray direction divergence and material shading divergence.
 
-GPUBench evaluates how different GPU hardware architectures handle these workloads across four distinct scheduling architectures:
+GPUBench evaluates how different GPU hardware architectures handle these workloads across distinct scheduling architectures:
 
 1. **Traditional Megakernel**: Traces rays and evaluates all hit shading in a single massive compute pass. Suffering from the "convoy effect," a single complex material forces all lanes to allocate worst-case VGPRs and serializes execution over divergent SIMD branches.
-2. **Traditional + SER (Shader Execution Reordering)**: Leverages hardware reordering (`VK_KHR_ray_tracing_reorder` / NV SER) to dynamically regroup divergent lanes by spatial direction and material hit ID before executing hit shaders.
+2. **Traditional + SER (Shader Execution Reordering)**: Leverages hardware reordering (`VK_KHR_ray_tracing_reorder` / `VK_EXT_ray_tracing_invocation_reorder`) to dynamically regroup divergent lanes by spatial direction and material hit ID before executing hit shaders.
 3. **Device-Generated Commands (DGC / Wavefront Compaction)**: Compacts divergent hits into categorized material queues via ballot/atomic compaction and dispatches uniform waves using GPU-driven command generation (`VK_EXT_device_generated_commands`).
-4. **Work Graphs (Autonomous Node Enqueue)**: Uses GPU-autonomous execution graph pipelines (`VK_AMDX_shader_enqueue`) to dynamically enqueue child nodes without host or CPU round-trips.
 
 #### Four-Scenario Benchmarking Morphology
 - **Showroom Studio (`-s showroom`)**: $108,936$ triangles featuring the Khronos ToyCar glTF asset with clearcoat, decals, and velvet pedestal. Device-Generated Commands (DGC) achieve **101.3 FPS** vs. Megakernel **57.6 FPS** (**1.76x speedup**).

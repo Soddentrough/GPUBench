@@ -617,8 +617,16 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
   buildAS();
 
   std::filesystem::path kdir(kernel_dir);
+  auto findShader = [&](const std::string &primary, const std::string &fallback) {
+    if (std::filesystem::exists(kdir / "vulkan" / primary) ||
+        std::filesystem::exists(kdir / "vulkan" / (primary + ".spv"))) {
+      return (kdir / "vulkan" / primary).string();
+    }
+    return (kdir / "vulkan" / fallback).string();
+  };
+
   kernelTraditional = vContext->createKernel(
-      (kdir / "vulkan" / "rt_scheduling_traditional.comp").string(), "main", 8);
+      findShader("rt_scheduling_traditional_megakernel.comp", "rt_scheduling_traditional.comp"), "main", 8);
   vContext->setKernelAS(kernelTraditional, 0, (AccelerationStructure)sceneTlas);
   vContext->setKernelArg(kernelTraditional, 1, resultBuffer);
   vContext->setKernelArg(kernelTraditional, 2, fbTraditional);
@@ -629,7 +637,7 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
   vContext->setKernelArg(kernelTraditional, 7, texPixelBuffer);
 
   kernelClassify = vContext->createKernel(
-      (kdir / "vulkan" / "rt_scheduling_worklist_classify.comp").string(), "main", 10);
+      findShader("rt_scheduling_device_generated_commands_classify.comp", "rt_scheduling_worklist_classify.comp"), "main", 10);
   vContext->setKernelAS(kernelClassify, 0, (AccelerationStructure)sceneTlas);
   vContext->setKernelArg(kernelClassify, 1, resultBuffer);
   vContext->setKernelArg(kernelClassify, 2, workListBuffer);
@@ -642,7 +650,7 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
   vContext->setKernelArg(kernelClassify, 9, texPixelBuffer);
 
   kernelMaterial = vContext->createKernel(
-      (kdir / "vulkan" / "rt_scheduling_worklist_material.comp").string(), "main", 9);
+      findShader("rt_scheduling_device_generated_commands_material.comp", "rt_scheduling_worklist_material.comp"), "main", 9);
   vContext->setKernelAS(kernelMaterial, 0, (AccelerationStructure)sceneTlas);
   vContext->setKernelArg(kernelMaterial, 1, resultBuffer);
   vContext->setKernelArg(kernelMaterial, 2, workListBuffer);
@@ -655,7 +663,7 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
 
   for (uint32_t arch = 0; arch < 8; ++arch) {
     kernelMaterialSpecialized[arch] = vContext->createKernelWithSpec(
-        (kdir / "vulkan" / "rt_scheduling_worklist_material.comp").string(), "main", 9, 0, arch);
+        findShader("rt_scheduling_device_generated_commands_material.comp", "rt_scheduling_worklist_material.comp"), "main", 9, 0, arch);
     vContext->setKernelAS(kernelMaterialSpecialized[arch], 0, (AccelerationStructure)sceneTlas);
     vContext->setKernelArg(kernelMaterialSpecialized[arch], 1, resultBuffer);
     vContext->setKernelArg(kernelMaterialSpecialized[arch], 2, workListBuffer);
@@ -667,7 +675,7 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
     vContext->setKernelArg(kernelMaterialSpecialized[arch], 8, texPixelBuffer);
   }
   kernelBounce = vContext->createKernel(
-      (kdir / "vulkan" / "rt_scheduling_worklist_bounce.comp").string(), "main", 9);
+      findShader("rt_scheduling_device_generated_commands_bounce.comp", "rt_scheduling_worklist_bounce.comp"), "main", 9);
   vContext->setKernelAS(kernelBounce, 0, (AccelerationStructure)sceneTlas);
   vContext->setKernelArg(kernelBounce, 1, resultBuffer);
   vContext->setKernelArg(kernelBounce, 2, workListBuffer);
@@ -679,7 +687,7 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
   vContext->setKernelArg(kernelBounce, 8, fbWorkList);
 
   kernelBounceTerminal = vContext->createKernelWithSpec(
-      (kdir / "vulkan" / "rt_scheduling_worklist_bounce.comp").string(), "main", 9, 0, 1u);
+      findShader("rt_scheduling_device_generated_commands_bounce.comp", "rt_scheduling_worklist_bounce.comp"), "main", 9, 0, 1u);
   vContext->setKernelAS(kernelBounceTerminal, 0, (AccelerationStructure)sceneTlas);
   vContext->setKernelArg(kernelBounceTerminal, 1, resultBuffer);
   vContext->setKernelArg(kernelBounceTerminal, 2, workListBuffer);
@@ -691,7 +699,7 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
   vContext->setKernelArg(kernelBounceTerminal, 8, fbWorkList);
 
   kernelBounceOctant = vContext->createKernelWithSpec(
-      (kdir / "vulkan" / "rt_scheduling_worklist_bounce.comp").string(), "main", 9, 0, 2u);
+      findShader("rt_scheduling_device_generated_commands_bounce.comp", "rt_scheduling_worklist_bounce.comp"), "main", 9, 0, 2u);
   vContext->setKernelAS(kernelBounceOctant, 0, (AccelerationStructure)sceneTlas);
   vContext->setKernelArg(kernelBounceOctant, 1, resultBuffer);
   vContext->setKernelArg(kernelBounceOctant, 2, workListBuffer);
@@ -722,7 +730,7 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
   vContext->setKernelArg(kernelResolve, 3, dgcSequenceBuffer);
 
   kernelShadow = vContext->createKernel(
-      (kdir / "vulkan" / "rt_scheduling_worklist_shadow.comp").string(), "main", 9);
+      findShader("rt_scheduling_device_generated_commands_shadow.comp", "rt_scheduling_worklist_shadow.comp"), "main", 9);
   vContext->setKernelAS(kernelShadow, 0, (AccelerationStructure)sceneTlas);
   vContext->setKernelArg(kernelShadow, 1, resultBuffer);
   vContext->setKernelArg(kernelShadow, 2, workListBuffer);
@@ -825,6 +833,8 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
     unsupportedReason[30] = serReason;
   }
 
+  uint32_t perQueue = rayCount / 8;
+
   // Pre-generate static indirect batches for Wavefront/DGC dispatches with specialized PSOs
   materialBatches.reserve(8);
   materialBatchesBreakdown.reserve(8);
@@ -843,16 +853,26 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
     std::memcpy(pcData.data(), &pcMat, sizeof(pcMat));
     materialBatches.push_back({m * sizeof(uint32_t) * 3, pcData, kernelMaterialSpecialized[m]});
 
+    pcMat.queueCapacity = perQueue;
     pcMat.dumpRenders = 0u;
     pcMat.mode = 1u;
     std::memcpy(pcData.data(), &pcMat, sizeof(pcMat));
     materialBatchesBreakdown.push_back({m * sizeof(uint32_t) * 3, pcData, kernelMaterialSpecialized[m]});
   }
 
+  // Pre-initialize dedicated indirectMaterialBuffer for isolated Config 2 fallback testing
+  indirectMaterialBuffer = context->createBuffer(sizeof(uint32_t) * 3 * 8);
+  std::vector<uint32_t> initMatCmds(8 * 3, 0);
+  for (uint32_t m = 0; m < 8; ++m) {
+    initMatCmds[m * 3 + 0] = (perQueue + 31) / 32;
+    initMatCmds[m * 3 + 1] = 1;
+    initMatCmds[m * 3 + 2] = 1;
+  }
+  context->writeBuffer(indirectMaterialBuffer, 0, initMatCmds.size() * sizeof(uint32_t), initMatCmds.data());
+
   // Pre-initialize indirectBuffer commands and workList counters for isolated stage testing
   std::vector<uint32_t> initCmds(32 * 3, 0);
   std::vector<uint32_t> initCounters(kWorkListHeaderUints, 0);
-  uint32_t perQueue = rayCount / 8;
   for (uint32_t m = 0; m < 8; ++m) {
     initCmds[m * 3 + 0] = (perQueue + 31) / 32;
     initCmds[m * 3 + 1] = 1;
@@ -1018,11 +1038,30 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
       dgcInfoStandard.preprocessBufferSize = dgcPreprocessBufferSize;
       dgcInfoStandard.maxSequenceCount = 32;
 
+      uint32_t sceneTypeVal = (sceneType == SceneType::AAAOutdoorForest) ? 3u : ((sceneType == SceneType::OutdoorLandscape) ? 1u : ((sceneType == SceneType::IndoorAtrium) ? 2u : 0u));
+      uint32_t isGltfVal = isGltf ? 1u : 0u;
+
       if (isDGCExecutionSetAvailable) {
+        dgcSpecializedSequenceBuffer = context->createBuffer(sizeof(uint32_t) * 12 * 8);
+        for (uint32_t m = 0; m < 8; ++m) {
+          uint32_t pc[8] = {
+              m, perQueue, 0u, renderWidth, renderHeight, sceneTypeVal, isGltfVal, 1u
+          };
+          uint32_t item[12] = {
+              m, pc[0], pc[1], pc[2], pc[3], pc[4], pc[5], pc[6], pc[7],
+              (perQueue + 31) / 32, 1, 1
+          };
+          context->writeBuffer(dgcSpecializedSequenceBuffer, m * sizeof(item), sizeof(item), item);
+        }
+
         dgcInfoSpecialized = dgcInfoStandard;
         dgcInfoSpecialized.layout = dgcLayoutSpecialized;
         dgcInfoSpecialized.executionSet = dgcExecutionSetSpecialized;
-        dgcInfoSpecialized.sequenceBufferOffset = sizeof(uint32_t) * 12 * 32;
+        dgcInfoSpecialized.sequenceBuffer = dgcSpecializedSequenceBuffer;
+        dgcInfoSpecialized.sequenceBufferOffset = 0;
+        dgcInfoSpecialized.sequenceBufferSize = sizeof(uint32_t) * 12 * 8;
+        dgcInfoSpecialized.sequenceCountBuffer = nullptr;
+        dgcInfoSpecialized.sequenceCountBufferOffset = 0;
         dgcInfoSpecialized.maxSequenceCount = 8;
       }
 
@@ -1030,8 +1069,6 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
       dgcInfoOctant.maxSequenceCount = 1;
 
       // 6. Pre-seed templates in dgcSequenceBuffer
-      uint32_t sceneTypeVal = (sceneType == SceneType::AAAOutdoorForest) ? 3u : ((sceneType == SceneType::OutdoorLandscape) ? 1u : ((sceneType == SceneType::IndoorAtrium) ? 2u : 0u));
-      uint32_t isGltfVal = isGltf ? 1u : 0u;
 
       // Material templates: slots 0..7
       for (uint32_t m = 0; m < 8; ++m) {
@@ -1067,21 +1104,6 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
         };
         context->writeBuffer(dgcSequenceBuffer, (9 + l) * sizeof(item), sizeof(item), item);
       }
-
-      // Pre-seed compacted[0..7] for isolated Config 2 testing
-      for (uint32_t m = 0; m < 8; ++m) {
-        uint32_t pc[8] = {
-            m, materialCapacity, 0u, renderWidth, renderHeight, sceneTypeVal, isGltfVal, 1u
-        };
-        uint32_t item[12] = {
-            m, pc[0], pc[1], pc[2], pc[3], pc[4], pc[5], pc[6], pc[7],
-            (perQueue + 31) / 32, 1, 1
-        };
-        context->writeBuffer(dgcSequenceBuffer, (32 + m) * sizeof(item), sizeof(item), item);
-      }
-
-      uint32_t initDgcCount = 8;
-      context->writeBuffer(dgcSequenceCountBuffer, 0, sizeof(initDgcCount), &initDgcCount);
 
       rebuildDGCBounceBatches();
       isDGCAvailable = true;
@@ -1170,7 +1192,7 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     if (isDGCAvailable && isDGCExecutionSetAvailable) {
       vContext->dispatchDGCSequence(kernelMaterialSpecialized[0], dgcInfoSpecialized);
     } else {
-      vContext->dispatchIndirectSequence(kernelMaterial, indirectBuffer, materialBatchesBreakdown);
+      vContext->dispatchIndirectSequence(kernelMaterial, indirectMaterialBuffer, materialBatchesBreakdown);
     }
     break;
   }
@@ -2106,6 +2128,10 @@ void RaySchedulingBench::Teardown() {
     context->releaseBuffer(indirectBuffer);
     indirectBuffer = nullptr;
   }
+  if (indirectMaterialBuffer) {
+    context->releaseBuffer(indirectMaterialBuffer);
+    indirectMaterialBuffer = nullptr;
+  }
 
   if (fbTraditional) {
     context->releaseBuffer(fbTraditional);
@@ -2186,6 +2212,10 @@ void RaySchedulingBench::Teardown() {
   if (dgcSequenceCountBuffer) {
     context->releaseBuffer(dgcSequenceCountBuffer);
     dgcSequenceCountBuffer = nullptr;
+  }
+  if (dgcSpecializedSequenceBuffer) {
+    context->releaseBuffer(dgcSpecializedSequenceBuffer);
+    dgcSpecializedSequenceBuffer = nullptr;
   }
 #endif
   context = nullptr;
