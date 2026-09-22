@@ -1079,12 +1079,12 @@ GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
         if (item.category == "Compute") {
             if (item.id == "FP32") {
                 info.isBaseline = true;
-                info.deltaText = "[Baseline]";
+                info.deltaText = "";
                 info.deltaColor = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
             } else if (item.id == "INT8") {
                 if (item.name.find("Vector") != std::string::npos) {
                     info.isBaseline = true;
-                    info.deltaText = "[Baseline]";
+                    info.deltaText = "";
                     info.deltaColor = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
                 } else {
                     baselineName = "INT8_Vector";
@@ -1092,7 +1092,7 @@ GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
             } else if (item.id == "INT4") {
                 if (item.name.find("Vector") != std::string::npos) {
                     info.isBaseline = true;
-                    info.deltaText = "[Baseline]";
+                    info.deltaText = "";
                     info.deltaColor = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
                 } else {
                     baselineName = "INT4_Vector";
@@ -1102,13 +1102,13 @@ GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
             }
         } else if (item.name.find("Vector ALU") != std::string::npos || item.name == "Vector") {
             info.isBaseline = true;
-            info.deltaText = "[Baseline]";
+            info.deltaText = "";
             info.deltaColor = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
         } else if (item.name.find("Matrix") != std::string::npos) {
             baselineName = "Vector";
         } else if (item.name.find("FP32") != std::string::npos) {
             info.isBaseline = true;
-            info.deltaText = "[Baseline]";
+            info.deltaText = "";
             info.deltaColor = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
         } else if (item.name == "Compute Megakernel" || item.name.find("Compute Megakernel") != std::string::npos ||
                    item.name.find("Megakernel") != std::string::npos ||
@@ -1121,7 +1121,7 @@ GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
                    item.name.find("16B Payload") != std::string::npos ||
                    item.name.find("4 Bytes") != std::string::npos) {
             info.isBaseline = true;
-            info.deltaText = "[Baseline]";
+            info.deltaText = "";
             info.deltaColor = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
         } else {
             // Find appropriate baseline for this subcategory
@@ -1186,7 +1186,7 @@ GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
                 info.percentDelta = (info.speedupRatio - 1.0) * 100.0;
 
                 char dBuf[64];
-                snprintf(dBuf, sizeof(dBuf), "-> %.2fx", info.speedupRatio);
+                snprintf(dBuf, sizeof(dBuf), "%.2fx", info.speedupRatio);
                 info.deltaText = dBuf;
                 info.deltaColor = (info.speedupRatio >= 1.0) ? ImVec4(0.35f, 0.95f, 0.55f, 1.0f) : ImVec4(0.70f, 0.75f, 0.85f, 1.0f);
             }
@@ -1629,15 +1629,56 @@ void GuiApp::renderBenchmarkSuitePanel() {
             float childStartX = p0.x + 36.0f; // 10px indent from parent checkbox
             float childContentW = (p0.x + availW) - childStartX - 10.0f;
 
-            auto renderSingleItem = [&](size_t iIdx, BenchmarkItem& item, float startX, float contentW) {
+            // Check if any visible item in this subgroup has a comparison
+            bool hasAnyComparison = false;
+            for (const auto& itm : sub.items) {
+                BenchmarkDisplayInfo d = getBenchmarkDisplayInfo(itm, m_telemetryGpuIndex);
+                if (d.hasResult && d.hasComparison && !d.primaryResult.isUnsupported) {
+                    hasAnyComparison = true;
+                    break;
+                }
+            }
+
+            // Map each baseline item index to its last comparison item index
+            std::unordered_map<int, int> baselineToLastComp;
+            {
+                int currentBaseline = -1;
+                std::string currentSubcat = "";
+                for (int i = 0; i < static_cast<int>(sub.items.size()); ++i) {
+                    BenchmarkDisplayInfo d = getBenchmarkDisplayInfo(sub.items[i], m_telemetryGpuIndex);
+                    bool isUnsupported = (!sub.items[i].isSupported || (d.hasResult && d.primaryResult.isUnsupported));
+                    if (m_hideUnsupported && isUnsupported) continue;
+
+                    if (d.isBaseline) {
+                        currentBaseline = i;
+                        currentSubcat = sub.items[i].subcategory;
+                    } else if (d.hasComparison && d.hasResult && !isUnsupported) {
+                        if (currentBaseline >= 0 && (sub.items[i].subcategory == currentSubcat || currentSubcat.empty())) {
+                            baselineToLastComp[currentBaseline] = i;
+                        }
+                    }
+                }
+            }
+
+            float rightTargetX = childStartX + childContentW - 10.0f;
+            float speedupColW = 46.0f;
+            float branchX = hasAnyComparison ? (rightTargetX - speedupColW - 14.0f) : rightTargetX;
+            float scoreMaxRightX = hasAnyComparison ? (branchX - 10.0f) : rightTargetX;
+
+            int activeBaseline = -1;
+            int activeLastComp = -1;
+            float prevTrunkY = 0.0f;
+
+            for (size_t iIdx = 0; iIdx < sub.items.size(); ++iIdx) {
+                auto& item = sub.items[iIdx];
                 BenchmarkDisplayInfo dispInfo = getBenchmarkDisplayInfo(item, m_telemetryGpuIndex);
                 bool isUnsupported = (!item.isSupported || (dispInfo.hasResult && dispInfo.primaryResult.isUnsupported));
-                if (m_hideUnsupported && isUnsupported) return;
+                if (m_hideUnsupported && isUnsupported) continue;
 
                 ImGui::PushID(static_cast<int>(iIdx));
 
                 float curRowY = ImGui::GetCursorScreenPos().y;
-                ImGui::SetCursorScreenPos(ImVec2(startX, curRowY));
+                ImGui::SetCursorScreenPos(ImVec2(childStartX, curRowY));
 
                 if (isUnsupported || !canEditWorkloads) {
                     ImGui::BeginDisabled(true);
@@ -1652,39 +1693,32 @@ void GuiApp::renderBenchmarkSuitePanel() {
                     matchesItem(m_currentlyRunningResult, item, m_telemetryGpuIndex));
 
                 float checkRightX = ImGui::GetItemRectMax().x;
-                float rightTargetX = startX + contentW - 10.0f;
+                float curCenterY = curRowY + frameH * 0.5f;
 
+                // Render score / status
                 if (dispInfo.hasResult && !dispInfo.primaryResult.isUnsupported && dispInfo.primaryResult.time_ms > 0.0) {
                     float scoreW = ImGui::CalcTextSize(dispInfo.scoreText.c_str()).x;
-                    float deltaW = !dispInfo.deltaText.empty() ? (ImGui::CalcTextSize(dispInfo.deltaText.c_str()).x + 8.0f) : 0.0f;
-                    float totalW = scoreW + deltaW;
-
-                    if (rightTargetX - totalW > checkRightX + 10.0f) {
+                    if (scoreMaxRightX - scoreW > checkRightX + 10.0f) {
                         ImGui::SameLine(0, 0);
-                        ImGui::SetCursorScreenPos(ImVec2(rightTargetX - totalW, curRowY + (frameH - ImGui::GetTextLineHeight()) * 0.5f));
+                        ImGui::SetCursorScreenPos(ImVec2(scoreMaxRightX - scoreW, curRowY + (frameH - ImGui::GetTextLineHeight()) * 0.5f));
                     } else {
                         ImGui::SameLine(0, 8.0f);
                     }
-
                     ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s", dispInfo.scoreText.c_str());
-                    if (!dispInfo.deltaText.empty()) {
-                        ImGui::SameLine(0, 8.0f);
-                        ImGui::TextColored(dispInfo.deltaColor, "%s", dispInfo.deltaText.c_str());
-                    }
                 } else if (isUnsupported) {
                     float textW = ImGui::CalcTextSize("[UNSUPPORTED]").x;
-                    if (rightTargetX - textW > checkRightX + 10.0f) {
+                    if (scoreMaxRightX - textW > checkRightX + 10.0f) {
                         ImGui::SameLine(0, 0);
-                        ImGui::SetCursorScreenPos(ImVec2(rightTargetX - textW, curRowY + (frameH - ImGui::GetTextLineHeight()) * 0.5f));
+                        ImGui::SetCursorScreenPos(ImVec2(scoreMaxRightX - textW, curRowY + (frameH - ImGui::GetTextLineHeight()) * 0.5f));
                     } else {
                         ImGui::SameLine(0, 10.0f);
                     }
                     ImGui::TextColored(ImVec4(0.85f, 0.55f, 0.15f, 1.0f), "[UNSUPPORTED]");
                 } else if (isCurrentlyTesting) {
                     float textW = ImGui::CalcTextSize("[RUNNING...]").x;
-                    if (rightTargetX - textW > checkRightX + 10.0f) {
+                    if (scoreMaxRightX - textW > checkRightX + 10.0f) {
                         ImGui::SameLine(0, 0);
-                        ImGui::SetCursorScreenPos(ImVec2(rightTargetX - textW, curRowY + (frameH - ImGui::GetTextLineHeight()) * 0.5f));
+                        ImGui::SetCursorScreenPos(ImVec2(scoreMaxRightX - textW, curRowY + (frameH - ImGui::GetTextLineHeight()) * 0.5f));
                     } else {
                         ImGui::SameLine(0, 10.0f);
                     }
@@ -1693,13 +1727,54 @@ void GuiApp::renderBenchmarkSuitePanel() {
                 } else {
                     std::string badge = "[" + item.metricType + "]";
                     float textW = ImGui::CalcTextSize(badge.c_str()).x;
-                    if (rightTargetX - textW > checkRightX + 10.0f) {
+                    if (scoreMaxRightX - textW > checkRightX + 10.0f) {
                         ImGui::SameLine(0, 0);
-                        ImGui::SetCursorScreenPos(ImVec2(rightTargetX - textW, curRowY + (frameH - ImGui::GetTextLineHeight()) * 0.5f));
+                        ImGui::SetCursorScreenPos(ImVec2(scoreMaxRightX - textW, curRowY + (frameH - ImGui::GetTextLineHeight()) * 0.5f));
                     } else {
                         ImGui::SameLine(0, 10.0f);
                     }
                     ImGui::TextColored(ImVec4(0.35f, 0.65f, 0.95f, 0.85f), "%s", badge.c_str());
+                }
+
+                // Connecting line logic
+                if (hasAnyComparison && branchX > checkRightX + 20.0f) {
+                    ImU32 trunkCol = IM_COL32(70, 140, 220, 190);
+
+                    // Check if this item starts a baseline connection
+                    if (dispInfo.isBaseline && baselineToLastComp.count(static_cast<int>(iIdx))) {
+                        activeBaseline = static_cast<int>(iIdx);
+                        activeLastComp = baselineToLastComp[activeBaseline];
+                        prevTrunkY = curCenterY;
+
+                        // Baseline anchor node and tick
+                        drawList->AddLine(ImVec2(scoreMaxRightX + 4.0f, curCenterY), ImVec2(branchX, curCenterY), trunkCol, 1.5f);
+                        drawList->AddCircleFilled(ImVec2(branchX, curCenterY), 2.5f, IM_COL32(97, 191, 255, 240));
+                    } else if (activeBaseline >= 0 && static_cast<int>(iIdx) <= activeLastComp) {
+                        // Draw vertical trunk segment from previous row to this row
+                        drawList->AddLine(ImVec2(branchX, prevTrunkY), ImVec2(branchX, curCenterY), trunkCol, 1.5f);
+                        prevTrunkY = curCenterY;
+
+                        // If this item is a comparison item with result
+                        if (dispInfo.hasComparison && dispInfo.hasResult && !isUnsupported) {
+                            ImU32 branchCol = ImGui::GetColorU32(dispInfo.deltaColor);
+                            // Horizontal branch line
+                            drawList->AddLine(ImVec2(branchX, curCenterY), ImVec2(branchX + 10.0f, curCenterY), branchCol, 1.5f);
+                            // Arrow head
+                            drawList->AddLine(ImVec2(branchX + 6.0f, curCenterY - 3.5f), ImVec2(branchX + 10.0f, curCenterY), branchCol, 1.5f);
+                            drawList->AddLine(ImVec2(branchX + 6.0f, curCenterY + 3.5f), ImVec2(branchX + 10.0f, curCenterY), branchCol, 1.5f);
+
+                            // Speedup text
+                            ImGui::SameLine(0, 0);
+                            ImGui::SetCursorScreenPos(ImVec2(branchX + 14.0f, curRowY + (frameH - ImGui::GetTextLineHeight()) * 0.5f));
+                            ImGui::TextColored(dispInfo.deltaColor, "%s", dispInfo.deltaText.c_str());
+                        }
+
+                        // If this is the last comparison item, terminate trunk
+                        if (static_cast<int>(iIdx) == activeLastComp) {
+                            activeBaseline = -1;
+                            activeLastComp = -1;
+                        }
+                    }
                 }
 
                 if (ImGui::IsItemHovered()) {
@@ -1715,40 +1790,6 @@ void GuiApp::renderBenchmarkSuitePanel() {
                     }
                 }
                 ImGui::PopID();
-            };
-
-            int innerCols = 1;
-            if (availW >= 1350.0f && visibleCount >= 10) {
-                innerCols = 3;
-            } else if (availW >= 820.0f && visibleCount >= 6) {
-                innerCols = 2;
-            }
-
-            if (innerCols > 1) {
-                std::string innerTableId = "InnerGrid_" + sub.name;
-                if (ImGui::BeginTable(innerTableId.c_str(), innerCols, ImGuiTableFlags_SizingStretchSame)) {
-                    for (size_t iIdx = 0; iIdx < sub.items.size(); ++iIdx) {
-                        auto& item = sub.items[iIdx];
-                        BenchmarkDisplayInfo dispInfo = getBenchmarkDisplayInfo(item, m_telemetryGpuIndex);
-                        bool isUnsupported = (!item.isSupported || (dispInfo.hasResult && dispInfo.primaryResult.isUnsupported));
-                        if (m_hideUnsupported && isUnsupported) continue;
-
-                        ImGui::TableNextColumn();
-                        float cellStartX = ImGui::GetCursorScreenPos().x + 16.0f;
-                        float cellAvailW = ImGui::GetContentRegionAvail().x - 16.0f;
-                        renderSingleItem(iIdx, item, cellStartX, cellAvailW);
-                    }
-                    ImGui::EndTable();
-                }
-            } else {
-                for (size_t iIdx = 0; iIdx < sub.items.size(); ++iIdx) {
-                    auto& item = sub.items[iIdx];
-                    BenchmarkDisplayInfo dispInfo = getBenchmarkDisplayInfo(item, m_telemetryGpuIndex);
-                    bool isUnsupported = (!item.isSupported || (dispInfo.hasResult && dispInfo.primaryResult.isUnsupported));
-                    if (m_hideUnsupported && isUnsupported) continue;
-
-                    renderSingleItem(iIdx, item, childStartX, childContentW);
-                }
             }
         }
 
@@ -2397,7 +2438,7 @@ void GuiApp::renderResultsScorecard() {
                 deltaStr = "-";
             } else if (res.component == "Compute") {
                 if (res.benchmarkName.find("FP32") != std::string::npos) {
-                    deltaStr = "[Baseline]";
+                    deltaStr = "-";
                     deltaCol = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
                 } else if (res.benchmarkName.find("FP64") != std::string::npos) {
                     deltaStr = "-";
@@ -2416,7 +2457,7 @@ void GuiApp::renderResultsScorecard() {
                     if (baseOps > 0.0) {
                         double ratio = curOpsPerSec / baseOps;
                         char dBuf[48];
-                        snprintf(dBuf, sizeof(dBuf), "-> %.2fx baseline", ratio);
+                        snprintf(dBuf, sizeof(dBuf), "%.2fx", ratio);
                         deltaStr = dBuf;
                         deltaCol = (ratio >= 1.0) ? ImVec4(0.30f, 0.92f, 0.85f, 1.0f) : ImVec4(0.92f, 0.65f, 0.35f, 1.0f);
                     }
@@ -2446,7 +2487,7 @@ void GuiApp::renderResultsScorecard() {
                            (res.benchmarkName.find("RayDivergence") != std::string::npos && res.configIndex == 0) ||
                            (res.benchmarkName.find("RayPayload") != std::string::npos && res.configIndex == 0) ||
                            (res.benchmarkName.find("RayAnyHit") != std::string::npos && res.configIndex == 0)) {
-                    deltaStr = "[Baseline]";
+                    deltaStr = "-";
                     deltaCol = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
                 } else if (res.time_ms > 0.0 && curOpsPerSec > 0.0) {
                     double baseOps = 0.0;
@@ -2490,7 +2531,7 @@ void GuiApp::renderResultsScorecard() {
                     if (baseOps > 0.0) {
                         double ratio = curOpsPerSec / baseOps;
                         char dBuf[48];
-                        snprintf(dBuf, sizeof(dBuf), "-> %.2fx baseline", ratio);
+                        snprintf(dBuf, sizeof(dBuf), "%.2fx", ratio);
                         deltaStr = dBuf;
                         deltaCol = (ratio >= 1.0) ? ImVec4(0.30f, 0.92f, 0.85f, 1.0f) : ImVec4(0.92f, 0.65f, 0.35f, 1.0f);
                     }
