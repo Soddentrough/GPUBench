@@ -10,7 +10,7 @@ This document provides developer and agent guidelines for configuring, building,
 - **Target GPU**: **GPU 0** (`-d 0`) — `AMD Radeon RX 7900 XTX` (Navi 31, RDNA 3, GFX1100).
   > **Note**: Unlike the Linux environment described in `AGENTS.md` (which targets GPU 1 on a multi-GPU Threadripper node), on this Windows system GPU 0 is the primary discrete Radeon GPU.
 - **Driver**: AMD Proprietary Driver 26.8.1 (LLPC / Vulkan 1.4.349).
-- **API Backends**: Vulkan 1.4 (Primary). OpenCL and ROCm/HIP are not active on Windows.
+- **API Backends**: Vulkan 1.4 (Primary). OpenCL and ROCm/HIP are disabled by default on Windows MinGW builds unless configured with respective vendor SDKs.
 
 ---
 

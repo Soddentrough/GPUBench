@@ -1,10 +1,13 @@
-# GPUBench Future Work & TODOs
+# GPUBench Future Work & Roadmap
 
-## Graphics Benchmarks
-- **Pixel Fill Rate (ROP Throughput)**: 
-  - *Goal*: Measure the theoretical peak pixel fill rate (e.g., 380.2 GP/s on RDNA4).
-  - *Implementation Needs*: Requires adding a full Vulkan graphics pipeline (Vertex + Fragment shaders) to `VulkanContext`. Compute shaders using `imageStore` bypass the Render Output Units (ROPs) and Delta Color Compression (DCC), so they cannot reach true fill rate spec limits.
-  - *Design*: Render a massive offscreen framebuffer (e.g., 8192x8192) using a fullscreen quad.
+## Graphics & Ray Tracing
+- **Pixel Fill Rate (ROP Throughput)**: Completed in v1.2.0 (`PixelFillRateBench.cpp`). Measures offscreen Vulkan rasterization fill rates (RGBA8, RGBA16F HDR, Alpha Blending) using a dedicated graphics pipeline.
+- **Vulkan Work Graphs (`VK_AMDX_shader_enqueue`)**: Evaluate autonomous GPU node enqueue and dynamic shader dispatch graphs for ray scheduling and multi-pass traversal.
 
 ## Compute Enhancements
-- (Add future compute enhancements here)
+- **Cooperative Matrix Sub-Byte Formats**: Integrate native FP8 (`VK_EXT_shader_float8` + `VK_KHR_cooperative_matrix`) and INT4 matrix multiplication when driver toolchains provide GLSL compiler support.
+- **Dynamic Workgroup Dispatch Scaling**: Dynamically scale dispatch workgroup dimensions based on hardware Compute Unit / Streaming Multiprocessor counts across low-power and high-end discrete GPUs.
+
+## Ecosystem & Infrastructure
+- **Community Leaderboard**: Opt-in JSON result submission to community database for cross-architecture and driver comparison.
+- **Windows Authenticode Signing**: Implement digital signature integration for Windows release binaries.

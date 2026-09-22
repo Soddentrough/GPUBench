@@ -9,6 +9,11 @@
 - [x] **Pixel Fill Rate (ROP Throughput) Benchmark**: Built offscreen Vulkan rasterization pipeline measuring RGBA8, RGBA16F HDR, and Alpha Blending fill rates in GPixels/s.
 - [x] **Real-time Hardware Telemetry HUD**: Added sysfs hardware telemetry monitoring (temperatures, power draw, core/memory clocks, VRAM usage) in `gpubench-gui`.
 - [x] **Benchmark Naming & Progress Bar Fixes**: Renamed `"Performance"` to `"Device Memory Bandwidth"`, fixed `Fp6Bench` naming, and fixed ROCm compilation progress bar rendering.
+- [x] **4K UHD Default Render Dimensions**: Initialized default render target dimensions to 4K UHD (`3840 x 2160`, ~8.29M primary rays) for GPUs with $\ge 16$ GB VRAM (with automatic graceful tier down to 1440p/1080p for lower VRAM cards), plus CLI `-r`/`--resolution` and GUI resolution preset selection.
+- [x] **Dynamic Multi-Scale GUI Layout & Results Visibility**: Engineered responsive ImGui table column sizing with dedicated score columns, preventing result clipping under UI scaling (1.0x to 2.5x).
+- [x] **Dynamic Physical Hardware Device Detection**: Enumerated physical GPU devices dynamically, filtering out phantom/unconnected devices on single-GPU workstations.
+- [x] **Compute API Diagnostics & Tooltips**: Added runtime capability probing with diagnostic status notes and hover tooltips for unsupported compute backends in the GUI and CLI (`--list-backends`).
+- [x] **Console-Free WIN32 GUI Launch**: Configured Windows GUI build for the WIN32 subsystem (`-mwindows` / `WIN32_EXECUTABLE`), eliminating the persistent terminal console window when launching the GUI.
 
 ---
 

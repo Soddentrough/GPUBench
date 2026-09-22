@@ -208,13 +208,13 @@ Detailed profiling of `RaySchedulingBench` reveals **six distinct implementation
 
 ---
 
-## 5. Why Material Shading Succeeded Dramatically (2.86x Speedup)
+## 5. Architectural Analysis of Material Shading (2.86x Speedup)
 
-Despite all the implementation overheads described above, look at what happened in **Material Shading**:
+Despite all the implementation overheads described above, the impact on **Material Shading** was substantial:
 - **Traditional Megakernel**: $5{,}195.9\text{ MHits/s}$
-- **DGC**: $\mathbf{14{,}875.5\text{ MHits/s}}$ (**2.86x Faster!**)
+- **DGC**: $\mathbf{14{,}875.5\text{ MHits/s}}$ (**2.86x Faster**)
 
-### Why Did DGC Crush the Megakernel Here?
+### Factors Behind the DGC Performance Advantage
 In the Material Shading workload:
 1. The scene features **8 drastically different material types**:
    - Car Paint (dual-specular clearcoat)
@@ -232,9 +232,9 @@ In the Material Shading workload:
 3. **In the DGC Pipeline**:
    Hits were classified and sorted by material index into compact queues.
    Each specialized indirect dispatch launched **homogeneous Wave32s**: every lane executed the exact same material shader.
-   SIMD lane utilization jumped to **100%**, delivering a **2.86x net throughput gain** even after paying the queue overhead!
+   SIMD lane utilization jumped to **100%**, delivering a **2.86x net throughput gain** even after paying the queue overhead.
 
-> **Key Takeaway**: This proves the core architectural theory. When divergence is real, DGC and wavefront compaction dominate RDNA 3. The apparent "slowness" in primary and incoherent tests was caused solely by artificial overhead in the compaction implementation, not the RDNA 3 architecture.
+> **Key Takeaway**: This validates the core architectural model. Under real material divergence, DGC and wavefront compaction yield substantially higher execution efficiency on RDNA 3. The apparent "slowness" in primary and incoherent tests was caused by overhead in the initial compaction implementation, not an inherent hardware limitation.
 
 ---
 

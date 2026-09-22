@@ -1,6 +1,6 @@
 # OpenCL Compute Backend Support
 
-GPUBench includes a first-class, cross-vendor **OpenCL Compute Backend** (`--backend opencl`), providing GPU compute and memory bandwidth benchmarking across AMD, Intel, NVIDIA, and mobile/embedded GPUs without requiring Vulkan 1.4 or ROCm/HIP drivers.
+GPUBench includes a cross-vendor **OpenCL Compute Backend** (`--backend opencl`), providing GPU compute and memory bandwidth benchmarking across AMD, Intel, NVIDIA, and mobile/embedded GPUs without requiring Vulkan 1.4 or ROCm/HIP drivers.
 
 ---
 
@@ -81,5 +81,5 @@ make -j16
 ./gpubench -k opencl -d 0 -b FP32,FP16,FP64,INT8,Memory
 
 # Export machine-readable results to JSON
-./gpubench -k opencl --output json --output-file results_opencl.json
+./gpubench -k opencl -o results_opencl.json
 ```

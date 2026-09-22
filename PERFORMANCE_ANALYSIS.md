@@ -8,7 +8,7 @@
 - FP64: 1.440 TFLOPS (1440 GFLOPS)
 
 ### Benchmark Results
-- FP64: 1.478 TFLOPS ✓ (~103% of theoretical - excellent)
+- FP64: 1.478 TFLOPS ✓ (~103% of theoretical - elevated due to GPU core clock boosting above base spec)
 - FP32: 14.067 TFLOPS ✗ (~61% of theoretical)
 - FP16: 14.020 TFLOPS ✗ (~30% of theoretical)
 
@@ -184,27 +184,6 @@ The benchmark now provides realistic and meaningful performance measurements for
   expressible through Vulkan today; the old shader measured INT8. INT4
   vector has no native Vulkan path either.
 - **FP4: reported UNSUPPORTED** (no FP4 type on RDNA4; FP16-based emulation
-  disabled as inaccurate).
-
-## Known Platform Ceilings and Toolchain Gaps (measured 2026-07, R9700/RADV)
-
-- FP16/BF16 vector (~51.5 TFLOPS, 1.13x FP32): the SPIR-V is correct
-  (packed v2f16 FMAs verified by disassembly), but measured throughput caps
-  at ~1.13x FP32 on RADV/GFX12 regardless of formulation (v2/v4 vectors,
-  4x unrolling, ACO and LLVM backends all identical). The op counting is
-  correct; this is a driver/hardware-path ceiling, not a benchmark bug.
-  BF16 vector intentionally uses an FP16 shader (same packed rate on RDNA4).
-- FP8 vector/matrix: reported UNSUPPORTED. Hardware and driver support
-  native FP8 (VK_EXT_shader_float8 + shaderFloat8CooperativeMatrix), but no
-  GLSL toolchain can compile FP8 shaders (glslang main has no
-  GL_EXT_shader_explicit_arithmetic_types_float8). The old FP16-based proxy
-  shaders were reporting FP16 rates mislabeled as FP8; they are now gated
-  off until a compiler (glslang FP8 support, or slang with FP8 CoopMat) is
-  integrated.
-- INT4 matrix: reported UNSUPPORTED. VK_KHR_cooperative_matrix has no
-  4-bit integer component type, so native INT4 WMMA rates are not
-  expressible through Vulkan today; the old shader measured INT8.
-- FP4: reported UNSUPPORTED (no FP4 type on RDNA4; FP16-based emulation
   disabled as inaccurate).
 
 ## ROCm Backend Findings (2026-07, R9700, TheRock ROCm 7.x / clang 23)

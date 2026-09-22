@@ -1,6 +1,6 @@
 # GPUBench
 
-GPUBench is a high-performance cross-platform GPU benchmarking tool designed to measure raw compute capabilities, memory bandwidth, and modern hardware ray tracing pipeline architectures across graphics hardware. It supports multiple backends and a wide range of data types, from double-precision floating point (FP64) down to 4-bit integers (INT4), alongside cutting-edge ray scheduling architectures.
+GPUBench is a high-performance cross-platform GPU benchmarking tool designed to measure raw compute capabilities, memory bandwidth, and modern hardware ray tracing pipeline architectures across graphics hardware. It supports multiple backends and a wide range of data types, from double-precision floating point (FP64) down to 4-bit integers (INT4), alongside modern hardware ray scheduling architectures.
 
 ![GitHub Version](https://img.shields.io/github/v/release/Soddentrough/GPUBench)
 ![License](https://img.shields.io/github/license/Soddentrough/GPUBench)
@@ -37,7 +37,7 @@ GPUBench provides both a standalone graphical workstation profiler with live har
 
 ### Graphical User Interface (GUI)
 
-The Workstation Profiler dashboard provides real-time GPU telemetry (utilization, power, core and memory clocks, temperatures, and VRAM capacity), backend and device selection, benchmark suite configuration, and visual ray tracing comparative inspection:
+The Workstation Profiler dashboard (`gpubench-gui`) provides real-time GPU telemetry (utilization, package power, core and memory clocks, temperatures, and VRAM usage), dynamic physical hardware device detection, compute API diagnostics with requirement tooltips, responsive multi-scale DPI layout (1.0x–2.5x), benchmark suite configuration with dedicated score columns, and in-application comparative ray tracing inspection:
 
 ![GPUBench Workstation Profiler GUI](docs/images/gpubench_gui.png)
 *Fig: GPUBench Workstation Profiler GUI showing real-time hardware telemetry HUD, backend selection, and benchmark suite configuration.*
@@ -145,7 +145,7 @@ Modern ray tracing performance in production games and visual effects engines is
 
 GPUBench evaluates how different GPU hardware architectures handle these workloads across distinct scheduling architectures:
 
-1. **Traditional Megakernel**: Traces rays and evaluates all hit shading in a single massive compute pass. Suffering from the "convoy effect," a single complex material forces all lanes to allocate worst-case VGPRs and serializes execution over divergent SIMD branches.
+1. **Traditional Megakernel**: Traces rays and evaluates all hit shading in a single compute pass. Suffering from the "convoy effect," a single complex material forces all lanes to allocate worst-case VGPRs and serializes execution over divergent SIMD branches.
 2. **Traditional + SER (Shader Execution Reordering)**: Leverages hardware reordering (`VK_KHR_ray_tracing_reorder` / `VK_EXT_ray_tracing_invocation_reorder`) to dynamically regroup divergent lanes by spatial direction and material hit ID before executing hit shaders.
 3. **Device-Generated Commands (DGC / Wavefront Compaction)**: Compacts divergent hits into categorized material queues via ballot/atomic compaction and dispatches uniform waves using GPU-driven command generation (`VK_EXT_device_generated_commands`).
 
@@ -160,7 +160,7 @@ GPUBench evaluates how different GPU hardware architectures handle these workloa
 
 ### Realistic Material Divergence
 
-Real-world production scenes never contain uniform, toy shaders—they feature a **heterogeneous range of materials** with radically different computational weights and register footprints.
+Production scenes rarely contain uniform shaders; they feature a **heterogeneous distribution of materials** with differing computational complexity and register footprints.
 
 ![Realistic Material Range Showroom](docs/images/realistic_scene_material_range.png)
 *Fig 1: Representative still-life showroom scene featuring a heterogeneous distribution of production material archetypes.*
@@ -176,7 +176,7 @@ Real-world production scenes never contain uniform, toy shaders—they feature a
 | Archetype | Reference Shading Model | Computational / SIMD Bottleneck |
 | :--- | :--- | :--- |
 | **Clearcoat Car Paint** | Dual-specular GGX lobes (clearcoat + metallic substrate), Beer-Lambert absorption, high-frequency Voronoi micro-flake glints. | Multi-lobe evaluation, procedural hash functions, secondary normal perturbations. |
-| **Dispersive Crystal / Glass** | Snell's law refraction with total internal reflection (TIR) branching, Cauchy spectral dispersion, 450 nm thin-film wave interference. | Hard directional ray branching (reflection vs. transmission), trigonometric Airy interference series. |
+| **Dispersive Crystal / Glass** | Snell's law refraction with total internal reflection (TIR) branching, Cauchy spectral dispersion, 450 nm thin-film wave interference. | Directional ray branching (reflection vs. transmission), trigonometric Airy interference series. |
 | **Organic Jade / Wax** | Multi-channel subsurface diffusion profile ($R, G, B$ differing mean free paths), dual-lobe surface gloss. | Multi-channel exponential attenuation, non-local volumetric scattering. |
 | **Anisotropic Velvet / Fabric** | Dual-axis anisotropic roughness ($a_x \neq a_y$) with tangent frame rotation, Charlie micro-fiber inverted grazing sheen ($D_{\text{charlie}}$). | Tangent-space matrix transforms, transcendental power functions ($x^{1/2\alpha}$). |
 | **Weathered Industrial Rust** | 6-octave Fractal Brownian Motion (FBM) noise loops, continuous dynamic phase transition from conductor steel to porous dielectric rust. | Heavy arithmetic loop execution, divergent multi-octave iteration depth. |
@@ -219,6 +219,9 @@ Download the latest release package (`.rpm`, `.deb`, `.tar.gz`) from the [GitHub
 # List all available benchmarks
 gpubench --list-benchmarks
 
+# List compute backend availability and diagnostic status
+gpubench --list-backends
+
 # Run all benchmarks on default device
 gpubench
 
@@ -229,6 +232,9 @@ gpubench -d 1 -b RayScheduling
 gpubench -d 1 -b rayscheduling -s forest
 gpubench -d 1 -b rayscheduling -s all
 
+# Set render resolution preset (720p, 1080p, 1440p, 4k) or custom WxH (default: auto; 4K UHD on >=16GB VRAM)
+gpubench -d 1 -b rayscheduling -s forest -r 4k
+
 # Dump 4K UHD PPM/PNG render buffers, diff heatmaps, and 4-scenario comparative grid
 gpubench -d 1 -b rayscheduling -s all --dump-renders
 
@@ -236,12 +242,12 @@ gpubench -d 1 -b rayscheduling -s all --dump-renders
 gpubench -d 1 -b rayscheduling -s forest -c 22 --profile-snapshot
 
 # Export machine-readable results to JSON
-gpubench -d 1 -b rayscheduling -s all --output json --output-file benchmark_results.json
+gpubench -d 1 -b rayscheduling -s all -o benchmark_results.json
 ```
 
 ### Profiling & Telemetry Suite
 
-GPUBench includes turnkey Python tools for automated thread tracing with Mesa RADV / Radeon GPU Profiler (RGP) and AMD ROCm SMI telemetry:
+GPUBench includes Python tools for automated thread tracing with Mesa RADV / Radeon GPU Profiler (RGP) and AMD ROCm SMI telemetry:
 
 ```bash
 # Capture RGP traces, amd-smi power/clock telemetry, and RGA ISA compilation

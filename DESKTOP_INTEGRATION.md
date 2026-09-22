@@ -7,9 +7,7 @@ Install to /usr/share/applications/ (RPM and DEB packages).
 Specifies categories: Categories=System;HardwareSettings;Benchmark;.
 Executable target: Exec=gpubench-gui %F.
 Terminal fallback action: Desktop entry actions can provide quick secondary launches (e.g., right-click dock icon → "Run Fast Benchmark CLI", "Open Documentation").
-ini
-
-
+```ini
 [Desktop Entry]
 Type=Application
 Version=1.5
@@ -25,21 +23,20 @@ StartupNotify=true
 StartupWMClass=gpubench-gui
 MimeType=application/x-gpubench+json;
 Actions=RunCLI;
+
 [Desktop Action RunCLI]
 Name=Run Benchmark (Terminal)
 Exec=x-terminal-emulator -e gpubench
+```
+
 Wayland app_id and X11 WM_CLASS Alignment:
 Wayland compositors (Mutter/GNOME, KWin/KDE) match running windows to .desktop files using the window's app_id.
-In gpubench-gui (Iced), the window settings should explicitly set the application ID so the taskbar, dash, and Alt-Tab switcher show the correct app icon rather than a generic fallback gear icon:
-rust
+In `gpubench-gui`, the window settings explicitly set the application ID so the taskbar, dash, and Alt-Tab switcher show the correct app icon rather than a generic fallback gear icon:
 
-
-iced::window::Settings {
-    platform_specific: iced::window::settings::PlatformSpecific {
-        application_id: String::from("io.github.soddentrough.gpubench"),
-    },
-    ..Default::default()
-}
+```cpp
+// SDL3 window creation property
+SDL_SetStringProperty(props, SDL_PROP_WINDOW_CREATE_WAYLAND_APP_ID_STRING, "io.github.soddentrough.gpubench");
+```
 1.2. AppStream Metainfo (metainfo.xml)
 For inclusion in GNOME Software, KDE Discover, Fedora Software, and potential Flathub packaging:
 Install to /usr/share/metainfo/io.github.soddentrough.gpubench.metainfo.xml.
@@ -88,13 +85,12 @@ Thumbnail Toolbar: Fast quick-action buttons on the taskbar preview (e.g. "Stop"
 2.3. Power & Sleep State Management
 Windows aggressive modern standby (Connected Standby) will frequently attempt to turn off displays after 2–5 minutes of no keyboard/mouse input even when the GPU is at 100% compute load.
 Win32 API: Call SetThreadExecutionState when starting a benchmark:
-cpp
-
-
+```cpp
 // Prevent monitor sleep and system idle sleep during benchmark
 SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED);
 // Restore default power behavior when benchmarks finish
 SetThreadExecutionState(ES_CONTINUOUS);
+```
 2.4. Windows Notifications (Toast)
 Deliver native Windows 10/11 Toast notifications via Windows Shell / WinRT:
 Fires upon batch completion with summary scores.
@@ -137,9 +133,7 @@ Use NSApp.dockTile to draw dynamic progress badges or mini charts directly onto 
 Bounce dock icon (NSApp requestUserAttention:NSInformationalRequest) when a long benchmark completes.
 3.4. Sleep Prevention (IOPMLib)
 On macOS, system sleep is inhibited using I/O Kit Power Management:
-objc
-
-
+```objc
 IOPMAssertionID assertionID;
 IOPMAssertionCreateWithName(
     kIOPMAssertionTypePreventUserIdleSystemSleep,
@@ -149,6 +143,7 @@ IOPMAssertionCreateWithName(
 );
 // Release when complete:
 IOPMAssertionRelease(assertionID);
+```
 (Or execute caffeinate -w <pid> as a background guard process).
 3.5. Notification Center
 Dispatch notifications via UNUserNotificationCenter or AppleScript bridge (osascript -e 'display notification ...').
@@ -175,7 +170,7 @@ Linux Desktop Entry & Icon Distribution:
 Extract standard resolution PNGs from packaging/windows/icon.ico into packaging/linux/icons/.
 Create packaging/linux/io.github.soddentrough.gpubench.desktop.
 Update CMakeLists.txt Linux install rules to place .desktop and icons into /usr/share/applications/ and /usr/share/icons/hicolor/.
-Add Wayland app_id to gpubench-gui/src/main.rs.
+Add Wayland app_id to GUI window settings (`cpp_src/gui/main.cpp`).
 Windows Version & Icon Resources:
 Create packaging/windows/gpubench.rc and packaging/windows/gpubench.manifest with version 1.0.0.0, application icon, and High-DPI PerMonitorV2 support.
 Link gpubench.rc into gpubench.exe in CMakeLists.txt when targeting Windows.
@@ -189,4 +184,3 @@ Phase 3: Desktop Telemetry & Notifications
 Add native desktop notification triggers when benchmark suites complete in gpubench-gui and gpubench.
 Add Windows ITaskbarList3 progress reporting during multi-test runs.
 macOS .app bundle restructuring and CPack DMG layout customization.
-Would you like to begin by implementing Phase 1 (creating the Linux .desktop file, extracting the icons into the XDG hicolor theme hierarchy, updating CMakeLists.txt for RPM/DEB packages, and adding the Windows .rc resource and manifest for gpubench.exe)?
