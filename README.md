@@ -265,6 +265,7 @@ python3 scripts/capture_gpu_profiles.py
 ### Architectural & Technical Whitepapers
 - [Ray Scheduling Architectures](docs/RAY_SCHEDULING_ARCHITECTURE.md) - Decoupled scheduling, microarchitectural ISA analysis, and RGP timeline profiling.
 - [BVH Traversal Architectural Audit](docs/BVH_TRAVERSAL_ARCHITECTURAL_AUDIT.md) - Hardware BVH traversal ceilings, box and triangle peak rates on RDNA 4.
+- [RDNA 4 Ray Tracing Architecture](docs/RDNA4_RAY_TRACING_ARCHITECTURE.md) - RAv3 hardware traversal, Shader Execution Reordering (SER), and monolithic 4nm architecture.
 - [RDNA 3 Ray Tracing Architecture](docs/RDNA3_RAY_TRACING_ARCHITECTURE.md) - Chiplet topology, memory fabric, and zero-LDS pure Wave32 compaction.
 - [Hardware Profiling & Telemetry Guide](docs/PROFILING_GUIDE.md) - RGA disassembly, ACO compiler stats, packet dumping, and SMI telemetry.
 - [Compute Performance Analysis](docs/COMPUTE_PERFORMANCE_ANALYSIS.md) - Compute pipelines, packed math, and compiler ceilings.
