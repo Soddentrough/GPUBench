@@ -142,14 +142,17 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Install Vulkan SDK (LunarG apt repo)
+      - name: Install Vulkan SDK
         run: |
-          wget -qO - https://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo apt-key add -
-          CODENAME=$(. /etc/os-release && echo $VERSION_CODENAME)
-          sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-$CODENAME.list \
-            https://packages.lunarg.com/vulkan/lunarg-vulkan-$CODENAME.list
-          sudo apt-get update
-          sudo apt-get install -y vulkan-sdk
+          VERSION=$(curl -sL https://vulkan.lunarg.com/sdk/latest/linux.txt)
+          echo "Downloading latest Vulkan SDK version $VERSION..."
+          curl -sL "https://sdk.lunarg.com/sdk/download/$VERSION/linux/vulkansdk-linux-x86_64-$VERSION.tar.xz" -o /tmp/vulkansdk.tar.xz
+          mkdir -p "$HOME/VulkanSDK"
+          tar -xf /tmp/vulkansdk.tar.xz -C "$HOME/VulkanSDK"
+          VULKAN_ROOT="$HOME/VulkanSDK/$VERSION/x86_64"
+          echo "VULKAN_SDK=$VULKAN_ROOT" >> $GITHUB_ENV
+          echo "$VULKAN_ROOT/bin" >> $GITHUB_PATH
+          echo "LD_LIBRARY_PATH=$VULKAN_ROOT/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
 
       - name: Install build dependencies
         run: |

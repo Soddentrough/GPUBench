@@ -1,7 +1,6 @@
 #version 460
 #extension GL_EXT_ray_tracing : require
-#extension GL_EXT_shader_invocation_reorder : enable
-#extension GL_NV_shader_invocation_reorder : enable
+#extension GL_EXT_shader_invocation_reorder : require
 
 layout(location = 0) rayPayloadEXT vec3 payload;
 
@@ -148,19 +147,10 @@ void main() {
     float tMinPrimary = (pc.isGltf != 0u) ? 0.1 : ((pc.sceneType == SCENE_OUTDOOR_TERRAIN) ? 0.05 : 0.01);
 
     payload = vec3(0.0);
-#if defined(GL_EXT_shader_invocation_reorder)
     hitObjectEXT hObj;
     hitObjectTraceRayEXT(hObj, topLevelAS, gl_RayFlagsOpaqueEXT, 0xFF, 0, 0, 0, rayOrigin, tMinPrimary, rayDir, tMaxPrimary, 0);
     reorderThreadEXT(hObj);
     hitObjectExecuteShaderEXT(hObj, 0);
-#elif defined(GL_NV_shader_invocation_reorder)
-    hitObjectNV hObj;
-    hitObjectTraceRayNV(hObj, topLevelAS, gl_RayFlagsOpaqueEXT, 0xFF, 0, 0, 0, rayOrigin, tMinPrimary, rayDir, tMaxPrimary, 0);
-    reorderThreadNV(hObj);
-    hitObjectExecuteShaderNV(hObj, 0);
-#else
-    traceRayEXT(topLevelAS, gl_RayFlagsOpaqueEXT, 0xFF, 0, 0, 0, rayOrigin, tMinPrimary, rayDir, tMaxPrimary, 0);
-#endif
 
     if (pc.dumpRenders != 0) {
         fb.pixels[pixelIdx] = vec4(tonemapACES(payload * 1.0), 1.0);

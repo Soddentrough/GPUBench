@@ -31,7 +31,7 @@ if(Vulkan_FOUND)
     message(STATUS "Vulkan found: ${Vulkan_LIBRARIES}")
     # Try to find glslc, checking VULKAN_SDK environment variable if defined
     find_program(GLSLC_EXECUTABLE glslc
-        HINTS "$ENV{VULKAN_SDK}/Bin"
+        HINTS "$ENV{VULKAN_SDK}/Bin" "$ENV{VULKAN_SDK}/bin" "$ENV{VULKAN_SDK}/x86_64/bin"
     )
     if(NOT GLSLC_EXECUTABLE)
         message(WARNING "glslc not found! Searching for glslc in Vulkan SDK...")
