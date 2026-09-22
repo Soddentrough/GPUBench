@@ -10,18 +10,17 @@
 
 ---
 
-## 1. Executive Summary & Core Architectural Premise
+## 1. Executive Summary & Architectural Scope
 
-A previous preliminary observation suggested:
-> *"On RDNA3 (unlike RDNA4 where ray compaction is ~2x faster across all tests), for primary and semi-coherent rays, the overhead of global memory queue atomic writes (atomicAdd) and indirect dispatch slightly exceeds the divergence cost of the monolithic megakernel. Only under heavy divergence (Material Shading) does DGC pull ahead by 1.76x."*
+In ray tracing pipelines, the trade-off between monolithic megakernels and decoupled execution (such as Device-Generated Commands with stream compaction queues) is governed by two competing factors:
+1. **Divergence Penalty**: Register pressure and SIMD lane masking caused by diverse materials and scattering secondary rays in a monolithic shader.
+2. **Scheduling & Indirection Overhead**: The fixed cost of queue allocation, atomic counters, memory round-trips, and Command Processor indirect dispatch latency.
 
-**This observation is fundamentally flawed.** 
+Empirical measurements demonstrate distinct performance regimes across ray tracing phases:
+- **Primary & Coherent Rays**: Monolithic megakernels perform efficiently because primary rays generated from regular pixel grids are spatially and directionally coherent. In this regime, queue compaction overhead (memory writes, pipeline barriers, and indirect dispatch) can exceed the divergence penalty.
+- **Divergent Bounces & Diverse Materials**: As rays scatter or encounter multiple disparate material models, SIMD lane masking and register pressure degrade megakernel efficiency. In this regime, decoupled scheduling and stream compaction achieve substantial throughput gains (e.g. 2.86x higher throughput in 8-material shading) by repacking active rays into coherent wavefronts.
 
-Device-Generated Commands (DGC), stream compaction, and wavefront compaction queues **should not be slower than a monolithic megakernel on AMD RDNA 3**—even for primary and semi-coherent rays. 
-
-When a benchmark or engine implementation shows a monolithic megakernel outperforming a DGC / wavefront-scheduled pipeline on RDNA 3, it is **not** an inherent architectural limitation of the RDNA 3 hardware. Rather, it indicates an **implementation impedance mismatch** where the indirect wavefront pipeline introduces avoidable overheads (such as uncompressed global memory round-trips, chiplet fabric transit latency, transfer engine queue clears, multi-wave LDS contention, and Command Processor dispatch serialization) that mask the inherent architectural advantages of wavefront scheduling.
-
-Under proper architectural alignment, DGC and wavefront compaction queues on RDNA 3 provide superior hardware utilization, drastically lower VGPR pressure, higher wave occupancy, and better cache hit rates across all ray tracing workloads.
+This document analyzes the microarchitectural factors governing both regimes on AMD RDNA 3, identifies the specific implementation bottlenecks that introduce overhead in indirect pipelines, and details optimizations to minimize indirection latency.
 
 ---
 
@@ -83,8 +82,8 @@ To understand the interaction between ray scheduling paradigms and the hardware,
   - **$\le 32$ VGPRs**: Maximum occupancy (up to 16 Wave32s per SIMD).
   - **$64$ VGPRs**: 8 Wave32s per SIMD.
   - **$128$ VGPRs**: 4 Wave32s per SIMD.
-  - **$> 160$ VGPRs**: 2 Wave32s per SIMD (catastrophic latency-hiding collapse).
-- In ray tracing, when a BVH node cache-miss occurs (fetching from L2 or MALL), the SIMD unit **must switch to another active wave** to hide the 100–300 cycle memory latency. If occupancy is low due to VGPR pressure, the SIMD unit completely stalls.
+  - **$> 160$ VGPRs**: 2 Wave32s per SIMD (severe latency-hiding limitation).
+- In ray tracing, when a BVH node cache-miss occurs (fetching from L2 or MALL), the SIMD unit **must switch to another active wave** to hide the 100–300 cycle memory latency. If occupancy is low due to VGPR pressure, the SIMD unit stalls.
 
 ### 2.4. Chiplet Memory Subsystem (Navi 31)
 - Navi 31 separates the core logic into a **Graphics Compute Die (GCD)** (5nm) and six **Memory Cache Dies (MCDs)** (6nm).
@@ -94,20 +93,20 @@ To understand the interaction between ray scheduling paradigms and the hardware,
 
 ---
 
-## 3. The Theoretical Superiority of DGC & Wavefront Queues on RDNA 3
+## 3. Comparative Microarchitectural Trade-Offs
 
-To see why DGC and wavefront compaction queues should outperform a megakernel on RDNA 3, consider the fundamental failure modes of a monolithic megakernel:
+The trade-offs between monolithic megakernels and decoupled wavefront pipelines on RDNA 3 reflect fundamental design choices:
 
 | Architectural Metric | Monolithic Megakernel | DGC / Wavefront Compaction Pipeline |
 | :--- | :--- | :--- |
-| **Shader Scope** | Huge monolithic shader (Traversal + Stack + 8+ Materials + Light eval + Noise + ACES tonemapping). | Decomposed micro-kernels: (1) Traversal, (2) Compaction, (3) Specialized Shaders. |
-| **VGPR Allocation** | **Extremely High (96–160+ VGPRs)**. Traversal stack, RNG, hit state, material parameters must stay live across all code. | **Extremely Low (24–40 VGPRs)**. Shaders only need registers for their specific, isolated stage. |
-| **Active Wave Occupancy** | **2–4 Wave32s per SIMD**. Severe memory latency exposure during BVH misses. | **8–16 Wave32s per SIMD**. Plentiful active waves to saturate execution units during memory stalls. |
-| **SIMD Lane Utilization (Divergence)** | **Disastrous (12.5%–25%)**. When 8 materials exist, each wave executes every material branch with masked lanes. | **100% Uniform Execution**. Every lane in an indirect dispatch executes identical instructions. |
-| **Ray Accelerator Saturation** | Inactive/diverged lanes in a wave waste Ray Accelerator issue slots. | Fully compacted waves issue 32 active ray queries simultaneously, keeping RAv2 at peak utilization. |
-| **Dual-Issue VOPD Opportunities** | Large register footprint limits register operand pairing needed for VOPD co-issue. | Tight, specialized kernels maximize dual-issue math pairing in shading and lighting loops. |
+| **Shader Scope** | Monolithic shader (traversal, stack, material evaluations, lighting, and post-processing). | Decomposed stages: (1) traversal, (2) classification/compaction, (3) specialized material shading. |
+| **VGPR Allocation** | **Higher (96–160+ VGPRs)**. Traversal stack, RNG, hit state, and material parameters remain live concurrently. | **Lower (24–48 VGPRs)** per stage. Shaders only allocate registers for their specific stage. |
+| **Active Wave Occupancy** | **2–4 Wave32s per SIMD**. Lower tolerance for memory latency during BVH cache misses. | **8–16 Wave32s per SIMD**. Higher wave residency to hide memory latency during isolated passes. |
+| **SIMD Lane Utilization (Divergence)** | **12.5%–25% under 8 disparate materials**. Waves execute every branch sequentially with masked lanes. | **Near 100% Uniform Execution**. Every lane in an indirect dispatch executes identical instructions. |
+| **Ray Accelerator Saturation** | Inactive lanes in divergent waves consume Ray Accelerator issue slots without useful work. | Compacted waves issue active ray queries simultaneously. |
+| **Memory & Indirection Overhead** | **Zero queue overhead**. Hits processed directly in registers and written to framebuffer. | Incurs payload queue writes/reads, atomic counter updates, and indirect dispatch latency. |
 
-Given these immense theoretical advantages, why did the initial benchmark report DGC as slower on RDNA 3 for primary rays and incoherent rays?
+When considering these characteristics, a key question emerges: why did early benchmark iterations report DGC as slower on RDNA 3 for primary rays and semi-coherent rays?
 
 ---
 
@@ -189,7 +188,7 @@ Detailed profiling of `RaySchedulingBench` reveals **six distinct implementation
   ```
 - At $1920 \times 1080$ resolution with workgroups of 64 threads, there are **32,400 workgroups**.
 - Thousands of workgroups concurrently execute atomic operations (`atomicAdd` and `atomicMax`) targeting **the exact same 8 cache lines in global memory**.
-- In RDNA 3, atomic operations that miss L1 collide at the L2 cache bank controllers. When tens of thousands of workgroups contend for 8 addresses, atomic serialization creates massive queue latency at the memory controller.
+- In RDNA 3, atomic operations that miss L1 collide at the L2 cache bank controllers. When tens of thousands of workgroups contend for 8 addresses, atomic serialization creates substantial queue latency at the memory controller.
 
 ### 4.6. Subgroup Sizing & LDS Bank Contention Mismatch
 - `rt_scheduling_traditional_megakernel.comp` was configured with:
@@ -234,13 +233,13 @@ In the Material Shading workload:
    Each specialized indirect dispatch launched **homogeneous Wave32s**: every lane executed the exact same material shader.
    SIMD lane utilization jumped to **100%**, delivering a **2.86x net throughput gain** even after paying the queue overhead.
 
-> **Key Takeaway**: This validates the core architectural model. Under real material divergence, DGC and wavefront compaction yield substantially higher execution efficiency on RDNA 3. The apparent "slowness" in primary and incoherent tests was caused by overhead in the initial compaction implementation, not an inherent hardware limitation.
+> **Key Observation**: Under real material divergence, DGC and wavefront compaction yield substantially higher execution efficiency on RDNA 3 by ensuring coherent SIMD execution. Conversely, for primary and coherent rays where SIMD utilization is already high, the indirection and queue overhead of compaction can outweigh its benefits.
 
 ---
 
-## 6. The Architectural Blueprint: Optimal DGC & Wavefront Compaction on RDNA 3
+## 6. Architectural Guidelines for Low-Overhead Wavefront Compaction on RDNA 3
 
-To achieve maximum performance across *all* ray tracing workloads on RDNA 3, a DGC / wavefront compaction pipeline must be architected according to the following principles:
+To minimize queue latency and memory overhead when employing DGC and wavefront compaction on RDNA 3, the pipeline should be architected according to the following principles:
 
 ```
 +-----------------------------------------------------------------------------------+
@@ -320,14 +319,14 @@ On RDNA 4, the monolithic die and higher bandwidth masked the memory traffic of 
 
 ## 8. Summary & Technical Verdict
 
-1. **The Inversion was an Artifact of Implementation, Not Hardware**:
-   The claim that RDNA 3's atomic and indirect dispatch overhead exceeds megakernel divergence cost is **incorrect**. The performance deficit observed on primary and semi-coherent rays was caused by uncompressed global memory queues, DMA buffer clear bubbles, multi-wave LDS bank conflicts, uncoalesced VRAM stores, and primary ray compaction redundancy.
-2. **Primary Rays Should Never Be Compacted**:
-   Primary rays are already coherent. Applying stream compaction to primary ray traversal is an architectural anti-pattern. Wavefront compaction queues should begin *after* the primary hit, sorting rays by hit material or secondary bounce direction.
-3. **Material Divergence Demonstrates True Potential**:
-   When divergence actually exists (as in Material Shading), DGC outperformed the monolithic megakernel by up to **1.89x (9,849.7 vs 5,122.8 MHits/s)** on RDNA 3, proving that wavefront compaction is massively beneficial to RDNA 3 execution units.
-4. **Secondary Traversal Coherence is Proven**:
-   In isolation, coherent octant-binned secondary ray traversal achieved **4,557 MRays/s (1.82 ms)** vs the Megakernel's **3,822 MRays/s (2.17 ms)**—a **1.19x speedup** directly attributable to the elimination of intra-wave SIMD branch divergence.
+1. **Regime-Dependent Trade-Offs**:
+   Empirical benchmarking shows that the comparative performance between megakernels and DGC depends directly on the presence and degree of branch divergence. The performance deficit observed in early compaction implementations on primary and semi-coherent rays was driven by uncompressed global memory queues, DMA buffer clear bubbles, multi-wave LDS bank conflicts, uncoalesced VRAM stores, and redundant primary ray compaction.
+2. **Primary Rays Do Not Benefit from Compaction**:
+   Primary rays are already spatially coherent from the camera grid. Applying stream compaction to primary ray traversal introduces queue overhead without reducing divergence. Compaction is effective when applied *after* hits, sorting rays by material model or secondary bounce direction.
+3. **Material Divergence Demonstrates Measurable Compaction Gains**:
+   Under divergent branch workloads (such as Material Shading with heterogeneous BSDFs), DGC outperformed the monolithic megakernel by **1.89x (9,849.7 vs 5,122.8 MHits/s)** on RDNA 3, demonstrating the efficiency gains of wavefront compaction under divergent execution.
+4. **Secondary Traversal Coherence**:
+   In isolation, coherent octant-binned secondary ray traversal achieved **4,557 MRays/s (1.82 ms)** vs the Megakernel's **3,822 MRays/s (2.17 ms)**—a **1.19x speedup** directly attributable to the reduction of intra-wave SIMD branch divergence.
 
 ---
 
@@ -452,7 +451,7 @@ Following the removal of user LDS from RT shaders, native 8x4 Wave32 mapping, an
 3. **Consolidate Indirect Dispatches**:
    Avoid issuing multiple sequential `vkCmdDispatchIndirect` calls for sparse or empty queues. Consolidate queues into a single prefix-summed dispatch buffer to minimize Command Processor overhead and synchronization barriers.
 4. **Reserve Compaction for Divergent Workloads (Post-First-Hit)**:
-   Do not compact primary camera rays before first hit—their natural 2D tile layout is already spatially coherent. Apply stream compaction to divergent secondary bounces (ambient occlusion, diffuse GI, path tracing) and divergent material shading where SIMD lane masking causes catastrophic throughput loss in megakernels.
+   Do not compact primary camera rays before first hit—their natural 2D tile layout is already spatially coherent. Apply stream compaction to divergent secondary bounces (ambient occlusion, diffuse GI, path tracing) and divergent material shading where SIMD lane masking causes substantial throughput loss in megakernels.
 5. **Pack Ray Payloads into 16 Bytes**:
    Store positions as 32-bit floats (or quantized 16-bit halfs where applicable), directions as octahedral `snorm16x2`, and metadata as 32-bit integer IDs. Keeping payload size $\le 16\text{ bytes}$ halves memory bandwidth and doubles cache residency.
 6. **Enforce Compile-Time Ray Flags**:
@@ -489,7 +488,7 @@ Once both issues were resolved:
 With realistic material diversity and zero-LDS stream compaction:
 $$\text{ALU Cycles Saved by Compaction} \gg \text{VRAM Payload Round-Trip} + \text{Atomic Contention} + \text{Pipeline Barriers} + \text{CP Dispatch Overhead}$$
 
-DGC decisively outperformed the Megakernel across all metrics on the RX 7900 XTX:
+DGC achieved higher throughput than the Megakernel across measured configurations on the RX 7900 XTX:
 - **Total Scene Render**: **1.05x to 1.33x faster** (up to 5,651 vs. 4,464 MRays/s at 4K).
 - **Material Shading**: **1.68x to 4.68x faster** (up to 34,128 vs. 7,286 MHits/s at 4K).
 - **Path Tracing**: **1.20x to 1.43x faster** (up to 2,988 vs. 2,192 MRays/s at 4K).
@@ -502,7 +501,7 @@ DGC decisively outperformed the Megakernel across all metrics on the RX 7900 XTX
 
 ### 11.4. Production Best Practices & Architectural Guidance
 1. **Never Compact Primary Rays Before First Hit**: Primary camera rays are already spatially and directionally coherent; compacting them prior to first hit is an algorithmic anti-pattern.
-2. **Apply DGC Wavefront Compaction After Hit for Material & Secondary Bounces**: When scenes feature realistic multi-material diversity (8+ BSDF archetypes) or secondary divergent bounces (diffuse GI, path tracing), DGC delivers massive speedups (+5% to +33% total frame render, +325% to +368% material shading).
+2. **Apply DGC Wavefront Compaction After Hit for Material & Secondary Bounces**: When scenes feature realistic multi-material diversity (8+ BSDF archetypes) or secondary divergent bounces (diffuse GI, path tracing), DGC delivers measured performance gains (+5% to +33% total frame render, +325% to +368% material shading).
 3. **Zero LDS in RT Shaders**: Never allocate LDS or insert workgroup barriers in ray traversal or stream compaction shaders. Rely strictly on subgroup ballot intrinsics and leader atomics to maintain maximum WGP wave residency.
 4. **Quantize Payloads Aggressively**: Keep ray records $\le 16\text{ bytes}$ (packed octahedral directions, half-float positions) to fit within on-chip caches and avoid DRAM round-trips.
 
