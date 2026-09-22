@@ -2,7 +2,7 @@
 
 **Author**: GPUBench Technical Architecture Team  
 **Scope**: AMD RDNA 3 Architecture (Navi 3x / GFX1100 / RX 7900 Series), Vulkan 1.4 Ray Query & Compute  
-**Target Codebase**: `cpp_src/benchmarks/RaySchedulingBench.*`, `kernels/vulkan/rt_scheduling_*.comp`  
+**Target Codebase**: `cpp_src/benchmarks/RaySchedulingBench.*`, `kernels/vulkan/rt_scheduling_*.comp`, `shaders/rt_scheduling_*.comp`  
 
 > [!NOTE]
 > **Vulkan Device-Generated Commands (DGC) vs. DirectX 12 Terminology**:
@@ -129,7 +129,7 @@ Detailed profiling of `RaySchedulingBench` reveals **six distinct implementation
   **Compacting primary rays before traversal is an anti-pattern.** Stream compaction is meant to restore coherence to *secondary divergent bounces*, not coherent primary rays.
 
 ### 4.2. Global Memory Round-Trip & Chiplet Interconnect Penalty
-- In `rt_scheduling_worklist_classify.comp`:
+- In `rt_scheduling_device_generated_commands_classify.comp`:
   ```glsl
   struct CompactRayPayload {
       vec4 field0; // 16 bytes: hitPos.xyz + pixelIdx
@@ -175,7 +175,7 @@ Detailed profiling of `RaySchedulingBench` reveals **six distinct implementation
   This barrier flushes the L2 cache lines containing the indirect commands, causing a command processor stall while the MEC fetches arguments from VRAM.
 
 ### 4.5. Global Memory Atomic Contention on Un-coalesced Queue Counters
-- In `rt_scheduling_worklist_classify.comp`:
+- In `rt_scheduling_device_generated_commands_classify.comp`:
   ```glsl
   if (localId < 8) {
       uint qCount = ldsQueueCount[localId];
@@ -192,10 +192,10 @@ Detailed profiling of `RaySchedulingBench` reveals **six distinct implementation
 - In RDNA 3, atomic operations that miss L1 collide at the L2 cache bank controllers. When tens of thousands of workgroups contend for 8 addresses, atomic serialization creates massive queue latency at the memory controller.
 
 ### 4.6. Subgroup Sizing & LDS Bank Contention Mismatch
-- `rt_scheduling_traditional.comp` was configured with:
+- `rt_scheduling_traditional_megakernel.comp` was configured with:
   `layout(local_size_x = 32) in;` $\rightarrow$ Exactly **1 native Wave32**.
   Requires **0 bytes of LDS**.
-- `rt_scheduling_worklist_classify.comp` was configured with:
+- `rt_scheduling_device_generated_commands_classify.comp` was configured with:
   `layout(local_size_x = 64) in;` $\rightarrow$ Spans **2 Wave32s**.
   Allocates shared LDS arrays:
   ```glsl
@@ -363,7 +363,7 @@ During deep optimization of `RaySchedulingBench` on an AMD Radeon RX 7900 XTX (N
 - **Hypothesis**: Dispatching 8 separate `vkCmdDispatchIndirect` calls sequentially introduced Command Processor (CP / MEC) serialization, cache-flush stalls, and redundant pipeline barriers.
 - **Empirical Test**:
   1. In `rt_scheduling_resolve.comp`, used `subgroupExclusiveAdd(waves)` to compute prefix sums in `worklist.queueCounters[24..31]` and total workgroups in `indirectCmds.commands[8]`.
-  2. In `rt_scheduling_worklist_bounce.comp`, specialized kernel with `BOUNCE_MODE == 2u` to map `gl_WorkGroupID.x` dynamically to its octant and wave offset via lane 0 `subgroupBroadcastFirst`.
+  2. In `rt_scheduling_device_generated_commands_bounce.comp`, specialized kernel with `BOUNCE_MODE == 2u` to map `gl_WorkGroupID.x` dynamically to its octant and wave offset via lane 0 `subgroupBroadcastFirst`.
   3. Replaced 8 indirect dispatch calls with a single indirect dispatch entry at offset `8 * sizeof(uint32_t) * 3`.
 - **Outcome**: Completely eliminated Command Processor dispatch serialization and barrier bubbles between octant batches.
 
@@ -470,8 +470,8 @@ Subsequent source-level profiling and low-level disassembly disproved that concl
 
 ### 11.1. Root Cause: The glTF Material Shading Benchmark Disparity
 In the `sponza.glb` (Indoor Atrium) scene, the two implementations were executing entirely disparate workloads:
-- **Traditional Megakernel** (`rt_scheduling_traditional.comp`): Mode 4 explicitly called `evaluateGltfPbr(..., false)` with `enableShadows = false`. It used dummy registers, bypassing all vertex buffer reads, normal map texture sampling, and secondary ray query traversals. It was purely measuring isolated ALU arithmetic.
-- **DGC** (`rt_scheduling_worklist_material.comp`): Mode 4 called `evaluateGltfPbr(...)` without specifying the shadow flag, defaulting to `enableShadows = true`. For every ray, it fetched 36 floats of vertex data from VRAM, unpacked barycentrics, sampled PBR textures, and **launched a full hardware ray query BVH traversal (`traceShadowRay`) across all 262,267 triangles in Sponza**.
+- **Traditional Megakernel** (`rt_scheduling_traditional_megakernel.comp`): Mode 4 explicitly called `evaluateGltfPbr(..., false)` with `enableShadows = false`. It used dummy registers, bypassing all vertex buffer reads, normal map texture sampling, and secondary ray query traversals. It was purely measuring isolated ALU arithmetic.
+- **DGC** (`rt_scheduling_device_generated_commands_material.comp`): Mode 4 called `evaluateGltfPbr(...)` without specifying the shadow flag, defaulting to `enableShadows = true`. For every ray, it fetched 36 floats of vertex data from VRAM, unpacked barycentrics, sampled PBR textures, and **launched a full hardware ray query BVH traversal (`traceShadowRay`) across all 262,267 triangles in Sponza**.
 
 When benchmarked under true apples-to-apples workloads without shadow disparities:
 - **Procedural Showroom Studio** (8 heterogeneous BSDF archetypes): DGC delivers **29,315.12 MHits/s** vs. Megakernel's **6,902.40 MHits/s** (**4.25x speedup** on RX 7900 XTX at 1080p, scaling to **4.68x** at 4K).
@@ -546,7 +546,7 @@ We implemented three hardware-agnostic architectural fixes across the shaders an
 While the current implementation achieves 2.2x–4.7x speedups and high-fidelity visual parity across realistic scenes, several architectural boundaries should be noted for future development:
 
 1. **Octant Queue Capacity Clamping (Pathological Directional Beams)**:
-   - *Behavior*: In `rt_scheduling_worklist_classify.comp`, ray allocation bounds-checks destination slots with `if (vramSlot < pc.queueCapacity)`. If ray count in a single octant exceeds `queueCapacity`, excess rays are dropped to prevent buffer overruns.
+   - *Behavior*: In `rt_scheduling_device_generated_commands_classify.comp`, ray allocation bounds-checks destination slots with `if (vramSlot < pc.queueCapacity)`. If ray count in a single octant exceeds `queueCapacity`, excess rays are dropped to prevent buffer overruns.
    - *Operational Context*: In real-world rendering, diffuse, glossy, and specular bounces naturally distribute across octants (observed maximum load in any single octant is $<30\%$). With `queueCapacity` sized with adequate headroom (e.g. 35% of total ray count), no rays are lost.
    - *Future Work*: For synthetic or extreme laser-collimated scenarios where 100% of rays travel in a single octant direction, a dynamic fallback heap or multi-pass secondary spillover allocation should be introduced.
 
