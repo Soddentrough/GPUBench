@@ -302,3 +302,16 @@ std::string SysMemBandwidthBench::GetConfigName(uint32_t config_idx) const {
     return "Invalid";
   return configs[config_idx].name;
 }
+
+bool SysMemBandwidthBench::IsEmulated(uint32_t config_idx) const {
+  (void)config_idx;
+  return !hasAVX2();
+}
+
+std::string SysMemBandwidthBench::GetConfigCaveat(uint32_t config_idx) const {
+  (void)config_idx;
+  if (!hasAVX2()) {
+    return "Compiled without AVX2 streaming non-temporal stores; memory writes pass through CPU cache hierarchy";
+  }
+  return "";
+}

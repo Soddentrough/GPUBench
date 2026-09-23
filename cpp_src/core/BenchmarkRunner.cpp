@@ -379,15 +379,15 @@ void BenchmarkRunner::discoverBenchmarks() {
   benchmarks.push_back(std::make_unique<CacheBench>(
       "L1 Cache Latency", "ns", l1_size, "cache_latency",
       create_shuffled_indices(l1_size / sizeof(uint32_t)),
-      std::vector<std::string>{"l1l"}));
+      std::vector<std::string>{"l1l"}, 1));
   benchmarks.push_back(std::make_unique<CacheBench>(
       "L2 Cache Latency", "ns", l2_size, "cache_latency",
       create_shuffled_indices(l2_size / sizeof(uint32_t)),
-      std::vector<std::string>{"l2l"}));
+      std::vector<std::string>{"l2l"}, 2));
   benchmarks.push_back(std::make_unique<CacheBench>(
       "L3 Cache Latency", "ns", l3_size, "cache_latency",
       create_shuffled_indices(l3_size / sizeof(uint32_t)),
-      std::vector<std::string>{"l3l"}));
+      std::vector<std::string>{"l3l"}, 3));
 }
 
 struct BenchmarkResultRow {
@@ -651,10 +651,7 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
         }
       } else if (should_run && bench->IsDeviceDependent()) {
         std::string bname = bench->GetName();
-        uint32_t num_unsupported_configs = 1;
-        if (bname == "FP8" || bname == "INT4" || bname == "FP16" || bname == "BF16" || bname == "INT8") {
-          num_unsupported_configs = 2;
-        }
+        uint32_t num_unsupported_configs = bench->GetNumConfigs();
 
         for (uint32_t ci = 0; ci < num_unsupported_configs; ++ci) {
           ResultData result_data;
@@ -662,7 +659,7 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
               ComputeBackendFactory::getBackendName(context->getBackend());
           result_data.deviceName = info.name;
           result_data.benchmarkName = (num_unsupported_configs > 1)
-              ? (bname + (ci == 0 ? " (Vector)" : " (Matrix)"))
+              ? (bname + " (" + bench->GetConfigName(ci) + ")")
               : bname;
           result_data.metric = "";
           result_data.operations = 0;

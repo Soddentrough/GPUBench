@@ -344,6 +344,7 @@ const std::vector<DeviceInfo> &VulkanContext::getDevices() const {
                           hasExt("VK_NV_ray_tracing_invocation_reorder");
 #endif
       info.workGraphsSupported = hasExt("VK_AMDX_shader_enqueue") || hasExt("VK_KHR_work_graphs");
+      info.dgcSupported = hasExt("VK_EXT_device_generated_commands");
 
       deviceInfos.push_back(info);
     }
@@ -502,6 +503,7 @@ DeviceInfo VulkanContext::getCurrentDeviceInfo() const {
                       hasExt("VK_NV_ray_tracing_invocation_reorder");
 #endif
   info.workGraphsSupported = hasExt("VK_AMDX_shader_enqueue") || hasExt("VK_KHR_work_graphs");
+  info.dgcSupported = dgcSupported;
 
   return info;
 }

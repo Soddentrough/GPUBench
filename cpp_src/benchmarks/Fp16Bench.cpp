@@ -114,10 +114,4 @@ BenchmarkResult Fp16Bench::GetResult(uint32_t config_idx) const {
   }
 }
 
-uint32_t Fp16Bench::GetNumConfigs() const {
-  return (matrixKernel != nullptr) ? 2 : 1;
-}
 
-std::string Fp16Bench::GetConfigName(uint32_t config_idx) const {
-  return config_idx == 0 ? "Vector" : "Matrix";
-}

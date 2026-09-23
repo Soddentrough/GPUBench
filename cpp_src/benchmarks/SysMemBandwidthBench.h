@@ -46,9 +46,8 @@ public:
   // System benchmark is not tied to a specific GPU
   bool IsDeviceDependent() const override { return false; }
 
-  // Not an emulated benchmark, it's a real system benchmark, but returns false
-  // for GPU emulation
-  bool IsEmulated(uint32_t config_idx = 0) const override { return false; }
+  bool IsEmulated(uint32_t config_idx = 0) const override;
+  std::string GetConfigCaveat(uint32_t config_idx = 0) const override;
 
 private:
   std::vector<SysMemConfig> configs;

@@ -105,9 +105,34 @@ public:
   }
   bool IsConfigSupported(uint32_t config_idx, const DeviceInfo &info,
                          IComputeContext *context = nullptr) const override {
-    (void)info;
-    (void)context;
-    return !unsupportedConfig[config_idx];
+    if (!IsSupported(info, context)) {
+      return false;
+    }
+    if (unsupportedConfig[config_idx]) {
+      return false;
+    }
+    if (config_idx == 1 || config_idx == 4 || config_idx == 7 || config_idx == 10 || config_idx == 20 || config_idx == 30) {
+      if (!info.serSupported) return false;
+#ifdef HAVE_VULKAN
+      if (context && context->getBackend() == ComputeBackend::Vulkan) {
+        const VulkanContext *vc = static_cast<const VulkanContext *>(context);
+        if (!vc->isSERSupported()) return false;
+      }
+#endif
+    }
+    if (config_idx == 2 || config_idx == 5 || config_idx == 8 ||
+        config_idx == 11 || config_idx == 18 || config_idx == 21 ||
+        config_idx == 24) {
+      if (!info.dgcSupported) return false;
+#ifdef HAVE_VULKAN
+      if (context && context->getBackend() == ComputeBackend::Vulkan) {
+        const VulkanContext *vc = static_cast<const VulkanContext *>(context);
+        if (!vc->isDGCSupported()) return false;
+        if (config_idx == 2 && !vc->isDGCExecutionSetSupported()) return false;
+      }
+#endif
+    }
+    return true;
   }
   std::string GetConfigSupportNote(uint32_t config_idx) const override {
     return unsupportedReason[config_idx];
@@ -121,10 +146,36 @@ public:
     if (config_idx == 1 || config_idx == 4 || config_idx == 7 || config_idx == 10 || config_idx == 20 || config_idx == 30) {
       return "VK_EXT_ray_tracing_invocation_reorder requires Ray Tracing Pipeline with hardware SER support";
     }
+    if (config_idx == 29) {
+      return "Vulkan Ray Tracing Pipeline unsupported or pipeline creation failed";
+    }
+    if (config_idx == 2) {
+#ifdef HAVE_VULKAN
+      if (context && context->getBackend() == ComputeBackend::Vulkan) {
+        const VulkanContext *vc = static_cast<const VulkanContext *>(context);
+        if (vc->isDGCSupported() && !vc->isDGCExecutionSetSupported()) {
+          return "VK_EXT_device_generated_commands IndirectExecutionSet pipeline binding unsupported for compute on this driver";
+        }
+      }
+#endif
+      return "VK_EXT_device_generated_commands unsupported by device/driver";
+    }
+    if (config_idx == 5 || config_idx == 8 || config_idx == 11 ||
+        config_idx == 18 || config_idx == 21 || config_idx == 24) {
+      return "VK_EXT_device_generated_commands unsupported by device/driver";
+    }
     return GetSupportNote(info, context);
   }
   SupportLimitation GetConfigSupportLimitation(uint32_t config_idx) const override {
     if (config_idx == 1 || config_idx == 4 || config_idx == 7 || config_idx == 10 || config_idx == 20 || config_idx == 30) {
+      return SupportLimitation::kHardware;
+    }
+    if (config_idx == 29) {
+      return SupportLimitation::kHardware;
+    }
+    if (config_idx == 2 || config_idx == 5 || config_idx == 8 ||
+        config_idx == 11 || config_idx == 18 || config_idx == 21 ||
+        config_idx == 24) {
       return SupportLimitation::kHardware;
     }
     return SupportLimitation::kNone;

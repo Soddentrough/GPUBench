@@ -407,15 +407,8 @@ const char *RaySchedulingBench::GetSubCategory(uint32_t config_idx) const {
 }
 
 std::string RaySchedulingBench::GetConfigCaveat(uint32_t config_idx) const {
-  if (config_idx == 2 && isDGCAvailable && !isDGCExecutionSetAvailable) {
-    return "VK_EXT_device_generated_commands IndirectExecutionSet pipeline binding unsupported for compute on this driver; executed via Vulkan 1.0 Core (vkCmdDispatchIndirect) fallback.";
-  }
-  if (!isDGCAvailable) {
-    if (config_idx == 2 || config_idx == 5 || config_idx == 8 ||
-        config_idx == 11 || config_idx == 18 || config_idx == 21 ||
-        config_idx == 22 || config_idx == 24) {
-      return "VK_EXT_device_generated_commands unavailable; executed via Vulkan 1.0 Core (vkCmdDispatchIndirect) fallback.";
-    }
+  if (config_idx == 22 && !isDGCAvailable) {
+    return "VK_EXT_device_generated_commands unavailable; executed via Vulkan 1.0 Core (vkCmdDispatchIndirect) fallback.";
   }
   return "";
 }
@@ -1130,6 +1123,17 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
       }
       isDGCAvailable = false;
     }
+  }
+
+  if (!isDGCAvailable) {
+    const std::vector<uint32_t> dgcConfigs = {2, 5, 8, 11, 18, 21, 24};
+    for (uint32_t c : dgcConfigs) {
+      unsupportedConfig[c] = true;
+      unsupportedReason[c] = "VK_EXT_device_generated_commands extension unsupported by device/driver";
+    }
+  } else if (!isDGCExecutionSetAvailable) {
+    unsupportedConfig[2] = true;
+    unsupportedReason[2] = "VK_EXT_device_generated_commands IndirectExecutionSet pipeline binding unsupported for compute on this driver";
   }
 #endif
 }

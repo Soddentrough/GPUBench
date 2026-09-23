@@ -54,6 +54,7 @@ struct DeviceInfo {
   bool structuredSparsitySupport = false;
   bool rayTracingSupport = false;
   bool serSupported = false;
+  bool dgcSupported = false;
   bool workGraphsSupported = false;
   uint32_t vendorID = 0;
   uint32_t deviceID = 0;

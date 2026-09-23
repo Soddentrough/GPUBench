@@ -17,7 +17,12 @@ bool Bf16Bench::IsSupported(const DeviceInfo &info,
     // Standard OpenCL does not support native BFloat16 floating-point arithmetic.
     return false;
   }
-  return info.bf16Support;
+  if (context && context->getBackend() == ComputeBackend::Vulkan) {
+    // glslc / glslang lacks native bfloat16 vector & matrix types; shaders fall back to FP16 math.
+    // Report UNSUPPORTED instead of publishing misleading FP16 numbers under BF16.
+    return false;
+  }
+  return false;
 }
 
 void Bf16Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
@@ -129,14 +134,4 @@ BenchmarkResult Bf16Bench::GetResult(uint32_t config_idx) const {
   }
 }
 
-uint32_t Bf16Bench::GetNumConfigs() const {
-  int configs = 0;
-  if (vectorKernel != nullptr) configs++;
-  if (matrixKernel != nullptr) configs++;
-  return configs;
-}
 
-std::string Bf16Bench::GetConfigName(uint32_t config_idx) const {
-  if (config_idx == 0 && vectorKernel != nullptr) return "Vector";
-  return "Matrix";
-}

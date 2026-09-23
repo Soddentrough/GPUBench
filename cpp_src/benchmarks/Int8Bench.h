@@ -34,10 +34,38 @@ public:
   std::string GetConfigSupportNote(uint32_t config_idx,
                                    const DeviceInfo &info,
                                    IComputeContext *context = nullptr) const override {
-    if (config_idx == 1 && !info.cooperativeMatrixSupport) {
-      return "extension VK_KHR_cooperative_matrix missing or ROCm WMMA not supported";
+    if (config_idx == 1) {
+      if (context && context->getBackend() == ComputeBackend::OpenCL) {
+        return "Cooperative matrix / WMMA not supported in OpenCL API";
+      }
+      if (!info.cooperativeMatrixSupport) {
+        return "extension VK_KHR_cooperative_matrix missing or ROCm WMMA not supported";
+      }
     }
     return GetSupportNote(info, context);
+  }
+  SupportLimitation GetConfigSupportLimitation(uint32_t config_idx) const override {
+    return GetSupportLimitation();
+  }
+  SupportLimitation GetConfigSupportLimitation(uint32_t config_idx,
+                                               const DeviceInfo &info,
+                                               IComputeContext *context = nullptr) const override {
+    if (config_idx == 1) {
+      if (context && context->getBackend() == ComputeBackend::OpenCL) return SupportLimitation::kApi;
+      if (!info.cooperativeMatrixSupport) return SupportLimitation::kHardware;
+    }
+    return GetSupportLimitation(info, context);
+  }
+  bool IsConfigSupported(uint32_t config_idx) const override {
+    if (config_idx == 0) return true;
+    return matrixKernel != nullptr;
+  }
+  bool IsConfigSupported(uint32_t config_idx, const DeviceInfo &info,
+                         IComputeContext *context = nullptr) const override {
+    if (!IsSupported(info, context)) return false;
+    if (config_idx == 0) return true;
+    if (context && context->getBackend() == ComputeBackend::OpenCL) return false;
+    return info.cooperativeMatrixSupport;
   }
   void Setup(IComputeContext &context, const std::string &kernel_dir) override;
   void Run(uint32_t config_idx = 0) override;
@@ -50,9 +78,11 @@ public:
     return "INT8";
   }
   int GetSortWeight() const override { return 70; }
-  uint32_t GetNumConfigs() const override;
+  uint32_t GetNumConfigs() const override { return 2; }
   virtual uint32_t GetExpectedKernelCount() const override { return 2; }
-  std::string GetConfigName(uint32_t config_idx) const override;
+  std::string GetConfigName(uint32_t config_idx) const override {
+    return config_idx == 0 ? "Vector" : "Matrix";
+  }
   const char *GetMetric() const override { return "TOPS"; }
 
 private:

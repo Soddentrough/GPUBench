@@ -30,6 +30,12 @@ CacheBench::~CacheBench() {
 
 bool CacheBench::IsSupported(const DeviceInfo &info,
                              IComputeContext *context) const {
+  if (targetCacheLevel == 3 && info.l3CacheSize == 0) {
+    return false;
+  }
+  if (targetCacheLevel == 2 && info.l2CacheSize == 0) {
+    return false;
+  }
   return true;
 }
 

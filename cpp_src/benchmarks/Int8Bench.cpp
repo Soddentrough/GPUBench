@@ -97,11 +97,3 @@ BenchmarkResult Int8Bench::GetResult(uint32_t config_idx) const {
     return {num_ops, 0.0};
   }
 }
-
-uint32_t Int8Bench::GetNumConfigs() const {
-  return (matrixKernel != nullptr) ? 2 : 1;
-}
-
-std::string Int8Bench::GetConfigName(uint32_t config_idx) const {
-  return config_idx == 0 ? "Vector" : "Matrix";
-}
