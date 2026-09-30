@@ -147,7 +147,7 @@ void Fp8Bench::Teardown() {
 }
 
 BenchmarkResult Fp8Bench::GetResult(uint32_t config_idx) const {
-  if (config_idx == 0 && vectorKernel != nullptr) { // Vector
+  if (config_idx == 0) { // Vector
     // 8 fma operations per iteration, each is 2 ops (multiply, add)
     // 8 * 2 * 4 = 64 FP8-equivalent operations per iteration.
     uint64_t iters = 16384;
@@ -155,24 +155,20 @@ BenchmarkResult Fp8Bench::GetResult(uint32_t config_idx) const {
     return {num_ops, 0.0};
   } else { // Matrix
     // 16x16x16 matrix multiply = 8192 ops per WMMA
-    // 4096 iters * 8 WMMA ops = 32768 WMMA ops per workgroup
+    // In coop_matrix_fp8.comp: 2048 iters * 8 accumulators = 16384 WMMA ops per workgroup
+    // In ROCm fp8_matrix.hip: 4096 iters * 8 WMMA ops = 32768 WMMA ops per workgroup
     // Dispatch: 65536 WGs
-    uint64_t num_ops = (uint64_t)65536 * 32768 * 8192;
+    uint64_t wmma_per_wg = (context && context->getBackend() == ComputeBackend::ROCm) ? 32768ULL : 16384ULL;
+    uint64_t num_ops = (uint64_t)65536 * wmma_per_wg * 8192ULL;
     return {num_ops, 0.0};
   }
 }
 
 uint32_t Fp8Bench::GetNumConfigs() const {
-  int configs = 0;
-  if (vectorKernel != nullptr) configs++;
-  if (matrixKernel != nullptr) configs++;
-  return configs;
+  return 2;
 }
 
 std::string Fp8Bench::GetConfigName(uint32_t config_idx) const {
-  if (vectorKernel != nullptr) {
-    if (config_idx == 0) return "Vector";
-    return "Matrix";
-  }
+  if (config_idx == 0) return "Vector";
   return "Matrix";
 }

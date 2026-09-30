@@ -694,16 +694,27 @@ void ResultFormatter::print() {
                         BOLD + YELLOW + formatDouble(maxTlasRate, 1) + " MInst/s" + RESET + " (TLAS Construction)";
       printSummaryRow("Acceleration Build Peak Rates", val, "");
     }
+    bool isR9700 = false;
+    for (const auto &dn : deviceNames) {
+      if (dn.second.find("R9700") != std::string::npos ||
+          dn.second.find("GFX1201") != std::string::npos ||
+          dn.second.find("gfx1201") != std::string::npos) {
+        isR9700 = true;
+        break;
+      }
+    }
     if (rawBoxGis > 0.0) {
       double pct = (rawBoxGis / 1203.2) * 100.0;
       std::string val = BOLD + GREEN + formatDouble(rawBoxGis, 1) + " GIS/s" + RESET;
-      std::string extra = " (" + formatDouble(pct, 1) + "% of 1.20 TIS/s Boost Peak)";
+      std::string extra = isR9700 ? (" (" + formatDouble(pct, 1) + "% of 1.20 TIS/s R9700 Boost Peak)")
+                                  : (" (" + formatDouble(pct, 1) + "% of 1.20 TIS/s R9700 Ref Peak)");
       printSummaryRow("Hardware BVH8 Box Peak Rate  ", val, extra);
     }
     if (rawTriangleGis > 0.0) {
       double pct = (rawTriangleGis / 300.8) * 100.0;
       std::string val = BOLD + GREEN + formatDouble(rawTriangleGis, 1) + " GIS/s" + RESET;
-      std::string extra = " (" + formatDouble(pct, 1) + "% of 300.8 GIS/s Boost Peak)";
+      std::string extra = isR9700 ? (" (" + formatDouble(pct, 1) + "% of 300.8 GIS/s R9700 Boost Peak)")
+                                  : (" (" + formatDouble(pct, 1) + "% of 300.8 GIS/s R9700 Ref Peak)");
       printSummaryRow("Hardware Triangle Peak Rate  ", val, extra);
     }
     std::string val = BOLD + GREEN + formatDouble(maxRayRate, 1) + " MRays/s" + RESET;
@@ -1264,7 +1275,7 @@ double computeResultValue(const ResultData &r) {
                r.metric == "MTris/s" || r.metric == "MInst/s" ||
                r.metric == "MRecords/s") {
       value = (static_cast<double>(r.operations) / seconds) / 1e6;
-    } else if (r.metric == "GIS/s") {
+    } else if (r.metric == "GIS/s" || r.metric == "GRays/s") {
       value = (static_cast<double>(r.operations) / seconds) / 1e9;
     } else if (r.metric == "GPixels/s") {
       value = (static_cast<double>(r.operations) / seconds) / 1e9;
@@ -1370,6 +1381,9 @@ std::string resultsToJson(const std::vector<ResultData> &results) {
       out += "      \"resolution\": \"" + std::to_string(w) + "x" + std::to_string(h) + "\",\n";
     }
     if (r.benchmarkName.find("RayRawTraversal") != std::string::npos) {
+      bool isR9700Dev = (r.deviceName.find("R9700") != std::string::npos ||
+                         r.deviceName.find("GFX1201") != std::string::npos ||
+                         r.deviceName.find("gfx1201") != std::string::npos);
       double peakGis = (r.configIndex == 0) ? 300.8 : 1203.2;
       double time_s = r.time_ms / 1000.0;
       double throughputGis = 0.0;
@@ -1378,11 +1392,13 @@ std::string resultsToJson(const std::vector<ResultData> &results) {
         throughputGis = (static_cast<double>(ops) / time_s) / 1e9;
       }
       double pctPeak = (peakGis > 0.0) ? ((throughputGis / peakGis) * 100.0) : 0.0;
-      char buf[64];
-      std::snprintf(buf, sizeof(buf), "%.1f%% of %s Boost Peak", pctPeak,
-                    (r.configIndex == 0 ? "300.8 GIS/s" : "1.20 TIS/s"));
+      char buf[80];
+      std::snprintf(buf, sizeof(buf), "%.1f%% of %s %s Peak", pctPeak,
+                    (r.configIndex == 0 ? "300.8 GIS/s" : "1.20 TIS/s"),
+                    (isR9700Dev ? "R9700 Boost" : "R9700 Ref"));
       std::string detailsStr(buf);
       out += "      \"peak_type\": \"" + std::string(r.configIndex == 0 ? "Triangle" : "Box") + "\",\n";
+      out += "      \"target_architecture\": \"" + std::string(isR9700Dev ? "R9700 (GFX1201)" : "Generic") + "\",\n";
       out += "      \"theoretical_peak_gis\": " + std::to_string(peakGis) + ",\n";
       out += "      \"throughput_gis\": " + std::to_string(throughputGis) + ",\n";
       out += "      \"pct_theoretical_peak\": " + std::to_string(pctPeak) + ",\n";

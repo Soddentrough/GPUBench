@@ -346,6 +346,23 @@ const std::vector<DeviceInfo> &VulkanContext::getDevices() const {
       info.workGraphsSupported = hasExt("VK_AMDX_shader_enqueue") || hasExt("VK_KHR_work_graphs");
       info.dgcSupported = hasExt("VK_EXT_device_generated_commands");
 
+      if (props.vendorID == 0x1002) { // AMD
+        std::string dName = props.deviceName;
+        if (dName.find("GFX12") != std::string::npos ||
+            dName.find("gfx12") != std::string::npos ||
+            dName.find("R9700") != std::string::npos ||
+            dName.find("Radeon AI") != std::string::npos ||
+            dName.find("Navi 48") != std::string::npos ||
+            dName.find("RX 9070") != std::string::npos ||
+            dName.find("rx 9070") != std::string::npos) {
+          info.l2CacheSize = 4 * 1024 * 1024;
+          info.l3CacheSize = 64 * 1024 * 1024;
+        } else {
+          info.l2CacheSize = 4 * 1024 * 1024;
+          info.l3CacheSize = 32 * 1024 * 1024;
+        }
+      }
+
       deviceInfos.push_back(info);
     }
   }
@@ -504,6 +521,23 @@ DeviceInfo VulkanContext::getCurrentDeviceInfo() const {
 #endif
   info.workGraphsSupported = hasExt("VK_AMDX_shader_enqueue") || hasExt("VK_KHR_work_graphs");
   info.dgcSupported = dgcSupported;
+
+  if (properties.vendorID == 0x1002) { // AMD
+    std::string dName = properties.deviceName;
+    if (dName.find("GFX12") != std::string::npos ||
+        dName.find("gfx12") != std::string::npos ||
+        dName.find("R9700") != std::string::npos ||
+        dName.find("Radeon AI") != std::string::npos ||
+        dName.find("Navi 48") != std::string::npos ||
+        dName.find("RX 9070") != std::string::npos ||
+        dName.find("rx 9070") != std::string::npos) {
+      info.l2CacheSize = 4 * 1024 * 1024;
+      info.l3CacheSize = 64 * 1024 * 1024;
+    } else {
+      info.l2CacheSize = 4 * 1024 * 1024;
+      info.l3CacheSize = 32 * 1024 * 1024;
+    }
+  }
 
   return info;
 }

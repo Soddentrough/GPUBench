@@ -850,13 +850,13 @@ void GuiApp::initializeBenchmarkCategories() {
         cat.description = "Host CPU system memory DDR streaming bandwidth and latency";
 
         cat.subgroups.push_back({"Host CPU System Memory", "Host System", "System Memory Bandwidth", "Host CPU DDR read, write, copy bandwidth and latency", {
-            {"System Memory Bandwidth", "Host CPU Memory Bandwidth", "Multi-Threaded Read (32C / 64T)", "System", "GB/s", "Host CPU DDR read streaming bandwidth (multi-threaded)", true},
-            {"System Memory Bandwidth", "Host CPU Memory Bandwidth", "Multi-Threaded Write (32C / 64T)", "System", "GB/s", "Host CPU DDR write streaming bandwidth (multi-threaded)", true},
-            {"System Memory Bandwidth", "Host CPU Memory Bandwidth", "Multi-Threaded Copy (32C / 64T)", "System", "GB/s", "Host CPU DDR copy bandwidth (multi-threaded)", true},
+            {"System Memory Bandwidth", "Host CPU Memory Bandwidth", "Multi-Threaded Read", "System", "GB/s", "Host CPU DDR read streaming bandwidth (multi-threaded)", true},
+            {"System Memory Bandwidth", "Host CPU Memory Bandwidth", "Multi-Threaded Write", "System", "GB/s", "Host CPU DDR write streaming bandwidth (multi-threaded)", true},
+            {"System Memory Bandwidth", "Host CPU Memory Bandwidth", "Multi-Threaded Copy", "System", "GB/s", "Host CPU DDR copy bandwidth (multi-threaded)", true},
             {"System Memory Bandwidth", "Host CPU Memory Bandwidth", "Single-Threaded Read (1T)", "System", "GB/s", "Single-threaded host CPU DDR read bandwidth", true},
             {"System Memory Bandwidth", "Host CPU Memory Bandwidth", "Single-Threaded Write (1T)", "System", "GB/s", "Single-threaded host CPU DDR write bandwidth", true},
             {"System Memory Bandwidth", "Host CPU Memory Bandwidth", "Single-Threaded Copy (1T)", "System", "GB/s", "Single-threaded host CPU DDR copy bandwidth", true},
-            {"System Memory Latency", "Host CPU Memory Latency", "Pointer Chasing Latency", "System", "ns", "Host pointer-chasing DRAM & CPU cache latency", true}
+            {"System Memory Latency", "Host CPU Memory Latency", "Default", "System", "ns", "Host pointer-chasing DRAM & CPU cache latency", true}
         }});
 
         m_categories.push_back(cat);
@@ -1353,7 +1353,7 @@ void GuiApp::renderLeftSidebar(float width, float height) {
         ImGui::PushTextWrapPos(s(300.0f));
         ImGui::TextUnformatted(
             "Controls the internal framebuffer canvas dimensions and total ray count for Ray Tracing, Path Tracing, and Graphics benchmark passes.\n\n"
-            "Higher resolutions increase compute and memory bandwidth load quadratically with pixel count:\n"
+            "Higher resolutions increase compute and memory bandwidth load linearly / proportionally with pixel count (W x H):\n"
             "  • 720p:  1280 x 720   (~0.92M primary rays)\n"
             "  • 1080p: 1920 x 1080  (~2.07M primary rays) [FHD]\n"
             "  • 1440p: 2560 x 1440  (~3.69M primary rays) [QHD]\n"

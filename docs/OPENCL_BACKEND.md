@@ -27,12 +27,12 @@ GPUBench classifies tests cleanly into fully supported native workloads and tran
 | **FP16 Compute** | ✅ **Supported** | `cl_khr_fp16` (`half` / `half2`) | Vector compute throughput. (Matrix mode requires cooperative matrix). |
 | **BF16 Compute** | ⚠️ *API Limitation* | None (`cl_khr_bfloat16` not standard) | Reported as `UNSUPPORTED (API Limitation)` without error/crash. |
 | **FP8 Compute** | ⚠️ *API Limitation* | None | Reported as `UNSUPPORTED (API Limitation)`. |
-| **FP4 / INT4** | ⚠️ *Hardware Limitation* | None | Reported as `UNSUPPORTED (Hardware Limitation)`. |
+| **FP4 / INT4** | ⚠️ *API / Toolchain Limitation* | None (Sub-byte 4-bit types not standardized in OpenCL C) | Reported as `UNSUPPORTED (Toolchain Limitation)`. |
 | **INT8 Compute** | ✅ **Supported** | Standard vector math (`char4`) | Vector throughput across all OpenCL vendors. |
 | **Device Memory Bandwidth** | ✅ **Supported** | Standard OpenCL Buffers | 128, 256, and 1024 threads/group sweep modes (Read, Write, R/W). |
 | **Cache Latency** | ✅ **Supported** | Pointer-chasing buffer traversal | Single-workitem pointer chasing across L0/L1/L2/L3 cache levels. |
 | **Pixel Fill Rate (ROPs)** | ⚠️ *API Limitation* | Graphics pipeline required | Reported as `UNSUPPORTED (API Limitation)` (OpenCL lacks rasterizer/ROPs). |
-| **Ray Tracing (All 9 Suites)** | ⚠️ *API Limitation* | `VK_KHR_ray_tracing_pipeline` required | Reported as `UNSUPPORTED (API Limitation)` (OpenCL lacks BVH traversal ISA). |
+| **Ray Tracing (All 9 Suites)** | ⚠️ *API Limitation* | `VK_KHR_ray_query` / hardware BVH acceleration required | Reported as `UNSUPPORTED (API Limitation)` (OpenCL lacks hardware BVH traversal and ray query primitives). |
 
 ---
 

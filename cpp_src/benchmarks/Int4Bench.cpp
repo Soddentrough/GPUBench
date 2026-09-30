@@ -102,7 +102,7 @@ void Int4Bench::Teardown() {
 }
 
 BenchmarkResult Int4Bench::GetResult(uint32_t config_idx) const {
-  if (config_idx == 0 && vectorKernel != nullptr) { // Vector
+  if (config_idx == 0) { // Vector
     uint64_t iters = 32768;
     uint64_t ops_per_iter = 32;
     if (context) {
@@ -125,13 +125,10 @@ BenchmarkResult Int4Bench::GetResult(uint32_t config_idx) const {
 }
 
 uint32_t Int4Bench::GetNumConfigs() const {
-  int configs = 0;
-  if (vectorKernel != nullptr) configs++;
-  if (matrixKernel != nullptr) configs++;
-  return configs;
+  return 2;
 }
 
 std::string Int4Bench::GetConfigName(uint32_t config_idx) const {
-  if (config_idx == 0 && vectorKernel != nullptr) return "Vector";
+  if (config_idx == 0) return "Vector";
   return "Matrix";
 }

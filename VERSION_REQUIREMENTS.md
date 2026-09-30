@@ -38,7 +38,7 @@ All OpenCL kernels in the `kernels/` directory require OpenCL 1.2 or later. This
 
 **Minimum Version**: 1.4+
 
-All Vulkan shaders in the `shaders/` directory target GLSL version 460, which corresponds to Vulkan 1.4. This provides:
+All Vulkan shaders in the `shaders/` directory target GLSL version 460 compiled to SPIR-V 1.4/1.6, running on Vulkan 1.4+ runtimes. This provides:
 - Support for extended arithmetic types (8-bit, 16-bit storage)
 - Enhanced shader capabilities
 - Better optimization opportunities
@@ -66,8 +66,8 @@ Each kernel/shader file includes a comment at the top indicating its version req
 - Verify driver support for required extensions (`cl_khr_fp16`, `cl_khr_fp64`)
 
 ### Vulkan
-- Vulkan 1.4 is widely supported on modern GPUs (2020+)
-- Check for extension support: `VK_EXT_shader_16bit_storage`, `VK_EXT_shader_8bit_storage`, `VK_EXT_shader_float64`
+- Vulkan 1.4 runtimes are supported on modern AMD (RDNA 2+ / ROCm 6.4+), NVIDIA (RTX series), and Intel (Arc) graphics hardware.
+- Check for required features and extensions: `VkPhysicalDeviceFeatures::shaderFloat64`, `VK_KHR_shader_float16_int8`, `VK_KHR_8bit_storage`, `VK_KHR_16bit_storage`, `VK_KHR_ray_query`, and `VK_EXT_device_generated_commands`.
 
 ## Build Requirements
 

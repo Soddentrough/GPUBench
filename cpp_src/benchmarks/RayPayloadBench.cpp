@@ -300,7 +300,8 @@ void RayPayloadBench::Teardown() {
 }
 
 BenchmarkResult RayPayloadBench::GetResult(uint32_t config_idx) const {
-  return {(uint64_t)rayCount, 0.0};
+  (void)config_idx;
+  return {(uint64_t)rayCount * 2, 0.0};
 }
 
 const char *RayPayloadBench::GetName() const { return "RayPayload"; }

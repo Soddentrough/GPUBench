@@ -390,8 +390,8 @@ void RayIntersectBench::Teardown() {
 }
 
 BenchmarkResult RayIntersectBench::GetResult(uint32_t config_idx) const {
-  // Each ray hits exactly 64 layers in our structured grid
-  return {(uint64_t)rayCount * 64, 0.0};
+  (void)config_idx;
+  return {(uint64_t)rayCount, 0.0};
 }
 
 const char *RayIntersectBench::GetName() const { return "RayIntersect"; }

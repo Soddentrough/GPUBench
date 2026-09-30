@@ -15,9 +15,9 @@ GPUBench is a high-performance cross-platform GPU benchmarking tool designed to 
   - **Multi-Layer Alpha Testing**: AnyHit alpha evaluation through 16 stacked cutout planes.
   - **Acceleration Structure Throughput**: BLAS/TLAS build and dynamic vertex refit rates.
 - **Comprehensive Compute Data Types**: 
-  - Floating Point: FP64, FP32, FP16, FP8, FP6, FP4
+  - Floating Point: FP64, FP32, FP16, BF16, FP8, FP6, FP4
   - Integer: INT8, INT4
-- **Memory & Cache Hierarchy**: Measure Device VRAM Bandwidth, Host/PCIe Bandwidth, and L1/L2/L3 Cache latency and throughput.
+- **Memory & Cache Hierarchy**: Measure Device VRAM Bandwidth, Host/PCIe Bandwidth, and L0/L1/L2/L3 Cache latency.
 - **Dynamic Loading**: Backends are loaded at runtime, making them optional and reducing installation dependencies.
 - **Cross-Platform**: Built for Linux and Windows.
 
@@ -111,12 +111,12 @@ $ gpubench -d 1
   ╭─ Hardware Traversal & Acceleration ──────────────────────────────────────────────────────────────────────────────────────────╮
   │ Workload                                     │ Backend  │             Throughput │ Details / Speedup                         │
   ├──────────────────────────────────────────────┼──────────┼────────────────────────┼───────────────────────────────────────────┤
-  │ Hardware Ray-Triangle Intersection           │ Vulkan   │          1435.56 GIS/s │                                           │
+  │ Hardware Ray-Triangle Intersection           │ Vulkan   │           274.68 GIS/s │                                           │
   │ Hardware Ray-Box Traversal                   │ Vulkan   │           672.38 GIS/s │                                           │
   │ Primary rays (coherent)                      │ Vulkan   │       5,600.04 MRays/s │                                           │
   │ Secondary bounce rays (incoherent)           │ Vulkan   │       3,083.89 MRays/s │                                           │
-  │ AnyHit Opacity Alpha-Testing                 │ Vulkan   │          37.28 GRays/s │                                           │
-  │ Procedural Geometry (AABB Spheres)           │ Vulkan   │          38.22 GRays/s │                                           │
+  │ AnyHit Opacity Alpha-Testing                 │ Vulkan   │          37.28 MRays/s │                                           │
+  │ Procedural Geometry (AABB Spheres)           │ Vulkan   │          38.22 MRays/s │                                           │
   │ BLAS Construction (1M Triangles)             │ Vulkan   │          50.74 MTris/s │                                           │
   │ Dynamic BLAS Refit / Update                  │ Vulkan   │         117.91 MTris/s │                                           │
   │ TLAS Instance Hierarchy (10K Instances)      │ Vulkan   │           1.71 MInst/s │                                           │
@@ -132,7 +132,7 @@ $ gpubench -d 1
   │ • Wavefront Scheduling Speedup : 2.69x in PBR Ray Tracing (558.2 vs 207.3 MRays/s)                                           │
   │ • Acceleration Build Peak Rates : 117.9 MTris/s (BLAS Update) | 1.7 MInst/s (TLAS Construction)                              │
   │ • Hardware BVH8 Box Peak Rate   : 672.4 GIS/s (55.9% of 1.20 TIS/s Boost Peak)                                               │
-  │ • Hardware Triangle Peak Rate   : 1435.6 GIS/s (477.2% of 300.8 GIS/s Boost Peak)                                            │
+  │ • Hardware Triangle Peak Rate   : 274.7 GIS/s (91.3% of 300.8 GIS/s Boost Peak)                                              │
   │ • Peak Measured Ray Rate        : 5,600.0 MRays/s (Primary rays (coherent))                                                  │
   ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```

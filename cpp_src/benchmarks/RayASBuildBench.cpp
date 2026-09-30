@@ -540,6 +540,7 @@ void RayASBuildBench::Teardown() {
 
 BenchmarkResult RayASBuildBench::GetResult(uint32_t config_idx) const {
   uint64_t ops = 0;
+  uint32_t iters = (config_idx == 2 || config_idx == 3 || config_idx == 4 || config_idx == 7) ? 5 : 10;
   switch (config_idx) {
   case 0: ops = 1000000; break;
   case 1: ops = 1000000; break;
@@ -551,7 +552,12 @@ BenchmarkResult RayASBuildBench::GetResult(uint32_t config_idx) const {
   case 7: ops = 200000; break;
   default: ops = 1; break;
   }
-  return {ops, buildTimes.at(config_idx)};
+  double time_val = 0.0;
+  auto it = buildTimes.find(config_idx);
+  if (it != buildTimes.end()) {
+    time_val = it->second;
+  }
+  return {ops * iters, time_val};
 }
 
 const char *RayASBuildBench::GetName() const { return "RayASBuild"; }

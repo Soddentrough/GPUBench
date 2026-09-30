@@ -79,7 +79,7 @@ The following diagram illustrates the compute and ray tracing pipeline of the AM
 ### 2.1. Compute Unit Organization & Register File
 - **Dual Compute Unit Architecture**: Each Workgroup Processor (WGP) contains two Compute Units (CUs), each equipped with two independent SIMD32 vector units capable of dual-issue ALU operation.
 - **GFX1201 Scale (Radeon AI PRO R9700)**:
-  - **64 Dual Compute Units (128 CUs / 256 SIMD32 execution engines)**.
+  - **32 WGPs / 64 Compute Units / 128 SIMD32 vector engines**.
   - **Physical VGPR Capacity**: 1536 Wave32 registers per SIMD.
   - **Maximum Concurrent Waves**: Up to 16 Wave32s per SIMD (32 waves per CU, 64 waves per WGP).
   - **Occupancy Scaling**:

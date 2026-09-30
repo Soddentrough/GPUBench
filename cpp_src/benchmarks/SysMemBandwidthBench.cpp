@@ -198,31 +198,34 @@ void SysMemBandwidthBench::workerLoop(unsigned int tid) {
 
     if (cfgIdx < configs.size()) {
       const auto &config = configs[cfgIdx];
-      size_t chunkSize = bufferSize / threadCount;
-      chunkSize = (chunkSize / 256) * 256;
+      uint32_t activeThreads = (config.numThreads > 0) ? config.numThreads : threadCount;
+      if (tid < activeThreads) {
+        size_t chunkSize = bufferSize / threadCount;
+        chunkSize = (chunkSize / 256) * 256;
 
-      size_t offset = tid * chunkSize;
-      char *tSrc = (char *)buffer + offset;
-      char *tDst = (char *)destBuffer + offset;
+        size_t offset = tid * chunkSize;
+        char *tSrc = (char *)buffer + offset;
+        char *tDst = (char *)destBuffer + offset;
 
 #if ENABLE_AVX2
-      if (useAVX2) {
-        if (config.mode == SysMemTestMode::Read) {
-          run_read_avx2(tSrc, chunkSize);
-        } else if (config.mode == SysMemTestMode::Write) {
-          run_write_avx2(tSrc, chunkSize);
-        } else {
-          run_copy_avx2(tSrc, tDst, chunkSize);
-        }
-      } else
+        if (useAVX2) {
+          if (config.mode == SysMemTestMode::Read) {
+            run_read_avx2(tSrc, chunkSize);
+          } else if (config.mode == SysMemTestMode::Write) {
+            run_write_avx2(tSrc, chunkSize);
+          } else {
+            run_copy_avx2(tSrc, tDst, chunkSize);
+          }
+        } else
 #endif
-      {
-        if (config.mode == SysMemTestMode::Read) {
-          run_read_fallback(tSrc, chunkSize);
-        } else if (config.mode == SysMemTestMode::Write) {
-          run_write_fallback(tSrc, chunkSize);
-        } else {
-          run_copy_fallback(tSrc, tDst, chunkSize);
+        {
+          if (config.mode == SysMemTestMode::Read) {
+            run_read_fallback(tSrc, chunkSize);
+          } else if (config.mode == SysMemTestMode::Write) {
+            run_write_fallback(tSrc, chunkSize);
+          } else {
+            run_copy_fallback(tSrc, tDst, chunkSize);
+          }
         }
       }
     }
@@ -261,7 +264,8 @@ void SysMemBandwidthBench::Run(uint32_t config_idx) {
 
   lastRunTimeMs = elapsedMs;
   // Calculate bytes transferred
-  uint64_t totalBytes = chunkSize * threadCount;
+  uint32_t activeThreads = (config.numThreads > 0) ? config.numThreads : threadCount;
+  uint64_t totalBytes = chunkSize * activeThreads;
   if (config.mode == SysMemTestMode::ReadWrite) {
     totalBytes *= 2;
   }

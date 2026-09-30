@@ -60,9 +60,9 @@ int main(int argc, char **argv) {
   app.footer(
       "\nBENCHMARK GROUPS & INCLUDED TESTS:\n"
       "  compute     Compute arithmetic units (vector & matrix tensor operations):\n"
-      "              FP64, FP32, FP16, BF16, FP8, INT8, INT4\n"
+      "              FP64, FP32, FP16, BF16, FP8, FP6, FP4, INT8, INT4\n"
       "  memory      VRAM and GPU cache hierarchy:\n"
-      "              Device Memory Bandwidth, L0/L1/L2/L3 Cache Bandwidth & Latency\n"
+      "              Device Memory Bandwidth, L0/L1/L2/L3 Cache Latency\n"
       "  graphics    All 3D graphics rendering pipelines (combines 'raster' and 'raytracing', alias: 'gfx'):\n"
       "              Runs both fixed-function rasterization (ROP) and hardware ray tracing\n"
       "  raster      Fixed-function rasterization & ROP pixel fill rates (subset of graphics):\n"
@@ -443,31 +443,9 @@ int main(int argc, char **argv) {
       }
     }
 
-    if (contexts.empty() && !list_backends) {
+    if (contexts.empty()) {
       std::cerr << "No valid compute backends found." << std::endl;
       return EXIT_FAILURE;
-    }
-
-    if (list_backends) {
-      // Report both compile-time support and runtime availability (a
-      // lightweight context creation probe) for each backend.
-      auto reportBackend = [](const char *name, ComputeBackend backend) {
-        if (!ComputeBackendFactory::isAvailable(backend)) {
-          std::cout << "- " << name << ": Not Supported (not compiled in)"
-                    << std::endl;
-          return;
-        }
-        bool runtime = ComputeBackendFactory::isRuntimeAvailable(backend);
-        std::cout << "- " << name << ": Supported, runtime "
-                  << (runtime ? "available" : "UNAVAILABLE (driver/GPU "
-                                             "missing or init failed)")
-                  << std::endl;
-      };
-      std::cout << "Available backends:" << std::endl;
-      reportBackend("vulkan", ComputeBackend::Vulkan);
-      reportBackend("opencl", ComputeBackend::OpenCL);
-      reportBackend("rocm", ComputeBackend::ROCm);
-      return EXIT_SUCCESS;
     }
 
     if (list_devices) {

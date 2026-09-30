@@ -1,7 +1,7 @@
 #version 460
 #extension GL_EXT_control_flow_attributes : enable
 
-layout (local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+layout (local_size_x = 512, local_size_y = 1, local_size_z = 1) in;
 
 layout(set = 0, binding = 0, std430) readonly restrict buffer InputData {
     vec4 inputData[];

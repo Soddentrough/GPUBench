@@ -122,7 +122,14 @@ void CacheBench::Setup(IComputeContext &context,
                   << (void *)((char *)hostMem + bufferSize) << " ("
                   << (bufferSize / 1024 / 1024) << " MB)" << std::endl;
       }
-      buffer = context.createBuffer(bufferSize, hostMem);
+      if (context.getBackend() == ComputeBackend::OpenCL) {
+        // Do not use CL_MEM_USE_HOST_PTR on OpenCL because on discrete PCIe GPUs it places
+        // memory in host RAM across the PCIe bus, measuring PCIe transfer latency instead of GPU cache.
+        buffer = context.createBuffer(bufferSize);
+        context.writeBuffer(buffer, 0, bufferSize, hostMem);
+      } else {
+        buffer = context.createBuffer(bufferSize, hostMem);
+      }
     } else {
       // Fallback to standard allocation if host allocation fails (unlikely)
       buffer = context.createBuffer(bufferSize);

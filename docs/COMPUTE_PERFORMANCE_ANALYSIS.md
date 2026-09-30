@@ -128,12 +128,12 @@ Achieving 67-69% of theoretical peak is actually excellent for real-world benchm
 ### INT Performance Optimizations
 
 **Before INT Optimization:**
-- INT8: 7.635 TFLOPS
-- INT4: 11.495 TFLOPS
+- INT8: 7.635 TOPS
+- INT4: 11.495 TOPS
 
 **After INT Optimization:**
-- INT8: 19.749 TFLOPS (+159% improvement)
-- INT4: 17.300 TFLOPS (+51% improvement)
+- INT8: 19.749 TOPS (+159% improvement)
+- INT4: 17.300 TOPS (+51% improvement)
 
 The INT benchmarks used similar optimization strategies:
 - Packed i8vec4 operations (4 INT8 values per vector)
@@ -143,7 +143,7 @@ The INT benchmarks used similar optimization strategies:
 
 ### Why INT Performance Is Lower Than Expected?
 
-INT8 (19.7 TFLOPS) and INT4 (17.3 TFLOPS) are lower than FP16 (37.9 TFLOPS) due to:
+INT8 (19.7 TOPS) and INT4 (17.3 TOPS) are lower than FP16 (37.9 TFLOPS) due to:
 
 1. **Gaming GPU Optimization**: RDNA2 is heavily optimized for FP operations (gaming workloads)
 2. **INT4 Emulation Overhead**: INT4 requires bitwise AND operations to maintain 4-bit range
@@ -157,8 +157,8 @@ However, the achieved INT performance is still very good and represents efficien
 The optimizations successfully addressed the main performance issues:
 - ✓ Packed FP16 operations achieved 82% of theoretical (37.8 TFLOPS)
 - ✓ FP32 achieved 97% of theoretical (22.3 TFLOPS)  
-- ✓ INT8 achieved good performance with packed operations (19.7 TFLOPS)
-- ✓ INT4 achieved good performance despite emulation overhead (17.3 TFLOPS)
+- ✓ INT8 achieved good performance with packed operations (19.7 TOPS)
+- ✓ INT4 achieved good performance despite emulation overhead (17.3 TOPS)
 - ✓ Increased workgroup count improved GPU utilization across all benchmarks
 - ✓ Multiple accumulators eliminated dependency chains
 
