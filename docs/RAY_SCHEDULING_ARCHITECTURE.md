@@ -189,14 +189,15 @@ gpubench -d 1 -b rayscheduling -s outdoor
 gpubench -d 1 -b rayscheduling -s forest
 
 # Dump 4K UHD PNG/PPM frames, difference heatmaps, and 4-scenario comparative grid
-gpubench -d 1 -b rayscheduling -s all --dump-renders
+gpubench -d 0 -b rayscheduling -s all --dump-renders
 
-# Run a specific benchmark configuration (e.g. Config 21: Primary Rays (Megakernel), Config 22: Primary Rays (DGC))
-gpubench -d 1 -b rayscheduling -s forest -c 21
-gpubench -d 1 -b rayscheduling -s forest -c 22
+# Run a specific benchmark configuration (e.g. Config 17: Primary Rays (Compute Megakernel), Config 18: Primary Rays (Wavefront - DGC), Config 29: Primary Rays (Pipeline Megakernel - RTP))
+gpubench -d 0 -b rayscheduling -s forest -c 17
+gpubench -d 0 -b rayscheduling -s forest -c 18
+gpubench -d 0 -b rayscheduling -s forest -c 29
 
 # Run in profiling snapshot mode (single submit for clean RGP trace capture)
-gpubench -d 1 -b rayscheduling -s forest -c 22 --profile-snapshot
+gpubench -d 0 -b rayscheduling -s forest -c 18 --profile-snapshot
 ```
 
 ### 6.2 Inspecting Shader Occupancy & Compiler Statistics

@@ -754,10 +754,10 @@ elseif(UNIX AND NOT APPLE)
         COMMENT "Running RPM dry-run and structural verification..."
     )
     add_custom_target(check-parity
-        COMMAND ${CMAKE_COMMAND} -E env MESA_VK_IGNORE_CONFORMANCE_WARNING=1 "${CMAKE_CURRENT_BINARY_DIR}/gpubench" -d 1 -b rayscheduling --profile-snapshot --verify-parity
+        COMMAND ${CMAKE_COMMAND} -E env MESA_VK_IGNORE_CONFORMANCE_WARNING=1 "${CMAKE_CURRENT_BINARY_DIR}/gpubench" -d 0 -b rayscheduling --profile-snapshot --verify-parity
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
         DEPENDS gpubench
-        COMMENT "Running automated visual parity gate between Megakernel and Device-Generated Commands (DGC) on GPU 1..."
+        COMMENT "Running automated visual parity gate between Megakernel and Device-Generated Commands (DGC) on GPU 0..."
     )
     add_custom_target(package_deb
         COMMAND ${CMAKE_COMMAND} -E env --unset=BASH_FUNC_module%% --unset=BASH_FUNC_ml%% --unset=BASH_FUNC__module_raw%% cpack -G DEB

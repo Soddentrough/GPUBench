@@ -146,18 +146,18 @@ std::string cleanWorkloadName(const std::string &rawName, const std::string &sub
   }
 
   // Strip repeated scene path tracing patterns
-  if (subcat.find("Path Tracing") != std::string::npos) {
-    size_t dash = name.rfind(" - ");
-    if (dash != std::string::npos) {
-      name = name.substr(dash + 3);
+  if (subcat.find("Path Tracing") != std::string::npos && name.rfind("Primary Rays", 0) != 0) {
+    if (name.rfind("Full Scene Path Tracing - ", 0) == 0) {
+      name = name.substr(26);
     }
   }
 
   // Strip repeated scene ray tracing patterns
-  if (subcat.find("Scene Ray Tracing") != std::string::npos) {
-    size_t dash = name.rfind(" - ");
-    if (dash != std::string::npos) {
-      name = name.substr(dash + 3);
+  if (subcat.find("Scene Ray Tracing") != std::string::npos && name.rfind("Primary Rays", 0) != 0) {
+    if (name.rfind("Full Scene Ray Tracing (PBR) - ", 0) == 0) {
+      name = name.substr(31);
+    } else if (name.rfind("Full Scene Ray Tracing - ", 0) == 0) {
+      name = name.substr(25);
     }
   }
 
@@ -275,10 +275,12 @@ void ResultFormatter::print() {
           maxRayRate = rate;
           maxRayWorkload = cleanName;
         }
-        if (res.benchmarkName.find("Primary Rays (Megakernel)") != std::string::npos ||
+        if (res.benchmarkName.find("Primary Rays (Compute Megakernel)") != std::string::npos ||
+            res.benchmarkName.find("Primary Rays (Megakernel)") != std::string::npos ||
             res.benchmarkName.find("Full Scene Ray Tracing (PBR) - Megakernel") != std::string::npos) {
           megakernelPBRRate = rate;
-        } else if (res.benchmarkName.find("Primary Rays (DGC)") != std::string::npos ||
+        } else if (res.benchmarkName.find("Primary Rays (Wavefront - DGC)") != std::string::npos ||
+                   res.benchmarkName.find("Primary Rays (DGC)") != std::string::npos ||
                    res.benchmarkName.find("Full Scene Ray Tracing (PBR) - DGC") != std::string::npos ||
                    res.benchmarkName.find("Full Scene Ray Tracing (PBR) - Work Lists") != std::string::npos ||
                    res.benchmarkName.find("Full Scene Ray Tracing (PBR) - Device-Generated Commands") != std::string::npos) {
@@ -318,10 +320,10 @@ void ResultFormatter::print() {
   const size_t cardBoxWidth = 128;
   const size_t cardInnerWidth = cardBoxWidth - 4; // 124
 
-  const size_t w1 = 44;
+  const size_t w1 = 46;
   const size_t w2 = 8;
   const size_t w3 = 22;
-  const size_t w4 = 41;
+  const size_t w4 = 39;
 
   std::cout << std::endl;
   for (uint32_t devIdx : deviceIndices) {
@@ -420,7 +422,7 @@ void ResultFormatter::print() {
             for (const auto &benchPair : subcat.benchmarks) {
               std::string cName = std::get<2>(benchPair.first);
               bool isCandidate = false;
-              if (hasMegakernel && (cName.find("Megakernel") != std::string::npos || cName.find("Traditional") != std::string::npos)) {
+              if (hasMegakernel && ((cName.find("Megakernel") != std::string::npos && cName.find("RTP") == std::string::npos) || cName.find("Traditional") != std::string::npos)) {
                 isCandidate = true;
               } else if (!hasMegakernel && hasVector && cName.find("Vector") != std::string::npos) {
                 isCandidate = true;
@@ -579,7 +581,9 @@ void ResultFormatter::print() {
                         }
                       }
                     }
-                  } else if (fullName == baselineKeyName || fullName.find("Megakernel") != std::string::npos || fullName.find("Traditional") != std::string::npos || fullName.find("Baseline") != std::string::npos) {
+                  } else if (fullName == baselineKeyName ||
+                             (((fullName.find("Megakernel") != std::string::npos && fullName.find("RTP") == std::string::npos) ||
+                               fullName.find("Traditional") != std::string::npos || fullName.find("Baseline") != std::string::npos))) {
                     isLocalBase = true;
                   } else if (hasComparison && baselineVal > 0.0 && baselineMetric == res.metric) {
                     localBaseVal = baselineVal;

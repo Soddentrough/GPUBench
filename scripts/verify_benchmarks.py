@@ -360,8 +360,8 @@ def evaluate_results(raw_data: Any) -> bool:
 
         scenarios = [
             ("Scene Ray Tracing (PBR)",
-             ["Full Scene Ray Tracing (PBR) - Megakernel", "Full Scene Render - Megakernel", "Full Scene Render: Megakernel", "Total Scene Render - Traditional Megakernel", "Primary Ray Tracing - Traditional Megakernel", "Primary Rays (Traditional)", "Primary Rays (Megakernel)", "Total Scene Render (Megakernel)"],
-             ["Primary Rays (DGC)", "Full Scene Ray Tracing (PBR) - DGC", "Full Scene Ray Tracing (PBR) - Device-Generated Commands", "Full Scene Render - DGC", "Total Scene Render - DGC", "Full Scene Ray Tracing (PBR) - Work Lists", "Primary Rays (Work Lists)", "Total Scene Render (Work Lists)"]),
+             ["Primary Rays (Compute Megakernel)", "Full Scene Ray Tracing (PBR) - Megakernel", "Full Scene Render - Megakernel", "Full Scene Render: Megakernel", "Total Scene Render - Traditional Megakernel", "Primary Ray Tracing - Traditional Megakernel", "Primary Rays (Traditional)", "Primary Rays (Megakernel)", "Total Scene Render (Megakernel)"],
+             ["Primary Rays (Wavefront - DGC)", "Primary Rays (DGC)", "Full Scene Ray Tracing (PBR) - DGC", "Full Scene Ray Tracing (PBR) - Device-Generated Commands", "Full Scene Render - DGC", "Total Scene Render - DGC", "Full Scene Ray Tracing (PBR) - Work Lists", "Primary Rays (Work Lists)", "Total Scene Render (Work Lists)"]),
             ("Material Shading",
              ["Material Shading (Megakernel)", "Material (Megakernel)", "Material Shading - Traditional Megakernel", "Material Shading (Traditional)"],
              ["Material Shading (DGC)", "Material (DGC)", "Material Shading - DGC", "Material Shading - Work Lists", "Material Shading (Work Lists)"]),

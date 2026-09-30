@@ -356,9 +356,9 @@ std::string RaySchedulingBench::GetConfigName(uint32_t config_idx) const {
   case 16:
     return "Stage: BVH Traversal - 2D Morton Z-Curve (4x8)";
   case 17:
-    return "Primary Rays (Megakernel)";
+    return "Primary Rays (Compute Megakernel)";
   case 18:
-    return "Primary Rays (DGC)";
+    return "Primary Rays (Wavefront - DGC)";
   case 19:
     return "Stage: Directional Shadows (Megakernel)";
   case 20:
@@ -380,9 +380,9 @@ std::string RaySchedulingBench::GetConfigName(uint32_t config_idx) const {
   case 28:
     return "Stage: Queue Memory - VRAM Round-Trip Bandwidth";
   case 29:
-    return "Primary Rays (RTP)";
+    return "Primary Rays (Pipeline Megakernel - RTP)";
   case 30:
-    return "Primary Rays (RTP + SER)";
+    return "Primary Rays (Pipeline Megakernel - RTP + SER)";
   default:
     return "Unknown";
   }

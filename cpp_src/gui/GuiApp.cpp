@@ -769,10 +769,10 @@ void GuiApp::initializeBenchmarkCategories() {
 
         // Subgroup 2: Primary & Bounce Ray Tracing (14 tests)
         cat.subgroups.push_back({"Primary & Bounce Ray Tracing", "Ray Tracing", "RayScheduling", "Primary camera ray tracing and multi-bounce path tracing across dispatches", {
-            {"RayScheduling", "Scene Ray Tracing (PBR)", "Primary Rays (Megakernel)", "Ray Tracing", "MRays/s", "PBR primary ray tracing baseline using unified compute dispatch and rayQueryEXT", true},
-            {"RayScheduling", "Scene Ray Tracing (PBR)", "Primary Rays (DGC)", "Ray Tracing", "MRays/s", "PBR primary ray tracing with wavefront stream compaction and indirect dispatch", true},
-            {"RayScheduling", "Scene Ray Tracing (PBR)", "Primary Rays (RTP)", "Ray Tracing", "MRays/s", "Dedicated ray tracing pipeline using vkCmdTraceRaysKHR and SBT", true},
-            {"RayScheduling", "Scene Ray Tracing (PBR)", "Primary Rays (RTP + SER)", "Ray Tracing", "MRays/s", "Dedicated ray tracing pipeline with Shader Execution Reordering", true},
+            {"RayScheduling", "Scene Ray Tracing (PBR)", "Primary Rays (Compute Megakernel)", "Ray Tracing", "MRays/s", "Monolithic compute megakernel using VK_KHR_ray_query", true},
+            {"RayScheduling", "Scene Ray Tracing (PBR)", "Primary Rays (Wavefront - DGC)", "Ray Tracing", "MRays/s", "Decoupled wavefront stream compaction using VK_EXT_device_generated_commands and VK_KHR_ray_query", true},
+            {"RayScheduling", "Scene Ray Tracing (PBR)", "Primary Rays (Pipeline Megakernel - RTP)", "Ray Tracing", "MRays/s", "Monolithic ray tracing pipeline megakernel (VK_KHR_ray_tracing_pipeline) with Shader Binding Table", true},
+            {"RayScheduling", "Scene Ray Tracing (PBR)", "Primary Rays (Pipeline Megakernel - RTP + SER)", "Ray Tracing", "MRays/s", "Monolithic ray tracing pipeline megakernel with hardware Shader Execution Reordering (VK_NV_ray_tracing_invocation_reorder)", true},
             {"RayScheduling", "Scene Ray Tracing (PBR)", "Primary Rays (Alpha Cutout)", "Ray Tracing", "MRays/s", "PBR primary ray tracing with alpha-tested cutout geometry evaluation", true},
             {"RayScheduling", "Scene Path Tracing (Multi-Bounce)", "Bounce Rays (Megakernel)", "Ray Tracing", "MRays/s", "Multi-bounce diffuse path tracing using compute megakernel", true},
             {"RayScheduling", "Scene Path Tracing (Multi-Bounce)", "Bounce Rays (RTP + SER)", "Ray Tracing", "MRays/s", "Multi-bounce path tracing with dedicated RTP and Hardware SER", true},
@@ -1644,7 +1644,8 @@ bool GuiApp::matchesItem(const ResultData& r, const BenchmarkItem& itm, uint32_t
         }
         if (itm.name.find("Dedicated") != std::string::npos && clean.find("Dedicated") != std::string::npos) return true;
         if (itm.name.find("DGC") != std::string::npos && (clean.find("DGC") != std::string::npos || clean.find("Work Lists") != std::string::npos)) return true;
-        if (itm.name.find("Megakernel") != std::string::npos && clean.find("Megakernel") != std::string::npos) return true;
+        if (itm.name.find("Megakernel") != std::string::npos && clean.find("Megakernel") != std::string::npos &&
+            clean.find("RTP") == std::string::npos && itm.name.find("RTP") == std::string::npos) return true;
         // Traversal Scheduling
         if (itm.name.find("Morton") != std::string::npos && clean.find("Morton") != std::string::npos) {
             if (itm.name.find("8x4") != std::string::npos && clean.find("8x4") != std::string::npos) return true;
