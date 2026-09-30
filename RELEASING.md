@@ -47,7 +47,7 @@ cd build
 
 # Configure and compile release targets
 cmake .. -DCMAKE_BUILD_TYPE=Release
-cmake --build . --parallel $(nproc)
+cmake --build . --parallel $(( (n = $(nproc) - 4) > 8 ? n : 8 ))
 
 # Generate all packages (TGZ, DEB, RPM) with automated shell sanitization:
 cmake --build . --target package_linux

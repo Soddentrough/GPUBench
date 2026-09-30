@@ -1,8 +1,5 @@
 # Build directory
-build/
-build-windows/
-build-release/
-build-release-package/
+build*/
 target/
 
 # GPU core dump files
@@ -22,6 +19,7 @@ gpucore.*
 *.a
 *.exe
 *.spv
+*.co
 
 # Logs and temporary files
 *.log

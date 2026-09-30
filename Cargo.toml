@@ -2,6 +2,6 @@
 members = [
     "gpubench-sys",
     "gpubench-core",
-    "gpubench-gui", "test_ash",
+    "gpubench-gui",
 ]
 resolver = "2"

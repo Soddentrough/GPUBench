@@ -39,7 +39,7 @@ cmake .. -DCMAKE_INSTALL_PREFIX="C:\Program Files\GPUBench"
 ### 3. Build
 
 ```bash
-make -j16
+make -j$(( (n = $(nproc) - 4) > 8 ? n : 8 ))
 ```
 
 On Windows, use:
@@ -153,7 +153,7 @@ For development, you can build without installing:
 ```bash
 mkdir build && cd build
 cmake ..
-make -j16
+make -j$(( (n = $(nproc) - 4) > 8 ? n : 8 ))
 ./gpubench --list-benchmarks
 ```
 
