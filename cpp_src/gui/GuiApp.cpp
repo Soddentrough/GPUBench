@@ -3921,22 +3921,26 @@ void GuiApp::renderRayTracingViewport() {
         auto texDgc = getOrLoadTexture(dgcPath);
         auto texDiff = getOrLoadTexture(diffPath);
 
-        // If current scene has no renders on disk, check if another scene does and auto-switch
-        if (!texTrad.isValid() && !texDgc.isValid()) {
-            for (size_t sIdx = 0; sIdx < numScenes; ++sIdx) {
-                if (sIdx == static_cast<size_t>(m_rtSceneIndex)) continue;
-                std::string altTrad = "renders/render_" + std::string(scenes[sIdx].tag) + "_traditional_megakernel.png";
-                auto altTex = getOrLoadTexture(altTrad);
-                if (altTex.isValid()) {
-                    m_rtSceneIndex = static_cast<int>(sIdx);
-                    tag = scenes[m_rtSceneIndex].tag;
-                    tradPath = altTrad;
-                    dgcPath = "renders/render_" + tag + "_worklist_dgc.png";
-                    diffPath = "renders/render_" + tag + "_difference_heatmap.png";
-                    texTrad = altTex;
-                    texDgc = getOrLoadTexture(dgcPath);
-                    texDiff = getOrLoadTexture(diffPath);
-                    break;
+        // On initial startup only: if default scene (index 0) has no renders, pick first scene with renders
+        static bool s_hasInitializedSceneIndex = false;
+        if (!s_hasInitializedSceneIndex) {
+            s_hasInitializedSceneIndex = true;
+            if (!texTrad.isValid() && !texDgc.isValid()) {
+                for (size_t sIdx = 0; sIdx < numScenes; ++sIdx) {
+                    if (sIdx == static_cast<size_t>(m_rtSceneIndex)) continue;
+                    std::string altTrad = "renders/render_" + std::string(scenes[sIdx].tag) + "_traditional_megakernel.png";
+                    auto altTex = getOrLoadTexture(altTrad);
+                    if (altTex.isValid()) {
+                        m_rtSceneIndex = static_cast<int>(sIdx);
+                        tag = scenes[m_rtSceneIndex].tag;
+                        tradPath = altTrad;
+                        dgcPath = "renders/render_" + tag + "_worklist_dgc.png";
+                        diffPath = "renders/render_" + tag + "_difference_heatmap.png";
+                        texTrad = altTex;
+                        texDgc = getOrLoadTexture(dgcPath);
+                        texDiff = getOrLoadTexture(diffPath);
+                        break;
+                    }
                 }
             }
         }

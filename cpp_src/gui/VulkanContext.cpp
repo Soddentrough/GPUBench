@@ -723,7 +723,9 @@ VulkanContext::TextureResource VulkanContext::loadTextureFromFile(const std::str
     std::string candidatePaths[] = {
         filepath,
         "../" + filepath,
-        "../../" + filepath
+        "../../" + filepath,
+        "/usr/share/gpubench/" + filepath,
+        "/usr/local/share/gpubench/" + filepath
     };
     std::string resolvedPath = "";
     for (const auto& p : candidatePaths) {
