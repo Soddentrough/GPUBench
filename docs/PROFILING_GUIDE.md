@@ -109,11 +109,11 @@ Compilation statistics for all `rt_scheduling` compute kernels targeting GFX1201
 |---|---|---|---|---|---|---|---|
 | `rt_scheduling_reset.comp` | **4** | 9 | 0 | 168 B | 0 | 0 | **16 waves / SIMD (Peak)** |
 | `rt_scheduling_resolve.comp` (DGC Resolve) | **19** | 34 | 0 | 2,068 B | 0 | 0 | **16 waves / SIMD (Peak)** |
-| `rt_scheduling_worklist_shadow.comp` | **34** | 43 | 2,048 | 3,176 B | 0 | 0 | **16 waves / SIMD (Peak)** |
-| `rt_scheduling_worklist_bounce.comp` | **49** | 56 | 4,096 | 5,064 B | 0 | 0 | **16 waves / SIMD (Peak)** |
-| `rt_scheduling_worklist_classify.comp` | **85** | 106 | 4,096 | 37,396 B | 0 | 0 | **5 waves / SIMD** |
-| `rt_scheduling_worklist_material.comp` | **92** | 92 | 2,048 | 209,004 B | 0 | 0 | **5 waves / SIMD** |
-| **Traditional Megakernel** (`rt_scheduling_traditional.comp`) | **97** | **106 (Max)** | 4,096 | **266,364 B** | 0 | 0 | **2–3 waves / SIMD** |
+| `rt_scheduling_device_generated_commands_shadow.comp` | **34** | 43 | 2,048 | 3,176 B | 0 | 0 | **16 waves / SIMD (Peak)** |
+| `rt_scheduling_device_generated_commands_bounce.comp` | **49** | 56 | 4,096 | 5,064 B | 0 | 0 | **16 waves / SIMD (Peak)** |
+| `rt_scheduling_device_generated_commands_classify.comp` | **85** | 106 | 4,096 | 37,396 B | 0 | 0 | **5 waves / SIMD** |
+| `rt_scheduling_device_generated_commands_material.comp` | **92** | 92 | 2,048 | 209,004 B | 0 | 0 | **5 waves / SIMD** |
+| **Traditional Megakernel** (`rt_scheduling_traditional_megakernel.comp`) | **97** | **106 (Max)** | 4,096 | **266,364 B** | 0 | 0 | **2–3 waves / SIMD** |
 
 ### 4.3 Architectural Insights from Register Analysis
 1. **The Megakernel Occupancy Cliff**:
@@ -193,7 +193,7 @@ RADV_DEBUG=dumpibs ./build/gpubench \
     -c 2 \
     -d 1 \
     --no-dump \
-    --profile-snapshot > scratch/dumpibs_config2.log 2>&1
+    --profile-snapshot > profiling/dumpibs_config2.log 2>&1
 ```
 
 ### 6.2 Key Hardware Packet Types
@@ -310,10 +310,10 @@ To run a fast 2-second benchmark without image disk writes:
 
 ### Recipe 2: Run Offline RGA Analysis on All Shaders
 ```bash
-OUTDIR="scratch/rga_analysis"
+OUTDIR="profiling/rga_analysis"
 mkdir -p "$OUTDIR"
 
-for shader in rt_scheduling_resolve rt_scheduling_worklist_bounce rt_scheduling_worklist_shadow; do
+for shader in rt_scheduling_resolve rt_scheduling_device_generated_commands_bounce rt_scheduling_device_generated_commands_shadow; do
     /opt/RadeonDeveloperToolSuite-2026-05-28-1806/rga \
         -s vk-spv-offline \
         -c gfx1201 \
