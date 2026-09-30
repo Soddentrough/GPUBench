@@ -1885,8 +1885,8 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         label: "Primary Rays (Pipeline Megakernel - RTP + SER)",
         approach: "Morton 8x4 + RTP + Hardware SER",
         default_unit: "MRays/s",
-        desc: "End-to-end PBR ray tracing combining 2D Morton ray ordering with monolithic ray tracing pipeline megakernel with hardware Shader Execution Reordering (VK_NV_ray_tracing_invocation_reorder).",
-        api_extensions: "VK_KHR_ray_tracing_pipeline, VK_NV_ray_tracing_invocation_reorder",
+        desc: "End-to-end PBR ray tracing combining 2D Morton ray ordering with monolithic ray tracing pipeline megakernel with hardware Shader Execution Reordering (VK_EXT_ray_tracing_invocation_reorder).",
+        api_extensions: "VK_KHR_ray_tracing_pipeline, VK_EXT_ray_tracing_invocation_reorder",
         is_system: false,
     },
 ];
