@@ -7,41 +7,41 @@
 #include <thread>
 #include <atomic>
 #include <cstdint>
+#include <chrono>
 
 namespace gpubench::gui {
 
-constexpr size_t TELEMETRY_HISTORY_CAPACITY = 600; // 60 seconds at 10Hz
-
-template<typename T, size_t N = TELEMETRY_HISTORY_CAPACITY>
-class CircularBuffer {
+class TelemetryBuffer {
 public:
-    void push(T val) {
-        m_data[m_head] = val;
-        m_head = (m_head + 1) % N;
-        if (m_size < N) m_size++;
+    void push(float val) {
+        m_data.push_back(val);
+        // Safety cap at 36,000 samples (1 hour at 10Hz) to prevent unbounded memory
+        if (m_data.size() > 36000) {
+            size_t half = m_data.size() / 2;
+            for (size_t i = 0; i < half; ++i) {
+                m_data[i] = (m_data[2 * i] + m_data[2 * i + 1]) * 0.5f;
+            }
+            m_data.resize(half);
+        }
     }
 
-    size_t size() const { return m_size; }
-    bool empty() const { return m_size == 0; }
-    size_t offset() const { return (m_size < N) ? 0 : m_head; }
-    const T* data() const { return m_data.data(); }
-    T latest() const {
-        if (m_size == 0) return T{};
-        size_t idx = (m_head + N - 1) % N;
-        return m_data[idx];
-    }
-    T back() const { return latest(); }
+    size_t size() const { return m_data.size(); }
+    bool empty() const { return m_data.empty(); }
+    size_t offset() const { return 0; }
+    const float* data() const { return m_data.data(); }
+    float* data() { return m_data.data(); }
+    float latest() const { return m_data.empty() ? 0.0f : m_data.back(); }
+    float back() const { return latest(); }
 
     void clear() {
-        m_data.fill(T{});
-        m_head = 0;
-        m_size = 0;
+        m_data.clear();
+    }
+    void reserve(size_t n) {
+        m_data.reserve(n);
     }
 
 private:
-    std::array<T, N> m_data{};
-    size_t m_head{0};
-    size_t m_size{0};
+    std::vector<float> m_data;
 };
 
 struct DeviceTelemetrySnapshot {
@@ -62,16 +62,16 @@ struct DeviceTelemetrySnapshot {
     uint64_t vramUsedBytes{0};
     uint64_t vramTotalBytes{0};
 
-    // Circular histories for ImPlot
-    CircularBuffer<float> timeHistory;
-    CircularBuffer<float> sclkHistory;
-    CircularBuffer<float> mclkHistory;
-    CircularBuffer<float> powerHistory;
-    CircularBuffer<float> tempEdgeHistory;
-    CircularBuffer<float> tempJctHistory;
-    CircularBuffer<float> tempMemHistory;
-    CircularBuffer<float> vramUsedMbHistory;
-    CircularBuffer<float> gpuBusyHistory;
+    // Histories for ImPlot (records full run duration)
+    TelemetryBuffer timeHistory;
+    TelemetryBuffer sclkHistory;
+    TelemetryBuffer mclkHistory;
+    TelemetryBuffer powerHistory;
+    TelemetryBuffer tempEdgeHistory;
+    TelemetryBuffer tempJctHistory;
+    TelemetryBuffer tempMemHistory;
+    TelemetryBuffer vramUsedMbHistory;
+    TelemetryBuffer gpuBusyHistory;
 };
 
 struct DeviceSysfsPaths {
@@ -89,6 +89,13 @@ public:
     void start();
     void stop();
 
+    // Benchmark Run Session Telemetry
+    void startRecording();
+    void stopRecording();
+    bool isRecording() const { return m_isRecording.load(); }
+    double getRunDuration() const;
+    void resetHistory();
+
     uint32_t getDeviceCount() const;
     bool getSnapshot(uint32_t deviceIndex, DeviceTelemetrySnapshot& outSnapshot);
     std::vector<std::string> getDeviceNames() const;
@@ -96,14 +103,17 @@ public:
 private:
     void workerLoop();
     void discoverDevices();
-    void pollDevice(const DeviceSysfsPaths& paths, DeviceTelemetrySnapshot& snapshot, double timestampSec);
+    void pollDevice(const DeviceSysfsPaths& paths, DeviceTelemetrySnapshot& snapshot, double timestampSec, bool recordHistory);
 
     std::atomic<bool> m_running{false};
+    std::atomic<bool> m_isRecording{false};
     std::thread m_workerThread;
     mutable std::mutex m_mutex;
     std::vector<DeviceSysfsPaths> m_devicePaths;
     std::vector<DeviceTelemetrySnapshot> m_snapshots;
     std::chrono::steady_clock::time_point m_startTime;
+    std::chrono::steady_clock::time_point m_runStartTime;
+    double m_runDuration{0.0};
 };
 
 } // namespace gpubench::gui

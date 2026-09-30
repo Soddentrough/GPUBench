@@ -982,6 +982,10 @@ void GuiApp::updateAndRender() {
     ImGui::End();
     ImGui::PopStyleVar(3);
 
+    if (m_telemetryNeedsFit && m_execState != ExecutionState::Running) {
+        m_telemetryNeedsFit = false;
+    }
+
     if (m_showSettingsModal) {
         renderSettingsModal();
     }
@@ -1498,6 +1502,10 @@ void GuiApp::renderRightWorkspace(float width, float height) {
         }
         if (ImGui::BeginTabItem("Ray Tracing Viewport")) {
             renderRayTracingViewport();
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("Hardware Telemetry")) {
+            renderLiveTelemetryDock();
             ImGui::EndTabItem();
         }
         ImGui::EndTabBar();
@@ -2595,6 +2603,19 @@ void GuiApp::renderLiveTelemetryDock() {
     ImGui::TextDisabled("|");
     ImGui::SameLine();
 
+    if (m_execState == ExecutionState::Running) {
+        ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.35f, 1.0f), "● RECORDING RUN");
+    } else if (m_execState == ExecutionState::Completed) {
+        ImGui::TextColored(ImVec4(0.35f, 0.85f, 0.45f, 1.0f), "● RUN COMPLETE (FROZEN)");
+    } else if (m_execState == ExecutionState::Cancelled) {
+        ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f), "● RUN ABORTED (FROZEN)");
+    } else {
+        ImGui::TextDisabled("● IDLE");
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled("|");
+    ImGui::SameLine();
+
     // Device selection: ONLY actual devices!
     if (actualGpuIndices.size() > 1) {
         for (size_t g = 0; g < actualGpuIndices.size(); ++g) {
@@ -2623,10 +2644,11 @@ void GuiApp::renderLiveTelemetryDock() {
 
     // Time window selector
     float winTextW = ImGui::CalcTextSize("Window:").x;
+    float bFullW = ImGui::CalcTextSize("Full Run").x + ImGui::GetStyle().FramePadding.x * 2.0f;
     float b30W = ImGui::CalcTextSize("30s").x + ImGui::GetStyle().FramePadding.x * 2.0f;
     float b60W = ImGui::CalcTextSize("60s").x + ImGui::GetStyle().FramePadding.x * 2.0f;
     float b120W = ImGui::CalcTextSize("120s").x + ImGui::GetStyle().FramePadding.x * 2.0f;
-    float totalWinW = winTextW + b30W + b60W + b120W + ImGui::GetStyle().ItemSpacing.x * 4.0f;
+    float totalWinW = winTextW + bFullW + b30W + b60W + b120W + ImGui::GetStyle().ItemSpacing.x * 5.0f;
 
     ImGui::SameLine();
     float availWin = ImGui::GetContentRegionAvail().x;
@@ -2644,9 +2666,14 @@ void GuiApp::renderLiveTelemetryDock() {
         bool isAct = (m_telemetryTimeWindow == winSec);
         if (isAct) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.22f, 0.48f, 0.90f, 1.0f));
         else ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.12f, 0.15f, 0.22f, 1.0f));
-        if (ImGui::SmallButton(label)) m_telemetryTimeWindow = winSec;
+        if (ImGui::SmallButton(label)) {
+            m_telemetryTimeWindow = winSec;
+            m_telemetryNeedsFit = true;
+        }
         ImGui::PopStyleColor();
     };
+    winBtn("Full Run", 0.0f);
+    ImGui::SameLine();
     winBtn("30s", 30.0f);
     ImGui::SameLine();
     winBtn("60s", 60.0f);
@@ -2737,16 +2764,31 @@ void GuiApp::renderLiveTelemetryDock() {
     } else if (m_telemetryGpuIndex == 1 && !snap1.timeHistory.empty()) {
         curT = snap1.timeHistory.back();
     }
-    float minT = std::max(0.0f, curT - m_telemetryTimeWindow);
+
+    float minT = 0.0f;
+    float maxT = 10.0f;
+    if (m_telemetryTimeWindow <= 0.0f) {
+        // Full Run: compress to cover the entire run
+        minT = 0.0f;
+        maxT = std::max(5.0f, curT + 0.2f);
+    } else {
+        // Fixed sliding window (30s, 60s, 120s)
+        minT = std::max(0.0f, curT - m_telemetryTimeWindow);
+        maxT = std::max(minT + 5.0f, curT + 0.2f);
+    }
+
+    ImPlotCond cond = (m_execState == ExecutionState::Running || m_telemetryNeedsFit) 
+                      ? ImPlotCond_Always 
+                      : ImPlotCond_Once;
 
     float availW = ImGui::GetContentRegionAvail().x;
     float graphW = (availW - s(14.0f)) * 0.5f;
-    float graphH = s(175.0f);
+    float graphH = std::max(s(280.0f), ImGui::GetContentRegionAvail().y - s(20.0f));
 
     // Left graph: Clocks (Shader & Memory)
     if (ImPlot::BeginPlot("##suite_clocks", ImVec2(graphW, graphH), ImPlotFlags_NoTitle)) {
         ImPlot::SetupAxes("Time (s)", "Clock (MHz)", ImPlotAxisFlags_None, ImPlotAxisFlags_None);
-        ImPlot::SetupAxisLimits(ImAxis_X1, minT, curT + 0.5f, ImPlotCond_Always);
+        ImPlot::SetupAxisLimits(ImAxis_X1, minT, maxT, cond);
         ImPlot::SetupAxisLimits(ImAxis_Y1, 0, 3500, ImPlotCond_Once);
 
         if (m_telemetryDualGpuMode) {
@@ -2780,7 +2822,7 @@ void GuiApp::renderLiveTelemetryDock() {
     if (ImPlot::BeginPlot("##suite_power", ImVec2(graphW, graphH), ImPlotFlags_NoTitle)) {
         ImPlot::SetupAxes("Time (s)", "Temp (C)", ImPlotAxisFlags_None, ImPlotAxisFlags_None);
         ImPlot::SetupAxis(ImAxis_Y2, "Power (W)", ImPlotAxisFlags_AuxDefault);
-        ImPlot::SetupAxisLimits(ImAxis_X1, minT, curT + 0.5f, ImPlotCond_Always);
+        ImPlot::SetupAxisLimits(ImAxis_X1, minT, maxT, cond);
         ImPlot::SetupAxisLimits(ImAxis_Y1, 20, 110, ImPlotCond_Once);
         ImPlot::SetupAxisLimits(ImAxis_Y2, 0, 350, ImPlotCond_Once);
 
@@ -2858,6 +2900,14 @@ void GuiApp::renderSidebarTelemetry() {
     ImGui::Separator();
     ImGui::Spacing();
     ImGui::TextColored(ImVec4(0.65f, 0.75f, 0.90f, 1.0f), "HARDWARE TELEMETRY");
+    ImGui::SameLine();
+    if (m_execState == ExecutionState::Running) {
+        ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.35f, 1.0f), "● REC");
+    } else if (m_execState == ExecutionState::Completed) {
+        ImGui::TextColored(ImVec4(0.35f, 0.85f, 0.45f, 1.0f), "● FROZEN");
+    } else if (m_execState == ExecutionState::Cancelled) {
+        ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f), "● ABORT");
+    }
 
     // Device switch buttons (ONLY for actual devices!)
     auto devPill = [this](const char* label, bool active) {
@@ -2892,10 +2942,11 @@ void GuiApp::renderSidebarTelemetry() {
     }
 
     // Time window selector on the right
+    float bFullW = ImGui::CalcTextSize("Full").x + ImGui::GetStyle().FramePadding.x * 2.0f;
     float b30W = ImGui::CalcTextSize("30s").x + ImGui::GetStyle().FramePadding.x * 2.0f;
     float b60W = ImGui::CalcTextSize("60s").x + ImGui::GetStyle().FramePadding.x * 2.0f;
     float b120W = ImGui::CalcTextSize("120s").x + ImGui::GetStyle().FramePadding.x * 2.0f;
-    float totalBtnsW = b30W + b60W + b120W + ImGui::GetStyle().ItemSpacing.x * 2.0f;
+    float totalBtnsW = bFullW + b30W + b60W + b120W + ImGui::GetStyle().ItemSpacing.x * 3.0f;
 
     ImGui::SameLine();
     float availSide = ImGui::GetContentRegionAvail().x;
@@ -2916,9 +2967,14 @@ void GuiApp::renderSidebarTelemetry() {
             ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.12f, 0.15f, 0.22f, 1.0f));
             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.65f, 0.70f, 0.80f, 1.0f));
         }
-        if (ImGui::SmallButton(label)) m_telemetryTimeWindow = winSec;
+        if (ImGui::SmallButton(label)) {
+            m_telemetryTimeWindow = winSec;
+            m_telemetryNeedsFit = true;
+        }
         ImGui::PopStyleColor(2);
     };
+    winBtn("Full", 0.0f);
+    ImGui::SameLine();
     winBtn("30s", 30.0f);
     ImGui::SameLine();
     winBtn("60s", 60.0f);
@@ -2934,7 +2990,22 @@ void GuiApp::renderSidebarTelemetry() {
     } else if (!activeSnap.timeHistory.empty()) {
         curT = activeSnap.timeHistory.back();
     }
-    float minT = std::max(0.0f, curT - m_telemetryTimeWindow);
+
+    float minT = 0.0f;
+    float maxT = 10.0f;
+    if (m_telemetryTimeWindow <= 0.0f) {
+        // Full Run: compress to cover the entire run
+        minT = 0.0f;
+        maxT = std::max(5.0f, curT + 0.2f);
+    } else {
+        // Fixed sliding window (30s, 60s, 120s)
+        minT = std::max(0.0f, curT - m_telemetryTimeWindow);
+        maxT = std::max(minT + 5.0f, curT + 0.2f);
+    }
+
+    ImPlotCond cond = (m_execState == ExecutionState::Running || m_telemetryNeedsFit) 
+                      ? ImPlotCond_Always 
+                      : ImPlotCond_Once;
 
     float plotH = s(120.0f);
 
@@ -2972,7 +3043,7 @@ void GuiApp::renderSidebarTelemetry() {
     // Graph 1: Frequencies (Shader & Memory Clock)
     if (ImPlot::BeginPlot("##sidebar_clocks", ImVec2(-1, plotH), plotFlags)) {
         ImPlot::SetupAxes(nullptr, "MHz", ImPlotAxisFlags_NoLabel, ImPlotAxisFlags_None);
-        ImPlot::SetupAxisLimits(ImAxis_X1, minT, curT + 0.5f, ImPlotCond_Always);
+        ImPlot::SetupAxisLimits(ImAxis_X1, minT, maxT, cond);
         ImPlot::SetupAxisLimits(ImAxis_Y1, 0, 3500, ImPlotCond_Once);
 
         if (m_telemetryDualGpuMode && actualGpuIndices.size() > 1) {
@@ -3020,7 +3091,7 @@ void GuiApp::renderSidebarTelemetry() {
     if (ImPlot::BeginPlot("##sidebar_thermals", ImVec2(-1, plotH), plotFlags)) {
         ImPlot::SetupAxes(nullptr, "°C", ImPlotAxisFlags_NoLabel, ImPlotAxisFlags_None);
         ImPlot::SetupAxis(ImAxis_Y2, "W", ImPlotAxisFlags_AuxDefault);
-        ImPlot::SetupAxisLimits(ImAxis_X1, minT, curT + 0.5f, ImPlotCond_Always);
+        ImPlot::SetupAxisLimits(ImAxis_X1, minT, maxT, cond);
         ImPlot::SetupAxisLimits(ImAxis_Y1, 20, 110, ImPlotCond_Once);
         ImPlot::SetupAxisLimits(ImAxis_Y2, 0, 350, ImPlotCond_Once);
 
@@ -4433,6 +4504,8 @@ void GuiApp::startBenchmarks() {
     m_currentlyRunningTestId.clear();
     m_hasCurrentlyRunningResult = false;
     m_benchmarkStartTime = std::chrono::steady_clock::now();
+    m_telemetryWorker.startRecording();
+    m_telemetryNeedsFit = true;
 
     if (m_execThread.joinable()) {
         m_execThread.join();
@@ -4463,6 +4536,9 @@ void GuiApp::startBenchmarks() {
             &m_cancelToken
         );
 
+        m_telemetryWorker.stopRecording();
+        m_telemetryNeedsFit = true;
+
         if (m_cancelToken.load()) {
             m_execState = ExecutionState::Cancelled;
         } else {
@@ -4476,6 +4552,8 @@ void GuiApp::startBenchmarks() {
 void GuiApp::abortBenchmarks() {
     if (m_execState == ExecutionState::Running) {
         m_cancelToken.store(true);
+        m_telemetryWorker.stopRecording();
+        m_telemetryNeedsFit = true;
     }
 }
 

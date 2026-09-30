@@ -235,7 +235,8 @@ private:
     bool m_switchToScorecard{false};
     std::string m_exportNotificationText;
     float m_exportNotificationTimer{0.0f};
-    float m_telemetryTimeWindow{60.0f}; // 30s, 60s, 120s
+    float m_telemetryTimeWindow{0.0f}; // 0.0f = Full Run (compressed to cover entire run), or 30s, 60s, 120s
+    bool m_telemetryNeedsFit{true};
 
     // Scorecard Filters
     int m_activeScorecardFilter{0}; // 0: All, 1: Compute, 2: Memory, 3: Ray Tracing, 4: Raster, 5: System

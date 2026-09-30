@@ -146,6 +146,58 @@ void TelemetryWorker::stop() {
     }
 }
 
+void TelemetryWorker::startRecording() {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_runStartTime = std::chrono::steady_clock::now();
+    m_runDuration = 0.0;
+    for (auto& snap : m_snapshots) {
+        snap.timeHistory.clear();
+        snap.sclkHistory.clear();
+        snap.mclkHistory.clear();
+        snap.powerHistory.clear();
+        snap.tempEdgeHistory.clear();
+        snap.tempJctHistory.clear();
+        snap.tempMemHistory.clear();
+        snap.vramUsedMbHistory.clear();
+        snap.gpuBusyHistory.clear();
+    }
+    m_isRecording.store(true);
+}
+
+void TelemetryWorker::stopRecording() {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (m_isRecording.load()) {
+        auto now = std::chrono::steady_clock::now();
+        m_runDuration = std::chrono::duration<double>(now - m_runStartTime).count();
+    }
+    m_isRecording.store(false);
+}
+
+double TelemetryWorker::getRunDuration() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (m_isRecording.load()) {
+        auto now = std::chrono::steady_clock::now();
+        return std::chrono::duration<double>(now - m_runStartTime).count();
+    }
+    return m_runDuration;
+}
+
+void TelemetryWorker::resetHistory() {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_runDuration = 0.0;
+    for (auto& snap : m_snapshots) {
+        snap.timeHistory.clear();
+        snap.sclkHistory.clear();
+        snap.mclkHistory.clear();
+        snap.powerHistory.clear();
+        snap.tempEdgeHistory.clear();
+        snap.tempJctHistory.clear();
+        snap.tempMemHistory.clear();
+        snap.vramUsedMbHistory.clear();
+        snap.gpuBusyHistory.clear();
+    }
+}
+
 uint32_t TelemetryWorker::getDeviceCount() const {
     std::lock_guard<std::mutex> lock(m_mutex);
     return static_cast<uint32_t>(m_snapshots.size());
@@ -175,7 +227,7 @@ std::vector<std::string> TelemetryWorker::getDeviceNames() const {
     return names;
 }
 
-void TelemetryWorker::pollDevice(const DeviceSysfsPaths& paths, DeviceTelemetrySnapshot& snap, double timestampSec) {
+void TelemetryWorker::pollDevice(const DeviceSysfsPaths& paths, DeviceTelemetrySnapshot& snap, double timestampSec, bool recordHistory) {
     // 1. Clocks: freq1_input is in Hz for AMDGPU hwmon -> divide by 1e6 for MHz
     float sclk = readSysfsFloat(paths.hwmonDir + "/freq1_input", 0.0f, 1e-6f);
     if (sclk <= 0.0f) {
@@ -209,7 +261,7 @@ void TelemetryWorker::pollDevice(const DeviceSysfsPaths& paths, DeviceTelemetryS
     uint64_t vramUsed = readSysfsUint64(paths.drmDeviceDir + "/mem_info_vram_used", 0);
     uint64_t vramTotal = readSysfsUint64(paths.drmDeviceDir + "/mem_info_vram_total", 0);
 
-    // Update current snapshot scalars
+    // Update current snapshot scalars (always live for digital readouts)
     snap.sclkMhz = sclk;
     snap.mclkMhz = mclk;
     snap.powerWatts = power;
@@ -222,27 +274,33 @@ void TelemetryWorker::pollDevice(const DeviceSysfsPaths& paths, DeviceTelemetryS
     snap.vramUsedBytes = vramUsed;
     snap.vramTotalBytes = vramTotal;
 
-    // Push into circular history
-    snap.timeHistory.push(static_cast<float>(timestampSec));
-    snap.sclkHistory.push(sclk);
-    snap.mclkHistory.push(mclk);
-    snap.powerHistory.push(power);
-    snap.tempEdgeHistory.push(tempEdge);
-    snap.tempJctHistory.push(tempJct);
-    snap.tempMemHistory.push(tempMem);
-    snap.vramUsedMbHistory.push(static_cast<float>(vramUsed / (1024 * 1024)));
-    snap.gpuBusyHistory.push(gpuBusy);
+    // Only record into history during an active benchmark run
+    if (recordHistory) {
+        snap.timeHistory.push(static_cast<float>(timestampSec));
+        snap.sclkHistory.push(sclk);
+        snap.mclkHistory.push(mclk);
+        snap.powerHistory.push(power);
+        snap.tempEdgeHistory.push(tempEdge);
+        snap.tempJctHistory.push(tempJct);
+        snap.tempMemHistory.push(tempMem);
+        snap.vramUsedMbHistory.push(static_cast<float>(vramUsed / (1024 * 1024)));
+        snap.gpuBusyHistory.push(gpuBusy);
+    }
 }
 
 void TelemetryWorker::workerLoop() {
     while (m_running.load()) {
-        auto now = std::chrono::steady_clock::now();
-        double timestamp = std::chrono::duration<double>(now - m_startTime).count();
+        bool recording = m_isRecording.load();
+        double timestamp = 0.0;
+        if (recording) {
+            auto now = std::chrono::steady_clock::now();
+            timestamp = std::chrono::duration<double>(now - m_runStartTime).count();
+        }
 
         {
             std::lock_guard<std::mutex> lock(m_mutex);
             for (size_t i = 0; i < m_devicePaths.size() && i < m_snapshots.size(); ++i) {
-                pollDevice(m_devicePaths[i], m_snapshots[i], timestamp);
+                pollDevice(m_devicePaths[i], m_snapshots[i], timestamp, recording);
             }
         }
 
