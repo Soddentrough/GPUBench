@@ -30,6 +30,7 @@ layout(push_constant) uniform PushConstants {
     uint sceneType;
     uint isGltf;
     uint spp;
+    uint sampleIdx;
 } pc;
 
 const uint SCENE_SHOWROOM_STUDIO = 0u;

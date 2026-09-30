@@ -701,7 +701,7 @@ void main() {
                                     vec3 toL = lanternPos[li] - hitPos;
                                     float d2 = dot(toL, toL);
                                     float d = sqrt(d2);
-                                    vec3 L = toL / d;
+                                    vec3 L = toL / max(d, 0.001);
                                     float l_NdotL = max(0.0, dot(normal, L));
                                     if (l_NdotL > 0.0) {
                                         bool l_shad = traceShadowRay(hitPos, normal, L, d - 0.1);
@@ -779,7 +779,7 @@ void main() {
                                         vec3 b_toL = lanternPos[li] - b_hitPos;
                                         float bd2 = dot(b_toL, b_toL);
                                         float bd = sqrt(bd2);
-                                        vec3 b_L = b_toL / bd;
+                                        vec3 b_L = b_toL / max(bd, 0.001);
                                         float bl_NdotL = max(0.0, dot(b_normal, b_L));
                                         if (bl_NdotL > 0.0) {
                                             bool bl_shad = traceShadowRay(b_hitPos, b_normal, b_L, bd - 0.1);

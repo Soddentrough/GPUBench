@@ -461,7 +461,7 @@ void main() {
                                 vec3 toL = lanternPos[li] - hitPos;
                                 float d2 = dot(toL, toL);
                                 float d = sqrt(d2);
-                                vec3 L = toL / d;
+                                vec3 L = toL / max(d, 0.001);
                                 float l_NdotL = max(0.0, dot(normal, L));
                                 if (l_NdotL > 0.0) {
                                     bool l_shad = traceShadowRay(hitPos, normal, L, d - 0.1);

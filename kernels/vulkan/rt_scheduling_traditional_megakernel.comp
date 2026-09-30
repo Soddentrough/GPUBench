@@ -40,6 +40,7 @@ layout(push_constant) uniform PushConstants {
     uint sceneType;       // 0: Showroom Studio, 1: Outdoor Terrain, 2: Indoor Atrium
     uint isGltf;          // 1 if glTF PBR scene, 0 if procedural
     uint spp;             // Samples per pixel (default: 1)
+    uint sampleIdx;       // Sample index for progressive accumulation (0 .. spp-1)
 } pc;
 
 
@@ -847,18 +848,16 @@ void main() {
     float tMinPrimary = (pc.isGltf != 0u) ? 0.1 : ((pc.sceneType == SCENE_OUTDOOR_TERRAIN) ? 0.05 : 0.01);
 
     if (pc.mode == 1) {
-        // Mode 1: Multi-Bounce Path Tracing with Russian Roulette & Radiance Accumulation
-        vec3 accumRadiance = vec3(0.0);
-        uint sppToRun = max(1u, pc.spp);
-
-        for (uint s = 0u; s < sppToRun; ++s) {
-            uint rngState = pixelIdx + pc.seed + s * 7919u;
-            float jx = (sppToRun == 1u) ? 0.0 : (rand_float(rngState) - 0.5);
-            float jy = (sppToRun == 1u) ? 0.0 : (rand_float(rngState) - 0.5);
-            float px_s = float(px_u) + jx - float(pc.width) * 0.5 + 0.5;
-            float py_s = float(py_u) + jy - halfH + 0.5;
-            vec3 curDir = normalize(camForward + (px_s / halfH * fov) * camRight - (py_s / halfH * fov) * camUp);
-            vec3 curOrigin = camPos;
+        // Mode 1: Multi-Bounce Path Tracing with Russian Roulette & Progressive Radiance Accumulation
+        uint sampleIdx = pc.sampleIdx;
+        uint totalSpp = max(1u, pc.spp);
+        uint rngState = pixelIdx + pc.seed + sampleIdx * 7919u;
+        float jx = (totalSpp == 1u) ? 0.0 : (rand_float(rngState) - 0.5);
+        float jy = (totalSpp == 1u) ? 0.0 : (rand_float(rngState) - 0.5);
+        float px_s = float(px_u) + jx - float(pc.width) * 0.5 + 0.5;
+        float py_s = float(py_u) + jy - halfH + 0.5;
+        vec3 curDir = normalize(camForward + (px_s / halfH * fov) * camRight - (py_s / halfH * fov) * camUp);
+        vec3 curOrigin = camPos;
 
             threadRays++;
             rayQueryEXT query;
@@ -942,7 +941,7 @@ void main() {
                         vec3 toL = lanternPos[li] - hitPos;
                         float d2 = dot(toL, toL);
                         float d = sqrt(d2);
-                        vec3 L = toL / d;
+                        vec3 L = toL / max(d, 0.001);
                         float l_NdotL = max(0.0, dot(normal, L));
                         if (l_NdotL > 0.0) {
                             bool l_shad = traceShadowRay(hitPos, normal, L, d - 0.1);
@@ -1021,7 +1020,7 @@ void main() {
                                 vec3 b_toL = lanternPos[li] - b_hitPos;
                                 float bd2 = dot(b_toL, b_toL);
                                 float bd = sqrt(bd2);
-                                vec3 b_L = b_toL / bd;
+                                vec3 b_L = b_toL / max(bd, 0.001);
                                 float bl_NdotL = max(0.0, dot(b_normal, b_L));
                                 if (bl_NdotL > 0.0) {
                                     bool bl_shad = traceShadowRay(b_hitPos, b_normal, b_L, bd - 0.1);
@@ -1050,13 +1049,19 @@ void main() {
             } else {
                 sampleRadiance = evalSky(pc.sceneType, curDir);
             }
-            accumRadiance += sampleRadiance;
-        }
-
         if (pc.dumpRenders != 0) {
             float expGain = (pc.sceneType == 2u) ? 1.6 : 1.0;
-            vec3 finalColor = (accumRadiance / float(sppToRun)) * expGain;
-            fb.pixels[pixelIdx] = vec4(tonemapACES(finalColor), 1.0);
+            if (totalSpp <= 1u) {
+                fb.pixels[pixelIdx] = vec4(tonemapACES(sampleRadiance * expGain), 1.0);
+            } else if (sampleIdx == 0u) {
+                fb.pixels[pixelIdx] = vec4(sampleRadiance, 1.0);
+            } else if (sampleIdx < totalSpp - 1u) {
+                fb.pixels[pixelIdx] += vec4(sampleRadiance, 0.0);
+            } else {
+                vec3 total = fb.pixels[pixelIdx].rgb + sampleRadiance;
+                vec3 avg = (total / float(totalSpp)) * expGain;
+                fb.pixels[pixelIdx] = vec4(tonemapACES(avg), 1.0);
+            }
         }
     } else if (pc.mode == 2) {
         // Mode 2: Incoherent Secondary GI (Hemisphere Scattering without Spatial Binning)
@@ -1412,7 +1417,7 @@ void main() {
                             vec3 b_toL = lanternPos[li] - b_hitPos;
                             float bd2 = dot(b_toL, b_toL);
                             float bd = sqrt(bd2);
-                            vec3 b_L = b_toL / bd;
+                            vec3 b_L = b_toL / max(bd, 0.001);
                             float bl_NdotL = max(0.0, dot(b_normal, b_L));
                             if (bl_NdotL > 0.0) {
                                 bool bl_shad = traceShadowRay(b_hitPos, b_normal, b_L, bd - 0.1);

@@ -1160,6 +1160,7 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     uint32_t sceneType;
     uint32_t isGltf;
     uint32_t spp;
+    uint32_t sampleIdx{0};
   };
 
   struct PushConstantsClassify {
@@ -1201,16 +1202,22 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     break;
   }
   case 3: { // Path Tracing - Traditional Megakernel
-    PushConstantsTraditional pc{rayCount, 1, 1 + bounceDepth, seed, dumpRenders ? 1u : 0u, renderWidth, renderHeight, 0, sceneTypeVal, isGltfVal, samplesPerPixel};
-    vContext->setKernelArg(kernelTraditional, 8, sizeof(pc), &pc);
-    vContext->dispatch(kernelTraditional, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
+    uint32_t passes = (samplesPerPixel > 1) ? samplesPerPixel : 1u;
+    for (uint32_t s = 0; s < passes; ++s) {
+      PushConstantsTraditional pc{rayCount, 1, 1 + bounceDepth, seed + s * 7919u, dumpRenders ? 1u : 0u, renderWidth, renderHeight, 0, sceneTypeVal, isGltfVal, passes, s};
+      vContext->setKernelArg(kernelTraditional, 8, sizeof(pc), &pc);
+      vContext->dispatch(kernelTraditional, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
+    }
     break;
   }
   case 4: { // Path Tracing - RTP + Hardware SER
     if (kernelRTPSER) {
-      PushConstantsTraditional pc{rayCount, 1, 1 + bounceDepth, seed, dumpRenders ? 1u : 0u, renderWidth, renderHeight, 0, sceneTypeVal, isGltfVal, samplesPerPixel};
-      vContext->setKernelArg(kernelRTPSER, 8, sizeof(pc), &pc);
-      vContext->dispatch(kernelRTPSER, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
+      uint32_t passes = (samplesPerPixel > 1) ? samplesPerPixel : 1u;
+      for (uint32_t s = 0; s < passes; ++s) {
+        PushConstantsTraditional pc{rayCount, 1, 1 + bounceDepth, seed + s * 7919u, dumpRenders ? 1u : 0u, renderWidth, renderHeight, 0, sceneTypeVal, isGltfVal, passes, s};
+        vContext->setKernelArg(kernelRTPSER, 8, sizeof(pc), &pc);
+        vContext->dispatch(kernelRTPSER, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
+      }
     }
     break;
   }
@@ -1412,9 +1419,11 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     break;
   }
   case 23: { // Full Scene Path Tracing (16 SPP) - Traditional Megakernel
-    PushConstantsTraditional pc{rayCount, 1, 1 + bounceDepth, seed, dumpRenders ? 1u : 0u, renderWidth, renderHeight, 0, sceneTypeVal, isGltfVal, 16u};
-    vContext->setKernelArg(kernelTraditional, 8, sizeof(pc), &pc);
-    vContext->dispatch(kernelTraditional, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
+    for (uint32_t s = 0; s < 16; ++s) {
+      PushConstantsTraditional pc{rayCount, 1, 1 + bounceDepth, seed + s * 7919u, dumpRenders ? 1u : 0u, renderWidth, renderHeight, 0, sceneTypeVal, isGltfVal, 16u, s};
+      vContext->setKernelArg(kernelTraditional, 8, sizeof(pc), &pc);
+      vContext->dispatch(kernelTraditional, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
+    }
     break;
   }
   case 24: { // Full Scene Path Tracing (16 SPP) - Device-Generated Commands (DGC)
@@ -1906,6 +1915,7 @@ void RaySchedulingBench::dumpPipelineBreakdown(const std::string &tag, bool isIn
     uint32_t sceneType;
     uint32_t isGltf;
     uint32_t spp;
+    uint32_t sampleIdx{0};
   };
 
   struct StageConfig {
@@ -1947,12 +1957,13 @@ void RaySchedulingBench::dumpPipelineBreakdown(const std::string &tag, bool isIn
       std::cout << "\r\033[K  \033[36m⠋\033[0m [3/3] Pipeline stage [" << (sIdx + 1) << "/" << stages.size() << "]: "
                 << st.title << "..." << std::flush;
     }
-    PushConstantsTraditional pc{rayCount, st.mode, st.bounces, 1337u, 1u, renderWidth, renderHeight, 0, sceneTypeVal, isGltfVal, st.spp};
-    vContext->setKernelArg(kernelTraditional, 8, sizeof(pc), &pc);
-
     // Warmup
     for (int w = 0; w < 2; ++w) {
-      vContext->dispatch(kernelTraditional, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
+      for (uint32_t s = 0; s < st.spp; ++s) {
+        PushConstantsTraditional pc{rayCount, st.mode, st.bounces, 1337u + s * 7919u, 1u, renderWidth, renderHeight, 0, sceneTypeVal, isGltfVal, st.spp, s};
+        vContext->setKernelArg(kernelTraditional, 8, sizeof(pc), &pc);
+        vContext->dispatch(kernelTraditional, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
+      }
     }
     context->waitIdle();
 
@@ -1960,7 +1971,11 @@ void RaySchedulingBench::dumpPipelineBreakdown(const std::string &tag, bool isIn
     const int iters = (st.spp > 1) ? 3 : 6;
     auto t0 = std::chrono::high_resolution_clock::now();
     for (int it = 0; it < iters; ++it) {
-      vContext->dispatch(kernelTraditional, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
+      for (uint32_t s = 0; s < st.spp; ++s) {
+        PushConstantsTraditional pc{rayCount, st.mode, st.bounces, 1337u + s * 7919u, 1u, renderWidth, renderHeight, 0, sceneTypeVal, isGltfVal, st.spp, s};
+        vContext->setKernelArg(kernelTraditional, 8, sizeof(pc), &pc);
+        vContext->dispatch(kernelTraditional, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
+      }
     }
     context->waitIdle();
     auto t1 = std::chrono::high_resolution_clock::now();
@@ -2229,6 +2244,8 @@ BenchmarkResult RaySchedulingBench::GetResult(uint32_t config_idx) const {
   BenchmarkResult r;
   if (config_idx == 23 || config_idx == 24) {
     r.operations = static_cast<uint64_t>(rayCount) * 16;
+  } else if ((config_idx >= 3 && config_idx <= 5) || config_idx == 25) {
+    r.operations = static_cast<uint64_t>(rayCount) * ((samplesPerPixel > 1) ? samplesPerPixel : 1u);
   } else if (config_idx == 28) {
     // 32-byte ray record read + 32-byte ray record write per queue transaction = 64 bytes/ray
     r.operations = static_cast<uint64_t>(rayCount) * 64;

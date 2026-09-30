@@ -317,6 +317,7 @@ float rand_float_pbr(inout uint state) {
 }
 
 bool traceShadowRay(vec3 origin, vec3 normal, vec3 lightDir, float maxDist) {
+    if (maxDist <= 0.05) return false;
     rayQueryEXT sQuery;
     vec3 rayOrig = origin + normal * 0.12;
     rayQueryInitializeEXT(sQuery, topLevelAS,
