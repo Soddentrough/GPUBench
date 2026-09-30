@@ -169,6 +169,19 @@ std::string cleanWorkloadName(const std::string &rawName, const std::string &sub
     name = "Secondary bounce rays - 0% Diffuse";
   }
 
+  // Clean Stage prefix if present
+  if (name.rfind("Stage: BVH Traversal - ", 0) == 0) {
+    name = name.substr(23);
+  } else if (name.rfind("Stage: Queue Compaction - ", 0) == 0) {
+    name = name.substr(26);
+  } else if (name.rfind("Stage: Queue Memory - ", 0) == 0) {
+    name = name.substr(22);
+  } else if (name.rfind("Stage: Traversal Divergence - ", 0) == 0) {
+    name = name.substr(30);
+  } else if (name.rfind("Stage: ", 0) == 0) {
+    name = name.substr(7);
+  }
+
   // Clean long pipeline breakdown names
   if (name == "BVH Traversal - Linear 1D Scanline (Baseline)") {
     name = "BVH Traversal - Linear 1D Scanline";
@@ -401,6 +414,7 @@ void ResultFormatter::print() {
           bool hasMegakernel = false;
           bool hasVector = false;
           bool hasScanline = false;
+          bool hasWaveBallot = false;
 
           for (const auto &benchPair : subcat.benchmarks) {
             std::string cName = std::get<2>(benchPair.first);
@@ -415,9 +429,12 @@ void ResultFormatter::print() {
                 cName.find("Baseline") != std::string::npos) {
               hasScanline = true;
             }
+            if (cName.find("Wave Ballot") != std::string::npos) {
+              hasWaveBallot = true;
+            }
           }
 
-          if (hasMegakernel || (hasVector && subcat.benchmarks.size() >= 2) || hasScanline) {
+          if (hasMegakernel || (hasVector && subcat.benchmarks.size() >= 2) || hasScanline || hasWaveBallot) {
             hasComparison = true;
             for (const auto &benchPair : subcat.benchmarks) {
               std::string cName = std::get<2>(benchPair.first);
@@ -427,6 +444,8 @@ void ResultFormatter::print() {
               } else if (!hasMegakernel && hasVector && cName.find("Vector") != std::string::npos) {
                 isCandidate = true;
               } else if (!hasMegakernel && !hasVector && hasScanline && (cName.find("Scanline") != std::string::npos || cName.find("Baseline") != std::string::npos)) {
+                isCandidate = true;
+              } else if (!hasMegakernel && !hasVector && !hasScanline && hasWaveBallot && cName.find("Wave Ballot") != std::string::npos) {
                 isCandidate = true;
               }
 
@@ -594,7 +613,8 @@ void ResultFormatter::print() {
                     }
                   } else if (fullName == baselineKeyName ||
                              (((fullName.find("Megakernel") != std::string::npos && fullName.find("RTP") == std::string::npos) ||
-                               fullName.find("Traditional") != std::string::npos || fullName.find("Baseline") != std::string::npos))) {
+                               fullName.find("Traditional") != std::string::npos || fullName.find("Baseline") != std::string::npos ||
+                               fullName.find("Scanline") != std::string::npos || fullName.find("Wave Ballot") != std::string::npos))) {
                     isLocalBase = true;
                   } else if (hasComparison && baselineVal > 0.0 && baselineMetric == res.metric) {
                     localBaseVal = baselineVal;

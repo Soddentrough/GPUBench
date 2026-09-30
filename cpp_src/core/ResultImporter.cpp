@@ -727,31 +727,31 @@ bool ResultImporter::loadFromFile(const std::string &filepath, ImportedRun &outR
           rd.configIndex = 0;
         } else if (id == "rt_sched_stage_bvh_linear") {
           rd.component = "Ray Tracing";
-          rd.subcategory = "Pipeline Breakdown";
+          rd.subcategory = "Traversal Ordering & Coherence";
           rd.benchmarkName = "BVH Traversal - Linear 1D Scanline (Baseline)";
           rd.sortWeight = 500;
           rd.configIndex = 0;
         } else if (id == "rt_sched_stage_queue_compaction") {
           rd.component = "Ray Tracing";
-          rd.subcategory = "Pipeline Breakdown";
+          rd.subcategory = "Wavefront Stream Compaction";
           rd.benchmarkName = "Queue Compaction - Wave Stream Sort";
           rd.sortWeight = 505;
           rd.configIndex = 1;
         } else if (id == "rt_sched_stage_bvh_tiled") {
           rd.component = "Ray Tracing";
-          rd.subcategory = "Pipeline Breakdown";
+          rd.subcategory = "Traversal Ordering & Coherence";
           rd.benchmarkName = "BVH Traversal - 2D Screen Tiled (8x4)";
           rd.sortWeight = 510;
           rd.configIndex = 2;
         } else if (id == "rt_sched_stage_bvh_morton8x4") {
           rd.component = "Ray Tracing";
-          rd.subcategory = "Pipeline Breakdown";
+          rd.subcategory = "Traversal Ordering & Coherence";
           rd.benchmarkName = "BVH Traversal - 2D Morton Z-Curve (8x4)";
           rd.sortWeight = 515;
           rd.configIndex = 3;
         } else if (id == "rt_sched_stage_bvh_morton4x8") {
           rd.component = "Ray Tracing";
-          rd.subcategory = "Pipeline Breakdown";
+          rd.subcategory = "Traversal Ordering & Coherence";
           rd.benchmarkName = "BVH Traversal - 2D Morton Z-Curve (4x8)";
           rd.sortWeight = 520;
           rd.configIndex = 4;

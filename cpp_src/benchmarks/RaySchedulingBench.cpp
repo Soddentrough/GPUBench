@@ -403,6 +403,14 @@ const char *RaySchedulingBench::GetSubCategory(uint32_t config_idx) const {
     return "Incoherent Ray Tracing";
   if (config_idx >= 9 && config_idx <= 11)
     return "Total Scene Render";
+  if (config_idx == 12 || config_idx == 14 || config_idx == 15 || config_idx == 16)
+    return "Traversal Ordering & Coherence";
+  if (config_idx == 13 || config_idx == 26)
+    return "Wavefront Stream Compaction";
+  if (config_idx == 28)
+    return "Queue Memory Bandwidth";
+  if (config_idx == 27)
+    return "Alpha Cutout Divergence";
   return "Pipeline Breakdown";
 }
 
@@ -425,11 +433,19 @@ int RaySchedulingBench::GetSortWeight(uint32_t config_idx) const {
   if (config_idx >= 19 && config_idx <= 22) return 640 + static_cast<int>(config_idx - 19); // Shadows: 640..643
   if (config_idx < 3) return 645 + static_cast<int>(config_idx);                             // Material: 645..647
   if (config_idx >= 6 && config_idx <= 8) return 650 + static_cast<int>(config_idx - 6);    // Incoherent: 650..652
-  if (config_idx >= 12 && config_idx <= 16) return 660 + static_cast<int>(config_idx - 12); // Traversal: 660..664
-  if (config_idx == 26) return 665;                                                           // Single-Pass Compaction: 665
-  if (config_idx == 28) return 666;                                                           // Queue Memory Bandwidth: 666
-  if (config_idx == 27) return 667;                                                           // Alpha Cutout Traversal Divergence: 667
-  return 660 + static_cast<int>(config_idx);
+  // Traversal Ordering & Coherence: 12, 14, 15, 16
+  if (config_idx == 12) return 660; // Linear 1D Scanline (Baseline)
+  if (config_idx == 14) return 661; // 2D Screen Tiled (8x4)
+  if (config_idx == 15) return 662; // 2D Morton (8x4)
+  if (config_idx == 16) return 663; // 2D Morton (4x8)
+  // Wavefront Stream Compaction: 13, 26
+  if (config_idx == 13) return 665; // Wave Ballot Compaction (Baseline)
+  if (config_idx == 26) return 666; // Queue Compaction (Single-Pass)
+  // Queue Memory Bandwidth: 28
+  if (config_idx == 28) return 670; // VRAM Queue Round-Trip
+  // Alpha Cutout Divergence: 27
+  if (config_idx == 27) return 675; // Traversal Divergence (Alpha Cutout)
+  return 680 + static_cast<int>(config_idx);
 }
 
 void RaySchedulingBench::Setup(IComputeContext &context_ref,

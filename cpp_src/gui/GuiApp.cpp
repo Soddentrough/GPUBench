@@ -815,14 +815,14 @@ void GuiApp::initializeBenchmarkCategories() {
             {"RayScheduling", "Incoherent Ray Tracing", "Incoherent Rays (Megakernel)", "Ray Tracing", "MRays/s", "Diffuse GI bounce traversal with high memory incoherence", true},
             {"RayScheduling", "Incoherent Ray Tracing", "Incoherent Rays (RTP + SER)", "Ray Tracing", "MRays/s", "Incoherent diffuse rays reordered via hardware SER", true},
             {"RayScheduling", "Incoherent Ray Tracing", "Incoherent Rays (DGC)", "Ray Tracing", "MRays/s", "Incoherent diffuse rays sorted and compacted via wavefront queues", true},
-            {"RayScheduling", "Pipeline Breakdown", "Linear 1D Scanline", "Ray Tracing", "MRays/s", "Linear scanline ray dispatch traversal baseline", true},
-            {"RayScheduling", "Pipeline Breakdown", "Wave Ballot Compaction", "Ray Tracing", "MRecords/s", "SIMD wave ballot compaction of active ray streams", true},
-            {"RayScheduling", "Pipeline Breakdown", "2D Screen Tiled (8x4)", "Ray Tracing", "MRays/s", "2D 8x4 tiled ray dispatch for spatial coherence", true},
-            {"RayScheduling", "Pipeline Breakdown", "2D Morton (8x4)", "Ray Tracing", "MRays/s", "8x4 Morton Z-order curve spatial traversal order", true},
-            {"RayScheduling", "Pipeline Breakdown", "2D Morton (4x8)", "Ray Tracing", "MRays/s", "4x8 Morton Z-order curve spatial traversal order", true},
-            {"RayScheduling", "Pipeline Breakdown", "Queue Compaction (Single-Pass)", "Ray Tracing", "MRecords/s", "Single-pass prefix sum wave stream compaction", true},
-            {"RayScheduling", "Pipeline Breakdown", "VRAM Queue Round-Trip", "Ray Tracing", "GB/s", "Ray queue intermediate VRAM round-trip streaming bandwidth", true},
-            {"RayScheduling", "Pipeline Breakdown", "Traversal Divergence (Alpha Cutout)", "Ray Tracing", "MRays/s", "Stackless Any-Hit shader evaluation across alpha-tested cutout geometry", true}
+            {"RayScheduling", "Traversal Ordering & Coherence", "Linear 1D Scanline", "Ray Tracing", "MRays/s", "Linear scanline ray dispatch traversal baseline", true},
+            {"RayScheduling", "Traversal Ordering & Coherence", "2D Screen Tiled (8x4)", "Ray Tracing", "MRays/s", "2D 8x4 tiled ray dispatch for spatial coherence", true},
+            {"RayScheduling", "Traversal Ordering & Coherence", "2D Morton (8x4)", "Ray Tracing", "MRays/s", "8x4 Morton Z-order curve spatial traversal order", true},
+            {"RayScheduling", "Traversal Ordering & Coherence", "2D Morton (4x8)", "Ray Tracing", "MRays/s", "4x8 Morton Z-order curve spatial traversal order", true},
+            {"RayScheduling", "Wavefront Stream Compaction", "Wave Ballot Compaction", "Ray Tracing", "MRecords/s", "SIMD wave ballot compaction of active ray streams", true},
+            {"RayScheduling", "Wavefront Stream Compaction", "Queue Compaction (Single-Pass)", "Ray Tracing", "MRecords/s", "Single-pass prefix sum wave stream compaction", true},
+            {"RayScheduling", "Queue Memory Bandwidth", "VRAM Queue Round-Trip", "Ray Tracing", "GB/s", "Ray queue intermediate VRAM round-trip streaming bandwidth", true},
+            {"RayScheduling", "Alpha Cutout Divergence", "Traversal Divergence (Alpha Cutout)", "Ray Tracing", "MRays/s", "Stackless Any-Hit shader evaluation across alpha-tested cutout geometry", true}
         }});
 
         // Subgroup 4: Hardware BVH & Divergence Stress (15 tests)
@@ -1833,6 +1833,7 @@ GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
                          item.name.find("SER") == std::string::npos && 
                          item.name.find("DGC") == std::string::npos)) ||
                        item.name.find("Linear 1D Scanline") != std::string::npos ||
+                       item.name.find("Wave Ballot") != std::string::npos ||
                        item.name.find("100% Solid") != std::string::npos ||
                        item.name.find("Uniform Material") != std::string::npos ||
                        item.name.find("Coherent Material") != std::string::npos ||
@@ -1862,8 +1863,12 @@ GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
                     baselineName = "Mirror";
                 } else if (item.subcategory.find("Payload Register Pressure") != std::string::npos || item.name.find("Payload") != std::string::npos) {
                     baselineName = "16B";
-                } else if (item.subcategory.find("Pipeline Breakdown") != std::string::npos || item.name.find("Traversal Scheduling") != std::string::npos) {
+                } else if (item.subcategory.find("Traversal Ordering") != std::string::npos ||
+                           item.subcategory.find("Pipeline Breakdown") != std::string::npos ||
+                           item.name.find("Traversal Scheduling") != std::string::npos) {
                     baselineName = "Linear 1D Scanline";
+                } else if (item.subcategory.find("Wavefront Stream Compaction") != std::string::npos) {
+                    baselineName = "Wave Ballot";
                 }
             }
         }
@@ -2470,7 +2475,7 @@ void GuiApp::renderBenchmarkSuitePanel() {
             }
 
             // Fixed columns for Score and Speedup guarantee visibility regardless of name length
-            float scoreColW = std::max(s(115.0f), ImGui::CalcTextSize("9999.9 GB/s").x + s(10.0f));
+            float scoreColW = std::max(s(145.0f), ImGui::CalcTextSize("99999.9 MRecords/s").x + s(12.0f));
             float deltaColW = hasAnyComparison ? std::max(s(145.0f), ImGui::CalcTextSize("[Baseline]").x + s(50.0f)) : 0.0f;
             int numSubCols = hasAnyComparison ? 3 : 2;
 
@@ -2588,6 +2593,11 @@ void GuiApp::renderBenchmarkSuitePanel() {
                             ImGui::SetCursorPosX(ImGui::GetCursorPosX() + s(6.0f));
                             ImGui::TextColored(baseColor, "[Baseline]");
                         } else if (dispInfo.hasComparison && dispInfo.hasResult && !isUnsupported && dispInfo.primaryResult.time_ms > 0.0 && !dispInfo.deltaText.empty()) {
+                            if (!item.subcategory.empty() && item.subcategory != activeBaselineSubcat) {
+                                hasActiveBaseline = false;
+                                activeBaselineY = -1.0f;
+                                activeBaselineSubcat = "";
+                            }
                             float stemX = (hasActiveBaseline && activeBaselineX > 0.0f) ? activeBaselineX : (cellPos.x + s(10.0f));
                             ImDrawList* drawList = ImGui::GetWindowDrawList();
                             ImU32 branchCol = ImGui::GetColorU32(ImVec4(0.38f, 0.65f, 0.90f, 0.65f));
@@ -2610,6 +2620,8 @@ void GuiApp::renderBenchmarkSuitePanel() {
                         } else {
                             if (!item.subcategory.empty() && item.subcategory != activeBaselineSubcat) {
                                 hasActiveBaseline = false;
+                                activeBaselineY = -1.0f;
+                                activeBaselineSubcat = "";
                             }
                         }
                     }
@@ -3612,6 +3624,8 @@ void GuiApp::renderResultsScorecard() {
                 } else if (res.benchmarkName.find("Megakernel") != std::string::npos ||
                            res.benchmarkName.find("Traditional") != std::string::npos ||
                            res.benchmarkName.find("Scanline (Baseline)") != std::string::npos ||
+                           res.benchmarkName.find("Scanline") != std::string::npos ||
+                           res.benchmarkName.find("Wave Ballot") != std::string::npos ||
                            (res.benchmarkName.find("RayDivergence") != std::string::npos && res.configIndex == 0) ||
                            (res.benchmarkName.find("RayPayload") != std::string::npos && res.configIndex == 0) ||
                            (res.benchmarkName.find("RayAnyHit") != std::string::npos && res.configIndex == 0)) {
@@ -3648,7 +3662,8 @@ void GuiApp::renderResultsScorecard() {
                         for (const auto& other : m_allResults) {
                             if (other.deviceIndex == res.deviceIndex && other.component == "Ray Tracing" &&
                                 other.subcategory == res.subcategory &&
-                                (other.benchmarkName.find("Megakernel") != std::string::npos || other.benchmarkName.find("Baseline") != std::string::npos) &&
+                                (other.benchmarkName.find("Megakernel") != std::string::npos || other.benchmarkName.find("Baseline") != std::string::npos ||
+                                 other.benchmarkName.find("Scanline") != std::string::npos || other.benchmarkName.find("Wave Ballot") != std::string::npos) &&
                                 other.time_ms > 0.0 && other.metric == res.metric) {
                                 baseOps = (static_cast<double>(other.operations) / other.time_ms) * 1000.0;
                                 break;
@@ -4297,18 +4312,31 @@ void GuiApp::renderRayTracingViewport() {
         ImGui::Spacing();
 
         // Split view: Left = Material Image, Right = Material Properties Card
-        if (ImGui::BeginTable("MatLayoutTable", 2, ImGuiTableFlags_SizingStretchProp)) {
+        if (ImGui::BeginTable("MatLayoutTable", 2, ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_Resizable)) {
+            ImGui::TableSetupColumn("Preview", ImGuiTableColumnFlags_WidthStretch, 0.50f);
+            ImGui::TableSetupColumn("Details", ImGuiTableColumnFlags_WidthStretch, 0.50f);
+
+            float cardHeight = std::max(s(360.0f), ImGui::GetContentRegionAvail().y - s(20.0f));
+
             ImGui::TableNextColumn();
             
-            // Left Column: Material Texture
+            // Left Column: Material Texture Card
+            ImGui::BeginChild("MatImageCard", ImVec2(0, cardHeight), true, ImGuiWindowFlags_NoScrollbar);
             auto texMat = getOrLoadTexture(curMat.file);
-            ImVec2 avail = ImGui::GetContentRegionAvail();
-            float canvasHeight = std::max(s(320.0f), avail.y - s(20.0f));
+            ImVec2 childAvail = ImGui::GetContentRegionAvail();
             float targetAspect = (texMat.isValid() && texMat.height > 0) ? (static_cast<float>(texMat.width) / texMat.height) : 1.0f;
-            float canvasWidth = std::min(avail.x, canvasHeight * targetAspect);
+            float imgW = childAvail.x;
+            float imgH = (targetAspect > 0.001f) ? (imgW / targetAspect) : imgW;
+            if (imgH > childAvail.y) {
+                imgH = childAvail.y;
+                imgW = imgH * targetAspect;
+            }
+            float offsetX = std::max(0.0f, (childAvail.x - imgW) * 0.5f);
+            float offsetY = std::max(0.0f, (childAvail.y - imgH) * 0.5f);
 
-            ImVec2 p0 = ImGui::GetCursorScreenPos();
-            ImVec2 p1 = ImVec2(p0.x + canvasWidth, p0.y + canvasHeight);
+            ImVec2 curPos = ImGui::GetCursorScreenPos();
+            ImVec2 p0 = ImVec2(curPos.x + offsetX, curPos.y + offsetY);
+            ImVec2 p1 = ImVec2(p0.x + imgW, p0.y + imgH);
             ImDrawList* drawList = ImGui::GetWindowDrawList();
 
             drawList->AddRectFilled(p0, p1, IM_COL32(10, 12, 18, 255), s(6.0f));
@@ -4319,16 +4347,15 @@ void GuiApp::renderRayTracingViewport() {
             } else {
                 std::string msg = "Image not found: " + std::string(curMat.file);
                 ImVec2 textSize = ImGui::CalcTextSize(msg.c_str());
-                drawList->AddText(ImVec2(p0.x + (canvasWidth - textSize.x) * 0.5f, p0.y + canvasHeight * 0.48f),
+                drawList->AddText(ImVec2(p0.x + (imgW - textSize.x) * 0.5f, p0.y + (imgH - textSize.y) * 0.5f),
                                   IM_COL32(200, 180, 80, 255), msg.c_str());
             }
-
-            ImGui::SetCursorScreenPos(ImVec2(p0.x, p1.y + s(10.0f)));
+            ImGui::EndChild();
 
             ImGui::TableNextColumn();
 
             // Right Column: Physical Properties & Shader Formulation
-            ImGui::BeginChild("MatPropsCard", ImVec2(0, canvasHeight), true);
+            ImGui::BeginChild("MatPropsCard", ImVec2(0, cardHeight), true);
             ImGui::TextColored(ImVec4(0.40f, 0.80f, 1.00f, 1.0f), "%s", curMat.name);
             ImGui::TextDisabled("BSDF Formulation: %s", curMat.bsdfClass);
             ImGui::Separator();
@@ -4442,18 +4469,31 @@ void GuiApp::renderRayTracingViewport() {
 
         ImGui::Spacing();
 
-        if (ImGui::BeginTable("GeoLayoutTable", 2, ImGuiTableFlags_SizingStretchProp)) {
+        if (ImGui::BeginTable("GeoLayoutTable", 2, ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_Resizable)) {
+            ImGui::TableSetupColumn("Preview", ImGuiTableColumnFlags_WidthStretch, 0.50f);
+            ImGui::TableSetupColumn("Details", ImGuiTableColumnFlags_WidthStretch, 0.50f);
+
+            float cardHeight = std::max(s(360.0f), ImGui::GetContentRegionAvail().y - s(20.0f));
+
             ImGui::TableNextColumn();
 
-            // Left Column: Geometry Image
+            // Left Column: Geometry Image Card
+            ImGui::BeginChild("GeoImageCard", ImVec2(0, cardHeight), true, ImGuiWindowFlags_NoScrollbar);
             auto texGeo = getOrLoadTexture(curGeo.file);
-            ImVec2 avail = ImGui::GetContentRegionAvail();
-            float canvasHeight = std::max(s(320.0f), avail.y - s(20.0f));
+            ImVec2 childAvail = ImGui::GetContentRegionAvail();
             float targetAspect = (texGeo.isValid() && texGeo.height > 0) ? (static_cast<float>(texGeo.width) / texGeo.height) : (16.0f / 9.0f);
-            float canvasWidth = std::min(avail.x, canvasHeight * targetAspect);
+            float imgW = childAvail.x;
+            float imgH = (targetAspect > 0.001f) ? (imgW / targetAspect) : imgW;
+            if (imgH > childAvail.y) {
+                imgH = childAvail.y;
+                imgW = imgH * targetAspect;
+            }
+            float offsetX = std::max(0.0f, (childAvail.x - imgW) * 0.5f);
+            float offsetY = std::max(0.0f, (childAvail.y - imgH) * 0.5f);
 
-            ImVec2 p0 = ImGui::GetCursorScreenPos();
-            ImVec2 p1 = ImVec2(p0.x + canvasWidth, p0.y + canvasHeight);
+            ImVec2 curPos = ImGui::GetCursorScreenPos();
+            ImVec2 p0 = ImVec2(curPos.x + offsetX, curPos.y + offsetY);
+            ImVec2 p1 = ImVec2(p0.x + imgW, p0.y + imgH);
             ImDrawList* drawList = ImGui::GetWindowDrawList();
 
             drawList->AddRectFilled(p0, p1, IM_COL32(10, 12, 18, 255), s(6.0f));
@@ -4464,16 +4504,15 @@ void GuiApp::renderRayTracingViewport() {
             } else {
                 std::string msg = "Geometry image not found: " + std::string(curGeo.file);
                 ImVec2 textSize = ImGui::CalcTextSize(msg.c_str());
-                drawList->AddText(ImVec2(p0.x + (canvasWidth - textSize.x) * 0.5f, p0.y + canvasHeight * 0.48f),
+                drawList->AddText(ImVec2(p0.x + (imgW - textSize.x) * 0.5f, p0.y + (imgH - textSize.y) * 0.5f),
                                   IM_COL32(200, 180, 80, 255), msg.c_str());
             }
-
-            ImGui::SetCursorScreenPos(ImVec2(p0.x, p1.y + s(10.0f)));
+            ImGui::EndChild();
 
             ImGui::TableNextColumn();
 
             // Right Column: Geometry & BVH Topology Specs
-            ImGui::BeginChild("GeoPropsCard", ImVec2(0, canvasHeight), true);
+            ImGui::BeginChild("GeoPropsCard", ImVec2(0, cardHeight), true);
             ImGui::TextColored(ImVec4(0.40f, 0.80f, 1.00f, 1.0f), "%s", curGeo.title);
             ImGui::Separator();
 
