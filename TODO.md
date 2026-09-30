@@ -84,6 +84,17 @@
   - Maintain a proactive release workflow to submit newly generated release artifacts to Microsoft Security Intelligence (WDSI) upon publishing.
   - Explore Inno Setup or WiX Toolset (.msi) generator alternatives in CPack to reduce heuristic AV flags associated with NSIS self-extracting archive stubs.
 
+### OpenCL 3.1+ & Mesa Rusticl Integration (SPIR-V Ingestion & FP8 Testing)
+- **Background**:
+  - OpenCL 3.1 mandates SPIR-V ingestion (`clCreateProgramWithIL`) in the core specification, and promotes subgroup operations and integer dot products to core.
+  - Fedora 45 (and Rawhide) packages `opencl-headers-3.1+` and ships Mesa Rusticl (`mesa-libOpenCL` with `RUSTICL_ENABLE=radeonsi`) as the first conformant OpenCL 3.1 implementation on Linux.
+- **Planned Tasks**:
+  - **Dynamic Ingestion of SPIR-V**: Extend `OpenCLContext::createKernel` to detect OpenCL 3.1+ / `cl_khr_il_program` and load precompiled `.spv` binaries directly via `clCreateProgramWithIL`.
+  - **Unified Compute Shader Pipeline**: Share precompiled SPIR-V binaries between Vulkan and OpenCL compute passes, eliminating redundant OpenCL C text kernels.
+  - **Native FP8 Testing under OpenCL**: Ingest FP8 SPIR-V kernels (`SPV_KHR_float8` / `SPV_KHR_cooperative_matrix` compiled via Slang or Clang/LLVM) into OpenCL 3.1, enabling native FP8 matrix and vector throughput benchmarking on OpenCL for hardware with native FP8 tensor/vector units (e.g., AMD RDNA 4 / CDNA 3) without being blocked by OpenCL C language syntax limitations.
+  - **Hardware Subgroup Reductions**: Implement `sub_group_reduce_add` in OpenCL matching the Vulkan atomic contention reductions.
+  - **Command Buffer Replay (`cl_khr_command_buffer`)**: Leverage the OpenCL 3.1.2 finalized command-buffer extension to record and replay benchmark dispatch graphs, minimizing CPU submission overhead.
+
 ### Architectural Backlog (Best Practices)
 - **Resource Management & RAII**: Transition Vulkan buffer (`VulkanBuffer`) and kernel (`VulkanKernel`) handles to full RAII semantics using C++ smart pointers with custom deleters or `Vulkan-Hpp` to guarantee leak-free teardowns.
 - **Vulkan Memory Allocator (VMA)**: Integrate AMD's VMA library into `VulkanContext` to pool device memory allocations, eliminate the 4,096 allocation cap limitation, and reduce VRAM fragmentation.
