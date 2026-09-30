@@ -11,11 +11,16 @@ Do not search for SMI tool paths across runs; use these exact absolute paths:
 
 *Note*: Executing binaries located outside the repository workspace (such as in `/opt/rocm` or `~/.local/bin`) requires running with `BypassSandbox: true`.
 
-## Hardware & Target GPU
-- **Target GPU**: GPU 1 (`-d 1`). (GPU 0 is reserved for external workloads).
-- **Architecture**: AMD Radeon AI PRO R9700 (GFX1201 / Vulkan 1.4 / SPIR-V 1.4).
-- **CPU & RAM**: Threadripper 3750X with 64GB RAM. Limit parallel compilation jobs to `-j16`.
-- **Operating System**: Fedora 44.
+## Hardware & Target GPU Discovery
+- **Target GPU**: Dynamic discovery. Always check available devices with `./build/gpubench --list-devices` or ROCm tools before executing.
+  - On this single-GPU system, use **`-d 0`** (or omit `-d`, which defaults to 0). Never attempt `-d 1` on single-GPU nodes.
+  - On multi-GPU systems, target `-d 1` only if device index 1 is actively enumerated.
+- **Current System Hardware**:
+  - **CPU**: AMD Ryzen AI MAX+ 395 (16 Cores / 32 Threads).
+  - **GPU**: AMD Radeon 8060S Graphics (RADV STRIX_HALO / RDNA 3.5 / Vulkan 1.4 / SPIR-V 1.4). Exactly 1 physical GPU device (Device 0).
+  - **RAM**: 128 GB Unified LPDDR5X.
+  - **Operating System**: Fedora 44.
+- **Build Parallelism**: Use dynamic core formula: `cmake --build . --parallel $(( (n = $(nproc) - 4) > 8 ? n : 8 ))`.
 
 ## System & Execution Rules
 - No sudo commands.
