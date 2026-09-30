@@ -478,6 +478,17 @@ void ResultFormatter::print() {
                 if (!note.empty()) {
                   noteStr = "[" + note + "]";
                 }
+              } else if (res.time_ms < 0.0) {
+                if (res.time_ms == -3.0) {
+                  valStr = "ABORTED";
+                  statusColor = YELLOW;
+                } else {
+                  valStr = "FAILED";
+                  statusColor = RED;
+                }
+                if (!res.errorString.empty()) {
+                  noteStr = "[" + res.errorString + "]";
+                }
               } else if (res.component == "Compute") {
                 double value = (static_cast<double>(res.operations) /
                                (res.time_ms / 1000.0)) / 1e12;
@@ -1410,6 +1421,17 @@ std::string resultsToJson(const std::vector<ResultData> &results) {
     }
     out += "      \"operations\": " + std::to_string(r.operations) + ",\n";
     out += "      \"time_ms\": " + std::to_string(r.time_ms) + ",\n";
+    if (r.time_ms == -3.0) {
+      out += "      \"status\": \"ABORTED\",\n";
+      out += "      \"error\": \"" + jsonEscape(r.errorString) + "\",\n";
+    } else if (r.time_ms < 0.0) {
+      out += "      \"status\": \"FAILED\",\n";
+      out += "      \"error\": \"" + jsonEscape(r.errorString) + "\",\n";
+    } else if (r.isUnsupported) {
+      out += "      \"status\": \"UNSUPPORTED\",\n";
+    } else {
+      out += "      \"status\": \"SUCCESS\",\n";
+    }
     out += std::string("      \"is_emulated\": ") +
            (r.isEmulated ? "true" : "false") + ",\n";
     out += std::string("      \"unsupported\": ") +

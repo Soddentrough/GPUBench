@@ -575,6 +575,10 @@ int main(int argc, char **argv) {
       std::cerr << "Error: Visual parity verification failed." << std::endl;
       return EXIT_FAILURE;
     }
+    if (runner.hasExecutionFailure()) {
+      std::cerr << "Error: One or more benchmarks failed or were aborted." << std::endl;
+      return EXIT_FAILURE;
+    }
 
     // execution_contexts will be destroyed here, cleaning up resources
 

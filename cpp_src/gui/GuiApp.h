@@ -217,6 +217,9 @@ private:
     VulkanContext* m_vulkanContext{nullptr};
     std::unordered_map<std::string, VulkanContext::TextureResource> m_textureCache;
     VulkanContext::TextureResource getOrLoadTexture(const std::string& relPath);
+    void clearTextureCache();
+    std::atomic<bool> m_textureCacheNeedsClear{false};
+    size_t m_prevTotalSelectedItems{(size_t)-1};
 
     // Ray Tracing Viewport Configuration & State
     int m_rtViewportMode{0};   // 0: Scenes & Parity, 1: Pipeline Passes, 2: PBR Materials, 3: Geometry & BVH

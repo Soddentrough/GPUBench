@@ -389,7 +389,7 @@ std::string RaySchedulingBench::GetConfigName(uint32_t config_idx) const {
 }
 
 const char *RaySchedulingBench::GetSubCategory(uint32_t config_idx) const {
-  if (config_idx == 17 || config_idx == 18 || config_idx == 27 || config_idx == 29 || config_idx == 30)
+  if (config_idx == 17 || config_idx == 18 || config_idx == 29 || config_idx == 30)
     return "Scene Ray Tracing (PBR)";
   if (config_idx >= 19 && config_idx <= 22)
     return "Directional Shadows";
@@ -417,7 +417,6 @@ int RaySchedulingBench::GetSortWeight(uint32_t config_idx) const {
   if (config_idx == 17 || config_idx == 18) return 620 + static_cast<int>(config_idx - 17); // Scene RT (PBR): 620, 621
   if (config_idx == 29) return 622;                                                           // Scene RT (PBR) - RTP: 622
   if (config_idx == 30) return 623;                                                           // Scene RT (PBR) - RTP+SER: 623
-  if (config_idx == 27) return 624;                                                           // Scene RT (Alpha Cutout): 624
   if (config_idx >= 3 && config_idx <= 5) return 625 + static_cast<int>(config_idx - 3);    // Scene Path Tracing: 625..627
   if (config_idx == 25) return 628;                                                           // Scene Path Tracing (Persistent Wavefront): 628
   if (config_idx == 23) return 629;                                                           // Scene Path Tracing 16 SPP Mega: 629
@@ -429,6 +428,7 @@ int RaySchedulingBench::GetSortWeight(uint32_t config_idx) const {
   if (config_idx >= 12 && config_idx <= 16) return 660 + static_cast<int>(config_idx - 12); // Traversal: 660..664
   if (config_idx == 26) return 665;                                                           // Single-Pass Compaction: 665
   if (config_idx == 28) return 666;                                                           // Queue Memory Bandwidth: 666
+  if (config_idx == 27) return 667;                                                           // Alpha Cutout Traversal Divergence: 667
   return 660 + static_cast<int>(config_idx);
 }
 

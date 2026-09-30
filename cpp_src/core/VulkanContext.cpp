@@ -16,11 +16,11 @@ void VulkanContext::waitIdle() {
   if (device == VK_NULL_HANDLE) return;
   for (size_t i = 0; i < kMaxInFlight; ++i) {
     if (inFlightFrames[i].inUse && inFlightFrames[i].fence != VK_NULL_HANDLE) {
-      constexpr uint64_t kTimeoutNs = 3'000'000'000ULL;
+      constexpr uint64_t kTimeoutNs = 30'000'000'000ULL;
       VkResult waitResult =
           vkWaitForFences(device, 1, &inFlightFrames[i].fence, VK_TRUE, kTimeoutNs);
       if (waitResult == VK_TIMEOUT) {
-        throw std::runtime_error("GPU dispatch timed out (>3 s) in waitIdle()");
+        throw std::runtime_error("GPU dispatch timed out (>30 s) in waitIdle()");
       } else if (waitResult != VK_SUCCESS) {
         throw std::runtime_error("vkWaitForFences failed in waitIdle with result: " +
                                  std::to_string(waitResult));
@@ -1600,12 +1600,12 @@ void VulkanContext::dispatch(ComputeKernel kernel, uint32_t grid_x,
 
   InFlightFrame &frame = inFlightFrames[currentFrameIndex];
   if (frame.inUse) {
-    constexpr uint64_t kTimeoutNs = 3'000'000'000ULL;
+    constexpr uint64_t kTimeoutNs = 30'000'000'000ULL;
     VkResult waitResult =
         vkWaitForFences(device, 1, &frame.fence, VK_TRUE, kTimeoutNs);
     if (waitResult == VK_TIMEOUT) {
       throw std::runtime_error(
-          "GPU dispatch timed out (>3 s) — aborting benchmark to prevent amdgpu TDR crash.");
+          "GPU dispatch timed out (>30 s) — aborting benchmark to prevent amdgpu TDR crash.");
     } else if (waitResult != VK_SUCCESS) {
       throw std::runtime_error("vkWaitForFences failed with result: " +
                                std::to_string(waitResult));
@@ -1682,12 +1682,12 @@ void VulkanContext::dispatchIndirect(ComputeKernel kernel_handle,
 
   auto &frame = inFlightFrames[currentFrameIndex];
   if (frame.inUse) {
-    constexpr uint64_t kTimeoutNs = 3'000'000'000ULL;
+    constexpr uint64_t kTimeoutNs = 30'000'000'000ULL;
     VkResult waitResult =
         vkWaitForFences(device, 1, &frame.fence, VK_TRUE, kTimeoutNs);
     if (waitResult == VK_TIMEOUT) {
       throw std::runtime_error(
-          "GPU dispatch timed out (>3 s) — aborting benchmark to prevent amdgpu TDR crash.");
+          "GPU dispatch timed out (>30 s) — aborting benchmark to prevent amdgpu TDR crash.");
     } else if (waitResult != VK_SUCCESS) {
       throw std::runtime_error("vkWaitForFences failed with result: " +
                                std::to_string(waitResult));
@@ -1745,12 +1745,12 @@ void VulkanContext::dispatchIndirectSequence(
 
   auto &frame = inFlightFrames[currentFrameIndex];
   if (frame.inUse) {
-    constexpr uint64_t kTimeoutNs = 3'000'000'000ULL;
+    constexpr uint64_t kTimeoutNs = 30'000'000'000ULL;
     VkResult waitResult =
         vkWaitForFences(device, 1, &frame.fence, VK_TRUE, kTimeoutNs);
     if (waitResult == VK_TIMEOUT) {
       throw std::runtime_error(
-          "GPU dispatch timed out (>3 s) — aborting benchmark to prevent amdgpu TDR crash.");
+          "GPU dispatch timed out (>30 s) — aborting benchmark to prevent amdgpu TDR crash.");
     } else if (waitResult != VK_SUCCESS) {
       throw std::runtime_error("vkWaitForFences failed with result: " +
                                std::to_string(waitResult));
@@ -1828,12 +1828,12 @@ void VulkanContext::dispatchWorkListSequence(
 
   auto &frame = inFlightFrames[currentFrameIndex];
   if (frame.inUse) {
-    constexpr uint64_t kTimeoutNs = 3'000'000'000ULL;
+    constexpr uint64_t kTimeoutNs = 30'000'000'000ULL;
     VkResult waitResult =
         vkWaitForFences(device, 1, &frame.fence, VK_TRUE, kTimeoutNs);
     if (waitResult == VK_TIMEOUT) {
       throw std::runtime_error(
-          "GPU dispatch timed out (>3 s) — aborting benchmark to prevent amdgpu TDR crash.");
+          "GPU dispatch timed out (>30 s) — aborting benchmark to prevent amdgpu TDR crash.");
     } else if (waitResult != VK_SUCCESS) {
       throw std::runtime_error("vkWaitForFences failed with result: " +
                                std::to_string(waitResult));
@@ -2124,12 +2124,12 @@ void VulkanContext::dispatchRayTracingIndirect(ComputeKernel kernel_handle,
 
   auto &frame = inFlightFrames[currentFrameIndex];
   if (frame.inUse) {
-    constexpr uint64_t kTimeoutNs = 3'000'000'000ULL;
+    constexpr uint64_t kTimeoutNs = 30'000'000'000ULL;
     VkResult waitResult =
         vkWaitForFences(device, 1, &frame.fence, VK_TRUE, kTimeoutNs);
     if (waitResult == VK_TIMEOUT) {
       throw std::runtime_error(
-          "GPU dispatch timed out (>3 s) — aborting benchmark to prevent amdgpu TDR crash.");
+          "GPU dispatch timed out (>30 s) — aborting benchmark to prevent amdgpu TDR crash.");
     } else if (waitResult != VK_SUCCESS) {
       throw std::runtime_error("vkWaitForFences failed with result: " +
                                std::to_string(waitResult));

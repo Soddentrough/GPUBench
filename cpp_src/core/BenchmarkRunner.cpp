@@ -739,6 +739,7 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
 
     IBenchmark *prevBench = nullptr;
     size_t taskIdx = 0;
+    bool deviceLost = false;
     for (const auto &task : tasks) {
       if (cancelToken && cancelToken->load()) {
         if (!verbose && !onResult) {
@@ -887,15 +888,23 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
           // Warmup: Run until the GPU clocks ramp up from idle/sleep to sustained boost clocks.
           // On modern GPUs with dynamic power management (DPM) governors, ramping takes ~250-400ms.
           const double min_warmup_duration_ms = 400.0;
-          uint64_t warmup_iters = 3;
+          uint64_t warmup_iters = 1;
           if (single_run_ms > 0.0) {
-            warmup_iters = static_cast<uint64_t>(
-                std::max(3.0, std::ceil(min_warmup_duration_ms / single_run_ms)));
+            if (single_run_ms < 50.0) {
+              warmup_iters = static_cast<uint64_t>(
+                  std::max(3.0, std::ceil(min_warmup_duration_ms / single_run_ms)));
+            } else if (single_run_ms < min_warmup_duration_ms) {
+              warmup_iters = static_cast<uint64_t>(
+                  std::ceil(min_warmup_duration_ms / single_run_ms));
+            }
           }
           warmup_iters = std::min(warmup_iters, static_cast<uint64_t>(200));
 
           for (uint64_t w = 0; w < warmup_iters; ++w) {
             bench->Run(i);
+            if (single_run_ms >= 500.0) {
+              context->waitIdle();
+            }
           }
           context->waitIdle();
 
@@ -977,6 +986,7 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
         }
       } catch (const std::exception &e) {
         taskIdx++;
+        executionFailure = true;
         if (!verbose) {
           std::cout << " Failed (" << e.what() << ")" << std::endl;
         } else {
@@ -984,25 +994,27 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
         }
 
         std::string errStr = e.what();
+        ResultData fail_data;
+        fail_data.backendName = ComputeBackendFactory::getBackendName(context->getBackend());
+        fail_data.deviceName = info.name;
+        fail_data.benchmarkName = bench_name;
+        fail_data.component = bench->GetComponent(i);
+        fail_data.subcategory = bench->GetSubCategory(i);
+        fail_data.metric = bench->GetMetric(i);
+        fail_data.operations = 0;
+        fail_data.time_ms = -2.0; // Signals error/failure
+        fail_data.isEmulated = false;
+        fail_data.isUnsupported = false;
+        fail_data.maxWorkGroupSize = info.maxWorkGroupSize;
+        fail_data.deviceIndex = context->getSelectedDeviceIndex();
+        fail_data.configIndex = i;
+        fail_data.sortWeight = bench->GetSortWeight(i);
+        fail_data.width = effectiveWidth;
+        fail_data.height = effectiveHeight;
+        fail_data.errorString = errStr;
+
+        formatter->addResult(fail_data);
         if (onResult) {
-          ResultData fail_data;
-          fail_data.backendName = ComputeBackendFactory::getBackendName(context->getBackend());
-          fail_data.deviceName = info.name;
-          fail_data.benchmarkName = bench_name;
-          fail_data.component = bench->GetComponent(i);
-          fail_data.subcategory = bench->GetSubCategory(i);
-          fail_data.metric = bench->GetMetric(i);
-          fail_data.operations = 0;
-          fail_data.time_ms = -2.0; // Signals error/failure
-          fail_data.isEmulated = false;
-          fail_data.isUnsupported = false;
-          fail_data.maxWorkGroupSize = info.maxWorkGroupSize;
-          fail_data.deviceIndex = context->getSelectedDeviceIndex();
-          fail_data.configIndex = i;
-          fail_data.sortWeight = bench->GetSortWeight(i);
-          fail_data.width = effectiveWidth;
-          fail_data.height = effectiveHeight;
-          fail_data.errorString = errStr;
           onResult(fail_data);
         }
 
@@ -1013,14 +1025,46 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
                        errStr.find("Device lost") != std::string::npos ||
                        errStr.find("result: -4") != std::string::npos);
         if (isLost) {
+          deviceLost = true;
           std::cerr << "  [CRITICAL] GPU device hung or lost during " << bench_name
                     << ". Aborting remaining tasks on this device." << std::endl;
+          for (size_t k = taskIdx; k < tasks.size(); ++k) {
+            auto *abortedBench = tasks[k].bench;
+            uint32_t abortedConfig = tasks[k].configIndex;
+            std::string abortedName = abortedBench->GetConfigName(abortedConfig);
+            if (abortedName.empty()) {
+              abortedName = abortedBench->GetName();
+            }
+            ResultData abort_data;
+            abort_data.backendName = ComputeBackendFactory::getBackendName(context->getBackend());
+            abort_data.deviceName = info.name;
+            abort_data.benchmarkName = abortedName;
+            abort_data.component = abortedBench->GetComponent(abortedConfig);
+            abort_data.subcategory = abortedBench->GetSubCategory(abortedConfig);
+            abort_data.metric = abortedBench->GetMetric(abortedConfig);
+            abort_data.operations = 0;
+            abort_data.time_ms = -3.0; // Signals aborted
+            abort_data.isEmulated = false;
+            abort_data.isUnsupported = false;
+            abort_data.maxWorkGroupSize = info.maxWorkGroupSize;
+            abort_data.deviceIndex = context->getSelectedDeviceIndex();
+            abort_data.configIndex = abortedConfig;
+            abort_data.sortWeight = abortedBench->GetSortWeight(abortedConfig);
+            abort_data.width = effectiveWidth;
+            abort_data.height = effectiveHeight;
+            abort_data.errorString = "Aborted: GPU device hung/lost";
+
+            formatter->addResult(abort_data);
+            if (onResult) {
+              onResult(abort_data);
+            }
+          }
           break;
         }
       }
     }
 
-    if (hasVisualVerification) {
+    if (hasVisualVerification && !deviceLost) {
       if (!verbose && !onResult) {
         std::cout << "\r\033[K  \033[32m✔\033[0m Benchmark execution complete ("
                   << tasks.size() << " workloads).\n\n  \033[1m[3/3] Visual Parity & Frame Export\033[0m..." << std::endl;
@@ -1222,6 +1266,27 @@ void BenchmarkRunner::runHostBenchmarks(const std::vector<std::string> &benchmar
         }
         bench->Teardown();
       } catch (const std::exception &e) {
+        executionFailure = true;
+        ResultData fail_data;
+        fail_data.backendName = "System";
+        fail_data.deviceName = "Host CPU";
+        fail_data.benchmarkName = bench->GetName();
+        fail_data.component = "Host System";
+        fail_data.subcategory = bench->GetSubCategory(0);
+        fail_data.metric = bench->GetMetric(0);
+        fail_data.operations = 0;
+        fail_data.time_ms = -2.0;
+        fail_data.isEmulated = false;
+        fail_data.isUnsupported = false;
+        fail_data.maxWorkGroupSize = 0;
+        fail_data.deviceIndex = 0xFFFFFFFF;
+        fail_data.configIndex = 0;
+        fail_data.sortWeight = bench->GetSortWeight(0);
+        fail_data.errorString = e.what();
+        formatter->addResult(fail_data);
+        if (onResult) {
+          onResult(fail_data);
+        }
         if (verbose) {
           std::cerr << "Error running " << bench->GetName() << ": " << e.what()
                     << std::endl;

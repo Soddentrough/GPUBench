@@ -73,6 +73,7 @@ public:
   void setVerifyParity(bool enable) { verifyParity = enable; }
   bool getVerifyParity() const { return verifyParity; }
   bool hasParityFailure() const { return parityFailure; }
+  bool hasExecutionFailure() const { return executionFailure; }
 
   const std::vector<std::unique_ptr<IBenchmark>>& getBenchmarkList() const { return benchmarks; }
 
@@ -95,6 +96,7 @@ private:
   bool dumpRenders;
   bool verifyParity = false;
   bool parityFailure = false;
+  bool executionFailure = false;
   std::string sceneName = "all";
   uint32_t renderWidth = 0;
   uint32_t renderHeight = 0;

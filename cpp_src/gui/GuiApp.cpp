@@ -248,6 +248,10 @@ GuiApp::~GuiApp() {
     }
     m_telemetryWorker.stop();
 
+    clearTextureCache();
+}
+
+void GuiApp::clearTextureCache() {
     if (m_vulkanContext) {
         for (auto& pair : m_textureCache) {
             m_vulkanContext->destroyTexture(pair.second);
@@ -615,6 +619,21 @@ void GuiApp::selectOnlyBenchmark(const std::string& benchmarkId) {
             if (dev.isSystem) dev.selected = true;
         }
     }
+
+    // Auto-collapse untested subgroups and expand active ones
+    for (auto& cat : m_categories) {
+        for (auto& sub : cat.subgroups) {
+            size_t sel = 0;
+            for (const auto& item : sub.items) {
+                if (item.selected) sel++;
+            }
+            if (sel == 0) {
+                sub.collapsed = true;
+            } else {
+                sub.collapsed = false;
+            }
+        }
+    }
 }
 
 void GuiApp::setupDarkTheme(float scale) {
@@ -749,7 +768,7 @@ void GuiApp::initializeBenchmarkCategories() {
         m_categories.push_back(cat);
     }
 
-    // 3. [Ray Tracing] (4 subgroups, 66 tests)
+    // 3. [Ray Tracing] (4 subgroups, 54 tests)
     {
         BenchmarkCategory cat;
         cat.name = "Ray Tracing";
@@ -767,13 +786,12 @@ void GuiApp::initializeBenchmarkCategories() {
             {"RayASBuild", "TLAS Construction", "TLAS: Massive Open World (200K Instances)", "Ray Tracing", "MInst/s", "Top-level AS instance hierarchy construction (Massive Open World)", true}
         }});
 
-        // Subgroup 2: Primary & Bounce Ray Tracing (14 tests)
+        // Subgroup 2: Primary & Bounce Ray Tracing (13 tests)
         cat.subgroups.push_back({"Primary & Bounce Ray Tracing", "Ray Tracing", "RayScheduling", "Primary camera ray tracing and multi-bounce path tracing across dispatches", {
             {"RayScheduling", "Scene Ray Tracing (PBR)", "Primary Rays (Compute Megakernel)", "Ray Tracing", "MRays/s", "Monolithic compute megakernel using VK_KHR_ray_query", true},
             {"RayScheduling", "Scene Ray Tracing (PBR)", "Primary Rays (Wavefront - DGC)", "Ray Tracing", "MRays/s", "Decoupled wavefront stream compaction using VK_EXT_device_generated_commands and VK_KHR_ray_query", true},
             {"RayScheduling", "Scene Ray Tracing (PBR)", "Primary Rays (RTP)", "Ray Tracing", "MRays/s", "Monolithic ray tracing pipeline megakernel (VK_KHR_ray_tracing_pipeline) with Shader Binding Table", true},
             {"RayScheduling", "Scene Ray Tracing (PBR)", "Primary Rays (RTP + SER)", "Ray Tracing", "MRays/s", "Monolithic ray tracing pipeline megakernel with hardware Shader Execution Reordering (VK_EXT_ray_tracing_invocation_reorder)", true},
-            {"RayScheduling", "Scene Ray Tracing (PBR)", "Primary Rays (Alpha Cutout)", "Ray Tracing", "MRays/s", "PBR primary ray tracing with alpha-tested cutout geometry evaluation", true},
             {"RayScheduling", "Scene Path Tracing (Multi-Bounce)", "Bounce Rays (Megakernel)", "Ray Tracing", "MRays/s", "Multi-bounce diffuse path tracing using compute megakernel", true},
             {"RayScheduling", "Scene Path Tracing (Multi-Bounce)", "Bounce Rays (RTP + SER)", "Ray Tracing", "MRays/s", "Multi-bounce path tracing with dedicated RTP and Hardware SER", true},
             {"RayScheduling", "Scene Path Tracing (Multi-Bounce)", "Bounce Rays (DGC)", "Ray Tracing", "MRays/s", "Multi-bounce path tracing with compacted wavefront work queues", true},
@@ -785,7 +803,7 @@ void GuiApp::initializeBenchmarkCategories() {
             {"RayScheduling", "Total Scene Render", "Full Frame (DGC)", "Ray Tracing", "MRays/s", "Complete full-frame scene rendering via Device-Generated Commands (DGC)", true}
         }});
 
-        // Subgroup 3: Pipeline Stages & Scheduling (17 tests)
+        // Subgroup 3: Pipeline Stages & Scheduling (18 tests)
         cat.subgroups.push_back({"Pipeline Stages & Scheduling", "Ray Tracing", "RayScheduling", "Isolated rendering pipeline phases, shadows, shading, and queue compaction", {
             {"RayScheduling", "Directional Shadows", "Shadows (Megakernel)", "Ray Tracing", "MRays/s", "Primary directional light shadow ray casting via megakernel", true},
             {"RayScheduling", "Directional Shadows", "Shadows (RTP + SER)", "Ray Tracing", "MRays/s", "Directional shadows via dedicated RTP and SER", true},
@@ -803,7 +821,8 @@ void GuiApp::initializeBenchmarkCategories() {
             {"RayScheduling", "Pipeline Breakdown", "2D Morton (8x4)", "Ray Tracing", "MRays/s", "8x4 Morton Z-order curve spatial traversal order", true},
             {"RayScheduling", "Pipeline Breakdown", "2D Morton (4x8)", "Ray Tracing", "MRays/s", "4x8 Morton Z-order curve spatial traversal order", true},
             {"RayScheduling", "Pipeline Breakdown", "Queue Compaction (Single-Pass)", "Ray Tracing", "MRecords/s", "Single-pass prefix sum wave stream compaction", true},
-            {"RayScheduling", "Pipeline Breakdown", "VRAM Queue Round-Trip", "Ray Tracing", "GB/s", "Ray queue intermediate VRAM round-trip streaming bandwidth", true}
+            {"RayScheduling", "Pipeline Breakdown", "VRAM Queue Round-Trip", "Ray Tracing", "GB/s", "Ray queue intermediate VRAM round-trip streaming bandwidth", true},
+            {"RayScheduling", "Pipeline Breakdown", "Traversal Divergence (Alpha Cutout)", "Ray Tracing", "MRays/s", "Stackless Any-Hit shader evaluation across alpha-tested cutout geometry", true}
         }});
 
         // Subgroup 4: Hardware BVH & Divergence Stress (15 tests)
@@ -1718,7 +1737,9 @@ GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
     }
 
     auto formatScore = [](const ResultData& r) -> std::string {
-        if (r.time_ms <= 0.0 || r.operations == 0) return "-";
+        if (r.time_ms == -3.0) return "ABORTED";
+        if (r.time_ms < 0.0) return "FAILED";
+        if (r.time_ms == 0.0 || r.operations == 0) return "-";
         double opsPerSec = (static_cast<double>(r.operations) / r.time_ms) * 1000.0;
         char buf[64];
         if (r.metric.find("TFLOPS") != std::string::npos || r.metric.find("TOPS") != std::string::npos) {
@@ -1758,6 +1779,14 @@ GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
         info.hasResult = true;
         info.primaryResult = *curRes;
         info.scoreText = formatScore(*curRes);
+
+        if (curRes->time_ms == -3.0) {
+            info.deltaText = !curRes->errorString.empty() ? ("[" + curRes->errorString + "]") : "[ABORTED]";
+            info.deltaColor = ImVec4(0.95f, 0.70f, 0.25f, 1.0f);
+        } else if (curRes->time_ms < 0.0) {
+            info.deltaText = !curRes->errorString.empty() ? ("[" + curRes->errorString + "]") : "[FAILED]";
+            info.deltaColor = ImVec4(0.95f, 0.35f, 0.35f, 1.0f);
+        }
 
         bool isUnsupportedItem = (!item.isSupported || curRes->isUnsupported || curRes->time_ms <= 0.0);
 
@@ -1922,7 +1951,18 @@ void GuiApp::renderBenchmarkSuitePanel() {
 
         ImGui::BeginChild("CompletedSuiteBanner", ImVec2(0, bannerH), true);
         ImGui::AlignTextToFramePadding();
-        ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "[PASSED] Benchmark suite finished (%zu results recorded).", m_allResults.size());
+        size_t failCnt = 0;
+        size_t abortCnt = 0;
+        for (const auto& r : m_allResults) {
+            if (r.time_ms == -3.0) abortCnt++;
+            else if (r.time_ms < 0.0 && !r.isUnsupported) failCnt++;
+        }
+        if (failCnt > 0 || abortCnt > 0) {
+            ImGui::TextColored(ImVec4(0.95f, 0.40f, 0.35f, 1.0f), "[COMPLETED WITH ISSUES] %zu Passed | %zu Failed | %zu Aborted",
+                               m_allResults.size() - failCnt - abortCnt, failCnt, abortCnt);
+        } else {
+            ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "[PASSED] Benchmark suite finished (%zu results recorded).", m_allResults.size());
+        }
         
         if (!needsTwoLines) {
             ImGui::SameLine();
@@ -1948,7 +1988,7 @@ void GuiApp::renderBenchmarkSuitePanel() {
 
     // Category View Filter Tabs with dynamic flowing wrap
     ImGui::TextDisabled("View Category:");
-    const char* viewLabels[] = {"All Tests (102)", "Compute (13)", "Memory (13)", "Ray Tracing (66)", "Graphics (3)", "Host CPU (7)"};
+    const char* viewLabels[] = {"All Tests (90)", "Compute (13)", "Memory (13)", "Ray Tracing (54)", "Graphics (3)", "Host CPU (7)"};
     for (int vi = 0; vi < 6; ++vi) {
         float btnW = ImGui::CalcTextSize(viewLabels[vi]).x + ImGui::GetStyle().FramePadding.x * 2.0f;
         if (btnW + ImGui::GetStyle().ItemSpacing.x <= ImGui::GetContentRegionAvail().x) {
@@ -2026,6 +2066,20 @@ void GuiApp::renderBenchmarkSuitePanel() {
                 break;
             }
         }
+        // Auto-collapse untested subgroups and expand active ones
+        for (auto& cat : m_categories) {
+            for (auto& sub : cat.subgroups) {
+                size_t sel = 0;
+                for (const auto& itm : sub.items) {
+                    if (itm.selected) sel++;
+                }
+                if (sel == 0) {
+                    sub.collapsed = true;
+                } else {
+                    sub.collapsed = false;
+                }
+            }
+        }
     };
 
     size_t totalSelectedItems = 0;
@@ -2040,6 +2094,38 @@ void GuiApp::renderBenchmarkSuitePanel() {
     }
     bool allItemsSelected = (totalPossibleItems > 0 && totalSelectedItems == totalPossibleItems);
     bool noneItemsSelected = (totalSelectedItems == 0);
+
+    // If only one category or subgroup is selected, auto-collapse untested groups
+    if (totalSelectedItems != m_prevTotalSelectedItems) {
+        m_prevTotalSelectedItems = totalSelectedItems;
+        size_t activeCats = 0;
+        size_t activeSubs = 0;
+        for (const auto& cat : m_categories) {
+            bool catHasSel = false;
+            for (const auto& sub : cat.subgroups) {
+                size_t sel = 0;
+                for (const auto& itm : sub.items) {
+                    if (itm.selected) sel++;
+                }
+                if (sel > 0) {
+                    activeSubs++;
+                    catHasSel = true;
+                }
+            }
+            if (catHasSel) activeCats++;
+        }
+        if (activeCats == 1 || activeSubs == 1) {
+            for (auto& cat : m_categories) {
+                for (auto& sub : cat.subgroups) {
+                    size_t sel = 0;
+                    for (const auto& itm : sub.items) {
+                        if (itm.selected) sel++;
+                    }
+                    if (sel == 0) sub.collapsed = true;
+                }
+            }
+        }
+    }
 
     auto renderFilterPill = [](const char* label, int status, const char* tooltip) -> bool {
         if (status == 2) {
@@ -2091,6 +2177,7 @@ void GuiApp::renderBenchmarkSuitePanel() {
             cat.allSelected = true;
             for (auto& sub : cat.subgroups) {
                 sub.allSelected = true;
+                sub.collapsed = false;
                 for (auto& item : sub.items) item.selected = true;
             }
         }
@@ -2103,6 +2190,7 @@ void GuiApp::renderBenchmarkSuitePanel() {
             cat.allSelected = false;
             for (auto& sub : cat.subgroups) {
                 sub.allSelected = false;
+                sub.collapsed = true;
                 for (auto& item : sub.items) item.selected = false;
             }
         }
@@ -2128,9 +2216,10 @@ void GuiApp::renderBenchmarkSuitePanel() {
     if (!canEditWorkloads) ImGui::EndDisabled();
 
     // Group Collapse / Expand Controls
+    float untestW = ImGui::CalcTextSize("Collapse Untested").x + ImGui::GetStyle().FramePadding.x * 2.0f;
     float expW = ImGui::CalcTextSize("Expand All").x + ImGui::GetStyle().FramePadding.x * 2.0f;
     float colW = ImGui::CalcTextSize("Collapse All").x + ImGui::GetStyle().FramePadding.x * 2.0f;
-    float groupControlsW = expW + colW + s(24.0f);
+    float groupControlsW = expW + colW + untestW + s(32.0f);
     if (groupControlsW <= ImGui::GetContentRegionAvail().x) {
         ImGui::SameLine();
         float availForExp = ImGui::GetContentRegionAvail().x;
@@ -2138,6 +2227,18 @@ void GuiApp::renderBenchmarkSuitePanel() {
             ImGui::SetCursorPosX(ImGui::GetCursorPosX() + availForExp - groupControlsW);
         }
     }
+    if (ImGui::SmallButton("Collapse Untested")) {
+        for (auto& cat : m_categories) {
+            for (auto& sub : cat.subgroups) {
+                size_t sel = 0;
+                for (const auto& itm : sub.items) {
+                    if (itm.selected) sel++;
+                }
+                if (sel == 0) sub.collapsed = true;
+            }
+        }
+    }
+    ImGui::SameLine(0, s(6.0f));
     if (ImGui::SmallButton("Expand All")) {
         for (auto& cat : m_categories) {
             for (auto& sub : cat.subgroups) sub.collapsed = false;
@@ -2287,6 +2388,11 @@ void GuiApp::renderBenchmarkSuitePanel() {
                     itm.selected = cbVal;
                 }
             }
+            if (!cbVal) {
+                sub.collapsed = true;
+            } else {
+                sub.collapsed = false;
+            }
         }
         if (isPartSel) ImGui::PopStyleColor();
         if (!canEditWorkloads) ImGui::EndDisabled();
@@ -2430,6 +2536,20 @@ void GuiApp::renderBenchmarkSuitePanel() {
                             ImGui::SetCursorPosX(ImGui::GetCursorPosX() + availC - sW - s(4.0f));
                         }
                         ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s", dispInfo.scoreText.c_str());
+                    } else if (dispInfo.hasResult && dispInfo.primaryResult.time_ms == -3.0) {
+                        float sW = ImGui::CalcTextSize("[ABORTED]").x;
+                        float availC = ImGui::GetContentRegionAvail().x;
+                        if (availC > sW + s(4.0f)) {
+                            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + availC - sW - s(4.0f));
+                        }
+                        ImGui::TextColored(ImVec4(0.95f, 0.70f, 0.25f, 1.0f), "[ABORTED]");
+                    } else if (dispInfo.hasResult && dispInfo.primaryResult.time_ms < 0.0) {
+                        float sW = ImGui::CalcTextSize("[FAILED]").x;
+                        float availC = ImGui::GetContentRegionAvail().x;
+                        if (availC > sW + s(4.0f)) {
+                            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + availC - sW - s(4.0f));
+                        }
+                        ImGui::TextColored(ImVec4(0.95f, 0.35f, 0.35f, 1.0f), "[FAILED]");
                     } else if (isUnsupported) {
                         ImGui::TextColored(ImVec4(0.85f, 0.55f, 0.15f, 1.0f), "[UNSUPPORTED]");
                     } else if (isCurrentlyTesting) {
@@ -2448,6 +2568,12 @@ void GuiApp::renderBenchmarkSuitePanel() {
                     // Col 2: Delta Speedup / Baseline Connecting Branch
                     if (hasAnyComparison) {
                         ImGui::TableNextColumn();
+                        if (dispInfo.hasResult && dispInfo.primaryResult.time_ms == -3.0) {
+                            ImGui::TextColored(ImVec4(0.95f, 0.70f, 0.25f, 1.0f), "[Aborted]");
+                        } else if (dispInfo.hasResult && dispInfo.primaryResult.time_ms < 0.0) {
+                            std::string err = !dispInfo.primaryResult.errorString.empty() ? ("[" + dispInfo.primaryResult.errorString + "]") : "[Failed]";
+                            ImGui::TextColored(ImVec4(0.95f, 0.35f, 0.35f, 1.0f), "%s", err.c_str());
+                        } else {
                         ImVec2 cellPos = ImGui::GetCursorScreenPos();
                         float textH = ImGui::GetTextLineHeight();
                         float curCenterY = cellPos.y + textH * 0.5f;
@@ -2486,6 +2612,7 @@ void GuiApp::renderBenchmarkSuitePanel() {
                                 hasActiveBaseline = false;
                             }
                         }
+                    }
                     }
 
                     ImGui::PopID();
@@ -2617,13 +2744,13 @@ void GuiApp::renderLiveTelemetryDock() {
     ImGui::SameLine();
 
     if (m_execState == ExecutionState::Running) {
-        ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.35f, 1.0f), "● RECORDING RUN");
+        ImGui::TextColored(ImVec4(0.35f, 0.85f, 0.45f, 1.0f), "LIVE");
     } else if (m_execState == ExecutionState::Completed) {
-        ImGui::TextColored(ImVec4(0.35f, 0.85f, 0.45f, 1.0f), "● RUN COMPLETE (FROZEN)");
+        ImGui::TextColored(ImVec4(0.40f, 0.75f, 1.0f, 1.0f), "COMPLETE");
     } else if (m_execState == ExecutionState::Cancelled) {
-        ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f), "● RUN ABORTED (FROZEN)");
+        ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.35f, 1.0f), "ABORTED");
     } else {
-        ImGui::TextDisabled("● IDLE");
+        ImGui::TextDisabled("IDLE");
     }
     ImGui::SameLine();
     ImGui::TextDisabled("|");
@@ -2915,11 +3042,11 @@ void GuiApp::renderSidebarTelemetry() {
     ImGui::TextColored(ImVec4(0.65f, 0.75f, 0.90f, 1.0f), "HARDWARE TELEMETRY");
     ImGui::SameLine();
     if (m_execState == ExecutionState::Running) {
-        ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.35f, 1.0f), "● REC");
+        ImGui::TextColored(ImVec4(0.35f, 0.85f, 0.45f, 1.0f), "LIVE");
     } else if (m_execState == ExecutionState::Completed) {
-        ImGui::TextColored(ImVec4(0.35f, 0.85f, 0.45f, 1.0f), "● FROZEN");
+        ImGui::TextColored(ImVec4(0.40f, 0.75f, 1.0f, 1.0f), "COMPLETE");
     } else if (m_execState == ExecutionState::Cancelled) {
-        ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f), "● ABORT");
+        ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.35f, 1.0f), "ABORTED");
     }
 
     // Device switch buttons (ONLY for actual devices!)
@@ -3170,12 +3297,13 @@ void GuiApp::renderResultsScorecard() {
     
     // Top Summary Banner when results are present
     if (!m_allResults.empty()) {
-        size_t passedCount = 0, unsuppCount = 0, failedCount = 0;
+        size_t passedCount = 0, unsuppCount = 0, failedCount = 0, abortedCount = 0;
         double peakCompute = 0.0, peakBandwidth = 0.0, peakRT = 0.0;
 
         for (const auto& res : m_allResults) {
             if (res.isUnsupported) { unsuppCount++; continue; }
-            if (res.time_ms == -2.0) { failedCount++; continue; }
+            if (res.time_ms == -3.0) { abortedCount++; continue; }
+            if (res.time_ms < 0.0) { failedCount++; continue; }
             passedCount++;
 
             if (res.time_ms > 0.0 && res.operations > 0) {
@@ -3203,6 +3331,10 @@ void GuiApp::renderResultsScorecard() {
         if (failedCount > 0) {
             ImGui::SameLine();
             ImGui::TextColored(ImVec4(0.95f, 0.30f, 0.30f, 1.0f), "| %zu Failed", failedCount);
+        }
+        if (abortedCount > 0) {
+            ImGui::SameLine();
+            ImGui::TextColored(ImVec4(0.95f, 0.70f, 0.25f, 1.0f), "| %zu Aborted", abortedCount);
         }
 
         ImGui::SameLine(s(320.0f));
@@ -3345,10 +3477,10 @@ void GuiApp::renderResultsScorecard() {
             ImGui::TableNextColumn();
             if (res.isUnsupported) {
                 ImGui::TextColored(ImVec4(0.85f, 0.55f, 0.15f, 1.0f), "UNSUPPORTED");
-            } else if (res.time_ms == -2.0) {
-                ImGui::TextColored(ImVec4(0.95f, 0.25f, 0.25f, 1.0f), "FAILED");
+            } else if (res.time_ms == -3.0) {
+                ImGui::TextColored(ImVec4(0.95f, 0.70f, 0.25f, 1.0f), "ABORTED");
             } else if (res.time_ms < 0.0) {
-                ImGui::TextColored(ImVec4(0.25f, 0.75f, 0.95f, 1.0f), "RUNNING...");
+                ImGui::TextColored(ImVec4(0.95f, 0.25f, 0.25f, 1.0f), "FAILED");
             } else {
                 ImGui::TextColored(ImVec4(0.25f, 0.85f, 0.35f, 1.0f), "PASS");
             }
@@ -3406,8 +3538,10 @@ void GuiApp::renderResultsScorecard() {
                 }
             } else if (res.isUnsupported && !res.supportNote.empty()) {
                 ImGui::TextDisabled("%s", res.supportNote.c_str());
-            } else if (res.time_ms == -2.0 && !res.errorString.empty()) {
-                ImGui::TextColored(ImVec4(0.95f, 0.3f, 0.3f, 1.0f), "%s", res.errorString.c_str());
+            } else if (res.time_ms == -3.0) {
+                ImGui::TextColored(ImVec4(0.95f, 0.70f, 0.25f, 1.0f), "ABORTED");
+            } else if (res.time_ms < 0.0) {
+                ImGui::TextColored(ImVec4(0.95f, 0.30f, 0.30f, 1.0f), "FAILED");
             } else {
                 ImGui::TextDisabled("-");
             }
@@ -3419,6 +3553,12 @@ void GuiApp::renderResultsScorecard() {
 
             if (res.isUnsupported) {
                 deltaStr = "-";
+            } else if (res.time_ms == -3.0) {
+                deltaStr = !res.errorString.empty() ? ("[" + res.errorString + "]") : "[Aborted: GPU Lost]";
+                deltaCol = ImVec4(0.95f, 0.70f, 0.25f, 1.0f);
+            } else if (res.time_ms < 0.0) {
+                deltaStr = !res.errorString.empty() ? ("[" + res.errorString + "]") : "[Failed]";
+                deltaCol = ImVec4(0.95f, 0.30f, 0.30f, 1.0f);
             } else if (res.component == "Compute") {
                 if (res.benchmarkName.find("FP32") != std::string::npos) {
                     deltaStr = "[Baseline]";
@@ -3675,6 +3815,8 @@ void GuiApp::renderRayTracingViewport() {
         else if (targetTag == "showroom") m_scene = "showroom";
         else m_scene = "outdoor";
         m_dumpRenders = true;
+        clearTextureCache();
+        selectOnlyBenchmark("RayScheduling");
         startBenchmarks();
     }
     if (ImGui::IsItemHovered()) {
@@ -3738,6 +3880,11 @@ void GuiApp::renderRayTracingViewport() {
 
         ImGui::Spacing();
 
+        // Check if texture cache needs reload
+        if (m_textureCacheNeedsClear.exchange(false)) {
+            clearTextureCache();
+        }
+
         // Resolve Image Textures
         std::string tag = curSceneMeta.tag;
         std::string tradPath = "renders/render_" + tag + "_traditional_megakernel.png";
@@ -3747,6 +3894,26 @@ void GuiApp::renderRayTracingViewport() {
         auto texTrad = getOrLoadTexture(tradPath);
         auto texDgc = getOrLoadTexture(dgcPath);
         auto texDiff = getOrLoadTexture(diffPath);
+
+        // If current scene has no renders on disk, check if another scene does and auto-switch
+        if (!texTrad.isValid() && !texDgc.isValid()) {
+            for (size_t sIdx = 0; sIdx < numScenes; ++sIdx) {
+                if (sIdx == static_cast<size_t>(m_rtSceneIndex)) continue;
+                std::string altTrad = "renders/render_" + std::string(scenes[sIdx].tag) + "_traditional_megakernel.png";
+                auto altTex = getOrLoadTexture(altTrad);
+                if (altTex.isValid()) {
+                    m_rtSceneIndex = static_cast<int>(sIdx);
+                    tag = scenes[m_rtSceneIndex].tag;
+                    tradPath = altTrad;
+                    dgcPath = "renders/render_" + tag + "_worklist_dgc.png";
+                    diffPath = "renders/render_" + tag + "_difference_heatmap.png";
+                    texTrad = altTex;
+                    texDgc = getOrLoadTexture(dgcPath);
+                    texDiff = getOrLoadTexture(diffPath);
+                    break;
+                }
+            }
+        }
 
         // Viewport Canvas Calculation
         ImVec2 avail = ImGui::GetContentRegionAvail();
@@ -4559,6 +4726,7 @@ void GuiApp::startBenchmarks() {
         }
         m_currentlyRunningTestId.clear();
         m_hasCurrentlyRunningResult = false;
+        m_textureCacheNeedsClear.store(true);
     });
 }
 
