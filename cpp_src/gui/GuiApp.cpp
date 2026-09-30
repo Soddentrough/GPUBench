@@ -1679,8 +1679,19 @@ bool GuiApp::matchesItem(const ResultData& r, const BenchmarkItem& itm, uint32_t
     }
 
     // BVH & Divergence Stress matching
+    auto hasPercentToken = [](const std::string& str, const std::string& token) -> bool {
+        size_t pos = 0;
+        while ((pos = str.find(token, pos)) != std::string::npos) {
+            if (pos == 0 || !isdigit(static_cast<unsigned char>(str[pos - 1]))) {
+                return true;
+            }
+            pos += token.length();
+        }
+        return false;
+    };
+
     for (const char* pct : {"100%", "75%", "50%", "25%", "10%", "0%"}) {
-        if (itm.name.find(pct) != std::string::npos && clean.find(pct) != std::string::npos) return true;
+        if (hasPercentToken(itm.name, pct) && hasPercentToken(clean, pct)) return true;
     }
     for (const char* deg : {"45 deg", "75 deg", "90 deg", "180 deg", "Microbench", "Mirror", "Diffuse"}) {
         if (itm.name.find(deg) != std::string::npos && clean.find(deg) != std::string::npos) return true;
@@ -2161,7 +2172,7 @@ void GuiApp::renderBenchmarkSuitePanel() {
         ImGui::PopStyleVar(3);
         ImGui::PopStyleColor(5);
 
-        if (ImGui::IsItemHovered() && tooltip) {
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled) && tooltip) {
             ImGui::SetTooltip("%s", tooltip);
         }
 
@@ -2515,7 +2526,7 @@ void GuiApp::renderBenchmarkSuitePanel() {
                     }
                     ImGui::Unindent(s(16.0f));
 
-                    if (ImGui::IsItemHovered()) {
+                    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
                         if (isUnsupported) {
                             std::string reason = !item.supportReason.empty() ? item.supportReason :
                                 (dispInfo.hasResult && !dispInfo.primaryResult.supportNote.empty() ? dispInfo.primaryResult.supportNote : "Hardware or API limitation");

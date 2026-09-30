@@ -250,6 +250,16 @@ void TelemetryWorker::pollDevice(const DeviceSysfsPaths& paths, DeviceTelemetryS
     float tempJct = readSysfsFloat(paths.hwmonDir + "/temp2_input", 0.0f, 0.001f);
     float tempMem = readSysfsFloat(paths.hwmonDir + "/temp3_input", 0.0f, 0.001f);
 
+    // Fallback: if junction or edge temperature sensor is absent, cross-populate
+    if (tempJct <= 0.0f && tempEdge > 0.0f) {
+        tempJct = tempEdge;
+    } else if (tempEdge <= 0.0f && tempJct > 0.0f) {
+        tempEdge = tempJct;
+    }
+    if (tempMem <= 0.0f) {
+        tempMem = (tempJct > 0.0f) ? tempJct : tempEdge;
+    }
+
     // 4. Fan RPM
     float fan = readSysfsFloat(paths.hwmonDir + "/fan1_input", 0.0f);
 

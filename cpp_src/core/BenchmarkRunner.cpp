@@ -942,10 +942,6 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
           }
         }
 
-        if (!verbose && !isInteractive) {
-          std::cout << " Done." << std::endl;
-        }
-
         bool isValid = bench->ValidateResults(i);
         if (!isValid && verbose) {
           std::cerr << " [WARNING] Result validation failed for "
@@ -979,6 +975,31 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
         result_data.height = effectiveHeight;
 
         formatter->addResult(result_data);
+        if (!verbose && !isInteractive) {
+          double opsPerSec = (result_data.time_ms > 0.0 && result_data.operations > 0)
+              ? (static_cast<double>(result_data.operations) / result_data.time_ms) * 1000.0
+              : 0.0;
+          char scoreBuf[64];
+          if (result_data.metric.find("TFLOPS") != std::string::npos || result_data.metric.find("TOPS") != std::string::npos) {
+            snprintf(scoreBuf, sizeof(scoreBuf), "%.2f %s", opsPerSec / 1e12, result_data.metric.c_str());
+          } else if (result_data.metric.find("GB/s") != std::string::npos) {
+            snprintf(scoreBuf, sizeof(scoreBuf), "%.1f GB/s", opsPerSec / 1e9);
+          } else if (result_data.metric.find("GIS/s") != std::string::npos) {
+            snprintf(scoreBuf, sizeof(scoreBuf), "%.2f GIS/s", opsPerSec / 1e9);
+          } else if (result_data.metric.find("MRays/s") != std::string::npos) {
+            snprintf(scoreBuf, sizeof(scoreBuf), "%.1f MRays/s", opsPerSec / 1e6);
+          } else if (result_data.metric.find("GPixels/s") != std::string::npos) {
+            snprintf(scoreBuf, sizeof(scoreBuf), "%.2f GPixels/s", opsPerSec / 1e9);
+          } else if (result_data.metric.find("ns") != std::string::npos) {
+            double nsVal = (result_data.operations > 0) ? ((result_data.time_ms * 1e6) / result_data.operations) : result_data.time_ms;
+            snprintf(scoreBuf, sizeof(scoreBuf), "%.1f ns", nsVal);
+          } else if (result_data.metric.find("M") != std::string::npos) {
+            snprintf(scoreBuf, sizeof(scoreBuf), "%.1f %s", opsPerSec / 1e6, result_data.metric.c_str());
+          } else {
+            snprintf(scoreBuf, sizeof(scoreBuf), "%.1f %s", opsPerSec, result_data.metric.c_str());
+          }
+          std::cout << " Done. [" << scoreBuf << "]" << std::endl;
+        }
         numBenchmarksRun++;
         taskIdx++;
         if (onResult) {

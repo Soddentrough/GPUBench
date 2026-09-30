@@ -851,7 +851,7 @@ void main() {
         // Mode 1: Multi-Bounce Path Tracing with Russian Roulette & Progressive Radiance Accumulation
         uint sampleIdx = pc.sampleIdx;
         uint totalSpp = max(1u, pc.spp);
-        uint rngState = pixelIdx + pc.seed + sampleIdx * 7919u;
+        uint rngState = pixelIdx + pc.seed;
         float jx = (totalSpp == 1u) ? 0.0 : (rand_float(rngState) - 0.5);
         float jy = (totalSpp == 1u) ? 0.0 : (rand_float(rngState) - 0.5);
         float px_s = float(px_u) + jx - float(pc.width) * 0.5 + 0.5;
@@ -956,8 +956,8 @@ void main() {
                 vec3 throughput = albedo;
                 vec3 indirectRadiance = vec3(0.0);
 
-                // Multi-bounce path tracing loop
-                for (uint b = 1; b < pc.bounces; ++b) {
+                uint maxBounces = (pc.dumpRenders != 0u) ? 2u : pc.bounces;
+                for (uint b = 1; b < maxBounces; ++b) {
                     threadRays++;
                     rayQueryEXT bQuery;
                     rayQueryInitializeEXT(bQuery, topLevelAS, gl_RayFlagsOpaqueEXT, 0xFF, bOrigin, (pc.isGltf != 0u ? 0.05 : 0.005), bDir, tMaxPrimary);
