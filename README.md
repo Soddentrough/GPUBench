@@ -238,7 +238,7 @@ gpubench -d 0 -b rayscheduling -s forest -r 4k
 # Dump 4K UHD PPM/PNG render buffers, diff heatmaps, and 4-scenario comparative grid
 gpubench -d 0 -b rayscheduling -s all --dump-renders
 
-# Run specific config (e.g. Config 17: Primary Rays (Compute Megakernel), Config 18: Primary Rays (Wavefront - DGC), Config 29: Primary Rays (Pipeline Megakernel - RTP)) in profiling snapshot mode
+# Run specific config (e.g. Config 17: Primary Rays (Compute Megakernel), Config 18: Primary Rays (Wavefront - DGC), Config 29: Primary Rays (RTP)) in profiling snapshot mode
 gpubench -d 0 -b rayscheduling -s forest -c 18 --profile-snapshot
 
 # Export machine-readable results to JSON

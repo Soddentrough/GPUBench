@@ -1872,7 +1872,7 @@ pub static WORKLOADS: &[WorkloadDef] = &[
     WorkloadDef {
         id: "rt_sched_stage_prim_morton_rtp",
         category: "RAY PIPELINE BREAKDOWN",
-        label: "Primary Rays (Pipeline Megakernel - RTP)",
+        label: "Primary Rays (RTP)",
         approach: "Morton 8x4 + RTP",
         default_unit: "MRays/s",
         desc: "End-to-end PBR ray tracing combining 2D Morton ray ordering with monolithic ray tracing pipeline megakernel (VK_KHR_ray_tracing_pipeline) with Shader Binding Table.",
@@ -1882,7 +1882,7 @@ pub static WORKLOADS: &[WorkloadDef] = &[
     WorkloadDef {
         id: "rt_sched_stage_prim_morton_ser",
         category: "RAY PIPELINE BREAKDOWN",
-        label: "Primary Rays (Pipeline Megakernel - RTP + SER)",
+        label: "Primary Rays (RTP + SER)",
         approach: "Morton 8x4 + RTP + Hardware SER",
         default_unit: "MRays/s",
         desc: "End-to-end PBR ray tracing combining 2D Morton ray ordering with monolithic ray tracing pipeline megakernel with hardware Shader Execution Reordering (VK_EXT_ray_tracing_invocation_reorder).",
@@ -5985,9 +5985,9 @@ fn map_result_to_workload_id(res: &ResultData) -> Option<&'static str> {
                     Some("rt_sched_mat_trad")
                 } else if ((res.configIndex == 2 || res.configIndex == 1) && (res.subcategory.contains("Material") || res.benchmarkName.contains("Material"))) || ((res.subcategory.contains("Work Lists") || res.subcategory.contains("Device-Generated Commands") || res.subcategory.contains("DGC") || res.benchmarkName.contains("DGC")) && res.subcategory.contains("Material")) {
                     Some("rt_sched_mat_wl")
-                } else if res.configIndex == 4 || res.configIndex == 28 || (res.benchmarkName.contains("Path Tracing") && (res.benchmarkName.contains("Traditional") || res.benchmarkName.contains("Megakernel"))) || (res.subcategory.contains("Path Tracing") && (res.subcategory.contains("Traditional") || res.benchmarkName.contains("Traditional") || res.benchmarkName.contains("Megakernel"))) {
+                } else if res.configIndex == 4 || (res.benchmarkName.contains("Path Tracing") && (res.benchmarkName.contains("Traditional") || res.benchmarkName.contains("Megakernel"))) || (res.subcategory.contains("Path Tracing") && (res.subcategory.contains("Traditional") || res.benchmarkName.contains("Traditional") || res.benchmarkName.contains("Megakernel"))) {
                     Some("rt_sched_pt_trad")
-                } else if res.configIndex == 6 || res.configIndex == 29 || (res.benchmarkName.contains("Path Tracing") && (res.benchmarkName.contains("Work Lists") || res.benchmarkName.contains("DGC") || res.benchmarkName.contains("Device-Generated Commands"))) || (res.subcategory.contains("Path Tracing") && (res.subcategory.contains("Work Lists") || res.subcategory.contains("DGC") || res.subcategory.contains("Device-Generated Commands") || res.benchmarkName.contains("Work Lists") || res.benchmarkName.contains("DGC"))) {
+                } else if res.configIndex == 6 || (res.benchmarkName.contains("Path Tracing") && (res.benchmarkName.contains("Work Lists") || res.benchmarkName.contains("DGC") || res.benchmarkName.contains("Device-Generated Commands"))) || (res.subcategory.contains("Path Tracing") && (res.subcategory.contains("Work Lists") || res.subcategory.contains("DGC") || res.subcategory.contains("Device-Generated Commands") || res.benchmarkName.contains("Work Lists") || res.benchmarkName.contains("DGC"))) {
                     Some("rt_sched_pt_wl")
                 } else if res.configIndex == 8 || (res.subcategory.contains("Traditional") && res.subcategory.contains("Incoherent")) || (res.benchmarkName.contains("Incoherent") && res.benchmarkName.contains("Megakernel")) {
                     Some("rt_sched_incoh_trad")
@@ -5997,24 +5997,24 @@ fn map_result_to_workload_id(res: &ResultData) -> Option<&'static str> {
                     Some("rt_sched_ser")
                 } else if res.configIndex == 3 || res.configIndex == 7 || res.configIndex == 11 || res.configIndex == 15 || res.subcategory.contains("Work Graph") {
                     Some("rt_sched_workgraph")
+                } else if res.configIndex == 30 || res.configIndex == 35 || ((res.benchmarkName.contains("Full Scene Ray Tracing") || res.benchmarkName.contains("Full Scene Render") || res.benchmarkName.contains("Full Render") || res.benchmarkName.contains("Morton") || res.benchmarkName.contains("Ray Tracing (PBR)") || res.benchmarkName.contains("Primary Rays")) && (res.benchmarkName.contains("SER") || res.benchmarkName.contains("Reordering"))) {
+                    Some("rt_sched_stage_prim_morton_ser")
+                } else if res.configIndex == 29 || res.configIndex == 34 || ((res.benchmarkName.contains("Full Scene Ray Tracing") || res.benchmarkName.contains("Full Scene Render") || res.benchmarkName.contains("Full Render") || res.benchmarkName.contains("Morton") || res.benchmarkName.contains("Ray Tracing (PBR)") || res.benchmarkName.contains("Primary Rays")) && (res.benchmarkName.contains("Dedicated") || res.benchmarkName.contains("RTP"))) {
+                    Some("rt_sched_stage_prim_morton_rtp")
+                } else if (res.benchmarkName.contains("Primary Rays") && (res.benchmarkName.contains("DGC") || res.benchmarkName.contains("Wavefront"))) || ((res.configIndex == 18 || res.configIndex == 22 || res.benchmarkName.contains("Full Scene Ray Tracing") || res.benchmarkName.contains("Full Scene Render") || res.benchmarkName.contains("Full Render") || res.benchmarkName.contains("Morton") || res.benchmarkName.contains("Ray Tracing (PBR)")) && (res.benchmarkName.contains("Work Lists") || res.benchmarkName.contains("DGC") || res.benchmarkName.contains("Device-Generated Commands"))) {
+                    Some("rt_sched_stage_prim_morton_wl")
+                } else if (res.benchmarkName.contains("Primary Rays") && (res.benchmarkName.contains("Megakernel") || res.benchmarkName.contains("Compute"))) || ((res.configIndex == 17 || res.configIndex == 21 || res.benchmarkName.contains("Full Scene Ray Tracing") || res.benchmarkName.contains("Full Scene Render") || res.benchmarkName.contains("Full Render") || res.benchmarkName.contains("Morton")) && (res.benchmarkName.contains("Megakernel") || res.benchmarkName.contains("Traditional"))) {
+                    Some("rt_sched_stage_prim_morton_trad")
                 } else if res.configIndex == 16 || res.benchmarkName.contains("Linear 32x1") || res.benchmarkName.contains("Linear 1D") {
                     Some("rt_sched_stage_bvh_linear")
-                } else if res.configIndex == 17 || res.benchmarkName.contains("Queue Compaction") {
+                } else if res.benchmarkName.contains("Queue Compaction") {
                     Some("rt_sched_stage_queue_compaction")
-                } else if res.configIndex == 18 || res.benchmarkName.contains("2D Tiled 8x4") || res.benchmarkName.contains("Screen Tiled") {
+                } else if res.benchmarkName.contains("2D Tiled 8x4") || res.benchmarkName.contains("Screen Tiled") {
                     Some("rt_sched_stage_bvh_tiled")
                 } else if res.configIndex == 19 || (res.benchmarkName.contains("Morton 8x4") && res.benchmarkName.contains("BVH Traversal")) {
                     Some("rt_sched_stage_bvh_morton8x4")
                 } else if res.configIndex == 20 || (res.benchmarkName.contains("Morton 4x8") && res.benchmarkName.contains("BVH Traversal")) {
                     Some("rt_sched_stage_bvh_morton4x8")
-                } else if res.configIndex == 30 || res.configIndex == 35 || ((res.benchmarkName.contains("Full Scene Ray Tracing") || res.benchmarkName.contains("Full Scene Render") || res.benchmarkName.contains("Full Render") || res.benchmarkName.contains("Morton") || res.benchmarkName.contains("Ray Tracing (PBR)") || res.benchmarkName.contains("Primary Rays")) && (res.benchmarkName.contains("SER") || res.benchmarkName.contains("Reordering"))) {
-                    Some("rt_sched_stage_prim_morton_ser")
-                } else if res.configIndex == 29 || res.configIndex == 34 || ((res.benchmarkName.contains("Full Scene Ray Tracing") || res.benchmarkName.contains("Full Scene Render") || res.benchmarkName.contains("Full Render") || res.benchmarkName.contains("Morton") || res.benchmarkName.contains("Ray Tracing (PBR)") || res.benchmarkName.contains("Primary Rays")) && (res.benchmarkName.contains("Dedicated") || res.benchmarkName.contains("RTP"))) {
-                    Some("rt_sched_stage_prim_morton_rtp")
-                } else if res.configIndex == 18 || res.configIndex == 22 || ((res.benchmarkName.contains("Full Scene Ray Tracing") || res.benchmarkName.contains("Full Scene Render") || res.benchmarkName.contains("Full Render") || res.benchmarkName.contains("Morton") || res.benchmarkName.contains("Ray Tracing (PBR)") || res.benchmarkName.contains("Primary Rays")) && (res.benchmarkName.contains("Work Lists") || res.benchmarkName.contains("DGC") || res.benchmarkName.contains("Device-Generated Commands"))) {
-                    Some("rt_sched_stage_prim_morton_wl")
-                } else if res.configIndex == 17 || res.configIndex == 21 || ((res.benchmarkName.contains("Full Scene Ray Tracing") || res.benchmarkName.contains("Full Scene Render") || res.benchmarkName.contains("Full Render") || res.benchmarkName.contains("Morton") || res.benchmarkName.contains("Primary Rays")) && (res.benchmarkName.contains("Megakernel") || res.benchmarkName.contains("Traditional"))) {
-                    Some("rt_sched_stage_prim_morton_trad")
                 } else if res.configIndex == 23 || ((res.subcategory.contains("Traditional") || res.benchmarkName.contains("Megakernel") || res.benchmarkName.contains("Traditional")) && (res.subcategory.contains("Shadow") || res.benchmarkName.contains("Shadow"))) {
                     Some("rt_sched_shadow_trad")
                 } else if res.configIndex == 24 {
@@ -6515,11 +6515,11 @@ mod tests {
         assert_eq!(map_result_to_workload_id(&res), Some("rt_sched_stage_prim_morton_wl"));
 
         res.configIndex = 29;
-        res.benchmarkName = "Primary Rays (Pipeline Megakernel - RTP)".to_string();
+        res.benchmarkName = "Primary Rays (RTP)".to_string();
         assert_eq!(map_result_to_workload_id(&res), Some("rt_sched_stage_prim_morton_rtp"));
 
         res.configIndex = 30;
-        res.benchmarkName = "Primary Rays (Pipeline Megakernel - RTP + SER)".to_string();
+        res.benchmarkName = "Primary Rays (RTP + SER)".to_string();
         assert_eq!(map_result_to_workload_id(&res), Some("rt_sched_stage_prim_morton_ser"));
 
         res.configIndex = 21;

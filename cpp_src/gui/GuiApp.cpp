@@ -771,8 +771,8 @@ void GuiApp::initializeBenchmarkCategories() {
         cat.subgroups.push_back({"Primary & Bounce Ray Tracing", "Ray Tracing", "RayScheduling", "Primary camera ray tracing and multi-bounce path tracing across dispatches", {
             {"RayScheduling", "Scene Ray Tracing (PBR)", "Primary Rays (Compute Megakernel)", "Ray Tracing", "MRays/s", "Monolithic compute megakernel using VK_KHR_ray_query", true},
             {"RayScheduling", "Scene Ray Tracing (PBR)", "Primary Rays (Wavefront - DGC)", "Ray Tracing", "MRays/s", "Decoupled wavefront stream compaction using VK_EXT_device_generated_commands and VK_KHR_ray_query", true},
-            {"RayScheduling", "Scene Ray Tracing (PBR)", "Primary Rays (Pipeline Megakernel - RTP)", "Ray Tracing", "MRays/s", "Monolithic ray tracing pipeline megakernel (VK_KHR_ray_tracing_pipeline) with Shader Binding Table", true},
-            {"RayScheduling", "Scene Ray Tracing (PBR)", "Primary Rays (Pipeline Megakernel - RTP + SER)", "Ray Tracing", "MRays/s", "Monolithic ray tracing pipeline megakernel with hardware Shader Execution Reordering (VK_EXT_ray_tracing_invocation_reorder)", true},
+            {"RayScheduling", "Scene Ray Tracing (PBR)", "Primary Rays (RTP)", "Ray Tracing", "MRays/s", "Monolithic ray tracing pipeline megakernel (VK_KHR_ray_tracing_pipeline) with Shader Binding Table", true},
+            {"RayScheduling", "Scene Ray Tracing (PBR)", "Primary Rays (RTP + SER)", "Ray Tracing", "MRays/s", "Monolithic ray tracing pipeline megakernel with hardware Shader Execution Reordering (VK_EXT_ray_tracing_invocation_reorder)", true},
             {"RayScheduling", "Scene Ray Tracing (PBR)", "Primary Rays (Alpha Cutout)", "Ray Tracing", "MRays/s", "PBR primary ray tracing with alpha-tested cutout geometry evaluation", true},
             {"RayScheduling", "Scene Path Tracing (Multi-Bounce)", "Bounce Rays (Megakernel)", "Ray Tracing", "MRays/s", "Multi-bounce diffuse path tracing using compute megakernel", true},
             {"RayScheduling", "Scene Path Tracing (Multi-Bounce)", "Bounce Rays (RTP + SER)", "Ray Tracing", "MRays/s", "Multi-bounce path tracing with dedicated RTP and Hardware SER", true},
@@ -1759,76 +1759,83 @@ GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
         info.primaryResult = *curRes;
         info.scoreText = formatScore(*curRes);
 
+        bool isUnsupportedItem = (!item.isSupported || curRes->isUnsupported || curRes->time_ms <= 0.0);
+
         // Determine baseline item name in the same subcategory
         std::string baselineName = "";
-        if (item.category == "Compute") {
-            if (item.id == "FP32") {
+        if (!isUnsupportedItem) {
+            if (item.category == "Compute") {
+                if (item.id == "FP32") {
+                    info.isBaseline = true;
+                    info.deltaText = "[Baseline]";
+                    info.deltaColor = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
+                } else if (item.id == "INT8") {
+                    if (item.name.find("Vector") != std::string::npos) {
+                        info.isBaseline = true;
+                        info.deltaText = "[Baseline]";
+                        info.deltaColor = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
+                    } else {
+                        baselineName = "INT8_Vector";
+                    }
+                } else if (item.id == "INT4") {
+                    if (item.name.find("Vector") != std::string::npos) {
+                        info.isBaseline = true;
+                        info.deltaText = "[Baseline]";
+                        info.deltaColor = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
+                    } else {
+                        baselineName = "INT4_Vector";
+                    }
+                } else {
+                    baselineName = "FP32";
+                }
+            } else if (item.name.find("Vector ALU") != std::string::npos || item.name == "Vector") {
                 info.isBaseline = true;
                 info.deltaText = "[Baseline]";
                 info.deltaColor = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
-            } else if (item.id == "INT8") {
-                if (item.name.find("Vector") != std::string::npos) {
-                    info.isBaseline = true;
-                    info.deltaText = "[Baseline]";
-                    info.deltaColor = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
-                } else {
-                    baselineName = "INT8_Vector";
-                }
-            } else if (item.id == "INT4") {
-                if (item.name.find("Vector") != std::string::npos) {
-                    info.isBaseline = true;
-                    info.deltaText = "[Baseline]";
-                    info.deltaColor = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
-                } else {
-                    baselineName = "INT4_Vector";
-                }
+            } else if (item.name.find("Matrix") != std::string::npos) {
+                baselineName = "Vector";
+            } else if (item.name.find("FP32") != std::string::npos) {
+                info.isBaseline = true;
+                info.deltaText = "[Baseline]";
+                info.deltaColor = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
+            } else if ((item.name == "Compute Megakernel" || item.name.find("Compute Megakernel") != std::string::npos ||
+                        (item.name.find("Megakernel") != std::string::npos && 
+                         item.name.find("RTP") == std::string::npos && 
+                         item.name.find("SER") == std::string::npos && 
+                         item.name.find("DGC") == std::string::npos)) ||
+                       item.name.find("Linear 1D Scanline") != std::string::npos ||
+                       item.name.find("100% Solid") != std::string::npos ||
+                       item.name.find("Uniform Material") != std::string::npos ||
+                       item.name.find("Coherent Material") != std::string::npos ||
+                       item.name.find("0 deg Divergence") != std::string::npos ||
+                       item.name.find("0 deg (Primary Rays)") != std::string::npos ||
+                       item.name.find("100% Mirror") != std::string::npos ||
+                       item.name.find("16B Payload") != std::string::npos ||
+                       item.name.find("16B") != std::string::npos ||
+                       item.name.find("4 Bytes") != std::string::npos) {
+                info.isBaseline = true;
+                info.deltaText = "[Baseline]";
+                info.deltaColor = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
             } else {
-                baselineName = "FP32";
-            }
-        } else if (item.name.find("Vector ALU") != std::string::npos || item.name == "Vector") {
-            info.isBaseline = true;
-            info.deltaText = "[Baseline]";
-            info.deltaColor = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
-        } else if (item.name.find("Matrix") != std::string::npos) {
-            baselineName = "Vector";
-        } else if (item.name.find("FP32") != std::string::npos) {
-            info.isBaseline = true;
-            info.deltaText = "[Baseline]";
-            info.deltaColor = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
-        } else if (item.name == "Compute Megakernel" || item.name.find("Compute Megakernel") != std::string::npos ||
-                   item.name.find("Megakernel") != std::string::npos ||
-                   item.name.find("Linear 1D Scanline") != std::string::npos ||
-                   item.name.find("100% Solid") != std::string::npos ||
-                   item.name.find("Uniform Material") != std::string::npos ||
-                   item.name.find("Coherent Material") != std::string::npos ||
-                   item.name.find("0 deg Divergence") != std::string::npos ||
-                   item.name.find("0 deg (Primary Rays)") != std::string::npos ||
-                   item.name.find("100% Mirror") != std::string::npos ||
-                   item.name.find("16B Payload") != std::string::npos ||
-                   item.name.find("16B") != std::string::npos ||
-                   item.name.find("4 Bytes") != std::string::npos) {
-            info.isBaseline = true;
-            info.deltaText = "[Baseline]";
-            info.deltaColor = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
-        } else {
-            // Find appropriate baseline for this subcategory
-            if (item.subcategory.find("Scene Ray Tracing") != std::string::npos ||
-                item.subcategory.find("Path Tracing") != std::string::npos ||
-                item.subcategory.find("Total Scene Render") != std::string::npos ||
-                item.subcategory.find("Directional Shadows") != std::string::npos ||
-                item.subcategory.find("Material Shading") != std::string::npos ||
-                item.subcategory.find("Incoherent Ray Tracing") != std::string::npos) {
-                baselineName = "Megakernel";
-            } else if (item.subcategory.find("Alpha-Tested") != std::string::npos || item.name.find("Solid") != std::string::npos) {
-                baselineName = "100% Solid";
-            } else if (item.subcategory.find("Material Divergence") != std::string::npos || item.name.find("Material Divergence") != std::string::npos) {
-                baselineName = "Uniform";
-            } else if (item.subcategory.find("Ray Directional Coherence") != std::string::npos || item.name.find("Coherence") != std::string::npos || item.name.find("Mirror") != std::string::npos) {
-                baselineName = "Mirror";
-            } else if (item.subcategory.find("Payload Register Pressure") != std::string::npos || item.name.find("Payload") != std::string::npos) {
-                baselineName = "16B";
-            } else if (item.subcategory.find("Pipeline Breakdown") != std::string::npos || item.name.find("Traversal Scheduling") != std::string::npos) {
-                baselineName = "Linear 1D Scanline";
+                // Find appropriate baseline for this subcategory
+                if (item.subcategory.find("Scene Ray Tracing") != std::string::npos ||
+                    item.subcategory.find("Path Tracing") != std::string::npos ||
+                    item.subcategory.find("Total Scene Render") != std::string::npos ||
+                    item.subcategory.find("Directional Shadows") != std::string::npos ||
+                    item.subcategory.find("Material Shading") != std::string::npos ||
+                    item.subcategory.find("Incoherent Ray Tracing") != std::string::npos) {
+                    baselineName = "Megakernel";
+                } else if (item.subcategory.find("Alpha-Tested") != std::string::npos || item.name.find("Solid") != std::string::npos) {
+                    baselineName = "100% Solid";
+                } else if (item.subcategory.find("Material Divergence") != std::string::npos || item.name.find("Material Divergence") != std::string::npos) {
+                    baselineName = "Uniform";
+                } else if (item.subcategory.find("Ray Directional Coherence") != std::string::npos || item.name.find("Coherence") != std::string::npos || item.name.find("Mirror") != std::string::npos) {
+                    baselineName = "Mirror";
+                } else if (item.subcategory.find("Payload Register Pressure") != std::string::npos || item.name.find("Payload") != std::string::npos) {
+                    baselineName = "16B";
+                } else if (item.subcategory.find("Pipeline Breakdown") != std::string::npos || item.name.find("Traversal Scheduling") != std::string::npos) {
+                    baselineName = "Linear 1D Scanline";
+                }
             }
         }
         const ResultData* baselineRes = nullptr;
@@ -1851,8 +1858,15 @@ GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
                             break;
                         }
                     } else if (r.subcategory == item.subcategory) {
+                        if (r.isUnsupported || r.time_ms <= 0.0) continue;
                         std::string cName = cleanWorkloadName(r.benchmarkName, r.subcategory);
-                        if (cName.find(baselineName) != std::string::npos || r.benchmarkName.find(baselineName) != std::string::npos) {
+                        if (baselineName == "Megakernel") {
+                            if ((cName.find("Megakernel") != std::string::npos || r.benchmarkName.find("Megakernel") != std::string::npos) &&
+                                r.benchmarkName.find("RTP") == std::string::npos && r.benchmarkName.find("DGC") == std::string::npos) {
+                                baselineRes = &r;
+                                break;
+                            }
+                        } else if (cName.find(baselineName) != std::string::npos || r.benchmarkName.find(baselineName) != std::string::npos) {
                             baselineRes = &r;
                             break;
                         }
@@ -1861,8 +1875,8 @@ GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
             }
         }
 
-        if (baselineRes && baselineRes->time_ms > 0.0 && baselineRes->operations > 0 &&
-            curRes->time_ms > 0.0 && curRes->operations > 0 &&
+        if (baselineRes && !baselineRes->isUnsupported && baselineRes->time_ms > 0.0 && baselineRes->operations > 0 &&
+            !curRes->isUnsupported && curRes->time_ms > 0.0 && curRes->operations > 0 &&
             baselineRes->metric == curRes->metric) {
             double curOps = (static_cast<double>(curRes->operations) / curRes->time_ms) * 1000.0;
             double baseOps = (static_cast<double>(baselineRes->operations) / baselineRes->time_ms) * 1000.0;
@@ -2438,18 +2452,16 @@ void GuiApp::renderBenchmarkSuitePanel() {
                         float textH = ImGui::GetTextLineHeight();
                         float curCenterY = cellPos.y + textH * 0.5f;
 
-                        if (dispInfo.isBaseline) {
+                        if (dispInfo.isBaseline && !isUnsupported && dispInfo.hasResult && dispInfo.primaryResult.time_ms > 0.0) {
                             activeBaselineX = cellPos.x + s(10.0f);
                             activeBaselineY = curCenterY;
                             hasActiveBaseline = true;
                             activeBaselineSubcat = item.subcategory;
 
-                            ImVec4 baseColor = (dispInfo.hasResult && dispInfo.primaryResult.time_ms > 0.0) 
-                                ? ImVec4(0.38f, 0.75f, 1.00f, 0.95f) 
-                                : ImVec4(0.42f, 0.52f, 0.65f, 0.70f);
+                            ImVec4 baseColor = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
                             ImGui::SetCursorPosX(ImGui::GetCursorPosX() + s(6.0f));
                             ImGui::TextColored(baseColor, "[Baseline]");
-                        } else if (dispInfo.hasComparison && dispInfo.hasResult && !isUnsupported && !dispInfo.deltaText.empty()) {
+                        } else if (dispInfo.hasComparison && dispInfo.hasResult && !isUnsupported && dispInfo.primaryResult.time_ms > 0.0 && !dispInfo.deltaText.empty()) {
                             float stemX = (hasActiveBaseline && activeBaselineX > 0.0f) ? activeBaselineX : (cellPos.x + s(10.0f));
                             ImDrawList* drawList = ImGui::GetWindowDrawList();
                             ImU32 branchCol = ImGui::GetColorU32(ImVec4(0.38f, 0.65f, 0.90f, 0.65f));
