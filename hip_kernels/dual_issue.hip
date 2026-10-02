@@ -28,34 +28,25 @@ extern "C" __global__ void run_dual_issue_ilp1(float* data, float multiplier, ui
     data[index] = val.x + val.y + val.z + val.w;
 }
 
-// Config 1: ILP-4 (Latency-Bound Single-Issue)
+// Config 1: Standard FP32 (Single-Issue Baseline)
 extern "C" __global__ void run_dual_issue_ilp4(float* data, float multiplier, uint32_t num_elements) {
     uint32_t index = blockIdx.x * blockDim.x + threadIdx.x;
     if (index >= num_elements) return;
 
     float4 val0 = make_float4(data[index], data[index], data[index], data[index]);
-    float4 val1 = make_float4(0.1f, 0.2f, 0.3f, 0.4f);
-    float4 val2 = make_float4(0.5f, 0.6f, 0.7f, 0.8f);
-    float4 val3 = make_float4(0.9f, 1.0f, 1.1f, 1.2f);
-
+    float4 val1 = make_float4(data[index] + 0.1f, data[index] + 0.1f, data[index] + 0.1f, data[index] + 0.1f);
     float4 m = make_float4(multiplier, multiplier, multiplier, multiplier);
-    float4 c0 = make_float4(0.0001f, 0.0002f, 0.0003f, 0.0004f);
-    float4 c1 = make_float4(0.0005f, 0.0006f, 0.0007f, 0.0008f);
-    float4 c2 = make_float4(0.0009f, 0.0010f, 0.0011f, 0.0012f);
-    float4 c3 = make_float4(0.0013f, 0.0014f, 0.0015f, 0.0016f);
 
-    for (int i = 0; i < 16384; ++i) {
-        val0 = fmac4(c0, m, val0);
-        val1 = fmac4(c1, m, val1);
-        val2 = fmac4(c2, m, val2);
-        val3 = fmac4(c3, m, val3);
+    for (int i = 0; i < 32768; ++i) {
+        val0 = fmac4(val1, m, val0);
+        val1 = fmac4(val0, m, val1);
     }
 
     float4 res = make_float4(
-        val0.x + val1.x + val2.x + val3.x,
-        val0.y + val1.y + val2.y + val3.y,
-        val0.z + val1.z + val2.z + val3.z,
-        val0.w + val1.w + val2.w + val3.w
+        val0.x + val1.x,
+        val0.y + val1.y,
+        val0.z + val1.z,
+        val0.w + val1.w
     );
     data[index] = res.x + res.y + res.z + res.w;
 }

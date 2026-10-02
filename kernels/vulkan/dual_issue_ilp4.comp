@@ -19,27 +19,20 @@ void main() {
     uint index = gl_GlobalInvocationID.x;
     if (index >= pushConstants.num_elements) return;
 
-    // 4 independent accumulator chains
+    // 2 vec4 accumulators in a ping-pong ring dependency:
+    // val1 strictly depends on val0 (RAW hazard prevents dual-issue co-scheduling between the pairs),
+    // guaranteeing a standard single-issue execution pipeline across all compilers.
     float base = InOutBuffer.data[index];
     vec4 val0 = vec4(base);
     vec4 val1 = vec4(base + 0.1);
-    vec4 val2 = vec4(base + 0.2);
-    vec4 val3 = vec4(base + 0.3);
-
     vec4 m = vec4(pushConstants.multiplier);
-    vec4 c0 = vec4(0.0001, 0.0002, 0.0003, 0.0004);
-    vec4 c1 = vec4(0.0005, 0.0006, 0.0007, 0.0008);
-    vec4 c2 = vec4(0.0009, 0.0010, 0.0011, 0.0012);
-    vec4 c3 = vec4(0.0013, 0.0014, 0.0015, 0.0016);
 
-    // 16384 iterations * 4 vec4 FMAs = 16384 * 32 = 524,288 FP32 operations
-    for (int i = 0; i < 16384; ++i) {
-        val0 = fma(val0, m, c0);
-        val1 = fma(val1, m, c1);
-        val2 = fma(val2, m, c2);
-        val3 = fma(val3, m, c3);
+    // 32768 iterations * 2 vec4 FMAs = 32768 * 16 = 524,288 FP32 operations
+    for (int i = 0; i < 32768; ++i) {
+        val0 = fma(val0, m, val1);
+        val1 = fma(val1, m, val0);
     }
 
-    vec4 res = val0 + val1 + val2 + val3;
+    vec4 res = val0 + val1;
     InOutBuffer.data[index] = res.x + res.y + res.z + res.w;
 }

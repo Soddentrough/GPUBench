@@ -22,26 +22,17 @@ __kernel void run_dual_issue_ilp4(__global float* data, float multiplier, uint n
     if (index >= num_elements) return;
 
     float in_val = data[index & 0x1FFFu];
-    float4 seed = (float4)(in_val * 0.0001f);
-    float4 val0 = seed + (float4)(0.01f, 0.02f, 0.03f, 0.04f);
-    float4 val1 = seed + (float4)(0.05f, 0.06f, 0.07f, 0.08f);
-    float4 val2 = seed + (float4)(0.09f, 0.10f, 0.11f, 0.12f);
-    float4 val3 = seed + (float4)(0.13f, 0.14f, 0.15f, 0.16f);
-
+    float4 val0 = (float4)(in_val * 0.0001f);
+    float4 val1 = val0 + (float4)(0.01f, 0.02f, 0.03f, 0.04f);
     float4 m = (float4)(multiplier);
-    float4 c0 = (float4)(0.0001f, 0.0002f, 0.0003f, 0.0004f);
-    float4 c1 = (float4)(0.0005f, 0.0006f, 0.0007f, 0.0008f);
-    float4 c2 = (float4)(0.0009f, 0.0010f, 0.0011f, 0.0012f);
-    float4 c3 = (float4)(0.0013f, 0.0014f, 0.0015f, 0.0016f);
 
-    for (int i = 0; i < 16384; ++i) {
-        val0 = fma(val0, m, c0);
-        val1 = fma(val1, m, c1);
-        val2 = fma(val2, m, c2);
-        val3 = fma(val3, m, c3);
+    // 32768 iterations * 2 float4 FMAs = 32768 * 16 = 524,288 FP32 operations
+    for (int i = 0; i < 32768; ++i) {
+        val0 = fma(val0, m, val1);
+        val1 = fma(val1, m, val0);
     }
 
-    float4 res = val0 + val1 + val2 + val3;
+    float4 res = val0 + val1;
     data[index] = res.x + res.y + res.z + res.w;
 }
 
