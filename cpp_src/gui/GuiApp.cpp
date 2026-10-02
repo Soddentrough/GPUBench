@@ -737,6 +737,23 @@ void GuiApp::initializeBenchmarkCategories() {
             {"INT4", "INT4", "INT4 Integer - Matrix (WMMA)", "Compute", "TOPS", "Sub-byte 4-bit integer matrix core throughput", true}
         };
         cat.subgroups.push_back(sub);
+
+        BenchmarkSubgroup dualSub;
+        dualSub.name = "Dual-Issue & Concurrency";
+        dualSub.component = "Compute";
+        dualSub.engineId = "Dual-Issue";
+        dualSub.description = "Dual-issue ALU co-issuing, ILP scaling, and concurrent FP32+INT32 arithmetic";
+        dualSub.items = {
+            {"Dual-Issue", "Dual-Issue", "Standard FP32", "Compute", "TFLOPS", "Standard single-issue FP32 baseline (1 instruction per cycle)", true},
+            {"Dual-Issue", "Dual-Issue", "Dual-Issue FP32 (Partial Co-Issue)", "Compute", "TFLOPS", "Partial dual-issue FP32 (transition threshold to 2 instructions per cycle)", true},
+            {"Dual-Issue", "Dual-Issue", "Dual-Issue FP32 (FP32+FP32)", "Compute", "TFLOPS", "Full dual-issue FP32 pairing (2 FP32 instructions per cycle)", true},
+            {"Dual-Issue", "Dual-Issue", "Standard INT32", "Compute", "TOPS", "Standard single-issue INT32 baseline (1 instruction per cycle)", true},
+            {"Dual-Issue", "Dual-Issue", "Dual-Issue INT32 (Partial Co-Issue)", "Compute", "TOPS", "Partial dual-issue INT32 (transition threshold to 2 instructions per cycle)", true},
+            {"Dual-Issue", "Dual-Issue", "Dual-Issue INT32 (INT32+INT32)", "Compute", "TOPS", "Full dual-issue INT32 pairing (2 INT32 instructions per cycle)", true},
+            {"Dual-Issue", "Dual-Issue", "Dual-Issue Mixed (FP32+INT32)", "Compute", "TOPS", "Dual-issue concurrent execution (1 FP32 + 1 INT32 instruction per cycle)", true}
+        };
+        cat.subgroups.push_back(dualSub);
+
         m_categories.push_back(cat);
     }
 
@@ -1605,6 +1622,12 @@ bool GuiApp::matchesItem(const ResultData& r, const BenchmarkItem& itm, uint32_t
         }
     }
 
+    // Dual-Issue matching
+    if (itm.subcategory == "Dual-Issue" || r.subcategory == "Dual-Issue") {
+        std::string clean = cleanWorkloadName(r.benchmarkName, r.subcategory);
+        return (clean == itm.name || r.benchmarkName == itm.name || r.benchmarkName.find(itm.name) != std::string::npos);
+    }
+
     // Compute Precision matching
     if (itm.category == "Compute") {
         if (itm.name.find("Matrix") != std::string::npos) {
@@ -2430,7 +2453,7 @@ void GuiApp::renderBenchmarkSuitePanel() {
                 badgeColor = ImVec4(0.55f, 0.65f, 0.75f, 0.9f);
             }
         } else {
-            if (sub.name == "Compute Precision") {
+            if (sub.name == "Compute Precision" || sub.name == "Dual-Issue & Concurrency") {
                 rightBadge = "[TFLOPS / TOPS]";
             } else if (sub.name == "Host CPU System Memory") {
                 rightBadge = "[GB/s / ns]";
@@ -4748,6 +4771,7 @@ void GuiApp::startBenchmarks() {
         if (b == "Device Memory Bandwidth") gpu_configs += 9;
         else if (b == "Cache Latency") gpu_configs += 4;
         else if (b == "Pixel Fill Rate") gpu_configs += 3;
+        else if (b == "Dual-Issue") gpu_configs += 7;
         else if (b == "FP16" || b == "BF16" || b == "FP8" || b == "INT8" || b == "INT4") gpu_configs += 2;
         else if (b == "RayASBuild") gpu_configs += 8;
         else if (b == "RayIntersect") gpu_configs += 2;

@@ -25,37 +25,37 @@ Modern GPU microarchitectures have evolved beyond simple SIMD vector execution p
 
 ---
 
-## 3. The 6-Phase Dual-Issue Benchmark Suite
+## 3. The 7-Phase Dual-Issue Benchmark Suite
 
-The suite evaluates hardware through 6 distinct configurations designed to map out the execution curve:
+The suite evaluates hardware through 7 distinct configurations structured symmetrically across floating-point, integer, and mixed datapaths:
 
-### Config 0: `Single-Issue Baseline (ILP-1)`
-- **Workload**: A strictly serialized FMA chain ($y = \text{fma}(y, m, c)$).
-- **Architectural Purpose**: Measures execution latency under zero instruction-level parallelism. Modern GPU ALU pipelines take 4–5 clock cycles to complete an FMA; with $\text{ILP} = 1$, each operation must wait for writeback before the next can issue, exposing the latency-bound baseline throughput.
+### Config 0: `Standard FP32`
+- **Workload**: 4 independent FP32 accumulator chains (`val0..val3`).
+- **Architectural Purpose**: Establishes the single-issue FP32 baseline (1 instruction per cycle). Hides standard ALU pipeline latency (~4 cycles) to ensure single execution ports are 100% saturated without starvation.
 
-### Config 1: `ILP-4 (Latency-Bound Single-Issue)`
-- **Workload**: 4 independent accumulator chains.
-- **Architectural Purpose**: Hides the 4-cycle arithmetic pipeline latency. For a single-issue ALU, 4 independent operations in flight are sufficient to achieve 100% single-issue saturation. However, 4 chains are insufficient to sustain dual-issue execution without starvation.
+### Config 1: `Dual-Issue FP32 (Partial Co-Issue)`
+- **Workload**: 8 independent FP32 accumulator chains (`val0..val7`).
+- **Architectural Purpose**: Evaluates the transition threshold where warp schedulers (NVIDIA) and compiler pairers (AMD) have enough independent instructions to co-issue 2 operations per cycle across the pipeline window.
 
-### Config 2: `ILP-8 (Dual-Issue Transition Threshold)`
-- **Workload**: 8 independent accumulator chains.
-- **Architectural Purpose**: Evaluates the inflection point where warp schedulers (NVIDIA) and compiler pairers (AMD) have enough independent instructions to co-issue 2 operations per cycle across the 4-cycle pipeline window ($2 \text{ ops/cycle} \times 4 \text{ cycles} = 8 \text{ ops}$).
+### Config 2: `Dual-Issue FP32 (FP32+FP32)`
+- **Workload**: 16 independent FP32 accumulator chains (`val0..val15`).
+- **Architectural Purpose**: Saturates the dual-issue silicon ceiling (2 FP32 instructions per cycle). Measures the peak theoretical speedup (up to 2.0x over Standard FP32) when both execution pipelines fire simultaneously.
 
-### Config 3: `ILP-16 (Peak Dual-Issue Saturated FP32)`
-- **Workload**: 16 independent accumulator chains (64 scalar accumulators in flight per thread).
-- **Architectural Purpose**: Saturates the dual-issue silicon ceiling. At this ILP level, bank conflicts and dependency latencies are fully hidden, driving modern GPUs to their advertised peak boost FLOPS (e.g. **~49.5 TFLOPS** on the AMD Radeon AI PRO R9700).
+### Config 3: `Standard INT32`
+- **Workload**: 4 independent INT32 accumulator chains (`u0..u3`).
+- **Architectural Purpose**: Establishes the single-issue INT32 integer baseline (1 instruction per cycle).
 
-### Config 4: `Concurrent FP32 + INT32 (50/50 Dual-Issue)`
+### Config 4: `Dual-Issue INT32 (Partial Co-Issue)`
+- **Workload**: 8 independent INT32 accumulator chains (`u0..u7`).
+- **Architectural Purpose**: Tests the transition threshold for integer co-issuing.
+
+### Config 5: `Dual-Issue INT32 (INT32+INT32)`
+- **Workload**: 16 independent INT32 accumulator chains (`u0..u15`).
+- **Architectural Purpose**: Tests whether the GPU microarchitecture possesses dual integer ALUs. On architectures with only one integer pipeline (e.g. NVIDIA Ampere/Ada), this remains at ~1.0x over Standard INT32.
+
+### Config 6: `Dual-Issue Mixed (FP32+INT32)`
 - **Workload**: Perfectly interleaved 8 FP32 FMAs and 8 INT32 operations.
-- **Architectural Purpose**: Tests the secondary datapath's flexibility:
-  - On **NVIDIA Ampere/Ada/Blackwell**, Datapath 0 executes INT32 while Datapath 1 executes FP32 concurrently, demonstrating zero-overhead concurrent address/indexing computation and math.
-  - On **AMD RDNA 3/4**, measures how effectively the compiler and execution units handle mixed floating-point and integer pipelines.
-
-### Config 5: `Pure INT32 (Single Datapath Ceiling)`
-- **Workload**: 16 independent INT32 accumulator chains.
-- **Architectural Purpose**: Measures the integer execution ceiling:
-  - On **NVIDIA**, only Datapath 0 contains integer ALUs, cutting peak issue rate by $50\%$ relative to pure FP32.
-  - On **AMD RDNA 4**, measures the throughput of the native integer pipeline.
+- **Architectural Purpose**: Tests concurrent execution across decoupled floating-point and integer execution units (simultaneous $1\times \text{FP32} + 1\times \text{INT32}$ per cycle).
 
 ---
 

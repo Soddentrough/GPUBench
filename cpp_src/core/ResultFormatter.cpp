@@ -512,7 +512,27 @@ void ResultFormatter::print() {
                 double value = (static_cast<double>(res.operations) /
                                (res.time_ms / 1000.0)) / 1e12;
                 valStr = formatDouble(value, 2) + " " + res.metric;
-                if (hasComparison && baselineVal > 0.0 && value > 0.0) {
+                if (res.subcategory == "Dual-Issue") {
+                  if (res.configIndex == 0 || res.configIndex == 3) {
+                    noteStr = "[Baseline]";
+                  } else {
+                    uint32_t targetBaseConfig = (res.configIndex >= 3 && res.configIndex <= 5) ? 3 : 0;
+                    for (const auto &bp : subcat.benchmarks) {
+                      if (bp.second.count(backend)) {
+                        const auto &br = bp.second.at(backend);
+                        if (br.subcategory == "Dual-Issue" && br.configIndex == targetBaseConfig && br.time_ms > 0.0) {
+                          double baseVal = (static_cast<double>(br.operations) / (br.time_ms / 1000.0)) / 1e12;
+                          if (baseVal > 0.0) {
+                            double ratio = value / baseVal;
+                            double pct = (ratio - 1.0) * 100.0;
+                            noteStr = "└──> " + formatDouble(ratio, 2) + "x (" + (pct >= 0 ? "+" : "") + formatDouble(pct, 1) + "%)";
+                          }
+                          break;
+                        }
+                      }
+                    }
+                  }
+                } else if (hasComparison && baselineVal > 0.0 && value > 0.0) {
                   if (fullName == baselineKeyName || fullName.find("Vector") != std::string::npos) {
                     noteStr = "[Baseline]";
                   } else {

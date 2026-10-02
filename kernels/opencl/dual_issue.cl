@@ -234,6 +234,84 @@ __kernel void run_dual_issue_mixed(__global float* data, float multiplier, uint 
     data[index] = fres.x + fres.y + fres.z + fres.w + (float)(ures.x ^ ures.y ^ ures.z ^ ures.w);
 }
 
+// Standard INT32: 4 independent chains (single-issue saturated integer baseline)
+__kernel void run_dual_issue_int32_4(__global float* data, float multiplier, uint num_elements) {
+    uint index = get_global_id(0);
+    if (index >= num_elements) return;
+
+    float in_val = data[index & 0x1FFFu];
+    uint ubase = (uint)(in_val * 1000.0f) + index;
+
+    uint4 u0  = (uint4)(ubase);
+    uint4 u1  = (uint4)(ubase + 1u);
+    uint4 u2  = (uint4)(ubase + 2u);
+    uint4 u3  = (uint4)(ubase + 3u);
+
+    uint4 mu = (uint4)((uint)multiplier);
+    if (mu.x == 0u) mu = (uint4)(1u);
+
+    uint4 cu0  = (uint4)(13u, 17u, 19u, 23u);
+    uint4 cu1  = (uint4)(29u, 31u, 37u, 41u);
+    uint4 cu2  = (uint4)(43u, 47u, 53u, 59u);
+    uint4 cu3  = (uint4)(61u, 67u, 71u, 73u);
+
+    for (int i = 0; i < 16384; ++i) {
+        u0  = (u0  * mu) + cu0;
+        u1  = (u1  * mu) + cu1;
+        u2  = (u2  * mu) + cu2;
+        u3  = (u3  * mu) + cu3;
+    }
+
+    uint4 ures = (u0 + u1) + (u2 + u3);
+    data[index] = (float)(ures.x ^ ures.y ^ ures.z ^ ures.w);
+}
+
+// Dual-Issue INT32 Partial Co-Issue: 8 independent chains
+__kernel void run_dual_issue_int32_8(__global float* data, float multiplier, uint num_elements) {
+    uint index = get_global_id(0);
+    if (index >= num_elements) return;
+
+    float in_val = data[index & 0x1FFFu];
+    uint ubase = (uint)(in_val * 1000.0f) + index;
+
+    uint4 u0  = (uint4)(ubase);
+    uint4 u1  = (uint4)(ubase + 1u);
+    uint4 u2  = (uint4)(ubase + 2u);
+    uint4 u3  = (uint4)(ubase + 3u);
+    uint4 u4  = (uint4)(ubase + 4u);
+    uint4 u5  = (uint4)(ubase + 5u);
+    uint4 u6  = (uint4)(ubase + 6u);
+    uint4 u7  = (uint4)(ubase + 7u);
+
+    uint4 mu = (uint4)((uint)multiplier);
+    if (mu.x == 0u) mu = (uint4)(1u);
+
+    uint4 cu0  = (uint4)(13u, 17u, 19u, 23u);
+    uint4 cu1  = (uint4)(29u, 31u, 37u, 41u);
+    uint4 cu2  = (uint4)(43u, 47u, 53u, 59u);
+    uint4 cu3  = (uint4)(61u, 67u, 71u, 73u);
+    uint4 cu4  = (uint4)(79u, 83u, 89u, 97u);
+    uint4 cu5  = (uint4)(101u, 103u, 107u, 109u);
+    uint4 cu6  = (uint4)(113u, 127u, 131u, 137u);
+    uint4 cu7  = (uint4)(139u, 149u, 151u, 157u);
+
+    for (int i = 0; i < 16384; ++i) {
+        u0  = (u0  * mu) + cu0;
+        u1  = (u1  * mu) + cu1;
+        u2  = (u2  * mu) + cu2;
+        u3  = (u3  * mu) + cu3;
+        u4  = (u4  * mu) + cu4;
+        u5  = (u5  * mu) + cu5;
+        u6  = (u6  * mu) + cu6;
+        u7  = (u7  * mu) + cu7;
+    }
+
+    uint4 s0 = (u0 + u1) + (u2 + u3);
+    uint4 s1 = (u4 + u5) + (u6 + u7);
+    uint4 ures = s0 + s1;
+    data[index] = (float)(ures.x ^ ures.y ^ ures.z ^ ures.w);
+}
+
 __kernel void run_dual_issue_int32(__global float* data, float multiplier, uint num_elements) {
     uint index = get_global_id(0);
     if (index >= num_elements) return;

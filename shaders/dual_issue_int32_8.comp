@@ -1,0 +1,61 @@
+#version 460
+// GPUBench Dual-Issue & Concurrency Benchmark Suite
+// Dual-Issue INT32 (Partial Co-Issue): 8 independent chains (transition threshold)
+
+layout (local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) buffer Data {
+    float data[];
+} InOutBuffer;
+
+layout(push_constant) uniform PushConstants {
+    float multiplier;
+    uint num_elements;
+} pushConstants;
+
+void main() {
+    uint index = gl_GlobalInvocationID.x;
+    if (index >= pushConstants.num_elements) return;
+
+    uint ubase = uint(InOutBuffer.data[index] * 1000.0) + index;
+
+    // 8 independent INT32 accumulator chains
+    uvec4 u0  = uvec4(ubase);
+    uvec4 u1  = uvec4(ubase + 1u);
+    uvec4 u2  = uvec4(ubase + 2u);
+    uvec4 u3  = uvec4(ubase + 3u);
+    uvec4 u4  = uvec4(ubase + 4u);
+    uvec4 u5  = uvec4(ubase + 5u);
+    uvec4 u6  = uvec4(ubase + 6u);
+    uvec4 u7  = uvec4(ubase + 7u);
+
+    uvec4 mu = uvec4(uint(pushConstants.multiplier));
+    if (mu.x == 0u) mu = uvec4(1u);
+
+    uvec4 cu0  = uvec4(13u, 17u, 19u, 23u);
+    uvec4 cu1  = uvec4(29u, 31u, 37u, 41u);
+    uvec4 cu2  = uvec4(43u, 47u, 53u, 59u);
+    uvec4 cu3  = uvec4(61u, 67u, 71u, 73u);
+    uvec4 cu4  = uvec4(79u, 83u, 89u, 97u);
+    uvec4 cu5  = uvec4(101u, 103u, 107u, 109u);
+    uvec4 cu6  = uvec4(113u, 127u, 131u, 137u);
+    uvec4 cu7  = uvec4(139u, 149u, 151u, 157u);
+
+    // 16384 iterations * 8 uvec4 INT mul-add (2 ops each) = 16384 * 64 = 1,048,576 INT32 ops
+    for (int i = 0; i < 16384; ++i) {
+        u0  = (u0  * mu) + cu0;
+        u1  = (u1  * mu) + cu1;
+        u2  = (u2  * mu) + cu2;
+        u3  = (u3  * mu) + cu3;
+        u4  = (u4  * mu) + cu4;
+        u5  = (u5  * mu) + cu5;
+        u6  = (u6  * mu) + cu6;
+        u7  = (u7  * mu) + cu7;
+    }
+
+    uvec4 s0 = (u0 + u1) + (u2 + u3);
+    uvec4 s1 = (u4 + u5) + (u6 + u7);
+    uvec4 ures = s0 + s1;
+
+    InOutBuffer.data[index] = float(ures.x ^ ures.y ^ ures.z ^ ures.w);
+}

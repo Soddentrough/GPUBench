@@ -7,52 +7,60 @@
 DualIssueBench::DualIssueBench() {
   configs = {
     {
-      "Single-Issue Baseline (ILP-1)",
-      "dual_issue_ilp1.comp",
-      "run_dual_issue_ilp1",
-      32768ULL * 8ULL, // 262,144 ops/thread
-      "TFLOPS",
-      "Strictly serialized FMA chain (latency-bound single-issue baseline)"
-    },
-    {
-      "ILP-4 (Latency-Bound Single-Issue)",
+      "Standard FP32",
       "dual_issue_ilp4.comp",
       "run_dual_issue_ilp4",
       16384ULL * 32ULL, // 524,288 ops/thread
       "TFLOPS",
-      "4 independent chains (hides ~4-cycle latency, 1-issue saturated)"
+      "Standard single-issue FP32 baseline (1 instruction per cycle)"
     },
     {
-      "ILP-8 (Dual-Issue Transition Threshold)",
+      "Dual-Issue FP32 (Partial Co-Issue)",
       "dual_issue_ilp8.comp",
       "run_dual_issue_ilp8",
       16384ULL * 64ULL, // 1,048,576 ops/thread
       "TFLOPS",
-      "8 independent chains (dual-issue scheduler co-issuing threshold)"
+      "Partial dual-issue FP32 (transition threshold to 2 instructions per cycle)"
     },
     {
-      "ILP-16 (Peak Dual-Issue Saturated FP32)",
+      "Dual-Issue FP32 (FP32+FP32)",
       "dual_issue_ilp16.comp",
       "run_dual_issue_ilp16",
       16384ULL * 128ULL, // 2,097,152 ops/thread
       "TFLOPS",
-      "16 independent chains (saturates dual-issue SIMD32 / dual-FP32 peak)"
+      "Full dual-issue FP32 (2 FP32 instructions per cycle peak)"
     },
     {
-      "Concurrent FP32 + INT32 (50/50 Dual-Issue)",
-      "dual_issue_mixed.comp",
-      "run_dual_issue_mixed",
-      16384ULL * 128ULL, // 2,097,152 ops/thread (64 FP32 + 64 INT32)
+      "Standard INT32",
+      "dual_issue_int32_4.comp",
+      "run_dual_issue_int32_4",
+      16384ULL * 32ULL, // 524,288 ops/thread
       "TOPS",
-      "50% FP32 + 50% INT32 (tests concurrent execution across mixed datapaths)"
+      "Standard single-issue INT32 baseline (1 instruction per cycle)"
     },
     {
-      "Pure INT32 (Single Datapath Ceiling)",
+      "Dual-Issue INT32 (Partial Co-Issue)",
+      "dual_issue_int32_8.comp",
+      "run_dual_issue_int32_8",
+      16384ULL * 64ULL, // 1,048,576 ops/thread
+      "TOPS",
+      "Partial dual-issue INT32 (transition threshold to 2 instructions per cycle)"
+    },
+    {
+      "Dual-Issue INT32 (INT32+INT32)",
       "dual_issue_int32.comp",
       "run_dual_issue_int32",
       16384ULL * 128ULL, // 2,097,152 ops/thread
       "TOPS",
-      "Pure INT32 arithmetic (establishes single-datapath integer ceiling)"
+      "Full dual-issue INT32 (2 INT32 instructions per cycle peak)"
+    },
+    {
+      "Dual-Issue Mixed (FP32+INT32)",
+      "dual_issue_mixed.comp",
+      "run_dual_issue_mixed",
+      16384ULL * 128ULL, // 2,097,152 ops/thread (64 FP32 + 64 INT32)
+      "TOPS",
+      "Dual-issue concurrent execution (1 FP32 + 1 INT32 instruction per cycle)"
     }
   };
 }

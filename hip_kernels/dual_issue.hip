@@ -228,7 +228,63 @@ extern "C" __global__ void run_dual_issue_mixed(float* data, float multiplier, u
                   static_cast<float>(u0.x ^ u1.y ^ u2.z ^ u3.w ^ u4.x ^ u5.y ^ u6.z ^ u7.w);
 }
 
-// Config 5: Pure INT32
+// Standard INT32 (4 independent chains: single-issue saturated integer baseline)
+extern "C" __global__ void run_dual_issue_int32_4(float* data, float multiplier, uint32_t num_elements) {
+    uint32_t index = blockIdx.x * blockDim.x + threadIdx.x;
+    if (index >= num_elements) return;
+
+    uint32_t ubase = static_cast<uint32_t>(data[index] * 1000.0f) + index;
+    uint4 u0  = make_uint4(ubase, ubase + 1, ubase + 2, ubase + 3);
+    uint4 u1  = make_uint4(ubase + 4, ubase + 5, ubase + 6, ubase + 7);
+    uint4 u2  = make_uint4(ubase + 8, ubase + 9, ubase + 10, ubase + 11);
+    uint4 u3  = make_uint4(ubase + 12, ubase + 13, ubase + 14, ubase + 15);
+
+    uint32_t umult = static_cast<uint32_t>(multiplier);
+    if (umult == 0) umult = 1;
+
+    for (int i = 0; i < 16384; ++i) {
+        u0.x  = u0.x  * umult + 13u;  u0.y  = u0.y  * umult + 17u;  u0.z  = u0.z  * umult + 19u;  u0.w  = u0.w  * umult + 23u;
+        u1.x  = u1.x  * umult + 29u;  u1.y  = u1.y  * umult + 31u;  u1.z  = u1.z  * umult + 37u;  u1.w  = u1.w  * umult + 41u;
+        u2.x  = u2.x  * umult + 43u;  u2.y  = u2.y  * umult + 47u;  u2.z  = u2.z  * umult + 53u;  u2.w  = u2.w  * umult + 59u;
+        u3.x  = u3.x  * umult + 61u;  u3.y  = u3.y  * umult + 67u;  u3.z  = u3.z  * umult + 71u;  u3.w  = u3.w  * umult + 73u;
+    }
+
+    data[index] = static_cast<float>(u0.x ^ u1.y ^ u2.z ^ u3.w);
+}
+
+// Dual-Issue INT32 Partial Co-Issue (8 independent chains)
+extern "C" __global__ void run_dual_issue_int32_8(float* data, float multiplier, uint32_t num_elements) {
+    uint32_t index = blockIdx.x * blockDim.x + threadIdx.x;
+    if (index >= num_elements) return;
+
+    uint32_t ubase = static_cast<uint32_t>(data[index] * 1000.0f) + index;
+    uint4 u0  = make_uint4(ubase, ubase + 1, ubase + 2, ubase + 3);
+    uint4 u1  = make_uint4(ubase + 4, ubase + 5, ubase + 6, ubase + 7);
+    uint4 u2  = make_uint4(ubase + 8, ubase + 9, ubase + 10, ubase + 11);
+    uint4 u3  = make_uint4(ubase + 12, ubase + 13, ubase + 14, ubase + 15);
+    uint4 u4  = make_uint4(ubase + 16, ubase + 17, ubase + 18, ubase + 19);
+    uint4 u5  = make_uint4(ubase + 20, ubase + 21, ubase + 22, ubase + 23);
+    uint4 u6  = make_uint4(ubase + 24, ubase + 25, ubase + 26, ubase + 27);
+    uint4 u7  = make_uint4(ubase + 28, ubase + 29, ubase + 30, ubase + 31);
+
+    uint32_t umult = static_cast<uint32_t>(multiplier);
+    if (umult == 0) umult = 1;
+
+    for (int i = 0; i < 16384; ++i) {
+        u0.x  = u0.x  * umult + 13u;  u0.y  = u0.y  * umult + 17u;  u0.z  = u0.z  * umult + 19u;  u0.w  = u0.w  * umult + 23u;
+        u1.x  = u1.x  * umult + 29u;  u1.y  = u1.y  * umult + 31u;  u1.z  = u1.z  * umult + 37u;  u1.w  = u1.w  * umult + 41u;
+        u2.x  = u2.x  * umult + 43u;  u2.y  = u2.y  * umult + 47u;  u2.z  = u2.z  * umult + 53u;  u2.w  = u2.w  * umult + 59u;
+        u3.x  = u3.x  * umult + 61u;  u3.y  = u3.y  * umult + 67u;  u3.z  = u3.z  * umult + 71u;  u3.w  = u3.w  * umult + 73u;
+        u4.x  = u4.x  * umult + 79u;  u4.y  = u4.y  * umult + 83u;  u4.z  = u4.z  * umult + 89u;  u4.w  = u4.w  * umult + 97u;
+        u5.x  = u5.x  * umult + 101u; u5.y  = u5.y  * umult + 103u; u5.z  = u5.z  * umult + 107u; u5.w  = u5.w  * umult + 109u;
+        u6.x  = u6.x  * umult + 113u; u6.y  = u6.y  * umult + 127u; u6.z  = u6.z  * umult + 131u; u6.w  = u6.w  * umult + 137u;
+        u7.x  = u7.x  * umult + 139u; u7.y  = u7.y  * umult + 149u; u7.z  = u7.z  * umult + 151u; u7.w  = u7.w  * umult + 157u;
+    }
+
+    data[index] = static_cast<float>(u0.x ^ u1.y ^ u2.z ^ u3.w ^ u4.x ^ u5.y ^ u6.z ^ u7.w);
+}
+
+// Config 5: Dual-Issue INT32 (INT32+INT32) - 16 independent chains
 extern "C" __global__ void run_dual_issue_int32(float* data, float multiplier, uint32_t num_elements) {
     uint32_t index = blockIdx.x * blockDim.x + threadIdx.x;
     if (index >= num_elements) return;
