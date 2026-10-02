@@ -1,22 +1,5 @@
 // Requires OpenCL 1.2+
-// GPUBench Dual-Issue & Concurrency Benchmark Suite
-
-__kernel void run_dual_issue_ilp1(__global float* data, float multiplier, uint num_elements) {
-    uint index = get_global_id(0);
-    if (index >= num_elements) return;
-
-    float in_val = data[index & 0x1FFFu];
-    float4 val = (float4)(in_val * 0.0001f);
-    float4 m = (float4)(multiplier);
-    float4 c = (float4)(0.0001f, 0.0002f, 0.0003f, 0.0004f);
-
-    for (int i = 0; i < 32768; ++i) {
-        val = fma(val, m, c);
-    }
-
-    data[index] = val.x + val.y + val.z + val.w;
-}
-
+// Config 0: Standard FP32 (Single-Issue Baseline)
 __kernel void run_dual_issue_ilp4(__global float* data, float multiplier, uint num_elements) {
     uint index = get_global_id(0);
     if (index >= num_elements) return;
@@ -36,6 +19,7 @@ __kernel void run_dual_issue_ilp4(__global float* data, float multiplier, uint n
     data[index] = res.x + res.y + res.z + res.w;
 }
 
+// Config 1: Dual-Issue FP32 (Partial Co-Issue)
 __kernel void run_dual_issue_ilp8(__global float* data, float multiplier, uint num_elements) {
     uint index = get_global_id(0);
     if (index >= num_elements) return;
@@ -76,6 +60,7 @@ __kernel void run_dual_issue_ilp8(__global float* data, float multiplier, uint n
     data[index] = res.x + res.y + res.z + res.w;
 }
 
+// Config 2: Dual-Issue FP32 (FP32+FP32)
 __kernel void run_dual_issue_ilp16(__global float* data, float multiplier, uint num_elements) {
     uint index = get_global_id(0);
     if (index >= num_elements) return;
@@ -145,6 +130,7 @@ __kernel void run_dual_issue_ilp16(__global float* data, float multiplier, uint 
     data[index] = res.x + res.y + res.z + res.w;
 }
 
+// Config 6: Dual-Issue Mixed (FP32+INT32)
 __kernel void run_dual_issue_mixed(__global float* data, float multiplier, uint num_elements) {
     uint index = get_global_id(0);
     if (index >= num_elements) return;
@@ -225,7 +211,7 @@ __kernel void run_dual_issue_mixed(__global float* data, float multiplier, uint 
     data[index] = fres.x + fres.y + fres.z + fres.w + (float)(ures.x ^ ures.y ^ ures.z ^ ures.w);
 }
 
-// Standard INT32: 4 independent chains (single-issue saturated integer baseline)
+// Config 3: Standard INT32 (Single-Issue Baseline)
 __kernel void run_dual_issue_int32_4(__global float* data, float multiplier, uint num_elements) {
     uint index = get_global_id(0);
     if (index >= num_elements) return;
@@ -257,7 +243,7 @@ __kernel void run_dual_issue_int32_4(__global float* data, float multiplier, uin
     data[index] = (float)(ures.x ^ ures.y ^ ures.z ^ ures.w);
 }
 
-// Dual-Issue INT32 Partial Co-Issue: 8 independent chains
+// Config 4: Dual-Issue INT32 (Partial Co-Issue)
 __kernel void run_dual_issue_int32_8(__global float* data, float multiplier, uint num_elements) {
     uint index = get_global_id(0);
     if (index >= num_elements) return;
@@ -303,6 +289,7 @@ __kernel void run_dual_issue_int32_8(__global float* data, float multiplier, uin
     data[index] = (float)(ures.x ^ ures.y ^ ures.z ^ ures.w);
 }
 
+// Config 5: Dual-Issue INT32 (INT32+INT32)
 __kernel void run_dual_issue_int32(__global float* data, float multiplier, uint num_elements) {
     uint index = get_global_id(0);
     if (index >= num_elements) return;

@@ -515,6 +515,33 @@ void ResultFormatter::print() {
                 if (res.subcategory == "Dual-Issue") {
                   if (res.configIndex == 0 || res.configIndex == 3) {
                     noteStr = "[Baseline]";
+                  } else if (res.configIndex == 6) {
+                    // Config 6: Dual-Issue Mixed (50% FP32 + 50% INT32).
+                    // The expected single-issue serialized baseline throughput is the harmonic mean of
+                    // Config 0 (Standard FP32 baseline) and Config 3 (Standard INT32 baseline):
+                    // B_mixed = 2 / (1 / B_FP32 + 1 / B_INT32)
+                    double baseFP32 = 0.0;
+                    double baseINT32 = 0.0;
+                    for (const auto &bp : subcat.benchmarks) {
+                      if (bp.second.count(backend)) {
+                        const auto &br = bp.second.at(backend);
+                        if (br.subcategory == "Dual-Issue" && br.time_ms > 0.0) {
+                          if (br.configIndex == 0) {
+                            baseFP32 = (static_cast<double>(br.operations) / (br.time_ms / 1000.0)) / 1e12;
+                          } else if (br.configIndex == 3) {
+                            baseINT32 = (static_cast<double>(br.operations) / (br.time_ms / 1000.0)) / 1e12;
+                          }
+                        }
+                      }
+                    }
+                    if (baseFP32 > 0.0 && baseINT32 > 0.0) {
+                      double baseVal = 2.0 / ((1.0 / baseFP32) + (1.0 / baseINT32));
+                      double ratio = value / baseVal;
+                      double pct = (ratio - 1.0) * 100.0;
+                      noteStr = "└──> " + formatDouble(ratio, 2) + "x (" + (pct >= 0 ? "+" : "") + formatDouble(pct, 1) + "%)";
+                    } else {
+                      noteStr = "[Mixed FP32+INT32]";
+                    }
                   } else {
                     uint32_t targetBaseConfig = (res.configIndex >= 3 && res.configIndex <= 5) ? 3 : 0;
                     for (const auto &bp : subcat.benchmarks) {

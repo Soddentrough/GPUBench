@@ -12,23 +12,7 @@ __device__ inline float4 fmac4(float4 acc, float4 a, float4 b) {
     );
 }
 
-// Config 0: ILP-1 (Strictly Serialized Baseline)
-extern "C" __global__ void run_dual_issue_ilp1(float* data, float multiplier, uint32_t num_elements) {
-    uint32_t index = blockIdx.x * blockDim.x + threadIdx.x;
-    if (index >= num_elements) return;
-
-    float4 val = make_float4(data[index], data[index], data[index], data[index]);
-    float4 m = make_float4(multiplier, multiplier, multiplier, multiplier);
-    float4 c = make_float4(0.0001f, 0.0002f, 0.0003f, 0.0004f);
-
-    for (int i = 0; i < 32768; ++i) {
-        val = fmac4(c, m, val);
-    }
-
-    data[index] = val.x + val.y + val.z + val.w;
-}
-
-// Config 1: Standard FP32 (Single-Issue Baseline)
+// Config 0: Standard FP32 (Single-Issue Baseline)
 extern "C" __global__ void run_dual_issue_ilp4(float* data, float multiplier, uint32_t num_elements) {
     uint32_t index = blockIdx.x * blockDim.x + threadIdx.x;
     if (index >= num_elements) return;
@@ -51,7 +35,7 @@ extern "C" __global__ void run_dual_issue_ilp4(float* data, float multiplier, ui
     data[index] = res.x + res.y + res.z + res.w;
 }
 
-// Config 2: ILP-8 (Dual-Issue Transition Threshold)
+// Config 1: Dual-Issue FP32 (Partial Co-Issue)
 extern "C" __global__ void run_dual_issue_ilp8(float* data, float multiplier, uint32_t num_elements) {
     uint32_t index = blockIdx.x * blockDim.x + threadIdx.x;
     if (index >= num_elements) return;
@@ -89,7 +73,7 @@ extern "C" __global__ void run_dual_issue_ilp8(float* data, float multiplier, ui
     data[index] = val0.x + val1.y + val2.z + val3.w + val4.x + val5.y + val6.z + val7.w;
 }
 
-// Config 3: ILP-16 (Peak Dual-Issue Saturated FP32)
+// Config 2: Dual-Issue FP32 (FP32+FP32)
 extern "C" __global__ void run_dual_issue_ilp16(float* data, float multiplier, uint32_t num_elements) {
     uint32_t index = blockIdx.x * blockDim.x + threadIdx.x;
     if (index >= num_elements) return;
@@ -152,7 +136,7 @@ extern "C" __global__ void run_dual_issue_ilp16(float* data, float multiplier, u
                   val8.x + val9.y + val10.z + val11.w + val12.x + val13.y + val14.z + val15.w;
 }
 
-// Config 4: Concurrent FP32 + INT32
+// Config 6: Dual-Issue Mixed (FP32+INT32)
 extern "C" __global__ void run_dual_issue_mixed(float* data, float multiplier, uint32_t num_elements) {
     uint32_t index = blockIdx.x * blockDim.x + threadIdx.x;
     if (index >= num_elements) return;
@@ -219,7 +203,7 @@ extern "C" __global__ void run_dual_issue_mixed(float* data, float multiplier, u
                   static_cast<float>(u0.x ^ u1.y ^ u2.z ^ u3.w ^ u4.x ^ u5.y ^ u6.z ^ u7.w);
 }
 
-// Standard INT32 (4 independent chains: single-issue saturated integer baseline)
+// Config 3: Standard INT32 (Single-Issue Baseline)
 extern "C" __global__ void run_dual_issue_int32_4(float* data, float multiplier, uint32_t num_elements) {
     uint32_t index = blockIdx.x * blockDim.x + threadIdx.x;
     if (index >= num_elements) return;
@@ -243,7 +227,7 @@ extern "C" __global__ void run_dual_issue_int32_4(float* data, float multiplier,
     data[index] = static_cast<float>(u0.x ^ u1.y ^ u2.z ^ u3.w);
 }
 
-// Dual-Issue INT32 Partial Co-Issue (8 independent chains)
+// Config 4: Dual-Issue INT32 (Partial Co-Issue)
 extern "C" __global__ void run_dual_issue_int32_8(float* data, float multiplier, uint32_t num_elements) {
     uint32_t index = blockIdx.x * blockDim.x + threadIdx.x;
     if (index >= num_elements) return;

@@ -59,9 +59,9 @@ The suite evaluates hardware through 7 distinct configurations structured symmet
 
 ---
 
-## 4. Empirical Case Study: AMD Radeon 8060S (Strix Halo / GFX1151)
+## 4. Empirical Case Study: AMD Radeon 8060S (Strix Halo / GFX1151) & R9700 (GFX1201)
 
-Running `./build/gpubench -b Dual-Issue -d 0 -k vulkan,rocm,opencl` produces cross-backend telemetry demonstrating dual-issue scaling once single-issue baseline skew is eliminated:
+Running `./build/gpubench -b Dual-Issue -d 0 -k vulkan,rocm,opencl` produces cross-backend telemetry demonstrating dual-issue scaling once single-issue baseline skew and mixed-mode baselines are properly calibrated:
 
 ```text
 ╭─ Dual-Issue ─────────────────────────────────────────────────────────────────────────────────────────────────╮
@@ -85,19 +85,30 @@ Running `./build/gpubench -b Dual-Issue -d 0 -k vulkan,rocm,opencl` produces cro
 │ Dual-Issue INT32 (INT32+INT32)                 │ OpenCL   │              3.38 TOPS │ └──> 1.02x (+1.8%)                      │
 │                                                │ ROCm     │             13.43 TOPS │ └──> 0.98x (-1.8%)                      │
 │                                                │ Vulkan   │              2.89 TOPS │ └──> 1.00x (-0.1%)                      │
-│ Dual-Issue Mixed (FP32+INT32)                  │ OpenCL   │              5.11 TOPS │ └──> 0.45x (-54.7%)                     │
-│                                                │ ROCm     │             23.14 TOPS │ └──> 1.91x (+91.3%)                     │
-│                                                │ Vulkan   │              4.92 TOPS │ └──> 0.28x (-71.6%)                     │
+│ Dual-Issue Mixed (FP32+INT32)                  │ OpenCL   │              5.11 TOPS │ └──> 1.00x (-0.4%)                      │
+│                                                │ ROCm     │             23.14 TOPS │ └──> 1.80x (+80.2%)                     │
+│                                                │ Vulkan   │              4.92 TOPS │ └──> 0.99x (-0.7%)                      │
 ╰────────────────────────────────────────────────┴──────────┴────────────────────────┴─────────────────────────────────────────╯
 ```
 
-### Key Takeaways
-1. **True Single-Issue Baseline Calibration**:
-   - By eliminating accumulator independence in `Standard FP32`, the baseline under Vulkan drops from the skew of 24.54 TFLOPS down to **17.34 TFLOPS** (matching physical single-issue ALU capacity at boost clock).
-   - `Dual-Issue FP32` now clearly demonstrates an honest **1.42x – 1.56x (+42% to +56%) dual-issue speedup** on Vulkan!
-2. **ROCm (`hipcc`/LLVM) Dual-Issue vs Concurrency**:
-   - Under ROCm, pure FP32 saturates at **~13 TFLOPS** regardless of ILP, confirming LLVM's lack of VOPD / dual-issue FP32 pairing.
-   - Mixing FP32 and INT32 achieves **23.14 TOPS** (+91.3% speedup / 1.91x over baseline), demonstrating that LLVM co-schedules mixed arithmetic across independent vector execution pipes.
+### Key Takeaways & Microarchitectural Insights
+
+1. **Harmonic Baseline for Mixed Datapaths (Config 6)**:
+   - Config 6 contains a 50/50 mix of independent FP32 FMAs and INT32 operations. In serialized single-issue execution, the total execution time is $T_{\text{serial}} = 2 t_{\text{FP32}} + 2 t_{\text{INT32}}$, meaning the theoretical un-co-issued baseline is the **harmonic mean** of Config 0 and Config 3:
+     $$\text{Baseline}_{\text{Mixed}} = \frac{2}{\frac{1}{\text{FP32 Baseline}} + \frac{1}{\text{INT32 Baseline}}}$$
+   - Comparing against this composite baseline reveals the true concurrency speedup of executing FP32 and INT32 simultaneously across independent execution units (+80.2% on ROCm, and +74.8% on Radeon AI PRO R9700).
+
+2. **True Single-Issue Baseline Calibration**:
+   - By eliminating accumulator independence in `Standard FP32` through ping-pong RAW hazards, the baseline under Vulkan drops from the skew of 24.54 TFLOPS down to **17.34 TFLOPS** (matching physical single-issue ALU capacity at boost clock).
+   - `Dual-Issue FP32` now clearly demonstrates an honest **1.42x – 1.50x (+42% to +50%) dual-issue speedup** on Vulkan with Mesa RADV/ACO!
+
+3. **Vulkan vs ROCm INT32 Throughput Disparity**:
+   - In GLSL (`shaders/dual_issue_int32_4.comp`) and OpenCL (`kernels/opencl/dual_issue.cl`), vector arithmetic `(u * mu) + cu` lowers to `v_mul_lo_u32` followed by `v_add_nc_u32`. On AMD RDNA, `v_mul_lo_u32` is not single-cycle full-rate (requiring 4–6 cycles throughput), bounding performance to ~3–5 TOPS.
+   - In ROCm HIP (`hip_kernels/dual_issue.hip`), `umult` is scalar, allowing `amdclang++` / LLVM to fuse the expression into a single hardware instruction: `v_mad_co_u64_u32` with an SGPR scalar operand, achieving dedicated full hardware throughput (~14–27 TOPS).
+
+4. **ROCm (`hipcc`/LLVM) Pure FP32 vs Mixed Concurrency**:
+   - In ROCm HIP (`run_dual_issue_ilp16`), 16 `float4` accumulators plus constant offsets consume >128 VGPRs per thread. LLVM's `SIFormVOPD` pass enforces strict register bank conflict rules for VOPD opcode pairing. Under this extreme register pressure, LLVM fails to find valid VOPD pairings and wave occupancy drops, causing pure FP32 dual-issue to plateau.
+   - In contrast, when FP32 is interleaved with INT32 (`run_dual_issue_mixed`), instructions target different execution pipelines without VOPD bank conflicts, allowing LLVM to co-schedule dual instructions effortlessly (**+75% to +80% concurrency speedup**).
 
 ---
 
@@ -112,7 +123,7 @@ Key metrics in the output:
 - `Latency`: Total estimated instruction cycle latency of the unrolled loop.
 - `Inverse Throughput`: Cycles required to issue the unrolled instruction sequence.
 - `VGPRs`: Vector register count allocated for the configuration ($12 \to 24 \to 36 \to 72$).
-- `VOPD`: On RDNA 3 (GFX11), reports the exact count of 64-bit dual-issue instructions emitted.
+- `VOPD`: On RDNA 3 (GFX11) and RDNA 4 (GFX12), reports the exact count of 64-bit dual-issue instructions emitted.
 
 ### AMD: Static ISA Disassembly via RGA
 Use the Radeon GPU Analyzer directly to inspect disassembled vector instructions:
@@ -134,5 +145,5 @@ ncu --metrics \
   ./build/gpubench -b dualissue
 ```
 - `sm__pipe_fma_cycles_active`: Measures primary and secondary FP32 datapath utilization.
-- `sm__pipe_alu_cycles_active`: Measures integer datapath activity during Config 4 (Concurrent) and Config 5 (INT32).
+- `sm__pipe_alu_cycles_active`: Measures integer datapath activity during Configs 3–5 (INT32) and Config 6 (Mixed Concurrent FP32+INT32).
 - `smsp__issue_active`: Shows the percentage of cycles where the warp scheduler successfully issued 2 instructions simultaneously.
