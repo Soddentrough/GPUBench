@@ -3,6 +3,7 @@
 #include "benchmarks/RayDivergenceBench.h"
 #include "benchmarks/RayIntersectBench.h"
 #include "benchmarks/RayRawTraversalBench.h"
+#include "benchmarks/DualIssueBench.h"
 #include "core/BenchmarkRunner.h"
 #include "core/ComputeBackendFactory.h"
 #include "core/ResultFormatter.h"
@@ -60,7 +61,7 @@ int main(int argc, char **argv) {
   app.footer(
       "\nBENCHMARK GROUPS & INCLUDED TESTS:\n"
       "  compute     Compute arithmetic units (vector & matrix tensor operations):\n"
-      "              FP64, FP32, FP16, BF16, FP8, FP6, FP4, INT8, INT4\n"
+      "              FP64, FP32, Dual-Issue (ILP & Concurrent Math), FP16, BF16, FP8, FP6, FP4, INT8, INT4\n"
       "  memory      VRAM and GPU cache hierarchy:\n"
       "              Device Memory Bandwidth, L0/L1/L2/L3 Cache Latency\n"
       "  graphics    All 3D graphics rendering pipelines (combines 'raster' and 'raytracing', alias: 'gfx'):\n"
@@ -362,6 +363,13 @@ int main(int argc, char **argv) {
           RayRawTraversalBench rawBench;
           for (uint32_t c = 0; c < rawBench.GetNumConfigs(); ++c) {
             std::cout << "      [" << c << "] " << rawBench.GetConfigName(c) << std::endl;
+          }
+        }
+        if (name == "Dual-Issue") {
+          DualIssueBench diBench;
+          for (uint32_t c = 0; c < diBench.GetNumConfigs(); ++c) {
+            std::cout << "      [" << c << "] " << diBench.GetConfigName(c)
+                      << "  -- " << diBench.GetConfigSupportNote(c) << std::endl;
           }
         }
       }

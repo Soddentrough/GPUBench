@@ -225,6 +225,10 @@ gpubench --list-backends
 # Run all benchmarks on default device
 gpubench
 
+# Run Dual-Issue & Concurrency benchmark suite across backends
+gpubench -d 0 -b dualissue
+gpubench -d 0 -b dualissue -k vulkan,rocm
+
 # Run Ray Scheduling on a specific GPU device (e.g. Device 1)
 gpubench -d 1 -b RayScheduling
 
@@ -269,6 +273,7 @@ python3 scripts/capture_gpu_profiles.py
 - [RDNA 3 Ray Tracing Architecture](docs/RDNA3_RAY_TRACING_ARCHITECTURE.md) - Chiplet topology, memory fabric, and zero-LDS pure Wave32 compaction.
 - [Hardware Profiling & Telemetry Guide](docs/PROFILING_GUIDE.md) - RGA disassembly, ACO compiler stats, packet dumping, and SMI telemetry.
 - [Compute Performance Analysis](docs/COMPUTE_PERFORMANCE_ANALYSIS.md) - Compute pipelines, packed math, and compiler ceilings.
+- [Dual-Issue & Datapath Concurrency](docs/DUAL_ISSUE_ANALYSIS.md) - RDNA 3 VOPD, RDNA 4 dual-issue SIMD32, and NVIDIA concurrent FP32+INT32 datapath analysis.
 - [OpenCL Backend](docs/OPENCL_BACKEND.md) - Architecture, feature matrix, and disk binary caching.
 - [Desktop Integration](docs/DESKTOP_INTEGRATION.md) - FreeDesktop XDG, Windows High-DPI manifest, and macOS app bundle integration.
 

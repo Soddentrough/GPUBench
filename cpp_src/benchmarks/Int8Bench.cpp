@@ -41,13 +41,28 @@ void Int8Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
   context.setKernelArg(vectorKernel, 0, buffer);
 
   // Optionally load Matrix Kernel
-  if (context.getCurrentDeviceInfo().cooperativeMatrixSupport &&
-      context.getBackend() == ComputeBackend::Vulkan) {
-    std::filesystem::path matrix_file_path =
-        kdir / "vulkan" / "coop_matrix_int8.comp";
-    matrixKernel = context.createKernel(matrix_file_path.string(), "main", 2);
-    context.setKernelArg(matrixKernel, 0, buffer); // Binding 0: int8 (A/B)
-    context.setKernelArg(matrixKernel, 1, buffer); // Binding 1: int32 (C)
+  if (context.getCurrentDeviceInfo().cooperativeMatrixSupport) {
+    if (context.getBackend() == ComputeBackend::Vulkan) {
+      std::filesystem::path matrix_file_path =
+          kdir / "vulkan" / "coop_matrix_int8.comp";
+      matrixKernel = context.createKernel(matrix_file_path.string(), "main", 2);
+      if (matrixKernel) {
+        context.setKernelArg(matrixKernel, 0, buffer); // Binding 0: int8 (A/B)
+        context.setKernelArg(matrixKernel, 1, buffer); // Binding 1: int32 (C)
+      }
+    } else if (context.getBackend() == ComputeBackend::ROCm) {
+      std::filesystem::path matrix_file_path =
+          kdir / "rocm" / "int8_matrix.hip";
+      try {
+        matrixKernel = context.createKernel(matrix_file_path.string(), "run_benchmark", 1);
+        if (matrixKernel) {
+          context.setKernelArg(matrixKernel, 0, buffer);
+        }
+      } catch (const std::exception &e) {
+        std::cerr << "ROCm INT8 Matrix kernel compilation failed: " << e.what() << std::endl;
+        matrixKernel = nullptr;
+      }
+    }
   }
 }
 

@@ -3,6 +3,7 @@
 #include "benchmarks/Fp16Bench.h"
 #include "benchmarks/Bf16Bench.h"
 #include "benchmarks/Fp32Bench.h"
+#include "benchmarks/DualIssueBench.h"
 #include "benchmarks/Fp4Bench.h"
 #include "benchmarks/Fp64Bench.h"
 #include "benchmarks/Fp8Bench.h"
@@ -222,6 +223,7 @@ const std::vector<ResultData>& BenchmarkRunner::getResults() const {
 void BenchmarkRunner::discoverBenchmarks() {
   benchmarks.push_back(std::make_unique<Fp64Bench>());
   benchmarks.push_back(std::make_unique<Fp32Bench>());
+  benchmarks.push_back(std::make_unique<DualIssueBench>());
   benchmarks.push_back(std::make_unique<Fp16Bench>());
   benchmarks.push_back(std::make_unique<Bf16Bench>());
   benchmarks.push_back(std::make_unique<Fp8Bench>());
@@ -658,8 +660,9 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
           result_data.backendName =
               ComputeBackendFactory::getBackendName(context->getBackend());
           result_data.deviceName = info.name;
-          result_data.benchmarkName = (num_unsupported_configs > 1)
-              ? (bname + " (" + bench->GetConfigName(ci) + ")")
+          std::string cname = bench->GetConfigName(ci);
+          result_data.benchmarkName = (num_unsupported_configs > 1 || !cname.empty())
+              ? (bname + " (" + cname + ")")
               : bname;
           result_data.metric = "";
           result_data.operations = 0;

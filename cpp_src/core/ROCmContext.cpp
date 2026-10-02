@@ -271,6 +271,19 @@ void ROCmContext::enumerateDevices() {
       bool is_rdna3 = (archNameStr.find("gfx11") != std::string::npos);
       bool is_cdna3 = (archNameStr.find("gfx942") != std::string::npos);
 
+      if (info.l2CacheSize == 0) {
+        if (is_rdna4) {
+          info.l2CacheSize = 8 * 1024 * 1024;
+        } else if (is_rdna3) {
+          info.l2CacheSize = 4 * 1024 * 1024;
+        }
+      }
+      if (is_rdna4) {
+        info.l3CacheSize = 64 * 1024 * 1024;
+      } else if (is_rdna3) {
+        info.l3CacheSize = 32 * 1024 * 1024;
+      }
+
       info.fp8Support = (is_cdna3 || is_rdna3 || is_rdna4);
       info.fp6Support = false;
       // RDNA4 (gfx12) has no FP4 hardware; FP4 arrived with CDNA4 (gfx950).

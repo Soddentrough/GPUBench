@@ -276,10 +276,20 @@ const std::vector<DeviceInfo> &OpenCLContext::getDevices() const {
                         &localMemSize, nullptr);
       info.maxComputeSharedMemorySize = static_cast<uint32_t>(localMemSize);
 
-      cl_ulong cacheSize;
+      cl_ulong cacheSize = 0;
       f_clGetDeviceInfo(dev, CL_DEVICE_GLOBAL_MEM_CACHE_SIZE, sizeof(cacheSize),
                         &cacheSize, nullptr);
-      info.l2CacheSize = static_cast<uint32_t>(cacheSize);
+      if (cacheSize >= 512 * 1024) {
+        info.l2CacheSize = static_cast<uint32_t>(cacheSize);
+      } else {
+        // AMD OpenCL driver returns CU L1 cache size (16KB) for CL_DEVICE_GLOBAL_MEM_CACHE_SIZE.
+        // Fallback to real architectural L2 cache (8MB on RDNA4 / 4MB baseline).
+        info.l2CacheSize = (deviceName.find("gfx12") != std::string::npos || deviceName.find("R9700") != std::string::npos)
+                               ? (8 * 1024 * 1024) : (4 * 1024 * 1024);
+      }
+      if (deviceName.find("gfx12") != std::string::npos || deviceName.find("R9700") != std::string::npos) {
+        info.l3CacheSize = 64 * 1024 * 1024;
+      }
 
       size_t ext_size;
       f_clGetDeviceInfo(dev, CL_DEVICE_EXTENSIONS, 0, nullptr, &ext_size);
@@ -381,10 +391,20 @@ DeviceInfo OpenCLContext::getCurrentDeviceInfo() const {
                     &localMemSize, nullptr);
   info.maxComputeSharedMemorySize = static_cast<uint32_t>(localMemSize);
 
-  cl_ulong cacheSize;
+  cl_ulong cacheSize = 0;
   f_clGetDeviceInfo(device, CL_DEVICE_GLOBAL_MEM_CACHE_SIZE, sizeof(cacheSize),
                     &cacheSize, nullptr);
-  info.l2CacheSize = static_cast<uint32_t>(cacheSize);
+  if (cacheSize >= 512 * 1024) {
+    info.l2CacheSize = static_cast<uint32_t>(cacheSize);
+  } else {
+    std::string devName = info.name;
+    info.l2CacheSize = (devName.find("gfx12") != std::string::npos || devName.find("R9700") != std::string::npos)
+                           ? (8 * 1024 * 1024) : (4 * 1024 * 1024);
+  }
+  std::string devName = info.name;
+  if (devName.find("gfx12") != std::string::npos || devName.find("R9700") != std::string::npos) {
+    info.l3CacheSize = 64 * 1024 * 1024;
+  }
 
   size_t ext_size;
   f_clGetDeviceInfo(device, CL_DEVICE_EXTENSIONS, 0, nullptr, &ext_size);

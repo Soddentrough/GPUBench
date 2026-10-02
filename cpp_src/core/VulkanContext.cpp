@@ -355,7 +355,7 @@ const std::vector<DeviceInfo> &VulkanContext::getDevices() const {
             dName.find("Navi 48") != std::string::npos ||
             dName.find("RX 9070") != std::string::npos ||
             dName.find("rx 9070") != std::string::npos) {
-          info.l2CacheSize = 4 * 1024 * 1024;
+          info.l2CacheSize = 8 * 1024 * 1024;
           info.l3CacheSize = 64 * 1024 * 1024;
         } else {
           info.l2CacheSize = 4 * 1024 * 1024;
@@ -531,7 +531,7 @@ DeviceInfo VulkanContext::getCurrentDeviceInfo() const {
         dName.find("Navi 48") != std::string::npos ||
         dName.find("RX 9070") != std::string::npos ||
         dName.find("rx 9070") != std::string::npos) {
-      info.l2CacheSize = 4 * 1024 * 1024;
+      info.l2CacheSize = 8 * 1024 * 1024;
       info.l3CacheSize = 64 * 1024 * 1024;
     } else {
       info.l2CacheSize = 4 * 1024 * 1024;

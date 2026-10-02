@@ -215,6 +215,7 @@ set(LIB_SOURCES
     cpp_src/core/ResultFormatter.cpp
     cpp_src/core/ResultImporter.cpp
     cpp_src/benchmarks/Fp32Bench.cpp
+    cpp_src/benchmarks/DualIssueBench.cpp
     cpp_src/benchmarks/Fp64Bench.cpp
     cpp_src/benchmarks/Fp16Bench.cpp
     cpp_src/benchmarks/Bf16Bench.cpp

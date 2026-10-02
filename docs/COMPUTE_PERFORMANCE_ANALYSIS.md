@@ -172,13 +172,16 @@ The benchmark now provides realistic and meaningful performance measurements for
   4x unrolling, ACO and LLVM backends all identical). The op counting is
   correct; this is a driver/hardware-path ceiling, not a benchmark bug.
   BF16 vector intentionally uses an FP16 shader (same packed rate on RDNA4).
-- **FP8 vector/matrix: reported UNSUPPORTED.** Hardware and driver support
-  native FP8 (VK_EXT_shader_float8 + shaderFloat8CooperativeMatrix), but no
-  GLSL toolchain can compile FP8 shaders (glslang main has no
-  GL_EXT_shader_explicit_arithmetic_types_float8). The old FP16-based proxy
-  shaders were reporting FP16 rates mislabeled as FP8; they are now gated
-  off until a compiler (glslang FP8 support, or slang with FP8 CoopMat) is
-  integrated.
+- **FP8 Matrix: SUPPORTED NATIVELY (~420-425 TFLOPS on R9700).** Supported via
+  `VK_EXT_shader_float8` and `VK_KHR_cooperative_matrix`. The GLSL toolchain compiles
+  native FP8 shaders using `#extension GL_EXT_float_e4m3 : require` (exposing `floate4m3_t`),
+  emitting SPIR-V with `Capability Float8EXT`, `Capability Float8CooperativeMatrixEXT`,
+  and `Extension "SPV_EXT_float8"`. RADV natively executes 16x16x16 cooperative matrix
+  multiplication using hardware WMMA units.
+  *Note on Vector FP8*: The benchmark is streamlined directly to the `Matrix` workload because
+  `SPV_EXT_float8` and RDNA4 hardware define 8-bit floats for cooperative matrices, storage,
+  and conversions, but do not provide general scalar/vector FP8 ALU arithmetic (`*`, `+`, `fma` on vectors).
+  Modeling FP8 directly as `Matrix` accurately reflects real-world hardware and API capabilities.
 - **INT4 matrix: reported UNSUPPORTED.** VK_KHR_cooperative_matrix has no
   4-bit integer component type, so native INT4 WMMA rates are not
   expressible through Vulkan today; the old shader measured INT8. INT4

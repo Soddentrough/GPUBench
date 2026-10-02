@@ -1,0 +1,33 @@
+#version 460
+// GPUBench Dual-Issue & Concurrency Benchmark Suite
+// Config 0: ILP-1 (Strictly Serialized Baseline)
+// Evaluates latency-bound single-issue execution where every operation depends
+// directly on the result of the preceding operation (stalling ~4 cycles per op).
+
+layout (local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) buffer Data {
+    float data[];
+} InOutBuffer;
+
+layout(push_constant) uniform PushConstants {
+    float multiplier;
+    uint num_elements;
+} pushConstants;
+
+void main() {
+    uint index = gl_GlobalInvocationID.x;
+    if (index >= pushConstants.num_elements) return;
+
+    // Single accumulator chain: strictly serialized
+    vec4 val = vec4(InOutBuffer.data[index]);
+    vec4 m = vec4(pushConstants.multiplier);
+    vec4 c = vec4(0.0001, 0.0002, 0.0003, 0.0004);
+
+    // 32768 iterations * 1 vec4 FMA = 32768 * 8 = 262,144 FP32 operations
+    for (int i = 0; i < 32768; ++i) {
+        val = fma(val, m, c);
+    }
+
+    InOutBuffer.data[index] = val.x + val.y + val.z + val.w;
+}

@@ -1,12 +1,13 @@
 __kernel void run_benchmark(__global uint* data, __global uint* pc) {
-    uint stride = pc[0];
-    uint mask = pc[1];
-    uint iterations = pc[2];
+    uint tid = get_local_id(0);
+    uint iterations = pc ? pc[2] : 1000000;
+    uint val = tid;
 
-    uint index = 0;
     for (uint i = 0; i < iterations; ++i) {
-        index = data[index];
+        val = data[val + tid];
     }
-    if (stride == 0xFFFFFFFF) { data[1] = mask; }
-    data[0] = index;
+
+    if (val == 0xDEADBEEF) {
+        data[0] = val;
+    }
 }

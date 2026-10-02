@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <iostream>
 #include <numeric>
+#include <random>
 #include <stdexcept>
 
 #ifdef _WIN32
@@ -68,6 +69,22 @@ void CacheBench::Setup(IComputeContext &context,
   } else if (targetCacheLevel == 2 && info.l2CacheSize > 0) {
     // Use 75% of L2 size, rounded down to power of 2
     bufferSize = roundDownToPowerOf2(info.l2CacheSize * 3 / 4);
+  }
+
+  // Ensure initData contains a valid cycle of exact buffer element count for pointer chasing
+  if (metric == "ns" && bufferSize > 0) {
+    size_t count = bufferSize / sizeof(uint32_t);
+    if (initData.size() != count) {
+      initData.resize(count);
+      std::vector<uint32_t> perm(count);
+      std::iota(perm.begin(), perm.end(), 0);
+      std::mt19937 g(1337);
+      std::shuffle(perm.begin(), perm.end(), g);
+      for (size_t i = 0; i < count - 1; ++i) {
+        initData[perm[i]] = perm[i + 1];
+      }
+      initData[perm[count - 1]] = perm[0];
+    }
   }
 
   // Determine numWorkgroups to cover the buffer exactly once.
