@@ -3767,8 +3767,8 @@ void GuiApp::renderRayTracingViewport() {
             "Open-World Forest (AAAOutdoorForest)",
             "forest",
             "Procedural Nature Heightfield",
-            "380,000+ Triangles",
-            "High-density outdoor wilderness with 512x512 heightfield terrain, 600 pines, 250 birches, 1,200 boulders, 4,000 foliage clusters, and river water.",
+            "1,050,000+ Triangles",
+            "High-density AAA woodland with rolling terrain, 350 soaring multi-tiered pines, 180 birches, 3,500 sword ferns, 2,500 shrubs, 180 nurse logs, and 600 boulders.",
             "89.90 MRays/s (97.5 FPS)",
             "266.27 MRays/s (288.9 FPS)",
             "2.96x (+196.2%)",
@@ -4082,6 +4082,7 @@ void GuiApp::renderRayTracingViewport() {
     else if (m_rtViewportMode == 1) {
         struct PassInfo {
             const char* id;
+            const char* pillLabel;
             const char* name;
             const char* passType;
             const char* timeMs;
@@ -4093,6 +4094,7 @@ void GuiApp::renderRayTracingViewport() {
         static const PassInfo passes[] = {
             {
                 "stage1_bvh",
+                "1. BVH",
                 "1. BVH Traversal Complexity Heatmap",
                 "Ray Query Step Profiling (Linear Turbo Map)",
                 "2.03 ms", "4,085.6 MRays/s", "492.6 FPS",
@@ -4100,6 +4102,7 @@ void GuiApp::renderRayTracingViewport() {
             },
             {
                 "stage2_primary",
+                "2. Normals",
                 "2. Primary Surface G-Buffer Normals",
                 "Primary Ray Cast (Vulkan 1.4 RQ)",
                 "1.81 ms", "4,594.2 MRays/s", "553.9 FPS",
@@ -4107,6 +4110,7 @@ void GuiApp::renderRayTracingViewport() {
             },
             {
                 "stage3_shadow",
+                "3. Shadows",
                 "3. Sun Occlusion Shadow Mask",
                 "Directional Shadow Traversal",
                 "2.18 ms", "7,593.8 MRays/s", "457.8 FPS",
@@ -4114,6 +4118,7 @@ void GuiApp::renderRayTracingViewport() {
             },
             {
                 "stage4_rtao",
+                "4. RTAO",
                 "4. Ray-Traced Ambient Occlusion (RTAO)",
                 "Stratified Hemisphere Occlusion (4 Rays)",
                 "3.88 ms", "10,692.7 MRays/s", "257.8 FPS",
@@ -4121,6 +4126,7 @@ void GuiApp::renderRayTracingViewport() {
             },
             {
                 "stage5_direct",
+                "5. Direct",
                 "5. Direct Hybrid PBR Shading",
                 "Analytic Sun + GGX Specular + Shadows + RTAO",
                 "6.69 ms", "6,194.8 MRays/s", "149.4 FPS",
@@ -4128,6 +4134,7 @@ void GuiApp::renderRayTracingViewport() {
             },
             {
                 "stage6_indirect",
+                "6. Indirect GI",
                 "6. Secondary Indirect GI Bounce",
                 "Cosine-Sampled Diffuse Radiance (4 Rays)",
                 "11.21 ms", "3,699.9 MRays/s", "89.2 FPS",
@@ -4135,10 +4142,11 @@ void GuiApp::renderRayTracingViewport() {
             },
             {
                 "stage7_final",
-                "7. Converged 16 SPP Path Tracing",
+                "ALL (Final Render)",
+                "7. Final Beauty Render (Converged 16 SPP)",
                 "Multi-Bounce Monte Carlo (16 SPP, 32 Rays/px)",
                 "59.50 ms", "4,461.2 MRays/s", "16.8 FPS",
-                "Full path-traced convergence showcasing balanced specular reflection, caustics, and global illumination."
+                "Full multi-bounce Monte Carlo converged beauty pass combining direct solar/studio illumination, Cook-Torrance GGX specular, dielectric transmission, and multi-bounce diffuse global illumination."
             }
         };
 
@@ -4148,24 +4156,53 @@ void GuiApp::renderRayTracingViewport() {
         }
         const auto& curPass = passes[m_rtPassIndex];
 
-        // Pass selector buttons
+        // Pass selector pill buttons
+        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, s(12.0f));
         for (size_t p = 0; p < numPasses; ++p) {
-            if (p > 0) ImGui::SameLine(0, s(4.0f));
+            bool isAll = (p == numPasses - 1);
+            if (p > 0) {
+                if (isAll) {
+                    ImGui::SameLine(0, s(10.0f));
+                    ImGui::TextDisabled("|");
+                    ImGui::SameLine(0, s(10.0f));
+                } else {
+                    ImGui::SameLine(0, s(4.0f));
+                }
+            }
             bool isCur = (static_cast<size_t>(m_rtPassIndex) == p);
             if (isCur) {
-                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.00f, 0.48f, 0.80f, 1.0f));
-                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
+                if (isAll) {
+                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.00f, 0.58f, 0.65f, 1.0f));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.05f, 0.68f, 0.75f, 1.0f));
+                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
+                } else {
+                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.00f, 0.48f, 0.80f, 1.0f));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.10f, 0.56f, 0.88f, 1.0f));
+                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
+                }
             } else {
-                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.13f, 0.16f, 0.22f, 1.0f));
-                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.70f, 0.75f, 0.85f, 1.0f));
+                if (isAll) {
+                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.12f, 0.22f, 0.26f, 1.0f));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.16f, 0.30f, 0.36f, 1.0f));
+                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.40f, 0.90f, 0.85f, 1.0f));
+                } else {
+                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.13f, 0.16f, 0.22f, 1.0f));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.18f, 0.24f, 0.32f, 1.0f));
+                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.70f, 0.75f, 0.85f, 1.0f));
+                }
             }
-            char label[32];
-            std::snprintf(label, sizeof(label), "Pass %zu", p + 1);
-            if (ImGui::Button(label, ImVec2(s(75.0f), s(24.0f)))) {
+            float pillW = ImGui::CalcTextSize(passes[p].pillLabel).x + s(22.0f);
+            if (ImGui::Button(passes[p].pillLabel, ImVec2(pillW, s(24.0f)))) {
                 m_rtPassIndex = static_cast<int>(p);
             }
-            ImGui::PopStyleColor(2);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("%s\n%s\nTime: %s | Throughput: %s | %s",
+                                  passes[p].name, passes[p].passType,
+                                  passes[p].timeMs, passes[p].mrays, passes[p].fps);
+            }
+            ImGui::PopStyleColor(3);
         }
+        ImGui::PopStyleVar();
 
         ImGui::Spacing();
 

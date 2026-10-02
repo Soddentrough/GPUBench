@@ -2,6 +2,7 @@
 #include "core/VulkanContext.h"
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <iostream>
@@ -45,49 +46,10 @@ void RayDivergenceBench::Setup(IComputeContext &context,
   uint32_t zero = 0;
   context.writeBuffer(resultBuffer, 0, 4, &zero);
 
-  // Setup a high-resolution flat floor plane (Z=0) and ceiling plane (Z=-20)
-  uint32_t gridSize = 256;
-  uint32_t primitivesPerPlane = gridSize * gridSize * 2;
-  numPrimitives = primitivesPerPlane * 2; // Floor + Ceiling
-
+  // Setup enclosed chamber geometry with 3D relief floor, ceiling, and boundary walls
   std::vector<float> vertices;
-  vertices.reserve(numPrimitives * 9);
-
-  auto addPlane = [&](float z) {
-    float scale = 200.0f / gridSize;
-    for (uint32_t y = 0; y < gridSize; ++y) {
-      for (uint32_t x = 0; x < gridSize; ++x) {
-        float fx0 = (float)x * scale - 100.0f;
-        float fy0 = (float)y * scale - 100.0f;
-        float fx1 = (float)(x + 1) * scale - 100.0f;
-        float fy1 = (float)(y + 1) * scale - 100.0f;
-
-        // Triangle 1
-        vertices.push_back(fx0);
-        vertices.push_back(fy0);
-        vertices.push_back(z);
-        vertices.push_back(fx1);
-        vertices.push_back(fy0);
-        vertices.push_back(z);
-        vertices.push_back(fx0);
-        vertices.push_back(fy1);
-        vertices.push_back(z);
-        // Triangle 2
-        vertices.push_back(fx1);
-        vertices.push_back(fy0);
-        vertices.push_back(z);
-        vertices.push_back(fx1);
-        vertices.push_back(fy1);
-        vertices.push_back(z);
-        vertices.push_back(fx0);
-        vertices.push_back(fy1);
-        vertices.push_back(z);
-      }
-    }
-  };
-
-  addPlane(0.0f);   // Floor
-  addPlane(-20.0f); // Ceiling
+  generateGeometry(vertices);
+  numPrimitives = static_cast<uint32_t>(vertices.size() / 9);
 
   vertexBuffer =
       context.createBuffer(vertices.size() * sizeof(float), vertices.data());
@@ -369,90 +331,89 @@ std::string RayDivergenceBench::GetConfigName(uint32_t config_idx) const {
 void RayDivergenceBench::generateGeometry(std::vector<float> &vertices) const {
   uint32_t gridSize = 256;
   uint32_t primitivesPerPlane = gridSize * gridSize * 2;
-  vertices.reserve(primitivesPerPlane * 2 * 9);
+  // Floor + Ceiling + 4 Walls (each wall gridSize * 2 primitives)
+  vertices.reserve((primitivesPerPlane * 2 + gridSize * 8) * 9);
 
-  auto addPlane = [&](float z) {
-    float scale = 200.0f / gridSize;
-    for (uint32_t y = 0; y < gridSize; ++y) {
-      for (uint32_t x = 0; x < gridSize; ++x) {
-        float fx0 = (float)x * scale - 100.0f;
-        float fy0 = (float)y * scale - 100.0f;
-        float fx1 = (float)(x + 1) * scale - 100.0f;
-        float fy1 = (float)(y + 1) * scale - 100.0f;
+  float scale = 200.0f / gridSize;
 
-        // Triangle 1
-        vertices.push_back(fx0);
-        vertices.push_back(fy0);
-        vertices.push_back(z);
-        vertices.push_back(fx1);
-        vertices.push_back(fy0);
-        vertices.push_back(z);
-        vertices.push_back(fx0);
-        vertices.push_back(fy1);
-        vertices.push_back(z);
-        // Triangle 2
-        vertices.push_back(fx1);
-        vertices.push_back(fy0);
-        vertices.push_back(z);
-        vertices.push_back(fx1);
-        vertices.push_back(fy1);
-        vertices.push_back(z);
-        vertices.push_back(fx0);
-        vertices.push_back(fy1);
-        vertices.push_back(z);
-      }
+  // 1. Undulating Floor with realistic 3D relief (Z around 0.0)
+  for (uint32_t y = 0; y < gridSize; ++y) {
+    for (uint32_t x = 0; x < gridSize; ++x) {
+      float fx0 = (float)x * scale - 100.0f;
+      float fy0 = (float)y * scale - 100.0f;
+      float fx1 = (float)(x + 1) * scale - 100.0f;
+      float fy1 = (float)(y + 1) * scale - 100.0f;
+
+      float z00 = 2.5f * std::sin(fx0 * 0.12f) * std::cos(fy0 * 0.12f);
+      float z10 = 2.5f * std::sin(fx1 * 0.12f) * std::cos(fy0 * 0.12f);
+      float z01 = 2.5f * std::sin(fx0 * 0.12f) * std::cos(fy1 * 0.12f);
+      float z11 = 2.5f * std::sin(fx1 * 0.12f) * std::cos(fy1 * 0.12f);
+
+      // Triangle 1
+      vertices.push_back(fx0); vertices.push_back(fy0); vertices.push_back(z00);
+      vertices.push_back(fx1); vertices.push_back(fy0); vertices.push_back(z10);
+      vertices.push_back(fx0); vertices.push_back(fy1); vertices.push_back(z01);
+      // Triangle 2
+      vertices.push_back(fx1); vertices.push_back(fy0); vertices.push_back(z10);
+      vertices.push_back(fx1); vertices.push_back(fy1); vertices.push_back(z11);
+      vertices.push_back(fx0); vertices.push_back(fy1); vertices.push_back(z01);
     }
-  };
+  }
 
-  addPlane(0.0f);   // Floor
-  addPlane(-20.0f); // Ceiling
+  // 2. Flat Ceiling (Z = -20.0)
+  for (uint32_t y = 0; y < gridSize; ++y) {
+    for (uint32_t x = 0; x < gridSize; ++x) {
+      float fx0 = (float)x * scale - 100.0f;
+      float fy0 = (float)y * scale - 100.0f;
+      float fx1 = (float)(x + 1) * scale - 100.0f;
+      float fy1 = (float)(y + 1) * scale - 100.0f;
+
+      // Triangle 1
+      vertices.push_back(fx0); vertices.push_back(fy0); vertices.push_back(-20.0f);
+      vertices.push_back(fx1); vertices.push_back(fy0); vertices.push_back(-20.0f);
+      vertices.push_back(fx0); vertices.push_back(fy1); vertices.push_back(-20.0f);
+      // Triangle 2
+      vertices.push_back(fx1); vertices.push_back(fy0); vertices.push_back(-20.0f);
+      vertices.push_back(fx1); vertices.push_back(fy1); vertices.push_back(-20.0f);
+      vertices.push_back(fx0); vertices.push_back(fy1); vertices.push_back(-20.0f);
+    }
+  }
+
+  // 3. Four Enclosing Boundary Walls (-20.0 <= Z <= 0.0) to catch grazing diffuse rays
+  for (uint32_t i = 0; i < gridSize; ++i) {
+    float coord0 = (float)i * scale - 100.0f;
+    float coord1 = (float)(i + 1) * scale - 100.0f;
+
+    auto addWallQuad = [&](float x0, float y0, float x1, float y1) {
+      // Tri 1
+      vertices.push_back(x0); vertices.push_back(y0); vertices.push_back(-20.0f);
+      vertices.push_back(x1); vertices.push_back(y1); vertices.push_back(-20.0f);
+      vertices.push_back(x0); vertices.push_back(y0); vertices.push_back(0.0f);
+      // Tri 2
+      vertices.push_back(x1); vertices.push_back(y1); vertices.push_back(-20.0f);
+      vertices.push_back(x1); vertices.push_back(y1); vertices.push_back(0.0f);
+      vertices.push_back(x0); vertices.push_back(y0); vertices.push_back(0.0f);
+    };
+
+    addWallQuad(-100.0f, coord0, -100.0f, coord1); // West Wall (-X)
+    addWallQuad(100.0f, coord0, 100.0f, coord1);   // East Wall (+X)
+    addWallQuad(coord0, -100.0f, coord1, -100.0f); // South Wall (-Y)
+    addWallQuad(coord0, 100.0f, coord1, 100.0f);   // North Wall (+Y)
+  }
 }
 
 void RayDivergenceBench::DumpGeometry() const {
   std::vector<float> vertices;
   generateGeometry(vertices);
 
-  std::ofstream mtlFile("raydiv_scene.mtl");
-  mtlFile << "newmtl MaterialA\nKd 1.0 0.5 0.5\nPr 0.0\nNs 1000\n";
-  mtlFile << "newmtl MaterialB\nKd 0.5 1.0 0.5\nPr 0.25\nNs 400\n";
-  mtlFile << "newmtl MaterialC\nKd 0.5 0.5 1.0\nPr 0.5\nNs 100\n";
-  mtlFile << "newmtl MaterialD\nKd 1.0 1.0 0.5\nPr 0.75\nNs 25\n";
-  mtlFile << "newmtl MaterialE\nKd 1.0 0.5 1.0\nPr 1.0\nNs 1\n";
-  mtlFile.close();
-
   std::ofstream objFile("raydiv_scene.obj");
-  objFile << "mtllib raydiv_scene.mtl\n";
-
   for (size_t i = 0; i < vertices.size(); i += 3) {
     objFile << "v " << vertices[i] << " " << vertices[i + 1] << " "
             << vertices[i + 2] << "\n";
   }
-
-  uint32_t gridSize = 256;
-  uint32_t vIdx = 1;
-
-  auto writePlaneFaces = [&](bool isCeiling) {
-    for (uint32_t y = 0; y < gridSize; ++y) {
-      for (uint32_t x = 0; x < gridSize; ++x) {
-        // Material is based on x-coordinate stripping for 5 materials
-        uint32_t matIdx = x % 5;
-        char matChar = 'A' + matIdx;
-        objFile << "usemtl Material" << matChar << "\n";
-
-        // Triangle 1
-        objFile << "f " << vIdx << " " << vIdx + 1 << " " << vIdx + 2 << "\n";
-        // Triangle 2
-        objFile << "f " << vIdx + 3 << " " << vIdx + 4 << " " << vIdx + 5
-                << "\n";
-        vIdx += 6;
-      }
-    }
-  };
-
-  writePlaneFaces(false); // Floor
-  writePlaneFaces(true);  // Ceiling
-
+  for (size_t i = 1; i <= vertices.size() / 3; i += 3) {
+    objFile << "f " << i << " " << i + 1 << " " << i + 2 << "\n";
+  }
   objFile.close();
-  std::cout << "Geometry dumped to raydiv_scene.obj and raydiv_scene.mtl"
-            << std::endl;
+  std::cout << "Geometry dumped to raydiv_scene.obj" << std::endl;
 }

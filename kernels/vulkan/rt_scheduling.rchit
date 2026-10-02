@@ -202,15 +202,7 @@ void main() {
         uint matId = computeMaterialId(pc.sceneType, primId, hitPos, normal);
         vec3 sunDir, sunColor;
         getSceneSunParams(pc.sceneType, sunDir, sunColor);
-        vec3 baseColor = vec3(0.5);
-        if (matId == 0u) baseColor = vec3(0.65, 0.52, 0.40);
-        else if (matId == 1u) baseColor = vec3(0.18, 0.55, 0.34);
-        else if (matId == 2u) baseColor = vec3(0.95, 0.95, 0.98);
-        else if (matId == 3u) baseColor = vec3(0.85, 0.12, 0.22);
-        else if (matId == 4u) baseColor = vec3(0.55, 0.45, 0.35);
-        else if (matId == 5u) baseColor = vec3(0.80, 0.80, 0.82);
-        else if (matId == 6u) baseColor = vec3(0.88, 0.20, 0.10);
-        else baseColor = vec3(0.12, 0.45, 0.15);
+        vec3 baseColor = getSceneArchetypeAlbedo(pc.sceneType, matId);
         pixelColor = evaluateMaterialArchetypeDirect(matId, hitPos, baseColor, 0.5, 0.0, 1.5, normal, -rayDir, sunDir, sunColor, 1.0);
     }
 

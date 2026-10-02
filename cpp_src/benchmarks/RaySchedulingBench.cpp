@@ -546,7 +546,7 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
     AAAForestScene::buildForestMesh(vertices, triMats);
     numPrimitives = static_cast<uint32_t>(vertices.size() / 36);
     std::cout << "[RayScheduling] Generated high-density Open-World Forest scene: " << numPrimitives
-              << " triangles (512x512 terrain, 600 pines, 250 birches, 1200 boulders, 4000 grass/ferns, timber bridge)"
+              << " triangles (woodland terrain, 350 multi-tiered pines, 180 birches, 4500 fern clumps, 3500 shrubs, 250 nurse logs, 1200 boulders)"
               << std::endl;
 
     std::vector<GltfMaterial> natureMats(8);

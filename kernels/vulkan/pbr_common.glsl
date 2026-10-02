@@ -343,6 +343,29 @@ void getSceneSunParams(uint sceneType, out vec3 sunDir, out vec3 sunColor) {
     }
 }
 
+vec3 getSceneArchetypeAlbedo(uint sceneType, uint archetype) {
+    if (sceneType == 1u) { // SCENE_OUTDOOR_TERRAIN
+        if (archetype == 0u) return vec3(0.65, 0.52, 0.40); // Scree slope / weathered sandstone
+        if (archetype == 1u) return vec3(0.08, 0.32, 0.12); // Translucent conifer foliage / needles
+        if (archetype == 2u) return vec3(0.012, 0.042, 0.065); // Alpine lake / river water
+        if (archetype == 3u) return vec3(0.92, 0.95, 0.98); // High mountain snow & glacial ice (Crisp white snow)
+        if (archetype == 4u) return vec3(0.30, 0.31, 0.34); // Exposed granite cliff face
+        if (archetype == 5u) return vec3(0.24, 0.44, 0.18); // Valley grassland / alpine meadow (Lush green)
+        if (archetype == 6u) return vec3(0.25, 0.17, 0.11); // Pine bark / timber trunk
+        return vec3(0.18, 0.20, 0.22);                      // Wet river stones / shoreline gravel
+    } else {
+        // Showroom Knot / Atrium
+        if (archetype == 0u) return vec3(0.65, 0.52, 0.40); // Ruby paint base
+        if (archetype == 1u) return vec3(0.18, 0.55, 0.34); // Jade subsurface
+        if (archetype == 2u) return vec3(0.95, 0.95, 0.98); // Glass
+        if (archetype == 3u) return vec3(0.85, 0.12, 0.22); // Magenta velvet
+        if (archetype == 4u) return vec3(0.55, 0.45, 0.35); // Weathered rust
+        if (archetype == 5u) return vec3(0.80, 0.80, 0.82); // Cyclorama floor
+        if (archetype == 6u) return vec3(0.88, 0.20, 0.10); // Pedestal / Gold
+        return vec3(0.12, 0.45, 0.15);                      // Chrome / accent
+    }
+}
+
 float traceAreaShadow(vec3 origin, vec3 normal, vec3 lightDir, float maxDist, float lightRadius, inout uint rng, int numSamples) {
     vec3 up = abs(lightDir.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
     vec3 tangent = normalize(cross(up, lightDir));
