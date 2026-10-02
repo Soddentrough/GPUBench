@@ -17,15 +17,15 @@ extern "C" __global__ void run_dual_issue_ilp1(float* data, float multiplier, ui
     uint32_t index = blockIdx.x * blockDim.x + threadIdx.x;
     if (index >= num_elements) return;
 
-    float val = data[index];
-    float m = multiplier;
-    float c = 0.0001f;
+    float4 val = make_float4(data[index], data[index], data[index], data[index]);
+    float4 m = make_float4(multiplier, multiplier, multiplier, multiplier);
+    float4 c = make_float4(0.0001f, 0.0002f, 0.0003f, 0.0004f);
 
     for (int i = 0; i < 32768; ++i) {
-        val = fmaf(val, m, c);
+        val = fmac4(c, m, val);
     }
 
-    data[index] = val;
+    data[index] = val.x + val.y + val.z + val.w;
 }
 
 // Config 1: ILP-4 (Latency-Bound Single-Issue)
