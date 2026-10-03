@@ -1827,29 +1827,33 @@ GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
         // Determine baseline item name in the same subcategory
         std::string baselineName = "";
         if (!isUnsupportedItem) {
-            if (item.category == "Compute") {
-                if (item.id == "FP32") {
+            if (item.subcategory == "Dual-Issue") {
+                if (item.name == "Standard FP32") {
                     info.isBaseline = true;
                     info.deltaText = "[Baseline]";
                     info.deltaColor = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
-                } else if (item.id == "INT8") {
-                    if (item.name.find("Vector") != std::string::npos) {
+                } else if (item.name.find("Dual-Issue FP32") != std::string::npos) {
+                    baselineName = "Dual_Issue_FP32_Baseline";
+                } else if (item.name == "Standard INT32") {
+                    info.isBaseline = true;
+                    info.deltaText = "[Baseline]";
+                    info.deltaColor = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
+                } else if (item.name.find("Dual-Issue INT32") != std::string::npos) {
+                    baselineName = "Dual_Issue_INT32_Baseline";
+                } else if (item.name.find("Mixed") != std::string::npos) {
+                    baselineName = "Dual_Issue_Mixed_Harmonic";
+                }
+            } else if (item.category == "Compute") {
+                // In Compute Precision, Vector ALU is the baseline for Matrix (WMMA) within the SAME precision.
+                // Standalone precisions (FP64, FP32, FP4) do not compare against unrelated datatypes.
+                if (item.name.find("Vector") != std::string::npos) {
+                    if (item.id == "FP16" || item.id == "BF16" || item.id == "FP8" || item.id == "INT8" || item.id == "INT4") {
                         info.isBaseline = true;
                         info.deltaText = "[Baseline]";
                         info.deltaColor = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
-                    } else {
-                        baselineName = "INT8_Vector";
                     }
-                } else if (item.id == "INT4") {
-                    if (item.name.find("Vector") != std::string::npos) {
-                        info.isBaseline = true;
-                        info.deltaText = "[Baseline]";
-                        info.deltaColor = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
-                    } else {
-                        baselineName = "INT4_Vector";
-                    }
-                } else {
-                    baselineName = "FP32";
+                } else if (item.name.find("Matrix") != std::string::npos) {
+                    baselineName = item.id + "_Vector";
                 }
             } else if (item.name.find("Vector ALU") != std::string::npos || item.name == "Vector") {
                 info.isBaseline = true;
@@ -1857,10 +1861,6 @@ GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
                 info.deltaColor = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
             } else if (item.name.find("Matrix") != std::string::npos) {
                 baselineName = "Vector";
-            } else if (item.name.find("FP32") != std::string::npos) {
-                info.isBaseline = true;
-                info.deltaText = "[Baseline]";
-                info.deltaColor = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
             } else if ((item.name == "Compute Megakernel" || item.name.find("Compute Megakernel") != std::string::npos ||
                         (item.name.find("Megakernel") != std::string::npos && 
                          item.name.find("RTP") == std::string::npos && 
@@ -1910,23 +1910,24 @@ GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
         if (!baselineName.empty()) {
             for (const auto& r : m_allResults) {
                 if (r.deviceIndex == activeDev) {
-                    if (baselineName == "FP32") {
-                        if (r.benchmarkName.find("FP32") != std::string::npos || r.subcategory == "FP32") {
+                    if (r.isUnsupported || r.time_ms <= 0.0) continue;
+                    if (baselineName == "Dual_Issue_FP32_Baseline") {
+                        if (r.subcategory == "Dual-Issue" && (r.configIndex == 0 || r.benchmarkName.find("Standard FP32") != std::string::npos)) {
                             baselineRes = &r;
                             break;
                         }
-                    } else if (baselineName == "INT8_Vector") {
-                        if (r.benchmarkName.find("INT8") != std::string::npos && r.benchmarkName.find("Vector") != std::string::npos) {
+                    } else if (baselineName == "Dual_Issue_INT32_Baseline") {
+                        if (r.subcategory == "Dual-Issue" && (r.configIndex == 3 || r.benchmarkName.find("Standard INT32") != std::string::npos)) {
                             baselineRes = &r;
                             break;
                         }
-                    } else if (baselineName == "INT4_Vector") {
-                        if (r.benchmarkName.find("INT4") != std::string::npos && r.benchmarkName.find("Vector") != std::string::npos) {
+                    } else if (baselineName.find("_Vector") != std::string::npos) {
+                        std::string targetSub = baselineName.substr(0, baselineName.find("_Vector"));
+                        if (r.subcategory == targetSub && r.benchmarkName.find("Vector") != std::string::npos) {
                             baselineRes = &r;
                             break;
                         }
                     } else if (r.subcategory == item.subcategory) {
-                        if (r.isUnsupported || r.time_ms <= 0.0) continue;
                         std::string cName = cleanWorkloadName(r.benchmarkName, r.subcategory);
                         if (baselineName == "Megakernel") {
                             if ((cName.find("Megakernel") != std::string::npos || r.benchmarkName.find("Megakernel") != std::string::npos) &&
@@ -1951,6 +1952,37 @@ GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
             if (baseOps > 0.0) {
                 info.hasComparison = true;
                 info.baselineResult = *baselineRes;
+                info.speedupRatio = curOps / baseOps;
+                info.percentDelta = (info.speedupRatio - 1.0) * 100.0;
+
+                char dBuf[64];
+                if (std::abs(info.percentDelta) >= 0.1) {
+                    snprintf(dBuf, sizeof(dBuf), "%.2fx (%s%.1f%%)",
+                             info.speedupRatio,
+                             info.percentDelta >= 0.0 ? "+" : "",
+                             info.percentDelta);
+                } else {
+                    snprintf(dBuf, sizeof(dBuf), "%.2fx", info.speedupRatio);
+                }
+                info.deltaText = dBuf;
+                info.deltaColor = (info.speedupRatio >= 1.0) ? ImVec4(0.35f, 0.95f, 0.55f, 1.0f) : ImVec4(0.70f, 0.75f, 0.85f, 1.0f);
+            }
+        } else if (baselineName == "Dual_Issue_Mixed_Harmonic" && !curRes->isUnsupported && curRes->time_ms > 0.0 && curRes->operations > 0) {
+            double baseFP32 = 0.0;
+            double baseINT32 = 0.0;
+            for (const auto& r : m_allResults) {
+                if (r.deviceIndex == activeDev && r.subcategory == "Dual-Issue" && !r.isUnsupported && r.time_ms > 0.0) {
+                    if (r.configIndex == 0 || r.benchmarkName.find("Standard FP32") != std::string::npos) {
+                        baseFP32 = (static_cast<double>(r.operations) / r.time_ms) * 1000.0;
+                    } else if (r.configIndex == 3 || r.benchmarkName.find("Standard INT32") != std::string::npos) {
+                        baseINT32 = (static_cast<double>(r.operations) / r.time_ms) * 1000.0;
+                    }
+                }
+            }
+            if (baseFP32 > 0.0 && baseINT32 > 0.0) {
+                double baseOps = 2.0 / ((1.0 / baseFP32) + (1.0 / baseINT32));
+                double curOps = (static_cast<double>(curRes->operations) / curRes->time_ms) * 1000.0;
+                info.hasComparison = true;
                 info.speedupRatio = curOps / baseOps;
                 info.percentDelta = (info.speedupRatio - 1.0) * 100.0;
 
@@ -3638,34 +3670,92 @@ void GuiApp::renderResultsScorecard() {
                 deltaStr = !res.errorString.empty() ? ("[" + res.errorString + "]") : "[Failed]";
                 deltaCol = ImVec4(0.95f, 0.30f, 0.30f, 1.0f);
             } else if (res.component == "Compute") {
-                if (res.benchmarkName.find("FP32") != std::string::npos) {
-                    deltaStr = "[Baseline]";
-                    deltaCol = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
-                } else if (res.benchmarkName.find("FP64") != std::string::npos) {
-                    deltaStr = "-";
-                } else if (res.time_ms > 0.0 && curOpsPerSec > 0.0) {
-                    double baseOps = 0.0;
-                    for (const auto& other : m_allResults) {
-                        if (other.deviceIndex == res.deviceIndex && other.component == "Compute" &&
-                            other.benchmarkName.find("FP32") != std::string::npos && other.time_ms > 0.0) {
-                            baseOps = (static_cast<double>(other.operations) / other.time_ms) * 1000.0;
-                            break;
+                if (res.subcategory == "Dual-Issue") {
+                    if (res.configIndex == 0 || res.configIndex == 3) {
+                        deltaStr = "[Baseline]";
+                        deltaCol = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
+                    } else if (res.configIndex == 6) {
+                        // Harmonic mean of Config 0 (Standard FP32) and Config 3 (Standard INT32)
+                        double baseFP32 = 0.0;
+                        double baseINT32 = 0.0;
+                        for (const auto& other : m_allResults) {
+                            if (other.deviceIndex == res.deviceIndex && other.backendName == res.backendName && other.subcategory == "Dual-Issue" && other.time_ms > 0.0) {
+                                if (other.configIndex == 0 || other.benchmarkName.find("Standard FP32") != std::string::npos) {
+                                    baseFP32 = (static_cast<double>(other.operations) / other.time_ms) * 1000.0;
+                                } else if (other.configIndex == 3 || other.benchmarkName.find("Standard INT32") != std::string::npos) {
+                                    baseINT32 = (static_cast<double>(other.operations) / other.time_ms) * 1000.0;
+                                }
+                            }
+                        }
+                        if (baseFP32 > 0.0 && baseINT32 > 0.0) {
+                            double baseOps = 2.0 / ((1.0 / baseFP32) + (1.0 / baseINT32));
+                            double ratio = curOpsPerSec / baseOps;
+                            double pct = (ratio - 1.0) * 100.0;
+                            char dBuf[48];
+                            if (std::abs(pct) >= 0.1) {
+                                snprintf(dBuf, sizeof(dBuf), "%.2fx (%s%.1f%%)", ratio, (pct >= 0 ? "+" : ""), pct);
+                            } else {
+                                snprintf(dBuf, sizeof(dBuf), "%.2fx", ratio);
+                            }
+                            deltaStr = dBuf;
+                            deltaCol = (ratio >= 1.0) ? ImVec4(0.30f, 0.92f, 0.85f, 1.0f) : ImVec4(0.92f, 0.65f, 0.35f, 1.0f);
+                        }
+                    } else {
+                        uint32_t targetBaseConfig = (res.configIndex >= 3) ? 3 : 0;
+                        double baseOps = 0.0;
+                        for (const auto& other : m_allResults) {
+                            if (other.deviceIndex == res.deviceIndex && other.backendName == res.backendName && other.subcategory == "Dual-Issue" &&
+                                other.configIndex == targetBaseConfig && other.time_ms > 0.0) {
+                                baseOps = (static_cast<double>(other.operations) / other.time_ms) * 1000.0;
+                                break;
+                            }
+                        }
+                        if (baseOps > 0.0) {
+                            double ratio = curOpsPerSec / baseOps;
+                            double pct = (ratio - 1.0) * 100.0;
+                            char dBuf[48];
+                            if (std::abs(pct) >= 0.1) {
+                                snprintf(dBuf, sizeof(dBuf), "%.2fx (%s%.1f%%)", ratio, (pct >= 0 ? "+" : ""), pct);
+                            } else {
+                                snprintf(dBuf, sizeof(dBuf), "%.2fx", ratio);
+                            }
+                            deltaStr = dBuf;
+                            deltaCol = (ratio >= 1.0) ? ImVec4(0.30f, 0.92f, 0.85f, 1.0f) : ImVec4(0.92f, 0.65f, 0.35f, 1.0f);
                         }
                     }
-                    if (baseOps == 0.0 && m_latestResults.count("FP32") && m_latestResults.at("FP32").time_ms > 0) {
-                        baseOps = (static_cast<double>(m_latestResults.at("FP32").operations) / m_latestResults.at("FP32").time_ms) * 1000.0;
-                    }
-                    if (baseOps > 0.0) {
-                        double ratio = curOpsPerSec / baseOps;
-                        double pct = (ratio - 1.0) * 100.0;
-                        char dBuf[48];
-                        if (std::abs(pct) >= 0.1) {
-                            snprintf(dBuf, sizeof(dBuf), "%.2fx (%s%.1f%%)", ratio, (pct >= 0 ? "+" : ""), pct);
-                        } else {
-                            snprintf(dBuf, sizeof(dBuf), "%.2fx", ratio);
+                } else {
+                    // Compute Precision: Vector is the baseline for Matrix within the SAME precision.
+                    // Standalone precisions (FP64, FP32, FP4) do not compare against unrelated datatypes.
+                    bool isVector = (res.benchmarkName.find("Vector") != std::string::npos);
+                    bool isMatrix = (res.benchmarkName.find("Matrix") != std::string::npos);
+                    if (isVector && (res.subcategory == "FP16" || res.subcategory == "BF16" || res.subcategory == "FP8" ||
+                                     res.subcategory == "INT8" || res.subcategory == "INT4")) {
+                        deltaStr = "[Baseline]";
+                        deltaCol = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
+                    } else if (isMatrix && res.time_ms > 0.0 && curOpsPerSec > 0.0) {
+                        double baseOps = 0.0;
+                        for (const auto& other : m_allResults) {
+                            if (other.deviceIndex == res.deviceIndex && other.backendName == res.backendName &&
+                                other.subcategory == res.subcategory &&
+                                other.benchmarkName.find("Vector") != std::string::npos && other.time_ms > 0.0) {
+                                baseOps = (static_cast<double>(other.operations) / other.time_ms) * 1000.0;
+                                break;
+                            }
                         }
-                        deltaStr = dBuf;
-                        deltaCol = (ratio >= 1.0) ? ImVec4(0.30f, 0.92f, 0.85f, 1.0f) : ImVec4(0.92f, 0.65f, 0.35f, 1.0f);
+                        if (baseOps > 0.0) {
+                            double ratio = curOpsPerSec / baseOps;
+                            double pct = (ratio - 1.0) * 100.0;
+                            char dBuf[48];
+                            if (std::abs(pct) >= 0.1) {
+                                snprintf(dBuf, sizeof(dBuf), "%.2fx (%s%.1f%%)", ratio, (pct >= 0 ? "+" : ""), pct);
+                            } else {
+                                snprintf(dBuf, sizeof(dBuf), "%.2fx", ratio);
+                            }
+                            deltaStr = dBuf;
+                            deltaCol = (ratio >= 1.0) ? ImVec4(0.30f, 0.92f, 0.85f, 1.0f) : ImVec4(0.92f, 0.65f, 0.35f, 1.0f);
+                        }
+                    } else {
+                        deltaStr = "-";
                     }
                 }
             } else if (res.component == "Ray Tracing") {
