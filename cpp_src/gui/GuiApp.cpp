@@ -825,10 +825,10 @@ void GuiApp::initializeBenchmarkCategories() {
             {"RayScheduling", "Directional Shadows", "Shadows - Single Light (1 Light, RTP + SER)", "Ray Tracing", "MRays/s", "Single directional light shadows via dedicated RTP and SER", true},
             {"RayScheduling", "Directional Shadows", "Shadows - Single Light (1 Light, DGC)", "Ray Tracing", "MRays/s", "Single directional light shadow ray casting with compacted wavefront stream via DGC", true},
             {"RayScheduling", "Directional Shadows", "Shadows - Multi-Light (3 Lights, DGC)", "Ray Tracing", "MRays/s", "Shadow rays binned and dispatched across 3 directional lights via DGC", true},
-            {"RayScheduling", "Multi-Light Evaluation", "Single Light (1 Light, Megakernel)", "Ray Tracing", "MRays/s", "Multi-light evaluation baseline with 1 light via megakernel", true},
-            {"RayScheduling", "Multi-Light Evaluation", "Single Light (1 Light, DGC)", "Ray Tracing", "MRays/s", "Multi-light evaluation baseline with 1 light via DGC", true},
-            {"RayScheduling", "Multi-Light Evaluation", "128 Lights (128 Lights, Megakernel)", "Ray Tracing", "MRays/s", "Multi-light evaluation with 128 unbinned lights via divergent megakernel", true},
-            {"RayScheduling", "Multi-Light Evaluation", "128 Lights (128 Lights, DGC Light Binning)", "Ray Tracing", "MRays/s", "Multi-light evaluation with 128 lights via DGC coherent light binning", true},
+            {"RayScheduling", "Multi-Light Evaluation", "Multi-Light Shading - Single Light (1 Light, Megakernel)", "Ray Tracing", "MRays/s", "Direct lighting BSDF evaluation baseline with 1 light via megakernel", true},
+            {"RayScheduling", "Multi-Light Evaluation", "Multi-Light Shading - Single Light (1 Light, DGC)", "Ray Tracing", "MRays/s", "Direct lighting BSDF evaluation with 1 light via DGC", true},
+            {"RayScheduling", "Multi-Light Evaluation", "Multi-Light Shading - 128 Lights (128 Lights, Megakernel)", "Ray Tracing", "MRays/s", "Direct lighting BSDF evaluation with 128 unbinned lights via divergent megakernel", true},
+            {"RayScheduling", "Multi-Light Evaluation", "Multi-Light Shading - 128 Lights (128 Lights, DGC Light Binning)", "Ray Tracing", "MRays/s", "Direct lighting BSDF evaluation with 128 lights via DGC coherent light binning", true},
             {"RayScheduling", "Material Shading", "Material (Megakernel)", "Ray Tracing", "MHits/s", "PBR material BSDF evaluation in monolithic compute pass", true},
             {"RayScheduling", "Material Shading", "Material (RTP + SER)", "Ray Tracing", "MHits/s", "Material shading via dedicated closest-hit shaders and SER", true},
             {"RayScheduling", "Material Shading", "Material (DGC)", "Ray Tracing", "MHits/s", "Material evaluation via sorted material work queues", true},
@@ -1685,6 +1685,17 @@ bool GuiApp::matchesItem(const ResultData& r, const BenchmarkItem& itm, uint32_t
         if (!itm.subcategory.empty() && !r.subcategory.empty() && r.subcategory != itm.subcategory) {
             return false;
         }
+
+        // Multi-Light Evaluation exact matching
+        if (itm.subcategory == "Multi-Light Evaluation" || r.subcategory == "Multi-Light Evaluation") {
+            bool itm128 = (itm.name.find("128") != std::string::npos);
+            bool r128 = (clean.find("128") != std::string::npos || r.benchmarkName.find("128") != std::string::npos || r.configIndex == 33 || r.configIndex == 34);
+            if (itm128 != r128) return false;
+            bool itmDGC = (itm.name.find("DGC") != std::string::npos || itm.name.find("Binning") != std::string::npos);
+            bool rDGC = (clean.find("DGC") != std::string::npos || clean.find("Binning") != std::string::npos || r.configIndex == 32 || r.configIndex == 34);
+            return (itmDGC == rDGC);
+        }
+
         // Differentiate 128 Lights vs 1 Light
         bool itm128 = (itm.name.find("128") != std::string::npos);
         bool r128 = (clean.find("128") != std::string::npos || r.benchmarkName.find("128") != std::string::npos);
