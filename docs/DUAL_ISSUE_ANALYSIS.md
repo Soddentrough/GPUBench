@@ -35,19 +35,21 @@ The suite evaluates hardware through 7 distinct configurations structured symmet
 
 ### Config 1: `Dual-Issue FP32 (Partial Co-Issue)`
 - **Workload**: 8 independent FP32 accumulator chains (`val0..val7`).
-- **Architectural Purpose**: Evaluates the transition threshold where warp schedulers (NVIDIA) and compiler pairers (AMD) have enough independent instructions to co-issue 2 operations per cycle across the pipeline window.
+- **Architectural Meaning**: Moderate Instruction-Level Parallelism (ILP). While superscalar schedulers and compiler pairers have enough independent instructions to form dual-issue pairs, the 8-chain depth is insufficient to hide instruction latency across every clock cycle. The pipeline exhibits intermittent data-dependency bubbles, alternating between 2-issue and 1-issue cycles.
+- **What It Measures**: Measures realistic dual-issue scaling efficiency under moderate ILP typical of compiled game shaders and compute kernels (which rarely possess 16 completely independent operations queued back-to-back), demonstrating how much co-issue speedup hardware achieves before peak synthetic saturation.
 
 ### Config 2: `Dual-Issue FP32 (FP32+FP32)`
 - **Workload**: 16 independent FP32 accumulator chains (`val0..val15`).
-- **Architectural Purpose**: Saturates the dual-issue silicon ceiling (2 FP32 instructions per cycle). Measures the peak theoretical speedup (up to 2.0x over Standard FP32) when both execution pipelines fire simultaneously.
+- **Architectural Meaning & Measurement**: Peak Instruction-Level Parallelism (16 chains). Saturates the dual-issue silicon ceiling (2 FP32 instructions per cycle), measuring maximum theoretical speedup (up to 2.0x+ over Standard FP32) when both execution pipelines fire continuously.
 
 ### Config 3: `Standard INT32`
 - **Workload**: 4 independent INT32 accumulator chains (`u0..u3`).
-- **Architectural Purpose**: Establishes the single-issue INT32 integer baseline (1 instruction per cycle).
+- **Architectural Meaning & Measurement**: Establishes the single-issue INT32 integer baseline (1 instruction per cycle; single integer datapath).
 
 ### Config 4: `Dual-Issue INT32 (Partial Co-Issue)`
 - **Workload**: 8 independent INT32 accumulator chains (`u0..u7`).
-- **Architectural Purpose**: Tests the transition threshold for integer co-issuing.
+- **Architectural Meaning**: Moderate integer Instruction-Level Parallelism (8 chains).
+- **What It Measures**: Tests whether the integer execution pipeline can achieve any dual-issue speedup under moderate instruction parallelism. On architectures with only one integer ALU per SIMD (such as RDNA 3/3.5), throughput remains identical to Standard INT32 (~1.00x), proving that integer execution is strictly datapath-limited rather than latency-bound.
 
 ### Config 5: `Dual-Issue INT32 (INT32+INT32)`
 - **Workload**: 16 independent INT32 accumulator chains (`u0..u15`).

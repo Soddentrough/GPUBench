@@ -12,7 +12,7 @@ DualIssueBench::DualIssueBench() {
       "run_dual_issue_ilp4",
       16384ULL * 32ULL, // 524,288 ops/thread
       "TFLOPS",
-      "Standard single-issue FP32 baseline (1 instruction per cycle)"
+      "Single-issue FP32 baseline (1 FMA/cycle); sequential dependency prevents dual-issuing"
     },
     {
       "Dual-Issue FP32 (Partial Co-Issue)",
@@ -20,7 +20,7 @@ DualIssueBench::DualIssueBench() {
       "run_dual_issue_ilp8",
       16384ULL * 64ULL, // 1,048,576 ops/thread
       "TFLOPS",
-      "Partial dual-issue FP32 (transition threshold to 2 instructions per cycle)"
+      "Moderate ILP (8 chains); measures realistic dual-issue scaling with latency bubbles typical of real shaders, before peak saturation"
     },
     {
       "Dual-Issue FP32 (FP32+FP32)",
@@ -28,7 +28,7 @@ DualIssueBench::DualIssueBench() {
       "run_dual_issue_ilp16",
       16384ULL * 128ULL, // 2,097,152 ops/thread
       "TFLOPS",
-      "Full dual-issue FP32 (2 FP32 instructions per cycle peak)"
+      "Peak dual-issue saturation (16 chains); saturates dual ALUs to measure maximum hardware co-issue capacity (2 FMAs/cycle)"
     },
     {
       "Standard INT32",
@@ -36,7 +36,7 @@ DualIssueBench::DualIssueBench() {
       "run_dual_issue_int32_4",
       16384ULL * 32ULL, // 524,288 ops/thread
       "TOPS",
-      "Standard single-issue INT32 baseline (1 instruction per cycle)"
+      "Single-issue integer baseline (1 ALU op/cycle); tests basic integer ALU throughput"
     },
     {
       "Dual-Issue INT32 (Partial Co-Issue)",
@@ -44,7 +44,7 @@ DualIssueBench::DualIssueBench() {
       "run_dual_issue_int32_8",
       16384ULL * 64ULL, // 1,048,576 ops/thread
       "TOPS",
-      "Partial dual-issue INT32 (transition threshold to 2 instructions per cycle)"
+      "Moderate integer ILP (8 chains); tests whether integer ALUs can co-issue operations under typical instruction parallelism"
     },
     {
       "Dual-Issue INT32 (INT32+INT32)",
@@ -52,7 +52,7 @@ DualIssueBench::DualIssueBench() {
       "run_dual_issue_int32",
       16384ULL * 128ULL, // 2,097,152 ops/thread
       "TOPS",
-      "Full dual-issue INT32 (2 INT32 instructions per cycle peak)"
+      "Peak integer ILP (16 chains); reveals if GPU has dual integer ALUs or is physically capped at 1 ALU/cycle"
     },
     {
       "Dual-Issue Mixed (FP32+INT32)",
@@ -60,7 +60,7 @@ DualIssueBench::DualIssueBench() {
       "run_dual_issue_mixed",
       16384ULL * 128ULL, // 2,097,152 ops/thread (64 FP32 + 64 INT32)
       "TOPS",
-      "Dual-issue concurrent execution (1 FP32 + 1 INT32 instruction per cycle)"
+      "Concurrent 1 FP32 + 1 INT32 per cycle; measures simultaneous execution across separate float and integer pipelines"
     }
   };
 }

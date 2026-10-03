@@ -744,13 +744,13 @@ void GuiApp::initializeBenchmarkCategories() {
         dualSub.engineId = "Dual-Issue";
         dualSub.description = "Dual-issue ALU co-issuing, ILP scaling, and concurrent FP32+INT32 arithmetic";
         dualSub.items = {
-            {"Dual-Issue", "Dual-Issue", "Standard FP32", "Compute", "TFLOPS", "Standard single-issue FP32 baseline (1 instruction per cycle)", true},
-            {"Dual-Issue", "Dual-Issue", "Dual-Issue FP32 (Partial Co-Issue)", "Compute", "TFLOPS", "Partial dual-issue FP32 (transition threshold to 2 instructions per cycle)", true},
-            {"Dual-Issue", "Dual-Issue", "Dual-Issue FP32 (FP32+FP32)", "Compute", "TFLOPS", "Full dual-issue FP32 pairing (2 FP32 instructions per cycle)", true},
-            {"Dual-Issue", "Dual-Issue", "Standard INT32", "Compute", "TOPS", "Standard single-issue INT32 baseline (1 instruction per cycle)", true},
-            {"Dual-Issue", "Dual-Issue", "Dual-Issue INT32 (Partial Co-Issue)", "Compute", "TOPS", "Partial dual-issue INT32 (transition threshold to 2 instructions per cycle)", true},
-            {"Dual-Issue", "Dual-Issue", "Dual-Issue INT32 (INT32+INT32)", "Compute", "TOPS", "Full dual-issue INT32 pairing (2 INT32 instructions per cycle)", true},
-            {"Dual-Issue", "Dual-Issue", "Dual-Issue Mixed (FP32+INT32)", "Compute", "TOPS", "Dual-issue concurrent execution (1 FP32 + 1 INT32 instruction per cycle)", true}
+            {"Dual-Issue", "Dual-Issue", "Standard FP32", "Compute", "TFLOPS", "Single-issue FP32 baseline (1 FMA/cycle); sequential dependency prevents dual-issuing to measure honest 1-issue capacity", true},
+            {"Dual-Issue", "Dual-Issue", "Dual-Issue FP32 (Partial Co-Issue)", "Compute", "TFLOPS", "Moderate ILP (8 chains); measures realistic dual-issue scaling with latency bubbles typical of real compiled shaders, before peak saturation", true},
+            {"Dual-Issue", "Dual-Issue", "Dual-Issue FP32 (FP32+FP32)", "Compute", "TFLOPS", "Peak dual-issue saturation (16 chains); saturates dual ALUs to measure maximum hardware co-issue capacity (2 FMAs/cycle)", true},
+            {"Dual-Issue", "Dual-Issue", "Standard INT32", "Compute", "TOPS", "Single-issue integer baseline (1 ALU op/cycle); tests basic integer ALU throughput", true},
+            {"Dual-Issue", "Dual-Issue", "Dual-Issue INT32 (Partial Co-Issue)", "Compute", "TOPS", "Moderate integer ILP (8 chains); tests whether integer ALUs can co-issue operations under typical instruction parallelism", true},
+            {"Dual-Issue", "Dual-Issue", "Dual-Issue INT32 (INT32+INT32)", "Compute", "TOPS", "Peak integer ILP (16 chains); reveals if GPU has dual integer ALUs or is physically capped at 1 ALU/cycle", true},
+            {"Dual-Issue", "Dual-Issue", "Dual-Issue Mixed (FP32+INT32)", "Compute", "TOPS", "Concurrent 1 FP32 + 1 INT32 per cycle; measures simultaneous execution across separate float and integer pipelines", true}
         };
         cat.subgroups.push_back(dualSub);
 
@@ -2558,7 +2558,14 @@ void GuiApp::renderBenchmarkSuitePanel() {
                                               item.name.c_str(), item.subcategory.c_str(), item.id.c_str(),
                                               catStr.c_str(), reason.c_str());
                         } else if (!item.description.empty()) {
-                            ImGui::SetTooltip("%s\nSubcategory: %s | Workload: %s", item.description.c_str(), item.subcategory.c_str(), item.name.c_str());
+                            ImGui::BeginTooltip();
+                            ImGui::TextColored(ImVec4(0.40f, 0.80f, 1.00f, 1.0f), "%s", item.name.c_str());
+                            ImGui::TextDisabled("Subcategory: %s | Metric: %s", item.subcategory.c_str(), item.metricType.c_str());
+                            ImGui::Separator();
+                            ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + s(380.0f));
+                            ImGui::TextUnformatted(item.description.c_str());
+                            ImGui::PopTextWrapPos();
+                            ImGui::EndTooltip();
                         }
                     }
 
@@ -3550,6 +3557,31 @@ void GuiApp::renderResultsScorecard() {
             // 5. Benchmark
             ImGui::TableNextColumn();
             ImGui::Text("%s", res.benchmarkName.c_str());
+            if (ImGui::IsItemHovered()) {
+                std::string desc = "";
+                for (const auto& cat : m_categories) {
+                    for (const auto& sub : cat.subgroups) {
+                        for (const auto& itm : sub.items) {
+                            if (itm.name == res.benchmarkName || itm.id == res.benchmarkName) {
+                                desc = itm.description;
+                                break;
+                            }
+                        }
+                        if (!desc.empty()) break;
+                    }
+                    if (!desc.empty()) break;
+                }
+                if (!desc.empty()) {
+                    ImGui::BeginTooltip();
+                    ImGui::TextColored(ImVec4(0.40f, 0.80f, 1.00f, 1.0f), "%s", res.benchmarkName.c_str());
+                    ImGui::TextDisabled("Component: %s | Subcategory: %s", res.component.c_str(), res.subcategory.c_str());
+                    ImGui::Separator();
+                    ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + s(380.0f));
+                    ImGui::TextUnformatted(desc.c_str());
+                    ImGui::PopTextWrapPos();
+                    ImGui::EndTooltip();
+                }
+            }
 
             // 6. Metric
             ImGui::TableNextColumn();
