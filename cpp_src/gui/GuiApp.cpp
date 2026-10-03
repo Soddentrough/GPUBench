@@ -1902,6 +1902,7 @@ GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
                        item.name.find("100% Solid") != std::string::npos ||
                        item.name.find("Uniform Material") != std::string::npos ||
                        item.name.find("Coherent Material") != std::string::npos ||
+                       item.name.find("0° Beam") != std::string::npos ||
                        item.name.find("0 deg Divergence") != std::string::npos ||
                        item.name.find("0 deg (Primary Rays)") != std::string::npos ||
                        item.name.find("100% Mirror") != std::string::npos ||
@@ -1913,11 +1914,16 @@ GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
                 info.deltaColor = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
             } else {
                 // Find appropriate baseline for this subcategory
-                if (item.subcategory.find("Scene Ray Tracing") != std::string::npos ||
+                if (item.subcategory == "Multi-Light Evaluation" || item.subcategory.find("Multi-Light") != std::string::npos) {
+                    if (item.name.find("128") != std::string::npos) {
+                        baselineName = "128_Megakernel";
+                    } else {
+                        baselineName = "Single_Megakernel";
+                    }
+                } else if (item.subcategory.find("Scene Ray Tracing") != std::string::npos ||
                     item.subcategory.find("Path Tracing") != std::string::npos ||
                     item.subcategory.find("Total Scene Render") != std::string::npos ||
                     item.subcategory.find("Directional Shadows") != std::string::npos ||
-                    item.subcategory.find("Multi-Light Evaluation") != std::string::npos ||
                     item.subcategory.find("Material Shading") != std::string::npos ||
                     item.subcategory.find("Incoherent Ray Tracing") != std::string::npos) {
                     baselineName = "Megakernel";
@@ -1926,7 +1932,7 @@ GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
                 } else if (item.subcategory.find("Material Divergence") != std::string::npos || item.name.find("Material Divergence") != std::string::npos) {
                     baselineName = "Uniform";
                 } else if (item.subcategory.find("Ray Directional Coherence") != std::string::npos || item.name.find("Coherence") != std::string::npos || item.name.find("Mirror") != std::string::npos) {
-                    baselineName = "Mirror";
+                    baselineName = "0° Beam";
                 } else if (item.subcategory.find("Payload Register Pressure") != std::string::npos || item.name.find("Payload") != std::string::npos) {
                     baselineName = "16B";
                 } else if (item.subcategory.find("Traversal Ordering") != std::string::npos ||
@@ -1959,11 +1965,34 @@ GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
                             baselineRes = &r;
                             break;
                         }
+                    } else if (baselineName == "128_Megakernel") {
+                        if (r.subcategory == "Multi-Light Evaluation" &&
+                            (r.configIndex == 33 || (r.benchmarkName.find("128") != std::string::npos && r.benchmarkName.find("Megakernel") != std::string::npos && r.benchmarkName.find("DGC") == std::string::npos))) {
+                            baselineRes = &r;
+                            break;
+                        }
+                    } else if (baselineName == "Single_Megakernel") {
+                        if (r.subcategory == "Multi-Light Evaluation" &&
+                            (r.configIndex == 31 || (r.benchmarkName.find("Single Light") != std::string::npos && r.benchmarkName.find("Megakernel") != std::string::npos && r.benchmarkName.find("DGC") == std::string::npos))) {
+                            baselineRes = &r;
+                            break;
+                        }
+                    } else if (baselineName == "0° Beam") {
+                        if (r.subcategory == "Ray Directional Coherence" &&
+                            (r.configIndex == 0 || r.benchmarkName.find("0°") != std::string::npos || r.benchmarkName.find("0 deg") != std::string::npos || r.benchmarkName.find("Coherent") != std::string::npos)) {
+                            baselineRes = &r;
+                            break;
+                        }
                     } else if (r.subcategory == item.subcategory) {
                         std::string cName = cleanWorkloadName(r.benchmarkName, r.subcategory);
                         if (baselineName == "Megakernel") {
                             if ((cName.find("Megakernel") != std::string::npos || r.benchmarkName.find("Megakernel") != std::string::npos) &&
                                 r.benchmarkName.find("RTP") == std::string::npos && r.benchmarkName.find("DGC") == std::string::npos) {
+                                if (item.subcategory == "Multi-Light Evaluation") {
+                                    bool itm128 = (item.name.find("128") != std::string::npos);
+                                    bool r128 = (r.benchmarkName.find("128") != std::string::npos || r.configIndex == 33 || r.configIndex == 34);
+                                    if (itm128 != r128) continue;
+                                }
                                 baselineRes = &r;
                                 break;
                             }
