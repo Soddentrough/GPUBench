@@ -328,7 +328,8 @@ void BenchmarkRunner::discoverBenchmarks() {
     benchmarks.push_back(std::move(forest));
   }
   benchmarks.push_back(std::make_unique<RayDivergenceBench>());
-  benchmarks.push_back(std::make_unique<RayPayloadBench>());
+  // RayPayload benchmark disabled (payload size invariance on modern wide VGPR files)
+  // benchmarks.push_back(std::make_unique<RayPayloadBench>());
 
   // Cache Bandwidth
   const size_t l0_size = 16 * 1024; // 16KB L0 cache
@@ -378,6 +379,8 @@ void BenchmarkRunner::discoverBenchmarks() {
       "L0 Cache Latency", "ns", l0_size, "l0_cache_latency",
       create_shuffled_indices(l0_size / sizeof(uint32_t)),
       std::vector<std::string>{"l0l"}, 0));
+  // L1, L2, and L3 cache latency tests temporarily disabled due to memory prefetcher & measurement volatility
+  /*
   benchmarks.push_back(std::make_unique<CacheBench>(
       "L1 Cache Latency", "ns", l1_size, "cache_latency",
       create_shuffled_indices(l1_size / sizeof(uint32_t)),
@@ -390,6 +393,7 @@ void BenchmarkRunner::discoverBenchmarks() {
       "L3 Cache Latency", "ns", l3_size, "cache_latency",
       create_shuffled_indices(l3_size / sizeof(uint32_t)),
       std::vector<std::string>{"l3l"}, 3));
+  */
 }
 
 struct BenchmarkResultRow {
@@ -653,6 +657,11 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
           }
         }
       } else if (should_run && bench->IsDeviceDependent()) {
+        // Skip logging unsupported Ray Tracing benchmarks under compute-only backends (ROCm / OpenCL)
+        if (bench->GetComponent() == "Ray Tracing" && context->getBackend() != ComputeBackend::Vulkan) {
+          continue;
+        }
+
         std::string bname = bench->GetName();
         uint32_t num_unsupported_configs = bench->GetNumConfigs();
 
@@ -662,10 +671,14 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
               ComputeBackendFactory::getBackendName(context->getBackend());
           result_data.deviceName = info.name;
           std::string cname = bench->GetConfigName(ci);
-          result_data.benchmarkName = (num_unsupported_configs > 1 || !cname.empty())
-              ? (bname + " (" + cname + ")")
-              : bname;
-          result_data.metric = "";
+          std::string fullName = bname;
+          if (cname.rfind(bname, 0) == 0) {
+            fullName = cname;
+          } else if (num_unsupported_configs > 1 || !cname.empty()) {
+            fullName = bname + " (" + cname + ")";
+          }
+          result_data.benchmarkName = fullName;
+          result_data.metric = bench->GetMetric(ci);
           result_data.operations = 0;
           result_data.time_ms = 0;
           result_data.isEmulated = false;
@@ -720,6 +733,21 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
         } else if (targetConfig >= 0 && static_cast<int>(i) != targetConfig) {
           continue;
         }
+
+        // Silence unsupported SER configs when hardware SER is absent
+        if (!info.serSupported && bench->GetConfigName(i).find("SER") != std::string::npos) {
+          continue;
+        }
+
+        // Deduplicate algorithmic microbenchmarks across non-Showroom scenes
+        if (auto *rs = dynamic_cast<RaySchedulingBench *>(bench)) {
+          if (rs->GetSceneType() != RaySchedulingBench::SceneType::Showroom) {
+            if (i == 12 || i == 13 || i == 14 || i == 15 || i == 16 || i == 26 || i == 28) {
+              continue;
+            }
+          }
+        }
+
         tasks.push_back({bench, i, bench->GetSortWeight(i)});
       }
     }
@@ -761,7 +789,9 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
 
       std::string bench_name = bench->GetName();
       std::string config_name = bench->GetConfigName(i);
-      if (!config_name.empty()) {
+      if (config_name.rfind(bench_name, 0) == 0) {
+        bench_name = config_name;
+      } else if (!config_name.empty()) {
         bench_name += " (" + config_name + ")";
       }
 

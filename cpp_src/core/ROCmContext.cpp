@@ -42,6 +42,7 @@ typedef hipError_t (*p_hipModuleLaunchKernel)(hipFunction_t, unsigned int,
                                               hipStream_t, void **, void **);
 typedef hipError_t (*p_hipModuleUnload)(hipModule_t);
 typedef hipError_t (*p_hipDeviceSynchronize)(void);
+typedef hipError_t (*p_hipMemGetInfo)(size_t *, size_t *);
 
 // Function pointers for HIPRTC
 #ifdef HAVE_HIPRTC
@@ -80,6 +81,7 @@ static p_hipModuleGetFunction f_hipModuleGetFunction;
 static p_hipModuleLaunchKernel f_hipModuleLaunchKernel;
 static p_hipModuleUnload f_hipModuleUnload;
 static p_hipDeviceSynchronize f_hipDeviceSynchronize;
+static p_hipMemGetInfo f_hipMemGetInfo;
 
 bool ROCmContext::loadLibraries() {
   if (librariesLoaded)
@@ -131,6 +133,7 @@ bool ROCmContext::loadLibraries() {
         hipLib->getFunction<p_hipModuleUnload>("hipModuleUnload");
     f_hipDeviceSynchronize =
         hipLib->getFunction<p_hipDeviceSynchronize>("hipDeviceSynchronize");
+    f_hipMemGetInfo = hipLib->getFunction<p_hipMemGetInfo>("hipMemGetInfo");
 
 #ifdef HAVE_HIPRTC
 #ifdef _WIN32
@@ -247,6 +250,14 @@ void ROCmContext::enumerateDevices() {
       info.driverUUID = std::string(uuid_str);
 
       info.memorySize = prop.totalGlobalMem;
+      if (f_hipMemGetInfo && f_hipSetDevice) {
+        if (f_hipSetDevice(i) == hipSuccess) {
+          size_t freeBytes = 0, totalBytes = 0;
+          if (f_hipMemGetInfo(&freeBytes, &totalBytes) == hipSuccess && totalBytes > 0) {
+            info.memorySize = totalBytes;
+          }
+        }
+      }
       info.verbose = verbose;
       info.maxWorkGroupSize = prop.maxThreadsPerBlock;
       info.maxComputeWorkGroupCountX = prop.maxGridSize[0];

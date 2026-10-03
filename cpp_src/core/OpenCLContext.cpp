@@ -385,6 +385,15 @@ DeviceInfo OpenCLContext::getCurrentDeviceInfo() const {
   f_clGetDeviceInfo(device, CL_DEVICE_NAME, sizeof(name), name, nullptr);
   info.name = name;
 
+  // Try querying CL_DEVICE_BOARD_NAME_AMD (0x4038) for AMD GPUs to get friendly model name
+  char boardName[256] = {0};
+  if (f_clGetDeviceInfo(device, 0x4038, sizeof(boardName), boardName, nullptr) == 0 &&
+      boardName[0] != '\0') {
+    info.name = std::string(boardName);
+  } else if (selectedDeviceIndex >= 0 && selectedDeviceIndex < static_cast<int>(deviceInfos.size())) {
+    info.name = deviceInfos[selectedDeviceIndex].name;
+  }
+
   cl_ulong memSize;
   f_clGetDeviceInfo(device, CL_DEVICE_GLOBAL_MEM_SIZE, sizeof(memSize),
                     &memSize, nullptr);

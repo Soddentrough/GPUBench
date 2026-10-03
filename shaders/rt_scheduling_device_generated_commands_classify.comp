@@ -537,6 +537,11 @@ void main() {
             threadHits = 1u;
             assignedQueue = idx % 8u;
             payload0 = vec4(origin, uintBitsToFloat(packSnorm2x16(octEncode(direction))));
+        } else if (pc.mode == 6) {
+            threadHits = 1u;
+            assignedQueue = 0u;
+            payload0 = vec4(origin, uintBitsToFloat(packSnorm2x16(octEncode(direction))));
+            payload1 = vec4(0.0);
         } else {
             rayQueryEXT query;
             uint rFlags = (pc.mode == 7u) ? gl_RayFlagsNoneEXT : gl_RayFlagsOpaqueEXT;

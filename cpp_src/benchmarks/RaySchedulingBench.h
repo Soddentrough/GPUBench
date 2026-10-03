@@ -111,6 +111,14 @@ public:
     if (unsupportedConfig[config_idx]) {
       return false;
     }
+    // Algorithmic traversal ordering and queue compaction microbenchmarks are only run on the primary reference scene (Showroom)
+    if (sceneType != SceneType::Showroom) {
+      if (config_idx == 12 || config_idx == 13 || config_idx == 14 ||
+          config_idx == 15 || config_idx == 16 || config_idx == 26 ||
+          config_idx == 28) {
+        return false;
+      }
+    }
     if (config_idx == 1 || config_idx == 4 || config_idx == 7 || config_idx == 10 || config_idx == 20 || config_idx == 30) {
       if (!info.serSupported) return false;
 #ifdef HAVE_VULKAN
