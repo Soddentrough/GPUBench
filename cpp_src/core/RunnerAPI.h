@@ -19,7 +19,8 @@ std::vector<ResultData> RunBenchmarksAPI(
     std::function<void(const ResultData&)> callback = nullptr,
     const std::string& scene = "all",
     uint32_t samples_per_pixel = 1,
-    std::atomic<bool>* cancel_token = nullptr);
+    std::atomic<bool>* cancel_token = nullptr,
+    bool quiet = false);
 
 struct DeviceProfile {
     std::string backend;

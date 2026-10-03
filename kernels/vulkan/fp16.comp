@@ -47,7 +47,7 @@ void main() {
     f16vec4 val31 = f16vec4(11.7, 11.8, 11.9, 12.0);
     f16vec4 val32 = f16vec4(12.1, 12.2, 12.3, 12.4);
 
-    f16vec4 m = f16vec4(float16_t(1.0001));
+    f16vec4 m = f16vec4(float16_t(1.0009765625));
     
     // Each iteration performs 32 f16vec4 FMAs = 32 * 4 * 2 = 256 FP16 ops.
     for (int i = 0; i < 32768; ++i) {

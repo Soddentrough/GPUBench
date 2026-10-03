@@ -644,21 +644,45 @@ bool ResultImporter::loadFromFile(const std::string &filepath, ImportedRun &outR
         } else if (id == "rt_sched_shadow_trad") {
           rd.component = "Ray Tracing";
           rd.subcategory = "Directional Shadows";
-          rd.benchmarkName = "RayScheduling (Shadows - Traditional Megakernel)";
+          rd.benchmarkName = "RayScheduling (Shadows - Single Light (1 Light, Megakernel))";
           rd.sortWeight = 400;
           rd.configIndex = 0;
         } else if (id == "rt_sched_shadow_wl") {
           rd.component = "Ray Tracing";
           rd.subcategory = "Directional Shadows";
-          rd.benchmarkName = "RayScheduling (Shadows (DGC))";
+          rd.benchmarkName = "RayScheduling (Shadows - Single Light (1 Light, DGC))";
           rd.sortWeight = 401;
           rd.configIndex = 1;
         } else if (id == "rt_sched_shadow_bin") {
           rd.component = "Ray Tracing";
           rd.subcategory = "Directional Shadows";
-          rd.benchmarkName = "RayScheduling (Shadows - Directional Binning)";
+          rd.benchmarkName = "RayScheduling (Shadows - Multi-Light (3 Lights, DGC))";
           rd.sortWeight = 402;
           rd.configIndex = 2;
+        } else if (id == "rt_sched_multilight_single_trad") {
+          rd.component = "Ray Tracing";
+          rd.subcategory = "Multi-Light Evaluation";
+          rd.benchmarkName = "RayScheduling (Multi-Light - Single Light (1 Light, Megakernel))";
+          rd.sortWeight = 405;
+          rd.configIndex = 0;
+        } else if (id == "rt_sched_multilight_single_dgc") {
+          rd.component = "Ray Tracing";
+          rd.subcategory = "Multi-Light Evaluation";
+          rd.benchmarkName = "RayScheduling (Multi-Light - Single Light (1 Light, DGC))";
+          rd.sortWeight = 406;
+          rd.configIndex = 1;
+        } else if (id == "rt_sched_multilight_128_trad") {
+          rd.component = "Ray Tracing";
+          rd.subcategory = "Multi-Light Evaluation";
+          rd.benchmarkName = "RayScheduling (Multi-Light - 128 Lights (128 Lights, Megakernel))";
+          rd.sortWeight = 407;
+          rd.configIndex = 2;
+        } else if (id == "rt_sched_multilight_128_dgc") {
+          rd.component = "Ray Tracing";
+          rd.subcategory = "Multi-Light Evaluation";
+          rd.benchmarkName = "RayScheduling (Multi-Light - 128 Lights (128 Lights, DGC Light Binning))";
+          rd.sortWeight = 408;
+          rd.configIndex = 3;
         } else if (id == "rt_sched_mat_trad") {
           rd.component = "Ray Tracing";
           rd.subcategory = "Material Shading";

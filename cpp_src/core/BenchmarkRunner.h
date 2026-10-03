@@ -72,6 +72,8 @@ public:
 
   void setVerifyParity(bool enable) { verifyParity = enable; }
   bool getVerifyParity() const { return verifyParity; }
+  void setQuiet(bool q) { quiet = q; }
+  bool isQuiet() const { return quiet; }
   bool hasParityFailure() const { return parityFailure; }
   bool hasExecutionFailure() const { return executionFailure; }
 
@@ -91,6 +93,7 @@ private:
   bool bannerPrinted = false;
   uint32_t numBenchmarksRun = 0;
   bool verbose;
+  bool quiet = false;
   bool debug;
   bool dumpGeometry;
   bool dumpRenders;
@@ -100,7 +103,7 @@ private:
   std::string sceneName = "all";
   uint32_t renderWidth = 0;
   uint32_t renderHeight = 0;
-  uint32_t bounceDepth = 2;
+  uint32_t bounceDepth = 4;
   uint32_t samplesPerPixel = 1;
   int targetConfig = -1;
   bool profileSnapshot = false;

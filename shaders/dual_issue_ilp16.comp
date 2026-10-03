@@ -1,8 +1,7 @@
 #version 460
 // GPUBench Dual-Issue & Concurrency Benchmark Suite
-// Config 3: ILP-16 (Peak Dual-Issue Saturated FP32)
-// Evaluates peak dual-issue throughput where 16 independent accumulator chains
-// (64 scalar accumulators in flight) fully saturate the dual execution pipelines.
+// Config 2: Dual-Issue FP32 (Peak Co-Issue - 16 chains)
+// Evaluates peak dual-issue throughput with 16 independent scalar accumulator chains.
 
 layout (local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
@@ -19,40 +18,64 @@ void main() {
     uint index = gl_GlobalInvocationID.x;
     if (index >= pushConstants.num_elements) return;
 
-    // 8 independent vec4 accumulator chains (32 scalar accumulators in flight):
-    // Perfectly sized to saturate dual-issue execution units while maintaining 100% wavefront occupancy.
     float base = InOutBuffer.data[index];
-    vec4 val0 = vec4(base);
-    vec4 val1 = vec4(base + 0.1);
-    vec4 val2 = vec4(base + 0.2);
-    vec4 val3 = vec4(base + 0.3);
-    vec4 val4 = vec4(base + 0.4);
-    vec4 val5 = vec4(base + 0.5);
-    vec4 val6 = vec4(base + 0.6);
-    vec4 val7 = vec4(base + 0.7);
+    float val0  = base;
+    float val1  = base + 0.05;
+    float val2  = base + 0.10;
+    float val3  = base + 0.15;
+    float val4  = base + 0.20;
+    float val5  = base + 0.25;
+    float val6  = base + 0.30;
+    float val7  = base + 0.35;
+    float val8  = base + 0.40;
+    float val9  = base + 0.45;
+    float val10 = base + 0.50;
+    float val11 = base + 0.55;
+    float val12 = base + 0.60;
+    float val13 = base + 0.65;
+    float val14 = base + 0.70;
+    float val15 = base + 0.75;
 
-    vec4 m = vec4(pushConstants.multiplier);
-    vec4 c0 = vec4(0.0001, 0.0002, 0.0003, 0.0004);
-    vec4 c1 = vec4(0.0005, 0.0006, 0.0007, 0.0008);
-    vec4 c2 = vec4(0.0009, 0.0010, 0.0011, 0.0012);
-    vec4 c3 = vec4(0.0013, 0.0014, 0.0015, 0.0016);
-    vec4 c4 = vec4(0.0017, 0.0018, 0.0019, 0.0020);
-    vec4 c5 = vec4(0.0021, 0.0022, 0.0023, 0.0024);
-    vec4 c6 = vec4(0.0025, 0.0026, 0.0027, 0.0028);
-    vec4 c7 = vec4(0.0029, 0.0030, 0.0031, 0.0032);
+    float m = pushConstants.multiplier;
+    float c0  = 0.0001;
+    float c1  = 0.0002;
+    float c2  = 0.0003;
+    float c3  = 0.0004;
+    float c4  = 0.0005;
+    float c5  = 0.0006;
+    float c6  = 0.0007;
+    float c7  = 0.0008;
+    float c8  = 0.0009;
+    float c9  = 0.0010;
+    float c10 = 0.0011;
+    float c11 = 0.0012;
+    float c12 = 0.0013;
+    float c13 = 0.0014;
+    float c14 = 0.0015;
+    float c15 = 0.0016;
 
-    // 32768 iterations * 8 vec4 FMAs = 32768 * 64 = 2,097,152 FP32 operations
-    for (int i = 0; i < 32768; ++i) {
-        val0 = fma(val0, m, c0);
-        val1 = fma(val1, m, c1);
-        val2 = fma(val2, m, c2);
-        val3 = fma(val3, m, c3);
-        val4 = fma(val4, m, c4);
-        val5 = fma(val5, m, c5);
-        val6 = fma(val6, m, c6);
-        val7 = fma(val7, m, c7);
+    // 65536 iterations * 16 scalar FMAs = 65536 * 32 = 2,097,152 FP32 operations
+    for (int i = 0; i < 65536; ++i) {
+        val0  = fma(val0,  m, c0);
+        val1  = fma(val1,  m, c1);
+        val2  = fma(val2,  m, c2);
+        val3  = fma(val3,  m, c3);
+        val4  = fma(val4,  m, c4);
+        val5  = fma(val5,  m, c5);
+        val6  = fma(val6,  m, c6);
+        val7  = fma(val7,  m, c7);
+        val8  = fma(val8,  m, c8);
+        val9  = fma(val9,  m, c9);
+        val10 = fma(val10, m, c10);
+        val11 = fma(val11, m, c11);
+        val12 = fma(val12, m, c12);
+        val13 = fma(val13, m, c13);
+        val14 = fma(val14, m, c14);
+        val15 = fma(val15, m, c15);
     }
 
-    vec4 res = (val0 + val1) + (val2 + val3) + (val4 + val5) + (val6 + val7);
-    InOutBuffer.data[index] = res.x + res.y + res.z + res.w;
+    InOutBuffer.data[index] = ((val0 + val1) + (val2 + val3)) +
+                             ((val4 + val5) + (val6 + val7)) +
+                             ((val8 + val9) + (val10 + val11)) +
+                             ((val12 + val13) + (val14 + val15));
 }

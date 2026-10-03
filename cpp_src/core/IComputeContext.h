@@ -83,6 +83,8 @@ public:
 
   virtual void setVerbose(bool v) {}
   virtual bool isVerbose() const { return false; }
+  virtual void setQuiet(bool q) {}
+  virtual bool isQuiet() const { return false; }
 
   // Compilation progress tracking
   virtual void setExpectedKernelCount(uint32_t count) {}

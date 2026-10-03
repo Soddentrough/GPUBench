@@ -524,6 +524,7 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
   }
 
   context->setVerbose(verbose);
+  context->setQuiet(quiet);
 
   try {
     DeviceInfo info = context->getCurrentDeviceInfo();
@@ -571,7 +572,7 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
       }
     }
 
-    if (!verbose && !onResult) {
+    if (!quiet && !verbose && !onResult) {
       std::string backendStr = ComputeBackendFactory::getBackendName(context->getBackend());
       int vramGb = static_cast<int>(std::round(info.memorySize / (1024.0 * 1024.0 * 1024.0)));
       std::string line1_plain = "Target Device : [GPU " + std::to_string(context->getSelectedDeviceIndex()) + "] " + info.name;
@@ -591,7 +592,7 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
       } else {
         std::cout << "  \033[1m[1/2] Preparation Phase\033[0m (compiling kernels, uploading data, building BVHs)..." << std::endl;
       }
-    } else {
+    } else if (!quiet) {
       std::cout << "Preparing benchmarks (compiling kernels, uploading "
                    "data, building acceleration structures)..."
                 << std::endl;
@@ -728,8 +729,8 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
                        return a.sortWeight < b.sortWeight;
                      });
 
-    const bool isInteractive = !verbose && !onResult && isatty(fileno(stdout));
-    if (!verbose && !onResult) {
+    const bool isInteractive = !quiet && !verbose && !onResult && isatty(fileno(stdout));
+    if (!quiet && !verbose && !onResult) {
       std::cout << "\r\033[K  \033[32m✔\033[0m Preparation complete.\n\n";
       if (hasVisualVerification) {
         std::cout << "  \033[1m[2/3] Running Benchmarks\033[0m ("
@@ -745,7 +746,7 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
     bool deviceLost = false;
     for (const auto &task : tasks) {
       if (cancelToken && cancelToken->load()) {
-        if (!verbose && !onResult) {
+        if (!quiet && !verbose && !onResult) {
           std::cout << "\n  \033[33m⚠\033[0m Benchmark run cancelled by user." << std::endl;
         }
         break;
@@ -786,7 +787,7 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
           if (disp.length() > 50) disp = disp.substr(0, 47) + "...";
           std::cout << "\r\033[K  \033[36m⠋\033[0m [" << (taskIdx + 1) << "/" << tasks.size() << "] "
                     << disp << "..." << std::flush;
-        } else {
+        } else if (!quiet) {
           std::cout << "  - [" << ComputeBackendFactory::getBackendName(context->getBackend())
                     << "] Running " << bench_name << "..." << std::flush;
         }
@@ -817,7 +818,7 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
           if (note.empty()) {
             note = bench->GetSupportNote(info, context);
           }
-          if (!verbose && !isInteractive) {
+          if (!quiet && !verbose && !isInteractive) {
             if (!note.empty()) {
               std::cout << " Unsupported (" << note << ")." << std::endl;
             } else {
@@ -978,7 +979,7 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
         result_data.height = effectiveHeight;
 
         formatter->addResult(result_data);
-        if (!verbose && !isInteractive) {
+        if (!quiet && !verbose && !isInteractive) {
           double opsPerSec = (result_data.time_ms > 0.0 && result_data.operations > 0)
               ? (static_cast<double>(result_data.operations) / result_data.time_ms) * 1000.0
               : 0.0;
@@ -1012,7 +1013,11 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
         taskIdx++;
         executionFailure = true;
         if (!verbose) {
-          std::cout << " Failed (" << e.what() << ")" << std::endl;
+          if (!quiet) {
+            std::cout << " Failed (" << e.what() << ")" << std::endl;
+          } else {
+            std::cerr << " [ERROR] Task " << bench_name << " failed: " << e.what() << std::endl;
+          }
         } else {
           std::cerr << "Error running task " << bench_name << ": " << e.what() << std::endl;
         }
@@ -1089,7 +1094,7 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
     }
 
     if (hasVisualVerification && !deviceLost) {
-      if (!verbose && !onResult) {
+      if (!quiet && !verbose && !onResult) {
         std::cout << "\r\033[K  \033[32m✔\033[0m Benchmark execution complete ("
                   << tasks.size() << " workloads).\n\n  \033[1m[3/3] Visual Parity & Frame Export\033[0m..." << std::endl;
       }
@@ -1110,11 +1115,11 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
           }
         }
       }
-      if (!verbose && !onResult) {
+      if (!quiet && !verbose && !onResult) {
         std::cout << "\r\033[K  \033[32m✔\033[0m Visual parity verification & frame export complete.\n" << std::endl;
       }
     } else {
-      if (isInteractive) {
+      if (!quiet && isInteractive) {
         std::cout << "\r\033[K  \033[32m✔\033[0m Benchmark suite completed ("
                   << tasks.size() << " workloads).\n" << std::endl;
       }
@@ -1196,12 +1201,14 @@ void BenchmarkRunner::runHostBenchmarks(const std::vector<std::string> &benchmar
 
     if (should_run) {
       if (!headerPrinted) {
-        std::cout << " [System] Host CPU" << std::endl;
-        if (verbose) {
-          std::cout << "  - Threads:      "
-                    << std::thread::hardware_concurrency() << std::endl;
+        if (!quiet) {
+          std::cout << " [System] Host CPU" << std::endl;
+          if (verbose) {
+            std::cout << "  - Threads:      "
+                      << std::thread::hardware_concurrency() << std::endl;
+          }
+          std::cout << std::endl;
         }
-        std::cout << std::endl;
         headerPrinted = true;
       }
 
@@ -1325,6 +1332,9 @@ void BenchmarkRunner::runHostBenchmarks(const std::vector<std::string> &benchmar
 }
 
 void BenchmarkRunner::printReport() {
+  if (quiet) {
+    return;
+  }
   if (verbose) {
     std::cout << "\r\033[K" << std::flush;
   }

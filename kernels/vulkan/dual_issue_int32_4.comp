@@ -1,6 +1,7 @@
 #version 460
 // GPUBench Dual-Issue & Concurrency Benchmark Suite
-// Standard INT32: 4 independent chains (single-issue saturated integer ALU baseline)
+// Config 3: Standard INT32 (Single-Issue Baseline)
+// Evaluates single-issue integer baseline with a strict sequential dependency chain.
 
 layout (local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
@@ -18,29 +19,20 @@ void main() {
     if (index >= pushConstants.num_elements) return;
 
     uint ubase = uint(InOutBuffer.data[index] * 1000.0) + index;
+    uint val0 = ubase;
+    uint val1 = ubase + 1u;
 
-    // 4 independent INT32 accumulator chains
-    uvec4 u0  = uvec4(ubase);
-    uvec4 u1  = uvec4(ubase + 1u);
-    uvec4 u2  = uvec4(ubase + 2u);
-    uvec4 u3  = uvec4(ubase + 3u);
+    uint mu = uint(pushConstants.multiplier);
+    if (mu == 0u) mu = 1u;
 
-    uvec4 mu = uvec4(uint(pushConstants.multiplier));
-    if (mu.x == 0u) mu = uvec4(1u);
+    uint cu0 = 13u;
+    uint cu1 = 29u;
 
-    uvec4 cu0  = uvec4(13u, 17u, 19u, 23u);
-    uvec4 cu1  = uvec4(29u, 31u, 37u, 41u);
-    uvec4 cu2  = uvec4(43u, 47u, 53u, 59u);
-    uvec4 cu3  = uvec4(61u, 67u, 71u, 73u);
-
-    // 16384 iterations * 4 uvec4 full-rate INT32 ALU ops (2 adds = 2 ops each) = 16384 * 32 = 524,288 INT32 ops
-    for (int i = 0; i < 16384; ++i) {
-        u0  = (u0  + cu0) + 1u;
-        u1  = (u1  + cu1) + 1u;
-        u2  = (u2  + cu2) + 1u;
-        u3  = (u3  + cu3) + 1u;
+    // 131072 iterations * 2 scalar INT32 ops (add + xor = 2 ops each) = 131072 * 4 = 524,288 INT32 ops
+    for (int i = 0; i < 131072; ++i) {
+        val0 = (val1 + cu0) ^ mu;
+        val1 = (val0 + cu1) ^ mu;
     }
 
-    uvec4 ures = (u0 + u1) + (u2 + u3);
-    InOutBuffer.data[index] = float(ures.x ^ ures.y ^ ures.z ^ ures.w);
+    InOutBuffer.data[index] = float(val0 ^ val1);
 }

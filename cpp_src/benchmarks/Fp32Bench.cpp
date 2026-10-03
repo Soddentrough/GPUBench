@@ -47,7 +47,7 @@ void Fp32Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
 
 void Fp32Bench::Run(uint32_t config_idx) {
   // Pass multiplier as push constant / arg 1
-  float multiplier = 1.0f;
+  float multiplier = 0.999f;
   context->setKernelArg(kernel, 1, sizeof(float), &multiplier);
 
   // Pass numElements as arg 2

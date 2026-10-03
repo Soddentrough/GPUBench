@@ -401,9 +401,8 @@ void main() {
                     vec3 bOrigin = hitPos + normal * (pc.isGltf != 0u ? 0.05 : 0.005);
                     vec3 bDir = nextDir;
 
-                    if (pc.dumpRenders != 0) {
-                        vec3 albedo = vec3(0.72);
-                        vec3 emissive = vec3(0.0);
+                    vec3 albedo = vec3(0.72);
+                    vec3 emissive = vec3(0.0);
                         if (pc.isGltf != 0u) {
                             vec2 bary = unpackUnorm2x16(packUnorm2x16(rawBary));
                             uint base = primId * 36u;
@@ -548,7 +547,6 @@ void main() {
                         }
 
                         sampleRadiance = directLight + indirectRadiance + emissive;
-                    }
                 } else {
                     if (pc.dumpRenders != 0) {
                         sampleRadiance = evalSky(pc.sceneType, curDir);

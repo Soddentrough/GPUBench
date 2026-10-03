@@ -53,6 +53,9 @@ public:
   void setExpectedKernelCount(uint32_t count) override;
   void notifyKernelCreated(const std::string &kernel_name) override;
   void setVerbose(bool v) override { verbose = v; }
+  bool isVerbose() const override { return verbose; }
+  void setQuiet(bool q) override { quiet = q; }
+  bool isQuiet() const override { return quiet; }
   void waitIdle() override;
 
   hipDevice_t getROCmDevice() const override { return device; }
@@ -76,6 +79,7 @@ private:
   std::unordered_map<std::string, hipModule_t> modules;
   std::unordered_map<ComputeKernel, ROCmKernel> kernels;
   bool verbose = false;
+  bool quiet = false;
   bool available = false;
 
   uint32_t expectedKernelCount = 0;

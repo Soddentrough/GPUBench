@@ -78,16 +78,16 @@ public:
   int GetSortWeight(uint32_t config_idx = 0) const override;
   uint32_t GetExpectedKernelCount() const override { return 22; }
 
-  uint32_t GetNumConfigs() const override { return 31; }
+  uint32_t GetNumConfigs() const override { return 35; }
   std::vector<std::string> GetAliases() const override {
     if (sceneType == SceneType::AAAOutdoorForest) {
-      return {"rayscheduling", "rtscheduling", "forest", "aaa_forest", "rayscheduling_forest", "wavefront_queues", "dgc", "scene_render", "total_scene_render", "total_frame", "primary", "primary_rays", "shadow", "shadows", "rts", "ray_shadows", "ray_shadow"};
+      return {"rayscheduling", "rtscheduling", "forest", "aaa_forest", "rayscheduling_forest", "wavefront_queues", "dgc", "scene_render", "total_scene_render", "total_frame", "primary", "primary_rays", "shadow", "shadows", "rts", "ray_shadows", "ray_shadow", "multilight", "multi_light", "lightbinning", "light_binning"};
     } else if (sceneType == SceneType::OutdoorLandscape) {
-      return {"rayscheduling", "rtscheduling", "outdoor", "landscape", "rayscheduling_outdoor", "wavefront_queues", "dgc", "scene_render", "total_scene_render", "total_frame", "primary", "primary_rays", "shadow", "shadows", "rts", "ray_shadows", "ray_shadow"};
+      return {"rayscheduling", "rtscheduling", "outdoor", "landscape", "rayscheduling_outdoor", "wavefront_queues", "dgc", "scene_render", "total_scene_render", "total_frame", "primary", "primary_rays", "shadow", "shadows", "rts", "ray_shadows", "ray_shadow", "multilight", "multi_light", "lightbinning", "light_binning"};
     } else if (sceneType == SceneType::IndoorAtrium) {
-      return {"rayscheduling", "rtscheduling", "indoor", "atrium", "rayscheduling_indoor", "wavefront_queues", "dgc", "scene_render", "total_scene_render", "total_frame", "primary", "primary_rays", "shadow", "shadows", "rts", "ray_shadows", "ray_shadow"};
+      return {"rayscheduling", "rtscheduling", "indoor", "atrium", "rayscheduling_indoor", "wavefront_queues", "dgc", "scene_render", "total_scene_render", "total_frame", "primary", "primary_rays", "shadow", "shadows", "rts", "ray_shadows", "ray_shadow", "multilight", "multi_light", "lightbinning", "light_binning"};
     } else {
-      return {"rayscheduling", "rtscheduling", "showroom", "studio", "rayscheduling_showroom", "wavefront_queues", "dgc", "scene_render", "total_scene_render", "total_frame", "primary", "primary_rays", "shadow", "shadows", "rts", "ray_shadows", "ray_shadow"};
+      return {"rayscheduling", "rtscheduling", "showroom", "studio", "rayscheduling_showroom", "wavefront_queues", "dgc", "scene_render", "total_scene_render", "total_frame", "primary", "primary_rays", "shadow", "shadows", "rts", "ray_shadows", "ray_shadow", "multilight", "multi_light", "lightbinning", "light_binning"};
     }
   }
   std::string GetConfigName(uint32_t config_idx) const override;
@@ -122,7 +122,7 @@ public:
     }
     if (config_idx == 2 || config_idx == 5 || config_idx == 8 ||
         config_idx == 11 || config_idx == 18 || config_idx == 21 ||
-        config_idx == 24) {
+        config_idx == 24 || config_idx == 32 || config_idx == 34) {
       if (!info.dgcSupported) return false;
 #ifdef HAVE_VULKAN
       if (context && context->getBackend() == ComputeBackend::Vulkan) {
@@ -161,7 +161,8 @@ public:
       return "VK_EXT_device_generated_commands unsupported by device/driver";
     }
     if (config_idx == 5 || config_idx == 8 || config_idx == 11 ||
-        config_idx == 18 || config_idx == 21 || config_idx == 24) {
+        config_idx == 18 || config_idx == 21 || config_idx == 24 ||
+        config_idx == 32 || config_idx == 34) {
       return "VK_EXT_device_generated_commands unsupported by device/driver";
     }
     return GetSupportNote(info, context);
@@ -175,7 +176,7 @@ public:
     }
     if (config_idx == 2 || config_idx == 5 || config_idx == 8 ||
         config_idx == 11 || config_idx == 18 || config_idx == 21 ||
-        config_idx == 24) {
+        config_idx == 24 || config_idx == 32 || config_idx == 34) {
       return SupportLimitation::kHardware;
     }
     return SupportLimitation::kNone;
@@ -223,7 +224,7 @@ public:
   uint32_t GetQueueCapacity() const { return queueCapacity; }
 
   void RecordRunResult(uint32_t config_idx, uint64_t total_invocations, double total_time_ms) override {
-    if (config_idx < 31) {
+    if (config_idx < 35) {
       recordedInvocations[config_idx] = total_invocations;
       recordedTimeMs[config_idx] = total_time_ms;
     }
@@ -233,8 +234,8 @@ public:
   void RunVisualVerification(bool isInteractive = false) override;
 
 private:
-  uint64_t recordedInvocations[31] = {0};
-  double recordedTimeMs[31] = {0.0};
+  uint64_t recordedInvocations[35] = {0};
+  double recordedTimeMs[35] = {0.0};
   IComputeContext *context = nullptr;
   bool dumpRenders = false;
   bool verifyParity = false;
@@ -256,6 +257,7 @@ private:
   ComputeKernel kernelBounceTerminal = nullptr;
   ComputeKernel kernelBounceOctant = nullptr;
   ComputeKernel kernelShadow = nullptr;
+  ComputeKernel kernelMultiLight = nullptr;
   ComputeKernel kernelReset = nullptr;
   ComputeKernel kernelResolve = nullptr;
   ComputeKernel kernelPersistent = nullptr;
@@ -299,6 +301,8 @@ private:
   std::vector<VulkanContext::IndirectBatchEntry> octantBatches;
   std::vector<VulkanContext::IndirectBatchEntry> shadowBatches;
   std::vector<VulkanContext::IndirectBatchEntry> shadowBinBatches;
+  std::vector<VulkanContext::IndirectBatchEntry> multiLightBatchesSingle;
+  std::vector<VulkanContext::IndirectBatchEntry> multiLightBatches128;
   void rebuildBounceBatches();
 
   // DGC (VK_EXT_device_generated_commands) Objects & Execution Infos
@@ -320,7 +324,7 @@ private:
   void rebuildDGCBounceBatches();
 #endif
 
-  uint32_t bounceDepth = 2;
+  uint32_t bounceDepth = 4;
   uint32_t samplesPerPixel = 1;
   uint32_t renderWidth = 1920;
   uint32_t renderHeight = 1080;
@@ -331,7 +335,7 @@ private:
   uint32_t octantCapacity = 262144;
   uint32_t numPrimitives = 4096;
   SceneType sceneType = SceneType::IndoorAtrium;
-  mutable double results[31] = {0.0};
-  mutable bool unsupportedConfig[31] = {false};
-  mutable std::string unsupportedReason[31];
+  mutable double results[35] = {0.0};
+  mutable bool unsupportedConfig[35] = {false};
+  mutable std::string unsupportedReason[35];
 };

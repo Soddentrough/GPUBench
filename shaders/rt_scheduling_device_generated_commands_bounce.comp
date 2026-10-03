@@ -252,7 +252,7 @@ void main() {
         float tMaxBounce = (pc.isGltf != 0u) ? 5000.0 : ((pc.sceneType == SCENE_OUTDOOR_TERRAIN) ? 500.0 : 20.0);
         float rayOffset = (pc.isGltf != 0u) ? 0.05 : 0.005;
         rayQueryEXT query;
-        uint rayFlags = (gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT);
+        uint rayFlags = (BOUNCE_MODE == 0u) ? gl_RayFlagsOpaqueEXT : (gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT);
         rayQueryInitializeEXT(query, topLevelAS, rayFlags, 0xFF, origin, rayOffset, direction, tMaxBounce);
         while (rayQueryProceedEXT(query)) {}
 

@@ -348,15 +348,21 @@ const std::vector<DeviceInfo> &VulkanContext::getDevices() const {
 
       if (props.vendorID == 0x1002) { // AMD
         std::string dName = props.deviceName;
-        if (dName.find("GFX12") != std::string::npos ||
-            dName.find("gfx12") != std::string::npos ||
-            dName.find("R9700") != std::string::npos ||
-            dName.find("Radeon AI") != std::string::npos ||
-            dName.find("Navi 48") != std::string::npos ||
-            dName.find("RX 9070") != std::string::npos ||
-            dName.find("rx 9070") != std::string::npos) {
+        std::string dNameLower = dName;
+        std::transform(dNameLower.begin(), dNameLower.end(), dNameLower.begin(), ::tolower);
+        if (dNameLower.find("gfx12") != std::string::npos ||
+            dNameLower.find("r9700") != std::string::npos ||
+            dNameLower.find("radeon ai") != std::string::npos ||
+            dNameLower.find("navi 48") != std::string::npos ||
+            dNameLower.find("rx 9070") != std::string::npos) {
           info.l2CacheSize = 8 * 1024 * 1024;
           info.l3CacheSize = 64 * 1024 * 1024;
+        } else if (dNameLower.find("gfx115") != std::string::npos ||
+                   dNameLower.find("strix") != std::string::npos ||
+                   dNameLower.find("8060") != std::string::npos ||
+                   dNameLower.find("8050") != std::string::npos) {
+          info.l2CacheSize = 2 * 1024 * 1024;
+          info.l3CacheSize = 32 * 1024 * 1024;
         } else {
           info.l2CacheSize = 4 * 1024 * 1024;
           info.l3CacheSize = 32 * 1024 * 1024;
@@ -524,15 +530,21 @@ DeviceInfo VulkanContext::getCurrentDeviceInfo() const {
 
   if (properties.vendorID == 0x1002) { // AMD
     std::string dName = properties.deviceName;
-    if (dName.find("GFX12") != std::string::npos ||
-        dName.find("gfx12") != std::string::npos ||
-        dName.find("R9700") != std::string::npos ||
-        dName.find("Radeon AI") != std::string::npos ||
-        dName.find("Navi 48") != std::string::npos ||
-        dName.find("RX 9070") != std::string::npos ||
-        dName.find("rx 9070") != std::string::npos) {
+    std::string dNameLower = dName;
+    std::transform(dNameLower.begin(), dNameLower.end(), dNameLower.begin(), ::tolower);
+    if (dNameLower.find("gfx12") != std::string::npos ||
+        dNameLower.find("r9700") != std::string::npos ||
+        dNameLower.find("radeon ai") != std::string::npos ||
+        dNameLower.find("navi 48") != std::string::npos ||
+        dNameLower.find("rx 9070") != std::string::npos) {
       info.l2CacheSize = 8 * 1024 * 1024;
       info.l3CacheSize = 64 * 1024 * 1024;
+    } else if (dNameLower.find("gfx115") != std::string::npos ||
+               dNameLower.find("strix") != std::string::npos ||
+               dNameLower.find("8060") != std::string::npos ||
+               dNameLower.find("8050") != std::string::npos) {
+      info.l2CacheSize = 2 * 1024 * 1024;
+      info.l3CacheSize = 32 * 1024 * 1024;
     } else {
       info.l2CacheSize = 4 * 1024 * 1024;
       info.l3CacheSize = 32 * 1024 * 1024;
@@ -2241,7 +2253,7 @@ void VulkanContext::setExpectedKernelCount(uint32_t count) {
 
 void VulkanContext::notifyKernelCreated(const std::string &file_name) {
   createdKernelCount++;
-  if (!verbose && expectedKernelCount > 0) {
+  if (!quiet && !verbose && expectedKernelCount > 0) {
     printProgressBar(createdKernelCount, expectedKernelCount, file_name);
   }
 }

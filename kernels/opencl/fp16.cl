@@ -38,7 +38,7 @@ __kernel void run_benchmark(__global half* data) {
     half2 val31 = (half2)(5.9h, 6.0h);
     half2 val32 = (half2)(6.1h, 6.2h);
 
-    half2 m = (half2)(1.0001h);
+    half2 m = (half2)(1.0009765625h);
 
     // Each iteration performs 32 half2 FMAs = 32 * 2 * 2 = 128 FP16 ops
     for (int i = 0; i < 16384; ++i) {

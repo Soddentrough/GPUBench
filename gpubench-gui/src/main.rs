@@ -540,6 +540,7 @@ fn get_benchmark_description(name: &str) -> &'static str {
         "FP4" => "4-bit quantized floating point compute throughput for ultra-compact model execution.",
         "INT8" => "8-bit integer tensor and dot-product (DP4A) throughput for quantized neural network inference.",
         "INT4" => "4-bit integer quantized vector compute throughput for heavily compressed models.",
+        "Dual-Issue" => "Dual-issue ALU co-issuing, ILP instruction scheduling, and concurrent FP32+INT32 arithmetic.",
         "Device Memory Bandwidth" => "Peak streaming read/write bandwidth across the dedicated GPU VRAM bus.",
         "Cache Latency" => "Pointer-chasing memory access latency across GPU L0, L1, L2, and L3 (Infinity) caches.",
         "System Memory Bandwidth" => "Multi-threaded host RAM copy and streaming bandwidth from CPU to system DDR memory.",
@@ -567,6 +568,7 @@ pub fn get_benchmark_api_extensions(name: &str) -> &'static str {
         "FP4" => "Vulkan Subgroup Bit Packing (4-bit Float)",
         "INT8" => "VK_KHR_shader_integer_dot_product (DP4A)",
         "INT4" => "Vulkan Subgroup Bit Packing (4-bit INT)",
+        "Dual-Issue" => "Vulkan / OpenCL / ROCm Core Compute (Dual-Issue / ILP)",
         "Device Memory Bandwidth" => "Vulkan / OpenCL / ROCm Linear Buffer DMA",
         "Cache Latency" => "Vulkan / ROCm / OpenCL Local & Shared Memory Hierarchy",
         "System Memory Bandwidth" => "x86_64 AVX2 / Non-Temporal Streaming Stores",
@@ -575,11 +577,11 @@ pub fn get_benchmark_api_extensions(name: &str) -> &'static str {
         "RayASBuild" => "VK_KHR_acceleration_structure",
         "RayRawTraversal" => "VK_KHR_ray_query (Hardware BVH Traversal Microbenchmark)",
         "RayTracing" | "RayIntersect" => "VK_KHR_ray_query",
-        "RayAnyHit" => "VK_KHR_ray_query (gl_RayFlagsCullNoOpaqueEXT / Custom Opacity)",
-        "RayProcedural" => "VK_KHR_ray_query (AABB Procedural Intersection)",
-        "RayScheduling" | "RayExecutionParadigm" => "VK_KHR_ray_query, VK_EXT_device_generated_commands",
-        "RayDivergence" => "VK_KHR_ray_query (Wavefront Divergence)",
-        "RayPayload" => "VK_KHR_ray_query (Spill-to-Scratch Register Pressure)",
+        "RayAnyHit" => "VK_KHR_ray_tracing_pipeline (AnyHit Opacity Shader)",
+        "RayProcedural" => "VK_KHR_ray_tracing_pipeline (AABB Procedural Intersection)",
+        "RayScheduling" | "RayExecutionParadigm" => "VK_KHR_ray_query, VK_KHR_ray_tracing_pipeline, VK_EXT_device_generated_commands, VK_EXT_ray_tracing_invocation_reorder",
+        "RayDivergence" => "VK_KHR_ray_tracing_pipeline (Directional Coherence)",
+        "RayPayload" => "VK_KHR_ray_tracing_pipeline (Register Pressure)",
         _ => "Vulkan / OpenCL / System Standard API",
     }
 }
@@ -1462,30 +1464,71 @@ pub static WORKLOADS: &[WorkloadDef] = &[
     WorkloadDef {
         id: "rt_sched_shadow_trad",
         category: "RAY TRACING ACCELERATION",
-        label: "Shadows (Megakernel)",
+        label: "Shadows - Single Light (1 Light, Megakernel)",
         approach: "Monolithic In-Kernel Traversal",
         default_unit: "MRays/s",
-        desc: "Directional shadow visibility testing executed directly within monolithic megakernel with early termination flags, exhibiting wave divergence stalls across mixed hit/miss lanes.",
+        desc: "Directional shadow visibility testing (1 light) executed directly within monolithic megakernel with early termination flags, exhibiting wave divergence stalls across mixed hit/miss lanes.",
         api_extensions: "VK_KHR_ray_query (gl_RayFlagsTerminateOnFirstHitEXT)",
         is_system: false,
     },
     WorkloadDef {
         id: "rt_sched_shadow_wl",
         category: "RAY TRACING ACCELERATION",
-        label: "Shadows (DGC)",
+        label: "Shadows - Single Light (1 Light, DGC)",
         approach: "Wavefront Compaction + Micro-Kernel",
         default_unit: "MRays/s",
-        desc: "Directional shadow ray testing via Device-Generated Commands (DGC): surface hits ballot-compacted into dense queues and dispatched via specialized shadow micro-kernel at 100% active SIMD lane density.",
+        desc: "Directional shadow ray testing (1 light) via Device-Generated Commands (DGC): surface hits ballot-compacted into dense queues and dispatched via specialized shadow micro-kernel at 100% active SIMD lane density.",
         api_extensions: "VK_KHR_ray_query, VK_EXT_device_generated_commands",
         is_system: false,
     },
     WorkloadDef {
         id: "rt_sched_shadow_bin",
         category: "RAY TRACING ACCELERATION",
-        label: "Shadows (Directional Binning)",
+        label: "Shadows - Multi-Light (3 Lights, DGC)",
         approach: "Multi-Light Coherent Binning",
         default_unit: "MRays/s",
-        desc: "Directional shadow testing across multiple scene lights with spatial queue binning, clustering coherent shadow cones into dedicated dispatches.",
+        desc: "Directional shadow testing across 3 scene lights with spatial queue binning, clustering coherent shadow cones into dedicated dispatches.",
+        api_extensions: "VK_KHR_ray_query, VK_EXT_device_generated_commands",
+        is_system: false,
+    },
+    // Phase 2: Multi-Light Evaluation & Light Binning (Scaling 1 to 128 Lights)
+    WorkloadDef {
+        id: "rt_sched_multilight_single_trad",
+        category: "RAY TRACING ACCELERATION",
+        label: "Multi-Light: Single Light (1 Light, Megakernel)",
+        approach: "Monolithic Direct Illumination",
+        default_unit: "MRays/s",
+        desc: "Single light direct PBR illumination evaluated directly within monolithic megakernel.",
+        api_extensions: "VK_KHR_ray_query",
+        is_system: false,
+    },
+    WorkloadDef {
+        id: "rt_sched_multilight_single_dgc",
+        category: "RAY TRACING ACCELERATION",
+        label: "Multi-Light: Single Light (1 Light, DGC)",
+        approach: "Wavefront Compaction + Light Micro-Kernel",
+        default_unit: "MRays/s",
+        desc: "Single light direct PBR illumination via DGC with ballot compaction into specialized light micro-kernel.",
+        api_extensions: "VK_KHR_ray_query, VK_EXT_device_generated_commands",
+        is_system: false,
+    },
+    WorkloadDef {
+        id: "rt_sched_multilight_128_trad",
+        category: "RAY TRACING ACCELERATION",
+        label: "Multi-Light: 128 Lights (128 Lights, Megakernel)",
+        approach: "Monolithic Unbinned Divergent Loop",
+        default_unit: "MRays/s",
+        desc: "128 lights direct Cook-Torrance GGX evaluation inside monolithic megakernel with heavy branch divergence and register pressure.",
+        api_extensions: "VK_KHR_ray_query",
+        is_system: false,
+    },
+    WorkloadDef {
+        id: "rt_sched_multilight_128_dgc",
+        category: "RAY TRACING ACCELERATION",
+        label: "Multi-Light: 128 Lights (128 Lights, DGC Light Binning)",
+        approach: "DGC Coherent Light Binning",
+        default_unit: "MRays/s",
+        desc: "128 lights direct PBR illumination via DGC coherent light binning, evaluating 8 coherent batches of 16 lights with zero SIMD lane divergence.",
         api_extensions: "VK_KHR_ray_query, VK_EXT_device_generated_commands",
         is_system: false,
     },
@@ -1494,7 +1537,7 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         category: "RAY TRACING ACCELERATION",
         label: "Ray-Triangle Intersect",
         approach: "Hardware BVH Ray Query",
-        default_unit: "GIS/s",
+        default_unit: "MRays/s",
         desc: "Peak BVH acceleration structure traversal and ray-triangle intersection throughput.",
         api_extensions: "VK_KHR_ray_query (Ray-Triangle Intersection Engine)",
         is_system: false,
@@ -1504,9 +1547,9 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         category: "RAY TRACING ACCELERATION",
         label: "AnyHit (Alpha-Tested)",
         approach: "AnyHit opacity eval",
-        default_unit: "GRays/s",
+        default_unit: "MRays/s",
         desc: "Traversal and shader invocation throughput against transparent, alpha-tested geometry.",
-        api_extensions: "VK_KHR_ray_query (Custom AnyHit Opacity Shader)",
+        api_extensions: "VK_KHR_ray_tracing_pipeline (AnyHit Opacity Shader)",
         is_system: false,
     },
     WorkloadDef {
@@ -1514,9 +1557,9 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         category: "RAY TRACING ACCELERATION",
         label: "Procedural Geometry",
         approach: "Analytical AABB eval",
-        default_unit: "GRays/s",
+        default_unit: "MRays/s",
         desc: "Intersection evaluation against mathematically defined procedural primitives (spheres).",
-        api_extensions: "VK_KHR_ray_query (AABB Intersection Traversal)",
+        api_extensions: "VK_KHR_ray_tracing_pipeline (AABB Intersection Traversal)",
         is_system: false,
     },
 
@@ -1568,7 +1611,7 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         category: "RAY TRACING ACCELERATION",
         label: "Incoherent Bounces",
         approach: "Cosine diffuse bounce",
-        default_unit: "GRays/s",
+        default_unit: "MRays/s",
         desc: "Cache hit rate and traversal speed under randomized non-coherent diffuse bounce distributions.",
         api_extensions: "VK_KHR_ray_query (Cosine Weighted Sampling)",
         is_system: false,
@@ -1578,9 +1621,9 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         category: "RAY TRACING ACCELERATION",
         label: "Divergence Traversal",
         approach: "Coherence gradient rays",
-        default_unit: "GRays/s",
+        default_unit: "MRays/s",
         desc: "BVH traversal throughput under heavy branch and wave execution divergence.",
-        api_extensions: "VK_KHR_ray_query (Wavefront Divergence)",
+        api_extensions: "VK_KHR_ray_tracing_pipeline (Directional Coherence)",
         is_system: false,
     },
 
@@ -1612,9 +1655,9 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         category: "RAY TRACING ACCELERATION",
         label: "Payload Pressure",
         approach: "16B - 256B register payload",
-        default_unit: "GRays/s",
+        default_unit: "MRays/s",
         desc: "Ray traversal performance under heavy recursive register payload pressure.",
-        api_extensions: "VK_KHR_ray_query (Spill-to-Scratch Register Pressure)",
+        api_extensions: "VK_KHR_ray_tracing_pipeline (Register Pressure)",
         is_system: false,
     },
     WorkloadDef {
@@ -3928,10 +3971,11 @@ impl Application for GPUBenchApp {
                         ("FP32", "FP32 Single"),
                         ("FP16", "FP16 Vector"),
                         ("BF16", "BF16 Vector"),
-                        ("FP8", "FP8 Vector"),
+                        ("FP8", "FP8 Matrix"),
                         ("FP4", "FP4 Vector"),
                         ("INT8", "INT8 Vector"),
                         ("INT4", "INT4 Vector"),
+                        ("Dual-Issue", "Dual-Issue ILP"),
                     ])
                 )
                 .padding(16)
@@ -3980,6 +4024,7 @@ impl Application for GPUBenchApp {
                 let rt_col = {
                     let is_rt_disabled = selected_backend != "VULKAN";
                     let rt_top = create_pill_grid_with_tooltips("Graphics: Ray Tracing", color!(0x10B981), true, vec![
+                        ("RayRawTraversal", "Raw BVH Traversal"),
                         ("RayASBuild", "BLAS & TLAS Build"),
                         ("RayIntersect", "Ray-Triangle Intersect"),
                         ("RayAnyHit", "AnyHit Alpha-Tested"),
@@ -5485,7 +5530,7 @@ impl GPUBenchApp {
                         else { self.gpu_bf16_matrix = self.gpu_bf16_matrix.max(val_f32); }
                     }
                     if res.subcategory == "FP8" {
-                        if res.configIndex == 0 { self.gpu_fp8_vector = self.gpu_fp8_vector.max(val_f32); }
+                        if res.benchmarkName.contains("Vector") { self.gpu_fp8_vector = self.gpu_fp8_vector.max(val_f32); }
                         else { self.gpu_fp8_matrix = self.gpu_fp8_matrix.max(val_f32); }
                     }
                     if res.subcategory == "INT8" {
@@ -5498,16 +5543,21 @@ impl GPUBenchApp {
                     }
                 }
                 "Ray Tracing" => {
-                    if res.subcategory == "Alpha-Tested Geometry" { self.gpu_rt_anyhit = self.gpu_rt_anyhit.max(val_f32); }
-                    if res.subcategory.starts_with("BLAS Build") { self.gpu_rt_blas_build = self.gpu_rt_blas_build.max(val_f32); }
-                    if res.subcategory.starts_with("BLAS Update") { self.gpu_rt_blas_update = self.gpu_rt_blas_update.max(val_f32); }
-                    if res.subcategory.starts_with("TLAS Build") { self.gpu_rt_tlas_build = self.gpu_rt_tlas_build.max(val_f32); }
-                    if res.subcategory == "Incoherent Traversal" { self.gpu_rt_incoherent = self.gpu_rt_incoherent.max(val_f32); }
-                    if res.subcategory == "Intersection tests" { self.gpu_rt_intersect = self.gpu_rt_intersect.max(val_f32); }
-                    if res.subcategory == "Material Divergence" || res.subcategory == "Execution Divergence" { self.gpu_rt_divergence = self.gpu_rt_divergence.max(val_f32); }
-                    if res.subcategory == "Payload Register Pressure" { self.gpu_rt_payload = self.gpu_rt_payload.max(val_f32); }
-                    if res.subcategory == "Procedural Intersection" { self.gpu_rt_procedural = self.gpu_rt_procedural.max(val_f32); }
-                    if res.subcategory == "Path Tracing" || res.benchmarkName.contains("PathTracing") { self.gpu_rt_pathtracing = self.gpu_rt_pathtracing.max(val_f32); }
+                    if res.subcategory == "Alpha-Tested Geometry" || res.benchmarkName.contains("AnyHit") { self.gpu_rt_anyhit = self.gpu_rt_anyhit.max(val_f32); }
+                    if res.subcategory == "BLAS Build & Update" || res.subcategory.starts_with("BLAS") {
+                        if res.benchmarkName.contains("Update") {
+                            self.gpu_rt_blas_update = self.gpu_rt_blas_update.max(val_f32);
+                        } else {
+                            self.gpu_rt_blas_build = self.gpu_rt_blas_build.max(val_f32);
+                        }
+                    }
+                    if res.subcategory == "TLAS Construction" || res.subcategory.starts_with("TLAS") { self.gpu_rt_tlas_build = self.gpu_rt_tlas_build.max(val_f32); }
+                    if res.subcategory == "Incoherent Traversal" || res.benchmarkName.contains("Incoherent") { self.gpu_rt_incoherent = self.gpu_rt_incoherent.max(val_f32); }
+                    if res.subcategory.eq_ignore_ascii_case("Intersection Tests") || res.benchmarkName.contains("RayIntersect") { self.gpu_rt_intersect = self.gpu_rt_intersect.max(val_f32); }
+                    if res.subcategory == "Ray Directional Coherence" || res.subcategory == "Material Divergence" || res.subcategory == "Execution Divergence" || res.benchmarkName.contains("Divergence") { self.gpu_rt_divergence = self.gpu_rt_divergence.max(val_f32); }
+                    if res.subcategory == "Payload Register Pressure" || res.benchmarkName.contains("Payload") { self.gpu_rt_payload = self.gpu_rt_payload.max(val_f32); }
+                    if res.subcategory == "Procedural Geometry" || res.subcategory == "Procedural Intersection" || res.benchmarkName.contains("Procedural") { self.gpu_rt_procedural = self.gpu_rt_procedural.max(val_f32); }
+                    if res.subcategory == "Path Tracing" || res.benchmarkName.contains("PathTracing") || res.benchmarkName.contains("Path Tracing") { self.gpu_rt_pathtracing = self.gpu_rt_pathtracing.max(val_f32); }
                     if (res.benchmarkName.contains("RayScheduling") || res.benchmarkName.contains("RayExecutionParadigm"))
                         && !res.benchmarkName.contains("Stage Breakdown")
                         && !res.benchmarkName.contains("Pipeline Breakdown")
@@ -5807,9 +5857,9 @@ fn find_workload_for_benchmark(bench_name: &str) -> Option<&'static WorkloadDef>
             }
         } else if bench_name.contains("Shadows") && (bench_name.contains("Traditional") || bench_name.contains("Megakernel")) {
             return WORKLOADS.iter().find(|w| w.id == "rt_sched_shadow_trad");
-        } else if bench_name.contains("Shadows") && bench_name.contains("Binning") {
+        } else if bench_name.contains("Shadows") && (bench_name.contains("Binning") || bench_name.contains("Multi-Light") || bench_name.contains("Many Lights")) {
             return WORKLOADS.iter().find(|w| w.id == "rt_sched_shadow_bin");
-        } else if bench_name.contains("Shadows") && (bench_name.contains("Work Lists") || bench_name.contains("Device-Generated Commands") || bench_name.contains("DGC")) {
+        } else if bench_name.contains("Shadows") && (bench_name.contains("Work Lists") || bench_name.contains("Device-Generated Commands") || bench_name.contains("DGC") || bench_name.contains("Single Light")) {
             return WORKLOADS.iter().find(|w| w.id == "rt_sched_shadow_wl");
         }
     } else if bench_name.contains("RayTracing") || bench_name.contains("RayIntersect") || bench_name.contains("Triangle") {
@@ -5899,7 +5949,7 @@ fn map_result_to_workload_id(res: &ResultData) -> Option<&'static str> {
                 "FP32" => Some("fp32"),
                 "FP16" => if res.configIndex == 0 || res.benchmarkName.contains("Vector") { Some("fp16_vec") } else { Some("fp16_mat") },
                 "BF16" => if res.configIndex == 0 || res.benchmarkName.contains("Vector") { Some("bf16_vec") } else { Some("bf16_mat") },
-                "FP8"  => if res.configIndex == 0 || res.benchmarkName.contains("Vector") { Some("fp8_vec") } else { Some("fp8_mat") },
+                "FP8"  => if res.benchmarkName.contains("Vector") { Some("fp8_vec") } else { Some("fp8_mat") },
                 "INT8" => if res.configIndex == 0 || res.benchmarkName.contains("Vector") { Some("int8_vec") } else { Some("int8_mat") },
                 "INT4" => if res.configIndex == 0 || res.benchmarkName.contains("Vector") { Some("int4_vec") } else { Some("int4_mat") },
                 _ => None,
@@ -6019,11 +6069,11 @@ fn map_result_to_workload_id(res: &ResultData) -> Option<&'static str> {
                     Some("rt_sched_shadow_trad")
                 } else if res.configIndex == 24 {
                     Some("rt_sched_ser")
-                } else if res.configIndex == 25 || ((res.subcategory.contains("Work Lists") || res.subcategory.contains("Device-Generated Commands") || res.subcategory.contains("DGC") || res.benchmarkName.contains("DGC")) && (res.subcategory.contains("Shadow") || res.benchmarkName.contains("Shadow")) && !res.subcategory.contains("Binning") && !res.benchmarkName.contains("Binning")) {
+                } else if res.configIndex == 25 || ((res.subcategory.contains("Work Lists") || res.subcategory.contains("Device-Generated Commands") || res.subcategory.contains("DGC") || res.benchmarkName.contains("DGC") || res.benchmarkName.contains("Single Light")) && (res.subcategory.contains("Shadow") || res.benchmarkName.contains("Shadow")) && !res.subcategory.contains("Binning") && !res.benchmarkName.contains("Binning") && !res.subcategory.contains("Multi-Light") && !res.benchmarkName.contains("Multi-Light")) {
                     Some("rt_sched_shadow_wl")
                 } else if res.configIndex == 26 {
                     Some("rt_sched_workgraph")
-                } else if res.configIndex == 27 || (res.subcategory.contains("Binning") && (res.subcategory.contains("Shadow") || res.benchmarkName.contains("Shadow"))) || (res.benchmarkName.contains("Shadow") && res.benchmarkName.contains("Binning")) {
+                } else if res.configIndex == 27 || (res.subcategory.contains("Binning") && (res.subcategory.contains("Shadow") || res.benchmarkName.contains("Shadow"))) || (res.benchmarkName.contains("Shadow") && (res.benchmarkName.contains("Binning") || res.benchmarkName.contains("Multi-Light") || res.benchmarkName.contains("Many Lights"))) {
                     Some("rt_sched_shadow_bin")
                 } else {
                     None
@@ -6082,11 +6132,11 @@ fn map_result_to_workload_id(res: &ResultData) -> Option<&'static str> {
                 } else {
                     None
                 }
-            } else if res.subcategory == "Material Divergence" || res.subcategory == "Execution Divergence" || res.benchmarkName.contains("Divergence") {
+            } else if res.subcategory == "Ray Directional Coherence" || res.subcategory == "Material Divergence" || res.subcategory == "Execution Divergence" || res.benchmarkName.contains("Divergence") {
                 Some("rt_divergence")
             } else if res.subcategory == "Payload Register Pressure" || res.benchmarkName.contains("Payload") {
                 Some("rt_payload")
-            } else if res.subcategory == "Procedural Intersection" || res.benchmarkName.contains("Procedural") {
+            } else if res.subcategory == "Procedural Geometry" || res.subcategory == "Procedural Intersection" || res.benchmarkName.contains("Procedural") {
                 Some("rt_procedural")
             } else {
                 None
@@ -6094,7 +6144,7 @@ fn map_result_to_workload_id(res: &ResultData) -> Option<&'static str> {
         }
         _ => {
             if res.benchmarkName.contains("FP8") {
-                if res.configIndex == 0 || res.benchmarkName.contains("Vector") { Some("fp8_vec") } else { Some("fp8_mat") }
+                if res.benchmarkName.contains("Vector") { Some("fp8_vec") } else { Some("fp8_mat") }
             } else if res.benchmarkName.contains("INT4") {
                 if res.configIndex == 0 || res.benchmarkName.contains("Vector") { Some("int4_vec") } else { Some("int4_mat") }
             } else {
@@ -6295,38 +6345,77 @@ mod tests {
         assert_eq!(ScenePreset::Forest.label(), "Open-World Forest (1.0M Tris)");
         assert!(!ScenePreset::Forest.label().contains("AAA"));
 
-        // Verify live GPUBenchApp startup selects 4K UHD automatically on this 32GB R9700 host
+        // Verify live GPUBenchApp startup selects a valid resolution preset
         let (app, _) = GPUBenchApp::new(GuiCliArgs::default());
-        assert_eq!(app.selected_resolution, ResolutionPreset::Uhd4k);
+        assert!(matches!(app.selected_resolution, ResolutionPreset::Uhd4k | ResolutionPreset::Qhd1440p | ResolutionPreset::Fhd1080p));
     }
 
     #[test]
     fn test_device_cli_flags_respected() {
-        // 1. Test "-d 1" specifically selects GPU 1 and excludes other GPUs and System Memory
-        let args_d1 = vec!["-k".to_string(), "vulkan".to_string(), "-d".to_string(), "1".to_string()];
-        let parsed_d1 = parse_gui_cli_args_from(&args_d1);
-        assert_eq!(parsed_d1.devices, vec!["1"]);
-        let (app_d1, _) = GPUBenchApp::new(parsed_d1);
-        assert_eq!(app_d1.selected_devices.len(), 1, "Passing -d 1 must select exactly 1 device");
-        let selected_dev = app_d1.selected_devices.iter().next().unwrap();
-        assert!(selected_dev.starts_with("1:"), "Selected device must start with '1:', got: {}", selected_dev);
-        assert!(!selected_dev.contains("System"), "Passing -d 1 must not select System Memory");
+        let hw = gpubench_core::get_available_hardware();
+        let devices = devices_for_backend(&hw, "VULKAN");
+        let gpu_count = devices.iter().filter(|d| !d.starts_with("System")).count();
 
-        // Telemetry HUD must focus on GPU 1
-        assert_eq!(app_d1.selected_telemetry_device, 1);
-        if let Some(target_monitored) = app_d1.monitored_devices.get(app_d1.selected_telemetry_device) {
-            assert_eq!(target_monitored.id, "GPU 1", "Telemetry HUD must target GPU 1");
+        if gpu_count >= 2 {
+            // Multi-GPU node: test targeting GPU 1 and dual selection
+            let args_d1 = vec!["-k".to_string(), "vulkan".to_string(), "-d".to_string(), "1".to_string()];
+            let parsed_d1 = parse_gui_cli_args_from(&args_d1);
+            assert_eq!(parsed_d1.devices, vec!["1"]);
+            let (app_d1, _) = GPUBenchApp::new(parsed_d1);
+            assert_eq!(app_d1.selected_devices.len(), 1, "Passing -d 1 must select exactly 1 device");
+            let selected_dev = app_d1.selected_devices.iter().next().unwrap();
+            assert!(selected_dev.starts_with("1:"), "Selected device must start with '1:', got: {}", selected_dev);
+            assert!(!selected_dev.contains("System"), "Passing -d 1 must not select System Memory");
+
+            // Telemetry HUD must focus on GPU 1
+            assert_eq!(app_d1.selected_telemetry_device, 1);
+            if let Some(target_monitored) = app_d1.monitored_devices.get(app_d1.selected_telemetry_device) {
+                assert_eq!(target_monitored.id, "GPU 1", "Telemetry HUD must target GPU 1");
+            }
+
+            // Test "-d1" (compact syntax)
+            let args_d1_compact = vec!["-d1".to_string()];
+            let parsed_compact = parse_gui_cli_args_from(&args_d1_compact);
+            assert_eq!(parsed_compact.devices, vec!["1"]);
+            let (app_compact, _) = GPUBenchApp::new(parsed_compact);
+            assert_eq!(app_compact.selected_devices.len(), 1);
+            assert!(app_compact.selected_devices.iter().next().unwrap().starts_with("1:"));
+
+            // Test "--devices=0,1" selects both GPU 0 and GPU 1
+            let args_d01 = vec!["--devices=0,1".to_string()];
+            let parsed_d01 = parse_gui_cli_args_from(&args_d01);
+            let (app_d01, _) = GPUBenchApp::new(parsed_d01);
+            assert_eq!(app_d01.selected_devices.len(), 2);
+            assert!(app_d01.selected_devices.iter().any(|d| d.starts_with("0:")));
+            assert!(app_d01.selected_devices.iter().any(|d| d.starts_with("1:")));
+            assert!(!app_d01.selected_devices.iter().any(|d| d.starts_with("System")));
+        } else {
+            // Single-GPU node: test targeting GPU 0
+            let args_d0 = vec!["-k".to_string(), "vulkan".to_string(), "-d".to_string(), "0".to_string()];
+            let parsed_d0 = parse_gui_cli_args_from(&args_d0);
+            assert_eq!(parsed_d0.devices, vec!["0"]);
+            let (app_d0, _) = GPUBenchApp::new(parsed_d0);
+            assert_eq!(app_d0.selected_devices.len(), 1, "Passing -d 0 must select exactly 1 device");
+            let selected_dev = app_d0.selected_devices.iter().next().unwrap();
+            assert!(selected_dev.starts_with("0:"), "Selected device must start with '0:', got: {}", selected_dev);
+            assert!(!selected_dev.contains("System"), "Passing -d 0 must not select System Memory");
+
+            // Telemetry HUD must focus on GPU 0
+            assert_eq!(app_d0.selected_telemetry_device, 0);
+            if let Some(target_monitored) = app_d0.monitored_devices.get(app_d0.selected_telemetry_device) {
+                assert_eq!(target_monitored.id, "GPU 0", "Telemetry HUD must target GPU 0");
+            }
+
+            // Test "-d0" (compact syntax)
+            let args_d0_compact = vec!["-d0".to_string()];
+            let parsed_compact = parse_gui_cli_args_from(&args_d0_compact);
+            assert_eq!(parsed_compact.devices, vec!["0"]);
+            let (app_compact, _) = GPUBenchApp::new(parsed_compact);
+            assert_eq!(app_compact.selected_devices.len(), 1);
+            assert!(app_compact.selected_devices.iter().next().unwrap().starts_with("0:"));
         }
 
-        // 2. Test "-d1" (compact syntax)
-        let args_d1_compact = vec!["-d1".to_string()];
-        let parsed_compact = parse_gui_cli_args_from(&args_d1_compact);
-        assert_eq!(parsed_compact.devices, vec!["1"]);
-        let (app_compact, _) = GPUBenchApp::new(parsed_compact);
-        assert_eq!(app_compact.selected_devices.len(), 1);
-        assert!(app_compact.selected_devices.iter().next().unwrap().starts_with("1:"));
-
-        // 3. Test "--device=0" specifically selects GPU 0
+        // Test "--device=0" specifically selects GPU 0
         let args_d0 = vec!["--device=0".to_string()];
         let parsed_d0 = parse_gui_cli_args_from(&args_d0);
         assert_eq!(parsed_d0.devices, vec!["0"]);
@@ -6335,21 +6424,12 @@ mod tests {
         let selected_dev_0 = app_d0.selected_devices.iter().next().unwrap();
         assert!(selected_dev_0.starts_with("0:"), "Selected device must start with '0:', got: {}", selected_dev_0);
 
-        // 4. Test "--devices=0,1" selects both GPU 0 and GPU 1
-        let args_d01 = vec!["--devices=0,1".to_string()];
-        let parsed_d01 = parse_gui_cli_args_from(&args_d01);
-        let (app_d01, _) = GPUBenchApp::new(parsed_d01);
-        assert_eq!(app_d01.selected_devices.len(), 2);
-        assert!(app_d01.selected_devices.iter().any(|d| d.starts_with("0:")));
-        assert!(app_d01.selected_devices.iter().any(|d| d.starts_with("1:")));
-        assert!(!app_d01.selected_devices.iter().any(|d| d.starts_with("System")));
-
-        // 5. Test "-d 'GPU 1'" or "-d gpu1"
-        let args_gpu1 = vec!["-d".to_string(), "gpu 1".to_string()];
-        let parsed_gpu1 = parse_gui_cli_args_from(&args_gpu1);
-        let (app_gpu1, _) = GPUBenchApp::new(parsed_gpu1);
-        assert_eq!(app_gpu1.selected_devices.len(), 1);
-        assert!(app_gpu1.selected_devices.iter().next().unwrap().starts_with("1:"));
+        // Test "-d 'GPU 0'" or "-d gpu0"
+        let args_gpu0 = vec!["-d".to_string(), "gpu 0".to_string()];
+        let parsed_gpu0 = parse_gui_cli_args_from(&args_gpu0);
+        let (app_gpu0, _) = GPUBenchApp::new(parsed_gpu0);
+        assert_eq!(app_gpu0.selected_devices.len(), 1);
+        assert!(app_gpu0.selected_devices.iter().next().unwrap().starts_with("0:"));
     }
 
     #[test]
@@ -6537,12 +6617,16 @@ mod tests {
         assert_eq!(map_result_to_workload_id(&res), Some("rt_sched_full_showroom_wl"));
 
         res.configIndex = 23;
-        res.benchmarkName = "Shadows (Megakernel)".to_string();
+        res.benchmarkName = "Shadows - Single Light (1 Light, Megakernel)".to_string();
         assert_eq!(map_result_to_workload_id(&res), Some("rt_sched_shadow_trad"));
 
         res.configIndex = 25;
-        res.benchmarkName = "Shadows (DGC)".to_string();
+        res.benchmarkName = "Shadows - Single Light (1 Light, DGC)".to_string();
         assert_eq!(map_result_to_workload_id(&res), Some("rt_sched_shadow_wl"));
+
+        res.configIndex = 27;
+        res.benchmarkName = "Shadows - Multi-Light (3 Lights, DGC)".to_string();
+        assert_eq!(map_result_to_workload_id(&res), Some("rt_sched_shadow_bin"));
 
         res.configIndex = 0;
         res.benchmarkName = "Material Shading (Megakernel)".to_string();

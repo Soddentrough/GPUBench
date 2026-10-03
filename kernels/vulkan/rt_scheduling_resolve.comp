@@ -22,7 +22,8 @@ layout(set = 0, binding = 1) buffer IndirectCommandsBuffer {
 
 layout(push_constant) uniform ResolvePC {
     uint resetQueue;
-    uint dgcMode; // 0: legacy only, 1: standard compacted DGC, 2: consolidated octant DGC
+    uint dgcMode; // 0: legacy only, 1: standard compacted DGC, 2: consolidated octant DGC, 3: ping-pong bounce
+    uint bounceIndex;
 } rpc;
 
 layout(std430, set = 0, binding = 2) buffer DGCSequenceCountBuffer {
@@ -103,12 +104,13 @@ void main() {
             }
         }
     } else if (rpc.dgcMode == 3u) {
-        // Ping-Pong Bounce Mode (Config 6 & 29)
+        // Ping-Pong Bounce Mode (Config 5 & 24)
         if (id == 0u) {
             uint inQ = (rpc.resetQueue == 1u) ? 0u : ((rpc.resetQueue == 0u) ? 1u : 0u);
             uint count = worklist.queueCounters[Q_SNAPSHOT_IDX(inQ)];
             if (count > 0u) {
-                DGCSequenceItem item = dgcData.templates[inQ];
+                uint templateIdx = 16u + (rpc.bounceIndex > 0u ? rpc.bounceIndex - 1u : 0u);
+                DGCSequenceItem item = dgcData.templates[templateIdx];
                 item.cmdX = (count + 31u) / 32u;
                 item.cmdY = 1u;
                 item.cmdZ = 1u;
@@ -142,5 +144,26 @@ void main() {
         if (id == 0u) {
             dgcCount.dynamicSequenceCount = totalActive;
         }
+    } else if (rpc.dgcMode == 5u || rpc.dgcMode == 6u) {
+        // Multi-Light Evaluation (dgcMode == 5u: Single Light, dgcMode == 6u: 128 Lights Binning)
+        if (id == 0u) {
+            uint count = worklist.queueCounters[Q_SNAPSHOT_IDX(0)];
+            indirectCmds.commands[0].x = (count + 31u) / 32u;
+            indirectCmds.commands[0].y = (count > 0u) ? 1u : 0u;
+            indirectCmds.commands[0].z = (count > 0u) ? 1u : 0u;
+
+            uint templateIdx = (rpc.dgcMode == 6u) ? 13u : 12u;
+            if (count > 0u) {
+                DGCSequenceItem item = dgcData.templates[templateIdx];
+                item.cmdX = (count + 31u) / 32u;
+                item.cmdY = 1u;
+                item.cmdZ = 1u;
+                dgcData.compacted[0] = item;
+                dgcCount.dynamicSequenceCount = 1u;
+            } else {
+                dgcCount.dynamicSequenceCount = 0u;
+            }
+        }
     }
 }
+

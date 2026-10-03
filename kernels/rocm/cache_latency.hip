@@ -16,7 +16,7 @@ extern "C" __global__ void run_benchmark(uint* buffer, uint* pc) {
 
     if (stride == 0xFFFFFFFF) { buffer[1] = mask; }
 
-    if (val > 0) {
+    if (val == 0xDEADBEEF) {
         buffer[0] = val;
     }
 }

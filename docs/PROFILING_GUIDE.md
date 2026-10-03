@@ -230,8 +230,8 @@ During execution, look for these packets emitted by the GPU Command Processor:
 | **Config 10** | Incoherent Diffuse GI (DGC) | 4 | 2 | 16 | 10 / 2 |
 | **Config 14** | Scene Render: Full Frame (DGC) | 4 | 2 | 18 | 12 / 2 |
 | **Config 22** | Primary Rays (DGC) | 4 | 2 | 18 | 12 / 2 |
-| **Config 25** | Shadows (DGC) | 4 | 2 | 18 | 12 / 2 |
-| **Config 27** | Shadows (Multi-Light Binning) | 4 | 2 | 18 | 12 / 2 |
+| **Config 25** | Shadows - Single Light (1 Light, DGC) | 4 | 2 | 18 | 12 / 2 |
+| **Config 27** | Shadows - Multi-Light (3 Lights, DGC) | 4 | 2 | 18 | 12 / 2 |
 | **Config 29** | Path Tracing (16 SPP) (DGC) | 96 | 64 | 384 | 288 / 32 |
 
 ---
@@ -279,8 +279,8 @@ Tested across all 8 configurations against baseline monolithic megakernels at 4K
 | **Incoherent Ray Tracing** (Directional Binning) | Config 8 | Config 10 | 203.53 MRays/s | **1,807.70 MRays/s** | **8.88x** | 100.00% (PSNR 120 dB) |
 | **Total Scene Render** (Material Sorting) | Config 12 | Config 14 | 101.90 MRays/s | **306.51 MRays/s** | **3.01x** | 100.00% (PSNR 120 dB) |
 | **Full Scene Ray Tracing** (PBR - Morton Z-Curve) | Config 21 | Config 22 | 113.47 MRays/s | **308.89 MRays/s** | **2.72x** | 100.00% (PSNR 120 dB) |
-| **Directional Shadows** (Wavefront Compaction) | Config 23 | Config 25 | 455.28 MRays/s | **2,257.62 MRays/s** | **4.96x** | 100.00% (PSNR 120 dB) |
-| **Directional Shadows** (Multi-Light Binning) | Config 23 | Config 27 | 310.26 MRays/s | **2,331.30 MRays/s** | **7.51x** | 100.00% (PSNR 120 dB) |
+| **Directional Shadows** (Single Light - 1 Light, DGC) | Config 23 | Config 25 | 455.28 MRays/s | **2,257.62 MRays/s** | **4.96x** | 100.00% (PSNR 120 dB) |
+| **Directional Shadows** (Multi-Light - 3 Lights, DGC) | Config 23 | Config 27 | 310.26 MRays/s | **2,331.30 MRays/s** | **7.51x** | 100.00% (PSNR 120 dB) |
 | **Full Scene Path Tracing** (16 SPP Multi-Bounce) | Config 28 | Config 29 | 13.41 MRays/s | **101.24 MRays/s** | **7.55x** | 100.00% (PSNR 120 dB) |
 
 ### 8.2 Visual & Analytical Parity Verification

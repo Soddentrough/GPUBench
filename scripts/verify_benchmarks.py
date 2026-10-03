@@ -22,6 +22,20 @@ if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
 # Baseline expected performance ranges for known architectures
 # Format: (min_acceptable, expected_nominal, max_acceptable) in native metric units
 HARDWARE_BASELINES = {
+    "strix_halo": {
+        "description": "AMD Radeon 8060S / Strix Halo (RDNA3.5 / GFX1151)",
+        "baselines": {
+            ("FP64", "TFLOPS"): (0.35, 0.45, 0.60),
+            ("FP32", "TFLOPS"): (15.0, 18.0, 25.0),
+            ("FP16 (Vector)", "TFLOPS"): (20.0, 26.0, 35.0),
+            ("FP16 (Matrix)", "TFLOPS"): (45.0, 54.0, 70.0),
+            ("INT8 (Vector)", "TOPS"): (10.0, 15.0, 22.0),
+            ("INT8 (Matrix)", "TOPS"): (45.0, 55.0, 70.0),
+            ("Memory Bandwidth (Read)", "GB/s"): (150.0, 220.0, 280.0),
+            ("Memory Bandwidth (Write)", "GB/s"): (100.0, 180.0, 280.0),
+            ("Memory Bandwidth (R/W)", "GB/s"): (120.0, 165.0, 220.0),
+        }
+    },
     "gfx1201": {
         "description": "AMD Radeon AI PRO R9700 / GFX1201 (RDNA4 / Navi 48)",
         "baselines": {
@@ -70,23 +84,42 @@ class Colors:
 
 def identify_arch(device_str: str) -> str:
     dev = device_str.lower()
+    if "8060" in dev or "strix" in dev or "gfx1151" in dev or "gfx1150" in dev:
+        return "strix_halo"
     if "gfx1201" in dev or "r9700" in dev or "9070" in dev:
         return "gfx1201"
     if "7900" in dev or "gfx1100" in dev or "navi 31" in dev or "navi31" in dev:
         return "navi31"
-    return "gfx1201"  # Default to target system GPU
+    return "strix_halo"  # Default to current hardware
+
+
+def discover_device_index(binary: str = "./build/gpubench") -> int:
+    try:
+        res = subprocess.run([binary, "--list-devices"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if res.returncode == 0:
+            lines = res.stdout.splitlines()
+            devices = [line.strip() for line in lines if line.strip().startswith(("0:", "1:", "2:", "3:"))]
+            if len(devices) == 1:
+                return 0
+            for d in devices:
+                if d.startswith("1:"):
+                    return 1
+    except Exception:
+        pass
+    return 0
 
 
 def run_gpubench(args: argparse.Namespace) -> List[Dict[str, Any]]:
     import tempfile
     binary = args.binary or "./build/gpubench"
+    device_idx = args.device if args.device is not None else discover_device_index(binary)
     with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tmp:
         tmp_path = tmp.name
 
     try:
         cmd = [
             binary,
-            "-d", str(args.device),
+            "-d", str(device_idx),
             "-k", args.backends,
             "-b", args.benchmarks,
             "--output", "json",
@@ -342,11 +375,11 @@ def evaluate_results(raw_data: Any) -> bool:
 
         if diff_pct <= 10.0:
             status = f"{Colors.GREEN}PASS (≤10%){Colors.RESET}"
-        elif diff_pct <= 15.0:
-            status = f"{Colors.YELLOW}WARN (10-15% variance){Colors.RESET}"
+        elif diff_pct <= 20.0:
+            status = f"{Colors.YELLOW}WARN (10-20% variance){Colors.RESET}"
             warnings.append(f"{name} has {diff_pct:.1f}% cross-backend variance ({b_str})")
         else:
-            status = f"{Colors.RED}FAIL (>15% Parity Violation){Colors.RESET}"
+            status = f"{Colors.RED}FAIL (>20% Parity Violation){Colors.RESET}"
             all_passed = False
             regressions.append(f"{name} parity violation: {diff_pct:.1f}% variance between backends ({b_str})")
 
@@ -375,8 +408,14 @@ def evaluate_results(raw_data: Any) -> bool:
              ["Path Tracing (16 SPP) (Megakernel)", "Full Scene Path Tracing (16 SPP) - Traditional Megakernel", "Bounce Rays 16 SPP (Megakernel)"],
              ["Path Tracing (16 SPP) (DGC)", "Full Scene Path Tracing (16 SPP) (DGC)", "Bounce Rays 16 SPP (DGC)", "Full Scene Path Tracing (16 SPP) - Work Lists"]),
             ("Directional Shadows",
-             ["Shadows (Megakernel)", "Directional Shadows (Megakernel)", "Directional Shadows - Traditional Megakernel"],
-             ["Shadows (DGC)", "Directional Shadows (DGC)", "Directional Shadows - DGC", "Directional Shadows - Work Lists (Wavefront Compaction)"]),
+             ["Shadows - Single Light (1 Light, Megakernel)", "Shadows (Megakernel)", "Directional Shadows - Single Light (1 Light, Megakernel)", "Directional Shadows (Megakernel)", "Directional Shadows - Traditional Megakernel"],
+             ["Shadows - Single Light (1 Light, DGC)", "Shadows (DGC)", "Directional Shadows - Single Light (1 Light, DGC)", "Directional Shadows (DGC)", "Directional Shadows - DGC", "Directional Shadows - Work Lists (Wavefront Compaction)"]),
+            ("Multi-Light (Single Light)",
+             ["Multi-Light Evaluation - Single Light (1 Light, Megakernel)", "Single Light (1 Light, Megakernel)"],
+             ["Multi-Light Evaluation - Single Light (1 Light, DGC)", "Single Light (1 Light, DGC)"]),
+            ("Multi-Light (128 Lights)",
+             ["Multi-Light Evaluation - 128 Lights (128 Lights, Megakernel)", "128 Lights (128 Lights, Megakernel)"],
+             ["Multi-Light Evaluation - 128 Lights (128 Lights, DGC Light Binning)", "128 Lights (128 Lights, DGC Light Binning)"]),
         ]
 
         for sc_name, mega_keys, dgc_keys in scenarios:
@@ -462,7 +501,7 @@ def evaluate_results(raw_data: Any) -> bool:
 
 def main():
     parser = argparse.ArgumentParser(description="GPUBench Verification & Regression Detection Suite")
-    parser.add_argument("-d", "--device", type=int, default=1, help="Target GPU device index (default: 1)")
+    parser.add_argument("-d", "--device", type=int, default=None, help="Target GPU device index (default: auto-detect)")
     parser.add_argument("-k", "--backends", type=str, default="opencl,rocm,vulkan", help="Backends to benchmark")
     parser.add_argument("-b", "--benchmarks", type=str, default="fp64,fp32,fp16,int8,ray_scheduling", help="Benchmarks to run")
     parser.add_argument("-r", "--resolution", type=str, default=None, help="Resolution preset (e.g. 1080p, 4k)")

@@ -72,6 +72,8 @@ public:
   void notifyKernelCreated(const std::string &kernel_name) override;
   void setVerbose(bool v) override { verbose = v; }
   bool isVerbose() const override { return verbose; }
+  void setQuiet(bool q) override { quiet = q; }
+  bool isQuiet() const override { return quiet; }
 
   VkPhysicalDevice getVulkanPhysicalDevice() const override {
     return physicalDevice;
@@ -250,6 +252,7 @@ private:
   mutable std::vector<DeviceInfo> deviceInfos;
   uint32_t selectedDeviceIndex = 0;
   bool verbose = false;
+  bool quiet = false;
   bool debug = false;
 
   uint32_t expectedKernelCount = 0;

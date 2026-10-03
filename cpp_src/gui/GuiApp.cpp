@@ -728,7 +728,6 @@ void GuiApp::initializeBenchmarkCategories() {
             {"FP16", "FP16", "FP16 Half Precision - Matrix (WMMA)", "Compute", "TFLOPS", "Cooperative matrix / tensor half-precision throughput", true},
             {"BF16", "BF16", "BF16 Bfloat16 - Vector", "Compute", "TFLOPS", "Packed 16-bit bfloat16 vector arithmetic", true},
             {"BF16", "BF16", "BF16 Bfloat16 - Matrix (WMMA)", "Compute", "TFLOPS", "Cooperative matrix / tensor bfloat16 throughput", true},
-            {"FP8", "FP8", "FP8 Micro-Float - Vector", "Compute", "TFLOPS", "E4M3 / E5M2 8-bit floating point vector operations", true},
             {"FP8", "FP8", "FP8 Micro-Float - Matrix (WMMA)", "Compute", "TFLOPS", "E4M3 / E5M2 8-bit floating point cooperative matrix ops", true},
             {"FP4", "FP4", "FP4 Micro-Float - Vector", "Compute", "TFLOPS", "Sub-byte 4-bit quantized floating point throughput", true},
             {"INT8", "INT8", "INT8 Integer - Vector (DP4A)", "Compute", "TOPS", "INT8 dot product (DP4A) vector instructions", true},
@@ -820,12 +819,16 @@ void GuiApp::initializeBenchmarkCategories() {
             {"RayScheduling", "Total Scene Render", "Full Frame (DGC)", "Ray Tracing", "MRays/s", "Complete full-frame scene rendering via Device-Generated Commands (DGC)", true}
         }});
 
-        // Subgroup 3: Pipeline Stages & Scheduling (18 tests)
+        // Subgroup 3: Pipeline Stages & Scheduling (22 tests)
         cat.subgroups.push_back({"Pipeline Stages & Scheduling", "Ray Tracing", "RayScheduling", "Isolated rendering pipeline phases, shadows, shading, and queue compaction", {
-            {"RayScheduling", "Directional Shadows", "Shadows (Megakernel)", "Ray Tracing", "MRays/s", "Primary directional light shadow ray casting via megakernel", true},
-            {"RayScheduling", "Directional Shadows", "Shadows (RTP + SER)", "Ray Tracing", "MRays/s", "Directional shadows via dedicated RTP and SER", true},
-            {"RayScheduling", "Directional Shadows", "Shadows (DGC)", "Ray Tracing", "MRays/s", "Directional shadows with compacted wavefront stream", true},
-            {"RayScheduling", "Directional Shadows", "Shadows (Multi-Light Binning)", "Ray Tracing", "MRays/s", "Shadow rays binned and dispatched across multiple directional lights", true},
+            {"RayScheduling", "Directional Shadows", "Shadows - Single Light (1 Light, Megakernel)", "Ray Tracing", "MRays/s", "Single directional light shadow ray casting via megakernel", true},
+            {"RayScheduling", "Directional Shadows", "Shadows - Single Light (1 Light, RTP + SER)", "Ray Tracing", "MRays/s", "Single directional light shadows via dedicated RTP and SER", true},
+            {"RayScheduling", "Directional Shadows", "Shadows - Single Light (1 Light, DGC)", "Ray Tracing", "MRays/s", "Single directional light shadow ray casting with compacted wavefront stream via DGC", true},
+            {"RayScheduling", "Directional Shadows", "Shadows - Multi-Light (3 Lights, DGC)", "Ray Tracing", "MRays/s", "Shadow rays binned and dispatched across 3 directional lights via DGC", true},
+            {"RayScheduling", "Multi-Light Evaluation", "Single Light (1 Light, Megakernel)", "Ray Tracing", "MRays/s", "Multi-light evaluation baseline with 1 light via megakernel", true},
+            {"RayScheduling", "Multi-Light Evaluation", "Single Light (1 Light, DGC)", "Ray Tracing", "MRays/s", "Multi-light evaluation baseline with 1 light via DGC", true},
+            {"RayScheduling", "Multi-Light Evaluation", "128 Lights (128 Lights, Megakernel)", "Ray Tracing", "MRays/s", "Multi-light evaluation with 128 unbinned lights via divergent megakernel", true},
+            {"RayScheduling", "Multi-Light Evaluation", "128 Lights (128 Lights, DGC Light Binning)", "Ray Tracing", "MRays/s", "Multi-light evaluation with 128 lights via DGC coherent light binning", true},
             {"RayScheduling", "Material Shading", "Material (Megakernel)", "Ray Tracing", "MHits/s", "PBR material BSDF evaluation in monolithic compute pass", true},
             {"RayScheduling", "Material Shading", "Material (RTP + SER)", "Ray Tracing", "MHits/s", "Material shading via dedicated closest-hit shaders and SER", true},
             {"RayScheduling", "Material Shading", "Material (DGC)", "Ray Tracing", "MHits/s", "Material evaluation via sorted material work queues", true},
@@ -844,18 +847,18 @@ void GuiApp::initializeBenchmarkCategories() {
 
         // Subgroup 4: Hardware BVH & Divergence Stress (15 tests)
         cat.subgroups.push_back({"Hardware BVH & Divergence Stress", "Ray Tracing", "RayRawTraversal", "Hardware ray-box, triangle traversal, alpha foliage, and SIMD divergence", {
-            {"RayRawTraversal", "Hardware BVH Traversal", "Coherent Triangles", "Ray Tracing", "GIS/s", "Raw hardware BVH traversal of coherent triangle geometry", true},
+            {"RayRawTraversal", "Hardware BVH Traversal", "Coherent Triangles", "Ray Tracing", "MRays/s", "Raw hardware BVH traversal of coherent triangle geometry", true},
             {"RayRawTraversal", "Hardware BVH Traversal", "Deep Box Stress", "Ray Tracing", "MRays/s", "Deep multi-layer BVH box traversal stress", true},
-            {"RayIntersect", "Intersection Tests", "Ray-Triangle", "Ray Tracing", "GIS/s", "Hardware ray-triangle intersection test rate", true},
-            {"RayIntersect", "Intersection Tests", "Ray-Box", "Ray Tracing", "GIS/s", "Hardware ray-AABB box intersection test rate", true},
-            {"RayAnyHit", "Alpha-Tested Geometry", "100% Solid (Baseline)", "Ray Tracing", "MRays/s", "100% opaque alpha evaluation baseline", true},
+            {"RayIntersect", "Intersection Tests", "Ray-Triangle", "Ray Tracing", "MRays/s", "Hardware ray-triangle intersection test rate", true},
+            {"RayIntersect", "Intersection Tests", "Ray-Box", "Ray Tracing", "MRays/s", "Hardware ray-AABB box intersection test rate", true},
+            {"RayAnyHit", "Alpha-Tested Geometry", "100% Solid (Any-Hit Baseline)", "Ray Tracing", "MRays/s", "100% opaque alpha evaluation baseline", true},
             {"RayAnyHit", "Alpha-Tested Geometry", "50% Solid (Cutout Stress)", "Ray Tracing", "MRays/s", "50% solid / 50% transparent any-hit evaluation", true},
             {"RayProcedural", "Procedural Geometry", "AABB Spheres", "Ray Tracing", "MRays/s", "Procedural analytical sphere intersection in bounding box", true},
-            {"RayDivergence", "Ray Directional Coherence", "100% Mirror (Coherent)", "Ray Tracing", "MRays/s", "Directional coherence sweep - 100% mirror reflection", true},
-            {"RayDivergence", "Ray Directional Coherence", "75% Coherence", "Ray Tracing", "MRays/s", "Directional coherence sweep - 75% specular reflection", true},
-            {"RayDivergence", "Ray Directional Coherence", "50% Coherence", "Ray Tracing", "MRays/s", "Directional coherence sweep - 50% directional scattering", true},
-            {"RayDivergence", "Ray Directional Coherence", "25% Coherence", "Ray Tracing", "MRays/s", "Directional coherence sweep - 25% directional scattering", true},
-            {"RayDivergence", "Ray Directional Coherence", "0% Diffuse (Incoherent)", "Ray Tracing", "MRays/s", "Directional coherence sweep - 0% diffuse isotropic scattering", true},
+            {"RayDivergence", "Ray Directional Coherence", "0° Beam (Coherent)", "Ray Tracing", "MRays/s", "Directional coherence sweep - 0° coherent beam", true},
+            {"RayDivergence", "Ray Directional Coherence", "22.5° Cone Spread", "Ray Tracing", "MRays/s", "Directional coherence sweep - 22.5° cone spread", true},
+            {"RayDivergence", "Ray Directional Coherence", "45° Cone Spread", "Ray Tracing", "MRays/s", "Directional coherence sweep - 45° cone spread", true},
+            {"RayDivergence", "Ray Directional Coherence", "67.5° Cone Spread", "Ray Tracing", "MRays/s", "Directional coherence sweep - 67.5° cone spread", true},
+            {"RayDivergence", "Ray Directional Coherence", "90° Hemispherical (Incoherent)", "Ray Tracing", "MRays/s", "Directional coherence sweep - 90° hemispherical diffuse scattering", true},
             {"RayPayload", "Payload Register Pressure", "16B Payload", "Ray Tracing", "MRays/s", "Minimal 16-byte payload register footprint", true},
             {"RayPayload", "Payload Register Pressure", "128B Payload", "Ray Tracing", "MRays/s", "Standard 128-byte path tracing payload footprint", true},
             {"RayPayload", "Payload Register Pressure", "256B Payload", "Ray Tracing", "MRays/s", "Heavy 256-byte production BSDF payload footprint", true}
@@ -1084,12 +1087,50 @@ void GuiApp::renderLeftSidebar(float width, float height) {
         ImGui::ProgressBar(1.0f, ImVec2(-1, s(20.0f)), "Complete");
         ImGui::PopStyleColor();
         ImGui::TextColored(ImVec4(0.35f, 0.85f, 0.55f, 1.0f), "[PASSED] %zu workloads recorded", m_allResults.size());
+        ImGui::Spacing();
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.45f, 0.90f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.28f, 0.55f, 1.00f, 1.0f));
+        if (ImGui::Button("Export JSON", ImVec2(-1, s(28.0f)))) {
+            exportResultsToJson("");
+        }
+        ImGui::PopStyleColor(2);
+        if (m_exportNotificationTimer > 0.0f) {
+            ImGui::Spacing();
+            ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s", m_exportNotificationText.c_str());
+        }
     } else if (m_execState == ExecutionState::Cancelled) {
         ImGui::Spacing();
         ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.85f, 0.55f, 0.15f, 1.00f));
         ImGui::ProgressBar(1.0f, ImVec2(-1, s(20.0f)), "Cancelled");
         ImGui::PopStyleColor();
         ImGui::TextColored(ImVec4(0.95f, 0.65f, 0.20f, 1.0f), "[!] Cancelled by user");
+        if (!m_allResults.empty()) {
+            ImGui::Spacing();
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.45f, 0.90f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.28f, 0.55f, 1.00f, 1.0f));
+            if (ImGui::Button("Export JSON", ImVec2(-1, s(28.0f)))) {
+                exportResultsToJson("");
+            }
+            ImGui::PopStyleColor(2);
+            if (m_exportNotificationTimer > 0.0f) {
+                ImGui::Spacing();
+                ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s", m_exportNotificationText.c_str());
+            }
+        }
+    } else if (!m_allResults.empty()) {
+        ImGui::Spacing();
+        ImGui::TextColored(ImVec4(0.40f, 0.75f, 1.0f, 1.0f), "%zu records available", m_allResults.size());
+        ImGui::Spacing();
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.45f, 0.90f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.28f, 0.55f, 1.00f, 1.0f));
+        if (ImGui::Button("Export JSON", ImVec2(-1, s(28.0f)))) {
+            exportResultsToJson("");
+        }
+        ImGui::PopStyleColor(2);
+        if (m_exportNotificationTimer > 0.0f) {
+            ImGui::Spacing();
+            ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s", m_exportNotificationText.c_str());
+        }
     } else if (!m_statusMessage.empty()) {
         ImGui::Spacing();
         ImGui::TextColored(ImVec4(0.95f, 0.40f, 0.30f, 1.0f), "%s", m_statusMessage.c_str());
@@ -1099,7 +1140,7 @@ void GuiApp::renderLeftSidebar(float width, float height) {
     ImGui::Separator();
     ImGui::Spacing();
 
-    // 2. Scrollable Body (Target Accelerators, Telemetry, API, Resolution, Export)
+    // 2. Scrollable Body (Target Accelerators, Telemetry, API, Resolution)
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
     ImGui::BeginChild("LeftSidebarScroll", ImVec2(0, 0), false);
     ImGui::PopStyleVar();
@@ -1473,38 +1514,6 @@ void GuiApp::renderLeftSidebar(float width, float height) {
         ImGui::TextDisabled("In-memory only (max throughput)");
     }
 
-    // Export Buttons: ALWAYS visible by default!
-    ImGui::Spacing();
-    ImGui::Separator();
-    ImGui::Spacing();
-
-    if (!m_allResults.empty()) {
-        ImGui::TextDisabled("Export Data (%zu records):", m_allResults.size());
-    } else {
-        ImGui::TextDisabled("Export Results:");
-    }
-
-    ImGui::BeginDisabled(m_allResults.empty());
-    if (m_allResults.empty()) {
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.12f, 0.15f, 0.22f, 1.0f));
-    } else {
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.45f, 0.90f, 1.0f));
-    }
-    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.28f, 0.55f, 1.00f, 1.0f));
-
-    if (ImGui::Button("Export JSON Report", ImVec2(-1, s(28.0f)))) {
-        exportResultsToJson("");
-    }
-    ImGui::PopStyleColor(2);
-    ImGui::EndDisabled();
-
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled) && m_allResults.empty()) {
-        ImGui::SetTooltip("Export becomes available once benchmark workloads have run.");
-    }
-
-    if (m_exportNotificationTimer > 0.0f) {
-        ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s", m_exportNotificationText.c_str());
-    }
 
     ImGui::EndChild(); // LeftSidebarScroll
     ImGui::EndChild(); // LeftSidebar
@@ -1611,15 +1620,16 @@ bool GuiApp::matchesItem(const ResultData& r, const BenchmarkItem& itm, uint32_t
     // Host Memory matching
     if (itm.category == "System" || itm.category == "Host System") {
         if (r.deviceIndex == 0xFFFFFFFF) {
-            if (itm.name.find("Pointer Chasing") != std::string::npos && r.metric == "ns") return true;
+            if ((itm.id == "System Memory Latency" || itm.name == "Default" || itm.name.find("Latency") != std::string::npos || itm.name.find("Pointer Chasing") != std::string::npos) && r.metric == "ns") return true;
             bool is1T_itm = (itm.name.find("1T") != std::string::npos || itm.name.find("Single-Threaded") != std::string::npos);
-            bool is1T_r = (r.benchmarkName.find("1 Thread") != std::string::npos || r.benchmarkName.find("1T") != std::string::npos);
+            bool is1T_r = (r.benchmarkName.find("1 Thread") != std::string::npos || r.benchmarkName.find("1T") != std::string::npos || r.benchmarkName.find("Single-Threaded") != std::string::npos);
             if (is1T_itm == is1T_r && r.metric != "ns") {
                 if (itm.name.find("Read") != std::string::npos && r.benchmarkName.find("Read") != std::string::npos) return true;
                 if (itm.name.find("Write") != std::string::npos && r.benchmarkName.find("Write") != std::string::npos) return true;
                 if (itm.name.find("Copy") != std::string::npos && r.benchmarkName.find("Copy") != std::string::npos) return true;
             }
         }
+        return false;
     }
 
     // Dual-Issue matching
@@ -1675,19 +1685,40 @@ bool GuiApp::matchesItem(const ResultData& r, const BenchmarkItem& itm, uint32_t
         if (!itm.subcategory.empty() && !r.subcategory.empty() && r.subcategory != itm.subcategory) {
             return false;
         }
-        if (itm.name.find("Multi-Light") != std::string::npos && clean.find("Multi-Light") != std::string::npos) return true;
-        if (itm.name.find("Persistent") != std::string::npos && clean.find("Persistent") != std::string::npos) return true;
-        if (itm.name.find("Alpha Cutout") != std::string::npos && clean.find("Alpha") != std::string::npos) return true;
-        if (itm.name.find("SER") != std::string::npos && clean.find("SER") != std::string::npos) return true;
+        // Differentiate 128 Lights vs 1 Light
+        bool itm128 = (itm.name.find("128") != std::string::npos);
+        bool r128 = (clean.find("128") != std::string::npos || r.benchmarkName.find("128") != std::string::npos);
+        if (itm128 != r128) return false;
+
+        // Differentiate 3 Lights vs Single Light in Shadows
+        bool itm3L = (itm.name.find("3 Light") != std::string::npos || itm.name.find("Multi-Light (3") != std::string::npos);
+        bool r3L = (clean.find("3 Light") != std::string::npos || r.benchmarkName.find("3 Light") != std::string::npos);
+        if (itm3L != r3L) return false;
+
+        if (itm.name.find("Megakernel") != std::string::npos && clean.find("Megakernel") != std::string::npos &&
+            clean.find("RTP") == std::string::npos && itm.name.find("RTP") == std::string::npos) return true;
         if (itm.name.find("RTP") != std::string::npos && clean.find("RTP") != std::string::npos) {
             bool itmHasSER = (itm.name.find("SER") != std::string::npos);
             bool cleanHasSER = (clean.find("SER") != std::string::npos);
             if (itmHasSER == cleanHasSER) return true;
         }
+        if ((itm.name.find("Multi-Light") != std::string::npos || itm.name.find("Many Lights") != std::string::npos) &&
+            (clean.find("Multi-Light") != std::string::npos || clean.find("Many Lights") != std::string::npos || clean.find("Binning") != std::string::npos)) return true;
+        if ((itm.name.find("Single Light") != std::string::npos || itm.name.find("DGC") != std::string::npos) &&
+            (clean.find("Single Light") != std::string::npos || clean.find("DGC") != std::string::npos || clean.find("Work Lists") != std::string::npos) &&
+            itm.name.find("Megakernel") == std::string::npos && clean.find("Megakernel") == std::string::npos &&
+            itm.name.find("RTP") == std::string::npos && clean.find("RTP") == std::string::npos &&
+            itm.name.find("Multi-Light") == std::string::npos && clean.find("Multi-Light") == std::string::npos &&
+            itm.name.find("Binning") == std::string::npos && clean.find("Binning") == std::string::npos) return true;
+        if (itm.name.find("Persistent") != std::string::npos && clean.find("Persistent") != std::string::npos) return true;
+        if (itm.name.find("Alpha Cutout") != std::string::npos && clean.find("Alpha") != std::string::npos) return true;
+        if (itm.name.find("SER") != std::string::npos && clean.find("SER") != std::string::npos) return true;
         if (itm.name.find("Dedicated") != std::string::npos && clean.find("Dedicated") != std::string::npos) return true;
-        if (itm.name.find("DGC") != std::string::npos && (clean.find("DGC") != std::string::npos || clean.find("Work Lists") != std::string::npos)) return true;
-        if (itm.name.find("Megakernel") != std::string::npos && clean.find("Megakernel") != std::string::npos &&
-            clean.find("RTP") == std::string::npos && itm.name.find("RTP") == std::string::npos) return true;
+        if (itm.name.find("DGC") != std::string::npos && (clean.find("DGC") != std::string::npos || clean.find("Work Lists") != std::string::npos)) {
+            bool itmMulti = (itm.name.find("Multi-Light") != std::string::npos || itm.name.find("Many Lights") != std::string::npos);
+            bool cleanMulti = (clean.find("Multi-Light") != std::string::npos || clean.find("Many Lights") != std::string::npos || clean.find("Binning") != std::string::npos);
+            if (itmMulti == cleanMulti) return true;
+        }
         // Traversal Scheduling
         if (itm.name.find("Morton") != std::string::npos && clean.find("Morton") != std::string::npos) {
             if (itm.name.find("8x4") != std::string::npos && clean.find("8x4") != std::string::npos) return true;
@@ -1716,7 +1747,7 @@ bool GuiApp::matchesItem(const ResultData& r, const BenchmarkItem& itm, uint32_t
     for (const char* pct : {"100%", "75%", "50%", "25%", "10%", "0%"}) {
         if (hasPercentToken(itm.name, pct) && hasPercentToken(clean, pct)) return true;
     }
-    for (const char* deg : {"45 deg", "75 deg", "90 deg", "180 deg", "Microbench", "Mirror", "Diffuse"}) {
+    for (const char* deg : {"45 deg", "75 deg", "90 deg", "180 deg", "Microbench", "Mirror", "Diffuse", "0°", "22.5°", "45°", "67.5°", "90°", "Beam", "Cone", "Hemispherical"}) {
         if (itm.name.find(deg) != std::string::npos && clean.find(deg) != std::string::npos) return true;
     }
     for (const char* pl : {"16B", "128B", "256B"}) {
@@ -1886,6 +1917,7 @@ GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
                     item.subcategory.find("Path Tracing") != std::string::npos ||
                     item.subcategory.find("Total Scene Render") != std::string::npos ||
                     item.subcategory.find("Directional Shadows") != std::string::npos ||
+                    item.subcategory.find("Multi-Light Evaluation") != std::string::npos ||
                     item.subcategory.find("Material Shading") != std::string::npos ||
                     item.subcategory.find("Incoherent Ray Tracing") != std::string::npos) {
                     baselineName = "Megakernel";
@@ -2014,8 +2046,9 @@ void GuiApp::renderBenchmarkSuitePanel() {
         ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.30f, 0.65f, 0.95f, 0.85f));
 
         float btn1W = ImGui::CalcTextSize("View Results Scorecard").x + ImGui::GetStyle().FramePadding.x * 2.0f;
-        float btn2W = ImGui::CalcTextSize("Reconfigure Workloads").x + ImGui::GetStyle().FramePadding.x * 2.0f;
-        float totalBtnsW = btn1W + btn2W + s(20.0f);
+        float btn2W = ImGui::CalcTextSize("Export JSON").x + ImGui::GetStyle().FramePadding.x * 2.0f;
+        float btn3W = ImGui::CalcTextSize("Reconfigure Workloads").x + ImGui::GetStyle().FramePadding.x * 2.0f;
+        float totalBtnsW = btn1W + btn2W + btn3W + s(28.0f);
         float bannerTextW = ImGui::CalcTextSize("[PASSED] Benchmark suite finished (171 results recorded). | Selection locked.").x;
         bool needsTwoLines = (ImGui::GetContentRegionAvail().x < bannerTextW + totalBtnsW + s(30.0f));
         float bannerH = needsTwoLines ? (ImGui::GetFrameHeight() * 2.0f + s(22.0f)) : (ImGui::GetFrameHeight() + s(16.0f));
@@ -2047,6 +2080,10 @@ void GuiApp::renderBenchmarkSuitePanel() {
         
         if (ImGui::SmallButton("View Results Scorecard")) {
             m_switchToScorecard = true;
+        }
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Export JSON")) {
+            exportResultsToJson("");
         }
         ImGui::SameLine();
         if (ImGui::SmallButton("Reconfigure Workloads")) {
@@ -2558,15 +2595,57 @@ void GuiApp::renderBenchmarkSuitePanel() {
                 bool hasActiveBaseline = false;
                 std::string activeBaselineSubcat = "";
 
+                std::string currentGroupKey = "";
+                int groupIndex = -1;
+
                 for (size_t iIdx = 0; iIdx < sub.items.size(); ++iIdx) {
                     auto& item = sub.items[iIdx];
                     BenchmarkDisplayInfo dispInfo = getBenchmarkDisplayInfo(item, m_telemetryGpuIndex);
                     bool isUnsupported = (!item.isSupported || (dispInfo.hasResult && dispInfo.primaryResult.isUnsupported));
                     if (m_hideUnsupported && isUnsupported) continue;
 
+                    // Group identification for related tests
+                    std::string itemGroupKey;
+                    if (sub.name == "Dual-Issue & Concurrency") {
+                        if (item.name.find("FP32") != std::string::npos && item.name.find("Mixed") == std::string::npos) {
+                            itemGroupKey = "Dual-Issue_FP32";
+                        } else if (item.name.find("INT32") != std::string::npos && item.name.find("Mixed") == std::string::npos) {
+                            itemGroupKey = "Dual-Issue_INT32";
+                        } else if (item.name.find("Mixed") != std::string::npos) {
+                            itemGroupKey = "Dual-Issue_Mixed";
+                        } else {
+                            itemGroupKey = item.subcategory;
+                        }
+                    } else if (sub.name == "VRAM Streaming Bandwidth") {
+                        if (item.name.find("128 threads") != std::string::npos) {
+                            itemGroupKey = "VRAM_128";
+                        } else if (item.name.find("256 threads") != std::string::npos) {
+                            itemGroupKey = "VRAM_256";
+                        } else if (item.name.find("1024 threads") != std::string::npos) {
+                            itemGroupKey = "VRAM_1024";
+                        } else {
+                            itemGroupKey = item.subcategory;
+                        }
+                    } else if (!item.subcategory.empty()) {
+                        itemGroupKey = item.subcategory;
+                    } else {
+                        itemGroupKey = item.name;
+                    }
+
+                    if (itemGroupKey != currentGroupKey) {
+                        currentGroupKey = itemGroupKey;
+                        groupIndex++;
+                    }
+
                     ImGui::PushID(static_cast<int>(iIdx));
                     float rowH = std::max(s(22.0f), frameH + s(2.0f));
                     ImGui::TableNextRow(ImGuiTableRowFlags_None, rowH);
+
+                    // Slightly different background shading for alternating groups of related tests
+                    if (groupIndex >= 0 && (groupIndex % 2 == 1)) {
+                        ImU32 shadedBg = ImGui::GetColorU32(ImVec4(0.14f, 0.18f, 0.27f, 0.42f));
+                        ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0, shadedBg);
+                    }
 
                     // Col 0: Workload Checkbox & Label
                     ImGui::TableNextColumn();
@@ -3508,7 +3587,7 @@ void GuiApp::renderResultsScorecard() {
     }
 
     // Export Button
-    float exportW = ImGui::CalcTextSize("Export JSON Report").x + ImGui::GetStyle().FramePadding.x * 2.0f;
+    float exportW = ImGui::CalcTextSize("Export JSON").x + ImGui::GetStyle().FramePadding.x * 2.0f;
     ImGui::SameLine();
     float availExp = ImGui::GetContentRegionAvail().x;
     if (availExp >= exportW + s(14.0f)) {
@@ -3519,7 +3598,7 @@ void GuiApp::renderResultsScorecard() {
     } else {
         ImGui::NewLine();
     }
-    if (ImGui::Button("Export JSON Report")) {
+    if (ImGui::Button("Export JSON")) {
         exportResultsToJson("");
     }
 
@@ -4950,7 +5029,8 @@ void GuiApp::startBenchmarks() {
             callback,
             scene,
             spp,
-            &m_cancelToken
+            &m_cancelToken,
+            /*quiet=*/true
         );
 
         m_telemetryWorker.stopRecording();

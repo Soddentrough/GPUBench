@@ -1,5 +1,7 @@
 #include "OpenCLContext.h"
 #include "utils/ShaderCache.h"
+#include <algorithm>
+#include <cctype>
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -279,16 +281,23 @@ const std::vector<DeviceInfo> &OpenCLContext::getDevices() const {
       cl_ulong cacheSize = 0;
       f_clGetDeviceInfo(dev, CL_DEVICE_GLOBAL_MEM_CACHE_SIZE, sizeof(cacheSize),
                         &cacheSize, nullptr);
-      if (cacheSize >= 512 * 1024) {
+      std::string devNameLower = deviceName;
+      std::transform(devNameLower.begin(), devNameLower.end(), devNameLower.begin(), ::tolower);
+      if (cacheSize >= 512 * 1024 && devNameLower.find("gfx115") == std::string::npos && devNameLower.find("strix") == std::string::npos && devNameLower.find("8060") == std::string::npos) {
         info.l2CacheSize = static_cast<uint32_t>(cacheSize);
       } else {
-        // AMD OpenCL driver returns CU L1 cache size (16KB) for CL_DEVICE_GLOBAL_MEM_CACHE_SIZE.
-        // Fallback to real architectural L2 cache (8MB on RDNA4 / 4MB baseline).
-        info.l2CacheSize = (deviceName.find("gfx12") != std::string::npos || deviceName.find("R9700") != std::string::npos)
-                               ? (8 * 1024 * 1024) : (4 * 1024 * 1024);
+        if (devNameLower.find("gfx12") != std::string::npos || devNameLower.find("r9700") != std::string::npos) {
+          info.l2CacheSize = 8 * 1024 * 1024;
+        } else if (devNameLower.find("gfx115") != std::string::npos || devNameLower.find("strix") != std::string::npos || devNameLower.find("8060") != std::string::npos || devNameLower.find("8050") != std::string::npos) {
+          info.l2CacheSize = 2 * 1024 * 1024;
+        } else {
+          info.l2CacheSize = 4 * 1024 * 1024;
+        }
       }
-      if (deviceName.find("gfx12") != std::string::npos || deviceName.find("R9700") != std::string::npos) {
+      if (devNameLower.find("gfx12") != std::string::npos || devNameLower.find("r9700") != std::string::npos) {
         info.l3CacheSize = 64 * 1024 * 1024;
+      } else {
+        info.l3CacheSize = 32 * 1024 * 1024;
       }
 
       size_t ext_size;
@@ -394,16 +403,23 @@ DeviceInfo OpenCLContext::getCurrentDeviceInfo() const {
   cl_ulong cacheSize = 0;
   f_clGetDeviceInfo(device, CL_DEVICE_GLOBAL_MEM_CACHE_SIZE, sizeof(cacheSize),
                     &cacheSize, nullptr);
-  if (cacheSize >= 512 * 1024) {
+  std::string devNameLower = info.name;
+  std::transform(devNameLower.begin(), devNameLower.end(), devNameLower.begin(), ::tolower);
+  if (cacheSize >= 512 * 1024 && devNameLower.find("gfx115") == std::string::npos && devNameLower.find("strix") == std::string::npos && devNameLower.find("8060") == std::string::npos) {
     info.l2CacheSize = static_cast<uint32_t>(cacheSize);
   } else {
-    std::string devName = info.name;
-    info.l2CacheSize = (devName.find("gfx12") != std::string::npos || devName.find("R9700") != std::string::npos)
-                           ? (8 * 1024 * 1024) : (4 * 1024 * 1024);
+    if (devNameLower.find("gfx12") != std::string::npos || devNameLower.find("r9700") != std::string::npos) {
+      info.l2CacheSize = 8 * 1024 * 1024;
+    } else if (devNameLower.find("gfx115") != std::string::npos || devNameLower.find("strix") != std::string::npos || devNameLower.find("8060") != std::string::npos || devNameLower.find("8050") != std::string::npos) {
+      info.l2CacheSize = 2 * 1024 * 1024;
+    } else {
+      info.l2CacheSize = 4 * 1024 * 1024;
+    }
   }
-  std::string devName = info.name;
-  if (devName.find("gfx12") != std::string::npos || devName.find("R9700") != std::string::npos) {
+  if (devNameLower.find("gfx12") != std::string::npos || devNameLower.find("r9700") != std::string::npos) {
     info.l3CacheSize = 64 * 1024 * 1024;
+  } else {
+    info.l3CacheSize = 32 * 1024 * 1024;
   }
 
   size_t ext_size;
@@ -648,7 +664,7 @@ void OpenCLContext::setExpectedKernelCount(uint32_t count) {
 
 void OpenCLContext::notifyKernelCreated(const std::string &file_name) {
   createdKernelCount++;
-  if (!verbose && expectedKernelCount > 0) {
+  if (!quiet && !verbose && expectedKernelCount > 0) {
     printProgressBar(createdKernelCount, expectedKernelCount, file_name);
   }
 }

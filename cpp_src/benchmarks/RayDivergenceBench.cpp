@@ -314,15 +314,15 @@ const char *RayDivergenceBench::GetSubCategory(uint32_t config_idx) const {
 std::string RayDivergenceBench::GetConfigName(uint32_t config_idx) const {
   switch (config_idx) {
   case 0:
-    return "Traversal: Isolated Microbenchmark - 100% Mirror (RTP)";
+    return "Traversal: Isolated Microbenchmark - 0° Beam (Coherent)";
   case 1:
-    return "Traversal: Isolated Microbenchmark - 75% Coherence (RTP)";
+    return "Traversal: Isolated Microbenchmark - 22.5° Cone Spread";
   case 2:
-    return "Traversal: Isolated Microbenchmark - 50% Coherence (RTP)";
+    return "Traversal: Isolated Microbenchmark - 45° Cone Spread";
   case 3:
-    return "Traversal: Isolated Microbenchmark - 25% Coherence (RTP)";
+    return "Traversal: Isolated Microbenchmark - 67.5° Cone Spread";
   case 4:
-    return "Traversal: Isolated Microbenchmark - 0% Diffuse (RTP)";
+    return "Traversal: Isolated Microbenchmark - 90° Hemispherical (Incoherent)";
   default:
     return "Traversal: Isolated Microbenchmark - Level " + std::to_string(config_idx);
   }

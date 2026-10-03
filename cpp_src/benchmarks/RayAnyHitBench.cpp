@@ -351,6 +351,6 @@ const char *RayAnyHitBench::GetSubCategory(uint32_t config_idx) const {
 }
 
 std::string RayAnyHitBench::GetConfigName(uint32_t config_idx) const {
-  if (config_idx == 0) return "100% Solid (Opaque Baseline)";
+  if (config_idx == 0) return "100% Solid (Any-Hit Baseline)";
   return "50% Solid (Cutout Stress)";
 }

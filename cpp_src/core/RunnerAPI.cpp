@@ -19,7 +19,8 @@ std::vector<ResultData> RunBenchmarksAPI(
     std::function<void(const ResultData&)> callback,
     const std::string& scene,
     uint32_t samples_per_pixel,
-    std::atomic<bool>* cancel_token)
+    std::atomic<bool>* cancel_token,
+    bool quiet)
 {
     // Never let C++ exceptions cross the cxx FFI boundary into Rust (that
     // would call std::terminate). On error, return an empty result list.
@@ -48,6 +49,7 @@ std::vector<ResultData> RunBenchmarksAPI(
     BenchmarkRunner runner({}, verbose, debug, dump_geometry, dump_renders, scene.empty() ? "all" : scene);
     runner.setResolution(renderWidth, renderHeight);
     runner.setSamplesPerPixel(samples_per_pixel);
+    runner.setQuiet(quiet || (callback != nullptr));
     if (cancel_token) {
         runner.setCancelToken(cancel_token);
     }

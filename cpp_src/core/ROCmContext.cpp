@@ -270,8 +270,14 @@ void ROCmContext::enumerateDevices() {
 
       bool is_rdna3 = (archNameStr.find("gfx11") != std::string::npos);
       bool is_cdna3 = (archNameStr.find("gfx942") != std::string::npos);
+      bool is_strix = (archNameStr.find("gfx115") != std::string::npos) ||
+                      (deviceNameStr.find("strix") != std::string::npos) ||
+                      (deviceNameStr.find("8060") != std::string::npos) ||
+                      (deviceNameStr.find("8050") != std::string::npos);
 
-      if (info.l2CacheSize == 0) {
+      if (is_strix) {
+        info.l2CacheSize = 2 * 1024 * 1024;
+      } else if (info.l2CacheSize == 0) {
         if (is_rdna4) {
           info.l2CacheSize = 8 * 1024 * 1024;
         } else if (is_rdna3) {
@@ -284,7 +290,7 @@ void ROCmContext::enumerateDevices() {
         info.l3CacheSize = 32 * 1024 * 1024;
       }
 
-      info.fp8Support = (is_cdna3 || is_rdna3 || is_rdna4);
+      info.fp8Support = (is_cdna3 || is_rdna4);
       info.fp6Support = false;
       // RDNA4 (gfx12) has no FP4 hardware; FP4 arrived with CDNA4 (gfx950).
       info.fp4Support = false;
@@ -616,7 +622,7 @@ void ROCmContext::setExpectedKernelCount(uint32_t count) {
 
 void ROCmContext::notifyKernelCreated(const std::string &file_name) {
   createdKernelCount++;
-  if (!verbose && expectedKernelCount > 0) {
+  if (!quiet && !verbose && expectedKernelCount > 0) {
     printProgressBar(createdKernelCount, expectedKernelCount, file_name);
   }
 }

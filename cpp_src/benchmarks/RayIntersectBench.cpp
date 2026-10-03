@@ -114,8 +114,7 @@ void RayIntersectBench::buildAS() {
   VkAccelerationStructureGeometryKHR triGeom{
       VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR};
   triGeom.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
-  triGeom.flags =
-      VK_GEOMETRY_OPAQUE_BIT_KHR; // Force exact hardware Ray-Tri test!
+  triGeom.flags = 0; // Non-opaque so ray query proceed yields candidates
   triGeom.geometry.triangles.sType =
       VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
   triGeom.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
@@ -398,7 +397,7 @@ const char *RayIntersectBench::GetName() const { return "RayIntersect"; }
 const char *RayIntersectBench::GetComponent(uint32_t config_idx) const {
   return "Ray Tracing";
 }
-const char *RayIntersectBench::GetMetric() const { return "GIS/s"; }
+const char *RayIntersectBench::GetMetric() const { return "MRays/s"; }
 const char *RayIntersectBench::GetSubCategory(uint32_t config_idx) const {
   return "Intersection Tests";
 }

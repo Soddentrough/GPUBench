@@ -741,4 +741,65 @@ vec3 evaluateGltfPbr(
     uint dummyRng = 123456789u;
     return evaluateGltfPbr(mat, hitPos, geomNormal, smoothNormal, tangent, uv, inDir, sceneType, true, dummyRng);
 }
+
+void getMultiLight(uint idx, uint totalLights, uint sceneType, out vec3 lightDir, out vec3 lightColor) {
+    if (totalLights <= 1u) {
+        if (sceneType == 2u) {
+            lightDir = normalize(vec3(0.35, 0.90, -0.25));
+        } else if (sceneType == 0u) {
+            lightDir = normalize(vec3(0.6, 0.8, 0.5));
+        } else {
+            lightDir = normalize(vec3(0.45, 0.35, 0.82));
+        }
+        lightColor = vec3(1.0, 0.95, 0.9) * 3.5;
+    } else {
+        // Spherical Fibonacci distribution across upper hemisphere
+        const float PHI = 1.618033988749895;
+        float phi = 2.0 * 3.141592653589793 * (float(idx) / PHI);
+        float cosTheta = 0.08 + 0.90 * (1.0 - (float(idx) + 0.5) / float(totalLights));
+        float sinTheta = sqrt(max(0.0, 1.0 - cosTheta * cosTheta));
+
+        vec3 rawDir;
+        if (sceneType == 2u || sceneType == 0u) {
+            rawDir = vec3(cos(phi) * sinTheta, cosTheta, sin(phi) * sinTheta);
+        } else {
+            rawDir = vec3(cos(phi) * sinTheta, sin(phi) * sinTheta, cosTheta);
+        }
+        lightDir = normalize(rawDir);
+
+        float t = float(idx) / float(totalLights);
+        vec3 col = mix(vec3(1.0, 0.88, 0.70), vec3(0.75, 0.88, 1.0), fract(t * 5.0));
+        lightColor = col * (160.0 / float(totalLights));
+    }
+}
+
+vec3 evalCookTorranceDirect(vec3 N, vec3 V, vec3 L, vec3 lightRadiance, vec3 albedo, float roughness, float metallic) {
+    float NdotL = max(0.0, dot(N, L));
+    if (NdotL <= 0.0) return vec3(0.0);
+    float NdotV = max(0.001, dot(N, V));
+    vec3 H = normalize(V + L);
+    float NdotH = max(0.0, dot(N, H));
+    float VdotH = max(0.0, dot(V, H));
+
+    // D: GGX Trowbridge-Reitz
+    float alpha = max(0.04, roughness * roughness);
+    float alpha2 = alpha * alpha;
+    float denomD = (NdotH * NdotH * (alpha2 - 1.0) + 1.0);
+    float D = alpha2 / (3.14159265 * denomD * denomD);
+
+    // F: Fresnel-Schlick
+    vec3 F0 = mix(vec3(0.04), albedo, metallic);
+    vec3 F = F0 + (1.0 - F0) * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
+
+    // G: Smith GGX
+    float k = (roughness + 1.0);
+    k = (k * k) / 8.0;
+    float G = (NdotV / (NdotV * (1.0 - k) + k)) * (NdotL / (NdotL * (1.0 - k) + k));
+
+    vec3 spec = (D * F * G) / max(0.001, 4.0 * NdotV * NdotL);
+    vec3 diff = (vec3(1.0) - F) * (1.0 - metallic) * (albedo / 3.14159265);
+
+    return (diff + spec) * lightRadiance * NdotL;
+}
 #endif
+

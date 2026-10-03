@@ -277,10 +277,9 @@ void ResultFormatter::print() {
       if (res.benchmarkName.find("RayRawTraversal") != std::string::npos) {
         double time_s = res.time_ms / 1000.0;
         if (res.configIndex == 0) {
-          rawTriangleGis = (time_s > 0.0) ? ((static_cast<double>(res.operations) / time_s) / 1e9) : 0.0;
+          rawTriangleGis = (time_s > 0.0) ? ((static_cast<double>(res.operations) / time_s) / 1e6) : 0.0;
         } else {
-          uint64_t boxOps = res.operations * 64;
-          rawBoxGis = (time_s > 0.0) ? ((static_cast<double>(boxOps) / time_s) / 1e9) : 0.0;
+          rawBoxGis = (time_s > 0.0) ? ((static_cast<double>(res.operations) / time_s) / 1e6) : 0.0;
         }
       }
       if (res.metric == "MRays/s") {
@@ -601,22 +600,44 @@ void ResultFormatter::print() {
 
                 if (res.benchmarkName.find("RayRawTraversal") != std::string::npos) {
                   double time_s = res.time_ms / 1000.0;
+                  double mrays = (time_s > 0.0) ? ((static_cast<double>(res.operations) / time_s) / 1e6) : 0.0;
                   if (res.configIndex == 0) {
-                    double gis_s = (time_s > 0.0) ? ((static_cast<double>(res.operations) / time_s) / 1e9) : 0.0;
-                    double pct = (gis_s / 300.8) * 100.0;
-                    noteStr = formatDouble(pct, 1) + "% of 300.8 GIS/s Boost Peak";
+                    noteStr = formatDouble(mrays, 1) + " MRays/s";
                   } else {
-                    uint64_t boxOps = res.operations * 64;
-                    double box_gis_s = (time_s > 0.0) ? ((static_cast<double>(boxOps) / time_s) / 1e9) : 0.0;
-                    double pct = (box_gis_s / 1203.2) * 100.0;
-                    noteStr = formatDouble(pct, 1) + "% of 1.20 TIS/s Boost Peak";
+                    noteStr = formatDouble(mrays, 1) + " MRays/s (Multi-Layer)";
                   }
                 } else {
                   double localBaseVal = 0.0;
                   std::string localBaseMetric = "";
                   bool isLocalBase = false;
 
-                  if (res.benchmarkName.find("RayDivergence") != std::string::npos) {
+                  if (res.benchmarkName.find("Multi-Light Evaluation") != std::string::npos) {
+                    if (res.configIndex == 31 || res.configIndex == 33) {
+                      isLocalBase = true;
+                    } else if (res.configIndex == 32) {
+                      for (const auto &bp : subcat.benchmarks) {
+                        if (bp.second.count(backend)) {
+                          const auto &br = bp.second.at(backend);
+                          if (br.configIndex == 31 && br.time_ms > 0.0) {
+                            localBaseVal = static_cast<double>(br.operations) / (br.time_ms / 1000.0) / 1e6;
+                            localBaseMetric = br.metric;
+                            break;
+                          }
+                        }
+                      }
+                    } else if (res.configIndex == 34) {
+                      for (const auto &bp : subcat.benchmarks) {
+                        if (bp.second.count(backend)) {
+                          const auto &br = bp.second.at(backend);
+                          if (br.configIndex == 33 && br.time_ms > 0.0) {
+                            localBaseVal = static_cast<double>(br.operations) / (br.time_ms / 1000.0) / 1e6;
+                            localBaseMetric = br.metric;
+                            break;
+                          }
+                        }
+                      }
+                    }
+                  } else if (res.benchmarkName.find("RayDivergence") != std::string::npos) {
                     if (res.configIndex == 0) isLocalBase = true;
                     else {
                       for (const auto &bp : subcat.benchmarks) {
@@ -786,18 +807,12 @@ void ResultFormatter::print() {
       }
     }
     if (rawBoxGis > 0.0) {
-      double pct = (rawBoxGis / 1203.2) * 100.0;
-      std::string val = BOLD + GREEN + formatDouble(rawBoxGis, 1) + " GIS/s" + RESET;
-      std::string extra = isR9700 ? (" (" + formatDouble(pct, 1) + "% of 1.20 TIS/s R9700 Boost Peak)")
-                                  : (" (" + formatDouble(pct, 1) + "% of 1.20 TIS/s R9700 Ref Peak)");
-      printSummaryRow("Hardware BVH8 Box Peak Rate  ", val, extra);
+      std::string val = BOLD + GREEN + formatDouble(rawBoxGis, 1) + " MRays/s" + RESET;
+      printSummaryRow("Hardware BVH Traversal (Deep)", val, " (Multi-Layer Stress)");
     }
     if (rawTriangleGis > 0.0) {
-      double pct = (rawTriangleGis / 300.8) * 100.0;
-      std::string val = BOLD + GREEN + formatDouble(rawTriangleGis, 1) + " GIS/s" + RESET;
-      std::string extra = isR9700 ? (" (" + formatDouble(pct, 1) + "% of 300.8 GIS/s R9700 Boost Peak)")
-                                  : (" (" + formatDouble(pct, 1) + "% of 300.8 GIS/s R9700 Ref Peak)");
-      printSummaryRow("Hardware Triangle Peak Rate  ", val, extra);
+      std::string val = BOLD + GREEN + formatDouble(rawTriangleGis, 1) + " MRays/s" + RESET;
+      printSummaryRow("Hardware BVH Traversal (Coherent)", val, " (Max Occupancy)");
     }
     std::string val = BOLD + GREEN + formatDouble(maxRayRate, 1) + " MRays/s" + RESET;
     std::string extra = " (" + maxRayWorkload + ")";

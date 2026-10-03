@@ -577,6 +577,10 @@ void main() {
                     assignedQueue = (pc.spatialPattern == 3u) ? (primId % 3u) : 0u;
                     vec2 rawBary = rayQueryGetIntersectionBarycentricsEXT(query, true);
                     payload0 = vec4(t, uintBitsToFloat(pixelIdx), uintBitsToFloat(primId), uintBitsToFloat(packUnorm2x16(rawBary)));
+                } else if (pc.mode == 8) {
+                    assignedQueue = 0u;
+                    vec2 rawBary = rayQueryGetIntersectionBarycentricsEXT(query, true);
+                    payload0 = vec4(t, uintBitsToFloat(pixelIdx), uintBitsToFloat(primId), uintBitsToFloat(packUnorm2x16(rawBary)));
                 } else if (pc.mode == 6 || pc.mode == 7) {
                     assignedQueue = 0u;
                     vec2 rawBary = rayQueryGetIntersectionBarycentricsEXT(query, true);
@@ -903,6 +907,8 @@ void main() {
                 if (pc.dumpRenders != 0) {
                     if (pc.mode == 5) {
                         fb.pixels[pixelIdx] = vec4(0.02, 0.03, 0.05, 1.0);
+                    } else if (pc.mode == 8) {
+                        fb.pixels[pixelIdx] = vec4(0.0, 0.0, 0.0, 1.0);
                     } else if (pc.mode == 1) {
                         vec3 sampleRadiance = evalSky(pc.sceneType, direction);
                         float expGain = (pc.sceneType == 2u) ? 1.6 : 1.0;

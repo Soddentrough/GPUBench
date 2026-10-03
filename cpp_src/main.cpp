@@ -161,6 +161,12 @@ int main(int argc, char **argv) {
       "Write benchmark results to JSON file (optional file path, defaults to gpubench_<hostname>_<timestamp>.json)")
       ->expected(0, 1);
 
+  std::string json_flag_path;
+  CLI::Option *opt_json = app.add_option(
+      "--json", json_flag_path,
+      "Output benchmark results as JSON (optional file path, defaults to stdout)")
+      ->expected(0, 1);
+
   std::string legacy_output_format;
   CLI::Option *opt_legacy_output = app.add_option(
       "--output", legacy_output_format,
@@ -187,7 +193,14 @@ int main(int argc, char **argv) {
   CLI11_PARSE(app, argc, argv);
 
   bool want_json_output = false;
-  if (opt_output_json->count() > 0) {
+  if (opt_json->count() > 0) {
+    want_json_output = true;
+    if (json_flag_path.empty()) {
+      output_json_path = "-";
+    } else {
+      output_json_path = json_flag_path;
+    }
+  } else if (opt_output_json->count() > 0) {
     want_json_output = true;
     if (output_json_path.empty()) {
       output_json_path = getDefaultJsonFilename();
@@ -397,8 +410,10 @@ int main(int argc, char **argv) {
   }
 
   try {
-    std::cout << "GPUBench version " << GPUBENCH_VERSION << std::endl
-              << std::endl;
+    if (!want_json_output) {
+      std::cout << "GPUBench version " << GPUBENCH_VERSION << std::endl
+                << std::endl;
+    }
     // Create compute contexts for specified backends
     std::vector<std::unique_ptr<IComputeContext>> contexts;
     if (backend_strs.empty() ||
@@ -487,6 +502,9 @@ int main(int argc, char **argv) {
     runner.setResolution(render_width, render_height);
     runner.setBounceDepth(bounce_depth);
     runner.setSamplesPerPixel(samples_per_pixel);
+    if (want_json_output) {
+      runner.setQuiet(true);
+    }
     if (!config_targets.empty()) {
       if (config_targets.size() == 1) {
         runner.setTargetConfig(config_targets[0]);

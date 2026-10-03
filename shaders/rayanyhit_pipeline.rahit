@@ -19,8 +19,8 @@ uint hash(uint seed) {
 }
 
 void main() {
-    // Compute barycentric UV coordinate across triangle surface
-    vec2 uv = attribs * 16.0;
+    // Compute barycentric UV coordinate across triangle surface with per-primitive variation
+    vec2 uv = attribs * 16.0 + vec2(float(gl_PrimitiveID % 7) * 0.13, float(gl_PrimitiveID / 7) * 0.17);
     
     // Procedural multi-frequency alpha cutout mask (simulating foliage leaf / fence cutout)
     float mask = sin(uv.x * 6.28318) * cos(uv.y * 6.28318);

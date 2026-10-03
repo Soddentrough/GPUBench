@@ -130,7 +130,7 @@ void DualIssueBench::Run(uint32_t config_idx) {
                              std::to_string(config_idx));
   }
 
-  float multiplier = 1.0f;
+  float multiplier = 0.999f;
   context->setKernelArg(kernels[config_idx], 1, sizeof(float), &multiplier);
   context->setKernelArg(kernels[config_idx], 2, sizeof(uint32_t), &numElements);
 

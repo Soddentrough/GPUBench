@@ -39,6 +39,9 @@ public:
   cl_context getOpenCLContext() const override { return context; }
 
   void setVerbose(bool v) override { verbose = v; }
+  bool isVerbose() const override { return verbose; }
+  void setQuiet(bool q) override { quiet = q; }
+  bool isQuiet() const override { return quiet; }
   void setExpectedKernelCount(uint32_t count) override;
   void notifyKernelCreated(const std::string &kernel_name) override;
 
@@ -103,5 +106,6 @@ private:
   uint32_t expectedKernelCount = 0;
   uint32_t createdKernelCount = 0;
   bool verbose = false;
+  bool quiet = false;
   bool available = false;
 };

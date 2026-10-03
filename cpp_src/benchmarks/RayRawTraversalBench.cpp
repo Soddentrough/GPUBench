@@ -417,13 +417,8 @@ void RayRawTraversalBench::Teardown() {
 }
 
 BenchmarkResult RayRawTraversalBench::GetResult(uint32_t config_idx) const {
-  if (config_idx == 0) {
-    // Config 0: Triangle intersection tests in leaf (2 candidate triangle tests per ray)
-    return {(uint64_t)rayCount * 2, 0.0};
-  } else {
-    // Config 1: Deep multi-layer traversal (reported in MRays/s)
-    return {(uint64_t)rayCount, 0.0};
-  }
+  (void)config_idx;
+  return {(uint64_t)rayCount, 0.0};
 }
 
 void RayRawTraversalBench::RecordRunResult(uint32_t config_idx,
@@ -448,19 +443,9 @@ std::string RayRawTraversalBench::GetConfigCaveat(uint32_t config_idx) const {
   ss << std::fixed << std::setprecision(1);
 
   if (config_idx == 0) {
-    // Config 0 reports GIS/s as primary metric (triangle tests)
-    // Secondary telemetry: MRays/s and % of 300.8 GIS/s Boost ceiling
-    uint64_t totalTriTests = totalRays * 2;
-    double gis_s = (static_cast<double>(totalTriTests) / time_s) / 1e9;
-    double pctBoost = (gis_s / 300.8) * 100.0;
-    ss << mrays_s << " MRays/s (" << pctBoost << "% Boost Peak)";
+    ss << mrays_s << " MRays/s";
   } else {
-    // Config 1 reports MRays/s as primary metric (deep traversal)
-    // Secondary telemetry: sustained Box GIS/s (64 box tests/ray) and % of 1,203.2 GIS/s Boost ceiling
-    uint64_t totalBoxTests = totalRays * 64;
-    double box_gis_s = (static_cast<double>(totalBoxTests) / time_s) / 1e9;
-    double pctBoost = (box_gis_s / 1203.2) * 100.0;
-    ss << box_gis_s << " GIS/s (" << pctBoost << "% Boost Peak)";
+    ss << mrays_s << " MRays/s (Multi-Layer BVH)";
   }
 
   return ss.str();
@@ -500,11 +485,12 @@ std::vector<std::string> RayRawTraversalBench::GetAliases() const {
 }
 
 const char *RayRawTraversalBench::GetMetric() const {
-  return "GIS/s";
+  return "MRays/s";
 }
 
 const char *RayRawTraversalBench::GetMetric(uint32_t config_idx) const {
-  return config_idx == 0 ? "GIS/s" : "MRays/s";
+  (void)config_idx;
+  return "MRays/s";
 }
 
 const char *RayRawTraversalBench::GetComponent(uint32_t config_idx) const {

@@ -1,8 +1,7 @@
 #version 460
 // GPUBench Dual-Issue & Concurrency Benchmark Suite
-// Config 4: Concurrent FP32 + INT32 (50/50 Dual-Issue)
-// Evaluates concurrent execution across mixed datapaths (NVIDIA decoupled FP32+INT32
-// datapaths vs AMD mixed ALU instruction pairing).
+// Config 6: Dual-Issue Mixed (FP32+INT32, 50/50 Dual-Issue)
+// Evaluates concurrent execution across mixed datapaths (8 FP32 + 8 INT32 scalar chains).
 
 layout (local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
@@ -22,77 +21,78 @@ void main() {
     float base = InOutBuffer.data[index];
     uint ubase = uint(base * 1000.0) + index;
 
-    // 8 independent FP32 accumulator chains
-    vec4 f0 = vec4(base);
-    vec4 f1 = vec4(base + 0.1);
-    vec4 f2 = vec4(base + 0.2);
-    vec4 f3 = vec4(base + 0.3);
-    vec4 f4 = vec4(base + 0.4);
-    vec4 f5 = vec4(base + 0.5);
-    vec4 f6 = vec4(base + 0.6);
-    vec4 f7 = vec4(base + 0.7);
+    // 8 independent FP32 scalar accumulator chains
+    float f0 = base;
+    float f1 = base + 0.1;
+    float f2 = base + 0.2;
+    float f3 = base + 0.3;
+    float f4 = base + 0.4;
+    float f5 = base + 0.5;
+    float f6 = base + 0.6;
+    float f7 = base + 0.7;
 
-    vec4 mf = vec4(pushConstants.multiplier);
-    vec4 cf0 = vec4(0.0001, 0.0002, 0.0003, 0.0004);
-    vec4 cf1 = vec4(0.0005, 0.0006, 0.0007, 0.0008);
-    vec4 cf2 = vec4(0.0009, 0.0010, 0.0011, 0.0012);
-    vec4 cf3 = vec4(0.0013, 0.0014, 0.0015, 0.0016);
-    vec4 cf4 = vec4(0.0017, 0.0018, 0.0019, 0.0020);
-    vec4 cf5 = vec4(0.0021, 0.0022, 0.0023, 0.0024);
-    vec4 cf6 = vec4(0.0025, 0.0026, 0.0027, 0.0028);
-    vec4 cf7 = vec4(0.0029, 0.0030, 0.0031, 0.0032);
+    float mf = pushConstants.multiplier;
+    float cf0 = 0.0001;
+    float cf1 = 0.0002;
+    float cf2 = 0.0003;
+    float cf3 = 0.0004;
+    float cf4 = 0.0005;
+    float cf5 = 0.0006;
+    float cf6 = 0.0007;
+    float cf7 = 0.0008;
 
-    // 8 independent INT32 accumulator chains
-    uvec4 u0 = uvec4(ubase);
-    uvec4 u1 = uvec4(ubase + 1u);
-    uvec4 u2 = uvec4(ubase + 2u);
-    uvec4 u3 = uvec4(ubase + 3u);
-    uvec4 u4 = uvec4(ubase + 4u);
-    uvec4 u5 = uvec4(ubase + 5u);
-    uvec4 u6 = uvec4(ubase + 6u);
-    uvec4 u7 = uvec4(ubase + 7u);
+    // 8 independent INT32 scalar accumulator chains
+    uint u0 = ubase;
+    uint u1 = ubase + 1u;
+    uint u2 = ubase + 2u;
+    uint u3 = ubase + 3u;
+    uint u4 = ubase + 4u;
+    uint u5 = ubase + 5u;
+    uint u6 = ubase + 6u;
+    uint u7 = ubase + 7u;
 
-    uvec4 mu = uvec4(uint(pushConstants.multiplier));
-    if (mu.x == 0u) mu = uvec4(1u);
-    uvec4 cu0 = uvec4(13u, 17u, 19u, 23u);
-    uvec4 cu1 = uvec4(29u, 31u, 37u, 41u);
-    uvec4 cu2 = uvec4(43u, 47u, 53u, 59u);
-    uvec4 cu3 = uvec4(61u, 67u, 71u, 73u);
-    uvec4 cu4 = uvec4(79u, 83u, 89u, 97u);
-    uvec4 cu5 = uvec4(101u, 103u, 107u, 109u);
-    uvec4 cu6 = uvec4(113u, 127u, 131u, 137u);
-    uvec4 cu7 = uvec4(139u, 149u, 151u, 157u);
+    uint mu = uint(pushConstants.multiplier);
+    if (mu == 0u) mu = 1u;
 
-    // 16384 iterations * (8 vec4 FMAs + 8 uvec4 INT adds)
-    // = 16384 * (64 FP32 ops + 64 INT32 ops) = 16384 * 128 = 2,097,152 operations
-    for (int i = 0; i < 16384; ++i) {
+    uint cu0 = 13u;
+    uint cu1 = 29u;
+    uint cu2 = 43u;
+    uint cu3 = 61u;
+    uint cu4 = 79u;
+    uint cu5 = 101u;
+    uint cu6 = 113u;
+    uint cu7 = 139u;
+
+    // 65536 iterations * (8 scalar FMAs + 8 scalar INT add+xor)
+    // = 65536 * (16 FP32 ops + 16 INT32 ops) = 65536 * 32 = 2,097,152 operations
+    for (int i = 0; i < 65536; ++i) {
         f0 = fma(f0, mf, cf0);
-        u0 = (u0 + cu0) + 1u;
+        u0 = (u0 + cu0) ^ mu;
 
         f1 = fma(f1, mf, cf1);
-        u1 = (u1 + cu1) + 1u;
+        u1 = (u1 + cu1) ^ mu;
 
         f2 = fma(f2, mf, cf2);
-        u2 = (u2 + cu2) + 1u;
+        u2 = (u2 + cu2) ^ mu;
 
         f3 = fma(f3, mf, cf3);
-        u3 = (u3 + cu3) + 1u;
+        u3 = (u3 + cu3) ^ mu;
 
         f4 = fma(f4, mf, cf4);
-        u4 = (u4 + cu4) + 1u;
+        u4 = (u4 + cu4) ^ mu;
 
         f5 = fma(f5, mf, cf5);
-        u5 = (u5 + cu5) + 1u;
+        u5 = (u5 + cu5) ^ mu;
 
         f6 = fma(f6, mf, cf6);
-        u6 = (u6 + cu6) + 1u;
+        u6 = (u6 + cu6) ^ mu;
 
         f7 = fma(f7, mf, cf7);
-        u7 = (u7 + cu7) + 1u;
+        u7 = (u7 + cu7) ^ mu;
     }
 
-    vec4 fres = (f0 + f1) + (f2 + f3) + (f4 + f5) + (f6 + f7);
-    uvec4 ures = (u0 + u1) + (u2 + u3) + (u4 + u5) + (u6 + u7);
+    float fres = (f0 + f1) + (f2 + f3) + (f4 + f5) + (f6 + f7);
+    uint ures = u0 ^ u1 ^ u2 ^ u3 ^ u4 ^ u5 ^ u6 ^ u7;
 
-    InOutBuffer.data[index] = fres.x + fres.y + fres.z + fres.w + float(ures.x ^ ures.y ^ ures.z ^ ures.w);
+    InOutBuffer.data[index] = fres + float(ures);
 }
