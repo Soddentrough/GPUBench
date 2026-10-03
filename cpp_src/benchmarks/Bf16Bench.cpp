@@ -61,9 +61,7 @@ void Bf16Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
   if (context.getBackend() == ComputeBackend::Vulkan && context.getCurrentDeviceInfo().cooperativeMatrixSupport) {
       try_load_matrix = true;
   } else if (context.getBackend() == ComputeBackend::ROCm) {
-      // Matrix WMMA is disabled on ROCm due to 7.1.1 backend crash for RDNA4.
-      // If we are on RDNA3 (gfx1100), we could enable it, but for now we skip.
-      if (context.getCurrentDeviceInfo().name.find("gfx11") != std::string::npos) {
+      if (context.getCurrentDeviceInfo().cooperativeMatrixSupport) {
           try_load_matrix = true;
       }
   }

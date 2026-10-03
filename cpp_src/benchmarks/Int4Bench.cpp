@@ -55,18 +55,10 @@ void Int4Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
 
   DeviceInfo info = context.getCurrentDeviceInfo();
 
-  // Cooperative Matrix path: on RDNA4, the matrix cores handle INT4 natively
-  // via the cooperative matrix interface with int8_t types (HW packs/unpacks).
-  bool is_rdna4 =
-      info.name.find("gfx12") != std::string::npos ||
-      info.name.find("GFX12") != std::string::npos ||
-      info.name.find("rx 9070") != std::string::npos ||
-      info.name.find("R9700") != std::string::npos ||
-      info.name.find("Radeon AI") != std::string::npos;
-      
+  // Cooperative Matrix path: query cooperative matrix API support
   is_native_matrix = false;
   if (info.cooperativeMatrixSupport &&
-      context.getBackend() == ComputeBackend::Vulkan && is_rdna4) {
+      context.getBackend() == ComputeBackend::Vulkan) {
     std::filesystem::path matrix_file =
         kdir / "vulkan" / "coop_matrix_int4.comp";
     if (file_exists(matrix_file.string())) {
