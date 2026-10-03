@@ -585,15 +585,6 @@ if(UNIX AND NOT APPLE)
                 FILES_MATCHING PATTERN "*.glb")
     endif()
 
-    # Reference Renders & Stitching Script
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/renders")
-        install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/renders/"
-                DESTINATION share/gpubench/renders
-                FILES_MATCHING PATTERN "*.png" PATTERN "*.json")
-    endif()
-    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/scripts/make_triptych.py"
-            DESTINATION share/gpubench/scripts
-            PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ)
 endif()
 
 # CPack configuration for creating packages
