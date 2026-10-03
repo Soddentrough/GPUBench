@@ -481,7 +481,7 @@ vec3 computeSmoothNormal(uint sceneType, uint primId, vec3 hitPos, vec3 rayDir, 
 }
 
 
-vec3 evalMaterialBSDF(uint sceneType, uint matId, vec3 normal, vec3 inDir, vec3 hitPos, inout uint rng) {
+vec3 evalMaterialBSDFInternal(uint sceneType, uint matId, vec3 normal, vec3 inDir, vec3 hitPos, bool directOnly, inout uint rng) {
     vec3 viewDir = -inDir;
     float NdotV = max(dot(normal, viewDir), 0.001);
     uint archetype = (SPECIALIZED_ARCHETYPE != 0xFFFFFFFFu) ? SPECIALIZED_ARCHETYPE : getArchetype(matId);
@@ -592,6 +592,10 @@ vec3 evalMaterialBSDF(uint sceneType, uint matId, vec3 normal, vec3 inDir, vec3 
             totalRadiance = mix(deepWater, reflSky, F_w) + sunColor * sunGlint;
         } else {
             totalRadiance = color * sunColor * sunShadow + albedo * skyColor * max(normal.z, 0.0) + albedo * groundColor * max(-normal.z, 0.0);
+        }
+
+        if (directOnly) {
+            return totalRadiance;
         }
 
         // Atmospheric Aerial Perspective Haze with Horizon Matching
@@ -754,6 +758,10 @@ vec3 evalMaterialBSDF(uint sceneType, uint matId, vec3 normal, vec3 inDir, vec3 
             totalRadiance += color * lightCol;
         }
 
+        if (directOnly) {
+            return totalRadiance;
+        }
+
         vec3 reflDir = reflect(inDir, normal);
         vec3 envRefl = evalStudioEnvironment(reflDir);
         if (archetype == 0) {
@@ -839,6 +847,14 @@ vec3 evalMaterialBSDF(uint sceneType, uint matId, vec3 normal, vec3 inDir, vec3 
 
         return totalRadiance;
     }
+}
+
+vec3 evalMaterialBSDF(uint sceneType, uint matId, vec3 normal, vec3 inDir, vec3 hitPos, inout uint rng) {
+    return evalMaterialBSDFInternal(sceneType, matId, normal, inDir, hitPos, false, rng);
+}
+
+vec3 evalMaterialBSDFDirect(uint sceneType, uint matId, vec3 normal, vec3 inDir, vec3 hitPos, inout uint rng) {
+    return evalMaterialBSDFInternal(sceneType, matId, normal, inDir, hitPos, true, rng);
 }
 
 
@@ -938,30 +954,25 @@ void main() {
                 vec3 bOrigin = hitPos + normal * (pc.isGltf != 0u ? 0.05 : 0.005);
                 vec3 bDir = nextDir;
 
-                if (transmission > 0.5) {
-                    // Automotive Dielectric Glass: Fresnel reflection vs Snell refraction
+                if (transmission > 0.5 || archetype == 2u) {
+                    // Automotive Dielectric Glass: Fresnel reflection + clean cabin interior
+                    vec3 cabinInterior = vec3(0.02, 0.025, 0.03);
+                    vec3 R = reflect(curDir, normal);
+                    vec3 envRefl = evalStudioEnvironment(R);
                     float cosTheta = clamp(dot(-curDir, normal), 0.0, 1.0);
                     float F = 0.04 + 0.96 * pow(1.0 - cosTheta, 5.0);
-                    if (u1 < F) {
-                        bDir = reflect(curDir, normal);
-                        bOrigin = hitPos + normal * 0.05;
-                        throughput = vec3(1.0);
-                    } else {
-                        vec3 refr = refract(curDir, normal, 1.0 / max(ior, 1.001));
-                        bDir = (length(refr) > 0.01) ? refr : reflect(curDir, normal);
-                        bOrigin = hitPos - normal * 0.05;
-                        throughput = vec3(0.94, 0.96, 0.98); // Clean safety glass tint
-                    }
+                    directLight = mix(cabinInterior, envRefl, F);
+                    throughput = vec3(0.0);
                 } else {
                     if (pc.sceneType == 0u) {
                         // Showroom Studio: 3-point Studio Softbox lighting
                         const vec3 studioDir[3] = vec3[3](
-                            normalize(vec3(1.2, 2.5, 1.8)),
-                            normalize(vec3(-2.0, 1.8, -1.2)),
-                            normalize(vec3(0.0, 3.0, -2.5))
+                            normalize(vec3(0.6, 0.8, 0.5)),
+                            normalize(vec3(-0.7, 0.5, 0.4)),
+                            normalize(vec3(-0.2, 0.4, -0.9))
                         );
                         const vec3 studioColor[3] = vec3[3](
-                            vec3(1.0, 0.96, 0.90) * 3.2,
+                            vec3(1.0, 0.97, 0.92) * 3.8,
                             vec3(0.75, 0.88, 1.0) * 1.8,
                             vec3(1.0, 1.0, 1.0) * 2.5
                         );
@@ -1077,12 +1088,12 @@ void main() {
 
                         if (pc.sceneType == 0u) {
                             const vec3 studioDir[3] = vec3[3](
-                                normalize(vec3(1.2, 2.5, 1.8)),
-                                normalize(vec3(-2.0, 1.8, -1.2)),
-                                normalize(vec3(0.0, 3.0, -2.5))
+                                normalize(vec3(0.6, 0.8, 0.5)),
+                                normalize(vec3(-0.7, 0.5, 0.4)),
+                                normalize(vec3(-0.2, 0.4, -0.9))
                             );
                             const vec3 studioColor[3] = vec3[3](
-                                vec3(1.0, 0.96, 0.90) * 3.2,
+                                vec3(1.0, 0.97, 0.92) * 3.8,
                                 vec3(0.75, 0.88, 1.0) * 1.8,
                                 vec3(1.0, 1.0, 1.0) * 2.5
                             );
@@ -1616,6 +1627,67 @@ void main() {
 
         if (pc.dumpRenders != 0) {
             fb.pixels[pixelIdx] = vec4(tonemapACES(totalRadiance), 1.0);
+        }
+    } else if (pc.mode == 12) {
+        // Mode 12: Pipeline Breakdown - Isolated Direct Hybrid PBR Shading
+        threadRays++;
+
+        rayQueryEXT query;
+        rayQueryInitializeEXT(query, topLevelAS, gl_RayFlagsOpaqueEXT, 0xFF, rayOrigin, tMinPrimary, rayDir, tMaxPrimary);
+        while (rayQueryProceedEXT(query)) {}
+
+        vec3 pixelColor = vec3(0.0);
+
+        if (rayQueryGetIntersectionTypeEXT(query, true) == gl_RayQueryCommittedIntersectionTriangleEXT) {
+            threadHits++;
+            float t = rayQueryGetIntersectionTEXT(query, true);
+            vec3 hitPos = rayOrigin + rayDir * t;
+            uint primId = rayQueryGetIntersectionPrimitiveIndexEXT(query, true);
+            vec2 rawBary = rayQueryGetIntersectionBarycentricsEXT(query, true);
+            rngState = pixelIdx;
+
+            if (pc.isGltf != 0u) {
+                vec2 bary = unpackUnorm2x16(packUnorm2x16(rawBary));
+                uint base = primId * 36u;
+                vec3 p0 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
+                vec3 n0 = vec3(vbuf.vertices[base + 3], vbuf.vertices[base + 4], vbuf.vertices[base + 5]);
+                vec4 t0 = vec4(vbuf.vertices[base + 6], vbuf.vertices[base + 7], vbuf.vertices[base + 8], vbuf.vertices[base + 9]);
+                vec2 uv0 = vec2(vbuf.vertices[base + 10], vbuf.vertices[base + 11]);
+
+                base += 12u;
+                vec3 p1 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
+                vec3 n1 = vec3(vbuf.vertices[base + 3], vbuf.vertices[base + 4], vbuf.vertices[base + 5]);
+                vec4 t1 = vec4(vbuf.vertices[base + 6], vbuf.vertices[base + 7], vbuf.vertices[base + 8], vbuf.vertices[base + 9]);
+                vec2 uv1 = vec2(vbuf.vertices[base + 10], vbuf.vertices[base + 11]);
+
+                base += 12u;
+                vec3 p2 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
+                vec3 n2 = vec3(vbuf.vertices[base + 3], vbuf.vertices[base + 4], vbuf.vertices[base + 5]);
+                vec4 t2 = vec4(vbuf.vertices[base + 6], vbuf.vertices[base + 7], vbuf.vertices[base + 8], vbuf.vertices[base + 9]);
+                vec2 uv2 = vec2(vbuf.vertices[base + 10], vbuf.vertices[base + 11]);
+
+                float w = 1.0 - bary.x - bary.y;
+                vec3 interpHitPos = w * p0 + bary.x * p1 + bary.y * p2;
+                vec3 geomNormal = normalize(cross(p1 - p0, p2 - p0));
+                vec3 sn = w * n0 + bary.x * n1 + bary.y * n2;
+                vec3 smoothNormal = (length(sn) > 1e-4) ? normalize(sn) : geomNormal;
+                vec4 tangent = w * t0 + bary.x * t1 + bary.y * t2;
+                vec2 uv = w * uv0 + bary.x * uv1 + bary.y * uv2;
+
+                uint matId = triMatBuf.triangleMats[primId];
+                GltfMaterialGpu mat = matBuf.materials[matId];
+                pixelColor = evaluateGltfPbrDirect(mat, interpHitPos, geomNormal, smoothNormal, tangent, uv, rayDir, pc.sceneType, rngState);
+            } else {
+                vec3 normal = computeSmoothNormal(pc.sceneType, primId, hitPos, rayDir, rawBary);
+                uint matId = computeMaterialId(pc.sceneType, primId, hitPos, normal);
+                pixelColor = evalMaterialBSDFDirect(pc.sceneType, matId, normal, rayDir, hitPos, rngState);
+            }
+        } else {
+            pixelColor = evalSky(pc.sceneType, rayDir) * 0.15;
+        }
+
+        if (pc.dumpRenders != 0) {
+            fb.pixels[pixelIdx] = vec4(tonemapACES(pixelColor * 1.0), 1.0);
         }
     } else {
         // Mode 0: Primary Ray Tracing + Divergent Material Shading

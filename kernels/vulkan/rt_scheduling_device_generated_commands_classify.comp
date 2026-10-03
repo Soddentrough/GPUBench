@@ -685,28 +685,23 @@ void main() {
                             vec3 bOrigin = hitPos + normal * (pc.isGltf != 0u ? 0.05 : 0.005);
                             vec3 bDir = nextDir;
 
-                            if (transmission > 0.5) {
+                            if (transmission > 0.5 || archetype == 2u) {
+                                vec3 cabinInterior = vec3(0.02, 0.025, 0.03);
+                                vec3 R = reflect(direction, normal);
+                                vec3 envRefl = evalStudioEnvironment(R);
                                 float cosTheta = clamp(dot(-direction, normal), 0.0, 1.0);
                                 float F = 0.04 + 0.96 * pow(1.0 - cosTheta, 5.0);
-                                if (u1 < F) {
-                                    bDir = reflect(direction, normal);
-                                    bOrigin = hitPos + normal * 0.05;
-                                    throughput = vec3(1.0);
-                                } else {
-                                    vec3 refr = refract(direction, normal, 1.0 / max(ior, 1.001));
-                                    bDir = (length(refr) > 0.01) ? refr : reflect(direction, normal);
-                                    bOrigin = hitPos - normal * 0.05;
-                                    throughput = vec3(0.94, 0.96, 0.98);
-                                }
+                                directLight = mix(cabinInterior, envRefl, F);
+                                throughput = vec3(0.0);
                             } else {
                                 if (pc.sceneType == 0u) {
                                     const vec3 studioDir[3] = vec3[3](
-                                        normalize(vec3(1.2, 2.5, 1.8)),
-                                        normalize(vec3(-2.0, 1.8, -1.2)),
-                                        normalize(vec3(0.0, 3.0, -2.5))
+                                        normalize(vec3(0.6, 0.8, 0.5)),
+                                        normalize(vec3(-0.7, 0.5, 0.4)),
+                                        normalize(vec3(-0.2, 0.4, -0.9))
                                     );
                                     const vec3 studioColor[3] = vec3[3](
-                                        vec3(1.0, 0.96, 0.90) * 3.2,
+                                        vec3(1.0, 0.97, 0.92) * 3.8,
                                         vec3(0.75, 0.88, 1.0) * 1.8,
                                         vec3(1.0, 1.0, 1.0) * 2.5
                                     );
@@ -818,12 +813,12 @@ void main() {
 
                                 if (pc.sceneType == 0u) {
                                     const vec3 studioDir[3] = vec3[3](
-                                        normalize(vec3(1.2, 2.5, 1.8)),
-                                        normalize(vec3(-2.0, 1.8, -1.2)),
-                                        normalize(vec3(0.0, 3.0, -2.5))
+                                        normalize(vec3(0.6, 0.8, 0.5)),
+                                        normalize(vec3(-0.7, 0.5, 0.4)),
+                                        normalize(vec3(-0.2, 0.4, -0.9))
                                     );
                                     const vec3 studioColor[3] = vec3[3](
-                                        vec3(1.0, 0.96, 0.90) * 3.2,
+                                        vec3(1.0, 0.97, 0.92) * 3.8,
                                         vec3(0.75, 0.88, 1.0) * 1.8,
                                         vec3(1.0, 1.0, 1.0) * 2.5
                                     );

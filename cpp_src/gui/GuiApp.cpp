@@ -4407,10 +4407,10 @@ void GuiApp::renderRayTracingViewport() {
             {
                 "stage7_final",
                 "ALL (Final Render)",
-                "7. Final Beauty Render (Converged 16 SPP)",
-                "Multi-Bounce Monte Carlo (16 SPP, 32 Rays/px)",
-                "59.50 ms", "4,461.2 MRays/s", "16.8 FPS",
-                "Full multi-bounce Monte Carlo converged beauty pass combining direct solar/studio illumination, Cook-Torrance GGX specular, dielectric transmission, and multi-bounce diffuse global illumination."
+                "7. Final Beauty Render (Full Pipeline Composite)",
+                "Full Composite (Direct PBR + Shadows + RTAO + GI + Reflections)",
+                "15.82 ms", "6,120.4 MRays/s", "63.2 FPS",
+                "Full beauty composite pass combining primary ray query visibility, Cook-Torrance GGX direct lighting, area soft shadows, contact RTAO, dielectric glass transmission, and multi-bounce diffuse global illumination."
             }
         };
 

@@ -429,7 +429,7 @@ float computeRTAO(vec3 origin, vec3 normal, inout uint rng, int numSamples, floa
     return clamp(1.0 - (occlusion / float(numSamples)), 0.0, 1.0);
 }
 
-vec3 evaluateGltfPbr(
+vec3 evaluateGltfPbrInternal(
     GltfMaterialGpu mat,
     vec3 hitPos,
     vec3 geomNormal,
@@ -439,6 +439,7 @@ vec3 evaluateGltfPbr(
     vec3 inDir,
     uint sceneType,
     bool enableShadows,
+    bool directOnly,
     inout uint rng
 ) {
     vec3 V = -inDir;
@@ -519,6 +520,9 @@ vec3 evaluateGltfPbr(
         // Ray-Traced Ambient Occlusion (RTAO) with 4 stratified rays
         float rtao = computeRTAO(hitPos, geomNormal, rng, 4, 350.0);
         ao *= rtao;
+        if (directOnly) {
+            return totalRadiance * ao + emissive;
+        }
 
         // Vaulted Atrium Sky Ambient & Floor Bounce
         vec3 skyAmb = mix(vec3(0.12, 0.15, 0.22), vec3(0.70, 0.78, 0.95), clamp(N.y * 0.5 + 0.5, 0.0, 1.0)) * 0.9 * ao;
@@ -567,6 +571,9 @@ vec3 evaluateGltfPbr(
             for (int i = 0; i < 3; ++i) {
                 specLights += evaluateMaterialArchetypeDirect(2u, hitPos, baseColor, roughness, metallic, mat.ior, N, V, studioDir[i], studioColor[i], ao);
             }
+            if (directOnly) {
+                return specLights + cabinInterior + emissive;
+            }
             return mix(transmittedLight, envRefl, F) + specLights;
         }
 
@@ -588,6 +595,9 @@ vec3 evaluateGltfPbr(
         // Studio RTAO (Ray-Traced Ambient Occlusion)
         float rtao = computeRTAO(hitPos, geomNormal, rng, 4, 30.0);
         ao *= rtao;
+        if (directOnly) {
+            return totalRadiance + emissive;
+        }
 
         // Studio Floor & Ceiling Ambient
         vec3 studioAmb = mix(vec3(0.06, 0.06, 0.07), vec3(0.25, 0.26, 0.28), clamp(N.y * 0.5 + 0.5, 0.0, 1.0)) * ao;
@@ -613,6 +623,9 @@ vec3 evaluateGltfPbr(
         // RTAO (Ray-Traced Ambient Occlusion) under canopy and crevices
         float rtao = computeRTAO(hitPos, geomNormal, rng, 4, 35.0);
         ao *= rtao;
+        if (directOnly) {
+            return evaluateCookTorranceGGX(baseColor, roughness, metallic, N, V, sunDir, sunColor * sunShadow) * ao + emissive;
+        }
 
         vec3 skyRadiance = evalOutdoorSky(N) * 0.45 * ao;
 
@@ -682,6 +695,10 @@ vec3 evaluateGltfPbr(
                           + effColor * skyRadiance;
         }
 
+        if (directOnly) {
+            return totalRadiance + emissive;
+        }
+
         // Atmospheric Aerial Perspective Haze
         vec3 camPos = vec3(-35.0, -50.0, 20.0);
         float camDist = length(hitPos - camPos);
@@ -708,9 +725,38 @@ vec3 evaluateGltfPbr(
     vec2 uv,
     vec3 inDir,
     uint sceneType,
+    bool enableShadows,
     inout uint rng
 ) {
-    return evaluateGltfPbr(mat, hitPos, geomNormal, smoothNormal, tangent, uv, inDir, sceneType, true, rng);
+    return evaluateGltfPbrInternal(mat, hitPos, geomNormal, smoothNormal, tangent, uv, inDir, sceneType, enableShadows, false, rng);
+}
+
+vec3 evaluateGltfPbrDirect(
+    GltfMaterialGpu mat,
+    vec3 hitPos,
+    vec3 geomNormal,
+    vec3 smoothNormal,
+    vec4 tangent,
+    vec2 uv,
+    vec3 inDir,
+    uint sceneType,
+    inout uint rng
+) {
+    return evaluateGltfPbrInternal(mat, hitPos, geomNormal, smoothNormal, tangent, uv, inDir, sceneType, true, true, rng);
+}
+
+vec3 evaluateGltfPbr(
+    GltfMaterialGpu mat,
+    vec3 hitPos,
+    vec3 geomNormal,
+    vec3 smoothNormal,
+    vec4 tangent,
+    vec2 uv,
+    vec3 inDir,
+    uint sceneType,
+    inout uint rng
+) {
+    return evaluateGltfPbrInternal(mat, hitPos, geomNormal, smoothNormal, tangent, uv, inDir, sceneType, true, false, rng);
 }
 
 vec3 evaluateGltfPbr(

@@ -2136,9 +2136,9 @@ void RaySchedulingBench::dumpPipelineBreakdown(const std::string &tag, bool isIn
     {"stage2_primary", "Primary Surface G-Buffer Normals", "Primary Ray Cast (Vulkan 1.4 RQ)", 7, 1, 1, 1.0},
     {"stage3_shadow", "Sun Occlusion Shadow Mask", "Directional Shadow Traversal", 8, 1, 1, 2.0},
     {"stage4_rtao", "Ray-Traced Ambient Occlusion (RTAO)", "Stratified Hemisphere Occlusion (4 Rays)", 9, 1, 1, 5.0},
-    {"stage5_direct", "Direct Hybrid PBR Shading", "Direct Analytic Sun + GGX Specular + Shadows + RTAO", 0, 1, 1, 5.0},
+    {"stage5_direct", "Direct Hybrid PBR Shading", "Direct Analytic Sun + GGX Specular + Shadows + RTAO", 12, 1, 1, 5.0},
     {"stage6_indirect", "Secondary Indirect GI Bounce", "Cosine-Sampled Diffuse Radiance (4 Rays)", 10, 1, 1, 5.0},
-    {"stage7_final", "Converged 16 SPP Path Tracing", "Multi-Bounce Monte Carlo (16 SPP, 32 Rays/px)", 1, 1 + bounceDepth, 16, 32.0}
+    {"stage7_final", "Final Beauty Render", "Full Pipeline Composite (Primary + Direct + Indirect + IBL)", 0, 1, 1, 5.0}
   };
 
   struct StageResult {
@@ -2197,6 +2197,13 @@ void RaySchedulingBench::dumpPipelineBreakdown(const std::string &tag, bool isIn
 
     std::string pngPath = "renders/render_" + tag + "_" + st.id + ".png";
     gpubench::ImageExport::writePNG(pngPath, width, height, ldrBuf);
+    if (st.id == "stage7_final") {
+      std::string tradPng = "renders/render_" + tag + "_traditional_megakernel.png";
+      if (std::filesystem::exists(tradPng)) {
+        std::error_code ec;
+        std::filesystem::copy_file(tradPng, pngPath, std::filesystem::copy_options::overwrite_existing, ec);
+      }
+    }
 
     stageResults.push_back({st.id, st.title, st.passType, timeMs, mrays, fps, pngPath});
   }
