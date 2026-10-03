@@ -543,7 +543,7 @@ void ResultFormatter::print() {
                       noteStr = "[Mixed FP32+INT32]";
                     }
                   } else {
-                    uint32_t targetBaseConfig = (res.configIndex >= 3 && res.configIndex <= 5) ? 3 : 0;
+                    uint32_t targetBaseConfig = (res.configIndex >= 3) ? 3 : 0;
                     for (const auto &bp : subcat.benchmarks) {
                       if (bp.second.count(backend)) {
                         const auto &br = bp.second.at(backend);

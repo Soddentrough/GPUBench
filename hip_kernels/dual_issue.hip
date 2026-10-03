@@ -40,37 +40,21 @@ extern "C" __global__ void run_dual_issue_ilp8(float* data, float multiplier, ui
     uint32_t index = blockIdx.x * blockDim.x + threadIdx.x;
     if (index >= num_elements) return;
 
-    float4 val0 = make_float4(data[index], data[index], data[index], data[index]);
-    float4 val1 = make_float4(0.1f, 0.2f, 0.3f, 0.4f);
-    float4 val2 = make_float4(0.5f, 0.6f, 0.7f, 0.8f);
-    float4 val3 = make_float4(0.9f, 1.0f, 1.1f, 1.2f);
-    float4 val4 = make_float4(1.3f, 1.4f, 1.5f, 1.6f);
-    float4 val5 = make_float4(1.7f, 1.8f, 1.9f, 2.0f);
-    float4 val6 = make_float4(2.1f, 2.2f, 2.3f, 2.4f);
-    float4 val7 = make_float4(2.5f, 2.6f, 2.7f, 2.8f);
+    float base = data[index];
+    float val0 = base;
+    float val1 = base + 0.1f;
+    float val2 = base + 0.2f;
+    float val3 = base + 0.3f;
 
-    float4 m = make_float4(multiplier, multiplier, multiplier, multiplier);
-    float4 c0 = make_float4(0.0001f, 0.0002f, 0.0003f, 0.0004f);
-    float4 c1 = make_float4(0.0005f, 0.0006f, 0.0007f, 0.0008f);
-    float4 c2 = make_float4(0.0009f, 0.0010f, 0.0011f, 0.0012f);
-    float4 c3 = make_float4(0.0013f, 0.0014f, 0.0015f, 0.0016f);
-    float4 c4 = make_float4(0.0017f, 0.0018f, 0.0019f, 0.0020f);
-    float4 c5 = make_float4(0.0021f, 0.0022f, 0.0023f, 0.0024f);
-    float4 c6 = make_float4(0.0025f, 0.0026f, 0.0027f, 0.0028f);
-    float4 c7 = make_float4(0.0029f, 0.0030f, 0.0031f, 0.0032f);
-
-    for (int i = 0; i < 16384; ++i) {
-        val0 = fmac4(c0, m, val0);
-        val1 = fmac4(c1, m, val1);
-        val2 = fmac4(c2, m, val2);
-        val3 = fmac4(c3, m, val3);
-        val4 = fmac4(c4, m, val4);
-        val5 = fmac4(c5, m, val5);
-        val6 = fmac4(c6, m, val6);
-        val7 = fmac4(c7, m, val7);
+    // 131072 iterations * 4 scalar FMAs = 131072 * 8 = 1,048,576 FP32 operations
+    for (int i = 0; i < 131072; ++i) {
+        val0 = fmaf(multiplier, val1, val0);
+        val2 = fmaf(multiplier, val3, val2);
+        val1 = fmaf(multiplier, val0, val1);
+        val3 = fmaf(multiplier, val2, val3);
     }
 
-    data[index] = val0.x + val1.y + val2.z + val3.w + val4.x + val5.y + val6.z + val7.w;
+    data[index] = val0 + val1 + val2 + val3;
 }
 
 // Config 2: Dual-Issue FP32 (FP32+FP32)
@@ -78,62 +62,32 @@ extern "C" __global__ void run_dual_issue_ilp16(float* data, float multiplier, u
     uint32_t index = blockIdx.x * blockDim.x + threadIdx.x;
     if (index >= num_elements) return;
 
-    float4 val0  = make_float4(data[index], data[index], data[index], data[index]);
-    float4 val1  = make_float4(0.1f, 0.2f, 0.3f, 0.4f);
-    float4 val2  = make_float4(0.5f, 0.6f, 0.7f, 0.8f);
-    float4 val3  = make_float4(0.9f, 1.0f, 1.1f, 1.2f);
-    float4 val4  = make_float4(1.3f, 1.4f, 1.5f, 1.6f);
-    float4 val5  = make_float4(1.7f, 1.8f, 1.9f, 2.0f);
-    float4 val6  = make_float4(2.1f, 2.2f, 2.3f, 2.4f);
-    float4 val7  = make_float4(2.5f, 2.6f, 2.7f, 2.8f);
-    float4 val8  = make_float4(2.9f, 3.0f, 3.1f, 3.2f);
-    float4 val9  = make_float4(3.3f, 3.4f, 3.5f, 3.6f);
-    float4 val10 = make_float4(3.7f, 3.8f, 3.9f, 4.0f);
-    float4 val11 = make_float4(4.1f, 4.2f, 4.3f, 4.4f);
-    float4 val12 = make_float4(4.5f, 4.6f, 4.7f, 4.8f);
-    float4 val13 = make_float4(4.9f, 5.0f, 5.1f, 5.2f);
-    float4 val14 = make_float4(5.3f, 5.4f, 5.5f, 5.6f);
-    float4 val15 = make_float4(5.7f, 5.8f, 5.9f, 6.0f);
+    float base = data[index];
+    float4 val0 = make_float4(base, base, base, base);
+    float4 val1 = make_float4(base + 0.1f, base + 0.2f, base + 0.3f, base + 0.4f);
+    float4 val2 = make_float4(base + 0.5f, base + 0.6f, base + 0.7f, base + 0.8f);
+    float4 val3 = make_float4(base + 0.9f, base + 1.0f, base + 1.1f, base + 1.2f);
+    float4 val4 = make_float4(base + 1.3f, base + 1.4f, base + 1.5f, base + 1.6f);
+    float4 val5 = make_float4(base + 1.7f, base + 1.8f, base + 1.9f, base + 2.0f);
+    float4 val6 = make_float4(base + 2.1f, base + 2.2f, base + 2.3f, base + 2.4f);
+    float4 val7 = make_float4(base + 2.5f, base + 2.6f, base + 2.7f, base + 2.8f);
 
     float4 m = make_float4(multiplier, multiplier, multiplier, multiplier);
-    float4 c0  = make_float4(0.0001f, 0.0002f, 0.0003f, 0.0004f);
-    float4 c1  = make_float4(0.0005f, 0.0006f, 0.0007f, 0.0008f);
-    float4 c2  = make_float4(0.0009f, 0.0010f, 0.0011f, 0.0012f);
-    float4 c3  = make_float4(0.0013f, 0.0014f, 0.0015f, 0.0016f);
-    float4 c4  = make_float4(0.0017f, 0.0018f, 0.0019f, 0.0020f);
-    float4 c5  = make_float4(0.0021f, 0.0022f, 0.0023f, 0.0024f);
-    float4 c6  = make_float4(0.0025f, 0.0026f, 0.0027f, 0.0028f);
-    float4 c7  = make_float4(0.0029f, 0.0030f, 0.0031f, 0.0032f);
-    float4 c8  = make_float4(0.0033f, 0.0034f, 0.0035f, 0.0036f);
-    float4 c9  = make_float4(0.0037f, 0.0038f, 0.0039f, 0.0040f);
-    float4 c10 = make_float4(0.0041f, 0.0042f, 0.0043f, 0.0044f);
-    float4 c11 = make_float4(0.0045f, 0.0046f, 0.0047f, 0.0048f);
-    float4 c12 = make_float4(0.0049f, 0.0050f, 0.0051f, 0.0052f);
-    float4 c13 = make_float4(0.0053f, 0.0054f, 0.0055f, 0.0056f);
-    float4 c14 = make_float4(0.0057f, 0.0058f, 0.0059f, 0.0060f);
-    float4 c15 = make_float4(0.0061f, 0.0062f, 0.0063f, 0.0064f);
 
-    for (int i = 0; i < 16384; ++i) {
-        val0  = fmac4(c0,  m, val0);
-        val1  = fmac4(c1,  m, val1);
-        val2  = fmac4(c2,  m, val2);
-        val3  = fmac4(c3,  m, val3);
-        val4  = fmac4(c4,  m, val4);
-        val5  = fmac4(c5,  m, val5);
-        val6  = fmac4(c6,  m, val6);
-        val7  = fmac4(c7,  m, val7);
-        val8  = fmac4(c8,  m, val8);
-        val9  = fmac4(c9,  m, val9);
-        val10 = fmac4(c10, m, val10);
-        val11 = fmac4(c11, m, val11);
-        val12 = fmac4(c12, m, val12);
-        val13 = fmac4(c13, m, val13);
-        val14 = fmac4(c14, m, val14);
-        val15 = fmac4(c15, m, val15);
+    // 32768 iterations * 8 float4 FMAs = 32768 * 64 = 2,097,152 FP32 operations
+    for (int i = 0; i < 32768; ++i) {
+        val0 = fmac4(val0, m, val1);
+        val2 = fmac4(val2, m, val3);
+        val4 = fmac4(val4, m, val5);
+        val6 = fmac4(val6, m, val7);
+
+        val1 = fmac4(val1, m, val0);
+        val3 = fmac4(val3, m, val2);
+        val5 = fmac4(val5, m, val4);
+        val7 = fmac4(val7, m, val6);
     }
 
-    data[index] = val0.x + val1.y + val2.z + val3.w + val4.x + val5.y + val6.z + val7.w +
-                  val8.x + val9.y + val10.z + val11.w + val12.x + val13.y + val14.z + val15.w;
+    data[index] = val0.x + val1.y + val2.z + val3.w + val4.x + val5.y + val6.z + val7.w;
 }
 
 // Config 6: Dual-Issue Mixed (FP32+INT32)
@@ -174,28 +128,28 @@ extern "C" __global__ void run_dual_issue_mixed(float* data, float multiplier, u
     if (umult == 0) umult = 1;
 
     for (int i = 0; i < 16384; ++i) {
-        f0 = fmac4(cf0, mf, f0);
+        f0 = fmac4(f0, mf, cf0);
         u0.x = u0.x * umult + 13u; u0.y = u0.y * umult + 17u; u0.z = u0.z * umult + 19u; u0.w = u0.w * umult + 23u;
 
-        f1 = fmac4(cf1, mf, f1);
+        f1 = fmac4(f1, mf, cf1);
         u1.x = u1.x * umult + 29u; u1.y = u1.y * umult + 31u; u1.z = u1.z * umult + 37u; u1.w = u1.w * umult + 41u;
 
-        f2 = fmac4(cf2, mf, f2);
+        f2 = fmac4(f2, mf, cf2);
         u2.x = u2.x * umult + 43u; u2.y = u2.y * umult + 47u; u2.z = u2.z * umult + 53u; u2.w = u2.w * umult + 59u;
 
-        f3 = fmac4(cf3, mf, f3);
+        f3 = fmac4(f3, mf, cf3);
         u3.x = u3.x * umult + 61u; u3.y = u3.y * umult + 67u; u3.z = u3.z * umult + 71u; u3.w = u3.w * umult + 73u;
 
-        f4 = fmac4(cf4, mf, f4);
+        f4 = fmac4(f4, mf, cf4);
         u4.x = u4.x * umult + 79u; u4.y = u4.y * umult + 83u; u4.z = u4.z * umult + 89u; u4.w = u4.w * umult + 97u;
 
-        f5 = fmac4(cf5, mf, f5);
+        f5 = fmac4(f5, mf, cf5);
         u5.x = u5.x * umult + 101u; u5.y = u5.y * umult + 103u; u5.z = u5.z * umult + 107u; u5.w = u5.w * umult + 109u;
 
-        f6 = fmac4(cf6, mf, f6);
+        f6 = fmac4(f6, mf, cf6);
         u6.x = u6.x * umult + 113u; u6.y = u6.y * umult + 127u; u6.z = u6.z * umult + 131u; u6.w = u6.w * umult + 137u;
 
-        f7 = fmac4(cf7, mf, f7);
+        f7 = fmac4(f7, mf, cf7);
         u7.x = u7.x * umult + 139u; u7.y = u7.y * umult + 149u; u7.z = u7.z * umult + 151u; u7.w = u7.w * umult + 157u;
     }
 

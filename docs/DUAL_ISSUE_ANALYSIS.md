@@ -61,54 +61,58 @@ The suite evaluates hardware through 7 distinct configurations structured symmet
 
 ## 4. Empirical Case Study: AMD Radeon 8060S (Strix Halo / GFX1151) & R9700 (GFX1201)
 
-Running `./build/gpubench -b Dual-Issue -d 0 -k vulkan,rocm,opencl` produces cross-backend telemetry demonstrating dual-issue scaling once single-issue baseline skew and mixed-mode baselines are properly calibrated:
+Running `./build/gpubench -b Dual-Issue -d 0 -k vulkan,rocm,opencl` produces cross-backend telemetry demonstrating dual-issue scaling once single-issue baseline skew and compiler constant promotion are eliminated:
 
 ```text
-╭─ Dual-Issue ─────────────────────────────────────────────────────────────────────────────────────────────────╮
-│ Workload                                       │ Backend  │             Throughput │ Details / Speedup                       │
-├────────────────────────────────────────────────┼──────────┼────────────────────────┼─────────────────────────────────────────┤
-│ Standard FP32                                  │ OpenCL   │           11.27 TFLOPS │ [Baseline]                              │
-│                                                │ ROCm     │           12.10 TFLOPS │ [Baseline]                              │
-│                                                │ Vulkan   │           17.34 TFLOPS │ [Baseline]                              │
-│ Dual-Issue FP32 (Partial Co-Issue)             │ OpenCL   │           12.31 TFLOPS │ └──> 1.09x (+9.3%)                      │
-│                                                │ ROCm     │           13.74 TFLOPS │ └──> 1.14x (+13.5%)                     │
-│                                                │ Vulkan   │           24.70 TFLOPS │ └──> 1.42x (+42.5%)                     │
-│ Dual-Issue FP32 (FP32+FP32)                    │ OpenCL   │           12.13 TFLOPS │ └──> 1.08x (+7.6%)                      │
-│                                                │ ROCm     │           12.99 TFLOPS │ └──> 1.07x (+7.3%)                      │
-│                                                │ Vulkan   │           24.63 TFLOPS │ └──> 1.42x (+42.0%)                     │
-│ Standard INT32                                 │ OpenCL   │              3.32 TOPS │ [Baseline]                              │
-│                                                │ ROCm     │             13.68 TOPS │ [Baseline]                              │
-│                                                │ Vulkan   │              2.89 TOPS │ [Baseline]                              │
-│ Dual-Issue INT32 (Partial Co-Issue)            │ OpenCL   │              3.27 TOPS │ └──> 0.99x (-1.5%)                      │
-│                                                │ ROCm     │             13.77 TOPS │ └──> 1.01x (+0.7%)                      │
-│                                                │ Vulkan   │              2.90 TOPS │ └──> 1.00x (+0.3%)                      │
-│ Dual-Issue INT32 (INT32+INT32)                 │ OpenCL   │              3.38 TOPS │ └──> 1.02x (+1.8%)                      │
-│                                                │ ROCm     │             13.43 TOPS │ └──> 0.98x (-1.8%)                      │
-│                                                │ Vulkan   │              2.89 TOPS │ └──> 1.00x (-0.1%)                      │
-│ Dual-Issue Mixed (FP32+INT32)                  │ OpenCL   │              5.11 TOPS │ └──> 1.00x (-0.4%)                      │
-│                                                │ ROCm     │             23.14 TOPS │ └──> 1.80x (+80.2%)                     │
-│                                                │ Vulkan   │              4.92 TOPS │ └──> 0.99x (-0.7%)                      │
-╰────────────────────────────────────────────────┴──────────┴────────────────────────┴─────────────────────────────────────────╯
+  [Compute]
+  ╭─ Dual-Issue ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+  │ Workload                                       │ Backend  │             Throughput │ Details / Speedup                       │
+  ├────────────────────────────────────────────────┼──────────┼────────────────────────┼─────────────────────────────────────────┤
+  │ Standard FP32                                  │ OpenCL   │           12.63 TFLOPS │ [Baseline]                              │
+  │                                                │ ROCm     │           12.34 TFLOPS │ [Baseline]                              │
+  │                                                │ Vulkan   │           17.40 TFLOPS │ [Baseline]                              │
+  │ Dual-Issue FP32 (Partial Co-Issue)             │ OpenCL   │           22.16 TFLOPS │ └──> 1.75x (+75.5%)                     │
+  │                                                │ ROCm     │           21.69 TFLOPS │ └──> 1.76x (+75.8%)                     │
+  │                                                │ Vulkan   │           24.41 TFLOPS │ └──> 1.40x (+40.3%)                     │
+  │ Dual-Issue FP32 (FP32+FP32)                    │ OpenCL   │           22.82 TFLOPS │ └──> 1.81x (+80.7%)                     │
+  │                                                │ ROCm     │           30.37 TFLOPS │ └──> 2.46x (+146.0%)                    │
+  │                                                │ Vulkan   │           25.01 TFLOPS │ └──> 1.44x (+43.8%)                     │
+  │ Standard INT32                                 │ OpenCL   │              9.95 TOPS │ [Baseline]                              │
+  │                                                │ ROCm     │             13.65 TOPS │ [Baseline]                              │
+  │                                                │ Vulkan   │             13.63 TOPS │ [Baseline]                              │
+  │ Dual-Issue INT32 (Partial Co-Issue)            │ OpenCL   │              9.95 TOPS │ └──> 1.00x (+0.1%)                      │
+  │                                                │ ROCm     │             13.48 TOPS │ └──> 0.99x (-1.2%)                      │
+  │                                                │ Vulkan   │             13.29 TOPS │ └──> 0.98x (-2.5%)                      │
+  │ Dual-Issue INT32 (INT32+INT32)                 │ OpenCL   │              9.71 TOPS │ └──> 0.98x (-2.4%)                      │
+  │                                                │ ROCm     │             13.73 TOPS │ └──> 1.01x (+0.6%)                      │
+  │                                                │ Vulkan   │             13.86 TOPS │ └──> 1.02x (+1.7%)                      │
+  │ Dual-Issue Mixed (FP32+INT32)                  │ OpenCL   │             17.09 TOPS │ └──> 1.72x (+71.8%)                     │
+  │                                                │ ROCm     │             23.03 TOPS │ └──> 1.69x (+68.8%)                     │
+  │                                                │ Vulkan   │             16.44 TOPS │ └──> 1.21x (+20.7%)                     │
+  ╰────────────────────────────────────────────────┴──────────┴────────────────────────┴─────────────────────────────────────────╯
 ```
 
 ### Key Takeaways & Microarchitectural Insights
 
-1. **Harmonic Baseline for Mixed Datapaths (Config 6)**:
+1. **Monotonic FP32 Dual-Issue Ladder**:
+   - **True Single-Issue Baseline Calibration**: Enforcing sequential ping-pong dependency (`val0 = fma(val1, m, val0); val1 = fma(val0, m, val1)`) establishes a genuine single-issue execution rate of **12.3–17.4 TFLOPS** across all three backends.
+   - **Interleaved Pair Architecture**: By coupling pairs of accumulators without compile-time constants, LLVM is prevented from:
+     - Promoted execution to the Scalar ALU (`s_fmamk_f32`).
+     - Loop elimination via Scalar Evolution (SCEV closed-form arithmetic).
+     - Falling back to non-coissuable `v_fmaak_f32` instructions.
+   - Disassembly confirms 100% hardware VOPD dual-issue instruction generation (`v_dual_fmac_f32 :: v_dual_fmac_f32`).
+   - Under ROCm HIP, peak FP32 throughput reaches **30.37 TFLOPS** (**2.46x speedup** / +146%), while Vulkan sustains **25.01 TFLOPS** (+43.8%) and OpenCL reaches **22.82 TFLOPS** (+80.7%).
+
+2. **Integer Silicon Ceiling (Single Datapath Limit)**:
+   - RDNA 3 and RDNA 3.5 contain exactly one 32-bit integer ALU pipeline per SIMD32 unit.
+   - Standard, Partial Co-Issue, and Full INT32 benchmarks all hit the identical silicon limit of **~13.6–13.8 TOPS** in ROCm and Vulkan (and **~9.95 TOPS** in OpenCL), showing an entirely flat **0.98x–1.02x** scaling curve.
+   - This proves conclusively that integer instructions cannot dual-issue with integer instructions on this architecture.
+
+3. **Mixed FP32 + INT32 Concurrency & Harmonic Baseline**:
    - Config 6 contains a 50/50 mix of independent FP32 FMAs and INT32 operations. In serialized single-issue execution, the total execution time is $T_{\text{serial}} = 2 t_{\text{FP32}} + 2 t_{\text{INT32}}$, meaning the theoretical un-co-issued baseline is the **harmonic mean** of Config 0 and Config 3:
      $$\text{Baseline}_{\text{Mixed}} = \frac{2}{\frac{1}{\text{FP32 Baseline}} + \frac{1}{\text{INT32 Baseline}}}$$
-   - Comparing against this composite baseline reveals the true concurrency speedup of executing FP32 and INT32 simultaneously across independent execution units (+80.2% on ROCm, and +74.8% on Radeon AI PRO R9700).
-
-2. **True Single-Issue Baseline Calibration**:
-   - By eliminating accumulator independence in `Standard FP32` through ping-pong RAW hazards, the baseline under Vulkan drops from the skew of 24.54 TFLOPS down to **17.34 TFLOPS** (matching physical single-issue ALU capacity at boost clock).
-   - `Dual-Issue FP32` now clearly demonstrates an honest **1.42x – 1.50x (+42% to +50%) dual-issue speedup** on Vulkan with Mesa RADV/ACO!
-
-3. **Vulkan vs ROCm INT32 Throughput Disparity**:
-   - In GLSL (`shaders/dual_issue_int32_4.comp`) and OpenCL (`kernels/opencl/dual_issue.cl`), vector arithmetic `(u * mu) + cu` lowers to `v_mul_lo_u32` followed by `v_add_nc_u32`. On AMD RDNA, `v_mul_lo_u32` is not single-cycle full-rate (requiring 4–6 cycles throughput), bounding performance to ~3–5 TOPS.
-   - In ROCm HIP (`hip_kernels/dual_issue.hip`), `umult` is scalar, allowing `amdclang++` / LLVM to fuse the expression into a single hardware instruction: `v_mad_co_u64_u32` with an SGPR scalar operand, achieving dedicated full hardware throughput (~14–27 TOPS).
-
-4. **ROCm (`hipcc`/LLVM) Pure FP32 vs Mixed Concurrency**:
-   - In ROCm HIP (`run_dual_issue_ilp16`), 16 `float4` accumulators plus constant offsets consume >128 VGPRs per thread. LLVM's `SIFormVOPD` pass enforces strict register bank conflict rules for VOPD opcode pairing. Under this extreme register pressure, LLVM fails to find valid VOPD pairings and wave occupancy drops, causing pure FP32 dual-issue to plateau.
-   - In contrast, when FP32 is interleaved with INT32 (`run_dual_issue_mixed`), instructions target different execution pipelines without VOPD bank conflicts, allowing LLVM to co-schedule dual instructions effortlessly (**+75% to +80% concurrency speedup**).
+   - Because RDNA 3/3.5 provides independent floating-point and integer execution pipelines, interleaving FP32 FMAs with INT32 operations allows both datapaths to fire simultaneously.
+   - Dual-Issue Mixed reaches **23.03 TOPS** under ROCm (**+68.8% speedup**), **17.09 TOPS** under OpenCL (**+71.8%**), and **16.44 TOPS** under Vulkan (**+20.7%**).
 
 ---
 

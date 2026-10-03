@@ -33,12 +33,12 @@ void main() {
     uvec4 cu2  = uvec4(43u, 47u, 53u, 59u);
     uvec4 cu3  = uvec4(61u, 67u, 71u, 73u);
 
-    // 16384 iterations * 4 uvec4 INT mul-add (2 ops each) = 16384 * 32 = 524,288 INT32 ops
+    // 16384 iterations * 4 uvec4 full-rate INT32 ALU ops (2 adds = 2 ops each) = 16384 * 32 = 524,288 INT32 ops
     for (int i = 0; i < 16384; ++i) {
-        u0  = (u0  * mu) + cu0;
-        u1  = (u1  * mu) + cu1;
-        u2  = (u2  * mu) + cu2;
-        u3  = (u3  * mu) + cu3;
+        u0  = (u0  + cu0) + 1u;
+        u1  = (u1  + cu1) + 1u;
+        u2  = (u2  + cu2) + 1u;
+        u3  = (u3  + cu3) + 1u;
     }
 
     uvec4 ures = (u0 + u1) + (u2 + u3);

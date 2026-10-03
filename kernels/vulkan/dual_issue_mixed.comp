@@ -63,32 +63,32 @@ void main() {
     uvec4 cu6 = uvec4(113u, 127u, 131u, 137u);
     uvec4 cu7 = uvec4(139u, 149u, 151u, 157u);
 
-    // 16384 iterations * (8 vec4 FMAs + 8 uvec4 INT mul-add)
+    // 16384 iterations * (8 vec4 FMAs + 8 uvec4 INT adds)
     // = 16384 * (64 FP32 ops + 64 INT32 ops) = 16384 * 128 = 2,097,152 operations
     for (int i = 0; i < 16384; ++i) {
         f0 = fma(f0, mf, cf0);
-        u0 = (u0 * mu) + cu0;
+        u0 = (u0 + cu0) + 1u;
 
         f1 = fma(f1, mf, cf1);
-        u1 = (u1 * mu) + cu1;
+        u1 = (u1 + cu1) + 1u;
 
         f2 = fma(f2, mf, cf2);
-        u2 = (u2 * mu) + cu2;
+        u2 = (u2 + cu2) + 1u;
 
         f3 = fma(f3, mf, cf3);
-        u3 = (u3 * mu) + cu3;
+        u3 = (u3 + cu3) + 1u;
 
         f4 = fma(f4, mf, cf4);
-        u4 = (u4 * mu) + cu4;
+        u4 = (u4 + cu4) + 1u;
 
         f5 = fma(f5, mf, cf5);
-        u5 = (u5 * mu) + cu5;
+        u5 = (u5 + cu5) + 1u;
 
         f6 = fma(f6, mf, cf6);
-        u6 = (u6 * mu) + cu6;
+        u6 = (u6 + cu6) + 1u;
 
         f7 = fma(f7, mf, cf7);
-        u7 = (u7 * mu) + cu7;
+        u7 = (u7 + cu7) + 1u;
     }
 
     vec4 fres = (f0 + f1) + (f2 + f3) + (f4 + f5) + (f6 + f7);
