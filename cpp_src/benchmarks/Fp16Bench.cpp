@@ -88,11 +88,10 @@ void Fp16Bench::Teardown() {
 
 BenchmarkResult Fp16Bench::GetResult(uint32_t config_idx) const {
   if (config_idx == 0) {
-    // 32 f16vec4 FMAs per iteration = 32 * 8 = 256 FP16 ops per iteration.
-    // Each f16vec4 FMA = 4 elements × (mul+add) = 8 FP16 ops.
-    // Vulkan: 32768 iters. OpenCL: 16384 iters. ROCm: 2048 iters.
-    uint64_t iters = 32768; // Vulkan default
-    uint64_t ops_per_iter = 256; // 32 FMAs × 8 ops each
+    // Vulkan: 16 f16vec4 FMAs per iteration = 16 * 8 = 128 FP16 ops per iteration, 65536 iters.
+    // Total ops per thread = 65536 * 128 = 8,388,608 ops (<=64 VGPRs, 100% occupancy)
+    uint64_t iters = 65536; // Vulkan default
+    uint64_t ops_per_iter = 128; // 16 FMAs × 8 ops each
     if (context) {
       if (context->getBackend() == ComputeBackend::ROCm) {
         iters = 2048;

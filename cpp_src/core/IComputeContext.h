@@ -62,6 +62,8 @@ struct DeviceInfo {
   std::string driverName = "";
   std::string driverInfo = "";
   std::string driverVersionStr = "";
+  std::string pcieBusId = "";
+  uint64_t dedicatedVramBytes = 0;
   bool verbose = false;
 };
 
@@ -124,6 +126,11 @@ public:
                         uint32_t block_z) = 0;
   virtual void releaseKernel(ComputeKernel kernel) = 0;
   virtual void waitIdle() = 0;
+
+  // Hardware GPU timestamp profiling
+  virtual void startTiming() {}
+  virtual double stopTiming() { return 0.0; } // Returns elapsed GPU execution time in milliseconds
+  virtual bool hasGpuTiming() const { return false; }
 
   // Headless presentation hooks for profiling / tracing tools (e.g. RRA)
   virtual void enableHeadlessSwapchain() {}

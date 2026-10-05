@@ -56,9 +56,8 @@ void Fp64Bench::Teardown() {
 }
 
 BenchmarkResult Fp64Bench::GetResult(uint32_t config_idx) const {
-  // 2 operations per loop iteration (FMA).
-  // Kernel loop count is 2048 across all backends to keep dispatch time <50ms
-  // and prevent TDR / ring timeouts on display GPUs.
+  // Vulkan: 256 iters * 8 independent FMAs * 2 ops = 4096 FP64 ops per thread
+  // OpenCL/ROCm: 2048 iters * 1 FMA * 2 ops = 4096 FP64 ops per thread
   uint64_t iters = 2048;
   uint64_t num_threads = 8192 * 64;
   uint64_t num_ops = iters * 2 * num_threads;

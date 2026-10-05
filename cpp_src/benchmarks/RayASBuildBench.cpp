@@ -98,12 +98,13 @@ void RayASBuildBench::Setup(IComputeContext &context_ref,
 
   // 3. Setup Multi-BLAS Library (5,000 distinct geometries for branched TLAS)
   uint32_t numBlasLib = 5000;
-  blasLibBuffers.resize(numBlasLib);
   blasLibHandles.resize(numBlasLib);
   blasLibAddrs.resize(numBlasLib);
 
   std::vector<uint32_t> libPrims(numBlasLib);
   std::vector<VkAccelerationStructureBuildSizesInfoKHR> libSizes(numBlasLib);
+  std::vector<VkDeviceSize> libOffsets(numBlasLib);
+  VkDeviceSize totalLibBufferSize = 0;
 
   for (uint32_t b = 0; b < numBlasLib; ++b) {
     libPrims[b] = 50 + (b % 15) * 100;
@@ -133,11 +134,23 @@ void RayASBuildBench::Setup(IComputeContext &context_ref,
         device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &bInfo,
         &libPrims[b], &libSizes[b]);
 
-    blasLibBuffers[b] = context_ref.createBuffer(libSizes[b].accelerationStructureSize);
+    // Align each AS to 256 bytes per Vulkan AS spec
+    totalLibBufferSize = (totalLibBufferSize + 255) & ~255ULL;
+    libOffsets[b] = totalLibBufferSize;
+    totalLibBufferSize += libSizes[b].accelerationStructureSize;
+
+    maxBuildScratch = std::max(maxBuildScratch, (size_t)libSizes[b].buildScratchSize);
+  }
+
+  // Allocate single pooled buffer for all 5,000 BLASes (avoids exceeding maxMemoryAllocationCount)
+  blasLibPooledBuffer = context_ref.createBuffer(totalLibBufferSize);
+  VkBuffer pooledVkBuffer = vContext->getVkBuffer(blasLibPooledBuffer);
+
+  for (uint32_t b = 0; b < numBlasLib; ++b) {
     VkAccelerationStructureCreateInfoKHR cInfo{
         VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR};
-    cInfo.buffer = vContext->getVkBuffer(blasLibBuffers[b]);
-    cInfo.offset = 0;
+    cInfo.buffer = pooledVkBuffer;
+    cInfo.offset = libOffsets[b];
     cInfo.size = libSizes[b].accelerationStructureSize;
     cInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
     vkCreateAccelerationStructureKHR_ptr(device, &cInfo, nullptr, &blasLibHandles[b]);
@@ -146,8 +159,6 @@ void RayASBuildBench::Setup(IComputeContext &context_ref,
         VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR};
     dInfo.accelerationStructure = blasLibHandles[b];
     blasLibAddrs[b] = vkGetAccelerationStructureDeviceAddressKHR_ptr(device, &dInfo);
-
-    maxBuildScratch = std::max(maxBuildScratch, (size_t)libSizes[b].buildScratchSize);
   }
 
   // Batch build the 5,000 BLASes in chunks to avoid GPU ring timeouts on display adapters
@@ -523,6 +534,10 @@ void RayASBuildBench::Teardown() {
       if (b) { context->releaseBuffer(b); }
     }
     blasLibBuffers.clear();
+    if (blasLibPooledBuffer) {
+      context->releaseBuffer(blasLibPooledBuffer);
+      blasLibPooledBuffer = nullptr;
+    }
     blasLibAddrs.clear();
 
     for (auto &t : tlases) {

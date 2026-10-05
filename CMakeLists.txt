@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.22)
 project(GPUBench VERSION 1.0.0)
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Versioning
@@ -227,6 +227,9 @@ set(LIB_SOURCES
     cpp_src/benchmarks/SysMemBandwidthBench.cpp
     cpp_src/benchmarks/SysMemLatencyBench.cpp
     cpp_src/benchmarks/CacheBench.cpp
+    cpp_src/benchmarks/CacheLatencyCurveBench.cpp
+    cpp_src/benchmarks/LdsBankConflictBench.cpp
+    cpp_src/benchmarks/InShaderIndirectBench.cpp
     cpp_src/benchmarks/PixelFillRateBench.cpp
     cpp_src/benchmarks/RayIntersectBench.cpp
     cpp_src/benchmarks/RayRawTraversalBench.cpp
@@ -746,7 +749,7 @@ elseif(UNIX AND NOT APPLE)
         COMMENT "Running RPM dry-run and structural verification..."
     )
     add_custom_target(check-parity
-        COMMAND ${CMAKE_COMMAND} -E env MESA_VK_IGNORE_CONFORMANCE_WARNING=1 "${CMAKE_CURRENT_BINARY_DIR}/gpubench" -d 0 -b rayscheduling --profile-snapshot --verify-parity
+        COMMAND "${CMAKE_CURRENT_BINARY_DIR}/gpubench" -d 0 -b rayscheduling --profile-snapshot --verify-parity
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
         DEPENDS gpubench
         COMMENT "Running automated visual parity gate between Megakernel and Device-Generated Commands (DGC) on GPU 0..."

@@ -13,6 +13,7 @@
 #define ALIGNED_ALLOC(alignment, size) _aligned_malloc(size, alignment)
 #define ALIGNED_FREE(ptr) _aligned_free(ptr)
 #else
+#include <sys/mman.h>
 #define ALIGNED_ALLOC(alignment, size) aligned_alloc(alignment, size)
 #define ALIGNED_FREE(ptr) free(ptr)
 #endif
@@ -37,11 +38,20 @@ void SysMemLatencyBench::Setup(IComputeContext &context,
   // 256MB buffer to ensure we bypass CPU caches (including 32MB - 128MB L3)
   bufferSize = 256ULL * 1024ULL * 1024ULL;
 
-  buffer = ALIGNED_ALLOC(64, bufferSize);
+  buffer = ALIGNED_ALLOC(2 * 1024 * 1024, bufferSize);
+  if (!buffer) {
+    buffer = ALIGNED_ALLOC(64, bufferSize);
+  }
   if (!buffer) {
     throw std::runtime_error(
         "Failed to allocate system memory buffer for latency test");
   }
+
+#ifndef _WIN32
+#ifdef MADV_HUGEPAGE
+  madvise(buffer, bufferSize, MADV_HUGEPAGE);
+#endif
+#endif
 
   // Pointer chasing across 64-byte cache lines.
   // Striding by 64 bytes (16 uint32_t elements) guarantees that every jump

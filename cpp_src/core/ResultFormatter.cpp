@@ -22,7 +22,35 @@
 #include <windows.h>
 #else
 #include <unistd.h>
+#include <sys/ioctl.h>
 #endif
+
+static bool shouldUseColor() {
+  if (std::getenv("NO_COLOR") != nullptr) {
+    return false;
+  }
+#if defined(_WIN32)
+  return true;
+#else
+  return isatty(fileno(stdout));
+#endif
+}
+
+static size_t getTerminalWidth() {
+#if defined(_WIN32)
+  CONSOLE_SCREEN_BUFFER_INFO csbi;
+  if (GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &csbi)) {
+    return std::max<size_t>(80, csbi.srWindow.Right - csbi.srWindow.Left + 1);
+  }
+  return 128;
+#else
+  struct winsize w;
+  if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) == 0 && w.ws_col > 0) {
+    return std::max<size_t>(80, static_cast<size_t>(w.ws_col));
+  }
+  return 128;
+#endif
+}
 
 std::string ResultFormatter::formatDouble(double value, int precision) {
   std::stringstream stream;
@@ -319,17 +347,18 @@ void ResultFormatter::print() {
     }
   }
 
-  const std::string RESET = "\033[0m";
-  const std::string BOLD = "\033[1m";
-  const std::string DIM = "\033[2m";
-  const std::string CYAN = "\033[36m";
-  const std::string GREEN = "\033[32m";
-  const std::string RED = "\033[31m";
-  const std::string YELLOW = "\033[33m";
-  const std::string MAGENTA = "\033[35m";
-  const std::string BLUE = "\033[34m";
+  const bool useColor = shouldUseColor();
+  const std::string RESET = useColor ? "\033[0m" : "";
+  const std::string BOLD = useColor ? "\033[1m" : "";
+  const std::string DIM = useColor ? "\033[2m" : "";
+  const std::string CYAN = useColor ? "\033[36m" : "";
+  const std::string GREEN = useColor ? "\033[32m" : "";
+  const std::string RED = useColor ? "\033[31m" : "";
+  const std::string YELLOW = useColor ? "\033[33m" : "";
+  const std::string MAGENTA = useColor ? "\033[35m" : "";
+  const std::string BLUE = useColor ? "\033[34m" : "";
 
-  const size_t cardBoxWidth = 128;
+  const size_t cardBoxWidth = std::clamp<size_t>(getTerminalWidth(), 80, 128);
   const size_t cardInnerWidth = cardBoxWidth - 4; // 124
 
   const size_t w1 = 46;
@@ -508,10 +537,54 @@ void ResultFormatter::print() {
                   noteStr = "[" + res.errorString + "]";
                 }
               } else if (res.component == "Compute") {
-                double value = (static_cast<double>(res.operations) /
-                               (res.time_ms / 1000.0)) / 1e12;
+                double value = 0.0;
+                if (res.metric == "MItems/s") {
+                  value = (static_cast<double>(res.operations) / (res.time_ms / 1000.0)) / 1e6;
+                } else {
+                  value = (static_cast<double>(res.operations) / (res.time_ms / 1000.0)) / 1e12;
+                }
                 valStr = formatDouble(value, 2) + " " + res.metric;
-                if (res.subcategory == "Dual-Issue") {
+                if (res.subcategory == "LDS Bank Conflicts") {
+                  if (res.configIndex == 0) {
+                    noteStr = "[Baseline]";
+                  } else {
+                    double baseVal = 0.0;
+                    for (const auto &bp : subcat.benchmarks) {
+                      if (bp.second.count(backend)) {
+                        const auto &br = bp.second.at(backend);
+                        if (br.subcategory == "LDS Bank Conflicts" && br.configIndex == 0 && br.time_ms > 0.0) {
+                          baseVal = (static_cast<double>(br.operations) / (br.time_ms / 1000.0)) / 1e12;
+                          break;
+                        }
+                      }
+                    }
+                    if (baseVal > 0.0) {
+                      double ratio = value / baseVal;
+                      double pct = (ratio - 1.0) * 100.0;
+                      noteStr = "└──> " + formatDouble(ratio, 2) + "x (" + (pct >= 0 ? "+" : "") + formatDouble(pct, 1) + "%)";
+                    }
+                  }
+                } else if (res.subcategory == "Indirect Command Synthesis") {
+                  if (res.configIndex == 0) {
+                    noteStr = "[Baseline]";
+                  } else {
+                    double baseVal = 0.0;
+                    for (const auto &bp : subcat.benchmarks) {
+                      if (bp.second.count(backend)) {
+                        const auto &br = bp.second.at(backend);
+                        if (br.subcategory == "Indirect Command Synthesis" && br.configIndex == 0 && br.time_ms > 0.0) {
+                          baseVal = (static_cast<double>(br.operations) / (br.time_ms / 1000.0)) / 1e6;
+                          break;
+                        }
+                      }
+                    }
+                    if (baseVal > 0.0) {
+                      double ratio = value / baseVal;
+                      double pct = (ratio - 1.0) * 100.0;
+                      noteStr = "└──> " + formatDouble(ratio, 2) + "x (" + (pct >= 0 ? "+" : "") + formatDouble(pct, 1) + "%)";
+                    }
+                  }
+                } else if (res.subcategory == "Dual-Issue") {
                   if (res.configIndex == 0 || res.configIndex == 3) {
                     noteStr = "[Baseline]";
                   } else if (res.configIndex == 6) {
@@ -568,9 +641,12 @@ void ResultFormatter::print() {
                   }
                 }
               } else if (res.component == "Memory") {
-                if (res.subcategory == "Latency" || res.metric == "ns") {
+                if (res.subcategory == "Latency" || res.subcategory == "Cache Latency Curve" || res.metric == "ns") {
                   double value = (res.time_ms * 1e6) / res.operations; // ns
                   valStr = formatDouble(value, 2) + " ns";
+                  if (!res.supportNote.empty()) {
+                    noteStr = "[" + res.supportNote + "]";
+                  }
                 } else {
                   double value = (static_cast<double>(res.operations) /
                                  (res.time_ms / 1000.0)) / 1e9; // GB/s
@@ -837,15 +913,16 @@ void ResultFormatter::printComparison(const std::vector<ImportedRun> &runs) {
     return;
   }
 
-  const std::string RESET = "\033[0m";
-  const std::string BOLD = "\033[1m";
-  const std::string DIM = "\033[2m";
-  const std::string CYAN = "\033[36m";
-  const std::string GREEN = "\033[32m";
-  const std::string RED = "\033[31m";
-  const std::string YELLOW = "\033[33m";
-  const std::string MAGENTA = "\033[35m";
-  const std::string BLUE = "\033[34m";
+  const bool useColor = shouldUseColor();
+  const std::string RESET = useColor ? "\033[0m" : "";
+  const std::string BOLD = useColor ? "\033[1m" : "";
+  const std::string DIM = useColor ? "\033[2m" : "";
+  const std::string CYAN = useColor ? "\033[36m" : "";
+  const std::string GREEN = useColor ? "\033[32m" : "";
+  const std::string RED = useColor ? "\033[31m" : "";
+  const std::string YELLOW = useColor ? "\033[33m" : "";
+  const std::string MAGENTA = useColor ? "\033[35m" : "";
+  const std::string BLUE = useColor ? "\033[34m" : "";
 
   const size_t N = runs.size();
 
@@ -866,9 +943,9 @@ void ResultFormatter::printComparison(const std::vector<ImportedRun> &runs) {
 
   std::vector<std::string> devNames(N);
   std::vector<std::string> devNicks(N);
-  const std::vector<std::string> devColors = {
+  const std::vector<std::string> devColors = useColor ? std::vector<std::string>{
     YELLOW, MAGENTA, CYAN, BLUE, "\033[38;5;208m", "\033[38;5;141m", GREEN
-  };
+  } : std::vector<std::string>(7, "");
 
   for (size_t i = 0; i < N; ++i) {
     char letter = static_cast<char>('A' + i);

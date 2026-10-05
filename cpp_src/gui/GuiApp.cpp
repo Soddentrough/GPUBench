@@ -753,14 +753,47 @@ void GuiApp::initializeBenchmarkCategories() {
         };
         cat.subgroups.push_back(dualSub);
 
+        BenchmarkSubgroup ldsSub;
+        ldsSub.name = "LDS & Shared Memory";
+        ldsSub.component = "Compute";
+        ldsSub.engineId = "LDS Bank Conflicts";
+        ldsSub.description = "Local Data Share 32-bank conflict sweep and serialization quantification";
+        ldsSub.items = {
+            {"LDS Bank Conflicts", "LDS Bank Conflicts", "Stride 1 (Conflict-Free Baseline)", "Compute", "TB/s", "1-way conflict-free; all 32 lanes access distinct 4-byte banks", true},
+            {"LDS Bank Conflicts", "LDS Bank Conflicts", "Stride 2 (2-Way Conflict)", "Compute", "TB/s", "2 lanes per bank; 2x serialization reduces throughput to ~50%", true},
+            {"LDS Bank Conflicts", "LDS Bank Conflicts", "Stride 4 (4-Way Conflict)", "Compute", "TB/s", "4 lanes per bank; 4x serialization reduces throughput to ~25%", true},
+            {"LDS Bank Conflicts", "LDS Bank Conflicts", "Stride 8 (8-Way Conflict)", "Compute", "TB/s", "8 lanes per bank; 8x serialization reduces throughput to ~12.5%", true},
+            {"LDS Bank Conflicts", "LDS Bank Conflicts", "Stride 16 (16-Way Conflict)", "Compute", "TB/s", "16 lanes per bank; 16x serialization reduces throughput to ~6.25%", true},
+            {"LDS Bank Conflicts", "LDS Bank Conflicts", "Stride 32 (32-Way Full Serialization)", "Compute", "TB/s", "32 lanes collide on bank 0; fully serialized down to ~3.125%", true},
+            {"LDS Bank Conflicts", "LDS Bank Conflicts", "Stride 3 (Odd Stride Control)", "Compute", "TB/s", "gcd(3,32)=1; conflict-free permutation proves modular collision theory", true},
+            {"LDS Bank Conflicts", "LDS Bank Conflicts", "Stride 5 (Odd Stride Control)", "Compute", "TB/s", "gcd(5,32)=1; conflict-free permutation proves modular collision theory", true}
+        };
+        cat.subgroups.push_back(ldsSub);
+
+        BenchmarkSubgroup indirectSub;
+        indirectSub.name = "Indirect Command Synthesis";
+        indirectSub.component = "Compute";
+        indirectSub.engineId = "In-Shader Indirect Synthesis";
+        indirectSub.description = "Dynamic GPU workgroup command synthesis and hardware zero-dispatch pruning";
+        indirectSub.items = {
+            {"In-Shader Indirect Synthesis", "Indirect Command Synthesis", "CPU Direct Fixed Grid (100% Active Baseline)", "Compute", "MItems/s", "Host fixed grid dispatch with 100% item activity; baseline compute throughput", true},
+            {"In-Shader Indirect Synthesis", "Indirect Command Synthesis", "100% Active", "Compute", "MItems/s", "Classifier synthesizes VkDispatchIndirectCommand on GPU; measures indirect dispatch overhead", true},
+            {"In-Shader Indirect Synthesis", "Indirect Command Synthesis", "50% Active", "Compute", "MItems/s", "Stream compaction bins 50% active work; launches half the workgroups dynamically", true},
+            {"In-Shader Indirect Synthesis", "Indirect Command Synthesis", "10% Active", "Compute", "MItems/s", "Sparse workload; GPU skips 90% of workgroups via synthesized grid sizing", true},
+            {"In-Shader Indirect Synthesis", "Indirect Command Synthesis", "1% Active", "Compute", "MItems/s", "Highly sparse workload; dynamic indirect dispatch processes only 1% work", true},
+            {"In-Shader Indirect Synthesis", "Indirect Command Synthesis", "In-Shader Zero-Dispatch Pruning (0% Active)", "Compute", "MItems/s", "Hardware Command Processor instantaneously dismisses zero-workgroup (0,0,0) dispatches", true},
+            {"In-Shader Indirect Synthesis", "Indirect Command Synthesis", "CPU Direct Fixed Grid (10% Active)", "Compute", "MItems/s", "Host fixed grid dispatch on sparse 10% active workload; shows wasted wave occupancy", true}
+        };
+        cat.subgroups.push_back(indirectSub);
+
         m_categories.push_back(cat);
     }
 
-    // 2. [Memory] (2 subgroups, 13 tests)
+    // 2. [Memory] (3 subgroups, 28 tests)
     {
         BenchmarkCategory cat;
         cat.name = "Memory";
-        cat.description = "On-chip cache hierarchy latencies (L0..L3) and VRAM streaming bandwidth";
+        cat.description = "On-chip cache hierarchy latencies (L0..L3), cache curves, and VRAM streaming bandwidth";
 
         cat.subgroups.push_back({"Cache Latency", "Memory", "Cache Latency", "On-chip CU cache hierarchy latency (L0..L3)", {
             {"Cache Latency", "Cache Latency", "L0 (Vector CU, 16 KB)", "Memory", "ns", "On-chip compute unit L0 vector cache latency", true},
@@ -768,6 +801,30 @@ void GuiApp::initializeBenchmarkCategories() {
             {"Cache Latency", "Cache Latency", "L2 (Shared GPU, 4 MB)", "Memory", "ns", "Shared GPU-wide L2 cache latency", true},
             {"Cache Latency", "Cache Latency", "L3 (Infinity Cache / MALL)", "Memory", "ns", "System-level on-die Infinity Cache (L3 / MALL) latency", true}
         }});
+
+        BenchmarkSubgroup cacheCurveSub;
+        cacheCurveSub.name = "Cache Latency Curve";
+        cacheCurveSub.component = "Memory";
+        cacheCurveSub.engineId = "Cache Latency Curve";
+        cacheCurveSub.description = "128-byte cache-line pointer chasing (16 KB to 256 MB) across L0, GL1, GL2, L3 MALL, and GDDR6";
+        cacheCurveSub.items = {
+            {"Cache Latency Curve", "Cache Latency Curve", "16 KB", "Memory", "ns", "L0 TCP Vector Cache (32B/64B/128B Cache Line)", true},
+            {"Cache Latency Curve", "Cache Latency Curve", "32 KB", "Memory", "ns", "L0 TCP Capacity Boundary", true},
+            {"Cache Latency Curve", "Cache Latency Curve", "64 KB", "Memory", "ns", "GL1 Cache Transition", true},
+            {"Cache Latency Curve", "Cache Latency Curve", "128 KB", "Memory", "ns", "GL1 Cache Working Set", true},
+            {"Cache Latency Curve", "Cache Latency Curve", "256 KB", "Memory", "ns", "GL1 Cache Capacity Boundary", true},
+            {"Cache Latency Curve", "Cache Latency Curve", "512 KB", "Memory", "ns", "GL2 Cache Working Set", true},
+            {"Cache Latency Curve", "Cache Latency Curve", "1 MB", "Memory", "ns", "GL2 Cache Working Set", true},
+            {"Cache Latency Curve", "Cache Latency Curve", "2 MB", "Memory", "ns", "GL2 Cache Working Set", true},
+            {"Cache Latency Curve", "Cache Latency Curve", "4 MB", "Memory", "ns", "GL2 Cache Capacity Boundary", true},
+            {"Cache Latency Curve", "Cache Latency Curve", "8 MB", "Memory", "ns", "L3 MALL / Infinity Cache", true},
+            {"Cache Latency Curve", "Cache Latency Curve", "16 MB", "Memory", "ns", "L3 MALL / Infinity Cache", true},
+            {"Cache Latency Curve", "Cache Latency Curve", "32 MB", "Memory", "ns", "L3 MALL / Infinity Cache", true},
+            {"Cache Latency Curve", "Cache Latency Curve", "64 MB", "Memory", "ns", "L3 MALL / Infinity Cache", true},
+            {"Cache Latency Curve", "Cache Latency Curve", "128 MB", "Memory", "ns", "L3 MALL Capacity Boundary", true},
+            {"Cache Latency Curve", "Cache Latency Curve", "256 MB", "Memory", "ns", "GDDR6 VRAM DRAM Step", true}
+        };
+        cat.subgroups.push_back(cacheCurveSub);
 
         cat.subgroups.push_back({"VRAM Streaming Bandwidth", "Memory", "Device Memory Bandwidth", "VRAM read/write streaming bandwidth across thread block sizes", {
             {"Device Memory Bandwidth", "VRAM Bandwidth", "Read (128 threads/group)", "Memory", "GB/s", "Streaming VRAM read bandwidth at 128 threads/group", true},
@@ -1600,6 +1657,24 @@ bool GuiApp::matchesItem(const ResultData& r, const BenchmarkItem& itm, uint32_t
         }
     }
 
+    // Cache Latency Curve matching
+    if (itm.subcategory == "Cache Latency Curve" || r.subcategory == "Cache Latency Curve") {
+        std::string clean = cleanWorkloadName(r.benchmarkName, r.subcategory);
+        return (clean == itm.name || r.benchmarkName == itm.name);
+    }
+
+    // LDS Bank Conflicts matching
+    if (itm.subcategory == "LDS Bank Conflicts" || r.subcategory == "LDS Bank Conflicts") {
+        std::string clean = cleanWorkloadName(r.benchmarkName, r.subcategory);
+        return (clean == itm.name || r.benchmarkName == itm.name || r.benchmarkName.find(itm.name) != std::string::npos);
+    }
+
+    // In-Shader Indirect Synthesis matching
+    if (itm.subcategory == "Indirect Command Synthesis" || r.subcategory == "Indirect Command Synthesis") {
+        std::string clean = cleanWorkloadName(r.benchmarkName, r.subcategory);
+        return (clean == itm.name || r.benchmarkName == itm.name || r.benchmarkName.find(itm.name) != std::string::npos);
+    }
+
     // VRAM Bandwidth matching
     if (itm.subcategory == "VRAM Bandwidth" || r.subcategory == "Bandwidth" || itm.id == "Device Memory Bandwidth") {
         if (r.deviceIndex != 0xFFFFFFFF) {
@@ -1820,6 +1895,8 @@ GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
         char buf[64];
         if (r.metric.find("TFLOPS") != std::string::npos || r.metric.find("TOPS") != std::string::npos) {
             snprintf(buf, sizeof(buf), "%.2f %s", opsPerSec / 1e12, r.metric.c_str());
+        } else if (r.metric.find("TB/s") != std::string::npos) {
+            snprintf(buf, sizeof(buf), "%.2f TB/s", opsPerSec / 1e12);
         } else if (r.metric.find("GB/s") != std::string::npos) {
             snprintf(buf, sizeof(buf), "%.1f GB/s", opsPerSec / 1e9);
         } else if (r.metric.find("GIS/s") != std::string::npos) {
@@ -1832,6 +1909,7 @@ GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
                    r.metric.find("MTris/s") != std::string::npos ||
                    r.metric.find("MInst/s") != std::string::npos ||
                    r.metric.find("MHits/s") != std::string::npos ||
+                   r.metric.find("MItems/s") != std::string::npos ||
                    r.metric.find("MRecords/s") != std::string::npos) {
             snprintf(buf, sizeof(buf), "%.1f %s", opsPerSec / 1e6, r.metric.c_str());
         } else if (r.metric.find("ns") != std::string::npos) {
@@ -1869,7 +1947,23 @@ GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
         // Determine baseline item name in the same subcategory
         std::string baselineName = "";
         if (!isUnsupportedItem) {
-            if (item.subcategory == "Dual-Issue") {
+            if (item.subcategory == "LDS Bank Conflicts") {
+                if (item.name.find("Baseline") != std::string::npos || item.name.find("Stride 1") != std::string::npos) {
+                    info.isBaseline = true;
+                    info.deltaText = "[Baseline]";
+                    info.deltaColor = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
+                } else {
+                    baselineName = "Stride 1";
+                }
+            } else if (item.subcategory == "Indirect Command Synthesis") {
+                if (item.name.find("Baseline") != std::string::npos || item.name.find("CPU Direct") != std::string::npos) {
+                    info.isBaseline = true;
+                    info.deltaText = "[Baseline]";
+                    info.deltaColor = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
+                } else {
+                    baselineName = "CPU Direct";
+                }
+            } else if (item.subcategory == "Dual-Issue") {
                 if (item.name == "Standard FP32") {
                     info.isBaseline = true;
                     info.deltaText = "[Baseline]";
@@ -3745,12 +3839,14 @@ void GuiApp::renderResultsScorecard() {
                 curOpsPerSec = (static_cast<double>(res.operations) / res.time_ms) * 1000.0;
                 if (res.metric.find("TFLOPS") != std::string::npos || res.metric.find("TOPS") != std::string::npos) {
                     ImGui::Text("%.2f %s", curOpsPerSec / 1e12, res.metric.c_str());
+                } else if (res.metric.find("TB/s") != std::string::npos) {
+                    ImGui::Text("%.2f TB/s", curOpsPerSec / 1e12);
                 } else if (res.metric.find("GB/s") != std::string::npos) {
                     ImGui::Text("%.2f GB/s", curOpsPerSec / 1e9);
                 } else if (res.metric.find("GIS/s") != std::string::npos) {
                     ImGui::Text("%.2f GIS/s", curOpsPerSec / 1e9);
-                } else if (res.metric.find("MRays/s") != std::string::npos) {
-                    ImGui::Text("%.2f MRays/s", curOpsPerSec / 1e6);
+                } else if (res.metric.find("MRays/s") != std::string::npos || res.metric.find("MItems/s") != std::string::npos) {
+                    ImGui::Text("%.2f %s", curOpsPerSec / 1e6, res.metric.c_str());
                 } else if (res.metric.find("GPixels/s") != std::string::npos) {
                     ImGui::Text("%.2f GPixels/s", curOpsPerSec / 1e9);
                 } else if (res.metric.find("MTris/s") != std::string::npos) {
@@ -3825,6 +3921,58 @@ void GuiApp::renderResultsScorecard() {
                         for (const auto& other : m_allResults) {
                             if (other.deviceIndex == res.deviceIndex && other.backendName == res.backendName && other.subcategory == "Dual-Issue" &&
                                 other.configIndex == targetBaseConfig && other.time_ms > 0.0) {
+                                baseOps = (static_cast<double>(other.operations) / other.time_ms) * 1000.0;
+                                break;
+                            }
+                        }
+                        if (baseOps > 0.0) {
+                            double ratio = curOpsPerSec / baseOps;
+                            double pct = (ratio - 1.0) * 100.0;
+                            char dBuf[48];
+                            if (std::abs(pct) >= 0.1) {
+                                snprintf(dBuf, sizeof(dBuf), "%.2fx (%s%.1f%%)", ratio, (pct >= 0 ? "+" : ""), pct);
+                            } else {
+                                snprintf(dBuf, sizeof(dBuf), "%.2fx", ratio);
+                            }
+                            deltaStr = dBuf;
+                            deltaCol = (ratio >= 1.0) ? ImVec4(0.30f, 0.92f, 0.85f, 1.0f) : ImVec4(0.92f, 0.65f, 0.35f, 1.0f);
+                        }
+                    }
+                } else if (res.subcategory == "LDS Bank Conflicts") {
+                    if (res.configIndex == 0) {
+                        deltaStr = "[Baseline]";
+                        deltaCol = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
+                    } else {
+                        double baseOps = 0.0;
+                        for (const auto& other : m_allResults) {
+                            if (other.deviceIndex == res.deviceIndex && other.backendName == res.backendName &&
+                                other.subcategory == "LDS Bank Conflicts" && other.configIndex == 0 && other.time_ms > 0.0) {
+                                baseOps = (static_cast<double>(other.operations) / other.time_ms) * 1000.0;
+                                break;
+                            }
+                        }
+                        if (baseOps > 0.0) {
+                            double ratio = curOpsPerSec / baseOps;
+                            double pct = (ratio - 1.0) * 100.0;
+                            char dBuf[48];
+                            if (std::abs(pct) >= 0.1) {
+                                snprintf(dBuf, sizeof(dBuf), "%.2fx (%s%.1f%%)", ratio, (pct >= 0 ? "+" : ""), pct);
+                            } else {
+                                snprintf(dBuf, sizeof(dBuf), "%.2fx", ratio);
+                            }
+                            deltaStr = dBuf;
+                            deltaCol = (ratio >= 1.0) ? ImVec4(0.30f, 0.92f, 0.85f, 1.0f) : ImVec4(0.92f, 0.65f, 0.35f, 1.0f);
+                        }
+                    }
+                } else if (res.subcategory == "Indirect Command Synthesis") {
+                    if (res.configIndex == 0) {
+                        deltaStr = "[Baseline]";
+                        deltaCol = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
+                    } else {
+                        double baseOps = 0.0;
+                        for (const auto& other : m_allResults) {
+                            if (other.deviceIndex == res.deviceIndex && other.backendName == res.backendName &&
+                                other.subcategory == "Indirect Command Synthesis" && other.configIndex == 0 && other.time_ms > 0.0) {
                                 baseOps = (static_cast<double>(other.operations) / other.time_ms) * 1000.0;
                                 break;
                             }
@@ -4062,6 +4210,39 @@ void GuiApp::renderRayTracingViewport() {
     }
     const auto& curSceneMeta = scenes[m_rtSceneIndex];
 
+    std::string dynamicTechAScore = "--";
+    std::string dynamicTechBScore = "--";
+    std::string dynamicSpeedup = "--";
+    double scoreTrad = 0.0, scoreDgc = 0.0;
+    for (const auto& res : m_allResults) {
+        if (res.benchmarkName.find(curSceneMeta.displayName) != std::string::npos ||
+            res.benchmarkName.find(curSceneMeta.tag) != std::string::npos ||
+            res.subcategory.find(curSceneMeta.displayName) != std::string::npos) {
+            double rate = (res.time_ms > 0.0) ? (static_cast<double>(res.operations) / res.time_ms * 1000.0 / 1e6) : 0.0;
+            if (res.benchmarkName.find("Megakernel") != std::string::npos || res.benchmarkName.find("Traditional") != std::string::npos) {
+                scoreTrad = rate;
+            } else if (res.benchmarkName.find("DGC") != std::string::npos || res.benchmarkName.find("Work Lists") != std::string::npos) {
+                scoreDgc = rate;
+            }
+        }
+    }
+    if (scoreTrad > 0.0) {
+        char buf[64];
+        snprintf(buf, sizeof(buf), "%.2f MRays/s", scoreTrad);
+        dynamicTechAScore = buf;
+    }
+    if (scoreDgc > 0.0) {
+        char buf[64];
+        snprintf(buf, sizeof(buf), "%.2f MRays/s", scoreDgc);
+        dynamicTechBScore = buf;
+    }
+    if (scoreTrad > 0.0 && scoreDgc > 0.0) {
+        char buf[64];
+        double sp = scoreDgc / scoreTrad;
+        snprintf(buf, sizeof(buf), "%.2fx (+%.1f%%)", sp, (sp - 1.0) * 100.0);
+        dynamicSpeedup = buf;
+    }
+
     // Top Controls Bar
     ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.10f, 0.12f, 0.16f, 1.0f));
     ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, s(6.0f));
@@ -4138,7 +4319,7 @@ void GuiApp::renderRayTracingViewport() {
         ImGui::TextColored(ImVec4(0.95f, 0.80f, 0.35f, 1.0f), "%s", curSceneMeta.triangleCount);
         ImGui::SameLine(0, s(16.0f));
         ImGui::TextDisabled("Speedup:"); ImGui::SameLine();
-        ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s", curSceneMeta.speedup);
+        ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s", (dynamicSpeedup != "--" ? dynamicSpeedup.c_str() : curSceneMeta.speedup));
         ImGui::EndChild();
         ImGui::PopStyleColor(2);
 
@@ -4318,7 +4499,7 @@ void GuiApp::renderRayTracingViewport() {
             ImGui::TextColored(ImVec4(0.40f, 0.78f, 1.00f, 1.0f), "Technique A: Megakernel (Reference)");
             ImGui::TextDisabled("Architecture: Monolithic Ray Query kernel (Stackless traversal)");
             ImGui::Text("Throughput: "); ImGui::SameLine();
-            ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.0f, 1.0f), "%s", curSceneMeta.techAScore);
+            ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.0f, 1.0f), "%s", (dynamicTechAScore != "--" ? dynamicTechAScore.c_str() : curSceneMeta.techAScore));
             ImGui::SameLine(0, s(16.0f));
             ImGui::TextDisabled("VGPR Pressure:"); ImGui::SameLine();
             ImGui::TextColored(ImVec4(0.95f, 0.65f, 0.35f, 1.0f), "%d VGPRs", curSceneMeta.vgprTrad);
@@ -4331,7 +4512,7 @@ void GuiApp::renderRayTracingViewport() {
             ImGui::TextColored(ImVec4(0.98f, 0.72f, 0.35f, 1.0f), "Technique B: Compacted Wavefront (DGC / SER)");
             ImGui::TextDisabled("Architecture: Shader Execution Reordering & Clustered Ray Bins");
             ImGui::Text("Throughput: "); ImGui::SameLine();
-            ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s", curSceneMeta.techBScore);
+            ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s", (dynamicTechBScore != "--" ? dynamicTechBScore.c_str() : curSceneMeta.techBScore));
             ImGui::SameLine(0, s(16.0f));
             ImGui::TextDisabled("VGPR Pressure:"); ImGui::SameLine();
             ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%d VGPRs", curSceneMeta.vgprDgc);
@@ -5011,8 +5192,11 @@ void GuiApp::startBenchmarks() {
         if (b.find("System Memory") != std::string::npos) continue;
         if (b == "Device Memory Bandwidth") gpu_configs += 9;
         else if (b == "Cache Latency") gpu_configs += 4;
+        else if (b == "Cache Latency Curve") gpu_configs += 15;
         else if (b == "Pixel Fill Rate") gpu_configs += 3;
         else if (b == "Dual-Issue") gpu_configs += 7;
+        else if (b == "LDS Bank Conflicts") gpu_configs += 8;
+        else if (b == "In-Shader Indirect Synthesis") gpu_configs += 7;
         else if (b == "FP16" || b == "BF16" || b == "FP8" || b == "INT8" || b == "INT4") gpu_configs += 2;
         else if (b == "RayASBuild") gpu_configs += 8;
         else if (b == "RayIntersect") gpu_configs += 2;

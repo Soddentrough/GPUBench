@@ -485,7 +485,7 @@ ComputeBuffer OpenCLContext::createBuffer(size_t size, const void *host_ptr) {
   cl_int err;
   cl_mem_flags flags = CL_MEM_READ_WRITE;
   if (host_ptr) {
-    flags |= CL_MEM_USE_HOST_PTR;
+    flags |= CL_MEM_COPY_HOST_PTR;
   }
   cl_mem buffer = f_clCreateBuffer(context, flags, size,
                                    const_cast<void *>(host_ptr), &err);

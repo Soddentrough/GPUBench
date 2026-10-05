@@ -1,0 +1,38 @@
+#version 450
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) buffer InputBuffer {
+    uint inputItems[];
+};
+
+layout(set = 0, binding = 1) buffer OutputBuffer {
+    float results[];
+};
+
+layout(push_constant) uniform PushConstants {
+    uint selectivity; // 0..100 (%)
+    uint totalItems;
+} pc;
+
+void main() {
+    uint gid = gl_GlobalInvocationID.x;
+    if (gid >= pc.totalItems) {
+        return;
+    }
+
+    // Fast deterministic pseudo-random hash to determine selectivity
+    uint hash = gid * 2654435761u;
+    bool activeItem = (hash % 100u) < pc.selectivity;
+
+    if (!activeItem) {
+        return; // Lane divergence & early return
+    }
+
+    // Identical representative compute arithmetic loop
+    float val = float(gid) * 0.001f;
+    for (int i = 0; i < 32; i++) {
+        val = sin(val) * 1.05f + cos(val * 0.5f);
+    }
+
+    results[gid] = val;
+}

@@ -85,6 +85,7 @@ private:
 
   // Multi-BLAS scene library (5,000 distinct geometries)
   ComputeBuffer blasLibVertexBuffer = nullptr;
+  ComputeBuffer blasLibPooledBuffer = nullptr;
   std::vector<ComputeBuffer> blasLibBuffers;
   std::vector<VkAccelerationStructureKHR> blasLibHandles;
   std::vector<VkDeviceAddress> blasLibAddrs;

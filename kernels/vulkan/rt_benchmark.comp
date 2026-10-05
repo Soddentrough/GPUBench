@@ -1,5 +1,6 @@
 #version 460
 #extension GL_EXT_ray_query : enable
+#extension GL_KHR_shader_subgroup_arithmetic : enable
 
 layout(local_size_x = 32) in;
 
@@ -13,17 +14,10 @@ layout(push_constant) uniform PushConstants {
     uint testMode; // 0 for triangle, 1 for box
 } pc;
 
-shared uint localHits;
-
 void main() {
     uint idx = gl_GlobalInvocationID.x;
-
-    if (gl_LocalInvocationID.x == 0) {
-        localHits = 0;
-    }
-    barrier();
-
     uint hitCount = 0;
+
     if (idx < pc.rayCount) {
         // Spread rays across the 64x64 grid matching geometry bounds (-8.0 to 8.0 range)
         float fx = (float(idx % 64) / 64.0) * 16.0 - 8.0 + 0.125;
@@ -35,20 +29,16 @@ void main() {
         float tMax = 10.0;
 
         rayQueryEXT query;
-        rayQueryInitializeEXT(query, topLevelAS, gl_RayFlagsNoneEXT, 0xFF, origin, tMin, direction, tMax);
+        rayQueryInitializeEXT(query, topLevelAS, gl_RayFlagsOpaqueEXT, 0xFF, origin, tMin, direction, tMax);
         
-        while (rayQueryProceedEXT(query)) {
-            // Count every candidate to stress the intersection unit
-            hitCount++;
-        }
-
-        if (hitCount > 0) {
-            atomicAdd(localHits, hitCount);
+        rayQueryProceedEXT(query);
+        if (rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionNoneEXT) {
+            hitCount = 1;
         }
     }
-    barrier();
 
-    if (gl_LocalInvocationID.x == 0 && localHits > 0) {
-        atomicAdd(results.hits, localHits);
+    uint totalWorkgroupHits = subgroupAdd(hitCount);
+    if (subgroupElect() && totalWorkgroupHits > 0) {
+        atomicAdd(results.hits, totalWorkgroupHits);
     }
 }

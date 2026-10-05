@@ -541,8 +541,11 @@ fn get_benchmark_description(name: &str) -> &'static str {
         "INT8" => "8-bit integer tensor and dot-product (DP4A) throughput for quantized neural network inference.",
         "INT4" => "4-bit integer quantized vector compute throughput for heavily compressed models.",
         "Dual-Issue" => "Dual-issue ALU co-issuing, ILP instruction scheduling, and concurrent FP32+INT32 arithmetic.",
+        "LDS Bank Conflicts" => "Local Data Share 32-bank conflict sweep and serialization quantification across strides.",
+        "In-Shader Indirect Synthesis" => "Dynamic GPU workgroup command synthesis and hardware zero-dispatch pruning via vkCmdDispatchIndirect.",
         "Device Memory Bandwidth" => "Peak streaming read/write bandwidth across the dedicated GPU VRAM bus.",
         "Cache Latency" => "Pointer-chasing memory access latency across GPU L0, L1, L2, and L3 (Infinity) caches.",
+        "Cache Latency Curve" => "Strided pointer chasing (16KB to 256MB) isolating step latency across L0 TCP, GL1, GL2, L3 MALL, and GDDR6.",
         "System Memory Bandwidth" => "Multi-threaded host RAM copy and streaming bandwidth from CPU to system DDR memory.",
         "System Memory Latency" => "Pointer-chasing memory access latency in nanoseconds (lower is better).",
         "Pixel Fill Rate" => "Rasterizer and ROP output fill throughput across 32-bit RGBA, 64-bit HDR, and alpha blending.",
@@ -569,8 +572,11 @@ pub fn get_benchmark_api_extensions(name: &str) -> &'static str {
         "INT8" => "VK_KHR_shader_integer_dot_product (DP4A)",
         "INT4" => "Vulkan Subgroup Bit Packing (4-bit INT)",
         "Dual-Issue" => "Vulkan / OpenCL / ROCm Core Compute (Dual-Issue / ILP)",
+        "LDS Bank Conflicts" => "Vulkan Compute (Local Data Share / Workgroup Memory)",
+        "In-Shader Indirect Synthesis" => "Vulkan Core Indirect (vkCmdDispatchIndirect)",
         "Device Memory Bandwidth" => "Vulkan / OpenCL / ROCm Linear Buffer DMA",
         "Cache Latency" => "Vulkan / ROCm / OpenCL Local & Shared Memory Hierarchy",
+        "Cache Latency Curve" => "Vulkan Pointer Chasing Hierarchy",
         "System Memory Bandwidth" => "x86_64 AVX2 / Non-Temporal Streaming Stores",
         "System Memory Latency" => "Hardware DRAM Pointer Chase",
         "Pixel Fill Rate" => "Vulkan Graphics Pipeline (Rasterization & Blending)",
@@ -1262,6 +1268,36 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         api_extensions: "VK_KHR_cooperative_matrix (Sub-byte INT4)",
         is_system: false,
     },
+    WorkloadDef {
+        id: "dual_issue",
+        category: "COMPUTE PIPELINES",
+        label: "Dual-Issue (VOPD / ILP)",
+        approach: "VOPD dual-issue / ILP ALU scheduling",
+        default_unit: "TFLOPS",
+        desc: "Dual-issue ALU co-issuing, ILP instruction scheduling, and concurrent FP32+INT32 arithmetic.",
+        api_extensions: "Vulkan / OpenCL / ROCm Core Compute (Dual-Issue / ILP)",
+        is_system: false,
+    },
+    WorkloadDef {
+        id: "lds_bank_conflicts",
+        category: "COMPUTE PIPELINES",
+        label: "LDS Bank Conflicts",
+        approach: "Wave32 shared memory bank sweep",
+        default_unit: "TB/s",
+        desc: "Local Data Share 32-bank conflict sweep measuring conflict-free vs serialized bank collisions.",
+        api_extensions: "Vulkan Compute (Local Data Share / Workgroup Memory)",
+        is_system: false,
+    },
+    WorkloadDef {
+        id: "inshader_indirect",
+        category: "COMPUTE PIPELINES",
+        label: "In-Shader Indirect Synthesis",
+        approach: "Dynamic GPU command synthesis",
+        default_unit: "MItems/s",
+        desc: "GPU classifier synthesizes VkDispatchIndirectCommand for dynamic workgroup grid sizing.",
+        api_extensions: "Vulkan Core Indirect (vkCmdDispatchIndirect)",
+        is_system: false,
+    },
 
     // MEMORY & SYSTEM
     WorkloadDef {
@@ -1344,6 +1380,16 @@ pub static WORKLOADS: &[WorkloadDef] = &[
         api_extensions: "Hardware DRAM Pointer Chase",
         is_system: true,
     },
+    WorkloadDef {
+        id: "cache_latency_curve",
+        category: "MEMORY & SYSTEM",
+        label: "Cache Latency Curve",
+        approach: "128-byte strided pointer chase",
+        default_unit: "ns",
+        desc: "Working set sweep (16KB to 256MB) isolating step latency across L0 TCP, GL1, GL2, L3 MALL, and GDDR6.",
+        api_extensions: "Vulkan Pointer Chasing Hierarchy",
+        is_system: false,
+    },
 
     // RASTERIZATION & ROP
     WorkloadDef {
@@ -1378,6 +1424,16 @@ pub static WORKLOADS: &[WorkloadDef] = &[
     },
 
     // RAY TRACING ACCELERATION
+    WorkloadDef {
+        id: "rt_raw_traversal",
+        category: "RAY TRACING ACCELERATION",
+        label: "Raw BVH Traversal",
+        approach: "Raw Hardware Ray-Box / Ray-Tri Traversal",
+        default_unit: "MRays/s",
+        desc: "Peak raw hardware BVH traversal and ray-triangle / ray-box intersection throughput without shading overhead.",
+        api_extensions: "VK_KHR_ray_query (Hardware BVH Traversal Microbenchmark)",
+        is_system: false,
+    },
     // Phase 1: Acceleration Structure Creation & Updates
     WorkloadDef {
         id: "rt_blas_build_1m",
@@ -2949,7 +3005,11 @@ impl Application for GPUBenchApp {
                         gpu_configs += match t.as_str() {
                             "Device Memory Bandwidth" => 9,
                             "Cache Latency" | "Cache" => 4,
+                            "Cache Latency Curve" => 15,
                             "Pixel Fill Rate" => 3,
+                            "Dual-Issue" => 7,
+                            "LDS Bank Conflicts" => 8,
+                            "In-Shader Indirect Synthesis" => 7,
                             "FP16" | "BF16" | "FP8" | "INT8" | "INT4" => 2,
                             "RayASBuild" => 8,
                             "RayTracing" | "RayIntersect" => 2,
@@ -3976,6 +4036,8 @@ impl Application for GPUBenchApp {
                         ("INT8", "INT8 Vector"),
                         ("INT4", "INT4 Vector"),
                         ("Dual-Issue", "Dual-Issue ILP"),
+                        ("LDS Bank Conflicts", "LDS Conflicts"),
+                        ("In-Shader Indirect Synthesis", "Indirect Synthesis"),
                     ])
                 )
                 .padding(16)
@@ -3994,6 +4056,7 @@ impl Application for GPUBenchApp {
                         create_pill_grid_with_tooltips("Memory: VRAM & Host RAM", color!(0x0EA5E9), false, vec![
                             ("Device Memory Bandwidth", "GPU VRAM Bandwidth"),
                             ("Cache Latency", "Cache Latency"),
+                            ("Cache Latency Curve", "Cache Latency Curve"),
                             ("System Memory Bandwidth", "System RAM Bandwidth"),
                             ("System Memory Latency", "System RAM Latency"),
                         ]),
@@ -5338,10 +5401,14 @@ impl GPUBenchApp {
             "fp8_vec" | "fp8_mat" => self.selected_tests.contains("FP8"),
             "int8_vec" | "int8_mat" => self.selected_tests.contains("INT8"),
             "int4_vec" | "int4_mat" => self.selected_tests.contains("INT4"),
+            "dual_issue" => self.selected_tests.contains("Dual-Issue"),
+            "lds_bank_conflicts" => self.selected_tests.contains("LDS Bank Conflicts"),
+            "inshader_indirect" => self.selected_tests.contains("In-Shader Indirect Synthesis"),
             "gpu_vram_bw" => self.selected_tests.contains("Device Memory Bandwidth"),
             "cache_l0" | "cache_l1" | "cache_l2" | "cache_l3" => {
                 self.selected_tests.iter().any(|t| t.contains("Cache"))
             }
+            "cache_latency_curve" => self.selected_tests.contains("Cache Latency Curve"),
             "sys_mem_bw_multi" | "sys_mem_bw_single" => self.selected_tests.contains("System Memory Bandwidth"),
             "sys_mem_lat" => self.selected_tests.contains("System Memory Latency"),
             "rop_rgba8" | "rop_rgba16f" | "rop_blend" => self.selected_tests.contains("Pixel Fill Rate"),
@@ -5420,9 +5487,9 @@ impl GPUBenchApp {
             value = if res.operations > 0 { (res.time_ms * 1_000_000.0) / (res.operations as f64) } else { 0.0 };
         } else if res.metric == "GIS/s" || res.metric == "GRays/s" || res.metric == "GB/s" || res.metric == "GPixels/s" {
             value /= 1e9;
-        } else if res.metric == "TFLOPS" || res.metric == "TOPS" {
+        } else if res.metric == "TFLOPS" || res.metric == "TOPS" || res.metric == "TB/s" {
             value /= 1e12;
-        } else if res.metric == "MTris/s" || res.metric == "MInst/s" || res.metric == "MRays/s" || res.metric == "MHits/s" || res.metric == "MRecords/s" {
+        } else if res.metric == "MTris/s" || res.metric == "MInst/s" || res.metric == "MRays/s" || res.metric == "MHits/s" || res.metric == "MRecords/s" || res.metric == "MItems/s" {
             value /= 1e6;
         }
 
@@ -5952,11 +6019,26 @@ fn map_result_to_workload_id(res: &ResultData) -> Option<&'static str> {
                 "FP8"  => if res.benchmarkName.contains("Vector") { Some("fp8_vec") } else { Some("fp8_mat") },
                 "INT8" => if res.configIndex == 0 || res.benchmarkName.contains("Vector") { Some("int8_vec") } else { Some("int8_mat") },
                 "INT4" => if res.configIndex == 0 || res.benchmarkName.contains("Vector") { Some("int4_vec") } else { Some("int4_mat") },
-                _ => None,
+                "Dual-Issue" => Some("dual_issue"),
+                "LDS Bank Conflicts" => Some("lds_bank_conflicts"),
+                "Indirect Command Synthesis" => Some("inshader_indirect"),
+                _ => {
+                    if res.benchmarkName.contains("Dual-Issue") || res.subcategory.contains("Dual-Issue") {
+                        Some("dual_issue")
+                    } else if res.benchmarkName.contains("LDS") || res.subcategory.contains("LDS") {
+                        Some("lds_bank_conflicts")
+                    } else if res.benchmarkName.contains("Indirect") || res.subcategory.contains("Indirect") {
+                        Some("inshader_indirect")
+                    } else {
+                        None
+                    }
+                }
             }
         }
         "Memory" => {
-            if res.benchmarkName.contains("L0 Cache") {
+            if res.benchmarkName.contains("Cache Latency Curve") || res.subcategory.contains("Cache Latency Curve") {
+                Some("cache_latency_curve")
+            } else if res.benchmarkName.contains("L0 Cache") {
                 Some("cache_l0")
             } else if res.benchmarkName.contains("L1 Cache") {
                 Some("cache_l1")
@@ -5978,6 +6060,9 @@ fn map_result_to_workload_id(res: &ResultData) -> Option<&'static str> {
             }
         }
         "Ray Tracing" => {
+            if res.benchmarkName.contains("RayRawTraversal") || res.subcategory.contains("Raw BVH") || res.benchmarkName.contains("Raw Traversal") {
+                return Some("rt_raw_traversal");
+            }
             if res.benchmarkName.contains("RayScheduling")
                 || res.benchmarkName.contains("RayExecutionParadigm")
                 || res.benchmarkName.contains("Primary Rays")
@@ -6776,6 +6861,64 @@ mod tests {
         bf16_mat.subcategory = "BF16".to_string();
         bf16_mat.component = "Compute".to_string();
         assert_eq!(map_result_to_workload_id(&bf16_mat), Some("bf16_mat"));
+    }
+
+    #[test]
+    fn test_new_benchmarks_mapping_and_selection() {
+        let (mut app, _) = GPUBenchApp::new(GuiCliArgs::default());
+
+        // 1. Verify WorkloadDef mappings for LDS Bank Conflicts
+        let mut lds_res = ResultData::default();
+        lds_res.configIndex = 0;
+        lds_res.benchmarkName = "LDS Bank Conflicts (Stride 1 (Conflict-Free Baseline))".to_string();
+        lds_res.subcategory = "LDS Bank Conflicts".to_string();
+        lds_res.component = "Compute".to_string();
+        lds_res.metric = "TB/s".to_string();
+        lds_res.operations = 10090000000000;
+        lds_res.time_ms = 1000.0;
+        assert_eq!(map_result_to_workload_id(&lds_res), Some("lds_bank_conflicts"));
+
+        // 2. Verify WorkloadDef mappings for In-Shader Indirect Synthesis
+        let mut ind_res = ResultData::default();
+        ind_res.configIndex = 1;
+        ind_res.benchmarkName = "In-Shader Indirect Synthesis (100% Active)".to_string();
+        ind_res.subcategory = "Indirect Command Synthesis".to_string();
+        ind_res.component = "Compute".to_string();
+        ind_res.metric = "MItems/s".to_string();
+        ind_res.operations = 150000000;
+        ind_res.time_ms = 1000.0;
+        assert_eq!(map_result_to_workload_id(&ind_res), Some("inshader_indirect"));
+
+        // 3. Verify WorkloadDef mappings for Cache Latency Curve
+        let mut cache_res = ResultData::default();
+        cache_res.configIndex = 0;
+        cache_res.benchmarkName = "Cache Latency Curve (16 KB)".to_string();
+        cache_res.subcategory = "Cache Latency Curve".to_string();
+        cache_res.component = "Memory".to_string();
+        cache_res.metric = "ns".to_string();
+        cache_res.operations = 1000000;
+        cache_res.time_ms = 53.0;
+        assert_eq!(map_result_to_workload_id(&cache_res), Some("cache_latency_curve"));
+
+        // 4. Test selection state for new workloads
+        let get_workload = |id: &str| WORKLOADS.iter().find(|w| w.id == id).unwrap();
+        app.selected_tests.insert("LDS Bank Conflicts".to_string());
+        app.selected_tests.insert("In-Shader Indirect Synthesis".to_string());
+        app.selected_tests.insert("Cache Latency Curve".to_string());
+        assert!(app.is_workload_selected(get_workload("lds_bank_conflicts")));
+        assert!(app.is_workload_selected(get_workload("inshader_indirect")));
+        assert!(app.is_workload_selected(get_workload("cache_latency_curve")));
+
+        // 5. Test metric scaling in process_result
+        app.process_result(&lds_res);
+        let entry = app.results_map.get(&(0, "lds_bank_conflicts")).unwrap();
+        assert!((entry.numeric - 10.09).abs() < 0.1, "Numeric rate {} should be ~10.09 TB/s", entry.numeric);
+        assert!(entry.value_str.contains("TB/s"), "Value string {} should contain TB/s", entry.value_str);
+
+        app.process_result(&ind_res);
+        let ind_entry = app.results_map.get(&(0, "inshader_indirect")).unwrap();
+        assert!((ind_entry.numeric - 150.0).abs() < 1.0, "Numeric rate {} should be ~150.0 MItems/s", ind_entry.numeric);
+        assert!(ind_entry.value_str.contains("MItems/s"), "Value string {} should contain MItems/s", ind_entry.value_str);
     }
 }
 

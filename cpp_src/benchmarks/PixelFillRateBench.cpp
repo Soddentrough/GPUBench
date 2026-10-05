@@ -268,8 +268,8 @@ void PixelFillRateBench::Setup(IComputeContext &ctx, const std::string &kernel_d
 
   device = vulkanContext->getVulkanDevice();
   physicalDevice = vulkanContext->getVulkanPhysicalDevice();
-  queue = vulkanContext->getComputeQueue();
-  queueFamilyIndex = vulkanContext->getComputeQueueFamilyIndex();
+  queue = vulkanContext->getGraphicsQueue();
+  queueFamilyIndex = vulkanContext->getGraphicsQueueFamilyIndex();
 
   // Load Shaders
   std::filesystem::path kdir(kernel_dir);

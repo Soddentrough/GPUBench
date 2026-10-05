@@ -37,41 +37,26 @@ void main() {
     float val15 = base + 0.75;
 
     float m = pushConstants.multiplier;
-    float c0  = 0.0001;
-    float c1  = 0.0002;
-    float c2  = 0.0003;
-    float c3  = 0.0004;
-    float c4  = 0.0005;
-    float c5  = 0.0006;
-    float c6  = 0.0007;
-    float c7  = 0.0008;
-    float c8  = 0.0009;
-    float c9  = 0.0010;
-    float c10 = 0.0011;
-    float c11 = 0.0012;
-    float c12 = 0.0013;
-    float c13 = 0.0014;
-    float c14 = 0.0015;
-    float c15 = 0.0016;
 
     // 65536 iterations * 16 scalar FMAs = 65536 * 32 = 2,097,152 FP32 operations
+    // Using register-register operands enables RDNA 3/4 dual-issue (v_dual_fmac_f32) pair scheduling
     for (int i = 0; i < 65536; ++i) {
-        val0  = fma(val0,  m, c0);
-        val1  = fma(val1,  m, c1);
-        val2  = fma(val2,  m, c2);
-        val3  = fma(val3,  m, c3);
-        val4  = fma(val4,  m, c4);
-        val5  = fma(val5,  m, c5);
-        val6  = fma(val6,  m, c6);
-        val7  = fma(val7,  m, c7);
-        val8  = fma(val8,  m, c8);
-        val9  = fma(val9,  m, c9);
-        val10 = fma(val10, m, c10);
-        val11 = fma(val11, m, c11);
-        val12 = fma(val12, m, c12);
-        val13 = fma(val13, m, c13);
-        val14 = fma(val14, m, c14);
-        val15 = fma(val15, m, c15);
+        val0  = fma(val0,  m, val1);
+        val1  = fma(val1,  m, val2);
+        val2  = fma(val2,  m, val3);
+        val3  = fma(val3,  m, val4);
+        val4  = fma(val4,  m, val5);
+        val5  = fma(val5,  m, val6);
+        val6  = fma(val6,  m, val7);
+        val7  = fma(val7,  m, val8);
+        val8  = fma(val8,  m, val9);
+        val9  = fma(val9,  m, val10);
+        val10 = fma(val10, m, val11);
+        val11 = fma(val11, m, val12);
+        val12 = fma(val12, m, val13);
+        val13 = fma(val13, m, val14);
+        val14 = fma(val14, m, val15);
+        val15 = fma(val15, m, val0);
     }
 
     InOutBuffer.data[index] = ((val0 + val1) + (val2 + val3)) +

@@ -41,10 +41,6 @@ int main(int argc, char **argv) {
   SetConsoleOutputCP(CP_UTF8);
 #endif
 
-#ifdef __linux__
-  // Suppress Mesa/RADV conformance warnings to keep the output clean
-  setenv("MESA_VK_IGNORE_CONFORMANCE_WARNING", "1", 1);
-#endif
   CLI::App app{"GPUBench"};
   app.set_version_flag("--version", GPUBENCH_VERSION);
 
@@ -481,6 +477,14 @@ int main(int argc, char **argv) {
         for (size_t i = 0; i < devices.size(); ++i) {
           const auto &d = devices[i];
           std::cout << "  " << i << ": " << d.name;
+          if (!d.pcieBusId.empty()) {
+            std::cout << " [PCIe: " << d.pcieBusId << "]";
+          }
+          if (d.dedicatedVramBytes > 0) {
+            std::cout << " [VRAM: " << (d.dedicatedVramBytes / (1024 * 1024)) << " MB]";
+          } else if (d.memorySize > 0) {
+            std::cout << " [VRAM: " << (d.memorySize / (1024 * 1024)) << " MB]";
+          }
           if (!d.driverName.empty() || !d.driverVersionStr.empty()) {
             std::cout << " [Driver: " << d.driverName << " " << d.driverVersionStr << "]";
           }

@@ -21,6 +21,9 @@
 #include "benchmarks/RaySchedulingBench.h"
 #include "benchmarks/SysMemBandwidthBench.h"
 #include "benchmarks/SysMemLatencyBench.h"
+#include "benchmarks/CacheLatencyCurveBench.h"
+#include "benchmarks/LdsBankConflictBench.h"
+#include "benchmarks/InShaderIndirectBench.h"
 
 static std::vector<int> g_targetConfigs;
 
@@ -224,6 +227,8 @@ void BenchmarkRunner::discoverBenchmarks() {
   benchmarks.push_back(std::make_unique<Fp64Bench>());
   benchmarks.push_back(std::make_unique<Fp32Bench>());
   benchmarks.push_back(std::make_unique<DualIssueBench>());
+  benchmarks.push_back(std::make_unique<LdsBankConflictBench>());
+  benchmarks.push_back(std::make_unique<InShaderIndirectBench>());
   benchmarks.push_back(std::make_unique<Fp16Bench>());
   benchmarks.push_back(std::make_unique<Bf16Bench>());
   benchmarks.push_back(std::make_unique<Fp8Bench>());
@@ -379,6 +384,7 @@ void BenchmarkRunner::discoverBenchmarks() {
       "L0 Cache Latency", "ns", l0_size, "l0_cache_latency",
       create_shuffled_indices(l0_size / sizeof(uint32_t)),
       std::vector<std::string>{"l0l"}, 0));
+  benchmarks.push_back(std::make_unique<CacheLatencyCurveBench>());
   // L1, L2, and L3 cache latency tests temporarily disabled due to memory prefetcher & measurement volatility
   /*
   benchmarks.push_back(std::make_unique<CacheBench>(
@@ -815,7 +821,9 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
             }
           }
           if (disp.length() > 50) disp = disp.substr(0, 47) + "...";
-          std::cout << "\r\033[K  \033[36m⠋\033[0m [" << (taskIdx + 1) << "/" << tasks.size() << "] "
+          static const char* kSpinnerFrames[] = {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"};
+          const char* spinner = kSpinnerFrames[taskIdx % 10];
+          std::cout << "\r\033[K  \033[36m" << spinner << "\033[0m [" << (taskIdx + 1) << "/" << tasks.size() << "] "
                     << disp << "..." << std::flush;
         } else if (!quiet) {
           std::cout << "  - [" << ComputeBackendFactory::getBackendName(context->getBackend())
@@ -904,12 +912,21 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
           bench->Run(i);
           context->waitIdle();
 
+          if (context->hasGpuTiming()) {
+            context->startTiming();
+          }
           auto start = std::chrono::high_resolution_clock::now();
           bench->Run(i);
           context->waitIdle();
           auto end = std::chrono::high_resolution_clock::now();
           total_time_ms =
               std::chrono::duration<double, std::milli>(end - start).count();
+          if (context->hasGpuTiming()) {
+            double gpu_time = context->stopTiming();
+            if (gpu_time > 0.0) {
+              total_time_ms = gpu_time;
+            }
+          }
           total_invocations = 1;
         } else {
           auto start = std::chrono::high_resolution_clock::now();
@@ -954,12 +971,15 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
           uint64_t iterations = 1;
           if (single_run_ms > 0.0) {
             iterations = static_cast<uint64_t>(
-                std::max(1.0, std::round(target_duration_ms / single_run_ms)));
+                  std::max(1.0, std::round(target_duration_ms / single_run_ms)));
           }
           iterations = std::min(iterations, static_cast<uint64_t>(10000));
           iterations = std::max(iterations, static_cast<uint64_t>(1));
 
           total_invocations = iterations;
+          if (context->hasGpuTiming()) {
+            context->startTiming();
+          }
           start = std::chrono::high_resolution_clock::now();
           for (uint64_t iter = 0; iter < iterations; ++iter) {
             bench->Run(i);
@@ -968,6 +988,12 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
           end = std::chrono::high_resolution_clock::now();
           total_time_ms =
               std::chrono::duration<double, std::milli>(end - start).count();
+          if (context->hasGpuTiming()) {
+            double gpu_time = context->stopTiming();
+            if (gpu_time > 0.0) {
+              total_time_ms = gpu_time;
+            }
+          }
           if (verbose) {
             std::cout << "[TIMING " << bench_name << "] single_run_ms: " << single_run_ms
                       << ", iterations: " << iterations
@@ -996,6 +1022,9 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
         result_data.time_ms = total_time_ms;
         result_data.isEmulated = bench->IsEmulated(i);
         result_data.supportNote = bench->GetConfigCaveat(i, info, context);
+        if (result_data.supportNote.empty()) {
+          result_data.supportNote = bench->GetConfigSupportNote(i, info, context);
+        }
         if (result_data.supportNote.empty() && result_data.isEmulated) {
           result_data.supportNote = "Emulated via software unpack";
         }
@@ -1009,29 +1038,50 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
         result_data.height = effectiveHeight;
 
         formatter->addResult(result_data);
-        if (!quiet && !verbose && !isInteractive) {
-          double opsPerSec = (result_data.time_ms > 0.0 && result_data.operations > 0)
-              ? (static_cast<double>(result_data.operations) / result_data.time_ms) * 1000.0
-              : 0.0;
-          char scoreBuf[64];
-          if (result_data.metric.find("TFLOPS") != std::string::npos || result_data.metric.find("TOPS") != std::string::npos) {
-            snprintf(scoreBuf, sizeof(scoreBuf), "%.2f %s", opsPerSec / 1e12, result_data.metric.c_str());
-          } else if (result_data.metric.find("GB/s") != std::string::npos) {
-            snprintf(scoreBuf, sizeof(scoreBuf), "%.1f GB/s", opsPerSec / 1e9);
-          } else if (result_data.metric.find("GIS/s") != std::string::npos) {
-            snprintf(scoreBuf, sizeof(scoreBuf), "%.2f GIS/s", opsPerSec / 1e9);
-          } else if (result_data.metric.find("MRays/s") != std::string::npos) {
-            snprintf(scoreBuf, sizeof(scoreBuf), "%.1f MRays/s", opsPerSec / 1e6);
-          } else if (result_data.metric.find("GPixels/s") != std::string::npos) {
-            snprintf(scoreBuf, sizeof(scoreBuf), "%.2f GPixels/s", opsPerSec / 1e9);
-          } else if (result_data.metric.find("ns") != std::string::npos) {
-            double nsVal = (result_data.operations > 0) ? ((result_data.time_ms * 1e6) / result_data.operations) : result_data.time_ms;
-            snprintf(scoreBuf, sizeof(scoreBuf), "%.1f ns", nsVal);
-          } else if (result_data.metric.find("M") != std::string::npos) {
-            snprintf(scoreBuf, sizeof(scoreBuf), "%.1f %s", opsPerSec / 1e6, result_data.metric.c_str());
+        double opsPerSec = (result_data.time_ms > 0.0 && result_data.operations > 0)
+            ? (static_cast<double>(result_data.operations) / result_data.time_ms) * 1000.0
+            : 0.0;
+        char scoreBuf[64];
+        if (result_data.metric.find("TFLOPS") != std::string::npos || result_data.metric.find("TOPS") != std::string::npos) {
+          snprintf(scoreBuf, sizeof(scoreBuf), "%.2f %s", opsPerSec / 1e12, result_data.metric.c_str());
+        } else if (result_data.metric.find("TB/s") != std::string::npos) {
+          snprintf(scoreBuf, sizeof(scoreBuf), "%.2f TB/s", opsPerSec / 1e12);
+        } else if (result_data.metric.find("GB/s") != std::string::npos) {
+          snprintf(scoreBuf, sizeof(scoreBuf), "%.1f GB/s", opsPerSec / 1e9);
+        } else if (result_data.metric.find("GIS/s") != std::string::npos) {
+          snprintf(scoreBuf, sizeof(scoreBuf), "%.2f GIS/s", opsPerSec / 1e9);
+        } else if (result_data.metric.find("MRays/s") != std::string::npos) {
+          snprintf(scoreBuf, sizeof(scoreBuf), "%.1f MRays/s", opsPerSec / 1e6);
+        } else if (result_data.metric.find("GPixels/s") != std::string::npos) {
+          snprintf(scoreBuf, sizeof(scoreBuf), "%.2f GPixels/s", opsPerSec / 1e9);
+        } else if (result_data.metric.find("ns") != std::string::npos) {
+          double nsVal = (result_data.operations > 0) ? ((result_data.time_ms * 1e6) / result_data.operations) : result_data.time_ms;
+          snprintf(scoreBuf, sizeof(scoreBuf), "%.1f ns", nsVal);
+        } else if (result_data.metric.find("M") != std::string::npos) {
+          snprintf(scoreBuf, sizeof(scoreBuf), "%.1f %s", opsPerSec / 1e6, result_data.metric.c_str());
+        } else {
+          snprintf(scoreBuf, sizeof(scoreBuf), "%.1f %s", opsPerSec, result_data.metric.c_str());
+        }
+
+        if (isInteractive) {
+          std::string disp = bench_name;
+          if (disp.rfind("RayScheduling (", 0) == 0) {
+            size_t secondOpen = disp.find(") (");
+            if (secondOpen != std::string::npos && disp.back() == ')') {
+              disp = disp.substr(secondOpen + 3, disp.length() - (secondOpen + 4));
+            }
+          } else if (disp.rfind("RayASBuild (", 0) == 0 && disp.back() == ')') {
+            disp = disp.substr(12, disp.length() - 13);
           } else {
-            snprintf(scoreBuf, sizeof(scoreBuf), "%.1f %s", opsPerSec, result_data.metric.c_str());
+            size_t firstOpen = disp.find(" (");
+            if (firstOpen != std::string::npos && disp.back() == ')') {
+              disp = disp.substr(firstOpen + 2, disp.length() - (firstOpen + 3));
+            }
           }
+          if (disp.length() > 50) disp = disp.substr(0, 47) + "...";
+          std::cout << "\r\033[K  \033[32m✓\033[0m [" << (taskIdx + 1) << "/" << tasks.size() << "] "
+                    << disp << "  \033[33m" << scoreBuf << "\033[0m\n" << std::flush;
+        } else if (!quiet && !verbose) {
           std::cout << " Done. [" << scoreBuf << "]" << std::endl;
         }
         numBenchmarksRun++;

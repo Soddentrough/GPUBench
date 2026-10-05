@@ -114,7 +114,7 @@ void RayIntersectBench::buildAS() {
   VkAccelerationStructureGeometryKHR triGeom{
       VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR};
   triGeom.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
-  triGeom.flags = 0; // Non-opaque so ray query proceed yields candidates
+  triGeom.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
   triGeom.geometry.triangles.sType =
       VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
   triGeom.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
@@ -153,7 +153,7 @@ void RayIntersectBench::buildAS() {
   VkAccelerationStructureGeometryKHR boxGeom{
       VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR};
   boxGeom.geometryType = VK_GEOMETRY_TYPE_AABBS_KHR;
-  boxGeom.flags = 0; // Non-opaque to stress math units
+  boxGeom.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
   boxGeom.geometry.aabbs.sType =
       VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_AABBS_DATA_KHR;
   boxGeom.geometry.aabbs.data.deviceAddress = aAddr;

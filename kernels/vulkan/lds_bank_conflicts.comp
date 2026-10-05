@@ -1,0 +1,55 @@
+#version 450
+layout(local_size_x = 32, local_size_y = 1, local_size_z = 1) in;
+
+shared uint lds[1024];
+
+layout(set = 0, binding = 0) buffer OutputBuffer {
+    uint results[];
+};
+
+layout(push_constant) uniform PushConstants {
+    uint stride;
+    uint iterations;
+} pc;
+
+void main() {
+    uint tid = gl_LocalInvocationID.x;
+    uint gid = gl_GlobalInvocationID.x;
+    
+    // Initialize shared memory with non-zero values
+    for (uint i = tid; i < 1024; i += 32) {
+        lds[i] = i + 1;
+    }
+    barrier();
+
+    uint stride = pc.stride;
+    uint iters = pc.iterations;
+    
+    // Each lane accesses its bank stride
+    uint base_addr = (tid * stride) & 1023;
+    uint acc0 = 0;
+    uint acc1 = 0;
+    uint acc2 = 0;
+    uint acc3 = 0;
+    uint acc4 = 0;
+    uint acc5 = 0;
+    uint acc6 = 0;
+    uint acc7 = 0;
+
+    for (uint i = 0; i < iters; i++) {
+        acc0 += lds[(base_addr + 0 * stride) & 1023];
+        acc1 += lds[(base_addr + 1 * stride) & 1023];
+        acc2 += lds[(base_addr + 2 * stride) & 1023];
+        acc3 += lds[(base_addr + 3 * stride) & 1023];
+        acc4 += lds[(base_addr + 4 * stride) & 1023];
+        acc5 += lds[(base_addr + 5 * stride) & 1023];
+        acc6 += lds[(base_addr + 6 * stride) & 1023];
+        acc7 += lds[(base_addr + 7 * stride) & 1023];
+        base_addr = (base_addr + acc0) & 1023;
+    }
+
+    uint total = acc0 + acc1 + acc2 + acc3 + acc4 + acc5 + acc6 + acc7;
+    if (total == 0xDEADBEEF) {
+        results[gid] = total;
+    }
+}

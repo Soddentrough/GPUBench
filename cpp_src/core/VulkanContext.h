@@ -81,6 +81,11 @@ public:
   VkDevice getVulkanDevice() const override { return device; }
   void *getVulkanContext() const override { return (void *)this; }
 
+  // Hardware GPU timestamp profiling
+  void startTiming() override;
+  double stopTiming() override;
+  bool hasGpuTiming() const override { return timingSupported; }
+
   // Vulkan-specific accessors
   VkInstance getInstance() const { return instance; }
   VkPhysicalDevice getPhysicalDevice() const { return physicalDevice; }
@@ -89,6 +94,10 @@ public:
     return computeQueueFamilyIndex;
   }
   VkQueue getComputeQueue() const { return computeQueue; }
+  uint32_t getGraphicsQueueFamilyIndex() const {
+    return graphicsQueueFamilyIndex;
+  }
+  VkQueue getGraphicsQueue() const { return graphicsQueue; }
   const VkPhysicalDeviceProperties &getPhysicalDeviceProperties() const {
     return properties;
   }
@@ -234,9 +243,11 @@ private:
 
   uint32_t computeQueueFamilyIndex = 0;
   VkQueue computeQueue = VK_NULL_HANDLE;
+  uint32_t graphicsQueueFamilyIndex = 0;
+  VkQueue graphicsQueue = VK_NULL_HANDLE;
   VkCommandPool commandPool = VK_NULL_HANDLE;
 
-  static constexpr size_t kMaxInFlight = 16;
+  static constexpr size_t kMaxInFlight = 64;
   struct InFlightFrame {
     VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
     VkFence fence = VK_NULL_HANDLE;
@@ -244,6 +255,23 @@ private:
   };
   std::array<InFlightFrame, kMaxInFlight> inFlightFrames{};
   size_t currentFrameIndex = 0;
+
+  VkQueryPool timestampQueryPool = VK_NULL_HANDLE;
+  bool timingSupported = false;
+  bool isTimingActive = false;
+  double timestampPeriod = 1.0;
+  uint32_t currentQueryIndex = 0;
+  static constexpr uint32_t kMaxTimestamps = 4096;
+  VkCommandBuffer timingCmdStart = VK_NULL_HANDLE;
+  VkCommandBuffer timingCmdStop = VK_NULL_HANDLE;
+  bool hostQueryResetSupported = false;
+
+  PFN_vkCmdPipelineBarrier2KHR vkCmdPipelineBarrier2KHR_ptr = nullptr;
+  bool sync2Supported = false;
+
+  VkDebugUtilsMessengerEXT debugMessenger = VK_NULL_HANDLE;
+  PFN_vkCreateDebugUtilsMessengerEXT vkCreateDebugUtilsMessengerEXT_ptr = nullptr;
+  PFN_vkDestroyDebugUtilsMessengerEXT vkDestroyDebugUtilsMessengerEXT_ptr = nullptr;
 
   std::map<ComputeBuffer, VulkanBuffer *> buffers;
   std::map<ComputeKernel, VulkanKernel *> kernels;

@@ -200,10 +200,10 @@ void SysMemBandwidthBench::workerLoop(unsigned int tid) {
       const auto &config = configs[cfgIdx];
       uint32_t activeThreads = (config.numThreads > 0) ? config.numThreads : threadCount;
       if (tid < activeThreads) {
-        size_t chunkSize = bufferSize / threadCount;
+        size_t chunkSize = (activeThreads == 1) ? bufferSize : (bufferSize / threadCount);
         chunkSize = (chunkSize / 256) * 256;
 
-        size_t offset = tid * chunkSize;
+        size_t offset = (activeThreads == 1) ? 0 : (tid * chunkSize);
         char *tSrc = (char *)buffer + offset;
         char *tDst = (char *)destBuffer + offset;
 
@@ -241,7 +241,8 @@ void SysMemBandwidthBench::Run(uint32_t config_idx) {
     return;
 
   const auto &config = configs[config_idx];
-  size_t chunkSize = bufferSize / threadCount;
+  uint32_t activeThreads = (config.numThreads > 0) ? config.numThreads : threadCount;
+  size_t chunkSize = (activeThreads == 1) ? bufferSize : (bufferSize / threadCount);
   chunkSize = (chunkSize / 256) * 256;
 
   auto start = std::chrono::high_resolution_clock::now();
@@ -264,7 +265,6 @@ void SysMemBandwidthBench::Run(uint32_t config_idx) {
 
   lastRunTimeMs = elapsedMs;
   // Calculate bytes transferred
-  uint32_t activeThreads = (config.numThreads > 0) ? config.numThreads : threadCount;
   uint64_t totalBytes = chunkSize * activeThreads;
   if (config.mode == SysMemTestMode::ReadWrite) {
     totalBytes *= 2;
