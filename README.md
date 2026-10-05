@@ -9,7 +9,7 @@ GPUBench is a high-performance cross-platform GPU benchmarking tool designed to 
 
 - **Multi-Backend Support**: Benchmarks using Vulkan, OpenCL, and ROCm/HIP.
 - **Hardware Ray Tracing Suite**:
-  - **Ray Scheduling Architectures**: Megakernel vs. Hardware Shader Execution Reordering (SER) vs. Device-Generated Commands (DGC).
+  - **Ray Scheduling Architectures**: Megakernel vs. Decoupled Wavefronts via Device-Generated Commands (DGC) and Shader Execution Reordering (SER, where supported by hardware).
   - **Real-World Material Divergence**: Realistic heterogeneous material distributions testing VGPR allocation pressure and SIMD wave divergence.
   - **Spatial Ray Divergence**: Parametric cone divergence measuring BVH traversal cache hit rates.
   - **Multi-Layer Alpha Testing**: AnyHit alpha evaluation through 16 stacked cutout planes.
@@ -146,8 +146,8 @@ Modern ray tracing performance in production games and visual effects engines is
 GPUBench evaluates how different GPU hardware architectures handle these workloads across distinct scheduling architectures:
 
 1. **Traditional Megakernel**: Traces rays and evaluates all hit shading in a single compute pass. Suffering from the "convoy effect," a single complex material forces all lanes to allocate worst-case VGPRs and serializes execution over divergent SIMD branches.
-2. **Traditional + SER (Shader Execution Reordering)**: Leverages hardware reordering (`VK_KHR_ray_tracing_reorder` / `VK_EXT_ray_tracing_invocation_reorder`) to dynamically regroup divergent lanes by spatial direction and material hit ID before executing hit shaders.
-3. **Device-Generated Commands (DGC / Wavefront Compaction)**: Compacts divergent hits into categorized material queues via ballot/atomic compaction and dispatches uniform waves using GPU-driven command generation (`VK_EXT_device_generated_commands`).
+2. **Traditional + SER (Shader Execution Reordering)**: Evaluates in-pipeline thread regrouping (`VK_EXT_ray_tracing_invocation_reorder`) on supported architectures (e.g. NVIDIA Ada Lovelace / Blackwell) to dynamically regroup divergent lanes by spatial direction and material hit ID before executing hit shaders. *(Note: Unsupported on AMD RDNA hardware, which relies on software stream compaction).*
+3. **Device-Generated Commands (DGC / Wavefront Compaction)**: Compacts divergent hits into categorized material queues via ballot/atomic compaction and dispatches uniform waves using GPU-driven command generation (`VK_EXT_device_generated_commands`), providing optimal scaling across AMD RDNA and multi-vendor GPUs.
 
 #### Four-Scenario Benchmarking Morphology
 - **Showroom Studio (`-s showroom`)**: $108,936$ triangles featuring the Khronos ToyCar glTF asset with clearcoat, decals, and velvet pedestal. Device-Generated Commands (DGC) achieve **101.3 FPS** vs. Megakernel **57.6 FPS** (**1.76x speedup**).
@@ -269,7 +269,7 @@ python3 scripts/capture_gpu_profiles.py
 ### Architectural & Technical Whitepapers
 - [Ray Scheduling Architectures](docs/RAY_SCHEDULING_ARCHITECTURE.md) - Decoupled scheduling, microarchitectural ISA analysis, and RGP timeline profiling.
 - [BVH Traversal Architectural Audit](docs/BVH_TRAVERSAL_ARCHITECTURAL_AUDIT.md) - Hardware BVH traversal ceilings, box and triangle peak rates on RDNA 4.
-- [RDNA 4 Ray Tracing Architecture](docs/RDNA4_RAY_TRACING_ARCHITECTURE.md) - RAv3 hardware traversal, Shader Execution Reordering (SER), and monolithic 4nm architecture.
+- [RDNA 4 Ray Tracing Architecture](docs/RDNA4_RAY_TRACING_ARCHITECTURE.md) - RAv3 BVH8 traversal, LDS hardware stack management, and DGC wavefront compaction.
 - [RDNA 3 Ray Tracing Architecture](docs/RDNA3_RAY_TRACING_ARCHITECTURE.md) - Chiplet topology, memory fabric, and zero-LDS pure Wave32 compaction.
 - [Hardware Profiling & Telemetry Guide](docs/PROFILING_GUIDE.md) - RGA disassembly, ACO compiler stats, packet dumping, and SMI telemetry.
 - [Compute Performance Analysis](docs/COMPUTE_PERFORMANCE_ANALYSIS.md) - Compute pipelines, packed math, and compiler ceilings.

@@ -16,7 +16,7 @@ GPUBench implements and contrasts modern ray scheduling paradigms to decouple th
 - **Traditional Megakernel**: Monolithic compute dispatch (`vkCmdDispatch`).
 - **Device-Generated Commands (DGC)**: Decoupled micro-kernels where hit records are classified into uniform queues and executed via GPU-driven command generation (`VK_EXT_device_generated_commands` / `vkCmdExecuteGeneratedCommandsEXT`).
 - **Active-Ray Compaction**: Atomic queue compaction repacking surviving path-tracing rays into dense wavefronts after every bounce using wave ballot stream sort.
-- **Shader Execution Reordering (SER)**: Hardware ray reordering (`VK_KHR_ray_tracing_reorder` / `VK_EXT_ray_tracing_invocation_reorder`).
+- **Shader Execution Reordering (SER)**: In-pipeline thread reordering (`VK_EXT_ray_tracing_invocation_reorder`, supported on NVIDIA Ada Lovelace / Blackwell; unsupported in hardware on AMD RDNA).
 - **Work Graphs**: Autonomous GPU node enqueue (`VK_AMDX_shader_enqueue`).
 
 > [!NOTE]

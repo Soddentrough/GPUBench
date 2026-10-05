@@ -1,16 +1,16 @@
-# Architectural Analysis: Ray Tracing Scheduling, Hardware BVH Traversal (RAv3), and Shader Execution Reordering (SER) on AMD RDNA 4
+# Architectural Analysis: Ray Tracing Scheduling, Ray Accelerator v3 (RAv3), and Wavefront Compaction via DGC on AMD RDNA 4
 
 **Author**: GPUBench Technical Architecture Team  
-**Scope**: AMD RDNA 4 Architecture (Navi 48 / GFX1201 / Radeon AI PRO R9700 / RX 8000 Series), Vulkan 1.4 Ray Query, Dedicated Ray Tracing Pipelines, and Compute  
-**Target Codebase**: `cpp_src/benchmarks/RaySchedulingBench.*`, `kernels/vulkan/rt_scheduling_*.comp`, `shaders/rt_scheduling_*.rgen`, `shaders/rt_scheduling_ser.rgen`  
+**Scope**: AMD RDNA 4 Architecture (Navi 48 / GFX1201 / Radeon AI PRO R9700 / RX 9000 Series), Vulkan 1.4 Ray Query, Dedicated Ray Tracing Pipelines, and Compute  
+**Target Codebase**: `cpp_src/benchmarks/RaySchedulingBench.*`, `kernels/vulkan/rt_scheduling_*.comp`, `shaders/rt_scheduling_*.comp`, `shaders/rt_scheduling_*.rgen`  
 
 > [!NOTE]
-> **Vulkan Standardized Terminology**:
+> **Vulkan Standardized Terminology & Hardware Feature Availability**:
 > This whitepaper strictly implements and evaluates official Vulkan 1.4 specifications:
-> - **Device-Generated Commands (DGC)**: `VK_EXT_device_generated_commands` utilizing Indirect Execution Sets (`VkIndirectExecutionSetEXT`) and Indirect Commands Layouts (`VkIndirectCommandsLayoutEXT`).
-> - **Shader Execution Reordering (SER)**: `GL_EXT_shader_invocation_reorder` / `VK_EXT_shader_invocation_reorder` utilizing Hit Objects (`hitObjectEXT`).
+> - **Device-Generated Commands (DGC)**: `VK_EXT_device_generated_commands` utilizing Indirect Execution Sets (`VkIndirectExecutionSetEXT`) and Indirect Commands Layouts (`VkIndirectCommandsLayoutEXT`), paired with GPU-driven compute queue compaction.
 > - **Ray Tracing Pipelines (RTP)**: `VK_KHR_ray_tracing_pipeline` utilizing Shader Binding Tables (SBT) and `vkCmdTraceRaysKHR`.
 > - **Ray Queries**: `VK_KHR_ray_query` utilizing `rayQueryEXT` inside compute shaders.
+> - **Shader Execution Reordering (SER)**: `VK_EXT_ray_tracing_invocation_reorder` / `GL_EXT_shader_invocation_reorder` utilizing Hit Objects (`hitObjectEXT`). **Hardware Note**: Hardware SER with on-chip thread sorting queues is an NVIDIA-exclusive architectural feature (introduced in Ada Lovelace). **AMD RDNA 4 does not feature hardware-level Shader Execution Reordering.** Consequently, ray and material sorting on RDNA 4 is achieved via software stream compaction (e.g. ballot-compacted queues and DGC).
 
 ---
 
@@ -26,13 +26,15 @@ While requiring less dedicated silicon area, this model imposed specific microar
 3. **Branch Divergence on Non-Uniform Rays**: When secondary rays scattered across diverse directions or hit different materials, SIMD32 wavefronts experienced lane masking, reducing active ALU utilization to **12.5%–25%**.
 
 ### The RDNA 4 Architectural Approach
-AMD RDNA 4 alters this balance through four architectural modifications:
-1. **Third-Generation Ray Accelerator (RAv3) with Hardware BVH Traversal**: The traversal loop and traversal stack are offloaded to dedicated hardware logic, reducing traversal stack residency in shader VGPRs.
-2. **Hardware Instance Transform Evaluation**: World-to-object space matrix multiplication is evaluated in dedicated silicon during TLAS-to-BLAS transitions, reducing shader instruction counts.
-3. **Hardware Shader Execution Reordering (SER)**: Support for `GL_EXT_shader_invocation_reorder` allows dynamic sorting of rays by spatial and shader coherence prior to shading.
-4. **Monolithic 4nm Topology & Increased Interconnect Bandwidth**: Navi 48 utilizes a single monolithic die, avoiding IFOP inter-die transit latency and increasing internal L1/L2 bandwidth.
+AMD RDNA 4 alters this balance through major architectural enhancements in the **Ray Accelerator v3 (RAv3)** alongside a return to monolithic silicon:
+1. **BVH8 Traversal & Dual Intersection Engines**: Upgraded from BVH4 to **BVH8**, allowing the Ray Accelerator to evaluate up to 8 bounding boxes simultaneously per instruction. Each CU houses two parallel intersection engines, doubling hardware test throughput to **8 ray-box or 2 ray-triangle tests per clock per CU**.
+2. **Hardware LDS Traversal Stack Management**: Traversal stack push and pop operations are offloaded from shader VGPRs to Local Data Share (LDS) via dedicated hardware instructions (`ds_bvh_stack_push8_pop1_rtn_b32`), preventing register spilling without requiring black-box traversal hardware.
+3. **Hardware Instance Transform Evaluation**: World-to-object space matrix multiplication is evaluated in dedicated silicon during TLAS-to-BLAS transitions, reducing shader VALU instruction overhead.
+4. **Hardware Oriented Bounding Box (OBB) Intersections**: Native hardware acceleration for OBB intersections reduces empty volume and false-positive hits for non-axis-aligned geometry.
+5. **Monolithic 4nm Topology & Increased Interconnect Bandwidth**: Navi 48 utilizes a single monolithic die, avoiding IFOP inter-die transit latency and increasing internal L1/L2 bandwidth.
+6. **Wavefront Compaction via DGC**: Because RDNA 4 does not incorporate hardware Shader Execution Reordering (SER), decoupling ray traversal from shading via **Device-Generated Commands (DGC)** is the premier architecture for restoring 100% SIMD lane utilization in divergent path tracing.
 
-Empirical benchmarks on the **AMD Radeon AI PRO R9700 (GFX1201)** demonstrate **1.76x to 2.26x total frame speedups** at 4K UHD across complex scenes and up to a **4.80x speedup (16,415 vs. 3,423 MHits/s)** in heterogeneous material shading.
+Empirical benchmarks on the **AMD Radeon AI PRO R9700 (GFX1201)** demonstrate **1.76x to 2.26x total frame speedups** at 4K UHD across complex scenes and up to a **4.80x speedup (16,415 vs. 3,423 MHits/s)** in heterogeneous material shading using DGC stream compaction.
 
 ---
 
@@ -52,8 +54,8 @@ The following diagram illustrates the compute and ray tracing pipeline of the AM
 |  |  |   SIMD32 Unit 1 (Dual-Issue)  |  |   |  |   SIMD32 Unit 1 (Dual-Issue)  | | |
 |  |  +-------------------------------+  |   |  +-------------------------------+ | |
 |  |  | Ray Accelerator v3 (RAv3)     |  |   |  | Ray Accelerator v3 (RAv3)     | | |
-|  |  | • Hardware BVH Traversal Engine|  |   | • Hardware BVH Traversal Engine| | |
-|  |  | • 8 Ray-Box / Dual-Node Tests |  |   | • 8 Ray-Box / Dual-Node Tests  | | |
+|  |  | • Dual Intersect Engines      |  |   |  | • Dual Intersect Engines      | | |
+|  |  | • BVH8 8-Box / 2-Tri per clock|  |   |  | • BVH8 8-Box / 2-Tri per clock| | |
 |  |  | • HW Instance Transform Matrix|  |   | • HW Instance Transform Matrix | | |
 |  |  | • Hardware OBB Intersection   |  |   | • Hardware OBB Intersection    | | |
 |  |  +-------------------------------+  |   |  +-------------------------------+ | |
@@ -63,6 +65,7 @@ The following diagram illustrates the compute and ray tracing pipeline of the AM
 |  +-------------------------------------+   +------------------------------------+ |
 |                                                                                   |
 |  [ Local Data Share (LDS): 64 KB ]    [ Vector L0 Cache (GL0C): 32 KB per WGP ]   |
+|  (Houses Hardware BVH Stack)                                                      |
 +-----------------------------------------------------------------------------------+
                                          |
                        [ Vector L1 Cache (GL1C): 256 KB ]
@@ -77,7 +80,7 @@ The following diagram illustrates the compute and ray tracing pipeline of the AM
 ```
 
 ### 2.1. Compute Unit Organization & Register File
-- **Dual Compute Unit Architecture**: Each Workgroup Processor (WGP) contains two Compute Units (CUs), each equipped with two independent SIMD32 vector units capable of dual-issue ALU operation.
+- **Dual Compute Unit Architecture**: Each Workgroup Processor (WGP) contains two Compute Units (CUs), each equipped with two independent SIMD32 vector units capable of dual-issue VOPD ALU operation.
 - **GFX1201 Scale (Radeon AI PRO R9700)**:
   - **32 WGPs / 64 Compute Units / 128 SIMD32 vector engines**.
   - **Physical VGPR Capacity**: 1536 Wave32 registers per SIMD.
@@ -100,119 +103,113 @@ A key operational difference between RDNA 3 and RDNA 4 is the physical die packa
 
 The core of RDNA 4's ray tracing capability is the **Ray Accelerator v3 (RAv3)**, integrated alongside the texture and memory load-store units.
 
-| Architectural Capability | RDNA 2 (RAv1) | RDNA 3 (RAv2) | RDNA 4 (RAv3) |
+| Architectural Capability | RDNA 2 (RAv1) | RDNA 3 (RAv2) | AMD RDNA 4 (RAv3 / `gfx1201`) |
 | :--- | :--- | :--- | :--- |
-| **BVH Traversal Execution** | Software-driven in shader | Software-driven in shader | **Full Fixed-Function Hardware Traversal** |
-| **Traversal Stack Storage** | Shader VGPRs | Shader VGPRs | **Internal Hardware Traversal Stack Cache** |
-| **Ray-Box Intersections** | 4 / clock / CU | 4 / clock / CU | **8 / clock / CU (Dual-Node Evaluation)** |
-| **Ray-Triangle Intersections** | 1 / clock / CU | 1 / clock / CU | **2 / clock / CU** |
+| **BVH Traversal Execution** | Software-driven in shader | Software-driven in shader | **Instruction-Driven BVH8 (`image_bvh8`)** |
+| **Traversal Stack Storage** | Shader VGPRs / Scratch | Shader VGPRs / Scratch | **Hardware LDS Stack Instructions (`ds_bvh_stack`)** |
+| **BVH Hierarchy Width** | BVH4 (4 children / node) | BVH4 (4 children / node) | **BVH8 (8 children / node)** |
+| **Internal Intersect Engines**| 1 engine / CU | 1 engine / CU | **2 parallel engines / CU (Dual Engine)** |
+| **Ray-Box Intersections** | 4 / clock / CU | 4 / clock / CU | **8 / clock / CU (Dual Engine)** |
+| **Ray-Triangle Intersections** | 1 / clock / CU | 1 / clock / CU | **2 / clock / CU (Dual Engine)** |
 | **Instance Transforms** | Software ALU matrix math | Software ALU matrix math | **Hardware Matrix Transform in Silicon** |
 | **Oriented Bounding Box (OBB)** | Unsupported (AABB only) | Unsupported (AABB only) | **Hardware OBB Intersection Supported** |
-| **Shader Invocation Reordering** | Unsupported | Unsupported | **Hardware-Accelerated (SER)** |
+| **Shader Execution Reordering** | Unsupported | Unsupported | **Unsupported in Hardware** (Software DGC used) |
 
-### 3.1. Elimination of the Software Traversal Loop
-In RDNA 3 shaders, ray traversal required substantial code:
-```glsl
-// Conceptual RDNA 3 Software Traversal Loop
-while (stackTop > 0) {
-    uint nodeAddr = stack[--stackTop];
-    // Fetch BVH node data from L1/L2 into VGPRs
-    vec4 boxMin, boxMax;
-    fetchNodeData(nodeAddr, boxMin, boxMax);
-    // Instruction issue to RAv2 hardware
-    uint hitMask = image_bvh_intersect_ray(rayOrigin, rayDir, boxMin, boxMax);
-    // Shader executes sorting and stack pushes
-    if (hitMask & 0x1) stack[stackTop++] = childNode0;
-    if (hitMask & 0x2) stack[stackTop++] = childNode1;
-}
+### 3.1. Instruction-Driven BVH8 Traversal & LDS Stack Acceleration
+Unlike fixed-function black-box traversal architectures (such as NVIDIA RT Cores or Intel Xe), AMD RDNA architectures keep the traversal loop under driver/compiler control in shader instructions, while offloading math and stack operations to dedicated hardware units.
+
+Disassembly of Vulkan ray query compute shaders targeting `gfx1201` via RGA reveals how RDNA 4 executes traversal:
+
+```asm
+; --- RDNA 4 Ray Traversal Inner Loop (ACO / GFX1201) ---
+loop_traversal:
+    ; 1. Hardware BVH8 node intersection (up to 8 bounding boxes tested in 1 cycle)
+    image_bvh8_intersect_ray v[3:12], [v[21:22], v[19:20], v[13:15], v[16:18], v29], s[8:11]
+
+    ; 2. Wait for asynchronous Ray Accelerator intersection completion
+    s_wait_bvhcnt 0x0
+
+    ; 3. Hardware LDS traversal stack push/pop in a single instruction
+    ;    Pushes candidate child nodes sorted by distance and pops nearest into v3
+    ds_bvh_stack_push8_pop1_rtn_b32 v3, v24, v27, v[3:10] offset:528
+
+    ; 4. Test terminal condition and branch
+    s_cmp_eq_u32 v3, 0xffffffff
+    s_cbranch_scc0 loop_traversal
 ```
-This loop required keeping the `stack[]` array, loop counters, node addresses, and candidate hit distances continuously live in the Vector Register File (VGPR).
-
-In RDNA 4, the shader issues a single high-level traversal request (either via `rayQueryProceedEXT` in compute or `traceRayEXT` in dedicated ray generation pipelines). The **RAv3 hardware handles the traversal loop autonomously**:
-1. It queries the BVH node addresses directly from cache.
-2. It pushes and pops child nodes within an internal high-speed on-chip traversal stack.
-3. It transforms rays between TLAS and BLAS coordinate spaces in fixed-function matrix hardware.
-4. It only returns control to the shader when a terminal leaf hit (or custom any-hit shader invocation) is reached.
 
 ### 3.2. Microarchitectural Impact on Shader Occupancy
-Because the traversal stack no longer resides in the shader's register file, compiler register allocation changes drastically:
+In RDNA 2 and RDNA 3, keeping the traversal stack in VGPRs led to severe register spilling whenever the traversal loop was combined with complex material evaluation.
 
-| Shader Configuration | Architecture | VGPRs | Waves / SIMD | Active Occupancy | Traversal Bottleneck |
+In RDNA 4:
+1. **LDS Offloading**: The dedicated `ds_bvh_stack_push8_pop1_rtn_b32` instruction offloads stack storage into Local Data Share (LDS). This preserves thread VGPRs for arithmetic and payload caching.
+2. **BVH8 Multiplier**: Evaluating 8 child nodes per intersection instruction halves the number of traversal loop iterations and cache lookups required compared to BVH4.
+3. **Hardware Matrix Transforms**: TLAS instance transforms execute directly inside RAv3, eliminating VALU matrix multiplication instruction sequences.
+
+| Shader Configuration | Architecture | VGPRs | Waves / SIMD | Active Occupancy | Traversal / Register Bottleneck |
 | :--- | :--- | :---: | :---: | :---: | :--- |
-| **Monolithic Megakernel** | RDNA 3 (GFX1100) | 160–240 | 2–4 | 12.5%–25.0% | Register pressure stalls memory hiding |
+| **Monolithic Megakernel** | RDNA 3 (GFX1100) | 160–240 | 2–4 | 12.5%–25.0% | Traversal stack + materials consume all VGPRs |
 | **Monolithic Megakernel** | RDNA 4 (GFX1201) | 240 | 2 | 12.5% | Material branches still force registers |
 | **DGC Classify Kernel** | RDNA 4 (GFX1201) | **48** | **11** | **68.8%** | **Optimal wave residency (5.5x occupancy)** |
 | **DGC Shading Micro-Kernel**| RDNA 4 (GFX1201) | **40–64** | **8–10** | **50.0%–62.5%**| **Zero traversal register footprint** |
 
 ---
 
-## 4. Hardware Shader Execution Reordering (SER) vs. Device-Generated Commands (DGC)
+## 4. Ray Reordering Architecture: Why Decoupled DGC Stream Compaction Is Essential on AMD RDNA 4
 
-RDNA 4 introduces hardware and compiler support for **Shader Execution Reordering (SER)** via the `GL_EXT_shader_invocation_reorder` extension. Understanding when to use hardware SER versus software stream compaction (DGC) is a critical architectural decision.
+A frequent point of technical misunderstanding in modern ray tracing is **Shader Execution Reordering (SER)**. Standardized across APIs via `VK_EXT_ray_tracing_invocation_reorder` and DirectX 12 DXR 1.2 / Shader Model 6.9, SER is designed to mitigate SIMD divergence by dynamically regrouping threads prior to executing hit shaders.
 
 ```
 +-----------------------------------------------------------------------------------+
-|                        RAY REORDERING TAXONOMY ON RDNA 4                          |
+|                        RAY REORDERING ARCHITECTURAL COMPARISON                    |
 |                                                                                   |
-|  1. In-Pipeline Hardware SER (VK_EXT_shader_invocation_reorder)                   |
-|     • Scope: Dedicated Ray Tracing Pipelines (vkCmdTraceRaysKHR).                 |
-|     • Mechanism: Hardware hitObjectEXT sorts rays in on-chip execution buffers.   |
-|     • Overhead: Zero VRAM bandwidth; internal hardware reordering latency only.   |
-|     • Best For: Secondary diffuse GI, ambient occlusion, reflection divergence.   |
+|  Approach A: In-Pipeline Hardware SER (NVIDIA Ada Lovelace / Blackwell)           |
+|     • Mechanism: Dedicated on-chip sorting buffers & warp regrouping schedulers. |
+|     • Support: Supported exclusively on NVIDIA GPUs via VK_EXT_ray_tracing_...    |
+|     • AMD RDNA 4 Status: UNSUPPORTED IN HARDWARE.                                 |
 |                                                                                   |
-|  2. Decoupled GPU-Driven DGC (VK_EXT_device_generated_commands)                   |
-|     • Scope: General Compute Pipelines & Workfront Schedulers.                   |
-|     • Mechanism: Ballot-compacted append queues (worklist.rayRecords) + indirect. |
-|     • Overhead: 16-byte quantized queue VRAM traffic (L2 cache-resident).        |
-|     • Best For: Extreme material heterogeneity (8+ distinct BSDF shaders).       |
+|  Approach B: Decoupled GPU-Driven DGC (Vulkan Device-Generated Commands)          |
+|     • Scope: General Compute Pipelines & Autonomous Workfront Schedulers.         |
+|     • Mechanism: Wavefront ballot compaction (subgroupBallot) + append queues.    |
+|     • Support: Native Vulkan 1.4 specification supported on AMD RDNA 3 / RDNA 4.  |
+|     • Best For: Solving extreme material divergence without proprietary hardware. |
 +-----------------------------------------------------------------------------------+
 ```
 
-### 4.1. The Mechanics of Hardware SER
-Inside `shaders/rt_scheduling_ser.rgen`:
-```glsl
-#extension GL_EXT_ray_tracing : require
-#extension GL_EXT_shader_invocation_reorder : require
+### 4.1. The Reality of SER on AMD RDNA 4
+On architectures equipped with dedicated hardware SER (e.g. NVIDIA Ada Lovelace), the Ray Tracing Pipeline provides `hitObjectTraceRayEXT` and `reorderThreadWithHitObjectEXT` primitives backed by dedicated physical sorting logic that pause divergent warps and assemble new coherent execution groups in silicon.
 
-hitObjectEXT hitObj;
-hitObjectRecordEmptyEXT(hitObj);
+**AMD RDNA 4 does not feature dedicated hardware for dynamic thread reordering.**
+- On AMD GPUs, `vContext->isSERSupported()` returns `false`, and `VK_EXT_ray_tracing_invocation_reorder` is not exposed by the driver.
+- Shaders attempting to call `reorderThreadWithHitObjectEXT` cannot be dispatched on GFX1201 without falling back to no-op driver stubs or software emulation.
 
-// Trace ray into Hit Object representation
-hitObjectTraceRayEXT(
-    topLevelAS,
-    gl_RayFlagsOpaqueEXT,
-    0xFF, 0, 0, 0,
-    rayOrigin, 0.001,
-    rayDir, 10000.0,
-    hitObj
-);
+### 4.2. Why DGC Wavefront Compaction Is the Ideal Solution for AMD
+Because RDNA 4 lacks hardware SER, relying on monolithic ray tracing pipelines (`vkCmdTraceRaysKHR` with mega-hit-shaders) causes severe wavefront divergence: when lanes in a Wave32 strike different materials, execution is serialized and ALU efficiency drops to 12.5%.
 
-// Reorder execution invocations by spatial and shader coherence
-reorderThreadWithHitObjectEXT(hitObj);
+To achieve high performance on RDNA 4, applications must employ **software stream compaction via Device-Generated Commands (DGC)**:
+1. **Ray Classification Pass**: Primary or secondary rays traverse the BVH using `rayQueryEXT`. Upon hit, the hit record and material ID are extracted.
+2. **Subgroup Wave Ballot Compaction**: Invocations within each Wave32 execute `subgroupBallot` to count hits per material archetype, and leader lanes use `atomicAdd` to reserve queue slots.
+3. **GPU-Driven Indirect Dispatch**: `vkCmdExecuteGeneratedCommandsEXT` dispatches specialized shading micro-kernels sized exactly to the number of active rays in each material queue.
+4. **100% SIMD Lane Utilization**: Every lane in the indirect dispatch executes identical material instructions with zero branch divergence.
 
-// Invoke specialized hit shaders with reordered, coherent wavefronts
-hitObjectExecuteShaderEXT(hitObj);
-```
-- **How It Works**: When `reorderThreadWithHitObjectEXT(hitObj)` is invoked, the hardware Ray Accelerator pauses execution of divergent wavefronts. It bins hit objects with matching shader indices and similar spatial coordinates into internal reordering buffers, assembling new, fully coherent Wave32 wavefronts before executing `hitObjectExecuteShaderEXT`.
-- **Architectural Advantage**: Operates entirely within the ray tracing hardware pipeline without writing records to global memory buffers, requiring zero descriptor management or dispatch barriers.
+### 4.3. DGC vs. Hardware SER Architectural Comparison Matrix
 
-### 4.2. DGC vs. SER Architectural Comparison Matrix
-
-| Feature / Metric | Dedicated Ray Tracing + SER | Compute Megakernel | Decoupled DGC Compaction |
+| Architectural Metric | In-Pipeline Hardware SER (NVIDIA Only) | Monolithic Megakernel (Cross-Platform) | Decoupled DGC Compaction (Native on RDNA 4) |
 | :--- | :--- | :--- | :--- |
-| **Pipeline Model** | `vkCmdTraceRaysKHR` + SBT | `vkCmdDispatch` | Indirect Compute / DGC |
-| **Reordering Mechanism** | Hardware `reorderThread` | None (diverged execution) | Wave32 `subgroupBallot` |
-| **Queue Memory Footprint**| **0 MB** (On-Chip Silicon) | **0 MB** (Register-bound) | **16–32 MB** (L2 Cache-resident) |
+| **AMD RDNA 4 Support** | ❌ **Unsupported in Hardware** | ✅ Supported | ✅ **Fully Supported & Optimized** |
+| **Pipeline Model** | `vkCmdTraceRaysKHR` + Hit Objects | `vkCmdDispatch` / Compute Megakernel | Indirect Compute (`vkCmdExecuteGeneratedCommandsEXT`)|
+| **Reordering Engine** | Dedicated Hardware Sorting Silicon | None (Divergent SIMD execution) | Wave32 `subgroupBallot` + Atomic Queue Append |
+| **Queue VRAM Traffic** | 0 MB (On-chip sorting buffers) | 0 MB (Register-bound) | **16–32 MB (L2 Cache-resident on 4nm die)** |
 | **Pipeline Barriers** | None (Hardware managed) | None | 1 Compute-to-Indirect barrier |
-| **SIMD Lane Utilization** | High (80%–95%) | Very Low (12.5%–25%) | **100% Uniform** |
-| **Material Scaling** | Limited by SBT branch size| Collapses with $N$ materials| **Linear scaling with $N$ materials** |
-| **Peak Material Speedup** | ~1.5x–1.8x | 1.0x (Baseline) | **4.80x** |
+| **SIMD Lane Utilization**| High (80%–95%) | Very Low (12.5%–25% on 8 materials) | **100% Uniform Execution** |
+| **Material Scaling** | Limited by hit-shader compilation | Collapses exponentially with materials | **Linear scaling with N material shaders** |
+| **Measured R9700 Speedup**| N/A (Unsupported on AMD) | 1.0x (Baseline) | **4.80x (+379.6% Throughput)** |
 
 ---
 
 ## 5. Empirical Performance Validation on AMD Radeon AI PRO R9700
 
-All benchmarks were evaluated at native **4K UHD (3840×2160, 8,294,400 primary rays per frame)** using the Mesa 25.1 RADV driver, ACO compiler, and Vulkan 1.4 on the dual AMD Radeon AI PRO R9700 workstation (GPU 1 target).
+All benchmarks were evaluated at native **4K UHD (3840×2160, 8,294,400 primary rays per frame)** using the Mesa RADV Vulkan driver, ACO compiler, and Vulkan 1.4 on the dual AMD Radeon AI PRO R9700 workstation (GPU 1 target).
 
 ### 5.1. 4K UHD Full-Frame Performance Matrix
 
@@ -295,13 +292,15 @@ The following table summarizes the architectural differences governing ray traci
 | **Inter-Die Latency Penalty** | ~140–150 ns on L2 cache misses (IFOP) | **0 ns (Unified on-chip fabric)** |
 | **Internal Interconnect Bandwidth**| Baseline | **2x L1/L2 internal throughput** |
 | **Ray Accelerator Generation** | RAv2 | **RAv3** |
-| **BVH Traversal Execution** | Software-driven in shader (`image_bvh`) | **Fixed-function hardware traversal** |
-| **Traversal Stack Location** | Shader VGPR registers | **Internal hardware traversal cache** |
-| **Ray-Box Intersections** | 4 per clock per CU | **8 per clock per CU (Dual-Node)** |
-| **Ray-Triangle Intersections** | 1 per clock per CU | **2 per clock per CU** |
-| **Instance Transform Math** | Software shader ALU instructions | **Dedicated hardware matrix transforms** |
+| **BVH Traversal Execution** | Software-driven in shader (`image_bvh`) | **Instruction-Driven BVH8 (`image_bvh8_intersect_ray`)** |
+| **BVH Hierarchy Width** | BVH4 (4 children / node) | **BVH8 (8 children / node)** |
+| **Internal Intersect Engines**| 1 engine / CU | **2 parallel engines / CU (Dual Engine)** |
+| **Traversal Stack Location** | Shader VGPR registers / Scratch | **Hardware LDS Stack Instructions (`ds_bvh_stack`)** |
+| **Ray-Box Intersections** | 4 per clock per CU | **8 per clock per CU (Dual-Engine BVH8)** |
+| **Ray-Triangle Intersections** | 1 per clock per CU | **2 per clock per CU (Dual-Engine)** |
+| **Instance Transform Math** | Software shader ALU instructions | **Dedicated hardware matrix transforms in silicon** |
 | **Oriented Bounding Box (OBB)** | Software emulation | **Native hardware acceleration** |
-| **Shader Execution Reordering** | Unsupported | **Hardware-accelerated (`hitObjectEXT`)** |
+| **Shader Execution Reordering** | Unsupported | **Unsupported in Hardware** (Software DGC required) |
 | **Command Processor (MEC)** | Standard asynchronous compute engine | **Next-gen low-latency autonomous MEC** |
 | **Material Shading Speedup (DGC)** | ~2.86x–4.25x | **4.80x (up to 16.4 GHits/s)** |
 | **Total 4K Scene Render Speedup** | +15% to +33% (1.15x–1.33x) | **+76% to +126% (1.76x–2.26x)** |
@@ -310,19 +309,19 @@ The following table summarizes the architectural differences governing ray traci
 
 ## 7. Production Best Practices for Ray Tracing on AMD RDNA 4
 
-1. **Leverage Hardware Traversal to Shrink Ray Query Footprints**:
-   In compute shaders, use `rayQueryEXT` with `gl_RayFlagsOpaqueEXT` and `gl_RayFlagsTerminateOnFirstHitEXT` for shadow and occlusion queries. On RDNA 4, RAv3 handles the entire traversal loop in fixed-function silicon, eliminating the register bloat that afflicted RDNA 2/3.
-2. **Use Hardware SER for Unified Path Tracing Pipelines**:
-   In dedicated ray tracing pipelines (`vkCmdTraceRaysKHR`), use `hitObjectTraceRayEXT` and `reorderThreadWithHitObjectEXT` to reorder divergent secondary rays without writing records to global memory queues.
+1. **Leverage BVH8 & LDS Stack Instructions to Shrink Ray Query Footprints**:
+   In compute shaders, use `rayQueryEXT` with `gl_RayFlagsOpaqueEXT` and `gl_RayFlagsTerminateOnFirstHitEXT` for shadow and occlusion queries. On RDNA 4, RAv3 evaluates 8 bounding boxes per instruction, and the compiler automatically lowers stack management to dedicated LDS instructions (`ds_bvh_stack_push8_pop1_rtn_b32`), keeping VGPR usage low.
+2. **Employ Software Stream Compaction via DGC for Divergent Workloads**:
+   Because AMD RDNA 4 lacks hardware Shader Execution Reordering (SER), unified ray tracing pipelines suffer severe SIMD lane serialization under divergent secondary bounces. Use compute-driven ballot compaction (`subgroupBallot`) and Device-Generated Commands (`VK_EXT_device_generated_commands`) to sort and repack rays before dispatching shading micro-kernels.
 3. **Use Decoupled DGC When Shading Heterogeneity Exceeds 4 BSDF Archetypes**:
-   When rendering scenes with diverse material sets (e.g., foliage cutouts, clearcoats, hair, skin, glass, and metals), decompose the pipeline into DGC classification and specialized indirect shading kernels. DGC eliminates lane masking and delivers up to a 4.8x throughput increase.
+   When rendering scenes with diverse material sets (e.g., foliage cutouts, clearcoats, hair, skin, glass, and metals), decompose the pipeline into DGC classification and specialized indirect shading kernels. DGC eliminates lane masking and delivers up to a 4.80x throughput increase.
 4. **Maintain 16-Byte Quantized Payloads**:
    Even with RDNA 4's doubled memory bandwidth, keep queue records compact:
    - Position: Quantized half-floats or scene-relative floats: 6–8 bytes.
    - Direction: Octahedral `snorm16x2`: 4 bytes.
    - Metadata / Pixel Index: 32-bit integer: 4 bytes.
    - **Total**: 16 bytes. Keeping payloads $\le 16\text{ bytes}$ guarantees that multi-million ray queues fit entirely within the monolithic L2 cache and MALL.
-5. **Zero LDS in Traversal and Compaction Shaders**:
-   Never allocate user LDS arrays or use workgroup `barrier()` calls in ray compaction shaders. Use single-wave `subgroupBallot`, `subgroupExclusiveAdd`, and leader `atomicAdd` to maintain maximum (68.8%+) WGP wave residency.
+5. **Zero User LDS in Ray Compaction Shaders**:
+   Never allocate large user LDS arrays or use workgroup `barrier()` calls in ray compaction shaders. Use single-wave `subgroupBallot`, `subgroupExclusiveAdd`, and leader `atomicAdd` to maintain maximum (68.8%+) WGP wave residency, while leaving LDS capacity available for the hardware traversal stack.
 6. **Enforce 1:1 Wave32 Compute Mapping**:
    Configure compute kernels as `layout(local_size_x = 32) in;`. Each workgroup maps directly to one RDNA 4 SIMD32 wave slot, eliminating workgroup scheduling overhead and inter-wave synchronization.

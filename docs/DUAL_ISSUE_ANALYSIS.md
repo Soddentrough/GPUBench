@@ -4,7 +4,7 @@
 
 Modern GPU microarchitectures have evolved beyond simple SIMD vector execution pipelines by introducing dual-issue and concurrent arithmetic execution datapaths:
 - **AMD RDNA 3 (Navi 3x / GFX11)**: Introduced static **VOPD (Vector Operations Dual-issue)** 64-bit instruction pairing within each SIMD32 unit.
-- **AMD RDNA 4 (Navi 4x / GFX12)**: Overhauled the dual-issue pipeline with streamlined dual-ALU vector execution, removing restrictive legacy VOPD FMA pairing rules while requiring bank-aware register allocation.
+- **AMD RDNA 4 (Navi 4x / GFX12)**: Continues and refines 64-bit **VOPD** dual-issue execution (`v_dual_*`), paired with Dynamic VGPR allocation and improved compiler scheduling to maximize dual-FMA throughput.
 - **NVIDIA Turing, Ampere, Ada Lovelace, and Blackwell**:
   - *Turing (TU10x)*: Decoupled FP32 and INT32 execution units capable of concurrent $1\times \text{FP32} + 1\times \text{INT32}$ execution per warp cycle.
   - *Ampere (GA10x) & Ada Lovelace (AD10x)*: Dual FP32 datapath design where Datapath 0 handles FP32 or INT32, and Datapath 1 handles FP32 only (yielding $2\times \text{FP32}$ dual-issue peak, or $1\times \text{FP32} + 1\times \text{INT32}$ concurrent execution).
@@ -17,7 +17,7 @@ Modern GPU microarchitectures have evolved beyond simple SIMD vector execution p
 
 | Feature / Metric | AMD RDNA 3 (GFX11) | AMD RDNA 4 (GFX12) | NVIDIA Ampere / Ada Lovelace |
 | :--- | :--- | :--- | :--- |
-| **Dual-Issue Mechanism** | Static 64-bit **VOPD** opcode pairing (`v_dual_*`) | Dynamic / compiler-scheduled dual-issue SIMD32 | Dynamic warp scheduler dual-dispatch (Scoreboard) |
+| **Dual-Issue Mechanism** | Static 64-bit **VOPD** opcode pairing (`v_dual_*`) | 64-bit **VOPD** opcode pairing (`v_dual_*`) with Dynamic VGPRs | Dynamic warp scheduler dual-dispatch (Scoreboard) |
 | **FP32 Issue Rate** | Up to 2 FMAs / cycle / SIMD32 | Up to 2 FMAs / cycle / SIMD32 | Up to 2 FMAs / cycle / SM sub-partition |
 | **INT32 Issue Rate** | Up to 1–2 ops / cycle (dependent on opcode pairing) | Dedicated integer ALUs | 1 op / cycle / sub-partition (Datapath 0 only) |
 | **Mixed FP32 + INT32** | Supported for specific bitwise/shift pairs (`v_dual_lshlrev_b32`, `v_dual_and_b32`) | Supported via dual-ALU scheduling | **Full concurrency**: $1\times \text{FP32} + 1\times \text{INT32}$ simultaneously |

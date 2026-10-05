@@ -2,7 +2,7 @@
 
 **Target Architecture**: AMD RDNA 4 (GFX1201 / AMD Radeon AI PRO R9700 / Navi 4x)  
 **Target Driver**: Mesa RADV 26.1.8 / Vulkan 1.4 / SPIR-V 1.4  
-**Host Platform**: AMD Threadripper 3750X (64GB RAM), Fedora 44  
+**Host Platform**: AMD Ryzen Threadripper 3970X (64GB RAM), Fedora 44  
 **Primary Target Device**: GPU 1 (`-d 1`). *(Note: GPU 0 is strictly reserved for external host display and background tasks)*.
 
 ---
