@@ -1,7 +1,0 @@
-[workspace]
-members = [
-    "gpubench-sys",
-    "gpubench-core",
-    "gpubench-gui",
-]
-resolver = "2"

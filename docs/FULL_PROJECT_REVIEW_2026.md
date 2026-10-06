@@ -846,7 +846,7 @@ All recommendations are explicitly organized into the four mandatory categories,
 │ ├── REWRITE-01: Integrate Vulkan Memory Allocator (VMA) for pooled buffer allocations.           │
 │ ├── REWRITE-02: Upgrade synchronization model to VK_KHR_synchronization2 and timeline semaphores.│
 │ ├── REWRITE-03: Redesign IComputeContext with strongly typed handles and C++23 std::span/expected│
-│ ├── REWRITE-04: Formally deprecate and purge the 25 MB Rust/Iced GUI stack; standardize on ImGui.│
+│ ├── REWRITE-04: [COMPLETED] Purged 25 MB Rust/Iced GUI stack; standardized on C++ ImGui/ImPlot.  │
 │ ├── REWRITE-05: Modularize GuiApp.cpp (SidebarPanel, ScorecardPanel, ViewportPanel, Telemetry).   │
 │ └── REWRITE-06: Add SOTA microbenchmarks: Strided Cache Latency Curve, LDS Bank Conflicts,       │
 │                 and In-Shader Indirect Command Synthesis.                                        │

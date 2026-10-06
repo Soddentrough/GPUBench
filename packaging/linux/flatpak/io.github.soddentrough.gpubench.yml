@@ -17,11 +17,6 @@ finish-args:
   # Host read access for AMD ROCm runtime libraries if installed on host
   - --filesystem=/opt/rocm:ro
 
-build-options:
-  append-path: /usr/lib/sdk/rust-stable/bin
-  env:
-    CARGO_HOME: /run/build/gpubench/cargo
-
 modules:
   - name: gpubench
     buildsystem: cmake-ninja

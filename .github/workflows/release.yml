@@ -46,12 +46,6 @@ jobs:
           choco install nsis -y
           echo "C:\Program Files (x86)\NSIS" >> $env:GITHUB_PATH
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo workspace
-        uses: Swatinem/rust-cache@v2
-
       - name: Configure CMake
         run: |
           mkdir build
@@ -99,12 +93,6 @@ jobs:
             --confirm-command install
           echo "VULKAN_SDK=$GITHUB_WORKSPACE/VulkanSDK/macOS" >> $GITHUB_ENV
           echo "$GITHUB_WORKSPACE/VulkanSDK/macOS/bin" >> $GITHUB_PATH
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo workspace
-        uses: Swatinem/rust-cache@v2
 
       - name: Configure CMake
         run: |
@@ -173,12 +161,6 @@ jobs:
             libxinerama-dev \
             libwayland-dev \
             libxkbcommon-dev
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo workspace
-        uses: Swatinem/rust-cache@v2
 
       - name: Configure CMake
         run: |

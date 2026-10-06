@@ -35,7 +35,7 @@ The project is ~16 days old (62 commits, 2026-09-20 → 2026-10-06), agent-assis
 | Megakernel bounce gating on `dumpRenders` | ✅ Inverted intentionally (`maxBounces = dumpRenders ? 2 : pc.bounces`, `rt_scheduling_traditional_megakernel.comp:1054`) |
 | VMA absence / 4096-allocation limit / staging churn | ❌ **Still open** (in `TODO.md`) |
 | GUI mock data leak (P0) | ❌ **Still open** — see Critical #1 |
-| Dual GUI (Rust iced vs C++ ImGui) | ❌ **Still open** — Rust GUI still built in CI, absent from release packages |
+| Dual GUI (Rust iced vs C++ ImGui) | ✅ **RESOLVED** — Purged unreleased Rust/Iced stack; standardized on C++23 Dear ImGui (`cpp_src/gui`) across CMake, packages, and desktop entries |
 | Zero warning flags | ❌ **Still open** — no `-Wall/-Wextra/-Werror` anywhere |
 
 ---
@@ -168,7 +168,7 @@ Power is already sampled in the GUI telemetry; wire joules/TLOP into CLI results
 
 ## 5. Nice-to-Have Features
 
-1. **Pick one GUI and delete the other.** The Rust/iced stack (6,924-line `gpubench-gui/src/main.rs`, cxx FFI, `gpubench-sys`) is built in CI (`ci.yml`) but **not shipped in any release package** (`release.yml` builds CMake targets only). The C++ ImGui GUI is the product (desktop file, README, releases all point at it) and its dependencies are current (imgui 1.91.3, implot 0.16, SDL3, CLI11 2.3.2). Deleting the Cargo workspace halves CI time and removes an entire maintenance surface (iced 0.12 is also stale vs 0.13/0.14). If a Rust GUI is wanted long-term, make that a fresh decision — not a zombie build.
+1. **Pick one GUI and delete the other.** ✅ **RESOLVED:** Formally deleted the unreleased Rust/Iced stack (`gpubench-gui/`, `gpubench-core/`, `gpubench-sys/`, `Cargo.toml`, `Cargo.lock`), removed Rust CI jobs, and consolidated 100% onto the pure C++23 Dear ImGui + ImPlot + SDL3/Vulkan workstation frontend (`cpp_src/gui`). Halved CI build times and eliminated 5.6 GB of build cache.
 2. **Real test suite.** Today: no CTest/gtest; the Rust `test_*.rs` bins are manual debug tools; the de-facto regression suite is `scripts/verify_benchmarks.py` (genuinely good — per-architecture baselines, cross-backend ±10% parity, logical invariants) but it is not wired into CI. Add: CTest unit tests for pure logic (JSON round-trip, group expansion, formatter width math, PSNR/parity math), `cargo clippy`/`fmt` in CI, clang-tidy, and a GPU CI job (self-hosted) running the existing `check-parity` CMake target — the parity gate exists but **CI never runs it** (CI runners are GPU-less; smoke tests use `|| true`).
 3. **Composite score / index** across the suite for quick comparisons (the planned leaderboard in `TODO.md` depends on it).
 4. **CSV export** (JSON exists; CSV is the sysadmin default).

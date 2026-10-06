@@ -44,19 +44,11 @@ jobs:
             libwayland-dev \
             libxkbcommon-dev
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo workspace
-        uses: Swatinem/rust-cache@v2
-
       - name: Configure CMake
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
-        run: |
-          cmake --build build --config Release --parallel
-          cargo build --workspace --release
+        run: cmake --build build --config Release --parallel
 
       - name: Package RPM & Run Dry-Run Verification
         run: |
@@ -83,16 +75,8 @@ jobs:
           echo "VULKAN_SDK=C:\VulkanSDK" >> $env:GITHUB_ENV
           echo "C:\VulkanSDK\Bin" >> $env:GITHUB_PATH
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo workspace
-        uses: Swatinem/rust-cache@v2
-
       - name: Configure CMake
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
-        run: |
-          cmake --build build --config Release
-          cargo build --workspace --release
+        run: cmake --build build --config Release
