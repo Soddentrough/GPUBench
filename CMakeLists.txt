@@ -590,6 +590,15 @@ if(UNIX AND NOT APPLE)
                 FILES_MATCHING PATTERN "*.glb")
     endif()
 
+    # GUI tooltip visualization thumbnails (400x225 pipeline previews).
+    # Resolved at runtime via VulkanContext::loadTextureFromFile's
+    # /usr/share/gpubench/<path> candidate, so keep the assets/ prefix.
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets/thumbnails")
+        install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/assets/thumbnails/"
+                DESTINATION share/gpubench/assets/thumbnails
+                FILES_MATCHING PATTERN "*.png")
+    endif()
+
 endif()
 
 # CPack configuration for creating packages

@@ -930,6 +930,774 @@ void GuiApp::initializeBenchmarkCategories() {
 
         m_categories.push_back(cat);
     }
+
+    applyVisualizationMetadata();
+}
+
+void GuiApp::applyVisualizationMetadata() {
+    // Declarative mapping of graphics-pipeline workloads to tooltip visualizations.
+    // Keyed by (engineId, configIndex) to keep the category initializer lists above
+    // untouched. Scene-relative assets use the "{scene}" token, resolved at render
+    // time against the currently selected benchmark scene (showroom fallback).
+    struct VizEntry {
+        const char* engineId;
+        int configIndex;
+        BenchmarkVisualization viz;
+    };
+
+    const VizEntry entries[] = {
+        // ---- RayASBuild: BLAS build/update (0-4), TLAS construction (5-7) ----
+        {"RayASBuild", 0, {"assets/thumbnails/thumb_blas_wireframe.png", "",
+            "Vehicle mesh enclosed by hierarchical AABBs - the geometry staged into the bottom-level structure", 16.0f/9.0f, 3, 0}},
+        {"RayASBuild", 1, {"assets/thumbnails/thumb_blas_wireframe.png", "",
+            "Incremental BLAS update: only moved geometry is re-inserted, sibling nodes are re-bounded in place", 16.0f/9.0f, 3, 0}},
+        {"RayASBuild", 2, {"assets/thumbnails/thumb_blas_wireframe.png", "",
+            "5M-triangle build: deeper tree levels, wider nodes, higher memory-bandwidth pressure during sorting", 16.0f/9.0f, 3, 0}},
+        {"RayASBuild", 3, {"assets/thumbnails/thumb_blas_wireframe.png", "",
+            "Dynamic update of complex geometry: per-instance transforms are refreshed without a full rebuild", 16.0f/9.0f, 3, 0}},
+        {"RayASBuild", 4, {"assets/thumbnails/thumb_blas_wireframe.png", "",
+            "10M-triangle build: stresses triangle sorting, node packing, and BVH memory allocation at scale", 16.0f/9.0f, 3, 0}},
+        {"RayASBuild", 5, {"", "tlas_hierarchy",
+            "Top-level structure: one TLAS node per instance (20K here), each referencing a pre-built BLAS", 16.0f/9.0f, 3, 2}},
+        {"RayASBuild", 6, {"", "tlas_hierarchy",
+            "50K instanced objects: TLAS build cost grows with instance count, not triangle count", 16.0f/9.0f, 3, 2}},
+        {"RayASBuild", 7, {"", "tlas_hierarchy",
+            "200K instances: massive open-world hierarchy; traversal starts here before descending into BLAS", 16.0f/9.0f, 3, 2}},
+
+        // ---- RayScheduling: material shading (0-2) ----
+        {"RayScheduling", 0, {"assets/thumbnails/thumb_material_lineup.png", "",
+            "Five BSDF archetypes (car paint, subsurface, velvet, glass, rust) shaded per hit", 16.0f/9.0f, 2, 0}},
+        {"RayScheduling", 1, {"assets/thumbnails/thumb_material_lineup.png", "",
+            "Closest-hit shaders reordered by hardware SER into uniform material bins, removing wavefront divergence", 16.0f/9.0f, 2, 0}},
+        {"RayScheduling", 2, {"assets/thumbnails/thumb_material_lineup.png", "",
+            "DGC sorts hits into material-coherent work queues before shading dispatch", 16.0f/9.0f, 2, 0}},
+
+        // ---- RayScheduling: path tracing (3-5: 1 SPP, 23-24: 16 SPP) ----
+        {"RayScheduling", 3, {"assets/thumbnails/thumb_{scene}_stage6_indirect.png", "",
+            "Multi-bounce diffuse indirect light: each bounce re-enters the BVH with incoherent directions", 16.0f/9.0f, 1, 5}},
+        {"RayScheduling", 4, {"assets/thumbnails/thumb_{scene}_stage6_indirect.png", "",
+            "Secondary bounces traced on hardware ray cores with hardware reordering of incoherent rays", 16.0f/9.0f, 1, 5}},
+        {"RayScheduling", 5, {"assets/thumbnails/thumb_{scene}_stage6_indirect.png", "",
+            "Bounce rays grouped into GPU work queues; terminated rays compacted out each iteration", 16.0f/9.0f, 1, 5}},
+        {"RayScheduling", 23, {"assets/thumbnails/thumb_{scene}_stage6_indirect.png", "",
+            "16 samples per pixel: 16x the bounce rays of 1 SPP, converging the noisy indirect estimate", 16.0f/9.0f, 1, 5}},
+        {"RayScheduling", 24, {"assets/thumbnails/thumb_{scene}_stage6_indirect.png", "",
+            "16 SPP with DGC: per-sample work queues keep cores saturated across the extra bounces", 16.0f/9.0f, 1, 5}},
+
+        // ---- RayScheduling: incoherent GI (6-8) ----
+        {"RayScheduling", 6, {"", "cone_divergence_90",
+            "Diffuse bounce rays scatter across the full hemisphere - worst-case SIMD divergence", 16.0f/9.0f, 1, 5}},
+        {"RayScheduling", 7, {"", "cone_divergence_90",
+            "Hardware SER re-bins scattered rays so each wavefront traverses coherently", 16.0f/9.0f, 1, 5}},
+        {"RayScheduling", 8, {"", "cone_divergence_90",
+            "DGC compacts scattered rays into direction-coherent queues for the next dispatch", 16.0f/9.0f, 1, 5}},
+
+        // ---- RayScheduling: full frame (9-11) ----
+        {"RayScheduling", 9, {"assets/thumbnails/thumb_{scene}_stage7_final.png", "",
+            "Complete beauty pass: primary rays + shadows + RTAO + direct PBR + indirect GI in one pipeline", 16.0f/9.0f, 1, 6}},
+        {"RayScheduling", 10, {"assets/thumbnails/thumb_{scene}_stage7_final.png", "",
+            "Full frame on hardware ray tracing with SER reordering across every stage", 16.0f/9.0f, 1, 6}},
+        {"RayScheduling", 11, {"assets/thumbnails/thumb_{scene}_stage7_final.png", "",
+            "Full frame via GPU-driven command queues; each stage re-dispatches from compacted work", 16.0f/9.0f, 1, 6}},
+
+        // ---- RayScheduling: traversal ordering (12, 14-16) ----
+        {"RayScheduling", 12, {"", "traversal_scanline",
+            "Row-by-row dispatch: baseline order, long strides between consecutive rays", 16.0f/9.0f, 1, 0}},
+        {"RayScheduling", 14, {"", "traversal_tiled_8x4",
+            "8x4 pixel tiles dispatched together: short strides keep BVH nodes cache-hot", 16.0f/9.0f, 1, 0}},
+        {"RayScheduling", 15, {"", "traversal_morton_8x4",
+            "Tiles visited along a Morton Z-curve: spatial locality preserved across tile boundaries", 16.0f/9.0f, 1, 0}},
+        {"RayScheduling", 16, {"", "traversal_morton_4x8",
+            "Tall 4x8 tiles on a Z-curve: probes the hardware's directional cache preference", 16.0f/9.0f, 1, 0}},
+
+        // ---- RayScheduling: wavefront compaction (13, 26, 28) ----
+        {"RayScheduling", 13, {"", "wave_ballot_compaction",
+            "Wave-wide vote marks terminated rays; surviving lanes are packed into a dense queue", 16.0f/9.0f, -1, 0}},
+        {"RayScheduling", 26, {"", "wave_ballot_compaction",
+            "Single-pass removal of dead rays from the active stream in one GPU traversal", 16.0f/9.0f, -1, 0}},
+        {"RayScheduling", 28, {"", "wave_ballot_compaction",
+            "Peak pack rate: sorting and writing compacted ray records for the next dispatch", 16.0f/9.0f, -1, 0}},
+
+        // ---- RayScheduling: primary rays (17, 18, 29, 30) ----
+        {"RayScheduling", 17, {"assets/thumbnails/thumb_{scene}_stage2_primary.png", "",
+            "Primary camera ray hits rendered as world-space G-Buffer normals", 16.0f/9.0f, 1, 1}},
+        {"RayScheduling", 18, {"assets/thumbnails/thumb_{scene}_stage2_primary.png", "",
+            "Primary rays issued from GPU work queues instead of a fixed pixel grid", 16.0f/9.0f, 1, 1}},
+        {"RayScheduling", 29, {"assets/thumbnails/thumb_{scene}_stage2_primary.png", "",
+            "Primary rays on dedicated hardware ray-query pipelines", 16.0f/9.0f, 1, 1}},
+        {"RayScheduling", 30, {"assets/thumbnails/thumb_{scene}_stage2_primary.png", "",
+            "Hardware ray reordering groups similar primary rays before traversal", 16.0f/9.0f, 1, 1}},
+
+        // ---- RayScheduling: directional shadows (19-22) ----
+        {"RayScheduling", 19, {"assets/thumbnails/thumb_{scene}_stage3_shadow.png", "",
+            "Per-pixel visibility rays toward the sun produce this binary shadow mask", 16.0f/9.0f, 1, 2}},
+        {"RayScheduling", 20, {"assets/thumbnails/thumb_{scene}_stage3_shadow.png", "",
+            "Shadow rays on hardware pipelines with early termination at first hit", 16.0f/9.0f, 1, 2}},
+        {"RayScheduling", 21, {"assets/thumbnails/thumb_{scene}_stage3_shadow.png", "",
+            "Shadow rays batched through GPU work queues", 16.0f/9.0f, 1, 2}},
+        {"RayScheduling", 22, {"assets/thumbnails/thumb_{scene}_stage3_shadow.png", "",
+            "3x the shadow rays: one visibility pass per light, batched by DGC light binning", 16.0f/9.0f, 1, 2}},
+
+        // ---- RayScheduling: alpha cutout divergence (27) ----
+        {"RayScheduling", 27, {"assets/thumbnails/thumb_alpha_layers.png", "",
+            "Foliage layers fail the alpha test and force traversal to continue - any-hit re-entry stress", 16.0f/9.0f, 3, 1}},
+
+        // ---- RayScheduling: multi-light evaluation (31-34) ----
+        {"RayScheduling", 31, {"assets/thumbnails/thumb_{scene}_stage5_direct.png", "",
+            "Direct PBR shading under one light: GGX specular + Lambert diffuse per hit", 16.0f/9.0f, 1, 4}},
+        {"RayScheduling", 32, {"assets/thumbnails/thumb_{scene}_stage5_direct.png", "",
+            "Single-light shading with DGC-batched hits", 16.0f/9.0f, 1, 4}},
+        {"RayScheduling", 33, {"assets/thumbnails/thumb_{scene}_multilight_128_dgc.png", "",
+            "128 lights evaluated per hit in one pass: shading ALU throughput becomes the bottleneck", 16.0f/9.0f, 1, 4}},
+        {"RayScheduling", 34, {"assets/thumbnails/thumb_{scene}_multilight_128_dgc.png", "",
+            "128 lights grouped into coherent DGC bins so each wavefront shades similar lights", 16.0f/9.0f, 1, 4}},
+
+        // ---- RayRawTraversal: coherent triangles (0), deep boxes (1) ----
+        {"RayRawTraversal", 0, {"assets/thumbnails/thumb_{scene}_stage1_bvh.png", "",
+            "BVH traversal cost per pixel: blue = shallow, red = deep box/triangle test counts", 16.0f/9.0f, 1, 0}},
+        {"RayRawTraversal", 1, {"", "bvh_nested_boxes",
+            "Deeply nested AABBs: every level forces an extra ray-box test before reaching geometry", 16.0f/9.0f, 1, 0}},
+
+        // ---- RayIntersect: ray-triangle (0), ray-box (1) ----
+        {"RayIntersect", 0, {"", "intersect_ray_triangle",
+            "Moller-Trumbore ray-triangle test: the innermost intersection primitive", 16.0f/9.0f, -1, 0}},
+        {"RayIntersect", 1, {"", "intersect_ray_box",
+            "AABB slab test: the fast rejection primitive executed at every BVH node", 16.0f/9.0f, -1, 0}},
+
+        // ---- RayAnyHit: 100% solid (0), 50% cutout (1) ----
+        {"RayAnyHit", 0, {"assets/thumbnails/thumb_alpha_layers.png", "",
+            "Baseline: every hit is opaque, any-hit shader exits immediately", 16.0f/9.0f, 3, 1}},
+        {"RayAnyHit", 1, {"assets/thumbnails/thumb_alpha_layers.png", "",
+            "50% of hits fail the alpha test; traversal re-enters the BVH until an opaque surface is found", 16.0f/9.0f, 3, 1}},
+
+        // ---- RayProcedural: AABB spheres (0) ----
+        {"RayProcedural", 0, {"", "procedural_sphere",
+            "Analytic sphere intersection: no triangle fetch, no barycentrics - pure ALU math", 16.0f/9.0f, -1, 0}},
+
+        // ---- RayDivergence: 90 (0), 67.5 (1), 45 (2), 22.5 (3), 0 (4) ----
+        {"RayDivergence", 0, {"", "cone_divergence_90",
+            "Full hemisphere scatter (diffuse): rays in one wavefront hit unrelated BVH branches", 16.0f/9.0f, -1, 0}},
+        {"RayDivergence", 1, {"", "cone_divergence_67.5",
+            "Wide 67.5-degree cone: rough specular surfaces, heavy but bounded divergence", 16.0f/9.0f, -1, 0}},
+        {"RayDivergence", 2, {"", "cone_divergence_45",
+            "45-degree cone: semi-glossy surfaces, moderate cache locality", 16.0f/9.0f, -1, 0}},
+        {"RayDivergence", 3, {"", "cone_divergence_22.5",
+            "22.5-degree cone: glossy surfaces, rays stay close to the reflection direction", 16.0f/9.0f, -1, 0}},
+        {"RayDivergence", 4, {"", "cone_divergence_0",
+            "Perfectly parallel beam (mirror): peak traversal throughput, zero divergence", 16.0f/9.0f, -1, 0}},
+
+        // ---- Pixel Fill Rate: RGBA8 (0), RGBA16F (1), Alpha blend (2) ----
+        {"Pixel Fill Rate", 0, {"", "rop_fill_rgba8",
+            "32-bit color fill: one pixel per ROP clock, pure rasterizer throughput", 16.0f/9.0f, -1, 0}},
+        {"Pixel Fill Rate", 1, {"", "rop_fill_hdr",
+            "64-bit RGBA16F HDR fill: 2x the color bandwidth of RGBA8 per pixel", 16.0f/9.0f, -1, 0}},
+        {"Pixel Fill Rate", 2, {"", "rop_fill_blend",
+            "Alpha blending: read-modify-write per overlapping pixel stresses the blend stage", 16.0f/9.0f, -1, 0}},
+    };
+
+    int matched = 0;
+    for (const auto& e : entries) {
+        bool found = false;
+        for (auto& cat : m_categories) {
+            for (auto& sub : cat.subgroups) {
+                for (auto& item : sub.items) {
+                    if (item.id == e.engineId && item.configIndex == e.configIndex) {
+                        item.viz = e.viz;
+                        found = true;
+                    }
+                }
+            }
+        }
+        if (found) matched++;
+        else std::cerr << "[GPUBench GUI] WARNING: viz entry unmatched: "
+                      << e.engineId << " config " << e.configIndex << "\n";
+    }
+    std::cout << "[GPUBench GUI] Tooltip visualizations: " << matched << "/"
+              << sizeof(entries) / sizeof(entries[0]) << " workloads mapped\n";
+}
+
+std::string GuiApp::currentSceneTag() const {
+    // m_scene is either "all" (run every scene) or a specific scene tag.
+    // Tooltips show one representative capture; showroom is the canonical model.
+    if (m_scene == "indoor" || m_scene == "forest" || m_scene == "outdoor") return m_scene;
+    return "showroom";
+}
+
+void GuiApp::renderBenchmarkTooltip(const BenchmarkItem& item) {
+    ImGui::BeginTooltip();
+
+    // 1. Header & badges
+    ImGui::TextColored(ImVec4(0.40f, 0.80f, 1.00f, 1.0f), "%s", item.name.c_str());
+    ImGui::TextDisabled("Subcategory: %s | Metric: %s", item.subcategory.c_str(), item.metricType.c_str());
+    ImGui::Separator();
+
+    // 2. Textual explanation
+    ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + s(380.0f));
+    ImGui::TextUnformatted(item.description.c_str());
+    ImGui::PopTextWrapPos();
+
+    // 3. Visualization canvas (Tier 1 texture or Tier 2 procedural diagram)
+    if (item.viz.hasVisualization()) {
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        float canvasWidth = s(340.0f);
+        float ar = item.viz.aspectRatio > 0.001f ? item.viz.aspectRatio : (16.0f / 9.0f);
+        float canvasHeight = canvasWidth / ar;
+
+        ImVec2 p0 = ImGui::GetCursorScreenPos();
+        ImVec2 p1 = ImVec2(p0.x + canvasWidth, p0.y + canvasHeight);
+        ImDrawList* drawList = ImGui::GetWindowDrawList();
+
+        drawList->AddRectFilled(p0, p1, IM_COL32(12, 14, 20, 255), s(4.0f));
+
+        if (!item.viz.assetPath.empty()) {
+            // Tier 1: static pre-baked thumbnail, lazily loaded & cached
+            std::string assetPath = item.viz.assetPath;
+            std::string scene = currentSceneTag();
+            size_t pos;
+            while ((pos = assetPath.find("{scene}")) != std::string::npos) {
+                assetPath.replace(pos, 7, scene);
+            }
+            auto tex = getOrLoadTexture(assetPath);
+            if (tex.isValid()) {
+                // Letterbox the image inside the canvas preserving its aspect
+                float tar = (tex.height > 0) ? (static_cast<float>(tex.width) / tex.height) : ar;
+                float imgW = canvasWidth;
+                float imgH = canvasWidth / tar;
+                if (imgH > canvasHeight) {
+                    imgH = canvasHeight;
+                    imgW = canvasHeight * tar;
+                }
+                ImVec2 ip0 = ImVec2(p0.x + (canvasWidth - imgW) * 0.5f, p0.y + (canvasHeight - imgH) * 0.5f);
+                ImVec2 ip1 = ImVec2(ip0.x + imgW, ip0.y + imgH);
+                drawList->AddImage(reinterpret_cast<ImTextureID>(tex.descriptorSet), ip0, ip1);
+            } else {
+                std::string fallback = "Preview unavailable: " + item.viz.caption;
+                ImVec2 tsz = ImGui::CalcTextSize(fallback.c_str());
+                drawList->AddText(ImVec2(p0.x + (canvasWidth - tsz.x) * 0.5f, p0.y + (canvasHeight - tsz.y) * 0.5f),
+                                  IM_COL32(160, 170, 190, 255), fallback.c_str());
+            }
+        } else {
+            // Tier 2: procedural vector schematic (crisp at any UI scale)
+            renderProceduralDiagram(item.viz.diagramId, p0, p1);
+        }
+
+        drawList->AddRect(p0, p1, IM_COL32(50, 60, 80, 255), s(4.0f));
+        ImGui::Dummy(ImVec2(canvasWidth, canvasHeight));
+
+        // Caption & legend
+        if (!item.viz.caption.empty()) {
+            ImGui::Spacing();
+            ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + canvasWidth);
+            ImGui::TextColored(ImVec4(0.85f, 0.75f, 0.35f, 1.0f), "%s", item.viz.caption.c_str());
+            ImGui::PopTextWrapPos();
+        }
+
+        // Cross-link to the full Ray Tracing Viewport
+        if (item.viz.linkedViewportMode >= 0) {
+            ImGui::Spacing();
+            if (ImGui::SmallButton("Open in Ray Tracing Viewport  ->")) {
+                m_rtViewportMode = item.viz.linkedViewportMode;
+                if (item.viz.linkedViewportMode == 1) m_rtPassIndex = item.viz.linkedViewportSubIndex;
+                else if (item.viz.linkedViewportMode == 2) m_rtMaterialIndex = item.viz.linkedViewportSubIndex;
+                else if (item.viz.linkedViewportMode == 3) m_rtGeometryIndex = item.viz.linkedViewportSubIndex;
+                m_switchToRtViewport = true;
+            }
+        }
+    }
+
+    ImGui::EndTooltip();
+}
+
+void GuiApp::renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, ImVec2 p1) const {
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+
+    // ImVec2 math helpers (project does not define IMGUI_DEFINE_MATH_OPERATORS)
+    auto add = [](const ImVec2& a, const ImVec2& b) { return ImVec2(a.x + b.x, a.y + b.y); };
+    auto sub = [](const ImVec2& a, const ImVec2& b) { return ImVec2(a.x - b.x, a.y - b.y); };
+    auto mul = [](const ImVec2& a, float s) { return ImVec2(a.x * s, a.y * s); };
+
+    // Shared palette
+    const ImU32 colGrid  = IM_COL32(35, 45, 60, 180);
+    const ImU32 colPath  = IM_COL32(0, 220, 180, 230);
+    const ImU32 colAmber = IM_COL32(255, 190, 60, 230);
+    const ImU32 colHot   = IM_COL32(255, 100, 80, 230);
+    const ImU32 colCool  = IM_COL32(80, 180, 255, 230);
+    const ImU32 colText  = IM_COL32(200, 210, 230, 255);
+    const ImU32 colDim   = IM_COL32(140, 150, 170, 255);
+    const ImU32 colGreen = IM_COL32(90, 220, 120, 230);
+
+    float pad = s(12.0f);
+    auto drawTitle = [&](const char* title) {
+        dl->AddText(ImVec2(p0.x + pad, p0.y + s(6.0f)), colText, title);
+    };
+    ImVec2 area = ImVec2(p0.x + pad, p0.y + s(30.0f));
+    ImVec2 areaEnd = ImVec2(p1.x - pad, p1.y - pad - s(16.0f));
+    float gw = areaEnd.x - area.x;
+    float gh = areaEnd.y - area.y;
+    auto drawFootnote = [&](const char* text) {
+        dl->AddText(ImVec2(p0.x + pad, p1.y - s(12.0f)), colDim, text);
+    };
+
+    // ------------------------------------------------------------------
+    // Ray directional divergence cone (cone_divergence_<deg>)
+    // ------------------------------------------------------------------
+    if (diagramId.rfind("cone_divergence_", 0) == 0) {
+        float angle = 0.0f;
+        try { angle = std::stof(diagramId.substr(16)); } catch (...) {}
+        drawTitle(angle == 0.0f ? "Ray Divergence: 0 Beam (Coherent)" : "Ray Divergence Cone");
+
+        ImVec2 hit(area.x + gw * 0.5f, areaEnd.y - s(4.0f));
+        float surfHalf = gw * 0.42f;
+        dl->AddLine(ImVec2(hit.x - surfHalf, hit.y), ImVec2(hit.x + surfHalf, hit.y),
+                    IM_COL32(120, 130, 150, 255), 2.0f);
+
+        float normalLen = gh * 0.88f;
+        ImVec2 normalEnd(hit.x, hit.y - normalLen);
+        dl->AddLine(hit, normalEnd, colCool, 1.5f);
+        dl->AddText(ImVec2(normalEnd.x + s(4.0f), normalEnd.y), colCool, "N");
+
+        float rad = angle * 0.5f * (3.14159265f / 180.0f);
+        int nRays = (angle == 0.0f) ? 1 : 7;
+        ImU32 rayCol = (angle > 60.0f) ? colHot : ((angle > 30.0f) ? colAmber : colCool);
+        for (int i = 0; i < nRays; ++i) {
+            float t = (nRays > 1) ? (static_cast<float>(i) / (nRays - 1) * 2.0f - 1.0f) : 0.0f;
+            float a = t * rad;
+            float len = normalLen * 0.92f;
+            ImVec2 end(hit.x + std::sin(a) * len, hit.y - std::cos(a) * len);
+            dl->AddLine(hit, end, rayCol, 1.5f);
+            dl->AddCircleFilled(end, s(2.0f), rayCol);
+        }
+
+        if (angle > 0.0f) {
+            float arcR = normalLen * 0.38f;
+            float a0 = -3.14159265f / 2.0f - rad;
+            float a1 = -3.14159265f / 2.0f + rad;
+            dl->PathArcTo(hit, arcR, a0, a1, 24);
+            dl->PathStroke(colAmber, 1.2f);
+        }
+
+        char buf[48];
+        snprintf(buf, sizeof(buf), "Cone: %.1f deg", angle);
+        dl->AddText(ImVec2(area.x, area.y), colAmber, buf);
+        const char* sub = (angle == 0.0f) ? "mirror - peak throughput" :
+                          (angle <= 22.5f) ? "glossy surface" :
+                          (angle <= 45.0f) ? "semi-glossy surface" :
+                          (angle <= 67.5f) ? "rough surface" : "diffuse - max divergence";
+        dl->AddText(ImVec2(area.x, area.y + s(16.0f)), colDim, sub);
+        return;
+    }
+
+    // ------------------------------------------------------------------
+    // Traversal ordering: pixel-level scanline vs 8x4 tiled (16x8 grid)
+    // ------------------------------------------------------------------
+    if (diagramId == "traversal_scanline" || diagramId == "traversal_tiled_8x4") {
+        bool tiled = (diagramId == "traversal_tiled_8x4");
+        drawTitle(tiled ? "Traversal: 2D Screen Tiled (8x4)" : "Traversal: Linear 1D Scanline");
+
+        const int cols = 16, rows = 8;
+        float cw = gw / cols, ch = gh / rows;
+        for (int r = 0; r < rows; ++r) {
+            for (int c = 0; c < cols; ++c) {
+                ImVec2 c0(area.x + c * cw, area.y + r * ch);
+                ImVec2 c1(c0.x + cw, c0.y + ch);
+                dl->AddRect(c0, c1, colGrid);
+            }
+        }
+
+        std::vector<ImVec2> centers;
+        centers.reserve(cols * rows);
+        if (!tiled) {
+            for (int r = 0; r < rows; ++r)
+                for (int c = 0; c < cols; ++c)
+                    centers.push_back(ImVec2(area.x + (c + 0.5f) * cw, area.y + (r + 0.5f) * ch));
+        } else {
+            const int tc = 8, tr = 4;
+            for (int tr0 = 0; tr0 < rows; tr0 += tr)
+                for (int tc0 = 0; tc0 < cols; tc0 += tc)
+                    for (int r = 0; r < tr; ++r)
+                        for (int c = 0; c < tc; ++c)
+                            centers.push_back(ImVec2(area.x + (tc0 + c + 0.5f) * cw, area.y + (tr0 + r + 0.5f) * ch));
+            for (int tr0 = 0; tr0 < rows; tr0 += tr)
+                for (int tc0 = 0; tc0 < cols; tc0 += tc) {
+                    ImVec2 t0(area.x + tc0 * cw, area.y + tr0 * ch);
+                    ImVec2 t1(area.x + (tc0 + tc) * cw, area.y + (tr0 + tr) * ch);
+                    dl->AddRect(t0, t1, colAmber, 2.0f);
+                }
+        }
+
+        for (size_t i = 1; i < centers.size(); ++i) {
+            dl->AddLine(centers[i - 1], centers[i], colPath, 1.2f);
+        }
+        dl->AddCircleFilled(centers.front(), s(3.0f), colGreen);
+        dl->AddCircleFilled(centers.back(), s(3.0f), colHot);
+        drawFootnote(tiled ? "wrap at tile edge keeps 8x4 ray groups cache-coherent"
+                           : "consecutive rays stride the full row width");
+        return;
+    }
+
+    // ------------------------------------------------------------------
+    // Traversal ordering: Morton Z-curve over a 4x4 tile grid
+    // ------------------------------------------------------------------
+    if (diagramId == "traversal_morton_8x4" || diagramId == "traversal_morton_4x8") {
+        bool wide = (diagramId == "traversal_morton_8x4");
+        drawTitle(wide ? "Traversal: 2D Morton Z-Order (8x4)" : "Traversal: 2D Morton Z-Order (4x8)");
+
+        const int n = 4;
+        float cw = gw / n, ch = gh / n;
+
+        auto morton2D = [](uint32_t x, uint32_t y) -> uint32_t {
+            auto part1by1 = [](uint32_t v) -> uint32_t {
+                v &= 0x0000ffff;
+                v = (v | (v << 8)) & 0x00FF00FF;
+                v = (v | (v << 4)) & 0x0F0F0F0F;
+                v = (v | (v << 2)) & 0x33333333;
+                v = (v | (v << 1)) & 0x55555555;
+                return v;
+            };
+            return (part1by1(y) << 1) | part1by1(x);
+        };
+
+        std::vector<std::pair<uint32_t, ImVec2>> tiles;
+        tiles.reserve(n * n);
+        for (int r = 0; r < n; ++r)
+            for (int c = 0; c < n; ++c)
+                tiles.push_back({morton2D(static_cast<uint32_t>(c), static_cast<uint32_t>(r)),
+                                 ImVec2(area.x + (c + 0.5f) * cw, area.y + (r + 0.5f) * ch)});
+        std::sort(tiles.begin(), tiles.end(),
+                  [](const auto& a, const auto& b) { return a.first < b.first; });
+
+        for (int r = 0; r < n; ++r) {
+            for (int c = 0; c < n; ++c) {
+                ImVec2 t0(area.x + c * cw, area.y + r * ch);
+                ImVec2 t1(t0.x + cw, t0.y + ch);
+                dl->AddRect(t0, t1, colGrid);
+                // Mini-raster suggesting the intra-tile pixel order
+                if (wide) {
+                    for (int i = 1; i <= 3; ++i)
+                        dl->AddLine(ImVec2(t0.x + s(3.0f), t0.y + ch * i / 4.0f),
+                                    ImVec2(t1.x - s(3.0f), t0.y + ch * i / 4.0f),
+                                    IM_COL32(60, 75, 95, 200), 1.0f);
+                } else {
+                    for (int i = 1; i <= 3; ++i)
+                        dl->AddLine(ImVec2(t0.x + cw * i / 4.0f, t0.y + s(3.0f)),
+                                    ImVec2(t0.x + cw * i / 4.0f, t1.y - s(3.0f)),
+                                    IM_COL32(60, 75, 95, 200), 1.0f);
+                }
+            }
+        }
+
+        for (size_t i = 1; i < tiles.size(); ++i) {
+            dl->AddLine(tiles[i - 1].second, tiles[i].second, colPath, 1.5f);
+        }
+        for (size_t i = 0; i < tiles.size(); ++i) {
+            ImU32 dotCol = (i == 0) ? colGreen : ((i == tiles.size() - 1) ? colHot : colPath);
+            dl->AddCircleFilled(tiles[i].second, s(2.5f), dotCol);
+            if (i < 4 || i >= tiles.size() - 2) {
+                char b[16];
+                snprintf(b, sizeof(b), "%u", static_cast<unsigned>(i));
+                ImVec2 tsz = ImGui::CalcTextSize(b);
+                dl->AddText(ImVec2(tiles[i].second.x + s(4.0f), tiles[i].second.y - tsz.y - s(2.0f)), colDim, b);
+            }
+        }
+        drawFootnote("tiles visited along the Z-curve: locality across boundaries");
+        return;
+    }
+
+    // ------------------------------------------------------------------
+    // Wavefront stream compaction via ballot
+    // ------------------------------------------------------------------
+    if (diagramId == "wave_ballot_compaction") {
+        drawTitle("Wave Ballot Stream Compaction");
+
+        const int lanes = 32;
+        static const bool active[32] = {
+            1,1,1,0, 1,1,0,0, 1,1,1,1, 0,0,1,0,
+            1,1,0,0, 1,1,1,0, 0,0,1,0, 0,0,1,1
+        };
+        float labelW = s(84.0f);
+        float barX = area.x + labelW;
+        float barW = areaEnd.x - barX;
+        float lw = barW / lanes;
+        float laneH = s(14.0f);
+        float rowGap = s(24.0f);
+
+        // Row 1: wavefront lanes
+        dl->AddText(ImVec2(area.x, area.y), colDim, "wavefront");
+        for (int i = 0; i < lanes; ++i) {
+            ImVec2 l0(barX + i * lw + s(1.0f), area.y - s(2.0f));
+            ImVec2 l1(l0.x + lw - s(2.0f), l0.y + laneH);
+            if (active[i]) {
+                dl->AddRectFilled(l0, l1, IM_COL32(60, 140, 80, 255), s(2.0f));
+                dl->AddRect(l0, l1, colGreen);
+            } else {
+                dl->AddRectFilled(l0, l1, IM_COL32(70, 40, 40, 255), s(2.0f));
+                dl->AddRect(l0, l1, IM_COL32(150, 70, 60, 200));
+            }
+        }
+
+        // Row 2: ballot mask
+        char mask[33];
+        for (int i = 0; i < lanes; ++i) mask[i] = active[i] ? '1' : '0';
+        mask[32] = 0;
+        float y2 = area.y + rowGap;
+        dl->AddText(ImVec2(area.x, y2), colDim, "ballot mask");
+        dl->AddText(ImVec2(barX, y2), colAmber, mask);
+
+        // Row 3: compacted queue
+        float y3 = y2 + rowGap;
+        dl->AddText(ImVec2(area.x, y3), colDim, "compacted");
+        int k = 0;
+        for (int i = 0; i < lanes; ++i) {
+            ImVec2 l0(barX + i * lw + s(1.0f), y3 - s(2.0f));
+            ImVec2 l1(l0.x + lw - s(2.0f), l0.y + laneH);
+            if (active[i]) {
+                dl->AddRectFilled(l0, l1, IM_COL32(60, 140, 80, 255), s(2.0f));
+                dl->AddRect(l0, l1, colGreen);
+                ++k;
+            } else {
+                dl->AddRect(l0, l1, IM_COL32(40, 48, 60, 120));
+            }
+        }
+
+        char b[64];
+        snprintf(b, sizeof(b), "%d active lanes repacked for the next dispatch", k);
+        drawFootnote(b);
+        return;
+    }
+
+    // ------------------------------------------------------------------
+    // TLAS instance hierarchy
+    // ------------------------------------------------------------------
+    if (diagramId == "tlas_hierarchy") {
+        drawTitle("TLAS Instance Hierarchy");
+
+        auto drawNode = [&](ImVec2 c, float nw, float nh, const char* label, ImU32 fill, ImU32 border) {
+            ImVec2 n0(c.x - nw * 0.5f, c.y - nh * 0.5f);
+            ImVec2 n1(c.x + nw * 0.5f, c.y + nh * 0.5f);
+            dl->AddRectFilled(n0, n1, fill, s(3.0f));
+            dl->AddRect(n0, n1, border, s(3.0f));
+            ImVec2 tsz = ImGui::CalcTextSize(label);
+            dl->AddText(ImVec2(c.x - tsz.x * 0.5f, c.y - tsz.y * 0.5f), colText, label);
+        };
+
+        ImVec2 rootC(area.x + gw * 0.5f, area.y + s(10.0f));
+        drawNode(rootC, s(92.0f), s(20.0f), "TLAS Root", IM_COL32(30, 50, 80, 255), colCool);
+
+        ImVec2 mid[3];
+        for (int i = 0; i < 3; ++i) {
+            mid[i] = ImVec2(area.x + gw * (0.2f + 0.3f * i), area.y + gh * 0.45f);
+            dl->AddLine(rootC, mid[i], IM_COL32(90, 110, 140, 200), 1.5f);
+            drawNode(mid[i], s(64.0f), s(18.0f), "Node", IM_COL32(28, 45, 70, 255), IM_COL32(80, 120, 170, 255));
+        }
+
+        int bi = 0;
+        for (int i = 0; i < 3; ++i) {
+            for (int j = 0; j < 2; ++j) {
+                ImVec2 leaf(mid[i].x + (j == 0 ? -1 : 1) * gw * 0.085f, area.y + gh * 0.85f);
+                dl->AddLine(mid[i], leaf, IM_COL32(90, 110, 140, 160), 1.2f);
+                char b[16];
+                snprintf(b, sizeof(b), "BLAS %d", bi++);
+                drawNode(leaf, s(56.0f), s(16.0f), b, IM_COL32(25, 40, 55, 255), IM_COL32(70, 100, 130, 255));
+            }
+        }
+        drawFootnote("one TLAS node per instance -> each references a pre-built BLAS");
+        return;
+    }
+
+    // ------------------------------------------------------------------
+    // Ray-triangle intersection (Moller-Trumbore)
+    // ------------------------------------------------------------------
+    if (diagramId == "intersect_ray_triangle") {
+        drawTitle("Ray-Triangle (Moller-Trumbore)");
+
+        ImVec2 A(area.x + gw * 0.30f, area.y + gh * 0.15f);
+        ImVec2 B(area.x + gw * 0.88f, area.y + gh * 0.72f);
+        ImVec2 C(area.x + gw * 0.12f, area.y + gh * 0.88f);
+        dl->AddLine(A, B, colCool, 1.5f);
+        dl->AddLine(B, C, colCool, 1.5f);
+        dl->AddLine(C, A, colCool, 1.5f);
+
+        // Hit point via barycentric combination
+        ImVec2 H(A.x * 0.35f + B.x * 0.45f + C.x * 0.20f, A.y * 0.35f + B.y * 0.45f + C.y * 0.20f);
+
+        ImVec2 rayStart(area.x + gw * 0.02f, area.y + gh * 0.02f);
+        ImVec2 rayDir = sub(H, rayStart);
+        ImVec2 rayEnd = add(rayStart, mul(rayDir, 1.35f));
+        dl->AddLine(rayStart, rayEnd, colAmber, 1.8f);
+
+        dl->AddLine(H, A, IM_COL32(140, 150, 170, 160), 1.0f);
+        dl->AddLine(H, B, IM_COL32(140, 150, 170, 160), 1.0f);
+        dl->AddLine(H, C, IM_COL32(140, 150, 170, 160), 1.0f);
+        dl->AddCircleFilled(H, s(3.0f), colHot);
+        dl->AddText(ImVec2(H.x + s(6.0f), H.y - s(16.0f)), colHot, "hit (t, u, v)");
+        drawFootnote("solves a 3x3 linear system; barycentrics select the triangle");
+        return;
+    }
+
+    // ------------------------------------------------------------------
+    // Ray-AABB slab test
+    // ------------------------------------------------------------------
+    if (diagramId == "intersect_ray_box") {
+        drawTitle("Ray-AABB (Slab Test)");
+
+        ImVec2 f0(area.x + gw * 0.30f, area.y + gh * 0.32f);
+        ImVec2 f1(area.x + gw * 0.72f, area.y + gh * 0.84f);
+        ImVec2 off(gw * 0.14f, -gh * 0.20f);
+        ImVec2 b0 = add(f0, off), b1 = add(f1, off);
+
+        // Back face + connecting edges
+        dl->AddLine(b0, b1, IM_COL32(70, 90, 120, 200), 1.2f);
+        dl->AddLine(ImVec2(b1.x, b0.y), b1, IM_COL32(70, 90, 120, 200), 1.2f);
+        dl->AddLine(b0, ImVec2(b0.x, b1.y), IM_COL32(70, 90, 120, 200), 1.2f);
+        dl->AddLine(f0, b0, IM_COL32(70, 90, 120, 200), 1.2f);
+        dl->AddLine(ImVec2(f1.x, f0.y), ImVec2(b1.x, b0.y), IM_COL32(70, 90, 120, 200), 1.2f);
+        dl->AddLine(f1, b1, IM_COL32(70, 90, 120, 200), 1.2f);
+        dl->AddLine(ImVec2(f0.x, f1.y), ImVec2(b0.x, b1.y), IM_COL32(70, 90, 120, 200), 1.2f);
+
+        // Front face
+        dl->AddLine(f0, ImVec2(f1.x, f0.y), colCool, 1.5f);
+        dl->AddLine(ImVec2(f1.x, f0.y), f1, colCool, 1.5f);
+        dl->AddLine(f1, ImVec2(f0.x, f1.y), colCool, 1.5f);
+        dl->AddLine(ImVec2(f0.x, f1.y), f0, colCool, 1.5f);
+
+        ImVec2 rayStart(area.x + gw * 0.04f, area.y + gh * 0.08f);
+        ImVec2 rayEnd(area.x + gw * 0.96f, area.y + gh * 0.96f);
+        dl->AddLine(rayStart, rayEnd, colAmber, 1.8f);
+
+        ImVec2 t0pt = add(rayStart, mul(sub(rayEnd, rayStart), 0.40f));
+        ImVec2 t1pt = add(rayStart, mul(sub(rayEnd, rayStart), 0.62f));
+        dl->AddCircleFilled(t0pt, s(3.0f), colGreen);
+        dl->AddCircleFilled(t1pt, s(3.0f), colHot);
+        dl->AddText(ImVec2(t0pt.x - s(38.0f), t0pt.y - s(18.0f)), colGreen, "t near");
+        dl->AddText(ImVec2(t1pt.x + s(6.0f), t1pt.y + s(2.0f)), colHot, "t far");
+        drawFootnote("6 slab comparisons; reject the box when t near > t far");
+        return;
+    }
+
+    // ------------------------------------------------------------------
+    // Procedural analytic sphere
+    // ------------------------------------------------------------------
+    if (diagramId == "procedural_sphere") {
+        drawTitle("Procedural: Analytic Sphere");
+
+        ImVec2 c(area.x + gw * 0.55f, area.y + gh * 0.50f);
+        float r = std::min(gw, gh) * 0.38f;
+        dl->AddCircleFilled(c, r, IM_COL32(25, 45, 70, 255));
+        dl->AddCircle(c, r, colCool, 1.5f);
+        dl->PathArcTo(c, r * 0.8f, -3.14159265f * 0.75f, -3.14159265f * 0.25f, 16);
+        dl->PathStroke(IM_COL32(120, 170, 220, 180), 1.5f);
+
+        ImVec2 rayStart(area.x + gw * 0.05f, area.y + gh * 0.10f);
+        ImVec2 dir = sub(c, rayStart);
+        float dlen = std::sqrt(dir.x * dir.x + dir.y * dir.y);
+        dir.x /= dlen;
+        dir.y /= dlen;
+        ImVec2 hit = sub(c, mul(dir, r));
+        ImVec2 rayEnd = add(hit, mul(dir, r * 0.55f));
+        dl->AddLine(rayStart, rayEnd, colAmber, 1.8f);
+        dl->AddCircleFilled(hit, s(3.0f), colHot);
+
+        ImVec2 nrm = sub(hit, c);
+        float nlen = std::sqrt(nrm.x * nrm.x + nrm.y * nrm.y);
+        nrm.x /= nlen;
+        nrm.y /= nlen;
+        ImVec2 nEnd = add(hit, mul(nrm, r * 0.5f));
+        dl->AddLine(hit, nEnd, colGreen, 1.5f);
+        dl->AddText(ImVec2(nEnd.x + s(4.0f), nEnd.y - s(14.0f)), colGreen, "N");
+        drawFootnote("quadratic solve in the shader - no triangle fetch, no barycentrics");
+        return;
+    }
+
+    // ------------------------------------------------------------------
+    // Deeply nested BVH boxes
+    // ------------------------------------------------------------------
+    if (diagramId == "bvh_nested_boxes") {
+        drawTitle("Deeply Nested AABBs");
+
+        auto box = [&](float x, float y, float bw, float bh, ImU32 col) {
+            dl->AddRect(ImVec2(area.x + gw * x, area.y + gh * y),
+                        ImVec2(area.x + gw * (x + bw), area.y + gh * (y + bh)), col);
+        };
+        box(0.05f, 0.10f, 0.90f, 0.80f, colCool);
+        box(0.08f, 0.14f, 0.40f, 0.72f, IM_COL32(90, 150, 210, 220));
+        box(0.52f, 0.14f, 0.40f, 0.72f, IM_COL32(90, 150, 210, 220));
+        box(0.10f, 0.18f, 0.17f, 0.30f, colAmber);
+        box(0.28f, 0.50f, 0.17f, 0.30f, colAmber);
+        box(0.54f, 0.18f, 0.17f, 0.30f, colAmber);
+        box(0.72f, 0.50f, 0.17f, 0.30f, colAmber);
+
+        ImVec2 rs(area.x + gw * 0.02f, area.y + gh * 0.06f);
+        ImVec2 re(area.x + gw * 0.98f, area.y + gh * 0.94f);
+        dl->AddLine(rs, re, colPath, 1.8f);
+        const float steps[6] = {0.10f, 0.22f, 0.38f, 0.52f, 0.68f, 0.82f};
+        for (float t : steps) {
+            ImVec2 p = add(rs, mul(sub(re, rs), t));
+            dl->AddCircleFilled(p, s(2.5f), colAmber);
+        }
+        drawFootnote("each level adds a ray-box test before reaching leaf triangles");
+        return;
+    }
+
+    // ------------------------------------------------------------------
+    // ROP fill-rate variants
+    // ------------------------------------------------------------------
+    if (diagramId.rfind("rop_fill_", 0) == 0) {
+        bool hdr = (diagramId == "rop_fill_hdr");
+        bool blend = (diagramId == "rop_fill_blend");
+        drawTitle(hdr ? "ROP: RGBA16F HDR Fill" : (blend ? "ROP: Alpha Blending" : "ROP: RGBA8 Color Fill"));
+
+        ImVec2 fb0(area.x, area.y);
+        ImVec2 fb1(areaEnd.x, areaEnd.y);
+        dl->AddRect(fb0, fb1, colGrid, 1.0f);
+
+        if (!blend) {
+            ImVec2 q0(area.x + gw * 0.15f, area.y + gh * 0.20f);
+            ImVec2 q1(area.x + gw * 0.85f, area.y + gh * 0.80f);
+            if (hdr) {
+                const int slices = 24;
+                for (int i = 0; i < slices; ++i) {
+                    float t0 = static_cast<float>(i) / slices;
+                    float t1 = static_cast<float>(i + 1) / slices;
+                    int v = (int)(30 + 225 * t1);
+                    dl->AddRectFilled(ImVec2(q0.x + (q1.x - q0.x) * t0, q0.y),
+                                      ImVec2(q0.x + (q1.x - q0.x) * t1, q1.y),
+                                      IM_COL32(v, v, v, 255));
+                }
+            } else {
+                dl->AddRectFilled(q0, q1, IM_COL32(40, 90, 200, 255));
+            }
+            // Rasterization scanline arrow
+            ImVec2 sl0(q0.x, q1.y + s(8.0f));
+            ImVec2 sl1(q1.x, q1.y + s(8.0f));
+            dl->AddLine(sl0, sl1, colAmber, 1.5f);
+            dl->AddLine(sl1, ImVec2(sl1.x - s(6.0f), sl1.y - s(4.0f)), colAmber, 1.5f);
+            dl->AddLine(sl1, ImVec2(sl1.x - s(6.0f), sl1.y + s(4.0f)), colAmber, 1.5f);
+            drawFootnote(hdr ? "64-bit color: 2x the memory bandwidth of RGBA8 per pixel"
+                             : "1 pixel per ROP clock - pure rasterizer throughput");
+        } else {
+            ImVec2 q0a(area.x + gw * 0.12f, area.y + gh * 0.18f);
+            ImVec2 q1a(area.x + gw * 0.55f, area.y + gh * 0.78f);
+            ImVec2 q0b(area.x + gw * 0.45f, area.y + gh * 0.22f);
+            ImVec2 q1b(area.x + gw * 0.88f, area.y + gh * 0.82f);
+            dl->AddRectFilled(q0a, q1a, IM_COL32(60, 120, 230, 160));
+            dl->AddRectFilled(q0b, q1b, IM_COL32(230, 90, 60, 160));
+            ImVec2 o0(std::max(q0a.x, q0b.x), std::max(q0a.y, q0b.y));
+            ImVec2 o1(std::min(q1a.x, q1b.x), std::min(q1a.y, q1b.y));
+            dl->AddRect(o0, o1, IM_COL32(240, 240, 255, 220), 1.5f);
+            dl->AddText(ImVec2(o0.x + s(4.0f), o0.y + s(2.0f)), colText, "src + dst");
+            drawFootnote("overlapping pixels: read old color, blend, write back");
+        }
+        return;
+    }
+
+    // ------------------------------------------------------------------
+    // Fallback: unknown diagram id
+    // ------------------------------------------------------------------
+    float canvasH = p1.y - p0.y;
+    dl->AddText(ImVec2(p0.x + pad, p0.y + canvasH * 0.45f), colDim, ("Unknown diagram: " + diagramId).c_str());
 }
 
 void GuiApp::discoverHardware() {
@@ -1572,7 +2340,14 @@ void GuiApp::renderRightWorkspace(float width, float height) {
             renderResultsScorecard();
             ImGui::EndTabItem();
         }
-        if (ImGui::BeginTabItem("Ray Tracing Viewport")) {
+
+        ImGuiTabItemFlags rtFlags = ImGuiTabItemFlags_None;
+        if (m_switchToRtViewport) {
+            rtFlags |= ImGuiTabItemFlags_SetSelected;
+            m_switchToRtViewport = false;
+        }
+
+        if (ImGui::BeginTabItem("Ray Tracing Viewport", nullptr, rtFlags)) {
             renderRayTracingViewport();
             ImGui::EndTabItem();
         }
@@ -2843,14 +3618,7 @@ void GuiApp::renderBenchmarkSuitePanel() {
                                               item.name.c_str(), item.subcategory.c_str(), item.id.c_str(),
                                               catStr.c_str(), reason.c_str());
                         } else if (!item.description.empty()) {
-                            ImGui::BeginTooltip();
-                            ImGui::TextColored(ImVec4(0.40f, 0.80f, 1.00f, 1.0f), "%s", item.name.c_str());
-                            ImGui::TextDisabled("Subcategory: %s | Metric: %s", item.subcategory.c_str(), item.metricType.c_str());
-                            ImGui::Separator();
-                            ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + s(380.0f));
-                            ImGui::TextUnformatted(item.description.c_str());
-                            ImGui::PopTextWrapPos();
-                            ImGui::EndTooltip();
+                            renderBenchmarkTooltip(item);
                         }
                     }
 
@@ -3832,28 +4600,29 @@ void GuiApp::renderResultsScorecard() {
             ImGui::TableNextColumn();
             ImGui::Text("%s", res.benchmarkName.c_str());
             if (ImGui::IsItemHovered()) {
-                std::string desc = "";
-                for (const auto& cat : m_categories) {
-                    for (const auto& sub : cat.subgroups) {
-                        for (const auto& itm : sub.items) {
-                            if (itm.name == res.benchmarkName || itm.id == res.benchmarkName) {
-                                desc = itm.description;
-                                break;
+                // Match the suite item by engine id + config index (the result's
+                // benchmarkName is "<id> (<config name>)" for multi-config benches)
+                const BenchmarkItem* match = nullptr;
+                {
+                    std::string baseName = res.benchmarkName;
+                    size_t p = baseName.find(" (");
+                    if (p != std::string::npos) baseName = baseName.substr(0, p);
+                    for (const auto& cat : m_categories) {
+                        for (const auto& sub : cat.subgroups) {
+                            for (const auto& itm : sub.items) {
+                                if (itm.id == baseName &&
+                                    static_cast<uint32_t>(itm.configIndex) == res.configIndex) {
+                                    match = &itm;
+                                    break;
+                                }
                             }
+                            if (match) break;
                         }
-                        if (!desc.empty()) break;
+                        if (match) break;
                     }
-                    if (!desc.empty()) break;
                 }
-                if (!desc.empty()) {
-                    ImGui::BeginTooltip();
-                    ImGui::TextColored(ImVec4(0.40f, 0.80f, 1.00f, 1.0f), "%s", res.benchmarkName.c_str());
-                    ImGui::TextDisabled("Component: %s | Subcategory: %s", res.component.c_str(), res.subcategory.c_str());
-                    ImGui::Separator();
-                    ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + s(380.0f));
-                    ImGui::TextUnformatted(desc.c_str());
-                    ImGui::PopTextWrapPos();
-                    ImGui::EndTooltip();
+                if (match) {
+                    renderBenchmarkTooltip(*match);
                 }
             }
 

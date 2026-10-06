@@ -37,6 +37,22 @@ struct SelectableDevice {
     bool selected{false};
 };
 
+// Visualization descriptor attached to benchmarks that operate on graphics
+// pipeline data (BVH, scenes, materials, ray scheduling).
+// Tier 1: static pre-baked 400x225 thumbnail (assetPath, may contain "{scene}").
+// Tier 2: procedural vector schematic drawn via ImDrawList (diagramId).
+// Exactly one of assetPath / diagramId should be set.
+struct BenchmarkVisualization {
+    std::string assetPath;           // e.g. "assets/thumbnails/thumb_{scene}_stage1_bvh.png"
+    std::string diagramId;           // e.g. "cone_divergence_45", "traversal_morton_8x4"
+    std::string caption;             // One-line explanation shown under the canvas
+    float aspectRatio{16.0f / 9.0f}; // Canvas aspect (thumbnails are 16:9)
+    int linkedViewportMode{-1};      // -1: none | 0: Scenes & Parity | 1: Pipeline Passes | 2: PBR Materials | 3: Geometry & BVH
+    int linkedViewportSubIndex{0};   // Pass / material / geometry index within that mode
+
+    bool hasVisualization() const { return !assetPath.empty() || !diagramId.empty(); }
+};
+
 struct BenchmarkItem {
     std::string id;          // Exact C++ engine benchmark name (e.g. "FP16", "RayASBuild", "RayScheduling")
     std::string subcategory; // Subcategory / group name (e.g. "FP16", "BLAS Build & Update", "Directional Shadows")
@@ -49,6 +65,7 @@ struct BenchmarkItem {
     std::string supportReason;
     std::string limitationCategory;
     int configIndex{-1};
+    BenchmarkVisualization viz;   // Optional pipeline visualization for the hover tooltip
 
     BenchmarkItem() = default;
     BenchmarkItem(std::string id_, std::string subcat_, std::string name_, std::string cat_,
@@ -149,6 +166,7 @@ public:
 private:
     void setupDarkTheme(float scale = 1.0f);
     void initializeBenchmarkCategories();
+    void applyVisualizationMetadata();
     void discoverHardware();
 
     void updateZoomShortcuts();
@@ -174,6 +192,11 @@ private:
 
     void processIncomingResults();
     void exportResultsToJson(const std::string& filepath);
+
+    // Benchmark Tooltip Visualizations
+    void renderBenchmarkTooltip(const BenchmarkItem& item);
+    void renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, ImVec2 p1) const;
+    std::string currentSceneTag() const;
 
     // Subsystems
     TelemetryWorker m_telemetryWorker;
@@ -246,6 +269,7 @@ private:
 
     // Navigation & Notifications
     bool m_switchToScorecard{false};
+    bool m_switchToRtViewport{false};
     std::string m_exportNotificationText;
     float m_exportNotificationTimer{0.0f};
     float m_telemetryTimeWindow{0.0f}; // 0.0f = Full Run (compressed to cover entire run), or 30s, 60s, 120s
