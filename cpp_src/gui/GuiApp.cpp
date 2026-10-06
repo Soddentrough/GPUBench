@@ -2966,7 +2966,7 @@ void GuiApp::renderBenchmarkSuitePanel() {
 
     float availW = ImGui::GetContentRegionAvail().x;
     float fontScaleFactor = ImGui::GetFontSize() / 16.0f;
-    float minColW = std::max(s(480.0f), 450.0f * fontScaleFactor);
+    float minColW = std::max(s(420.0f), 400.0f * fontScaleFactor);
     int maxCols = std::max(1, static_cast<int>(availW / minColW));
     if (maxCols > 4) maxCols = 4;
 

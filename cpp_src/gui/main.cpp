@@ -128,13 +128,15 @@ int main(int argc, char** argv) {
 
     gpubench::gui::VulkanContext vulkanContext;
     std::string winTitle = std::string("GPUBench v") + GPUBENCH_VERSION + " - Workstation GPU Profiler";
-    if (!vulkanContext.init(winTitle.c_str(), 1480, 1180, uiScaleOverride)) {
+    if (!vulkanContext.init(winTitle.c_str(), 1760, 1000, uiScaleOverride)) {
         std::cerr << "Failed to initialize Vulkan GUI context!" << std::endl;
         return 1;
     }
     float effectiveScale = vulkanContext.getDisplayScale();
+    int curW = 0, curH = 0;
+    SDL_GetWindowSize(vulkanContext.getWindow(), &curW, &curH);
     std::cout << "[GPUBench GUI] Initialized. Video driver: " << (SDL_GetCurrentVideoDriver() ? SDL_GetCurrentVideoDriver() : "null")
-              << " | Display scale: " << effectiveScale << "x" << std::endl;
+              << " | Display scale: " << effectiveScale << "x | Window: " << curW << "x" << curH << std::endl;
 
     // Initialize ImPlot Context
     ImPlot::CreateContext();
