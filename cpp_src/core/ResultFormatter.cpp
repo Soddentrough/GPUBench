@@ -215,8 +215,9 @@ std::string cleanWorkloadName(const std::string &rawName, const std::string &sub
     name = "BVH Traversal - Linear 1D Scanline";
   } else if (name == "Queue Compaction - Single-Pass Unified Stream") {
     name = "Queue Compaction - Single-Pass Stream";
-  } else if (name.find("Queue Memory - VRAM Round-Trip") != std::string::npos) {
-    name = "Queue Memory - VRAM Round-Trip Bandwidth";
+  } else if (name.find("Queue Compaction - Queue Compaction") != std::string::npos ||
+             name.find("Queue Memory - VRAM Round-Trip") != std::string::npos) {
+    name = "Queue Compaction Throughput";
   }
 
   // Strip unmatched closing parenthesis
@@ -873,15 +874,6 @@ void ResultFormatter::print() {
                         BOLD + YELLOW + formatDouble(maxTlasRate, 1) + " MInst/s" + RESET + " (TLAS Construction)";
       printSummaryRow("Acceleration Build Peak Rates", val, "");
     }
-    bool isR9700 = false;
-    for (const auto &dn : deviceNames) {
-      if (dn.second.find("R9700") != std::string::npos ||
-          dn.second.find("GFX1201") != std::string::npos ||
-          dn.second.find("gfx1201") != std::string::npos) {
-        isR9700 = true;
-        break;
-      }
-    }
     if (rawBoxGis > 0.0) {
       std::string val = BOLD + GREEN + formatDouble(rawBoxGis, 1) + " MRays/s" + RESET;
       printSummaryRow("Hardware BVH Traversal (Deep)", val, " (Multi-Layer Stress)");
@@ -1222,16 +1214,13 @@ void ResultFormatter::printComparison(const std::vector<ImportedRun> &runs) {
 
           double realDelta = 0.0;
           double ratio = 1.0;
-          double pct = 0.0;
 
           if (isLatency) {
             realDelta = secondVal - bestVal;
             ratio = (bestVal > 0.0) ? (secondVal / bestVal) : 1.0;
-            pct = (secondVal > 0.0) ? ((secondVal - bestVal) / secondVal) * 100.0 : 0.0;
           } else {
             realDelta = bestVal - secondVal;
             ratio = (secondVal > 0.0) ? (bestVal / secondVal) : 1.0;
-            pct = (ratio - 1.0) * 100.0;
           }
 
           if (ratio <= 1.005 && std::abs(realDelta) < 0.01) {
@@ -1555,28 +1544,30 @@ std::string resultsToJson(const std::vector<ResultData> &results) {
       out += "      \"resolution\": \"" + std::to_string(w) + "x" + std::to_string(h) + "\",\n";
     }
     if (r.benchmarkName.find("RayRawTraversal") != std::string::npos) {
-      bool isR9700Dev = (r.deviceName.find("R9700") != std::string::npos ||
-                         r.deviceName.find("GFX1201") != std::string::npos ||
-                         r.deviceName.find("gfx1201") != std::string::npos);
-      double peakGis = (r.configIndex == 0) ? 300.8 : 1203.2;
       double time_s = r.time_ms / 1000.0;
       double throughputGis = 0.0;
       if (time_s > 0.0) {
         uint64_t ops = (r.configIndex == 0) ? r.operations : (r.operations * 64);
         throughputGis = (static_cast<double>(ops) / time_s) / 1e9;
       }
-      double pctPeak = (peakGis > 0.0) ? ((throughputGis / peakGis) * 100.0) : 0.0;
-      char buf[80];
-      std::snprintf(buf, sizeof(buf), "%.1f%% of %s %s Peak", pctPeak,
-                    (r.configIndex == 0 ? "300.8 GIS/s" : "1.20 TIS/s"),
-                    (isR9700Dev ? "R9700 Boost" : "R9700 Ref"));
-      std::string detailsStr(buf);
       out += "      \"peak_type\": \"" + std::string(r.configIndex == 0 ? "Triangle" : "Box") + "\",\n";
-      out += "      \"target_architecture\": \"" + std::string(isR9700Dev ? "R9700 (GFX1201)" : "Generic") + "\",\n";
-      out += "      \"theoretical_peak_gis\": " + std::to_string(peakGis) + ",\n";
       out += "      \"throughput_gis\": " + std::to_string(throughputGis) + ",\n";
-      out += "      \"pct_theoretical_peak\": " + std::to_string(pctPeak) + ",\n";
-      out += "      \"details_speedup\": \"" + jsonEscape(detailsStr) + "\",\n";
+
+      bool isR9700Dev = (r.deviceName.find("R9700") != std::string::npos ||
+                         r.deviceName.find("GFX1201") != std::string::npos ||
+                         r.deviceName.find("gfx1201") != std::string::npos);
+      if (isR9700Dev) {
+        double peakGis = (r.configIndex == 0) ? 300.8 : 1203.2;
+        double pctPeak = (peakGis > 0.0) ? ((throughputGis / peakGis) * 100.0) : 0.0;
+        char buf[80];
+        std::snprintf(buf, sizeof(buf), "%.1f%% of %s R9700 Boost Peak", pctPeak,
+                      (r.configIndex == 0 ? "300.8 GIS/s" : "1.20 TIS/s"));
+        std::string detailsStr(buf);
+        out += "      \"target_architecture\": \"R9700 (GFX1201)\",\n";
+        out += "      \"theoretical_peak_gis\": " + std::to_string(peakGis) + ",\n";
+        out += "      \"pct_theoretical_peak\": " + std::to_string(pctPeak) + ",\n";
+        out += "      \"details_speedup\": \"" + jsonEscape(detailsStr) + "\",\n";
+      }
     }
     out += "      \"operations\": " + std::to_string(r.operations) + ",\n";
     out += "      \"time_ms\": " + std::to_string(r.time_ms) + ",\n";

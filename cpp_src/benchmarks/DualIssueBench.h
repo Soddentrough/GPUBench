@@ -34,10 +34,10 @@ public:
   BenchmarkResult GetResult(uint32_t config_idx = 0) const override;
   bool ValidateResults(uint32_t config_idx = 0) const override;
 
-  const char *GetComponent(uint32_t config_idx = 0) const override {
+  const char *GetComponent(uint32_t /*config_idx*/ = 0) const override {
     return "Compute";
   }
-  const char *GetSubCategory(uint32_t config_idx = 0) const override {
+  const char *GetSubCategory(uint32_t /*config_idx*/ = 0) const override {
     return "Dual-Issue";
   }
   int GetSortWeight() const override { return 25; }

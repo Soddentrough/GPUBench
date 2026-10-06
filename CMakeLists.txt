@@ -19,6 +19,12 @@ if(WIN32)
     add_compile_definitions(NOMINMAX)
 endif()
 
+if(MSVC)
+    add_compile_options(/W4)
+else()
+    add_compile_options(-Wall -Wextra -Wno-missing-field-initializers -Wno-unused-parameter)
+endif()
+
 find_package(Threads REQUIRED)
 
 # Generate config header with install paths
@@ -220,6 +226,7 @@ set(LIB_SOURCES
     cpp_src/benchmarks/Fp16Bench.cpp
     cpp_src/benchmarks/Bf16Bench.cpp
     cpp_src/benchmarks/Fp8Bench.cpp
+    cpp_src/benchmarks/Fp6Bench.cpp
     cpp_src/benchmarks/Fp4Bench.cpp
     cpp_src/benchmarks/Int8Bench.cpp
     cpp_src/benchmarks/Int4Bench.cpp
@@ -384,13 +391,6 @@ if(HIP_FOUND)
     target_compile_definitions(gpubench_lib PRIVATE HAVE_ROCM)
 endif()
 
-# Copy kernels directory to project root for running from base directory
-add_custom_command(TARGET gpubench POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-    ${CMAKE_CURRENT_BINARY_DIR}/kernels
-    ${CMAKE_CURRENT_SOURCE_DIR}/kernels
-    COMMENT "Copying kernels directory to project root"
-)
 
 # Copy MinGW runtime DLLs to build directory so binary runs standalone out of the box
 if(MINGW)
@@ -461,7 +461,8 @@ if(GPUBENCH_BUILD_GUI)
         )
 
         add_executable(gpubench-gui WIN32 ${GUI_SOURCES})
-        set_target_properties(gpubench-gui PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+        set_target_properties(gpubench-gui PROPERTIES CXX_STANDARD 23 CXX_STANDARD_REQUIRED ON)
+        target_compile_definitions(gpubench-gui PRIVATE GPUBENCH_VERSION="${PROJECT_FULL_VERSION}")
 
         target_include_directories(gpubench-gui PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/cpp_src

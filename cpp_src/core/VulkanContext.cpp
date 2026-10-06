@@ -322,6 +322,7 @@ const std::vector<DeviceInfo> &VulkanContext::getDevices() const {
       info.driverVersion = props.driverVersion;
       info.dedicatedVramBytes = vramSize;
       info.memorySize = vramSize;
+      info.isApu = (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU);
 
       if (pciExtSupported) {
         char busBuf[32];
@@ -351,13 +352,13 @@ const std::vector<DeviceInfo> &VulkanContext::getDevices() const {
       info.driverInfo = (driverProps.driverInfo[0] != '\0') ? driverProps.driverInfo : "";
 
       char uuid_str[33];
-      for (int i = 0; i < VK_UUID_SIZE; ++i) {
+      for (uint32_t i = 0; i < VK_UUID_SIZE; ++i) {
         sprintf(&uuid_str[i * 2], "%02x", props.pipelineCacheUUID[i]);
       }
       info.driverUUID = std::string(uuid_str);
 
       info.memorySize = vramSize;
-      info.dedicatedVramBytes = vramSize;
+      info.dedicatedVramBytes = info.isApu ? 0 : vramSize;
       info.maxWorkGroupSize = props.limits.maxComputeWorkGroupInvocations;
       info.maxComputeWorkGroupCountX = props.limits.maxComputeWorkGroupCount[0];
       info.maxComputeWorkGroupCountY = props.limits.maxComputeWorkGroupCount[1];
@@ -2709,7 +2710,6 @@ ComputeKernel VulkanContext::createRTPipeline(
                 handles.data());
 
   vulkanKernel->sbtBuffer = createBuffer(sbtSize);
-  VkBuffer vkSbt = getVkBuffer(vulkanKernel->sbtBuffer);
   VkDeviceAddress sbtAddr = getBufferDeviceAddress(vulkanKernel->sbtBuffer);
 
   // Upload handles

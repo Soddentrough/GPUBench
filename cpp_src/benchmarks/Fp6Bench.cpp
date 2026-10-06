@@ -7,17 +7,14 @@ bool Fp6Bench::IsSupported(const DeviceInfo &info,
 }
 
 void Fp6Bench::Setup(IComputeContext &context, const std::string &build_dir) {
-  this->context = &context;
-
-  DeviceInfo info = context.getCurrentDeviceInfo();
-  // The logic for emulation based on device name is removed as per the
-  // instruction's implied change.
-
-  // Implementation will be added in a future step.
+  (void)context;
+  (void)build_dir;
+  throw std::runtime_error("FP6 benchmark is unsupported on this hardware/API (NVIDIA SPV_NV_float6 only)");
 }
 
 void Fp6Bench::Run(uint32_t config_idx) {
-  // Implementation will be added in a future step.
+  (void)config_idx;
+  throw std::runtime_error("FP6 benchmark is unsupported on this hardware/API (NVIDIA SPV_NV_float6 only)");
 }
 
 BenchmarkResult Fp6Bench::GetResult(uint32_t config_idx) const {

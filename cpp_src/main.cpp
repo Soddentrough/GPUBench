@@ -57,9 +57,9 @@ int main(int argc, char **argv) {
   app.footer(
       "\nBENCHMARK GROUPS & INCLUDED TESTS:\n"
       "  compute     Compute arithmetic units (vector & matrix tensor operations):\n"
-      "              FP64, FP32, Dual-Issue (ILP & Concurrent Math), FP16, BF16, FP8, FP6, FP4, INT8, INT4\n"
+      "              FP64, FP32, Dual-Issue (ILP & Concurrent Math), FP16, BF16, FP8, FP4, INT8, INT4\n"
       "  memory      VRAM and GPU cache hierarchy:\n"
-      "              Device Memory Bandwidth, L0/L1/L2/L3 Cache Latency\n"
+      "              Device Memory Bandwidth, L0 Cache Latency & Latency Curve\n"
       "  graphics    All 3D graphics rendering pipelines (combines 'raster' and 'raytracing', alias: 'gfx'):\n"
       "              Runs both fixed-function rasterization (ROP) and hardware ray tracing\n"
       "  raster      Fixed-function rasterization & ROP pixel fill rates (subset of graphics):\n"
@@ -67,7 +67,7 @@ int main(int argc, char **argv) {
       "  raytracing  Hardware BVH traversal, intersection & scheduling (subset of graphics, alias: 'rt'):\n"
       "              RayRawTraversal (Raw BVH Traversal: Coherent Triangles & Deep Multi-Layer BVH8),\n"
       "              RayIntersect, RayAnyHit, RayProcedural, RayDivergence,\n"
-      "              RayPayload, RayASBuild, RayScheduling (Megakernel vs DGC / SER),\n"
+      "              RayASBuild, RayScheduling (Megakernel vs DGC / SER),\n"
       "              Pipeline Breakdown (Linear vs 2D Tiled vs Morton Z-Curve, Queue Compaction)\n"
       "  system      Host CPU & RAM system memory:\n"
       "              System Memory Bandwidth (Multi & Single-Threaded), System Memory Latency\n"
@@ -103,6 +103,9 @@ int main(int argc, char **argv) {
 
   bool debug = false;
   app.add_flag("--debug", debug, "Enable debug logging (implies verbose)");
+
+  bool quiet = false;
+  app.add_flag("-q,--quiet", quiet, "Suppress progress output and decorative banners");
 
   bool dump_geometry = false;
   app.add_flag("--dump-geometry", dump_geometry,
@@ -164,14 +167,14 @@ int main(int argc, char **argv) {
       ->expected(0, 1);
 
   std::string legacy_output_format;
-  CLI::Option *opt_legacy_output = app.add_option(
+  app.add_option(
       "--output", legacy_output_format,
       "Legacy output format: json (deprecated, use --output-json)")
       ->check(CLI::IsMember({"json"}))
       ->group("");
 
   std::string legacy_output_file;
-  CLI::Option *opt_legacy_file = app.add_option(
+  app.add_option(
       "--output-file", legacy_output_file,
       "Legacy output file path (deprecated, use --output-json [FILE])")
       ->group("");
@@ -506,7 +509,7 @@ int main(int argc, char **argv) {
     runner.setResolution(render_width, render_height);
     runner.setBounceDepth(bounce_depth);
     runner.setSamplesPerPixel(samples_per_pixel);
-    if (want_json_output) {
+    if (want_json_output || quiet) {
       runner.setQuiet(true);
     }
     if (!config_targets.empty()) {

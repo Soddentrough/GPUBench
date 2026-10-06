@@ -20,6 +20,7 @@ gpucore.*
 *.exe
 *.spv
 *.co
+kernels/rocm/
 
 # Logs and temporary files
 *.log

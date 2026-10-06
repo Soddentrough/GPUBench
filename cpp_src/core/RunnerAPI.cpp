@@ -190,7 +190,7 @@ std::vector<DeviceProfile> GetDeviceProfilesAPI() {
                 if (ctx) {
                     uint32_t i = 0;
                     for (const auto& dev : ctx->getDevices()) {
-                        DeviceProfile p;
+                        DeviceProfile p{};
                         p.backend = "Vulkan";
                         p.deviceIndex = i;
                         p.deviceName = dev.name;
@@ -224,7 +224,7 @@ std::vector<DeviceProfile> GetDeviceProfilesAPI() {
                 if (ctx) {
                     uint32_t i = 0;
                     for (const auto& dev : ctx->getDevices()) {
-                        DeviceProfile p;
+                        DeviceProfile p{};
                         p.backend = "OpenCL";
                         p.deviceIndex = i;
                         p.deviceName = dev.name;
@@ -262,7 +262,7 @@ std::vector<DeviceProfile> GetDeviceProfilesAPI() {
                 if (ctx) {
                     uint32_t i = 0;
                     for (const auto& dev : ctx->getDevices()) {
-                        DeviceProfile p;
+                        DeviceProfile p{};
                         p.backend = "ROCm";
                         p.deviceIndex = i;
                         p.deviceName = dev.name;

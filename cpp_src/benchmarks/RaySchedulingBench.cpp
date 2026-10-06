@@ -378,7 +378,7 @@ std::string RaySchedulingBench::GetConfigName(uint32_t config_idx) const {
   case 27:
     return "Stage: Traversal Divergence - Alpha Cutout Geometry";
   case 28:
-    return "Stage: Queue Memory - VRAM Round-Trip Bandwidth";
+    return "Stage: Queue Compaction - Queue Compaction Throughput";
   case 29:
     return "Primary Rays (RTP)";
   case 30:
@@ -415,10 +415,8 @@ const char *RaySchedulingBench::GetSubCategory(uint32_t config_idx) const {
     return "Total Scene Render";
   if (config_idx == 12 || config_idx == 14 || config_idx == 15 || config_idx == 16)
     return "Traversal Ordering & Coherence";
-  if (config_idx == 13 || config_idx == 26)
+  if (config_idx == 13 || config_idx == 26 || config_idx == 28)
     return "Wavefront Stream Compaction";
-  if (config_idx == 28)
-    return "Queue Memory Bandwidth";
   if (config_idx == 27)
     return "Alpha Cutout Divergence";
   return "Pipeline Breakdown";
@@ -449,11 +447,10 @@ int RaySchedulingBench::GetSortWeight(uint32_t config_idx) const {
   if (config_idx == 14) return 661; // 2D Screen Tiled (8x4)
   if (config_idx == 15) return 662; // 2D Morton (8x4)
   if (config_idx == 16) return 663; // 2D Morton (4x8)
-  // Wavefront Stream Compaction: 13, 26
+  // Wavefront Stream Compaction: 13, 26, 28
   if (config_idx == 13) return 665; // Wave Ballot Compaction (Baseline)
   if (config_idx == 26) return 666; // Queue Compaction (Single-Pass)
-  // Queue Memory Bandwidth: 28
-  if (config_idx == 28) return 670; // VRAM Queue Round-Trip
+  if (config_idx == 28) return 667; // Queue Compaction Throughput
   // Alpha Cutout Divergence: 27
   if (config_idx == 27) return 675; // Traversal Divergence (Alpha Cutout)
   return 680 + static_cast<int>(config_idx);
@@ -1567,7 +1564,7 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     vContext->dispatch(kernelClassify, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     break;
   }
-  case 28: { // Queue Memory - VRAM Round-Trip Bandwidth (Wavefront Tax)
+  case 28: { // Queue Compaction - Queue Compaction Throughput
     vContext->dispatch(kernelReset, 1, 1, 1, 32, 1, 1);
     PushConstantsClassify pcClassify{rayCount, 6, 0, seed, 0, renderWidth, renderHeight, materialCapacity, 2, sceneTypeVal, isGltfVal, 1u};
     vContext->setKernelArg(kernelClassify, 10, sizeof(pcClassify), &pcClassify);
@@ -1942,8 +1939,8 @@ void RaySchedulingBench::performVisualVerification(bool isInteractive) {
     pt16Prof << "  \"gpu\": \"" << context->getCurrentDeviceInfo().name << "\",\n";
     pt16Prof << "  \"scene\": \"" << (sceneType == SceneType::AAAOutdoorForest ? "Open-World Forest" : ((sceneType == SceneType::OutdoorLandscape) ? "Outdoor Landscape" : ((sceneType == SceneType::IndoorAtrium) ? "Indoor Atrium" : "Showroom Studio"))) << " - Path Tracing (16 SPP)\",\n";
     pt16Prof << "  \"resolution\": \"" << width << "x" << height << " (" << (width * height) << " primary rays)\",\n";
-    pt16Prof << "  \"traditional\": { \"fps\": " << pt16FpsTrad << ", \"mrays\": " << pt1MRaysTrad << ", \"frame_ms\": " << pt1MsTrad << " },\n";
-    pt16Prof << "  \"worklist\": { \"fps\": " << pt16FpsWork << ", \"mrays\": " << pt1MRaysWork << ", \"frame_ms\": " << pt1MsWork << " },\n";
+    pt16Prof << "  \"traditional\": { \"fps\": " << pt16FpsTrad << ", \"mrays\": " << pt16MRaysTrad << ", \"frame_ms\": " << pt16MsTrad << " },\n";
+    pt16Prof << "  \"worklist\": { \"fps\": " << pt16FpsWork << ", \"mrays\": " << pt16MRaysWork << ", \"frame_ms\": " << pt16MsWork << " },\n";
     pt16Prof << "  \"parity\": {\n";
     pt16Prof << "    \"psnr\": " << pt16Metrics.psnr << ",\n";
     pt16Prof << "    \"mae\": " << pt16Metrics.mae << ",\n";
@@ -2462,10 +2459,8 @@ BenchmarkResult RaySchedulingBench::GetResult(uint32_t config_idx) const {
     r.operations = static_cast<uint64_t>(rayCount) * 16;
   } else if ((config_idx >= 3 && config_idx <= 5) || config_idx == 25) {
     r.operations = static_cast<uint64_t>(rayCount) * ((samplesPerPixel > 1) ? samplesPerPixel : 1u);
-  } else if (config_idx == 28) {
-    // 32-byte ray record read + 32-byte ray record write per queue transaction = 64 bytes/ray
-    r.operations = static_cast<uint64_t>(rayCount) * 64;
   } else {
+    // Stage compaction benchmarks (configs 13, 26, 28) and primary rays report ray/record operations
     r.operations = static_cast<uint64_t>(rayCount);
   }
   r.elapsedTime = 0.0;

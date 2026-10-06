@@ -8,13 +8,13 @@ public:
   bool IsSupported(const DeviceInfo &device,
                    IComputeContext *context = nullptr) const override;
   std::string GetSupportNote() const override {
-    return "shaderFloat6 hardware bit not set (no native 6-bit floating point hardware support)";
+    return "FP6 is an NVIDIA-specific extension (SPV_NV_float6); unsupported on AMD hardware and cross-vendor Vulkan / ROCm / OpenCL APIs.";
   }
   std::string GetSupportNote(const DeviceInfo &info,
                              IComputeContext *context = nullptr) const override {
     (void)info;
     (void)context;
-    return "shaderFloat6 hardware bit not set (no native 6-bit floating point hardware support)";
+    return "FP6 is an NVIDIA-specific extension (SPV_NV_float6); unsupported on AMD hardware and cross-vendor Vulkan / ROCm / OpenCL APIs.";
   }
   SupportLimitation GetSupportLimitation() const override {
     return SupportLimitation::kHardware;

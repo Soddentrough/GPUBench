@@ -49,10 +49,14 @@ int main(int argc, char** argv) {
     bool dumpRendersFlagSet = false;
     bool dumpRendersVal = false;
 
+#ifndef GPUBENCH_VERSION
+#define GPUBENCH_VERSION "1.0.0"
+#endif
+
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "--version" || arg == "-v") {
-            std::cout << "GPUBench GUI v1.0.0" << std::endl;
+            std::cout << "GPUBench GUI v" << GPUBENCH_VERSION << std::endl;
             return 0;
         } else if (arg == "--help" || arg == "-h") {
             std::cout << "Usage: gpubench-gui [options]\n\n"
@@ -123,7 +127,8 @@ int main(int argc, char** argv) {
     }
 
     gpubench::gui::VulkanContext vulkanContext;
-    if (!vulkanContext.init("GPUBench v1.0.0 - Workstation GPU Profiler", 1480, 1180, uiScaleOverride)) {
+    std::string winTitle = std::string("GPUBench v") + GPUBENCH_VERSION + " - Workstation GPU Profiler";
+    if (!vulkanContext.init(winTitle.c_str(), 1480, 1180, uiScaleOverride)) {
         std::cerr << "Failed to initialize Vulkan GUI context!" << std::endl;
         return 1;
     }

@@ -390,7 +390,7 @@ DeviceInfo OpenCLContext::getCurrentDeviceInfo() const {
   if (f_clGetDeviceInfo(device, 0x4038, sizeof(boardName), boardName, nullptr) == 0 &&
       boardName[0] != '\0') {
     info.name = std::string(boardName);
-  } else if (selectedDeviceIndex >= 0 && selectedDeviceIndex < static_cast<int>(deviceInfos.size())) {
+  } else if (selectedDeviceIndex < deviceInfos.size()) {
     info.name = deviceInfos[selectedDeviceIndex].name;
   }
 

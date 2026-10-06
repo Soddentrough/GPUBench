@@ -16,20 +16,20 @@ public:
   virtual const char *GetName() const = 0;
   virtual std::vector<std::string> GetAliases() const { return {}; }
   virtual const char *GetMetric() const { return "TFLOPS"; }
-  virtual const char *GetMetric(uint32_t config_idx) const { return GetMetric(); }
+  virtual const char *GetMetric(uint32_t /*config_idx*/) const { return GetMetric(); }
   virtual bool IsSupported(const DeviceInfo &info,
                            IComputeContext *context = nullptr) const = 0;
   virtual void Setup(IComputeContext &context,
                      const std::string &kernel_dir) = 0;
-  virtual void SetResolution(uint32_t w, uint32_t h) {}
+  virtual void SetResolution(uint32_t /*w*/, uint32_t /*h*/) {}
   virtual void Run(uint32_t config_idx = 0) = 0;
   virtual void Teardown() = 0;
   virtual BenchmarkResult GetResult(uint32_t config_idx = 0) const = 0;
-  virtual void RecordRunResult(uint32_t config_idx, uint64_t total_invocations, double total_time_ms) {}
+  virtual void RecordRunResult(uint32_t /*config_idx*/, uint64_t /*total_invocations*/, double /*total_time_ms*/) {}
   virtual void RebuildAccelerationStructures() {}
-  virtual bool ValidateResults(uint32_t config_idx = 0) const { return true; }
-  virtual bool IsEmulated(uint32_t config_idx = 0) const { return false; }
-  virtual void SetVerifyParity(bool verify) {}
+  virtual bool ValidateResults(uint32_t /*config_idx*/ = 0) const { return true; }
+  virtual bool IsEmulated(uint32_t /*config_idx*/ = 0) const { return false; }
+  virtual void SetVerifyParity(bool /*verify*/) {}
   virtual bool HasParityFailure() const { return false; }
   virtual bool HasVisualVerification() const { return false; }
   virtual void RunVisualVerification(bool isInteractive = false) { (void)isInteractive; }
@@ -62,15 +62,15 @@ public:
     return GetSupportNote();
   }
   virtual uint32_t GetNumConfigs() const { return 1; }
-  virtual std::string GetConfigName(uint32_t config_idx) const { return ""; }
-  virtual bool IsConfigSupported(uint32_t config_idx) const { return true; }
+  virtual std::string GetConfigName(uint32_t /*config_idx*/) const { return ""; }
+  virtual bool IsConfigSupported(uint32_t /*config_idx*/) const { return true; }
   virtual bool IsConfigSupported(uint32_t config_idx, const DeviceInfo &info,
                                  IComputeContext *context = nullptr) const {
     (void)info;
     (void)context;
     return IsConfigSupported(config_idx);
   }
-  virtual std::string GetConfigSupportNote(uint32_t config_idx) const { return ""; }
+  virtual std::string GetConfigSupportNote(uint32_t /*config_idx*/) const { return ""; }
   virtual std::string GetConfigSupportNote(uint32_t config_idx,
                                            const DeviceInfo &info,
                                            IComputeContext *context = nullptr) const {
@@ -80,7 +80,7 @@ public:
   }
   // Optional human-readable note explaining a performance or API caveat when
   // a benchmark is supported and completes, but utilized a fallback or emulation path.
-  virtual std::string GetConfigCaveat(uint32_t config_idx = 0) const { return ""; }
+  virtual std::string GetConfigCaveat(uint32_t /*config_idx*/ = 0) const { return ""; }
   virtual std::string GetConfigCaveat(uint32_t config_idx,
                                       const DeviceInfo &info,
                                       IComputeContext *context = nullptr) const {
@@ -88,7 +88,7 @@ public:
     (void)context;
     return GetConfigCaveat(config_idx);
   }
-  virtual SupportLimitation GetConfigSupportLimitation(uint32_t config_idx) const {
+  virtual SupportLimitation GetConfigSupportLimitation(uint32_t /*config_idx*/) const {
     return GetSupportLimitation();
   }
   virtual SupportLimitation GetConfigSupportLimitation(uint32_t config_idx,
@@ -104,10 +104,10 @@ public:
   // Returns false if it is a system-wide or host-only benchmark (runs once).
   virtual bool IsDeviceDependent() const { return true; }
 
-  virtual const char *GetComponent(uint32_t config_idx = 0) const {
+  virtual const char *GetComponent(uint32_t /*config_idx*/ = 0) const {
     return "Other";
   }
-  virtual const char *GetSubCategory(uint32_t config_idx = 0) const {
+  virtual const char *GetSubCategory(uint32_t /*config_idx*/ = 0) const {
     return "";
   }
   virtual int GetSortWeight() const { return 999; }

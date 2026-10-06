@@ -165,6 +165,7 @@ void run_read_fallback(const void *src, size_t size) {
   for (size_t i = 0; i < count; ++i) {
     sink ^= pSrc[i];
   }
+  (void)sink;
 }
 
 void run_write_fallback(void *dst, size_t size) {

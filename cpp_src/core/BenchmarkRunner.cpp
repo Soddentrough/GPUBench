@@ -34,7 +34,7 @@ void SetRunnerTargetConfigs(const std::vector<int> &configs) {
 #include "core/ResultFormatter.h"
 #include "utils/KernelPath.h"
 #include "utils/SleepInhibitor.h"
-// #include "benchmarks/Fp6Bench.h" // Temporarily disabled
+#include "benchmarks/Fp6Bench.h"
 #include <algorithm>
 #include <chrono>
 #include <iostream>
@@ -232,7 +232,7 @@ void BenchmarkRunner::discoverBenchmarks() {
   benchmarks.push_back(std::make_unique<Fp16Bench>());
   benchmarks.push_back(std::make_unique<Bf16Bench>());
   benchmarks.push_back(std::make_unique<Fp8Bench>());
-  // benchmarks.push_back(std::make_unique<Fp6Bench>()); // Temporarily disabled
+  benchmarks.push_back(std::make_unique<Fp6Bench>());
   benchmarks.push_back(std::make_unique<Fp4Bench>());
   benchmarks.push_back(std::make_unique<Int8Bench>());
   benchmarks.push_back(std::make_unique<Int4Bench>());
@@ -374,10 +374,10 @@ void BenchmarkRunner::discoverBenchmarks() {
       std::vector<uint32_t>{}, std::vector<std::string>{"l3b"}, 3));
   */
 
-  // We still need the sizes for latency tests
-  const size_t l1_size = 128 * 1024;       // 128KB
-  const size_t l2_size = 4 * 1024 * 1024;  // 4MB
-  const size_t l3_size = 64 * 1024 * 1024; // 64MB
+  // We still need the sizes for latency tests (commented out while L1-L3 latency tests disabled)
+  // const size_t l1_size = 128 * 1024;       // 128KB
+  // const size_t l2_size = 4 * 1024 * 1024;  // 4MB
+  // const size_t l3_size = 64 * 1024 * 1024; // 64MB
 
   // Cache Latency
   benchmarks.push_back(std::make_unique<CacheBench>(
@@ -585,8 +585,9 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
     if (!quiet && !verbose && !onResult) {
       std::string backendStr = ComputeBackendFactory::getBackendName(context->getBackend());
       int vramGb = static_cast<int>(std::round(info.memorySize / (1024.0 * 1024.0 * 1024.0)));
+      std::string memLabel = info.isApu ? "GB Unified Memory" : "GB Dedicated VRAM";
       std::string line1_plain = "Target Device : [GPU " + std::to_string(context->getSelectedDeviceIndex()) + "] " + info.name;
-      std::string line2_plain = "Backend / API : " + backendStr + " | VRAM: " + std::to_string(vramGb) + " GB GDDR";
+      std::string line2_plain = "Backend / API : " + backendStr + " | VRAM: " + std::to_string(vramGb) + " " + memLabel;
       size_t innerCardW = 72;
       size_t pad1 = (innerCardW > line1_plain.length()) ? (innerCardW - line1_plain.length()) : 0;
       size_t pad2 = (innerCardW > line2_plain.length()) ? (innerCardW - line2_plain.length()) : 0;
@@ -594,7 +595,7 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
       std::cout << "\n\033[1m\033[36m╭─ GPUBench v" << GPUBENCH_VERSION << " ────────────────────────────────────────────────────────╮\033[0m\n";
       std::cout << "\033[1m\033[36m│\033[0m \033[1mTarget Device\033[0m : [GPU " << context->getSelectedDeviceIndex() << "] \033[33m" << info.name << "\033[0m"
                 << std::string(pad1, ' ') << " \033[1m\033[36m│\033[0m\n";
-      std::cout << "\033[1m\033[36m│\033[0m \033[1mBackend / API\033[0m : \033[32m" << backendStr << "\033[0m | \033[1mVRAM\033[0m: \033[32m" << vramGb << " GB GDDR\033[0m"
+      std::cout << "\033[1m\033[36m│\033[0m \033[1mBackend / API\033[0m : \033[32m" << backendStr << "\033[0m | \033[1mVRAM\033[0m: \033[32m" << vramGb << " " << memLabel << "\033[0m"
                 << std::string(pad2, ' ') << " \033[1m\033[36m│\033[0m\n";
       std::cout << "\033[1m\033[36m╰──────────────────────────────────────────────────────────────────────────╯\033[0m\n\n";
       if (hasVisualVerification) {
@@ -664,7 +665,7 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
         }
       } else if (should_run && bench->IsDeviceDependent()) {
         // Skip logging unsupported Ray Tracing benchmarks under compute-only backends (ROCm / OpenCL)
-        if (bench->GetComponent() == "Ray Tracing" && context->getBackend() != ComputeBackend::Vulkan) {
+        if (std::string_view(bench->GetComponent()) == "Ray Tracing" && context->getBackend() != ComputeBackend::Vulkan) {
           continue;
         }
 
@@ -766,12 +767,14 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
     const bool isInteractive = !quiet && !verbose && !onResult && isatty(fileno(stdout));
     if (!quiet && !verbose && !onResult) {
       std::cout << "\r\033[K  \033[32m✔\033[0m Preparation complete.\n\n";
-      if (hasVisualVerification) {
-        std::cout << "  \033[1m[2/3] Running Benchmarks\033[0m ("
-                  << tasks.size() << " workloads)..." << std::endl;
-      } else {
-        std::cout << "  \033[1m[2/2] Running Benchmarks\033[0m ("
-                  << tasks.size() << " workloads)..." << std::endl;
+      if (!tasks.empty()) {
+        if (hasVisualVerification) {
+          std::cout << "  \033[1m[2/3] Running Benchmarks\033[0m ("
+                    << tasks.size() << " workloads)..." << std::endl;
+        } else {
+          std::cout << "  \033[1m[2/2] Running Benchmarks\033[0m ("
+                    << tasks.size() << " workloads)..." << std::endl;
+        }
       }
     }
 

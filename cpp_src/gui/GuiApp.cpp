@@ -28,6 +28,10 @@
 #include <sys/sysinfo.h>
 #endif
 
+#ifndef GPUBENCH_VERSION
+#define GPUBENCH_VERSION "1.0.0"
+#endif
+
 namespace gpubench::gui {
 
 namespace {
@@ -1097,7 +1101,7 @@ void GuiApp::renderLeftSidebar(float width, float height) {
     ImGui::AlignTextToFramePadding();
     ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.00f, 1.00f), "GPUBench");
     ImGui::SameLine();
-    ImGui::TextColored(ImVec4(0.60f, 0.70f, 0.90f, 1.00f), "v1.0.0");
+    ImGui::TextColored(ImVec4(0.60f, 0.70f, 0.90f, 1.00f), "v%s", GPUBENCH_VERSION);
 
     ImGui::Spacing();
 
@@ -4243,6 +4247,49 @@ void GuiApp::renderRayTracingViewport() {
         dynamicSpeedup = buf;
     }
 
+    bool parityMeasured = false;
+    bool parityPass = false;
+    std::string livePsnr = "--";
+    std::string liveMaxDelta = "--";
+
+    std::string profilePath = "renders/render_" + std::string(curSceneMeta.tag) + "_profile.json";
+    std::ifstream pf(profilePath);
+    if (pf.is_open()) {
+        std::string line;
+        while (std::getline(pf, line)) {
+            if (line.find("\"psnr\":") != std::string::npos) {
+                size_t col = line.find(':');
+                if (col != std::string::npos) {
+                    try {
+                        std::string numStr = line.substr(col + 1);
+                        size_t comma = numStr.find(',');
+                        if (comma != std::string::npos) numStr = numStr.substr(0, comma);
+                        float val = std::stof(numStr);
+                        char b[64];
+                        if (val >= 120.0f) snprintf(b, sizeof(b), "%.1f dB (BIT-EXACT)", val);
+                        else snprintf(b, sizeof(b), "%.2f dB", val);
+                        livePsnr = b;
+                        parityMeasured = true;
+                        if (val >= 45.0f) parityPass = true;
+                    } catch (...) {}
+                }
+            } else if (line.find("\"diff_pct\":") != std::string::npos || line.find("\"mae\":") != std::string::npos) {
+                size_t col = line.find(':');
+                if (col != std::string::npos) {
+                    try {
+                        std::string numStr = line.substr(col + 1);
+                        size_t comma = numStr.find(',');
+                        if (comma != std::string::npos) numStr = numStr.substr(0, comma);
+                        float delta = std::stof(numStr);
+                        char b[64];
+                        snprintf(b, sizeof(b), "%.4f", delta);
+                        liveMaxDelta = b;
+                    } catch (...) {}
+                }
+            }
+        }
+    }
+
     // Top Controls Bar
     ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.10f, 0.12f, 0.16f, 1.0f));
     ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, s(6.0f));
@@ -4307,19 +4354,43 @@ void GuiApp::renderRayTracingViewport() {
         ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.20f, 0.50f, 0.80f, 0.6f));
         ImGui::BeginChild("ParityBanner", ImVec2(0, s(34.0f)), true, ImGuiWindowFlags_NoScrollbar);
         ImGui::AlignTextToFramePadding();
-        ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "[PARITY: PASS]");
-        ImGui::SameLine(0, s(16.0f));
-        ImGui::TextDisabled("PSNR:"); ImGui::SameLine();
-        ImGui::TextColored(ImVec4(0.95f, 0.95f, 0.95f, 1.0f), "%s", curSceneMeta.psnr);
-        ImGui::SameLine(0, s(16.0f));
-        ImGui::TextDisabled("Max Delta:"); ImGui::SameLine();
-        ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s", curSceneMeta.maxDelta);
+
+        if (!parityMeasured) {
+            ImGui::TextColored(ImVec4(0.70f, 0.70f, 0.75f, 1.0f), "[PARITY: NOT MEASURED]");
+            ImGui::SameLine(0, s(16.0f));
+            ImGui::TextDisabled("PSNR:"); ImGui::SameLine();
+            ImGui::TextColored(ImVec4(0.70f, 0.70f, 0.75f, 1.0f), "--");
+            ImGui::SameLine(0, s(16.0f));
+            ImGui::TextDisabled("Max Delta:"); ImGui::SameLine();
+            ImGui::TextColored(ImVec4(0.70f, 0.70f, 0.75f, 1.0f), "--");
+        } else if (parityPass) {
+            ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "[PARITY: PASS]");
+            ImGui::SameLine(0, s(16.0f));
+            ImGui::TextDisabled("PSNR:"); ImGui::SameLine();
+            ImGui::TextColored(ImVec4(0.95f, 0.95f, 0.95f, 1.0f), "%s", livePsnr.c_str());
+            ImGui::SameLine(0, s(16.0f));
+            ImGui::TextDisabled("Max Delta:"); ImGui::SameLine();
+            ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s", liveMaxDelta.c_str());
+        } else {
+            ImGui::TextColored(ImVec4(0.95f, 0.35f, 0.35f, 1.0f), "[PARITY: FAIL]");
+            ImGui::SameLine(0, s(16.0f));
+            ImGui::TextDisabled("PSNR:"); ImGui::SameLine();
+            ImGui::TextColored(ImVec4(0.95f, 0.40f, 0.40f, 1.0f), "%s", livePsnr.c_str());
+            ImGui::SameLine(0, s(16.0f));
+            ImGui::TextDisabled("Max Delta:"); ImGui::SameLine();
+            ImGui::TextColored(ImVec4(0.95f, 0.40f, 0.40f, 1.0f), "%s", liveMaxDelta.c_str());
+        }
+
         ImGui::SameLine(0, s(16.0f));
         ImGui::TextDisabled("Triangles:"); ImGui::SameLine();
         ImGui::TextColored(ImVec4(0.95f, 0.80f, 0.35f, 1.0f), "%s", curSceneMeta.triangleCount);
         ImGui::SameLine(0, s(16.0f));
         ImGui::TextDisabled("Speedup:"); ImGui::SameLine();
-        ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s", (dynamicSpeedup != "--" ? dynamicSpeedup.c_str() : curSceneMeta.speedup));
+        if (dynamicSpeedup != "--") {
+            ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s (Live)", dynamicSpeedup.c_str());
+        } else {
+            ImGui::TextColored(ImVec4(0.65f, 0.70f, 0.80f, 1.0f), "--");
+        }
         ImGui::EndChild();
         ImGui::PopStyleColor(2);
 
@@ -4499,10 +4570,16 @@ void GuiApp::renderRayTracingViewport() {
             ImGui::TextColored(ImVec4(0.40f, 0.78f, 1.00f, 1.0f), "Technique A: Megakernel (Reference)");
             ImGui::TextDisabled("Architecture: Monolithic Ray Query kernel (Stackless traversal)");
             ImGui::Text("Throughput: "); ImGui::SameLine();
-            ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.0f, 1.0f), "%s", (dynamicTechAScore != "--" ? dynamicTechAScore.c_str() : curSceneMeta.techAScore));
+            if (dynamicTechAScore != "--") {
+                ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.0f, 1.0f), "%s (Live)", dynamicTechAScore.c_str());
+            } else {
+                ImGui::TextColored(ImVec4(0.65f, 0.70f, 0.80f, 1.0f), "Not Measured");
+            }
             ImGui::SameLine(0, s(16.0f));
+            ImGui::TextDisabled("Author Target: %s", curSceneMeta.techAScore);
             ImGui::TextDisabled("VGPR Pressure:"); ImGui::SameLine();
             ImGui::TextColored(ImVec4(0.95f, 0.65f, 0.35f, 1.0f), "%d VGPRs", curSceneMeta.vgprTrad);
+            ImGui::SameLine(0, s(16.0f));
             ImGui::TextDisabled("SIMD Utilization:"); ImGui::SameLine();
             ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f), "%s", curSceneMeta.simdTrad);
             ImGui::EndChild();
@@ -4512,10 +4589,16 @@ void GuiApp::renderRayTracingViewport() {
             ImGui::TextColored(ImVec4(0.98f, 0.72f, 0.35f, 1.0f), "Technique B: Compacted Wavefront (DGC / SER)");
             ImGui::TextDisabled("Architecture: Shader Execution Reordering & Clustered Ray Bins");
             ImGui::Text("Throughput: "); ImGui::SameLine();
-            ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s", (dynamicTechBScore != "--" ? dynamicTechBScore.c_str() : curSceneMeta.techBScore));
+            if (dynamicTechBScore != "--") {
+                ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s (Live)", dynamicTechBScore.c_str());
+            } else {
+                ImGui::TextColored(ImVec4(0.65f, 0.70f, 0.80f, 1.0f), "Not Measured");
+            }
             ImGui::SameLine(0, s(16.0f));
+            ImGui::TextDisabled("Author Target: %s", curSceneMeta.techBScore);
             ImGui::TextDisabled("VGPR Pressure:"); ImGui::SameLine();
             ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%d VGPRs", curSceneMeta.vgprDgc);
+            ImGui::SameLine(0, s(16.0f));
             ImGui::TextDisabled("SIMD Utilization:"); ImGui::SameLine();
             ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s", curSceneMeta.simdDgc);
             ImGui::EndChild();

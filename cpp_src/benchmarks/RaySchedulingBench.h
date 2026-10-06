@@ -93,8 +93,7 @@ public:
   std::string GetConfigName(uint32_t config_idx) const override;
   const char *GetMetric(uint32_t config_idx = 0) const override {
     if (config_idx < 3) return "MHits/s";
-    if (config_idx == 13 || config_idx == 26) return "MRecords/s";
-    if (config_idx == 28) return "GB/s";
+    if (config_idx == 13 || config_idx == 26 || config_idx == 28) return "MRecords/s";
     return "MRays/s";
   }
   void SetVerifyParity(bool verify) override { verifyParity = verify; }

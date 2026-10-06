@@ -60,8 +60,8 @@ public:
                              uint32_t num_args) override;
   void setKernelArg(ComputeKernel kernel, uint32_t arg_index,
                     ComputeBuffer buffer) override;
-  void setKernelAS(ComputeKernel kernel, uint32_t arg_index,
-                   AccelerationStructure as) override {
+  void setKernelAS(ComputeKernel /*kernel*/, uint32_t /*arg_index*/,
+                   AccelerationStructure /*as*/) override {
     throw std::runtime_error("setKernelAS not supported on OpenCL backend");
   }
   void setKernelArg(ComputeKernel kernel, uint32_t arg_index, size_t arg_size,

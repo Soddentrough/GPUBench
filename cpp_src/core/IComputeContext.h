@@ -64,6 +64,7 @@ struct DeviceInfo {
   std::string driverVersionStr = "";
   std::string pcieBusId = "";
   uint64_t dedicatedVramBytes = 0;
+  bool isApu = false;
   bool verbose = false;
 };
 
@@ -83,14 +84,14 @@ public:
   virtual DeviceInfo getCurrentDeviceInfo() const = 0;
   virtual uint32_t getSelectedDeviceIndex() const = 0;
 
-  virtual void setVerbose(bool v) {}
+  virtual void setVerbose(bool /*v*/) {}
   virtual bool isVerbose() const { return false; }
-  virtual void setQuiet(bool q) {}
+  virtual void setQuiet(bool /*q*/) {}
   virtual bool isQuiet() const { return false; }
 
   // Compilation progress tracking
-  virtual void setExpectedKernelCount(uint32_t count) {}
-  virtual void notifyKernelCreated(const std::string &kernel_name) {}
+  virtual void setExpectedKernelCount(uint32_t /*count*/) {}
+  virtual void notifyKernelCreated(const std::string & /*kernel_name*/) {}
 
   // Buffer management
   virtual ComputeBuffer createBuffer(size_t size,
@@ -108,11 +109,11 @@ public:
 
   // Create an RT pipeline from multiple shaders (raygen, miss, closest hits)
   virtual ComputeKernel createRTPipeline(
-      const std::string &rgen_path, const std::string &rmiss_path,
-      const std::vector<std::string> &rchit_paths,
-      const std::vector<std::string> &rahit_paths,
-      const std::vector<std::string> &rint_paths,
-      uint32_t num_buffer_args) {
+      const std::string & /*rgen_path*/, const std::string & /*rmiss_path*/,
+      const std::vector<std::string> & /*rchit_paths*/,
+      const std::vector<std::string> & /*rahit_paths*/,
+      const std::vector<std::string> & /*rint_paths*/,
+      uint32_t /*num_buffer_args*/) {
     return nullptr;
   }
   virtual void setKernelArg(ComputeKernel kernel, uint32_t arg_index,
