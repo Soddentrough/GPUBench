@@ -259,8 +259,8 @@ void RayDivergenceBench::Run(uint32_t config_idx) {
   vContext->setKernelAS(kernel, 0, (AccelerationStructure)activeTlas);
   vContext->setKernelArg(kernel, 1, resultBuffer);
 
-  // config_idx 0 = 100% coherence. config_idx 4 = 0% coherence.
-  float coherenceFactor = 1.0f - (float(config_idx) * 0.25f);
+  // config_idx 0 = 0% coherence (100% diffuse baseline). config_idx 4 = 100% coherence (0° beam).
+  float coherenceFactor = float(config_idx) * 0.25f;
   uint32_t seed = config_idx * 1337;
 
   // Push Constants: rayCount, coherenceFactor, seed
@@ -314,15 +314,15 @@ const char *RayDivergenceBench::GetSubCategory(uint32_t config_idx) const {
 std::string RayDivergenceBench::GetConfigName(uint32_t config_idx) const {
   switch (config_idx) {
   case 0:
-    return "Traversal: Isolated Microbenchmark - 0° Beam (Coherent)";
+    return "Traversal: Isolated Microbenchmark - 90° Hemispherical (Incoherent)";
   case 1:
-    return "Traversal: Isolated Microbenchmark - 22.5° Cone Spread";
+    return "Traversal: Isolated Microbenchmark - 67.5° Cone Spread";
   case 2:
     return "Traversal: Isolated Microbenchmark - 45° Cone Spread";
   case 3:
-    return "Traversal: Isolated Microbenchmark - 67.5° Cone Spread";
+    return "Traversal: Isolated Microbenchmark - 22.5° Cone Spread";
   case 4:
-    return "Traversal: Isolated Microbenchmark - 90° Hemispherical (Incoherent)";
+    return "Traversal: Isolated Microbenchmark - 0° Beam (Coherent)";
   default:
     return "Traversal: Isolated Microbenchmark - Level " + std::to_string(config_idx);
   }

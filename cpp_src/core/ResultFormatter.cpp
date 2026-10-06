@@ -191,8 +191,13 @@ std::string cleanWorkloadName(const std::string &rawName, const std::string &sub
   }
 
   // Clean verbose divergence string
-  if (name.find("Isolated Microbenchmark") != std::string::npos) {
-    // Preserve unified taxonomy naming
+  static const std::string kDivPrefix1 = "Traversal: Isolated Microbenchmark - ";
+  static const std::string kDivPrefix2 = "Isolated Microbenchmark - ";
+  if (name.rfind(kDivPrefix1, 0) == 0) {
+    name = name.substr(kDivPrefix1.length());
+  } else if (name.find(kDivPrefix2) != std::string::npos) {
+    size_t pos = name.find(kDivPrefix2);
+    name = name.substr(pos + kDivPrefix2.length());
   } else if (name.find("0% Coherence (Diffuse)") != std::string::npos ||
       name.find("0% Diffuse") != std::string::npos) {
     name = "Secondary bounce rays - 0% Diffuse";

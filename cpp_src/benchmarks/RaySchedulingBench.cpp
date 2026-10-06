@@ -478,6 +478,12 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
     dumpRenders = true;
   }
 
+  for (int c = 0; c < 35; ++c) {
+    lastCompletedPasses[c] = 1;
+  }
+  lastCompletedPasses[23] = 16;
+  lastCompletedPasses[24] = 16;
+
   rayCount = renderWidth * renderHeight;
   octantCapacity = std::max(1024u, (rayCount * 35u) / 100u);
   materialCapacity = rayCount;
@@ -1505,14 +1511,29 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     break;
   }
   case 23: { // Full Scene Path Tracing (16 SPP) - Traditional Megakernel
+    auto t0 = std::chrono::high_resolution_clock::now();
+    uint32_t passes = 0;
     for (uint32_t s = 0; s < 16; ++s) {
       PushConstantsTraditional pc{rayCount, 1, 1 + bounceDepth, seed + s * 7919u, dumpRenders ? 1u : 0u, renderWidth, renderHeight, 0, sceneTypeVal, isGltfVal, 16u, s};
       vContext->setKernelArg(kernelTraditional, 8, sizeof(pc), &pc);
       vContext->dispatch(kernelTraditional, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
+      vContext->waitIdle();
+      passes++;
+      if (s + 1 < 16) {
+        auto tNow = std::chrono::high_resolution_clock::now();
+        double elapsedMs = std::chrono::duration<double, std::milli>(tNow - t0).count();
+        double avgPassMs = elapsedMs / (s + 1);
+        if (elapsedMs + avgPassMs > 2500.0) {
+          break;
+        }
+      }
     }
+    lastCompletedPasses[23] = std::max(1u, passes);
     break;
   }
   case 24: { // Full Scene Path Tracing (16 SPP) - Device-Generated Commands (DGC)
+    auto t0 = std::chrono::high_resolution_clock::now();
+    uint32_t passes = 0;
     for (uint32_t s = 0; s < 16; ++s) {
       PushConstantsClassify pcClassify{rayCount, 1, s, seed + s * 7919u, dumpRenders ? 1u : 0u, renderWidth, renderHeight, bounceCapacity, 2, sceneTypeVal, isGltfVal, 16u};
       vContext->setKernelArg(kernelClassify, 10, sizeof(pcClassify), &pcClassify);
@@ -1523,7 +1544,18 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
           kernelResolve,
           kernelBounce, indirectBuffer, bounceBatches, true /* isPingPong */,
           isDGCAvailable ? &dgcInfoStandard : nullptr, isDGCAvailable ? 3u : 0u);
+      vContext->waitIdle();
+      passes++;
+      if (s + 1 < 16) {
+        auto tNow = std::chrono::high_resolution_clock::now();
+        double elapsedMs = std::chrono::duration<double, std::milli>(tNow - t0).count();
+        double avgPassMs = elapsedMs / (s + 1);
+        if (elapsedMs + avgPassMs > 2500.0) {
+          break;
+        }
+      }
     }
+    lastCompletedPasses[24] = std::max(1u, passes);
     break;
   }
   case 25: { // Full Scene Path Tracing - Persistent Threads (Work Stealing)
@@ -2456,7 +2488,8 @@ void RaySchedulingBench::Teardown() {
 BenchmarkResult RaySchedulingBench::GetResult(uint32_t config_idx) const {
   BenchmarkResult r;
   if (config_idx == 23 || config_idx == 24) {
-    r.operations = static_cast<uint64_t>(rayCount) * 16;
+    uint32_t passes = lastCompletedPasses[config_idx] > 0 ? lastCompletedPasses[config_idx] : 16u;
+    r.operations = static_cast<uint64_t>(rayCount) * passes;
   } else if ((config_idx >= 3 && config_idx <= 5) || config_idx == 25) {
     r.operations = static_cast<uint64_t>(rayCount) * ((samplesPerPixel > 1) ? samplesPerPixel : 1u);
   } else {

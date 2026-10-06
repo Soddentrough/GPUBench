@@ -343,6 +343,7 @@ private:
   uint32_t numPrimitives = 4096;
   SceneType sceneType = SceneType::IndoorAtrium;
   mutable double results[35] = {0.0};
+  mutable uint32_t lastCompletedPasses[35] = {0};
   mutable bool unsupportedConfig[35] = {false};
   mutable std::string unsupportedReason[35];
 };

@@ -178,6 +178,10 @@ int main(int argc, char** argv) {
         app.updateAndRender();
         vulkanContext.endFrame();
 
+        if (app.getExecutionState() == gpubench::gui::ExecutionState::Running) {
+            SDL_Delay(2);
+        }
+
         if (exitOnComplete && app.getExecutionState() == gpubench::gui::ExecutionState::Completed) {
             running = false;
         }

@@ -877,11 +877,11 @@ void GuiApp::initializeBenchmarkCategories() {
             {"RayAnyHit", "Alpha-Tested Geometry", "100% Solid (Any-Hit Baseline)", "Ray Tracing", "MRays/s", "100% opaque alpha evaluation baseline", true, 0},
             {"RayAnyHit", "Alpha-Tested Geometry", "50% Solid (Cutout Stress)", "Ray Tracing", "MRays/s", "50% solid / 50% transparent any-hit evaluation", true, 1},
             {"RayProcedural", "Procedural Geometry", "AABB Spheres", "Ray Tracing", "MRays/s", "Procedural analytical sphere intersection in bounding box", true, 0},
-            {"RayDivergence", "Ray Directional Coherence", "0° Beam (Coherent)", "Ray Tracing", "MRays/s", "Directional coherence sweep - 0° coherent beam", true, 0},
-            {"RayDivergence", "Ray Directional Coherence", "22.5° Cone Spread", "Ray Tracing", "MRays/s", "Directional coherence sweep - 22.5° cone spread", true, 1},
+            {"RayDivergence", "Ray Directional Coherence", "90° Hemispherical (Incoherent)", "Ray Tracing", "MRays/s", "Directional coherence sweep - 90° hemispherical diffuse scattering (Baseline)", true, 0},
+            {"RayDivergence", "Ray Directional Coherence", "67.5° Cone Spread", "Ray Tracing", "MRays/s", "Directional coherence sweep - 67.5° cone spread", true, 1},
             {"RayDivergence", "Ray Directional Coherence", "45° Cone Spread", "Ray Tracing", "MRays/s", "Directional coherence sweep - 45° cone spread", true, 2},
-            {"RayDivergence", "Ray Directional Coherence", "67.5° Cone Spread", "Ray Tracing", "MRays/s", "Directional coherence sweep - 67.5° cone spread", true, 3},
-            {"RayDivergence", "Ray Directional Coherence", "90° Hemispherical (Incoherent)", "Ray Tracing", "MRays/s", "Directional coherence sweep - 90° hemispherical diffuse scattering", true, 4}
+            {"RayDivergence", "Ray Directional Coherence", "22.5° Cone Spread", "Ray Tracing", "MRays/s", "Directional coherence sweep - 22.5° cone spread", true, 3},
+            {"RayDivergence", "Ray Directional Coherence", "0° Beam (Coherent)", "Ray Tracing", "MRays/s", "Directional coherence sweep - 0° coherent beam", true, 4}
         }});
 
         m_categories.push_back(cat);
@@ -1010,6 +1010,9 @@ void GuiApp::processEvents() {
 void GuiApp::updateAndRender() {
     processIncomingResults();
     updateZoomShortcuts();
+    if (m_exportNotificationTimer > 0.0f) {
+        m_exportNotificationTimer -= ImGui::GetIO().DeltaTime;
+    }
 
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->WorkPos);
@@ -1543,12 +1546,6 @@ void GuiApp::renderLeftSidebar(float width, float height) {
 void GuiApp::renderRightWorkspace(float width, float height) {
     ImGui::BeginChild("RightWorkspace", ImVec2(width, height), false);
 
-    if (m_exportNotificationTimer > 0.0f) {
-        m_exportNotificationTimer -= ImGui::GetIO().DeltaTime;
-        ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s", m_exportNotificationText.c_str());
-        ImGui::Spacing();
-    }
-
     if (ImGui::BeginTabBar("MainWorkstationTabs", ImGuiTabBarFlags_None)) {
         if (ImGui::BeginTabItem("Benchmark Suite")) {
             renderBenchmarkSuitePanel();
@@ -1577,6 +1574,17 @@ void GuiApp::renderRightWorkspace(float width, float height) {
     }
 
     ImGui::EndChild();
+}
+
+static bool hasAngleToken(const std::string& str, const std::string& token) {
+    size_t pos = 0;
+    while ((pos = str.find(token, pos)) != std::string::npos) {
+        if (pos == 0 || !isdigit(static_cast<unsigned char>(str[pos - 1]))) {
+            return true;
+        }
+        pos += token.length();
+    }
+    return false;
 }
 
 bool GuiApp::matchesItem(const ResultData& r, const BenchmarkItem& itm, uint32_t activeDev) const {
@@ -1649,6 +1657,31 @@ bool GuiApp::matchesItem(const ResultData& r, const BenchmarkItem& itm, uint32_t
     if (itm.subcategory == "Indirect Command Synthesis" || r.subcategory == "Indirect Command Synthesis") {
         std::string clean = cleanWorkloadName(r.benchmarkName, r.subcategory);
         return (clean == itm.name || r.benchmarkName == itm.name || r.benchmarkName.find(itm.name) != std::string::npos);
+    }
+
+    // Ray Directional Coherence matching
+    if (itm.subcategory == "Ray Directional Coherence" || r.subcategory == "Ray Directional Coherence") {
+        std::string clean = cleanWorkloadName(r.benchmarkName, r.subcategory);
+        if (clean == itm.name || r.benchmarkName == itm.name || clean.find(itm.name) != std::string::npos) {
+            return true;
+        }
+
+        if (hasAngleToken(itm.name, "90°") || itm.name.find("90 deg") != std::string::npos || itm.name.find("Hemispherical") != std::string::npos || itm.name.find("Diffuse") != std::string::npos) {
+            return r.configIndex == 0 || hasAngleToken(clean, "90°") || clean.find("90 deg") != std::string::npos || clean.find("Hemispherical") != std::string::npos || clean.find("Diffuse") != std::string::npos;
+        }
+        if (hasAngleToken(itm.name, "67.5°") || itm.name.find("67.5 deg") != std::string::npos) {
+            return r.configIndex == 1 || clean.find("67.5°") != std::string::npos || clean.find("67.5 deg") != std::string::npos;
+        }
+        if (hasAngleToken(itm.name, "45°") || itm.name.find("45 deg") != std::string::npos) {
+            return r.configIndex == 2 || clean.find("45°") != std::string::npos || clean.find("45 deg") != std::string::npos;
+        }
+        if (hasAngleToken(itm.name, "22.5°") || itm.name.find("22.5 deg") != std::string::npos) {
+            return r.configIndex == 3 || clean.find("22.5°") != std::string::npos || clean.find("22.5 deg") != std::string::npos;
+        }
+        if (hasAngleToken(itm.name, "0°") || itm.name.find("0 deg") != std::string::npos || itm.name.find("Beam") != std::string::npos) {
+            return r.configIndex == 4 || hasAngleToken(clean, "0°") || clean.find("0 deg") != std::string::npos || clean.find("Beam") != std::string::npos;
+        }
+        return false;
     }
 
     // VRAM Bandwidth matching
@@ -1809,7 +1842,7 @@ bool GuiApp::matchesItem(const ResultData& r, const BenchmarkItem& itm, uint32_t
     for (const char* pct : {"100%", "75%", "50%", "25%", "10%", "0%"}) {
         if (hasPercentToken(itm.name, pct) && hasPercentToken(clean, pct)) return true;
     }
-    for (const char* deg : {"45 deg", "75 deg", "90 deg", "180 deg", "Microbench", "Mirror", "Diffuse", "0°", "22.5°", "45°", "67.5°", "90°", "Beam", "Cone", "Hemispherical"}) {
+    for (const char* deg : {"45 deg", "75 deg", "90 deg", "180 deg", "Microbench", "Mirror", "Diffuse", "0°", "22.5°", "45°", "67.5°", "90°"}) {
         if (itm.name.find(deg) != std::string::npos && clean.find(deg) != std::string::npos) return true;
     }
     for (const char* pl : {"16B", "128B", "256B"}) {
@@ -1817,7 +1850,8 @@ bool GuiApp::matchesItem(const ResultData& r, const BenchmarkItem& itm, uint32_t
     }
     if (itm.name.find("Ray-Triangle") != std::string::npos && clean.find("Ray-Triangle") != std::string::npos) return true;
     if (itm.name.find("Ray-Box") != std::string::npos && clean.find("Ray-Box") != std::string::npos) return true;
-    if (itm.name.find("Coherent") != std::string::npos && clean.find("Coherent") != std::string::npos) return true;
+    if (itm.name.find("Coherent") != std::string::npos && itm.name.find("Incoherent") == std::string::npos &&
+        clean.find("Coherent") != std::string::npos && clean.find("Incoherent") == std::string::npos) return true;
     if (itm.name.find("Deep Box") != std::string::npos && clean.find("Box") != std::string::npos) return true;
     if (itm.name.find("Spheres") != std::string::npos && clean.find("Spheres") != std::string::npos) return true;
     if (itm.id == "RayProcedural" || itm.name.find("Procedural") != std::string::npos) {
@@ -1983,10 +2017,9 @@ GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
                        item.name.find("100% Solid") != std::string::npos ||
                        item.name.find("Uniform Material") != std::string::npos ||
                        item.name.find("Coherent Material") != std::string::npos ||
-                       item.name.find("0° Beam") != std::string::npos ||
-                       item.name.find("0 deg Divergence") != std::string::npos ||
-                       item.name.find("0 deg (Primary Rays)") != std::string::npos ||
-                       item.name.find("100% Mirror") != std::string::npos ||
+                       item.name.find("90° Hemispherical") != std::string::npos ||
+                       item.name.find("90 deg") != std::string::npos ||
+                       item.name.find("Diffuse Baseline") != std::string::npos ||
                        item.name.find("16B Payload") != std::string::npos ||
                        item.name.find("16B") != std::string::npos ||
                        item.name.find("4 Bytes") != std::string::npos) {
@@ -2012,8 +2045,8 @@ GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
                     baselineName = "100% Solid";
                 } else if (item.subcategory.find("Material Divergence") != std::string::npos || item.name.find("Material Divergence") != std::string::npos) {
                     baselineName = "Uniform";
-                } else if (item.subcategory.find("Ray Directional Coherence") != std::string::npos || item.name.find("Coherence") != std::string::npos || item.name.find("Mirror") != std::string::npos) {
-                    baselineName = "0° Beam";
+                } else if (item.subcategory.find("Ray Directional Coherence") != std::string::npos || item.name.find("Coherence") != std::string::npos || item.name.find("Mirror") != std::string::npos || item.name.find("Diffuse") != std::string::npos) {
+                    baselineName = "90° Hemispherical";
                 } else if (item.subcategory.find("Payload Register Pressure") != std::string::npos || item.name.find("Payload") != std::string::npos) {
                     baselineName = "16B";
                 } else if (item.subcategory.find("Traversal Ordering") != std::string::npos ||
@@ -2058,9 +2091,10 @@ GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
                             baselineRes = &r;
                             break;
                         }
-                    } else if (baselineName == "0° Beam") {
+                    } else if (baselineName == "90° Hemispherical") {
                         if (r.subcategory == "Ray Directional Coherence" &&
-                            (r.configIndex == 0 || r.benchmarkName.find("0°") != std::string::npos || r.benchmarkName.find("0 deg") != std::string::npos || r.benchmarkName.find("Coherent") != std::string::npos)) {
+                            (r.configIndex == 0 || hasAngleToken(r.benchmarkName, "90°") || r.benchmarkName.find("90 deg") != std::string::npos ||
+                             r.benchmarkName.find("Hemispherical") != std::string::npos || r.benchmarkName.find("Diffuse") != std::string::npos)) {
                             baselineRes = &r;
                             break;
                         }
@@ -2156,9 +2190,8 @@ void GuiApp::renderBenchmarkSuitePanel() {
         ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.30f, 0.65f, 0.95f, 0.85f));
 
         float btn1W = ImGui::CalcTextSize("View Results Scorecard").x + ImGui::GetStyle().FramePadding.x * 2.0f;
-        float btn2W = ImGui::CalcTextSize("Export JSON").x + ImGui::GetStyle().FramePadding.x * 2.0f;
-        float btn3W = ImGui::CalcTextSize("Reconfigure Workloads").x + ImGui::GetStyle().FramePadding.x * 2.0f;
-        float totalBtnsW = btn1W + btn2W + btn3W + s(28.0f);
+        float btn2W = ImGui::CalcTextSize("Reconfigure Workloads").x + ImGui::GetStyle().FramePadding.x * 2.0f;
+        float totalBtnsW = btn1W + btn2W + s(14.0f);
         float bannerTextW = ImGui::CalcTextSize("[PASSED] Benchmark suite finished (171 results recorded). | Selection locked.").x;
         bool needsTwoLines = (ImGui::GetContentRegionAvail().x < bannerTextW + totalBtnsW + s(30.0f));
         float bannerH = needsTwoLines ? (ImGui::GetFrameHeight() * 2.0f + s(22.0f)) : (ImGui::GetFrameHeight() + s(16.0f));
@@ -2190,10 +2223,6 @@ void GuiApp::renderBenchmarkSuitePanel() {
         
         if (ImGui::SmallButton("View Results Scorecard")) {
             m_switchToScorecard = true;
-        }
-        ImGui::SameLine();
-        if (ImGui::SmallButton("Export JSON")) {
-            exportResultsToJson("");
         }
         ImGui::SameLine();
         if (ImGui::SmallButton("Reconfigure Workloads")) {
@@ -3694,22 +3723,6 @@ void GuiApp::renderResultsScorecard() {
     ImGui::PopStyleColor();
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Hide tests with UNSUPPORTED status from results table (default: hidden)");
-    }
-
-    // Export Button
-    float exportW = ImGui::CalcTextSize("Export JSON").x + ImGui::GetStyle().FramePadding.x * 2.0f;
-    ImGui::SameLine();
-    float availExp = ImGui::GetContentRegionAvail().x;
-    if (availExp >= exportW + s(14.0f)) {
-        float targetX = ImGui::GetCursorPosX() + availExp - exportW;
-        if (targetX > ImGui::GetCursorPosX()) {
-            ImGui::SetCursorPosX(targetX);
-        }
-    } else {
-        ImGui::NewLine();
-    }
-    if (ImGui::Button("Export JSON")) {
-        exportResultsToJson("");
     }
 
     ImGui::Spacing();

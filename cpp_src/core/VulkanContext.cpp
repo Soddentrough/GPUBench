@@ -2059,6 +2059,7 @@ void VulkanContext::dispatch(ComputeKernel kernel, uint32_t grid_x,
                                         ? (VK_SHADER_STAGE_RAYGEN_BIT_KHR |
                                            VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR |
                                            VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
+                                           VK_SHADER_STAGE_INTERSECTION_BIT_KHR |
                                            VK_SHADER_STAGE_MISS_BIT_KHR)
                                         : VK_SHADER_STAGE_COMPUTE_BIT;
 
@@ -2581,6 +2582,7 @@ void VulkanContext::dispatchRayTracingIndirect(ComputeKernel kernel_handle,
     vkCmdPushConstants(
         frame.commandBuffer, vulkanKernel->pipelineLayout,
         VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR |
+            VK_SHADER_STAGE_ANY_HIT_BIT_KHR | VK_SHADER_STAGE_INTERSECTION_BIT_KHR |
             VK_SHADER_STAGE_MISS_BIT_KHR,
         0, vulkanKernel->pushConstantData.size(),
         vulkanKernel->pushConstantData.data());

@@ -987,69 +987,86 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
           double single_run_ms =
               std::chrono::duration<double, std::milli>(end - start).count();
 
-          // Warmup: Run until the GPU clocks ramp up from idle/sleep to sustained boost clocks.
-          // On modern GPUs with dynamic power management (DPM) governors, ramping takes ~250-400ms.
-          const double min_warmup_duration_ms = 400.0;
-          uint64_t warmup_iters = 1;
-          if (single_run_ms > 0.0) {
-            if (single_run_ms < 50.0) {
-              warmup_iters = static_cast<uint64_t>(
-                  std::max(3.0, std::ceil(min_warmup_duration_ms / single_run_ms)));
-            } else if (single_run_ms < min_warmup_duration_ms) {
-              warmup_iters = static_cast<uint64_t>(
-                  std::ceil(min_warmup_duration_ms / single_run_ms));
-            }
-          }
-          warmup_iters = std::min(warmup_iters, static_cast<uint64_t>(200));
-
-          for (uint64_t w = 0; w < warmup_iters; ++w) {
-            bench->Run(i);
-            if (single_run_ms >= 500.0) {
-              context->waitIdle();
-            }
-          }
-          context->waitIdle();
-
-          // After warmup, re-measure single run latency at warmed-up clock speeds
-          start = std::chrono::high_resolution_clock::now();
-          bench->Run(i);
-          context->waitIdle();
-          end = std::chrono::high_resolution_clock::now();
-          single_run_ms =
-              std::chrono::duration<double, std::milli>(end - start).count();
-
-          const double target_duration_ms = 250.0;
           uint64_t iterations = 1;
-          if (single_run_ms > 0.0) {
-            iterations = static_cast<uint64_t>(
-                  std::max(1.0, std::round(target_duration_ms / single_run_ms)));
-          }
-          iterations = std::min(iterations, static_cast<uint64_t>(10000));
-          iterations = std::max(iterations, static_cast<uint64_t>(1));
+          if (single_run_ms >= 1500.0) {
+            // Already took 1.5+ seconds on this single invocation.
+            // Clocks are fully boosted and measurement is statistically robust.
+            // Avoid redundant iterations so total benchmark duration stays strictly < 5 seconds.
+            total_invocations = 1;
+            total_time_ms = single_run_ms;
+          } else {
+            // Warmup: Run until GPU clocks ramp up to sustained boost clocks.
+            // If single_run_ms >= 200ms, GPU is already at boost clocks; skip warmup.
+            const double min_warmup_duration_ms = 400.0;
+            uint64_t warmup_iters = 0;
+            if (single_run_ms > 0.0 && single_run_ms < 200.0) {
+              if (single_run_ms < 50.0) {
+                warmup_iters = static_cast<uint64_t>(
+                    std::max(2.0, std::ceil(min_warmup_duration_ms / single_run_ms)));
+              } else {
+                warmup_iters = static_cast<uint64_t>(
+                    std::ceil(min_warmup_duration_ms / single_run_ms));
+              }
+            }
+            warmup_iters = std::min(warmup_iters, static_cast<uint64_t>(50));
 
-          total_invocations = iterations;
-          if (context->hasGpuTiming()) {
-            context->startTiming();
-          }
-          start = std::chrono::high_resolution_clock::now();
-          for (uint64_t iter = 0; iter < iterations; ++iter) {
-            bench->Run(i);
-          }
-          if (context->hasGpuTiming()) {
-            double gpu_time = context->stopTiming();
-            if (gpu_time > 0.0) {
-              total_time_ms = gpu_time;
+            for (uint64_t w = 0; w < warmup_iters; ++w) {
+              if (cancelToken && cancelToken->load()) break;
+              bench->Run(i);
+              if (single_run_ms >= 100.0) {
+                context->waitIdle();
+              }
+            }
+            context->waitIdle();
+
+            // Re-measure single run latency only if warmup was actually performed
+            if (warmup_iters > 0) {
+              start = std::chrono::high_resolution_clock::now();
+              bench->Run(i);
+              context->waitIdle();
+              end = std::chrono::high_resolution_clock::now();
+              single_run_ms =
+                  std::chrono::duration<double, std::milli>(end - start).count();
+            }
+
+            const double target_duration_ms = 250.0;
+            if (single_run_ms > 0.0) {
+              iterations = static_cast<uint64_t>(
+                    std::max(1.0, std::round(target_duration_ms / single_run_ms)));
+            }
+            iterations = std::min(iterations, static_cast<uint64_t>(5000));
+            iterations = std::max(iterations, static_cast<uint64_t>(1));
+
+            // Hard clamp: ensure timed loop duration does not exceed 1500ms
+            if (single_run_ms > 0.0 && (iterations * single_run_ms > 1500.0)) {
+              iterations = static_cast<uint64_t>(std::max(1.0, 1500.0 / single_run_ms));
+            }
+
+            total_invocations = iterations;
+            if (context->hasGpuTiming()) {
+              context->startTiming();
+            }
+            start = std::chrono::high_resolution_clock::now();
+            for (uint64_t iter = 0; iter < iterations; ++iter) {
+              if (cancelToken && cancelToken->load()) break;
+              bench->Run(i);
+            }
+            if (context->hasGpuTiming()) {
+              double gpu_time = context->stopTiming();
+              if (gpu_time > 0.0) {
+                total_time_ms = gpu_time;
+              } else {
+                context->waitIdle();
+                end = std::chrono::high_resolution_clock::now();
+                total_time_ms =
+                    std::chrono::duration<double, std::milli>(end - start).count();
+              }
             } else {
               context->waitIdle();
               end = std::chrono::high_resolution_clock::now();
               total_time_ms =
                   std::chrono::duration<double, std::milli>(end - start).count();
             }
-          } else {
-            context->waitIdle();
-            end = std::chrono::high_resolution_clock::now();
-            total_time_ms =
-                std::chrono::duration<double, std::milli>(end - start).count();
           }
           if (verbose) {
             std::cout << "[TIMING " << bench_name << "] single_run_ms: " << single_run_ms
@@ -1411,7 +1428,7 @@ void BenchmarkRunner::runHostBenchmarks(const std::vector<std::string> &benchmar
           double total_time_ms = 0;
           uint64_t total_invocations = 0;
           auto bench_start = std::chrono::high_resolution_clock::now();
-          while (total_time_ms < 5000) {
+          while (total_time_ms < 500.0 && total_invocations < 1000) {
             if (cancelToken && cancelToken->load()) {
               break;
             }

@@ -376,24 +376,54 @@ void VulkanContext::endFrame() {
     const bool isMinimized = (drawData->DisplaySize.x <= 0.0f || drawData->DisplaySize.y <= 0.0f);
 
     if (!isMinimized) {
-        frameRender(drawData);
-        framePresent();
+        if (frameRender(drawData)) {
+            framePresent();
+        }
     }
 }
 
-void VulkanContext::frameRender(ImDrawData* drawData) {
+bool VulkanContext::frameRender(ImDrawData* drawData) {
     VkResult err;
     VkSemaphore imageAcquiredSemaphore = m_mainWindowData.FrameSemaphores[m_mainWindowData.SemaphoreIndex].ImageAcquiredSemaphore;
     VkSemaphore renderCompleteSemaphore = m_mainWindowData.FrameSemaphores[m_mainWindowData.SemaphoreIndex].RenderCompleteSemaphore;
 
-    err = vkAcquireNextImageKHR(m_device, m_mainWindowData.Swapchain, UINT64_MAX, imageAcquiredSemaphore, VK_NULL_HANDLE, &m_mainWindowData.FrameIndex);
+    // Use 16ms slice instead of UINT64_MAX to prevent blocking the GUI thread when the swapchain is waiting
+    constexpr uint64_t kAcquireTimeoutNs = 16'000'000ULL;
+    err = vkAcquireNextImageKHR(m_device, m_mainWindowData.Swapchain, kAcquireTimeoutNs, imageAcquiredSemaphore, VK_NULL_HANDLE, &m_mainWindowData.FrameIndex);
+    if (err == VK_TIMEOUT || err == VK_NOT_READY) {
+        SDL_PumpEvents();
+        return false;
+    }
     if (err == VK_ERROR_OUT_OF_DATE_KHR || err == VK_SUBOPTIMAL_KHR) {
         m_swapchainRebuild = true;
-        return;
+        return false;
+    }
+    if (err != VK_SUCCESS) {
+        return false;
     }
 
     ImGui_ImplVulkanH_Frame* fd = &m_mainWindowData.Frames[m_mainWindowData.FrameIndex];
-    err = vkWaitForFences(m_device, 1, &fd->Fence, VK_TRUE, UINT64_MAX);
+
+    // Wait for the in-flight frame's fence with 16ms slices while pumping OS window events.
+    // This guarantees the GUI thread responds to Wayland/X11 pings and never hangs.
+    while (true) {
+        constexpr uint64_t kFenceTimeoutNs = 16'000'000ULL;
+        err = vkWaitForFences(m_device, 1, &fd->Fence, VK_TRUE, kFenceTimeoutNs);
+        if (err == VK_SUCCESS) {
+            break;
+        }
+        if (err == VK_TIMEOUT) {
+            SDL_PumpEvents();
+            SDL_Event ev;
+            if (SDL_PeepEvents(&ev, 1, SDL_PEEKEVENT, SDL_EVENT_QUIT, SDL_EVENT_QUIT) > 0) {
+                // User requested quit; stop waiting
+                break;
+            }
+            continue;
+        }
+        break;
+    }
+
     err = vkResetFences(m_device, 1, &fd->Fence);
 
     err = vkResetCommandPool(m_device, fd->CommandPool, 0);
@@ -431,6 +461,7 @@ void VulkanContext::frameRender(ImDrawData* drawData) {
 
     err = vkEndCommandBuffer(fd->CommandBuffer);
     err = vkQueueSubmit(m_queue, 1, &submitInfo, fd->Fence);
+    return true;
 }
 
 void VulkanContext::framePresent() {

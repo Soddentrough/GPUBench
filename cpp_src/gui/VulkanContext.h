@@ -59,7 +59,7 @@ private:
     bool setupVulkan();
     void setupVulkanWindow(int width, int height);
     void cleanupVulkanWindow();
-    void frameRender(ImDrawData* drawData);
+    bool frameRender(ImDrawData* drawData);
     void framePresent();
 
     SDL_Window* m_window{nullptr};
