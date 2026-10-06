@@ -186,7 +186,7 @@ if(HIP_FOUND)
         set(HIPCC_ENV)
     endif()
 
-    file(GLOB HIP_SOURCES "hip_kernels/*.hip")
+    file(GLOB HIP_SOURCES CONFIGURE_DEPENDS "hip_kernels/*.hip")
     file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/kernels/rocm)
     
     foreach(HIP_SOURCE ${HIP_SOURCES})

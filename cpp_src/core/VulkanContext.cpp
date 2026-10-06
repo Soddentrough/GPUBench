@@ -370,13 +370,16 @@ const std::vector<DeviceInfo> &VulkanContext::getDevices() const {
       info.subgroupSize = subgroupProps.subgroupSize;
       info.fp64Support = (features2.features.shaderFloat64 == VK_TRUE);
       info.fp16Support = (features168.shaderFloat16 == VK_TRUE);
-      info.bf16Support = true;
-      info.int8Support =
-          true; // Usually supported if 8bit storage/int8 shader is supported
+      info.bf16Support = hasExt("VK_KHR_shader_bfloat16") || hasExt("VK_EXT_shader_bfloat16");
+      info.int8Support = (features168.shaderInt8 == VK_TRUE);
       info.cooperativeMatrixSupport =
-          hasExt(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME);
-      info.structuredSparsitySupport = true;
+          hasExt(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME) &&
+          (coopMatrixFeatures.cooperativeMatrix == VK_TRUE);
+      info.structuredSparsitySupport = hasExt("VK_NV_cooperative_matrix2");
       info.fp8Support = hasExt("VK_EXT_shader_float8");
+      info.fp6Support = false;
+      info.fp4Support = false;
+      info.int4Support = false;
       info.rayTracingSupport =
           hasExt(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) &&
           hasExt(VK_KHR_RAY_QUERY_EXTENSION_NAME);
@@ -525,10 +528,11 @@ DeviceInfo VulkanContext::getCurrentDeviceInfo() const {
   info.subgroupSize = subgroupProps.subgroupSize;
   info.fp64Support = (features2_2.features.shaderFloat64 == VK_TRUE);
   info.fp16Support = (features168_curr.shaderFloat16 == VK_TRUE);
-  info.bf16Support = true;
-  info.int8Support = true;
+  info.bf16Support = hasExt("VK_KHR_shader_bfloat16") || hasExt("VK_EXT_shader_bfloat16");
+  info.int8Support = (features168_curr.shaderInt8 == VK_TRUE);
   info.cooperativeMatrixSupport =
-      hasExt(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME);
+      hasExt(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME) &&
+      (coopMatrixFeatures_curr.cooperativeMatrix == VK_TRUE);
   info.fp8Support = hasExt("VK_EXT_shader_float8");
   info.fp6Support = false;
   info.fp4Support = false; // No Vulkan FP4 shader type exists; Fp4Bench is
@@ -537,7 +541,7 @@ DeviceInfo VulkanContext::getCurrentDeviceInfo() const {
   // exists, so native INT4 rates cannot be measured through Vulkan. The
   // coop_matrix_int4.comp shader actually performs INT8 math.
   info.int4Support = false;
-  info.structuredSparsitySupport = true;
+  info.structuredSparsitySupport = hasExt("VK_NV_cooperative_matrix2");
   info.rayTracingSupport =
       hasExt(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) &&
       hasExt(VK_KHR_RAY_QUERY_EXTENSION_NAME);
