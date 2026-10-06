@@ -1,4 +1,5 @@
 #include "VulkanContext.h"
+#include "DeviceDatabase.h"
 #include "utils/ShaderCache.h"
 #include <algorithm>
 #include <cstring>
@@ -71,6 +72,8 @@ VulkanContext::~VulkanContext() {
       buffers.erase(buffers.begin());
     }
   }
+  cleanupStagingBuffer();
+  cleanupMemoryBlocks();
   if (device != VK_NULL_HANDLE) {
     for (size_t i = 0; i < kMaxInFlight; ++i) {
       if (inFlightFrames[i].fence != VK_NULL_HANDLE) {
@@ -412,28 +415,7 @@ const std::vector<DeviceInfo> &VulkanContext::getDevices() const {
       info.workGraphsSupported = hasExt("VK_AMDX_shader_enqueue") || hasExt("VK_KHR_work_graphs");
       info.dgcSupported = hasExt("VK_EXT_device_generated_commands");
 
-      if (props.vendorID == 0x1002) { // AMD
-        std::string dName = props.deviceName;
-        std::string dNameLower = dName;
-        std::transform(dNameLower.begin(), dNameLower.end(), dNameLower.begin(), ::tolower);
-        if (dNameLower.find("gfx12") != std::string::npos ||
-            dNameLower.find("r9700") != std::string::npos ||
-            dNameLower.find("radeon ai") != std::string::npos ||
-            dNameLower.find("navi 48") != std::string::npos ||
-            dNameLower.find("rx 9070") != std::string::npos) {
-          info.l2CacheSize = 8 * 1024 * 1024;
-          info.l3CacheSize = 64 * 1024 * 1024;
-        } else if (dNameLower.find("gfx115") != std::string::npos ||
-                   dNameLower.find("strix") != std::string::npos ||
-                   dNameLower.find("8060") != std::string::npos ||
-                   dNameLower.find("8050") != std::string::npos) {
-          info.l2CacheSize = 2 * 1024 * 1024;
-          info.l3CacheSize = 32 * 1024 * 1024;
-        } else {
-          info.l2CacheSize = 4 * 1024 * 1024;
-          info.l3CacheSize = 32 * 1024 * 1024;
-        }
-      }
+      DeviceDatabase::enrichDeviceInfo(info);
 
       deviceInfos.push_back(info);
     }
@@ -594,29 +576,7 @@ DeviceInfo VulkanContext::getCurrentDeviceInfo() const {
   info.workGraphsSupported = hasExt("VK_AMDX_shader_enqueue") || hasExt("VK_KHR_work_graphs");
   info.dgcSupported = dgcSupported;
 
-  if (properties.vendorID == 0x1002) { // AMD
-    std::string dName = properties.deviceName;
-    std::string dNameLower = dName;
-    std::transform(dNameLower.begin(), dNameLower.end(), dNameLower.begin(), ::tolower);
-    if (dNameLower.find("gfx12") != std::string::npos ||
-        dNameLower.find("r9700") != std::string::npos ||
-        dNameLower.find("radeon ai") != std::string::npos ||
-        dNameLower.find("navi 48") != std::string::npos ||
-        dNameLower.find("rx 9070") != std::string::npos) {
-      info.l2CacheSize = 8 * 1024 * 1024;
-      info.l3CacheSize = 64 * 1024 * 1024;
-    } else if (dNameLower.find("gfx115") != std::string::npos ||
-               dNameLower.find("strix") != std::string::npos ||
-               dNameLower.find("8060") != std::string::npos ||
-               dNameLower.find("8050") != std::string::npos) {
-      info.l2CacheSize = 2 * 1024 * 1024;
-      info.l3CacheSize = 32 * 1024 * 1024;
-    } else {
-      info.l2CacheSize = 4 * 1024 * 1024;
-      info.l3CacheSize = 32 * 1024 * 1024;
-    }
-  }
-
+  DeviceDatabase::enrichDeviceInfo(info);
   return info;
 }
 
@@ -639,6 +599,8 @@ void VulkanContext::pickPhysicalDevice(uint32_t index) {
     while (!buffers.empty()) {
       releaseBuffer(buffers.begin()->first);
     }
+    cleanupStagingBuffer();
+    cleanupMemoryBlocks();
     for (size_t i = 0; i < kMaxInFlight; ++i) {
       if (inFlightFrames[i].fence != VK_NULL_HANDLE) {
         vkDestroyFence(device, inFlightFrames[i].fence, nullptr);
@@ -1049,6 +1011,8 @@ void VulkanContext::createDevice() {
     timingCmdStart = timingCmds[0];
     timingCmdStop = timingCmds[1];
   }
+
+  initStagingBuffer();
 }
 
 void VulkanContext::startTiming() {
@@ -1127,6 +1091,264 @@ uint32_t VulkanContext::findMemoryType(uint32_t typeFilter,
   throw std::runtime_error("failed to find suitable memory type!");
 }
 
+// Staging Buffer Pool Implementation
+void VulkanContext::initStagingBuffer() {
+  std::lock_guard<std::mutex> lock(stagingMutex);
+  if (device == VK_NULL_HANDLE || commandPool == VK_NULL_HANDLE) return;
+
+  VkBufferCreateInfo bufferInfo{};
+  bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+  bufferInfo.size = kStagingBufferSize;
+  bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+  bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+  if (vkCreateBuffer(device, &bufferInfo, nullptr, &stagingBuffer) != VK_SUCCESS) {
+    throw std::runtime_error("failed to create persistent staging buffer!");
+  }
+
+  VkMemoryRequirements memRequirements;
+  vkGetBufferMemoryRequirements(device, stagingBuffer, &memRequirements);
+
+  VkMemoryAllocateInfo allocInfo{};
+  allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+  allocInfo.allocationSize = memRequirements.size;
+  allocInfo.memoryTypeIndex = findMemoryType(
+      memRequirements.memoryTypeBits,
+      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+  if (vkAllocateMemory(device, &allocInfo, nullptr, &stagingMemory) != VK_SUCCESS) {
+    vkDestroyBuffer(device, stagingBuffer, nullptr);
+    stagingBuffer = VK_NULL_HANDLE;
+    throw std::runtime_error("failed to allocate persistent staging memory!");
+  }
+
+  if (vkBindBufferMemory(device, stagingBuffer, stagingMemory, 0) != VK_SUCCESS) {
+    vkDestroyBuffer(device, stagingBuffer, nullptr);
+    stagingBuffer = VK_NULL_HANDLE;
+    vkFreeMemory(device, stagingMemory, nullptr);
+    stagingMemory = VK_NULL_HANDLE;
+    throw std::runtime_error("failed to bind persistent staging memory!");
+  }
+
+  if (vkMapMemory(device, stagingMemory, 0, kStagingBufferSize, 0, &stagingMappedPtr) != VK_SUCCESS) {
+    vkDestroyBuffer(device, stagingBuffer, nullptr);
+    stagingBuffer = VK_NULL_HANDLE;
+    vkFreeMemory(device, stagingMemory, nullptr);
+    stagingMemory = VK_NULL_HANDLE;
+    throw std::runtime_error("failed to map persistent staging memory!");
+  }
+
+  VkCommandBufferAllocateInfo cmdAllocInfo{};
+  cmdAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+  cmdAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+  cmdAllocInfo.commandPool = commandPool;
+  cmdAllocInfo.commandBufferCount = 1;
+  if (vkAllocateCommandBuffers(device, &cmdAllocInfo, &stagingCmdBuffer) != VK_SUCCESS) {
+    vkUnmapMemory(device, stagingMemory);
+    stagingMappedPtr = nullptr;
+    vkDestroyBuffer(device, stagingBuffer, nullptr);
+    stagingBuffer = VK_NULL_HANDLE;
+    vkFreeMemory(device, stagingMemory, nullptr);
+    stagingMemory = VK_NULL_HANDLE;
+    throw std::runtime_error("failed to allocate staging command buffer!");
+  }
+
+  VkFenceCreateInfo fenceInfo{};
+  fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+  fenceInfo.flags = 0;
+  if (vkCreateFence(device, &fenceInfo, nullptr, &stagingFence) != VK_SUCCESS) {
+    vkFreeCommandBuffers(device, commandPool, 1, &stagingCmdBuffer);
+    stagingCmdBuffer = VK_NULL_HANDLE;
+    vkUnmapMemory(device, stagingMemory);
+    stagingMappedPtr = nullptr;
+    vkDestroyBuffer(device, stagingBuffer, nullptr);
+    stagingBuffer = VK_NULL_HANDLE;
+    vkFreeMemory(device, stagingMemory, nullptr);
+    stagingMemory = VK_NULL_HANDLE;
+    throw std::runtime_error("failed to create staging fence!");
+  }
+}
+
+void VulkanContext::cleanupStagingBuffer() {
+  std::lock_guard<std::mutex> lock(stagingMutex);
+  if (device == VK_NULL_HANDLE) return;
+
+  if (stagingFence != VK_NULL_HANDLE) {
+    vkDestroyFence(device, stagingFence, nullptr);
+    stagingFence = VK_NULL_HANDLE;
+  }
+  if (stagingCmdBuffer != VK_NULL_HANDLE && commandPool != VK_NULL_HANDLE) {
+    vkFreeCommandBuffers(device, commandPool, 1, &stagingCmdBuffer);
+    stagingCmdBuffer = VK_NULL_HANDLE;
+  }
+  if (stagingMappedPtr != nullptr && stagingMemory != VK_NULL_HANDLE) {
+    vkUnmapMemory(device, stagingMemory);
+    stagingMappedPtr = nullptr;
+  }
+  if (stagingBuffer != VK_NULL_HANDLE) {
+    vkDestroyBuffer(device, stagingBuffer, nullptr);
+    stagingBuffer = VK_NULL_HANDLE;
+  }
+  if (stagingMemory != VK_NULL_HANDLE) {
+    vkFreeMemory(device, stagingMemory, nullptr);
+    stagingMemory = VK_NULL_HANDLE;
+  }
+}
+
+// Memory Block Suballocator Implementation
+static inline VkDeviceSize alignUpVk(VkDeviceSize offset, VkDeviceSize alignment) {
+  if (alignment == 0) return offset;
+  return ((offset + alignment - 1) / alignment) * alignment;
+}
+
+bool VulkanContext::allocateSuballocatedBuffer(VkDeviceSize size,
+                                               VkDeviceSize alignment,
+                                               uint32_t memoryTypeIndex,
+                                               bool needDeviceAddress,
+                                               VulkanBuffer *outBuf) {
+  if (!outBuf) return false;
+
+  // 1. Check existing blocks for a free chunk with sufficient size after alignment
+  for (uint32_t b = 0; b < static_cast<uint32_t>(memoryBlocks.size()); ++b) {
+    auto &block = memoryBlocks[b];
+    if (block.memory == VK_NULL_HANDLE) continue;
+    if (block.memoryTypeIndex != memoryTypeIndex) continue;
+    if (block.hasDeviceAddress != needDeviceAddress) continue;
+
+    for (size_t c = 0; c < block.chunks.size(); ++c) {
+      if (block.chunks[c].inUse) continue;
+
+      VkDeviceSize chunkStart = block.chunks[c].offset;
+      VkDeviceSize chunkSize = block.chunks[c].size;
+      VkDeviceSize alignedStart = alignUpVk(chunkStart, alignment);
+      VkDeviceSize padding = alignedStart - chunkStart;
+
+      if (chunkSize >= padding + size) {
+        VkDeviceSize remaining = chunkSize - (padding + size);
+
+        if (padding > 0) {
+          block.chunks[c].size = padding;
+
+          VulkanMemoryChunk allocChunk;
+          allocChunk.offset = alignedStart;
+          allocChunk.size = size;
+          allocChunk.inUse = true;
+          block.chunks.insert(block.chunks.begin() + c + 1, allocChunk);
+
+          if (remaining > 0) {
+            VulkanMemoryChunk remChunk;
+            remChunk.offset = alignedStart + size;
+            remChunk.size = remaining;
+            remChunk.inUse = false;
+            block.chunks.insert(block.chunks.begin() + c + 2, remChunk);
+          }
+        } else {
+          block.chunks[c].size = size;
+          block.chunks[c].inUse = true;
+
+          if (remaining > 0) {
+            VulkanMemoryChunk remChunk;
+            remChunk.offset = alignedStart + size;
+            remChunk.size = remaining;
+            remChunk.inUse = false;
+            block.chunks.insert(block.chunks.begin() + c + 1, remChunk);
+          }
+        }
+
+        outBuf->memory = block.memory;
+        outBuf->offset = alignedStart;
+        outBuf->isSuballocated = true;
+        outBuf->blockIndex = b;
+        return true;
+      }
+    }
+  }
+
+  // 2. Allocate a new 64 MB block
+  VkMemoryAllocateInfo allocInfo{};
+  allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+  allocInfo.allocationSize = kDefaultBlockSize;
+  allocInfo.memoryTypeIndex = memoryTypeIndex;
+
+  VkMemoryAllocateFlagsInfo flagsInfo{};
+  if (needDeviceAddress) {
+    flagsInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
+    flagsInfo.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
+    allocInfo.pNext = &flagsInfo;
+  }
+
+  VkDeviceMemory blockMemory = VK_NULL_HANDLE;
+  if (vkAllocateMemory(device, &allocInfo, nullptr, &blockMemory) != VK_SUCCESS) {
+    return false;
+  }
+
+  VulkanMemoryBlock newBlock;
+  newBlock.memory = blockMemory;
+  newBlock.size = kDefaultBlockSize;
+  newBlock.memoryTypeIndex = memoryTypeIndex;
+  newBlock.hasDeviceAddress = needDeviceAddress;
+
+  VulkanMemoryChunk allocChunk;
+  allocChunk.offset = 0;
+  allocChunk.size = size;
+  allocChunk.inUse = true;
+  newBlock.chunks.push_back(allocChunk);
+
+  if (kDefaultBlockSize > size) {
+    VulkanMemoryChunk remChunk;
+    remChunk.offset = size;
+    remChunk.size = kDefaultBlockSize - size;
+    remChunk.inUse = false;
+    newBlock.chunks.push_back(remChunk);
+  }
+
+  uint32_t newBlockIdx = static_cast<uint32_t>(memoryBlocks.size());
+  memoryBlocks.push_back(newBlock);
+
+  outBuf->memory = blockMemory;
+  outBuf->offset = 0;
+  outBuf->isSuballocated = true;
+  outBuf->blockIndex = newBlockIdx;
+  return true;
+}
+
+void VulkanContext::freeSuballocatedBuffer(const VulkanBuffer *buf) {
+  if (!buf || !buf->isSuballocated || buf->blockIndex >= memoryBlocks.size()) {
+    return;
+  }
+
+  auto &block = memoryBlocks[buf->blockIndex];
+  for (size_t i = 0; i < block.chunks.size(); ++i) {
+    if (block.chunks[i].offset == buf->offset) {
+      block.chunks[i].inUse = false;
+      break;
+    }
+  }
+
+  // Coalesce adjacent free chunks
+  for (size_t i = 0; i + 1 < block.chunks.size(); ) {
+    if (!block.chunks[i].inUse && !block.chunks[i + 1].inUse) {
+      block.chunks[i].size += block.chunks[i + 1].size;
+      block.chunks.erase(block.chunks.begin() + i + 1);
+    } else {
+      ++i;
+    }
+  }
+}
+
+void VulkanContext::cleanupMemoryBlocks() {
+  std::lock_guard<std::mutex> lock(suballocatorMutex);
+  if (device != VK_NULL_HANDLE) {
+    for (auto &block : memoryBlocks) {
+      if (block.memory != VK_NULL_HANDLE) {
+        vkFreeMemory(device, block.memory, nullptr);
+        block.memory = VK_NULL_HANDLE;
+      }
+    }
+  }
+  memoryBlocks.clear();
+}
+
 ComputeBuffer VulkanContext::createBuffer(size_t size, const void *host_ptr) {
   auto vulkanBuffer = new VulkanBuffer();
 
@@ -1138,7 +1360,8 @@ ComputeBuffer VulkanContext::createBuffer(size_t size, const void *host_ptr) {
                      VK_BUFFER_USAGE_TRANSFER_DST_BIT |
                      VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
 
-  if (getCurrentDeviceInfo().rayTracingSupport || dgcSupported) {
+  bool needDeviceAddress = getCurrentDeviceInfo().rayTracingSupport || dgcSupported;
+  if (needDeviceAddress) {
     bufferInfo.usage |=
         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
         VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
@@ -1156,28 +1379,62 @@ ComputeBuffer VulkanContext::createBuffer(size_t size, const void *host_ptr) {
   VkMemoryRequirements memRequirements;
   vkGetBufferMemoryRequirements(device, vulkanBuffer->buffer, &memRequirements);
 
-  VkMemoryAllocateInfo allocInfo{};
-  allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-  allocInfo.allocationSize = memRequirements.size;
-  allocInfo.memoryTypeIndex = findMemoryType(
+  uint32_t memTypeIndex = findMemoryType(
       memRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
-  VkMemoryAllocateFlagsInfo flagsInfo{};
-  if (getCurrentDeviceInfo().rayTracingSupport || dgcSupported) {
-    flagsInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
-    flagsInfo.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
-    allocInfo.pNext = &flagsInfo;
+  bool suballocated = false;
+  if (memRequirements.size <= kMaxSuballocSize) {
+    std::lock_guard<std::mutex> lock(suballocatorMutex);
+    suballocated = allocateSuballocatedBuffer(memRequirements.size,
+                                              memRequirements.alignment,
+                                              memTypeIndex,
+                                              needDeviceAddress,
+                                              vulkanBuffer);
   }
 
-  if (vkAllocateMemory(device, &allocInfo, nullptr, &vulkanBuffer->memory) !=
-      VK_SUCCESS) {
-    delete vulkanBuffer;
-    throw std::runtime_error("failed to allocate buffer memory!");
+  if (suballocated) {
+    if (vkBindBufferMemory(device, vulkanBuffer->buffer, vulkanBuffer->memory, vulkanBuffer->offset) != VK_SUCCESS) {
+      {
+        std::lock_guard<std::mutex> lock(suballocatorMutex);
+        freeSuballocatedBuffer(vulkanBuffer);
+      }
+      suballocated = false;
+    }
   }
 
-  vkBindBufferMemory(device, vulkanBuffer->buffer, vulkanBuffer->memory, 0);
+  if (!suballocated) {
+    VkMemoryAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    allocInfo.allocationSize = memRequirements.size;
+    allocInfo.memoryTypeIndex = memTypeIndex;
 
-  if (getCurrentDeviceInfo().rayTracingSupport || dgcSupported) {
+    VkMemoryAllocateFlagsInfo flagsInfo{};
+    if (needDeviceAddress) {
+      flagsInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
+      flagsInfo.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
+      allocInfo.pNext = &flagsInfo;
+    }
+
+    if (vkAllocateMemory(device, &allocInfo, nullptr, &vulkanBuffer->memory) !=
+        VK_SUCCESS) {
+      vkDestroyBuffer(device, vulkanBuffer->buffer, nullptr);
+      delete vulkanBuffer;
+      throw std::runtime_error("failed to allocate buffer memory!");
+    }
+
+    vulkanBuffer->offset = 0;
+    vulkanBuffer->isSuballocated = false;
+    if (vkBindBufferMemory(device, vulkanBuffer->buffer, vulkanBuffer->memory, 0) != VK_SUCCESS) {
+      vkDestroyBuffer(device, vulkanBuffer->buffer, nullptr);
+      vkFreeMemory(device, vulkanBuffer->memory, nullptr);
+      delete vulkanBuffer;
+      throw std::runtime_error("failed to bind buffer memory!");
+    }
+  }
+
+  vulkanBuffer->size = memRequirements.size;
+
+  if (needDeviceAddress) {
     VkBufferDeviceAddressInfo bdaInfo{
         VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO};
     bdaInfo.buffer = vulkanBuffer->buffer;
@@ -1208,86 +1465,55 @@ void VulkanContext::writeBuffer(ComputeBuffer buffer, size_t offset,
   }
   VkBuffer dstBuffer = it->second->buffer;
 
-  constexpr size_t kMaxChunkSize = 64ULL * 1024ULL * 1024ULL; // 64 MB chunk cap
-  const size_t chunkSize = std::min(size, kMaxChunkSize);
-
-  VulkanBuffer stagingBuffer;
-  VkBufferCreateInfo bufferInfo{};
-  bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-  bufferInfo.size = chunkSize;
-  bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-  bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-  if (vkCreateBuffer(device, &bufferInfo, nullptr, &stagingBuffer.buffer) !=
-      VK_SUCCESS) {
-    throw std::runtime_error("failed to create staging buffer!");
-  }
-
-  VkMemoryRequirements memRequirements;
-  vkGetBufferMemoryRequirements(device, stagingBuffer.buffer, &memRequirements);
-
-  VkMemoryAllocateInfo allocInfo{};
-  allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-  allocInfo.allocationSize = memRequirements.size;
-  allocInfo.memoryTypeIndex = findMemoryType(
-      memRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                                          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-
-  if (vkAllocateMemory(device, &allocInfo, nullptr, &stagingBuffer.memory) !=
-      VK_SUCCESS) {
-    vkDestroyBuffer(device, stagingBuffer.buffer, nullptr);
-    throw std::runtime_error("failed to allocate staging buffer memory!");
-  }
-
-  vkBindBufferMemory(device, stagingBuffer.buffer, stagingBuffer.memory, 0);
-
-  void *mappedData = nullptr;
-  if (vkMapMemory(device, stagingBuffer.memory, 0, chunkSize, 0, &mappedData) != VK_SUCCESS) {
-    vkDestroyBuffer(device, stagingBuffer.buffer, nullptr);
-    vkFreeMemory(device, stagingBuffer.memory, nullptr);
-    throw std::runtime_error("failed to map staging buffer memory!");
-  }
-
-  VkCommandBufferAllocateInfo cmdAllocInfo{};
-  cmdAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-  cmdAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-  cmdAllocInfo.commandPool = commandPool;
-  cmdAllocInfo.commandBufferCount = 1;
-
-  VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
-  if (vkAllocateCommandBuffers(device, &cmdAllocInfo, &commandBuffer) != VK_SUCCESS) {
-    vkUnmapMemory(device, stagingBuffer.memory);
-    vkDestroyBuffer(device, stagingBuffer.buffer, nullptr);
-    vkFreeMemory(device, stagingBuffer.memory, nullptr);
-    throw std::runtime_error("failed to allocate transfer command buffer!");
+  std::lock_guard<std::mutex> lock(stagingMutex);
+  if (stagingBuffer == VK_NULL_HANDLE || !stagingMappedPtr || stagingCmdBuffer == VK_NULL_HANDLE) {
+    throw std::runtime_error("Staging buffer not initialized in writeBuffer");
   }
 
   const uint8_t *srcBytes = static_cast<const uint8_t *>(host_ptr);
   size_t bytesWritten = 0;
 
-  try {
-    while (bytesWritten < size) {
-      size_t curChunk = std::min(size - bytesWritten, chunkSize);
-      memcpy(mappedData, srcBytes + bytesWritten, curChunk);
+  while (bytesWritten < size) {
+    size_t curChunk = std::min(size - bytesWritten, kStagingBufferSize);
+    memcpy(stagingMappedPtr, srcBytes + bytesWritten, curChunk);
 
-      VkCommandBufferBeginInfo beginInfo{};
-      beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-      beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-      vkBeginCommandBuffer(commandBuffer, &beginInfo);
+    vkResetCommandBuffer(stagingCmdBuffer, 0);
 
-      VkBufferCopy copyRegion{};
-      copyRegion.srcOffset = 0;
-      copyRegion.dstOffset = offset + bytesWritten;
-      copyRegion.size = curChunk;
-      vkCmdCopyBuffer(commandBuffer, stagingBuffer.buffer, dstBuffer, 1, &copyRegion);
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    if (vkBeginCommandBuffer(stagingCmdBuffer, &beginInfo) != VK_SUCCESS) {
+      throw std::runtime_error("failed to begin staging command buffer in writeBuffer");
+    }
 
-      vkEndCommandBuffer(commandBuffer);
+    VkBufferCopy copyRegion{};
+    copyRegion.srcOffset = 0;
+    copyRegion.dstOffset = offset + bytesWritten;
+    copyRegion.size = curChunk;
+    vkCmdCopyBuffer(stagingCmdBuffer, stagingBuffer, dstBuffer, 1, &copyRegion);
 
-      VkSubmitInfo submitInfo{};
-      submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-      submitInfo.commandBufferCount = 1;
-      submitInfo.pCommandBuffers = &commandBuffer;
+    if (vkEndCommandBuffer(stagingCmdBuffer) != VK_SUCCESS) {
+      throw std::runtime_error("failed to end staging command buffer in writeBuffer");
+    }
 
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &stagingCmdBuffer;
+
+    if (stagingFence != VK_NULL_HANDLE) {
+      vkResetFences(device, 1, &stagingFence);
+      VkResult submitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, stagingFence);
+      if (submitRes != VK_SUCCESS) {
+        throw std::runtime_error("vkQueueSubmit failed in writeBuffer with result: " +
+                                 std::to_string(submitRes));
+      }
+      VkResult waitRes = vkWaitForFences(device, 1, &stagingFence, VK_TRUE, UINT64_MAX);
+      if (waitRes != VK_SUCCESS) {
+        throw std::runtime_error("vkWaitForFences failed in writeBuffer with result: " +
+                                 std::to_string(waitRes));
+      }
+    } else {
       VkResult submitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, VK_NULL_HANDLE);
       if (submitRes != VK_SUCCESS) {
         throw std::runtime_error("vkQueueSubmit failed in writeBuffer with result: " +
@@ -1298,23 +1524,10 @@ void VulkanContext::writeBuffer(ComputeBuffer buffer, size_t offset,
         throw std::runtime_error("vkQueueWaitIdle failed in writeBuffer with result: " +
                                  std::to_string(waitRes));
       }
+    }
 
-      bytesWritten += curChunk;
-    }
-  } catch (...) {
-    vkUnmapMemory(device, stagingBuffer.memory);
-    if (commandBuffer != VK_NULL_HANDLE) {
-      vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
-    }
-    vkDestroyBuffer(device, stagingBuffer.buffer, nullptr);
-    vkFreeMemory(device, stagingBuffer.memory, nullptr);
-    throw;
+    bytesWritten += curChunk;
   }
-
-  vkUnmapMemory(device, stagingBuffer.memory);
-  vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
-  vkDestroyBuffer(device, stagingBuffer.buffer, nullptr);
-  vkFreeMemory(device, stagingBuffer.memory, nullptr);
 }
 
 void VulkanContext::readBuffer(ComputeBuffer buffer, size_t offset, size_t size,
@@ -1326,85 +1539,54 @@ void VulkanContext::readBuffer(ComputeBuffer buffer, size_t offset, size_t size,
   }
   VkBuffer srcBuffer = it->second->buffer;
 
-  constexpr size_t kMaxChunkSize = 64ULL * 1024ULL * 1024ULL; // 64 MB chunk cap
-  const size_t chunkSize = std::min(size, kMaxChunkSize);
-
-  VulkanBuffer stagingBuffer;
-  VkBufferCreateInfo bufferInfo{};
-  bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-  bufferInfo.size = chunkSize;
-  bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-  bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-  if (vkCreateBuffer(device, &bufferInfo, nullptr, &stagingBuffer.buffer) !=
-      VK_SUCCESS) {
-    throw std::runtime_error("failed to create staging buffer!");
-  }
-
-  VkMemoryRequirements memRequirements;
-  vkGetBufferMemoryRequirements(device, stagingBuffer.buffer, &memRequirements);
-
-  VkMemoryAllocateInfo allocInfo{};
-  allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-  allocInfo.allocationSize = memRequirements.size;
-  allocInfo.memoryTypeIndex = findMemoryType(
-      memRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                                          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-
-  if (vkAllocateMemory(device, &allocInfo, nullptr, &stagingBuffer.memory) !=
-      VK_SUCCESS) {
-    vkDestroyBuffer(device, stagingBuffer.buffer, nullptr);
-    throw std::runtime_error("failed to allocate staging buffer memory!");
-  }
-
-  vkBindBufferMemory(device, stagingBuffer.buffer, stagingBuffer.memory, 0);
-
-  void *mappedData = nullptr;
-  if (vkMapMemory(device, stagingBuffer.memory, 0, chunkSize, 0, &mappedData) != VK_SUCCESS) {
-    vkDestroyBuffer(device, stagingBuffer.buffer, nullptr);
-    vkFreeMemory(device, stagingBuffer.memory, nullptr);
-    throw std::runtime_error("failed to map staging buffer memory!");
-  }
-
-  VkCommandBufferAllocateInfo cmdAllocInfo{};
-  cmdAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-  cmdAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-  cmdAllocInfo.commandPool = commandPool;
-  cmdAllocInfo.commandBufferCount = 1;
-
-  VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
-  if (vkAllocateCommandBuffers(device, &cmdAllocInfo, &commandBuffer) != VK_SUCCESS) {
-    vkUnmapMemory(device, stagingBuffer.memory);
-    vkDestroyBuffer(device, stagingBuffer.buffer, nullptr);
-    vkFreeMemory(device, stagingBuffer.memory, nullptr);
-    throw std::runtime_error("failed to allocate transfer command buffer!");
+  std::lock_guard<std::mutex> lock(stagingMutex);
+  if (stagingBuffer == VK_NULL_HANDLE || !stagingMappedPtr || stagingCmdBuffer == VK_NULL_HANDLE) {
+    throw std::runtime_error("Staging buffer not initialized in readBuffer");
   }
 
   uint8_t *dstBytes = static_cast<uint8_t *>(host_ptr);
   size_t bytesRead = 0;
 
-  try {
-    while (bytesRead < size) {
-      size_t curChunk = std::min(size - bytesRead, chunkSize);
+  while (bytesRead < size) {
+    size_t curChunk = std::min(size - bytesRead, kStagingBufferSize);
 
-      VkCommandBufferBeginInfo beginInfo{};
-      beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-      beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-      vkBeginCommandBuffer(commandBuffer, &beginInfo);
+    vkResetCommandBuffer(stagingCmdBuffer, 0);
 
-      VkBufferCopy copyRegion{};
-      copyRegion.srcOffset = offset + bytesRead;
-      copyRegion.dstOffset = 0;
-      copyRegion.size = curChunk;
-      vkCmdCopyBuffer(commandBuffer, srcBuffer, stagingBuffer.buffer, 1, &copyRegion);
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    if (vkBeginCommandBuffer(stagingCmdBuffer, &beginInfo) != VK_SUCCESS) {
+      throw std::runtime_error("failed to begin staging command buffer in readBuffer");
+    }
 
-      vkEndCommandBuffer(commandBuffer);
+    VkBufferCopy copyRegion{};
+    copyRegion.srcOffset = offset + bytesRead;
+    copyRegion.dstOffset = 0;
+    copyRegion.size = curChunk;
+    vkCmdCopyBuffer(stagingCmdBuffer, srcBuffer, stagingBuffer, 1, &copyRegion);
 
-      VkSubmitInfo submitInfo{};
-      submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-      submitInfo.commandBufferCount = 1;
-      submitInfo.pCommandBuffers = &commandBuffer;
+    if (vkEndCommandBuffer(stagingCmdBuffer) != VK_SUCCESS) {
+      throw std::runtime_error("failed to end staging command buffer in readBuffer");
+    }
 
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &stagingCmdBuffer;
+
+    if (stagingFence != VK_NULL_HANDLE) {
+      vkResetFences(device, 1, &stagingFence);
+      VkResult submitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, stagingFence);
+      if (submitRes != VK_SUCCESS) {
+        throw std::runtime_error("vkQueueSubmit failed in readBuffer with result: " +
+                                 std::to_string(submitRes));
+      }
+      VkResult waitRes = vkWaitForFences(device, 1, &stagingFence, VK_TRUE, UINT64_MAX);
+      if (waitRes != VK_SUCCESS) {
+        throw std::runtime_error("vkWaitForFences failed in readBuffer with result: " +
+                                 std::to_string(waitRes));
+      }
+    } else {
       VkResult submitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, VK_NULL_HANDLE);
       if (submitRes != VK_SUCCESS) {
         throw std::runtime_error("vkQueueSubmit failed in readBuffer with result: " +
@@ -1415,24 +1597,11 @@ void VulkanContext::readBuffer(ComputeBuffer buffer, size_t offset, size_t size,
         throw std::runtime_error("vkQueueWaitIdle failed in readBuffer with result: " +
                                  std::to_string(waitRes));
       }
+    }
 
-      memcpy(dstBytes + bytesRead, mappedData, curChunk);
-      bytesRead += curChunk;
-    }
-  } catch (...) {
-    vkUnmapMemory(device, stagingBuffer.memory);
-    if (commandBuffer != VK_NULL_HANDLE) {
-      vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
-    }
-    vkDestroyBuffer(device, stagingBuffer.buffer, nullptr);
-    vkFreeMemory(device, stagingBuffer.memory, nullptr);
-    throw;
+    memcpy(dstBytes + bytesRead, stagingMappedPtr, curChunk);
+    bytesRead += curChunk;
   }
-
-  vkUnmapMemory(device, stagingBuffer.memory);
-  vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
-  vkDestroyBuffer(device, stagingBuffer.buffer, nullptr);
-  vkFreeMemory(device, stagingBuffer.memory, nullptr);
 }
 
 void VulkanContext::releaseBuffer(ComputeBuffer buffer) {
@@ -1444,7 +1613,10 @@ void VulkanContext::releaseBuffer(ComputeBuffer buffer) {
         vkDestroyBuffer(device, vulkanBuffer->buffer, nullptr);
         vulkanBuffer->buffer = VK_NULL_HANDLE;
       }
-      if (vulkanBuffer->memory != VK_NULL_HANDLE) {
+      if (vulkanBuffer->isSuballocated) {
+        std::lock_guard<std::mutex> lock(suballocatorMutex);
+        freeSuballocatedBuffer(vulkanBuffer);
+      } else if (vulkanBuffer->memory != VK_NULL_HANDLE) {
         vkFreeMemory(device, vulkanBuffer->memory, nullptr);
         vulkanBuffer->memory = VK_NULL_HANDLE;
       }

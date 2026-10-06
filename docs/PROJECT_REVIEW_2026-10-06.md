@@ -128,9 +128,10 @@ So the UNSUPPORTED stance is defensible now, but the fix is available and this i
 - **HIP:** inline-asm kernel using native packed BF16 ops (`v_pk_fma_f32`-class / `__builtin_amdgcn` intrinsics) — RDNA 3.5/4 have real BF16 datapaths.
 - **Vulkan:** Slang (native `bfloat` type) → SPIR-V, ingested via the existing `createKernel` path; or track glslang's improving `GL_EXT_bfloat16` support.
 
-### O-2. VMA (or at minimum a staging-buffer pool)
+### O-2. VMA (or at minimum a staging-buffer pool) — **RESOLVED (2026-10-06)**
 
-`createBuffer` still issues one dedicated `vkAllocateMemory` per buffer, and `RayASBuildBench` allocates **5,000 BLAS buffers** (`RayASBuildBench.cpp:100`) vs the 4,096 spec-minimum `maxMemoryAllocationCount`; `writeBuffer` recreates a 64 MB staging buffer per chunk (`VulkanContext.cpp:~1180`: create → allocate → map → copy → submit → wait → destroy). This is the top item in the project's own `TODO.md` and remains the most likely crash vector on strictly-compliant drivers. VMA (or a hand-rolled suballocator for the staging path) closes it.
+- **Persistent 64 MB Staging Pool**: Implemented persistent host-visible mapped staging buffer, command buffer, and fence in `VulkanContext`, eliminating repeated per-chunk allocation/mapping/destruction in `writeBuffer` and `readBuffer`.
+- **Block Memory Suballocator**: Implemented a 64 MB block memory suballocator in `VulkanContext` for device buffers $\le 32$ MB with first-fit aligned chunk splitting and free chunk coalescing. `RayASBuildBench` (5,000 BLAS buffers) now operates well within driver allocation budgets, eliminating raw `vkAllocateMemory` churn. Dedicated allocations are used only for buffers $> 32$ MB.
 
 ### O-3. System-load guard + measurement metadata
 

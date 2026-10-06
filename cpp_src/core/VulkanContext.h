@@ -3,6 +3,7 @@
 #include "IComputeContext.h"
 #include <array>
 #include <map>
+#include <mutex>
 #include <set>
 #include <string>
 #include <vector>
@@ -206,9 +207,28 @@ public:
 
 private:
   struct VulkanBuffer {
-    VkBuffer buffer;
-    VkDeviceMemory memory;
-    VkDeviceAddress address;
+    VkBuffer buffer = VK_NULL_HANDLE;
+    VkDeviceMemory memory = VK_NULL_HANDLE;
+    VkDeviceSize offset = 0;
+    VkDeviceSize size = 0;
+    VkDeviceAddress address = 0;
+    bool isSuballocated = false;
+    uint32_t blockIndex = 0;
+    size_t chunkIndex = 0;
+  };
+
+  struct VulkanMemoryChunk {
+    VkDeviceSize offset = 0;
+    VkDeviceSize size = 0;
+    bool inUse = false;
+  };
+
+  struct VulkanMemoryBlock {
+    VkDeviceMemory memory = VK_NULL_HANDLE;
+    VkDeviceSize size = 0;
+    uint32_t memoryTypeIndex = 0;
+    bool hasDeviceAddress = false;
+    std::vector<VulkanMemoryChunk> chunks;
   };
 
   struct VulkanKernel {
@@ -276,6 +296,28 @@ private:
   std::map<ComputeBuffer, VulkanBuffer *> buffers;
   std::map<ComputeKernel, VulkanKernel *> kernels;
   VulkanKernel *getKernel(ComputeKernel handle) const;
+
+  // Staging buffer pool (eliminates repeated per-transfer staging allocations)
+  static constexpr size_t kStagingBufferSize = 64ULL * 1024ULL * 1024ULL;
+  mutable std::mutex stagingMutex;
+  mutable VkBuffer stagingBuffer = VK_NULL_HANDLE;
+  mutable VkDeviceMemory stagingMemory = VK_NULL_HANDLE;
+  mutable void *stagingMappedPtr = nullptr;
+  mutable VkCommandBuffer stagingCmdBuffer = VK_NULL_HANDLE;
+  mutable VkFence stagingFence = VK_NULL_HANDLE;
+  void initStagingBuffer();
+  void cleanupStagingBuffer();
+
+  // Memory block suballocator (eliminates raw vkAllocateMemory churn for <= 32 MB buffers)
+  static constexpr VkDeviceSize kDefaultBlockSize = 64ULL * 1024ULL * 1024ULL;
+  static constexpr VkDeviceSize kMaxSuballocSize = 32ULL * 1024ULL * 1024ULL;
+  mutable std::mutex suballocatorMutex;
+  std::vector<VulkanMemoryBlock> memoryBlocks;
+  bool allocateSuballocatedBuffer(VkDeviceSize size, VkDeviceSize alignment,
+                                  uint32_t memoryTypeIndex, bool needDeviceAddress,
+                                  VulkanBuffer *outBuf);
+  void freeSuballocatedBuffer(const VulkanBuffer *buf);
+  void cleanupMemoryBlocks();
 
   mutable std::vector<DeviceInfo> deviceInfos;
   uint32_t selectedDeviceIndex = 0;

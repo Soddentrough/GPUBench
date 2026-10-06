@@ -677,6 +677,8 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
           result_data.backendName =
               ComputeBackendFactory::getBackendName(context->getBackend());
           result_data.deviceName = info.name;
+          result_data.vendorId = info.vendorID;
+          result_data.deviceId = info.deviceID;
           std::string cname = bench->GetConfigName(ci);
           std::string fullName = bname;
           if (cname.rfind(bname, 0) == 0) {
@@ -870,6 +872,8 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
           ResultData result_data;
           result_data.backendName = ComputeBackendFactory::getBackendName(context->getBackend());
           result_data.deviceName = info.name;
+          result_data.vendorId = info.vendorID;
+          result_data.deviceId = info.deviceID;
           result_data.benchmarkName = bench_name;
           result_data.metric = bench->GetMetric(i);
           result_data.operations = 0;
@@ -1030,6 +1034,8 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
         result_data.backendName = ComputeBackendFactory::getBackendName(
             context->getBackend());
         result_data.deviceName = info.name;
+        result_data.vendorId = info.vendorID;
+        result_data.deviceId = info.deviceID;
         result_data.benchmarkName = bench_name;
         result_data.metric = bench->GetMetric(i);
         result_data.operations =

@@ -1,4 +1,5 @@
 #include "OpenCLContext.h"
+#include "DeviceDatabase.h"
 #include "utils/ShaderCache.h"
 #include <algorithm>
 #include <cctype>
@@ -312,24 +313,10 @@ const std::vector<DeviceInfo> &OpenCLContext::getDevices() const {
       cl_ulong cacheSize = 0;
       f_clGetDeviceInfo(dev, CL_DEVICE_GLOBAL_MEM_CACHE_SIZE, sizeof(cacheSize),
                         &cacheSize, nullptr);
-      std::string devNameLower = deviceName;
-      std::transform(devNameLower.begin(), devNameLower.end(), devNameLower.begin(), ::tolower);
-      if (cacheSize >= 512 * 1024 && devNameLower.find("gfx115") == std::string::npos && devNameLower.find("strix") == std::string::npos && devNameLower.find("8060") == std::string::npos) {
+      if (cacheSize >= 512 * 1024) {
         info.l2CacheSize = static_cast<uint32_t>(cacheSize);
-      } else {
-        if (devNameLower.find("gfx12") != std::string::npos || devNameLower.find("r9700") != std::string::npos) {
-          info.l2CacheSize = 8 * 1024 * 1024;
-        } else if (devNameLower.find("gfx115") != std::string::npos || devNameLower.find("strix") != std::string::npos || devNameLower.find("8060") != std::string::npos || devNameLower.find("8050") != std::string::npos) {
-          info.l2CacheSize = 2 * 1024 * 1024;
-        } else {
-          info.l2CacheSize = 4 * 1024 * 1024;
-        }
       }
-      if (devNameLower.find("gfx12") != std::string::npos || devNameLower.find("r9700") != std::string::npos) {
-        info.l3CacheSize = 64 * 1024 * 1024;
-      } else {
-        info.l3CacheSize = 32 * 1024 * 1024;
-      }
+      DeviceDatabase::enrichDeviceInfo(info);
 
       size_t ext_size;
       f_clGetDeviceInfo(dev, CL_DEVICE_EXTENSIONS, 0, nullptr, &ext_size);
@@ -453,24 +440,10 @@ DeviceInfo OpenCLContext::getCurrentDeviceInfo() const {
   cl_ulong cacheSize = 0;
   f_clGetDeviceInfo(device, CL_DEVICE_GLOBAL_MEM_CACHE_SIZE, sizeof(cacheSize),
                     &cacheSize, nullptr);
-  std::string devNameLower = info.name;
-  std::transform(devNameLower.begin(), devNameLower.end(), devNameLower.begin(), ::tolower);
-  if (cacheSize >= 512 * 1024 && devNameLower.find("gfx115") == std::string::npos && devNameLower.find("strix") == std::string::npos && devNameLower.find("8060") == std::string::npos) {
+  if (cacheSize >= 512 * 1024) {
     info.l2CacheSize = static_cast<uint32_t>(cacheSize);
-  } else {
-    if (devNameLower.find("gfx12") != std::string::npos || devNameLower.find("r9700") != std::string::npos) {
-      info.l2CacheSize = 8 * 1024 * 1024;
-    } else if (devNameLower.find("gfx115") != std::string::npos || devNameLower.find("strix") != std::string::npos || devNameLower.find("8060") != std::string::npos || devNameLower.find("8050") != std::string::npos) {
-      info.l2CacheSize = 2 * 1024 * 1024;
-    } else {
-      info.l2CacheSize = 4 * 1024 * 1024;
-    }
   }
-  if (devNameLower.find("gfx12") != std::string::npos || devNameLower.find("r9700") != std::string::npos) {
-    info.l3CacheSize = 64 * 1024 * 1024;
-  } else {
-    info.l3CacheSize = 32 * 1024 * 1024;
-  }
+  DeviceDatabase::enrichDeviceInfo(info);
 
   size_t ext_size;
   f_clGetDeviceInfo(device, CL_DEVICE_EXTENSIONS, 0, nullptr, &ext_size);

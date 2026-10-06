@@ -1,4 +1,5 @@
 #include "ResultFormatter.h"
+#include "DeviceDatabase.h"
 #include "ResultImporter.h"
 #include "RunnerAPI.h"
 #include <algorithm>
@@ -1553,17 +1554,20 @@ std::string resultsToJson(const std::vector<ResultData> &results) {
       out += "      \"peak_type\": \"" + std::string(r.configIndex == 0 ? "Triangle" : "Box") + "\",\n";
       out += "      \"throughput_gis\": " + std::to_string(throughputGis) + ",\n";
 
-      bool isR9700Dev = (r.deviceName.find("R9700") != std::string::npos ||
-                         r.deviceName.find("GFX1201") != std::string::npos ||
-                         r.deviceName.find("gfx1201") != std::string::npos);
-      if (isR9700Dev) {
-        double peakGis = (r.configIndex == 0) ? 300.8 : 1203.2;
-        double pctPeak = (peakGis > 0.0) ? ((throughputGis / peakGis) * 100.0) : 0.0;
-        char buf[80];
-        std::snprintf(buf, sizeof(buf), "%.1f%% of %s R9700 Boost Peak", pctPeak,
-                      (r.configIndex == 0 ? "300.8 GIS/s" : "1.20 TIS/s"));
+      const auto &prof = DeviceDatabase::lookup(r.vendorId, r.deviceId, r.deviceName);
+      double peakGis = (r.configIndex == 0) ? prof.theoreticalTriangleGis : prof.theoreticalBoxGis;
+      if (peakGis > 0.0) {
+        double pctPeak = (throughputGis / peakGis) * 100.0;
+        char buf[96];
+        if (r.configIndex == 0) {
+          std::snprintf(buf, sizeof(buf), "%.1f%% of %.1f GIS/s %s Boost Peak", pctPeak,
+                        peakGis, prof.archName.c_str());
+        } else {
+          std::snprintf(buf, sizeof(buf), "%.1f%% of %.2f TIS/s %s Boost Peak", pctPeak,
+                        peakGis / 1000.0, prof.archName.c_str());
+        }
         std::string detailsStr(buf);
-        out += "      \"target_architecture\": \"R9700 (GFX1201)\",\n";
+        out += "      \"target_architecture\": \"" + jsonEscape(prof.archName) + "\",\n";
         out += "      \"theoretical_peak_gis\": " + std::to_string(peakGis) + ",\n";
         out += "      \"pct_theoretical_peak\": " + std::to_string(pctPeak) + ",\n";
         out += "      \"details_speedup\": \"" + jsonEscape(detailsStr) + "\",\n";

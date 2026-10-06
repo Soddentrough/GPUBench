@@ -1,4 +1,5 @@
 #include "GuiApp.h"
+#include "core/DeviceDatabase.h"
 #include <imgui.h>
 #include <implot.h>
 
@@ -37,60 +38,7 @@ namespace gpubench::gui {
 namespace {
 
 static std::string detectGpuArchitecture(const std::string& name, uint32_t vendorID, uint32_t deviceID) {
-    (void)deviceID;
-    std::string lower = name;
-    std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
-
-    if (vendorID == 0x1002 || lower.find("amd") != std::string::npos || lower.find("radeon") != std::string::npos) {
-        // RDNA 4
-        if (lower.find("r9700") != std::string::npos || lower.find("gfx12") != std::string::npos || 
-            lower.find("rdna 4") != std::string::npos || lower.find("rdna4") != std::string::npos) {
-            return "gfx1201 (RDNA 4)";
-        }
-        // RDNA 3 / 3.5
-        if (lower.find("7900") != std::string::npos) return "gfx1100 (RDNA 3)";
-        if (lower.find("7800") != std::string::npos || lower.find("7700") != std::string::npos) return "gfx1101 (RDNA 3)";
-        if (lower.find("7600") != std::string::npos) return "gfx1102 (RDNA 3)";
-        if (lower.find("890m") != std::string::npos || lower.find("880m") != std::string::npos || lower.find("gfx115") != std::string::npos) return "gfx1150 (RDNA 3.5)";
-        if (lower.find("gfx11") != std::string::npos || lower.find("rdna 3") != std::string::npos || lower.find("rdna3") != std::string::npos) {
-            return "RDNA 3";
-        }
-        // RDNA 2
-        if (lower.find("6900") != std::string::npos || lower.find("6800") != std::string::npos) return "gfx1030 (RDNA 2)";
-        if (lower.find("6700") != std::string::npos) return "gfx1031 (RDNA 2)";
-        if (lower.find("6600") != std::string::npos) return "gfx1032 (RDNA 2)";
-        if (lower.find("gfx103") != std::string::npos || lower.find("rdna 2") != std::string::npos || lower.find("rdna2") != std::string::npos) {
-            return "RDNA 2";
-        }
-        // RDNA 1
-        if (lower.find("5700") != std::string::npos || lower.find("5600") != std::string::npos || lower.find("gfx101") != std::string::npos) {
-            return "gfx1010 (RDNA 1)";
-        }
-        // CDNA
-        if (lower.find("mi300") != std::string::npos || lower.find("gfx942") != std::string::npos) return "gfx942 (CDNA 3)";
-        if (lower.find("mi200") != std::string::npos || lower.find("gfx90a") != std::string::npos) return "gfx90a (CDNA 2)";
-        if (lower.find("mi100") != std::string::npos || lower.find("gfx908") != std::string::npos) return "gfx908 (CDNA 1)";
-        // Vega / GCN
-        if (lower.find("vega") != std::string::npos || lower.find("gfx90") != std::string::npos) return "Vega (GCN 5)";
-        if (lower.find("polaris") != std::string::npos || lower.find("rx 580") != std::string::npos || lower.find("rx 570") != std::string::npos) return "Polaris (GCN 4)";
-        return "AMD Radeon (Vulkan)";
-    }
-
-    if (vendorID == 0x10DE || lower.find("nvidia") != std::string::npos || lower.find("geforce") != std::string::npos || lower.find("rtx") != std::string::npos) {
-        if (lower.find("5090") != std::string::npos || lower.find("5080") != std::string::npos) return "Blackwell";
-        if (lower.find("4090") != std::string::npos || lower.find("4080") != std::string::npos || lower.find("4070") != std::string::npos) return "Ada Lovelace";
-        if (lower.find("3090") != std::string::npos || lower.find("3080") != std::string::npos || lower.find("3070") != std::string::npos) return "Ampere";
-        if (lower.find("2080") != std::string::npos || lower.find("2070") != std::string::npos) return "Turing";
-        return "NVIDIA";
-    }
-
-    if (vendorID == 0x8086 || lower.find("intel") != std::string::npos || lower.find("arc") != std::string::npos) {
-        if (lower.find("b580") != std::string::npos || lower.find("battlemage") != std::string::npos) return "Battlemage (Xe2)";
-        if (lower.find("a770") != std::string::npos || lower.find("a750") != std::string::npos || lower.find("alchemist") != std::string::npos) return "Alchemist (Xe-HPG)";
-        return "Intel Xe";
-    }
-
-    return "Discrete GPU";
+    return gpubench::DeviceDatabase::getArchitectureName(vendorID, deviceID, name);
 }
 
 static void getHostSystemInfo(std::string& outCpuModel, std::string& outCpuArch, std::string& outOsDriver, uint64_t& outRamMb) {

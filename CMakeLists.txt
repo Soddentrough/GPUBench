@@ -218,6 +218,7 @@ endif()
 # Source files - always include core files
 set(LIB_SOURCES
     cpp_src/core/BenchmarkRunner.cpp
+    cpp_src/core/DeviceDatabase.cpp
     cpp_src/core/ResultFormatter.cpp
     cpp_src/core/ResultImporter.cpp
     cpp_src/benchmarks/Fp32Bench.cpp

@@ -3,6 +3,7 @@
 #endif
 
 #include "ROCmContext.h"
+#include "DeviceDatabase.h"
 #include <hip/hip_runtime.h>
 #include <hip/hip_runtime_api.h>
 #include <iostream>
@@ -298,34 +299,11 @@ void ROCmContext::enumerateDevices() {
       std::transform(archNameStr.begin(), archNameStr.end(), archNameStr.begin(), ::tolower);
       std::transform(deviceNameStr.begin(), deviceNameStr.end(), deviceNameStr.begin(), ::tolower);
 
-      // Workaround for hybrid ROCm 7.1.1/7.2.0 environments where gcnArchName is corrupted on RDNA4
-      bool is_rdna4 = (archNameStr.find("gfx12") != std::string::npos) ||
-                      (deviceNameStr.find("rx 9070") != std::string::npos) ||
-                      (deviceNameStr.find("rx 9070xt") != std::string::npos) ||
-                      (deviceNameStr.find("radeon ai pro r9700") != std::string::npos) ||
-                      (deviceNameStr.find("radeon ai") != std::string::npos);
-
-      bool is_rdna3 = (archNameStr.find("gfx11") != std::string::npos);
-      bool is_cdna3 = (archNameStr.find("gfx942") != std::string::npos);
-      bool is_strix = (archNameStr.find("gfx115") != std::string::npos) ||
-                      (deviceNameStr.find("strix") != std::string::npos) ||
-                      (deviceNameStr.find("8060") != std::string::npos) ||
-                      (deviceNameStr.find("8050") != std::string::npos);
-
-      if (is_strix) {
-        info.l2CacheSize = 2 * 1024 * 1024;
-      } else if (info.l2CacheSize == 0) {
-        if (is_rdna4) {
-          info.l2CacheSize = 8 * 1024 * 1024;
-        } else if (is_rdna3) {
-          info.l2CacheSize = 4 * 1024 * 1024;
-        }
-      }
-      if (is_rdna4) {
-        info.l3CacheSize = 64 * 1024 * 1024;
-      } else if (is_rdna3) {
-        info.l3CacheSize = 32 * 1024 * 1024;
-      }
+      DeviceDatabase::enrichDeviceInfo(info);
+      const auto &prof = DeviceDatabase::lookup(info.vendorID, info.deviceID, info.name);
+      bool is_rdna4 = (prof.archFamily == "RDNA 4") || (archNameStr.find("gfx12") != std::string::npos);
+      bool is_rdna3 = (prof.archFamily == "RDNA 3" || prof.archFamily == "RDNA 3.5") || (archNameStr.find("gfx11") != std::string::npos);
+      bool is_cdna3 = (prof.archFamily == "CDNA 3") || (archNameStr.find("gfx942") != std::string::npos);
 
       info.fp8Support = (is_cdna3 || is_rdna4);
       info.fp6Support = false;

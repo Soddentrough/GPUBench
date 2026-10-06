@@ -26,6 +26,8 @@ struct ResultData {
   uint32_t maxWorkGroupSize;
   uint32_t deviceIndex;
   uint32_t configIndex;
+  uint32_t vendorId = 0;
+  uint32_t deviceId = 0;
   int sortWeight;
   uint32_t width = 0;
   uint32_t height = 0;
