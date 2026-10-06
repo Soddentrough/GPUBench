@@ -920,15 +920,21 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
           }
           auto start = std::chrono::high_resolution_clock::now();
           bench->Run(i);
-          context->waitIdle();
-          auto end = std::chrono::high_resolution_clock::now();
-          total_time_ms =
-              std::chrono::duration<double, std::milli>(end - start).count();
           if (context->hasGpuTiming()) {
             double gpu_time = context->stopTiming();
             if (gpu_time > 0.0) {
               total_time_ms = gpu_time;
+            } else {
+              context->waitIdle();
+              auto end = std::chrono::high_resolution_clock::now();
+              total_time_ms =
+                  std::chrono::duration<double, std::milli>(end - start).count();
             }
+          } else {
+            context->waitIdle();
+            auto end = std::chrono::high_resolution_clock::now();
+            total_time_ms =
+                std::chrono::duration<double, std::milli>(end - start).count();
           }
           total_invocations = 1;
         } else {
@@ -987,15 +993,21 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
           for (uint64_t iter = 0; iter < iterations; ++iter) {
             bench->Run(i);
           }
-          context->waitIdle();
-          end = std::chrono::high_resolution_clock::now();
-          total_time_ms =
-              std::chrono::duration<double, std::milli>(end - start).count();
           if (context->hasGpuTiming()) {
             double gpu_time = context->stopTiming();
             if (gpu_time > 0.0) {
               total_time_ms = gpu_time;
+            } else {
+              context->waitIdle();
+              end = std::chrono::high_resolution_clock::now();
+              total_time_ms =
+                  std::chrono::duration<double, std::milli>(end - start).count();
             }
+          } else {
+            context->waitIdle();
+            end = std::chrono::high_resolution_clock::now();
+            total_time_ms =
+                std::chrono::duration<double, std::milli>(end - start).count();
           }
           if (verbose) {
             std::cout << "[TIMING " << bench_name << "] single_run_ms: " << single_run_ms

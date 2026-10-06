@@ -69,16 +69,14 @@ void Fp32Bench::Teardown() {
 }
 
 BenchmarkResult Fp32Bench::GetResult(uint32_t config_idx) const {
-  // Vulkan: 8 vec4 FMAs per iteration = 64 FP32 operations per iteration, 65536 iters
-  // Total ops per thread = 65536 * 64 = 4,194,304 ops (33 VGPRs, 100% occupancy)
-  uint64_t iters = 65536;
-  uint64_t ops_per_iter = 64;
-  if (context && (context->getBackend() == ComputeBackend::OpenCL ||
-                  context->getBackend() == ComputeBackend::ROCm)) {
-    iters = 16384;
-    ops_per_iter = 256;
-  }
-  uint64_t num_ops = iters * ops_per_iter * 8192 * 64;
+  // All backends (Vulkan, OpenCL, ROCm):
+  // 32 vec4/float4 FMAs × 4 components × 2 ops = 256 FP32 ops per iteration.
+  // 16384 iterations × 256 ops = 4,194,304 ops per thread.
+  // 8192 workgroups × 64 threads = 524,288 threads.
+  // Total workload = 2,199,023,255,552 FP32 operations.
+  uint64_t iters = 16384;
+  uint64_t ops_per_iter = 256;
+  uint64_t num_ops = iters * ops_per_iter * 8192ULL * 64ULL;
   return {num_ops, 0.0};
 }
 

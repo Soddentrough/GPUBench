@@ -41,48 +41,49 @@ __kernel void run_benchmark(__global float* data, float multiplier, uint num_ele
     float4 val31 = seed + (float4)(1.21f, 1.22f, 1.23f, 1.24f);
     float4 val32 = seed + (float4)(1.25f, 1.26f, 1.27f, 1.28f);
 
-    float4 c = (float4)(0.0001f, 0.0002f, 0.0003f, 0.0004f);
     float4 m = (float4)(multiplier);
 
     // 32 vec4 FMAs × 4 components × 2 ops = 256 FP32 ops per iteration.
+    // 16384 iters * 256 ops = 4,194,304 ops per thread (matching Vulkan and ROCm)
     for (int i = 0; i < 16384; ++i) {
-        val1  = fma(val1,  m, c);
-        val2  = fma(val2,  m, c);
-        val3  = fma(val3,  m, c);
-        val4  = fma(val4,  m, c);
-        val5  = fma(val5,  m, c);
-        val6  = fma(val6,  m, c);
-        val7  = fma(val7,  m, c);
-        val8  = fma(val8,  m, c);
-        val9  = fma(val9,  m, c);
-        val10 = fma(val10, m, c);
-        val11 = fma(val11, m, c);
-        val12 = fma(val12, m, c);
-        val13 = fma(val13, m, c);
-        val14 = fma(val14, m, c);
-        val15 = fma(val15, m, c);
-        val16 = fma(val16, m, c);
-        val17 = fma(val17, m, c);
-        val18 = fma(val18, m, c);
-        val19 = fma(val19, m, c);
-        val20 = fma(val20, m, c);
-        val21 = fma(val21, m, c);
-        val22 = fma(val22, m, c);
-        val23 = fma(val23, m, c);
-        val24 = fma(val24, m, c);
-        val25 = fma(val25, m, c);
-        val26 = fma(val26, m, c);
-        val27 = fma(val27, m, c);
-        val28 = fma(val28, m, c);
-        val29 = fma(val29, m, c);
-        val30 = fma(val30, m, c);
-        val31 = fma(val31, m, c);
-        val32 = fma(val32, m, c);
+        val1  = fma(m, val2,  val1);
+        val2  = fma(m, val3,  val2);
+        val3  = fma(m, val4,  val3);
+        val4  = fma(m, val5,  val4);
+        val5  = fma(m, val6,  val5);
+        val6  = fma(m, val7,  val6);
+        val7  = fma(m, val8,  val7);
+        val8  = fma(m, val9,  val8);
+        val9  = fma(m, val10, val9);
+        val10 = fma(m, val11, val10);
+        val11 = fma(m, val12, val11);
+        val12 = fma(m, val13, val12);
+        val13 = fma(m, val14, val13);
+        val14 = fma(m, val15, val14);
+        val15 = fma(m, val16, val15);
+        val16 = fma(m, val17, val16);
+        val17 = fma(m, val18, val17);
+        val18 = fma(m, val19, val18);
+        val19 = fma(m, val20, val19);
+        val20 = fma(m, val21, val20);
+        val21 = fma(m, val22, val21);
+        val22 = fma(m, val23, val22);
+        val23 = fma(m, val24, val23);
+        val24 = fma(m, val25, val24);
+        val25 = fma(m, val26, val25);
+        val26 = fma(m, val27, val26);
+        val27 = fma(m, val28, val27);
+        val28 = fma(m, val29, val28);
+        val29 = fma(m, val30, val29);
+        val30 = fma(m, val31, val30);
+        val31 = fma(m, val32, val31);
+        val32 = fma(m, val1,  val32);
     }
 
-    data[index] = val1.x + val2.y + val3.z + val4.w + val5.x + val6.y + val7.z + val8.w +
-                  val9.x + val10.y + val11.z + val12.w + val13.x + val14.y + val15.z + val16.w +
-                  val17.x + val18.y + val19.z + val20.w + val21.x + val22.y + val23.z + val24.w +
-                  val25.x + val26.y + val27.z + val28.w + val29.x + val30.y + val31.z + val32.w;
-}
+    float4 sum = ((val1 + val2) + (val3 + val4)) + ((val5 + val6) + (val7 + val8)) +
+                 ((val9 + val10) + (val11 + val12)) + ((val13 + val14) + (val15 + val16)) +
+                 ((val17 + val18) + (val19 + val20)) + ((val21 + val22) + (val23 + val24)) +
+                 ((val25 + val26) + (val27 + val28)) + ((val29 + val30) + (val31 + val32));
 
+    data[index] = sum.x + sum.y + sum.z + sum.w;
+}

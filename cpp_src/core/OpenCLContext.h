@@ -72,6 +72,11 @@ public:
   void releaseKernel(ComputeKernel kernel) override;
   void waitIdle() override;
 
+  // Hardware GPU timestamp profiling
+  void startTiming() override;
+  double stopTiming() override;
+  bool hasGpuTiming() const override;
+
   // OpenCL-specific accessors
   cl_command_queue getCommandQueue() const { return commandQueue; }
 
@@ -108,4 +113,9 @@ private:
   bool verbose = false;
   bool quiet = false;
   bool available = false;
+
+  cl_event timingStartEvent = nullptr;
+  cl_event timingStopEvent = nullptr;
+  bool isTimingActive = false;
+  bool timingSupported = false;
 };

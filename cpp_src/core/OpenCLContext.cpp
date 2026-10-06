@@ -63,6 +63,12 @@ typedef cl_int (*p_clEnqueueNDRangeKernel)(cl_command_queue, cl_kernel, cl_uint,
                                            const size_t *, cl_uint,
                                            const cl_event *, cl_event *);
 typedef cl_int (*p_clFinish)(cl_command_queue);
+typedef cl_int (*p_clGetEventProfilingInfo)(cl_event, cl_profiling_info, size_t,
+                                            void *, size_t *);
+typedef cl_int (*p_clReleaseEvent)(cl_event);
+typedef cl_int (*p_clEnqueueMarkerWithWaitList)(cl_command_queue, cl_uint,
+                                                const cl_event *, cl_event *);
+typedef cl_int (*p_clEnqueueMarker)(cl_command_queue, cl_event *);
 
 static p_clGetPlatformIDs f_clGetPlatformIDs;
 static p_clGetDeviceIDs f_clGetDeviceIDs;
@@ -88,6 +94,10 @@ static p_clReleaseKernel f_clReleaseKernel;
 static p_clSetKernelArg f_clSetKernelArg;
 static p_clEnqueueNDRangeKernel f_clEnqueueNDRangeKernel;
 static p_clFinish f_clFinish;
+static p_clGetEventProfilingInfo f_clGetEventProfilingInfo;
+static p_clReleaseEvent f_clReleaseEvent;
+static p_clEnqueueMarkerWithWaitList f_clEnqueueMarkerWithWaitList;
+static p_clEnqueueMarker f_clEnqueueMarker;
 
 bool OpenCLContext::loadLibraries() {
   if (librariesLoaded)
@@ -151,6 +161,15 @@ bool OpenCLContext::loadLibraries() {
     f_clEnqueueNDRangeKernel = openclLib->getFunction<p_clEnqueueNDRangeKernel>(
         "clEnqueueNDRangeKernel");
     f_clFinish = openclLib->getFunction<p_clFinish>("clFinish");
+    f_clGetEventProfilingInfo =
+        openclLib->getFunction<p_clGetEventProfilingInfo>("clGetEventProfilingInfo");
+    f_clReleaseEvent =
+        openclLib->getFunction<p_clReleaseEvent>("clReleaseEvent");
+    f_clEnqueueMarkerWithWaitList =
+        openclLib->getFunction<p_clEnqueueMarkerWithWaitList>(
+            "clEnqueueMarkerWithWaitList");
+    f_clEnqueueMarker =
+        openclLib->getFunction<p_clEnqueueMarker>("clEnqueueMarker");
   }
 
   librariesLoaded = true;
@@ -181,11 +200,23 @@ OpenCLContext::OpenCLContext(bool verbose)
 }
 
 OpenCLContext::~OpenCLContext() {
+  if (f_clReleaseEvent) {
+    if (timingStartEvent) {
+      (void)f_clReleaseEvent(timingStartEvent);
+      timingStartEvent = nullptr;
+    }
+    if (timingStopEvent) {
+      (void)f_clReleaseEvent(timingStopEvent);
+      timingStopEvent = nullptr;
+    }
+  }
   if (commandQueue) {
     f_clReleaseCommandQueue(commandQueue);
+    commandQueue = nullptr;
   }
   if (context) {
     f_clReleaseContext(context);
+    context = nullptr;
   }
 }
 
@@ -359,6 +390,16 @@ void OpenCLContext::pickDevice(uint32_t index) {
   if (selectedDeviceIndex == index && device != nullptr && context != nullptr) {
     return;
   }
+  if (f_clReleaseEvent) {
+    if (timingStartEvent) {
+      (void)f_clReleaseEvent(timingStartEvent);
+      timingStartEvent = nullptr;
+    }
+    if (timingStopEvent) {
+      (void)f_clReleaseEvent(timingStopEvent);
+      timingStopEvent = nullptr;
+    }
+  }
   if (commandQueue) {
     f_clReleaseCommandQueue(commandQueue);
     commandQueue = nullptr;
@@ -463,10 +504,22 @@ void OpenCLContext::createContext() {
 
 void OpenCLContext::createCommandQueue() {
   cl_int err;
+  cl_queue_properties props[] = {CL_QUEUE_PROPERTIES, CL_QUEUE_PROFILING_ENABLE, 0};
+  timingSupported = false;
   if (f_clCreateCommandQueueWithProperties) {
-    commandQueue = f_clCreateCommandQueueWithProperties(context, device, nullptr, &err);
+    commandQueue = f_clCreateCommandQueueWithProperties(context, device, props, &err);
+    if (err == CL_SUCCESS) {
+      timingSupported = true;
+    } else {
+      commandQueue = f_clCreateCommandQueueWithProperties(context, device, nullptr, &err);
+    }
   } else if (f_clCreateCommandQueue) {
-    commandQueue = f_clCreateCommandQueue(context, device, 0, &err);
+    commandQueue = f_clCreateCommandQueue(context, device, CL_QUEUE_PROFILING_ENABLE, &err);
+    if (err == CL_SUCCESS) {
+      timingSupported = true;
+    } else {
+      commandQueue = f_clCreateCommandQueue(context, device, 0, &err);
+    }
   } else {
     throw std::runtime_error("OpenCL command queue creation functions not found");
   }
@@ -702,3 +755,78 @@ void OpenCLContext::printProgressBar(uint32_t current, uint32_t total,
   std::cout << "] " << int(progress * 100.0) << "% Compiling " << short_name
             << (current == total ? "\n" : "") << std::flush;
 }
+
+void OpenCLContext::startTiming() {
+  if (!timingSupported || !commandQueue ||
+      (!f_clEnqueueMarkerWithWaitList && !f_clEnqueueMarker)) {
+    return;
+  }
+  if (timingStartEvent && f_clReleaseEvent) {
+    (void)f_clReleaseEvent(timingStartEvent);
+    timingStartEvent = nullptr;
+  }
+  if (timingStopEvent && f_clReleaseEvent) {
+    (void)f_clReleaseEvent(timingStopEvent);
+    timingStopEvent = nullptr;
+  }
+  waitIdle();
+  cl_int err = CL_INVALID_OPERATION;
+  if (f_clEnqueueMarkerWithWaitList) {
+    err = f_clEnqueueMarkerWithWaitList(commandQueue, 0, nullptr, &timingStartEvent);
+  } else if (f_clEnqueueMarker) {
+    err = f_clEnqueueMarker(commandQueue, &timingStartEvent);
+  }
+  isTimingActive = (err == CL_SUCCESS && timingStartEvent != nullptr);
+}
+
+double OpenCLContext::stopTiming() {
+  if (!isTimingActive || !timingSupported || !commandQueue || !timingStartEvent ||
+      (!f_clEnqueueMarkerWithWaitList && !f_clEnqueueMarker) || !f_clGetEventProfilingInfo) {
+    isTimingActive = false;
+    return 0.0;
+  }
+  isTimingActive = false;
+
+  cl_int err = CL_INVALID_OPERATION;
+  if (f_clEnqueueMarkerWithWaitList) {
+    err = f_clEnqueueMarkerWithWaitList(commandQueue, 0, nullptr, &timingStopEvent);
+  } else if (f_clEnqueueMarker) {
+    err = f_clEnqueueMarker(commandQueue, &timingStopEvent);
+  }
+  if (err != CL_SUCCESS || !timingStopEvent) {
+    if (timingStartEvent && f_clReleaseEvent) {
+      (void)f_clReleaseEvent(timingStartEvent);
+      timingStartEvent = nullptr;
+    }
+    return 0.0;
+  }
+
+  waitIdle();
+
+  cl_ulong start_ns = 0, stop_ns = 0;
+  cl_int errStart = f_clGetEventProfilingInfo(
+      timingStartEvent, CL_PROFILING_COMMAND_END, sizeof(cl_ulong), &start_ns, nullptr);
+  cl_int errStop = f_clGetEventProfilingInfo(
+      timingStopEvent, CL_PROFILING_COMMAND_END, sizeof(cl_ulong), &stop_ns, nullptr);
+
+  if (timingStartEvent && f_clReleaseEvent) {
+    (void)f_clReleaseEvent(timingStartEvent);
+    timingStartEvent = nullptr;
+  }
+  if (timingStopEvent && f_clReleaseEvent) {
+    (void)f_clReleaseEvent(timingStopEvent);
+    timingStopEvent = nullptr;
+  }
+
+  if (errStart != CL_SUCCESS || errStop != CL_SUCCESS || stop_ns <= start_ns) {
+    return 0.0;
+  }
+
+  return static_cast<double>(stop_ns - start_ns) / 1.0e6;
+}
+
+bool OpenCLContext::hasGpuTiming() const {
+  return available && timingSupported && (f_clGetEventProfilingInfo != nullptr) &&
+         (f_clEnqueueMarkerWithWaitList != nullptr || f_clEnqueueMarker != nullptr);
+}
+

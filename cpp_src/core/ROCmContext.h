@@ -58,6 +58,11 @@ public:
   bool isQuiet() const override { return quiet; }
   void waitIdle() override;
 
+  // Hardware GPU timestamp profiling
+  void startTiming() override;
+  double stopTiming() override;
+  bool hasGpuTiming() const override;
+
   hipDevice_t getROCmDevice() const override { return device; }
 
 private:
@@ -86,4 +91,9 @@ private:
   uint32_t createdKernelCount = 0;
   void printProgressBar(uint32_t current, uint32_t total,
                         const std::string &kernel_name);
+
+  hipEvent_t timingStartEvent = nullptr;
+  hipEvent_t timingStopEvent = nullptr;
+  bool isTimingActive = false;
+  bool timingSupported = false;
 };

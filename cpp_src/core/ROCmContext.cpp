@@ -43,6 +43,11 @@ typedef hipError_t (*p_hipModuleLaunchKernel)(hipFunction_t, unsigned int,
 typedef hipError_t (*p_hipModuleUnload)(hipModule_t);
 typedef hipError_t (*p_hipDeviceSynchronize)(void);
 typedef hipError_t (*p_hipMemGetInfo)(size_t *, size_t *);
+typedef hipError_t (*p_hipEventCreate)(hipEvent_t *);
+typedef hipError_t (*p_hipEventDestroy)(hipEvent_t);
+typedef hipError_t (*p_hipEventRecord)(hipEvent_t, hipStream_t);
+typedef hipError_t (*p_hipEventSynchronize)(hipEvent_t);
+typedef hipError_t (*p_hipEventElapsedTime)(float *, hipEvent_t, hipEvent_t);
 
 // Function pointers for HIPRTC
 #ifdef HAVE_HIPRTC
@@ -82,6 +87,11 @@ static p_hipModuleLaunchKernel f_hipModuleLaunchKernel;
 static p_hipModuleUnload f_hipModuleUnload;
 static p_hipDeviceSynchronize f_hipDeviceSynchronize;
 static p_hipMemGetInfo f_hipMemGetInfo;
+static p_hipEventCreate f_hipEventCreate;
+static p_hipEventDestroy f_hipEventDestroy;
+static p_hipEventRecord f_hipEventRecord;
+static p_hipEventSynchronize f_hipEventSynchronize;
+static p_hipEventElapsedTime f_hipEventElapsedTime;
 
 bool ROCmContext::loadLibraries() {
   if (librariesLoaded)
@@ -134,6 +144,11 @@ bool ROCmContext::loadLibraries() {
     f_hipDeviceSynchronize =
         hipLib->getFunction<p_hipDeviceSynchronize>("hipDeviceSynchronize");
     f_hipMemGetInfo = hipLib->getFunction<p_hipMemGetInfo>("hipMemGetInfo");
+    f_hipEventCreate = hipLib->getFunction<p_hipEventCreate>("hipEventCreate");
+    f_hipEventDestroy = hipLib->getFunction<p_hipEventDestroy>("hipEventDestroy");
+    f_hipEventRecord = hipLib->getFunction<p_hipEventRecord>("hipEventRecord");
+    f_hipEventSynchronize = hipLib->getFunction<p_hipEventSynchronize>("hipEventSynchronize");
+    f_hipEventElapsedTime = hipLib->getFunction<p_hipEventElapsedTime>("hipEventElapsedTime");
 
 #ifdef HAVE_HIPRTC
 #ifdef _WIN32
@@ -221,6 +236,17 @@ ROCmContext::~ROCmContext() {
     }
   }
   modules.clear();
+
+  if (f_hipEventDestroy) {
+    if (timingStartEvent) {
+      (void)f_hipEventDestroy(timingStartEvent);
+      timingStartEvent = nullptr;
+    }
+    if (timingStopEvent) {
+      (void)f_hipEventDestroy(timingStopEvent);
+      timingStopEvent = nullptr;
+    }
+  }
 }
 
 void ROCmContext::enumerateDevices() {
@@ -334,6 +360,20 @@ void ROCmContext::pickDevice(uint32_t index) {
 
   device = index;
   selectedDeviceIndex = index;
+
+  if (f_hipEventCreate) {
+    if (timingStartEvent && f_hipEventDestroy) {
+      (void)f_hipEventDestroy(timingStartEvent);
+      timingStartEvent = nullptr;
+    }
+    if (timingStopEvent && f_hipEventDestroy) {
+      (void)f_hipEventDestroy(timingStopEvent);
+      timingStopEvent = nullptr;
+    }
+    hipError_t e1 = f_hipEventCreate(&timingStartEvent);
+    hipError_t e2 = f_hipEventCreate(&timingStopEvent);
+    timingSupported = (e1 == hipSuccess && e2 == hipSuccess);
+  }
 
   if (verbose) {
     std::cout << "Successfully selected HIP device " << index << ": "
@@ -662,3 +702,42 @@ void ROCmContext::printProgressBar(uint32_t current, uint32_t total,
   std::cout << "] " << int(progress * 100.0) << "% Compiling " << short_name
             << (current == total ? "\n" : "") << std::flush;
 }
+
+void ROCmContext::startTiming() {
+  if (!timingSupported || !timingStartEvent || !f_hipEventRecord) {
+    return;
+  }
+  waitIdle();
+  hipError_t err = f_hipEventRecord(timingStartEvent, 0);
+  isTimingActive = (err == hipSuccess);
+}
+
+double ROCmContext::stopTiming() {
+  if (!isTimingActive || !timingSupported || !timingStopEvent || !f_hipEventRecord ||
+      !f_hipEventElapsedTime) {
+    isTimingActive = false;
+    return 0.0;
+  }
+  isTimingActive = false;
+  hipError_t err = f_hipEventRecord(timingStopEvent, 0);
+  if (err != hipSuccess) {
+    return 0.0;
+  }
+  if (f_hipEventSynchronize) {
+    (void)f_hipEventSynchronize(timingStopEvent);
+  } else {
+    waitIdle();
+  }
+  float elapsed_ms = 0.0f;
+  err = f_hipEventElapsedTime(&elapsed_ms, timingStartEvent, timingStopEvent);
+  if (err != hipSuccess || elapsed_ms < 0.0f) {
+    return 0.0;
+  }
+  return static_cast<double>(elapsed_ms);
+}
+
+bool ROCmContext::hasGpuTiming() const {
+  return available && timingSupported && (f_hipEventRecord != nullptr) &&
+         (f_hipEventElapsedTime != nullptr);
+}
+
