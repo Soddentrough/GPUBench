@@ -98,6 +98,8 @@ public:
     bool shouldQuit() const { return m_shouldQuit; }
     void requestQuit() { m_shouldQuit = true; }
 
+    const std::vector<BenchmarkCategory>& getCategories() const { return m_categories; }
+
     void setSelectedDevice(int deviceIndex);
     void setSelectedDevices(const std::vector<int>& deviceIndices);
     void setSelectedBackend(const std::string& backend);

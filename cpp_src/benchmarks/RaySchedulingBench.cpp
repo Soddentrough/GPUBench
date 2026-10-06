@@ -1432,16 +1432,10 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     break;
   }
   case 18: { // Stage Breakdown - Primary Ray Tracing (2D Morton 8x4, Wavefront DGC)
+    vContext->dispatch(kernelReset, 1, 1, 1, 32, 1, 1);
     PushConstantsClassify pcClassify{rayCount, 0, 0, seed, dumpRenders ? 1u : 0u, renderWidth, renderHeight, materialCapacity, 2, sceneTypeVal, isGltfVal, 1u};
     vContext->setKernelArg(kernelClassify, 10, sizeof(pcClassify), &pcClassify);
-
-    vContext->dispatchWorkListSequence(
-        kernelReset,
-        kernelClassify, (rayCount + 31) / 32, 1, 1,
-        kernelResolve,
-        kernelMaterial, indirectBuffer, materialBatches,
-        false /* isPingPong */,
-        isDGCAvailable ? &dgcInfoStandard : nullptr, isDGCAvailable ? 1u : 0u);
+    vContext->dispatch(kernelClassify, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     break;
   }
   case 19: { // Ray-Traced Shadows - Traditional Megakernel (Directional Shadow Rays, In-Kernel Traversal)

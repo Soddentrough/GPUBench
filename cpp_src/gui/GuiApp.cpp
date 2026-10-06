@@ -191,6 +191,7 @@ static std::string formatCardDeviceSubtitle(const SelectableDevice& dev) {
 
 GuiApp::GuiApp() {
     m_benchmarkStartTime = std::chrono::steady_clock::now();
+    initializeBenchmarkCategories();
 }
 
 GuiApp::~GuiApp() {
@@ -864,7 +865,7 @@ void GuiApp::initializeBenchmarkCategories() {
             {"RayScheduling", "Traversal Ordering & Coherence", "2D Morton (4x8)", "Ray Tracing", "MRays/s", "4x8 Morton Z-order curve spatial traversal order", true, 16},
             {"RayScheduling", "Wavefront Stream Compaction", "Wave Ballot Compaction", "Ray Tracing", "MRecords/s", "SIMD wave ballot compaction of active ray streams", true, 13},
             {"RayScheduling", "Wavefront Stream Compaction", "Queue Compaction (Single-Pass)", "Ray Tracing", "MRecords/s", "Single-pass prefix sum wave stream compaction", true, 26},
-            {"RayScheduling", "Queue Memory Bandwidth", "VRAM Queue Round-Trip", "Ray Tracing", "GB/s", "Ray queue intermediate VRAM round-trip streaming bandwidth", true, 28},
+            {"RayScheduling", "Wavefront Stream Compaction", "Queue Compaction Throughput", "Ray Tracing", "MRecords/s", "Wavefront stream compaction throughput into sorted ray queues", true, 28},
             {"RayScheduling", "Alpha Cutout Divergence", "Traversal Divergence (Alpha Cutout)", "Ray Tracing", "MRays/s", "Stackless Any-Hit shader evaluation across alpha-tested cutout geometry", true, 27}
         }});
 
