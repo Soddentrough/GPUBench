@@ -360,11 +360,11 @@ std::string RaySchedulingBench::GetConfigName(uint32_t config_idx) const {
   case 18:
     return "Primary Rays (Wavefront - DGC)";
   case 19:
-    return "Stage: Directional Shadows - Single Light (1 Light, Megakernel)";
+    return "Stage: Directional Shadows - Single Light (Megakernel)";
   case 20:
-    return "Stage: Directional Shadows - Single Light (1 Light, RTP + SER)";
+    return "Stage: Directional Shadows - Single Light (RTP + SER)";
   case 21:
-    return "Stage: Directional Shadows - Single Light (1 Light, DGC)";
+    return "Stage: Directional Shadows - Single Light (DGC)";
   case 22:
     return "Stage: Directional Shadows - Multi-Light (3 Lights, DGC)";
   case 23:
@@ -372,7 +372,7 @@ std::string RaySchedulingBench::GetConfigName(uint32_t config_idx) const {
   case 24:
     return "Path Tracing (16 SPP) (DGC)";
   case 25:
-    return "Path Tracing (" + std::to_string(samplesPerPixel) + " SPP) (Persistent Threads - Work Stealing)";
+    return "Path Tracing (" + std::to_string(samplesPerPixel) + " SPP) (Dynamic Load Balancing)";
   case 26:
     return "Stage: Queue Compaction - Single-Pass Unified Stream";
   case 27:
@@ -384,13 +384,13 @@ std::string RaySchedulingBench::GetConfigName(uint32_t config_idx) const {
   case 30:
     return "Primary Rays (RTP + SER)";
   case 31:
-    return "Stage: Multi-Light Evaluation - Single Light (1 Light, Megakernel)";
+    return "Stage: Multi-Light Evaluation - Single Light (Megakernel)";
   case 32:
-    return "Stage: Multi-Light Evaluation - Single Light (1 Light, DGC)";
+    return "Stage: Multi-Light Evaluation - Single Light (DGC)";
   case 33:
-    return "Stage: Multi-Light Evaluation - 128 Lights (128 Lights, Megakernel)";
+    return "Stage: Multi-Light Evaluation - 128 Lights (Megakernel)";
   case 34:
-    return "Stage: Multi-Light Evaluation - 128 Lights (128 Lights, DGC Light Binning)";
+    return "Stage: Multi-Light Evaluation - 128 Lights (DGC Light Binning)";
   default:
     return "Unknown";
   }
@@ -430,9 +430,10 @@ std::string RaySchedulingBench::GetConfigCaveat(uint32_t config_idx) const {
 }
 
 int RaySchedulingBench::GetSortWeight(uint32_t config_idx) const {
-  if (config_idx == 17 || config_idx == 18) return 620 + static_cast<int>(config_idx - 17); // Scene RT (PBR): 620, 621
-  if (config_idx == 29) return 622;                                                           // Scene RT (PBR) - RTP: 622
-  if (config_idx == 30) return 623;                                                           // Scene RT (PBR) - RTP+SER: 623
+  if (config_idx == 17) return 620; // Scene RT (PBR) - Compute Megakernel (Baseline): 620
+  if (config_idx == 29) return 621; // Scene RT (PBR) - Dedicated RTP: 621
+  if (config_idx == 30) return 622; // Scene RT (PBR) - RTP + Hardware SER: 622
+  if (config_idx == 18) return 623; // Scene RT (PBR) - Wavefront DGC: 623
   if (config_idx >= 3 && config_idx <= 5) return 625 + static_cast<int>(config_idx - 3);    // Scene Path Tracing: 625..627
   if (config_idx == 25) return 628;                                                           // Scene Path Tracing (Persistent Threads): 628
   if (config_idx == 23) return 629;                                                           // Scene Path Tracing 16 SPP Mega: 629

@@ -127,9 +127,9 @@ int main(int argc, char **argv) {
                  "Ray tracing benchmark scenario: showroom, indoor, outdoor, forest, all (default: all)")
       ->check(CLI::IsMember({"showroom", "indoor", "outdoor", "forest", "aaa_forest", "all"}));
 
-  std::string resolution_str = "auto";
+  std::string resolution_str = "4k";
   app.add_option("-r,--resolution", resolution_str,
-                 "Resolution preset (auto, 720p, 1080p, 1440p, 4k, 1024x1024) or custom WxH (default: auto)");
+                 "Resolution preset (4k, 1440p, 1080p, 720p, 1024x1024, auto) or custom WxH (default: 4k)");
 
   std::vector<int> config_targets;
   app.add_option("-c,--config", config_targets,
@@ -291,9 +291,9 @@ int main(int argc, char **argv) {
   std::string res_lower;
   for (char c : resolution_str) res_lower.push_back(std::tolower(static_cast<unsigned char>(c)));
 
-  if (res_lower == "auto") {
-    render_width = 0;
-    render_height = 0;
+  if (res_lower == "auto" || res_lower == "4k" || res_lower == "2160p" || res_lower == "uhd") {
+    render_width = 3840;
+    render_height = 2160;
   } else if (res_lower == "720p") {
     render_width = 1280;
     render_height = 720;
@@ -303,9 +303,6 @@ int main(int argc, char **argv) {
   } else if (res_lower == "1440p" || res_lower == "2k" || res_lower == "qhd") {
     render_width = 2560;
     render_height = 1440;
-  } else if (res_lower == "4k" || res_lower == "2160p" || res_lower == "uhd") {
-    render_width = 3840;
-    render_height = 2160;
   } else if (res_lower == "1024x1024") {
     render_width = 1024;
     render_height = 1024;
@@ -317,15 +314,15 @@ int main(int argc, char **argv) {
         render_height = std::stoul(res_lower.substr(xPos + 1));
       } catch (...) {
         std::cerr << "Warning: Invalid resolution string '" << resolution_str
-                  << "', defaulting to auto" << std::endl;
-        render_width = 0;
-        render_height = 0;
+                  << "', defaulting to 4K (3840x2160)" << std::endl;
+        render_width = 3840;
+        render_height = 2160;
       }
     } else {
       std::cerr << "Warning: Unrecognized resolution preset '" << resolution_str
-                << "', defaulting to auto" << std::endl;
-      render_width = 0;
-      render_height = 0;
+                << "', defaulting to 4K (3840x2160)" << std::endl;
+      render_width = 3840;
+      render_height = 2160;
     }
   }
 

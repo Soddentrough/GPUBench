@@ -81,13 +81,13 @@ public:
   uint32_t GetNumConfigs() const override { return 35; }
   std::vector<std::string> GetAliases() const override {
     if (sceneType == SceneType::AAAOutdoorForest) {
-      return {"rayscheduling", "rtscheduling", "forest", "aaa_forest", "rayscheduling_forest", "wavefront_queues", "dgc", "scene_render", "total_scene_render", "total_frame", "primary", "primary_rays", "shadow", "shadows", "rts", "ray_shadows", "ray_shadow", "multilight", "multi_light", "lightbinning", "light_binning"};
+      return {"rayscheduling", "rtscheduling", "forest", "aaa_forest", "rayscheduling_forest", "wavefront_queues", "dgc", "scene_render", "total_scene_render", "total_frame", "primary", "primary_rays", "shadow", "shadows", "rts", "ray_shadows", "ray_shadow", "multilight", "multi_light", "lightbinning", "light_binning", "pathtracing", "path_tracing", "path", "pathtrace"};
     } else if (sceneType == SceneType::OutdoorLandscape) {
-      return {"rayscheduling", "rtscheduling", "outdoor", "landscape", "rayscheduling_outdoor", "wavefront_queues", "dgc", "scene_render", "total_scene_render", "total_frame", "primary", "primary_rays", "shadow", "shadows", "rts", "ray_shadows", "ray_shadow", "multilight", "multi_light", "lightbinning", "light_binning"};
+      return {"rayscheduling", "rtscheduling", "outdoor", "landscape", "rayscheduling_outdoor", "wavefront_queues", "dgc", "scene_render", "total_scene_render", "total_frame", "primary", "primary_rays", "shadow", "shadows", "rts", "ray_shadows", "ray_shadow", "multilight", "multi_light", "lightbinning", "light_binning", "pathtracing", "path_tracing", "path", "pathtrace"};
     } else if (sceneType == SceneType::IndoorAtrium) {
-      return {"rayscheduling", "rtscheduling", "indoor", "atrium", "rayscheduling_indoor", "wavefront_queues", "dgc", "scene_render", "total_scene_render", "total_frame", "primary", "primary_rays", "shadow", "shadows", "rts", "ray_shadows", "ray_shadow", "multilight", "multi_light", "lightbinning", "light_binning"};
+      return {"rayscheduling", "rtscheduling", "indoor", "atrium", "rayscheduling_indoor", "wavefront_queues", "dgc", "scene_render", "total_scene_render", "total_frame", "primary", "primary_rays", "shadow", "shadows", "rts", "ray_shadows", "ray_shadow", "multilight", "multi_light", "lightbinning", "light_binning", "pathtracing", "path_tracing", "path", "pathtrace"};
     } else {
-      return {"rayscheduling", "rtscheduling", "showroom", "studio", "rayscheduling_showroom", "wavefront_queues", "dgc", "scene_render", "total_scene_render", "total_frame", "primary", "primary_rays", "shadow", "shadows", "rts", "ray_shadows", "ray_shadow", "multilight", "multi_light", "lightbinning", "light_binning"};
+      return {"rayscheduling", "rtscheduling", "showroom", "studio", "rayscheduling_showroom", "wavefront_queues", "dgc", "scene_render", "total_scene_render", "total_frame", "primary", "primary_rays", "shadow", "shadows", "rts", "ray_shadows", "ray_shadow", "multilight", "multi_light", "lightbinning", "light_binning", "pathtracing", "path_tracing", "path", "pathtrace"};
     }
   }
   std::string GetConfigName(uint32_t config_idx) const override;

@@ -575,11 +575,23 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
     context->setExpectedKernelCount(totalKernels);
 
     bool hasVisualVerification = false;
+    bool hasRayTracing = false;
     for (const auto &bench : benchmarks) {
-      if (isSelected(bench.get()) && bench->IsSupported(info, context) && bench->HasVisualVerification()) {
-        hasVisualVerification = true;
-        break;
+      if (isSelected(bench.get()) && bench->IsSupported(info, context)) {
+        if (bench->HasVisualVerification()) {
+          hasVisualVerification = true;
+        }
+        if (dynamic_cast<RaySchedulingBench *>(bench.get()) != nullptr) {
+          hasRayTracing = true;
+        }
       }
+    }
+
+    uint32_t effectiveWidth = renderWidth;
+    uint32_t effectiveHeight = renderHeight;
+    if (effectiveWidth == 0 || effectiveHeight == 0) {
+      effectiveWidth = 3840;
+      effectiveHeight = 2160;
     }
 
     if (!quiet && !verbose && !onResult) {
@@ -588,16 +600,56 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
       std::string memLabel = info.isApu ? "GB Unified Memory" : "GB Dedicated VRAM";
       std::string line1_plain = "Target Device : [GPU " + std::to_string(context->getSelectedDeviceIndex()) + "] " + info.name;
       std::string line2_plain = "Backend / API : " + backendStr + " | VRAM: " + std::to_string(vramGb) + " " + memLabel;
-      size_t innerCardW = 72;
+
+      std::string resPreset = "";
+      if (effectiveWidth == 3840 && effectiveHeight == 2160) resPreset = " (4K UHD)";
+      else if (effectiveWidth == 2560 && effectiveHeight == 1440) resPreset = " (1440p QHD)";
+      else if (effectiveWidth == 1920 && effectiveHeight == 1080) resPreset = " (1080p FHD)";
+      else if (effectiveWidth == 1280 && effectiveHeight == 720) resPreset = " (720p HD)";
+      else if (effectiveWidth == 1024 && effectiveHeight == 1024) resPreset = " (1024x1024 Square)";
+      std::string line3_plain = "Resolution    : " + std::to_string(effectiveWidth) + "x" + std::to_string(effectiveHeight) + resPreset;
+
+      std::string scLabel = sceneName;
+      if (sceneName == "all") scLabel = "All Scenarios (Showroom, Atrium, Landscape, Forest)";
+      else if (sceneName == "showroom") scLabel = "Showroom Studio";
+      else if (sceneName == "indoor") scLabel = "Indoor Atrium";
+      else if (sceneName == "outdoor") scLabel = "Outdoor Landscape";
+      else if (sceneName == "forest" || sceneName == "aaa_forest") scLabel = "Open-World Forest";
+      std::string line4_plain = "RT Scenario   : " + scLabel;
+
+      size_t innerCardW = 74;
+      if (line1_plain.length() > innerCardW) innerCardW = line1_plain.length();
+      if (line2_plain.length() > innerCardW) innerCardW = line2_plain.length();
+      if (line3_plain.length() > innerCardW) innerCardW = line3_plain.length();
+      if (hasRayTracing && line4_plain.length() > innerCardW) innerCardW = line4_plain.length();
+
       size_t pad1 = (innerCardW > line1_plain.length()) ? (innerCardW - line1_plain.length()) : 0;
       size_t pad2 = (innerCardW > line2_plain.length()) ? (innerCardW - line2_plain.length()) : 0;
+      size_t pad3 = (innerCardW > line3_plain.length()) ? (innerCardW - line3_plain.length()) : 0;
+      size_t pad4 = (innerCardW > line4_plain.length()) ? (innerCardW - line4_plain.length()) : 0;
 
-      std::cout << "\n\033[1m\033[36m╭─ GPUBench v" << GPUBENCH_VERSION << " ────────────────────────────────────────────────────────╮\033[0m\n";
+      std::string topTitle = "╭─ GPUBench v" + std::string(GPUBENCH_VERSION) + " ";
+      size_t prefixLen = 14 + std::string(GPUBENCH_VERSION).length();
+      size_t dashCount = (innerCardW + 2 > prefixLen) ? (innerCardW + 2 - prefixLen) : 10;
+
+      std::cout << "\n\033[1m\033[36m" << topTitle;
+      for (size_t d = 0; d < dashCount; ++d) std::cout << "─";
+      std::cout << "╮\033[0m\n";
+
       std::cout << "\033[1m\033[36m│\033[0m \033[1mTarget Device\033[0m : [GPU " << context->getSelectedDeviceIndex() << "] \033[33m" << info.name << "\033[0m"
                 << std::string(pad1, ' ') << " \033[1m\033[36m│\033[0m\n";
       std::cout << "\033[1m\033[36m│\033[0m \033[1mBackend / API\033[0m : \033[32m" << backendStr << "\033[0m | \033[1mVRAM\033[0m: \033[32m" << vramGb << " " << memLabel << "\033[0m"
                 << std::string(pad2, ' ') << " \033[1m\033[36m│\033[0m\n";
-      std::cout << "\033[1m\033[36m╰──────────────────────────────────────────────────────────────────────────╯\033[0m\n\n";
+      std::cout << "\033[1m\033[36m│\033[0m \033[1mResolution\033[0m    : \033[36m" << effectiveWidth << "x" << effectiveHeight << resPreset << "\033[0m"
+                << std::string(pad3, ' ') << " \033[1m\033[36m│\033[0m\n";
+      if (hasRayTracing) {
+        std::cout << "\033[1m\033[36m│\033[0m \033[1mRT Scenario\033[0m   : \033[35m" << scLabel << "\033[0m"
+                  << std::string(pad4, ' ') << " \033[1m\033[36m│\033[0m\n";
+      }
+      std::cout << "\033[1m\033[36m╰";
+      for (size_t d = 0; d < innerCardW + 2; ++d) std::cout << "─";
+      std::cout << "╯\033[0m\n\n";
+
       if (hasVisualVerification) {
         std::cout << "  \033[1m[1/3] Preparation Phase\033[0m (compiling kernels, uploading data, building BVHs)..." << std::endl;
       } else {
@@ -607,25 +659,6 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
       std::cout << "Preparing benchmarks (compiling kernels, uploading "
                    "data, building acceleration structures)..."
                 << std::endl;
-    }
-    uint32_t effectiveWidth = renderWidth;
-    uint32_t effectiveHeight = renderHeight;
-    if (effectiveWidth == 0 || effectiveHeight == 0) {
-      if (info.memorySize >= 15ULL * 1024 * 1024 * 1024) {
-        effectiveWidth = 3840;
-        effectiveHeight = 2160;
-      } else if (info.memorySize >= 9ULL * 1024 * 1024 * 1024) {
-        effectiveWidth = 2560;
-        effectiveHeight = 1440;
-      } else {
-        effectiveWidth = 1920;
-        effectiveHeight = 1080;
-      }
-      if (verbose) {
-        std::cout << "Auto-selected resolution: " << effectiveWidth << "x" << effectiveHeight
-                  << " for " << info.name << " (" << (info.memorySize / (1024 * 1024 * 1024))
-                  << " GB VRAM)" << std::endl;
-      }
     }
 
     std::vector<IBenchmark *> runnable;

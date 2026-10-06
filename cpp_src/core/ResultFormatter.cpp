@@ -137,6 +137,25 @@ static std::string cleanSupportNote(const std::string &rawNote) {
   return note;
 }
 
+static std::string extractSceneName(const std::string &rawName) {
+  if (rawName.rfind("RayScheduling (", 0) == 0) {
+    size_t firstParen = 15; // length of "RayScheduling ("
+    size_t closeParen = rawName.find(')', firstParen);
+    if (closeParen != std::string::npos) {
+      return rawName.substr(firstParen, closeParen - firstParen);
+    }
+  }
+  return "";
+}
+
+static int getSceneOrder(const std::string &name) {
+  if (name.find("[Showroom Studio]") != std::string::npos || name.find("Showroom") != std::string::npos) return 1;
+  if (name.find("[Indoor Atrium]") != std::string::npos || name.find("Indoor") != std::string::npos || name.find("Atrium") != std::string::npos) return 2;
+  if (name.find("[Outdoor Landscape]") != std::string::npos || name.find("Outdoor") != std::string::npos || name.find("Landscape") != std::string::npos) return 3;
+  if (name.find("[Open-World Forest]") != std::string::npos || name.find("Forest") != std::string::npos) return 4;
+  return 99;
+}
+
 std::string cleanWorkloadName(const std::string &rawName, const std::string &subcat) {
   std::string name = rawName;
 
@@ -301,8 +320,14 @@ void ResultFormatter::print() {
     std::string cleanName = cleanWorkloadName(res.benchmarkName, res.subcategory);
     if (res.isEmulated) cleanName += " (Emulated)";
 
-    auto &subcatGroup = organizedData[res.deviceIndex][{compWeight, res.component}][res.subcategory];
-    subcatGroup.name = res.subcategory;
+    std::string effectiveSubcat = res.subcategory;
+    std::string sceneName = extractSceneName(res.benchmarkName);
+    if (!sceneName.empty()) {
+      effectiveSubcat = res.subcategory + " [" + sceneName + "]";
+    }
+
+    auto &subcatGroup = organizedData[res.deviceIndex][{compWeight, res.component}][effectiveSubcat];
+    subcatGroup.name = effectiveSubcat;
     subcatGroup.minSortWeight = (std::min)(subcatGroup.minSortWeight, res.sortWeight);
     subcatGroup.benchmarks[{res.sortWeight, res.configIndex, cleanName}][res.backendName] = res;
 
@@ -398,6 +423,46 @@ void ResultFormatter::print() {
               << std::string(pad, ' ')
               << BOLD << CYAN << " │" << RESET << "\n";
 
+    // Query canvas resolution if available
+    uint32_t reportWidth = 0;
+    uint32_t reportHeight = 0;
+    for (const auto &compPair : organizedData[devIdx]) {
+      for (const auto &subcatPair : compPair.second) {
+        for (const auto &benchPair : subcatPair.second.benchmarks) {
+          for (const auto &bPair : benchPair.second) {
+            if (bPair.second.width > 0 && bPair.second.height > 0) {
+              reportWidth = bPair.second.width;
+              reportHeight = bPair.second.height;
+              break;
+            }
+          }
+          if (reportWidth > 0) break;
+        }
+        if (reportWidth > 0) break;
+      }
+      if (reportWidth > 0) break;
+    }
+
+    if (reportWidth > 0 && reportHeight > 0) {
+      std::string resPreset = "";
+      if (reportWidth == 3840 && reportHeight == 2160) resPreset = " (4K UHD)";
+      else if (reportWidth == 2560 && reportHeight == 1440) resPreset = " (1440p QHD)";
+      else if (reportWidth == 1920 && reportHeight == 1080) resPreset = " (1080p FHD)";
+      else if (reportWidth == 1280 && reportHeight == 720) resPreset = " (720p HD)";
+      else if (reportWidth == 1024 && reportHeight == 1024) resPreset = " (1024x1024 Square)";
+
+      std::string resLabel = "Canvas / Res  : ";
+      std::string resValStr = std::to_string(reportWidth) + "x" + std::to_string(reportHeight) + resPreset;
+      std::string fullResLine = resLabel + resValStr;
+      size_t visResLen = visualLength(fullResLine);
+      size_t resPad = (cardInnerWidth > visResLen) ? (cardInnerWidth - visResLen) : 0;
+
+      std::cout << BOLD << CYAN << "  │ " << RESET
+                << BOLD << resLabel << RESET << CYAN << resValStr << RESET
+                << std::string(resPad, ' ')
+                << BOLD << CYAN << " │" << RESET << "\n";
+    }
+
     std::cout << BOLD << CYAN << "  ╰─" << repeatUtf8("─", cardBoxWidth - 3) << "╯" << RESET << "\n";
 
     const auto &components = organizedData[devIdx];
@@ -412,7 +477,13 @@ void ResultFormatter::print() {
       }
       std::sort(sortedSubcats.begin(), sortedSubcats.end(),
                 [](const SubcategoryGroup &a, const SubcategoryGroup &b) {
-                  return a.minSortWeight < b.minSortWeight;
+                  if (a.minSortWeight != b.minSortWeight)
+                    return a.minSortWeight < b.minSortWeight;
+                  int orderA = getSceneOrder(a.name);
+                  int orderB = getSceneOrder(b.name);
+                  if (orderA != orderB)
+                    return orderA < orderB;
+                  return a.name < b.name;
                 });
 
       for (const auto &subcat : sortedSubcats) {
@@ -1028,8 +1099,13 @@ void ResultFormatter::printComparison(const std::vector<ImportedRun> &runs) {
       else if (res.component == "Ray Tracing") compWeight = 4;
 
       std::string cName = cleanWorkloadName(res.benchmarkName, res.subcategory);
-      auto &subcat = compData[std::make_pair(compWeight, res.component)][res.subcategory];
-      subcat.name = res.subcategory;
+      std::string effectiveSubcat = res.subcategory;
+      std::string sceneName = extractSceneName(res.benchmarkName);
+      if (!sceneName.empty()) {
+        effectiveSubcat = res.subcategory + " [" + sceneName + "]";
+      }
+      auto &subcat = compData[std::make_pair(compWeight, res.component)][effectiveSubcat];
+      subcat.name = effectiveSubcat;
       subcat.minSortWeight = (std::min)(subcat.minSortWeight, res.sortWeight);
 
       auto key = std::make_pair(res.sortWeight, res.configIndex);
@@ -1125,7 +1201,13 @@ void ResultFormatter::printComparison(const std::vector<ImportedRun> &runs) {
     for (const auto &sp : compPair.second) sortedSubcats.push_back(sp.second);
     std::sort(sortedSubcats.begin(), sortedSubcats.end(),
               [](const CompSubcategory &a, const CompSubcategory &b) {
-                return a.minSortWeight < b.minSortWeight;
+                if (a.minSortWeight != b.minSortWeight)
+                  return a.minSortWeight < b.minSortWeight;
+                int orderA = getSceneOrder(a.name);
+                int orderB = getSceneOrder(b.name);
+                if (orderA != orderB)
+                  return orderA < orderB;
+                return a.name < b.name;
               });
 
     for (const auto &subcat : sortedSubcats) {
