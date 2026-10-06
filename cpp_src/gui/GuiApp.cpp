@@ -2611,8 +2611,8 @@ void GuiApp::renderBenchmarkSuitePanel() {
         }
 
         // 2. Fixed column widths for Score and Speedup guarantee visibility
-        float scoreColW = std::max(s(150.0f), ImGui::CalcTextSize("99999.9 MRecords/s").x + s(16.0f));
-        float deltaColW = hasAnyComparison ? std::max(s(150.0f), ImGui::CalcTextSize("[Baseline]").x + s(54.0f)) : 0.0f;
+        float scoreColW = std::max(s(130.0f), ImGui::CalcTextSize("99999.9 MRecords/s").x + s(12.0f));
+        float deltaColW = hasAnyComparison ? std::max(s(130.0f), ImGui::CalcTextSize("[Baseline]").x + s(40.0f)) : 0.0f;
         int numSubCols = hasAnyComparison ? 3 : 2;
 
         // 3. Exact minimum width needed by workload column so NO test name is ever truncated
@@ -2625,8 +2625,8 @@ void GuiApp::renderBenchmarkSuitePanel() {
             if (tw > maxWorkloadTextW) maxWorkloadTextW = tw;
         }
         float minWorkloadColW = maxWorkloadTextW + s(16.0f) /* indent */ + frameH /* checkbox */ + 
-                                ImGui::GetStyle().ItemInnerSpacing.x + ImGui::GetStyle().CellPadding.x * 2.0f + s(16.0f) /* safety margin */;
-        float minTableW = minWorkloadColW + scoreColW + deltaColW + s(16.0f);
+                                ImGui::GetStyle().ItemInnerSpacing.x + ImGui::GetStyle().CellPadding.x * 2.0f + s(12.0f) /* safety margin */;
+        float minTableW = minWorkloadColW + scoreColW + deltaColW + s(10.0f);
 
         // 4. Right-aligned header score/status badge
         std::string rightBadge = "";
@@ -2663,7 +2663,7 @@ void GuiApp::renderBenchmarkSuitePanel() {
 
         float badgeW = ImGui::CalcTextSize(rightBadge.c_str()).x;
         float titleTextW = ImGui::CalcTextSize(sub.name.c_str()).x;
-        float minHeaderW = s(58.0f) + titleTextW + s(80.0f) + badgeW + s(20.0f);
+        float minHeaderW = s(58.0f) + titleTextW + s(24.0f) + badgeW + s(16.0f);
 
         float requiredCardW = std::max(minTableW, minHeaderW);
         float cardW = std::max(availW, requiredCardW);
@@ -3004,37 +3004,7 @@ void GuiApp::renderBenchmarkSuitePanel() {
 
     float availW = ImGui::GetContentRegionAvail().x;
     float fontScaleFactor = ImGui::GetFontSize() / 16.0f;
-    // Calculate maximum required subgroup width across all visible subgroups so no card is ever cramped
-    float maxSubgroupRequiredW = s(550.0f);
-    for (const auto* sub : visibleSubgroups) {
-        float subWorkloadW = s(200.0f);
-        bool hasComp = false;
-        for (const auto& itm : sub->items) {
-            BenchmarkDisplayInfo d = getBenchmarkDisplayInfo(itm, m_telemetryGpuIndex);
-            bool isUnsupported = (!itm.isSupported || (d.hasResult && d.primaryResult.isUnsupported));
-            if (m_hideUnsupported && isUnsupported) continue;
-            float tw = ImGui::CalcTextSize(itm.name.c_str()).x;
-            if (tw > subWorkloadW) subWorkloadW = tw;
-
-            if ((d.hasResult && d.hasComparison && !d.primaryResult.isUnsupported) ||
-                (d.isBaseline && sub->items.size() > 1)) {
-                hasComp = true;
-            }
-        }
-        float subWorkloadColW = subWorkloadW + s(16.0f) + ImGui::GetFrameHeight() + 
-                                ImGui::GetStyle().ItemInnerSpacing.x + ImGui::GetStyle().CellPadding.x * 2.0f + s(16.0f);
-        float scoreColW = std::max(s(150.0f), ImGui::CalcTextSize("99999.9 MRecords/s").x + s(16.0f));
-        float deltaColW = hasComp ? std::max(s(150.0f), ImGui::CalcTextSize("[Baseline]").x + s(54.0f)) : 0.0f;
-        float subMinW = subWorkloadColW + scoreColW + deltaColW + s(16.0f);
-
-        float titleW = s(58.0f) + ImGui::CalcTextSize(sub->name.c_str()).x + s(80.0f) + s(120.0f) + s(20.0f);
-        float subReq = std::max(subMinW, titleW);
-        if (subReq > maxSubgroupRequiredW) {
-            maxSubgroupRequiredW = subReq;
-        }
-    }
-
-    float minColW = std::max(maxSubgroupRequiredW + s(16.0f), 420.0f * fontScaleFactor);
+    float minColW = std::max(s(440.0f), 400.0f * fontScaleFactor);
     int maxCols = std::max(1, static_cast<int>(availW / minColW));
     if (maxCols > 4) maxCols = 4;
 
