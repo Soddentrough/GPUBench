@@ -20,7 +20,8 @@ std::vector<ResultData> RunBenchmarksAPI(
     const std::string& scene,
     uint32_t samples_per_pixel,
     std::atomic<bool>* cancel_token,
-    bool quiet)
+    bool quiet,
+    const std::vector<std::string>& selected_workloads)
 {
     // Never let C++ exceptions cross the cxx FFI boundary into Rust (that
     // would call std::terminate). On error, return an empty result list.
@@ -50,6 +51,9 @@ std::vector<ResultData> RunBenchmarksAPI(
     runner.setResolution(renderWidth, renderHeight);
     runner.setSamplesPerPixel(samples_per_pixel);
     runner.setQuiet(quiet || (callback != nullptr));
+    if (!selected_workloads.empty()) {
+        runner.setWorkloadFilter(selected_workloads);
+    }
     if (cancel_token) {
         runner.setCancelToken(cancel_token);
     }
@@ -350,6 +354,50 @@ std::vector<BenchmarkSupportInfo> ProbeBenchmarkSupportAPI(
                             }
                         }
                         results.push_back(item);
+
+                        if (std::string(bench->GetName()).rfind("RayScheduling", 0) == 0) {
+                            BenchmarkSupportInfo baseItem = item;
+                            baseItem.id = "RayScheduling";
+                            results.push_back(baseItem);
+                        }
+
+                        // Probe individual configuration support
+                        uint32_t num_configs = bench->GetNumConfigs();
+                        for (uint32_t ci = 0; ci < num_configs; ++ci) {
+                            if (!bench->IsConfigSupported(ci, info, ctx.get())) {
+                                BenchmarkSupportInfo cfgItem;
+                                cfgItem.id = bench->GetConfigName(ci);
+                                cfgItem.isSupported = false;
+                                cfgItem.reason = bench->GetConfigSupportNote(ci, info, ctx.get());
+                                if (cfgItem.reason.empty()) {
+                                    cfgItem.reason = bench->GetSupportNote(info, ctx.get());
+                                }
+                                switch (bench->GetConfigSupportLimitation(ci, info, ctx.get())) {
+                                case IBenchmark::SupportLimitation::kHardware:
+                                    cfgItem.limitationCategory = "Hardware Limitation";
+                                    break;
+                                case IBenchmark::SupportLimitation::kApi:
+                                    cfgItem.limitationCategory = "API Limitation";
+                                    break;
+                                case IBenchmark::SupportLimitation::kToolchain:
+                                    cfgItem.limitationCategory = "Toolchain Limitation";
+                                    break;
+                                default:
+                                    cfgItem.limitationCategory = "Unsupported";
+                                    break;
+                                }
+                                results.push_back(cfgItem);
+                            }
+                        }
+                    }
+
+                    if (!info.serSupported) {
+                        BenchmarkSupportInfo serItem;
+                        serItem.id = "SER";
+                        serItem.isSupported = false;
+                        serItem.reason = "VK_EXT_ray_tracing_invocation_reorder requires Ray Tracing Pipeline with hardware SER support";
+                        serItem.limitationCategory = "Hardware Limitation";
+                        results.push_back(serItem);
                     }
                 }
             }

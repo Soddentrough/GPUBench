@@ -5,6 +5,10 @@
 class Fp6Bench : public IBenchmark {
 public:
   const char *GetName() const override { return "FP6"; }
+  std::vector<std::string> GetAliases() const override {
+    return {"fp6", "f6"};
+  }
+  const char *GetMetric() const override { return "TOPS"; }
   bool IsSupported(const DeviceInfo &device,
                    IComputeContext *context = nullptr) const override;
   std::string GetSupportNote() const override {

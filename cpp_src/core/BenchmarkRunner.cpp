@@ -743,17 +743,55 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
           continue;
         }
 
-        // Silence unsupported SER configs when hardware SER is absent
-        if (!info.serSupported && bench->GetConfigName(i).find("SER") != std::string::npos) {
-          continue;
-        }
-
         // Deduplicate algorithmic microbenchmarks across non-Showroom scenes
         if (auto *rs = dynamic_cast<RaySchedulingBench *>(bench)) {
           if (rs->GetSceneType() != RaySchedulingBench::SceneType::Showroom) {
             if (i == 12 || i == 13 || i == 14 || i == 15 || i == 16 || i == 26 || i == 28) {
               continue;
             }
+          }
+        }
+
+        if (!workloadFilter.empty()) {
+          bool matched = false;
+          std::string bName = bench->GetName();
+          std::string cName = bench->GetConfigName(i);
+          std::string fullTaskName = bName;
+          if (cName.rfind(bName, 0) == 0) {
+            fullTaskName = cName;
+          } else if (!cName.empty()) {
+            fullTaskName += " (" + cName + ")";
+          }
+          std::string keyIndex = bName + "#" + std::to_string(i);
+
+          // Strip any parenthesized scene name from RayScheduling (e.g. "RayScheduling (Indoor Atrium)" -> "RayScheduling")
+          std::string baseBenchName = bName;
+          size_t p = baseBenchName.find(" (");
+          if (p != std::string::npos) {
+            baseBenchName = baseBenchName.substr(0, p);
+          }
+          std::string baseKeyIndex = baseBenchName + "#" + std::to_string(i);
+
+          for (const auto &filt : workloadFilter) {
+            if (filt == baseBenchName || filt == bName) {
+              matched = true;
+              break;
+            }
+            if (filt == baseKeyIndex || filt == keyIndex) {
+              matched = true;
+              break;
+            }
+            if (!cName.empty() && filt == cName) {
+              matched = true;
+              break;
+            }
+            if (filt == fullTaskName) {
+              matched = true;
+              break;
+            }
+          }
+          if (!matched) {
+            continue;
           }
         }
 
@@ -1326,10 +1364,25 @@ void BenchmarkRunner::runHostBenchmarks(const std::vector<std::string> &benchmar
           if (cancelToken && cancelToken->load()) {
             break;
           }
-          std::string bench_name = bench->GetName();
+          std::string bName = bench->GetName();
           std::string config_name = bench->GetConfigName(i);
+          std::string bench_name = bName;
           if (!config_name.empty()) {
             bench_name += " (" + config_name + ")";
+          }
+          std::string keyIndex = bName + "#" + std::to_string(i);
+
+          if (!workloadFilter.empty()) {
+            bool matched = false;
+            for (const auto &filt : workloadFilter) {
+              if (filt == bName || filt == keyIndex || filt == config_name || filt == bench_name) {
+                matched = true;
+                break;
+              }
+            }
+            if (!matched) {
+              continue;
+            }
           }
 
           if (verbose) {

@@ -372,7 +372,7 @@ std::string RaySchedulingBench::GetConfigName(uint32_t config_idx) const {
   case 24:
     return "Path Tracing (16 SPP) (DGC)";
   case 25:
-    return "Path Tracing (" + std::to_string(samplesPerPixel) + " SPP) - Persistent Wavefront Queue";
+    return "Path Tracing (" + std::to_string(samplesPerPixel) + " SPP) (Persistent Threads - Work Stealing)";
   case 26:
     return "Stage: Queue Compaction - Single-Pass Unified Stream";
   case 27:
@@ -434,7 +434,7 @@ int RaySchedulingBench::GetSortWeight(uint32_t config_idx) const {
   if (config_idx == 29) return 622;                                                           // Scene RT (PBR) - RTP: 622
   if (config_idx == 30) return 623;                                                           // Scene RT (PBR) - RTP+SER: 623
   if (config_idx >= 3 && config_idx <= 5) return 625 + static_cast<int>(config_idx - 3);    // Scene Path Tracing: 625..627
-  if (config_idx == 25) return 628;                                                           // Scene Path Tracing (Persistent Wavefront): 628
+  if (config_idx == 25) return 628;                                                           // Scene Path Tracing (Persistent Threads): 628
   if (config_idx == 23) return 629;                                                           // Scene Path Tracing 16 SPP Mega: 629
   if (config_idx == 24) return 630;                                                           // Scene Path Tracing 16 SPP WL: 630
   if (config_idx >= 9 && config_idx <= 11) return 635 + static_cast<int>(config_idx - 9);   // Primary / Total Scene: 635..637
@@ -1526,7 +1526,7 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     }
     break;
   }
-  case 25: { // Full Scene Path Tracing - Persistent Wavefront Work Queue
+  case 25: { // Full Scene Path Tracing - Persistent Threads (Work Stealing)
     // Reset workQueue.currentWorkTileIndex (counter 0 in workListBuffer) to 0
     uint32_t zero = 0;
     context->writeBuffer(workListBuffer, 0, sizeof(zero), &zero);

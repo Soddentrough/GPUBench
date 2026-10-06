@@ -48,6 +48,14 @@ struct BenchmarkItem {
     bool isSupported{true};
     std::string supportReason;
     std::string limitationCategory;
+    int configIndex{-1};
+
+    BenchmarkItem() = default;
+    BenchmarkItem(std::string id_, std::string subcat_, std::string name_, std::string cat_,
+                  std::string metric_, std::string desc_, bool sel_ = true, int cfg_ = -1)
+        : id(std::move(id_)), subcategory(std::move(subcat_)), name(std::move(name_)),
+          category(std::move(cat_)), metricType(std::move(metric_)), description(std::move(desc_)),
+          selected(sel_), configIndex(cfg_) {}
 };
 
 struct BenchmarkSubgroup {

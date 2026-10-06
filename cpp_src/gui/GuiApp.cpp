@@ -494,15 +494,31 @@ void GuiApp::updateBenchmarkSupport() {
                     continue;
                 }
                 auto it = suppMap.find(item.id);
-                if (it != suppMap.end()) {
-                    item.isSupported = it->second.isSupported;
-                    item.supportReason = it->second.reason;
-                    item.limitationCategory = it->second.limitationCategory;
-                } else {
-                    item.isSupported = true;
-                    item.supportReason.clear();
-                    item.limitationCategory.clear();
+                bool supported = (it != suppMap.end()) ? it->second.isSupported : true;
+                std::string reason = (it != suppMap.end()) ? it->second.reason : "";
+                std::string limCat = (it != suppMap.end()) ? it->second.limitationCategory : "";
+
+                // Check by specific config or item name
+                auto itName = suppMap.find(item.name);
+                if (itName != suppMap.end() && !itName->second.isSupported) {
+                    supported = false;
+                    reason = itName->second.reason;
+                    limCat = itName->second.limitationCategory;
                 }
+
+                // Check for SER items specifically
+                if (item.name.find("SER") != std::string::npos) {
+                    auto itSER = suppMap.find("SER");
+                    if (itSER != suppMap.end() && !itSER->second.isSupported) {
+                        supported = false;
+                        reason = itSER->second.reason;
+                        limCat = itSER->second.limitationCategory;
+                    }
+                }
+
+                item.isSupported = supported;
+                item.supportReason = reason;
+                item.limitationCategory = limCat;
                 if (!item.isSupported) {
                     item.selected = false;
                 }
@@ -674,18 +690,19 @@ void GuiApp::initializeBenchmarkCategories() {
         sub.engineId = "Compute";
         sub.description = "Peak floating-point and integer vector/matrix throughput (FP64 down to INT4)";
         sub.items = {
-            {"FP64", "FP64", "FP64 Double Precision", "Compute", "TFLOPS", "64-bit IEEE 754 floating-point peak throughput", true},
-            {"FP32", "FP32", "FP32 Single Precision", "Compute", "TFLOPS", "32-bit floating-point peak TFLOPS (dual-issue FMA)", true},
-            {"FP16", "FP16", "FP16 Half Precision - Vector", "Compute", "TFLOPS", "Packed 16-bit half-precision vector arithmetic", true},
-            {"FP16", "FP16", "FP16 Half Precision - Matrix (WMMA)", "Compute", "TFLOPS", "Cooperative matrix / tensor half-precision throughput", true},
-            {"BF16", "BF16", "BF16 Bfloat16 - Vector", "Compute", "TFLOPS", "Packed 16-bit bfloat16 vector arithmetic", true},
-            {"BF16", "BF16", "BF16 Bfloat16 - Matrix (WMMA)", "Compute", "TFLOPS", "Cooperative matrix / tensor bfloat16 throughput", true},
-            {"FP8", "FP8", "FP8 Micro-Float - Matrix (WMMA)", "Compute", "TFLOPS", "E4M3 / E5M2 8-bit floating point cooperative matrix ops", true},
-            {"FP4", "FP4", "FP4 Micro-Float - Vector", "Compute", "TFLOPS", "Sub-byte 4-bit quantized floating point throughput", true},
-            {"INT8", "INT8", "INT8 Integer - Vector (DP4A)", "Compute", "TOPS", "INT8 dot product (DP4A) vector instructions", true},
-            {"INT8", "INT8", "INT8 Integer - Matrix (WMMA)", "Compute", "TOPS", "INT8 cooperative matrix / WMMA tensor throughput", true},
-            {"INT4", "INT4", "INT4 Integer - Vector", "Compute", "TOPS", "Sub-byte 4-bit integer packed vector operations", true},
-            {"INT4", "INT4", "INT4 Integer - Matrix (WMMA)", "Compute", "TOPS", "Sub-byte 4-bit integer matrix core throughput", true}
+            {"FP64", "FP64", "FP64 Double Precision", "Compute", "TFLOPS", "64-bit IEEE 754 floating-point peak throughput", true, 0},
+            {"FP32", "FP32", "FP32 Single Precision", "Compute", "TFLOPS", "32-bit floating-point peak TFLOPS (dual-issue FMA)", true, 0},
+            {"FP16", "FP16", "FP16 Half Precision - Vector", "Compute", "TFLOPS", "Packed 16-bit half-precision vector arithmetic", true, 0},
+            {"FP16", "FP16", "FP16 Half Precision - Matrix (WMMA)", "Compute", "TFLOPS", "Cooperative matrix / tensor half-precision throughput", true, 1},
+            {"BF16", "BF16", "BF16 Bfloat16 - Vector", "Compute", "TFLOPS", "Packed 16-bit bfloat16 vector arithmetic", true, 0},
+            {"BF16", "BF16", "BF16 Bfloat16 - Matrix (WMMA)", "Compute", "TFLOPS", "Cooperative matrix / tensor bfloat16 throughput", true, 1},
+            {"FP8", "FP8", "FP8 Micro-Float - Matrix (WMMA)", "Compute", "TFLOPS", "E4M3 / E5M2 8-bit floating point cooperative matrix ops", true, 0},
+            {"FP6", "FP6", "FP6 Micro-Float - Vector", "Compute", "TOPS", "Sub-byte 6-bit quantized floating point throughput (SPV_NV_float6)", true, 0},
+            {"FP4", "FP4", "FP4 Micro-Float - Vector", "Compute", "TOPS", "Sub-byte 4-bit quantized floating point throughput", true, 0},
+            {"INT8", "INT8", "INT8 Integer - Vector (DP4A)", "Compute", "TOPS", "INT8 dot product (DP4A) vector instructions", true, 0},
+            {"INT8", "INT8", "INT8 Integer - Matrix (WMMA)", "Compute", "TOPS", "INT8 cooperative matrix / WMMA tensor throughput", true, 1},
+            {"INT4", "INT4", "INT4 Integer - Vector", "Compute", "TOPS", "Sub-byte 4-bit integer packed vector operations", true, 0},
+            {"INT4", "INT4", "INT4 Integer - Matrix (WMMA)", "Compute", "TOPS", "Sub-byte 4-bit integer matrix core throughput", true, 1}
         };
         cat.subgroups.push_back(sub);
 
@@ -695,13 +712,13 @@ void GuiApp::initializeBenchmarkCategories() {
         dualSub.engineId = "Dual-Issue";
         dualSub.description = "Dual-issue ALU co-issuing, ILP scaling, and concurrent FP32+INT32 arithmetic";
         dualSub.items = {
-            {"Dual-Issue", "Dual-Issue", "Standard FP32", "Compute", "TFLOPS", "Single-issue FP32 baseline (1 FMA/cycle); sequential dependency prevents dual-issuing to measure honest 1-issue capacity", true},
-            {"Dual-Issue", "Dual-Issue", "Dual-Issue FP32 (Partial Co-Issue)", "Compute", "TFLOPS", "Moderate ILP (8 chains); measures realistic dual-issue scaling with latency bubbles typical of real compiled shaders, before peak saturation", true},
-            {"Dual-Issue", "Dual-Issue", "Dual-Issue FP32 (FP32+FP32)", "Compute", "TFLOPS", "Peak dual-issue saturation (16 chains); saturates dual ALUs to measure maximum hardware co-issue capacity (2 FMAs/cycle)", true},
-            {"Dual-Issue", "Dual-Issue", "Standard INT32", "Compute", "TOPS", "Single-issue integer baseline (1 ALU op/cycle); tests basic integer ALU throughput", true},
-            {"Dual-Issue", "Dual-Issue", "Dual-Issue INT32 (Partial Co-Issue)", "Compute", "TOPS", "Moderate integer ILP (8 chains); tests whether integer ALUs can co-issue operations under typical instruction parallelism", true},
-            {"Dual-Issue", "Dual-Issue", "Dual-Issue INT32 (INT32+INT32)", "Compute", "TOPS", "Peak integer ILP (16 chains); reveals if GPU has dual integer ALUs or is physically capped at 1 ALU/cycle", true},
-            {"Dual-Issue", "Dual-Issue", "Dual-Issue Mixed (FP32+INT32)", "Compute", "TOPS", "Concurrent 1 FP32 + 1 INT32 per cycle; measures simultaneous execution across separate float and integer pipelines", true}
+            {"Dual-Issue", "Dual-Issue", "Standard FP32", "Compute", "TFLOPS", "Single-issue FP32 baseline (1 FMA/cycle); sequential dependency prevents dual-issuing to measure honest 1-issue capacity", true, 0},
+            {"Dual-Issue", "Dual-Issue", "Dual-Issue FP32 (Partial Co-Issue)", "Compute", "TFLOPS", "Moderate ILP (8 chains); measures realistic dual-issue scaling with latency bubbles typical of real compiled shaders, before peak saturation", true, 1},
+            {"Dual-Issue", "Dual-Issue", "Dual-Issue FP32 (FP32+FP32)", "Compute", "TFLOPS", "Peak dual-issue saturation (16 chains); saturates dual ALUs to measure maximum hardware co-issue capacity (2 FMAs/cycle)", true, 2},
+            {"Dual-Issue", "Dual-Issue", "Standard INT32", "Compute", "TOPS", "Single-issue integer baseline (1 ALU op/cycle); tests basic integer ALU throughput", true, 3},
+            {"Dual-Issue", "Dual-Issue", "Dual-Issue INT32 (Partial Co-Issue)", "Compute", "TOPS", "Moderate integer ILP (8 chains); tests whether integer ALUs can co-issue operations under typical instruction parallelism", true, 4},
+            {"Dual-Issue", "Dual-Issue", "Dual-Issue INT32 (INT32+INT32)", "Compute", "TOPS", "Peak integer ILP (16 chains); reveals if GPU has dual integer ALUs or is physically capped at 1 ALU/cycle", true, 5},
+            {"Dual-Issue", "Dual-Issue", "Dual-Issue Mixed (FP32+INT32)", "Compute", "TOPS", "Concurrent 1 FP32 + 1 INT32 per cycle; measures simultaneous execution across separate float and integer pipelines", true, 6}
         };
         cat.subgroups.push_back(dualSub);
 
@@ -711,14 +728,14 @@ void GuiApp::initializeBenchmarkCategories() {
         ldsSub.engineId = "LDS Bank Conflicts";
         ldsSub.description = "Local Data Share 32-bank conflict sweep and serialization quantification";
         ldsSub.items = {
-            {"LDS Bank Conflicts", "LDS Bank Conflicts", "Stride 1 (Conflict-Free Baseline)", "Compute", "TB/s", "1-way conflict-free; all 32 lanes access distinct 4-byte banks", true},
-            {"LDS Bank Conflicts", "LDS Bank Conflicts", "Stride 2 (2-Way Conflict)", "Compute", "TB/s", "2 lanes per bank; 2x serialization reduces throughput to ~50%", true},
-            {"LDS Bank Conflicts", "LDS Bank Conflicts", "Stride 4 (4-Way Conflict)", "Compute", "TB/s", "4 lanes per bank; 4x serialization reduces throughput to ~25%", true},
-            {"LDS Bank Conflicts", "LDS Bank Conflicts", "Stride 8 (8-Way Conflict)", "Compute", "TB/s", "8 lanes per bank; 8x serialization reduces throughput to ~12.5%", true},
-            {"LDS Bank Conflicts", "LDS Bank Conflicts", "Stride 16 (16-Way Conflict)", "Compute", "TB/s", "16 lanes per bank; 16x serialization reduces throughput to ~6.25%", true},
-            {"LDS Bank Conflicts", "LDS Bank Conflicts", "Stride 32 (32-Way Full Serialization)", "Compute", "TB/s", "32 lanes collide on bank 0; fully serialized down to ~3.125%", true},
-            {"LDS Bank Conflicts", "LDS Bank Conflicts", "Stride 3 (Odd Stride Control)", "Compute", "TB/s", "gcd(3,32)=1; conflict-free permutation proves modular collision theory", true},
-            {"LDS Bank Conflicts", "LDS Bank Conflicts", "Stride 5 (Odd Stride Control)", "Compute", "TB/s", "gcd(5,32)=1; conflict-free permutation proves modular collision theory", true}
+            {"LDS Bank Conflicts", "LDS Bank Conflicts", "Stride 1 (Conflict-Free Baseline)", "Compute", "TB/s", "1-way conflict-free; all 32 lanes access distinct 4-byte banks", true, 0},
+            {"LDS Bank Conflicts", "LDS Bank Conflicts", "Stride 2 (2-Way Conflict)", "Compute", "TB/s", "2 lanes per bank; 2x serialization reduces throughput to ~50%", true, 1},
+            {"LDS Bank Conflicts", "LDS Bank Conflicts", "Stride 4 (4-Way Conflict)", "Compute", "TB/s", "4 lanes per bank; 4x serialization reduces throughput to ~25%", true, 2},
+            {"LDS Bank Conflicts", "LDS Bank Conflicts", "Stride 8 (8-Way Conflict)", "Compute", "TB/s", "8 lanes per bank; 8x serialization reduces throughput to ~12.5%", true, 3},
+            {"LDS Bank Conflicts", "LDS Bank Conflicts", "Stride 16 (16-Way Conflict)", "Compute", "TB/s", "16 lanes per bank; 16x serialization reduces throughput to ~6.25%", true, 4},
+            {"LDS Bank Conflicts", "LDS Bank Conflicts", "Stride 32 (32-Way Full Serialization)", "Compute", "TB/s", "32 lanes collide on bank 0; fully serialized down to ~3.125%", true, 5},
+            {"LDS Bank Conflicts", "LDS Bank Conflicts", "Stride 3 (Odd Stride Control)", "Compute", "TB/s", "gcd(3,32)=1; conflict-free permutation proves modular collision theory", true, 6},
+            {"LDS Bank Conflicts", "LDS Bank Conflicts", "Stride 5 (Odd Stride Control)", "Compute", "TB/s", "gcd(5,32)=1; conflict-free permutation proves modular collision theory", true, 7}
         };
         cat.subgroups.push_back(ldsSub);
 
@@ -728,13 +745,13 @@ void GuiApp::initializeBenchmarkCategories() {
         indirectSub.engineId = "In-Shader Indirect Synthesis";
         indirectSub.description = "Dynamic GPU workgroup command synthesis and hardware zero-dispatch pruning";
         indirectSub.items = {
-            {"In-Shader Indirect Synthesis", "Indirect Command Synthesis", "CPU Direct Fixed Grid (100% Active Baseline)", "Compute", "MItems/s", "Host fixed grid dispatch with 100% item activity; baseline compute throughput", true},
-            {"In-Shader Indirect Synthesis", "Indirect Command Synthesis", "100% Active", "Compute", "MItems/s", "Classifier synthesizes VkDispatchIndirectCommand on GPU; measures indirect dispatch overhead", true},
-            {"In-Shader Indirect Synthesis", "Indirect Command Synthesis", "50% Active", "Compute", "MItems/s", "Stream compaction bins 50% active work; launches half the workgroups dynamically", true},
-            {"In-Shader Indirect Synthesis", "Indirect Command Synthesis", "10% Active", "Compute", "MItems/s", "Sparse workload; GPU skips 90% of workgroups via synthesized grid sizing", true},
-            {"In-Shader Indirect Synthesis", "Indirect Command Synthesis", "1% Active", "Compute", "MItems/s", "Highly sparse workload; dynamic indirect dispatch processes only 1% work", true},
-            {"In-Shader Indirect Synthesis", "Indirect Command Synthesis", "In-Shader Zero-Dispatch Pruning (0% Active)", "Compute", "MItems/s", "Hardware Command Processor instantaneously dismisses zero-workgroup (0,0,0) dispatches", true},
-            {"In-Shader Indirect Synthesis", "Indirect Command Synthesis", "CPU Direct Fixed Grid (10% Active)", "Compute", "MItems/s", "Host fixed grid dispatch on sparse 10% active workload; shows wasted wave occupancy", true}
+            {"In-Shader Indirect Synthesis", "Indirect Command Synthesis", "CPU Direct Fixed Grid (100% Active Baseline)", "Compute", "MItems/s", "Host fixed grid dispatch with 100% item activity; baseline compute throughput", true, 0},
+            {"In-Shader Indirect Synthesis", "Indirect Command Synthesis", "100% Active", "Compute", "MItems/s", "Classifier synthesizes VkDispatchIndirectCommand on GPU; measures indirect dispatch overhead", true, 1},
+            {"In-Shader Indirect Synthesis", "Indirect Command Synthesis", "50% Active", "Compute", "MItems/s", "Stream compaction bins 50% active work; launches half the workgroups dynamically", true, 2},
+            {"In-Shader Indirect Synthesis", "Indirect Command Synthesis", "10% Active", "Compute", "MItems/s", "Sparse workload; GPU skips 90% of workgroups via synthesized grid sizing", true, 3},
+            {"In-Shader Indirect Synthesis", "Indirect Command Synthesis", "1% Active", "Compute", "MItems/s", "Highly sparse workload; dynamic indirect dispatch processes only 1% work", true, 4},
+            {"In-Shader Indirect Synthesis", "Indirect Command Synthesis", "In-Shader Zero-Dispatch Pruning (0% Active)", "Compute", "MItems/s", "Hardware Command Processor instantaneously dismisses zero-workgroup (0,0,0) dispatches", true, 5},
+            {"In-Shader Indirect Synthesis", "Indirect Command Synthesis", "CPU Direct Fixed Grid (10% Active)", "Compute", "MItems/s", "Host fixed grid dispatch on sparse 10% active workload; shows wasted wave occupancy", true, 6}
         };
         cat.subgroups.push_back(indirectSub);
 
@@ -747,11 +764,8 @@ void GuiApp::initializeBenchmarkCategories() {
         cat.name = "Memory";
         cat.description = "On-chip cache hierarchy latencies (L0..L3), cache curves, and VRAM streaming bandwidth";
 
-        cat.subgroups.push_back({"Cache Latency", "Memory", "Cache Latency", "On-chip CU cache hierarchy latency (L0..L3)", {
-            {"Cache Latency", "Cache Latency", "L0 (Vector CU, 16 KB)", "Memory", "ns", "On-chip compute unit L0 vector cache latency", true},
-            {"Cache Latency", "Cache Latency", "L1 (GL1 Array, 256 KB)", "Memory", "ns", "Shader array L1 instruction and data cache latency", true},
-            {"Cache Latency", "Cache Latency", "L2 (Shared GPU, 4 MB)", "Memory", "ns", "Shared GPU-wide L2 cache latency", true},
-            {"Cache Latency", "Cache Latency", "L3 (Infinity Cache / MALL)", "Memory", "ns", "System-level on-die Infinity Cache (L3 / MALL) latency", true}
+        cat.subgroups.push_back({"Cache Latency", "Memory", "L0 Cache Latency", "On-chip CU vector cache read latency", {
+            {"L0 Cache Latency", "Cache Latency", "L0 Cache Latency (16 KB)", "Memory", "ns", "On-chip compute unit L0 vector cache latency", true, 0}
         }});
 
         BenchmarkSubgroup cacheCurveSub;
@@ -760,34 +774,34 @@ void GuiApp::initializeBenchmarkCategories() {
         cacheCurveSub.engineId = "Cache Latency Curve";
         cacheCurveSub.description = "128-byte cache-line pointer chasing (16 KB to 256 MB) across L0, GL1, GL2, L3 MALL, and GDDR6";
         cacheCurveSub.items = {
-            {"Cache Latency Curve", "Cache Latency Curve", "16 KB", "Memory", "ns", "L0 TCP Vector Cache (32B/64B/128B Cache Line)", true},
-            {"Cache Latency Curve", "Cache Latency Curve", "32 KB", "Memory", "ns", "L0 TCP Capacity Boundary", true},
-            {"Cache Latency Curve", "Cache Latency Curve", "64 KB", "Memory", "ns", "GL1 Cache Transition", true},
-            {"Cache Latency Curve", "Cache Latency Curve", "128 KB", "Memory", "ns", "GL1 Cache Working Set", true},
-            {"Cache Latency Curve", "Cache Latency Curve", "256 KB", "Memory", "ns", "GL1 Cache Capacity Boundary", true},
-            {"Cache Latency Curve", "Cache Latency Curve", "512 KB", "Memory", "ns", "GL2 Cache Working Set", true},
-            {"Cache Latency Curve", "Cache Latency Curve", "1 MB", "Memory", "ns", "GL2 Cache Working Set", true},
-            {"Cache Latency Curve", "Cache Latency Curve", "2 MB", "Memory", "ns", "GL2 Cache Working Set", true},
-            {"Cache Latency Curve", "Cache Latency Curve", "4 MB", "Memory", "ns", "GL2 Cache Capacity Boundary", true},
-            {"Cache Latency Curve", "Cache Latency Curve", "8 MB", "Memory", "ns", "L3 MALL / Infinity Cache", true},
-            {"Cache Latency Curve", "Cache Latency Curve", "16 MB", "Memory", "ns", "L3 MALL / Infinity Cache", true},
-            {"Cache Latency Curve", "Cache Latency Curve", "32 MB", "Memory", "ns", "L3 MALL / Infinity Cache", true},
-            {"Cache Latency Curve", "Cache Latency Curve", "64 MB", "Memory", "ns", "L3 MALL / Infinity Cache", true},
-            {"Cache Latency Curve", "Cache Latency Curve", "128 MB", "Memory", "ns", "L3 MALL Capacity Boundary", true},
-            {"Cache Latency Curve", "Cache Latency Curve", "256 MB", "Memory", "ns", "GDDR6 VRAM DRAM Step", true}
+            {"Cache Latency Curve", "Cache Latency Curve", "16 KB", "Memory", "ns", "L0 TCP Vector Cache (32B/64B/128B Cache Line)", true, 0},
+            {"Cache Latency Curve", "Cache Latency Curve", "32 KB", "Memory", "ns", "L0 TCP Capacity Boundary", true, 1},
+            {"Cache Latency Curve", "Cache Latency Curve", "64 KB", "Memory", "ns", "GL1 Cache Transition", true, 2},
+            {"Cache Latency Curve", "Cache Latency Curve", "128 KB", "Memory", "ns", "GL1 Cache Working Set", true, 3},
+            {"Cache Latency Curve", "Cache Latency Curve", "256 KB", "Memory", "ns", "GL1 Cache Capacity Boundary", true, 4},
+            {"Cache Latency Curve", "Cache Latency Curve", "512 KB", "Memory", "ns", "GL2 Cache Working Set", true, 5},
+            {"Cache Latency Curve", "Cache Latency Curve", "1 MB", "Memory", "ns", "GL2 Cache Working Set", true, 6},
+            {"Cache Latency Curve", "Cache Latency Curve", "2 MB", "Memory", "ns", "GL2 Cache Working Set", true, 7},
+            {"Cache Latency Curve", "Cache Latency Curve", "4 MB", "Memory", "ns", "GL2 Cache Capacity Boundary", true, 8},
+            {"Cache Latency Curve", "Cache Latency Curve", "8 MB", "Memory", "ns", "L3 MALL / Infinity Cache", true, 9},
+            {"Cache Latency Curve", "Cache Latency Curve", "16 MB", "Memory", "ns", "L3 MALL / Infinity Cache", true, 10},
+            {"Cache Latency Curve", "Cache Latency Curve", "32 MB", "Memory", "ns", "L3 MALL / Infinity Cache", true, 11},
+            {"Cache Latency Curve", "Cache Latency Curve", "64 MB", "Memory", "ns", "L3 MALL / Infinity Cache", true, 12},
+            {"Cache Latency Curve", "Cache Latency Curve", "128 MB", "Memory", "ns", "L3 MALL Capacity Boundary", true, 13},
+            {"Cache Latency Curve", "Cache Latency Curve", "256 MB", "Memory", "ns", "GDDR6 VRAM DRAM Step", true, 14}
         };
         cat.subgroups.push_back(cacheCurveSub);
 
         cat.subgroups.push_back({"VRAM Streaming Bandwidth", "Memory", "Device Memory Bandwidth", "VRAM read/write streaming bandwidth across thread block sizes", {
-            {"Device Memory Bandwidth", "VRAM Bandwidth", "Read (128 threads/group)", "Memory", "GB/s", "Streaming VRAM read bandwidth at 128 threads/group", true},
-            {"Device Memory Bandwidth", "VRAM Bandwidth", "Write (128 threads/group)", "Memory", "GB/s", "Streaming VRAM write bandwidth at 128 threads/group", true},
-            {"Device Memory Bandwidth", "VRAM Bandwidth", "Read / Write (128 threads/group)", "Memory", "GB/s", "Combined VRAM read/write streaming bandwidth at 128 threads/group", true},
-            {"Device Memory Bandwidth", "VRAM Bandwidth", "Read (256 threads/group)", "Memory", "GB/s", "Streaming VRAM read bandwidth at 256 threads/group", true},
-            {"Device Memory Bandwidth", "VRAM Bandwidth", "Write (256 threads/group)", "Memory", "GB/s", "Streaming VRAM write bandwidth at 256 threads/group", true},
-            {"Device Memory Bandwidth", "VRAM Bandwidth", "Read / Write (256 threads/group)", "Memory", "GB/s", "Combined VRAM read/write streaming bandwidth at 256 threads/group", true},
-            {"Device Memory Bandwidth", "VRAM Bandwidth", "Read (1024 threads/group)", "Memory", "GB/s", "Streaming VRAM read bandwidth at 1024 threads/group", true},
-            {"Device Memory Bandwidth", "VRAM Bandwidth", "Write (1024 threads/group)", "Memory", "GB/s", "Streaming VRAM write bandwidth at 1024 threads/group", true},
-            {"Device Memory Bandwidth", "VRAM Bandwidth", "Read / Write (1024 threads/group)", "Memory", "GB/s", "Combined VRAM read/write streaming bandwidth at 1024 threads/group", true}
+            {"Device Memory Bandwidth", "VRAM Bandwidth", "Read (128 threads/group)", "Memory", "GB/s", "Streaming VRAM read bandwidth at 128 threads/group", true, 0},
+            {"Device Memory Bandwidth", "VRAM Bandwidth", "Write (128 threads/group)", "Memory", "GB/s", "Streaming VRAM write bandwidth at 128 threads/group", true, 1},
+            {"Device Memory Bandwidth", "VRAM Bandwidth", "Read / Write (128 threads/group)", "Memory", "GB/s", "Combined VRAM read/write streaming bandwidth at 128 threads/group", true, 2},
+            {"Device Memory Bandwidth", "VRAM Bandwidth", "Read (256 threads/group)", "Memory", "GB/s", "Streaming VRAM read bandwidth at 256 threads/group", true, 3},
+            {"Device Memory Bandwidth", "VRAM Bandwidth", "Write (256 threads/group)", "Memory", "GB/s", "Streaming VRAM write bandwidth at 256 threads/group", true, 4},
+            {"Device Memory Bandwidth", "VRAM Bandwidth", "Read / Write (256 threads/group)", "Memory", "GB/s", "Combined VRAM read/write streaming bandwidth at 256 threads/group", true, 5},
+            {"Device Memory Bandwidth", "VRAM Bandwidth", "Read (1024 threads/group)", "Memory", "GB/s", "Streaming VRAM read bandwidth at 1024 threads/group", true, 6},
+            {"Device Memory Bandwidth", "VRAM Bandwidth", "Write (1024 threads/group)", "Memory", "GB/s", "Streaming VRAM write bandwidth at 1024 threads/group", true, 7},
+            {"Device Memory Bandwidth", "VRAM Bandwidth", "Read / Write (1024 threads/group)", "Memory", "GB/s", "Combined VRAM read/write streaming bandwidth at 1024 threads/group", true, 8}
         }});
 
         m_categories.push_back(cat);
@@ -801,76 +815,73 @@ void GuiApp::initializeBenchmarkCategories() {
 
         // Subgroup 1: Acceleration Structure Builds (8 tests)
         cat.subgroups.push_back({"Acceleration Structure Builds", "Ray Tracing", "RayASBuild", "Bottom-level and top-level AS build and update throughput", {
-            {"RayASBuild", "BLAS Build & Update", "BLAS Build (1M Triangles)", "Ray Tracing", "MTris/s", "Bottom-level AS build throughput (1 million triangles)", true},
-            {"RayASBuild", "BLAS Build & Update", "BLAS Update (1M Triangles)", "Ray Tracing", "MTris/s", "Bottom-level AS refit / dynamic update throughput (1 million triangles)", true},
-            {"RayASBuild", "BLAS Build & Update", "BLAS Build (5M Triangles)", "Ray Tracing", "MTris/s", "Bottom-level AS build throughput (5 million triangles)", true},
-            {"RayASBuild", "BLAS Build & Update", "BLAS Update (5M Triangles)", "Ray Tracing", "MTris/s", "Bottom-level AS refit / dynamic update throughput (5 million triangles)", true},
-            {"RayASBuild", "BLAS Build & Update", "BLAS Build (10M Triangles)", "Ray Tracing", "MTris/s", "Bottom-level AS build throughput (10 million triangles)", true},
-            {"RayASBuild", "TLAS Construction", "TLAS: Indoor Corridor (20K Instances)", "Ray Tracing", "MInst/s", "Top-level AS instance hierarchy construction (Indoor Corridor)", true},
-            {"RayASBuild", "TLAS Construction", "TLAS: Dense Jungle (50K Instances)", "Ray Tracing", "MInst/s", "Top-level AS instance hierarchy construction (Dense Jungle)", true},
-            {"RayASBuild", "TLAS Construction", "TLAS: Massive Open World (200K Instances)", "Ray Tracing", "MInst/s", "Top-level AS instance hierarchy construction (Massive Open World)", true}
+            {"RayASBuild", "BLAS Build & Update", "BLAS Build (1M Triangles)", "Ray Tracing", "MTris/s", "Bottom-level AS build throughput (1 million triangles)", true, 0},
+            {"RayASBuild", "BLAS Build & Update", "BLAS Update (1M Triangles)", "Ray Tracing", "MTris/s", "Bottom-level AS refit / dynamic update throughput (1 million triangles)", true, 1},
+            {"RayASBuild", "BLAS Build & Update", "BLAS Build (5M Triangles)", "Ray Tracing", "MTris/s", "Bottom-level AS build throughput (5 million triangles)", true, 2},
+            {"RayASBuild", "BLAS Build & Update", "BLAS Update (5M Triangles)", "Ray Tracing", "MTris/s", "Bottom-level AS refit / dynamic update throughput (5 million triangles)", true, 3},
+            {"RayASBuild", "BLAS Build & Update", "BLAS Build (10M Triangles)", "Ray Tracing", "MTris/s", "Bottom-level AS build throughput (10 million triangles)", true, 4},
+            {"RayASBuild", "TLAS Construction", "TLAS: Indoor Corridor (20K Instances)", "Ray Tracing", "MInst/s", "Top-level AS instance hierarchy construction (Indoor Corridor)", true, 5},
+            {"RayASBuild", "TLAS Construction", "TLAS: Dense Jungle (50K Instances)", "Ray Tracing", "MInst/s", "Top-level AS instance hierarchy construction (Dense Jungle)", true, 6},
+            {"RayASBuild", "TLAS Construction", "TLAS: Massive Open World (200K Instances)", "Ray Tracing", "MInst/s", "Top-level AS instance hierarchy construction (Massive Open World)", true, 7}
         }});
 
         // Subgroup 2: Primary & Bounce Ray Tracing (13 tests)
         cat.subgroups.push_back({"Primary & Bounce Ray Tracing", "Ray Tracing", "RayScheduling", "Primary camera ray tracing and multi-bounce path tracing across dispatches", {
-            {"RayScheduling", "Scene Ray Tracing (PBR)", "Primary Rays (Compute Megakernel)", "Ray Tracing", "MRays/s", "Monolithic compute megakernel using VK_KHR_ray_query", true},
-            {"RayScheduling", "Scene Ray Tracing (PBR)", "Primary Rays (Wavefront - DGC)", "Ray Tracing", "MRays/s", "Decoupled wavefront stream compaction using VK_EXT_device_generated_commands and VK_KHR_ray_query", true},
-            {"RayScheduling", "Scene Ray Tracing (PBR)", "Primary Rays (RTP)", "Ray Tracing", "MRays/s", "Monolithic ray tracing pipeline megakernel (VK_KHR_ray_tracing_pipeline) with Shader Binding Table", true},
-            {"RayScheduling", "Scene Ray Tracing (PBR)", "Primary Rays (RTP + SER)", "Ray Tracing", "MRays/s", "Monolithic ray tracing pipeline megakernel with hardware Shader Execution Reordering (VK_EXT_ray_tracing_invocation_reorder)", true},
-            {"RayScheduling", "Scene Path Tracing (Multi-Bounce)", "Bounce Rays (Megakernel)", "Ray Tracing", "MRays/s", "Multi-bounce diffuse path tracing using compute megakernel", true},
-            {"RayScheduling", "Scene Path Tracing (Multi-Bounce)", "Bounce Rays (RTP + SER)", "Ray Tracing", "MRays/s", "Multi-bounce path tracing with dedicated RTP and Hardware SER", true},
-            {"RayScheduling", "Scene Path Tracing (Multi-Bounce)", "Bounce Rays (DGC)", "Ray Tracing", "MRays/s", "Multi-bounce path tracing with compacted wavefront work queues", true},
-            {"RayScheduling", "Scene Path Tracing (Multi-Bounce)", "Bounce Rays (Persistent Queue)", "Ray Tracing", "MRays/s", "Persistent wavefront work stealing queue path tracing", true},
-            {"RayScheduling", "Scene Path Tracing (16 SPP)", "Bounce Rays 16 SPP (Megakernel)", "Ray Tracing", "MRays/s", "High-sample 16 SPP path tracing using compute megakernel", true},
-            {"RayScheduling", "Scene Path Tracing (16 SPP)", "Bounce Rays 16 SPP (DGC)", "Ray Tracing", "MRays/s", "High-sample 16 SPP path tracing with compacted wavefront queues", true},
-            {"RayScheduling", "Total Scene Render", "Full Frame (Megakernel)", "Ray Tracing", "MRays/s", "Complete full-frame scene rendering via compute megakernel", true},
-            {"RayScheduling", "Total Scene Render", "Full Frame (RTP + SER)", "Ray Tracing", "MRays/s", "Complete full-frame scene rendering via RTP + Hardware SER", true},
-            {"RayScheduling", "Total Scene Render", "Full Frame (DGC)", "Ray Tracing", "MRays/s", "Complete full-frame scene rendering via Device-Generated Commands (DGC)", true}
+            {"RayScheduling", "Scene Ray Tracing (PBR)", "Primary Rays (Compute Megakernel)", "Ray Tracing", "MRays/s", "Monolithic compute megakernel using VK_KHR_ray_query", true, 17},
+            {"RayScheduling", "Scene Ray Tracing (PBR)", "Primary Rays (Wavefront - DGC)", "Ray Tracing", "MRays/s", "Decoupled wavefront stream compaction using VK_EXT_device_generated_commands and VK_KHR_ray_query", true, 18},
+            {"RayScheduling", "Scene Ray Tracing (PBR)", "Primary Rays (RTP)", "Ray Tracing", "MRays/s", "Monolithic ray tracing pipeline megakernel (VK_KHR_ray_tracing_pipeline) with Shader Binding Table", true, 29},
+            {"RayScheduling", "Scene Ray Tracing (PBR)", "Primary Rays (RTP + SER)", "Ray Tracing", "MRays/s", "Monolithic ray tracing pipeline megakernel with hardware Shader Execution Reordering (VK_EXT_ray_tracing_invocation_reorder)", true, 30},
+            {"RayScheduling", "Scene Path Tracing (Multi-Bounce)", "Bounce Rays (Megakernel)", "Ray Tracing", "MRays/s", "Multi-bounce diffuse path tracing using compute megakernel", true, 3},
+            {"RayScheduling", "Scene Path Tracing (Multi-Bounce)", "Bounce Rays (RTP + SER)", "Ray Tracing", "MRays/s", "Multi-bounce path tracing with dedicated RTP and Hardware SER", true, 4},
+            {"RayScheduling", "Scene Path Tracing (Multi-Bounce)", "Bounce Rays (DGC)", "Ray Tracing", "MRays/s", "Multi-bounce path tracing with compacted wavefront work queues", true, 5},
+            {"RayScheduling", "Scene Path Tracing (Multi-Bounce)", "Bounce Rays (Persistent Threads)", "Ray Tracing", "MRays/s", "Persistent compute workgroups stay resident on CUs and dynamically steal screen tile chunks via atomic counters. Eliminates GPU tail starvation without the multi-pass VRAM round-trip overhead of DGC.", true, 25},
+            {"RayScheduling", "Scene Path Tracing (16 SPP)", "Bounce Rays 16 SPP (Megakernel)", "Ray Tracing", "MRays/s", "High-sample 16 SPP path tracing using compute megakernel", true, 23},
+            {"RayScheduling", "Scene Path Tracing (16 SPP)", "Bounce Rays 16 SPP (DGC)", "Ray Tracing", "MRays/s", "High-sample 16 SPP path tracing with compacted wavefront queues", true, 24},
+            {"RayScheduling", "Total Scene Render", "Full Frame (Megakernel)", "Ray Tracing", "MRays/s", "Complete full-frame scene rendering via compute megakernel", true, 9},
+            {"RayScheduling", "Total Scene Render", "Full Frame (RTP + SER)", "Ray Tracing", "MRays/s", "Complete full-frame scene rendering via RTP + Hardware SER", true, 10},
+            {"RayScheduling", "Total Scene Render", "Full Frame (DGC)", "Ray Tracing", "MRays/s", "Complete full-frame scene rendering via Device-Generated Commands (DGC)", true, 11}
         }});
 
         // Subgroup 3: Pipeline Stages & Scheduling (22 tests)
         cat.subgroups.push_back({"Pipeline Stages & Scheduling", "Ray Tracing", "RayScheduling", "Isolated rendering pipeline phases, shadows, shading, and queue compaction", {
-            {"RayScheduling", "Directional Shadows", "Shadows - Single Light (1 Light, Megakernel)", "Ray Tracing", "MRays/s", "Single directional light shadow ray casting via megakernel", true},
-            {"RayScheduling", "Directional Shadows", "Shadows - Single Light (1 Light, RTP + SER)", "Ray Tracing", "MRays/s", "Single directional light shadows via dedicated RTP and SER", true},
-            {"RayScheduling", "Directional Shadows", "Shadows - Single Light (1 Light, DGC)", "Ray Tracing", "MRays/s", "Single directional light shadow ray casting with compacted wavefront stream via DGC", true},
-            {"RayScheduling", "Directional Shadows", "Shadows - Multi-Light (3 Lights, DGC)", "Ray Tracing", "MRays/s", "Shadow rays binned and dispatched across 3 directional lights via DGC", true},
-            {"RayScheduling", "Multi-Light Evaluation", "Multi-Light Shading - Single Light (1 Light, Megakernel)", "Ray Tracing", "MRays/s", "Direct lighting BSDF evaluation baseline with 1 light via megakernel", true},
-            {"RayScheduling", "Multi-Light Evaluation", "Multi-Light Shading - Single Light (1 Light, DGC)", "Ray Tracing", "MRays/s", "Direct lighting BSDF evaluation with 1 light via DGC", true},
-            {"RayScheduling", "Multi-Light Evaluation", "Multi-Light Shading - 128 Lights (128 Lights, Megakernel)", "Ray Tracing", "MRays/s", "Direct lighting BSDF evaluation with 128 unbinned lights via divergent megakernel", true},
-            {"RayScheduling", "Multi-Light Evaluation", "Multi-Light Shading - 128 Lights (128 Lights, DGC Light Binning)", "Ray Tracing", "MRays/s", "Direct lighting BSDF evaluation with 128 lights via DGC coherent light binning", true},
-            {"RayScheduling", "Material Shading", "Material (Megakernel)", "Ray Tracing", "MHits/s", "PBR material BSDF evaluation in monolithic compute pass", true},
-            {"RayScheduling", "Material Shading", "Material (RTP + SER)", "Ray Tracing", "MHits/s", "Material shading via dedicated closest-hit shaders and SER", true},
-            {"RayScheduling", "Material Shading", "Material (DGC)", "Ray Tracing", "MHits/s", "Material evaluation via sorted material work queues", true},
-            {"RayScheduling", "Incoherent Ray Tracing", "Incoherent Rays (Megakernel)", "Ray Tracing", "MRays/s", "Diffuse GI bounce traversal with high memory incoherence", true},
-            {"RayScheduling", "Incoherent Ray Tracing", "Incoherent Rays (RTP + SER)", "Ray Tracing", "MRays/s", "Incoherent diffuse rays reordered via hardware SER", true},
-            {"RayScheduling", "Incoherent Ray Tracing", "Incoherent Rays (DGC)", "Ray Tracing", "MRays/s", "Incoherent diffuse rays sorted and compacted via wavefront queues", true},
-            {"RayScheduling", "Traversal Ordering & Coherence", "Linear 1D Scanline", "Ray Tracing", "MRays/s", "Linear scanline ray dispatch traversal baseline", true},
-            {"RayScheduling", "Traversal Ordering & Coherence", "2D Screen Tiled (8x4)", "Ray Tracing", "MRays/s", "2D 8x4 tiled ray dispatch for spatial coherence", true},
-            {"RayScheduling", "Traversal Ordering & Coherence", "2D Morton (8x4)", "Ray Tracing", "MRays/s", "8x4 Morton Z-order curve spatial traversal order", true},
-            {"RayScheduling", "Traversal Ordering & Coherence", "2D Morton (4x8)", "Ray Tracing", "MRays/s", "4x8 Morton Z-order curve spatial traversal order", true},
-            {"RayScheduling", "Wavefront Stream Compaction", "Wave Ballot Compaction", "Ray Tracing", "MRecords/s", "SIMD wave ballot compaction of active ray streams", true},
-            {"RayScheduling", "Wavefront Stream Compaction", "Queue Compaction (Single-Pass)", "Ray Tracing", "MRecords/s", "Single-pass prefix sum wave stream compaction", true},
-            {"RayScheduling", "Queue Memory Bandwidth", "VRAM Queue Round-Trip", "Ray Tracing", "GB/s", "Ray queue intermediate VRAM round-trip streaming bandwidth", true},
-            {"RayScheduling", "Alpha Cutout Divergence", "Traversal Divergence (Alpha Cutout)", "Ray Tracing", "MRays/s", "Stackless Any-Hit shader evaluation across alpha-tested cutout geometry", true}
+            {"RayScheduling", "Directional Shadows", "Shadows - Single Light (1 Light, Megakernel)", "Ray Tracing", "MRays/s", "Single directional light shadow ray casting via megakernel", true, 19},
+            {"RayScheduling", "Directional Shadows", "Shadows - Single Light (1 Light, RTP + SER)", "Ray Tracing", "MRays/s", "Single directional light shadows via dedicated RTP and SER", true, 20},
+            {"RayScheduling", "Directional Shadows", "Shadows - Single Light (1 Light, DGC)", "Ray Tracing", "MRays/s", "Single directional light shadow ray casting with compacted wavefront stream via DGC", true, 21},
+            {"RayScheduling", "Directional Shadows", "Shadows - Multi-Light (3 Lights, DGC)", "Ray Tracing", "MRays/s", "Shadow rays binned and dispatched across 3 directional lights via DGC", true, 22},
+            {"RayScheduling", "Multi-Light Evaluation", "Multi-Light Shading - Single Light (1 Light, Megakernel)", "Ray Tracing", "MRays/s", "Direct lighting BSDF evaluation baseline with 1 light via megakernel", true, 31},
+            {"RayScheduling", "Multi-Light Evaluation", "Multi-Light Shading - Single Light (1 Light, DGC)", "Ray Tracing", "MRays/s", "Direct lighting BSDF evaluation with 1 light via DGC", true, 32},
+            {"RayScheduling", "Multi-Light Evaluation", "Multi-Light Shading - 128 Lights (128 Lights, Megakernel)", "Ray Tracing", "MRays/s", "Direct lighting BSDF evaluation with 128 unbinned lights via divergent megakernel", true, 33},
+            {"RayScheduling", "Multi-Light Evaluation", "Multi-Light Shading - 128 Lights (128 Lights, DGC Light Binning)", "Ray Tracing", "MRays/s", "Direct lighting BSDF evaluation with 128 lights via DGC coherent light binning", true, 34},
+            {"RayScheduling", "Material Shading", "Material (Megakernel)", "Ray Tracing", "MHits/s", "PBR material BSDF evaluation in monolithic compute pass", true, 0},
+            {"RayScheduling", "Material Shading", "Material (RTP + SER)", "Ray Tracing", "MHits/s", "Material shading via dedicated closest-hit shaders and SER", true, 1},
+            {"RayScheduling", "Material Shading", "Material (DGC)", "Ray Tracing", "MHits/s", "Material evaluation via sorted material work queues", true, 2},
+            {"RayScheduling", "Incoherent Ray Tracing", "Incoherent Rays (Megakernel)", "Ray Tracing", "MRays/s", "Diffuse GI bounce traversal with high memory incoherence", true, 6},
+            {"RayScheduling", "Incoherent Ray Tracing", "Incoherent Rays (RTP + SER)", "Ray Tracing", "MRays/s", "Incoherent diffuse rays reordered via hardware SER", true, 7},
+            {"RayScheduling", "Incoherent Ray Tracing", "Incoherent Rays (DGC)", "Ray Tracing", "MRays/s", "Incoherent diffuse rays sorted and compacted via wavefront queues", true, 8},
+            {"RayScheduling", "Traversal Ordering & Coherence", "Linear 1D Scanline", "Ray Tracing", "MRays/s", "Linear scanline ray dispatch traversal baseline", true, 12},
+            {"RayScheduling", "Traversal Ordering & Coherence", "2D Screen Tiled (8x4)", "Ray Tracing", "MRays/s", "2D 8x4 tiled ray dispatch for spatial coherence", true, 14},
+            {"RayScheduling", "Traversal Ordering & Coherence", "2D Morton (8x4)", "Ray Tracing", "MRays/s", "8x4 Morton Z-order curve spatial traversal order", true, 15},
+            {"RayScheduling", "Traversal Ordering & Coherence", "2D Morton (4x8)", "Ray Tracing", "MRays/s", "4x8 Morton Z-order curve spatial traversal order", true, 16},
+            {"RayScheduling", "Wavefront Stream Compaction", "Wave Ballot Compaction", "Ray Tracing", "MRecords/s", "SIMD wave ballot compaction of active ray streams", true, 13},
+            {"RayScheduling", "Wavefront Stream Compaction", "Queue Compaction (Single-Pass)", "Ray Tracing", "MRecords/s", "Single-pass prefix sum wave stream compaction", true, 26},
+            {"RayScheduling", "Queue Memory Bandwidth", "VRAM Queue Round-Trip", "Ray Tracing", "GB/s", "Ray queue intermediate VRAM round-trip streaming bandwidth", true, 28},
+            {"RayScheduling", "Alpha Cutout Divergence", "Traversal Divergence (Alpha Cutout)", "Ray Tracing", "MRays/s", "Stackless Any-Hit shader evaluation across alpha-tested cutout geometry", true, 27}
         }});
 
-        // Subgroup 4: Hardware BVH & Divergence Stress (15 tests)
+        // Subgroup 4: Hardware BVH & Divergence Stress (12 tests)
         cat.subgroups.push_back({"Hardware BVH & Divergence Stress", "Ray Tracing", "RayRawTraversal", "Hardware ray-box, triangle traversal, alpha foliage, and SIMD divergence", {
-            {"RayRawTraversal", "Hardware BVH Traversal", "Coherent Triangles", "Ray Tracing", "MRays/s", "Raw hardware BVH traversal of coherent triangle geometry", true},
-            {"RayRawTraversal", "Hardware BVH Traversal", "Deep Box Stress", "Ray Tracing", "MRays/s", "Deep multi-layer BVH box traversal stress", true},
-            {"RayIntersect", "Intersection Tests", "Ray-Triangle", "Ray Tracing", "MRays/s", "Hardware ray-triangle intersection test rate", true},
-            {"RayIntersect", "Intersection Tests", "Ray-Box", "Ray Tracing", "MRays/s", "Hardware ray-AABB box intersection test rate", true},
-            {"RayAnyHit", "Alpha-Tested Geometry", "100% Solid (Any-Hit Baseline)", "Ray Tracing", "MRays/s", "100% opaque alpha evaluation baseline", true},
-            {"RayAnyHit", "Alpha-Tested Geometry", "50% Solid (Cutout Stress)", "Ray Tracing", "MRays/s", "50% solid / 50% transparent any-hit evaluation", true},
-            {"RayProcedural", "Procedural Geometry", "AABB Spheres", "Ray Tracing", "MRays/s", "Procedural analytical sphere intersection in bounding box", true},
-            {"RayDivergence", "Ray Directional Coherence", "0° Beam (Coherent)", "Ray Tracing", "MRays/s", "Directional coherence sweep - 0° coherent beam", true},
-            {"RayDivergence", "Ray Directional Coherence", "22.5° Cone Spread", "Ray Tracing", "MRays/s", "Directional coherence sweep - 22.5° cone spread", true},
-            {"RayDivergence", "Ray Directional Coherence", "45° Cone Spread", "Ray Tracing", "MRays/s", "Directional coherence sweep - 45° cone spread", true},
-            {"RayDivergence", "Ray Directional Coherence", "67.5° Cone Spread", "Ray Tracing", "MRays/s", "Directional coherence sweep - 67.5° cone spread", true},
-            {"RayDivergence", "Ray Directional Coherence", "90° Hemispherical (Incoherent)", "Ray Tracing", "MRays/s", "Directional coherence sweep - 90° hemispherical diffuse scattering", true},
-            {"RayPayload", "Payload Register Pressure", "16B Payload", "Ray Tracing", "MRays/s", "Minimal 16-byte payload register footprint", true},
-            {"RayPayload", "Payload Register Pressure", "128B Payload", "Ray Tracing", "MRays/s", "Standard 128-byte path tracing payload footprint", true},
-            {"RayPayload", "Payload Register Pressure", "256B Payload", "Ray Tracing", "MRays/s", "Heavy 256-byte production BSDF payload footprint", true}
+            {"RayRawTraversal", "Hardware BVH Traversal", "Coherent Triangles", "Ray Tracing", "MRays/s", "Raw hardware BVH traversal of coherent triangle geometry", true, 0},
+            {"RayRawTraversal", "Hardware BVH Traversal", "Deep Box Stress", "Ray Tracing", "MRays/s", "Deep multi-layer BVH box traversal stress", true, 1},
+            {"RayIntersect", "Intersection Tests", "Ray-Triangle", "Ray Tracing", "MRays/s", "Hardware ray-triangle intersection test rate", true, 0},
+            {"RayIntersect", "Intersection Tests", "Ray-Box", "Ray Tracing", "MRays/s", "Hardware ray-AABB box intersection test rate", true, 1},
+            {"RayAnyHit", "Alpha-Tested Geometry", "100% Solid (Any-Hit Baseline)", "Ray Tracing", "MRays/s", "100% opaque alpha evaluation baseline", true, 0},
+            {"RayAnyHit", "Alpha-Tested Geometry", "50% Solid (Cutout Stress)", "Ray Tracing", "MRays/s", "50% solid / 50% transparent any-hit evaluation", true, 1},
+            {"RayProcedural", "Procedural Geometry", "AABB Spheres", "Ray Tracing", "MRays/s", "Procedural analytical sphere intersection in bounding box", true, 0},
+            {"RayDivergence", "Ray Directional Coherence", "0° Beam (Coherent)", "Ray Tracing", "MRays/s", "Directional coherence sweep - 0° coherent beam", true, 0},
+            {"RayDivergence", "Ray Directional Coherence", "22.5° Cone Spread", "Ray Tracing", "MRays/s", "Directional coherence sweep - 22.5° cone spread", true, 1},
+            {"RayDivergence", "Ray Directional Coherence", "45° Cone Spread", "Ray Tracing", "MRays/s", "Directional coherence sweep - 45° cone spread", true, 2},
+            {"RayDivergence", "Ray Directional Coherence", "67.5° Cone Spread", "Ray Tracing", "MRays/s", "Directional coherence sweep - 67.5° cone spread", true, 3},
+            {"RayDivergence", "Ray Directional Coherence", "90° Hemispherical (Incoherent)", "Ray Tracing", "MRays/s", "Directional coherence sweep - 90° hemispherical diffuse scattering", true, 4}
         }});
 
         m_categories.push_back(cat);
@@ -883,9 +894,9 @@ void GuiApp::initializeBenchmarkCategories() {
         cat.description = "Fixed-function rasterizer ROP throughput and blending";
 
         cat.subgroups.push_back({"Graphics & ROP Fill Rate", "Graphics", "Pixel Fill Rate", "Fixed-function rasterizer fill rate across color formats", {
-            {"Pixel Fill Rate", "ROP Throughput", "RGBA8 Color Fill", "Graphics", "GPixels/s", "Fixed-function 32-bit RGBA8 color raster fill rate", true},
-            {"Pixel Fill Rate", "ROP Throughput", "RGBA16F HDR Fill", "Graphics", "GPixels/s", "Fixed-function 64-bit RGBA16F HDR color raster fill rate", true},
-            {"Pixel Fill Rate", "ROP Throughput", "Alpha Blending Fill", "Graphics", "GPixels/s", "Fixed-function alpha blending (SRC_ALPHA, ONE_MINUS_SRC_ALPHA) fill rate", true}
+            {"Pixel Fill Rate", "ROP Throughput", "RGBA8 Color Fill", "Graphics", "GPixels/s", "Fixed-function 32-bit RGBA8 color raster fill rate", true, 0},
+            {"Pixel Fill Rate", "ROP Throughput", "RGBA16F HDR Fill", "Graphics", "GPixels/s", "Fixed-function 64-bit RGBA16F HDR color raster fill rate", true, 1},
+            {"Pixel Fill Rate", "ROP Throughput", "Alpha Blending Fill", "Graphics", "GPixels/s", "Fixed-function alpha blending (SRC_ALPHA, ONE_MINUS_SRC_ALPHA) fill rate", true, 2}
         }});
 
         m_categories.push_back(cat);
@@ -898,13 +909,13 @@ void GuiApp::initializeBenchmarkCategories() {
         cat.description = "Host CPU system memory DDR streaming bandwidth and latency";
 
         cat.subgroups.push_back({"Host CPU System Memory", "Host System", "System Memory Bandwidth", "Host CPU DDR read, write, copy bandwidth and latency", {
-            {"System Memory Bandwidth", "Host CPU Memory Bandwidth", "Multi-Threaded Read", "System", "GB/s", "Host CPU DDR read streaming bandwidth (multi-threaded)", true},
-            {"System Memory Bandwidth", "Host CPU Memory Bandwidth", "Multi-Threaded Write", "System", "GB/s", "Host CPU DDR write streaming bandwidth (multi-threaded)", true},
-            {"System Memory Bandwidth", "Host CPU Memory Bandwidth", "Multi-Threaded Copy", "System", "GB/s", "Host CPU DDR copy bandwidth (multi-threaded)", true},
-            {"System Memory Bandwidth", "Host CPU Memory Bandwidth", "Single-Threaded Read (1T)", "System", "GB/s", "Single-threaded host CPU DDR read bandwidth", true},
-            {"System Memory Bandwidth", "Host CPU Memory Bandwidth", "Single-Threaded Write (1T)", "System", "GB/s", "Single-threaded host CPU DDR write bandwidth", true},
-            {"System Memory Bandwidth", "Host CPU Memory Bandwidth", "Single-Threaded Copy (1T)", "System", "GB/s", "Single-threaded host CPU DDR copy bandwidth", true},
-            {"System Memory Latency", "Host CPU Memory Latency", "Default", "System", "ns", "Host pointer-chasing DRAM & CPU cache latency", true}
+            {"System Memory Bandwidth", "Host CPU Memory Bandwidth", "Multi-Threaded Read", "System", "GB/s", "Host CPU DDR read streaming bandwidth (multi-threaded)", true, 0},
+            {"System Memory Bandwidth", "Host CPU Memory Bandwidth", "Multi-Threaded Write", "System", "GB/s", "Host CPU DDR write streaming bandwidth (multi-threaded)", true, 1},
+            {"System Memory Bandwidth", "Host CPU Memory Bandwidth", "Multi-Threaded Copy", "System", "GB/s", "Host CPU DDR copy bandwidth (multi-threaded)", true, 2},
+            {"System Memory Bandwidth", "Host CPU Memory Bandwidth", "Single-Threaded Read (1T)", "System", "GB/s", "Single-threaded host CPU DDR read bandwidth", true, 3},
+            {"System Memory Bandwidth", "Host CPU Memory Bandwidth", "Single-Threaded Write (1T)", "System", "GB/s", "Single-threaded host CPU DDR write bandwidth", true, 4},
+            {"System Memory Bandwidth", "Host CPU Memory Bandwidth", "Single-Threaded Copy (1T)", "System", "GB/s", "Single-threaded host CPU DDR copy bandwidth", true, 5},
+            {"System Memory Latency", "Host CPU Memory Latency", "Default", "System", "ns", "Host pointer-chasing DRAM & CPU cache latency", true, 0}
         }});
 
         m_categories.push_back(cat);
@@ -1572,6 +1583,19 @@ bool GuiApp::matchesItem(const ResultData& r, const BenchmarkItem& itm, uint32_t
     bool isHostItem = (itm.category == "System" || itm.category == "Host System" || itm.category == "System Memory");
     uint32_t expectedDev = isHostItem ? 0xFFFFFFFF : activeDev;
     if (r.deviceIndex != expectedDev) return false;
+
+    // Fast path: Exact configIndex and benchmark id match
+    if (itm.configIndex >= 0) {
+        std::string baseName = r.benchmarkName;
+        size_t p = baseName.find(" (");
+        if (p != std::string::npos) {
+            baseName = baseName.substr(0, p);
+        }
+        if ((itm.id == baseName || (itm.id == "L0 Cache Latency" && baseName == "L0 Cache Latency")) &&
+            r.configIndex == static_cast<uint32_t>(itm.configIndex)) {
+            return true;
+        }
+    }
 
     // Subcategory matching with normalization
     if (!itm.subcategory.empty() && !r.subcategory.empty()) {
@@ -4165,18 +4189,42 @@ void GuiApp::renderRayTracingViewport() {
     std::string dynamicTechAScore = "--";
     std::string dynamicTechBScore = "--";
     std::string dynamicSpeedup = "--";
+    auto containsCi = [](const std::string& haystack, const std::string& needle) -> bool {
+        if (needle.empty()) return true;
+        auto it = std::search(haystack.begin(), haystack.end(), needle.begin(), needle.end(),
+            [](char c1, char c2) { return std::tolower(static_cast<unsigned char>(c1)) == std::tolower(static_cast<unsigned char>(c2)); });
+        return (it != haystack.end());
+    };
+
     double scoreTrad = 0.0, scoreDgc = 0.0;
-    for (const auto& res : m_allResults) {
-        if (res.benchmarkName.find(curSceneMeta.displayName) != std::string::npos ||
-            res.benchmarkName.find(curSceneMeta.tag) != std::string::npos ||
-            res.subcategory.find(curSceneMeta.displayName) != std::string::npos) {
+    // Prefer matching full frame render (configs 9 & 11) or path tracing (configs 3 & 5)
+    for (int priorityPass = 0; priorityPass < 2; ++priorityPass) {
+        for (const auto& res : m_allResults) {
+            bool sceneMatches = containsCi(res.benchmarkName, curSceneMeta.displayName) ||
+                                containsCi(res.benchmarkName, curSceneMeta.tag) ||
+                                containsCi(res.subcategory, curSceneMeta.displayName);
+            if (!sceneMatches) continue;
+
             double rate = (res.time_ms > 0.0) ? (static_cast<double>(res.operations) / res.time_ms * 1000.0 / 1e6) : 0.0;
-            if (res.benchmarkName.find("Megakernel") != std::string::npos || res.benchmarkName.find("Traditional") != std::string::npos) {
-                scoreTrad = rate;
-            } else if (res.benchmarkName.find("DGC") != std::string::npos || res.benchmarkName.find("Work Lists") != std::string::npos) {
-                scoreDgc = rate;
+
+            if (priorityPass == 0) {
+                // First pass: look specifically for Full Frame (config 9 vs 11) or Bounce Rays Path Tracing (config 3 vs 5)
+                if (res.configIndex == 9 || (res.configIndex == 3 && scoreTrad == 0.0)) {
+                    scoreTrad = rate;
+                } else if (res.configIndex == 11 || (res.configIndex == 5 && scoreDgc == 0.0)) {
+                    scoreDgc = rate;
+                }
+            } else {
+                // Fallback pass: any Megakernel vs DGC in this scene if specific configs were not run
+                if (scoreTrad == 0.0 && (containsCi(res.benchmarkName, "Megakernel") || containsCi(res.benchmarkName, "Traditional"))) {
+                    scoreTrad = rate;
+                }
+                if (scoreDgc == 0.0 && (containsCi(res.benchmarkName, "DGC") || containsCi(res.benchmarkName, "Work List"))) {
+                    scoreDgc = rate;
+                }
             }
         }
+        if (scoreTrad > 0.0 && scoreDgc > 0.0) break;
     }
     if (scoreTrad > 0.0) {
         char buf[64];
@@ -4519,12 +4567,12 @@ void GuiApp::renderRayTracingViewport() {
             ImGui::TextDisabled("Architecture: Monolithic Ray Query kernel (Stackless traversal)");
             ImGui::Text("Throughput: "); ImGui::SameLine();
             if (dynamicTechAScore != "--") {
-                ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.0f, 1.0f), "%s (Live)", dynamicTechAScore.c_str());
+                ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.0f, 1.0f), "%s (Live Measured)", dynamicTechAScore.c_str());
             } else {
                 ImGui::TextColored(ImVec4(0.65f, 0.70f, 0.80f, 1.0f), "Not Measured");
             }
             ImGui::SameLine(0, s(16.0f));
-            ImGui::TextDisabled("Author Target: %s", curSceneMeta.techAScore);
+            ImGui::TextDisabled("Reference Target: %s", curSceneMeta.techAScore);
             ImGui::TextDisabled("VGPR Pressure:"); ImGui::SameLine();
             ImGui::TextColored(ImVec4(0.95f, 0.65f, 0.35f, 1.0f), "%d VGPRs", curSceneMeta.vgprTrad);
             ImGui::SameLine(0, s(16.0f));
@@ -4538,12 +4586,12 @@ void GuiApp::renderRayTracingViewport() {
             ImGui::TextDisabled("Architecture: Shader Execution Reordering & Clustered Ray Bins");
             ImGui::Text("Throughput: "); ImGui::SameLine();
             if (dynamicTechBScore != "--") {
-                ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s (Live)", dynamicTechBScore.c_str());
+                ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s (Live Measured)", dynamicTechBScore.c_str());
             } else {
                 ImGui::TextColored(ImVec4(0.65f, 0.70f, 0.80f, 1.0f), "Not Measured");
             }
             ImGui::SameLine(0, s(16.0f));
-            ImGui::TextDisabled("Author Target: %s", curSceneMeta.techBScore);
+            ImGui::TextDisabled("Reference Target: %s", curSceneMeta.techBScore);
             ImGui::TextDisabled("VGPR Pressure:"); ImGui::SameLine();
             ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%d VGPRs", curSceneMeta.vgprDgc);
             ImGui::SameLine(0, s(16.0f));
@@ -5126,19 +5174,6 @@ void GuiApp::renderSettingsModal() {
 void GuiApp::startBenchmarks() {
     if (m_execState == ExecutionState::Running) return;
 
-    // Collect selected benchmarks
-    std::vector<std::string> selectedBenchmarks;
-    for (const auto& cat : m_categories) {
-        for (const auto& sub : cat.subgroups) {
-            for (const auto& item : sub.items) {
-                if (item.selected) {
-                    if (m_hideUnsupported && !item.isSupported) continue;
-                    selectedBenchmarks.push_back(item.id);
-                }
-            }
-        }
-    }
-
     // Collect selected target devices
     std::vector<uint32_t> targetGpus;
     bool hasSystemDevice = false;
@@ -5155,10 +5190,14 @@ void GuiApp::startBenchmarks() {
 
     // Auto-enable host device if user selected any host system benchmarks
     bool hasSelectedHostBenchmarks = false;
-    for (const auto& b : selectedBenchmarks) {
-        if (b.find("System Memory") != std::string::npos || b == "Host System") {
-            hasSelectedHostBenchmarks = true;
-            break;
+    for (const auto& cat : m_categories) {
+        for (const auto& sub : cat.subgroups) {
+            for (const auto& item : sub.items) {
+                if (item.selected && (item.category == "System" || item.category == "Host System" || item.id.find("System Memory") != std::string::npos)) {
+                    hasSelectedHostBenchmarks = true;
+                    break;
+                }
+            }
         }
     }
     if (hasSelectedHostBenchmarks) {
@@ -5173,26 +5212,38 @@ void GuiApp::startBenchmarks() {
         return;
     }
 
-    // Filter out system benchmarks if host device is not selected
-    if (!hasSystemDevice) {
-        selectedBenchmarks.erase(
-            std::remove_if(selectedBenchmarks.begin(), selectedBenchmarks.end(),
-                [](const std::string& b) {
-                    return b.find("System Memory") != std::string::npos;
-                }),
-            selectedBenchmarks.end()
-        );
-    }
+    // Collect selected benchmarks and workloads dynamically
+    std::vector<std::string> selectedBenchmarks;
+    std::vector<std::string> selectedWorkloads;
+    size_t gpu_configs = 0;
+    size_t sys_configs = 0;
 
-    // Filter out GPU benchmarks if no GPU is selected
-    if (targetGpus.empty()) {
-        selectedBenchmarks.erase(
-            std::remove_if(selectedBenchmarks.begin(), selectedBenchmarks.end(),
-                [](const std::string& b) {
-                    return b.find("System Memory") == std::string::npos;
-                }),
-            selectedBenchmarks.end()
-        );
+    for (const auto& cat : m_categories) {
+        for (const auto& sub : cat.subgroups) {
+            for (const auto& item : sub.items) {
+                if (!item.selected) continue;
+                if (m_hideUnsupported && !item.isSupported) continue;
+
+                bool isHost = (item.category == "System" || item.category == "Host System" || item.id.find("System Memory") != std::string::npos);
+                if (isHost) {
+                    if (!hasSystemDevice) continue;
+                    sys_configs++;
+                } else {
+                    if (targetGpus.empty()) continue;
+                    if (item.id == "RayScheduling" && m_scene == "all") {
+                        gpu_configs += 4;
+                    } else {
+                        gpu_configs += 1;
+                    }
+                }
+
+                selectedBenchmarks.push_back(item.id);
+                if (item.configIndex >= 0) {
+                    selectedWorkloads.push_back(item.id + "#" + std::to_string(item.configIndex));
+                }
+                selectedWorkloads.push_back(item.name);
+            }
+        }
     }
 
     if (selectedBenchmarks.empty()) {
@@ -5210,43 +5261,12 @@ void GuiApp::startBenchmarks() {
         std::string mapped = b;
         if (b == "SceneRayTracing" || b == "PathTracing" || b == "PipelineBreakdown") {
             mapped = "RayScheduling";
-        } else if (b == "L0 Cache Latency" || b == "L1 Cache Latency" || b == "L2 Cache Latency" || b == "L3 Cache Latency" || b == "Cache Latency") {
-            mapped = "Cache Latency";
         }
         if (std::find(engineBenchmarks.begin(), engineBenchmarks.end(), mapped) == engineBenchmarks.end()) {
             engineBenchmarks.push_back(mapped);
         }
     }
 
-    size_t gpu_configs = 0;
-    for (const auto& b : engineBenchmarks) {
-        if (b.find("System Memory") != std::string::npos) continue;
-        if (b == "Device Memory Bandwidth") gpu_configs += 9;
-        else if (b == "Cache Latency") gpu_configs += 4;
-        else if (b == "Cache Latency Curve") gpu_configs += 15;
-        else if (b == "Pixel Fill Rate") gpu_configs += 3;
-        else if (b == "Dual-Issue") gpu_configs += 7;
-        else if (b == "LDS Bank Conflicts") gpu_configs += 8;
-        else if (b == "In-Shader Indirect Synthesis") gpu_configs += 7;
-        else if (b == "FP16" || b == "BF16" || b == "FP8" || b == "INT8" || b == "INT4") gpu_configs += 2;
-        else if (b == "RayASBuild") gpu_configs += 8;
-        else if (b == "RayIntersect") gpu_configs += 2;
-        else if (b == "RayAnyHit") gpu_configs += 2;
-        else if (b == "RayProcedural") gpu_configs += 1;
-        else if (b == "RayDivergence") gpu_configs += 5;
-        else if (b == "RayPayload") gpu_configs += 3;
-        else if (b == "RayScheduling") {
-            gpu_configs += (m_scene == "all" ? 31 * 4 : 31);
-        }
-        else gpu_configs += 1;
-    }
-    size_t sys_configs = 0;
-    if (hasSystemDevice) {
-        for (const auto& b : engineBenchmarks) {
-            if (b == "System Memory Bandwidth") sys_configs += 6;
-            if (b == "System Memory Latency") sys_configs += 1;
-        }
-    }
     m_totalTasks = (gpu_configs * targetGpus.size()) + sys_configs;
     if (m_totalTasks == 0) m_totalTasks = 1;
 
@@ -5269,7 +5289,7 @@ void GuiApp::startBenchmarks() {
     bool dumpR = m_dumpRenders;
     std::string scene = m_scene;
 
-    m_execThread = std::thread([this, engineBenchmarks, targetGpus, targetBackend, rWidth, rHeight, spp, dumpR, scene]() {
+    m_execThread = std::thread([this, engineBenchmarks, targetGpus, targetBackend, rWidth, rHeight, spp, dumpR, scene, selectedWorkloads]() {
         auto callback = [this](const ResultData& res) {
             std::lock_guard<std::mutex> lock(m_resultsMutex);
             m_incomingResults.push_back(res);
@@ -5285,7 +5305,8 @@ void GuiApp::startBenchmarks() {
             scene,
             spp,
             &m_cancelToken,
-            /*quiet=*/true
+            /*quiet=*/true,
+            selectedWorkloads
         );
 
         m_telemetryWorker.stopRecording();

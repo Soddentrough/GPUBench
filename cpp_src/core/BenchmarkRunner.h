@@ -77,11 +77,16 @@ public:
   bool hasParityFailure() const { return parityFailure; }
   bool hasExecutionFailure() const { return executionFailure; }
 
+  void setWorkloadFilter(const std::vector<std::string> &filter) { workloadFilter = filter; }
+  const std::vector<std::string>& getWorkloadFilter() const { return workloadFilter; }
+
   const std::vector<std::unique_ptr<IBenchmark>>& getBenchmarkList() const { return benchmarks; }
 
 private:
   void discoverBenchmarks();
   void printBanner();
+
+  std::vector<std::string> workloadFilter;
 
   std::vector<IComputeContext *> contexts;
   std::vector<std::unique_ptr<IBenchmark>> benchmarks;
