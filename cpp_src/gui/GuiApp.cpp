@@ -865,9 +865,9 @@ void GuiApp::initializeBenchmarkCategories() {
             {"RayScheduling", "Material Shading", "Material (Megakernel)", "Ray Tracing", "MHits/s", "Evaluates realistic surface materials (metal, roughness, glass) in a standard compute pass", true, 0},
             {"RayScheduling", "Material Shading", "Material (RTP + SER)", "Ray Tracing", "MHits/s", "Evaluates surface materials using dedicated ray tracing closest-hit shaders and ray reordering", true, 1},
             {"RayScheduling", "Material Shading", "Material (DGC)", "Ray Tracing", "MHits/s", "Evaluates surface materials by sorting hits into batches to reduce shader divergence", true, 2},
-            {"RayScheduling", "Incoherent Ray Tracing", "Incoherent Rays (Megakernel)", "Ray Tracing", "MRays/s", "Tests GPU memory and cache performance with scattered, randomly bouncing light rays", true, 6},
-            {"RayScheduling", "Incoherent Ray Tracing", "Incoherent Rays (RTP + SER)", "Ray Tracing", "MRays/s", "Tests randomly bouncing light rays reordered by hardware to restore memory coherence", true, 7},
-            {"RayScheduling", "Incoherent Ray Tracing", "Incoherent Rays (DGC)", "Ray Tracing", "MRays/s", "Tests randomly bouncing light rays sorted and compacted into queues to maximize SIMD efficiency", true, 8},
+            {"RayScheduling", "Incoherent Ray Tracing", "Incoherent Rays (Megakernel)", "Ray Tracing", "MRays/s", "Diffuse secondary rays from real scene hits, traced with no reordering: the unmitigated baseline. Compare the three items to see what each technique recovers", true, 6},
+            {"RayScheduling", "Incoherent Ray Tracing", "Incoherent Rays (RTP + SER)", "Ray Tracing", "MRays/s", "Same incoherent bounce rays, re-binned by hardware ray reordering (SER): measures what SER recovers from the worst-case divergence", true, 7},
+            {"RayScheduling", "Incoherent Ray Tracing", "Incoherent Rays (DGC)", "Ray Tracing", "MRays/s", "Same incoherent bounce rays, classified into directional octants and compacted into GPU work queues: measures what DGC recovers", true, 8},
             {"RayScheduling", "Traversal Ordering & Coherence", "Linear 1D Scanline", "Ray Tracing", "MRays/s", "Traces rays in simple row-by-row order, serving as a baseline for ray order comparisons", true, 12},
             {"RayScheduling", "Traversal Ordering & Coherence", "2D Screen Tiled (8x4)", "Ray Tracing", "MRays/s", "Traces rays in small 8x4 pixel rectangular blocks to improve cache hit rates", true, 14},
             {"RayScheduling", "Traversal Ordering & Coherence", "2D Morton (8x4)", "Ray Tracing", "MRays/s", "Traces rays following an 8x4 Z-order curve to maximize spatial cache locality", true, 15},
@@ -887,11 +887,11 @@ void GuiApp::initializeBenchmarkCategories() {
             {"RayAnyHit", "Alpha-Tested Geometry", "100% Solid (Any-Hit Baseline)", "Ray Tracing", "MRays/s", "Baseline opacity test where all geometry is fully solid with no transparency", true, 0},
             {"RayAnyHit", "Alpha-Tested Geometry", "50% Solid (Cutout Stress)", "Ray Tracing", "MRays/s", "Tests GPU performance when half of all ray hits encounter transparent leaf cutouts", true, 1},
             {"RayProcedural", "Procedural Geometry", "AABB Spheres", "Ray Tracing", "MRays/s", "Tests ray intersection with mathematically defined spheres rather than polygons", true, 0},
-            {"RayDivergence", "Ray Directional Coherence", "90° Hemispherical (Incoherent)", "Ray Tracing", "MRays/s", "Baseline for diffuse reflections where rays scatter randomly in all directions across the surface", true, 0},
-            {"RayDivergence", "Ray Directional Coherence", "67.5° Cone Spread", "Ray Tracing", "MRays/s", "Tests ray performance when rays scatter widely in a 67.5-degree cone", true, 1},
-            {"RayDivergence", "Ray Directional Coherence", "45° Cone Spread", "Ray Tracing", "MRays/s", "Tests ray performance with moderate ray scattering in a 45-degree cone (semi-glossy surfaces)", true, 2},
-            {"RayDivergence", "Ray Directional Coherence", "22.5° Cone Spread", "Ray Tracing", "MRays/s", "Tests ray performance with tight ray scattering in a 22.5-degree cone (glossy surfaces)", true, 3},
-            {"RayDivergence", "Ray Directional Coherence", "0° Beam (Coherent)", "Ray Tracing", "MRays/s", "Measures peak ray tracing speed when all rays travel in exactly the same direction (perfect mirror)", true, 4}
+            {"RayDivergence", "Ray Directional Coherence", "90° Hemispherical (Incoherent)", "Ray Tracing", "MRays/s", "Worst-case divergence: full-hemisphere scatter (diffuse) on the controlled test chamber. This is the hardware cost floor - see 'Incoherent Ray Tracing' for how SER/DGC recover it", true, 0},
+            {"RayDivergence", "Ray Directional Coherence", "67.5° Cone Spread", "Ray Tracing", "MRays/s", "Wide 67.5-degree cone (rough surfaces): heavy but bounded divergence, part of the controlled cost-curve sweep", true, 1},
+            {"RayDivergence", "Ray Directional Coherence", "45° Cone Spread", "Ray Tracing", "MRays/s", "45-degree cone (semi-glossy surfaces): moderate spread with a measurable cache penalty on the controlled test chamber", true, 2},
+            {"RayDivergence", "Ray Directional Coherence", "22.5° Cone Spread", "Ray Tracing", "MRays/s", "22.5-degree cone (glossy surfaces): tight spread, small cache penalty on the controlled test chamber", true, 3},
+            {"RayDivergence", "Ray Directional Coherence", "0° Beam (Coherent)", "Ray Tracing", "MRays/s", "All rays perfectly parallel (mirror): peak traversal speed, the top of the cost-curve sweep", true, 4}
         }});
 
         m_categories.push_back(cat);
@@ -957,12 +957,12 @@ void GuiApp::applyVisualizationMetadata() {
             "Dynamic update of complex geometry: per-instance transforms are refreshed without a full rebuild", 16.0f/9.0f, 3, 0}},
         {"RayASBuild", 4, {"assets/thumbnails/thumb_blas_wireframe.png", "",
             "10M-triangle build: stresses triangle sorting, node packing, and BVH memory allocation at scale", 16.0f/9.0f, 3, 0}},
-        {"RayASBuild", 5, {"", "tlas_hierarchy",
-            "Top-level structure: one TLAS node per instance (20K here), each referencing a pre-built BLAS", 16.0f/9.0f, 3, 2}},
-        {"RayASBuild", 6, {"", "tlas_hierarchy",
-            "50K instanced objects: TLAS build cost grows with instance count, not triangle count", 16.0f/9.0f, 3, 2}},
-        {"RayASBuild", 7, {"", "tlas_hierarchy",
-            "200K instances: massive open-world hierarchy; traversal starts here before descending into BLAS", 16.0f/9.0f, 3, 2}},
+        {"RayASBuild", 5, {"", "tlas_corridor_20k",
+            "100 discrete rooms: disjoint non-overlapping AABBs with 1:4 mesh uniqueness (~5,000 unique BLASes)", 16.0f/9.0f, 3, 2}},
+        {"RayASBuild", 6, {"", "tlas_jungle_50k",
+            "Continuous undulating terrain: 50K foliage instances with heavy AABB overlap reusing 500 BLASes", 16.0f/9.0f, 3, 2}},
+        {"RayASBuild", 7, {"", "tlas_openworld_200k",
+            "Massive open world: 20 macro sectors (10K inst/sector) spanning kilometers; multi-tier tree", 16.0f/9.0f, 3, 2}},
 
         // ---- RayScheduling: material shading (0-2) ----
         {"RayScheduling", 0, {"assets/thumbnails/thumb_material_lineup.png", "",
@@ -984,13 +984,13 @@ void GuiApp::applyVisualizationMetadata() {
         {"RayScheduling", 24, {"assets/thumbnails/thumb_{scene}_stage6_indirect.png", "",
             "16 SPP with DGC: per-sample work queues keep cores saturated across the extra bounces", 16.0f/9.0f, 1, 5}},
 
-        // ---- RayScheduling: incoherent GI (6-8) ----
-        {"RayScheduling", 6, {"", "cone_divergence_90",
-            "Diffuse bounce rays scatter across the full hemisphere - worst-case SIMD divergence", 16.0f/9.0f, 1, 5}},
-        {"RayScheduling", 7, {"", "cone_divergence_90",
-            "Hardware SER re-bins scattered rays so each wavefront traverses coherently", 16.0f/9.0f, 1, 5}},
-        {"RayScheduling", 8, {"", "cone_divergence_90",
-            "DGC compacts scattered rays into direction-coherent queues for the next dispatch", 16.0f/9.0f, 1, 5}},
+        // ---- RayScheduling: incoherent GI (6-8) - technique comparison ----
+        {"RayScheduling", 6, {"", "incoherent_naive",
+            "No reordering: every wavefront mixes all direction groups - the unmitigated baseline", 16.0f/9.0f, 1, 5}},
+        {"RayScheduling", 7, {"", "incoherent_ser",
+            "Hardware SER re-bins the same scattered rays into direction-coherent groups", 16.0f/9.0f, 1, 5}},
+        {"RayScheduling", 8, {"", "incoherent_dgc",
+            "DGC classifies the same rays into octants and compacts each into its own work queue", 16.0f/9.0f, 1, 5}},
 
         // ---- RayScheduling: full frame (9-11) ----
         {"RayScheduling", 9, {"assets/thumbnails/thumb_{scene}_stage7_final.png", "",
@@ -1470,7 +1470,179 @@ void GuiApp::renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, Im
     }
 
     // ------------------------------------------------------------------
-    // TLAS instance hierarchy
+    // TLAS 1: Indoor Corridor (20,000 Instances) - Disjoint Room Grid
+    // ------------------------------------------------------------------
+    if (diagramId == "tlas_corridor_20k") {
+        drawTitle("TLAS: Indoor Corridor (20K Instances)");
+
+        const int cols = 4;
+        const int rows = 3;
+        float padX = s(6.0f);
+        float padY = s(6.0f);
+        float roomW = (gw - s(64.0f) - padX * (cols - 1)) / cols;
+        float roomH = (gh - padY * (rows - 1)) / rows;
+        float startX = area.x;
+        float startY = area.y;
+
+        for (int r = 0; r < rows; ++r) {
+            for (int c = 0; c < cols; ++c) {
+                ImVec2 r0(startX + c * (roomW + padX), startY + r * (roomH + padY));
+                ImVec2 r1(r0.x + roomW, r0.y + roomH);
+
+                // Room AABB (Disjoint / Non-overlapping)
+                dl->AddRectFilled(r0, r1, IM_COL32(20, 36, 56, 220), s(2.0f));
+                dl->AddRect(r0, r1, IM_COL32(50, 130, 210, 240), s(2.0f));
+
+                // Clustered instance primitives inside each room
+                for (int k = 0; k < 4; ++k) {
+                    float px = r0.x + roomW * (0.28f + 0.44f * (k % 2));
+                    float py = r0.y + roomH * (0.28f + 0.44f * (k / 2));
+                    dl->AddCircleFilled(ImVec2(px, py), s(2.0f), IM_COL32(90, 200, 255, 230));
+                }
+            }
+        }
+
+        // Ray culling demonstration on the right side
+        float legendX = startX + cols * (roomW + padX) + s(8.0f);
+        dl->AddText(ImVec2(legendX, startY + s(2.0f)), colCool, "100 Rooms");
+        dl->AddText(ImVec2(legendX, startY + s(18.0f)), colDim, "200 inst/rm");
+        dl->AddText(ImVec2(legendX, startY + s(34.0f)), colCool, "1:4 Unique");
+        dl->AddText(ImVec2(legendX, startY + s(50.0f)), colDim, "5K BLASes");
+
+        // Corridor ray (miss / culled early)
+        ImVec2 rayStart(startX + roomW + padX * 0.5f, startY - s(4.0f));
+        ImVec2 rayEnd(rayStart.x, startY + gh + s(4.0f));
+        dl->AddLine(rayStart, rayEnd, colAmber, 1.5f);
+        dl->AddCircleFilled(rayEnd, s(2.0f), colAmber);
+        dl->AddText(ImVec2(legendX, startY + gh - s(18.0f)), colAmber, "Corridor: 0 hit");
+
+        drawFootnote("disjoint room AABBs cull cleanly at top tree levels; high mesh uniqueness");
+        return;
+    }
+
+    // ------------------------------------------------------------------
+    // TLAS 2: Dense Jungle (50,000 Instances) - Overlapping Foliage
+    // ------------------------------------------------------------------
+    if (diagramId == "tlas_jungle_50k") {
+        drawTitle("TLAS: Dense Jungle (50K Instances)");
+
+        // Undulating terrain curve
+        const int segs = 24;
+        for (int i = 0; i < segs; ++i) {
+            float t0 = (float)i / segs;
+            float t1 = (float)(i + 1) / segs;
+            float x0 = area.x + t0 * (gw - s(60.0f));
+            float x1 = area.x + t1 * (gw - s(60.0f));
+            float y0 = area.y + gh * 0.76f + std::sin(t0 * 6.283f * 1.3f) * s(10.0f);
+            float y1 = area.y + gh * 0.76f + std::sin(t1 * 6.283f * 1.3f) * s(10.0f);
+            dl->AddLine(ImVec2(x0, y0), ImVec2(x1, y1), IM_COL32(60, 115, 65, 255), 2.0f);
+        }
+
+        // Overlapping foliage bounding boxes across undulating terrain
+        const int foliageCount = 10;
+        float spacing = (gw - s(90.0f)) / (foliageCount - 1);
+        float boxW = s(26.0f);
+        float boxH = s(34.0f);
+
+        for (int i = 0; i < foliageCount; ++i) {
+            float t = (float)i / (foliageCount - 1);
+            float fx = area.x + i * spacing;
+            float groundY = area.y + gh * 0.76f + std::sin(t * 6.283f * 1.3f) * s(10.0f);
+            float fy = groundY - boxH + s(4.0f);
+
+            // Translucent foliage AABB box
+            dl->AddRectFilled(ImVec2(fx, fy), ImVec2(fx + boxW, fy + boxH), IM_COL32(30, 110, 55, 65), s(2.0f));
+            dl->AddRect(ImVec2(fx, fy), ImVec2(fx + boxW, fy + boxH), IM_COL32(70, 200, 95, 170), s(2.0f));
+
+            // Foliage center tree/leaf dot
+            dl->AddCircleFilled(ImVec2(fx + boxW * 0.5f, fy + boxH * 0.45f), s(2.5f), IM_COL32(110, 240, 120, 240));
+        }
+
+        // Ray piercing overlapping canopy
+        float rayX = area.x + spacing * 4.5f;
+        ImVec2 rTop(rayX, area.y - s(4.0f));
+        ImVec2 rBot(rayX, area.y + gh);
+        dl->AddLine(rTop, rBot, colHot, 1.8f);
+
+        // Highlight intersection points with multiple overlapping boxes
+        dl->AddCircleFilled(ImVec2(rayX, area.y + gh * 0.32f), s(3.0f), colHot);
+        dl->AddCircleFilled(ImVec2(rayX, area.y + gh * 0.48f), s(3.0f), colHot);
+        dl->AddCircleFilled(ImVec2(rayX, area.y + gh * 0.62f), s(3.0f), colHot);
+
+        // Legend panel on right
+        float legendX = area.x + gw - s(55.0f);
+        dl->AddText(ImVec2(legendX, area.y + s(2.0f)), colGreen, "Heavy AABB");
+        dl->AddText(ImVec2(legendX, area.y + s(18.0f)), colHot, "Overlap!");
+        dl->AddText(ImVec2(legendX, area.y + s(34.0f)), colDim, "3+ hits/ray");
+        dl->AddText(ImVec2(legendX, area.y + s(50.0f)), colGreen, "1:100 Reuse");
+
+        drawFootnote("undulating terrain & continuous foliage -> high AABB overlap stresses BVH splitting");
+        return;
+    }
+
+    // ------------------------------------------------------------------
+    // TLAS 3: Massive Open World (200,000 Instances) - Macro Sectors
+    // ------------------------------------------------------------------
+    if (diagramId == "tlas_openworld_200k") {
+        drawTitle("TLAS: Massive Open World (200K Instances)");
+
+        // Left 62%: Macro Geographic Sectors (4x2 sector grid)
+        float mapW = gw * 0.62f;
+        const int cols = 4;
+        const int rows = 2;
+        float pad = s(4.0f);
+        float secW = (mapW - pad * (cols - 1)) / cols;
+        float secH = (gh - pad * (rows - 1)) / rows;
+
+        for (int r = 0; r < rows; ++r) {
+            for (int c = 0; c < cols; ++c) {
+                ImVec2 s0(area.x + c * (secW + pad), area.y + r * (secH + pad));
+                ImVec2 s1(s0.x + secW, s0.y + secH);
+
+                // Sector AABB border (amber)
+                dl->AddRectFilled(s0, s1, IM_COL32(35, 30, 20, 180), s(2.0f));
+                dl->AddRect(s0, s1, IM_COL32(200, 160, 60, 220), s(2.0f));
+
+                // High-density instances inside sector
+                for (int k = 0; k < 6; ++k) {
+                    float px = s0.x + secW * (0.2f + 0.28f * (k % 3));
+                    float py = s0.y + secH * (0.3f + 0.40f * (k / 3));
+                    dl->AddCircleFilled(ImVec2(px, py), s(1.5f), IM_COL32(255, 210, 90, 220));
+                }
+            }
+        }
+
+        // Right 38%: Multi-tier hierarchy tree & stats
+        float treeX = area.x + mapW + s(8.0f);
+        float treeW = gw - mapW - s(8.0f);
+
+        auto drawTierBox = [&](float yOffset, const char* label, ImU32 fill, ImU32 border, ImU32 textCol) {
+            ImVec2 b0(treeX, area.y + yOffset);
+            ImVec2 b1(treeX + treeW, b0.y + s(15.0f));
+            dl->AddRectFilled(b0, b1, fill, s(2.0f));
+            dl->AddRect(b0, b1, border, s(2.0f));
+            ImVec2 tsz = ImGui::CalcTextSize(label);
+            dl->AddText(ImVec2(b0.x + (treeW - tsz.x) * 0.5f, b0.y + (s(15.0f) - tsz.y) * 0.5f), textCol, label);
+            return ImVec2(treeX + treeW * 0.5f, b1.y);
+        };
+
+        ImVec2 pRoot = drawTierBox(0.0f, "TLAS Root", IM_COL32(30, 50, 80, 255), colCool, colText);
+        ImVec2 pSec = drawTierBox(s(20.0f), "20 Sectors (500m)", IM_COL32(50, 42, 20, 255), colAmber, colAmber);
+        ImVec2 pLeaves = drawTierBox(s(40.0f), "200K BLAS Leaves", IM_COL32(25, 45, 35, 255), colGreen, colGreen);
+
+        dl->AddLine(pRoot, ImVec2(pSec.x, area.y + s(20.0f)), colDim, 1.0f);
+        dl->AddLine(pSec, ImVec2(pLeaves.x, area.y + s(40.0f)), colDim, 1.0f);
+
+        // Stats badge
+        dl->AddText(ImVec2(treeX, area.y + s(58.0f)), colAmber, "Buffer: 12.8 MB");
+        dl->AddText(ImVec2(treeX, area.y + s(72.0f)), colDim, "~500M Virt Tris");
+
+        drawFootnote("20 macro sectors (500m pitch) -> multi-tier hierarchical tree & high memory scale");
+        return;
+    }
+
+    // ------------------------------------------------------------------
+    // Generic TLAS fallback (retained for backward compatibility)
     // ------------------------------------------------------------------
     if (diagramId == "tlas_hierarchy") {
         drawTitle("TLAS Instance Hierarchy");
@@ -1639,6 +1811,100 @@ void GuiApp::renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, Im
             dl->AddCircleFilled(p, s(2.5f), colAmber);
         }
         drawFootnote("each level adds a ray-box test before reaching leaf triangles");
+        return;
+    }
+
+    // ------------------------------------------------------------------
+    // Incoherent bounce rays: technique comparison (naive / SER / DGC)
+    // ------------------------------------------------------------------
+    if (diagramId.rfind("incoherent_", 0) == 0) {
+        bool naive = (diagramId == "incoherent_naive");
+        bool ser = (diagramId == "incoherent_ser");
+        drawTitle(naive ? "Incoherent Bounce Rays: No Reordering" :
+                        ser ? "Incoherent Bounce Rays: Hardware SER" :
+                             "Incoherent Bounce Rays: DGC Octant Binning");
+
+        // 12 bounce rays from real scene hits: 4 direction groups x 3 rays.
+        // (group, angle in degrees; +y is down)
+        const int rayGroup[12] = {0, 1, 2, 3, 0, 2, 1, 3, 1, 3, 0, 2};
+        const float rayAng[12] = {-70, -15, 25, 65, -65, 15, -25, 70, -10, 60, -75, 30};
+        const float groupAng[4] = {-70, -17, 23, 65}; // mean direction per group
+        const ImU32 groupCol[4] = {colCool, colAmber, colGreen, colHot};
+
+        auto drawArrow = [&](ImVec2 from, float angDeg, float len, ImU32 col) {
+            float a = angDeg * 0.0174532925f;
+            ImVec2 dir(std::cos(a), std::sin(a));
+            ImVec2 to(from.x + dir.x * len, from.y + dir.y * len);
+            dl->AddLine(from, to, col, 1.5f);
+            ImVec2 h1(to.x - dir.x * s(5.0f) - dir.y * s(3.5f), to.y - dir.y * s(5.0f) + dir.x * s(3.5f));
+            ImVec2 h2(to.x - dir.x * s(5.0f) + dir.y * s(3.5f), to.y - dir.y * s(5.0f) - dir.x * s(3.5f));
+            dl->AddLine(to, h1, col, 1.5f);
+            dl->AddLine(to, h2, col, 1.5f);
+        };
+
+        // Left: scattered bounce rays from a column of scene hit points
+        float beforeX = area.x + gw * 0.10f;
+        float rowH = gh / 13.0f;
+        for (int i = 0; i < 12; ++i) {
+            ImVec2 from(beforeX, area.y + (i + 1) * rowH);
+            dl->AddCircleFilled(from, s(2.0f), IM_COL32(200, 210, 230, 255));
+            drawArrow(from, rayAng[i], gw * 0.13f, groupCol[rayGroup[i]]);
+        }
+        dl->AddText(ImVec2(area.x, area.y - s(12.0f)), colDim, "bounce rays");
+
+        // Divider
+        float divX = area.x + gw * 0.46f;
+        dl->AddLine(ImVec2(divX, area.y), ImVec2(divX, areaEnd.y), IM_COL32(70, 85, 110, 200), 1.0f);
+        dl->AddText(ImVec2(divX - s(4.0f), area.y + gh * 0.5f), colDim, ">");
+
+        // Right: the technique's reordering result
+        float afterX = area.x + gw * 0.52f;
+        float afterW = areaEnd.x - afterX;
+
+        if (naive) {
+            // Same mixed arrows, one undivided dispatch
+            dl->AddRect(ImVec2(afterX, area.y), areaEnd, IM_COL32(70, 85, 110, 200), 1.0f);
+            for (int i = 0; i < 12; ++i) {
+                ImVec2 from(afterX + afterW * 0.12f, area.y + (i + 1) * rowH);
+                drawArrow(from, rayAng[i], afterW * 0.55f, groupCol[rayGroup[i]]);
+            }
+            dl->AddText(ImVec2(afterX, area.y - s(12.0f)), colDim, "one dispatch");
+            drawFootnote("no reordering: every wavefront mixes all direction groups");
+        } else if (ser) {
+            // 2x2 bins, each with 3 parallel arrows of one direction group
+            float bw = afterW * 0.46f, bh = gh * 0.42f;
+            for (int g = 0; g < 4; ++g) {
+                int bx = (g % 2), by = (g / 2);
+                ImVec2 b0(afterX + bx * (bw + afterW * 0.08f), area.y + by * (bh + gh * 0.10f));
+                ImVec2 b1(b0.x + bw, b0.y + bh);
+                dl->AddRect(b0, b1, groupCol[g], 1.0f);
+                for (int k = 0; k < 3; ++k) {
+                    ImVec2 from(b0.x + bw * 0.15f, b0.y + bh * (0.25f + 0.25f * k));
+                    drawArrow(from, groupAng[g], bw * 0.55f, groupCol[g]);
+                }
+            }
+            dl->AddText(ImVec2(afterX, area.y - s(12.0f)), colDim, "SER bins");
+            drawFootnote("hardware re-bins rays by direction before traversal");
+        } else {
+            // 4 compacted octant queue rows
+            float qh = gh * 0.185f;
+            for (int g = 0; g < 4; ++g) {
+                float qy = area.y + g * (qh + gh * 0.045f);
+                ImVec2 q0(afterX + afterW * 0.18f, qy);
+                ImVec2 q1(afterX + afterW * 0.95f, qy + qh);
+                dl->AddRect(q0, q1, IM_COL32(40, 52, 70, 255), 1.0f);
+                dl->AddRect(q0, q1, groupCol[g], 1.0f);
+                char lbl[8];
+                snprintf(lbl, sizeof(lbl), "O%d", g);
+                dl->AddText(ImVec2(afterX + s(2.0f), qy + qh * 0.25f), groupCol[g], lbl);
+                for (int k = 0; k < 3; ++k) {
+                    ImVec2 from(q0.x + afterW * 0.08f + k * afterW * 0.22f, qy + qh * 0.5f);
+                    drawArrow(from, 0.0f, afterW * 0.16f, groupCol[g]);
+                }
+            }
+            dl->AddText(ImVec2(afterX, area.y - s(12.0f)), colDim, "octant queues");
+            drawFootnote("rays classified into octants, compacted into per-batch work queues");
+        }
         return;
     }
 

@@ -88,10 +88,11 @@ referenced by any tooltip today (no RTAO-specific workload exists); they cost
 
 Scene-dependent thumbnails carry a `{scene}` token in their metadata path,
 e.g. `assets/thumbnails/thumb_{scene}_stage1_bvh.png`. At render time
-`renderBenchmarkTooltip()` substitutes the currently selected benchmark scene
-(`GuiApp::currentSceneTag()`): the scene chosen in Settings, or `showroom`
-when `all` is selected. This keeps the tooltip in sync with what the test
-actually runs on.
+`renderBenchmarkTooltip()` substitutes the active scene via
+`currentSceneTag()` (or an explicit `sceneOverride` for scorecard rows that
+belong to a specific scenario): the scene chosen in the Ray Tracing Scenario
+selector, or the canonical Sponza/`indoor` scene when `all` is selected. This
+keeps the tooltip in sync with what the test actually runs on.
 
 ### 2.3 Loading & caching
 
@@ -168,7 +169,7 @@ At startup the GUI logs coverage, and warns per unmatched entry:
 | `RayASBuild` | 5–7 (TLAS) | 2 | `tlas_hierarchy` → Geometry & BVH view 2 |
 | `RayScheduling` | 0–2 (Material) | 1 | `thumb_material_lineup.png` → PBR Materials view 0 |
 | `RayScheduling` | 3–5, 23–24 (Path tracing) | 1 | `thumb_{scene}_stage6_indirect.png` → Pipeline Passes 5 |
-| `RayScheduling` | 6–8 (Incoherent GI) | 2 | `cone_divergence_90` → Pipeline Passes 5 |
+| `RayScheduling` | 6–8 (Incoherent GI) | 2 | `incoherent_{naive,ser,dgc}` → Pipeline Passes 5 |
 | `RayScheduling` | 9–11 (Full frame) | 1 | `thumb_{scene}_stage7_final.png` → Pipeline Passes 6 |
 | `RayScheduling` | 12 (Scanline) | 2 | `traversal_scanline` → Pipeline Passes 0 |
 | `RayScheduling` | 13, 26, 28 (Compaction) | 2 | `wave_ballot_compaction` |
@@ -187,6 +188,17 @@ At startup the GUI logs coverage, and warns per unmatched entry:
 | `RayAnyHit` | 0–1 (Alpha solid/cutout) | 1 | `thumb_alpha_layers.png` → Geometry & BVH view 1 |
 | `RayProcedural` | 0 (AABB spheres) | 2 | `procedural_sphere` |
 | `RayDivergence` | 0–4 (90°…0°) | 2 | `cone_divergence_{90,67.5,45,22.5,0}` |
+
+> **Incoherent GI vs Ray Directional Coherence** — these two groups look
+> similar but answer different questions, and the tooltips say so explicitly:
+> `RayDivergence` is a *controlled cost curve* (synthetic chamber, one
+> technique, cone angle swept 0°→90°) — "how much does divergence cost this
+> hardware?" — while `Incoherent Ray Tracing` is a *technique comparison*
+> (real scenes, full-hemisphere secondary rays, three scheduling techniques)
+> — "how much do SER/DGC recover?". Their descriptions cross-reference each
+> other, and the incoherent test gets its own mechanism diagrams
+> (`incoherent_*`) rather than reusing the static cone, so the reordering
+> being tested is actually visible.
 | `Pixel Fill Rate` | 0–2 (RGBA8/HDR/blend) | 2 | `rop_fill_{rgba8,hdr,blend}` |
 
 ---
@@ -237,7 +249,7 @@ for one frame.
 
 `GuiApp::renderProceduralDiagram(diagramId, p0, p1)` — pure `ImDrawList`
 vector drawing (lines, rects, circles, arcs, text), shared palette, title at
-top, footnote at bottom. 18 diagram ids:
+top, footnote at bottom. 21 diagram ids:
 
 | Diagram id | Visual |
 |:-----------|:-------|
@@ -246,6 +258,7 @@ top, footnote at bottom. 18 diagram ids:
 | `traversal_tiled_8x4` | Same grid with 8×4 tile borders; path wraps at tile edges |
 | `traversal_morton_8x4` / `_4x8` | 4×4 tile grid visited along a true Morton Z-curve (bit-interleaved codes), numbered dots, mini-raster lines inside tiles showing intra-tile orientation (wide vs tall) |
 | `wave_ballot_compaction` | 32-lane wavefront (active/terminated), the 32-bit ballot mask, and the compacted queue packed left; footnote reports active-lane count |
+| `incoherent_naive` / `incoherent_ser` / `incoherent_dgc` | Left: 12 color-coded bounce rays scattered from a column of scene hit points (4 direction groups). Right: the technique's result — one undivided dispatch (naive), 2×2 direction bins with parallel arrows (SER), or 4 compacted octant queue rows O0–O3 (DGC) |
 | `tlas_hierarchy` | Root → 3 internal nodes → 6 `BLAS #i` leaves |
 | `intersect_ray_triangle` | Triangle, ray with hit point, dashed barycentric spokes, `hit (t, u, v)` label |
 | `intersect_ray_box` | 2.5D AABB wireframe, ray with `t near` / `t far` markers |
@@ -310,7 +323,7 @@ install(DIRECTORY assets/thumbnails/
    scene tags.
 4. **Visual parity**: the drawing code was rendered headlessly (ImGui +
    software triangle rasterizer, no GPU/display) to PNGs and inspected:
-   all 18 procedural diagrams plus full-tooltip composites (texture and
+   all 21 procedural diagrams plus full-tooltip composites (texture and
    procedural variants, cross-link button, 1.5× UI scale). One ImGui quirk
    surfaced and understood: a *newly created* tooltip window is hidden for
    one frame while it measures its size (16 ms at 60 Hz — imperceptible in
