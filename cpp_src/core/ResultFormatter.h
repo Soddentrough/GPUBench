@@ -57,5 +57,6 @@ private:
 
 double computeResultValue(const ResultData &r);
 std::string cleanWorkloadName(const std::string &rawName, const std::string &subcat);
+std::string extractSceneName(const std::string &rawName);
 std::string getDefaultJsonFilename();
 std::string resultsToJson(const std::vector<ResultData> &results);

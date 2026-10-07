@@ -137,7 +137,7 @@ static std::string cleanSupportNote(const std::string &rawNote) {
   return note;
 }
 
-static std::string extractSceneName(const std::string &rawName) {
+std::string extractSceneName(const std::string &rawName) {
   if (rawName.rfind("RayScheduling (", 0) == 0) {
     size_t firstParen = 15; // length of "RayScheduling ("
     size_t closeParen = rawName.find(')', firstParen);

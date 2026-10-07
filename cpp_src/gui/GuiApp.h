@@ -194,7 +194,7 @@ private:
     void exportResultsToJson(const std::string& filepath);
 
     // Benchmark Tooltip Visualizations
-    void renderBenchmarkTooltip(const BenchmarkItem& item);
+    void renderBenchmarkTooltip(const BenchmarkItem& item, const std::string& sceneOverride = "");
     void renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, ImVec2 p1) const;
     std::string currentSceneTag() const;
 
@@ -213,6 +213,7 @@ private:
     // Benchmark Suite Definitions
     std::vector<BenchmarkCategory> m_categories;
     int m_suiteCategoryFilter{0}; // 0: All, 1: Compute, 2: Memory, 3: Ray Tracing, 4: Graphics, 5: Host System
+    std::string m_suiteActiveScene{"indoor"}; // Active scenario shown on Suite cards: "indoor", "forest", "outdoor", "showroom"
     bool m_hideUnsupported{false}; // Show all tests by default
     std::string m_lastProbedBackend{""};
     uint32_t m_lastProbedDeviceIndex{0xFFFFFFFF};
@@ -245,6 +246,7 @@ private:
     uint32_t m_samplesPerPixel{1};
     bool m_dumpRenders{false};
     bool m_showSettingsModal{false};
+    int m_scorecardSceneFilter{0}; // 0: All, 1: Indoor (Sponza), 2: Forest, 3: Landscape, 4: Showroom
 
     // Vulkan GUI Context & Texture Management
     VulkanContext* m_vulkanContext{nullptr};

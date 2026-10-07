@@ -1117,13 +1117,14 @@ void GuiApp::applyVisualizationMetadata() {
 }
 
 std::string GuiApp::currentSceneTag() const {
-    // m_scene is either "all" (run every scene) or a specific scene tag.
-    // Tooltips show one representative capture; showroom is the canonical model.
-    if (m_scene == "indoor" || m_scene == "forest" || m_scene == "outdoor") return m_scene;
-    return "showroom";
+    // Sponza (Crytek Sponza atrium) is the canonical reference architecture scene.
+    if (m_scene == "forest" || m_scene == "outdoor" || m_scene == "showroom") return m_scene;
+    if (m_scene == "indoor") return "indoor";
+    if (!m_suiteActiveScene.empty() && m_suiteActiveScene != "all") return m_suiteActiveScene;
+    return "indoor";
 }
 
-void GuiApp::renderBenchmarkTooltip(const BenchmarkItem& item) {
+void GuiApp::renderBenchmarkTooltip(const BenchmarkItem& item, const std::string& sceneOverride) {
     ImGui::BeginTooltip();
 
     // 1. Header & badges
@@ -1155,7 +1156,7 @@ void GuiApp::renderBenchmarkTooltip(const BenchmarkItem& item) {
         if (!item.viz.assetPath.empty()) {
             // Tier 1: static pre-baked thumbnail, lazily loaded & cached
             std::string assetPath = item.viz.assetPath;
-            std::string scene = currentSceneTag();
+            std::string scene = !sceneOverride.empty() ? sceneOverride : currentSceneTag();
             size_t pos;
             while ((pos = assetPath.find("{scene}")) != std::string::npos) {
                 assetPath.replace(pos, 7, scene);
@@ -2291,6 +2292,89 @@ void GuiApp::renderLeftSidebar(float width, float height) {
     ImGui::SameLine();
     ImGui::TextDisabled("(%.2f Mpix / frame)", raysM);
 
+    // 5. Ray Tracing Scenario Selection
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    ImGui::TextColored(ImVec4(0.65f, 0.75f, 0.90f, 1.0f), "RAY TRACING SCENARIO");
+    ImGui::SameLine();
+    ImGui::TextDisabled("(?)");
+    if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.00f, 1.0f), "Ray Tracing Geometry & Architectural Workload");
+        ImGui::Separator();
+        ImGui::PushTextWrapPos(s(300.0f));
+        ImGui::TextUnformatted(
+            "Selects the 3D test scenario for ray tracing and path tracing passes:\n\n"
+            "  • All Scenes: Evaluates all 4 scenes sequentially (Console CLI parity)\n"
+            "  • Sponza (Indoor): Crytek Sponza atrium (262K tris, 25 PBR materials, 100% screen fill) [Canonical Architecture Benchmark]\n"
+            "  • AAA Forest: Heavy foliage, alpha-tested leaf cutouts & deep geometry stress (1.05M+ tris)\n"
+            "  • Landscape: Expansive outdoor terrain with wide depth range & sky escape rays\n"
+            "  • Showroom: Single vehicle model in empty studio void (108K tris)\n"
+        );
+        ImGui::PopTextWrapPos();
+        ImGui::EndTooltip();
+    }
+
+    ImGui::TextDisabled("Test Scene Geometry & Shading");
+    ImGui::Spacing();
+
+    const char* sceneBtnLabels[] = { "All", "Sponza", "Forest", "Landscape", "Showroom" };
+    const char* sceneBtnTags[] = { "all", "indoor", "forest", "outdoor", "showroom" };
+    const char* sceneBtnTooltips[] = {
+        "All Scenes - Runs all 4 scenarios sequentially (Console parity default)",
+        "Indoor Atrium (Crytek Sponza) - 262K triangles, 25 PBR materials, 100% screen fill [Canonical Benchmark]",
+        "Open-World Forest - 1.05M+ triangles, heavy alpha cutout foliage & traversal stress",
+        "Outdoor Landscape - Expansive terrain vista with wide depth variance & sky miss rays",
+        "Showroom Studio - Single high-detail vehicle in studio void (108K triangles)"
+    };
+
+    for (int sIdx = 0; sIdx < 5; ++sIdx) {
+        bool isSel = (m_scene == sceneBtnTags[sIdx]);
+        if (isSel) {
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.48f, 0.90f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.26f, 0.55f, 0.98f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.18f, 0.42f, 0.85f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
+        } else {
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.12f, 0.15f, 0.22f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.18f, 0.23f, 0.32f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.22f, 0.28f, 0.40f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.70f, 0.78f, 0.90f, 1.0f));
+        }
+
+        float btnW = ImGui::CalcTextSize(sceneBtnLabels[sIdx]).x + ImGui::GetStyle().FramePadding.x * 2.0f;
+        if (btnW + ImGui::GetStyle().ItemSpacing.x <= ImGui::GetContentRegionAvail().x && sIdx > 0 && sIdx != 3) {
+            ImGui::SameLine();
+        }
+
+        if (ImGui::SmallButton(sceneBtnLabels[sIdx])) {
+            m_scene = sceneBtnTags[sIdx];
+            if (m_scene != "all") {
+                m_suiteActiveScene = m_scene;
+            }
+        }
+
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("%s", sceneBtnTooltips[sIdx]);
+        }
+
+        ImGui::PopStyleColor(4);
+    }
+
+    if (m_scene == "all") {
+        ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.00f, 1.0f), "All 4 Scenarios (Console Parity)");
+    } else if (m_scene == "indoor") {
+        ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "Indoor Atrium (Sponza - Canonical)");
+    } else if (m_scene == "forest") {
+        ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "Open-World Forest (1.05M+ Tris)");
+    } else if (m_scene == "outdoor") {
+        ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "Outdoor Landscape (Terrain Vista)");
+    } else {
+        ImGui::TextColored(ImVec4(0.70f, 0.75f, 0.85f, 1.0f), "Showroom Studio (108K Tris)");
+    }
+
     ImGui::Spacing();
     ImGui::Checkbox("Dump Scene Renders to Disk", &m_dumpRenders);
     ImGui::SameLine();
@@ -2554,6 +2638,9 @@ bool GuiApp::matchesItem(const ResultData& r, const BenchmarkItem& itm, uint32_t
         if (!itm.subcategory.empty() && !r.subcategory.empty() && r.subcategory != itm.subcategory) {
             return false;
         }
+        if (itm.configIndex >= 0 && r.configIndex == static_cast<uint32_t>(itm.configIndex)) {
+            return true;
+        }
 
         // Multi-Light Evaluation exact matching
         if (itm.subcategory == "Multi-Light Evaluation" || r.subcategory == "Multi-Light Evaluation") {
@@ -2718,12 +2805,29 @@ GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
     };
 
     const ResultData* curRes = nullptr;
+    const ResultData* fallbackRes = nullptr;
     for (const auto& r : m_allResults) {
         if (matchesItem(r, item, activeDev)) {
-            curRes = &r;
-            if (r.time_ms > 0.0) break;
+            if (!fallbackRes && r.time_ms > 0.0) fallbackRes = &r;
+            if (item.id == "RayScheduling" || item.id == "RayPathTracing") {
+                bool sceneMatches = false;
+                if (m_suiteActiveScene == "indoor" && r.benchmarkName.find("Indoor Atrium") != std::string::npos) sceneMatches = true;
+                else if (m_suiteActiveScene == "forest" && r.benchmarkName.find("Forest") != std::string::npos) sceneMatches = true;
+                else if (m_suiteActiveScene == "outdoor" && r.benchmarkName.find("Outdoor") != std::string::npos) sceneMatches = true;
+                else if (m_suiteActiveScene == "showroom" && r.benchmarkName.find("Showroom") != std::string::npos) sceneMatches = true;
+                else if (m_suiteActiveScene.empty() || m_suiteActiveScene == "all") sceneMatches = true;
+
+                if (sceneMatches) {
+                    curRes = &r;
+                    if (r.time_ms > 0.0) break;
+                }
+            } else {
+                curRes = &r;
+                if (r.time_ms > 0.0) break;
+            }
         }
     }
+    if (!curRes) curRes = fallbackRes;
 
     if (curRes) {
         info.hasResult = true;
@@ -2885,6 +2989,13 @@ GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
                             break;
                         }
                     } else if (r.subcategory == item.subcategory) {
+                        if (item.id == "RayScheduling" || item.id == "RayPathTracing") {
+                            std::string curScene = extractSceneName(curRes->benchmarkName);
+                            std::string rScene = extractSceneName(r.benchmarkName);
+                            if (!curScene.empty() && !rScene.empty() && curScene != rScene) {
+                                continue;
+                            }
+                        }
                         std::string cName = cleanWorkloadName(r.benchmarkName, r.subcategory);
                         if (baselineName == "Megakernel") {
                             if ((cName.find("Megakernel") != std::string::npos || r.benchmarkName.find("Megakernel") != std::string::npos) &&
@@ -3061,6 +3172,42 @@ void GuiApp::renderBenchmarkSuitePanel() {
     ImGui::PopStyleColor();
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Hide workloads not supported by current hardware or API toolchain");
+    }
+
+    // Ray Tracing Scenario View Tabs (available whenever Ray Tracing or All is viewed)
+    if (m_suiteCategoryFilter == 0 || m_suiteCategoryFilter == 3) {
+        ImGui::Spacing();
+        ImGui::TextDisabled("Ray Tracing Scenario View:");
+        ImGui::SameLine();
+        const char* sceneViewLabels[] = { "Indoor Atrium (Sponza) [Canonical]", "Open-World Forest", "Outdoor Landscape", "Showroom Studio" };
+        const char* sceneViewTags[] = { "indoor", "forest", "outdoor", "showroom" };
+        const char* sceneViewTips[] = {
+            "View scores and tooltips for Indoor Atrium (Crytek Sponza, 262K tris) [Canonical Reference]",
+            "View scores and tooltips for Open-World Forest (1.05M+ tris, alpha-tested foliage)",
+            "View scores and tooltips for Outdoor Landscape (terrain vista, distance rays)",
+            "View scores and tooltips for Showroom Studio (108K tris, vehicle void)"
+        };
+        for (int svi = 0; svi < 4; ++svi) {
+            float sBtnW = ImGui::CalcTextSize(sceneViewLabels[svi]).x + ImGui::GetStyle().FramePadding.x * 2.0f;
+            if (sBtnW + ImGui::GetStyle().ItemSpacing.x <= ImGui::GetContentRegionAvail().x && svi > 0) {
+                ImGui::SameLine();
+            }
+            bool isAct = (m_suiteActiveScene == sceneViewTags[svi]);
+            if (isAct) {
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.48f, 0.92f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
+            } else {
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.13f, 0.16f, 0.22f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.70f, 0.75f, 0.85f, 1.0f));
+            }
+            if (ImGui::SmallButton(sceneViewLabels[svi])) {
+                m_suiteActiveScene = sceneViewTags[svi];
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("%s", sceneViewTips[svi]);
+            }
+            ImGui::PopStyleColor(2);
+        }
     }
 
     ImGui::Spacing();
@@ -3504,7 +3651,14 @@ void GuiApp::renderBenchmarkSuitePanel() {
         float textOffsetY = (headerH - ImGui::GetTextLineHeight()) * 0.5f;
         float titleStartX = p0.x + s(58.0f);
         ImGui::SetCursorScreenPos(ImVec2(titleStartX, p0.y + textOffsetY));
-        ImGui::TextColored(ImVec4(0.95f, 0.96f, 0.98f, 1.0f), "%s", sub.name.c_str());
+        std::string displaySubName = sub.name;
+        if (sub.component == "Ray Tracing" && (sub.engineId == "RayScheduling" || sub.engineId == "RayPathTracing")) {
+            if (m_suiteActiveScene == "indoor") displaySubName += " [Indoor Atrium]";
+            else if (m_suiteActiveScene == "forest") displaySubName += " [Open-World Forest]";
+            else if (m_suiteActiveScene == "outdoor") displaySubName += " [Outdoor Landscape]";
+            else if (m_suiteActiveScene == "showroom") displaySubName += " [Showroom Studio]";
+        }
+        ImGui::TextColored(ImVec4(0.95f, 0.96f, 0.98f, 1.0f), "%s", displaySubName.c_str());
 
         ImGui::SameLine(0, s(6.0f));
         ImGui::TextDisabled("(%zu/%zu)", selectedCount, visibleCount);
@@ -3618,7 +3772,8 @@ void GuiApp::renderBenchmarkSuitePanel() {
                                               item.name.c_str(), item.subcategory.c_str(), item.id.c_str(),
                                               catStr.c_str(), reason.c_str());
                         } else if (!item.description.empty()) {
-                            renderBenchmarkTooltip(item);
+                            std::string scn = (item.id == "RayScheduling" || item.id == "RayRawTraversal" || item.id == "RayPathTracing") ? m_suiteActiveScene : "";
+                            renderBenchmarkTooltip(item, scn);
                         }
                     }
 
@@ -4533,6 +4688,19 @@ void GuiApp::renderResultsScorecard() {
         ImGui::SetTooltip("Hide tests with UNSUPPORTED status from results table (default: hidden)");
     }
 
+    // Scenario Filter for Ray Tracing
+    ImGui::Text("Scenario:");
+    ImGui::SameLine();
+    ImGui::RadioButton("All Scenarios", &m_scorecardSceneFilter, 0);
+    ImGui::SameLine();
+    ImGui::RadioButton("Indoor (Sponza)", &m_scorecardSceneFilter, 1);
+    ImGui::SameLine();
+    ImGui::RadioButton("Forest", &m_scorecardSceneFilter, 2);
+    ImGui::SameLine();
+    ImGui::RadioButton("Landscape", &m_scorecardSceneFilter, 3);
+    ImGui::SameLine();
+    ImGui::RadioButton("Showroom", &m_scorecardSceneFilter, 4);
+
     ImGui::Spacing();
 
     const ImGuiTableFlags flags = ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
@@ -4565,6 +4733,15 @@ void GuiApp::renderResultsScorecard() {
 
             // Apply unsupported filter
             if (m_hideUnsupported && res.isUnsupported) continue;
+
+            // Apply scenario filter for Ray Tracing
+            if (m_scorecardSceneFilter > 0 && res.component == "Ray Tracing" && res.benchmarkName.find("RayScheduling") != std::string::npos) {
+                std::string sName = extractSceneName(res.benchmarkName);
+                if (m_scorecardSceneFilter == 1 && sName.find("Indoor") == std::string::npos) continue;
+                if (m_scorecardSceneFilter == 2 && sName.find("Forest") == std::string::npos) continue;
+                if (m_scorecardSceneFilter == 3 && sName.find("Outdoor") == std::string::npos) continue;
+                if (m_scorecardSceneFilter == 4 && sName.find("Showroom") == std::string::npos) continue;
+            }
 
             ImGui::TableNextRow();
 
@@ -4622,7 +4799,13 @@ void GuiApp::renderResultsScorecard() {
                     }
                 }
                 if (match) {
-                    renderBenchmarkTooltip(*match);
+                    std::string scn = "";
+                    std::string sName = extractSceneName(res.benchmarkName);
+                    if (sName.find("Indoor") != std::string::npos) scn = "indoor";
+                    else if (sName.find("Forest") != std::string::npos) scn = "forest";
+                    else if (sName.find("Outdoor") != std::string::npos) scn = "outdoor";
+                    else if (sName.find("Showroom") != std::string::npos) scn = "showroom";
+                    renderBenchmarkTooltip(*match, scn);
                 }
             }
 
