@@ -506,7 +506,7 @@ int main(int argc, char **argv) {
     runner.setResolution(render_width, render_height);
     runner.setBounceDepth(bounce_depth);
     runner.setSamplesPerPixel(samples_per_pixel);
-    if (want_json_output || quiet) {
+    if ((want_json_output && (output_json_path == "-" || output_json_path == "stdout")) || quiet) {
       runner.setQuiet(true);
     }
     if (!config_targets.empty()) {

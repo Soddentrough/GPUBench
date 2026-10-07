@@ -930,41 +930,53 @@ bool ResultImporter::loadFromFile(const std::string &filepath, ImportedRun &outR
       // Deduce sort weight and normalize to standard hierarchical schema
       if (rd.component == "Compute") {
         rd.sortWeight = 10;
-        if (rd.subcategory == "FP64" || rd.benchmarkName.find("FP64") != std::string::npos) {
+        if (rd.subcategory == "Dual-Issue" || rd.benchmarkName.rfind("Dual-Issue", 0) == 0) {
+          rd.subcategory = "Dual-Issue";
+          rd.sortWeight = 25;
+        } else if (rd.subcategory == "LDS Bank Conflicts" || rd.benchmarkName.find("LDS") != std::string::npos) {
+          rd.subcategory = "LDS Bank Conflicts";
+          rd.sortWeight = 26;
+        } else if (rd.subcategory == "Indirect Command Synthesis" || rd.benchmarkName.find("Indirect") != std::string::npos) {
+          rd.subcategory = "Indirect Command Synthesis";
+          rd.sortWeight = 28;
+        } else if (rd.subcategory == "FP64" || rd.subcategory == "Double Precision" || rd.benchmarkName == "FP64") {
           rd.subcategory = "Double Precision";
           rd.benchmarkName = "FP64";
           rd.sortWeight = 10;
           rd.configIndex = 0;
-        } else if (rd.subcategory == "FP32" || rd.benchmarkName.find("FP32") != std::string::npos) {
+        } else if (rd.subcategory == "FP32" || rd.subcategory == "Single Precision" || rd.benchmarkName == "FP32") {
           rd.subcategory = "Single Precision";
           rd.benchmarkName = "FP32";
           rd.sortWeight = 20;
           rd.configIndex = 0;
-        } else if (rd.subcategory == "FP16" || rd.benchmarkName.find("FP16") != std::string::npos) {
+        } else if (rd.subcategory == "FP16" || rd.subcategory == "Half Precision (FP16)" || rd.benchmarkName.rfind("FP16", 0) == 0) {
           rd.subcategory = "Half Precision (FP16)";
           rd.benchmarkName = (rd.configIndex == 1 || rd.benchmarkName.find("Matrix") != std::string::npos) ? "Matrix" : "Vector";
           rd.configIndex = (rd.benchmarkName == "Matrix") ? 1 : 0;
           rd.sortWeight = 30;
-        } else if (rd.subcategory == "BF16" || rd.benchmarkName.find("BF16") != std::string::npos) {
+        } else if (rd.subcategory == "BF16" || rd.subcategory == "Bfloat16 (BF16)" || rd.benchmarkName.rfind("BF16", 0) == 0) {
           rd.subcategory = "Bfloat16 (BF16)";
           rd.benchmarkName = (rd.configIndex == 1 || rd.benchmarkName.find("Matrix") != std::string::npos) ? "Matrix" : "Vector";
           rd.configIndex = (rd.benchmarkName == "Matrix") ? 1 : 0;
           rd.sortWeight = 40;
-        } else if (rd.subcategory == "FP8" || rd.benchmarkName.find("FP8") != std::string::npos) {
+        } else if (rd.subcategory == "FP8" || rd.subcategory == "Quarter Precision (FP8)" || rd.benchmarkName.rfind("FP8", 0) == 0) {
           rd.subcategory = "Quarter Precision (FP8)";
           rd.benchmarkName = (rd.configIndex == 1 || rd.benchmarkName.find("Matrix") != std::string::npos) ? "Matrix" : "Vector";
           rd.configIndex = (rd.benchmarkName == "Matrix") ? 1 : 0;
           rd.sortWeight = 50;
-        } else if (rd.subcategory == "INT8" || rd.benchmarkName.find("INT8") != std::string::npos) {
+        } else if (rd.subcategory == "INT8" || rd.subcategory == "8-bit Integer (INT8)" || rd.benchmarkName.rfind("INT8", 0) == 0) {
           rd.subcategory = "8-bit Integer (INT8)";
           rd.benchmarkName = (rd.configIndex == 1 || rd.benchmarkName.find("Matrix") != std::string::npos) ? "Matrix" : "Vector";
           rd.configIndex = (rd.benchmarkName == "Matrix") ? 1 : 0;
           rd.sortWeight = 60;
-        } else if (rd.subcategory == "INT4" || rd.benchmarkName.find("INT4") != std::string::npos) {
+        } else if (rd.subcategory == "INT4" || rd.subcategory == "4-bit Integer (INT4)" || rd.benchmarkName.rfind("INT4", 0) == 0) {
           rd.subcategory = "4-bit Integer (INT4)";
           rd.benchmarkName = (rd.configIndex == 1 || rd.benchmarkName.find("Matrix") != std::string::npos) ? "Matrix" : "Vector";
           rd.configIndex = (rd.benchmarkName == "Matrix") ? 1 : 0;
           rd.sortWeight = 70;
+        } else if (rd.subcategory == "FP6" || rd.benchmarkName == "FP6") {
+          rd.subcategory = "FP6";
+          rd.sortWeight = 45;
         }
       } else if (rd.component == "Memory") {
         rd.sortWeight = 100;

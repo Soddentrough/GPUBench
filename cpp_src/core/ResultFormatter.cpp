@@ -165,6 +165,13 @@ std::string cleanWorkloadName(const std::string &rawName, const std::string &sub
     if (secondOpen != std::string::npos && name.back() == ')') {
       name = name.substr(secondOpen + 3, name.length() - (secondOpen + 4));
     }
+  } else if (subcat == "Dual-Issue" || name.rfind("Dual-Issue", 0) == 0) {
+    // Preserve full precision qualification for Dual-Issue workloads
+    if (name.rfind("Dual-Issue (", 0) == 0 && name.back() == ')') {
+      name = name.substr(12, name.length() - 13);
+    } else if (name.rfind("Dual-Issue ", 0) == 0) {
+      name = name.substr(11);
+    }
   } else {
     // Handle "RayASBuild (BLAS Build (1M Tris))" or "RayIntersect (Ray-Triangle)"
     size_t firstOpen = name.find(" (");

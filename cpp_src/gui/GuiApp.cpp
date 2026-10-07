@@ -2853,8 +2853,11 @@ bool GuiApp::matchesItem(const ResultData& r, const BenchmarkItem& itm, uint32_t
 
     // Dual-Issue matching
     if (itm.subcategory == "Dual-Issue" || r.subcategory == "Dual-Issue") {
+        if (itm.configIndex >= 0 && static_cast<uint32_t>(itm.configIndex) == r.configIndex) return true;
         std::string clean = cleanWorkloadName(r.benchmarkName, r.subcategory);
-        return (clean == itm.name || r.benchmarkName == itm.name || r.benchmarkName.find(itm.name) != std::string::npos);
+        return (clean == itm.name || r.benchmarkName == itm.name ||
+                r.benchmarkName.find(itm.name) != std::string::npos ||
+                itm.name.find(clean) != std::string::npos);
     }
 
     // Compute Precision matching
