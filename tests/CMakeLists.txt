@@ -44,6 +44,17 @@ add_test(NAME KernelPath COMMAND gpubench_tests --filter=KernelPath)
 add_test(NAME PixelFill COMMAND gpubench_tests --filter=PixelFill)
 add_test(NAME AllTests COMMAND gpubench_tests)
 
+set_tests_properties(
+    DeviceDatabase
+    JsonSerialization
+    MathAndParity
+    BlockSuballocator
+    KernelPath
+    PixelFill
+    AllTests
+    PROPERTIES WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+
 add_custom_target(check
     COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure
     DEPENDS gpubench_tests

@@ -61,6 +61,13 @@ TEST_CASE(PixelFill, ShaderArtifactsExist) {
                     std::filesystem::exists(kp / "vulkan" / "pixel_fill.vert.spv");
   bool fragExists = std::filesystem::exists(kp / "vulkan" / "pixel_fill.frag") ||
                     std::filesystem::exists(kp / "vulkan" / "pixel_fill.frag.spv");
+  if (!vertExists || !fragExists) {
+    std::filesystem::path kp_up = kp.parent_path() / "kernels";
+    vertExists = vertExists || std::filesystem::exists(kp_up / "vulkan" / "pixel_fill.vert") ||
+                               std::filesystem::exists(kp_up / "vulkan" / "pixel_fill.vert.spv");
+    fragExists = fragExists || std::filesystem::exists(kp_up / "vulkan" / "pixel_fill.frag") ||
+                               std::filesystem::exists(kp_up / "vulkan" / "pixel_fill.frag.spv");
+  }
   ASSERT_TRUE(vertExists);
   ASSERT_TRUE(fragExists);
 }

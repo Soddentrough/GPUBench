@@ -86,6 +86,14 @@ std::string KernelPath::find() {
     if (std::filesystem::is_directory(exe_parent_kernels)) {
       return exe_parent_kernels.string();
     }
+
+    // Look for multi-config build tree (e.g. build/tests/Release -> build/kernels)
+    std::filesystem::path exe_grandparent_kernels =
+        exe_dir / std::filesystem::path("..") / std::filesystem::path("..") /
+        std::filesystem::path("kernels");
+    if (std::filesystem::is_directory(exe_grandparent_kernels)) {
+      return exe_grandparent_kernels.string();
+    }
   }
 
   // 3. Check installed location from compile-time prefix
@@ -102,6 +110,12 @@ std::string KernelPath::find() {
   // 4. Check development location (fallback for running from the build tree)
   if (std::filesystem::is_directory(dev_path)) {
     return dev_path.string();
+  }
+
+  std::filesystem::path parent_dev_path =
+      std::filesystem::path("..") / std::filesystem::path("kernels");
+  if (std::filesystem::is_directory(parent_dev_path)) {
+    return parent_dev_path.string();
   }
 
   // 5. Check relative install locations (CWD based - fallback)
