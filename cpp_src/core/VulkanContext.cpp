@@ -2,6 +2,7 @@
 #include "DeviceDatabase.h"
 #include "utils/ShaderCache.h"
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <fstream>
 #include <iostream>
@@ -92,6 +93,10 @@ VulkanContext::~VulkanContext() {
   try {
     destroyHeadlessSwapchain();
   } catch (...) {
+  }
+  if (perfQueryPool != VK_NULL_HANDLE && device != VK_NULL_HANDLE) {
+    vkDestroyQueryPool(device, perfQueryPool, nullptr);
+    perfQueryPool = VK_NULL_HANDLE;
   }
   if (timestampQueryPool != VK_NULL_HANDLE && device != VK_NULL_HANDLE) {
     vkDestroyQueryPool(device, timestampQueryPool, nullptr);
@@ -420,6 +425,7 @@ const std::vector<DeviceInfo> &VulkanContext::getDevices() const {
 #endif
       info.workGraphsSupported = hasExt("VK_AMDX_shader_enqueue") || hasExt("VK_KHR_work_graphs");
       info.dgcSupported = hasExt("VK_EXT_device_generated_commands");
+      info.performanceQuerySupported = hasExt(VK_KHR_PERFORMANCE_QUERY_EXTENSION_NAME);
 
       DeviceDatabase::enrichDeviceInfo(info);
 
@@ -583,6 +589,7 @@ DeviceInfo VulkanContext::getCurrentDeviceInfo() const {
   info.workGraphsSupported = hasExt("VK_AMDX_shader_enqueue") || hasExt("VK_KHR_work_graphs");
   info.dgcSupported = dgcSupported;
 
+  info.performanceQuerySupported = performanceQuerySupported;
   DeviceDatabase::enrichDeviceInfo(info);
   return info;
 }
@@ -802,6 +809,11 @@ void VulkanContext::createDevice() {
   if (hasExt(VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME)) {
       *currentPNext = &sync2Features; currentPNext = &sync2Features.pNext;
   }
+  VkPhysicalDevicePerformanceQueryFeaturesKHR perfQueryFeatures{
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PERFORMANCE_QUERY_FEATURES_KHR, nullptr, VK_FALSE};
+  if (hasExt(VK_KHR_PERFORMANCE_QUERY_EXTENSION_NAME)) {
+      *currentPNext = &perfQueryFeatures; currentPNext = &perfQueryFeatures.pNext;
+  }
   *currentPNext = &hostQueryResetFeatures; currentPNext = &hostQueryResetFeatures.pNext;
   *currentPNext = nullptr;
 
@@ -827,6 +839,7 @@ void VulkanContext::createDevice() {
       VK_KHR_SWAPCHAIN_EXTENSION_NAME,
       VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME,
       VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME,
+      VK_KHR_PERFORMANCE_QUERY_EXTENSION_NAME,
       "VK_KHR_maintenance5",
       "VK_EXT_shader_float8",
       "VK_KHR_shader_float_controls2",
@@ -899,6 +912,83 @@ void VulkanContext::createDevice() {
             device, "vkGetPipelineExecutableInternalRepresentationsKHR");
     if (!vkGetPipelineExecutablePropertiesKHR_ptr || !vkGetPipelineExecutableStatisticsKHR_ptr) {
       pipelineExecutablePropertiesSupported = false;
+    }
+  }
+
+  performanceQuerySupported = hasExt(VK_KHR_PERFORMANCE_QUERY_EXTENSION_NAME) &&
+                              (perfQueryFeatures.performanceCounterQueryPools == VK_TRUE);
+  performanceQueryEnabled = false;
+  perfQueryPool = VK_NULL_HANDLE;
+  perfQuerySelectedIndices.clear();
+  perfCountersInfo.clear();
+  perfCounterDescriptions.clear();
+
+  if (performanceQuerySupported) {
+    pfnEnumerateQueueFamilyPerformanceQueryCountersKHR_ptr =
+        (PFN_vkEnumeratePhysicalDeviceQueueFamilyPerformanceQueryCountersKHR)
+            vkGetInstanceProcAddr(instance, "vkEnumeratePhysicalDeviceQueueFamilyPerformanceQueryCountersKHR");
+    pfnGetQueueFamilyPerformanceQueryPassesKHR_ptr =
+        (PFN_vkGetPhysicalDeviceQueueFamilyPerformanceQueryPassesKHR)
+            vkGetInstanceProcAddr(instance, "vkGetPhysicalDeviceQueueFamilyPerformanceQueryPassesKHR");
+    pfnAcquireProfilingLockKHR_ptr =
+        (PFN_vkAcquireProfilingLockKHR)vkGetDeviceProcAddr(device, "vkAcquireProfilingLockKHR");
+    pfnReleaseProfilingLockKHR_ptr =
+        (PFN_vkReleaseProfilingLockKHR)vkGetDeviceProcAddr(device, "vkReleaseProfilingLockKHR");
+
+    if (pfnEnumerateQueueFamilyPerformanceQueryCountersKHR_ptr &&
+        pfnGetQueueFamilyPerformanceQueryPassesKHR_ptr &&
+        pfnAcquireProfilingLockKHR_ptr &&
+        pfnReleaseProfilingLockKHR_ptr) {
+      uint32_t counterCount = 0;
+      pfnEnumerateQueueFamilyPerformanceQueryCountersKHR_ptr(
+          physicalDevice, computeQueueFamilyIndex, &counterCount, nullptr, nullptr);
+      if (counterCount > 0) {
+        perfCountersInfo.resize(counterCount);
+        perfCounterDescriptions.resize(counterCount);
+        for (uint32_t c = 0; c < counterCount; ++c) {
+          perfCountersInfo[c].sType = VK_STRUCTURE_TYPE_PERFORMANCE_COUNTER_KHR;
+          perfCounterDescriptions[c].sType = VK_STRUCTURE_TYPE_PERFORMANCE_COUNTER_DESCRIPTION_KHR;
+        }
+        pfnEnumerateQueueFamilyPerformanceQueryCountersKHR_ptr(
+            physicalDevice, computeQueueFamilyIndex, &counterCount,
+            perfCountersInfo.data(), perfCounterDescriptions.data());
+
+        for (uint32_t c = 0; c < counterCount; ++c) {
+          perfQuerySelectedIndices.push_back(c);
+          VkQueryPoolPerformanceCreateInfoKHR testPerfCI{VK_STRUCTURE_TYPE_QUERY_POOL_PERFORMANCE_CREATE_INFO_KHR};
+          testPerfCI.queueFamilyIndex = computeQueueFamilyIndex;
+          testPerfCI.counterIndexCount = static_cast<uint32_t>(perfQuerySelectedIndices.size());
+          testPerfCI.pCounterIndices = perfQuerySelectedIndices.data();
+          uint32_t passes = 0;
+          pfnGetQueueFamilyPerformanceQueryPassesKHR_ptr(physicalDevice, &testPerfCI, &passes);
+          if (passes > 1) {
+            perfQuerySelectedIndices.pop_back();
+          }
+        }
+
+        if (!perfQuerySelectedIndices.empty()) {
+          VkQueryPoolPerformanceCreateInfoKHR perfPoolCI{VK_STRUCTURE_TYPE_QUERY_POOL_PERFORMANCE_CREATE_INFO_KHR};
+          perfPoolCI.queueFamilyIndex = computeQueueFamilyIndex;
+          perfPoolCI.counterIndexCount = static_cast<uint32_t>(perfQuerySelectedIndices.size());
+          perfPoolCI.pCounterIndices = perfQuerySelectedIndices.data();
+
+          VkQueryPoolCreateInfo poolCI{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
+          poolCI.pNext = &perfPoolCI;
+          poolCI.queryType = VK_QUERY_TYPE_PERFORMANCE_QUERY_KHR;
+          poolCI.queryCount = 1;
+
+          if (vkCreateQueryPool(device, &poolCI, nullptr, &perfQueryPool) == VK_SUCCESS) {
+            performanceQueryEnabled = true;
+            if (verbose) {
+              std::cout << " [VK_KHR_performance_query] Initialized performance query pool with "
+                        << perfQuerySelectedIndices.size() << " 1-pass counters (out of "
+                        << counterCount << " available)" << std::endl;
+            }
+          }
+        }
+      }
+    } else {
+      performanceQuerySupported = false;
     }
   }
 
@@ -1086,6 +1176,135 @@ double VulkanContext::stopTiming() {
     return elapsedNs * 1e-6; // nanoseconds -> milliseconds
   }
   return 0.0;
+}
+
+void VulkanContext::startPerformanceQuery() {
+  if (!performanceQueryEnabled || perfQueryPool == VK_NULL_HANDLE || !pfnAcquireProfilingLockKHR_ptr) {
+    return;
+  }
+  if (isPerfQueryActive) return;
+
+  waitIdle();
+  VkAcquireProfilingLockInfoKHR lockInfo{VK_STRUCTURE_TYPE_ACQUIRE_PROFILING_LOCK_INFO_KHR};
+  lockInfo.timeout = 2000000000ULL; // 2 seconds
+  VkResult lockRes = pfnAcquireProfilingLockKHR_ptr(device, &lockInfo);
+  if (lockRes != VK_SUCCESS) {
+    if (verbose) {
+      std::cerr << "Warning: vkAcquireProfilingLockKHR returned " << lockRes << std::endl;
+    }
+    return;
+  }
+
+  isPerfQueryActive = true;
+  perfQueryRecording = false;
+  perfQuerySubmitted = false;
+  perfQueryNeedsSubmitInfo = false;
+}
+
+HardwarePerformanceCounters VulkanContext::stopPerformanceQuery() {
+  if (!isPerfQueryActive) {
+    return HardwarePerformanceCounters{};
+  }
+  waitIdle();
+  isPerfQueryActive = false;
+
+  HardwarePerformanceCounters counters;
+  counters.available = false;
+
+  if (perfQuerySubmitted && perfQueryPool != VK_NULL_HANDLE) {
+    std::vector<VkPerformanceCounterResultKHR> results(perfQuerySelectedIndices.size());
+    VkResult qRes = vkGetQueryPoolResults(
+        device, perfQueryPool, 0, 1,
+        results.size() * sizeof(VkPerformanceCounterResultKHR),
+        results.data(),
+        sizeof(VkPerformanceCounterResultKHR) * perfQuerySelectedIndices.size(),
+        VK_QUERY_RESULT_WAIT_BIT);
+    if (qRes == VK_SUCCESS) {
+      counters.available = true;
+      for (size_t i = 0; i < perfQuerySelectedIndices.size(); ++i) {
+        uint32_t cIdx = perfQuerySelectedIndices[i];
+        const auto &desc = perfCounterDescriptions[cIdx];
+        const auto &info = perfCountersInfo[cIdx];
+        double val = 0.0;
+        if (info.storage == VK_PERFORMANCE_COUNTER_STORAGE_FLOAT32_KHR) {
+          val = static_cast<double>(results[i].float32);
+        } else if (info.storage == VK_PERFORMANCE_COUNTER_STORAGE_FLOAT64_KHR) {
+          val = results[i].float64;
+        } else if (info.storage == VK_PERFORMANCE_COUNTER_STORAGE_UINT32_KHR) {
+          val = static_cast<double>(results[i].uint32);
+        } else if (info.storage == VK_PERFORMANCE_COUNTER_STORAGE_UINT64_KHR) {
+          val = static_cast<double>(results[i].uint64);
+        } else if (info.storage == VK_PERFORMANCE_COUNTER_STORAGE_INT32_KHR) {
+          val = static_cast<double>(results[i].int32);
+        } else if (info.storage == VK_PERFORMANCE_COUNTER_STORAGE_INT64_KHR) {
+          val = static_cast<double>(results[i].int64);
+        }
+
+        std::string name(desc.name);
+        counters.rawCounters[name] = val;
+
+        if (name == "GPU active cycles") {
+          counters.gpuActiveCycles = static_cast<uint64_t>(val);
+        } else if (name == "Waves") {
+          counters.waves = static_cast<uint64_t>(val);
+        } else if (name == "VALU Instructions") {
+          counters.valuInstructions = static_cast<uint64_t>(val);
+        } else if (name == "SALU Instructions") {
+          counters.saluInstructions = static_cast<uint64_t>(val);
+        } else if (name == "VMEM Load Instructions") {
+          counters.vmemLoadInstructions = static_cast<uint64_t>(val);
+        } else if (name == "SMEM Load Instructions") {
+          counters.smemLoadInstructions = static_cast<uint64_t>(val);
+        } else if (name == "VMEM Store Instructions") {
+          counters.vmemStoreInstructions = static_cast<uint64_t>(val);
+        } else if (name == "LDS Instructions") {
+          counters.ldsInstructions = static_cast<uint64_t>(val);
+        } else if (name == "GDS Instructions") {
+          counters.gdsInstructions = static_cast<uint64_t>(val);
+        } else if (name == "VALU Busy") {
+          counters.valuBusyPct = static_cast<float>(val);
+        } else if (name == "SALU Busy") {
+          counters.saluBusyPct = static_cast<float>(val);
+        } else if (name == "VRAM read size") {
+          counters.vramReadBytes = static_cast<uint64_t>(val);
+        } else if (name == "VRAM write size") {
+          counters.vramWriteBytes = static_cast<uint64_t>(val);
+        } else if (name == "L0 cache hit ratio") {
+          counters.l0CacheHitRatio = !std::isnan(val) ? static_cast<float>(val) : 0.0f;
+        } else if (name == "L1 cache hit ratio") {
+          counters.l1CacheHitRatio = !std::isnan(val) ? static_cast<float>(val) : 0.0f;
+        } else if (name == "L2 cache hit ratio") {
+          counters.l2CacheHitRatio = !std::isnan(val) ? static_cast<float>(val) : 0.0f;
+        }
+      }
+    }
+  }
+
+  if (pfnReleaseProfilingLockKHR_ptr) {
+    pfnReleaseProfilingLockKHR_ptr(device);
+  }
+  perfQuerySubmitted = false;
+  perfQueryRecording = false;
+  perfQueryNeedsSubmitInfo = false;
+  lastPerfCounters = counters;
+  return counters;
+}
+
+void VulkanContext::maybeBeginPerfQuery(VkCommandBuffer cmd) {
+  if (isPerfQueryActive && !perfQueryRecording && !perfQuerySubmitted && perfQueryPool != VK_NULL_HANDLE) {
+    vkCmdResetQueryPool(cmd, perfQueryPool, 0, 1);
+    vkCmdBeginQuery(cmd, perfQueryPool, 0, 0);
+    perfQueryRecording = true;
+    perfQueryNeedsSubmitInfo = true;
+  }
+}
+
+void VulkanContext::maybeEndPerfQuery(VkCommandBuffer cmd) {
+  if (isPerfQueryActive && perfQueryRecording && perfQueryPool != VK_NULL_HANDLE) {
+    vkCmdEndQuery(cmd, perfQueryPool, 0);
+    perfQueryRecording = false;
+    perfQuerySubmitted = true;
+  }
 }
 
 uint32_t VulkanContext::findMemoryType(uint32_t typeFilter,
@@ -2040,12 +2259,21 @@ void VulkanContext::endBatch() {
   if (!m_inBatch) return;
   if (m_batchCmdRecording) {
     InFlightFrame &frame = inFlightFrames[currentFrameIndex];
+    maybeEndPerfQuery(frame.commandBuffer);
     vkEndCommandBuffer(frame.commandBuffer);
 
     VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submitInfo.commandBufferCount = 1;
     submitInfo.pCommandBuffers = &frame.commandBuffer;
+
+    VkPerformanceQuerySubmitInfoKHR perfSubmitInfo{VK_STRUCTURE_TYPE_PERFORMANCE_QUERY_SUBMIT_INFO_KHR};
+    perfSubmitInfo.counterPassIndex = 0;
+    if (perfQueryNeedsSubmitInfo) {
+      perfSubmitInfo.pNext = submitInfo.pNext;
+      submitInfo.pNext = &perfSubmitInfo;
+      perfQueryNeedsSubmitInfo = false;
+    }
 
     VkResult submitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, frame.fence);
     if (submitRes != VK_SUCCESS) {
@@ -2092,6 +2320,7 @@ void VulkanContext::dispatch(ComputeKernel kernel, uint32_t grid_x,
       beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
       beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
       vkBeginCommandBuffer(frame.commandBuffer, &beginInfo);
+      maybeBeginPerfQuery(frame.commandBuffer);
       m_batchCmdRecording = true;
       m_batchDispatchCount = 0;
     }
@@ -2170,6 +2399,7 @@ void VulkanContext::dispatch(ComputeKernel kernel, uint32_t grid_x,
   beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
   vkBeginCommandBuffer(frame.commandBuffer, &beginInfo);
+  maybeBeginPerfQuery(frame.commandBuffer);
   VkPipelineBindPoint bindPoint = vulkanKernel->isRTPipeline
                                       ? VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR
                                       : VK_PIPELINE_BIND_POINT_COMPUTE;
@@ -2208,12 +2438,21 @@ void VulkanContext::dispatch(ComputeKernel kernel, uint32_t grid_x,
     vkCmdDispatch(frame.commandBuffer, grid_x, grid_y, grid_z);
   }
 
+  maybeEndPerfQuery(frame.commandBuffer);
   vkEndCommandBuffer(frame.commandBuffer);
 
   VkSubmitInfo submitInfo{};
   submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
   submitInfo.commandBufferCount = 1;
   submitInfo.pCommandBuffers = &frame.commandBuffer;
+
+  VkPerformanceQuerySubmitInfoKHR perfSubmitInfo{VK_STRUCTURE_TYPE_PERFORMANCE_QUERY_SUBMIT_INFO_KHR};
+  perfSubmitInfo.counterPassIndex = 0;
+  if (perfQueryNeedsSubmitInfo) {
+    perfSubmitInfo.pNext = submitInfo.pNext;
+    submitInfo.pNext = &perfSubmitInfo;
+    perfQueryNeedsSubmitInfo = false;
+  }
 
   VkResult submitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, frame.fence);
   if (submitRes != VK_SUCCESS) {
@@ -2334,6 +2573,7 @@ void VulkanContext::dispatchIndirect(ComputeKernel kernel_handle,
   beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
   beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   vkBeginCommandBuffer(frame.commandBuffer, &beginInfo);
+  maybeBeginPerfQuery(frame.commandBuffer);
 
   vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
                     vulkanKernel->pipeline);
@@ -2351,12 +2591,21 @@ void VulkanContext::dispatchIndirect(ComputeKernel kernel_handle,
   VkBuffer vkIndirect = getVkBuffer(indirectBuffer);
   vkCmdDispatchIndirect(frame.commandBuffer, vkIndirect, offset);
 
+  maybeEndPerfQuery(frame.commandBuffer);
   vkEndCommandBuffer(frame.commandBuffer);
 
   VkSubmitInfo submitInfo{};
   submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
   submitInfo.commandBufferCount = 1;
   submitInfo.pCommandBuffers = &frame.commandBuffer;
+
+  VkPerformanceQuerySubmitInfoKHR perfSubmitInfo{VK_STRUCTURE_TYPE_PERFORMANCE_QUERY_SUBMIT_INFO_KHR};
+  perfSubmitInfo.counterPassIndex = 0;
+  if (perfQueryNeedsSubmitInfo) {
+    perfSubmitInfo.pNext = submitInfo.pNext;
+    submitInfo.pNext = &perfSubmitInfo;
+    perfQueryNeedsSubmitInfo = false;
+  }
 
   VkResult indSubmitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, frame.fence);
   if (indSubmitRes != VK_SUCCESS) {
@@ -2397,6 +2646,7 @@ void VulkanContext::dispatchIndirectSequence(
   beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
   beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   vkBeginCommandBuffer(frame.commandBuffer, &beginInfo);
+  maybeBeginPerfQuery(frame.commandBuffer);
 
   vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
                     vulkanKernel->pipeline);
@@ -2427,12 +2677,21 @@ void VulkanContext::dispatchIndirectSequence(
     vkCmdDispatchIndirect(frame.commandBuffer, vkIndirect, entry.offset);
   }
 
+  maybeEndPerfQuery(frame.commandBuffer);
   vkEndCommandBuffer(frame.commandBuffer);
 
   VkSubmitInfo submitInfo{};
   submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
   submitInfo.commandBufferCount = 1;
   submitInfo.pCommandBuffers = &frame.commandBuffer;
+
+  VkPerformanceQuerySubmitInfoKHR perfSubmitInfo{VK_STRUCTURE_TYPE_PERFORMANCE_QUERY_SUBMIT_INFO_KHR};
+  perfSubmitInfo.counterPassIndex = 0;
+  if (perfQueryNeedsSubmitInfo) {
+    perfSubmitInfo.pNext = submitInfo.pNext;
+    submitInfo.pNext = &perfSubmitInfo;
+    perfQueryNeedsSubmitInfo = false;
+  }
 
   VkResult indSeqSubmitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, frame.fence);
   if (indSeqSubmitRes != VK_SUCCESS) {
@@ -2480,6 +2739,7 @@ void VulkanContext::dispatchWorkListSequence(
   beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
   beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   vkBeginCommandBuffer(frame.commandBuffer, &beginInfo);
+  maybeBeginPerfQuery(frame.commandBuffer);
 
   // 1. Reset queue counters & indirect commands on compute queue (zero transfer bubbles)
   if (resetKernel_handle) {
@@ -2711,12 +2971,21 @@ void VulkanContext::dispatchWorkListSequence(
     }
   }
 
+  maybeEndPerfQuery(frame.commandBuffer);
   vkEndCommandBuffer(frame.commandBuffer);
 
   VkSubmitInfo submitInfo{};
   submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
   submitInfo.commandBufferCount = 1;
   submitInfo.pCommandBuffers = &frame.commandBuffer;
+
+  VkPerformanceQuerySubmitInfoKHR perfSubmitInfo{VK_STRUCTURE_TYPE_PERFORMANCE_QUERY_SUBMIT_INFO_KHR};
+  perfSubmitInfo.counterPassIndex = 0;
+  if (perfQueryNeedsSubmitInfo) {
+    perfSubmitInfo.pNext = submitInfo.pNext;
+    submitInfo.pNext = &perfSubmitInfo;
+    perfQueryNeedsSubmitInfo = false;
+  }
 
   VkResult wlSubmitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, frame.fence);
   if (wlSubmitRes != VK_SUCCESS) {
@@ -2757,6 +3026,7 @@ void VulkanContext::dispatchRayTracingIndirect(ComputeKernel kernel_handle,
   beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
   beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   vkBeginCommandBuffer(frame.commandBuffer, &beginInfo);
+  maybeBeginPerfQuery(frame.commandBuffer);
 
   vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
                     vulkanKernel->pipeline);
@@ -2783,12 +3053,21 @@ void VulkanContext::dispatchRayTracingIndirect(ComputeKernel kernel_handle,
     pfnTraceRaysIndirect2(frame.commandBuffer, indirectAddress);
   }
 
+  maybeEndPerfQuery(frame.commandBuffer);
   vkEndCommandBuffer(frame.commandBuffer);
 
   VkSubmitInfo submitInfo{};
   submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
   submitInfo.commandBufferCount = 1;
   submitInfo.pCommandBuffers = &frame.commandBuffer;
+
+  VkPerformanceQuerySubmitInfoKHR perfSubmitInfo{VK_STRUCTURE_TYPE_PERFORMANCE_QUERY_SUBMIT_INFO_KHR};
+  perfSubmitInfo.counterPassIndex = 0;
+  if (perfQueryNeedsSubmitInfo) {
+    perfSubmitInfo.pNext = submitInfo.pNext;
+    submitInfo.pNext = &perfSubmitInfo;
+    perfQueryNeedsSubmitInfo = false;
+  }
 
   VkResult rtSubmitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, frame.fence);
   if (rtSubmitRes != VK_SUCCESS) {
@@ -3408,6 +3687,7 @@ void VulkanContext::dispatchDGCWorkListSequence(
   VkCommandBufferBeginInfo beginInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
   beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   vkBeginCommandBuffer(frame.commandBuffer, &beginInfo);
+  maybeBeginPerfQuery(frame.commandBuffer);
 
   // 1. Reset
   if (resetKernel_handle) {
@@ -3492,11 +3772,20 @@ void VulkanContext::dispatchDGCWorkListSequence(
 
   vkCmdExecuteGeneratedCommandsEXT_ptr(frame.commandBuffer, VK_FALSE, &genCmds);
 
+  maybeEndPerfQuery(frame.commandBuffer);
   vkEndCommandBuffer(frame.commandBuffer);
 
   VkSubmitInfo submitInfo{VK_STRUCTURE_TYPE_SUBMIT_INFO};
   submitInfo.commandBufferCount = 1;
   submitInfo.pCommandBuffers = &frame.commandBuffer;
+
+  VkPerformanceQuerySubmitInfoKHR perfSubmitInfo{VK_STRUCTURE_TYPE_PERFORMANCE_QUERY_SUBMIT_INFO_KHR};
+  perfSubmitInfo.counterPassIndex = 0;
+  if (perfQueryNeedsSubmitInfo) {
+    perfSubmitInfo.pNext = submitInfo.pNext;
+    submitInfo.pNext = &perfSubmitInfo;
+    perfQueryNeedsSubmitInfo = false;
+  }
 
   VkResult submitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, frame.fence);
   if (submitRes != VK_SUCCESS) {
@@ -3532,6 +3821,7 @@ void VulkanContext::dispatchDGCSequence(ComputeKernel kernel_handle,
   VkCommandBufferBeginInfo beginInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
   beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   vkBeginCommandBuffer(frame.commandBuffer, &beginInfo);
+  maybeBeginPerfQuery(frame.commandBuffer);
 
   vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, kernel->pipeline);
   vkCmdBindDescriptorSets(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
@@ -3558,11 +3848,20 @@ void VulkanContext::dispatchDGCSequence(ComputeKernel kernel_handle,
 
   vkCmdExecuteGeneratedCommandsEXT_ptr(frame.commandBuffer, VK_FALSE, &genCmds);
 
+  maybeEndPerfQuery(frame.commandBuffer);
   vkEndCommandBuffer(frame.commandBuffer);
 
   VkSubmitInfo submitInfo{VK_STRUCTURE_TYPE_SUBMIT_INFO};
   submitInfo.commandBufferCount = 1;
   submitInfo.pCommandBuffers = &frame.commandBuffer;
+
+  VkPerformanceQuerySubmitInfoKHR perfSubmitInfo{VK_STRUCTURE_TYPE_PERFORMANCE_QUERY_SUBMIT_INFO_KHR};
+  perfSubmitInfo.counterPassIndex = 0;
+  if (perfQueryNeedsSubmitInfo) {
+    perfSubmitInfo.pNext = submitInfo.pNext;
+    submitInfo.pNext = &perfSubmitInfo;
+    perfQueryNeedsSubmitInfo = false;
+  }
 
   VkResult submitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, frame.fence);
   if (submitRes != VK_SUCCESS) {

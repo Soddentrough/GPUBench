@@ -1024,6 +1024,10 @@ void ResultFormatter::print() {
                      ", " + std::to_string(r.maxWavesPerSimd) + " waves/SIMD" +
                      (r.scratchSizeBytes > 0 ? (", " + std::to_string(r.scratchSizeBytes) + " B spill") : "");
         }
+        if (r.hasPerfQueryTelemetry && r.perfCounters.waves > 0) {
+          telemStr += " [HW: " + std::to_string(r.perfCounters.waves) + " waves, " +
+                      formatDouble(r.perfCounters.valuBusyPct, 1) + "% VALU busy]";
+        }
         std::cout << BOLD << CYAN << "  │ " << RESET << " • " << std::left << std::setw(8) << backend << ": "
                   << BOLD << GREEN << formatDouble(val, 2) << " " << r.metric << RESET
                   << DIM << telemStr << " (" << (!r.compilerTarget.empty() ? r.compilerTarget : backend) << ")" << RESET << "\n";
@@ -1163,6 +1167,57 @@ void ResultFormatter::print() {
       printCardRow(row.str());
     }
 
+    std::cout << BOLD << CYAN << "  ╰─" << repeatUtf8("─", cardBoxWidth - 3) << "╯" << RESET << "\n";
+  }
+
+  // 7. Hardware Performance Query Telemetry (VK_KHR_performance_query / Optimization O-1)
+  bool hasAnyPerfQuery = false;
+  for (const auto &r : results) {
+    if (r.hasPerfQueryTelemetry && r.perfCounters.available) {
+      hasAnyPerfQuery = true;
+      break;
+    }
+  }
+
+  if (hasAnyPerfQuery) {
+    std::cout << "\n";
+    std::string cardTitle = " Hardware Performance Query Telemetry (VK_KHR_performance_query / Optimization O-1) ";
+    size_t dashCount = (cardBoxWidth > cardTitle.length() + 3)
+                           ? (cardBoxWidth - 3 - cardTitle.length())
+                           : 10;
+
+    std::cout << BOLD << CYAN << "  ╭─" << RESET << BOLD << cardTitle << RESET
+              << BOLD << CYAN << repeatUtf8("─", dashCount) << "╮" << RESET << "\n";
+
+    auto printPerfRow = [&](const std::string &content) {
+      size_t visLen = visualLength(content);
+      size_t pad = (cardBoxWidth > visLen + 4) ? (cardBoxWidth - 4 - visLen) : 0;
+      std::cout << BOLD << CYAN << "  │ " << RESET << content << std::string(pad, ' ')
+                << BOLD << CYAN << " │" << RESET << "\n";
+    };
+
+    for (const auto &r : results) {
+      if (r.hasPerfQueryTelemetry && r.perfCounters.available) {
+        std::string line1 = BOLD + r.benchmarkName + RESET + " (" + r.backendName + "):";
+        printPerfRow(line1);
+
+        std::string cyclesWaves = "  • GPU Active Cycles: " + BOLD + std::to_string(r.perfCounters.gpuActiveCycles) + RESET +
+                                  " | Waves: " + BOLD + std::to_string(r.perfCounters.waves) + RESET;
+        printPerfRow(cyclesWaves);
+
+        std::string instRow = "  • VALU Busy: " + BOLD + GREEN + formatDouble(r.perfCounters.valuBusyPct, 1) + "%" + RESET +
+                              " | SALU Busy: " + BOLD + formatDouble(r.perfCounters.saluBusyPct, 1) + "%" + RESET +
+                              " | VALU Insts: " + formatDouble(static_cast<double>(r.perfCounters.valuInstructions) / 1e6, 2) + " M";
+        printPerfRow(instRow);
+
+        if (r.perfCounters.vramReadBytes > 0 || r.perfCounters.l0CacheHitRatio > 0.0f) {
+          std::string memRow = "  • VRAM Read: " + BOLD + formatDouble(static_cast<double>(r.perfCounters.vramReadBytes) / (1024.0 * 1024.0), 2) + " MB" + RESET +
+                               " | L0 Hit: " + BOLD + formatDouble(r.perfCounters.l0CacheHitRatio, 1) + "%" + RESET +
+                               " | L1 Hit: " + BOLD + formatDouble(r.perfCounters.l1CacheHitRatio, 1) + "%" + RESET;
+          printPerfRow(memRow);
+        }
+      }
+    }
     std::cout << BOLD << CYAN << "  ╰─" << repeatUtf8("─", cardBoxWidth - 3) << "╯" << RESET << "\n";
   }
 
@@ -1822,6 +1877,7 @@ std::string resultsToJson(const std::vector<ResultData> &results) {
     out += "      \"float16_supported\": " + std::string(dp.float16Supported ? "true" : "false") + ",\n";
     const auto &prof = DeviceDatabase::lookup(dp.vendorID, dp.deviceID, dp.deviceName);
     out += "      \"int8_supported\": " + std::string(dp.int8Supported ? "true" : "false") + ",\n";
+    out += "      \"performance_query_supported\": " + std::string(dp.performanceQuerySupported ? "true" : "false") + ",\n";
     out += "      \"architecture\": \"" + jsonEscape(prof.archName) + "\",\n";
     out += "      \"memory_type\": \"" + jsonEscape(prof.memoryType) + "\"";
     if (prof.theoreticalFp32Tflops > 0.0) {
@@ -1961,6 +2017,32 @@ std::string resultsToJson(const std::vector<ResultData> &results) {
       out += "        \"joules_per_unit\": " + std::to_string(r.joulesPerUnit) + ",\n";
       out += "        \"unit_per_watt\": " + std::to_string(r.unitPerWatt) + ",\n";
       out += "        \"efficiency_unit\": \"" + jsonEscape(r.efficiencyUnit) + "\"\n";
+      out += "      },\n";
+    }
+    if (r.hasPerfQueryTelemetry) {
+      out += "      \"performance_query\": {\n";
+      out += "        \"available\": true,\n";
+      out += "        \"gpu_active_cycles\": " + std::to_string(r.perfCounters.gpuActiveCycles) + ",\n";
+      out += "        \"waves\": " + std::to_string(r.perfCounters.waves) + ",\n";
+      out += "        \"valu_instructions\": " + std::to_string(r.perfCounters.valuInstructions) + ",\n";
+      out += "        \"salu_instructions\": " + std::to_string(r.perfCounters.saluInstructions) + ",\n";
+      out += "        \"vmem_load_instructions\": " + std::to_string(r.perfCounters.vmemLoadInstructions) + ",\n";
+      out += "        \"smem_load_instructions\": " + std::to_string(r.perfCounters.smemLoadInstructions) + ",\n";
+      out += "        \"vmem_store_instructions\": " + std::to_string(r.perfCounters.vmemStoreInstructions) + ",\n";
+      out += "        \"lds_instructions\": " + std::to_string(r.perfCounters.ldsInstructions) + ",\n";
+      out += "        \"valu_busy_pct\": " + std::to_string(r.perfCounters.valuBusyPct) + ",\n";
+      out += "        \"salu_busy_pct\": " + std::to_string(r.perfCounters.saluBusyPct) + ",\n";
+      out += "        \"vram_read_bytes\": " + std::to_string(r.perfCounters.vramReadBytes) + ",\n";
+      out += "        \"l0_cache_hit_ratio\": " + std::to_string(r.perfCounters.l0CacheHitRatio) + ",\n";
+      out += "        \"l1_cache_hit_ratio\": " + std::to_string(r.perfCounters.l1CacheHitRatio) + ",\n";
+      out += "        \"raw_counters\": {\n";
+      size_t rcIdx = 0;
+      for (const auto &[cName, cVal] : r.perfCounters.rawCounters) {
+        out += "          \"" + jsonEscape(cName) + "\": " + std::to_string(cVal) +
+               (rcIdx + 1 < r.perfCounters.rawCounters.size() ? ",\n" : "\n");
+        rcIdx++;
+      }
+      out += "        }\n";
       out += "      },\n";
     }
     if (r.time_ms == -3.0) {

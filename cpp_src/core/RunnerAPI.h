@@ -42,6 +42,7 @@ struct DeviceProfile {
     bool cooperativeMatrixSupported;
     bool float16Supported;
     bool int8Supported;
+    bool performanceQuerySupported = false;
 };
 
 std::vector<std::string> GetAvailableHardwareAPI();

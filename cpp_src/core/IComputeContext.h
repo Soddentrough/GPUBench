@@ -2,6 +2,7 @@
 
 #include "ComputeBackend.h"
 #include <cstdint>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -56,6 +57,7 @@ struct DeviceInfo {
   bool serSupported = false;
   bool dgcSupported = false;
   bool workGraphsSupported = false;
+  bool performanceQuerySupported = false;
   uint32_t vendorID = 0;
   uint32_t deviceID = 0;
   uint32_t apiVersion = 0;
@@ -84,6 +86,28 @@ struct KernelResourceUsage {
   std::string compilerNotes = ""; // e.g. "Mesa RADV (ACO)" or "ROCm LLVM (hipcc/hiprtc)"
 };
 
+// Hardware Performance Query Telemetry (VK_KHR_performance_query)
+struct HardwarePerformanceCounters {
+  bool available = false;
+  uint64_t gpuActiveCycles = 0;
+  uint64_t waves = 0;
+  uint64_t valuInstructions = 0;
+  uint64_t saluInstructions = 0;
+  uint64_t vmemLoadInstructions = 0;
+  uint64_t smemLoadInstructions = 0;
+  uint64_t vmemStoreInstructions = 0;
+  uint64_t ldsInstructions = 0;
+  uint64_t gdsInstructions = 0;
+  float valuBusyPct = 0.0f;
+  float saluBusyPct = 0.0f;
+  uint64_t vramReadBytes = 0;
+  uint64_t vramWriteBytes = 0;
+  float l0CacheHitRatio = 0.0f;
+  float l1CacheHitRatio = 0.0f;
+  float l2CacheHitRatio = 0.0f;
+  std::map<std::string, double> rawCounters;
+};
+
 class IComputeContext {
 public:
   virtual ~IComputeContext() = default;
@@ -110,6 +134,16 @@ public:
   }
   virtual KernelResourceUsage getLastKernelResourceUsage() const {
     return getKernelResourceUsage(lastDispatchedKernel);
+  }
+
+  // Hardware Performance Query (VK_KHR_performance_query)
+  virtual void startPerformanceQuery() {}
+  virtual HardwarePerformanceCounters stopPerformanceQuery() {
+    return HardwarePerformanceCounters{};
+  }
+  virtual bool hasPerformanceQuery() const { return false; }
+  virtual HardwarePerformanceCounters getLastPerformanceCounters() const {
+    return HardwarePerformanceCounters{};
   }
 
   // Buffer management

@@ -24,6 +24,7 @@
 #include "benchmarks/CacheLatencyCurveBench.h"
 #include "benchmarks/LdsBankConflictBench.h"
 #include "benchmarks/InShaderIndirectBench.h"
+#include <iomanip>
 
 static std::vector<int> g_targetConfigs;
 
@@ -1059,11 +1060,15 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
         uint32_t devIdx = context->getSelectedDeviceIndex();
         GpuTelemetryData powerStart = HardwareTelemetry::queryGpu(devIdx);
         float avgPowerWatts = 0.0f;
+        HardwarePerformanceCounters measuredPerfCounters;
 
         if (profileSnapshot) {
           bench->Run(i);
           context->waitIdle();
 
+          if (context->hasPerformanceQuery()) {
+            context->startPerformanceQuery();
+          }
           if (context->hasGpuTiming()) {
             context->startTiming();
           }
@@ -1084,6 +1089,9 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
             auto end = std::chrono::high_resolution_clock::now();
             total_time_ms =
                 std::chrono::duration<double, std::milli>(end - start).count();
+          }
+          if (context->hasPerformanceQuery()) {
+            measuredPerfCounters = context->stopPerformanceQuery();
           }
           total_invocations = 1;
           stat_min_ms = total_time_ms;
@@ -1173,6 +1181,10 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
           for (uint32_t s = 0; s < num_samples; ++s) {
             if (cancelToken && cancelToken->load()) break;
 
+            if (s == 0 && context->hasPerformanceQuery()) {
+              context->startPerformanceQuery();
+            }
+
             if (context->hasGpuTiming()) {
               context->startTiming();
             }
@@ -1204,6 +1216,10 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
               auto s_end = std::chrono::high_resolution_clock::now();
               sample_ms =
                   std::chrono::duration<double, std::milli>(s_end - s_start).count();
+            }
+
+            if (s == 0 && context->hasPerformanceQuery()) {
+              measuredPerfCounters = context->stopPerformanceQuery();
             }
 
             if (sample_ms > 0.0) {
@@ -1348,6 +1364,26 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
                       << (kUsage.codeSizeBytes > 0 ? (" | Code: " + std::to_string(kUsage.codeSizeBytes) + " B") : "")
                       << (kUsage.maxWavesPerSimd > 0 ? (" | Occupancy: " + std::to_string(kUsage.maxWavesPerSimd) + "/16 waves (" + std::to_string(static_cast<int>(kUsage.maxWavesPerSimd * 100.0 / 16.0)) + "%)") : "")
                       << " (" << kUsage.compilerNotes << ")"
+                      << std::endl;
+          }
+        }
+
+        if (measuredPerfCounters.available) {
+          result_data.hasPerfQueryTelemetry = true;
+          result_data.perfCounters = measuredPerfCounters;
+
+          if (verbose) {
+            std::cout << " [HARDWARE TELEMETRY VK_KHR_performance_query] Active Cycles: "
+                      << measuredPerfCounters.gpuActiveCycles
+                      << " | Waves: " << measuredPerfCounters.waves
+                      << " | VALU Insts: " << measuredPerfCounters.valuInstructions
+                      << " | SALU Insts: " << measuredPerfCounters.saluInstructions
+                      << " | VALU Busy: " << std::fixed << std::setprecision(1) << measuredPerfCounters.valuBusyPct << "%"
+                      << " | SALU Busy: " << measuredPerfCounters.saluBusyPct << "%"
+                      << " | VRAM Read: " << (static_cast<double>(measuredPerfCounters.vramReadBytes) / (1024.0 * 1024.0)) << " MB"
+                      << " | L0 Hit: " << measuredPerfCounters.l0CacheHitRatio << "%"
+                      << " | L1 Hit: " << measuredPerfCounters.l1CacheHitRatio << "%"
+                      << std::defaultfloat
                       << std::endl;
           }
         }

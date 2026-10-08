@@ -1,5 +1,6 @@
 #pragma once
 
+#include "IComputeContext.h"
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -57,6 +58,9 @@ struct ResultData {
   double joulesPerUnit = 0.0;
   double unitPerWatt = 0.0;
   std::string efficiencyUnit;
+  // Hardware Performance Query Telemetry (VK_KHR_performance_query)
+  bool hasPerfQueryTelemetry = false;
+  HardwarePerformanceCounters perfCounters;
 };
 
 struct ImportedRun;

@@ -216,6 +216,7 @@ std::vector<DeviceProfile> GetDeviceProfilesAPI() {
                         p.cooperativeMatrixSupported = dev.cooperativeMatrixSupport;
                         p.float16Supported = dev.fp16Support;
                         p.int8Supported = dev.int8Support;
+                        p.performanceQuerySupported = dev.performanceQuerySupported;
                         profiles.push_back(p);
                         i++;
                     }

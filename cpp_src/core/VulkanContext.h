@@ -135,6 +135,18 @@ public:
   }
   KernelResourceUsage getKernelResourceUsage(ComputeKernel kernel) const override;
 
+  bool isPerformanceQuerySupported() const {
+    return performanceQuerySupported;
+  }
+  bool hasPerformanceQuery() const override {
+    return performanceQueryEnabled;
+  }
+  void startPerformanceQuery() override;
+  HardwarePerformanceCounters stopPerformanceQuery() override;
+  HardwarePerformanceCounters getLastPerformanceCounters() const override {
+    return lastPerfCounters;
+  }
+
   struct IndirectBatchEntry {
     VkDeviceSize offset;
     std::vector<uint8_t> pushConstants;
@@ -383,6 +395,27 @@ private:
   PFN_vkDestroyIndirectExecutionSetEXT vkDestroyIndirectExecutionSetEXT_ptr = nullptr;
   PFN_vkUpdateIndirectExecutionSetPipelineEXT vkUpdateIndirectExecutionSetPipelineEXT_ptr = nullptr;
   PFN_vkGetBufferDeviceAddressKHR vkGetBufferDeviceAddressKHR_ptr = nullptr;
+
+  // VK_KHR_performance_query state and function pointers
+  bool performanceQuerySupported = false;
+  bool performanceQueryEnabled = false;
+  bool isPerfQueryActive = false;
+  bool perfQueryRecording = false;
+  bool perfQuerySubmitted = false;
+  bool perfQueryNeedsSubmitInfo = false;
+  VkQueryPool perfQueryPool = VK_NULL_HANDLE;
+  std::vector<uint32_t> perfQuerySelectedIndices;
+  std::vector<VkPerformanceCounterKHR> perfCountersInfo;
+  std::vector<VkPerformanceCounterDescriptionKHR> perfCounterDescriptions;
+  HardwarePerformanceCounters lastPerfCounters;
+
+  PFN_vkEnumeratePhysicalDeviceQueueFamilyPerformanceQueryCountersKHR pfnEnumerateQueueFamilyPerformanceQueryCountersKHR_ptr = nullptr;
+  PFN_vkGetPhysicalDeviceQueueFamilyPerformanceQueryPassesKHR pfnGetQueueFamilyPerformanceQueryPassesKHR_ptr = nullptr;
+  PFN_vkAcquireProfilingLockKHR pfnAcquireProfilingLockKHR_ptr = nullptr;
+  PFN_vkReleaseProfilingLockKHR pfnReleaseProfilingLockKHR_ptr = nullptr;
+
+  void maybeBeginPerfQuery(VkCommandBuffer cmd);
+  void maybeEndPerfQuery(VkCommandBuffer cmd);
 
   void destroyHeadlessSwapchain();
 };
