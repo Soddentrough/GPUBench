@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <functional>
@@ -49,8 +50,11 @@ public:
       std::cout << "  • [" << std::left << std::setw(24) << t.suite << "] " 
                 << std::setw(42) << t.name << " ... " << std::flush;
       try {
+        auto t0 = std::chrono::high_resolution_clock::now();
         t.func();
-        std::cout << "\033[32m✔ PASS\033[0m\n";
+        auto t1 = std::chrono::high_resolution_clock::now();
+        double elapsedUs = std::chrono::duration<double, std::micro>(t1 - t0).count();
+        std::cout << "\033[32m✔ PASS\033[0m (" << std::fixed << std::setprecision(1) << elapsedUs << " µs)\n";
         ++passed;
       } catch (const std::exception &e) {
         std::cout << "\033[31m✘ FAIL\033[0m\n";
