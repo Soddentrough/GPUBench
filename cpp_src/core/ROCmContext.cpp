@@ -109,6 +109,15 @@ bool ROCmContext::loadLibraries() {
     hipLib = std::make_unique<utils::DynamicLibrary>("libamdhip64.so");
   }
   if (!hipLib->isValid()) {
+    hipLib = std::make_unique<utils::DynamicLibrary>("/opt/rocm/core-10.1/lib/libamdhip64.so.7");
+  }
+  if (!hipLib->isValid()) {
+    hipLib = std::make_unique<utils::DynamicLibrary>("/opt/rocm/core-10.1/lib/libamdhip64.so.6");
+  }
+  if (!hipLib->isValid()) {
+    hipLib = std::make_unique<utils::DynamicLibrary>("/opt/rocm/core-10.1/lib/libamdhip64.so");
+  }
+  if (!hipLib->isValid()) {
     hipLib = std::make_unique<utils::DynamicLibrary>("/opt/rocm/lib/libamdhip64.so.7");
   }
   if (!hipLib->isValid()) {

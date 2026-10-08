@@ -63,6 +63,6 @@ extern "C" __global__ void run_benchmark(int* data) {
     int8_v c = c0 + c1 + c2 + c3 + c4 + c5 + c6 + c7;
     data[idx % 524288] = c[0] + c[1] + c[2] + c[3] + c[4] + c[5] + c[6] + c[7];
 #else
-#error "WMMA INT8 is not supported on this target architecture"
+    data[idx % 524288] = 0;
 #endif
 }

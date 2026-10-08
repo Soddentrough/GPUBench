@@ -86,10 +86,10 @@ endif()
 # Determine ROCm root path dynamically
 if(DEFINED ENV{ROCM_PATH} AND EXISTS "$ENV{ROCM_PATH}")
     set(ROCM_PATH "$ENV{ROCM_PATH}")
-elseif(EXISTS "/opt/rocm")
-    set(ROCM_PATH "/opt/rocm")
 elseif(EXISTS "/opt/rocm/core-10.1")
     set(ROCM_PATH "/opt/rocm/core-10.1")
+elseif(EXISTS "/opt/rocm")
+    set(ROCM_PATH "/opt/rocm")
 elseif(EXISTS "/opt/rocm/core-10.0")
     set(ROCM_PATH "/opt/rocm/core-10.0")
 endif()
@@ -200,11 +200,11 @@ endif()
 
 # Copy HIP kernels and compile code objects
 if(HIP_FOUND)
-    find_program(HIPCC_EXECUTABLE hipcc HINTS ${ROCM_PATH}/bin /usr/bin /opt/rocm/bin)
+    find_program(HIPCC_EXECUTABLE hipcc HINTS ${ROCM_PATH}/bin /opt/rocm/core-10.1/bin /usr/bin /opt/rocm/bin)
     if(NOT HIPCC_EXECUTABLE)
         set(HIPCC_EXECUTABLE hipcc)
     endif()
-    find_path(ROCM_CLANG_PATH clang++ HINTS ${ROCM_PATH}/llvm/bin ${ROCM_PATH}/lib/llvm/bin /usr/lib64/rocm/llvm/bin)
+    find_path(ROCM_CLANG_PATH clang++ HINTS ${ROCM_PATH}/llvm/bin ${ROCM_PATH}/lib/llvm/bin /opt/rocm/core-10.1/lib/llvm/bin /usr/lib64/rocm/llvm/bin)
     if(ROCM_CLANG_PATH)
         if(ROCM_PATH)
             set(HIPCC_ENV ${CMAKE_COMMAND} -E env HIP_CLANG_PATH=${ROCM_CLANG_PATH} ROCM_PATH=${ROCM_PATH})
@@ -215,6 +215,22 @@ if(HIP_FOUND)
         set(HIPCC_ENV)
     endif()
 
+    # Target GPU architectures for fat code object generation (Optimization O-5)
+    set(OFFLOAD_ARCHS "all" CACHE STRING "Target GPU architectures for HIP code objects: 'all', 'native', or custom list (e.g. 'gfx1151;gfx1201')")
+    if(OFFLOAD_ARCHS STREQUAL "all")
+        set(TARGET_ARCH_LIST "gfx1030;gfx1100;gfx1150;gfx1151;gfx1200;gfx1201;gfx90a;gfx942")
+    elseif(OFFLOAD_ARCHS STREQUAL "native")
+        set(TARGET_ARCH_LIST "native")
+    else()
+        set(TARGET_ARCH_LIST "${OFFLOAD_ARCHS}")
+    endif()
+
+    set(OFFLOAD_FLAGS "")
+    foreach(ARCH ${TARGET_ARCH_LIST})
+        list(APPEND OFFLOAD_FLAGS "--offload-arch=${ARCH}")
+    endforeach()
+    message(STATUS "HIP target offload architectures: ${TARGET_ARCH_LIST}")
+
     file(GLOB HIP_SOURCES CONFIGURE_DEPENDS "hip_kernels/*.hip")
     file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/kernels/rocm)
     
@@ -224,12 +240,12 @@ if(HIP_FOUND)
         set(DEST_HIP_SOURCE "${CMAKE_CURRENT_BINARY_DIR}/kernels/rocm/${KERNEL_NAME}")
         set(DEST_HIP_CO "${CMAKE_CURRENT_BINARY_DIR}/kernels/rocm/${KERNEL_NAME_WE}.co")
         
-        # Compile to .co using hipcc
+        # Compile to multi-target fat code object using hipcc
         add_custom_command(
             OUTPUT ${DEST_HIP_CO}
-            COMMAND ${HIPCC_ENV} ${HIPCC_EXECUTABLE} -O3 --genco --offload-arch=native ${HIP_SOURCE} -o ${DEST_HIP_CO}
+            COMMAND ${HIPCC_ENV} ${HIPCC_EXECUTABLE} -O3 --genco ${OFFLOAD_FLAGS} ${HIP_SOURCE} -o ${DEST_HIP_CO}
             DEPENDS ${HIP_SOURCE}
-            COMMENT "Compiling HIP kernel to code object: ${HIP_SOURCE}"
+            COMMENT "Compiling HIP kernel to fat code object (${OFFLOAD_ARCHS}): ${HIP_SOURCE}"
         )
 
         add_custom_command(
