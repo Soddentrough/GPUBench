@@ -26,6 +26,7 @@ public:
   virtual void Teardown() = 0;
   virtual BenchmarkResult GetResult(uint32_t config_idx = 0) const = 0;
   virtual void RecordRunResult(uint32_t /*config_idx*/, uint64_t /*total_invocations*/, double /*total_time_ms*/) {}
+  virtual double FilterDuration(uint32_t /*config_idx*/, uint64_t /*total_invocations*/, double duration_ms) { return duration_ms; }
   virtual void RebuildAccelerationStructures() {}
   virtual bool ValidateResults(uint32_t /*config_idx*/ = 0) const { return true; }
   // Optional 0-indexed baseline config index for speedup comparison within this benchmark.

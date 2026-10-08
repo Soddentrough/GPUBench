@@ -15,6 +15,9 @@
 
 void VulkanContext::waitIdle() {
   if (device == VK_NULL_HANDLE) return;
+  if (m_inBatch) {
+    endBatch();
+  }
   for (size_t i = 0; i < kMaxInFlight; ++i) {
     if (inFlightFrames[i].inUse && inFlightFrames[i].fence != VK_NULL_HANDLE) {
       constexpr uint64_t kTimeoutNs = 30'000'000'000ULL;
@@ -1997,6 +2000,39 @@ void VulkanContext::setKernelArg(ComputeKernel kernel, uint32_t arg_index,
   memcpy(it->second->pushConstantData.data() + offset, arg_value, arg_size);
 }
 
+void VulkanContext::beginBatch(uint32_t /*expected_dispatches*/) {
+  if (m_inBatch) {
+    endBatch();
+  }
+  m_inBatch = true;
+  m_batchCmdRecording = false;
+  m_batchDispatchCount = 0;
+}
+
+void VulkanContext::endBatch() {
+  if (!m_inBatch) return;
+  if (m_batchCmdRecording) {
+    InFlightFrame &frame = inFlightFrames[currentFrameIndex];
+    vkEndCommandBuffer(frame.commandBuffer);
+
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &frame.commandBuffer;
+
+    VkResult submitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, frame.fence);
+    if (submitRes != VK_SUCCESS) {
+      throw std::runtime_error("vkQueueSubmit failed in endBatch with result: " +
+                               std::to_string(submitRes));
+    }
+    frame.inUse = true;
+    currentFrameIndex = (currentFrameIndex + 1) % kMaxInFlight;
+    m_batchCmdRecording = false;
+  }
+  m_inBatch = false;
+  m_batchDispatchCount = 0;
+}
+
 void VulkanContext::dispatch(ComputeKernel kernel, uint32_t grid_x,
                              uint32_t grid_y, uint32_t grid_z, uint32_t block_x,
                              uint32_t block_y, uint32_t block_z) {
@@ -2005,6 +2041,85 @@ void VulkanContext::dispatch(ComputeKernel kernel, uint32_t grid_x,
     throw std::runtime_error("Invalid kernel handle");
   }
   VulkanKernel *vulkanKernel = it->second;
+
+  if (m_inBatch) {
+    InFlightFrame &frame = inFlightFrames[currentFrameIndex];
+    if (!m_batchCmdRecording) {
+      if (frame.inUse) {
+        constexpr uint64_t kTimeoutNs = 30'000'000'000ULL;
+        VkResult waitResult =
+            vkWaitForFences(device, 1, &frame.fence, VK_TRUE, kTimeoutNs);
+        if (waitResult == VK_TIMEOUT) {
+          throw std::runtime_error(
+              "GPU dispatch timed out (>30 s) — aborting benchmark to prevent amdgpu TDR crash.");
+        } else if (waitResult != VK_SUCCESS) {
+          throw std::runtime_error("vkWaitForFences failed with result: " +
+                                   std::to_string(waitResult));
+        }
+        vkResetFences(device, 1, &frame.fence);
+        frame.inUse = false;
+      }
+
+      VkCommandBufferBeginInfo beginInfo{};
+      beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+      beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+      vkBeginCommandBuffer(frame.commandBuffer, &beginInfo);
+      m_batchCmdRecording = true;
+      m_batchDispatchCount = 0;
+    }
+
+    VkPipelineBindPoint bindPoint = vulkanKernel->isRTPipeline
+                                        ? VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR
+                                        : VK_PIPELINE_BIND_POINT_COMPUTE;
+
+    // Memory barrier between dispatches in a batch to serialize sequential writes
+    if (m_batchDispatchCount > 0) {
+      VkMemoryBarrier memBarrier{};
+      memBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+      memBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+      memBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+      vkCmdPipelineBarrier(frame.commandBuffer,
+                           VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                           VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                           0, 1, &memBarrier, 0, nullptr, 0, nullptr);
+    }
+
+    vkCmdBindPipeline(frame.commandBuffer, bindPoint, vulkanKernel->pipeline);
+    vkCmdBindDescriptorSets(frame.commandBuffer, bindPoint,
+                            vulkanKernel->pipelineLayout, 0, 1,
+                            &vulkanKernel->descriptorSet, 0, nullptr);
+
+    if (!vulkanKernel->pushConstantData.empty()) {
+      VkShaderStageFlags stageFlags = vulkanKernel->isRTPipeline
+                                          ? (VK_SHADER_STAGE_RAYGEN_BIT_KHR |
+                                             VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR |
+                                             VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
+                                             VK_SHADER_STAGE_INTERSECTION_BIT_KHR |
+                                             VK_SHADER_STAGE_MISS_BIT_KHR)
+                                          : VK_SHADER_STAGE_COMPUTE_BIT;
+
+      vkCmdPushConstants(
+          frame.commandBuffer, vulkanKernel->pipelineLayout, stageFlags, 0,
+          static_cast<uint32_t>(vulkanKernel->pushConstantData.size()),
+          vulkanKernel->pushConstantData.data());
+    }
+
+    if (vulkanKernel->isRTPipeline) {
+      auto pfnTraceRays =
+          (PFN_vkCmdTraceRaysKHR)vkGetDeviceProcAddr(device, "vkCmdTraceRaysKHR");
+      uint32_t rWidth = (block_x > 1) ? (grid_x * block_x) : grid_x;
+      uint32_t rHeight = (block_y > 1) ? (grid_y * block_y) : grid_y;
+      uint32_t rDepth = (block_z > 1) ? (grid_z * block_z) : grid_z;
+      pfnTraceRays(frame.commandBuffer, &vulkanKernel->rgenRegion,
+                   &vulkanKernel->missRegion, &vulkanKernel->hitRegion,
+                   &vulkanKernel->callRegion, rWidth, rHeight, rDepth);
+    } else {
+      vkCmdDispatch(frame.commandBuffer, grid_x, grid_y, grid_z);
+    }
+
+    m_batchDispatchCount++;
+    return;
+  }
 
   InFlightFrame &frame = inFlightFrames[currentFrameIndex];
   if (frame.inUse) {

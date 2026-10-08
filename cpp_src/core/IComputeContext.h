@@ -128,6 +128,11 @@ public:
   virtual void releaseKernel(ComputeKernel kernel) = 0;
   virtual void waitIdle() = 0;
 
+  // Command buffer batching for short compute microbenchmarks (Optimization O-2)
+  virtual void beginBatch(uint32_t /*expected_dispatches*/ = 0) {}
+  virtual void endBatch() {}
+  virtual bool isBatching() const { return false; }
+
   // Hardware GPU timestamp profiling
   virtual void startTiming() {}
   virtual double stopTiming() { return 0.0; } // Returns elapsed GPU execution time in milliseconds

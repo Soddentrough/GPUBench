@@ -13,6 +13,13 @@ struct ResultData {
   std::string metric;
   uint64_t operations;
   double time_ms;
+  // Multi-sample statistical distribution metrics (Optimization O-3)
+  double min_time_ms = 0.0;
+  double median_time_ms = 0.0;
+  double mean_time_ms = 0.0;
+  double p95_time_ms = 0.0;
+  uint32_t sample_count = 0;
+  std::vector<double> sample_durations_ms;
   bool isEmulated;
   // True when the benchmark was selected but is not supported on this
   // device/backend (e.g. missing hardware capability). Such entries carry

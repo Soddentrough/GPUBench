@@ -69,6 +69,11 @@ public:
   void releaseKernel(ComputeKernel kernel) override;
   void waitIdle() override;
 
+  // Command buffer batching (Optimization O-2)
+  void beginBatch(uint32_t expected_dispatches = 0) override;
+  void endBatch() override;
+  bool isBatching() const override { return m_inBatch; }
+
   void setExpectedKernelCount(uint32_t count) override;
   void notifyKernelCreated(const std::string &kernel_name) override;
   void setVerbose(bool v) override { verbose = v; }
@@ -283,6 +288,9 @@ private:
   };
   std::array<InFlightFrame, kMaxInFlight> inFlightFrames{};
   size_t currentFrameIndex = 0;
+  bool m_inBatch = false;
+  bool m_batchCmdRecording = false;
+  uint32_t m_batchDispatchCount = 0;
 
   VkQueryPool timestampQueryPool = VK_NULL_HANDLE;
   bool timingSupported = false;

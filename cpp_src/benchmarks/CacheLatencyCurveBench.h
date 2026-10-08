@@ -31,6 +31,7 @@ public:
   void Teardown() override;
   BenchmarkResult GetResult(uint32_t config_idx = 0) const override;
   bool ValidateResults(uint32_t config_idx = 0) const override;
+  double FilterDuration(uint32_t config_idx, uint64_t total_invocations, double duration_ms) override;
 
   const char *GetComponent(uint32_t config_idx = 0) const override { return "Memory"; }
   const char *GetSubCategory(uint32_t config_idx = 0) const override { return "Cache Latency Curve"; }
@@ -48,4 +49,5 @@ private:
   ComputeBuffer buffer = nullptr;
   uint64_t totalBufferBytes = 0;
   static constexpr uint32_t kIterations = 1000000;
+  double maxTimePerInvoc = 0.0;
 };

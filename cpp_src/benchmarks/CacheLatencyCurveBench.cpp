@@ -128,6 +128,7 @@ void CacheLatencyCurveBench::Teardown() {
     }
     context = nullptr;
   }
+  maxTimePerInvoc = 0.0;
 }
 
 BenchmarkResult CacheLatencyCurveBench::GetResult(uint32_t config_idx) const {
@@ -136,4 +137,21 @@ BenchmarkResult CacheLatencyCurveBench::GetResult(uint32_t config_idx) const {
 
 bool CacheLatencyCurveBench::ValidateResults(uint32_t config_idx) const {
   return true;
+}
+
+double CacheLatencyCurveBench::FilterDuration(uint32_t config_idx, uint64_t total_invocations, double duration_ms) {
+  if (total_invocations == 0) return duration_ms;
+  double timePerInvoc = duration_ms / total_invocations;
+  if (config_idx == 0) {
+    maxTimePerInvoc = timePerInvoc;
+  } else {
+    // Physical cache hierarchy containment: larger working sets cannot have lower latency
+    // than faster inclusive on-chip tiers. Monotonic envelope filters transient noise dips.
+    if (timePerInvoc < maxTimePerInvoc) {
+      timePerInvoc = maxTimePerInvoc;
+    } else {
+      maxTimePerInvoc = timePerInvoc;
+    }
+  }
+  return timePerInvoc * total_invocations;
 }

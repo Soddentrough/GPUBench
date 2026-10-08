@@ -1759,6 +1759,15 @@ std::string resultsToJson(const std::vector<ResultData> &results) {
     }
     out += "      \"operations\": " + std::to_string(r.operations) + ",\n";
     out += "      \"time_ms\": " + std::to_string(r.time_ms) + ",\n";
+    if (r.sample_count > 0) {
+      out += "      \"statistics\": {\n";
+      out += "        \"samples\": " + std::to_string(r.sample_count) + ",\n";
+      out += "        \"min_time_ms\": " + std::to_string(r.min_time_ms) + ",\n";
+      out += "        \"median_time_ms\": " + std::to_string(r.median_time_ms) + ",\n";
+      out += "        \"mean_time_ms\": " + std::to_string(r.mean_time_ms) + ",\n";
+      out += "        \"p95_time_ms\": " + std::to_string(r.p95_time_ms) + "\n";
+      out += "      },\n";
+    }
     if (r.time_ms == -3.0) {
       out += "      \"status\": \"ABORTED\",\n";
       out += "      \"error\": \"" + jsonEscape(r.errorString) + "\",\n";

@@ -1050,6 +1050,12 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
 
         double total_time_ms = 0;
         uint64_t total_invocations = 0;
+        double stat_min_ms = 0.0;
+        double stat_med_ms = 0.0;
+        double stat_mean_ms = 0.0;
+        double stat_p95_ms = 0.0;
+        uint32_t stat_sample_count = 0;
+        std::vector<double> stat_samples;
 
         if (profileSnapshot) {
           bench->Run(i);
@@ -1077,6 +1083,12 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
                 std::chrono::duration<double, std::milli>(end - start).count();
           }
           total_invocations = 1;
+          stat_min_ms = total_time_ms;
+          stat_med_ms = total_time_ms;
+          stat_mean_ms = total_time_ms;
+          stat_p95_ms = total_time_ms;
+          stat_sample_count = 1;
+          stat_samples.push_back(total_time_ms);
         } else {
           auto start = std::chrono::high_resolution_clock::now();
           bench->Run(i);
@@ -1085,95 +1097,146 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
           double single_run_ms =
               std::chrono::duration<double, std::milli>(end - start).count();
 
-          uint64_t iterations = 1;
-          if (single_run_ms >= 1500.0) {
-            // Already took 1.5+ seconds on this single invocation.
-            // Clocks are fully boosted and measurement is statistically robust.
-            // Avoid redundant iterations so total benchmark duration stays strictly < 5 seconds.
-            total_invocations = 1;
-            total_time_ms = single_run_ms;
-          } else {
-            // Warmup: Run until GPU clocks ramp up to sustained boost clocks.
-            // If single_run_ms >= 200ms, GPU is already at boost clocks; skip warmup.
-            const double min_warmup_duration_ms = 400.0;
-            uint64_t warmup_iters = 0;
-            if (single_run_ms > 0.0 && single_run_ms < 200.0) {
-              if (single_run_ms < 50.0) {
-                warmup_iters = static_cast<uint64_t>(
-                    std::max(2.0, std::ceil(min_warmup_duration_ms / single_run_ms)));
-              } else {
-                warmup_iters = static_cast<uint64_t>(
-                    std::ceil(min_warmup_duration_ms / single_run_ms));
-              }
+          // Warmup: Run until GPU clocks ramp up to sustained boost clocks.
+          // If single_run_ms >= 200ms, GPU is already at boost clocks; skip warmup.
+          const double min_warmup_duration_ms = 400.0;
+          uint64_t warmup_iters = 0;
+          if (single_run_ms > 0.0 && single_run_ms < 200.0) {
+            if (single_run_ms < 50.0) {
+              warmup_iters = static_cast<uint64_t>(
+                  std::max(2.0, std::ceil(min_warmup_duration_ms / single_run_ms)));
+            } else {
+              warmup_iters = static_cast<uint64_t>(
+                  std::ceil(min_warmup_duration_ms / single_run_ms));
             }
-            warmup_iters = std::min(warmup_iters, static_cast<uint64_t>(50));
-            if (dynamic_cast<MemBandwidthBench *>(bench)) {
-              warmup_iters = std::min(warmup_iters, static_cast<uint64_t>(2));
-            }
+          }
+          warmup_iters = std::min(warmup_iters, static_cast<uint64_t>(50));
+          if (dynamic_cast<MemBandwidthBench *>(bench)) {
+            warmup_iters = std::min(warmup_iters, static_cast<uint64_t>(2));
+          }
 
-            for (uint64_t w = 0; w < warmup_iters; ++w) {
-              if (cancelToken && cancelToken->load()) break;
-              bench->Run(i);
-              if (single_run_ms >= 10.0) {
-                context->waitIdle();
-              }
-            }
-            context->waitIdle();
-
-            // Re-measure single run latency only if warmup was actually performed
-            if (warmup_iters > 0) {
-              start = std::chrono::high_resolution_clock::now();
-              bench->Run(i);
+          for (uint64_t w = 0; w < warmup_iters; ++w) {
+            if (cancelToken && cancelToken->load()) break;
+            bench->Run(i);
+            if (single_run_ms >= 10.0) {
               context->waitIdle();
-              end = std::chrono::high_resolution_clock::now();
-              single_run_ms =
-                  std::chrono::duration<double, std::milli>(end - start).count();
             }
+          }
+          context->waitIdle();
 
-            const double target_duration_ms = 250.0;
-            if (single_run_ms > 0.0) {
-              iterations = static_cast<uint64_t>(
-                    std::max(1.0, std::round(target_duration_ms / single_run_ms)));
-            }
-            iterations = std::min(iterations, static_cast<uint64_t>(5000));
-            iterations = std::max(iterations, static_cast<uint64_t>(1));
+          // Re-measure single run latency only if warmup was actually performed
+          if (warmup_iters > 0) {
+            start = std::chrono::high_resolution_clock::now();
+            bench->Run(i);
+            context->waitIdle();
+            end = std::chrono::high_resolution_clock::now();
+            single_run_ms =
+                std::chrono::duration<double, std::milli>(end - start).count();
+          }
 
-            // Hard clamp: ensure timed loop duration does not exceed 1500ms
-            if (single_run_ms > 0.0 && (iterations * single_run_ms > 1500.0)) {
-              iterations = static_cast<uint64_t>(std::max(1.0, 1500.0 / single_run_ms));
-            }
+          // Optimization O-3: Multi-sample distribution measurement (min / median / mean / p95)
+          // Optimization O-2: Command buffer batching for short compute microbenchmarks
+          uint32_t num_samples = 5;
+          if (single_run_ms >= 1500.0) {
+            num_samples = 1;
+          } else if (single_run_ms >= 400.0) {
+            num_samples = 3;
+          } else if (single_run_ms < 0.5) {
+            num_samples = 7;
+          }
 
-            if (dynamic_cast<MemBandwidthBench *>(bench)) {
-              iterations = std::min(iterations, static_cast<uint64_t>(4));
-            }
+          const double target_sample_ms = (num_samples > 1) ? 50.0 : 250.0;
+          uint64_t sample_iters = 1;
+          if (single_run_ms > 0.0) {
+            sample_iters = static_cast<uint64_t>(
+                std::max(1.0, std::round(target_sample_ms / single_run_ms)));
+          }
+          sample_iters = std::min(sample_iters, static_cast<uint64_t>(500));
+          sample_iters = std::max(sample_iters, static_cast<uint64_t>(1));
 
-            total_invocations = 0;
+          // Hard clamp: ensure a single sample does not exceed 350ms
+          if (single_run_ms > 0.0 && (sample_iters * single_run_ms > 350.0)) {
+            sample_iters = static_cast<uint64_t>(std::max(1.0, 350.0 / single_run_ms));
+          }
+
+          if (dynamic_cast<MemBandwidthBench *>(bench)) {
+            sample_iters = std::min(sample_iters, static_cast<uint64_t>(2));
+            num_samples = std::min(num_samples, 3u);
+          }
+
+          std::vector<double> sample_time_per_invoc;
+          total_invocations = 0;
+
+          for (uint32_t s = 0; s < num_samples; ++s) {
+            if (cancelToken && cancelToken->load()) break;
+
             if (context->hasGpuTiming()) {
               context->startTiming();
             }
-            start = std::chrono::high_resolution_clock::now();
-            for (uint64_t iter = 0; iter < iterations; ++iter) {
-              if (cancelToken && cancelToken->load()) break;
+            auto s_start = std::chrono::high_resolution_clock::now();
+
+            if (sample_iters > 1) {
+              context->beginBatch(sample_iters);
+              for (uint64_t it = 0; it < sample_iters; ++it) {
+                bench->Run(i);
+              }
+              context->endBatch();
+            } else {
               bench->Run(i);
-              total_invocations++;
             }
+
+            double sample_ms = 0.0;
             if (context->hasGpuTiming()) {
               double gpu_time = context->stopTiming();
               if (gpu_time > 0.0) {
-                total_time_ms = gpu_time;
+                sample_ms = gpu_time;
               } else {
                 context->waitIdle();
-                end = std::chrono::high_resolution_clock::now();
-                total_time_ms =
-                    std::chrono::duration<double, std::milli>(end - start).count();
+                auto s_end = std::chrono::high_resolution_clock::now();
+                sample_ms =
+                    std::chrono::duration<double, std::milli>(s_end - s_start).count();
               }
             } else {
               context->waitIdle();
-              end = std::chrono::high_resolution_clock::now();
-              total_time_ms =
-                  std::chrono::duration<double, std::milli>(end - start).count();
+              auto s_end = std::chrono::high_resolution_clock::now();
+              sample_ms =
+                  std::chrono::duration<double, std::milli>(s_end - s_start).count();
+            }
+
+            if (sample_ms > 0.0) {
+              sample_time_per_invoc.push_back(sample_ms / sample_iters);
+              total_invocations += sample_iters;
             }
           }
+
+          if (!sample_time_per_invoc.empty()) {
+            std::vector<double> sorted_samples = sample_time_per_invoc;
+            std::sort(sorted_samples.begin(), sorted_samples.end());
+            size_t S = sorted_samples.size();
+
+            double min_per_inv = sorted_samples.front();
+            double sum_per_inv = 0.0;
+            for (double val : sorted_samples) sum_per_inv += val;
+            double mean_per_inv = sum_per_inv / S;
+
+            double med_per_inv = (S % 2 == 1)
+                ? sorted_samples[S / 2]
+                : 0.5 * (sorted_samples[S / 2 - 1] + sorted_samples[S / 2]);
+
+            size_t p95_idx = std::min(static_cast<size_t>(std::ceil(0.95 * S)) - 1, S - 1);
+            double p95_per_inv = sorted_samples[p95_idx];
+
+            double raw_median_total_ms = med_per_inv * total_invocations;
+            total_time_ms = bench->FilterDuration(i, total_invocations, raw_median_total_ms);
+
+            stat_min_ms = min_per_inv * total_invocations;
+            stat_med_ms = total_time_ms;
+            stat_mean_ms = mean_per_inv * total_invocations;
+            stat_p95_ms = p95_per_inv * total_invocations;
+            stat_sample_count = static_cast<uint32_t>(S);
+            stat_samples = sample_time_per_invoc;
+          }
+
           if (total_invocations == 0) {
             ResultData abort_data;
             abort_data.backendName = ComputeBackendFactory::getBackendName(context->getBackend());
@@ -1194,10 +1257,14 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
             continue;
           }
           if (verbose) {
-            std::cout << "[TIMING " << bench_name << "] single_run_ms: " << single_run_ms
-                      << ", iterations: " << total_invocations
-                      << ", total_time_ms: " << total_time_ms
-                      << ", avg_ms: " << (total_time_ms / total_invocations) << std::endl;
+            std::cout << "[STATS " << bench_name << "] " << stat_sample_count << " samples"
+                      << ", invocations: " << total_invocations
+                      << ", median_total_ms: " << total_time_ms
+                      << " | median_inv: " << (stat_med_ms / (total_invocations ? total_invocations : 1)) << " ms"
+                      << " | min_inv: " << (stat_min_ms / (total_invocations ? total_invocations : 1)) << " ms"
+                      << " | mean_inv: " << (stat_mean_ms / (total_invocations ? total_invocations : 1)) << " ms"
+                      << " | p95_inv: " << (stat_p95_ms / (total_invocations ? total_invocations : 1)) << " ms"
+                      << std::endl;
           }
         }
 
@@ -1224,6 +1291,12 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
         result_data.operations =
             bench_result.operations * total_invocations;
         result_data.time_ms = total_time_ms;
+        result_data.min_time_ms = stat_min_ms;
+        result_data.median_time_ms = stat_med_ms;
+        result_data.mean_time_ms = stat_mean_ms;
+        result_data.p95_time_ms = stat_p95_ms;
+        result_data.sample_count = stat_sample_count;
+        result_data.sample_durations_ms = stat_samples;
         result_data.isValid = isValid;
         result_data.baselineConfigIndex = bench->GetBaselineConfigIndex(i);
         result_data.isEmulated = bench->IsEmulated(i);
