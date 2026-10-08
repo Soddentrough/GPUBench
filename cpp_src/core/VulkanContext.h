@@ -275,7 +275,7 @@ private:
   VkQueue graphicsQueue = VK_NULL_HANDLE;
   VkCommandPool commandPool = VK_NULL_HANDLE;
 
-  static constexpr size_t kMaxInFlight = 64;
+  static constexpr size_t kMaxInFlight = 4;
   struct InFlightFrame {
     VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
     VkFence fence = VK_NULL_HANDLE;

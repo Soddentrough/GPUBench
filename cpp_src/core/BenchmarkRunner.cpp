@@ -864,8 +864,12 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
       auto *bench = task.bench;
       uint32_t i = task.configIndex;
 
-      if (prevBench && prevBench != bench) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(150));
+      if (prevBench) {
+        if (prevBench != bench) {
+          std::this_thread::sleep_for(std::chrono::milliseconds(150));
+        } else if (dynamic_cast<MemBandwidthBench *>(bench)) {
+          std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
       }
       prevBench = bench;
 
@@ -1042,11 +1046,14 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
               }
             }
             warmup_iters = std::min(warmup_iters, static_cast<uint64_t>(50));
+            if (dynamic_cast<MemBandwidthBench *>(bench)) {
+              warmup_iters = std::min(warmup_iters, static_cast<uint64_t>(2));
+            }
 
             for (uint64_t w = 0; w < warmup_iters; ++w) {
               if (cancelToken && cancelToken->load()) break;
               bench->Run(i);
-              if (single_run_ms >= 100.0) {
+              if (single_run_ms >= 10.0) {
                 context->waitIdle();
               }
             }
@@ -1073,6 +1080,10 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
             // Hard clamp: ensure timed loop duration does not exceed 1500ms
             if (single_run_ms > 0.0 && (iterations * single_run_ms > 1500.0)) {
               iterations = static_cast<uint64_t>(std::max(1.0, 1500.0 / single_run_ms));
+            }
+
+            if (dynamic_cast<MemBandwidthBench *>(bench)) {
+              iterations = std::min(iterations, static_cast<uint64_t>(4));
             }
 
             total_invocations = 0;
@@ -1226,6 +1237,7 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
         if (onResult) {
           onResult(result_data);
         }
+        context->waitIdle();
       } catch (const std::exception &e) {
         taskIdx++;
         executionFailure = true;

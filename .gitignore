@@ -25,8 +25,6 @@ kernels/vulkan/
 
 # Logs and temporary files
 *.log
-*.txt
-!CMakeLists.txt
 runner.bat
 test.cpp
 test_minimal.cpp
@@ -34,8 +32,9 @@ test_minimal.cpp
 # Results files
 gpubench_results*
 gpubench_*.json
+VP_*.json
 
-# Specific logs
+# Specific logs and temp outputs
 build_error.log
 build_error.txt
 build_out.txt

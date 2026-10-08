@@ -33,9 +33,9 @@ static const std::vector<HardwareProfile> s_knownProfiles = {
         /* l1CacheBytes */ 32 * 1024,
         /* l2CacheBytes */ 8 * 1024 * 1024,
         /* l3CacheBytes */ 48 * 1024 * 1024,
-        /* theoreticalFp32Tflops */ 48.66,
-        /* theoreticalTriangleGis */ 300.8,
-        /* theoreticalBoxGis */ 1203.2,
+        /* theoreticalFp32Tflops */ 41.06,
+        /* theoreticalTriangleGis */ 253.8,
+        /* theoreticalBoxGis */ 1015.2,
         /* theoreticalBandwidthGBps */ 640.0,
         /* memoryType */ "GDDR6",
     },
@@ -65,9 +65,9 @@ static const std::vector<HardwareProfile> s_knownProfiles = {
         /* l1CacheBytes */ 32 * 1024,
         /* l2CacheBytes */ 8 * 1024 * 1024,
         /* l3CacheBytes */ 48 * 1024 * 1024,
-        /* theoreticalFp32Tflops */ 40.55,
-        /* theoreticalTriangleGis */ 250.6,
-        /* theoreticalBoxGis */ 1002.4,
+        /* theoreticalFp32Tflops */ 36.51,
+        /* theoreticalTriangleGis */ 225.6,
+        /* theoreticalBoxGis */ 902.4,
         /* theoreticalBandwidthGBps */ 640.0,
         /* memoryType */ "GDDR6",
     },
@@ -85,7 +85,7 @@ static const std::vector<HardwareProfile> s_knownProfiles = {
         /* l1CacheBytes */ 32 * 1024,
         /* l2CacheBytes */ 2 * 1024 * 1024,
         /* l3CacheBytes */ 32 * 1024 * 1024,
-        /* theoreticalFp32Tflops */ 23.56,
+        /* theoreticalFp32Tflops */ 29.70,
         /* theoreticalTriangleGis */ 145.0,
         /* theoreticalBoxGis */ 580.0,
         /* theoreticalBandwidthGBps */ 273.0,
@@ -93,7 +93,7 @@ static const std::vector<HardwareProfile> s_knownProfiles = {
     },
     {
         /* vendorId */ 0x1002,
-        /* deviceId */ 0x15BF,
+        /* deviceId */ 0x150E,
         /* marketingName */ "AMD Radeon 890M",
         /* archName */ "gfx1150 (RDNA 3.5)",
         /* archFamily */ "RDNA 3.5",
@@ -101,7 +101,7 @@ static const std::vector<HardwareProfile> s_knownProfiles = {
         /* l1CacheBytes */ 32 * 1024,
         /* l2CacheBytes */ 2 * 1024 * 1024,
         /* l3CacheBytes */ 0,
-        /* theoreticalFp32Tflops */ 11.2,
+        /* theoreticalFp32Tflops */ 11.88,
         /* theoreticalTriangleGis */ 70.0,
         /* theoreticalBoxGis */ 280.0,
         /* theoreticalBandwidthGBps */ 120.0,
@@ -109,15 +109,15 @@ static const std::vector<HardwareProfile> s_knownProfiles = {
     },
     {
         /* vendorId */ 0x1002,
-        /* deviceId */ 0x15C8,
-        /* marketingName */ "AMD Radeon 880M",
+        /* deviceId */ 0x1114,
+        /* marketingName */ "AMD Radeon 860M / 840M",
         /* archName */ "gfx1150 (RDNA 3.5)",
         /* archFamily */ "RDNA 3.5",
         /* isApu */ true,
         /* l1CacheBytes */ 32 * 1024,
         /* l2CacheBytes */ 2 * 1024 * 1024,
         /* l3CacheBytes */ 0,
-        /* theoreticalFp32Tflops */ 8.9,
+        /* theoreticalFp32Tflops */ 8.91,
         /* theoreticalTriangleGis */ 55.0,
         /* theoreticalBoxGis */ 220.0,
         /* theoreticalBandwidthGBps */ 120.0,
@@ -125,7 +125,7 @@ static const std::vector<HardwareProfile> s_knownProfiles = {
     },
 
     // -------------------------------------------------------------------------
-    // AMD RDNA 3 (Navi 31, 32, 33)
+    // AMD RDNA 3 (Navi 31, 32, 33 & Phoenix)
     // -------------------------------------------------------------------------
     {
         /* vendorId */ 0x1002,
@@ -145,7 +145,23 @@ static const std::vector<HardwareProfile> s_knownProfiles = {
     },
     {
         /* vendorId */ 0x1002,
-        /* deviceId */ 0x7460,
+        /* deviceId */ 0x7448,
+        /* marketingName */ "AMD Radeon PRO W7900",
+        /* archName */ "gfx1100 (RDNA 3)",
+        /* archFamily */ "RDNA 3",
+        /* isApu */ false,
+        /* l1CacheBytes */ 32 * 1024,
+        /* l2CacheBytes */ 6 * 1024 * 1024,
+        /* l3CacheBytes */ 96 * 1024 * 1024,
+        /* theoreticalFp32Tflops */ 61.4,
+        /* theoreticalTriangleGis */ 240.0,
+        /* theoreticalBoxGis */ 960.0,
+        /* theoreticalBandwidthGBps */ 864.0,
+        /* memoryType */ "GDDR6",
+    },
+    {
+        /* vendorId */ 0x1002,
+        /* deviceId */ 0x747E,
         /* marketingName */ "AMD Radeon RX 7800 XT",
         /* archName */ "gfx1101 (RDNA 3)",
         /* archFamily */ "RDNA 3",
@@ -157,6 +173,22 @@ static const std::vector<HardwareProfile> s_knownProfiles = {
         /* theoreticalTriangleGis */ 160.0,
         /* theoreticalBoxGis */ 640.0,
         /* theoreticalBandwidthGBps */ 624.0,
+        /* memoryType */ "GDDR6",
+    },
+    {
+        /* vendorId */ 0x1002,
+        /* deviceId */ 0x7460,
+        /* marketingName */ "AMD Radeon PRO V710",
+        /* archName */ "gfx1101 (RDNA 3)",
+        /* archFamily */ "RDNA 3",
+        /* isApu */ false,
+        /* l1CacheBytes */ 32 * 1024,
+        /* l2CacheBytes */ 4 * 1024 * 1024,
+        /* l3CacheBytes */ 54 * 1024 * 1024,
+        /* theoreticalFp32Tflops */ 33.6,
+        /* theoreticalTriangleGis */ 140.0,
+        /* theoreticalBoxGis */ 560.0,
+        /* theoreticalBandwidthGBps */ 432.0,
         /* memoryType */ "GDDR6",
     },
     {
@@ -174,6 +206,38 @@ static const std::vector<HardwareProfile> s_knownProfiles = {
         /* theoreticalBoxGis */ 420.0,
         /* theoreticalBandwidthGBps */ 288.0,
         /* memoryType */ "GDDR6",
+    },
+    {
+        /* vendorId */ 0x1002,
+        /* deviceId */ 0x15BF,
+        /* marketingName */ "AMD Radeon 780M",
+        /* archName */ "gfx1103 (RDNA 3)",
+        /* archFamily */ "RDNA 3",
+        /* isApu */ true,
+        /* l1CacheBytes */ 32 * 1024,
+        /* l2CacheBytes */ 2 * 1024 * 1024,
+        /* l3CacheBytes */ 0,
+        /* theoreticalFp32Tflops */ 8.91,
+        /* theoreticalTriangleGis */ 50.0,
+        /* theoreticalBoxGis */ 200.0,
+        /* theoreticalBandwidthGBps */ 120.0,
+        /* memoryType */ "Unified LPDDR5X",
+    },
+    {
+        /* vendorId */ 0x1002,
+        /* deviceId */ 0x15C8,
+        /* marketingName */ "AMD Radeon 760M",
+        /* archName */ "gfx1103 (RDNA 3)",
+        /* archFamily */ "RDNA 3",
+        /* isApu */ true,
+        /* l1CacheBytes */ 32 * 1024,
+        /* l2CacheBytes */ 2 * 1024 * 1024,
+        /* l3CacheBytes */ 0,
+        /* theoreticalFp32Tflops */ 5.94,
+        /* theoreticalTriangleGis */ 35.0,
+        /* theoreticalBoxGis */ 140.0,
+        /* theoreticalBandwidthGBps */ 120.0,
+        /* memoryType */ "Unified LPDDR5X",
     },
 
     // -------------------------------------------------------------------------
@@ -197,11 +261,11 @@ static const std::vector<HardwareProfile> s_knownProfiles = {
     },
 
     // -------------------------------------------------------------------------
-    // AMD CDNA 3 (MI300 Series)
+    // AMD CDNA 2 & 3 (MI200 & MI300 Series)
     // -------------------------------------------------------------------------
     {
         /* vendorId */ 0x1002,
-        /* deviceId */ 0x740F,
+        /* deviceId */ 0x74A1,
         /* marketingName */ "AMD Instinct MI300X",
         /* archName */ "gfx942 (CDNA 3)",
         /* archFamily */ "CDNA 3",
@@ -214,6 +278,22 @@ static const std::vector<HardwareProfile> s_knownProfiles = {
         /* theoreticalBoxGis */ 0.0,
         /* theoreticalBandwidthGBps */ 5300.0,
         /* memoryType */ "HBM3",
+    },
+    {
+        /* vendorId */ 0x1002,
+        /* deviceId */ 0x740F,
+        /* marketingName */ "AMD Instinct MI210",
+        /* archName */ "gfx90a (CDNA 2)",
+        /* archFamily */ "CDNA 2",
+        /* isApu */ false,
+        /* l1CacheBytes */ 16 * 1024,
+        /* l2CacheBytes */ 8 * 1024 * 1024,
+        /* l3CacheBytes */ 0,
+        /* theoreticalFp32Tflops */ 45.3,
+        /* theoreticalTriangleGis */ 0.0,
+        /* theoreticalBoxGis */ 0.0,
+        /* theoreticalBandwidthGBps */ 1600.0,
+        /* memoryType */ "HBM2e",
     },
 
     // -------------------------------------------------------------------------
@@ -322,7 +402,7 @@ static HardwareProfile synthesizePatternProfile(uint32_t vendorId, uint32_t devi
       p.archFamily = "RDNA 4";
       p.isApu = false;
       p.l2CacheBytes = 8 * 1024 * 1024;
-      p.l3CacheBytes = 64 * 1024 * 1024;
+      p.l3CacheBytes = 48 * 1024 * 1024;
       p.theoreticalTriangleGis = 300.8;
       p.theoreticalBoxGis = 1203.2;
       p.theoreticalFp32Tflops = 48.66;
@@ -335,7 +415,7 @@ static HardwareProfile synthesizePatternProfile(uint32_t vendorId, uint32_t devi
       p.archFamily = "RDNA 4";
       p.isApu = false;
       p.l2CacheBytes = 8 * 1024 * 1024;
-      p.l3CacheBytes = 64 * 1024 * 1024;
+      p.l3CacheBytes = 48 * 1024 * 1024;
       p.theoreticalTriangleGis = 0.0;
       p.theoreticalBoxGis = 0.0;
       p.theoreticalFp32Tflops = 0.0;
@@ -349,7 +429,7 @@ static HardwareProfile synthesizePatternProfile(uint32_t vendorId, uint32_t devi
       p.isApu = true;
       p.l2CacheBytes = 2 * 1024 * 1024;
       p.l3CacheBytes = 32 * 1024 * 1024;
-      p.theoreticalFp32Tflops = 23.56;
+      p.theoreticalFp32Tflops = 29.70;
       p.theoreticalTriangleGis = 145.0;
       p.theoreticalBoxGis = 580.0;
       p.theoreticalBandwidthGBps = 273.0;

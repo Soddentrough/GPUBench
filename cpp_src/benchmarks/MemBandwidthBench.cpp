@@ -50,6 +50,8 @@ void MemBandwidthBench::createKernel(BandwidthConfig &config,
   }
 }
 
+#include "core/DeviceDatabase.h"
+
 void MemBandwidthBench::Setup(IComputeContext &context,
                               const std::string &kernel_dir) {
   this->context = &context;
@@ -78,11 +80,11 @@ void MemBandwidthBench::Setup(IComputeContext &context,
     maxThreads = std::max(maxThreads, 1024u * 512u);
   }
 
-  // Calculate max safe size: 50% of VRAM or 2GB, whichever is smaller.
-  // We increase this to 2GB to better saturate modern high-bandwidth GPUs
-  // (H100, MI300).
-  uint64_t maxSafeSize =
-      std::min<uint64_t>(availableVRAM / 2, 2048ULL * 1024ULL * 1024ULL);
+  // Calculate max safe size: 512MB for APUs / unified memory (safely exceeds 32MB L3 cache
+  // by 16x without starving host memory) or 1GB for discrete GPUs.
+  bool isApu = gpubench::DeviceDatabase::isApuDevice(deviceInfo.vendorID, deviceInfo.deviceID, deviceInfo.name);
+  uint64_t capSize = isApu ? (512ULL * 1024ULL * 1024ULL) : (1024ULL * 1024ULL * 1024ULL);
+  uint64_t maxSafeSize = std::min<uint64_t>(availableVRAM / 4, capSize);
 
   // Find largest power of 2 that fits in maxSafeSize
   this->bufferSize = 16ULL * 1024ULL * 1024ULL; // Start at 16MB min
