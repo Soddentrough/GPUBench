@@ -5586,7 +5586,7 @@ void GuiApp::renderRayTracingViewport() {
             128, 64,
             "68.2% (Divergent Wavefronts)", "94.7% (Re-Coalesced Wavefronts)",
             "120.0 dB (BIT-EXACT)", "0.000",
-            "Primary Rays: 921,600 (1280x720) | Multi-BSDF Hits: 2,457,600 | BVH Traversal: 44.8 steps/ray"
+            "Primary Rays: 921,600 (1280x720) | Multi-BSDF Hits: 2,457,600"
         },
         {
             "Indoor Atrium (sponza.glb)",
@@ -5600,7 +5600,7 @@ void GuiApp::renderRayTracingViewport() {
             128, 64,
             "64.5% (Divergent Wavefronts)", "95.1% (Re-Coalesced Wavefronts)",
             "120.0 dB (BIT-EXACT)", "0.000",
-            "Primary Rays: 921,600 (1280x720) | Indirect Bounces: 3,686,400 | BVH Traversal: 52.1 steps/ray"
+            "Primary Rays: 921,600 (1280x720) | Indirect Bounces: 3,686,400"
         },
         {
             "Open-World Forest (AAAOutdoorForest)",
@@ -5614,7 +5614,7 @@ void GuiApp::renderRayTracingViewport() {
             128, 64,
             "61.3% (Divergent Wavefronts)", "96.2% (Re-Coalesced Wavefronts)",
             "120.0 dB (BIT-EXACT)", "0.000",
-            "Primary Rays: 921,600 (1280x720) | Alpha Tests: 2,764,800 | BVH Traversal: 64.5 steps/ray"
+            "Primary Rays: 921,600 (1280x720) | Alpha Tests: 2,764,800"
         },
         {
             "Outdoor Landscape (OutdoorLandscape)",
@@ -5628,7 +5628,7 @@ void GuiApp::renderRayTracingViewport() {
             128, 64,
             "72.1% (Divergent Wavefronts)", "95.8% (Re-Coalesced Wavefronts)",
             "120.0 dB (BIT-EXACT)", "0.000",
-            "Primary Rays: 921,600 (1280x720) | Direct Light Passes: 4 | BVH Traversal: 38.2 steps/ray"
+            "Primary Rays: 921,600 (1280x720) | Direct Light Passes: 4"
         }
     };
     const size_t numScenes = sizeof(scenes) / sizeof(scenes[0]);
@@ -6023,12 +6023,7 @@ void GuiApp::renderRayTracingViewport() {
                 ImGui::TextColored(ImVec4(0.65f, 0.70f, 0.80f, 1.0f), "Not Measured");
             }
             ImGui::SameLine(0, s(16.0f));
-            ImGui::TextDisabled("Reference Target: %s", curSceneMeta.techAScore);
-            ImGui::TextDisabled("VGPR Pressure:"); ImGui::SameLine();
-            ImGui::TextColored(ImVec4(0.95f, 0.65f, 0.35f, 1.0f), "%d VGPRs", curSceneMeta.vgprTrad);
-            ImGui::SameLine(0, s(16.0f));
-            ImGui::TextDisabled("SIMD Utilization:"); ImGui::SameLine();
-            ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f), "%s", curSceneMeta.simdTrad);
+            ImGui::TextDisabled("Baseline Target (R9700 720p): %s", curSceneMeta.techAScore);
             ImGui::EndChild();
 
             ImGui::TableNextColumn();
@@ -6042,12 +6037,7 @@ void GuiApp::renderRayTracingViewport() {
                 ImGui::TextColored(ImVec4(0.65f, 0.70f, 0.80f, 1.0f), "Not Measured");
             }
             ImGui::SameLine(0, s(16.0f));
-            ImGui::TextDisabled("Reference Target: %s", curSceneMeta.techBScore);
-            ImGui::TextDisabled("VGPR Pressure:"); ImGui::SameLine();
-            ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%d VGPRs", curSceneMeta.vgprDgc);
-            ImGui::SameLine(0, s(16.0f));
-            ImGui::TextDisabled("SIMD Utilization:"); ImGui::SameLine();
-            ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s", curSceneMeta.simdDgc);
+            ImGui::TextDisabled("Baseline Target (R9700 720p): %s", curSceneMeta.techBScore);
             ImGui::EndChild();
 
             ImGui::EndTable();
@@ -6171,7 +6161,7 @@ void GuiApp::renderRayTracingViewport() {
                 m_rtPassIndex = static_cast<int>(p);
             }
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("%s\n%s\nTime: %s | Throughput: %s | %s",
+                ImGui::SetTooltip("%s\n%s\nReference (R9700 720p): %s | %s | %s",
                                   passes[p].name, passes[p].passType,
                                   passes[p].timeMs, passes[p].mrays, passes[p].fps);
             }
@@ -6188,13 +6178,13 @@ void GuiApp::renderRayTracingViewport() {
         ImGui::SameLine(0, s(16.0f));
         ImGui::TextDisabled("| %s", curPass.passType);
         ImGui::SameLine(0, s(20.0f));
-        ImGui::Text("Time: "); ImGui::SameLine();
+        ImGui::Text("Ref Time (R9700 720p): "); ImGui::SameLine();
         ImGui::TextColored(ImVec4(0.95f, 0.80f, 0.35f, 1.0f), "%s", curPass.timeMs);
         ImGui::SameLine(0, s(16.0f));
-        ImGui::Text("Throughput: "); ImGui::SameLine();
+        ImGui::Text("Ref Rate: "); ImGui::SameLine();
         ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s", curPass.mrays);
         ImGui::SameLine(0, s(16.0f));
-        ImGui::Text("Effective FPS: "); ImGui::SameLine();
+        ImGui::Text("Ref FPS: "); ImGui::SameLine();
         ImGui::TextColored(ImVec4(0.95f, 0.95f, 0.95f, 1.0f), "%s", curPass.fps);
         ImGui::TextDisabled("%s", curPass.description);
         ImGui::EndChild();

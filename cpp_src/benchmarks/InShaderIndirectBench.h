@@ -27,8 +27,11 @@ public:
   std::vector<std::string> GetAliases() const override {
     return {"indirect", "indirect-dispatch", "inshaderindirect", "in-shader-indirect", "indirect_synth", "command_synth"};
   }
-  const char *GetMetric() const override { return "MItems/s"; }
-  const char *GetMetric(uint32_t config_idx) const override { return "MItems/s"; }
+  const char *GetMetric() const override { return "us"; }
+  const char *GetMetric(uint32_t /*config_idx*/) const override { return "us"; }
+  int32_t GetBaselineConfigIndex(uint32_t config_idx) const override {
+    return (config_idx == 0) ? -1 : 0;
+  }
   bool IsSupported(const DeviceInfo &info, IComputeContext *context = nullptr) const override {
     if (context && context->getBackend() != ComputeBackend::Vulkan) {
       return false;

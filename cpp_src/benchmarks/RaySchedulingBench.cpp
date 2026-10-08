@@ -395,6 +395,57 @@ std::string RaySchedulingBench::GetConfigName(uint32_t config_idx) const {
   }
 }
 
+int32_t RaySchedulingBench::GetBaselineConfigIndex(uint32_t config_idx) const {
+  switch (config_idx) {
+  // Scene Ray Tracing (PBR): baseline is 17 (Primary Rays Compute Megakernel)
+  case 18: // Primary Rays (Wavefront - DGC)
+  case 29: // Primary Rays (RTP)
+  case 30: // Primary Rays (RTP + SER)
+    return 17;
+
+  // Total Scene Render: baseline is 9 (Scene Render: Full Frame Megakernel)
+  case 10: // Scene Render: Full Frame (RTP + SER)
+  case 11: // Scene Render: Full Frame (DGC)
+    return 9;
+
+  // Traversal Ordering & Coherence: baseline is 12 (Linear 1D Scanline)
+  case 14: // 2D Screen Tiled (8x4)
+  case 15: // 2D Morton (8x4)
+  case 16: // 2D Morton (4x8)
+    return 12;
+
+  // Material Shading: baseline is 0 (Stage: Material Shading Megakernel)
+  case 1: // Stage: Material Shading (RTP + SER)
+  case 2: // Stage: Material Shading (DGC)
+    return 0;
+
+  // Scene Path Tracing (Multi-Bounce): baseline is 3 (Megakernel)
+  case 4:  // Path Tracing (RTP + SER)
+  case 25: // Path Tracing (Dynamic Load Balancing / Persistent Threads)
+    return 3;
+
+  // Directional Shadows: baseline is 19 (Single Light Megakernel)
+  case 20: // Single Light (RTP + SER)
+  case 21: // Single Light (DGC)
+  case 22: // Multi-Light (3 Lights, DGC)
+    return 19;
+
+  // Multi-Light Evaluation: Single Light baseline 31, 128 Lights baseline 33
+  case 32:
+    return 31;
+  case 34:
+    return 33;
+
+  // Incoherent Ray Tracing: baseline is 6 (Megakernel)
+  case 7: // Incoherent Diffuse GI (RTP + SER)
+    return 6;
+
+  // Configs with no work-equivalent baseline (or that are baselines themselves):
+  default:
+    return -1;
+  }
+}
+
 const char *RaySchedulingBench::GetSubCategory(uint32_t config_idx) const {
   if (config_idx == 17 || config_idx == 18 || config_idx == 29 || config_idx == 30)
     return "Scene Ray Tracing (PBR)";
@@ -1431,11 +1482,30 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     vContext->dispatch(kernelTraditional, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     break;
   }
-  case 18: { // Stage Breakdown - Primary Ray Tracing (2D Morton 8x4, Wavefront DGC)
-    vContext->dispatch(kernelReset, 1, 1, 1, 32, 1, 1);
+  case 18: { // Scene Ray Tracing (PBR) - Primary Rays (2D Morton 8x4, Wavefront DGC)
+    for (uint32_t m = 0; m < materialBatches.size(); ++m) {
+      struct {
+        uint32_t materialId;
+        uint32_t queueCapacity;
+        uint32_t dumpRenders;
+        uint32_t width;
+        uint32_t height;
+        uint32_t sceneType;
+        uint32_t isGltf;
+        uint32_t mode;
+      } pcMat{m, materialCapacity, dumpRenders ? 1u : 0u, renderWidth, renderHeight, sceneTypeVal, isGltfVal, 0u};
+      std::memcpy(materialBatches[m].pushConstants.data(), &pcMat, sizeof(pcMat));
+    }
     PushConstantsClassify pcClassify{rayCount, 0, 0, seed, dumpRenders ? 1u : 0u, renderWidth, renderHeight, materialCapacity, 2, sceneTypeVal, isGltfVal, 1u};
     vContext->setKernelArg(kernelClassify, 10, sizeof(pcClassify), &pcClassify);
-    vContext->dispatch(kernelClassify, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
+
+    vContext->dispatchWorkListSequence(
+        kernelReset,
+        kernelClassify, (rayCount + 31) / 32, 1, 1,
+        kernelResolve,
+        kernelMaterial, indirectBuffer, materialBatches,
+        false /* isPingPong */,
+        isDGCAvailable ? &dgcInfoStandard : nullptr, isDGCAvailable ? 1u : 0u);
     break;
   }
   case 19: { // Ray-Traced Shadows - Traditional Megakernel (Directional Shadow Rays, In-Kernel Traversal)

@@ -32,6 +32,8 @@ struct ResultData {
   uint32_t width = 0;
   uint32_t height = 0;
   std::string errorString;
+  bool isValid = true;
+  int32_t baselineConfigIndex = -1;
 };
 
 struct ImportedRun;

@@ -157,8 +157,8 @@ void InShaderIndirectBench::Teardown() {
   }
 }
 
-BenchmarkResult InShaderIndirectBench::GetResult(uint32_t config_idx) const {
-  return { kTotalItems, 0.0 };
+BenchmarkResult InShaderIndirectBench::GetResult(uint32_t /*config_idx*/) const {
+  return { 1, 0.0 };
 }
 
 bool InShaderIndirectBench::ValidateResults(uint32_t config_idx) const {

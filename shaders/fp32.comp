@@ -29,7 +29,9 @@ void main() {
     vec4 a[32];
     APPLY32(INIT)
 
-    vec4 m = vec4(pushConstants.multiplier);
+    // Spectral radius (1 + m)^16384 stays bounded in [0.2, 5.2] with |m| <= 1e-4,
+    // avoiding IEEE-754 saturation to +inf while preserving dst == addend for v_dual_fmac_f32
+    vec4 m = vec4(pushConstants.multiplier * 0.0001);
     for (int iteration = 0; iteration < 16384; ++iteration) {
         APPLY32(STEP)
     }

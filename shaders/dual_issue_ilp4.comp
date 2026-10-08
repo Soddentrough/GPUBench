@@ -25,7 +25,7 @@ void main() {
     float base = InOutBuffer.data[index];
     float val0 = base;
     float val1 = base + 0.1;
-    float m = pushConstants.multiplier;
+    float m = pushConstants.multiplier * 0.00001;
 
     // 131072 iterations * 2 scalar FMAs = 131072 * 4 = 524,288 FP32 operations
     for (int i = 0; i < 131072; ++i) {

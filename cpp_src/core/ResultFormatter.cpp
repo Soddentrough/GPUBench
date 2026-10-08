@@ -307,8 +307,7 @@ void ResultFormatter::print() {
   std::string maxRayWorkload = "";
   double megakernelPBRRate = 0.0;
   double dgcPBRRate = 0.0;
-  double megakernelPT16Rate = 0.0;
-  double dgcPT16Rate = 0.0;
+  std::string pbrSceneName = "";
   double scanlineRate = 0.0;
   double tiledRate = 0.0;
   double maxBlasUpdateRate = 0.0;
@@ -339,7 +338,7 @@ void ResultFormatter::print() {
     subcatGroup.benchmarks[{res.sortWeight, res.configIndex, cleanName}][res.backendName] = res;
 
     // Track metrics for executive summary
-    if (!res.isUnsupported && res.time_ms > 0.0) {
+    if (!res.isUnsupported && res.isValid && res.time_ms > 0.0) {
       double rate = (static_cast<double>(res.operations) / (res.time_ms / 1000.0)) / 1e6;
       if (res.benchmarkName.find("RayRawTraversal") != std::string::npos) {
         double time_s = res.time_ms / 1000.0;
@@ -357,20 +356,19 @@ void ResultFormatter::print() {
         if (res.benchmarkName.find("Primary Rays (Compute Megakernel)") != std::string::npos ||
             res.benchmarkName.find("Primary Rays (Megakernel)") != std::string::npos ||
             res.benchmarkName.find("Full Scene Ray Tracing (PBR) - Megakernel") != std::string::npos) {
-          megakernelPBRRate = rate;
+          if (pbrSceneName.empty() || sceneName == pbrSceneName) {
+            megakernelPBRRate = rate;
+            if (pbrSceneName.empty()) pbrSceneName = sceneName;
+          }
         } else if (res.benchmarkName.find("Primary Rays (Wavefront - DGC)") != std::string::npos ||
                    res.benchmarkName.find("Primary Rays (DGC)") != std::string::npos ||
                    res.benchmarkName.find("Full Scene Ray Tracing (PBR) - DGC") != std::string::npos ||
                    res.benchmarkName.find("Full Scene Ray Tracing (PBR) - Work Lists") != std::string::npos ||
                    res.benchmarkName.find("Full Scene Ray Tracing (PBR) - Device-Generated Commands") != std::string::npos) {
-          dgcPBRRate = rate;
-        } else if (res.benchmarkName.find("16 SPP) (Megakernel)") != std::string::npos ||
-                   res.benchmarkName.find("16 SPP) - Traditional Megakernel") != std::string::npos) {
-          megakernelPT16Rate = rate;
-        } else if (res.benchmarkName.find("16 SPP) (DGC)") != std::string::npos ||
-                   res.benchmarkName.find("16 SPP) - Work Lists") != std::string::npos ||
-                   res.benchmarkName.find("16 SPP) - Device-Generated Commands") != std::string::npos) {
-          dgcPT16Rate = rate;
+          if (pbrSceneName.empty() || sceneName == pbrSceneName) {
+            dgcPBRRate = rate;
+            if (pbrSceneName.empty()) pbrSceneName = sceneName;
+          }
         } else if (res.benchmarkName.find("1D Scanline") != std::string::npos) {
           scanlineRate = rate;
         } else if (res.benchmarkName.find("2D Screen Tiled") != std::string::npos) {
@@ -566,11 +564,16 @@ void ResultFormatter::print() {
                 for (const auto &backend : backends) {
                   if (benchPair.second.count(backend)) {
                     const auto &res = benchPair.second.at(backend);
-                    if (!res.isUnsupported && res.time_ms > 0.0) {
-                      double val = static_cast<double>(res.operations) / (res.time_ms / 1000.0);
-                      if (res.component == "Compute") val /= 1e12;
-                      else if (res.component == "Memory") val = (res.subcategory == "Latency") ? ((res.time_ms * 1e6) / res.operations) : (val / 1e9);
-                      else val /= (res.metric == "GIS/s" || res.metric == "GB/s") ? 1e9 : 1e6;
+                    if (!res.isUnsupported && res.isValid && res.time_ms > 0.0) {
+                      double val = 0.0;
+                      if (res.metric == "us") {
+                        val = (res.time_ms * 1000.0) / static_cast<double>(res.operations);
+                      } else {
+                        val = static_cast<double>(res.operations) / (res.time_ms / 1000.0);
+                        if (res.component == "Compute") val /= 1e12;
+                        else if (res.component == "Memory") val = (res.subcategory == "Latency") ? ((res.time_ms * 1e6) / res.operations) : (val / 1e9);
+                        else val /= (res.metric == "GIS/s" || res.metric == "GB/s") ? 1e9 : 1e6;
+                      }
 
                       baselineVal = val;
                       baselineMetric = res.metric;
@@ -610,6 +613,10 @@ void ResultFormatter::print() {
                 if (!note.empty()) {
                   noteStr = "[" + note + "]";
                 }
+              } else if (!res.isValid) {
+                valStr = "INVALID";
+                statusColor = RED;
+                noteStr = "[Validation Failed]";
               } else if (res.time_ms < 0.0) {
                 if (res.time_ms == -3.0) {
                   valStr = "ABORTED";
@@ -625,6 +632,8 @@ void ResultFormatter::print() {
                 double value = 0.0;
                 if (res.metric == "MItems/s") {
                   value = (static_cast<double>(res.operations) / (res.time_ms / 1000.0)) / 1e6;
+                } else if (res.metric == "us") {
+                  value = (res.time_ms * 1000.0) / static_cast<double>(res.operations);
                 } else {
                   value = (static_cast<double>(res.operations) / (res.time_ms / 1000.0)) / 1e12;
                 }
@@ -658,13 +667,13 @@ void ResultFormatter::print() {
                       if (bp.second.count(backend)) {
                         const auto &br = bp.second.at(backend);
                         if (br.subcategory == "Indirect Command Synthesis" && br.configIndex == 0 && br.time_ms > 0.0) {
-                          baseVal = (static_cast<double>(br.operations) / (br.time_ms / 1000.0)) / 1e6;
+                          baseVal = (br.time_ms * 1000.0) / static_cast<double>(br.operations);
                           break;
                         }
                       }
                     }
-                    if (baseVal > 0.0) {
-                      double ratio = value / baseVal;
+                    if (baseVal > 0.0 && value > 0.0) {
+                      double ratio = baseVal / value;
                       double pct = (ratio - 1.0) * 100.0;
                       noteStr = "└──> " + formatDouble(ratio, 2) + "x (" + (pct >= 0 ? "+" : "") + formatDouble(pct, 1) + "%)";
                     }
@@ -720,7 +729,7 @@ void ResultFormatter::print() {
                   if (fullName == baselineKeyName || fullName.find("Vector") != std::string::npos) {
                     noteStr = "[Baseline]";
                   } else {
-                    double ratio = value / baselineVal;
+                    double ratio = (res.metric == "us" || res.metric == "ns") ? (baselineVal / value) : (value / baselineVal);
                     double pct = (ratio - 1.0) * 100.0;
                     noteStr = "└──> " + formatDouble(ratio, 2) + "x (" + (pct >= 0 ? "+" : "") + formatDouble(pct, 1) + "%)";
                   }
@@ -840,12 +849,23 @@ void ResultFormatter::print() {
                         }
                       }
                     }
+                  } else if (res.baselineConfigIndex >= 0) {
+                    for (const auto &bp : subcat.benchmarks) {
+                      if (bp.second.count(backend)) {
+                        const auto &br = bp.second.at(backend);
+                        if (br.configIndex == static_cast<uint32_t>(res.baselineConfigIndex) && br.time_ms > 0.0 && br.isValid) {
+                          localBaseVal = static_cast<double>(br.operations) / (br.time_ms / 1000.0) / 1e6;
+                          localBaseMetric = br.metric;
+                          break;
+                        }
+                      }
+                    }
                   } else if (fullName == baselineKeyName ||
                              (((fullName.find("Megakernel") != std::string::npos && fullName.find("RTP") == std::string::npos) ||
                                fullName.find("Traditional") != std::string::npos || fullName.find("Baseline") != std::string::npos ||
                                fullName.find("Scanline") != std::string::npos || fullName.find("Wave Ballot") != std::string::npos))) {
                     isLocalBase = true;
-                  } else if (hasComparison && baselineVal > 0.0 && baselineMetric == res.metric) {
+                  } else if (hasComparison && baselineVal > 0.0 && baselineMetric == res.metric && res.baselineConfigIndex != -1) {
                     localBaseVal = baselineVal;
                     localBaseMetric = baselineMetric;
                   }
@@ -935,16 +955,10 @@ void ResultFormatter::print() {
     if (megakernelPBRRate > 0.0 && dgcPBRRate > 0.0) {
       double pbrSpeedup = dgcPBRRate / megakernelPBRRate;
       std::string val = BOLD + GREEN + formatDouble(pbrSpeedup, 2) + "x" + RESET;
-      std::string extra = " in PBR Ray Tracing (" + formatDouble(dgcPBRRate, 1) + " vs " +
+      std::string sceneTag = pbrSceneName.empty() ? "" : (" [" + pbrSceneName + "]");
+      std::string extra = " in PBR Ray Tracing" + sceneTag + " (" + formatDouble(dgcPBRRate, 1) + " vs " +
                           formatDouble(megakernelPBRRate, 1) + " MRays/s)";
       printSummaryRow("Wavefront Scheduling Speedup", val, extra);
-    }
-    if (megakernelPT16Rate > 0.0 && dgcPT16Rate > 0.0) {
-      double ptSpeedup = dgcPT16Rate / megakernelPT16Rate;
-      std::string val = BOLD + GREEN + formatDouble(ptSpeedup, 2) + "x" + RESET;
-      std::string extra = " in 16 SPP Stress (" + formatDouble(dgcPT16Rate, 1) + " vs " +
-                          formatDouble(megakernelPT16Rate, 1) + " MRays/s)";
-      printSummaryRow("Multi-Bounce Path Tracing   ", val, extra);
     }
     if (scanlineRate > 0.0 && tiledRate > 0.0) {
       double cacheGain = ((tiledRate - scanlineRate) / scanlineRate) * 100.0;
@@ -1149,6 +1163,11 @@ void ResultFormatter::printComparison(const std::vector<ImportedRun> &runs) {
       wv.formattedStr = "UNSUPPORTED";
       return wv;
     }
+    if (!res.isValid) {
+      wv.formattedStr = "INVALID";
+      wv.isValid = false;
+      return wv;
+    }
     if (res.time_ms <= 0.0 || res.operations == 0) {
       wv.formattedStr = "N/A";
       return wv;
@@ -1159,8 +1178,20 @@ void ResultFormatter::printComparison(const std::vector<ImportedRun> &runs) {
     int prec = 2;
 
     if (res.component == "Compute") {
-      wv.val = rawRate / 1e12;
-      wv.metric = res.metric.empty() ? "TFLOPS" : res.metric;
+      if (res.metric == "MItems/s") {
+        wv.val = rawRate / 1e6;
+        wv.metric = res.metric;
+      } else if (res.metric == "us") {
+        wv.val = (res.time_ms * 1000.0) / static_cast<double>(res.operations);
+        wv.isLatency = true;
+        wv.metric = "us";
+        wv.isValid = true;
+        wv.formattedStr = formatDouble(wv.val, 2) + " us";
+        return wv;
+      } else {
+        wv.val = rawRate / 1e12;
+        wv.metric = res.metric.empty() ? "TFLOPS" : res.metric;
+      }
     } else if (res.component == "Memory") {
       if (res.subcategory == "Latency" || res.metric == "ns" || res.benchmarkName.find("Latency") != std::string::npos) {
         wv.val = (res.time_ms * 1e6) / static_cast<double>(res.operations);
@@ -1717,9 +1748,14 @@ std::string resultsToJson(const std::vector<ResultData> &results) {
       out += "      \"error\": \"" + jsonEscape(r.errorString) + "\",\n";
     } else if (r.isUnsupported) {
       out += "      \"status\": \"UNSUPPORTED\",\n";
+    } else if (!r.isValid) {
+      out += "      \"status\": \"INVALID\",\n";
+      out += "      \"error\": \"Result validation failed (numerical divergence or NaN/Inf detected)\",\n";
     } else {
       out += "      \"status\": \"SUCCESS\",\n";
     }
+    out += std::string("      \"is_valid\": ") +
+           (r.isValid ? "true" : "false") + ",\n";
     out += std::string("      \"is_emulated\": ") +
            (r.isEmulated ? "true" : "false") + ",\n";
     out += std::string("      \"unsupported\": ") +

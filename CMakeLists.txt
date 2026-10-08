@@ -615,6 +615,12 @@ if(UNIX AND NOT APPLE)
                 FILES_MATCHING PATTERN "*.png")
     endif()
 
+    # Documentation and Legal Notices
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE"
+                  "${CMAKE_CURRENT_SOURCE_DIR}/README.md"
+                  "${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_NOTICES.md"
+            DESTINATION share/doc/gpubench)
+
 endif()
 
 # CPack configuration for creating packages

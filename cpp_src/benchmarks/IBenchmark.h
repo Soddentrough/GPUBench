@@ -28,6 +28,9 @@ public:
   virtual void RecordRunResult(uint32_t /*config_idx*/, uint64_t /*total_invocations*/, double /*total_time_ms*/) {}
   virtual void RebuildAccelerationStructures() {}
   virtual bool ValidateResults(uint32_t /*config_idx*/ = 0) const { return true; }
+  // Optional 0-indexed baseline config index for speedup comparison within this benchmark.
+  // Returns -1 if this config is itself a baseline or has no comparable baseline.
+  virtual int32_t GetBaselineConfigIndex(uint32_t /*config_idx*/) const { return -1; }
   virtual bool IsEmulated(uint32_t /*config_idx*/ = 0) const { return false; }
   virtual void SetVerifyParity(bool /*verify*/) {}
   virtual bool HasParityFailure() const { return false; }

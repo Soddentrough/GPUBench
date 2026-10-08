@@ -76,6 +76,7 @@ public:
   bool isQuiet() const { return quiet; }
   bool hasParityFailure() const { return parityFailure; }
   bool hasExecutionFailure() const { return executionFailure; }
+  bool hasValidationFailure() const { return validationFailure; }
 
   void setWorkloadFilter(const std::vector<std::string> &filter) { workloadFilter = filter; }
   const std::vector<std::string>& getWorkloadFilter() const { return workloadFilter; }
@@ -105,6 +106,7 @@ private:
   bool verifyParity = false;
   bool parityFailure = false;
   bool executionFailure = false;
+  bool validationFailure = false;
   std::string sceneName = "all";
   uint32_t renderWidth = 3840;
   uint32_t renderHeight = 2160;

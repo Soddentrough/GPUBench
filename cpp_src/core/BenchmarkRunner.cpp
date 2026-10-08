@@ -1075,7 +1075,7 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
               iterations = static_cast<uint64_t>(std::max(1.0, 1500.0 / single_run_ms));
             }
 
-            total_invocations = iterations;
+            total_invocations = 0;
             if (context->hasGpuTiming()) {
               context->startTiming();
             }
@@ -1083,6 +1083,7 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
             for (uint64_t iter = 0; iter < iterations; ++iter) {
               if (cancelToken && cancelToken->load()) break;
               bench->Run(i);
+              total_invocations++;
             }
             if (context->hasGpuTiming()) {
               double gpu_time = context->stopTiming();
@@ -1101,18 +1102,40 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
                   std::chrono::duration<double, std::milli>(end - start).count();
             }
           }
+          if (total_invocations == 0) {
+            ResultData abort_data;
+            abort_data.backendName = ComputeBackendFactory::getBackendName(context->getBackend());
+            abort_data.deviceName = info.name;
+            abort_data.vendorId = info.vendorID;
+            abort_data.deviceId = info.deviceID;
+            abort_data.benchmarkName = bench_name;
+            abort_data.time_ms = -3.0; // ABORTED
+            abort_data.errorString = "Benchmark cancelled by user before execution";
+            abort_data.isUnsupported = false;
+            abort_data.isValid = false;
+            abort_data.component = bench->GetComponent(i);
+            abort_data.subcategory = bench->GetSubCategory(i);
+            abort_data.configIndex = i;
+            abort_data.sortWeight = bench->GetSortWeight(i);
+            formatter->addResult(abort_data);
+            executionFailure = true;
+            continue;
+          }
           if (verbose) {
             std::cout << "[TIMING " << bench_name << "] single_run_ms: " << single_run_ms
-                      << ", iterations: " << iterations
+                      << ", iterations: " << total_invocations
                       << ", total_time_ms: " << total_time_ms
-                      << ", avg_ms: " << (total_time_ms / iterations) << std::endl;
+                      << ", avg_ms: " << (total_time_ms / total_invocations) << std::endl;
           }
         }
 
         bool isValid = bench->ValidateResults(i);
-        if (!isValid && verbose) {
-          std::cerr << " [WARNING] Result validation failed for "
-                    << bench_name << std::endl;
+        if (!isValid) {
+          validationFailure = true;
+          if (verbose) {
+            std::cerr << " [WARNING] Result validation failed for "
+                      << bench_name << std::endl;
+          }
         }
 
         BenchmarkResult bench_result = bench->GetResult(i);
@@ -1129,6 +1152,8 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
         result_data.operations =
             bench_result.operations * total_invocations;
         result_data.time_ms = total_time_ms;
+        result_data.isValid = isValid;
+        result_data.baselineConfigIndex = bench->GetBaselineConfigIndex(i);
         result_data.isEmulated = bench->IsEmulated(i);
         result_data.supportNote = bench->GetConfigCaveat(i, info, context);
         if (result_data.supportNote.empty()) {
@@ -1166,6 +1191,9 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
         } else if (result_data.metric.find("ns") != std::string::npos) {
           double nsVal = (result_data.operations > 0) ? ((result_data.time_ms * 1e6) / result_data.operations) : result_data.time_ms;
           snprintf(scoreBuf, sizeof(scoreBuf), "%.1f ns", nsVal);
+        } else if (result_data.metric.find("us") != std::string::npos) {
+          double usVal = (result_data.operations > 0) ? ((result_data.time_ms * 1000.0) / result_data.operations) : (result_data.time_ms * 1000.0);
+          snprintf(scoreBuf, sizeof(scoreBuf), "%.1f us", usVal);
         } else if (result_data.metric.find("M") != std::string::npos) {
           snprintf(scoreBuf, sizeof(scoreBuf), "%.1f %s", opsPerSec / 1e6, result_data.metric.c_str());
         } else {

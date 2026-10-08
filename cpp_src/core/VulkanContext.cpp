@@ -724,37 +724,17 @@ void VulkanContext::createDevice() {
     return false;
   };
 
-#ifndef VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT8_FEATURES_EXT
-#define VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT8_FEATURES_EXT ((VkStructureType)1000521001)
-#endif
-#ifndef VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT_CONTROLS_2_FEATURES_KHR
-#define VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT_CONTROLS_2_FEATURES_KHR ((VkStructureType)1000528001)
-#endif
-#ifndef VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_INVOCATION_REORDER_FEATURES_NV
-#define VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_INVOCATION_REORDER_FEATURES_NV ((VkStructureType)1000490000)
-#endif
+  VkPhysicalDeviceShaderFloat8FeaturesEXT float8Features{
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT8_FEATURES_EXT, nullptr, VK_FALSE};
 
-  // Explicitly using the struct names for EXT/KHR features
-  struct VkPhysicalDeviceFloat8FeaturesEXT {
-    VkStructureType sType;
-    void *pNext;
-    VkBool32 shaderFloat8;
-  } float8Features{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT8_FEATURES_EXT, nullptr, VK_FALSE};
-
-  struct VkPhysicalDeviceShaderFloatControls2FeaturesKHR {
-    VkStructureType sType;
-    void *pNext;
-    VkBool32 shaderFloatControls2;
-  } floatControls2Features{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT_CONTROLS_2_FEATURES_KHR, nullptr, VK_FALSE};
+  VkPhysicalDeviceShaderFloatControls2FeaturesKHR floatControls2Features{
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT_CONTROLS_2_FEATURES_KHR, nullptr, VK_FALSE};
 
   VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtPipelineFeatures{
       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR, nullptr};
 
-  struct VkPhysicalDeviceRayTracingInvocationReorderFeaturesEXTCustom {
-    VkStructureType sType;
-    void *pNext;
-    VkBool32 rayTracingInvocationReorderEXT;
-  } serFeatures{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_INVOCATION_REORDER_FEATURES_NV, nullptr, VK_FALSE};
+  VkPhysicalDeviceRayTracingInvocationReorderFeaturesEXT serFeatures{
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_INVOCATION_REORDER_FEATURES_EXT, nullptr, VK_FALSE};
 
   VkPhysicalDeviceRayTracingMaintenance1FeaturesKHR rtMaint1Features{
       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_MAINTENANCE_1_FEATURES_KHR,
@@ -871,7 +851,7 @@ void VulkanContext::createDevice() {
   }
 
   serSupported = hasExt("VK_EXT_ray_tracing_invocation_reorder") &&
-                 (serFeatures.rayTracingInvocationReorderEXT == VK_TRUE);
+                 (serFeatures.rayTracingInvocationReorder == VK_TRUE);
 
   subgroupSizeControlSupported = hasExt(VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME) &&
                                  (subgroupSizeFeatures.subgroupSizeControl == VK_TRUE);

@@ -122,6 +122,10 @@ int main(int argc, char **argv) {
   app.add_flag("--verify-parity", verify_parity,
                "Enforce visual parity gating between Megakernel and DGC (fails if PSNR < 45 dB or discrepancy > 0.01%)");
 
+  bool strict = false;
+  app.add_flag("--strict", strict,
+               "Enforce strict validation; exit with non-zero code if any benchmark fails numerical validation");
+
   std::string scene_str = "all";
   app.add_option("-s,--scene", scene_str,
                  "Ray tracing benchmark scenario: showroom, indoor, outdoor, forest, all (default: all)")
@@ -609,6 +613,10 @@ int main(int argc, char **argv) {
     }
     if (runner.hasExecutionFailure()) {
       std::cerr << "Error: One or more benchmarks failed or were aborted." << std::endl;
+      return EXIT_FAILURE;
+    }
+    if (strict && runner.hasValidationFailure()) {
+      std::cerr << "Error: One or more benchmarks failed numerical validation (--strict enabled)." << std::endl;
       return EXIT_FAILURE;
     }
 
