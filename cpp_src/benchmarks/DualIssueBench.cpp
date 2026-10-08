@@ -7,60 +7,60 @@
 DualIssueBench::DualIssueBench() {
   configs = {
     {
-      "Standard FP32",
+      "FP32 Baseline (Ping-Pong)",
       "dual_issue_ilp4.comp",
       "run_dual_issue_ilp4",
       16384ULL * 32ULL, // 524,288 ops/thread
       "TFLOPS",
-      "Single-issue FP32 baseline (1 FMA/cycle); sequential dependency prevents dual-issuing"
+      "Single-issue FP32 baseline (1 FMA/cycle); sequential ping-pong dependency prevents superscalar latency hiding and dual-issuing"
     },
     {
-      "Dual-Issue FP32 (Partial Co-Issue)",
+      "FP32 Moderate ILP (8 Chains)",
       "dual_issue_ilp8.comp",
       "run_dual_issue_ilp8",
       16384ULL * 64ULL, // 1,048,576 ops/thread
       "TFLOPS",
-      "Moderate ILP (8 chains); measures realistic dual-issue scaling with latency bubbles typical of real shaders, before peak saturation"
+      "Moderate ILP (8 independent chains); measures latency hiding across arithmetic stages before peak saturation"
     },
     {
-      "Dual-Issue FP32 (FP32+FP32)",
+      "FP32 Peak ILP / Co-Issue (16 Chains)",
       "dual_issue_ilp16.comp",
       "run_dual_issue_ilp16",
       16384ULL * 128ULL, // 2,097,152 ops/thread
       "TFLOPS",
-      "Peak dual-issue saturation (16 chains); saturates dual ALUs to measure maximum hardware co-issue capacity (2 FMAs/cycle)"
+      "Peak ILP saturation (16 independent chains); saturates pipeline depth and evaluates dual-issue capacity on architectures with dual VALUs (e.g. RDNA 4 VOPD)"
     },
     {
-      "Standard INT32",
+      "INT32 Baseline (Ping-Pong)",
       "dual_issue_int32_4.comp",
       "run_dual_issue_int32_4",
       16384ULL * 32ULL, // 524,288 ops/thread
       "TOPS",
-      "Single-issue integer baseline (1 ALU op/cycle); tests basic integer ALU throughput"
+      "Single-issue integer baseline (1 ALU/cycle); sequential dependency prevents pipelined execution"
     },
     {
-      "Dual-Issue INT32 (Partial Co-Issue)",
+      "INT32 Moderate ILP (8 Chains)",
       "dual_issue_int32_8.comp",
       "run_dual_issue_int32_8",
       16384ULL * 64ULL, // 1,048,576 ops/thread
       "TOPS",
-      "Moderate integer ILP (8 chains); tests whether integer ALUs can co-issue operations under typical instruction parallelism"
+      "Moderate integer ILP (8 independent chains); evaluates integer ALU latency hiding under typical instruction-level parallelism"
     },
     {
-      "Dual-Issue INT32 (INT32+INT32)",
+      "INT32 Peak ILP (16 Chains)",
       "dual_issue_int32.comp",
       "run_dual_issue_int32",
       16384ULL * 128ULL, // 2,097,152 ops/thread
       "TOPS",
-      "Peak integer ILP (16 chains); reveals if GPU has dual integer ALUs or is physically capped at 1 ALU/cycle"
+      "Peak integer ILP (16 independent chains); reveals whether integer datapath supports dual ALUs or single ALU/cycle"
     },
     {
-      "Dual-Issue Mixed (FP32+INT32)",
+      "Concurrent Mixed (FP32+INT32)",
       "dual_issue_mixed.comp",
       "run_dual_issue_mixed",
       16384ULL * 128ULL, // 2,097,152 ops/thread (64 FP32 + 64 INT32)
       "TOPS",
-      "Concurrent 1 FP32 + 1 INT32 per cycle; measures simultaneous execution across separate float and integer pipelines"
+      "Concurrent FP32 + INT32; evaluates simultaneous execution across decoupled float and integer ALU datapaths"
     }
   };
 }

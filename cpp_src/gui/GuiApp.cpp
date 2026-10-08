@@ -714,18 +714,18 @@ void GuiApp::initializeBenchmarkCategories() {
         cat.subgroups.push_back(sub);
 
         BenchmarkSubgroup dualSub;
-        dualSub.name = "Dual-Issue & Concurrency";
+        dualSub.name = "ILP & Concurrency";
         dualSub.component = "Compute";
-        dualSub.engineId = "Dual-Issue";
-        dualSub.description = "Dual-issue ALU co-issuing, ILP scaling, and concurrent FP32+INT32 arithmetic";
+        dualSub.engineId = "ILP & Concurrency";
+        dualSub.description = "Instruction-level parallelism (ILP) scaling, arithmetic latency hiding, and concurrent FP32+INT32 arithmetic";
         dualSub.items = {
-            {"Dual-Issue", "Dual-Issue", "Standard FP32", "Compute", "TFLOPS", "Single-issue FP32 baseline (1 FMA/cycle); sequential dependency prevents dual-issuing to measure honest 1-issue capacity", true, 0},
-            {"Dual-Issue", "Dual-Issue", "Dual-Issue FP32 (Partial Co-Issue)", "Compute", "TFLOPS", "Moderate ILP (8 chains); measures realistic dual-issue scaling with latency bubbles typical of real compiled shaders, before peak saturation", true, 1},
-            {"Dual-Issue", "Dual-Issue", "Dual-Issue FP32 (FP32+FP32)", "Compute", "TFLOPS", "Peak dual-issue saturation (16 chains); saturates dual ALUs to measure maximum hardware co-issue capacity (2 FMAs/cycle)", true, 2},
-            {"Dual-Issue", "Dual-Issue", "Standard INT32", "Compute", "TOPS", "Single-issue integer baseline (1 ALU op/cycle); tests basic integer ALU throughput", true, 3},
-            {"Dual-Issue", "Dual-Issue", "Dual-Issue INT32 (Partial Co-Issue)", "Compute", "TOPS", "Moderate integer ILP (8 chains); tests whether integer ALUs can co-issue operations under typical instruction parallelism", true, 4},
-            {"Dual-Issue", "Dual-Issue", "Dual-Issue INT32 (INT32+INT32)", "Compute", "TOPS", "Peak integer ILP (16 chains); reveals if GPU has dual integer ALUs or is physically capped at 1 ALU/cycle", true, 5},
-            {"Dual-Issue", "Dual-Issue", "Dual-Issue Mixed (FP32+INT32)", "Compute", "TOPS", "Concurrent 1 FP32 + 1 INT32 per cycle; measures simultaneous execution across separate float and integer pipelines", true, 6}
+            {"ILP & Dual-Issue", "ILP & Concurrency", "FP32 Baseline (Ping-Pong)", "Compute", "TFLOPS", "Single-issue FP32 baseline (1 FMA/cycle); sequential ping-pong dependency prevents superscalar latency hiding and dual-issuing", true, 0},
+            {"ILP & Dual-Issue", "ILP & Concurrency", "FP32 Moderate ILP (8 Chains)", "Compute", "TFLOPS", "Moderate ILP (8 independent chains); measures latency hiding across arithmetic stages before peak saturation", true, 1},
+            {"ILP & Dual-Issue", "ILP & Concurrency", "FP32 Peak ILP / Co-Issue (16 Chains)", "Compute", "TFLOPS", "Peak ILP saturation (16 independent chains); saturates pipeline depth and evaluates dual-issue capacity on architectures with dual VALUs (e.g. RDNA 4 VOPD)", true, 2},
+            {"ILP & Dual-Issue", "ILP & Concurrency", "INT32 Baseline (Ping-Pong)", "Compute", "TOPS", "Single-issue integer baseline (1 ALU/cycle); sequential dependency prevents pipelined execution", true, 3},
+            {"ILP & Dual-Issue", "ILP & Concurrency", "INT32 Moderate ILP (8 Chains)", "Compute", "TOPS", "Moderate integer ILP (8 independent chains); evaluates integer ALU latency hiding under typical instruction-level parallelism", true, 4},
+            {"ILP & Dual-Issue", "ILP & Concurrency", "INT32 Peak ILP (16 Chains)", "Compute", "TOPS", "Peak integer ILP (16 independent chains); reveals whether integer datapath supports dual ALUs or single ALU/cycle", true, 5},
+            {"ILP & Dual-Issue", "ILP & Concurrency", "Concurrent Mixed (FP32+INT32)", "Compute", "TOPS", "Concurrent FP32 + INT32; evaluates simultaneous execution across decoupled float and integer ALU datapaths", true, 6}
         };
         cat.subgroups.push_back(dualSub);
 
@@ -771,8 +771,8 @@ void GuiApp::initializeBenchmarkCategories() {
         cat.name = "Memory";
         cat.description = "On-chip cache hierarchy latencies (L0..L3), cache curves, and VRAM streaming bandwidth";
 
-        cat.subgroups.push_back({"Cache Latency", "Memory", "L0 Cache Latency", "On-chip CU vector cache read latency", {
-            {"L0 Cache Latency", "Cache Latency", "L0 Cache Latency (16 KB)", "Memory", "ns", "On-chip compute unit L0 vector cache latency", true, 0}
+        cat.subgroups.push_back({"Cache Latency", "Memory", "L0 Vector Cache Latency (16 KB)", "On-chip CU vector cache read latency", {
+            {"L0 Vector Cache Latency (16 KB)", "Cache Latency", "L0 Vector Cache Latency (16 KB)", "Memory", "ns", "16 KB pointer-chasing latency measuring nearest vector cache (AMD RDNA WGP Vector L0 / TCP, NVIDIA L1 / Texture, Intel L1)", true, 0}
         }});
 
         BenchmarkSubgroup cacheCurveSub;
@@ -2917,7 +2917,8 @@ bool GuiApp::matchesItem(const ResultData& r, const BenchmarkItem& itm, uint32_t
         if (p != std::string::npos) {
             baseName = baseName.substr(0, p);
         }
-        if ((itm.id == baseName || (itm.id == "L0 Cache Latency" && baseName == "L0 Cache Latency")) &&
+        if ((itm.id == baseName || (itm.id == "L0 Cache Latency" && baseName == "L0 Cache Latency") ||
+             (itm.id.find("L0") != std::string::npos && baseName.find("L0") != std::string::npos)) &&
             r.configIndex == static_cast<uint32_t>(itm.configIndex)) {
             return true;
         }
@@ -3034,8 +3035,9 @@ bool GuiApp::matchesItem(const ResultData& r, const BenchmarkItem& itm, uint32_t
         return false;
     }
 
-    // Dual-Issue matching
-    if (itm.subcategory == "Dual-Issue" || r.subcategory == "Dual-Issue") {
+    // Dual-Issue / ILP & Concurrency matching
+    if (itm.subcategory == "Dual-Issue" || r.subcategory == "Dual-Issue" ||
+        itm.subcategory == "ILP & Concurrency" || r.subcategory == "ILP & Concurrency") {
         if (itm.configIndex >= 0 && static_cast<uint32_t>(itm.configIndex) == r.configIndex) return true;
         std::string clean = cleanWorkloadName(r.benchmarkName, r.subcategory);
         return (clean == itm.name || r.benchmarkName == itm.name ||
@@ -3315,20 +3317,20 @@ GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
                 } else {
                     baselineName = "CPU Direct";
                 }
-            } else if (item.subcategory == "Dual-Issue") {
-                if (item.name == "Standard FP32") {
+            } else if (item.subcategory == "Dual-Issue" || item.subcategory == "ILP & Concurrency") {
+                if (item.name == "Standard FP32" || item.name == "FP32 Baseline (Ping-Pong)" || item.name.find("FP32 Baseline") != std::string::npos) {
                     info.isBaseline = true;
                     info.deltaText = "[Baseline]";
                     info.deltaColor = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
-                } else if (item.name.find("Dual-Issue FP32") != std::string::npos) {
+                } else if (item.name.find("Dual-Issue FP32") != std::string::npos || item.name.find("FP32 Moderate") != std::string::npos || item.name.find("FP32 Peak") != std::string::npos) {
                     baselineName = "Dual_Issue_FP32_Baseline";
-                } else if (item.name == "Standard INT32") {
+                } else if (item.name == "Standard INT32" || item.name == "INT32 Baseline (Ping-Pong)" || item.name.find("INT32 Baseline") != std::string::npos) {
                     info.isBaseline = true;
                     info.deltaText = "[Baseline]";
                     info.deltaColor = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
-                } else if (item.name.find("Dual-Issue INT32") != std::string::npos) {
+                } else if (item.name.find("Dual-Issue INT32") != std::string::npos || item.name.find("INT32 Moderate") != std::string::npos || item.name.find("INT32 Peak") != std::string::npos) {
                     baselineName = "Dual_Issue_INT32_Baseline";
-                } else if (item.name.find("Mixed") != std::string::npos) {
+                } else if (item.name.find("Mixed") != std::string::npos || item.name.find("Concurrent") != std::string::npos) {
                     baselineName = "Dual_Issue_Mixed_Harmonic";
                 }
             } else if (item.category == "Compute") {
@@ -3406,12 +3408,14 @@ GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
                 if (r.deviceIndex == activeDev) {
                     if (r.isUnsupported || r.time_ms <= 0.0) continue;
                     if (baselineName == "Dual_Issue_FP32_Baseline") {
-                        if (r.subcategory == "Dual-Issue" && (r.configIndex == 0 || r.benchmarkName.find("Standard FP32") != std::string::npos)) {
+                        if ((r.subcategory == "Dual-Issue" || r.subcategory == "ILP & Concurrency") &&
+                            (r.configIndex == 0 || r.benchmarkName.find("Standard FP32") != std::string::npos || r.benchmarkName.find("FP32 Baseline") != std::string::npos)) {
                             baselineRes = &r;
                             break;
                         }
                     } else if (baselineName == "Dual_Issue_INT32_Baseline") {
-                        if (r.subcategory == "Dual-Issue" && (r.configIndex == 3 || r.benchmarkName.find("Standard INT32") != std::string::npos)) {
+                        if ((r.subcategory == "Dual-Issue" || r.subcategory == "ILP & Concurrency") &&
+                            (r.configIndex == 3 || r.benchmarkName.find("Standard INT32") != std::string::npos || r.benchmarkName.find("INT32 Baseline") != std::string::npos)) {
                             baselineRes = &r;
                             break;
                         }
@@ -3496,10 +3500,10 @@ GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
             double baseFP32 = 0.0;
             double baseINT32 = 0.0;
             for (const auto& r : m_allResults) {
-                if (r.deviceIndex == activeDev && r.subcategory == "Dual-Issue" && !r.isUnsupported && r.time_ms > 0.0) {
-                    if (r.configIndex == 0 || r.benchmarkName.find("Standard FP32") != std::string::npos) {
+                if (r.deviceIndex == activeDev && (r.subcategory == "Dual-Issue" || r.subcategory == "ILP & Concurrency") && !r.isUnsupported && r.time_ms > 0.0) {
+                    if (r.configIndex == 0 || r.benchmarkName.find("Standard FP32") != std::string::npos || r.benchmarkName.find("FP32 Baseline") != std::string::npos) {
                         baseFP32 = (static_cast<double>(r.operations) / r.time_ms) * 1000.0;
-                    } else if (r.configIndex == 3 || r.benchmarkName.find("Standard INT32") != std::string::npos) {
+                    } else if (r.configIndex == 3 || r.benchmarkName.find("Standard INT32") != std::string::npos || r.benchmarkName.find("INT32 Baseline") != std::string::npos) {
                         baseINT32 = (static_cast<double>(r.operations) / r.time_ms) * 1000.0;
                     }
                 }
@@ -4019,7 +4023,7 @@ void GuiApp::renderBenchmarkSuitePanel() {
                 badgeColor = ImVec4(0.55f, 0.65f, 0.75f, 0.9f);
             }
         } else {
-            if (sub.name == "Compute Precision" || sub.name == "Dual-Issue & Concurrency") {
+            if (sub.name == "Compute Precision" || sub.name == "Dual-Issue & Concurrency" || sub.name == "ILP & Concurrency") {
                 rightBadge = "[TFLOPS / TOPS]";
             } else if (sub.name == "Host CPU System Memory") {
                 rightBadge = "[GB/s / ns]";
@@ -4161,12 +4165,12 @@ void GuiApp::renderBenchmarkSuitePanel() {
 
                     // Group identification for related tests
                     std::string itemGroupKey;
-                    if (sub.name == "Dual-Issue & Concurrency") {
-                        if (item.name.find("FP32") != std::string::npos && item.name.find("Mixed") == std::string::npos) {
+                    if (sub.name == "Dual-Issue & Concurrency" || sub.name == "ILP & Concurrency") {
+                        if (item.name.find("FP32") != std::string::npos && item.name.find("Mixed") == std::string::npos && item.name.find("Concurrent") == std::string::npos) {
                             itemGroupKey = "Dual-Issue_FP32";
-                        } else if (item.name.find("INT32") != std::string::npos && item.name.find("Mixed") == std::string::npos) {
+                        } else if (item.name.find("INT32") != std::string::npos && item.name.find("Mixed") == std::string::npos && item.name.find("Concurrent") == std::string::npos) {
                             itemGroupKey = "Dual-Issue_INT32";
-                        } else if (item.name.find("Mixed") != std::string::npos) {
+                        } else if (item.name.find("Mixed") != std::string::npos || item.name.find("Concurrent") != std::string::npos) {
                             itemGroupKey = "Dual-Issue_Mixed";
                         } else {
                             itemGroupKey = item.subcategory;
@@ -5318,19 +5322,20 @@ void GuiApp::renderResultsScorecard() {
                 deltaStr = !res.errorString.empty() ? ("[" + res.errorString + "]") : "[Failed]";
                 deltaCol = ImVec4(0.95f, 0.30f, 0.30f, 1.0f);
             } else if (res.component == "Compute") {
-                if (res.subcategory == "Dual-Issue") {
+                if (res.subcategory == "Dual-Issue" || res.subcategory == "ILP & Concurrency") {
                     if (res.configIndex == 0 || res.configIndex == 3) {
                         deltaStr = "[Baseline]";
                         deltaCol = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
                     } else if (res.configIndex == 6) {
-                        // Harmonic mean of Config 0 (Standard FP32) and Config 3 (Standard INT32)
+                        // Harmonic mean of Config 0 (FP32 Baseline) and Config 3 (INT32 Baseline)
                         double baseFP32 = 0.0;
                         double baseINT32 = 0.0;
                         for (const auto& other : m_allResults) {
-                            if (other.deviceIndex == res.deviceIndex && other.backendName == res.backendName && other.subcategory == "Dual-Issue" && other.time_ms > 0.0) {
-                                if (other.configIndex == 0 || other.benchmarkName.find("Standard FP32") != std::string::npos) {
+                            if (other.deviceIndex == res.deviceIndex && other.backendName == res.backendName &&
+                                (other.subcategory == "Dual-Issue" || other.subcategory == "ILP & Concurrency") && other.time_ms > 0.0) {
+                                if (other.configIndex == 0 || other.benchmarkName.find("Standard FP32") != std::string::npos || other.benchmarkName.find("FP32 Baseline") != std::string::npos) {
                                     baseFP32 = (static_cast<double>(other.operations) / other.time_ms) * 1000.0;
-                                } else if (other.configIndex == 3 || other.benchmarkName.find("Standard INT32") != std::string::npos) {
+                                } else if (other.configIndex == 3 || other.benchmarkName.find("Standard INT32") != std::string::npos || other.benchmarkName.find("INT32 Baseline") != std::string::npos) {
                                     baseINT32 = (static_cast<double>(other.operations) / other.time_ms) * 1000.0;
                                 }
                             }
@@ -5352,7 +5357,8 @@ void GuiApp::renderResultsScorecard() {
                         uint32_t targetBaseConfig = (res.configIndex >= 3) ? 3 : 0;
                         double baseOps = 0.0;
                         for (const auto& other : m_allResults) {
-                            if (other.deviceIndex == res.deviceIndex && other.backendName == res.backendName && other.subcategory == "Dual-Issue" &&
+                            if (other.deviceIndex == res.deviceIndex && other.backendName == res.backendName &&
+                                (other.subcategory == "Dual-Issue" || other.subcategory == "ILP & Concurrency") &&
                                 other.configIndex == targetBaseConfig && other.time_ms > 0.0) {
                                 baseOps = (static_cast<double>(other.operations) / other.time_ms) * 1000.0;
                                 break;

@@ -382,9 +382,9 @@ void BenchmarkRunner::discoverBenchmarks() {
 
   // Cache Latency
   benchmarks.push_back(std::make_unique<CacheBench>(
-      "L0 Cache Latency", "ns", l0_size, "l0_cache_latency",
-      create_shuffled_indices(l0_size / sizeof(uint32_t)),
-      std::vector<std::string>{"l0l"}, 0));
+      "L0 Vector Cache Latency (16 KB)", "ns", l0_size, "l0_cache_latency",
+      std::vector<uint32_t>{},
+      std::vector<std::string>{"l0l", "l0", "l0_cache_latency", "l0-cache-latency", "l0-latency", "l0cache"}, 0));
   benchmarks.push_back(std::make_unique<CacheLatencyCurveBench>());
   // L1, L2, and L3 cache latency tests temporarily disabled due to memory prefetcher & measurement volatility
   /*

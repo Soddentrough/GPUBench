@@ -20,6 +20,9 @@ public:
                    IComputeContext *context = nullptr) const override;
   std::string GetSupportNote(const DeviceInfo &info,
                              IComputeContext *context = nullptr) const override {
+    if (targetCacheLevel == 0) {
+      return "Measures nearest vector cache latency: AMD RDNA WGP Vector L0 (TCP, 16-32 KB); NVIDIA L1 / Texture; Intel L1";
+    }
     if (targetCacheLevel == 3 && info.l3CacheSize == 0) {
       return "Device does not have an L3 / Infinity Cache (l3CacheSize = 0)";
     }
@@ -29,6 +32,9 @@ public:
     return "";
   }
   std::string GetSupportNote() const override {
+    if (targetCacheLevel == 0) {
+      return "Measures nearest vector cache latency: AMD RDNA WGP Vector L0 (TCP, 16-32 KB); NVIDIA L1 / Texture; Intel L1";
+    }
     if (targetCacheLevel == 3) {
       return "Device does not have an L3 / Infinity Cache (l3CacheSize = 0)";
     }

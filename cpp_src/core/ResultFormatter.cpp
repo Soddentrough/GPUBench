@@ -166,14 +166,19 @@ std::string cleanWorkloadName(const std::string &rawName, const std::string &sub
     if (secondOpen != std::string::npos && name.back() == ')') {
       name = name.substr(secondOpen + 3, name.length() - (secondOpen + 4));
     }
-  } else if (subcat == "Dual-Issue" || name.rfind("Dual-Issue", 0) == 0) {
-    // Preserve full precision qualification for Dual-Issue workloads
-    if (name.rfind("Dual-Issue (", 0) == 0 && name.back() == ')') {
-      name = name.substr(12, name.length() - 13);
+  } else if (subcat == "Dual-Issue" || subcat == "ILP & Concurrency" ||
+             name.rfind("Dual-Issue", 0) == 0 || name.rfind("ILP & Dual-Issue", 0) == 0) {
+    // Preserve full precision qualification for Dual-Issue and ILP workloads
+    const std::string prefix1 = "ILP & Dual-Issue (";
+    const std::string prefix2 = "Dual-Issue (";
+    if (name.rfind(prefix1, 0) == 0 && name.back() == ')') {
+      name = name.substr(prefix1.length(), name.length() - prefix1.length() - 1);
+    } else if (name.rfind(prefix2, 0) == 0 && name.back() == ')') {
+      name = name.substr(prefix2.length(), name.length() - prefix2.length() - 1);
     } else if (name.rfind("Dual-Issue ", 0) == 0) {
       name = name.substr(11);
     }
-  } else {
+  } else if (name.rfind("Ray", 0) == 0) {
     // Handle "RayASBuild (BLAS Build (1M Tris))" or "RayIntersect (Ray-Triangle)"
     size_t firstOpen = name.find(" (");
     if (firstOpen != std::string::npos && name.back() == ')') {
@@ -679,20 +684,20 @@ void ResultFormatter::print() {
                       noteStr = "└──> " + formatDouble(ratio, 2) + "x (" + (pct >= 0 ? "+" : "") + formatDouble(pct, 1) + "%)";
                     }
                   }
-                } else if (res.subcategory == "Dual-Issue") {
+                } else if (res.subcategory == "Dual-Issue" || res.subcategory == "ILP & Concurrency") {
                   if (res.configIndex == 0 || res.configIndex == 3) {
                     noteStr = "[Baseline]";
                   } else if (res.configIndex == 6) {
-                    // Config 6: Dual-Issue Mixed (50% FP32 + 50% INT32).
+                    // Config 6: Mixed (50% FP32 + 50% INT32).
                     // The expected single-issue serialized baseline throughput is the harmonic mean of
-                    // Config 0 (Standard FP32 baseline) and Config 3 (Standard INT32 baseline):
+                    // Config 0 (FP32 baseline) and Config 3 (INT32 baseline):
                     // B_mixed = 2 / (1 / B_FP32 + 1 / B_INT32)
                     double baseFP32 = 0.0;
                     double baseINT32 = 0.0;
                     for (const auto &bp : subcat.benchmarks) {
                       if (bp.second.count(backend)) {
                         const auto &br = bp.second.at(backend);
-                        if (br.subcategory == "Dual-Issue" && br.time_ms > 0.0) {
+                        if ((br.subcategory == "Dual-Issue" || br.subcategory == "ILP & Concurrency") && br.time_ms > 0.0) {
                           if (br.configIndex == 0) {
                             baseFP32 = (static_cast<double>(br.operations) / (br.time_ms / 1000.0)) / 1e12;
                           } else if (br.configIndex == 3) {
@@ -714,7 +719,7 @@ void ResultFormatter::print() {
                     for (const auto &bp : subcat.benchmarks) {
                       if (bp.second.count(backend)) {
                         const auto &br = bp.second.at(backend);
-                        if (br.subcategory == "Dual-Issue" && br.configIndex == targetBaseConfig && br.time_ms > 0.0) {
+                        if ((br.subcategory == "Dual-Issue" || br.subcategory == "ILP & Concurrency") && br.configIndex == targetBaseConfig && br.time_ms > 0.0) {
                           double baseVal = (static_cast<double>(br.operations) / (br.time_ms / 1000.0)) / 1e12;
                           if (baseVal > 0.0) {
                             double ratio = value / baseVal;

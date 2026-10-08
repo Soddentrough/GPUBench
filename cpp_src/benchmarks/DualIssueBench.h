@@ -20,9 +20,9 @@ public:
   DualIssueBench();
   ~DualIssueBench() override = default;
 
-  const char *GetName() const override { return "Dual-Issue"; }
+  const char *GetName() const override { return "ILP & Dual-Issue"; }
   std::vector<std::string> GetAliases() const override {
-    return {"dualissue", "dual-issue", "vopd", "concurrency", "dual"};
+    return {"dualissue", "dual-issue", "ilp", "concurrency", "vopd", "dual"};
   }
   const char *GetMetric() const override { return "TFLOPS"; }
   const char *GetMetric(uint32_t config_idx) const override;
@@ -38,7 +38,7 @@ public:
     return "Compute";
   }
   const char *GetSubCategory(uint32_t /*config_idx*/ = 0) const override {
-    return "Dual-Issue";
+    return "ILP & Concurrency";
   }
   int GetSortWeight() const override { return 25; }
 

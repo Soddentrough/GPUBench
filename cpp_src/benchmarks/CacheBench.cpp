@@ -73,17 +73,23 @@ void CacheBench::Setup(IComputeContext &context,
 
   // Ensure initData contains a valid cycle of exact buffer element count for pointer chasing
   if (metric == "ns" && bufferSize > 0) {
-    size_t count = bufferSize / sizeof(uint32_t);
-    if (initData.size() != count) {
-      initData.resize(count);
-      std::vector<uint32_t> perm(count);
-      std::iota(perm.begin(), perm.end(), 0);
-      std::mt19937 g(1337);
-      std::shuffle(perm.begin(), perm.end(), g);
-      for (size_t i = 0; i < count - 1; ++i) {
-        initData[perm[i]] = perm[i + 1];
-      }
-      initData[perm[count - 1]] = perm[0];
+    // Inter-cache-line pointer chasing across 128-byte cache lines
+    // (matches CacheLatencyCurveBench methodology to ensure consistent hardware cache latency)
+    constexpr size_t kLineBytes = 128;
+    size_t numLines = bufferSize / kLineBytes;
+    if (numLines == 0) numLines = 1;
+    size_t totalWords = bufferSize / sizeof(uint32_t);
+    initData.assign(totalWords, 0);
+
+    std::vector<uint32_t> perm(numLines);
+    std::iota(perm.begin(), perm.end(), 0);
+    std::mt19937 g(1337);
+    std::shuffle(perm.begin(), perm.end(), g);
+
+    for (size_t i = 0; i < numLines; ++i) {
+      uint32_t curLine = perm[i];
+      uint32_t nextLine = perm[(i + 1) % numLines];
+      initData[curLine * (kLineBytes / sizeof(uint32_t))] = static_cast<uint32_t>(nextLine * (kLineBytes / sizeof(uint32_t)));
     }
   }
 
@@ -177,8 +183,9 @@ void CacheBench::Setup(IComputeContext &context,
     kernel_name = "run_benchmark";
   }
 
-  // We now pass 3 push constants: stride, mask, iterations
-  kernel = context.createKernel(full_kernel_path.string(), kernel_name, 2);
+  // Vulkan uses 1 storage buffer descriptor + push constants; OpenCL/ROCm pass push constants in a 2nd buffer
+  uint32_t numBuffers = (context.getBackend() == ComputeBackend::Vulkan) ? 1 : 2;
+  kernel = context.createKernel(full_kernel_path.string(), kernel_name, numBuffers);
   if (buffer) {
     context.setKernelArg(kernel, 0, buffer);
 
@@ -271,8 +278,7 @@ BenchmarkResult CacheBench::GetResult(uint32_t config_idx) const {
       name == "L2 Cache Bandwidth" || name == "L3 Cache Bandwidth") {
     // Robust kernel loops 2,000 times * 8 float4 loads * 16 bytes
     operations = num_threads_bw * 16000ULL * 16;
-  } else if (name == "L0 Cache Latency" || name == "L1 Cache Latency" ||
-             name == "L2 Cache Latency" || name == "L3 Cache Latency") {
+  } else if (name.find("Latency") != std::string::npos || metric == "ns") {
     // 1,000,000 pointer chasing steps
     operations = 1000000;
   } else if (metric == "GB/s") {
