@@ -267,9 +267,11 @@ void TelemetryWorker::pollDevice(const DeviceSysfsPaths& paths, DeviceTelemetryS
     float gpuBusy = readSysfsFloat(paths.drmDeviceDir + "/gpu_busy_percent", 0.0f);
     float memBusy = readSysfsFloat(paths.drmDeviceDir + "/mem_busy_percent", 0.0f);
 
-    // 6. VRAM
+    // 6. VRAM & GTT
     uint64_t vramUsed = readSysfsUint64(paths.drmDeviceDir + "/mem_info_vram_used", 0);
     uint64_t vramTotal = readSysfsUint64(paths.drmDeviceDir + "/mem_info_vram_total", 0);
+    uint64_t gttUsed = readSysfsUint64(paths.drmDeviceDir + "/mem_info_gtt_used", 0);
+    uint64_t gttTotal = readSysfsUint64(paths.drmDeviceDir + "/mem_info_gtt_total", 0);
 
     // Update current snapshot scalars (always live for digital readouts)
     snap.sclkMhz = sclk;
@@ -283,6 +285,8 @@ void TelemetryWorker::pollDevice(const DeviceSysfsPaths& paths, DeviceTelemetryS
     snap.memBusyPct = memBusy;
     snap.vramUsedBytes = vramUsed;
     snap.vramTotalBytes = vramTotal;
+    snap.gttUsedBytes = gttUsed;
+    snap.gttTotalBytes = gttTotal;
 
     // Only record into history during an active benchmark run
     if (recordHistory) {

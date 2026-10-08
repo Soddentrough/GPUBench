@@ -2,6 +2,7 @@
 #include "DeviceDatabase.h"
 #include "ResultImporter.h"
 #include "RunnerAPI.h"
+#include "utils/HardwareTelemetry.h"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -1655,7 +1656,20 @@ std::string resultsToJson(const std::vector<ResultData> &results) {
       out += ",\n      \"theoretical_triangle_gis\": " + std::to_string(prof.theoreticalTriangleGis) + ",\n";
       out += "      \"theoretical_box_gis\": " + std::to_string(prof.theoreticalBoxGis);
     }
-    out += "\n";
+    GpuContentionInfo cont = HardwareTelemetry::checkContention(dp.deviceIndex);
+    out += ",\n      \"hardware_contention\": {\n";
+    out += "        \"detected\": " + std::string(cont.hasContention ? "true" : "false") + ",\n";
+    out += "        \"is_critical\": " + std::string(cont.isCritical ? "true" : "false") + ",\n";
+    out += "        \"gpu_busy_percent\": " + std::to_string(cont.gpuBusyPct) + ",\n";
+    out += "        \"vram_used_mb\": " + std::to_string(cont.vramUsedMb) + ",\n";
+    out += "        \"vram_total_mb\": " + std::to_string(cont.vramTotalMb) + ",\n";
+    out += "        \"gtt_used_mb\": " + std::to_string(cont.gttUsedMb) + ",\n";
+    out += "        \"cpu_load_1min\": " + std::to_string(cont.cpuLoad1Min) + ",\n";
+    out += "        \"reasons\": [";
+    for (size_t r = 0; r < cont.reasons.size(); ++r) {
+      out += "\"" + jsonEscape(cont.reasons[r]) + "\"" + (r + 1 < cont.reasons.size() ? ", " : "");
+    }
+    out += "]\n      }\n";
     out += (d + 1 < profiles.size()) ? "    },\n" : "    }\n";
   }
   out += "  ],\n";

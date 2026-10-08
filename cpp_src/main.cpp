@@ -9,6 +9,7 @@
 #include "core/ResultFormatter.h"
 #include "core/ResultImporter.h"
 #include "core/RunnerAPI.h"
+#include "utils/HardwareTelemetry.h"
 
 void SetRunnerTargetConfigs(const std::vector<int> &configs);
 #include <cctype>
@@ -125,6 +126,10 @@ int main(int argc, char **argv) {
   bool strict = false;
   app.add_flag("--strict", strict,
                "Enforce strict validation; exit with non-zero code if any benchmark fails numerical validation");
+
+  bool force = false;
+  app.add_flag("-f,--force", force,
+               "Bypass background contention checks and force benchmark execution");
 
   std::string scene_str = "all";
   app.add_option("-s,--scene", scene_str,
@@ -521,6 +526,8 @@ int main(int argc, char **argv) {
     }
     runner.setProfileSnapshot(profile_snapshot);
     runner.setVerifyParity(verify_parity);
+    runner.setForce(force);
+    runner.setStrict(strict);
 
     std::vector<uint32_t> target_indices = device_indices;
     if (target_indices.empty()) {
@@ -539,6 +546,14 @@ int main(int argc, char **argv) {
     // cross-runtime resource contention (e.g. HIP vs Vulkan on display GPU).
     for (ComputeBackend backend : target_backends) {
       for (uint32_t device_idx : target_indices) {
+        GpuContentionInfo contention = HardwareTelemetry::checkContention(device_idx);
+        if (strict && contention.isCritical && !force) {
+          std::cerr << "\n\033[1;31mError: Benchmark aborted under --strict due to active background GPU contention ("
+                    << contention.gpuBusyPct << "% busy).\n"
+                    << "Use -f / --force to benchmark under contention, or terminate the active workload.\033[0m\n\n";
+          return EXIT_FAILURE;
+        }
+
         std::unique_ptr<IComputeContext> new_context =
             ComputeBackendFactory::create(backend, verbose, debug);
 

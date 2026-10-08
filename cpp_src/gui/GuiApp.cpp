@@ -2297,6 +2297,22 @@ void GuiApp::renderLeftSidebar(float width, float height) {
         }
         ImGui::PopStyleColor(3);
     } else {
+        DeviceTelemetrySnapshot preSnap;
+        m_telemetryWorker.getSnapshot(m_telemetryGpuIndex, preSnap);
+        if (preSnap.gpuBusyPct >= 15.0f || (preSnap.gttUsedBytes / (1024ULL * 1024ULL * 1024ULL)) >= 16) {
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.75f, 0.20f, 1.0f));
+            if (preSnap.gpuBusyPct >= 15.0f) {
+                ImGui::Text("⚠ Contention: GPU %.0f%% busy", preSnap.gpuBusyPct);
+            } else {
+                ImGui::Text("⚠ Contention: %llu GB in-use", static_cast<unsigned long long>(preSnap.gttUsedBytes / (1024ULL * 1024ULL * 1024ULL)));
+            }
+            ImGui::PopStyleColor();
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Active background GPU or resident memory load detected.\nBenchmark results will be contaminated or throttled.");
+            }
+            ImGui::Spacing();
+        }
+
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.45f, 0.95f, 1.00f));
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.28f, 0.55f, 1.00f, 1.00f));
         ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.35f, 0.65f, 1.00f, 1.00f));

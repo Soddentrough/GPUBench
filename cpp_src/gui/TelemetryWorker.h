@@ -61,6 +61,8 @@ struct DeviceTelemetrySnapshot {
     float memBusyPct{0.0f};
     uint64_t vramUsedBytes{0};
     uint64_t vramTotalBytes{0};
+    uint64_t gttUsedBytes{0};
+    uint64_t gttTotalBytes{0};
 
     // Histories for ImPlot (records full run duration)
     TelemetryBuffer timeHistory;

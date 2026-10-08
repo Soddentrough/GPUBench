@@ -72,6 +72,10 @@ public:
 
   void setVerifyParity(bool enable) { verifyParity = enable; }
   bool getVerifyParity() const { return verifyParity; }
+  void setForce(bool f) { forceExecution = f; }
+  bool getForce() const { return forceExecution; }
+  void setStrict(bool s) { strictMode = s; }
+  bool getStrict() const { return strictMode; }
   void setQuiet(bool q) { quiet = q; }
   bool isQuiet() const { return quiet; }
   bool hasParityFailure() const { return parityFailure; }
@@ -107,6 +111,8 @@ private:
   bool parityFailure = false;
   bool executionFailure = false;
   bool validationFailure = false;
+  bool forceExecution = false;
+  bool strictMode = false;
   std::string sceneName = "all";
   uint32_t renderWidth = 3840;
   uint32_t renderHeight = 2160;

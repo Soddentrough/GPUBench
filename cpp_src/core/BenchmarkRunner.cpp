@@ -34,6 +34,7 @@ void SetRunnerTargetConfigs(const std::vector<int> &configs) {
 #include "core/ResultFormatter.h"
 #include "utils/KernelPath.h"
 #include "utils/SleepInhibitor.h"
+#include "utils/HardwareTelemetry.h"
 #include "benchmarks/Fp6Bench.h"
 #include <algorithm>
 #include <chrono>
@@ -649,7 +650,47 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
       std::cout << "\033[1m\033[36m╰";
       for (size_t d = 0; d < innerCardW + 2; ++d) std::cout << "─";
       std::cout << "╯\033[0m\n\n";
+    }
 
+    GpuContentionInfo contention = HardwareTelemetry::checkContention(context->getSelectedDeviceIndex());
+    if (contention.hasContention && !quiet) {
+      size_t alertW = 76;
+      for (const auto &reason : contention.reasons) {
+        if (reason.length() + 4 > alertW) {
+          alertW = reason.length() + 4;
+        }
+      }
+      std::string headerPrefix = "╭─ ⚠ Background Hardware Contention Detected ";
+      size_t headerPrefixCol = 44;
+      size_t topDashes = (alertW > headerPrefixCol) ? (alertW - headerPrefixCol) : 4;
+      std::cout << "\033[1;33m" << headerPrefix;
+      for (size_t d = 0; d < topDashes; ++d) std::cout << "─";
+      std::cout << "╮\n";
+      std::string line1 = "Active background tasks or resident memory allocations were detected:";
+      std::cout << "│ " << line1 << std::string(alertW > line1.length() + 1 ? alertW - line1.length() - 1 : 0, ' ') << "│\n";
+      for (const auto &reason : contention.reasons) {
+        std::string rContent = " • " + reason;
+        std::cout << "│ " << rContent << std::string(alertW > rContent.length() + 1 ? alertW - rContent.length() - 1 : 0, ' ') << "│\n";
+      }
+      std::string line2 = "Benchmark throughput may be contaminated or throttled by background load.";
+      std::string line3 = "For clean publication results, terminate active background LLMs or apps.";
+      std::cout << "│ " << std::string(alertW - 1, ' ') << "│\n";
+      std::cout << "│ " << line2 << std::string(alertW > line2.length() + 1 ? alertW - line2.length() - 1 : 0, ' ') << "│\n";
+      std::cout << "│ " << line3 << std::string(alertW > line3.length() + 1 ? alertW - line3.length() - 1 : 0, ' ') << "│\n";
+      std::cout << "╰";
+      for (size_t d = 0; d < alertW; ++d) std::cout << "─";
+      std::cout << "╯\033[0m\n\n";
+    }
+
+    if (strictMode && contention.isCritical && !forceExecution) {
+      std::cerr << "\n\033[1;31mError: Benchmark aborted under --strict due to active background GPU contention ("
+                << contention.gpuBusyPct << "% busy).\n"
+                << "Use -f / --force to benchmark under contention, or terminate the active workload.\033[0m\n\n";
+      executionFailure = true;
+      return;
+    }
+
+    if (!quiet && !verbose && !onResult) {
       if (hasVisualVerification) {
         std::cout << "  \033[1m[1/3] Preparation Phase\033[0m (compiling kernels, uploading data, building BVHs)..." << std::endl;
       } else {
