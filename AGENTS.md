@@ -3,10 +3,12 @@
 ## AMD GPU Tools & ROCm Paths
 Do not search for SMI tool paths across runs; use these exact absolute paths:
 - **`amd-smi`**:
+  - `/opt/rocm/current/bin/amd-smi`
   - `~/.local/bin/amd-smi`
   - `/opt/rocm/core-10.1/bin/amd-smi`
   - `/opt/rocm/core-10.0/bin/amd-smi`
 - **`rocm-smi`**:
+  - `/opt/rocm/current/bin/rocm-smi`
   - `~/.local/bin/rocm-smi`
   - `/opt/rocm/core-10.1/bin/rocm-smi`
   - `/opt/rocm/core-10.0/bin/rocm-smi`

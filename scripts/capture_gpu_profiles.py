@@ -8,7 +8,7 @@ import subprocess
 import time
 import re
 
-AMDSMI_BIN = "/opt/rocm/core-10.0/bin/amd-smi"
+AMDSMI_BIN = "/opt/rocm/current/bin/amd-smi" if os.path.exists("/opt/rocm/current/bin/amd-smi") else "/opt/rocm/bin/amd-smi"
 RGA_BIN = "/opt/RadeonDeveloperToolSuite-2026-05-28-1806/rga"
 GPUBENCH_BIN = "./build/gpubench"
 PROFILES_DIR = "profiles"

@@ -111,6 +111,15 @@ bool ROCmContext::loadLibraries() {
     hipLib = std::make_unique<utils::DynamicLibrary>("libamdhip64.so");
   }
   if (!hipLib->isValid()) {
+    hipLib = std::make_unique<utils::DynamicLibrary>("/opt/rocm/current/lib/libamdhip64.so.7");
+  }
+  if (!hipLib->isValid()) {
+    hipLib = std::make_unique<utils::DynamicLibrary>("/opt/rocm/current/lib/libamdhip64.so.6");
+  }
+  if (!hipLib->isValid()) {
+    hipLib = std::make_unique<utils::DynamicLibrary>("/opt/rocm/current/lib/libamdhip64.so");
+  }
+  if (!hipLib->isValid()) {
     hipLib = std::make_unique<utils::DynamicLibrary>("/opt/rocm/core-10.1/lib/libamdhip64.so.7");
   }
   if (!hipLib->isValid()) {
@@ -176,6 +185,24 @@ bool ROCmContext::loadLibraries() {
     }
     if (!hiprtcLib->isValid()) {
       hiprtcLib = std::make_unique<utils::DynamicLibrary>("libhiprtc.so");
+    }
+    if (!hiprtcLib->isValid()) {
+      hiprtcLib = std::make_unique<utils::DynamicLibrary>("/opt/rocm/current/lib/libhiprtc.so.7");
+    }
+    if (!hiprtcLib->isValid()) {
+      hiprtcLib = std::make_unique<utils::DynamicLibrary>("/opt/rocm/current/lib/libhiprtc.so.6");
+    }
+    if (!hiprtcLib->isValid()) {
+      hiprtcLib = std::make_unique<utils::DynamicLibrary>("/opt/rocm/current/lib/libhiprtc.so");
+    }
+    if (!hiprtcLib->isValid()) {
+      hiprtcLib = std::make_unique<utils::DynamicLibrary>("/opt/rocm/core-10.1/lib/libhiprtc.so.7");
+    }
+    if (!hiprtcLib->isValid()) {
+      hiprtcLib = std::make_unique<utils::DynamicLibrary>("/opt/rocm/core-10.1/lib/libhiprtc.so.6");
+    }
+    if (!hiprtcLib->isValid()) {
+      hiprtcLib = std::make_unique<utils::DynamicLibrary>("/opt/rocm/core-10.1/lib/libhiprtc.so");
     }
     if (!hiprtcLib->isValid()) {
       hiprtcLib = std::make_unique<utils::DynamicLibrary>("/opt/rocm/lib/libhiprtc.so.7");
@@ -499,9 +526,9 @@ ComputeKernel ROCmContext::createKernel(const std::string &file_name,
         std::string offload_arch =
             "--offload-arch=" + devices[selectedDeviceIndex].archName;
         const char *opts[] = {offload_arch.c_str(), "-O3",
-                              "-I/usr/include", "-I/opt/rocm/include",
-                              "-I/usr/local/include"};
-        hiprtcResult compileResult = f_hiprtcCompileProgram(prog, 5, opts);
+                              "-I/usr/include", "-I/opt/rocm/current/include",
+                              "-I/opt/rocm/include", "-I/usr/local/include"};
+        hiprtcResult compileResult = f_hiprtcCompileProgram(prog, 6, opts);
 
         if (compileResult != HIPRTC_SUCCESS) {
           std::cout << "HIPRTC compilation failed with code: " << compileResult
