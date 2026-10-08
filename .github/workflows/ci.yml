@@ -59,10 +59,13 @@ jobs:
             libxkbcommon-dev
 
       - name: Configure CMake
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DGPUBENCH_WERROR=ON
 
       - name: Build
         run: cmake --build build --config Release --parallel
+
+      - name: Run Automated Headless Unit Tests (CTest)
+        run: ctest --test-dir build --output-on-failure
 
       - name: Package RPM & Run Dry-Run Verification
         run: |
@@ -94,3 +97,6 @@ jobs:
 
       - name: Build
         run: cmake --build build --config Release
+
+      - name: Run Automated Headless Unit Tests (CTest)
+        run: ctest --test-dir build --output-on-failure

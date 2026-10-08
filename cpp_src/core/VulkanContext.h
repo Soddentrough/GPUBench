@@ -1,6 +1,7 @@
 #pragma once
 
 #include "IComputeContext.h"
+#include "BlockSuballocator.h"
 #include <array>
 #include <map>
 #include <mutex>
@@ -246,20 +247,6 @@ private:
     size_t chunkIndex = 0;
   };
 
-  struct VulkanMemoryChunk {
-    VkDeviceSize offset = 0;
-    VkDeviceSize size = 0;
-    bool inUse = false;
-  };
-
-  struct VulkanMemoryBlock {
-    VkDeviceMemory memory = VK_NULL_HANDLE;
-    VkDeviceSize size = 0;
-    uint32_t memoryTypeIndex = 0;
-    bool hasDeviceAddress = false;
-    std::vector<VulkanMemoryChunk> chunks;
-  };
-
   struct VulkanKernel {
     VkShaderModule shaderModule;
     VkDescriptorSetLayout descriptorSetLayout;
@@ -346,10 +333,11 @@ private:
   void cleanupStagingBuffer();
 
   // Memory block suballocator (eliminates raw vkAllocateMemory churn for <= 32 MB buffers)
-  static constexpr VkDeviceSize kDefaultBlockSize = 64ULL * 1024ULL * 1024ULL;
-  static constexpr VkDeviceSize kMaxSuballocSize = 32ULL * 1024ULL * 1024ULL;
+  static constexpr VkDeviceSize kDefaultBlockSize = gpubench::BlockSuballocator::kDefaultBlockSize;
+  static constexpr VkDeviceSize kMaxSuballocSize = gpubench::BlockSuballocator::kMaxSuballocSize;
   mutable std::mutex suballocatorMutex;
-  std::vector<VulkanMemoryBlock> memoryBlocks;
+  gpubench::BlockSuballocator m_suballocator;
+  std::vector<VkDeviceMemory> m_blockMemories;
   bool allocateSuballocatedBuffer(VkDeviceSize size, VkDeviceSize alignment,
                                   uint32_t memoryTypeIndex, bool needDeviceAddress,
                                   VulkanBuffer *outBuf);

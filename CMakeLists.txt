@@ -19,8 +19,13 @@ if(WIN32)
     add_compile_definitions(NOMINMAX)
 endif()
 
+option(GPUBENCH_WERROR "Treat compiler warnings as errors" OFF)
+
 if(MSVC)
     add_compile_options(/W4)
+    if(GPUBENCH_WERROR)
+        add_compile_options(/WX)
+    endif()
 else()
     add_compile_options(
         -Wall
@@ -31,6 +36,9 @@ else()
         -Wformat
         -Wformat-security
     )
+    if(GPUBENCH_WERROR)
+        add_compile_options(-Werror)
+    endif()
     if(NOT APPLE AND NOT WIN32)
         add_compile_definitions($<$<CONFIG:Release>:_FORTIFY_SOURCE=3> $<$<CONFIG:RelWithDebInfo>:_FORTIFY_SOURCE=3>)
         add_link_options(
@@ -265,6 +273,7 @@ endif()
 # Source files - always include core files
 set(LIB_SOURCES
     cpp_src/core/BenchmarkRunner.cpp
+    cpp_src/core/BlockSuballocator.cpp
     cpp_src/core/DeviceDatabase.cpp
     cpp_src/core/ResultFormatter.cpp
     cpp_src/core/ResultImporter.cpp
@@ -459,6 +468,10 @@ if(MINGW)
         )
     endif()
 endif()
+
+# Automated Unit Testing & CTest Suite
+enable_testing()
+add_subdirectory(tests)
 
 # Build Native C++ Workstation GUI (Option D: Dear ImGui + ImPlot + Vulkan/SDL3)
 option(GPUBENCH_BUILD_GUI "Build native C++ Dear ImGui workstation GUI" ON)

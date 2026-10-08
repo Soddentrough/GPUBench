@@ -1,7 +1,7 @@
 #pragma once
 
 #include "IComputeContext.h"
-#define CL_TARGET_OPENCL_VERSION 300
+#define CL_TARGET_OPENCL_VERSION 220
 #include "utils/DynamicLibrary.h"
 #ifdef __APPLE__
 #include <OpenCL/opencl.h>

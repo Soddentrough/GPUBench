@@ -34,6 +34,10 @@ struct ImportedRun {
 
 class ResultImporter {
 public:
+  // Load a single run from a JSON string (GUI or CLI schema)
+  static bool loadFromString(const std::string &jsonContent, ImportedRun &outRun,
+                             std::string &errorMessage);
+
   // Load a single run from a JSON file (GUI or CLI schema)
   static bool loadFromFile(const std::string &filepath, ImportedRun &outRun,
                            std::string &errorMessage);

@@ -1439,63 +1439,16 @@ bool VulkanContext::allocateSuballocatedBuffer(VkDeviceSize size,
                                                VulkanBuffer *outBuf) {
   if (!outBuf) return false;
 
-  // 1. Check existing blocks for a free chunk with sufficient size after alignment
-  for (uint32_t b = 0; b < static_cast<uint32_t>(memoryBlocks.size()); ++b) {
-    auto &block = memoryBlocks[b];
-    if (block.memory == VK_NULL_HANDLE) continue;
-    if (block.memoryTypeIndex != memoryTypeIndex) continue;
-    if (block.hasDeviceAddress != needDeviceAddress) continue;
-
-    for (size_t c = 0; c < block.chunks.size(); ++c) {
-      if (block.chunks[c].inUse) continue;
-
-      VkDeviceSize chunkStart = block.chunks[c].offset;
-      VkDeviceSize chunkSize = block.chunks[c].size;
-      VkDeviceSize alignedStart = alignUpVk(chunkStart, alignment);
-      VkDeviceSize padding = alignedStart - chunkStart;
-
-      if (chunkSize >= padding + size) {
-        VkDeviceSize remaining = chunkSize - (padding + size);
-
-        if (padding > 0) {
-          block.chunks[c].size = padding;
-
-          VulkanMemoryChunk allocChunk;
-          allocChunk.offset = alignedStart;
-          allocChunk.size = size;
-          allocChunk.inUse = true;
-          block.chunks.insert(block.chunks.begin() + c + 1, allocChunk);
-
-          if (remaining > 0) {
-            VulkanMemoryChunk remChunk;
-            remChunk.offset = alignedStart + size;
-            remChunk.size = remaining;
-            remChunk.inUse = false;
-            block.chunks.insert(block.chunks.begin() + c + 2, remChunk);
-          }
-        } else {
-          block.chunks[c].size = size;
-          block.chunks[c].inUse = true;
-
-          if (remaining > 0) {
-            VulkanMemoryChunk remChunk;
-            remChunk.offset = alignedStart + size;
-            remChunk.size = remaining;
-            remChunk.inUse = false;
-            block.chunks.insert(block.chunks.begin() + c + 1, remChunk);
-          }
-        }
-
-        outBuf->memory = block.memory;
-        outBuf->offset = alignedStart;
-        outBuf->isSuballocated = true;
-        outBuf->blockIndex = b;
-        return true;
-      }
-    }
+  auto res = m_suballocator.allocate(size, alignment, memoryTypeIndex, needDeviceAddress);
+  if (res.success) {
+    outBuf->memory = m_blockMemories[res.blockIndex];
+    outBuf->offset = res.offset;
+    outBuf->isSuballocated = true;
+    outBuf->blockIndex = res.blockIndex;
+    return true;
   }
 
-  // 2. Allocate a new 64 MB block
+  // Allocate a new 64 MB block
   VkMemoryAllocateInfo allocInfo{};
   allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
   allocInfo.allocationSize = kDefaultBlockSize;
@@ -1513,71 +1466,35 @@ bool VulkanContext::allocateSuballocatedBuffer(VkDeviceSize size,
     return false;
   }
 
-  VulkanMemoryBlock newBlock;
-  newBlock.memory = blockMemory;
-  newBlock.size = kDefaultBlockSize;
-  newBlock.memoryTypeIndex = memoryTypeIndex;
-  newBlock.hasDeviceAddress = needDeviceAddress;
-
-  VulkanMemoryChunk allocChunk;
-  allocChunk.offset = 0;
-  allocChunk.size = size;
-  allocChunk.inUse = true;
-  newBlock.chunks.push_back(allocChunk);
-
-  if (kDefaultBlockSize > size) {
-    VulkanMemoryChunk remChunk;
-    remChunk.offset = size;
-    remChunk.size = kDefaultBlockSize - size;
-    remChunk.inUse = false;
-    newBlock.chunks.push_back(remChunk);
-  }
-
-  uint32_t newBlockIdx = static_cast<uint32_t>(memoryBlocks.size());
-  memoryBlocks.push_back(newBlock);
+  auto regRes = m_suballocator.registerNewBlock(size, kDefaultBlockSize, memoryTypeIndex, needDeviceAddress);
+  m_blockMemories.push_back(blockMemory);
 
   outBuf->memory = blockMemory;
-  outBuf->offset = 0;
+  outBuf->offset = regRes.offset;
   outBuf->isSuballocated = true;
-  outBuf->blockIndex = newBlockIdx;
+  outBuf->blockIndex = regRes.blockIndex;
   return true;
 }
 
 void VulkanContext::freeSuballocatedBuffer(const VulkanBuffer *buf) {
-  if (!buf || !buf->isSuballocated || buf->blockIndex >= memoryBlocks.size()) {
+  if (!buf || !buf->isSuballocated) {
     return;
   }
-
-  auto &block = memoryBlocks[buf->blockIndex];
-  for (size_t i = 0; i < block.chunks.size(); ++i) {
-    if (block.chunks[i].offset == buf->offset) {
-      block.chunks[i].inUse = false;
-      break;
-    }
-  }
-
-  // Coalesce adjacent free chunks
-  for (size_t i = 0; i + 1 < block.chunks.size(); ) {
-    if (!block.chunks[i].inUse && !block.chunks[i + 1].inUse) {
-      block.chunks[i].size += block.chunks[i + 1].size;
-      block.chunks.erase(block.chunks.begin() + i + 1);
-    } else {
-      ++i;
-    }
-  }
+  m_suballocator.free(buf->blockIndex, buf->offset);
 }
 
 void VulkanContext::cleanupMemoryBlocks() {
   std::lock_guard<std::mutex> lock(suballocatorMutex);
   if (device != VK_NULL_HANDLE) {
-    for (auto &block : memoryBlocks) {
-      if (block.memory != VK_NULL_HANDLE) {
-        vkFreeMemory(device, block.memory, nullptr);
-        block.memory = VK_NULL_HANDLE;
+    for (auto &mem : m_blockMemories) {
+      if (mem != VK_NULL_HANDLE) {
+        vkFreeMemory(device, mem, nullptr);
+        mem = VK_NULL_HANDLE;
       }
     }
   }
-  memoryBlocks.clear();
+  m_blockMemories.clear();
+  m_suballocator.clear();
 }
 
 ComputeBuffer VulkanContext::createBuffer(size_t size, const void *host_ptr) {

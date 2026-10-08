@@ -1847,7 +1847,11 @@ std::string getDefaultJsonFilename() {
 }
 
 std::string resultsToJson(const std::vector<ResultData> &results) {
-  auto profiles = GetDeviceProfilesAPI();
+  return resultsToJson(results, GetDeviceProfilesAPI());
+}
+
+std::string resultsToJson(const std::vector<ResultData> &results,
+                          const std::vector<DeviceProfile> &profiles) {
   std::string out = "{\n";
   out += "  \"version\": \"" + std::string(GPUBENCH_VERSION) + "\",\n";
   out += "  \"device_profiles\": [\n";

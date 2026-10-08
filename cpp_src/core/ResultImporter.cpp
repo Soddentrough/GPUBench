@@ -319,6 +319,16 @@ bool ResultImporter::loadFromFile(const std::string &filepath, ImportedRun &outR
     return false;
   }
 
+  return loadFromString(content, outRun, errorMessage);
+}
+
+bool ResultImporter::loadFromString(const std::string &content, ImportedRun &outRun,
+                                    std::string &errorMessage) {
+  if (content.empty()) {
+    errorMessage = "JSON content is empty";
+    return false;
+  }
+
   JsonValue root;
   if (!SimpleJsonReader::parse(content, root, errorMessage)) {
     return false;

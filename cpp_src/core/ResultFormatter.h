@@ -64,6 +64,7 @@ struct ResultData {
 };
 
 struct ImportedRun;
+struct DeviceProfile;
 
 class ResultFormatter {
 public:
@@ -89,3 +90,5 @@ std::string cleanWorkloadName(const std::string &rawName, const std::string &sub
 std::string extractSceneName(const std::string &rawName);
 std::string getDefaultJsonFilename();
 std::string resultsToJson(const std::vector<ResultData> &results);
+std::string resultsToJson(const std::vector<ResultData> &results,
+                          const std::vector<DeviceProfile> &profiles);
