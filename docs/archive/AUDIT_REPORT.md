@@ -2,7 +2,7 @@
 
 - **Target Architecture**: AMD Radeon AI PRO R9700 (`gfx1201` / RDNA 4 / Navi 48, 32GB GDDR6, Vulkan 1.4 / SPIR-V 1.4, Mesa RADV)
 - **Host Platform**: AMD Ryzen Threadripper 3970X (32 Physical Cores / 64 SMT Threads), 64GB RAM, Fedora 44, Device 1 (`-d 1`)
-- **Reference Real-Time Engine**: Pathways Path Tracing System (`/home/naoki/Development/Pathways`)
+- **Reference Real-Time Engine**: Pathways Path Tracing System (`Pathways`)
 - **Authoring Agent**: `teamwork_preview_worker_m1` (Milestone 1)
 - **Date**: 2026-09-30
 - **Classification**: Production-Grade Technical & Mathematical Audit
@@ -11,7 +11,7 @@
 
 ## Executive Summary
 
-An exhaustive technical, mathematical, and architectural audit of **GPUBench** was conducted across its Compute, Memory/Cache Hierarchy, Hardware Ray Tracing, and Documentation/Text subsystems. The audit cross-referenced implementations with low-level Vulkan 1.4 specifications, AMD RDNA 4 (`gfx1201`) microarchitectural documentation, and the reference production wavefront path tracing engine in **Pathways** (`/home/naoki/Development/Pathways`).
+An exhaustive technical, mathematical, and architectural audit of **GPUBench** was conducted across its Compute, Memory/Cache Hierarchy, Hardware Ray Tracing, and Documentation/Text subsystems. The audit cross-referenced implementations with low-level Vulkan 1.4 specifications, AMD RDNA 4 (`gfx1201`) microarchitectural documentation, and the reference production wavefront path tracing engine in **Pathways**.
 
 The investigation revealed that while GPUBench provides an extensive architectural scaffolding across multiple APIs (Vulkan, OpenCL, ROCm/HIP), the codebase suffers from severe mathematical overcounting, silent omission of unsupported configurations, memory non-coalescing, cross-backend PCIe memory hazards, complete lack of GPU hardware timestamp queries, and multiple published documentation claims that physically violate the silicon limits of the underlying hardware.
 
@@ -604,7 +604,7 @@ This section audits all eight ray tracing benchmarks in `cpp_src/benchmarks/Ray*
 
 ## Section 4: Pathways Comparative Architectural Analysis (Dedicated Section)
 
-This dedicated section evaluates GPUBench's ray tracing architectures against the production reference engine **Pathways** (`/home/naoki/Development/Pathways`).
+This dedicated section evaluates GPUBench's ray tracing architectures against the production reference engine **Pathways**.
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
@@ -698,82 +698,82 @@ $$\text{Waves}_{\text{SIMD}} = \min\left(16, \left\lfloor \frac{512}{\text{Alloc
 This section documents all 16 user-facing documentation, CLI, and GUI errors identified across the codebase.
 
 ### Item 5.1: Front-Page Impossible 477.2% Hardware Ceiling in `README.md`
-- **File & Lines**: `/home/naoki/Development/GPUBench/README.md:114-137`
+- **File & Lines**: `README.md:114-137`
 - **Flaw**: Claims `Hardware Ray-Triangle Intersection: 1435.56 GIS/s` and `Hardware Triangle Peak Rate: 1435.6 GIS/s (477.2% of 300.8 GIS/s Boost Peak)`. Also lists fabricated workload names (`Primary rays (coherent)`) and wrong metric units (`37.28 GRays/s` instead of `MRays/s`).
 - **Correction**: Replace lines 110–138 with verified outputs from `RayRawTraversalBench` (274.7 GIS/s, 91.3% of 300.8 GIS/s Boost Peak), `RaySchedulingBench`, `RayASBuildBench`, and `RayAnyHitBench`.
 
 ### Item 5.2: Omission of BF16 & False Cache Throughput Claim in `README.md`
-- **File & Lines**: `/home/naoki/Development/GPUBench/README.md:18-20`
+- **File & Lines**: `README.md:18-20`
 - **Flaw**: Line 18 omits `BF16` from supported compute types. Line 20 claims to measure `L1/L2/L3 Cache latency and throughput`, but cache throughput (bandwidth) is completely disabled due to compiler dead-code elimination.
 - **Correction**: Add `BF16`; clarify that cache latency (L0–L3) is measured, not throughput.
 
 ### Item 5.3: Integer Operations Mislabeled as TFLOPS in `COMPUTE_PERFORMANCE_ANALYSIS.md`
-- **File & Lines**: `/home/naoki/Development/GPUBench/docs/COMPUTE_PERFORMANCE_ANALYSIS.md:131, 132, 135, 136, 146, 160, 161`
+- **File & Lines**: `docs/COMPUTE_PERFORMANCE_ANALYSIS.md:131, 132, 135, 136, 146, 160, 161`
 - **Flaw**: Integer tensor operations (INT8 and INT4) are repeatedly labeled as `TFLOPS` (e.g. `INT8: 19.749 TFLOPS`, `INT4: 17.300 TFLOPS`).
 - **Correction**: Replace `TFLOPS` with `TOPS` across all INT8 and INT4 references.
 
 ### Item 5.4: Physical Topology Distortion in `RDNA4_RAY_TRACING_ARCHITECTURE.md`
-- **File & Lines**: `/home/naoki/Development/GPUBench/docs/RDNA4_RAY_TRACING_ARCHITECTURE.md:81-82`
+- **File & Lines**: `docs/RDNA4_RAY_TRACING_ARCHITECTURE.md:81-82`
 - **Flaw**: Claims Navi 48 has `64 Dual Compute Units (128 CUs / 256 SIMD32 execution engines)`. This doubles actual physical hardware.
 - **Correction**: Correct to `32 Workgroup Processors (64 CUs / 128 SIMD32 execution engines / 4,096 stream processors)`.
 
 ### Item 5.5: Specification Version Inaccuracies in `VERSION_REQUIREMENTS.md`
-- **File & Lines**: `/home/naoki/Development/GPUBench/VERSION_REQUIREMENTS.md:41, 69-70`
+- **File & Lines**: `VERSION_REQUIREMENTS.md:41, 69-70`
 - **Flaw**: Claims GLSL 460 corresponds to Vulkan 1.4; claims Vulkan 1.4 was supported in 2020; lists nonexistent extension `VK_EXT_shader_float64`.
 - **Correction**: Clarify GLSL 460 compiled to SPIR-V 1.4/1.6; cite `VkPhysicalDeviceFeatures::shaderFloat64` core feature.
 
 ### Item 5.6: OpenCL Backend Classification Inaccuracies in `OPENCL_BACKEND.md`
-- **File & Lines**: `/home/naoki/Development/GPUBench/docs/OPENCL_BACKEND.md:30, 35`
+- **File & Lines**: `docs/OPENCL_BACKEND.md:30, 35`
 - **Flaw**: Categorizes FP4/INT4 lack of support as `Hardware Limitation` (it is an API/toolchain limitation); claims RT requires `VK_KHR_ray_tracing_pipeline` (8 of 9 suites use `VK_KHR_ray_query`).
 - **Correction**: Reclassify as `API / Toolchain Limitation`; cite `VK_KHR_ray_query`.
 
 ### Item 5.7: Data Loss in JSON Exporter for `GRays/s` Metric
-- **File & Lines**: `/home/naoki/Development/GPUBench/cpp_src/core/ResultFormatter.cpp:1255-1275`
+- **File & Lines**: `cpp_src/core/ResultFormatter.cpp:1255-1275`
 - **Flaw**: `computeResultValue()` omits `GRays/s` from its metric dispatch chain, returning `0.0` and exporting `"value": 0.000000` to machine-readable JSON exports.
 - **Correction**: Add `r.metric == "GRays/s"` to the $10^9$ scaling branch in `computeResultValue()`.
 
 ### Item 5.8: Hardcoded R9700 Boost Ceilings in Summary Card
-- **File & Lines**: `/home/naoki/Development/GPUBench/cpp_src/core/ResultFormatter.cpp:697-708, 1373-1384`
+- **File & Lines**: `cpp_src/core/ResultFormatter.cpp:697-708, 1373-1384`
 - **Flaw**: Summary card unconditionally calculates percentage against R9700 ceilings (1203.2 GIS/s box, 300.8 GIS/s tri) regardless of whether the benchmark ran on NVIDIA, Intel, or another AMD GPU.
 - **Correction**: Guard percentage calculations with a device architecture check.
 
 ### Item 5.9: FP4 Omission and False Cache Bandwidth in `main.cpp` CLI Footer
-- **File & Lines**: `/home/naoki/Development/GPUBench/cpp_src/main.cpp:63, 65`
+- **File & Lines**: `cpp_src/main.cpp:63, 65`
 - **Flaw**: Line 63 omits `FP4` from compute group help. Line 65 claims `L0/L1/L2/L3 Cache Bandwidth & Latency`.
 - **Correction**: Add `FP4`; remove "Cache Bandwidth".
 
 ### Item 5.10: Dead Code in `main.cpp` for `--list-backends`
-- **File & Lines**: `/home/naoki/Development/GPUBench/cpp_src/main.cpp:451-471`
+- **File & Lines**: `cpp_src/main.cpp:451-471`
 - **Flaw**: Unreachable duplicate `if (list_backends)` block (lines 339–352 already handled it and returned `EXIT_SUCCESS`).
 - **Correction**: Delete lines 451–471.
 
 ### Item 5.11: Hardcoded Host CPU Core Count `(32C / 64T)` in `GuiApp.cpp`
-- **File & Lines**: `/home/naoki/Development/GPUBench/cpp_src/gui/GuiApp.cpp:853-855`
+- **File & Lines**: `cpp_src/gui/GuiApp.cpp:853-855`
 - **Flaw**: Hardcodes `(32C / 64T)` into system memory benchmark names, displaying incorrect thread counts on non-32-core CPUs.
 - **Correction**: Remove `(32C / 64T)` from names.
 
 ### Item 5.12: Mismatched Latency Config Name in `GuiApp.cpp`
-- **File & Lines**: `/home/naoki/Development/GPUBench/cpp_src/gui/GuiApp.cpp:859`
+- **File & Lines**: `cpp_src/gui/GuiApp.cpp:859`
 - **Flaw**: Displays `"Pointer Chasing Latency"` which mismatches the engine's config name `"Default"`.
 - **Correction**: Align name with engine configuration.
 
 ### Item 5.13: Resolution Tooltip "Quadratic Scaling" Error in `GuiApp.cpp`
-- **File & Lines**: `/home/naoki/Development/GPUBench/cpp_src/gui/GuiApp.cpp:1356`
+- **File & Lines**: `cpp_src/gui/GuiApp.cpp:1356`
 - **Flaw**: Tooltip states that render load increases "quadratically with pixel count".
 - **Correction**: Change to "proportionally / linearly with pixel count".
 
 ### Item 5.14: Missing `RayRawTraversal` in Rust GUI (`gpubench-gui`)
-- **File & Lines**: `/home/naoki/Development/GPUBench/gpubench-gui/src/main.rs:533-583`
+- **File & Lines**: `gpubench-gui/src/main.rs:533-583`
 - **Flaw**: `RayRawTraversal` omitted from `get_benchmark_description` and `get_benchmark_api_extensions`, falling back to generic placeholders.
 - **Correction**: Add explicit match arms for `RayRawTraversal`.
 
 ### Item 5.15: Dangerous Compilation Recommendation in `INSTALL.md`
-- **File & Lines**: `/home/naoki/Development/GPUBench/INSTALL.md:42, 156`
+- **File & Lines**: `INSTALL.md:42, 156`
 - **Flaw**: Recommends `make -j$(nproc)` which launches 64 parallel compile jobs on Threadripper systems, risking Out-Of-Memory (OOM) compiler crashes.
 - **Correction**: Recommend `-j16` per project guidelines.
 
 ### Item 5.16: Inaccurate Shader Group Descriptions in `RaySchedulingBench.h`
-- **File & Lines**: `/home/naoki/Development/GPUBench/cpp_src/benchmarks/RaySchedulingBench.h:20-35`
+- **File & Lines**: `cpp_src/benchmarks/RaySchedulingBench.h:20-35`
 - **Flaw**: Comments assert that RTP+SER configurations execute multi-bounce diffuse GI and shadow passes, whereas shader code executes only single primary rays.
 - **Correction**: Update comments to document single-ray primary reordering behavior.
 

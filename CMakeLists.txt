@@ -22,7 +22,23 @@ endif()
 if(MSVC)
     add_compile_options(/W4)
 else()
-    add_compile_options(-Wall -Wextra -Wno-missing-field-initializers -Wno-unused-parameter)
+    add_compile_options(
+        -Wall
+        -Wextra
+        -Wno-missing-field-initializers
+        -Wno-unused-parameter
+        -fstack-protector-strong
+        -Wformat
+        -Wformat-security
+    )
+    if(NOT APPLE AND NOT WIN32)
+        add_compile_definitions($<$<CONFIG:Release>:_FORTIFY_SOURCE=3> $<$<CONFIG:RelWithDebInfo>:_FORTIFY_SOURCE=3>)
+        add_link_options(
+            -Wl,-z,relro
+            -Wl,-z,now
+            -Wl,-z,noexecstack
+        )
+    endif()
 endif()
 
 find_package(Threads REQUIRED)
@@ -139,7 +155,7 @@ if(Vulkan_FOUND)
             COMMENT "Compiling Vulkan shader to SPIR-V: ${SHADER}"
         )
         
-        # Also copy the source as fallback
+        # Also copy the source as fallback to build tree
         add_custom_command(
             OUTPUT ${DEST_SHADER}
             COMMAND ${CMAKE_COMMAND} -E copy_if_different ${SHADER} ${DEST_SHADER}

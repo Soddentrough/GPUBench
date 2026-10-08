@@ -1,39 +1,38 @@
 #version 460
-
 #extension GL_EXT_shader_explicit_arithmetic_types_float64 : require
-#extension GL_EXT_control_flow_attributes : require
 
-layout (local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+layout(local_size_x = 64) in;
 
 layout(set = 0, binding = 0) buffer OutputBuffer {
     double data[];
 } outBuffer;
+
+#define STEP(i) a[i] = fma(a[i], mult, a[((i) + 1) & 7]);
+
+#define APPLY4(OP, i) OP(i) OP((i) + 1) OP((i) + 2) OP((i) + 3)
+#define APPLY8(OP)    APPLY4(OP, 0) APPLY4(OP, 4)
 
 void main() {
     uint index = gl_GlobalInvocationID.x;
     double add = double(index) * 0.00000001;
     double mult = 1.000001 + add;
 
-    // Use 8 independent double accumulators to hide ALU pipeline latency
-    double val0 = outBuffer.data[index] + 1.0;
-    double val1 = val0 + 0.1;
-    double val2 = val0 + 0.2;
-    double val3 = val0 + 0.3;
-    double val4 = val0 + 0.4;
-    double val5 = val0 + 0.5;
-    double val6 = val0 + 0.6;
-    double val7 = val0 + 0.7;
+    double a[8];
+    a[0] = outBuffer.data[index] + 1.0;
+    a[1] = a[0] + 0.1;
+    a[2] = a[0] + 0.2;
+    a[3] = a[0] + 0.3;
+    a[4] = a[0] + 0.4;
+    a[5] = a[0] + 0.5;
+    a[6] = a[0] + 0.6;
+    a[7] = a[0] + 0.7;
 
-    // 256 iters * 8 FMAs * 2 ops = 4096 FP64 ops
+    // 256 × 8 FMAs × 2 = 4096 FP64 operations per invocation.
     for (int i = 0; i < 256; ++i) {
-        val0 = fma(val0, mult, val1);
-        val1 = fma(val1, mult, val2);
-        val2 = fma(val2, mult, val3);
-        val3 = fma(val3, mult, val4);
-        val4 = fma(val4, mult, val5);
-        val5 = fma(val5, mult, val6);
-        val6 = fma(val6, mult, val7);
-        val7 = fma(val7, mult, val0);
+        APPLY8(STEP)
     }
-    outBuffer.data[index] = val0 + val1 + val2 + val3 + val4 + val5 + val6 + val7;
+
+    outBuffer.data[index] =
+        a[0] + a[1] + a[2] + a[3] +
+        a[4] + a[5] + a[6] + a[7];
 }

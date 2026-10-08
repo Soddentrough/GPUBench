@@ -7,7 +7,7 @@ workloads: a static pre-baked thumbnail, a procedural vector schematic, or a
 cross-link into the interactive Ray Tracing Viewport.
 
 > Supersedes the draft architecture spec in
-> `docs/TOOLTIP_PIPELINE_VISUALIZATIONS.md`.
+> `docs/archive/TOOLTIP_PIPELINE_VISUALIZATIONS.md`.
 
 ---
 
@@ -166,7 +166,9 @@ At startup the GUI logs coverage, and warns per unmatched entry:
 | Engine | Configs | Tier | Visualization |
 |:-------|:--------|:-----|:--------------|
 | `RayASBuild` | 0–4 (BLAS build/update) | 1 | `thumb_blas_wireframe.png` → Geometry & BVH view 0 |
-| `RayASBuild` | 5–7 (TLAS) | 2 | `tlas_hierarchy` → Geometry & BVH view 2 |
+| `RayASBuild` | 5 (TLAS: Corridor 20K) | 2 | `tlas_corridor_20k` → Geometry & BVH view 2 |
+| `RayASBuild` | 6 (TLAS: Jungle 50K) | 2 | `tlas_jungle_50k` → Geometry & BVH view 2 |
+| `RayASBuild` | 7 (TLAS: Open World 200K) | 2 | `tlas_openworld_200k` → Geometry & BVH view 2 |
 | `RayScheduling` | 0–2 (Material) | 1 | `thumb_material_lineup.png` → PBR Materials view 0 |
 | `RayScheduling` | 3–5, 23–24 (Path tracing) | 1 | `thumb_{scene}_stage6_indirect.png` → Pipeline Passes 5 |
 | `RayScheduling` | 6–8 (Incoherent GI) | 2 | `incoherent_{naive,ser,dgc}` → Pipeline Passes 5 |
@@ -181,11 +183,12 @@ At startup the GUI logs coverage, and warns per unmatched entry:
 | `RayScheduling` | 27 (Alpha cutout) | 1 | `thumb_alpha_layers.png` → Geometry & BVH view 1 |
 | `RayScheduling` | 31, 32 (Multi-light, 1 light) | 1 | `thumb_{scene}_stage5_direct.png` → Pipeline Passes 4 |
 | `RayScheduling` | 33, 34 (Multi-light, 128 lights) | 1 | `thumb_{scene}_multilight_128_dgc.png` → Pipeline Passes 4 |
-| `RayRawTraversal` | 0 (Coherent tris) | 1 | `thumb_{scene}_stage1_bvh.png` → Pipeline Passes 0 |
-| `RayRawTraversal` | 1 (Deep boxes) | 2 | `bvh_nested_boxes` → Pipeline Passes 0 |
+| `RayRawTraversal` | 0 (Coherent tris) | 2 | `bvh_coherent_triangles` |
+| `RayRawTraversal` | 1 (Deep boxes) | 2 | `bvh_nested_boxes` |
 | `RayIntersect` | 0 (Ray-triangle) | 2 | `intersect_ray_triangle` |
 | `RayIntersect` | 1 (Ray-box) | 2 | `intersect_ray_box` |
-| `RayAnyHit` | 0–1 (Alpha solid/cutout) | 1 | `thumb_alpha_layers.png` → Geometry & BVH view 1 |
+| `RayAnyHit` | 0 (100% solid baseline) | 2 | `anyhit_100_solid` |
+| `RayAnyHit` | 1 (50% cutout stress) | 2 | `anyhit_50_cutout` |
 | `RayProcedural` | 0 (AABB spheres) | 2 | `procedural_sphere` |
 | `RayDivergence` | 0–4 (90°…0°) | 2 | `cone_divergence_{90,67.5,45,22.5,0}` |
 

@@ -21,6 +21,7 @@ gpucore.*
 *.spv
 *.co
 kernels/rocm/
+kernels/vulkan/
 
 # Logs and temporary files
 *.log
@@ -82,4 +83,20 @@ raw_traversal_scene.obj
 ORIGINAL_REQUEST.md
 PROJECT.md
 imgui.ini
+
+# Tooling, Language Server & Compiler caches
+compile_commands.json
+.cache/
+.ccls-cache/
+.clang-tidy
+
+# Profiling and coverage
+*.profraw
+*.profdata
+*.gcov
+VP_*.json
+
+# Patch leftovers
+*.orig
+*.rej
 

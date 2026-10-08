@@ -352,7 +352,7 @@ const std::vector<DeviceInfo> &OpenCLContext::getDevices() const {
       if (uuid_err == CL_SUCCESS) {
         char uuid_str[33];
         for (int i = 0; i < 16; ++i) {
-          sprintf(&uuid_str[i * 2], "%02x", (unsigned char)uuid[i]);
+          std::snprintf(&uuid_str[i * 2], sizeof(uuid_str) - (i * 2), "%02x", (unsigned char)uuid[i]);
         }
         info.driverUUID = std::string(uuid_str);
       } else {

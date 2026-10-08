@@ -885,7 +885,7 @@ void GuiApp::initializeBenchmarkCategories() {
             {"RayIntersect", "Intersection Tests", "Ray-Triangle", "Ray Tracing", "MRays/s", "Pure hardware test measuring maximum ray-triangle intersection tests per second", true, 0},
             {"RayIntersect", "Intersection Tests", "Ray-Box", "Ray Tracing", "MRays/s", "Pure hardware test measuring maximum bounding box (AABB) intersection tests per second", true, 1},
             {"RayAnyHit", "Alpha-Tested Geometry", "100% Solid (Any-Hit Baseline)", "Ray Tracing", "MRays/s", "Baseline opacity test where all geometry is fully solid with no transparency", true, 0},
-            {"RayAnyHit", "Alpha-Tested Geometry", "50% Solid (Cutout Stress)", "Ray Tracing", "MRays/s", "Tests GPU performance when half of all ray hits encounter transparent leaf cutouts", true, 1},
+            {"RayAnyHit", "Alpha-Tested Geometry", "50% Solid (Cutout Stress)", "Ray Tracing", "MRays/s", "Measures any-hit shader re-traversal overhead when 50% of candidate hits are rejected across 16 geometric planes", true, 1},
             {"RayProcedural", "Procedural Geometry", "AABB Spheres", "Ray Tracing", "MRays/s", "Tests ray intersection with mathematically defined spheres rather than polygons", true, 0},
             {"RayDivergence", "Ray Directional Coherence", "90° Hemispherical (Incoherent)", "Ray Tracing", "MRays/s", "Worst-case divergence: full-hemisphere scatter (diffuse) on the controlled test chamber. This is the hardware cost floor - see 'Incoherent Ray Tracing' for how SER/DGC recover it", true, 0},
             {"RayDivergence", "Ray Directional Coherence", "67.5° Cone Spread", "Ray Tracing", "MRays/s", "Wide 67.5-degree cone (rough surfaces): heavy but bounded divergence, part of the controlled cost-curve sweep", true, 1},
@@ -1053,10 +1053,10 @@ void GuiApp::applyVisualizationMetadata() {
             "128 lights grouped into coherent DGC bins so each wavefront shades similar lights", 16.0f/9.0f, 1, 4}},
 
         // ---- RayRawTraversal: coherent triangles (0), deep boxes (1) ----
-        {"RayRawTraversal", 0, {"assets/thumbnails/thumb_{scene}_stage1_bvh.png", "",
-            "BVH traversal cost per pixel: blue = shallow, red = deep box/triangle test counts", 16.0f/9.0f, 1, 0}},
+        {"RayRawTraversal", 0, {"", "bvh_coherent_triangles",
+            "32 planar triangle layers (65.5K tris) pierced by 64M parallel vertical rays with 0% miss rate", 16.0f/9.0f, -1, 0}},
         {"RayRawTraversal", 1, {"", "bvh_nested_boxes",
-            "Deeply nested AABBs: every level forces an extra ray-box test before reaching geometry", 16.0f/9.0f, 1, 0}},
+            "128 planar triangle layers (262K tris) forcing 7-8 levels of deep BVH node box traversal", 16.0f/9.0f, -1, 0}},
 
         // ---- RayIntersect: ray-triangle (0), ray-box (1) ----
         {"RayIntersect", 0, {"", "intersect_ray_triangle",
@@ -1065,10 +1065,10 @@ void GuiApp::applyVisualizationMetadata() {
             "AABB slab test: the fast rejection primitive executed at every BVH node", 16.0f/9.0f, -1, 0}},
 
         // ---- RayAnyHit: 100% solid (0), 50% cutout (1) ----
-        {"RayAnyHit", 0, {"assets/thumbnails/thumb_alpha_layers.png", "",
-            "Baseline: every hit is opaque, any-hit shader exits immediately", 16.0f/9.0f, 3, 1}},
-        {"RayAnyHit", 1, {"assets/thumbnails/thumb_alpha_layers.png", "",
-            "50% of hits fail the alpha test; traversal re-enters the BVH until an opaque surface is found", 16.0f/9.0f, 3, 1}},
+        {"RayAnyHit", 0, {"", "anyhit_100_solid",
+            "16 planar layers: all geometry 100% solid; ray terminates on Plane 0 with zero BVH re-entries", 16.0f/9.0f, -1, 0}},
+        {"RayAnyHit", 1, {"", "anyhit_50_cutout",
+            "16 planar layers: 50% of candidate hits rejected, forcing hardware BVH traversal re-entry", 16.0f/9.0f, -1, 0}},
 
         // ---- RayProcedural: AABB spheres (0) ----
         {"RayProcedural", 0, {"", "procedural_sphere",
@@ -1785,6 +1785,68 @@ void GuiApp::renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, Im
     }
 
     // ------------------------------------------------------------------
+    // Hardware BVH: Coherent Triangles (32-Layer Grid)
+    // ------------------------------------------------------------------
+    if (diagramId == "bvh_coherent_triangles") {
+        drawTitle("Hardware BVH: Coherent Triangles (32-Layer Grid)");
+
+        // 4 stratified planar triangle layers
+        const int layers = 4;
+        float layerSpacing = gh * 0.22f;
+        float startY = area.y + s(14.0f);
+        float planeW = gw * 0.60f;
+
+        for (int l = 0; l < layers; ++l) {
+            float y = startY + l * layerSpacing;
+            ImVec2 pL(area.x, y);
+            ImVec2 pR(area.x + planeW, y);
+
+            // Plane boundary line
+            dl->AddLine(pL, pR, colGrid, 1.5f);
+
+            // Planar triangle grid elements along the layer
+            const int tris = 6;
+            float triW = planeW / tris;
+            for (int t = 0; t < tris; ++t) {
+                ImVec2 t0(area.x + t * triW, y);
+                ImVec2 t1(t0.x + triW, y);
+                ImVec2 t2(t0.x + triW * 0.5f, y - s(6.0f));
+                dl->AddTriangle(t0, t1, t2, IM_COL32(40, 80, 130, 180));
+            }
+        }
+
+        // Parallel vertical coherent rays piercing straight down
+        const int rays = 5;
+        float raySpacing = planeW / (rays + 1);
+        for (int r = 0; r < rays; ++r) {
+            float rx = area.x + (r + 1) * raySpacing;
+            ImVec2 rayStart(rx, area.y - s(4.0f));
+            ImVec2 rayEnd(rx, startY + (layers - 1) * layerSpacing + s(6.0f));
+
+            // Perfectly parallel vertical ray
+            dl->AddLine(rayStart, rayEnd, colGreen, 1.6f);
+            dl->AddCircleFilled(rayStart, s(2.0f), colGreen);
+
+            // Hit dots on every single layer (0% misses)
+            for (int l = 0; l < layers; ++l) {
+                float hitY = startY + l * layerSpacing;
+                dl->AddCircleFilled(ImVec2(rx, hitY), s(2.2f), colAmber);
+            }
+        }
+
+        // Legend / Stats on right side
+        float statX = area.x + planeW + s(10.0f);
+        dl->AddText(ImVec2(statX, area.y + s(2.0f)), colCool, "32 Layers");
+        dl->AddText(ImVec2(statX, area.y + s(18.0f)), colDim, "65.5K Tris");
+        dl->AddText(ImVec2(statX, area.y + s(34.0f)), colCool, "64M Rays");
+        dl->AddText(ImVec2(statX, area.y + s(50.0f)), colGreen, "0% Misses");
+        dl->AddText(ImVec2(statX, area.y + s(66.0f)), colAmber, "Max Coherence");
+
+        drawFootnote("parallel vertical rays through 32 stratified triangle layers; 100% warp coherence & 0% misses");
+        return;
+    }
+
+    // ------------------------------------------------------------------
     // Deeply nested BVH boxes
     // ------------------------------------------------------------------
     if (diagramId == "bvh_nested_boxes") {
@@ -1811,6 +1873,111 @@ void GuiApp::renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, Im
             dl->AddCircleFilled(p, s(2.5f), colAmber);
         }
         drawFootnote("each level adds a ray-box test before reaching leaf triangles");
+        return;
+    }
+
+    // ------------------------------------------------------------------
+    // Any-Hit Baseline: 100% Solid Geometry
+    // ------------------------------------------------------------------
+    if (diagramId == "anyhit_100_solid") {
+        drawTitle("Any-Hit Baseline: 100% Solid Geometry");
+
+        const int numPlanes = 4;
+        float planeSpacing = gh * 0.23f;
+        float startY = area.y + s(12.0f);
+        float planeW = gw * 0.58f;
+
+        for (int p = 0; p < numPlanes; ++p) {
+            float y = startY + p * planeSpacing;
+            ImVec2 p0_layer(area.x, y - s(3.0f));
+            ImVec2 p1_layer(area.x + planeW, y + s(3.0f));
+
+            if (p == 0) {
+                // Plane 0: Opaque Hit Surface
+                dl->AddRectFilled(p0_layer, p1_layer, IM_COL32(30, 80, 130, 240), s(2.0f));
+                dl->AddRect(p0_layer, p1_layer, colCool, s(2.0f));
+                char buf[24];
+                snprintf(buf, sizeof(buf), "Plane %d (Opaque)", p);
+                dl->AddText(ImVec2(area.x + s(6.0f), y - s(6.0f)), colText, buf);
+            } else {
+                // Lower planes: Untouched
+                dl->AddRect(p0_layer, p1_layer, IM_COL32(50, 65, 85, 140), s(2.0f));
+                char buf[24];
+                snprintf(buf, sizeof(buf), "Plane %d (unreached)", p);
+                dl->AddText(ImVec2(area.x + s(6.0f), y - s(6.0f)), colDim, buf);
+            }
+        }
+
+        // Ray entering and terminating immediately on Plane 0
+        const int rays = 3;
+        float raySpacing = planeW / (rays + 1);
+        for (int r = 0; r < rays; ++r) {
+            float rx = area.x + (r + 1) * raySpacing;
+            ImVec2 rayStart(rx, area.y - s(4.0f));
+            ImVec2 rayHit(rx, startY - s(3.0f));
+            dl->AddLine(rayStart, rayHit, colGreen, 1.8f);
+            dl->AddCircleFilled(rayHit, s(3.0f), colGreen);
+        }
+
+        // Stats on right
+        float statX = area.x + planeW + s(10.0f);
+        dl->AddText(ImVec2(statX, area.y + s(2.0f)), colCool, "16 Solid Planes");
+        dl->AddText(ImVec2(statX, area.y + s(18.0f)), colGreen, "Hits Plane 0");
+        dl->AddText(ImVec2(statX, area.y + s(34.0f)), colAmber, "0 Re-Entries");
+        dl->AddText(ImVec2(statX, area.y + s(50.0f)), colDim, "Fast Accept");
+
+        drawFootnote("all geometry opaque -> any-hit shader confirms hit immediately; zero re-traversal overhead");
+        return;
+    }
+
+    // ------------------------------------------------------------------
+    // Any-Hit Stress: 50% Cutout Penetration
+    // ------------------------------------------------------------------
+    if (diagramId == "anyhit_50_cutout") {
+        drawTitle("Any-Hit Stress: 50% Cutout Penetration");
+
+        const int numPlanes = 4;
+        float planeSpacing = gh * 0.23f;
+        float startY = area.y + s(12.0f);
+        float planeW = gw * 0.58f;
+
+        for (int p = 0; p < numPlanes; ++p) {
+            float y = startY + p * planeSpacing;
+            float segW = planeW / 6.0f;
+            for (int sIdx = 0; sIdx < 6; ++sIdx) {
+                ImVec2 s0(area.x + sIdx * segW, y - s(3.0f));
+                ImVec2 s1(s0.x + segW - s(2.0f), y + s(3.0f));
+                bool solid = ((sIdx + p) % 2 == 0);
+                if (solid) {
+                    dl->AddRectFilled(s0, s1, IM_COL32(30, 80, 130, 240), s(1.0f));
+                    dl->AddRect(s0, s1, colCool, s(1.0f));
+                } else {
+                    dl->AddRect(s0, s1, IM_COL32(70, 50, 40, 160), s(1.0f));
+                }
+            }
+        }
+
+        // Ray 1: pierces Plane 0 (cutout), hits Plane 1 (solid)
+        float r1X = area.x + planeW * 0.25f;
+        dl->AddLine(ImVec2(r1X, area.y - s(4.0f)), ImVec2(r1X, startY + planeSpacing - s(3.0f)), colHot, 1.6f);
+        dl->AddCircleFilled(ImVec2(r1X, startY), s(2.5f), colAmber);
+        dl->AddCircleFilled(ImVec2(r1X, startY + planeSpacing), s(3.0f), colGreen);
+
+        // Ray 2: pierces Plane 0 (cutout), Plane 1 (cutout), hits Plane 2 (solid)
+        float r2X = area.x + planeW * 0.58f;
+        dl->AddLine(ImVec2(r2X, area.y - s(4.0f)), ImVec2(r2X, startY + 2 * planeSpacing - s(3.0f)), colHot, 1.6f);
+        dl->AddCircleFilled(ImVec2(r2X, startY), s(2.5f), colAmber);
+        dl->AddCircleFilled(ImVec2(r2X, startY + planeSpacing), s(2.5f), colAmber);
+        dl->AddCircleFilled(ImVec2(r2X, startY + 2 * planeSpacing), s(3.0f), colGreen);
+
+        // Stats on right
+        float statX = area.x + planeW + s(10.0f);
+        dl->AddText(ImVec2(statX, area.y + s(2.0f)), colCool, "16 Planes");
+        dl->AddText(ImVec2(statX, area.y + s(18.0f)), colHot, "50% Cutout");
+        dl->AddText(ImVec2(statX, area.y + s(34.0f)), colAmber, "Re-enters BVH");
+        dl->AddText(ImVec2(statX, area.y + s(50.0f)), colHot, "RTU Re-dispatch");
+
+        drawFootnote("any-hit shader rejects 50% of candidate hits; forces hardware to resume BVH traversal through layers");
         return;
     }
 
@@ -4041,7 +4208,7 @@ void GuiApp::renderBenchmarkSuitePanel() {
                                               item.name.c_str(), item.subcategory.c_str(), item.id.c_str(),
                                               catStr.c_str(), reason.c_str());
                         } else if (!item.description.empty()) {
-                            std::string scn = (item.id == "RayScheduling" || item.id == "RayRawTraversal" || item.id == "RayPathTracing") ? m_suiteActiveScene : "";
+                            std::string scn = (item.id == "RayScheduling" || item.id == "RayPathTracing") ? m_suiteActiveScene : "";
                             renderBenchmarkTooltip(item, scn);
                         }
                     }

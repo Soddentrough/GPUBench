@@ -104,34 +104,93 @@ void SleepInhibitor::unInhibit() {
 }
 
 #else // Linux / FreeDesktop
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/wait.h>
+#include <spawn.h>
+
+extern char **environ;
+
 void SleepInhibitor::inhibit(const std::string &reason) {
-    // Attempt D-Bus inhibition via org.freedesktop.ScreenSaver
-    FILE *fp = popen("dbus-send --print-reply --dest=org.freedesktop.ScreenSaver "
-                     "/org/freedesktop/ScreenSaver org.freedesktop.ScreenSaver.Inhibit "
-                     "string:\"GPUBench\" string:\"Active GPU benchmark execution\" 2>/dev/null", "r");
-    if (fp) {
-        char buf[256];
-        while (fgets(buf, sizeof(buf), fp)) {
-            unsigned int c = 0;
-            if (sscanf(buf, " uint32 %u", &c) == 1 || sscanf(buf, "uint32 %u", &c) == 1) {
-                cookie = c;
-                inhibited = true;
-                break;
+    (void)reason;
+    int pipefd[2];
+    if (pipe(pipefd) != 0) {
+        return;
+    }
+
+    posix_spawn_file_actions_t actions;
+    posix_spawn_file_actions_init(&actions);
+    posix_spawn_file_actions_addclose(&actions, pipefd[0]);
+    posix_spawn_file_actions_adddup2(&actions, pipefd[1], STDOUT_FILENO);
+    posix_spawn_file_actions_addclose(&actions, pipefd[1]);
+    posix_spawn_file_actions_addopen(&actions, STDERR_FILENO, "/dev/null", O_WRONLY, 0);
+
+    const char *argv[] = {
+        "dbus-send",
+        "--print-reply",
+        "--dest=org.freedesktop.ScreenSaver",
+        "/org/freedesktop/ScreenSaver",
+        "org.freedesktop.ScreenSaver.Inhibit",
+        "string:GPUBench",
+        "string:Active GPU benchmark execution",
+        nullptr
+    };
+
+    pid_t pid;
+    int status = posix_spawnp(&pid, "dbus-send", &actions, nullptr, const_cast<char *const *>(argv), environ);
+    posix_spawn_file_actions_destroy(&actions);
+    close(pipefd[1]);
+
+    if (status == 0) {
+        FILE *fp = fdopen(pipefd[0], "r");
+        if (fp) {
+            char buf[256];
+            while (fgets(buf, sizeof(buf), fp)) {
+                unsigned int c = 0;
+                if (sscanf(buf, " uint32 %u", &c) == 1 || sscanf(buf, "uint32 %u", &c) == 1) {
+                    cookie = c;
+                    inhibited = true;
+                    break;
+                }
             }
+            fclose(fp);
+        } else {
+            close(pipefd[0]);
         }
-        pclose(fp);
+        waitpid(pid, nullptr, 0);
+    } else {
+        close(pipefd[0]);
     }
 }
 
 void SleepInhibitor::unInhibit() {
     if (inhibited && cookie > 0) {
-        char cmd[256];
-        std::snprintf(cmd, sizeof(cmd),
-                      "dbus-send --dest=org.freedesktop.ScreenSaver "
-                      "/org/freedesktop/ScreenSaver org.freedesktop.ScreenSaver.UnInhibit "
-                      "uint32:%u 2>/dev/null", cookie);
-        int ret = system(cmd);
-        (void)ret;
+        char cookie_arg[64];
+        std::snprintf(cookie_arg, sizeof(cookie_arg), "uint32:%u", cookie);
+
+        posix_spawn_file_actions_t actions;
+        posix_spawn_file_actions_init(&actions);
+        posix_spawn_file_actions_addopen(&actions, STDOUT_FILENO, "/dev/null", O_WRONLY, 0);
+        posix_spawn_file_actions_addopen(&actions, STDERR_FILENO, "/dev/null", O_WRONLY, 0);
+
+        const char *argv[] = {
+            "dbus-send",
+            "--dest=org.freedesktop.ScreenSaver",
+            "/org/freedesktop/ScreenSaver",
+            "org.freedesktop.ScreenSaver.UnInhibit",
+            cookie_arg,
+            nullptr
+        };
+
+        pid_t pid;
+        if (posix_spawnp(&pid, "dbus-send", &actions, nullptr, const_cast<char *const *>(argv), environ) == 0) {
+            waitpid(pid, nullptr, 0);
+        }
+        posix_spawn_file_actions_destroy(&actions);
+
         cookie = 0;
         inhibited = false;
     }

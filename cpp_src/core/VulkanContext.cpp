@@ -356,7 +356,7 @@ const std::vector<DeviceInfo> &VulkanContext::getDevices() const {
 
       char uuid_str[33];
       for (uint32_t i = 0; i < VK_UUID_SIZE; ++i) {
-        sprintf(&uuid_str[i * 2], "%02x", props.pipelineCacheUUID[i]);
+        std::snprintf(&uuid_str[i * 2], sizeof(uuid_str) - (i * 2), "%02x", props.pipelineCacheUUID[i]);
       }
       info.driverUUID = std::string(uuid_str);
 
@@ -969,7 +969,8 @@ void VulkanContext::createDevice() {
   if (!vkCmdPipelineBarrier2KHR_ptr) {
     vkCmdPipelineBarrier2KHR_ptr = (PFN_vkCmdPipelineBarrier2KHR)vkGetDeviceProcAddr(device, "vkCmdPipelineBarrier2");
   }
-  sync2Supported = (vkCmdPipelineBarrier2KHR_ptr != nullptr);
+  sync2Supported = (sync2Features.synchronization2 == VK_TRUE) &&
+                   (vkCmdPipelineBarrier2KHR_ptr != nullptr);
 
   VkCommandPoolCreateInfo poolInfo{};
   poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
