@@ -317,8 +317,7 @@ static HardwareProfile synthesizePatternProfile(uint32_t vendorId, uint32_t devi
   p.marketingName = name;
 
   if (vendorId == 0x1002 || containsCi(name, "AMD") || containsCi(name, "Radeon")) {
-    if (containsCi(name, "gfx12") || containsCi(name, "r9700") || containsCi(name, "rdna 4") ||
-        containsCi(name, "rdna4") || containsCi(name, "navi 48") || containsCi(name, "rx 9070")) {
+    if (containsCi(name, "r9700") || containsCi(name, "navi 48") || containsCi(name, "9070")) {
       p.archName = "gfx1201 (RDNA 4)";
       p.archFamily = "RDNA 4";
       p.isApu = false;
@@ -327,16 +326,43 @@ static HardwareProfile synthesizePatternProfile(uint32_t vendorId, uint32_t devi
       p.theoreticalTriangleGis = 300.8;
       p.theoreticalBoxGis = 1203.2;
       p.theoreticalFp32Tflops = 48.66;
+      p.theoreticalBandwidthGBps = 640.0;
       p.memoryType = "GDDR6";
       return p;
     }
-    if (containsCi(name, "gfx115") || containsCi(name, "strix") || containsCi(name, "8060") ||
+    if (containsCi(name, "gfx12") || containsCi(name, "rdna 4") || containsCi(name, "rdna4")) {
+      p.archName = "gfx1200 (RDNA 4)";
+      p.archFamily = "RDNA 4";
+      p.isApu = false;
+      p.l2CacheBytes = 8 * 1024 * 1024;
+      p.l3CacheBytes = 64 * 1024 * 1024;
+      p.theoreticalTriangleGis = 0.0;
+      p.theoreticalBoxGis = 0.0;
+      p.theoreticalFp32Tflops = 0.0;
+      p.theoreticalBandwidthGBps = 0.0;
+      p.memoryType = "GDDR6";
+      return p;
+    }
+    if (containsCi(name, "8060") || containsCi(name, "strix halo") || containsCi(name, "gfx1151")) {
+      p.archName = "gfx1151 (RDNA 3.5)";
+      p.archFamily = "RDNA 3.5";
+      p.isApu = true;
+      p.l2CacheBytes = 2 * 1024 * 1024;
+      p.l3CacheBytes = 32 * 1024 * 1024;
+      p.theoreticalFp32Tflops = 23.56;
+      p.theoreticalTriangleGis = 145.0;
+      p.theoreticalBoxGis = 580.0;
+      p.theoreticalBandwidthGBps = 273.0;
+      p.memoryType = "Unified LPDDR5X";
+      return p;
+    }
+    if (containsCi(name, "gfx115") || containsCi(name, "strix") ||
         containsCi(name, "8050") || containsCi(name, "890m") || containsCi(name, "880m")) {
       p.archName = "gfx1150 (RDNA 3.5)";
       p.archFamily = "RDNA 3.5";
       p.isApu = true;
       p.l2CacheBytes = 2 * 1024 * 1024;
-      p.l3CacheBytes = containsCi(name, "8060") ? (32 * 1024 * 1024) : 0;
+      p.l3CacheBytes = 0;
       p.memoryType = "Unified LPDDR5X";
       return p;
     }

@@ -5278,19 +5278,29 @@ void GuiApp::renderResultsScorecard() {
             } else if (res.component == "Ray Tracing") {
                 if (res.benchmarkName.find("RayRawTraversal") != std::string::npos) {
                     double time_s = res.time_ms / 1000.0;
+                    const auto &prof = DeviceDatabase::lookup(res.vendorId, res.deviceId, res.deviceName);
+                    double peakGis = (res.configIndex == 0) ? prof.theoreticalTriangleGis : prof.theoreticalBoxGis;
                     if (res.configIndex == 0) {
                         double gis_s = (time_s > 0.0) ? ((static_cast<double>(res.operations) / time_s) / 1e9) : 0.0;
-                        double pct = (gis_s / 300.8) * 100.0;
-                        char dBuf[48];
-                        snprintf(dBuf, sizeof(dBuf), "%.1f%% of Peak", pct);
+                        double pct = (peakGis > 0.0) ? ((gis_s / peakGis) * 100.0) : 0.0;
+                        char dBuf[64];
+                        if (peakGis > 0.0) {
+                            snprintf(dBuf, sizeof(dBuf), "%.1f%% of Peak (%s)", pct, prof.archName.c_str());
+                        } else {
+                            snprintf(dBuf, sizeof(dBuf), "%.1f GIS/s", gis_s);
+                        }
                         deltaStr = dBuf;
                         deltaCol = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
                     } else {
                         uint64_t boxOps = res.operations * 64;
                         double box_gis_s = (time_s > 0.0) ? ((static_cast<double>(boxOps) / time_s) / 1e9) : 0.0;
-                        double pct = (box_gis_s / 1203.2) * 100.0;
-                        char dBuf[48];
-                        snprintf(dBuf, sizeof(dBuf), "%.1f%% of Peak", pct);
+                        double pct = (peakGis > 0.0) ? ((box_gis_s / peakGis) * 100.0) : 0.0;
+                        char dBuf[64];
+                        if (peakGis > 0.0) {
+                            snprintf(dBuf, sizeof(dBuf), "%.1f%% of Peak (%s)", pct, prof.archName.c_str());
+                        } else {
+                            snprintf(dBuf, sizeof(dBuf), "%.1f GIS/s", box_gis_s);
+                        }
                         deltaStr = dBuf;
                         deltaCol = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
                     }

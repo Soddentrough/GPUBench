@@ -219,14 +219,14 @@ void RayASBuildBench::Setup(IComputeContext &context_ref,
         vkCmdBuildAccelerationStructuresKHR_ptr(cmd, 1, &bInfo, &pRange);
 
         if (b + 1 < bEnd) {
-          VkMemoryBarrier mb{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
-          mb.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR | VK_ACCESS_SHADER_WRITE_BIT;
-          mb.dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR |
-                             VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR |
-                             VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-          vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
-                               VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
-                               0, 1, &mb, 0, nullptr, 0, nullptr);
+          vContext->cmdPipelineMemoryBarrier2(
+              cmd,
+              VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+              VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR | VK_ACCESS_2_SHADER_WRITE_BIT,
+              VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+              VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR |
+                  VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR |
+                  VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT);
         }
       }
       vkEndCommandBuffer(cmd);

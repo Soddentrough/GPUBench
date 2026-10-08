@@ -15,9 +15,9 @@ GPUBench is a high-performance cross-platform GPU benchmarking tool designed to 
   - **Multi-Layer Alpha Testing**: AnyHit alpha evaluation through 16 stacked cutout planes.
   - **Acceleration Structure Throughput**: BLAS/TLAS build and dynamic vertex refit rates.
 - **Comprehensive Compute Data Types**: 
-  - Floating Point: FP64, FP32, FP16, BF16, FP8, FP6, FP4
-  - Integer: INT8, INT4
-- **Memory & Cache Hierarchy**: Measure Device VRAM Bandwidth, Host/PCIe Bandwidth, and L0/L1/L2/L3 Cache latency.
+  - Actively Supported Hardware Types: FP64, FP32, FP16, FP8 (Vulkan Cooperative Matrix / ROCm), INT8
+  - Capability-Probed / Future Types: BF16 (probed; toolchain arithmetic limitation), FP6 (probed; NVIDIA SPV_NV_float6 only), FP4 (probed; software emulation avoided), INT4 (probed; lacks standardized SPIR-V types)
+- **Memory & Cache Hierarchy**: Measure Device VRAM Bandwidth, Host/PCIe Bandwidth, L0 Cache Latency, and full multi-level cache latency curves (16 KB to 256 MB spanning L0 TCP, GL1, GL2, L3 MALL, and GDDR6 DRAM). Cache bandwidth rows are disabled to prevent compiler dead-code elimination.
 - **Dynamic Loading**: Backends are loaded at runtime, making them optional and reducing installation dependencies.
 - **Cross-Platform**: Built for Linux and Windows.
 
@@ -94,10 +94,11 @@ $ gpubench -d 1
   ╭─ Latency ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
   │ Workload                                     │ Backend  │             Throughput │ Details / Speedup                         │
   ├──────────────────────────────────────────────┼──────────┼────────────────────────┼───────────────────────────────────────────┤
-  │ L0 Cache Latency                             │ Vulkan   │               30.94 ns │                                           │
-  │ L1 Cache Latency                             │ Vulkan   │               65.15 ns │                                           │
-  │ L2 Cache Latency                             │ Vulkan   │               83.61 ns │                                           │
-  │ L3 Cache Latency                             │ Vulkan   │              154.81 ns │                                           │
+  │ L0 Cache Latency                             │ Vulkan   │               29.60 ns │ [L0 TCP Cache]                            │
+  │ Cache Latency Curve (64 KB)                  │ Vulkan   │               33.12 ns │ [GL1 Cache]                               │
+  │ Cache Latency Curve (4 MB)                   │ Vulkan   │               79.45 ns │ [GL2 Cache]                               │
+  │ Cache Latency Curve (32 MB)                  │ Vulkan   │              148.20 ns │ [L3 MALL Cache]                           │
+  │ Cache Latency Curve (256 MB)                 │ Vulkan   │              312.40 ns │ [GDDR6 VRAM DRAM]                         │
   ╰──────────────────────────────────────────────┴──────────┴────────────────────────┴───────────────────────────────────────────╯
   ╭─ Bandwidth ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
   │ Workload                                     │ Backend  │             Throughput │ Details / Speedup                         │
@@ -150,6 +151,7 @@ GPUBench evaluates how different GPU hardware architectures handle these workloa
 3. **Device-Generated Commands (DGC / Wavefront Compaction)**: Compacts divergent hits into categorized material queues via ballot/atomic compaction and dispatches uniform waves using GPU-driven command generation (`VK_EXT_device_generated_commands`), providing optimal scaling across AMD RDNA and multi-vendor GPUs.
 
 #### Four-Scenario Benchmarking Morphology
+All scenario throughput measurements below were evaluated at **4K UHD (3840x2160, ~8.29M primary rays)** on the **AMD Radeon AI PRO R9700** (RDNA 4 / gfx1201):
 - **Showroom Studio (`-s showroom`)**: $108,936$ triangles featuring the Khronos ToyCar glTF asset with clearcoat, decals, and velvet pedestal. Device-Generated Commands (DGC) achieve **101.3 FPS** vs. Megakernel **57.6 FPS** (**1.76x speedup**).
 - **Complex Indoor Atrium (`-s indoor`)**: $262,267$ triangles featuring Crytek Sponza glTF with 25 PBR materials and 0% sky escape. Device-Generated Commands (DGC) achieve **68.0 FPS** vs. Megakernel **30.5 FPS** (**2.23x speedup**).
 - **Open-World Outdoor Landscape (`-s outdoor`)**: $57,216$ triangles spanning $>2000\text{m}$ alpine terrain, lake, conifer foliage, and Rayleigh-Mie atmospheric scattering. Device-Generated Commands (DGC) achieve **420.0 FPS** vs. Megakernel **185.8 FPS** (**2.26x speedup**).

@@ -21,8 +21,8 @@ CacheBench::CacheBench(std::string name, std::string metric,
                        uint64_t bufferSize, std::string kernelFile,
                        std::vector<uint32_t> initData,
                        std::vector<std::string> aliases, int targetCacheLevel)
-    : name(name), metric(metric), bufferSize(bufferSize),
-      kernelFile(kernelFile), initData(initData), aliases(aliases),
+    : name(name), aliases(aliases), metric(metric), bufferSize(bufferSize),
+      kernelFile(kernelFile), initData(initData),
       targetCacheLevel(targetCacheLevel) {}
 
 CacheBench::~CacheBench() {

@@ -2286,13 +2286,10 @@ void VulkanContext::dispatchWorkListSequence(
                               &resetKernel->descriptorSet, 0, nullptr);
       vkCmdDispatch(frame.commandBuffer, 1, 1, 1);
 
-      VkMemoryBarrier resetBarrier{};
-      resetBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-      resetBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-      resetBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-      vkCmdPipelineBarrier(frame.commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                           VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &resetBarrier, 0,
-                           nullptr, 0, nullptr);
+      cmdPipelineMemoryBarrier2(
+          frame.commandBuffer,
+          VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT,
+          VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT);
     }
   }
 
@@ -2316,13 +2313,10 @@ void VulkanContext::dispatchWorkListSequence(
   if (resolveKernel_handle) {
     auto *resolveKernel = getKernel(resolveKernel_handle);
     if (resolveKernel) {
-      VkMemoryBarrier classifyBarrier{};
-      classifyBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-      classifyBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-      classifyBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-      vkCmdPipelineBarrier(frame.commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                           VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &classifyBarrier, 0,
-                           nullptr, 0, nullptr);
+      cmdPipelineMemoryBarrier2(
+          frame.commandBuffer,
+          VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT,
+          VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT);
 
       vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
                         resolveKernel->pipeline);
@@ -2343,22 +2337,18 @@ void VulkanContext::dispatchWorkListSequence(
       }
       vkCmdDispatch(frame.commandBuffer, 1, 1, 1);
 
-      VkMemoryBarrier resolveBarrier{};
-      resolveBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-      resolveBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-      resolveBarrier.dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_SHADER_READ_BIT;
-      vkCmdPipelineBarrier(frame.commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                           VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_COMMAND_PREPROCESS_BIT_EXT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                           0, 1, &resolveBarrier, 0, nullptr, 0, nullptr);
+      cmdPipelineMemoryBarrier2(
+          frame.commandBuffer,
+          VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT,
+          VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_COMMAND_PREPROCESS_BIT_EXT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+          VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT);
     }
   } else {
-    VkMemoryBarrier passBarrier{};
-    passBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-    passBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    passBarrier.dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_SHADER_READ_BIT;
-    vkCmdPipelineBarrier(frame.commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                         VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_COMMAND_PREPROCESS_BIT_EXT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                         0, 1, &passBarrier, 0, nullptr, 0, nullptr);
+    cmdPipelineMemoryBarrier2(
+        frame.commandBuffer,
+        VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT,
+        VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_COMMAND_PREPROCESS_BIT_EXT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+        VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT);
   }
 
   // 4. Pass 2: Indirect Dispatches (DGC or Legacy Fallback)
@@ -2429,12 +2419,10 @@ void VulkanContext::dispatchWorkListSequence(
         if (e + 1 < entries.size() && resolveKernel_handle) {
           auto *resolveKernel = getKernel(resolveKernel_handle);
           if (resolveKernel) {
-            VkMemoryBarrier bounceBarrier{};
-            bounceBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-            bounceBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-            bounceBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-            vkCmdPipelineBarrier(frame.commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                                 VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &bounceBarrier, 0, nullptr, 0, nullptr);
+            cmdPipelineMemoryBarrier2(
+                frame.commandBuffer,
+                VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT,
+                VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT);
 
             vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, resolveKernel->pipeline);
             vkCmdBindDescriptorSets(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
@@ -2446,13 +2434,11 @@ void VulkanContext::dispatchWorkListSequence(
                                VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(rpcBounce), &rpcBounce);
             vkCmdDispatch(frame.commandBuffer, 1, 1, 1);
 
-            VkMemoryBarrier resolveBarrier{};
-            resolveBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-            resolveBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-            resolveBarrier.dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_SHADER_READ_BIT;
-            vkCmdPipelineBarrier(frame.commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                                 VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_COMMAND_PREPROCESS_BIT_EXT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                                 0, 1, &resolveBarrier, 0, nullptr, 0, nullptr);
+            cmdPipelineMemoryBarrier2(
+                frame.commandBuffer,
+                VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT,
+                VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_COMMAND_PREPROCESS_BIT_EXT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT);
           }
         }
       }
@@ -2485,13 +2471,10 @@ void VulkanContext::dispatchWorkListSequence(
       if (isPingPong && (e + 1 < entries.size()) && resolveKernel_handle) {
         auto *resolveKernel = getKernel(resolveKernel_handle);
         if (resolveKernel) {
-          VkMemoryBarrier bounceBarrier{};
-          bounceBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-          bounceBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-          bounceBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-          vkCmdPipelineBarrier(frame.commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                               VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &bounceBarrier, 0,
-                               nullptr, 0, nullptr);
+          cmdPipelineMemoryBarrier2(
+              frame.commandBuffer,
+              VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT,
+              VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT);
 
           vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
                             resolveKernel->pipeline);
@@ -2505,13 +2488,11 @@ void VulkanContext::dispatchWorkListSequence(
                              sizeof(rpcBounce), &rpcBounce);
           vkCmdDispatch(frame.commandBuffer, 1, 1, 1);
 
-          VkMemoryBarrier resolveBarrier{};
-          resolveBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-          resolveBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-          resolveBarrier.dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_SHADER_READ_BIT;
-          vkCmdPipelineBarrier(frame.commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                               VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                               0, 1, &resolveBarrier, 0, nullptr, 0, nullptr);
+          cmdPipelineMemoryBarrier2(
+              frame.commandBuffer,
+              VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT,
+              VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+              VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT);
 
           vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
                             secondKernel->pipeline);
@@ -3231,11 +3212,10 @@ void VulkanContext::dispatchDGCWorkListSequence(
                               resetKernel->pipelineLayout, 0, 1, &resetKernel->descriptorSet, 0, nullptr);
       vkCmdDispatch(frame.commandBuffer, 1, 1, 1);
 
-      VkMemoryBarrier resetBarrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
-      resetBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-      resetBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-      vkCmdPipelineBarrier(frame.commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                           VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &resetBarrier, 0, nullptr, 0, nullptr);
+      cmdPipelineMemoryBarrier2(
+          frame.commandBuffer,
+          VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT,
+          VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT);
     }
   }
 
@@ -3252,11 +3232,10 @@ void VulkanContext::dispatchDGCWorkListSequence(
   vkCmdDispatch(frame.commandBuffer, grid_x, grid_y, grid_z);
 
   // 3. Barrier: Classify -> Resolve
-  VkMemoryBarrier classifyBarrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
-  classifyBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-  classifyBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-  vkCmdPipelineBarrier(frame.commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                       VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &classifyBarrier, 0, nullptr, 0, nullptr);
+  cmdPipelineMemoryBarrier2(
+      frame.commandBuffer,
+      VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT,
+      VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT);
 
   // 4. Resolve: GPU outputs DGC sequence items and dynamic sequence count
   if (resolveKernel_handle) {
@@ -3274,12 +3253,11 @@ void VulkanContext::dispatchDGCWorkListSequence(
   }
 
   // 5. Barrier: Resolve -> DGC Execution
-  VkMemoryBarrier dgcBarrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
-  dgcBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-  dgcBarrier.dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_SHADER_READ_BIT;
-  vkCmdPipelineBarrier(frame.commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                       VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_COMMAND_PREPROCESS_BIT_EXT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                       0, 1, &dgcBarrier, 0, nullptr, 0, nullptr);
+  cmdPipelineMemoryBarrier2(
+      frame.commandBuffer,
+      VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT,
+      VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_COMMAND_PREPROCESS_BIT_EXT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+      VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT);
 
   // 6. Bind base pipeline and descriptor set
   vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, secondKernel->pipeline);
@@ -3387,5 +3365,38 @@ void VulkanContext::dispatchDGCSequence(ComputeKernel kernel_handle,
   }
   frame.inUse = true;
   currentFrameIndex = (currentFrameIndex + 1) % kMaxInFlight;
+}
+
+void VulkanContext::cmdPipelineMemoryBarrier2(
+    VkCommandBuffer cmd,
+    VkPipelineStageFlags2 srcStageMask,
+    VkAccessFlags2 srcAccessMask,
+    VkPipelineStageFlags2 dstStageMask,
+    VkAccessFlags2 dstAccessMask) {
+  if (sync2Supported && vkCmdPipelineBarrier2KHR_ptr) {
+    VkMemoryBarrier2 barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+    barrier.srcStageMask = srcStageMask;
+    barrier.srcAccessMask = srcAccessMask;
+    barrier.dstStageMask = dstStageMask;
+    barrier.dstAccessMask = dstAccessMask;
+
+    VkDependencyInfo depInfo{};
+    depInfo.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    depInfo.memoryBarrierCount = 1;
+    depInfo.pMemoryBarriers = &barrier;
+
+    vkCmdPipelineBarrier2KHR_ptr(cmd, &depInfo);
+  } else {
+    VkMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    barrier.srcAccessMask = static_cast<VkAccessFlags>(srcAccessMask);
+    barrier.dstAccessMask = static_cast<VkAccessFlags>(dstAccessMask);
+    vkCmdPipelineBarrier(
+        cmd,
+        static_cast<VkPipelineStageFlags>(srcStageMask),
+        static_cast<VkPipelineStageFlags>(dstStageMask),
+        0, 1, &barrier, 0, nullptr, 0, nullptr);
+  }
 }
 

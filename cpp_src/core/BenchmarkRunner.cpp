@@ -1536,15 +1536,13 @@ void BenchmarkRunner::runHostBenchmarks(const std::vector<std::string> &benchmar
 }
 
 void BenchmarkRunner::printReport() {
-  if (quiet) {
+  if (onResult) {
     return;
   }
   if (verbose) {
     std::cout << "\r\033[K" << std::flush;
   }
-  if (!onResult) {
-    formatter->print();
-  }
+  formatter->print();
 }
 
 void BenchmarkRunner::run(const std::vector<std::string> &benchmarks_to_run) {

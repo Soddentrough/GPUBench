@@ -1610,7 +1610,21 @@ std::string resultsToJson(const std::vector<ResultData> &results) {
     out += "      \"work_graphs_supported\": " + std::string(dp.workGraphsSupported ? "true" : "false") + ",\n";
     out += "      \"cooperative_matrix_supported\": " + std::string(dp.cooperativeMatrixSupported ? "true" : "false") + ",\n";
     out += "      \"float16_supported\": " + std::string(dp.float16Supported ? "true" : "false") + ",\n";
-    out += "      \"int8_supported\": " + std::string(dp.int8Supported ? "true" : "false") + "\n";
+    const auto &prof = DeviceDatabase::lookup(dp.vendorID, dp.deviceID, dp.deviceName);
+    out += "      \"int8_supported\": " + std::string(dp.int8Supported ? "true" : "false") + ",\n";
+    out += "      \"architecture\": \"" + jsonEscape(prof.archName) + "\",\n";
+    out += "      \"memory_type\": \"" + jsonEscape(prof.memoryType) + "\"";
+    if (prof.theoreticalFp32Tflops > 0.0) {
+      out += ",\n      \"theoretical_fp32_tflops\": " + std::to_string(prof.theoreticalFp32Tflops);
+    }
+    if (prof.theoreticalBandwidthGBps > 0.0) {
+      out += ",\n      \"theoretical_bandwidth_gbps\": " + std::to_string(prof.theoreticalBandwidthGBps);
+    }
+    if (prof.theoreticalTriangleGis > 0.0) {
+      out += ",\n      \"theoretical_triangle_gis\": " + std::to_string(prof.theoreticalTriangleGis) + ",\n";
+      out += "      \"theoretical_box_gis\": " + std::to_string(prof.theoreticalBoxGis);
+    }
+    out += "\n";
     out += (d + 1 < profiles.size()) ? "    },\n" : "    }\n";
   }
   out += "  ],\n";
@@ -1665,6 +1679,32 @@ std::string resultsToJson(const std::vector<ResultData> &results) {
         out += "      \"theoretical_peak_gis\": " + std::to_string(peakGis) + ",\n";
         out += "      \"pct_theoretical_peak\": " + std::to_string(pctPeak) + ",\n";
         out += "      \"details_speedup\": \"" + jsonEscape(detailsStr) + "\",\n";
+      }
+    }
+    if ((r.benchmarkName.find("FP32") != std::string::npos || r.benchmarkName.find("Dual-Issue") != std::string::npos) && r.metric == "TFLOPS") {
+      const auto &prof = DeviceDatabase::lookup(r.vendorId, r.deviceId, r.deviceName);
+      if (prof.theoreticalFp32Tflops > 0.0) {
+        double pctPeak = (value / prof.theoreticalFp32Tflops) * 100.0;
+        char buf[96];
+        std::snprintf(buf, sizeof(buf), "%.1f%% of %.2f TFLOPS %s Peak", pctPeak,
+                      prof.theoreticalFp32Tflops, prof.archName.c_str());
+        out += "      \"target_architecture\": \"" + jsonEscape(prof.archName) + "\",\n";
+        out += "      \"theoretical_peak_tflops\": " + std::to_string(prof.theoreticalFp32Tflops) + ",\n";
+        out += "      \"pct_theoretical_peak\": " + std::to_string(pctPeak) + ",\n";
+        out += "      \"details_speedup\": \"" + jsonEscape(std::string(buf)) + "\",\n";
+      }
+    }
+    if ((r.benchmarkName.find("Device Memory Bandwidth") != std::string::npos || r.benchmarkName.find("MemBandwidth") != std::string::npos) && r.metric == "GB/s") {
+      const auto &prof = DeviceDatabase::lookup(r.vendorId, r.deviceId, r.deviceName);
+      if (prof.theoreticalBandwidthGBps > 0.0) {
+        double pctPeak = (value / prof.theoreticalBandwidthGBps) * 100.0;
+        char buf[96];
+        std::snprintf(buf, sizeof(buf), "%.1f%% of %.1f GB/s %s Peak", pctPeak,
+                      prof.theoreticalBandwidthGBps, prof.archName.c_str());
+        out += "      \"target_architecture\": \"" + jsonEscape(prof.archName) + "\",\n";
+        out += "      \"theoretical_peak_gbps\": " + std::to_string(prof.theoreticalBandwidthGBps) + ",\n";
+        out += "      \"pct_theoretical_peak\": " + std::to_string(pctPeak) + ",\n";
+        out += "      \"details_speedup\": \"" + jsonEscape(std::string(buf)) + "\",\n";
       }
     }
     out += "      \"operations\": " + std::to_string(r.operations) + ",\n";

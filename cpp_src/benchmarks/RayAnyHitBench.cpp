@@ -258,13 +258,12 @@ void RayAnyHitBench::buildAS() {
     const VkAccelerationStructureBuildRangeInfoKHR *pRange = &range;
     vkCmdBuildAccelerationStructuresKHR_ptr(cmd, 1, &info, &pRange);
 
-    VkMemoryBarrier barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
-    barrier.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
-    barrier.dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR;
-    vkCmdPipelineBarrier(cmd,
-                         VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
-                         VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
-                         0, 1, &barrier, 0, nullptr, 0, nullptr);
+    vContext->cmdPipelineMemoryBarrier2(
+        cmd,
+        VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+        VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR,
+        VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+        VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR);
   };
 
   cmdBuild(triBuildInfo, triangleBlas, numPrimitives);

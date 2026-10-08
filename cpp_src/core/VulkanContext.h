@@ -205,6 +205,14 @@ public:
   }
   void pickPhysicalDevice(uint32_t index);
 
+  bool isSync2Supported() const { return sync2Supported; }
+  void cmdPipelineMemoryBarrier2(
+      VkCommandBuffer cmd,
+      VkPipelineStageFlags2 srcStageMask,
+      VkAccessFlags2 srcAccessMask,
+      VkPipelineStageFlags2 dstStageMask,
+      VkAccessFlags2 dstAccessMask);
+
 private:
   struct VulkanBuffer {
     VkBuffer buffer = VK_NULL_HANDLE;
