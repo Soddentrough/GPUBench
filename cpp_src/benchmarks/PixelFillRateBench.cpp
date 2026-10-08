@@ -29,16 +29,16 @@ bool PixelFillRateBench::IsSupported(const DeviceInfo &info,
 }
 
 std::string PixelFillRateBench::GetSupportNote(const DeviceInfo &info,
-                                               IComputeContext *context) const {
+                                               IComputeContext *ctx) const {
   (void)info;
-  if (context && context->getBackend() == ComputeBackend::OpenCL) {
+  if (ctx && ctx->getBackend() == ComputeBackend::OpenCL) {
     return "No support for graphics rasterization pipeline (ROPs) in OpenCL API";
   }
-  if (context && context->getBackend() == ComputeBackend::ROCm) {
+  if (ctx && ctx->getBackend() == ComputeBackend::ROCm) {
     return "No support for graphics rasterization pipeline (ROPs) in ROCm API";
   }
-  if (context && context->getBackend() == ComputeBackend::Vulkan) {
-    auto *vkCtx = dynamic_cast<VulkanContext *>(context);
+  if (ctx && ctx->getBackend() == ComputeBackend::Vulkan) {
+    auto *vkCtx = dynamic_cast<VulkanContext *>(ctx);
     if (vkCtx && !vkCtx->isDynamicRenderingSupported()) {
       return "Dynamic rendering (VK_KHR_dynamic_rendering) not supported on this device";
     }

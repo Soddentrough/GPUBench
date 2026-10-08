@@ -21,13 +21,15 @@ endif()
 
 option(GPUBENCH_WERROR "Treat compiler warnings as errors" OFF)
 
+add_library(gpubench_compiler_flags INTERFACE)
+
 if(MSVC)
-    add_compile_options(/W4)
+    target_compile_options(gpubench_compiler_flags INTERFACE /W4)
     if(GPUBENCH_WERROR)
-        add_compile_options(/WX)
+        target_compile_options(gpubench_compiler_flags INTERFACE /WX)
     endif()
 else()
-    add_compile_options(
+    target_compile_options(gpubench_compiler_flags INTERFACE
         -Wall
         -Wextra
         -Wno-missing-field-initializers
@@ -37,11 +39,14 @@ else()
         -Wformat-security
     )
     if(GPUBENCH_WERROR)
-        add_compile_options(-Werror)
+        target_compile_options(gpubench_compiler_flags INTERFACE -Werror)
     endif()
     if(NOT APPLE AND NOT WIN32)
-        add_compile_definitions($<$<CONFIG:Release>:_FORTIFY_SOURCE=3> $<$<CONFIG:RelWithDebInfo>:_FORTIFY_SOURCE=3>)
-        add_link_options(
+        target_compile_definitions(gpubench_compiler_flags INTERFACE
+            $<$<CONFIG:Release>:_FORTIFY_SOURCE=3>
+            $<$<CONFIG:RelWithDebInfo>:_FORTIFY_SOURCE=3>
+        )
+        target_link_options(gpubench_compiler_flags INTERFACE
             -Wl,-z,relro
             -Wl,-z,now
             -Wl,-z,noexecstack
@@ -345,7 +350,10 @@ endif()
 
 add_library(gpubench_lib STATIC ${LIB_SOURCES})
 set_target_properties(gpubench_lib PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_link_libraries(gpubench_lib PUBLIC gpubench_compiler_flags)
+
 add_executable(gpubench ${SOURCES})
+target_link_libraries(gpubench PRIVATE gpubench_compiler_flags)
 
 # Add dependencies on shader/kernel compilation
 if(Vulkan_FOUND)
@@ -493,8 +501,12 @@ if(GPUBENCH_BUILD_GUI)
             GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
             GIT_TAG release-3.4.16
             GIT_SHALLOW TRUE
+            SYSTEM
         )
+        set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
+        set(SDL_TESTS OFF CACHE BOOL "" FORCE)
         set(SDL_TEST_ENABLE OFF CACHE BOOL "" FORCE)
+        set(SDL_WERROR OFF CACHE BOOL "" FORCE)
         set(SDL_SHARED ON CACHE BOOL "" FORCE)
         set(SDL_X11_XSCRNSAVER OFF CACHE BOOL "" FORCE)
         set(SDL_X11_XTEST OFF CACHE BOOL "" FORCE)

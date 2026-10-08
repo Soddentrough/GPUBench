@@ -17,30 +17,30 @@ public:
   }
   const char *GetMetric() const override { return "GPixels/s"; }
   bool IsSupported(const DeviceInfo &info,
-                   IComputeContext *context = nullptr) const override;
+                   IComputeContext *ctx = nullptr) const override;
   SupportLimitation GetSupportLimitation() const override {
     return SupportLimitation::kApi;
   }
   SupportLimitation GetSupportLimitation(const DeviceInfo &info,
-                                         IComputeContext *context = nullptr) const override {
+                                         IComputeContext *ctx = nullptr) const override {
     (void)info;
-    (void)context;
+    (void)ctx;
     return SupportLimitation::kApi;
   }
   std::string GetSupportNote() const override {
     return "Pixel Fill Rate benchmark requires Vulkan graphics rasterization pipeline with dynamic rendering (ROPs)";
   }
   std::string GetSupportNote(const DeviceInfo &info,
-                             IComputeContext *context = nullptr) const override;
+                             IComputeContext *ctx = nullptr) const override;
   void Setup(IComputeContext &context, const std::string &kernel_dir) override;
   void Run(uint32_t config_idx = 0) override;
   void Teardown() override;
   BenchmarkResult GetResult(uint32_t config_idx = 0) const override;
 
-  const char *GetComponent(uint32_t config_idx = 0) const override {
+  const char *GetComponent(uint32_t /*config_idx*/ = 0) const override {
     return "Graphics";
   }
-  const char *GetSubCategory(uint32_t config_idx = 0) const override {
+  const char *GetSubCategory(uint32_t /*config_idx*/ = 0) const override {
     return "ROP Throughput";
   }
   int GetSortWeight() const override { return 450; }
