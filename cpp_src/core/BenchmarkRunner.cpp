@@ -1056,6 +1056,9 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
         double stat_p95_ms = 0.0;
         uint32_t stat_sample_count = 0;
         std::vector<double> stat_samples;
+        uint32_t devIdx = context->getSelectedDeviceIndex();
+        GpuTelemetryData powerStart = HardwareTelemetry::queryGpu(devIdx);
+        float avgPowerWatts = 0.0f;
 
         if (profileSnapshot) {
           bench->Run(i);
@@ -1268,6 +1271,15 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
           }
         }
 
+        GpuTelemetryData powerEnd = HardwareTelemetry::queryGpu(devIdx);
+        if (powerStart.powerWatts > 0.0f && powerEnd.powerWatts > 0.0f) {
+          avgPowerWatts = (powerStart.powerWatts + powerEnd.powerWatts) * 0.5f;
+        } else if (powerStart.powerWatts > 0.0f) {
+          avgPowerWatts = powerStart.powerWatts;
+        } else if (powerEnd.powerWatts > 0.0f) {
+          avgPowerWatts = powerEnd.powerWatts;
+        }
+
         bool isValid = bench->ValidateResults(i);
         if (!isValid) {
           validationFailure = true;
@@ -1337,6 +1349,65 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
                       << (kUsage.maxWavesPerSimd > 0 ? (" | Occupancy: " + std::to_string(kUsage.maxWavesPerSimd) + "/16 waves (" + std::to_string(static_cast<int>(kUsage.maxWavesPerSimd * 100.0 / 16.0)) + "%)") : "")
                       << " (" << kUsage.compilerNotes << ")"
                       << std::endl;
+          }
+        }
+
+        if (avgPowerWatts > 0.0f && total_time_ms > 0.0) {
+          result_data.hasPowerTelemetry = true;
+          result_data.powerWatts = avgPowerWatts;
+          double durationSec = total_time_ms / 1000.0;
+          result_data.energyJoules = avgPowerWatts * durationSec;
+
+          if (result_data.component == "Compute" && result_data.operations > 0) {
+            double ops12 = (static_cast<double>(result_data.operations) / durationSec) / 1e12;
+            if (ops12 > 0.0) {
+              result_data.joulesPerUnit = avgPowerWatts / ops12;
+              result_data.unitPerWatt = (ops12 * 1000.0) / avgPowerWatts;
+              result_data.efficiencyUnit = (result_data.metric == "TOPS") ? "J/TOP" : "J/TFLOP";
+            }
+          } else if (result_data.component == "Memory" && result_data.operations > 0) {
+            double gbps = (static_cast<double>(result_data.operations) / durationSec) / 1e9;
+            if (gbps > 0.0) {
+              result_data.joulesPerUnit = avgPowerWatts / gbps;
+              result_data.unitPerWatt = gbps / avgPowerWatts; // GB/Joule
+              result_data.efficiencyUnit = "J/GB";
+            }
+          } else if (result_data.component == "Ray Tracing" && result_data.operations > 0) {
+            if (result_data.metric == "GIS/s") {
+              double gis = (static_cast<double>(result_data.operations) / durationSec) / 1e9;
+              if (gis > 0.0) {
+                result_data.joulesPerUnit = avgPowerWatts / gis;
+                result_data.unitPerWatt = (gis * 1000.0) / avgPowerWatts; // MIS/Joule
+                result_data.efficiencyUnit = "J/GIS";
+              }
+            } else {
+              double mrays = (static_cast<double>(result_data.operations) / durationSec) / 1e6;
+              if (mrays > 0.0) {
+                result_data.joulesPerUnit = avgPowerWatts / mrays;
+                result_data.unitPerWatt = (mrays * 1000.0) / avgPowerWatts; // kRays/Joule
+                result_data.efficiencyUnit = "J/MRay";
+              }
+            }
+          }
+
+          if (verbose && result_data.hasPowerTelemetry) {
+            std::cout << " [POWER & ENERGY] Measured: " << ResultFormatter::formatDouble(result_data.powerWatts, 1) << " W"
+                      << " | Energy: " << ResultFormatter::formatDouble(result_data.energyJoules, 2) << " J";
+            if (result_data.joulesPerUnit > 0.0) {
+              std::cout << " | Efficiency: " << ResultFormatter::formatDouble(result_data.joulesPerUnit, 2) << " " << result_data.efficiencyUnit;
+              if (result_data.efficiencyUnit == "J/TFLOP") {
+                std::cout << " (" << ResultFormatter::formatDouble(result_data.unitPerWatt, 1) << " GFLOPS/W)";
+              } else if (result_data.efficiencyUnit == "J/TOP") {
+                std::cout << " (" << ResultFormatter::formatDouble(result_data.unitPerWatt, 1) << " GOPS/W)";
+              } else if (result_data.efficiencyUnit == "J/GB") {
+                std::cout << " (" << ResultFormatter::formatDouble(result_data.unitPerWatt, 2) << " GB/J)";
+              } else if (result_data.efficiencyUnit == "J/MRay") {
+                std::cout << " (" << ResultFormatter::formatDouble(result_data.unitPerWatt, 1) << " kRays/J)";
+              } else if (result_data.efficiencyUnit == "J/GIS") {
+                std::cout << " (" << ResultFormatter::formatDouble(result_data.unitPerWatt, 1) << " MIS/J)";
+              }
+            }
+            std::cout << std::endl;
           }
         }
 

@@ -50,6 +50,13 @@ struct ResultData {
   uint32_t codeSizeBytes = 0;
   uint32_t maxWavesPerSimd = 0;
   std::string compilerTarget;
+  // Power & Energy Efficiency Telemetry (Optimization O-3 / O-8)
+  bool hasPowerTelemetry = false;
+  float powerWatts = 0.0f;
+  double energyJoules = 0.0;
+  double joulesPerUnit = 0.0;
+  double unitPerWatt = 0.0;
+  std::string efficiencyUnit;
 };
 
 struct ImportedRun;

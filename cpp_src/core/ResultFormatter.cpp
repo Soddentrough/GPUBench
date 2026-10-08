@@ -1058,6 +1058,114 @@ void ResultFormatter::print() {
     std::cout << BOLD << CYAN << "  ╰──────────────────────────────────────────────────────────────────────────────╯" << RESET << "\n";
   }
 
+  // 6. Energy Efficiency & Power Telemetry (Optimization O-3 / O-8)
+  bool hasAnyPower = false;
+  for (const auto &r : results) {
+    if (r.hasPowerTelemetry && r.powerWatts > 0.0f) {
+      hasAnyPower = true;
+      break;
+    }
+  }
+
+  if (hasAnyPower) {
+    std::cout << "\n";
+    std::string cardTitle = " Energy Efficiency & Power Telemetry (Optimization O-3 / O-8) ";
+    size_t dashCount = (cardBoxWidth > cardTitle.length() + 3)
+                           ? (cardBoxWidth - 3 - cardTitle.length())
+                           : 10;
+
+    std::cout << BOLD << CYAN << "  ╭─" << RESET << BOLD << cardTitle << RESET
+              << BOLD << CYAN << repeatUtf8("─", dashCount) << "╮" << RESET << "\n";
+
+    auto printCardRow = [&](const std::string &content) {
+      size_t visLen = visualLength(content);
+      size_t pad = (cardInnerWidth > visLen) ? (cardInnerWidth - visLen) : 0;
+      std::cout << BOLD << CYAN << "  │ " << RESET
+                << content
+                << std::string(pad, ' ')
+                << BOLD << CYAN << " │" << RESET << "\n";
+    };
+
+    double totalPowerSum = 0.0;
+    size_t powerCount = 0;
+    double maxComputeEff = 0.0;
+    std::string maxComputeWl;
+    std::string maxComputeUnit;
+    double maxMemEff = 0.0;
+    std::string maxMemWl;
+    double maxRtEff = 0.0;
+    std::string maxRtWl;
+
+    for (const auto &r : results) {
+      if (!r.hasPowerTelemetry || r.powerWatts <= 0.0f) continue;
+      totalPowerSum += r.powerWatts;
+      powerCount++;
+
+      if ((r.efficiencyUnit == "J/TFLOP" || r.efficiencyUnit == "J/TOP") && r.unitPerWatt > maxComputeEff) {
+        maxComputeEff = r.unitPerWatt;
+        maxComputeWl = cleanWorkloadName(r.benchmarkName, r.subcategory) + " (" + r.backendName + ")";
+        maxComputeUnit = (r.efficiencyUnit == "J/TFLOP") ? "GFLOPS/W" : "GOPS/W";
+      } else if (r.efficiencyUnit == "J/GB" && r.unitPerWatt > maxMemEff) {
+        maxMemEff = r.unitPerWatt;
+        maxMemWl = cleanWorkloadName(r.benchmarkName, r.subcategory) + " (" + r.backendName + ")";
+      } else if (r.efficiencyUnit == "J/MRay" && r.unitPerWatt > maxRtEff) {
+        maxRtEff = r.unitPerWatt;
+        maxRtWl = cleanWorkloadName(r.benchmarkName, r.subcategory) + " (" + r.backendName + ")";
+      }
+    }
+
+    double avgPower = powerCount > 0 ? (totalPowerSum / powerCount) : 0.0;
+    std::string devLine = BOLD + "• Average Measured Power: " + RESET + BOLD + GREEN + formatDouble(avgPower, 1) + " W" + RESET +
+                          DIM + " (Hardware Telemetry / sysfs hwmon)" + RESET;
+    printCardRow(devLine);
+
+    if (maxComputeEff > 0.0) {
+      std::string effLine = BOLD + "• Peak Compute Efficiency: " + RESET + BOLD + GREEN + formatDouble(maxComputeEff, 1) + " " + maxComputeUnit + RESET +
+                            DIM + " [" + maxComputeWl + "]" + RESET;
+      printCardRow(effLine);
+    }
+    if (maxMemEff > 0.0) {
+      std::string effLine = BOLD + "• Peak Memory Efficiency : " + RESET + BOLD + GREEN + formatDouble(maxMemEff, 2) + " GB/Joule" + RESET +
+                            DIM + " [" + maxMemWl + "]" + RESET;
+      printCardRow(effLine);
+    }
+    if (maxRtEff > 0.0) {
+      std::string effLine = BOLD + "• Peak RT Efficiency     : " + RESET + BOLD + GREEN + formatDouble(maxRtEff, 1) + " kRays/Joule" + RESET +
+                            DIM + " [" + maxRtWl + "]" + RESET;
+      printCardRow(effLine);
+    }
+
+    printCardRow(DIM + repeatUtf8("─", cardInnerWidth) + RESET);
+
+    for (const auto &r : results) {
+      if (!r.hasPowerTelemetry || r.powerWatts <= 0.0f || r.joulesPerUnit <= 0.0) continue;
+      std::string wl = cleanWorkloadName(r.benchmarkName, r.subcategory);
+      if (wl.length() > 28) wl = wl.substr(0, 26) + "..";
+      std::string effStr;
+      if (r.efficiencyUnit == "J/TFLOP") {
+        effStr = formatDouble(r.unitPerWatt, 1) + " GFLOPS/W (" + formatDouble(r.joulesPerUnit, 2) + " J/TFLOP)";
+      } else if (r.efficiencyUnit == "J/TOP") {
+        effStr = formatDouble(r.unitPerWatt, 1) + " GOPS/W (" + formatDouble(r.joulesPerUnit, 2) + " J/TOP)";
+      } else if (r.efficiencyUnit == "J/GB") {
+        effStr = formatDouble(r.unitPerWatt, 2) + " GB/J (" + formatDouble(r.joulesPerUnit, 2) + " J/GB)";
+      } else if (r.efficiencyUnit == "J/MRay") {
+        effStr = formatDouble(r.unitPerWatt, 1) + " kRays/J (" + formatDouble(r.joulesPerUnit, 2) + " J/MRay)";
+      } else if (r.efficiencyUnit == "J/GIS") {
+        effStr = formatDouble(r.unitPerWatt, 1) + " MIS/J (" + formatDouble(r.joulesPerUnit, 2) + " J/GIS)";
+      }
+
+      std::stringstream row;
+      row << "• " << std::left << std::setw(28) << wl
+          << " " << std::left << std::setw(8) << r.backendName
+          << " " << std::right << std::setw(6) << formatDouble(r.powerWatts, 1) + " W"
+          << " " << std::right << std::setw(7) << formatDouble(r.energyJoules, (r.energyJoules < 0.1 ? 3 : 2)) + " J"
+          << "  " << BOLD << GREEN << effStr << RESET;
+      printCardRow(row.str());
+    }
+
+    std::cout << BOLD << CYAN << "  ╰─" << repeatUtf8("─", cardBoxWidth - 3) << "╯" << RESET << "\n";
+  }
+
   std::cout << std::endl;
 }
 
@@ -1845,6 +1953,16 @@ std::string resultsToJson(const std::vector<ResultData> &results) {
       out += "        \"compiler\": \"" + jsonEscape(r.compilerTarget) + "\"\n";
       out += "      },\n";
     }
+    if (r.hasPowerTelemetry) {
+      out += "      \"power_telemetry\": {\n";
+      out += "        \"available\": true,\n";
+      out += "        \"power_watts\": " + std::to_string(r.powerWatts) + ",\n";
+      out += "        \"energy_joules\": " + std::to_string(r.energyJoules) + ",\n";
+      out += "        \"joules_per_unit\": " + std::to_string(r.joulesPerUnit) + ",\n";
+      out += "        \"unit_per_watt\": " + std::to_string(r.unitPerWatt) + ",\n";
+      out += "        \"efficiency_unit\": \"" + jsonEscape(r.efficiencyUnit) + "\"\n";
+      out += "      },\n";
+    }
     if (r.time_ms == -3.0) {
       out += "      \"status\": \"ABORTED\",\n";
       out += "      \"error\": \"" + jsonEscape(r.errorString) + "\",\n";
@@ -1879,7 +1997,28 @@ std::string resultsToJson(const std::vector<ResultData> &results) {
     out += "      \"config_index\": " + std::to_string(r.configIndex) + "\n";
     out += (i + 1 < results.size()) ? "    },\n" : "    }\n";
   }
-  out += "  ]\n";
+  out += "  ]";
+
+  bool hasAnyPowerInJson = false;
+  double totalPowerSumInJson = 0.0;
+  double totalEnergySumInJson = 0.0;
+  size_t powerCountInJson = 0;
+  for (const auto &r : results) {
+    if (r.hasPowerTelemetry && r.powerWatts > 0.0f) {
+      hasAnyPowerInJson = true;
+      totalPowerSumInJson += r.powerWatts;
+      totalEnergySumInJson += r.energyJoules;
+      powerCountInJson++;
+    }
+  }
+  if (hasAnyPowerInJson && powerCountInJson > 0) {
+    out += ",\n  \"power_summary\": {\n";
+    out += "    \"average_power_watts\": " + std::to_string(totalPowerSumInJson / powerCountInJson) + ",\n";
+    out += "    \"total_energy_joules\": " + std::to_string(totalEnergySumInJson) + "\n";
+    out += "  }\n";
+  } else {
+    out += "\n";
+  }
   out += "}\n";
   return out;
 }
