@@ -793,6 +793,12 @@ void VulkanContext::createDevice() {
   if (hasExt("VK_AMDX_shader_enqueue")) {
       *currentPNext = &enqueueFeatures; currentPNext = &enqueueFeatures.pNext;
   }
+  VkPhysicalDevicePipelineExecutablePropertiesFeaturesKHR pipelineExecutablePropertiesFeatures{
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_EXECUTABLE_PROPERTIES_FEATURES_KHR,
+      nullptr, VK_FALSE};
+  if (hasExt(VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME)) {
+      *currentPNext = &pipelineExecutablePropertiesFeatures; currentPNext = &pipelineExecutablePropertiesFeatures.pNext;
+  }
   if (hasExt(VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME)) {
       *currentPNext = &sync2Features; currentPNext = &sync2Features.pNext;
   }
@@ -820,6 +826,7 @@ void VulkanContext::createDevice() {
       VK_EXT_DEVICE_GENERATED_COMMANDS_EXTENSION_NAME,
       VK_KHR_SWAPCHAIN_EXTENSION_NAME,
       VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME,
+      VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME,
       "VK_KHR_maintenance5",
       "VK_EXT_shader_float8",
       "VK_KHR_shader_float_controls2",
@@ -876,6 +883,23 @@ void VulkanContext::createDevice() {
   if (vkCreateDevice(physicalDevice, &createInfo, nullptr, &device) !=
       VK_SUCCESS) {
     throw std::runtime_error("failed to create logical device!");
+  }
+
+  pipelineExecutablePropertiesSupported = hasExt(VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME) &&
+                                         (pipelineExecutablePropertiesFeatures.pipelineExecutableInfo == VK_TRUE);
+  if (pipelineExecutablePropertiesSupported) {
+    vkGetPipelineExecutablePropertiesKHR_ptr =
+        (PFN_vkGetPipelineExecutablePropertiesKHR)vkGetDeviceProcAddr(
+            device, "vkGetPipelineExecutablePropertiesKHR");
+    vkGetPipelineExecutableStatisticsKHR_ptr =
+        (PFN_vkGetPipelineExecutableStatisticsKHR)vkGetDeviceProcAddr(
+            device, "vkGetPipelineExecutableStatisticsKHR");
+    vkGetPipelineExecutableInternalRepresentationsKHR_ptr =
+        (PFN_vkGetPipelineExecutableInternalRepresentationsKHR)vkGetDeviceProcAddr(
+            device, "vkGetPipelineExecutableInternalRepresentationsKHR");
+    if (!vkGetPipelineExecutablePropertiesKHR_ptr || !vkGetPipelineExecutableStatisticsKHR_ptr) {
+      pipelineExecutablePropertiesSupported = false;
+    }
   }
 
   // Load DGC function pointers and query DGC properties if extension is enabled
@@ -1832,6 +1856,9 @@ ComputeKernel VulkanContext::createKernelInternal(const std::string &file_name,
 
   VkComputePipelineCreateInfo pipelineInfo{};
   pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+  if (pipelineExecutablePropertiesSupported) {
+    pipelineInfo.flags |= VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR;
+  }
   pipelineInfo.layout = vulkanKernel->pipelineLayout;
   pipelineInfo.stage.sType =
       VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -2041,6 +2068,7 @@ void VulkanContext::dispatch(ComputeKernel kernel, uint32_t grid_x,
     throw std::runtime_error("Invalid kernel handle");
   }
   VulkanKernel *vulkanKernel = it->second;
+  lastDispatchedKernel = kernel;
 
   if (m_inBatch) {
     InFlightFrame &frame = inFlightFrames[currentFrameIndex];
@@ -2195,6 +2223,86 @@ void VulkanContext::dispatch(ComputeKernel kernel, uint32_t grid_x,
   frame.inUse = true;
 
   currentFrameIndex = (currentFrameIndex + 1) % kMaxInFlight;
+}
+
+KernelResourceUsage VulkanContext::getKernelResourceUsage(ComputeKernel kernel) const {
+  KernelResourceUsage usage;
+  if (!kernel || !pipelineExecutablePropertiesSupported ||
+      !vkGetPipelineExecutablePropertiesKHR_ptr || !vkGetPipelineExecutableStatisticsKHR_ptr) {
+    return usage;
+  }
+  VulkanKernel *vkKernel = getKernel(kernel);
+  if (!vkKernel || vkKernel->pipeline == VK_NULL_HANDLE) {
+    return usage;
+  }
+
+  VkPipelineInfoKHR pipelineInfo{};
+  pipelineInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_INFO_KHR;
+  pipelineInfo.pipeline = vkKernel->pipeline;
+
+  uint32_t executableCount = 0;
+  if (vkGetPipelineExecutablePropertiesKHR_ptr(device, &pipelineInfo, &executableCount, nullptr) != VK_SUCCESS ||
+      executableCount == 0) {
+    return usage;
+  }
+
+  std::vector<VkPipelineExecutablePropertiesKHR> props(executableCount);
+  for (auto &p : props) {
+    p.sType = VK_STRUCTURE_TYPE_PIPELINE_EXECUTABLE_PROPERTIES_KHR;
+    p.pNext = nullptr;
+  }
+  if (vkGetPipelineExecutablePropertiesKHR_ptr(device, &pipelineInfo, &executableCount, props.data()) != VK_SUCCESS) {
+    return usage;
+  }
+
+  VkPipelineExecutableInfoKHR execInfo{};
+  execInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_EXECUTABLE_INFO_KHR;
+  execInfo.pipeline = vkKernel->pipeline;
+  execInfo.executableIndex = 0;
+
+  uint32_t statCount = 0;
+  if (vkGetPipelineExecutableStatisticsKHR_ptr(device, &execInfo, &statCount, nullptr) == VK_SUCCESS && statCount > 0) {
+    std::vector<VkPipelineExecutableStatisticKHR> stats(statCount);
+    for (auto &s : stats) {
+      s.sType = VK_STRUCTURE_TYPE_PIPELINE_EXECUTABLE_STATISTIC_KHR;
+      s.pNext = nullptr;
+    }
+    if (vkGetPipelineExecutableStatisticsKHR_ptr(device, &execInfo, &statCount, stats.data()) == VK_SUCCESS) {
+      usage.available = true;
+      usage.compilerNotes = "Mesa RADV (ACO)";
+      for (const auto &s : stats) {
+        std::string name = s.name;
+        uint64_t val = 0;
+        if (s.format == VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_UINT64_KHR) {
+          val = s.value.u64;
+        } else if (s.format == VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_INT64_KHR) {
+          val = static_cast<uint64_t>(s.value.i64);
+        } else if (s.format == VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_FLOAT64_KHR) {
+          val = static_cast<uint64_t>(s.value.f64);
+        }
+
+        if (name == "VGPRs" || (name.find("VGPR") != std::string::npos && name.find("Spill") == std::string::npos && name.find("Pre-Sched") == std::string::npos)) {
+          usage.vgprCount = static_cast<uint32_t>(val);
+        } else if (name == "SGPRs" || (name.find("SGPR") != std::string::npos && name.find("Spill") == std::string::npos && name.find("Pre-Sched") == std::string::npos)) {
+          usage.sgprCount = static_cast<uint32_t>(val);
+        } else if (name.find("Scratch") != std::string::npos || name.find("Spill") != std::string::npos) {
+          usage.scratchSizeBytes = std::max(usage.scratchSizeBytes, static_cast<uint32_t>(val));
+        } else if (name.find("LDS") != std::string::npos) {
+          usage.ldsSizeBytes = static_cast<uint32_t>(val);
+        } else if (name.find("Code") != std::string::npos) {
+          usage.codeSizeBytes = static_cast<uint32_t>(val);
+        } else if (name.find("Subgroups per SIMD") != std::string::npos ||
+                   name.find("Waves per SIMD") != std::string::npos ||
+                   name.find("Occupancy") != std::string::npos) {
+          usage.maxWavesPerSimd = static_cast<uint32_t>(val);
+        }
+      }
+      if (usage.maxWavesPerSimd == 0 && usage.vgprCount > 0) {
+        usage.maxWavesPerSimd = std::min(16u, 1536u / usage.vgprCount);
+      }
+    }
+  }
+  return usage;
 }
 
 void VulkanContext::dispatchIndirect(ComputeKernel kernel_handle,

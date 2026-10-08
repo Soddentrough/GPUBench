@@ -99,6 +99,8 @@ static p_clGetEventProfilingInfo f_clGetEventProfilingInfo;
 static p_clReleaseEvent f_clReleaseEvent;
 static p_clEnqueueMarkerWithWaitList f_clEnqueueMarkerWithWaitList;
 static p_clEnqueueMarker f_clEnqueueMarker;
+typedef cl_int (*p_clGetKernelWorkGroupInfo)(cl_kernel, cl_device_id, cl_kernel_work_group_info, size_t, void *, size_t *);
+static p_clGetKernelWorkGroupInfo f_clGetKernelWorkGroupInfo;
 
 bool OpenCLContext::loadLibraries() {
   if (librariesLoaded)
@@ -171,6 +173,8 @@ bool OpenCLContext::loadLibraries() {
             "clEnqueueMarkerWithWaitList");
     f_clEnqueueMarker =
         openclLib->getFunction<p_clEnqueueMarker>("clEnqueueMarker");
+    f_clGetKernelWorkGroupInfo =
+        openclLib->getFunction<p_clGetKernelWorkGroupInfo>("clGetKernelWorkGroupInfo");
   }
 
   librariesLoaded = true;
@@ -671,6 +675,7 @@ void OpenCLContext::dispatch(ComputeKernel kernel, uint32_t grid_x,
                                 (size_t)grid_z * block_z};
   size_t local_work_size[3] = {(size_t)block_x, (size_t)block_y,
                                (size_t)block_z};
+  lastDispatchedKernel = kernel;
   cl_int err = f_clEnqueueNDRangeKernel(commandQueue, kernel_cl->kernel, 3,
                                         nullptr, global_work_size,
                                         local_work_size, 0, nullptr, nullptr);
@@ -678,6 +683,32 @@ void OpenCLContext::dispatch(ComputeKernel kernel, uint32_t grid_x,
     throw std::runtime_error("Failed to dispatch OpenCL kernel (error: " +
                              std::to_string(err) + ")");
   }
+}
+
+KernelResourceUsage OpenCLContext::getKernelResourceUsage(ComputeKernel kernel) const {
+  KernelResourceUsage usage;
+  if (!kernel || !available || !f_clGetKernelWorkGroupInfo || !device) {
+    return usage;
+  }
+  auto *kernel_cl = static_cast<ComputeKernel_cl *>(kernel);
+  if (!kernel_cl || !kernel_cl->kernel) {
+    return usage;
+  }
+
+  usage.available = true;
+  usage.compilerNotes = "OpenCL Compiler";
+
+  cl_ulong local_mem = 0;
+  if (f_clGetKernelWorkGroupInfo(kernel_cl->kernel, device, CL_KERNEL_LOCAL_MEM_SIZE, sizeof(local_mem), &local_mem, nullptr) == CL_SUCCESS) {
+    usage.ldsSizeBytes = static_cast<uint32_t>(local_mem);
+  }
+
+  cl_ulong private_mem = 0;
+  if (f_clGetKernelWorkGroupInfo(kernel_cl->kernel, device, CL_KERNEL_PRIVATE_MEM_SIZE, sizeof(private_mem), &private_mem, nullptr) == CL_SUCCESS) {
+    usage.scratchSizeBytes = static_cast<uint32_t>(private_mem);
+  }
+
+  return usage;
 }
 
 void OpenCLContext::releaseKernel(ComputeKernel kernel) {

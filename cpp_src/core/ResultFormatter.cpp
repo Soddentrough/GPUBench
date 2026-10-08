@@ -993,6 +993,71 @@ void ResultFormatter::print() {
     std::cout << BOLD << CYAN << "  ╰─" << repeatUtf8("─", cardBoxWidth - 3) << "╯" << RESET << "\n";
   }
 
+  // 5. Backend Parity Attribution (Optimization O-4)
+  std::map<std::string, std::map<std::string, ResultData>> parityMap;
+  for (const auto &r : results) {
+    if (r.component == "Compute" && r.isValid && r.time_ms > 0.0) {
+      parityMap[r.benchmarkName][r.backendName] = r;
+    }
+  }
+
+  bool hasMultiBackendParity = false;
+  for (const auto &[bName, bMap] : parityMap) {
+    if (bMap.size() > 1 && (bMap.count("Vulkan") || bMap.count("ROCm"))) {
+      hasMultiBackendParity = true;
+      break;
+    }
+  }
+
+  if (hasMultiBackendParity) {
+    std::cout << "\n";
+    std::cout << BOLD << CYAN << "  ╭─ Compiler Telemetry & Backend Parity Attribution (Optimization O-4) ─────────╮" << RESET << "\n";
+    for (const auto &[bName, bMap] : parityMap) {
+      if (bMap.size() <= 1) continue;
+      std::cout << BOLD << CYAN << "  │ " << RESET << BOLD << "Workload: " << bName << RESET << "\n";
+      for (const auto &[backend, r] : bMap) {
+        double val = (static_cast<double>(r.operations) / (r.time_ms / 1000.0)) / 1e12;
+        std::string telemStr;
+        if (r.hasRegisterTelemetry) {
+          telemStr = " | " + std::to_string(r.vgprCount) + " VGPRs" +
+                     (r.sgprCount > 0 ? (", " + std::to_string(r.sgprCount) + " SGPRs") : "") +
+                     ", " + std::to_string(r.maxWavesPerSimd) + " waves/SIMD" +
+                     (r.scratchSizeBytes > 0 ? (", " + std::to_string(r.scratchSizeBytes) + " B spill") : "");
+        }
+        std::cout << BOLD << CYAN << "  │ " << RESET << " • " << std::left << std::setw(8) << backend << ": "
+                  << BOLD << GREEN << formatDouble(val, 2) << " " << r.metric << RESET
+                  << DIM << telemStr << " (" << (!r.compilerTarget.empty() ? r.compilerTarget : backend) << ")" << RESET << "\n";
+      }
+
+      if (bMap.count("Vulkan") && bMap.count("ROCm")) {
+        const auto &v = bMap.at("Vulkan");
+        const auto &roc = bMap.at("ROCm");
+        double vVal = (static_cast<double>(v.operations) / (v.time_ms / 1000.0)) / 1e12;
+        double rVal = (static_cast<double>(roc.operations) / (roc.time_ms / 1000.0)) / 1e12;
+        if (vVal > 0.0 && rVal > 0.0) {
+          double deltaPct = ((vVal - rVal) / vVal) * 100.0;
+          std::cout << BOLD << CYAN << "  │ " << RESET << " • " << BOLD << "Parity Delta: " << RESET;
+          if (std::abs(deltaPct) < 3.0) {
+            std::cout << GREEN << "Within " << formatDouble(std::abs(deltaPct), 1) << "% (Full Parity)" << RESET << "\n";
+          } else {
+            std::cout << YELLOW << (deltaPct > 0 ? "Vulkan +" : "ROCm +") << formatDouble(std::abs(deltaPct), 1) << "% delta" << RESET;
+            if (v.hasRegisterTelemetry && roc.hasRegisterTelemetry) {
+              if (v.vgprCount != roc.vgprCount) {
+                std::cout << " — attributed to compiler register allocation (ACO "
+                          << v.vgprCount << " VGPRs vs LLVM " << roc.vgprCount << " VGPRs; "
+                          << v.maxWavesPerSimd << " vs " << roc.maxWavesPerSimd << " waves/SIMD occupancy)";
+              } else {
+                std::cout << " — equal register allocation (" << v.vgprCount << " VGPRs); attributed to instruction scheduling / dual-issue packing";
+              }
+            }
+            std::cout << "\n";
+          }
+        }
+      }
+    }
+    std::cout << BOLD << CYAN << "  ╰──────────────────────────────────────────────────────────────────────────────╯" << RESET << "\n";
+  }
+
   std::cout << std::endl;
 }
 
@@ -1766,6 +1831,18 @@ std::string resultsToJson(const std::vector<ResultData> &results) {
       out += "        \"median_time_ms\": " + std::to_string(r.median_time_ms) + ",\n";
       out += "        \"mean_time_ms\": " + std::to_string(r.mean_time_ms) + ",\n";
       out += "        \"p95_time_ms\": " + std::to_string(r.p95_time_ms) + "\n";
+      out += "      },\n";
+    }
+    if (r.hasRegisterTelemetry) {
+      out += "      \"compiler_telemetry\": {\n";
+      out += "        \"available\": true,\n";
+      out += "        \"vgpr_count\": " + std::to_string(r.vgprCount) + ",\n";
+      out += "        \"sgpr_count\": " + std::to_string(r.sgprCount) + ",\n";
+      out += "        \"lds_size_bytes\": " + std::to_string(r.ldsSizeBytes) + ",\n";
+      out += "        \"scratch_spill_bytes\": " + std::to_string(r.scratchSizeBytes) + ",\n";
+      out += "        \"code_size_bytes\": " + std::to_string(r.codeSizeBytes) + ",\n";
+      out += "        \"max_waves_per_simd\": " + std::to_string(r.maxWavesPerSimd) + ",\n";
+      out += "        \"compiler\": \"" + jsonEscape(r.compilerTarget) + "\"\n";
       out += "      },\n";
     }
     if (r.time_ms == -3.0) {

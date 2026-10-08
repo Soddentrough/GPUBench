@@ -70,6 +70,7 @@ public:
                 uint32_t grid_z, uint32_t block_x, uint32_t block_y,
                 uint32_t block_z) override;
   void releaseKernel(ComputeKernel kernel) override;
+  KernelResourceUsage getKernelResourceUsage(ComputeKernel kernel) const override;
   void waitIdle() override;
 
   // Hardware GPU timestamp profiling

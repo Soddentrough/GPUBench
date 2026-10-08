@@ -93,6 +93,8 @@ static p_hipEventDestroy f_hipEventDestroy;
 static p_hipEventRecord f_hipEventRecord;
 static p_hipEventSynchronize f_hipEventSynchronize;
 static p_hipEventElapsedTime f_hipEventElapsedTime;
+typedef hipError_t (*p_hipFuncGetAttribute)(int *, hipFunction_attribute, hipFunction_t);
+static p_hipFuncGetAttribute f_hipFuncGetAttribute;
 
 bool ROCmContext::loadLibraries() {
   if (librariesLoaded)
@@ -159,6 +161,7 @@ bool ROCmContext::loadLibraries() {
     f_hipEventRecord = hipLib->getFunction<p_hipEventRecord>("hipEventRecord");
     f_hipEventSynchronize = hipLib->getFunction<p_hipEventSynchronize>("hipEventSynchronize");
     f_hipEventElapsedTime = hipLib->getFunction<p_hipEventElapsedTime>("hipEventElapsedTime");
+    f_hipFuncGetAttribute = hipLib->getFunction<p_hipFuncGetAttribute>("hipFuncGetAttribute");
 
 #ifdef HAVE_HIPRTC
 #ifdef _WIN32
@@ -626,11 +629,49 @@ void ROCmContext::dispatch(ComputeKernel kernel, uint32_t grid_x,
     }
   }
 
+  lastDispatchedKernel = kernel;
+
   if (f_hipModuleLaunchKernel(it->second.function, grid_x, grid_y, grid_z,
                               block_x, block_y, block_z, 0, nullptr,
                               arg_pointers.data(), nullptr) != hipSuccess) {
     throw std::runtime_error("Failed to launch kernel");
   }
+}
+
+KernelResourceUsage ROCmContext::getKernelResourceUsage(ComputeKernel kernel) const {
+  KernelResourceUsage usage;
+  if (!kernel || !available || !f_hipFuncGetAttribute) {
+    return usage;
+  }
+  auto it = kernels.find(kernel);
+  if (it == kernels.end() || !it->second.function) {
+    return usage;
+  }
+
+  usage.available = true;
+  usage.compilerNotes = "ROCm LLVM Backend";
+
+  int vgprs = 0;
+  if (f_hipFuncGetAttribute(&vgprs, HIP_FUNC_ATTRIBUTE_NUM_REGS, it->second.function) == hipSuccess) {
+    usage.vgprCount = static_cast<uint32_t>(vgprs);
+  }
+
+  int lds = 0;
+  if (f_hipFuncGetAttribute(&lds, HIP_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES, it->second.function) == hipSuccess) {
+    usage.ldsSizeBytes = static_cast<uint32_t>(lds);
+  }
+
+  int scratch = 0;
+  if (f_hipFuncGetAttribute(&scratch, HIP_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES, it->second.function) == hipSuccess) {
+    usage.scratchSizeBytes = static_cast<uint32_t>(scratch);
+  }
+
+  if (usage.vgprCount > 0) {
+    // AMD RDNA architecture SIMD32 budget (1536 physical VGPRs per SIMD32, max 16 waves)
+    usage.maxWavesPerSimd = std::min(16u, 1536u / usage.vgprCount);
+  }
+
+  return usage;
 }
 
 void ROCmContext::releaseKernel(ComputeKernel kernel) {

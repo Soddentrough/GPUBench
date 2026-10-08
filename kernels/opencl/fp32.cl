@@ -41,7 +41,9 @@ __kernel void run_benchmark(__global float* data, float multiplier, uint num_ele
     float4 val31 = seed + (float4)(1.21f, 1.22f, 1.23f, 1.24f);
     float4 val32 = seed + (float4)(1.25f, 1.26f, 1.27f, 1.28f);
 
-    float4 m = (float4)(multiplier);
+    // Spectral radius (1 + m)^16384 stays bounded in [0.2, 5.2] with |m| <= 1e-4,
+    // avoiding IEEE-754 saturation to +inf while preserving dst == addend for v_dual_fmac_f32
+    float4 m = (float4)(multiplier * 0.0001f);
 
     // 32 vec4 FMAs × 4 components × 2 ops = 256 FP32 ops per iteration.
     // 16384 iters * 256 ops = 4,194,304 ops per thread (matching Vulkan and ROCm)

@@ -49,7 +49,10 @@ extern "C" __global__ void run_benchmark(float* data, float multiplier, uint32_t
     float4 val30 = make_float4(11.7f, 11.8f, 11.9f, 12.0f);
     float4 val31 = make_float4(12.1f, 12.2f, 12.3f, 12.4f);
     
-    float4 m = make_float4(multiplier, multiplier, multiplier, multiplier);
+    // Spectral radius (1 + m)^16384 stays bounded in [0.2, 5.2] with |m| <= 1e-4,
+    // avoiding IEEE-754 saturation to +inf while preserving dst == addend for v_dual_fmac_f32
+    float scaled_m = multiplier * 0.0001f;
+    float4 m = make_float4(scaled_m, scaled_m, scaled_m, scaled_m);
 
     // Each iteration performs 32 float4 FMACs = 32 * 4 * 2 = 256 FP32 ops.
     #pragma unroll 4

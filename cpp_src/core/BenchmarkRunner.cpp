@@ -1316,6 +1316,30 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
         result_data.width = effectiveWidth;
         result_data.height = effectiveHeight;
 
+        KernelResourceUsage kUsage = context->getLastKernelResourceUsage();
+        if (kUsage.available) {
+          result_data.hasRegisterTelemetry = true;
+          result_data.vgprCount = kUsage.vgprCount;
+          result_data.sgprCount = kUsage.sgprCount;
+          result_data.ldsSizeBytes = kUsage.ldsSizeBytes;
+          result_data.scratchSizeBytes = kUsage.scratchSizeBytes;
+          result_data.codeSizeBytes = kUsage.codeSizeBytes;
+          result_data.maxWavesPerSimd = kUsage.maxWavesPerSimd;
+          result_data.compilerTarget = kUsage.compilerNotes;
+
+          if (verbose) {
+            std::cout << " [COMPILER TELEMETRY " << ComputeBackendFactory::getBackendName(context->getBackend())
+                      << "] VGPRs: " << kUsage.vgprCount
+                      << (kUsage.sgprCount > 0 ? (" | SGPRs: " + std::to_string(kUsage.sgprCount)) : "")
+                      << " | LDS: " << kUsage.ldsSizeBytes << " B"
+                      << " | Scratch/Spill: " << kUsage.scratchSizeBytes << " B"
+                      << (kUsage.codeSizeBytes > 0 ? (" | Code: " + std::to_string(kUsage.codeSizeBytes) + " B") : "")
+                      << (kUsage.maxWavesPerSimd > 0 ? (" | Occupancy: " + std::to_string(kUsage.maxWavesPerSimd) + "/16 waves (" + std::to_string(static_cast<int>(kUsage.maxWavesPerSimd * 100.0 / 16.0)) + "%)") : "")
+                      << " (" << kUsage.compilerNotes << ")"
+                      << std::endl;
+          }
+        }
+
         formatter->addResult(result_data);
         double opsPerSec = (result_data.time_ms > 0.0 && result_data.operations > 0)
             ? (static_cast<double>(result_data.operations) / result_data.time_ms) * 1000.0

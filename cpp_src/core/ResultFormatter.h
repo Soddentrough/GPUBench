@@ -41,6 +41,15 @@ struct ResultData {
   std::string errorString;
   bool isValid = true;
   int32_t baselineConfigIndex = -1;
+  // Compiler / Kernel Resource Telemetry (Optimization O-4)
+  bool hasRegisterTelemetry = false;
+  uint32_t vgprCount = 0;
+  uint32_t sgprCount = 0;
+  uint32_t ldsSizeBytes = 0;
+  uint32_t scratchSizeBytes = 0;
+  uint32_t codeSizeBytes = 0;
+  uint32_t maxWavesPerSimd = 0;
+  std::string compilerTarget;
 };
 
 struct ImportedRun;

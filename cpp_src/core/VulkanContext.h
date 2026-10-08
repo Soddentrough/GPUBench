@@ -130,6 +130,10 @@ public:
   bool isSERSupported() const {
     return serSupported;
   }
+  bool isPipelineExecutablePropertiesSupported() const {
+    return pipelineExecutablePropertiesSupported;
+  }
+  KernelResourceUsage getKernelResourceUsage(ComputeKernel kernel) const override;
 
   struct IndirectBatchEntry {
     VkDeviceSize offset;
@@ -304,6 +308,11 @@ private:
 
   PFN_vkCmdPipelineBarrier2KHR vkCmdPipelineBarrier2KHR_ptr = nullptr;
   bool sync2Supported = false;
+
+  PFN_vkGetPipelineExecutablePropertiesKHR vkGetPipelineExecutablePropertiesKHR_ptr = nullptr;
+  PFN_vkGetPipelineExecutableStatisticsKHR vkGetPipelineExecutableStatisticsKHR_ptr = nullptr;
+  PFN_vkGetPipelineExecutableInternalRepresentationsKHR vkGetPipelineExecutableInternalRepresentationsKHR_ptr = nullptr;
+  bool pipelineExecutablePropertiesSupported = false;
 
   VkDebugUtilsMessengerEXT debugMessenger = VK_NULL_HANDLE;
   PFN_vkCreateDebugUtilsMessengerEXT vkCreateDebugUtilsMessengerEXT_ptr = nullptr;

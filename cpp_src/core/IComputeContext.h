@@ -73,6 +73,17 @@ using ComputeBuffer = void *;
 using ComputeKernel = void *;
 using AccelerationStructure = void *;
 
+struct KernelResourceUsage {
+  bool available = false;
+  uint32_t vgprCount = 0;
+  uint32_t sgprCount = 0;
+  uint32_t ldsSizeBytes = 0;
+  uint32_t scratchSizeBytes = 0; // Spill memory
+  uint32_t codeSizeBytes = 0;
+  uint32_t maxWavesPerSimd = 0;
+  std::string compilerNotes = ""; // e.g. "Mesa RADV (ACO)" or "ROCm LLVM (hipcc/hiprtc)"
+};
+
 class IComputeContext {
 public:
   virtual ~IComputeContext() = default;
@@ -92,6 +103,14 @@ public:
   // Compilation progress tracking
   virtual void setExpectedKernelCount(uint32_t /*count*/) {}
   virtual void notifyKernelCreated(const std::string & /*kernel_name*/) {}
+
+  // Compiler / Kernel Resource Telemetry (Optimization O-4)
+  virtual KernelResourceUsage getKernelResourceUsage(ComputeKernel /*kernel*/) const {
+    return KernelResourceUsage{};
+  }
+  virtual KernelResourceUsage getLastKernelResourceUsage() const {
+    return getKernelResourceUsage(lastDispatchedKernel);
+  }
 
   // Buffer management
   virtual ComputeBuffer createBuffer(size_t size,
@@ -154,4 +173,7 @@ public:
 
   virtual hipDevice_t getROCmDevice() const { return -1; }
   virtual hipCtx_t getROCmContext() const { return nullptr; }
+
+protected:
+  ComputeKernel lastDispatchedKernel = nullptr;
 };
