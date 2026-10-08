@@ -5,6 +5,7 @@ set(TEST_SOURCES
     test_math_and_parity.cpp
     test_memory_suballocator.cpp
     test_kernel_path.cpp
+    test_pixelfill.cpp
 )
 
 add_executable(gpubench_tests ${TEST_SOURCES})
@@ -40,6 +41,7 @@ add_test(NAME JsonSerialization COMMAND gpubench_tests --filter=JsonSerializatio
 add_test(NAME MathAndParity COMMAND gpubench_tests --filter=MathAndParity)
 add_test(NAME BlockSuballocator COMMAND gpubench_tests --filter=BlockSuballocator)
 add_test(NAME KernelPath COMMAND gpubench_tests --filter=KernelPath)
+add_test(NAME PixelFill COMMAND gpubench_tests --filter=PixelFill)
 add_test(NAME AllTests COMMAND gpubench_tests)
 
 add_custom_target(check

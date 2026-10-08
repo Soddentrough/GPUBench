@@ -134,6 +134,15 @@ public:
   bool isPipelineExecutablePropertiesSupported() const {
     return pipelineExecutablePropertiesSupported;
   }
+  bool isDynamicRenderingSupported() const {
+    return dynamicRenderingSupported;
+  }
+  PFN_vkCmdBeginRenderingKHR getCmdBeginRendering() const {
+    return vkCmdBeginRendering_ptr;
+  }
+  PFN_vkCmdEndRenderingKHR getCmdEndRendering() const {
+    return vkCmdEndRendering_ptr;
+  }
   KernelResourceUsage getKernelResourceUsage(ComputeKernel kernel) const override;
 
   bool isPerformanceQuerySupported() const {
@@ -307,6 +316,10 @@ private:
 
   PFN_vkCmdPipelineBarrier2KHR vkCmdPipelineBarrier2KHR_ptr = nullptr;
   bool sync2Supported = false;
+
+  PFN_vkCmdBeginRenderingKHR vkCmdBeginRendering_ptr = nullptr;
+  PFN_vkCmdEndRenderingKHR vkCmdEndRendering_ptr = nullptr;
+  bool dynamicRenderingSupported = false;
 
   PFN_vkGetPipelineExecutablePropertiesKHR vkGetPipelineExecutablePropertiesKHR_ptr = nullptr;
   PFN_vkGetPipelineExecutableStatisticsKHR vkGetPipelineExecutableStatisticsKHR_ptr = nullptr;

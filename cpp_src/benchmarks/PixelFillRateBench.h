@@ -28,19 +28,10 @@ public:
     return SupportLimitation::kApi;
   }
   std::string GetSupportNote() const override {
-    return "Pixel Fill Rate benchmark requires Vulkan graphics rasterization pipeline (ROPs)";
+    return "Pixel Fill Rate benchmark requires Vulkan graphics rasterization pipeline with dynamic rendering (ROPs)";
   }
   std::string GetSupportNote(const DeviceInfo &info,
-                             IComputeContext *context = nullptr) const override {
-    (void)info;
-    if (context && context->getBackend() == ComputeBackend::OpenCL) {
-      return "No support for graphics rasterization pipeline (ROPs) in OpenCL API";
-    }
-    if (context && context->getBackend() == ComputeBackend::ROCm) {
-      return "No support for graphics rasterization pipeline (ROPs) in ROCm API";
-    }
-    return "Pixel Fill Rate benchmark requires Vulkan graphics rasterization pipeline (ROPs)";
-  }
+                             IComputeContext *context = nullptr) const override;
   void Setup(IComputeContext &context, const std::string &kernel_dir) override;
   void Run(uint32_t config_idx = 0) override;
   void Teardown() override;
@@ -66,8 +57,6 @@ private:
     VkImage image = VK_NULL_HANDLE;
     VkDeviceMemory memory = VK_NULL_HANDLE;
     VkImageView imageView = VK_NULL_HANDLE;
-    VkFramebuffer framebuffer = VK_NULL_HANDLE;
-    VkRenderPass renderPass = VK_NULL_HANDLE;
   };
 
   IComputeContext *context = nullptr;
@@ -75,6 +64,9 @@ private:
   VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
   VkQueue queue = VK_NULL_HANDLE;
   uint32_t queueFamilyIndex = 0;
+
+  PFN_vkCmdBeginRenderingKHR pfnCmdBeginRendering = nullptr;
+  PFN_vkCmdEndRenderingKHR pfnCmdEndRendering = nullptr;
 
   uint32_t width = 8192;
   uint32_t height = 8192;

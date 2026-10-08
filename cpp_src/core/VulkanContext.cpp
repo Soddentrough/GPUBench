@@ -765,6 +765,9 @@ void VulkanContext::createDevice() {
   VkPhysicalDeviceShaderIntegerDotProductFeatures dotProductFeatures{
       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_DOT_PRODUCT_FEATURES, nullptr};
 
+  VkPhysicalDeviceDynamicRenderingFeaturesKHR dynamicRenderingFeatures{
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES_KHR, nullptr, VK_FALSE};
+
   void** currentPNext = (void**)&features2.pNext;
   *currentPNext = &features168; currentPNext = &features168.pNext;
   *currentPNext = &features16Storage; currentPNext = &features16Storage.pNext;
@@ -814,6 +817,9 @@ void VulkanContext::createDevice() {
   if (hasExt(VK_KHR_PERFORMANCE_QUERY_EXTENSION_NAME)) {
       *currentPNext = &perfQueryFeatures; currentPNext = &perfQueryFeatures.pNext;
   }
+  if (hasExt(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME) || properties.apiVersion >= VK_API_VERSION_1_3) {
+      *currentPNext = &dynamicRenderingFeatures; currentPNext = &dynamicRenderingFeatures.pNext;
+  }
   *currentPNext = &hostQueryResetFeatures; currentPNext = &hostQueryResetFeatures.pNext;
   *currentPNext = nullptr;
 
@@ -822,6 +828,7 @@ void VulkanContext::createDevice() {
   hostQueryResetSupported = (hostQueryResetFeatures.hostQueryReset == VK_TRUE);
 
   const std::vector<const char *> desiredExtensions = {
+      VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
       VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME,
       VK_KHR_8BIT_STORAGE_EXTENSION_NAME,
       VK_KHR_16BIT_STORAGE_EXTENSION_NAME,
@@ -1068,6 +1075,18 @@ void VulkanContext::createDevice() {
   }
   sync2Supported = (sync2Features.synchronization2 == VK_TRUE) &&
                    (vkCmdPipelineBarrier2KHR_ptr != nullptr);
+
+  vkCmdBeginRendering_ptr = (PFN_vkCmdBeginRenderingKHR)vkGetDeviceProcAddr(device, "vkCmdBeginRendering");
+  if (!vkCmdBeginRendering_ptr) {
+    vkCmdBeginRendering_ptr = (PFN_vkCmdBeginRenderingKHR)vkGetDeviceProcAddr(device, "vkCmdBeginRenderingKHR");
+  }
+  vkCmdEndRendering_ptr = (PFN_vkCmdEndRenderingKHR)vkGetDeviceProcAddr(device, "vkCmdEndRendering");
+  if (!vkCmdEndRendering_ptr) {
+    vkCmdEndRendering_ptr = (PFN_vkCmdEndRenderingKHR)vkGetDeviceProcAddr(device, "vkCmdEndRenderingKHR");
+  }
+  dynamicRenderingSupported = (dynamicRenderingFeatures.dynamicRendering == VK_TRUE) &&
+                              (vkCmdBeginRendering_ptr != nullptr) &&
+                              (vkCmdEndRendering_ptr != nullptr);
 
   VkCommandPoolCreateInfo poolInfo{};
   poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;

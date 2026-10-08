@@ -17,7 +17,33 @@ PixelFillRateBench::~PixelFillRateBench() {
 
 bool PixelFillRateBench::IsSupported(const DeviceInfo &info,
                                      IComputeContext *ctx) const {
-  return ctx && ctx->getBackend() == ComputeBackend::Vulkan;
+  (void)info;
+  if (!ctx || ctx->getBackend() != ComputeBackend::Vulkan) {
+    return false;
+  }
+  auto *vkCtx = dynamic_cast<VulkanContext *>(ctx);
+  if (vkCtx && !vkCtx->isDynamicRenderingSupported()) {
+    return false;
+  }
+  return true;
+}
+
+std::string PixelFillRateBench::GetSupportNote(const DeviceInfo &info,
+                                               IComputeContext *context) const {
+  (void)info;
+  if (context && context->getBackend() == ComputeBackend::OpenCL) {
+    return "No support for graphics rasterization pipeline (ROPs) in OpenCL API";
+  }
+  if (context && context->getBackend() == ComputeBackend::ROCm) {
+    return "No support for graphics rasterization pipeline (ROPs) in ROCm API";
+  }
+  if (context && context->getBackend() == ComputeBackend::Vulkan) {
+    auto *vkCtx = dynamic_cast<VulkanContext *>(context);
+    if (vkCtx && !vkCtx->isDynamicRenderingSupported()) {
+      return "Dynamic rendering (VK_KHR_dynamic_rendering) not supported on this device";
+    }
+  }
+  return "Pixel Fill Rate benchmark requires Vulkan graphics rasterization pipeline with dynamic rendering (ROPs)";
 }
 
 std::string PixelFillRateBench::GetConfigName(uint32_t config_idx) const {
@@ -70,38 +96,7 @@ VkShaderModule PixelFillRateBench::loadShaderModule(const std::string &path) {
 }
 
 void PixelFillRateBench::createPipelineForConfig(Config &cfg) {
-  // 1. Create Render Pass
-  VkAttachmentDescription colorAttachment{};
-  colorAttachment.format = cfg.format;
-  colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
-  colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-  colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-  colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-  colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-  colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-  colorAttachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
-  VkAttachmentReference colorAttachmentRef{};
-  colorAttachmentRef.attachment = 0;
-  colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
-  VkSubpassDescription subpass{};
-  subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-  subpass.colorAttachmentCount = 1;
-  subpass.pColorAttachments = &colorAttachmentRef;
-
-  VkRenderPassCreateInfo renderPassInfo{};
-  renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-  renderPassInfo.attachmentCount = 1;
-  renderPassInfo.pAttachments = &colorAttachment;
-  renderPassInfo.subpassCount = 1;
-  renderPassInfo.pSubpasses = &subpass;
-
-  if (vkCreateRenderPass(device, &renderPassInfo, nullptr, &cfg.renderPass) != VK_SUCCESS) {
-    throw std::runtime_error("Failed to create render pass for pixel fill rate benchmark!");
-  }
-
-  // 2. Create Image and Framebuffer
+  // 1. Create Image and ImageView
   VkImageCreateInfo imageInfo{};
   imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
   imageInfo.imageType = VK_IMAGE_TYPE_2D;
@@ -151,20 +146,7 @@ void PixelFillRateBench::createPipelineForConfig(Config &cfg) {
     throw std::runtime_error("Failed to create image view for pixel fill rate benchmark!");
   }
 
-  VkFramebufferCreateInfo fbInfo{};
-  fbInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-  fbInfo.renderPass = cfg.renderPass;
-  fbInfo.attachmentCount = 1;
-  fbInfo.pAttachments = &cfg.imageView;
-  fbInfo.width = width;
-  fbInfo.height = height;
-  fbInfo.layers = 1;
-
-  if (vkCreateFramebuffer(device, &fbInfo, nullptr, &cfg.framebuffer) != VK_SUCCESS) {
-    throw std::runtime_error("Failed to create framebuffer for pixel fill rate benchmark!");
-  }
-
-  // 3. Create Graphics Pipeline
+  // 2. Create Graphics Pipeline with Dynamic Rendering
   VkPipelineShaderStageCreateInfo vertStageInfo{};
   vertStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
   vertStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
@@ -239,8 +221,14 @@ void PixelFillRateBench::createPipelineForConfig(Config &cfg) {
   colorBlending.attachmentCount = 1;
   colorBlending.pAttachments = &colorBlendAttachment;
 
+  VkPipelineRenderingCreateInfoKHR renderingInfo{};
+  renderingInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR;
+  renderingInfo.colorAttachmentCount = 1;
+  renderingInfo.pColorAttachmentFormats = &cfg.format;
+
   VkGraphicsPipelineCreateInfo pipelineInfo{};
   pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+  pipelineInfo.pNext = &renderingInfo;
   pipelineInfo.stageCount = 2;
   pipelineInfo.pStages = stages;
   pipelineInfo.pVertexInputState = &vertexInputInfo;
@@ -250,7 +238,7 @@ void PixelFillRateBench::createPipelineForConfig(Config &cfg) {
   pipelineInfo.pMultisampleState = &multisampling;
   pipelineInfo.pColorBlendState = &colorBlending;
   pipelineInfo.layout = pipelineLayout;
-  pipelineInfo.renderPass = cfg.renderPass;
+  pipelineInfo.renderPass = VK_NULL_HANDLE;
   pipelineInfo.subpass = 0;
 
   if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr,
@@ -270,6 +258,28 @@ void PixelFillRateBench::Setup(IComputeContext &ctx, const std::string &kernel_d
   physicalDevice = vulkanContext->getVulkanPhysicalDevice();
   queue = vulkanContext->getGraphicsQueue();
   queueFamilyIndex = vulkanContext->getGraphicsQueueFamilyIndex();
+
+  pfnCmdBeginRendering = vulkanContext->getCmdBeginRendering();
+  pfnCmdEndRendering = vulkanContext->getCmdEndRendering();
+
+  if (!pfnCmdBeginRendering || !pfnCmdEndRendering) {
+    pfnCmdBeginRendering =
+        (PFN_vkCmdBeginRenderingKHR)vkGetDeviceProcAddr(device, "vkCmdBeginRendering");
+    if (!pfnCmdBeginRendering) {
+      pfnCmdBeginRendering =
+          (PFN_vkCmdBeginRenderingKHR)vkGetDeviceProcAddr(device, "vkCmdBeginRenderingKHR");
+    }
+    pfnCmdEndRendering =
+        (PFN_vkCmdEndRenderingKHR)vkGetDeviceProcAddr(device, "vkCmdEndRendering");
+    if (!pfnCmdEndRendering) {
+      pfnCmdEndRendering =
+          (PFN_vkCmdEndRenderingKHR)vkGetDeviceProcAddr(device, "vkCmdEndRenderingKHR");
+    }
+  }
+
+  if (!pfnCmdBeginRendering || !pfnCmdEndRendering) {
+    throw std::runtime_error("Dynamic rendering (vkCmdBeginRendering / vkCmdEndRendering) is not supported or could not be loaded!");
+  }
 
   // Load Shaders
   std::filesystem::path kdir(kernel_dir);
@@ -329,6 +339,47 @@ void PixelFillRateBench::Setup(IComputeContext &ctx, const std::string &kernel_d
   for (auto &cfg : configs) {
     createPipelineForConfig(cfg);
   }
+
+  // Transition all configuration images from UNDEFINED to COLOR_ATTACHMENT_OPTIMAL layout
+  VkCommandBufferBeginInfo cmdBeginInfo{};
+  cmdBeginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+  cmdBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  vkBeginCommandBuffer(frames[0].commandBuffer, &cmdBeginInfo);
+
+  std::vector<VkImageMemoryBarrier> barriers;
+  for (auto &cfg : configs) {
+    VkImageMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    barrier.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = cfg.image;
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+    barrier.srcAccessMask = 0;
+    barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    barriers.push_back(barrier);
+  }
+
+  vkCmdPipelineBarrier(frames[0].commandBuffer,
+                       VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                       VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                       0, 0, nullptr, 0, nullptr,
+                       static_cast<uint32_t>(barriers.size()), barriers.data());
+
+  vkEndCommandBuffer(frames[0].commandBuffer);
+
+  VkSubmitInfo submitInfo{};
+  submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+  submitInfo.commandBufferCount = 1;
+  submitInfo.pCommandBuffers = &frames[0].commandBuffer;
+
+  vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+  vkQueueWaitIdle(queue);
 }
 
 void PixelFillRateBench::Run(uint32_t config_idx) {
@@ -355,17 +406,25 @@ void PixelFillRateBench::Run(uint32_t config_idx) {
   beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   vkBeginCommandBuffer(frame.commandBuffer, &beginInfo);
 
-  VkRenderPassBeginInfo renderPassBegin{};
-  renderPassBegin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-  renderPassBegin.renderPass = cfg.renderPass;
-  renderPassBegin.framebuffer = cfg.framebuffer;
-  renderPassBegin.renderArea.offset = {0, 0};
-  renderPassBegin.renderArea.extent = {width, height};
+  VkRenderingAttachmentInfoKHR colorAttachment{};
+  colorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR;
+  colorAttachment.imageView = cfg.imageView;
+  colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+  colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+
+  VkRenderingInfoKHR renderingInfo{};
+  renderingInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO_KHR;
+  renderingInfo.renderArea.offset = {0, 0};
+  renderingInfo.renderArea.extent = {width, height};
+  renderingInfo.layerCount = 1;
+  renderingInfo.colorAttachmentCount = 1;
+  renderingInfo.pColorAttachments = &colorAttachment;
 
   float colorSeed[4] = {0.2f, 0.4f, 0.6f, 1.0f};
 
   for (uint32_t p = 0; p < passesPerDispatch; ++p) {
-    vkCmdBeginRenderPass(frame.commandBuffer, &renderPassBegin, VK_SUBPASS_CONTENTS_INLINE);
+    pfnCmdBeginRendering(frame.commandBuffer, &renderingInfo);
     vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, cfg.pipeline);
 
     colorSeed[0] = static_cast<float>(p) * 0.1f;
@@ -373,7 +432,7 @@ void PixelFillRateBench::Run(uint32_t config_idx) {
                        sizeof(colorSeed), colorSeed);
 
     vkCmdDraw(frame.commandBuffer, 3, 1, 0, 0); // Fullscreen triangle
-    vkCmdEndRenderPass(frame.commandBuffer);
+    pfnCmdEndRendering(frame.commandBuffer);
   }
 
   vkEndCommandBuffer(frame.commandBuffer);
@@ -399,10 +458,6 @@ void PixelFillRateBench::Teardown() {
         vkDestroyPipeline(device, cfg.pipeline, nullptr);
         cfg.pipeline = VK_NULL_HANDLE;
       }
-      if (cfg.framebuffer != VK_NULL_HANDLE) {
-        vkDestroyFramebuffer(device, cfg.framebuffer, nullptr);
-        cfg.framebuffer = VK_NULL_HANDLE;
-      }
       if (cfg.imageView != VK_NULL_HANDLE) {
         vkDestroyImageView(device, cfg.imageView, nullptr);
         cfg.imageView = VK_NULL_HANDLE;
@@ -414,10 +469,6 @@ void PixelFillRateBench::Teardown() {
       if (cfg.memory != VK_NULL_HANDLE) {
         vkFreeMemory(device, cfg.memory, nullptr);
         cfg.memory = VK_NULL_HANDLE;
-      }
-      if (cfg.renderPass != VK_NULL_HANDLE) {
-        vkDestroyRenderPass(device, cfg.renderPass, nullptr);
-        cfg.renderPass = VK_NULL_HANDLE;
       }
     }
 
@@ -448,6 +499,8 @@ void PixelFillRateBench::Teardown() {
       commandPool = VK_NULL_HANDLE;
     }
 
+    pfnCmdBeginRendering = nullptr;
+    pfnCmdEndRendering = nullptr;
     device = VK_NULL_HANDLE;
     physicalDevice = VK_NULL_HANDLE;
     queue = VK_NULL_HANDLE;
