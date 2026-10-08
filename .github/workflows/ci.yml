@@ -55,6 +55,7 @@ jobs:
             libxi-dev \
             libxinerama-dev \
             libxss-dev \
+            libxtst-dev \
             libwayland-dev \
             libxkbcommon-dev
 
