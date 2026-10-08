@@ -320,7 +320,7 @@ The following table summarizes the architectural differences governing ray traci
    - Position: Quantized half-floats or scene-relative floats: 6–8 bytes.
    - Direction: Octahedral `snorm16x2`: 4 bytes.
    - Metadata / Pixel Index: 32-bit integer: 4 bytes.
-   - **Total**: 16 bytes. Keeping payloads $\le 16\text{ bytes}$ guarantees that multi-million ray queues fit entirely within the monolithic L2 cache and MALL.
+   - **Total**: 16 bytes. Keeping payloads $\le 16\text{ bytes}$ maximizes cache line utilization, allowing compact ray queue segments to maintain high residency within the monolithic L2 cache and MALL.
 5. **Zero User LDS in Ray Compaction Shaders**:
    Never allocate large user LDS arrays or use workgroup `barrier()` calls in ray compaction shaders. Use single-wave `subgroupBallot`, `subgroupExclusiveAdd`, and leader `atomicAdd` to maintain maximum (68.8%+) WGP wave residency, while leaving LDS capacity available for the hardware traversal stack.
 6. **Enforce 1:1 Wave32 Compute Mapping**:

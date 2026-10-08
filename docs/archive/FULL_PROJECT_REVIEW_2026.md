@@ -1,3 +1,6 @@
+> [!NOTE]
+> **ARCHIVED / SUPERSEDED**: This review reflects the pre-unification state of the codebase (October 5, 2026) prior to the Rust/Iced GUI retirement, cross-backend timestamp alignment, and full project review of October 8, 2026 (`docs/PROJECT_REVIEW_2026-10-08.md`). It is retained for historical audit provenance.
+
 # GPUBench: Comprehensive Architectural, Hardware, UX & SOTA Project Review (2026)
 
 **Document Type:** Publication-Grade Architectural Audit, Microarchitectural Evaluation & SOTA Research Synthesis  

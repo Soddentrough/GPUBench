@@ -140,14 +140,6 @@ void VulkanContext::createInstance() {
   createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
   createInfo.pApplicationInfo = &appInfo;
 
-  std::vector<const char*> extensions;
-#ifdef __APPLE__
-  // MoltenVK requires the portability enumeration extension (and its flag)
-  // to expose physical devices on macOS.
-  extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
-  createInfo.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
-#endif
-
   uint32_t instExtCount = 0;
   vkEnumerateInstanceExtensionProperties(nullptr, &instExtCount, nullptr);
   std::vector<VkExtensionProperties> availableInstExts(instExtCount);
@@ -158,6 +150,14 @@ void VulkanContext::createInstance() {
     }
     return false;
   };
+
+  std::vector<const char*> extensions;
+#if defined(__APPLE__) || defined(VK_KHR_portability_enumeration)
+  if (hasInstExt(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME)) {
+    extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+    createInfo.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+  }
+#endif
 
   headlessSurfaceSupported = false;
   if (hasInstExt(VK_KHR_SURFACE_EXTENSION_NAME)) {
@@ -1981,18 +1981,20 @@ void VulkanContext::setKernelArg(ComputeKernel kernel, uint32_t arg_index,
   // Push constants start AFTER the descriptor indices.
 
   if (arg_index < it->second->numBufferDescriptors) {
-    if (verbose) {
-      std::cerr << "Error: setKernelArg (value) called for index " << arg_index
-                << " but it's reserved for a buffer descriptor (numBuffers="
-                << it->second->numBufferDescriptors << ")" << std::endl;
-    }
-    return;
+    throw std::runtime_error("setKernelArg (value) called for index " +
+                             std::to_string(arg_index) +
+                             " but it is reserved for a buffer descriptor (numBuffers=" +
+                             std::to_string(it->second->numBufferDescriptors) + ")");
   }
 
   size_t offset = (arg_index - it->second->numBufferDescriptors) * 4;
-  if (offset + arg_size <= it->second->pushConstantData.size()) {
-    memcpy(it->second->pushConstantData.data() + offset, arg_value, arg_size);
+  if (offset + arg_size > it->second->pushConstantData.size()) {
+    throw std::runtime_error("setKernelArg push constant overflow: offset " +
+                             std::to_string(offset) + " + size " +
+                             std::to_string(arg_size) + " exceeds capacity " +
+                             std::to_string(it->second->pushConstantData.size()));
   }
+  memcpy(it->second->pushConstantData.data() + offset, arg_value, arg_size);
 }
 
 void VulkanContext::dispatch(ComputeKernel kernel, uint32_t grid_x,

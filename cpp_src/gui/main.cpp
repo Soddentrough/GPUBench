@@ -50,7 +50,7 @@ int main(int argc, char** argv) {
     bool dumpRendersVal = false;
 
 #ifndef GPUBENCH_VERSION
-#define GPUBENCH_VERSION "1.0.0"
+#error "GPUBENCH_VERSION must be defined by the build system"
 #endif
 
     for (int i = 1; i < argc; ++i) {

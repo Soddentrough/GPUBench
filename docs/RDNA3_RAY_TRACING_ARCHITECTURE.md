@@ -532,7 +532,7 @@ We implemented three hardware-agnostic architectural fixes across the shaders an
    #define Q_SNAPSHOT_IDX(q) ((16u + (q)) * Q_COUNTER_STRIDE)
    #define Q_PREFIX_IDX(q)   ((32u + (q)) * Q_COUNTER_STRIDE)
    ```
-   Every queue's atomic counter is guaranteed to reside on a distinct cache line and route to a distinct L2 cache bank across AMD (RDNA 2/3/4), NVIDIA (Ampere/Ada/Blackwell), and Intel (Arc/Battlemage), eliminating cross-queue L2 bank serialization without vendor branching.
+   Every queue's atomic counter resides on a distinct cache line with 64-byte padding, minimizing cross-queue atomic cache line contention and bank serialization across modern GPU memory hierarchies without vendor branching.
 2. **Direct-to-VRAM Wave Compaction**:
    Eliminated intermediate `ldsPayload` and the second `barrier()`. Active threads compute their target slot from `ldsBaseSlot[q] + rankInQueue` and write directly to VRAM. LDS usage dropped from 676 bytes down to just 32 bytes (and further to zero with pure Wave32 ballot compaction).
 3. **Strict 16-Byte Payloads & Fair Microbench Sizing**:

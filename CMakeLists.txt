@@ -83,12 +83,30 @@ else()
     message(STATUS "OpenCL not found")
 endif()
 
-# Try to find HIP for ROCm backend
-if(EXISTS "/opt/rocm/core-10.0")
-    if(NOT DEFINED CMAKE_HIP_COMPILER AND EXISTS "/opt/rocm/core-10.0/lib/llvm/bin/clang++")
-        set(CMAKE_HIP_COMPILER "/opt/rocm/core-10.0/lib/llvm/bin/clang++" CACHE FILEPATH "HIP compiler")
+# Determine ROCm root path dynamically
+if(DEFINED ENV{ROCM_PATH} AND EXISTS "$ENV{ROCM_PATH}")
+    set(ROCM_PATH "$ENV{ROCM_PATH}")
+elseif(EXISTS "/opt/rocm")
+    set(ROCM_PATH "/opt/rocm")
+elseif(EXISTS "/opt/rocm/core-10.1")
+    set(ROCM_PATH "/opt/rocm/core-10.1")
+elseif(EXISTS "/opt/rocm/core-10.0")
+    set(ROCM_PATH "/opt/rocm/core-10.0")
+endif()
+
+if(ROCM_PATH)
+    if(NOT DEFINED CMAKE_HIP_COMPILER)
+        find_program(DETECTED_HIP_COMPILER clang++ HINTS ${ROCM_PATH}/llvm/bin ${ROCM_PATH}/lib/llvm/bin /usr/lib64/rocm/llvm/bin)
+        if(DETECTED_HIP_COMPILER)
+            set(CMAKE_HIP_COMPILER "${DETECTED_HIP_COMPILER}" CACHE FILEPATH "HIP compiler")
+        endif()
     endif()
-    set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} --rocm-path=/opt/rocm/core-10.0 --rocm-device-lib-path=/opt/rocm/core-10.0/lib/llvm/amdgcn/bitcode")
+    set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} --rocm-path=${ROCM_PATH}")
+    if(EXISTS "${ROCM_PATH}/lib/llvm/amdgcn/bitcode")
+        set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} --rocm-device-lib-path=${ROCM_PATH}/lib/llvm/amdgcn/bitcode")
+    elseif(EXISTS "${ROCM_PATH}/amdgcn/bitcode")
+        set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} --rocm-device-lib-path=${ROCM_PATH}/amdgcn/bitcode")
+    endif()
 endif()
 find_package(HIP)
 if(HIP_FOUND)
@@ -119,17 +137,12 @@ endif()
 
 # Shader/Kernel sources
 if(Vulkan_FOUND)
-    file(GLOB SHADERS "shaders/*.comp" "shaders/*.rgen" "shaders/*.rmiss" "shaders/*.rchit" "shaders/*.rahit" "shaders/*.rint" "shaders/*.vert" "shaders/*.frag")
-    # Filter out problematic shaders that use non-standard extensions
-    list(REMOVE_ITEM SHADERS 
-        "${CMAKE_CURRENT_SOURCE_DIR}/shaders/fp8_native.comp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/shaders/int4_native.comp"
-    )
+    file(GLOB SHADERS CONFIGURE_DEPENDS "shaders/*.comp" "shaders/*.rgen" "shaders/*.rmiss" "shaders/*.rchit" "shaders/*.rahit" "shaders/*.rint" "shaders/*.vert" "shaders/*.frag")
     list(APPEND SHADERS "${CMAKE_CURRENT_SOURCE_DIR}/shaders/rt_raw_traversal.comp")
     list(REMOVE_DUPLICATES SHADERS)
     file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/kernels/vulkan)
     
-    file(GLOB SHADER_HEADERS "shaders/*.glsl" "shaders/*.h")
+    file(GLOB SHADER_HEADERS CONFIGURE_DEPENDS "shaders/*.glsl" "shaders/*.h")
     foreach(HEADER ${SHADER_HEADERS})
         get_filename_component(HEADER_NAME ${HEADER} NAME)
         set(DEST_HEADER "${CMAKE_CURRENT_BINARY_DIR}/kernels/vulkan/${HEADER_NAME}")
@@ -187,14 +200,14 @@ endif()
 
 # Copy HIP kernels and compile code objects
 if(HIP_FOUND)
-    find_program(HIPCC_EXECUTABLE hipcc HINTS /usr/bin /opt/rocm/core-10.0/bin /opt/rocm/bin)
+    find_program(HIPCC_EXECUTABLE hipcc HINTS ${ROCM_PATH}/bin /usr/bin /opt/rocm/bin)
     if(NOT HIPCC_EXECUTABLE)
         set(HIPCC_EXECUTABLE hipcc)
     endif()
-    find_path(ROCM_CLANG_PATH clang++ HINTS /usr/lib64/rocm/llvm/bin /opt/rocm/core-10.0/lib/llvm/bin)
+    find_path(ROCM_CLANG_PATH clang++ HINTS ${ROCM_PATH}/llvm/bin ${ROCM_PATH}/lib/llvm/bin /usr/lib64/rocm/llvm/bin)
     if(ROCM_CLANG_PATH)
-        if(EXISTS "/opt/rocm/core-10.0")
-            set(HIPCC_ENV ${CMAKE_COMMAND} -E env HIP_CLANG_PATH=${ROCM_CLANG_PATH} ROCM_PATH=/opt/rocm/core-10.0)
+        if(ROCM_PATH)
+            set(HIPCC_ENV ${CMAKE_COMMAND} -E env HIP_CLANG_PATH=${ROCM_CLANG_PATH} ROCM_PATH=${ROCM_PATH})
         else()
             set(HIPCC_ENV ${CMAKE_COMMAND} -E env HIP_CLANG_PATH=${ROCM_CLANG_PATH})
         endif()
@@ -447,7 +460,7 @@ if(GPUBENCH_BUILD_GUI)
         FetchContent_Declare(
             SDL3
             GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
-            GIT_TAG release-3.2.8
+            GIT_TAG release-3.4.16
             GIT_SHALLOW TRUE
         )
         set(SDL_TEST_ENABLE OFF CACHE BOOL "" FORCE)

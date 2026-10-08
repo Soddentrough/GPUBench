@@ -1,6 +1,6 @@
 # GPUBench Roadmap & TODOs
 
-## Completed in v1.2.0
+## Completed in v1.0.0
 - [x] **FP32 Dual-Issue SIMD32 RDNA4 Dual-Issue Saturation**: Expanded `hip_kernels/fp32.hip` to 32 `float4` accumulators in a ring chain, achieving 44+ TFLOPS on Navi 48.
 - [x] **FP16 & BF16 Packed Math Saturation**: Upgraded `shaders/fp16.comp` and `shaders/bf16.comp` to 32 `f16vec4` accumulators (256 FLOPs/iter) and corrected FLOP accounting in `Fp16Bench.cpp` / `Bf16Bench.cpp`.
 - [x] **Memory Bandwidth Write-Mode Guard**: Eliminated redundant loads from `InputBuffer` in `shaders/membw_*.comp` during write-only sweeps to dedicate 100% of memory bus bandwidth to streaming stores.
@@ -19,7 +19,7 @@
 
 ## Future Enhancements & TODOs
 
-### Community Leaderboard & Cloud Verification (Target: v1.3.0)
+### Community Leaderboard & Cloud Verification (Target: v1.1.0)
 - **Goal**: Enable opt-in submission of benchmark results to a community leaderboard for comparing GPU and system performance across operating systems, driver versions, and microarchitectures.
 - **Payload Schema Specification**:
   ```json
@@ -29,7 +29,7 @@
     "type": "object",
     "required": ["version", "timestamp", "system_info", "gpu_info", "benchmark_results", "signature"],
     "properties": {
-      "version": { "type": "string", "example": "1.2.0" },
+      "version": { "type": "string", "example": "1.0.0" },
       "timestamp": { "type": "string", "format": "date-time" },
       "system_info": {
         "type": "object",

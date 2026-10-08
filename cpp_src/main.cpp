@@ -136,9 +136,9 @@ int main(int argc, char **argv) {
                  "Ray tracing benchmark scenario: showroom, indoor, outdoor, forest, all (default: all)")
       ->check(CLI::IsMember({"showroom", "indoor", "outdoor", "forest", "aaa_forest", "all"}));
 
-  std::string resolution_str = "4k";
+  std::string resolution_str = "auto";
   app.add_option("-r,--resolution", resolution_str,
-                 "Resolution preset (4k, 1440p, 1080p, 720p, 1024x1024, auto) or custom WxH (default: 4k)");
+                 "Resolution preset (auto, 4k, 1440p, 1080p, 720p, 1024x1024) or custom WxH (default: auto)");
 
   std::vector<int> config_targets;
   app.add_option("-c,--config", config_targets,
@@ -175,19 +175,6 @@ int main(int argc, char **argv) {
       "Output benchmark results as JSON (optional file path, defaults to stdout)")
       ->expected(0, 1);
 
-  std::string legacy_output_format;
-  app.add_option(
-      "--output", legacy_output_format,
-      "Legacy output format: json (deprecated, use --output-json)")
-      ->check(CLI::IsMember({"json"}))
-      ->group("");
-
-  std::string legacy_output_file;
-  app.add_option(
-      "--output-file", legacy_output_file,
-      "Legacy output file path (deprecated, use --output-json [FILE])")
-      ->group("");
-
   std::vector<std::string> import_files;
   app.add_option("-i,--import,--input", import_files,
                  "Load and display results from benchmark JSON report file(s)")
@@ -212,13 +199,6 @@ int main(int argc, char **argv) {
     want_json_output = true;
     if (output_json_path.empty()) {
       output_json_path = getDefaultJsonFilename();
-    }
-  } else if (!legacy_output_file.empty() || !legacy_output_format.empty()) {
-    want_json_output = true;
-    if (!legacy_output_file.empty()) {
-      output_json_path = legacy_output_file;
-    } else {
-      output_json_path = "-";
     }
   }
 
@@ -300,7 +280,10 @@ int main(int argc, char **argv) {
   std::string res_lower;
   for (char c : resolution_str) res_lower.push_back(std::tolower(static_cast<unsigned char>(c)));
 
-  if (res_lower == "auto" || res_lower == "4k" || res_lower == "2160p" || res_lower == "uhd") {
+  if (res_lower == "auto") {
+    render_width = 0;
+    render_height = 0;
+  } else if (res_lower == "4k" || res_lower == "2160p" || res_lower == "uhd") {
     render_width = 3840;
     render_height = 2160;
   } else if (res_lower == "720p") {

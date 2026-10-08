@@ -30,7 +30,7 @@
 #endif
 
 #ifndef GPUBENCH_VERSION
-#define GPUBENCH_VERSION "1.0.0"
+#error "GPUBENCH_VERSION must be defined by the build system"
 #endif
 
 namespace gpubench::gui {
@@ -666,7 +666,7 @@ void GuiApp::setupDarkTheme(float scale) {
         style.ScrollbarRounding = 6.0f;
         style.GrabRounding      = 4.0f;
         style.TabRounding       = 6.0f;
-        style.WindowBorderSize  = 0.0f;
+        style.WindowBorderSize  = 1.0f;
         style.FrameBorderSize   = 1.0f;
         style.ItemSpacing       = ImVec2(10.0f, 8.0f);
         style.FramePadding      = ImVec2(10.0f, 6.0f);
@@ -5622,7 +5622,7 @@ void GuiApp::renderRayTracingViewport() {
             "Open-World Forest (AAAOutdoorForest)",
             "forest",
             "Procedural Nature Heightfield",
-            "1,050,000+ Triangles",
+            "1,007,280 Triangles",
             "High-density AAA woodland with rolling terrain, 350 soaring multi-tiered pines, 180 birches, 3,500 sword ferns, 2,500 shrubs, 180 nurse logs, and 600 boulders.",
             "89.90 MRays/s (97.5 FPS)",
             "266.27 MRays/s (288.9 FPS)",
@@ -5636,7 +5636,7 @@ void GuiApp::renderRayTracingViewport() {
             "Outdoor Landscape (OutdoorLandscape)",
             "outdoor",
             "Procedural Alpine Terrain",
-            "150,000+ Triangles",
+            "57,216 Triangles",
             "Expansive alpine landscape featuring distant mountains, pine forests, reflective lake surface, and timber cabins.",
             "542.03 MRays/s (588.1 FPS)",
             "1,444.29 MRays/s (1567.2 FPS)",

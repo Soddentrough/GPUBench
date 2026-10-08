@@ -590,9 +590,23 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
 
     uint32_t effectiveWidth = renderWidth;
     uint32_t effectiveHeight = renderHeight;
-    if (effectiveWidth == 0 || effectiveHeight == 0) {
-      effectiveWidth = 3840;
-      effectiveHeight = 2160;
+    const bool isAutoRes = (effectiveWidth == 0 || effectiveHeight == 0);
+    if (isAutoRes) {
+      // Adaptive tier-down based on device memory:
+      // >= 16 GB: 4K UHD (3840x2160)
+      // >= 8 GB:  1440p QHD (2560x1440)
+      // < 8 GB:   1080p FHD (1920x1080)
+      const uint64_t gib = 1024ULL * 1024ULL * 1024ULL;
+      if (info.memorySize >= 16ULL * gib) {
+        effectiveWidth = 3840;
+        effectiveHeight = 2160;
+      } else if (info.memorySize >= 8ULL * gib) {
+        effectiveWidth = 2560;
+        effectiveHeight = 1440;
+      } else {
+        effectiveWidth = 1920;
+        effectiveHeight = 1080;
+      }
     }
 
     if (!quiet && !verbose && !onResult) {
@@ -603,11 +617,17 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
       std::string line2_plain = "Backend / API : " + backendStr + " | VRAM: " + std::to_string(vramGb) + " " + memLabel;
 
       std::string resPreset = "";
-      if (effectiveWidth == 3840 && effectiveHeight == 2160) resPreset = " (4K UHD)";
-      else if (effectiveWidth == 2560 && effectiveHeight == 1440) resPreset = " (1440p QHD)";
-      else if (effectiveWidth == 1920 && effectiveHeight == 1080) resPreset = " (1080p FHD)";
-      else if (effectiveWidth == 1280 && effectiveHeight == 720) resPreset = " (720p HD)";
-      else if (effectiveWidth == 1024 && effectiveHeight == 1024) resPreset = " (1024x1024 Square)";
+      if (isAutoRes) {
+        if (effectiveWidth == 3840 && effectiveHeight == 2160) resPreset = " (Auto -> 4K UHD)";
+        else if (effectiveWidth == 2560 && effectiveHeight == 1440) resPreset = " (Auto -> 1440p QHD)";
+        else if (effectiveWidth == 1920 && effectiveHeight == 1080) resPreset = " (Auto -> 1080p FHD)";
+      } else {
+        if (effectiveWidth == 3840 && effectiveHeight == 2160) resPreset = " (4K UHD)";
+        else if (effectiveWidth == 2560 && effectiveHeight == 1440) resPreset = " (1440p QHD)";
+        else if (effectiveWidth == 1920 && effectiveHeight == 1080) resPreset = " (1080p FHD)";
+        else if (effectiveWidth == 1280 && effectiveHeight == 720) resPreset = " (720p HD)";
+        else if (effectiveWidth == 1024 && effectiveHeight == 1024) resPreset = " (1024x1024 Square)";
+      }
       std::string line3_plain = "Resolution    : " + std::to_string(effectiveWidth) + "x" + std::to_string(effectiveHeight) + resPreset;
 
       std::string scLabel = sceneName;

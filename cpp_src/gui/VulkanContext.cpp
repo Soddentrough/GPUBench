@@ -95,7 +95,6 @@ bool VulkanContext::init(const char* title, int width, int height, float scaleOv
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 
     // Load high-resolution system TrueType font for workstation UI
     const char* fontCandidates[] = {
@@ -167,13 +166,27 @@ bool VulkanContext::setupVulkan() {
 
     std::vector<const char*> instanceExtensions(sdlExtensions, sdlExtensions + sdlExtCount);
 
+    uint32_t apiVersion = VK_API_VERSION_1_0;
+    auto pfnEnumerateInstanceVersion =
+        reinterpret_cast<PFN_vkEnumerateInstanceVersion>(
+            vkGetInstanceProcAddr(nullptr, "vkEnumerateInstanceVersion"));
+    if (pfnEnumerateInstanceVersion) {
+        uint32_t supportedVersion = VK_API_VERSION_1_0;
+        if (pfnEnumerateInstanceVersion(&supportedVersion) == VK_SUCCESS) {
+            apiVersion = supportedVersion;
+        }
+    }
+    if (apiVersion > VK_API_VERSION_1_4) {
+        apiVersion = VK_API_VERSION_1_4;
+    }
+
     VkApplicationInfo appInfo{};
     appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
     appInfo.pApplicationName = "GPUBench";
-    appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 1);
+    appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
     appInfo.pEngineName = "GPUBench";
-    appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 1);
-    appInfo.apiVersion = VK_API_VERSION_1_3;
+    appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
+    appInfo.apiVersion = apiVersion;
 
     VkInstanceCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
