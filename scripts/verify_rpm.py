@@ -200,9 +200,9 @@ def verify_directories(entries: List[Dict[str, Any]]) -> Tuple[bool, List[str], 
                     f"Forbidden system directory collision: Package claims ownership of '{p}'. "
                     f"This will cause conflict with system packages (e.g. filesystem)."
                 )
-            elif not p.startswith("/usr/share/gpubench"):
+            elif not (p.startswith("/usr/share/gpubench") or p.startswith("/usr/share/doc/gpubench")):
                 errors.append(
-                    f"Unexpected owned directory: '{p}'. Only '/usr/share/gpubench*' subdirectories "
+                    f"Unexpected owned directory: '{p}'. Only '/usr/share/gpubench*' and '/usr/share/doc/gpubench*' subdirectories "
                     f"should be declared as owned."
                 )
 
