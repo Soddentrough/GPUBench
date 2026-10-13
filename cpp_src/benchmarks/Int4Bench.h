@@ -16,12 +16,14 @@ public:
   }
   std::string GetSupportNote(const DeviceInfo &info,
                              IComputeContext *context = nullptr) const override {
-    (void)info;
     if (context && context->getBackend() == ComputeBackend::OpenCL) {
       return "No support for 4-bit integer types in OpenCL API";
     }
     if (context && context->getBackend() == ComputeBackend::ROCm) {
-      return "No support for 4-bit integer types in ROCm API (HIP toolchain lacks native 4-bit types)";
+      if (!info.int4Support) {
+        return "INT4 WMMA hardware support not available on this GPU";
+      }
+      return "";
     }
     return "No support for 4-bit integer types in Vulkan API (no 4-bit component type in VK_KHR_cooperative_matrix or SPIR-V)";
   }
@@ -30,11 +32,34 @@ public:
   }
   SupportLimitation GetSupportLimitation(const DeviceInfo &info,
                                          IComputeContext *context = nullptr) const override {
-    (void)info;
     if (context && context->getBackend() == ComputeBackend::ROCm) {
-      return SupportLimitation::kToolchain;
+      if (!info.int4Support) {
+        return SupportLimitation::kHardware;
+      }
+      return SupportLimitation::kNone;
     }
     return SupportLimitation::kApi;
+  }
+  std::string GetConfigSupportNote(uint32_t config_idx,
+                                   const DeviceInfo &info,
+                                   IComputeContext *context = nullptr) const override {
+    (void)config_idx;
+    return GetSupportNote(info, context);
+  }
+  SupportLimitation GetConfigSupportLimitation(uint32_t config_idx,
+                                               const DeviceInfo &info,
+                                               IComputeContext *context = nullptr) const override {
+    (void)config_idx;
+    return GetSupportLimitation(info, context);
+  }
+  bool IsConfigSupported(uint32_t config_idx) const override {
+    (void)config_idx;
+    return matrixKernel != nullptr;
+  }
+  bool IsConfigSupported(uint32_t config_idx, const DeviceInfo &info,
+                         IComputeContext *context = nullptr) const override {
+    (void)config_idx;
+    return IsSupported(info, context);
   }
   void Setup(IComputeContext &context, const std::string &kernel_dir) override;
   void Run(uint32_t config_idx = 0) override;
@@ -48,22 +73,22 @@ public:
   }
   int GetSortWeight() const override { return 80; }
 
-  uint32_t GetNumConfigs() const override;
-  virtual uint32_t GetExpectedKernelCount() const override { return 2; }
-  std::string GetConfigName(uint32_t config_idx) const override;
+  uint32_t GetNumConfigs() const override { return 1; }
+  virtual uint32_t GetExpectedKernelCount() const override { return 1; }
+  std::string GetConfigName(uint32_t config_idx) const override {
+    (void)config_idx;
+    return "Matrix";
+  }
   const char *GetMetric() const override { return "TOPS"; }
 
   bool IsEmulated(uint32_t config_idx = 0) const override {
-    if (config_idx == 0) return is_emulated_vector;
+    (void)config_idx;
     return !is_native_matrix;
   }
 
 private:
   IComputeContext *context = nullptr;
-  ComputeKernel vectorKernel = nullptr;
   ComputeKernel matrixKernel = nullptr;
   ComputeBuffer buffer = nullptr;
-  bool is_emulated_vector = true;
-  bool is_native_vector = false;
   bool is_native_matrix = false;
 };

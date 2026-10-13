@@ -6,6 +6,7 @@
 #include <hip/hip_runtime_api.h>
 #include <map>
 #include <memory>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -84,6 +85,7 @@ private:
 
   std::unordered_map<std::string, hipModule_t> modules;
   std::unordered_map<ComputeKernel, ROCmKernel> kernels;
+  std::set<ComputeBuffer> allocatedBuffers;
   bool verbose = false;
   bool quiet = false;
   bool available = false;

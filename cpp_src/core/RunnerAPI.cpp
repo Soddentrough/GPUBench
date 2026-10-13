@@ -21,34 +21,45 @@ std::vector<ResultData> RunBenchmarksAPI(
     uint32_t samples_per_pixel,
     std::atomic<bool>* cancel_token,
     bool quiet,
-    const std::vector<std::string>& selected_workloads)
+    const std::vector<std::string>& selected_workloads,
+    uint32_t bounce_depth)
 {
     // Never let C++ exceptions cross the cxx FFI boundary into Rust (that
     // would call std::terminate). On error, return an empty result list.
     try {
     std::vector<std::unique_ptr<IComputeContext>> contexts;
     if (backend_strs.empty() || (backend_strs.size() == 1 && backend_strs[0] == "auto")) {
-        if (ComputeBackendFactory::isAvailable(ComputeBackend::Vulkan)) {
-            contexts.push_back(ComputeBackendFactory::create(ComputeBackend::Vulkan, verbose, debug));
-        } else if (ComputeBackendFactory::isAvailable(ComputeBackend::OpenCL)) {
-            contexts.push_back(ComputeBackendFactory::create(ComputeBackend::OpenCL, verbose, debug));
-        } else if (ComputeBackendFactory::isAvailable(ComputeBackend::ROCm)) {
-            contexts.push_back(ComputeBackendFactory::create(ComputeBackend::ROCm, verbose, debug));
+        const ComputeBackend auto_order[] = {
+            ComputeBackend::Vulkan, ComputeBackend::ROCm, ComputeBackend::OpenCL};
+        for (ComputeBackend backend : auto_order) {
+            if (!ComputeBackendFactory::isAvailable(backend)) {
+                continue;
+            }
+            try {
+                auto ctx = ComputeBackendFactory::create(backend, verbose, debug);
+                if (ctx && ctx->isAvailable() && !ctx->getDevices().empty()) {
+                    contexts.push_back(std::move(ctx));
+                    break;
+                }
+            } catch (...) {
+                // Backend compiled in but failed at runtime; try next backend
+            }
         }
     } else {
         for (const auto& backend_str : backend_strs) {
             if (backend_str == "vulkan" && ComputeBackendFactory::isAvailable(ComputeBackend::Vulkan)) {
                 contexts.push_back(ComputeBackendFactory::create(ComputeBackend::Vulkan, verbose, debug));
-            } else if (backend_str == "opencl" && ComputeBackendFactory::isAvailable(ComputeBackend::OpenCL)) {
-                contexts.push_back(ComputeBackendFactory::create(ComputeBackend::OpenCL, verbose, debug));
             } else if (backend_str == "rocm" && ComputeBackendFactory::isAvailable(ComputeBackend::ROCm)) {
                 contexts.push_back(ComputeBackendFactory::create(ComputeBackend::ROCm, verbose, debug));
+            } else if (backend_str == "opencl" && ComputeBackendFactory::isAvailable(ComputeBackend::OpenCL)) {
+                contexts.push_back(ComputeBackendFactory::create(ComputeBackend::OpenCL, verbose, debug));
             }
         }
     }
 
     BenchmarkRunner runner({}, verbose, debug, dump_geometry, dump_renders, scene.empty() ? "all" : scene);
     runner.setResolution(renderWidth, renderHeight);
+    runner.setBounceDepth(bounce_depth);
     runner.setSamplesPerPixel(samples_per_pixel);
     runner.setQuiet(quiet || (callback != nullptr));
     if (!selected_workloads.empty()) {
@@ -133,20 +144,6 @@ std::vector<std::string> GetAvailableHardwareAPI() {
             // Vulkan compiled in but not usable at runtime; skip it
         }
     }
-    if (ComputeBackendFactory::isAvailable(ComputeBackend::OpenCL)) {
-        try {
-            auto ctx = ComputeBackendFactory::create(ComputeBackend::OpenCL, false, false);
-            if (ctx) {
-                uint32_t i = 0;
-                for (const auto& dev : ctx->getDevices()) {
-                    results.push_back("opencl|" + std::to_string(i) + "|" + dev.name);
-                    i++;
-                }
-            }
-        } catch (...) {
-            // OpenCL compiled in but not usable at runtime; skip it
-        }
-    }
     if (ComputeBackendFactory::isAvailable(ComputeBackend::ROCm)) {
         try {
             auto ctx = ComputeBackendFactory::create(ComputeBackend::ROCm, false, false);
@@ -159,6 +156,20 @@ std::vector<std::string> GetAvailableHardwareAPI() {
             }
         } catch (...) {
             // ROCm compiled in but not usable at runtime; skip it
+        }
+    }
+    if (ComputeBackendFactory::isAvailable(ComputeBackend::OpenCL)) {
+        try {
+            auto ctx = ComputeBackendFactory::create(ComputeBackend::OpenCL, false, false);
+            if (ctx) {
+                uint32_t i = 0;
+                for (const auto& dev : ctx->getDevices()) {
+                    results.push_back("opencl|" + std::to_string(i) + "|" + dev.name);
+                    i++;
+                }
+            }
+        } catch (...) {
+            // OpenCL compiled in but not usable at runtime; skip it
         }
     }
     } catch (const std::exception& e) {
@@ -223,6 +234,41 @@ std::vector<DeviceProfile> GetDeviceProfilesAPI() {
                 }
             } catch (...) {}
         }
+        if (profiles.empty() && ComputeBackendFactory::isAvailable(ComputeBackend::ROCm)) {
+            try {
+                auto ctx = ComputeBackendFactory::create(ComputeBackend::ROCm, false, false);
+                if (ctx) {
+                    uint32_t i = 0;
+                    for (const auto& dev : ctx->getDevices()) {
+                        DeviceProfile p{};
+                        p.backend = "ROCm";
+                        p.deviceIndex = i;
+                        p.deviceName = dev.name;
+                        p.vendorID = dev.vendorID;
+                        p.deviceID = dev.deviceID;
+                        p.driverName = dev.driverName.empty() ? "AMD ROCm / HIP" : dev.driverName;
+                        p.driverInfo = dev.driverInfo.empty() ? (dev.archName.empty() ? "HIP Runtime" : dev.archName) : dev.driverInfo;
+                        p.driverVersion = dev.driverVersionStr.empty() ? std::to_string(dev.driverVersion) : dev.driverVersionStr;
+                        if (dev.driverVersion > 0) {
+                            p.apiVersion = "HIP " + std::to_string(dev.driverVersion / 10000000) + "." + std::to_string((dev.driverVersion / 100000) % 100);
+                        } else {
+                            p.apiVersion = "ROCm";
+                        }
+                        p.vramTotalMb = dev.memorySize / (1024 * 1024);
+                        p.subgroupSize = dev.subgroupSize;
+                        p.maxWorkGroupSize = dev.maxWorkGroupSize;
+                        p.rayTracingSupported = dev.rayTracingSupport;
+                        p.serSupported = dev.serSupported;
+                        p.workGraphsSupported = dev.workGraphsSupported;
+                        p.cooperativeMatrixSupported = dev.cooperativeMatrixSupport;
+                        p.float16Supported = dev.fp16Support;
+                        p.int8Supported = dev.int8Support;
+                        profiles.push_back(p);
+                        i++;
+                    }
+                }
+            } catch (...) {}
+        }
         if (profiles.empty() && ComputeBackendFactory::isAvailable(ComputeBackend::OpenCL)) {
             try {
                 auto ctx = ComputeBackendFactory::create(ComputeBackend::OpenCL, false, false);
@@ -245,41 +291,6 @@ std::vector<DeviceProfile> GetDeviceProfilesAPI() {
                             p.apiVersion = std::to_string(apiMajor) + "." + std::to_string(apiMinor) + "." + std::to_string(apiPatch);
                         } else {
                             p.apiVersion = "OpenCL";
-                        }
-                        p.vramTotalMb = dev.memorySize / (1024 * 1024);
-                        p.subgroupSize = dev.subgroupSize;
-                        p.maxWorkGroupSize = dev.maxWorkGroupSize;
-                        p.rayTracingSupported = dev.rayTracingSupport;
-                        p.serSupported = dev.serSupported;
-                        p.workGraphsSupported = dev.workGraphsSupported;
-                        p.cooperativeMatrixSupported = dev.cooperativeMatrixSupport;
-                        p.float16Supported = dev.fp16Support;
-                        p.int8Supported = dev.int8Support;
-                        profiles.push_back(p);
-                        i++;
-                    }
-                }
-            } catch (...) {}
-        }
-        if (profiles.empty() && ComputeBackendFactory::isAvailable(ComputeBackend::ROCm)) {
-            try {
-                auto ctx = ComputeBackendFactory::create(ComputeBackend::ROCm, false, false);
-                if (ctx) {
-                    uint32_t i = 0;
-                    for (const auto& dev : ctx->getDevices()) {
-                        DeviceProfile p{};
-                        p.backend = "ROCm";
-                        p.deviceIndex = i;
-                        p.deviceName = dev.name;
-                        p.vendorID = dev.vendorID;
-                        p.deviceID = dev.deviceID;
-                        p.driverName = dev.driverName.empty() ? "AMD ROCm / HIP" : dev.driverName;
-                        p.driverInfo = dev.driverInfo.empty() ? (dev.archName.empty() ? "HIP Runtime" : dev.archName) : dev.driverInfo;
-                        p.driverVersion = dev.driverVersionStr.empty() ? std::to_string(dev.driverVersion) : dev.driverVersionStr;
-                        if (dev.driverVersion > 0) {
-                            p.apiVersion = "HIP " + std::to_string(dev.driverVersion / 10000000) + "." + std::to_string((dev.driverVersion / 100000) % 100);
-                        } else {
-                            p.apiVersion = "ROCm";
                         }
                         p.vramTotalMb = dev.memorySize / (1024 * 1024);
                         p.subgroupSize = dev.subgroupSize;

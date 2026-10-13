@@ -410,8 +410,9 @@ void PixelFillRateBench::Run(uint32_t config_idx) {
   colorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR;
   colorAttachment.imageView = cfg.imageView;
   colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-  colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-  colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+  colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+  colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+  colorAttachment.clearValue.color = {{0.0f, 0.0f, 0.0f, 1.0f}};
 
   VkRenderingInfoKHR renderingInfo{};
   renderingInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO_KHR;
@@ -423,17 +424,18 @@ void PixelFillRateBench::Run(uint32_t config_idx) {
 
   float colorSeed[4] = {0.2f, 0.4f, 0.6f, 1.0f};
 
-  for (uint32_t p = 0; p < passesPerDispatch; ++p) {
-    pfnCmdBeginRendering(frame.commandBuffer, &renderingInfo);
-    vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, cfg.pipeline);
+  pfnCmdBeginRendering(frame.commandBuffer, &renderingInfo);
+  vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, cfg.pipeline);
 
+  for (uint32_t p = 0; p < passesPerDispatch; ++p) {
     colorSeed[0] = static_cast<float>(p) * 0.1f;
     vkCmdPushConstants(frame.commandBuffer, pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0,
                        sizeof(colorSeed), colorSeed);
 
     vkCmdDraw(frame.commandBuffer, 3, 1, 0, 0); // Fullscreen triangle
-    pfnCmdEndRendering(frame.commandBuffer);
   }
+
+  pfnCmdEndRendering(frame.commandBuffer);
 
   vkEndCommandBuffer(frame.commandBuffer);
 

@@ -146,8 +146,10 @@ void RayIntersectBench::buildAS() {
   triCreateInfo.buffer = vContext->getVkBuffer(triangleBlasBuffer);
   triCreateInfo.size = triSizes.accelerationStructureSize;
   triCreateInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-  vkCreateAccelerationStructureKHR_ptr(device, &triCreateInfo, nullptr,
-                                       &triangleBlas);
+  if (vkCreateAccelerationStructureKHR_ptr(device, &triCreateInfo, nullptr,
+                                           &triangleBlas) != VK_SUCCESS) {
+    throw std::runtime_error("Failed to create triangle BLAS in RayIntersectBench");
+  }
 
   // 2. Box BLAS
   VkAccelerationStructureGeometryKHR boxGeom{
@@ -181,8 +183,10 @@ void RayIntersectBench::buildAS() {
   boxCreateInfo.buffer = vContext->getVkBuffer(boxBlasBuffer);
   boxCreateInfo.size = boxSizes.accelerationStructureSize;
   boxCreateInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-  vkCreateAccelerationStructureKHR_ptr(device, &boxCreateInfo, nullptr,
-                                       &boxBlas);
+  if (vkCreateAccelerationStructureKHR_ptr(device, &boxCreateInfo, nullptr,
+                                           &boxBlas) != VK_SUCCESS) {
+    throw std::runtime_error("Failed to create box BLAS in RayIntersectBench");
+  }
 
   // 3. TLASes
   VkAccelerationStructureDeviceAddressInfoKHR triAddrInfo{
@@ -254,8 +258,10 @@ void RayIntersectBench::buildAS() {
     createInfo.buffer = vContext->getVkBuffer(tlasBufferHandle);
     createInfo.size = sizes.accelerationStructureSize;
     createInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
-    vkCreateAccelerationStructureKHR_ptr(device, &createInfo, nullptr,
-                                         &tlasHandle);
+    if (vkCreateAccelerationStructureKHR_ptr(device, &createInfo, nullptr,
+                                             &tlasHandle) != VK_SUCCESS) {
+      throw std::runtime_error("Failed to create TLAS in RayIntersectBench");
+    }
     return sizes.buildScratchSize;
   };
 
@@ -274,7 +280,9 @@ void RayIntersectBench::buildAS() {
   VkCommandPoolCreateInfo cpInfo{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
   cpInfo.queueFamilyIndex = vContext->getComputeQueueFamilyIndex();
   VkCommandPool tmpPool;
-  vkCreateCommandPool(device, &cpInfo, nullptr, &tmpPool);
+  if (vkCreateCommandPool(device, &cpInfo, nullptr, &tmpPool) != VK_SUCCESS) {
+    throw std::runtime_error("Failed to create command pool in RayIntersectBench");
+  }
 
   VkCommandBufferAllocateInfo cbAlloc{
       VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
@@ -282,11 +290,17 @@ void RayIntersectBench::buildAS() {
   cbAlloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
   cbAlloc.commandBufferCount = 1;
   VkCommandBuffer cmd;
-  vkAllocateCommandBuffers(device, &cbAlloc, &cmd);
+  if (vkAllocateCommandBuffers(device, &cbAlloc, &cmd) != VK_SUCCESS) {
+    vkDestroyCommandPool(device, tmpPool, nullptr);
+    throw std::runtime_error("Failed to allocate command buffer in RayIntersectBench");
+  }
 
   VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
   begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-  vkBeginCommandBuffer(cmd, &begin);
+  if (vkBeginCommandBuffer(cmd, &begin) != VK_SUCCESS) {
+    vkDestroyCommandPool(device, tmpPool, nullptr);
+    throw std::runtime_error("Failed to begin command buffer in RayIntersectBench");
+  }
 
   auto cmdBuild = [&](VkAccelerationStructureBuildGeometryInfoKHR &info,
                       VkAccelerationStructureKHR dst, uint32_t primCount) {
@@ -321,12 +335,18 @@ void RayIntersectBench::buildAS() {
   tlasBoxBuild.pGeometries = &topBoxGeom;
   cmdBuild(tlasBoxBuild, boxTlas, 1);
 
-  vkEndCommandBuffer(cmd);
+  if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
+    vkDestroyCommandPool(device, tmpPool, nullptr);
+    throw std::runtime_error("Failed to end command buffer in RayIntersectBench");
+  }
 
   VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
   submit.commandBufferCount = 1;
   submit.pCommandBuffers = &cmd;
-  vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE);
+  if (vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE) != VK_SUCCESS) {
+    vkDestroyCommandPool(device, tmpPool, nullptr);
+    throw std::runtime_error("Failed to submit AS build in RayIntersectBench");
+  }
   vkQueueWaitIdle(queue);
 
   vkDestroyCommandPool(device, tmpPool, nullptr);

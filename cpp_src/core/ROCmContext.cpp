@@ -263,6 +263,15 @@ ROCmContext::~ROCmContext() {
   } catch (...) {
   }
 
+  if (f_hipFree) {
+    for (ComputeBuffer buf : allocatedBuffers) {
+      if (buf) {
+        (void)f_hipFree(buf);
+      }
+    }
+  }
+  allocatedBuffers.clear();
+
   for (auto &pair : kernels) {
     delete static_cast<ROCmKernel *>(pair.first);
   }
@@ -302,6 +311,7 @@ void ROCmContext::enumerateDevices() {
     hipDeviceProp_t prop;
     if (f_hipGetDeviceProperties(&prop, i) == hipSuccess) {
       DeviceInfo info;
+      info.vendorID = 0x1002;
       info.name = prop.name;
       info.archName = prop.gcnArchName;
 
@@ -432,6 +442,7 @@ ComputeBuffer ROCmContext::createBuffer(size_t size, const void *host_ptr) {
                                std::string(f_hipGetErrorString(err)));
     }
   }
+  allocatedBuffers.insert(device_ptr);
   return device_ptr;
 }
 
@@ -455,6 +466,7 @@ void ROCmContext::readBuffer(ComputeBuffer buffer, size_t offset, size_t size,
 
 void ROCmContext::releaseBuffer(ComputeBuffer buffer) {
   if (buffer) {
+    allocatedBuffers.erase(buffer);
     if (f_hipFree(buffer) != hipSuccess) {
       std::cerr << "hipFree failed" << std::endl;
     }
@@ -464,6 +476,7 @@ void ROCmContext::releaseBuffer(ComputeBuffer buffer) {
 ComputeKernel ROCmContext::createKernel(const std::string &file_name,
                                         const std::string &kernel_name,
                                         uint32_t num_args) {
+  (void)num_args;
   notifyKernelCreated(file_name);
   if (!available || selectedDeviceIndex < 0) {
     throw std::runtime_error("No device selected or ROCm not available.");
@@ -489,7 +502,7 @@ ComputeKernel ROCmContext::createKernel(const std::string &file_name,
         }
         loaded_co_successfully = true;
         is_hip = false; // Bypass HIPRTC entirely
-      } else {
+      } else if (verbose && !quiet) {
         std::cout << "Failed to load pre-compiled .co file " << co_file_name
                   << " error: " << err << " (" << f_hipGetErrorString(err)
                   << ")" << std::endl;
@@ -523,28 +536,38 @@ ComputeKernel ROCmContext::createKernel(const std::string &file_name,
         f_hiprtcCreateProgram(&prog, source.c_str(), file_name.c_str(), 0,
                               nullptr, nullptr);
 
-        std::string offload_arch =
-            "--offload-arch=" + devices[selectedDeviceIndex].archName;
+        std::string clean_arch = devices[selectedDeviceIndex].archName;
+        size_t colon_pos = clean_arch.find(':');
+        if (colon_pos != std::string::npos) {
+          clean_arch = clean_arch.substr(0, colon_pos);
+        }
+        size_t space_pos = clean_arch.find(' ');
+        if (space_pos != std::string::npos) {
+          clean_arch = clean_arch.substr(0, space_pos);
+        }
+        std::string offload_arch = "--offload-arch=" + clean_arch;
         const char *opts[] = {offload_arch.c_str(), "-O3",
                               "-I/usr/include", "-I/opt/rocm/current/include",
+                              "-I/opt/rocm/core-10.1/include",
+                              "-I/opt/rocm/core-10.0/include",
                               "-I/opt/rocm/include", "-I/usr/local/include"};
-        hiprtcResult compileResult = f_hiprtcCompileProgram(prog, 6, opts);
+        hiprtcResult compileResult = f_hiprtcCompileProgram(prog, 8, opts);
 
         if (compileResult != HIPRTC_SUCCESS) {
-          std::cout << "HIPRTC compilation failed with code: " << compileResult
+          std::cerr << "HIPRTC compilation failed with code: " << compileResult
                     << std::endl;
-          std::cout << "Source snippet: "
+          std::cerr << "Source snippet: "
                     << source.substr(0, std::min(source.length(), (size_t)150))
                     << std::endl;
           size_t logSize = 0;
           hiprtcResult logSizeRes = f_hiprtcGetProgramLogSize(prog, &logSize);
-          std::cout << "HIPRTC logSizeRes=" << logSizeRes
+          std::cerr << "HIPRTC logSizeRes=" << logSizeRes
                     << " logSize=" << logSize << std::endl;
           std::string log_str = "No log available";
           if (logSize > 0) {
             std::vector<char> log(logSize);
             hiprtcResult logRes = f_hiprtcGetProgramLog(prog, log.data());
-            std::cout << "HIPRTC get log res: " << logRes << std::endl;
+            std::cerr << "HIPRTC get log res: " << logRes << std::endl;
             log_str = std::string(log.data(), logSize);
           }
           f_hiprtcDestroyProgram(&prog);

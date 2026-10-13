@@ -64,10 +64,8 @@ public:
   const char *GetSubCategory(uint32_t config_idx = 0) const override;
   bool ValidateResults(uint32_t config_idx = 0) const override;
 
-  // Un-fictitious telemetry accessors
+  // Telemetry accessors
   uint64_t GetTraversedRays(uint32_t config_idx = 0) const;
-  uint64_t GetSustainedOperations(uint32_t config_idx = 0) const;
-  double GetThroughputGIS(uint32_t config_idx = 0) const;
   double GetThroughputMRays(uint32_t config_idx = 0) const;
 
 private:

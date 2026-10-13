@@ -5,14 +5,15 @@ __kernel void run_dual_issue_ilp4(__global float* data, float multiplier, uint n
     uint index = get_global_id(0);
     if (index >= num_elements) return;
 
-    float base = data[index];
+    float base = as_float((as_uint(data[index]) & 0x007FFFFFu) | 0x3F800000u);
     float val0 = base;
     float val1 = base + 0.1f;
+    float m = multiplier * 0.00001f;
 
     // 131072 iterations * 2 scalar FMAs = 131072 * 4 = 524,288 FP32 operations
     for (int i = 0; i < 131072; ++i) {
-        val0 = fma(val0, multiplier, val1);
-        val1 = fma(val1, multiplier, val0);
+        val0 = fma(val0, m, val1);
+        val1 = fma(val1, m, val0);
     }
 
     data[index] = val0 + val1;
@@ -23,7 +24,7 @@ __kernel void run_dual_issue_ilp8(__global float* data, float multiplier, uint n
     uint index = get_global_id(0);
     if (index >= num_elements) return;
 
-    float base = data[index];
+    float base = as_float((as_uint(data[index]) & 0x007FFFFFu) | 0x3F800000u);
     float val0 = base;
     float val1 = base + 0.1f;
     float val2 = base + 0.2f;
@@ -33,25 +34,18 @@ __kernel void run_dual_issue_ilp8(__global float* data, float multiplier, uint n
     float val6 = base + 0.6f;
     float val7 = base + 0.7f;
 
-    float c0 = 0.0001f;
-    float c1 = 0.0002f;
-    float c2 = 0.0003f;
-    float c3 = 0.0004f;
-    float c4 = 0.0005f;
-    float c5 = 0.0006f;
-    float c6 = 0.0007f;
-    float c7 = 0.0008f;
+    float m = multiplier * 0.00001f;
 
     // 65536 iterations * 8 scalar FMAs = 65536 * 16 = 1,048,576 FP32 operations
     for (int i = 0; i < 65536; ++i) {
-        val0 = fma(val0, multiplier, c0);
-        val1 = fma(val1, multiplier, c1);
-        val2 = fma(val2, multiplier, c2);
-        val3 = fma(val3, multiplier, c3);
-        val4 = fma(val4, multiplier, c4);
-        val5 = fma(val5, multiplier, c5);
-        val6 = fma(val6, multiplier, c6);
-        val7 = fma(val7, multiplier, c7);
+        val0 = fma(val0, m, val0);
+        val1 = fma(val1, m, val1);
+        val2 = fma(val2, m, val2);
+        val3 = fma(val3, m, val3);
+        val4 = fma(val4, m, val4);
+        val5 = fma(val5, m, val5);
+        val6 = fma(val6, m, val6);
+        val7 = fma(val7, m, val7);
     }
 
     data[index] = (val0 + val1) + (val2 + val3) + (val4 + val5) + (val6 + val7);
@@ -62,7 +56,7 @@ __kernel void run_dual_issue_ilp16(__global float* data, float multiplier, uint 
     uint index = get_global_id(0);
     if (index >= num_elements) return;
 
-    float base = data[index];
+    float base = as_float((as_uint(data[index]) & 0x007FFFFFu) | 0x3F800000u);
     float val0  = base;
     float val1  = base + 0.05f;
     float val2  = base + 0.10f;
@@ -80,41 +74,26 @@ __kernel void run_dual_issue_ilp16(__global float* data, float multiplier, uint 
     float val14 = base + 0.70f;
     float val15 = base + 0.75f;
 
-    float c0  = 0.0001f;
-    float c1  = 0.0002f;
-    float c2  = 0.0003f;
-    float c3  = 0.0004f;
-    float c4  = 0.0005f;
-    float c5  = 0.0006f;
-    float c6  = 0.0007f;
-    float c7  = 0.0008f;
-    float c8  = 0.0009f;
-    float c9  = 0.0010f;
-    float c10 = 0.0011f;
-    float c11 = 0.0012f;
-    float c12 = 0.0013f;
-    float c13 = 0.0014f;
-    float c14 = 0.0015f;
-    float c15 = 0.0016f;
+    float m = multiplier * 0.00001f;
 
     // 65536 iterations * 16 scalar FMAs = 65536 * 32 = 2,097,152 FP32 operations
     for (int i = 0; i < 65536; ++i) {
-        val0  = fma(val0,  multiplier, c0);
-        val1  = fma(val1,  multiplier, c1);
-        val2  = fma(val2,  multiplier, c2);
-        val3  = fma(val3,  multiplier, c3);
-        val4  = fma(val4,  multiplier, c4);
-        val5  = fma(val5,  multiplier, c5);
-        val6  = fma(val6,  multiplier, c6);
-        val7  = fma(val7,  multiplier, c7);
-        val8  = fma(val8,  multiplier, c8);
-        val9  = fma(val9,  multiplier, c9);
-        val10 = fma(val10, multiplier, c10);
-        val11 = fma(val11, multiplier, c11);
-        val12 = fma(val12, multiplier, c12);
-        val13 = fma(val13, multiplier, c13);
-        val14 = fma(val14, multiplier, c14);
-        val15 = fma(val15, multiplier, c15);
+        val0  = fma(val0,  m, val0);
+        val1  = fma(val1,  m, val1);
+        val2  = fma(val2,  m, val2);
+        val3  = fma(val3,  m, val3);
+        val4  = fma(val4,  m, val4);
+        val5  = fma(val5,  m, val5);
+        val6  = fma(val6,  m, val6);
+        val7  = fma(val7,  m, val7);
+        val8  = fma(val8,  m, val8);
+        val9  = fma(val9,  m, val9);
+        val10 = fma(val10, m, val10);
+        val11 = fma(val11, m, val11);
+        val12 = fma(val12, m, val12);
+        val13 = fma(val13, m, val13);
+        val14 = fma(val14, m, val14);
+        val15 = fma(val15, m, val15);
     }
 
     data[index] = ((val0 + val1) + (val2 + val3)) +
@@ -132,19 +111,16 @@ __kernel void run_dual_issue_int32_4(__global float* data, float multiplier, uin
     uint val0 = ubase;
     uint val1 = ubase + 1u;
 
-    uint mu = (uint)multiplier;
-    if (mu == 0u) mu = 1u;
+    uint mu = ((uint)(multiplier * 1000.0f)) | 1u;
+    uint mask = (num_elements ^ 0x7FFF7FFFu) | 1u;
 
-    uint cu0 = 13u;
-    uint cu1 = 29u;
-
-    // 131072 iterations * 2 scalar INT32 ops (add + xor = 2 ops each) = 131072 * 4 = 524,288 INT32 ops
+    // 131072 iterations * 2 scalar INT32 chains (add + and = 2 ops each) = 131072 * 4 = 524,288 INT32 ops
     for (int i = 0; i < 131072; ++i) {
-        val0 = (val1 + cu0) ^ mu;
-        val1 = (val0 + cu1) ^ mu;
+        val0 = (val1 + mu) & mask;
+        val1 = (val0 + mu) & mask;
     }
 
-    data[index] = (float)(val0 ^ val1);
+    data[index] = (float)(((val0 + val1) & 0x00FFFFFFu) | 1u);
 }
 
 // Config 4: Dual-Issue INT32 (Partial Co-Issue - 8 chains)
@@ -162,31 +138,23 @@ __kernel void run_dual_issue_int32_8(__global float* data, float multiplier, uin
     uint u6 = ubase + 6u;
     uint u7 = ubase + 7u;
 
-    uint mu = (uint)multiplier;
-    if (mu == 0u) mu = 1u;
+    uint mu = ((uint)(multiplier * 1000.0f)) | 1u;
+    uint mask = (num_elements ^ 0x7FFF7FFFu) | 1u;
 
-    uint cu0 = 13u;
-    uint cu1 = 29u;
-    uint cu2 = 43u;
-    uint cu3 = 61u;
-    uint cu4 = 79u;
-    uint cu5 = 101u;
-    uint cu6 = 113u;
-    uint cu7 = 139u;
-
-    // 65536 iterations * 8 scalar INT32 ops (add + xor = 2 ops each) = 65536 * 16 = 1,048,576 INT32 ops
+    // 65536 iterations * 8 scalar INT32 chains (add + and = 2 ops each) = 65536 * 16 = 1,048,576 INT32 ops
     for (int i = 0; i < 65536; ++i) {
-        u0 = (u0 + cu0) ^ mu;
-        u1 = (u1 + cu1) ^ mu;
-        u2 = (u2 + cu2) ^ mu;
-        u3 = (u3 + cu3) ^ mu;
-        u4 = (u4 + cu4) ^ mu;
-        u5 = (u5 + cu5) ^ mu;
-        u6 = (u6 + cu6) ^ mu;
-        u7 = (u7 + cu7) ^ mu;
+        u0 = (u0 + mu) & mask;
+        u1 = (u1 + mu) & mask;
+        u2 = (u2 + mu) & mask;
+        u3 = (u3 + mu) & mask;
+        u4 = (u4 + mu) & mask;
+        u5 = (u5 + mu) & mask;
+        u6 = (u6 + mu) & mask;
+        u7 = (u7 + mu) & mask;
     }
 
-    data[index] = (float)(u0 ^ u1 ^ u2 ^ u3 ^ u4 ^ u5 ^ u6 ^ u7);
+    uint ures = (u0 + u1) ^ (u2 + u3) ^ (u4 + u5) ^ (u6 + u7);
+    data[index] = (float)((ures & 0x00FFFFFFu) | 1u);
 }
 
 // Config 5: Dual-Issue INT32 (Peak Co-Issue - 16 chains)
@@ -212,50 +180,32 @@ __kernel void run_dual_issue_int32(__global float* data, float multiplier, uint 
     uint u14 = ubase + 14u;
     uint u15 = ubase + 15u;
 
-    uint mu = (uint)multiplier;
-    if (mu == 0u) mu = 1u;
+    uint mu = ((uint)(multiplier * 1000.0f)) | 1u;
+    uint mask = (num_elements ^ 0x7FFF7FFFu) | 1u;
 
-    uint cu0  = 13u;
-    uint cu1  = 29u;
-    uint cu2  = 43u;
-    uint cu3  = 61u;
-    uint cu4  = 79u;
-    uint cu5  = 101u;
-    uint cu6  = 113u;
-    uint cu7  = 139u;
-    uint cu8  = 163u;
-    uint cu9  = 181u;
-    uint cu10 = 199u;
-    uint cu11 = 229u;
-    uint cu12 = 251u;
-    uint cu13 = 271u;
-    uint cu14 = 293u;
-    uint cu15 = 317u;
-
-    // 65536 iterations * 16 scalar INT32 ops (add + xor = 2 ops each) = 65536 * 32 = 2,097,152 INT32 ops
+    // 65536 iterations * 16 scalar INT32 chains (add + and = 2 ops each) = 65536 * 32 = 2,097,152 INT32 ops
     for (int i = 0; i < 65536; ++i) {
-        u0  = (u0  + cu0)  ^ mu;
-        u1  = (u1  + cu1)  ^ mu;
-        u2  = (u2  + cu2)  ^ mu;
-        u3  = (u3  + cu3)  ^ mu;
-        u4  = (u4  + cu4)  ^ mu;
-        u5  = (u5  + cu5)  ^ mu;
-        u6  = (u6  + cu6)  ^ mu;
-        u7  = (u7  + cu7)  ^ mu;
-        u8  = (u8  + cu8)  ^ mu;
-        u9  = (u9  + cu9)  ^ mu;
-        u10 = (u10 + cu10) ^ mu;
-        u11 = (u11 + cu11) ^ mu;
-        u12 = (u12 + cu12) ^ mu;
-        u13 = (u13 + cu13) ^ mu;
-        u14 = (u14 + cu14) ^ mu;
-        u15 = (u15 + cu15) ^ mu;
+        u0  = (u0  + mu) & mask;
+        u1  = (u1  + mu) & mask;
+        u2  = (u2  + mu) & mask;
+        u3  = (u3  + mu) & mask;
+        u4  = (u4  + mu) & mask;
+        u5  = (u5  + mu) & mask;
+        u6  = (u6  + mu) & mask;
+        u7  = (u7  + mu) & mask;
+        u8  = (u8  + mu) & mask;
+        u9  = (u9  + mu) & mask;
+        u10 = (u10 + mu) & mask;
+        u11 = (u11 + mu) & mask;
+        u12 = (u12 + mu) & mask;
+        u13 = (u13 + mu) & mask;
+        u14 = (u14 + mu) & mask;
+        u15 = (u15 + mu) & mask;
     }
 
-    data[index] = (float)(
-        u0 ^ u1 ^ u2 ^ u3 ^ u4 ^ u5 ^ u6 ^ u7 ^
-        u8 ^ u9 ^ u10 ^ u11 ^ u12 ^ u13 ^ u14 ^ u15
-    );
+    uint ures = ((u0 + u1) ^ (u2 + u3)) + ((u4 + u5) ^ (u6 + u7)) +
+                ((u8 + u9) ^ (u10 + u11)) + ((u12 + u13) ^ (u14 + u15));
+    data[index] = (float)((ures & 0x00FFFFFFu) | 1u);
 }
 
 // Config 6: Dual-Issue Mixed (FP32+INT32, 50/50 Dual-Issue)
@@ -263,7 +213,7 @@ __kernel void run_dual_issue_mixed(__global float* data, float multiplier, uint 
     uint index = get_global_id(0);
     if (index >= num_elements) return;
 
-    float base = data[index];
+    float base = as_float((as_uint(data[index]) & 0x007FFFFFu) | 0x3F800000u);
     uint ubase = (uint)(base * 1000.0f) + index;
 
     // 8 independent FP32 scalar accumulator chains
@@ -276,14 +226,7 @@ __kernel void run_dual_issue_mixed(__global float* data, float multiplier, uint 
     float f6 = base + 0.6f;
     float f7 = base + 0.7f;
 
-    float cf0 = 0.0001f;
-    float cf1 = 0.0002f;
-    float cf2 = 0.0003f;
-    float cf3 = 0.0004f;
-    float cf4 = 0.0005f;
-    float cf5 = 0.0006f;
-    float cf6 = 0.0007f;
-    float cf7 = 0.0008f;
+    float mf = multiplier * 0.00001f;
 
     // 8 independent INT32 scalar accumulator chains
     uint u0 = ubase;
@@ -295,48 +238,39 @@ __kernel void run_dual_issue_mixed(__global float* data, float multiplier, uint 
     uint u6 = ubase + 6u;
     uint u7 = ubase + 7u;
 
-    uint mu = (uint)multiplier;
-    if (mu == 0u) mu = 1u;
+    uint mu = ((uint)(multiplier * 1000.0f)) | 1u;
+    uint mask = (num_elements ^ 0x7FFF7FFFu) | 1u;
 
-    uint cu0 = 13u;
-    uint cu1 = 29u;
-    uint cu2 = 43u;
-    uint cu3 = 61u;
-    uint cu4 = 79u;
-    uint cu5 = 101u;
-    uint cu6 = 113u;
-    uint cu7 = 139u;
-
-    // 65536 iterations * (8 scalar FMAs + 8 scalar INT add+xor)
+    // 65536 iterations * (8 scalar FMAs + 8 scalar INT add+and)
     // = 65536 * (16 FP32 ops + 16 INT32 ops) = 65536 * 32 = 2,097,152 operations
     for (int i = 0; i < 65536; ++i) {
-        f0 = fma(f0, multiplier, cf0);
-        u0 = (u0 + cu0) ^ mu;
+        f0 = fma(f0, mf, f0);
+        u0 = (u0 + mu) & mask;
 
-        f1 = fma(f1, multiplier, cf1);
-        u1 = (u1 + cu1) ^ mu;
+        f1 = fma(f1, mf, f1);
+        u1 = (u1 + mu) & mask;
 
-        f2 = fma(f2, multiplier, cf2);
-        u2 = (u2 + cu2) ^ mu;
+        f2 = fma(f2, mf, f2);
+        u2 = (u2 + mu) & mask;
 
-        f3 = fma(f3, multiplier, cf3);
-        u3 = (u3 + cu3) ^ mu;
+        f3 = fma(f3, mf, f3);
+        u3 = (u3 + mu) & mask;
 
-        f4 = fma(f4, multiplier, cf4);
-        u4 = (u4 + cu4) ^ mu;
+        f4 = fma(f4, mf, f4);
+        u4 = (u4 + mu) & mask;
 
-        f5 = fma(f5, multiplier, cf5);
-        u5 = (u5 + cu5) ^ mu;
+        f5 = fma(f5, mf, f5);
+        u5 = (u5 + mu) & mask;
 
-        f6 = fma(f6, multiplier, cf6);
-        u6 = (u6 + cu6) ^ mu;
+        f6 = fma(f6, mf, f6);
+        u6 = (u6 + mu) & mask;
 
-        f7 = fma(f7, multiplier, cf7);
-        u7 = (u7 + cu7) ^ mu;
+        f7 = fma(f7, mf, f7);
+        u7 = (u7 + mu) & mask;
     }
 
     float fres = (f0 + f1) + (f2 + f3) + (f4 + f5) + (f6 + f7);
-    uint ures = u0 ^ u1 ^ u2 ^ u3 ^ u4 ^ u5 ^ u6 ^ u7;
+    uint ures = ((u0 + u1) ^ (u2 + u3) ^ (u4 + u5) ^ (u6 + u7)) & 0x00FFFFFFu;
 
-    data[index] = fres + (float)ures;
+    data[index] = fres + (float)(ures | 1u);
 }

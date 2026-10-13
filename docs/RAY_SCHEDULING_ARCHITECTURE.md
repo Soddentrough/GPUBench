@@ -50,7 +50,7 @@ To evaluate how geometric complexity, mesh density, occlusion, and material dist
 - **Primary Use Case**: Expansive open world with long ray distances, heavy sky miss rates, and directional shadow evaluation.
 
 ### 2.4 Open-World Forest (`-s forest`)
-- **Geometry**: $1,001,280$ triangles featuring a high-density, multi-tiered natural ecosystem (512×512 terrain, riverbed bathymetry, 850 mature trees, 1,200 boulders, and 4,000 understory plants).
+- **Geometry**: $1,007,280$ triangles featuring a high-density, multi-tiered natural ecosystem (512×512 terrain, riverbed bathymetry, 850 mature trees, 1,200 boulders, and 4,000 understory plants).
 - **Heterogeneous Nature PBR**: 8 specialized physical material shaders:
   1. *Translucent Leaves/Needles*: Dual-sided thin-surface subsurface scattering with backlit emerald transmission.
   2. *Anisotropic Bark*: High-roughness ($0.85$) anisotropic GGX with furrow shadowing.
@@ -75,7 +75,7 @@ Benchmarks and shader diagnostics were evaluated on the **AMD Radeon AI PRO R970
 | **Showroom Studio** | 108,936 | 57.6 FPS (17.37 ms) | **101.3 FPS (9.87 ms)** | **1.76x** | 8,294,400 / 8,294,400 (100%) | 120.0 dB |
 | **Indoor Atrium** | 262,267 | 30.5 FPS (32.77 ms) | **68.0 FPS (14.70 ms)** | **2.23x** | 8,294,400 / 8,294,400 (100%) | 120.0 dB |
 | **Outdoor Landscape** | 57,216 | 185.8 FPS (5.38 ms) | **420.0 FPS (2.38 ms)** | **2.26x** | 8,294,400 / 8,294,400 (100%) | 120.0 dB |
-| **Open-World Forest** | 1,001,280 | 27.0 FPS (37.00 ms) | **55.0 FPS (18.18 ms)** | **2.04x** | 8,294,400 / 8,294,400 (100%) | 120.0 dB |
+| **Open-World Forest** | 1,007,280 | 27.0 FPS (37.00 ms) | **55.0 FPS (18.18 ms)** | **2.04x** | 8,294,400 / 8,294,400 (100%) | 120.0 dB |
 
 Across all scenarios, Device-Generated Commands (DGC) reduces frame render times by **43% to 56%**, doubling interactive framerates while preserving identical image output.
 
@@ -95,11 +95,11 @@ Querying compiler statistics directly via `RADV_DEBUG=shaderstats` reveals why t
 
 | Compute Kernel | Pipeline Stage | Code Size | VGPRs | LDS Allocation | Waves / SIMD | Theoretical SIMD Occupancy |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: |
-| **`rt_scheduling_traditional_megakernel.comp`** | **Megakernel** | **119.2 KB** | **240** | **15,360 B** | **2 waves** | **12.5%** *(Critical Bottleneck)* |
-| **`rt_scheduling_device_generated_commands_classify.comp`** | Ray Hit Classification | 9.4 KB | 48 | 3,072 B | **11 waves** | **68.8%** |
-| **`rt_scheduling_device_generated_commands_material.comp`** | Specialized PBR Shading | 100.2 KB | 240 | 8,192 B | **4 waves** | **25.0%** *(2x Megakernel)* |
-| **`rt_scheduling_device_generated_commands_bounce.comp`** | Ray Generation / Bounces | 4.8 KB | 48 | 2,048 B | **16 waves** | **100.0% (MAX OCCUPANCY)** |
-| **`rt_scheduling_device_generated_commands_shadow.comp`** | Directional Shadows | 3.1 KB | 48 | 2,048 B | **16 waves** | **100.0% (MAX OCCUPANCY)** |
+| **`rt_scheduling_traditional.comp`** | **Megakernel** | **119.2 KB** | **240** | **15,360 B** | **2 waves** | **12.5%** *(Critical Bottleneck)* |
+| **`rt_scheduling_worklist_classify.comp`** | Ray Hit Classification | 9.4 KB | 48 | 3,072 B | **11 waves** | **68.8%** |
+| **`rt_scheduling_worklist_material.comp`** | Specialized PBR Shading | 100.2 KB | 240 | 8,192 B | **4 waves** | **25.0%** *(2x Megakernel)* |
+| **`rt_scheduling_worklist_bounce.comp`** | Ray Generation / Bounces | 4.8 KB | 48 | 2,048 B | **16 waves** | **100.0% (MAX OCCUPANCY)** |
+| **`rt_scheduling_worklist_shadow.comp`** | Directional Shadows | 3.1 KB | 48 | 2,048 B | **16 waves** | **100.0% (MAX OCCUPANCY)** |
 | **`rt_scheduling_persistent.comp`** | Persistent Wavefront Queue | 27.8 KB | 48 | 2,048 B | **16 waves** | **100.0% (MAX OCCUPANCY)** |
 | **`rt_scheduling_resolve.comp`** | Framebuffer Resolve | 444 B | 96 | 0 B | **16 waves** | **100.0% (MAX OCCUPANCY)** |
 
@@ -191,20 +191,21 @@ gpubench -d 1 -b rayscheduling -s forest
 # Dump 4K UHD PNG/PPM frames, difference heatmaps, and 4-scenario comparative grid
 gpubench -d 0 -b rayscheduling -s all --dump-renders
 
-# Run a specific benchmark configuration (e.g. Config 17: Primary Rays (Compute Megakernel), Config 18: Primary Rays (Wavefront - DGC), Config 29: Primary Rays (RTP))
+# Run a specific benchmark configuration (e.g. Config 9: Full Frame Megakernel, Config 11: Full Frame DGC, Config 17: Full Pipeline 4K UHD DGC, Config 18: Primary Rays RTP)
+gpubench -d 0 -b rayscheduling -s forest -c 9
+gpubench -d 0 -b rayscheduling -s forest -c 11
 gpubench -d 0 -b rayscheduling -s forest -c 17
 gpubench -d 0 -b rayscheduling -s forest -c 18
-gpubench -d 0 -b rayscheduling -s forest -c 29
 
 # Run in profiling snapshot mode (single submit for clean RGP trace capture)
-gpubench -d 0 -b rayscheduling -s forest -c 18 --profile-snapshot
+gpubench -d 0 -b rayscheduling -s forest -c 11 --profile-snapshot
 ```
 
 ### 6.2 Inspecting Shader Occupancy & Compiler Statistics
 
 To inspect ACO compiler machine code statistics, VGPR allocation, and SIMD wave occupancy:
 ```bash
-RADV_DEBUG=shaderstats gpubench -d 1 -b rayscheduling -s showroom -c 21 --profile-snapshot --no-dump
+RADV_DEBUG=shaderstats gpubench -d 1 -b rayscheduling -s showroom -c 11 --profile-snapshot --no-dump
 ```
 
 ### 6.3 Querying Real-Time Hardware Telemetry

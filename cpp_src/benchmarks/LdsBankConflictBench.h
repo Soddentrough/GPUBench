@@ -37,6 +37,9 @@ public:
 
   uint32_t GetNumConfigs() const override { return static_cast<uint32_t>(configs.size()); }
   uint32_t GetExpectedKernelCount() const override { return 1; }
+  int GetBaselineConfigIndex(uint32_t config_idx) const override {
+    return config_idx > 0 ? 0 : -1;
+  }
   std::string GetConfigName(uint32_t config_idx) const override;
   std::string GetConfigSupportNote(uint32_t config_idx) const override;
 

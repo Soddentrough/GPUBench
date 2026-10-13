@@ -523,9 +523,15 @@ Replace the arbitrary hardcoded `rayCount * 64` formula with exact traversal acc
 
 ## 6. Synthesis & Next Milestone Roadmap
 
+> [!NOTE]
+> **Post-Audit Remediation Status (Completed)**:
+> Following this M1 audit, all identified defects were remediated in the codebase:
+> 1. **`RayIntersectBench` Remediation**: In `shaders/rt_benchmark.comp`, ray origins were aligned to the `[-8.0, +8.0]` geometry domain (eliminating the 93.75% early root miss), and global atomic contention was replaced with wave-level `subgroupAdd` reduction.
+> 2. **`RayRawTraversalBench` Implementation**: The dedicated zero-overhead hardware BVH traversal microbenchmark (`shaders/rt_raw_traversal.comp` and `cpp_src/benchmarks/RayRawTraversalBench.{h,cpp}`) was implemented, achieving 32 VGPRs, 0 LDS bytes, 16 waves/SIMD (100% occupancy), and reporting `% of Peak` against `DeviceDatabase` theoretical ceilings.
+
 | Milestone | Deliverable | Status | Core Objective |
 | :---: | :--- | :---: | :--- |
 | **M1** | `docs/BVH_TRAVERSAL_ARCHITECTURAL_AUDIT.md` | **COMPLETED** | Rigorous architectural audit, hardware specifications, theoretical ceiling derivations, and microbenchmark blueprint. |
-| **M2** | `shaders/rt_raw_traversal.comp`, `RayRawTraversalBench.{h,cpp}` | NEXT | Implement zero-overhead compute kernel ($\le 32$ VGPRs, 16 waves/SIMD), dense coherent BLAS/TLAS, and C++ benchmark class. |
-| **M3** | CLI Integration, `% Peak` Reporting, Validation Script | PLANNED | Register `-b RayRawTraversal`, update `ResultFormatter`, and build `scripts/validate_rt_microbench.py`. |
-| **M4** | End-to-End GPU 1 Execution & Forensic Audit | PLANNED | Execute on GPU 1, verify sustained throughput improvements, and conduct independent forensic audit. |
+| **M2** | `shaders/rt_raw_traversal.comp`, `RayRawTraversalBench.{h,cpp}` | **COMPLETED** | Implement zero-overhead compute kernel ($\le 32$ VGPRs, 16 waves/SIMD), dense coherent BLAS/TLAS, and C++ benchmark class. |
+| **M3** | CLI Integration, `% Peak` Reporting, Validation Script | **COMPLETED** | Register `-b RayRawTraversal`, update `ResultFormatter`, and build `scripts/validate_rt_microbench.py`. |
+| **M4** | End-to-End GPU Execution & Forensic Audit | **COMPLETED** | Execute on target GPUs, verify sustained throughput improvements, and conduct independent forensic audit. |

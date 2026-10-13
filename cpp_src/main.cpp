@@ -10,8 +10,6 @@
 #include "core/ResultImporter.h"
 #include "core/RunnerAPI.h"
 #include "utils/HardwareTelemetry.h"
-
-void SetRunnerTargetConfigs(const std::vector<int> &configs);
 #include <cctype>
 #include <chrono>
 #include <cstdlib>
@@ -58,10 +56,10 @@ int main(int argc, char **argv) {
   app.footer(
       "\nBENCHMARK GROUPS & INCLUDED TESTS:\n"
       "  compute     Compute arithmetic units (vector & matrix tensor operations):\n"
-      "              FP64, FP32, Dual-Issue (ILP & Concurrent Math), LDS Bank Conflicts,\n"
+      "              FP64, FP32, ILP & Dual-Issue, LDS Bank Conflicts,\n"
       "              In-Shader Indirect Synthesis, FP16, FP8, INT8 (BF16, FP6, FP4, INT4 capability-probed)\n"
       "  memory      VRAM and GPU cache hierarchy:\n"
-      "              Device Memory Bandwidth, L0 Cache Latency, Cache Latency Curve\n"
+      "              Device Memory Bandwidth, L0 Vector Cache Latency (16 KB), Cache Latency Curve\n"
       "  graphics    All 3D graphics rendering pipelines (combines 'raster' and 'raytracing', alias: 'gfx'):\n"
       "              Runs both fixed-function rasterization (ROP) and hardware ray tracing\n"
       "  raster      Fixed-function rasterization & ROP pixel fill rates (subset of graphics):\n"
@@ -366,7 +364,7 @@ int main(int argc, char **argv) {
             std::cout << "      [" << c << "] " << rawBench.GetConfigName(c) << std::endl;
           }
         }
-        if (name == "Dual-Issue") {
+        if (name == "ILP & Dual-Issue") {
           DualIssueBench diBench;
           for (uint32_t c = 0; c < diBench.GetNumConfigs(); ++c) {
             std::cout << "      [" << c << "] " << diBench.GetConfigName(c)
@@ -406,11 +404,11 @@ int main(int argc, char **argv) {
     std::vector<std::unique_ptr<IComputeContext>> contexts;
     if (backend_strs.empty() ||
         (backend_strs.size() == 1 && backend_strs[0] == "auto")) {
-      // Default to Vulkan, fall back to OpenCL, then ROCm. A backend can be
+      // Default to Vulkan, fall back to ROCm, then OpenCL. A backend can be
       // compiled in but fail at runtime (missing driver/GPU), so attempt
       // creation in order and fall through on failure.
       const ComputeBackend auto_order[] = {
-          ComputeBackend::Vulkan, ComputeBackend::OpenCL, ComputeBackend::ROCm};
+          ComputeBackend::Vulkan, ComputeBackend::ROCm, ComputeBackend::OpenCL};
       for (ComputeBackend backend : auto_order) {
         if (!ComputeBackendFactory::isAvailable(backend)) {
           continue;

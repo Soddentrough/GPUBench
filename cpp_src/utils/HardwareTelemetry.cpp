@@ -76,30 +76,45 @@ GpuTelemetryData HardwareTelemetry::queryGpu(uint32_t deviceIndex) {
       try { data.gpuActivityPct = std::stoul(busyStr); } catch (...) {}
     }
 
-    // Temperature & Power (hwmon)
-    for (int h = 0; h < 8; ++h) {
-      std::string hwmonPath = cardPath + "hwmon/hwmon" + std::to_string(h) + "/";
-      if (std::filesystem::exists(hwmonPath)) {
-        if (data.deviceName.empty()) {
-          std::string hwmonName = readSysfsFile(hwmonPath + "name");
-          if (!hwmonName.empty()) data.deviceName = hwmonName;
+    // Temperature, Power & Clocks (hwmon)
+    std::string foundHwmonPath;
+    std::error_code ec;
+    if (std::filesystem::exists(cardPath + "hwmon", ec)) {
+      for (const auto &entry : std::filesystem::directory_iterator(cardPath + "hwmon", ec)) {
+        if (entry.is_directory(ec)) {
+          foundHwmonPath = entry.path().string() + "/";
+          break;
         }
-        std::string tempStr = readSysfsFile(hwmonPath + "temp1_input");
-        if (!tempStr.empty()) {
-          try { data.temperatureC = std::stof(tempStr) / 1000.0f; } catch (...) {}
+      }
+    }
+    if (foundHwmonPath.empty()) {
+      for (int h = 0; h < 16; ++h) {
+        std::string hwmonPath = cardPath + "hwmon/hwmon" + std::to_string(h) + "/";
+        if (std::filesystem::exists(hwmonPath, ec)) {
+          foundHwmonPath = hwmonPath;
+          break;
         }
-        std::string powerStr = readSysfsFile(hwmonPath + "power1_average");
-        if (powerStr.empty()) {
-          powerStr = readSysfsFile(hwmonPath + "power1_input");
-        }
-        if (!powerStr.empty()) {
-          try { data.powerWatts = std::stof(powerStr) / 1000000.0f; } catch (...) {}
-        }
-        std::string fanStr = readSysfsFile(hwmonPath + "pwm1");
-        if (!fanStr.empty()) {
-          try { data.fanSpeedPct = static_cast<uint32_t>(std::stoul(fanStr) * 100 / 255); } catch (...) {}
-        }
-        break;
+      }
+    }
+    if (!foundHwmonPath.empty()) {
+      if (data.deviceName.empty()) {
+        std::string hwmonName = readSysfsFile(foundHwmonPath + "name");
+        if (!hwmonName.empty()) data.deviceName = hwmonName;
+      }
+      std::string tempStr = readSysfsFile(foundHwmonPath + "temp1_input");
+      if (!tempStr.empty()) {
+        try { data.temperatureC = std::stof(tempStr) / 1000.0f; } catch (...) {}
+      }
+      std::string powerStr = readSysfsFile(foundHwmonPath + "power1_average");
+      if (powerStr.empty()) {
+        powerStr = readSysfsFile(foundHwmonPath + "power1_input");
+      }
+      if (!powerStr.empty()) {
+        try { data.powerWatts = std::stof(powerStr) / 1000000.0f; } catch (...) {}
+      }
+      std::string fanStr = readSysfsFile(foundHwmonPath + "pwm1");
+      if (!fanStr.empty()) {
+        try { data.fanSpeedPct = static_cast<uint32_t>(std::stoul(fanStr) * 100 / 255); } catch (...) {}
       }
     }
 
@@ -123,14 +138,24 @@ GpuTelemetryData HardwareTelemetry::queryGpu(uint32_t deviceIndex) {
       try { data.gttTotalMb = std::stoull(gttTotalStr) / (1024 * 1024); } catch (...) {}
     }
 
-    // Clocks
+    // Clocks (with fallback to hwmon freq1_input / freq2_input in Hz)
     std::string sclkStr = readSysfsFile(cardPath + "current_gfxclk");
     if (!sclkStr.empty()) {
       try { data.coreClockMhz = std::stoul(sclkStr); } catch (...) {}
+    } else if (!foundHwmonPath.empty()) {
+      std::string freq1Str = readSysfsFile(foundHwmonPath + "freq1_input");
+      if (!freq1Str.empty()) {
+        try { data.coreClockMhz = static_cast<uint32_t>(std::stoull(freq1Str) / 1000000ULL); } catch (...) {}
+      }
     }
     std::string mclkStr = readSysfsFile(cardPath + "current_uclk");
     if (!mclkStr.empty()) {
       try { data.memoryClockMhz = std::stoul(mclkStr); } catch (...) {}
+    } else if (!foundHwmonPath.empty()) {
+      std::string freq2Str = readSysfsFile(foundHwmonPath + "freq2_input");
+      if (!freq2Str.empty()) {
+        try { data.memoryClockMhz = static_cast<uint32_t>(std::stoull(freq2Str) / 1000000ULL); } catch (...) {}
+      }
     }
   }
 

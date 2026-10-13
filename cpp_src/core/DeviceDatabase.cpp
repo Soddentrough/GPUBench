@@ -397,7 +397,33 @@ static HardwareProfile synthesizePatternProfile(uint32_t vendorId, uint32_t devi
   p.marketingName = name;
 
   if (vendorId == 0x1002 || containsCi(name, "AMD") || containsCi(name, "Radeon")) {
-    if (containsCi(name, "r9700") || containsCi(name, "navi 48") || containsCi(name, "9070")) {
+    if (containsCi(name, "r9700")) {
+      p.archName = "gfx1201 (RDNA 4)";
+      p.archFamily = "RDNA 4";
+      p.isApu = false;
+      p.l2CacheBytes = 8 * 1024 * 1024;
+      p.l3CacheBytes = 48 * 1024 * 1024;
+      p.theoreticalTriangleGis = 253.8;
+      p.theoreticalBoxGis = 1015.2;
+      p.theoreticalFp32Tflops = 41.06;
+      p.theoreticalBandwidthGBps = 640.0;
+      p.memoryType = "GDDR6";
+      return p;
+    }
+    if (containsCi(name, "9070") && !containsCi(name, "xt")) {
+      p.archName = "gfx1201 (RDNA 4)";
+      p.archFamily = "RDNA 4";
+      p.isApu = false;
+      p.l2CacheBytes = 8 * 1024 * 1024;
+      p.l3CacheBytes = 48 * 1024 * 1024;
+      p.theoreticalTriangleGis = 225.6;
+      p.theoreticalBoxGis = 902.4;
+      p.theoreticalFp32Tflops = 36.51;
+      p.theoreticalBandwidthGBps = 640.0;
+      p.memoryType = "GDDR6";
+      return p;
+    }
+    if (containsCi(name, "navi 48") || containsCi(name, "9070")) {
       p.archName = "gfx1201 (RDNA 4)";
       p.archFamily = "RDNA 4";
       p.isApu = false;
@@ -564,7 +590,15 @@ const HardwareProfile &DeviceDatabase::lookup(uint32_t vendorId, uint32_t device
 }
 
 void DeviceDatabase::enrichDeviceInfo(DeviceInfo &info) {
-  const HardwareProfile &prof = lookup(info.vendorID, info.deviceID, info.name);
+  const HardwareProfile *profPtr = &lookup(info.vendorID, info.deviceID, info.name);
+  if ((profPtr->archFamily == "Generic" || profPtr->archFamily == "AMD GCN/RDNA") &&
+      !info.archName.empty()) {
+    const HardwareProfile &archProf = lookup(info.vendorID, info.deviceID, info.archName);
+    if (archProf.archFamily != "Generic") {
+      profPtr = &archProf;
+    }
+  }
+  const HardwareProfile &prof = *profPtr;
 
   if (info.archName.empty() || info.archName == "Discrete GPU" ||
       info.archName == "AMD Radeon (Vulkan)") {
@@ -583,6 +617,9 @@ void DeviceDatabase::enrichDeviceInfo(DeviceInfo &info) {
 
   if (!info.isApu && prof.isApu) {
     info.isApu = true;
+  }
+  if (!info.int4Support && (prof.archFamily == "RDNA 4" || containsCi(info.archName, "gfx12"))) {
+    info.int4Support = true;
   }
 }
 

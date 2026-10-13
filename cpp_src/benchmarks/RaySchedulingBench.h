@@ -313,9 +313,10 @@ private:
   std::vector<VulkanContext::IndirectBatchEntry> multiLightBatches128;
   void rebuildBounceBatches();
 
-  // DGC (VK_EXT_device_generated_commands) Objects & Execution Infos
+#endif
   bool isDGCAvailable = false;
   bool isDGCExecutionSetAvailable = false;
+#ifdef HAVE_VULKAN
   VkIndirectCommandsLayoutEXT dgcLayoutStandard = VK_NULL_HANDLE;
   VkIndirectCommandsLayoutEXT dgcLayoutSpecialized = VK_NULL_HANDLE;
   VkIndirectExecutionSetEXT dgcExecutionSetSpecialized = VK_NULL_HANDLE;
@@ -332,7 +333,7 @@ private:
   void rebuildDGCBounceBatches();
 #endif
 
-  uint32_t bounceDepth = 4;
+  uint32_t bounceDepth = 2;
   uint32_t samplesPerPixel = 1;
   uint32_t renderWidth = 1920;
   uint32_t renderHeight = 1080;

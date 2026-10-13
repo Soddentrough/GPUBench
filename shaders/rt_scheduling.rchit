@@ -166,6 +166,21 @@ void main() {
 
     vec3 pixelColor = vec3(0.0);
 
+    if (pc.mode == 5u) {
+        if (pc.isGltf != 0u) {
+            uint base = primId * 36u;
+            vec3 p0 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
+            vec3 p1 = vec3(vbuf.vertices[base + 12], vbuf.vertices[base + 13], vbuf.vertices[base + 14]);
+            vec3 p2 = vec3(vbuf.vertices[base + 24], vbuf.vertices[base + 25], vbuf.vertices[base + 26]);
+            vec3 geomNormal = normalize(cross(p1 - p0, p2 - p0));
+            if (dot(geomNormal, rayDir) > 0.0) geomNormal = -geomNormal;
+            payload = geomNormal;
+        } else {
+            payload = computeSmoothNormal(pc.sceneType, primId, hitPos, rayDir, rawBary);
+        }
+        return;
+    }
+
     if (pc.isGltf != 0u) {
         vec2 bary = unpackUnorm2x16(packUnorm2x16(rawBary));
         uint base = primId * 36u;
@@ -196,7 +211,8 @@ void main() {
 
         uint matId = triMatBuf.triangleMats[primId];
         GltfMaterialGpu mat = matBuf.materials[matId];
-        pixelColor = evaluateGltfPbr(mat, interpHitPos, geomNormal, smoothNormal, tangent, uv, rayDir, pc.sceneType, rngState);
+        bool enableShadows = (pc.mode != 4u);
+        pixelColor = evaluateGltfPbr(mat, interpHitPos, geomNormal, smoothNormal, tangent, uv, rayDir, pc.sceneType, enableShadows, rngState);
     } else {
         vec3 normal = computeSmoothNormal(pc.sceneType, primId, hitPos, rayDir, rawBary);
         uint matId = computeMaterialId(pc.sceneType, primId, hitPos, normal);

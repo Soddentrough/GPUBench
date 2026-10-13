@@ -18,7 +18,7 @@ void main() {
     uint index = gl_GlobalInvocationID.x;
     if (index >= pushConstants.num_elements) return;
 
-    float base = InOutBuffer.data[index];
+    float base = uintBitsToFloat((floatBitsToUint(InOutBuffer.data[index]) & 0x007FFFFFu) | 0x3F800000u);
     float val0 = base;
     float val1 = base + 0.1;
     float val2 = base + 0.2;
@@ -28,26 +28,18 @@ void main() {
     float val6 = base + 0.6;
     float val7 = base + 0.7;
 
-    float m = pushConstants.multiplier;
-    float c0 = 0.0001;
-    float c1 = 0.0002;
-    float c2 = 0.0003;
-    float c3 = 0.0004;
-    float c4 = 0.0005;
-    float c5 = 0.0006;
-    float c6 = 0.0007;
-    float c7 = 0.0008;
+    float m = pushConstants.multiplier * 0.00001;
 
     // 65536 iterations * 8 scalar FMAs = 65536 * 16 = 1,048,576 FP32 operations
     for (int i = 0; i < 65536; ++i) {
-        val0 = fma(val0, m, c0);
-        val1 = fma(val1, m, c1);
-        val2 = fma(val2, m, c2);
-        val3 = fma(val3, m, c3);
-        val4 = fma(val4, m, c4);
-        val5 = fma(val5, m, c5);
-        val6 = fma(val6, m, c6);
-        val7 = fma(val7, m, c7);
+        val0 = fma(val0, m, val0);
+        val1 = fma(val1, m, val1);
+        val2 = fma(val2, m, val2);
+        val3 = fma(val3, m, val3);
+        val4 = fma(val4, m, val4);
+        val5 = fma(val5, m, val5);
+        val6 = fma(val6, m, val6);
+        val7 = fma(val7, m, val7);
     }
 
     InOutBuffer.data[index] = (val0 + val1) + (val2 + val3) + (val4 + val5) + (val6 + val7);

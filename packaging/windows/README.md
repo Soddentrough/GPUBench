@@ -77,9 +77,11 @@ Both package types include:
 ```
 GPUBench/
 ├── bin/
-│   ├── gpubench.exe           # Main executable
+│   ├── gpubench.exe           # CLI benchmark executable
+│   ├── gpubench-gui.exe       # Workstation Profiler GUI executable
 │   └── *.dll                  # Runtime dependencies (if any)
 └── share/gpubench/
+    ├── assets/models/         # Canonical glTF 3D scenes (sponza.glb, toycar.glb)
     └── kernels/
         ├── vulkan/            # Compiled SPIR-V shaders (*.spv)
         └── opencl/            # OpenCL source files (*.cl)
@@ -123,7 +125,7 @@ gpubench --list-benchmarks
 ### Version Number
 Edit `CMakeLists.txt` to set version:
 ```cmake
-project(GPUBench VERSION 1.0.0)
+project(GPUBench VERSION 1.3.0)
 ```
 
 ### Package Metadata

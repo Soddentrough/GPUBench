@@ -42,6 +42,9 @@ def display_detailed_results(data: dict[str, Any], console: Console) -> None:
     backend = data.get("backend", "Unknown")
 
     header_text = Text()
+    if data.get("version"):
+        header_text.append("Version:   ", style="bold")
+        header_text.append(f"{data.get('version')}\n", style="cyan")
     header_text.append("Timestamp: ", style="bold")
     header_text.append(f"{time_str} ({timestamp})\n", style="white")
     header_text.append("Backend:   ", style="bold")
@@ -49,8 +52,12 @@ def display_detailed_results(data: dict[str, Any], console: Console) -> None:
 
     devices = data.get("devices", [])
     if devices:
+        dev_names = [
+            d.get("name", d.get("device_name", str(d))) if isinstance(d, dict) else str(d)
+            for d in devices
+        ]
         header_text.append("Devices:   ", style="bold")
-        header_text.append(", ".join(devices), style="green")
+        header_text.append(", ".join(dev_names), style="green")
 
     console.print(
         Panel(
@@ -84,7 +91,7 @@ def display_detailed_results(data: dict[str, Any], console: Console) -> None:
             caps = []
             caps.append(f"Ray Tracing: {'[bold green]Yes[/bold green]' if p.get('ray_tracing_supported') else '[dim]No[/dim]'}")
             caps.append(f"Hardware SER: {'[bold green]Yes[/bold green]' if p.get('ser_supported') else '[dim]No[/dim]'}")
-            caps.append(f"Work Graphs: {'[bold green]Yes[/bold green]' if p.get('work_graphs_supported') else '[dim]No[/dim]'}")
+            caps.append(f"DGC: {'[bold green]Yes[/bold green]' if p.get('dgc_supported') else '[dim]No[/dim]'}")
             caps.append(f"Coop Matrix: {'[bold green]Yes[/bold green]' if p.get('cooperative_matrix_supported') else '[dim]No[/dim]'}")
             caps.append(f"FP16: {'[bold green]Yes[/bold green]' if p.get('float16_supported') else '[dim]No[/dim]'}, INT8: {'[bold green]Yes[/bold green]' if p.get('int8_supported') else '[dim]No[/dim]'}")
             cap_str = "\n".join(caps)
@@ -110,12 +117,14 @@ def display_detailed_results(data: dict[str, Any], console: Console) -> None:
         table.add_column("Backend", style="cyan")
         table.add_column("Subcategory", style="dim")
         table.add_column("Result / Diagnostic", justify="right", style="bold cyan")
+        table.add_column("Speedup / Note", justify="right", style="green")
         table.add_column("Status", justify="center", no_wrap=True)
 
         for r in results:
             bench = r.get("benchmark", "")
             backend_name = r.get("backend", "")
             subcat = r.get("subcategory", "") or r.get("component", "")
+            speedup = r.get("details_speedup", "") or "-"
             unsupp = r.get("unsupported", False)
             if unsupp:
                 status_styled = Text("UNSUPPORTED", style="dim yellow")
@@ -125,7 +134,7 @@ def display_detailed_results(data: dict[str, Any], console: Console) -> None:
                 status_styled = Text("COMPLETED", style="bold green")
                 val_str = f"{r.get('value', 0.0):.2f} {r.get('metric', '')}"
                 val_styled = Text(val_str, style="bold cyan")
-            table.add_row(bench, backend_name, subcat, val_styled, status_styled)
+            table.add_row(bench, backend_name, subcat, val_styled, speedup, status_styled)
 
         console.print(table)
         return
@@ -221,8 +230,8 @@ def display_simple_results(data: dict[str, Any], console: Console) -> None:
 
 def display_results(data: dict[str, Any], console: Console) -> None:
     # Determine schema variant:
-    # Schema A: has 'results' as a list of device objects (e.g. gpubench_results_<timestamp>.json)
-    # Schema B: has 'results' as a dict of categorized metrics (e.g. gpubench_results.json)
+    # Schema A: has 'results' as a list of result or device objects
+    # Schema B: has 'results' as a dict of categorized metrics
     results = data.get("results")
     if isinstance(results, list):
         display_detailed_results(data, console)
@@ -239,20 +248,29 @@ def main() -> None:
     parser.add_argument(
         "json_paths",
         nargs="*",
-        default=["gpubench_results_1788511996.json"],
-        help="Path(s) to GPUBench JSON results file(s)",
+        default=[],
+        help="Path(s) to GPUBench JSON results file(s) (defaults to newest gpubench_results*.json)",
     )
     args = parser.parse_args()
 
     console = Console()
 
-    for path_str in args.json_paths:
+    paths = args.json_paths
+    if not paths:
+        candidates = sorted(Path(".").glob("gpubench_results*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+        if candidates:
+            paths = [str(candidates[0])]
+        else:
+            console.print("[bold red]Error:[/bold red] No JSON file specified and no 'gpubench_results*.json' found in current directory.")
+            sys.exit(1)
+
+    for path_str in paths:
         path = Path(path_str)
         if not path.is_file():
             console.print(f"[bold red]Error:[/bold red] File '{path}' not found.")
             continue
 
-        if len(args.json_paths) > 1:
+        if len(paths) > 1:
             console.rule(f"[bold cyan]{path.name}[/bold cyan]")
 
         try:

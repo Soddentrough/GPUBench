@@ -28,29 +28,21 @@ void main() {
     uint u6 = ubase + 6u;
     uint u7 = ubase + 7u;
 
-    uint mu = uint(pushConstants.multiplier);
-    if (mu == 0u) mu = 1u;
+    uint mu = uint(pushConstants.multiplier * 1000.0) | 1u;
+    uint mask = (pushConstants.num_elements ^ 0x7FFF7FFFu) | 1u;
 
-    uint cu0 = 13u;
-    uint cu1 = 29u;
-    uint cu2 = 43u;
-    uint cu3 = 61u;
-    uint cu4 = 79u;
-    uint cu5 = 101u;
-    uint cu6 = 113u;
-    uint cu7 = 139u;
-
-    // 65536 iterations * 8 scalar INT32 ops (add + xor = 2 ops each) = 65536 * 16 = 1,048,576 INT32 ops
+    // 65536 iterations * 8 scalar INT32 chains (add + and = 2 ops each) = 65536 * 16 = 1,048,576 INT32 ops
     for (int i = 0; i < 65536; ++i) {
-        u0 = (u0 + cu0) ^ mu;
-        u1 = (u1 + cu1) ^ mu;
-        u2 = (u2 + cu2) ^ mu;
-        u3 = (u3 + cu3) ^ mu;
-        u4 = (u4 + cu4) ^ mu;
-        u5 = (u5 + cu5) ^ mu;
-        u6 = (u6 + cu6) ^ mu;
-        u7 = (u7 + cu7) ^ mu;
+        u0 = (u0 + mu) & mask;
+        u1 = (u1 + mu) & mask;
+        u2 = (u2 + mu) & mask;
+        u3 = (u3 + mu) & mask;
+        u4 = (u4 + mu) & mask;
+        u5 = (u5 + mu) & mask;
+        u6 = (u6 + mu) & mask;
+        u7 = (u7 + mu) & mask;
     }
 
-    InOutBuffer.data[index] = float(u0 ^ u1 ^ u2 ^ u3 ^ u4 ^ u5 ^ u6 ^ u7);
+    uint ures = (u0 + u1) ^ (u2 + u3) ^ (u4 + u5) ^ (u6 + u7);
+    InOutBuffer.data[index] = float((ures & 0x00FFFFFFu) | 1u);
 }

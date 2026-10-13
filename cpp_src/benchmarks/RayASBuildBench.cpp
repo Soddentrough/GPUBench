@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cmath>
 #include <iostream>
+#include <random>
 
 bool RayASBuildBench::IsSupported(const DeviceInfo &info,
                                   IComputeContext *context) const {
@@ -41,8 +42,10 @@ void RayASBuildBench::Setup(IComputeContext &context_ref,
   // 1. Allocate primary vertex pool (10M triangles max = 360 MB)
   uint32_t maxPrimitives = 10000000;
   std::vector<float> vertices(maxPrimitives * 9, 0.0f);
+  std::mt19937 rng(1337);
+  std::uniform_real_distribution<float> dist(0.0f, 1.0f);
   for (uint32_t i = 0; i < vertices.size(); ++i) {
-    vertices[i] = (float(rand()) / RAND_MAX);
+    vertices[i] = dist(rng);
   }
   vertexBuffer =
       context_ref.createBuffer(vertices.size() * sizeof(float), vertices.data());
@@ -90,7 +93,9 @@ void RayASBuildBench::Setup(IComputeContext &context_ref,
     blasCreateInfo.buffer = vContext->getVkBuffer(blases[b].buffer);
     blasCreateInfo.size = blases[b].sizes.accelerationStructureSize;
     blasCreateInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-    vkCreateAccelerationStructureKHR_ptr(device, &blasCreateInfo, nullptr, &blases[b].handle);
+    if (vkCreateAccelerationStructureKHR_ptr(device, &blasCreateInfo, nullptr, &blases[b].handle) != VK_SUCCESS) {
+      throw std::runtime_error("RayASBuildBench: Failed to create standalone BLAS");
+    }
 
     maxBuildScratch = std::max(maxBuildScratch, (size_t)blases[b].sizes.buildScratchSize);
     maxUpdateScratch = std::max(maxUpdateScratch, (size_t)blases[b].sizes.updateScratchSize);
@@ -153,7 +158,9 @@ void RayASBuildBench::Setup(IComputeContext &context_ref,
     cInfo.offset = libOffsets[b];
     cInfo.size = libSizes[b].accelerationStructureSize;
     cInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-    vkCreateAccelerationStructureKHR_ptr(device, &cInfo, nullptr, &blasLibHandles[b]);
+    if (vkCreateAccelerationStructureKHR_ptr(device, &cInfo, nullptr, &blasLibHandles[b]) != VK_SUCCESS) {
+      throw std::runtime_error("RayASBuildBench: Failed to create pooled BLAS");
+    }
 
     VkAccelerationStructureDeviceAddressInfoKHR dInfo{
         VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR};
@@ -167,16 +174,21 @@ void RayASBuildBench::Setup(IComputeContext &context_ref,
     VkCommandPoolCreateInfo cpInfo{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
     cpInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
     cpInfo.queueFamilyIndex = vContext->getComputeQueueFamilyIndex();
-    VkCommandPool tmpPool;
-    vkCreateCommandPool(device, &cpInfo, nullptr, &tmpPool);
+    VkCommandPool tmpPool = VK_NULL_HANDLE;
+    if (vkCreateCommandPool(device, &cpInfo, nullptr, &tmpPool) != VK_SUCCESS) {
+      throw std::runtime_error("RayASBuildBench: Failed to create command pool");
+    }
 
     VkCommandBufferAllocateInfo cbAlloc{
         VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
     cbAlloc.commandPool = tmpPool;
     cbAlloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     cbAlloc.commandBufferCount = 1;
-    VkCommandBuffer cmd;
-    vkAllocateCommandBuffers(device, &cbAlloc, &cmd);
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    if (vkAllocateCommandBuffers(device, &cbAlloc, &cmd) != VK_SUCCESS) {
+      vkDestroyCommandPool(device, tmpPool, nullptr);
+      throw std::runtime_error("RayASBuildBench: Failed to allocate command buffer");
+    }
 
     ComputeBuffer libScratch = context_ref.createBuffer(maxBuildScratch);
     VkDeviceAddress libScratchAddr = vContext->getBufferDeviceAddress(libScratch);
@@ -186,7 +198,11 @@ void RayASBuildBench::Setup(IComputeContext &context_ref,
       uint32_t bEnd = std::min(bStart + kBatchChunk, numBlasLib);
 
       VkCommandBufferBeginInfo bBegin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
-      vkBeginCommandBuffer(cmd, &bBegin);
+      if (vkBeginCommandBuffer(cmd, &bBegin) != VK_SUCCESS) {
+        vkDestroyCommandPool(device, tmpPool, nullptr);
+        context_ref.releaseBuffer(libScratch);
+        throw std::runtime_error("RayASBuildBench: Failed to begin command buffer");
+      }
 
       for (uint32_t b = bStart; b < bEnd; ++b) {
         VkAccelerationStructureGeometryKHR geom{
@@ -229,13 +245,22 @@ void RayASBuildBench::Setup(IComputeContext &context_ref,
                   VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT);
         }
       }
-      vkEndCommandBuffer(cmd);
+      if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
+        vkDestroyCommandPool(device, tmpPool, nullptr);
+        context_ref.releaseBuffer(libScratch);
+        throw std::runtime_error("RayASBuildBench: Failed to end command buffer");
+      }
 
       VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
       submit.commandBufferCount = 1;
       submit.pCommandBuffers = &cmd;
-      vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE);
-      vkQueueWaitIdle(queue);
+      VkResult submitRes = vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE);
+      VkResult waitRes = vkQueueWaitIdle(queue);
+      if (submitRes != VK_SUCCESS || waitRes != VK_SUCCESS) {
+        vkDestroyCommandPool(device, tmpPool, nullptr);
+        context_ref.releaseBuffer(libScratch);
+        throw std::runtime_error("RayASBuildBench: Pooled BLAS build queue submission failed");
+      }
     }
 
     vkDestroyCommandPool(device, tmpPool, nullptr);
@@ -363,7 +388,9 @@ void RayASBuildBench::Setup(IComputeContext &context_ref,
     tlasCreateInfo.buffer = vContext->getVkBuffer(tlases[t].buffer);
     tlasCreateInfo.size = tlases[t].sizes.accelerationStructureSize;
     tlasCreateInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
-    vkCreateAccelerationStructureKHR_ptr(device, &tlasCreateInfo, nullptr, &tlases[t].handle);
+    if (vkCreateAccelerationStructureKHR_ptr(device, &tlasCreateInfo, nullptr, &tlases[t].handle) != VK_SUCCESS) {
+      throw std::runtime_error("RayASBuildBench: Failed to create TLAS");
+    }
 
     maxBuildScratch = std::max(maxBuildScratch, (size_t)tlases[t].sizes.buildScratchSize);
   }
@@ -383,20 +410,28 @@ void RayASBuildBench::Run(uint32_t config_idx) {
 
   VkCommandPoolCreateInfo cpInfo{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
   cpInfo.queueFamilyIndex = vContext->getComputeQueueFamilyIndex();
-  VkCommandPool tmpPool;
-  vkCreateCommandPool(device, &cpInfo, nullptr, &tmpPool);
+  VkCommandPool tmpPool = VK_NULL_HANDLE;
+  if (vkCreateCommandPool(device, &cpInfo, nullptr, &tmpPool) != VK_SUCCESS) {
+    throw std::runtime_error("RayASBuildBench: Failed to create command pool in Run");
+  }
 
   VkCommandBufferAllocateInfo cbAlloc{
       VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
   cbAlloc.commandPool = tmpPool;
   cbAlloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
   cbAlloc.commandBufferCount = 1;
-  VkCommandBuffer cmd;
-  vkAllocateCommandBuffers(device, &cbAlloc, &cmd);
+  VkCommandBuffer cmd = VK_NULL_HANDLE;
+  if (vkAllocateCommandBuffers(device, &cbAlloc, &cmd) != VK_SUCCESS) {
+    vkDestroyCommandPool(device, tmpPool, nullptr);
+    throw std::runtime_error("RayASBuildBench: Failed to allocate command buffer in Run");
+  }
 
   VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
   begin.flags = 0;
-  vkBeginCommandBuffer(cmd, &begin);
+  if (vkBeginCommandBuffer(cmd, &begin) != VK_SUCCESS) {
+    vkDestroyCommandPool(device, tmpPool, nullptr);
+    throw std::runtime_error("RayASBuildBench: Failed to begin command buffer in Run");
+  }
 
   VkDeviceAddress vAddr = vContext->getBufferDeviceAddress(vertexBuffer);
 
@@ -469,7 +504,10 @@ void RayASBuildBench::Run(uint32_t config_idx) {
   const VkAccelerationStructureBuildRangeInfoKHR *pRange = &range;
   vkCmdBuildAccelerationStructuresKHR_ptr(cmd, 1, &buildInfo, &pRange);
 
-  vkEndCommandBuffer(cmd);
+  if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
+    vkDestroyCommandPool(device, tmpPool, nullptr);
+    throw std::runtime_error("RayASBuildBench: Failed to end command buffer in Run");
+  }
 
   auto start = std::chrono::high_resolution_clock::now();
 

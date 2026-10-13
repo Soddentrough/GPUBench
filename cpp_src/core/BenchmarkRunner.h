@@ -16,6 +16,8 @@ struct BenchmarkGroupInfo {
   std::vector<std::string> benchmarks;
 };
 
+void SetRunnerTargetConfigs(const std::vector<int> &configs);
+
 class BenchmarkRunner {
 public:
   BenchmarkRunner(const std::vector<IComputeContext *> &contexts,
@@ -116,7 +118,7 @@ private:
   std::string sceneName = "all";
   uint32_t renderWidth = 3840;
   uint32_t renderHeight = 2160;
-  uint32_t bounceDepth = 4;
+  uint32_t bounceDepth = 2;
   uint32_t samplesPerPixel = 1;
   int targetConfig = -1;
   bool profileSnapshot = false;

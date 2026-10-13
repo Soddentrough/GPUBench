@@ -110,11 +110,11 @@ def discover_device_index(binary: str = "./build/gpubench") -> int:
 
 
 def run_gpubench(args: argparse.Namespace) -> List[Dict[str, Any]]:
-    import tempfile
     binary = args.binary or "./build/gpubench"
     device_idx = args.device if args.device is not None else discover_device_index(binary)
-    with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tmp:
-        tmp_path = tmp.name
+    scratch_dir = os.path.abspath(os.path.join("profiles", "scratch"))
+    os.makedirs(scratch_dir, exist_ok=True)
+    tmp_path = os.path.join(scratch_dir, f"verify_results_{os.getpid()}.json")
 
     try:
         cmd = [
@@ -122,8 +122,7 @@ def run_gpubench(args: argparse.Namespace) -> List[Dict[str, Any]]:
             "-d", str(device_idx),
             "-k", args.backends,
             "-b", args.benchmarks,
-            "--output", "json",
-            "--output-file", tmp_path,
+            "--output", tmp_path,
         ]
         if getattr(args, "resolution", None):
             cmd.extend(["-r", str(args.resolution)])

@@ -166,12 +166,18 @@ The benchmark now provides realistic and meaningful performance measurements for
 
 ## Known Platform Ceilings and Toolchain Gaps (measured 2026-07, R9700/RADV)
 
-- **FP16/BF16 vector (~51.5 TFLOPS, 1.13x FP32)**: the SPIR-V is correct
-  (packed v2f16 FMAs verified by disassembly), but measured throughput caps
+### AMD Radeon AI PRO R9700 (RDNA 4 / Navi 48 / `gfx1201`) - Hardware Specs
+- **Compute Units**: 64 CUs (32 WGPs / 4,096 Stream Processors)
+- **L3 Infinity Cache (MALL)**: 48 MB on-die
+- **Theoretical Peak FP32**: **41.06 TFLOPS** (2,506 MHz game/base clock) / **47.82 TFLOPS** (2,920 MHz boost clock)
+- **Theoretical Peak FP16 / BF16 Vector**: **82.12 TFLOPS** (base) / **95.64 TFLOPS** (boost)
+
+- **FP16/BF16 vector (~51.5 TFLOPS, 1.13x FP32)**: `shaders/fp16.comp` tests packed `f16vec2` vector ALU FMA chains (whereas `shaders/fp16_matrix.comp` tests `VK_KHR_cooperative_matrix` WMMA hardware units). The SPIR-V for `fp16.comp` is correct
+  (packed v2f16 FMAs verified by disassembly), but measured vector ALU throughput caps
   at ~1.13x FP32 on RADV/GFX12 regardless of formulation (v2/v4 vectors,
   4x unrolling, ACO and LLVM backends all identical). The op counting is
   correct; this is a driver/hardware-path ceiling, not a benchmark bug.
-  BF16 vector intentionally uses an FP16 shader (same packed rate on RDNA4).
+  On Vulkan, `BF16` probes `VK_KHR_shader_bfloat16` (and `VK_KHR_cooperative_matrix` for matrix workloads).
 - **FP8 Matrix: SUPPORTED NATIVELY (~420-425 TFLOPS on R9700).** Supported via
   `VK_EXT_shader_float8` and `VK_KHR_cooperative_matrix`. The GLSL toolchain compiles
   native FP8 shaders using `#extension GL_EXT_float_e4m3 : require` (exposing `floate4m3_t`),
@@ -198,11 +204,7 @@ The benchmark now provides realistic and meaningful performance measurements for
   bank-aware register allocation that LLVM does not do; RADV/ACO does,
   which is why the Vulkan numbers show the true silicon peak). Reported
   as-is: it is the honest hipcc-achievable rate.
-- BF16 vector: UNSUPPORTED [toolchain]. TheRock's clang has no native
-  bf16 vector codegen for gfx12 — __bf16 arithmetic is emulated via FP32
-  with software rounding on the SCALAR unit (verified in disassembly),
-  and headers lack hip_bfloat162/__hfma2. The previous ~2.5 TFLOPS result
-  was emulated bf16, not hardware throughput.
+- BF16 vector: On ROCm/HIP (`hip_kernels/bf16.hip`), `BF16` uses `<hip/hip_bfloat16.h>` (`__hip_bfloat162`), while on older toolchains without native `gfx12` bf16 vector intrinsics it reports UNSUPPORTED [toolchain] rather than falling back to scalar FP32 software emulation.
 - L0/L1/L2/L3 cache latency: FIXED (L0 was 0.00 ns — the old kernel did
   integer ALU ops with no memory reads; now a real 1M-step pointer chase,
   measuring ~14/21/44/217 ns).

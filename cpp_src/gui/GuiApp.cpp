@@ -285,7 +285,13 @@ void GuiApp::setUiScale(float scale) {
     setupDarkTheme(m_uiScale);
 
     ImGuiIO& io = ImGui::GetIO();
-    if (m_baseScale > 0.0f) {
+    if (m_vulkanContext && m_vulkanContext->isInitialized()) {
+        float builtScale = m_vulkanContext->getBuiltFontScale();
+        if (builtScale > 0.0f) {
+            io.FontGlobalScale = m_uiScale / builtScale;
+        }
+        m_vulkanContext->requestFontRebuild(m_uiScale);
+    } else if (m_baseScale > 0.0f) {
         io.FontGlobalScale = m_uiScale / m_baseScale;
     }
 
@@ -530,19 +536,45 @@ void GuiApp::updateBenchmarkSupport() {
 
 void GuiApp::setSelectedBackend(const std::string& backend) {
     if (!backend.empty()) {
+        std::string bLower = backend;
+        std::transform(bLower.begin(), bLower.end(), bLower.begin(), ::tolower);
         if (m_apiSupportList.empty()) {
             m_apiSupportList = GetAllComputeApiSupportAPI();
         }
         for (const auto& api : m_apiSupportList) {
-            if (api.name == backend) {
+            if (api.name == bLower) {
                 if (!api.isSupported) {
                     return; // Ignore selection of unsupported backend
                 }
                 break;
             }
         }
-        m_selectedBackend = backend;
+        m_selectedBackend = bLower;
         updateBenchmarkSupport();
+    }
+}
+
+void GuiApp::setScene(const std::string& scene) {
+    std::string sLower = scene;
+    std::transform(sLower.begin(), sLower.end(), sLower.begin(), ::tolower);
+    if (sLower == "sponza" || sLower == "indoor") {
+        m_scene = "indoor";
+        m_suiteActiveScene = "indoor";
+        m_rtSceneIndex = 1;
+    } else if (sLower == "forest" || sLower == "jungle") {
+        m_scene = "forest";
+        m_suiteActiveScene = "forest";
+        m_rtSceneIndex = 2;
+    } else if (sLower == "outdoor" || sLower == "landscape") {
+        m_scene = "outdoor";
+        m_suiteActiveScene = "outdoor";
+        m_rtSceneIndex = 3;
+    } else if (sLower == "showroom" || sLower == "vehicle") {
+        m_scene = "showroom";
+        m_suiteActiveScene = "showroom";
+        m_rtSceneIndex = 0;
+    } else if (sLower == "all") {
+        m_scene = "all";
     }
 }
 
@@ -555,6 +587,32 @@ void GuiApp::selectOnlyBenchmark(const std::string& benchmarkId) {
     }
     if (targetIds.empty()) targetIds.push_back(benchmarkId);
 
+    auto eqCi = [](const std::string& a, const std::string& b) -> bool {
+        if (a.size() != b.size()) return false;
+        for (size_t i = 0; i < a.size(); ++i) {
+            if (std::tolower(static_cast<unsigned char>(a[i])) != std::tolower(static_cast<unsigned char>(b[i]))) return false;
+        }
+        return true;
+    };
+
+    auto mapCliAlias = [&](const std::string& raw) -> std::string {
+        std::string t = raw;
+        std::transform(t.begin(), t.end(), t.begin(), ::tolower);
+        if (t == "dualissue" || t == "dual_issue" || t == "ilp") return "ILP & Dual-Issue";
+        if (t == "lds" || t == "lds_bank_conflicts") return "LDS Bank Conflicts";
+        if (t == "indirect" || t == "indirect_synthesis") return "In-Shader Indirect Synthesis";
+        if (t == "membw" || t == "vram") return "Device Memory Bandwidth";
+        if (t == "l0_cache" || t == "l0") return "L0 Vector Cache Latency (16 KB)";
+        if (t == "cache_latency_curve" || t == "cache_curve") return "Cache Latency Curve";
+        if (t == "pixelfill" || t == "pixel_fill" || t == "rop") return "Pixel Fill Rate";
+        if (t == "sysmembw") return "System Memory Bandwidth";
+        if (t == "sysmemlatency") return "System Memory Latency";
+        if (t == "rt" || t == "raytracing" || t == "ray_tracing") return "Ray Tracing";
+        if (t == "raster" || t == "graphics") return "Graphics";
+        if (t == "system" || t == "host" || t == "cpu") return "Host System";
+        return raw;
+    };
+
     bool isSystemBenchmark = false;
     for (auto& cat : m_categories) {
         cat.allSelected = false;
@@ -564,12 +622,18 @@ void GuiApp::selectOnlyBenchmark(const std::string& benchmarkId) {
             bool subAnySel = false;
             for (auto& item : sub.items) {
                 bool matches = false;
-                for (const auto& tid : targetIds) {
-                    if (item.id == tid || item.subcategory == tid || item.name == tid || sub.name == tid) {
+                for (const auto& rawTid : targetIds) {
+                    if (eqCi(rawTid, "all")) {
                         matches = true;
                         break;
                     }
-                    if (tid == "pathtracing" || tid == "path_tracing" || tid == "path" || tid == "Path Tracing" || tid == "pathtrace") {
+                    std::string tid = mapCliAlias(rawTid);
+                    if (eqCi(item.id, tid) || eqCi(item.subcategory, tid) || eqCi(item.name, tid) ||
+                        eqCi(sub.name, tid) || eqCi(cat.name, tid) || eqCi(item.category, tid)) {
+                        matches = true;
+                        break;
+                    }
+                    if (eqCi(rawTid, "pathtracing") || eqCi(rawTid, "path_tracing") || eqCi(rawTid, "path") || eqCi(rawTid, "Path Tracing") || eqCi(rawTid, "pathtrace")) {
                         if (item.subcategory.find("Path Tracing") != std::string::npos || sub.name.find("Path Tracing") != std::string::npos || item.name.find("Path Tracing") != std::string::npos) {
                             matches = true;
                             break;
@@ -685,7 +749,7 @@ void GuiApp::setupDarkTheme(float scale) {
 void GuiApp::initializeBenchmarkCategories() {
     m_categories.clear();
 
-    // 1. [Compute] (1 subgroup, 13 tests)
+    // 1. [Compute] (4 subgroups, 35 tests)
     {
         BenchmarkCategory cat;
         cat.name = "Compute";
@@ -765,7 +829,7 @@ void GuiApp::initializeBenchmarkCategories() {
         m_categories.push_back(cat);
     }
 
-    // 2. [Memory] (3 subgroups, 28 tests)
+    // 2. [Memory] (3 subgroups, 25 tests)
     {
         BenchmarkCategory cat;
         cat.name = "Memory";
@@ -814,7 +878,7 @@ void GuiApp::initializeBenchmarkCategories() {
         m_categories.push_back(cat);
     }
 
-    // 3. [Ray Tracing] (5 subgroups, 54 tests)
+    // 3. [Ray Tracing] (5 subgroups, 55 tests)
     {
         BenchmarkCategory cat;
         cat.name = "Ray Tracing";
@@ -843,11 +907,12 @@ void GuiApp::initializeBenchmarkCategories() {
             {"RayScheduling", "Total Scene Render", "Full Frame (DGC)", "Ray Tracing", "MRays/s", "Renders complete frames using dynamic GPU-driven work queues", true, 11}
         }});
 
-        // Subgroup 3: Scene Path Tracing (5 tests)
+        // Subgroup 3: Scene Path Tracing (6 tests)
         cat.subgroups.push_back({"Scene Path Tracing", "Ray Tracing", "RayScheduling", "Multi-bounce diffuse path tracing and high-sample stress workloads", {
             {"RayScheduling", "Scene Path Tracing (Multi-Bounce)", "Path Tracing (1 SPP) (Megakernel)", "Ray Tracing", "MRays/s", "Calculates realistic indirect light bounces using a standard all-in-one compute shader", true, 3},
             {"RayScheduling", "Scene Path Tracing (Multi-Bounce)", "Path Tracing (1 SPP) (RTP + SER)", "Ray Tracing", "MRays/s", "Calculates light bounces using dedicated ray tracing cores with hardware ray reordering", true, 4},
             {"RayScheduling", "Scene Path Tracing (Multi-Bounce)", "Path Tracing (1 SPP) (DGC)", "Ray Tracing", "MRays/s", "Calculates light bounces by grouping active rays into queues to keep GPU cores fully utilized", true, 5},
+            {"RayScheduling", "Scene Path Tracing (Multi-Bounce)", "Path Tracing (1 SPP) (Dynamic Load Balancing)", "Ray Tracing", "MRays/s", "Calculates light bounces using persistent threads that dynamically pull rays from a shared work queue", true, 25},
             {"RayScheduling", "Scene Path Tracing (16 SPP)", "Path Tracing (16 SPP) (Megakernel)", "Ray Tracing", "MRays/s", "High-quality path tracing (16 samples per pixel) using a standard compute shader", true, 23},
             {"RayScheduling", "Scene Path Tracing (16 SPP)", "Path Tracing (16 SPP) (DGC)", "Ray Tracing", "MRays/s", "High-quality path tracing (16 samples per pixel) grouping active rays into queues", true, 24}
         }});
@@ -972,13 +1037,15 @@ void GuiApp::applyVisualizationMetadata() {
         {"RayScheduling", 2, {"assets/thumbnails/thumb_material_lineup.png", "",
             "DGC sorts hits into material-coherent work queues before shading dispatch", 16.0f/9.0f, 2, 0}},
 
-        // ---- RayScheduling: path tracing (3-5: 1 SPP, 23-24: 16 SPP) ----
+        // ---- RayScheduling: path tracing (3-5, 25: 1 SPP, 23-24: 16 SPP) ----
         {"RayScheduling", 3, {"assets/thumbnails/thumb_{scene}_stage6_indirect.png", "",
             "Multi-bounce diffuse indirect light: each bounce re-enters the BVH with incoherent directions", 16.0f/9.0f, 1, 5}},
         {"RayScheduling", 4, {"assets/thumbnails/thumb_{scene}_stage6_indirect.png", "",
             "Secondary bounces traced on hardware ray cores with hardware reordering of incoherent rays", 16.0f/9.0f, 1, 5}},
         {"RayScheduling", 5, {"assets/thumbnails/thumb_{scene}_stage6_indirect.png", "",
             "Bounce rays grouped into GPU work queues; terminated rays compacted out each iteration", 16.0f/9.0f, 1, 5}},
+        {"RayScheduling", 25, {"assets/thumbnails/thumb_{scene}_stage6_indirect.png", "",
+            "Persistent workgroups dynamically claim bounce rays from an atomic global counter to balance load", 16.0f/9.0f, 1, 5}},
         {"RayScheduling", 23, {"assets/thumbnails/thumb_{scene}_stage6_indirect.png", "",
             "16 samples per pixel: 16x the bounce rays of 1 SPP, converging the noisy indirect estimate", 16.0f/9.0f, 1, 5}},
         {"RayScheduling", 24, {"assets/thumbnails/thumb_{scene}_stage6_indirect.png", "",
@@ -2276,6 +2343,21 @@ void GuiApp::renderLeftSidebar(float width, float height) {
     ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.00f, 1.00f), "GPUBench");
     ImGui::SameLine();
     ImGui::TextColored(ImVec4(0.60f, 0.70f, 0.90f, 1.00f), "v%s", GPUBENCH_VERSION);
+    {
+        float settingsBtnW = ImGui::CalcTextSize("Settings").x + ImGui::GetStyle().FramePadding.x * 2.0f + s(8.0f);
+        float availW = ImGui::GetContentRegionAvail().x;
+        if (availW > settingsBtnW) {
+            ImGui::SameLine(ImGui::GetCursorPosX() + availW - settingsBtnW);
+        } else {
+            ImGui::SameLine();
+        }
+        if (ImGui::SmallButton("Settings")) {
+            m_showSettingsModal = true;
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Configure UI Zoom, VSync, Render Dumping, and Telemetry Options");
+        }
+    }
 
     ImGui::Spacing();
 
@@ -3588,9 +3670,17 @@ void GuiApp::renderBenchmarkSuitePanel() {
 
     // Category View Filter Tabs with dynamic flowing wrap
     ImGui::TextDisabled("View Category:");
-    const char* viewLabels[] = {"All Tests (90)", "Compute (13)", "Memory (13)", "Ray Tracing (54)", "Graphics (3)", "Host CPU (7)"};
+    size_t catCounts[5] = {0, 0, 0, 0, 0};
+    size_t totalCatCount = 0;
+    for (size_t ci = 0; ci < m_categories.size() && ci < 5; ++ci) {
+        catCounts[ci] = m_categories[ci].totalItemCount();
+        totalCatCount += catCounts[ci];
+    }
+    const char* catBaseNames[6] = {"All Tests", "Compute", "Memory", "Ray Tracing", "Graphics", "Host CPU"};
     for (int vi = 0; vi < 6; ++vi) {
-        float btnW = ImGui::CalcTextSize(viewLabels[vi]).x + ImGui::GetStyle().FramePadding.x * 2.0f;
+        size_t count = (vi == 0) ? totalCatCount : catCounts[vi - 1];
+        std::string labelStr = std::string(catBaseNames[vi]) + " (" + std::to_string(count) + ")";
+        float btnW = ImGui::CalcTextSize(labelStr.c_str()).x + ImGui::GetStyle().FramePadding.x * 2.0f;
         if (btnW + ImGui::GetStyle().ItemSpacing.x <= ImGui::GetContentRegionAvail().x) {
             ImGui::SameLine();
         }
@@ -3602,7 +3692,7 @@ void GuiApp::renderBenchmarkSuitePanel() {
             ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.13f, 0.16f, 0.22f, 1.0f));
             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.70f, 0.75f, 0.85f, 1.0f));
         }
-        if (ImGui::SmallButton(viewLabels[vi])) {
+        if (ImGui::SmallButton(labelStr.c_str())) {
             m_suiteCategoryFilter = vi;
         }
         ImGui::PopStyleColor(2);
@@ -3763,7 +3853,7 @@ void GuiApp::renderBenchmarkSuitePanel() {
         }
     }
 
-    auto renderFilterPill = [](const char* label, int status, const char* tooltip) -> bool {
+    auto renderFilterPill = [this](const char* label, int status, const char* tooltip) -> bool {
         if (status == 2) {
             ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.48f, 0.92f, 1.0f));
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.28f, 0.58f, 1.00f, 1.0f));
@@ -3784,8 +3874,8 @@ void GuiApp::renderBenchmarkSuitePanel() {
             ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.20f, 0.24f, 0.34f, 0.50f));
         }
         ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
-        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 4.0f);
-        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8.0f, 3.0f));
+        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, s(4.0f));
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(s(8.0f), s(3.0f)));
 
         bool clicked = ImGui::SmallButton(label);
 
@@ -4542,14 +4632,23 @@ void GuiApp::renderLiveTelemetryDock() {
     ImGui::SameLine();
     winBtn("120s", 120.0f);
 
+    auto lookupDeviceVramMb = [this](uint32_t gpuIdx) -> float {
+        for (const auto& dev : m_devices) {
+            if (!dev.isSystem && dev.deviceIndex == gpuIdx && dev.vramTotalMb > 0) {
+                return static_cast<float>(dev.vramTotalMb);
+            }
+        }
+        return 0.0f;
+    };
+
     // Live digital metrics banner with rock-solid fixed column offsets (zero bouncing text)
     if (m_telemetryDualGpuMode) {
         float v0 = static_cast<float>(snap0.vramUsedBytes / (1024 * 1024));
         float t0 = static_cast<float>(snap0.vramTotalBytes / (1024 * 1024));
-        if (t0 < 1000.0f) t0 = 32624.0f;
+        if (t0 <= 0.0f) t0 = lookupDeviceVramMb(0);
         float v1 = static_cast<float>(snap1.vramUsedBytes / (1024 * 1024));
         float t1 = static_cast<float>(snap1.vramTotalBytes / (1024 * 1024));
-        if (t1 < 1000.0f) t1 = 32624.0f;
+        if (t1 <= 0.0f) t1 = lookupDeviceVramMb(1);
 
         auto renderDualGpuRow = [this](const char* label, ImVec4 col, const DeviceTelemetrySnapshot& snap, float vMb, float tMb) {
             float startX = ImGui::GetCursorPosX();
@@ -4587,8 +4686,8 @@ void GuiApp::renderLiveTelemetryDock() {
         const auto& snap = (m_telemetryGpuIndex == 1) ? snap1 : snap0;
         float vramMb = static_cast<float>(snap.vramUsedBytes / (1024 * 1024));
         float totalVramMb = static_cast<float>(snap.vramTotalBytes / (1024 * 1024));
-        if (totalVramMb < 1000.0f) totalVramMb = 32624.0f;
-        float vramPct = (vramMb / totalVramMb) * 100.0f;
+        if (totalVramMb <= 0.0f) totalVramMb = lookupDeviceVramMb(static_cast<uint32_t>(m_telemetryGpuIndex));
+        float vramPct = (totalVramMb > 0.0f) ? (vramMb / totalVramMb) * 100.0f : 0.0f;
 
         float startX = ImGui::GetCursorPosX();
         ImGui::TextDisabled("Shader Clk:");
@@ -5032,7 +5131,10 @@ void GuiApp::renderResultsScorecard() {
                 double opsPerSec = (static_cast<double>(res.operations) / res.time_ms) * 1000.0;
                 if (res.metric.find("TFLOPS") != std::string::npos) {
                     peakCompute = std::max(peakCompute, opsPerSec / 1e12);
-                } else if (res.metric.find("GB/s") != std::string::npos) {
+                } else if (res.metric.find("GB/s") != std::string::npos &&
+                           res.deviceIndex != 0xFFFFFFFF &&
+                           (res.benchmarkName.find("Device Memory Bandwidth") != std::string::npos ||
+                            res.subcategory == "VRAM Bandwidth" || res.subcategory == "Bandwidth")) {
                     peakBandwidth = std::max(peakBandwidth, opsPerSec / 1e9);
                 } else if (res.metric.find("MRays/s") != std::string::npos) {
                     peakRT = std::max(peakRT, opsPerSec / 1e6);
@@ -5175,7 +5277,75 @@ void GuiApp::renderResultsScorecard() {
         ImGui::TableSetupColumn("Time (ms)", ImGuiTableColumnFlags_WidthFixed, s(75.0f));
         ImGui::TableHeadersRow();
 
-        for (const auto& res : m_allResults) {
+        std::vector<const ResultData*> sortedResults;
+        sortedResults.reserve(m_allResults.size());
+        for (const auto& r : m_allResults) {
+            sortedResults.push_back(&r);
+        }
+
+        if (ImGuiTableSortSpecs* sorts_specs = ImGui::TableGetSortSpecs()) {
+            if (sorts_specs->SpecsDirty) {
+                sorts_specs->SpecsDirty = false;
+            }
+            if (sorts_specs->SpecsCount > 0) {
+                const ImGuiTableColumnSortSpecs& sortSpec = sorts_specs->Specs[0];
+                const bool asc = (sortSpec.SortDirection == ImGuiSortDirection_Ascending);
+                auto statusRank = [](const ResultData& r) -> int {
+                    if (r.isUnsupported) return 3;
+                    if (r.time_ms == -3.0) return 2;
+                    if (r.time_ms < 0.0) return 1;
+                    return 0;
+                };
+                auto scoreValue = [](const ResultData& r) -> double {
+                    if (r.isUnsupported || r.time_ms <= 0.0 || r.operations == 0) return -1.0;
+                    if (r.metric.find("ns") != std::string::npos) {
+                        return (r.time_ms * 1e6) / static_cast<double>(r.operations);
+                    }
+                    return (static_cast<double>(r.operations) / r.time_ms) * 1000.0;
+                };
+                std::stable_sort(sortedResults.begin(), sortedResults.end(),
+                    [&](const ResultData* a, const ResultData* b) {
+                        int cmp = 0;
+                        switch (sortSpec.ColumnIndex) {
+                            case 0: {
+                                int ra = statusRank(*a), rb = statusRank(*b);
+                                cmp = (ra < rb) ? -1 : (ra > rb ? 1 : 0);
+                                break;
+                            }
+                            case 1:
+                                cmp = (a->deviceIndex < b->deviceIndex) ? -1 : (a->deviceIndex > b->deviceIndex ? 1 : 0);
+                                break;
+                            case 2:
+                                cmp = a->backendName.compare(b->backendName);
+                                break;
+                            case 3:
+                                cmp = a->component.compare(b->component);
+                                break;
+                            case 4:
+                                cmp = a->benchmarkName.compare(b->benchmarkName);
+                                break;
+                            case 5:
+                                cmp = a->metric.compare(b->metric);
+                                break;
+                            case 6:
+                            case 7: {
+                                double sa = scoreValue(*a), sb = scoreValue(*b);
+                                cmp = (sa < sb) ? -1 : (sa > sb ? 1 : 0);
+                                break;
+                            }
+                            case 8:
+                                cmp = (a->time_ms < b->time_ms) ? -1 : (a->time_ms > b->time_ms ? 1 : 0);
+                                break;
+                            default:
+                                break;
+                        }
+                        return asc ? (cmp < 0) : (cmp > 0);
+                    });
+            }
+        }
+
+        for (const ResultData* resPtr : sortedResults) {
+            const auto& res = *resPtr;
             // Apply category filter
             if (m_activeScorecardFilter == 1 && res.component != "Compute") continue;
             if (m_activeScorecardFilter == 2 && res.component != "Memory") continue;
@@ -5586,12 +5756,6 @@ void GuiApp::renderRayTracingViewport() {
         const char* techAScore;
         const char* techBScore;
         const char* speedup;
-        int vgprTrad;
-        int vgprDgc;
-        const char* simdTrad;
-        const char* simdDgc;
-        const char* psnr;
-        const char* maxDelta;
         const char* details;
     };
 
@@ -5605,10 +5769,7 @@ void GuiApp::renderRayTracingViewport() {
             "185.40 MRays/s (201.2 FPS)",
             "523.80 MRays/s (568.3 FPS)",
             "2.82x (+182.5%)",
-            128, 64,
-            "68.2% (Divergent Wavefronts)", "94.7% (Re-Coalesced Wavefronts)",
-            "120.0 dB (BIT-EXACT)", "0.000",
-            "Primary Rays: 921,600 (1280x720) | Multi-BSDF Hits: 2,457,600"
+            "Multi-BSDF Car Paint, Clearcoat Flakes, Dispersive Glass & Alloy Wheels"
         },
         {
             "Indoor Atrium (sponza.glb)",
@@ -5619,10 +5780,7 @@ void GuiApp::renderRayTracingViewport() {
             "99.05 MRays/s (107.5 FPS)",
             "277.80 MRays/s (301.4 FPS)",
             "2.80x (+180.5%)",
-            128, 64,
-            "64.5% (Divergent Wavefronts)", "95.1% (Re-Coalesced Wavefronts)",
-            "120.0 dB (BIT-EXACT)", "0.000",
-            "Primary Rays: 921,600 (1280x720) | Indirect Bounces: 3,686,400"
+            "Multi-Tiered Arches, Carved Stone Columns & Alpha Cutout Tapestry"
         },
         {
             "Open-World Forest (AAAOutdoorForest)",
@@ -5633,10 +5791,7 @@ void GuiApp::renderRayTracingViewport() {
             "89.90 MRays/s (97.5 FPS)",
             "266.27 MRays/s (288.9 FPS)",
             "2.96x (+196.2%)",
-            128, 64,
-            "61.3% (Divergent Wavefronts)", "96.2% (Re-Coalesced Wavefronts)",
-            "120.0 dB (BIT-EXACT)", "0.000",
-            "Primary Rays: 921,600 (1280x720) | Alpha Tests: 2,764,800"
+            "High-Density AAA Woodland with Multi-Tiered Pines & Alpha-Tested Foliage"
         },
         {
             "Outdoor Landscape (OutdoorLandscape)",
@@ -5647,10 +5802,7 @@ void GuiApp::renderRayTracingViewport() {
             "542.03 MRays/s (588.1 FPS)",
             "1,444.29 MRays/s (1567.2 FPS)",
             "2.66x (+166.5%)",
-            128, 64,
-            "72.1% (Divergent Wavefronts)", "95.8% (Re-Coalesced Wavefronts)",
-            "120.0 dB (BIT-EXACT)", "0.000",
-            "Primary Rays: 921,600 (1280x720) | Direct Light Passes: 4"
+            "Expansive Alpine Terrain, Reflective Lake Surface & Timber Cabins"
         }
     };
     const size_t numScenes = sizeof(scenes) / sizeof(scenes[0]);
@@ -5661,6 +5813,8 @@ void GuiApp::renderRayTracingViewport() {
 
     std::string dynamicTechAScore = "--";
     std::string dynamicTechBScore = "--";
+    std::string dynamicTechARegInfo = "";
+    std::string dynamicTechBRegInfo = "";
     std::string dynamicSpeedup = "--";
     auto containsCi = [](const std::string& haystack, const std::string& needle) -> bool {
         if (needle.empty()) return true;
@@ -5670,11 +5824,18 @@ void GuiApp::renderRayTracingViewport() {
     };
 
     double scoreTrad = 0.0, scoreDgc = 0.0;
+    double timeTradMs = 0.0, timeDgcMs = 0.0;
+    uint32_t liveWidth = m_renderWidth > 0 ? m_renderWidth : 1280;
+    uint32_t liveHeight = m_renderHeight > 0 ? m_renderHeight : 720;
+    const ResultData* bestTradRes = nullptr;
+    const ResultData* bestDgcRes = nullptr;
+
     // Prefer matching full frame render (configs 9 & 11) or path tracing (configs 3 & 5)
     for (int priorityPass = 0; priorityPass < 2; ++priorityPass) {
         for (const auto& res : m_allResults) {
             bool sceneMatches = containsCi(res.benchmarkName, curSceneMeta.displayName) ||
                                 containsCi(res.benchmarkName, curSceneMeta.tag) ||
+                                (std::string(curSceneMeta.tag) == "indoor" && containsCi(res.benchmarkName, "sponza")) ||
                                 containsCi(res.subcategory, curSceneMeta.displayName);
             if (!sceneMatches) continue;
 
@@ -5684,30 +5845,60 @@ void GuiApp::renderRayTracingViewport() {
                 // First pass: look specifically for Full Frame (config 9 vs 11) or Scene Path Tracing (config 3 vs 5)
                 if (res.configIndex == 9 || (res.configIndex == 3 && scoreTrad == 0.0)) {
                     scoreTrad = rate;
+                    timeTradMs = res.time_ms;
+                    bestTradRes = &res;
                 } else if (res.configIndex == 11 || (res.configIndex == 5 && scoreDgc == 0.0)) {
                     scoreDgc = rate;
+                    timeDgcMs = res.time_ms;
+                    bestDgcRes = &res;
                 }
             } else {
                 // Fallback pass: any Megakernel vs DGC in this scene if specific configs were not run
                 if (scoreTrad == 0.0 && (containsCi(res.benchmarkName, "Megakernel") || containsCi(res.benchmarkName, "Traditional"))) {
                     scoreTrad = rate;
+                    timeTradMs = res.time_ms;
+                    bestTradRes = &res;
                 }
                 if (scoreDgc == 0.0 && (containsCi(res.benchmarkName, "DGC") || containsCi(res.benchmarkName, "Work List"))) {
                     scoreDgc = rate;
+                    timeDgcMs = res.time_ms;
+                    bestDgcRes = &res;
                 }
             }
         }
         if (scoreTrad > 0.0 && scoreDgc > 0.0) break;
     }
+
+    if (bestTradRes && bestTradRes->width > 0 && bestTradRes->height > 0) {
+        liveWidth = bestTradRes->width;
+        liveHeight = bestTradRes->height;
+    } else if (bestDgcRes && bestDgcRes->width > 0 && bestDgcRes->height > 0) {
+        liveWidth = bestDgcRes->width;
+        liveHeight = bestDgcRes->height;
+    }
+
+    double primaryRaysM = static_cast<double>(liveWidth) * static_cast<double>(liveHeight) / 1e6;
     if (scoreTrad > 0.0) {
-        char buf[64];
-        snprintf(buf, sizeof(buf), "%.2f MRays/s", scoreTrad);
+        char buf[96];
+        double estFps = (primaryRaysM > 0.0) ? (scoreTrad / primaryRaysM) : 0.0;
+        snprintf(buf, sizeof(buf), "%.2f MRays/s (%.1f FPS, %.2f ms)", scoreTrad, estFps, timeTradMs);
         dynamicTechAScore = buf;
     }
     if (scoreDgc > 0.0) {
-        char buf[64];
-        snprintf(buf, sizeof(buf), "%.2f MRays/s", scoreDgc);
+        char buf[96];
+        double estFps = (primaryRaysM > 0.0) ? (scoreDgc / primaryRaysM) : 0.0;
+        snprintf(buf, sizeof(buf), "%.2f MRays/s (%.1f FPS, %.2f ms)", scoreDgc, estFps, timeDgcMs);
         dynamicTechBScore = buf;
+    }
+    if (bestTradRes && bestTradRes->hasRegisterTelemetry) {
+        char buf[96];
+        snprintf(buf, sizeof(buf), "VGPRs: %u | Max Waves/SIMD: %u", bestTradRes->vgprCount, bestTradRes->maxWavesPerSimd);
+        dynamicTechARegInfo = buf;
+    }
+    if (bestDgcRes && bestDgcRes->hasRegisterTelemetry) {
+        char buf[96];
+        snprintf(buf, sizeof(buf), "VGPRs: %u | Max Waves/SIMD: %u", bestDgcRes->vgprCount, bestDgcRes->maxWavesPerSimd);
+        dynamicTechBRegInfo = buf;
     }
     if (scoreTrad > 0.0 && scoreDgc > 0.0) {
         char buf[64];
@@ -5858,7 +6049,7 @@ void GuiApp::renderRayTracingViewport() {
         if (dynamicSpeedup != "--") {
             ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s (Live)", dynamicSpeedup.c_str());
         } else {
-            ImGui::TextColored(ImVec4(0.65f, 0.70f, 0.80f, 1.0f), "--");
+            ImGui::TextColored(ImVec4(0.65f, 0.70f, 0.80f, 1.0f), "%s (Ref)", curSceneMeta.speedup);
         }
         ImGui::EndChild();
         ImGui::PopStyleColor(2);
@@ -6026,8 +6217,14 @@ void GuiApp::renderRayTracingViewport() {
                 drawList->AddText(ImVec2(p0.x + halfW + s(16.0f), p0.y + s(10.0f)), IM_COL32(255, 180, 100, 255), "Compacted Wavefront (DGC)");
             }
 
-            // Canvas Bottom HUD Overlay
-            drawList->AddText(ImVec2(p0.x + s(14.0f), p1.y - s(26.0f)), IM_COL32(180, 195, 220, 230), "%s", curSceneMeta.details);
+            // Canvas Bottom HUD Overlay with dynamic resolution & primary ray count
+            uint32_t dispW = (texTrad.isValid() && texTrad.width > 0) ? static_cast<uint32_t>(texTrad.width) : liveWidth;
+            uint32_t dispH = (texTrad.isValid() && texTrad.height > 0) ? static_cast<uint32_t>(texTrad.height) : liveHeight;
+            uint64_t primaryRays = static_cast<uint64_t>(dispW) * static_cast<uint64_t>(dispH);
+            char hudOverlay[256];
+            snprintf(hudOverlay, sizeof(hudOverlay), "Primary Rays: %llu (%ux%u) | %s",
+                     static_cast<unsigned long long>(primaryRays), dispW, dispH, curSceneMeta.details);
+            drawList->AddText(ImVec2(p0.x + s(14.0f), p1.y - s(26.0f)), IM_COL32(180, 195, 220, 230), hudOverlay);
 
             ImGui::SetCursorScreenPos(ImVec2(p0.x, p1.y + s(10.0f)));
         }
@@ -6041,11 +6238,15 @@ void GuiApp::renderRayTracingViewport() {
             ImGui::Text("Throughput: "); ImGui::SameLine();
             if (dynamicTechAScore != "--") {
                 ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.0f, 1.0f), "%s (Live Measured)", dynamicTechAScore.c_str());
+                if (!dynamicTechARegInfo.empty()) {
+                    ImGui::SameLine(0, s(12.0f));
+                    ImGui::TextDisabled("| %s", dynamicTechARegInfo.c_str());
+                }
             } else {
                 ImGui::TextColored(ImVec4(0.65f, 0.70f, 0.80f, 1.0f), "Not Measured");
+                ImGui::SameLine(0, s(16.0f));
+                ImGui::TextDisabled("Reference (R9700 720p): %s", curSceneMeta.techAScore);
             }
-            ImGui::SameLine(0, s(16.0f));
-            ImGui::TextDisabled("Baseline Target (R9700 720p): %s", curSceneMeta.techAScore);
             ImGui::EndChild();
 
             ImGui::TableNextColumn();
@@ -6055,11 +6256,15 @@ void GuiApp::renderRayTracingViewport() {
             ImGui::Text("Throughput: "); ImGui::SameLine();
             if (dynamicTechBScore != "--") {
                 ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s (Live Measured)", dynamicTechBScore.c_str());
+                if (!dynamicTechBRegInfo.empty()) {
+                    ImGui::SameLine(0, s(12.0f));
+                    ImGui::TextDisabled("| %s", dynamicTechBRegInfo.c_str());
+                }
             } else {
                 ImGui::TextColored(ImVec4(0.65f, 0.70f, 0.80f, 1.0f), "Not Measured");
+                ImGui::SameLine(0, s(16.0f));
+                ImGui::TextDisabled("Reference (R9700 720p): %s", curSceneMeta.techBScore);
             }
-            ImGui::SameLine(0, s(16.0f));
-            ImGui::TextDisabled("Baseline Target (R9700 720p): %s", curSceneMeta.techBScore);
             ImGui::EndChild();
 
             ImGui::EndTable();
@@ -6200,14 +6405,22 @@ void GuiApp::renderRayTracingViewport() {
         ImGui::SameLine(0, s(16.0f));
         ImGui::TextDisabled("| %s", curPass.passType);
         ImGui::SameLine(0, s(20.0f));
-        ImGui::Text("Ref Time (R9700 720p): "); ImGui::SameLine();
-        ImGui::TextColored(ImVec4(0.95f, 0.80f, 0.35f, 1.0f), "%s", curPass.timeMs);
-        ImGui::SameLine(0, s(16.0f));
-        ImGui::Text("Ref Rate: "); ImGui::SameLine();
-        ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s", curPass.mrays);
-        ImGui::SameLine(0, s(16.0f));
-        ImGui::Text("Ref FPS: "); ImGui::SameLine();
-        ImGui::TextColored(ImVec4(0.95f, 0.95f, 0.95f, 1.0f), "%s", curPass.fps);
+        if (scoreDgc > 0.0) {
+            double liveEstFps = (primaryRaysM > 0.0) ? (scoreDgc / primaryRaysM) : 0.0;
+            ImGui::Text("Live Scene Rate: "); ImGui::SameLine();
+            ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%.2f MRays/s (%.1f FPS, %.2f ms)", scoreDgc, liveEstFps, timeDgcMs);
+            ImGui::SameLine(0, s(16.0f));
+            ImGui::TextDisabled("| Ref (R9700 720p): %s, %s", curPass.timeMs, curPass.mrays);
+        } else {
+            ImGui::Text("Ref Time (R9700 720p): "); ImGui::SameLine();
+            ImGui::TextColored(ImVec4(0.95f, 0.80f, 0.35f, 1.0f), "%s", curPass.timeMs);
+            ImGui::SameLine(0, s(16.0f));
+            ImGui::Text("Ref Rate: "); ImGui::SameLine();
+            ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s", curPass.mrays);
+            ImGui::SameLine(0, s(16.0f));
+            ImGui::Text("Ref FPS: "); ImGui::SameLine();
+            ImGui::TextColored(ImVec4(0.95f, 0.95f, 0.95f, 1.0f), "%s", curPass.fps);
+        }
         ImGui::TextDisabled("%s", curPass.description);
         ImGui::EndChild();
         ImGui::PopStyleColor();

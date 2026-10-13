@@ -5,6 +5,7 @@
 #include <cstring>
 #include <filesystem>
 #include <iostream>
+#include <random>
 
 bool RayProceduralBench::IsSupported(const DeviceInfo &info,
                                      IComputeContext *context) const {
@@ -50,11 +51,12 @@ void RayProceduralBench::Setup(IComputeContext &context,
   std::vector<float> spheres;
   spheres.reserve(numPrimitives * 4);
 
-  srand(1337);
+  std::mt19937 rng(1337);
+  std::uniform_real_distribution<float> dist(-100.0f, 100.0f);
   for (uint32_t i = 0; i < numPrimitives; ++i) {
-    float x = (float(rand()) / RAND_MAX) * 200.0f - 100.0f;
-    float y = (float(rand()) / RAND_MAX) * 200.0f - 100.0f;
-    float z = (float(rand()) / RAND_MAX) * 200.0f - 100.0f;
+    float x = dist(rng);
+    float y = dist(rng);
+    float z = dist(rng);
     float r = 2.0f; 
 
     aabbs.push_back({x - r, y - r, z - r, x + r, y + r, z + r});
@@ -124,8 +126,10 @@ void RayProceduralBench::buildAS() {
   blasCreateInfo.buffer = vContext->getVkBuffer(aabbBlasBuffer);
   blasCreateInfo.size = blasSizes.accelerationStructureSize;
   blasCreateInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-  vkCreateAccelerationStructureKHR_ptr(device, &blasCreateInfo, nullptr,
-                                       &aabbBlas);
+  if (vkCreateAccelerationStructureKHR_ptr(device, &blasCreateInfo, nullptr,
+                                           &aabbBlas) != VK_SUCCESS) {
+    throw std::runtime_error("RayProceduralBench: Failed to create BLAS");
+  }
 
   VkAccelerationStructureDeviceAddressInfoKHR blasAddrInfo{
       VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR};
@@ -173,8 +177,10 @@ void RayProceduralBench::buildAS() {
   tlasCreateInfo.buffer = vContext->getVkBuffer(aabbTlasBuffer);
   tlasCreateInfo.size = tlasSizes.accelerationStructureSize;
   tlasCreateInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
-  vkCreateAccelerationStructureKHR_ptr(device, &tlasCreateInfo, nullptr,
-                                       &aabbTlas);
+  if (vkCreateAccelerationStructureKHR_ptr(device, &tlasCreateInfo, nullptr,
+                                           &aabbTlas) != VK_SUCCESS) {
+    throw std::runtime_error("RayProceduralBench: Failed to create TLAS");
+  }
 
   size_t scratchSize = std::max(blasSizes.buildScratchSize, tlasSizes.buildScratchSize);
   scratchBuffer = context->createBuffer(scratchSize);
@@ -182,20 +188,28 @@ void RayProceduralBench::buildAS() {
 
   VkCommandPoolCreateInfo cpInfo{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
   cpInfo.queueFamilyIndex = vContext->getComputeQueueFamilyIndex();
-  VkCommandPool tmpPool;
-  vkCreateCommandPool(device, &cpInfo, nullptr, &tmpPool);
+  VkCommandPool tmpPool = VK_NULL_HANDLE;
+  if (vkCreateCommandPool(device, &cpInfo, nullptr, &tmpPool) != VK_SUCCESS) {
+    throw std::runtime_error("RayProceduralBench: Failed to create command pool");
+  }
 
   VkCommandBufferAllocateInfo cbAlloc{
       VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
   cbAlloc.commandPool = tmpPool;
   cbAlloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
   cbAlloc.commandBufferCount = 1;
-  VkCommandBuffer cmd;
-  vkAllocateCommandBuffers(device, &cbAlloc, &cmd);
+  VkCommandBuffer cmd = VK_NULL_HANDLE;
+  if (vkAllocateCommandBuffers(device, &cbAlloc, &cmd) != VK_SUCCESS) {
+    vkDestroyCommandPool(device, tmpPool, nullptr);
+    throw std::runtime_error("RayProceduralBench: Failed to allocate command buffer");
+  }
 
   VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
   begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-  vkBeginCommandBuffer(cmd, &begin);
+  if (vkBeginCommandBuffer(cmd, &begin) != VK_SUCCESS) {
+    vkDestroyCommandPool(device, tmpPool, nullptr);
+    throw std::runtime_error("RayProceduralBench: Failed to begin command buffer");
+  }
 
   auto cmdBuild = [&](VkAccelerationStructureBuildGeometryInfoKHR &info,
                       VkAccelerationStructureKHR dst, uint32_t primCount) {
@@ -216,19 +230,20 @@ void RayProceduralBench::buildAS() {
   cmdBuild(blasBuildInfo, aabbBlas, numPrimitives);
   cmdBuild(tlasBuildInfo, aabbTlas, 1);
 
-
-
-  vkEndCommandBuffer(cmd);
+  if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
+    vkDestroyCommandPool(device, tmpPool, nullptr);
+    throw std::runtime_error("RayProceduralBench: Failed to end command buffer");
+  }
 
   VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
   submit.commandBufferCount = 1;
   submit.pCommandBuffers = &cmd;
-  vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE);
-  vkQueueWaitIdle(queue);
-
-
-
+  VkResult submitRes = vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE);
+  VkResult waitRes = vkQueueWaitIdle(queue);
   vkDestroyCommandPool(device, tmpPool, nullptr);
+  if (submitRes != VK_SUCCESS || waitRes != VK_SUCCESS) {
+    throw std::runtime_error("RayProceduralBench: AS build queue submission failed");
+  }
 }
 
 void RayProceduralBench::Run(uint32_t config_idx) {

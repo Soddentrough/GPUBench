@@ -162,5 +162,51 @@ BenchmarkResult InShaderIndirectBench::GetResult(uint32_t /*config_idx*/) const 
 }
 
 bool InShaderIndirectBench::ValidateResults(uint32_t config_idx) const {
+  if (config_idx >= configs.size() || !context) {
+    return false;
+  }
+
+  const auto &cfg = configs[config_idx];
+  if (cfg.mode == IndirectBenchMode::GPU_Indirect) {
+    if (!indirectBuffer || !outputBuffer) {
+      return false;
+    }
+    GpuIndirectCommand cmd{};
+    context->readBuffer(indirectBuffer, 0, sizeof(cmd), &cmd);
+
+    if (cmd.workgroupsFinished != kTotalWorkgroups) {
+      std::cerr << "InShaderIndirectBench validation failed (config "
+                << config_idx << "): workgroupsFinished="
+                << cmd.workgroupsFinished << ", expected " << kTotalWorkgroups
+                << "\n";
+      return false;
+    }
+
+    uint32_t expectedX = (cmd.activeCount + 63u) / 64u;
+    if (cmd.x != expectedX) {
+      std::cerr << "InShaderIndirectBench validation failed (config "
+                << config_idx << "): cmd.x=" << cmd.x
+                << ", expected " << expectedX << "\n";
+      return false;
+    }
+
+    if (cfg.selectivity == 100) {
+      if (cmd.activeCount != kTotalItems ||
+          cmd.x != (kTotalItems + 63u) / 64u) {
+        std::cerr << "InShaderIndirectBench validation failed (100% active): "
+                  << "activeCount=" << cmd.activeCount << ", cmd.x=" << cmd.x
+                  << "\n";
+        return false;
+      }
+    } else if (cfg.selectivity == 0) {
+      if (cmd.activeCount != 0u || cmd.x != 0u || cmd.y != 0u || cmd.z != 0u) {
+        std::cerr << "InShaderIndirectBench validation failed (0% active): "
+                  << "activeCount=" << cmd.activeCount << ", cmd=(" << cmd.x
+                  << "," << cmd.y << "," << cmd.z << ")\n";
+        return false;
+      }
+    }
+  }
+
   return true;
 }

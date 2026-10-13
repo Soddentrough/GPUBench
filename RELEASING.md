@@ -14,15 +14,15 @@ GPUBench uses a fully automated release process via GitHub Actions:
 
 Windows, macOS, and Linux binaries are handled by the GitHub Actions workflow in `.github/workflows/release.yml`.
 
-- **Trigger**: Pushing a tag matching `v*` (e.g. `v1.1.0.2`).
+- **Trigger**: Pushing a tag matching `v*` (e.g. `v1.3.0`).
 - **Generated Assets**:
   - Windows: `GPUBench-*-win64.zip` and `GPUBench-*-win64.exe`
   - macOS: `GPUBench-*-Darwin.dmg` and `GPUBench-*-Darwin.tar.gz`
   - Linux: `GPUBench-*-Linux.deb`, `GPUBench-*-Linux.rpm`, and `GPUBench-*-Linux.tar.gz`
 - **Workflow**:
   1. Commit changes and update the `BUILD_NUMBER` in `CMakeLists.txt`.
-  2. Tag the commit (e.g., `git tag v1.1.0.2`).
-  3. Push the tag to remote (`git push origin v1.1.0.2`).
+  2. Tag the commit (e.g., `git tag v1.3.0`).
+  3. Push the tag to remote (`git push origin v1.3.0`).
   4. The GitHub Actions runner will automatically build, package, and publish the Windows, macOS, and Linux binaries to the release page.
 
 ---
@@ -63,9 +63,9 @@ Upload the generated assets directly to the existing GitHub release page using t
 
 ```bash
 # Upload assets to the corresponding tag
-gh release upload v1.1.0.2 \
-  build/GPUBench-1.1.0.2-Linux.deb \
-  build/GPUBench-1.1.0.2-Linux.rpm \
-  build/GPUBench-1.1.0.2-Linux.tar.gz \
+gh release upload v1.3.0 \
+  build/GPUBench-1.3.0-Linux.deb \
+  build/GPUBench-1.3.0-Linux.rpm \
+  build/GPUBench-1.3.0-Linux.tar.gz \
   --clobber
 ```

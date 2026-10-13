@@ -6,7 +6,7 @@ gpubench \- Modern cross-backend GPU compute and hardware ray tracing benchmark
 [\fIOPTIONS\fR]
 .SH DESCRIPTION
 .B GPUBench
-is a high-performance cross-backend GPU compute and ray tracing benchmarking utility supporting Vulkan 1.4, AMD ROCm/HIP, and OpenCL. It evaluates raw compute capabilities (FP64, FP32, FP16, BF16, FP8, INT8), VRAM and cache bandwidth, hardware-accelerated BVH traversal, and dynamic wavefront ray scheduling via Device-Generated Commands (DGC).
+is a high-performance cross-backend GPU compute and ray tracing benchmarking utility supporting Vulkan 1.4, AMD ROCm/HIP, and OpenCL. It evaluates raw compute capabilities (FP64, FP32, DualIssue, LDS, Indirect, FP16, BF16, FP8, FP6, FP4, INT8, INT4), VRAM and cache bandwidth/latency, hardware-accelerated BVH traversal, and dynamic wavefront ray scheduling via Device-Generated Commands (DGC).
 .SH OPTIONS
 .TP
 \fB\-h\fR, \fB\-\-help\fR
@@ -15,13 +15,13 @@ Print help message and exit.
 \fB\-\-version\fR
 Display program version information and exit.
 .TP
-\fB\-b\fR, \fB\-\-benchmarks\fR \fIBENCHMARKS\fR
-Comma-separated list of benchmarks to run (e.g., fp32,fp64,mem_bandwidth,ray_scheduling).
+\fB\-b\fR, \fB\-\-benchmark\fR, \fB\-\-benchmarks\fR \fIBENCHMARKS\fR
+Comma-separated list of benchmarks to run (e.g., fp32,fp64,dualissue,lds,indirect,fp16,bf16,fp8,fp6,fp4,int8,int4,membw,l0_cache,cache_latency_curve,pixelfill,rayrawtraversal,rayasbuild,rayintersect,rayanyhit,rayprocedural,rayscheduling,raydivergence,sysmembw,sysmemlatency,all).
 .TP
-\fB\-g\fR, \fB\-\-groups\fR \fIGROUPS\fR
+\fB\-g\fR, \fB\-\-group\fR, \fB\-\-groups\fR \fIGROUPS\fR
 Benchmark groups to run: compute, memory, graphics (combines raster & raytracing), raster, raytracing, system, or all.
 .TP
-\fB\-\-list\-benchmarks\fR
+\fB\-\-list\fR, \fB\-\-list\-benchmarks\fR
 List all available benchmarks organized by group.
 .TP
 \fB\-\-list\-groups\fR
@@ -39,19 +39,61 @@ List available compute backends.
 \fB\-k\fR, \fB\-\-backend\fR \fIBACKEND\fR
 Specify compute backend: auto, vulkan, opencl, rocm (default: auto).
 .TP
+\fB\-c\fR, \fB\-\-config\fR \fIINDEX\fR
+Run only a specific sub-test configuration index within a multi-configuration benchmark.
+.TP
 \fB\-s\fR, \fB\-\-scene\fR \fISCENE\fR
 Ray tracing scenario: showroom, indoor, outdoor, forest, all (default: all).
 .TP
 \fB\-r\fR, \fB\-\-resolution\fR \fIRESPRESET\fR
-Resolution preset: auto, 720p, 1080p, 1440p, 4k, 1024x1024, or custom WxH.
+Resolution preset: auto, 720p, 1080p, 1440p, 4k, 8k, 1024x1024, or custom WxH.
 .TP
 \fB\-\-bounces\fR \fIBOUNCES\fR
 Number of light bounces for multi-bounce path tracing (1..8, default: 2).
 .TP
+\fB\-\-spp\fR \fISPP\fR
+Number of samples per pixel for path tracing accumulation (default: 1).
+.TP
+\fB\-\-dump\-renders\fR, \fB\-\-dump\fR
+Dump rendered images and parity difference heatmaps to the \fIrenders/\fR directory.
+.TP
+\fB\-\-no\-dump\-renders\fR, \fB\-\-no\-dump\fR
+Disable dumping rendered images to disk.
+.TP
+\fB\-\-dump\-geometry\fR
+Export procedural ray tracing scene geometry to Wavefront OBJ files.
+.TP
+\fB\-\-verify\-parity\fR
+Enforce strict Megakernel vs. DGC framebuffer visual parity verification (PSNR >= 45 dB) and return a non-zero exit code on failure.
+.TP
+\fB\-\-profile\-snapshot\fR
+Run in single-frame deterministic profiling snapshot mode for RGP / Nsight capture.
+.TP
+\fB\-\-rra\fR
+Enable Radeon Raytracing Analyzer (RRA) BVH capture mode.
+.TP
+\fB\-f\fR, \fB\-\-force\fR
+Force execution even if concurrent GPU load or high GTT usage is detected.
+.TP
+\fB\-q\fR, \fB\-\-quiet\fR
+Suppress informational banners and progress output.
+.TP
+\fB\-\-strict\fR
+Return a non-zero exit code if any requested benchmark fails or is unsupported.
+.TP
+\fB\-\-verbose\fR
+Enable verbose logging output.
+.TP
+\fB\-\-debug\fR
+Enable detailed debug logging output.
+.TP
 \fB\-o\fR, \fB\-\-output\-json\fR [\fIFILE\fR]
 Write benchmark results to a JSON report file. If \fIFILE\fR is omitted, a default timestamped filename including the hostname is generated (e.g., \fIgpubench_<hostname>_<timestamp>.json\fR). Specify \fB\-\fR to direct pure JSON to standard output.
 .TP
-\fB\-i\fR, \fB\-\-import\fR \fIFILE\fR...
+\fB\-\-json\fR
+Output pure JSON report directly to standard output (equivalent to \fB\-o \-\fR).
+.TP
+\fB\-i\fR, \fB\-\-import\fR, \fB\-\-input\fR \fIFILE\fR...
 Load and display results from one or more benchmark JSON report files.
 .TP
 \fB\-\-compare\fR \fIFILE1\fR \fIFILE2\fR [\fIFILE3\fR...]

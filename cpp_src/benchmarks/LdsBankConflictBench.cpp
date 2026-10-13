@@ -68,12 +68,11 @@ void LdsBankConflictBench::Run(uint32_t config_idx) {
     throw std::runtime_error("LdsBankConflictBench: invalid config or uninitialized state");
   }
 
-  struct PushConstants {
-    uint32_t stride;
-    uint32_t iterations;
-  } pc = { configs[config_idx].stride, kIterations };
+  uint32_t stride = configs[config_idx].stride;
+  uint32_t iterations = kIterations;
 
-  context->setKernelArg(kernel, 1, sizeof(pc), &pc);
+  context->setKernelArg(kernel, 1, sizeof(uint32_t), &stride);
+  context->setKernelArg(kernel, 2, sizeof(uint32_t), &iterations);
   context->dispatch(kernel, kWorkgroups, 1, 1, kThreadsPerWg, 1, 1);
 }
 

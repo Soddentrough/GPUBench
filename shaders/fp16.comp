@@ -13,14 +13,14 @@ layout(set = 0, binding = 0) buffer Data {
                        OP(13) OP(14) OP(15)
 #define APPLY16(OP)    OP(0) APPLY15(OP)
 
-#define INIT(i) a[(i)] = f16vec4(       \
-    0.1 * float(4 * (i) - 3),           \
-    0.1 * float(4 * (i) - 2),           \
-    0.1 * float(4 * (i) - 1),           \
-    0.1 * float(4 * (i))                \
+#define INIT(i) a[(i)] = a[0] + f16vec4( \
+    0.01 * float(4 * (i) - 3),          \
+    0.01 * float(4 * (i) - 2),          \
+    0.01 * float(4 * (i) - 1),          \
+    0.01 * float(4 * (i))               \
 );
 
-#define STEP(i) a[(i)] = fma(a[(i)], m, a[((i) + 1) & 15]);
+#define STEP(i) a[(i)] = fma(a[(i)], m, c);
 
 void main() {
     uint index = gl_GlobalInvocationID.x;
@@ -29,7 +29,8 @@ void main() {
     a[0] = InOutBuffer.data[index % 1024u];
     APPLY15(INIT)
 
-    f16vec4 m = f16vec4(float16_t(1.0009765625));
+    f16vec4 m = f16vec4(float16_t(-0.9990234375));
+    f16vec4 c = f16vec4(float16_t(0.5));
 
     for (int iteration = 0; iteration < 65536; ++iteration) {
         APPLY16(STEP)

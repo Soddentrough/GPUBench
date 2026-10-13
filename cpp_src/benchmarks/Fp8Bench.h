@@ -94,6 +94,7 @@ private:
   mutable IComputeContext *lastCheckedContext = nullptr;
   ComputeKernel matrixKernel = nullptr;
   ComputeBuffer buffer = nullptr;
+  ComputeBuffer outputBuffer = nullptr;
   bool is_native_matrix = false;
   mutable std::string name = "FP8";
 };

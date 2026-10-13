@@ -68,17 +68,38 @@ The installation creates the following structure:
 ```
 <PREFIX>/
 ├── bin/
-│   └── gpubench                    # The executable
-└── share/gpubench/
-    └── kernels/
-        ├── vulkan/                 # Compiled SPIR-V shaders (*.spv)
-        ├── opencl/                 # OpenCL source files (*.cl)
-        └── rocm/                   # Compiled HIP objects (*.o)
+│   ├── gpubench                    # CLI benchmark executable
+│   └── gpubench-gui                # Workstation Profiler GUI executable
+└── share/
+    ├── applications/
+    │   └── io.github.soddentrough.gpubench.desktop
+    ├── bash-completion/completions/
+    │   ├── gpubench
+    │   └── gpubench-gui
+    ├── fish/vendor_completions.d/
+    │   ├── gpubench.fish
+    │   └── gpubench-gui.fish
+    ├── gpubench/
+    │   ├── assets/models/          # Canonical glTF 3D scenes (sponza.glb, toycar.glb)
+    │   └── kernels/
+    │       ├── vulkan/             # Compiled SPIR-V shaders (*.spv)
+    │       ├── opencl/             # OpenCL source files (*.cl)
+    │       └── rocm/               # Compiled HIP fat binaries (*.hsaco)
+    ├── icons/hicolor/*/apps/
+    │   └── io.github.soddentrough.gpubench.png
+    ├── man/man1/
+    │   ├── gpubench.1
+    │   └── gpubench-gui.1
+    ├── metainfo/
+    │   └── io.github.soddentrough.gpubench.metainfo.xml
+    └── zsh/site-functions/
+        ├── _gpubench
+        └── _gpubench-gui
 ```
 
 ### Default Prefixes
 
-- **Linux**: `/usr/local`
+- **Linux**: `/usr/local` (or `/usr` in distribution packages)
 - **Windows**: `C:\Program Files\GPUBench`
 
 ## Running GPUBench
@@ -100,15 +121,20 @@ gpubench --list-devices
 
 # Run on a specific device
 gpubench -d 0 -b FP32
+
+# Launch the interactive GUI
+gpubench-gui
 ```
 
 ## Kernel Path Resolution
 
-GPUBench searches for kernel files in the following order:
+GPUBench (`PathResolver::getKernelPath()`) searches for kernel files in the following order:
 
 1. **Environment variable** `GPUBENCH_KERNEL_PATH` (if set)
-2. **Installed location**: `<PREFIX>/share/gpubench/kernels`
-3. **Development fallback**: `./kernels` (relative to working directory)
+2. **Relative to executable**: `<exe_dir>/../share/gpubench/kernels` and `<exe_dir>/kernels`
+3. **Configured install prefix**: `<CMAKE_INSTALL_PREFIX>/share/gpubench/kernels`
+4. **Standard system prefixes**: `/usr/local/share/gpubench/kernels` and `/usr/share/gpubench/kernels`
+5. **Development fallbacks**: `./kernels` and `../kernels` (relative to working directory)
 
 ### Using Custom Kernel Path
 
@@ -136,7 +162,7 @@ sudo make uninstall
 
 Or manually remove:
 ```bash
-sudo rm /usr/local/bin/gpubench
+sudo rm /usr/local/bin/gpubench /usr/local/bin/gpubench-gui
 sudo rm -rf /usr/local/share/gpubench
 ```
 
@@ -241,8 +267,8 @@ cpack -G NSIS -C Release
 ```
 
 **Output:**
-- `GPUBench-1.0.0-win64.zip` - Portable ZIP archive
-- `GPUBench-1.0.0-win64.exe` - NSIS installer (if NSIS is installed)
+- `GPUBench-1.3.0-win64.zip` - Portable ZIP archive
+- `GPUBench-1.3.0-win64.exe` - NSIS installer (if NSIS is installed)
 
 ### Linux Packages
 
@@ -264,9 +290,9 @@ cpack -G TGZ  # Tarball
 ```
 
 **Output:**
-- `GPUBench-1.0.0-Linux.deb`
-- `GPUBench-1.0.0-Linux.rpm`
-- `GPUBench-1.0.0-Linux.tar.gz`
+- `GPUBench-1.3.0-Linux.deb`
+- `GPUBench-1.3.0-Linux.rpm`
+- `GPUBench-1.3.0-Linux.tar.gz`
 
 ### macOS Packages
 

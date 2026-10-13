@@ -14,7 +14,7 @@ import argparse
 from typing import Dict, List, Any
 
 
-def run_gpubench_with_shaderstats(binary_path: str, device_idx: int = 1) -> str:
+def run_gpubench_with_shaderstats(binary_path: str, device_idx: int = 0, configs: str = "17,18") -> str:
     env = os.environ.copy()
     env["RADV_DEBUG"] = "shaderstats,nocache"
     env["MESA_VK_IGNORE_CONFORMANCE_WARNING"] = "1"
@@ -23,6 +23,7 @@ def run_gpubench_with_shaderstats(binary_path: str, device_idx: int = 1) -> str:
         binary_path,
         "-d", str(device_idx),
         "-b", "rayscheduling",
+        "-c", configs,
         "--profile-snapshot",
         "--no-dump"
     ]
@@ -89,7 +90,8 @@ def parse_shaderstats(output: str) -> List[Dict[str, Any]]:
 def main():
     parser = argparse.ArgumentParser(description="GPUBench Register Telemetry Profiler")
     parser.add_argument("--bin", default="./build/gpubench", help="Path to gpubench executable")
-    parser.add_argument("-d", "--device", type=int, default=1, help="Target GPU device index (default: 1)")
+    parser.add_argument("-d", "--device", type=int, default=0, help="Target GPU device index (default: 0)")
+    parser.add_argument("-c", "--config", default="17,18", help="RayScheduling config indices to profile (default: 17,18)")
     args = parser.parse_args()
 
     if not os.path.isfile(args.bin):
@@ -98,44 +100,47 @@ def main():
 
     print(f"==========================================================================================================")
     print(f"       GPUBench Compiler Register Telemetry Profiler (GPU {args.device})")
-    print(f"       Target Hardware Architecture: AMD Radeon AI PRO R9700 (GFX1201 / RDNA 4)")
+    print(f"       Target Hardware Architecture: AMD RDNA 3.5 / RDNA 4 (Mesa RADV ACO)")
     print(f"==========================================================================================================")
-    print(f"Compiling kernels with RADV_DEBUG=shaderstats,nocache on device {args.device}...\n")
+    print(f"Compiling kernels with RADV_DEBUG=shaderstats,nocache on device {args.device} (configs: {args.config})...\n")
     
-    raw_output = run_gpubench_with_shaderstats(args.bin, args.device)
+    raw_output = run_gpubench_with_shaderstats(args.bin, args.device, args.config)
     stats = parse_shaderstats(raw_output)
     
     if not stats:
         print("Note: No ACO shader stats captured. Ensure Mesa RADV driver is active on Linux.", file=sys.stderr)
         sys.exit(0)
 
-    print(f"{'Shader / Role':<32} | {'SGPR':<5} | {'VGPR':<5} | {'Code (B)':<9} | {'Instr':<6} | {'Branch':<6} | {'Occupancy':<16} | {'Bottleneck Status'}")
-    print("-" * 110)
+    print(f"{'Shader / Role':<42} | {'SGPR':<5} | {'VGPR':<5} | {'Code (B)':<9} | {'Instr':<6} | {'Branch':<6} | {'Occupancy':<16} | {'Bottleneck Status'}")
+    print("-" * 120)
     
-    # Classify known kernels by instruction / VGPR footprint
+    # Classify known kernels by instruction / VGPR / code_size footprint
     for idx, s in enumerate(stats):
         occ = s['subgroups_per_simd']
         occ_str = f"{occ}/16 waves ({s['occupancy_pct']:.1f}%)"
         
-        if s['vgprs'] >= 240 or s['instructions'] > 20000:
-            role = f"Megakernel (rt_traditional)"
-            bottleneck = "Occupancy Wall (VGPRs)"
-        elif s['instructions'] > 10000:
-            role = f"Wavefront Classify / BVH"
+        if s['code_size'] > 230000 or s['vgprs'] >= 96 and occ <= 3:
+            role = "Megakernel (rt_scheduling_traditional)"
+            bottleneck = "Occupancy Wall (SGPR/VGPR)"
+        elif s['code_size'] > 150000:
+            role = "DGC Material (rt_scheduling_dgc_material)"
+            bottleneck = "Homogeneous ALU"
+        elif s['code_size'] > 25000:
+            role = "DGC Classify (rt_scheduling_dgc_classify)"
             bottleneck = "Compute Traversal"
         elif s['vgprs'] <= 64 and occ >= 8:
-            role = f"Wavefront Micro-Kernel #{idx}"
+            role = f"DGC Micro-Kernel #{idx} (bounce/shadow/resolve)"
             bottleneck = "High / Max Occupancy"
         else:
             role = f"Micro-Kernel / Helper #{idx}"
             bottleneck = "Balanced"
             
-        print(f"{role:<32} | {s['sgprs']:<5} | {s['vgprs']:<5} | {s['code_size']:<9} | {s['instructions']:<6} | {s['branches']:<6} | {occ_str:<16} | {bottleneck}")
+        print(f"{role:<42} | {s['sgprs']:<5} | {s['vgprs']:<5} | {s['code_size']:<9} | {s['instructions']:<6} | {s['branches']:<6} | {occ_str:<16} | {bottleneck}")
         
-    print("=" * 110)
+    print("=" * 120)
     print("Architectural Findings on RDNA 4 (GFX1201):")
-    print(" - Monolithic Megakernel incurs 240-256 VGPRs and 1,500+ branches, capping SIMD occupancy at 2 waves (12.5%).")
-    print(" - Wavefront / DGC decoupled micro-kernels operate at 32-96 VGPRs, reaching up to 8-16 waves (50-100% occupancy).")
+    print(" - Monolithic Megakernel saturates SGPRs (106) and VGPRs (97-240), capping SIMD occupancy at 2-3 waves (12.5%-18.8%).")
+    print(" - Wavefront / DGC decoupled micro-kernels operate at 19-92 VGPRs, reaching 5-16 waves (31.3%-100% occupancy).")
     print("==========================================================================================================")
 
 

@@ -37,15 +37,71 @@ std::string CacheLatencyCurveBench::GetConfigName(uint32_t config_idx) const {
   return "";
 }
 
+std::string CacheLatencyCurveBench::ComputeAdaptiveHint(
+    uint64_t workingSetBytes, const DeviceInfo &info) const {
+  uint64_t l0Bytes = info.l1CacheSize > 0 ? info.l1CacheSize : (32ULL * 1024);
+  uint64_t l1Bytes = 256ULL * 1024;
+  uint64_t l2Bytes =
+      info.l2CacheSize > 0 ? info.l2CacheSize : (4ULL * 1024 * 1024);
+  uint64_t l3Bytes = info.l3CacheSize;
+
+  if (workingSetBytes < l0Bytes) {
+    return "L0 Vector Cache";
+  }
+  if (workingSetBytes == l0Bytes) {
+    return "L0 Vector Cache Boundary";
+  }
+  if (workingSetBytes < l1Bytes) {
+    return "L1 / GL1 Cache";
+  }
+  if (workingSetBytes == l1Bytes) {
+    return "L1 / GL1 Cache Boundary";
+  }
+  if (workingSetBytes < l2Bytes) {
+    return "L2 Cache";
+  }
+  if (workingSetBytes == l2Bytes) {
+    return "L2 Cache Boundary";
+  }
+  if (l3Bytes > 0) {
+    if (workingSetBytes < l3Bytes) {
+      return "L3 / MALL Infinity Cache";
+    }
+    if (workingSetBytes == l3Bytes) {
+      return "L3 / MALL Cache Boundary";
+    }
+  }
+  return info.isApu ? "Unified System DRAM" : "VRAM DRAM";
+}
+
 std::string CacheLatencyCurveBench::GetConfigSupportNote(uint32_t config_idx) const {
   if (config_idx < configs.size()) {
+    if (context) {
+      return ComputeAdaptiveHint(configs[config_idx].workingSetBytes,
+                                 context->getCurrentDeviceInfo());
+    }
     return configs[config_idx].cacheLevelHint;
+  }
+  return "";
+}
+
+std::string CacheLatencyCurveBench::GetConfigSupportNote(
+    uint32_t config_idx, const DeviceInfo &info,
+    IComputeContext *context) const {
+  (void)context;
+  if (config_idx < configs.size()) {
+    return ComputeAdaptiveHint(configs[config_idx].workingSetBytes, info);
   }
   return "";
 }
 
 void CacheLatencyCurveBench::Setup(IComputeContext &context, const std::string &kernel_dir) {
   this->context = &context;
+
+  DeviceInfo info = context.getCurrentDeviceInfo();
+  for (auto &cfg : configs) {
+    cfg.cacheLevelHint = ComputeAdaptiveHint(cfg.workingSetBytes, info);
+  }
 
   // Calculate total buffer allocation
   totalBufferBytes = 0;
@@ -107,12 +163,11 @@ void CacheLatencyCurveBench::Run(uint32_t config_idx) {
     throw std::runtime_error("CacheLatencyCurveBench: invalid config or uninitialized state");
   }
 
-  struct PushConstants {
-    uint32_t iterations;
-    uint32_t startIndex;
-  } pc = { kIterations, configs[config_idx].startWordIndex };
+  uint32_t iterations = kIterations;
+  uint32_t startIndex = configs[config_idx].startWordIndex;
 
-  context->setKernelArg(kernel, 1, sizeof(pc), &pc);
+  context->setKernelArg(kernel, 1, sizeof(uint32_t), &iterations);
+  context->setKernelArg(kernel, 2, sizeof(uint32_t), &startIndex);
   context->dispatch(kernel, 1, 1, 1, 1, 1, 1);
 }
 
@@ -128,7 +183,6 @@ void CacheLatencyCurveBench::Teardown() {
     }
     context = nullptr;
   }
-  maxTimePerInvoc = 0.0;
 }
 
 BenchmarkResult CacheLatencyCurveBench::GetResult(uint32_t config_idx) const {
@@ -140,18 +194,7 @@ bool CacheLatencyCurveBench::ValidateResults(uint32_t config_idx) const {
 }
 
 double CacheLatencyCurveBench::FilterDuration(uint32_t config_idx, uint64_t total_invocations, double duration_ms) {
-  if (total_invocations == 0) return duration_ms;
-  double timePerInvoc = duration_ms / total_invocations;
-  if (config_idx == 0) {
-    maxTimePerInvoc = timePerInvoc;
-  } else {
-    // Physical cache hierarchy containment: larger working sets cannot have lower latency
-    // than faster inclusive on-chip tiers. Monotonic envelope filters transient noise dips.
-    if (timePerInvoc < maxTimePerInvoc) {
-      timePerInvoc = maxTimePerInvoc;
-    } else {
-      maxTimePerInvoc = timePerInvoc;
-    }
-  }
-  return timePerInvoc * total_invocations;
+  (void)config_idx;
+  (void)total_invocations;
+  return duration_ms;
 }

@@ -15,8 +15,8 @@ GPUBench is a high-performance cross-platform GPU benchmarking tool designed to 
   - **Multi-Layer Alpha Testing**: AnyHit alpha evaluation through 16 stacked cutout planes.
   - **Acceleration Structure Throughput**: BLAS/TLAS build and dynamic vertex refit rates.
 - **Comprehensive Compute Data Types**: 
-  - Actively Supported Hardware Types: FP64, FP32, FP16, FP8 (Vulkan Cooperative Matrix / ROCm), INT8
-  - Capability-Probed / Future Types: BF16 (probed; toolchain arithmetic limitation), FP6 (probed; NVIDIA SPV_NV_float6 only), FP4 (probed; software emulation avoided), INT4 (probed; lacks standardized SPIR-V types)
+  - Actively Supported Hardware Types: FP64, FP32, FP16, BF16 (native ROCm/HIP `__hip_bfloat16` & Vulkan `VK_KHR_shader_bfloat16`), FP8 (Vulkan Cooperative Matrix / ROCm WMMA), INT8, INT4 (ROCm/HIP sub-byte matrix dot & Vulkan Cooperative Matrix probe)
+  - Capability-Probed / Vendor-Specific Types: FP6 (probed; NVIDIA `SPV_NV_float6`), FP4 (probed; `VK_NV_cooperative_matrix2` / `SPV_NV_float4` hardware only, software emulation avoided)
 - **Memory & Cache Hierarchy**: Measure Device VRAM Bandwidth, Host/PCIe Bandwidth, L0 Cache Latency, and full multi-level cache latency curves (16 KB to 256 MB spanning L0 TCP, GL1, GL2, L3 MALL, and GDDR6 DRAM). Cache bandwidth rows are disabled to prevent compiler dead-code elimination.
 - **Dynamic Loading**: Backends are loaded at runtime, making them optional and reducing installation dependencies.
 - **Cross-Platform**: Built for Linux and Windows.
@@ -227,8 +227,8 @@ gpubench -d 0 -b rayscheduling -s forest -r 4k
 # Dump 4K UHD PPM/PNG render buffers, diff heatmaps, and 4-scenario comparative grid
 gpubench -d 0 -b rayscheduling -s all --dump-renders
 
-# Run specific config (e.g. Config 17: Primary Rays (Compute Megakernel), Config 18: Primary Rays (Wavefront - DGC), Config 29: Primary Rays (RTP)) in profiling snapshot mode
-gpubench -d 0 -b rayscheduling -s forest -c 18 --profile-snapshot
+# Run specific config (e.g. Config 9: Full Frame Render (Compute Megakernel), Config 11: Full Frame Render (Wavefront - DGC), Config 17: Full Pipeline (4K UHD Wavefront - DGC), Config 18: Primary Rays (Hardware RTP)) in profiling snapshot mode
+gpubench -d 0 -b rayscheduling -s forest -c 11 --profile-snapshot
 
 # Export machine-readable results to JSON
 gpubench -d 0 -b rayscheduling -s all -o benchmark_results.json

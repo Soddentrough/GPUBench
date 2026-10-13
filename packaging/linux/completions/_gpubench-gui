@@ -5,13 +5,20 @@ _gpubench_gui() {
     opts=(
         '(-h --help)'{-h,--help}'[Print help message and exit]'
         '(-v --version)'{-v,--version}'[Display version information and exit]'
-        '(-b --benchmark --benchmarks)'{-b,--benchmark,--benchmarks}'[Benchmark(s) to enable]:benchmark:(fp32 fp64 fp16 bf16 fp8 int8 int4 membw fillrate sysmem syslat asbuild triangle anyhit procedural mat_divergence incoherent divergence payload pathtracing rayscheduling all)'
+        '(-b --benchmark --benchmarks -t --test)'{-b,--benchmark,--benchmarks,-t,--test}'[Benchmark(s) to enable]:benchmark:(fp64 fp32 dualissue lds indirect fp16 bf16 fp8 fp6 fp4 int8 int4 membw l0_cache cache_latency_curve pixelfill rayrawtraversal rayasbuild rayintersect rayanyhit rayprocedural rayscheduling raydivergence sysmembw sysmemlatency all)'
         '(-g --group --groups)'{-g,--group,--groups}'[Benchmark group(s) to enable]:group:(compute memory raster graphics raytracing system all)'
-        '(-d --device --devices)'{-d,--device,--devices}'[Target GPU device index(es)]:device:'
+        '(-d --device)'{-d,--device}'[Target GPU device index(es)]:device:'
         '(-k --backend)'{-k,--backend}'[Backend to select]:backend:(auto vulkan opencl rocm)'
+        '(-s --scene)'{-s,--scene}'[Pre-select Ray Tracing scene]:scene:(showroom indoor outdoor forest)'
+        '(-r --res --resolution)'{-r,--res,--resolution}'[Resolution preset]:resolution:(720p 1080p 1440p 4k 8k)'
+        '(--ui-scale --scale)'{--ui-scale,--scale}'[Override UI DPI scaling factor]:scale:(1.0 1.25 1.5 1.75 2.0 2.5)'
         '(--dump --dump-renders)'{--dump,--dump-renders}'[Enable visual verification and render output dumping]'
-        '(--auto-start --run)'{--auto-start,--run}'[Automatically start benchmark suite immediately on launch]'
-        '(-r --resolution)'{-r,--resolution}'[Resolution preset]:resolution:(auto 1080p 1440p 4k)'
+        '(--no-dump --no-dump-renders)'{--no-dump,--no-dump-renders}'[Disable render output dumping]'
+        '(--auto-run --auto-start --run)'{--auto-run,--auto-start,--run}'[Automatically start benchmark suite immediately on launch]'
+        '--exit-on-complete[Exit automatically when benchmark run finishes]'
+        '--frames[Run for specified number of frames and exit]:frames:'
+        '--verbose[Enable verbose logging]'
+        '--debug[Enable debug logging]'
     )
     _arguments -s $opts
 }

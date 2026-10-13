@@ -87,17 +87,7 @@ void TelemetryWorker::discoverDevices() {
                     }
                 }
 
-                DeviceTelemetrySnapshot snap;
-                snap.deviceIndex = cardIdx;
-                std::string productName = readSysfsString(paths.drmDeviceDir + "/product_name");
-                if (productName.empty()) {
-                    productName = readSysfsString(paths.hwmonDir + "/name", "AMD Radeon GPU");
-                }
-                snap.name = "GPU " + std::to_string(cardIdx) + ": " + productName;
-                snap.pciBus = readSysfsString(paths.drmDeviceDir + "/uevent");
-
                 m_devicePaths.push_back(paths);
-                m_snapshots.push_back(snap);
             } catch (...) {
                 continue;
             }
@@ -112,8 +102,7 @@ void TelemetryWorker::discoverDevices() {
         return pciA < pciB;
     });
 
-    // Rebuild snapshots with matching deviceIndex (0, 1, ...)
-    m_snapshots.clear();
+    // Build snapshots with matching deviceIndex (0, 1, ...)
     for (size_t i = 0; i < m_devicePaths.size(); ++i) {
         m_devicePaths[i].deviceIndex = static_cast<uint32_t>(i);
         DeviceTelemetrySnapshot snap;

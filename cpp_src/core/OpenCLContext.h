@@ -12,6 +12,7 @@
 typedef intptr_t cl_queue_properties;
 #endif
 #include <memory>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -119,4 +120,5 @@ private:
   cl_event timingStopEvent = nullptr;
   bool isTimingActive = false;
   bool timingSupported = false;
+  std::set<ComputeBuffer> allocatedBuffers;
 };

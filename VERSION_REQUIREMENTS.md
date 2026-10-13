@@ -6,7 +6,7 @@ This document specifies the minimum version requirements for all GPU compute bac
 
 - **ROCm/HIP**: 6.4+
 - **OpenCL**: 1.2+
-- **Vulkan**: 1.4+
+- **Vulkan**: 1.2+ runtime baseline (1.4+ recommended for full Ray Query, Cooperative Matrix, and Device-Generated Commands support)
 
 ## Details
 
@@ -36,12 +36,12 @@ All OpenCL kernels in the `kernels/` directory require OpenCL 1.2 or later. This
 
 ### Vulkan Requirements
 
-**Minimum Version**: 1.4+
+**Minimum Version**: 1.2+ (`VulkanBackend::checkMinimumVersion()` accepts Vulkan 1.2+ at runtime; Vulkan 1.4+ recommended)
 
-All Vulkan shaders in the `shaders/` directory target GLSL version 460 compiled to SPIR-V 1.4/1.6, running on Vulkan 1.4+ runtimes. This provides:
-- Support for extended arithmetic types (8-bit, 16-bit storage)
-- Enhanced shader capabilities
-- Better optimization opportunities
+All Vulkan shaders in the `shaders/` directory target GLSL version 460 compiled to SPIR-V 1.4/1.6. While standard compute workloads execute on Vulkan 1.2+ runtimes, Vulkan 1.4+ is recommended for full hardware feature coverage:
+- Support for extended arithmetic types (8-bit, 16-bit storage, and `VK_KHR_cooperative_matrix`)
+- Hardware Ray Query (`VK_KHR_ray_query`, `VK_KHR_acceleration_structure`) and Device-Generated Commands (`VK_EXT_device_generated_commands`)
+- Better compiler optimization opportunities
 
 **Affected Files**:
 - `shaders/*.comp` (all Vulkan compute shaders)

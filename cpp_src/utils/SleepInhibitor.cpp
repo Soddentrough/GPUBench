@@ -115,7 +115,6 @@ void SleepInhibitor::unInhibit() {
 extern char **environ;
 
 void SleepInhibitor::inhibit(const std::string &reason) {
-    (void)reason;
     int pipefd[2];
     if (pipe(pipefd) != 0) {
         return;
@@ -128,6 +127,8 @@ void SleepInhibitor::inhibit(const std::string &reason) {
     posix_spawn_file_actions_addclose(&actions, pipefd[1]);
     posix_spawn_file_actions_addopen(&actions, STDERR_FILENO, "/dev/null", O_WRONLY, 0);
 
+    std::string reasonArg = "string:" + (reason.empty() ? std::string("Active GPU benchmark execution") : reason);
+
     const char *argv[] = {
         "dbus-send",
         "--print-reply",
@@ -135,7 +136,7 @@ void SleepInhibitor::inhibit(const std::string &reason) {
         "/org/freedesktop/ScreenSaver",
         "org.freedesktop.ScreenSaver.Inhibit",
         "string:GPUBench",
-        "string:Active GPU benchmark execution",
+        reasonArg.c_str(),
         nullptr
     };
 

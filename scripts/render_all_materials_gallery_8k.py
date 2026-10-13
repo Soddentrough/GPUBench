@@ -449,15 +449,18 @@ print(f"=== Blender Cycles 8K 42-Material render completed in {t_end - t_start:.
 """
 
 def generate_blender_render():
-    blend_script_path = os.path.join(tempfile.gettempdir(), "run_all_materials_render_8k.py")
+    import subprocess
+    scratch_dir = os.path.abspath(os.path.join("renders", "scratch"))
+    os.makedirs(scratch_dir, exist_ok=True)
+    blend_script_path = os.path.join(scratch_dir, "run_all_materials_render_8k.py")
     with open(blend_script_path, "w") as f:
         f.write(BLENDER_SCRIPT)
     
-    cmd = f"blender -b --python {blend_script_path}"
-    print(f"Executing Blender Cycles 8K render on GPU 1: {cmd}")
-    ret = os.system(cmd)
-    if ret != 0:
-        raise RuntimeError(f"Blender render failed with exit code {ret}")
+    cmd = ["blender", "-b", "--python", blend_script_path]
+    print(f"Executing Blender Cycles 8K render: {' '.join(cmd)}")
+    res = subprocess.run(cmd)
+    if res.returncode != 0:
+        raise RuntimeError(f"Blender render failed with exit code {res.returncode}")
 
 # ------------------------------------------------------------------------------
 # 2. Typography & Caption Card Compositor (Pillow) - 8K Native UHD Scaling

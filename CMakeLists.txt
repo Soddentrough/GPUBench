@@ -4,6 +4,7 @@ project(GPUBench VERSION 1.0.0)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Versioning
 set(BUILD_NUMBER "0")
@@ -32,8 +33,8 @@ else()
     target_compile_options(gpubench_compiler_flags INTERFACE
         -Wall
         -Wextra
-        -Wno-missing-field-initializers
         -Wno-unused-parameter
+        -Wno-missing-field-initializers
         -fstack-protector-strong
         -Wformat
         -Wformat-security
@@ -126,7 +127,6 @@ endif()
 find_package(HIP)
 if(HIP_FOUND)
     message(STATUS "HIP (ROCm) found: ${HIP_LIBRARIES}")
-    enable_language(HIP)
     
     # Find hiprtc for runtime compilation
     find_library(HIPRTC_LIBRARY NAMES hiprtc)
@@ -153,7 +153,6 @@ endif()
 # Shader/Kernel sources
 if(Vulkan_FOUND)
     file(GLOB SHADERS CONFIGURE_DEPENDS "shaders/*.comp" "shaders/*.rgen" "shaders/*.rmiss" "shaders/*.rchit" "shaders/*.rahit" "shaders/*.rint" "shaders/*.vert" "shaders/*.frag")
-    list(APPEND SHADERS "${CMAKE_CURRENT_SOURCE_DIR}/shaders/rt_raw_traversal.comp")
     list(REMOVE_DUPLICATES SHADERS)
     file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/kernels/vulkan)
     
@@ -233,7 +232,7 @@ if(HIP_FOUND)
     # Target GPU architectures for fat code object generation (Optimization O-5)
     set(OFFLOAD_ARCHS "all" CACHE STRING "Target GPU architectures for HIP code objects: 'all', 'native', or custom list (e.g. 'gfx1151;gfx1201')")
     if(OFFLOAD_ARCHS STREQUAL "all")
-        set(TARGET_ARCH_LIST "gfx1030;gfx1100;gfx1150;gfx1151;gfx1200;gfx1201;gfx90a;gfx942")
+        set(TARGET_ARCH_LIST "gfx1030;gfx1100;gfx1101;gfx1102;gfx1103;gfx1150;gfx1151;gfx1200;gfx1201;gfx90a;gfx942")
     elseif(OFFLOAD_ARCHS STREQUAL "native")
         set(TARGET_ARCH_LIST "native")
     else()
@@ -369,37 +368,43 @@ endif()
 # Include directories
 target_include_directories(gpubench PUBLIC 
     ${CMAKE_CURRENT_SOURCE_DIR}/cpp_src
-    ${CMAKE_CURRENT_SOURCE_DIR}/cpp_src/third_party
-    ${CMAKE_CURRENT_SOURCE_DIR}/external
-    ${CMAKE_CURRENT_SOURCE_DIR}/external/vulkan/Include
     ${CMAKE_CURRENT_BINARY_DIR}/cpp_src
 )
 
 target_include_directories(gpubench_lib PUBLIC 
     ${CMAKE_CURRENT_SOURCE_DIR}/cpp_src
-    ${CMAKE_CURRENT_SOURCE_DIR}/cpp_src/third_party
-    ${CMAKE_CURRENT_SOURCE_DIR}/external
-    ${CMAKE_CURRENT_SOURCE_DIR}/external/vulkan/Include
     ${CMAKE_CURRENT_BINARY_DIR}/cpp_src
 )
 
 if(Vulkan_FOUND)
-    target_include_directories(gpubench PUBLIC ${Vulkan_INCLUDE_DIRS})
-    target_include_directories(gpubench_lib PUBLIC ${Vulkan_INCLUDE_DIRS})
+    target_include_directories(gpubench SYSTEM PUBLIC ${Vulkan_INCLUDE_DIRS})
+    target_include_directories(gpubench_lib SYSTEM PUBLIC ${Vulkan_INCLUDE_DIRS})
     if(SHADERC_FOUND)
-        target_include_directories(gpubench PUBLIC ${SHADERC_INCLUDE_DIR})
-        target_include_directories(gpubench_lib PUBLIC ${SHADERC_INCLUDE_DIR})
+        target_include_directories(gpubench SYSTEM PUBLIC ${SHADERC_INCLUDE_DIR})
+        target_include_directories(gpubench_lib SYSTEM PUBLIC ${SHADERC_INCLUDE_DIR})
     endif()
 endif()
 
+target_include_directories(gpubench SYSTEM PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/cpp_src/third_party
+    ${CMAKE_CURRENT_SOURCE_DIR}/external
+    ${CMAKE_CURRENT_SOURCE_DIR}/external/vulkan/Include
+)
+
+target_include_directories(gpubench_lib SYSTEM PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/cpp_src/third_party
+    ${CMAKE_CURRENT_SOURCE_DIR}/external
+    ${CMAKE_CURRENT_SOURCE_DIR}/external/vulkan/Include
+)
+
 if(OpenCL_FOUND)
-    target_include_directories(gpubench PUBLIC ${OpenCL_INCLUDE_DIRS})
-    target_include_directories(gpubench_lib PUBLIC ${OpenCL_INCLUDE_DIRS})
+    target_include_directories(gpubench SYSTEM PUBLIC ${OpenCL_INCLUDE_DIRS})
+    target_include_directories(gpubench_lib SYSTEM PUBLIC ${OpenCL_INCLUDE_DIRS})
 endif()
 
 if(HIP_FOUND)
-    target_include_directories(gpubench PUBLIC ${HIP_INCLUDE_DIRS})
-    target_include_directories(gpubench_lib PUBLIC ${HIP_INCLUDE_DIRS})
+    target_include_directories(gpubench SYSTEM PUBLIC ${HIP_INCLUDE_DIRS})
+    target_include_directories(gpubench_lib SYSTEM PUBLIC ${HIP_INCLUDE_DIRS})
 endif()
 
 if(WIN32)
@@ -525,6 +530,8 @@ if(GPUBENCH_BUILD_GUI)
             cpp_src/gui/GuiApp.cpp
             cpp_src/gui/TelemetryWorker.cpp
             cpp_src/gui/VulkanContext.cpp
+        )
+        set(GUI_THIRD_PARTY_SOURCES
             ${IMGUI_DIR}/imgui.cpp
             ${IMGUI_DIR}/imgui_draw.cpp
             ${IMGUI_DIR}/imgui_tables.cpp
@@ -534,24 +541,37 @@ if(GPUBENCH_BUILD_GUI)
             ${IMPLOT_DIR}/implot.cpp
             ${IMPLOT_DIR}/implot_items.cpp
         )
+        if(NOT MSVC)
+            set_source_files_properties(${GUI_THIRD_PARTY_SOURCES} PROPERTIES
+                COMPILE_OPTIONS "-Wno-unused-parameter;-Wno-missing-field-initializers"
+            )
+        endif()
 
-        add_executable(gpubench-gui WIN32 ${GUI_SOURCES})
-        set_target_properties(gpubench-gui PROPERTIES CXX_STANDARD 23 CXX_STANDARD_REQUIRED ON)
-        target_compile_definitions(gpubench-gui PRIVATE GPUBENCH_VERSION="${PROJECT_FULL_VERSION}")
+        add_executable(gpubench-gui WIN32 ${GUI_SOURCES} ${GUI_THIRD_PARTY_SOURCES})
+        set_target_properties(gpubench-gui PROPERTIES CXX_STANDARD 23 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+        target_compile_definitions(gpubench-gui PRIVATE GPUBENCH_VERSION="${PROJECT_FULL_VERSION}" HAVE_VULKAN)
+        if(OpenCL_FOUND)
+            target_compile_definitions(gpubench-gui PRIVATE HAVE_OPENCL)
+        endif()
+        if(HIP_FOUND)
+            target_compile_definitions(gpubench-gui PRIVATE HAVE_ROCM)
+        endif()
 
         target_include_directories(gpubench-gui PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/cpp_src
             ${CMAKE_CURRENT_SOURCE_DIR}/cpp_src/gui
+        )
+        target_include_directories(gpubench-gui SYSTEM PRIVATE
+            ${Vulkan_INCLUDE_DIRS}
             ${IMGUI_DIR}
             ${IMGUI_DIR}/backends
             ${IMPLOT_DIR}
-            ${Vulkan_INCLUDE_DIRS}
         )
 
         if(TARGET SDL3::SDL3)
             target_link_libraries(gpubench-gui PRIVATE SDL3::SDL3)
         elseif(SDL3_LIBRARIES)
-            target_include_directories(gpubench-gui PRIVATE ${SDL3_INCLUDE_DIRS})
+            target_include_directories(gpubench-gui SYSTEM PRIVATE ${SDL3_INCLUDE_DIRS})
             target_link_libraries(gpubench-gui PRIVATE ${SDL3_LIBRARIES})
         endif()
 
@@ -602,7 +622,17 @@ endif()
 if(Vulkan_FOUND)
     install(DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/kernels/vulkan/
             DESTINATION share/gpubench/kernels/vulkan
-            FILES_MATCHING PATTERN "*.comp" PATTERN "*.spv")
+            FILES_MATCHING
+            PATTERN "*.comp"
+            PATTERN "*.rgen"
+            PATTERN "*.rmiss"
+            PATTERN "*.rchit"
+            PATTERN "*.rahit"
+            PATTERN "*.rint"
+            PATTERN "*.vert"
+            PATTERN "*.frag"
+            PATTERN "*.glsl"
+            PATTERN "*.spv")
 endif()
 
 if(OpenCL_FOUND)

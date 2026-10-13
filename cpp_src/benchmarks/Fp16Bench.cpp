@@ -1,4 +1,6 @@
 #include "benchmarks/Fp16Bench.h"
+#include <cmath>
+#include <cstring>
 #include <filesystem>
 #include <stdexcept>
 
@@ -15,8 +17,8 @@ void Fp16Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
       8192 * 64 * 4 * 4; // 8MB buffer to prevent out of bounds
   buffer = context.createBuffer(bufferSize);
 
-  // Initialize buffer
-  std::vector<uint32_t> initData(bufferSize / sizeof(uint32_t), 0);
+  // Initialize buffer with packed FP16 0.03125 (0x2800) so both vector and matrix loads see non-zero finite values
+  std::vector<uint32_t> initData(bufferSize / sizeof(uint32_t), 0x28002800u);
   context.writeBuffer(buffer, 0, bufferSize, initData.data());
 
   // Load Vector Kernel
@@ -94,7 +96,7 @@ BenchmarkResult Fp16Bench::GetResult(uint32_t config_idx) const {
     uint64_t ops_per_iter = 128; // 16 FMAs × 8 ops each
     if (context) {
       if (context->getBackend() == ComputeBackend::ROCm) {
-        iters = 2048;
+        iters = 16384;
         ops_per_iter = 128;
       } else if (context->getBackend() == ComputeBackend::OpenCL) {
         iters = 16384;
@@ -107,9 +109,66 @@ BenchmarkResult Fp16Bench::GetResult(uint32_t config_idx) const {
   } else {
     // coopmat 16x16x16: 16*16*16*2 = 8192 FP16 ops per coopMatMulAdd.
     // Each subgroup (32 threads) computes one tile — not multiplied by thread count.
-    // Shader loops 32768 iters. Dispatch: 65536 WGs.
+    // Shader loops 4096 iters * 8 accumulators = 32768 WMMA ops. Dispatch: 65536 WGs.
     uint64_t num_ops = (uint64_t)65536 * 32768 * 8192;
     return {num_ops, 0.0};
+  }
+}
+
+bool Fp16Bench::ValidateResults(uint32_t config_idx) const {
+  if (!context || !buffer) return false;
+  if (config_idx == 1 && !matrixKernel) return true;
+
+  try {
+    auto fp16ToFloat = [](uint16_t h) -> float {
+      uint32_t sign = (static_cast<uint32_t>(h & 0x8000u)) << 16;
+      uint32_t exp = (h >> 10) & 0x1Fu;
+      uint32_t mant = h & 0x03FFu;
+      uint32_t bits = 0;
+      if (exp == 0) {
+        if (mant == 0) {
+          bits = sign;
+        } else {
+          exp = 1;
+          while ((mant & 0x0400u) == 0) {
+            mant <<= 1;
+            exp--;
+          }
+          mant &= 0x03FFu;
+          bits = sign | ((exp + (127 - 15)) << 23) | (mant << 13);
+        }
+      } else if (exp == 0x1Fu) {
+        bits = sign | 0x7F800000u | (mant << 13);
+      } else {
+        bits = sign | ((exp + (127 - 15)) << 23) | (mant << 13);
+      }
+      float out = 0.0f;
+      std::memcpy(&out, &bits, sizeof(float));
+      return out;
+    };
+
+    if (config_idx == 1 && context->getBackend() == ComputeBackend::ROCm) {
+      std::vector<float> hostOut(64, 0.0f);
+      context->readBuffer(buffer, 0, hostOut.size() * sizeof(float), hostOut.data());
+      bool anyNonZero = false;
+      for (float v : hostOut) {
+        if (std::isnan(v) || std::isinf(v)) return false;
+        if (v != 0.0f) anyNonZero = true;
+      }
+      return anyNonZero;
+    }
+
+    std::vector<uint16_t> hostHalf(64, 0);
+    context->readBuffer(buffer, 0, hostHalf.size() * sizeof(uint16_t), hostHalf.data());
+    bool anyNonZero = false;
+    for (uint16_t h : hostHalf) {
+      float v = fp16ToFloat(h);
+      if (std::isnan(v) || std::isinf(v)) return false;
+      if (v != 0.0f) anyNonZero = true;
+    }
+    return anyNonZero;
+  } catch (...) {
+    return false;
   }
 }
 

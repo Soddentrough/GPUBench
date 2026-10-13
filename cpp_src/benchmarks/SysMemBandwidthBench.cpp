@@ -73,15 +73,29 @@ void SysMemBandwidthBench::Setup(IComputeContext &context,
     throw std::runtime_error("Failed to allocate system memory buffers");
   }
 
-  // Initialize memory to avoid page faults during timed run (Linux lazy
-  // allocation)
-  std::memset(buffer, 1, bufferSize);
-  std::memset(destBuffer, 0, bufferSize); // Touch pages
-
   // Determine thread count and initialize persistent worker thread pool
   threadCount = std::thread::hardware_concurrency();
   if (threadCount == 0) threadCount = 4;
   if (threadCount > 64) threadCount = 64; // Cap to 64 to avoid excessive memory bus contention
+
+  // Perform parallel first-touch page initialization across worker threads so pages
+  // are distributed across NUMA/CCD nodes rather than faulted onto thread 0's node.
+  {
+    std::vector<std::thread> initThreads;
+    initThreads.reserve(threadCount);
+    size_t chunkSize = (bufferSize / threadCount / 256) * 256;
+    for (unsigned int i = 0; i < threadCount; ++i) {
+      initThreads.emplace_back([this, i, chunkSize]() {
+        size_t offset = i * chunkSize;
+        size_t len = (i + 1 == threadCount) ? (bufferSize - offset) : chunkSize;
+        std::memset(static_cast<char *>(buffer) + offset, 1, len);
+        std::memset(static_cast<char *>(destBuffer) + offset, 0, len);
+      });
+    }
+    for (auto &t : initThreads) {
+      t.join();
+    }
+  }
 
   stopPool = false;
   workGeneration = 0;
@@ -213,7 +227,7 @@ void SysMemBandwidthBench::workerLoop(unsigned int tid) {
           if (config.mode == SysMemTestMode::Read) {
             run_read_avx2(tSrc, chunkSize);
           } else if (config.mode == SysMemTestMode::Write) {
-            run_write_avx2(tSrc, chunkSize);
+            run_write_avx2(tDst, chunkSize);
           } else {
             run_copy_avx2(tSrc, tDst, chunkSize);
           }
@@ -223,7 +237,7 @@ void SysMemBandwidthBench::workerLoop(unsigned int tid) {
           if (config.mode == SysMemTestMode::Read) {
             run_read_fallback(tSrc, chunkSize);
           } else if (config.mode == SysMemTestMode::Write) {
-            run_write_fallback(tSrc, chunkSize);
+            run_write_fallback(tDst, chunkSize);
           } else {
             run_copy_fallback(tSrc, tDst, chunkSize);
           }

@@ -22,7 +22,7 @@ void main() {
     // Strict scalar ping-pong dependency chain:
     // val0 strictly depends on val1, and val1 strictly depends on val0.
     // There are no independent operations in flight, enforcing a single-issue baseline.
-    float base = InOutBuffer.data[index];
+    float base = uintBitsToFloat((floatBitsToUint(InOutBuffer.data[index]) & 0x007FFFFFu) | 0x3F800000u);
     float val0 = base;
     float val1 = base + 0.1;
     float m = pushConstants.multiplier * 0.00001;

@@ -9,5 +9,5 @@ hitAttributeEXT SphereHit hitAttr;
 layout(location = 0) rayPayloadInEXT vec3 payload;
 
 void main() {
-    payload = vec3(1.0, 1.0, 1.0);
+    payload = hitAttr.normal * 0.5 + vec3(1.0);
 }

@@ -1,16 +1,19 @@
 #include "test_harness.h"
+#include "benchmarks/DualIssueBench.h"
+#include "benchmarks/LdsBankConflictBench.h"
+#include "benchmarks/RaySchedulingBench.h"
 #include <cmath>
+#include <cstdint>
 #include <vector>
 
 TEST_CASE(MathAndParity, Fp32RecurrenceConvergence) {
-  // Analytical verification of Critical Bug C-2 fix:
-  // x_{n+1} = fma(m, x_n, c) with |m| < 1.0 has spectral radius < 1.0
-  // and converges to the unique fixed point x* = c / (1 - m).
+  // Analytical verification of x_{n+1} = fma(m, x_n, c) with |m| < 1.0:
+  // spectral radius < 1.0, converges to the unique fixed point x* = c / (1 - m).
   const float m = 0.999f;
   const float c = 0.001f;
   const float fixedPoint = c / (1.0f - m); // 1.0f
 
-  float x = 0.5f; // Initial arbitrary non-zero value
+  float x = 0.5f;
   constexpr int kIterations = 16384;
 
   for (int i = 0; i < kIterations; ++i) {
@@ -20,90 +23,81 @@ TEST_CASE(MathAndParity, Fp32RecurrenceConvergence) {
     ASSERT_FALSE(std::isinf(x));
   }
 
-  // Value must be strictly finite and within epsilon of the fixed point
   ASSERT_NEAR(x, fixedPoint, 1e-4);
-
-  // Demonstrate the failure of the pre-fix recurrence:
-  // x_{n+1} = (1 + m) * x_n whose dominant eigenvalue is ~1.999
-  float divergentX = 1.0f;
-  bool reachedInf = false;
-  int infIteration = -1;
-
-  for (int i = 0; i < kIterations; ++i) {
-    divergentX = (1.0f + m) * divergentX;
-    if (std::isinf(divergentX)) {
-      reachedInf = true;
-      infIteration = i;
-      break;
-    }
-  }
-
-  // Pre-fix recurrence diverges to inf within ~130 iterations
-  ASSERT_TRUE(reachedInf);
-  ASSERT_LT(infIteration, 150);
 }
 
-TEST_CASE(MathAndParity, PsnrMaeArithmetic) {
-  constexpr size_t N = 10000;
-  std::vector<float> bufA(N, 0.75f);
-  std::vector<float> bufB(N, 0.75f);
-
-  // Exact identical buffers
-  double sumAe = 0.0;
-  double sumSe = 0.0;
-  for (size_t i = 0; i < N; ++i) {
-    double diff = std::abs(static_cast<double>(bufA[i]) - static_cast<double>(bufB[i]));
-    sumAe += diff;
-    sumSe += diff * diff;
+TEST_CASE(MathAndParity, Fp16AndDualIssueRecurrenceBounds) {
+  // 1. Verify FP16 self-recurrence: a = fma(a, -0.9990234375f, 0.5f)
+  // remains strictly within IEEE-754 FP16 range (max 65504.0) across 65,536 iterations.
+  const float m16 = -0.9990234375f;
+  const float c16 = 0.5f;
+  float a16 = 0.03125f;
+  for (int i = 0; i < 65536; ++i) {
+    a16 = std::fma(a16, m16, c16);
+    ASSERT_TRUE(std::isfinite(a16));
+    ASSERT_LT(std::abs(a16), 65504.0f);
   }
-  double mae = sumAe / N;
-  double mse = sumSe / N;
-  double psnr = (mse < 1e-12) ? 120.0 : 10.0 * std::log10(1.0 / mse);
+  ASSERT_GT(std::abs(a16), 0.0f);
 
-  ASSERT_EQ(mae, 0.0);
-  ASSERT_EQ(mse, 0.0);
-  ASSERT_GE(psnr, 100.0);
-
-  // Perturb exactly 1 pixel by 0.5f
-  bufB[500] = 0.25f;
-  sumAe = 0.0;
-  sumSe = 0.0;
-  uint32_t discrepantCount = 0;
-  for (size_t i = 0; i < N; ++i) {
-    double diff = std::abs(static_cast<double>(bufA[i]) - static_cast<double>(bufB[i]));
-    sumAe += diff;
-    sumSe += diff * diff;
-    if (diff > 1e-4) {
-      ++discrepantCount;
-    }
+  // 2. Verify DualIssue ILP4 coupled recurrence with scaled m = 0.999f * 0.00001f
+  // stays finite across 131,072 iterations.
+  const float mIlp4 = 0.999f * 0.00001f;
+  float val0 = 1.0f;
+  float val1 = 1.1f;
+  for (int i = 0; i < 131072; ++i) {
+    val0 = std::fma(val0, mIlp4, val1);
+    val1 = std::fma(val1, mIlp4, val0);
+    ASSERT_TRUE(std::isfinite(val0));
+    ASSERT_TRUE(std::isfinite(val1));
   }
-  mae = sumAe / N;
-  mse = sumSe / N;
-  psnr = 10.0 * std::log10(1.0 / mse);
-
-  ASSERT_EQ(discrepantCount, 1u);
-  ASSERT_NEAR(mae, 0.5 / N, 1e-9);
-  ASSERT_NEAR(mse, 0.25 / N, 1e-9);
-  ASSERT_TRUE(std::isfinite(psnr));
-  ASSERT_GT(psnr, 40.0); // 1 discrepant pixel out of 10,000 gives ~46 dB PSNR
 }
 
-TEST_CASE(MathAndParity, BaselineSpeedupGuards) {
-  // Baseline config comparison guard:
-  // If candidate baselineConfigIndex == -1, no speedup should be evaluated.
-  int32_t noBaseline = -1;
-  ASSERT_EQ(noBaseline, -1);
+TEST_CASE(MathAndParity, LdsBankConflictStridePreservation) {
+  // Verify that initializing LDS elements to 32u preserves the exact bank stride
+  // (base_addr(tid) - base_addr(0)) mod 32 == (tid * stride) mod 32 across iterations.
+  constexpr uint32_t kLdsSize = 1024;
+  std::vector<uint32_t> lds(kLdsSize, 32u);
 
-  // Candidate with valid baseline config index 0
-  int32_t baselineIdx = 0;
-  double baselineTime = 100.0; // 100 ms
-  double candidateTime = 25.0; // 25 ms
-  bool bothValid = true;
+  const uint32_t strides[] = {1u, 2u, 4u, 8u, 16u, 32u, 3u, 5u};
+  for (uint32_t stride : strides) {
+    std::vector<uint32_t> baseAddr(32);
+    std::vector<uint32_t> acc0(32, 0u);
+    for (uint32_t tid = 0; tid < 32; ++tid) {
+      baseAddr[tid] = (tid * stride) & 1023u;
+    }
 
-  double speedup = 0.0;
-  if (baselineIdx >= 0 && bothValid && candidateTime > 0.0) {
-    speedup = baselineTime / candidateTime;
+    for (int iter = 0; iter < 256; ++iter) {
+      for (uint32_t tid = 0; tid < 32; ++tid) {
+        uint32_t bank = baseAddr[tid] & 31u;
+        uint32_t expectedBank = ( (baseAddr[0] + tid * stride) & 31u );
+        ASSERT_EQ(bank, expectedBank);
+
+        acc0[tid] += lds[(baseAddr[tid] + 0u * stride) & 1023u];
+        baseAddr[tid] = (baseAddr[tid] + acc0[tid]) & 1023u;
+      }
+    }
   }
+}
 
-  ASSERT_NEAR(speedup, 4.0, 1e-6);
+TEST_CASE(MathAndParity, BenchmarkBaselineAndSortWeightIntegrity) {
+  RaySchedulingBench rtBench;
+  // Verify DGC Path Tracing and GI configs map to their Megakernel baselines
+  ASSERT_EQ(rtBench.GetBaselineConfigIndex(2), 0);
+  ASSERT_EQ(rtBench.GetBaselineConfigIndex(5), 3);
+  ASSERT_EQ(rtBench.GetBaselineConfigIndex(8), 6);
+  ASSERT_EQ(rtBench.GetBaselineConfigIndex(11), 9);
+  ASSERT_EQ(rtBench.GetBaselineConfigIndex(18), 17);
+  ASSERT_EQ(rtBench.GetBaselineConfigIndex(24), 23);
+
+  // Verify Config 2 (Material Shading DGC) and Config 6 (Incoherent GI Megakernel) do not share sortWeight
+  ASSERT_NE(rtBench.GetSortWeight(2), rtBench.GetSortWeight(6));
+
+  DualIssueBench diBench;
+  ASSERT_EQ(std::string(diBench.GetName()), "ILP & Dual-Issue");
+  ASSERT_EQ(diBench.GetNumConfigs(), 7u);
+
+  LdsBankConflictBench ldsBench;
+  ASSERT_EQ(ldsBench.GetNumConfigs(), 8u);
+  ASSERT_EQ(ldsBench.GetBaselineConfigIndex(0), -1);
+  ASSERT_EQ(ldsBench.GetBaselineConfigIndex(1), 0);
 }

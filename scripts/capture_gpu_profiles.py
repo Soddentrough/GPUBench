@@ -7,37 +7,50 @@ import shutil
 import subprocess
 import time
 import re
+import argparse
 
-AMDSMI_BIN = "/opt/rocm/current/bin/amd-smi" if os.path.exists("/opt/rocm/current/bin/amd-smi") else "/opt/rocm/bin/amd-smi"
+AMDSMI_CANDIDATES = [
+    "/opt/rocm/current/bin/amd-smi",
+    "/opt/rocm/core-10.1/bin/amd-smi",
+    "/opt/rocm/core-10.0/bin/amd-smi",
+    os.path.expanduser("~/.local/bin/amd-smi"),
+    "/opt/rocm/bin/amd-smi",
+]
+AMDSMI_BIN = next((p for p in AMDSMI_CANDIDATES if os.path.exists(p)), "amd-smi")
 RGA_BIN = "/opt/RadeonDeveloperToolSuite-2026-05-28-1806/rga"
 GPUBENCH_BIN = "./build/gpubench"
 PROFILES_DIR = "profiles"
+SCRATCH_DIR = os.path.join(PROFILES_DIR, "scratch")
 
 TESTS = [
     # Indoor Atrium
     {"scene": "indoor", "config": 0, "name": "Material Shading", "paradigm": "Traditional Megakernel", "slug": "indoor_material_traditional", "shader": "rt_scheduling_traditional_megakernel.comp"},
     {"scene": "indoor", "config": 2, "name": "Material Shading", "paradigm": "DGC (Material Sorting)", "slug": "indoor_material_dgc", "shader": "rt_scheduling_device_generated_commands_material.comp"},
-    {"scene": "indoor", "config": 4, "name": "Path Tracing (4 Bounces)", "paradigm": "Traditional Megakernel", "slug": "indoor_pathtracing_traditional", "shader": "rt_scheduling_traditional_megakernel.comp"},
-    {"scene": "indoor", "config": 6, "name": "Path Tracing (4 Bounces)", "paradigm": "DGC (Active Ray Compaction)", "slug": "indoor_pathtracing_dgc", "shader": "rt_scheduling_device_generated_commands_bounce.comp"},
-    {"scene": "indoor", "config": 8, "name": "Incoherent Secondary Rays", "paradigm": "Traditional Megakernel", "slug": "indoor_incoherent_traditional", "shader": "rt_scheduling_traditional_megakernel.comp"},
-    {"scene": "indoor", "config": 10, "name": "Incoherent Secondary Rays", "paradigm": "DGC (Directional Binning)", "slug": "indoor_incoherent_dgc", "shader": "rt_scheduling_device_generated_commands_classify.comp"},
-    {"scene": "indoor", "config": 12, "name": "Primary Ray Tracing", "paradigm": "Traditional Megakernel", "slug": "indoor_primary_traditional", "shader": "rt_scheduling_traditional_megakernel.comp"},
-    {"scene": "indoor", "config": 14, "name": "Primary Ray Tracing", "paradigm": "DGC (Decoupled Micro-Kernels)", "slug": "indoor_primary_dgc", "shader": "rt_scheduling_device_generated_commands_material.comp"},
+    {"scene": "indoor", "config": 3, "name": "Path Tracing (1 SPP)", "paradigm": "Traditional Megakernel", "slug": "indoor_pathtracing_traditional", "shader": "rt_scheduling_traditional_megakernel.comp"},
+    {"scene": "indoor", "config": 5, "name": "Path Tracing (1 SPP)", "paradigm": "DGC (Active Ray Compaction)", "slug": "indoor_pathtracing_dgc", "shader": "rt_scheduling_device_generated_commands_bounce.comp"},
+    {"scene": "indoor", "config": 6, "name": "Incoherent Secondary Rays", "paradigm": "Traditional Megakernel", "slug": "indoor_incoherent_traditional", "shader": "rt_scheduling_traditional_megakernel.comp"},
+    {"scene": "indoor", "config": 8, "name": "Incoherent Secondary Rays", "paradigm": "DGC (Directional Binning)", "slug": "indoor_incoherent_dgc", "shader": "rt_scheduling_device_generated_commands_classify.comp"},
+    {"scene": "indoor", "config": 9, "name": "Scene Render: Full Frame", "paradigm": "Traditional Megakernel", "slug": "indoor_fullframe_traditional", "shader": "rt_scheduling_traditional_megakernel.comp"},
+    {"scene": "indoor", "config": 11, "name": "Scene Render: Full Frame", "paradigm": "DGC (Decoupled Micro-Kernels)", "slug": "indoor_fullframe_dgc", "shader": "rt_scheduling_device_generated_commands_material.comp"},
+    {"scene": "indoor", "config": 17, "name": "Primary Ray Tracing", "paradigm": "Traditional Megakernel", "slug": "indoor_primary_traditional", "shader": "rt_scheduling_traditional_megakernel.comp"},
+    {"scene": "indoor", "config": 18, "name": "Primary Ray Tracing", "paradigm": "DGC (Decoupled Micro-Kernels)", "slug": "indoor_primary_dgc", "shader": "rt_scheduling_device_generated_commands_material.comp"},
 
     # Outdoor Landscape
     {"scene": "outdoor", "config": 0, "name": "Material Shading", "paradigm": "Traditional Megakernel", "slug": "outdoor_material_traditional", "shader": "rt_scheduling_traditional_megakernel.comp"},
     {"scene": "outdoor", "config": 2, "name": "Material Shading", "paradigm": "DGC (Material Sorting)", "slug": "outdoor_material_dgc", "shader": "rt_scheduling_device_generated_commands_material.comp"},
-    {"scene": "outdoor", "config": 4, "name": "Path Tracing (4 Bounces)", "paradigm": "Traditional Megakernel", "slug": "outdoor_pathtracing_traditional", "shader": "rt_scheduling_traditional_megakernel.comp"},
-    {"scene": "outdoor", "config": 6, "name": "Path Tracing (4 Bounces)", "paradigm": "DGC (Active Ray Compaction)", "slug": "outdoor_pathtracing_dgc", "shader": "rt_scheduling_device_generated_commands_bounce.comp"},
-    {"scene": "outdoor", "config": 8, "name": "Incoherent Secondary Rays", "paradigm": "Traditional Megakernel", "slug": "outdoor_incoherent_traditional", "shader": "rt_scheduling_traditional_megakernel.comp"},
-    {"scene": "outdoor", "config": 10, "name": "Incoherent Secondary Rays", "paradigm": "DGC (Directional Binning)", "slug": "outdoor_incoherent_dgc", "shader": "rt_scheduling_device_generated_commands_classify.comp"},
-    {"scene": "outdoor", "config": 12, "name": "Primary Ray Tracing", "paradigm": "Traditional Megakernel", "slug": "outdoor_primary_traditional", "shader": "rt_scheduling_traditional_megakernel.comp"},
-    {"scene": "outdoor", "config": 14, "name": "Primary Ray Tracing", "paradigm": "DGC (Decoupled Micro-Kernels)", "slug": "outdoor_primary_dgc", "shader": "rt_scheduling_device_generated_commands_material.comp"},
+    {"scene": "outdoor", "config": 3, "name": "Path Tracing (1 SPP)", "paradigm": "Traditional Megakernel", "slug": "outdoor_pathtracing_traditional", "shader": "rt_scheduling_traditional_megakernel.comp"},
+    {"scene": "outdoor", "config": 5, "name": "Path Tracing (1 SPP)", "paradigm": "DGC (Active Ray Compaction)", "slug": "outdoor_pathtracing_dgc", "shader": "rt_scheduling_device_generated_commands_bounce.comp"},
+    {"scene": "outdoor", "config": 6, "name": "Incoherent Secondary Rays", "paradigm": "Traditional Megakernel", "slug": "outdoor_incoherent_traditional", "shader": "rt_scheduling_traditional_megakernel.comp"},
+    {"scene": "outdoor", "config": 8, "name": "Incoherent Secondary Rays", "paradigm": "DGC (Directional Binning)", "slug": "outdoor_incoherent_dgc", "shader": "rt_scheduling_device_generated_commands_classify.comp"},
+    {"scene": "outdoor", "config": 9, "name": "Scene Render: Full Frame", "paradigm": "Traditional Megakernel", "slug": "outdoor_fullframe_traditional", "shader": "rt_scheduling_traditional_megakernel.comp"},
+    {"scene": "outdoor", "config": 11, "name": "Scene Render: Full Frame", "paradigm": "DGC (Decoupled Micro-Kernels)", "slug": "outdoor_fullframe_dgc", "shader": "rt_scheduling_device_generated_commands_material.comp"},
+    {"scene": "outdoor", "config": 17, "name": "Primary Ray Tracing", "paradigm": "Traditional Megakernel", "slug": "outdoor_primary_traditional", "shader": "rt_scheduling_traditional_megakernel.comp"},
+    {"scene": "outdoor", "config": 18, "name": "Primary Ray Tracing", "paradigm": "DGC (Decoupled Micro-Kernels)", "slug": "outdoor_primary_dgc", "shader": "rt_scheduling_device_generated_commands_material.comp"},
 ]
 
-def query_amd_smi():
+def query_amd_smi(device_idx: int = 0):
     try:
-        res = subprocess.run([AMDSMI_BIN, "metric", "-g", "1", "--json"], capture_output=True, text=True, check=True)
+        res = subprocess.run([AMDSMI_BIN, "metric", "-g", str(device_idx), "--json"], capture_output=True, text=True, check=True)
         data = json.loads(res.stdout)
         dev = {}
         if isinstance(data, dict) and "gpu_data" in data and len(data["gpu_data"]) > 0:
@@ -98,27 +111,29 @@ def parse_gpubench_output(stdout_text, stderr_text):
                         fps = (throughput * 1e6) / (1920.0 * 1080.0)
     return throughput, metric, fps
 
-def run_test(test_info):
+def run_test(test_info, device_idx: int = 0):
     os.makedirs(PROFILES_DIR, exist_ok=True)
+    os.makedirs(SCRATCH_DIR, exist_ok=True)
     slug = test_info["slug"]
     rgp_dest = os.path.join(PROFILES_DIR, f"{slug}.rgp")
 
-    # Clean previous /tmp/gpubench_*.rgp
-    for f in glob.glob("/tmp/gpubench_*.rgp"):
+    # Clean previous scratch gpubench_*.rgp files
+    for f in glob.glob(os.path.join(SCRATCH_DIR, "gpubench_*.rgp")):
         try:
             os.remove(f)
         except OSError:
             pass
 
-    smi_before = query_amd_smi()
+    smi_before = query_amd_smi(device_idx)
 
     env = os.environ.copy()
     env["MESA_VK_TRACE"] = "rgp"
     env["MESA_VK_TRACE_PER_SUBMIT"] = "1"
+    env["MESA_VK_TRACE_DIR"] = os.path.abspath(SCRATCH_DIR)
 
     cmd = [
         GPUBENCH_BIN,
-        "-d", "1",
+        "-d", str(device_idx),
         "-b", "RayScheduling",
         "--scene", test_info["scene"],
         "-c", str(test_info["config"]),
@@ -130,10 +145,10 @@ def run_test(test_info):
     res = subprocess.run(cmd, env=env, capture_output=True, text=True)
     t1 = time.time()
 
-    smi_after = query_amd_smi()
+    smi_after = query_amd_smi(device_idx)
 
-    # Find the largest .rgp file in /tmp/ (corresponding to the timed test dispatch)
-    rgp_files = glob.glob("/tmp/gpubench_*.rgp")
+    # Find the largest .rgp file in SCRATCH_DIR (corresponding to the timed test dispatch)
+    rgp_files = glob.glob(os.path.join(SCRATCH_DIR, "gpubench_*.rgp"))
     rgp_size = 0
     if rgp_files:
         rgp_files.sort(key=os.path.getsize, reverse=True)
@@ -141,7 +156,7 @@ def run_test(test_info):
         rgp_size = os.path.getsize(largest)
         shutil.copyfile(largest, rgp_dest)
 
-    # Clean up /tmp/*.rgp
+    # Clean up scratch *.rgp
     for f in rgp_files:
         try:
             os.remove(f)
@@ -167,7 +182,8 @@ def run_test(test_info):
         "shader": test_info["shader"]
     }
 
-def analyze_shaders_rga():
+def analyze_shaders_rga(target_arch: str = "gfx1201"):
+    os.makedirs(SCRATCH_DIR, exist_ok=True)
     shaders = [
         "rt_scheduling_traditional_megakernel.comp",
         "rt_scheduling_device_generated_commands_classify.comp",
@@ -176,23 +192,26 @@ def analyze_shaders_rga():
     ]
     rga_results = {}
     for s in shaders:
-        spath = os.path.join("shaders", s)
+        spv_candidate = os.path.join("build", "kernels", "vulkan", s + ".spv")
+        spath = spv_candidate if os.path.exists(spv_candidate) else os.path.join("build", "kernels", "vulkan", s)
+        if not os.path.exists(spath):
+            spath = os.path.join("shaders", s)
         base = os.path.splitext(s)[0]
-        out_analysis_prefix = f"/tmp/rga_analysis_{base}"
-        out_isa_prefix = f"/tmp/rga_isa_{base}"
+        out_analysis_prefix = os.path.join(SCRATCH_DIR, f"rga_analysis_{base}")
+        out_isa_prefix = os.path.join(SCRATCH_DIR, f"rga_isa_{base}")
 
         cmd = [
             RGA_BIN,
             "-s", "vk-spv-offline",
-            "-c", "gfx1201",
+            "-c", target_arch,
             "--comp", spath,
             "--analysis", out_analysis_prefix + ".csv",
             "--isa", out_isa_prefix + ".txt"
         ]
         try:
             subprocess.run(cmd, capture_output=True, check=True)
-            gen_csv = f"/tmp/gfx1201_rga_analysis_{base}_comp.csv"
-            gen_isa = f"/tmp/gfx1201_rga_isa_{base}_comp.txt"
+            gen_csv = os.path.join(SCRATCH_DIR, f"{target_arch}_rga_analysis_{base}_comp.csv")
+            gen_isa = os.path.join(SCRATCH_DIR, f"{target_arch}_rga_isa_{base}_comp.txt")
 
             entry = {}
             if os.path.exists(gen_csv):
@@ -262,26 +281,32 @@ def analyze_shaders_rga():
     return rga_results
 
 def main():
+    parser = argparse.ArgumentParser(description="GPUBench Dual-Scenario GPU Profiling Capture & Architecture Analysis")
+    parser.add_argument("-d", "--device", type=int, default=0, help="Target GPU device index (default: 0)")
+    parser.add_argument("--arch", default="gfx1201", help="Target RGA architecture (default: gfx1201)")
+    args = parser.parse_args()
+
     print("=" * 80)
     print("  GPUBench Dual-Scenario GPU Profiling Capture & Architecture Analysis")
-    print("  Hardware: AMD Radeon AI PRO R9700 (GFX1201, GPU 1)")
+    print(f"  Target Device: GPU {args.device} | RGA Target: {args.arch}")
     print("=" * 80)
 
     results = []
     for idx, test_info in enumerate(TESTS):
         print(f"[{idx+1:02d}/{len(TESTS)}] Capturing snapshot: {test_info['scene'].upper():<7} | {test_info['name']} ({test_info['paradigm']})...", flush=True)
-        res = run_test(test_info)
+        res = run_test(test_info, args.device)
         results.append(res)
         tp_str = f"{res['profiled_throughput']:,.2f} {res['metric']}" if res['profiled_throughput'] else "N/A"
         fps_str = f"({res['profiled_fps']:.1f} FPS)" if res['profiled_fps'] else ""
         print(f"       -> Profile Throughput: {tp_str:<22} {fps_str:<12} | RGP Trace: {res['rgp_path']} ({res['rgp_size_bytes']:,} bytes)")
 
     print("\nRunning Radeon GPU Analyzer (RGA) ISA disassembly & occupancy evaluation...")
-    shader_stats = analyze_shaders_rga()
+    shader_stats = analyze_shaders_rga(args.arch)
 
     out_data = {
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "gpu": "AMD Radeon AI PRO R9700 (GFX1201, ID 1)",
+        "gpu_index": args.device,
+        "arch": args.arch,
         "resolution": "1920x1080 (1080p)",
         "snapshots": results,
         "shader_architecture": shader_stats

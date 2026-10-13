@@ -4,7 +4,7 @@ _gpubench_gui() {
     local cur prev words cword
     _init_completion || return
 
-    local opts="--help -h --version -v --backend -k --group --groups -g --benchmark --benchmarks -b --device --devices -d --resolution -r --dump-renders --dump --auto-start --run"
+    local opts="--help -h --version -v --backend -k --group --groups -g --benchmark --benchmarks -b --test -t --device -d --scene -s --res --resolution -r --ui-scale --scale --dump-renders --dump --no-dump-renders --no-dump --auto-run --auto-start --run --exit-on-complete --frames --verbose --debug"
 
     case "$prev" in
         -k|--backend)
@@ -15,12 +15,20 @@ _gpubench_gui() {
             COMPREPLY=( $(compgen -W "compute memory raster graphics raytracing system all" -- "$cur") )
             return 0
             ;;
-        -r|--resolution)
-            COMPREPLY=( $(compgen -W "auto 1080p 1440p 4k" -- "$cur") )
+        -s|--scene)
+            COMPREPLY=( $(compgen -W "showroom indoor outdoor forest" -- "$cur") )
             return 0
             ;;
-        -b|--benchmark|--benchmarks)
-            COMPREPLY=( $(compgen -W "fp32 fp64 fp16 bf16 fp8 int8 int4 membw fillrate sysmem syslat asbuild triangle anyhit procedural mat_divergence incoherent divergence payload pathtracing rayscheduling all" -- "$cur") )
+        -r|--res|--resolution)
+            COMPREPLY=( $(compgen -W "720p 1080p 1440p 4k 8k" -- "$cur") )
+            return 0
+            ;;
+        --ui-scale|--scale)
+            COMPREPLY=( $(compgen -W "1.0 1.25 1.5 1.75 2.0 2.5" -- "$cur") )
+            return 0
+            ;;
+        -b|--benchmark|--benchmarks|-t|--test)
+            COMPREPLY=( $(compgen -W "fp64 fp32 dualissue lds indirect fp16 bf16 fp8 fp6 fp4 int8 int4 membw l0_cache cache_latency_curve pixelfill rayrawtraversal rayasbuild rayintersect rayanyhit rayprocedural rayscheduling raydivergence sysmembw sysmemlatency all" -- "$cur") )
             return 0
             ;;
     esac

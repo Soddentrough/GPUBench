@@ -6,7 +6,7 @@ gpubench-gui \- Graphical interface for GPU compute and hardware ray tracing ben
 [\fIOPTIONS\fR]
 .SH DESCRIPTION
 .B GPUBench GUI
-is the graphical interface for GPUBench, a cross-backend GPU compute and hardware ray tracing benchmark suite. It features real-time telemetry graphs (GPU clock, temperature, fan speed, power, VRAM), configurable test suites, visual parity inspection with split/diff/heatmap views, and analytical scorecard evaluations. Command line options can be supplied to preconfigure options or run benchmarks non-interactively.
+is the graphical interface for GPUBench, a cross-backend GPU compute and hardware ray tracing benchmark suite. It features real-time telemetry graphs (GPU clock, temperature, power, VRAM, activity), configurable test suites, visual parity inspection with split/diff/heatmap views, and analytical scorecard evaluations. Command line options can be supplied to preconfigure options or run benchmarks non-interactively.
 .SH OPTIONS
 .TP
 .BR \-h ", " \-\-help
@@ -16,35 +16,56 @@ Print help message and exit.
 Display program version information and exit.
 .TP
 .BR \-k ", " \-\-backend " \fIBACKEND\fR"
-Select default compute backend: vulkan, opencl, rocm.
+Select default compute backend: auto, vulkan, opencl, rocm.
 .TP
 .BR \-g ", " \-\-group ", " \-\-groups " \fINAMES\fR"
 Benchmark group(s) to enable: compute, memory, graphics (combines raster & raytracing), raster, raytracing, system, all.
 .TP
-.BR \-b ", " \-\-benchmark ", " \-\-benchmarks " \fIBENCHMARKS\fR"
-Specific benchmark(s) to enable (comma-separated or multiple flags). Supported identifiers include: fp32, fp64, fp16, bf16, fp8, int8, int4, membw, fillrate, sysmem, syslat, asbuild, triangle, anyhit, procedural, mat_divergence, incoherent, divergence, payload, pathtracing, rayscheduling, all.
+.BR \-b ", " \-\-benchmark ", " \-\-benchmarks ", " \-t ", " \-\-test " \fIBENCHMARKS\fR"
+Specific benchmark(s) to enable (comma-separated). Supported identifiers include: fp32, fp64, dualissue, lds, indirect, fp16, bf16, fp8, fp6, fp4, int8, int4, membw, l0_cache, cache_latency_curve, pixelfill, rayrawtraversal, rayasbuild, rayintersect, rayanyhit, rayprocedural, rayscheduling, raydivergence, sysmembw, sysmemlatency, all.
 .TP
-.BR \-d ", " \-\-device ", " \-\-devices " \fIDEVICES\fR"
-Target GPU device index(es) (e.g., 0, 1, or 0,1).
+.BR \-d ", " \-\-device " \fIDEVICES\fR"
+Target GPU device index(es) (e.g., 0, 1, 0,1, dual, or all).
 .TP
-.BR \-r ", " \-\-resolution " \fIPRESET\fR"
-Resolution preset: auto, 1080p, 1440p, 4k.
+.BR \-s ", " \-\-scene " \fISCENE\fR"
+Pre-select Ray Tracing scene: showroom, indoor, outdoor, forest.
+.TP
+.BR \-r ", " \-\-res ", " \-\-resolution " \fIPRESET\fR"
+Resolution preset: 720p, 1080p, 1440p, 4k, 8k, or custom WxH.
+.TP
+.BR \-\-ui-scale ", " \-\-scale " \fISCALE\fR"
+Override UI DPI scaling factor (e.g., 1.0, 1.25, 1.5, 2.0).
 .TP
 .BR \-\-dump-renders ", " \-\-dump
 Enable visual verification and dump comparison frames to disk.
 .TP
-.BR \-\-auto-start ", " \-\-run
+.BR \-\-no-dump-renders ", " \-\-no-dump
+Disable saving rendered output images to disk.
+.TP
+.BR \-\-auto-run ", " \-\-auto-start ", " \-\-run
 Automatically begin benchmark execution immediately upon launch.
+.TP
+.BR \-\-exit-on-complete
+Exit automatically when the benchmark run finishes.
+.TP
+.BR \-\-frames " \fICOUNT\fR"
+Run for the specified number of frames and exit.
+.TP
+.BR \-\-verbose
+Enable verbose logging output.
+.TP
+.BR \-\-debug
+Enable debug logging output.
 .SH EXAMPLES
 .TP
-Launch GUI with Vulkan backend, Ray Tracing group, and GPU 1 selected:
-.B gpubench-gui \-k vulkan \-g raytracing \-d 1
+Launch GUI with Vulkan backend, Ray Tracing group, and GPU 0 selected:
+.B gpubench-gui \-k vulkan \-g raytracing \-d 0
 .TP
 Launch GUI with Compute and Memory benchmarks at 1080p:
 .B gpubench-gui \-g compute,memory \-r 1080p
 .TP
 Run Ray Scheduling benchmark automatically and dump renders:
-.B gpubench-gui \-b rayscheduling \-\-dump-renders \-\-auto-start
+.B gpubench-gui \-b rayscheduling \-\-dump-renders \-\-auto-run
 .SH SEE ALSO
 .BR gpubench (1)
 .SH AUTHORS

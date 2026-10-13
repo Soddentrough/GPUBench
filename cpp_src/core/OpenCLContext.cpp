@@ -215,6 +215,16 @@ OpenCLContext::~OpenCLContext() {
       timingStopEvent = nullptr;
     }
   }
+  for (ComputeBuffer buf : allocatedBuffers) {
+    if (buf) {
+      auto *buffer_cl = static_cast<ComputeBuffer_cl *>(buf);
+      if (f_clReleaseMemObject && buffer_cl->buffer) {
+        (void)f_clReleaseMemObject(buffer_cl->buffer);
+      }
+      delete buffer_cl;
+    }
+  }
+  allocatedBuffers.clear();
   if (commandQueue) {
     f_clReleaseCommandQueue(commandQueue);
     commandQueue = nullptr;
@@ -238,6 +248,26 @@ void OpenCLContext::enumeratePlatformsAndDevices() {
   std::vector<cl_platform_id> platforms(platformCount);
   f_clGetPlatformIDs(platformCount, platforms.data(), nullptr);
 
+  auto filterAndAddDevices = [&](const std::vector<cl_device_id> &candidates) {
+    for (cl_device_id dev : candidates) {
+      char name[256] = {0};
+      f_clGetDeviceInfo(dev, CL_DEVICE_NAME, sizeof(name), name, nullptr);
+      std::string deviceName = name;
+      char boardName[256] = {0};
+      if (f_clGetDeviceInfo(dev, 0x4038, sizeof(boardName), boardName, nullptr) == 0 &&
+          boardName[0] != '\0') {
+        deviceName = std::string(boardName);
+      }
+      if (deviceName.find("llvmpipe") != std::string::npos)
+        continue;
+      cl_device_type type = 0;
+      f_clGetDeviceInfo(dev, CL_DEVICE_TYPE, sizeof(type), &type, nullptr);
+      if (type & CL_DEVICE_TYPE_CPU)
+        continue;
+      devices.push_back(dev);
+    }
+  };
+
   for (const auto &p : platforms) {
     cl_uint deviceCount = 0;
     err = f_clGetDeviceIDs(p, CL_DEVICE_TYPE_GPU, 0, nullptr, &deviceCount);
@@ -246,7 +276,7 @@ void OpenCLContext::enumeratePlatformsAndDevices() {
       std::vector<cl_device_id> pDevs(deviceCount);
       if (f_clGetDeviceIDs(p, CL_DEVICE_TYPE_GPU, deviceCount,
                            pDevs.data(), nullptr) == CL_SUCCESS) {
-        devices.insert(devices.end(), pDevs.begin(), pDevs.end());
+        filterAndAddDevices(pDevs);
       }
     }
   }
@@ -260,7 +290,7 @@ void OpenCLContext::enumeratePlatformsAndDevices() {
         std::vector<cl_device_id> pDevs(deviceCount);
         if (f_clGetDeviceIDs(p, CL_DEVICE_TYPE_ALL, deviceCount,
                              pDevs.data(), nullptr) == CL_SUCCESS) {
-          devices.insert(devices.end(), pDevs.begin(), pDevs.end());
+          filterAndAddDevices(pDevs);
         }
       }
     }
@@ -288,16 +318,13 @@ const std::vector<DeviceInfo> &OpenCLContext::getDevices() const {
         deviceName = std::string(boardName);
       }
 
-      if (deviceName.find("llvmpipe") != std::string::npos)
-        continue;
-
-      cl_device_type type;
-      f_clGetDeviceInfo(dev, CL_DEVICE_TYPE, sizeof(type), &type, nullptr);
-      if (type & CL_DEVICE_TYPE_CPU)
-        continue;
-
       DeviceInfo info;
       info.name = deviceName;
+
+      cl_uint vendorId = 0;
+      if (f_clGetDeviceInfo(dev, CL_DEVICE_VENDOR_ID, sizeof(vendorId), &vendorId, nullptr) == CL_SUCCESS) {
+        info.vendorID = vendorId;
+      }
 
       cl_ulong memSize;
       f_clGetDeviceInfo(dev, CL_DEVICE_GLOBAL_MEM_SIZE, sizeof(memSize),
@@ -308,6 +335,14 @@ const std::vector<DeviceInfo> &OpenCLContext::getDevices() const {
       f_clGetDeviceInfo(dev, CL_DEVICE_MAX_WORK_GROUP_SIZE,
                         sizeof(maxWorkGroupSize), &maxWorkGroupSize, nullptr);
       info.maxWorkGroupSize = static_cast<uint32_t>(maxWorkGroupSize);
+
+      size_t maxItemSizes[3] = {0, 0, 0};
+      if (f_clGetDeviceInfo(dev, CL_DEVICE_MAX_WORK_ITEM_SIZES, sizeof(maxItemSizes),
+                            maxItemSizes, nullptr) == CL_SUCCESS) {
+        info.maxComputeWorkGroupCountX = static_cast<uint32_t>(maxItemSizes[0]);
+        info.maxComputeWorkGroupCountY = static_cast<uint32_t>(maxItemSizes[1]);
+        info.maxComputeWorkGroupCountZ = static_cast<uint32_t>(maxItemSizes[2]);
+      }
 
       cl_ulong localMemSize;
       f_clGetDeviceInfo(dev, CL_DEVICE_LOCAL_MEM_SIZE, sizeof(localMemSize),
@@ -391,6 +426,16 @@ void OpenCLContext::pickDevice(uint32_t index) {
       timingStopEvent = nullptr;
     }
   }
+  for (ComputeBuffer buf : allocatedBuffers) {
+    if (buf) {
+      auto *buffer_cl = static_cast<ComputeBuffer_cl *>(buf);
+      if (f_clReleaseMemObject && buffer_cl->buffer) {
+        (void)f_clReleaseMemObject(buffer_cl->buffer);
+      }
+      delete buffer_cl;
+    }
+  }
+  allocatedBuffers.clear();
   if (commandQueue) {
     f_clReleaseCommandQueue(commandQueue);
     commandQueue = nullptr;
@@ -426,6 +471,11 @@ DeviceInfo OpenCLContext::getCurrentDeviceInfo() const {
     info.name = deviceInfos[selectedDeviceIndex].name;
   }
 
+  cl_uint vendorId = 0;
+  if (f_clGetDeviceInfo(device, CL_DEVICE_VENDOR_ID, sizeof(vendorId), &vendorId, nullptr) == CL_SUCCESS) {
+    info.vendorID = vendorId;
+  }
+
   cl_ulong memSize;
   f_clGetDeviceInfo(device, CL_DEVICE_GLOBAL_MEM_SIZE, sizeof(memSize),
                     &memSize, nullptr);
@@ -435,6 +485,14 @@ DeviceInfo OpenCLContext::getCurrentDeviceInfo() const {
   f_clGetDeviceInfo(device, CL_DEVICE_MAX_WORK_GROUP_SIZE,
                     sizeof(maxWorkGroupSize), &maxWorkGroupSize, nullptr);
   info.maxWorkGroupSize = static_cast<uint32_t>(maxWorkGroupSize);
+
+  size_t maxItemSizes[3] = {0, 0, 0};
+  if (f_clGetDeviceInfo(device, CL_DEVICE_MAX_WORK_ITEM_SIZES, sizeof(maxItemSizes),
+                        maxItemSizes, nullptr) == CL_SUCCESS) {
+    info.maxComputeWorkGroupCountX = static_cast<uint32_t>(maxItemSizes[0]);
+    info.maxComputeWorkGroupCountY = static_cast<uint32_t>(maxItemSizes[1]);
+    info.maxComputeWorkGroupCountZ = static_cast<uint32_t>(maxItemSizes[2]);
+  }
 
   cl_ulong localMemSize;
   f_clGetDeviceInfo(device, CL_DEVICE_LOCAL_MEM_SIZE, sizeof(localMemSize),
@@ -522,7 +580,9 @@ ComputeBuffer OpenCLContext::createBuffer(size_t size, const void *host_ptr) {
   if (err != CL_SUCCESS) {
     throw std::runtime_error("Failed to create OpenCL buffer");
   }
-  return new ComputeBuffer_cl{buffer};
+  ComputeBuffer handle = new ComputeBuffer_cl{buffer};
+  allocatedBuffers.insert(handle);
+  return handle;
 }
 
 void OpenCLContext::writeBuffer(ComputeBuffer buffer, size_t offset,
@@ -549,6 +609,7 @@ void OpenCLContext::readBuffer(ComputeBuffer buffer, size_t offset, size_t size,
 
 void OpenCLContext::releaseBuffer(ComputeBuffer buffer) {
   if (buffer) {
+    allocatedBuffers.erase(buffer);
     auto *buffer_cl = static_cast<ComputeBuffer_cl *>(buffer);
     f_clReleaseMemObject(buffer_cl->buffer);
     delete buffer_cl;
@@ -558,6 +619,7 @@ void OpenCLContext::releaseBuffer(ComputeBuffer buffer) {
 ComputeKernel OpenCLContext::createKernel(const std::string &file_name,
                                           const std::string &kernel_name,
                                           uint32_t num_args) {
+  (void)num_args;
   notifyKernelCreated(file_name);
   if (!available)
     throw std::runtime_error("OpenCL not available");
@@ -613,6 +675,7 @@ ComputeKernel OpenCLContext::createKernel(const std::string &file_name,
     f_clGetProgramBuildInfo(program, device, CL_PROGRAM_BUILD_LOG, log_size,
                             log.data(), nullptr);
     std::string log_str(log.begin(), log.end());
+    f_clReleaseProgram(program);
     throw std::runtime_error("Failed to build OpenCL program: " + log_str);
   }
 

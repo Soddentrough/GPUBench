@@ -230,31 +230,28 @@ void getCamera(uint sceneType, out vec3 camPos, out vec3 camForward, out vec3 ca
             camForward = normalize(target - camPos);
             camRight = normalize(cross(camForward, vec3(0.0, 1.0, 0.0)));
             camUp = cross(camRight, camForward);
-            fov = 0.48;
-            return;
-        } else {
-            camPos = vec3(-400.0, 350.0, 280.0);
-            vec3 target = vec3(0.0, 0.0, 80.0);
-            camForward = normalize(target - camPos);
-            camRight = normalize(cross(camForward, vec3(0.0, 0.0, 1.0)));
-            camUp = cross(camRight, camForward);
-            fov = 0.60;
+            fov = 0.45;
             return;
         }
     }
     if (sceneType == SCENE_OUTDOOR_TERRAIN) {
-        camPos = vec3(-450.0, -350.0, 280.0);
-        vec3 target = vec3(0.0, 0.0, 80.0);
-        camForward = normalize(target - camPos);
-        camRight = normalize(cross(camForward, vec3(0.0, 0.0, 1.0)));
-        camUp = cross(camRight, camForward);
-        fov = 0.60;
-    } else {
-        camPos = vec3(0.0, -6.5, 1.8);
-        camForward = normalize(vec3(0.0, 1.0, -0.15));
+        camPos = vec3(0.0, -320.0, 75.0);
+        camForward = vec3(0.0, 0.997375, -0.072412);
         camRight = vec3(1.0, 0.0, 0.0);
-        camUp = cross(camRight, camForward);
-        fov = 0.70;
+        camUp = vec3(0.0, 0.072412, 0.997375);
+        fov = 0.45;
+    } else if (sceneType == SCENE_INDOOR_ATRIUM) {
+        camPos = vec3(0.0, -9.6, 1.2);
+        camForward = normalize(vec3(0.0, 9.6, 0.6));
+        camRight = vec3(1.0, 0.0, 0.0);
+        camUp = normalize(cross(camRight, camForward));
+        fov = 0.65;
+    } else {
+        camPos = vec3(-0.5081, -8.1276, 1.5591);
+        camForward = vec3(0.0562, 0.9852, -0.1622);
+        camRight = vec3(0.9984, -0.0570, 0.0000);
+        camUp = vec3(0.0092, 0.1619, 0.9868);
+        fov = 0.2155;
     }
 }
 
@@ -552,15 +549,15 @@ void main() {
                         sampleRadiance = evalSky(pc.sceneType, curDir);
                     }
                 }
-                if (pc.dumpRenders != 0) {
-                    accumRadiance += sampleRadiance;
-                }
+                accumRadiance += sampleRadiance;
             }
 
             if (pc.dumpRenders != 0) {
                 float expGain = (pc.sceneType == 2u) ? 1.6 : 1.0;
                 vec3 finalColor = (accumRadiance / float(sppToRun)) * expGain;
                 fb.pixels[pixelIdx] = vec4(tonemapACES(finalColor), 1.0);
+            } else if (dot(accumRadiance, vec3(1.0)) < -1e30) {
+                results.accumulatedLuminance = accumRadiance.x;
             }
         }
     }

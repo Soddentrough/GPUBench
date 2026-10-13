@@ -9,9 +9,10 @@ layout(location = 0) rayPayloadInEXT Payload256B payload;
 hitAttributeEXT vec2 attribs;
 
 void main() {
-    payload.data[0] = vec4(1.0);
-    // Force usage of the payload data
-    for (int i = 1; i < 16; ++i) {
-        payload.data[i] = vec4(1.0);
+    float t = gl_HitTEXT;
+    float p = float(gl_PrimitiveID & 255);
+    vec4 hitVec = vec4(t, attribs.x, attribs.y, p * 0.01 + 1.0);
+    for (int i = 0; i < 16; ++i) {
+        payload.data[i] = payload.data[i] * 0.5 + hitVec * float(i + 1);
     }
 }

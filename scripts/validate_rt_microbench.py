@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
 GPUBench Raw BVH Traversal Microbenchmark Validation & Regression Tool
-Requirement R3 - Cross-verifies kernel ISA/occupancy via RGA and executes comparative benchmarks on GPU 1.
+Requirement R3 - Cross-verifies kernel ISA/occupancy via RGA and executes comparative benchmarks on target GPU.
 
 Verifies:
 1. RGA compilation: USED_VGPRs <= 32, VGPR_SPILLS == 0, SCRATCH_MEM == 0, Occupancy = 16 waves/SIMD.
 2. Native RDNA 4 ISA instructions: image_bvh8_intersect_ray, ds_bvh_stack_push8_pop1_rtn_b32.
-3. GPU 1 repeatable benchmark runs and % theoretical peak reporting (1,203.2 GIS/s Box, 300.8 GIS/s Triangle).
-4. Comparative performance vs baselines (RayIntersect, RayScheduling configs 16, 18).
+3. Repeatable benchmark runs and % theoretical peak reporting (1,203.2 GIS/s Box, 300.8 GIS/s Triangle).
+4. Comparative performance vs baselines (RayIntersect, RayScheduling configs 12, 14, 16).
 5. 100% ray-hit integrity (zero empty-space misses).
 """
 
@@ -17,7 +17,7 @@ import json
 import argparse
 import subprocess
 import csv
-import tempfile
+import shutil
 import pathlib
 from typing import Dict, Any, Optional, List, Tuple
 
@@ -34,7 +34,7 @@ MAGENTA = "\033[35m"
 # Default tool and benchmark paths
 DEFAULT_RGA_PATH = "/opt/RadeonDeveloperToolSuite-2026-05-28-1806/rga"
 DEFAULT_TARGET_ARCH = "gfx1201"
-DEFAULT_GPU_INDEX = 1
+DEFAULT_GPU_INDEX = 0
 THEORETICAL_TRI_BOOST_GIS = 300.8
 THEORETICAL_BOX_BOOST_GIS = 1203.2
 
@@ -90,7 +90,9 @@ def verify_rga_isa_and_occupancy(rga_path: str, spv_path: str, target_arch: str)
         result["errors"].append(f"SPIR-V shader binary not found at: {spv_path}")
         return result
 
-    with tempfile.TemporaryDirectory() as tmpdir:
+    tmpdir = os.path.abspath(os.path.join("profiles", "scratch", "rga_microbench"))
+    os.makedirs(tmpdir, exist_ok=True)
+    try:
         stats_csv_prefix = os.path.join(tmpdir, "rga_stats.csv")
         isa_txt_prefix = os.path.join(tmpdir, "rga_isa.txt")
 
@@ -171,13 +173,15 @@ def verify_rga_isa_and_occupancy(rga_path: str, spv_path: str, target_arch: str)
 
         if not result["errors"]:
             result["passed"] = True
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
     return result
 
 
 def run_benchmark_json(binary_path: str, gpu_idx: int, bench_args: List[str], cwd: str) -> Dict[str, Any]:
     """Execute GPUBench with specified arguments and parse JSON output."""
-    cmd = [binary_path, "-d", str(gpu_idx)] + bench_args + ["--output", "json"]
+    cmd = [binary_path, "-d", str(gpu_idx)] + bench_args + ["--json"]
     ret, stdout, stderr = run_command(cmd, cwd=cwd)
     if ret != 0:
         raise RuntimeError(f"Command {' '.join(cmd)} failed with code {ret}:\n{stderr or stdout}")
@@ -222,7 +226,7 @@ def main():
     )
     parser.add_argument("--rga", default=DEFAULT_RGA_PATH, help="Path to RGA binary")
     parser.add_argument("--binary", default="./build/gpubench", help="Path to gpubench binary")
-    parser.add_argument("--device", type=int, default=DEFAULT_GPU_INDEX, help="GPU device index to target (default: 1)")
+    parser.add_argument("-d", "--device", type=int, default=DEFAULT_GPU_INDEX, help="GPU device index to target (default: 0)")
     parser.add_argument("--arch", default=DEFAULT_TARGET_ARCH, help="Target architecture (default: gfx1201)")
     parser.add_argument("--spv", default="", help="Path to compiled rt_raw_traversal.comp.spv")
     parser.add_argument("--runs", type=int, default=2, help="Number of repeatable execution runs (default: 2)")
@@ -279,7 +283,7 @@ def main():
         print(f"  {GREEN}✔ RGA offline shader analysis PASSED: Optimal 16 waves/SIMD occupancy and native BVH8 ISA confirmed.{RESET}\n")
 
     # -------------------------------------------------------------------------
-    # 2. GPU 1 Execution & Repeatability
+    # 2. GPU Execution & Repeatability
     # -------------------------------------------------------------------------
     print(f"{BOLD}[2/4] Executing Microbenchmark Runs on GPU {args.device}...{RESET}")
     raw_runs = []
@@ -322,8 +326,8 @@ def main():
     try:
         intersect_data = run_benchmark_json(binary_path, args.device, ["-b", "RayIntersect"], cwd=project_root)
         print("  ✔ Baseline 1 (RayIntersect: Ray-Triangle & Ray-Box) completed.")
-        scheduling_data = run_benchmark_json(binary_path, args.device, ["-b", "RayScheduling", "-c", "16,18"], cwd=project_root)
-        print("  ✔ Baseline 2 (RayScheduling: 1D Scanline Config 16 & 2D Screen Tiled Config 18) completed.\n")
+        scheduling_data = run_benchmark_json(binary_path, args.device, ["-b", "RayScheduling", "-c", "12,14,16"], cwd=project_root)
+        print("  ✔ Baseline 2 (RayScheduling: 1D Scanline Config 12, 2D Screen Tiled Config 14, & 2D Morton Config 16) completed.\n")
     except Exception as e:
         print(f"  {RED}✖ Baseline execution failed: {e}{RESET}")
         all_passed = False
@@ -343,11 +347,16 @@ def main():
 
     sched_scanline_mrays = 0.0
     sched_tiled_mrays = 0.0
+    sched_morton_mrays = 0.0
     for r in scheduling_results:
-        if r.get("config_index") == 16:
+        bname = r.get("benchmark", "")
+        cidx = r.get("config_index")
+        if cidx == 12 or "Linear 1D Scanline" in bname:
             sched_scanline_mrays = r.get("value", 0.0)
-        elif r.get("config_index") == 18:
+        elif cidx == 14 or "2D Screen Tiled" in bname:
             sched_tiled_mrays = r.get("value", 0.0)
+        elif cidx == 16 or "2D Morton" in bname:
+            sched_morton_mrays = r.get("value", 0.0)
 
     # Microbench rates
     raw_tri_gis = cfg0_res.get("value", 0.0)
@@ -386,17 +395,24 @@ def main():
             f"{RED}6.25% (93.75% empty misses){RESET}"
         ],
         [
-            "RayScheduling - 1D Scanline (Config 16)",
+            "RayScheduling - 1D Scanline (Config 12)",
             f"{sched_scanline_mrays:.2f} MRays/s",
             "N/A (Full Scene)",
             "1.00x baseline",
             "Mixed scene hits"
         ],
         [
-            "RayScheduling - 2D Screen Tiled 8x4 (Config 18)",
+            "RayScheduling - 2D Screen Tiled 8x4 (Config 14)",
             f"{sched_tiled_mrays:.2f} MRays/s",
             "N/A (Full Scene)",
             f"{(sched_tiled_mrays / sched_scanline_mrays):.2f}x vs 1D Scanline" if sched_scanline_mrays > 0 else "N/A",
+            "Mixed scene hits"
+        ],
+        [
+            "RayScheduling - 2D Morton Z-Curve 4x8 (Config 16)",
+            f"{sched_morton_mrays:.2f} MRays/s",
+            "N/A (Full Scene)",
+            f"{(sched_morton_mrays / sched_scanline_mrays):.2f}x vs 1D Scanline" if sched_scanline_mrays > 0 else "N/A",
             "Mixed scene hits"
         ]
     ]

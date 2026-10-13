@@ -121,6 +121,7 @@ public:
     void setSelectedDevices(const std::vector<int>& deviceIndices);
     void setSelectedBackend(const std::string& backend);
     void selectOnlyBenchmark(const std::string& benchmarkId);
+    void setScene(const std::string& scene);
     void setRenderResolution(uint32_t width, uint32_t height) { m_renderWidth = width; m_renderHeight = height; }
     void setDumpRenders(bool dump) { m_dumpRenders = dump; }
     uint32_t getRenderWidth() const { return m_renderWidth; }
@@ -131,6 +132,7 @@ public:
     void abortBenchmarks();
 
     ExecutionState getExecutionState() const { return m_execState; }
+    ExecutionState getState() const { return m_execState; }
     const std::vector<ResultData>& getResults() const { return m_allResults; }
     void injectResultForTesting(const ResultData& res) { m_allResults.push_back(res); }
 
@@ -264,10 +266,6 @@ private:
     int m_rtPassIndex{0};       // 0: BVH Heatmap, 1: G-Buffer Normals, 2: Shadows, 3: RTAO, 4: Direct PBR, 5: Indirect GI, 6: Path Traced
     int m_rtMaterialIndex{0};   // 0: Lineup, 1: Car Paint, 2: Subsurface, 3: Velvet, 4: Glass, 5: Rust, 6: Range
     int m_rtGeometryIndex{0};   // 0: Vehicle Wireframe & BVH, 1: Alpha Cutout Layers, 2: Scene BVH Heatmap
-    int m_rtBounces{4};
-    bool m_showRtRayPaths{true};
-    bool m_showRtBvhHeatmap{false};
-    bool m_showRtDivergence{false};
 
     // Navigation & Notifications
     bool m_switchToScorecard{false};

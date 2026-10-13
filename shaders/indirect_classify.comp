@@ -55,10 +55,13 @@ void main() {
         activeWorklist[baseSlot + laneOffset] = gid;
     }
 
-    // Last workgroup to complete writes the VkDispatchIndirectCommand
-    if (subgroupElect()) {
+    // Ensure all subgroups in this workgroup have finished updating cmd.activeCount
+    barrier();
+    memoryBarrierBuffer();
+    if (gl_LocalInvocationIndex == 0u) {
         uint finished = atomicAdd(cmd.workgroupsFinished, 1u);
         if (finished == pc.totalWorkgroups - 1u) {
+            memoryBarrierBuffer();
             uint totalActive = cmd.activeCount;
             cmd.x = (totalActive + 63u) / 64u;
             cmd.y = (totalActive > 0u) ? 1u : 0u;

@@ -166,8 +166,10 @@ void RayAnyHitBench::buildAS() {
   triCreateInfo.buffer = vContext->getVkBuffer(triangleBlasBuffer);
   triCreateInfo.size = triSizes.accelerationStructureSize;
   triCreateInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-  vkCreateAccelerationStructureKHR_ptr(device, &triCreateInfo, nullptr,
-                                       &triangleBlas);
+  if (vkCreateAccelerationStructureKHR_ptr(device, &triCreateInfo, nullptr,
+                                           &triangleBlas) != VK_SUCCESS) {
+    throw std::runtime_error("Failed to create triangle BLAS in RayAnyHitBench");
+  }
 
   VkAccelerationStructureDeviceAddressInfoKHR triAddrInfo{
       VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR};
@@ -220,8 +222,10 @@ void RayAnyHitBench::buildAS() {
     createInfo.buffer = vContext->getVkBuffer(tlasBufferHandle);
     createInfo.size = sizes.accelerationStructureSize;
     createInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
-    vkCreateAccelerationStructureKHR_ptr(device, &createInfo, nullptr,
-                                         &tlasHandle);
+    if (vkCreateAccelerationStructureKHR_ptr(device, &createInfo, nullptr,
+                                             &tlasHandle) != VK_SUCCESS) {
+      throw std::runtime_error("Failed to create TLAS in RayAnyHitBench");
+    }
     return sizes.buildScratchSize;
   };
 
@@ -236,7 +240,9 @@ void RayAnyHitBench::buildAS() {
   VkCommandPoolCreateInfo cpInfo{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
   cpInfo.queueFamilyIndex = vContext->getComputeQueueFamilyIndex();
   VkCommandPool tmpPool;
-  vkCreateCommandPool(device, &cpInfo, nullptr, &tmpPool);
+  if (vkCreateCommandPool(device, &cpInfo, nullptr, &tmpPool) != VK_SUCCESS) {
+    throw std::runtime_error("Failed to create command pool in RayAnyHitBench");
+  }
 
   VkCommandBufferAllocateInfo cbAlloc{
       VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
@@ -244,11 +250,17 @@ void RayAnyHitBench::buildAS() {
   cbAlloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
   cbAlloc.commandBufferCount = 1;
   VkCommandBuffer cmd;
-  vkAllocateCommandBuffers(device, &cbAlloc, &cmd);
+  if (vkAllocateCommandBuffers(device, &cbAlloc, &cmd) != VK_SUCCESS) {
+    vkDestroyCommandPool(device, tmpPool, nullptr);
+    throw std::runtime_error("Failed to allocate command buffer in RayAnyHitBench");
+  }
 
   VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
   begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-  vkBeginCommandBuffer(cmd, &begin);
+  if (vkBeginCommandBuffer(cmd, &begin) != VK_SUCCESS) {
+    vkDestroyCommandPool(device, tmpPool, nullptr);
+    throw std::runtime_error("Failed to begin command buffer in RayAnyHitBench");
+  }
 
   auto cmdBuild = [&](VkAccelerationStructureBuildGeometryInfoKHR &info,
                       VkAccelerationStructureKHR dst, uint32_t primCount) {
@@ -278,12 +290,18 @@ void RayAnyHitBench::buildAS() {
   tlasTriBuild.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
   cmdBuild(tlasTriBuild, triangleTlas, 1);
 
-  vkEndCommandBuffer(cmd);
+  if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
+    vkDestroyCommandPool(device, tmpPool, nullptr);
+    throw std::runtime_error("Failed to end command buffer in RayAnyHitBench");
+  }
 
   VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
   submit.commandBufferCount = 1;
   submit.pCommandBuffers = &cmd;
-  vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE);
+  if (vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE) != VK_SUCCESS) {
+    vkDestroyCommandPool(device, tmpPool, nullptr);
+    throw std::runtime_error("Failed to submit AS build in RayAnyHitBench");
+  }
   vkQueueWaitIdle(queue);
 
   vkDestroyCommandPool(device, tmpPool, nullptr);

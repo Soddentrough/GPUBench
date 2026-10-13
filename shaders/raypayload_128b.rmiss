@@ -8,5 +8,8 @@ struct Payload128B {
 layout(location = 0) rayPayloadInEXT Payload128B payload;
 
 void main() {
-    payload.data[0] = vec4(0.0);
+    vec4 missVec = vec4(gl_WorldRayDirectionEXT, gl_RayTmaxEXT * 0.001);
+    for (int i = 0; i < 8; ++i) {
+        payload.data[i] = payload.data[i] * 0.25 + missVec * float(i + 1);
+    }
 }

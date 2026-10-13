@@ -22,6 +22,8 @@ public:
     void shutdown();
 
     float getDisplayScale() const { return m_displayScale; }
+    float getBuiltFontScale() const { return m_builtFontScale; }
+    void requestFontRebuild(float scale);
 
     void beginFrame();
     void endFrame();
@@ -59,6 +61,7 @@ private:
     bool setupVulkan();
     void setupVulkanWindow(int width, int height);
     void cleanupVulkanWindow();
+    void loadSystemFont(float scale);
     bool frameRender(ImDrawData* drawData);
     void framePresent();
 
@@ -78,6 +81,8 @@ private:
     bool m_swapchainRebuild{false};
     bool m_initialized{false};
     float m_displayScale{1.0f};
+    float m_builtFontScale{1.0f};
+    float m_pendingFontScale{0.0f};
     VkClearColorValue m_clearColor{{0.08f, 0.09f, 0.12f, 1.00f}};
 };
 

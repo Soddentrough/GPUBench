@@ -947,9 +947,25 @@ void main() {
             baseSlot = subgroupBroadcast(baseSlot, firstLane);
             if (match) {
                 uint slot = baseSlot + slotInWave;
-                if (slot < pc.queueCapacity) {
-                    worklist.rayRecords[slot * 2u] = payload0;
-                    worklist.rayRecords[slot * 2u + 1u] = payload1;
+                if (pc.mode == 6u && pc.bounce == 1u) {
+                    // 128-Byte Expanded Hit Record Baseline (8 x vec4)
+                    if (slot * 4u < pc.queueCapacity) {
+                        uint baseIdx = slot * 8u;
+                        worklist.rayRecords[baseIdx + 0u] = payload0;
+                        worklist.rayRecords[baseIdx + 1u] = payload1;
+                        worklist.rayRecords[baseIdx + 2u] = vec4(payload0.xyz, 1.0);
+                        worklist.rayRecords[baseIdx + 3u] = vec4(payload1.xy, payload0.w, 0.0);
+                        worklist.rayRecords[baseIdx + 4u] = vec4(1.0, 1.0, 1.0, 0.0);
+                        worklist.rayRecords[baseIdx + 5u] = vec4(0.5, 0.0, 1.5, 0.0);
+                        worklist.rayRecords[baseIdx + 6u] = vec4(payload0.yxz, payload1.z);
+                        worklist.rayRecords[baseIdx + 7u] = vec4(payload1.w, 0.0, 0.0, 1.0);
+                    }
+                } else {
+                    // 32-Byte Packed Hybrid Payload (2 x vec4)
+                    if (slot < pc.queueCapacity) {
+                        worklist.rayRecords[slot * 2u] = payload0;
+                        worklist.rayRecords[slot * 2u + 1u] = payload1;
+                    }
                 }
             }
         }

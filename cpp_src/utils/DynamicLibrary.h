@@ -16,7 +16,7 @@ public:
 #ifdef _WIN32
     handle = LoadLibraryA(name.c_str());
 #else
-    handle = dlopen(name.c_str(), RTLD_LAZY | RTLD_GLOBAL);
+    handle = dlopen(name.c_str(), RTLD_LAZY | RTLD_LOCAL);
 #endif
   }
 

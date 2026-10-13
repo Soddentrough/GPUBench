@@ -41,6 +41,7 @@ int main(int argc, char** argv) {
     std::vector<int> preselectedDevices;
     std::string preselectedBackend = "";
     std::string preselectedTest = "";
+    std::string preselectedScene = "";
     bool autoRun = false;
     bool exitOnComplete = false;
     float uiScaleOverride = 0.0f;
@@ -48,6 +49,8 @@ int main(int argc, char** argv) {
     uint32_t preselectedHeight = 0;
     bool dumpRendersFlagSet = false;
     bool dumpRendersVal = false;
+    bool verboseMode = false;
+    bool debugMode = false;
 
 #ifndef GPUBENCH_VERSION
 #error "GPUBENCH_VERSION must be defined by the build system"
@@ -61,17 +64,23 @@ int main(int argc, char** argv) {
         } else if (arg == "--help" || arg == "-h") {
             std::cout << "Usage: gpubench-gui [options]\n\n"
                       << "Options:\n"
-                      << "  -d, --device <index>    Pre-select GPU index (e.g. 0, 1, 0,1, or dual/all)\n"
-                      << "  -b, --backend <name>    Pre-select backend (vulkan, rocm, opencl)\n"
-                      << "  -t, --test <name>       Pre-select a specific benchmark (e.g. FP32)\n"
-                      << "  -r, --res <preset|WxH>  Pre-select render resolution (720p, 1080p, 1440p, 4k)\n"
-                      << "      --dump-renders      Enable saving rendered output images to disk\n"
-                      << "      --auto-run          Automatically start benchmarks upon launch\n"
-                      << "      --exit-on-complete  Exit automatically when benchmark run finishes\n"
-                      << "      --frames <count>    Run for specified number of frames and exit\n"
-                      << "      --ui-scale <scale>  UI scaling factor (default: auto-detected from DPI, e.g. 1.0, 1.5, 2.0, 2.5)\n"
-                      << "  -h, --help              Display this help message\n"
-                      << "  -v, --version           Display version information\n\n";
+                      << "  -d, --device <index>       Pre-select GPU index (e.g. 0, 1, 0,1, or dual/all)\n"
+                      << "  -k, --backend <name>       Pre-select backend (vulkan, rocm, opencl, auto)\n"
+                      << "  -b, --benchmark <name>     Pre-select a specific benchmark or comma-separated list\n"
+                      << "  -t, --test <name>          Alias for --benchmark\n"
+                      << "  -g, --group <name>         Pre-select a benchmark category (compute, memory, rt, graphics, system, all)\n"
+                      << "  -s, --scene <name>         Pre-select Ray Tracing scene (indoor, forest, outdoor, showroom)\n"
+                      << "  -r, --res <preset|WxH>     Pre-select render resolution (720p, 1080p, 1440p, 4k, 8k)\n"
+                      << "      --dump-renders, --dump Enable saving rendered output images to disk\n"
+                      << "      --no-dump-renders      Disable saving rendered output images to disk\n"
+                      << "      --auto-run, --auto-start Automatically start benchmarks upon launch\n"
+                      << "      --exit-on-complete     Exit automatically when benchmark run finishes\n"
+                      << "      --frames <count>       Run for specified number of frames and exit\n"
+                      << "      --ui-scale <scale>     UI scaling factor (default: auto-detected from DPI, e.g. 1.0, 1.5, 2.0, 2.5)\n"
+                      << "      --verbose              Enable verbose logging output\n"
+                      << "      --debug                Enable debug logging output\n"
+                      << "  -h, --help                 Display this help message\n"
+                      << "  -v, --version              Display version information\n\n";
             return 0;
         } else if ((arg == "-d" || arg == "--device") && i + 1 < argc) {
             std::string dStr = argv[++i];
@@ -79,19 +88,32 @@ int main(int argc, char** argv) {
                 preselectedDevices = {0, 1};
             } else {
                 try {
-                    preselectedDevices.push_back(static_cast<uint32_t>(std::stoi(dStr)));
+                    preselectedDevices.push_back(static_cast<int>(std::stoi(dStr)));
                 } catch (...) {}
             }
-        } else if ((arg == "-b" || arg == "--backend") && i + 1 < argc) {
+        } else if ((arg == "-k" || arg == "--backend") && i + 1 < argc) {
             preselectedBackend = argv[++i];
-        } else if ((arg == "-t" || arg == "--test") && i + 1 < argc) {
+        } else if ((arg == "-b" || arg == "--benchmark" || arg == "--benchmarks") && i + 1 < argc) {
+            std::string val = argv[++i];
+            std::string valLower = val;
+            std::transform(valLower.begin(), valLower.end(), valLower.begin(), ::tolower);
+            if (valLower == "vulkan" || valLower == "rocm" || valLower == "hip" || valLower == "opencl" || valLower == "cl" || valLower == "auto") {
+                preselectedBackend = val;
+            } else {
+                preselectedTest = val;
+            }
+        } else if ((arg == "-t" || arg == "--test" || arg == "-g" || arg == "--group" || arg == "--groups") && i + 1 < argc) {
             preselectedTest = argv[++i];
-        } else if (arg == "--auto-run") {
+        } else if ((arg == "-s" || arg == "--scene") && i + 1 < argc) {
+            preselectedScene = argv[++i];
+        } else if (arg == "--auto-run" || arg == "--auto-start" || arg == "--run") {
             autoRun = true;
         } else if (arg == "--exit-on-complete") {
             exitOnComplete = true;
         } else if (arg == "--frames" && i + 1 < argc) {
-            maxFrames = std::stoi(argv[++i]);
+            try {
+                maxFrames = std::stoi(argv[++i]);
+            } catch (...) {}
         } else if ((arg == "--ui-scale" || arg == "--scale") && i + 1 < argc) {
             try {
                 uiScaleOverride = std::stof(argv[++i]);
@@ -108,6 +130,8 @@ int main(int argc, char** argv) {
                 preselectedWidth = 2560; preselectedHeight = 1440;
             } else if (rLower == "4k" || rLower == "uhd" || rLower == "2160p") {
                 preselectedWidth = 3840; preselectedHeight = 2160;
+            } else if (rLower == "8k" || rLower == "4320p") {
+                preselectedWidth = 7680; preselectedHeight = 4320;
             } else {
                 size_t xPos = rLower.find('x');
                 if (xPos != std::string::npos) {
@@ -117,14 +141,20 @@ int main(int argc, char** argv) {
                     } catch (...) {}
                 }
             }
-        } else if (arg == "--dump-renders") {
+        } else if (arg == "--dump-renders" || arg == "--dump") {
             dumpRendersFlagSet = true;
             dumpRendersVal = true;
-        } else if (arg == "--no-dump-renders") {
+        } else if (arg == "--no-dump-renders" || arg == "--no-dump") {
             dumpRendersFlagSet = true;
             dumpRendersVal = false;
+        } else if (arg == "--verbose") {
+            verboseMode = true;
+        } else if (arg == "--debug") {
+            debugMode = true;
         }
     }
+    (void)verboseMode;
+    (void)debugMode;
 
     gpubench::gui::VulkanContext vulkanContext;
     std::string winTitle = std::string("GPUBench v") + GPUBENCH_VERSION + " - Workstation GPU Profiler";
@@ -149,6 +179,9 @@ int main(int argc, char** argv) {
     if (!preselectedBackend.empty()) {
         app.setSelectedBackend(preselectedBackend);
     }
+    if (!preselectedScene.empty()) {
+        app.setScene(preselectedScene);
+    }
     if (!preselectedTest.empty()) {
         app.selectOnlyBenchmark(preselectedTest);
     }
@@ -164,16 +197,25 @@ int main(int argc, char** argv) {
 
     int frameCount = 0;
     bool running = true;
+    auto processEvent = [&](const SDL_Event& ev) {
+        ImGui_ImplSDL3_ProcessEvent(&ev);
+        if (ev.type == SDL_EVENT_QUIT) {
+            running = false;
+        }
+        if (ev.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) {
+            vulkanContext.resize(ev.window.data1, ev.window.data2);
+        }
+    };
+
     while (running && !app.shouldQuit()) {
         SDL_Event event;
+        if (maxFrames <= 0 && app.getExecutionState() == gpubench::gui::ExecutionState::Idle) {
+            if (SDL_WaitEventTimeout(&event, 50)) {
+                processEvent(event);
+            }
+        }
         while (SDL_PollEvent(&event)) {
-            ImGui_ImplSDL3_ProcessEvent(&event);
-            if (event.type == SDL_EVENT_QUIT) {
-                running = false;
-            }
-            if (event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) {
-                vulkanContext.resize(event.window.data1, event.window.data2);
-            }
+            processEvent(event);
         }
 
         vulkanContext.beginFrame();

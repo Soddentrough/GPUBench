@@ -253,7 +253,6 @@ private:
     VkDeviceAddress address = 0;
     bool isSuballocated = false;
     uint32_t blockIndex = 0;
-    size_t chunkIndex = 0;
   };
 
   struct VulkanKernel {

@@ -14,10 +14,11 @@ bool Int8Bench::IsSupported(const DeviceInfo &info,
 void Int8Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
   this->context = &context;
 
-  // Create storage buffer
+  // Create storage buffers (separate outputBuffer prevents int8 BufferA and int32 BufferC from aliasing)
   size_t bufferSize =
       8192 * 64 * 4; // 8192 workgroups * 64 threads * 4 bytes (i8vec4)
   buffer = context.createBuffer(bufferSize);
+  outputBuffer = context.createBuffer(bufferSize);
   std::vector<int8_t> initData(bufferSize, 1);
   context.writeBuffer(buffer, 0, bufferSize, initData.data());
 
@@ -47,8 +48,8 @@ void Int8Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
           kdir / "vulkan" / "coop_matrix_int8.comp";
       matrixKernel = context.createKernel(matrix_file_path.string(), "main", 2);
       if (matrixKernel) {
-        context.setKernelArg(matrixKernel, 0, buffer); // Binding 0: int8 (A/B)
-        context.setKernelArg(matrixKernel, 1, buffer); // Binding 1: int32 (C)
+        context.setKernelArg(matrixKernel, 0, buffer);       // Binding 0: int8 (A/B)
+        context.setKernelArg(matrixKernel, 1, outputBuffer); // Binding 1: int32 (C)
       }
     } else if (context.getBackend() == ComputeBackend::ROCm) {
       std::filesystem::path matrix_file_path =
@@ -87,6 +88,10 @@ void Int8Bench::Teardown() {
   if (buffer) {
     context->releaseBuffer(buffer);
     buffer = nullptr;
+  }
+  if (outputBuffer) {
+    context->releaseBuffer(outputBuffer);
+    outputBuffer = nullptr;
   }
 }
 

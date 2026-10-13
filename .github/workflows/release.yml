@@ -166,7 +166,7 @@ jobs:
         run: |
           mkdir build
           cd build
-          cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="GPUBench"
+          cmake .. -DCMAKE_BUILD_TYPE=Release -DGPUBENCH_WERROR=ON
 
       - name: Build C++ Target
         run: |

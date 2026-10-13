@@ -528,6 +528,8 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
   if (!context || !context->isAvailable())
     return;
 
+  utils::SleepInhibitor sleep_guard("Running GPU benchmarks");
+
   initRunConfig(benchmarks_to_run);
 
   if (verbose && !bannerPrinted) {
@@ -768,12 +770,14 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
         uint32_t num_unsupported_configs = bench->GetNumConfigs();
 
         for (uint32_t ci = 0; ci < num_unsupported_configs; ++ci) {
-          ResultData result_data;
-          result_data.backendName =
-              ComputeBackendFactory::getBackendName(context->getBackend());
-          result_data.deviceName = info.name;
-          result_data.vendorId = info.vendorID;
-          result_data.deviceId = info.deviceID;
+          if (!g_targetConfigs.empty()) {
+            if (std::find(g_targetConfigs.begin(), g_targetConfigs.end(), static_cast<int>(ci)) == g_targetConfigs.end()) {
+              continue;
+            }
+          } else if (targetConfig >= 0 && static_cast<int>(ci) != targetConfig) {
+            continue;
+          }
+
           std::string cname = bench->GetConfigName(ci);
           std::string fullName = bname;
           if (cname.rfind(bname, 0) == 0) {
@@ -781,6 +785,27 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
           } else if (num_unsupported_configs > 1 || !cname.empty()) {
             fullName = bname + " (" + cname + ")";
           }
+
+          if (!workloadFilter.empty()) {
+            bool matched = false;
+            std::string keyIndex = bname + "#" + std::to_string(ci);
+            for (const auto &filt : workloadFilter) {
+              if (filt == bname || filt == keyIndex || filt == cname || filt == fullName) {
+                matched = true;
+                break;
+              }
+            }
+            if (!matched) {
+              continue;
+            }
+          }
+
+          ResultData result_data;
+          result_data.backendName =
+              ComputeBackendFactory::getBackendName(context->getBackend());
+          result_data.deviceName = info.name;
+          result_data.vendorId = info.vendorID;
+          result_data.deviceId = info.deviceID;
           result_data.benchmarkName = fullName;
           result_data.metric = bench->GetMetric(ci);
           result_data.operations = 0;
@@ -796,7 +821,7 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
             result_data.supportCategory = "hardware";
             break;
           case IBenchmark::SupportLimitation::kApi:
-            result_data.supportCategory = "api";
+            result_data.supportCategory = "driver/api";
             break;
           case IBenchmark::SupportLimitation::kToolchain:
             result_data.supportCategory = "toolchain";
@@ -1058,7 +1083,7 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
         uint32_t stat_sample_count = 0;
         std::vector<double> stat_samples;
         uint32_t devIdx = context->getSelectedDeviceIndex();
-        GpuTelemetryData powerStart = HardwareTelemetry::queryGpu(devIdx);
+        GpuTelemetryData powerStart{};
         float avgPowerWatts = 0.0f;
         HardwarePerformanceCounters measuredPerfCounters;
 
@@ -1066,9 +1091,8 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
           bench->Run(i);
           context->waitIdle();
 
-          if (context->hasPerformanceQuery()) {
-            context->startPerformanceQuery();
-          }
+          powerStart = HardwareTelemetry::queryGpu(devIdx);
+
           if (context->hasGpuTiming()) {
             context->startTiming();
           }
@@ -1089,9 +1113,6 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
             auto end = std::chrono::high_resolution_clock::now();
             total_time_ms =
                 std::chrono::duration<double, std::milli>(end - start).count();
-          }
-          if (context->hasPerformanceQuery()) {
-            measuredPerfCounters = context->stopPerformanceQuery();
           }
           total_invocations = 1;
           stat_min_ms = total_time_ms;
@@ -1178,12 +1199,10 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
           std::vector<double> sample_time_per_invoc;
           total_invocations = 0;
 
+          powerStart = HardwareTelemetry::queryGpu(devIdx);
+
           for (uint32_t s = 0; s < num_samples; ++s) {
             if (cancelToken && cancelToken->load()) break;
-
-            if (s == 0 && context->hasPerformanceQuery()) {
-              context->startPerformanceQuery();
-            }
 
             if (context->hasGpuTiming()) {
               context->startTiming();
@@ -1216,10 +1235,6 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
               auto s_end = std::chrono::high_resolution_clock::now();
               sample_ms =
                   std::chrono::duration<double, std::milli>(s_end - s_start).count();
-            }
-
-            if (s == 0 && context->hasPerformanceQuery()) {
-              measuredPerfCounters = context->stopPerformanceQuery();
             }
 
             if (sample_ms > 0.0) {
@@ -1294,6 +1309,14 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
           avgPowerWatts = powerStart.powerWatts;
         } else if (powerEnd.powerWatts > 0.0f) {
           avgPowerWatts = powerEnd.powerWatts;
+        }
+
+        // Run VK_KHR_performance_query in an isolated untimed pass so SPM/SQTT
+        // serialization barriers do not contaminate the timed throughput measurement.
+        if (context->hasPerformanceQuery() && (!cancelToken || !cancelToken->load())) {
+          context->startPerformanceQuery();
+          bench->Run(i);
+          measuredPerfCounters = context->stopPerformanceQuery();
         }
 
         bool isValid = bench->ValidateResults(i);
@@ -1394,14 +1417,17 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
           double durationSec = total_time_ms / 1000.0;
           result_data.energyJoules = avgPowerWatts * durationSec;
 
-          if (result_data.component == "Compute" && result_data.operations > 0) {
+          if ((result_data.metric == "TFLOPS" || result_data.metric == "GFLOPS" ||
+               result_data.metric == "TOPS") &&
+              result_data.operations > 0) {
             double ops12 = (static_cast<double>(result_data.operations) / durationSec) / 1e12;
             if (ops12 > 0.0) {
               result_data.joulesPerUnit = avgPowerWatts / ops12;
               result_data.unitPerWatt = (ops12 * 1000.0) / avgPowerWatts;
               result_data.efficiencyUnit = (result_data.metric == "TOPS") ? "J/TOP" : "J/TFLOP";
             }
-          } else if (result_data.component == "Memory" && result_data.operations > 0) {
+          } else if ((result_data.metric == "GB/s" || result_data.metric == "TB/s") &&
+                     result_data.operations > 0) {
             double gbps = (static_cast<double>(result_data.operations) / durationSec) / 1e9;
             if (gbps > 0.0) {
               result_data.joulesPerUnit = avgPowerWatts / gbps;
@@ -1653,6 +1679,8 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
 }
 
 void BenchmarkRunner::runHostBenchmarks(const std::vector<std::string> &benchmarks_to_run) {
+  utils::SleepInhibitor sleep_guard("Running GPU benchmarks");
+
   initRunConfig(benchmarks_to_run);
 
   bool headerPrinted = false;
@@ -1718,6 +1746,13 @@ void BenchmarkRunner::runHostBenchmarks(const std::vector<std::string> &benchmar
         for (uint32_t i = 0; i < num_configs; ++i) {
           if (cancelToken && cancelToken->load()) {
             break;
+          }
+          if (!g_targetConfigs.empty()) {
+            if (std::find(g_targetConfigs.begin(), g_targetConfigs.end(), static_cast<int>(i)) == g_targetConfigs.end()) {
+              continue;
+            }
+          } else if (targetConfig >= 0 && static_cast<int>(i) != targetConfig) {
+            continue;
           }
           std::string bName = bench->GetName();
           std::string config_name = bench->GetConfigName(i);

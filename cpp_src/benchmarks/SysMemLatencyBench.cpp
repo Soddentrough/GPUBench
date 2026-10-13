@@ -38,7 +38,14 @@ void SysMemLatencyBench::Setup(IComputeContext &context,
   // 256MB buffer to ensure we bypass CPU caches (including 32MB - 128MB L3)
   bufferSize = 256ULL * 1024ULL * 1024ULL;
 
+  buffer = nullptr;
+#ifdef _WIN32
   buffer = ALIGNED_ALLOC(2 * 1024 * 1024, bufferSize);
+#else
+  if (posix_memalign(&buffer, 2 * 1024 * 1024, bufferSize) != 0) {
+    buffer = nullptr;
+  }
+#endif
   if (!buffer) {
     buffer = ALIGNED_ALLOC(64, bufferSize);
   }
@@ -47,7 +54,7 @@ void SysMemLatencyBench::Setup(IComputeContext &context,
         "Failed to allocate system memory buffer for latency test");
   }
 
-#ifndef _WIN32
+#ifdef __linux__
 #ifdef MADV_HUGEPAGE
   madvise(buffer, bufferSize, MADV_HUGEPAGE);
 #endif

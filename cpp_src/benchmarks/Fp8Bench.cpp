@@ -11,7 +11,7 @@ bool Fp8Bench::IsSupported(const DeviceInfo &info,
     return false;
   }
   if (context && context->getBackend() == ComputeBackend::ROCm) {
-    return info.fp8Support || info.cooperativeMatrixSupport;
+    return info.fp8Support;
   }
   if (context && context->getBackend() == ComputeBackend::Vulkan) {
     return info.fp8Support && info.cooperativeMatrixSupport;
@@ -24,11 +24,13 @@ void Fp8Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
 
   DeviceInfo info = context.getCurrentDeviceInfo();
 
-
-  // Create storage buffer (allocated with extra headroom for input A/B and output C)
-  size_t bufferSize =
-      8192 * 64 * sizeof(float) * 2;
+  // Create separate input A/B and output C storage buffers to prevent aliasing
+  size_t bufferSize = 8192 * 64 * sizeof(float) * 2;
   buffer = context.createBuffer(bufferSize);
+  outputBuffer = context.createBuffer(bufferSize);
+
+  std::vector<uint32_t> initData(bufferSize / sizeof(uint32_t), 0x30303030u);
+  context.writeBuffer(buffer, 0, bufferSize, initData.data());
 
   // Helper to check if file exists
   auto file_exists = [](const std::string &path) {
@@ -41,7 +43,7 @@ void Fp8Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
   if (context.getBackend() == ComputeBackend::ROCm) {
     is_native_matrix = false;
 
-    if (info.cooperativeMatrixSupport || info.fp8Support) {
+    if (info.fp8Support) {
       std::filesystem::path matrix_file = kdir / "rocm" / "fp8_matrix.hip";
       try {
         matrixKernel = context.createKernel(matrix_file.string(), "run_benchmark", 1);
@@ -77,7 +79,7 @@ void Fp8Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
         matrixKernel = context.createKernel(matrix_file.string(), "main", 2);
         if (matrixKernel) {
           context.setKernelArg(matrixKernel, 0, buffer);
-          context.setKernelArg(matrixKernel, 1, buffer);
+          context.setKernelArg(matrixKernel, 1, outputBuffer);
           is_native_matrix = true;
         }
       } catch (const std::exception &e) {
@@ -103,10 +105,13 @@ void Fp8Bench::Teardown() {
       context->releaseKernel(matrixKernel);
     if (buffer)
       context->releaseBuffer(buffer);
+    if (outputBuffer)
+      context->releaseBuffer(outputBuffer);
     context = nullptr;
   }
   matrixKernel = nullptr;
   buffer = nullptr;
+  outputBuffer = nullptr;
 }
 
 BenchmarkResult Fp8Bench::GetResult(uint32_t config_idx) const {

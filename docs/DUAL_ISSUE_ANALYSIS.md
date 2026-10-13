@@ -63,7 +63,7 @@ The suite evaluates hardware through 7 distinct configurations structured symmet
 
 ## 4. Empirical Case Study: AMD Radeon 8060S (Strix Halo / GFX1151) & R9700 (GFX1201)
 
-Running `./build/gpubench -b Dual-Issue -d 0 -k vulkan,rocm,opencl` produces cross-backend telemetry demonstrating dual-issue scaling once single-issue baseline skew and compiler constant promotion are eliminated:
+Running `./build/gpubench -b dualissue -d 0 -k vulkan,rocm,opencl` produces cross-backend telemetry demonstrating dual-issue scaling once single-issue baseline skew and compiler constant promotion are eliminated:
 
 ```text
   [Compute]

@@ -181,7 +181,9 @@ void RayRawTraversalBench::buildAS() {
     createInfo.buffer = vContext->getVkBuffer(blasBufferHandle);
     createInfo.size = sizesOut.accelerationStructureSize;
     createInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-    vkCreateAccelerationStructureKHR_ptr(device, &createInfo, nullptr, &blasHandle);
+    if (vkCreateAccelerationStructureKHR_ptr(device, &createInfo, nullptr, &blasHandle) != VK_SUCCESS) {
+      throw std::runtime_error("Failed to create BLAS in RayRawTraversalBench");
+    }
   };
 
   VkAccelerationStructureGeometryKHR geomCoherent{};
@@ -272,7 +274,9 @@ void RayRawTraversalBench::buildAS() {
     createInfo.buffer = vContext->getVkBuffer(tlasBufferHandle);
     createInfo.size = tlasSizesOut.accelerationStructureSize;
     createInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
-    vkCreateAccelerationStructureKHR_ptr(device, &createInfo, nullptr, &tlasHandle);
+    if (vkCreateAccelerationStructureKHR_ptr(device, &createInfo, nullptr, &tlasHandle) != VK_SUCCESS) {
+      throw std::runtime_error("Failed to create TLAS in RayRawTraversalBench");
+    }
   };
 
   VkAccelerationStructureGeometryKHR topGeomCoherent{};
@@ -300,7 +304,9 @@ void RayRawTraversalBench::buildAS() {
   VkCommandPoolCreateInfo cpInfo{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
   cpInfo.queueFamilyIndex = vContext->getComputeQueueFamilyIndex();
   VkCommandPool tmpPool;
-  vkCreateCommandPool(device, &cpInfo, nullptr, &tmpPool);
+  if (vkCreateCommandPool(device, &cpInfo, nullptr, &tmpPool) != VK_SUCCESS) {
+    throw std::runtime_error("Failed to create command pool in RayRawTraversalBench");
+  }
 
   VkCommandBufferAllocateInfo cbAlloc{
       VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
@@ -308,11 +314,17 @@ void RayRawTraversalBench::buildAS() {
   cbAlloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
   cbAlloc.commandBufferCount = 1;
   VkCommandBuffer cmd;
-  vkAllocateCommandBuffers(device, &cbAlloc, &cmd);
+  if (vkAllocateCommandBuffers(device, &cbAlloc, &cmd) != VK_SUCCESS) {
+    vkDestroyCommandPool(device, tmpPool, nullptr);
+    throw std::runtime_error("Failed to allocate command buffer in RayRawTraversalBench");
+  }
 
   VkCommandBufferBeginInfo beginInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
   beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-  vkBeginCommandBuffer(cmd, &beginInfo);
+  if (vkBeginCommandBuffer(cmd, &beginInfo) != VK_SUCCESS) {
+    vkDestroyCommandPool(device, tmpPool, nullptr);
+    throw std::runtime_error("Failed to begin command buffer in RayRawTraversalBench");
+  }
 
   auto cmdBuild = [&](VkAccelerationStructureBuildGeometryInfoKHR &info,
                       VkAccelerationStructureKHR dst, uint32_t primCount) {
@@ -338,12 +350,18 @@ void RayRawTraversalBench::buildAS() {
   cmdBuild(tlasBuildCoherent, coherentTlas, 1);
   cmdBuild(tlasBuildDeep, deepTlas, 1);
 
-  vkEndCommandBuffer(cmd);
+  if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
+    vkDestroyCommandPool(device, tmpPool, nullptr);
+    throw std::runtime_error("Failed to end command buffer in RayRawTraversalBench");
+  }
 
   VkSubmitInfo submitInfo{VK_STRUCTURE_TYPE_SUBMIT_INFO};
   submitInfo.commandBufferCount = 1;
   submitInfo.pCommandBuffers = &cmd;
-  vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+  if (vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE) != VK_SUCCESS) {
+    vkDestroyCommandPool(device, tmpPool, nullptr);
+    throw std::runtime_error("Failed to submit AS build in RayRawTraversalBench");
+  }
   vkQueueWaitIdle(queue);
 
   vkDestroyCommandPool(device, tmpPool, nullptr);
@@ -511,20 +529,6 @@ std::string RayRawTraversalBench::GetConfigName(uint32_t config_idx) const {
 uint64_t RayRawTraversalBench::GetTraversedRays(uint32_t config_idx) const {
   if (config_idx >= 2) return 0;
   return static_cast<uint64_t>(rayCount) * recordedInvocations[config_idx];
-}
-
-uint64_t RayRawTraversalBench::GetSustainedOperations(uint32_t config_idx) const {
-  if (config_idx == 0) {
-    return GetTraversedRays(0) * 2; // 2 triangle tests per ray
-  } else {
-    return GetTraversedRays(1) * 64; // 64 box tests per ray across 8 BVH8 nodes
-  }
-}
-
-double RayRawTraversalBench::GetThroughputGIS(uint32_t config_idx) const {
-  if (config_idx >= 2 || recordedTimeMs[config_idx] <= 0.0) return 0.0;
-  double time_s = recordedTimeMs[config_idx] / 1000.0;
-  return (static_cast<double>(GetSustainedOperations(config_idx)) / time_s) / 1e9;
 }
 
 double RayRawTraversalBench::GetThroughputMRays(uint32_t config_idx) const {

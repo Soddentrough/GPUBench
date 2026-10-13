@@ -76,7 +76,7 @@ Key binaries available:
 | CLI Flag | Purpose |
 |---|---|
 | `-d 1` | Targets GPU 1 (AMD Radeon AI PRO R9700). |
-| `-c <index>` | Runs an isolated benchmark configuration (0 to 29). |
+| `-c <index>` | Runs an isolated benchmark configuration (`0` to `34`). |
 | `-s <scene>` | Selects scene: `showroom`, `indoor` (Sponza GLTF), `outdoor`, `forest`. |
 | `--profile-snapshot` | Sets 1 warmup pass and 1 timed submit for clean profiler traces. |
 | `--no-dump` | Bypasses 4K frame dumping and image verification for fast throughput runs. |
@@ -103,14 +103,14 @@ Target ASIC for AMD Radeon AI PRO R9700 is **`gfx1201`**:
 
 ### 4.2 GFX1201 Hardware Resource Profile
 
-Compilation statistics for all `rt_scheduling` compute kernels targeting GFX1201:
+Compilation statistics for all `rt_scheduling` compute kernels (`build/kernels/vulkan/rt_scheduling_*.spv`) targeting GFX1201:
 
 | Shader Kernel | VGPRs | SGPRs | LDS (Bytes) | Binary Size | VGPR Spills | SGPR Spills | SIMD Wave Occupancy |
 |---|---|---|---|---|---|---|---|
 | `rt_scheduling_reset.comp` | **4** | 9 | 0 | 168 B | 0 | 0 | **16 waves / SIMD (Peak)** |
 | `rt_scheduling_resolve.comp` (DGC Resolve) | **19** | 34 | 0 | 2,068 B | 0 | 0 | **16 waves / SIMD (Peak)** |
 | `rt_scheduling_device_generated_commands_shadow.comp` | **34** | 43 | 2,048 | 3,176 B | 0 | 0 | **16 waves / SIMD (Peak)** |
-| `rt_scheduling_device_generated_commands_bounce.comp` | **49** | 56 | 4,096 | 5,064 B | 0 | 0 | **16 waves / SIMD (Peak)** |
+| `rt_scheduling_device_generated_commands_bounce.comp` | **49** | 56 | 4,096 | 5,064 B | 0 | 0 | **10–16 waves / SIMD** |
 | `rt_scheduling_device_generated_commands_classify.comp` | **85** | 106 | 4,096 | 37,396 B | 0 | 0 | **5 waves / SIMD** |
 | `rt_scheduling_device_generated_commands_material.comp` | **92** | 92 | 2,048 | 209,004 B | 0 | 0 | **5 waves / SIMD** |
 | **Traditional Megakernel** (`rt_scheduling_traditional_megakernel.comp`) | **97** | **106 (Max)** | 4,096 | **266,364 B** | 0 | 0 | **2–3 waves / SIMD** |
@@ -123,7 +123,7 @@ Compilation statistics for all `rt_scheduling` compute kernels targeting GFX1201
 2. **Micro-kernel Latency Hiding**:
    - The Device-Generated Commands (DGC) pipeline splits execution into specialized micro-kernels.
    - `resolve` uses only **19 VGPRs**, `shadow` uses **34 VGPRs**, and `bounce` uses **49 VGPRs**.
-   - This unlocks the **maximum hardware occupancy of 16 waves per SIMD**, ensuring continuous arithmetic execution while other waves wait for memory fetches.
+   - This unlocks up to the **maximum hardware occupancy of 10–16 waves per SIMD**, ensuring continuous arithmetic execution while other waves wait for memory fetches.
 3. **L1 Instruction Cache (L1I) Footprint**:
    - The monolithic megakernel is **266.3 KB**, far exceeding the L1I cache size and causing constant instruction cache misses.
    - The DGC bounce micro-kernel is **5.0 KB** and the shadow kernel is **3.1 KB**, allowing both to fit entirely inside high-speed L1I cache.
@@ -221,18 +221,20 @@ During execution, look for these packets emitted by the GPU Command Processor:
 4. **`c0027600 SET_SH_REG` / `c021ba04 SET_SH_REG_PAIRS`**:
    - Direct hardware shader register writes for pipeline switches and push constant updates.
 
-### 6.3 Command Processor Packet Verification Across All 8 DGC Tests
+### 6.3 Command Processor Packet Verification Across All 8 Core DGC Tests
 
 | Config Index | Benchmark Test Name | `INDIRECT_BUFFER` Packets | Predicated Dispatches | Register Sets (`SET_SH_REG`) | Memory Barriers (`ACQUIRE`/`REL`) |
 |---|---|---|---|---|---|
-| **Config 2** | Material Shading (DGC) | 4 | 2 | 10 | 6 / 2 |
-| **Config 6** | Path Tracing (1 SPP) (DGC) | 6 | 4 | 24 | 18 / 2 |
-| **Config 10** | Incoherent Diffuse GI (DGC) | 4 | 2 | 16 | 10 / 2 |
-| **Config 14** | Scene Render: Full Frame (DGC) | 4 | 2 | 18 | 12 / 2 |
-| **Config 22** | Primary Rays (DGC) | 4 | 2 | 18 | 12 / 2 |
-| **Config 25** | Shadows - Single Light (1 Light, DGC) | 4 | 2 | 18 | 12 / 2 |
-| **Config 27** | Shadows - Multi-Light (3 Lights, DGC) | 4 | 2 | 18 | 12 / 2 |
-| **Config 29** | Path Tracing (16 SPP) (DGC) | 96 | 64 | 384 | 288 / 32 |
+| **Config 2** | Stage: Material Shading (DGC) | 4 | 2 | 10 | 6 / 2 |
+| **Config 5** | Path Tracing (1 SPP) (DGC) | 6 | 4 | 24 | 18 / 2 |
+| **Config 8** | Incoherent Diffuse GI (DGC) | 4 | 2 | 16 | 10 / 2 |
+| **Config 11** | Scene Render: Full Frame (DGC) | 4 | 2 | 18 | 12 / 2 |
+| **Config 18** | Primary Rays (Wavefront - DGC) | 4 | 2 | 18 | 12 / 2 |
+| **Config 21** | Stage: Directional Shadows - Single Light (DGC) | 4 | 2 | 18 | 12 / 2 |
+| **Config 22** | Stage: Directional Shadows - Multi-Light (3 Lights, DGC) | 4 | 2 | 18 | 12 / 2 |
+| **Config 24** | Path Tracing (16 SPP) (DGC) | 96 | 64 | 384 | 288 / 32 |
+
+*(Note: Dedicated Hardware Ray Tracing Pipeline primary rays can be profiled via `Config 29` (`Primary Rays (RTP)`) and `Config 30` (`Primary Rays (RTP + SER)`), and 128-light DGC light binning via `Config 34`).*
 
 ---
 
@@ -244,13 +246,13 @@ RDNA architectures support both Wave32 and Wave64 execution modes.
 To test the impact of wavefront size on path tracing throughput:
 ```bash
 # Default (Native Wave32)
-./build/gpubench --benchmark rayscheduling --scene indoor -c 6 -d 1 --no-dump --profile-snapshot
+./build/gpubench --benchmark rayscheduling --scene indoor -c 5 -d 1 --no-dump --profile-snapshot
 
 # Enforce Wave32
-RADV_PERFTEST=cswave32 ./build/gpubench --benchmark rayscheduling --scene indoor -c 6 -d 1 --no-dump --profile-snapshot
+RADV_PERFTEST=cswave32 ./build/gpubench --benchmark rayscheduling --scene indoor -c 5 -d 1 --no-dump --profile-snapshot
 
 # Enforce Wave64
-RADV_PERFTEST=rtwave64 ./build/gpubench --benchmark rayscheduling --scene indoor -c 6 -d 1 --no-dump --profile-snapshot
+RADV_PERFTEST=rtwave64 ./build/gpubench --benchmark rayscheduling --scene indoor -c 5 -d 1 --no-dump --profile-snapshot
 ```
 
 ### 7.2 Measured Performance Impact on GFX1201
@@ -275,13 +277,13 @@ Tested across all 8 configurations against baseline monolithic megakernels at 4K
 | Benchmark Test | Megakernel Config | DGC Config | Megakernel Throughput | DGC Throughput | Measured Speedup | Parity Match |
 |---|---|---|---|---|---|---|
 | **Material Shading** (Pure Shading Micro-kernel) | Config 0 | Config 2 | 232.50 MHits/s | **2,405.22 MHits/s** | **10.35x** | 100.00% (PSNR 120 dB) |
-| **Full Scene Path Tracing** (1 SPP, 2 Bounces) | Config 4 | Config 6 | 116.81 MRays/s | **1,348.01 MRays/s** | **11.54x** | 100.00% (PSNR 120 dB) |
-| **Incoherent Ray Tracing** (Directional Binning) | Config 8 | Config 10 | 203.53 MRays/s | **1,807.70 MRays/s** | **8.88x** | 100.00% (PSNR 120 dB) |
-| **Total Scene Render** (Material Sorting) | Config 12 | Config 14 | 101.90 MRays/s | **306.51 MRays/s** | **3.01x** | 100.00% (PSNR 120 dB) |
-| **Full Scene Ray Tracing** (PBR - Morton Z-Curve) | Config 21 | Config 22 | 113.47 MRays/s | **308.89 MRays/s** | **2.72x** | 100.00% (PSNR 120 dB) |
-| **Directional Shadows** (Single Light - 1 Light, DGC) | Config 23 | Config 25 | 455.28 MRays/s | **2,257.62 MRays/s** | **4.96x** | 100.00% (PSNR 120 dB) |
-| **Directional Shadows** (Multi-Light - 3 Lights, DGC) | Config 23 | Config 27 | 310.26 MRays/s | **2,331.30 MRays/s** | **7.51x** | 100.00% (PSNR 120 dB) |
-| **Full Scene Path Tracing** (16 SPP Multi-Bounce) | Config 28 | Config 29 | 13.41 MRays/s | **101.24 MRays/s** | **7.55x** | 100.00% (PSNR 120 dB) |
+| **Full Scene Path Tracing** (1 SPP, 2 Bounces) | Config 3 | Config 5 | 116.81 MRays/s | **1,348.01 MRays/s** | **11.54x** | 100.00% (PSNR 120 dB) |
+| **Incoherent Ray Tracing** (Directional Binning) | Config 6 | Config 8 | 203.53 MRays/s | **1,807.70 MRays/s** | **8.88x** | 100.00% (PSNR 120 dB) |
+| **Total Scene Render** (Material Sorting) | Config 9 | Config 11 | 101.90 MRays/s | **306.51 MRays/s** | **3.01x** | 100.00% (PSNR 120 dB) |
+| **Primary Rays** (Scene Ray Tracing PBR; RTP is Config 29) | Config 17 | Config 18 | 113.47 MRays/s | **308.89 MRays/s** | **2.72x** | 100.00% (PSNR 120 dB) |
+| **Directional Shadows** (Single Light - 1 Light, DGC) | Config 19 | Config 21 | 455.28 MRays/s | **2,257.62 MRays/s** | **4.96x** | 100.00% (PSNR 120 dB) |
+| **Directional Shadows** (Multi-Light - 3 Lights, DGC) | Config 19 | Config 22 | 310.26 MRays/s | **2,331.30 MRays/s** | **7.51x** | 100.00% (PSNR 120 dB) |
+| **Full Scene Path Tracing** (16 SPP Multi-Bounce) | Config 23 | Config 24 | 13.41 MRays/s | **101.24 MRays/s** | **7.55x** | 100.00% (PSNR 120 dB) |
 
 ### 8.2 Visual & Analytical Parity Verification
 When `--dump-renders` is enabled, GPUBench compares the rendered 4K framebuffer outputs pixel-by-pixel between the Megakernel and Device-Generated Commands (DGC):
@@ -302,7 +304,7 @@ To run a fast 2-second benchmark without image disk writes:
 ./build/gpubench \
     --benchmark rayscheduling \
     --scene indoor \
-    -c 6 \
+    -c 5 \
     -d 1 \
     --no-dump \
     --profile-snapshot
@@ -338,7 +340,7 @@ RADV_DEBUG=dumpibs ./build/gpubench \
 ```python
 import subprocess, re
 
-configs = [(2, 0), (6, 4), (10, 8), (14, 12), (22, 21), (25, 23), (27, 23), (29, 28)]
+configs = [(2, 0), (5, 3), (8, 6), (11, 9), (18, 17), (21, 19), (22, 19), (24, 23)]
 
 for dgc, base in configs:
     for cfg in [base, dgc]:

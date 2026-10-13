@@ -41,13 +41,17 @@ public:
   uint32_t GetExpectedKernelCount() const override { return 1; }
   std::string GetConfigName(uint32_t config_idx) const override;
   std::string GetConfigSupportNote(uint32_t config_idx) const override;
+  std::string GetConfigSupportNote(uint32_t config_idx,
+                                   const DeviceInfo &info,
+                                   IComputeContext *context = nullptr) const override;
 
 private:
+  std::string ComputeAdaptiveHint(uint64_t workingSetBytes,
+                                  const DeviceInfo &info) const;
   IComputeContext *context = nullptr;
   std::vector<CacheCurveConfig> configs;
   ComputeKernel kernel = nullptr;
   ComputeBuffer buffer = nullptr;
   uint64_t totalBufferBytes = 0;
   static constexpr uint32_t kIterations = 1000000;
-  double maxTimePerInvoc = 0.0;
 };

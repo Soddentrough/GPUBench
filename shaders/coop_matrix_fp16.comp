@@ -10,23 +10,25 @@ layout(set = 0, binding = 0) buffer Data {
 } buf;
 
 void main() {
-    // RDNA4: FP116 matrix A/B (16x16), FP32 accumulator C.
-    // Use explicit scope 3 (Subgroup). gl_ScopeSubgroup = 3.
+    // RDNA3/4: FP16 matrix A/B (16x16), FP32 accumulator C.
     coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseA> matA;
     coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseB> matB;
-    
-    coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC0 = coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(0.0);
-    coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC1 = coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(0.0);
-    coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC2 = coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(0.0);
-    coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC3 = coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(0.0);
-    coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC4 = coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(0.0);
-    coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC5 = coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(0.0);
-    coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC6 = coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(0.0);
-    coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC7 = coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(0.0);
 
-    // Use non-suffixed names. Stride 16, Layout 0 (Row Major).
-    coopMatLoad(matA, buf.data, 0u, 16u, 0);
-    coopMatLoad(matB, buf.data, 0u, 16u, 0);
+    uint gid = gl_WorkGroupID.x;
+    uint loadOffset = 2097152u + (gid & 511u) * 256u;
+    uint storeOffset = (gid & 511u) * 256u;
+    coopMatLoad(matA, buf.data, loadOffset, 16u, 0);
+    coopMatLoad(matB, buf.data, 2097152u + ((gid + 1u) & 511u) * 256u, 16u, 0);
+
+    float seed = float(buf.data[loadOffset]) * 0.01 + float((gid & 255u) + 1u) * 0.001;
+    coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC0 = coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(seed * 1.0);
+    coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC1 = coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(seed * 2.0);
+    coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC2 = coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(seed * 3.0);
+    coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC3 = coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(seed * 4.0);
+    coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC4 = coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(seed * 5.0);
+    coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC5 = coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(seed * 6.0);
+    coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC6 = coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(seed * 7.0);
+    coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC7 = coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(seed * 8.0);
 
     for (int i = 0; i < 4096; ++i) {
         matC0 = coopMatMulAdd(matA, matB, matC0);
@@ -45,7 +47,9 @@ void main() {
     matC6 = matC6 + matC7;
     matC0 = matC0 + matC2;
     matC4 = matC4 + matC6;
-    matC0 = matC0 + matC4;
+    matC0 = (matC0 + matC4) * 0.01;
 
-    coopMatStore(matC0, buf.data, 0u, 16u, 0);
+    coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matOut =
+        coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(matC0);
+    coopMatStore(matOut, buf.data, storeOffset, 16u, 0);
 }

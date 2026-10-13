@@ -4,11 +4,15 @@ _gpubench() {
     local cur prev words cword
     _init_completion || return
 
-    local opts="--help --version --benchmarks --benchmark -b --groups --group -g --list-benchmarks --list-groups --device -d --list-devices --list-backends --backend -k --verbose --debug --dump-geometry --dump-renders --dump -s --scene -r --resolution --bounces -c --config --profile-snapshot --rra -o --output-json --output-file -i --import --compare"
+    local opts="--help -h --version --benchmarks --benchmark -b --groups --group -g --list --list-benchmarks --list-groups --device -d --list-devices -l --list-backends --backend -k --verbose --debug -q --quiet --strict -f --force --verify-parity --dump-geometry --dump-renders --dump --no-dump-renders --no-dump -s --scene -r --resolution --bounces --spp -c --config --profile-snapshot --rra -o --output-json --json -i --import --input --compare"
 
     case "$prev" in
         --bounces)
             COMPREPLY=( $(compgen -W "1 2 3 4 5 6 7 8" -- "$cur") )
+            return 0
+            ;;
+        --spp)
+            COMPREPLY=( $(compgen -W "1 2 4 8 16 32 64" -- "$cur") )
             return 0
             ;;
         -k|--backend)
@@ -24,15 +28,15 @@ _gpubench() {
             return 0
             ;;
         -r|--resolution)
-            COMPREPLY=( $(compgen -W "auto 720p 1080p 1440p 4k 1024x1024" -- "$cur") )
+            COMPREPLY=( $(compgen -W "auto 720p 1080p 1440p 4k 8k 1024x1024" -- "$cur") )
             return 0
             ;;
-        -o|--output-json|--output-file|-i|--import|--compare)
+        -o|--output-json|-i|--import|--input|--compare)
             _filedir json
             return 0
             ;;
         -b|--benchmark|--benchmarks)
-            COMPREPLY=( $(compgen -W "fp32 fp64 fp16 bf16 fp8 fp4 int8 int4 mem_bandwidth l1_cache pixel_fill ray_scheduling all" -- "$cur") )
+            COMPREPLY=( $(compgen -W "fp64 fp32 dualissue lds indirect fp16 bf16 fp8 fp6 fp4 int8 int4 membw l0_cache cache_latency_curve pixelfill rayrawtraversal rayasbuild rayintersect rayanyhit rayprocedural rayscheduling raydivergence sysmembw sysmemlatency all" -- "$cur") )
             return 0
             ;;
     esac

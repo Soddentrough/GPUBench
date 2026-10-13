@@ -518,7 +518,7 @@ vec3 evaluateGltfPbrInternal(
         }
 
         // Ray-Traced Ambient Occlusion (RTAO) with 4 stratified rays
-        float rtao = computeRTAO(hitPos, geomNormal, rng, 4, 350.0);
+        float rtao = enableShadows ? computeRTAO(hitPos, geomNormal, rng, 4, 350.0) : 1.0;
         ao *= rtao;
         if (directOnly) {
             return totalRadiance * ao + emissive;
@@ -593,7 +593,7 @@ vec3 evaluateGltfPbrInternal(
         }
 
         // Studio RTAO (Ray-Traced Ambient Occlusion)
-        float rtao = computeRTAO(hitPos, geomNormal, rng, 4, 30.0);
+        float rtao = enableShadows ? computeRTAO(hitPos, geomNormal, rng, 4, 30.0) : 1.0;
         ao *= rtao;
         if (directOnly) {
             return totalRadiance + emissive;
@@ -621,7 +621,7 @@ vec3 evaluateGltfPbrInternal(
         }
 
         // RTAO (Ray-Traced Ambient Occlusion) under canopy and crevices
-        float rtao = computeRTAO(hitPos, geomNormal, rng, 4, 35.0);
+        float rtao = enableShadows ? computeRTAO(hitPos, geomNormal, rng, 4, 35.0) : 1.0;
         ao *= rtao;
         if (directOnly) {
             return evaluateCookTorranceGGX(baseColor, roughness, metallic, N, V, sunDir, sunColor * sunShadow) * ao + emissive;

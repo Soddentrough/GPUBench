@@ -90,4 +90,5 @@ private:
   ComputeKernel vectorKernel = nullptr;
   ComputeKernel matrixKernel = nullptr;
   ComputeBuffer buffer = nullptr;
+  ComputeBuffer outputBuffer = nullptr;
 };

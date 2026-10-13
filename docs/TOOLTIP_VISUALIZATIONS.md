@@ -35,7 +35,7 @@ row in the **Results Scorecard**) shows a tooltip:
 +-------------------------------------------------------------+
 ```
 
-Only workloads with graphics-pipeline data get a visualization (57 of the
+Only workloads with graphics-pipeline data get a visualization (58 of the
 ~150 workloads). Compute, Memory, and Host System workloads keep plain-text
 tooltips.
 
@@ -151,17 +151,17 @@ const VizEntry entries[] = {
         "Vehicle mesh enclosed by hierarchical AABBs - ...", 16.0f/9.0f, 3, 0}},
     {"RayDivergence", 4, {"", "cone_divergence_0",
         "Perfectly parallel beam (mirror): ...", 16.0f/9.0f, -1, 0}},
-    // ... 57 entries total
+    // ... 58 entries total
 };
 ```
 
 At startup the GUI logs coverage, and warns per unmatched entry:
 
 ```
-[GPUBench GUI] Tooltip visualizations: 57/57 workloads mapped
+[GPUBench GUI] Tooltip visualizations: 58/58 workloads mapped
 ```
 
-### 4.1 Mapping table (57 workloads)
+### 4.1 Mapping table (58 workloads)
 
 | Engine | Configs | Tier | Visualization |
 |:-------|:--------|:-----|:--------------|
@@ -170,19 +170,19 @@ At startup the GUI logs coverage, and warns per unmatched entry:
 | `RayASBuild` | 6 (TLAS: Jungle 50K) | 2 | `tlas_jungle_50k` → Geometry & BVH view 2 |
 | `RayASBuild` | 7 (TLAS: Open World 200K) | 2 | `tlas_openworld_200k` → Geometry & BVH view 2 |
 | `RayScheduling` | 0–2 (Material) | 1 | `thumb_material_lineup.png` → PBR Materials view 0 |
-| `RayScheduling` | 3–5, 23–24 (Path tracing) | 1 | `thumb_{scene}_stage6_indirect.png` → Pipeline Passes 5 |
+| `RayScheduling` | 3–5, 21–25 (Path tracing) | 1 | `thumb_{scene}_stage6_indirect.png` → Pipeline Passes 5 |
 | `RayScheduling` | 6–8 (Incoherent GI) | 2 | `incoherent_{naive,ser,dgc}` → Pipeline Passes 5 |
-| `RayScheduling` | 9–11 (Full frame) | 1 | `thumb_{scene}_stage7_final.png` → Pipeline Passes 6 |
+| `RayScheduling` | 9–11, 17 (Full frame / 4K UHD) | 1 | `thumb_{scene}_stage7_final.png` → Pipeline Passes 6 |
 | `RayScheduling` | 12 (Scanline) | 2 | `traversal_scanline` → Pipeline Passes 0 |
-| `RayScheduling` | 13, 26, 28 (Compaction) | 2 | `wave_ballot_compaction` |
+| `RayScheduling` | 13, 26, 27, 29 (Compaction / Payload) | 2 | `wave_ballot_compaction` |
 | `RayScheduling` | 14 (Tiled 8×4) | 2 | `traversal_tiled_8x4` → Pipeline Passes 0 |
 | `RayScheduling` | 15 (Morton 8×4) | 2 | `traversal_morton_8x4` → Pipeline Passes 0 |
 | `RayScheduling` | 16 (Morton 4×8) | 2 | `traversal_morton_4x8` → Pipeline Passes 0 |
-| `RayScheduling` | 17, 18, 29, 30 (Primary rays) | 1 | `thumb_{scene}_stage2_primary.png` → Pipeline Passes 1 |
-| `RayScheduling` | 19–22 (Shadows) | 1 | `thumb_{scene}_stage3_shadow.png` → Pipeline Passes 2 |
-| `RayScheduling` | 27 (Alpha cutout) | 1 | `thumb_alpha_layers.png` → Geometry & BVH view 1 |
-| `RayScheduling` | 31, 32 (Multi-light, 1 light) | 1 | `thumb_{scene}_stage5_direct.png` → Pipeline Passes 4 |
-| `RayScheduling` | 33, 34 (Multi-light, 128 lights) | 1 | `thumb_{scene}_multilight_128_dgc.png` → Pipeline Passes 4 |
+| `RayScheduling` | 18, 30, 31 (Primary rays) | 1 | `thumb_{scene}_stage2_primary.png` → Pipeline Passes 1 |
+| `RayScheduling` | 19, 20, 32, 33 (Shadows) | 1 | `thumb_{scene}_stage3_shadow.png` → Pipeline Passes 2 |
+| `RayScheduling` | 28 (Alpha cutout) | 1 | `thumb_alpha_layers.png` → Geometry & BVH view 1 |
+| `RayScheduling` | 34, 35 (Multi-light, 1 light) | 1 | `thumb_{scene}_stage5_direct.png` → Pipeline Passes 4 |
+| `RayScheduling` | 36, 37 (Multi-light, 128 lights) | 1 | `thumb_{scene}_multilight_128_dgc.png` → Pipeline Passes 4 |
 | `RayRawTraversal` | 0 (Coherent tris) | 2 | `bvh_coherent_triangles` |
 | `RayRawTraversal` | 1 (Deep boxes) | 2 | `bvh_nested_boxes` |
 | `RayIntersect` | 0 (Ray-triangle) | 2 | `intersect_ray_triangle` |

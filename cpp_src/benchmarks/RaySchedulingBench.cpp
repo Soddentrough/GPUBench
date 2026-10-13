@@ -421,8 +421,13 @@ int32_t RaySchedulingBench::GetBaselineConfigIndex(uint32_t config_idx) const {
 
   // Scene Path Tracing (Multi-Bounce): baseline is 3 (Megakernel)
   case 4:  // Path Tracing (RTP + SER)
+  case 5:  // Path Tracing (DGC)
   case 25: // Path Tracing (Dynamic Load Balancing / Persistent Threads)
     return 3;
+
+  // Scene Path Tracing (16 SPP): baseline is 23 (Megakernel)
+  case 24: // Path Tracing (16 SPP) (DGC)
+    return 23;
 
   // Directional Shadows: baseline is 19 (Single Light Megakernel)
   case 20: // Single Light (RTP + SER)
@@ -438,6 +443,7 @@ int32_t RaySchedulingBench::GetBaselineConfigIndex(uint32_t config_idx) const {
 
   // Incoherent Ray Tracing: baseline is 6 (Megakernel)
   case 7: // Incoherent Diffuse GI (RTP + SER)
+  case 8: // Incoherent Diffuse GI (DGC)
     return 6;
 
   // Configs with no work-equivalent baseline (or that are baselines themselves):
@@ -492,7 +498,7 @@ int RaySchedulingBench::GetSortWeight(uint32_t config_idx) const {
   if (config_idx >= 19 && config_idx <= 22) return 640 + static_cast<int>(config_idx - 19); // Shadows: 640..643
   if (config_idx >= 31 && config_idx <= 34) return 644 + static_cast<int>(config_idx - 31); // Multi-Light: 644..647
   if (config_idx < 3) return 648 + static_cast<int>(config_idx);                             // Material: 648..650
-  if (config_idx >= 6 && config_idx <= 8) return 650 + static_cast<int>(config_idx - 6);    // Incoherent: 650..652
+  if (config_idx >= 6 && config_idx <= 8) return 651 + static_cast<int>(config_idx - 6);    // Incoherent: 651..653
   // Traversal Ordering & Coherence: 12, 14, 15, 16
   if (config_idx == 12) return 660; // Linear 1D Scanline (Baseline)
   if (config_idx == 14) return 661; // 2D Screen Tiled (8x4)
@@ -895,7 +901,7 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
     }
   }
 
-  for (int i = 0; i < 31; ++i) {
+  for (int i = 0; i < 35; ++i) {
     unsupportedConfig[i] = false;
     unsupportedReason[i] = "";
   }
@@ -1406,14 +1412,14 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     break;
   }
   case 9: { // Primary Ray Tracing - Traditional Megakernel
-    PushConstantsTraditional pc{rayCount, 0, 1, seed, dumpRenders ? 1u : 0u, renderWidth, renderHeight, 0, sceneTypeVal, isGltfVal, 1u};
+    PushConstantsTraditional pc{rayCount, 0, 1, seed, dumpRenders ? 1u : 0u, renderWidth, renderHeight, 2, sceneTypeVal, isGltfVal, 1u};
     vContext->setKernelArg(kernelTraditional, 8, sizeof(pc), &pc);
     vContext->dispatch(kernelTraditional, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     break;
   }
   case 10: { // Primary Ray Tracing - RTP + Hardware SER
     if (kernelRTPSER) {
-      PushConstantsTraditional pc{rayCount, 0, 1, seed, dumpRenders ? 1u : 0u, renderWidth, renderHeight, 0, sceneTypeVal, isGltfVal, 1u};
+      PushConstantsTraditional pc{rayCount, 0, 1, seed, dumpRenders ? 1u : 0u, renderWidth, renderHeight, 2, sceneTypeVal, isGltfVal, 1u};
       vContext->setKernelArg(kernelRTPSER, 8, sizeof(pc), &pc);
       vContext->dispatch(kernelRTPSER, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     }
@@ -1623,10 +1629,6 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     break;
   }
   case 25: { // Full Scene Path Tracing - Persistent Threads (Work Stealing)
-    // Reset workQueue.currentWorkTileIndex (counter 0 in workListBuffer) to 0
-    uint32_t zero = 0;
-    context->writeBuffer(workListBuffer, 0, sizeof(zero), &zero);
-
     struct PushConstantsPersistent {
       uint32_t rayCount;
       uint32_t mode;
@@ -1639,16 +1641,22 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
       uint32_t sceneType;
       uint32_t isGltf;
       uint32_t spp;
+      uint32_t sampleIdx{0};
     };
-    PushConstantsPersistent pc{rayCount, 1, 1 + bounceDepth, seed, dumpRenders ? 1u : 0u, renderWidth, renderHeight, 2, sceneTypeVal, isGltfVal, samplesPerPixel};
-    vContext->setKernelArg(kernelPersistent, 9, sizeof(pc), &pc);
-    // Persistent workgroups: 384 groups * 32 threads = 12,288 threads saturating 64 CUs / 128 SIMDs on RDNA 4
-    vContext->dispatch(kernelPersistent, 384, 1, 1, 32, 1, 1);
+    uint32_t passes = (samplesPerPixel > 1) ? samplesPerPixel : 1u;
+    for (uint32_t s = 0; s < passes; ++s) {
+      // Reset workQueue.currentWorkTileIndex (counter 0 in workListBuffer) on GPU without synchronous host staging stall
+      vContext->dispatch(kernelReset, 1, 1, 1, 32, 1, 1);
+      PushConstantsPersistent pc{rayCount, 1, 1 + bounceDepth, seed + s * 7919u, dumpRenders ? 1u : 0u, renderWidth, renderHeight, 2, sceneTypeVal, isGltfVal, passes, s};
+      vContext->setKernelArg(kernelPersistent, 9, sizeof(pc), &pc);
+      // Persistent workgroups: 384 groups * 32 threads = 12,288 threads saturating 64 CUs / 128 SIMDs on RDNA 4
+      vContext->dispatch(kernelPersistent, 384, 1, 1, 32, 1, 1);
+    }
     break;
   }
-  case 26: { // Queue Compaction - Single-Pass Unified Stream (32B Packed Hybrid Payload)
+  case 26: { // Queue Compaction - Single-Pass Unified Stream (128B Expanded Hit Record)
     vContext->dispatch(kernelReset, 1, 1, 1, 32, 1, 1);
-    PushConstantsClassify pcClassify{rayCount, 6, 0, seed, 0, renderWidth, renderHeight, materialCapacity, 2, sceneTypeVal, isGltfVal, 1u};
+    PushConstantsClassify pcClassify{rayCount, 6, 1, seed, 0, renderWidth, renderHeight, materialCapacity, 2, sceneTypeVal, isGltfVal, 1u};
     vContext->setKernelArg(kernelClassify, 10, sizeof(pcClassify), &pcClassify);
     vContext->dispatch(kernelClassify, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     break;
@@ -1660,7 +1668,7 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     vContext->dispatch(kernelClassify, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     break;
   }
-  case 28: { // Queue Compaction - Queue Compaction Throughput
+  case 28: { // Queue Compaction - Queue Compaction Throughput (32B Packed Hybrid Record)
     vContext->dispatch(kernelReset, 1, 1, 1, 32, 1, 1);
     PushConstantsClassify pcClassify{rayCount, 6, 0, seed, 0, renderWidth, renderHeight, materialCapacity, 2, sceneTypeVal, isGltfVal, 1u};
     vContext->setKernelArg(kernelClassify, 10, sizeof(pcClassify), &pcClassify);
@@ -1703,16 +1711,6 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
       } pcLight{b, materialCapacity, dumpRenders ? 1u : 0u, renderWidth, renderHeight, sceneTypeVal, isGltfVal, 1u};
       std::memcpy(multiLightBatchesSingle[b].pushConstants.data(), &pcLight, sizeof(pcLight));
     }
-    if (dgcSequenceBuffer) {
-      uint32_t pcSingle[8] = {
-          0, materialCapacity, dumpRenders ? 1u : 0u, renderWidth, renderHeight,
-          sceneTypeVal, isGltfVal, 1u
-      };
-      uint32_t itemSingle[12] = {
-          0, pcSingle[0], pcSingle[1], pcSingle[2], pcSingle[3], pcSingle[4], pcSingle[5], pcSingle[6], pcSingle[7], 0, 1, 1
-      };
-      context->writeBuffer(dgcSequenceBuffer, 12 * sizeof(itemSingle), sizeof(itemSingle), itemSingle);
-    }
     PushConstantsClassify pcClassify{rayCount, 8, 0, seed, dumpRenders ? 1u : 0u, renderWidth, renderHeight, materialCapacity, 0, sceneTypeVal, isGltfVal, 1u};
     vContext->setKernelArg(kernelClassify, 10, sizeof(pcClassify), &pcClassify);
 
@@ -1745,16 +1743,6 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
       } pcLight{b, materialCapacity, dumpRenders ? 1u : 0u, renderWidth, renderHeight, sceneTypeVal, isGltfVal, 128u};
       std::memcpy(multiLightBatches128[b].pushConstants.data(), &pcLight, sizeof(pcLight));
     }
-    if (dgcSequenceBuffer) {
-      uint32_t pc128[8] = {
-          0, materialCapacity, dumpRenders ? 1u : 0u, renderWidth, renderHeight,
-          sceneTypeVal, isGltfVal, 128u
-      };
-      uint32_t item128[12] = {
-          0, pc128[0], pc128[1], pc128[2], pc128[3], pc128[4], pc128[5], pc128[6], pc128[7], 0, 1, 1
-      };
-      context->writeBuffer(dgcSequenceBuffer, 13 * sizeof(item128), sizeof(item128), item128);
-    }
     PushConstantsClassify pcClassify{rayCount, 8, 0, seed, dumpRenders ? 1u : 0u, renderWidth, renderHeight, materialCapacity, 0, sceneTypeVal, isGltfVal, 128u};
     vContext->setKernelArg(kernelClassify, 10, sizeof(pcClassify), &pcClassify);
 
@@ -1779,8 +1767,39 @@ void RaySchedulingBench::performVisualVerification(bool isInteractive) {
     std::cout << "\r\033[K  \033[36m⠋\033[0m [1/3] Tonemapping and exporting primary 4K frames..." << std::flush;
   }
 
+  uint32_t sceneTypeVal = (sceneType == SceneType::AAAOutdoorForest) ? 3u : ((sceneType == SceneType::OutdoorLandscape) ? 1u : ((sceneType == SceneType::IndoorAtrium) ? 2u : 0u));
+  uint32_t isGltfVal = isGltf ? 1u : 0u;
+  auto updateDgcDumpFlag = [&](uint32_t dumpFlag) {
+    if (!dgcSequenceBuffer) return;
+    for (uint32_t m = 0; m < 8; ++m) {
+      uint32_t item[12] = {
+          m, m, materialCapacity, dumpFlag, renderWidth, renderHeight,
+          sceneTypeVal, isGltfVal, 0u, 0, 1, 1
+      };
+      context->writeBuffer(dgcSequenceBuffer, m * sizeof(item), sizeof(item), item);
+    }
+    for (uint32_t l = 0; l < 3; ++l) {
+      uint32_t item[12] = {
+          0, l, materialCapacity, dumpFlag, renderWidth, renderHeight,
+          sceneTypeVal, isGltfVal, l, 0, 1, 1
+      };
+      context->writeBuffer(dgcSequenceBuffer, (9 + l) * sizeof(item), sizeof(item), item);
+    }
+    uint32_t itemSingle[12] = {
+        0, 0, materialCapacity, dumpFlag, renderWidth, renderHeight,
+        sceneTypeVal, isGltfVal, 1u, 0, 1, 1
+    };
+    context->writeBuffer(dgcSequenceBuffer, 12 * sizeof(itemSingle), sizeof(itemSingle), itemSingle);
+    uint32_t item128[12] = {
+        0, 0, materialCapacity, dumpFlag, renderWidth, renderHeight,
+        sceneTypeVal, isGltfVal, 128u, 0, 1, 1
+    };
+    context->writeBuffer(dgcSequenceBuffer, 13 * sizeof(item128), sizeof(item128), item128);
+  };
+
   // Explicitly render one complete frame from each pipeline with dump enabled
   dumpRenders = true;
+  updateDgcDumpFlag(1u);
   Run(9);
   context->waitIdle();
   Run(11);

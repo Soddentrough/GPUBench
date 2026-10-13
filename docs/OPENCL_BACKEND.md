@@ -32,7 +32,7 @@ GPUBench classifies tests cleanly into fully supported native workloads and tran
 | **Device Memory Bandwidth** | ✅ **Supported** | Standard OpenCL Buffers | 128, 256, and 1024 threads/group sweep modes (Read, Write, R/W). |
 | **Cache Latency** | ✅ **Supported** | Pointer-chasing buffer traversal | Single-workitem pointer chasing across L0/L1/L2/L3 cache levels. |
 | **Pixel Fill Rate (ROPs)** | ⚠️ *API Limitation* | Graphics pipeline required | Reported as `UNSUPPORTED (API Limitation)` (OpenCL lacks rasterizer/ROPs). |
-| **Ray Tracing (All 9 Suites)** | ⚠️ *API Limitation* | `VK_KHR_ray_query` / hardware BVH acceleration required | Reported as `UNSUPPORTED (API Limitation)` (OpenCL lacks hardware BVH traversal and ray query primitives). |
+| **Ray Tracing (All 7 Suites)** | ⚠️ *API Limitation* | `VK_KHR_ray_query` / hardware BVH acceleration required | Reported as `UNSUPPORTED (API Limitation)` (OpenCL lacks hardware BVH traversal and ray query primitives). |
 
 ---
 
@@ -78,7 +78,7 @@ make -j16
 ./gpubench --backend opencl
 
 # Run specific compute and memory benchmarks on OpenCL device 0
-./gpubench -k opencl -d 0 -b FP32,FP16,FP64,INT8,Memory
+./gpubench -k opencl -d 0 -b FP32,FP16,FP64,INT8,membw
 
 # Export machine-readable results to JSON
 ./gpubench -k opencl -o results_opencl.json

@@ -97,42 +97,7 @@ bool VulkanContext::init(const char* title, int width, int height, float scaleOv
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 
     // Load high-resolution system TrueType font for workstation UI
-    const char* fontCandidates[] = {
-#if defined(_WIN32)
-        "C:\\Windows\\Fonts\\segoeui.ttf",
-        "C:\\Windows\\Fonts\\arial.ttf",
-        "C:\\Windows\\Fonts\\calibri.ttf",
-#elif defined(__APPLE__)
-        "/System/Library/Fonts/SFNS.ttf",
-        "/System/Library/Fonts/Supplemental/Arial.ttf",
-        "/Library/Fonts/Arial.ttf",
-#endif
-        "/usr/share/fonts/adwaita-sans-fonts/AdwaitaSans-Regular.ttf",
-        "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/google-noto/NotoSans-Regular.ttf"
-    };
-
-    float baseFontSize = 16.0f;
-    float scaledFontSize = std::round(baseFontSize * m_displayScale);
-
-    bool fontLoaded = false;
-    for (const char* fontPath : fontCandidates) {
-        FILE* f = fopen(fontPath, "rb");
-        if (f) {
-            fclose(f);
-            ImFontConfig fontCfg;
-            fontCfg.OversampleH = 2;
-            fontCfg.OversampleV = 2;
-            fontCfg.PixelSnapH = true;
-            io.Fonts->AddFontFromFileTTF(fontPath, scaledFontSize, &fontCfg);
-            fontLoaded = true;
-            break;
-        }
-    }
-    if (!fontLoaded) {
-        io.Fonts->AddFontDefault();
-    }
+    loadSystemFont(m_displayScale);
 
     setupVulkanWindow(fbWidth, fbHeight);
 
@@ -151,6 +116,57 @@ bool VulkanContext::init(const char* title, int width, int height, float scaleOv
 
     m_initialized = true;
     return true;
+}
+
+void VulkanContext::loadSystemFont(float scale) {
+    ImGuiIO& io = ImGui::GetIO();
+    io.Fonts->Clear();
+
+    const char* fontCandidates[] = {
+#if defined(_WIN32)
+        "C:\\Windows\\Fonts\\segoeui.ttf",
+        "C:\\Windows\\Fonts\\arial.ttf",
+        "C:\\Windows\\Fonts\\calibri.ttf",
+#elif defined(__APPLE__)
+        "/System/Library/Fonts/SFNS.ttf",
+        "/System/Library/Fonts/Supplemental/Arial.ttf",
+        "/Library/Fonts/Arial.ttf",
+#endif
+        "/usr/share/fonts/adwaita-sans-fonts/AdwaitaSans-Regular.ttf",
+        "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/google-noto/NotoSans-Regular.ttf"
+    };
+
+    float baseFontSize = 16.0f;
+    float scaledFontSize = std::max(10.0f, std::round(baseFontSize * scale));
+
+    bool fontLoaded = false;
+    for (const char* fontPath : fontCandidates) {
+        FILE* f = fopen(fontPath, "rb");
+        if (f) {
+            fclose(f);
+            ImFontConfig fontCfg;
+            fontCfg.OversampleH = 2;
+            fontCfg.OversampleV = 2;
+            fontCfg.PixelSnapH = true;
+            io.Fonts->AddFontFromFileTTF(fontPath, scaledFontSize, &fontCfg);
+            fontLoaded = true;
+            break;
+        }
+    }
+    if (!fontLoaded) {
+        ImFontConfig fontCfg;
+        fontCfg.SizePixels = scaledFontSize;
+        io.Fonts->AddFontDefault(&fontCfg);
+    }
+    m_builtFontScale = scale;
+}
+
+void VulkanContext::requestFontRebuild(float scale) {
+    if (scale > 0.0f && std::abs(scale - m_builtFontScale) > 0.01f) {
+        m_pendingFontScale = scale;
+    }
 }
 
 bool VulkanContext::setupVulkan() {
@@ -378,6 +394,13 @@ void VulkanContext::beginFrame() {
         }
     }
 
+    if (m_pendingFontScale > 0.0f && m_device != VK_NULL_HANDLE) {
+        loadSystemFont(m_pendingFontScale);
+        ImGui_ImplVulkan_CreateFontsTexture();
+        ImGui::GetIO().FontGlobalScale = 1.0f;
+        m_pendingFontScale = 0.0f;
+    }
+
     ImGui_ImplVulkan_NewFrame();
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
@@ -429,7 +452,8 @@ bool VulkanContext::frameRender(ImDrawData* drawData) {
             SDL_PumpEvents();
             SDL_Event ev;
             if (SDL_PeepEvents(&ev, 1, SDL_PEEKEVENT, SDL_EVENT_QUIT, SDL_EVENT_QUIT) > 0) {
-                // User requested quit; stop waiting
+                // User requested quit; wait for in-flight fence to complete before resetting
+                err = vkWaitForFences(m_device, 1, &fd->Fence, VK_TRUE, UINT64_MAX);
                 break;
             }
             continue;

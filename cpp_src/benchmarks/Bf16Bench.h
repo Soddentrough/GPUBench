@@ -7,26 +7,20 @@ public:
   bool IsSupported(const DeviceInfo &info,
                    IComputeContext *context) const override;
   std::string GetSupportNote() const override {
-    return "No native BFloat16 arithmetic types available in current Vulkan/GLSL or HIP toolchains (shaders would fall back to FP16)";
+    return "Requires VK_KHR_shader_bfloat16 or ROCm BF16 WMMA support";
   }
   std::string GetSupportNote(const DeviceInfo &info,
                              IComputeContext *context = nullptr) const override {
     if (context && context->getBackend() == ComputeBackend::OpenCL) {
       return "No support for native BFloat16 floating-point arithmetic in OpenCL API (extension cl_khr_bfloat16 missing)";
     }
-    if (context && context->getBackend() == ComputeBackend::ROCm) {
-      return "HIP toolchain clang emulates bf16 via FP32 (no native hip_bfloat162/__hfma2 in headers)";
-    }
-    if (context && context->getBackend() == ComputeBackend::Vulkan) {
-      return "No native BFloat16 arithmetic shader types available in glslang/Vulkan toolchain (shaders would fall back to FP16)";
-    }
     if (!info.bf16Support) {
-      return "shaderBfloat16 hardware bit not set";
+      return "shaderBfloat16 / BF16 hardware support bit not set";
     }
-    return "No native BFloat16 arithmetic types available in current toolchain";
+    return "";
   }
   SupportLimitation GetSupportLimitation() const override {
-    return SupportLimitation::kToolchain;
+    return SupportLimitation::kHardware;
   }
   SupportLimitation GetSupportLimitation(const DeviceInfo &info,
                                          IComputeContext *context = nullptr) const override {
@@ -38,15 +32,45 @@ public:
     }
     return SupportLimitation::kToolchain;
   }
-  bool IsConfigSupported(uint32_t config_idx) const override { return false; }
+  bool IsConfigSupported(uint32_t config_idx) const override {
+    if (config_idx == 0)
+      return vectorKernel != nullptr;
+    if (config_idx == 1)
+      return matrixKernel != nullptr;
+    return false;
+  }
   bool IsConfigSupported(uint32_t config_idx, const DeviceInfo &info,
                          IComputeContext *context = nullptr) const override {
-    (void)config_idx;
-    return IsSupported(info, context);
+    if (!IsSupported(info, context))
+      return false;
+    if (config_idx == 0) {
+      if (this->context != nullptr &&
+          (context == nullptr || context == this->context)) {
+        return vectorKernel != nullptr;
+      }
+      // On ROCm, scalar hip_bfloat16 vector math is emulated via FP32 on RDNA3/4;
+      // only Matrix WMMA is native unless vectorKernel is explicitly loaded.
+      if (context && context->getBackend() == ComputeBackend::ROCm)
+        return false;
+      return true;
+    }
+    if (config_idx == 1) {
+      if (!info.cooperativeMatrixSupport)
+        return false;
+      if (this->context != nullptr &&
+          (context == nullptr || context == this->context)) {
+        return matrixKernel != nullptr;
+      }
+      return true;
+    }
+    return false;
   }
   std::string GetConfigSupportNote(uint32_t config_idx,
                                    const DeviceInfo &info,
                                    IComputeContext *context = nullptr) const override {
+    if (config_idx == 0 && context && context->getBackend() == ComputeBackend::ROCm) {
+      return "HIP toolchain emulates vector bf16 via FP32; only BF16 Matrix WMMA is native on ROCm";
+    }
     if (config_idx == 1 && !info.cooperativeMatrixSupport) {
       return "VK_KHR_cooperative_matrix or ROCm WMMA not supported";
     }
@@ -55,6 +79,9 @@ public:
   SupportLimitation GetConfigSupportLimitation(uint32_t config_idx,
                                                const DeviceInfo &info,
                                                IComputeContext *context = nullptr) const override {
+    if (config_idx == 0 && context && context->getBackend() == ComputeBackend::ROCm) {
+      return SupportLimitation::kToolchain;
+    }
     if (config_idx == 1 && !info.cooperativeMatrixSupport) {
       return SupportLimitation::kHardware;
     }

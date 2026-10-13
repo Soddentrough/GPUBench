@@ -928,20 +928,90 @@ bool ResultImporter::loadFromString(const std::string &content, ImportedRun &out
       rd.metric = entry["metric"].as_string();
       rd.operations = entry["operations"].as_uint64(0);
       rd.time_ms = entry["time_ms"].as_double(0.0);
+      rd.isValid = entry["is_valid"].as_bool(true);
+      rd.errorString = entry["error"].as_string();
+      std::string status = entry["status"].as_string();
+      if (status == "INVALID") {
+        rd.isValid = false;
+      } else if (status == "ABORTED" && rd.time_ms >= 0.0) {
+        rd.time_ms = -3.0;
+      } else if (status == "FAILED" && rd.time_ms >= 0.0) {
+        rd.time_ms = -2.0;
+      }
       rd.isEmulated = entry["is_emulated"].as_bool(false);
-      rd.isUnsupported = entry["unsupported"].as_bool(false);
+      rd.isUnsupported = entry["unsupported"].as_bool(false) || (status == "UNSUPPORTED");
       rd.supportCategory = entry["unsupported_category"].as_string();
       rd.supportNote = entry["unsupported_reason"].as_string(entry["support_note"].as_string());
       rd.maxWorkGroupSize = entry["max_workgroup_size"].as_uint32(1024);
+      bool hasExplicitConfigIndex = entry.has("config_index");
       rd.configIndex = entry["config_index"].as_uint32(0);
-      rd.width = resWidth;
-      rd.height = resHeight;
+      rd.baselineConfigIndex = static_cast<int>(entry["baseline_config_index"].as_double(-1.0));
+
+      uint32_t entryW = resWidth, entryH = resHeight;
+      if (entry.has("resolution")) {
+        parseResolution(entry["resolution"].as_string(), entryW, entryH);
+      }
+      rd.width = entry["width"].as_uint32(entryW);
+      rd.height = entry["height"].as_uint32(entryH);
+
+      if (entry.has("statistics")) {
+        const auto &st = entry["statistics"];
+        rd.sample_count = st["samples"].as_uint32(st["sample_count"].as_uint32(0));
+        rd.min_time_ms = st["min_time_ms"].as_double(0.0);
+        rd.median_time_ms = st["median_time_ms"].as_double(0.0);
+        rd.mean_time_ms = st["mean_time_ms"].as_double(0.0);
+        rd.p95_time_ms = st["p95_time_ms"].as_double(0.0);
+      }
+      if (entry.has("compiler_telemetry")) {
+        const auto &ct = entry["compiler_telemetry"];
+        rd.hasRegisterTelemetry = ct["available"].as_bool(true);
+        rd.vgprCount = ct["vgpr_count"].as_uint32(0);
+        rd.sgprCount = ct["sgpr_count"].as_uint32(0);
+        rd.ldsSizeBytes = ct["lds_size_bytes"].as_uint32(0);
+        rd.scratchSizeBytes = ct["scratch_spill_bytes"].as_uint32(0);
+        rd.codeSizeBytes = ct["code_size_bytes"].as_uint32(0);
+        rd.maxWavesPerSimd = ct["max_waves_per_simd"].as_uint32(0);
+        rd.compilerTarget = ct["compiler"].as_string();
+      }
+      if (entry.has("power_telemetry")) {
+        const auto &pt = entry["power_telemetry"];
+        rd.hasPowerTelemetry = pt["available"].as_bool(true);
+        rd.powerWatts = static_cast<float>(pt["power_watts"].as_double(0.0));
+        rd.energyJoules = pt["energy_joules"].as_double(0.0);
+        rd.joulesPerUnit = pt["joules_per_unit"].as_double(0.0);
+        rd.unitPerWatt = pt["unit_per_watt"].as_double(0.0);
+        rd.efficiencyUnit = pt["efficiency_unit"].as_string();
+      }
+      if (entry.has("performance_query")) {
+        const auto &pq = entry["performance_query"];
+        rd.hasPerfQueryTelemetry = pq["available"].as_bool(true);
+        rd.perfCounters.available = rd.hasPerfQueryTelemetry;
+        rd.perfCounters.gpuActiveCycles = pq["gpu_active_cycles"].as_uint64(0);
+        rd.perfCounters.waves = pq["waves"].as_uint64(0);
+        rd.perfCounters.valuInstructions = pq["valu_instructions"].as_uint64(0);
+        rd.perfCounters.saluInstructions = pq["salu_instructions"].as_uint64(0);
+        rd.perfCounters.vmemLoadInstructions = pq["vmem_load_instructions"].as_uint64(0);
+        rd.perfCounters.smemLoadInstructions = pq["smem_load_instructions"].as_uint64(0);
+        rd.perfCounters.vmemStoreInstructions = pq["vmem_store_instructions"].as_uint64(0);
+        rd.perfCounters.ldsInstructions = pq["lds_instructions"].as_uint64(0);
+        rd.perfCounters.valuBusyPct = static_cast<float>(pq["valu_busy_pct"].as_double(0.0));
+        rd.perfCounters.saluBusyPct = static_cast<float>(pq["salu_busy_pct"].as_double(0.0));
+        rd.perfCounters.vramReadBytes = pq["vram_read_bytes"].as_uint64(0);
+        rd.perfCounters.l0CacheHitRatio = static_cast<float>(pq["l0_cache_hit_ratio"].as_double(0.0));
+        rd.perfCounters.l1CacheHitRatio = static_cast<float>(pq["l1_cache_hit_ratio"].as_double(0.0));
+        if (pq.has("raw_counters") && pq["raw_counters"].is_object()) {
+          for (const auto &kv : pq["raw_counters"].objVal) {
+            rd.perfCounters.rawCounters[kv.first] = kv.second.as_double(0.0);
+          }
+        }
+      }
 
       // Deduce sort weight and normalize to standard hierarchical schema
       if (rd.component == "Compute") {
         rd.sortWeight = 10;
-        if (rd.subcategory == "Dual-Issue" || rd.benchmarkName.rfind("Dual-Issue", 0) == 0) {
-          rd.subcategory = "Dual-Issue";
+        if (rd.subcategory == "Dual-Issue" || rd.subcategory == "ILP & Concurrency" ||
+            rd.benchmarkName.rfind("Dual-Issue", 0) == 0 || rd.benchmarkName.rfind("ILP & Dual-Issue", 0) == 0) {
+          if (rd.subcategory.empty()) rd.subcategory = "ILP & Concurrency";
           rd.sortWeight = 25;
         } else if (rd.subcategory == "LDS Bank Conflicts" || rd.benchmarkName.find("LDS") != std::string::npos) {
           rd.subcategory = "LDS Bank Conflicts";
@@ -953,12 +1023,12 @@ bool ResultImporter::loadFromString(const std::string &content, ImportedRun &out
           rd.subcategory = "Double Precision";
           rd.benchmarkName = "FP64";
           rd.sortWeight = 10;
-          rd.configIndex = 0;
+          if (!hasExplicitConfigIndex) rd.configIndex = 0;
         } else if (rd.subcategory == "FP32" || rd.subcategory == "Single Precision" || rd.benchmarkName == "FP32") {
           rd.subcategory = "Single Precision";
           rd.benchmarkName = "FP32";
           rd.sortWeight = 20;
-          rd.configIndex = 0;
+          if (!hasExplicitConfigIndex) rd.configIndex = 0;
         } else if (rd.subcategory == "FP16" || rd.subcategory == "Half Precision (FP16)" || rd.benchmarkName.rfind("FP16", 0) == 0) {
           rd.subcategory = "Half Precision (FP16)";
           rd.benchmarkName = (rd.configIndex == 1 || rd.benchmarkName.find("Matrix") != std::string::npos) ? "Matrix" : "Vector";
@@ -984,9 +1054,12 @@ bool ResultImporter::loadFromString(const std::string &content, ImportedRun &out
           rd.benchmarkName = (rd.configIndex == 1 || rd.benchmarkName.find("Matrix") != std::string::npos) ? "Matrix" : "Vector";
           rd.configIndex = (rd.benchmarkName == "Matrix") ? 1 : 0;
           rd.sortWeight = 70;
-        } else if (rd.subcategory == "FP6" || rd.benchmarkName == "FP6") {
-          rd.subcategory = "FP6";
+        } else if (rd.subcategory == "FP6" || rd.benchmarkName == "FP6" || rd.benchmarkName.rfind("FP6", 0) == 0) {
+          if (rd.subcategory.empty()) rd.subcategory = "FP6";
           rd.sortWeight = 45;
+        } else if (rd.subcategory == "FP4" || rd.subcategory.find("FP4") != std::string::npos || rd.benchmarkName.rfind("FP4", 0) == 0) {
+          if (rd.subcategory.empty()) rd.subcategory = "Sub-Byte Precision (FP4)";
+          rd.sortWeight = 55;
         }
       } else if (rd.component == "Memory") {
         rd.sortWeight = 100;
@@ -999,17 +1072,22 @@ bool ResultImporter::loadFromString(const std::string &content, ImportedRun &out
           } else {
             rd.subcategory = "Device Memory Bandwidth";
             rd.sortWeight = 105;
+            bool isWrite = (rd.benchmarkName.find("Write") != std::string::npos);
+            bool isRW = (rd.benchmarkName.find("R/W") != std::string::npos);
             if (rd.benchmarkName.find("128") != std::string::npos) {
               rd.benchmarkName = "VRAM Bandwidth (128 threads/group)";
-              rd.configIndex = (rd.benchmarkName.find("Write") != std::string::npos) ? 1 : (rd.benchmarkName.find("R/W") != std::string::npos ? 2 : 0);
+              if (!hasExplicitConfigIndex) rd.configIndex = isWrite ? 1 : (isRW ? 2 : 0);
             } else if (rd.benchmarkName.find("256") != std::string::npos) {
               rd.benchmarkName = "VRAM Bandwidth (256 threads/group)";
-              rd.configIndex = (rd.benchmarkName.find("Write") != std::string::npos) ? 4 : (rd.benchmarkName.find("R/W") != std::string::npos ? 5 : 3);
+              if (!hasExplicitConfigIndex) rd.configIndex = isWrite ? 4 : (isRW ? 5 : 3);
             } else if (rd.benchmarkName.find("1024") != std::string::npos) {
               rd.benchmarkName = "VRAM Bandwidth (1024 threads/group)";
-              rd.configIndex = (rd.benchmarkName.find("Write") != std::string::npos) ? 7 : (rd.benchmarkName.find("R/W") != std::string::npos ? 8 : 6);
+              if (!hasExplicitConfigIndex) rd.configIndex = isWrite ? 7 : (isRW ? 8 : 6);
             }
           }
+        } else if (rd.subcategory == "Cache Latency Curve" || rd.benchmarkName.find("Cache Latency Curve") != std::string::npos) {
+          rd.subcategory = "Cache Latency Curve";
+          rd.sortWeight = 115;
         } else if (rd.subcategory == "Latency" || rd.benchmarkName.find("Latency") != std::string::npos) {
           rd.subcategory = "Latency";
           rd.sortWeight = 110;
@@ -1022,12 +1100,12 @@ bool ResultImporter::loadFromString(const std::string &content, ImportedRun &out
           rd.subcategory = "Hardware Traversal & Intersection";
           rd.benchmarkName = "Ray-Triangle Intersection";
           rd.sortWeight = 500;
-          rd.configIndex = 0;
+          if (!hasExplicitConfigIndex) rd.configIndex = 0;
         } else if (rd.benchmarkName.find("Ray-Box") != std::string::npos) {
           rd.subcategory = "Hardware Traversal & Intersection";
           rd.benchmarkName = "Ray-Box Intersection";
           rd.sortWeight = 500;
-          rd.configIndex = 1;
+          if (!hasExplicitConfigIndex) rd.configIndex = 1;
         } else if (rd.benchmarkName.find("RayDivergence") != std::string::npos) {
           rd.subcategory = "Ray Divergence";
           rd.sortWeight = 510;
@@ -1043,11 +1121,11 @@ bool ResultImporter::loadFromString(const std::string &content, ImportedRun &out
         } else if (rd.benchmarkName.find("BLAS Build") != std::string::npos) {
           rd.subcategory = "BLAS Build & Update";
           rd.sortWeight = 550;
-          rd.configIndex = 0;
+          if (!hasExplicitConfigIndex) rd.configIndex = 0;
         } else if (rd.benchmarkName.find("BLAS Update") != std::string::npos) {
           rd.subcategory = "BLAS Build & Update";
           rd.sortWeight = 550;
-          rd.configIndex = 1;
+          if (!hasExplicitConfigIndex) rd.configIndex = 1;
         } else if (rd.benchmarkName.find("TLAS Build") != std::string::npos) {
           rd.subcategory = "TLAS Build";
           rd.sortWeight = 560;
@@ -1055,20 +1133,31 @@ bool ResultImporter::loadFromString(const std::string &content, ImportedRun &out
           rd.subcategory = "Material Shading Wavefront";
           bool isDgc = (rd.benchmarkName.find("DGC") != std::string::npos || rd.benchmarkName.find("Work Lists") != std::string::npos);
           rd.sortWeight = isDgc ? 581 : 580;
-          rd.configIndex = isDgc ? 1 : 0;
+          if (!hasExplicitConfigIndex) rd.configIndex = isDgc ? 1 : 0;
         } else if (rd.benchmarkName.find("Path Tracing (1 SPP)") != std::string::npos) {
           rd.subcategory = "Path Tracing (1 SPP)";
           bool isDgc = (rd.benchmarkName.find("DGC") != std::string::npos || rd.benchmarkName.find("Work Lists") != std::string::npos);
           rd.sortWeight = isDgc ? 591 : 590;
-          rd.configIndex = isDgc ? 1 : 0;
+          if (!hasExplicitConfigIndex) rd.configIndex = isDgc ? 1 : 0;
         } else if (rd.benchmarkName.find("Path Tracing (16 SPP") != std::string::npos) {
           rd.subcategory = "Path Tracing (16 SPP Stress)";
           bool isDgc = (rd.benchmarkName.find("DGC") != std::string::npos || rd.benchmarkName.find("Work Lists") != std::string::npos);
           rd.sortWeight = isDgc ? 596 : 595;
-          rd.configIndex = isDgc ? 1 : 0;
+          if (!hasExplicitConfigIndex) rd.configIndex = isDgc ? 1 : 0;
         }
       } else {
         rd.sortWeight = 300;
+      }
+
+      if (entry.has("sort_weight")) {
+        int explicitSortWeight = static_cast<int>(entry["sort_weight"].as_double(0.0));
+        if (explicitSortWeight > 0) {
+          rd.sortWeight = explicitSortWeight;
+        }
+      }
+
+      if (outRun.backend == "Vulkan" && !root.has("backend") && !rd.backendName.empty() && rd.backendName != "System") {
+        outRun.backend = rd.backendName;
       }
 
       outRun.results.push_back(rd);
