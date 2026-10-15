@@ -11,9 +11,15 @@ __kernel void run_dual_issue_ilp4(__global float* data, float multiplier, uint n
     float m = multiplier * 0.00001f;
 
     // 131072 iterations * 2 scalar FMAs = 131072 * 4 = 524,288 FP32 operations
+    #pragma unroll 1
     for (int i = 0; i < 131072; ++i) {
+#ifdef __AMDGCN__
+        __asm__ volatile("v_fma_f32 %0, %0, %1, %2" : "+v"(val0) : "s"(m), "v"(val1));
+        __asm__ volatile("v_fma_f32 %0, %0, %1, %2" : "+v"(val1) : "s"(m), "v"(val0));
+#else
         val0 = fma(val0, m, val1);
         val1 = fma(val1, m, val0);
+#endif
     }
 
     data[index] = val0 + val1;
@@ -37,6 +43,7 @@ __kernel void run_dual_issue_ilp8(__global float* data, float multiplier, uint n
     float m = multiplier * 0.00001f;
 
     // 65536 iterations * 8 scalar FMAs = 65536 * 16 = 1,048,576 FP32 operations
+    #pragma unroll 1
     for (int i = 0; i < 65536; ++i) {
         val0 = fma(val0, m, val0);
         val1 = fma(val1, m, val1);
@@ -77,6 +84,7 @@ __kernel void run_dual_issue_ilp16(__global float* data, float multiplier, uint 
     float m = multiplier * 0.00001f;
 
     // 65536 iterations * 16 scalar FMAs = 65536 * 32 = 2,097,152 FP32 operations
+    #pragma unroll 1
     for (int i = 0; i < 65536; ++i) {
         val0  = fma(val0,  m, val0);
         val1  = fma(val1,  m, val1);
@@ -115,9 +123,15 @@ __kernel void run_dual_issue_int32_4(__global float* data, float multiplier, uin
     uint mask = (num_elements ^ 0x7FFF7FFFu) | 1u;
 
     // 131072 iterations * 2 scalar INT32 chains (add + and = 2 ops each) = 131072 * 4 = 524,288 INT32 ops
+    #pragma unroll 1
     for (int i = 0; i < 131072; ++i) {
+#ifdef __AMDGCN__
+        __asm__ volatile("v_add_nc_u32 %0, %1, %2\n\tv_and_b32 %0, %3, %0" : "=v"(val0) : "s"(mu), "v"(val1), "s"(mask));
+        __asm__ volatile("v_add_nc_u32 %0, %1, %2\n\tv_and_b32 %0, %3, %0" : "=v"(val1) : "s"(mu), "v"(val0), "s"(mask));
+#else
         val0 = (val1 + mu) & mask;
         val1 = (val0 + mu) & mask;
+#endif
     }
 
     data[index] = (float)(((val0 + val1) & 0x00FFFFFFu) | 1u);

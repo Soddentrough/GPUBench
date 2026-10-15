@@ -8,16 +8,18 @@
 // Helper: signed int8 dot product of 4 pairs into int32 + accumulate.
 // LLVM lowers this to V_DOT4_I32_IU8 when targeting GFX1201.
 __device__ __forceinline__
-int sdot4(char4 a, char4 b, int c) {
-    union {
-        char4 c4;
-        int i32;
-    } ua, ub;
-    ua.c4 = a;
-    ub.c4 = b;
+int sdot4_packed(int a_packed, int b_packed, int c) {
     int dst;
-    __asm__ volatile("v_dot4_i32_i8 %0, %1, %2, %3" : "=v"(dst) : "v"(ua.i32), "v"(ub.i32), "v"(c));
+    __asm__ volatile("v_dot4_i32_i8 %0, %1, %2, %3" : "=v"(dst) : "v"(a_packed), "v"(b_packed), "v"(c));
     return dst;
+}
+
+__device__ __forceinline__
+int pack_char4(char4 v) {
+    return (static_cast<int>(v.x) & 0xFF) |
+           ((static_cast<int>(v.y) & 0xFF) << 8) |
+           ((static_cast<int>(v.z) & 0xFF) << 16) |
+           ((static_cast<int>(v.w) & 0xFF) << 24);
 }
 
 extern "C" __global__ void run_benchmark(char4* data) {
@@ -26,32 +28,35 @@ extern "C" __global__ void run_benchmark(char4* data) {
     // Dynamic load — compiler cannot constant-fold loop body.
     char4 a = data[index & 0x1FFFu];
 
-    const char4 w0 = make_char4( 1,  2,  3,  4);
-    const char4 w1 = make_char4( 5,  6,  7,  8);
-    const char4 w2 = make_char4( 9, 10, 11, 12);
-    const char4 w3 = make_char4(13, 14, 15, 16);
-    const char4 w4 = make_char4(17, 18, 19, 20);
-    const char4 w5 = make_char4(21, 22, 23, 24);
-    const char4 w6 = make_char4(25, 26, 27, 28);
-    const char4 w7 = make_char4(29, 30, 31, 32);
+    const int w0 = ( 1 & 0xFF) | (( 2 & 0xFF) << 8) | (( 3 & 0xFF) << 16) | (( 4 & 0xFF) << 24);
+    const int w1 = ( 5 & 0xFF) | (( 6 & 0xFF) << 8) | (( 7 & 0xFF) << 16) | (( 8 & 0xFF) << 24);
+    const int w2 = ( 9 & 0xFF) | ((10 & 0xFF) << 8) | ((11 & 0xFF) << 16) | ((12 & 0xFF) << 24);
+    const int w3 = (13 & 0xFF) | ((14 & 0xFF) << 8) | ((15 & 0xFF) << 16) | ((16 & 0xFF) << 24);
+    const int w4 = (17 & 0xFF) | ((18 & 0xFF) << 8) | ((19 & 0xFF) << 16) | ((20 & 0xFF) << 24);
+    const int w5 = (21 & 0xFF) | ((22 & 0xFF) << 8) | ((23 & 0xFF) << 16) | ((24 & 0xFF) << 24);
+    const int w6 = (25 & 0xFF) | ((26 & 0xFF) << 8) | ((27 & 0xFF) << 16) | ((28 & 0xFF) << 24);
+    const int w7 = (29 & 0xFF) | ((30 & 0xFF) << 8) | ((31 & 0xFF) << 16) | ((32 & 0xFF) << 24);
 
-    int acc0 = 0, acc1 = 0, acc2 = 0, acc3 = 0;
-    int acc4 = 0, acc5 = 0, acc6 = 0, acc7 = 0;
+    int base_packed = pack_char4(a);
+    int acc0 = base_packed ^ 0x01010101;
+    int acc1 = base_packed ^ 0x02020202;
+    int acc2 = base_packed ^ 0x03030303;
+    int acc3 = base_packed ^ 0x04040404;
+    int acc4 = base_packed ^ 0x05050505;
+    int acc5 = base_packed ^ 0x06060606;
+    int acc6 = base_packed ^ 0x07070707;
+    int acc7 = base_packed ^ 0x08080808;
 
     #pragma unroll 4
-    for (int i = 0; i < 512; ++i) {
-        // ai varies each iteration to prevent loop hoisting.
-        char4 ai = make_char4(a.x + (char)i, a.y + (char)i,
-                              a.z + (char)i, a.w + (char)i);
-
-        acc0 = sdot4(ai, w0, acc0);
-        acc1 = sdot4(ai, w1, acc1);
-        acc2 = sdot4(ai, w2, acc2);
-        acc3 = sdot4(ai, w3, acc3);
-        acc4 = sdot4(ai, w4, acc4);
-        acc5 = sdot4(ai, w5, acc5);
-        acc6 = sdot4(ai, w6, acc6);
-        acc7 = sdot4(ai, w7, acc7);
+    for (int i = 0; i < 16384; ++i) {
+        acc0 = sdot4_packed(acc0, w0, acc0);
+        acc1 = sdot4_packed(acc1, w1, acc1);
+        acc2 = sdot4_packed(acc2, w2, acc2);
+        acc3 = sdot4_packed(acc3, w3, acc3);
+        acc4 = sdot4_packed(acc4, w4, acc4);
+        acc5 = sdot4_packed(acc5, w5, acc5);
+        acc6 = sdot4_packed(acc6, w6, acc6);
+        acc7 = sdot4_packed(acc7, w7, acc7);
     }
 
     int total = acc0 + acc1 + acc2 + acc3 + acc4 + acc5 + acc6 + acc7;

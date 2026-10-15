@@ -12,10 +12,12 @@ extern "C" __global__ void run_dual_issue_ilp4(float* data, float multiplier, ui
     float val1 = base + 0.1f;
     float m = multiplier * 0.00001f;
 
-    // 131072 iterations * 2 scalar FMAs = 131072 * 4 = 524,288 FP32 operations
+    // 131072 iterations * 2 scalar FMAs = 131072 * 4 = 524,288 FP32 operations.
+    // Inline asm barrier prevents LLVM from algebraically folding ping-pong FMAs across unrolled pairs.
+    #pragma unroll 8
     for (int i = 0; i < 131072; ++i) {
-        val0 = fmaf(val0, m, val1);
-        val1 = fmaf(val1, m, val0);
+        __asm__ volatile("v_fma_f32 %0, %1, %0, %2" : "+v"(val0) : "s"(m), "v"(val1));
+        __asm__ volatile("v_fma_f32 %0, %1, %0, %2" : "+v"(val1) : "s"(m), "v"(val0));
     }
 
     data[index] = val0 + val1;

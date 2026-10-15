@@ -196,25 +196,36 @@ std::vector<std::string> BenchmarkRunner::expandGroups(const std::vector<std::st
 
     bool isGroup = false;
     if (!matchesExactBench) {
-      for (const auto &grp : groups) {
-        if (normalize(grp.id) == normInput || normalize(grp.name) == normInput) {
-          isGroup = true;
-        } else {
-          for (const auto &alias : grp.aliases) {
-            if (normalize(alias) == normInput) {
-              isGroup = true;
-              break;
-            }
-          }
-        }
-
-        if (isGroup) {
+      if (normInput == "all") {
+        isGroup = true;
+        for (const auto &grp : groups) {
           for (const auto &benchName : grp.benchmarks) {
             if (std::find(expanded.begin(), expanded.end(), benchName) == expanded.end()) {
               expanded.push_back(benchName);
             }
           }
-          break;
+        }
+      } else {
+        for (const auto &grp : groups) {
+          if (normalize(grp.id) == normInput || normalize(grp.name) == normInput) {
+            isGroup = true;
+          } else {
+            for (const auto &alias : grp.aliases) {
+              if (normalize(alias) == normInput) {
+                isGroup = true;
+                break;
+              }
+            }
+          }
+
+          if (isGroup) {
+            for (const auto &benchName : grp.benchmarks) {
+              if (std::find(expanded.begin(), expanded.end(), benchName) == expanded.end()) {
+                expanded.push_back(benchName);
+              }
+            }
+            break;
+          }
         }
       }
     }

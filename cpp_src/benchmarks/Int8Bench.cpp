@@ -105,13 +105,8 @@ BenchmarkResult Int8Bench::GetResult(uint32_t config_idx) const {
     // Shader: 8 i8vec4 multiply-adds per iteration.
     // Each MAD on i8vec4 = 4 components × 2 ops = 8 ops per MAD.
     // 8 MADs × 8 = 64 INT8 operations per iteration.
-    // Vulkan: 16384 iters. OpenCL: 16384 iters. ROCm: 512 iters.
-    uint64_t iters = 16384; // Vulkan/OpenCL default
-    if (context) {
-      if (context->getBackend() == ComputeBackend::ROCm) {
-        iters = 512;
-      }
-    }
+    // Vulkan, OpenCL, and ROCm all run 16384 iterations.
+    uint64_t iters = 16384;
     uint64_t num_ops = iters * 64 * 8192 * 64;
     return {num_ops, 0.0};
   } else {

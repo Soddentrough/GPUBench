@@ -2152,7 +2152,8 @@ ComputeKernel VulkanContext::createKernelInternal(const std::string &file_name,
   VkPipelineCreateFlags2CreateInfoKHR pipeFlags2{
       VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO_KHR};
   if (isDGCSupported() && maintenance5Supported) {
-    pipeFlags2.flags = VK_PIPELINE_CREATE_2_INDIRECT_BINDABLE_BIT_EXT;
+    pipeFlags2.flags = static_cast<VkPipelineCreateFlags2KHR>(pipelineInfo.flags) |
+                       VK_PIPELINE_CREATE_2_INDIRECT_BINDABLE_BIT_EXT;
     pipelineInfo.pNext = &pipeFlags2;
   }
 

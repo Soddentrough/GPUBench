@@ -29,8 +29,8 @@ TEST_CASE(DeviceDatabase, Navi48ArchitectureSeparation) {
   ASSERT_EQ(r9700.archName, "gfx1201 (RDNA 4)");
   ASSERT_EQ(r9700.archFamily, "RDNA 4");
   ASSERT_FALSE(r9700.isApu);
-  // Verify 48 MB Infinity Cache (Navi 48 specification), NOT 64 MB
-  ASSERT_EQ(r9700.l3CacheBytes, 48u * 1024u * 1024u);
+  // Verify 64 MB Infinity Cache (Navi 48 specification: 4x 16 MB MALL slices = 64 MB)
+  ASSERT_EQ(r9700.l3CacheBytes, 64u * 1024u * 1024u);
   ASSERT_NEAR(r9700.theoreticalFp32Tflops, 41.06, 0.5);
 
   // RX 9070 XT (Full 64 CUs Navi 48)
@@ -38,7 +38,7 @@ TEST_CASE(DeviceDatabase, Navi48ArchitectureSeparation) {
   ASSERT_EQ(rx9070xt.archName, "gfx1201 (RDNA 4)");
   ASSERT_EQ(rx9070xt.archFamily, "RDNA 4");
   ASSERT_FALSE(rx9070xt.isApu);
-  ASSERT_EQ(rx9070xt.l3CacheBytes, 48u * 1024u * 1024u);
+  ASSERT_EQ(rx9070xt.l3CacheBytes, 64u * 1024u * 1024u);
   ASSERT_NEAR(rx9070xt.theoreticalFp32Tflops, 48.66, 0.1);
 
   // Verify peak separation: R9700 and 9070 XT must NOT have identical peak TFLOPS

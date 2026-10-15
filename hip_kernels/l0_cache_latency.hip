@@ -6,9 +6,10 @@
 // CacheBench.cpp binds 2 buffers on ROCm: (buffer, pcBuffer).
 extern "C" __global__ void l0_cache_latency(unsigned int *buffer,
                                             const unsigned int *pc) {
-    unsigned int index = 0;
+    unsigned int index = threadIdx.x;
     unsigned int iterations = pc ? pc[2] : 1000000u;
 
+    #pragma nounroll
     for (unsigned int i = 0; i < iterations; ++i) {
         index = buffer[index];
     }
@@ -19,9 +20,10 @@ extern "C" __global__ void l0_cache_latency(unsigned int *buffer,
 
 extern "C" __global__ void run_benchmark(unsigned int *buffer,
                                          const unsigned int *pc) {
-    unsigned int index = 0;
+    unsigned int index = threadIdx.x;
     unsigned int iterations = pc ? pc[2] : 1000000u;
 
+    #pragma nounroll
     for (unsigned int i = 0; i < iterations; ++i) {
         index = buffer[index];
     }

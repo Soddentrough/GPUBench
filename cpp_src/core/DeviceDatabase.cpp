@@ -32,7 +32,7 @@ static const std::vector<HardwareProfile> s_knownProfiles = {
         /* isApu */ false,
         /* l1CacheBytes */ 32 * 1024,
         /* l2CacheBytes */ 8 * 1024 * 1024,
-        /* l3CacheBytes */ 48 * 1024 * 1024,
+        /* l3CacheBytes */ 64 * 1024 * 1024,
         /* theoreticalFp32Tflops */ 41.06,
         /* theoreticalTriangleGis */ 253.8,
         /* theoreticalBoxGis */ 1015.2,
@@ -48,7 +48,7 @@ static const std::vector<HardwareProfile> s_knownProfiles = {
         /* isApu */ false,
         /* l1CacheBytes */ 32 * 1024,
         /* l2CacheBytes */ 8 * 1024 * 1024,
-        /* l3CacheBytes */ 48 * 1024 * 1024,
+        /* l3CacheBytes */ 64 * 1024 * 1024,
         /* theoreticalFp32Tflops */ 48.66,
         /* theoreticalTriangleGis */ 300.8,
         /* theoreticalBoxGis */ 1203.2,
@@ -64,7 +64,7 @@ static const std::vector<HardwareProfile> s_knownProfiles = {
         /* isApu */ false,
         /* l1CacheBytes */ 32 * 1024,
         /* l2CacheBytes */ 8 * 1024 * 1024,
-        /* l3CacheBytes */ 48 * 1024 * 1024,
+        /* l3CacheBytes */ 64 * 1024 * 1024,
         /* theoreticalFp32Tflops */ 36.51,
         /* theoreticalTriangleGis */ 225.6,
         /* theoreticalBoxGis */ 902.4,
@@ -402,7 +402,7 @@ static HardwareProfile synthesizePatternProfile(uint32_t vendorId, uint32_t devi
       p.archFamily = "RDNA 4";
       p.isApu = false;
       p.l2CacheBytes = 8 * 1024 * 1024;
-      p.l3CacheBytes = 48 * 1024 * 1024;
+      p.l3CacheBytes = 64 * 1024 * 1024;
       p.theoreticalTriangleGis = 253.8;
       p.theoreticalBoxGis = 1015.2;
       p.theoreticalFp32Tflops = 41.06;
@@ -415,7 +415,7 @@ static HardwareProfile synthesizePatternProfile(uint32_t vendorId, uint32_t devi
       p.archFamily = "RDNA 4";
       p.isApu = false;
       p.l2CacheBytes = 8 * 1024 * 1024;
-      p.l3CacheBytes = 48 * 1024 * 1024;
+      p.l3CacheBytes = 64 * 1024 * 1024;
       p.theoreticalTriangleGis = 225.6;
       p.theoreticalBoxGis = 902.4;
       p.theoreticalFp32Tflops = 36.51;
@@ -428,7 +428,7 @@ static HardwareProfile synthesizePatternProfile(uint32_t vendorId, uint32_t devi
       p.archFamily = "RDNA 4";
       p.isApu = false;
       p.l2CacheBytes = 8 * 1024 * 1024;
-      p.l3CacheBytes = 48 * 1024 * 1024;
+      p.l3CacheBytes = 64 * 1024 * 1024;
       p.theoreticalTriangleGis = 300.8;
       p.theoreticalBoxGis = 1203.2;
       p.theoreticalFp32Tflops = 48.66;
@@ -441,7 +441,7 @@ static HardwareProfile synthesizePatternProfile(uint32_t vendorId, uint32_t devi
       p.archFamily = "RDNA 4";
       p.isApu = false;
       p.l2CacheBytes = 8 * 1024 * 1024;
-      p.l3CacheBytes = 48 * 1024 * 1024;
+      p.l3CacheBytes = 64 * 1024 * 1024;
       p.theoreticalTriangleGis = 0.0;
       p.theoreticalBoxGis = 0.0;
       p.theoreticalFp32Tflops = 0.0;

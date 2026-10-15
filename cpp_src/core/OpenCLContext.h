@@ -78,6 +78,8 @@ public:
   void startTiming() override;
   double stopTiming() override;
   bool hasGpuTiming() const override;
+  void beginBatch(uint32_t expected_dispatches) override;
+  void endBatch() override;
 
   // OpenCL-specific accessors
   cl_command_queue getCommandQueue() const { return commandQueue; }
@@ -116,9 +118,9 @@ private:
   bool quiet = false;
   bool available = false;
 
-  cl_event timingStartEvent = nullptr;
-  cl_event timingStopEvent = nullptr;
+  std::vector<cl_event> timedEvents;
   bool isTimingActive = false;
   bool timingSupported = false;
+  bool m_inBatch = false;
   std::set<ComputeBuffer> allocatedBuffers;
 };
