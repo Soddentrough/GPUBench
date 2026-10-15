@@ -15,6 +15,23 @@ Do not search for SMI tool paths across runs; use these exact absolute paths:
 
 *Note*: Executing binaries located outside the repository workspace (such as in `/opt/rocm` or `~/.local/bin`) requires running with `BypassSandbox: true`.
 
+## Shader & Kernel ISA Inspection (`--dump-isa`)
+- **Primary built-in CLI tool**: Always use `./build/gpubench --dump-isa <benchmark_or_shader>` to inspect hardware ISA, instruction histograms, hot-loop disassembly, and VGPR/SGPR register usage.
+  - Uses Vulkan's native `VK_KHR_pipeline_executable_properties` (`vkGetPipelineExecutableStatisticsKHR` & `vkGetPipelineExecutableInternalRepresentationsKHR`) directly in C++ — zero external binaries or paths required:
+  - Dump BF16 Vulkan shaders (Vector & Matrix): `./build/gpubench --dump-isa bf16`
+  - Dump a specific config (e.g. Vector `-c 0` or Matrix `-c 1`): `./build/gpubench --dump-isa bf16 -c 0`
+  - Dump ROCm `.co` ISA: `./build/gpubench --dump-isa bf16 -k rocm`
+  - Dump full shader ISA: `./build/gpubench --dump-isa bf16 --full-isa`
+  - Never run full benchmark loops with `RADV_DEBUG=shaders` just to inspect ISA.
+
+## `gpubench` CLI Quick-Reference
+- `-b, --benchmark <name>`: Benchmark(s) to run (e.g., `-b bf16`, `-b fp16`). Do **not** guess `-t`, `-m`, or `--filter`.
+- `-k, --backend <vulkan|rocm|opencl|auto>`: Compute backend to use.
+- `-d, --device <index>`: Device index (e.g., `-d 0` or `-d 1`).
+- `-c, --config <index>`: Sub-test configuration index (0-based, e.g., `-c 0` for Vector, `-c 1` for Matrix).
+- `--profile-snapshot -f`: Fast 1-warmup, 1-timed-submit execution (do **not** guess `--iterations` or `--warmup`).
+- `--dump-isa <target>`: Disassemble shader/kernel hardware ISA via RGA without running benchmarks.
+
 ## Hardware & Target GPU Discovery
 - **Target GPU**: Dynamic discovery. Always check available devices with `./build/gpubench --list-devices` or `/opt/rocm/core-10.0/bin/amd-smi list` before executing.
   - On single-GPU systems, use **`-d 0`** (or omit `-d`, which defaults to 0). Never attempt `-d 1` on single-GPU nodes.

@@ -13,13 +13,15 @@ layout(push_constant) uniform PushConstants {
 void main() {
     uint index = pc.startIndex;
     uint iters = pc.iterations;
+    uint i = 0u;
     
     // Serial pointer chasing loop across 128-byte cache lines
-    for (uint i = 0; i < iters; i++) {
+    do {
         index = Buffer.data[index];
-    }
+        i++;
+    } while (i < iters);
 
-    if (index == 0xDEADBEEF) {
+    if (index == 0xDEADBEEFu) {
         Buffer.data[0] = index;
     }
 }

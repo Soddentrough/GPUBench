@@ -10,6 +10,7 @@
 #include "core/ResultImporter.h"
 #include "core/RunnerAPI.h"
 #include "utils/HardwareTelemetry.h"
+#include "utils/IsaDumper.h"
 #include <cctype>
 #include <chrono>
 #include <cstdlib>
@@ -161,6 +162,21 @@ int main(int argc, char **argv) {
   app.add_flag("--rra", rra_trace,
                "Enable Radeon Raytracing Analyzer (RRA) trace capture (implies --profile-snapshot)");
 
+  std::vector<std::string> dump_isa_targets;
+  CLI::Option *opt_dump_isa = app.add_option(
+      "--dump-isa", dump_isa_targets,
+      "Disassemble shader/kernel hardware ISA and register statistics natively via VK_KHR_pipeline_executable_properties (accepts benchmark name or shader filename, or uses -b)")
+      ->expected(0, -1)
+      ->delimiter(',');
+
+  std::string target_asic = "gfx1201";
+  app.add_option("--asic", target_asic,
+                 "Target GPU architecture for ROCm code-object disassembly (default: gfx1201)");
+
+  bool full_isa = false;
+  app.add_flag("--full-isa", full_isa,
+               "Print entire shader/kernel ISA disassembly instead of just the hot loop when using --dump-isa");
+
   std::string output_json_path;
   CLI::Option *opt_output_json = app.add_option(
       "-o,--output-json", output_json_path,
@@ -184,6 +200,27 @@ int main(int argc, char **argv) {
       ->expected(1, -1);
 
   CLI11_PARSE(app, argc, argv);
+
+  if (opt_dump_isa->count() > 0) {
+    IsaDumperOptions isaOpts;
+    isaOpts.targets = dump_isa_targets;
+    for (const auto &b : benchmarks_to_run) {
+      isaOpts.targets.push_back(b);
+    }
+    if (isaOpts.targets.empty()) {
+      std::cerr << "Error: --dump-isa requires at least one benchmark name or shader/kernel filename "
+                   "(e.g. --dump-isa bf16 or -b bf16 --dump-isa)." << std::endl;
+      return EXIT_FAILURE;
+    }
+    isaOpts.backends = backend_strs;
+    isaOpts.configs = config_targets;
+    if (!device_indices.empty()) {
+      isaOpts.deviceIndex = device_indices[0];
+    }
+    isaOpts.asic = target_asic;
+    isaOpts.fullIsa = full_isa;
+    return IsaDumper::dump(isaOpts);
+  }
 
   bool want_json_output = false;
   if (opt_json->count() > 0) {

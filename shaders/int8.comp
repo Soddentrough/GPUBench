@@ -30,24 +30,29 @@ void main() {
     const int w6 = ( 25 & 0xFF) | (( 26 & 0xFF) << 8) | (( 27 & 0xFF) << 16) | (( 28 & 0xFF) << 24);
     const int w7 = ( 29 & 0xFF) | (( 30 & 0xFF) << 8) | (( 31 & 0xFF) << 16) | (( 32 & 0xFF) << 24);
 
-    // 8 independent int32 accumulators.
-    int acc0 = 0, acc1 = 0, acc2 = 0, acc3 = 0;
-    int acc4 = 0, acc5 = 0, acc6 = 0, acc7 = 0;
+    // Pack the initial dynamic vector once outside the hot loop and initialize
+    // 8 independent packed int32 registers. Each iteration updates acc0..acc7
+    // directly via dotPacked4x8EXT(acc, w) + acc so the compiler emits pure
+    // 4-operand v_dot4_i32_iu8 instructions with zero byte-packing overhead.
+    int base_packed = pack_i8vec4(a);
+    int acc0 = base_packed ^ 0x01010101;
+    int acc1 = base_packed ^ 0x02020202;
+    int acc2 = base_packed ^ 0x03030303;
+    int acc3 = base_packed ^ 0x04040404;
+    int acc4 = base_packed ^ 0x05050505;
+    int acc5 = base_packed ^ 0x06060606;
+    int acc6 = base_packed ^ 0x07070707;
+    int acc7 = base_packed ^ 0x08080808;
 
     for (int i = 0; i < 16384; ++i) {
-        // ai varies each iteration to prevent loop hoisting.
-        i8vec4 ai = a + i8vec4(int8_t(i));
-        int packed_ai = pack_i8vec4(ai);
-
-        // Use the native integer dot product to emit V_DOT4_I32_IU8.
-        acc0 += dotPacked4x8EXT(packed_ai, w0);
-        acc1 += dotPacked4x8EXT(packed_ai, w1);
-        acc2 += dotPacked4x8EXT(packed_ai, w2);
-        acc3 += dotPacked4x8EXT(packed_ai, w3);
-        acc4 += dotPacked4x8EXT(packed_ai, w4);
-        acc5 += dotPacked4x8EXT(packed_ai, w5);
-        acc6 += dotPacked4x8EXT(packed_ai, w6);
-        acc7 += dotPacked4x8EXT(packed_ai, w7);
+        acc0 += dotPacked4x8EXT(acc0, w0);
+        acc1 += dotPacked4x8EXT(acc1, w1);
+        acc2 += dotPacked4x8EXT(acc2, w2);
+        acc3 += dotPacked4x8EXT(acc3, w3);
+        acc4 += dotPacked4x8EXT(acc4, w4);
+        acc5 += dotPacked4x8EXT(acc5, w5);
+        acc6 += dotPacked4x8EXT(acc6, w6);
+        acc7 += dotPacked4x8EXT(acc7, w7);
     }
 
     // Prevent optimization away — store one byte of result

@@ -1,7 +1,7 @@
 #version 460
 layout(local_size_x = 32, local_size_y = 1, local_size_z = 1) in;
 
-shared uint lds[1024];
+shared uint lds[1280];
 
 layout(set = 0, binding = 0) buffer OutputBuffer {
     uint results[];
@@ -19,7 +19,7 @@ void main() {
     // Initialize shared memory with a uniform multiple of 32 (32 banks) so that
     // adding acc0 to base_addr keeps the loop-carried dependency live without
     // scrambling per-lane bank offsets (base_addr mod 32 remains (tid * stride) mod 32).
-    for (uint i = tid; i < 1024u; i += 32u) {
+    for (uint i = tid; i < 1280u; i += 32u) {
         lds[i] = 32u;
     }
     barrier();
@@ -27,7 +27,11 @@ void main() {
     uint stride = pc.stride;
     uint iters = pc.iterations;
 
-    // Each lane accesses its bank stride
+    // Each lane accesses its target bank stride: (tid * stride) mod 32.
+    // The 8 loads per iteration use constant +32u (128-byte) offsets from base_addr,
+    // which preserve the exact same LDS bank ((tid * stride) mod 32) and allow the
+    // compiler to fold all offsets directly into `ds_load_2addr_b32` with zero
+    // per-load VALU address arithmetic while keeping base_addr + 224u < 1280u.
     uint base_addr = (tid * stride) & 1023u;
     uint acc0 = 0u;
     uint acc1 = 0u;
@@ -39,14 +43,14 @@ void main() {
     uint acc7 = 0u;
 
     for (uint i = 0u; i < iters; i++) {
-        acc0 += lds[(base_addr + 0u * stride) & 1023u];
-        acc1 += lds[(base_addr + 1u * stride) & 1023u];
-        acc2 += lds[(base_addr + 2u * stride) & 1023u];
-        acc3 += lds[(base_addr + 3u * stride) & 1023u];
-        acc4 += lds[(base_addr + 4u * stride) & 1023u];
-        acc5 += lds[(base_addr + 5u * stride) & 1023u];
-        acc6 += lds[(base_addr + 6u * stride) & 1023u];
-        acc7 += lds[(base_addr + 7u * stride) & 1023u];
+        acc0 += lds[base_addr + 0u];
+        acc1 += lds[base_addr + 32u];
+        acc2 += lds[base_addr + 64u];
+        acc3 += lds[base_addr + 96u];
+        acc4 += lds[base_addr + 128u];
+        acc5 += lds[base_addr + 160u];
+        acc6 += lds[base_addr + 192u];
+        acc7 += lds[base_addr + 224u];
         base_addr = (base_addr + acc0) & 1023u;
     }
 
