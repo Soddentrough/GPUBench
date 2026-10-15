@@ -5,6 +5,8 @@
 #include <string>
 #include <vulkan/vulkan.h>
 
+class VulkanContext;
+
 class RayASBuildBench : public IBenchmark {
 public:
   RayASBuildBench() = default;
@@ -45,6 +47,7 @@ public:
   void Teardown() override;
 
   BenchmarkResult GetResult(uint32_t config_idx) const override;
+  bool ValidateResults(uint32_t config_idx = 0) const override;
   const char *GetName() const override;
   const char *GetComponent(uint32_t config_idx) const override;
   const char *GetMetric(uint32_t config_idx) const override;
@@ -74,6 +77,7 @@ public:
 
 private:
   void loadRTProcs(VkDevice device);
+  void recordBuildCommands(VkDevice device, VulkanContext *vContext);
 
   IComputeContext *context = nullptr;
 
@@ -93,8 +97,9 @@ private:
   // Real-world branched TLAS scenes
   std::vector<TlasInfo> tlases;
 
-  std::map<uint32_t, double> buildTimes;
-  uint32_t iterations = 0;
+  // Persistent command resources for benchmark execution
+  VkCommandPool buildCmdPool = VK_NULL_HANDLE;
+  std::vector<VkCommandBuffer> buildCmdBuffers;
 
   // Function pointers
   PFN_vkGetAccelerationStructureBuildSizesKHR

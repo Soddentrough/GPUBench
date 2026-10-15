@@ -86,6 +86,8 @@ public:
     return !is_native_matrix;
   }
 
+  bool ValidateResults(uint32_t config_idx = 0) const override;
+
 private:
   IComputeContext *context = nullptr;
   ComputeKernel matrixKernel = nullptr;

@@ -15,6 +15,7 @@
 #include <map>
 #include <set>
 #include <sstream>
+#include <type_traits>
 #include <vector>
 
 #ifdef _WIN32
@@ -55,6 +56,9 @@ static size_t getTerminalWidth() {
 }
 
 std::string ResultFormatter::formatDouble(double value, int precision) {
+  if (!std::isfinite(value)) {
+    return "0.0";
+  }
   std::stringstream stream;
   stream.imbue(std::locale::classic());
   stream << std::fixed << std::setprecision(precision) << value;
@@ -223,8 +227,14 @@ std::string cleanWorkloadName(const std::string &rawName, const std::string &sub
     } else if (name.rfind("Dual-Issue ", 0) == 0) {
       name = name.substr(11);
     }
-  } else if (name.rfind("Ray", 0) == 0) {
-    // Handle "RayASBuild (BLAS Build (1M Tris))" or "RayIntersect (Ray-Triangle)"
+  } else if (name.rfind("Ray", 0) == 0 ||
+             name.rfind("LDS Bank Conflicts (", 0) == 0 ||
+             name.rfind("In-Shader Indirect Synthesis (", 0) == 0 ||
+             name.rfind("Cache Latency Curve (", 0) == 0 ||
+             name.rfind("Device Memory Bandwidth (", 0) == 0 ||
+             name.rfind("Pixel Fill Rate (", 0) == 0 ||
+             name.rfind("System Memory Bandwidth (", 0) == 0) {
+    // Strip redundant outer benchmark prefix when the subcategory header already conveys it
     size_t firstOpen = name.find(" (");
     if (firstOpen != std::string::npos && name.back() == ')') {
       name = name.substr(firstOpen + 2, name.length() - (firstOpen + 3));
@@ -291,6 +301,15 @@ std::string cleanWorkloadName(const std::string &rawName, const std::string &sub
     name = name.substr(30);
   } else if (name.rfind("Stage: ", 0) == 0) {
     name = name.substr(7);
+  }
+
+  // Strip subcategory prefix again if revealed after Stage: removal
+  if (!subcat.empty()) {
+    if (name.rfind(subcat + " - ", 0) == 0) {
+      name = name.substr(subcat.length() + 3);
+    } else if (name.rfind(subcat + ": ", 0) == 0) {
+      name = name.substr(subcat.length() + 2);
+    }
   }
 
   // Clean long pipeline breakdown names
@@ -370,17 +389,20 @@ void ResultFormatter::print() {
 
   for (const auto &res : results) {
     totalWorkloadsEvaluated++;
-    int compWeight = 4;
+    int compWeight = 5;
     if (res.component == "Compute") compWeight = 1;
     else if (res.component == "Memory") compWeight = 2;
-    else if (res.component == "Ray Tracing") compWeight = 3;
+    else if (res.component == "Graphics" || res.component == "Rasterization & ROP") compWeight = 3;
+    else if (res.component == "Ray Tracing") compWeight = 4;
 
     std::string cleanName = cleanWorkloadName(res.benchmarkName, res.subcategory);
     if (res.isEmulated) cleanName += " (Emulated)";
 
     std::string effectiveSubcat = res.subcategory;
     std::string sceneName = extractSceneName(res.benchmarkName);
-    if (!sceneName.empty()) {
+    if (!sceneName.empty() &&
+        res.subcategory != "Traversal Ordering & Coherence" &&
+        res.subcategory != "Wavefront Stream Compaction") {
       effectiveSubcat = res.subcategory + " [" + sceneName + "]";
     }
 
@@ -853,11 +875,12 @@ void ResultFormatter::print() {
                 if (res.benchmarkName.find("RayRawTraversal") != std::string::npos ||
                     res.subcategory == "Hardware BVH Traversal") {
                   double time_s = res.time_ms / 1000.0;
-                  double mrays = (time_s > 0.0) ? ((static_cast<double>(res.operations) / time_s) / 1e6) : 0.0;
+                  uint64_t ops = (res.configIndex == 0) ? res.operations : (res.operations * 64);
+                  double gis = (time_s > 0.0) ? ((static_cast<double>(ops) / time_s) / 1e9) : 0.0;
                   if (res.configIndex == 0) {
-                    noteStr = formatDouble(mrays, 1) + " MRays/s";
+                    noteStr = "[" + formatDouble(gis, 1) + " GIS/s Max Occupancy]";
                   } else {
-                    noteStr = formatDouble(mrays, 1) + " MRays/s (Multi-Layer)";
+                    noteStr = "[" + formatDouble(gis, 1) + " Box GIS/s (64-AABB Model)]";
                   }
                 } else {
                   double localBaseVal = 0.0;
@@ -972,6 +995,24 @@ void ResultFormatter::print() {
                 }
               }
 
+              if (showPower && res.hasPowerTelemetry && res.powerWatts > 0.0f && !res.isUnsupported && res.isValid && res.time_ms > 0.0) {
+                std::string pwrStr = formatDouble(res.powerWatts, 0) + "W";
+                if (res.joulesPerUnit > 0.0 && res.unitPerWatt > 0.0) {
+                  if (res.efficiencyUnit == "J/TFLOP") {
+                    pwrStr += " | " + formatDouble(res.unitPerWatt, 1) + " GFLOPS/W";
+                  } else if (res.efficiencyUnit == "J/TOP") {
+                    pwrStr += " | " + formatDouble(res.unitPerWatt, 1) + " GOPS/W";
+                  } else if (res.efficiencyUnit == "J/GB") {
+                    pwrStr += " | " + formatDouble(res.unitPerWatt, 2) + " GB/J";
+                  } else if (res.efficiencyUnit == "J/MRay") {
+                    pwrStr += " | " + formatDouble(res.unitPerWatt, 0) + " kRays/J";
+                  } else if (res.efficiencyUnit == "J/GIS") {
+                    pwrStr += " | " + formatDouble(res.unitPerWatt, 0) + " MIS/J";
+                  }
+                }
+                noteStr += (noteStr.empty() ? "" : " ") + ("[" + pwrStr + "]");
+              }
+
               std::string backendStr = truncateUtf8(backend, w2, "");
               valStr = truncateUtf8(valStr, w3, "");
               noteStr = truncateUtf8(noteStr, w4);
@@ -989,6 +1030,34 @@ void ResultFormatter::print() {
                         << BOLD << CYAN << " │ " << RESET << DIM << noteStr << notePad << RESET
                         << BOLD << CYAN << " │" << RESET << "\n";
 
+              if (showTelemetry && (res.hasPerfQueryTelemetry || res.hasRegisterTelemetry) && !res.isUnsupported && res.isValid && res.time_ms > 0.0) {
+                std::string telemInfo = "   └─ ";
+                bool firstItem = true;
+                if (res.hasPerfQueryTelemetry && res.perfCounters.available) {
+                  telemInfo += "Cycles: " + formatNumber(res.perfCounters.gpuActiveCycles) +
+                               " | Waves: " + formatNumber(res.perfCounters.waves) +
+                               " | SALU: " + formatDouble(res.perfCounters.saluBusyPct, 1) + "%";
+                  if (res.perfCounters.vramReadBytes > 0 || res.perfCounters.l0CacheHitRatio > 0.0f) {
+                    telemInfo += " | VRAM Rd: " + formatDouble(static_cast<double>(res.perfCounters.vramReadBytes) / (1024.0 * 1024.0), 1) + " MB" +
+                                 " | L0 Hit: " + formatDouble(res.perfCounters.l0CacheHitRatio, 1) + "%" +
+                                 " | L1 Hit: " + formatDouble(res.perfCounters.l1CacheHitRatio, 1) + "%";
+                  }
+                  firstItem = false;
+                }
+                if (res.hasRegisterTelemetry && res.vgprCount > 0) {
+                  if (!firstItem) telemInfo += " | ";
+                  telemInfo += std::to_string(res.vgprCount) + " VGPRs";
+                  if (res.maxWavesPerSimd > 0) {
+                    telemInfo += " (" + std::to_string(res.maxWavesPerSimd) + "w/SIMD)";
+                  }
+                }
+                std::string truncTelem = truncateUtf8(telemInfo, cardInnerWidth);
+                size_t tVis = visualLength(truncTelem);
+                std::string tPad = (cardInnerWidth > tVis) ? std::string(cardInnerWidth - tVis, ' ') : "";
+                std::cout << BOLD << CYAN << "  │ " << RESET << DIM << truncTelem << tPad << RESET
+                          << BOLD << CYAN << " │" << RESET << "\n";
+              }
+
               firstBackend = false;
             }
           }
@@ -1004,8 +1073,27 @@ void ResultFormatter::print() {
     }
   }
 
-  // 4. Executive Summary Card (if Ray Tracing was evaluated)
-  if (totalWorkloadsEvaluated > 0 && maxRayRate > 0.0) {
+  // 4. Executive Summary Card (if Ray Tracing or Power was evaluated)
+  bool hasAnyPower = false;
+  double totalPowerSum = 0.0;
+  size_t powerCount = 0;
+  double maxComputeEff = 0.0;
+  std::string maxComputeWl;
+  std::string maxComputeUnit;
+  for (const auto &r : results) {
+    if (r.hasPowerTelemetry && r.powerWatts > 0.0f) {
+      hasAnyPower = true;
+      totalPowerSum += r.powerWatts;
+      powerCount++;
+      if ((r.efficiencyUnit == "J/TFLOP" || r.efficiencyUnit == "J/TOP") && r.unitPerWatt > maxComputeEff) {
+        maxComputeEff = r.unitPerWatt;
+        maxComputeWl = cleanWorkloadName(r.benchmarkName, r.subcategory);
+        maxComputeUnit = (r.efficiencyUnit == "J/TFLOP") ? "GFLOPS/W" : "GOPS/W";
+      }
+    }
+  }
+
+  if (totalWorkloadsEvaluated > 0 && (maxRayRate > 0.0 || (showPower && hasAnyPower))) {
     std::cout << "\n";
     std::string cardTitle = " Executive Performance Summary & Architectural Takeaways ";
     size_t dashCount = (cardBoxWidth > cardTitle.length() + 3)
@@ -1054,9 +1142,19 @@ void ResultFormatter::print() {
       std::string val = BOLD + GREEN + formatDouble(rawTriangleGis, 1) + " GIS/s" + RESET;
       printSummaryRow("Hardware BVH Traversal (Coherent)", val, " (Max Occupancy)");
     }
-    std::string val = BOLD + GREEN + formatDouble(maxRayRate, 1) + " MRays/s" + RESET;
-    std::string extra = " (" + maxRayWorkload + ")";
-    printSummaryRow("Peak Measured Ray Rate       ", val, extra);
+    if (maxRayRate > 0.0) {
+      std::string val = BOLD + GREEN + formatDouble(maxRayRate, 1) + " MRays/s" + RESET;
+      std::string extra = " (" + maxRayWorkload + ")";
+      printSummaryRow("Peak Measured Ray Rate       ", val, extra);
+    }
+    if (showPower && hasAnyPower && powerCount > 0) {
+      double avgPower = totalPowerSum / powerCount;
+      std::string val = BOLD + GREEN + formatDouble(avgPower, 1) + " W" + RESET + " Average Power";
+      std::string extra = (maxComputeEff > 0.0)
+          ? (" | Peak Efficiency: " + formatDouble(maxComputeEff, 1) + " " + maxComputeUnit + " (" + maxComputeWl + ")")
+          : "";
+      printSummaryRow("Power & Energy Telemetry     ", val, extra);
+    }
 
     std::cout << BOLD << CYAN << "  ╰─" << repeatUtf8("─", cardBoxWidth - 3) << "╯" << RESET << "\n";
   }
@@ -1079,7 +1177,7 @@ void ResultFormatter::print() {
 
   if (hasMultiBackendParity) {
     std::cout << "\n";
-    std::cout << BOLD << CYAN << "  ╭─ Compiler Telemetry & Backend Parity Attribution (Optimization O-4) ─────────╮" << RESET << "\n";
+    std::cout << BOLD << CYAN << "  ╭─ Compiler Telemetry & Backend Parity Attribution ───────────────────────────╮" << RESET << "\n";
     for (const auto &[bName, bMap] : parityMap) {
       if (bMap.size() <= 1) continue;
       std::cout << BOLD << CYAN << "  │ " << RESET << BOLD << "Workload: " << bName << RESET << "\n";
@@ -1128,164 +1226,6 @@ void ResultFormatter::print() {
       }
     }
     std::cout << BOLD << CYAN << "  ╰──────────────────────────────────────────────────────────────────────────────╯" << RESET << "\n";
-  }
-
-  // 6. Energy Efficiency & Power Telemetry (Optimization O-3 / O-8)
-  bool hasAnyPower = false;
-  for (const auto &r : results) {
-    if (r.hasPowerTelemetry && r.powerWatts > 0.0f) {
-      hasAnyPower = true;
-      break;
-    }
-  }
-
-  if (hasAnyPower) {
-    std::cout << "\n";
-    std::string cardTitle = " Energy Efficiency & Power Telemetry (Optimization O-3 / O-8) ";
-    size_t dashCount = (cardBoxWidth > cardTitle.length() + 3)
-                           ? (cardBoxWidth - 3 - cardTitle.length())
-                           : 10;
-
-    std::cout << BOLD << CYAN << "  ╭─" << RESET << BOLD << cardTitle << RESET
-              << BOLD << CYAN << repeatUtf8("─", dashCount) << "╮" << RESET << "\n";
-
-    auto printCardRow = [&](const std::string &content) {
-      size_t visLen = visualLength(content);
-      size_t pad = (cardInnerWidth > visLen) ? (cardInnerWidth - visLen) : 0;
-      std::cout << BOLD << CYAN << "  │ " << RESET
-                << content
-                << std::string(pad, ' ')
-                << BOLD << CYAN << " │" << RESET << "\n";
-    };
-
-    double totalPowerSum = 0.0;
-    size_t powerCount = 0;
-    double maxComputeEff = 0.0;
-    std::string maxComputeWl;
-    std::string maxComputeUnit;
-    double maxMemEff = 0.0;
-    std::string maxMemWl;
-    double maxRtEff = 0.0;
-    std::string maxRtWl;
-
-    for (const auto &r : results) {
-      if (!r.hasPowerTelemetry || r.powerWatts <= 0.0f) continue;
-      totalPowerSum += r.powerWatts;
-      powerCount++;
-
-      if ((r.efficiencyUnit == "J/TFLOP" || r.efficiencyUnit == "J/TOP") && r.unitPerWatt > maxComputeEff) {
-        maxComputeEff = r.unitPerWatt;
-        maxComputeWl = cleanWorkloadName(r.benchmarkName, r.subcategory) + " (" + r.backendName + ")";
-        maxComputeUnit = (r.efficiencyUnit == "J/TFLOP") ? "GFLOPS/W" : "GOPS/W";
-      } else if (r.efficiencyUnit == "J/GB" && r.unitPerWatt > maxMemEff) {
-        maxMemEff = r.unitPerWatt;
-        maxMemWl = cleanWorkloadName(r.benchmarkName, r.subcategory) + " (" + r.backendName + ")";
-      } else if (r.efficiencyUnit == "J/MRay" && r.unitPerWatt > maxRtEff) {
-        maxRtEff = r.unitPerWatt;
-        maxRtWl = cleanWorkloadName(r.benchmarkName, r.subcategory) + " (" + r.backendName + ")";
-      }
-    }
-
-    double avgPower = powerCount > 0 ? (totalPowerSum / powerCount) : 0.0;
-    std::string devLine = BOLD + "• Average Measured Power: " + RESET + BOLD + GREEN + formatDouble(avgPower, 1) + " W" + RESET +
-                          DIM + " (Hardware Telemetry / sysfs hwmon)" + RESET;
-    printCardRow(devLine);
-
-    if (maxComputeEff > 0.0) {
-      std::string effLine = BOLD + "• Peak Compute Efficiency: " + RESET + BOLD + GREEN + formatDouble(maxComputeEff, 1) + " " + maxComputeUnit + RESET +
-                            DIM + " [" + maxComputeWl + "]" + RESET;
-      printCardRow(effLine);
-    }
-    if (maxMemEff > 0.0) {
-      std::string effLine = BOLD + "• Peak Memory Efficiency : " + RESET + BOLD + GREEN + formatDouble(maxMemEff, 2) + " GB/Joule" + RESET +
-                            DIM + " [" + maxMemWl + "]" + RESET;
-      printCardRow(effLine);
-    }
-    if (maxRtEff > 0.0) {
-      std::string effLine = BOLD + "• Peak RT Efficiency     : " + RESET + BOLD + GREEN + formatDouble(maxRtEff, 1) + " kRays/Joule" + RESET +
-                            DIM + " [" + maxRtWl + "]" + RESET;
-      printCardRow(effLine);
-    }
-
-    printCardRow(DIM + repeatUtf8("─", cardInnerWidth) + RESET);
-
-    for (const auto &r : results) {
-      if (!r.hasPowerTelemetry || r.powerWatts <= 0.0f || r.joulesPerUnit <= 0.0) continue;
-      std::string wl = truncateUtf8(cleanWorkloadName(r.benchmarkName, r.subcategory), 28);
-      std::string effStr;
-      if (r.efficiencyUnit == "J/TFLOP") {
-        effStr = formatDouble(r.unitPerWatt, 1) + " GFLOPS/W (" + formatDouble(r.joulesPerUnit, 2) + " J/TFLOP)";
-      } else if (r.efficiencyUnit == "J/TOP") {
-        effStr = formatDouble(r.unitPerWatt, 1) + " GOPS/W (" + formatDouble(r.joulesPerUnit, 2) + " J/TOP)";
-      } else if (r.efficiencyUnit == "J/GB") {
-        effStr = formatDouble(r.unitPerWatt, 2) + " GB/J (" + formatDouble(r.joulesPerUnit, 2) + " J/GB)";
-      } else if (r.efficiencyUnit == "J/MRay") {
-        effStr = formatDouble(r.unitPerWatt, 1) + " kRays/J (" + formatDouble(r.joulesPerUnit, 2) + " J/MRay)";
-      } else if (r.efficiencyUnit == "J/GIS") {
-        effStr = formatDouble(r.unitPerWatt, 1) + " MIS/J (" + formatDouble(r.joulesPerUnit, 2) + " J/GIS)";
-      }
-
-      std::stringstream row;
-      row << "• " << std::left << std::setw(28) << wl
-          << " " << std::left << std::setw(8) << r.backendName
-          << " " << std::right << std::setw(6) << formatDouble(r.powerWatts, 1) + " W"
-          << " " << std::right << std::setw(7) << formatDouble(r.energyJoules, (r.energyJoules < 0.1 ? 3 : 2)) + " J"
-          << "  " << BOLD << GREEN << effStr << RESET;
-      printCardRow(row.str());
-    }
-
-    std::cout << BOLD << CYAN << "  ╰─" << repeatUtf8("─", cardBoxWidth - 3) << "╯" << RESET << "\n";
-  }
-
-  // 7. Hardware Performance Query Telemetry (VK_KHR_performance_query / Optimization O-1)
-  bool hasAnyPerfQuery = false;
-  for (const auto &r : results) {
-    if (r.hasPerfQueryTelemetry && r.perfCounters.available) {
-      hasAnyPerfQuery = true;
-      break;
-    }
-  }
-
-  if (hasAnyPerfQuery) {
-    std::cout << "\n";
-    std::string cardTitle = " Hardware Performance Query Telemetry (VK_KHR_performance_query / Optimization O-1) ";
-    size_t dashCount = (cardBoxWidth > cardTitle.length() + 3)
-                           ? (cardBoxWidth - 3 - cardTitle.length())
-                           : 10;
-
-    std::cout << BOLD << CYAN << "  ╭─" << RESET << BOLD << cardTitle << RESET
-              << BOLD << CYAN << repeatUtf8("─", dashCount) << "╮" << RESET << "\n";
-
-    auto printPerfRow = [&](const std::string &content) {
-      size_t visLen = visualLength(content);
-      size_t pad = (cardBoxWidth > visLen + 4) ? (cardBoxWidth - 4 - visLen) : 0;
-      std::cout << BOLD << CYAN << "  │ " << RESET << content << std::string(pad, ' ')
-                << BOLD << CYAN << " │" << RESET << "\n";
-    };
-
-    for (const auto &r : results) {
-      if (r.hasPerfQueryTelemetry && r.perfCounters.available) {
-        std::string line1 = BOLD + r.benchmarkName + RESET + " (" + r.backendName + "):";
-        printPerfRow(line1);
-
-        std::string cyclesWaves = "  • GPU Active Cycles: " + BOLD + std::to_string(r.perfCounters.gpuActiveCycles) + RESET +
-                                  " | Waves: " + BOLD + std::to_string(r.perfCounters.waves) + RESET;
-        printPerfRow(cyclesWaves);
-
-        std::string instRow = "  • VALU Busy: " + BOLD + GREEN + formatDouble(r.perfCounters.valuBusyPct, 1) + "%" + RESET +
-                              " | SALU Busy: " + BOLD + formatDouble(r.perfCounters.saluBusyPct, 1) + "%" + RESET +
-                              " | VALU Insts: " + formatDouble(static_cast<double>(r.perfCounters.valuInstructions) / 1e6, 2) + " M";
-        printPerfRow(instRow);
-
-        if (r.perfCounters.vramReadBytes > 0 || r.perfCounters.l0CacheHitRatio > 0.0f) {
-          std::string memRow = "  • VRAM Read: " + BOLD + formatDouble(static_cast<double>(r.perfCounters.vramReadBytes) / (1024.0 * 1024.0), 2) + " MB" + RESET +
-                               " | L0 Hit: " + BOLD + formatDouble(r.perfCounters.l0CacheHitRatio, 1) + "%" + RESET +
-                               " | L1 Hit: " + BOLD + formatDouble(r.perfCounters.l1CacheHitRatio, 1) + "%" + RESET;
-          printPerfRow(memRow);
-        }
-      }
-    }
-    std::cout << BOLD << CYAN << "  ╰─" << repeatUtf8("─", cardBoxWidth - 3) << "╯" << RESET << "\n";
   }
 
   std::cout << std::endl;
@@ -1853,6 +1793,16 @@ std::string jsonEscape(const std::string &s) {
   }
   return out;
 }
+
+template <typename T>
+std::string jsonNumber(T val, const char *fallback = "0.0") {
+  if constexpr (std::is_floating_point_v<T>) {
+    if (!std::isfinite(val)) {
+      return fallback;
+    }
+  }
+  return std::to_string(val);
+}
 } // namespace
 
 double computeResultValue(const ResultData &r) {
@@ -1984,14 +1934,14 @@ std::string resultsToJson(const std::vector<ResultData> &results,
     out += "      \"architecture\": \"" + jsonEscape(prof.archName) + "\",\n";
     out += "      \"memory_type\": \"" + jsonEscape(prof.memoryType) + "\"";
     if (prof.theoreticalFp32Tflops > 0.0) {
-      out += ",\n      \"theoretical_fp32_tflops\": " + std::to_string(prof.theoreticalFp32Tflops);
+      out += ",\n      \"theoretical_fp32_tflops\": " + jsonNumber(prof.theoreticalFp32Tflops);
     }
     if (prof.theoreticalBandwidthGBps > 0.0) {
-      out += ",\n      \"theoretical_bandwidth_gbps\": " + std::to_string(prof.theoreticalBandwidthGBps);
+      out += ",\n      \"theoretical_bandwidth_gbps\": " + jsonNumber(prof.theoreticalBandwidthGBps);
     }
     if (prof.theoreticalTriangleGis > 0.0) {
-      out += ",\n      \"theoretical_triangle_gis\": " + std::to_string(prof.theoreticalTriangleGis) + ",\n";
-      out += "      \"theoretical_box_gis\": " + std::to_string(prof.theoreticalBoxGis);
+      out += ",\n      \"theoretical_triangle_gis\": " + jsonNumber(prof.theoreticalTriangleGis) + ",\n";
+      out += "      \"theoretical_box_gis\": " + jsonNumber(prof.theoreticalBoxGis);
     }
     GpuContentionInfo cont = HardwareTelemetry::checkContention(dp.deviceIndex);
     out += ",\n      \"hardware_contention\": {\n";
@@ -2001,7 +1951,7 @@ std::string resultsToJson(const std::vector<ResultData> &results,
     out += "        \"vram_used_mb\": " + std::to_string(cont.vramUsedMb) + ",\n";
     out += "        \"vram_total_mb\": " + std::to_string(cont.vramTotalMb) + ",\n";
     out += "        \"gtt_used_mb\": " + std::to_string(cont.gttUsedMb) + ",\n";
-    out += "        \"cpu_load_1min\": " + std::to_string(cont.cpuLoad1Min) + ",\n";
+    out += "        \"cpu_load_1min\": " + jsonNumber(cont.cpuLoad1Min) + ",\n";
     out += "        \"reasons\": [";
     for (size_t r = 0; r < cont.reasons.size(); ++r) {
       out += "\"" + jsonEscape(cont.reasons[r]) + "\"" + (r + 1 < cont.reasons.size() ? ", " : "");
@@ -2026,12 +1976,13 @@ std::string resultsToJson(const std::vector<ResultData> &results,
     out += "      \"component\": \"" + jsonEscape(r.component) + "\",\n";
     out += "      \"subcategory\": \"" + jsonEscape(r.subcategory) + "\",\n";
     out += "      \"metric\": \"" + jsonEscape(r.metric) + "\",\n";
-    out += "      \"value\": " + std::to_string(value) + ",\n";
+    out += "      \"metric_unit\": \"" + jsonEscape(r.metric) + "\",\n";
+    out += "      \"value\": " + jsonNumber(value) + ",\n";
     if (r.benchmarkName.find("RayScheduling") != std::string::npos && r.metric == "MRays/s") {
       uint32_t w = r.width ? r.width : 1920;
       uint32_t h = r.height ? r.height : 1080;
       double fps = (value * 1e6) / static_cast<double>(w * h);
-      out += "      \"fps\": " + std::to_string(fps) + ",\n";
+      out += "      \"fps\": " + jsonNumber(fps) + ",\n";
       out += "      \"resolution\": \"" + std::to_string(w) + "x" + std::to_string(h) + "\",\n";
     }
     if (r.benchmarkName.find("RayRawTraversal") != std::string::npos ||
@@ -2043,12 +1994,19 @@ std::string resultsToJson(const std::vector<ResultData> &results,
         throughputGis = (static_cast<double>(ops) / time_s) / 1e9;
       }
       out += "      \"peak_type\": \"" + std::string(r.configIndex == 0 ? "Triangle" : "Box") + "\",\n";
-      out += "      \"throughput_gis\": " + std::to_string(throughputGis) + ",\n";
+      out += "      \"traversal_model\": \"" + std::string(r.configIndex == 0 ? "coherent_single_layer_triangle" : "synthetic_64_layer_aabb") + "\",\n";
+      out += "      \"synthetic_model\": \"" + std::string(r.configIndex == 0 ? "coherent_single_layer_triangle" : "synthetic_64_layer_aabb") + "\",\n";
+      out += "      \"model_box_tests_per_ray\": " + std::to_string(r.configIndex == 0 ? 1 : 64) + ",\n";
+      out += "      \"synthetic_disclosure\": \"" + std::string(r.configIndex == 0 ?
+          "Measures sustained hardware triangle intersection rate terminating on Layer 0." :
+          "Measures synthetic 64-layer AABB traversal (assuming 8 BVH8 nodes x 8 box tests = 64 box tests/ray) under idealized occupancy; does not represent real triangle mesh geometry.") + "\",\n";
+      out += "      \"throughput_gis\": " + jsonNumber(throughputGis) + ",\n";
 
       const auto &prof = DeviceDatabase::lookup(r.vendorId, r.deviceId, r.deviceName);
       double peakGis = (r.configIndex == 0) ? prof.theoreticalTriangleGis : prof.theoreticalBoxGis;
       if (peakGis > 0.0) {
         double pctPeak = (throughputGis / peakGis) * 100.0;
+        if (!std::isfinite(pctPeak)) pctPeak = 0.0;
         char buf[96];
         if (r.configIndex == 0) {
           std::snprintf(buf, sizeof(buf), "%.1f%% of %.1f GIS/s %s Boost Peak", pctPeak,
@@ -2059,8 +2017,8 @@ std::string resultsToJson(const std::vector<ResultData> &results,
         }
         std::string detailsStr(buf);
         out += "      \"target_architecture\": \"" + jsonEscape(prof.archName) + "\",\n";
-        out += "      \"theoretical_peak_gis\": " + std::to_string(peakGis) + ",\n";
-        out += "      \"pct_theoretical_peak\": " + std::to_string(pctPeak) + ",\n";
+        out += "      \"theoretical_peak_gis\": " + jsonNumber(peakGis) + ",\n";
+        out += "      \"pct_theoretical_peak\": " + jsonNumber(pctPeak) + ",\n";
         out += "      \"details_speedup\": \"" + jsonEscape(detailsStr) + "\",\n";
       }
     }
@@ -2068,12 +2026,13 @@ std::string resultsToJson(const std::vector<ResultData> &results,
       const auto &prof = DeviceDatabase::lookup(r.vendorId, r.deviceId, r.deviceName);
       if (prof.theoreticalFp32Tflops > 0.0) {
         double pctPeak = (value / prof.theoreticalFp32Tflops) * 100.0;
+        if (!std::isfinite(pctPeak)) pctPeak = 0.0;
         char buf[96];
         std::snprintf(buf, sizeof(buf), "%.1f%% of %.2f TFLOPS %s Peak", pctPeak,
                       prof.theoreticalFp32Tflops, prof.archName.c_str());
         out += "      \"target_architecture\": \"" + jsonEscape(prof.archName) + "\",\n";
-        out += "      \"theoretical_peak_tflops\": " + std::to_string(prof.theoreticalFp32Tflops) + ",\n";
-        out += "      \"pct_theoretical_peak\": " + std::to_string(pctPeak) + ",\n";
+        out += "      \"theoretical_peak_tflops\": " + jsonNumber(prof.theoreticalFp32Tflops) + ",\n";
+        out += "      \"pct_theoretical_peak\": " + jsonNumber(pctPeak) + ",\n";
         out += "      \"details_speedup\": \"" + jsonEscape(std::string(buf)) + "\",\n";
       }
     }
@@ -2081,24 +2040,25 @@ std::string resultsToJson(const std::vector<ResultData> &results,
       const auto &prof = DeviceDatabase::lookup(r.vendorId, r.deviceId, r.deviceName);
       if (prof.theoreticalBandwidthGBps > 0.0) {
         double pctPeak = (value / prof.theoreticalBandwidthGBps) * 100.0;
+        if (!std::isfinite(pctPeak)) pctPeak = 0.0;
         char buf[96];
         std::snprintf(buf, sizeof(buf), "%.1f%% of %.1f GB/s %s Peak", pctPeak,
                       prof.theoreticalBandwidthGBps, prof.archName.c_str());
         out += "      \"target_architecture\": \"" + jsonEscape(prof.archName) + "\",\n";
-        out += "      \"theoretical_peak_gbps\": " + std::to_string(prof.theoreticalBandwidthGBps) + ",\n";
-        out += "      \"pct_theoretical_peak\": " + std::to_string(pctPeak) + ",\n";
+        out += "      \"theoretical_peak_gbps\": " + jsonNumber(prof.theoreticalBandwidthGBps) + ",\n";
+        out += "      \"pct_theoretical_peak\": " + jsonNumber(pctPeak) + ",\n";
         out += "      \"details_speedup\": \"" + jsonEscape(std::string(buf)) + "\",\n";
       }
     }
     out += "      \"operations\": " + std::to_string(r.operations) + ",\n";
-    out += "      \"time_ms\": " + std::to_string(r.time_ms) + ",\n";
+    out += "      \"time_ms\": " + jsonNumber(r.time_ms) + ",\n";
     if (r.sample_count > 0) {
       out += "      \"statistics\": {\n";
       out += "        \"samples\": " + std::to_string(r.sample_count) + ",\n";
-      out += "        \"min_time_ms\": " + std::to_string(r.min_time_ms) + ",\n";
-      out += "        \"median_time_ms\": " + std::to_string(r.median_time_ms) + ",\n";
-      out += "        \"mean_time_ms\": " + std::to_string(r.mean_time_ms) + ",\n";
-      out += "        \"p95_time_ms\": " + std::to_string(r.p95_time_ms) + "\n";
+      out += "        \"min_time_ms\": " + jsonNumber(r.min_time_ms) + ",\n";
+      out += "        \"median_time_ms\": " + jsonNumber(r.median_time_ms) + ",\n";
+      out += "        \"mean_time_ms\": " + jsonNumber(r.mean_time_ms) + ",\n";
+      out += "        \"p95_time_ms\": " + jsonNumber(r.p95_time_ms) + "\n";
       out += "      },\n";
     }
     if (r.hasRegisterTelemetry) {
@@ -2116,10 +2076,10 @@ std::string resultsToJson(const std::vector<ResultData> &results,
     if (r.hasPowerTelemetry) {
       out += "      \"power_telemetry\": {\n";
       out += "        \"available\": true,\n";
-      out += "        \"power_watts\": " + std::to_string(r.powerWatts) + ",\n";
-      out += "        \"energy_joules\": " + std::to_string(r.energyJoules) + ",\n";
-      out += "        \"joules_per_unit\": " + std::to_string(r.joulesPerUnit) + ",\n";
-      out += "        \"unit_per_watt\": " + std::to_string(r.unitPerWatt) + ",\n";
+      out += "        \"power_watts\": " + jsonNumber(r.powerWatts) + ",\n";
+      out += "        \"energy_joules\": " + jsonNumber(r.energyJoules) + ",\n";
+      out += "        \"joules_per_unit\": " + jsonNumber(r.joulesPerUnit) + ",\n";
+      out += "        \"unit_per_watt\": " + jsonNumber(r.unitPerWatt) + ",\n";
       out += "        \"efficiency_unit\": \"" + jsonEscape(r.efficiencyUnit) + "\"\n";
       out += "      },\n";
     }
@@ -2134,15 +2094,15 @@ std::string resultsToJson(const std::vector<ResultData> &results,
       out += "        \"smem_load_instructions\": " + std::to_string(r.perfCounters.smemLoadInstructions) + ",\n";
       out += "        \"vmem_store_instructions\": " + std::to_string(r.perfCounters.vmemStoreInstructions) + ",\n";
       out += "        \"lds_instructions\": " + std::to_string(r.perfCounters.ldsInstructions) + ",\n";
-      out += "        \"valu_busy_pct\": " + std::to_string(r.perfCounters.valuBusyPct) + ",\n";
-      out += "        \"salu_busy_pct\": " + std::to_string(r.perfCounters.saluBusyPct) + ",\n";
+      out += "        \"valu_busy_pct\": " + jsonNumber(r.perfCounters.valuBusyPct) + ",\n";
+      out += "        \"salu_busy_pct\": " + jsonNumber(r.perfCounters.saluBusyPct) + ",\n";
       out += "        \"vram_read_bytes\": " + std::to_string(r.perfCounters.vramReadBytes) + ",\n";
-      out += "        \"l0_cache_hit_ratio\": " + std::to_string(r.perfCounters.l0CacheHitRatio) + ",\n";
-      out += "        \"l1_cache_hit_ratio\": " + std::to_string(r.perfCounters.l1CacheHitRatio) + ",\n";
+      out += "        \"l0_cache_hit_ratio\": " + jsonNumber(r.perfCounters.l0CacheHitRatio) + ",\n";
+      out += "        \"l1_cache_hit_ratio\": " + jsonNumber(r.perfCounters.l1CacheHitRatio) + ",\n";
       out += "        \"raw_counters\": {\n";
       size_t rcIdx = 0;
       for (const auto &[cName, cVal] : r.perfCounters.rawCounters) {
-        out += "          \"" + jsonEscape(cName) + "\": " + std::to_string(cVal) +
+        out += "          \"" + jsonEscape(cName) + "\": " + jsonNumber(cVal) +
                (rcIdx + 1 < r.perfCounters.rawCounters.size() ? ",\n" : "\n");
         rcIdx++;
       }
@@ -2167,6 +2127,13 @@ std::string resultsToJson(const std::vector<ResultData> &results,
            (r.isValid ? "true" : "false") + ",\n";
     out += std::string("      \"is_emulated\": ") +
            (r.isEmulated ? "true" : "false") + ",\n";
+    out += std::string("      \"emulated\": ") +
+           (r.isEmulated ? "true" : "false") + ",\n";
+    std::string emulationReason = "";
+    if (r.isEmulated) {
+      emulationReason = r.supportNote.empty() ? "Emulated via software unpack" : r.supportNote;
+    }
+    out += "      \"emulation_reason\": \"" + jsonEscape(emulationReason) + "\",\n";
     out += std::string("      \"unsupported\": ") +
            (r.isUnsupported ? "true" : "false") + ",\n";
     if (r.isUnsupported) {
@@ -2178,6 +2145,7 @@ std::string resultsToJson(const std::vector<ResultData> &results,
       out += "      \"support_note\": \"" + jsonEscape(r.supportNote) + "\",\n";
       out += "      \"caveat\": \"" + jsonEscape(r.supportNote) + "\",\n";
     }
+    out += "      \"notes\": \"" + jsonEscape(r.supportNote) + "\",\n";
     out += "      \"max_workgroup_size\": " +
            std::to_string(r.maxWorkGroupSize) + ",\n";
     out += "      \"sort_weight\": " + std::to_string(r.sortWeight) + ",\n";
@@ -2203,8 +2171,8 @@ std::string resultsToJson(const std::vector<ResultData> &results,
   }
   if (hasAnyPowerInJson && powerCountInJson > 0) {
     out += ",\n  \"power_summary\": {\n";
-    out += "    \"average_power_watts\": " + std::to_string(totalPowerSumInJson / powerCountInJson) + ",\n";
-    out += "    \"total_energy_joules\": " + std::to_string(totalEnergySumInJson) + "\n";
+    out += "    \"average_power_watts\": " + jsonNumber(totalPowerSumInJson / powerCountInJson) + ",\n";
+    out += "    \"total_energy_joules\": " + jsonNumber(totalEnergySumInJson) + "\n";
     out += "  }\n";
   } else {
     out += "\n";

@@ -9,8 +9,38 @@
 
 bool RayDivergenceBench::IsSupported(const DeviceInfo &info,
                                      IComputeContext *context) const {
-  return info.rayTracingSupport &&
-         (context && context->getBackend() == ComputeBackend::Vulkan);
+  if (!info.rayTracingSupport) return false;
+  if (!context) return true;
+  if (context->getBackend() != ComputeBackend::Vulkan) return false;
+  const VulkanContext *vc = dynamic_cast<const VulkanContext *>(context);
+  if (vc && !vc->isExtensionEnabled(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME)) {
+    return false;
+  }
+  return true;
+}
+
+std::string RayDivergenceBench::GetSupportNote() const {
+  return "Ray tracing requires Vulkan ray tracing pipeline extensions";
+}
+
+std::string RayDivergenceBench::GetSupportNote(const DeviceInfo &info,
+                                               IComputeContext *context) const {
+  if (context && context->getBackend() == ComputeBackend::OpenCL) {
+    return "No support for ray tracing pipelines in OpenCL API";
+  }
+  if (context && context->getBackend() == ComputeBackend::ROCm) {
+    return "No support for ray tracing pipelines in ROCm/HIP API";
+  }
+  if (!info.rayTracingSupport) {
+    return "VK_KHR_acceleration_structure or VK_KHR_ray_query missing";
+  }
+  if (context) {
+    const VulkanContext *vc = dynamic_cast<const VulkanContext *>(context);
+    if (vc && !vc->isExtensionEnabled(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME)) {
+      return "VK_KHR_ray_tracing_pipeline missing";
+    }
+  }
+  return "Ray tracing requires Vulkan ray tracing pipeline extensions";
 }
 
 void RayDivergenceBench::loadRTProcs(VkDevice device) {
@@ -327,91 +357,70 @@ const char *RayDivergenceBench::GetSubCategory(uint32_t config_idx) const {
 std::string RayDivergenceBench::GetConfigName(uint32_t config_idx) const {
   switch (config_idx) {
   case 0:
-    return "Traversal: Isolated Microbenchmark - 90° Hemispherical (Incoherent)";
+    return "Bounce Divergence: Rough Diffuse (r=1.0, 90° Spread)";
   case 1:
-    return "Traversal: Isolated Microbenchmark - 67.5° Cone Spread";
+    return "Bounce Divergence: Matte Satin (r=0.75, 67.5° Spread)";
   case 2:
-    return "Traversal: Isolated Microbenchmark - 45° Cone Spread";
+    return "Bounce Divergence: Brushed Metal (r=0.5, 45° Spread)";
   case 3:
-    return "Traversal: Isolated Microbenchmark - 22.5° Cone Spread";
+    return "Bounce Divergence: Glossy Coat (r=0.25, 22.5° Spread)";
   case 4:
-    return "Traversal: Isolated Microbenchmark - 0° Beam (Coherent)";
+    return "Bounce Divergence: Mirror Reflection (r=0.0, 0° Coherent)";
   default:
-    return "Traversal: Isolated Microbenchmark - Level " + std::to_string(config_idx);
+    return "Bounce Divergence: Level " + std::to_string(config_idx);
   }
 }
 
 void RayDivergenceBench::generateGeometry(std::vector<float> &vertices) const {
-  uint32_t gridSize = 256;
-  uint32_t primitivesPerPlane = gridSize * gridSize * 2;
-  // Floor + Ceiling + 4 Walls (each wall gridSize * 2 primitives)
-  vertices.reserve((primitivesPerPlane * 2 + gridSize * 8) * 9);
+  // Uniformly tessellated 6-face enclosing chamber [-100, 100]^3 (160x160 quads = 51,200 tris per face, 307,200 tris total).
+  // Every direction in the hemisphere encounters identical triangle density and BVH tree depth,
+  // avoiding grazing-angle multi-leaf overlap traps or early ray misses.
+  const uint32_t gridSize = 160;
+  const uint32_t trisPerFace = gridSize * gridSize * 2;
+  vertices.reserve(trisPerFace * 6 * 9);
 
-  float scale = 200.0f / gridSize;
+  const float halfExtent = 100.0f;
+  const float step = (2.0f * halfExtent) / static_cast<float>(gridSize);
 
-  // 1. Undulating Floor with realistic 3D relief (Z around 0.0)
-  for (uint32_t y = 0; y < gridSize; ++y) {
-    for (uint32_t x = 0; x < gridSize; ++x) {
-      float fx0 = (float)x * scale - 100.0f;
-      float fy0 = (float)y * scale - 100.0f;
-      float fx1 = (float)(x + 1) * scale - 100.0f;
-      float fy1 = (float)(y + 1) * scale - 100.0f;
+  auto pushTri = [&](float x0, float y0, float z0,
+                     float x1, float y1, float z1,
+                     float x2, float y2, float z2) {
+    vertices.push_back(x0); vertices.push_back(y0); vertices.push_back(z0);
+    vertices.push_back(x1); vertices.push_back(y1); vertices.push_back(z1);
+    vertices.push_back(x2); vertices.push_back(y2); vertices.push_back(z2);
+  };
 
-      float z00 = 2.5f * std::sin(fx0 * 0.12f) * std::cos(fy0 * 0.12f);
-      float z10 = 2.5f * std::sin(fx1 * 0.12f) * std::cos(fy0 * 0.12f);
-      float z01 = 2.5f * std::sin(fx0 * 0.12f) * std::cos(fy1 * 0.12f);
-      float z11 = 2.5f * std::sin(fx1 * 0.12f) * std::cos(fy1 * 0.12f);
+  for (uint32_t iv = 0; iv < gridSize; ++iv) {
+    float v0 = -halfExtent + static_cast<float>(iv) * step;
+    float v1 = v0 + step;
+    for (uint32_t iu = 0; iu < gridSize; ++iu) {
+      float u0 = -halfExtent + static_cast<float>(iu) * step;
+      float u1 = u0 + step;
 
-      // Triangle 1
-      vertices.push_back(fx0); vertices.push_back(fy0); vertices.push_back(z00);
-      vertices.push_back(fx1); vertices.push_back(fy0); vertices.push_back(z10);
-      vertices.push_back(fx0); vertices.push_back(fy1); vertices.push_back(z01);
-      // Triangle 2
-      vertices.push_back(fx1); vertices.push_back(fy0); vertices.push_back(z10);
-      vertices.push_back(fx1); vertices.push_back(fy1); vertices.push_back(z11);
-      vertices.push_back(fx0); vertices.push_back(fy1); vertices.push_back(z01);
+      // 1. Top Dome / Ceiling (+Z = +100)
+      pushTri(u0, v0,  halfExtent, u1, v0,  halfExtent, u0, v1,  halfExtent);
+      pushTri(u1, v0,  halfExtent, u1, v1,  halfExtent, u0, v1,  halfExtent);
+
+      // 2. Floor (-Z = -100)
+      pushTri(u0, v0, -halfExtent, u0, v1, -halfExtent, u1, v0, -halfExtent);
+      pushTri(u1, v0, -halfExtent, u0, v1, -halfExtent, u1, v1, -halfExtent);
+
+      // 3. East Wall (+X = +100)
+      pushTri( halfExtent, u0, v0,  halfExtent, u1, v0,  halfExtent, u0, v1);
+      pushTri( halfExtent, u1, v0,  halfExtent, u1, v1,  halfExtent, u0, v1);
+
+      // 4. West Wall (-X = -100)
+      pushTri(-halfExtent, u0, v0, -halfExtent, u0, v1, -halfExtent, u1, v0);
+      pushTri(-halfExtent, u1, v0, -halfExtent, u0, v1, -halfExtent, u1, v1);
+
+      // 5. North Wall (+Y = +100)
+      pushTri(u0,  halfExtent, v0, u0,  halfExtent, v1, u1,  halfExtent, v0);
+      pushTri(u1,  halfExtent, v0, u0,  halfExtent, v1, u1,  halfExtent, v1);
+
+      // 6. South Wall (-Y = -100)
+      pushTri(u0, -halfExtent, v0, u1, -halfExtent, v0, u0, -halfExtent, v1);
+      pushTri(u1, -halfExtent, v0, u1, -halfExtent, v1, u0, -halfExtent, v1);
     }
-  }
-
-  // 2. Flat Ceiling (Z = -20.0)
-  for (uint32_t y = 0; y < gridSize; ++y) {
-    for (uint32_t x = 0; x < gridSize; ++x) {
-      float fx0 = (float)x * scale - 100.0f;
-      float fy0 = (float)y * scale - 100.0f;
-      float fx1 = (float)(x + 1) * scale - 100.0f;
-      float fy1 = (float)(y + 1) * scale - 100.0f;
-
-      // Triangle 1
-      vertices.push_back(fx0); vertices.push_back(fy0); vertices.push_back(-20.0f);
-      vertices.push_back(fx1); vertices.push_back(fy0); vertices.push_back(-20.0f);
-      vertices.push_back(fx0); vertices.push_back(fy1); vertices.push_back(-20.0f);
-      // Triangle 2
-      vertices.push_back(fx1); vertices.push_back(fy0); vertices.push_back(-20.0f);
-      vertices.push_back(fx1); vertices.push_back(fy1); vertices.push_back(-20.0f);
-      vertices.push_back(fx0); vertices.push_back(fy1); vertices.push_back(-20.0f);
-    }
-  }
-
-  // 3. Four Enclosing Boundary Walls (-20.0 <= Z <= 0.0) to catch grazing diffuse rays
-  for (uint32_t i = 0; i < gridSize; ++i) {
-    float coord0 = (float)i * scale - 100.0f;
-    float coord1 = (float)(i + 1) * scale - 100.0f;
-
-    auto addWallQuad = [&](float x0, float y0, float x1, float y1) {
-      // Tri 1
-      vertices.push_back(x0); vertices.push_back(y0); vertices.push_back(-20.0f);
-      vertices.push_back(x1); vertices.push_back(y1); vertices.push_back(-20.0f);
-      vertices.push_back(x0); vertices.push_back(y0); vertices.push_back(0.0f);
-      // Tri 2
-      vertices.push_back(x1); vertices.push_back(y1); vertices.push_back(-20.0f);
-      vertices.push_back(x1); vertices.push_back(y1); vertices.push_back(0.0f);
-      vertices.push_back(x0); vertices.push_back(y0); vertices.push_back(0.0f);
-    };
-
-    addWallQuad(-100.0f, coord0, -100.0f, coord1); // West Wall (-X)
-    addWallQuad(100.0f, coord0, 100.0f, coord1);   // East Wall (+X)
-    addWallQuad(coord0, -100.0f, coord1, -100.0f); // South Wall (-Y)
-    addWallQuad(coord0, 100.0f, coord1, 100.0f);   // North Wall (+Y)
   }
 }
 
@@ -429,4 +438,22 @@ void RayDivergenceBench::DumpGeometry() const {
   }
   objFile.close();
   std::cout << "Geometry dumped to raydiv_scene.obj" << std::endl;
+}
+
+bool RayDivergenceBench::ValidateResults(uint32_t config_idx) const {
+  if (config_idx >= GetNumConfigs()) {
+    return false;
+  }
+  if (!context || !resultBuffer) {
+    return false;
+  }
+  try {
+    uint32_t hits = 0;
+    context->readBuffer(resultBuffer, 0, sizeof(uint32_t), &hits);
+    // Chamber enclosure guarantees 100% of rays intersect geometry;
+    // hits must be non-zero after any valid execution.
+    return hits > 0;
+  } catch (...) {
+    return false;
+  }
 }

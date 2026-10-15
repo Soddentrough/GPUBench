@@ -938,10 +938,13 @@ bool ResultImporter::loadFromString(const std::string &content, ImportedRun &out
       } else if (status == "FAILED" && rd.time_ms >= 0.0) {
         rd.time_ms = -2.0;
       }
-      rd.isEmulated = entry["is_emulated"].as_bool(false);
+      rd.isEmulated = entry["is_emulated"].as_bool(entry["emulated"].as_bool(false));
       rd.isUnsupported = entry["unsupported"].as_bool(false) || (status == "UNSUPPORTED");
       rd.supportCategory = entry["unsupported_category"].as_string();
-      rd.supportNote = entry["unsupported_reason"].as_string(entry["support_note"].as_string());
+      rd.supportNote = entry["unsupported_reason"].as_string(
+          entry["support_note"].as_string(
+              entry["caveat"].as_string(
+                  entry["notes"].as_string())));
       rd.maxWorkGroupSize = entry["max_workgroup_size"].as_uint32(1024);
       bool hasExplicitConfigIndex = entry.has("config_index");
       rd.configIndex = entry["config_index"].as_uint32(0);

@@ -7,18 +7,18 @@ layout(set = 0, binding = 0) buffer OutputBuffer {
     double data[];
 } outBuffer;
 
-#define STEP(i) a[i] = fma(a[i], mult, a[((i) + 1) & 7]);
+#define STEP(i) a[i] = fma(m, a[((i) + 1) & 7], a[i]);
 
 #define APPLY4(OP, i) OP(i) OP((i) + 1) OP((i) + 2) OP((i) + 3)
 #define APPLY8(OP)    APPLY4(OP, 0) APPLY4(OP, 4)
 
 void main() {
     uint index = gl_GlobalInvocationID.x;
-    double add = double(index) * 0.00000001;
-    double mult = 1.000001 + add;
+    double seed = outBuffer.data[index & 0x1FFFu] * 0.0001;
+    double m = 0.00001 + (double(index & 63u) * 0.00000001);
 
     double a[8];
-    a[0] = outBuffer.data[index] + 1.0;
+    a[0] = seed + 1.0;
     a[1] = a[0] + 0.1;
     a[2] = a[0] + 0.2;
     a[3] = a[0] + 0.3;

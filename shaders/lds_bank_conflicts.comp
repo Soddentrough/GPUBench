@@ -55,7 +55,5 @@ void main() {
     }
 
     uint total = acc0 + acc1 + acc2 + acc3 + acc4 + acc5 + acc6 + acc7;
-    if (total == 0xDEADBEEFu) {
-        results[gid] = total;
-    }
+    results[gid] = total;
 }

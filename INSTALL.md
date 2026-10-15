@@ -84,7 +84,7 @@ The installation creates the following structure:
     │   └── kernels/
     │       ├── vulkan/             # Compiled SPIR-V shaders (*.spv)
     │       ├── opencl/             # OpenCL source files (*.cl)
-    │       └── rocm/               # Compiled HIP fat binaries (*.hsaco)
+    │       └── rocm/               # Compiled HIP fat binaries (*.co)
     ├── icons/hicolor/*/apps/
     │   └── io.github.soddentrough.gpubench.png
     ├── man/man1/

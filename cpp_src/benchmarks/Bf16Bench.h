@@ -99,10 +99,13 @@ public:
   int GetSortWeight() const override { return 35; }
   uint32_t GetExpectedKernelCount() const override { return 2; }
 
+  bool ValidateResults(uint32_t config_idx = 0) const override;
+
 private:
   IComputeContext *context = nullptr;
   mutable IComputeContext *lastCheckedContext = nullptr;
   ComputeKernel vectorKernel = nullptr;
   ComputeKernel matrixKernel = nullptr;
   ComputeBuffer buffer = nullptr;
+  ComputeBuffer matrixBuffer = nullptr;
 };

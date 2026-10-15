@@ -225,8 +225,7 @@ void RayRawTraversalBench::buildAS() {
   instDeep.mask = 0xFF;
   instDeep.accelerationStructureReference = blasAddrDeep;
   instDeep.flags =
-      VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR |
-      VK_GEOMETRY_INSTANCE_FORCE_OPAQUE_BIT_KHR;
+      VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
 
   instanceBufferCoherent = context->createBuffer(sizeof(instCoherent), &instCoherent);
   instanceBufferDeep = context->createBuffer(sizeof(instDeep), &instDeep);
@@ -460,9 +459,11 @@ std::string RayRawTraversalBench::GetConfigCaveat(uint32_t config_idx) const {
   ss << std::fixed << std::setprecision(1);
 
   if (config_idx == 0) {
-    ss << mrays_s << " MRays/s";
+    ss << mrays_s << " MRays/s (Coherent Triangle Fast-Path)";
   } else {
-    ss << mrays_s << " MRays/s (Multi-Layer BVH)";
+    uint64_t boxOps = totalRays * 64;
+    double gis = (time_s > 0.0) ? ((static_cast<double>(boxOps) / time_s) / 1e9) : 0.0;
+    ss << mrays_s << " MRays/s (Synthetic 64-AABB Traversal Model; " << gis << " Box GIS/s)";
   }
 
   return ss.str();
@@ -477,20 +478,25 @@ std::string RayRawTraversalBench::GetConfigCaveat(uint32_t config_idx,
 }
 
 bool RayRawTraversalBench::ValidateResults(uint32_t config_idx) const {
+  if (config_idx >= GetNumConfigs()) return false;
   if (!context || !resultBuffer) return false;
 
-  // Read back first 1024 workgroups from strided buffer
-  uint32_t checkCount = 1024;
-  std::vector<uint32_t> hostHits(checkCount, 0);
-  context->readBuffer(resultBuffer, 0, checkCount * sizeof(uint32_t), hostHits.data());
+  try {
+    // Read back first 1024 workgroups from strided buffer
+    uint32_t checkCount = 1024;
+    std::vector<uint32_t> hostHits(checkCount, 0);
+    context->readBuffer(resultBuffer, 0, checkCount * sizeof(uint32_t), hostHits.data());
 
-  for (uint32_t i = 0; i < checkCount; ++i) {
-    // Every workgroup should report 32 hits (100% ray-geometry alignment, 0% empty space root misses)
-    if (hostHits[i] == 0) {
-      return false;
+    for (uint32_t i = 0; i < checkCount; ++i) {
+      // Every workgroup should report 32 hits (100% ray-geometry alignment, 0% empty space root misses)
+      if (hostHits[i] == 0) {
+        return false;
+      }
     }
+    return true;
+  } catch (...) {
+    return false;
   }
-  return true;
 }
 
 const char *RayRawTraversalBench::GetName() const {
@@ -522,8 +528,8 @@ const char *RayRawTraversalBench::GetSubCategory(uint32_t config_idx) const {
 
 std::string RayRawTraversalBench::GetConfigName(uint32_t config_idx) const {
   return config_idx == 0
-      ? "Raw BVH Traversal - Coherent Triangle Traversal (Max Occupancy)"
-      : "Raw BVH Traversal - Deep BVH Multi-Layer Stress";
+      ? "Raw BVH - Coherent Triangle Traversal (Max Occupancy)"
+      : "Raw BVH - Deep Multi-Layer Box Stress";
 }
 
 uint64_t RayRawTraversalBench::GetTraversedRays(uint32_t config_idx) const {

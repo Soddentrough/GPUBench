@@ -25,8 +25,8 @@ __kernel void run_benchmark(__global const float4* restrict inputData,
         }
     }
 
-    // Prevent compiler from optimizing away reads
-    if (accumulator.x > 1e30f) {
-        outputData[0] = accumulator;
+    // Genuine writeback: unconditionally commit accumulated loads to global memory in read mode
+    if (mode == 0) {
+        outputData[thread_id] = accumulator;
     }
 }

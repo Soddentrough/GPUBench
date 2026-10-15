@@ -12,8 +12,9 @@ public:
   void Teardown() override;
 
   BenchmarkResult GetResult(uint32_t config_idx) const override;
+  bool ValidateResults(uint32_t config_idx = 0) const override;
   uint32_t GetNumConfigs() const override { return 2; }
-  int GetSortWeight(uint32_t = 0) const override { return 672; }
+  int GetSortWeight(uint32_t = 0) const override { return 617; }
   const char *GetName() const override;
   const char *GetComponent(uint32_t config_idx) const override;
   const char *GetMetric() const override;
@@ -34,22 +35,9 @@ public:
     }
     return SupportLimitation::kHardware;
   }
-  std::string GetSupportNote() const override {
-    return "Ray tracing requires Vulkan ray query acceleration structures";
-  }
+  std::string GetSupportNote() const override;
   std::string GetSupportNote(const DeviceInfo &info,
-                             IComputeContext *context = nullptr) const override {
-    if (context && context->getBackend() == ComputeBackend::OpenCL) {
-      return "No support for ray tracing acceleration structures in OpenCL API";
-    }
-    if (context && context->getBackend() == ComputeBackend::ROCm) {
-      return "No support for ray tracing acceleration structures in ROCm/HIP API";
-    }
-    if (!info.rayTracingSupport) {
-      return "extension VK_KHR_acceleration_structure or VK_KHR_ray_query missing";
-    }
-    return "Ray tracing requires Vulkan ray query acceleration structures";
-  }
+                             IComputeContext *context = nullptr) const override;
 
 private:
   void buildAS();

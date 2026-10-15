@@ -174,6 +174,13 @@ private:
     void updateZoomShortcuts();
     void renderZoomToast();
 
+    ImFont* boldFont() const { return m_vulkanContext ? m_vulkanContext->getBoldFont() : nullptr; }
+    ImFont* monoFont() const { return m_vulkanContext ? m_vulkanContext->getMonoFont() : nullptr; }
+    void pushBoldFont() const { if (ImFont* f = boldFont()) ImGui::PushFont(f); }
+    void popBoldFont() const { if (boldFont()) ImGui::PopFont(); }
+    void pushMonoFont() const { if (ImFont* f = monoFont()) ImGui::PushFont(f); }
+    void popMonoFont() const { if (monoFont()) ImGui::PopFont(); }
+
     float m_uiScale{1.0f};
     float m_baseScale{1.0f};
     ImGuiStyle m_baseStyle{};

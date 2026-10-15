@@ -166,18 +166,28 @@ void main() {
 
     vec3 pixelColor = vec3(0.0);
 
-    if (pc.mode == 5u) {
+    if (pc.mode == 7u) {
+        vec3 normal = computeSmoothNormal(pc.sceneType, primId, hitPos, rayDir, rawBary);
+        payload = normal * 0.5 + 0.5;
+        return;
+    }
+
+    if (pc.mode == 4u) {
+        uint idx = gl_LaunchIDEXT.x;
+        uint matId = idx % 8u;
+        vec3 normal = computeSmoothNormal(pc.sceneType, primId, hitPos, rayDir, rawBary);
         if (pc.isGltf != 0u) {
-            uint base = primId * 36u;
-            vec3 p0 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
-            vec3 p1 = vec3(vbuf.vertices[base + 12], vbuf.vertices[base + 13], vbuf.vertices[base + 14]);
-            vec3 p2 = vec3(vbuf.vertices[base + 24], vbuf.vertices[base + 25], vbuf.vertices[base + 26]);
-            vec3 geomNormal = normalize(cross(p1 - p0, p2 - p0));
-            if (dot(geomNormal, rayDir) > 0.0) geomNormal = -geomNormal;
-            payload = geomNormal;
+            GltfMaterialGpu mat = matBuf.materials[matId];
+            vec4 dummyTan = vec4(1.0, 0.0, 0.0, 1.0);
+            vec2 dummyUv = rawBary;
+            pixelColor = evaluateGltfPbr(mat, hitPos, normal, normal, dummyTan, dummyUv, rayDir, pc.sceneType, false, rngState);
         } else {
-            payload = computeSmoothNormal(pc.sceneType, primId, hitPos, rayDir, rawBary);
+            vec3 sunDir, sunColor;
+            getSceneSunParams(pc.sceneType, sunDir, sunColor);
+            vec3 baseColor = getSceneArchetypeAlbedo(pc.sceneType, matId);
+            pixelColor = evaluateMaterialArchetypeDirect(matId, hitPos, baseColor, 0.5, 0.0, 1.5, normal, -rayDir, sunDir, sunColor, 1.0);
         }
+        payload = pixelColor;
         return;
     }
 
@@ -211,8 +221,7 @@ void main() {
 
         uint matId = triMatBuf.triangleMats[primId];
         GltfMaterialGpu mat = matBuf.materials[matId];
-        bool enableShadows = (pc.mode != 4u);
-        pixelColor = evaluateGltfPbr(mat, interpHitPos, geomNormal, smoothNormal, tangent, uv, rayDir, pc.sceneType, enableShadows, rngState);
+        pixelColor = evaluateGltfPbr(mat, interpHitPos, geomNormal, smoothNormal, tangent, uv, rayDir, pc.sceneType, rngState);
     } else {
         vec3 normal = computeSmoothNormal(pc.sceneType, primId, hitPos, rayDir, rawBary);
         uint matId = computeMaterialId(pc.sceneType, primId, hitPos, normal);

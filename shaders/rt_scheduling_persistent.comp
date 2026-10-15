@@ -45,6 +45,7 @@ layout(push_constant) uniform PushConstants {
     uint sceneType;       // 0: Showroom Studio, 1: Outdoor Terrain, 2: Indoor Atrium, 3: AAA Forest
     uint isGltf;          // 1 if glTF PBR scene, 0 if procedural
     uint spp;             // Samples per pixel (default: 1)
+    uint sampleIdx;       // Sample index for progressive accumulation (0 .. spp-1)
 } pc;
 
 // Scene Type Constants
@@ -83,23 +84,6 @@ float rand_float(inout uint state) {
     return float(pcg_hash(state) & 0x00FFFFFFu) / 16777216.0;
 }
 
-vec2 signNotZero(vec2 v) {
-    return vec2(v.x >= 0.0 ? 1.0 : -1.0, v.y >= 0.0 ? 1.0 : -1.0);
-}
-
-vec2 octEncode(vec3 n) {
-    n /= (abs(n.x) + abs(n.y) + abs(n.z));
-    return (n.z >= 0.0) ? n.xy : ((1.0 - abs(n.yx)) * signNotZero(n.xy));
-}
-
-vec3 octDecode(vec2 f) {
-    vec3 n = vec3(f.x, f.y, 1.0 - abs(f.x) - abs(f.y));
-    float t = clamp(-n.z, 0.0, 1.0);
-    n.x += (n.x >= 0.0) ? -t : t;
-    n.y += (n.y >= 0.0) ? -t : t;
-    return normalize(n);
-}
-
 vec3 cosine_sample_hemisphere(float u1, float u2) {
     float r = sqrt(u1);
     float theta = 6.28318530718 * u2;
@@ -116,101 +100,9 @@ vec3 align_to_normal(vec3 sample_dir, vec3 normal) {
     return tangent * sample_dir.x + bitangent * sample_dir.y + normal * sample_dir.z;
 }
 
-vec3 computeSmoothNormal(uint sceneType, uint primId, vec3 hitPos, vec3 rayDir, vec2 bary) {
-    if (pc.isGltf != 0u) {
-        uint base = primId * 36u;
-        vec3 p0 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
-        vec3 n0 = vec3(vbuf.vertices[base + 3], vbuf.vertices[base + 4], vbuf.vertices[base + 5]);
-        base += 12u;
-        vec3 p1 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
-        vec3 n1 = vec3(vbuf.vertices[base + 3], vbuf.vertices[base + 4], vbuf.vertices[base + 5]);
-        base += 12u;
-        vec3 p2 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
-        vec3 n2 = vec3(vbuf.vertices[base + 3], vbuf.vertices[base + 4], vbuf.vertices[base + 5]);
-
-        float w = 1.0 - bary.x - bary.y;
-        vec3 geomNorm = normalize(cross(p1 - p0, p2 - p0));
-        vec3 smoothNorm = w * n0 + bary.x * n1 + bary.y * n2;
-        vec3 n = (length(smoothNorm) > 1e-4) ? normalize(smoothNorm) : geomNorm;
-        if (dot(n, rayDir) > 0.0) n = -n;
-        return n;
-    }
-    vec3 normal;
-    if (sceneType == SCENE_OUTDOOR_TERRAIN) {
-        if (primId >= PRIM_TERRAIN_END && primId < PRIM_WATER_END) {
-            normal = vec3(0.0, 0.0, 1.0);
-        } else {
-            uint base = primId * 9u;
-            vec3 p0 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
-            vec3 p1 = vec3(vbuf.vertices[base + 3], vbuf.vertices[base + 4], vbuf.vertices[base + 5]);
-            vec3 p2 = vec3(vbuf.vertices[base + 6], vbuf.vertices[base + 7], vbuf.vertices[base + 8]);
-            normal = normalize(cross(p1 - p0, p2 - p0));
-        }
-    } else {
-        if (primId < PRIM_KNOT_RUST_END) {
-            uint segI = (primId / 48u);
-            float u = float(segI) / 160.0 * 6.28318530718 * 2.0;
-            vec3 c = vec3(sin(u) + 2.0 * sin(2.0 * u), cos(u) - 2.0 * cos(2.0 * u), -sin(3.0 * u));
-            normal = normalize(hitPos - c);
-        } else if (primId < PRIM_SPHERE_END) {
-            normal = normalize(hitPos - vec3(0.0, 0.0, 0.5));
-        } else if (primId < PRIM_PEDESTAL_END) {
-            normal = normalize(vec3(hitPos.xy, 0.0));
-        } else if (primId < PRIM_SUZANNE_END) {
-            normal = normalize(hitPos - vec3(0.0, 0.0, 1.0));
-        } else if (primId < PRIM_FLOOR_END) {
-            normal = vec3(0.0, 0.0, 1.0);
-        } else if (primId < PRIM_WALLS_END) {
-            normal = (abs(hitPos.x) > abs(hitPos.y)) ? vec3(-sign(hitPos.x), 0.0, 0.0) : vec3(0.0, -sign(hitPos.y), 0.0);
-        } else if (primId < PRIM_CEILING_END) {
-            normal = vec3(0.0, 0.0, -1.0);
-        } else {
-            normal = vec3(0.0, 0.0, 1.0);
-        }
-    }
-    if (dot(normal, rayDir) > 0.0) normal = -normal;
-    return normal;
-}
-
-uint computeMaterialId(uint sceneType, uint primId, vec3 hitPos, vec3 normal) {
-    if (sceneType == SCENE_OUTDOOR_TERRAIN) {
-        if (primId >= PRIM_WATER_END) {
-            return 11u; // Pine Foliage
-        } else if (primId >= PRIM_TERRAIN_END) {
-            return 10u; // Water
-        } else {
-            float slope = 1.0 - max(0.0, normal.z);
-            float elev = hitPos.z;
-            if (elev > 380.0) return 12u; // Snow
-            else if (slope > 0.55) return 13u; // Cliff
-            else if (elev < 80.0 && slope < 0.15) return 15u; // River stones
-            else return 14u; // Meadow Grass
-        }
-    } else {
-        if (primId < PRIM_KNOT_PAINT_END) return 0u;
-        else if (primId < PRIM_KNOT_JADE_END) return 1u;
-        else if (primId < PRIM_KNOT_CHROME_END) return 2u;
-        else if (primId < PRIM_KNOT_VELVET_END) return 3u;
-        else if (primId < PRIM_KNOT_RUST_END) return 4u;
-        else if (primId < PRIM_SPHERE_END) return 5u;
-        else if (primId < PRIM_PEDESTAL_END) return 6u;
-        else if (primId < PRIM_SUZANNE_END) return 7u;
-        else if (primId < PRIM_FLOOR_END) return 8u;
-        else if (primId < PRIM_WALLS_END) return 9u;
-        else if (primId < PRIM_CEILING_END) return 9u;
-        else return 6u;
-    }
-}
-
-uint getArchetype(uint matId) {
-    if (matId >= 10u) return (matId - 10u) % 8u;
-    return matId % 8u;
-}
-
 void getCamera(uint sceneType, out vec3 camPos, out vec3 camForward, out vec3 camRight, out vec3 camUp, out float fov) {
     if (pc.isGltf != 0u) {
         if (sceneType == SCENE_AAA_FOREST) {
-            // AAA Open-World Woodland Forest: Eye-level trail camera gazing through dense canopy
             camPos = vec3(0.0, -18.0, 0.55);
             camForward = normalize(vec3(0.0, 33.0, 1.2));
             camRight = normalize(cross(camForward, vec3(0.0, 0.0, 1.0)));
@@ -255,23 +147,179 @@ void getCamera(uint sceneType, out vec3 camPos, out vec3 camForward, out vec3 ca
     }
 }
 
+vec3 evalStudioEnvironment(vec3 dir) {
+    float z = dir.z;
+    vec3 baseWall = mix(vec3(0.12, 0.13, 0.16), vec3(0.24, 0.26, 0.30), clamp(z * 1.5, 0.0, 1.0));
+    if (z < 0.0) {
+        baseWall = mix(vec3(0.12, 0.13, 0.16), vec3(0.06, 0.07, 0.08), clamp(-z * 2.0, 0.0, 1.0));
+    }
+    vec3 softboxDir1 = normalize(vec3(0.05, 0.30, 0.95));
+    float sb1 = pow(clamp(dot(dir, softboxDir1), 0.0, 1.0), 80.0) * 6.0;
+    vec3 softboxDir2 = normalize(vec3(-0.75, -0.20, 0.40));
+    float sb2 = pow(clamp(dot(dir, softboxDir2), 0.0, 1.0), 45.0) * 3.5;
+    vec3 softboxDir3 = normalize(vec3(0.65, 0.70, 0.30));
+    float sb3 = pow(clamp(dot(dir, softboxDir3), 0.0, 1.0), 40.0) * 2.5;
+    return baseWall + vec3(1.0, 0.98, 0.95) * sb1 + vec3(0.85, 0.92, 1.0) * sb2 + vec3(1.0, 0.90, 0.80) * sb3;
+}
 
+vec3 evalAtriumEnvironment(vec3 dir) {
+    float z = dir.z;
+    vec3 baseWall = mix(vec3(0.16, 0.15, 0.15), vec3(0.26, 0.24, 0.22), clamp(z * 1.5, 0.0, 1.0));
+    if (z < 0.0) {
+        baseWall = mix(vec3(0.16, 0.15, 0.15), vec3(0.08, 0.07, 0.06), clamp(-z * 2.0, 0.0, 1.0));
+    }
+    vec3 clerestoryDir = normalize(vec3(0.10, 0.30, 0.95));
+    float cs = pow(clamp(dot(dir, clerestoryDir), 0.0, 1.0), 30.0) * 3.5;
+    return baseWall + vec3(1.0, 0.95, 0.85) * cs;
+}
+
+#ifndef EVAL_OUTDOOR_SKY_DEFINED
+#define EVAL_OUTDOOR_SKY_DEFINED
+vec3 evalOutdoorSky(vec3 dir) {
+    vec3 sunDir = normalize(vec3(0.45, 0.35, 0.82));
+    float sunDot = max(dot(dir, sunDir), 0.0);
+    vec3 sky = mix(vec3(0.70, 0.82, 0.95), vec3(0.18, 0.42, 0.82), clamp(dir.z, 0.0, 1.0));
+    if (dir.z < 0.0) {
+        sky = mix(vec3(0.70, 0.82, 0.95), vec3(0.35, 0.30, 0.25), clamp(-dir.z * 2.0, 0.0, 1.0));
+    }
+    sky += vec3(1.0, 0.95, 0.85) * pow(sunDot, 120.0) * 8.0;
+    sky += vec3(1.0, 0.85, 0.60) * pow(sunDot, 12.0) * 0.8;
+    return sky;
+}
+#endif
 
 vec3 evalSky(uint sceneType, vec3 dir) {
     if (sceneType == SCENE_OUTDOOR_TERRAIN || sceneType == SCENE_AAA_FOREST) {
-        float skyT = clamp(dir.z * 0.5 + 0.5, 0.0, 1.0);
-        vec3 skyColor = mix(vec3(0.65, 0.75, 0.90), vec3(0.12, 0.35, 0.75), skyT);
-        vec3 sunDir = normalize(vec3(0.4, 0.5, 0.75));
-        float sunDot = max(0.0, dot(dir, sunDir));
-        skyColor += vec3(1.0, 0.8, 0.5) * pow(sunDot, 120.0) * 8.0;
-        return skyColor;
+        return evalOutdoorSky(dir);
     } else if (sceneType == SCENE_INDOOR_ATRIUM) {
-        float skyT = clamp(dir.z * 0.5 + 0.5, 0.0, 1.0);
-        return mix(vec3(0.55, 0.65, 0.85), vec3(0.10, 0.25, 0.65), skyT) * 1.5;
-    } else {
-        float t = clamp(dir.y * 0.5 + 0.5, 0.0, 1.0);
-        return mix(vec3(0.05, 0.05, 0.08), vec3(0.40, 0.45, 0.55), t);
+        return evalAtriumEnvironment(dir);
     }
+    return evalStudioEnvironment(dir);
+}
+
+uint computeMaterialId(uint sceneType, uint primId, vec3 hitPos, vec3 normal) {
+    if (sceneType == SCENE_OUTDOOR_TERRAIN) {
+        if (primId < PRIM_TERRAIN_END) {
+            if (hitPos.z >= -0.2 && hitPos.z <= 2.2 && abs(hitPos.x) < 185.0 && hitPos.y >= -145.0 && hitPos.y <= 930.0) {
+                return 7u;
+            }
+            float snowHarmonics = sin(hitPos.x * 0.032 + hitPos.y * 0.018) * 9.5
+                                + cos(hitPos.x * 0.068 - hitPos.y * 0.045) * 4.5
+                                + sin(hitPos.x * 0.130 + hitPos.y * 0.110) * 2.0;
+            float snowAltitude = 60.0 + (1.0 - normal.z) * 28.0 + snowHarmonics;
+            if (hitPos.z > snowAltitude && normal.z >= 0.50) return 3u;
+            if (normal.z < 0.65) return 4u;
+            if (normal.z < 0.82) return 0u;
+            return 5u;
+        }
+        if (primId < PRIM_WATER_END) return 2u;
+        uint treeLocalTri = (primId - PRIM_WATER_END) % 224u;
+        if (treeLocalTri < 32u) return 6u;
+        return 1u;
+    } else {
+        if (primId < PRIM_KNOT_PAINT_END)  return 0u;
+        if (primId < PRIM_KNOT_JADE_END)   return 1u;
+        if (primId < PRIM_KNOT_CHROME_END) return 7u;
+        if (primId < PRIM_KNOT_VELVET_END) return 3u;
+        if (primId < PRIM_KNOT_RUST_END)   return 4u;
+        if (primId < PRIM_SPHERE_END)      return 1u;
+        if (primId < PRIM_PEDESTAL_END)    return 6u;
+        if (primId < PRIM_SUZANNE_END)     return 2u;
+        if (primId < PRIM_FLOOR_END)       return 5u;
+        if (primId < PRIM_WALLS_END)       return 4u;
+        if (primId < PRIM_CEILING_END)     return 6u;
+        return 1u;
+    }
+}
+
+uint getArchetype(uint matId) {
+    return matId;
+}
+
+vec3 computeSmoothNormal(uint sceneType, uint primId, vec3 hitPos, vec3 rayDir, vec2 bary) {
+    if (pc.isGltf != 0u) {
+        uint base = primId * 36u;
+        vec3 p0 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
+        vec3 n0 = vec3(vbuf.vertices[base + 3], vbuf.vertices[base + 4], vbuf.vertices[base + 5]);
+        base += 12u;
+        vec3 p1 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
+        vec3 n1 = vec3(vbuf.vertices[base + 3], vbuf.vertices[base + 4], vbuf.vertices[base + 5]);
+        base += 12u;
+        vec3 p2 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
+        vec3 n2 = vec3(vbuf.vertices[base + 3], vbuf.vertices[base + 4], vbuf.vertices[base + 5]);
+
+        float w = 1.0 - bary.x - bary.y;
+        vec3 geomNorm = normalize(cross(p1 - p0, p2 - p0));
+        vec3 smoothNorm = w * n0 + bary.x * n1 + bary.y * n2;
+        vec3 n = (length(smoothNorm) > 1e-4) ? normalize(smoothNorm) : geomNorm;
+        if (dot(n, rayDir) > 0.0) n = -n;
+        return n;
+    }
+    vec3 normal;
+    if (sceneType == SCENE_OUTDOOR_TERRAIN) {
+        if (primId >= PRIM_TERRAIN_END && primId < PRIM_WATER_END) {
+            normal = vec3(0.0, 0.0, 1.0);
+        } else {
+            uint base = primId * 9u;
+            vec3 p0 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
+            vec3 p1 = vec3(vbuf.vertices[base + 3], vbuf.vertices[base + 4], vbuf.vertices[base + 5]);
+            vec3 p2 = vec3(vbuf.vertices[base + 6], vbuf.vertices[base + 7], vbuf.vertices[base + 8]);
+            normal = normalize(cross(p1 - p0, p2 - p0));
+        }
+    } else {
+        if (primId < PRIM_KNOT_RUST_END) {
+            uint segI = (primId / 48u);
+            float u0 = (float(segI) / 160.0) * 6.283185307;
+            float u1 = (float((segI + 1u) % 160u) / 160.0) * 6.283185307;
+
+            float r0 = (2.0 + 0.8 * cos(3.0 * u0)) * 0.835;
+            vec3 unrot0 = vec3(r0 * cos(2.0 * u0), r0 * sin(2.0 * u0), -0.8 * 0.835 * sin(3.0 * u0));
+            float r1 = (2.0 + 0.8 * cos(3.0 * u1)) * 0.835;
+            vec3 unrot1 = vec3(r1 * cos(2.0 * u1), r1 * sin(2.0 * u1), -0.8 * 0.835 * sin(3.0 * u1));
+
+            const mat3 R_knot = mat3(
+                vec3( 0.929662, -0.239757, -0.279722),
+                vec3( 0.326751,  0.887321,  0.325417),
+                vec3( 0.170182, -0.393927,  0.903249)
+            );
+            vec3 c0 = R_knot * unrot0 + vec3(0.0, 0.0, 0.385);
+            vec3 c1 = R_knot * unrot1 + vec3(0.0, 0.0, 0.385);
+
+            vec3 seg = c1 - c0;
+            float segLen2 = dot(seg, seg);
+            float tSeg = clamp(dot(hitPos - c0, seg) / max(segLen2, 0.00001), 0.0, 1.0);
+            vec3 centerPt = c0 + tSeg * seg;
+
+            normal = normalize(hitPos - centerPt);
+        } else if (primId < PRIM_SPHERE_END) {
+            normal = normalize(hitPos - vec3(-3.242, 0.391, -0.509));
+        } else if (primId < PRIM_PEDESTAL_END) {
+            if (hitPos.z >= -0.658) {
+                normal = vec3(0.0, 0.0, 1.0);
+            } else if (hitPos.z <= -1.050) {
+                normal = vec3(0.0, 0.0, -1.0);
+            } else {
+                normal = normalize(vec3(hitPos.x - (-0.460), hitPos.y - 0.060, 0.0));
+            }
+        } else if (primId < PRIM_SUZANNE_END) {
+            uint base = primId * 9u;
+            vec3 p0 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
+            vec3 p1 = vec3(vbuf.vertices[base + 3], vbuf.vertices[base + 4], vbuf.vertices[base + 5]);
+            vec3 p2 = vec3(vbuf.vertices[base + 6], vbuf.vertices[base + 7], vbuf.vertices[base + 8]);
+            normal = normalize(cross(p1 - p0, p2 - p0));
+        } else if (primId < PRIM_FLOOR_END) {
+            float backCurve = (hitPos.y > 1.0) ? 0.044 * (hitPos.y - 1.0) : 0.0;
+            normal = normalize(vec3(0.0, -backCurve, 1.0));
+        } else {
+            uint base = primId * 9u;
+            vec3 p0 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
+            vec3 p1 = vec3(vbuf.vertices[base + 3], vbuf.vertices[base + 4], vbuf.vertices[base + 5]);
+            vec3 p2 = vec3(vbuf.vertices[base + 6], vbuf.vertices[base + 7], vbuf.vertices[base + 8]);
+            normal = normalize(cross(p1 - p0, p2 - p0));
+        }
+    }
+    if (dot(normal, rayDir) > 0.0) normal = -normal;
+    return normal;
 }
 
 vec3 tonemapACES(vec3 x) {
@@ -280,7 +328,8 @@ vec3 tonemapACES(vec3 x) {
     const float c = 2.43;
     const float d = 0.59;
     const float e = 0.14;
-    return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
+    vec3 mapped = clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
+    return pow(mapped, vec3(1.0 / 2.2));
 }
 
 ivec2 getPixelCoordsMorton8x4(uint linearIdx, uint width, uint height) {
@@ -295,8 +344,6 @@ ivec2 getPixelCoordsMorton8x4(uint linearIdx, uint width, uint height) {
 
     return ivec2(int(tileX * 8u + mx), int(tileY * 4u + my));
 }
-
-
 
 shared uint s_baseTileIndex;
 
@@ -340,102 +387,233 @@ void main() {
             uint py_u = uint(pixelCoord.y);
             uint pixelIdx = px_u + py_u * pc.width;
 
-            vec3 accumRadiance = vec3(0.0);
-            uint sppToRun = max(1u, pc.spp);
+            uint totalSpp = max(1u, pc.spp);
+            uint sampleIdx = pc.sampleIdx;
+            uint rngState = pixelIdx + pc.seed;
+            float jx = (totalSpp == 1u) ? 0.0 : (rand_float(rngState) - 0.5);
+            float jy = (totalSpp == 1u) ? 0.0 : (rand_float(rngState) - 0.5);
+            float px_s = float(px_u) + jx - float(pc.width) * 0.5 + 0.5;
+            float py_s = float(py_u) + jy - halfH + 0.5;
+            vec3 curDir = normalize(camForward + (px_s / halfH * fov) * camRight - (py_s / halfH * fov) * camUp);
+            vec3 curOrigin = camPos;
 
-            for (uint s = 0u; s < sppToRun; ++s) {
-                uint rngState = pixelIdx + pc.seed + s * 7919u;
-                float jx = (sppToRun == 1u) ? 0.0 : (rand_float(rngState) - 0.5);
-                float jy = (sppToRun == 1u) ? 0.0 : (rand_float(rngState) - 0.5);
-                float px_s = float(px_u) + jx - float(pc.width) * 0.5 + 0.5;
-                float py_s = float(py_u) + jy - halfH + 0.5;
-                vec3 curDir = normalize(camForward + (px_s / halfH * fov) * camRight - (py_s / halfH * fov) * camUp);
-                vec3 curOrigin = camPos;
+            threadRays++;
+            rayQueryEXT query;
+            rayQueryInitializeEXT(query, topLevelAS, gl_RayFlagsOpaqueEXT, 0xFF, curOrigin, tMinPrimary, curDir, tMaxPrimary);
+            while (rayQueryProceedEXT(query)) {}
 
-                threadRays++;
-                rayQueryEXT query;
-                rayQueryInitializeEXT(query, topLevelAS, gl_RayFlagsNoneEXT, 0xFF, curOrigin, tMinPrimary, curDir, tMaxPrimary);
-                while (rayQueryProceedEXT(query)) {
-                    if (rayQueryGetIntersectionTypeEXT(query, false) == gl_RayQueryCandidateIntersectionTriangleEXT) {
-                        if (pc.isGltf != 0u) {
-                            uint candTri = rayQueryGetIntersectionPrimitiveIndexEXT(query, false);
-                            uint candMatId = triMatBuf.triangleMats[candTri];
-                            GltfMaterialGpu candMat = matBuf.materials[candMatId];
-                            if (candMat.alphaMode == 1u /* MASK */) {
-                                vec2 candBary = rayQueryGetIntersectionBarycentricsEXT(query, false);
-                                uint b = candTri * 36u;
-                                vec2 uv0 = vec2(vbuf.vertices[b + 10], vbuf.vertices[b + 11]);
-                                vec2 uv1 = vec2(vbuf.vertices[b + 22], vbuf.vertices[b + 23]);
-                                vec2 uv2 = vec2(vbuf.vertices[b + 34], vbuf.vertices[b + 35]);
-                                float cw = 1.0 - candBary.x - candBary.y;
-                                vec2 cuv = cw * uv0 + candBary.x * uv1 + candBary.y * uv2;
-                                float calpha = candMat.baseColorFactor.a;
-                                if (candMat.baseColorTexIdx >= 0) {
-                                    calpha *= sampleTexture(uint(candMat.baseColorTexIdx), cuv).a;
-                                }
-                                if (calpha < candMat.alphaCutoff) {
-                                    continue; // Skip transparent pixel (pass-through)
-                                }
-                            }
-                        }
-                        rayQueryConfirmIntersectionEXT(query);
+            vec3 sampleRadiance = vec3(0.0);
+            if (rayQueryGetIntersectionTypeEXT(query, true) == gl_RayQueryCommittedIntersectionTriangleEXT) {
+                threadHits++;
+                float t = rayQueryGetIntersectionTEXT(query, true);
+                vec3 hitPos = curOrigin + curDir * t;
+                uint primId = rayQueryGetIntersectionPrimitiveIndexEXT(query, true);
+                vec2 rawBary = rayQueryGetIntersectionBarycentricsEXT(query, true);
+                vec3 normal = computeSmoothNormal(pc.sceneType, primId, hitPos, curDir, rawBary);
+
+                float u1 = rand_float(rngState);
+                float u2 = rand_float(rngState);
+                vec3 nextDir = align_to_normal(cosine_sample_hemisphere(u1, u2), normal);
+
+                vec3 albedo = vec3(0.72);
+                vec3 emissive = vec3(0.0);
+                float metallic = 0.0;
+                float roughness = 0.5;
+                float transmission = 0.0;
+                float ior = 1.5;
+                uint archetype = 0u;
+
+                if (pc.isGltf != 0u) {
+                    vec2 bary = unpackUnorm2x16(packUnorm2x16(rawBary));
+                    uint base = primId * 36u;
+                    vec2 uv0 = vec2(vbuf.vertices[base + 10], vbuf.vertices[base + 11]);
+                    vec2 uv1 = vec2(vbuf.vertices[base + 22], vbuf.vertices[base + 23]);
+                    vec2 uv2 = vec2(vbuf.vertices[base + 34], vbuf.vertices[base + 35]);
+                    float w = 1.0 - bary.x - bary.y;
+                    vec2 uv = w * uv0 + bary.x * uv1 + bary.y * uv2;
+                    uint matId = triMatBuf.triangleMats[primId];
+                    GltfMaterialGpu mat = matBuf.materials[matId];
+                    albedo = mat.baseColorFactor.rgb;
+                    if (mat.baseColorTexIdx >= 0) {
+                        albedo *= pow(sampleTexture(uint(mat.baseColorTexIdx), uv).rgb, vec3(2.2));
                     }
+                    if (mat.emissiveTexIdx >= 0) {
+                        emissive = pow(sampleTexture(uint(mat.emissiveTexIdx), uv).rgb, vec3(2.2)) * mat.emissiveFactor.rgb;
+                    }
+                    metallic = mat.metallicFactor;
+                    roughness = mat.roughnessFactor;
+                    transmission = mat.transmissionFactor;
+                    ior = mat.ior;
+                    archetype = mat.archetype;
+                } else {
+                    uint matId = computeMaterialId(pc.sceneType, primId, hitPos, normal);
+                    archetype = getArchetype(matId);
+                    albedo = getSceneArchetypeAlbedo(pc.sceneType, archetype);
                 }
 
-                vec3 sampleRadiance = vec3(0.0);
-                if (rayQueryGetIntersectionTypeEXT(query, true) == gl_RayQueryCommittedIntersectionTriangleEXT) {
-                    threadHits++;
-                    float t = rayQueryGetIntersectionTEXT(query, true);
-                    vec3 hitPos = curOrigin + curDir * t;
-                    uint primId = rayQueryGetIntersectionPrimitiveIndexEXT(query, true);
-                    vec2 rawBary = rayQueryGetIntersectionBarycentricsEXT(query, true);
-                    vec3 normal = computeSmoothNormal(pc.sceneType, primId, hitPos, curDir, rawBary);
+                vec3 directLight = vec3(0.0);
+                vec3 throughput = albedo;
+                vec3 bOrigin = hitPos + normal * (pc.isGltf != 0u ? 0.05 : 0.005);
+                vec3 bDir = nextDir;
 
-                    float u1 = rand_float(rngState);
-                    float u2 = rand_float(rngState);
-                    vec3 nextDir = align_to_normal(cosine_sample_hemisphere(u1, u2), normal);
-
-                    vec3 bOrigin = hitPos + normal * (pc.isGltf != 0u ? 0.05 : 0.005);
-                    vec3 bDir = nextDir;
-
-                    vec3 albedo = vec3(0.72);
-                    vec3 emissive = vec3(0.0);
-                        if (pc.isGltf != 0u) {
-                            vec2 bary = unpackUnorm2x16(packUnorm2x16(rawBary));
-                            uint base = primId * 36u;
-                            vec2 uv0 = vec2(vbuf.vertices[base + 10], vbuf.vertices[base + 11]);
-                            vec2 uv1 = vec2(vbuf.vertices[base + 22], vbuf.vertices[base + 23]);
-                            vec2 uv2 = vec2(vbuf.vertices[base + 34], vbuf.vertices[base + 35]);
-                            float w = 1.0 - bary.x - bary.y;
-                            vec2 uv = w * uv0 + bary.x * uv1 + bary.y * uv2;
-                            uint matId = triMatBuf.triangleMats[primId];
-                            GltfMaterialGpu mat = matBuf.materials[matId];
-                            albedo = mat.baseColorFactor.rgb;
-                            if (mat.baseColorTexIdx >= 0) {
-                                albedo *= pow(sampleTexture(uint(mat.baseColorTexIdx), uv).rgb, vec3(2.2));
+                if (transmission > 0.5 || archetype == 2u) {
+                    vec3 cabinInterior = vec3(0.02, 0.025, 0.03);
+                    vec3 R = reflect(curDir, normal);
+                    vec3 envRefl = evalStudioEnvironment(R);
+                    float cosTheta = clamp(dot(-curDir, normal), 0.0, 1.0);
+                    float F = 0.04 + 0.96 * pow(1.0 - cosTheta, 5.0);
+                    directLight = mix(cabinInterior, envRefl, F);
+                    throughput = vec3(0.0);
+                } else {
+                    if (pc.sceneType == 0u) {
+                        const vec3 studioDir[3] = vec3[3](
+                            normalize(vec3(0.6, 0.8, 0.5)),
+                            normalize(vec3(-0.7, 0.5, 0.4)),
+                            normalize(vec3(-0.2, 0.4, -0.9))
+                        );
+                        const vec3 studioColor[3] = vec3[3](
+                            vec3(1.0, 0.97, 0.92) * 3.8,
+                            vec3(0.75, 0.88, 1.0) * 1.8,
+                            vec3(1.0, 1.0, 1.0) * 2.5
+                        );
+                        for (int i = 0; i < 3; ++i) {
+                            float sNdotL = max(0.0, dot(normal, studioDir[i]));
+                            if (sNdotL > 0.0) {
+                                bool shadowed = traceShadowRay(hitPos, normal, studioDir[i], 5000.0);
+                                if (!shadowed) {
+                                    if (pc.isGltf != 0u) {
+                                        directLight += evaluateCookTorranceGGX(albedo, roughness, metallic, normal, -curDir, studioDir[i], studioColor[i]);
+                                    } else {
+                                        directLight += (albedo / 3.14159) * studioColor[i] * sNdotL;
+                                    }
+                                }
                             }
-                            if (mat.emissiveTexIdx >= 0) {
-                                emissive = pow(sampleTexture(uint(mat.emissiveTexIdx), uv).rgb, vec3(2.2)) * mat.emissiveFactor.rgb;
-                            }
-                        } else {
-                            uint matId = computeMaterialId(pc.sceneType, primId, hitPos, normal);
-                            uint archetype = getArchetype(matId);
-                            albedo = getSceneArchetypeAlbedo(pc.sceneType, archetype);
                         }
-
+                    } else {
                         vec3 sunDir;
                         vec3 sunColor;
                         getSceneSunParams(pc.sceneType, sunDir, sunColor);
 
                         float NdotL = max(0.0, dot(normal, sunDir));
-                        vec3 directLight = vec3(0.0);
                         if (NdotL > 0.0) {
                             bool shadowed = traceShadowRay(hitPos, normal, sunDir, (pc.isGltf != 0u ? 5000.0 : 2000.0));
                             if (!shadowed) {
-                                directLight = (albedo / 3.14159) * sunColor * NdotL;
+                                if (pc.isGltf != 0u) {
+                                    directLight = evaluateCookTorranceGGX(albedo, roughness, metallic, normal, -curDir, sunDir, sunColor);
+                                } else {
+                                    directLight = (albedo / 3.14159) * sunColor * NdotL;
+                                }
                             }
                         }
+                    }
 
+                    if (pc.sceneType == 2u) {
+                        const vec3 lanternPos[3] = vec3[3](
+                            vec3(0.0, 450.0, 0.0),
+                            vec3(-650.0, 250.0, 0.0),
+                            vec3(650.0, 250.0, 0.0)
+                        );
+                        const vec3 lanternColor[3] = vec3[3](
+                            vec3(1.0, 0.85, 0.60) * 2.2,
+                            vec3(1.0, 0.80, 0.50) * 1.8,
+                            vec3(1.0, 0.80, 0.50) * 1.8
+                        );
+                        for (int li = 0; li < 3; ++li) {
+                            vec3 toL = lanternPos[li] - hitPos;
+                            float d2 = dot(toL, toL);
+                            float d = sqrt(d2);
+                            vec3 L = toL / max(d, 0.001);
+                            float l_NdotL = max(0.0, dot(normal, L));
+                            if (l_NdotL > 0.0) {
+                                bool l_shad = traceShadowRay(hitPos, normal, L, d - 0.1);
+                                if (!l_shad) {
+                                    float atten = 1.0 / (1.0 + 0.000004 * d2);
+                                    directLight += (albedo / 3.14159) * lanternColor[li] * atten * l_NdotL;
+                                }
+                            }
+                        }
+                    }
+
+                    if (metallic > 0.1 && u2 < metallic) {
+                        vec3 refl = reflect(curDir, normal);
+                        vec3 jitter = (vec3(u1, u2, fract(u1 * 31.7)) * 2.0 - 1.0) * (roughness * 0.4);
+                        bDir = normalize(refl + jitter);
+                        if (dot(bDir, normal) <= 0.0) bDir = refl;
+                        throughput = mix(vec3(0.04), albedo, metallic);
+                    } else {
+                        bDir = nextDir;
+                        throughput = (1.0 - metallic) * albedo;
+                    }
+                    bOrigin = hitPos + normal * (pc.isGltf != 0u ? 0.05 : 0.005);
+                }
+
+                vec3 indirectRadiance = vec3(0.0);
+                uint maxBounces = (pc.dumpRenders != 0u) ? 2u : pc.bounces;
+                for (uint b = 1; b < maxBounces; ++b) {
+                    threadRays++;
+                    rayQueryEXT bQuery;
+                    rayQueryInitializeEXT(bQuery, topLevelAS, gl_RayFlagsOpaqueEXT, 0xFF, bOrigin, (pc.isGltf != 0u ? 0.05 : 0.005), bDir, tMaxPrimary);
+                    while (rayQueryProceedEXT(bQuery)) {}
+                    if (rayQueryGetIntersectionTypeEXT(bQuery, true) == gl_RayQueryCommittedIntersectionTriangleEXT) {
+                        threadHits++;
+                        float b_t = rayQueryGetIntersectionTEXT(bQuery, true);
+                        vec3 b_hitPos = bOrigin + bDir * b_t;
+                        uint b_primId = rayQueryGetIntersectionPrimitiveIndexEXT(bQuery, true);
+                        vec2 b_bary = rayQueryGetIntersectionBarycentricsEXT(bQuery, true);
+                        vec3 b_normal = computeSmoothNormal(pc.sceneType, b_primId, b_hitPos, bDir, b_bary);
+
+                        vec3 b_albedo = vec3(0.72);
+                        if (pc.isGltf != 0u) {
+                            vec2 b_ubary = unpackUnorm2x16(packUnorm2x16(b_bary));
+                            uint b_base = b_primId * 36u;
+                            vec2 b_uv0 = vec2(vbuf.vertices[b_base + 10], vbuf.vertices[b_base + 11]);
+                            vec2 b_uv1 = vec2(vbuf.vertices[b_base + 22], vbuf.vertices[b_base + 23]);
+                            vec2 b_uv2 = vec2(vbuf.vertices[b_base + 34], vbuf.vertices[b_base + 35]);
+                            float b_w = 1.0 - b_ubary.x - b_ubary.y;
+                            vec2 b_uv = b_w * b_uv0 + b_ubary.x * b_uv1 + b_ubary.y * b_uv2;
+                            uint b_matId = triMatBuf.triangleMats[b_primId];
+                            GltfMaterialGpu b_mat = matBuf.materials[b_matId];
+                            b_albedo = b_mat.baseColorFactor.rgb;
+                            if (b_mat.baseColorTexIdx >= 0) {
+                                b_albedo *= pow(sampleTexture(uint(b_mat.baseColorTexIdx), b_uv).rgb, vec3(2.2));
+                            }
+                        } else {
+                            uint b_matId = computeMaterialId(pc.sceneType, b_primId, b_hitPos, b_normal);
+                            uint b_arch = getArchetype(b_matId);
+                            b_albedo = getSceneArchetypeAlbedo(pc.sceneType, b_arch);
+                        }
+
+                        if (pc.sceneType == 0u) {
+                            const vec3 studioDir[3] = vec3[3](
+                                normalize(vec3(0.6, 0.8, 0.5)),
+                                normalize(vec3(-0.7, 0.5, 0.4)),
+                                normalize(vec3(-0.2, 0.4, -0.9))
+                            );
+                            const vec3 studioColor[3] = vec3[3](
+                                vec3(1.0, 0.97, 0.92) * 3.8,
+                                vec3(0.75, 0.88, 1.0) * 1.8,
+                                vec3(1.0, 1.0, 1.0) * 2.5
+                            );
+                            for (int li = 0; li < 3; ++li) {
+                                float b_sNdotL = max(0.0, dot(b_normal, studioDir[li]));
+                                if (b_sNdotL > 0.0) {
+                                    bool b_shad = traceShadowRay(b_hitPos, b_normal, studioDir[li], 5000.0);
+                                    if (!b_shad) {
+                                        indirectRadiance += throughput * (b_albedo / 3.14159) * studioColor[li] * b_sNdotL;
+                                    }
+                                }
+                            }
+                        } else {
+                            vec3 sunDir, sunColor;
+                            getSceneSunParams(pc.sceneType, sunDir, sunColor);
+                            float b_NdotL = max(0.0, dot(b_normal, sunDir));
+                            if (b_NdotL > 0.0) {
+                                bool b_shadowed = traceShadowRay(b_hitPos, b_normal, sunDir, (pc.isGltf != 0u ? 5000.0 : 2000.0));
+                                if (!b_shadowed) {
+                                    indirectRadiance += throughput * (b_albedo / 3.14159) * sunColor * b_NdotL;
+                                }
+                            }
+                        }
                         if (pc.sceneType == 2u) {
                             const vec3 lanternPos[3] = vec3[3](
                                 vec3(0.0, 450.0, 0.0),
@@ -448,116 +626,54 @@ void main() {
                                 vec3(1.0, 0.80, 0.50) * 1.8
                             );
                             for (int li = 0; li < 3; ++li) {
-                                vec3 toL = lanternPos[li] - hitPos;
-                                float d2 = dot(toL, toL);
-                                float d = sqrt(d2);
-                                vec3 L = toL / max(d, 0.001);
-                                float l_NdotL = max(0.0, dot(normal, L));
-                                if (l_NdotL > 0.0) {
-                                    bool l_shad = traceShadowRay(hitPos, normal, L, d - 0.1);
-                                    if (!l_shad) {
-                                        float atten = 1.0 / (1.0 + 0.000004 * d2);
-                                        directLight += (albedo / 3.14159) * lanternColor[li] * atten * l_NdotL;
+                                vec3 b_toL = lanternPos[li] - b_hitPos;
+                                float bd2 = dot(b_toL, b_toL);
+                                float bd = sqrt(bd2);
+                                vec3 b_L = b_toL / max(bd, 0.001);
+                                float bl_NdotL = max(0.0, dot(b_normal, b_L));
+                                if (bl_NdotL > 0.0) {
+                                    bool bl_shad = traceShadowRay(b_hitPos, b_normal, b_L, bd - 0.1);
+                                    if (!bl_shad) {
+                                        float atten = 1.0 / (1.0 + 0.000004 * bd2);
+                                        indirectRadiance += throughput * (b_albedo / 3.14159) * lanternColor[li] * atten * bl_NdotL;
                                     }
                                 }
                             }
                         }
+                        indirectRadiance += throughput * b_albedo * evalSky(pc.sceneType, b_normal) * 0.25;
 
-                        vec3 throughput = albedo;
-                        vec3 indirectRadiance = vec3(0.0);
-
-                        // Secondary Bounce Path Tracing
-                        for (uint b = 1; b < pc.bounces; ++b) {
-                            threadRays++;
-                            rayQueryEXT bQuery;
-                            rayQueryInitializeEXT(bQuery, topLevelAS, gl_RayFlagsNoneEXT, 0xFF, bOrigin, (pc.isGltf != 0u ? 0.05 : 0.005), bDir, tMaxPrimary);
-                            while (rayQueryProceedEXT(bQuery)) {
-                                if (rayQueryGetIntersectionTypeEXT(bQuery, false) == gl_RayQueryCandidateIntersectionTriangleEXT) {
-                                    if (pc.isGltf != 0u) {
-                                        uint b_candTri = rayQueryGetIntersectionPrimitiveIndexEXT(bQuery, false);
-                                        uint b_candMatId = triMatBuf.triangleMats[b_candTri];
-                                        GltfMaterialGpu b_candMat = matBuf.materials[b_candMatId];
-                                        if (b_candMat.alphaMode == 1u /* MASK */) {
-                                            vec2 b_candBary = rayQueryGetIntersectionBarycentricsEXT(bQuery, false);
-                                            uint b_base = b_candTri * 36u;
-                                            vec2 uv0 = vec2(vbuf.vertices[b_base + 10], vbuf.vertices[b_base + 11]);
-                                            vec2 uv1 = vec2(vbuf.vertices[b_base + 22], vbuf.vertices[b_base + 23]);
-                                            vec2 uv2 = vec2(vbuf.vertices[b_base + 34], vbuf.vertices[b_base + 35]);
-                                            float cw = 1.0 - b_candBary.x - b_candBary.y;
-                                            vec2 cuv = cw * uv0 + b_candBary.x * uv1 + b_candBary.y * uv2;
-                                            float calpha = b_candMat.baseColorFactor.a;
-                                            if (b_candMat.baseColorTexIdx >= 0) {
-                                                calpha *= sampleTexture(uint(b_candMat.baseColorTexIdx), cuv).a;
-                                            }
-                                            if (calpha < b_candMat.alphaCutoff) {
-                                                continue;
-                                            }
-                                        }
-                                    }
-                                    rayQueryConfirmIntersectionEXT(bQuery);
-                                }
-                            }
-
-                            if (rayQueryGetIntersectionTypeEXT(bQuery, true) == gl_RayQueryCommittedIntersectionTriangleEXT) {
-                                threadHits++;
-                                if (b >= 2 && rand_float(rngState) < 0.4) break; // Russian roulette
-                                float b_t = rayQueryGetIntersectionTEXT(bQuery, true);
-                                vec3 b_hitPos = bOrigin + bDir * b_t;
-                                uint b_primId = rayQueryGetIntersectionPrimitiveIndexEXT(bQuery, true);
-                                vec2 b_bary = rayQueryGetIntersectionBarycentricsEXT(bQuery, true);
-                                vec3 b_normal = computeSmoothNormal(pc.sceneType, b_primId, b_hitPos, bDir, b_bary);
-
-                                vec3 b_albedo = vec3(0.72);
-                                if (pc.isGltf != 0u) {
-                                    vec2 b_ubary = unpackUnorm2x16(packUnorm2x16(b_bary));
-                                    uint b_base = b_primId * 36u;
-                                    vec2 b_uv0 = vec2(vbuf.vertices[b_base + 10], vbuf.vertices[b_base + 11]);
-                                    vec2 b_uv1 = vec2(vbuf.vertices[b_base + 22], vbuf.vertices[b_base + 23]);
-                                    vec2 b_uv2 = vec2(vbuf.vertices[b_base + 34], vbuf.vertices[b_base + 35]);
-                                    float b_w = 1.0 - b_ubary.x - b_ubary.y;
-                                    vec2 b_uv = b_w * b_uv0 + b_ubary.x * b_uv1 + b_ubary.y * b_uv2;
-                                    uint b_matId = triMatBuf.triangleMats[b_primId];
-                                    GltfMaterialGpu b_mat = matBuf.materials[b_matId];
-                                    b_albedo = b_mat.baseColorFactor.rgb;
-                                    if (b_mat.baseColorTexIdx >= 0) {
-                                        b_albedo *= pow(sampleTexture(uint(b_mat.baseColorTexIdx), b_uv).rgb, vec3(2.2));
-                                    }
-                                }
-
-                                float b_NdotL = max(0.0, dot(b_normal, sunDir));
-                                if (b_NdotL > 0.0) {
-                                    bool b_shadowed = traceShadowRay(b_hitPos, b_normal, sunDir, (pc.isGltf != 0u ? 5000.0 : 2000.0));
-                                    if (!b_shadowed) {
-                                        indirectRadiance += throughput * (b_albedo / 3.14159) * sunColor * b_NdotL;
-                                    }
-                                }
-
-                                float b_u1 = rand_float(rngState);
-                                float b_u2 = rand_float(rngState);
-                                bDir = align_to_normal(cosine_sample_hemisphere(b_u1, b_u2), b_normal);
-                                bOrigin = b_hitPos + b_normal * (pc.isGltf != 0u ? 0.05 : 0.005);
-                                throughput *= b_albedo;
-                            } else {
-                                indirectRadiance += throughput * evalSky(pc.sceneType, bDir);
-                                break;
-                            }
+                        if (b + 1 < maxBounces) {
+                            if (b >= 2 && rand_float(rngState) < 0.4) break;
+                            throughput *= b_albedo;
+                            float b_u1 = rand_float(rngState);
+                            float b_u2 = rand_float(rngState);
+                            bDir = align_to_normal(cosine_sample_hemisphere(b_u1, b_u2), b_normal);
+                            bOrigin = b_hitPos + b_normal * (pc.isGltf != 0u ? 0.05 : 0.005);
                         }
-
-                        sampleRadiance = directLight + indirectRadiance + emissive;
-                } else {
-                    if (pc.dumpRenders != 0) {
-                        sampleRadiance = evalSky(pc.sceneType, curDir);
+                    } else {
+                        indirectRadiance += throughput * evalSky(pc.sceneType, bDir);
+                        break;
                     }
                 }
-                accumRadiance += sampleRadiance;
+
+                sampleRadiance = emissive + directLight + indirectRadiance;
+            } else {
+                sampleRadiance = evalSky(pc.sceneType, curDir);
             }
 
             if (pc.dumpRenders != 0) {
                 float expGain = (pc.sceneType == 2u) ? 1.6 : 1.0;
-                vec3 finalColor = (accumRadiance / float(sppToRun)) * expGain;
-                fb.pixels[pixelIdx] = vec4(tonemapACES(finalColor), 1.0);
-            } else if (dot(accumRadiance, vec3(1.0)) < -1e30) {
-                results.accumulatedLuminance = accumRadiance.x;
+                if (totalSpp <= 1u) {
+                    fb.pixels[pixelIdx] = vec4(tonemapACES(sampleRadiance * expGain), 1.0);
+                } else if (sampleIdx == 0u) {
+                    fb.pixels[pixelIdx] = vec4(sampleRadiance, 1.0);
+                } else if (sampleIdx < totalSpp - 1u) {
+                    fb.pixels[pixelIdx] += vec4(sampleRadiance, 0.0);
+                } else {
+                    vec3 total = fb.pixels[pixelIdx].rgb + sampleRadiance;
+                    vec3 avg = (total / float(totalSpp)) * expGain;
+                    fb.pixels[pixelIdx] = vec4(tonemapACES(avg), 1.0);
+                }
             }
         }
     }

@@ -75,6 +75,7 @@ public:
   void Teardown() override;
 
   BenchmarkResult GetResult(uint32_t config_idx = 0) const override;
+  bool ValidateResults(uint32_t config_idx = 0) const override;
   int GetSortWeight(uint32_t config_idx = 0) const override;
   uint32_t GetExpectedKernelCount() const override { return 22; }
 
@@ -171,9 +172,22 @@ public:
     if (config_idx == 5 || config_idx == 8 || config_idx == 11 ||
         config_idx == 18 || config_idx == 21 || config_idx == 24 ||
         config_idx == 32 || config_idx == 34) {
-      return "VK_EXT_device_generated_commands unsupported by device/driver";
+      if (!info.dgcSupported) {
+        return "VK_EXT_device_generated_commands unsupported by device/driver";
+      }
+#ifdef HAVE_VULKAN
+      if (context && context->getBackend() == ComputeBackend::Vulkan) {
+        const VulkanContext *vc = static_cast<const VulkanContext *>(context);
+        if (!vc->isDGCSupported()) {
+          return "VK_EXT_device_generated_commands unsupported by device/driver";
+        }
+      }
+#endif
     }
-    return GetSupportNote(info, context);
+    if (!IsSupported(info, context)) {
+      return GetSupportNote(info, context);
+    }
+    return "";
   }
   SupportLimitation GetConfigSupportLimitation(uint32_t config_idx) const override {
     if (config_idx == 1 || config_idx == 4 || config_idx == 7 || config_idx == 10 || config_idx == 20 || config_idx == 30) {
@@ -304,6 +318,7 @@ private:
   void buildAS();
 
   std::vector<VulkanContext::IndirectBatchEntry> materialBatches;
+  std::vector<VulkanContext::IndirectBatchEntry> primaryMaterialBatches;
   std::vector<VulkanContext::IndirectBatchEntry> materialBatchesBreakdown;
   std::vector<VulkanContext::IndirectBatchEntry> bounceBatches;
   std::vector<VulkanContext::IndirectBatchEntry> octantBatches;

@@ -57,6 +57,10 @@ public:
     void destroyTexture(TextureResource& tex);
     uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const;
 
+    ImFont* getRegularFont() const { return m_fontRegular; }
+    ImFont* getBoldFont() const { return m_fontBold; }
+    ImFont* getMonoFont() const { return m_fontMono; }
+
 private:
     bool setupVulkan();
     void setupVulkanWindow(int width, int height);
@@ -83,6 +87,9 @@ private:
     float m_displayScale{1.0f};
     float m_builtFontScale{1.0f};
     float m_pendingFontScale{0.0f};
+    ImFont* m_fontRegular{nullptr};
+    ImFont* m_fontBold{nullptr};
+    ImFont* m_fontMono{nullptr};
     VkClearColorValue m_clearColor{{0.08f, 0.09f, 0.12f, 1.00f}};
 };
 

@@ -518,7 +518,7 @@ vec3 evaluateGltfPbrInternal(
         }
 
         // Ray-Traced Ambient Occlusion (RTAO) with 4 stratified rays
-        float rtao = enableShadows ? computeRTAO(hitPos, geomNormal, rng, 4, 350.0) : 1.0;
+        float rtao = computeRTAO(hitPos, geomNormal, rng, 4, 350.0);
         ao *= rtao;
         if (directOnly) {
             return totalRadiance * ao + emissive;
@@ -593,7 +593,7 @@ vec3 evaluateGltfPbrInternal(
         }
 
         // Studio RTAO (Ray-Traced Ambient Occlusion)
-        float rtao = enableShadows ? computeRTAO(hitPos, geomNormal, rng, 4, 30.0) : 1.0;
+        float rtao = computeRTAO(hitPos, geomNormal, rng, 4, 30.0);
         ao *= rtao;
         if (directOnly) {
             return totalRadiance + emissive;
@@ -621,7 +621,7 @@ vec3 evaluateGltfPbrInternal(
         }
 
         // RTAO (Ray-Traced Ambient Occlusion) under canopy and crevices
-        float rtao = enableShadows ? computeRTAO(hitPos, geomNormal, rng, 4, 35.0) : 1.0;
+        float rtao = computeRTAO(hitPos, geomNormal, rng, 4, 35.0);
         ao *= rtao;
         if (directOnly) {
             return evaluateCookTorranceGGX(baseColor, roughness, metallic, N, V, sunDir, sunColor * sunShadow) * ao + emissive;
@@ -815,7 +815,7 @@ void getMultiLight(uint idx, uint totalLights, uint sceneType, out vec3 lightDir
 
         float t = float(idx) / float(totalLights);
         vec3 col = mix(vec3(1.0, 0.88, 0.70), vec3(0.75, 0.88, 1.0), fract(t * 5.0));
-        lightColor = col * (160.0 / float(totalLights));
+        lightColor = col * (7.0 / float(totalLights));
     }
 }
 

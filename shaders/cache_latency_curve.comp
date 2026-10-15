@@ -21,7 +21,6 @@ void main() {
         i++;
     } while (i < iters);
 
-    if (index == 0xDEADBEEFu) {
-        Buffer.data[0] = index;
-    }
+    // Eliminate DCE: store terminal index to unchased word (+1)
+    Buffer.data[pc.startIndex + 1] = index;
 }

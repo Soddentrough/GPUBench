@@ -9,7 +9,7 @@ extern "C" __global__ void run_benchmark(float* data) {
     using float8 = __attribute__((ext_vector_type(8))) float;
     using short8 = __attribute__((ext_vector_type(8))) short;
 
-    const short* sdata = reinterpret_cast<const short*>(data);
+    const short* sdata = reinterpret_cast<const short*>(data) + 2097152u;
     short8 a;
     short8 b;
     for (int i = 0; i < 8; ++i) {
@@ -45,7 +45,7 @@ extern "C" __global__ void run_benchmark(float* data) {
     using float8 = __attribute__((ext_vector_type(8))) float;
     using short16 = __attribute__((ext_vector_type(16))) short;
 
-    const short* sdata = reinterpret_cast<const short*>(data);
+    const short* sdata = reinterpret_cast<const short*>(data) + 2097152u;
     short16 a;
     short16 b;
     for (int i = 0; i < 16; ++i) {

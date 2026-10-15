@@ -1,0 +1,23 @@
+#version 450
+
+layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+
+struct VkDispatchIndirectCommand {
+    uint x;
+    uint y;
+    uint z;
+    uint activeCount;
+    uint workgroupsFinished;
+};
+
+layout(set = 0, binding = 0) buffer IndirectCommandBuffer {
+    VkDispatchIndirectCommand cmd;
+};
+
+void main() {
+    cmd.x = 0u;
+    cmd.y = 0u;
+    cmd.z = 0u;
+    cmd.activeCount = 0u;
+    cmd.workgroupsFinished = 0u;
+}

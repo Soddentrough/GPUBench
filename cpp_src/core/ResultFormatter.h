@@ -75,6 +75,11 @@ public:
   void print();
   const std::vector<ResultData>& getResults() const { return results; }
 
+  void setShowPower(bool enable) { showPower = enable; }
+  bool getShowPower() const { return showPower; }
+  void setShowTelemetry(bool enable) { showTelemetry = enable; }
+  bool getShowTelemetry() const { return showTelemetry; }
+
   static void printComparison(const ImportedRun &runA, const ImportedRun &runB);
   static void printComparison(const std::vector<ImportedRun> &runs);
 
@@ -83,6 +88,8 @@ public:
 
 private:
   std::vector<ResultData> results;
+  bool showPower = false;
+  bool showTelemetry = false;
 };
 
 double computeResultValue(const ResultData &r);

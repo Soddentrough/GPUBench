@@ -100,3 +100,22 @@ BenchmarkResult Int4Bench::GetResult(uint32_t config_idx) const {
   uint64_t num_ops = muladds * 8192 * 32768;
   return {num_ops, 0.0};
 }
+
+bool Int4Bench::ValidateResults(uint32_t config_idx) const {
+  (void)config_idx;
+  if (!context) return false;
+  // If INT4 is not supported on this backend/hardware, pass validation
+  if (!matrixKernel || !buffer) return true;
+
+  std::vector<int32_t> hostOut(64, 0);
+  try {
+    context->readBuffer(buffer, 0, hostOut.size() * sizeof(int32_t), hostOut.data());
+    bool anyNonZero = false;
+    for (int32_t v : hostOut) {
+      if (v != 0) anyNonZero = true;
+    }
+    return anyNonZero;
+  } catch (...) {
+    return false;
+  }
+}

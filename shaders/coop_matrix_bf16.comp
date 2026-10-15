@@ -13,7 +13,8 @@ void main() {
     coopmat<bfloat16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseA> matA;
     coopmat<bfloat16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseB> matB;
 
-    float seed = float(buf.data[gl_WorkGroupID.x & 1023u]);
+    uint loadOffset = 2097152u + (gl_WorkGroupID.x & 1023u) * 256u;
+    float seed = float(buf.data[loadOffset]);
     coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC0 = coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(seed * 1.0);
     coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC1 = coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(seed * 2.0);
     coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC2 = coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(seed * 3.0);
@@ -23,8 +24,8 @@ void main() {
     coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC6 = coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(seed * 7.0);
     coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC7 = coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(seed * 8.0);
 
-    coopMatLoad(matA, buf.data, 0u, 16u, 0);
-    coopMatLoad(matB, buf.data, 0u, 16u, 0);
+    coopMatLoad(matA, buf.data, loadOffset, 16u, 0);
+    coopMatLoad(matB, buf.data, loadOffset, 16u, 0);
 
     for (int i = 0; i < 4096; ++i) {
         matC0 = coopMatMulAdd(matA, matB, matC0);

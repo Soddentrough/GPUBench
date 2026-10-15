@@ -749,7 +749,7 @@ void GuiApp::setupDarkTheme(float scale) {
 void GuiApp::initializeBenchmarkCategories() {
     m_categories.clear();
 
-    // 1. [Compute] (4 subgroups, 35 tests)
+    // 1. [Compute] (4 subgroups, 34 tests)
     {
         BenchmarkCategory cat;
         cat.name = "Compute";
@@ -759,21 +759,20 @@ void GuiApp::initializeBenchmarkCategories() {
         sub.name = "Compute Precision";
         sub.component = "Compute";
         sub.engineId = "Compute";
-        sub.description = "Peak floating-point and integer vector/matrix throughput (FP64 down to INT4)";
+        sub.description = "Peak floating-point and integer vector/matrix throughput (FP64 down to INT4; capability-probed)";
         sub.items = {
             {"FP64", "FP64", "FP64 Double Precision", "Compute", "TFLOPS", "64-bit IEEE 754 floating-point peak throughput", true, 0},
             {"FP32", "FP32", "FP32 Single Precision", "Compute", "TFLOPS", "32-bit floating-point peak TFLOPS (dual-issue FMA)", true, 0},
             {"FP16", "FP16", "FP16 Half Precision - Vector", "Compute", "TFLOPS", "Packed 16-bit half-precision vector arithmetic", true, 0},
             {"FP16", "FP16", "FP16 Half Precision - Matrix (WMMA)", "Compute", "TFLOPS", "Cooperative matrix / tensor half-precision throughput", true, 1},
-            {"BF16", "BF16", "BF16 Bfloat16 - Vector", "Compute", "TFLOPS", "Packed 16-bit bfloat16 vector arithmetic", true, 0},
-            {"BF16", "BF16", "BF16 Bfloat16 - Matrix (WMMA)", "Compute", "TFLOPS", "Cooperative matrix / tensor bfloat16 throughput", true, 1},
+            {"BF16", "BF16", "BF16 Bfloat16 - Vector", "Compute", "TFLOPS", "Packed 16-bit bfloat16 vector arithmetic (v_dot2_bf16_bf16 / v_dot2_f32_bf16; requires VK_KHR_shader_bfloat16 on Vulkan or ROCm BF16 support)", true, 0},
+            {"BF16", "BF16", "BF16 Bfloat16 - Matrix (WMMA)", "Compute", "TFLOPS", "Cooperative matrix / tensor bfloat16 throughput (16x16x16 WMMA; requires VK_KHR_cooperative_matrix + VK_KHR_shader_bfloat16 or ROCm WMMA)", true, 1},
             {"FP8", "FP8", "FP8 Micro-Float - Matrix (WMMA)", "Compute", "TFLOPS", "E4M3 / E5M2 8-bit floating point cooperative matrix ops", true, 0},
-            {"FP6", "FP6", "FP6 Micro-Float - Vector", "Compute", "TOPS", "Sub-byte 6-bit quantized floating point throughput (SPV_NV_float6)", true, 0},
-            {"FP4", "FP4", "FP4 Micro-Float - Vector", "Compute", "TOPS", "Sub-byte 4-bit quantized floating point throughput", true, 0},
+            {"FP6", "FP6", "FP6 Micro-Float - Vector", "Compute", "TOPS", "Sub-byte 6-bit quantized floating point throughput (requires native NVIDIA SPV_NV_float6 extension; reports UNSUPPORTED otherwise)", true, 0},
+            {"FP4", "FP4", "FP4 Micro-Float - Vector", "Compute", "TOPS", "Sub-byte 4-bit quantized floating point throughput (requires native FP4 compute units such as CDNA4/gfx950+; reports UNSUPPORTED otherwise)", true, 0},
             {"INT8", "INT8", "INT8 Integer - Vector (DP4A)", "Compute", "TOPS", "INT8 dot product (DP4A) vector instructions", true, 0},
             {"INT8", "INT8", "INT8 Integer - Matrix (WMMA)", "Compute", "TOPS", "INT8 cooperative matrix / WMMA tensor throughput", true, 1},
-            {"INT4", "INT4", "INT4 Integer - Vector", "Compute", "TOPS", "Sub-byte 4-bit integer packed vector operations", true, 0},
-            {"INT4", "INT4", "INT4 Integer - Matrix (WMMA)", "Compute", "TOPS", "Sub-byte 4-bit integer matrix core throughput", true, 1}
+            {"INT4", "INT4", "INT4 Integer - Matrix (WMMA)", "Compute", "TOPS", "Sub-byte 4-bit integer matrix core throughput (native 16x16x16 iu4 WMMA on ROCm RDNA 4; reports UNSUPPORTED on Vulkan/OpenCL)", true, 0}
         };
         cat.subgroups.push_back(sub);
 
@@ -900,17 +899,17 @@ void GuiApp::initializeBenchmarkCategories() {
         cat.subgroups.push_back({"Primary & Full Frame Ray Tracing", "Ray Tracing", "RayScheduling", "Primary camera ray tracing and full-frame rendering across dispatch methods", {
             {"RayScheduling", "Scene Ray Tracing (PBR)", "Primary Rays (Compute Megakernel)", "Ray Tracing", "MRays/s", "Traces initial camera rays into the scene using a standard compute shader", true, 17},
             {"RayScheduling", "Scene Ray Tracing (PBR)", "Primary Rays (RTP)", "Ray Tracing", "MRays/s", "Traces initial camera rays using dedicated hardware ray tracing pipelines", true, 29},
-            {"RayScheduling", "Scene Ray Tracing (PBR)", "Primary Rays (RTP + SER)", "Ray Tracing", "MRays/s", "Traces camera rays with hardware reordering to group similar rays and maximize core efficiency", true, 30},
+            {"RayScheduling", "Scene Ray Tracing (PBR)", "Primary Rays (RTP + SER)", "Ray Tracing", "MRays/s", "Traces camera rays with hardware reordering to group similar rays and maximize core efficiency. Requires VK_EXT_ray_tracing_invocation_reorder extension (reports UNSUPPORTED when unavailable).", true, 30},
             {"RayScheduling", "Scene Ray Tracing (PBR)", "Primary Rays (Wavefront - DGC)", "Ray Tracing", "MRays/s", "Traces camera rays using GPU work queues that group active work to maximize utilization", true, 18},
             {"RayScheduling", "Total Scene Render", "Full Frame (Megakernel)", "Ray Tracing", "MRays/s", "Renders complete frames with full lighting and shadows using standard compute shaders", true, 9},
-            {"RayScheduling", "Total Scene Render", "Full Frame (RTP + SER)", "Ray Tracing", "MRays/s", "Renders complete frames using dedicated ray tracing hardware and ray reordering", true, 10},
+            {"RayScheduling", "Total Scene Render", "Full Frame (RTP + SER)", "Ray Tracing", "MRays/s", "Renders complete frames using dedicated ray tracing hardware and ray reordering. Requires VK_EXT_ray_tracing_invocation_reorder extension (reports UNSUPPORTED when unavailable).", true, 10},
             {"RayScheduling", "Total Scene Render", "Full Frame (DGC)", "Ray Tracing", "MRays/s", "Renders complete frames using dynamic GPU-driven work queues", true, 11}
         }});
 
         // Subgroup 3: Scene Path Tracing (6 tests)
         cat.subgroups.push_back({"Scene Path Tracing", "Ray Tracing", "RayScheduling", "Multi-bounce diffuse path tracing and high-sample stress workloads", {
             {"RayScheduling", "Scene Path Tracing (Multi-Bounce)", "Path Tracing (1 SPP) (Megakernel)", "Ray Tracing", "MRays/s", "Calculates realistic indirect light bounces using a standard all-in-one compute shader", true, 3},
-            {"RayScheduling", "Scene Path Tracing (Multi-Bounce)", "Path Tracing (1 SPP) (RTP + SER)", "Ray Tracing", "MRays/s", "Calculates light bounces using dedicated ray tracing cores with hardware ray reordering", true, 4},
+            {"RayScheduling", "Scene Path Tracing (Multi-Bounce)", "Path Tracing (1 SPP) (RTP + SER)", "Ray Tracing", "MRays/s", "Calculates light bounces using dedicated ray tracing cores with hardware ray reordering. Requires VK_EXT_ray_tracing_invocation_reorder extension (reports UNSUPPORTED when unavailable).", true, 4},
             {"RayScheduling", "Scene Path Tracing (Multi-Bounce)", "Path Tracing (1 SPP) (DGC)", "Ray Tracing", "MRays/s", "Calculates light bounces by grouping active rays into queues to keep GPU cores fully utilized", true, 5},
             {"RayScheduling", "Scene Path Tracing (Multi-Bounce)", "Path Tracing (1 SPP) (Dynamic Load Balancing)", "Ray Tracing", "MRays/s", "Calculates light bounces using persistent threads that dynamically pull rays from a shared work queue", true, 25},
             {"RayScheduling", "Scene Path Tracing (16 SPP)", "Path Tracing (16 SPP) (Megakernel)", "Ray Tracing", "MRays/s", "High-quality path tracing (16 samples per pixel) using a standard compute shader", true, 23},
@@ -920,33 +919,33 @@ void GuiApp::initializeBenchmarkCategories() {
         // Subgroup 4: Pipeline Stages & Scheduling (22 tests)
         cat.subgroups.push_back({"Pipeline Stages & Scheduling", "Ray Tracing", "RayScheduling", "Isolated rendering pipeline phases, shadows, shading, and queue compaction", {
             {"RayScheduling", "Directional Shadows", "Shadows - Single Light (Megakernel)", "Ray Tracing", "MRays/s", "Tests shadow ray performance for a single light source using standard compute shaders", true, 19},
-            {"RayScheduling", "Directional Shadows", "Shadows - Single Light (RTP + SER)", "Ray Tracing", "MRays/s", "Tests shadow ray performance for a single light using dedicated ray tracing hardware and reordering", true, 20},
+            {"RayScheduling", "Directional Shadows", "Shadows - Single Light (RTP + SER)", "Ray Tracing", "MRays/s", "Tests shadow ray performance for a single light using dedicated ray tracing hardware and reordering. Requires VK_EXT_ray_tracing_invocation_reorder extension (reports UNSUPPORTED when unavailable).", true, 20},
             {"RayScheduling", "Directional Shadows", "Shadows - Single Light (DGC)", "Ray Tracing", "MRays/s", "Tests shadow ray performance for a single light using dynamic GPU work queues", true, 21},
             {"RayScheduling", "Directional Shadows", "Shadows - Multi-Light (3 Lights, DGC)", "Ray Tracing", "MRays/s", "Tests shadow ray performance across 3 light sources using dynamic GPU work queues", true, 22},
             {"RayScheduling", "Multi-Light Evaluation", "Multi-Light Shading - Single Light (Megakernel)", "Ray Tracing", "MRays/s", "Evaluates material surface shading under a single light source using standard compute shaders", true, 31},
             {"RayScheduling", "Multi-Light Evaluation", "Multi-Light Shading - Single Light (DGC)", "Ray Tracing", "MRays/s", "Evaluates material surface shading under a single light source using dynamic work queues", true, 32},
             {"RayScheduling", "Multi-Light Evaluation", "Multi-Light Shading - 128 Lights (Megakernel)", "Ray Tracing", "MRays/s", "Stresses GPU cores by evaluating material shading across 128 unbinned lights in a single pass", true, 33},
-            {"RayScheduling", "Multi-Light Evaluation", "Multi-Light Shading - 128 Lights (DGC Light Binning)", "Ray Tracing", "MRays/s", "Groups 128 light sources into coherent batches to optimize shading performance", true, 34},
-            {"RayScheduling", "Material Shading", "Material (Megakernel)", "Ray Tracing", "MHits/s", "Evaluates realistic surface materials (metal, roughness, glass) in a standard compute pass", true, 0},
-            {"RayScheduling", "Material Shading", "Material (RTP + SER)", "Ray Tracing", "MHits/s", "Evaluates surface materials using dedicated ray tracing closest-hit shaders and ray reordering", true, 1},
-            {"RayScheduling", "Material Shading", "Material (DGC)", "Ray Tracing", "MHits/s", "Evaluates surface materials by sorting hits into batches to reduce shader divergence", true, 2},
+            {"RayScheduling", "Multi-Light Evaluation", "Multi-Light Shading - 128 Lights (DGC Light Binning)", "Ray Tracing", "MRays/s", "Compacts active surface hits via DGC and evaluates 128 lights in 8x16 batched passes, eliminating sky-lane divergence", true, 34},
+            {"RayScheduling", "Material Shading", "Material (Megakernel)", "Ray Tracing", "MHits/s", "Evaluates 8 distinct surface BSDF archetypes (car paint, jade SSS, glass, velvet, rust, floor, gold, chrome) in a single monolithic compute pass", true, 0},
+            {"RayScheduling", "Material Shading", "Material (RTP + SER)", "Ray Tracing", "MHits/s", "Evaluates 8 surface BSDF archetypes using dedicated ray tracing closest-hit shaders and hardware SER reordering. Requires VK_EXT_ray_tracing_invocation_reorder extension (reports UNSUPPORTED when unavailable).", true, 1},
+            {"RayScheduling", "Material Shading", "Material (DGC)", "Ray Tracing", "MHits/s", "Evaluates 8 surface BSDF archetypes by dispatching specialized per-material micro-kernels via DGC", true, 2},
             {"RayScheduling", "Incoherent Ray Tracing", "Incoherent Rays (Megakernel)", "Ray Tracing", "MRays/s", "Diffuse secondary rays from real scene hits, traced with no reordering: the unmitigated baseline. Compare the three items to see what each technique recovers", true, 6},
-            {"RayScheduling", "Incoherent Ray Tracing", "Incoherent Rays (RTP + SER)", "Ray Tracing", "MRays/s", "Same incoherent bounce rays, re-binned by hardware ray reordering (SER): measures what SER recovers from the worst-case divergence", true, 7},
+            {"RayScheduling", "Incoherent Ray Tracing", "Incoherent Rays (RTP + SER)", "Ray Tracing", "MRays/s", "Same incoherent bounce rays, re-binned by hardware ray reordering (SER): measures what SER recovers from the worst-case divergence. Requires VK_EXT_ray_tracing_invocation_reorder extension (reports UNSUPPORTED when unavailable).", true, 7},
             {"RayScheduling", "Incoherent Ray Tracing", "Incoherent Rays (DGC)", "Ray Tracing", "MRays/s", "Same incoherent bounce rays, classified into directional octants and compacted into GPU work queues: measures what DGC recovers", true, 8},
             {"RayScheduling", "Traversal Ordering & Coherence", "Linear 1D Scanline", "Ray Tracing", "MRays/s", "Traces rays in simple row-by-row order, serving as a baseline for ray order comparisons", true, 12},
             {"RayScheduling", "Traversal Ordering & Coherence", "2D Screen Tiled (8x4)", "Ray Tracing", "MRays/s", "Traces rays in small 8x4 pixel rectangular blocks to improve cache hit rates", true, 14},
             {"RayScheduling", "Traversal Ordering & Coherence", "2D Morton (8x4)", "Ray Tracing", "MRays/s", "Traces rays following an 8x4 Z-order curve to maximize spatial cache locality", true, 15},
             {"RayScheduling", "Traversal Ordering & Coherence", "2D Morton (4x8)", "Ray Tracing", "MRays/s", "Traces rays following a 4x8 Z-order curve to test directional cache preference", true, 16},
-            {"RayScheduling", "Wavefront Stream Compaction", "Wave Ballot Compaction", "Ray Tracing", "MRecords/s", "Tests how fast GPU compute units can filter and compact active threads using wave voting", true, 13},
-            {"RayScheduling", "Wavefront Stream Compaction", "Queue Compaction (Single-Pass)", "Ray Tracing", "MRecords/s", "Measures the speed of removing terminated rays from active queues in a single GPU pass", true, 26},
-            {"RayScheduling", "Wavefront Stream Compaction", "Queue Compaction Throughput", "Ray Tracing", "MRecords/s", "Measures maximum rate of sorting and packing active rays into queues for the next pass", true, 28},
-            {"RayScheduling", "Alpha Cutout Divergence", "Traversal Divergence (Alpha Cutout)", "Ray Tracing", "MRays/s", "Stresses ray traversal with transparent foliage (leaves and grass) requiring repeated opacity tests", true, 27}
+            {"RayScheduling", "Wavefront Stream Compaction", "Wave Ballot Compaction", "Ray Tracing", "MRecords/s", "Traces primary rays and uses subgroupBallot wave voting to bin hits into 8 material queues (16B records)", true, 13},
+            {"RayScheduling", "Wavefront Stream Compaction", "Queue Compaction (Single-Pass)", "Ray Tracing", "MRecords/s", "Traces primary rays, filters out sky misses, and writes 128-byte expanded hit state records to a unified queue", true, 26},
+            {"RayScheduling", "Wavefront Stream Compaction", "Queue Compaction Throughput", "Ray Tracing", "MRecords/s", "Traces primary rays, filters out sky misses, and writes 32-byte octahedrally-packed hit records at peak bandwidth", true, 28},
+            {"RayScheduling", "Alpha Cutout Divergence", "Traversal Divergence (Alpha Cutout)", "Ray Tracing", "MRays/s", "Stresses ray traversal with procedural alpha-cutout masks requiring repeated candidate triangle evaluation and BVH re-entry", true, 27}
         }});
 
         // Subgroup 5: Hardware BVH & Divergence Stress (12 tests)
-        cat.subgroups.push_back({"Hardware BVH & Divergence Stress", "Ray Tracing", "RayRawTraversal", "Hardware ray-box, triangle traversal, alpha foliage, and SIMD divergence", {
-            {"RayRawTraversal", "Hardware BVH Traversal", "Coherent Triangles", "Ray Tracing", "MRays/s", "Measures raw hardware ray-triangle test speed with parallel, orderly rays", true, 0},
-            {"RayRawTraversal", "Hardware BVH Traversal", "Deep Box Stress", "Ray Tracing", "MRays/s", "Stresses hardware ray-box intersection cores with deeply nested bounding boxes", true, 1},
+        cat.subgroups.push_back({"Hardware BVH & Divergence Stress", "Ray Tracing", "RayRawTraversal", "Hardware ray-box (synthetic 64-AABB model), triangle traversal, alpha foliage, and SIMD divergence", {
+            {"RayRawTraversal", "Hardware BVH Traversal", "Coherent Triangles", "Ray Tracing", "MRays/s", "Measures raw hardware BVH traversal speed with parallel rays terminating immediately on Layer 0 (TerminateOnFirstHitEXT) with 0% root misses.", true, 0},
+            {"RayRawTraversal", "Hardware BVH Traversal", "Deep Box Stress", "Ray Tracing", "MRays/s", "Stresses hardware BVH traversal across 128 stratified triangle layers (262K tris), traversing all 128 layers before committing. Evaluates internal node traversal using a synthetic 64-AABB model (reporting Box GIS/s under idealized occupancy).", true, 1},
             {"RayIntersect", "Intersection Tests", "Ray-Triangle", "Ray Tracing", "MRays/s", "Pure hardware test measuring maximum ray-triangle intersection tests per second", true, 0},
             {"RayIntersect", "Intersection Tests", "Ray-Box", "Ray Tracing", "MRays/s", "Pure hardware test measuring maximum bounding box (AABB) intersection tests per second", true, 1},
             {"RayAnyHit", "Alpha-Tested Geometry", "100% Solid (Any-Hit Baseline)", "Ray Tracing", "MRays/s", "Baseline opacity test where all geometry is fully solid with no transparency", true, 0},
@@ -1031,25 +1030,25 @@ void GuiApp::applyVisualizationMetadata() {
 
         // ---- RayScheduling: material shading (0-2) ----
         {"RayScheduling", 0, {"assets/thumbnails/thumb_material_lineup.png", "",
-            "Five BSDF archetypes (car paint, subsurface, velvet, glass, rust) shaded per hit", 16.0f/9.0f, 2, 0}},
+            "Eight BSDF archetypes (car paint, jade SSS, glass, velvet, rust, floor, gold, chrome) shaded per hit", 16.0f/9.0f, 2, 0}},
         {"RayScheduling", 1, {"assets/thumbnails/thumb_material_lineup.png", "",
-            "Closest-hit shaders reordered by hardware SER into uniform material bins, removing wavefront divergence", 16.0f/9.0f, 2, 0}},
+            "Closest-hit shaders reordered by hardware SER (requires VK_EXT_ray_tracing_invocation_reorder) into 8 uniform material bins, removing wavefront divergence", 16.0f/9.0f, 2, 0}},
         {"RayScheduling", 2, {"assets/thumbnails/thumb_material_lineup.png", "",
-            "DGC sorts hits into material-coherent work queues before shading dispatch", 16.0f/9.0f, 2, 0}},
+            "DGC sorts hits into 8 material-coherent work queues and dispatches specialized PSOs", 16.0f/9.0f, 2, 0}},
 
         // ---- RayScheduling: path tracing (3-5, 25: 1 SPP, 23-24: 16 SPP) ----
-        {"RayScheduling", 3, {"assets/thumbnails/thumb_{scene}_stage6_indirect.png", "",
-            "Multi-bounce diffuse indirect light: each bounce re-enters the BVH with incoherent directions", 16.0f/9.0f, 1, 5}},
-        {"RayScheduling", 4, {"assets/thumbnails/thumb_{scene}_stage6_indirect.png", "",
-            "Secondary bounces traced on hardware ray cores with hardware reordering of incoherent rays", 16.0f/9.0f, 1, 5}},
-        {"RayScheduling", 5, {"assets/thumbnails/thumb_{scene}_stage6_indirect.png", "",
-            "Bounce rays grouped into GPU work queues; terminated rays compacted out each iteration", 16.0f/9.0f, 1, 5}},
-        {"RayScheduling", 25, {"assets/thumbnails/thumb_{scene}_stage6_indirect.png", "",
-            "Persistent workgroups dynamically claim bounce rays from an atomic global counter to balance load", 16.0f/9.0f, 1, 5}},
-        {"RayScheduling", 23, {"assets/thumbnails/thumb_{scene}_stage6_indirect.png", "",
-            "16 samples per pixel: 16x the bounce rays of 1 SPP, converging the noisy indirect estimate", 16.0f/9.0f, 1, 5}},
-        {"RayScheduling", 24, {"assets/thumbnails/thumb_{scene}_stage6_indirect.png", "",
-            "16 SPP with DGC: per-sample work queues keep cores saturated across the extra bounces", 16.0f/9.0f, 1, 5}},
+        {"RayScheduling", 3, {"assets/thumbnails/thumb_{scene}_pathtracing_1spp.png", "",
+            "Full multi-bounce path tracing (1 SPP): direct sun/sky + stochastic indirect GI bounces in one megakernel", 16.0f/9.0f, 1, 5}},
+        {"RayScheduling", 4, {"assets/thumbnails/thumb_{scene}_pathtracing_1spp.png", "",
+            "Multi-bounce path tracing (1 SPP) on hardware ray tracing pipelines with SER coherence reordering (requires VK_EXT_ray_tracing_invocation_reorder)", 16.0f/9.0f, 1, 5}},
+        {"RayScheduling", 5, {"assets/thumbnails/thumb_{scene}_pathtracing_1spp.png", "",
+            "Multi-bounce path tracing (1 SPP) via DGC: active rays are compacted into ping-pong queues each bounce", 16.0f/9.0f, 1, 5}},
+        {"RayScheduling", 25, {"assets/thumbnails/thumb_{scene}_pathtracing_1spp.png", "",
+            "Persistent workgroups dynamically claim 8x4 Morton tiles from a global atomic queue to balance multi-bounce load", 16.0f/9.0f, 1, 5}},
+        {"RayScheduling", 23, {"assets/thumbnails/thumb_{scene}_pathtracing_16spp.png", "",
+            "16-sample-per-pixel multi-bounce path tracing: 16x the bounce rays of 1 SPP for converged global illumination", 16.0f/9.0f, 1, 5}},
+        {"RayScheduling", 24, {"assets/thumbnails/thumb_{scene}_pathtracing_16spp.png", "",
+            "16 SPP multi-bounce path tracing with DGC: per-bounce work queues keep cores saturated across all 16 samples", 16.0f/9.0f, 1, 5}},
 
         // ---- RayScheduling: incoherent GI (6-8) - technique comparison ----
         {"RayScheduling", 6, {"", "incoherent_naive",
@@ -1079,21 +1078,21 @@ void GuiApp::applyVisualizationMetadata() {
 
         // ---- RayScheduling: wavefront compaction (13, 26, 28) ----
         {"RayScheduling", 13, {"", "wave_ballot_compaction",
-            "Wave-wide vote marks terminated rays; surviving lanes are packed into a dense queue", 16.0f/9.0f, -1, 0}},
-        {"RayScheduling", 26, {"", "wave_ballot_compaction",
-            "Single-pass removal of dead rays from the active stream in one GPU traversal", 16.0f/9.0f, -1, 0}},
-        {"RayScheduling", 28, {"", "wave_ballot_compaction",
-            "Peak pack rate: sorting and writing compacted ray records for the next dispatch", 16.0f/9.0f, -1, 0}},
+            "Subgroup ballot bins active surface hits into 8 material queues using 1 single atomic add per wave", 16.0f/9.0f, -1, 0}},
+        {"RayScheduling", 26, {"", "compaction_128b_expanded",
+            "Single-pass stream compaction filtering sky misses and writing 128-byte expanded hit state records (8x vec4)", 16.0f/9.0f, -1, 0}},
+        {"RayScheduling", 28, {"", "compaction_32b_packed",
+            "Single-pass stream compaction writing 32-byte octahedrally-packed hit records (2x vec4, 4x less bandwidth)", 16.0f/9.0f, -1, 0}},
 
         // ---- RayScheduling: primary rays (17, 18, 29, 30) ----
         {"RayScheduling", 17, {"assets/thumbnails/thumb_{scene}_stage2_primary.png", "",
             "Primary camera ray hits rendered as world-space G-Buffer normals", 16.0f/9.0f, 1, 1}},
         {"RayScheduling", 18, {"assets/thumbnails/thumb_{scene}_stage2_primary.png", "",
-            "Primary rays issued from GPU work queues instead of a fixed pixel grid", 16.0f/9.0f, 1, 1}},
+            "Primary rays classified into GPU work queues to evaluate G-Buffer normals without sky-lane waste", 16.0f/9.0f, 1, 1}},
         {"RayScheduling", 29, {"assets/thumbnails/thumb_{scene}_stage2_primary.png", "",
-            "Primary rays on dedicated hardware ray-query pipelines", 16.0f/9.0f, 1, 1}},
+            "Primary rays on dedicated hardware ray-tracing pipelines (RTP) outputting G-Buffer normals", 16.0f/9.0f, 1, 1}},
         {"RayScheduling", 30, {"assets/thumbnails/thumb_{scene}_stage2_primary.png", "",
-            "Hardware ray reordering groups similar primary rays before traversal", 16.0f/9.0f, 1, 1}},
+            "Hardware ray reordering (RTP + SER) groups primary rays before G-Buffer normal evaluation", 16.0f/9.0f, 1, 1}},
 
         // ---- RayScheduling: directional shadows (19-22) ----
         {"RayScheduling", 19, {"assets/thumbnails/thumb_{scene}_stage3_shadow.png", "",
@@ -1106,24 +1105,24 @@ void GuiApp::applyVisualizationMetadata() {
             "3x the shadow rays: one visibility pass per light, batched by DGC light binning", 16.0f/9.0f, 1, 2}},
 
         // ---- RayScheduling: alpha cutout divergence (27) ----
-        {"RayScheduling", 27, {"assets/thumbnails/thumb_alpha_layers.png", "",
-            "Foliage layers fail the alpha test and force traversal to continue - any-hit re-entry stress", 16.0f/9.0f, 3, 1}},
+        {"RayScheduling", 27, {"assets/thumbnails/thumb_{scene}_alpha_cutout.png", "",
+            "Procedural alpha-cutout masks reject candidate triangles mid-traversal, forcing repeated BVH re-entry", 16.0f/9.0f, 3, 1}},
 
         // ---- RayScheduling: multi-light evaluation (31-34) ----
         {"RayScheduling", 31, {"assets/thumbnails/thumb_{scene}_stage5_direct.png", "",
             "Direct PBR shading under one light: GGX specular + Lambert diffuse per hit", 16.0f/9.0f, 1, 4}},
         {"RayScheduling", 32, {"assets/thumbnails/thumb_{scene}_stage5_direct.png", "",
-            "Single-light shading with DGC-batched hits", 16.0f/9.0f, 1, 4}},
+            "Single-light shading with DGC-compacted surface hits", 16.0f/9.0f, 1, 4}},
         {"RayScheduling", 33, {"assets/thumbnails/thumb_{scene}_multilight_128_dgc.png", "",
-            "128 lights evaluated per hit in one pass: shading ALU throughput becomes the bottleneck", 16.0f/9.0f, 1, 4}},
+            "128 lights evaluated per hit in one monolithic pass; sky misses stall active lanes", 16.0f/9.0f, 1, 4}},
         {"RayScheduling", 34, {"assets/thumbnails/thumb_{scene}_multilight_128_dgc.png", "",
-            "128 lights grouped into coherent DGC bins so each wavefront shades similar lights", 16.0f/9.0f, 1, 4}},
+            "DGC compacts active surface hits (eliminating sky misses) and evaluates 128 lights in 8x16 batched passes", 16.0f/9.0f, 1, 4}},
 
         // ---- RayRawTraversal: coherent triangles (0), deep boxes (1) ----
         {"RayRawTraversal", 0, {"", "bvh_coherent_triangles",
-            "32 planar triangle layers (65.5K tris) pierced by 64M parallel vertical rays with 0% miss rate", 16.0f/9.0f, -1, 0}},
+            "32 planar triangle layers (65.5K tris): parallel vertical rays terminate immediately on Layer 0 with 0% misses", 16.0f/9.0f, -1, 0}},
         {"RayRawTraversal", 1, {"", "bvh_nested_boxes",
-            "128 planar triangle layers (262K tris) forcing 7-8 levels of deep BVH node box traversal", 16.0f/9.0f, -1, 0}},
+            "128 planar triangle layers (262K tris): rays traverse all 128 layers from top to bottom before committing", 16.0f/9.0f, -1, 0}},
 
         // ---- RayIntersect: ray-triangle (0), ray-box (1) ----
         {"RayIntersect", 0, {"", "intersect_ray_triangle",
@@ -1143,15 +1142,15 @@ void GuiApp::applyVisualizationMetadata() {
 
         // ---- RayDivergence: 90 (0), 67.5 (1), 45 (2), 22.5 (3), 0 (4) ----
         {"RayDivergence", 0, {"", "cone_divergence_90",
-            "Full hemisphere scatter (diffuse): rays in one wavefront hit unrelated BVH branches", 16.0f/9.0f, -1, 0}},
+            "Incoming rays hit a matte surface and scatter across the full ±90° (180°) hemisphere into unrelated BVH branches", 16.0f/9.0f, -1, 0}},
         {"RayDivergence", 1, {"", "cone_divergence_67.5",
-            "Wide 67.5-degree cone: rough specular surfaces, heavy but bounded divergence", 16.0f/9.0f, -1, 0}},
+            "Incoming rays hit a rough surface and scatter within a ±67.5° (135°) cone with heavy cross-lane divergence", 16.0f/9.0f, -1, 0}},
         {"RayDivergence", 2, {"", "cone_divergence_45",
-            "45-degree cone: semi-glossy surfaces, moderate cache locality", 16.0f/9.0f, -1, 0}},
+            "Incoming rays hit a semi-glossy surface and reflect within a ±45° (90°) cone with moderate BVH cache locality", 16.0f/9.0f, -1, 0}},
         {"RayDivergence", 3, {"", "cone_divergence_22.5",
-            "22.5-degree cone: glossy surfaces, rays stay close to the reflection direction", 16.0f/9.0f, -1, 0}},
+            "Incoming rays hit a glossy surface and reflect within a tight ±22.5° (45°) cone around the reflection normal", 16.0f/9.0f, -1, 0}},
         {"RayDivergence", 4, {"", "cone_divergence_0",
-            "Perfectly parallel beam (mirror): peak traversal throughput, zero divergence", 16.0f/9.0f, -1, 0}},
+            "Incoming rays reflect off a perfect mirror (0° spread): all wavefront lanes traverse the same BVH path in lockstep", 16.0f/9.0f, -1, 0}},
 
         // ---- Pixel Fill Rate: RGBA8 (0), RGBA16F (1), Alpha blend (2) ----
         {"Pixel Fill Rate", 0, {"", "rop_fill_rgba8",
@@ -1195,7 +1194,9 @@ void GuiApp::renderBenchmarkTooltip(const BenchmarkItem& item, const std::string
     ImGui::BeginTooltip();
 
     // 1. Header & badges
+    pushBoldFont();
     ImGui::TextColored(ImVec4(0.40f, 0.80f, 1.00f, 1.0f), "%s", item.name.c_str());
+    popBoldFont();
     ImGui::TextDisabled("Subcategory: %s | Metric: %s", item.subcategory.c_str(), item.metricType.c_str());
     ImGui::Separator();
 
@@ -1263,16 +1264,10 @@ void GuiApp::renderBenchmarkTooltip(const BenchmarkItem& item, const std::string
             ImGui::PopTextWrapPos();
         }
 
-        // Cross-link to the full Ray Tracing Viewport
+        // Cross-link to the full Ray Tracing Viewport (right-click on row triggers jump)
         if (item.viz.linkedViewportMode >= 0) {
             ImGui::Spacing();
-            if (ImGui::SmallButton("Open in Ray Tracing Viewport  ->")) {
-                m_rtViewportMode = item.viz.linkedViewportMode;
-                if (item.viz.linkedViewportMode == 1) m_rtPassIndex = item.viz.linkedViewportSubIndex;
-                else if (item.viz.linkedViewportMode == 2) m_rtMaterialIndex = item.viz.linkedViewportSubIndex;
-                else if (item.viz.linkedViewportMode == 3) m_rtGeometryIndex = item.viz.linkedViewportSubIndex;
-                m_switchToRtViewport = true;
-            }
+            ImGui::TextColored(ImVec4(0.42f, 0.80f, 1.0f, 0.95f), "Right-click row to open in Ray Tracing Viewport →");
         }
     }
 
@@ -1313,48 +1308,105 @@ void GuiApp::renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, Im
     // Ray directional divergence cone (cone_divergence_<deg>)
     // ------------------------------------------------------------------
     if (diagramId.rfind("cone_divergence_", 0) == 0) {
-        float angle = 0.0f;
-        try { angle = std::stof(diagramId.substr(16)); } catch (...) {}
-        drawTitle(angle == 0.0f ? "Ray Divergence: 0 Beam (Coherent)" : "Ray Divergence Cone");
+        float halfAngleDeg = 0.0f;
+        try { halfAngleDeg = std::stof(diagramId.substr(16)); } catch (...) {}
+        drawTitle(halfAngleDeg == 0.0f ? "Surface Bounce: 0° Beam (Mirror)" :
+                  (halfAngleDeg >= 89.0f ? "Surface Bounce: ±90° Hemisphere (Diffuse)" :
+                                           "Surface Bounce Divergence Cone"));
 
-        ImVec2 hit(area.x + gw * 0.5f, areaEnd.y - s(4.0f));
-        float surfHalf = gw * 0.42f;
-        dl->AddLine(ImVec2(hit.x - surfHalf, hit.y), ImVec2(hit.x + surfHalf, hit.y),
-                    IM_COL32(120, 130, 150, 255), 2.0f);
+        float surfY = areaEnd.y - s(6.0f);
+        float surfLeft = area.x + gw * 0.06f;
+        float surfRight = area.x + gw * 0.94f;
+        float surfW = surfRight - surfLeft;
 
-        float normalLen = gh * 0.88f;
-        ImVec2 normalEnd(hit.x, hit.y - normalLen);
-        dl->AddLine(hit, normalEnd, colCool, 1.5f);
-        dl->AddText(ImVec2(normalEnd.x + s(4.0f), normalEnd.y), colCool, "N");
-
-        float rad = angle * 0.5f * (3.14159265f / 180.0f);
-        int nRays = (angle == 0.0f) ? 1 : 7;
-        ImU32 rayCol = (angle > 60.0f) ? colHot : ((angle > 30.0f) ? colAmber : colCool);
-        for (int i = 0; i < nRays; ++i) {
-            float t = (nRays > 1) ? (static_cast<float>(i) / (nRays - 1) * 2.0f - 1.0f) : 0.0f;
-            float a = t * rad;
-            float len = normalLen * 0.92f;
-            ImVec2 end(hit.x + std::sin(a) * len, hit.y - std::cos(a) * len);
-            dl->AddLine(hit, end, rayCol, 1.5f);
-            dl->AddCircleFilled(end, s(2.0f), rayCol);
+        // Draw rough/microfacet surface profile according to halfAngleDeg
+        float roughnessAmp = (halfAngleDeg / 90.0f) * s(3.5f);
+        const int surfSegs = 28;
+        for (int i = 0; i < surfSegs; ++i) {
+            float x0 = surfLeft + (surfW * i) / surfSegs;
+            float x1 = surfLeft + (surfW * (i + 1)) / surfSegs;
+            float y0 = surfY + ((i % 2 == 0) ? -roughnessAmp : roughnessAmp);
+            float y1 = surfY + (((i + 1) % 2 == 0) ? -roughnessAmp : roughnessAmp);
+            dl->AddLine(ImVec2(x0, y0), ImVec2(x1, y1), IM_COL32(130, 145, 170, 255), 2.0f);
         }
 
-        if (angle > 0.0f) {
-            float arcR = normalLen * 0.38f;
-            float a0 = -3.14159265f / 2.0f - rad;
-            float a1 = -3.14159265f / 2.0f + rad;
-            dl->PathArcTo(hit, arcR, a0, a1, 24);
-            dl->PathStroke(colAmber, 1.2f);
+        // Surface normal N at center
+        ImVec2 centerHit(area.x + gw * 0.54f, surfY);
+        float normalLen = gh * 0.86f;
+        ImVec2 normalEnd(centerHit.x, centerHit.y - normalLen);
+        dl->AddLine(centerHit, normalEnd, IM_COL32(80, 180, 255, 140), 1.2f);
+        dl->AddText(ImVec2(normalEnd.x + s(4.0f), normalEnd.y - s(2.0f)), colCool, "N");
+
+        // True polar half-angle in radians (90 deg -> full +/-90 deg = 180 deg hemisphere!)
+        float maxRad = std::min(halfAngleDeg, 86.0f) * (3.14159265f / 180.0f);
+
+        // Cone envelope arc at center showing the +/-halfAngleDeg spread around N
+        if (halfAngleDeg > 0.0f) {
+            float arcR = normalLen * 0.36f;
+            float a0 = -3.14159265f / 2.0f - maxRad;
+            float a1 = -3.14159265f / 2.0f + maxRad;
+            dl->PathArcTo(centerHit, arcR, a0, a1, 28);
+            dl->PathStroke(IM_COL32(255, 190, 60, 170), 1.2f);
+            // Dashed/dim envelope boundary lines
+            ImVec2 envL(centerHit.x - std::sin(maxRad) * normalLen * 0.75f,
+                        centerHit.y - std::cos(maxRad) * normalLen * 0.75f);
+            ImVec2 envR(centerHit.x + std::sin(maxRad) * normalLen * 0.75f,
+                        centerHit.y - std::cos(maxRad) * normalLen * 0.75f);
+            dl->AddLine(centerHit, envL, IM_COL32(255, 190, 60, 80), 1.0f);
+            dl->AddLine(centerHit, envR, IM_COL32(255, 190, 60, 80), 1.0f);
         }
 
-        char buf[48];
-        snprintf(buf, sizeof(buf), "Cone: %.1f deg", angle);
+        // 6 incoming parallel primary rays hitting adjacent points across the surface,
+        // then bouncing outward with disordered angles inside [-maxRad, +maxRad]
+        const int nLanes = 6;
+        // Non-monotonic disordered scatter fractions in [-1, +1] so adjacent lanes visibly cross/diverge
+        const float scatterFrac[6] = { -0.92f, 0.78f, -0.35f, 0.96f, -0.74f, 0.22f };
+        const float lenScale[6]    = {  0.82f, 0.88f,  0.94f, 0.78f,  0.86f, 0.92f };
+        ImU32 bounceCol = (halfAngleDeg > 60.0f) ? colHot : ((halfAngleDeg > 30.0f) ? colAmber : colGreen);
+
+        for (int i = 0; i < nLanes; ++i) {
+            float laneT = static_cast<float>(i) / (nLanes - 1);
+            float hx = centerHit.x + (laneT - 0.5f) * (surfW * 0.44f);
+            ImVec2 hPt(hx, surfY);
+
+            // Incoming parallel ray (from top-left at a uniform 18-deg incidence angle)
+            float inAng = -18.0f * (3.14159265f / 180.0f);
+            float inLen = normalLen * 0.48f;
+            ImVec2 inStart(hx + std::sin(inAng) * inLen, surfY - std::cos(inAng) * inLen);
+            dl->AddLine(inStart, hPt, IM_COL32(80, 180, 255, 150), 1.2f);
+            dl->AddCircleFilled(hPt, s(2.0f), colCool);
+
+            // Outgoing bounce ray
+            float outAng = (halfAngleDeg == 0.0f) ? 0.0f : (scatterFrac[i] * maxRad);
+            float outLen = normalLen * lenScale[i];
+            ImVec2 outEnd(hPt.x + std::sin(outAng) * outLen, hPt.y - std::cos(outAng) * outLen);
+            dl->AddLine(hPt, outEnd, bounceCol, 1.6f);
+
+            // Arrowhead on outgoing bounce ray
+            ImVec2 dVec( std::sin(outAng), -std::cos(outAng));
+            ImVec2 ah1(outEnd.x - dVec.x * s(4.5f) - dVec.y * s(2.8f),
+                       outEnd.y - dVec.y * s(4.5f) + dVec.x * s(2.8f));
+            ImVec2 ah2(outEnd.x - dVec.x * s(4.5f) + dVec.y * s(2.8f),
+                       outEnd.y - dVec.y * s(4.5f) - dVec.x * s(2.8f));
+            dl->AddLine(outEnd, ah1, bounceCol, 1.4f);
+            dl->AddLine(outEnd, ah2, bounceCol, 1.4f);
+        }
+
+        char buf[64];
+        if (halfAngleDeg >= 89.0f) {
+            snprintf(buf, sizeof(buf), "Spread: ±90° (180° Hemisphere)");
+        } else if (halfAngleDeg == 0.0f) {
+            snprintf(buf, sizeof(buf), "Spread: 0.0° (Parallel Mirror)");
+        } else {
+            snprintf(buf, sizeof(buf), "Spread: ±%.1f° (%.0f° Cone)", halfAngleDeg, halfAngleDeg * 2.0f);
+        }
         dl->AddText(ImVec2(area.x, area.y), colAmber, buf);
-        const char* sub = (angle == 0.0f) ? "mirror - peak throughput" :
-                          (angle <= 22.5f) ? "glossy surface" :
-                          (angle <= 45.0f) ? "semi-glossy surface" :
-                          (angle <= 67.5f) ? "rough surface" : "diffuse - max divergence";
-        dl->AddText(ImVec2(area.x, area.y + s(16.0f)), colDim, sub);
+        const char* sub = (halfAngleDeg == 0.0f) ? "coherent bounce - peak BVH cache reuse" :
+                          (halfAngleDeg <= 22.5f) ? "glossy bounce - tight ray bundle" :
+                          (halfAngleDeg <= 45.0f) ? "semi-glossy bounce - moderate spread" :
+                          (halfAngleDeg <= 67.5f) ? "rough bounce - wide crossing rays" :
+                                                    "diffuse bounce - disordered 180° scatter";
+        dl->AddText(ImVec2(area.x, area.y + s(15.0f)), colDim, sub);
         return;
     }
 
@@ -1475,10 +1527,10 @@ void GuiApp::renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, Im
     }
 
     // ------------------------------------------------------------------
-    // Wavefront stream compaction via ballot
+    // Wavefront stream compaction via ballot (Config 13: 8-queue material sort, 16B records)
     // ------------------------------------------------------------------
     if (diagramId == "wave_ballot_compaction") {
-        drawTitle("Wave Ballot Stream Compaction");
+        drawTitle("Wave Ballot Material Queue Sort (16B Records)");
 
         const int lanes = 32;
         static const bool active[32] = {
@@ -1512,27 +1564,109 @@ void GuiApp::renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, Im
         mask[32] = 0;
         float y2 = area.y + rowGap;
         dl->AddText(ImVec2(area.x, y2), colDim, "ballot mask");
-        dl->AddText(ImVec2(barX, y2), colAmber, mask);
+        if (monoFont()) {
+            dl->AddText(monoFont(), monoFont()->FontSize, ImVec2(barX, y2), colAmber, mask);
+        } else {
+            dl->AddText(ImVec2(barX, y2), colAmber, mask);
+        }
 
-        // Row 3: compacted queue
+        // Row 3: compacted material queues (8 bins, 16B/hit)
         float y3 = y2 + rowGap;
-        dl->AddText(ImVec2(area.x, y3), colDim, "compacted");
+        dl->AddText(ImVec2(area.x, y3), colDim, "8 mat bins");
         int k = 0;
+        const ImU32 binColors[4] = {colCool, colGreen, colAmber, colPath};
         for (int i = 0; i < lanes; ++i) {
             ImVec2 l0(barX + i * lw + s(1.0f), y3 - s(2.0f));
             ImVec2 l1(l0.x + lw - s(2.0f), l0.y + laneH);
             if (active[i]) {
-                dl->AddRectFilled(l0, l1, IM_COL32(60, 140, 80, 255), s(2.0f));
-                dl->AddRect(l0, l1, colGreen);
+                ImU32 bc = binColors[(k / 5) % 4];
+                dl->AddRectFilled(l0, l1, IM_COL32(35, 70, 95, 255), s(2.0f));
+                dl->AddRect(l0, l1, bc);
                 ++k;
             } else {
                 dl->AddRect(l0, l1, IM_COL32(40, 48, 60, 120));
             }
         }
 
-        char b[64];
-        snprintf(b, sizeof(b), "%d active lanes repacked for the next dispatch", k);
+        char b[80];
+        snprintf(b, sizeof(b), "%d surface hits sorted into 8 material queues (16B/record)", k);
         drawFootnote(b);
+        return;
+    }
+
+    // ------------------------------------------------------------------
+    // Single-Pass Stream Compaction: 128B Expanded vs 32B Packed Records (Configs 26 & 28)
+    // ------------------------------------------------------------------
+    if (diagramId == "compaction_128b_expanded" || diagramId == "compaction_32b_packed") {
+        bool isPacked = (diagramId == "compaction_32b_packed");
+        drawTitle(isPacked ? "Queue Compaction: 32B Packed Hybrid Record"
+                           : "Queue Compaction: 128B Expanded Hit Record");
+
+        const int lanes = 16;
+        static const bool hitMask[16] = {1,1,0,1, 0,1,1,1, 0,0,1,1, 1,0,1,1};
+        float labelW = s(86.0f);
+        float barX = area.x + labelW;
+        float barW = areaEnd.x - barX;
+        float lw = barW / lanes;
+        float laneH = s(14.0f);
+
+        // Row 1: Primary ray traversal (Hits vs Sky Misses)
+        dl->AddText(ImVec2(area.x, area.y), colDim, "primary rays");
+        int activeHits = 0;
+        for (int i = 0; i < lanes; ++i) {
+            ImVec2 l0(barX + i * lw + s(1.0f), area.y - s(1.0f));
+            ImVec2 l1(l0.x + lw - s(2.0f), l0.y + laneH);
+            if (hitMask[i]) {
+                dl->AddRectFilled(l0, l1, IM_COL32(45, 130, 75, 255), s(2.0f));
+                dl->AddRect(l0, l1, colGreen);
+                activeHits++;
+            } else {
+                dl->AddRectFilled(l0, l1, IM_COL32(65, 38, 38, 255), s(2.0f));
+                dl->AddRect(l0, l1, colHot);
+            }
+        }
+
+        // Row 2: Record layout comparison (8x vec4 = 128B vs 2x vec4 = 32B)
+        float y2 = area.y + s(24.0f);
+        dl->AddText(ImVec2(area.x, y2), colDim, isPacked ? "32B record" : "128B record");
+        int vec4Count = isPacked ? 2 : 8;
+        float slotW = (barW * (isPacked ? 0.38f : 0.96f)) / vec4Count;
+        const char* fields128[8] = {"pos+t", "dir+m", "norm", "bary", "v0", "v1", "v2", "pad"};
+        const char* fields32[2]  = {"pos.xyz + tHit (16B)", "octNorm + mat + pixel (16B)"};
+        for (int v = 0; v < vec4Count; ++v) {
+            ImVec2 b0(barX + v * slotW + s(1.0f), y2 - s(2.0f));
+            ImVec2 b1(b0.x + slotW - s(2.0f), b0.y + s(16.0f));
+            ImU32 fillCol = isPacked ? IM_COL32(30, 85, 120, 255) : IM_COL32(85, 60, 25, 255);
+            ImU32 bordCol = isPacked ? colCool : colAmber;
+            dl->AddRectFilled(b0, b1, fillCol, s(2.0f));
+            dl->AddRect(b0, b1, bordCol);
+            const char* lbl = isPacked ? fields32[v] : fields128[v];
+            ImVec2 tsz = ImGui::CalcTextSize(lbl);
+            if (tsz.x < (slotW - s(2.0f))) {
+                dl->AddText(ImVec2(b0.x + (slotW - tsz.x) * 0.5f, b0.y + s(1.0f)), colText, lbl);
+            }
+        }
+        if (isPacked) {
+            dl->AddText(ImVec2(barX + barW * 0.41f, y2), colGreen, "4x less VRAM traffic!");
+        }
+
+        // Row 3: Unified compacted stream
+        float y3 = y2 + s(26.0f);
+        dl->AddText(ImVec2(area.x, y3), colDim, "stream out");
+        for (int i = 0; i < lanes; ++i) {
+            ImVec2 l0(barX + i * lw + s(1.0f), y3 - s(1.0f));
+            ImVec2 l1(l0.x + lw - s(2.0f), l0.y + laneH);
+            if (i < activeHits) {
+                dl->AddRectFilled(l0, l1, isPacked ? IM_COL32(35, 110, 145, 255) : IM_COL32(110, 80, 30, 255), s(2.0f));
+                dl->AddRect(l0, l1, isPacked ? colCool : colAmber);
+            } else {
+                dl->AddRect(l0, l1, IM_COL32(40, 48, 60, 110));
+            }
+        }
+
+        drawFootnote(isPacked
+            ? "sky misses culled; 32B octahedrally-packed hit records maximize compaction bandwidth"
+            : "sky misses culled; 128B uncompacted hit state stresses VRAM write bandwidth");
         return;
     }
 
@@ -1852,15 +1986,15 @@ void GuiApp::renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, Im
     }
 
     // ------------------------------------------------------------------
-    // Hardware BVH: Coherent Triangles (32-Layer Grid)
+    // Hardware BVH: Coherent Triangles (32-Layer Grid, TerminateOnFirstHitEXT)
     // ------------------------------------------------------------------
     if (diagramId == "bvh_coherent_triangles") {
-        drawTitle("Hardware BVH: Coherent Triangles (32-Layer Grid)");
+        drawTitle("Hardware BVH: Coherent Triangles (First-Hit Fast Path)");
 
-        // 4 stratified planar triangle layers
+        // 4 stratified planar triangle layers (Layer 0 active, Layers 1..3 skipped after first hit)
         const int layers = 4;
         float layerSpacing = gh * 0.22f;
-        float startY = area.y + s(14.0f);
+        float startY = area.y + s(16.0f);
         float planeW = gw * 0.60f;
 
         for (int l = 0; l < layers; ++l) {
@@ -1868,78 +2002,87 @@ void GuiApp::renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, Im
             ImVec2 pL(area.x, y);
             ImVec2 pR(area.x + planeW, y);
 
-            // Plane boundary line
-            dl->AddLine(pL, pR, colGrid, 1.5f);
+            ImU32 lineCol = (l == 0) ? colCool : IM_COL32(45, 55, 70, 140);
+            dl->AddLine(pL, pR, lineCol, (l == 0) ? 1.8f : 1.0f);
 
-            // Planar triangle grid elements along the layer
             const int tris = 6;
             float triW = planeW / tris;
             for (int t = 0; t < tris; ++t) {
                 ImVec2 t0(area.x + t * triW, y);
                 ImVec2 t1(t0.x + triW, y);
                 ImVec2 t2(t0.x + triW * 0.5f, y - s(6.0f));
-                dl->AddTriangle(t0, t1, t2, IM_COL32(40, 80, 130, 180));
+                ImU32 tc = (l == 0) ? IM_COL32(55, 130, 210, 220) : IM_COL32(40, 55, 75, 110);
+                dl->AddTriangle(t0, t1, t2, tc);
             }
         }
 
-        // Parallel vertical coherent rays piercing straight down
+        // Parallel vertical coherent rays terminating immediately on Layer 0
         const int rays = 5;
         float raySpacing = planeW / (rays + 1);
         for (int r = 0; r < rays; ++r) {
             float rx = area.x + (r + 1) * raySpacing;
             ImVec2 rayStart(rx, area.y - s(4.0f));
-            ImVec2 rayEnd(rx, startY + (layers - 1) * layerSpacing + s(6.0f));
+            ImVec2 rayHit(rx, startY);
 
-            // Perfectly parallel vertical ray
-            dl->AddLine(rayStart, rayEnd, colGreen, 1.6f);
+            dl->AddLine(rayStart, rayHit, colGreen, 1.8f);
             dl->AddCircleFilled(rayStart, s(2.0f), colGreen);
-
-            // Hit dots on every single layer (0% misses)
-            for (int l = 0; l < layers; ++l) {
-                float hitY = startY + l * layerSpacing;
-                dl->AddCircleFilled(ImVec2(rx, hitY), s(2.2f), colAmber);
-            }
+            dl->AddCircleFilled(rayHit, s(3.0f), colAmber);
         }
 
         // Legend / Stats on right side
         float statX = area.x + planeW + s(10.0f);
         dl->AddText(ImVec2(statX, area.y + s(2.0f)), colCool, "32 Layers");
-        dl->AddText(ImVec2(statX, area.y + s(18.0f)), colDim, "65.5K Tris");
-        dl->AddText(ImVec2(statX, area.y + s(34.0f)), colCool, "64M Rays");
+        dl->AddText(ImVec2(statX, area.y + s(18.0f)), colGreen, "Hits Layer 0");
+        dl->AddText(ImVec2(statX, area.y + s(34.0f)), colAmber, "First-Hit Exit");
         dl->AddText(ImVec2(statX, area.y + s(50.0f)), colGreen, "0% Misses");
-        dl->AddText(ImVec2(statX, area.y + s(66.0f)), colAmber, "Max Coherence");
+        dl->AddText(ImVec2(statX, area.y + s(66.0f)), colCool, "Max Coherence");
 
-        drawFootnote("parallel vertical rays through 32 stratified triangle layers; 100% warp coherence & 0% misses");
+        drawFootnote("parallel vertical rays terminate on Layer 0 (TerminateOnFirstHitEXT); 100% warp coherence");
         return;
     }
 
     // ------------------------------------------------------------------
-    // Deeply nested BVH boxes
+    // Hardware BVH: Deep 128-Layer Multi-Layer Traversal Stress
     // ------------------------------------------------------------------
     if (diagramId == "bvh_nested_boxes") {
-        drawTitle("Deeply Nested AABBs");
+        drawTitle("Hardware BVH: Deep 128-Layer Traversal Stress");
 
-        auto box = [&](float x, float y, float bw, float bh, ImU32 col) {
-            dl->AddRect(ImVec2(area.x + gw * x, area.y + gh * y),
-                        ImVec2(area.x + gw * (x + bw), area.y + gh * (y + bh)), col);
-        };
-        box(0.05f, 0.10f, 0.90f, 0.80f, colCool);
-        box(0.08f, 0.14f, 0.40f, 0.72f, IM_COL32(90, 150, 210, 220));
-        box(0.52f, 0.14f, 0.40f, 0.72f, IM_COL32(90, 150, 210, 220));
-        box(0.10f, 0.18f, 0.17f, 0.30f, colAmber);
-        box(0.28f, 0.50f, 0.17f, 0.30f, colAmber);
-        box(0.54f, 0.18f, 0.17f, 0.30f, colAmber);
-        box(0.72f, 0.50f, 0.17f, 0.30f, colAmber);
+        const int layers = 6;
+        float layerSpacing = gh * 0.15f;
+        float startY = area.y + s(10.0f);
+        float planeW = gw * 0.60f;
 
-        ImVec2 rs(area.x + gw * 0.02f, area.y + gh * 0.06f);
-        ImVec2 re(area.x + gw * 0.98f, area.y + gh * 0.94f);
-        dl->AddLine(rs, re, colPath, 1.8f);
-        const float steps[6] = {0.10f, 0.22f, 0.38f, 0.52f, 0.68f, 0.82f};
-        for (float t : steps) {
-            ImVec2 p = add(rs, mul(sub(re, rs), t));
-            dl->AddCircleFilled(p, s(2.5f), colAmber);
+        for (int l = 0; l < layers; ++l) {
+            float y = startY + l * layerSpacing;
+            ImVec2 b0(area.x, y - s(3.0f));
+            ImVec2 b1(area.x + planeW, y + s(3.0f));
+            bool isLast = (l == layers - 1);
+            dl->AddRectFilled(b0, b1, isLast ? IM_COL32(35, 95, 65, 220) : IM_COL32(30, 50, 80, 150), s(1.5f));
+            dl->AddRect(b0, b1, isLast ? colGreen : IM_COL32(70, 120, 180, 190), s(1.5f));
         }
-        drawFootnote("each level adds a ray-box test before reaching leaf triangles");
+
+        // Parallel vertical rays traversing through all 128 layers to commit on Layer 127
+        const int rays = 4;
+        float raySpacing = planeW / (rays + 1);
+        float botY = startY + (layers - 1) * layerSpacing;
+        for (int r = 0; r < rays; ++r) {
+            float rx = area.x + (r + 1) * raySpacing;
+            dl->AddLine(ImVec2(rx, area.y - s(4.0f)), ImVec2(rx, botY), colHot, 1.6f);
+            for (int l = 0; l < layers; ++l) {
+                float hy = startY + l * layerSpacing;
+                bool isLast = (l == layers - 1);
+                dl->AddCircleFilled(ImVec2(rx, hy), isLast ? s(3.0f) : s(2.0f), isLast ? colGreen : colAmber);
+            }
+        }
+
+        float statX = area.x + planeW + s(10.0f);
+        dl->AddText(ImVec2(statX, area.y + s(2.0f)), colCool, "128 Layers");
+        dl->AddText(ImVec2(statX, area.y + s(18.0f)), colDim, "262K Tris");
+        dl->AddText(ImVec2(statX, area.y + s(34.0f)), colHot, "Full Depth");
+        dl->AddText(ImVec2(statX, area.y + s(50.0f)), colAmber, "128 Hits/Ray");
+        dl->AddText(ImVec2(statX, area.y + s(66.0f)), colGreen, "Layer 127 Commit");
+
+        drawFootnote("rays traverse through all 128 stratified BVH layers before committing the deepest layer hit");
         return;
     }
 
@@ -2340,7 +2483,9 @@ void GuiApp::renderLeftSidebar(float width, float height) {
 
     // 1. Top Brand & Prominent Start Action Block (Pinned at top left)
     ImGui::AlignTextToFramePadding();
+    pushBoldFont();
     ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.00f, 1.00f), "GPUBench");
+    popBoldFont();
     ImGui::SameLine();
     ImGui::TextColored(ImVec4(0.60f, 0.70f, 0.90f, 1.00f), "v%s", GPUBENCH_VERSION);
     {
@@ -2374,9 +2519,11 @@ void GuiApp::renderLeftSidebar(float width, float height) {
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.85f, 0.20f, 0.20f, 1.00f));
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.95f, 0.25f, 0.25f, 1.00f));
         ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(1.00f, 0.30f, 0.30f, 1.00f));
+        pushBoldFont();
         if (ImGui::Button("ABORT BENCHMARK", ImVec2(-1, s(38.0f)))) {
             abortBenchmarks();
         }
+        popBoldFont();
         ImGui::PopStyleColor(3);
     } else {
         DeviceTelemetrySnapshot preSnap;
@@ -2401,9 +2548,11 @@ void GuiApp::renderLeftSidebar(float width, float height) {
         std::string runLabel = (selectedTests > 1)
             ? ("START BENCHMARKS (" + std::to_string(selectedTests) + ")")
             : (selectedTests == 1 ? "START BENCHMARK (1)" : "START BENCHMARK");
+        pushBoldFont();
         if (ImGui::Button(runLabel.c_str(), ImVec2(-1, s(38.0f)))) {
             startBenchmarks();
         }
+        popBoldFont();
         ImGui::PopStyleColor(3);
     }
 
@@ -2411,15 +2560,21 @@ void GuiApp::renderLeftSidebar(float width, float height) {
         ImGui::Spacing();
         float progress = (m_totalTasks > 0) ? (static_cast<float>(m_completedTasks) / static_cast<float>(m_totalTasks)) : 0.0f;
         progress = std::clamp(progress, 0.0f, 1.0f);
-        std::string progText = std::to_string(m_completedTasks) + "/" + std::to_string(m_totalTasks) + " (" + std::to_string(static_cast<int>(progress * 100.0f)) + "%)";
-        ImGui::ProgressBar(progress, ImVec2(-1, s(20.0f)), progText.c_str());
+        char progBuf[64];
+        snprintf(progBuf, sizeof(progBuf), "%zu/%zu (%d%%) • %.1fs",
+                 m_completedTasks, m_totalTasks, static_cast<int>(progress * 100.0f), m_elapsedSeconds);
+        pushMonoFont();
+        ImGui::ProgressBar(progress, ImVec2(-1, s(20.0f)), progBuf);
+        popMonoFont();
         ImGui::TextDisabled("%s", m_currentBenchmarkName.c_str());
     } else if (m_execState == ExecutionState::Completed) {
         ImGui::Spacing();
         ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.18f, 0.80f, 0.44f, 1.00f));
-        ImGui::ProgressBar(1.0f, ImVec2(-1, s(20.0f)), "Complete");
+        char compBuf[48];
+        snprintf(compBuf, sizeof(compBuf), "Complete (%.1fs)", m_elapsedSeconds);
+        ImGui::ProgressBar(1.0f, ImVec2(-1, s(20.0f)), compBuf);
         ImGui::PopStyleColor();
-        ImGui::TextColored(ImVec4(0.35f, 0.85f, 0.55f, 1.0f), "[PASSED] %zu workloads recorded", m_allResults.size());
+        ImGui::TextColored(ImVec4(0.35f, 0.85f, 0.55f, 1.0f), "✓ %zu workloads recorded", m_allResults.size());
         ImGui::Spacing();
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.45f, 0.90f, 1.0f));
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.28f, 0.55f, 1.00f, 1.0f));
@@ -2473,13 +2628,15 @@ void GuiApp::renderLeftSidebar(float width, float height) {
     ImGui::Separator();
     ImGui::Spacing();
 
-    // 2. Scrollable Body (Target Accelerators, Telemetry, API, Resolution)
+    // 2. Scrollable Body (Target Accelerators, Compute API, Resolution, Scenario, Telemetry)
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
     ImGui::BeginChild("LeftSidebarScroll", ImVec2(0, 0), false);
     ImGui::PopStyleVar();
 
     // 2. Target Accelerators (Multi-Selection)
+    pushBoldFont();
     ImGui::TextColored(ImVec4(0.65f, 0.75f, 0.90f, 1.0f), "TARGET ACCELERATORS");
+    popBoldFont();
 
     // Presets with active highlights
     bool dualGpu = false, allSel = true;
@@ -2595,7 +2752,9 @@ void GuiApp::renderLeftSidebar(float width, float height) {
             ImGui::BeginGroup();
             if (dev.isSystem) {
                 ImVec4 titleCol = dev.selected ? ImVec4(0.98f, 0.85f, 0.45f, 1.0f) : ImVec4(0.80f, 0.75f, 0.55f, 0.85f);
+                pushBoldFont();
                 ImGui::TextColored(titleCol, "Host CPU & RAM");
+                popBoldFont();
                 std::string sub = formatCardDeviceSubtitle(dev);
                 ImGui::TextDisabled("%s", sub.c_str());
             } else {
@@ -2606,7 +2765,9 @@ void GuiApp::renderLeftSidebar(float width, float height) {
                 ImVec4 titleCol = dev.selected 
                     ? (isPrimary ? ImVec4(0.38f, 0.85f, 1.00f, 1.0f) : ImVec4(0.72f, 0.85f, 0.98f, 1.0f))
                     : ImVec4(0.60f, 0.68f, 0.80f, 0.8f);
+                pushBoldFont();
                 ImGui::TextColored(titleCol, "%s", title.c_str());
+                popBoldFont();
                 std::string sub = formatCardDeviceSubtitle(dev);
                 ImGui::TextDisabled("%s", sub.c_str());
             }
@@ -2616,6 +2777,7 @@ void GuiApp::renderLeftSidebar(float width, float height) {
             uint64_t memGb = (dev.vramTotalMb + 512) / 1024;
             std::string badgeStr = dev.vramTotalMb > 0 ? ("[" + std::to_string(memGb) + " GB]") : "[N/A]";
             ImVec4 badgeCol = dev.isSystem ? ImVec4(0.90f, 0.75f, 0.35f, 0.85f) : ImVec4(0.38f, 0.75f, 1.00f, 0.85f);
+            pushMonoFont();
             float badgeW = ImGui::CalcTextSize(badgeStr.c_str()).x;
             float availW = ImGui::GetContentRegionAvail().x;
             if (availW > badgeW) {
@@ -2623,6 +2785,7 @@ void GuiApp::renderLeftSidebar(float width, float height) {
             }
             ImGui::SetCursorPosY(ImGui::GetCursorPosY() + s(2.0f));
             ImGui::TextColored(badgeCol, "%s", badgeStr.c_str());
+            popMonoFont();
 
             ImGui::EndTable();
         }
@@ -2668,13 +2831,12 @@ void GuiApp::renderLeftSidebar(float width, float height) {
         ImGui::Spacing();
     }
 
-    // 3. Live Hardware Telemetry
-    renderSidebarTelemetry();
-
-    // 4. Compute API Selection
+    // 3. Compute API Selection
     ImGui::Separator();
     ImGui::Spacing();
+    pushBoldFont();
     ImGui::TextColored(ImVec4(0.65f, 0.75f, 0.90f, 1.0f), "COMPUTE API");
+    popBoldFont();
     const char* backends[] = { "vulkan", "rocm", "opencl", "auto" };
     const char* backendLabels[] = { "Vulkan", "ROCm", "OpenCL", "Auto" };
     if (m_apiSupportList.empty()) {
@@ -2757,7 +2919,9 @@ void GuiApp::renderLeftSidebar(float width, float height) {
     ImGui::Separator();
     ImGui::Spacing();
 
+    pushBoldFont();
     ImGui::TextColored(ImVec4(0.65f, 0.75f, 0.90f, 1.0f), "BENCHMARK RENDER RESOLUTION");
+    popBoldFont();
     ImGui::SameLine();
     ImGui::TextDisabled("(?)");
     if (ImGui::IsItemHovered()) {
@@ -2819,7 +2983,9 @@ void GuiApp::renderLeftSidebar(float width, float height) {
 
     // Active Canvas dimensions readout
     float raysM = static_cast<float>(m_renderWidth * m_renderHeight) / 1000000.0f;
+    pushMonoFont();
     ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.00f, 1.0f), "%u x %u", m_renderWidth, m_renderHeight);
+    popMonoFont();
     ImGui::SameLine();
     ImGui::TextDisabled("(%.2f Mpix / frame)", raysM);
 
@@ -2828,7 +2994,9 @@ void GuiApp::renderLeftSidebar(float width, float height) {
     ImGui::Separator();
     ImGui::Spacing();
 
+    pushBoldFont();
     ImGui::TextColored(ImVec4(0.65f, 0.75f, 0.90f, 1.0f), "RAY TRACING SCENARIO");
+    popBoldFont();
     ImGui::SameLine();
     ImGui::TextDisabled("(?)");
     if (ImGui::IsItemHovered()) {
@@ -2930,6 +3098,9 @@ void GuiApp::renderLeftSidebar(float width, float height) {
         ImGui::TextDisabled("In-memory only (max throughput)");
     }
 
+    // 6. Live Hardware Telemetry (placed at bottom of sidebar so controls stay above the fold)
+    ImGui::Spacing();
+    renderSidebarTelemetry();
 
     ImGui::EndChild(); // LeftSidebarScroll
     ImGui::EndChild(); // LeftSidebar
@@ -3618,16 +3789,16 @@ GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
 void GuiApp::renderBenchmarkSuitePanel() {
     ImGui::Spacing();
     
-    bool canEditWorkloads = (m_execState == ExecutionState::Idle);
+    bool canEditWorkloads = (m_execState != ExecutionState::Running);
 
     if (m_execState == ExecutionState::Completed) {
         ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.12f, 0.18f, 0.25f, 0.95f));
         ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.30f, 0.65f, 0.95f, 0.85f));
 
         float btn1W = ImGui::CalcTextSize("View Results Scorecard").x + ImGui::GetStyle().FramePadding.x * 2.0f;
-        float btn2W = ImGui::CalcTextSize("Reconfigure Workloads").x + ImGui::GetStyle().FramePadding.x * 2.0f;
+        float btn2W = ImGui::CalcTextSize("Clear Results").x + ImGui::GetStyle().FramePadding.x * 2.0f;
         float totalBtnsW = btn1W + btn2W + s(14.0f);
-        float bannerTextW = ImGui::CalcTextSize("[PASSED] Benchmark suite finished (171 results recorded). | Selection locked.").x;
+        float bannerTextW = ImGui::CalcTextSize("✓ Benchmark suite finished (171 results recorded in 99.9s).").x;
         bool needsTwoLines = (ImGui::GetContentRegionAvail().x < bannerTextW + totalBtnsW + s(30.0f));
         float bannerH = needsTwoLines ? (ImGui::GetFrameHeight() * 2.0f + s(22.0f)) : (ImGui::GetFrameHeight() + s(16.0f));
 
@@ -3639,16 +3810,17 @@ void GuiApp::renderBenchmarkSuitePanel() {
             if (r.time_ms == -3.0) abortCnt++;
             else if (r.time_ms < 0.0 && !r.isUnsupported) failCnt++;
         }
+        pushBoldFont();
         if (failCnt > 0 || abortCnt > 0) {
-            ImGui::TextColored(ImVec4(0.95f, 0.40f, 0.35f, 1.0f), "[COMPLETED WITH ISSUES] %zu Passed | %zu Failed | %zu Aborted",
-                               m_allResults.size() - failCnt - abortCnt, failCnt, abortCnt);
+            ImGui::TextColored(ImVec4(0.95f, 0.40f, 0.35f, 1.0f), "⚠ Completed in %.1fs: %zu Passed | %zu Failed | %zu Aborted",
+                               m_elapsedSeconds, m_allResults.size() - failCnt - abortCnt, failCnt, abortCnt);
         } else {
-            ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "[PASSED] Benchmark suite finished (%zu results recorded).", m_allResults.size());
+            ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "✓ Benchmark suite finished in %.1fs (%zu results recorded)",
+                               m_elapsedSeconds, m_allResults.size());
         }
+        popBoldFont();
         
         if (!needsTwoLines) {
-            ImGui::SameLine();
-            ImGui::TextDisabled("| Selection locked.");
             ImGui::SameLine();
             float availBanner = ImGui::GetContentRegionAvail().x;
             if (availBanner >= totalBtnsW) {
@@ -3660,7 +3832,8 @@ void GuiApp::renderBenchmarkSuitePanel() {
             m_switchToScorecard = true;
         }
         ImGui::SameLine();
-        if (ImGui::SmallButton("Reconfigure Workloads")) {
+        if (ImGui::SmallButton("Clear Results")) {
+            m_allResults.clear();
             m_execState = ExecutionState::Idle;
         }
         ImGui::EndChild();
@@ -3669,7 +3842,7 @@ void GuiApp::renderBenchmarkSuitePanel() {
     }
 
     // Category View Filter Tabs with dynamic flowing wrap
-    ImGui::TextDisabled("View Category:");
+    ImGui::TextDisabled("Filter View:");
     size_t catCounts[5] = {0, 0, 0, 0, 0};
     size_t totalCatCount = 0;
     for (size_t ci = 0; ci < m_categories.size() && ci < 5; ++ci) {
@@ -3723,15 +3896,15 @@ void GuiApp::renderBenchmarkSuitePanel() {
     // Ray Tracing Scenario View Tabs (available whenever Ray Tracing or All is viewed)
     if (m_suiteCategoryFilter == 0 || m_suiteCategoryFilter == 3) {
         ImGui::Spacing();
-        ImGui::TextDisabled("Ray Tracing Scenario View:");
+        ImGui::TextDisabled("Preview Scene Scores:");
         ImGui::SameLine();
         const char* sceneViewLabels[] = { "Indoor Atrium (Sponza) [Canonical]", "Open-World Forest", "Outdoor Landscape", "Showroom Studio" };
         const char* sceneViewTags[] = { "indoor", "forest", "outdoor", "showroom" };
         const char* sceneViewTips[] = {
-            "View scores and tooltips for Indoor Atrium (Crytek Sponza, 262K tris) [Canonical Reference]",
-            "View scores and tooltips for Open-World Forest (1.05M+ tris, alpha-tested foliage)",
-            "View scores and tooltips for Outdoor Landscape (terrain vista, distance rays)",
-            "View scores and tooltips for Showroom Studio (108K tris, vehicle void)"
+            "Preview scores and thumbnails for Indoor Atrium (Crytek Sponza, 262K tris) [Canonical Reference]",
+            "Preview scores and thumbnails for Open-World Forest (1.05M+ tris, alpha-tested foliage)",
+            "Preview scores and thumbnails for Outdoor Landscape (terrain vista, distance rays)",
+            "Preview scores and thumbnails for Showroom Studio (108K tris, vehicle void)"
         };
         for (int svi = 0; svi < 4; ++svi) {
             float sBtnW = ImGui::CalcTextSize(sceneViewLabels[svi]).x + ImGui::GetStyle().FramePadding.x * 2.0f;
@@ -3759,7 +3932,7 @@ void GuiApp::renderBenchmarkSuitePanel() {
     ImGui::Spacing();
 
     // Toolbar with Select Filters and Collapse/Expand Controls
-    ImGui::TextDisabled("Select:");
+    ImGui::TextDisabled("Toggle Selection:");
 
     auto getCatStatus = [&](const std::string& catName) -> int {
         for (const auto& cat : m_categories) {
@@ -3855,11 +4028,11 @@ void GuiApp::renderBenchmarkSuitePanel() {
 
     auto renderFilterPill = [this](const char* label, int status, const char* tooltip) -> bool {
         if (status == 2) {
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.48f, 0.92f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.28f, 0.58f, 1.00f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.15f, 0.40f, 0.82f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.45f, 0.82f, 1.00f, 0.95f));
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.16f, 0.42f, 0.34f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.22f, 0.52f, 0.42f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.14f, 0.36f, 0.28f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.92f, 1.0f, 0.95f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.35f, 0.85f, 0.55f, 0.90f));
         } else if (status == 1) {
             ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.16f, 0.28f, 0.48f, 1.0f));
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.22f, 0.38f, 0.62f, 1.0f));
@@ -3897,21 +4070,29 @@ void GuiApp::renderBenchmarkSuitePanel() {
         return renderFilterPill(label, status, tooltip);
     };
 
+    auto catPillLabel = [](const char* base, int st) -> std::string {
+        if (st == 2) return std::string("✓ ") + base;
+        if (st == 1) return std::string("▪ ") + base;
+        return std::string("+ ") + base;
+    };
+
     if (!canEditWorkloads) ImGui::BeginDisabled(true);
-    if (flowPill("Select All", allItemsSelected ? 2 : 0, "Select all workloads across all categories")) {
+    if (flowPill("All", allItemsSelected ? 2 : 0, "Select all workloads across all categories")) {
         for (auto& cat : m_categories) {
             cat.allSelected = true;
             for (auto& sub : cat.subgroups) {
                 sub.allSelected = true;
                 sub.collapsed = false;
-                for (auto& item : sub.items) item.selected = true;
+                for (auto& item : sub.items) {
+                    if (!m_hideUnsupported || item.isSupported) item.selected = true;
+                }
             }
         }
         for (auto& dev : m_devices) {
             if (dev.isSystem) dev.selected = true;
         }
     }
-    if (flowPill("Deselect All", noneItemsSelected ? 2 : 0, "Deselect all workloads")) {
+    if (flowPill("None", noneItemsSelected ? 2 : 0, "Deselect all workloads")) {
         for (auto& cat : m_categories) {
             cat.allSelected = false;
             for (auto& sub : cat.subgroups) {
@@ -3921,19 +4102,46 @@ void GuiApp::renderBenchmarkSuitePanel() {
             }
         }
     }
-    if (flowPill("Compute", getCatStatus("Compute"), "Toggle Compute Precision workloads (FP64..INT4)")) {
+    if (flowPill("Quick Suite", 0, "Select a fast ~15s representative subset across Compute, Memory, Ray Tracing, and Graphics")) {
+        for (auto& cat : m_categories) {
+            cat.allSelected = false;
+            for (auto& sub : cat.subgroups) {
+                sub.allSelected = false;
+                bool hasSel = false;
+                for (auto& item : sub.items) {
+                    bool pick = (item.id == "FP32Vector") ||
+                                (item.id == "FP16Matrix" || item.id == "FP16Vector") ||
+                                (item.id == "MemoryBandwidth" && item.configIndex == 1) ||
+                                (item.id == "CacheHierarchyBandwidth" && (item.configIndex == 0 || item.configIndex == 2)) ||
+                                (item.id == "RayRawTraversal") ||
+                                (item.id == "RayScheduling" && (item.configIndex == 9 || item.configIndex == 11)) ||
+                                (item.id == "PixelFillRate" && item.configIndex == 0);
+                    item.selected = pick && item.isSupported;
+                    if (item.selected) hasSel = true;
+                }
+                sub.collapsed = !hasSel;
+            }
+        }
+        if (m_scene == "all") m_scene = "indoor";
+    }
+    int stComp = getCatStatus("Compute");
+    if (flowPill(catPillLabel("Compute", stComp).c_str(), stComp, "Toggle Compute Precision & Concurrency workloads (FP64..INT4)")) {
         toggleCat("Compute");
     }
-    if (flowPill("Memory", getCatStatus("Memory"), "Toggle VRAM streaming bandwidth and Cache Latency tests")) {
+    int stMem = getCatStatus("Memory");
+    if (flowPill(catPillLabel("Memory", stMem).c_str(), stMem, "Toggle VRAM streaming bandwidth and Cache Latency tests")) {
         toggleCat("Memory");
     }
-    if (flowPill("Ray Tracing", getCatStatus("Ray Tracing"), "Toggle all Ray Tracing & BVH Stress workloads")) {
+    int stRt = getCatStatus("Ray Tracing");
+    if (flowPill(catPillLabel("Ray Tracing", stRt).c_str(), stRt, "Toggle all Ray Tracing & BVH Stress workloads")) {
         toggleCat("Ray Tracing");
     }
-    if (flowPill("Graphics", getCatStatus("Graphics"), "Toggle Fixed-Function Pixel & Blend Fill Rate tests")) {
+    int stGfx = getCatStatus("Graphics");
+    if (flowPill(catPillLabel("Graphics", stGfx).c_str(), stGfx, "Toggle Fixed-Function Pixel & Blend Fill Rate tests")) {
         toggleCat("Graphics");
     }
-    if (flowPill("Host CPU", getCatStatus("Host System"), "Toggle Host System RAM Bandwidth and Latency tests")) {
+    int stHost = getCatStatus("Host System");
+    if (flowPill(catPillLabel("Host CPU", stHost).c_str(), stHost, "Toggle Host System RAM Bandwidth and Latency tests")) {
         toggleCat("Host System");
         if (getCatStatus("Host System") > 0) {
             for (auto& dev : m_devices) if (dev.isSystem) dev.selected = true;
@@ -4079,8 +4287,10 @@ void GuiApp::renderBenchmarkSuitePanel() {
         }
 
         // 2. Fixed column widths for Score and Speedup guarantee visibility
+        pushMonoFont();
         float scoreColW = std::max(s(130.0f), ImGui::CalcTextSize("99999.9 MRecords/s").x + s(12.0f));
         float deltaColW = hasAnyComparison ? std::max(s(130.0f), ImGui::CalcTextSize("[Baseline]").x + s(40.0f)) : 0.0f;
+        popMonoFont();
         int numSubCols = hasAnyComparison ? 3 : 2;
 
         // 3. Exact minimum width needed by workload column so NO test name is ever truncated
@@ -4129,8 +4339,12 @@ void GuiApp::renderBenchmarkSuitePanel() {
             badgeColor = ImVec4(0.35f, 0.65f, 0.95f, 0.85f);
         }
 
+        pushMonoFont();
         float badgeW = ImGui::CalcTextSize(rightBadge.c_str()).x;
+        popMonoFont();
+        pushBoldFont();
         float titleTextW = ImGui::CalcTextSize(sub.name.c_str()).x;
+        popBoldFont();
         float minHeaderW = s(58.0f) + titleTextW + s(24.0f) + badgeW + s(16.0f);
 
         float requiredCardW = std::max(minTableW, minHeaderW);
@@ -4204,7 +4418,9 @@ void GuiApp::renderBenchmarkSuitePanel() {
             else if (m_suiteActiveScene == "outdoor") displaySubName += " [Outdoor Landscape]";
             else if (m_suiteActiveScene == "showroom") displaySubName += " [Showroom Studio]";
         }
+        pushBoldFont();
         ImGui::TextColored(ImVec4(0.95f, 0.96f, 0.98f, 1.0f), "%s", displaySubName.c_str());
+        popBoldFont();
 
         ImGui::SameLine(0, s(6.0f));
         ImGui::TextDisabled("(%zu/%zu)", selectedCount, visibleCount);
@@ -4214,7 +4430,9 @@ void GuiApp::renderBenchmarkSuitePanel() {
         float badgeStartX = p0.x + cardW - badgeW - s(10.0f);
         if (badgeStartX > titleEndX + s(12.0f)) {
             ImGui::SetCursorScreenPos(ImVec2(badgeStartX, p0.y + textOffsetY));
+            pushMonoFont();
             ImGui::TextColored(badgeColor, "%s", rightBadge.c_str());
+            popMonoFont();
         }
 
         // Clickable title area for collapse/expand
@@ -4309,6 +4527,14 @@ void GuiApp::renderBenchmarkSuitePanel() {
                     }
                     ImGui::Unindent(s(16.0f));
 
+                    if (item.viz.linkedViewportMode >= 0 && ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
+                        m_rtViewportMode = item.viz.linkedViewportMode;
+                        if (item.viz.linkedViewportMode == 1) m_rtPassIndex = item.viz.linkedViewportSubIndex;
+                        else if (item.viz.linkedViewportMode == 2) m_rtMaterialIndex = item.viz.linkedViewportSubIndex;
+                        else if (item.viz.linkedViewportMode == 3) m_rtGeometryIndex = item.viz.linkedViewportSubIndex;
+                        m_switchToRtViewport = true;
+                    }
+
                     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
                         if (isUnsupported) {
                             std::string reason = !item.supportReason.empty() ? item.supportReason :
@@ -4325,6 +4551,7 @@ void GuiApp::renderBenchmarkSuitePanel() {
 
                     // Col 1: Score / Status / Metric Badge (ALWAYS VISIBLE!)
                     ImGui::TableNextColumn();
+                    pushMonoFont();
                     bool isCurrentlyTesting = !isUnsupported && (m_execState == ExecutionState::Running &&
                         m_hasCurrentlyRunningResult &&
                         matchesItem(m_currentlyRunningResult, item, m_telemetryGpuIndex));
@@ -4364,10 +4591,12 @@ void GuiApp::renderBenchmarkSuitePanel() {
                         }
                         ImGui::TextColored(ImVec4(0.35f, 0.65f, 0.95f, 0.85f), "%s", badge.c_str());
                     }
+                    popMonoFont();
 
                     // Col 2: Delta Speedup / Baseline Connecting Branch
                     if (hasAnyComparison) {
                         ImGui::TableNextColumn();
+                        pushMonoFont();
                         if (dispInfo.hasResult && dispInfo.primaryResult.time_ms == -3.0) {
                             ImGui::TextColored(ImVec4(0.95f, 0.70f, 0.25f, 1.0f), "[Aborted]");
                         } else if (dispInfo.hasResult && dispInfo.primaryResult.time_ms < 0.0) {
@@ -4419,7 +4648,8 @@ void GuiApp::renderBenchmarkSuitePanel() {
                                 activeBaselineSubcat = "";
                             }
                         }
-                    }
+                        }
+                        popMonoFont();
                     }
 
                     ImGui::PopID();
@@ -4550,7 +4780,9 @@ void GuiApp::renderLiveTelemetryDock() {
     }
 
     // Header bar with Device selection, Time Window, and live digital readout
+    pushBoldFont();
     ImGui::TextColored(ImVec4(0.40f, 0.80f, 1.0f, 1.0f), "LIVE TELEMETRY MONITOR");
+    popBoldFont();
     ImGui::SameLine();
     ImGui::TextDisabled("|");
     ImGui::SameLine();
@@ -4652,33 +4884,45 @@ void GuiApp::renderLiveTelemetryDock() {
 
         auto renderDualGpuRow = [this](const char* label, ImVec4 col, const DeviceTelemetrySnapshot& snap, float vMb, float tMb) {
             float startX = ImGui::GetCursorPosX();
+            pushBoldFont();
             ImGui::TextColored(col, "%s", label);
+            popBoldFont();
             ImGui::SameLine(startX + s(140.0f));
             ImGui::TextDisabled("Shader:");
             ImGui::SameLine(startX + s(195.0f));
+            pushMonoFont();
             ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.0f, 1.0f), "%4.0f MHz", snap.sclkMhz);
+            popMonoFont();
 
             ImGui::SameLine(startX + s(270.0f));
             ImGui::TextDisabled("| Mem:");
             ImGui::SameLine(startX + s(315.0f));
+            pushMonoFont();
             ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.0f, 1.0f), "%4.0f MHz", snap.mclkMhz);
+            popMonoFont();
 
             ImGui::SameLine(startX + s(390.0f));
             ImGui::TextDisabled("| Pwr:");
             ImGui::SameLine(startX + s(435.0f));
+            pushMonoFont();
             ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f), "%5.1f W", snap.powerWatts);
+            popMonoFont();
 
             ImGui::SameLine(startX + s(510.0f));
             ImGui::TextDisabled("| Temp:");
             ImGui::SameLine(startX + s(560.0f));
             ImVec4 tColor = (snap.tempJctC > 80.0f) ? ImVec4(0.95f, 0.3f, 0.3f, 1.0f) : ImVec4(0.35f, 0.85f, 0.65f, 1.0f);
+            pushMonoFont();
             ImGui::TextColored(tColor, "%4.0f C", snap.tempJctC);
+            popMonoFont();
 
             ImGui::SameLine(startX + s(630.0f));
             ImGui::TextDisabled("| VRAM:");
             ImGui::SameLine(startX + s(685.0f));
             float vPct = (tMb > 0.0f) ? (vMb / tMb) * 100.0f : 0.0f;
+            pushMonoFont();
             ImGui::TextColored(ImVec4(0.70f, 0.80f, 0.95f, 1.0f), "%5.0f / %5.0f MB (%2.0f%%)", vMb, tMb, vPct);
+            popMonoFont();
         };
         renderDualGpuRow("GPU 0 (Primary):", ImVec4(0.38f, 0.75f, 1.0f, 1.0f), snap0, v0, t0);
         renderDualGpuRow("GPU 1 (Secondary):", ImVec4(0.75f, 0.50f, 1.0f, 1.0f), snap1, v1, t1);
@@ -4692,28 +4936,38 @@ void GuiApp::renderLiveTelemetryDock() {
         float startX = ImGui::GetCursorPosX();
         ImGui::TextDisabled("Shader Clk:");
         ImGui::SameLine(startX + s(88.0f));
+        pushMonoFont();
         ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.0f, 1.0f), "%4.0f MHz", snap.sclkMhz);
+        popMonoFont();
 
         ImGui::SameLine(startX + s(185.0f));
         ImGui::TextDisabled("| Mem Clk:");
         ImGui::SameLine(startX + s(270.0f));
+        pushMonoFont();
         ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.0f, 1.0f), "%4.0f MHz", snap.mclkMhz);
+        popMonoFont();
 
         ImGui::SameLine(startX + s(365.0f));
         ImGui::TextDisabled("| Power:");
         ImGui::SameLine(startX + s(430.0f));
+        pushMonoFont();
         ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f), "%5.1f W", snap.powerWatts);
+        popMonoFont();
 
         ImGui::SameLine(startX + s(515.0f));
         ImGui::TextDisabled("| Junction:");
         ImGui::SameLine(startX + s(590.0f));
         ImVec4 tColor = (snap.tempJctC > 80.0f) ? ImVec4(0.95f, 0.3f, 0.3f, 1.0f) : ImVec4(0.35f, 0.85f, 0.65f, 1.0f);
+        pushMonoFont();
         ImGui::TextColored(tColor, "%4.1f C", snap.tempJctC);
+        popMonoFont();
 
         ImGui::SameLine(startX + s(675.0f));
         ImGui::TextDisabled("| VRAM:");
         ImGui::SameLine(startX + s(735.0f));
+        pushMonoFont();
         ImGui::TextColored(ImVec4(0.70f, 0.80f, 0.95f, 1.0f), "%5.0f / %5.0f MB (%2.0f%%)", vramMb, totalVramMb, vramPct);
+        popMonoFont();
     }
 
     ImGui::Spacing();
@@ -4860,7 +5114,9 @@ void GuiApp::renderSidebarTelemetry() {
 
     ImGui::Separator();
     ImGui::Spacing();
+    pushBoldFont();
     ImGui::TextColored(ImVec4(0.65f, 0.75f, 0.90f, 1.0f), "HARDWARE TELEMETRY");
+    popBoldFont();
     ImGui::SameLine();
     if (m_execState == ExecutionState::Running) {
         ImGui::TextColored(ImVec4(0.35f, 0.85f, 0.45f, 1.0f), "LIVE");
@@ -4999,7 +5255,7 @@ void GuiApp::renderSidebarTelemetry() {
         ImGui::TextColored(ImVec4(0.80f, 0.85f, 0.92f, 1.0f), "%s", label);
     };
 
-    ImPlotFlags plotFlags = ImPlotFlags_NoTitle | ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText;
+    ImPlotFlags plotFlags = ImPlotFlags_NoTitle | ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText | ImPlotFlags_NoInputs;
 
     // Graph 1: Frequencies (Shader & Memory Clock)
     if (ImPlot::BeginPlot("##sidebar_clocks", ImVec2(-1, plotH), plotFlags)) {
@@ -5144,37 +5400,64 @@ void GuiApp::renderResultsScorecard() {
 
         ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.11f, 0.14f, 0.20f, 1.0f));
         ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.24f, 0.36f, 0.55f, 0.6f));
-        ImGui::BeginChild("ScorecardSummaryCard", ImVec2(0, s(56.0f)), true);
+        ImGui::BeginChild("ScorecardSummaryCard", ImVec2(0, s(60.0f)), true, ImGuiWindowFlags_NoScrollbar);
 
-        ImGui::TextDisabled("Workloads:"); ImGui::SameLine();
-        ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%zu Passed", passedCount);
-        if (unsuppCount > 0) {
-            ImGui::SameLine();
-            ImGui::TextColored(ImVec4(0.85f, 0.55f, 0.15f, 1.0f), "| %zu Unsupported", unsuppCount);
-        }
-        if (failedCount > 0) {
-            ImGui::SameLine();
-            ImGui::TextColored(ImVec4(0.95f, 0.30f, 0.30f, 1.0f), "| %zu Failed", failedCount);
-        }
-        if (abortedCount > 0) {
-            ImGui::SameLine();
-            ImGui::TextColored(ImVec4(0.95f, 0.70f, 0.25f, 1.0f), "| %zu Aborted", abortedCount);
-        }
+        if (ImGui::BeginTable("ScorecardKpiTbl", 4, ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_BordersInnerV)) {
+            ImGui::TableNextRow();
 
-        ImGui::SameLine(s(320.0f));
-        if (peakCompute > 0.0) {
-            ImGui::TextDisabled("Peak Compute:"); ImGui::SameLine();
-            ImGui::TextColored(ImVec4(0.38f, 0.78f, 1.00f, 1.0f), "%.2f TFLOPS", peakCompute);
-            ImGui::SameLine();
-        }
-        if (peakBandwidth > 0.0) {
-            ImGui::TextDisabled("Peak VRAM:"); ImGui::SameLine();
-            ImGui::TextColored(ImVec4(0.38f, 0.78f, 1.00f, 1.0f), "%.1f GB/s", peakBandwidth);
-            ImGui::SameLine();
-        }
-        if (peakRT > 0.0) {
-            ImGui::TextDisabled("Peak Ray Tracing:"); ImGui::SameLine();
-            ImGui::TextColored(ImVec4(0.98f, 0.75f, 0.35f, 1.0f), "%.1f MRays/s", peakRT);
+            // KPI 1: Workloads Status
+            ImGui::TableNextColumn();
+            ImGui::TextDisabled("WORKLOAD STATUS");
+            pushBoldFont();
+            ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "✓ %zu Passed", passedCount);
+            popBoldFont();
+            if (unsuppCount > 0) {
+                ImGui::SameLine();
+                ImGui::TextColored(ImVec4(0.85f, 0.55f, 0.15f, 1.0f), "• %zu Unsupp", unsuppCount);
+            }
+            if (failedCount > 0) {
+                ImGui::SameLine();
+                ImGui::TextColored(ImVec4(0.95f, 0.30f, 0.30f, 1.0f), "• %zu Failed", failedCount);
+            }
+            if (abortedCount > 0) {
+                ImGui::SameLine();
+                ImGui::TextColored(ImVec4(0.95f, 0.70f, 0.25f, 1.0f), "• %zu Aborted", abortedCount);
+            }
+
+            // KPI 2: Peak Compute
+            ImGui::TableNextColumn();
+            ImGui::TextDisabled("PEAK COMPUTE");
+            pushMonoFont();
+            if (peakCompute > 0.0) {
+                ImGui::TextColored(ImVec4(0.38f, 0.78f, 1.00f, 1.0f), "%.2f TFLOPS", peakCompute);
+            } else {
+                ImGui::TextDisabled("--");
+            }
+            popMonoFont();
+
+            // KPI 3: Peak VRAM Bandwidth
+            ImGui::TableNextColumn();
+            ImGui::TextDisabled("PEAK VRAM BANDWIDTH");
+            pushMonoFont();
+            if (peakBandwidth > 0.0) {
+                ImGui::TextColored(ImVec4(0.35f, 0.92f, 0.80f, 1.0f), "%.1f GB/s", peakBandwidth);
+            } else {
+                ImGui::TextDisabled("--");
+            }
+            popMonoFont();
+
+            // KPI 4: Peak Ray Tracing
+            ImGui::TableNextColumn();
+            ImGui::TextDisabled("PEAK RAY TRACING");
+            pushMonoFont();
+            if (peakRT > 0.0) {
+                ImGui::TextColored(ImVec4(0.98f, 0.75f, 0.35f, 1.0f), "%.1f MRays/s", peakRT);
+            } else {
+                ImGui::TextDisabled("--");
+            }
+            popMonoFont();
+
+            ImGui::EndTable();
         }
 
         ImGui::EndChild();
@@ -5183,8 +5466,10 @@ void GuiApp::renderResultsScorecard() {
     } else {
         ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.10f, 0.12f, 0.18f, 1.0f));
         ImGui::BeginChild("EmptyScorecardPrompt", ImVec2(0, s(64.0f)), true);
+        pushBoldFont();
         ImGui::TextColored(ImVec4(0.70f, 0.78f, 0.90f, 1.0f), "No benchmark results recorded yet.");
-        ImGui::TextDisabled("Select workloads on the 'Benchmark Suite' tab and click 'START BENCHMARK' to generate performance scorecards.");
+        popBoldFont();
+        ImGui::TextDisabled("Select workloads on the 'Benchmark Suite' tab and click 'START BENCHMARKS' to generate performance scorecards.");
         ImGui::EndChild();
         ImGui::PopStyleColor();
         ImGui::Spacing();
@@ -5402,7 +5687,7 @@ void GuiApp::renderResultsScorecard() {
             // 5. Benchmark
             ImGui::TableNextColumn();
             ImGui::Text("%s", res.benchmarkName.c_str());
-            if (ImGui::IsItemHovered()) {
+            if (ImGui::IsItemHovered() || ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
                 // Match the suite item by engine id + config index (the result's
                 // benchmarkName is "<id> (<config name>)" for multi-config benches)
                 const BenchmarkItem* match = nullptr;
@@ -5425,13 +5710,21 @@ void GuiApp::renderResultsScorecard() {
                     }
                 }
                 if (match) {
-                    std::string scn = "";
-                    std::string sName = extractSceneName(res.benchmarkName);
-                    if (sName.find("Indoor") != std::string::npos) scn = "indoor";
-                    else if (sName.find("Forest") != std::string::npos) scn = "forest";
-                    else if (sName.find("Outdoor") != std::string::npos) scn = "outdoor";
-                    else if (sName.find("Showroom") != std::string::npos) scn = "showroom";
-                    renderBenchmarkTooltip(*match, scn);
+                    if (ImGui::IsItemClicked(ImGuiMouseButton_Right) && match->viz.linkedViewportMode >= 0) {
+                        m_rtViewportMode = match->viz.linkedViewportMode;
+                        if (match->viz.linkedViewportMode == 1) m_rtPassIndex = match->viz.linkedViewportSubIndex;
+                        else if (match->viz.linkedViewportMode == 2) m_rtMaterialIndex = match->viz.linkedViewportSubIndex;
+                        else if (match->viz.linkedViewportMode == 3) m_rtGeometryIndex = match->viz.linkedViewportSubIndex;
+                        m_switchToRtViewport = true;
+                    } else if (ImGui::IsItemHovered()) {
+                        std::string scn = "";
+                        std::string sName = extractSceneName(res.benchmarkName);
+                        if (sName.find("Indoor") != std::string::npos) scn = "indoor";
+                        else if (sName.find("Forest") != std::string::npos) scn = "forest";
+                        else if (sName.find("Outdoor") != std::string::npos) scn = "outdoor";
+                        else if (sName.find("Showroom") != std::string::npos) scn = "showroom";
+                        renderBenchmarkTooltip(*match, scn);
+                    }
                 }
             }
 
@@ -5441,6 +5734,7 @@ void GuiApp::renderResultsScorecard() {
 
             // 7. Score
             ImGui::TableNextColumn();
+            pushMonoFont();
             double curOpsPerSec = 0.0;
             if (res.time_ms > 0.0 && res.operations > 0) {
                 curOpsPerSec = (static_cast<double>(res.operations) / res.time_ms) * 1000.0;
@@ -5477,9 +5771,11 @@ void GuiApp::renderResultsScorecard() {
             } else {
                 ImGui::TextDisabled("-");
             }
+            popMonoFont();
 
             // 8. Speedup / Delta (Parity with console output)
             ImGui::TableNextColumn();
+            pushMonoFont();
             std::string deltaStr = "-";
             ImVec4 deltaCol = ImVec4(0.60f, 0.65f, 0.75f, 0.70f);
 
@@ -5729,14 +6025,17 @@ void GuiApp::renderResultsScorecard() {
             }
 
             ImGui::TextColored(deltaCol, "%s", deltaStr.c_str());
+            popMonoFont();
 
             // 9. Time
             ImGui::TableNextColumn();
+            pushMonoFont();
             if (res.time_ms > 0.0) {
                 ImGui::Text("%.1f", res.time_ms);
             } else {
                 ImGui::TextDisabled("-");
             }
+            popMonoFont();
         }
 
         ImGui::EndTable();
@@ -5786,7 +6085,7 @@ void GuiApp::renderRayTracingViewport() {
             "Open-World Forest (AAAOutdoorForest)",
             "forest",
             "Procedural Nature Heightfield",
-            "1,007,280 Triangles",
+            "1,051,696 Triangles",
             "High-density AAA woodland with rolling terrain, 350 soaring multi-tiered pines, 180 birches, 3,500 sword ferns, 2,500 shrubs, 180 nurse logs, and 600 boulders.",
             "89.90 MRays/s (97.5 FPS)",
             "266.27 MRays/s (288.9 FPS)",
@@ -5967,7 +6266,8 @@ void GuiApp::renderRayTracingViewport() {
             ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.16f, 0.20f, 0.28f, 1.0f));
             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.75f, 0.80f, 0.90f, 1.0f));
         }
-        if (ImGui::Button(modes[i], ImVec2(s(130.0f), s(28.0f)))) {
+        float modeBtnW = std::max(s(125.0f), ImGui::CalcTextSize(modes[i]).x + s(24.0f));
+        if (ImGui::Button(modes[i], ImVec2(modeBtnW, s(28.0f)))) {
             m_rtViewportMode = i;
         }
         ImGui::PopStyleColor(2);
@@ -5986,7 +6286,8 @@ void GuiApp::renderRayTracingViewport() {
     ImGui::Combo("##scene_combo", &m_rtSceneIndex, sceneComboNames, 4);
 
     ImGui::SameLine(0, s(16.0f));
-    if (ImGui::Button("Run Benchmark / Re-Render", ImVec2(s(190.0f), s(28.0f)))) {
+    float rerenderBtnW = std::max(s(190.0f), ImGui::CalcTextSize("Run Benchmark / Re-Render").x + s(24.0f));
+    if (ImGui::Button("Run Benchmark / Re-Render", ImVec2(rerenderBtnW, s(28.0f)))) {
         std::string targetTag = curSceneMeta.tag;
         if (targetTag == "forest") m_scene = "forest";
         else if (targetTag == "indoor") m_scene = "indoor";
@@ -6027,30 +6328,42 @@ void GuiApp::renderRayTracingViewport() {
             ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "[PARITY: PASS]");
             ImGui::SameLine(0, s(16.0f));
             ImGui::TextDisabled("PSNR:"); ImGui::SameLine();
+            pushMonoFont();
             ImGui::TextColored(ImVec4(0.95f, 0.95f, 0.95f, 1.0f), "%s", livePsnr.c_str());
+            popMonoFont();
             ImGui::SameLine(0, s(16.0f));
             ImGui::TextDisabled("Max Delta:"); ImGui::SameLine();
+            pushMonoFont();
             ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s", liveMaxDelta.c_str());
+            popMonoFont();
         } else {
             ImGui::TextColored(ImVec4(0.95f, 0.35f, 0.35f, 1.0f), "[PARITY: FAIL]");
             ImGui::SameLine(0, s(16.0f));
             ImGui::TextDisabled("PSNR:"); ImGui::SameLine();
+            pushMonoFont();
             ImGui::TextColored(ImVec4(0.95f, 0.40f, 0.40f, 1.0f), "%s", livePsnr.c_str());
+            popMonoFont();
             ImGui::SameLine(0, s(16.0f));
             ImGui::TextDisabled("Max Delta:"); ImGui::SameLine();
+            pushMonoFont();
             ImGui::TextColored(ImVec4(0.95f, 0.40f, 0.40f, 1.0f), "%s", liveMaxDelta.c_str());
+            popMonoFont();
         }
 
         ImGui::SameLine(0, s(16.0f));
         ImGui::TextDisabled("Triangles:"); ImGui::SameLine();
+        pushMonoFont();
         ImGui::TextColored(ImVec4(0.95f, 0.80f, 0.35f, 1.0f), "%s", curSceneMeta.triangleCount);
+        popMonoFont();
         ImGui::SameLine(0, s(16.0f));
         ImGui::TextDisabled("Speedup:"); ImGui::SameLine();
+        pushMonoFont();
         if (dynamicSpeedup != "--") {
             ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s (Live)", dynamicSpeedup.c_str());
         } else {
-            ImGui::TextColored(ImVec4(0.65f, 0.70f, 0.80f, 1.0f), "%s (Ref)", curSceneMeta.speedup);
+            ImGui::TextDisabled("Not Measured (Ref: %s)", curSceneMeta.speedup);
         }
+        popMonoFont();
         ImGui::EndChild();
         ImGui::PopStyleColor(2);
 
@@ -6068,7 +6381,8 @@ void GuiApp::renderRayTracingViewport() {
                 ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.13f, 0.16f, 0.22f, 1.0f));
                 ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.65f, 0.70f, 0.80f, 1.0f));
             }
-            if (ImGui::Button(pModes[m], ImVec2(s(150.0f), s(24.0f)))) {
+            float pBtnW = std::max(s(145.0f), ImGui::CalcTextSize(pModes[m]).x + s(24.0f));
+            if (ImGui::Button(pModes[m], ImVec2(pBtnW, s(24.0f)))) {
                 m_rtParityViewMode = m;
             }
             ImGui::PopStyleColor(2);
@@ -6233,9 +6547,12 @@ void GuiApp::renderRayTracingViewport() {
         if (ImGui::BeginTable("RtTechCompareTable", 2, ImGuiTableFlags_SizingStretchSame)) {
             ImGui::TableNextColumn();
             ImGui::BeginChild("TechACard", ImVec2(0, s(90.0f)), true);
+            pushBoldFont();
             ImGui::TextColored(ImVec4(0.40f, 0.78f, 1.00f, 1.0f), "Technique A: Megakernel (Reference)");
+            popBoldFont();
             ImGui::TextDisabled("Architecture: Monolithic Ray Query kernel (Stackless traversal)");
             ImGui::Text("Throughput: "); ImGui::SameLine();
+            pushMonoFont();
             if (dynamicTechAScore != "--") {
                 ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.0f, 1.0f), "%s (Live Measured)", dynamicTechAScore.c_str());
                 if (!dynamicTechARegInfo.empty()) {
@@ -6245,15 +6562,19 @@ void GuiApp::renderRayTracingViewport() {
             } else {
                 ImGui::TextColored(ImVec4(0.65f, 0.70f, 0.80f, 1.0f), "Not Measured");
                 ImGui::SameLine(0, s(16.0f));
-                ImGui::TextDisabled("Reference (R9700 720p): %s", curSceneMeta.techAScore);
+                ImGui::TextDisabled("Offline Ref (R9700 720p): %s", curSceneMeta.techAScore);
             }
+            popMonoFont();
             ImGui::EndChild();
 
             ImGui::TableNextColumn();
             ImGui::BeginChild("TechBCard", ImVec2(0, s(90.0f)), true);
+            pushBoldFont();
             ImGui::TextColored(ImVec4(0.98f, 0.72f, 0.35f, 1.0f), "Technique B: Compacted Wavefront (DGC / SER)");
+            popBoldFont();
             ImGui::TextDisabled("Architecture: Shader Execution Reordering & Clustered Ray Bins");
             ImGui::Text("Throughput: "); ImGui::SameLine();
+            pushMonoFont();
             if (dynamicTechBScore != "--") {
                 ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s (Live Measured)", dynamicTechBScore.c_str());
                 if (!dynamicTechBRegInfo.empty()) {
@@ -6263,8 +6584,9 @@ void GuiApp::renderRayTracingViewport() {
             } else {
                 ImGui::TextColored(ImVec4(0.65f, 0.70f, 0.80f, 1.0f), "Not Measured");
                 ImGui::SameLine(0, s(16.0f));
-                ImGui::TextDisabled("Reference (R9700 720p): %s", curSceneMeta.techBScore);
+                ImGui::TextDisabled("Offline Ref (R9700 720p): %s", curSceneMeta.techBScore);
             }
+            popMonoFont();
             ImGui::EndChild();
 
             ImGui::EndTable();
@@ -6388,7 +6710,7 @@ void GuiApp::renderRayTracingViewport() {
                 m_rtPassIndex = static_cast<int>(p);
             }
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("%s\n%s\nReference (R9700 720p): %s | %s | %s",
+                ImGui::SetTooltip("%s\n%s\nOffline Reference (R9700 720p): %s | %s | %s",
                                   passes[p].name, passes[p].passType,
                                   passes[p].timeMs, passes[p].mrays, passes[p].fps);
             }
@@ -6401,26 +6723,24 @@ void GuiApp::renderRayTracingViewport() {
         // Pass Information Header
         ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.10f, 0.14f, 0.20f, 1.0f));
         ImGui::BeginChild("PassInfoBanner", ImVec2(0, s(52.0f)), true, ImGuiWindowFlags_NoScrollbar);
+        pushBoldFont();
         ImGui::TextColored(ImVec4(0.40f, 0.80f, 1.00f, 1.0f), "%s", curPass.name);
+        popBoldFont();
         ImGui::SameLine(0, s(16.0f));
         ImGui::TextDisabled("| %s", curPass.passType);
         ImGui::SameLine(0, s(20.0f));
+        pushMonoFont();
         if (scoreDgc > 0.0) {
             double liveEstFps = (primaryRaysM > 0.0) ? (scoreDgc / primaryRaysM) : 0.0;
             ImGui::Text("Live Scene Rate: "); ImGui::SameLine();
             ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%.2f MRays/s (%.1f FPS, %.2f ms)", scoreDgc, liveEstFps, timeDgcMs);
             ImGui::SameLine(0, s(16.0f));
-            ImGui::TextDisabled("| Ref (R9700 720p): %s, %s", curPass.timeMs, curPass.mrays);
+            ImGui::TextDisabled("| Offline Ref (R9700 720p): %s, %s", curPass.timeMs, curPass.mrays);
         } else {
-            ImGui::Text("Ref Time (R9700 720p): "); ImGui::SameLine();
-            ImGui::TextColored(ImVec4(0.95f, 0.80f, 0.35f, 1.0f), "%s", curPass.timeMs);
-            ImGui::SameLine(0, s(16.0f));
-            ImGui::Text("Ref Rate: "); ImGui::SameLine();
-            ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s", curPass.mrays);
-            ImGui::SameLine(0, s(16.0f));
-            ImGui::Text("Ref FPS: "); ImGui::SameLine();
-            ImGui::TextColored(ImVec4(0.95f, 0.95f, 0.95f, 1.0f), "%s", curPass.fps);
+            ImGui::TextDisabled("Live Rate: Not Measured  |  Offline Ref (R9700 720p): %s  •  %s  •  %s",
+                                curPass.timeMs, curPass.mrays, curPass.fps);
         }
+        popMonoFont();
         ImGui::TextDisabled("%s", curPass.description);
         ImGui::EndChild();
         ImGui::PopStyleColor();
@@ -6544,9 +6864,12 @@ void GuiApp::renderRayTracingViewport() {
         }
         const auto& curMat = materials[m_rtMaterialIndex];
 
-        // Material selector buttons
+        // Material selector buttons (dynamically sized to prevent text clipping)
         for (size_t mi = 0; mi < numMaterials; ++mi) {
-            if (mi > 0) ImGui::SameLine(0, s(4.0f));
+            float btnW = ImGui::CalcTextSize(materials[mi].name).x + s(24.0f);
+            if (mi > 0 && (btnW + s(4.0f) <= ImGui::GetContentRegionAvail().x)) {
+                ImGui::SameLine(0, s(4.0f));
+            }
             bool isCur = (static_cast<size_t>(m_rtMaterialIndex) == mi);
             if (isCur) {
                 ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.00f, 0.48f, 0.80f, 1.0f));
@@ -6555,7 +6878,7 @@ void GuiApp::renderRayTracingViewport() {
                 ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.13f, 0.16f, 0.22f, 1.0f));
                 ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.70f, 0.75f, 0.85f, 1.0f));
             }
-            if (ImGui::Button(materials[mi].name, ImVec2(s(130.0f), s(24.0f)))) {
+            if (ImGui::Button(materials[mi].name, ImVec2(btnW, s(24.0f)))) {
                 m_rtMaterialIndex = static_cast<int>(mi);
             }
             ImGui::PopStyleColor(2);
@@ -6608,25 +6931,37 @@ void GuiApp::renderRayTracingViewport() {
 
             // Right Column: Physical Properties & Shader Formulation
             ImGui::BeginChild("MatPropsCard", ImVec2(0, cardHeight), true);
+            pushBoldFont();
             ImGui::TextColored(ImVec4(0.40f, 0.80f, 1.00f, 1.0f), "%s", curMat.name);
+            popBoldFont();
             ImGui::TextDisabled("BSDF Formulation: %s", curMat.bsdfClass);
             ImGui::Separator();
 
             ImGui::Spacing();
             ImGui::Text("Base Color Factor: "); ImGui::SameLine();
+            pushMonoFont();
             ImGui::TextColored(ImVec4(0.95f, 0.95f, 0.95f, 1.0f), "%s", curMat.baseColor);
+            popMonoFont();
 
             ImGui::Text("Metallic Factor: "); ImGui::SameLine();
+            pushMonoFont();
             ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%.2f", curMat.metallic);
+            popMonoFont();
             ImGui::SameLine(0, s(20.0f));
             ImGui::Text("Roughness Factor: "); ImGui::SameLine();
+            pushMonoFont();
             ImGui::TextColored(ImVec4(0.95f, 0.70f, 0.35f, 1.0f), "%.2f", curMat.roughness);
+            popMonoFont();
 
             ImGui::Text("Transmission Factor: "); ImGui::SameLine();
+            pushMonoFont();
             ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.0f, 1.0f), "%.2f", curMat.transmission);
+            popMonoFont();
             ImGui::SameLine(0, s(20.0f));
             ImGui::Text("Index of Refraction (IOR): "); ImGui::SameLine();
+            pushMonoFont();
             ImGui::TextColored(ImVec4(0.95f, 0.95f, 0.95f, 1.0f), "%.2f", curMat.ior);
+            popMonoFont();
 
             ImGui::Spacing();
             ImGui::Text("Wavefront Archetype: "); ImGui::SameLine();
@@ -6702,9 +7037,12 @@ void GuiApp::renderRayTracingViewport() {
         }
         const auto& curGeo = geoViews[m_rtGeometryIndex];
 
-        // Geometry Selector buttons
+        // Geometry Selector buttons (dynamically sized to prevent text clipping)
         for (size_t gi = 0; gi < numGeo; ++gi) {
-            if (gi > 0) ImGui::SameLine(0, s(4.0f));
+            float btnW = ImGui::CalcTextSize(geoViews[gi].title).x + s(24.0f);
+            if (gi > 0 && (btnW + s(4.0f) <= ImGui::GetContentRegionAvail().x)) {
+                ImGui::SameLine(0, s(4.0f));
+            }
             bool isCur = (static_cast<size_t>(m_rtGeometryIndex) == gi);
             if (isCur) {
                 ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.00f, 0.48f, 0.80f, 1.0f));
@@ -6713,7 +7051,7 @@ void GuiApp::renderRayTracingViewport() {
                 ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.13f, 0.16f, 0.22f, 1.0f));
                 ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.70f, 0.75f, 0.85f, 1.0f));
             }
-            if (ImGui::Button(geoViews[gi].title, ImVec2(s(220.0f), s(24.0f)))) {
+            if (ImGui::Button(geoViews[gi].title, ImVec2(btnW, s(24.0f)))) {
                 m_rtGeometryIndex = static_cast<int>(gi);
             }
             ImGui::PopStyleColor(2);
@@ -6765,21 +7103,31 @@ void GuiApp::renderRayTracingViewport() {
 
             // Right Column: Geometry & BVH Topology Specs
             ImGui::BeginChild("GeoPropsCard", ImVec2(0, cardHeight), true);
+            pushBoldFont();
             ImGui::TextColored(ImVec4(0.40f, 0.80f, 1.00f, 1.0f), "%s", curGeo.title);
+            popBoldFont();
             ImGui::Separator();
 
             ImGui::Spacing();
             ImGui::Text("Primitive Count: "); ImGui::SameLine();
+            pushMonoFont();
             ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s", curGeo.triangles);
+            popMonoFont();
 
             ImGui::Text("Vertex Count: "); ImGui::SameLine();
+            pushMonoFont();
             ImGui::TextColored(ImVec4(0.95f, 0.80f, 0.35f, 1.0f), "%s", curGeo.vertices);
+            popMonoFont();
 
             ImGui::Text("Vertex Format: "); ImGui::SameLine();
+            pushMonoFont();
             ImGui::TextColored(ImVec4(0.95f, 0.95f, 0.95f, 1.0f), "%s", curGeo.stride);
+            popMonoFont();
 
             ImGui::Text("AS Memory Footprint: "); ImGui::SameLine();
+            pushMonoFont();
             ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.0f, 1.0f), "%s", curGeo.blasMemory);
+            popMonoFont();
 
             ImGui::Spacing();
             ImGui::Separator();

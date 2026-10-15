@@ -89,8 +89,10 @@ public:
   void *getVulkanContext() const override { return (void *)this; }
 
   // Hardware GPU timestamp profiling
-  void startTiming() override;
-  double stopTiming() override;
+  void startTiming() override { startTiming(VK_NULL_HANDLE); }
+  double stopTiming() override { return stopTiming(VK_NULL_HANDLE); }
+  void startTiming(VkCommandBuffer cmd);
+  double stopTiming(VkCommandBuffer cmd);
   bool hasGpuTiming() const override { return timingSupported; }
 
   // Vulkan-specific accessors
@@ -309,8 +311,17 @@ private:
   double timestampPeriod = 1.0;
   uint32_t currentQueryIndex = 0;
   static constexpr uint32_t kMaxTimestamps = 4096;
-  VkCommandBuffer timingCmdStart = VK_NULL_HANDLE;
-  VkCommandBuffer timingCmdStop = VK_NULL_HANDLE;
+  struct TimestampQueryPair {
+    uint32_t startQuery = 0;
+    uint32_t stopQuery = 0;
+  };
+  std::vector<TimestampQueryPair> m_activeTimingPairs;
+  bool timingRecording = false;
+  bool timingSubmitted = false;
+  VkFence timingSubmittedFence = VK_NULL_HANDLE;
+
+  void maybeBeginTiming(VkCommandBuffer cmd);
+  void maybeEndTiming(VkCommandBuffer cmd);
   bool hostQueryResetSupported = false;
 
   PFN_vkCmdPipelineBarrier2KHR vkCmdPipelineBarrier2KHR_ptr = nullptr;

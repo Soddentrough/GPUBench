@@ -219,7 +219,7 @@ All benchmarks were evaluated at native **4K UHD (3840×2160, 8,294,400 primary 
 | **Showroom Studio** (`toycar.glb`) | 108,936 | 57.6 FPS (17.37 ms) | **101.3 FPS (9.87 ms)** | **1.76x (+75.9%)** | 8,294,400 / 8,294,400 | 120.0 dB |
 | **Indoor Atrium** (`sponza.glb`) | 262,267 | 30.5 FPS (32.77 ms) | **68.0 FPS (14.70 ms)** | **2.23x (+123.0%)**| 8,294,400 / 8,294,400 | 120.0 dB |
 | **Outdoor Landscape** (Procedural) | 57,216 | 185.8 FPS (5.38 ms) | **420.0 FPS (2.38 ms)** | **2.26x (+126.1%)**| 8,294,400 / 8,294,400 | 120.0 dB |
-| **Open-World Forest** (Dense Nature) | 1,007,280| 27.0 FPS (37.00 ms) | **55.0 FPS (18.18 ms)** | **2.04x (+103.7%)**| 8,294,400 / 8,294,400 | 120.0 dB |
+| **Open-World Forest** (Dense Nature) | 1,051,696| 27.0 FPS (37.00 ms) | **55.0 FPS (18.18 ms)** | **2.04x (+103.7%)**| 8,294,400 / 8,294,400 | 120.0 dB |
 
 Across all four benchmark scenarios, decoupling the ray tracing pipeline with DGC cuts frame render times by **43% to 56%**, doubling interactive framerates while achieving bit-exact visual parity.
 

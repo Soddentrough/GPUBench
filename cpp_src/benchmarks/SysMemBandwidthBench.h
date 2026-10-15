@@ -33,6 +33,7 @@ public:
   void Run(uint32_t config_idx = 0) override;
   void Teardown() override;
   BenchmarkResult GetResult(uint32_t config_idx = 0) const override;
+  bool ValidateResults(uint32_t config_idx = 0) const override;
   const char *GetComponent(uint32_t config_idx = 0) const override {
     return "Memory";
   }
@@ -66,7 +67,8 @@ private:
   std::condition_variable cvStart;
   std::condition_variable cvDone;
   std::atomic<bool> stopPool{false};
-  uint32_t activeConfigIdx = 0;
+  uint32_t activeConfigIdx = 0xFFFFFFFFu;
+  uint32_t sliceIndex = 0;
   uint32_t workGeneration = 0;
   std::atomic<unsigned int> completedWorkers{0};
   void workerLoop(unsigned int tid);

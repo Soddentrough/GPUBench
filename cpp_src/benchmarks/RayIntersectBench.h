@@ -48,10 +48,11 @@ public:
   void Teardown() override;
 
   BenchmarkResult GetResult(uint32_t config_idx = 0) const override;
+  bool ValidateResults(uint32_t config_idx = 0) const override;
   void DumpGeometry() const override;
 
   uint32_t GetNumConfigs() const override { return 2; }
-  int GetSortWeight(uint32_t = 0) const override { return 670; }
+  int GetSortWeight(uint32_t = 0) const override { return 616; }
   std::vector<std::string> GetAliases() const override {
     return {"triangle", "intersect", "ray_triangle", "ray_intersect", "rt_triangle", "raytriangle", "raytracing_intersect", "rayintersect", "raytracing"};
   }

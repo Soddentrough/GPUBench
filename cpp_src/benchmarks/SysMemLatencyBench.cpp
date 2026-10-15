@@ -80,29 +80,28 @@ void SysMemLatencyBench::Setup(IComputeContext &context,
     pBuffer[lineIndices[i] * kStrideElements] = lineIndices[i + 1] * kStrideElements;
   }
   pBuffer[lineIndices[numLines - 1] * kStrideElements] = lineIndices[0] * kStrideElements; // Close the cycle
+  currentIndex = 0;
 }
 
 void SysMemLatencyBench::Run(uint32_t config_idx) {
+  (void)config_idx;
   uint32_t *pBuffer = reinterpret_cast<uint32_t *>(buffer);
-  uint32_t index = 0;
+  uint32_t index = currentIndex;
 
-  // Warm up
-  for (int i = 0; i < 1000; i++) {
-    index = pBuffer[index];
-  }
-
-  const uint64_t iterations = 1000000; // 1M jumps
+  // Execute one fixed quantum (100,000 pointer-chase hops);
+  // BenchmarkRunner::runHostBenchmarks executes warmup and then runs this
+  // repeatedly over the fixed measurement time window.
+  const uint64_t iterations = 100000;
 
   auto start = std::chrono::high_resolution_clock::now();
 
-  // Pointer chasing loop
   for (uint64_t i = 0; i < iterations; ++i) {
     index = pBuffer[index];
   }
 
   auto end = std::chrono::high_resolution_clock::now();
 
-  // Use index to prevent optimization
+  currentIndex = index;
   volatile uint32_t sink = index;
   (void)sink;
 
@@ -128,3 +127,44 @@ uint32_t SysMemLatencyBench::GetNumConfigs() const { return 1; }
 std::string SysMemLatencyBench::GetConfigName(uint32_t config_idx) const {
   return "Default";
 }
+
+bool SysMemLatencyBench::ValidateResults(uint32_t config_idx) const {
+  if (config_idx >= GetNumConfigs() || !buffer || bufferSize == 0) {
+    return false;
+  }
+  if (lastRunOps == 0 || lastRunTimeMs <= 0.0) {
+    return false;
+  }
+
+  const uint32_t *pBuffer = reinterpret_cast<const uint32_t *>(buffer);
+  constexpr uint32_t kStrideElements = 16; // 64 bytes
+  const uint32_t totalElements = static_cast<uint32_t>(bufferSize / sizeof(uint32_t));
+
+  // Traverse 10,000 steps of the pointer chasing chain starting from index 0
+  uint32_t curr = 0;
+  for (uint32_t step = 0; step < 10000; ++step) {
+    uint32_t next = pBuffer[curr];
+    // Must be 64-byte aligned (multiple of 16 uint32s)
+    if (next % kStrideElements != 0) {
+      std::cerr << "SysMemLatencyBench validation failed: unaligned pointer chase target "
+                << next << " at step " << step << "\n";
+      return false;
+    }
+    // Must be within buffer boundaries
+    if (next >= totalElements) {
+      std::cerr << "SysMemLatencyBench validation failed: out-of-bounds index "
+                << next << " at step " << step << "\n";
+      return false;
+    }
+    // Must not be a degenerate self-loop
+    if (next == curr) {
+      std::cerr << "SysMemLatencyBench validation failed: degenerate self-loop at index "
+                << curr << "\n";
+      return false;
+    }
+    curr = next;
+  }
+
+  return true;
+}
+

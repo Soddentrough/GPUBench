@@ -28,7 +28,7 @@ Before launching GPU-intensive benchmarks or profiling sessions, verify GPU 1 ut
 ### 2.1 Querying GPU 1 with `amd-smi`
 Always verify SMI tool availability:
 - `amd-smi` (or `/opt/rocm/current/bin/amd-smi`)
-- `rocm-smi` (or `/opt/rocm/current/bin/rocm-smi`)
+- `amd-smi` is recommended; note that `rocm-smi` is deprecated
 
 ```bash
 # Query GPU 1 utilization, power, and VRAM capacity

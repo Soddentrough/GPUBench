@@ -23,13 +23,13 @@ layout(set = 0, binding = 0) buffer Data {
 void main() {
     uint index = gl_GlobalInvocationID.x;
 
-    uint seedIdx = (index * 4093u + 17u) & 1023u;
+    uint seedIdx = 524288u + ((index * 4093u + 17u) & 1023u);
     vec4 seed = vec4(InOutBuffer.data[seedIdx]);
 
     bf16vec4 a[32];
     APPLY32(INIT)
 
-    bf16vec4 m = bf16vec4(vec4(-0.248046875f, 0.125f, -0.1875f, 0.0625f));
+    bf16vec4 m = bf16vec4(vec4(-0.248046875f, 0.125f, -0.0625f, 0.1875f));
 
     // Each iteration performs 32 bf16vec4 dot products (64 v_dot2_bf16_bf16 = 256 BF16 ops).
     // Stays purely in BF16 inside the loop — zero FP32 adds or BF16<->FP32 conversions.

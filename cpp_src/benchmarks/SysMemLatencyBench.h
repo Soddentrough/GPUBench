@@ -21,6 +21,7 @@ public:
   void Run(uint32_t config_idx = 0) override;
   void Teardown() override;
   BenchmarkResult GetResult(uint32_t config_idx = 0) const override;
+  bool ValidateResults(uint32_t config_idx = 0) const override;
   uint32_t GetNumConfigs() const override;
   std::string GetConfigName(uint32_t config_idx) const override;
   const char *GetComponent(uint32_t config_idx = 0) const override {
@@ -37,6 +38,7 @@ public:
 private:
   void *buffer = nullptr;
   size_t bufferSize = 0;
+  uint32_t currentIndex = 0;
   double lastRunTimeMs = 0.0;
   uint64_t lastRunOps = 0;
 };

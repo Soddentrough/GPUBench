@@ -1,0 +1,70 @@
+#version 460
+#extension GL_EXT_ray_tracing : require
+#extension GL_EXT_shader_invocation_reorder : require
+
+layout(location = 0) rayPayloadEXT vec3 payload;
+
+layout(binding = 0, set = 0) uniform accelerationStructureEXT topLevelAS;
+layout(binding = 1, set = 0, std430) buffer ResultBuffer {
+    uint hits;
+};
+
+layout(push_constant) uniform PushConstants {
+    uint rayCount;
+    float coherenceFactor;
+    uint seed;
+    uint enableSER;
+} pc;
+
+uint hash(uint seed) {
+    seed = (seed ^ 61) ^ (seed >> 16);
+    seed *= 9;
+    seed = seed ^ (seed >> 4);
+    seed *= 0x27d4eb2d;
+    seed = seed ^ (seed >> 15);
+    return seed;
+}
+
+void main() {
+    uint idx = gl_LaunchIDEXT.x;
+    if (idx >= pc.rayCount) return;
+
+    const uint gridWidth = 2000u;
+    const uint tilesX = gridWidth / 8u;
+    uint tileIdx = idx / 32u;
+    uint laneIdx = idx % 32u;
+    uint ix = (tileIdx % tilesX) * 8u + (laneIdx % 8u);
+    uint iy = (tileIdx / tilesX) * 4u + (laneIdx / 8u);
+
+    float fx = (float(ix) / float(gridWidth)) * 160.0 - 80.0;
+    float fy = (float(iy) / float(gridWidth)) * 160.0 - 80.0;
+
+    uint state = hash(idx + pc.seed);
+    float jx = float(state % 100) / 100.0 * 0.05;
+    state = hash(state);
+    float jy = float(state % 100) / 100.0 * 0.05;
+    
+    vec3 origin = vec3(fx + jx, fy + jy, -95.0);
+    
+    // Directional divergence matching raydiv_pipeline.rgen (uniform ALU across all coherence factors)
+    float maxTheta = (1.0 - pc.coherenceFactor) * 1.57079632679; // 0 rad at 1.0, pi/2 rad at 0.0
+    state = hash(state);
+    float u1 = float(state % 10000) / 10000.0;
+    state = hash(state);
+    float u2 = float(state % 10000) / 10000.0;
+    
+    float cosTheta = 1.0 - u1 * (1.0 - cos(maxTheta));
+    float sinTheta = sqrt(max(0.0, 1.0 - cosTheta * cosTheta));
+    float phi = 6.28318530718 * u2;
+    vec3 dir = normalize(vec3(sinTheta * cos(phi), sinTheta * sin(phi), max(0.005, cosTheta)));
+    
+    payload = vec3(0.0);
+
+    // Hardware SER Reordering with single uniform hit shader
+    hitObjectEXT hObj;
+    hitObjectTraceRayEXT(hObj, topLevelAS, gl_RayFlagsNoneEXT, 0xFF, 0, 1, 0, origin, 0.001, dir, 500.0, 0);
+    reorderThreadEXT(hObj);
+    hitObjectExecuteShaderEXT(hObj, 0);
+
+    atomicAdd(hits, uint(payload.x * 100.0) + uint(payload.y * 10.0) + uint(payload.z));
+}

@@ -27,7 +27,7 @@ extern "C" __global__ void run_benchmark(unsigned int *data) {
 #if defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) || \
     defined(__gfx1103__) || defined(__gfx1150__) || defined(__gfx1151__) || \
     defined(__gfx1200__) || defined(__gfx1201__)
-  unsigned int raw = data[idx % 1024u];
+  unsigned int raw = data[524288u + (idx % 1024u)];
   short s0 = static_cast<short>((raw & 0xFFFFu) + 1u);
   short s1 = static_cast<short>(((raw >> 16) & 0xFFFFu) + 2u);
 

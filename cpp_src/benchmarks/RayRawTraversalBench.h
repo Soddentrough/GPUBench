@@ -58,7 +58,7 @@ public:
   void DumpGeometry() const override;
 
   uint32_t GetNumConfigs() const override { return 2; }
-  int GetSortWeight(uint32_t = 0) const override { return 669; }
+  int GetSortWeight(uint32_t = 0) const override { return 615; }
   std::string GetConfigName(uint32_t config_idx) const override;
   const char *GetComponent(uint32_t config_idx = 0) const override;
   const char *GetSubCategory(uint32_t config_idx = 0) const override;

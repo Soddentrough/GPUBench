@@ -53,7 +53,7 @@ public:
   int GetSortWeight() const override { return 28; }
 
   uint32_t GetNumConfigs() const override { return static_cast<uint32_t>(configs.size()); }
-  uint32_t GetExpectedKernelCount() const override { return 3; }
+  uint32_t GetExpectedKernelCount() const override { return 4; }
   std::string GetConfigName(uint32_t config_idx) const override;
   std::string GetConfigSupportNote(uint32_t config_idx) const override;
 
@@ -61,6 +61,7 @@ private:
   IComputeContext *context = nullptr;
   std::vector<IndirectBenchConfig> configs;
 
+  ComputeKernel kernelReset = nullptr;
   ComputeKernel kernelClassify = nullptr;
   ComputeKernel kernelIndirectWorker = nullptr;
   ComputeKernel kernelDirectWorker = nullptr;

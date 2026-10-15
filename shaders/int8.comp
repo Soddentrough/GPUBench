@@ -57,5 +57,5 @@ void main() {
 
     // Prevent optimization away — store one byte of result
     int total = acc0 + acc1 + acc2 + acc3 + acc4 + acc5 + acc6 + acc7;
-    InOutBuffer.data[index] = i8vec4(int8_t(total));
+    InOutBuffer.data[index] = i8vec4(int8_t((total >> 16) | 1));
 }

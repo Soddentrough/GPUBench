@@ -55,6 +55,7 @@ private:
   IComputeContext *context = nullptr;
   std::vector<DualIssueConfig> configs;
   std::vector<ComputeKernel> kernels;
+  std::vector<ComputeBuffer> buffers;
   ComputeBuffer buffer = nullptr;
   uint32_t numElements = 0;
 };

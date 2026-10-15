@@ -7,7 +7,5 @@ __kernel void run_benchmark(__global uint* data, __global uint* pc) {
         val = data[val + tid];
     }
 
-    if (val == 0xDEADBEEF) {
-        data[0] = val;
-    }
+    data[1] = val;
 }

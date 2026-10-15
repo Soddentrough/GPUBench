@@ -10,12 +10,13 @@ GPUBench is a high-performance cross-platform GPU benchmarking tool designed to 
 - **Multi-Backend Support**: Benchmarks using Vulkan, OpenCL, and ROCm/HIP.
 - **Hardware Ray Tracing Suite**:
   - **Ray Scheduling Architectures**: Megakernel vs. Decoupled Wavefronts via Device-Generated Commands (DGC) and Shader Execution Reordering (SER, where supported by hardware).
+  - **Raw Hardware BVH Traversal (`RayRawTraversal`)**: Hardware BVH8 node traversal evaluating zero-overhead in-register ray queries (Coherent Triangles & Deep Multi-Layer Box Stress models).
   - **Real-World Material Divergence**: Realistic heterogeneous material distributions testing VGPR allocation pressure and SIMD wave divergence.
   - **Spatial Ray Divergence**: Parametric cone divergence measuring BVH traversal cache hit rates.
   - **Multi-Layer Alpha Testing**: AnyHit alpha evaluation through 16 stacked cutout planes.
   - **Acceleration Structure Throughput**: BLAS/TLAS build and dynamic vertex refit rates.
 - **Comprehensive Compute Data Types**: 
-  - Actively Supported Hardware Types: FP64, FP32, FP16, BF16 (native ROCm/HIP `__hip_bfloat16` & Vulkan `VK_KHR_shader_bfloat16`), FP8 (Vulkan Cooperative Matrix / ROCm WMMA), INT8, INT4 (ROCm/HIP sub-byte matrix dot & Vulkan Cooperative Matrix probe)
+  - Actively Supported Hardware Types: FP64, FP32, FP16, BF16 (native ROCm/HIP `__hip_bfloat16` & Vulkan `VK_KHR_shader_bfloat16`; transparently falls back to IEEE FP16 emulation on Vulkan when `VK_KHR_shader_bfloat16` is unsupported), FP8 (Vulkan Cooperative Matrix / ROCm WMMA), INT8, INT4 (ROCm/HIP sub-byte matrix dot & Vulkan Cooperative Matrix probe)
   - Capability-Probed / Vendor-Specific Types: FP6 (probed; NVIDIA `SPV_NV_float6`), FP4 (probed; `VK_NV_cooperative_matrix2` / `SPV_NV_float4` hardware only, software emulation avoided)
 - **Memory & Cache Hierarchy**: Measure Device VRAM Bandwidth, Host/PCIe Bandwidth, L0 Cache Latency, and full multi-level cache latency curves (16 KB to 256 MB spanning L0 TCP, GL1, GL2, L3 MALL, and GDDR6 DRAM). Cache bandwidth rows are disabled to prevent compiler dead-code elimination.
 - **Dynamic Loading**: Backends are loaded at runtime, making them optional and reducing installation dependencies.
@@ -138,7 +139,7 @@ All scenario throughput measurements below were evaluated at **4K UHD (3840x2160
 - **Showroom Studio (`-s showroom`)**: $108,936$ triangles featuring the Khronos ToyCar glTF asset with clearcoat, decals, and velvet pedestal. Device-Generated Commands (DGC) achieve **101.3 FPS** vs. Megakernel **57.6 FPS** (**1.76x speedup**).
 - **Complex Indoor Atrium (`-s indoor`)**: $262,267$ triangles featuring Crytek Sponza glTF with 25 PBR materials and 0% sky escape. Device-Generated Commands (DGC) achieve **68.0 FPS** vs. Megakernel **30.5 FPS** (**2.23x speedup**).
 - **Open-World Outdoor Landscape (`-s outdoor`)**: $57,216$ triangles spanning $>2000\text{m}$ alpine terrain, lake, conifer foliage, and Rayleigh-Mie atmospheric scattering. Device-Generated Commands (DGC) achieve **420.0 FPS** vs. Megakernel **185.8 FPS** (**2.26x speedup**).
-- **Open-World Forest (`-s forest`)**: $1,007,280$ triangles featuring high-density 256×256 terrain, river bathymetry, 530 trees (350 pines, 180 birches), and 8 nature PBR shaders. Device-Generated Commands (DGC) achieve **55.0 FPS** vs. Megakernel **27.0 FPS** (**2.04x speedup**).
+- **Open-World Forest (`-s forest`)**: $1,051,696$ triangles featuring high-density 256×256 terrain, river bathymetry, 530 trees (350 pines, 180 birches), and 8 nature PBR shaders. Device-Generated Commands (DGC) achieve **55.0 FPS** vs. Megakernel **27.0 FPS** (**2.04x speedup**).
 - **100% Bit-Exact Analytical Parity**: Verified bit-exact 120.00 dB PSNR, 0.000000 MAE, and 0 discrepant pixels across all 8,294,400 pixels at 4K UHD across all four scenarios.
 
 ---

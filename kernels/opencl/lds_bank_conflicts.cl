@@ -1,12 +1,12 @@
 __kernel void run_benchmark(__global uint *results,
                             uint stride,
                             uint iters) {
-  __local uint lds[1024];
+  __local uint lds[1280];
 
   uint tid = get_local_id(0);
   uint gid = get_global_id(0);
 
-  for (uint i = tid; i < 1024u; i += 32u) {
+  for (uint i = tid; i < 1280u; i += 32u) {
     lds[i] = 32u;
   }
   barrier(CLK_LOCAL_MEM_FENCE);
@@ -22,19 +22,17 @@ __kernel void run_benchmark(__global uint *results,
   uint acc7 = 0u;
 
   for (uint i = 0u; i < iters; i++) {
-    acc0 += lds[(base_addr + 0u * stride) & 1023u];
-    acc1 += lds[(base_addr + 1u * stride) & 1023u];
-    acc2 += lds[(base_addr + 2u * stride) & 1023u];
-    acc3 += lds[(base_addr + 3u * stride) & 1023u];
-    acc4 += lds[(base_addr + 4u * stride) & 1023u];
-    acc5 += lds[(base_addr + 5u * stride) & 1023u];
-    acc6 += lds[(base_addr + 6u * stride) & 1023u];
-    acc7 += lds[(base_addr + 7u * stride) & 1023u];
+    acc0 += lds[base_addr + 0u];
+    acc1 += lds[base_addr + 32u];
+    acc2 += lds[base_addr + 64u];
+    acc3 += lds[base_addr + 96u];
+    acc4 += lds[base_addr + 128u];
+    acc5 += lds[base_addr + 160u];
+    acc6 += lds[base_addr + 192u];
+    acc7 += lds[base_addr + 224u];
     base_addr = (base_addr + acc0) & 1023u;
   }
 
   uint total = acc0 + acc1 + acc2 + acc3 + acc4 + acc5 + acc6 + acc7;
-  if (total == 0xDEADBEEFu) {
-    results[gid] = total;
-  }
+  results[gid] = total;
 }

@@ -101,6 +101,14 @@ void BenchmarkRunner::setSamplesPerPixel(uint32_t spp) {
   }
 }
 
+void BenchmarkRunner::setShowPower(bool p) {
+  if (formatter) formatter->setShowPower(p);
+}
+
+void BenchmarkRunner::setShowTelemetry(bool t) {
+  if (formatter) formatter->setShowTelemetry(t);
+}
+
 std::vector<std::string> BenchmarkRunner::getAvailableBenchmarks() const {
   std::vector<std::string> names;
   for (const auto &bench : benchmarks) {
@@ -591,26 +599,8 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
       }
     }
 
-    uint32_t effectiveWidth = renderWidth;
-    uint32_t effectiveHeight = renderHeight;
-    const bool isAutoRes = (effectiveWidth == 0 || effectiveHeight == 0);
-    if (isAutoRes) {
-      // Adaptive tier-down based on device memory:
-      // >= 16 GB: 4K UHD (3840x2160)
-      // >= 8 GB:  1440p QHD (2560x1440)
-      // < 8 GB:   1080p FHD (1920x1080)
-      const uint64_t gib = 1024ULL * 1024ULL * 1024ULL;
-      if (info.memorySize >= 16ULL * gib) {
-        effectiveWidth = 3840;
-        effectiveHeight = 2160;
-      } else if (info.memorySize >= 8ULL * gib) {
-        effectiveWidth = 2560;
-        effectiveHeight = 1440;
-      } else {
-        effectiveWidth = 1920;
-        effectiveHeight = 1080;
-      }
-    }
+    uint32_t effectiveWidth = (renderWidth == 0) ? 3840 : renderWidth;
+    uint32_t effectiveHeight = (renderHeight == 0) ? 2160 : renderHeight;
 
     if (!quiet && !verbose && !onResult) {
       std::string backendStr = ComputeBackendFactory::getBackendName(context->getBackend());
@@ -620,17 +610,11 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
       std::string line2_plain = "Backend / API : " + backendStr + " | VRAM: " + std::to_string(vramGb) + " " + memLabel;
 
       std::string resPreset = "";
-      if (isAutoRes) {
-        if (effectiveWidth == 3840 && effectiveHeight == 2160) resPreset = " (Auto -> 4K UHD)";
-        else if (effectiveWidth == 2560 && effectiveHeight == 1440) resPreset = " (Auto -> 1440p QHD)";
-        else if (effectiveWidth == 1920 && effectiveHeight == 1080) resPreset = " (Auto -> 1080p FHD)";
-      } else {
-        if (effectiveWidth == 3840 && effectiveHeight == 2160) resPreset = " (4K UHD)";
-        else if (effectiveWidth == 2560 && effectiveHeight == 1440) resPreset = " (1440p QHD)";
-        else if (effectiveWidth == 1920 && effectiveHeight == 1080) resPreset = " (1080p FHD)";
-        else if (effectiveWidth == 1280 && effectiveHeight == 720) resPreset = " (720p HD)";
-        else if (effectiveWidth == 1024 && effectiveHeight == 1024) resPreset = " (1024x1024 Square)";
-      }
+      if (effectiveWidth == 3840 && effectiveHeight == 2160) resPreset = " (4K UHD)";
+      else if (effectiveWidth == 2560 && effectiveHeight == 1440) resPreset = " (1440p QHD)";
+      else if (effectiveWidth == 1920 && effectiveHeight == 1080) resPreset = " (1080p FHD)";
+      else if (effectiveWidth == 1280 && effectiveHeight == 720) resPreset = " (720p HD)";
+      else if (effectiveWidth == 1024 && effectiveHeight == 1024) resPreset = " (1024x1024 Square)";
       std::string line3_plain = "Resolution    : " + std::to_string(effectiveWidth) + "x" + std::to_string(effectiveHeight) + resPreset;
 
       std::string scLabel = sceneName;
@@ -975,19 +959,17 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
         } else if (isInteractive) {
           std::string disp = bench_name;
           if (disp.rfind("RayScheduling (", 0) == 0) {
+            size_t firstClose = disp.find(')', 15);
             size_t secondOpen = disp.find(") (");
-            if (secondOpen != std::string::npos && disp.back() == ')') {
-              disp = disp.substr(secondOpen + 3, disp.length() - (secondOpen + 4));
+            if (firstClose != std::string::npos && secondOpen != std::string::npos && disp.back() == ')') {
+              std::string sc = disp.substr(15, firstClose - 15);
+              std::string cfg = disp.substr(secondOpen + 3, disp.length() - (secondOpen + 4));
+              disp = "[" + sc + "] " + cfg;
             }
           } else if (disp.rfind("RayASBuild (", 0) == 0 && disp.back() == ')') {
             disp = disp.substr(12, disp.length() - 13);
-          } else {
-            size_t firstOpen = disp.find(" (");
-            if (firstOpen != std::string::npos && disp.back() == ')') {
-              disp = disp.substr(firstOpen + 2, disp.length() - (firstOpen + 3));
-            }
           }
-          if (disp.length() > 50) disp = disp.substr(0, 47) + "...";
+          if (disp.length() > 64) disp = disp.substr(0, 61) + "...";
           static const char* kSpinnerFrames[] = {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"};
           const char* spinner = kSpinnerFrames[taskIdx % 10];
           std::cout << "\r\033[K  \033[36m" << spinner << "\033[0m [" << (taskIdx + 1) << "/" << tasks.size() << "] "
@@ -1087,219 +1069,148 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
         float avgPowerWatts = 0.0f;
         HardwarePerformanceCounters measuredPerfCounters;
 
-        if (profileSnapshot) {
+        // Time-bounded warmup & measurement windows:
+        // Never execute a fixed amount of work; execute sets of operations over
+        // a fixed time window and count total completed work.
+        const double target_warmup_ms = profileSnapshot ? 25.0 : 250.0;
+        const double target_measurement_ms = profileSnapshot ? 60.0 : 500.0;
+        const double target_batch_ms = profileSnapshot ? 20.0 : 50.0;
+
+        double warmup_elapsed_ms = 0.0;
+        double single_run_ms = 0.0;
+        while (warmup_elapsed_ms < target_warmup_ms) {
+          if (cancelToken && cancelToken->load()) break;
+          auto w_start = std::chrono::high_resolution_clock::now();
           bench->Run(i);
           context->waitIdle();
+          auto w_end = std::chrono::high_resolution_clock::now();
+          double w_ms =
+              std::chrono::duration<double, std::milli>(w_end - w_start).count();
+          if (w_ms <= 0.0) w_ms = 0.001;
+          warmup_elapsed_ms += w_ms;
+          single_run_ms = w_ms;
+        }
 
-          powerStart = HardwareTelemetry::queryGpu(devIdx);
+        uint64_t batch_iters = 1;
+        if (single_run_ms > 0.0 && single_run_ms < target_batch_ms) {
+          batch_iters = static_cast<uint64_t>(
+              std::max(1.0, std::round(target_batch_ms / single_run_ms)));
+        }
+        batch_iters = std::clamp<uint64_t>(batch_iters, 1, 256);
+
+        std::vector<double> sample_time_per_invoc;
+        total_invocations = 0;
+        double accumulated_time_ms = 0.0;
+        double wall_elapsed_ms = 0.0;
+        const double max_wall_ms = target_measurement_ms * 4.0 + 2000.0;
+
+        powerStart = HardwareTelemetry::queryGpu(devIdx);
+        auto loop_wall_start = std::chrono::high_resolution_clock::now();
+
+        while (accumulated_time_ms < target_measurement_ms &&
+               wall_elapsed_ms < max_wall_ms) {
+          if (cancelToken && cancelToken->load()) break;
 
           if (context->hasGpuTiming()) {
             context->startTiming();
           }
-          auto start = std::chrono::high_resolution_clock::now();
-          bench->Run(i);
+          auto s_start = std::chrono::high_resolution_clock::now();
+
+          if (batch_iters > 1) {
+            context->beginBatch(static_cast<uint32_t>(batch_iters));
+            for (uint64_t it = 0; it < batch_iters; ++it) {
+              bench->Run(i);
+            }
+            context->endBatch();
+          } else {
+            bench->Run(i);
+          }
+
+          double sample_ms = 0.0;
           if (context->hasGpuTiming()) {
             double gpu_time = context->stopTiming();
             if (gpu_time > 0.0) {
-              total_time_ms = gpu_time;
-            } else {
-              context->waitIdle();
-              auto end = std::chrono::high_resolution_clock::now();
-              total_time_ms =
-                  std::chrono::duration<double, std::milli>(end - start).count();
-            }
-          } else {
-            context->waitIdle();
-            auto end = std::chrono::high_resolution_clock::now();
-            total_time_ms =
-                std::chrono::duration<double, std::milli>(end - start).count();
-          }
-          total_invocations = 1;
-          stat_min_ms = total_time_ms;
-          stat_med_ms = total_time_ms;
-          stat_mean_ms = total_time_ms;
-          stat_p95_ms = total_time_ms;
-          stat_sample_count = 1;
-          stat_samples.push_back(total_time_ms);
-        } else {
-          auto start = std::chrono::high_resolution_clock::now();
-          bench->Run(i);
-          context->waitIdle();
-          auto end = std::chrono::high_resolution_clock::now();
-          double single_run_ms =
-              std::chrono::duration<double, std::milli>(end - start).count();
-
-          // Warmup: Run until GPU clocks ramp up to sustained boost clocks.
-          // If single_run_ms >= 200ms, GPU is already at boost clocks; skip warmup.
-          const double min_warmup_duration_ms = 400.0;
-          uint64_t warmup_iters = 0;
-          if (single_run_ms > 0.0 && single_run_ms < 200.0) {
-            if (single_run_ms < 50.0) {
-              warmup_iters = static_cast<uint64_t>(
-                  std::max(2.0, std::ceil(min_warmup_duration_ms / single_run_ms)));
-            } else {
-              warmup_iters = static_cast<uint64_t>(
-                  std::ceil(min_warmup_duration_ms / single_run_ms));
-            }
-          }
-          warmup_iters = std::min(warmup_iters, static_cast<uint64_t>(50));
-          if (dynamic_cast<MemBandwidthBench *>(bench)) {
-            warmup_iters = std::min(warmup_iters, static_cast<uint64_t>(2));
-          }
-
-          for (uint64_t w = 0; w < warmup_iters; ++w) {
-            if (cancelToken && cancelToken->load()) break;
-            bench->Run(i);
-            if (single_run_ms >= 10.0) {
-              context->waitIdle();
-            }
-          }
-          context->waitIdle();
-
-          // Re-measure single run latency only if warmup was actually performed
-          if (warmup_iters > 0) {
-            start = std::chrono::high_resolution_clock::now();
-            bench->Run(i);
-            context->waitIdle();
-            end = std::chrono::high_resolution_clock::now();
-            single_run_ms =
-                std::chrono::duration<double, std::milli>(end - start).count();
-          }
-
-          // Optimization O-3: Multi-sample distribution measurement (min / median / mean / p95)
-          // Optimization O-2: Command buffer batching for short compute microbenchmarks
-          uint32_t num_samples = 5;
-          if (single_run_ms >= 1500.0) {
-            num_samples = 1;
-          } else if (single_run_ms >= 400.0) {
-            num_samples = 3;
-          } else if (single_run_ms < 0.5) {
-            num_samples = 7;
-          }
-
-          const double target_sample_ms = (num_samples > 1) ? 50.0 : 250.0;
-          uint64_t sample_iters = 1;
-          if (single_run_ms > 0.0) {
-            sample_iters = static_cast<uint64_t>(
-                std::max(1.0, std::round(target_sample_ms / single_run_ms)));
-          }
-          sample_iters = std::min(sample_iters, static_cast<uint64_t>(500));
-          sample_iters = std::max(sample_iters, static_cast<uint64_t>(1));
-
-          // Hard clamp: ensure a single sample does not exceed 350ms
-          if (single_run_ms > 0.0 && (sample_iters * single_run_ms > 350.0)) {
-            sample_iters = static_cast<uint64_t>(std::max(1.0, 350.0 / single_run_ms));
-          }
-
-          if (dynamic_cast<MemBandwidthBench *>(bench)) {
-            sample_iters = std::min(sample_iters, static_cast<uint64_t>(2));
-            num_samples = std::min(num_samples, 3u);
-          }
-
-          std::vector<double> sample_time_per_invoc;
-          total_invocations = 0;
-
-          powerStart = HardwareTelemetry::queryGpu(devIdx);
-
-          for (uint32_t s = 0; s < num_samples; ++s) {
-            if (cancelToken && cancelToken->load()) break;
-
-            if (context->hasGpuTiming()) {
-              context->startTiming();
-            }
-            auto s_start = std::chrono::high_resolution_clock::now();
-
-            if (sample_iters > 1) {
-              context->beginBatch(sample_iters);
-              for (uint64_t it = 0; it < sample_iters; ++it) {
-                bench->Run(i);
-              }
-              context->endBatch();
-            } else {
-              bench->Run(i);
-            }
-
-            double sample_ms = 0.0;
-            if (context->hasGpuTiming()) {
-              double gpu_time = context->stopTiming();
-              if (gpu_time > 0.0) {
-                sample_ms = gpu_time;
-              } else {
-                context->waitIdle();
-                auto s_end = std::chrono::high_resolution_clock::now();
-                sample_ms =
-                    std::chrono::duration<double, std::milli>(s_end - s_start).count();
-              }
+              sample_ms = gpu_time;
             } else {
               context->waitIdle();
               auto s_end = std::chrono::high_resolution_clock::now();
               sample_ms =
                   std::chrono::duration<double, std::milli>(s_end - s_start).count();
             }
-
-            if (sample_ms > 0.0) {
-              sample_time_per_invoc.push_back(sample_ms / sample_iters);
-              total_invocations += sample_iters;
-            }
+          } else {
+            context->waitIdle();
+            auto s_end = std::chrono::high_resolution_clock::now();
+            sample_ms =
+                std::chrono::duration<double, std::milli>(s_end - s_start).count();
           }
 
-          if (!sample_time_per_invoc.empty()) {
-            std::vector<double> sorted_samples = sample_time_per_invoc;
-            std::sort(sorted_samples.begin(), sorted_samples.end());
-            size_t S = sorted_samples.size();
-
-            double min_per_inv = sorted_samples.front();
-            double sum_per_inv = 0.0;
-            for (double val : sorted_samples) sum_per_inv += val;
-            double mean_per_inv = sum_per_inv / S;
-
-            double med_per_inv = (S % 2 == 1)
-                ? sorted_samples[S / 2]
-                : 0.5 * (sorted_samples[S / 2 - 1] + sorted_samples[S / 2]);
-
-            size_t p95_idx = std::min(static_cast<size_t>(std::ceil(0.95 * S)) - 1, S - 1);
-            double p95_per_inv = sorted_samples[p95_idx];
-
-            double raw_median_total_ms = med_per_inv * total_invocations;
-            total_time_ms = bench->FilterDuration(i, total_invocations, raw_median_total_ms);
-
-            stat_min_ms = min_per_inv * total_invocations;
-            stat_med_ms = total_time_ms;
-            stat_mean_ms = mean_per_inv * total_invocations;
-            stat_p95_ms = p95_per_inv * total_invocations;
-            stat_sample_count = static_cast<uint32_t>(S);
-            stat_samples = sample_time_per_invoc;
+          if (sample_ms > 0.0) {
+            accumulated_time_ms += sample_ms;
+            total_invocations += batch_iters;
+            sample_time_per_invoc.push_back(
+                sample_ms / static_cast<double>(batch_iters));
           }
 
-          if (total_invocations == 0) {
-            ResultData abort_data;
-            abort_data.backendName = ComputeBackendFactory::getBackendName(context->getBackend());
-            abort_data.deviceName = info.name;
-            abort_data.vendorId = info.vendorID;
-            abort_data.deviceId = info.deviceID;
-            abort_data.benchmarkName = bench_name;
-            abort_data.time_ms = -3.0; // ABORTED
-            abort_data.errorString = "Benchmark cancelled by user before execution";
-            abort_data.isUnsupported = false;
-            abort_data.isValid = false;
-            abort_data.component = bench->GetComponent(i);
-            abort_data.subcategory = bench->GetSubCategory(i);
-            abort_data.configIndex = i;
-            abort_data.sortWeight = bench->GetSortWeight(i);
-            formatter->addResult(abort_data);
-            executionFailure = true;
-            continue;
-          }
-          if (verbose) {
-            std::cout << "[STATS " << bench_name << "] " << stat_sample_count << " samples"
-                      << ", invocations: " << total_invocations
-                      << ", median_total_ms: " << total_time_ms
-                      << " | median_inv: " << (stat_med_ms / (total_invocations ? total_invocations : 1)) << " ms"
-                      << " | min_inv: " << (stat_min_ms / (total_invocations ? total_invocations : 1)) << " ms"
-                      << " | mean_inv: " << (stat_mean_ms / (total_invocations ? total_invocations : 1)) << " ms"
-                      << " | p95_inv: " << (stat_p95_ms / (total_invocations ? total_invocations : 1)) << " ms"
-                      << std::endl;
-          }
+          auto now = std::chrono::high_resolution_clock::now();
+          wall_elapsed_ms =
+              std::chrono::duration<double, std::milli>(now - loop_wall_start).count();
+        }
+
+        if (!sample_time_per_invoc.empty()) {
+          std::vector<double> sorted_samples = sample_time_per_invoc;
+          std::sort(sorted_samples.begin(), sorted_samples.end());
+          size_t S = sorted_samples.size();
+
+          double min_per_inv = sorted_samples.front();
+          double sum_per_inv = 0.0;
+          for (double val : sorted_samples) sum_per_inv += val;
+          double mean_per_inv = sum_per_inv / S;
+
+          double med_per_inv = (S % 2 == 1)
+              ? sorted_samples[S / 2]
+              : 0.5 * (sorted_samples[S / 2 - 1] + sorted_samples[S / 2]);
+
+          size_t p95_idx = std::min(static_cast<size_t>(std::ceil(0.95 * S)) - 1, S - 1);
+          double p95_per_inv = sorted_samples[p95_idx];
+
+          total_time_ms = bench->FilterDuration(i, total_invocations, accumulated_time_ms);
+
+          stat_min_ms = min_per_inv * total_invocations;
+          stat_med_ms = med_per_inv * total_invocations;
+          stat_mean_ms = mean_per_inv * total_invocations;
+          stat_p95_ms = p95_per_inv * total_invocations;
+          stat_sample_count = static_cast<uint32_t>(S);
+          stat_samples = sample_time_per_invoc;
+        }
+
+        if (total_invocations == 0) {
+          ResultData abort_data;
+          abort_data.backendName = ComputeBackendFactory::getBackendName(context->getBackend());
+          abort_data.deviceName = info.name;
+          abort_data.vendorId = info.vendorID;
+          abort_data.deviceId = info.deviceID;
+          abort_data.benchmarkName = bench_name;
+          abort_data.time_ms = -3.0; // ABORTED
+          abort_data.errorString = "Benchmark cancelled by user before execution";
+          abort_data.isUnsupported = false;
+          abort_data.isValid = false;
+          abort_data.component = bench->GetComponent(i);
+          abort_data.subcategory = bench->GetSubCategory(i);
+          abort_data.configIndex = i;
+          abort_data.sortWeight = bench->GetSortWeight(i);
+          formatter->addResult(abort_data);
+          executionFailure = true;
+          continue;
+        }
+        if (verbose) {
+          std::cout << "[STATS " << bench_name << "] " << stat_sample_count << " samples"
+                    << ", invocations: " << total_invocations
+                    << ", total_ms: " << total_time_ms
+                    << " | median_inv: " << (stat_med_ms / (total_invocations ? total_invocations : 1)) << " ms"
+                    << " | min_inv: " << (stat_min_ms / (total_invocations ? total_invocations : 1)) << " ms"
+                    << " | mean_inv: " << (stat_mean_ms / (total_invocations ? total_invocations : 1)) << " ms"
+                    << " | p95_inv: " << (stat_p95_ms / (total_invocations ? total_invocations : 1)) << " ms"
+                    << std::endl;
         }
 
         GpuTelemetryData powerEnd = HardwareTelemetry::queryGpu(devIdx);
@@ -1352,7 +1263,7 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
         result_data.baselineConfigIndex = bench->GetBaselineConfigIndex(i);
         result_data.isEmulated = bench->IsEmulated(i);
         result_data.supportNote = bench->GetConfigCaveat(i, info, context);
-        if (result_data.supportNote.empty()) {
+        if (result_data.supportNote.empty() && dynamic_cast<CacheLatencyCurveBench *>(bench)) {
           result_data.supportNote = bench->GetConfigSupportNote(i, info, context);
         }
         if (result_data.supportNote.empty() && result_data.isEmulated) {
@@ -1503,23 +1414,7 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
         }
 
         if (isInteractive) {
-          std::string disp = bench_name;
-          if (disp.rfind("RayScheduling (", 0) == 0) {
-            size_t secondOpen = disp.find(") (");
-            if (secondOpen != std::string::npos && disp.back() == ')') {
-              disp = disp.substr(secondOpen + 3, disp.length() - (secondOpen + 4));
-            }
-          } else if (disp.rfind("RayASBuild (", 0) == 0 && disp.back() == ')') {
-            disp = disp.substr(12, disp.length() - 13);
-          } else {
-            size_t firstOpen = disp.find(" (");
-            if (firstOpen != std::string::npos && disp.back() == ')') {
-              disp = disp.substr(firstOpen + 2, disp.length() - (firstOpen + 3));
-            }
-          }
-          if (disp.length() > 50) disp = disp.substr(0, 47) + "...";
-          std::cout << "\r\033[K  \033[32m✓\033[0m [" << (taskIdx + 1) << "/" << tasks.size() << "] "
-                    << disp << "  \033[33m" << scoreBuf << "\033[0m\n" << std::flush;
+          // Keep transient single-line progress; do not print permanent newline per task
         } else if (!quiet && !verbose) {
           std::cout << " Done. [" << scoreBuf << "]" << std::endl;
         }
@@ -1636,12 +1531,12 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
         }
       }
       if (!quiet && !verbose && !onResult) {
-        std::cout << "\r\033[K  \033[32m✔\033[0m Visual parity verification & frame export complete.\n" << std::endl;
+        std::cout << "\r\033[K  \033[32m✔\033[0m Visual parity verification & frame export complete." << std::endl;
       }
     } else {
       if (!quiet && isInteractive) {
         std::cout << "\r\033[K  \033[32m✔\033[0m Benchmark suite completed ("
-                  << tasks.size() << " workloads).\n" << std::endl;
+                  << tasks.size() << " workloads)." << std::endl;
       }
     }
 
@@ -1722,13 +1617,12 @@ void BenchmarkRunner::runHostBenchmarks(const std::vector<std::string> &benchmar
     }
 
     if (should_run) {
+      const bool isInteractive = !quiet && !verbose && !onResult && isatty(fileno(stdout));
       if (!headerPrinted) {
-        if (!quiet) {
+        if (verbose && !quiet) {
           std::cout << " [System] Host CPU" << std::endl;
-          if (verbose) {
-            std::cout << "  - Threads:      "
-                      << std::thread::hardware_concurrency() << std::endl;
-          }
+          std::cout << "  - Threads:      "
+                    << std::thread::hardware_concurrency() << std::endl;
           std::cout << std::endl;
         }
         headerPrinted = true;
@@ -1777,6 +1671,8 @@ void BenchmarkRunner::runHostBenchmarks(const std::vector<std::string> &benchmar
 
           if (verbose) {
             std::cout << "[Sys] Running " << bench_name << "..." << std::endl;
+          } else if (isInteractive) {
+            std::cout << "\r\033[K  \033[36m⠋\033[0m [System] Running " << bench_name << "..." << std::flush;
           }
 
           if (onResult) {
@@ -1798,24 +1694,72 @@ void BenchmarkRunner::runHostBenchmarks(const std::vector<std::string> &benchmar
             onResult(start_data);
           }
 
-          double total_time_ms = 0;
-          uint64_t total_invocations = 0;
-          auto bench_start = std::chrono::high_resolution_clock::now();
-          while (total_time_ms < 500.0 && total_invocations < 1000) {
+          const double target_warmup_ms = profileSnapshot ? 25.0 : 150.0;
+          const double target_measurement_ms = profileSnapshot ? 60.0 : 500.0;
+
+          double warmup_elapsed_ms = 0.0;
+          auto warmup_start = std::chrono::high_resolution_clock::now();
+          while (warmup_elapsed_ms < target_warmup_ms) {
             if (cancelToken && cancelToken->load()) {
               break;
             }
             bench->Run(i);
-            total_invocations++;
             auto now = std::chrono::high_resolution_clock::now();
-            total_time_ms =
-                std::chrono::duration_cast<std::chrono::nanoseconds>(
-                    now - bench_start)
-                    .count() /
-                1e6;
+            warmup_elapsed_ms =
+                std::chrono::duration<double, std::milli>(now - warmup_start)
+                    .count();
+          }
+
+          double total_time_ms = 0.0;
+          uint64_t total_invocations = 0;
+          std::vector<double> sample_durations;
+          while (total_time_ms < target_measurement_ms) {
+            if (cancelToken && cancelToken->load()) {
+              break;
+            }
+            auto s_start = std::chrono::high_resolution_clock::now();
+            bench->Run(i);
+            auto s_end = std::chrono::high_resolution_clock::now();
+            double sample_ms =
+                std::chrono::duration<double, std::milli>(s_end - s_start)
+                    .count();
+            if (sample_ms <= 0.0) {
+              sample_ms = 0.0001;
+            }
+            total_time_ms += sample_ms;
+            total_invocations++;
+            sample_durations.push_back(sample_ms);
+          }
+
+          bool isValid = bench->ValidateResults(i);
+          if (!isValid) {
+            validationFailure = true;
           }
 
           BenchmarkResult bench_result = bench->GetResult(i);
+
+          double stat_min_ms = total_time_ms;
+          double stat_med_ms = total_time_ms;
+          double stat_mean_ms = total_time_ms;
+          double stat_p95_ms = total_time_ms;
+          if (!sample_durations.empty()) {
+            std::vector<double> sorted_samples = sample_durations;
+            std::sort(sorted_samples.begin(), sorted_samples.end());
+            size_t S = sorted_samples.size();
+            double min_per_inv = sorted_samples.front();
+            double mean_per_inv = total_time_ms / static_cast<double>(S);
+            double med_per_inv = (S % 2 == 1)
+                ? sorted_samples[S / 2]
+                : 0.5 * (sorted_samples[S / 2 - 1] + sorted_samples[S / 2]);
+            size_t p95_idx =
+                std::min(static_cast<size_t>(std::ceil(0.95 * S)) - 1, S - 1);
+            double p95_per_inv = sorted_samples[p95_idx];
+
+            stat_min_ms = min_per_inv * total_invocations;
+            stat_med_ms = med_per_inv * total_invocations;
+            stat_mean_ms = mean_per_inv * total_invocations;
+            stat_p95_ms = p95_per_inv * total_invocations;
+          }
 
           ResultData result_data;
           result_data.backendName = "System";
@@ -1825,7 +1769,16 @@ void BenchmarkRunner::runHostBenchmarks(const std::vector<std::string> &benchmar
           result_data.operations =
               bench_result.operations * total_invocations;
           result_data.time_ms = total_time_ms;
-          result_data.isEmulated = false;
+          result_data.min_time_ms = stat_min_ms;
+          result_data.median_time_ms = stat_med_ms;
+          result_data.mean_time_ms = stat_mean_ms;
+          result_data.p95_time_ms = stat_p95_ms;
+          result_data.sample_count =
+              static_cast<uint32_t>(sample_durations.size());
+          result_data.sample_durations_ms = sample_durations;
+          result_data.isValid = isValid;
+          result_data.isEmulated = bench->IsEmulated(i);
+          result_data.supportNote = bench->GetConfigCaveat(i);
           result_data.component = bench->GetComponent(i);
           result_data.subcategory = bench->GetSubCategory(i);
           result_data.maxWorkGroupSize = 0;
@@ -1872,6 +1825,10 @@ void BenchmarkRunner::runHostBenchmarks(const std::vector<std::string> &benchmar
         }
       }
     }
+  }
+  const bool isInteractive = !quiet && !verbose && !onResult && isatty(fileno(stdout));
+  if (headerPrinted && isInteractive) {
+    std::cout << "\r\033[K" << std::flush;
   }
 }
 

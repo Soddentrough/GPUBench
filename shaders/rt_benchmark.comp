@@ -19,9 +19,14 @@ void main() {
     uint hitCount = 0;
 
     if (idx < pc.rayCount) {
-        // Spread rays across the 64x64 grid matching geometry bounds (-8.0 to 8.0 range)
-        float fx = (float(idx % 64) / 64.0) * 16.0 - 8.0 + 0.125;
-        float fy = (float((idx / 64) % 64) / 64.0) * 16.0 - 8.0 + 0.125;
+        // Map rays uniformly into the guaranteed interior of the 16x16 grid cells (-8.0 to 8.0)
+        // across all 64 depth layers (jitter up to +0.35 in X/Y, primitive bounds [0.05, 0.95] -> safe interior [0.42, 0.56])
+        float cellX = float(idx & 15u) - 8.0;
+        float cellY = float((idx >> 4u) & 15u) - 8.0;
+        float subX = float((idx >> 8u) & 15u) * (0.14 / 15.0) + 0.42;
+        float subY = float((idx >> 12u) & 15u) * (0.14 / 15.0) + 0.42;
+        float fx = cellX + subX;
+        float fy = cellY + subY;
         
         vec3 origin = vec3(fx, fy, -2.0);
         vec3 direction = vec3(0.0, 0.0, 1.0);
@@ -29,11 +34,26 @@ void main() {
         float tMax = 10.0;
 
         rayQueryEXT query;
-        rayQueryInitializeEXT(query, topLevelAS, gl_RayFlagsOpaqueEXT, 0xFF, origin, tMin, direction, tMax);
-        
-        rayQueryProceedEXT(query);
-        if (rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionNoneEXT) {
-            hitCount = 1;
+        if (pc.testMode == 0u) {
+            rayQueryInitializeEXT(query, topLevelAS,
+                                  gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT,
+                                  0xFF, origin, tMin, direction, tMax);
+            while (rayQueryProceedEXT(query)) {}
+            if (rayQueryGetIntersectionTypeEXT(query, true) == gl_RayQueryCommittedIntersectionTriangleEXT) {
+                hitCount = 1;
+            }
+        } else {
+            rayQueryInitializeEXT(query, topLevelAS,
+                                  gl_RayFlagsTerminateOnFirstHitEXT,
+                                  0xFF, origin, tMin, direction, tMax);
+            while (rayQueryProceedEXT(query)) {
+                if (rayQueryGetIntersectionTypeEXT(query, false) == gl_RayQueryCandidateIntersectionAABBEXT) {
+                    rayQueryConfirmIntersectionEXT(query);
+                }
+            }
+            if (rayQueryGetIntersectionTypeEXT(query, true) == gl_RayQueryCommittedIntersectionGeneratedEXT) {
+                hitCount = 1;
+            }
         }
     }
 

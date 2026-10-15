@@ -95,5 +95,31 @@ BenchmarkResult LdsBankConflictBench::GetResult(uint32_t config_idx) const {
 }
 
 bool LdsBankConflictBench::ValidateResults(uint32_t config_idx) const {
-  return true;
+  if (config_idx >= configs.size() || !context || !buffer) {
+    return false;
+  }
+
+  const size_t totalThreads = static_cast<size_t>(kWorkgroups) * kThreadsPerWg;
+  const size_t outputBufferSize = totalThreads * sizeof(uint32_t);
+  constexpr uint32_t expectedVal = kIterations * kLoadsPerIter * kLdsInitVal;
+
+  std::vector<uint32_t> results(totalThreads, 0);
+  try {
+    context->readBuffer(buffer, 0, outputBufferSize, results.data());
+    for (size_t i = 0; i < totalThreads; ++i) {
+      if (results[i] != expectedVal) {
+        std::cerr << "LdsBankConflictBench validation failed (config "
+                  << config_idx << "): results[" << i << "] = "
+                  << results[i] << ", expected " << expectedVal << "\n";
+        return false;
+      }
+    }
+    return true;
+  } catch (const std::exception &e) {
+    std::cerr << "LdsBankConflictBench validation exception (config "
+              << config_idx << "): " << e.what() << "\n";
+    return false;
+  } catch (...) {
+    return false;
+  }
 }

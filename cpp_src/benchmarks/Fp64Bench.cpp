@@ -1,4 +1,5 @@
 #include "benchmarks/Fp64Bench.h"
+#include <cmath>
 #include <filesystem>
 #include <iostream>
 #include <stdexcept>
@@ -60,4 +61,22 @@ BenchmarkResult Fp64Bench::GetResult(uint32_t config_idx) const {
   uint64_t num_threads = 8192 * 64;
   uint64_t num_ops = 4096ULL * num_threads;
   return {num_ops, 0.0};
+}
+
+bool Fp64Bench::ValidateResults(uint32_t config_idx) const {
+  (void)config_idx;
+  if (!context || !buffer) return false;
+
+  std::vector<double> hostOut(64, 0.0);
+  try {
+    context->readBuffer(buffer, 0, hostOut.size() * sizeof(double), hostOut.data());
+    bool anyNonZero = false;
+    for (double v : hostOut) {
+      if (std::isnan(v) || std::isinf(v)) return false;
+      if (v != 0.0) anyNonZero = true;
+    }
+    return anyNonZero;
+  } catch (...) {
+    return false;
+  }
 }

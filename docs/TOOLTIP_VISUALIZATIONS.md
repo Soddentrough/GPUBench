@@ -79,10 +79,12 @@ Scenes: `showroom`, `indoor`, `forest`, `outdoor`. Stages: `stage1_bvh`,
 `stage2_primary`, `stage3_shadow`, `stage4_rtao`, `stage5_direct`,
 `stage6_indirect`, `stage7_final`, `multilight_128_dgc`.
 
-Note: `thumb_<scene>_stage4_rtao.png` and `thumb_material_range.png` are
-generated for parity with the Ray Tracing Viewport's asset set but are not
-referenced by any tooltip today (no RTAO-specific workload exists); they cost
-~220 KB and make future additions trivial.
+Note: `thumb_<scene>_stage1_bvh.png`, `thumb_<scene>_stage4_rtao.png`, and
+`thumb_material_range.png` are generated for parity with the Ray Tracing
+Viewport's full asset set but are not directly referenced by tooltip metadata
+today (BVH traversal uses Tier 2 procedural schematics for clarity, and no
+RTAO-specific benchmark workload exists); they cost ~480 KB total and ensure
+clean parity with viewport tabs.
 
 ### 2.2 Scene-relative assets
 
@@ -170,19 +172,19 @@ At startup the GUI logs coverage, and warns per unmatched entry:
 | `RayASBuild` | 6 (TLAS: Jungle 50K) | 2 | `tlas_jungle_50k` → Geometry & BVH view 2 |
 | `RayASBuild` | 7 (TLAS: Open World 200K) | 2 | `tlas_openworld_200k` → Geometry & BVH view 2 |
 | `RayScheduling` | 0–2 (Material) | 1 | `thumb_material_lineup.png` → PBR Materials view 0 |
-| `RayScheduling` | 3–5, 21–25 (Path tracing) | 1 | `thumb_{scene}_stage6_indirect.png` → Pipeline Passes 5 |
+| `RayScheduling` | 3–5, 23–25 (Path tracing) | 1 | `thumb_{scene}_stage6_indirect.png` → Pipeline Passes 5 |
 | `RayScheduling` | 6–8 (Incoherent GI) | 2 | `incoherent_{naive,ser,dgc}` → Pipeline Passes 5 |
-| `RayScheduling` | 9–11, 17 (Full frame / 4K UHD) | 1 | `thumb_{scene}_stage7_final.png` → Pipeline Passes 6 |
+| `RayScheduling` | 9–11 (Full frame) | 1 | `thumb_{scene}_stage7_final.png` → Pipeline Passes 6 |
 | `RayScheduling` | 12 (Scanline) | 2 | `traversal_scanline` → Pipeline Passes 0 |
-| `RayScheduling` | 13, 26, 27, 29 (Compaction / Payload) | 2 | `wave_ballot_compaction` |
+| `RayScheduling` | 13, 26, 28 (Compaction) | 2 | `wave_ballot_compaction` |
 | `RayScheduling` | 14 (Tiled 8×4) | 2 | `traversal_tiled_8x4` → Pipeline Passes 0 |
 | `RayScheduling` | 15 (Morton 8×4) | 2 | `traversal_morton_8x4` → Pipeline Passes 0 |
 | `RayScheduling` | 16 (Morton 4×8) | 2 | `traversal_morton_4x8` → Pipeline Passes 0 |
-| `RayScheduling` | 18, 30, 31 (Primary rays) | 1 | `thumb_{scene}_stage2_primary.png` → Pipeline Passes 1 |
-| `RayScheduling` | 19, 20, 32, 33 (Shadows) | 1 | `thumb_{scene}_stage3_shadow.png` → Pipeline Passes 2 |
-| `RayScheduling` | 28 (Alpha cutout) | 1 | `thumb_alpha_layers.png` → Geometry & BVH view 1 |
-| `RayScheduling` | 34, 35 (Multi-light, 1 light) | 1 | `thumb_{scene}_stage5_direct.png` → Pipeline Passes 4 |
-| `RayScheduling` | 36, 37 (Multi-light, 128 lights) | 1 | `thumb_{scene}_multilight_128_dgc.png` → Pipeline Passes 4 |
+| `RayScheduling` | 17, 18, 29, 30 (Primary rays) | 1 | `thumb_{scene}_stage2_primary.png` → Pipeline Passes 1 |
+| `RayScheduling` | 19–22 (Shadows) | 1 | `thumb_{scene}_stage3_shadow.png` → Pipeline Passes 2 |
+| `RayScheduling` | 27 (Alpha cutout) | 1 | `thumb_alpha_layers.png` → Geometry & BVH view 1 |
+| `RayScheduling` | 31, 32 (Multi-light, 1 light) | 1 | `thumb_{scene}_stage5_direct.png` → Pipeline Passes 4 |
+| `RayScheduling` | 33, 34 (Multi-light, 128 lights) | 1 | `thumb_{scene}_multilight_128_dgc.png` → Pipeline Passes 4 |
 | `RayRawTraversal` | 0 (Coherent tris) | 2 | `bvh_coherent_triangles` |
 | `RayRawTraversal` | 1 (Deep boxes) | 2 | `bvh_nested_boxes` |
 | `RayIntersect` | 0 (Ray-triangle) | 2 | `intersect_ray_triangle` |
@@ -252,7 +254,7 @@ for one frame.
 
 `GuiApp::renderProceduralDiagram(diagramId, p0, p1)` — pure `ImDrawList`
 vector drawing (lines, rects, circles, arcs, text), shared palette, title at
-top, footnote at bottom. 21 diagram ids:
+top, footnote at bottom. 26 active diagram ids (+ 1 legacy fallback):
 
 | Diagram id | Visual |
 |:-----------|:-------|
@@ -261,12 +263,18 @@ top, footnote at bottom. 21 diagram ids:
 | `traversal_tiled_8x4` | Same grid with 8×4 tile borders; path wraps at tile edges |
 | `traversal_morton_8x4` / `_4x8` | 4×4 tile grid visited along a true Morton Z-curve (bit-interleaved codes), numbered dots, mini-raster lines inside tiles showing intra-tile orientation (wide vs tall) |
 | `wave_ballot_compaction` | 32-lane wavefront (active/terminated), the 32-bit ballot mask, and the compacted queue packed left; footnote reports active-lane count |
-| `incoherent_naive` / `incoherent_ser` / `incoherent_dgc` | Left: 12 color-coded bounce rays scattered from a column of scene hit points (4 direction groups). Right: the technique's result — one undivided dispatch (naive), 2×2 direction bins with parallel arrows (SER), or 4 compacted octant queue rows O0–O3 (DGC) |
-| `tlas_hierarchy` | Root → 3 internal nodes → 6 `BLAS #i` leaves |
+| `tlas_corridor_20k` | 4×3 disjoint room grid with non-overlapping AABBs and corridor ray culling early at top tree levels |
+| `tlas_jungle_50k` | Undulating terrain curve with 10 overlapping foliage AABBs and vertical ray piercing 3+ canopy hit points |
+| `tlas_openworld_200k` | 4×2 macro geographic sector grid (500m pitch) with multi-tier hierarchy tree (Root → Sectors → 200K BLAS leaves) |
+| `tlas_hierarchy` | Legacy generic fallback: Root → 3 internal nodes → 6 `BLAS #i` leaves |
 | `intersect_ray_triangle` | Triangle, ray with hit point, dashed barycentric spokes, `hit (t, u, v)` label |
 | `intersect_ray_box` | 2.5D AABB wireframe, ray with `t near` / `t far` markers |
 | `procedural_sphere` | Analytic sphere with rim highlight, ray, radial normal |
+| `bvh_coherent_triangles` | 4 stratified planar triangle layers (65.5K tris) pierced by 5 parallel vertical rays with 0% miss rate |
 | `bvh_nested_boxes` | 3-level nested AABBs (1 → 2 → 4) with a ray and per-level step dots |
+| `anyhit_100_solid` | 4 planar layers with Plane 0 opaque termination and zero BVH re-entries |
+| `anyhit_50_cutout` | 4 planar layers with 50% checkerboard cutout segments forcing hardware BVH traversal re-entry |
+| `incoherent_naive` / `incoherent_ser` / `incoherent_dgc` | Left: 12 color-coded bounce rays scattered from a column of scene hit points (4 direction groups). Right: the technique's result — one undivided dispatch (naive), 2×2 direction bins with parallel arrows (SER), or 4 compacted octant queue rows O0–O3 (DGC) |
 | `rop_fill_rgba8` / `rop_fill_hdr` / `rop_fill_blend` | Framebuffer with solid quad + scanline arrow / LDR→HDR gradient / two overlapping translucent quads with `src + dst` overlap marker |
 
 Implementation notes:
@@ -319,7 +327,7 @@ install(DIRECTORY assets/thumbnails/
 ## 9. Verification
 
 1. **Build**: clean compile, zero warnings (`-Wformat-truncation` clean).
-2. **Mapping coverage**: GUI startup logs `Tooltip visualizations: 57/57
+2. **Mapping coverage**: GUI startup logs `Tooltip visualizations: 58/58
    workloads mapped`; any unmatched table entry logs a named warning.
 3. **Asset paths**: all 31 distinct metadata paths (28 scene-expanded + 4
    static, minus 1 shared) resolve to files on disk — checked across all four

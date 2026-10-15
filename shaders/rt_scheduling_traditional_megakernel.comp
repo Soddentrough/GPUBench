@@ -355,8 +355,7 @@ vec3 tonemapACES(vec3 x) {
     const float c = 2.43;
     const float d = 0.59;
     const float e = 0.14;
-    vec3 mapped = clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
-    return pow(mapped, vec3(1.0 / 2.2));
+    return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
 }
 
 void computePixelCoords(uint idx, uint pattern, uint width, uint height, out uint px_u, out uint py_u) {
@@ -481,7 +480,7 @@ vec3 computeSmoothNormal(uint sceneType, uint primId, vec3 hitPos, vec3 rayDir, 
 }
 
 
-vec3 evalMaterialBSDFInternal(uint sceneType, uint matId, vec3 normal, vec3 inDir, vec3 hitPos, bool directOnly, bool enableShadows, inout uint rng) {
+vec3 evalMaterialBSDFInternal(uint sceneType, uint matId, vec3 normal, vec3 inDir, vec3 hitPos, bool directOnly, inout uint rng) {
     vec3 viewDir = -inDir;
     float NdotV = max(dot(normal, viewDir), 0.001);
     uint archetype = (SPECIALIZED_ARCHETYPE != 0xFFFFFFFFu) ? SPECIALIZED_ARCHETYPE : getArchetype(matId);
@@ -576,7 +575,7 @@ vec3 evalMaterialBSDFInternal(uint sceneType, uint matId, vec3 normal, vec3 inDi
         }
 
         float sunShadow = 1.0;
-        if (enableShadows && dot(normal, sunDir) > 0.0) {
+        if (dot(normal, sunDir) > 0.0) {
             if (traceShadowRay(hitPos, normal, sunDir, 2500.0)) {
                 sunShadow = 0.0;
             }
@@ -626,7 +625,7 @@ vec3 evalMaterialBSDFInternal(uint sceneType, uint matId, vec3 normal, vec3 inDi
         for (int l = 0; l < 4; ++l) {
             vec3 lightDir = normalize(SCENE_LIGHTS[l].dir);
             vec3 lightCol = SCENE_LIGHTS[l].color * SCENE_LIGHTS[l].intensity;
-            if (enableShadows && l == 0 && archetype != 2) {
+            if (l == 0 && archetype != 2) {
                 float shadowVis = traceAreaShadow(hitPos, normal, lightDir, 25.0, 0.045, rng, 4);
                 lightCol *= shadowVis;
             }
@@ -718,7 +717,7 @@ vec3 evalMaterialBSDFInternal(uint sceneType, uint matId, vec3 normal, vec3 inDi
                     // Neutral Studio / Atrium Floor
                     vec3 floorBase = vec3(0.24, 0.25, 0.28);
                     float floorOcc = computeFloorOcclusion(hitPos);
-                    float rtao = enableShadows ? computeRTAO(hitPos, normal, rng, 4, 15.0) : 1.0;
+                    float rtao = computeRTAO(hitPos, normal, rng, 4, 15.0);
                     floorOcc *= rtao;
                     float wallFactor = smoothstep(2.0, 6.0, hitPos.y);
                     float wallAtten = mix(1.0, 0.85, wallFactor);
@@ -771,24 +770,24 @@ vec3 evalMaterialBSDFInternal(uint sceneType, uint matId, vec3 normal, vec3 inDi
         } else if (archetype == 2) {
             vec3 refrDir = refract(inDir, normal, 1.0 / 1.52);
             if (length(refrDir) < 0.01) refrDir = reflDir;
-            vec3 transmittedCol = evalStudioEnvironment(refrDir);
-            if (enableShadows) {
-                rayQueryEXT glassQuery;
-                rayQueryInitializeEXT(glassQuery, topLevelAS, gl_RayFlagsOpaqueEXT, 0xFF, hitPos + refrDir * 0.02, 0.001, refrDir, 25.0);
-                while (rayQueryProceedEXT(glassQuery)) {}
+            rayQueryEXT glassQuery;
+            rayQueryInitializeEXT(glassQuery, topLevelAS, gl_RayFlagsOpaqueEXT, 0xFF, hitPos + refrDir * 0.02, 0.001, refrDir, 25.0);
+            while (rayQueryProceedEXT(glassQuery)) {}
 
-                if (rayQueryGetIntersectionTypeEXT(glassQuery, true) != 0) {
-                    uint rPrim = rayQueryGetIntersectionPrimitiveIndexEXT(glassQuery, true);
-                    if (rPrim < PRIM_KNOT_PAINT_END) transmittedCol = vec3(0.68, 0.01, 0.02);
-                    else if (rPrim < PRIM_KNOT_JADE_END) transmittedCol = vec3(0.06, 0.75, 0.65);
-                    else if (rPrim < PRIM_KNOT_CHROME_END) transmittedCol = vec3(0.85, 0.85, 0.88);
-                    else if (rPrim < PRIM_KNOT_VELVET_END) transmittedCol = vec3(0.60, 0.02, 0.42);
-                    else if (rPrim < PRIM_KNOT_RUST_END) transmittedCol = vec3(0.80, 0.35, 0.12);
-                    else if (rPrim < PRIM_SPHERE_END) transmittedCol = vec3(0.06, 0.75, 0.65);
-                    else if (rPrim < PRIM_PEDESTAL_END) transmittedCol = vec3(0.90, 0.75, 0.30);
-                    else if (rPrim < PRIM_SUZANNE_END) transmittedCol = vec3(0.75, 0.80, 0.85);
-                    else transmittedCol = vec3(0.24, 0.25, 0.28);
-                }
+            vec3 transmittedCol;
+            if (rayQueryGetIntersectionTypeEXT(glassQuery, true) != 0) {
+                uint rPrim = rayQueryGetIntersectionPrimitiveIndexEXT(glassQuery, true);
+                if (rPrim < PRIM_KNOT_PAINT_END) transmittedCol = vec3(0.68, 0.01, 0.02);
+                else if (rPrim < PRIM_KNOT_JADE_END) transmittedCol = vec3(0.06, 0.75, 0.65);
+                else if (rPrim < PRIM_KNOT_CHROME_END) transmittedCol = vec3(0.85, 0.85, 0.88);
+                else if (rPrim < PRIM_KNOT_VELVET_END) transmittedCol = vec3(0.60, 0.02, 0.42);
+                else if (rPrim < PRIM_KNOT_RUST_END) transmittedCol = vec3(0.80, 0.35, 0.12);
+                else if (rPrim < PRIM_SPHERE_END) transmittedCol = vec3(0.06, 0.75, 0.65);
+                else if (rPrim < PRIM_PEDESTAL_END) transmittedCol = vec3(0.90, 0.75, 0.30);
+                else if (rPrim < PRIM_SUZANNE_END) transmittedCol = vec3(0.75, 0.80, 0.85);
+                else transmittedCol = vec3(0.24, 0.25, 0.28);
+            } else {
+                transmittedCol = evalStudioEnvironment(refrDir);
             }
             float F_glass = 0.04 + 0.96 * pow(clamp(1.0 - NdotV, 0.0, 1.0), 5.0);
             totalRadiance = mix(transmittedCol * vec3(0.90, 0.94, 0.96), envRefl, F_glass) + totalRadiance;
@@ -798,14 +797,35 @@ vec3 evalMaterialBSDFInternal(uint sceneType, uint matId, vec3 normal, vec3 inDi
             vec3 goldBase = vec3(1.00, 0.78, 0.32);
             totalRadiance += envRefl * goldBase * (0.40 + 0.60 * pow(clamp(1.0 - NdotV, 0.0, 1.0), 5.0));
         } else if (archetype == 7) {
-            vec3 reflColor = envRefl;
-            if (enableShadows) {
-                rayQueryEXT chromeQuery;
-                rayQueryInitializeEXT(chromeQuery, topLevelAS, gl_RayFlagsNoneEXT, 0xFF, hitPos + normal * 0.015, 0.001, reflDir, 25.0);
-                while (rayQueryProceedEXT(chromeQuery)) {}
+            rayQueryEXT chromeQuery;
+            rayQueryInitializeEXT(chromeQuery, topLevelAS, gl_RayFlagsNoneEXT, 0xFF, hitPos + normal * 0.015, 0.001, reflDir, 25.0);
+            while (rayQueryProceedEXT(chromeQuery)) {}
 
-                if (rayQueryGetIntersectionTypeEXT(chromeQuery, true) != 0) {
-                    uint rPrim = rayQueryGetIntersectionPrimitiveIndexEXT(chromeQuery, true);
+            vec3 reflColor;
+            if (rayQueryGetIntersectionTypeEXT(chromeQuery, true) != 0) {
+                uint rPrim = rayQueryGetIntersectionPrimitiveIndexEXT(chromeQuery, true);
+                if (rPrim < PRIM_KNOT_PAINT_END) reflColor = vec3(0.68, 0.01, 0.02);
+                else if (rPrim < PRIM_KNOT_JADE_END) reflColor = vec3(0.06, 0.75, 0.65);
+                else if (rPrim < PRIM_KNOT_CHROME_END) reflColor = vec3(0.85, 0.85, 0.88);
+                else if (rPrim < PRIM_KNOT_VELVET_END) reflColor = vec3(0.60, 0.02, 0.42);
+                else if (rPrim < PRIM_KNOT_RUST_END) reflColor = vec3(0.80, 0.35, 0.12);
+                else if (rPrim < PRIM_SPHERE_END) reflColor = vec3(0.06, 0.75, 0.65);
+                else if (rPrim < PRIM_PEDESTAL_END) reflColor = vec3(0.90, 0.75, 0.30);
+                else if (rPrim < PRIM_SUZANNE_END) reflColor = vec3(0.75, 0.80, 0.85);
+                else reflColor = vec3(0.20, 0.21, 0.23);
+            } else {
+                reflColor = envRefl;
+            }
+            totalRadiance = mix(totalRadiance, reflColor, 0.96);
+        } else if (archetype == 5) {
+            if (hitPos.y <= 3.0) {
+                rayQueryEXT reflQuery;
+                rayQueryInitializeEXT(reflQuery, topLevelAS, gl_RayFlagsNoneEXT, 0xFF, hitPos + normal * 0.015, 0.001, reflDir, 25.0);
+                while (rayQueryProceedEXT(reflQuery)) {}
+
+                vec3 reflColor;
+                if (rayQueryGetIntersectionTypeEXT(reflQuery, true) != 0) {
+                    uint rPrim = rayQueryGetIntersectionPrimitiveIndexEXT(reflQuery, true);
                     if (rPrim < PRIM_KNOT_PAINT_END) reflColor = vec3(0.68, 0.01, 0.02);
                     else if (rPrim < PRIM_KNOT_JADE_END) reflColor = vec3(0.06, 0.75, 0.65);
                     else if (rPrim < PRIM_KNOT_CHROME_END) reflColor = vec3(0.85, 0.85, 0.88);
@@ -815,29 +835,8 @@ vec3 evalMaterialBSDFInternal(uint sceneType, uint matId, vec3 normal, vec3 inDi
                     else if (rPrim < PRIM_PEDESTAL_END) reflColor = vec3(0.90, 0.75, 0.30);
                     else if (rPrim < PRIM_SUZANNE_END) reflColor = vec3(0.75, 0.80, 0.85);
                     else reflColor = vec3(0.20, 0.21, 0.23);
-                }
-            }
-            totalRadiance = mix(totalRadiance, reflColor, 0.96);
-        } else if (archetype == 5) {
-            if (hitPos.y <= 3.0) {
-                vec3 reflColor = envRefl * 0.25 + vec3(0.04, 0.04, 0.05);
-                if (enableShadows) {
-                    rayQueryEXT reflQuery;
-                    rayQueryInitializeEXT(reflQuery, topLevelAS, gl_RayFlagsNoneEXT, 0xFF, hitPos + normal * 0.015, 0.001, reflDir, 25.0);
-                    while (rayQueryProceedEXT(reflQuery)) {}
-
-                    if (rayQueryGetIntersectionTypeEXT(reflQuery, true) != 0) {
-                        uint rPrim = rayQueryGetIntersectionPrimitiveIndexEXT(reflQuery, true);
-                        if (rPrim < PRIM_KNOT_PAINT_END) reflColor = vec3(0.68, 0.01, 0.02);
-                        else if (rPrim < PRIM_KNOT_JADE_END) reflColor = vec3(0.06, 0.75, 0.65);
-                        else if (rPrim < PRIM_KNOT_CHROME_END) reflColor = vec3(0.85, 0.85, 0.88);
-                        else if (rPrim < PRIM_KNOT_VELVET_END) reflColor = vec3(0.60, 0.02, 0.42);
-                        else if (rPrim < PRIM_KNOT_RUST_END) reflColor = vec3(0.80, 0.35, 0.12);
-                        else if (rPrim < PRIM_SPHERE_END) reflColor = vec3(0.06, 0.75, 0.65);
-                        else if (rPrim < PRIM_PEDESTAL_END) reflColor = vec3(0.90, 0.75, 0.30);
-                        else if (rPrim < PRIM_SUZANNE_END) reflColor = vec3(0.75, 0.80, 0.85);
-                        else reflColor = vec3(0.20, 0.21, 0.23);
-                    }
+                } else {
+                    reflColor = envRefl * 0.25 + vec3(0.04, 0.04, 0.05);
                 }
 
                 float fresnelFloor = pow(clamp(1.0 - NdotV, 0.0, 1.0), 5.0);
@@ -849,12 +848,12 @@ vec3 evalMaterialBSDFInternal(uint sceneType, uint matId, vec3 normal, vec3 inDi
     }
 }
 
-vec3 evalMaterialBSDF(uint sceneType, uint matId, vec3 normal, vec3 inDir, vec3 hitPos, bool enableShadows, inout uint rng) {
-    return evalMaterialBSDFInternal(sceneType, matId, normal, inDir, hitPos, false, enableShadows, rng);
+vec3 evalMaterialBSDF(uint sceneType, uint matId, vec3 normal, vec3 inDir, vec3 hitPos, inout uint rng) {
+    return evalMaterialBSDFInternal(sceneType, matId, normal, inDir, hitPos, false, rng);
 }
 
 vec3 evalMaterialBSDFDirect(uint sceneType, uint matId, vec3 normal, vec3 inDir, vec3 hitPos, inout uint rng) {
-    return evalMaterialBSDFInternal(sceneType, matId, normal, inDir, hitPos, true, true, rng);
+    return evalMaterialBSDFInternal(sceneType, matId, normal, inDir, hitPos, true, rng);
 }
 
 
@@ -1176,8 +1175,6 @@ void main() {
                 vec3 avg = (total / float(totalSpp)) * expGain;
                 fb.pixels[pixelIdx] = vec4(tonemapACES(avg), 1.0);
             }
-        } else if (dot(sampleRadiance, vec3(1.0)) < -1e30) {
-            results.accumulatedLuminance = sampleRadiance.x;
         }
     } else if (pc.mode == 2) {
         // Mode 2: Incoherent Secondary GI (Hemisphere Scattering without Spatial Binning)
@@ -1235,12 +1232,10 @@ void main() {
             vec3 hitPos = vec3(float(px_u) * 0.01, float(py_u) * 0.01, 1.5);
             vec3 normal = ((idx % 2) == 0) ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
             uint matId = idx % 8; // Divergent materials across lanes in the wave
-            pixelColor = evalMaterialBSDF(pc.sceneType, matId, normal, rayDir, hitPos, false, rngState);
+            pixelColor = evalMaterialBSDF(pc.sceneType, matId, normal, rayDir, hitPos, rngState);
         }
         if (pc.dumpRenders != 0) {
             fb.pixels[pixelIdx] = vec4(tonemapACES(pixelColor * 1.0), 1.0);
-        } else if (dot(pixelColor, vec3(1.0)) < -1e30) {
-            results.accumulatedLuminance = pixelColor.x;
         }
     } else if (pc.mode == 5) {
         // Mode 5: Directional Shadow Ray Traversal (Traditional Megakernel)
@@ -1610,6 +1605,36 @@ void main() {
             } else {
                 smoothNormal = computeSmoothNormal(pc.sceneType, primId, hitPos, rayDir, rawBary);
                 geomNormal = smoothNormal;
+                if (pc.sceneType == SCENE_OUTDOOR_TERRAIN) {
+                    if (primId < PRIM_TERRAIN_END) {
+                        if (hitPos.z >= -0.2 && hitPos.z <= 2.2 && abs(hitPos.x) < 185.0 && hitPos.y >= -145.0 && hitPos.y <= 930.0) {
+                            albedo = vec3(0.18, 0.20, 0.22); roughness = 0.20;
+                        } else {
+                            float snowHarmonics = sin(hitPos.x * 0.032 + hitPos.y * 0.018) * 9.5
+                                                + cos(hitPos.x * 0.068 - hitPos.y * 0.045) * 4.5
+                                                + sin(hitPos.x * 0.130 + hitPos.y * 0.110) * 2.0;
+                            float snowAltitude = 60.0 + (1.0 - smoothNormal.z) * 28.0 + snowHarmonics;
+                            if (hitPos.z > snowAltitude && smoothNormal.z >= 0.50) {
+                                albedo = vec3(0.85, 0.88, 0.92); roughness = 0.35;
+                            } else if (smoothNormal.z < 0.65) {
+                                albedo = vec3(0.30, 0.31, 0.34); roughness = 0.85;
+                            } else if (smoothNormal.z < 0.82) {
+                                albedo = vec3(0.60, 0.48, 0.38); roughness = 0.75;
+                            } else {
+                                albedo = vec3(0.24, 0.44, 0.18); roughness = 0.65;
+                            }
+                        }
+                    } else if (primId < PRIM_WATER_END) {
+                        albedo = vec3(0.06, 0.22, 0.32); roughness = 0.08; metallic = 0.25;
+                    } else {
+                        uint treeLocalTri = (primId - PRIM_WATER_END) % 224u;
+                        if (treeLocalTri < 32u) {
+                            albedo = vec3(0.25, 0.17, 0.11); roughness = 0.85;
+                        } else {
+                            albedo = vec3(0.08, 0.32, 0.12); roughness = 0.50;
+                        }
+                    }
+                }
             }
 
             uint totalLights = pc.spp;
@@ -1627,12 +1652,12 @@ void main() {
                     }
                 }
             }
+        } else {
+            totalRadiance = evalSky(pc.sceneType, rayDir) * 0.15;
         }
 
         if (pc.dumpRenders != 0) {
             fb.pixels[pixelIdx] = vec4(tonemapACES(totalRadiance), 1.0);
-        } else if (dot(totalRadiance, vec3(1.0)) < -1e30) {
-            results.accumulatedLuminance = totalRadiance.x;
         }
     } else if (pc.mode == 12) {
         // Mode 12: Pipeline Breakdown - Isolated Direct Hybrid PBR Shading
@@ -1694,8 +1719,6 @@ void main() {
 
         if (pc.dumpRenders != 0) {
             fb.pixels[pixelIdx] = vec4(tonemapACES(pixelColor * 1.0), 1.0);
-        } else if (dot(pixelColor, vec3(1.0)) < -1e30) {
-            results.accumulatedLuminance = pixelColor.x;
         }
     } else {
         // Mode 0: Primary Ray Tracing + Divergent Material Shading
@@ -1749,7 +1772,7 @@ void main() {
             } else {
                 vec3 normal = computeSmoothNormal(pc.sceneType, primId, hitPos, rayDir, rawBary);
                 uint matId = computeMaterialId(pc.sceneType, primId, hitPos, normal);
-                pixelColor = evalMaterialBSDF(pc.sceneType, matId, normal, rayDir, hitPos, true, rngState);
+                pixelColor = evalMaterialBSDF(pc.sceneType, matId, normal, rayDir, hitPos, rngState);
             }
         } else {
             pixelColor = evalSky(pc.sceneType, rayDir);
@@ -1757,8 +1780,6 @@ void main() {
 
         if (pc.dumpRenders != 0) {
             fb.pixels[pixelIdx] = vec4(tonemapACES(pixelColor * 1.0), 1.0);
-        } else if (dot(pixelColor, vec3(1.0)) < -1e30) {
-            results.accumulatedLuminance = pixelColor.x;
         }
     }
 

@@ -2,12 +2,12 @@ __kernel void run_benchmark(__global uint *data,
                             uint iterations,
                             uint startIndex) {
   uint index = startIndex;
+  uint i = 0u;
 
-  for (uint i = 0u; i < iterations; i++) {
+  do {
     index = data[index];
-  }
+    i++;
+  } while (i < iterations);
 
-  if (index == 0xDEADBEEFu) {
-    data[0] = index;
-  }
+  data[startIndex + 1] = index;
 }

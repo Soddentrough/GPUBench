@@ -71,7 +71,17 @@ int main(int argc, char **argv) {
       "              RayScheduling (Megakernel vs DGC / SER)\n"
       "  system      Host CPU & RAM system memory:\n"
       "              System Memory Bandwidth (Multi & Single-Threaded), System Memory Latency\n"
-      "  all         Run all benchmark groups across enabled devices\n"
+      "  all         Run all benchmark groups across enabled devices\n\n"
+      "METHODOLOGY DISCLOSURES & EXECUTION NOTES:\n"
+      "  Precisions:  BF16, FP8, FP6, FP4, and INT4 require native hardware and API/driver support\n"
+      "               (e.g., VK_KHR_shader_bfloat16 / GL_EXT_bfloat16 or ROCm v_dot2_f32_bf16 / WMMA);\n"
+      "               unsupported backend/hardware combinations report UNSUPPORTED without silent fallback.\n"
+      "  Synthetic:   Raw BVH Traversal Deep Box Stress evaluates internal node traversal using an idealized\n"
+      "               synthetic 64-AABB model (reporting Box GIS/s under full wavefront occupancy).\n"
+      "  Extensions:  Ray Scheduling SER configurations strictly require VK_EXT_ray_tracing_invocation_reorder;\n"
+      "               unequipped devices report UNSUPPORTED.\n"
+      "  Strict Mode: --strict enforces zero-tolerance numerical validation on output buffers AND aborts execution\n"
+      "               if active background GPU contention is detected (override with -f/--force).\n"
   );
 
   bool list_benchmarks = false;
@@ -107,6 +117,14 @@ int main(int argc, char **argv) {
   bool quiet = false;
   app.add_flag("-q,--quiet", quiet, "Suppress progress output and decorative banners");
 
+  bool show_power = false;
+  app.add_flag("--power", show_power,
+               "Display power and energy efficiency telemetry inline in benchmark tables");
+
+  bool show_telemetry = false;
+  app.add_flag("--telemetry", show_telemetry,
+               "Display hardware performance counters and compiler register telemetry inline in benchmark tables");
+
   bool dump_geometry = false;
   app.add_flag("--dump-geometry", dump_geometry,
                "Dump ray tracing geometry to OBJ files");
@@ -124,7 +142,7 @@ int main(int argc, char **argv) {
 
   bool strict = false;
   app.add_flag("--strict", strict,
-               "Enforce strict validation; exit with non-zero code if any benchmark fails numerical validation");
+               "Enforce strict validation; aborts on active background GPU contention (override with -f/--force) and exits with non-zero code if any benchmark fails numerical validation");
 
   bool force = false;
   app.add_flag("-f,--force", force,
@@ -135,9 +153,9 @@ int main(int argc, char **argv) {
                  "Ray tracing benchmark scenario: showroom, indoor, outdoor, forest, all (default: all)")
       ->check(CLI::IsMember({"showroom", "indoor", "outdoor", "forest", "aaa_forest", "all"}));
 
-  std::string resolution_str = "auto";
+  std::string resolution_str = "4k";
   app.add_option("-r,--resolution", resolution_str,
-                 "Resolution preset (auto, 4k, 1440p, 1080p, 720p, 1024x1024) or custom WxH (default: auto)");
+                 "Resolution preset (4k, 1440p, 1080p, 720p, 1024x1024) or custom WxH (default: 4k)");
 
   std::vector<int> config_targets;
   app.add_option("-c,--config", config_targets,
@@ -156,7 +174,7 @@ int main(int argc, char **argv) {
 
   bool profile_snapshot = false;
   app.add_flag("--profile-snapshot", profile_snapshot,
-               "Run in profiling snapshot mode (1 warmup, 1 timed submit for clean profiler traces)");
+               "Run in fast profiling snapshot mode (shortened time window for quick profiler traces)");
 
   bool rra_trace = false;
   app.add_flag("--rra", rra_trace,
@@ -275,6 +293,8 @@ int main(int argc, char **argv) {
     }
 
     ResultFormatter formatter;
+    formatter.setShowPower(show_power);
+    formatter.setShowTelemetry(show_telemetry);
     for (const auto &res : run.results) {
       formatter.addResult(res);
     }
@@ -309,16 +329,13 @@ int main(int argc, char **argv) {
 #endif
   }
 
-  // Parse resolution
-  uint32_t render_width = 0;
-  uint32_t render_height = 0;
+  // Parse resolution (default: fixed 3840x2160 4K UHD across all devices)
+  uint32_t render_width = 3840;
+  uint32_t render_height = 2160;
   std::string res_lower;
   for (char c : resolution_str) res_lower.push_back(std::tolower(static_cast<unsigned char>(c)));
 
-  if (res_lower == "auto") {
-    render_width = 0;
-    render_height = 0;
-  } else if (res_lower == "4k" || res_lower == "2160p" || res_lower == "uhd") {
+  if (res_lower == "4k" || res_lower == "2160p" || res_lower == "uhd" || res_lower == "auto") {
     render_width = 3840;
     render_height = 2160;
   } else if (res_lower == "720p") {
@@ -398,8 +415,24 @@ int main(int argc, char **argv) {
         if (name == "RayRawTraversal") {
           RayRawTraversalBench rawBench;
           for (uint32_t c = 0; c < rawBench.GetNumConfigs(); ++c) {
-            std::cout << "      [" << c << "] " << rawBench.GetConfigName(c) << std::endl;
+            std::cout << "      [" << c << "] " << rawBench.GetConfigName(c);
+            if (c == 0) {
+              std::cout << "  (Coherent Triangle fast-path; 0% root misses)";
+            } else if (c == 1) {
+              std::cout << "  (Synthetic 64-AABB model; 64 box tests/ray)";
+            }
+            std::cout << std::endl;
           }
+        }
+        if (name == "BF16") {
+          std::cout << "      [0] Vector  (Requires native VK_KHR_shader_bfloat16 on Vulkan or ROCm BF16)" << std::endl;
+          std::cout << "      [1] Matrix  (Requires native VK_KHR_cooperative_matrix + BF16 or ROCm WMMA)" << std::endl;
+        }
+        if (name == "INT4" || name == "FP4" || name == "FP6") {
+          std::cout << "      Note: Requires native sub-byte hardware/API support (e.g. ROCm RDNA 4 iu4 WMMA for INT4); reports UNSUPPORTED otherwise" << std::endl;
+        }
+        if (name == "RayScheduling") {
+          std::cout << "      Note: SER configs strictly require VK_EXT_ray_tracing_invocation_reorder; DGC configs require VK_EXT_device_generated_commands" << std::endl;
         }
         if (name == "ILP & Dual-Issue") {
           DualIssueBench diBench;
@@ -546,6 +579,8 @@ int main(int argc, char **argv) {
     runner.setVerifyParity(verify_parity);
     runner.setForce(force);
     runner.setStrict(strict);
+    runner.setShowPower(show_power);
+    runner.setShowTelemetry(show_telemetry);
 
     std::vector<uint32_t> target_indices = device_indices;
     if (target_indices.empty()) {

@@ -4,12 +4,12 @@ extern "C" __global__ void run_benchmark(unsigned int *data,
                                          unsigned int iterations,
                                          unsigned int startIndex) {
   unsigned int index = startIndex;
+  unsigned int i = 0u;
 
-  for (unsigned int i = 0u; i < iterations; i++) {
+  do {
     index = data[index];
-  }
+    i++;
+  } while (i < iterations);
 
-  if (index == 0xDEADBEEFu) {
-    data[0] = index;
-  }
+  data[startIndex + 1] = index;
 }

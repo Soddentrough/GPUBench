@@ -1084,7 +1084,9 @@ void VulkanContext::createDevice() {
   if (vkCreateQueryPool(device, &qpInfo, nullptr, &timestampQueryPool) == VK_SUCCESS) {
     timingSupported = (properties.limits.timestampPeriod > 0.0f);
     timestampPeriod = static_cast<double>(properties.limits.timestampPeriod);
-    vkResetQueryPool(device, timestampQueryPool, 0, kMaxTimestamps);
+    if (hostQueryResetSupported) {
+      vkResetQueryPool(device, timestampQueryPool, 0, kMaxTimestamps);
+    }
   } else {
     timingSupported = false;
   }
@@ -1142,79 +1144,117 @@ void VulkanContext::createDevice() {
   }
   currentFrameIndex = 0;
 
-  VkCommandBufferAllocateInfo timingAllocInfo{};
-  timingAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-  timingAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-  timingAllocInfo.commandPool = commandPool;
-  timingAllocInfo.commandBufferCount = 2;
-  VkCommandBuffer timingCmds[2];
-  if (vkAllocateCommandBuffers(device, &timingAllocInfo, timingCmds) == VK_SUCCESS) {
-    timingCmdStart = timingCmds[0];
-    timingCmdStop = timingCmds[1];
-  }
-
   initStagingBuffer();
 }
 
-void VulkanContext::startTiming() {
-  if (!timingSupported || timestampQueryPool == VK_NULL_HANDLE || timingCmdStart == VK_NULL_HANDLE) {
+void VulkanContext::startTiming(VkCommandBuffer cmd) {
+  if (!timingSupported || timestampQueryPool == VK_NULL_HANDLE) {
     return;
   }
-  waitIdle();
-  if (hostQueryResetSupported) {
-    vkResetQueryPool(device, timestampQueryPool, 0, 2);
+  if (cmd == VK_NULL_HANDLE) {
+    waitIdle();
+    m_activeTimingPairs.clear();
+    currentQueryIndex = 0;
+    if (hostQueryResetSupported) {
+      vkResetQueryPool(device, timestampQueryPool, 0, kMaxTimestamps);
+    }
+    isTimingActive = true;
+    timingRecording = false;
+    timingSubmitted = false;
+    timingSubmittedFence = VK_NULL_HANDLE;
+  } else {
+    if (!isTimingActive) {
+      waitIdle();
+      m_activeTimingPairs.clear();
+      currentQueryIndex = 0;
+      if (hostQueryResetSupported) {
+        vkResetQueryPool(device, timestampQueryPool, 0, kMaxTimestamps);
+      }
+      isTimingActive = true;
+      timingSubmitted = false;
+    }
+    if (currentQueryIndex + 2 > kMaxTimestamps) return;
+    uint32_t startIdx = currentQueryIndex++;
+    uint32_t stopIdx = currentQueryIndex++;
+    if (!hostQueryResetSupported) {
+      vkCmdResetQueryPool(cmd, timestampQueryPool, startIdx, 2);
+    }
+    vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, timestampQueryPool, startIdx);
+    m_activeTimingPairs.push_back({startIdx, stopIdx});
+    timingRecording = true;
   }
-
-  VkCommandBufferBeginInfo beginInfo{};
-  beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-  beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-  vkBeginCommandBuffer(timingCmdStart, &beginInfo);
-  if (!hostQueryResetSupported) {
-    vkCmdResetQueryPool(timingCmdStart, timestampQueryPool, 0, 2);
-  }
-  vkCmdWriteTimestamp(timingCmdStart, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, timestampQueryPool, 0);
-  vkEndCommandBuffer(timingCmdStart);
-
-  VkSubmitInfo submitInfo{};
-  submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-  submitInfo.commandBufferCount = 1;
-  submitInfo.pCommandBuffers = &timingCmdStart;
-  vkQueueSubmit(computeQueue, 1, &submitInfo, VK_NULL_HANDLE);
-  isTimingActive = true;
 }
 
-double VulkanContext::stopTiming() {
-  if (!isTimingActive || !timingSupported || timestampQueryPool == VK_NULL_HANDLE || timingCmdStop == VK_NULL_HANDLE) {
+double VulkanContext::stopTiming(VkCommandBuffer cmd) {
+  if (!isTimingActive || !timingSupported || timestampQueryPool == VK_NULL_HANDLE) {
     isTimingActive = false;
     return 0.0;
   }
 
-  VkCommandBufferBeginInfo beginInfo{};
-  beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-  beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-  vkBeginCommandBuffer(timingCmdStop, &beginInfo);
-  vkCmdWriteTimestamp(timingCmdStop, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timestampQueryPool, 1);
-  vkEndCommandBuffer(timingCmdStop);
+  if (cmd != VK_NULL_HANDLE) {
+    if (!m_activeTimingPairs.empty()) {
+      uint32_t stopIdx = m_activeTimingPairs.back().stopQuery;
+      vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timestampQueryPool, stopIdx);
+      timingRecording = false;
+      timingSubmitted = true;
+    }
+    return 0.0;
+  }
 
-  VkSubmitInfo submitInfo{};
-  submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-  submitInfo.commandBufferCount = 1;
-  submitInfo.pCommandBuffers = &timingCmdStop;
-  vkQueueSubmit(computeQueue, 1, &submitInfo, VK_NULL_HANDLE);
+  if (timingRecording && m_inBatch && m_batchCmdRecording) {
+    endBatch();
+  }
 
   waitIdle();
   isTimingActive = false;
 
-  uint64_t timestamps[2] = {0, 0};
-  VkResult res = vkGetQueryPoolResults(
-      device, timestampQueryPool, 0, 2, sizeof(timestamps), timestamps,
-      sizeof(uint64_t), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
-
-  if (res == VK_SUCCESS && timestamps[1] >= timestamps[0]) {
-    double elapsedNs = static_cast<double>(timestamps[1] - timestamps[0]) * timestampPeriod;
-    return elapsedNs * 1e-6; // nanoseconds -> milliseconds
+  if (m_activeTimingPairs.empty() || !timingSubmitted) {
+    return 0.0;
   }
-  return 0.0;
+
+  double totalElapsedMs = 0.0;
+  for (const auto &pair : m_activeTimingPairs) {
+    uint64_t timestamps[2] = {0, 0};
+    VkResult res = vkGetQueryPoolResults(
+        device, timestampQueryPool, pair.startQuery, 2, sizeof(timestamps), timestamps,
+        sizeof(uint64_t), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+
+    if (res == VK_SUCCESS && timestamps[1] >= timestamps[0]) {
+      double elapsedNs = static_cast<double>(timestamps[1] - timestamps[0]) * timestampPeriod;
+      totalElapsedMs += elapsedNs * 1e-6;
+    }
+  }
+
+  m_activeTimingPairs.clear();
+  return totalElapsedMs;
+}
+
+void VulkanContext::maybeBeginTiming(VkCommandBuffer cmd) {
+  if (isTimingActive && !timingRecording && timestampQueryPool != VK_NULL_HANDLE) {
+    if (currentQueryIndex + 2 > kMaxTimestamps) {
+      return; // Query pool capacity safety guard
+    }
+    uint32_t startIdx = currentQueryIndex++;
+    uint32_t stopIdx = currentQueryIndex++;
+    if (!hostQueryResetSupported) {
+      vkCmdResetQueryPool(cmd, timestampQueryPool, startIdx, 2);
+    }
+    vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, timestampQueryPool, startIdx);
+    m_activeTimingPairs.push_back({startIdx, stopIdx});
+    timingRecording = true;
+  }
+}
+
+void VulkanContext::maybeEndTiming(VkCommandBuffer cmd) {
+  if (isTimingActive && timingRecording && timestampQueryPool != VK_NULL_HANDLE) {
+    if (!m_activeTimingPairs.empty()) {
+      uint32_t stopIdx = m_activeTimingPairs.back().stopQuery;
+      vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timestampQueryPool, stopIdx);
+      timingRecording = false;
+      timingSubmitted = true;
+      timingSubmittedFence = inFlightFrames[currentFrameIndex].fence;
+    }
+  }
 }
 
 void VulkanContext::startPerformanceQuery() {
@@ -2259,6 +2299,7 @@ void VulkanContext::endBatch() {
   if (m_batchCmdRecording) {
     InFlightFrame &frame = inFlightFrames[currentFrameIndex];
     maybeEndPerfQuery(frame.commandBuffer);
+    maybeEndTiming(frame.commandBuffer);
     vkEndCommandBuffer(frame.commandBuffer);
 
     VkSubmitInfo submitInfo{};
@@ -2320,6 +2361,7 @@ void VulkanContext::dispatch(ComputeKernel kernel, uint32_t grid_x,
       beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
       vkBeginCommandBuffer(frame.commandBuffer, &beginInfo);
       maybeBeginPerfQuery(frame.commandBuffer);
+      maybeBeginTiming(frame.commandBuffer);
       m_batchCmdRecording = true;
       m_batchDispatchCount = 0;
     }
@@ -2399,6 +2441,7 @@ void VulkanContext::dispatch(ComputeKernel kernel, uint32_t grid_x,
 
   vkBeginCommandBuffer(frame.commandBuffer, &beginInfo);
   maybeBeginPerfQuery(frame.commandBuffer);
+  maybeBeginTiming(frame.commandBuffer);
   VkPipelineBindPoint bindPoint = vulkanKernel->isRTPipeline
                                       ? VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR
                                       : VK_PIPELINE_BIND_POINT_COMPUTE;
@@ -2438,6 +2481,7 @@ void VulkanContext::dispatch(ComputeKernel kernel, uint32_t grid_x,
   }
 
   maybeEndPerfQuery(frame.commandBuffer);
+  maybeEndTiming(frame.commandBuffer);
   vkEndCommandBuffer(frame.commandBuffer);
 
   VkSubmitInfo submitInfo{};
@@ -2590,6 +2634,7 @@ void VulkanContext::dispatchIndirect(ComputeKernel kernel_handle,
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(frame.commandBuffer, &beginInfo);
     maybeBeginPerfQuery(frame.commandBuffer);
+    maybeBeginTiming(frame.commandBuffer);
     if (m_inBatch) {
       m_batchCmdRecording = true;
       m_batchDispatchCount = 0;
@@ -2628,6 +2673,7 @@ void VulkanContext::dispatchIndirect(ComputeKernel kernel_handle,
   }
 
   maybeEndPerfQuery(frame.commandBuffer);
+  maybeEndTiming(frame.commandBuffer);
   vkEndCommandBuffer(frame.commandBuffer);
 
   VkSubmitInfo submitInfo{};
@@ -2685,6 +2731,7 @@ void VulkanContext::dispatchIndirectSequence(
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(frame.commandBuffer, &beginInfo);
     maybeBeginPerfQuery(frame.commandBuffer);
+    maybeBeginTiming(frame.commandBuffer);
     if (m_inBatch) {
       m_batchCmdRecording = true;
       m_batchDispatchCount = 0;
@@ -2736,6 +2783,7 @@ void VulkanContext::dispatchIndirectSequence(
   }
 
   maybeEndPerfQuery(frame.commandBuffer);
+  maybeEndTiming(frame.commandBuffer);
   vkEndCommandBuffer(frame.commandBuffer);
 
   VkSubmitInfo submitInfo{};
@@ -2800,6 +2848,7 @@ void VulkanContext::dispatchWorkListSequence(
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(frame.commandBuffer, &beginInfo);
     maybeBeginPerfQuery(frame.commandBuffer);
+    maybeBeginTiming(frame.commandBuffer);
     if (m_inBatch) {
       m_batchCmdRecording = true;
       m_batchDispatchCount = 0;
@@ -3053,6 +3102,7 @@ void VulkanContext::dispatchWorkListSequence(
   }
 
   maybeEndPerfQuery(frame.commandBuffer);
+  maybeEndTiming(frame.commandBuffer);
   vkEndCommandBuffer(frame.commandBuffer);
 
   VkSubmitInfo submitInfo{};
@@ -3110,6 +3160,7 @@ void VulkanContext::dispatchRayTracingIndirect(ComputeKernel kernel_handle,
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(frame.commandBuffer, &beginInfo);
     maybeBeginPerfQuery(frame.commandBuffer);
+    maybeBeginTiming(frame.commandBuffer);
     if (m_inBatch) {
       m_batchCmdRecording = true;
       m_batchDispatchCount = 0;
@@ -3158,6 +3209,7 @@ void VulkanContext::dispatchRayTracingIndirect(ComputeKernel kernel_handle,
   }
 
   maybeEndPerfQuery(frame.commandBuffer);
+  maybeEndTiming(frame.commandBuffer);
   vkEndCommandBuffer(frame.commandBuffer);
 
   VkSubmitInfo submitInfo{};
@@ -3851,6 +3903,7 @@ void VulkanContext::dispatchDGCWorkListSequence(
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(frame.commandBuffer, &beginInfo);
     maybeBeginPerfQuery(frame.commandBuffer);
+    maybeBeginTiming(frame.commandBuffer);
     if (m_inBatch) {
       m_batchCmdRecording = true;
       m_batchDispatchCount = 0;
@@ -3957,6 +4010,7 @@ void VulkanContext::dispatchDGCWorkListSequence(
   }
 
   maybeEndPerfQuery(frame.commandBuffer);
+  maybeEndTiming(frame.commandBuffer);
   vkEndCommandBuffer(frame.commandBuffer);
 
   VkSubmitInfo submitInfo{VK_STRUCTURE_TYPE_SUBMIT_INFO};
@@ -4008,6 +4062,7 @@ void VulkanContext::dispatchDGCSequence(ComputeKernel kernel_handle,
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(frame.commandBuffer, &beginInfo);
     maybeBeginPerfQuery(frame.commandBuffer);
+    maybeBeginTiming(frame.commandBuffer);
     if (m_inBatch) {
       m_batchCmdRecording = true;
       m_batchDispatchCount = 0;
@@ -4056,6 +4111,7 @@ void VulkanContext::dispatchDGCSequence(ComputeKernel kernel_handle,
   }
 
   maybeEndPerfQuery(frame.commandBuffer);
+  maybeEndTiming(frame.commandBuffer);
   vkEndCommandBuffer(frame.commandBuffer);
 
   VkSubmitInfo submitInfo{VK_STRUCTURE_TYPE_SUBMIT_INFO};

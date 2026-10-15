@@ -51,8 +51,7 @@ vec3 tonemapACES(vec3 x) {
     const float c = 2.43;
     const float d = 0.59;
     const float e = 0.14;
-    vec3 mapped = clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
-    return pow(mapped, vec3(1.0 / 2.2));
+    return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
 }
 
 const uint SCENE_SHOWROOM_STUDIO = 0u;
@@ -262,6 +261,36 @@ void main() {
     } else {
         smoothNormal = computeSmoothNormal(pc.sceneType, primId, hitPos, inDir);
         geomNormal = smoothNormal;
+        if (pc.sceneType == SCENE_OUTDOOR_TERRAIN) {
+            if (primId < PRIM_TERRAIN_END) {
+                if (hitPos.z >= -0.2 && hitPos.z <= 2.2 && abs(hitPos.x) < 185.0 && hitPos.y >= -145.0 && hitPos.y <= 930.0) {
+                    albedo = vec3(0.18, 0.20, 0.22); roughness = 0.20;
+                } else {
+                    float snowHarmonics = sin(hitPos.x * 0.032 + hitPos.y * 0.018) * 9.5
+                                        + cos(hitPos.x * 0.068 - hitPos.y * 0.045) * 4.5
+                                        + sin(hitPos.x * 0.130 + hitPos.y * 0.110) * 2.0;
+                    float snowAltitude = 60.0 + (1.0 - smoothNormal.z) * 28.0 + snowHarmonics;
+                    if (hitPos.z > snowAltitude && smoothNormal.z >= 0.50) {
+                        albedo = vec3(0.85, 0.88, 0.92); roughness = 0.35;
+                    } else if (smoothNormal.z < 0.65) {
+                        albedo = vec3(0.30, 0.31, 0.34); roughness = 0.85;
+                    } else if (smoothNormal.z < 0.82) {
+                        albedo = vec3(0.60, 0.48, 0.38); roughness = 0.75;
+                    } else {
+                        albedo = vec3(0.24, 0.44, 0.18); roughness = 0.65;
+                    }
+                }
+            } else if (primId < PRIM_WATER_END) {
+                albedo = vec3(0.06, 0.22, 0.32); roughness = 0.08; metallic = 0.25;
+            } else {
+                uint treeLocalTri = (primId - PRIM_WATER_END) % 224u;
+                if (treeLocalTri < 32u) {
+                    albedo = vec3(0.25, 0.17, 0.11); roughness = 0.85;
+                } else {
+                    albedo = vec3(0.08, 0.32, 0.12); roughness = 0.50;
+                }
+            }
+        }
     }
 
     if (pc.binIndex <= 1u || pc.binIndex == 0xFFFFFFFFu) {
@@ -269,10 +298,6 @@ void main() {
         vec3 L, C;
         getMultiLight(0u, 1u, pc.sceneType, L, C);
         vec3 radiance = evalCookTorranceDirect(smoothNormal, viewDir, L, C, albedo, roughness, metallic);
-        float lum = dot(radiance, vec3(0.2126, 0.7152, 0.0722));
-        if ((threadIdx == 0u && lum != 0.0) || lum < -1e30) {
-            results.accumulatedLuminance = lum;
-        }
         if (pc.dumpRenders != 0u) {
             fb.pixels[pixelIdx] = vec4(tonemapACES(radiance), 1.0);
         }
@@ -288,10 +313,6 @@ void main() {
             }
         }
 
-        float lum = dot(totalRadiance, vec3(0.2126, 0.7152, 0.0722));
-        if ((threadIdx == 0u && lum != 0.0) || lum < -1e30) {
-            results.accumulatedLuminance = lum;
-        }
         if (pc.dumpRenders != 0u) {
             fb.pixels[pixelIdx] = vec4(tonemapACES(totalRadiance), 1.0);
         }

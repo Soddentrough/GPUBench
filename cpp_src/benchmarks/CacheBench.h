@@ -53,6 +53,7 @@ public:
   void Run(uint32_t config_idx = 0) override;
   void Teardown() override;
   BenchmarkResult GetResult(uint32_t config_idx = 0) const override;
+  bool ValidateResults(uint32_t config_idx = 0) const override;
   const char *GetComponent(uint32_t config_idx = 0) const override;
   const char *GetSubCategory(uint32_t config_idx = 0) const override;
   int GetSortWeight() const override;

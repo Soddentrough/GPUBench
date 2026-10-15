@@ -13,10 +13,8 @@ extern "C" __global__ void l0_cache_latency(unsigned int *buffer,
         index = buffer[index];
     }
 
-    // Prevent dead-code elimination (never taken in practice)
-    if (index == 0xDEADBEEFu) {
-        buffer[0] = index;
-    }
+    // Prevent dead-code elimination: store terminal index to unchased word 1
+    buffer[1] = index;
 }
 
 extern "C" __global__ void run_benchmark(unsigned int *buffer,
@@ -28,7 +26,5 @@ extern "C" __global__ void run_benchmark(unsigned int *buffer,
         index = buffer[index];
     }
 
-    if (index == 0xDEADBEEFu) {
-        buffer[0] = index;
-    }
+    buffer[1] = index;
 }

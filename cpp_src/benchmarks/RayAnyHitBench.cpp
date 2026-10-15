@@ -8,8 +8,38 @@
 
 bool RayAnyHitBench::IsSupported(const DeviceInfo &info,
                                  IComputeContext *context) const {
-  return info.rayTracingSupport &&
-         (context && context->getBackend() == ComputeBackend::Vulkan);
+  if (!info.rayTracingSupport) return false;
+  if (!context) return true;
+  if (context->getBackend() != ComputeBackend::Vulkan) return false;
+  const VulkanContext *vc = dynamic_cast<const VulkanContext *>(context);
+  if (vc && !vc->isExtensionEnabled(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME)) {
+    return false;
+  }
+  return true;
+}
+
+std::string RayAnyHitBench::GetSupportNote() const {
+  return "Ray tracing requires Vulkan ray tracing pipeline extensions";
+}
+
+std::string RayAnyHitBench::GetSupportNote(const DeviceInfo &info,
+                                           IComputeContext *context) const {
+  if (context && context->getBackend() == ComputeBackend::OpenCL) {
+    return "No support for ray tracing pipelines in OpenCL API";
+  }
+  if (context && context->getBackend() == ComputeBackend::ROCm) {
+    return "No support for ray tracing pipelines in ROCm/HIP API";
+  }
+  if (!info.rayTracingSupport) {
+    return "VK_KHR_acceleration_structure or VK_KHR_ray_query missing";
+  }
+  if (context) {
+    const VulkanContext *vc = dynamic_cast<const VulkanContext *>(context);
+    if (vc && !vc->isExtensionEnabled(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME)) {
+      return "VK_KHR_ray_tracing_pipeline missing";
+    }
+  }
+  return "Ray tracing requires Vulkan ray tracing pipeline extensions";
 }
 
 void RayAnyHitBench::loadRTProcs(VkDevice device) {
@@ -371,3 +401,22 @@ std::string RayAnyHitBench::GetConfigName(uint32_t config_idx) const {
   if (config_idx == 0) return "100% Solid (Any-Hit Baseline)";
   return "50% Solid (Cutout Stress)";
 }
+
+bool RayAnyHitBench::ValidateResults(uint32_t config_idx) const {
+  if (config_idx >= GetNumConfigs()) {
+    return false;
+  }
+  if (!context || !resultBuffer) {
+    return false;
+  }
+  try {
+    uint32_t hits = 0;
+    context->readBuffer(resultBuffer, 0, sizeof(uint32_t), &hits);
+    // Both Config 0 (100% solid) and Config 1 (50% cutout across 16 planes)
+    // record millions of confirmed surface hits.
+    return hits > 0;
+  } catch (...) {
+    return false;
+  }
+}
+

@@ -60,15 +60,15 @@ void RayIntersectBench::Setup(IComputeContext &context,
         float fx = (float)x - 8.0f + jitterX;
         float fy = (float)y - 8.0f + jitterY;
         float fz = (float)z * 0.1f;
-        // Small triangles in the bottom corner (0.1 to 0.4)
-        vertices.push_back(fx + 0.1f);
-        vertices.push_back(fy + 0.1f);
+        // Triangles spanning [0.05, 0.95] of each cell so interior rays [0.42, 0.56] hit across all jittered layers
+        vertices.push_back(fx + 0.05f);
+        vertices.push_back(fy + 0.05f);
         vertices.push_back(fz);
-        vertices.push_back(fx + 0.4f);
-        vertices.push_back(fy + 0.1f);
+        vertices.push_back(fx + 0.95f);
+        vertices.push_back(fy + 0.05f);
         vertices.push_back(fz);
-        vertices.push_back(fx + 0.1f);
-        vertices.push_back(fy + 0.4f);
+        vertices.push_back(fx + 0.05f);
+        vertices.push_back(fy + 0.95f);
         vertices.push_back(fz);
       }
     }
@@ -85,9 +85,8 @@ void RayIntersectBench::Setup(IComputeContext &context,
         float fx = (float)x - 8.0f + jitterX;
         float fy = (float)y - 8.0f + jitterY;
         float fz = (float)z * 0.1f;
-        // Small AABB in the bottom corner (0.1 to 0.4). Ray at 0.8 completely
-        // misses it!
-        aabbs.push_back({fx + 0.1f, fy + 0.1f, fz - 0.01f, fx + 0.4f, fy + 0.4f,
+        // Procedural AABB matching cell bounds [0.05, 0.95]
+        aabbs.push_back({fx + 0.05f, fy + 0.05f, fz - 0.01f, fx + 0.95f, fy + 0.95f,
                          fz + 0.01f});
       }
     }
@@ -151,11 +150,11 @@ void RayIntersectBench::buildAS() {
     throw std::runtime_error("Failed to create triangle BLAS in RayIntersectBench");
   }
 
-  // 2. Box BLAS
+  // 2. Box BLAS (non-opaque so rayQueryProceedEXT yields candidate AABB intersections)
   VkAccelerationStructureGeometryKHR boxGeom{
       VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR};
   boxGeom.geometryType = VK_GEOMETRY_TYPE_AABBS_KHR;
-  boxGeom.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+  boxGeom.flags = 0;
   boxGeom.geometry.aabbs.sType =
       VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_AABBS_DATA_KHR;
   boxGeom.geometry.aabbs.data.deviceAddress = aAddr;
@@ -412,6 +411,18 @@ BenchmarkResult RayIntersectBench::GetResult(uint32_t config_idx) const {
   return {(uint64_t)rayCount, 0.0};
 }
 
+bool RayIntersectBench::ValidateResults(uint32_t config_idx) const {
+  if (config_idx >= GetNumConfigs()) return false;
+  if (!context || !resultBuffer) return false;
+  try {
+    uint32_t hits = 0;
+    context->readBuffer(resultBuffer, 0, sizeof(uint32_t), &hits);
+    return hits > 0;
+  } catch (...) {
+    return false;
+  }
+}
+
 const char *RayIntersectBench::GetName() const { return "RayIntersect"; }
 const char *RayIntersectBench::GetComponent(uint32_t config_idx) const {
   return "Ray Tracing";
@@ -441,15 +452,15 @@ void RayIntersectBench::DumpGeometry() const {
         float fz = (float)z * 0.1f;
 
         // Triangle
-        objFile << "v " << fx + 0.1f << " " << fy + 0.1f << " " << fz << "\n";
-        objFile << "v " << fx + 0.4f << " " << fy + 0.1f << " " << fz << "\n";
-        objFile << "v " << fx + 0.1f << " " << fy + 0.4f << " " << fz << "\n";
+        objFile << "v " << fx + 0.05f << " " << fy + 0.05f << " " << fz << "\n";
+        objFile << "v " << fx + 0.95f << " " << fy + 0.05f << " " << fz << "\n";
+        objFile << "v " << fx + 0.05f << " " << fy + 0.95f << " " << fz << "\n";
         objFile << "f " << vIdx << " " << vIdx + 1 << " " << vIdx + 2 << "\n";
         vIdx += 3;
 
         // Box as Cube (12 triangles)
-        float x0 = fx + 0.1f, y0 = fy + 0.1f, z0 = fz - 0.01f;
-        float x1 = fx + 0.4f, y1 = fy + 0.4f, z1 = fz + 0.01f;
+        float x0 = fx + 0.05f, y0 = fy + 0.05f, z0 = fz - 0.01f;
+        float x1 = fx + 0.95f, y1 = fy + 0.95f, z1 = fz + 0.01f;
 
         // 8 Vertices
         objFile << "v " << x0 << " " << y0 << " " << z0 << "\n";

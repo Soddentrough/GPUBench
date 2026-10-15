@@ -108,7 +108,7 @@ void PixelFillRateBench::createPipelineForConfig(Config &cfg) {
   imageInfo.format = cfg.format;
   imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
   imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-  imageInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+  imageInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
   imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
   imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
@@ -514,3 +514,158 @@ BenchmarkResult PixelFillRateBench::GetResult(uint32_t config_idx) const {
   uint64_t totalPixels = static_cast<uint64_t>(width) * height * passesPerDispatch;
   return {totalPixels, 0.0};
 }
+
+bool PixelFillRateBench::ValidateResults(uint32_t config_idx) const {
+  if (config_idx >= configs.size() || device == VK_NULL_HANDLE || queue == VK_NULL_HANDLE) {
+    return false;
+  }
+  const auto &cfg = configs[config_idx];
+  if (cfg.image == VK_NULL_HANDLE) {
+    return false;
+  }
+
+  vkQueueWaitIdle(queue);
+
+  // Allocate 64-byte host staging buffer for 1 pixel (supports up to RGBA32F)
+  VkBuffer stagingBuffer = VK_NULL_HANDLE;
+  VkDeviceMemory stagingMemory = VK_NULL_HANDLE;
+
+  VkBufferCreateInfo bufInfo{};
+  bufInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+  bufInfo.size = 64;
+  bufInfo.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+  bufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+  if (vkCreateBuffer(device, &bufInfo, nullptr, &stagingBuffer) != VK_SUCCESS) {
+    return false;
+  }
+
+  VkMemoryRequirements memReqs;
+  vkGetBufferMemoryRequirements(device, stagingBuffer, &memReqs);
+
+  VkMemoryAllocateInfo allocInfo{};
+  allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+  allocInfo.allocationSize = memReqs.size;
+  allocInfo.memoryTypeIndex = findMemoryType(
+      memReqs.memoryTypeBits,
+      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+  if (vkAllocateMemory(device, &allocInfo, nullptr, &stagingMemory) != VK_SUCCESS) {
+    vkDestroyBuffer(device, stagingBuffer, nullptr);
+    return false;
+  }
+  vkBindBufferMemory(device, stagingBuffer, stagingMemory, 0);
+
+  // Allocate command buffer from existing pool
+  VkCommandBuffer cmd = VK_NULL_HANDLE;
+  VkCommandBufferAllocateInfo cmdAllocInfo{};
+  cmdAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+  cmdAllocInfo.commandPool = commandPool;
+  cmdAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+  cmdAllocInfo.commandBufferCount = 1;
+  if (vkAllocateCommandBuffers(device, &cmdAllocInfo, &cmd) != VK_SUCCESS) {
+    vkDestroyBuffer(device, stagingBuffer, nullptr);
+    vkFreeMemory(device, stagingMemory, nullptr);
+    return false;
+  }
+
+  VkCommandBufferBeginInfo beginInfo{};
+  beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+  beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  vkBeginCommandBuffer(cmd, &beginInfo);
+
+  // Barrier: COLOR_ATTACHMENT_OPTIMAL -> TRANSFER_SRC_OPTIMAL
+  VkImageMemoryBarrier barrierToSrc{};
+  barrierToSrc.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+  barrierToSrc.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  barrierToSrc.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+  barrierToSrc.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  barrierToSrc.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  barrierToSrc.image = cfg.image;
+  barrierToSrc.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+  barrierToSrc.subresourceRange.baseMipLevel = 0;
+  barrierToSrc.subresourceRange.levelCount = 1;
+  barrierToSrc.subresourceRange.baseArrayLayer = 0;
+  barrierToSrc.subresourceRange.layerCount = 1;
+  barrierToSrc.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+  barrierToSrc.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+
+  vkCmdPipelineBarrier(cmd,
+                       VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                       VK_PIPELINE_STAGE_TRANSFER_BIT,
+                       0, 0, nullptr, 0, nullptr, 1, &barrierToSrc);
+
+  // Copy center pixel (width / 2, height / 2)
+  VkBufferImageCopy region{};
+  region.bufferOffset = 0;
+  region.bufferRowLength = 0;
+  region.bufferImageHeight = 0;
+  region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+  region.imageSubresource.mipLevel = 0;
+  region.imageSubresource.baseArrayLayer = 0;
+  region.imageSubresource.layerCount = 1;
+  region.imageOffset = {static_cast<int32_t>(width / 2), static_cast<int32_t>(height / 2), 0};
+  region.imageExtent = {1, 1, 1};
+
+  vkCmdCopyImageToBuffer(cmd, cfg.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                         stagingBuffer, 1, &region);
+
+  // Barrier: TRANSFER_SRC_OPTIMAL -> COLOR_ATTACHMENT_OPTIMAL
+  VkImageMemoryBarrier barrierBack{};
+  barrierBack.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+  barrierBack.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+  barrierBack.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  barrierBack.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  barrierBack.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  barrierBack.image = cfg.image;
+  barrierBack.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+  barrierBack.subresourceRange.baseMipLevel = 0;
+  barrierBack.subresourceRange.levelCount = 1;
+  barrierBack.subresourceRange.baseArrayLayer = 0;
+  barrierBack.subresourceRange.layerCount = 1;
+  barrierBack.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+  barrierBack.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+
+  vkCmdPipelineBarrier(cmd,
+                       VK_PIPELINE_STAGE_TRANSFER_BIT,
+                       VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                       0, 0, nullptr, 0, nullptr, 1, &barrierBack);
+
+  vkEndCommandBuffer(cmd);
+
+  VkSubmitInfo submitInfo{};
+  submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+  submitInfo.commandBufferCount = 1;
+  submitInfo.pCommandBuffers = &cmd;
+
+  VkFence fence = VK_NULL_HANDLE;
+  VkFenceCreateInfo fenceInfo{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+  vkCreateFence(device, &fenceInfo, nullptr, &fence);
+
+  vkQueueSubmit(queue, 1, &submitInfo, fence);
+  vkWaitForFences(device, 1, &fence, VK_TRUE, 3000000000ULL);
+  vkDestroyFence(device, fence, nullptr);
+  vkFreeCommandBuffers(device, commandPool, 1, &cmd);
+
+  bool valid = false;
+  void *mapped = nullptr;
+  if (vkMapMemory(device, stagingMemory, 0, 64, 0, &mapped) == VK_SUCCESS) {
+    if (cfg.format == VK_FORMAT_R8G8B8A8_UNORM) {
+      auto *rgba = static_cast<const uint8_t *>(mapped);
+      // Verify non-zero color channels and non-zero alpha
+      valid = (rgba[0] > 0 || rgba[1] > 0 || rgba[2] > 0) && rgba[3] > 0;
+    } else if (cfg.format == VK_FORMAT_R16G16B16A16_SFLOAT) {
+      auto *hdr = static_cast<const uint16_t *>(mapped);
+      // In half float, 0 is 0x0000 or 0x8000 (-0.0)
+      valid = (hdr[0] != 0 || hdr[1] != 0 || hdr[2] != 0) && hdr[3] != 0;
+    } else {
+      valid = true;
+    }
+    vkUnmapMemory(device, stagingMemory);
+  }
+
+  vkDestroyBuffer(device, stagingBuffer, nullptr);
+  vkFreeMemory(device, stagingMemory, nullptr);
+  return valid;
+}
+

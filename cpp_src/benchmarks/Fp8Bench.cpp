@@ -1,4 +1,5 @@
 #include "benchmarks/Fp8Bench.h"
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -123,5 +124,34 @@ BenchmarkResult Fp8Bench::GetResult(uint32_t config_idx) const {
   uint64_t wmma_per_wg = 32768ULL;
   uint64_t num_ops = (uint64_t)65536 * wmma_per_wg * 8192ULL;
   return {num_ops, 0.0};
+}
+
+bool Fp8Bench::ValidateResults(uint32_t config_idx) const {
+  (void)config_idx;
+  if (!context) return false;
+  // If FP8 matrix is not supported or not loaded on this device, pass validation
+  if (!matrixKernel) return true;
+
+  ComputeBuffer targetBuf = outputBuffer ? outputBuffer : buffer;
+  if (!targetBuf) return false;
+
+  std::vector<float> hostOut(64, 0.0f);
+  try {
+    context->readBuffer(targetBuf, 0, hostOut.size() * sizeof(float), hostOut.data());
+    bool anyNonZero = false;
+    for (float v : hostOut) {
+      if (std::isnan(v) || std::isinf(v)) return false;
+      if (v != 0.0f) anyNonZero = true;
+      // On Vulkan coop_matrix_fp8, expected output tile elements are ~2048.0f
+      if (context->getBackend() == ComputeBackend::Vulkan) {
+        if (std::abs(v - 2048.036f) > 5.0f && std::abs(v - 2048.0f) > 5.0f) {
+          return false;
+        }
+      }
+    }
+    return anyNonZero;
+  } catch (...) {
+    return false;
+  }
 }
 

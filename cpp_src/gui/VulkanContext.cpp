@@ -121,8 +121,32 @@ bool VulkanContext::init(const char* title, int width, int height, float scaleOv
 void VulkanContext::loadSystemFont(float scale) {
     ImGuiIO& io = ImGui::GetIO();
     io.Fonts->Clear();
+    m_fontRegular = nullptr;
+    m_fontBold = nullptr;
+    m_fontMono = nullptr;
 
-    const char* fontCandidates[] = {
+    static const ImWchar kExtendedGlyphRanges[] = {
+        0x0020, 0x00FF, // Basic Latin + Latin-1 Supplement (°, ×, ±, µ)
+        0x2010, 0x2027, // General Punctuation (–, —, •, …)
+        0x2190, 0x2199, // Arrows (←, ↑, →, ↓)
+        0x2200, 0x22FF, // Mathematical Operators (≥, ≤, ≈, ≠, ∞)
+        0x25A0, 0x25FF, // Geometric Shapes (▪, ▸, ▾, ▲, ▼, ●)
+        0x26A0, 0x26A1, // Warning / High Voltage (⚠, ⚡)
+        0x2713, 0x2718, // Dingbats Checkmarks / Crosses (✓, ✔, ✕, ✖, ✗, ✘)
+        0,
+    };
+
+    static const ImWchar kSymbolMergeRanges[] = {
+        0x2010, 0x2027,
+        0x2190, 0x2199,
+        0x2200, 0x22FF,
+        0x25A0, 0x25FF,
+        0x26A0, 0x26A1,
+        0x2713, 0x2718,
+        0,
+    };
+
+    const char* regularCandidates[] = {
 #if defined(_WIN32)
         "C:\\Windows\\Fonts\\segoeui.ttf",
         "C:\\Windows\\Fonts\\arial.ttf",
@@ -132,34 +156,134 @@ void VulkanContext::loadSystemFont(float scale) {
         "/System/Library/Fonts/Supplemental/Arial.ttf",
         "/Library/Fonts/Arial.ttf",
 #endif
+        "/usr/share/fonts/rsms-inter-fonts/Inter-Regular.ttf",
         "/usr/share/fonts/adwaita-sans-fonts/AdwaitaSans-Regular.ttf",
         "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/liberation-sans-fonts/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/open-sans/OpenSans-Regular.ttf",
         "/usr/share/fonts/google-noto/NotoSans-Regular.ttf"
     };
 
-    float baseFontSize = 16.0f;
-    float scaledFontSize = std::max(10.0f, std::round(baseFontSize * scale));
+    const char* boldCandidates[] = {
+#if defined(_WIN32)
+        "C:\\Windows\\Fonts\\segoeuib.ttf",
+        "C:\\Windows\\Fonts\\arialbd.ttf",
+        "C:\\Windows\\Fonts\\calibrib.ttf",
+#elif defined(__APPLE__)
+        "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+        "/Library/Fonts/Arial Bold.ttf",
+#endif
+        "/usr/share/fonts/rsms-inter-fonts/Inter-SemiBold.ttf",
+        "/usr/share/fonts/rsms-inter-fonts/Inter-Bold.ttf",
+        "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/liberation-sans-fonts/LiberationSans-Bold.ttf",
+        "/usr/share/fonts/open-sans/OpenSans-Bold.ttf"
+    };
 
-    bool fontLoaded = false;
-    for (const char* fontPath : fontCandidates) {
-        FILE* f = fopen(fontPath, "rb");
+    const char* monoCandidates[] = {
+#if defined(_WIN32)
+        "C:\\Windows\\Fonts\\consola.ttf",
+        "C:\\Windows\\Fonts\\cour.ttf",
+#elif defined(__APPLE__)
+        "/System/Library/Fonts/Monaco.ttf",
+        "/System/Library/Fonts/Supplemental/Courier New.ttf",
+#endif
+        "/usr/share/fonts/adwaita-mono-fonts/AdwaitaMono-Regular.ttf",
+        "/usr/share/fonts/liberation-mono-fonts/LiberationMono-Regular.ttf",
+        "/usr/share/fonts/dejavu-sans-mono-fonts/DejaVuSansMono.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"
+    };
+
+    const char* symbolFallbackCandidates[] = {
+        "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/google-noto/NotoSansSymbols2-Regular.ttf"
+    };
+
+    auto fileExists = [](const char* path) -> bool {
+        FILE* f = fopen(path, "rb");
         if (f) {
             fclose(f);
+            return true;
+        }
+        return false;
+    };
+
+    auto mergeSymbolFallback = [&](float fontSize) {
+        for (const char* symPath : symbolFallbackCandidates) {
+            if (fileExists(symPath)) {
+                ImFontConfig mergeCfg;
+                mergeCfg.MergeMode = true;
+                mergeCfg.OversampleH = 2;
+                mergeCfg.OversampleV = 2;
+                mergeCfg.PixelSnapH = true;
+                io.Fonts->AddFontFromFileTTF(symPath, fontSize, &mergeCfg, kSymbolMergeRanges);
+                break;
+            }
+        }
+    };
+
+    float regFontSize  = std::max(10.0f, std::round(15.5f * scale));
+    float boldFontSize = std::max(11.0f, std::round(16.5f * scale));
+    float monoFontSize = std::max(10.0f, std::round(14.5f * scale));
+
+    // 1. Primary Regular UI Font (Default)
+    for (const char* fontPath : regularCandidates) {
+        if (fileExists(fontPath)) {
             ImFontConfig fontCfg;
             fontCfg.OversampleH = 2;
             fontCfg.OversampleV = 2;
             fontCfg.PixelSnapH = true;
-            io.Fonts->AddFontFromFileTTF(fontPath, scaledFontSize, &fontCfg);
-            fontLoaded = true;
-            break;
+            m_fontRegular = io.Fonts->AddFontFromFileTTF(fontPath, regFontSize, &fontCfg, kExtendedGlyphRanges);
+            if (m_fontRegular) {
+                mergeSymbolFallback(regFontSize);
+                break;
+            }
         }
     }
-    if (!fontLoaded) {
+    if (!m_fontRegular) {
         ImFontConfig fontCfg;
-        fontCfg.SizePixels = scaledFontSize;
-        io.Fonts->AddFontDefault(&fontCfg);
+        fontCfg.SizePixels = regFontSize;
+        m_fontRegular = io.Fonts->AddFontDefault(&fontCfg);
     }
+
+    // 2. Bold Header / KPI Font
+    for (const char* fontPath : boldCandidates) {
+        if (fileExists(fontPath)) {
+            ImFontConfig fontCfg;
+            fontCfg.OversampleH = 2;
+            fontCfg.OversampleV = 2;
+            fontCfg.PixelSnapH = true;
+            m_fontBold = io.Fonts->AddFontFromFileTTF(fontPath, boldFontSize, &fontCfg, kExtendedGlyphRanges);
+            if (m_fontBold) {
+                mergeSymbolFallback(boldFontSize);
+                break;
+            }
+        }
+    }
+    if (!m_fontBold) {
+        m_fontBold = m_fontRegular;
+    }
+
+    // 3. Tabular Monospace Font for Scores & Telemetry
+    for (const char* fontPath : monoCandidates) {
+        if (fileExists(fontPath)) {
+            ImFontConfig fontCfg;
+            fontCfg.OversampleH = 2;
+            fontCfg.OversampleV = 2;
+            fontCfg.PixelSnapH = true;
+            m_fontMono = io.Fonts->AddFontFromFileTTF(fontPath, monoFontSize, &fontCfg, kExtendedGlyphRanges);
+            if (m_fontMono) {
+                break;
+            }
+        }
+    }
+    if (!m_fontMono) {
+        m_fontMono = m_fontRegular;
+    }
+
     m_builtFontScale = scale;
 }
 
@@ -395,6 +519,7 @@ void VulkanContext::beginFrame() {
     }
 
     if (m_pendingFontScale > 0.0f && m_device != VK_NULL_HANDLE) {
+        vkDeviceWaitIdle(m_device);
         loadSystemFont(m_pendingFontScale);
         ImGui_ImplVulkan_CreateFontsTexture();
         ImGui::GetIO().FontGlobalScale = 1.0f;

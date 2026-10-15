@@ -52,7 +52,9 @@ private:
   static constexpr uint32_t kWorkgroups = 2048;
   static constexpr uint32_t kThreadsPerWg = 32;
   static constexpr uint32_t kLoadsPerIter = 8;
+  static constexpr uint32_t kLdsInitVal = 32u;
   static constexpr uint32_t kIterations = 50000;
+  static constexpr uint32_t kExpectedVal = kIterations * kLoadsPerIter * kLdsInitVal;
   static constexpr uint64_t kTotalBytes = static_cast<uint64_t>(kWorkgroups) *
                                           kThreadsPerWg * kLoadsPerIter *
                                           kIterations * sizeof(uint32_t);

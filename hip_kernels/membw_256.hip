@@ -36,8 +36,8 @@ extern "C" __global__ void run_benchmark(float4* inputDataRaw, float4* outputDat
         }
     }
 
-    // Prevent compiler from optimizing away reads (branch never taken, but compiler can't prove it)
-    if (accumulator.x > 1e30f) {
-        outputData[0] = accumulator;
+    // Genuine writeback: unconditionally commit accumulated loads to global memory in read mode
+    if (mode == 0) {
+        outputData[thread_id] = accumulator;
     }
 }

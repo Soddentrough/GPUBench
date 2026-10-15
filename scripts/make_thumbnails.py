@@ -39,6 +39,13 @@ STAGES = [
     "stage6_indirect",
     "stage7_final",
     "multilight_128_dgc",
+    "alpha_cutout",
+]
+
+# (source stage suffix, output stage suffix) for renamed scene renders
+RENAMED_STAGES = [
+    ("pathtracing_1spp_worklist", "pathtracing_1spp"),
+    ("pathtracing_16spp_worklist", "pathtracing_16spp"),
 ]
 
 # (source relative path, output thumbnail name)
@@ -56,6 +63,10 @@ def source_list():
         for stage in STAGES:
             src = os.path.join("renders", f"render_{scene}_{stage}.png")
             dst = f"thumb_{scene}_{stage}"
+            pairs.append((src, dst))
+        for src_suffix, dst_suffix in RENAMED_STAGES:
+            src = os.path.join("renders", f"render_{scene}_{src_suffix}.png")
+            dst = f"thumb_{scene}_{dst_suffix}"
             pairs.append((src, dst))
     for src, dst in STATIC_SOURCES:
         pairs.append((src, dst))

@@ -96,10 +96,13 @@ void DualIssueBench::Setup(IComputeContext &context, const std::string &kernel_d
 
   numElements = 8192 * 64;
   size_t bufferSize = numElements * sizeof(float);
-  buffer = context.createBuffer(bufferSize);
-
-  std::vector<float> initData(numElements, 1.0f);
-  context.writeBuffer(buffer, 0, bufferSize, initData.data());
+  buffers.resize(configs.size(), nullptr);
+  std::vector<float> sentinelData(numElements, 0.0f); // 0.0f sentinel prevents self-validating defaults
+  for (size_t i = 0; i < configs.size(); ++i) {
+    buffers[i] = context.createBuffer(bufferSize);
+    context.writeBuffer(buffers[i], 0, bufferSize, sentinelData.data());
+  }
+  buffer = buffers.empty() ? nullptr : buffers[0]; // backward-compatibility for direct test harness references
 
   std::filesystem::path kdir(kernel_dir);
   kernels.resize(configs.size(), nullptr);
@@ -120,16 +123,18 @@ void DualIssueBench::Setup(IComputeContext &context, const std::string &kernel_d
     }
 
     kernels[i] = context.createKernel(kernel_file.string(), kernel_func, 1);
-    context.setKernelArg(kernels[i], 0, buffer);
+    context.setKernelArg(kernels[i], 0, buffers[i]);
   }
 }
 
 void DualIssueBench::Run(uint32_t config_idx) {
-  if (config_idx >= kernels.size() || !kernels[config_idx]) {
-    throw std::runtime_error("DualIssueBench: kernel not loaded for config " +
+  if (config_idx >= kernels.size() || !kernels[config_idx] ||
+      config_idx >= buffers.size() || !buffers[config_idx]) {
+    throw std::runtime_error("DualIssueBench: kernel/buffer not loaded for config " +
                              std::to_string(config_idx));
   }
 
+  context->setKernelArg(kernels[config_idx], 0, buffers[config_idx]);
   float multiplier = 0.999f;
   context->setKernelArg(kernels[config_idx], 1, sizeof(float), &multiplier);
   context->setKernelArg(kernels[config_idx], 2, sizeof(uint32_t), &numElements);
@@ -145,10 +150,14 @@ void DualIssueBench::Teardown() {
     }
   }
   kernels.clear();
-  if (buffer) {
-    context->releaseBuffer(buffer);
-    buffer = nullptr;
+  for (auto &b : buffers) {
+    if (b) {
+      context->releaseBuffer(b);
+      b = nullptr;
+    }
   }
+  buffers.clear();
+  buffer = nullptr;
 }
 
 BenchmarkResult DualIssueBench::GetResult(uint32_t config_idx) const {
@@ -158,11 +167,39 @@ BenchmarkResult DualIssueBench::GetResult(uint32_t config_idx) const {
 }
 
 bool DualIssueBench::ValidateResults(uint32_t config_idx) const {
-  if (!context || !buffer) return false;
-  float val = 0.0f;
+  if (!context || config_idx >= configs.size() || config_idx >= buffers.size()) return false;
+  ComputeBuffer targetBuf = buffers[config_idx];
+  if (!targetBuf) return false;
+
+  std::vector<float> hostOut(64, 0.0f);
   try {
-    context->readBuffer(buffer, 0, sizeof(float), &val);
-    return !std::isnan(val) && !std::isinf(val) && val != 0.0f;
+    context->readBuffer(targetBuf, 0, hostOut.size() * sizeof(float), hostOut.data());
+
+    for (float v : hostOut) {
+      if (std::isnan(v) || std::isinf(v) || v <= 0.0f) {
+        return false;
+      }
+    }
+
+    float v0 = hostOut[0];
+    switch (config_idx) {
+      case 0: // FP32 Baseline (Ping-Pong) -> analytical recurrence envelope [30.1f, 60.6f] across all passes
+        return v0 >= 28.0f && v0 <= 65.0f;
+      case 1: // FP32 Moderate ILP (8 Chains) -> analytical recurrence closed form (8*base + 2.8)*(1+m)^65536 in [20.78f, 36.19f]
+        return v0 >= 20.0f && v0 <= 38.0f;
+      case 2: // FP32 Peak ILP / Co-Issue (16 Chains) -> analytical recurrence closed form (16*base + 6.0)*(1+m)^65536 in [42.34f, 73.14f]
+        return v0 >= 40.0f && v0 <= 75.0f;
+      case 3: // INT32 Baseline (Ping-Pong) -> 24-bit integer bitwise OR 1u in [1, 16777215], rejecting 0.0f sentinel
+        return v0 >= 1.0f && v0 <= 16777215.0f;
+      case 4: // INT32 Moderate ILP (8 Chains) -> 24-bit integer bitwise OR 1u in [1, 16777215], rejecting 0.0f sentinel
+        return v0 >= 1.0f && v0 <= 16777215.0f;
+      case 5: // INT32 Peak ILP (16 Chains) -> 24-bit integer bitwise OR 1u in [1, 16777215], rejecting 0.0f sentinel
+        return v0 >= 1.0f && v0 <= 16777215.0f;
+      case 6: // Concurrent Mixed (FP32+INT32) -> fres in [20.78, 36.19] + int in [1, 16777215] >= 21.78f
+        return v0 >= 21.0f && v0 <= 16777255.0f;
+      default:
+        return false;
+    }
   } catch (...) {
     return false;
   }

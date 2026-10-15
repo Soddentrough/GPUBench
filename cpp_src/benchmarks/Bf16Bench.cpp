@@ -1,5 +1,8 @@
 #include "benchmarks/Bf16Bench.h"
+#include <cmath>
+#include <cstring>
 #include <filesystem>
+#include <iostream>
 #include <stdexcept>
 #include <vector>
 
@@ -23,8 +26,10 @@ void Bf16Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
   size_t bufferSize =
       8192 * 64 * 4 * 4; // 8MB buffer to prevent out of bounds
   buffer = context.createBuffer(bufferSize);
+  matrixBuffer = context.createBuffer(bufferSize);
   std::vector<uint32_t> initData(bufferSize / sizeof(uint32_t), 0x3D003D00u);
   context.writeBuffer(buffer, 0, bufferSize, initData.data());
+  context.writeBuffer(matrixBuffer, 0, bufferSize, initData.data());
 
   // Load Vector Kernel
   std::filesystem::path kdir(kernel_dir);
@@ -55,11 +60,11 @@ void Bf16Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
   // Optionally load Matrix Kernel if supported
   bool try_load_matrix = false;
   if (context.getBackend() == ComputeBackend::Vulkan && context.getCurrentDeviceInfo().cooperativeMatrixSupport) {
-      try_load_matrix = true;
+    try_load_matrix = true;
   } else if (context.getBackend() == ComputeBackend::ROCm) {
-      if (context.getCurrentDeviceInfo().cooperativeMatrixSupport) {
-          try_load_matrix = true;
-      }
+    if (context.getCurrentDeviceInfo().cooperativeMatrixSupport) {
+      try_load_matrix = true;
+    }
   }
 
   if (try_load_matrix) {
@@ -67,7 +72,7 @@ void Bf16Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
       std::string func_name = (context.getBackend() == ComputeBackend::ROCm) ? "run_benchmark" : "main";
       matrixKernel = context.createKernel(matrix_file.string(), func_name, 1);
       if (matrixKernel) {
-          context.setKernelArg(matrixKernel, 0, buffer);
+        context.setKernelArg(matrixKernel, 0, matrixBuffer);
       }
     } catch (...) {
       matrixKernel = nullptr;
@@ -90,9 +95,12 @@ void Bf16Bench::Teardown() {
     context->releaseKernel(matrixKernel);
   if (buffer)
     context->releaseBuffer(buffer);
+  if (matrixBuffer)
+    context->releaseBuffer(matrixBuffer);
   vectorKernel = nullptr;
   matrixKernel = nullptr;
   buffer = nullptr;
+  matrixBuffer = nullptr;
 }
 
 BenchmarkResult Bf16Bench::GetResult(uint32_t config_idx) const {
@@ -115,5 +123,79 @@ BenchmarkResult Bf16Bench::GetResult(uint32_t config_idx) const {
     return {num_ops, 0.0};
   }
 }
+
+bool Bf16Bench::ValidateResults(uint32_t config_idx) const {
+  if (!context || !buffer) return false;
+  if (config_idx == 1 && !matrixKernel) return true;
+  if (config_idx == 0 && !vectorKernel) return false;
+
+  try {
+    auto bf16ToFloat = [](uint16_t bf) -> float {
+      uint32_t u = static_cast<uint32_t>(bf) << 16;
+      float f = 0.0f;
+      std::memcpy(&f, &u, sizeof(float));
+      return f;
+    };
+
+    ComputeBuffer targetBuf = (config_idx == 1 && matrixBuffer) ? matrixBuffer : buffer;
+    constexpr uint16_t kUnwrittenSeed16 = 0x3D00u;
+    constexpr uint32_t kUnwrittenSeed32 = 0x3D003D00u;
+
+    // ROCm backend writes 32-bit floats
+    if (context->getBackend() == ComputeBackend::ROCm) {
+      std::vector<float> hostOut(64, 0.0f);
+      context->readBuffer(targetBuf, 0, hostOut.size() * sizeof(float), hostOut.data());
+      for (float v : hostOut) {
+        if (std::isnan(v) || std::isinf(v) || v == 0.0f) return false;
+
+        // Verify that buffer was genuinely overwritten (not unwritten default)
+        uint32_t rawBits = 0;
+        std::memcpy(&rawBits, &v, sizeof(uint32_t));
+        if (rawBits == kUnwrittenSeed32) return false;
+
+        if (config_idx == 0) {
+          // hip_kernels/bf16.hip accumulates negative dot2 products (~ -36400.0f)
+          if (std::abs(v) < 10.0f) return false;
+        } else {
+          // ROCm WMMA produces ~4096.0f across 8 accumulators
+          if (v < 10.0f || v > 100000.0f) return false;
+        }
+      }
+      return true;
+    }
+
+    // Vulkan backend: read back 256 16-bit bfloat16 words
+    std::vector<uint16_t> hostBf16(256, 0);
+    context->readBuffer(targetBuf, 0, hostBf16.size() * sizeof(uint16_t), hostBf16.data());
+
+    for (size_t i = 0; i < hostBf16.size(); ++i) {
+      uint16_t h = hostBf16[i];
+
+      // 1. Verify buffer word changed from unwritten default seed (0x3D00)
+      if (h == kUnwrittenSeed16) {
+        return false;
+      }
+
+      float v = bf16ToFloat(h);
+
+      // 2. Numerical sanity check
+      if (std::isnan(v) || std::isinf(v) || v == 0.0f) {
+        return false;
+      }
+
+      // 3. Expected transformed boundaries per workload configuration
+      if (config_idx == 0) {
+        if (v <= 0.0f) return false;
+      } else {
+        // Native BF16 coop_matrix produces v ~ 512.0f
+        if (v < 10.0f || v > 2000.0f) return false;
+      }
+    }
+    return true;
+  } catch (...) {
+    return false;
+  }
+}
+
 
 

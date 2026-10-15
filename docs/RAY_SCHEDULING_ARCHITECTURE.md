@@ -17,7 +17,7 @@ GPUBench implements and contrasts modern ray scheduling paradigms to decouple th
 - **Device-Generated Commands (DGC)**: Decoupled micro-kernels where hit records are classified into uniform queues and executed via GPU-driven command generation (`VK_EXT_device_generated_commands` / `vkCmdExecuteGeneratedCommandsEXT`).
 - **Active-Ray Compaction**: Atomic queue compaction repacking surviving path-tracing rays into dense wavefronts after every bounce using wave ballot stream sort.
 - **Shader Execution Reordering (SER)**: In-pipeline thread reordering (`VK_EXT_ray_tracing_invocation_reorder`, supported on NVIDIA Ada Lovelace / Blackwell; unsupported in hardware on AMD RDNA).
-- **Work Graphs**: Autonomous GPU node enqueue (`VK_AMDX_shader_enqueue`).
+- **Work Graphs (Capability Probed)**: Autonomous GPU node enqueue (`VK_AMDX_shader_enqueue` / `VK_KHR_work_graphs`, capability-probed; active dispatch benchmark not implemented).
 
 > [!NOTE]
 > **Vulkan DGC vs. DirectX 12 Work Lists**:
@@ -50,7 +50,7 @@ To evaluate how geometric complexity, mesh density, occlusion, and material dist
 - **Primary Use Case**: Expansive open world with long ray distances, heavy sky miss rates, and directional shadow evaluation.
 
 ### 2.4 Open-World Forest (`-s forest`)
-- **Geometry**: $1,007,280$ triangles featuring a high-density, multi-tiered natural ecosystem (512×512 terrain, riverbed bathymetry, 850 mature trees, 1,200 boulders, and 4,000 understory plants).
+- **Geometry**: $1,051,696$ triangles featuring a high-density, multi-tiered natural ecosystem (256×256 terrain heightmap grid [131,072 triangles], riverbed bathymetry, 530 procedural trees [350 conifer pines, 180 deciduous birches, plus 4 foreground framing trees], 600 boulders, 180 fallen nurse logs, and 6,000 understory plants [3,500 sword ferns and 2,500 foliage shrubs]).
 - **Heterogeneous Nature PBR**: 8 specialized physical material shaders:
   1. *Translucent Leaves/Needles*: Dual-sided thin-surface subsurface scattering with backlit emerald transmission.
   2. *Anisotropic Bark*: High-roughness ($0.85$) anisotropic GGX with furrow shadowing.
@@ -75,7 +75,7 @@ Benchmarks and shader diagnostics were evaluated on the **AMD Radeon AI PRO R970
 | **Showroom Studio** | 108,936 | 57.6 FPS (17.37 ms) | **101.3 FPS (9.87 ms)** | **1.76x** | 8,294,400 / 8,294,400 (100%) | 120.0 dB |
 | **Indoor Atrium** | 262,267 | 30.5 FPS (32.77 ms) | **68.0 FPS (14.70 ms)** | **2.23x** | 8,294,400 / 8,294,400 (100%) | 120.0 dB |
 | **Outdoor Landscape** | 57,216 | 185.8 FPS (5.38 ms) | **420.0 FPS (2.38 ms)** | **2.26x** | 8,294,400 / 8,294,400 (100%) | 120.0 dB |
-| **Open-World Forest** | 1,007,280 | 27.0 FPS (37.00 ms) | **55.0 FPS (18.18 ms)** | **2.04x** | 8,294,400 / 8,294,400 (100%) | 120.0 dB |
+| **Open-World Forest** | 1,051,696 | 27.0 FPS (37.00 ms) | **55.0 FPS (18.18 ms)** | **2.04x** | 8,294,400 / 8,294,400 (100%) | 120.0 dB |
 
 Across all scenarios, Device-Generated Commands (DGC) reduces frame render times by **43% to 56%**, doubling interactive framerates while preserving identical image output.
 
@@ -212,11 +212,8 @@ RADV_DEBUG=shaderstats gpubench -d 1 -b rayscheduling -s showroom -c 11 --profil
 
 Query live clocks, power, and memory utilization on GPU 1:
 ```bash
-# Query via amd-smi
+# Query via amd-smi (rocm-smi is deprecated)
 amd-smi metric -g 1
-
-# Query via rocm-smi
-rocm-smi -d 1 --showclocks --showuse --showpower --showmeminfo vram
 
 # Direct kernel sysfs counters (zero CPU overhead)
 cat /sys/bus/pci/devices/0000:4d:00.0/gpu_busy_percent

@@ -98,6 +98,8 @@ void SysMemBandwidthBench::Setup(IComputeContext &context,
   }
 
   stopPool = false;
+  activeConfigIdx = 0xFFFFFFFFu;
+  sliceIndex = 0;
   workGeneration = 0;
   completedWorkers = 0;
   workers.clear();
@@ -123,10 +125,10 @@ __attribute__((target("avx2"))) void run_read_avx2(const void *src,
     __m256i v2 = _mm256_load_si256(pSrc + i + 2);
     __m256i v3 = _mm256_load_si256(pSrc + i + 3);
 
-    accum = _mm256_xor_si256(accum, v0);
-    accum = _mm256_xor_si256(accum, v1);
-    accum = _mm256_xor_si256(accum, v2);
-    accum = _mm256_xor_si256(accum, v3);
+    accum = _mm256_add_epi64(accum, v0);
+    accum = _mm256_add_epi64(accum, v1);
+    accum = _mm256_add_epi64(accum, v2);
+    accum = _mm256_add_epi64(accum, v3);
   }
 
   volatile __m256i sink = accum;
@@ -198,9 +200,11 @@ void run_copy_fallback(const void *src, void *dst, size_t size) {
 void SysMemBandwidthBench::workerLoop(unsigned int tid) {
   bool useAVX2 = hasAVX2();
   uint32_t localGen = 0;
+  constexpr size_t kQuantumBytes = 512ULL * 1024ULL * 1024ULL; // Fixed 512 MB per Run()
 
   while (true) {
     uint32_t cfgIdx = 0;
+    uint32_t curSlice = 0;
     {
       std::unique_lock<std::mutex> lock(poolMutex);
       cvStart.wait(lock, [&] { return stopPool.load() || workGeneration != localGen; });
@@ -209,23 +213,32 @@ void SysMemBandwidthBench::workerLoop(unsigned int tid) {
       }
       localGen = workGeneration;
       cfgIdx = activeConfigIdx;
+      curSlice = sliceIndex;
     }
 
     if (cfgIdx < configs.size()) {
       const auto &config = configs[cfgIdx];
       uint32_t activeThreads = (config.numThreads > 0) ? config.numThreads : threadCount;
       if (tid < activeThreads) {
-        size_t chunkSize = (activeThreads == 1) ? bufferSize : (bufferSize / threadCount);
-        chunkSize = (chunkSize / 256) * 256;
+        size_t numSlices = std::max<size_t>(1, bufferSize / kQuantumBytes);
+        size_t sliceBase = (curSlice % numSlices) * kQuantumBytes;
 
-        size_t offset = (activeThreads == 1) ? 0 : (tid * chunkSize);
-        char *tSrc = (char *)buffer + offset;
-        char *tDst = (char *)destBuffer + offset;
+        size_t startInSlice =
+            ((static_cast<uint64_t>(tid) * kQuantumBytes) / activeThreads) & ~size_t(255);
+        size_t endInSlice = (tid + 1 == activeThreads)
+            ? kQuantumBytes
+            : (((static_cast<uint64_t>(tid + 1) * kQuantumBytes) / activeThreads) & ~size_t(255));
+        size_t chunkSize = endInSlice - startInSlice;
+
+        size_t offset = sliceBase + startInSlice;
+        char *tSrc = static_cast<char *>(buffer) + offset;
+        char *tDst = static_cast<char *>(destBuffer) + offset;
 
 #if ENABLE_AVX2
         if (useAVX2) {
           if (config.mode == SysMemTestMode::Read) {
             run_read_avx2(tSrc, chunkSize);
+            reinterpret_cast<uint64_t *>(destBuffer)[tid] = 0xDEADBEEFCAFEBABEULL;
           } else if (config.mode == SysMemTestMode::Write) {
             run_write_avx2(tDst, chunkSize);
           } else {
@@ -236,6 +249,7 @@ void SysMemBandwidthBench::workerLoop(unsigned int tid) {
         {
           if (config.mode == SysMemTestMode::Read) {
             run_read_fallback(tSrc, chunkSize);
+            reinterpret_cast<uint64_t *>(destBuffer)[tid] = 0xDEADBEEFCAFEBABEULL;
           } else if (config.mode == SysMemTestMode::Write) {
             run_write_fallback(tDst, chunkSize);
           } else {
@@ -256,16 +270,19 @@ void SysMemBandwidthBench::Run(uint32_t config_idx) {
     return;
 
   const auto &config = configs[config_idx];
-  uint32_t activeThreads = (config.numThreads > 0) ? config.numThreads : threadCount;
-  size_t chunkSize = (activeThreads == 1) ? bufferSize : (bufferSize / threadCount);
-  chunkSize = (chunkSize / 256) * 256;
+  constexpr uint64_t kQuantumBytes = 512ULL * 1024ULL * 1024ULL; // Fixed 512 MB per Run()
 
   auto start = std::chrono::high_resolution_clock::now();
 
   {
     std::unique_lock<std::mutex> lock(poolMutex);
     completedWorkers = 0;
-    activeConfigIdx = config_idx;
+    if (activeConfigIdx != config_idx) {
+      activeConfigIdx = config_idx;
+      sliceIndex = 0;
+    } else {
+      sliceIndex++;
+    }
     workGeneration++;
     cvStart.notify_all();
     cvDone.wait(lock, [&] { return completedWorkers.load() == threadCount; });
@@ -279,8 +296,7 @@ void SysMemBandwidthBench::Run(uint32_t config_idx) {
       1000.0;
 
   lastRunTimeMs = elapsedMs;
-  // Calculate bytes transferred
-  uint64_t totalBytes = chunkSize * activeThreads;
+  uint64_t totalBytes = kQuantumBytes;
   if (config.mode == SysMemTestMode::ReadWrite) {
     totalBytes *= 2;
   }
@@ -333,4 +349,51 @@ std::string SysMemBandwidthBench::GetConfigCaveat(uint32_t config_idx) const {
     return "Compiled without AVX2 streaming non-temporal stores; memory writes pass through CPU cache hierarchy";
   }
   return "";
+}
+
+bool SysMemBandwidthBench::ValidateResults(uint32_t config_idx) const {
+  if (config_idx >= configs.size() || !buffer || !destBuffer || bufferSize == 0) {
+    return false;
+  }
+  if (lastRunBytes == 0 || lastRunTimeMs <= 0.0) {
+    return false;
+  }
+
+  const auto &config = configs[config_idx];
+  const uint32_t *pDst32 = reinterpret_cast<const uint32_t *>(destBuffer);
+  const size_t checkElements = std::min<size_t>(bufferSize / sizeof(uint32_t), 65536);
+
+  if (config.mode == SysMemTestMode::Write) {
+    // Write mode fills with 0xAAAAAAAA
+    constexpr uint32_t expected = 0xAAAAAAAAu;
+    for (size_t i = 0; i < checkElements; ++i) {
+      if (pDst32[i] != expected) {
+        std::cerr << "SysMemBandwidthBench Write validation failed at index " << i
+                  << ": got 0x" << std::hex << pDst32[i] << ", expected 0x" << expected << std::dec << "\n";
+        return false;
+      }
+    }
+  } else if (config.mode == SysMemTestMode::ReadWrite) {
+    // Copy mode copies buffer (initialized with byte 0x01 -> uint32 0x01010101)
+    constexpr uint32_t expected = 0x01010101u;
+    for (size_t i = 0; i < checkElements; ++i) {
+      if (pDst32[i] != expected) {
+        std::cerr << "SysMemBandwidthBench Copy validation failed at index " << i
+                  << ": got 0x" << std::hex << pDst32[i] << ", expected 0x" << expected << std::dec << "\n";
+        return false;
+      }
+    }
+  } else {
+    // Read mode verifies worker completion indicator
+    uint32_t activeThreads = (config.numThreads > 0) ? config.numThreads : threadCount;
+    const uint64_t *pDst64 = reinterpret_cast<const uint64_t *>(destBuffer);
+    for (uint32_t t = 0; t < activeThreads; ++t) {
+      if (pDst64[t] != 0xDEADBEEFCAFEBABEULL) {
+        std::cerr << "SysMemBandwidthBench Read validation failed: worker " << t << " did not record valid completion\n";
+        return false;
+      }
+    }
+  }
+
+  return true;
 }

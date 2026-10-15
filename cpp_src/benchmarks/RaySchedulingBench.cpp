@@ -86,7 +86,7 @@ void RaySchedulingBench::buildAS() {
   VkAccelerationStructureGeometryKHR triGeom{
       VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR};
   triGeom.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
-  triGeom.flags = isGltf ? 0 : VK_GEOMETRY_OPAQUE_BIT_KHR;
+  triGeom.flags = 0;
   triGeom.geometry.triangles.sType =
       VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
   triGeom.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
@@ -486,31 +486,37 @@ std::string RaySchedulingBench::GetConfigCaveat(uint32_t config_idx) const {
 }
 
 int RaySchedulingBench::GetSortWeight(uint32_t config_idx) const {
-  if (config_idx == 17) return 620; // Scene RT (PBR) - Compute Megakernel (Baseline): 620
-  if (config_idx == 29) return 621; // Scene RT (PBR) - Dedicated RTP: 621
-  if (config_idx == 30) return 622; // Scene RT (PBR) - RTP + Hardware SER: 622
-  if (config_idx == 18) return 623; // Scene RT (PBR) - Wavefront DGC: 623
-  if (config_idx >= 3 && config_idx <= 5) return 625 + static_cast<int>(config_idx - 3);    // Scene Path Tracing: 625..627
-  if (config_idx == 25) return 628;                                                           // Scene Path Tracing (Persistent Threads): 628
-  if (config_idx == 23) return 629;                                                           // Scene Path Tracing 16 SPP Mega: 629
-  if (config_idx == 24) return 630;                                                           // Scene Path Tracing 16 SPP WL: 630
-  if (config_idx >= 9 && config_idx <= 11) return 635 + static_cast<int>(config_idx - 9);   // Primary / Total Scene: 635..637
-  if (config_idx >= 19 && config_idx <= 22) return 640 + static_cast<int>(config_idx - 19); // Shadows: 640..643
-  if (config_idx >= 31 && config_idx <= 34) return 644 + static_cast<int>(config_idx - 31); // Multi-Light: 644..647
-  if (config_idx < 3) return 648 + static_cast<int>(config_idx);                             // Material: 648..650
-  if (config_idx >= 6 && config_idx <= 8) return 651 + static_cast<int>(config_idx - 6);    // Incoherent: 651..653
-  // Traversal Ordering & Coherence: 12, 14, 15, 16
-  if (config_idx == 12) return 660; // Linear 1D Scanline (Baseline)
-  if (config_idx == 14) return 661; // 2D Screen Tiled (8x4)
-  if (config_idx == 15) return 662; // 2D Morton (8x4)
-  if (config_idx == 16) return 663; // 2D Morton (4x8)
-  // Wavefront Stream Compaction: 13, 26, 28
-  if (config_idx == 13) return 665; // Wave Ballot Compaction (Baseline)
-  if (config_idx == 26) return 666; // Queue Compaction (Single-Pass)
-  if (config_idx == 28) return 667; // Queue Compaction Throughput
-  // Alpha Cutout Divergence: 27
-  if (config_idx == 27) return 675; // Traversal Divergence (Alpha Cutout)
-  return 680 + static_cast<int>(config_idx);
+  // Algorithmic microbenchmarks (only run on Showroom scene): 608..615
+  if (config_idx == 12) return 608; // Traversal Ordering - Linear 1D Scanline (Baseline)
+  if (config_idx == 14) return 609; // Traversal Ordering - 2D Screen Tiled (8x4)
+  if (config_idx == 15) return 610; // Traversal Ordering - 2D Morton (8x4)
+  if (config_idx == 16) return 611; // Traversal Ordering - 2D Morton (4x8)
+  if (config_idx == 13) return 612; // Wavefront Stream Compaction - Wave Ballot (Baseline)
+  if (config_idx == 26) return 613; // Wavefront Stream Compaction - Single-Pass
+  if (config_idx == 28) return 614; // Wavefront Stream Compaction - Throughput
+
+  // Group multi-scene rendering benchmarks by Scene first, then by Stage within each scene
+  int sceneBase = 620;
+  if (sceneType == SceneType::Showroom) sceneBase = 620;
+  else if (sceneType == SceneType::IndoorAtrium) sceneBase = 660;
+  else if (sceneType == SceneType::OutdoorLandscape) sceneBase = 700;
+  else if (sceneType == SceneType::AAAOutdoorForest) sceneBase = 740;
+
+  if (config_idx == 17) return sceneBase + 0;  // Scene RT (PBR) - Compute Megakernel (Baseline)
+  if (config_idx == 29) return sceneBase + 1;  // Scene RT (PBR) - Dedicated RTP
+  if (config_idx == 30) return sceneBase + 2;  // Scene RT (PBR) - RTP + Hardware SER
+  if (config_idx == 18) return sceneBase + 3;  // Scene RT (PBR) - Wavefront DGC
+  if (config_idx >= 3 && config_idx <= 5) return sceneBase + 5 + static_cast<int>(config_idx - 3); // Path Tracing (1 SPP): +5..+7
+  if (config_idx == 25) return sceneBase + 8;  // Path Tracing (Dynamic Load Balancing)
+  if (config_idx == 23) return sceneBase + 9;  // Path Tracing 16 SPP (Megakernel)
+  if (config_idx == 24) return sceneBase + 10; // Path Tracing 16 SPP (DGC)
+  if (config_idx >= 9 && config_idx <= 11) return sceneBase + 12 + static_cast<int>(config_idx - 9); // Total Scene Render: +12..+14
+  if (config_idx >= 19 && config_idx <= 22) return sceneBase + 15 + static_cast<int>(config_idx - 19); // Directional Shadows: +15..+18
+  if (config_idx >= 31 && config_idx <= 34) return sceneBase + 19 + static_cast<int>(config_idx - 31); // Multi-Light Evaluation: +19..+22
+  if (config_idx < 3) return sceneBase + 23 + static_cast<int>(config_idx); // Material Shading: +23..+25
+  if (config_idx >= 6 && config_idx <= 8) return sceneBase + 26 + static_cast<int>(config_idx - 6); // Incoherent Ray Tracing: +26..+28
+  if (config_idx == 27) return sceneBase + 29; // Alpha Cutout Divergence: +29
+  return sceneBase + 30 + static_cast<int>(config_idx);
 }
 
 void RaySchedulingBench::Setup(IComputeContext &context_ref,
@@ -622,7 +628,7 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
     numPrimitives = static_cast<uint32_t>(vertices.size() / 36);
     if (context && context->isVerbose()) {
       std::cout << "[RayScheduling] Generated high-density Open-World Forest scene: " << numPrimitives
-                << " triangles (woodland terrain, 350 multi-tiered pines, 180 birches, 4500 fern clumps, 3500 shrubs, 250 nurse logs, 1200 boulders)"
+                << " triangles (woodland terrain, 350 multi-tiered pines, 180 birches, 3500 fern clumps, 2500 shrubs, 180 nurse logs, 600 boulders)"
                 << std::endl;
     }
 
@@ -630,6 +636,7 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
     // Mat 0: Leaves & Needles
     natureMats[0].baseColorFactor[0] = 0.12f; natureMats[0].baseColorFactor[1] = 0.42f; natureMats[0].baseColorFactor[2] = 0.15f; natureMats[0].baseColorFactor[3] = 1.0f;
     natureMats[0].roughnessFactor = 0.45f; natureMats[0].metallicFactor = 0.0f; natureMats[0].transmissionFactor = 0.45f;
+    natureMats[0].alphaMode = 1u; natureMats[0].alphaCutoff = 0.5f;
     natureMats[0].baseColorTexIdx = -1; natureMats[0].normalTexIdx = -1; natureMats[0].metallicRoughnessTexIdx = -1; natureMats[0].occlusionTexIdx = -1;
     // Mat 1: Bark & Roots
     natureMats[1].baseColorFactor[0] = 0.28f; natureMats[1].baseColorFactor[1] = 0.18f; natureMats[1].baseColorFactor[2] = 0.12f; natureMats[1].baseColorFactor[3] = 1.0f;
@@ -646,6 +653,7 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
     // Mat 4: Grass & Ferns
     natureMats[4].baseColorFactor[0] = 0.22f; natureMats[4].baseColorFactor[1] = 0.48f; natureMats[4].baseColorFactor[2] = 0.18f; natureMats[4].baseColorFactor[3] = 1.0f;
     natureMats[4].roughnessFactor = 0.60f; natureMats[4].metallicFactor = 0.0f;
+    natureMats[4].alphaMode = 1u; natureMats[4].alphaCutoff = 0.5f;
     natureMats[4].baseColorTexIdx = -1; natureMats[4].normalTexIdx = -1; natureMats[4].metallicRoughnessTexIdx = -1; natureMats[4].occlusionTexIdx = -1;
     // Mat 5: River Water Surface & Bathymetry
     natureMats[5].baseColorFactor[0] = 0.02f; natureMats[5].baseColorFactor[1] = 0.08f; natureMats[5].baseColorFactor[2] = 0.12f; natureMats[5].baseColorFactor[3] = 0.65f;
@@ -935,6 +943,7 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
 
   // Pre-generate static indirect batches for Wavefront/DGC dispatches with specialized PSOs
   materialBatches.reserve(8);
+  primaryMaterialBatches.reserve(8);
   materialBatchesBreakdown.reserve(8);
   for (uint32_t m = 0; m < 8; ++m) {
     struct {
@@ -950,6 +959,10 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
     std::vector<uint8_t> pcData(sizeof(pcMat));
     std::memcpy(pcData.data(), &pcMat, sizeof(pcMat));
     materialBatches.push_back({m * sizeof(uint32_t) * 3, pcData, kernelMaterialSpecialized[m]});
+
+    pcMat.mode = 2u;
+    std::memcpy(pcData.data(), &pcMat, sizeof(pcMat));
+    primaryMaterialBatches.push_back({m * sizeof(uint32_t) * 3, pcData, kernelMaterialSpecialized[m]});
 
     pcMat.queueCapacity = perQueue;
     pcMat.dumpRenders = 0u;
@@ -979,7 +992,7 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
     initCounters[(16 + m) * kWorkListCounterStride] = perQueue;
   }
   context->writeBuffer(indirectBuffer, 0, initCmds.size() * sizeof(uint32_t), initCmds.data());
-  context->writeBuffer(workListBuffer, 0, initCounters.size() * sizeof(uint32_t), initCounters.data());
+  context->writeBuffer(workListBuffer, 0, initCounters.size() * sizeof(uint32_t), initialCounters.data());
 
   rebuildBounceBatches();
 
@@ -1190,7 +1203,7 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
 
       // 6. Pre-seed templates in dgcSequenceBuffer
 
-      // Material templates: slots 0..7
+      // Material templates: slots 0..7 (full PBR) and slots 24..31 (Primary Rays G-Buffer normals)
       for (uint32_t m = 0; m < 8; ++m) {
         uint32_t pc[8] = {
             m, materialCapacity, dumpRenders ? 1u : 0u, renderWidth, renderHeight,
@@ -1200,6 +1213,11 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
             m, pc[0], pc[1], pc[2], pc[3], pc[4], pc[5], pc[6], pc[7], 0, 1, 1
         };
         context->writeBuffer(dgcSequenceBuffer, m * sizeof(item), sizeof(item), item);
+
+        uint32_t itemPrimary[12] = {
+            m, pc[0], pc[1], pc[2], pc[3], pc[4], pc[5], pc[6], 2u, 0, 1, 1
+        };
+        context->writeBuffer(dgcSequenceBuffer, (24 + m) * sizeof(itemPrimary), sizeof(itemPrimary), itemPrimary);
       }
 
       // Octant template: slot 8
@@ -1483,13 +1501,13 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     break;
   }
   case 17: { // Stage Breakdown - Primary Ray Tracing (2D Morton 8x4, Traditional Megakernel)
-    PushConstantsTraditional pc{rayCount, 0, 1, seed, dumpRenders ? 1u : 0u, renderWidth, renderHeight, 2, sceneTypeVal, isGltfVal, 1u};
+    PushConstantsTraditional pc{rayCount, 7, 1, seed, dumpRenders ? 1u : 0u, renderWidth, renderHeight, 2, sceneTypeVal, isGltfVal, 1u};
     vContext->setKernelArg(kernelTraditional, 8, sizeof(pc), &pc);
     vContext->dispatch(kernelTraditional, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     break;
   }
-  case 18: { // Scene Ray Tracing (PBR) - Primary Rays (2D Morton 8x4, Wavefront DGC)
-    for (uint32_t m = 0; m < materialBatches.size(); ++m) {
+  case 18: { // Primary Rays (2D Morton 8x4, Wavefront DGC - Primary Ray Cast + G-Buffer Normals)
+    for (uint32_t m = 0; m < primaryMaterialBatches.size(); ++m) {
       struct {
         uint32_t materialId;
         uint32_t queueCapacity;
@@ -1499,19 +1517,19 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
         uint32_t sceneType;
         uint32_t isGltf;
         uint32_t mode;
-      } pcMat{m, materialCapacity, dumpRenders ? 1u : 0u, renderWidth, renderHeight, sceneTypeVal, isGltfVal, 0u};
-      std::memcpy(materialBatches[m].pushConstants.data(), &pcMat, sizeof(pcMat));
+      } pcMat{m, materialCapacity, dumpRenders ? 1u : 0u, renderWidth, renderHeight, sceneTypeVal, isGltfVal, 2u};
+      std::memcpy(primaryMaterialBatches[m].pushConstants.data(), &pcMat, sizeof(pcMat));
     }
-    PushConstantsClassify pcClassify{rayCount, 0, 0, seed, dumpRenders ? 1u : 0u, renderWidth, renderHeight, materialCapacity, 2, sceneTypeVal, isGltfVal, 1u};
+    PushConstantsClassify pcClassify{rayCount, 9, 0, seed, dumpRenders ? 1u : 0u, renderWidth, renderHeight, materialCapacity, 2, sceneTypeVal, isGltfVal, 1u};
     vContext->setKernelArg(kernelClassify, 10, sizeof(pcClassify), &pcClassify);
 
     vContext->dispatchWorkListSequence(
         kernelReset,
         kernelClassify, (rayCount + 31) / 32, 1, 1,
         kernelResolve,
-        kernelMaterial, indirectBuffer, materialBatches,
+        kernelMaterial, indirectBuffer, primaryMaterialBatches,
         false /* isPingPong */,
-        isDGCAvailable ? &dgcInfoStandard : nullptr, isDGCAvailable ? 1u : 0u);
+        isDGCAvailable ? &dgcInfoStandard : nullptr, isDGCAvailable ? 7u : 0u);
     break;
   }
   case 19: { // Ray-Traced Shadows - Traditional Megakernel (Directional Shadow Rays, In-Kernel Traversal)
@@ -1675,17 +1693,17 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     vContext->dispatch(kernelClassify, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     break;
   }
-  case 29: { // Scene Ray Tracing (PBR) - Dedicated Ray Tracing Pipeline (RTP)
+  case 29: { // Primary Rays - Dedicated Ray Tracing Pipeline (RTP)
     if (kernelRTP) {
-      PushConstantsTraditional pc{rayCount, 0, 1, seed, dumpRenders ? 1u : 0u, renderWidth, renderHeight, 2, sceneTypeVal, isGltfVal, 1u};
+      PushConstantsTraditional pc{rayCount, 7, 1, seed, dumpRenders ? 1u : 0u, renderWidth, renderHeight, 2, sceneTypeVal, isGltfVal, 1u};
       vContext->setKernelArg(kernelRTP, 8, sizeof(pc), &pc);
       vContext->dispatch(kernelRTP, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     }
     break;
   }
-  case 30: { // Scene Ray Tracing (PBR) - RTP + Hardware SER
+  case 30: { // Primary Rays - RTP + Hardware SER
     if (kernelRTPSER) {
-      PushConstantsTraditional pc{rayCount, 0, 1, seed, dumpRenders ? 1u : 0u, renderWidth, renderHeight, 2, sceneTypeVal, isGltfVal, 1u};
+      PushConstantsTraditional pc{rayCount, 7, 1, seed, dumpRenders ? 1u : 0u, renderWidth, renderHeight, 2, sceneTypeVal, isGltfVal, 1u};
       vContext->setKernelArg(kernelRTPSER, 8, sizeof(pc), &pc);
       vContext->dispatch(kernelRTPSER, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     }
@@ -1777,6 +1795,11 @@ void RaySchedulingBench::performVisualVerification(bool isInteractive) {
           sceneTypeVal, isGltfVal, 0u, 0, 1, 1
       };
       context->writeBuffer(dgcSequenceBuffer, m * sizeof(item), sizeof(item), item);
+      uint32_t itemPrimary[12] = {
+          m, m, materialCapacity, dumpFlag, renderWidth, renderHeight,
+          sceneTypeVal, isGltfVal, 2u, 0, 1, 1
+      };
+      context->writeBuffer(dgcSequenceBuffer, (24 + m) * sizeof(itemPrimary), sizeof(itemPrimary), itemPrimary);
     }
     for (uint32_t l = 0; l < 3; ++l) {
       uint32_t item[12] = {
@@ -2087,6 +2110,19 @@ void RaySchedulingBench::performVisualVerification(bool isInteractive) {
   gpubench::ImageExport::writePNG(mlTradPng, width, height, ldrTrad);
   gpubench::ImageExport::writePNG(mlWorkPng, width, height, ldrWork);
   gpubench::ImageExport::writePNG(mlDiffPng, width, height, ldrDiff);
+
+  // Render and dump Alpha Cutout Traversal Divergence (Config 27)
+  Run(27);
+  context->waitIdle();
+  context->readBuffer(fbWorkList, 0, bufferSize, hdrWork.data());
+  std::vector<uint8_t> ldrAlpha(width * height * 3, 0);
+  for (uint32_t i = 0; i < width * height; ++i) {
+    ldrAlpha[i * 3 + 0] = gpubench::ImageExport::floatToSrgb(hdrWork[i * 4 + 0]);
+    ldrAlpha[i * 3 + 1] = gpubench::ImageExport::floatToSrgb(hdrWork[i * 4 + 1]);
+    ldrAlpha[i * 3 + 2] = gpubench::ImageExport::floatToSrgb(hdrWork[i * 4 + 2]);
+  }
+  std::string alphaPng = "renders/render_" + tag + "_alpha_cutout.png";
+  gpubench::ImageExport::writePNG(alphaPng, width, height, ldrAlpha);
 
   // Step-by-step pipeline decomposition breakdown
   dumpPipelineBreakdown(tag, isInteractive);
@@ -2525,6 +2561,7 @@ void RaySchedulingBench::Teardown() {
   }
 
   materialBatches.clear();
+  primaryMaterialBatches.clear();
   materialBatchesBreakdown.clear();
   bounceBatches.clear();
   octantBatches.clear();
@@ -2581,4 +2618,30 @@ BenchmarkResult RaySchedulingBench::GetResult(uint32_t config_idx) const {
   }
   r.elapsedTime = 0.0;
   return r;
+}
+
+bool RaySchedulingBench::ValidateResults(uint32_t config_idx) const {
+  if (config_idx >= GetNumConfigs()) {
+    return false;
+  }
+  // If the configuration is legitimately unsupported on this hardware/driver
+  // (e.g. SER on non-SER GPUs or DGC on drivers lacking execution sets),
+  // it was not executed; return true to avoid false failure report.
+  if (unsupportedConfig[config_idx]) {
+    return true;
+  }
+  if (!context || !resultBuffer) {
+    return false;
+  }
+  try {
+    // resultBuffer layout: [0]=totalRays, [1]=totalHits, [2]=accumulatedLuminance, [3]=pad
+    uint32_t stats[4] = {0, 0, 0, 0};
+    context->readBuffer(resultBuffer, 0, sizeof(stats), stats);
+    uint32_t totalRays = stats[0];
+    uint32_t totalHits = stats[1];
+    // Assert that workload executed rays and recorded valid intersections
+    return (totalRays > 0 && totalHits > 0);
+  } catch (...) {
+    return false;
+  }
 }

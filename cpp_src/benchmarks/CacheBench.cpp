@@ -40,36 +40,9 @@ bool CacheBench::IsSupported(const DeviceInfo &info,
   return true;
 }
 
-// Helper to round down to nearest power of 2.
-// Returns the highest power of 2 that is <= v.
-// Returns 0 for v == 0.
-static uint64_t roundDownToPowerOf2(uint64_t v) {
-  if (v == 0) return 0;
-  // Propagate the highest set bit downward, then isolate it.
-  v |= v >> 1;
-  v |= v >> 2;
-  v |= v >> 4;
-  v |= v >> 8;
-  v |= v >> 16;
-  v |= v >> 32;
-  return v - (v >> 1);
-}
-
 void CacheBench::Setup(IComputeContext &context,
                        const std::string &kernel_dir) {
   this->context = &context;
-  DeviceInfo info = context.getCurrentDeviceInfo();
-
-  // Adjust buffer size based on cache level if available
-  if (targetCacheLevel == 3 && info.l3CacheSize > 0) {
-    // Use 75% of L3 size, rounded down to power of 2
-    bufferSize = roundDownToPowerOf2(info.l3CacheSize * 3 / 4);
-    if (bufferSize < 1024 * 1024)
-      bufferSize = 1024 * 1024; // Min 1MB
-  } else if (targetCacheLevel == 2 && info.l2CacheSize > 0) {
-    // Use 75% of L2 size, rounded down to power of 2
-    bufferSize = roundDownToPowerOf2(info.l2CacheSize * 3 / 4);
-  }
 
   // Ensure initData contains a valid cycle of exact buffer element count for pointer chasing
   if (metric == "ns" && bufferSize > 0) {
@@ -300,3 +273,44 @@ const char *CacheBench::GetSubCategory(uint32_t config_idx) const {
 }
 
 int CacheBench::GetSortWeight() const { return (metric == "GB/s") ? 100 : 200; }
+
+bool CacheBench::ValidateResults(uint32_t config_idx) const {
+  (void)config_idx;
+  if (!context || !buffer) {
+    return false;
+  }
+
+  if (metric == "ns") {
+    // Inter-cache-line pointer chasing over 128-byte cache lines
+    constexpr size_t kLineBytes = 128;
+    size_t numLines = bufferSize / kLineBytes;
+    if (numLines == 0) numLines = 1;
+
+    // Deterministic simulation of 1,000,000 hops starting from index 0
+    uint32_t expectedIndex = 0;
+    if (!initData.empty()) {
+      size_t targetStep = 1000000 % numLines;
+      for (size_t i = 0; i < targetStep; ++i) {
+        expectedIndex = initData[expectedIndex];
+      }
+    }
+
+    uint32_t readbackIndex = 0;
+    try {
+      // Read terminal index stored in word 1 (offset 4 bytes)
+      context->readBuffer(buffer, sizeof(uint32_t), sizeof(uint32_t), &readbackIndex);
+      if (readbackIndex != expectedIndex) {
+        std::cerr << "CacheBench validation failed: readback " << readbackIndex
+                  << " != expected " << expectedIndex << "\n";
+        return false;
+      }
+      return true;
+    } catch (const std::exception &e) {
+      std::cerr << "CacheBench validation error: " << e.what() << "\n";
+      return false;
+    }
+  }
+
+  return true;
+}
+

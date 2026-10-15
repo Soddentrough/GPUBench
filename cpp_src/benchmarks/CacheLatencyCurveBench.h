@@ -11,6 +11,7 @@ struct CacheCurveConfig {
   uint64_t workingSetBytes;
   std::string cacheLevelHint;
   uint32_t startWordIndex;
+  uint32_t expectedTerminalIndex;
 };
 
 class CacheLatencyCurveBench : public IBenchmark {
@@ -35,7 +36,7 @@ public:
 
   const char *GetComponent(uint32_t config_idx = 0) const override { return "Memory"; }
   const char *GetSubCategory(uint32_t config_idx = 0) const override { return "Cache Latency Curve"; }
-  int GetSortWeight() const override { return 15; }
+  int GetSortWeight() const override { return 210; }
 
   uint32_t GetNumConfigs() const override { return static_cast<uint32_t>(configs.size()); }
   uint32_t GetExpectedKernelCount() const override { return 1; }

@@ -80,6 +80,8 @@ public:
   bool getStrict() const { return strictMode; }
   void setQuiet(bool q) { quiet = q; }
   bool isQuiet() const { return quiet; }
+  void setShowPower(bool p);
+  void setShowTelemetry(bool t);
   bool hasParityFailure() const { return parityFailure; }
   bool hasExecutionFailure() const { return executionFailure; }
   bool hasValidationFailure() const { return validationFailure; }

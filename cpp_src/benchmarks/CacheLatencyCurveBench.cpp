@@ -133,6 +133,8 @@ void CacheLatencyCurveBench::Setup(IComputeContext &context, const std::string &
     }
 
     configs[c].startWordIndex = baseWordOffset + perm[0] * 32;
+    size_t targetStep = kIterations % numLines;
+    configs[c].expectedTerminalIndex = baseWordOffset + perm[targetStep] * 32;
     currentByteOffset += configs[c].workingSetBytes;
   }
 
@@ -190,7 +192,28 @@ BenchmarkResult CacheLatencyCurveBench::GetResult(uint32_t config_idx) const {
 }
 
 bool CacheLatencyCurveBench::ValidateResults(uint32_t config_idx) const {
-  return true;
+  if (config_idx >= configs.size() || !context || !buffer) {
+    return false;
+  }
+
+  uint32_t expected = configs[config_idx].expectedTerminalIndex;
+  uint32_t readback = 0;
+  uint64_t byteOffset = static_cast<uint64_t>(configs[config_idx].startWordIndex + 1) * sizeof(uint32_t);
+
+  try {
+    context->readBuffer(buffer, byteOffset, sizeof(uint32_t), &readback);
+    if (readback != expected) {
+      std::cerr << "CacheLatencyCurveBench validation failed (config "
+                << config_idx << "): readback " << readback
+                << " != expected " << expected << "\n";
+      return false;
+    }
+    return true;
+  } catch (const std::exception &e) {
+    std::cerr << "CacheLatencyCurveBench validation error (config "
+              << config_idx << "): " << e.what() << "\n";
+    return false;
+  }
 }
 
 double CacheLatencyCurveBench::FilterDuration(uint32_t config_idx, uint64_t total_invocations, double duration_ms) {

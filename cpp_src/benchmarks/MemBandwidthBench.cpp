@@ -58,59 +58,35 @@ void MemBandwidthBench::Setup(IComputeContext &context,
 
   // Get device info first
   DeviceInfo deviceInfo = context.getCurrentDeviceInfo();
-
-  // Calculate buffer size based on available VRAM and workload requirements
-  uint64_t availableVRAM = deviceInfo.memorySize;
   uint32_t maxWorkgroupSize = deviceInfo.maxWorkGroupSize;
 
-  // Determine maximum number of threads across all configurations
-  // Each config has: workgroupSize * numWorkgroups threads
-  uint32_t maxThreads = 0;
-
-  // 128 threads/group configs
-  maxThreads = std::max(maxThreads, 128u * 4096u);
-
-  // 256 threads/group configs (if supported)
-  if (maxWorkgroupSize >= 256) {
-    maxThreads = std::max(maxThreads, std::min(256u, maxWorkgroupSize) * 2048u);
-  }
-
-  // 1024 threads/group configs (if supported)
-  if (maxWorkgroupSize >= 1024) {
-    maxThreads = std::max(maxThreads, 1024u * 512u);
-  }
-
-  // Calculate max safe size: 512MB for APUs / unified memory (safely exceeds 32MB L3 cache
-  // by 16x without starving host memory) or 1GB for discrete GPUs.
-  bool isApu = gpubench::DeviceDatabase::isApuDevice(deviceInfo.vendorID, deviceInfo.deviceID, deviceInfo.name);
-  uint64_t capSize = isApu ? (512ULL * 1024ULL * 1024ULL) : (1024ULL * 1024ULL * 1024ULL);
-  uint64_t maxSafeSize = std::min<uint64_t>(availableVRAM / 4, capSize);
-
-  // Find largest power of 2 that fits in maxSafeSize
-  this->bufferSize = 16ULL * 1024ULL * 1024ULL; // Start at 16MB min
-  while (this->bufferSize * 2 <= maxSafeSize) {
-    this->bufferSize *= 2;
-  }
+  // Fixed 512 MB buffer per stream (1 GB total across input + output) across all devices
+  // so every GPU executes an identical per-dispatch memory workload (exceeding GPU L3/Infinity
+  // Cache capacities while fitting comfortably on all modern GPUs).
+  this->bufferSize = 512ULL * 1024ULL * 1024ULL;
 
   // Log buffer size for debugging
   if (this->context->getBackend() == ComputeBackend::Vulkan && debug) {
     std::cout << "Allocating memory buffers: "
-              << (bufferSize / (1024 * 1024 * 1024)) << " GB per buffer ("
-              << ((bufferSize * 2) / (1024 * 1024 * 1024)) << " GB total)"
+              << (bufferSize / (1024 * 1024)) << " MB per buffer ("
+              << ((bufferSize * 2) / (1024 * 1024)) << " MB total)"
               << std::endl;
   }
 
   inputBuffer = this->context->createBuffer(bufferSize);
   outputBuffer = this->context->createBuffer(bufferSize);
 
-  // Initialize input and output buffers with test data in safe chunks
+  // Initialize input buffer with 2.0f and output buffer with 0.0f in safe chunks.
+  // This ensures Mode 0 (Read) accumulates to 2048.0f, Mode 1 (Write) writes 1.0f,
+  // and Mode 2 (ReadWrite) writes 2.0f, guaranteeing positive and negative validation.
   constexpr size_t initChunkSize = 64 * 1024 * 1024; // 64 MB max host allocation
   size_t testDataSize = std::min<size_t>(bufferSize, initChunkSize);
-  std::vector<float> testData(testDataSize / sizeof(float), 1.0f);
+  std::vector<float> inputInitData(testDataSize / sizeof(float), 2.0f);
+  std::vector<float> outputInitData(testDataSize / sizeof(float), 0.0f);
   for (size_t off = 0; off < bufferSize; off += initChunkSize) {
     size_t cur = std::min<size_t>(bufferSize - off, initChunkSize);
-    this->context->writeBuffer(inputBuffer, off, cur, testData.data());
-    this->context->writeBuffer(outputBuffer, off, cur, testData.data());
+    this->context->writeBuffer(inputBuffer, off, cur, inputInitData.data());
+    this->context->writeBuffer(outputBuffer, off, cur, outputInitData.data());
   }
 
   this->context->waitIdle();
@@ -229,4 +205,60 @@ std::string MemBandwidthBench::GetConfigName(uint32_t config_idx) const {
     return "Invalid Config";
   }
   return configs[config_idx].name;
+}
+
+bool MemBandwidthBench::ValidateResults(uint32_t config_idx) const {
+  if (config_idx >= configs.size() || !context || !outputBuffer || bufferSize == 0) {
+    return false;
+  }
+
+  const auto &config = configs[config_idx];
+  const uint32_t numThreads = config.workgroupSize * config.numWorkgroups;
+  if (numThreads == 0) {
+    return false;
+  }
+
+  // Sample up to 16,384 threads (or all active threads if fewer)
+  const size_t checkThreads = std::min<size_t>(numThreads, 16384);
+  const size_t checkBytes = checkThreads * sizeof(float) * 4; // vec4 per thread
+
+  std::vector<float> results(checkThreads * 4, 0.0f);
+  try {
+    context->readBuffer(outputBuffer, 0, checkBytes, results.data());
+  } catch (const std::exception &e) {
+    std::cerr << "MemBandwidthBench::ValidateResults readBuffer failed (config "
+              << config_idx << "): " << e.what() << "\n";
+    return false;
+  }
+
+  float expectedVal = 0.0f;
+  switch (config.mode) {
+    case TestMode::Read:
+      // 32 outer loops * 32 vector loads = 1024 loads of vec4(2.0f) = 2048.0f
+      expectedVal = 2048.0f;
+      break;
+    case TestMode::Write:
+      // Kernel stores constant vec4(1.0f)
+      expectedVal = 1.0f;
+      break;
+    case TestMode::ReadWrite:
+      // Kernel loads from inputBuffer (2.0f) and writes directly to outputBuffer (2.0f)
+      expectedVal = 2.0f;
+      break;
+  }
+
+  // Verify non-zero data movement matching expected value across sampled lanes
+  for (size_t i = 0; i < checkThreads; ++i) {
+    for (int comp = 0; comp < 4; ++comp) {
+      float val = results[i * 4 + comp];
+      if (std::abs(val - expectedVal) > 1e-3f) {
+        std::cerr << "MemBandwidthBench validation failed (config " << config_idx
+                  << " '" << config.name << "'): results[" << i << "][" << comp
+                  << "] = " << val << ", expected " << expectedVal << "\n";
+        return false;
+      }
+    }
+  }
+
+  return true;
 }

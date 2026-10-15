@@ -29,16 +29,24 @@ void main() {
     vec3 origin = vec3(fx, fy, -1.0);
     vec3 direction = vec3(0.0, 0.0, 1.0);
 
-    uint rayFlags = (pc.mode == 0)
-        ? (gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT)
-        : (gl_RayFlagsOpaqueEXT);
-
     rayQueryEXT query;
-    rayQueryInitializeEXT(query, topLevelAS, rayFlags, 0xFF, origin, pc.tMin, direction, pc.tMax);
-    
-    while (rayQueryProceedEXT(query)) {
-        // Pure hardware BVH traversal: opaque geometry is resolved directly
-        // by the Ray Accelerator without shader candidate intervention.
+    if (pc.mode == 0u) {
+        // Coherent shallow traversal: opaque fast path with immediate termination on Layer 0
+        rayQueryInitializeEXT(query, topLevelAS,
+                              gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT,
+                              0xFF, origin, pc.tMin, direction, pc.tMax);
+        while (rayQueryProceedEXT(query)) {}
+    } else {
+        // Deep multi-layer BVH stress: traverse through all 128 stratified layers
+        // (z = 0.0 .. 12.7, t = 1.0 .. 13.7) before committing the deepest layer hit
+        rayQueryInitializeEXT(query, topLevelAS,
+                              gl_RayFlagsNoOpaqueEXT,
+                              0xFF, origin, pc.tMin, direction, pc.tMax);
+        while (rayQueryProceedEXT(query)) {
+            if (rayQueryGetIntersectionTEXT(query, false) >= 13.65) {
+                rayQueryConfirmIntersectionEXT(query);
+            }
+        }
     }
 
     bool hasHit = (rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionNoneEXT);
