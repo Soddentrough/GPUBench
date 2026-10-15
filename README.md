@@ -235,32 +235,37 @@ gpubench -d 0 -b rayscheduling -s forest -c 11 --profile-snapshot
 gpubench -d 0 -b rayscheduling -s all -o benchmark_results.json
 ```
 
-### Profiling & Telemetry Suite
+### Hardware ISA Disassembly & Profiling
 
-GPUBench includes Python tools for automated thread tracing with Mesa RADV / Radeon GPU Profiler (RGP) and AMD ROCm SMI telemetry:
+GPUBench includes built-in hardware ISA disassembly (`VK_KHR_pipeline_executable_properties` & `llvm-objdump`), live compiler statistics, and Radeon Raytracing Analyzer (`.rra`) capture support:
 
 ```bash
-# Capture RGP traces, amd-smi power/clock telemetry, and RGA ISA compilation
-python3 scripts/capture_gpu_profiles.py
+# Inspect hardware ISA, instruction histograms, hot-loop disassembly, and VGPR/SGPR usage
+gpubench --dump-isa bf16
+gpubench --dump-isa dualissue --full-isa
+gpubench --dump-isa fp16 -k rocm
+
+# Capture a single-frame profiling snapshot or RRA ray tracing trace
+gpubench -d 0 -b rayscheduling -s indoor -c 11 --profile-snapshot
+gpubench -d 0 -b rayscheduling -s indoor -c 11 --rra
 ```
 
 ## Documentation
 
 ### Core Guides
 - [Installation Guide](INSTALL.md) - Cross-platform build and installation instructions.
-- [Windows Environment & Build Guide](WINDOWS.md) - MinGW toolchain, packaging, and Windows guidelines.
+- [Windows Packaging Guide](packaging/windows/README.md) - Windows build and installer packaging instructions.
 - [Version Requirements](VERSION_REQUIREMENTS.md) - Minimum software and compute hardware requirements.
 - [Release Process](RELEASING.md) - Tagging, CI packaging, and automated release deployment.
 
 ### Architectural & Technical Whitepapers
 - [Ray Scheduling Architectures](docs/RAY_SCHEDULING_ARCHITECTURE.md) - Decoupled scheduling, microarchitectural ISA analysis, and RGP timeline profiling.
-- [BVH Traversal Architectural Audit](docs/BVH_TRAVERSAL_ARCHITECTURAL_AUDIT.md) - Hardware BVH traversal ceilings, box and triangle peak rates on RDNA 4.
 - [RDNA 4 Ray Tracing Architecture](docs/RDNA4_RAY_TRACING_ARCHITECTURE.md) - RAv3 BVH8 traversal, LDS hardware stack management, and DGC wavefront compaction.
 - [RDNA 3 Ray Tracing Architecture](docs/RDNA3_RAY_TRACING_ARCHITECTURE.md) - Chiplet topology, memory fabric, and zero-LDS pure Wave32 compaction.
-- [Hardware Profiling & Telemetry Guide](docs/PROFILING_GUIDE.md) - RGA disassembly, ACO compiler stats, packet dumping, and SMI telemetry.
-- [Compute Performance Analysis](docs/COMPUTE_PERFORMANCE_ANALYSIS.md) - Compute pipelines, packed math, and compiler ceilings.
+- [Hardware Profiling & Telemetry Guide](docs/PROFILING_GUIDE.md) - Native ISA disassembly (`--dump-isa`), ACO compiler stats, packet dumping, and SMI telemetry.
 - [Dual-Issue & Datapath Concurrency](docs/DUAL_ISSUE_ANALYSIS.md) - RDNA 3 VOPD, RDNA 4 dual-issue SIMD32, and NVIDIA concurrent FP32+INT32 datapath analysis.
 - [OpenCL Backend](docs/OPENCL_BACKEND.md) - Architecture, feature matrix, and disk binary caching.
+- [Tooltip Visualizations](docs/TOOLTIP_VISUALIZATIONS.md) - Three-tier hover-tooltip visualization architecture for graphics and ray tracing workloads.
 - [Desktop Integration](docs/DESKTOP_INTEGRATION.md) - FreeDesktop XDG, Windows High-DPI manifest, and macOS app bundle integration.
 
 ## License

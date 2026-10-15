@@ -31,7 +31,7 @@ std::unique_ptr<IComputeContext> createVulkanContext() {
 // 1. FP64 Recurrence & 5-Pass Stress Test
 // ============================================================================
 
-TEST_CASE(M2_Challenger2, FP64_FivePassStress_ZeroExplosion) {
+TEST_CASE(ComputeValidation, FP64_FivePassStress_ZeroExplosion) {
   auto ctx = createVulkanContext();
   ASSERT_TRUE(ctx != nullptr);
 
@@ -85,7 +85,7 @@ TEST_CASE(M2_Challenger2, FP64_FivePassStress_ZeroExplosion) {
 // 2. INT8 Analytical Values & Negative Injection
 // ============================================================================
 
-TEST_CASE(M2_Challenger2, INT8_AnalyticalVerification_And_NegativeInjection) {
+TEST_CASE(ComputeValidation, INT8_AnalyticalVerification_And_NegativeInjection) {
   auto ctx = createVulkanContext();
   ASSERT_TRUE(ctx != nullptr);
 
@@ -165,7 +165,7 @@ TEST_CASE(M2_Challenger2, INT8_AnalyticalVerification_And_NegativeInjection) {
 // 3. DualIssue Fresh Buffer Config 1 Validation Pass
 // ============================================================================
 
-TEST_CASE(M2_Challenger2, DualIssue_FreshBufferConfig1ValidationPass) {
+TEST_CASE(ComputeValidation, DualIssue_FreshBufferConfig1ValidationPass) {
   auto ctx = createVulkanContext();
   ASSERT_TRUE(ctx != nullptr);
 
@@ -204,7 +204,7 @@ TEST_CASE(M2_Challenger2, DualIssue_FreshBufferConfig1ValidationPass) {
 // 4. DualIssue Multi-Pass Accumulation Validation Pass
 // ============================================================================
 
-TEST_CASE(M2_Challenger2, DualIssue_MultiPassAccumulationValidationPass) {
+TEST_CASE(ComputeValidation, DualIssue_MultiPassAccumulationValidationPass) {
   auto ctx = createVulkanContext();
   ASSERT_TRUE(ctx != nullptr);
 
@@ -241,7 +241,7 @@ TEST_CASE(M2_Challenger2, DualIssue_MultiPassAccumulationValidationPass) {
 // 5. DualIssue Negative Injection Test
 // ============================================================================
 
-TEST_CASE(M2_Challenger2, DualIssue_NegativeInjection) {
+TEST_CASE(ComputeValidation, DualIssue_NegativeInjection) {
   auto ctx = createVulkanContext();
   ASSERT_TRUE(ctx != nullptr);
 
@@ -272,7 +272,7 @@ TEST_CASE(M2_Challenger2, DualIssue_NegativeInjection) {
 // 6. Bf16Bench Sentinel Seed Rejection (Empirical Challenge)
 // ============================================================================
 
-TEST_CASE(M2_Challenger2, Bf16Bench_SentinelSeedRejection_NoSelfValidation) {
+TEST_CASE(ComputeValidation, Bf16Bench_SentinelSeedRejection_NoSelfValidation) {
   Bf16Bench bench;
   std::unique_ptr<IComputeContext> ctx;
   if (ComputeBackendFactory::isAvailable(ComputeBackend::Vulkan)) {
@@ -355,7 +355,7 @@ TEST_CASE(M2_Challenger2, Bf16Bench_SentinelSeedRejection_NoSelfValidation) {
 // 7. DualIssue Buffer Isolation Exhaustive Verification
 // ============================================================================
 
-TEST_CASE(M2_Challenger2, DualIssue_BufferIsolation_ExhaustiveVerification) {
+TEST_CASE(ComputeValidation, DualIssue_BufferIsolation_ExhaustiveVerification) {
   auto ctx = createVulkanContext();
   ASSERT_TRUE(ctx != nullptr);
 
@@ -401,7 +401,7 @@ TEST_CASE(M2_Challenger2, DualIssue_BufferIsolation_ExhaustiveVerification) {
 // 8. DualIssue Multi-Pass Stress Across All 7 Configurations
 // ============================================================================
 
-TEST_CASE(M2_Challenger2, DualIssue_MultiPassStress_All7Configs_ZeroDriftFailures) {
+TEST_CASE(ComputeValidation, DualIssue_MultiPassStress_All7Configs_ZeroDriftFailures) {
   auto ctx = createVulkanContext();
   ASSERT_TRUE(ctx != nullptr);
 
@@ -438,7 +438,7 @@ TEST_CASE(M2_Challenger2, DualIssue_MultiPassStress_All7Configs_ZeroDriftFailure
 // 9. DualIssue Exhaustive Negative Validation (Corruption, Sentinels & Out-of-Bounds)
 // ============================================================================
 
-TEST_CASE(M2_Challenger2, DualIssue_NegativeValidation_ExhaustiveAll7Configs) {
+TEST_CASE(ComputeValidation, DualIssue_NegativeValidation_ExhaustiveAll7Configs) {
   auto ctx = createVulkanContext();
   ASSERT_TRUE(ctx != nullptr);
 

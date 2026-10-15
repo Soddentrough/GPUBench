@@ -31,7 +31,7 @@ std::unique_ptr<IComputeContext> createVulkanContext() {
 // 1. LdsBankConflictBench Adversarial & Negative Validation Tests
 // ============================================================================
 
-TEST_CASE(M2_AdversarialChallenge, LdsBankConflicts_PositiveValidation_AllConfigs) {
+TEST_CASE(LdsAndBf16Validation, LdsBankConflicts_PositiveValidation_AllConfigs) {
   auto ctx = createVulkanContext();
   ASSERT_TRUE(ctx != nullptr);
 
@@ -55,7 +55,7 @@ TEST_CASE(M2_AdversarialChallenge, LdsBankConflicts_PositiveValidation_AllConfig
   bench.Teardown();
 }
 
-TEST_CASE(M2_AdversarialChallenge, LdsBankConflicts_NegativeValidation_ZeroedBuffer) {
+TEST_CASE(LdsAndBf16Validation, LdsBankConflicts_NegativeValidation_ZeroedBuffer) {
   auto ctx = createVulkanContext();
   ASSERT_TRUE(ctx != nullptr);
 
@@ -82,7 +82,7 @@ TEST_CASE(M2_AdversarialChallenge, LdsBankConflicts_NegativeValidation_ZeroedBuf
   bench.Teardown();
 }
 
-TEST_CASE(M2_AdversarialChallenge, LdsBankConflicts_NegativeValidation_SingleElementCorruption) {
+TEST_CASE(LdsAndBf16Validation, LdsBankConflicts_NegativeValidation_SingleElementCorruption) {
   auto ctx = createVulkanContext();
   ASSERT_TRUE(ctx != nullptr);
 
@@ -124,7 +124,7 @@ TEST_CASE(M2_AdversarialChallenge, LdsBankConflicts_NegativeValidation_SingleEle
   bench.Teardown();
 }
 
-TEST_CASE(M2_AdversarialChallenge, LdsBankConflicts_NegativeValidation_OffByOneExpectedValue) {
+TEST_CASE(LdsAndBf16Validation, LdsBankConflicts_NegativeValidation_OffByOneExpectedValue) {
   auto ctx = createVulkanContext();
   ASSERT_TRUE(ctx != nullptr);
 
@@ -155,7 +155,7 @@ TEST_CASE(M2_AdversarialChallenge, LdsBankConflicts_NegativeValidation_OffByOneE
   bench.Teardown();
 }
 
-TEST_CASE(M2_AdversarialChallenge, LdsBankConflicts_NegativeValidation_OOBAndTeardown) {
+TEST_CASE(LdsAndBf16Validation, LdsBankConflicts_NegativeValidation_OOBAndTeardown) {
   auto ctx = createVulkanContext();
   ASSERT_TRUE(ctx != nullptr);
 
@@ -179,7 +179,7 @@ TEST_CASE(M2_AdversarialChallenge, LdsBankConflicts_NegativeValidation_OOBAndTea
   ASSERT_FALSE(bench.ValidateResults(0));
 }
 
-TEST_CASE(M2_AdversarialChallenge, LdsBankConflicts_SerializationCurve_EmpiricalVerification) {
+TEST_CASE(LdsAndBf16Validation, LdsBankConflicts_SerializationCurve_EmpiricalVerification) {
   auto ctx = createVulkanContext();
   ASSERT_TRUE(ctx != nullptr);
 
@@ -259,7 +259,7 @@ std::unique_ptr<IComputeContext> createBf16Context() {
 
 } // namespace
 
-TEST_CASE(M2_AdversarialChallenge, Bf16Bench_HonestyContract_NoSilentFp16Fallback) {
+TEST_CASE(LdsAndBf16Validation, Bf16Bench_HonestyContract_NoSilentFp16Fallback) {
   auto ctx = createVulkanContext();
   ASSERT_TRUE(ctx != nullptr);
 
@@ -279,7 +279,7 @@ TEST_CASE(M2_AdversarialChallenge, Bf16Bench_HonestyContract_NoSilentFp16Fallbac
   }
 }
 
-TEST_CASE(M2_AdversarialChallenge, Bf16Bench_PositiveValidation_VectorAndMatrix) {
+TEST_CASE(LdsAndBf16Validation, Bf16Bench_PositiveValidation_VectorAndMatrix) {
   auto ctx = createBf16Context();
   if (!ctx) {
     std::cout << "[SKIP] Native BF16 not supported on any available backend" << std::endl;
@@ -308,7 +308,7 @@ TEST_CASE(M2_AdversarialChallenge, Bf16Bench_PositiveValidation_VectorAndMatrix)
   bench.Teardown();
 }
 
-TEST_CASE(M2_AdversarialChallenge, Bf16Bench_NegativeValidation_ZeroedBuffer) {
+TEST_CASE(LdsAndBf16Validation, Bf16Bench_NegativeValidation_ZeroedBuffer) {
   auto ctx = createBf16Context();
   if (!ctx) {
     std::cout << "[SKIP] Native BF16 not supported on any available backend" << std::endl;
@@ -347,7 +347,7 @@ TEST_CASE(M2_AdversarialChallenge, Bf16Bench_NegativeValidation_ZeroedBuffer) {
   bench.Teardown();
 }
 
-TEST_CASE(M2_AdversarialChallenge, Bf16Bench_NegativeValidation_NaNInjection) {
+TEST_CASE(LdsAndBf16Validation, Bf16Bench_NegativeValidation_NaNInjection) {
   auto ctx = createBf16Context();
   if (!ctx) {
     std::cout << "[SKIP] Native BF16 not supported on any available backend" << std::endl;
@@ -384,7 +384,7 @@ TEST_CASE(M2_AdversarialChallenge, Bf16Bench_NegativeValidation_NaNInjection) {
   bench.Teardown();
 }
 
-TEST_CASE(M2_AdversarialChallenge, Bf16Bench_NegativeValidation_InfInjection) {
+TEST_CASE(LdsAndBf16Validation, Bf16Bench_NegativeValidation_InfInjection) {
   auto ctx = createBf16Context();
   if (!ctx) {
     std::cout << "[SKIP] Native BF16 not supported on any available backend" << std::endl;
@@ -421,7 +421,7 @@ TEST_CASE(M2_AdversarialChallenge, Bf16Bench_NegativeValidation_InfInjection) {
   bench.Teardown();
 }
 
-TEST_CASE(M2_AdversarialChallenge, Bf16Bench_RecurrenceStability_MultiPassStress) {
+TEST_CASE(LdsAndBf16Validation, Bf16Bench_RecurrenceStability_MultiPassStress) {
   auto ctx = createBf16Context();
   if (!ctx) {
     std::cout << "[SKIP] Native BF16 not supported on any available backend" << std::endl;

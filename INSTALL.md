@@ -80,7 +80,8 @@ The installation creates the following structure:
     │   ├── gpubench.fish
     │   └── gpubench-gui.fish
     ├── gpubench/
-    │   ├── assets/models/          # Canonical glTF 3D scenes (sponza.glb, toycar.glb)
+    │   ├── assets/thumbnails/      # Pre-rendered GUI tooltip preview thumbnails (*.png)
+    │   ├── models/                 # Canonical glTF 3D scenes (sponza.glb, toycar.glb)
     │   └── kernels/
     │       ├── vulkan/             # Compiled SPIR-V shaders (*.spv)
     │       ├── opencl/             # OpenCL source files (*.cl)
@@ -267,8 +268,8 @@ cpack -G NSIS -C Release
 ```
 
 **Output:**
-- `GPUBench-1.3.0-win64.zip` - Portable ZIP archive
-- `GPUBench-1.3.0-win64.exe` - NSIS installer (if NSIS is installed)
+- `GPUBench-1.0.0-win64.zip` - Portable ZIP archive
+- `GPUBench-1.0.0-win64.exe` - NSIS installer (if NSIS is installed)
 
 ### Linux Packages
 
@@ -290,9 +291,9 @@ cpack -G TGZ  # Tarball
 ```
 
 **Output:**
-- `GPUBench-1.3.0-Linux.deb`
-- `GPUBench-1.3.0-Linux.rpm`
-- `GPUBench-1.3.0-Linux.tar.gz`
+- `GPUBench-1.0.0-Linux.deb`
+- `GPUBench-1.0.0-Linux.rpm`
+- `GPUBench-1.0.0-Linux.tar.gz`
 
 ### macOS Packages
 

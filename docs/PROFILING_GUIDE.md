@@ -45,19 +45,13 @@ amd-smi metric --gpu 1
 
 ## 3. Profiling Toolchain & Environment Variables
 
-### 3.1 Tool Suite Installation
-The AMD Radeon Developer Tool Suite is located at:
-```bash
-/opt/RadeonDeveloperToolSuite-2026-05-28-1806/
-```
-Key binaries available:
-- `rga`: Radeon GPU Analyzer (offline/online ISA disassembly and resource analysis).
-- `RadeonGPUProfiler`: RGP GUI trace visualizer.
-- `RadeonRaytracingAnalyzer`: RRA GUI ray tracing BVH visualizer.
-- `RadeonDeveloperServiceCLI`: Headless daemon for developer connections.
+### 3.1 Built-In ISA Disassembly & External Profiling Tools
+GPUBench includes built-in hardware ISA disassembly (`--dump-isa`) via `VK_KHR_pipeline_executable_properties` (Vulkan) and `llvm-objdump` (ROCm), requiring zero external tool installation for register and instruction analysis.
 
-> [!NOTE]
-> Binaries located outside the repository workspace require execution outside the standard sandbox (`BypassSandbox: true`).
+For deep timeline and BVH visualization, external tools from the AMD Radeon Developer Tool Suite can also be used:
+- `RadeonGPUProfiler` (RGP): Hardware wavefront timeline trace visualizer.
+- `RadeonRaytracingAnalyzer` (RRA): BVH structure and traversal visualizer.
+- `rga`: Radeon GPU Analyzer for offline ASIC cross-compilation.
 
 ### 3.2 Mesa RADV Driver Variables
 
@@ -75,7 +69,9 @@ Key binaries available:
 
 | CLI Flag | Purpose |
 |---|---|
-| `-d 1` | Targets GPU 1 (AMD Radeon AI PRO R9700). |
+| `--dump-isa <target>` | Disassembles shader/kernel hardware ISA, instruction histograms, and VGPR/SGPR usage without running benchmarks. |
+| `--full-isa` | Prints full unabridged shader ISA disassembly when used with `--dump-isa`. |
+| `-d <index>` | Targets a specific GPU device index (check available devices with `--list-devices`). |
 | `-c <index>` | Runs an isolated benchmark configuration (`0` to `34`). |
 | `-s <scene>` | Selects scene: `showroom`, `indoor` (Sponza GLTF), `outdoor`, `forest`. |
 | `--profile-snapshot` | Sets 1 warmup pass and 1 timed submit for clean profiler traces. |
@@ -85,19 +81,24 @@ Key binaries available:
 
 ---
 
-## 4. Layer 1: Offline Shader ISA & Register Analysis (RGA)
+## 4. Layer 1: Shader ISA & Register Analysis (`--dump-isa` & RGA)
 
-The **Radeon GPU Analyzer (RGA)** compiles SPIR-V shaders directly for target AMD ASICs and generates detailed assembly disassemblies and hardware resource consumption CSV files.
+GPUBench's native `--dump-isa` flag queries `VK_KHR_pipeline_executable_properties` directly from the active Vulkan driver (or disassembles ROCm `.co` code objects) to report VGPR/SGPR allocations, scratch spills, instruction category histograms, and hot-loop assembly.
 
-### 4.1 Running RGA on Compute SPIR-V
-Target ASIC for AMD Radeon AI PRO R9700 is **`gfx1201`**:
-
+### 4.1 Inspecting Shader ISA with `--dump-isa`
 ```bash
-/opt/RadeonDeveloperToolSuite-2026-05-28-1806/rga \
-    -s vk-spv-offline \
+# Inspect ISA and register statistics for RayScheduling or BF16 shaders
+./build/gpubench --dump-isa rayscheduling
+./build/gpubench --dump-isa bf16 -c 0
+./build/gpubench --dump-isa bf16 --full-isa
+```
+
+For offline cross-compilation targeting a specific ASIC (such as `gfx1201`) via Radeon GPU Analyzer (`rga`):
+```bash
+rga -s vk-spv-offline \
     -c gfx1201 \
-    --isa scratch/rga/resolve_isa.txt \
-    -a scratch/rga/resolve_stats.csv \
+    --isa resolve_isa.txt \
+    -a resolve_stats.csv \
     --comp build/kernels/vulkan/rt_scheduling_resolve.comp.spv
 ```
 
@@ -310,19 +311,11 @@ To run a fast 2-second benchmark without image disk writes:
     --profile-snapshot
 ```
 
-### Recipe 2: Run Offline RGA Analysis on All Shaders
+### Recipe 2: Inspect Shader ISA & Register Usage Across Shaders
 ```bash
-OUTDIR="profiling/rga_analysis"
-mkdir -p "$OUTDIR"
-
-for shader in rt_scheduling_resolve rt_scheduling_device_generated_commands_bounce rt_scheduling_device_generated_commands_shadow; do
-    /opt/RadeonDeveloperToolSuite-2026-05-28-1806/rga \
-        -s vk-spv-offline \
-        -c gfx1201 \
-        --isa "${OUTDIR}/${shader}_isa.txt" \
-        -a "${OUTDIR}/${shader}_stats.csv" \
-        --comp "build/kernels/vulkan/${shader}.comp.spv"
-done
+# Built-in Vulkan / ROCm ISA inspection
+./build/gpubench --dump-isa rayscheduling
+./build/gpubench --dump-isa dualissue --full-isa
 ```
 
 ### Recipe 3: Verify Hardware Indirect Packets for Any Config
@@ -331,7 +324,7 @@ RADV_DEBUG=dumpibs ./build/gpubench \
     --benchmark rayscheduling \
     --scene indoor \
     -c <CONFIG_ID> \
-    -d 1 \
+    -d 0 \
     --no-dump \
     --profile-snapshot 2>&1 | grep -E "INDIRECT_BUFFER|DISPATCH_DIRECT|SET_PREDICATION"
 ```
@@ -344,7 +337,7 @@ configs = [(2, 0), (5, 3), (8, 6), (11, 9), (18, 17), (21, 19), (22, 19), (24, 2
 
 for dgc, base in configs:
     for cfg in [base, dgc]:
-        cmd = ["./build/gpubench", "--benchmark", "rayscheduling", "--scene", "indoor", "-c", str(cfg), "-d", "1", "--no-dump", "--profile-snapshot"]
+        cmd = ["./build/gpubench", "--benchmark", "rayscheduling", "--scene", "indoor", "-c", str(cfg), "-d", "0", "--no-dump", "--profile-snapshot"]
         out = subprocess.run(cmd, stdout=subprocess.PIPE, text=True).stdout
         for line in out.splitlines():
             clean = re.sub(r'\x1b\[[0-9;]*m', '', line)
@@ -356,8 +349,8 @@ for dgc, base in configs:
 
 ## 10. Rules of Thumb & Best Practices
 
-1. **Always Target GPU 1 (`-d 1`)**: Never run benchmarks on GPU 0 on this system.
+1. **Verify Target GPU Device (`--list-devices`)**: On multi-GPU workstations, select the dedicated benchmark GPU (e.g. `-d 0` or `-d 1`) to avoid contention with active display compositors.
 2. **Watch for ANSI Codes**: When parsing benchmark outputs in automation scripts, always strip ANSI escape sequences (`re.sub(r'\x1b\[[0-9;]*m', '', text)`).
 3. **Use `--no-dump` for Pure Profiling**: Full image dumping and difference generation adds ~15–30 seconds per run; use `--no-dump` when doing rapid iterative profiling or hardware packet dumping.
 4. **Inspect SGPR Budget First**: On RDNA, the SGPR budget is 106 registers. If a monolithic kernel approaches 106 SGPRs, wave occupancy collapses. Splitting into DGC micro-kernels is the primary architectural solution.
-5. **Verify Zero Spills**: Check that `Scratch size: 0` in ACO shader stats. Any spilling to scratch memory severely degrades ray tracing throughput.
+5. **Verify Zero Spills**: Check that `Scratch size: 0` in ACO shader stats or `--dump-isa`. Any spilling to scratch memory severely degrades ray tracing throughput.

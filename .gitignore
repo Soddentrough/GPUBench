@@ -1,19 +1,19 @@
-# Build directory
+# Build directories
 build*/
 target/
 
-# GPU core dump files
-gpucore.*
-**/gpucore.*
+# CMake & CPack generated files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+install_manifest.txt
+CPackConfig.cmake
+CPackSourceConfig.cmake
+_CPack_Packages/
+compile_commands.json
 
-# IDE files
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# Compiled binaries
+# Compiled binaries & kernel build outputs
 *.o
 *.so
 *.a
@@ -23,79 +23,45 @@ gpucore.*
 kernels/rocm/
 kernels/vulkan/
 
-# Logs and temporary files
-*.log
-runner.bat
-test.cpp
-test_minimal.cpp
-
-# Results files
-gpubench_results*
-gpubench_*.json
-VP_*.json
-
-# Specific logs and temp outputs
-build_error.log
-build_error.txt
-build_out.txt
-total_build.log
-
-# CMake generated files
-CMakeCache.txt
-CMakeFiles/
-cmake_install.cmake
-Makefile
-install_manifest.txt
-CPackConfig.cmake
-CPackSourceConfig.cmake
-_CPack_Packages/
-
 # Distribution packages
 *.zip
 *.msi
-*.exe
 *.rpm
 *.deb
 *.tar.gz
 
-# Test test directory
-test/
-
-# Backup files
-*~
-*.bak
-
-# Render test output dumps
-renders/
-
-# GPU Profiler binary traces
-profiles/*.rgp
-profiles/*.rra
-*.rra
-
-# Local benchmark result dumps
-gpubench_results_*.json
-raw_traversal_scene.obj
-
-# Agent and orchestration metadata
-.agents/
-ORIGINAL_REQUEST.md
-PROJECT.md
-imgui.ini
-
-# Tooling, Language Server & Compiler caches
-compile_commands.json
+# IDE, editor, and language server files
+.vscode/
+.idea/
 .cache/
 .ccls-cache/
 .clang-tidy
-
-# Profiling and coverage
-*.profraw
-*.profdata
-*.gcov
-VP_*.json
-
-# Patch leftovers
+*.swp
+*.swo
+*~
+*.bak
 *.orig
 *.rej
 
+# Logs, core dumps, and local runtime state
+*.log
+gpucore.*
+**/gpucore.*
+imgui.ini
+
+# Render output dumps & benchmark result exports
+renders/
+gpubench_results*
+gpubench_*.json
+
+# GPU profiler traces & coverage data
+profiles/
+*.rgp
+*.rra
+*.profraw
+*.profdata
+*.gcov
+
+# Local agent / workspace scratch
+.agents/
+PROJECT.md

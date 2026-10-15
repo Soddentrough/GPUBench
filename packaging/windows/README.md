@@ -125,7 +125,7 @@ gpubench --list-benchmarks
 ### Version Number
 Edit `CMakeLists.txt` to set version:
 ```cmake
-project(GPUBench VERSION 1.3.0)
+project(GPUBench VERSION 1.0.0)
 ```
 
 ### Package Metadata

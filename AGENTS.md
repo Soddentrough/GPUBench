@@ -6,12 +6,10 @@ Do not search for SMI tool paths across runs; use these exact absolute paths:
   - `/opt/rocm/current/bin/amd-smi`
   - `~/.local/bin/amd-smi`
   - `/opt/rocm/core-10.1/bin/amd-smi`
-  - `/opt/rocm/core-10.0/bin/amd-smi`
 - **`rocm-smi`**:
   - `/opt/rocm/current/bin/rocm-smi`
   - `~/.local/bin/rocm-smi`
   - `/opt/rocm/core-10.1/bin/rocm-smi`
-  - `/opt/rocm/core-10.0/bin/rocm-smi`
 
 *Note*: Executing binaries located outside the repository workspace (such as in `/opt/rocm` or `~/.local/bin`) requires running with `BypassSandbox: true`.
 

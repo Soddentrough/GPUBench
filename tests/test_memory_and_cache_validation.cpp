@@ -35,7 +35,7 @@ std::unique_ptr<IComputeContext> createVulkanContext() {
 // 1. MemBandwidthBench Adversarial Negative Validation Tests
 // ============================================================================
 
-TEST_CASE(M3_AdversarialChallenge, MemBandwidth_PositiveValidation_AllModes) {
+TEST_CASE(MemoryAndCacheValidation, MemBandwidth_PositiveValidation_AllModes) {
   auto ctx = createVulkanContext();
   ASSERT_TRUE(ctx != nullptr);
 
@@ -59,7 +59,7 @@ TEST_CASE(M3_AdversarialChallenge, MemBandwidth_PositiveValidation_AllModes) {
   bench.Teardown();
 }
 
-TEST_CASE(M3_AdversarialChallenge, MemBandwidth_NegativeValidation_ZeroedBuffer) {
+TEST_CASE(MemoryAndCacheValidation, MemBandwidth_NegativeValidation_ZeroedBuffer) {
   auto ctx = createVulkanContext();
   ASSERT_TRUE(ctx != nullptr);
 
@@ -103,7 +103,7 @@ TEST_CASE(M3_AdversarialChallenge, MemBandwidth_NegativeValidation_ZeroedBuffer)
   bench.Teardown();
 }
 
-TEST_CASE(M3_AdversarialChallenge, MemBandwidth_NegativeValidation_CorruptedFloatValues) {
+TEST_CASE(MemoryAndCacheValidation, MemBandwidth_NegativeValidation_CorruptedFloatValues) {
   auto ctx = createVulkanContext();
   ASSERT_TRUE(ctx != nullptr);
 
@@ -140,7 +140,7 @@ TEST_CASE(M3_AdversarialChallenge, MemBandwidth_NegativeValidation_CorruptedFloa
 // 2. CacheBench (L0 Vector Cache Latency) Negative Validation Tests
 // ============================================================================
 
-TEST_CASE(M3_AdversarialChallenge, CacheBench_PositiveAndNegativeValidation_Word1) {
+TEST_CASE(MemoryAndCacheValidation, CacheBench_PositiveAndNegativeValidation_Word1) {
   auto ctx = createVulkanContext();
   ASSERT_TRUE(ctx != nullptr);
 
@@ -191,7 +191,7 @@ TEST_CASE(M3_AdversarialChallenge, CacheBench_PositiveAndNegativeValidation_Word
 // 3. CacheLatencyCurveBench Negative Validation Tests
 // ============================================================================
 
-TEST_CASE(M3_AdversarialChallenge, CacheLatencyCurve_PositiveAndNegativeValidation_Word1) {
+TEST_CASE(MemoryAndCacheValidation, CacheLatencyCurve_PositiveAndNegativeValidation_Word1) {
   auto ctx = createVulkanContext();
   ASSERT_TRUE(ctx != nullptr);
 
@@ -235,7 +235,7 @@ TEST_CASE(M3_AdversarialChallenge, CacheLatencyCurve_PositiveAndNegativeValidati
 // 4. SysMemBandwidthBench Negative Validation Tests
 // ============================================================================
 
-TEST_CASE(M3_AdversarialChallenge, SysMemBandwidth_PositiveAndNegativeValidation) {
+TEST_CASE(MemoryAndCacheValidation, SysMemBandwidth_PositiveAndNegativeValidation) {
   auto ctx = createVulkanContext();
   ASSERT_TRUE(ctx != nullptr);
 
@@ -276,7 +276,7 @@ TEST_CASE(M3_AdversarialChallenge, SysMemBandwidth_PositiveAndNegativeValidation
 // 5. SysMemLatencyBench Negative Validation Tests
 // ============================================================================
 
-TEST_CASE(M3_AdversarialChallenge, SysMemLatency_PositiveAndNegativeValidation) {
+TEST_CASE(MemoryAndCacheValidation, SysMemLatency_PositiveAndNegativeValidation) {
   auto ctx = createVulkanContext();
   ASSERT_TRUE(ctx != nullptr);
 
@@ -317,7 +317,7 @@ TEST_CASE(M3_AdversarialChallenge, SysMemLatency_PositiveAndNegativeValidation) 
 // 6. No Self-Validating Stubs Audit
 // ============================================================================
 
-TEST_CASE(M3_AdversarialChallenge, NoSelfValidatingStubs_OOBAndUninitialized) {
+TEST_CASE(MemoryAndCacheValidation, NoSelfValidatingStubs_OOBAndUninitialized) {
   auto ctx = createVulkanContext();
   ASSERT_TRUE(ctx != nullptr);
 

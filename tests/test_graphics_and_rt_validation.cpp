@@ -86,7 +86,7 @@ void clearPixelFillImageToZero(PixelFillRateBench &bench, uint32_t configIdx) {
 // 1. PixelFillRate Adversarial Negative Validation
 // ============================================================================
 
-TEST_CASE(M3_Challenger2, PixelFill_PositiveAndNegativeValidation) {
+TEST_CASE(GraphicsAndRayTracingValidation, PixelFill_PositiveAndNegativeValidation) {
   auto ctx = createVulkanContext();
   ASSERT_TRUE(ctx != nullptr);
 
@@ -127,7 +127,7 @@ TEST_CASE(M3_Challenger2, PixelFill_PositiveAndNegativeValidation) {
 // 2. RayRawTraversal Adversarial Negative Validation
 // ============================================================================
 
-TEST_CASE(M3_Challenger2, RayRawTraversal_PositiveAndNegativeValidation) {
+TEST_CASE(GraphicsAndRayTracingValidation, RayRawTraversal_PositiveAndNegativeValidation) {
   auto ctx = createVulkanContext();
   ASSERT_TRUE(ctx != nullptr);
 
@@ -168,7 +168,7 @@ TEST_CASE(M3_Challenger2, RayRawTraversal_PositiveAndNegativeValidation) {
 // 3. RayIntersect Adversarial Negative Validation
 // ============================================================================
 
-TEST_CASE(M3_Challenger2, RayIntersect_PositiveAndNegativeValidation) {
+TEST_CASE(GraphicsAndRayTracingValidation, RayIntersect_PositiveAndNegativeValidation) {
   auto ctx = createVulkanContext();
   ASSERT_TRUE(ctx != nullptr);
 
@@ -202,7 +202,7 @@ TEST_CASE(M3_Challenger2, RayIntersect_PositiveAndNegativeValidation) {
 // 4. RayDivergence Adversarial Negative Validation
 // ============================================================================
 
-TEST_CASE(M3_Challenger2, RayDivergence_PositiveAndNegativeValidation) {
+TEST_CASE(GraphicsAndRayTracingValidation, RayDivergence_PositiveAndNegativeValidation) {
   auto ctx = createVulkanContext();
   ASSERT_TRUE(ctx != nullptr);
 
@@ -236,7 +236,7 @@ TEST_CASE(M3_Challenger2, RayDivergence_PositiveAndNegativeValidation) {
 // 5. RayAnyHit Adversarial Negative Validation
 // ============================================================================
 
-TEST_CASE(M3_Challenger2, RayAnyHit_PositiveAndNegativeValidation) {
+TEST_CASE(GraphicsAndRayTracingValidation, RayAnyHit_PositiveAndNegativeValidation) {
   auto ctx = createVulkanContext();
   ASSERT_TRUE(ctx != nullptr);
 
@@ -275,7 +275,7 @@ TEST_CASE(M3_Challenger2, RayAnyHit_PositiveAndNegativeValidation) {
 // 6. RayProcedural Adversarial Negative Validation
 // ============================================================================
 
-TEST_CASE(M3_Challenger2, RayProcedural_PositiveAndNegativeValidation) {
+TEST_CASE(GraphicsAndRayTracingValidation, RayProcedural_PositiveAndNegativeValidation) {
   auto ctx = createVulkanContext();
   ASSERT_TRUE(ctx != nullptr);
 
@@ -309,7 +309,7 @@ TEST_CASE(M3_Challenger2, RayProcedural_PositiveAndNegativeValidation) {
 // 7. RayScheduling Adversarial Negative Validation
 // ============================================================================
 
-TEST_CASE(M3_Challenger2, RayScheduling_PositiveAndNegativeValidation) {
+TEST_CASE(GraphicsAndRayTracingValidation, RayScheduling_PositiveAndNegativeValidation) {
   auto ctx = createVulkanContext();
   ASSERT_TRUE(ctx != nullptr);
 
@@ -354,7 +354,7 @@ TEST_CASE(M3_Challenger2, RayScheduling_PositiveAndNegativeValidation) {
 // 8. ResultFormatter & JSON Disclosures Verification
 // ============================================================================
 
-TEST_CASE(M3_Challenger2, RayRawTraversal_Disclosures_JSON_And_CLI) {
+TEST_CASE(GraphicsAndRayTracingValidation, RayRawTraversal_Disclosures_JSON_And_CLI) {
   ResultData r{};
   r.backendName = "Vulkan";
   r.deviceName = "Test GPU";

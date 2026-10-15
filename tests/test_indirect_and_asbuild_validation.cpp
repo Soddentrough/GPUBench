@@ -39,7 +39,7 @@ std::unique_ptr<IComputeContext> createVulkanContext() {
 // 1. RayASBuildBench Negative Validation Tests
 // ============================================================================
 
-TEST_CASE(M1_AdversarialChallenge, RayASBuild_NegativeValidation_ZeroedBlasBuffer) {
+TEST_CASE(IndirectAndASBuildValidation, RayASBuild_NegativeValidation_ZeroedBlasBuffer) {
   auto ctx = createVulkanContext();
   ASSERT_TRUE(ctx != nullptr);
 
@@ -84,7 +84,7 @@ TEST_CASE(M1_AdversarialChallenge, RayASBuild_NegativeValidation_ZeroedBlasBuffe
   ASSERT_FALSE(postTeardownValid);
 }
 
-TEST_CASE(M1_AdversarialChallenge, RayASBuild_NegativeValidation_ZeroedTlasBuffer) {
+TEST_CASE(IndirectAndASBuildValidation, RayASBuild_NegativeValidation_ZeroedTlasBuffer) {
   auto ctx = createVulkanContext();
   ASSERT_TRUE(ctx != nullptr);
 
@@ -125,7 +125,7 @@ TEST_CASE(M1_AdversarialChallenge, RayASBuild_NegativeValidation_ZeroedTlasBuffe
 // 2. InShaderIndirectBench Negative Validation Tests
 // ============================================================================
 
-TEST_CASE(M1_AdversarialChallenge, InShaderIndirect_NegativeValidation_IndirectBuffer) {
+TEST_CASE(IndirectAndASBuildValidation, InShaderIndirect_NegativeValidation_IndirectBuffer) {
   auto ctx = createVulkanContext();
   ASSERT_TRUE(ctx != nullptr);
 
@@ -180,7 +180,7 @@ TEST_CASE(M1_AdversarialChallenge, InShaderIndirect_NegativeValidation_IndirectB
   ASSERT_FALSE(bench.ValidateResults(1));
 }
 
-TEST_CASE(M1_AdversarialChallenge, InShaderIndirect_NegativeValidation_OutputBufferWiped_AllActiveConfigs) {
+TEST_CASE(IndirectAndASBuildValidation, InShaderIndirect_NegativeValidation_OutputBufferWiped_AllActiveConfigs) {
   // Empirically verify that wiping outputBuffer with zeros causes ValidateResults()
   // to return FALSE for all active configurations:
   // - CPU direct configurations: 0 (100% active), 6 (10% active)
@@ -215,7 +215,7 @@ TEST_CASE(M1_AdversarialChallenge, InShaderIndirect_NegativeValidation_OutputBuf
   }
 }
 
-TEST_CASE(M1_AdversarialChallenge, InShaderIndirect_NegativeValidation_OutputBufferCorrupted_NaN_Inf_WrongValue) {
+TEST_CASE(IndirectAndASBuildValidation, InShaderIndirect_NegativeValidation_OutputBufferCorrupted_NaN_Inf_WrongValue) {
   // Adversarially corrupt outputBuffer with NaNs, Infs, and mathematically incorrect floats
   // across all active configurations (Configs 0, 1, 2, 3, 4, 6).
   auto ctx = createVulkanContext();
@@ -266,7 +266,7 @@ TEST_CASE(M1_AdversarialChallenge, InShaderIndirect_NegativeValidation_OutputBuf
   }
 }
 
-TEST_CASE(M1_AdversarialChallenge, InShaderIndirect_NegativeValidation_SingleElementCorruption) {
+TEST_CASE(IndirectAndASBuildValidation, InShaderIndirect_NegativeValidation_SingleElementCorruption) {
   // Verify that corrupting even a single active element in outputBuffer causes ValidateResults() to fail
   auto ctx = createVulkanContext();
   ASSERT_TRUE(ctx != nullptr);
@@ -308,7 +308,7 @@ TEST_CASE(M1_AdversarialChallenge, InShaderIndirect_NegativeValidation_SingleEle
   }
 }
 
-TEST_CASE(M1_AdversarialChallenge, InShaderIndirect_PrunedConfig5_ZeroWorkgroupsAndUncorruptedBuffer) {
+TEST_CASE(IndirectAndASBuildValidation, InShaderIndirect_PrunedConfig5_ZeroWorkgroupsAndUncorruptedBuffer) {
   // Config 5 (0% active): Verify zero-dispatch pruning
   // 1. Validate that indirect dispatch sizing evaluates to (0, 0, 0) and 0 workgroups ran
   // 2. Empirically verify that outputBuffer is completely uncorrupted (untouched by GPU)
@@ -381,7 +381,7 @@ TEST_CASE(M1_AdversarialChallenge, InShaderIndirect_PrunedConfig5_ZeroWorkgroups
   bench.Teardown();
 }
 
-TEST_CASE(M1_AdversarialChallenge, InShaderIndirect_SamplingWindowBoundaryAndWorklistIntegrity) {
+TEST_CASE(IndirectAndASBuildValidation, InShaderIndirect_SamplingWindowBoundaryAndWorklistIntegrity) {
   // Boundary Condition Testing:
   // 1. Verify that corrupting the last checked element (index 1023) is caught by ValidateResults()
   // 2. Characterize the sampling window: elements at index >= 1024 are outside the sampling window
@@ -433,7 +433,7 @@ TEST_CASE(M1_AdversarialChallenge, InShaderIndirect_SamplingWindowBoundaryAndWor
 // 3. Query Pool Safety & Timestamp Overflow Stress Test
 // ============================================================================
 
-TEST_CASE(M1_AdversarialChallenge, TimestampQueryPool_ExceedsCapacity_SafetyGuard) {
+TEST_CASE(IndirectAndASBuildValidation, TimestampQueryPool_ExceedsCapacity_SafetyGuard) {
   auto ctx = createVulkanContext();
   ASSERT_TRUE(ctx != nullptr);
 
@@ -462,7 +462,7 @@ TEST_CASE(M1_AdversarialChallenge, TimestampQueryPool_ExceedsCapacity_SafetyGuar
   bench.Teardown();
 }
 
-TEST_CASE(M1_AdversarialChallenge, TimestampQueryPool_BatchingLargeIterationSafety) {
+TEST_CASE(IndirectAndASBuildValidation, TimestampQueryPool_BatchingLargeIterationSafety) {
   auto ctx = createVulkanContext();
   ASSERT_TRUE(ctx != nullptr);
 
@@ -489,7 +489,7 @@ TEST_CASE(M1_AdversarialChallenge, TimestampQueryPool_BatchingLargeIterationSafe
   bench.Teardown();
 }
 
-TEST_CASE(M1_AdversarialChallenge, TimestampQueryPool_RapidRecyclingStress) {
+TEST_CASE(IndirectAndASBuildValidation, TimestampQueryPool_RapidRecyclingStress) {
   auto ctx = createVulkanContext();
   ASSERT_TRUE(ctx != nullptr);
 
@@ -516,7 +516,7 @@ TEST_CASE(M1_AdversarialChallenge, TimestampQueryPool_RapidRecyclingStress) {
 // 4. RFC 8259 JSON Floating-Point Sanitization Stress Test
 // ============================================================================
 
-TEST_CASE(M1_AdversarialChallenge, ResultFormatter_RFC8259_NonFiniteFloatsSanitization) {
+TEST_CASE(IndirectAndASBuildValidation, ResultFormatter_RFC8259_NonFiniteFloatsSanitization) {
   std::vector<ResultData> results;
   ResultData r{};
   r.backendName = "Vulkan";

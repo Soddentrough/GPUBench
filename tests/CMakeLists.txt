@@ -8,12 +8,12 @@ set(TEST_SOURCES
     test_pixelfill.cpp
     test_descriptions_and_thumbnails.cpp
     test_e2e_tiers.cpp
-    test_m1_adversarial_challenge.cpp
-    test_m1_timing_fidelity.cpp
-    test_m2_adversarial_challenge.cpp
-    test_m2_challenger2.cpp
-    test_m3_adversarial_challenge.cpp
-    test_m3_challenger2.cpp
+    test_indirect_and_asbuild_validation.cpp
+    test_timing_fidelity.cpp
+    test_lds_and_bf16_validation.cpp
+    test_compute_validation.cpp
+    test_memory_and_cache_validation.cpp
+    test_graphics_and_rt_validation.cpp
     test_rfc8259_json_stress.cpp
 )
 
@@ -62,12 +62,12 @@ add_test(NAME E2E_Tier2 COMMAND gpubench_tests --filter=E2E_Tier2)
 add_test(NAME E2E_Tier3 COMMAND gpubench_tests --filter=E2E_Tier3)
 add_test(NAME E2E_Tier4 COMMAND gpubench_tests --filter=E2E_Tier4)
 add_test(NAME E2E_All COMMAND gpubench_tests --filter=E2E_)
-add_test(NAME M1_AdversarialChallenge COMMAND gpubench_tests --filter=M1_AdversarialChallenge)
-add_test(NAME M1_TimingFidelity COMMAND gpubench_tests --filter=M1_TimingFidelity)
-add_test(NAME M2_AdversarialChallenge COMMAND gpubench_tests --filter=M2_AdversarialChallenge)
-add_test(NAME M2_Challenger2 COMMAND gpubench_tests --filter=M2_Challenger2)
-add_test(NAME M3_AdversarialChallenge COMMAND gpubench_tests --filter=M3_AdversarialChallenge)
-add_test(NAME M3_Challenger2 COMMAND gpubench_tests --filter=M3_Challenger2)
+add_test(NAME IndirectAndASBuildValidation COMMAND gpubench_tests --filter=IndirectAndASBuildValidation)
+add_test(NAME TimingFidelity COMMAND gpubench_tests --filter=TimingFidelity)
+add_test(NAME LdsAndBf16Validation COMMAND gpubench_tests --filter=LdsAndBf16Validation)
+add_test(NAME ComputeValidation COMMAND gpubench_tests --filter=ComputeValidation)
+add_test(NAME MemoryAndCacheValidation COMMAND gpubench_tests --filter=MemoryAndCacheValidation)
+add_test(NAME GraphicsAndRayTracingValidation COMMAND gpubench_tests --filter=GraphicsAndRayTracingValidation)
 add_test(NAME RFC8259_JsonStress COMMAND gpubench_tests --filter=RFC8259_JsonStress)
 add_test(NAME AllTests COMMAND gpubench_tests)
 
@@ -84,12 +84,12 @@ set_tests_properties(
     E2E_Tier3
     E2E_Tier4
     E2E_All
-    M1_AdversarialChallenge
-    M1_TimingFidelity
-    M2_AdversarialChallenge
-    M2_Challenger2
-    M3_AdversarialChallenge
-    M3_Challenger2
+    IndirectAndASBuildValidation
+    TimingFidelity
+    LdsAndBf16Validation
+    ComputeValidation
+    MemoryAndCacheValidation
+    GraphicsAndRayTracingValidation
     RFC8259_JsonStress
     AllTests
     PROPERTIES WORKING_DIRECTORY "${CMAKE_BINARY_DIR}" RESOURCE_LOCK gpu_execution

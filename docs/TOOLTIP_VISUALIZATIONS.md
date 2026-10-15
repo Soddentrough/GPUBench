@@ -6,9 +6,6 @@ the shipped implementation of hover-tooltip visualizations for those
 workloads: a static pre-baked thumbnail, a procedural vector schematic, or a
 cross-link into the interactive Ray Tracing Viewport.
 
-> Supersedes the draft architecture spec in
-> `docs/archive/TOOLTIP_PIPELINE_VISUALIZATIONS.md`.
-
 ---
 
 ## 1. Overview

@@ -32,7 +32,7 @@ std::unique_ptr<IComputeContext> createVulkanContext() {
 // 1. Empirical Verification: GPU Timing Does NOT Latch Host CPU Recording Time
 // ============================================================================
 
-TEST_CASE(M1_TimingFidelity, GpuTiming_ExcludesHostCpuSleepDelays) {
+TEST_CASE(TimingFidelity, GpuTiming_ExcludesHostCpuSleepDelays) {
   auto ctx = createVulkanContext();
   ASSERT_TRUE(ctx != nullptr);
 
@@ -101,7 +101,7 @@ TEST_CASE(M1_TimingFidelity, GpuTiming_ExcludesHostCpuSleepDelays) {
   bench.Teardown();
 }
 
-TEST_CASE(M1_TimingFidelity, GpuTiming_BatchRecordingExcludesHostStalls) {
+TEST_CASE(TimingFidelity, GpuTiming_BatchRecordingExcludesHostStalls) {
   auto ctx = createVulkanContext();
   ASSERT_TRUE(ctx != nullptr);
 
@@ -141,7 +141,7 @@ TEST_CASE(M1_TimingFidelity, GpuTiming_BatchRecordingExcludesHostStalls) {
 // 2. Empirical Verification: Indirect Reset Pass Latency is Realistic (<1 µs)
 // ============================================================================
 
-TEST_CASE(M1_TimingFidelity, IndirectResetPass_SubMicrosecondExecutionLatency) {
+TEST_CASE(TimingFidelity, IndirectResetPass_SubMicrosecondExecutionLatency) {
   auto ctx = createVulkanContext();
   ASSERT_TRUE(ctx != nullptr);
 
@@ -198,7 +198,7 @@ TEST_CASE(M1_TimingFidelity, IndirectResetPass_SubMicrosecondExecutionLatency) {
 // 3. Empirical Verification: InShaderIndirect Workload Latency Scaling
 // ============================================================================
 
-TEST_CASE(M1_TimingFidelity, InShaderIndirect_ZeroDispatchPruningSpeedup) {
+TEST_CASE(TimingFidelity, InShaderIndirect_ZeroDispatchPruningSpeedup) {
   auto ctx = createVulkanContext();
   ASSERT_TRUE(ctx != nullptr);
 
@@ -254,7 +254,7 @@ TEST_CASE(M1_TimingFidelity, InShaderIndirect_ZeroDispatchPruningSpeedup) {
 // 4. Empirical Verification: RayASBuild Command Pool Pre-recording Fidelity
 // ============================================================================
 
-TEST_CASE(M1_TimingFidelity, RayASBuild_PreRecordedCommandExecutionIntegrity) {
+TEST_CASE(TimingFidelity, RayASBuild_PreRecordedCommandExecutionIntegrity) {
   auto ctx = createVulkanContext();
   ASSERT_TRUE(ctx != nullptr);
 

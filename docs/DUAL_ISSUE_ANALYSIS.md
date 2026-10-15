@@ -131,14 +131,12 @@ Key metrics in the output:
 - `VGPRs`: Vector register count allocated for the configuration ($12 \to 24 \to 36 \to 72$).
 - `VOPD`: On RDNA 3 (GFX11) and RDNA 4 (GFX12), reports the exact count of 64-bit dual-issue instructions emitted.
 
-### AMD: Static ISA Disassembly via RGA
-Use the Radeon GPU Analyzer directly to inspect disassembled vector instructions:
+### AMD & Vulkan: Built-In Hardware ISA Disassembly (`--dump-isa`)
+Use GPUBench's built-in `--dump-isa` tool (powered by `VK_KHR_pipeline_executable_properties` and `llvm-objdump`) to inspect hardware register usage, instruction histograms, and disassembled vector instructions without external tools:
 ```bash
-/opt/RadeonDeveloperToolSuite-2026-05-28-1806/rga \
-    -s vk-spv-offline \
-    --isa /tmp/dual_issue_isa.txt \
-    -c gfx1201 \
-    build/kernels/vulkan/dual_issue_ilp16.comp.spv
+./build/gpubench --dump-isa dualissue
+./build/gpubench --dump-isa dualissue -c 2 --full-isa
+./build/gpubench --dump-isa dualissue -k rocm
 ```
 
 ### NVIDIA: Profiling Dual-Issue via Nsight Compute (`ncu`)
