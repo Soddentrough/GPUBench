@@ -57,9 +57,10 @@ void Int8Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
       std::filesystem::path matrix_file_path =
           kdir / "rocm" / "int8_matrix.hip";
       try {
-        matrixKernel = context.createKernel(matrix_file_path.string(), "run_benchmark", 1);
+        matrixKernel = context.createKernel(matrix_file_path.string(), "run_benchmark", 2);
         if (matrixKernel) {
           context.setKernelArg(matrixKernel, 0, matrixInputBuffer);
+          context.setKernelArg(matrixKernel, 1, outputBuffer);
         }
       } catch (const std::exception &e) {
         matrixKernel = nullptr;

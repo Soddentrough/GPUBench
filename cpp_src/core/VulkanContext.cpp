@@ -3243,6 +3243,9 @@ VulkanContext::VulkanKernel *VulkanContext::getKernel(ComputeKernel handle) cons
 }
 
 void VulkanContext::releaseKernel(ComputeKernel kernel) {
+  if (lastDispatchedKernel == kernel) {
+    lastDispatchedKernel = nullptr;
+  }
   auto it = kernels.find(kernel);
   if (it != kernels.end()) {
     VulkanKernel *vulkanKernel = it->second;

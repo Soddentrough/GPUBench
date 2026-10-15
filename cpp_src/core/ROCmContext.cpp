@@ -725,6 +725,9 @@ KernelResourceUsage ROCmContext::getKernelResourceUsage(ComputeKernel kernel) co
 }
 
 void ROCmContext::releaseKernel(ComputeKernel kernel) {
+  if (lastDispatchedKernel == kernel) {
+    lastDispatchedKernel = nullptr;
+  }
   auto it = kernels.find(kernel);
   if (it != kernels.end()) {
     delete static_cast<ROCmKernel *>(kernel);

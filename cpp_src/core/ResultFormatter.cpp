@@ -1006,6 +1006,14 @@ void ResultFormatter::print() {
                     pwrStr += " | " + formatDouble(res.unitPerWatt, 2) + " GB/J";
                   } else if (res.efficiencyUnit == "J/MRay") {
                     pwrStr += " | " + formatDouble(res.unitPerWatt, 0) + " kRays/J";
+                  } else if (res.efficiencyUnit == "J/MTri") {
+                    pwrStr += " | " + formatDouble(res.unitPerWatt, 0) + " kTris/J";
+                  } else if (res.efficiencyUnit == "J/MInst") {
+                    pwrStr += " | " + formatDouble(res.unitPerWatt, 0) + " kInst/J";
+                  } else if (res.efficiencyUnit == "J/MRecord") {
+                    pwrStr += " | " + formatDouble(res.unitPerWatt, 0) + " kRecords/J";
+                  } else if (res.efficiencyUnit == "J/MHit") {
+                    pwrStr += " | " + formatDouble(res.unitPerWatt, 0) + " kHits/J";
                   } else if (res.efficiencyUnit == "J/GIS") {
                     pwrStr += " | " + formatDouble(res.unitPerWatt, 0) + " MIS/J";
                   }
@@ -1030,10 +1038,12 @@ void ResultFormatter::print() {
                         << BOLD << CYAN << " │ " << RESET << DIM << noteStr << notePad << RESET
                         << BOLD << CYAN << " │" << RESET << "\n";
 
-              if (showTelemetry && (res.hasPerfQueryTelemetry || res.hasRegisterTelemetry) && !res.isUnsupported && res.isValid && res.time_ms > 0.0) {
+              bool hasRenderablePerf = (res.hasPerfQueryTelemetry && res.perfCounters.available);
+              bool hasRenderableReg = (res.hasRegisterTelemetry && res.vgprCount > 0);
+              if (showTelemetry && (hasRenderablePerf || hasRenderableReg) && !res.isUnsupported && res.isValid && res.time_ms > 0.0) {
                 std::string telemInfo = "   └─ ";
                 bool firstItem = true;
-                if (res.hasPerfQueryTelemetry && res.perfCounters.available) {
+                if (hasRenderablePerf) {
                   telemInfo += "Cycles: " + formatNumber(res.perfCounters.gpuActiveCycles) +
                                " | Waves: " + formatNumber(res.perfCounters.waves) +
                                " | SALU: " + formatDouble(res.perfCounters.saluBusyPct, 1) + "%";
@@ -1044,7 +1054,7 @@ void ResultFormatter::print() {
                   }
                   firstItem = false;
                 }
-                if (res.hasRegisterTelemetry && res.vgprCount > 0) {
+                if (hasRenderableReg) {
                   if (!firstItem) telemInfo += " | ";
                   telemInfo += std::to_string(res.vgprCount) + " VGPRs";
                   if (res.maxWavesPerSimd > 0) {
@@ -1184,7 +1194,7 @@ void ResultFormatter::print() {
       for (const auto &[backend, r] : bMap) {
         double val = (static_cast<double>(r.operations) / (r.time_ms / 1000.0)) / 1e12;
         std::string telemStr;
-        if (r.hasRegisterTelemetry) {
+        if (r.hasRegisterTelemetry && r.vgprCount > 0) {
           telemStr = " | " + std::to_string(r.vgprCount) + " VGPRs" +
                      (r.sgprCount > 0 ? (", " + std::to_string(r.sgprCount) + " SGPRs") : "") +
                      ", " + std::to_string(r.maxWavesPerSimd) + " waves/SIMD" +

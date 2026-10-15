@@ -135,6 +135,7 @@ public:
   virtual KernelResourceUsage getLastKernelResourceUsage() const {
     return getKernelResourceUsage(lastDispatchedKernel);
   }
+  void clearLastDispatchedKernel() { lastDispatchedKernel = nullptr; }
 
   // Hardware Performance Query (VK_KHR_performance_query)
   virtual void startPerformanceQuery() {}

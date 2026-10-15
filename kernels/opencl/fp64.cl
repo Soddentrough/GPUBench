@@ -4,11 +4,11 @@
 __kernel void run_benchmark(__global double* data) {
     uint index = get_global_id(0);
 
-    double add = (double)(index) * 0.00000001;
-    double mult = 1.000001 + add;
+    double seed = data[index & 0x1FFFu] * 0.0001;
+    double m = 0.00001 + (double)(index & 63u) * 0.00000001;
 
     // Use 8 independent double accumulators to hide ALU pipeline latency (matching Vulkan fp64.comp)
-    double val0 = data[index] + 1.0;
+    double val0 = seed + 1.0;
     double val1 = val0 + 0.1;
     double val2 = val0 + 0.2;
     double val3 = val0 + 0.3;
@@ -19,14 +19,14 @@ __kernel void run_benchmark(__global double* data) {
 
     // 256 iters * 8 FMAs * 2 ops = 4096 FP64 ops
     for (int i = 0; i < 256; ++i) {
-        val0 = fma(val0, mult, val1);
-        val1 = fma(val1, mult, val2);
-        val2 = fma(val2, mult, val3);
-        val3 = fma(val3, mult, val4);
-        val4 = fma(val4, mult, val5);
-        val5 = fma(val5, mult, val6);
-        val6 = fma(val6, mult, val7);
-        val7 = fma(val7, mult, val0);
+        val0 = fma(m, val1, val0);
+        val1 = fma(m, val2, val1);
+        val2 = fma(m, val3, val2);
+        val3 = fma(m, val4, val3);
+        val4 = fma(m, val5, val4);
+        val5 = fma(m, val6, val5);
+        val6 = fma(m, val7, val6);
+        val7 = fma(m, val0, val7);
     }
     data[index] = val0 + val1 + val2 + val3 + val4 + val5 + val6 + val7;
 }

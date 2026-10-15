@@ -223,15 +223,21 @@ GpuContentionInfo HardwareTelemetry::checkContention(uint32_t deviceIndex) {
     }
 
     // 3. High Dedicated VRAM Allocation
+    // On APUs with a small BIOS UMA carveout (vramTotalMb <= 4096 and gttTotalMb > vramTotalMb * 2),
+    // normal desktop compositors spill across the 2 GB carveout into GTT, so evaluate against the
+    // combined GPU-accessible pool rather than triggering a false-positive on the 2 GB carveout alone.
     if (data.vramTotalMb > 0) {
-      uint32_t vramPct = static_cast<uint32_t>((data.vramUsedMb * 100) / data.vramTotalMb);
+      bool isSmallCarveoutApu = (data.vramTotalMb <= 4096 && data.gttTotalMb > data.vramTotalMb * 2);
+      uint64_t poolUsedMb = isSmallCarveoutApu ? (data.vramUsedMb + data.gttUsedMb) : data.vramUsedMb;
+      uint64_t poolTotalMb = isSmallCarveoutApu ? (data.vramTotalMb + data.gttTotalMb) : data.vramTotalMb;
+      uint32_t vramPct = static_cast<uint32_t>((poolUsedMb * 100) / poolTotalMb);
       if (vramPct >= 80) {
         info.hasContention = true;
         if (vramPct >= 90) {
           info.isCritical = true;
         }
-        info.reasons.push_back("High VRAM allocation: " + std::to_string(data.vramUsedMb) + " MB / " +
-                               std::to_string(data.vramTotalMb) + " MB (" + std::to_string(vramPct) + "% in-use)");
+        info.reasons.push_back("High VRAM allocation: " + std::to_string(poolUsedMb) + " MB / " +
+                               std::to_string(poolTotalMb) + " MB (" + std::to_string(vramPct) + "% in-use)");
       }
     }
   }

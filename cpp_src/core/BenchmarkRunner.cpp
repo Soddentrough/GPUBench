@@ -1079,6 +1079,7 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
         GpuTelemetryData powerStart{};
         float avgPowerWatts = 0.0f;
         HardwarePerformanceCounters measuredPerfCounters;
+        context->clearLastDispatchedKernel();
 
         // Time-bounded warmup & measurement windows:
         // Never execute a fixed amount of work; execute sets of operations over
@@ -1235,9 +1236,13 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
 
         // Run VK_KHR_performance_query in an isolated untimed pass so SPM/SQTT
         // serialization barriers do not contaminate the timed throughput measurement.
+        // Batch all sub-dispatches of bench->Run(i) into a single command buffer so
+        // multi-pass workloads capture the full sequence instead of only the reset pass.
         if (context->hasPerformanceQuery() && (!cancelToken || !cancelToken->load())) {
           context->startPerformanceQuery();
+          context->beginBatch(1);
           bench->Run(i);
+          context->endBatch();
           measuredPerfCounters = context->stopPerformanceQuery();
         }
 
@@ -1365,11 +1370,21 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
                 result_data.efficiencyUnit = "J/GIS";
               }
             } else {
-              double mrays = (static_cast<double>(result_data.operations) / durationSec) / 1e6;
-              if (mrays > 0.0) {
-                result_data.joulesPerUnit = avgPowerWatts / mrays;
-                result_data.unitPerWatt = (mrays * 1000.0) / avgPowerWatts; // kRays/Joule
-                result_data.efficiencyUnit = "J/MRay";
+              double munits = (static_cast<double>(result_data.operations) / durationSec) / 1e6;
+              if (munits > 0.0) {
+                result_data.joulesPerUnit = avgPowerWatts / munits;
+                result_data.unitPerWatt = (munits * 1000.0) / avgPowerWatts; // kUnits/Joule
+                if (result_data.metric == "MTris/s") {
+                  result_data.efficiencyUnit = "J/MTri";
+                } else if (result_data.metric == "MInst/s") {
+                  result_data.efficiencyUnit = "J/MInst";
+                } else if (result_data.metric == "MRecords/s") {
+                  result_data.efficiencyUnit = "J/MRecord";
+                } else if (result_data.metric == "MHits/s") {
+                  result_data.efficiencyUnit = "J/MHit";
+                } else {
+                  result_data.efficiencyUnit = "J/MRay";
+                }
               }
             }
           }
@@ -1387,6 +1402,14 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
                 std::cout << " (" << ResultFormatter::formatDouble(result_data.unitPerWatt, 2) << " GB/J)";
               } else if (result_data.efficiencyUnit == "J/MRay") {
                 std::cout << " (" << ResultFormatter::formatDouble(result_data.unitPerWatt, 1) << " kRays/J)";
+              } else if (result_data.efficiencyUnit == "J/MTri") {
+                std::cout << " (" << ResultFormatter::formatDouble(result_data.unitPerWatt, 1) << " kTris/J)";
+              } else if (result_data.efficiencyUnit == "J/MInst") {
+                std::cout << " (" << ResultFormatter::formatDouble(result_data.unitPerWatt, 1) << " kInst/J)";
+              } else if (result_data.efficiencyUnit == "J/MRecord") {
+                std::cout << " (" << ResultFormatter::formatDouble(result_data.unitPerWatt, 1) << " kRecords/J)";
+              } else if (result_data.efficiencyUnit == "J/MHit") {
+                std::cout << " (" << ResultFormatter::formatDouble(result_data.unitPerWatt, 1) << " kHits/J)";
               } else if (result_data.efficiencyUnit == "J/GIS") {
                 std::cout << " (" << ResultFormatter::formatDouble(result_data.unitPerWatt, 1) << " MIS/J)";
               }

@@ -762,7 +762,6 @@ KernelResourceUsage OpenCLContext::getKernelResourceUsage(ComputeKernel kernel) 
     return usage;
   }
 
-  usage.available = true;
   usage.compilerNotes = "OpenCL Compiler";
 
   cl_ulong local_mem = 0;
@@ -775,10 +774,14 @@ KernelResourceUsage OpenCLContext::getKernelResourceUsage(ComputeKernel kernel) 
     usage.scratchSizeBytes = static_cast<uint32_t>(private_mem);
   }
 
+  usage.available = (usage.vgprCount > 0 || usage.ldsSizeBytes > 0 || usage.scratchSizeBytes > 0);
   return usage;
 }
 
 void OpenCLContext::releaseKernel(ComputeKernel kernel) {
+  if (lastDispatchedKernel == kernel) {
+    lastDispatchedKernel = nullptr;
+  }
   if (kernel) {
     auto *kernel_cl = static_cast<ComputeKernel_cl *>(kernel);
     f_clReleaseKernel(kernel_cl->kernel);
