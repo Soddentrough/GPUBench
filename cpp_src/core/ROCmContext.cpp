@@ -360,7 +360,9 @@ void ROCmContext::enumerateDevices() {
       info.fp4Support = false;
       info.fp64Support = true;
       info.fp16Support = true;
-      info.bf16Support = true;
+      info.bf16Support = (is_cdna3 || is_rdna3 || is_rdna4);
+      info.shaderBfloat16DotProductSupport = (is_cdna3 || is_rdna3 || is_rdna4);
+      info.shaderBfloat16CoopMatrixSupport = (is_cdna3 || is_rdna3 || is_rdna4);
       info.int8Support = true;
       info.int4Support = is_rdna4;
 

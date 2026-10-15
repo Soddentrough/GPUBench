@@ -46,23 +46,30 @@ void Bf16Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
     matrix_file = kdir / "vulkan" / "coop_matrix_bf16.comp";
   }
 
+  DeviceInfo devInfo = context.getCurrentDeviceInfo();
+
   std::string vec_func_name =
       (context.getBackend() == ComputeBackend::Vulkan) ? "main" : "run_benchmark";
-  try {
-    vectorKernel = context.createKernel(vector_file.string(), vec_func_name, 1);
-    if (vectorKernel) {
-      context.setKernelArg(vectorKernel, 0, buffer);
+  bool try_load_vector = (context.getBackend() != ComputeBackend::Vulkan) ||
+                         devInfo.shaderBfloat16DotProductSupport;
+  if (try_load_vector) {
+    try {
+      vectorKernel = context.createKernel(vector_file.string(), vec_func_name, 1);
+      if (vectorKernel) {
+        context.setKernelArg(vectorKernel, 0, buffer);
+      }
+    } catch (...) {
+      vectorKernel = nullptr;
     }
-  } catch (...) {
-    vectorKernel = nullptr;
   }
 
   // Optionally load Matrix Kernel if supported
   bool try_load_matrix = false;
-  if (context.getBackend() == ComputeBackend::Vulkan && context.getCurrentDeviceInfo().cooperativeMatrixSupport) {
+  if (context.getBackend() == ComputeBackend::Vulkan &&
+      devInfo.cooperativeMatrixSupport && devInfo.shaderBfloat16CoopMatrixSupport) {
     try_load_matrix = true;
   } else if (context.getBackend() == ComputeBackend::ROCm) {
-    if (context.getCurrentDeviceInfo().cooperativeMatrixSupport) {
+    if (devInfo.cooperativeMatrixSupport) {
       try_load_matrix = true;
     }
   }

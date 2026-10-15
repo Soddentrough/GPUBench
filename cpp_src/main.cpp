@@ -184,12 +184,12 @@ int main(int argc, char **argv) {
   CLI::Option *opt_dump_isa = app.add_option(
       "--dump-isa", dump_isa_targets,
       "Disassemble shader/kernel hardware ISA and register statistics natively via VK_KHR_pipeline_executable_properties (accepts benchmark name or shader filename, or uses -b)")
-      ->expected(0, -1)
+      ->expected(0, 1)
       ->delimiter(',');
 
-  std::string target_asic = "gfx1201";
+  std::string target_asic;
   app.add_option("--asic", target_asic,
-                 "Target GPU architecture for ROCm code-object disassembly (default: gfx1201)");
+                 "Target GPU architecture for ROCm code-object disassembly (auto-detected from active GPU if omitted)");
 
   bool full_isa = false;
   app.add_flag("--full-isa", full_isa,
@@ -221,13 +221,17 @@ int main(int argc, char **argv) {
 
   if (opt_dump_isa->count() > 0) {
     IsaDumperOptions isaOpts;
-    isaOpts.targets = dump_isa_targets;
+    for (const auto &t : dump_isa_targets) {
+      if (!t.empty() && t[0] != '-') {
+        isaOpts.targets.push_back(t);
+      }
+    }
     for (const auto &b : benchmarks_to_run) {
       isaOpts.targets.push_back(b);
     }
     if (isaOpts.targets.empty()) {
       std::cerr << "Error: --dump-isa requires at least one benchmark name or shader/kernel filename "
-                   "(e.g. --dump-isa bf16 or -b bf16 --dump-isa)." << std::endl;
+                   "(e.g. --dump-isa bf16 or --dump-isa -b bf16)." << std::endl;
       return EXIT_FAILURE;
     }
     isaOpts.backends = backend_strs;

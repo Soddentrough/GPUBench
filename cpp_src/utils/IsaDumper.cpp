@@ -1,4 +1,5 @@
 #include "utils/IsaDumper.h"
+#include "core/DeviceDatabase.h"
 #include "utils/KernelPath.h"
 #include <algorithm>
 #include <cctype>
@@ -247,9 +248,19 @@ public:
   VkDevice device = VK_NULL_HANDLE;
   std::string deviceName;
   std::string driverInfo;
+  uint32_t vendorId = 0;
+  uint32_t deviceId = 0;
   bool subgroupSize32Supported = false;
   bool rtPipelineSupported = false;
+  bool rayQuerySupported = false;
   bool serSupported = false;
+  bool coopMatrixSupported = false;
+  bool bf16DotProductSupported = false;
+  bool bf16CoopMatrixSupported = false;
+  bool fp8CoopMatrixSupported = false;
+  bool fp16Supported = false;
+  bool fp64Supported = false;
+  bool int8Supported = false;
 
   PFN_vkGetPipelineExecutablePropertiesKHR pfnGetProps = nullptr;
   PFN_vkGetPipelineExecutableStatisticsKHR pfnGetStats = nullptr;
@@ -297,6 +308,8 @@ public:
     props2.pNext = &driverProps;
     vkGetPhysicalDeviceProperties2(physicalDevice, &props2);
     deviceName = props2.properties.deviceName;
+    vendorId = props2.properties.vendorID;
+    deviceId = props2.properties.deviceID;
     driverInfo = std::string(driverProps.driverName) + " (" + driverProps.driverInfo + ")";
 
     // Enumerate supported device extensions
@@ -356,9 +369,13 @@ public:
     bf16Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_BFLOAT16_FEATURES_KHR;
     execFeatures.pNext = &bf16Features;
 
+    VkPhysicalDeviceShaderFloat8FeaturesEXT fp8Features{};
+    fp8Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT8_FEATURES_EXT;
+    bf16Features.pNext = &fp8Features;
+
     VkPhysicalDeviceCooperativeMatrixFeaturesKHR coopFeatures{};
     coopFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR;
-    bf16Features.pNext = &coopFeatures;
+    fp8Features.pNext = &coopFeatures;
 
     VkPhysicalDeviceRayQueryFeaturesKHR rqFeatures{};
     rqFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR;
@@ -399,10 +416,26 @@ public:
         (v13Features.subgroupSizeControl == VK_TRUE) &&
         (subgroupProps.minSubgroupSize <= 32 && subgroupProps.maxSubgroupSize >= 32) &&
         ((subgroupProps.requiredSubgroupSizeStages & VK_SHADER_STAGE_COMPUTE_BIT) != 0);
-    rtPipelineSupported = (rtpFeatures.rayTracingPipeline == VK_TRUE);
+    rtPipelineSupported = hasExt(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME) &&
+                          (rtpFeatures.rayTracingPipeline == VK_TRUE);
+    rayQuerySupported = hasExt(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) &&
+                        hasExt(VK_KHR_RAY_QUERY_EXTENSION_NAME) &&
+                        (rqFeatures.rayQuery == VK_TRUE);
     serSupported = (hasExt("VK_EXT_ray_tracing_invocation_reorder") ||
                     hasExt("VK_NV_ray_tracing_invocation_reorder")) &&
                    (serFeatures.rayTracingInvocationReorder == VK_TRUE);
+    coopMatrixSupported = hasExt(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME) &&
+                          (coopFeatures.cooperativeMatrix == VK_TRUE);
+    bool hasBf16 = hasExt("VK_KHR_shader_bfloat16") || hasExt("VK_EXT_shader_bfloat16");
+    bf16DotProductSupported = hasBf16 && (bf16Features.shaderBFloat16DotProduct == VK_TRUE);
+    bf16CoopMatrixSupported = hasBf16 && coopMatrixSupported &&
+                              (bf16Features.shaderBFloat16CooperativeMatrix == VK_TRUE);
+    fp8CoopMatrixSupported = hasExt("VK_EXT_shader_float8") && coopMatrixSupported &&
+                             (fp8Features.shaderFloat8 == VK_TRUE) &&
+                             (fp8Features.shaderFloat8CooperativeMatrix == VK_TRUE);
+    fp16Supported = (v12Features.shaderFloat16 == VK_TRUE);
+    fp64Supported = (features2.features.shaderFloat64 == VK_TRUE);
+    int8Supported = (v12Features.shaderInt8 == VK_TRUE);
 
     float qPrio = 1.0f;
     VkDeviceQueueCreateInfo qInfo{};
@@ -723,7 +756,7 @@ public:
       prefix = prefix.substr(0, dotPos);
     }
     std::string basePrefix = prefix;
-    if (prefix == "rt_scheduling_ser") {
+    if (prefix == "rt_scheduling_ser" || prefix == "raydiv_pipeline_ser") {
       if (!serSupported) {
         std::cout << "━━━ [vulkan] " << art.configName
                   << " (" << art.filePath.filename().string() << ") ━━━\n"
@@ -731,8 +764,8 @@ public:
                      "exposed by the active Vulkan driver (" << driverInfo << ").\n\n";
         return true;
       }
-      basePrefix = "rt_scheduling";
-    } else if (prefix == "raydiv_pipeline_a" || prefix == "raydiv_pipeline_b") {
+      basePrefix = (prefix == "rt_scheduling_ser") ? "rt_scheduling" : "raydiv_pipeline";
+    } else if (prefix.rfind("raydiv_pipeline_", 0) == 0) {
       basePrefix = "raydiv_pipeline";
     }
 
@@ -741,7 +774,10 @@ public:
       rgenPath = dir / (basePrefix + ".rgen.spv");
     }
     fs::path rmissPath = dir / (basePrefix + ".rmiss.spv");
-    fs::path rchitPath = dir / (basePrefix + ".rchit.spv");
+    fs::path rchitPath = dir / (prefix + ".rchit.spv");
+    if (!fs::exists(rchitPath)) {
+      rchitPath = dir / (basePrefix + ".rchit.spv");
+    }
     if (!fs::exists(rchitPath)) {
       rchitPath = dir / (basePrefix + "_a.rchit.spv");
     }
@@ -888,6 +924,42 @@ public:
       return inspectRasterSpv(art, fullIsa);
     }
 
+    // Pre-flight capability checks to avoid compiling shaders whose required
+    // Vulkan sub-features are not supported by the active device/driver
+    // (e.g. bf16.comp requires shaderBFloat16DotProduct, which is false on RDNA 3.5 / gfx1151
+    // where RADV only exposes shaderBFloat16CooperativeMatrix, causing ACO to crash on scalar bfmul/bffma).
+    if (fname == "bf16.comp.spv" && !bf16DotProductSupported) {
+      std::cout << "━━━ [vulkan] " << art.configName << " (" << fname << ") ━━━\n"
+                << "  [Skipped] BF16 vector dot product (VK_KHR_shader_bfloat16::shaderBFloat16DotProduct / v_dot2_bf16_bf16) "
+                   "is not supported on " << deviceName << " under Vulkan (" << driverInfo << ").\n"
+                << "            Use '-k rocm' to inspect the ROCm HIP BF16 vector kernel (v_dot2_f32_bf16 in bf16.co).\n\n";
+      return true;
+    }
+    if (fname == "coop_matrix_bf16.comp.spv" && !bf16CoopMatrixSupported) {
+      std::cout << "━━━ [vulkan] " << art.configName << " (" << fname << ") ━━━\n"
+                << "  [Skipped] BF16 cooperative matrix (VK_KHR_shader_bfloat16::shaderBFloat16CooperativeMatrix) "
+                   "is not supported on " << deviceName << " (" << driverInfo << ").\n\n";
+      return true;
+    }
+    if (fname == "coop_matrix_fp8.comp.spv" && !fp8CoopMatrixSupported) {
+      std::cout << "━━━ [vulkan] " << art.configName << " (" << fname << ") ━━━\n"
+                << "  [Skipped] FP8 cooperative matrix (VK_EXT_shader_float8::shaderFloat8CooperativeMatrix) "
+                   "is not supported on " << deviceName << " (" << driverInfo << ").\n\n";
+      return true;
+    }
+    if ((fname == "coop_matrix_fp16.comp.spv" || fname == "coop_matrix_int8.comp.spv") &&
+        !coopMatrixSupported) {
+      std::cout << "━━━ [vulkan] " << art.configName << " (" << fname << ") ━━━\n"
+                << "  [Skipped] Cooperative matrix (VK_KHR_cooperative_matrix) "
+                   "is not supported on " << deviceName << " (" << driverInfo << ").\n\n";
+      return true;
+    }
+    if (fname == "fp64.comp.spv" && !fp64Supported) {
+      std::cout << "━━━ [vulkan] " << art.configName << " (" << fname << ") ━━━\n"
+                << "  [Skipped] FP64 (shaderFloat64) is not supported on " << deviceName << ".\n\n";
+      return true;
+    }
+
     std::vector<uint32_t> spvCode;
     VkShaderModule shaderModule = loadSpvModule(art.filePath, &spvCode);
     if (!shaderModule) {
@@ -896,6 +968,13 @@ public:
     }
 
     bool hasAccelStruct = spirvHasAccelerationStructure(spvCode);
+    if (hasAccelStruct && !rayQuerySupported) {
+      std::cout << "━━━ [vulkan] " << art.configName << " (" << fname << ") ━━━\n"
+                << "  [Skipped] Ray query / acceleration structure (VK_KHR_ray_query) "
+                   "is not supported on " << deviceName << " (" << driverInfo << ").\n\n";
+      vkDestroyShaderModule(device, shaderModule, nullptr);
+      return true;
+    }
 
     // Create a generous descriptor set layout (up to 12 bindings; binding 0 is TLAS if ray_query)
     std::vector<VkDescriptorSetLayoutBinding> bindings(12);
@@ -994,6 +1073,21 @@ static int runCommandSilent(const std::string &cmd, std::string &output) {
 #else
   return pclose(pipe);
 #endif
+}
+
+static std::string extractGfxToken(const std::string &s) {
+  size_t pos = s.find("gfx");
+  if (pos == std::string::npos) {
+    return "";
+  }
+  size_t end = pos + 3;
+  while (end < s.size() && std::isalnum(static_cast<unsigned char>(s[end]))) {
+    ++end;
+  }
+  if (end > pos + 3) {
+    return s.substr(pos, end - pos);
+  }
+  return "";
 }
 
 static bool inspectRocmCodeObject(const KernelArtifact &art, const std::string &asic, bool fullIsa) {
@@ -1165,26 +1259,41 @@ int IsaDumper::dump(const IsaDumperOptions &opts) {
     return EXIT_FAILURE;
   }
 
+  std::string resolvedAsic = opts.asic;
+
 #ifdef HAVE_VULKAN
   std::unique_ptr<NativeVulkanIsaInspector> vkInspector;
   bool needVulkan = false;
+  bool needRocm = false;
   for (const auto &a : artifacts) {
     if (a.backend == "vulkan") {
       needVulkan = true;
-      break;
+    } else if (a.backend == "rocm") {
+      needRocm = true;
     }
   }
-  if (needVulkan) {
+  if (needVulkan || (needRocm && resolvedAsic.empty())) {
     vkInspector = std::make_unique<NativeVulkanIsaInspector>();
-    if (!vkInspector->init(opts.deviceIndex)) {
+    if (vkInspector->init(opts.deviceIndex)) {
+      if (resolvedAsic.empty()) {
+        const auto &prof = DeviceDatabase::lookup(vkInspector->vendorId, vkInspector->deviceId,
+                                                  vkInspector->deviceName);
+        resolvedAsic = extractGfxToken(prof.archName);
+      }
+      if (needVulkan) {
+        std::cout << "╭─ GPUBench Native Shader ISA Inspector (VK_KHR_pipeline_executable_properties) ─╮\n";
+        std::cout << "│ Target Device : " << std::left << std::setw(63) << vkInspector->deviceName << "│\n";
+        std::cout << "│ Active Driver : " << std::left << std::setw(63) << vkInspector->driverInfo << "│\n";
+        std::cout << "╰────────────────────────────────────────────────────────────────────────────────╯\n\n";
+      }
+    } else if (needVulkan) {
       return EXIT_FAILURE;
     }
-    std::cout << "╭─ GPUBench Native Shader ISA Inspector (VK_KHR_pipeline_executable_properties) ─╮\n";
-    std::cout << "│ Target Device : " << std::left << std::setw(63) << vkInspector->deviceName << "│\n";
-    std::cout << "│ Active Driver : " << std::left << std::setw(63) << vkInspector->driverInfo << "│\n";
-    std::cout << "╰────────────────────────────────────────────────────────────────────────────────╯\n\n";
   }
 #endif
+  if (resolvedAsic.empty()) {
+    resolvedAsic = "gfx1201";
+  }
 
   std::set<std::string> visitedFiles;
   for (const auto &art : artifacts) {
@@ -1200,7 +1309,7 @@ int IsaDumper::dump(const IsaDumperOptions &opts) {
       }
 #endif
     } else if (art.backend == "rocm") {
-      inspectRocmCodeObject(art, opts.asic, opts.fullIsa);
+      inspectRocmCodeObject(art, resolvedAsic, opts.fullIsa);
     }
   }
 

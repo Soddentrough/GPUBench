@@ -283,8 +283,14 @@ const std::vector<DeviceInfo> &VulkanContext::getDevices() const {
         }
       }
 
+      VkPhysicalDeviceShaderFloat8FeaturesEXT float8Features{
+          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT8_FEATURES_EXT};
+
+      VkPhysicalDeviceShaderBfloat16FeaturesKHR bfloat16Features{
+          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_BFLOAT16_FEATURES_KHR, &float8Features};
+
       VkPhysicalDeviceCooperativeMatrixFeaturesKHR coopMatrixFeatures{
-          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR};
+          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR, &bfloat16Features};
 
       VkPhysicalDeviceShaderFloat16Int8Features features168{};
       features168.sType =
@@ -378,13 +384,18 @@ const std::vector<DeviceInfo> &VulkanContext::getDevices() const {
       info.subgroupSize = subgroupProps.subgroupSize;
       info.fp64Support = (features2.features.shaderFloat64 == VK_TRUE);
       info.fp16Support = (features168.shaderFloat16 == VK_TRUE);
-      info.bf16Support = hasExt("VK_KHR_shader_bfloat16") || hasExt("VK_EXT_shader_bfloat16");
+      bool hasBf16Ext = hasExt("VK_KHR_shader_bfloat16") || hasExt("VK_EXT_shader_bfloat16");
+      info.shaderBfloat16DotProductSupport = hasBf16Ext && (bfloat16Features.shaderBFloat16DotProduct == VK_TRUE);
+      info.shaderBfloat16CoopMatrixSupport = hasBf16Ext && (bfloat16Features.shaderBFloat16CooperativeMatrix == VK_TRUE);
+      info.bf16Support = info.shaderBfloat16DotProductSupport || info.shaderBfloat16CoopMatrixSupport;
       info.int8Support = (features168.shaderInt8 == VK_TRUE);
       info.cooperativeMatrixSupport =
           hasExt(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME) &&
           (coopMatrixFeatures.cooperativeMatrix == VK_TRUE);
       info.structuredSparsitySupport = hasExt("VK_NV_cooperative_matrix2");
-      info.fp8Support = hasExt("VK_EXT_shader_float8");
+      info.fp8Support = hasExt("VK_EXT_shader_float8") &&
+                        (float8Features.shaderFloat8 == VK_TRUE) &&
+                        (float8Features.shaderFloat8CooperativeMatrix == VK_TRUE);
       info.fp6Support = false;
       info.fp4Support = false;
       info.int4Support = false;
@@ -464,8 +475,14 @@ DeviceInfo VulkanContext::getCurrentDeviceInfo() const {
     }
   }
 
+  VkPhysicalDeviceShaderFloat8FeaturesEXT float8Features_curr{
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT8_FEATURES_EXT};
+
+  VkPhysicalDeviceShaderBfloat16FeaturesKHR bfloat16Features_curr{
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_BFLOAT16_FEATURES_KHR, &float8Features_curr};
+
   VkPhysicalDeviceCooperativeMatrixFeaturesKHR coopMatrixFeatures_curr{
-      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR};
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR, &bfloat16Features_curr};
 
   VkPhysicalDeviceShaderFloat16Int8Features features168_curr{};
   features168_curr.sType =
@@ -537,12 +554,17 @@ DeviceInfo VulkanContext::getCurrentDeviceInfo() const {
   info.subgroupSize = subgroupProps.subgroupSize;
   info.fp64Support = (features2_2.features.shaderFloat64 == VK_TRUE);
   info.fp16Support = (features168_curr.shaderFloat16 == VK_TRUE);
-  info.bf16Support = hasExt("VK_KHR_shader_bfloat16") || hasExt("VK_EXT_shader_bfloat16");
+  bool hasBf16Ext_curr = hasExt("VK_KHR_shader_bfloat16") || hasExt("VK_EXT_shader_bfloat16");
+  info.shaderBfloat16DotProductSupport = hasBf16Ext_curr && (bfloat16Features_curr.shaderBFloat16DotProduct == VK_TRUE);
+  info.shaderBfloat16CoopMatrixSupport = hasBf16Ext_curr && (bfloat16Features_curr.shaderBFloat16CooperativeMatrix == VK_TRUE);
+  info.bf16Support = info.shaderBfloat16DotProductSupport || info.shaderBfloat16CoopMatrixSupport;
   info.int8Support = (features168_curr.shaderInt8 == VK_TRUE);
   info.cooperativeMatrixSupport =
       hasExt(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME) &&
       (coopMatrixFeatures_curr.cooperativeMatrix == VK_TRUE);
-  info.fp8Support = hasExt("VK_EXT_shader_float8");
+  info.fp8Support = hasExt("VK_EXT_shader_float8") &&
+                    (float8Features_curr.shaderFloat8 == VK_TRUE) &&
+                    (float8Features_curr.shaderFloat8CooperativeMatrix == VK_TRUE);
   info.fp6Support = false;
   info.fp4Support = false; // No Vulkan FP4 shader type exists; Fp4Bench is
                            // deliberately disabled (see its IsSupported).

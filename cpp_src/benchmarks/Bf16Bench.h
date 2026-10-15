@@ -44,6 +44,10 @@ public:
     if (!IsSupported(info, context))
       return false;
     if (config_idx == 0) {
+      if (context && context->getBackend() == ComputeBackend::Vulkan &&
+          !info.shaderBfloat16DotProductSupport) {
+        return false;
+      }
       if (this->context != nullptr &&
           (context == nullptr || context == this->context)) {
         return vectorKernel != nullptr;
@@ -53,6 +57,10 @@ public:
     if (config_idx == 1) {
       if (!info.cooperativeMatrixSupport)
         return false;
+      if (context && context->getBackend() == ComputeBackend::Vulkan &&
+          !info.shaderBfloat16CoopMatrixSupport) {
+        return false;
+      }
       if (this->context != nullptr &&
           (context == nullptr || context == this->context)) {
         return matrixKernel != nullptr;
@@ -64,16 +72,36 @@ public:
   std::string GetConfigSupportNote(uint32_t config_idx,
                                    const DeviceInfo &info,
                                    IComputeContext *context = nullptr) const override {
-    if (config_idx == 1 && !info.cooperativeMatrixSupport) {
-      return "VK_KHR_cooperative_matrix or ROCm WMMA not supported";
+    if (config_idx == 0 && context && context->getBackend() == ComputeBackend::Vulkan &&
+        !info.shaderBfloat16DotProductSupport) {
+      return "shaderBFloat16DotProduct not supported by active Vulkan driver";
+    }
+    if (config_idx == 1) {
+      if (!info.cooperativeMatrixSupport) {
+        return "VK_KHR_cooperative_matrix or ROCm WMMA not supported";
+      }
+      if (context && context->getBackend() == ComputeBackend::Vulkan &&
+          !info.shaderBfloat16CoopMatrixSupport) {
+        return "shaderBFloat16CooperativeMatrix not supported by active Vulkan driver";
+      }
     }
     return GetSupportNote(info, context);
   }
   SupportLimitation GetConfigSupportLimitation(uint32_t config_idx,
                                                const DeviceInfo &info,
                                                IComputeContext *context = nullptr) const override {
-    if (config_idx == 1 && !info.cooperativeMatrixSupport) {
-      return SupportLimitation::kHardware;
+    if (config_idx == 0 && context && context->getBackend() == ComputeBackend::Vulkan &&
+        !info.shaderBfloat16DotProductSupport) {
+      return SupportLimitation::kApi;
+    }
+    if (config_idx == 1) {
+      if (!info.cooperativeMatrixSupport) {
+        return SupportLimitation::kHardware;
+      }
+      if (context && context->getBackend() == ComputeBackend::Vulkan &&
+          !info.shaderBfloat16CoopMatrixSupport) {
+        return SupportLimitation::kApi;
+      }
     }
     return GetSupportLimitation(info, context);
   }

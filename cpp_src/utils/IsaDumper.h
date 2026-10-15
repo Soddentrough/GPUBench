@@ -18,8 +18,8 @@ struct IsaDumperOptions {
   // Vulkan device index (-d / --device, defaults to 0)
   uint32_t deviceIndex = 0;
 
-  // Target ASIC for offline ROCm/OpenCL fallback (defaults to "gfx1201")
-  std::string asic = "gfx1201";
+  // Target ASIC for offline ROCm/OpenCL fallback (empty = auto-detect from device)
+  std::string asic = "";
 
   // Print full ISA (and IR) instead of just the hot loop + statistics summary
   bool fullIsa = false;

@@ -46,6 +46,8 @@ struct DeviceInfo {
   bool fp64Support = false;
   bool fp16Support = false;
   bool bf16Support = false;
+  bool shaderBfloat16DotProductSupport = false;
+  bool shaderBfloat16CoopMatrixSupport = false;
   bool fp8Support = false;
   bool fp6Support = false;
   bool fp4Support = false;
