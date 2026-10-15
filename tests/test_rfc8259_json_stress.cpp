@@ -7,6 +7,8 @@
 #include <vector>
 #include <string>
 #include <cmath>
+#include <cstdio>
+#include <filesystem>
 #include <limits>
 #include <fstream>
 #include <algorithm>
@@ -538,11 +540,12 @@ TEST_CASE(RFC8259_JsonStress, BatchScaling1000AdversarialResults) {
   assertNoNonFiniteTokens(jsonStr);
 
   // Write out to disk and verify with external strict validator
-  std::string outPath = "/tmp/gpubench_stress_1000.json";
+  std::string outPath = (std::filesystem::temp_directory_path() / "gpubench_stress_1000.json").string();
   std::ofstream ofs(outPath);
   ASSERT_TRUE(ofs.is_open());
   ofs << jsonStr;
   ofs.close();
+  std::remove(outPath.c_str());
 
   // Test round-trip with internal ResultImporter
   ImportedRun run;
