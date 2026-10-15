@@ -10,91 +10,34 @@ layout(set = 0, binding = 0) buffer Data {
     bf16vec4 data[];
 } InOutBuffer;
 
+#define INIT(i) a[i] = bf16vec4(seed + vec4(0.01f * float((i) + 1)));
+#define STEP(i) { bfloat16_t d = dot(a[i], m); a[i].x = d; }
+
+#define APPLY4(OP, i)  OP(i) OP((i)+1) OP((i)+2) OP((i)+3)
+#define APPLY16(OP, i) APPLY4(OP, i) APPLY4(OP, (i)+4) \
+                       APPLY4(OP, (i)+8) APPLY4(OP, (i)+12)
+#define APPLY32(OP)    APPLY16(OP, 0) APPLY16(OP, 16)
+
+#define GROUP(i) ((float(a[(i)].x) + float(a[(i)+1].x)) + (float(a[(i)+2].x) + float(a[(i)+3].x)))
+
 void main() {
     uint index = gl_GlobalInvocationID.x;
 
-    // Seed 32 accumulators from runtime buffer to prevent constant folding.
     uint seedIdx = (index * 4093u + 17u) & 1023u;
     vec4 seed = vec4(InOutBuffer.data[seedIdx]);
-    bf16vec4 val1  = bf16vec4(seed + vec4(0.01f));
-    bf16vec4 val2  = bf16vec4(seed + vec4(0.02f));
-    bf16vec4 val3  = bf16vec4(seed + vec4(0.03f));
-    bf16vec4 val4  = bf16vec4(seed + vec4(0.04f));
-    bf16vec4 val5  = bf16vec4(seed + vec4(0.05f));
-    bf16vec4 val6  = bf16vec4(seed + vec4(0.06f));
-    bf16vec4 val7  = bf16vec4(seed + vec4(0.07f));
-    bf16vec4 val8  = bf16vec4(seed + vec4(0.08f));
-    bf16vec4 val9  = bf16vec4(seed + vec4(0.09f));
-    bf16vec4 val10 = bf16vec4(seed + vec4(0.10f));
-    bf16vec4 val11 = bf16vec4(seed + vec4(0.11f));
-    bf16vec4 val12 = bf16vec4(seed + vec4(0.12f));
-    bf16vec4 val13 = bf16vec4(seed + vec4(0.13f));
-    bf16vec4 val14 = bf16vec4(seed + vec4(0.14f));
-    bf16vec4 val15 = bf16vec4(seed + vec4(0.15f));
-    bf16vec4 val16 = bf16vec4(seed + vec4(0.16f));
-    bf16vec4 val17 = bf16vec4(seed + vec4(0.17f));
-    bf16vec4 val18 = bf16vec4(seed + vec4(0.18f));
-    bf16vec4 val19 = bf16vec4(seed + vec4(0.19f));
-    bf16vec4 val20 = bf16vec4(seed + vec4(0.20f));
-    bf16vec4 val21 = bf16vec4(seed + vec4(0.21f));
-    bf16vec4 val22 = bf16vec4(seed + vec4(0.22f));
-    bf16vec4 val23 = bf16vec4(seed + vec4(0.23f));
-    bf16vec4 val24 = bf16vec4(seed + vec4(0.24f));
-    bf16vec4 val25 = bf16vec4(seed + vec4(0.25f));
-    bf16vec4 val26 = bf16vec4(seed + vec4(0.26f));
-    bf16vec4 val27 = bf16vec4(seed + vec4(0.27f));
-    bf16vec4 val28 = bf16vec4(seed + vec4(0.28f));
-    bf16vec4 val29 = bf16vec4(seed + vec4(0.29f));
-    bf16vec4 val30 = bf16vec4(seed + vec4(0.30f));
-    bf16vec4 val31 = bf16vec4(seed + vec4(0.31f));
-    bf16vec4 val32 = bf16vec4(seed + vec4(0.32f));
+
+    bf16vec4 a[32];
+    APPLY32(INIT)
 
     bf16vec4 m = bf16vec4(vec4(-0.248046875f, 0.125f, -0.1875f, 0.0625f));
 
     // Each iteration performs 32 bf16vec4 dot products (64 v_dot2_bf16_bf16 = 256 BF16 ops).
     // Stays purely in BF16 inside the loop — zero FP32 adds or BF16<->FP32 conversions.
     for (int i = 0; i < 32768; ++i) {
-        val1.x  = dot(val1,  m);
-        val2.x  = dot(val2,  m);
-        val3.x  = dot(val3,  m);
-        val4.x  = dot(val4,  m);
-        val5.x  = dot(val5,  m);
-        val6.x  = dot(val6,  m);
-        val7.x  = dot(val7,  m);
-        val8.x  = dot(val8,  m);
-        val9.x  = dot(val9,  m);
-        val10.x = dot(val10, m);
-        val11.x = dot(val11, m);
-        val12.x = dot(val12, m);
-        val13.x = dot(val13, m);
-        val14.x = dot(val14, m);
-        val15.x = dot(val15, m);
-        val16.x = dot(val16, m);
-        val17.x = dot(val17, m);
-        val18.x = dot(val18, m);
-        val19.x = dot(val19, m);
-        val20.x = dot(val20, m);
-        val21.x = dot(val21, m);
-        val22.x = dot(val22, m);
-        val23.x = dot(val23, m);
-        val24.x = dot(val24, m);
-        val25.x = dot(val25, m);
-        val26.x = dot(val26, m);
-        val27.x = dot(val27, m);
-        val28.x = dot(val28, m);
-        val29.x = dot(val29, m);
-        val30.x = dot(val30, m);
-        val31.x = dot(val31, m);
-        val32.x = dot(val32, m);
+        APPLY32(STEP)
     }
 
-    float total = float(val1.x)  + float(val2.x)  + float(val3.x)  + float(val4.x)  +
-                  float(val5.x)  + float(val6.x)  + float(val7.x)  + float(val8.x)  +
-                  float(val9.x)  + float(val10.x) + float(val11.x) + float(val12.x) +
-                  float(val13.x) + float(val14.x) + float(val15.x) + float(val16.x) +
-                  float(val17.x) + float(val18.x) + float(val19.x) + float(val20.x) +
-                  float(val21.x) + float(val22.x) + float(val23.x) + float(val24.x) +
-                  float(val25.x) + float(val26.x) + float(val27.x) + float(val28.x) +
-                  float(val29.x) + float(val30.x) + float(val31.x) + float(val32.x);
+    float total = GROUP(0)  + GROUP(4)  + GROUP(8)  + GROUP(12)
+                + GROUP(16) + GROUP(20) + GROUP(24) + GROUP(28);
     InOutBuffer.data[index] = bf16vec4(vec4(total));
 }
