@@ -1,8 +1,8 @@
 #include <hip/hip_runtime.h>
 
 // Kernel to measure L0 cache latency.
-// A single thread performs dependent pointer-chase reads over a small buffer
-// that fits in L0, mirroring the Vulkan cache_latency.comp.
+// Performs dependent pointer-chase reads over a small buffer that fits in L0,
+// corresponding to Vulkan shaders/l0_cache_latency.comp (parameterized via pc[2] iterations).
 // CacheBench.cpp binds 2 buffers on ROCm: (buffer, pcBuffer).
 extern "C" __global__ void l0_cache_latency(unsigned int *buffer,
                                             const unsigned int *pc) {

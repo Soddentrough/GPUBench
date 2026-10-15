@@ -28,9 +28,9 @@ void main() {
     uint iters = pc.iterations;
 
     // Each lane accesses its target bank stride: (tid * stride) mod 32.
-    // The 8 loads per iteration use constant +32u (128-byte) offsets from base_addr,
-    // which preserve the exact same LDS bank ((tid * stride) mod 32) and allow the
-    // compiler to fold all offsets directly into `ds_load_2addr_b32` with zero
+    // The 8 loads per iteration use constant +32u dword (+128-byte) index offsets from base_addr,
+    // which preserve the exact same LDS bank ((tid * stride) mod 32) and allow RADV/ACO
+    // to fold all offsets directly into `ds_load_2addr_b32` immediate dword offsets with zero
     // per-load VALU address arithmetic while keeping base_addr + 224u < 1280u.
     uint base_addr = (tid * stride) & 1023u;
     uint acc0 = 0u;

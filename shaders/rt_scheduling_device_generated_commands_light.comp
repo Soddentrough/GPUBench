@@ -42,7 +42,7 @@ layout(push_constant) uniform PushConstants {
     uint height;
     uint sceneType;       // 0: Showroom Studio, 1: Outdoor Terrain, 2: Indoor Atrium, 3: AAA Forest
     uint isGltf;          // 1 if glTF PBR scene, 0 if procedural
-    uint binIndex;        // 0xFFFFFFFFu: Single Light, 0..7: 128 Lights Bin
+    uint binIndex;        // <= 1u or 0xFFFFFFFFu: Single Light, > 1u (e.g. 128u): 128 Lights (8 bins x 16 lights)
 } pc;
 
 vec3 tonemapACES(vec3 x) {
@@ -59,7 +59,7 @@ const uint SCENE_OUTDOOR_TERRAIN = 1u;
 const uint SCENE_INDOOR_ATRIUM   = 2u;
 const uint SCENE_AAA_FOREST       = 3u;
 
-// Indoor Atrium Primitives
+// Procedural Showroom Studio & Indoor Atrium Primitives
 const uint PRIM_KNOT_PAINT_END  = 1536u;
 const uint PRIM_KNOT_JADE_END   = 3072u;
 const uint PRIM_KNOT_CHROME_END = 4608u;

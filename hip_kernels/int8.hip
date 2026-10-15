@@ -1,12 +1,11 @@
 // Requires ROCm 6.4+
-// INT8 vector benchmark using the dot4 MAC pattern.
-// AMDGPU LLVM auto-maps the "4 sign-extended int8 multiply-add" pattern to V_DOT4_I32_IU8.
-// Uses __attribute__((target("dot1-insts"))) on the kernel to enable the feature.
+// INT8 vector benchmark using packed 4x8-bit dot4 MAC instructions.
 // 8 independent int32 accumulators × 8 INT8 ops per dot4 = 64 INT8 ops per iteration.
 #include <hip/hip_runtime.h>
 
 // Helper: signed int8 dot product of 4 pairs into int32 + accumulate.
-// LLVM lowers this to V_DOT4_I32_IU8 when targeting GFX1201.
+// Emits v_dot4_i32_i8 via inline assembly, which the AMDGPU assembler encodes
+// as v_dot4_i32_iu8 on RDNA 3 (gfx11xx) and RDNA 4 (gfx12xx).
 __device__ __forceinline__
 int sdot4_packed(int a_packed, int b_packed, int c) {
     int dst;

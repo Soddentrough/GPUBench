@@ -31,7 +31,7 @@ void main() {
 
     bf16vec4 m = bf16vec4(vec4(-0.248046875f, 0.125f, -0.0625f, 0.1875f));
 
-    // Each iteration performs 32 bf16vec4 dot products (64 v_dot2_bf16_bf16 = 256 BF16 ops).
+    // Each iteration performs 32 bf16vec4 dot products (256 BF16 ops; lowered to 64 v_dot2_bf16_bf16 on RDNA 4 / gfx12).
     // Stays purely in BF16 inside the loop — zero FP32 adds or BF16<->FP32 conversions.
     for (int i = 0; i < 32768; ++i) {
         APPLY32(STEP)

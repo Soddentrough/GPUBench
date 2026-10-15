@@ -156,6 +156,18 @@ static void getHostSystemInfo(std::string& outCpuModel, std::string& outCpuArch,
 static std::string formatCardDeviceSubtitle(const SelectableDevice& dev) {
     std::string name = dev.name;
     if (dev.isSystem) {
+        size_t thPos = name.find(" (");
+        if (thPos != std::string::npos && name.find("Threads)", thPos) != std::string::npos) {
+            name = name.substr(0, thPos);
+        }
+        size_t wPos = name.find(" w/ ");
+        if (wPos != std::string::npos) {
+            name = name.substr(0, wPos);
+        }
+        size_t withPos = name.find(" with ");
+        if (withPos != std::string::npos) {
+            name = name.substr(0, withPos);
+        }
         size_t procPos = name.find(" Processor");
         if (procPos != std::string::npos) {
             name = name.substr(0, procPos);
@@ -183,9 +195,52 @@ static std::string formatCardDeviceSubtitle(const SelectableDevice& dev) {
         if (name.empty()) {
             return "GPU " + std::to_string(dev.deviceIndex);
         }
+        size_t radvPos = name.find(" (RADV ");
+        if (radvPos != std::string::npos) {
+            name = name.substr(0, radvPos);
+        }
+        size_t llvmPos = name.find(" (LLVM ");
+        if (llvmPos != std::string::npos) {
+            name = name.substr(0, llvmPos);
+        }
         return name;
     }
 }
+
+static std::string fitTextToPixelWidth(const std::string& text, float maxWidth) {
+    if (text.empty() || maxWidth <= 0.0f) return text;
+    if (ImGui::CalcTextSize(text.c_str()).x <= maxWidth) return text;
+    const std::string ellipsis = "...";
+    float ellW = ImGui::CalcTextSize(ellipsis.c_str()).x;
+    if (maxWidth <= ellW) return ellipsis;
+    size_t len = text.size();
+    while (len > 0) {
+        // Step back to a valid UTF-8 codepoint boundary
+        do {
+            --len;
+        } while (len > 0 && (static_cast<unsigned char>(text[len]) & 0xC0) == 0x80);
+        std::string candidate = text.substr(0, len);
+        while (!candidate.empty() && candidate.back() == ' ') {
+            candidate.pop_back();
+        }
+        if (ImGui::CalcTextSize((candidate + ellipsis).c_str()).x <= maxWidth) {
+            return candidate + ellipsis;
+        }
+    }
+    return ellipsis;
+}
+
+static bool sameLineIfFits(float nextItemW, float spacing = -1.0f) {
+    float sp = (spacing >= 0.0f) ? spacing : ImGui::GetStyle().ItemSpacing.x;
+    float limitRight = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
+    float nextRight = ImGui::GetItemRectMax().x + sp + nextItemW;
+    if (nextRight <= limitRight) {
+        ImGui::SameLine(0.0f, spacing);
+        return true;
+    }
+    return false;
+}
+
 
 } // anonymous namespace
 
@@ -815,13 +870,13 @@ void GuiApp::initializeBenchmarkCategories() {
         indirectSub.engineId = "In-Shader Indirect Synthesis";
         indirectSub.description = "Dynamic GPU workgroup command synthesis and hardware zero-dispatch pruning";
         indirectSub.items = {
-            {"In-Shader Indirect Synthesis", "Indirect Command Synthesis", "CPU Direct Fixed Grid (100% Active Baseline)", "Compute", "MItems/s", "Host fixed grid dispatch with 100% item activity; baseline compute throughput", true, 0},
-            {"In-Shader Indirect Synthesis", "Indirect Command Synthesis", "100% Active", "Compute", "MItems/s", "Classifier synthesizes VkDispatchIndirectCommand on GPU; measures indirect dispatch overhead", true, 1},
-            {"In-Shader Indirect Synthesis", "Indirect Command Synthesis", "50% Active", "Compute", "MItems/s", "Stream compaction bins 50% active work; launches half the workgroups dynamically", true, 2},
-            {"In-Shader Indirect Synthesis", "Indirect Command Synthesis", "10% Active", "Compute", "MItems/s", "Sparse workload; GPU skips 90% of workgroups via synthesized grid sizing", true, 3},
-            {"In-Shader Indirect Synthesis", "Indirect Command Synthesis", "1% Active", "Compute", "MItems/s", "Highly sparse workload; dynamic indirect dispatch processes only 1% work", true, 4},
-            {"In-Shader Indirect Synthesis", "Indirect Command Synthesis", "In-Shader Zero-Dispatch Pruning (0% Active)", "Compute", "MItems/s", "Hardware Command Processor instantaneously dismisses zero-workgroup (0,0,0) dispatches", true, 5},
-            {"In-Shader Indirect Synthesis", "Indirect Command Synthesis", "CPU Direct Fixed Grid (10% Active)", "Compute", "MItems/s", "Host fixed grid dispatch on sparse 10% active workload; shows wasted wave occupancy", true, 6}
+            {"In-Shader Indirect Synthesis", "Indirect Command Synthesis", "CPU Direct Fixed Grid (100% Active Baseline)", "Compute", "us", "Host fixed grid dispatch with 100% item activity; baseline compute throughput", true, 0},
+            {"In-Shader Indirect Synthesis", "Indirect Command Synthesis", "100% Active", "Compute", "us", "Classifier synthesizes VkDispatchIndirectCommand on GPU; measures indirect dispatch overhead", true, 1},
+            {"In-Shader Indirect Synthesis", "Indirect Command Synthesis", "50% Active", "Compute", "us", "Stream compaction bins 50% active work; launches half the workgroups dynamically", true, 2},
+            {"In-Shader Indirect Synthesis", "Indirect Command Synthesis", "10% Active", "Compute", "us", "Sparse workload; GPU skips 90% of workgroups via synthesized grid sizing", true, 3},
+            {"In-Shader Indirect Synthesis", "Indirect Command Synthesis", "1% Active", "Compute", "us", "Highly sparse workload; dynamic indirect dispatch processes only 1% work", true, 4},
+            {"In-Shader Indirect Synthesis", "Indirect Command Synthesis", "In-Shader Zero-Dispatch Pruning (0% Active)", "Compute", "us", "Hardware Command Processor instantaneously dismisses zero-workgroup (0,0,0) dispatches", true, 5},
+            {"In-Shader Indirect Synthesis", "Indirect Command Synthesis", "CPU Direct Fixed Grid (10% Active)", "Compute", "us", "Host fixed grid dispatch on sparse 10% active workload; shows wasted wave occupancy", true, 6}
         };
         cat.subgroups.push_back(indirectSub);
 
@@ -1193,15 +1248,19 @@ std::string GuiApp::currentSceneTag() const {
 void GuiApp::renderBenchmarkTooltip(const BenchmarkItem& item, const std::string& sceneOverride) {
     ImGui::BeginTooltip();
 
+    float contentWidth = s(360.0f);
+
     // 1. Header & badges
     pushBoldFont();
+    ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + contentWidth);
     ImGui::TextColored(ImVec4(0.40f, 0.80f, 1.00f, 1.0f), "%s", item.name.c_str());
+    ImGui::PopTextWrapPos();
     popBoldFont();
     ImGui::TextDisabled("Subcategory: %s | Metric: %s", item.subcategory.c_str(), item.metricType.c_str());
     ImGui::Separator();
 
     // 2. Textual explanation
-    ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + s(380.0f));
+    ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + contentWidth);
     ImGui::TextUnformatted(item.description.c_str());
     ImGui::PopTextWrapPos();
 
@@ -1211,7 +1270,7 @@ void GuiApp::renderBenchmarkTooltip(const BenchmarkItem& item, const std::string
         ImGui::Separator();
         ImGui::Spacing();
 
-        float canvasWidth = s(340.0f);
+        float canvasWidth = contentWidth;
         float ar = item.viz.aspectRatio > 0.001f ? item.viz.aspectRatio : (16.0f / 9.0f);
         float canvasHeight = canvasWidth / ar;
 
@@ -1220,6 +1279,7 @@ void GuiApp::renderBenchmarkTooltip(const BenchmarkItem& item, const std::string
         ImDrawList* drawList = ImGui::GetWindowDrawList();
 
         drawList->AddRectFilled(p0, p1, IM_COL32(12, 14, 20, 255), s(4.0f));
+        drawList->PushClipRect(p0, p1, true);
 
         if (!item.viz.assetPath.empty()) {
             // Tier 1: static pre-baked thumbnail, lazily loaded & cached
@@ -1243,7 +1303,7 @@ void GuiApp::renderBenchmarkTooltip(const BenchmarkItem& item, const std::string
                 ImVec2 ip1 = ImVec2(ip0.x + imgW, ip0.y + imgH);
                 drawList->AddImage(reinterpret_cast<ImTextureID>(tex.descriptorSet), ip0, ip1);
             } else {
-                std::string fallback = "Preview unavailable: " + item.viz.caption;
+                std::string fallback = fitTextToPixelWidth("Preview unavailable: " + item.viz.caption, canvasWidth - s(16.0f));
                 ImVec2 tsz = ImGui::CalcTextSize(fallback.c_str());
                 drawList->AddText(ImVec2(p0.x + (canvasWidth - tsz.x) * 0.5f, p0.y + (canvasHeight - tsz.y) * 0.5f),
                                   IM_COL32(160, 170, 190, 255), fallback.c_str());
@@ -1253,6 +1313,7 @@ void GuiApp::renderBenchmarkTooltip(const BenchmarkItem& item, const std::string
             renderProceduralDiagram(item.viz.diagramId, p0, p1);
         }
 
+        drawList->PopClipRect();
         drawList->AddRect(p0, p1, IM_COL32(50, 60, 80, 255), s(4.0f));
         ImGui::Dummy(ImVec2(canvasWidth, canvasHeight));
 
@@ -1294,14 +1355,16 @@ void GuiApp::renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, Im
 
     float pad = s(12.0f);
     auto drawTitle = [&](const char* title) {
-        dl->AddText(ImVec2(p0.x + pad, p0.y + s(6.0f)), colText, title);
+        std::string fitted = fitTextToPixelWidth(title, (p1.x - p0.x) - pad * 2.0f);
+        dl->AddText(ImVec2(p0.x + pad, p0.y + s(6.0f)), colText, fitted.c_str());
     };
-    ImVec2 area = ImVec2(p0.x + pad, p0.y + s(30.0f));
-    ImVec2 areaEnd = ImVec2(p1.x - pad, p1.y - pad - s(16.0f));
+    ImVec2 area = ImVec2(p0.x + pad, p0.y + s(28.0f));
+    ImVec2 areaEnd = ImVec2(p1.x - pad, p1.y - s(10.0f));
     float gw = areaEnd.x - area.x;
     float gh = areaEnd.y - area.y;
+    // Note: item.viz.caption is already rendered with proper word-wrapping right below the canvas
     auto drawFootnote = [&](const char* text) {
-        dl->AddText(ImVec2(p0.x + pad, p1.y - s(12.0f)), colDim, text);
+        (void)text;
     };
 
     // ------------------------------------------------------------------
@@ -1332,7 +1395,7 @@ void GuiApp::renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, Im
 
         // Surface normal N at center
         ImVec2 centerHit(area.x + gw * 0.54f, surfY);
-        float normalLen = gh * 0.86f;
+        float normalLen = gh * 0.82f;
         ImVec2 normalEnd(centerHit.x, centerHit.y - normalLen);
         dl->AddLine(centerHit, normalEnd, IM_COL32(80, 180, 255, 140), 1.2f);
         dl->AddText(ImVec2(normalEnd.x + s(4.0f), normalEnd.y - s(2.0f)), colCool, "N");
@@ -1532,22 +1595,22 @@ void GuiApp::renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, Im
     if (diagramId == "wave_ballot_compaction") {
         drawTitle("Wave Ballot Material Queue Sort (16B Records)");
 
-        const int lanes = 32;
-        static const bool active[32] = {
-            1,1,1,0, 1,1,0,0, 1,1,1,1, 0,0,1,0,
-            1,1,0,0, 1,1,1,0, 0,0,1,0, 0,0,1,1
+        const int lanes = 16;
+        static const bool active[16] = {
+            1,1,1,0, 1,1,0,1, 1,1,0,0, 1,0,1,1
         };
         float labelW = s(84.0f);
         float barX = area.x + labelW;
         float barW = areaEnd.x - barX;
         float lw = barW / lanes;
-        float laneH = s(14.0f);
-        float rowGap = s(24.0f);
+        float laneH = s(18.0f);
+        float rowGap = s(36.0f);
+        float startY = area.y + s(8.0f);
 
         // Row 1: wavefront lanes
-        dl->AddText(ImVec2(area.x, area.y), colDim, "wavefront");
+        dl->AddText(ImVec2(area.x, startY + s(1.0f)), colDim, "wavefront");
         for (int i = 0; i < lanes; ++i) {
-            ImVec2 l0(barX + i * lw + s(1.0f), area.y - s(2.0f));
+            ImVec2 l0(barX + i * lw + s(1.0f), startY);
             ImVec2 l1(l0.x + lw - s(2.0f), l0.y + laneH);
             if (active[i]) {
                 dl->AddRectFilled(l0, l1, IM_COL32(60, 140, 80, 255), s(2.0f));
@@ -1558,28 +1621,26 @@ void GuiApp::renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, Im
             }
         }
 
-        // Row 2: ballot mask
-        char mask[33];
-        for (int i = 0; i < lanes; ++i) mask[i] = active[i] ? '1' : '0';
-        mask[32] = 0;
-        float y2 = area.y + rowGap;
+        // Row 2: ballot mask bits centered under each lane
+        float y2 = startY + rowGap;
         dl->AddText(ImVec2(area.x, y2), colDim, "ballot mask");
-        if (monoFont()) {
-            dl->AddText(monoFont(), monoFont()->FontSize, ImVec2(barX, y2), colAmber, mask);
-        } else {
-            dl->AddText(ImVec2(barX, y2), colAmber, mask);
+        for (int i = 0; i < lanes; ++i) {
+            const char* bitStr = active[i] ? "1" : "0";
+            ImVec2 bsz = ImGui::CalcTextSize(bitStr);
+            float bx = barX + (i + 0.5f) * lw - bsz.x * 0.5f;
+            dl->AddText(ImVec2(bx, y2), active[i] ? colAmber : colDim, bitStr);
         }
 
         // Row 3: compacted material queues (8 bins, 16B/hit)
         float y3 = y2 + rowGap;
-        dl->AddText(ImVec2(area.x, y3), colDim, "8 mat bins");
+        dl->AddText(ImVec2(area.x, y3 + s(1.0f)), colDim, "8 mat bins");
         int k = 0;
         const ImU32 binColors[4] = {colCool, colGreen, colAmber, colPath};
         for (int i = 0; i < lanes; ++i) {
-            ImVec2 l0(barX + i * lw + s(1.0f), y3 - s(2.0f));
+            ImVec2 l0(barX + i * lw + s(1.0f), y3);
             ImVec2 l1(l0.x + lw - s(2.0f), l0.y + laneH);
             if (active[i]) {
-                ImU32 bc = binColors[(k / 5) % 4];
+                ImU32 bc = binColors[(k / 3) % 4];
                 dl->AddRectFilled(l0, l1, IM_COL32(35, 70, 95, 255), s(2.0f));
                 dl->AddRect(l0, l1, bc);
                 ++k;
@@ -1587,10 +1648,6 @@ void GuiApp::renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, Im
                 dl->AddRect(l0, l1, IM_COL32(40, 48, 60, 120));
             }
         }
-
-        char b[80];
-        snprintf(b, sizeof(b), "%d surface hits sorted into 8 material queues (16B/record)", k);
-        drawFootnote(b);
         return;
     }
 
@@ -1608,13 +1665,14 @@ void GuiApp::renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, Im
         float barX = area.x + labelW;
         float barW = areaEnd.x - barX;
         float lw = barW / lanes;
-        float laneH = s(14.0f);
+        float laneH = s(18.0f);
+        float startY = area.y + s(8.0f);
 
         // Row 1: Primary ray traversal (Hits vs Sky Misses)
-        dl->AddText(ImVec2(area.x, area.y), colDim, "primary rays");
+        dl->AddText(ImVec2(area.x, startY + s(1.0f)), colDim, "primary rays");
         int activeHits = 0;
         for (int i = 0; i < lanes; ++i) {
-            ImVec2 l0(barX + i * lw + s(1.0f), area.y - s(1.0f));
+            ImVec2 l0(barX + i * lw + s(1.0f), startY);
             ImVec2 l1(l0.x + lw - s(2.0f), l0.y + laneH);
             if (hitMask[i]) {
                 dl->AddRectFilled(l0, l1, IM_COL32(45, 130, 75, 255), s(2.0f));
@@ -1627,15 +1685,15 @@ void GuiApp::renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, Im
         }
 
         // Row 2: Record layout comparison (8x vec4 = 128B vs 2x vec4 = 32B)
-        float y2 = area.y + s(24.0f);
-        dl->AddText(ImVec2(area.x, y2), colDim, isPacked ? "32B record" : "128B record");
+        float y2 = startY + s(38.0f);
+        dl->AddText(ImVec2(area.x, y2 + s(1.0f)), colDim, isPacked ? "32B record" : "128B record");
         int vec4Count = isPacked ? 2 : 8;
-        float slotW = (barW * (isPacked ? 0.38f : 0.96f)) / vec4Count;
+        float slotW = (barW * (isPacked ? 0.42f : 0.98f)) / vec4Count;
         const char* fields128[8] = {"pos+t", "dir+m", "norm", "bary", "v0", "v1", "v2", "pad"};
-        const char* fields32[2]  = {"pos.xyz + tHit (16B)", "octNorm + mat + pixel (16B)"};
+        const char* fields32[2]  = {"pos+t", "octN+mat"};
         for (int v = 0; v < vec4Count; ++v) {
-            ImVec2 b0(barX + v * slotW + s(1.0f), y2 - s(2.0f));
-            ImVec2 b1(b0.x + slotW - s(2.0f), b0.y + s(16.0f));
+            ImVec2 b0(barX + v * slotW + s(1.0f), y2);
+            ImVec2 b1(b0.x + slotW - s(2.0f), b0.y + laneH);
             ImU32 fillCol = isPacked ? IM_COL32(30, 85, 120, 255) : IM_COL32(85, 60, 25, 255);
             ImU32 bordCol = isPacked ? colCool : colAmber;
             dl->AddRectFilled(b0, b1, fillCol, s(2.0f));
@@ -1643,18 +1701,18 @@ void GuiApp::renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, Im
             const char* lbl = isPacked ? fields32[v] : fields128[v];
             ImVec2 tsz = ImGui::CalcTextSize(lbl);
             if (tsz.x < (slotW - s(2.0f))) {
-                dl->AddText(ImVec2(b0.x + (slotW - tsz.x) * 0.5f, b0.y + s(1.0f)), colText, lbl);
+                dl->AddText(ImVec2(b0.x + (slotW - tsz.x) * 0.5f, b0.y + (laneH - tsz.y) * 0.5f), colText, lbl);
             }
         }
         if (isPacked) {
-            dl->AddText(ImVec2(barX + barW * 0.41f, y2), colGreen, "4x less VRAM traffic!");
+            dl->AddText(ImVec2(barX + barW * 0.45f, y2 + s(1.0f)), colGreen, "4x less VRAM traffic");
         }
 
         // Row 3: Unified compacted stream
-        float y3 = y2 + s(26.0f);
-        dl->AddText(ImVec2(area.x, y3), colDim, "stream out");
+        float y3 = y2 + s(38.0f);
+        dl->AddText(ImVec2(area.x, y3 + s(1.0f)), colDim, "stream out");
         for (int i = 0; i < lanes; ++i) {
-            ImVec2 l0(barX + i * lw + s(1.0f), y3 - s(1.0f));
+            ImVec2 l0(barX + i * lw + s(1.0f), y3);
             ImVec2 l1(l0.x + lw - s(2.0f), l0.y + laneH);
             if (i < activeHits) {
                 dl->AddRectFilled(l0, l1, isPacked ? IM_COL32(35, 110, 145, 255) : IM_COL32(110, 80, 30, 255), s(2.0f));
@@ -1663,10 +1721,6 @@ void GuiApp::renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, Im
                 dl->AddRect(l0, l1, IM_COL32(40, 48, 60, 110));
             }
         }
-
-        drawFootnote(isPacked
-            ? "sky misses culled; 32B octahedrally-packed hit records maximize compaction bandwidth"
-            : "sky misses culled; 128B uncompacted hit state stresses VRAM write bandwidth");
         return;
     }
 
@@ -1680,7 +1734,8 @@ void GuiApp::renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, Im
         const int rows = 3;
         float padX = s(6.0f);
         float padY = s(6.0f);
-        float roomW = (gw - s(64.0f) - padX * (cols - 1)) / cols;
+        float rightLegendW = s(88.0f);
+        float roomW = (gw - rightLegendW - padX * (cols - 1)) / cols;
         float roomH = (gh - padY * (rows - 1)) / rows;
         float startX = area.x;
         float startY = area.y;
@@ -1706,18 +1761,16 @@ void GuiApp::renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, Im
         // Ray culling demonstration on the right side
         float legendX = startX + cols * (roomW + padX) + s(8.0f);
         dl->AddText(ImVec2(legendX, startY + s(2.0f)), colCool, "100 Rooms");
-        dl->AddText(ImVec2(legendX, startY + s(18.0f)), colDim, "200 inst/rm");
-        dl->AddText(ImVec2(legendX, startY + s(34.0f)), colCool, "1:4 Unique");
-        dl->AddText(ImVec2(legendX, startY + s(50.0f)), colDim, "5K BLASes");
+        dl->AddText(ImVec2(legendX, startY + s(20.0f)), colDim, "200 inst/rm");
+        dl->AddText(ImVec2(legendX, startY + s(38.0f)), colCool, "1:4 Unique");
+        dl->AddText(ImVec2(legendX, startY + s(56.0f)), colDim, "5K BLASes");
 
         // Corridor ray (miss / culled early)
-        ImVec2 rayStart(startX + roomW + padX * 0.5f, startY - s(4.0f));
-        ImVec2 rayEnd(rayStart.x, startY + gh + s(4.0f));
+        ImVec2 rayStart(startX + roomW + padX * 0.5f, startY + s(2.0f));
+        ImVec2 rayEnd(rayStart.x, startY + gh - s(2.0f));
         dl->AddLine(rayStart, rayEnd, colAmber, 1.5f);
         dl->AddCircleFilled(rayEnd, s(2.0f), colAmber);
-        dl->AddText(ImVec2(legendX, startY + gh - s(18.0f)), colAmber, "Corridor: 0 hit");
-
-        drawFootnote("disjoint room AABBs cull cleanly at top tree levels; high mesh uniqueness");
+        dl->AddText(ImVec2(legendX, startY + gh - s(18.0f)), colAmber, "0 corridor hit");
         return;
     }
 
@@ -1727,13 +1780,16 @@ void GuiApp::renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, Im
     if (diagramId == "tlas_jungle_50k") {
         drawTitle("TLAS: Dense Jungle (50K Instances)");
 
+        float rightLegendW = s(84.0f);
+        float plotW = gw - rightLegendW;
+
         // Undulating terrain curve
         const int segs = 24;
         for (int i = 0; i < segs; ++i) {
             float t0 = (float)i / segs;
             float t1 = (float)(i + 1) / segs;
-            float x0 = area.x + t0 * (gw - s(60.0f));
-            float x1 = area.x + t1 * (gw - s(60.0f));
+            float x0 = area.x + t0 * plotW;
+            float x1 = area.x + t1 * plotW;
             float y0 = area.y + gh * 0.76f + std::sin(t0 * 6.283f * 1.3f) * s(10.0f);
             float y1 = area.y + gh * 0.76f + std::sin(t1 * 6.283f * 1.3f) * s(10.0f);
             dl->AddLine(ImVec2(x0, y0), ImVec2(x1, y1), IM_COL32(60, 115, 65, 255), 2.0f);
@@ -1741,9 +1797,9 @@ void GuiApp::renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, Im
 
         // Overlapping foliage bounding boxes across undulating terrain
         const int foliageCount = 10;
-        float spacing = (gw - s(90.0f)) / (foliageCount - 1);
-        float boxW = s(26.0f);
-        float boxH = s(34.0f);
+        float boxW = s(24.0f);
+        float boxH = s(36.0f);
+        float spacing = (plotW - boxW) / (foliageCount - 1);
 
         for (int i = 0; i < foliageCount; ++i) {
             float t = (float)i / (foliageCount - 1);
@@ -1761,23 +1817,21 @@ void GuiApp::renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, Im
 
         // Ray piercing overlapping canopy
         float rayX = area.x + spacing * 4.5f;
-        ImVec2 rTop(rayX, area.y - s(4.0f));
-        ImVec2 rBot(rayX, area.y + gh);
+        ImVec2 rTop(rayX, area.y + s(2.0f));
+        ImVec2 rBot(rayX, area.y + gh - s(2.0f));
         dl->AddLine(rTop, rBot, colHot, 1.8f);
 
         // Highlight intersection points with multiple overlapping boxes
-        dl->AddCircleFilled(ImVec2(rayX, area.y + gh * 0.32f), s(3.0f), colHot);
-        dl->AddCircleFilled(ImVec2(rayX, area.y + gh * 0.48f), s(3.0f), colHot);
-        dl->AddCircleFilled(ImVec2(rayX, area.y + gh * 0.62f), s(3.0f), colHot);
+        dl->AddCircleFilled(ImVec2(rayX, area.y + gh * 0.36f), s(3.0f), colHot);
+        dl->AddCircleFilled(ImVec2(rayX, area.y + gh * 0.50f), s(3.0f), colHot);
+        dl->AddCircleFilled(ImVec2(rayX, area.y + gh * 0.64f), s(3.0f), colHot);
 
         // Legend panel on right
-        float legendX = area.x + gw - s(55.0f);
-        dl->AddText(ImVec2(legendX, area.y + s(2.0f)), colGreen, "Heavy AABB");
-        dl->AddText(ImVec2(legendX, area.y + s(18.0f)), colHot, "Overlap!");
-        dl->AddText(ImVec2(legendX, area.y + s(34.0f)), colDim, "3+ hits/ray");
-        dl->AddText(ImVec2(legendX, area.y + s(50.0f)), colGreen, "1:100 Reuse");
-
-        drawFootnote("undulating terrain & continuous foliage -> high AABB overlap stresses BVH splitting");
+        float legendX = area.x + plotW + s(8.0f);
+        dl->AddText(ImVec2(legendX, area.y + s(4.0f)), colGreen, "Heavy AABB");
+        dl->AddText(ImVec2(legendX, area.y + s(22.0f)), colHot, "Overlap!");
+        dl->AddText(ImVec2(legendX, area.y + s(40.0f)), colDim, "3+ hits/ray");
+        dl->AddText(ImVec2(legendX, area.y + s(58.0f)), colGreen, "1:100 Reuse");
         return;
     }
 
@@ -1787,17 +1841,17 @@ void GuiApp::renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, Im
     if (diagramId == "tlas_openworld_200k") {
         drawTitle("TLAS: Massive Open World (200K Instances)");
 
-        // Left 62%: Macro Geographic Sectors (4x2 sector grid)
-        float mapW = gw * 0.62f;
+        // Left 60%: Macro Geographic Sectors (4x2 sector grid)
+        float mapW = gw * 0.60f;
         const int cols = 4;
         const int rows = 2;
-        float pad = s(4.0f);
-        float secW = (mapW - pad * (cols - 1)) / cols;
-        float secH = (gh - pad * (rows - 1)) / rows;
+        float secPad = s(4.0f);
+        float secW = (mapW - secPad * (cols - 1)) / cols;
+        float secH = (gh - secPad * (rows - 1)) / rows;
 
         for (int r = 0; r < rows; ++r) {
             for (int c = 0; c < cols; ++c) {
-                ImVec2 s0(area.x + c * (secW + pad), area.y + r * (secH + pad));
+                ImVec2 s0(area.x + c * (secW + secPad), area.y + r * (secH + secPad));
                 ImVec2 s1(s0.x + secW, s0.y + secH);
 
                 // Sector AABB border (amber)
@@ -1813,32 +1867,30 @@ void GuiApp::renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, Im
             }
         }
 
-        // Right 38%: Multi-tier hierarchy tree & stats
+        // Right 40%: Multi-tier hierarchy tree & stats
         float treeX = area.x + mapW + s(8.0f);
         float treeW = gw - mapW - s(8.0f);
 
         auto drawTierBox = [&](float yOffset, const char* label, ImU32 fill, ImU32 border, ImU32 textCol) {
             ImVec2 b0(treeX, area.y + yOffset);
-            ImVec2 b1(treeX + treeW, b0.y + s(15.0f));
+            ImVec2 b1(treeX + treeW, b0.y + s(18.0f));
             dl->AddRectFilled(b0, b1, fill, s(2.0f));
             dl->AddRect(b0, b1, border, s(2.0f));
             ImVec2 tsz = ImGui::CalcTextSize(label);
-            dl->AddText(ImVec2(b0.x + (treeW - tsz.x) * 0.5f, b0.y + (s(15.0f) - tsz.y) * 0.5f), textCol, label);
+            dl->AddText(ImVec2(b0.x + (treeW - tsz.x) * 0.5f, b0.y + (s(18.0f) - tsz.y) * 0.5f), textCol, label);
             return ImVec2(treeX + treeW * 0.5f, b1.y);
         };
 
         ImVec2 pRoot = drawTierBox(0.0f, "TLAS Root", IM_COL32(30, 50, 80, 255), colCool, colText);
-        ImVec2 pSec = drawTierBox(s(20.0f), "20 Sectors (500m)", IM_COL32(50, 42, 20, 255), colAmber, colAmber);
-        ImVec2 pLeaves = drawTierBox(s(40.0f), "200K BLAS Leaves", IM_COL32(25, 45, 35, 255), colGreen, colGreen);
+        ImVec2 pSec = drawTierBox(s(24.0f), "20 Sectors", IM_COL32(50, 42, 20, 255), colAmber, colAmber);
+        ImVec2 pLeaves = drawTierBox(s(48.0f), "200K Leaves", IM_COL32(25, 45, 35, 255), colGreen, colGreen);
 
-        dl->AddLine(pRoot, ImVec2(pSec.x, area.y + s(20.0f)), colDim, 1.0f);
-        dl->AddLine(pSec, ImVec2(pLeaves.x, area.y + s(40.0f)), colDim, 1.0f);
+        dl->AddLine(pRoot, ImVec2(pSec.x, area.y + s(24.0f)), colDim, 1.0f);
+        dl->AddLine(pSec, ImVec2(pLeaves.x, area.y + s(48.0f)), colDim, 1.0f);
 
         // Stats badge
-        dl->AddText(ImVec2(treeX, area.y + s(58.0f)), colAmber, "Buffer: 12.8 MB");
-        dl->AddText(ImVec2(treeX, area.y + s(72.0f)), colDim, "~500M Virt Tris");
-
-        drawFootnote("20 macro sectors (500m pitch) -> multi-tier hierarchical tree & high memory scale");
+        dl->AddText(ImVec2(treeX, area.y + s(74.0f)), colAmber, "12.8 MB TLAS");
+        dl->AddText(ImVec2(treeX, area.y + s(92.0f)), colDim, "~500M Virt Tris");
         return;
     }
 
@@ -1857,12 +1909,12 @@ void GuiApp::renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, Im
             dl->AddText(ImVec2(c.x - tsz.x * 0.5f, c.y - tsz.y * 0.5f), colText, label);
         };
 
-        ImVec2 rootC(area.x + gw * 0.5f, area.y + s(10.0f));
+        ImVec2 rootC(area.x + gw * 0.5f, area.y + s(12.0f));
         drawNode(rootC, s(92.0f), s(20.0f), "TLAS Root", IM_COL32(30, 50, 80, 255), colCool);
 
         ImVec2 mid[3];
         for (int i = 0; i < 3; ++i) {
-            mid[i] = ImVec2(area.x + gw * (0.2f + 0.3f * i), area.y + gh * 0.45f);
+            mid[i] = ImVec2(area.x + gw * (0.2f + 0.3f * i), area.y + gh * 0.48f);
             dl->AddLine(rootC, mid[i], IM_COL32(90, 110, 140, 200), 1.5f);
             drawNode(mid[i], s(64.0f), s(18.0f), "Node", IM_COL32(28, 45, 70, 255), IM_COL32(80, 120, 170, 255));
         }
@@ -1877,7 +1929,6 @@ void GuiApp::renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, Im
                 drawNode(leaf, s(56.0f), s(16.0f), b, IM_COL32(25, 40, 55, 255), IM_COL32(70, 100, 130, 255));
             }
         }
-        drawFootnote("one TLAS node per instance -> each references a pre-built BLAS");
         return;
     }
 
@@ -1897,7 +1948,7 @@ void GuiApp::renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, Im
         // Hit point via barycentric combination
         ImVec2 H(A.x * 0.35f + B.x * 0.45f + C.x * 0.20f, A.y * 0.35f + B.y * 0.45f + C.y * 0.20f);
 
-        ImVec2 rayStart(area.x + gw * 0.02f, area.y + gh * 0.02f);
+        ImVec2 rayStart(area.x + gw * 0.02f, area.y + gh * 0.06f);
         ImVec2 rayDir = sub(H, rayStart);
         ImVec2 rayEnd = add(rayStart, mul(rayDir, 1.35f));
         dl->AddLine(rayStart, rayEnd, colAmber, 1.8f);
@@ -1907,7 +1958,6 @@ void GuiApp::renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, Im
         dl->AddLine(H, C, IM_COL32(140, 150, 170, 160), 1.0f);
         dl->AddCircleFilled(H, s(3.0f), colHot);
         dl->AddText(ImVec2(H.x + s(6.0f), H.y - s(16.0f)), colHot, "hit (t, u, v)");
-        drawFootnote("solves a 3x3 linear system; barycentrics select the triangle");
         return;
     }
 
@@ -1938,7 +1988,7 @@ void GuiApp::renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, Im
         dl->AddLine(ImVec2(f0.x, f1.y), f0, colCool, 1.5f);
 
         ImVec2 rayStart(area.x + gw * 0.04f, area.y + gh * 0.08f);
-        ImVec2 rayEnd(area.x + gw * 0.96f, area.y + gh * 0.96f);
+        ImVec2 rayEnd(area.x + gw * 0.96f, area.y + gh * 0.94f);
         dl->AddLine(rayStart, rayEnd, colAmber, 1.8f);
 
         ImVec2 t0pt = add(rayStart, mul(sub(rayEnd, rayStart), 0.40f));
@@ -1947,7 +1997,6 @@ void GuiApp::renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, Im
         dl->AddCircleFilled(t1pt, s(3.0f), colHot);
         dl->AddText(ImVec2(t0pt.x - s(38.0f), t0pt.y - s(18.0f)), colGreen, "t near");
         dl->AddText(ImVec2(t1pt.x + s(6.0f), t1pt.y + s(2.0f)), colHot, "t far");
-        drawFootnote("6 slab comparisons; reject the box when t near > t far");
         return;
     }
 
@@ -1981,7 +2030,6 @@ void GuiApp::renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, Im
         ImVec2 nEnd = add(hit, mul(nrm, r * 0.5f));
         dl->AddLine(hit, nEnd, colGreen, 1.5f);
         dl->AddText(ImVec2(nEnd.x + s(4.0f), nEnd.y - s(14.0f)), colGreen, "N");
-        drawFootnote("quadratic solve in the shader - no triangle fetch, no barycentrics");
         return;
     }
 
@@ -1994,7 +2042,7 @@ void GuiApp::renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, Im
         // 4 stratified planar triangle layers (Layer 0 active, Layers 1..3 skipped after first hit)
         const int layers = 4;
         float layerSpacing = gh * 0.22f;
-        float startY = area.y + s(16.0f);
+        float startY = area.y + s(20.0f);
         float planeW = gw * 0.60f;
 
         for (int l = 0; l < layers; ++l) {
@@ -2021,7 +2069,7 @@ void GuiApp::renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, Im
         float raySpacing = planeW / (rays + 1);
         for (int r = 0; r < rays; ++r) {
             float rx = area.x + (r + 1) * raySpacing;
-            ImVec2 rayStart(rx, area.y - s(4.0f));
+            ImVec2 rayStart(rx, area.y + s(2.0f));
             ImVec2 rayHit(rx, startY);
 
             dl->AddLine(rayStart, rayHit, colGreen, 1.8f);
@@ -2031,13 +2079,11 @@ void GuiApp::renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, Im
 
         // Legend / Stats on right side
         float statX = area.x + planeW + s(10.0f);
-        dl->AddText(ImVec2(statX, area.y + s(2.0f)), colCool, "32 Layers");
-        dl->AddText(ImVec2(statX, area.y + s(18.0f)), colGreen, "Hits Layer 0");
-        dl->AddText(ImVec2(statX, area.y + s(34.0f)), colAmber, "First-Hit Exit");
-        dl->AddText(ImVec2(statX, area.y + s(50.0f)), colGreen, "0% Misses");
-        dl->AddText(ImVec2(statX, area.y + s(66.0f)), colCool, "Max Coherence");
-
-        drawFootnote("parallel vertical rays terminate on Layer 0 (TerminateOnFirstHitEXT); 100% warp coherence");
+        dl->AddText(ImVec2(statX, area.y + s(4.0f)), colCool, "32 Layers");
+        dl->AddText(ImVec2(statX, area.y + s(22.0f)), colGreen, "Hits Layer 0");
+        dl->AddText(ImVec2(statX, area.y + s(40.0f)), colAmber, "First-Hit Exit");
+        dl->AddText(ImVec2(statX, area.y + s(58.0f)), colGreen, "0% Misses");
+        dl->AddText(ImVec2(statX, area.y + s(76.0f)), colCool, "Max Coherence");
         return;
     }
 
@@ -2049,7 +2095,7 @@ void GuiApp::renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, Im
 
         const int layers = 6;
         float layerSpacing = gh * 0.15f;
-        float startY = area.y + s(10.0f);
+        float startY = area.y + s(14.0f);
         float planeW = gw * 0.60f;
 
         for (int l = 0; l < layers; ++l) {
@@ -2067,7 +2113,7 @@ void GuiApp::renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, Im
         float botY = startY + (layers - 1) * layerSpacing;
         for (int r = 0; r < rays; ++r) {
             float rx = area.x + (r + 1) * raySpacing;
-            dl->AddLine(ImVec2(rx, area.y - s(4.0f)), ImVec2(rx, botY), colHot, 1.6f);
+            dl->AddLine(ImVec2(rx, area.y + s(2.0f)), ImVec2(rx, botY), colHot, 1.6f);
             for (int l = 0; l < layers; ++l) {
                 float hy = startY + l * layerSpacing;
                 bool isLast = (l == layers - 1);
@@ -2076,13 +2122,11 @@ void GuiApp::renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, Im
         }
 
         float statX = area.x + planeW + s(10.0f);
-        dl->AddText(ImVec2(statX, area.y + s(2.0f)), colCool, "128 Layers");
-        dl->AddText(ImVec2(statX, area.y + s(18.0f)), colDim, "262K Tris");
-        dl->AddText(ImVec2(statX, area.y + s(34.0f)), colHot, "Full Depth");
-        dl->AddText(ImVec2(statX, area.y + s(50.0f)), colAmber, "128 Hits/Ray");
-        dl->AddText(ImVec2(statX, area.y + s(66.0f)), colGreen, "Layer 127 Commit");
-
-        drawFootnote("rays traverse through all 128 stratified BVH layers before committing the deepest layer hit");
+        dl->AddText(ImVec2(statX, area.y + s(4.0f)), colCool, "128 Layers");
+        dl->AddText(ImVec2(statX, area.y + s(22.0f)), colDim, "262K Tris");
+        dl->AddText(ImVec2(statX, area.y + s(40.0f)), colHot, "Full Depth");
+        dl->AddText(ImVec2(statX, area.y + s(58.0f)), colAmber, "128 Hits/Ray");
+        dl->AddText(ImVec2(statX, area.y + s(76.0f)), colGreen, "Layer 127 Hit");
         return;
     }
 
@@ -2093,8 +2137,8 @@ void GuiApp::renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, Im
         drawTitle("Any-Hit Baseline: 100% Solid Geometry");
 
         const int numPlanes = 4;
-        float planeSpacing = gh * 0.23f;
-        float startY = area.y + s(12.0f);
+        float planeSpacing = gh * 0.22f;
+        float startY = area.y + s(18.0f);
         float planeW = gw * 0.58f;
 
         for (int p = 0; p < numPlanes; ++p) {
@@ -2108,13 +2152,13 @@ void GuiApp::renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, Im
                 dl->AddRect(p0_layer, p1_layer, colCool, s(2.0f));
                 char buf[24];
                 snprintf(buf, sizeof(buf), "Plane %d (Opaque)", p);
-                dl->AddText(ImVec2(area.x + s(6.0f), y - s(6.0f)), colText, buf);
+                dl->AddText(ImVec2(area.x + s(6.0f), y - s(7.0f)), colText, buf);
             } else {
                 // Lower planes: Untouched
                 dl->AddRect(p0_layer, p1_layer, IM_COL32(50, 65, 85, 140), s(2.0f));
                 char buf[24];
                 snprintf(buf, sizeof(buf), "Plane %d (unreached)", p);
-                dl->AddText(ImVec2(area.x + s(6.0f), y - s(6.0f)), colDim, buf);
+                dl->AddText(ImVec2(area.x + s(6.0f), y - s(7.0f)), colDim, buf);
             }
         }
 
@@ -2123,7 +2167,7 @@ void GuiApp::renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, Im
         float raySpacing = planeW / (rays + 1);
         for (int r = 0; r < rays; ++r) {
             float rx = area.x + (r + 1) * raySpacing;
-            ImVec2 rayStart(rx, area.y - s(4.0f));
+            ImVec2 rayStart(rx, area.y + s(2.0f));
             ImVec2 rayHit(rx, startY - s(3.0f));
             dl->AddLine(rayStart, rayHit, colGreen, 1.8f);
             dl->AddCircleFilled(rayHit, s(3.0f), colGreen);
@@ -2131,12 +2175,10 @@ void GuiApp::renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, Im
 
         // Stats on right
         float statX = area.x + planeW + s(10.0f);
-        dl->AddText(ImVec2(statX, area.y + s(2.0f)), colCool, "16 Solid Planes");
-        dl->AddText(ImVec2(statX, area.y + s(18.0f)), colGreen, "Hits Plane 0");
-        dl->AddText(ImVec2(statX, area.y + s(34.0f)), colAmber, "0 Re-Entries");
-        dl->AddText(ImVec2(statX, area.y + s(50.0f)), colDim, "Fast Accept");
-
-        drawFootnote("all geometry opaque -> any-hit shader confirms hit immediately; zero re-traversal overhead");
+        dl->AddText(ImVec2(statX, area.y + s(4.0f)), colCool, "16 Solid Planes");
+        dl->AddText(ImVec2(statX, area.y + s(22.0f)), colGreen, "Hits Plane 0");
+        dl->AddText(ImVec2(statX, area.y + s(40.0f)), colAmber, "0 Re-Entries");
+        dl->AddText(ImVec2(statX, area.y + s(58.0f)), colDim, "Fast Accept");
         return;
     }
 
@@ -2147,8 +2189,8 @@ void GuiApp::renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, Im
         drawTitle("Any-Hit Stress: 50% Cutout Penetration");
 
         const int numPlanes = 4;
-        float planeSpacing = gh * 0.23f;
-        float startY = area.y + s(12.0f);
+        float planeSpacing = gh * 0.22f;
+        float startY = area.y + s(18.0f);
         float planeW = gw * 0.58f;
 
         for (int p = 0; p < numPlanes; ++p) {
@@ -2169,25 +2211,23 @@ void GuiApp::renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, Im
 
         // Ray 1: pierces Plane 0 (cutout), hits Plane 1 (solid)
         float r1X = area.x + planeW * 0.25f;
-        dl->AddLine(ImVec2(r1X, area.y - s(4.0f)), ImVec2(r1X, startY + planeSpacing - s(3.0f)), colHot, 1.6f);
+        dl->AddLine(ImVec2(r1X, area.y + s(2.0f)), ImVec2(r1X, startY + planeSpacing - s(3.0f)), colHot, 1.6f);
         dl->AddCircleFilled(ImVec2(r1X, startY), s(2.5f), colAmber);
         dl->AddCircleFilled(ImVec2(r1X, startY + planeSpacing), s(3.0f), colGreen);
 
         // Ray 2: pierces Plane 0 (cutout), Plane 1 (cutout), hits Plane 2 (solid)
         float r2X = area.x + planeW * 0.58f;
-        dl->AddLine(ImVec2(r2X, area.y - s(4.0f)), ImVec2(r2X, startY + 2 * planeSpacing - s(3.0f)), colHot, 1.6f);
+        dl->AddLine(ImVec2(r2X, area.y + s(2.0f)), ImVec2(r2X, startY + 2 * planeSpacing - s(3.0f)), colHot, 1.6f);
         dl->AddCircleFilled(ImVec2(r2X, startY), s(2.5f), colAmber);
         dl->AddCircleFilled(ImVec2(r2X, startY + planeSpacing), s(2.5f), colAmber);
         dl->AddCircleFilled(ImVec2(r2X, startY + 2 * planeSpacing), s(3.0f), colGreen);
 
         // Stats on right
         float statX = area.x + planeW + s(10.0f);
-        dl->AddText(ImVec2(statX, area.y + s(2.0f)), colCool, "16 Planes");
-        dl->AddText(ImVec2(statX, area.y + s(18.0f)), colHot, "50% Cutout");
-        dl->AddText(ImVec2(statX, area.y + s(34.0f)), colAmber, "Re-enters BVH");
-        dl->AddText(ImVec2(statX, area.y + s(50.0f)), colHot, "RTU Re-dispatch");
-
-        drawFootnote("any-hit shader rejects 50% of candidate hits; forces hardware to resume BVH traversal through layers");
+        dl->AddText(ImVec2(statX, area.y + s(4.0f)), colCool, "16 Planes");
+        dl->AddText(ImVec2(statX, area.y + s(22.0f)), colHot, "50% Cutout");
+        dl->AddText(ImVec2(statX, area.y + s(40.0f)), colAmber, "Re-enters BVH");
+        dl->AddText(ImVec2(statX, area.y + s(58.0f)), colHot, "RTU Re-dispatch");
         return;
     }
 
@@ -2202,85 +2242,99 @@ void GuiApp::renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, Im
                              "Incoherent Bounce Rays: DGC Octant Binning");
 
         // 12 bounce rays from real scene hits: 4 direction groups x 3 rays.
-        // (group, angle in degrees; +y is down)
+        // Angles chosen so rays visibly cross/diverge while staying cleanly inside their containers.
         const int rayGroup[12] = {0, 1, 2, 3, 0, 2, 1, 3, 1, 3, 0, 2};
-        const float rayAng[12] = {-70, -15, 25, 65, -65, 15, -25, 70, -10, 60, -75, 30};
-        const float groupAng[4] = {-70, -17, 23, 65}; // mean direction per group
+        const float rayAng[12] = {-32, -12, 16, 34, -28, 12, -18, 30, -10, 26, -34, 18};
+        const float groupAng[4] = {-18, -6, 8, 18};
         const ImU32 groupCol[4] = {colCool, colAmber, colGreen, colHot};
 
-        auto drawArrow = [&](ImVec2 from, float angDeg, float len, ImU32 col) {
+        float subHeaderY = area.y;
+        float bodyY0 = area.y + s(16.0f);
+        float bodyY1 = areaEnd.y;
+        float bodyH = bodyY1 - bodyY0;
+
+        auto drawArrowBounded = [&](ImVec2 from, float angDeg, float len, ImU32 col, float minY, float maxY) {
             float a = angDeg * 0.0174532925f;
             ImVec2 dir(std::cos(a), std::sin(a));
             ImVec2 to(from.x + dir.x * len, from.y + dir.y * len);
+            if (to.y < minY && std::abs(dir.y) > 1e-4f) {
+                float clampedLen = std::max(s(6.0f), (minY - from.y) / dir.y);
+                to = ImVec2(from.x + dir.x * clampedLen, from.y + dir.y * clampedLen);
+            } else if (to.y > maxY && std::abs(dir.y) > 1e-4f) {
+                float clampedLen = std::max(s(6.0f), (maxY - from.y) / dir.y);
+                to = ImVec2(from.x + dir.x * clampedLen, from.y + dir.y * clampedLen);
+            }
             dl->AddLine(from, to, col, 1.5f);
-            ImVec2 h1(to.x - dir.x * s(5.0f) - dir.y * s(3.5f), to.y - dir.y * s(5.0f) + dir.x * s(3.5f));
-            ImVec2 h2(to.x - dir.x * s(5.0f) + dir.y * s(3.5f), to.y - dir.y * s(5.0f) - dir.x * s(3.5f));
-            dl->AddLine(to, h1, col, 1.5f);
-            dl->AddLine(to, h2, col, 1.5f);
+            ImVec2 h1(to.x - dir.x * s(4.5f) - dir.y * s(3.0f), to.y - dir.y * s(4.5f) + dir.x * s(3.0f));
+            ImVec2 h2(to.x - dir.x * s(4.5f) + dir.y * s(3.0f), to.y - dir.y * s(4.5f) - dir.x * s(3.0f));
+            dl->AddLine(to, h1, col, 1.4f);
+            dl->AddLine(to, h2, col, 1.4f);
         };
 
         // Left: scattered bounce rays from a column of scene hit points
-        float beforeX = area.x + gw * 0.10f;
-        float rowH = gh / 13.0f;
+        dl->AddText(ImVec2(area.x, subHeaderY), colDim, "bounce rays");
+        float beforeX = area.x + gw * 0.08f;
+        float rowH = (bodyH - s(12.0f)) / 12.0f;
         for (int i = 0; i < 12; ++i) {
-            ImVec2 from(beforeX, area.y + (i + 1) * rowH);
+            ImVec2 from(beforeX, bodyY0 + s(6.0f) + (i + 0.5f) * rowH);
             dl->AddCircleFilled(from, s(2.0f), IM_COL32(200, 210, 230, 255));
-            drawArrow(from, rayAng[i], gw * 0.13f, groupCol[rayGroup[i]]);
+            drawArrowBounded(from, rayAng[i], gw * 0.24f, groupCol[rayGroup[i]], bodyY0 + s(3.0f), bodyY1 - s(3.0f));
         }
-        dl->AddText(ImVec2(area.x, area.y - s(12.0f)), colDim, "bounce rays");
 
         // Divider
-        float divX = area.x + gw * 0.46f;
-        dl->AddLine(ImVec2(divX, area.y), ImVec2(divX, areaEnd.y), IM_COL32(70, 85, 110, 200), 1.0f);
-        dl->AddText(ImVec2(divX - s(4.0f), area.y + gh * 0.5f), colDim, ">");
+        float divX = area.x + gw * 0.44f;
+        dl->AddLine(ImVec2(divX, bodyY0), ImVec2(divX, bodyY1), IM_COL32(70, 85, 110, 200), 1.0f);
+        dl->AddText(ImVec2(divX - s(3.0f), bodyY0 + bodyH * 0.45f), colDim, ">");
 
         // Right: the technique's reordering result
-        float afterX = area.x + gw * 0.52f;
+        float afterX = area.x + gw * 0.50f;
         float afterW = areaEnd.x - afterX;
 
         if (naive) {
-            // Same mixed arrows, one undivided dispatch
-            dl->AddRect(ImVec2(afterX, area.y), areaEnd, IM_COL32(70, 85, 110, 200), 1.0f);
+            dl->AddText(ImVec2(afterX, subHeaderY), colDim, "one dispatch (unreordered)");
+            dl->AddRect(ImVec2(afterX, bodyY0), ImVec2(areaEnd.x, bodyY1), IM_COL32(70, 85, 110, 200), s(2.0f));
             for (int i = 0; i < 12; ++i) {
-                ImVec2 from(afterX + afterW * 0.12f, area.y + (i + 1) * rowH);
-                drawArrow(from, rayAng[i], afterW * 0.55f, groupCol[rayGroup[i]]);
+                ImVec2 from(afterX + afterW * 0.12f, bodyY0 + s(6.0f) + (i + 0.5f) * rowH);
+                dl->AddCircleFilled(from, s(1.8f), groupCol[rayGroup[i]]);
+                drawArrowBounded(from, rayAng[i], afterW * 0.62f, groupCol[rayGroup[i]], bodyY0 + s(4.0f), bodyY1 - s(4.0f));
             }
-            dl->AddText(ImVec2(afterX, area.y - s(12.0f)), colDim, "one dispatch");
-            drawFootnote("no reordering: every wavefront mixes all direction groups");
         } else if (ser) {
-            // 2x2 bins, each with 3 parallel arrows of one direction group
-            float bw = afterW * 0.46f, bh = gh * 0.42f;
+            dl->AddText(ImVec2(afterX, subHeaderY), colDim, "SER coherence bins");
+            float gapX = afterW * 0.06f;
+            float gapY = bodyH * 0.08f;
+            float bw = (afterW - gapX) * 0.5f;
+            float bh = (bodyH - gapY) * 0.5f;
             for (int g = 0; g < 4; ++g) {
                 int bx = (g % 2), by = (g / 2);
-                ImVec2 b0(afterX + bx * (bw + afterW * 0.08f), area.y + by * (bh + gh * 0.10f));
+                ImVec2 b0(afterX + bx * (bw + gapX), bodyY0 + by * (bh + gapY));
                 ImVec2 b1(b0.x + bw, b0.y + bh);
-                dl->AddRect(b0, b1, groupCol[g], 1.0f);
+                dl->AddRectFilled(b0, b1, IM_COL32(20, 28, 40, 180), s(2.0f));
+                dl->AddRect(b0, b1, groupCol[g], s(2.0f));
                 for (int k = 0; k < 3; ++k) {
-                    ImVec2 from(b0.x + bw * 0.15f, b0.y + bh * (0.25f + 0.25f * k));
-                    drawArrow(from, groupAng[g], bw * 0.55f, groupCol[g]);
+                    ImVec2 from(b0.x + bw * 0.16f, b0.y + bh * (0.28f + 0.22f * k));
+                    drawArrowBounded(from, groupAng[g], bw * 0.62f, groupCol[g], b0.y + s(3.0f), b1.y - s(3.0f));
                 }
             }
-            dl->AddText(ImVec2(afterX, area.y - s(12.0f)), colDim, "SER bins");
-            drawFootnote("hardware re-bins rays by direction before traversal");
         } else {
-            // 4 compacted octant queue rows
-            float qh = gh * 0.185f;
+            dl->AddText(ImVec2(afterX, subHeaderY), colDim, "octant work queues");
+            float gapY = bodyH * 0.06f;
+            float qh = (bodyH - gapY * 3.0f) / 4.0f;
             for (int g = 0; g < 4; ++g) {
-                float qy = area.y + g * (qh + gh * 0.045f);
+                float qy = bodyY0 + g * (qh + gapY);
                 ImVec2 q0(afterX + afterW * 0.18f, qy);
-                ImVec2 q1(afterX + afterW * 0.95f, qy + qh);
-                dl->AddRect(q0, q1, IM_COL32(40, 52, 70, 255), 1.0f);
-                dl->AddRect(q0, q1, groupCol[g], 1.0f);
+                ImVec2 q1(areaEnd.x, qy + qh);
+                dl->AddRectFilled(q0, q1, IM_COL32(20, 28, 40, 180), s(2.0f));
+                dl->AddRect(q0, q1, groupCol[g], s(2.0f));
                 char lbl[8];
                 snprintf(lbl, sizeof(lbl), "O%d", g);
-                dl->AddText(ImVec2(afterX + s(2.0f), qy + qh * 0.25f), groupCol[g], lbl);
+                ImVec2 lsz = ImGui::CalcTextSize(lbl);
+                dl->AddText(ImVec2(afterX + s(2.0f), qy + (qh - lsz.y) * 0.5f), groupCol[g], lbl);
+                float qInnerW = q1.x - q0.x;
                 for (int k = 0; k < 3; ++k) {
-                    ImVec2 from(q0.x + afterW * 0.08f + k * afterW * 0.22f, qy + qh * 0.5f);
-                    drawArrow(from, 0.0f, afterW * 0.16f, groupCol[g]);
+                    ImVec2 from(q0.x + qInnerW * (0.10f + 0.28f * k), qy + qh * 0.5f);
+                    drawArrowBounded(from, 0.0f, qInnerW * 0.20f, groupCol[g], q0.y + s(2.0f), q1.y - s(2.0f));
                 }
             }
-            dl->AddText(ImVec2(afterX, area.y - s(12.0f)), colDim, "octant queues");
-            drawFootnote("rays classified into octants, compacted into per-batch work queues");
         }
         return;
     }
@@ -2735,60 +2789,55 @@ void GuiApp::renderLeftSidebar(float width, float height) {
         ImGui::BeginChild("DevCard", ImVec2(0, s(54.0f)), true, 
                           ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
 
-        if (ImGui::BeginTable("DevCardTbl", 2, ImGuiTableFlags_None)) {
-            ImGui::TableSetupColumn("DevCol", ImGuiTableColumnFlags_WidthStretch);
-            ImGui::TableSetupColumn("BadgeCol", ImGuiTableColumnFlags_WidthFixed, s(76.0f));
-            ImGui::TableNextRow();
-
-            ImGui::TableSetColumnIndex(0);
-            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(s(3.0f), s(3.0f)));
-            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + s(2.0f));
-            if (ImGui::Checkbox("##dev_sel", &dev.selected)) {
-                updateTelemetrySelection();
-            }
-            ImGui::PopStyleVar();
-
-            ImGui::SameLine(0, s(8.0f));
-            ImGui::BeginGroup();
-            if (dev.isSystem) {
-                ImVec4 titleCol = dev.selected ? ImVec4(0.98f, 0.85f, 0.45f, 1.0f) : ImVec4(0.80f, 0.75f, 0.55f, 0.85f);
-                pushBoldFont();
-                ImGui::TextColored(titleCol, "Host CPU & RAM");
-                popBoldFont();
-                std::string sub = formatCardDeviceSubtitle(dev);
-                ImGui::TextDisabled("%s", sub.c_str());
-            } else {
-                bool isPrimary = (dev.deviceIndex == 0);
-                std::string title = (gpuCount > 1)
-                    ? (isPrimary ? "GPU 0 (Primary)" : ("GPU " + std::to_string(dev.deviceIndex) + " (Secondary)"))
-                    : ("GPU " + std::to_string(dev.deviceIndex));
-                ImVec4 titleCol = dev.selected 
-                    ? (isPrimary ? ImVec4(0.38f, 0.85f, 1.00f, 1.0f) : ImVec4(0.72f, 0.85f, 0.98f, 1.0f))
-                    : ImVec4(0.60f, 0.68f, 0.80f, 0.8f);
-                pushBoldFont();
-                ImGui::TextColored(titleCol, "%s", title.c_str());
-                popBoldFont();
-                std::string sub = formatCardDeviceSubtitle(dev);
-                ImGui::TextDisabled("%s", sub.c_str());
-            }
-            ImGui::EndGroup();
-
-            ImGui::TableSetColumnIndex(1);
-            uint64_t memGb = (dev.vramTotalMb + 512) / 1024;
-            std::string badgeStr = dev.vramTotalMb > 0 ? ("[" + std::to_string(memGb) + " GB]") : "[N/A]";
-            ImVec4 badgeCol = dev.isSystem ? ImVec4(0.90f, 0.75f, 0.35f, 0.85f) : ImVec4(0.38f, 0.75f, 1.00f, 0.85f);
-            pushMonoFont();
-            float badgeW = ImGui::CalcTextSize(badgeStr.c_str()).x;
-            float availW = ImGui::GetContentRegionAvail().x;
-            if (availW > badgeW) {
-                ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (availW - badgeW));
-            }
-            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + s(2.0f));
-            ImGui::TextColored(badgeCol, "%s", badgeStr.c_str());
-            popMonoFont();
-
-            ImGui::EndTable();
+        // Row 1: Checkbox + Device Role Title + Right-Aligned Memory Badge
+        float rowStartY = ImGui::GetCursorPosY();
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(s(3.0f), s(3.0f)));
+        ImGui::SetCursorPosY(rowStartY + s(1.0f));
+        if (ImGui::Checkbox("##dev_sel", &dev.selected)) {
+            updateTelemetrySelection();
         }
+        ImGui::PopStyleVar();
+
+        float textIndentX = ImGui::GetCursorPosX() + ImGui::GetFrameHeight() + s(8.0f);
+        ImGui::SameLine(0, s(8.0f));
+        ImGui::SetCursorPosY(rowStartY + s(1.0f));
+        if (dev.isSystem) {
+            ImVec4 titleCol = dev.selected ? ImVec4(0.98f, 0.85f, 0.45f, 1.0f) : ImVec4(0.80f, 0.75f, 0.55f, 0.85f);
+            pushBoldFont();
+            ImGui::TextColored(titleCol, "Host CPU & RAM");
+            popBoldFont();
+        } else {
+            bool isPrimary = (dev.deviceIndex == 0);
+            std::string title = (gpuCount > 1)
+                ? (isPrimary ? "GPU 0 (Primary)" : ("GPU " + std::to_string(dev.deviceIndex) + " (Secondary)"))
+                : ("GPU " + std::to_string(dev.deviceIndex));
+            ImVec4 titleCol = dev.selected 
+                ? (isPrimary ? ImVec4(0.38f, 0.85f, 1.00f, 1.0f) : ImVec4(0.72f, 0.85f, 0.98f, 1.0f))
+                : ImVec4(0.60f, 0.68f, 0.80f, 0.8f);
+            pushBoldFont();
+            ImGui::TextColored(titleCol, "%s", title.c_str());
+            popBoldFont();
+        }
+
+        uint64_t memGb = (dev.vramTotalMb + 512) / 1024;
+        std::string badgeStr = dev.vramTotalMb > 0 ? ("[" + std::to_string(memGb) + " GB]") : "[N/A]";
+        ImVec4 badgeCol = dev.isSystem ? ImVec4(0.90f, 0.75f, 0.35f, 0.85f) : ImVec4(0.38f, 0.75f, 1.00f, 0.85f);
+        pushMonoFont();
+        float badgeW = ImGui::CalcTextSize(badgeStr.c_str()).x;
+        ImGui::SameLine();
+        float availRight = ImGui::GetContentRegionAvail().x;
+        if (availRight > badgeW) {
+            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (availRight - badgeW));
+        }
+        ImGui::SetCursorPosY(rowStartY + s(1.0f));
+        ImGui::TextColored(badgeCol, "%s", badgeStr.c_str());
+        popMonoFont();
+
+        // Row 2: Full-width device subtitle (indented beneath title, cleanly fitted)
+        ImGui::SetCursorPosX(textIndentX);
+        ImGui::SetCursorPosY(rowStartY + ImGui::GetTextLineHeight() + s(4.0f));
+        std::string sub = fitTextToPixelWidth(formatCardDeviceSubtitle(dev), ImGui::GetContentRegionAvail().x);
+        ImGui::TextDisabled("%s", sub.c_str());
 
         // Clicking anywhere on the card toggles its selection
         if (ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows) && ImGui::IsMouseClicked(0)) {
@@ -3044,8 +3093,8 @@ void GuiApp::renderLeftSidebar(float width, float height) {
         }
 
         float btnW = ImGui::CalcTextSize(sceneBtnLabels[sIdx]).x + ImGui::GetStyle().FramePadding.x * 2.0f;
-        if (btnW + ImGui::GetStyle().ItemSpacing.x <= ImGui::GetContentRegionAvail().x && sIdx > 0 && sIdx != 3) {
-            ImGui::SameLine();
+        if (sIdx > 0) {
+            sameLineIfFits(btnW);
         }
 
         if (ImGui::SmallButton(sceneBtnLabels[sIdx])) {
@@ -3505,6 +3554,9 @@ GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
         } else if (r.metric.find("ns") != std::string::npos) {
             double nsVal = (r.operations > 0) ? ((r.time_ms * 1e6) / r.operations) : r.time_ms;
             snprintf(buf, sizeof(buf), "%.1f ns", nsVal);
+        } else if (r.metric == "us") {
+            double usVal = (r.operations > 0) ? ((r.time_ms * 1000.0) / r.operations) : r.time_ms;
+            snprintf(buf, sizeof(buf), "%.1f us", usVal);
         } else {
             snprintf(buf, sizeof(buf), "%.1f %s", opsPerSec, r.metric.c_str());
         }
@@ -3555,20 +3607,20 @@ GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
         std::string baselineName = "";
         if (!isUnsupportedItem) {
             if (item.subcategory == "LDS Bank Conflicts") {
-                if (item.name.find("Baseline") != std::string::npos || item.name.find("Stride 1") != std::string::npos) {
+                if (item.configIndex == 0) {
                     info.isBaseline = true;
                     info.deltaText = "[Baseline]";
                     info.deltaColor = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
                 } else {
-                    baselineName = "Stride 1";
+                    baselineName = "LDS_Stride1_Baseline";
                 }
             } else if (item.subcategory == "Indirect Command Synthesis") {
-                if (item.name.find("Baseline") != std::string::npos || item.name.find("CPU Direct") != std::string::npos) {
+                if (item.configIndex == 0) {
                     info.isBaseline = true;
                     info.deltaText = "[Baseline]";
                     info.deltaColor = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
                 } else {
-                    baselineName = "CPU Direct";
+                    baselineName = "Indirect_Config0_Baseline";
                 }
             } else if (item.subcategory == "Dual-Issue" || item.subcategory == "ILP & Concurrency") {
                 if (item.name == "Standard FP32" || item.name == "FP32 Baseline (Ping-Pong)" || item.name.find("FP32 Baseline") != std::string::npos) {
@@ -3660,7 +3712,17 @@ GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
             for (const auto& r : m_allResults) {
                 if (r.deviceIndex == activeDev) {
                     if (r.isUnsupported || r.time_ms <= 0.0) continue;
-                    if (baselineName == "Dual_Issue_FP32_Baseline") {
+                    if (baselineName == "LDS_Stride1_Baseline") {
+                        if (r.subcategory == "LDS Bank Conflicts" && r.configIndex == 0) {
+                            baselineRes = &r;
+                            break;
+                        }
+                    } else if (baselineName == "Indirect_Config0_Baseline") {
+                        if (r.subcategory == "Indirect Command Synthesis" && r.configIndex == 0) {
+                            baselineRes = &r;
+                            break;
+                        }
+                    } else if (baselineName == "Dual_Issue_FP32_Baseline") {
                         if ((r.subcategory == "Dual-Issue" || r.subcategory == "ILP & Concurrency") &&
                             (r.configIndex == 0 || r.benchmarkName.find("Standard FP32") != std::string::npos || r.benchmarkName.find("FP32 Baseline") != std::string::npos)) {
                             baselineRes = &r;
@@ -3854,9 +3916,7 @@ void GuiApp::renderBenchmarkSuitePanel() {
         size_t count = (vi == 0) ? totalCatCount : catCounts[vi - 1];
         std::string labelStr = std::string(catBaseNames[vi]) + " (" + std::to_string(count) + ")";
         float btnW = ImGui::CalcTextSize(labelStr.c_str()).x + ImGui::GetStyle().FramePadding.x * 2.0f;
-        if (btnW + ImGui::GetStyle().ItemSpacing.x <= ImGui::GetContentRegionAvail().x) {
-            ImGui::SameLine();
-        }
+        sameLineIfFits(btnW);
         bool isAct = (m_suiteCategoryFilter == vi);
         if (isAct) {
             ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.48f, 0.92f, 1.0f));
@@ -3873,9 +3933,7 @@ void GuiApp::renderBenchmarkSuitePanel() {
 
     // Hide Unsupported Toggle placed cleanly with dynamic wrapping
     float checkW = ImGui::GetFrameHeight() + ImGui::GetStyle().ItemInnerSpacing.x + ImGui::CalcTextSize("Hide Unsupported").x + s(10.0f);
-    if (checkW + ImGui::GetStyle().ItemSpacing.x <= ImGui::GetContentRegionAvail().x) {
-        ImGui::SameLine();
-    }
+    sameLineIfFits(checkW);
     ImGui::PushStyleColor(ImGuiCol_Text, m_hideUnsupported ? ImVec4(0.70f, 0.80f, 0.95f, 1.0f) : ImVec4(0.95f, 0.70f, 0.25f, 1.0f));
     if (ImGui::Checkbox("Hide Unsupported", &m_hideUnsupported)) {
         if (m_hideUnsupported) {
@@ -3897,7 +3955,6 @@ void GuiApp::renderBenchmarkSuitePanel() {
     if (m_suiteCategoryFilter == 0 || m_suiteCategoryFilter == 3) {
         ImGui::Spacing();
         ImGui::TextDisabled("Preview Scene Scores:");
-        ImGui::SameLine();
         const char* sceneViewLabels[] = { "Indoor Atrium (Sponza) [Canonical]", "Open-World Forest", "Outdoor Landscape", "Showroom Studio" };
         const char* sceneViewTags[] = { "indoor", "forest", "outdoor", "showroom" };
         const char* sceneViewTips[] = {
@@ -3908,9 +3965,7 @@ void GuiApp::renderBenchmarkSuitePanel() {
         };
         for (int svi = 0; svi < 4; ++svi) {
             float sBtnW = ImGui::CalcTextSize(sceneViewLabels[svi]).x + ImGui::GetStyle().FramePadding.x * 2.0f;
-            if (sBtnW + ImGui::GetStyle().ItemSpacing.x <= ImGui::GetContentRegionAvail().x && svi > 0) {
-                ImGui::SameLine();
-            }
+            sameLineIfFits(sBtnW);
             bool isAct = (m_suiteActiveScene == sceneViewTags[svi]);
             if (isAct) {
                 ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.48f, 0.92f, 1.0f));
@@ -4063,10 +4118,8 @@ void GuiApp::renderBenchmarkSuitePanel() {
     };
 
     auto flowPill = [&](const char* label, int status, const char* tooltip) -> bool {
-        float pillW = ImGui::CalcTextSize(label).x + ImGui::GetStyle().FramePadding.x * 2.0f + s(16.0f);
-        if (pillW + ImGui::GetStyle().ItemSpacing.x <= ImGui::GetContentRegionAvail().x) {
-            ImGui::SameLine();
-        }
+        float pillW = ImGui::CalcTextSize(label).x + s(16.0f);
+        sameLineIfFits(pillW);
         return renderFilterPill(label, status, tooltip);
     };
 
@@ -4153,11 +4206,10 @@ void GuiApp::renderBenchmarkSuitePanel() {
     float untestW = ImGui::CalcTextSize("Collapse Untested").x + ImGui::GetStyle().FramePadding.x * 2.0f;
     float expW = ImGui::CalcTextSize("Expand All").x + ImGui::GetStyle().FramePadding.x * 2.0f;
     float colW = ImGui::CalcTextSize("Collapse All").x + ImGui::GetStyle().FramePadding.x * 2.0f;
-    float groupControlsW = expW + colW + untestW + s(32.0f);
-    if (groupControlsW <= ImGui::GetContentRegionAvail().x) {
-        ImGui::SameLine();
+    float groupControlsW = untestW + expW + colW + s(20.0f);
+    if (sameLineIfFits(groupControlsW + s(12.0f))) {
         float availForExp = ImGui::GetContentRegionAvail().x;
-        if (availForExp > groupControlsW + s(10.0f)) {
+        if (availForExp > groupControlsW) {
             ImGui::SetCursorPosX(ImGui::GetCursorPosX() + availForExp - groupControlsW);
         }
     }
@@ -4172,13 +4224,13 @@ void GuiApp::renderBenchmarkSuitePanel() {
             }
         }
     }
-    ImGui::SameLine(0, s(6.0f));
+    sameLineIfFits(expW, s(6.0f));
     if (ImGui::SmallButton("Expand All")) {
         for (auto& cat : m_categories) {
             for (auto& sub : cat.subgroups) sub.collapsed = false;
         }
     }
-    ImGui::SameLine(0, s(6.0f));
+    sameLineIfFits(colW, s(6.0f));
     if (ImGui::SmallButton("Collapse All")) {
         for (auto& cat : m_categories) {
             for (auto& sub : cat.subgroups) sub.collapsed = true;
@@ -4271,42 +4323,46 @@ void GuiApp::renderBenchmarkSuitePanel() {
         bool isAllSel = (selectedCount == visibleCount && visibleCount > 0);
         bool isPartSel = (selectedCount > 0 && selectedCount < visibleCount);
 
-        float availW = ImGui::GetContentRegionAvail().x;
+        float availW = std::max(s(220.0f), ImGui::GetContentRegionAvail().x);
         float frameH = ImGui::GetFrameHeight();
         float headerH = std::max(s(32.0f), frameH + s(8.0f));
 
-        // 1. Check if there are comparison / baseline rows in this subgroup
+        // 1. Dynamically measure actual Score and Delta column widths for this subgroup
         bool hasAnyComparison = false;
-        for (const auto& itm : sub.items) {
-            BenchmarkDisplayInfo d = getBenchmarkDisplayInfo(itm, m_telemetryGpuIndex);
-            if ((d.hasResult && d.hasComparison && !d.primaryResult.isUnsupported) ||
-                (d.isBaseline && sub.items.size() > 1)) {
-                hasAnyComparison = true;
-                break;
-            }
-        }
-
-        // 2. Fixed column widths for Score and Speedup guarantee visibility
         pushMonoFont();
-        float scoreColW = std::max(s(130.0f), ImGui::CalcTextSize("99999.9 MRecords/s").x + s(12.0f));
-        float deltaColW = hasAnyComparison ? std::max(s(130.0f), ImGui::CalcTextSize("[Baseline]").x + s(40.0f)) : 0.0f;
-        popMonoFont();
-        int numSubCols = hasAnyComparison ? 3 : 2;
-
-        // 3. Exact minimum width needed by workload column so NO test name is ever truncated
-        float maxWorkloadTextW = s(200.0f);
+        float maxScoreW = ImGui::CalcTextSize("[TFLOPS]").x;
+        float maxDeltaW = ImGui::CalcTextSize("[Baseline]").x + s(10.0f);
         for (const auto& itm : sub.items) {
             BenchmarkDisplayInfo d = getBenchmarkDisplayInfo(itm, m_telemetryGpuIndex);
             bool isUnsupported = (!itm.isSupported || (d.hasResult && d.primaryResult.isUnsupported));
             if (m_hideUnsupported && isUnsupported) continue;
-            float tw = ImGui::CalcTextSize(itm.name.c_str()).x;
-            if (tw > maxWorkloadTextW) maxWorkloadTextW = tw;
-        }
-        float minWorkloadColW = maxWorkloadTextW + s(16.0f) /* indent */ + frameH /* checkbox */ + 
-                                ImGui::GetStyle().ItemInnerSpacing.x + ImGui::GetStyle().CellPadding.x * 2.0f + s(12.0f) /* safety margin */;
-        float minTableW = minWorkloadColW + scoreColW + deltaColW + s(10.0f);
 
-        // 4. Right-aligned header score/status badge
+            std::string scStr;
+            if (d.hasResult && !d.primaryResult.isUnsupported && d.primaryResult.time_ms > 0.0) {
+                scStr = d.scoreText;
+            } else if (isUnsupported) {
+                scStr = "[UNSUPPORTED]";
+            } else {
+                scStr = "[" + itm.metricType + "]";
+            }
+            maxScoreW = std::max(maxScoreW, ImGui::CalcTextSize(scStr.c_str()).x);
+
+            if ((d.hasResult && d.hasComparison && !d.primaryResult.isUnsupported) ||
+                (d.isBaseline && sub.items.size() > 1)) {
+                hasAnyComparison = true;
+                if (!d.deltaText.empty()) {
+                    float dw = ImGui::CalcTextSize(d.deltaText.c_str()).x + (d.isBaseline ? s(10.0f) : s(26.0f));
+                    maxDeltaW = std::max(maxDeltaW, dw);
+                }
+            }
+        }
+        popMonoFont();
+
+        float scoreColW = maxScoreW + s(12.0f);
+        float deltaColW = hasAnyComparison ? (maxDeltaW + s(8.0f)) : 0.0f;
+        int numSubCols = hasAnyComparison ? 3 : 2;
+
+        // 2. Right-aligned header score/status badge
         std::string rightBadge = "";
         ImVec4 badgeColor = ImVec4(0.6f, 0.7f, 0.85f, 1.0f);
         if (sub.collapsed) {
@@ -4342,13 +4398,9 @@ void GuiApp::renderBenchmarkSuitePanel() {
         pushMonoFont();
         float badgeW = ImGui::CalcTextSize(rightBadge.c_str()).x;
         popMonoFont();
-        pushBoldFont();
-        float titleTextW = ImGui::CalcTextSize(sub.name.c_str()).x;
-        popBoldFont();
-        float minHeaderW = s(58.0f) + titleTextW + s(24.0f) + badgeW + s(16.0f);
 
-        float requiredCardW = std::max(minTableW, minHeaderW);
-        float cardW = std::max(availW, requiredCardW);
+        // Clamp cardW strictly to availW so cards NEVER overflow or clip against parent grid columns!
+        float cardW = availW;
 
         ImVec2 p0 = ImGui::GetCursorScreenPos();
         ImVec2 p1 = ImVec2(p0.x + cardW, p0.y + headerH);
@@ -4407,9 +4459,14 @@ void GuiApp::renderBenchmarkSuitePanel() {
         if (isPartSel) ImGui::PopStyleColor();
         if (!canEditWorkloads) ImGui::EndDisabled();
 
-        // Subgroup Name and count
+        // Subgroup Name and count (fitted so it never collides with right-aligned badge)
         float textOffsetY = (headerH - ImGui::GetTextLineHeight()) * 0.5f;
-        float titleStartX = p0.x + s(58.0f);
+        float titleStartX = p0.x + s(56.0f);
+        float badgeStartX = p0.x + cardW - badgeW - s(10.0f);
+        std::string countStr = "(" + std::to_string(selectedCount) + "/" + std::to_string(visibleCount) + ")";
+        float countW = ImGui::CalcTextSize(countStr.c_str()).x;
+        float maxTitleW = std::max(s(80.0f), badgeStartX - titleStartX - countW - s(16.0f));
+
         ImGui::SetCursorScreenPos(ImVec2(titleStartX, p0.y + textOffsetY));
         std::string displaySubName = sub.name;
         if (sub.component == "Ray Tracing" && (sub.engineId == "RayScheduling" || sub.engineId == "RayPathTracing")) {
@@ -4419,16 +4476,15 @@ void GuiApp::renderBenchmarkSuitePanel() {
             else if (m_suiteActiveScene == "showroom") displaySubName += " [Showroom Studio]";
         }
         pushBoldFont();
-        ImGui::TextColored(ImVec4(0.95f, 0.96f, 0.98f, 1.0f), "%s", displaySubName.c_str());
+        std::string fittedSubName = fitTextToPixelWidth(displaySubName, maxTitleW);
+        ImGui::TextColored(ImVec4(0.95f, 0.96f, 0.98f, 1.0f), "%s", fittedSubName.c_str());
         popBoldFont();
 
         ImGui::SameLine(0, s(6.0f));
-        ImGui::TextDisabled("(%zu/%zu)", selectedCount, visibleCount);
-        float titleEndX = ImGui::GetCursorScreenPos().x;
+        ImGui::TextDisabled("%s", countStr.c_str());
 
-        // Render right-aligned header badge ONLY if it doesn't collide with title
-        float badgeStartX = p0.x + cardW - badgeW - s(10.0f);
-        if (badgeStartX > titleEndX + s(12.0f)) {
+        // Render right-aligned header badge inside cardW
+        if (badgeStartX > titleStartX + s(60.0f)) {
             ImGui::SetCursorScreenPos(ImVec2(badgeStartX, p0.y + textOffsetY));
             pushMonoFont();
             ImGui::TextColored(badgeColor, "%s", rightBadge.c_str());
@@ -4437,7 +4493,7 @@ void GuiApp::renderBenchmarkSuitePanel() {
 
         // Clickable title area for collapse/expand
         ImGui::SetCursorScreenPos(ImVec2(titleStartX, p0.y));
-        if (ImGui::InvisibleButton("##title_click", ImVec2(cardW - s(58.0f), headerH))) {
+        if (ImGui::InvisibleButton("##title_click", ImVec2(cardW - s(56.0f), headerH))) {
             sub.collapsed = !sub.collapsed;
         }
 
@@ -4514,18 +4570,20 @@ void GuiApp::renderBenchmarkSuitePanel() {
                         ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0, shadedBg);
                     }
 
-                    // Col 0: Workload Checkbox & Label
+                    // Col 0: Workload Checkbox & Label (cleanly fitted to column width)
                     ImGui::TableNextColumn();
-                    ImGui::Indent(s(16.0f));
+                    ImGui::Indent(s(12.0f));
+                    float maxLabelW = std::max(s(60.0f), ImGui::GetContentRegionAvail().x - frameH - ImGui::GetStyle().ItemInnerSpacing.x - s(4.0f));
+                    std::string cbLabel = fitTextToPixelWidth(item.name, maxLabelW) + "##itm_cb";
 
                     if (isUnsupported || !canEditWorkloads) {
                         ImGui::BeginDisabled(true);
-                        ImGui::Checkbox(item.name.c_str(), &item.selected);
+                        ImGui::Checkbox(cbLabel.c_str(), &item.selected);
                         ImGui::EndDisabled();
                     } else {
-                        ImGui::Checkbox(item.name.c_str(), &item.selected);
+                        ImGui::Checkbox(cbLabel.c_str(), &item.selected);
                     }
-                    ImGui::Unindent(s(16.0f));
+                    ImGui::Unindent(s(12.0f));
 
                     if (item.viz.linkedViewportMode >= 0 && ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
                         m_rtViewportMode = item.viz.linkedViewportMode;
@@ -4608,13 +4666,13 @@ void GuiApp::renderBenchmarkSuitePanel() {
                         float curCenterY = cellPos.y + textH * 0.5f;
 
                         if (dispInfo.isBaseline && !isUnsupported && dispInfo.hasResult && dispInfo.primaryResult.time_ms > 0.0) {
-                            activeBaselineX = cellPos.x + s(10.0f);
+                            activeBaselineX = cellPos.x + s(8.0f);
                             activeBaselineY = curCenterY;
                             hasActiveBaseline = true;
                             activeBaselineSubcat = item.subcategory;
 
                             ImVec4 baseColor = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
-                            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + s(6.0f));
+                            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + s(4.0f));
                             ImGui::TextColored(baseColor, "[Baseline]");
                         } else if (dispInfo.hasComparison && dispInfo.hasResult && !isUnsupported && dispInfo.primaryResult.time_ms > 0.0 && !dispInfo.deltaText.empty()) {
                             if (!item.subcategory.empty() && item.subcategory != activeBaselineSubcat) {
@@ -4622,10 +4680,10 @@ void GuiApp::renderBenchmarkSuitePanel() {
                                 activeBaselineY = -1.0f;
                                 activeBaselineSubcat = "";
                             }
-                            float stemX = (hasActiveBaseline && activeBaselineX > 0.0f) ? activeBaselineX : (cellPos.x + s(10.0f));
+                            float stemX = (hasActiveBaseline && activeBaselineX > 0.0f) ? activeBaselineX : (cellPos.x + s(8.0f));
                             ImDrawList* drawList = ImGui::GetWindowDrawList();
                             ImU32 branchCol = ImGui::GetColorU32(ImVec4(0.38f, 0.65f, 0.90f, 0.65f));
-                            float branchLen = s(12.0f);
+                            float branchLen = s(10.0f);
 
                             if (hasActiveBaseline && activeBaselineY > 0.0f && item.subcategory == activeBaselineSubcat) {
                                 // Draw vertical connecting stem from baseline down to current speedup row
@@ -4639,7 +4697,7 @@ void GuiApp::renderBenchmarkSuitePanel() {
                             drawList->AddLine(ImVec2(stemX + branchLen - arrowSz, curCenterY + arrowSz), ImVec2(stemX + branchLen, curCenterY), branchCol, s(1.5f));
 
                             // Offset text past branch indicator
-                            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + s(24.0f));
+                            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + s(21.0f));
                             ImGui::TextColored(dispInfo.deltaColor, "%s", dispInfo.deltaText.c_str());
                         } else {
                             if (!item.subcategory.empty() && item.subcategory != activeBaselineSubcat) {
@@ -4658,10 +4716,6 @@ void GuiApp::renderBenchmarkSuitePanel() {
             }
         }
 
-        if (cardW > availW) {
-            ImGui::Dummy(ImVec2(cardW, 0.0f));
-        }
-
         // Clean separation gap between subgroups
         ImGui::Spacing();
         ImGui::Dummy(ImVec2(0, s(4.0f)));
@@ -4669,7 +4723,7 @@ void GuiApp::renderBenchmarkSuitePanel() {
     };
 
     // Scrollable suite area ensures no content is ever clipped or lost off screen
-    ImGui::BeginChild("SuiteScrollArea", ImVec2(0, 0), false, ImGuiWindowFlags_HorizontalScrollbar);
+    ImGui::BeginChild("SuiteScrollArea", ImVec2(0, 0), false);
 
     std::vector<BenchmarkSubgroup*> activeSubgroups;
     if (m_suiteCategoryFilter == 0) {
@@ -4703,7 +4757,7 @@ void GuiApp::renderBenchmarkSuitePanel() {
 
     float availW = ImGui::GetContentRegionAvail().x;
     float fontScaleFactor = ImGui::GetFontSize() / 16.0f;
-    float minColW = std::max(s(440.0f), 400.0f * fontScaleFactor);
+    float minColW = std::max(s(460.0f), 420.0f * fontScaleFactor);
     int maxCols = std::max(1, static_cast<int>(availW / minColW));
     if (maxCols > 4) maxCols = 4;
 
@@ -4726,8 +4780,7 @@ void GuiApp::renderBenchmarkSuitePanel() {
             visibleSubgroups, numCols, getSubHeight);
 
         std::string tableId = "DynamicSuiteGrid_" + std::to_string(numCols);
-        float gridW = std::max(availW, minColW * numCols);
-        if (ImGui::BeginTable(tableId.c_str(), numCols, ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_NoSavedSettings, ImVec2(gridW, 0.0f))) {
+        if (ImGui::BeginTable(tableId.c_str(), numCols, ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_NoSavedSettings, ImVec2(availW, 0.0f))) {
             for (int c = 0; c < numCols; ++c) {
                 ImGui::TableNextColumn();
                 for (auto* sub : cols[c]) {
@@ -5586,6 +5639,9 @@ void GuiApp::renderResultsScorecard() {
                     if (r.metric.find("ns") != std::string::npos) {
                         return (r.time_ms * 1e6) / static_cast<double>(r.operations);
                     }
+                    if (r.metric == "us") {
+                        return (r.time_ms * 1000.0) / static_cast<double>(r.operations);
+                    }
                     return (static_cast<double>(r.operations) / r.time_ms) * 1000.0;
                 };
                 std::stable_sort(sortedResults.begin(), sortedResults.end(),
@@ -5746,7 +5802,7 @@ void GuiApp::renderResultsScorecard() {
                     ImGui::Text("%.2f GB/s", curOpsPerSec / 1e9);
                 } else if (res.metric.find("GIS/s") != std::string::npos) {
                     ImGui::Text("%.2f GIS/s", curOpsPerSec / 1e9);
-                } else if (res.metric.find("MRays/s") != std::string::npos || res.metric.find("MItems/s") != std::string::npos) {
+                } else if (res.metric.find("MRays/s") != std::string::npos || res.metric.find("MItems/s") != std::string::npos || res.metric.find("MHits/s") != std::string::npos || res.metric.find("MRecords/s") != std::string::npos) {
                     ImGui::Text("%.2f %s", curOpsPerSec / 1e6, res.metric.c_str());
                 } else if (res.metric.find("GPixels/s") != std::string::npos) {
                     ImGui::Text("%.2f GPixels/s", curOpsPerSec / 1e9);
@@ -5759,6 +5815,9 @@ void GuiApp::renderResultsScorecard() {
                 } else if (res.metric.find("ns") != std::string::npos) {
                     double nsVal = (res.operations > 0) ? ((res.time_ms * 1e6) / res.operations) : res.time_ms;
                     ImGui::Text("%.2f ns", nsVal);
+                } else if (res.metric == "us") {
+                    double usVal = (res.operations > 0) ? ((res.time_ms * 1000.0) / res.operations) : res.time_ms;
+                    ImGui::Text("%.2f us", usVal);
                 } else {
                     ImGui::Text("%.2f %s", curOpsPerSec, res.metric.c_str());
                 }
@@ -6867,8 +6926,8 @@ void GuiApp::renderRayTracingViewport() {
         // Material selector buttons (dynamically sized to prevent text clipping)
         for (size_t mi = 0; mi < numMaterials; ++mi) {
             float btnW = ImGui::CalcTextSize(materials[mi].name).x + s(24.0f);
-            if (mi > 0 && (btnW + s(4.0f) <= ImGui::GetContentRegionAvail().x)) {
-                ImGui::SameLine(0, s(4.0f));
+            if (mi > 0) {
+                sameLineIfFits(btnW, s(4.0f));
             }
             bool isCur = (static_cast<size_t>(m_rtMaterialIndex) == mi);
             if (isCur) {
@@ -7040,8 +7099,8 @@ void GuiApp::renderRayTracingViewport() {
         // Geometry Selector buttons (dynamically sized to prevent text clipping)
         for (size_t gi = 0; gi < numGeo; ++gi) {
             float btnW = ImGui::CalcTextSize(geoViews[gi].title).x + s(24.0f);
-            if (gi > 0 && (btnW + s(4.0f) <= ImGui::GetContentRegionAvail().x)) {
-                ImGui::SameLine(0, s(4.0f));
+            if (gi > 0) {
+                sameLineIfFits(btnW, s(4.0f));
             }
             bool isCur = (static_cast<size_t>(m_rtGeometryIndex) == gi);
             if (isCur) {

@@ -1,5 +1,5 @@
 // GPUBench Industry-Standard PBR Shading Pipeline (8 Production AAA BSDF Archetypes)
-// Shared identically across Traditional Megakernel and DGC pathways.
+// Shared across Traditional Megakernel, Persistent Megakernel, DGC, and Hardware RT / SER pathways.
 
 struct GltfVertexGpu {
     float px, py, pz;
@@ -150,7 +150,7 @@ vec3 evaluateCookTorranceGGX(
     float denomD = (NdotH * NdotH * (a2 - 1.0) + 1.0);
     float D = a2 / (3.1415926535 * denomD * denomD + 1e-7);
 
-    // 2. G: Smith Height-Correlated Masking-Shadowing Function (Schlick-GGX)
+    // 2. G: Separable Smith Masking-Shadowing Function (Schlick-GGX)
     float k = (roughness + 1.0) * (roughness + 1.0) / 8.0;
     float G1_V = NdotV / (NdotV * (1.0 - k) + k);
     float G1_L = NdotL / (NdotL * (1.0 - k) + k);
@@ -252,7 +252,7 @@ vec3 evaluateMaterialArchetypeDirect(
             vec3 coatSpec = vec3((D_f * F_f * 0.70) / (4.0 * max(NdotL, 0.01) * NdotV + 0.001) * NdotL);
             return (diff + coatSpec) * lightRadiance;
         }
-        case 6: { // Archetype 6: Clearcoat Automotive Paint with Voronoi Micro-Flakes
+        case 6: { // Archetype 6: Clearcoat Automotive Paint with Procedural Grid-Cell Micro-Flakes
             float NdotL = max(dot(N, L), 0.0);
             vec3 H = normalize(V + L);
             float NdotH = max(dot(N, H), 0.0);
@@ -630,7 +630,7 @@ vec3 evaluateGltfPbrInternal(
         vec3 skyRadiance = evalOutdoorSky(N) * 0.45 * ao;
 
         if (mat.transmissionFactor > 0.80) {
-            // Material 5: River Water Surface with Snell's Law Refraction & Riverbed Bathymetry
+            // High-transmission water surface (transmissionFactor > 0.80): Snell's Law Refraction & Riverbed Bathymetry
             vec2 waveUV = hitPos.xy * 0.08;
             float w1 = sin(waveUV.x * 3.2 + waveUV.y * 2.1) * 0.025;
             float w2 = cos(waveUV.x * 6.5 - waveUV.y * 4.2) * 0.015;
@@ -663,21 +663,21 @@ vec3 evaluateGltfPbrInternal(
             float sunGlint = pow(max(dot(waterNorm, halfVec), 0.0), 180.0) * 12.0 * sunShadow;
             totalRadiance = mix(riverbedColor, reflSky, F_w) + sunColor * sunGlint;
         } else if (mat.transmissionFactor > 0.25) {
-            // Material 0: Canopy Leaves & Needles (Two-sided thin-surface transmission)
+            // Translucent foliage / canopy leaves & needles (0.25 < transmissionFactor <= 0.80): two-sided thin-surface transmission
             float backNdotL = max(dot(-N, sunDir), 0.0);
             vec3 transmission = baseColor * vec3(1.1, 1.4, 0.6) * backNdotL * sunColor * sunShadow * 0.85;
             float F_sheen = pow(clamp(1.0 - max(dot(N, V), 0.0), 0.0, 1.0), 4.0) * 0.45;
             totalRadiance = evaluateCookTorranceGGX(baseColor, roughness, metallic, N, V, sunDir, sunColor * sunShadow)
                           + transmission + vec3(F_sheen) * skyRadiance + baseColor * skyRadiance;
         } else if (roughness < 0.35 && baseColor.r > 0.85) {
-            // Material 6: Alpine Snow & Frost with Crystalline Micro-Glints
+            // Bright low-roughness surfaces (Alpine Snow & Frost): Crystalline Micro-Glints
             vec3 halfVec = normalize(V + sunDir);
             float NdotH = max(dot(N, halfVec), 0.0);
             float glint = pow(NdotH, 120.0) * 8.0 * sunShadow;
             totalRadiance = evaluateCookTorranceGGX(baseColor, 0.35, 0.0, N, V, sunDir, sunColor * sunShadow)
                           + vec3(glint) * sunColor + baseColor * skyRadiance;
         } else {
-            // Materials 1, 2, 3, 4, 7: Bark, Granite Rock, Dirt, Grass, Timber
+            // Opaque natural terrain & woodland surfaces (Bark, Granite Rock, Dirt, Grass, Timber)
             vec3 effColor = baseColor;
             float effRough = roughness;
             // Moisture darkening on dirt/rocks near waterline

@@ -22,7 +22,7 @@ layout(set = 0, binding = 1) buffer IndirectCommandsBuffer {
 
 layout(push_constant) uniform ResolvePC {
     uint resetQueue;
-    uint dgcMode; // 0: legacy only, 1: standard compacted DGC, 2: consolidated octant DGC, 3: ping-pong bounce
+    uint dgcMode; // 0: legacy only, 1: standard compacted DGC, 2: consolidated octant DGC, 3: ping-pong bounce, 4: directional shadows, 5: single light, 6: 128 lights binning, 7: G-buffer normal shading
     uint bounceIndex;
 } rpc;
 

@@ -38,8 +38,9 @@ extern "C" __global__ void run_benchmark(unsigned int *data) {
   // -0.248046875 in BF16 is 0xBE7E
   short2_v m = {static_cast<short>(0xBE7Eu), static_cast<short>(0xBE7Eu)};
 
-  // Each iteration performs 64 v_dot2_f32_bf16 instructions (32 pairs x 2 dot2 = 256 BF16 ops)
-  // matching Vulkan shaders/bf16.comp (32768 iterations x 256 ops/iter).
+  // Each iteration invokes 64 __builtin_amdgcn_fdot2_f32_bf16 calls (32 pairs x 2 dot2 = 256 BF16 ops,
+  // which hipcc dual-issues primarily as v_dual_dot2acc_f32_bf16 on RDNA 3/4), matching the iteration
+  // and operation count of Vulkan shaders/bf16.comp (32768 iterations x 256 ops/iter) while accumulating in FP32.
   for (int i = 0; i < 32768; ++i) {
     APPLY32(STEP)
   }

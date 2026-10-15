@@ -46,7 +46,7 @@ const uint SCENE_OUTDOOR_TERRAIN = 1u;
 const uint SCENE_INDOOR_ATRIUM   = 2u;
 const uint SCENE_AAA_FOREST       = 3u;
 
-// Indoor Atrium Primitives
+// Procedural Showroom Studio & Indoor Atrium Primitives
 const uint PRIM_KNOT_PAINT_END  = 1536u;
 const uint PRIM_KNOT_JADE_END   = 3072u;
 const uint PRIM_KNOT_CHROME_END = 4608u;

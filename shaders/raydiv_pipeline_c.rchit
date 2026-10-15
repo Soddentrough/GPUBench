@@ -4,6 +4,7 @@
 layout(location = 0) rayPayloadInEXT vec3 payload;
 
 void main() {
+    // Legacy multi-shader SBT variant C (75 iterations; active benchmark uses uniform raydiv_pipeline_a.rchit)
     vec3 p = gl_WorldRayOriginEXT + gl_WorldRayDirectionEXT * gl_HitTEXT;
     
     float val = length(p);

@@ -47,7 +47,7 @@ layout(set = 0, binding = 5) readonly buffer VertexBuffer {
 
 layout(push_constant) uniform PushConstants {
     uint rayCount;
-    uint mode;            // 0: Material Divergence, 1: Multi-Bounce Path Tracing, 2: Incoherent GI, 3: Compaction microbench
+    uint mode;            // 0: Material Divergence, 1: Multi-Bounce Path Tracing, 2: Incoherent GI, 3: Compaction microbench, 5: Full-Stack DGC, 6: Directional Shadows, 7: Single Light, 8: 128 Lights, 9: Primary Normals
     uint bounce;          // Current bounce index
     uint seed;
     uint dumpRenders;     // 1: dump pixels to fb
@@ -55,7 +55,7 @@ layout(push_constant) uniform PushConstants {
     uint height;
     uint queueCapacity;
     uint spatialPattern;  // 0: Linear 32x1, 1: Tiled 8x4, 2: Morton 8x4, 3: Morton 4x8
-    uint sceneType;       // 0: Showroom Studio, 1: Outdoor Terrain, 2: Indoor Atrium
+    uint sceneType;       // 0: Showroom Studio, 1: Outdoor Terrain, 2: Indoor Atrium, 3: AAA Forest
     uint isGltf;          // 1 if glTF PBR scene, 0 if procedural
     uint spp;             // Samples per pixel (default: 1)
 } pc;
@@ -67,7 +67,7 @@ const uint SCENE_OUTDOOR_TERRAIN = 1u;
 const uint SCENE_INDOOR_ATRIUM   = 2u;
 const uint SCENE_AAA_FOREST       = 3u;
 
-// Indoor Atrium Primitives
+// Procedural Showroom Studio & Indoor Atrium Primitives
 const uint PRIM_KNOT_PAINT_END  = 1536u;
 const uint PRIM_KNOT_JADE_END   = 3072u;
 const uint PRIM_KNOT_CHROME_END = 4608u;

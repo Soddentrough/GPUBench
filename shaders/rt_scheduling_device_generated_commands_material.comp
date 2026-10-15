@@ -39,9 +39,9 @@ layout(push_constant) uniform PushConstants {
     uint dumpRenders;
     uint width;
     uint height;
-    uint sceneType;       // 0: Showroom Studio, 1: Outdoor Terrain, 2: Indoor Atrium
+    uint sceneType;       // 0: Showroom Studio, 1: Outdoor Terrain, 2: Indoor Atrium, 3: AAA Forest
     uint isGltf;          // 1 if glTF PBR scene, 0 if procedural
-    uint mode;            // 0: Full Render, 1: Pure Shading microbenchmark
+    uint mode;            // 0: Full Render, 1: Pure Shading microbenchmark, 2: Primary Surface Normals / G-Buffer
 } pc;
 
 // Scene Type Constants
@@ -50,7 +50,7 @@ const uint SCENE_OUTDOOR_TERRAIN = 1u;
 const uint SCENE_INDOOR_ATRIUM   = 2u;
 const uint SCENE_AAA_FOREST       = 3u;
 
-// Indoor Atrium Primitives
+// Procedural Showroom Studio & Indoor Atrium Primitives
 const uint PRIM_KNOT_PAINT_END  = 1536u;
 const uint PRIM_KNOT_JADE_END   = 3072u;
 const uint PRIM_KNOT_CHROME_END = 4608u;

@@ -1,9 +1,8 @@
 #include <hip/hip_runtime.h>
 
-// Experimental GFX12 FP8 Matrix Kernel
-// Trying to use RDNA3/4 WMMA intrinsic.
-// Note: RDNA3 (gfx11) does not support fp8 wmma. RDNA4 (gfx12) does.
-// The intrinsic name is a guess based on LLVM conventions.
+// RDNA 4 (gfx1200 / gfx1201) FP8 Wave32 16x16x16 WMMA Matrix Benchmark.
+// Performs 4096 iterations * 8 independent 16x16x16 WMMA accumulators per wave
+// (32768 matrix operations * 8192 FLOPs = 268,435,456 FP8 ops per Wave32).
 
 extern "C" __global__ void run_benchmark(float* data) {
     uint32_t idx = blockIdx.x * blockDim.x + threadIdx.x;
