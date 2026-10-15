@@ -48,10 +48,6 @@ public:
           (context == nullptr || context == this->context)) {
         return vectorKernel != nullptr;
       }
-      // On ROCm, scalar hip_bfloat16 vector math is emulated via FP32 on RDNA3/4;
-      // only Matrix WMMA is native unless vectorKernel is explicitly loaded.
-      if (context && context->getBackend() == ComputeBackend::ROCm)
-        return false;
       return true;
     }
     if (config_idx == 1) {
@@ -68,9 +64,6 @@ public:
   std::string GetConfigSupportNote(uint32_t config_idx,
                                    const DeviceInfo &info,
                                    IComputeContext *context = nullptr) const override {
-    if (config_idx == 0 && context && context->getBackend() == ComputeBackend::ROCm) {
-      return "HIP toolchain emulates vector bf16 via FP32; only BF16 Matrix WMMA is native on ROCm";
-    }
     if (config_idx == 1 && !info.cooperativeMatrixSupport) {
       return "VK_KHR_cooperative_matrix or ROCm WMMA not supported";
     }
@@ -79,9 +72,6 @@ public:
   SupportLimitation GetConfigSupportLimitation(uint32_t config_idx,
                                                const DeviceInfo &info,
                                                IComputeContext *context = nullptr) const override {
-    if (config_idx == 0 && context && context->getBackend() == ComputeBackend::ROCm) {
-      return SupportLimitation::kToolchain;
-    }
     if (config_idx == 1 && !info.cooperativeMatrixSupport) {
       return SupportLimitation::kHardware;
     }

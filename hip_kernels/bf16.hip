@@ -1,85 +1,110 @@
+// Requires ROCm 6.4+
+// BF16 vector benchmark using hardware packed BF16 dot2 instructions
+// (v_dot2_f32_bf16 on RDNA 3 / RDNA 4).
 #include <hip/hip_runtime.h>
 #include <hip/hip_bfloat16.h>
 
-extern "C" __global__ void run_benchmark(hip_bfloat16 *data) {
+using short2_v = __attribute__((ext_vector_type(2))) short;
+
+extern "C" __global__ void run_benchmark(unsigned int *data) {
   unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
-  hip_bfloat16 seed = data[idx % 1024u];
-  hip_bfloat16 val1  = seed + hip_bfloat16(0.01f);
-  hip_bfloat16 val2  = seed + hip_bfloat16(0.02f);
-  hip_bfloat16 val3  = seed + hip_bfloat16(0.03f);
-  hip_bfloat16 val4  = seed + hip_bfloat16(0.04f);
-  hip_bfloat16 val5  = seed + hip_bfloat16(0.05f);
-  hip_bfloat16 val6  = seed + hip_bfloat16(0.06f);
-  hip_bfloat16 val7  = seed + hip_bfloat16(0.07f);
-  hip_bfloat16 val8  = seed + hip_bfloat16(0.08f);
-  hip_bfloat16 val9  = seed + hip_bfloat16(0.09f);
-  hip_bfloat16 val10 = seed + hip_bfloat16(0.10f);
-  hip_bfloat16 val11 = seed + hip_bfloat16(0.11f);
-  hip_bfloat16 val12 = seed + hip_bfloat16(0.12f);
-  hip_bfloat16 val13 = seed + hip_bfloat16(0.13f);
-  hip_bfloat16 val14 = seed + hip_bfloat16(0.14f);
-  hip_bfloat16 val15 = seed + hip_bfloat16(0.15f);
-  hip_bfloat16 val16 = seed + hip_bfloat16(0.16f);
-  hip_bfloat16 val17 = seed + hip_bfloat16(0.17f);
-  hip_bfloat16 val18 = seed + hip_bfloat16(0.18f);
-  hip_bfloat16 val19 = seed + hip_bfloat16(0.19f);
-  hip_bfloat16 val20 = seed + hip_bfloat16(0.20f);
-  hip_bfloat16 val21 = seed + hip_bfloat16(0.21f);
-  hip_bfloat16 val22 = seed + hip_bfloat16(0.22f);
-  hip_bfloat16 val23 = seed + hip_bfloat16(0.23f);
-  hip_bfloat16 val24 = seed + hip_bfloat16(0.24f);
-  hip_bfloat16 val25 = seed + hip_bfloat16(0.25f);
-  hip_bfloat16 val26 = seed + hip_bfloat16(0.26f);
-  hip_bfloat16 val27 = seed + hip_bfloat16(0.27f);
-  hip_bfloat16 val28 = seed + hip_bfloat16(0.28f);
-  hip_bfloat16 val29 = seed + hip_bfloat16(0.29f);
-  hip_bfloat16 val30 = seed + hip_bfloat16(0.30f);
-  hip_bfloat16 val31 = seed + hip_bfloat16(0.31f);
-  hip_bfloat16 val32 = seed + hip_bfloat16(0.32f);
+#if defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) || \
+    defined(__gfx1103__) || defined(__gfx1150__) || defined(__gfx1151__) || \
+    defined(__gfx1200__) || defined(__gfx1201__)
+  unsigned int raw = data[idx % 1024u];
+  short s0 = static_cast<short>((raw & 0xFFFFu) + 1u);
+  short s1 = static_cast<short>(((raw >> 16) & 0xFFFFu) + 2u);
+  short2_v base = {s0, s1};
 
-  hip_bfloat16 m = hip_bfloat16(-0.9921875f);
-  hip_bfloat16 c = hip_bfloat16(0.5f);
+  short2_v val1  = base;
+  short2_v val2  = {static_cast<short>(s0 + 1),  static_cast<short>(s1 + 1)};
+  short2_v val3  = {static_cast<short>(s0 + 2),  static_cast<short>(s1 + 2)};
+  short2_v val4  = {static_cast<short>(s0 + 3),  static_cast<short>(s1 + 3)};
+  short2_v val5  = {static_cast<short>(s0 + 4),  static_cast<short>(s1 + 4)};
+  short2_v val6  = {static_cast<short>(s0 + 5),  static_cast<short>(s1 + 5)};
+  short2_v val7  = {static_cast<short>(s0 + 6),  static_cast<short>(s1 + 6)};
+  short2_v val8  = {static_cast<short>(s0 + 7),  static_cast<short>(s1 + 7)};
+  short2_v val9  = {static_cast<short>(s0 + 8),  static_cast<short>(s1 + 8)};
+  short2_v val10 = {static_cast<short>(s0 + 9),  static_cast<short>(s1 + 9)};
+  short2_v val11 = {static_cast<short>(s0 + 10), static_cast<short>(s1 + 10)};
+  short2_v val12 = {static_cast<short>(s0 + 11), static_cast<short>(s1 + 11)};
+  short2_v val13 = {static_cast<short>(s0 + 12), static_cast<short>(s1 + 12)};
+  short2_v val14 = {static_cast<short>(s0 + 13), static_cast<short>(s1 + 13)};
+  short2_v val15 = {static_cast<short>(s0 + 14), static_cast<short>(s1 + 14)};
+  short2_v val16 = {static_cast<short>(s0 + 15), static_cast<short>(s1 + 15)};
+  short2_v val17 = {static_cast<short>(s0 + 16), static_cast<short>(s1 + 16)};
+  short2_v val18 = {static_cast<short>(s0 + 17), static_cast<short>(s1 + 17)};
+  short2_v val19 = {static_cast<short>(s0 + 18), static_cast<short>(s1 + 18)};
+  short2_v val20 = {static_cast<short>(s0 + 19), static_cast<short>(s1 + 19)};
+  short2_v val21 = {static_cast<short>(s0 + 20), static_cast<short>(s1 + 20)};
+  short2_v val22 = {static_cast<short>(s0 + 21), static_cast<short>(s1 + 21)};
+  short2_v val23 = {static_cast<short>(s0 + 22), static_cast<short>(s1 + 22)};
+  short2_v val24 = {static_cast<short>(s0 + 23), static_cast<short>(s1 + 23)};
+  short2_v val25 = {static_cast<short>(s0 + 24), static_cast<short>(s1 + 24)};
+  short2_v val26 = {static_cast<short>(s0 + 25), static_cast<short>(s1 + 25)};
+  short2_v val27 = {static_cast<short>(s0 + 26), static_cast<short>(s1 + 26)};
+  short2_v val28 = {static_cast<short>(s0 + 27), static_cast<short>(s1 + 27)};
+  short2_v val29 = {static_cast<short>(s0 + 28), static_cast<short>(s1 + 28)};
+  short2_v val30 = {static_cast<short>(s0 + 29), static_cast<short>(s1 + 29)};
+  short2_v val31 = {static_cast<short>(s0 + 30), static_cast<short>(s1 + 30)};
+  short2_v val32 = {static_cast<short>(s0 + 31), static_cast<short>(s1 + 31)};
 
-  for (int i = 0; i < 4096; ++i) {
-#if defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)
-    val1  = val1  * m + c;
-    val2  = val2  * m + c;
-    val3  = val3  * m + c;
-    val4  = val4  * m + c;
-    val5  = val5  * m + c;
-    val6  = val6  * m + c;
-    val7  = val7  * m + c;
-    val8  = val8  * m + c;
-    val9  = val9  * m + c;
-    val10 = val10 * m + c;
-    val11 = val11 * m + c;
-    val12 = val12 * m + c;
-    val13 = val13 * m + c;
-    val14 = val14 * m + c;
-    val15 = val15 * m + c;
-    val16 = val16 * m + c;
-    val17 = val17 * m + c;
-    val18 = val18 * m + c;
-    val19 = val19 * m + c;
-    val20 = val20 * m + c;
-    val21 = val21 * m + c;
-    val22 = val22 * m + c;
-    val23 = val23 * m + c;
-    val24 = val24 * m + c;
-    val25 = val25 * m + c;
-    val26 = val26 * m + c;
-    val27 = val27 * m + c;
-    val28 = val28 * m + c;
-    val29 = val29 * m + c;
-    val30 = val30 * m + c;
-    val31 = val31 * m + c;
-    val32 = val32 * m + c;
-#endif
+  // -0.248046875 in BF16 is 0xBE7E (-0.248046875f)
+  short2_v m = {static_cast<short>(0xBE7Eu), static_cast<short>(0xBE7Eu)};
+
+  float acc1 = 0.5f, acc2 = 0.5f, acc3 = 0.5f, acc4 = 0.5f;
+  float acc5 = 0.5f, acc6 = 0.5f, acc7 = 0.5f, acc8 = 0.5f;
+  float acc9 = 0.5f, acc10 = 0.5f, acc11 = 0.5f, acc12 = 0.5f;
+  float acc13 = 0.5f, acc14 = 0.5f, acc15 = 0.5f, acc16 = 0.5f;
+  float acc17 = 0.5f, acc18 = 0.5f, acc19 = 0.5f, acc20 = 0.5f;
+  float acc21 = 0.5f, acc22 = 0.5f, acc23 = 0.5f, acc24 = 0.5f;
+  float acc25 = 0.5f, acc26 = 0.5f, acc27 = 0.5f, acc28 = 0.5f;
+  float acc29 = 0.5f, acc30 = 0.5f, acc31 = 0.5f, acc32 = 0.5f;
+
+  // Each iteration performs 64 v_dot2_f32_bf16 instructions (32 pairs x 2 dot2 = 256 BF16 ops)
+  // matching Vulkan shaders/bf16.comp (32768 iterations x 256 ops/iter).
+  for (int i = 0; i < 32768; ++i) {
+    acc1  = __builtin_amdgcn_fdot2_f32_bf16(val1,  m, __builtin_amdgcn_fdot2_f32_bf16(val1,  m, acc1,  false), false);
+    acc2  = __builtin_amdgcn_fdot2_f32_bf16(val2,  m, __builtin_amdgcn_fdot2_f32_bf16(val2,  m, acc2,  false), false);
+    acc3  = __builtin_amdgcn_fdot2_f32_bf16(val3,  m, __builtin_amdgcn_fdot2_f32_bf16(val3,  m, acc3,  false), false);
+    acc4  = __builtin_amdgcn_fdot2_f32_bf16(val4,  m, __builtin_amdgcn_fdot2_f32_bf16(val4,  m, acc4,  false), false);
+    acc5  = __builtin_amdgcn_fdot2_f32_bf16(val5,  m, __builtin_amdgcn_fdot2_f32_bf16(val5,  m, acc5,  false), false);
+    acc6  = __builtin_amdgcn_fdot2_f32_bf16(val6,  m, __builtin_amdgcn_fdot2_f32_bf16(val6,  m, acc6,  false), false);
+    acc7  = __builtin_amdgcn_fdot2_f32_bf16(val7,  m, __builtin_amdgcn_fdot2_f32_bf16(val7,  m, acc7,  false), false);
+    acc8  = __builtin_amdgcn_fdot2_f32_bf16(val8,  m, __builtin_amdgcn_fdot2_f32_bf16(val8,  m, acc8,  false), false);
+    acc9  = __builtin_amdgcn_fdot2_f32_bf16(val9,  m, __builtin_amdgcn_fdot2_f32_bf16(val9,  m, acc9,  false), false);
+    acc10 = __builtin_amdgcn_fdot2_f32_bf16(val10, m, __builtin_amdgcn_fdot2_f32_bf16(val10, m, acc10, false), false);
+    acc11 = __builtin_amdgcn_fdot2_f32_bf16(val11, m, __builtin_amdgcn_fdot2_f32_bf16(val11, m, acc11, false), false);
+    acc12 = __builtin_amdgcn_fdot2_f32_bf16(val12, m, __builtin_amdgcn_fdot2_f32_bf16(val12, m, acc12, false), false);
+    acc13 = __builtin_amdgcn_fdot2_f32_bf16(val13, m, __builtin_amdgcn_fdot2_f32_bf16(val13, m, acc13, false), false);
+    acc14 = __builtin_amdgcn_fdot2_f32_bf16(val14, m, __builtin_amdgcn_fdot2_f32_bf16(val14, m, acc14, false), false);
+    acc15 = __builtin_amdgcn_fdot2_f32_bf16(val15, m, __builtin_amdgcn_fdot2_f32_bf16(val15, m, acc15, false), false);
+    acc16 = __builtin_amdgcn_fdot2_f32_bf16(val16, m, __builtin_amdgcn_fdot2_f32_bf16(val16, m, acc16, false), false);
+    acc17 = __builtin_amdgcn_fdot2_f32_bf16(val17, m, __builtin_amdgcn_fdot2_f32_bf16(val17, m, acc17, false), false);
+    acc18 = __builtin_amdgcn_fdot2_f32_bf16(val18, m, __builtin_amdgcn_fdot2_f32_bf16(val18, m, acc18, false), false);
+    acc19 = __builtin_amdgcn_fdot2_f32_bf16(val19, m, __builtin_amdgcn_fdot2_f32_bf16(val19, m, acc19, false), false);
+    acc20 = __builtin_amdgcn_fdot2_f32_bf16(val20, m, __builtin_amdgcn_fdot2_f32_bf16(val20, m, acc20, false), false);
+    acc21 = __builtin_amdgcn_fdot2_f32_bf16(val21, m, __builtin_amdgcn_fdot2_f32_bf16(val21, m, acc21, false), false);
+    acc22 = __builtin_amdgcn_fdot2_f32_bf16(val22, m, __builtin_amdgcn_fdot2_f32_bf16(val22, m, acc22, false), false);
+    acc23 = __builtin_amdgcn_fdot2_f32_bf16(val23, m, __builtin_amdgcn_fdot2_f32_bf16(val23, m, acc23, false), false);
+    acc24 = __builtin_amdgcn_fdot2_f32_bf16(val24, m, __builtin_amdgcn_fdot2_f32_bf16(val24, m, acc24, false), false);
+    acc25 = __builtin_amdgcn_fdot2_f32_bf16(val25, m, __builtin_amdgcn_fdot2_f32_bf16(val25, m, acc25, false), false);
+    acc26 = __builtin_amdgcn_fdot2_f32_bf16(val26, m, __builtin_amdgcn_fdot2_f32_bf16(val26, m, acc26, false), false);
+    acc27 = __builtin_amdgcn_fdot2_f32_bf16(val27, m, __builtin_amdgcn_fdot2_f32_bf16(val27, m, acc27, false), false);
+    acc28 = __builtin_amdgcn_fdot2_f32_bf16(val28, m, __builtin_amdgcn_fdot2_f32_bf16(val28, m, acc28, false), false);
+    acc29 = __builtin_amdgcn_fdot2_f32_bf16(val29, m, __builtin_amdgcn_fdot2_f32_bf16(val29, m, acc29, false), false);
+    acc30 = __builtin_amdgcn_fdot2_f32_bf16(val30, m, __builtin_amdgcn_fdot2_f32_bf16(val30, m, acc30, false), false);
+    acc31 = __builtin_amdgcn_fdot2_f32_bf16(val31, m, __builtin_amdgcn_fdot2_f32_bf16(val31, m, acc31, false), false);
+    acc32 = __builtin_amdgcn_fdot2_f32_bf16(val32, m, __builtin_amdgcn_fdot2_f32_bf16(val32, m, acc32, false), false);
   }
 
-  data[idx] = val1 + val2 + val3 + val4 + val5 + val6 + val7 + val8 +
-              val9 + val10 + val11 + val12 + val13 + val14 + val15 + val16 +
-              val17 + val18 + val19 + val20 + val21 + val22 + val23 + val24 +
-              val25 + val26 + val27 + val28 + val29 + val30 + val31 + val32;
+  float total = acc1 + acc2 + acc3 + acc4 + acc5 + acc6 + acc7 + acc8 +
+                acc9 + acc10 + acc11 + acc12 + acc13 + acc14 + acc15 + acc16 +
+                acc17 + acc18 + acc19 + acc20 + acc21 + acc22 + acc23 + acc24 +
+                acc25 + acc26 + acc27 + acc28 + acc29 + acc30 + acc31 + acc32;
+  data[idx] = __float_as_uint(total);
+#else
+  data[idx] = 0u;
+#endif
 }

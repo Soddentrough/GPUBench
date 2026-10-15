@@ -41,19 +41,14 @@ void Bf16Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
     matrix_file = kdir / "vulkan" / "coop_matrix_bf16.comp";
   }
 
-  // On ROCm, hip_bfloat16 scalar vector math is emulated via FP32; only load
-  // vectorKernel on backends with native BF16 vector shader support.
-  if (context.getBackend() != ComputeBackend::ROCm) {
-    std::string vec_func_name = "main";
-    try {
-      vectorKernel = context.createKernel(vector_file.string(), vec_func_name, 1);
-      if (vectorKernel) {
-        context.setKernelArg(vectorKernel, 0, buffer);
-      }
-    } catch (...) {
-      vectorKernel = nullptr;
+  std::string vec_func_name =
+      (context.getBackend() == ComputeBackend::Vulkan) ? "main" : "run_benchmark";
+  try {
+    vectorKernel = context.createKernel(vector_file.string(), vec_func_name, 1);
+    if (vectorKernel) {
+      context.setKernelArg(vectorKernel, 0, buffer);
     }
-  } else {
+  } catch (...) {
     vectorKernel = nullptr;
   }
 
@@ -103,11 +98,8 @@ void Bf16Bench::Teardown() {
 BenchmarkResult Bf16Bench::GetResult(uint32_t config_idx) const {
   if (config_idx == 0 && vectorKernel != nullptr) { // Vector
     uint64_t iters = 32768;
-    uint64_t ops_per_iter = 256; // Vulkan bf16vec4 (32 FMAs × 8 ops)
-    if (context && context->getBackend() == ComputeBackend::ROCm) {
-      iters = 4096;
-      ops_per_iter = 64; // bf16.hip: 32 scalar hip_bfloat16 FMAs × 2 ops
-    } else if (context && context->getBackend() == ComputeBackend::OpenCL) {
+    uint64_t ops_per_iter = 256; // 32 bf16vec4 dot-accumulates (64 v_dot2 * 4 ops = 256 BF16 ops)
+    if (context && context->getBackend() == ComputeBackend::OpenCL) {
       iters = 16384;
       ops_per_iter = 128;
     }
