@@ -372,19 +372,19 @@ where:
   Verifies that vector elements remain bounded within IEEE 754 half range ($|a| < 65,504.0$) and matrix accumulator tiles contain non-zero products.
 
 #### 4.2.4 BF16 Bfloat16 Vector & Matrix Compute (`Bf16Bench`)
-- **Host Dispatch & Shader Implementation** (`Bf16Bench.cpp:9-125`, `shaders/bf16.comp`, `shaders/coop_matrix_bf16.comp`, `hip_kernels/bf16.hip`, `hip_kernels/bf16_matrix.hip`):
+- **Host Dispatch & Shader Implementation** (`Bf16Bench.cpp:9-130`, `shaders/bf16.comp`, `shaders/coop_matrix_bf16.comp`, `hip_kernels/bf16.hip`, `hip_kernels/bf16_matrix.hip`):
   - **Config 0 (Vector)**: Dispatches $8,192 \times 64 = 524,288$ threads executing 32,768 iterations of 32 `bf16vec4` dot-accumulates (`APPLY32(STEP)` = 64 `v_dot2_f32_bf16` / `v_dot2_bf16_bf16` instructions = 256 BF16 operations per iteration):
     $$\text{Total FLOPs} = 524,288 \times 32,768 \times 256 = 4,398,046,511,104\,\text{FLOPs} \approx 4.398\,\text{TFLOP}$$
-    In `shaders/bf16.comp`, the loop stays purely in `bfloat16_t` (`bfloat16_t d = dot(a[i], m); a[i].x = d;`) with multiplier `m = bf16vec4(-0.248046875f, 0.125f, -0.0625f, 0.1875f)` (whose inhomogeneous `.y + .z + .w = +0.25` prevents decay to zero and stabilizes `a[i].x` at a non-zero fixed point $\approx 0.2003 s_i$).
+    In `shaders/bf16.comp`, each step shifts `a[i].z = a[i].x; a[i].x = dot(a[i], m);` with multiplier `m = bf16vec4(-0.248046875f, 0.125f, -0.0625f, 0.1875f)`. Updating both `a[i].x` and `a[i].z` creates a loop-carried dependency on both `bf16vec2` halves (`a[i].xy` and `a[i].zw`) so NIR's Loop-Invariant Code Motion (LICM) cannot hoist `bfdot2_bfadd(a[i].zw, m.zw, 0)` out of the 32,768-iteration loop, while the inhomogeneous `.y` and `.w` components stabilize `d` at the non-zero fixed point $d_i^* = \frac{0.125 a_{i,y} + 0.1875 a_{i,w}}{1.310546875} > 0$.
   - **Config 1 (Matrix)**: Dispatches $32,768$ Wave32 subgroups executing 4,096 iterations $\times$ 8 accumulators of $16 \times 16 \times 16$ BF16 WMMA (`v_wmma_f32_16x16x16_bf16`):
     $$\text{Total FLOPs} = 32,768 \times 4,096 \times 8 \times 8,192 = 8,796,093,022,208\,\text{FLOPs} \approx 8.796\,\text{TFLOP}$$
-- **Strict Native Capability Gating (Zero FP16 Fallback)**:
-  `Bf16Bench::IsSupported()` strictly requires `info.bf16Support` (`VK_KHR_shader_bfloat16` on Vulkan; native `v_dot2_f32_bf16` and `v_wmma_f32_16x16x16_bf16` on ROCm `gfx1100`–`gfx1201`). It **never** substitutes IEEE FP16 shaders when `VK_KHR_shader_bfloat16` is absent. On Mesa RADV `gfx1151` (which does not yet expose `VK_KHR_shader_bfloat16`), Vulkan honestly reports `UNSUPPORTED [shaderBfloat16 / BF16 hardware support missing]`, whereas the ROCm backend on the same `gfx1151` GPU executes natively via `v_dual_dot2acc_f32_bf16` and `v_wmma_f32_16x16x16_bf16`.
-- **Multi-Dispatch Input Isolation & Validation** (`Bf16Bench.cpp:127-198`):
+- **Strict Sub-Feature Capability Gating (Zero FP16 Fallback)**:
+  `Bf16Bench::IsSupported()` and `IsConfigSupported()` strictly require `info.bf16Support` and inspect the per-config Vulkan `VkPhysicalDeviceShaderBfloat16FeaturesKHR` bits (`shaderBFloat16DotProduct` for Config 0 Vector; `shaderBFloat16CooperativeMatrix` for Config 1 Matrix). It **never** substitutes IEEE FP16 shaders when `VK_KHR_shader_bfloat16` is absent. On Mesa RADV `gfx1151` (which does not expose `VK_KHR_shader_bfloat16` by default, and even with `RADV_EXPERIMENTAL=bfloat16` only enables `shaderBFloat16CooperativeMatrix` while keeping `shaderBFloat16DotProduct = VK_FALSE` because RDNA 3.5 lacks `v_dot2_bf16_bf16`), Vulkan cleanly gates each sub-test, whereas the ROCm backend on the same `gfx1151` GPU executes both Config 0 (`v_dual_dot2acc_f32_bf16` / `v_dot2_f32_bf16`) and Config 1 (`v_wmma_f32_16x16x16_bf16`) natively.
+- **Multi-Dispatch Input Isolation & Validation** (`Bf16Bench.cpp:131-205`):
   All four BF16 kernels (`shaders/bf16.comp`, `shaders/coop_matrix_bf16.comp`, `hip_kernels/bf16.hip`, `hip_kernels/bf16_matrix.hip`) read their initial seeds/tiles from the upper half of the 8 MB buffer and write results to the lower half, preventing multi-dispatch warmup/timed runs from overwriting input seeds and overflowing to `Inf`/`NaN`.
 - **Hardware Result (`gfx1151`)**:
-  - Vulkan: **UNSUPPORTED** (`VK_KHR_shader_bfloat16` absent in RADV).
-  - ROCm (`--dump-isa bf16.co` verified `v_dual_dot2acc_f32_bf16` & `v_wmma_f32_16x16x16_bf16`): Vector: **29.84 TFLOPS**; Matrix: **55.42 TFLOPS** (1.86x).
+  - Vulkan: **UNSUPPORTED** (`VK_KHR_shader_bfloat16` absent in RADV by default; Config 1 Matrix supported under `RADV_EXPERIMENTAL=bfloat16`).
+  - ROCm (`--dump-isa bf16 -k rocm` verified `v_dual_dot2acc_f32_bf16` & `v_wmma_f32_16x16x16_bf16`): Vector: **29.84 TFLOPS**; Matrix: **55.42 TFLOPS** (1.86x).
 
 #### 4.2.5 FP8 8-bit Floating-Point Matrix Compute (`Fp8Bench`)
 - **Host Dispatch & Shader Implementation** (`Fp8Bench.cpp:23-101`, `shaders/coop_matrix_fp8.comp`):
@@ -399,17 +399,17 @@ where:
   `Fp6Bench.h` and `Fp4Bench.h` require native hardware support (`info.fp6Support` / `info.fp4Support`) and never run bit-unpacked FP32 software emulation. Both report **UNSUPPORTED** cleanly on AMD Radeon 8060S.
 
 #### 4.2.7 INT8 8-bit Integer Vector & Matrix WMMA Compute (`Int8Bench`)
-- **Config 0: Vector INT8** (`Int8Bench.cpp:14-78`, `shaders/int8.comp:1-58`):
-  Threads: $524,288$. Loop: 16,384 iterations. Each iteration executes 16 packed 4-element dot product operations (`dotPacked4x8EXT` $\to$ `v_dot4_i32_iu8`).
-  Each 4-element dot product = 4 multiplications + 4 additions = 8 integer ops.
-  $$\text{Total IOPs} = 524,288 \times 16,384 \times 16 \times 8 = 1,099,511,627,776\,\text{IOPs} \approx 1.100\,\text{TOP}$$
-  - *ISA Optimization (`90ad3a1`)*: Byte packing (`pack_i8vec4(a)`) is hoisted into the loop prologue so the hot loop (`BB1`, verified via `./build/gpubench --dump-isa int8.comp.spv`) emits 16 back-to-back 4-operand `v_dot4_i32_iu8` instructions with zero byte-packing overhead inside the loop.
+- **Config 0: Vector INT8** (`Int8Bench.cpp:14-120`, `shaders/int8.comp:1-58`, `hip_kernels/int8.hip:1-44`):
+  Threads: $524,288$. Loop: 16,384 iterations. Each iteration executes 8 packed 4-element dot product operations (`APPLY8(STEP)` $\to$ 8 `dotPacked4x8EXT` / `v_dot4_i32_iu8` instructions).
+  Each 4-element dot product = 4 multiplications + 4 additions = 8 integer ops ($8 \times 8 = 64$ INT8 ops/iter).
+  $$\text{Total IOPs} = 524,288 \times 16,384 \times 8 \times 8 = 549,755,813,888\,\text{IOPs} \approx 549.76\,\text{GOP}$$
+  - *ISA Optimization (`90ad3a1`)*: Byte packing (`pack32(u8vec4(a))`) is hoisted into the loop prologue so the hot loop (`BB1`, verified via `./build/gpubench --dump-isa int8`) emits 8 back-to-back 4-operand `v_dot4_i32_iu8` instructions with zero byte-packing overhead inside the loop.
   - Measured throughput: **27.83 TOPS**.
-- **Config 1: Matrix INT8 WMMA** (`shaders/coop_matrix_int8.comp:1-58`):
-  $16 \times 16 \times 16$ integer WMMA cooperative matrix. Subgroup: Wave32.
+- **Config 1: Matrix INT8 WMMA** (`shaders/coop_matrix_int8.comp:1-58`, `hip_kernels/int8_matrix.hip:1-50`):
+  $16 \times 16 \times 16$ integer WMMA cooperative matrix (`v_wmma_i32_16x16x16_iu8`). Subgroup: Wave32 (65,536 workgroups $\times$ 4,096 iterations $\times$ 8 accumulators).
   $$\text{Total IOPs} = 65,536 \times 32,768 \times 8,192 = 17,592,186,044,416\,\text{IOPs} \approx 17.592\,\text{TOP}$$
   Measured throughput: **55.50 TOPS**.
-- **DCE & Analytical Validation Fix** (`Int8Bench.cpp:126-166`):
+- **DCE & Analytical Validation Fix** (`Int8Bench.cpp:122-163`):
   - *Vector Epilogue*: Writes `InOutBuffer.data[index] = i8vec4(int8_t((total >> 16) | 1));` to guarantee non-zero byte writeback.
   - *Matrix Analytical Solution*: Dedicated `matrixInputBuffer` prevents feedback loops. Validation asserts exact analytical integer product **`524,360`** (or `524,288`) across all 16 accumulator words.
 
@@ -488,13 +488,13 @@ Table 4.1 documents the complete technical audit of all 12 compute benchmark cla
 | **`Fp32Bench`** | FP32 (0) | TFLOPS | `Fp32Bench.cpp:13-58` | `shaders/fp32.comp:1-44` | $\frac{524288 \times 16384 \times 32 \times 8}{\Delta t \times 10^{12}} = \frac{2.199 \times 10^{12}}{\Delta t \times 10^{12}}$ | XOR reduction writeback; verified convergence to fixed point $x^* = 1.0f$. | Native single-precision peak vector ALU. |
 | **`Fp16Bench`** | Vector (0) | TFLOPS | `Fp16Bench.cpp:12-71` | `shaders/fp16.comp:1-45` | $\frac{524288 \times 65536 \times 16 \times 8}{\Delta t \times 10^{12}} = \frac{4.398 \times 10^{12}}{\Delta t \times 10^{12}}$ | Bounded within $|a| < 65504.0$; verified non-zero half array. | Native packed FP16 vector ALU. |
 | **`Fp16Bench`** | Matrix (1) | TFLOPS | `Fp16Bench.cpp:12-71` | `shaders/coop_matrix_fp16.comp` | $\frac{65536 \times 32768 \times 8192}{\Delta t \times 10^{12}} = \frac{17.592 \times 10^{12}}{\Delta t \times 10^{12}}$ | Cooperative matrix WMMA $16 \times 16 \times 16$; verified non-zero output tiles. | Native `VK_KHR_cooperative_matrix` (WMMA). |
-| **`Bf16Bench`** | Vector (0) | TFLOPS | `Bf16Bench.cpp:22-125` | `shaders/bf16.comp`<br>`hip_kernels/bf16.hip` | $\frac{524288 \times 32768 \times 256}{\Delta t \times 10^{12}} = \frac{4.398 \times 10^{12}}{\Delta t \times 10^{12}}$ | Stabilized recurrence; upper-half seed read; rejects sentinel seed `0x3D003D00u`. | Native `v_dot2_f32_bf16` on ROCm (29.84 TFLOPS); `UNSUPPORTED` on RADV without `VK_KHR_shader_bfloat16`. |
-| **`Bf16Bench`** | Matrix (1) | TFLOPS | `Bf16Bench.cpp:22-125` | `shaders/coop_matrix_bf16.comp`<br>`hip_kernels/bf16_matrix.hip` | $\frac{32768 \times 32768 \times 8192}{\Delta t \times 10^{12}} = \frac{8.796 \times 10^{12}}{\Delta t \times 10^{12}}$ | Upper-half input tile read; verified finite non-zero WMMA products ($\approx 4113$). | Native `v_wmma_f32_16x16x16_bf16` on ROCm (55.42 TFLOPS); `UNSUPPORTED` on RADV without `VK_KHR_shader_bfloat16`. |
+| **`Bf16Bench`** | Vector (0) | TFLOPS | `Bf16Bench.cpp:22-128` | `shaders/bf16.comp`<br>`hip_kernels/bf16.hip` | $\frac{524288 \times 32768 \times 256}{\Delta t \times 10^{12}} = \frac{4.398 \times 10^{12}}{\Delta t \times 10^{12}}$ | LICM-proof `.x`/`.z` shift recurrence; upper-half seed read; rejects sentinel `0x3D003D00u`. | Native `v_dot2_f32_bf16` on ROCm (29.84 TFLOPS); gated on `shaderBFloat16DotProduct` in Vulkan. |
+| **`Bf16Bench`** | Matrix (1) | TFLOPS | `Bf16Bench.cpp:22-128` | `shaders/coop_matrix_bf16.comp`<br>`hip_kernels/bf16_matrix.hip` | $\frac{32768 \times 32768 \times 8192}{\Delta t \times 10^{12}} = \frac{8.796 \times 10^{12}}{\Delta t \times 10^{12}}$ | Upper-half input tile read; verified finite non-zero WMMA products ($\approx 4113$). | Native `v_wmma_f32_16x16x16_bf16` on ROCm (55.42 TFLOPS); gated on `shaderBFloat16CooperativeMatrix` in Vulkan. |
 | **`Fp8Bench`** | Matrix (0) | TOPS | `Fp8Bench.cpp:23-101` | `shaders/coop_matrix_fp8.comp` | $\frac{65536 \times 32768 \times 8192}{\Delta t \times 10^{12}} = \frac{17.592 \times 10^{12}}{\Delta t \times 10^{12}}$ | Reads `outputBuffer` when supported; passes gracefully when unsupported. | **UNSUPPORTED** on `gfx1151`: `shaderFloat8` bit missing on RADV. |
 | **`Fp6Bench`** | Vector (0) | TOPS | `Fp6Bench.h:45-57` | `SPV_NV_float6` | $\frac{N_{\text{threads}} \times \text{Ops}}{\Delta t \times 10^{12}}$ | Probed capability check. | **UNSUPPORTED**: NVIDIA-specific extension. |
 | **`Fp4Bench`** | Vector (0) | TOPS | `Fp4Bench.h:57-69` | Native FP4 only | $\frac{N_{\text{threads}} \times \text{Ops}}{\Delta t \times 10^{12}}$ | Probed capability check. | **UNSUPPORTED** on `gfx1151`: `shaderFloat4` bit missing. |
-| **`Int8Bench`** | Vector (0) | TOPS | `Int8Bench.cpp:14-78` | `shaders/int8.comp:1-58` | $\frac{524288 \times 16384 \times 16 \times 8}{\Delta t \times 10^{12}} = \frac{1.100 \times 10^{12}}{\Delta t \times 10^{12}}$ | Hoisted packing; 16 `v_dot4_i32_iu8`/iter; writes `(total >> 16) \| 1`. | Native packed 8-bit integer vector ALU (27.83 TOPS). |
-| **`Int8Bench`** | Matrix (1) | TOPS | `Int8Bench.cpp:14-78` | `shaders/coop_matrix_int8.comp` | $\frac{65536 \times 32768 \times 8192}{\Delta t \times 10^{12}} = \frac{17.592 \times 10^{12}}{\Delta t \times 10^{12}}$ | Dedicated `matrixInputBuffer`; verified analytical $524,360$. | Native `VK_KHR_cooperative_matrix` WMMA (55.50 TOPS). |
+| **`Int8Bench`** | Vector (0) | TOPS | `Int8Bench.cpp:14-120` | `shaders/int8.comp:1-58`<br>`hip_kernels/int8.hip` | $\frac{524288 \times 16384 \times 8 \times 8}{\Delta t \times 10^{12}} = \frac{5.4976 \times 10^{11}}{\Delta t \times 10^{12}}$ | Hoisted packing; 8 `v_dot4_i32_iu8`/iter; writes `(total >> 16) \| 1`. | Native packed 8-bit integer vector ALU (27.83 TOPS). |
+| **`Int8Bench`** | Matrix (1) | TOPS | `Int8Bench.cpp:14-120` | `shaders/coop_matrix_int8.comp`<br>`hip_kernels/int8_matrix.hip` | $\frac{65536 \times 32768 \times 8192}{\Delta t \times 10^{12}} = \frac{17.592 \times 10^{12}}{\Delta t \times 10^{12}}$ | Dedicated `matrixInputBuffer`; verified analytical $524,360$. | Native `VK_KHR_cooperative_matrix` WMMA (55.50 TOPS). |
 | **`Int4Bench`** | Matrix (0) | TOPS | `Int4Bench.h:89-101` | `shaders/coop_matrix_int4.comp` | $\frac{65536 \times 32768 \times 8192}{\Delta t \times 10^{12}}$ | Probed capability check. | **UNSUPPORTED**: 4-bit integer types missing in Vulkan. |
 | **`DualIssueBench`** | Configs 0–6 | TFLOPS / TOPS | `DualIssueBench.cpp:94-143` | `shaders/dual_issue_*.comp` | Ping-Pong ($274.8\,\text{Gop}$), Moderate ($549.7\,\text{Gop}$), Peak ($1.100\,\text{Top}$) | Verified analytical bounds: $[28, 65]$, $[20, 38]$, $[40, 75]$, $[1, 16777215]$. | Evaluates pipeline latency hiding and dual-VALU capacity. |
 | **`LdsBankConflictBench`** | Strides 1–32 (0–7) | TB/s | `LdsBankConflictBench.cpp:37-77` | `shaders/lds_bank_conflicts.comp` | $\frac{65536 \times 50000 \times 8 \times 4}{\Delta t \times 10^{12}} = \frac{1.0486 \times 10^{11}}{\Delta t \times 10^{12}}$ | `+32u` offsets (`ds_load_2addr_b32`); eradicated `0xDEADBEEF`; verified $12,800,000$. | Measures physical 32-bank conflict serialization (11.97 TB/s $\to$ 0.44 TB/s). |

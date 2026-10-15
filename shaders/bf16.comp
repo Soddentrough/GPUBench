@@ -10,8 +10,13 @@ layout(set = 0, binding = 0) buffer Data {
     bf16vec4 data[];
 } InOutBuffer;
 
-#define INIT(i) a[i] = bf16vec4(seed + vec4(0.01f * float((i) + 1)));
-#define STEP(i) { bfloat16_t d = dot(a[i], m); a[i].x = d; }
+#define INIT(i) a[i] = bf16vec4(seed + vec4( \
+    0.01f * float(4 * (i) + 1), \
+    0.01f * float(4 * (i) + 2), \
+    0.01f * float(4 * (i) + 3), \
+    0.01f * float(4 * (i) + 4)  \
+));
+#define STEP(i) { bfloat16_t d = dot(a[i], m); a[i].z = a[i].x; a[i].x = d; }
 
 #define APPLY4(OP, i)  OP(i) OP((i)+1) OP((i)+2) OP((i)+3)
 #define APPLY16(OP, i) APPLY4(OP, i) APPLY4(OP, (i)+4) \

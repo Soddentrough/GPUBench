@@ -13,9 +13,6 @@ bool Bf16Bench::IsSupported(const DeviceInfo &info,
     // Standard OpenCL does not support native BFloat16 floating-point arithmetic.
     return false;
   }
-  if (context && context->getBackend() == ComputeBackend::ROCm) {
-    return info.bf16Support && info.cooperativeMatrixSupport;
-  }
   return info.bf16Support;
 }
 
