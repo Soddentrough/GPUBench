@@ -2,6 +2,7 @@
 #extension GL_KHR_cooperative_matrix : require
 #extension GL_EXT_bfloat16 : require
 #extension GL_KHR_memory_scope_semantics : require
+#extension GL_EXT_control_flow_attributes : enable
 
 layout (local_size_x = 32, local_size_y = 1, local_size_z = 1) in;
 
@@ -27,15 +28,19 @@ void main() {
     coopMatLoad(matA, buf.data, loadOffset, 16u, 0);
     coopMatLoad(matB, buf.data, loadOffset, 16u, 0);
 
-    for (int i = 0; i < 4096; ++i) {
-        matC0 = coopMatMulAdd(matA, matB, matC0);
-        matC1 = coopMatMulAdd(matA, matB, matC1);
-        matC2 = coopMatMulAdd(matA, matB, matC2);
-        matC3 = coopMatMulAdd(matA, matB, matC3);
-        matC4 = coopMatMulAdd(matA, matB, matC4);
-        matC5 = coopMatMulAdd(matA, matB, matC5);
-        matC6 = coopMatMulAdd(matA, matB, matC6);
-        matC7 = coopMatMulAdd(matA, matB, matC7);
+    [[dont_unroll]]
+    for (int i = 0; i < 1024; ++i) {
+        [[unroll]]
+        for (int u = 0; u < 4; ++u) {
+            matC0 = coopMatMulAdd(matA, matB, matC0);
+            matC1 = coopMatMulAdd(matA, matB, matC1);
+            matC2 = coopMatMulAdd(matA, matB, matC2);
+            matC3 = coopMatMulAdd(matA, matB, matC3);
+            matC4 = coopMatMulAdd(matA, matB, matC4);
+            matC5 = coopMatMulAdd(matA, matB, matC5);
+            matC6 = coopMatMulAdd(matA, matB, matC6);
+            matC7 = coopMatMulAdd(matA, matB, matC7);
+        }
     }
 
     matC0 = matC0 + matC1;

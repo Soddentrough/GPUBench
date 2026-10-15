@@ -145,8 +145,8 @@ bool Bf16Bench::ValidateResults(uint32_t config_idx) const {
     constexpr uint16_t kUnwrittenSeed16 = 0x3D00u;
     constexpr uint32_t kUnwrittenSeed32 = 0x3D003D00u;
 
-    // ROCm backend writes 32-bit floats
-    if (context->getBackend() == ComputeBackend::ROCm) {
+    // ROCm Vector (config_idx == 0) writes 32-bit floats
+    if (context->getBackend() == ComputeBackend::ROCm && config_idx == 0) {
       std::vector<float> hostOut(64, 0.0f);
       context->readBuffer(targetBuf, 0, hostOut.size() * sizeof(float), hostOut.data());
       for (float v : hostOut) {
@@ -157,18 +157,13 @@ bool Bf16Bench::ValidateResults(uint32_t config_idx) const {
         std::memcpy(&rawBits, &v, sizeof(uint32_t));
         if (rawBits == kUnwrittenSeed32) return false;
 
-        if (config_idx == 0) {
-          // hip_kernels/bf16.hip accumulates negative dot2 products (~ -36400.0f)
-          if (std::abs(v) < 10.0f) return false;
-        } else {
-          // ROCm WMMA produces ~4096.0f across 8 accumulators
-          if (v < 10.0f || v > 100000.0f) return false;
-        }
+        // hip_kernels/bf16.hip accumulates negative dot2 products (~ -36400.0f)
+        if (std::abs(v) < 10.0f) return false;
       }
       return true;
     }
 
-    // Vulkan backend: read back 256 16-bit bfloat16 words
+    // Vulkan (Config 0 & 1) and ROCm Matrix (Config 1): read back 256 16-bit bfloat16 words
     std::vector<uint16_t> hostBf16(256, 0);
     context->readBuffer(targetBuf, 0, hostBf16.size() * sizeof(uint16_t), hostBf16.data());
 
