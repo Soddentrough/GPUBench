@@ -25,26 +25,16 @@ public:
     return SupportLimitation::kHardware;
   }
   std::string GetSupportNote() const override {
-    return "Ray tracing requires Vulkan ray query acceleration structures";
+    return "Ray tracing requires Vulkan ray tracing pipeline extensions";
   }
   std::string GetSupportNote(const DeviceInfo &info,
-                             IComputeContext *context = nullptr) const override {
-    if (context && context->getBackend() == ComputeBackend::OpenCL) {
-      return "No support for ray tracing acceleration structures in OpenCL API";
-    }
-    if (context && context->getBackend() == ComputeBackend::ROCm) {
-      return "No support for ray tracing acceleration structures in ROCm/HIP API";
-    }
-    if (!info.rayTracingSupport) {
-      return "extension VK_KHR_acceleration_structure or VK_KHR_ray_query missing";
-    }
-    return "Ray tracing requires Vulkan ray query acceleration structures";
-  }
+                             IComputeContext *context = nullptr) const override;
   void Setup(IComputeContext &context, const std::string &kernel_dir) override;
   void Run(uint32_t config_idx) override;
   void Teardown() override;
 
   BenchmarkResult GetResult(uint32_t config_idx) const override;
+  bool ValidateResults(uint32_t config_idx = 0) const override;
   const char *GetName() const override;
   const char *GetComponent(uint32_t config_idx) const override;
   const char *GetMetric() const override;
@@ -76,6 +66,7 @@ private:
 
   uint32_t rayCount = 0;
   uint32_t numPrimitives = 0;
+  int lastRunConfig = -1;
   std::map<uint32_t, double> rtResults;
 
   // Function pointers

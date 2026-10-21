@@ -29,6 +29,8 @@ struct KernelArtifact {
   int configIndex = 0;
   std::string backend; // "vulkan", "rocm", "opencl"
   fs::path filePath;
+  std::string rocmSymbol;
+  std::string skipReason;
 };
 
 static std::string normalizeKey(const std::string &s) {
@@ -49,6 +51,7 @@ struct BenchmarkMapping {
   std::string vulkanSpv;
   std::string rocmCo;
   std::string openclCl;
+  std::string rocmSymbol = "";
 };
 
 static std::vector<BenchmarkMapping> getBenchmarkMappings() {
@@ -60,16 +63,18 @@ static std::vector<BenchmarkMapping> getBenchmarkMappings() {
       {"FP32", {"fp32"}, 0, "FP32 (Vector)", "fp32.comp.spv", "fp32.co", "fp32.cl"},
       {"FP64", {"fp64"}, 0, "FP64 (Vector)", "fp64.comp.spv", "fp64.co", "fp64.cl"},
       {"FP8", {"fp8", "coopmatrixfp8"}, 0, "FP8 (Matrix)", "coop_matrix_fp8.comp.spv", "fp8_matrix.co", ""},
+      {"FP6", {"fp6"}, 0, "FP6 (Vector)", "", "", ""},
+      {"FP4", {"fp4"}, 0, "FP4 (Vector)", "", "", ""},
       {"INT8", {"int8"}, 0, "INT8 (Vector)", "int8.comp.spv", "int8.co", "int8.cl"},
       {"INT8", {"int8", "int8matrix", "coopmatrixint8"}, 1, "INT8 (Matrix)", "coop_matrix_int8.comp.spv", "int8_matrix.co", ""},
       {"INT4", {"int4", "int4matrix"}, 0, "INT4 (Matrix)", "", "int4_matrix.co", ""},
-      {"ILP & Dual-Issue", {"dualissue", "ilp"}, 0, "FP32 ILP4", "dual_issue_ilp4.comp.spv", "dual_issue.co", "dual_issue.cl"},
-      {"ILP & Dual-Issue", {"dualissue", "ilp"}, 1, "FP32 ILP8", "dual_issue_ilp8.comp.spv", "dual_issue.co", "dual_issue.cl"},
-      {"ILP & Dual-Issue", {"dualissue", "ilp"}, 2, "FP32 ILP16", "dual_issue_ilp16.comp.spv", "dual_issue.co", "dual_issue.cl"},
-      {"ILP & Dual-Issue", {"dualissue", "ilp"}, 3, "INT32 ILP4", "dual_issue_int32_4.comp.spv", "dual_issue.co", "dual_issue.cl"},
-      {"ILP & Dual-Issue", {"dualissue", "ilp"}, 4, "INT32 ILP8", "dual_issue_int32_8.comp.spv", "dual_issue.co", "dual_issue.cl"},
-      {"ILP & Dual-Issue", {"dualissue", "ilp"}, 5, "INT32 ILP16", "dual_issue_int32.comp.spv", "dual_issue.co", "dual_issue.cl"},
-      {"ILP & Dual-Issue", {"dualissue", "ilp"}, 6, "Mixed FP32+INT32", "dual_issue_mixed.comp.spv", "dual_issue.co", "dual_issue.cl"},
+      {"ILP & Dual-Issue", {"dualissue", "ilp"}, 0, "FP32 ILP4", "dual_issue_ilp4.comp.spv", "dual_issue.co", "dual_issue.cl", "run_dual_issue_ilp4"},
+      {"ILP & Dual-Issue", {"dualissue", "ilp"}, 1, "FP32 ILP8", "dual_issue_ilp8.comp.spv", "dual_issue.co", "dual_issue.cl", "run_dual_issue_ilp8"},
+      {"ILP & Dual-Issue", {"dualissue", "ilp"}, 2, "FP32 ILP16", "dual_issue_ilp16.comp.spv", "dual_issue.co", "dual_issue.cl", "run_dual_issue_ilp16"},
+      {"ILP & Dual-Issue", {"dualissue", "ilp"}, 3, "INT32 ILP4", "dual_issue_int32_4.comp.spv", "dual_issue.co", "dual_issue.cl", "run_dual_issue_int32_4"},
+      {"ILP & Dual-Issue", {"dualissue", "ilp"}, 4, "INT32 ILP8", "dual_issue_int32_8.comp.spv", "dual_issue.co", "dual_issue.cl", "run_dual_issue_int32_8"},
+      {"ILP & Dual-Issue", {"dualissue", "ilp"}, 5, "INT32 ILP16", "dual_issue_int32.comp.spv", "dual_issue.co", "dual_issue.cl", "run_dual_issue_int32"},
+      {"ILP & Dual-Issue", {"dualissue", "ilp"}, 6, "Mixed FP32+INT32", "dual_issue_mixed.comp.spv", "dual_issue.co", "dual_issue.cl", "run_dual_issue_mixed"},
       {"LDS Bank Conflicts", {"lds", "ldsbankconflicts"}, 0, "LDS Bank Conflicts", "lds_bank_conflicts.comp.spv", "lds_bank_conflicts.co", "lds_bank_conflicts.cl"},
       {"In-Shader Indirect Synthesis", {"indirect", "inshaderindirect"}, 0, "Direct Dispatch", "direct_worker.comp.spv", "", ""},
       {"In-Shader Indirect Synthesis", {"indirect", "inshaderindirect"}, 1, "Indirect Classify", "indirect_classify.comp.spv", "", ""},
@@ -162,8 +167,15 @@ static void printIsaTextSummary(const std::string &isaText, bool fullIsa) {
     std::string trimmed = lines[i];
     while (!trimmed.empty() && (trimmed.back() == ' ' || trimmed.back() == '\t'))
       trimmed.pop_back();
-    if (!trimmed.empty() && trimmed[0] != '\t' && trimmed[0] != ' ' && trimmed.back() == ':') {
-      labelLines[trimmed.substr(0, trimmed.size() - 1)] = i;
+    if (!trimmed.empty() && trimmed.back() == ':') {
+      if (trimmed[0] != '\t' && trimmed[0] != ' ') {
+        labelLines[trimmed.substr(0, trimmed.size() - 1)] = i;
+      }
+      size_t lt = trimmed.find('<');
+      size_t gt = trimmed.find('>', lt != std::string::npos ? lt : 0);
+      if (lt != std::string::npos && gt != std::string::npos && gt > lt) {
+        labelLines[trimmed.substr(lt, gt - lt + 1)] = i;
+      }
     }
   }
 
@@ -181,6 +193,13 @@ static void printIsaTextSummary(const std::string &isaText, bool fullIsa) {
           size_t targetEnd = lines[i].find_first_of(" \t;/", targetStart);
           std::string targetLabel = lines[i].substr(targetStart, targetEnd - targetStart);
           auto it = labelLines.find(targetLabel);
+          if (it == labelLines.end()) {
+            size_t lt = lines[i].find('<', targetEnd);
+            size_t gt = lines[i].find('>', lt != std::string::npos ? lt : 0);
+            if (lt != std::string::npos && gt != std::string::npos && gt > lt) {
+              it = labelLines.find(lines[i].substr(lt, gt - lt + 1));
+            }
+          }
           if (it != labelLines.end() && it->second < i) {
             int span = i - it->second + 1;
             if (span >= maxLoopSpan) {
@@ -193,7 +212,7 @@ static void printIsaTextSummary(const std::string &isaText, bool fullIsa) {
       }
     }
   }
-  // Fallback for numeric relative offsets (e.g. llvm-objdump)
+  // Fallback for numeric relative offsets (e.g. llvm-objdump without symbol labels)
   if (loopStartIdx == -1) {
     for (int i = static_cast<int>(lines.size()) - 1; i >= 0; --i) {
       if (lines[i].find("s_cbranch_") != std::string::npos) {
@@ -1117,7 +1136,8 @@ static bool inspectRocmCodeObject(const KernelArtifact &art, const std::string &
   runCommandSilent(unbundleCmd, out);
 
   fs::path targetPath = fs::exists(tmpObj, ec) ? tmpObj : art.filePath;
-  std::string disCmd = "\"" + objdump + "\" -d --mcpu=" + asic + " \"" + targetPath.string() + "\"";
+  std::string symArg = !art.rocmSymbol.empty() ? (" --disassemble-symbols=" + art.rocmSymbol) : "";
+  std::string disCmd = "\"" + objdump + "\" -d --mcpu=" + asic + symArg + " \"" + targetPath.string() + "\"";
   int rc = runCommandSilent(disCmd, out);
   if (fs::exists(tmpObj, ec)) {
     fs::remove(tmpObj, ec);
@@ -1128,7 +1148,9 @@ static bool inspectRocmCodeObject(const KernelArtifact &art, const std::string &
   }
 
   std::cout << "━━━ [rocm] " << art.configName
-            << " (" << art.filePath.filename().string() << " — " << asic << ") ━━━\n\n";
+            << " (" << art.filePath.filename().string()
+            << (!art.rocmSymbol.empty() ? (" :: " + art.rocmSymbol) : "")
+            << " — " << asic << ") ━━━\n\n";
   printIsaTextSummary(out, fullIsa);
   return true;
 }
@@ -1164,7 +1186,7 @@ int IsaDumper::dump(const IsaDumperOptions &opts) {
       std::string ext = directPath.extension().string();
       std::string backend = (ext == ".co" || ext == ".hsaco" || ext == ".o") ? "rocm" : "vulkan";
       artifacts.push_back(
-          {directPath.filename().string(), directPath.filename().string(), 0, backend, directPath});
+          {directPath.filename().string(), directPath.filename().string(), 0, backend, directPath, "", ""});
       continue;
     }
 
@@ -1179,13 +1201,13 @@ int IsaDumper::dump(const IsaDumperOptions &opts) {
         if (wantedBackends.count("vulkan") && !m.vulkanSpv.empty()) {
           fs::path p = kernelDir / "vulkan" / m.vulkanSpv;
           if (fs::exists(p)) {
-            artifacts.push_back({m.benchName, m.configLabel, m.configIndex, "vulkan", p});
+            artifacts.push_back({m.benchName, m.configLabel, m.configIndex, "vulkan", p, "", ""});
           }
         }
         if (wantedBackends.count("rocm") && !m.rocmCo.empty()) {
           fs::path p = kernelDir / "rocm" / m.rocmCo;
           if (fs::exists(p)) {
-            artifacts.push_back({m.benchName, m.configLabel, m.configIndex, "rocm", p});
+            artifacts.push_back({m.benchName, m.configLabel, m.configIndex, "rocm", p, m.rocmSymbol, ""});
           }
         }
       }
@@ -1213,18 +1235,31 @@ int IsaDumper::dump(const IsaDumperOptions &opts) {
         continue;
       }
 
-      if (wantedBackends.count("vulkan") && !m.vulkanSpv.empty()) {
-        fs::path p = kernelDir / "vulkan" / m.vulkanSpv;
-        if (fs::exists(p)) {
-          artifacts.push_back({m.benchName, m.configLabel, m.configIndex, "vulkan", p});
-          matchedBench = true;
+      matchedBench = true;
+      if (wantedBackends.count("vulkan")) {
+        if (!m.vulkanSpv.empty()) {
+          fs::path p = kernelDir / "vulkan" / m.vulkanSpv;
+          if (fs::exists(p)) {
+            artifacts.push_back({m.benchName, m.configLabel, m.configIndex, "vulkan", p, "", ""});
+          }
+        } else if (wantedBackends.size() == 1) {
+          std::string reason = !m.rocmCo.empty()
+              ? (m.configLabel + " has no Vulkan shader artifact (supported on ROCm via " + m.rocmCo + "; pass '-k rocm').")
+              : (m.configLabel + " is a capability-probed benchmark with no compiled shader artifact on this toolchain.");
+          artifacts.push_back({m.benchName, m.configLabel, m.configIndex, "vulkan", {}, "", reason});
         }
       }
-      if (wantedBackends.count("rocm") && !m.rocmCo.empty()) {
-        fs::path p = kernelDir / "rocm" / m.rocmCo;
-        if (fs::exists(p)) {
-          artifacts.push_back({m.benchName, m.configLabel, m.configIndex, "rocm", p});
-          matchedBench = true;
+      if (wantedBackends.count("rocm")) {
+        if (!m.rocmCo.empty()) {
+          fs::path p = kernelDir / "rocm" / m.rocmCo;
+          if (fs::exists(p)) {
+            artifacts.push_back({m.benchName, m.configLabel, m.configIndex, "rocm", p, m.rocmSymbol, ""});
+          }
+        } else if (wantedBackends.size() == 1) {
+          std::string reason = !m.vulkanSpv.empty()
+              ? (m.configLabel + " has no ROCm kernel artifact (supported on Vulkan via " + m.vulkanSpv + "; pass '-k vulkan').")
+              : (m.configLabel + " is a capability-probed benchmark with no compiled kernel artifact on this toolchain.");
+          artifacts.push_back({m.benchName, m.configLabel, m.configIndex, "rocm", {}, "", reason});
         }
       }
     }
@@ -1235,7 +1270,7 @@ int IsaDumper::dump(const IsaDumperOptions &opts) {
           if (entry.path().extension() == ".spv") {
             std::string fname = entry.path().filename().string();
             if (normalizeKey(fname).find(normTarget) != std::string::npos) {
-              artifacts.push_back({fname, fname, 0, "vulkan", entry.path()});
+              artifacts.push_back({fname, fname, 0, "vulkan", entry.path(), "", ""});
             }
           }
         }
@@ -1245,7 +1280,7 @@ int IsaDumper::dump(const IsaDumperOptions &opts) {
           if (entry.path().extension() == ".co") {
             std::string fname = entry.path().filename().string();
             if (normalizeKey(fname).find(normTarget) != std::string::npos) {
-              artifacts.push_back({fname, fname, 0, "rocm", entry.path()});
+              artifacts.push_back({fname, fname, 0, "rocm", entry.path(), "", ""});
             }
           }
         }
@@ -1266,6 +1301,8 @@ int IsaDumper::dump(const IsaDumperOptions &opts) {
   bool needVulkan = false;
   bool needRocm = false;
   for (const auto &a : artifacts) {
+    if (!a.skipReason.empty())
+      continue;
     if (a.backend == "vulkan") {
       needVulkan = true;
     } else if (a.backend == "rocm") {
@@ -1297,8 +1334,14 @@ int IsaDumper::dump(const IsaDumperOptions &opts) {
 
   std::set<std::string> visitedFiles;
   for (const auto &art : artifacts) {
-    std::string visitKey = art.backend + ":" + art.filePath.string();
+    std::string visitKey = art.backend + ":" + art.filePath.string() + ":" + art.rocmSymbol + ":" + art.configName;
     if (!visitedFiles.insert(visitKey).second) {
+      continue;
+    }
+
+    if (!art.skipReason.empty()) {
+      std::cout << "━━━ [" << art.backend << "] " << art.configName << " ━━━\n"
+                << "  [Skipped] " << art.skipReason << "\n\n";
       continue;
     }
 

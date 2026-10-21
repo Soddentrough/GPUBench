@@ -27,12 +27,14 @@ GPUBench classifies tests cleanly into fully supported native workloads and tran
 | **FP16 Compute** | ✅ **Supported** | `cl_khr_fp16` (`half` / `half2`) | Vector compute throughput. (Matrix mode requires cooperative matrix). |
 | **BF16 Compute** | ⚠️ *API Limitation* | None (`cl_khr_bfloat16` not standard) | Reported as `UNSUPPORTED (API Limitation)` without error/crash. |
 | **FP8 Compute** | ⚠️ *API Limitation* | None | Reported as `UNSUPPORTED (API Limitation)`. |
-| **FP4 / INT4** | ⚠️ *API / Toolchain Limitation* | None (Sub-byte 4-bit types not standardized in OpenCL C) | Reported as `UNSUPPORTED (Toolchain Limitation)`. |
-| **INT8 Compute** | ✅ **Supported** | Standard vector math (`char4`) | Vector throughput across all OpenCL vendors. |
+| **FP6 / FP4 / INT4** | ⚠️ *API / Hardware Limitation* | None (Sub-byte 4/6-bit matrix/vector extensions not standardized in OpenCL C) | Reported as `UNSUPPORTED`. |
+| **INT8 Compute** | ✅ **Supported** | Standard vector math (`char4`) | Vector throughput across all OpenCL vendors. (Matrix mode requires cooperative matrix). |
+| **ILP & Concurrency** | ✅ **Supported** | Standard OpenCL C 1.2+ (`fma`, `mad24`) | 7 configurations spanning FP32 ILP4/8/16, INT32 ILP4/8/16, and Concurrent Mixed FP32+INT32. |
+| **LDS Bank Conflicts** | ✅ **Supported** | `__local` shared memory | 32-bank conflict sweep (Stride 1 to Stride 32). |
 | **Device Memory Bandwidth** | ✅ **Supported** | Standard OpenCL Buffers | 128, 256, and 1024 threads/group sweep modes (Read, Write, R/W). |
-| **Cache Latency** | ✅ **Supported** | Pointer-chasing buffer traversal | Single-workitem pointer chasing across L0/L1/L2/L3 cache levels. |
+| **Cache Latency & Curve** | ✅ **Supported** | Pointer-chasing buffer traversal | Single-workitem pointer chasing across L0/L1/L2/L3/VRAM hierarchy (4 KB to 256 MB). |
 | **Pixel Fill Rate (ROPs)** | ⚠️ *API Limitation* | Graphics pipeline required | Reported as `UNSUPPORTED (API Limitation)` (OpenCL lacks rasterizer/ROPs). |
-| **Ray Tracing (All 7 Suites)** | ⚠️ *API Limitation* | `VK_KHR_ray_query` / hardware BVH acceleration required | Reported as `UNSUPPORTED (API Limitation)` (OpenCL lacks hardware BVH traversal and ray query primitives). |
+| **Ray Tracing (All 8 Suites)** | ⚠️ *API Limitation* | `VK_KHR_ray_query` / hardware BVH acceleration required | Reported as `UNSUPPORTED (API Limitation)` (OpenCL lacks hardware BVH traversal and ray query primitives). |
 
 ---
 

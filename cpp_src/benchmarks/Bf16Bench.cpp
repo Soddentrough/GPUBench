@@ -36,11 +36,11 @@ void Bf16Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
   if (context.getBackend() == ComputeBackend::ROCm) {
     vector_file = kdir / "rocm" / "bf16.hip";
     matrix_file = kdir / "rocm" / "bf16_matrix.hip";
-  } else if (context.getBackend() == ComputeBackend::OpenCL) {
-    vector_file = kdir / "opencl" / "bf16.cl";
-  } else {
+  } else if (context.getBackend() == ComputeBackend::Vulkan) {
     vector_file = kdir / "vulkan" / "bf16.comp";
     matrix_file = kdir / "vulkan" / "coop_matrix_bf16.comp";
+  } else {
+    return;
   }
 
   DeviceInfo devInfo = context.getCurrentDeviceInfo();
@@ -111,10 +111,6 @@ BenchmarkResult Bf16Bench::GetResult(uint32_t config_idx) const {
   if (config_idx == 0 && vectorKernel != nullptr) { // Vector
     uint64_t iters = 32768;
     uint64_t ops_per_iter = 256; // 32 bf16vec4 dot-accumulates (64 v_dot2 * 4 ops = 256 BF16 ops)
-    if (context && context->getBackend() == ComputeBackend::OpenCL) {
-      iters = 16384;
-      ops_per_iter = 128;
-    }
     uint64_t num_ops = iters * ops_per_iter * 8192 * 64;
     return {num_ops, 0.0};
   } else { // Matrix

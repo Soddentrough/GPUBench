@@ -152,7 +152,7 @@ void RayRawTraversalBench::buildAS() {
     geomOut.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
     geomOut.geometry.triangles.vertexData.deviceAddress = vertexAddr;
     geomOut.geometry.triangles.vertexStride = sizeof(float) * 3;
-    geomOut.geometry.triangles.maxVertex = primCount * 3;
+    geomOut.geometry.triangles.maxVertex = primCount * 3 - 1;
     geomOut.geometry.triangles.indexType = VK_INDEX_TYPE_NONE_KHR;
     geomOut.geometry.triangles.transformData.deviceAddress = 0;
 
@@ -370,6 +370,12 @@ void RayRawTraversalBench::buildAS() {
 void RayRawTraversalBench::Run(uint32_t config_idx) {
 #ifdef HAVE_VULKAN
   VulkanContext *vContext = static_cast<VulkanContext *>(context);
+  if (lastRunConfig != static_cast<int>(config_idx)) {
+    uint32_t checkCount = 1024;
+    std::vector<uint32_t> zeroHits(checkCount, 0);
+    context->writeBuffer(resultBuffer, 0, checkCount * sizeof(uint32_t), zeroHits.data());
+    lastRunConfig = static_cast<int>(config_idx);
+  }
   VkAccelerationStructureKHR activeTlas =
       (config_idx == 0) ? coherentTlas : deepTlas;
 
@@ -480,6 +486,7 @@ std::string RayRawTraversalBench::GetConfigCaveat(uint32_t config_idx,
 bool RayRawTraversalBench::ValidateResults(uint32_t config_idx) const {
   if (config_idx >= GetNumConfigs()) return false;
   if (!context || !resultBuffer) return false;
+  if (lastRunConfig != static_cast<int>(config_idx)) return false;
 
   try {
     // Read back first 1024 workgroups from strided buffer

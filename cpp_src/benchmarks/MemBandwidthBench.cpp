@@ -186,11 +186,9 @@ BenchmarkResult MemBandwidthBench::GetResult(uint32_t config_idx) const {
   //   Read:      reads 512 B/iter only              -> 1x base
   //   Write:     writes 512 B/iter only             -> 1x base
   //   ReadWrite: reads AND writes 512 B/iter each   -> 2x base
-  // Note: the Vulkan/ROCm kernels issue the 512 B of loads unconditionally
-  // (the mode is a runtime push constant, so the loads cannot be proven
-  // dead), but their results are only consumed in Read/ReadWrite modes; we
-  // report the intended per-mode traffic above for all backends so results
-  // stay comparable across backends.
+  // All three backends (Vulkan, ROCm, OpenCL) hoist the mode branch outside
+  // the streaming loop so Read issues only loads, Write issues only stores,
+  // and ReadWrite issues both loads and stores.
   uint64_t base_bytes =
       (uint64_t)config.workgroupSize * config.numWorkgroups * 512 * 32;
   uint64_t bytes_transferred =

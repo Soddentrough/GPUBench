@@ -413,7 +413,7 @@ TEST_CASE(LdsAndBf16Validation, Bf16Bench_NegativeValidation_InfInjection) {
   ctx->waitIdle();
   ASSERT_TRUE(bench.ValidateResults(0));
 
-  // 0x7F800000 is float32 +Inf, and 0x7F80 is BF16 +Inf
+  // 0x7F800000 is float32 +Inf (ROCm Vector buffer), and 0x7F807F80 is packed BF16 +Inf (Vulkan Vector & Vulkan/ROCm Matrix)
   uint32_t infBits = (ctx->getBackend() == ComputeBackend::ROCm) ? 0x7F800000u : 0x7F807F80u;
   ctx->writeBuffer(bench.buffer, 0, sizeof(uint32_t), &infBits);
   ctx->waitIdle();
@@ -425,7 +425,8 @@ TEST_CASE(LdsAndBf16Validation, Bf16Bench_NegativeValidation_InfInjection) {
     ctx->waitIdle();
     ASSERT_TRUE(bench.ValidateResults(1));
 
-    ctx->writeBuffer(bench.matrixBuffer, 0, sizeof(uint32_t), &infBits);
+    uint32_t matrixInfBits = 0x7F807F80u;
+    ctx->writeBuffer(bench.matrixBuffer, 0, sizeof(uint32_t), &matrixInfBits);
     ctx->waitIdle();
     ASSERT_FALSE(bench.ValidateResults(1));
   }

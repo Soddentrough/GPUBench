@@ -992,7 +992,7 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
     initCounters[(16 + m) * kWorkListCounterStride] = perQueue;
   }
   context->writeBuffer(indirectBuffer, 0, initCmds.size() * sizeof(uint32_t), initCmds.data());
-  context->writeBuffer(workListBuffer, 0, initCounters.size() * sizeof(uint32_t), initialCounters.data());
+  context->writeBuffer(workListBuffer, 0, initCounters.size() * sizeof(uint32_t), initCounters.data());
 
   rebuildBounceBatches();
 

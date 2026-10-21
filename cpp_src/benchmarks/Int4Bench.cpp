@@ -110,11 +110,10 @@ bool Int4Bench::ValidateResults(uint32_t config_idx) const {
   std::vector<int32_t> hostOut(64, 0);
   try {
     context->readBuffer(buffer, 0, hostOut.size() * sizeof(int32_t), hostOut.data());
-    bool anyNonZero = false;
     for (int32_t v : hostOut) {
-      if (v != 0) anyNonZero = true;
+      if (v == 0 || static_cast<uint32_t>(v) == 0x12345678u) return false;
     }
-    return anyNonZero;
+    return true;
   } catch (...) {
     return false;
   }

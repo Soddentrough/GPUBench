@@ -1186,13 +1186,28 @@ void ResultFormatter::print() {
   }
 
   if (hasMultiBackendParity) {
+    auto computeParityVal = [](const ResultData &r) -> double {
+      if (r.time_ms <= 0.0 || r.operations == 0)
+        return 0.0;
+      if (r.metric == "MItems/s") {
+        return (static_cast<double>(r.operations) / (r.time_ms / 1000.0)) / 1e6;
+      } else if (r.metric == "GB/s") {
+        return (static_cast<double>(r.operations) / (r.time_ms / 1000.0)) / 1e9;
+      } else if (r.metric == "us") {
+        return (r.time_ms * 1000.0) / static_cast<double>(r.operations);
+      } else if (r.metric == "ns") {
+        return (r.time_ms * 1e6) / static_cast<double>(r.operations);
+      }
+      return (static_cast<double>(r.operations) / (r.time_ms / 1000.0)) / 1e12;
+    };
+
     std::cout << "\n";
     std::cout << BOLD << CYAN << "  ╭─ Compiler Telemetry & Backend Parity Attribution ───────────────────────────╮" << RESET << "\n";
     for (const auto &[bName, bMap] : parityMap) {
       if (bMap.size() <= 1) continue;
       std::cout << BOLD << CYAN << "  │ " << RESET << BOLD << "Workload: " << bName << RESET << "\n";
       for (const auto &[backend, r] : bMap) {
-        double val = (static_cast<double>(r.operations) / (r.time_ms / 1000.0)) / 1e12;
+        double val = computeParityVal(r);
         std::string telemStr;
         if (r.hasRegisterTelemetry && r.vgprCount > 0) {
           telemStr = " | " + std::to_string(r.vgprCount) + " VGPRs" +
@@ -1212,10 +1227,12 @@ void ResultFormatter::print() {
       if (bMap.count("Vulkan") && bMap.count("ROCm")) {
         const auto &v = bMap.at("Vulkan");
         const auto &roc = bMap.at("ROCm");
-        double vVal = (static_cast<double>(v.operations) / (v.time_ms / 1000.0)) / 1e12;
-        double rVal = (static_cast<double>(roc.operations) / (roc.time_ms / 1000.0)) / 1e12;
+        double vVal = computeParityVal(v);
+        double rVal = computeParityVal(roc);
         if (vVal > 0.0 && rVal > 0.0) {
-          double deltaPct = ((vVal - rVal) / vVal) * 100.0;
+          bool lowerIsBetter = (v.metric == "us" || v.metric == "ns");
+          double deltaPct = lowerIsBetter ? (((rVal - vVal) / rVal) * 100.0)
+                                          : (((vVal - rVal) / vVal) * 100.0);
           std::cout << BOLD << CYAN << "  │ " << RESET << " • " << BOLD << "Parity Delta: " << RESET;
           if (std::abs(deltaPct) < 3.0) {
             std::cout << GREEN << "Within " << formatDouble(std::abs(deltaPct), 1) << "% (Full Parity)" << RESET << "\n";

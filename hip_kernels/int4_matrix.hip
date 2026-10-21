@@ -8,9 +8,10 @@ extern "C" __global__ void run_benchmark(int* data) {
 #if defined(__gfx1200__) || defined(__gfx1201__)
     using int8 = __attribute__((ext_vector_type(8))) int;
 
-    int a = data[lane & 31u];
-    int b = data[(lane + 16u) & 31u];
-    int seed = data[lane & 31u] & 0x7;
+    const int* inptr = data + 1048576u;
+    int a = inptr[lane & 31u];
+    int b = inptr[(lane + 16u) & 31u];
+    int seed = inptr[lane & 31u] & 0x7;
 
     int8 c0 = {seed + 1, 0, 0, 0, 0, 0, 0, 0};
     int8 c1 = {seed + 2, 0, 0, 0, 0, 0, 0, 0};
@@ -39,9 +40,10 @@ extern "C" __global__ void run_benchmark(int* data) {
     using int8 = __attribute__((ext_vector_type(8))) int;
     using int2 = __attribute__((ext_vector_type(2))) int;
 
-    int2 a = {data[(lane * 2u) & 63u], data[(lane * 2u + 1u) & 63u]};
-    int2 b = {data[(lane * 2u + 32u) & 63u], data[(lane * 2u + 33u) & 63u]};
-    int seed = data[lane & 31u] & 0x7;
+    const int* inptr = data + 1048576u;
+    int2 a = {inptr[(lane * 2u) & 63u], inptr[(lane * 2u + 1u) & 63u]};
+    int2 b = {inptr[(lane * 2u + 32u) & 63u], inptr[(lane * 2u + 33u) & 63u]};
+    int seed = inptr[lane & 31u] & 0x7;
 
     int8 c0 = {seed + 1, 0, 0, 0, 0, 0, 0, 0};
     int8 c1 = {seed + 2, 0, 0, 0, 0, 0, 0, 0};

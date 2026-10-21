@@ -12,14 +12,16 @@ bool Fp16Bench::IsSupported(const DeviceInfo &info,
 void Fp16Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
   this->context = &context;
 
-  // Create storage buffer
+  // Create storage buffers (separate vector and matrix buffers prevent config aliasing)
   size_t bufferSize =
       8192 * 64 * 4 * 4; // 8MB buffer to prevent out of bounds
   buffer = context.createBuffer(bufferSize);
+  matrixBuffer = context.createBuffer(bufferSize);
 
-  // Initialize buffer with packed FP16 0.03125 (0x2800) so both vector and matrix loads see non-zero finite values
+  // Initialize buffers with packed FP16 0.03125 (0x2800) so both vector and matrix loads see non-zero finite values
   std::vector<uint32_t> initData(bufferSize / sizeof(uint32_t), 0x28002800u);
   context.writeBuffer(buffer, 0, bufferSize, initData.data());
+  context.writeBuffer(matrixBuffer, 0, bufferSize, initData.data());
 
   // Load Vector Kernel
   std::filesystem::path kdir(kernel_dir);
@@ -53,7 +55,7 @@ void Fp16Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
       std::string func_name = (context.getBackend() == ComputeBackend::ROCm) ? "run_benchmark" : "main";
       matrixKernel = context.createKernel(matrix_file.string(), func_name, 1);
       if (matrixKernel) {
-          context.setKernelArg(matrixKernel, 0, buffer);
+          context.setKernelArg(matrixKernel, 0, matrixBuffer);
       }
     } catch (...) {
       matrixKernel = nullptr;
@@ -83,6 +85,10 @@ void Fp16Bench::Teardown() {
     if (buffer) {
       context->releaseBuffer(buffer);
       buffer = nullptr;
+    }
+    if (matrixBuffer) {
+      context->releaseBuffer(matrixBuffer);
+      matrixBuffer = nullptr;
     }
     context = nullptr;
   }
@@ -118,6 +124,7 @@ BenchmarkResult Fp16Bench::GetResult(uint32_t config_idx) const {
 bool Fp16Bench::ValidateResults(uint32_t config_idx) const {
   if (!context || !buffer) return false;
   if (config_idx == 1 && !matrixKernel) return true;
+  if (config_idx == 0 && !vectorKernel) return false;
 
   try {
     auto fp16ToFloat = [](uint16_t h) -> float {
@@ -147,26 +154,34 @@ bool Fp16Bench::ValidateResults(uint32_t config_idx) const {
       return out;
     };
 
+    ComputeBuffer targetBuf = (config_idx == 1 && matrixBuffer) ? matrixBuffer : buffer;
+    constexpr uint16_t kUnwrittenSeed16 = 0x2800u;
+    constexpr uint32_t kUnwrittenSeed32 = 0x28002800u;
+
     if (config_idx == 1 && context->getBackend() == ComputeBackend::ROCm) {
       std::vector<float> hostOut(64, 0.0f);
-      context->readBuffer(buffer, 0, hostOut.size() * sizeof(float), hostOut.data());
-      bool anyNonZero = false;
+      context->readBuffer(targetBuf, 0, hostOut.size() * sizeof(float), hostOut.data());
       for (float v : hostOut) {
-        if (std::isnan(v) || std::isinf(v)) return false;
-        if (v != 0.0f) anyNonZero = true;
+        if (std::isnan(v) || std::isinf(v) || v == 0.0f) return false;
+        uint32_t rawBits = 0;
+        std::memcpy(&rawBits, &v, sizeof(uint32_t));
+        if (rawBits == kUnwrittenSeed32) return false;
+        // fp16_matrix.hip sums 8 elements of (8 accumulators * 4096 * 0.015625) = ~4096.0f
+        if (v < 4000.0f || v > 4200.0f) return false;
       }
-      return anyNonZero;
+      return true;
     }
 
     std::vector<uint16_t> hostHalf(64, 0);
-    context->readBuffer(buffer, 0, hostHalf.size() * sizeof(uint16_t), hostHalf.data());
-    bool anyNonZero = false;
+    context->readBuffer(targetBuf, 0, hostHalf.size() * sizeof(uint16_t), hostHalf.data());
     for (uint16_t h : hostHalf) {
+      if (h == kUnwrittenSeed16) return false;
       float v = fp16ToFloat(h);
-      if (std::isnan(v) || std::isinf(v)) return false;
-      if (v != 0.0f) anyNonZero = true;
+      if (std::isnan(v) || std::isinf(v) || v == 0.0f) return false;
+      // Vector converges to ~4.0f (Vulkan) or ~8.0f (ROCm/OpenCL); Vulkan Matrix outputs ~5.12f
+      if (v < 3.0f || v > 10.0f) return false;
     }
-    return anyNonZero;
+    return true;
   } catch (...) {
     return false;
   }

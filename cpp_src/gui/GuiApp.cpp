@@ -827,7 +827,7 @@ void GuiApp::initializeBenchmarkCategories() {
             {"FP4", "FP4", "FP4 Micro-Float - Vector", "Compute", "TOPS", "Sub-byte 4-bit quantized floating point throughput (requires native FP4 compute units such as CDNA4/gfx950+; reports UNSUPPORTED otherwise)", true, 0},
             {"INT8", "INT8", "INT8 Integer - Vector (DP4A)", "Compute", "TOPS", "INT8 dot product (DP4A) vector instructions", true, 0},
             {"INT8", "INT8", "INT8 Integer - Matrix (WMMA)", "Compute", "TOPS", "INT8 cooperative matrix / WMMA tensor throughput", true, 1},
-            {"INT4", "INT4", "INT4 Integer - Matrix (WMMA)", "Compute", "TOPS", "Sub-byte 4-bit integer matrix core throughput (native 16x16x16 iu4 WMMA on ROCm RDNA 4; reports UNSUPPORTED on Vulkan/OpenCL)", true, 0}
+            {"INT4", "INT4", "INT4 Integer - Matrix (WMMA)", "Compute", "TOPS", "Sub-byte 4-bit integer matrix core throughput (16x16x16 iu4 WMMA on RDNA 4 / gfx12+ via ROCm; reports UNSUPPORTED on RDNA 3/3.5, Vulkan, and OpenCL)", true, 0}
         };
         cat.subgroups.push_back(sub);
 

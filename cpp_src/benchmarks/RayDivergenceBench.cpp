@@ -129,7 +129,7 @@ void RayDivergenceBench::buildAS() {
   triGeom.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
   triGeom.geometry.triangles.vertexData.deviceAddress = vAddr;
   triGeom.geometry.triangles.vertexStride = sizeof(float) * 3;
-  triGeom.geometry.triangles.maxVertex = numPrimitives * 3;
+  triGeom.geometry.triangles.maxVertex = numPrimitives * 3 - 1;
   triGeom.geometry.triangles.indexType = VK_INDEX_TYPE_NONE_KHR;
 
   VkAccelerationStructureBuildGeometryInfoKHR triBuildInfo{
@@ -297,6 +297,11 @@ void RayDivergenceBench::buildAS() {
 
 void RayDivergenceBench::Run(uint32_t config_idx) {
   VulkanContext *vContext = static_cast<VulkanContext *>(context);
+  if (lastRunConfig != static_cast<int>(config_idx)) {
+    uint32_t zero = 0;
+    context->writeBuffer(resultBuffer, 0, sizeof(uint32_t), &zero);
+    lastRunConfig = static_cast<int>(config_idx);
+  }
   VkAccelerationStructureKHR activeTlas = triangleTlas;
 
   vContext->setKernelAS(kernel, 0, (AccelerationStructure)activeTlas);
@@ -339,6 +344,7 @@ void RayDivergenceBench::Teardown() {
     if (scratchBuffer) { context->releaseBuffer(scratchBuffer); scratchBuffer = nullptr; }
     context = nullptr;
   }
+  lastRunConfig = -1;
 }
 
 BenchmarkResult RayDivergenceBench::GetResult(uint32_t config_idx) const {
@@ -445,6 +451,9 @@ bool RayDivergenceBench::ValidateResults(uint32_t config_idx) const {
     return false;
   }
   if (!context || !resultBuffer) {
+    return false;
+  }
+  if (lastRunConfig != static_cast<int>(config_idx)) {
     return false;
   }
   try {

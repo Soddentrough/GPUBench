@@ -192,12 +192,19 @@ if(Vulkan_FOUND)
         list(APPEND VULKAN_SHADERS ${DEST_SHADER} ${SPV_SHADER})
     endforeach()
 
+    file(GLOB EXISTING_VULKAN_ARTIFACTS "${CMAKE_CURRENT_BINARY_DIR}/kernels/vulkan/*")
+    foreach(EXISTING_FILE ${EXISTING_VULKAN_ARTIFACTS})
+        if(NOT "${EXISTING_FILE}" IN_LIST VULKAN_SHADERS)
+            file(REMOVE "${EXISTING_FILE}")
+        endif()
+    endforeach()
+
     add_custom_target(shaders ALL DEPENDS ${VULKAN_SHADERS})
 endif()
 
 # Copy OpenCL kernels to build directory
 if(OpenCL_FOUND)
-    file(GLOB KERNELS "kernels/opencl/*.cl")
+    file(GLOB KERNELS CONFIGURE_DEPENDS "kernels/opencl/*.cl")
     file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/kernels/opencl)
     foreach(KERNEL_FILE ${KERNELS})
         get_filename_component(KERNEL_NAME ${KERNEL_FILE} NAME)
@@ -209,6 +216,14 @@ if(OpenCL_FOUND)
         )
         list(APPEND KERNEL_DESTINATIONS ${DESTINATION_FILE})
     endforeach()
+
+    file(GLOB EXISTING_OPENCL_ARTIFACTS "${CMAKE_CURRENT_BINARY_DIR}/kernels/opencl/*")
+    foreach(EXISTING_FILE ${EXISTING_OPENCL_ARTIFACTS})
+        if(NOT "${EXISTING_FILE}" IN_LIST KERNEL_DESTINATIONS)
+            file(REMOVE "${EXISTING_FILE}")
+        endif()
+    endforeach()
+
     add_custom_target(kernels ALL DEPENDS ${KERNEL_DESTINATIONS})
 endif()
 
@@ -271,6 +286,14 @@ if(HIP_FOUND)
        
         list(APPEND HIP_KERNELS_SRC ${DEST_HIP_SOURCE} ${DEST_HIP_CO})
     endforeach()
+
+    file(GLOB EXISTING_ROCM_ARTIFACTS "${CMAKE_CURRENT_BINARY_DIR}/kernels/rocm/*")
+    foreach(EXISTING_FILE ${EXISTING_ROCM_ARTIFACTS})
+        if(NOT "${EXISTING_FILE}" IN_LIST HIP_KERNELS_SRC)
+            file(REMOVE "${EXISTING_FILE}")
+        endif()
+    endforeach()
+
     add_custom_target(hip_kernels ALL DEPENDS ${HIP_KERNELS_SRC})
 endif()
 

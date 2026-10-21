@@ -5,6 +5,8 @@
 
 #define private public
 #include "benchmarks/Fp64Bench.h"
+#include "benchmarks/Fp32Bench.h"
+#include "benchmarks/Fp16Bench.h"
 #include "benchmarks/Int8Bench.h"
 #include "benchmarks/DualIssueBench.h"
 #include "benchmarks/Bf16Bench.h"
@@ -548,4 +550,73 @@ TEST_CASE(ComputeValidation, DualIssue_NegativeValidation_ExhaustiveAll7Configs)
   // 5. Post-teardown call
   ASSERT_FALSE(bench.ValidateResults(0));
 }
+
+// ============================================================================
+// 10. FP32, FP16, and INT8 Sentinel Seed Rejection (No Self-Validation)
+// ============================================================================
+
+TEST_CASE(ComputeValidation, Fp32_Fp16_Int8_SentinelSeedRejection_NoSelfValidation) {
+  auto ctx = createVulkanContext();
+  if (!ctx) { return; }
+
+  std::string kdir = KernelPath::find();
+  ASSERT_FALSE(kdir.empty());
+
+  // 1. FP32 must reject unwritten 1.0f seed before Run(0), and pass after Run(0)
+  {
+    Fp32Bench fp32;
+    fp32.Setup(*ctx, kdir);
+    ASSERT_FALSE(fp32.ValidateResults(0));
+    fp32.Run(0);
+    ctx->waitIdle();
+    ASSERT_TRUE(fp32.ValidateResults(0));
+    fp32.Teardown();
+  }
+
+  // 2. FP16 must reject unwritten 0x2800 seed before Run(0)/Run(1), and pass after Run()
+  {
+    Fp16Bench fp16;
+    if (fp16.IsSupported(ctx->getCurrentDeviceInfo(), ctx.get())) {
+      fp16.Setup(*ctx, kdir);
+      ASSERT_FALSE(fp16.ValidateResults(0));
+      if (fp16.matrixKernel != nullptr) {
+        ASSERT_FALSE(fp16.ValidateResults(1));
+      }
+      fp16.Run(0);
+      ctx->waitIdle();
+      ASSERT_TRUE(fp16.ValidateResults(0));
+      if (fp16.matrixKernel != nullptr) {
+        // Even after Config 0 ran, Config 1 must still be false before Run(1) because matrixBuffer is separate
+        ASSERT_FALSE(fp16.ValidateResults(1));
+        fp16.Run(1);
+        ctx->waitIdle();
+        ASSERT_TRUE(fp16.ValidateResults(1));
+      }
+      fp16.Teardown();
+    }
+  }
+
+  // 3. INT8 must reject unwritten seed (2) before Run(0) and unwritten outputBuffer (0) before Run(1)
+  {
+    Int8Bench int8;
+    if (int8.IsSupported(ctx->getCurrentDeviceInfo(), ctx.get())) {
+      int8.Setup(*ctx, kdir);
+      ASSERT_FALSE(int8.ValidateResults(0));
+      if (int8.matrixKernel != nullptr) {
+        ASSERT_FALSE(int8.ValidateResults(1));
+      }
+      int8.Run(0);
+      ctx->waitIdle();
+      ASSERT_TRUE(int8.ValidateResults(0));
+      if (int8.matrixKernel != nullptr) {
+        ASSERT_FALSE(int8.ValidateResults(1));
+        int8.Run(1);
+        ctx->waitIdle();
+        ASSERT_TRUE(int8.ValidateResults(1));
+      }
+      int8.Teardown();
+    }
+  }
+}
+
 

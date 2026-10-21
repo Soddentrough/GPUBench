@@ -32,6 +32,8 @@ void Fp8Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
 
   std::vector<uint32_t> initData(bufferSize / sizeof(uint32_t), 0x30303030u);
   context.writeBuffer(buffer, 0, bufferSize, initData.data());
+  std::vector<uint32_t> zeroData(bufferSize / sizeof(uint32_t), 0u);
+  context.writeBuffer(outputBuffer, 0, bufferSize, zeroData.data());
 
   // Helper to check if file exists
   auto file_exists = [](const std::string &path) {
@@ -47,9 +49,10 @@ void Fp8Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
     if (info.fp8Support) {
       std::filesystem::path matrix_file = kdir / "rocm" / "fp8_matrix.hip";
       try {
-        matrixKernel = context.createKernel(matrix_file.string(), "run_benchmark", 1);
+        matrixKernel = context.createKernel(matrix_file.string(), "run_benchmark", 2);
         if (matrixKernel) {
           context.setKernelArg(matrixKernel, 0, buffer);
+          context.setKernelArg(matrixKernel, 1, outputBuffer);
           is_native_matrix = true;
         }
       } catch (const std::exception &e) {
@@ -142,9 +145,14 @@ bool Fp8Bench::ValidateResults(uint32_t config_idx) const {
     for (float v : hostOut) {
       if (std::isnan(v) || std::isinf(v)) return false;
       if (v != 0.0f) anyNonZero = true;
-      // On Vulkan coop_matrix_fp8, expected output tile elements are ~2048.0f
+      // On Vulkan coop_matrix_fp8, 8 accumulators * 4096 iters * (16 * 0.5 * 0.5) = ~131072.0f
       if (context->getBackend() == ComputeBackend::Vulkan) {
-        if (std::abs(v - 2048.036f) > 5.0f && std::abs(v - 2048.0f) > 5.0f) {
+        if (v < 125000.0f || v > 135000.0f) {
+          return false;
+        }
+      } else if (context->getBackend() == ComputeBackend::ROCm) {
+        // On ROCm fp8_matrix.hip, 8 accumulators * 8 elements * 4096 iters * (16 * 0.5 * 0.5) = ~1048576.0f
+        if (v < 1000000.0f || v > 1100000.0f) {
           return false;
         }
       }

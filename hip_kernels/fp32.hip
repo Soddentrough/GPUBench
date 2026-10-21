@@ -16,7 +16,8 @@ extern "C" __global__ void run_benchmark(float* data, float multiplier, uint32_t
     if (index >= num_elements) return;
 
     // Use 32 independent float4 accumulators for high ILP and dual-issue ALU saturation (128 scalar FMAs in flight)
-    float4 val0  = make_float4(data[index], data[index], data[index], data[index]);
+    float seed   = data[index & 0x1FFFu] * 0.0001f;
+    float4 val0  = make_float4(seed + 0.01f, seed + 0.02f, seed + 0.03f, seed + 0.04f);
     float4 val1  = make_float4(0.1f, 0.2f, 0.3f, 0.4f);
     float4 val2  = make_float4(0.5f, 0.6f, 0.7f, 0.8f);
     float4 val3  = make_float4(0.9f, 1.0f, 1.1f, 1.2f);

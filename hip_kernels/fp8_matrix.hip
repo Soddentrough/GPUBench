@@ -4,7 +4,7 @@
 // Performs 4096 iterations * 8 independent 16x16x16 WMMA accumulators per wave
 // (32768 matrix operations * 8192 FLOPs = 268,435,456 FP8 ops per Wave32).
 
-extern "C" __global__ void run_benchmark(float* data) {
+extern "C" __global__ void run_benchmark(const float* in_data, float* out_data) {
     uint32_t idx = blockIdx.x * blockDim.x + threadIdx.x;
     uint32_t lane = threadIdx.x & 31u;
 
@@ -12,7 +12,7 @@ extern "C" __global__ void run_benchmark(float* data) {
     typedef int int2_v __attribute__((vector_size(8)));
     typedef float float8_v __attribute__((vector_size(32)));
 
-    const int2_v* iptr = reinterpret_cast<const int2_v*>(data);
+    const int2_v* iptr = reinterpret_cast<const int2_v*>(in_data);
     int2_v a = iptr[lane];
     int2_v b = iptr[lane + 32u];
 
@@ -39,8 +39,8 @@ extern "C" __global__ void run_benchmark(float* data) {
 
     float8_v c = c0 + c1 + c2 + c3 + c4 + c5 + c6 + c7;
     uint32_t safe_idx = idx % 524288u;
-    data[safe_idx] = c[0] + c[1] + c[2] + c[3] + c[4] + c[5] + c[6] + c[7];
+    out_data[safe_idx] = c[0] + c[1] + c[2] + c[3] + c[4] + c[5] + c[6] + c[7];
 #else
-    data[idx % 524288u] = 0.0f;
+    out_data[idx % 524288u] = 0.0f;
 #endif
 }

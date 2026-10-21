@@ -111,4 +111,5 @@ private:
   uint32_t deepPrimitives = 0;
   uint64_t recordedInvocations[2] = {0, 0};
   double recordedTimeMs[2] = {0.0, 0.0};
+  int lastRunConfig = -1;
 };

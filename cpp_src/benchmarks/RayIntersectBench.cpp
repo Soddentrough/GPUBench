@@ -119,7 +119,7 @@ void RayIntersectBench::buildAS() {
   triGeom.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
   triGeom.geometry.triangles.vertexData.deviceAddress = vAddr;
   triGeom.geometry.triangles.vertexStride = sizeof(float) * 3;
-  triGeom.geometry.triangles.maxVertex = numPrimitives * 3;
+  triGeom.geometry.triangles.maxVertex = numPrimitives * 3 - 1;
   triGeom.geometry.triangles.indexType = VK_INDEX_TYPE_NONE_KHR;
 
   VkAccelerationStructureBuildGeometryInfoKHR triBuildInfo{
@@ -353,6 +353,11 @@ void RayIntersectBench::buildAS() {
 
 void RayIntersectBench::Run(uint32_t config_idx) {
   VulkanContext *vContext = static_cast<VulkanContext *>(context);
+  if (lastRunConfig != static_cast<int>(config_idx)) {
+    uint32_t zero = 0;
+    context->writeBuffer(resultBuffer, 0, sizeof(uint32_t), &zero);
+    lastRunConfig = static_cast<int>(config_idx);
+  }
   VkAccelerationStructureKHR activeTlas =
       (config_idx == 0) ? triangleTlas : boxTlas;
 
@@ -404,6 +409,7 @@ void RayIntersectBench::Teardown() {
 #endif
     context = nullptr;
   }
+  lastRunConfig = -1;
 }
 
 BenchmarkResult RayIntersectBench::GetResult(uint32_t config_idx) const {
@@ -414,6 +420,7 @@ BenchmarkResult RayIntersectBench::GetResult(uint32_t config_idx) const {
 bool RayIntersectBench::ValidateResults(uint32_t config_idx) const {
   if (config_idx >= GetNumConfigs()) return false;
   if (!context || !resultBuffer) return false;
+  if (lastRunConfig != static_cast<int>(config_idx)) return false;
   try {
     uint32_t hits = 0;
     context->readBuffer(resultBuffer, 0, sizeof(uint32_t), &hits);

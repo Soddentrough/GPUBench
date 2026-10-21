@@ -8,9 +8,35 @@
 #include <random>
 
 bool RayPayloadBench::IsSupported(const DeviceInfo &info,
-                                     IComputeContext *context) const {
-  return info.rayTracingSupport &&
-         (context && context->getBackend() == ComputeBackend::Vulkan);
+                                  IComputeContext *context) const {
+  if (!info.rayTracingSupport) return false;
+  if (!context) return true;
+  if (context->getBackend() != ComputeBackend::Vulkan) return false;
+  const VulkanContext *vc = dynamic_cast<const VulkanContext *>(context);
+  if (vc && !vc->isExtensionEnabled(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME)) {
+    return false;
+  }
+  return true;
+}
+
+std::string RayPayloadBench::GetSupportNote(const DeviceInfo &info,
+                                            IComputeContext *context) const {
+  if (context && context->getBackend() == ComputeBackend::OpenCL) {
+    return "No support for ray tracing pipelines in OpenCL API";
+  }
+  if (context && context->getBackend() == ComputeBackend::ROCm) {
+    return "No support for ray tracing pipelines in ROCm/HIP API";
+  }
+  if (!info.rayTracingSupport) {
+    return "VK_KHR_acceleration_structure or VK_KHR_ray_query missing";
+  }
+  if (context) {
+    const VulkanContext *vc = dynamic_cast<const VulkanContext *>(context);
+    if (vc && !vc->isExtensionEnabled(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME)) {
+      return "VK_KHR_ray_tracing_pipeline missing";
+    }
+  }
+  return "Ray tracing requires Vulkan ray tracing pipeline extensions";
 }
 
 void RayPayloadBench::loadRTProcs(VkDevice device) {
@@ -111,7 +137,7 @@ void RayPayloadBench::buildAS() {
   triGeom.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
   triGeom.geometry.triangles.vertexData.deviceAddress = vAddr;
   triGeom.geometry.triangles.vertexStride = sizeof(float) * 3;
-  triGeom.geometry.triangles.maxVertex = numPrimitives * 3;
+  triGeom.geometry.triangles.maxVertex = numPrimitives * 3 - 1;
   triGeom.geometry.triangles.indexType = VK_INDEX_TYPE_NONE_KHR;
 
   VkAccelerationStructureBuildGeometryInfoKHR triBuildInfo{
@@ -276,6 +302,11 @@ void RayPayloadBench::buildAS() {
 
 void RayPayloadBench::Run(uint32_t config_idx) {
   VulkanContext *vContext = static_cast<VulkanContext *>(context);
+  if (lastRunConfig != static_cast<int>(config_idx)) {
+    uint32_t zero = 0;
+    context->writeBuffer(resultBuffer, 0, sizeof(uint32_t), &zero);
+    lastRunConfig = static_cast<int>(config_idx);
+  }
   
   ComputeKernel activeKernel = kernel16;
   if (config_idx == 1) activeKernel = kernel128;
@@ -316,6 +347,7 @@ void RayPayloadBench::Teardown() {
     if (scratchBuffer) { context->releaseBuffer(scratchBuffer); scratchBuffer = nullptr; }
     context = nullptr;
   }
+  lastRunConfig = -1;
 }
 
 BenchmarkResult RayPayloadBench::GetResult(uint32_t config_idx) const {
@@ -336,4 +368,23 @@ std::string RayPayloadBench::GetConfigName(uint32_t config_idx) const {
   if (config_idx == 0) return "16B Payload (Shadow / AO Visibility Probe)";
   if (config_idx == 1) return "128B Payload (Real-Time Path Tracing & GI)";
   return "256B Payload (Production / Film BSDF & MIS)";
+}
+
+bool RayPayloadBench::ValidateResults(uint32_t config_idx) const {
+  if (config_idx >= GetNumConfigs()) {
+    return false;
+  }
+  if (!context || !resultBuffer) {
+    return false;
+  }
+  if (lastRunConfig != static_cast<int>(config_idx)) {
+    return false;
+  }
+  try {
+    uint32_t hits = 0;
+    context->readBuffer(resultBuffer, 0, sizeof(uint32_t), &hits);
+    return hits > 0;
+  } catch (...) {
+    return false;
+  }
 }

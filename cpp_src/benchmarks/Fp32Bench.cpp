@@ -81,12 +81,18 @@ BenchmarkResult Fp32Bench::GetResult(uint32_t config_idx) const {
 }
 
 bool Fp32Bench::ValidateResults(uint32_t config_idx) const {
+  (void)config_idx;
   if (!context || !buffer)
     return false;
-  float val = 0.0f;
+  std::vector<float> hostOut(64, 0.0f);
   try {
-    context->readBuffer(buffer, 0, sizeof(float), &val);
-    return !std::isnan(val) && !std::isinf(val) && val != 0.0f;
+    context->readBuffer(buffer, 0, hostOut.size() * sizeof(float), hostOut.data());
+    for (float val : hostOut) {
+      if (std::isnan(val) || std::isinf(val) || val <= 10.0f) {
+        return false;
+      }
+    }
+    return true;
   } catch (...) {
     return false;
   }

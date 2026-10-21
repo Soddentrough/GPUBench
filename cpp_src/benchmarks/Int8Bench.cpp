@@ -20,9 +20,12 @@ void Int8Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
   buffer = context.createBuffer(bufferSize);
   matrixInputBuffer = context.createBuffer(bufferSize);
   outputBuffer = context.createBuffer(bufferSize);
-  std::vector<int8_t> initData(bufferSize, 1);
-  context.writeBuffer(buffer, 0, bufferSize, initData.data());
-  context.writeBuffer(matrixInputBuffer, 0, bufferSize, initData.data());
+  std::vector<int8_t> vecInitData(bufferSize, 2);
+  std::vector<int8_t> matInitData(bufferSize, 1);
+  std::vector<int8_t> zeroData(bufferSize, 0);
+  context.writeBuffer(buffer, 0, bufferSize, vecInitData.data());
+  context.writeBuffer(matrixInputBuffer, 0, bufferSize, matInitData.data());
+  context.writeBuffer(outputBuffer, 0, bufferSize, zeroData.data());
 
   // Load Vector Kernel
   std::filesystem::path kdir(kernel_dir);
@@ -127,11 +130,12 @@ bool Int8Bench::ValidateResults(uint32_t config_idx) const {
     std::vector<int8_t> hostBytes(64, 0);
     try {
       context->readBuffer(buffer, 0, hostBytes.size() * sizeof(int8_t), hostBytes.data());
-      bool anyNonZero = false;
-      for (int8_t v : hostBytes) {
-        if (v != 0) anyNonZero = true;
+      for (size_t i = 0; i < hostBytes.size(); i += 4) {
+        int8_t v = hostBytes[i];
+        // Kernels write ((total >> 16) | 1), which is odd (bit 0 == 1) and never 0 or unwritten seed 2
+        if (v == 0 || v == 2 || (v & 1) == 0) return false;
       }
-      return anyNonZero;
+      return true;
     } catch (...) {
       return false;
     }
@@ -151,7 +155,8 @@ bool Int8Bench::ValidateResults(uint32_t config_idx) const {
             return false;
           }
         } else {
-          if (v == 0) return false;
+          // ROCm int8_matrix.hip sums 8 elements of (8 accumulators * 4096 iters * 16 + seed) >= 4,194,304
+          if (v < 4194304 || v > 4250000) return false;
         }
       }
       return true;

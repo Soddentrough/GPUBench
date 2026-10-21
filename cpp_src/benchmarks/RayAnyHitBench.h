@@ -56,6 +56,7 @@ private:
 
   uint32_t rayCount;
   uint32_t numPrimitives;
+  int lastRunConfig = -1;
   std::map<uint32_t, double> rtResults;
 
   // Function pointers

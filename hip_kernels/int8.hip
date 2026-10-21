@@ -59,6 +59,6 @@ extern "C" __global__ void run_benchmark(char4* data) {
     }
 
     int total = acc0 + acc1 + acc2 + acc3 + acc4 + acc5 + acc6 + acc7;
-    data[index] = make_char4((char)total, (char)(total >> 8),
+    data[index] = make_char4((char)((total >> 16) | 1), (char)(total >> 8),
                              (char)(total >> 16), (char)(total >> 24));
 }

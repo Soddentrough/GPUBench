@@ -97,6 +97,7 @@ private:
   uint32_t rayCount = 4000000;
   uint32_t numPrimitives = 4096;
   uint32_t iterations = 100;
+  int lastRunConfig = -1;
   double rtResults[2] = {0.0, 0.0};
 
 #ifdef HAVE_VULKAN

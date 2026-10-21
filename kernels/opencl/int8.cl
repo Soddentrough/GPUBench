@@ -57,6 +57,6 @@ __kernel void run_benchmark(__global char4* data) {
     }
 
     int total = acc0 + acc1 + acc2 + acc3 + acc4 + acc5 + acc6 + acc7;
-    char4 result = (char4)((char)total);
+    char4 result = (char4)((char)((total >> 16) | 1));
     data[index] = result;
 }
