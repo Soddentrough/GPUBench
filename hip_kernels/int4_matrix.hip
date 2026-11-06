@@ -8,7 +8,8 @@ extern "C" __global__ void run_benchmark(int* data) {
 #if defined(__gfx1200__) || defined(__gfx1201__)
     using int8 = __attribute__((ext_vector_type(8))) int;
 
-    const int* inptr = data + 1048576u;
+    unsigned int wg_offset = (blockIdx.x & 1023u) * 32u;
+    const int* inptr = data + 1048576u + wg_offset;
     int a = inptr[lane & 31u];
     int b = inptr[(lane + 16u) & 31u];
     int seed = inptr[lane & 31u] & 0x7;
@@ -40,7 +41,8 @@ extern "C" __global__ void run_benchmark(int* data) {
     using int8 = __attribute__((ext_vector_type(8))) int;
     using int2 = __attribute__((ext_vector_type(2))) int;
 
-    const int* inptr = data + 1048576u;
+    unsigned int wg_offset = (blockIdx.x & 1023u) * 64u;
+    const int* inptr = data + 1048576u + wg_offset;
     int2 a = {inptr[(lane * 2u) & 63u], inptr[(lane * 2u + 1u) & 63u]};
     int2 b = {inptr[(lane * 2u + 32u) & 63u], inptr[(lane * 2u + 33u) & 63u]};
     int seed = inptr[lane & 31u] & 0x7;

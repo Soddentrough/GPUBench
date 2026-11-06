@@ -546,6 +546,7 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
   }
   lastCompletedPasses[23] = 16;
   lastCompletedPasses[24] = 16;
+  lastRunConfig = 0xFFFFFFFFu;
 
   rayCount = renderWidth * renderHeight;
   octantCapacity = std::max(1024u, (rayCount * 35u) / 100u);
@@ -1053,8 +1054,11 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
   multiLightBatches128.clear();
   auto pcMultiLight128 = pcMultiLightSingle;
   pcMultiLight128.binIndex = 128u;
-  std::memcpy(pcMultiLightData.data(), &pcMultiLight128, sizeof(pcMultiLight128));
-  multiLightBatches128.push_back({0 * sizeof(uint32_t) * 3, pcMultiLightData, kernelMultiLight});
+  for (uint32_t b = 0; b < 8; ++b) {
+    pcMultiLight128.queueId = b;
+    std::memcpy(pcMultiLightData.data(), &pcMultiLight128, sizeof(pcMultiLight128));
+    multiLightBatches128.push_back({b * sizeof(uint32_t) * 3, pcMultiLightData, kernelMultiLight});
+  }
 
   // Native Vulkan Device-Generated Commands (VK_EXT_device_generated_commands)
   isDGCAvailable = false;
@@ -1310,6 +1314,12 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
   if (unsupportedConfig[config_idx])
     return;
 
+  if (config_idx != lastRunConfig && resultBuffer) {
+    uint32_t zeros[4] = {0, 0, 0, 0};
+    context->writeBuffer(resultBuffer, 0, sizeof(zeros), zeros);
+    lastRunConfig = config_idx;
+  }
+
   uint32_t seed = dumpRenders ? 1337u : rand();
   uint32_t sceneTypeVal = (sceneType == SceneType::AAAOutdoorForest) ? 3u : ((sceneType == SceneType::OutdoorLandscape) ? 1u : ((sceneType == SceneType::IndoorAtrium) ? 2u : 0u));
   uint32_t isGltfVal = isGltf ? 1u : 0u;
@@ -1390,7 +1400,15 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
   case 5: { // Multi-Bounce Path Tracing - Device-Generated Commands (DGC) (Wavefront Compaction)
     uint32_t passes = (samplesPerPixel > 1) ? samplesPerPixel : 1u;
     for (uint32_t s = 0; s < passes; ++s) {
-      PushConstantsClassify pcClassify{rayCount, 1, s, seed + s * 7919u, dumpRenders ? 1u : 0u, renderWidth, renderHeight, bounceCapacity, 2, sceneTypeVal, isGltfVal, passes};
+      uint32_t sampleSeed = seed + s * 7919u;
+      for (size_t b = 0; b < bounceBatches.size(); ++b) {
+        uint32_t bounceSeed = sampleSeed + static_cast<uint32_t>(b) * 7919u;
+        if (bounceBatches[b].pushConstants.size() >= 4 * sizeof(uint32_t)) {
+          std::memcpy(bounceBatches[b].pushConstants.data() + 3 * sizeof(uint32_t),
+                      &bounceSeed, sizeof(uint32_t));
+        }
+      }
+      PushConstantsClassify pcClassify{rayCount, 1, s, sampleSeed, dumpRenders ? 1u : 0u, renderWidth, renderHeight, bounceCapacity, 2, sceneTypeVal, isGltfVal, passes};
       vContext->setKernelArg(kernelClassify, 10, sizeof(pcClassify), &pcClassify);
 
       vContext->dispatchWorkListSequence(
@@ -1599,31 +1617,27 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     break;
   }
   case 23: { // Full Scene Path Tracing (16 SPP) - Traditional Megakernel
-    auto t0 = std::chrono::high_resolution_clock::now();
-    uint32_t passes = 0;
-    for (uint32_t s = 0; s < 16; ++s) {
-      PushConstantsTraditional pc{rayCount, 1, 1 + bounceDepth, seed + s * 7919u, dumpRenders ? 1u : 0u, renderWidth, renderHeight, 0, sceneTypeVal, isGltfVal, 16u, s};
+    uint32_t passes = 16u;
+    for (uint32_t s = 0; s < passes; ++s) {
+      PushConstantsTraditional pc{rayCount, 1, 1 + bounceDepth, seed + s * 7919u, dumpRenders ? 1u : 0u, renderWidth, renderHeight, 0, sceneTypeVal, isGltfVal, passes, s};
       vContext->setKernelArg(kernelTraditional, 8, sizeof(pc), &pc);
       vContext->dispatch(kernelTraditional, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
-      vContext->waitIdle();
-      passes++;
-      if (s + 1 < 16) {
-        auto tNow = std::chrono::high_resolution_clock::now();
-        double elapsedMs = std::chrono::duration<double, std::milli>(tNow - t0).count();
-        double avgPassMs = elapsedMs / (s + 1);
-        if (elapsedMs + avgPassMs > 2500.0) {
-          break;
-        }
-      }
     }
-    lastCompletedPasses[23] = std::max(1u, passes);
+    lastCompletedPasses[23] = passes;
     break;
   }
   case 24: { // Full Scene Path Tracing (16 SPP) - Device-Generated Commands (DGC)
-    auto t0 = std::chrono::high_resolution_clock::now();
-    uint32_t passes = 0;
-    for (uint32_t s = 0; s < 16; ++s) {
-      PushConstantsClassify pcClassify{rayCount, 1, s, seed + s * 7919u, dumpRenders ? 1u : 0u, renderWidth, renderHeight, bounceCapacity, 2, sceneTypeVal, isGltfVal, 16u};
+    uint32_t passes = 16u;
+    for (uint32_t s = 0; s < passes; ++s) {
+      uint32_t sampleSeed = seed + s * 7919u;
+      for (size_t b = 0; b < bounceBatches.size(); ++b) {
+        uint32_t bounceSeed = sampleSeed + static_cast<uint32_t>(b) * 7919u;
+        if (bounceBatches[b].pushConstants.size() >= 4 * sizeof(uint32_t)) {
+          std::memcpy(bounceBatches[b].pushConstants.data() + 3 * sizeof(uint32_t),
+                      &bounceSeed, sizeof(uint32_t));
+        }
+      }
+      PushConstantsClassify pcClassify{rayCount, 1, s, sampleSeed, dumpRenders ? 1u : 0u, renderWidth, renderHeight, bounceCapacity, 2, sceneTypeVal, isGltfVal, passes};
       vContext->setKernelArg(kernelClassify, 10, sizeof(pcClassify), &pcClassify);
 
       vContext->dispatchWorkListSequence(
@@ -1632,18 +1646,8 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
           kernelResolve,
           kernelBounce, indirectBuffer, bounceBatches, true /* isPingPong */,
           isDGCAvailable ? &dgcInfoStandard : nullptr, isDGCAvailable ? 3u : 0u);
-      vContext->waitIdle();
-      passes++;
-      if (s + 1 < 16) {
-        auto tNow = std::chrono::high_resolution_clock::now();
-        double elapsedMs = std::chrono::duration<double, std::milli>(tNow - t0).count();
-        double avgPassMs = elapsedMs / (s + 1);
-        if (elapsedMs + avgPassMs > 2500.0) {
-          break;
-        }
-      }
     }
-    lastCompletedPasses[24] = std::max(1u, passes);
+    lastCompletedPasses[24] = passes;
     break;
   }
   case 25: { // Full Scene Path Tracing - Persistent Threads (Work Stealing)
@@ -2054,16 +2058,18 @@ void RaySchedulingBench::performVisualVerification(bool isInteractive) {
   gpubench::ImageExport::writePNG(pt16WorkPng, width, height, ldrWork);
   gpubench::ImageExport::writePNG(pt16DiffPng, width, height, ldrDiff);
 
+  uint32_t passes23 = lastCompletedPasses[23] > 0 ? lastCompletedPasses[23] : 16u;
+  uint32_t passes24 = lastCompletedPasses[24] > 0 ? lastCompletedPasses[24] : 16u;
   double pt16TimeTrad = (recordedInvocations[23] > 0 && recordedTimeMs[23] > 0.0)
-      ? (recordedTimeMs[23] / 1000.0) / static_cast<double>(recordedInvocations[23]) : (pt1TimeTrad * 16.0);
+      ? (recordedTimeMs[23] / 1000.0) / static_cast<double>(recordedInvocations[23]) : (pt1TimeTrad * passes23);
   double pt16FpsTrad = (pt16TimeTrad > 0.0) ? (1.0 / pt16TimeTrad) : 10.0;
-  double pt16MRaysTrad = (pt16TimeTrad > 0.0) ? ((static_cast<double>(rayCount * 16) / pt16TimeTrad) / 1e6) : 2000.0;
+  double pt16MRaysTrad = (pt16TimeTrad > 0.0) ? ((static_cast<double>(rayCount) * passes23 / pt16TimeTrad) / 1e6) : 2000.0;
   double pt16MsTrad = pt16TimeTrad * 1000.0;
 
   double pt16TimeWork = (recordedInvocations[24] > 0 && recordedTimeMs[24] > 0.0)
-      ? (recordedTimeMs[24] / 1000.0) / static_cast<double>(recordedInvocations[24]) : (pt1TimeWork * 16.0);
+      ? (recordedTimeMs[24] / 1000.0) / static_cast<double>(recordedInvocations[24]) : (pt1TimeWork * passes24);
   double pt16FpsWork = (pt16TimeWork > 0.0) ? (1.0 / pt16TimeWork) : 20.0;
-  double pt16MRaysWork = (pt16TimeWork > 0.0) ? ((static_cast<double>(rayCount * 16) / pt16TimeWork) / 1e6) : 4000.0;
+  double pt16MRaysWork = (pt16TimeWork > 0.0) ? ((static_cast<double>(rayCount) * passes24 / pt16TimeWork) / 1e6) : 4000.0;
   double pt16MsWork = pt16TimeWork * 1000.0;
 
   std::string pt16ProfileJson = "renders/render_" + tag + "_pt16_profile.json";

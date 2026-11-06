@@ -68,7 +68,7 @@ void main() {
         // Single uniform hit shader (SBT offset 0) with tMax = 500.0 so 100% of rays intersect the enclosing chamber
         traceRayEXT(topLevelAS, gl_RayFlagsNoneEXT, 0xFF, 0, 1, 0, origin, 0.001, dir, 500.0, 0);
 
-        myHits = uint(payload.x * 100.0) + uint(payload.y * 10.0) + uint(payload.z);
+        myHits = uint(max(0.0, payload.x * 100.0)) + uint(max(0.0, payload.y * 10.0)) + uint(max(0.0, payload.z));
     }
 
     uint waveHits = subgroupAdd(myHits);

@@ -56,18 +56,13 @@ private:
 #ifdef HAVE_VULKAN
   // Acceleration Structures
   VkAccelerationStructureKHR triangleBlas = VK_NULL_HANDLE;
-  VkAccelerationStructureKHR boxBlas = VK_NULL_HANDLE;
   VkAccelerationStructureKHR triangleTlas = VK_NULL_HANDLE;
-  VkAccelerationStructureKHR boxTlas = VK_NULL_HANDLE;
 
   ComputeBuffer vertexBuffer = nullptr;
-  ComputeBuffer aabbBuffer = nullptr;
   ComputeBuffer instanceBuffer = nullptr;
   ComputeBuffer scratchBuffer = nullptr;
   ComputeBuffer triangleTlasBuffer = nullptr;
   ComputeBuffer triangleBlasBuffer = nullptr;
-  ComputeBuffer boxTlasBuffer = nullptr;
-  ComputeBuffer boxBlasBuffer = nullptr;
 
   // RT function pointers
   PFN_vkGetAccelerationStructureBuildSizesKHR
@@ -84,7 +79,6 @@ private:
 
   uint32_t rayCount = 4000000;
   uint32_t numPrimitives = 4096;
-  uint32_t iterations = 100;
   int lastRunConfig = -1;
   double rtResults[5] = {0.0};
 

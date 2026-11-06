@@ -106,11 +106,13 @@ void main() {
     } else if (rpc.dgcMode == 3u) {
         // Ping-Pong Bounce Mode (Config 5 & 24)
         if (id == 0u) {
-            uint inQ = (rpc.resetQueue == 1u) ? 0u : ((rpc.resetQueue == 0u) ? 1u : 0u);
+            uint inQ = rpc.bounceIndex & 1u;
             uint count = worklist.queueCounters[Q_SNAPSHOT_IDX(inQ)];
             if (count > 0u) {
-                uint templateIdx = 16u + (rpc.bounceIndex > 0u ? rpc.bounceIndex - 1u : 0u);
+                uint templateIdx = 16u + rpc.bounceIndex;
                 DGCSequenceItem item = dgcData.templates[templateIdx];
+                uint sampleSeed = worklist.queueCounters[Q_SEED_IDX];
+                item.pc[3] = (sampleSeed != 0u ? sampleSeed : item.pc[3]) + rpc.bounceIndex * 7919u;
                 item.cmdX = (count + 31u) / 32u;
                 item.cmdY = 1u;
                 item.cmdZ = 1u;
@@ -144,17 +146,16 @@ void main() {
         if (id == 0u) {
             dgcCount.dynamicSequenceCount = totalActive;
         }
-    } else if (rpc.dgcMode == 5u || rpc.dgcMode == 6u) {
-        // Multi-Light Evaluation (dgcMode == 5u: Single Light, dgcMode == 6u: 128 Lights Binning)
+    } else if (rpc.dgcMode == 5u) {
+        // Single Light Evaluation (Config 28)
         if (id == 0u) {
             uint count = worklist.queueCounters[Q_SNAPSHOT_IDX(0)];
             indirectCmds.commands[0].x = (count + 31u) / 32u;
             indirectCmds.commands[0].y = (count > 0u) ? 1u : 0u;
             indirectCmds.commands[0].z = (count > 0u) ? 1u : 0u;
 
-            uint templateIdx = (rpc.dgcMode == 6u) ? 13u : 12u;
             if (count > 0u) {
-                DGCSequenceItem item = dgcData.templates[templateIdx];
+                DGCSequenceItem item = dgcData.templates[12u];
                 item.cmdX = (count + 31u) / 32u;
                 item.cmdY = 1u;
                 item.cmdZ = 1u;
@@ -163,6 +164,31 @@ void main() {
             } else {
                 dgcCount.dynamicSequenceCount = 0u;
             }
+        }
+    } else if (rpc.dgcMode == 6u) {
+        // 128 Lights Binning across 8 surface-normal octant queues (Config 29 & 30)
+        bool isActive = false;
+        uint count = 0u;
+        if (id < 8u) {
+            count = worklist.queueCounters[Q_SNAPSHOT_IDX(id)];
+            isActive = (count > 0u);
+        }
+
+        uint activeMask = isActive ? 1u : 0u;
+        uint slot = subgroupExclusiveAdd(activeMask);
+        uint totalActive = subgroupAdd(activeMask);
+
+        if (isActive) {
+            DGCSequenceItem item = dgcData.templates[13u];
+            item.pc[0] = id;
+            item.cmdX = (count + 31u) / 32u;
+            item.cmdY = 1u;
+            item.cmdZ = 1u;
+            dgcData.compacted[slot] = item;
+        }
+
+        if (id == 0u) {
+            dgcCount.dynamicSequenceCount = totalActive;
         }
     } else if (rpc.dgcMode == 7u) {
         // Primary Rays G-Buffer Normal Shading (Config 18) using templates[24..31]

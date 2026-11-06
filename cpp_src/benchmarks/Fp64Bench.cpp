@@ -57,7 +57,7 @@ void Fp64Bench::Teardown() {
 }
 
 BenchmarkResult Fp64Bench::GetResult(uint32_t config_idx) const {
-  // All backends (Vulkan, ROCm, OpenCL): 256 iters * 8 independent FMAs * 2 ops = 4096 FP64 ops per thread
+  // All backends (Vulkan, ROCm, OpenCL): 256 iters * 8 cyclic ring-dependent FMAs * 2 ops = 4096 FP64 ops per thread
   uint64_t num_threads = 8192 * 64;
   uint64_t num_ops = 4096ULL * num_threads;
   return {num_ops, 0.0};

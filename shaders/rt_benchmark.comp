@@ -5,8 +5,8 @@
 layout(local_size_x = 32) in;
 
 layout(set = 0, binding = 0) uniform accelerationStructureEXT topLevelAS;
-layout(set = 0, binding = 1) buffer Results {
-    uint hits;
+layout(set = 0, binding = 1) writeonly buffer Results {
+    uint hits[];
 } results;
 
 layout(push_constant) uniform PushConstants {
@@ -20,15 +20,16 @@ void main() {
 
     if (idx < pc.rayCount) {
         // Map rays uniformly into the guaranteed interior of the 16x16 grid cells (-8.0 to 8.0)
-        // across all 64 depth layers (jitter up to +0.35 in X/Y, primitive bounds [0.05, 0.95] -> safe interior [0.42, 0.56])
+        // across all 64 depth layers (jitter up to +0.35 in X/Y, right-triangle bounds [0.05, 0.95] -> safe interior [0.41, 0.48])
         float cellX = float(idx & 15u) - 8.0;
         float cellY = float((idx >> 4u) & 15u) - 8.0;
-        float subX = float((idx >> 8u) & 15u) * (0.14 / 15.0) + 0.42;
-        float subY = float((idx >> 12u) & 15u) * (0.14 / 15.0) + 0.42;
+        float subX = float((idx >> 8u) & 15u) * (0.07 / 15.0) + 0.41;
+        float subY = float((idx >> 12u) & 15u) * (0.07 / 15.0) + 0.41;
         float fx = cellX + subX;
         float fy = cellY + subY;
-        
-        vec3 origin = vec3(fx, fy, -2.0);
+        uint targetLayer = (idx >> 16u) & 63u;
+
+        vec3 origin = vec3(fx, fy, float(targetLayer) * 0.1 - 0.05);
         vec3 direction = vec3(0.0, 0.0, 1.0);
         float tMin = 0.001;
         float tMax = 10.0;
@@ -58,7 +59,7 @@ void main() {
     }
 
     uint totalWorkgroupHits = subgroupAdd(hitCount);
-    if (subgroupElect() && totalWorkgroupHits > 0) {
-        atomicAdd(results.hits, totalWorkgroupHits);
+    if (subgroupElect()) {
+        results.hits[gl_WorkGroupID.x] = totalWorkgroupHits;
     }
 }

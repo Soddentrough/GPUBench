@@ -1,4 +1,5 @@
 #version 460
+#extension GL_KHR_shader_subgroup_basic : enable
 
 layout(local_size_x = 1) in;
 
@@ -7,14 +8,20 @@ layout(set = 0, binding = 0) buffer Data {
 } Buffer;
 
 layout(push_constant) uniform PushConstants {
-    uint mask; // Kept for host compatibility
+    uint stride;
+    uint mask;
+    uint iterations;
+    uint padding;
 } pushConstants;
 
 void main() {
-    uint index = 0;
-    
+    // gl_SubgroupInvocationID is 0 on lane 0 (local_size_x = 1) and keeps index in a VGPR
+    // so the compiler does not promote index to an SGPR with v_readfirstlane_b32 per hop.
+    uint index = gl_LocalInvocationID.x + gl_SubgroupInvocationID;
+    uint iters = pushConstants.iterations > 0u ? pushConstants.iterations : 1000000u;
+
     // Raw chasing without mask to avoid extra arithmetic in the hot loop
-    for (uint i = 0; i < 1000000; i++) {
+    for (uint i = 0; i < iters; i++) {
         index = Buffer.data[index];
     }
 

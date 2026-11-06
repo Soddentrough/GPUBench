@@ -54,25 +54,6 @@ void Int4Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
   if (context.getBackend() == ComputeBackend::OpenCL) {
     return;
   }
-
-  DeviceInfo info = context.getCurrentDeviceInfo();
-  if (info.int4Support && info.cooperativeMatrixSupport &&
-      context.getBackend() == ComputeBackend::Vulkan) {
-    std::filesystem::path matrix_file =
-        kdir / "vulkan" / "coop_matrix_int4.comp";
-    if (file_exists(matrix_file.string())) {
-      try {
-        matrixKernel = context.createKernel(matrix_file.string(), "main", 1);
-        if (matrixKernel) {
-          context.setKernelArg(matrixKernel, 0, buffer);
-          is_native_matrix = true;
-        }
-      } catch (...) {
-        matrixKernel = nullptr;
-        is_native_matrix = false;
-      }
-    }
-  }
 }
 
 void Int4Bench::Run(uint32_t config_idx) {

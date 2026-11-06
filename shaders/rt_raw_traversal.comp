@@ -37,13 +37,13 @@ void main() {
                               0xFF, origin, pc.tMin, direction, pc.tMax);
         while (rayQueryProceedEXT(query)) {}
     } else {
-        // Deep multi-layer BVH stress: traverse through all 128 stratified layers
-        // (z = 0.0 .. 12.7, t = 1.0 .. 13.7) before committing the deepest layer hit
+        // Deep multi-layer BVH stress: traverse through all 64 stratified layers
+        // (z = 0.0 .. 6.3, t = 1.0 .. 7.3) before committing the deepest layer hit
         rayQueryInitializeEXT(query, topLevelAS,
                               gl_RayFlagsNoOpaqueEXT,
                               0xFF, origin, pc.tMin, direction, pc.tMax);
         while (rayQueryProceedEXT(query)) {
-            if (rayQueryGetIntersectionTEXT(query, false) >= 13.65) {
+            if (rayQueryGetIntersectionTEXT(query, false) >= 7.25) {
                 rayQueryConfirmIntersectionEXT(query);
             }
         }

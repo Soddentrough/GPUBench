@@ -11,5 +11,6 @@ void main() {
     for(int i = 0; i < 10; i++) {
         val += sin(p.x * i) * cos(p.y * i);
     }
-    payload = vec3(val, val * 0.5, val * 0.25);
+    float absVal = abs(val);
+    payload = vec3(absVal + 1.0, absVal * 0.5, absVal * 0.25);
 }

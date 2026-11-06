@@ -11,7 +11,7 @@ layout(set = 0, binding = 0) uniform accelerationStructureEXT topLevelAS;
 layout(set = 0, binding = 1) buffer Results {
     uint totalRays;
     uint totalHits;
-    float accumulatedLuminance;
+    uint accumulatedLuminance;
 } results;
 
 #include "rt_scheduling_common.glsl"
@@ -496,9 +496,13 @@ vec3 computeSmoothNormal(uint sceneType, uint primId, vec3 hitPos, vec3 rayDir, 
 
 void main() {
     uint idx = (gl_NumWorkGroups.y > 1u) ? (gl_GlobalInvocationID.y * pc.width + gl_GlobalInvocationID.x) : (gl_WorkGroupID.x * 32u + gl_LocalInvocationIndex);
+    if (idx == 0u) {
+        worklist.queueCounters[Q_SEED_IDX] = pc.seed;
+    }
 
     uint threadRays = 0u;
     uint threadHits = 0u;
+    uint threadLum = 0u;
     uint assignedQueue = 0xFFFFFFFFu;
     vec4 payload0 = vec4(0.0);
     vec4 payload1 = vec4(0.0);
@@ -598,8 +602,15 @@ void main() {
                 vec2 rawBary = rayQueryGetIntersectionBarycentricsEXT(query, true);
                 payload0 = vec4(t, uintBitsToFloat(pixelIdx), uintBitsToFloat(primId), uintBitsToFloat(packUnorm2x16(rawBary)));
             } else if (pc.mode == 8) {
-                assignedQueue = 0u;
                 vec2 rawBary = rayQueryGetIntersectionBarycentricsEXT(query, true);
+                if (pc.spp > 1u) {
+                    vec3 normal = computeSmoothNormal(pc.sceneType, primId, hitPos, direction, rawBary);
+                    assignedQueue = (normal.x >= 0.0 ? 1u : 0u) |
+                                    (normal.y >= 0.0 ? 2u : 0u) |
+                                    (normal.z >= 0.0 ? 4u : 0u);
+                } else {
+                    assignedQueue = 0u;
+                }
                 payload0 = vec4(t, uintBitsToFloat(pixelIdx), uintBitsToFloat(primId), uintBitsToFloat(packUnorm2x16(rawBary)));
             } else if (pc.mode == 6 || pc.mode == 7) {
                 assignedQueue = 0u;
@@ -619,7 +630,7 @@ void main() {
                 payload0 = vec4(hitPos, uintBitsToFloat(packSnorm2x16(octEncode(normal))));
                 payload1 = vec4(uintBitsToFloat(packHalf2x16(hitUv)), uintBitsToFloat(packUnorm2x16(rawBary)), uintBitsToFloat(primId), uintBitsToFloat(pixelIdx));
 
-                if (pc.mode == 7u && pc.dumpRenders != 0u) {
+                if (pc.mode == 7u) {
                     vec3 albedo = vec3(0.72);
                     if (pc.isGltf != 0u) {
                         uint matId = triMatBuf.triangleMats[primId];
@@ -636,7 +647,11 @@ void main() {
                     getSceneSunParams(pc.sceneType, sunDir, sunColor);
                     float NdotL = max(0.0, dot(normal, sunDir));
                     vec3 color = albedo * 0.15 + albedo * sunColor * NdotL;
-                    fb.pixels[pixelIdx] = vec4(tonemapACES(color), 1.0);
+                    if (pc.dumpRenders != 0u) {
+                        fb.pixels[pixelIdx] = vec4(tonemapACES(color), 1.0);
+                    } else {
+                        threadLum = uint(clamp(dot(color, vec3(0.2126, 0.7152, 0.0722)), 0.0, 100.0) * 256.0);
+                    }
                 }
             } else if (pc.mode == 0 || pc.mode == 9) {
                 if (pc.isGltf != 0u) {
@@ -664,142 +679,143 @@ void main() {
                     float u2 = rand_float(rngState);
                     vec3 nextDir = align_to_normal(cosine_sample_hemisphere(u1, u2), normal);
                     assignedQueue = 0u;
-                    payload0 = vec4(hitPos + normal * (pc.isGltf != 0u ? 0.05 : 0.005), uintBitsToFloat(packSnorm2x16(octEncode(nextDir))));
 
-                    if (pc.dumpRenders != 0) {
-                        vec3 albedo = vec3(0.72);
-                        vec3 emissive = vec3(0.0);
-                        float metallic = 0.0;
-                        float roughness = 0.5;
-                        float transmission = 0.0;
-                        float ior = 1.5;
-                        uint archetype = 0u;
+                    vec3 albedo = vec3(0.72);
+                    vec3 emissive = vec3(0.0);
+                    float metallic = 0.0;
+                    float roughness = 0.5;
+                    float transmission = 0.0;
+                    float ior = 1.5;
+                    uint archetype = 0u;
 
-                        if (pc.isGltf != 0u) {
-                            vec2 ubary = unpackUnorm2x16(packUnorm2x16(bary));
-                            uint base = primId * 36u;
-                            vec2 uv0 = vec2(vbuf.vertices[base + 10], vbuf.vertices[base + 11]);
-                            vec2 uv1 = vec2(vbuf.vertices[base + 22], vbuf.vertices[base + 23]);
-                            vec2 uv2 = vec2(vbuf.vertices[base + 34], vbuf.vertices[base + 35]);
-                            float w = 1.0 - ubary.x - ubary.y;
-                            vec2 uv = w * uv0 + ubary.x * uv1 + ubary.y * uv2;
-                            uint matId = triMatBuf.triangleMats[primId];
-                            GltfMaterialGpu mat = matBuf.materials[matId];
-                            albedo = mat.baseColorFactor.rgb;
-                            if (mat.baseColorTexIdx >= 0) {
-                                albedo *= pow(sampleTexture(uint(mat.baseColorTexIdx), uv).rgb, vec3(2.2));
-                            }
-                            if (mat.emissiveTexIdx >= 0) {
-                                emissive = pow(sampleTexture(uint(mat.emissiveTexIdx), uv).rgb, vec3(2.2)) * mat.emissiveFactor.rgb;
-                            }
-                            metallic = mat.metallicFactor;
-                            roughness = mat.roughnessFactor;
-                            transmission = mat.transmissionFactor;
-                            ior = mat.ior;
-                            archetype = mat.archetype;
-                        } else {
-                            uint matId = computeMaterialId(pc.sceneType, primId, hitPos, normal);
-                            archetype = getArchetype(matId);
-                            albedo = getSceneArchetypeAlbedo(pc.sceneType, archetype);
+                    if (pc.isGltf != 0u) {
+                        vec2 ubary = unpackUnorm2x16(packUnorm2x16(bary));
+                        uint base = primId * 36u;
+                        vec2 uv0 = vec2(vbuf.vertices[base + 10], vbuf.vertices[base + 11]);
+                        vec2 uv1 = vec2(vbuf.vertices[base + 22], vbuf.vertices[base + 23]);
+                        vec2 uv2 = vec2(vbuf.vertices[base + 34], vbuf.vertices[base + 35]);
+                        float w = 1.0 - ubary.x - ubary.y;
+                        vec2 uv = w * uv0 + ubary.x * uv1 + ubary.y * uv2;
+                        uint matId = triMatBuf.triangleMats[primId];
+                        GltfMaterialGpu mat = matBuf.materials[matId];
+                        albedo = mat.baseColorFactor.rgb;
+                        if (mat.baseColorTexIdx >= 0) {
+                            albedo *= pow(sampleTexture(uint(mat.baseColorTexIdx), uv).rgb, vec3(2.2));
                         }
+                        if (mat.emissiveTexIdx >= 0) {
+                            emissive = pow(sampleTexture(uint(mat.emissiveTexIdx), uv).rgb, vec3(2.2)) * mat.emissiveFactor.rgb;
+                        }
+                        metallic = mat.metallicFactor;
+                        roughness = mat.roughnessFactor;
+                        transmission = mat.transmissionFactor;
+                        ior = mat.ior;
+                        archetype = mat.archetype;
+                    } else {
+                        uint matId = computeMaterialId(pc.sceneType, primId, hitPos, normal);
+                        archetype = getArchetype(matId);
+                        albedo = getSceneArchetypeAlbedo(pc.sceneType, archetype);
+                    }
 
-                        vec3 directLight = vec3(0.0);
-                        vec3 throughput = albedo;
-                        vec3 bOrigin = hitPos + normal * (pc.isGltf != 0u ? 0.05 : 0.005);
-                        vec3 bDir = nextDir;
+                    vec3 directLight = vec3(0.0);
+                    vec3 throughput = albedo;
+                    vec3 bOrigin = hitPos + normal * (pc.isGltf != 0u ? 0.05 : 0.005);
+                    vec3 bDir = nextDir;
 
-                        if (transmission > 0.5 || archetype == 2u) {
-                            vec3 cabinInterior = vec3(0.02, 0.025, 0.03);
-                            vec3 R = reflect(direction, normal);
-                            vec3 envRefl = evalStudioEnvironment(R);
-                            float cosTheta = clamp(dot(-direction, normal), 0.0, 1.0);
-                            float F = 0.04 + 0.96 * pow(1.0 - cosTheta, 5.0);
-                            directLight = mix(cabinInterior, envRefl, F);
-                            throughput = vec3(0.0);
-                        } else {
-                            if (pc.sceneType == 0u) {
-                                const vec3 studioDir[3] = vec3[3](
-                                    normalize(vec3(0.6, 0.8, 0.5)),
-                                    normalize(vec3(-0.7, 0.5, 0.4)),
-                                    normalize(vec3(-0.2, 0.4, -0.9))
-                                );
-                                const vec3 studioColor[3] = vec3[3](
-                                    vec3(1.0, 0.97, 0.92) * 3.8,
-                                    vec3(0.75, 0.88, 1.0) * 1.8,
-                                    vec3(1.0, 1.0, 1.0) * 2.5
-                                );
-                                for (int i = 0; i < 3; ++i) {
-                                    float sNdotL = max(0.0, dot(normal, studioDir[i]));
-                                    if (sNdotL > 0.0) {
-                                        bool shadowed = traceShadowRay(hitPos, normal, studioDir[i], 5000.0);
-                                        if (!shadowed) {
-                                            if (pc.isGltf != 0u) {
-                                                directLight += evaluateCookTorranceGGX(albedo, roughness, metallic, normal, -direction, studioDir[i], studioColor[i]);
-                                            } else {
-                                                directLight += (albedo / 3.14159) * studioColor[i] * sNdotL;
-                                            }
-                                        }
-                                    }
-                                }
-                            } else {
-                                vec3 sunDir;
-                                vec3 sunColor;
-                                getSceneSunParams(pc.sceneType, sunDir, sunColor);
-
-                                float NdotL = max(0.0, dot(normal, sunDir));
-                                if (NdotL > 0.0) {
-                                    bool shadowed = traceShadowRay(hitPos, normal, sunDir, (pc.isGltf != 0u ? 5000.0 : 2000.0));
+                    if (transmission > 0.5 || archetype == 2u) {
+                        vec3 cabinInterior = vec3(0.02, 0.025, 0.03);
+                        vec3 R = reflect(direction, normal);
+                        vec3 envRefl = evalStudioEnvironment(R);
+                        float cosTheta = clamp(dot(-direction, normal), 0.0, 1.0);
+                        float F = 0.04 + 0.96 * pow(1.0 - cosTheta, 5.0);
+                        directLight = mix(cabinInterior, envRefl, F);
+                        throughput = vec3(0.0);
+                    } else {
+                        if (pc.sceneType == 0u) {
+                            const vec3 studioDir[3] = vec3[3](
+                                normalize(vec3(0.6, 0.8, 0.5)),
+                                normalize(vec3(-0.7, 0.5, 0.4)),
+                                normalize(vec3(-0.2, 0.4, -0.9))
+                            );
+                            const vec3 studioColor[3] = vec3[3](
+                                vec3(1.0, 0.97, 0.92) * 3.8,
+                                vec3(0.75, 0.88, 1.0) * 1.8,
+                                vec3(1.0, 1.0, 1.0) * 2.5
+                            );
+                            for (int i = 0; i < 3; ++i) {
+                                float sNdotL = max(0.0, dot(normal, studioDir[i]));
+                                if (sNdotL > 0.0) {
+                                    bool shadowed = traceShadowRay(hitPos, normal, studioDir[i], 5000.0);
                                     if (!shadowed) {
                                         if (pc.isGltf != 0u) {
-                                            directLight = evaluateCookTorranceGGX(albedo, roughness, metallic, normal, -direction, sunDir, sunColor);
+                                            directLight += evaluateCookTorranceGGX(albedo, roughness, metallic, normal, -direction, studioDir[i], studioColor[i]);
                                         } else {
-                                            directLight = (albedo / 3.14159) * sunColor * NdotL;
+                                            directLight += (albedo / 3.14159) * studioColor[i] * sNdotL;
                                         }
                                     }
                                 }
                             }
+                        } else {
+                            vec3 sunDir;
+                            vec3 sunColor;
+                            getSceneSunParams(pc.sceneType, sunDir, sunColor);
 
-                            if (pc.sceneType == 2u) {
-                                // Sponza Colonnade Lanterns
-                                const vec3 lanternPos[3] = vec3[3](
-                                    vec3(0.0, 450.0, 0.0),
-                                    vec3(-650.0, 250.0, 0.0),
-                                    vec3(650.0, 250.0, 0.0)
-                                );
-                                const vec3 lanternColor[3] = vec3[3](
-                                    vec3(1.0, 0.85, 0.60) * 2.2,
-                                    vec3(1.0, 0.80, 0.50) * 1.8,
-                                    vec3(1.0, 0.80, 0.50) * 1.8
-                                );
-                                for (int li = 0; li < 3; ++li) {
-                                    vec3 toL = lanternPos[li] - hitPos;
-                                    float d2 = dot(toL, toL);
-                                    float d = sqrt(d2);
-                                    vec3 L = toL / max(d, 0.001);
-                                    float l_NdotL = max(0.0, dot(normal, L));
-                                    if (l_NdotL > 0.0) {
-                                        bool l_shad = traceShadowRay(hitPos, normal, L, d - 0.1);
-                                        if (!l_shad) {
-                                            float atten = 1.0 / (1.0 + 0.000004 * d2);
-                                            directLight += (albedo / 3.14159) * lanternColor[li] * atten * l_NdotL;
-                                        }
+                            float NdotL = max(0.0, dot(normal, sunDir));
+                            if (NdotL > 0.0) {
+                                bool shadowed = traceShadowRay(hitPos, normal, sunDir, (pc.isGltf != 0u ? 5000.0 : 2000.0));
+                                if (!shadowed) {
+                                    if (pc.isGltf != 0u) {
+                                        directLight = evaluateCookTorranceGGX(albedo, roughness, metallic, normal, -direction, sunDir, sunColor);
+                                    } else {
+                                        directLight = (albedo / 3.14159) * sunColor * NdotL;
                                     }
                                 }
                             }
-
-                            if (metallic > 0.1 && u2 < metallic) {
-                                vec3 refl = reflect(direction, normal);
-                                vec3 jitter = (vec3(u1, u2, fract(u1 * 31.7)) * 2.0 - 1.0) * (roughness * 0.4);
-                                bDir = normalize(refl + jitter);
-                                if (dot(bDir, normal) <= 0.0) bDir = refl;
-                                throughput = mix(vec3(0.04), albedo, metallic);
-                            } else {
-                                bDir = nextDir;
-                                throughput = (1.0 - metallic) * albedo;
-                            }
-                            bOrigin = hitPos + normal * (pc.isGltf != 0u ? 0.05 : 0.005);
                         }
 
+                        if (pc.sceneType == 2u) {
+                            // Sponza Colonnade Lanterns
+                            const vec3 lanternPos[3] = vec3[3](
+                                vec3(0.0, 450.0, 0.0),
+                                vec3(-650.0, 250.0, 0.0),
+                                vec3(650.0, 250.0, 0.0)
+                            );
+                            const vec3 lanternColor[3] = vec3[3](
+                                vec3(1.0, 0.85, 0.60) * 2.2,
+                                vec3(1.0, 0.80, 0.50) * 1.8,
+                                vec3(1.0, 0.80, 0.50) * 1.8
+                            );
+                            for (int li = 0; li < 3; ++li) {
+                                vec3 toL = lanternPos[li] - hitPos;
+                                float d2 = dot(toL, toL);
+                                float d = sqrt(d2);
+                                vec3 L = toL / max(d, 0.001);
+                                float l_NdotL = max(0.0, dot(normal, L));
+                                if (l_NdotL > 0.0) {
+                                    bool l_shad = traceShadowRay(hitPos, normal, L, d - 0.1);
+                                    if (!l_shad) {
+                                        float atten = 1.0 / (1.0 + 0.000004 * d2);
+                                        directLight += (albedo / 3.14159) * lanternColor[li] * atten * l_NdotL;
+                                    }
+                                }
+                            }
+                        }
+
+                        if (metallic > 0.1 && u2 < metallic) {
+                            vec3 refl = reflect(direction, normal);
+                            vec3 jitter = (vec3(u1, u2, fract(u1 * 31.7)) * 2.0 - 1.0) * (roughness * 0.4);
+                            bDir = normalize(refl + jitter);
+                            if (dot(bDir, normal) <= 0.0) bDir = refl;
+                            throughput = mix(vec3(0.04), albedo, metallic);
+                        } else {
+                            bDir = nextDir;
+                            throughput = (1.0 - metallic) * albedo;
+                        }
+                        bOrigin = hitPos + normal * (pc.isGltf != 0u ? 0.05 : 0.005);
+                    }
+
+                    payload0 = vec4(bOrigin, uintBitsToFloat(packSnorm2x16(octEncode(bDir))));
+
+                    if (pc.dumpRenders != 0) {
                         vec3 indirectRadiance = vec3(0.0);
 
                         // Bounce 1 (identical to Megakernel)
@@ -910,6 +926,9 @@ void main() {
                             vec3 avg = (total / float(pc.spp)) * expGain;
                             fb.pixels[pixelIdx] = vec4(tonemapACES(avg), 1.0);
                         }
+                    } else {
+                        vec3 primaryRadiance = emissive + directLight;
+                        threadLum = uint(clamp(dot(primaryRadiance, vec3(0.2126, 0.7152, 0.0722)), 0.0, 100.0) * 256.0);
                     }
                 } else {
                     float u1 = rand_float(rngState);
@@ -948,6 +967,9 @@ void main() {
                     vec3 skyCol = evalSky(pc.sceneType, direction);
                     fb.pixels[pixelIdx] = vec4(tonemapACES(skyCol * 1.0), 1.0);
                 }
+            } else if (pc.mode == 1) {
+                vec3 skyCol = evalSky(pc.sceneType, direction);
+                threadLum = uint(clamp(dot(skyCol, vec3(0.2126, 0.7152, 0.0722)), 0.0, 100.0) * 256.0);
             }
         }
     }
@@ -1015,8 +1037,10 @@ void main() {
     // Subgroup Reduction for Global Result Counters
     uint waveRays = subgroupAdd(threadRays);
     uint waveHits = subgroupAdd(threadHits);
+    uint waveLum = subgroupAdd(threadLum);
     if (subgroupElect()) {
         if (waveRays > 0u) atomicAdd(results.totalRays, waveRays);
         if (waveHits > 0u) atomicAdd(results.totalHits, waveHits);
+        if (waveLum > 0u) atomicAdd(results.accumulatedLuminance, waveLum);
     }
 }

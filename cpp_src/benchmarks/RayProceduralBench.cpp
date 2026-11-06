@@ -278,6 +278,11 @@ void RayProceduralBench::buildAS() {
 
 void RayProceduralBench::Run(uint32_t config_idx) {
   VulkanContext *vContext = static_cast<VulkanContext *>(context);
+  if (lastRunConfig != static_cast<int>(config_idx)) {
+    uint32_t zero = 0;
+    context->writeBuffer(resultBuffer, 0, sizeof(uint32_t), &zero);
+    lastRunConfig = static_cast<int>(config_idx);
+  }
   
   vContext->setKernelAS(kernel, 0, (AccelerationStructure)aabbTlas);
   vContext->setKernelArg(kernel, 1, resultBuffer);
@@ -314,6 +319,7 @@ void RayProceduralBench::Teardown() {
     if (scratchBuffer) { context->releaseBuffer(scratchBuffer); scratchBuffer = nullptr; }
     context = nullptr;
   }
+  lastRunConfig = -1;
 }
 
 BenchmarkResult RayProceduralBench::GetResult(uint32_t config_idx) const {

@@ -10,7 +10,7 @@ layout(set = 0, binding = 0) uniform accelerationStructureEXT topLevelAS;
 layout(set = 0, binding = 1) buffer Results {
     uint totalRays;
     uint totalHits;
-    float accumulatedLuminance;
+    uint accumulatedLuminance;
 } results;
 
 layout(set = 0, binding = 2) buffer Framebuffer {
@@ -153,19 +153,24 @@ void main() {
     payload = vec3(0.0);
     traceRayEXT(topLevelAS, gl_RayFlagsOpaqueEXT, 0xFF, 0, 0, 0, rayOrigin, tMinPrimary, rayDir, tMaxPrimary, 0);
 
+    bool isHit = (payload.x > 0.0);
+    vec3 shadedCol = abs(payload);
+
     if (pc.dumpRenders != 0) {
         if (pc.mode == 7u) {
-            vec3 outCol = (payload != vec3(0.0)) ? payload : vec3(0.04, 0.05, 0.08);
+            vec3 outCol = isHit ? shadedCol : vec3(0.04, 0.05, 0.08);
             fb.pixels[pixelIdx] = vec4(outCol, 1.0);
         } else {
-            fb.pixels[pixelIdx] = vec4(tonemapACES(payload * 1.0), 1.0);
+            fb.pixels[pixelIdx] = vec4(tonemapACES(shadedCol * 1.0), 1.0);
         }
     }
 
     uint waveRays = subgroupAdd(1u);
-    uint waveHits = subgroupAdd(payload != vec3(0.0) ? 1u : 0u);
+    uint waveHits = subgroupAdd(isHit ? 1u : 0u);
+    uint waveLum = subgroupAdd(uint(clamp(dot(shadedCol, vec3(0.2126, 0.7152, 0.0722)), 0.0, 1000.0) * 256.0) + 1u);
     if (subgroupElect()) {
         if (waveRays > 0u) atomicAdd(results.totalRays, waveRays);
         if (waveHits > 0u) atomicAdd(results.totalHits, waveHits);
+        if (pc.dumpRenders == 0u && waveLum > 0u) atomicAdd(results.accumulatedLuminance, waveLum);
     }
 }

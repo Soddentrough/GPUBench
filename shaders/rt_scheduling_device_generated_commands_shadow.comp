@@ -10,7 +10,7 @@ layout(set = 0, binding = 0) uniform accelerationStructureEXT topLevelAS;
 layout(set = 0, binding = 1) buffer Results {
     uint totalRays;
     uint totalHits;
-    float accumulatedLuminance;
+    uint accumulatedLuminance;
 } results;
 
 #include "rt_scheduling_common.glsl"
@@ -123,6 +123,7 @@ void main() {
 
     uint threadRays = 0u;
     uint threadHits = 0u;
+    uint threadLum = 0u;
 
     if (threadIdx < count) {
         threadRays = 1u;
@@ -205,13 +206,17 @@ void main() {
         if (pc.dumpRenders != 0) {
             float shadowVal = occluded ? 0.08 : 0.95;
             fb.pixels[pixelIdx] = vec4(vec3(shadowVal), 1.0);
+        } else {
+            threadLum = occluded ? 20u : 243u;
         }
     }
 
     uint waveRays = subgroupAdd(threadRays);
     uint waveHits = subgroupAdd(threadHits);
+    uint waveLum = subgroupAdd(threadLum);
     if (subgroupElect()) {
         if (waveRays > 0u) atomicAdd(results.totalRays, waveRays);
         if (waveHits > 0u) atomicAdd(results.totalHits, waveHits);
+        if (waveLum > 0u) atomicAdd(results.accumulatedLuminance, waveLum);
     }
 }

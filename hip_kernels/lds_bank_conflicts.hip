@@ -8,11 +8,15 @@ extern "C" __global__ void run_benchmark(unsigned int *results,
   unsigned int tid = threadIdx.x;
   unsigned int gid = blockIdx.x * blockDim.x + threadIdx.x;
 
+  // Initialize shared memory with 32u (32 banks) so adding acc0 to base_addr
+  // keeps the loop-carried dependency live while preserving (tid * stride) mod 32.
   for (unsigned int i = tid; i < 1280u; i += 32u) {
     lds[i] = 32u;
   }
   __syncthreads();
 
+  // 8 dword loads (32 B/iter) at constant +32-dword (+128 B) bank-preserving offsets,
+  // allowing the compiler to fold offsets into 4 dual-address ds_load_2addr_b32 instructions.
   unsigned int base_addr = (tid * stride) & 1023u;
   unsigned int acc0 = 0u;
   unsigned int acc1 = 0u;

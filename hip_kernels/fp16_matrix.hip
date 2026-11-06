@@ -10,7 +10,8 @@ extern "C" __global__ void run_benchmark(float* data) {
     typedef _Float16 half8_v __attribute__((vector_size(16)));
     typedef float float8_v __attribute__((vector_size(32)));
 
-    const half8_v* hptr = reinterpret_cast<const half8_v*>(data) + 262144u;
+    uint32_t wg_offset = (blockIdx.x & 511u) * 32u;
+    const half8_v* hptr = reinterpret_cast<const half8_v*>(data) + 262144u + wg_offset;
     half8_v a = hptr[lane];
     half8_v b = hptr[lane + 32u];
 
@@ -41,7 +42,8 @@ extern "C" __global__ void run_benchmark(float* data) {
     using float8 = __attribute__((ext_vector_type(8))) float;
     using half16 = __attribute__((ext_vector_type(16))) _Float16;
 
-    const half16* hptr = reinterpret_cast<const half16*>(data) + 131072u;
+    uint32_t wg_offset = (blockIdx.x & 511u) * 16u;
+    const half16* hptr = reinterpret_cast<const half16*>(data) + 131072u + wg_offset;
     half16 a = hptr[lane];
     half16 b = hptr[lane + 32u];
 

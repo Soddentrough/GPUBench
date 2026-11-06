@@ -824,7 +824,7 @@ void GuiApp::initializeBenchmarkCategories() {
             {"BF16", "BF16", "BF16 Bfloat16 - Matrix (WMMA)", "Compute", "TFLOPS", "Cooperative matrix / tensor bfloat16 throughput (16x16x16 WMMA; requires VK_KHR_cooperative_matrix + VK_KHR_shader_bfloat16 or ROCm WMMA)", true, 1},
             {"FP8", "FP8", "FP8 Micro-Float - Matrix (WMMA)", "Compute", "TFLOPS", "E4M3 / E5M2 8-bit floating point cooperative matrix ops", true, 0},
             {"FP6", "FP6", "FP6 Micro-Float - Vector", "Compute", "TOPS", "Sub-byte 6-bit quantized floating point throughput (requires native NVIDIA SPV_NV_float6 extension; reports UNSUPPORTED otherwise)", true, 0},
-            {"FP4", "FP4", "FP4 Micro-Float - Vector", "Compute", "TOPS", "Sub-byte 4-bit quantized floating point throughput (requires native FP4 compute units such as CDNA4/gfx950+; reports UNSUPPORTED otherwise)", true, 0},
+            {"FP4", "FP4", "FP4 Micro-Float - Vector", "Compute", "TOPS", "Sub-byte 4-bit quantized floating point throughput (requires native FP4 compute units; reports UNSUPPORTED otherwise)", true, 0},
             {"INT8", "INT8", "INT8 Integer - Vector (DP4A)", "Compute", "TOPS", "INT8 dot product (DP4A) vector instructions", true, 0},
             {"INT8", "INT8", "INT8 Integer - Matrix (WMMA)", "Compute", "TOPS", "INT8 cooperative matrix / WMMA tensor throughput", true, 1},
             {"INT4", "INT4", "INT4 Integer - Matrix (WMMA)", "Compute", "TOPS", "Sub-byte 4-bit integer matrix core throughput (16x16x16 iu4 WMMA on RDNA 4 / gfx12+ via ROCm; reports UNSUPPORTED on RDNA 3/3.5, Vulkan, and OpenCL)", true, 0}
@@ -3741,12 +3741,22 @@ GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
                             break;
                         }
                     } else if (baselineName == "128_Megakernel") {
+                        std::string curScene = extractSceneName(curRes->benchmarkName);
+                        std::string rScene = extractSceneName(r.benchmarkName);
+                        if ((!curScene.empty() && !rScene.empty() && curScene != rScene)) {
+                            continue;
+                        }
                         if (r.subcategory == "Multi-Light Evaluation" &&
                             (r.configIndex == 33 || (r.benchmarkName.find("128") != std::string::npos && r.benchmarkName.find("Megakernel") != std::string::npos && r.benchmarkName.find("DGC") == std::string::npos))) {
                             baselineRes = &r;
                             break;
                         }
                     } else if (baselineName == "Single_Megakernel") {
+                        std::string curScene = extractSceneName(curRes->benchmarkName);
+                        std::string rScene = extractSceneName(r.benchmarkName);
+                        if ((!curScene.empty() && !rScene.empty() && curScene != rScene)) {
+                            continue;
+                        }
                         if (r.subcategory == "Multi-Light Evaluation" &&
                             (r.configIndex == 31 || (r.benchmarkName.find("Single Light") != std::string::npos && r.benchmarkName.find("Megakernel") != std::string::npos && r.benchmarkName.find("DGC") == std::string::npos))) {
                             baselineRes = &r;
@@ -3824,7 +3834,7 @@ GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
                 }
             }
             if (baseFP32 > 0.0 && baseINT32 > 0.0) {
-                double baseOps = 2.0 / ((1.0 / baseFP32) + (1.0 / baseINT32));
+                double baseOps = 3.0 / ((2.0 / baseFP32) + (1.0 / baseINT32));
                 double curOps = (static_cast<double>(curRes->operations) / curRes->time_ms) * 1000.0;
                 info.hasComparison = true;
                 info.speedupRatio = curOps / baseOps;
@@ -5866,7 +5876,7 @@ void GuiApp::renderResultsScorecard() {
                             }
                         }
                         if (baseFP32 > 0.0 && baseINT32 > 0.0) {
-                            double baseOps = 2.0 / ((1.0 / baseFP32) + (1.0 / baseINT32));
+                            double baseOps = 3.0 / ((2.0 / baseFP32) + (1.0 / baseINT32));
                             double ratio = curOpsPerSec / baseOps;
                             double pct = (ratio - 1.0) * 100.0;
                             char dBuf[48];
@@ -6056,14 +6066,42 @@ void GuiApp::renderResultsScorecard() {
                         }
                     } else {
                         // RayScheduling and general Ray Tracing
-                        for (const auto& other : m_allResults) {
-                            if (other.deviceIndex == res.deviceIndex && other.component == "Ray Tracing" &&
-                                other.subcategory == res.subcategory &&
-                                (other.benchmarkName.find("Megakernel") != std::string::npos || other.benchmarkName.find("Baseline") != std::string::npos ||
-                                 other.benchmarkName.find("Scanline") != std::string::npos || other.benchmarkName.find("Wave Ballot") != std::string::npos) &&
-                                other.time_ms > 0.0 && other.metric == res.metric) {
-                                baseOps = (static_cast<double>(other.operations) / other.time_ms) * 1000.0;
-                                break;
+                        std::string resScene = extractSceneName(res.benchmarkName);
+                        if (res.baselineConfigIndex >= 0) {
+                            for (const auto& other : m_allResults) {
+                                if (other.deviceIndex == res.deviceIndex && other.component == "Ray Tracing" &&
+                                    other.subcategory == res.subcategory &&
+                                    other.configIndex == static_cast<uint32_t>(res.baselineConfigIndex) &&
+                                    other.time_ms > 0.0 && other.metric == res.metric) {
+                                    std::string otherScene = extractSceneName(other.benchmarkName);
+                                    if (!resScene.empty() && !otherScene.empty() && resScene != otherScene) {
+                                        continue;
+                                    }
+                                    baseOps = (static_cast<double>(other.operations) / other.time_ms) * 1000.0;
+                                    break;
+                                }
+                            }
+                        }
+                        if (baseOps == 0.0) {
+                            bool resIs128 = (res.benchmarkName.find("128") != std::string::npos || res.configIndex == 33 || res.configIndex == 34);
+                            for (const auto& other : m_allResults) {
+                                if (other.deviceIndex == res.deviceIndex && other.component == "Ray Tracing" &&
+                                    other.subcategory == res.subcategory &&
+                                    (other.benchmarkName.find("Megakernel") != std::string::npos || other.benchmarkName.find("Baseline") != std::string::npos ||
+                                     other.benchmarkName.find("Scanline") != std::string::npos || other.benchmarkName.find("Wave Ballot") != std::string::npos) &&
+                                    other.benchmarkName.find("RTP") == std::string::npos && other.benchmarkName.find("DGC") == std::string::npos &&
+                                    other.time_ms > 0.0 && other.metric == res.metric) {
+                                    std::string otherScene = extractSceneName(other.benchmarkName);
+                                    if (!resScene.empty() && !otherScene.empty() && resScene != otherScene) {
+                                        continue;
+                                    }
+                                    if (res.subcategory == "Multi-Light Evaluation") {
+                                        bool otherIs128 = (other.benchmarkName.find("128") != std::string::npos || other.configIndex == 33 || other.configIndex == 34);
+                                        if (resIs128 != otherIs128) continue;
+                                    }
+                                    baseOps = (static_cast<double>(other.operations) / other.time_ms) * 1000.0;
+                                    break;
+                                }
                             }
                         }
                     }

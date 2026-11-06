@@ -341,12 +341,12 @@ void PixelFillRateBench::Setup(IComputeContext &ctx, const std::string &kernel_d
   }
 
   // Transition all configuration images from UNDEFINED to COLOR_ATTACHMENT_OPTIMAL layout
+  // and clear once during Setup so per-submit clears are not measured during Run().
   VkCommandBufferBeginInfo cmdBeginInfo{};
   cmdBeginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
   cmdBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   vkBeginCommandBuffer(frames[0].commandBuffer, &cmdBeginInfo);
 
-  std::vector<VkImageMemoryBarrier> barriers;
   for (auto &cfg : configs) {
     VkImageMemoryBarrier barrier{};
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -362,14 +362,31 @@ void PixelFillRateBench::Setup(IComputeContext &ctx, const std::string &kernel_d
     barrier.subresourceRange.layerCount = 1;
     barrier.srcAccessMask = 0;
     barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-    barriers.push_back(barrier);
-  }
 
-  vkCmdPipelineBarrier(frames[0].commandBuffer,
-                       VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                       VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                       0, 0, nullptr, 0, nullptr,
-                       static_cast<uint32_t>(barriers.size()), barriers.data());
+    vkCmdPipelineBarrier(frames[0].commandBuffer,
+                         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                         0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+    VkRenderingAttachmentInfoKHR clearAttachment{};
+    clearAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR;
+    clearAttachment.imageView = cfg.imageView;
+    clearAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    clearAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    clearAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    clearAttachment.clearValue.color = {{0.1f, 0.2f, 0.3f, 1.0f}};
+
+    VkRenderingInfoKHR clearRenderInfo{};
+    clearRenderInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO_KHR;
+    clearRenderInfo.renderArea.offset = {0, 0};
+    clearRenderInfo.renderArea.extent = {width, height};
+    clearRenderInfo.layerCount = 1;
+    clearRenderInfo.colorAttachmentCount = 1;
+    clearRenderInfo.pColorAttachments = &clearAttachment;
+
+    pfnCmdBeginRendering(frames[0].commandBuffer, &clearRenderInfo);
+    pfnCmdEndRendering(frames[0].commandBuffer);
+  }
 
   vkEndCommandBuffer(frames[0].commandBuffer);
 
@@ -386,6 +403,7 @@ void PixelFillRateBench::Run(uint32_t config_idx) {
   if (config_idx >= configs.size()) return;
   auto &cfg = configs[config_idx];
   auto &frame = frames[frameIndex];
+  auto *vContext = dynamic_cast<VulkanContext *>(context);
 
   if (frame.inFlight) {
     constexpr uint64_t kTimeoutNs = 3'000'000'000ULL;
@@ -406,13 +424,25 @@ void PixelFillRateBench::Run(uint32_t config_idx) {
   beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   vkBeginCommandBuffer(frame.commandBuffer, &beginInfo);
 
+  if (vContext) {
+    vContext->cmdPipelineMemoryBarrier2(
+        frame.commandBuffer,
+        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+        VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+        VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT |
+            VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+        VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT |
+            VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+    vContext->startTiming(frame.commandBuffer);
+  }
+
   VkRenderingAttachmentInfoKHR colorAttachment{};
   colorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR;
   colorAttachment.imageView = cfg.imageView;
   colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-  colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+  colorAttachment.loadOp = cfg.enableBlend ? VK_ATTACHMENT_LOAD_OP_LOAD
+                                           : VK_ATTACHMENT_LOAD_OP_DONT_CARE;
   colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-  colorAttachment.clearValue.color = {{0.0f, 0.0f, 0.0f, 1.0f}};
 
   VkRenderingInfoKHR renderingInfo{};
   renderingInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO_KHR;
@@ -422,7 +452,7 @@ void PixelFillRateBench::Run(uint32_t config_idx) {
   renderingInfo.colorAttachmentCount = 1;
   renderingInfo.pColorAttachments = &colorAttachment;
 
-  float colorSeed[4] = {0.2f, 0.4f, 0.6f, 1.0f};
+  float colorSeed[4] = {0.2f, 0.4f, 0.6f, cfg.enableBlend ? 0.5f : 1.0f};
 
   pfnCmdBeginRendering(frame.commandBuffer, &renderingInfo);
   vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, cfg.pipeline);
@@ -436,6 +466,10 @@ void PixelFillRateBench::Run(uint32_t config_idx) {
   }
 
   pfnCmdEndRendering(frame.commandBuffer);
+
+  if (vContext) {
+    vContext->stopTiming(frame.commandBuffer);
+  }
 
   vkEndCommandBuffer(frame.commandBuffer);
 

@@ -55,6 +55,7 @@ private:
   void *buffer = nullptr;
   void *destBuffer = nullptr; // For ReadWrite/Copy
   size_t bufferSize = 0;
+  std::vector<uint64_t> readSinks;
 
   // Results
   double lastRunTimeMs = 0.0;

@@ -12,7 +12,8 @@ extern "C" __global__ void run_benchmark(const float* in_data, float* out_data) 
     typedef int int2_v __attribute__((vector_size(8)));
     typedef float float8_v __attribute__((vector_size(32)));
 
-    const int2_v* iptr = reinterpret_cast<const int2_v*>(in_data);
+    uint32_t wg_offset = (blockIdx.x & 8191u) * 32u;
+    const int2_v* iptr = reinterpret_cast<const int2_v*>(in_data) + wg_offset;
     int2_v a = iptr[lane];
     int2_v b = iptr[lane + 32u];
 

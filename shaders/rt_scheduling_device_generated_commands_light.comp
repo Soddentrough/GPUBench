@@ -10,7 +10,7 @@ layout(set = 0, binding = 0) uniform accelerationStructureEXT topLevelAS;
 layout(set = 0, binding = 1) buffer Results {
     uint totalRays;
     uint totalHits;
-    float accumulatedLuminance;
+    uint accumulatedLuminance;
 } results;
 
 #include "rt_scheduling_common.glsl"
@@ -35,7 +35,7 @@ layout(set = 0, binding = 4) readonly buffer VertexBuffer {
 #include "pbr_common.glsl"
 
 layout(push_constant) uniform PushConstants {
-    uint queueId;         // Always 0 (surface hit queue)
+    uint queueId;         // 0 for Single Light, 0..7 for 128-Light Octant Binning
     uint queueCapacity;
     uint dumpRenders;
     uint width;
@@ -195,14 +195,14 @@ vec3 computeSmoothNormal(uint sceneType, uint primId, vec3 hitPos, vec3 rayDir) 
 
 void main() {
     uint threadIdx = gl_GlobalInvocationID.x;
-    uint count = worklist.queueCounters[Q_SNAPSHOT_IDX(0)];
+    uint count = worklist.queueCounters[Q_SNAPSHOT_IDX(pc.queueId)];
     if (threadIdx >= count || threadIdx >= pc.queueCapacity) return;
 
     if (threadIdx == 0) {
         atomicAdd(results.totalRays, count);
     }
 
-    uint recordIdx = threadIdx;
+    uint recordIdx = pc.queueId * pc.queueCapacity + threadIdx;
     vec4 p = worklist.rayRecords[recordIdx];
     float t = p.x;
     uint pixelIdx = floatBitsToUint(p.y);
@@ -293,14 +293,12 @@ void main() {
         }
     }
 
+    vec3 outRadiance;
     if (pc.binIndex <= 1u || pc.binIndex == 0xFFFFFFFFu) {
         // Single Light
         vec3 L, C;
         getMultiLight(0u, 1u, pc.sceneType, L, C);
-        vec3 radiance = evalCookTorranceDirect(smoothNormal, viewDir, L, C, albedo, roughness, metallic);
-        if (pc.dumpRenders != 0u) {
-            fb.pixels[pixelIdx] = vec4(tonemapACES(radiance), 1.0);
-        }
+        outRadiance = evalCookTorranceDirect(smoothNormal, viewDir, L, C, albedo, roughness, metallic);
     } else {
         // 128 Lights Light Binning: evaluate 128 lights partitioned into 8 coherent bins of 16 lights
         vec3 totalRadiance = vec3(0.0);
@@ -312,9 +310,16 @@ void main() {
                 totalRadiance += evalCookTorranceDirect(smoothNormal, viewDir, L, C, albedo, roughness, metallic);
             }
         }
+        outRadiance = totalRadiance;
+    }
 
-        if (pc.dumpRenders != 0u) {
-            fb.pixels[pixelIdx] = vec4(tonemapACES(totalRadiance), 1.0);
+    if (pc.dumpRenders != 0u) {
+        fb.pixels[pixelIdx] = vec4(tonemapACES(outRadiance), 1.0);
+    } else {
+        uint threadLum = uint(clamp(dot(outRadiance, vec3(0.2126, 0.7152, 0.0722)), 0.0, 100.0) * 256.0);
+        uint waveLum = subgroupAdd(threadLum);
+        if (subgroupElect() && waveLum > 0u) {
+            atomicAdd(results.accumulatedLuminance, waveLum);
         }
     }
 }

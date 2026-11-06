@@ -9,7 +9,8 @@ extern "C" __global__ void run_benchmark(const int* in_data, int* out_data) {
     typedef int int2_v __attribute__((vector_size(8)));
     typedef int int8_v __attribute__((vector_size(32)));
 
-    const int2_v* iptr = reinterpret_cast<const int2_v*>(in_data);
+    uint32_t wg_offset = (blockIdx.x & 4095u) * 32u;
+    const int2_v* iptr = reinterpret_cast<const int2_v*>(in_data) + wg_offset;
     int2_v a = iptr[lane];
     int2_v b = iptr[lane + 32u];
 
@@ -40,7 +41,8 @@ extern "C" __global__ void run_benchmark(const int* in_data, int* out_data) {
     using int4_v = __attribute__((ext_vector_type(4))) int;
     using int8_v = __attribute__((ext_vector_type(8))) int;
 
-    const int4_v* iptr = reinterpret_cast<const int4_v*>(in_data);
+    uint32_t wg_offset = (blockIdx.x & 4095u) * 16u;
+    const int4_v* iptr = reinterpret_cast<const int4_v*>(in_data) + wg_offset;
     int4_v a = iptr[lane];
     int4_v b = iptr[lane + 32u];
 

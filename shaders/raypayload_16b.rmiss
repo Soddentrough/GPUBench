@@ -8,5 +8,5 @@ struct Payload16B {
 layout(location = 0) rayPayloadInEXT Payload16B payload;
 
 void main() {
-    payload.data = payload.data * 0.25 + vec4(gl_WorldRayDirectionEXT, gl_RayTmaxEXT * 0.001);
+    payload.data = -abs(payload.data) * 0.25 - vec4(abs(gl_WorldRayDirectionEXT), gl_RayTmaxEXT * 0.001 + 1.0);
 }

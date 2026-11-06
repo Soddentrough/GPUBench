@@ -9,7 +9,7 @@ layout(set = 0, binding = 0) uniform accelerationStructureEXT topLevelAS;
 layout(set = 0, binding = 1) buffer Results {
     uint totalRays;
     uint totalHits;
-    float accumulatedLuminance;
+    uint accumulatedLuminance;
 } results;
 
 layout(set = 0, binding = 2) buffer Framebuffer {
@@ -168,26 +168,30 @@ void main() {
 
     if (pc.mode == 7u) {
         vec3 normal = computeSmoothNormal(pc.sceneType, primId, hitPos, rayDir, rawBary);
-        payload = normal * 0.5 + 0.5;
+        payload = max(normal * 0.5 + 0.5, vec3(1e-4));
         return;
     }
 
     if (pc.mode == 4u) {
         uint idx = gl_LaunchIDEXT.x;
         uint matId = idx % 8u;
-        vec3 normal = computeSmoothNormal(pc.sceneType, primId, hitPos, rayDir, rawBary);
+        uint px_u = idx % pc.width;
+        uint py_u = idx / pc.width;
+        vec3 dummyPos = vec3(float(px_u) * 0.01, float(py_u) * 0.01, 1.5);
+        vec3 dummyNorm = ((idx % 2u) == 0u) ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+        rngState = idx + pc.seed;
         if (pc.isGltf != 0u) {
             GltfMaterialGpu mat = matBuf.materials[matId];
             vec4 dummyTan = vec4(1.0, 0.0, 0.0, 1.0);
-            vec2 dummyUv = rawBary;
-            pixelColor = evaluateGltfPbr(mat, hitPos, normal, normal, dummyTan, dummyUv, rayDir, pc.sceneType, false, rngState);
+            vec2 dummyUv = vec2(float(px_u) / float(pc.width), float(py_u) / float(pc.height));
+            pixelColor = evaluateGltfPbr(mat, dummyPos, dummyNorm, dummyNorm, dummyTan, dummyUv, rayDir, pc.sceneType, false, rngState);
         } else {
             vec3 sunDir, sunColor;
             getSceneSunParams(pc.sceneType, sunDir, sunColor);
             vec3 baseColor = getSceneArchetypeAlbedo(pc.sceneType, matId);
-            pixelColor = evaluateMaterialArchetypeDirect(matId, hitPos, baseColor, 0.5, 0.0, 1.5, normal, -rayDir, sunDir, sunColor, 1.0);
+            pixelColor = evaluateMaterialArchetypeDirect(matId, dummyPos, baseColor, 0.5, 0.0, 1.5, dummyNorm, -rayDir, sunDir, sunColor, 1.0);
         }
-        payload = pixelColor;
+        payload = max(pixelColor, vec3(1e-4));
         return;
     }
 
@@ -231,5 +235,5 @@ void main() {
         pixelColor = evaluateMaterialArchetypeDirect(matId, hitPos, baseColor, 0.5, 0.0, 1.5, normal, -rayDir, sunDir, sunColor, 1.0);
     }
 
-    payload = pixelColor;
+    payload = max(pixelColor, vec3(1e-4));
 }

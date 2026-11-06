@@ -779,10 +779,10 @@ void ResultFormatter::print() {
                   if (res.configIndex == 0 || res.configIndex == 3) {
                     noteStr = "[Baseline]";
                   } else if (res.configIndex == 6) {
-                    // Config 6: Mixed (50% FP32 + 50% INT32).
-                    // The expected single-issue serialized baseline throughput is the harmonic mean of
+                    // Config 6: Mixed (1:1 instruction mix: 16 FP32 FMA instructions = 32 FLOPs + 16 INT32 instructions = 16 IOPs).
+                    // The expected single-issue serialized baseline throughput is the weighted harmonic mean of
                     // Config 0 (FP32 baseline) and Config 3 (INT32 baseline):
-                    // B_mixed = 2 / (1 / B_FP32 + 1 / B_INT32)
+                    // B_mixed = 3 / (2 / B_FP32 + 1 / B_INT32)
                     double baseFP32 = 0.0;
                     double baseINT32 = 0.0;
                     for (const auto &bp : subcat.benchmarks) {
@@ -798,7 +798,7 @@ void ResultFormatter::print() {
                       }
                     }
                     if (baseFP32 > 0.0 && baseINT32 > 0.0) {
-                      double baseVal = 2.0 / ((1.0 / baseFP32) + (1.0 / baseINT32));
+                      double baseVal = 3.0 / ((2.0 / baseFP32) + (1.0 / baseINT32));
                       double ratio = value / baseVal;
                       double pct = (ratio - 1.0) * 100.0;
                       noteStr = "└──> " + formatDouble(ratio, 2) + "x (" + (pct >= 0 ? "+" : "") + formatDouble(pct, 1) + "%)";
@@ -1597,12 +1597,17 @@ void ResultFormatter::printComparison(const std::vector<ImportedRun> &runs) {
           }
           if (subcat.name == "Device Memory Bandwidth" && wl.configIndex == 0) vramBwRates[i] = vals[i].val;
           if (subcat.name == "Latency" && wl.cleanName.find("L0") != std::string::npos) l0LatRates[i] = vals[i].val;
-          if (subcat.name.find("Indoor") != std::string::npos) {
-            if (wl.configIndex == 0) ptTradRates[i] = vals[i].val;
+          if (subcat.name.find("Scene Path Tracing (Multi-Bounce)") != std::string::npos && wl.configIndex == 3) {
+            if (ptTradRates[i] == 0.0 || subcat.name.find("Indoor") != std::string::npos) {
+              ptTradRates[i] = vals[i].val;
+            }
           }
-          if (subcat.name.find("Material") != std::string::npos || subcat.name.find("Showroom") != std::string::npos) {
-            if (wl.configIndex == 0) matTradRates[i] = vals[i].val;
-            else if (wl.configIndex == 1) matWlRates[i] = vals[i].val;
+          if (subcat.name.find("Material Shading") != std::string::npos) {
+            if (wl.configIndex == 0 && (matTradRates[i] == 0.0 || subcat.name.find("Showroom") != std::string::npos)) {
+              matTradRates[i] = vals[i].val;
+            } else if (wl.configIndex == 2 && (matWlRates[i] == 0.0 || subcat.name.find("Showroom") != std::string::npos)) {
+              matWlRates[i] = vals[i].val;
+            }
           }
         }
 

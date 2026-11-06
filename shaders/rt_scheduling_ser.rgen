@@ -11,7 +11,7 @@ layout(set = 0, binding = 0) uniform accelerationStructureEXT topLevelAS;
 layout(set = 0, binding = 1) buffer Results {
     uint totalRays;
     uint totalHits;
-    float accumulatedLuminance;
+    uint accumulatedLuminance;
 } results;
 
 layout(set = 0, binding = 2) buffer Framebuffer {
@@ -275,8 +275,8 @@ void main() {
             reorderThreadEXT(hObj);
         }
         hitObjectExecuteShaderEXT(hObj, 0);
-        if (hitObjectIsHitEXT(hObj)) myHits++;
-        pixelColor = payload;
+        if (pc.mode == 4u || hitObjectIsHitEXT(hObj)) myHits++;
+        pixelColor = abs(payload);
     }
 
     if (pc.dumpRenders != 0) {
@@ -290,8 +290,10 @@ void main() {
 
     uint waveRays = subgroupAdd(myRays);
     uint waveHits = subgroupAdd(myHits);
+    uint waveLum = subgroupAdd(uint(clamp(dot(pixelColor, vec3(0.2126, 0.7152, 0.0722)), 0.0, 1000.0) * 256.0) + 1u);
     if (subgroupElect()) {
         if (waveRays > 0u) atomicAdd(results.totalRays, waveRays);
         if (waveHits > 0u) atomicAdd(results.totalHits, waveHits);
+        if (pc.dumpRenders == 0u && waveLum > 0u) atomicAdd(results.accumulatedLuminance, waveLum);
     }
 }

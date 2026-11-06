@@ -13,6 +13,6 @@ void main() {
     float p = float(gl_PrimitiveID & 255);
     vec4 hitVec = vec4(t, attribs.x, attribs.y, p * 0.01 + 1.0);
     for (int i = 0; i < 16; ++i) {
-        payload.data[i] = payload.data[i] * 0.5 + hitVec * float(i + 1);
+        payload.data[i] = abs(payload.data[i]) * 0.5 + hitVec * float(i + 1);
     }
 }

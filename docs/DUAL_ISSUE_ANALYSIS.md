@@ -42,22 +42,22 @@ The suite evaluates hardware through 7 distinct configurations structured symmet
 - **Workload**: 16 independent FP32 accumulator chains (`val0..val15`).
 - **Architectural Meaning & Measurement**: Peak Instruction-Level Parallelism (16 chains). Saturates the dual-issue silicon ceiling (2 FP32 instructions per cycle), measuring maximum theoretical speedup (up to 2.0x+ over Standard FP32) when both execution pipelines fire continuously.
 
-### Config 3: `Standard INT32`
-- **Workload**: 4 independent INT32 accumulator chains (`u0..u3`).
-- **Architectural Meaning & Measurement**: Establishes the single-issue INT32 integer baseline (1 instruction per cycle; single integer datapath).
+### Config 3: `INT32 Baseline (Ping-Pong)`
+- **Workload**: Ping-pong dependent INT32 accumulator pair (`val0` and `val1`).
+- **Architectural Meaning & Measurement**: Establishes the true single-issue INT32 integer baseline (1 instruction per cycle; single integer datapath) by enforcing sequential data dependency between `val0` and `val1`.
 
-### Config 4: `Dual-Issue INT32 (Partial Co-Issue)`
-- **Workload**: 8 independent INT32 accumulator chains (`u0..u7`).
+### Config 4: `INT32 ILP8 (Moderate ILP)`
+- **Workload**: 8 independent INT32 accumulator chains (`val0..val7`).
 - **Architectural Meaning**: Moderate integer Instruction-Level Parallelism (8 chains).
 - **What It Measures**: Tests whether the integer execution pipeline can achieve any dual-issue speedup under moderate instruction parallelism. On architectures with only one integer ALU per SIMD (such as RDNA 3/3.5), throughput remains identical to Standard INT32 (~1.00x), proving that integer execution is strictly datapath-limited rather than latency-bound.
 
-### Config 5: `Dual-Issue INT32 (INT32+INT32)`
-- **Workload**: 16 independent INT32 accumulator chains (`u0..u15`).
+### Config 5: `INT32 ILP16 (Peak Dual-Issue)`
+- **Workload**: 16 independent INT32 accumulator chains (`val0..val15`).
 - **Architectural Purpose**: Tests whether the GPU microarchitecture possesses dual integer ALUs. On architectures with only one integer pipeline (e.g. NVIDIA Ampere/Ada), this remains at ~1.0x over Standard INT32.
 
-### Config 6: `Dual-Issue Mixed (FP32+INT32)`
-- **Workload**: Perfectly interleaved 8 FP32 FMAs and 8 INT32 operations.
-- **Architectural Purpose**: Tests concurrent execution across decoupled floating-point and integer execution units (simultaneous $1\times \text{FP32} + 1\times \text{INT32}$ per cycle).
+### Config 6: `Concurrent Mixed (FP32+INT32)`
+- **Workload**: Balanced 1:1 instruction mix of 16 independent FP32 FMA instructions (32 FLOPs) and 8 independent INT32 add+and pairs (16 INT32 instructions = 16 IOPs), totaling 48 operations per inner loop iteration.
+- **Architectural Purpose**: Tests concurrent execution across decoupled floating-point and integer execution units (simultaneous $1\times \text{FP32} + 1\times \text{INT32}$ instruction issue per cycle).
 
 ---
 
@@ -111,10 +111,9 @@ Running `./build/gpubench -b dualissue -d 0 -k vulkan,rocm,opencl` produces cros
    - This proves conclusively that integer instructions cannot dual-issue with integer instructions on this architecture.
 
 3. **Mixed FP32 + INT32 Concurrency & Harmonic Baseline**:
-   - Config 6 contains a 50/50 mix of independent FP32 FMAs and INT32 operations. In serialized single-issue execution, the total execution time is $T_{\text{serial}} = 2 t_{\text{FP32}} + 2 t_{\text{INT32}}$, meaning the theoretical un-co-issued baseline is the **harmonic mean** of Config 0 and Config 3:
-     $$\text{Baseline}_{\text{Mixed}} = \frac{2}{\frac{1}{\text{FP32 Baseline}} + \frac{1}{\text{INT32 Baseline}}}$$
-   - Because RDNA 3/3.5 provides independent floating-point and integer execution pipelines, interleaving FP32 FMAs with INT32 operations allows both datapaths to fire simultaneously.
-   - Dual-Issue Mixed reaches **23.03 TOPS** under ROCm (**+68.8% speedup**), **17.09 TOPS** under OpenCL (**+71.8%**), and **16.44 TOPS** under Vulkan (**+20.7%**).
+   - Config 6 executes a 1:1 instruction mix of 16 independent FP32 FMA instructions (32 FLOPs) and 16 independent INT32 instructions (16 IOPs), totaling 48 operations per iteration (2:1 op ratio between FLOPs and IOPs). In serialized single-issue execution, the theoretical un-co-issued baseline is the weighted harmonic mean of Config 0 (`FP32 Baseline`) and Config 3 (`INT32 Baseline`):
+     $$\text{Baseline}_{\text{Mixed}} = \frac{3}{\frac{2}{\text{FP32 Baseline}} + \frac{1}{\text{INT32 Baseline}}}$$
+   - Because RDNA 3/3.5/4 and modern NVIDIA architectures provide independent floating-point and integer execution pipelines, interleaving FP32 FMAs with INT32 operations allows both datapaths to fire simultaneously.
 
 ---
 

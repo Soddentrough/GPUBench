@@ -41,6 +41,13 @@ void VulkanContext::waitIdle() {
                                std::to_string(queueResult));
     }
   }
+  if (graphicsQueue != VK_NULL_HANDLE && graphicsQueue != computeQueue) {
+    VkResult queueResult = vkQueueWaitIdle(graphicsQueue);
+    if (queueResult != VK_SUCCESS) {
+      throw std::runtime_error("vkQueueWaitIdle(graphicsQueue) failed in waitIdle with result: " +
+                               std::to_string(queueResult));
+    }
+  }
 }
 
 VulkanContext::VulkanContext(bool verbose, bool debug) : verbose(verbose), debug(debug) {
@@ -1186,14 +1193,7 @@ void VulkanContext::startTiming(VkCommandBuffer cmd) {
     timingSubmittedFence = VK_NULL_HANDLE;
   } else {
     if (!isTimingActive) {
-      waitIdle();
-      m_activeTimingPairs.clear();
-      currentQueryIndex = 0;
-      if (hostQueryResetSupported) {
-        vkResetQueryPool(device, timestampQueryPool, 0, kMaxTimestamps);
-      }
-      isTimingActive = true;
-      timingSubmitted = false;
+      return;
     }
     if (currentQueryIndex + 2 > kMaxTimestamps) return;
     uint32_t startIdx = currentQueryIndex++;
@@ -2469,6 +2469,16 @@ void VulkanContext::dispatch(ComputeKernel kernel, uint32_t grid_x,
                                       ? VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR
                                       : VK_PIPELINE_BIND_POINT_COMPUTE;
 
+  VkPipelineStageFlags2 unbatchedStageMask =
+      VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT |
+      (vulkanKernel->isRTPipeline
+           ? VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR
+           : 0);
+  cmdPipelineMemoryBarrier2(
+      frame.commandBuffer, unbatchedStageMask, VK_ACCESS_2_SHADER_WRITE_BIT,
+      unbatchedStageMask,
+      VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT);
+
   vkCmdBindPipeline(frame.commandBuffer, bindPoint, vulkanKernel->pipeline);
   vkCmdBindDescriptorSets(frame.commandBuffer, bindPoint,
                            vulkanKernel->pipelineLayout, 0, 1,
@@ -2661,6 +2671,16 @@ void VulkanContext::dispatchIndirect(ComputeKernel kernel_handle,
     if (m_inBatch) {
       m_batchCmdRecording = true;
       m_batchDispatchCount = 0;
+    } else {
+      cmdPipelineMemoryBarrier2(
+          frame.commandBuffer,
+          VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+          VK_ACCESS_2_SHADER_WRITE_BIT,
+          VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT |
+              VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+          VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT |
+              VK_ACCESS_2_SHADER_READ_BIT |
+              VK_ACCESS_2_SHADER_WRITE_BIT);
     }
   } else if (m_batchDispatchCount > 0) {
     cmdPipelineMemoryBarrier2(

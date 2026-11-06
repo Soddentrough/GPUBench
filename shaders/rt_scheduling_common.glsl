@@ -19,6 +19,9 @@
 // Prefix wave sum for octant q (q in [0..7])
 #define Q_PREFIX_IDX(q)    ((32u + (q)) * Q_COUNTER_STRIDE)
 
+// Per-sample seed slot written by classify.comp and consumed by resolve.comp
+#define Q_SEED_IDX         (40u * Q_COUNTER_STRIDE)
+
 // Native Vulkan Device-Generated Commands (DGC) sequence token structure
 struct DGCSequenceItem {
     uint pipelineIndex;

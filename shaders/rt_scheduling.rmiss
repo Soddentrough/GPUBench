@@ -62,11 +62,13 @@ vec3 evalAtriumEnvironment(vec3 dir) {
 }
 
 void main() {
+    vec3 sky;
     if (pc.sceneType == SCENE_OUTDOOR_TERRAIN || pc.sceneType == SCENE_AAA_FOREST) {
-        payload = evalOutdoorSky(gl_WorldRayDirectionEXT);
+        sky = evalOutdoorSky(gl_WorldRayDirectionEXT);
     } else if (pc.sceneType == SCENE_INDOOR_ATRIUM) {
-        payload = evalAtriumEnvironment(gl_WorldRayDirectionEXT);
+        sky = evalAtriumEnvironment(gl_WorldRayDirectionEXT);
     } else {
-        payload = evalStudioEnvironment(gl_WorldRayDirectionEXT);
+        sky = evalStudioEnvironment(gl_WorldRayDirectionEXT);
     }
+    payload = -max(sky, vec3(1e-4));
 }

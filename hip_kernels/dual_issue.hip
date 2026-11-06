@@ -112,19 +112,18 @@ extern "C" __global__ void run_dual_issue_int32_4(float* data, float multiplier,
     if (index >= num_elements) return;
 
     uint32_t ubase = static_cast<uint32_t>(data[index] * 1000.0f) + index;
-    uint32_t val0 = ubase;
-    uint32_t val1 = ubase + 1u;
+    uint32_t val0 = ubase | 1u;
+    uint32_t val1 = ubase + 2u;
 
-    uint32_t mu = static_cast<uint32_t>(multiplier * 1000.0f) | 1u;
     uint32_t mask = (num_elements ^ 0x7FFF7FFFu) | 1u;
 
-    // 131072 iterations * 2 scalar INT32 chains (add + and = 2 ops each) = 131072 * 4 = 524,288 INT32 ops
+    // 131072 iterations * 2 scalar INT32 steps (add + and = 2 ops each) = 131072 * 4 = 524,288 INT32 ops
     for (int i = 0; i < 131072; ++i) {
-        val0 = (val1 + mu) & mask;
-        val1 = (val0 + mu) & mask;
+        val0 = (val0 + val1) & mask;
+        val1 = (val1 + val0) & mask;
     }
 
-    data[index] = static_cast<float>(((val0 + val1) & 0x00FFFFFFu) | 1u);
+    data[index] = static_cast<float>(((val0 ^ val1) & 0x00FFFFFFu) | 1u);
 }
 
 // Config 4: Dual-Issue INT32 (Partial Co-Issue - 8 chains)
@@ -212,7 +211,7 @@ extern "C" __global__ void run_dual_issue_int32(float* data, float multiplier, u
     data[index] = static_cast<float>((ures & 0x00FFFFFFu) | 1u);
 }
 
-// Config 6: Dual-Issue Mixed (FP32+INT32, 50/50 Dual-Issue)
+// Config 6: Dual-Issue Mixed (FP32+INT32, 1:1 Instruction Co-Issue)
 extern "C" __global__ void run_dual_issue_mixed(float* data, float multiplier, uint32_t num_elements) {
     uint32_t index = blockIdx.x * blockDim.x + threadIdx.x;
     if (index >= num_elements) return;
@@ -220,19 +219,27 @@ extern "C" __global__ void run_dual_issue_mixed(float* data, float multiplier, u
     float base = __uint_as_float((__float_as_uint(data[index]) & 0x007FFFFFu) | 0x3F800000u);
     uint32_t ubase = static_cast<uint32_t>(base * 1000.0f) + index;
 
-    // 8 independent FP32 scalar accumulator chains
-    float f0 = base;
-    float f1 = base + 0.1f;
-    float f2 = base + 0.2f;
-    float f3 = base + 0.3f;
-    float f4 = base + 0.4f;
-    float f5 = base + 0.5f;
-    float f6 = base + 0.6f;
-    float f7 = base + 0.7f;
+    // 16 independent FP32 scalar accumulator chains (16 FMA instructions = 32 FLOPs/iter)
+    float f0  = base;
+    float f1  = base + 0.1f;
+    float f2  = base + 0.2f;
+    float f3  = base + 0.3f;
+    float f4  = base + 0.4f;
+    float f5  = base + 0.5f;
+    float f6  = base + 0.6f;
+    float f7  = base + 0.7f;
+    float f8  = base + 0.8f;
+    float f9  = base + 0.9f;
+    float f10 = base + 1.0f;
+    float f11 = base + 1.1f;
+    float f12 = base + 1.2f;
+    float f13 = base + 1.3f;
+    float f14 = base + 1.4f;
+    float f15 = base + 1.5f;
 
     float mf = multiplier * 0.00001f;
 
-    // 8 independent INT32 scalar accumulator chains
+    // 8 independent INT32 scalar accumulator chains (8 add + 8 and = 16 INT32 instructions = 16 IOPs/iter)
     uint32_t u0 = ubase;
     uint32_t u1 = ubase + 1u;
     uint32_t u2 = ubase + 2u;
@@ -245,35 +252,44 @@ extern "C" __global__ void run_dual_issue_mixed(float* data, float multiplier, u
     uint32_t mu = static_cast<uint32_t>(multiplier * 1000.0f) | 1u;
     uint32_t mask = (num_elements ^ 0x7FFF7FFFu) | 1u;
 
-    // 65536 iterations * (8 scalar FMAs + 8 scalar INT add+and)
-    // = 65536 * (16 FP32 ops + 16 INT32 ops) = 65536 * 32 = 2,097,152 operations
+    // 65536 iterations * (16 scalar FMAs + 8 scalar INT add+and)
+    // = 65536 * (32 FP32 ops + 16 INT32 ops) = 65536 * 48 = 3,145,728 operations
     for (int i = 0; i < 65536; ++i) {
-        f0 = fmaf(f0, mf, f0);
-        u0 = (u0 + mu) & mask;
+        f0  = fmaf(f0,  mf, f0);
+        u0  = (u0 + mu) & mask;
+        f1  = fmaf(f1,  mf, f1);
 
-        f1 = fmaf(f1, mf, f1);
-        u1 = (u1 + mu) & mask;
+        f2  = fmaf(f2,  mf, f2);
+        u1  = (u1 + mu) & mask;
+        f3  = fmaf(f3,  mf, f3);
 
-        f2 = fmaf(f2, mf, f2);
-        u2 = (u2 + mu) & mask;
+        f4  = fmaf(f4,  mf, f4);
+        u2  = (u2 + mu) & mask;
+        f5  = fmaf(f5,  mf, f5);
 
-        f3 = fmaf(f3, mf, f3);
-        u3 = (u3 + mu) & mask;
+        f6  = fmaf(f6,  mf, f6);
+        u3  = (u3 + mu) & mask;
+        f7  = fmaf(f7,  mf, f7);
 
-        f4 = fmaf(f4, mf, f4);
-        u4 = (u4 + mu) & mask;
+        f8  = fmaf(f8,  mf, f8);
+        u4  = (u4 + mu) & mask;
+        f9  = fmaf(f9,  mf, f9);
 
-        f5 = fmaf(f5, mf, f5);
-        u5 = (u5 + mu) & mask;
+        f10 = fmaf(f10, mf, f10);
+        u5  = (u5 + mu) & mask;
+        f11 = fmaf(f11, mf, f11);
 
-        f6 = fmaf(f6, mf, f6);
-        u6 = (u6 + mu) & mask;
+        f12 = fmaf(f12, mf, f12);
+        u6  = (u6 + mu) & mask;
+        f13 = fmaf(f13, mf, f13);
 
-        f7 = fmaf(f7, mf, f7);
-        u7 = (u7 + mu) & mask;
+        f14 = fmaf(f14, mf, f14);
+        u7  = (u7 + mu) & mask;
+        f15 = fmaf(f15, mf, f15);
     }
 
-    float fres = (f0 + f1) + (f2 + f3) + (f4 + f5) + (f6 + f7);
+    float fres = ((f0 + f1) + (f2 + f3)) + ((f4 + f5) + (f6 + f7)) +
+                 ((f8 + f9) + (f10 + f11)) + ((f12 + f13) + (f14 + f15));
     uint32_t ures = ((u0 + u1) ^ (u2 + u3) ^ (u4 + u5) ^ (u6 + u7)) & 0x00FFFFFFu;
 
     data[index] = fres + static_cast<float>(ures | 1u);

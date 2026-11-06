@@ -11,5 +11,5 @@ hitAttributeEXT vec2 attribs;
 void main() {
     float t = gl_HitTEXT;
     float p = float(gl_PrimitiveID & 255);
-    payload.data = payload.data * 0.5 + vec4(t, attribs.x, attribs.y, p * 0.01 + 1.0);
+    payload.data = abs(payload.data) * 0.5 + vec4(t, attribs.x, attribs.y, p * 0.01 + 1.0);
 }

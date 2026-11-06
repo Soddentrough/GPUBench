@@ -42,9 +42,10 @@ void RayIntersectBench::Setup(IComputeContext &context,
 
   // Target a substantial workload to saturate RTUs
   rayCount = 128000000;
-  resultBuffer = context.createBuffer(sizeof(uint32_t));
-  uint32_t zero = 0;
-  context.writeBuffer(resultBuffer, 0, 4, &zero);
+  uint32_t numWorkgroups = (rayCount + 31) / 32;
+  resultBuffer = context.createBuffer(numWorkgroups * sizeof(uint32_t));
+  std::vector<uint32_t> zeroHits(1024, 0);
+  context.writeBuffer(resultBuffer, 0, zeroHits.size() * sizeof(uint32_t), zeroHits.data());
 
   // Setup Triangle and Box data (64 layers of 16x16 grids = 16,384 primitives)
   uint32_t gridSize = 16;
@@ -354,8 +355,8 @@ void RayIntersectBench::buildAS() {
 void RayIntersectBench::Run(uint32_t config_idx) {
   VulkanContext *vContext = static_cast<VulkanContext *>(context);
   if (lastRunConfig != static_cast<int>(config_idx)) {
-    uint32_t zero = 0;
-    context->writeBuffer(resultBuffer, 0, sizeof(uint32_t), &zero);
+    std::vector<uint32_t> zeroHits(1024, 0);
+    context->writeBuffer(resultBuffer, 0, zeroHits.size() * sizeof(uint32_t), zeroHits.data());
     lastRunConfig = static_cast<int>(config_idx);
   }
   VkAccelerationStructureKHR activeTlas =
@@ -422,9 +423,15 @@ bool RayIntersectBench::ValidateResults(uint32_t config_idx) const {
   if (!context || !resultBuffer) return false;
   if (lastRunConfig != static_cast<int>(config_idx)) return false;
   try {
-    uint32_t hits = 0;
-    context->readBuffer(resultBuffer, 0, sizeof(uint32_t), &hits);
-    return hits > 0;
+    uint32_t checkCount = 1024;
+    std::vector<uint32_t> hostHits(checkCount, 0);
+    context->readBuffer(resultBuffer, 0, checkCount * sizeof(uint32_t), hostHits.data());
+    for (uint32_t i = 0; i < checkCount; ++i) {
+      if (hostHits[i] == 0) {
+        return false;
+      }
+    }
+    return true;
   } catch (...) {
     return false;
   }

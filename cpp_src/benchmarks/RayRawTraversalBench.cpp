@@ -87,9 +87,9 @@ void RayRawTraversalBench::Setup(IComputeContext &context,
   vertexBufferCoherent =
       context.createBuffer(coherentVertices.size() * sizeof(float), coherentVertices.data());
 
-  // 2. Geometry 1: Deep Multi-Layer BVH Hierarchy (128 layers of 32x32 cells = 262,144 triangles)
-  // Forces deep internal node and leaf traversal through 7-8 levels of BVH8 hierarchy.
-  uint32_t deepLayers = 128;
+  // 2. Geometry 1: Deep Multi-Layer BVH Hierarchy (64 layers of 32x32 cells = 131,072 triangles)
+  // Forces deep internal node and leaf traversal through 64 stratified BVH layers.
+  uint32_t deepLayers = 64;
   deepPrimitives = gridDim * gridDim * 2 * deepLayers;
 
   std::vector<float> deepVertices;

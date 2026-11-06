@@ -102,6 +102,7 @@ void SysMemBandwidthBench::Setup(IComputeContext &context,
   sliceIndex = 0;
   workGeneration = 0;
   completedWorkers = 0;
+  readSinks.assign(threadCount, 0ULL);
   workers.clear();
   workers.reserve(threadCount);
   for (unsigned int i = 0; i < threadCount; ++i) {
@@ -111,8 +112,8 @@ void SysMemBandwidthBench::Setup(IComputeContext &context,
 
 #if ENABLE_AVX2
 // AVX2 kernels
-__attribute__((target("avx2"))) void run_read_avx2(const void *src,
-                                                   size_t size) {
+__attribute__((target("avx2"))) uint64_t run_read_avx2(const void *src,
+                                                       size_t size) {
   const __m256i *pSrc = reinterpret_cast<const __m256i *>(src);
   size_t count = size / sizeof(__m256i);
 
@@ -131,8 +132,9 @@ __attribute__((target("avx2"))) void run_read_avx2(const void *src,
     accum = _mm256_add_epi64(accum, v3);
   }
 
-  volatile __m256i sink = accum;
-  (void)sink;
+  alignas(32) uint64_t lanes[4];
+  _mm256_store_si256(reinterpret_cast<__m256i *>(lanes), accum);
+  return ((lanes[0] ^ lanes[1] ^ lanes[2] ^ lanes[3]) ^ 0xDEADBEEFCAFEBABEULL) | 1ULL;
 }
 
 __attribute__((target("avx2"))) void run_write_avx2(void *dst, size_t size) {
@@ -174,14 +176,14 @@ __attribute__((target("avx2"))) void run_copy_avx2(const void *src, void *dst,
 #endif
 
 // Fallbacks
-void run_read_fallback(const void *src, size_t size) {
+uint64_t run_read_fallback(const void *src, size_t size) {
   const uint64_t *pSrc = reinterpret_cast<const uint64_t *>(src);
   size_t count = size / sizeof(uint64_t);
-  volatile uint64_t sink = 0;
+  uint64_t sink = 0;
   for (size_t i = 0; i < count; ++i) {
     sink ^= pSrc[i];
   }
-  (void)sink;
+  return (sink ^ 0xDEADBEEFCAFEBABEULL) | 1ULL;
 }
 
 void run_write_fallback(void *dst, size_t size) {
@@ -237,7 +239,7 @@ void SysMemBandwidthBench::workerLoop(unsigned int tid) {
 #if ENABLE_AVX2
         if (useAVX2) {
           if (config.mode == SysMemTestMode::Read) {
-            run_read_avx2(tSrc, chunkSize);
+            readSinks[tid] = run_read_avx2(tSrc, chunkSize);
             reinterpret_cast<uint64_t *>(destBuffer)[tid] = 0xDEADBEEFCAFEBABEULL;
           } else if (config.mode == SysMemTestMode::Write) {
             run_write_avx2(tDst, chunkSize);
@@ -248,7 +250,7 @@ void SysMemBandwidthBench::workerLoop(unsigned int tid) {
 #endif
         {
           if (config.mode == SysMemTestMode::Read) {
-            run_read_fallback(tSrc, chunkSize);
+            readSinks[tid] = run_read_fallback(tSrc, chunkSize);
             reinterpret_cast<uint64_t *>(destBuffer)[tid] = 0xDEADBEEFCAFEBABEULL;
           } else if (config.mode == SysMemTestMode::Write) {
             run_write_fallback(tDst, chunkSize);
@@ -280,6 +282,9 @@ void SysMemBandwidthBench::Run(uint32_t config_idx) {
     if (activeConfigIdx != config_idx) {
       activeConfigIdx = config_idx;
       sliceIndex = 0;
+      if (config.mode == SysMemTestMode::Read) {
+        std::fill(readSinks.begin(), readSinks.end(), 0ULL);
+      }
     } else {
       sliceIndex++;
     }
@@ -360,8 +365,14 @@ bool SysMemBandwidthBench::ValidateResults(uint32_t config_idx) const {
   }
 
   const auto &config = configs[config_idx];
-  const uint32_t *pDst32 = reinterpret_cast<const uint32_t *>(destBuffer);
-  const size_t checkElements = std::min<size_t>(bufferSize / sizeof(uint32_t), 65536);
+  constexpr size_t kQuantumBytes = 512ULL * 1024ULL * 1024ULL;
+  const size_t numSlices = std::max<size_t>(1, bufferSize / kQuantumBytes);
+  const size_t lastSliceOffset32 =
+      (sliceIndex % numSlices) * (kQuantumBytes / sizeof(uint32_t));
+  const uint32_t *pDst32 =
+      reinterpret_cast<const uint32_t *>(destBuffer) + lastSliceOffset32;
+  const size_t checkElements =
+      std::min<size_t>(kQuantumBytes / sizeof(uint32_t), 65536);
 
   if (config.mode == SysMemTestMode::Write) {
     // Write mode fills with 0xAAAAAAAA
@@ -384,11 +395,14 @@ bool SysMemBandwidthBench::ValidateResults(uint32_t config_idx) const {
       }
     }
   } else {
-    // Read mode verifies worker completion indicator
-    uint32_t activeThreads = (config.numThreads > 0) ? config.numThreads : threadCount;
+    // Read mode verifies worker completion indicator in both destBuffer and readSinks
     const uint64_t *pDst64 = reinterpret_cast<const uint64_t *>(destBuffer);
+    uint32_t activeThreads = (config.numThreads > 0) ? config.numThreads : threadCount;
+    if (readSinks.size() < activeThreads) {
+      return false;
+    }
     for (uint32_t t = 0; t < activeThreads; ++t) {
-      if (pDst64[t] != 0xDEADBEEFCAFEBABEULL) {
+      if (pDst64[t] != 0xDEADBEEFCAFEBABEULL || readSinks[t] == 0ULL) {
         std::cerr << "SysMemBandwidthBench Read validation failed: worker " << t << " did not record valid completion\n";
         return false;
       }

@@ -2,7 +2,7 @@
 // Cross-vendor INT8 vector benchmark with optional native ISA acceleration.
 
 inline int sdot4_packed(int a_packed, int b_packed, int c) {
-#if defined(__AMDGPU__) && defined(__IMAGE_SUPPORT__)
+#if (defined(__AMDGPU__) || defined(__AMDGCN__)) && defined(__IMAGE_SUPPORT__)
     // On AMD GPUs with inline assembly support, use native dot4 instruction
     int dst;
     __asm__ volatile("v_dot4_i32_i8 %0, %1, %2, %3" : "=v"(dst) : "v"(a_packed), "v"(b_packed), "v"(c));

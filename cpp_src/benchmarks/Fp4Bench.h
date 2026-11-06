@@ -17,7 +17,7 @@ public:
   bool IsSupported(const DeviceInfo &info,
                    IComputeContext *context = nullptr) const override;
   std::string GetSupportNote() const override {
-    return "shaderFloat4 hardware bit not set (no native FP4 compute units; CDNA4/gfx950+ only)";
+    return "shaderFloat4 hardware bit not set (no native FP4 compute units on GPU)";
   }
   std::string GetSupportNote(const DeviceInfo &info,
                              IComputeContext *context = nullptr) const override {
@@ -25,10 +25,7 @@ public:
     if (context && context->getBackend() == ComputeBackend::OpenCL) {
       return "No support for 4-bit floating point in OpenCL API";
     }
-    if (context && context->getBackend() == ComputeBackend::ROCm) {
-      return "shaderFloat4 hardware bit not set (no native FP4 units on RDNA4; CDNA4/gfx950+ only)";
-    }
-    return "shaderFloat4 hardware bit not set (no native FP4 units on RDNA4; CDNA4/gfx950+ only)";
+    return "shaderFloat4 hardware bit not set (no native FP4 compute units on GPU)";
   }
   SupportLimitation GetSupportLimitation() const override {
     return SupportLimitation::kHardware;

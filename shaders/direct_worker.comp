@@ -20,8 +20,10 @@ void main() {
         return;
     }
 
+    uint itemId = inputItems[gid];
+
     // Fast deterministic pseudo-random hash to determine selectivity
-    uint hash = gid * 2654435761u;
+    uint hash = itemId * 2654435761u;
     bool activeItem = (hash % 100u) < pc.selectivity;
 
     if (!activeItem) {
@@ -29,7 +31,7 @@ void main() {
     }
 
     // Identical representative compute arithmetic loop
-    float val = float(gid) * 0.001f;
+    float val = float(itemId) * 0.001f;
     for (int i = 0; i < 32; i++) {
         val = sin(val) * 1.05f + cos(val * 0.5f);
     }

@@ -6,11 +6,15 @@ __kernel void run_benchmark(__global uint *results,
   uint tid = get_local_id(0);
   uint gid = get_global_id(0);
 
+  // Initialize local memory with 32u (32 banks) so adding acc0 to base_addr
+  // keeps the loop-carried dependency live while preserving (tid * stride) mod 32.
   for (uint i = tid; i < 1280u; i += 32u) {
     lds[i] = 32u;
   }
   barrier(CLK_LOCAL_MEM_FENCE);
 
+  // 8 dword loads (32 B/iter) at constant +32-dword (+128 B) bank-preserving offsets,
+  // allowing the compiler to fold offsets into 4 dual-address ds_load_2addr_b32 instructions.
   uint base_addr = (tid * stride) & 1023u;
   uint acc0 = 0u;
   uint acc1 = 0u;

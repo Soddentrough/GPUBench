@@ -5,7 +5,7 @@ __kernel void run_benchmark(__global uint* data, __global uint* pc) {
 
     #pragma unroll 1
     for (uint i = 0; i < iterations; ++i) {
-        val = data[val + tid];
+        val = data[val];
     }
 
     data[1] = val;

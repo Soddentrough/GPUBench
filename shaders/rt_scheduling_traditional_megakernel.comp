@@ -11,7 +11,7 @@ layout(set = 0, binding = 0) uniform accelerationStructureEXT topLevelAS;
 layout(set = 0, binding = 1) buffer Results {
     uint totalRays;
     uint totalHits;
-    float accumulatedLuminance;
+    uint accumulatedLuminance;
 } results;
 
 layout(set = 0, binding = 2) buffer Framebuffer {
@@ -863,6 +863,7 @@ void main() {
 
     uint threadRays = 0u;
     uint threadHits = 0u;
+    uint threadLum = 0u;
 
     uint rngState = idx + pc.seed;
 
@@ -1175,6 +1176,8 @@ void main() {
                 vec3 avg = (total / float(totalSpp)) * expGain;
                 fb.pixels[pixelIdx] = vec4(tonemapACES(avg), 1.0);
             }
+        } else {
+            threadLum = uint(clamp(dot(sampleRadiance, vec3(0.2126, 0.7152, 0.0722)), 0.0, 100.0) * 256.0);
         }
     } else if (pc.mode == 2) {
         // Mode 2: Incoherent Secondary GI (Hemisphere Scattering without Spatial Binning)
@@ -1236,6 +1239,8 @@ void main() {
         }
         if (pc.dumpRenders != 0) {
             fb.pixels[pixelIdx] = vec4(tonemapACES(pixelColor * 1.0), 1.0);
+        } else {
+            threadLum = uint(clamp(dot(pixelColor, vec3(0.2126, 0.7152, 0.0722)), 0.0, 100.0) * 256.0);
         }
     } else if (pc.mode == 5) {
         // Mode 5: Directional Shadow Ray Traversal (Traditional Megakernel)
@@ -1286,6 +1291,8 @@ void main() {
             if (pc.dumpRenders != 0) {
                 float shadowVal = occluded ? 0.08 : 0.95;
                 fb.pixels[pixelIdx] = vec4(vec3(shadowVal), 1.0);
+            } else {
+                threadLum = occluded ? 20u : 243u;
             }
         } else {
             if (pc.dumpRenders != 0) {
@@ -1315,23 +1322,16 @@ void main() {
                 vec2 rawBary = rayQueryGetIntersectionBarycentricsEXT(query, true);
                 vec3 normal = computeSmoothNormal(pc.sceneType, primId, hitPos, rayDir, rawBary);
 
-                // Scientific Turbo Step Depth Heatmap:
-                // Evaluates BVH traversal candidate intersections (candidate leaf/primitive tests).
-                // Logarithmic normalization:
-                // 1 step -> t=0.00 (Indigo Blue)
-                // 2 steps -> t=0.25 (Cyan)
-                // 4 steps -> t=0.50 (Emerald Green)
-                // 8 steps -> t=0.75 (Vivid Amber-Yellow)
-                // 16+ steps -> t=1.00 (Deep Crimson Red)
                 float tSteps = clamp(log2(max(1.0, float(steps))) / 4.0, 0.0, 1.0);
                 vec3 heatCol = turboColormap(tSteps);
 
-                // Subtle directional surface shading to preserve 3D geometry structure and relief
                 vec3 shadeDir = normalize(vec3(0.35, 0.55, 0.75));
                 float diff = clamp(dot(normal, shadeDir) * 0.25 + 0.75, 0.45, 1.0);
                 col = heatCol * diff;
             }
             fb.pixels[pixelIdx] = vec4(col, 1.0);
+        } else {
+            threadLum = steps;
         }
     } else if (pc.mode == 7) {
         // Mode 7: Pipeline Breakdown - Primary Surface Normals (G-Buffer)
@@ -1346,8 +1346,11 @@ void main() {
             uint primId = rayQueryGetIntersectionPrimitiveIndexEXT(query, true);
             vec2 rawBary = rayQueryGetIntersectionBarycentricsEXT(query, true);
             vec3 normal = computeSmoothNormal(pc.sceneType, primId, hitPos, rayDir, rawBary);
+            vec3 nCol = normal * 0.5 + 0.5;
             if (pc.dumpRenders != 0) {
-                fb.pixels[pixelIdx] = vec4(normal * 0.5 + 0.5, 1.0);
+                fb.pixels[pixelIdx] = vec4(nCol, 1.0);
+            } else {
+                threadLum = uint(clamp(dot(nCol, vec3(0.2126, 0.7152, 0.0722)), 0.0, 100.0) * 256.0);
             }
         } else {
             if (pc.dumpRenders != 0) {
@@ -1375,6 +1378,8 @@ void main() {
             }
             if (pc.dumpRenders != 0) {
                 fb.pixels[pixelIdx] = vec4(vec3(shadowed ? 0.08 : 0.98), 1.0);
+            } else {
+                threadLum = shadowed ? 20u : 250u;
             }
         } else {
             if (pc.dumpRenders != 0) {
@@ -1398,6 +1403,8 @@ void main() {
             float rtao = computeRTAO(hitPos, normal, rngState, 4, (pc.isGltf != 0u ? 15.0 : 35.0));
             if (pc.dumpRenders != 0) {
                 fb.pixels[pixelIdx] = vec4(vec3(rtao), 1.0);
+            } else {
+                threadLum = uint(clamp(rtao, 0.0, 1.0) * 256.0);
             }
         } else {
             if (pc.dumpRenders != 0) {
@@ -1540,6 +1547,8 @@ void main() {
             vec3 indirectRadiance = accumIndirect / float(kBounceSamples);
             if (pc.dumpRenders != 0) {
                 fb.pixels[pixelIdx] = vec4(tonemapACES(indirectRadiance * 3.5), 1.0);
+            } else {
+                threadLum = uint(clamp(dot(indirectRadiance, vec3(0.2126, 0.7152, 0.0722)), 0.0, 100.0) * 256.0);
             }
         } else {
             if (pc.dumpRenders != 0) {
@@ -1658,6 +1667,8 @@ void main() {
 
         if (pc.dumpRenders != 0) {
             fb.pixels[pixelIdx] = vec4(tonemapACES(totalRadiance), 1.0);
+        } else {
+            threadLum = uint(clamp(dot(totalRadiance, vec3(0.2126, 0.7152, 0.0722)), 0.0, 100.0) * 256.0);
         }
     } else if (pc.mode == 12) {
         // Mode 12: Pipeline Breakdown - Isolated Direct Hybrid PBR Shading
@@ -1719,6 +1730,8 @@ void main() {
 
         if (pc.dumpRenders != 0) {
             fb.pixels[pixelIdx] = vec4(tonemapACES(pixelColor * 1.0), 1.0);
+        } else {
+            threadLum = uint(clamp(dot(pixelColor, vec3(0.2126, 0.7152, 0.0722)), 0.0, 100.0) * 256.0);
         }
     } else {
         // Mode 0: Primary Ray Tracing + Divergent Material Shading
@@ -1780,13 +1793,17 @@ void main() {
 
         if (pc.dumpRenders != 0) {
             fb.pixels[pixelIdx] = vec4(tonemapACES(pixelColor * 1.0), 1.0);
+        } else {
+            threadLum = uint(clamp(dot(pixelColor, vec3(0.2126, 0.7152, 0.0722)), 0.0, 100.0) * 256.0);
         }
     }
 
     uint waveRays = subgroupAdd(threadRays);
     uint waveHits = subgroupAdd(threadHits);
+    uint waveLum = subgroupAdd(threadLum);
     if (subgroupElect()) {
         if (waveRays > 0u) atomicAdd(results.totalRays, waveRays);
         if (waveHits > 0u) atomicAdd(results.totalHits, waveHits);
+        if (waveLum > 0u) atomicAdd(results.accumulatedLuminance, waveLum);
     }
 }

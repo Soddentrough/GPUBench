@@ -95,13 +95,14 @@ Querying compiler statistics directly via `RADV_DEBUG=shaderstats` reveals why t
 
 | Compute Kernel | Pipeline Stage | Code Size | VGPRs | LDS Allocation | Waves / SIMD | Theoretical SIMD Occupancy |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: |
-| **`rt_scheduling_traditional.comp`** | **Megakernel** | **119.2 KB** | **240** | **15,360 B** | **2 waves** | **12.5%** *(Critical Bottleneck)* |
-| **`rt_scheduling_worklist_classify.comp`** | Ray Hit Classification | 9.4 KB | 48 | 3,072 B | **11 waves** | **68.8%** |
-| **`rt_scheduling_worklist_material.comp`** | Specialized PBR Shading | 100.2 KB | 240 | 8,192 B | **4 waves** | **25.0%** *(2x Megakernel)* |
-| **`rt_scheduling_worklist_bounce.comp`** | Ray Generation / Bounces | 4.8 KB | 48 | 2,048 B | **16 waves** | **100.0% (MAX OCCUPANCY)** |
-| **`rt_scheduling_worklist_shadow.comp`** | Directional Shadows | 3.1 KB | 48 | 2,048 B | **16 waves** | **100.0% (MAX OCCUPANCY)** |
+| **`rt_scheduling_traditional_megakernel.comp`** | **Megakernel** | **119.2 KB** | **240** | **15,360 B** | **2 waves** | **12.5%** *(Critical Bottleneck)* |
+| **`rt_scheduling_device_generated_commands_classify.comp`** | Ray Hit Classification | 9.4 KB | 48 | 3,072 B | **11 waves** | **68.8%** |
+| **`rt_scheduling_device_generated_commands_material.comp`** | Specialized PBR Shading | 100.2 KB | 240 | 8,192 B | **4 waves** | **25.0%** *(2x Megakernel)* |
+| **`rt_scheduling_device_generated_commands_bounce.comp`** | Ray Generation / Bounces | 4.8 KB | 48 | 2,048 B | **16 waves** | **100.0% (MAX OCCUPANCY)** |
+| **`rt_scheduling_device_generated_commands_shadow.comp`** | Directional Shadows | 3.1 KB | 48 | 2,048 B | **16 waves** | **100.0% (MAX OCCUPANCY)** |
+| **`rt_scheduling_device_generated_commands_light.comp`** | Multi-Light Binning | 5.2 KB | 64 | 2,048 B | **16 waves** | **100.0% (MAX OCCUPANCY)** |
 | **`rt_scheduling_persistent.comp`** | Persistent Wavefront Queue | 27.8 KB | 48 | 2,048 B | **16 waves** | **100.0% (MAX OCCUPANCY)** |
-| **`rt_scheduling_resolve.comp`** | Framebuffer Resolve | 444 B | 96 | 0 B | **16 waves** | **100.0% (MAX OCCUPANCY)** |
+| **`rt_scheduling_resolve.comp`** | DGC Sequence Resolve | 444 B | 96 | 0 B | **16 waves** | **100.0% (MAX OCCUPANCY)** |
 
 #### Architectural Takeaways:
 1. **The Megakernel Occupancy Wall**:
@@ -191,21 +192,22 @@ gpubench -d 1 -b rayscheduling -s forest
 # Dump 4K UHD PNG/PPM frames, difference heatmaps, and 4-scenario comparative grid
 gpubench -d 0 -b rayscheduling -s all --dump-renders
 
-# Run a specific benchmark configuration (e.g. Config 9: Full Frame Megakernel, Config 11: Full Frame DGC, Config 17: Full Pipeline 4K UHD DGC, Config 18: Primary Rays RTP)
-gpubench -d 0 -b rayscheduling -s forest -c 9
-gpubench -d 0 -b rayscheduling -s forest -c 11
+# Run a specific benchmark configuration (e.g. Config 0: Primary + Shading Megakernel, Config 1: Primary + Shading DGC, Config 17: Primary Rays RTP, Config 21: Full Pipeline 4K UHD Megakernel, Config 22: Full Pipeline 4K UHD DGC)
+gpubench -d 0 -b rayscheduling -s forest -c 0
+gpubench -d 0 -b rayscheduling -s forest -c 1
 gpubench -d 0 -b rayscheduling -s forest -c 17
-gpubench -d 0 -b rayscheduling -s forest -c 18
+gpubench -d 0 -b rayscheduling -s forest -c 21
+gpubench -d 0 -b rayscheduling -s forest -c 22
 
 # Run in profiling snapshot mode (single submit for clean RGP trace capture)
-gpubench -d 0 -b rayscheduling -s forest -c 11 --profile-snapshot
+gpubench -d 0 -b rayscheduling -s forest -c 22 --profile-snapshot
 ```
 
 ### 6.2 Inspecting Shader Occupancy & Compiler Statistics
 
 To inspect ACO compiler machine code statistics, VGPR allocation, and SIMD wave occupancy:
 ```bash
-RADV_DEBUG=shaderstats gpubench -d 1 -b rayscheduling -s showroom -c 11 --profile-snapshot --no-dump
+RADV_DEBUG=shaderstats gpubench -d 1 -b rayscheduling -s showroom -c 22 --profile-snapshot --no-dump
 ```
 
 ### 6.3 Querying Real-Time Hardware Telemetry

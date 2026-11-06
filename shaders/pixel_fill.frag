@@ -8,5 +8,5 @@ layout (push_constant) uniform PushConstants {
 } pc;
 
 void main() {
-    outColor = pc.colorSeed + vec4(inUV.x * 0.1, inUV.y * 0.1, 0.0, 1.0);
+    outColor = vec4(pc.colorSeed.rgb + vec3(inUV.x * 0.1, inUV.y * 0.1, 0.0), pc.colorSeed.a);
 }

@@ -77,7 +77,8 @@ public:
 
 private:
   void loadRTProcs(VkDevice device);
-  void recordBuildCommands(VkDevice device, VulkanContext *vContext);
+  void recordBuildCommand(VkCommandBuffer cmd, uint32_t config_idx,
+                          VulkanContext *vContext);
 
   IComputeContext *context = nullptr;
 
@@ -98,8 +99,15 @@ private:
   std::vector<TlasInfo> tlases;
 
   // Persistent command resources for benchmark execution
+  static constexpr uint32_t kNumFrames = 4;
+  struct BuildFrame {
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    VkFence fence = VK_NULL_HANDLE;
+    bool inFlight = false;
+  };
   VkCommandPool buildCmdPool = VK_NULL_HANDLE;
-  std::vector<VkCommandBuffer> buildCmdBuffers;
+  BuildFrame buildFrames[kNumFrames];
+  uint32_t frameIndex = 0;
 
   // Function pointers
   PFN_vkGetAccelerationStructureBuildSizesKHR

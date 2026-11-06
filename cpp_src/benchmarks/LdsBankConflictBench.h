@@ -51,6 +51,8 @@ private:
 
   static constexpr uint32_t kWorkgroups = 2048;
   static constexpr uint32_t kThreadsPerWg = 32;
+  // 8 dword loads (32 B) per iteration at +32-dword (+128 B) bank-preserving offsets
+  // (compiled into 4 dual-address ds_load_2addr_b32 instructions on RDNA)
   static constexpr uint32_t kLoadsPerIter = 8;
   static constexpr uint32_t kLdsInitVal = 32u;
   static constexpr uint32_t kIterations = 50000;

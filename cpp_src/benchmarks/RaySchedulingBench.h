@@ -363,4 +363,5 @@ private:
   mutable uint32_t lastCompletedPasses[35] = {0};
   mutable bool unsupportedConfig[35] = {false};
   mutable std::string unsupportedReason[35];
+  uint32_t lastRunConfig = 0xFFFFFFFFu;
 };

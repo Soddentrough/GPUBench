@@ -4,11 +4,11 @@
 
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
-layout(set = 0, binding = 0) buffer InputBuffer {
+layout(set = 0, binding = 0) readonly buffer InputBuffer {
     uint inputItems[];
 };
 
-layout(set = 0, binding = 1) buffer WorkListBuffer {
+layout(set = 0, binding = 1) coherent buffer WorkListBuffer {
     uint activeWorklist[];
 };
 
@@ -20,7 +20,7 @@ struct VkDispatchIndirectCommand {
     uint workgroupsFinished;
 };
 
-layout(set = 0, binding = 2) buffer IndirectCommandBuffer {
+layout(set = 0, binding = 2) coherent buffer IndirectCommandBuffer {
     VkDispatchIndirectCommand cmd;
 };
 
@@ -33,10 +33,12 @@ layout(push_constant) uniform PushConstants {
 void main() {
     uint gid = gl_GlobalInvocationID.x;
     bool activeItem = false;
+    uint itemId = gid;
 
     if (gid < pc.totalItems) {
+        itemId = inputItems[gid];
         // Fast deterministic pseudo-random hash to determine selectivity
-        uint hash = gid * 2654435761u;
+        uint hash = itemId * 2654435761u;
         activeItem = (hash % 100u) < pc.selectivity;
     }
 
@@ -52,7 +54,7 @@ void main() {
     baseSlot = subgroupBroadcastFirst(baseSlot);
 
     if (activeItem) {
-        activeWorklist[baseSlot + laneOffset] = gid;
+        activeWorklist[baseSlot + laneOffset] = itemId;
     }
 
     // Ensure all subgroups in this workgroup have finished updating cmd.activeCount
@@ -62,7 +64,7 @@ void main() {
         uint finished = atomicAdd(cmd.workgroupsFinished, 1u);
         if (finished == pc.totalWorkgroups - 1u) {
             memoryBarrierBuffer();
-            uint totalActive = cmd.activeCount;
+            uint totalActive = atomicAdd(cmd.activeCount, 0u);
             cmd.x = (totalActive + 63u) / 64u;
             cmd.y = (totalActive > 0u) ? 1u : 0u;
             cmd.z = (totalActive > 0u) ? 1u : 0u;

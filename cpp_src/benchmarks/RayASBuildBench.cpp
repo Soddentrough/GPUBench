@@ -112,7 +112,7 @@ void RayASBuildBench::Setup(IComputeContext &context_ref,
   VkDeviceSize totalLibBufferSize = 0;
 
   for (uint32_t b = 0; b < numBlasLib; ++b) {
-    libPrims[b] = 50 + (b % 15) * 100;
+    libPrims[b] = 50 + (b % 15) * 100; // 50..1450 triangles (750 avg tris/mesh)
     VkAccelerationStructureGeometryKHR geom{
         VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR};
     geom.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
@@ -270,7 +270,7 @@ void RayASBuildBench::Setup(IComputeContext &context_ref,
   // 4. Setup 3 Real-World Branched Scene TLASes
   tlases.resize(3);
 
-  // Scene 0: Indoor Corridor (20,000 instances, 5,000 unique meshes, ~20M virtual triangles)
+  // Scene 0: Indoor Corridor (20,000 instances, 5,000 unique meshes, ~15M virtual triangles)
   // Architecture: Room/hallway clustering with high geometric uniqueness (~1:4 ratio)
   {
     tlases[0].name = "TLAS: Indoor Corridor";
@@ -300,7 +300,7 @@ void RayASBuildBench::Setup(IComputeContext &context_ref,
         inst0.size() * sizeof(VkAccelerationStructureInstanceKHR), inst0.data());
   }
 
-  // Scene 1: Dense Jungle / Forest (50,000 instances, 500 unique meshes, ~50M virtual triangles)
+  // Scene 1: Dense Jungle / Forest (50,000 instances, 500 unique meshes, ~37.5M virtual triangles)
   // Architecture: Dense overlapping foliage on undulating terrain (~1:100 ratio, heavy AABB overlap)
   {
     tlases[1].name = "TLAS: Dense Jungle";
@@ -327,7 +327,7 @@ void RayASBuildBench::Setup(IComputeContext &context_ref,
         inst1.size() * sizeof(VkAccelerationStructureInstanceKHR), inst1.data());
   }
 
-  // Scene 2: Massive Open World (200,000 instances, 5,000 unique meshes, ~500M virtual triangles)
+  // Scene 2: Massive Open World (200,000 instances, 5,000 unique meshes, ~150M virtual triangles)
   // Architecture: Multi-scale geographic distribution across broad world sectors (~1:40 ratio)
   {
     tlases[2].name = "TLAS: Massive Open World";
@@ -398,7 +398,7 @@ void RayASBuildBench::Setup(IComputeContext &context_ref,
   scratchBuffer = context_ref.createBuffer(maxBuildScratch);
   updateScratchBuffer = context_ref.createBuffer(maxUpdateScratch);
 
-  // 5. Persistent command pool and pre-recorded build command buffers
+  // 5. Persistent command pool and per-frame command buffers/fences
   VkCommandPoolCreateInfo cpInfo{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
   cpInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
   cpInfo.queueFamilyIndex = vContext->getComputeQueueFamilyIndex();
@@ -406,156 +406,193 @@ void RayASBuildBench::Setup(IComputeContext &context_ref,
     throw std::runtime_error("RayASBuildBench: Failed to create persistent command pool in Setup");
   }
 
-  buildCmdBuffers.resize(GetNumConfigs());
-  VkCommandBufferAllocateInfo cbAlloc{
-      VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
-  cbAlloc.commandPool = buildCmdPool;
-  cbAlloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-  cbAlloc.commandBufferCount = static_cast<uint32_t>(buildCmdBuffers.size());
-  if (vkAllocateCommandBuffers(device, &cbAlloc, buildCmdBuffers.data()) != VK_SUCCESS) {
-    throw std::runtime_error("RayASBuildBench: Failed to allocate persistent command buffers in Setup");
+  VkFenceCreateInfo fenceInfo{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+  for (uint32_t i = 0; i < kNumFrames; ++i) {
+    VkCommandBufferAllocateInfo cbAlloc{
+        VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+    cbAlloc.commandPool = buildCmdPool;
+    cbAlloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    cbAlloc.commandBufferCount = 1;
+    if (vkAllocateCommandBuffers(device, &cbAlloc, &buildFrames[i].cmd) != VK_SUCCESS) {
+      throw std::runtime_error("RayASBuildBench: Failed to allocate command buffer in Setup");
+    }
+    if (vkCreateFence(device, &fenceInfo, nullptr, &buildFrames[i].fence) != VK_SUCCESS) {
+      throw std::runtime_error("RayASBuildBench: Failed to create fence in Setup");
+    }
+    buildFrames[i].inFlight = false;
   }
+  frameIndex = 0;
 
-  recordBuildCommands(device, vContext);
-
-  // Initial builds for standalone BLASes so refit updates work cleanly
+  // Initial builds for standalone BLASes (1M and 5M) so refit updates work cleanly
   VkQueue queue = vContext->getComputeQueue();
-  VkSubmitInfo initSubmit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
-  initSubmit.commandBufferCount = 1;
-  initSubmit.pCommandBuffers = &buildCmdBuffers[0];
-  vkQueueSubmit(queue, 1, &initSubmit, VK_NULL_HANDLE);
-  initSubmit.pCommandBuffers = &buildCmdBuffers[2];
-  vkQueueSubmit(queue, 1, &initSubmit, VK_NULL_HANDLE);
-  vContext->waitIdle();
+  for (uint32_t initCfg : {0u, 2u}) {
+    VkCommandBuffer cmd = buildFrames[0].cmd;
+    vkResetCommandBuffer(cmd, 0);
+    VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(cmd, &begin);
+    recordBuildCommand(cmd, initCfg, vContext);
+    vkEndCommandBuffer(cmd);
+    VkSubmitInfo initSubmit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+    initSubmit.commandBufferCount = 1;
+    initSubmit.pCommandBuffers = &cmd;
+    vkQueueSubmit(queue, 1, &initSubmit, VK_NULL_HANDLE);
+    vContext->waitIdle();
+  }
 }
 
-void RayASBuildBench::recordBuildCommands(VkDevice device, VulkanContext *vContext) {
-  (void)device;
+void RayASBuildBench::recordBuildCommand(VkCommandBuffer cmd, uint32_t config_idx,
+                                         VulkanContext *vContext) {
   VkDeviceAddress vAddr = vContext->getBufferDeviceAddress(vertexBuffer);
 
-  for (uint32_t config_idx = 0; config_idx < buildCmdBuffers.size(); ++config_idx) {
-    VkCommandBuffer cmd = buildCmdBuffers[config_idx];
+  // Pre-barrier: ensure any previous build on the queue has completed and memory is synchronized
+  vContext->cmdPipelineMemoryBarrier2(
+      cmd,
+      VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+      VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR | VK_ACCESS_2_SHADER_WRITE_BIT,
+      VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT |
+          VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+      VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR |
+          VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR |
+          VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT);
 
-    VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
-    begin.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
-    if (vkBeginCommandBuffer(cmd, &begin) != VK_SUCCESS) {
-      throw std::runtime_error("RayASBuildBench: Failed to begin command buffer for config " +
-                               std::to_string(config_idx));
-    }
+  VkAccelerationStructureGeometryKHR geom{
+      VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR};
+  VkAccelerationStructureBuildGeometryInfoKHR buildInfo{
+      VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR};
+  VkAccelerationStructureBuildRangeInfoKHR range{};
 
-    // Pre-barrier: ensure any previous build on the queue has completed and memory is synchronized
-    vContext->cmdPipelineMemoryBarrier2(
-        cmd,
-        VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
-        VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR | VK_ACCESS_2_SHADER_WRITE_BIT,
-        VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
-        VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR |
-            VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR |
-            VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT);
+  if (config_idx < 5) { // BLAS: 0=1M Build, 1=1M Update, 2=5M Build, 3=5M Update, 4=10M Build
+    size_t bIdx = 0;
+    bool isUpdate = false;
+    if (config_idx == 0) { bIdx = 0; isUpdate = false; }
+    else if (config_idx == 1) { bIdx = 0; isUpdate = true; }
+    else if (config_idx == 2) { bIdx = 1; isUpdate = false; }
+    else if (config_idx == 3) { bIdx = 1; isUpdate = true; }
+    else if (config_idx == 4) { bIdx = 2; isUpdate = false; }
 
-    VkAccelerationStructureGeometryKHR geom{
-        VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR};
-    VkAccelerationStructureBuildGeometryInfoKHR buildInfo{
-        VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR};
-    VkAccelerationStructureBuildRangeInfoKHR range{};
+    uint32_t prims = blases[bIdx].numPrimitives;
+    geom.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
+    geom.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+    geom.geometry.triangles.sType =
+        VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
+    geom.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
+    geom.geometry.triangles.vertexData.deviceAddress = vAddr;
+    geom.geometry.triangles.vertexStride = sizeof(float) * 3;
+    geom.geometry.triangles.maxVertex = prims * 3 - 1;
+    geom.geometry.triangles.indexType = VK_INDEX_TYPE_NONE_KHR;
 
-    if (config_idx < 5) { // BLAS: 0=1M Build, 1=1M Update, 2=5M Build, 3=5M Update, 4=10M Build
-      size_t bIdx = 0;
-      bool isUpdate = false;
-      if (config_idx == 0) { bIdx = 0; isUpdate = false; }
-      else if (config_idx == 1) { bIdx = 0; isUpdate = true; }
-      else if (config_idx == 2) { bIdx = 1; isUpdate = false; }
-      else if (config_idx == 3) { bIdx = 1; isUpdate = true; }
-      else if (config_idx == 4) { bIdx = 2; isUpdate = false; }
+    buildInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+    buildInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR |
+                      VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
+    buildInfo.geometryCount = 1;
+    buildInfo.pGeometries = &geom;
+    buildInfo.dstAccelerationStructure = blases[bIdx].handle;
 
-      uint32_t prims = blases[bIdx].numPrimitives;
-      geom.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
-      geom.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
-      geom.geometry.triangles.sType =
-          VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
-      geom.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
-      geom.geometry.triangles.vertexData.deviceAddress = vAddr;
-      geom.geometry.triangles.vertexStride = sizeof(float) * 3;
-      geom.geometry.triangles.maxVertex = prims * 3 - 1;
-      geom.geometry.triangles.indexType = VK_INDEX_TYPE_NONE_KHR;
-
-      buildInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-      buildInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR |
-                        VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
-      buildInfo.geometryCount = 1;
-      buildInfo.pGeometries = &geom;
-      buildInfo.dstAccelerationStructure = blases[bIdx].handle;
-
-      if (!isUpdate) {
-        buildInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
-        buildInfo.scratchData.deviceAddress =
-            vContext->getBufferDeviceAddress(scratchBuffer);
-      } else {
-        buildInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR;
-        buildInfo.srcAccelerationStructure = blases[bIdx].handle;
-        buildInfo.scratchData.deviceAddress =
-            vContext->getBufferDeviceAddress(updateScratchBuffer);
-      }
-      range.primitiveCount = prims;
-    } else { // TLAS: 5=Indoor Corridor (20K), 6=Dense Jungle (50K), 7=Massive Open World (200K)
-      size_t tIdx = config_idx - 5;
-      uint32_t instCount = tlases[tIdx].numInstances;
-
-      VkDeviceAddress iAddr =
-          vContext->getBufferDeviceAddress(tlases[tIdx].instanceBuffer);
-
-      geom.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
-      geom.geometry.instances.sType =
-          VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
-      geom.geometry.instances.data.deviceAddress = iAddr;
-
-      buildInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
-      buildInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
-      buildInfo.geometryCount = 1;
-      buildInfo.pGeometries = &geom;
-      buildInfo.dstAccelerationStructure = tlases[tIdx].handle;
+    if (!isUpdate) {
       buildInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
       buildInfo.scratchData.deviceAddress =
           vContext->getBufferDeviceAddress(scratchBuffer);
-      range.primitiveCount = instCount;
+    } else {
+      buildInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR;
+      buildInfo.srcAccelerationStructure = blases[bIdx].handle;
+      buildInfo.scratchData.deviceAddress =
+          vContext->getBufferDeviceAddress(updateScratchBuffer);
     }
+    range.primitiveCount = prims;
+  } else { // TLAS: 5=Indoor Corridor (20K), 6=Dense Jungle (50K), 7=Massive Open World (200K)
+    size_t tIdx = config_idx - 5;
+    uint32_t instCount = tlases[tIdx].numInstances;
 
-    const VkAccelerationStructureBuildRangeInfoKHR *pRange = &range;
-    vkCmdBuildAccelerationStructuresKHR_ptr(cmd, 1, &buildInfo, &pRange);
+    VkDeviceAddress iAddr =
+        vContext->getBufferDeviceAddress(tlases[tIdx].instanceBuffer);
 
-    // Post-barrier: ensure acceleration structure writes are flushed and visible
-    vContext->cmdPipelineMemoryBarrier2(
-        cmd,
-        VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
-        VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR | VK_ACCESS_2_SHADER_WRITE_BIT,
-        VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
-        VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR |
-            VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR |
-            VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT);
+    geom.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
+    geom.geometry.instances.sType =
+        VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
+    geom.geometry.instances.data.deviceAddress = iAddr;
 
-    if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
-      throw std::runtime_error("RayASBuildBench: Failed to end command buffer for config " +
-                               std::to_string(config_idx));
-    }
+    buildInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+    buildInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+    buildInfo.geometryCount = 1;
+    buildInfo.pGeometries = &geom;
+    buildInfo.dstAccelerationStructure = tlases[tIdx].handle;
+    buildInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+    buildInfo.scratchData.deviceAddress =
+        vContext->getBufferDeviceAddress(scratchBuffer);
+    range.primitiveCount = instCount;
   }
+
+  const VkAccelerationStructureBuildRangeInfoKHR *pRange = &range;
+  vkCmdBuildAccelerationStructuresKHR_ptr(cmd, 1, &buildInfo, &pRange);
+
+  // Post-barrier: ensure acceleration structure writes are flushed and visible
+  vContext->cmdPipelineMemoryBarrier2(
+      cmd,
+      VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+      VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR | VK_ACCESS_2_SHADER_WRITE_BIT,
+      VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+      VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR |
+          VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR |
+          VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT);
 }
 
 void RayASBuildBench::Run(uint32_t config_idx) {
-  if (config_idx >= buildCmdBuffers.size()) {
+  if (config_idx >= GetNumConfigs()) {
     throw std::out_of_range("Invalid config index in RayASBuildBench::Run");
   }
 
   VulkanContext *vContext = static_cast<VulkanContext *>(context);
+  VkDevice device = vContext->getVulkanDevice();
   VkQueue queue = vContext->getComputeQueue();
+  BuildFrame &frame = buildFrames[frameIndex];
+
+  if (frame.inFlight) {
+    constexpr uint64_t kTimeoutNs = 5'000'000'000ULL;
+    VkResult waitRes = vkWaitForFences(device, 1, &frame.fence, VK_TRUE, kTimeoutNs);
+    if (waitRes != VK_SUCCESS) {
+      throw std::runtime_error("RayASBuildBench fence wait failed: " + std::to_string(waitRes));
+    }
+    vkResetFences(device, 1, &frame.fence);
+    frame.inFlight = false;
+  }
+
+  vkResetCommandBuffer(frame.cmd, 0);
+  VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+  begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  if (vkBeginCommandBuffer(frame.cmd, &begin) != VK_SUCCESS) {
+    throw std::runtime_error("RayASBuildBench: Failed to begin command buffer in Run");
+  }
+
+  // Pre-barrier before startTiming: ensure any previous build on the queue has completed
+  vContext->cmdPipelineMemoryBarrier2(
+      frame.cmd,
+      VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+      VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR | VK_ACCESS_2_SHADER_WRITE_BIT,
+      VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT |
+          VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+      VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR |
+          VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR |
+          VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT);
+
+  vContext->startTiming(frame.cmd);
+  recordBuildCommand(frame.cmd, config_idx, vContext);
+  vContext->stopTiming(frame.cmd);
+
+  if (vkEndCommandBuffer(frame.cmd) != VK_SUCCESS) {
+    throw std::runtime_error("RayASBuildBench: Failed to end command buffer in Run");
+  }
 
   VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
   submit.commandBufferCount = 1;
-  submit.pCommandBuffers = &buildCmdBuffers[config_idx];
+  submit.pCommandBuffers = &frame.cmd;
 
-  VkResult res = vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE);
+  VkResult res = vkQueueSubmit(queue, 1, &submit, frame.fence);
   if (res != VK_SUCCESS) {
     throw std::runtime_error("vkQueueSubmit failed in RayASBuild: " + std::to_string(res));
   }
+  frame.inFlight = true;
+  frameIndex = (frameIndex + 1) % kNumFrames;
 }
 
 void RayASBuildBench::Teardown() {
@@ -565,11 +602,19 @@ void RayASBuildBench::Teardown() {
   if (device != VK_NULL_HANDLE) {
     vkDeviceWaitIdle(device);
 
+    for (uint32_t i = 0; i < kNumFrames; ++i) {
+      if (buildFrames[i].fence != VK_NULL_HANDLE) {
+        vkDestroyFence(device, buildFrames[i].fence, nullptr);
+        buildFrames[i].fence = VK_NULL_HANDLE;
+      }
+      buildFrames[i].cmd = VK_NULL_HANDLE;
+      buildFrames[i].inFlight = false;
+    }
+
     if (buildCmdPool != VK_NULL_HANDLE) {
       vkDestroyCommandPool(device, buildCmdPool, nullptr);
       buildCmdPool = VK_NULL_HANDLE;
     }
-    buildCmdBuffers.clear();
 
     if (vkDestroyAccelerationStructureKHR_ptr) {
       for (auto &b : blases) {

@@ -19,17 +19,16 @@ void main() {
     if (index >= pushConstants.num_elements) return;
 
     uint ubase = uint(InOutBuffer.data[index] * 1000.0) + index;
-    uint val0 = ubase;
-    uint val1 = ubase + 1u;
+    uint val0 = ubase | 1u;
+    uint val1 = ubase + 2u;
 
-    uint mu = uint(pushConstants.multiplier * 1000.0) | 1u;
     uint mask = (pushConstants.num_elements ^ 0x7FFF7FFFu) | 1u;
 
-    // 131072 iterations * 2 scalar INT32 chains (add + and = 2 ops each) = 131072 * 4 = 524,288 INT32 ops
+    // 131072 iterations * 2 scalar INT32 steps (add + and = 2 ops each) = 131072 * 4 = 524,288 INT32 ops
     for (int i = 0; i < 131072; ++i) {
-        val0 = (val1 + mu) & mask;
-        val1 = (val0 + mu) & mask;
+        val0 = (val0 + val1) & mask;
+        val1 = (val1 + val0) & mask;
     }
 
-    InOutBuffer.data[index] = float(((val0 + val1) & 0x00FFFFFFu) | 1u);
+    InOutBuffer.data[index] = float(((val0 ^ val1) & 0x00FFFFFFu) | 1u);
 }

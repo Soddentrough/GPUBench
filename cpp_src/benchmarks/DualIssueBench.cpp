@@ -58,9 +58,9 @@ DualIssueBench::DualIssueBench() {
       "Concurrent Mixed (FP32+INT32)",
       "dual_issue_mixed.comp",
       "run_dual_issue_mixed",
-      16384ULL * 128ULL, // 2,097,152 ops/thread (64 FP32 + 64 INT32)
+      16384ULL * 192ULL, // 3,145,728 ops/thread (16 FP32 FMA insts = 32 FLOPs + 16 INT32 ALU insts = 16 IOPs per iter)
       "TOPS",
-      "Concurrent FP32 + INT32; evaluates simultaneous execution across decoupled float and integer ALU datapaths"
+      "Concurrent FP32 + INT32 (1:1 instruction mix); evaluates simultaneous execution across float and integer ALU datapaths"
     }
   };
 }
@@ -195,8 +195,8 @@ bool DualIssueBench::ValidateResults(uint32_t config_idx) const {
         return v0 >= 1.0f && v0 <= 16777215.0f;
       case 5: // INT32 Peak ILP (16 Chains) -> 24-bit integer bitwise OR 1u in [1, 16777215], rejecting 0.0f sentinel
         return v0 >= 1.0f && v0 <= 16777215.0f;
-      case 6: // Concurrent Mixed (FP32+INT32) -> fres in [20.78, 36.19] + int in [1, 16777215] >= 21.78f
-        return v0 >= 21.0f && v0 <= 16777255.0f;
+      case 6: // Concurrent Mixed (FP32+INT32) -> fres in [42.34, 73.14] + int in [1, 16777215] >= 43.34f
+        return v0 >= 42.0f && v0 <= 16777300.0f;
       default:
         return false;
     }
