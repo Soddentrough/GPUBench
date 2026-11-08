@@ -32,6 +32,7 @@ layout(set = 0, binding = 4) readonly buffer VertexBuffer {
 #define BINDING_TRI_MAT_BUF 6
 #define BINDING_TEX_HDR_BUF 7
 #define BINDING_TEX_PIX_BUF 8
+#define PBR_NO_RAY_QUERY 1
 #include "pbr_common.glsl"
 
 layout(push_constant) uniform PushConstants {
@@ -50,157 +51,58 @@ const uint SCENE_OUTDOOR_TERRAIN = 1u;
 const uint SCENE_INDOOR_ATRIUM   = 2u;
 const uint SCENE_AAA_FOREST       = 3u;
 
-// Outdoor Landscape Primitives
-const uint PRIM_TERRAIN_END     = 32768u;
-const uint PRIM_WATER_END       = 34816u;
-
-void getCamera(uint sceneType, out vec3 camPos, out vec3 camForward, out vec3 camRight, out vec3 camUp, out float fov) {
-    if (pc.isGltf != 0u) {
-        if (sceneType == SCENE_AAA_FOREST) {
-            // AAA Open-World Woodland Forest: Eye-level trail camera gazing through dense canopy
-            camPos = vec3(0.0, -18.0, 0.55);
-            camForward = normalize(vec3(0.0, 33.0, 1.2));
-            camRight = normalize(cross(camForward, vec3(0.0, 0.0, 1.0)));
-            camUp = cross(camRight, camForward);
-            fov = 0.65;
-            return;
-        } else if (sceneType == SCENE_INDOOR_ATRIUM) {
-            camPos = vec3(-1150.0, 280.0, -40.0);
-            camForward = normalize(vec3(1.0, 0.02, 0.0));
-            camRight = vec3(0.0, 0.0, -1.0);
-            camUp = vec3(0.0, 1.0, 0.0);
-            fov = 0.55;
-            return;
-        } else if (sceneType == SCENE_SHOWROOM_STUDIO) {
-            camPos = vec3(360.0, 160.0, 420.0);
-            vec3 target = vec3(0.0, 30.0, 0.0);
-            camForward = normalize(target - camPos);
-            camRight = normalize(cross(camForward, vec3(0.0, 1.0, 0.0)));
-            camUp = cross(camRight, camForward);
-            fov = 0.45;
-            return;
-        }
-    }
-    if (sceneType == SCENE_OUTDOOR_TERRAIN) {
-        camPos = vec3(0.0, -320.0, 75.0);
-        camForward = vec3(0.0, 0.997375, -0.072412);
-        camRight = vec3(1.0, 0.0, 0.0);
-        camUp = vec3(0.0, 0.072412, 0.997375);
-        fov = 0.45;
-    } else if (sceneType == SCENE_INDOOR_ATRIUM) {
-        camPos = vec3(0.0, -9.6, 1.2);
-        camForward = normalize(vec3(0.0, 9.6, 0.6));
-        camRight = vec3(1.0, 0.0, 0.0);
-        camUp = normalize(cross(camRight, camForward));
-        fov = 0.65;
-    } else {
-        camPos = vec3(-0.5081, -8.1276, 1.5591);
-        camForward = vec3(0.0562, 0.9852, -0.1622);
-        camRight = vec3(0.9984, -0.0570, 0.0000);
-        camUp = vec3(0.0092, 0.1619, 0.9868);
-        fov = 0.2155;
-    }
-}
-
-vec3 computeSmoothNormal(uint sceneType, uint primId, vec3 hitPos, vec3 inDir, vec2 bary) {
-    vec3 normal;
-    if (sceneType == SCENE_OUTDOOR_TERRAIN && primId >= PRIM_TERRAIN_END && primId < PRIM_WATER_END) {
-        normal = vec3(0.0, 0.0, 1.0);
-    } else {
-        uint base = primId * 9u;
-        vec3 p0 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
-        vec3 p1 = vec3(vbuf.vertices[base + 3], vbuf.vertices[base + 4], vbuf.vertices[base + 5]);
-        vec3 p2 = vec3(vbuf.vertices[base + 6], vbuf.vertices[base + 7], vbuf.vertices[base + 8]);
-        normal = normalize(cross(p1 - p0, p2 - p0));
-    }
-    if (dot(normal, inDir) > 0.0) normal = -normal;
-    return normal;
-}
-
 void main() {
     uint threadIdx = gl_GlobalInvocationID.x;
     uint count = min(worklist.queueCounters[Q_SNAPSHOT_IDX(pc.queueId)], pc.queueCapacity);
 
-    uint threadRays = 0u;
     uint threadHits = 0u;
     uint threadLum = 0u;
 
     if (threadIdx < count) {
-        threadRays = 1u;
         uint recordIdx = pc.queueId * pc.queueCapacity + threadIdx;
         vec4 p = worklist.rayRecords[recordIdx];
-        float t = p.x;
-        uint pixelIdx = floatBitsToUint(p.y);
-        uint primId = floatBitsToUint(p.z);
-        vec2 bary = unpackUnorm2x16(floatBitsToUint(p.w));
-
-        vec3 camPos, camForward, camRight, camUp;
-        float fov;
-        getCamera(pc.sceneType, camPos, camForward, camRight, camUp, fov);
-
-        uint px_u = pixelIdx % pc.width;
-        uint py_u = pixelIdx / pc.width;
-        float halfH = float(pc.height) * 0.5;
-        float px = float(px_u) - float(pc.width) * 0.5 + 0.5;
-        float py = float(py_u) - halfH + 0.5;
-        vec3 inDir = normalize(camForward + (px / halfH * fov) * camRight - (py / halfH * fov) * camUp);
-        vec3 hitPos = camPos + inDir * t;
-
-        vec3 geomNormal;
-        if (pc.isGltf != 0u) {
-            uint base = primId * 36u;
-            vec3 p0 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
-            vec3 p1 = vec3(vbuf.vertices[base + 12], vbuf.vertices[base + 13], vbuf.vertices[base + 14]);
-            vec3 p2 = vec3(vbuf.vertices[base + 24], vbuf.vertices[base + 25], vbuf.vertices[base + 26]);
-            geomNormal = normalize(cross(p1 - p0, p2 - p0));
-            if (dot(geomNormal, inDir) > 0.0) geomNormal = -geomNormal;
-        } else {
-            geomNormal = computeSmoothNormal(pc.sceneType, primId, hitPos, inDir, bary);
-        }
+        vec3 rayOrig = p.xyz;
+        uint pixelIdx = floatBitsToUint(p.w);
 
         vec3 lightDir;
         float maxDist;
         if (pc.sceneType == SCENE_INDOOR_ATRIUM) {
             if (pc.lightIndex == 1u) {
-                lightDir = normalize(vec3(-0.55, 0.70, 0.45));
+                lightDir = normalize(vec3(0.32, 0.91, -0.22));
             } else if (pc.lightIndex == 2u) {
-                lightDir = normalize(vec3(0.60, 0.50, -0.62));
+                lightDir = normalize(vec3(0.38, 0.89, -0.28));
             } else {
                 lightDir = normalize(vec3(0.35, 0.90, -0.25));
             }
             maxDist = 10000.0;
         } else if (pc.sceneType == SCENE_SHOWROOM_STUDIO) {
             if (pc.lightIndex == 1u) {
-                lightDir = normalize(vec3(-0.7, 0.5, 0.4));
+                lightDir = normalize(vec3(0.57, 0.82, 0.47));
             } else if (pc.lightIndex == 2u) {
-                lightDir = normalize(vec3(-0.2, 0.4, -0.9));
+                lightDir = normalize(vec3(0.63, 0.78, 0.53));
             } else {
                 lightDir = normalize(vec3(0.6, 0.8, 0.5));
             }
             maxDist = 5000.0;
         } else {
             if (pc.lightIndex == 1u) {
-                lightDir = normalize(vec3(-0.65, 0.45, 0.61));
+                lightDir = normalize(vec3(0.42, 0.38, 0.82));
             } else if (pc.lightIndex == 2u) {
-                lightDir = normalize(vec3(0.20, -0.75, 0.63));
+                lightDir = normalize(vec3(0.48, 0.32, 0.82));
             } else {
                 lightDir = normalize(vec3(0.45, 0.35, 0.82));
             }
-            maxDist = (pc.sceneType == SCENE_AAA_FOREST) ? 5000.0 : 2500.0;
+            maxDist = 2500.0;
         }
 
-        bool occluded = false;
-        if (dot(geomNormal, lightDir) > 0.0) {
-            rayQueryEXT sQuery;
-            vec3 rayOrig = hitPos + geomNormal * 0.12;
-            rayQueryInitializeEXT(sQuery, topLevelAS,
-                gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsSkipClosestHitShaderEXT | gl_RayFlagsOpaqueEXT,
-                0xFF, rayOrig, 0.05, lightDir, maxDist);
-            while (rayQueryProceedEXT(sQuery)) {}
-            if (rayQueryGetIntersectionTypeEXT(sQuery, true) != gl_RayQueryCommittedIntersectionNoneEXT) {
-                occluded = true;
-                threadHits = 1u;
-            }
+        rayQueryEXT sQuery;
+        rayQueryInitializeEXT(sQuery, topLevelAS,
+            gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsSkipClosestHitShaderEXT | gl_RayFlagsOpaqueEXT,
+            0xFF, rayOrig, 0.05, lightDir, maxDist);
+        while (rayQueryProceedEXT(sQuery)) {}
+        bool occluded = (rayQueryGetIntersectionTypeEXT(sQuery, true) != gl_RayQueryCommittedIntersectionNoneEXT);
+        if (occluded) {
+            threadHits = 1u;
         }
 
         if (pc.dumpRenders != 0) {
@@ -211,11 +113,9 @@ void main() {
         }
     }
 
-    uint waveRays = subgroupAdd(threadRays);
     uint waveHits = subgroupAdd(threadHits);
     uint waveLum = subgroupAdd(threadLum);
     if (subgroupElect()) {
-        if (waveRays > 0u) atomicAdd(results.totalRays, waveRays);
         if (waveHits > 0u) atomicAdd(results.totalHits, waveHits);
         if (waveLum > 0u) atomicAdd(results.accumulatedLuminance, waveLum);
     }

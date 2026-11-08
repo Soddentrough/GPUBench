@@ -61,7 +61,13 @@ vec3 evalAtriumEnvironment(vec3 dir) {
     return baseWall + vec3(1.0, 0.95, 0.85) * cs;
 }
 
+layout(constant_id = 0) const uint RMISS_MODE = 7u;
+
 void main() {
+    if (RMISS_MODE == 7u || pc.mode == 7u) {
+        payload = vec3(-1.0);
+        return;
+    }
     vec3 sky;
     if (pc.sceneType == SCENE_OUTDOOR_TERRAIN || pc.sceneType == SCENE_AAA_FOREST) {
         sky = evalOutdoorSky(gl_WorldRayDirectionEXT);

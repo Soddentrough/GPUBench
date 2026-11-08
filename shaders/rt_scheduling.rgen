@@ -154,7 +154,7 @@ void main() {
     traceRayEXT(topLevelAS, gl_RayFlagsOpaqueEXT, 0xFF, 0, 0, 0, rayOrigin, tMinPrimary, rayDir, tMaxPrimary, 0);
 
     bool isHit = (payload.x > 0.0);
-    vec3 shadedCol = abs(payload);
+    vec3 shadedCol = isHit ? payload : vec3(0.0);
 
     if (pc.dumpRenders != 0) {
         if (pc.mode == 7u) {
@@ -167,7 +167,7 @@ void main() {
 
     uint waveRays = subgroupAdd(1u);
     uint waveHits = subgroupAdd(isHit ? 1u : 0u);
-    uint waveLum = subgroupAdd(uint(clamp(dot(shadedCol, vec3(0.2126, 0.7152, 0.0722)), 0.0, 1000.0) * 256.0) + 1u);
+    uint waveLum = subgroupAdd(isHit ? (uint(clamp(dot(shadedCol, vec3(0.2126, 0.7152, 0.0722)), 0.0, 1000.0) * 256.0) + 1u) : 0u);
     if (subgroupElect()) {
         if (waveRays > 0u) atomicAdd(results.totalRays, waveRays);
         if (waveHits > 0u) atomicAdd(results.totalHits, waveHits);

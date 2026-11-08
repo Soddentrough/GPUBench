@@ -10,10 +10,40 @@
 #include <cstring>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <stdexcept>
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#elif defined(__linux__)
+#include <unistd.h>
+#include <limits.h>
+#endif
 
 namespace {
+std::filesystem::path getExecutableDirForAssets() {
+#ifdef _WIN32
+  char path[MAX_PATH];
+  DWORD len = GetModuleFileNameA(NULL, path, MAX_PATH);
+  if (len > 0 && len < MAX_PATH) {
+    return std::filesystem::path(path).parent_path();
+  }
+#elif defined(__linux__)
+  char result[PATH_MAX];
+  ssize_t count = readlink("/proc/self/exe", result, PATH_MAX);
+  if (count > 0 && count < PATH_MAX) {
+    return std::filesystem::path(std::string(result, count)).parent_path();
+  }
+#endif
+  return std::filesystem::current_path();
+}
+
 std::string resolveRendersDir() {
   std::error_code ec;
   if (std::filesystem::exists("renders", ec) ||
@@ -21,7 +51,13 @@ std::string resolveRendersDir() {
       std::filesystem::exists("../CMakeLists.txt", ec)) {
     std::filesystem::create_directories("renders", ec);
     if (!ec) {
-      return "renders";
+      std::string probePath = "renders/.write_probe";
+      std::ofstream probe(probePath);
+      if (probe.is_open()) {
+        probe.close();
+        std::filesystem::remove(probePath, ec);
+        return "renders";
+      }
     }
   }
 #ifdef _WIN32
@@ -52,16 +88,24 @@ std::string resolveRendersDir() {
 } // namespace
 
 std::string RaySchedulingBench::findModelPath(const std::string &modelName) const {
-  std::vector<std::string> searchPaths = {
-    "assets/models/" + modelName,
-    "../assets/models/" + modelName,
-    "/usr/share/gpubench/models/" + modelName,
-    "/usr/local/share/gpubench/models/" + modelName,
-    "share/gpubench/models/" + modelName
+  std::filesystem::path exeDir = getExecutableDirForAssets();
+  std::vector<std::filesystem::path> searchPaths = {
+    std::filesystem::path("assets/models") / modelName,
+    std::filesystem::path("../assets/models") / modelName,
+    std::filesystem::path("../../assets/models") / modelName,
+    exeDir / "assets" / "models" / modelName,
+    exeDir / ".." / "assets" / "models" / modelName,
+    exeDir / ".." / ".." / "assets" / "models" / modelName,
+    exeDir / ".." / "share" / "gpubench" / "models" / modelName,
+    exeDir / "share" / "gpubench" / "models" / modelName,
+    std::filesystem::path("share/gpubench/models") / modelName,
+    std::filesystem::path("/usr/share/gpubench/models") / modelName,
+    std::filesystem::path("/usr/local/share/gpubench/models") / modelName
   };
+  std::error_code ec;
   for (const auto &p : searchPaths) {
-    if (std::filesystem::exists(p)) {
-      return p;
+    if (std::filesystem::exists(p, ec)) {
+      return p.string();
     }
   }
   return "";
@@ -301,7 +345,7 @@ void RaySchedulingBench::rebuildBounceBatches() {
   for (uint32_t b = 1; b <= bounceDepth; ++b) {
     uint32_t inQ = (b - 1) % 2;
     uint32_t outQ = (b == bounceDepth) ? 0xFFFFFFFFu : (b % 2);
-    uint32_t offset = inQ * sizeof(uint32_t) * 3;
+    uint32_t offset = (16u + inQ) * sizeof(uint32_t) * 3;
     ComputeKernel kernel = (b == bounceDepth) ? kernelBounceTerminal : nullptr;
 
     struct {
@@ -596,7 +640,7 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
   rayCount = renderWidth * renderHeight;
   octantCapacity = std::max(1024u, (rayCount * 35u) / 100u);
   materialCapacity = rayCount;
-  bounceCapacity = rayCount;
+  bounceCapacity = std::max(1024u, rayCount / 2u);
   queueCapacity = materialCapacity;
   resultBuffer = context->createBuffer(sizeof(uint32_t) * 4);
   uint32_t zeros[4] = {0, 0, 0, 0};
@@ -608,7 +652,6 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
 
   // WorkList storage buffer: 4096 uint header (16KB) with 256B strided counters + 16 * maxCapacity * 16B records
   constexpr size_t kWorkListHeaderUints = 4096;
-  constexpr size_t kWorkListCounterStride = 64;
   uint32_t maxCapacity = std::max(rayCount, materialCapacity);
   size_t workListSize = sizeof(uint32_t) * kWorkListHeaderUints + (size_t)16 * maxCapacity * sizeof(float) * 4;
   workListBuffer = context->createBuffer(workListSize);
@@ -682,36 +725,36 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
     // Mat 0: Leaves & Needles
     natureMats[0].baseColorFactor[0] = 0.12f; natureMats[0].baseColorFactor[1] = 0.42f; natureMats[0].baseColorFactor[2] = 0.15f; natureMats[0].baseColorFactor[3] = 1.0f;
     natureMats[0].roughnessFactor = 0.45f; natureMats[0].metallicFactor = 0.0f; natureMats[0].transmissionFactor = 0.45f;
-    natureMats[0].alphaMode = 1u; natureMats[0].alphaCutoff = 0.5f;
+    natureMats[0].alphaMode = 1u; natureMats[0].alphaCutoff = 0.5f; natureMats[0].archetype = 0u;
     natureMats[0].baseColorTexIdx = -1; natureMats[0].normalTexIdx = -1; natureMats[0].metallicRoughnessTexIdx = -1; natureMats[0].occlusionTexIdx = -1;
     // Mat 1: Bark & Roots
     natureMats[1].baseColorFactor[0] = 0.28f; natureMats[1].baseColorFactor[1] = 0.18f; natureMats[1].baseColorFactor[2] = 0.12f; natureMats[1].baseColorFactor[3] = 1.0f;
-    natureMats[1].roughnessFactor = 0.85f; natureMats[1].metallicFactor = 0.0f;
+    natureMats[1].roughnessFactor = 0.85f; natureMats[1].metallicFactor = 0.0f; natureMats[1].archetype = 1u;
     natureMats[1].baseColorTexIdx = -1; natureMats[1].normalTexIdx = -1; natureMats[1].metallicRoughnessTexIdx = -1; natureMats[1].occlusionTexIdx = -1;
     // Mat 2: Granite Cliffs & Boulders
     natureMats[2].baseColorFactor[0] = 0.38f; natureMats[2].baseColorFactor[1] = 0.39f; natureMats[2].baseColorFactor[2] = 0.42f; natureMats[2].baseColorFactor[3] = 1.0f;
-    natureMats[2].roughnessFactor = 0.90f; natureMats[2].metallicFactor = 0.0f;
+    natureMats[2].roughnessFactor = 0.90f; natureMats[2].metallicFactor = 0.0f; natureMats[2].archetype = 2u;
     natureMats[2].baseColorTexIdx = -1; natureMats[2].normalTexIdx = -1; natureMats[2].metallicRoughnessTexIdx = -1; natureMats[2].occlusionTexIdx = -1;
     // Mat 3: Topsoil & Mud
     natureMats[3].baseColorFactor[0] = 0.30f; natureMats[3].baseColorFactor[1] = 0.22f; natureMats[3].baseColorFactor[2] = 0.16f; natureMats[3].baseColorFactor[3] = 1.0f;
-    natureMats[3].roughnessFactor = 0.95f; natureMats[3].metallicFactor = 0.0f;
+    natureMats[3].roughnessFactor = 0.95f; natureMats[3].metallicFactor = 0.0f; natureMats[3].archetype = 3u;
     natureMats[3].baseColorTexIdx = -1; natureMats[3].normalTexIdx = -1; natureMats[3].metallicRoughnessTexIdx = -1; natureMats[3].occlusionTexIdx = -1;
     // Mat 4: Grass & Ferns
     natureMats[4].baseColorFactor[0] = 0.22f; natureMats[4].baseColorFactor[1] = 0.48f; natureMats[4].baseColorFactor[2] = 0.18f; natureMats[4].baseColorFactor[3] = 1.0f;
     natureMats[4].roughnessFactor = 0.60f; natureMats[4].metallicFactor = 0.0f;
-    natureMats[4].alphaMode = 1u; natureMats[4].alphaCutoff = 0.5f;
+    natureMats[4].alphaMode = 1u; natureMats[4].alphaCutoff = 0.5f; natureMats[4].archetype = 4u;
     natureMats[4].baseColorTexIdx = -1; natureMats[4].normalTexIdx = -1; natureMats[4].metallicRoughnessTexIdx = -1; natureMats[4].occlusionTexIdx = -1;
     // Mat 5: River Water Surface & Bathymetry
     natureMats[5].baseColorFactor[0] = 0.02f; natureMats[5].baseColorFactor[1] = 0.08f; natureMats[5].baseColorFactor[2] = 0.12f; natureMats[5].baseColorFactor[3] = 0.65f;
-    natureMats[5].roughnessFactor = 0.02f; natureMats[5].metallicFactor = 0.0f; natureMats[5].transmissionFactor = 0.92f; natureMats[5].ior = 1.333f;
+    natureMats[5].roughnessFactor = 0.02f; natureMats[5].metallicFactor = 0.0f; natureMats[5].transmissionFactor = 0.92f; natureMats[5].ior = 1.333f; natureMats[5].archetype = 5u;
     natureMats[5].baseColorTexIdx = -1; natureMats[5].normalTexIdx = -1; natureMats[5].metallicRoughnessTexIdx = -1; natureMats[5].occlusionTexIdx = -1;
     // Mat 6: Alpine Snow & Frost
     natureMats[6].baseColorFactor[0] = 0.92f; natureMats[6].baseColorFactor[1] = 0.95f; natureMats[6].baseColorFactor[2] = 0.98f; natureMats[6].baseColorFactor[3] = 1.0f;
-    natureMats[6].roughnessFactor = 0.30f; natureMats[6].metallicFactor = 0.0f;
+    natureMats[6].roughnessFactor = 0.30f; natureMats[6].metallicFactor = 0.0f; natureMats[6].archetype = 6u;
     natureMats[6].baseColorTexIdx = -1; natureMats[6].normalTexIdx = -1; natureMats[6].metallicRoughnessTexIdx = -1; natureMats[6].occlusionTexIdx = -1;
     // Mat 7: Weathered Timber & Stone
     natureMats[7].baseColorFactor[0] = 0.45f; natureMats[7].baseColorFactor[1] = 0.38f; natureMats[7].baseColorFactor[2] = 0.32f; natureMats[7].baseColorFactor[3] = 1.0f;
-    natureMats[7].roughnessFactor = 0.75f; natureMats[7].metallicFactor = 0.05f;
+    natureMats[7].roughnessFactor = 0.75f; natureMats[7].metallicFactor = 0.05f; natureMats[7].archetype = 7u;
     natureMats[7].baseColorTexIdx = -1; natureMats[7].normalTexIdx = -1; natureMats[7].metallicRoughnessTexIdx = -1; natureMats[7].occlusionTexIdx = -1;
 
     materialBuffer = context->createBuffer(natureMats.size() * sizeof(GltfMaterial), natureMats.data());
@@ -789,6 +832,21 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
   vContext->setKernelArg(kernelClassify, 8, texHeaderBuffer);
   vContext->setKernelArg(kernelClassify, 9, texPixelBuffer);
 
+  for (uint32_t m : {0u, 1u, 2u, 5u, 8u, 9u}) {
+    kernelClassifySpecialized[m] = vContext->createKernelWithSpec(
+        findShader("rt_scheduling_device_generated_commands_classify.comp", "rt_scheduling_worklist_classify.comp"), "main", 10, 0, m);
+    vContext->setKernelAS(kernelClassifySpecialized[m], 0, (AccelerationStructure)sceneTlas);
+    vContext->setKernelArg(kernelClassifySpecialized[m], 1, resultBuffer);
+    vContext->setKernelArg(kernelClassifySpecialized[m], 2, workListBuffer);
+    vContext->setKernelArg(kernelClassifySpecialized[m], 3, indirectBuffer);
+    vContext->setKernelArg(kernelClassifySpecialized[m], 4, fbWorkList);
+    vContext->setKernelArg(kernelClassifySpecialized[m], 5, vertexBuffer);
+    vContext->setKernelArg(kernelClassifySpecialized[m], 6, materialBuffer);
+    vContext->setKernelArg(kernelClassifySpecialized[m], 7, triangleMaterialBuffer);
+    vContext->setKernelArg(kernelClassifySpecialized[m], 8, texHeaderBuffer);
+    vContext->setKernelArg(kernelClassifySpecialized[m], 9, texPixelBuffer);
+  }
+
   kernelMaterial = vContext->createKernel(
       findShader("rt_scheduling_device_generated_commands_material.comp", "rt_scheduling_worklist_material.comp"), "main", 9);
   vContext->setKernelAS(kernelMaterial, 0, (AccelerationStructure)sceneTlas);
@@ -800,6 +858,30 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
   vContext->setKernelArg(kernelMaterial, 6, triangleMaterialBuffer);
   vContext->setKernelArg(kernelMaterial, 7, texHeaderBuffer);
   vContext->setKernelArg(kernelMaterial, 8, texPixelBuffer);
+
+  kernelMaterialPrimary = vContext->createKernelWithSpec(
+      findShader("rt_scheduling_device_generated_commands_material.comp", "rt_scheduling_worklist_material.comp"), "main", 9, 0, 8u);
+  vContext->setKernelAS(kernelMaterialPrimary, 0, (AccelerationStructure)sceneTlas);
+  vContext->setKernelArg(kernelMaterialPrimary, 1, resultBuffer);
+  vContext->setKernelArg(kernelMaterialPrimary, 2, workListBuffer);
+  vContext->setKernelArg(kernelMaterialPrimary, 3, fbWorkList);
+  vContext->setKernelArg(kernelMaterialPrimary, 4, vertexBuffer);
+  vContext->setKernelArg(kernelMaterialPrimary, 5, materialBuffer);
+  vContext->setKernelArg(kernelMaterialPrimary, 6, triangleMaterialBuffer);
+  vContext->setKernelArg(kernelMaterialPrimary, 7, texHeaderBuffer);
+  vContext->setKernelArg(kernelMaterialPrimary, 8, texPixelBuffer);
+
+  kernelMaterialGltf = vContext->createKernelWithSpec(
+      findShader("rt_scheduling_device_generated_commands_material.comp", "rt_scheduling_worklist_material.comp"), "main", 9, 0, 9u);
+  vContext->setKernelAS(kernelMaterialGltf, 0, (AccelerationStructure)sceneTlas);
+  vContext->setKernelArg(kernelMaterialGltf, 1, resultBuffer);
+  vContext->setKernelArg(kernelMaterialGltf, 2, workListBuffer);
+  vContext->setKernelArg(kernelMaterialGltf, 3, fbWorkList);
+  vContext->setKernelArg(kernelMaterialGltf, 4, vertexBuffer);
+  vContext->setKernelArg(kernelMaterialGltf, 5, materialBuffer);
+  vContext->setKernelArg(kernelMaterialGltf, 6, triangleMaterialBuffer);
+  vContext->setKernelArg(kernelMaterialGltf, 7, texHeaderBuffer);
+  vContext->setKernelArg(kernelMaterialGltf, 8, texPixelBuffer);
 
   for (uint32_t arch = 0; arch < 8; ++arch) {
     kernelMaterialSpecialized[arch] = vContext->createKernelWithSpec(
@@ -911,7 +993,7 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
         (kdir / "vulkan" / "rt_scheduling.rgen").string(),
         (kdir / "vulkan" / "rt_scheduling.rmiss").string(),
         {(kdir / "vulkan" / "rt_scheduling.rchit").string()},
-        {}, {}, 8);
+        {}, {}, 8, 7u, true);
     vContext->setKernelAS(kernelRTP, 0, (AccelerationStructure)sceneTlas);
     vContext->setKernelArg(kernelRTP, 1, resultBuffer);
     vContext->setKernelArg(kernelRTP, 2, fbTraditional);
@@ -938,7 +1020,7 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
           (kdir / "vulkan" / "rt_scheduling_ser.rgen").string(),
           (kdir / "vulkan" / "rt_scheduling.rmiss").string(),
           {(kdir / "vulkan" / "rt_scheduling.rchit").string()},
-          {}, {}, 8);
+          {}, {}, 8, 0u, true);
       vContext->setKernelAS(kernelRTPSER, 0, (AccelerationStructure)sceneTlas);
       vContext->setKernelArg(kernelRTPSER, 1, resultBuffer);
       vContext->setKernelArg(kernelRTPSER, 2, fbTraditional);
@@ -969,7 +1051,7 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
     std::string serReason = !hasSERExt
         ? "extension VK_EXT_ray_tracing_invocation_reorder missing"
         : (!serSupported
-            ? "rayTracingInvocationReorder hardware bit not set"
+            ? "Hardware Shader Execution Reordering (SER) not supported by GPU architecture"
             : "RTP SER pipeline compilation or creation failed");
     unsupportedConfig[1] = true;
     unsupportedReason[1] = serReason;
@@ -1006,9 +1088,11 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
     std::memcpy(pcData.data(), &pcMat, sizeof(pcMat));
     materialBatches.push_back({m * sizeof(uint32_t) * 3, pcData, kernelMaterialSpecialized[m]});
 
-    pcMat.mode = 2u;
-    std::memcpy(pcData.data(), &pcMat, sizeof(pcMat));
-    primaryMaterialBatches.push_back({m * sizeof(uint32_t) * 3, pcData, kernelMaterialSpecialized[m]});
+    if (m == 0) {
+      pcMat.mode = 2u;
+      std::memcpy(pcData.data(), &pcMat, sizeof(pcMat));
+      primaryMaterialBatches.push_back({0 * sizeof(uint32_t) * 3, pcData, kernelMaterialPrimary ? kernelMaterialPrimary : kernelMaterialSpecialized[0]});
+    }
 
     pcMat.queueCapacity = perQueue;
     pcMat.dumpRenders = 0u;
@@ -1026,19 +1110,6 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
     initMatCmds[m * 3 + 2] = 1;
   }
   context->writeBuffer(indirectMaterialBuffer, 0, initMatCmds.size() * sizeof(uint32_t), initMatCmds.data());
-
-  // Pre-initialize indirectBuffer commands and workList counters for isolated stage testing
-  std::vector<uint32_t> initCmds(32 * 3, 0);
-  std::vector<uint32_t> initCounters(kWorkListHeaderUints, 0);
-  for (uint32_t m = 0; m < 8; ++m) {
-    initCmds[m * 3 + 0] = (perQueue + 31) / 32;
-    initCmds[m * 3 + 1] = 1;
-    initCmds[m * 3 + 2] = 1;
-    initCounters[m * kWorkListCounterStride] = perQueue;
-    initCounters[(16 + m) * kWorkListCounterStride] = perQueue;
-  }
-  context->writeBuffer(indirectBuffer, 0, initCmds.size() * sizeof(uint32_t), initCmds.data());
-  context->writeBuffer(workListBuffer, 0, initCounters.size() * sizeof(uint32_t), initCounters.data());
 
   rebuildBounceBatches();
 
@@ -1346,9 +1417,6 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
       unsupportedConfig[c] = true;
       unsupportedReason[c] = "VK_EXT_device_generated_commands extension unsupported by device/driver";
     }
-  } else if (!isDGCExecutionSetAvailable) {
-    unsupportedConfig[2] = true;
-    unsupportedReason[2] = "VK_EXT_device_generated_commands IndirectExecutionSet pipeline binding unsupported for compute on this driver";
   }
 #endif
 }
@@ -1362,6 +1430,10 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
   if (config_idx != lastRunConfig && resultBuffer) {
     uint32_t zeros[4] = {0, 0, 0, 0};
     context->writeBuffer(resultBuffer, 0, sizeof(zeros), zeros);
+    if (workListBuffer) {
+      uint32_t zeroCounters[64] = {0};
+      context->writeBuffer(workListBuffer, 0, sizeof(zeroCounters), zeroCounters);
+    }
     lastRunConfig = config_idx;
   }
 
@@ -1425,26 +1497,35 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
   }
   case 3: { // Path Tracing - Traditional Megakernel
     uint32_t passes = (samplesPerPixel > 1) ? samplesPerPixel : 1u;
+    bool ownBatch = (passes > 1u) && !vContext->isBatching();
+    if (ownBatch) vContext->beginBatch(passes);
     for (uint32_t s = 0; s < passes; ++s) {
       PushConstantsTraditional pc{rayCount, 1, 1 + bounceDepth, seed + s * 7919u, dumpFlag, renderWidth, renderHeight, 0, sceneTypeVal, isGltfVal, passes, s};
       vContext->setKernelArg(kernelTraditional, 8, sizeof(pc), &pc);
       vContext->dispatch(kernelTraditional, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     }
+    if (ownBatch) vContext->endBatch();
     break;
   }
   case 4: { // Path Tracing - RTP + Hardware SER
     if (kernelRTPSER) {
       uint32_t passes = (samplesPerPixel > 1) ? samplesPerPixel : 1u;
+      bool ownBatch = (passes > 1u) && !vContext->isBatching();
+      if (ownBatch) vContext->beginBatch(passes);
       for (uint32_t s = 0; s < passes; ++s) {
         PushConstantsTraditional pc{rayCount, 1, 1 + bounceDepth, seed + s * 7919u, dumpFlag, renderWidth, renderHeight, 0, sceneTypeVal, isGltfVal, passes, s};
         vContext->setKernelArg(kernelRTPSER, 8, sizeof(pc), &pc);
         vContext->dispatch(kernelRTPSER, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
       }
+      if (ownBatch) vContext->endBatch();
     }
     break;
   }
   case 5: { // Multi-Bounce Path Tracing - Device-Generated Commands (DGC) (Wavefront Compaction)
+    ComputeKernel kClass = kernelClassifySpecialized[1] ? kernelClassifySpecialized[1] : kernelClassify;
     uint32_t passes = (samplesPerPixel > 1) ? samplesPerPixel : 1u;
+    bool ownBatch = (passes > 1u) && !vContext->isBatching();
+    if (ownBatch) vContext->beginBatch(passes);
     for (uint32_t s = 0; s < passes; ++s) {
       uint32_t sampleSeed = seed + s * 7919u;
       for (size_t b = 0; b < bounceBatches.size(); ++b) {
@@ -1455,15 +1536,16 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
         }
       }
       PushConstantsClassify pcClassify{rayCount, 1, s, sampleSeed, dumpFlag, renderWidth, renderHeight, bounceCapacity, 2, sceneTypeVal, isGltfVal, passes};
-      vContext->setKernelArg(kernelClassify, 10, sizeof(pcClassify), &pcClassify);
+      vContext->setKernelArg(kClass, 10, sizeof(pcClassify), &pcClassify);
 
       vContext->dispatchWorkListSequence(
-          kernelReset,
-          kernelClassify, (rayCount + 31) / 32, 1, 1,
+          nullptr,
+          kClass, (rayCount + 31) / 32, 1, 1,
           kernelResolve,
           kernelBounce, indirectBuffer, bounceBatches, true /* isPingPong */,
           isDGCAvailable ? &dgcInfoStandard : nullptr, isDGCAvailable ? 3u : 0u);
     }
+    if (ownBatch) vContext->endBatch();
     break;
   }
   case 6: { // Incoherent Ray Tracing - Traditional Megakernel
@@ -1481,12 +1563,13 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     break;
   }
   case 8: { // Incoherent Ray Tracing - Wavefront Compaction (Directional Binning)
-    PushConstantsClassify pcClassify{rayCount, 2, 0, seed, 0, renderWidth, renderHeight, octantCapacity, 1, sceneTypeVal, isGltfVal, 1u};
-    vContext->setKernelArg(kernelClassify, 10, sizeof(pcClassify), &pcClassify);
+    ComputeKernel kClass = kernelClassifySpecialized[2] ? kernelClassifySpecialized[2] : kernelClassify;
+    PushConstantsClassify pcClassify{rayCount, 2, 0, seed, 0, renderWidth, renderHeight, octantCapacity, 2, sceneTypeVal, isGltfVal, 1u};
+    vContext->setKernelArg(kClass, 10, sizeof(pcClassify), &pcClassify);
 
     vContext->dispatchWorkListSequence(
         nullptr,
-        kernelClassify, (rayCount + 31) / 32, 1, 1,
+        kClass, (rayCount + 31) / 32, 1, 1,
         kernelResolve,
         kernelBounceOctant, indirectBuffer, octantBatches,
         false /* isPingPong */,
@@ -1494,7 +1577,7 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     break;
   }
   case 9: { // Primary Ray Tracing - Traditional Megakernel
-    PushConstantsTraditional pc{rayCount, 0, 1, seed, dumpFlag, renderWidth, renderHeight, 2, sceneTypeVal, isGltfVal, 1u};
+    PushConstantsTraditional pc{rayCount, 0, 1, seed, dumpFlag, renderWidth, renderHeight, 0, sceneTypeVal, isGltfVal, 1u};
     vContext->setKernelArg(kernelTraditional, 8, sizeof(pc), &pc);
     vContext->dispatch(kernelTraditional, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     break;
@@ -1521,14 +1604,16 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
       } pcMat{m, materialCapacity, dumpFlag, renderWidth, renderHeight, sceneTypeVal, isGltfVal, 0u};
       std::memcpy(materialBatches[m].pushConstants.data(), &pcMat, sizeof(pcMat));
     }
+    ComputeKernel kClass = kernelClassifySpecialized[0] ? kernelClassifySpecialized[0] : kernelClassify;
+    ComputeKernel kMat = (isGltf && kernelMaterialGltf) ? kernelMaterialGltf : kernelMaterial;
     PushConstantsClassify pcClassify{rayCount, 0, 0, seed, dumpFlag, renderWidth, renderHeight, materialCapacity, 2, sceneTypeVal, isGltfVal, 1u};
-    vContext->setKernelArg(kernelClassify, 10, sizeof(pcClassify), &pcClassify);
+    vContext->setKernelArg(kClass, 10, sizeof(pcClassify), &pcClassify);
 
     vContext->dispatchWorkListSequence(
-        kernelReset,
-        kernelClassify, (rayCount + 31) / 32, 1, 1,
+        nullptr,
+        kClass, (rayCount + 31) / 32, 1, 1,
         kernelResolve,
-        kernelMaterial, indirectBuffer, materialBatches,
+        kMat, indirectBuffer, materialBatches,
         false /* isPingPong */,
         isDGCAvailable ? &dgcInfoStandard : nullptr, isDGCAvailable ? 1u : 0u);
     break;
@@ -1564,8 +1649,8 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     vContext->dispatch(kernelTraditional, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     break;
   }
-  case 17: { // Stage Breakdown - Primary Ray Tracing (2D Morton 8x4, Traditional Megakernel)
-    PushConstantsTraditional pc{rayCount, 7, 1, seed, dumpFlag, renderWidth, renderHeight, 2, sceneTypeVal, isGltfVal, 1u};
+  case 17: { // Stage Breakdown - Primary Ray Tracing (Linear 32x1, Traditional Megakernel)
+    PushConstantsTraditional pc{rayCount, 7, 1, seed, dumpFlag, renderWidth, renderHeight, 0, sceneTypeVal, isGltfVal, 1u};
     vContext->setKernelArg(kernelTraditional, 8, sizeof(pc), &pc);
     vContext->dispatch(kernelTraditional, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     break;
@@ -1584,14 +1669,16 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
       } pcMat{m, materialCapacity, dumpFlag, renderWidth, renderHeight, sceneTypeVal, isGltfVal, 2u};
       std::memcpy(primaryMaterialBatches[m].pushConstants.data(), &pcMat, sizeof(pcMat));
     }
+    ComputeKernel kClass = kernelClassifySpecialized[9] ? kernelClassifySpecialized[9] : kernelClassify;
+    ComputeKernel kMat = kernelMaterialPrimary ? kernelMaterialPrimary : kernelMaterial;
     PushConstantsClassify pcClassify{rayCount, 9, 0, seed, dumpFlag, renderWidth, renderHeight, materialCapacity, 2, sceneTypeVal, isGltfVal, 1u};
-    vContext->setKernelArg(kernelClassify, 10, sizeof(pcClassify), &pcClassify);
+    vContext->setKernelArg(kClass, 10, sizeof(pcClassify), &pcClassify);
 
     vContext->dispatchWorkListSequence(
-        kernelReset,
-        kernelClassify, (rayCount + 31) / 32, 1, 1,
+        nullptr,
+        kClass, (rayCount + 31) / 32, 1, 1,
         kernelResolve,
-        kernelMaterial, indirectBuffer, primaryMaterialBatches,
+        kMat, indirectBuffer, primaryMaterialBatches,
         false /* isPingPong */,
         isDGCAvailable ? &dgcInfoStandard : nullptr, isDGCAvailable ? 7u : 0u);
     break;
@@ -1624,12 +1711,13 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
       } pcShadow{b, materialCapacity, dumpFlag, renderWidth, renderHeight, sceneTypeVal, isGltfVal, b};
       std::memcpy(shadowBatches[b].pushConstants.data(), &pcShadow, sizeof(pcShadow));
     }
-    PushConstantsClassify pcClassify{rayCount, 5, 0, seed, dumpFlag, renderWidth, renderHeight, materialCapacity, 0, sceneTypeVal, isGltfVal, 1u};
-    vContext->setKernelArg(kernelClassify, 10, sizeof(pcClassify), &pcClassify);
+    ComputeKernel kClass = kernelClassifySpecialized[5] ? kernelClassifySpecialized[5] : kernelClassify;
+    PushConstantsClassify pcClassify{rayCount, 5, 0, seed, dumpFlag, renderWidth, renderHeight, materialCapacity, 2, sceneTypeVal, isGltfVal, 1u};
+    vContext->setKernelArg(kClass, 10, sizeof(pcClassify), &pcClassify);
 
     vContext->dispatchWorkListSequence(
-        kernelReset,
-        kernelClassify, (rayCount + 31) / 32, 1, 1,
+        nullptr,
+        kClass, (rayCount + 31) / 32, 1, 1,
         kernelResolve,
         kernelShadow, indirectBuffer, shadowBatches,
         false /* isPingPong */,
@@ -1650,12 +1738,13 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
       } pcShadow{b, materialCapacity, dumpFlag, renderWidth, renderHeight, sceneTypeVal, isGltfVal, b};
       std::memcpy(shadowBinBatches[b].pushConstants.data(), &pcShadow, sizeof(pcShadow));
     }
-    PushConstantsClassify pcClassify{rayCount, 5, 0, seed, dumpFlag, renderWidth, renderHeight, materialCapacity, 3, sceneTypeVal, isGltfVal, 1u};
-    vContext->setKernelArg(kernelClassify, 10, sizeof(pcClassify), &pcClassify);
+    ComputeKernel kClass = kernelClassifySpecialized[5] ? kernelClassifySpecialized[5] : kernelClassify;
+    PushConstantsClassify pcClassify{rayCount, 5, 0, seed, dumpFlag, renderWidth, renderHeight, materialCapacity, 2, sceneTypeVal, isGltfVal, 3u};
+    vContext->setKernelArg(kClass, 10, sizeof(pcClassify), &pcClassify);
 
     vContext->dispatchWorkListSequence(
-        kernelReset,
-        kernelClassify, (rayCount + 31) / 32, 1, 1,
+        nullptr,
+        kClass, (rayCount + 31) / 32, 1, 1,
         kernelResolve,
         kernelShadow, indirectBuffer, shadowBinBatches,
         false /* isPingPong */,
@@ -1664,16 +1753,22 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
   }
   case 23: { // Full Scene Path Tracing (16 SPP) - Traditional Megakernel
     uint32_t passes = 16u;
+    bool ownBatch = !vContext->isBatching();
+    if (ownBatch) vContext->beginBatch(passes);
     for (uint32_t s = 0; s < passes; ++s) {
       PushConstantsTraditional pc{rayCount, 1, 1 + bounceDepth, seed + s * 7919u, dumpFlag, renderWidth, renderHeight, 0, sceneTypeVal, isGltfVal, passes, s};
       vContext->setKernelArg(kernelTraditional, 8, sizeof(pc), &pc);
       vContext->dispatch(kernelTraditional, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     }
+    if (ownBatch) vContext->endBatch();
     lastCompletedPasses[23] = passes;
     break;
   }
   case 24: { // Full Scene Path Tracing (16 SPP) - Device-Generated Commands (DGC)
+    ComputeKernel kClass = kernelClassifySpecialized[1] ? kernelClassifySpecialized[1] : kernelClassify;
     uint32_t passes = 16u;
+    bool ownBatch = !vContext->isBatching();
+    if (ownBatch) vContext->beginBatch(passes);
     for (uint32_t s = 0; s < passes; ++s) {
       uint32_t sampleSeed = seed + s * 7919u;
       for (size_t b = 0; b < bounceBatches.size(); ++b) {
@@ -1684,15 +1779,16 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
         }
       }
       PushConstantsClassify pcClassify{rayCount, 1, s, sampleSeed, dumpFlag, renderWidth, renderHeight, bounceCapacity, 2, sceneTypeVal, isGltfVal, passes};
-      vContext->setKernelArg(kernelClassify, 10, sizeof(pcClassify), &pcClassify);
+      vContext->setKernelArg(kClass, 10, sizeof(pcClassify), &pcClassify);
 
       vContext->dispatchWorkListSequence(
-          kernelReset,
-          kernelClassify, (rayCount + 31) / 32, 1, 1,
+          nullptr,
+          kClass, (rayCount + 31) / 32, 1, 1,
           kernelResolve,
           kernelBounce, indirectBuffer, bounceBatches, true /* isPingPong */,
           isDGCAvailable ? &dgcInfoStandard : nullptr, isDGCAvailable ? 3u : 0u);
     }
+    if (ownBatch) vContext->endBatch();
     lastCompletedPasses[24] = passes;
     break;
   }
@@ -1712,6 +1808,8 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
       uint32_t sampleIdx{0};
     };
     uint32_t passes = (samplesPerPixel > 1) ? samplesPerPixel : 1u;
+    bool ownBatch = !vContext->isBatching();
+    if (ownBatch) vContext->beginBatch(passes * 2u);
     for (uint32_t s = 0; s < passes; ++s) {
       // Reset workQueue.currentWorkTileIndex (counter 0 in workListBuffer) on GPU without synchronous host staging stall
       vContext->dispatch(kernelReset, 1, 1, 1, 32, 1, 1);
@@ -1720,6 +1818,7 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
       // Persistent workgroups: 384 groups * 32 threads = 12,288 threads saturating 64 CUs / 128 SIMDs on RDNA 4
       vContext->dispatch(kernelPersistent, 384, 1, 1, 32, 1, 1);
     }
+    if (ownBatch) vContext->endBatch();
     break;
   }
   case 26: { // Queue Compaction - Single-Pass Unified Stream (128B Expanded Hit Record)
@@ -1779,12 +1878,13 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
       } pcLight{b, materialCapacity, dumpFlag, renderWidth, renderHeight, sceneTypeVal, isGltfVal, 1u};
       std::memcpy(multiLightBatchesSingle[b].pushConstants.data(), &pcLight, sizeof(pcLight));
     }
-    PushConstantsClassify pcClassify{rayCount, 8, 0, seed, dumpFlag, renderWidth, renderHeight, materialCapacity, 0, sceneTypeVal, isGltfVal, 1u};
-    vContext->setKernelArg(kernelClassify, 10, sizeof(pcClassify), &pcClassify);
+    ComputeKernel kClass = kernelClassifySpecialized[8] ? kernelClassifySpecialized[8] : kernelClassify;
+    PushConstantsClassify pcClassify{rayCount, 8, 0, seed, dumpFlag, renderWidth, renderHeight, materialCapacity, 2, sceneTypeVal, isGltfVal, 1u};
+    vContext->setKernelArg(kClass, 10, sizeof(pcClassify), &pcClassify);
 
     vContext->dispatchWorkListSequence(
-        kernelReset,
-        kernelClassify, (rayCount + 31) / 32, 1, 1,
+        nullptr,
+        kClass, (rayCount + 31) / 32, 1, 1,
         kernelResolve,
         kernelMultiLight, indirectBuffer, multiLightBatchesSingle,
         false /* isPingPong */,
@@ -1811,12 +1911,13 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
       } pcLight{b, materialCapacity, dumpFlag, renderWidth, renderHeight, sceneTypeVal, isGltfVal, 128u};
       std::memcpy(multiLightBatches128[b].pushConstants.data(), &pcLight, sizeof(pcLight));
     }
-    PushConstantsClassify pcClassify{rayCount, 8, 0, seed, dumpFlag, renderWidth, renderHeight, materialCapacity, 0, sceneTypeVal, isGltfVal, 128u};
-    vContext->setKernelArg(kernelClassify, 10, sizeof(pcClassify), &pcClassify);
+    ComputeKernel kClass = kernelClassifySpecialized[8] ? kernelClassifySpecialized[8] : kernelClassify;
+    PushConstantsClassify pcClassify{rayCount, 8, 0, seed, dumpFlag, renderWidth, renderHeight, materialCapacity, 2, sceneTypeVal, isGltfVal, 128u};
+    vContext->setKernelArg(kClass, 10, sizeof(pcClassify), &pcClassify);
 
     vContext->dispatchWorkListSequence(
-        kernelReset,
-        kernelClassify, (rayCount + 31) / 32, 1, 1,
+        nullptr,
+        kClass, (rayCount + 31) / 32, 1, 1,
         kernelResolve,
         kernelMultiLight, indirectBuffer, multiLightBatches128,
         false /* isPingPong */,
@@ -1947,6 +2048,8 @@ void RaySchedulingBench::performVisualVerification(bool isInteractive) {
     captureFramebuffer = true;
     updateDgcDumpFlag(1u);
   }
+  captureFramebuffer = true;
+  updateDgcDumpFlag(1u);
   double fpsWork = (timeSecWork > 0.0) ? (1.0 / timeSecWork) : 2000.0;
   double mraysWork = (timeSecWork > 0.0) ? ((static_cast<double>(rayCount) / timeSecWork) / 1e6) : 4000.0;
   double frameMsWork = timeSecWork * 1000.0;
@@ -2190,6 +2293,7 @@ void RaySchedulingBench::performVisualVerification(bool isInteractive) {
   // Step-by-step pipeline decomposition breakdown
   dumpPipelineBreakdown(tag, isInteractive);
   captureFramebuffer = false;
+  dumpRenders = false;
   updateDgcDumpFlag(0u);
 
   if (isInteractive && context && !context->isQuiet()) {
@@ -2467,7 +2571,7 @@ void RaySchedulingBench::RunVisualVerification(bool isInteractive) {
     return;
   }
 
-  if (dumpRenders || verifyParity) {
+  if (wantDumpRenders || dumpRenders || verifyParity) {
     try {
       performVisualVerification(isInteractive);
     } catch (const std::exception &e) {
@@ -2519,9 +2623,23 @@ void RaySchedulingBench::Teardown() {
     context->releaseKernel(kernelClassify);
     kernelClassify = nullptr;
   }
+  for (uint32_t m = 0; m < 10; ++m) {
+    if (kernelClassifySpecialized[m]) {
+      context->releaseKernel(kernelClassifySpecialized[m]);
+      kernelClassifySpecialized[m] = nullptr;
+    }
+  }
   if (kernelMaterial) {
     context->releaseKernel(kernelMaterial);
     kernelMaterial = nullptr;
+  }
+  if (kernelMaterialPrimary) {
+    context->releaseKernel(kernelMaterialPrimary);
+    kernelMaterialPrimary = nullptr;
+  }
+  if (kernelMaterialGltf) {
+    context->releaseKernel(kernelMaterialGltf);
+    kernelMaterialGltf = nullptr;
   }
   for (uint32_t arch = 0; arch < 8; ++arch) {
     if (kernelMaterialSpecialized[arch]) {

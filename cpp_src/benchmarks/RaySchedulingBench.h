@@ -137,7 +137,6 @@ public:
       if (context && context->getBackend() == ComputeBackend::Vulkan) {
         const VulkanContext *vc = static_cast<const VulkanContext *>(context);
         if (!vc->isDGCSupported()) return false;
-        if (config_idx == 2 && !vc->isDGCExecutionSetSupported()) return false;
       }
 #endif
     }
@@ -223,8 +222,8 @@ public:
   const char *GetComponent(uint32_t config_idx = 0) const override { return "Ray Tracing"; }
   const char *GetSubCategory(uint32_t config_idx = 0) const override;
 
-  void SetDumpRenders(bool dump) { dumpRenders = dump; }
-  bool GetDumpRenders() const { return dumpRenders; }
+  void SetDumpRenders(bool dump) { wantDumpRenders = dump; }
+  bool GetDumpRenders() const { return wantDumpRenders; }
 
   void SetResolution(uint32_t w, uint32_t h) override {
     renderWidth = w;
@@ -252,7 +251,7 @@ public:
     }
   }
 
-  bool HasVisualVerification() const override { return dumpRenders || verifyParity; }
+  bool HasVisualVerification() const override { return wantDumpRenders || verifyParity; }
   void RunVisualVerification(bool isInteractive = false) override;
 
 private:
@@ -261,6 +260,7 @@ private:
   IComputeContext *context = nullptr;
   bool dumpRenders = false;
   bool captureFramebuffer = false;
+  bool wantDumpRenders = false;
   bool verifyParity = false;
   bool parityFailure = false;
   ComputeBuffer fbTraditional = nullptr;
@@ -274,7 +274,10 @@ private:
   ComputeKernel kernelRTP = nullptr;
   ComputeKernel kernelRTPSER = nullptr;
   ComputeKernel kernelClassify = nullptr;
+  ComputeKernel kernelClassifySpecialized[10] = {nullptr};
   ComputeKernel kernelMaterial = nullptr;
+  ComputeKernel kernelMaterialPrimary = nullptr;
+  ComputeKernel kernelMaterialGltf = nullptr;
   ComputeKernel kernelMaterialSpecialized[8] = {nullptr};
   ComputeKernel kernelBounce = nullptr;
   ComputeKernel kernelBounceTerminal = nullptr;

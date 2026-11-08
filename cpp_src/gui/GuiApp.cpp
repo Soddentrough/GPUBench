@@ -4,6 +4,7 @@
 #include <implot.h>
 
 #include <iostream>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <iomanip>
@@ -1263,6 +1264,16 @@ void GuiApp::renderBenchmarkTooltip(const BenchmarkItem& item, const std::string
     popBoldFont();
     ImGui::TextDisabled("Subcategory: %s | Metric: %s", item.subcategory.c_str(), item.metricType.c_str());
     ImGui::Separator();
+
+    if (!item.isSupported) {
+        std::string catStr = !item.limitationCategory.empty() ? item.limitationCategory : "Limitation";
+        std::string reason = !item.supportReason.empty() ? item.supportReason : "Hardware or API limitation";
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + contentWidth);
+        ImGui::TextColored(ImVec4(0.95f, 0.60f, 0.20f, 1.0f), "Status: UNSUPPORTED (%s)", catStr.c_str());
+        ImGui::TextColored(ImVec4(0.90f, 0.75f, 0.50f, 1.0f), "Reason: %s", reason.c_str());
+        ImGui::PopTextWrapPos();
+        ImGui::Separator();
+    }
 
     // 2. Textual explanation
     ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + contentWidth);
@@ -4579,19 +4590,7 @@ void GuiApp::renderBenchmarkSuitePanel() {
                         m_switchToRtViewport = true;
                     }
 
-                    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-                        if (isUnsupported) {
-                            std::string reason = !item.supportReason.empty() ? item.supportReason :
-                                (dispInfo.hasResult && !dispInfo.primaryResult.supportNote.empty() ? dispInfo.primaryResult.supportNote : "Hardware or API limitation");
-                            std::string catStr = !item.limitationCategory.empty() ? item.limitationCategory : "Limitation";
-                            ImGui::SetTooltip("Workload: %s (%s - %s)\nStatus: UNSUPPORTED (%s)\nReason: %s",
-                                              item.name.c_str(), item.subcategory.c_str(), item.id.c_str(),
-                                              catStr.c_str(), reason.c_str());
-                        } else if (!item.description.empty()) {
-                            std::string scn = !cardScene.empty() ? cardScene : ((item.id == "RayScheduling" || item.id == "RayPathTracing") ? m_suiteActiveScene : "");
-                            renderBenchmarkTooltip(item, scn);
-                        }
-                    }
+                    bool rowHovered = ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled);
 
                     // Col 1: Score / Status / Metric Badge (ALWAYS VISIBLE!)
                     ImGui::TableNextColumn();
@@ -4641,6 +4640,9 @@ void GuiApp::renderBenchmarkSuitePanel() {
                             ImGui::SetCursorPosX(ImGui::GetCursorPosX() + availC - bW - s(4.0f));
                         }
                         ImGui::TextColored(ImVec4(0.35f, 0.65f, 0.95f, 0.85f), "%s", badge.c_str());
+                    }
+                    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                        rowHovered = true;
                     }
                     popMonoFont();
 
@@ -4700,7 +4702,24 @@ void GuiApp::renderBenchmarkSuitePanel() {
                             }
                         }
                         }
+                        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                            rowHovered = true;
+                        }
                         popMonoFont();
+                    }
+
+                    if (rowHovered) {
+                        if (!item.description.empty() || item.viz.hasVisualization()) {
+                            std::string scn = !cardScene.empty() ? cardScene : ((item.id == "RayScheduling" || item.id == "RayPathTracing") ? m_suiteActiveScene : "");
+                            renderBenchmarkTooltip(item, scn);
+                        } else if (isUnsupported) {
+                            std::string reason = !item.supportReason.empty() ? item.supportReason :
+                                (dispInfo.hasResult && !dispInfo.primaryResult.supportNote.empty() ? dispInfo.primaryResult.supportNote : "Hardware or API limitation");
+                            std::string catStr = !item.limitationCategory.empty() ? item.limitationCategory : "Limitation";
+                            ImGui::SetTooltip("Workload: %s (%s - %s)\nStatus: UNSUPPORTED (%s)\nReason: %s",
+                                              item.name.c_str(), item.subcategory.c_str(), item.id.c_str(),
+                                              catStr.c_str(), reason.c_str());
+                        }
                     }
 
                     ImGui::PopID();
@@ -6201,6 +6220,13 @@ void GuiApp::renderRayTracingViewport() {
             "/usr/share/gpubench/" + relPath,
             "/usr/local/share/gpubench/" + relPath
         };
+        if (const char* basePath = SDL_GetBasePath()) {
+            std::filesystem::path exeDir(basePath);
+            systemCandidates.push_back((exeDir / relPath).string());
+            systemCandidates.push_back((exeDir / ".." / relPath).string());
+            systemCandidates.push_back((exeDir / ".." / "share" / "gpubench" / relPath).string());
+            systemCandidates.push_back((exeDir / "share" / "gpubench" / relPath).string());
+        }
         for (const auto& c : systemCandidates) {
             if (std::filesystem::exists(c, ec) && !ec) {
                 return c;
@@ -6688,6 +6714,15 @@ void GuiApp::renderRayTracingViewport() {
         auto texPt16 = (m_rtParityViewMode == 3) ? getOrLoadTexture(pt16Path) : VulkanContext::TextureResource{};
         auto texMl128 = (m_rtParityViewMode == 4) ? getOrLoadTexture(ml128Path) : VulkanContext::TextureResource{};
 
+        // Fall back to pre-bundled thumbnail preview if full 4K render has not been generated yet
+        if (!texTrad.isValid() && !texDgc.isValid()) {
+            auto thumbPreview = getOrLoadTexture("assets/thumbnails/thumb_" + tag + "_stage7_final.png");
+            if (thumbPreview.isValid()) {
+                texTrad = thumbPreview;
+                texDgc = thumbPreview;
+            }
+        }
+
         // Viewport Canvas Calculation
         ImVec2 avail = ImGui::GetContentRegionAvail();
         float canvasHeight = std::max(s(320.0f), avail.y - s(115.0f));
@@ -7059,6 +7094,9 @@ void GuiApp::renderRayTracingViewport() {
         std::string tag = curSceneMeta.tag;
         std::string passFile = "renders/render_" + tag + "_" + curPass.id + ".png";
         auto texPass = getOrLoadTexture(passFile);
+        if (!texPass.isValid()) {
+            texPass = getOrLoadTexture("assets/thumbnails/thumb_" + tag + "_" + curPass.id + ".png");
+        }
 
         ImVec2 avail = ImGui::GetContentRegionAvail();
         float canvasHeight = std::max(s(320.0f), avail.y - s(20.0f));
@@ -7651,7 +7689,8 @@ void GuiApp::startBenchmarks() {
     uint32_t rWidth = m_renderWidth;
     uint32_t rHeight = m_renderHeight;
     uint32_t spp = m_samplesPerPixel;
-    bool dumpR = m_dumpRenders;
+    bool dumpR = m_dumpRenders ||
+                 (std::find(engineBenchmarks.begin(), engineBenchmarks.end(), "RayScheduling") != engineBenchmarks.end());
     std::string scene = m_scene;
 
     m_execThread = std::thread([this, engineBenchmarks, targetGpus, targetBackend, rWidth, rHeight, spp, dumpR, scene, selectedWorkloads]() {

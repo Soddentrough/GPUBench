@@ -102,8 +102,6 @@ void InShaderIndirectBench::Run(uint32_t config_idx) {
   const auto &cfg = configs[config_idx];
 
   if (cfg.mode == IndirectBenchMode::GPU_Indirect) {
-    context->dispatch(kernelReset, 1, 1, 1, 1, 1, 1);
-
     struct ClassifyPushConstants {
       uint32_t selectivity;
       uint32_t totalItems;
@@ -111,14 +109,19 @@ void InShaderIndirectBench::Run(uint32_t config_idx) {
     } pcClassify = { cfg.selectivity, kTotalItems, kTotalWorkgroups };
 
     context->setKernelArg(kernelClassify, 3, sizeof(pcClassify), &pcClassify);
-    context->dispatch(kernelClassify, kTotalWorkgroups, 1, 1, kWorkgroupSize, 1, 1);
 
 #ifdef HAVE_VULKAN
     auto *vContext = dynamic_cast<VulkanContext *>(context);
     if (vContext) {
-      vContext->dispatchIndirect(kernelIndirectWorker, indirectBuffer, 0);
+      std::vector<VulkanContext::IndirectBatchEntry> entries = {{0, {}, nullptr}};
+      vContext->dispatchWorkListSequence(
+          kernelReset, kernelClassify, kTotalWorkgroups, 1, 1,
+          nullptr, kernelIndirectWorker, indirectBuffer, entries);
+      return;
     }
 #endif
+    context->dispatch(kernelReset, 1, 1, 1, 1, 1, 1);
+    context->dispatch(kernelClassify, kTotalWorkgroups, 1, 1, kWorkgroupSize, 1, 1);
   } else {
     struct DirectPushConstants {
       uint32_t selectivity;

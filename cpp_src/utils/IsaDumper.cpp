@@ -317,8 +317,12 @@ public:
     }
     physicalDevice = devs[deviceIdx];
 
+    VkPhysicalDeviceRayTracingInvocationReorderPropertiesEXT serProps{};
+    serProps.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_INVOCATION_REORDER_PROPERTIES_EXT;
     VkPhysicalDeviceSubgroupSizeControlProperties subgroupProps{};
     subgroupProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_PROPERTIES;
+    subgroupProps.pNext = &serProps;
     VkPhysicalDeviceDriverProperties driverProps{};
     driverProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES;
     driverProps.pNext = &subgroupProps;
@@ -440,9 +444,12 @@ public:
     rayQuerySupported = hasExt(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) &&
                         hasExt(VK_KHR_RAY_QUERY_EXTENSION_NAME) &&
                         (rqFeatures.rayQuery == VK_TRUE);
-    serSupported = (hasExt("VK_EXT_ray_tracing_invocation_reorder") ||
-                    hasExt("VK_NV_ray_tracing_invocation_reorder")) &&
-                   (serFeatures.rayTracingInvocationReorder == VK_TRUE);
+    serSupported = (vendorId != 0x1002) &&
+                   ((hasExt("VK_EXT_ray_tracing_invocation_reorder") &&
+                     (serFeatures.rayTracingInvocationReorder == VK_TRUE) &&
+                     (serProps.rayTracingInvocationReorderReorderingHint ==
+                      VK_RAY_TRACING_INVOCATION_REORDER_MODE_REORDER_EXT)) ||
+                    hasExt("VK_NV_ray_tracing_invocation_reorder"));
     coopMatrixSupported = hasExt(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME) &&
                           (coopFeatures.cooperativeMatrix == VK_TRUE);
     bool hasBf16 = hasExt("VK_KHR_shader_bfloat16") || hasExt("VK_EXT_shader_bfloat16");
@@ -807,6 +814,11 @@ public:
     std::vector<VkPipelineShaderStageCreateInfo> stages;
     std::vector<VkRayTracingShaderGroupCreateInfoKHR> groups;
 
+    uint32_t specVal = (prefix == "rt_scheduling_ser") ? 0u : 7u;
+    bool useSpec = (prefix == "rt_scheduling_ser" || basePrefix == "rt_scheduling");
+    VkSpecializationMapEntry specEntry{0, 0, sizeof(uint32_t)};
+    VkSpecializationInfo specInfo{1, &specEntry, sizeof(uint32_t), &specVal};
+
     auto addStage = [&](const fs::path &p, VkShaderStageFlagBits stageBit) -> int {
       if (!fs::exists(p))
         return -1;
@@ -819,6 +831,9 @@ public:
       st.stage = stageBit;
       st.module = m;
       st.pName = "main";
+      if (useSpec) {
+        st.pSpecializationInfo = &specInfo;
+      }
       stages.push_back(st);
       return static_cast<int>(stages.size()) - 1;
     };

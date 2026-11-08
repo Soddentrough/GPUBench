@@ -261,6 +261,69 @@ void VulkanContext::enumeratePhysicalDevices() {
   }
 }
 
+namespace {
+bool queryHardwareSERSupport(VkPhysicalDevice physDev, uint32_t vendorID,
+                             bool hasExtEXT, bool hasExtNV) {
+  if (!hasExtEXT && !hasExtNV) {
+    return false;
+  }
+  // AMD RDNA architectures (RDNA 2, RDNA 3, RDNA 3.5, RDNA 4) do not have
+  // dedicated hardware Shader Execution Reordering (SER). Drivers that expose
+  // VK_EXT_ray_tracing_invocation_reorder only accept the SPIR-V capability
+  // with VK_RAY_TRACING_INVOCATION_REORDER_MODE_NONE_EXT or software emulation.
+  if (vendorID == 0x1002) {
+    return false;
+  }
+#if defined(VK_EXT_RAY_TRACING_INVOCATION_REORDER_EXTENSION_NAME)
+  if (hasExtEXT) {
+    VkPhysicalDeviceRayTracingInvocationReorderFeaturesEXT serFeatures{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_INVOCATION_REORDER_FEATURES_EXT};
+    VkPhysicalDeviceFeatures2 f2{};
+    f2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    f2.pNext = &serFeatures;
+    vkGetPhysicalDeviceFeatures2(physDev, &f2);
+
+    VkPhysicalDeviceRayTracingInvocationReorderPropertiesEXT serProps{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_INVOCATION_REORDER_PROPERTIES_EXT};
+    VkPhysicalDeviceProperties2 p2{};
+    p2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    p2.pNext = &serProps;
+    vkGetPhysicalDeviceProperties2(physDev, &p2);
+
+    if (serFeatures.rayTracingInvocationReorder == VK_TRUE &&
+        serProps.rayTracingInvocationReorderReorderingHint ==
+            VK_RAY_TRACING_INVOCATION_REORDER_MODE_REORDER_EXT) {
+      return true;
+    }
+  }
+#endif
+#if defined(VK_NV_RAY_TRACING_INVOCATION_REORDER_EXTENSION_NAME)
+  if (hasExtNV) {
+    VkPhysicalDeviceRayTracingInvocationReorderFeaturesNV serFeaturesNV{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_INVOCATION_REORDER_FEATURES_NV};
+    VkPhysicalDeviceFeatures2 f2{};
+    f2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    f2.pNext = &serFeaturesNV;
+    vkGetPhysicalDeviceFeatures2(physDev, &f2);
+
+    VkPhysicalDeviceRayTracingInvocationReorderPropertiesNV serPropsNV{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_INVOCATION_REORDER_PROPERTIES_NV};
+    VkPhysicalDeviceProperties2 p2{};
+    p2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    p2.pNext = &serPropsNV;
+    vkGetPhysicalDeviceProperties2(physDev, &p2);
+
+    if (serFeaturesNV.rayTracingInvocationReorder == VK_TRUE &&
+        serPropsNV.rayTracingInvocationReorderReorderingHint ==
+            VK_RAY_TRACING_INVOCATION_REORDER_MODE_REORDER_NV) {
+      return true;
+    }
+  }
+#endif
+  return false;
+}
+} // namespace
+
 const std::vector<DeviceInfo> &VulkanContext::getDevices() const {
   if (deviceInfos.empty()) {
     for (const auto &device : physicalDevices) {
@@ -410,37 +473,10 @@ const std::vector<DeviceInfo> &VulkanContext::getDevices() const {
           hasExt(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) &&
           hasExt(VK_KHR_RAY_QUERY_EXTENSION_NAME);
 
-#if defined(VK_EXT_RAY_TRACING_INVOCATION_REORDER_EXTENSION_NAME)
-      VkPhysicalDeviceRayTracingInvocationReorderFeaturesEXT serFeatures{
-          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_INVOCATION_REORDER_FEATURES_EXT};
-      bool hasSERExt = hasExt(VK_EXT_RAY_TRACING_INVOCATION_REORDER_EXTENSION_NAME) ||
-                       hasExt("VK_NV_ray_tracing_invocation_reorder");
-      if (hasSERExt) {
-        VkPhysicalDeviceFeatures2 f2_ser{};
-        f2_ser.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-        f2_ser.pNext = &serFeatures;
-        vkGetPhysicalDeviceFeatures2(device, &f2_ser);
-        info.serSupported = (serFeatures.rayTracingInvocationReorder == VK_TRUE);
-      } else {
-        info.serSupported = false;
-      }
-#elif defined(VK_NV_RAY_TRACING_INVOCATION_REORDER_EXTENSION_NAME)
-      VkPhysicalDeviceRayTracingInvocationReorderFeaturesNV serFeatures{
-          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_INVOCATION_REORDER_FEATURES_NV};
-      bool hasSERExt = hasExt(VK_NV_RAY_TRACING_INVOCATION_REORDER_EXTENSION_NAME);
-      if (hasSERExt) {
-        VkPhysicalDeviceFeatures2 f2_ser{};
-        f2_ser.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-        f2_ser.pNext = &serFeatures;
-        vkGetPhysicalDeviceFeatures2(device, &f2_ser);
-        info.serSupported = (serFeatures.rayTracingInvocationReorder == VK_TRUE);
-      } else {
-        info.serSupported = false;
-      }
-#else
-      info.serSupported = hasExt("VK_EXT_ray_tracing_invocation_reorder") ||
-                          hasExt("VK_NV_ray_tracing_invocation_reorder");
-#endif
+      info.serSupported = queryHardwareSERSupport(
+          device, props.vendorID,
+          hasExt("VK_EXT_ray_tracing_invocation_reorder"),
+          hasExt("VK_NV_ray_tracing_invocation_reorder"));
       info.workGraphsSupported = hasExt("VK_AMDX_shader_enqueue") || hasExt("VK_KHR_work_graphs");
       info.dgcSupported = hasExt("VK_EXT_device_generated_commands");
       info.performanceQuerySupported = hasExt(VK_KHR_PERFORMANCE_QUERY_EXTENSION_NAME);
@@ -584,37 +620,10 @@ DeviceInfo VulkanContext::getCurrentDeviceInfo() const {
       hasExt(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) &&
       hasExt(VK_KHR_RAY_QUERY_EXTENSION_NAME);
 
-#if defined(VK_EXT_RAY_TRACING_INVOCATION_REORDER_EXTENSION_NAME)
-  VkPhysicalDeviceRayTracingInvocationReorderFeaturesEXT serFeatures{
-      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_INVOCATION_REORDER_FEATURES_EXT};
-  bool hasSERExt = hasExt(VK_EXT_RAY_TRACING_INVOCATION_REORDER_EXTENSION_NAME) ||
-                   hasExt("VK_NV_ray_tracing_invocation_reorder");
-  if (hasSERExt) {
-    VkPhysicalDeviceFeatures2 f2_ser{};
-    f2_ser.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-    f2_ser.pNext = &serFeatures;
-    vkGetPhysicalDeviceFeatures2(physicalDevice, &f2_ser);
-    info.serSupported = (serFeatures.rayTracingInvocationReorder == VK_TRUE);
-  } else {
-    info.serSupported = false;
-  }
-#elif defined(VK_NV_RAY_TRACING_INVOCATION_REORDER_EXTENSION_NAME)
-  VkPhysicalDeviceRayTracingInvocationReorderFeaturesNV serFeatures{
-      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_INVOCATION_REORDER_FEATURES_NV};
-  bool hasSERExt = hasExt(VK_NV_RAY_TRACING_INVOCATION_REORDER_EXTENSION_NAME);
-  if (hasSERExt) {
-    VkPhysicalDeviceFeatures2 f2_ser{};
-    f2_ser.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-    f2_ser.pNext = &serFeatures;
-    vkGetPhysicalDeviceFeatures2(physicalDevice, &f2_ser);
-    info.serSupported = (serFeatures.rayTracingInvocationReorder == VK_TRUE);
-  } else {
-    info.serSupported = false;
-  }
-#else
-  info.serSupported = hasExt("VK_EXT_ray_tracing_invocation_reorder") ||
-                      hasExt("VK_NV_ray_tracing_invocation_reorder");
-#endif
+  info.serSupported = queryHardwareSERSupport(
+      physicalDevice, properties.vendorID,
+      hasExt("VK_EXT_ray_tracing_invocation_reorder"),
+      hasExt("VK_NV_ray_tracing_invocation_reorder"));
   info.workGraphsSupported = hasExt("VK_AMDX_shader_enqueue") || hasExt("VK_KHR_work_graphs");
   info.dgcSupported = dgcSupported;
 
@@ -834,8 +843,14 @@ void VulkanContext::createDevice() {
   if (hasExt(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME)) {
       *currentPNext = &rtPipelineFeatures; currentPNext = &rtPipelineFeatures.pNext;
   }
-  if (hasExt("VK_EXT_ray_tracing_invocation_reorder") ||
-      hasExt("VK_NV_ray_tracing_invocation_reorder")) {
+  serSupported = queryHardwareSERSupport(
+      physicalDevice, properties.vendorID,
+      hasExt("VK_EXT_ray_tracing_invocation_reorder"),
+      hasExt("VK_NV_ray_tracing_invocation_reorder"));
+
+  if (serSupported &&
+      (hasExt("VK_EXT_ray_tracing_invocation_reorder") ||
+       hasExt("VK_NV_ray_tracing_invocation_reorder"))) {
       *currentPNext = &serFeatures; currentPNext = &serFeatures.pNext;
   }
   if (hasExt(VK_KHR_RAY_TRACING_MAINTENANCE_1_EXTENSION_NAME)) {
@@ -874,7 +889,7 @@ void VulkanContext::createDevice() {
   vkGetPhysicalDeviceFeatures2(physicalDevice, &features2);
   hostQueryResetSupported = (hostQueryResetFeatures.hostQueryReset == VK_TRUE);
 
-  const std::vector<const char *> desiredExtensions = {
+  std::vector<const char *> desiredExtensions = {
       VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
       VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME,
       VK_KHR_8BIT_STORAGE_EXTENSION_NAME,
@@ -898,9 +913,11 @@ void VulkanContext::createDevice() {
       "VK_KHR_shader_bfloat16",
       "VK_EXT_shader_float8",
       "VK_KHR_shader_float_controls2",
-      "VK_EXT_ray_tracing_invocation_reorder",
-      "VK_NV_ray_tracing_invocation_reorder",
       "VK_AMDX_shader_enqueue"};
+  if (serSupported) {
+    desiredExtensions.push_back("VK_EXT_ray_tracing_invocation_reorder");
+    desiredExtensions.push_back("VK_NV_ray_tracing_invocation_reorder");
+  }
 
   swapchainSupported = hasExt(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
 
@@ -927,10 +944,6 @@ void VulkanContext::createDevice() {
   for (const auto &ext : enabledExtensions) {
     enabledExtensionsSet.insert(ext);
   }
-
-  serSupported = (hasExt("VK_EXT_ray_tracing_invocation_reorder") ||
-                  hasExt("VK_NV_ray_tracing_invocation_reorder")) &&
-                 (serFeatures.rayTracingInvocationReorder == VK_TRUE);
 
   subgroupSizeControlSupported = hasExt(VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME) &&
                                  (subgroupSizeFeatures.subgroupSizeControl == VK_TRUE);
@@ -2901,16 +2914,15 @@ void VulkanContext::dispatchWorkListSequence(
         frame.commandBuffer,
         VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
         VK_ACCESS_2_SHADER_WRITE_BIT,
-        VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT |
-            VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT |
-            VK_PIPELINE_STAGE_2_COMMAND_PREPROCESS_BIT_EXT,
+        VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
         VK_ACCESS_2_SHADER_READ_BIT |
-            VK_ACCESS_2_SHADER_WRITE_BIT |
-            VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT);
+            VK_ACCESS_2_SHADER_WRITE_BIT);
   }
 
   // 1. Reset queue counters & indirect commands on compute queue (zero transfer bubbles)
-  if (resetKernel_handle) {
+  // Note: resolveKernel resets queueCounters[0..15] = 0 after snapshotting on every pass,
+  // so subsequent iterations in a batch do not need a redundant resetKernel dispatch + barrier.
+  if (resetKernel_handle && (!m_inBatch || m_batchDispatchCount == 0 || !resolveKernel_handle)) {
     auto *resetKernel = getKernel(resetKernel_handle);
     if (resetKernel) {
       vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
@@ -2957,7 +2969,7 @@ void VulkanContext::dispatchWorkListSequence(
       vkCmdBindDescriptorSets(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
                               resolveKernel->pipelineLayout, 0, 1,
                               &resolveKernel->descriptorSet, 0, nullptr);
-      uint32_t resetQueue = isPingPong ? 1u : 0xFFFFFFFFu;
+      uint32_t resetQueue = (isPingPong && entries.size() > 1) ? 1u : 0xFFFFFFFFu;
       if (useDGC) {
         struct { uint32_t resetQueue; uint32_t dgcMode; uint32_t bounceIndex; } rpcResolve{resetQueue, dgcMode, 0u};
         vkCmdPushConstants(frame.commandBuffer, resolveKernel->pipelineLayout,
@@ -2975,14 +2987,14 @@ void VulkanContext::dispatchWorkListSequence(
           frame.commandBuffer,
           VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT,
           VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_COMMAND_PREPROCESS_BIT_EXT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-          VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT);
+          VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT);
     }
   } else {
     cmdPipelineMemoryBarrier2(
         frame.commandBuffer,
         VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT,
         VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_COMMAND_PREPROCESS_BIT_EXT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-        VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT);
+        VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT);
   }
 
   // 4. Pass 2: Indirect Dispatches (DGC or Legacy Fallback)
@@ -3009,7 +3021,15 @@ void VulkanContext::dispatchWorkListSequence(
       genCmds.indirectAddressSize = dgcInfo->sequenceBufferSize;
       genCmds.preprocessAddress = getBufferDeviceAddress(dgcInfo->preprocessBuffer);
       genCmds.preprocessSize = dgcInfo->preprocessBufferSize;
-      genCmds.maxSequenceCount = dgcInfo->maxSequenceCount;
+      uint32_t maxSeq = dgcInfo->maxSequenceCount;
+      if (dgcMode == 2u || dgcMode == 3u || dgcMode == 5u || dgcMode == 7u) {
+        maxSeq = std::min(maxSeq, 1u);
+      } else if (dgcMode == 4u) {
+        maxSeq = std::min(maxSeq, 3u);
+      } else if (dgcMode == 1u || dgcMode == 6u) {
+        maxSeq = std::min(maxSeq, 8u);
+      }
+      genCmds.maxSequenceCount = maxSeq;
       genCmds.sequenceCountAddress = dgcInfo->sequenceCountBuffer ?
           (getBufferDeviceAddress(dgcInfo->sequenceCountBuffer) + dgcInfo->sequenceCountBufferOffset) : 0;
       genCmds.maxDrawCount = 0;
@@ -3067,17 +3087,18 @@ void VulkanContext::dispatchWorkListSequence(
             vkCmdPushConstants(frame.commandBuffer, resolveKernel->pipelineLayout,
                                VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(rpcBounce), &rpcBounce);
             vkCmdDispatch(frame.commandBuffer, 1, 1, 1);
+            lastBound = nullptr;
 
             cmdPipelineMemoryBarrier2(
                 frame.commandBuffer,
                 VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT,
                 VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_COMMAND_PREPROCESS_BIT_EXT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT);
+                VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT);
           }
         }
       }
     }
-  } else {
+  } else if (!useDGC) {
     // Legacy fallback path: CPU indirect command dispatch loop
     VkBuffer vkIndirect = getVkBuffer(indirectBuffer);
     VulkanKernel *lastBound = secondKernel;
@@ -3115,8 +3136,9 @@ void VulkanContext::dispatchWorkListSequence(
           vkCmdBindDescriptorSets(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
                                   resolveKernel->pipelineLayout, 0, 1,
                                   &resolveKernel->descriptorSet, 0, nullptr);
+          uint32_t nextBounce = static_cast<uint32_t>(e + 1);
           uint32_t resetQueue = (e + 2 < entries.size()) ? static_cast<uint32_t>(e % 2) : 0xFFFFFFFFu;
-          struct { uint32_t resetQueue; uint32_t dgcMode; uint32_t bounceIndex; } rpcBounce{resetQueue, 0u, 0u};
+          struct { uint32_t resetQueue; uint32_t dgcMode; uint32_t bounceIndex; } rpcBounce{resetQueue, 0u, nextBounce};
           vkCmdPushConstants(frame.commandBuffer, resolveKernel->pipelineLayout,
                              VK_SHADER_STAGE_COMPUTE_BIT, 0,
                              sizeof(rpcBounce), &rpcBounce);
@@ -3126,7 +3148,7 @@ void VulkanContext::dispatchWorkListSequence(
               frame.commandBuffer,
               VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT,
               VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-              VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT);
+              VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT);
 
           vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
                             secondKernel->pipeline);
@@ -3371,7 +3393,8 @@ ComputeKernel VulkanContext::createRTPipeline(
     const std::string &rgen_path, const std::string &rmiss_path,
     const std::vector<std::string> &rchit_paths,
     const std::vector<std::string> &rahit_paths,
-    const std::vector<std::string> &rint_paths, uint32_t num_buffer_args) {
+    const std::vector<std::string> &rint_paths, uint32_t num_buffer_args,
+    uint32_t spec_const0, bool has_spec_const0) {
 
   auto load_shader = [&](const std::string &path) -> VkShaderModule {
     std::string spv_path = path + ".spv";
@@ -3430,12 +3453,26 @@ ComputeKernel VulkanContext::createRTPipeline(
     delete vulkanKernel;
   };
 
+  VkSpecializationMapEntry specEntry{};
+  specEntry.constantID = 0;
+  specEntry.offset = 0;
+  specEntry.size = sizeof(uint32_t);
+
+  VkSpecializationInfo specInfo{};
+  specInfo.mapEntryCount = 1;
+  specInfo.pMapEntries = &specEntry;
+  specInfo.dataSize = sizeof(uint32_t);
+  specInfo.pData = &spec_const0;
+
   auto add_stage = [&](VkShaderModule module, VkShaderStageFlagBits stage) {
     VkPipelineShaderStageCreateInfo info{
         VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO};
     info.stage = stage;
     info.module = module;
     info.pName = "main";
+    if (has_spec_const0) {
+      info.pSpecializationInfo = &specInfo;
+    }
     stages.push_back(info);
   };
 
@@ -3959,12 +3996,9 @@ void VulkanContext::dispatchDGCWorkListSequence(
         frame.commandBuffer,
         VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
         VK_ACCESS_2_SHADER_WRITE_BIT,
-        VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT |
-            VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT |
-            VK_PIPELINE_STAGE_2_COMMAND_PREPROCESS_BIT_EXT,
+        VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
         VK_ACCESS_2_SHADER_READ_BIT |
-            VK_ACCESS_2_SHADER_WRITE_BIT |
-            VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT);
+            VK_ACCESS_2_SHADER_WRITE_BIT);
   }
 
   // 1. Reset
@@ -4118,12 +4152,9 @@ void VulkanContext::dispatchDGCSequence(ComputeKernel kernel_handle,
         frame.commandBuffer,
         VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
         VK_ACCESS_2_SHADER_WRITE_BIT,
-        VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT |
-            VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT |
-            VK_PIPELINE_STAGE_2_COMMAND_PREPROCESS_BIT_EXT,
+        VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
         VK_ACCESS_2_SHADER_READ_BIT |
-            VK_ACCESS_2_SHADER_WRITE_BIT |
-            VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT);
+            VK_ACCESS_2_SHADER_WRITE_BIT);
   }
 
   vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, kernel->pipeline);

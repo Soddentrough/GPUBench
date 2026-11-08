@@ -23,8 +23,7 @@ void main() {
     if (id < 16u) {
         worklist.queueCounters[Q_COUNTER_IDX(id)] = 0u;
         worklist.queueCounters[Q_SNAPSHOT_IDX(id)] = 0u;
-    }
-    if (id < 8u) {
+        worklist.queueCounters[Q_FAST_SNAP_IDX(id)] = 0u;
         worklist.queueCounters[Q_PREFIX_IDX(id)] = 0u;
     }
     if (id < 32u) {

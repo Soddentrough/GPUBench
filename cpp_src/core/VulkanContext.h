@@ -57,7 +57,9 @@ public:
                                  const std::vector<std::string> &rchit_paths,
                                  const std::vector<std::string> &rahit_paths,
                                  const std::vector<std::string> &rint_paths,
-                                 uint32_t num_buffer_args) override;
+                                 uint32_t num_buffer_args,
+                                 uint32_t spec_const0 = 7u,
+                                 bool has_spec_const0 = false) override;
   void setKernelArg(ComputeKernel kernel, uint32_t arg_index,
                     ComputeBuffer buffer) override;
   void setKernelAS(ComputeKernel kernel, uint32_t arg_index,

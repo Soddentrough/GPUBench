@@ -1,12 +1,11 @@
 #version 460
-#extension GL_EXT_ray_query : enable
-#extension GL_EXT_ray_flags_primitive_culling : enable
 #extension GL_KHR_shader_subgroup_basic : enable
+#extension GL_KHR_shader_subgroup_vote : enable
+#extension GL_KHR_shader_subgroup_ballot : enable
 #extension GL_KHR_shader_subgroup_arithmetic : enable
 
 layout(local_size_x = 32) in;
 
-layout(set = 0, binding = 0) uniform accelerationStructureEXT topLevelAS;
 layout(set = 0, binding = 1) buffer Results {
     uint totalRays;
     uint totalHits;
@@ -32,6 +31,7 @@ layout(set = 0, binding = 4) readonly buffer VertexBuffer {
 #define BINDING_TRI_MAT_BUF 6
 #define BINDING_TEX_HDR_BUF 7
 #define BINDING_TEX_PIX_BUF 8
+#define PBR_NO_RAY_QUERY 1
 #include "pbr_common.glsl"
 
 layout(push_constant) uniform PushConstants {
@@ -58,25 +58,6 @@ const uint SCENE_SHOWROOM_STUDIO = 0u;
 const uint SCENE_OUTDOOR_TERRAIN = 1u;
 const uint SCENE_INDOOR_ATRIUM   = 2u;
 const uint SCENE_AAA_FOREST       = 3u;
-
-// Procedural Showroom Studio & Indoor Atrium Primitives
-const uint PRIM_KNOT_PAINT_END  = 1536u;
-const uint PRIM_KNOT_JADE_END   = 3072u;
-const uint PRIM_KNOT_CHROME_END = 4608u;
-const uint PRIM_KNOT_VELVET_END = 6144u;
-const uint PRIM_KNOT_RUST_END   = 7680u;
-const uint PRIM_SPHERE_END      = 9600u;
-const uint PRIM_PEDESTAL_END    = 9728u;
-const uint PRIM_SUZANNE_END     = 10696u;
-const uint PRIM_FLOOR_END       = 27080u;
-const uint PRIM_WALLS_END       = 28104u;
-const uint PRIM_CEILING_END     = 29128u;
-const uint PRIM_COLUMNS_END     = 35272u;
-
-// Outdoor Landscape Primitives
-const uint PRIM_TERRAIN_END     = 32768u;
-const uint PRIM_WATER_END       = 34816u;
-const uint PRIM_TREES_END       = 57216u;
 
 void getCamera(uint sceneType, out vec3 camPos, out vec3 camForward, out vec3 camRight, out vec3 camUp, out float fov) {
     if (pc.isGltf != 0u) {
@@ -125,201 +106,105 @@ void getCamera(uint sceneType, out vec3 camPos, out vec3 camForward, out vec3 ca
     }
 }
 
-vec3 computeSmoothNormal(uint sceneType, uint primId, vec3 hitPos, vec3 rayDir) {
-    vec3 normal;
-    if (sceneType == SCENE_OUTDOOR_TERRAIN) {
-        if (primId >= PRIM_TERRAIN_END && primId < PRIM_WATER_END) {
-            normal = vec3(0.0, 0.0, 1.0);
-        } else {
-            uint base = primId * 9u;
-            vec3 p0 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
-            vec3 p1 = vec3(vbuf.vertices[base + 3], vbuf.vertices[base + 4], vbuf.vertices[base + 5]);
-            vec3 p2 = vec3(vbuf.vertices[base + 6], vbuf.vertices[base + 7], vbuf.vertices[base + 8]);
-            normal = normalize(cross(p1 - p0, p2 - p0));
-        }
-    } else {
-        if (primId < PRIM_KNOT_RUST_END) {
-            uint segI = (primId / 48u);
-            float u0 = (float(segI) / 160.0) * 6.283185307;
-            float u1 = (float((segI + 1u) % 160u) / 160.0) * 6.283185307;
-
-            float r0 = (2.0 + 0.8 * cos(3.0 * u0)) * 0.835;
-            vec3 unrot0 = vec3(r0 * cos(2.0 * u0), r0 * sin(2.0 * u0), -0.8 * 0.835 * sin(3.0 * u0));
-            float r1 = (2.0 + 0.8 * cos(3.0 * u1)) * 0.835;
-            vec3 unrot1 = vec3(r1 * cos(2.0 * u1), r1 * sin(2.0 * u1), -0.8 * 0.835 * sin(3.0 * u1));
-
-            const mat3 R_knot = mat3(
-                vec3( 0.929662, -0.239757, -0.279722),
-                vec3( 0.326751,  0.887321,  0.325417),
-                vec3( 0.170182, -0.393927,  0.903249)
-            );
-            vec3 c0 = R_knot * unrot0 + vec3(0.0, 0.0, 0.385);
-            vec3 c1 = R_knot * unrot1 + vec3(0.0, 0.0, 0.385);
-
-            vec3 seg = c1 - c0;
-            float segLen2 = dot(seg, seg);
-            float tSeg = clamp(dot(hitPos - c0, seg) / max(segLen2, 0.00001), 0.0, 1.0);
-            vec3 centerPt = c0 + tSeg * seg;
-
-            normal = normalize(hitPos - centerPt);
-        } else if (primId < PRIM_SPHERE_END) {
-            normal = normalize(hitPos - vec3(-3.242, 0.391, -0.509));
-        } else if (primId < PRIM_PEDESTAL_END) {
-            if (hitPos.z >= -0.658) {
-                normal = vec3(0.0, 0.0, 1.0);
-            } else if (hitPos.z <= -1.050) {
-                normal = vec3(0.0, 0.0, -1.0);
-            } else {
-                normal = normalize(vec3(hitPos.x - (-0.460), hitPos.y - 0.060, 0.0));
-            }
-        } else if (primId < PRIM_SUZANNE_END) {
-            uint base = primId * 9u;
-            vec3 p0 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
-            vec3 p1 = vec3(vbuf.vertices[base + 3], vbuf.vertices[base + 4], vbuf.vertices[base + 5]);
-            vec3 p2 = vec3(vbuf.vertices[base + 6], vbuf.vertices[base + 7], vbuf.vertices[base + 8]);
-            normal = normalize(cross(p1 - p0, p2 - p0));
-        } else if (primId < PRIM_FLOOR_END) {
-            float backCurve = (hitPos.y > 1.0) ? 0.044 * (hitPos.y - 1.0) : 0.0;
-            normal = normalize(vec3(0.0, -backCurve, 1.0));
-        } else {
-            uint base = primId * 9u;
-            vec3 p0 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
-            vec3 p1 = vec3(vbuf.vertices[base + 3], vbuf.vertices[base + 4], vbuf.vertices[base + 5]);
-            vec3 p2 = vec3(vbuf.vertices[base + 6], vbuf.vertices[base + 7], vbuf.vertices[base + 8]);
-            normal = normalize(cross(p1 - p0, p2 - p0));
-        }
-    }
-    if (dot(normal, rayDir) > 0.0) normal = -normal;
-    return normal;
+vec3 octDecode(vec2 f) {
+    vec3 n = vec3(f.x, f.y, 1.0 - abs(f.x) - abs(f.y));
+    float t = clamp(-n.z, 0.0, 1.0);
+    n.x += (n.x >= 0.0) ? -t : t;
+    n.y += (n.y >= 0.0) ? -t : t;
+    return normalize(n);
 }
 
 void main() {
     uint threadIdx = gl_GlobalInvocationID.x;
-    uint count = worklist.queueCounters[Q_SNAPSHOT_IDX(pc.queueId)];
-    if (threadIdx >= count || threadIdx >= pc.queueCapacity) return;
+    uint count = min(worklist.queueCounters[Q_SNAPSHOT_IDX(pc.queueId)], pc.queueCapacity);
 
-    if (threadIdx == 0) {
-        atomicAdd(results.totalRays, count);
-    }
+    uint threadLum = 0u;
 
-    uint recordIdx = pc.queueId * pc.queueCapacity + threadIdx;
-    vec4 p = worklist.rayRecords[recordIdx];
-    float t = p.x;
-    uint pixelIdx = floatBitsToUint(p.y);
-    uint primId = floatBitsToUint(p.z);
-    vec2 bary = unpackUnorm2x16(floatBitsToUint(p.w));
+    if (threadIdx < count) {
+        uint recordIdx = pc.queueId * pc.queueCapacity + threadIdx;
+        uvec4 raw = floatBitsToUint(worklist.rayRecords[recordIdx]);
+        vec3 smoothNormal = octDecode(unpackSnorm2x16(raw.x));
+        uint pixelIdx = raw.y & 0x00FFFFFFu;
+        float metallic = float(raw.y >> 24u) * (1.0 / 255.0);
+        vec2 albRG = unpackHalf2x16(raw.z);
+        vec2 albBR = unpackHalf2x16(raw.w);
+        vec3 albedo = vec3(albRG, albBR.x);
+        float roughness = albBR.y;
 
-    vec3 camPos, camForward, camRight, camUp;
-    float fov;
-    getCamera(pc.sceneType, camPos, camForward, camRight, camUp, fov);
+        vec3 camPos, camForward, camRight, camUp;
+        float fov;
+        getCamera(pc.sceneType, camPos, camForward, camRight, camUp, fov);
 
-    uint px_u = pixelIdx % pc.width;
-    uint py_u = pixelIdx / pc.width;
-    float halfH = float(pc.height) * 0.5;
-    float px = float(px_u) - float(pc.width) * 0.5 + 0.5;
-    float py = float(py_u) - halfH + 0.5;
-    vec3 inDir = normalize(camForward + (px / halfH * fov) * camRight - (py / halfH * fov) * camUp);
-    vec3 hitPos = camPos + inDir * t;
-    vec3 viewDir = -inDir;
+        uint px_u = pixelIdx % pc.width;
+        uint py_u = pixelIdx / pc.width;
+        float halfH = float(pc.height) * 0.5;
+        float px = float(px_u) - float(pc.width) * 0.5 + 0.5;
+        float py = float(py_u) - halfH + 0.5;
+        vec3 inDir = normalize(camForward + (px / halfH * fov) * camRight - (py / halfH * fov) * camUp);
+        vec3 viewDir = -inDir;
 
-    vec3 geomNormal;
-    vec3 smoothNormal;
-    vec3 albedo = vec3(0.72);
-    float roughness = 0.5;
-    float metallic = 0.0;
+        vec3 outRadiance;
+        if (pc.binIndex <= 1u || pc.binIndex == 0xFFFFFFFFu) {
+            // Single Light (back-facing surfaces already culled in classify.comp)
+            vec3 L, C;
+            getMultiLight(0u, 1u, pc.sceneType, L, C);
+            outRadiance = evalCookTorranceDirect(smoothNormal, viewDir, L, C, albedo, roughness, metallic);
+        } else {
+            // 128 Lights Octant-Binned Evaluation:
+            // Surfaces in queue pc.queueId have smoothNormal in octant pc.queueId.
+            // We cull entire 16-light octant bins at the wave level using the exact octant cone bound
+            // before evaluating or broadcasting any individual light directions.
+            vec3 totalRadiance = vec3(0.0);
+            uint lane16 = gl_SubgroupInvocationID & 15u;
+            uint qOct = subgroupBroadcastFirst(pc.queueId & 7u);
+            uint oppositeOctant = (~qOct) & 7u;
+            bool has16 = ((subgroupBallot(true).x & 0xFFFFu) == 0xFFFFu);
 
-    if (pc.isGltf != 0u) {
-        uint base = primId * 36u;
-        vec3 p0 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
-        vec3 n0 = vec3(vbuf.vertices[base + 3], vbuf.vertices[base + 4], vbuf.vertices[base + 5]);
-        vec2 uv0 = vec2(vbuf.vertices[base + 10], vbuf.vertices[base + 11]);
+            for (uint b = 0u; b < 8u; ++b) {
+                if (b == oppositeOctant) continue;
+                vec3 octSign = vec3(
+                    (b & 1u) != 0u ? 1.0 : -1.0,
+                    (b & 2u) != 0u ? 1.0 : -1.0,
+                    (b & 4u) != 0u ? 1.0 : -1.0
+                );
+                vec3 s = smoothNormal * octSign;
+                float maxDot = length(max(s, vec3(0.0))) + min(s.x, 0.0) * 0.06 + min(s.y, 0.0) * 0.06 + min(s.z, 0.0) * 0.20;
+                if (subgroupAll(maxDot <= 0.0)) continue;
 
-        base += 12u;
-        vec3 p1 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
-        vec3 n1 = vec3(vbuf.vertices[base + 3], vbuf.vertices[base + 4], vbuf.vertices[base + 5]);
-        vec2 uv1 = vec2(vbuf.vertices[base + 10], vbuf.vertices[base + 11]);
-
-        base += 12u;
-        vec3 p2 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
-        vec3 n2 = vec3(vbuf.vertices[base + 3], vbuf.vertices[base + 4], vbuf.vertices[base + 5]);
-        vec2 uv2 = vec2(vbuf.vertices[base + 10], vbuf.vertices[base + 11]);
-
-        float w = 1.0 - bary.x - bary.y;
-        geomNormal = normalize(cross(p1 - p0, p2 - p0));
-        vec3 sn = w * n0 + bary.x * n1 + bary.y * n2;
-        smoothNormal = (length(sn) > 1e-4) ? normalize(sn) : geomNormal;
-
-        uint matId = triMatBuf.triangleMats[primId];
-        GltfMaterialGpu mat = matBuf.materials[matId];
-        albedo = mat.baseColorFactor.rgb;
-        roughness = mat.roughnessFactor;
-        metallic = mat.metallicFactor;
-        if (mat.baseColorTexIdx >= 0) {
-            vec2 uv = w * uv0 + bary.x * uv1 + bary.y * uv2;
-            albedo *= pow(sampleTexture(uint(mat.baseColorTexIdx), uv).rgb, vec3(2.2));
-        }
-    } else {
-        smoothNormal = computeSmoothNormal(pc.sceneType, primId, hitPos, inDir);
-        geomNormal = smoothNormal;
-        if (pc.sceneType == SCENE_OUTDOOR_TERRAIN) {
-            if (primId < PRIM_TERRAIN_END) {
-                if (hitPos.z >= -0.2 && hitPos.z <= 2.2 && abs(hitPos.x) < 185.0 && hitPos.y >= -145.0 && hitPos.y <= 930.0) {
-                    albedo = vec3(0.18, 0.20, 0.22); roughness = 0.20;
+                if (has16) {
+                    vec3 binL, binC;
+                    getMultiLight(b * 16u + lane16, 128u, pc.sceneType, binL, binC);
+                    for (uint li = 0u; li < 16u; ++li) {
+                        vec3 L = subgroupBroadcast(binL, li);
+                        vec3 C = subgroupBroadcast(binC, li);
+                        float NdotL = dot(smoothNormal, L);
+                        if (subgroupAll(NdotL <= 0.0)) continue;
+                        if (NdotL > 0.0) {
+                            totalRadiance += evalCookTorranceDirect(smoothNormal, viewDir, L, C, albedo, roughness, metallic);
+                        }
+                    }
                 } else {
-                    float snowHarmonics = sin(hitPos.x * 0.032 + hitPos.y * 0.018) * 9.5
-                                        + cos(hitPos.x * 0.068 - hitPos.y * 0.045) * 4.5
-                                        + sin(hitPos.x * 0.130 + hitPos.y * 0.110) * 2.0;
-                    float snowAltitude = 60.0 + (1.0 - smoothNormal.z) * 28.0 + snowHarmonics;
-                    if (hitPos.z > snowAltitude && smoothNormal.z >= 0.50) {
-                        albedo = vec3(0.85, 0.88, 0.92); roughness = 0.35;
-                    } else if (smoothNormal.z < 0.65) {
-                        albedo = vec3(0.30, 0.31, 0.34); roughness = 0.85;
-                    } else if (smoothNormal.z < 0.82) {
-                        albedo = vec3(0.60, 0.48, 0.38); roughness = 0.75;
-                    } else {
-                        albedo = vec3(0.24, 0.44, 0.18); roughness = 0.65;
+                    for (uint li = 0u; li < 16u; ++li) {
+                        vec3 L, C;
+                        getMultiLight(b * 16u + li, 128u, pc.sceneType, L, C);
+                        if (dot(smoothNormal, L) > 0.0) {
+                            totalRadiance += evalCookTorranceDirect(smoothNormal, viewDir, L, C, albedo, roughness, metallic);
+                        }
                     }
                 }
-            } else if (primId < PRIM_WATER_END) {
-                albedo = vec3(0.06, 0.22, 0.32); roughness = 0.08; metallic = 0.25;
-            } else {
-                uint treeLocalTri = (primId - PRIM_WATER_END) % 224u;
-                if (treeLocalTri < 32u) {
-                    albedo = vec3(0.25, 0.17, 0.11); roughness = 0.85;
-                } else {
-                    albedo = vec3(0.08, 0.32, 0.12); roughness = 0.50;
-                }
             }
+            outRadiance = totalRadiance;
+        }
+
+        if (pc.dumpRenders != 0u) {
+            fb.pixels[pixelIdx] = vec4(tonemapACES(outRadiance), 1.0);
+        } else {
+            threadLum = uint(clamp(dot(outRadiance, vec3(0.2126, 0.7152, 0.0722)), 0.0, 100.0) * 256.0);
         }
     }
 
-    vec3 outRadiance;
-    if (pc.binIndex <= 1u || pc.binIndex == 0xFFFFFFFFu) {
-        // Single Light
-        vec3 L, C;
-        getMultiLight(0u, 1u, pc.sceneType, L, C);
-        outRadiance = evalCookTorranceDirect(smoothNormal, viewDir, L, C, albedo, roughness, metallic);
-    } else {
-        // 128 Lights Light Binning: evaluate 128 lights partitioned into 8 coherent bins of 16 lights
-        vec3 totalRadiance = vec3(0.0);
-        for (uint b = 0u; b < 8u; ++b) {
-            uint startLight = b * 16u;
-            for (uint li = 0u; li < 16u; ++li) {
-                vec3 L, C;
-                getMultiLight(startLight + li, 128u, pc.sceneType, L, C);
-                totalRadiance += evalCookTorranceDirect(smoothNormal, viewDir, L, C, albedo, roughness, metallic);
-            }
-        }
-        outRadiance = totalRadiance;
-    }
-
-    if (pc.dumpRenders != 0u) {
-        fb.pixels[pixelIdx] = vec4(tonemapACES(outRadiance), 1.0);
-    } else {
-        uint threadLum = uint(clamp(dot(outRadiance, vec3(0.2126, 0.7152, 0.0722)), 0.0, 100.0) * 256.0);
-        uint waveLum = subgroupAdd(threadLum);
-        if (subgroupElect() && waveLum > 0u) {
-            atomicAdd(results.accumulatedLuminance, waveLum);
-        }
+    uint waveLum = subgroupAdd(threadLum);
+    if (subgroupElect() && waveLum > 0u) {
+        atomicAdd(results.accumulatedLuminance, waveLum);
     }
 }

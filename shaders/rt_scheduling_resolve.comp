@@ -37,31 +37,51 @@ layout(std430, set = 0, binding = 3) buffer DGCSequenceBuffer {
 
 void main() {
     uint id = gl_LocalInvocationID.x;
-    if (id < 16u) {
+    uint bank = (rpc.bounceIndex & 1u);
+    uint baseQ = bank * 8u;
+    bool pingPong = (rpc.dgcMode == 3u) || (rpc.resetQueue != 0xFFFFFFFFu) || (rpc.bounceIndex > 0u);
+    if (id < 16u && (!pingPong || (id >= baseQ && id < baseQ + 8u))) {
         uint count = worklist.queueCounters[Q_COUNTER_IDX(id)];
         indirectCmds.commands[id].x = (count + 31u) / 32u;
         indirectCmds.commands[id].y = (count > 0u) ? 1u : 0u;
         indirectCmds.commands[id].z = (count > 0u) ? 1u : 0u;
         worklist.queueCounters[Q_SNAPSHOT_IDX(id)] = count;
-        if (rpc.resetQueue == 0xFFFFFFFFu) {
-            worklist.queueCounters[Q_COUNTER_IDX(id)] = 0u;
-        }
-    }
-    if (id == 0u && rpc.resetQueue < 16u) {
-        worklist.queueCounters[Q_COUNTER_IDX(rpc.resetQueue)] = 0u;
+        worklist.queueCounters[Q_FAST_SNAP_IDX(id)] = count;
+        worklist.queueCounters[Q_COUNTER_IDX(id)] = 0u;
+    } else if (pingPong && rpc.resetQueue == 0xFFFFFFFFu && id < 16u) {
+        worklist.queueCounters[Q_COUNTER_IDX(id)] = 0u;
     }
 
-    // Consolidated command for octants 0..7 at commands[8]
-    uint waves = (id < 8u) ? indirectCmds.commands[id].x : 0u;
-    uint pref = subgroupExclusiveAdd(waves);
-    if (id < 8u) {
-        worklist.queueCounters[Q_PREFIX_IDX(id)] = pref;
-    }
-    if (id == 7u) {
-        uint totalWaves = pref + waves;
-        indirectCmds.commands[8].x = totalWaves;
-        indirectCmds.commands[8].y = (totalWaves > 0u) ? 1u : 0u;
-        indirectCmds.commands[8].z = (totalWaves > 0u) ? 1u : 0u;
+    // Consolidated command for octants/cones at commands[8] (16 cones in dgcMode==2u, 8 cones per ping-pong bank at commands[16 + bank])
+    if (rpc.dgcMode == 2u) {
+        uint waves = (id < 16u) ? indirectCmds.commands[id].x : 0u;
+        uint pref = subgroupExclusiveAdd(waves);
+        if (id < 16u) {
+            worklist.queueCounters[Q_PREFIX_IDX(id)] = pref;
+        }
+        if (id == 15u) {
+            uint totalWaves = pref + waves;
+            indirectCmds.commands[8].x = totalWaves;
+            indirectCmds.commands[8].y = (totalWaves > 0u) ? 1u : 0u;
+            indirectCmds.commands[8].z = (totalWaves > 0u) ? 1u : 0u;
+        }
+    } else {
+        uint waves = (id < 8u) ? indirectCmds.commands[baseQ + id].x : 0u;
+        uint pref = subgroupExclusiveAdd(waves);
+        if (id < 8u) {
+            worklist.queueCounters[Q_PREFIX_IDX(baseQ + id)] = pref;
+        }
+        if (id == 7u) {
+            uint totalWaves = pref + waves;
+            if (bank == 0u) {
+                indirectCmds.commands[8].x = totalWaves;
+                indirectCmds.commands[8].y = (totalWaves > 0u) ? 1u : 0u;
+                indirectCmds.commands[8].z = (totalWaves > 0u) ? 1u : 0u;
+            }
+            indirectCmds.commands[16u + bank].x = totalWaves;
+            indirectCmds.commands[16u + bank].y = (totalWaves > 0u) ? 1u : 0u;
+            indirectCmds.commands[16u + bank].z = (totalWaves > 0u) ? 1u : 0u;
+        }
     }
 
     // DGC Dynamic Token Generation & Active Queue Pruning
@@ -71,6 +91,9 @@ void main() {
         if (id < 16u) {
             count = worklist.queueCounters[Q_SNAPSHOT_IDX(id)];
             isActive = (count > 0u);
+            dgcData.templates[id].cmdX = (count + 31u) / 32u;
+            dgcData.templates[id].cmdY = isActive ? 1u : 0u;
+            dgcData.templates[id].cmdZ = isActive ? 1u : 0u;
         }
 
         uint activeMask = isActive ? 1u : 0u;
@@ -104,16 +127,15 @@ void main() {
             }
         }
     } else if (rpc.dgcMode == 3u) {
-        // Ping-Pong Bounce Mode (Config 5 & 24)
-        if (id == 0u) {
-            uint inQ = rpc.bounceIndex & 1u;
-            uint count = worklist.queueCounters[Q_SNAPSHOT_IDX(inQ)];
-            if (count > 0u) {
+        // Ping-Pong Bounce Mode (Config 5 & 24) - Consolidated 8-Octant Wavefront Dispatch
+        if (id == 7u) {
+            uint totalWaves = indirectCmds.commands[16u + bank].x;
+            if (totalWaves > 0u) {
                 uint templateIdx = 16u + rpc.bounceIndex;
                 DGCSequenceItem item = dgcData.templates[templateIdx];
                 uint sampleSeed = worklist.queueCounters[Q_SEED_IDX];
                 item.pc[3] = (sampleSeed != 0u ? sampleSeed : item.pc[3]) + rpc.bounceIndex * 7919u;
-                item.cmdX = (count + 31u) / 32u;
+                item.cmdX = totalWaves;
                 item.cmdY = 1u;
                 item.cmdZ = 1u;
                 dgcData.compacted[0] = item;
@@ -166,7 +188,7 @@ void main() {
             }
         }
     } else if (rpc.dgcMode == 6u) {
-        // 128 Lights Binning across 8 surface-normal octant queues (Config 29 & 30)
+        // 128 Lights Octant-Binned Evaluation (Config 34) across queues 0..7
         bool isActive = false;
         uint count = 0u;
         if (id < 8u) {
@@ -191,30 +213,19 @@ void main() {
             dgcCount.dynamicSequenceCount = totalActive;
         }
     } else if (rpc.dgcMode == 7u) {
-        // Primary Rays G-Buffer Normal Shading (Config 18) using templates[24..31]
-        bool isActive = false;
-        uint count = 0u;
-        if (id < 8u) {
-            count = worklist.queueCounters[Q_SNAPSHOT_IDX(id)];
-            isActive = (count > 0u);
-        }
-
-        uint activeMask = isActive ? 1u : 0u;
-        uint slot = subgroupExclusiveAdd(activeMask);
-        uint totalActive = subgroupAdd(activeMask);
-
-        if (isActive) {
-            DGCSequenceItem item = dgcData.templates[24u + id];
-            item.cmdX = (count + 31u) / 32u;
-            item.cmdY = 1u;
-            item.cmdZ = 1u;
-            dgcData.compacted[slot] = item;
-        }
-
+        // Primary Rays G-Buffer Normal Shading (Config 18) using compacted queue 0 (template 24)
         if (id == 0u) {
-            dgcCount.dynamicSequenceCount = totalActive;
+            uint count = worklist.queueCounters[Q_SNAPSHOT_IDX(0)];
+            if (count > 0u) {
+                DGCSequenceItem item = dgcData.templates[24u];
+                item.cmdX = (count + 31u) / 32u;
+                item.cmdY = 1u;
+                item.cmdZ = 1u;
+                dgcData.compacted[0] = item;
+                dgcCount.dynamicSequenceCount = 1u;
+            } else {
+                dgcCount.dynamicSequenceCount = 0u;
+            }
         }
     }
 }
-
-

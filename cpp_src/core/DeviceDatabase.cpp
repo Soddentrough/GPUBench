@@ -621,6 +621,10 @@ void DeviceDatabase::enrichDeviceInfo(DeviceInfo &info) {
   if (!info.int4Support && (prof.archFamily == "RDNA 4" || containsCi(info.archName, "gfx12"))) {
     info.int4Support = true;
   }
+  if (info.vendorID == 0x1002 || containsCi(prof.archFamily, "RDNA") ||
+      containsCi(prof.archFamily, "CDNA") || containsCi(prof.archFamily, "GCN")) {
+    info.serSupported = false;
+  }
 }
 
 std::string DeviceDatabase::getArchitectureName(uint32_t vendorId, uint32_t deviceId,

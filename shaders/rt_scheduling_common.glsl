@@ -16,11 +16,12 @@
 // Resolved snapshot count for queue q (q in [0..15])
 #define Q_SNAPSHOT_IDX(q)  ((16u + (q)) * Q_COUNTER_STRIDE)
 
-// Prefix wave sum for octant q (q in [0..7])
-#define Q_PREFIX_IDX(q)    ((32u + (q)) * Q_COUNTER_STRIDE)
+// Contiguous single-cache-line prefix wave sums & snapshots for fast parallel lookup in bounce.comp
+#define Q_PREFIX_IDX(q)    (2048u + (q))
+#define Q_FAST_SNAP_IDX(q) (2064u + (q))
 
 // Per-sample seed slot written by classify.comp and consumed by resolve.comp
-#define Q_SEED_IDX         (40u * Q_COUNTER_STRIDE)
+#define Q_SEED_IDX         2080u
 
 // Native Vulkan Device-Generated Commands (DGC) sequence token structure
 struct DGCSequenceItem {

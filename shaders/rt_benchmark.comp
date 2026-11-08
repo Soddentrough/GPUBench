@@ -49,7 +49,7 @@ void main() {
                                   0xFF, origin, tMin, direction, tMax);
             while (rayQueryProceedEXT(query)) {
                 if (rayQueryGetIntersectionTypeEXT(query, false) == gl_RayQueryCandidateIntersectionAABBEXT) {
-                    rayQueryConfirmIntersectionEXT(query);
+                    rayQueryGenerateIntersectionEXT(query, tMin);
                 }
             }
             if (rayQueryGetIntersectionTypeEXT(query, true) == gl_RayQueryCommittedIntersectionGeneratedEXT) {

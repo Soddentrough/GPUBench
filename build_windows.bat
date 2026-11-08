@@ -69,12 +69,12 @@ goto collect_run_args
 
 :args_done
 
-:: 1. Detect MinGW toolchain
+:: 1. Detect MinGW toolchain (prefer UCRT64)
 set "MINGW_BIN="
-if exist "C:\msys64\mingw64\bin\gcc.exe" (
-    set "MINGW_BIN=C:\msys64\mingw64\bin"
-) else if exist "C:\msys64\ucrt64\bin\gcc.exe" (
+if exist "C:\msys64\ucrt64\bin\gcc.exe" (
     set "MINGW_BIN=C:\msys64\ucrt64\bin"
+) else if exist "C:\msys64\mingw64\bin\gcc.exe" (
+    set "MINGW_BIN=C:\msys64\mingw64\bin"
 )
 
 if not "%MINGW_BIN%"=="" (
@@ -168,15 +168,28 @@ if "%ACTION%"=="gui" (
 
 if "%ACTION%"=="package" (
     echo.
-    echo [GPUBench] Creating ZIP release package...
+    echo [GPUBench] Creating ZIP and NSIS release packages...
     pushd build-release
     cpack -G ZIP -C Release
     set "CPACK_ERR=!errorlevel!"
+    where makensis >nul 2>nul
+    if !errorlevel! equ 0 (
+        cpack -G NSIS -C Release
+        if !errorlevel! neq 0 set "CPACK_ERR=!errorlevel!"
+    ) else if exist "C:\Program Files (x86)\NSIS\makensis.exe" (
+        set "PATH=C:\Program Files (x86)\NSIS;!PATH!"
+        cpack -G NSIS -C Release
+        if !errorlevel! neq 0 set "CPACK_ERR=!errorlevel!"
+    ) else if exist "C:\msys64\ucrt64\bin\makensis.exe" (
+        set "PATH=C:\msys64\ucrt64\bin;!PATH!"
+        cpack -G NSIS -C Release
+        if !errorlevel! neq 0 set "CPACK_ERR=!errorlevel!"
+    )
     popd
     if !CPACK_ERR! neq 0 (
         echo [WARNING] Packaging encountered errors.
     ) else (
-        echo [GPUBench] Package created in build-release\
+        echo [GPUBench] Packages created in build-release\
     )
 )
 

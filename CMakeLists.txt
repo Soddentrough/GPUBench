@@ -488,9 +488,8 @@ endif()
 
 # Copy MinGW runtime DLLs to build directory so binary runs standalone out of the box
 if(MINGW)
-    find_program(MINGW_GCC gcc)
-    if(MINGW_GCC)
-        get_filename_component(MINGW_BIN_DIR ${MINGW_GCC} DIRECTORY)
+    get_filename_component(MINGW_BIN_DIR "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    if(EXISTS "${MINGW_BIN_DIR}/libstdc++-6.dll")
         add_custom_command(TARGET gpubench POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${MINGW_BIN_DIR}/libstdc++-6.dll"
@@ -555,6 +554,21 @@ if(GPUBENCH_BUILD_GUI)
             cpp_src/gui/TelemetryWorker.cpp
             cpp_src/gui/VulkanContext.cpp
         )
+        if(WIN32)
+            if(MINGW)
+                set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/packaging/windows/gpubench-gui.rc" PROPERTIES
+                    COMPILE_FLAGS "-I${CMAKE_CURRENT_SOURCE_DIR}/packaging/windows -DEMBED_RC_MANIFEST"
+                )
+            else()
+                set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/packaging/windows/gpubench-gui.rc" PROPERTIES
+                    COMPILE_FLAGS "-I${CMAKE_CURRENT_SOURCE_DIR}/packaging/windows"
+                )
+            endif()
+            list(APPEND GUI_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/packaging/windows/gpubench-gui.rc")
+            if(MSVC)
+                list(APPEND GUI_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/packaging/windows/gpubench.manifest")
+            endif()
+        endif()
         set(GUI_THIRD_PARTY_SOURCES
             ${IMGUI_DIR}/imgui.cpp
             ${IMGUI_DIR}/imgui_draw.cpp
@@ -608,14 +622,43 @@ if(GPUBENCH_BUILD_GUI)
 
 
 
-        if(WIN32 AND TARGET SDL3-shared)
-            add_custom_command(TARGET gpubench-gui POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                $<TARGET_FILE:SDL3-shared>
-                ${CMAKE_CURRENT_BINARY_DIR}/
-                COMMENT "Copying SDL3 runtime DLL to binary directory"
-            )
-            install(TARGETS SDL3-shared DESTINATION bin)
+        if(WIN32)
+            if(TARGET SDL3-shared)
+                add_custom_command(TARGET gpubench-gui POST_BUILD
+                    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    $<TARGET_FILE:SDL3-shared>
+                    ${CMAKE_CURRENT_BINARY_DIR}/
+                    COMMENT "Copying SDL3 runtime DLL to binary directory"
+                )
+                install(TARGETS SDL3-shared DESTINATION bin)
+            elseif(TARGET SDL3::SDL3-shared)
+                add_custom_command(TARGET gpubench-gui POST_BUILD
+                    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    $<TARGET_FILE:SDL3::SDL3-shared>
+                    ${CMAKE_CURRENT_BINARY_DIR}/
+                    COMMENT "Copying SDL3 runtime DLL to binary directory"
+                )
+                install(FILES $<TARGET_FILE:SDL3::SDL3-shared> DESTINATION bin)
+            elseif(TARGET SDL3::SDL3)
+                add_custom_command(TARGET gpubench-gui POST_BUILD
+                    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    $<TARGET_FILE:SDL3::SDL3>
+                    ${CMAKE_CURRENT_BINARY_DIR}/
+                    COMMENT "Copying SDL3 runtime DLL to binary directory"
+                )
+                install(FILES $<TARGET_FILE:SDL3::SDL3> DESTINATION bin)
+            elseif(MINGW AND EXISTS "${MINGW_BIN_DIR}/SDL3.dll")
+                add_custom_command(TARGET gpubench-gui POST_BUILD
+                    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${MINGW_BIN_DIR}/SDL3.dll"
+                    ${CMAKE_CURRENT_BINARY_DIR}/
+                    COMMENT "Copying SDL3 runtime DLL to binary directory"
+                )
+                install(FILES "${MINGW_BIN_DIR}/SDL3.dll" DESTINATION bin)
+            endif()
+            if(MINGW AND EXISTS "${MINGW_BIN_DIR}/SDL3.dll")
+                file(COPY "${MINGW_BIN_DIR}/SDL3.dll" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}")
+            endif()
         endif()
 
         install(TARGETS gpubench-gui DESTINATION bin)
@@ -629,9 +672,8 @@ install(TARGETS gpubench DESTINATION bin)
 
 # Bundle MinGW DLLs
 if(MINGW)
-    find_program(MINGW_GCC gcc)
-    if(MINGW_GCC)
-        get_filename_component(MINGW_BIN_DIR ${MINGW_GCC} DIRECTORY)
+    get_filename_component(MINGW_BIN_DIR "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    if(EXISTS "${MINGW_BIN_DIR}/libstdc++-6.dll")
         install(FILES
             "${MINGW_BIN_DIR}/libstdc++-6.dll"
             "${MINGW_BIN_DIR}/libgcc_s_seh-1.dll"
@@ -671,10 +713,12 @@ if(HIP_FOUND)
             FILES_MATCHING PATTERN "*.hip" PATTERN "*.co")
 endif()
 
-# Install Windows batch script for easy benchmarking
+# Install Windows batch script and application icon
 if(WIN32)
     install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/packaging/windows/RunAllBenchmarks.bat"
             DESTINATION .)
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/packaging/windows/icon.ico"
+            DESTINATION share/gpubench)
 endif()
 
 # Linux desktop integration files
@@ -775,6 +819,7 @@ if(WIN32)
     set(CPACK_NSIS_COMPRESSOR "/SOLID lzma")
     set(CPACK_NSIS_MUI_ICON "${CMAKE_CURRENT_SOURCE_DIR}/packaging/windows/icon.ico")
     set(CPACK_NSIS_MUI_UNIICON "${CMAKE_CURRENT_SOURCE_DIR}/packaging/windows/icon.ico")
+    set(CPACK_NSIS_INSTALLED_ICON_NAME "bin\\\\gpubench-gui.exe")
     set(CPACK_NSIS_HELP_LINK "https://github.com/Soddentrough/GPUBench")
     set(CPACK_NSIS_URL_INFO_ABOUT "https://github.com/Soddentrough/GPUBench")
     set(CPACK_NSIS_CONTACT "https://github.com/Soddentrough/GPUBench/issues")
@@ -784,6 +829,13 @@ if(WIN32)
         "RunAllBenchmarks.bat" "Run All Benchmarks"
         "https://github.com/Soddentrough/GPUBench" "GPUBench Website"
     )
+    set(CPACK_NSIS_CREATE_ICONS_EXTRA "
+  CreateShortCut '$SMPROGRAMS\\\\$STARTMENU_FOLDER\\\\GPUBench.lnk' '$INSTDIR\\\\bin\\\\gpubench-gui.exe' '' '$INSTDIR\\\\bin\\\\gpubench-gui.exe' 0
+  CreateShortCut '$DESKTOP\\\\GPUBench.lnk' '$INSTDIR\\\\bin\\\\gpubench-gui.exe' '' '$INSTDIR\\\\bin\\\\gpubench-gui.exe' 0
+")
+    set(CPACK_NSIS_DELETE_ICONS_EXTRA "
+  Delete '$DESKTOP\\\\GPUBench.lnk'
+")
     set(CPACK_NSIS_MUI_FINISHPAGE_RUN "gpubench-gui.exe")
     set(CPACK_NSIS_DEFINES "
 !define MUI_FINISHPAGE_RUN_TEXT \"Start GPUBench\"

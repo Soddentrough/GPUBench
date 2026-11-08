@@ -1,12 +1,11 @@
 #version 460
-#extension GL_EXT_ray_query : enable
-#extension GL_EXT_ray_flags_primitive_culling : enable
 #extension GL_KHR_shader_subgroup_basic : enable
+#extension GL_KHR_shader_subgroup_ballot : enable
 #extension GL_KHR_shader_subgroup_arithmetic : enable
+#extension GL_KHR_shader_subgroup_vote : enable
 
 layout(local_size_x = 32) in;
 
-layout(set = 0, binding = 0) uniform accelerationStructureEXT topLevelAS;
 layout(set = 0, binding = 1) buffer Results {
     uint totalRays;
     uint totalHits;
@@ -33,6 +32,7 @@ layout(set = 0, binding = 4) readonly buffer VertexBuffer {
 #define BINDING_TEX_HDR_BUF 7
 #define BINDING_TEX_PIX_BUF 8
 #define ENABLE_SPECIALIZED_ARCHETYPE 1
+#define PBR_NO_RAY_QUERY 1
 #include "pbr_common.glsl"
 
 layout(push_constant) uniform PushConstants {
@@ -456,10 +456,10 @@ vec3 computeSmoothNormal(uint sceneType, uint primId, vec3 hitPos, vec3 rayDir) 
     return normal;
 }
 
-vec3 evalMaterialBSDF(uint sceneType, uint matId, vec3 normal, vec3 inDir, vec3 hitPos, inout uint rng) {
+vec3 evalMaterialBSDF(uint sceneType, uint matId, vec3 normal, vec3 inDir, vec3 hitPos, bool enableShadows, float precomputedShadow, uvec3 precomputedAux, inout uint rng) {
     vec3 viewDir = -inDir;
     float NdotV = max(dot(normal, viewDir), 0.001);
-    uint archetype = (SPECIALIZED_ARCHETYPE != 0xFFFFFFFFu) ? SPECIALIZED_ARCHETYPE : getArchetype(matId);
+    uint archetype = (SPECIALIZED_ARCHETYPE < 8u) ? SPECIALIZED_ARCHETYPE : getArchetype(matId);
 
     if (sceneType == SCENE_OUTDOOR_TERRAIN) {
         // Outdoor Open-World Lighting
@@ -489,60 +489,75 @@ vec3 evalMaterialBSDF(uint sceneType, uint matId, vec3 normal, vec3 inDir, vec3 
 
         vec3 color = vec3(0.0);
         vec3 albedo = vec3(0.5);
+        vec3 fbmPos = hitPos * 0.32;
+        vec3 noisePos = hitPos * 1.40;
+        switch (archetype) {
+            case 0: fbmPos = vec3(hitPos.xy * 0.08, hitPos.z * 0.35); noisePos = hitPos * 0.65; break;
+            case 1: fbmPos = hitPos * 0.45; noisePos = hitPos * 1.80; break;
+            case 2: fbmPos = vec3(hitPos.xy * 0.35, 0.0); break;
+            case 3: fbmPos = hitPos * 0.12; noisePos = hitPos * 2.40; break;
+            case 4: fbmPos = hitPos * 0.14; noisePos = hitPos * 0.95; break;
+            case 5: fbmPos = hitPos * 0.09; noisePos = hitPos * 0.75; break;
+            case 6: fbmPos = vec3(hitPos.xy * 0.85, hitPos.z * 0.18); noisePos = hitPos * 1.35; break;
+            default: break;
+        }
+        float fbmVal = rustFBM3D_common(fbmPos);
+        float noiseVal = (archetype != 2u) ? noise3D_common(noisePos) : 0.0;
 
         switch (archetype) {
             case 0: {
                 // Weathered Sandstone & Scree Slope
-                albedo = vec3(0.65, 0.52, 0.40);
-                float D_r = pow(NdotH, 8.0) * 0.15;
+                albedo = mix(vec3(0.58, 0.45, 0.34), vec3(0.72, 0.59, 0.46), clamp(fbmVal * 0.75 + noiseVal * 0.25, 0.0, 1.0));
+                float D_r = pow(NdotH, 8.0) * (0.12 + 0.08 * noiseVal);
                 color = albedo * (NdotL * 0.75 + 0.15) + vec3(D_r);
                 break;
             }
             case 1: {
                 // Translucent Conifer Pine Foliage / Needles
-                albedo = vec3(0.08, 0.32, 0.12);
+                albedo = mix(vec3(0.06, 0.26, 0.09), vec3(0.11, 0.38, 0.15), clamp(fbmVal * 0.70 + noiseVal * 0.30, 0.0, 1.0));
                 float wrappedNdotL = clamp((dot(normal, sunDir) + 0.45) / 1.45, 0.0, 1.0);
-                vec3 transmission = vec3(0.18, 0.48, 0.10) * wrappedNdotL;
+                vec3 transmission = vec3(0.18, 0.48, 0.10) * wrappedNdotL * (0.85 + 0.30 * noiseVal);
                 float D_f = pow(NdotH, 30.0) * 0.4;
                 color = albedo * (NdotL * 0.60 + 0.10) + transmission + vec3(D_f);
                 break;
             }
             case 2: {
                 // Alpine Lake / River Water Plane
-                albedo = vec3(0.012, 0.042, 0.065);
+                albedo = mix(vec3(0.010, 0.038, 0.060), vec3(0.015, 0.048, 0.072), fbmVal);
                 break;
             }
             case 3: {
                 // High Mountain Snow & Glacial Ice
-                albedo = vec3(0.92, 0.95, 0.98);
+                albedo = mix(vec3(0.88, 0.92, 0.97), vec3(0.96, 0.98, 1.00), fbmVal);
                 float snowWrap = clamp((dot(normal, sunDir) + 0.3) / 1.3, 0.0, 1.0);
-                float snowGlint = pow(NdotH, 60.0) * 0.8;
+                float snowGlint = pow(NdotH, 60.0) * (0.65 + 0.45 * noiseVal);
                 color = albedo * (snowWrap * 0.85 + 0.20) + vec3(snowGlint);
                 break;
             }
             case 4: {
                 // Exposed Granite Cliff Face
-                albedo = vec3(0.30, 0.31, 0.34);
+                albedo = mix(vec3(0.24, 0.25, 0.28), vec3(0.36, 0.37, 0.40), fbmVal);
                 float cliffNdotL = NdotL * 0.80 + 0.12;
-                color = albedo * cliffNdotL;
+                float micaSpec = pow(NdotH, 45.0) * smoothstep(0.65, 0.95, noiseVal) * 0.35;
+                color = albedo * cliffNdotL + vec3(micaSpec);
                 break;
             }
             case 5: {
                 // Valley Grassland / Alpine Meadow
-                albedo = vec3(0.24, 0.44, 0.18);
-                float sheen = pow(clamp(1.0 - VdotH, 0.0, 1.0), 3.0) * 0.30;
+                albedo = mix(vec3(0.19, 0.38, 0.14), vec3(0.29, 0.50, 0.22), clamp(fbmVal * 0.75 + noiseVal * 0.25, 0.0, 1.0));
+                float sheen = pow(clamp(1.0 - VdotH, 0.0, 1.0), 3.0) * (0.24 + 0.12 * noiseVal);
                 color = albedo * (NdotL * 0.70 + 0.18) + vec3(sheen);
                 break;
             }
             case 6: {
                 // Pine Bark / Timber Trunk
-                albedo = vec3(0.25, 0.17, 0.11);
+                albedo = mix(vec3(0.18, 0.11, 0.07), vec3(0.32, 0.22, 0.14), clamp(fbmVal * 0.70 + noiseVal * 0.30, 0.0, 1.0));
                 color = albedo * (NdotL * 0.65 + 0.10);
                 break;
             }
             case 7: {
                 // Wet River Stones / Shoreline Boulders
-                albedo = vec3(0.18, 0.20, 0.22);
+                albedo = mix(vec3(0.14, 0.16, 0.18), vec3(0.23, 0.25, 0.27), clamp(fbmVal * 0.70 + noiseVal * 0.30, 0.0, 1.0));
                 float F_wet = 0.06 + 0.94 * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
                 float D_wet = pow(NdotH, 90.0) * 2.5;
                 color = albedo * (NdotL * 0.50 + 0.10) + vec3(D_wet * F_wet);
@@ -550,12 +565,7 @@ vec3 evalMaterialBSDF(uint sceneType, uint matId, vec3 normal, vec3 inDir, vec3 
             }
         }
 
-        float sunShadow = 1.0;
-        if (dot(normal, sunDir) > 0.0) {
-            if (traceShadowRay(hitPos, normal, sunDir, 2500.0)) {
-                sunShadow = 0.0;
-            }
-        }
+        float sunShadow = enableShadows ? precomputedShadow : 1.0;
         vec3 totalRadiance;
         if (archetype == 2) {
             // Physically-based water: Fresnel reflection of outdoor sky & mountains
@@ -593,13 +603,14 @@ vec3 evalMaterialBSDF(uint sceneType, uint matId, vec3 normal, vec3 inDir, vec3 
     } else {
         // Indoor Atrium / Showroom Lighting
         vec3 totalRadiance = vec3(0.0);
+        vec2 rtao01 = unpackHalf2x16(precomputedAux.y);
+        vec2 rtao23 = unpackHalf2x16(precomputedAux.z);
 
         for (int l = 0; l < 4; ++l) {
             vec3 lightDir = normalize(SCENE_LIGHTS[l].dir);
             vec3 lightCol = SCENE_LIGHTS[l].color * SCENE_LIGHTS[l].intensity;
-            if (l == 0 && archetype != 2) {
-                float shadowVis = traceAreaShadow(hitPos, normal, lightDir, 25.0, 0.045, rng, 4);
-                lightCol *= shadowVis;
+            if (enableShadows && l == 0 && archetype != 2) {
+                lightCol *= precomputedShadow;
             }
             vec3 halfVec = normalize(viewDir + lightDir);
             float NdotL = max(dot(normal, lightDir), 0.0);
@@ -689,8 +700,10 @@ vec3 evalMaterialBSDF(uint sceneType, uint matId, vec3 normal, vec3 inDir, vec3 
                     // Neutral Studio / Atrium Floor
                     vec3 floorBase = vec3(0.24, 0.25, 0.28);
                     float floorOcc = computeFloorOcclusion(hitPos);
-                    float rtao = computeRTAO(hitPos, normal, rng, 4, 15.0);
-                    floorOcc *= rtao;
+                    if (enableShadows) {
+                        float rtao = (l == 0) ? rtao01.x : ((l == 1) ? rtao01.y : ((l == 2) ? rtao23.x : rtao23.y));
+                        floorOcc *= rtao;
+                    }
                     float wallFactor = smoothstep(2.0, 6.0, hitPos.y);
                     float wallAtten = mix(1.0, 0.85, wallFactor);
                     float effectiveNdotL = NdotL * ((l == 0) ? floorOcc : clamp(floorOcc * 1.15, 0.0, 1.0)) * wallAtten;
@@ -731,6 +744,7 @@ vec3 evalMaterialBSDF(uint sceneType, uint matId, vec3 normal, vec3 inDir, vec3 
 
         vec3 reflDir = reflect(inDir, normal);
         vec3 envRefl = evalStudioEnvironment(reflDir);
+        uint rPrim = precomputedAux.x;
         if (archetype == 0) {
             totalRadiance += envRefl * 0.50 * pow(clamp(1.0 - NdotV, 0.0, 1.0), 4.0);
         } else if (archetype == 1) {
@@ -738,13 +752,9 @@ vec3 evalMaterialBSDF(uint sceneType, uint matId, vec3 normal, vec3 inDir, vec3 
         } else if (archetype == 2) {
             vec3 refrDir = refract(inDir, normal, 1.0 / 1.52);
             if (length(refrDir) < 0.01) refrDir = reflDir;
-            rayQueryEXT glassQuery;
-            rayQueryInitializeEXT(glassQuery, topLevelAS, gl_RayFlagsOpaqueEXT, 0xFF, hitPos + refrDir * 0.02, 0.001, refrDir, 25.0);
-            while (rayQueryProceedEXT(glassQuery)) {}
 
             vec3 transmittedCol;
-            if (rayQueryGetIntersectionTypeEXT(glassQuery, true) != 0) {
-                uint rPrim = rayQueryGetIntersectionPrimitiveIndexEXT(glassQuery, true);
+            if (enableShadows && rPrim != 0xFFFFFFFFu) {
                 if (rPrim < PRIM_KNOT_PAINT_END) transmittedCol = vec3(0.68, 0.01, 0.02);
                 else if (rPrim < PRIM_KNOT_JADE_END) transmittedCol = vec3(0.06, 0.75, 0.65);
                 else if (rPrim < PRIM_KNOT_CHROME_END) transmittedCol = vec3(0.85, 0.85, 0.88);
@@ -765,13 +775,8 @@ vec3 evalMaterialBSDF(uint sceneType, uint matId, vec3 normal, vec3 inDir, vec3 
             vec3 goldBase = vec3(1.00, 0.78, 0.32);
             totalRadiance += envRefl * goldBase * (0.40 + 0.60 * pow(clamp(1.0 - NdotV, 0.0, 1.0), 5.0));
         } else if (archetype == 7) {
-            rayQueryEXT chromeQuery;
-            rayQueryInitializeEXT(chromeQuery, topLevelAS, gl_RayFlagsOpaqueEXT, 0xFF, hitPos + normal * 0.015, 0.001, reflDir, 25.0);
-            while (rayQueryProceedEXT(chromeQuery)) {}
-
             vec3 reflColor;
-            if (rayQueryGetIntersectionTypeEXT(chromeQuery, true) != 0) {
-                uint rPrim = rayQueryGetIntersectionPrimitiveIndexEXT(chromeQuery, true);
+            if (enableShadows && rPrim != 0xFFFFFFFFu) {
                 if (rPrim < PRIM_KNOT_PAINT_END) reflColor = vec3(0.68, 0.01, 0.02);
                 else if (rPrim < PRIM_KNOT_JADE_END) reflColor = vec3(0.06, 0.75, 0.65);
                 else if (rPrim < PRIM_KNOT_CHROME_END) reflColor = vec3(0.85, 0.85, 0.88);
@@ -787,13 +792,8 @@ vec3 evalMaterialBSDF(uint sceneType, uint matId, vec3 normal, vec3 inDir, vec3 
             totalRadiance = mix(totalRadiance, reflColor, 0.96);
         } else if (archetype == 5) {
             if (hitPos.y <= 3.0) {
-                rayQueryEXT reflQuery;
-                rayQueryInitializeEXT(reflQuery, topLevelAS, gl_RayFlagsOpaqueEXT, 0xFF, hitPos + normal * 0.015, 0.001, reflDir, 25.0);
-                while (rayQueryProceedEXT(reflQuery)) {}
-
                 vec3 reflColor;
-                if (rayQueryGetIntersectionTypeEXT(reflQuery, true) != 0) {
-                    uint rPrim = rayQueryGetIntersectionPrimitiveIndexEXT(reflQuery, true);
+                if (enableShadows && rPrim != 0xFFFFFFFFu) {
                     if (rPrim < PRIM_KNOT_PAINT_END) reflColor = vec3(0.68, 0.01, 0.02);
                     else if (rPrim < PRIM_KNOT_JADE_END) reflColor = vec3(0.06, 0.75, 0.65);
                     else if (rPrim < PRIM_KNOT_CHROME_END) reflColor = vec3(0.85, 0.85, 0.88);
@@ -819,20 +819,80 @@ vec3 evalMaterialBSDF(uint sceneType, uint matId, vec3 normal, vec3 inDir, vec3 
 
 void main() {
     uint threadIdx = gl_GlobalInvocationID.x;
-    uint count = (pc.mode == 1u) ? pc.queueCapacity : worklist.queueCounters[Q_SNAPSHOT_IDX(pc.materialId)];
+    if (SPECIALIZED_ARCHETYPE == 8u || (SPECIALIZED_ARCHETYPE != 9u && pc.mode == 2u)) {
+        uint count = worklist.queueCounters[Q_SNAPSHOT_IDX(0u)];
+        if (threadIdx >= count || threadIdx >= pc.queueCapacity) return;
+        vec4 p = worklist.rayRecords[threadIdx];
+        uint pixelIdx = floatBitsToUint(p.y);
+        uint primId = floatBitsToUint(p.z);
+        if (subgroupAllEqual(primId)) {
+            primId = subgroupBroadcastFirst(primId);
+        }
+        vec2 bary = unpackUnorm2x16(floatBitsToUint(p.w));
+
+        vec3 camPos, camForward, camRight, camUp;
+        float fov;
+        getCamera(pc.sceneType, camPos, camForward, camRight, camUp, fov);
+
+        uint px_u = pixelIdx % pc.width;
+        uint py_u = pixelIdx / pc.width;
+        float halfH = float(pc.height) * 0.5;
+        float px = float(px_u) - float(pc.width) * 0.5 + 0.5;
+        float py = float(py_u) - halfH + 0.5;
+        vec3 inDir = normalize(camForward + (px / halfH * fov) * camRight - (py / halfH * fov) * camUp);
+
+        vec3 normal;
+        if (pc.isGltf != 0u) {
+            uint base = primId * 36u;
+            vec3 n0 = vec3(vbuf.vertices[base + 3], vbuf.vertices[base + 4], vbuf.vertices[base + 5]);
+            vec3 n1 = vec3(vbuf.vertices[base + 15], vbuf.vertices[base + 16], vbuf.vertices[base + 17]);
+            vec3 n2 = vec3(vbuf.vertices[base + 27], vbuf.vertices[base + 28], vbuf.vertices[base + 29]);
+            float w = 1.0 - bary.x - bary.y;
+            vec3 sn = w * n0 + bary.x * n1 + bary.y * n2;
+            float snLen2 = dot(sn, sn);
+            if (snLen2 > 1e-8) {
+                normal = sn * inversesqrt(snLen2);
+            } else {
+                vec3 p0 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
+                vec3 p1 = vec3(vbuf.vertices[base + 12], vbuf.vertices[base + 13], vbuf.vertices[base + 14]);
+                vec3 p2 = vec3(vbuf.vertices[base + 24], vbuf.vertices[base + 25], vbuf.vertices[base + 26]);
+                normal = normalize(cross(p1 - p0, p2 - p0));
+            }
+            if (dot(normal, inDir) > 0.0) normal = -normal;
+        } else {
+            vec3 hitPos = (pc.sceneType == SCENE_OUTDOOR_TERRAIN) ? vec3(0.0) : (camPos + inDir * p.x);
+            normal = computeSmoothNormal(pc.sceneType, primId, hitPos, inDir);
+        }
+        vec3 shadedColor = normal * 0.5 + 0.5;
+        if (pc.dumpRenders != 0) {
+            fb.pixels[pixelIdx] = vec4(shadedColor, 1.0);
+        } else {
+            uint threadLum = uint(clamp(dot(shadedColor, vec3(0.2126, 0.7152, 0.0722)), 0.0, 100.0) * 256.0);
+            uint waveLum = subgroupAdd(threadLum);
+            if (subgroupElect() && waveLum > 0u) {
+                atomicAdd(results.accumulatedLuminance, waveLum);
+            }
+        }
+        return;
+    }
+
+    uint count = (SPECIALIZED_ARCHETYPE != 9u && pc.mode == 1u) ? pc.queueCapacity : worklist.queueCounters[Q_SNAPSHOT_IDX(pc.materialId)];
     if (threadIdx >= count || threadIdx >= pc.queueCapacity) return;
 
-    if (threadIdx == 0) {
+    if (SPECIALIZED_ARCHETYPE != 9u && threadIdx == 0) {
         if (pc.mode == 1u) {
             atomicAdd(results.totalRays, count);
+            atomicAdd(results.totalHits, count);
         }
-        atomicAdd(results.totalHits, count);
     }
 
     uint recordIdx = pc.materialId * pc.queueCapacity + threadIdx;
-    vec4 p = worklist.rayRecords[recordIdx];
-    float t = p.x;
-    uint pixelIdx = (pc.mode == 1u) ? (pc.materialId * pc.queueCapacity + threadIdx) : floatBitsToUint(p.y);
+    vec4 p = vec4(0.0);
+    if (SPECIALIZED_ARCHETYPE == 9u || pc.mode != 1u) {
+        p = worklist.rayRecords[recordIdx];
+    }
+
+    uint pixelIdx = (SPECIALIZED_ARCHETYPE != 9u && pc.mode == 1u) ? (pc.materialId * pc.queueCapacity + threadIdx) : floatBitsToUint(p.y);
     uint primId = floatBitsToUint(p.z);
     uint rngState = pixelIdx;
 
@@ -846,89 +906,83 @@ void main() {
     float px = float(px_u) - float(pc.width) * 0.5 + 0.5;
     float py = float(py_u) - halfH + 0.5;
     vec3 inDir = normalize(camForward + (px / halfH * fov) * camRight - (py / halfH * fov) * camUp);
-    vec3 hitPos = camPos + inDir * t;
 
     vec3 shadedColor;
-    if (pc.mode == 1u) {
+    if (SPECIALIZED_ARCHETYPE != 9u && pc.mode == 1u) {
         if (pc.isGltf != 0u) {
-            GltfMaterialGpu mat = matBuf.materials[pc.materialId % 8u];
+            uint uniformArch = subgroupBroadcastFirst(pc.materialId & 7u);
+            GltfMaterialGpu mat = matBuf.materials[uniformArch];
+            mat.archetype = uniformArch;
             vec3 dummyPos = vec3(float(px_u) * 0.01, float(py_u) * 0.01, 1.5);
             vec3 dummyNorm = ((pixelIdx % 2) == 0) ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
             vec4 dummyTan = vec4(1.0, 0.0, 0.0, 1.0);
             vec2 dummyUv = vec2(float(px_u) / float(pc.width), float(py_u) / float(pc.height));
-            shadedColor = evaluateGltfPbr(mat, dummyPos, dummyNorm, dummyNorm, dummyTan, dummyUv, inDir, pc.sceneType, false, rngState);
+            shadedColor = evaluateGltfPbrPrecomputedVis(mat, dummyPos, dummyNorm, dummyNorm, dummyTan, dummyUv, inDir, pc.sceneType, false, vec3(1.0, 1.0, -1.0), rngState);
         } else {
             vec3 dummyPos = vec3(float(px_u) * 0.01, float(py_u) * 0.01, 1.5);
             vec3 dummyNorm = ((threadIdx % 2) == 0) ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
-            shadedColor = evalMaterialBSDF(pc.sceneType, pc.materialId, dummyNorm, inDir, dummyPos, rngState);
+            shadedColor = evalMaterialBSDF(pc.sceneType, subgroupBroadcastFirst(pc.materialId & 7u), dummyNorm, inDir, dummyPos, false, 1.0, uvec3(0xFFFFFFFFu, 0u, 0u), rngState);
         }
-    } else if (pc.mode == 2u) {
-        vec3 normal;
-        if (pc.isGltf != 0u) {
-            vec2 bary = unpackUnorm2x16(floatBitsToUint(p.w));
-            uint base = primId * 36u;
-            vec3 p0 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
-            vec3 n0 = vec3(vbuf.vertices[base + 3], vbuf.vertices[base + 4], vbuf.vertices[base + 5]);
-            base += 12u;
-            vec3 p1 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
-            vec3 n1 = vec3(vbuf.vertices[base + 3], vbuf.vertices[base + 4], vbuf.vertices[base + 5]);
-            base += 12u;
-            vec3 p2 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
-            vec3 n2 = vec3(vbuf.vertices[base + 3], vbuf.vertices[base + 4], vbuf.vertices[base + 5]);
-            float w = 1.0 - bary.x - bary.y;
-            vec3 geomNormal = normalize(cross(p1 - p0, p2 - p0));
-            vec3 sn = w * n0 + bary.x * n1 + bary.y * n2;
-            normal = (length(sn) > 1e-4) ? normalize(sn) : geomNormal;
-            if (dot(normal, inDir) > 0.0) normal = -normal;
-        } else {
-            normal = computeSmoothNormal(pc.sceneType, primId, hitPos, inDir);
-        }
-        shadedColor = normal * 0.5 + 0.5;
-        if (pc.dumpRenders != 0) {
-            fb.pixels[pixelIdx] = vec4(shadedColor, 1.0);
-        } else {
-            uint threadLum = uint(clamp(dot(shadedColor, vec3(0.2126, 0.7152, 0.0722)), 0.0, 100.0) * 256.0);
-            uint waveLum = subgroupAdd(threadLum);
-            if (subgroupElect() && waveLum > 0u) {
-                atomicAdd(results.accumulatedLuminance, waveLum);
-            }
-        }
-        return;
     } else {
-        if (pc.isGltf != 0u) {
+        if (SPECIALIZED_ARCHETYPE == 9u || pc.isGltf != 0u) {
+            vec2 vis = unpackHalf2x16(floatBitsToUint(p.x));
+            float waterDepth = -1.0;
+            uint uniformArch = (SPECIALIZED_ARCHETYPE < 8u) ? SPECIALIZED_ARCHETYPE : subgroupBroadcastFirst(pc.materialId & 7u);
+            if (pc.sceneType == SCENE_AAA_FOREST && uniformArch == 2u) {
+                waterDepth = worklist.rayRecords[(8u + pc.materialId) * pc.queueCapacity + threadIdx].x;
+            }
+            if (subgroupAllEqual(primId)) {
+                primId = subgroupBroadcastFirst(primId);
+            }
+            uint matId = triMatBuf.triangleMats[primId];
+            if (subgroupAllEqual(matId)) {
+                matId = subgroupBroadcastFirst(matId);
+            }
+            GltfMaterialGpu mat = matBuf.materials[matId];
+            mat.archetype = uniformArch;
+
             vec2 bary = unpackUnorm2x16(floatBitsToUint(p.w));
             uint base = primId * 36u;
             vec3 p0 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
             vec3 n0 = vec3(vbuf.vertices[base + 3], vbuf.vertices[base + 4], vbuf.vertices[base + 5]);
-            vec4 t0 = vec4(vbuf.vertices[base + 6], vbuf.vertices[base + 7], vbuf.vertices[base + 8], vbuf.vertices[base + 9]);
             vec2 uv0 = vec2(vbuf.vertices[base + 10], vbuf.vertices[base + 11]);
 
-            base += 12u;
-            vec3 p1 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
-            vec3 n1 = vec3(vbuf.vertices[base + 3], vbuf.vertices[base + 4], vbuf.vertices[base + 5]);
-            vec4 t1 = vec4(vbuf.vertices[base + 6], vbuf.vertices[base + 7], vbuf.vertices[base + 8], vbuf.vertices[base + 9]);
-            vec2 uv1 = vec2(vbuf.vertices[base + 10], vbuf.vertices[base + 11]);
+            uint base1 = base + 12u;
+            vec3 p1 = vec3(vbuf.vertices[base1 + 0], vbuf.vertices[base1 + 1], vbuf.vertices[base1 + 2]);
+            vec3 n1 = vec3(vbuf.vertices[base1 + 3], vbuf.vertices[base1 + 4], vbuf.vertices[base1 + 5]);
+            vec2 uv1 = vec2(vbuf.vertices[base1 + 10], vbuf.vertices[base1 + 11]);
 
-            base += 12u;
-            vec3 p2 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
-            vec3 n2 = vec3(vbuf.vertices[base + 3], vbuf.vertices[base + 4], vbuf.vertices[base + 5]);
-            vec4 t2 = vec4(vbuf.vertices[base + 6], vbuf.vertices[base + 7], vbuf.vertices[base + 8], vbuf.vertices[base + 9]);
-            vec2 uv2 = vec2(vbuf.vertices[base + 10], vbuf.vertices[base + 11]);
+            uint base2 = base + 24u;
+            vec3 p2 = vec3(vbuf.vertices[base2 + 0], vbuf.vertices[base2 + 1], vbuf.vertices[base2 + 2]);
+            vec3 n2 = vec3(vbuf.vertices[base2 + 3], vbuf.vertices[base2 + 4], vbuf.vertices[base2 + 5]);
+            vec2 uv2 = vec2(vbuf.vertices[base2 + 10], vbuf.vertices[base2 + 11]);
 
             float w = 1.0 - bary.x - bary.y;
             vec3 interpHitPos = w * p0 + bary.x * p1 + bary.y * p2;
             vec3 geomNormal = normalize(cross(p1 - p0, p2 - p0));
             vec3 sn = w * n0 + bary.x * n1 + bary.y * n2;
             vec3 smoothNormal = (length(sn) > 1e-4) ? normalize(sn) : geomNormal;
-            vec4 tangent = w * t0 + bary.x * t1 + bary.y * t2;
+            vec4 tangent = vec4(0.0);
+            if (mat.normalTexIdx >= 0) {
+                vec4 t0 = vec4(vbuf.vertices[base + 6], vbuf.vertices[base + 7], vbuf.vertices[base + 8], vbuf.vertices[base + 9]);
+                vec4 t1 = vec4(vbuf.vertices[base1 + 6], vbuf.vertices[base1 + 7], vbuf.vertices[base1 + 8], vbuf.vertices[base1 + 9]);
+                vec4 t2 = vec4(vbuf.vertices[base2 + 6], vbuf.vertices[base2 + 7], vbuf.vertices[base2 + 8], vbuf.vertices[base2 + 9]);
+                tangent = w * t0 + bary.x * t1 + bary.y * t2;
+            }
             vec2 uv = w * uv0 + bary.x * uv1 + bary.y * uv2;
 
-            uint matId = triMatBuf.triangleMats[primId];
-            GltfMaterialGpu mat = matBuf.materials[matId];
-            shadedColor = evaluateGltfPbr(mat, interpHitPos, geomNormal, smoothNormal, tangent, uv, inDir, pc.sceneType, true, rngState);
+            shadedColor = evaluateGltfPbrPrecomputedVis(mat, interpHitPos, geomNormal, smoothNormal, tangent, uv, inDir, pc.sceneType, true, vec3(vis.x, vis.y, waterDepth), rngState);
         } else {
-            vec3 normal = computeSmoothNormal(pc.sceneType, primId, hitPos, inDir);
-            shadedColor = evalMaterialBSDF(pc.sceneType, pc.materialId, normal, inDir, hitPos, rngState);
+            vec3 hitPos = camPos + inDir * p.x;
+            vec3 normal = (pc.sceneType == SCENE_OUTDOOR_TERRAIN)
+                ? octDecode(unpackSnorm2x16(primId))
+                : computeSmoothNormal(pc.sceneType, primId, hitPos, inDir);
+            uvec3 aux = uvec3(0xFFFFFFFFu, 0u, 0u);
+            if (pc.sceneType != SCENE_OUTDOOR_TERRAIN) {
+                vec4 p1 = worklist.rayRecords[(8u + pc.materialId) * pc.queueCapacity + threadIdx];
+                aux = uvec3(floatBitsToUint(p1.x), floatBitsToUint(p1.y), floatBitsToUint(p1.z));
+            }
+            shadedColor = evalMaterialBSDF(pc.sceneType, subgroupBroadcastFirst(pc.materialId & 7u), normal, inDir, hitPos, true, p.w, aux, rngState);
         }
     }
 

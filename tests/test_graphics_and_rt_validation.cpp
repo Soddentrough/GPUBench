@@ -336,6 +336,24 @@ TEST_CASE(GraphicsAndRayTracingValidation, RayScheduling_PositiveAndNegativeVali
   ctx->waitIdle();
   ASSERT_TRUE(bench.ValidateResults(0));
 
+  // Verify non-zero worklist compaction for Incoherent GI (Config 8, mode 2),
+  // Primary Rays G-Buffer (Config 18, mode 9), and Single Light (Config 32, mode 8)
+  for (uint32_t cfg : {8u, 18u, 32u}) {
+    if (!bench.unsupportedConfig[cfg]) {
+      bench.Run(cfg);
+      ctx->waitIdle();
+      ASSERT_TRUE(bench.ValidateResults(cfg));
+      uint32_t snaps[16] = {0};
+      ctx->readBuffer(bench.workListBuffer, 2064u * sizeof(uint32_t), sizeof(snaps), snaps);
+      uint64_t totalCompacted = 0;
+      for (uint32_t q = 0; q < 16; ++q) {
+        totalCompacted += snaps[q];
+      }
+      std::cout << "[Showroom cfg " << cfg << " compacted=" << totalCompacted << "] ";
+      ASSERT_TRUE(totalCompacted > 0);
+    }
+  }
+
   // Negative validation A: Zero rays, zero hits
   uint32_t statsZero[4] = {0, 0, 0, 0};
   ctx->writeBuffer(bench.resultBuffer, 0, sizeof(statsZero), statsZero);
@@ -355,6 +373,33 @@ TEST_CASE(GraphicsAndRayTracingValidation, RayScheduling_PositiveAndNegativeVali
   ASSERT_FALSE(bench.ValidateResults(0));
 
   bench.Teardown();
+
+  // Also verify IndoorAtrium, OutdoorLandscape, and AAAOutdoorForest worklist compaction
+  const std::pair<RaySchedulingBench::SceneType, const char *> extraScenes[] = {
+      {RaySchedulingBench::SceneType::IndoorAtrium, "Indoor"},
+      {RaySchedulingBench::SceneType::OutdoorLandscape, "Outdoor"},
+      {RaySchedulingBench::SceneType::AAAOutdoorForest, "Forest"},
+  };
+  for (const auto &sc : extraScenes) {
+    RaySchedulingBench sceneBench(sc.first);
+    sceneBench.Setup(*ctx, kdir);
+    for (uint32_t cfg : {8u, 18u, 32u}) {
+      if (!sceneBench.unsupportedConfig[cfg]) {
+        sceneBench.Run(cfg);
+        ctx->waitIdle();
+        ASSERT_TRUE(sceneBench.ValidateResults(cfg));
+        uint32_t snaps[16] = {0};
+        ctx->readBuffer(sceneBench.workListBuffer, 2064u * sizeof(uint32_t), sizeof(snaps), snaps);
+        uint64_t totalCompacted = 0;
+        for (uint32_t q = 0; q < 16; ++q) {
+          totalCompacted += snaps[q];
+        }
+        std::cout << "[" << sc.second << " cfg " << cfg << " compacted=" << totalCompacted << "] ";
+        ASSERT_TRUE(totalCompacted > 0);
+      }
+    }
+    sceneBench.Teardown();
+  }
 }
 
 // ============================================================================

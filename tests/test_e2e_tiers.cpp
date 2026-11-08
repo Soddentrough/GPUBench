@@ -52,7 +52,7 @@ std::string getGpubenchPath() {
   }
 #ifdef _WIN32
   const std::vector<std::string> candidates = {
-      "./Release/gpubench.exe",
+      "./Release/gpubench.exe", "./build-release/gpubench.exe", "./build-win/gpubench.exe",
       "./gpubench.exe",
       "./build/Release/gpubench.exe",
       "./build/gpubench.exe",

@@ -72,7 +72,7 @@ public:
   void setProfileSnapshot(bool enable) { profileSnapshot = enable; }
   bool getProfileSnapshot() const { return profileSnapshot; }
 
-  void setVerifyParity(bool enable) { verifyParity = enable; }
+  void setVerifyParity(bool enable);
   bool getVerifyParity() const { return verifyParity; }
   void setForce(bool f) { forceExecution = f; }
   bool getForce() const { return forceExecution; }

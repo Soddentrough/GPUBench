@@ -29,6 +29,12 @@ VulkanContext::~VulkanContext() {
 bool VulkanContext::init(const char* title, int width, int height, float scaleOverride) {
     if (m_initialized) return true;
 
+#if defined(_WIN32)
+    // Tell SDL3 to use the embedded Win32 icon resource (IDI_ICON1 = 1) for the window class
+    SDL_SetHint(SDL_HINT_WINDOWS_INTRESOURCE_ICON, "1");
+    SDL_SetHint(SDL_HINT_WINDOWS_INTRESOURCE_ICON_SMALL, "1");
+#endif
+
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         std::cerr << "Failed to initialize SDL3: " << SDL_GetError() << std::endl;
         return false;
@@ -73,6 +79,28 @@ bool VulkanContext::init(const char* title, int width, int height, float scaleOv
         std::cerr << "Failed to create SDL3 window: " << SDL_GetError() << std::endl;
         return false;
     }
+
+#if defined(_WIN32)
+    {
+        SDL_PropertiesID props = SDL_GetWindowProperties(m_window);
+        HWND hwnd = static_cast<HWND>(SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr));
+        if (hwnd) {
+            HINSTANCE hInst = GetModuleHandleW(nullptr);
+            HICON hIconBig = static_cast<HICON>(LoadImageW(
+                hInst, MAKEINTRESOURCEW(1), IMAGE_ICON,
+                GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), LR_DEFAULTCOLOR));
+            HICON hIconSmall = static_cast<HICON>(LoadImageW(
+                hInst, MAKEINTRESOURCEW(1), IMAGE_ICON,
+                GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR));
+            if (hIconBig) {
+                SendMessageW(hwnd, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(hIconBig));
+            }
+            if (hIconSmall) {
+                SendMessageW(hwnd, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(hIconSmall));
+            }
+        }
+    }
+#endif
 
     float winScale = SDL_GetWindowDisplayScale(m_window);
     if (winScale > 0.0f) {
@@ -913,14 +941,25 @@ VulkanContext::TextureResource VulkanContext::createTextureRgba(int width, int h
 
 VulkanContext::TextureResource VulkanContext::loadTextureFromFile(const std::string& filepath) {
     TextureResource tex{};
+    std::filesystem::path exeDir;
+    if (const char* basePath = SDL_GetBasePath()) {
+        exeDir = std::filesystem::path(basePath);
+    }
+
     std::vector<std::string> writablePaths = {
         filepath,
         "../" + filepath,
         "../../" + filepath
     };
+    if (!exeDir.empty()) {
+        writablePaths.push_back((exeDir / filepath).string());
+        writablePaths.push_back((exeDir / ".." / filepath).string());
+        writablePaths.push_back((exeDir / ".." / ".." / filepath).string());
+    }
 #ifdef _WIN32
     if (const char* localAppData = std::getenv("LOCALAPPDATA")) {
         writablePaths.push_back((std::filesystem::path(localAppData) / "gpubench" / filepath).string());
+        writablePaths.push_back((std::filesystem::path(localAppData) / "GPUBench" / filepath).string());
     }
 #else
     if (const char* xdgCache = std::getenv("XDG_CACHE_HOME")) {
@@ -957,6 +996,10 @@ VulkanContext::TextureResource VulkanContext::loadTextureFromFile(const std::str
             "/usr/share/gpubench/" + filepath,
             "/usr/local/share/gpubench/" + filepath
         };
+        if (!exeDir.empty()) {
+            candidatePaths.push_back((exeDir / ".." / "share" / "gpubench" / filepath).string());
+            candidatePaths.push_back((exeDir / "share" / "gpubench" / filepath).string());
+        }
 
         // If a full-resolution render in renders/render_<scene>_<pass>.png is not yet generated on disk,
         // fall back to the shipped preview in assets/thumbnails/thumb_<scene>_<pass>.png so packaged
@@ -982,6 +1025,12 @@ VulkanContext::TextureResource VulkanContext::loadTextureFromFile(const std::str
             candidatePaths.push_back(thumbRel);
             candidatePaths.push_back("../" + thumbRel);
             candidatePaths.push_back("../../" + thumbRel);
+            if (!exeDir.empty()) {
+                candidatePaths.push_back((exeDir / thumbRel).string());
+                candidatePaths.push_back((exeDir / ".." / thumbRel).string());
+                candidatePaths.push_back((exeDir / ".." / "share" / "gpubench" / thumbRel).string());
+                candidatePaths.push_back((exeDir / "share" / "gpubench" / thumbRel).string());
+            }
             candidatePaths.push_back("/usr/share/gpubench/" + thumbRel);
             candidatePaths.push_back("/usr/local/share/gpubench/" + thumbRel);
         }

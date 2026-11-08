@@ -549,7 +549,7 @@ void main() {
                 }
 
                 vec3 indirectRadiance = vec3(0.0);
-                uint maxBounces = (pc.dumpRenders != 0u) ? 2u : pc.bounces;
+                uint maxBounces = pc.bounces;
                 for (uint b = 1; b < maxBounces; ++b) {
                     threadRays++;
                     rayQueryEXT bQuery;

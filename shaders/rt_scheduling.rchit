@@ -1,6 +1,7 @@
 #version 460
 #extension GL_EXT_ray_tracing : require
-#extension GL_EXT_ray_query : enable
+
+layout(constant_id = 0) const uint RCHIT_MODE = 7u;
 
 layout(location = 0) rayPayloadInEXT vec3 payload;
 hitAttributeEXT vec2 hitBarycentrics;
@@ -24,6 +25,7 @@ layout(set = 0, binding = 3) readonly buffer VertexBuffer {
 #define BINDING_TRI_MAT_BUF 5
 #define BINDING_TEX_HDR_BUF 6
 #define BINDING_TEX_PIX_BUF 7
+#define PBR_NO_RAY_QUERY
 #include "pbr_common.glsl"
 
 layout(push_constant) uniform PushConstants {
@@ -162,78 +164,80 @@ void main() {
     vec3 rayDir = gl_WorldRayDirectionEXT;
     vec3 hitPos = rayOrigin + rayDir * t;
     vec2 rawBary = hitBarycentrics;
-    uint rngState = primId + pc.seed;
 
-    vec3 pixelColor = vec3(0.0);
-
-    if (pc.mode == 7u) {
+    if (RCHIT_MODE == 7u || pc.mode == 7u) {
         vec3 normal = computeSmoothNormal(pc.sceneType, primId, hitPos, rayDir, rawBary);
         payload = max(normal * 0.5 + 0.5, vec3(1e-4));
         return;
     }
 
-    if (pc.mode == 4u) {
-        uint idx = gl_LaunchIDEXT.x;
-        uint matId = idx % 8u;
-        uint px_u = idx % pc.width;
-        uint py_u = idx / pc.width;
-        vec3 dummyPos = vec3(float(px_u) * 0.01, float(py_u) * 0.01, 1.5);
-        vec3 dummyNorm = ((idx % 2u) == 0u) ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
-        rngState = idx + pc.seed;
+    if (RCHIT_MODE != 7u) {
+        uint rngState = primId + pc.seed;
+        vec3 pixelColor = vec3(0.0);
+
+        if (pc.mode == 4u) {
+            uint idx = gl_LaunchIDEXT.x;
+            uint matId = idx % 8u;
+            uint px_u = idx % pc.width;
+            uint py_u = idx / pc.width;
+            vec3 dummyPos = vec3(float(px_u) * 0.01, float(py_u) * 0.01, 1.5);
+            vec3 dummyNorm = ((idx % 2u) == 0u) ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+            rngState = idx + pc.seed;
+            if (pc.isGltf != 0u) {
+                GltfMaterialGpu mat = matBuf.materials[matId];
+                vec4 dummyTan = vec4(1.0, 0.0, 0.0, 1.0);
+                vec2 dummyUv = vec2(float(px_u) / float(pc.width), float(py_u) / float(pc.height));
+                pixelColor = evaluateGltfPbr(mat, dummyPos, dummyNorm, dummyNorm, dummyTan, dummyUv, rayDir, pc.sceneType, false, rngState);
+            } else {
+                vec3 sunDir, sunColor;
+                getSceneSunParams(pc.sceneType, sunDir, sunColor);
+                vec3 baseColor = getSceneArchetypeAlbedo(pc.sceneType, matId);
+                pixelColor = evaluateMaterialArchetypeDirect(matId, dummyPos, baseColor, 0.5, 0.0, 1.5, dummyNorm, -rayDir, sunDir, sunColor, 1.0);
+            }
+            payload = max(pixelColor, vec3(1e-4));
+            return;
+        }
+
         if (pc.isGltf != 0u) {
+            vec2 bary = unpackUnorm2x16(packUnorm2x16(rawBary));
+            uint base = primId * 36u;
+            vec3 p0 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
+            vec3 n0 = vec3(vbuf.vertices[base + 3], vbuf.vertices[base + 4], vbuf.vertices[base + 5]);
+            vec4 t0 = vec4(vbuf.vertices[base + 6], vbuf.vertices[base + 7], vbuf.vertices[base + 8], vbuf.vertices[base + 9]);
+            vec2 uv0 = vec2(vbuf.vertices[base + 10], vbuf.vertices[base + 11]);
+
+            base += 12u;
+            vec3 p1 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
+            vec3 n1 = vec3(vbuf.vertices[base + 3], vbuf.vertices[base + 4], vbuf.vertices[base + 5]);
+            vec4 t1 = vec4(vbuf.vertices[base + 6], vbuf.vertices[base + 7], vbuf.vertices[base + 8], vbuf.vertices[base + 9]);
+            vec2 uv1 = vec2(vbuf.vertices[base + 10], vbuf.vertices[base + 11]);
+
+            base += 12u;
+            vec3 p2 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
+            vec3 n2 = vec3(vbuf.vertices[base + 3], vbuf.vertices[base + 4], vbuf.vertices[base + 5]);
+            vec4 t2 = vec4(vbuf.vertices[base + 6], vbuf.vertices[base + 7], vbuf.vertices[base + 8], vbuf.vertices[base + 9]);
+            vec2 uv2 = vec2(vbuf.vertices[base + 10], vbuf.vertices[base + 11]);
+
+            float w = 1.0 - bary.x - bary.y;
+            vec3 interpHitPos = w * p0 + bary.x * p1 + bary.y * p2;
+            vec3 geomNormal = normalize(cross(p1 - p0, p2 - p0));
+            vec3 sn = w * n0 + bary.x * n1 + bary.y * n2;
+            vec3 smoothNormal = (length(sn) > 1e-4) ? normalize(sn) : geomNormal;
+            vec4 tangent = w * t0 + bary.x * t1 + bary.y * t2;
+            vec2 uv = w * uv0 + bary.x * uv1 + bary.y * uv2;
+
+            uint matId = triMatBuf.triangleMats[primId];
             GltfMaterialGpu mat = matBuf.materials[matId];
-            vec4 dummyTan = vec4(1.0, 0.0, 0.0, 1.0);
-            vec2 dummyUv = vec2(float(px_u) / float(pc.width), float(py_u) / float(pc.height));
-            pixelColor = evaluateGltfPbr(mat, dummyPos, dummyNorm, dummyNorm, dummyTan, dummyUv, rayDir, pc.sceneType, false, rngState);
+            pixelColor = evaluateGltfPbr(mat, interpHitPos, geomNormal, smoothNormal, tangent, uv, rayDir, pc.sceneType, rngState);
         } else {
+            vec3 normal = computeSmoothNormal(pc.sceneType, primId, hitPos, rayDir, rawBary);
+            uint matId = computeMaterialId(pc.sceneType, primId, hitPos, normal);
             vec3 sunDir, sunColor;
             getSceneSunParams(pc.sceneType, sunDir, sunColor);
             vec3 baseColor = getSceneArchetypeAlbedo(pc.sceneType, matId);
-            pixelColor = evaluateMaterialArchetypeDirect(matId, dummyPos, baseColor, 0.5, 0.0, 1.5, dummyNorm, -rayDir, sunDir, sunColor, 1.0);
+            pixelColor = evaluateMaterialArchetypeDirect(matId, hitPos, baseColor, 0.5, 0.0, 1.5, normal, -rayDir, sunDir, sunColor, 1.0);
         }
+
         payload = max(pixelColor, vec3(1e-4));
-        return;
     }
-
-    if (pc.isGltf != 0u) {
-        vec2 bary = unpackUnorm2x16(packUnorm2x16(rawBary));
-        uint base = primId * 36u;
-        vec3 p0 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
-        vec3 n0 = vec3(vbuf.vertices[base + 3], vbuf.vertices[base + 4], vbuf.vertices[base + 5]);
-        vec4 t0 = vec4(vbuf.vertices[base + 6], vbuf.vertices[base + 7], vbuf.vertices[base + 8], vbuf.vertices[base + 9]);
-        vec2 uv0 = vec2(vbuf.vertices[base + 10], vbuf.vertices[base + 11]);
-
-        base += 12u;
-        vec3 p1 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
-        vec3 n1 = vec3(vbuf.vertices[base + 3], vbuf.vertices[base + 4], vbuf.vertices[base + 5]);
-        vec4 t1 = vec4(vbuf.vertices[base + 6], vbuf.vertices[base + 7], vbuf.vertices[base + 8], vbuf.vertices[base + 9]);
-        vec2 uv1 = vec2(vbuf.vertices[base + 10], vbuf.vertices[base + 11]);
-
-        base += 12u;
-        vec3 p2 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
-        vec3 n2 = vec3(vbuf.vertices[base + 3], vbuf.vertices[base + 4], vbuf.vertices[base + 5]);
-        vec4 t2 = vec4(vbuf.vertices[base + 6], vbuf.vertices[base + 7], vbuf.vertices[base + 8], vbuf.vertices[base + 9]);
-        vec2 uv2 = vec2(vbuf.vertices[base + 10], vbuf.vertices[base + 11]);
-
-        float w = 1.0 - bary.x - bary.y;
-        vec3 interpHitPos = w * p0 + bary.x * p1 + bary.y * p2;
-        vec3 geomNormal = normalize(cross(p1 - p0, p2 - p0));
-        vec3 sn = w * n0 + bary.x * n1 + bary.y * n2;
-        vec3 smoothNormal = (length(sn) > 1e-4) ? normalize(sn) : geomNormal;
-        vec4 tangent = w * t0 + bary.x * t1 + bary.y * t2;
-        vec2 uv = w * uv0 + bary.x * uv1 + bary.y * uv2;
-
-        uint matId = triMatBuf.triangleMats[primId];
-        GltfMaterialGpu mat = matBuf.materials[matId];
-        pixelColor = evaluateGltfPbr(mat, interpHitPos, geomNormal, smoothNormal, tangent, uv, rayDir, pc.sceneType, rngState);
-    } else {
-        vec3 normal = computeSmoothNormal(pc.sceneType, primId, hitPos, rayDir, rawBary);
-        uint matId = computeMaterialId(pc.sceneType, primId, hitPos, normal);
-        vec3 sunDir, sunColor;
-        getSceneSunParams(pc.sceneType, sunDir, sunColor);
-        vec3 baseColor = getSceneArchetypeAlbedo(pc.sceneType, matId);
-        pixelColor = evaluateMaterialArchetypeDirect(matId, hitPos, baseColor, 0.5, 0.0, 1.5, normal, -rayDir, sunDir, sunColor, 1.0);
-    }
-
-    payload = max(pixelColor, vec3(1e-4));
 }

@@ -101,6 +101,15 @@ void BenchmarkRunner::setSamplesPerPixel(uint32_t spp) {
   }
 }
 
+void BenchmarkRunner::setVerifyParity(bool enable) {
+  verifyParity = enable;
+  for (auto &bench : benchmarks) {
+    if (auto *rs = dynamic_cast<RaySchedulingBench *>(bench.get())) {
+      rs->SetVerifyParity(enable);
+    }
+  }
+}
+
 void BenchmarkRunner::setShowPower(bool p) {
   if (formatter) formatter->setShowPower(p);
 }

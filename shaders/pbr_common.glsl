@@ -183,7 +183,7 @@ vec3 evaluateMaterialArchetypeDirect(
     vec3 lightRadiance,
     float ao
 ) {
-    uint arch = (SPECIALIZED_ARCHETYPE != 0xFFFFFFFFu) ? SPECIALIZED_ARCHETYPE : archetype;
+    uint arch = (SPECIALIZED_ARCHETYPE != 0xFFFFFFFFu && SPECIALIZED_ARCHETYPE < 8u) ? SPECIALIZED_ARCHETYPE : archetype;
 
     switch (arch) {
         case 0: { // Archetype 0: Standard Dielectric/Conductor PBR (Cook-Torrance GGX)
@@ -316,6 +316,7 @@ float rand_float_pbr(inout uint state) {
     return float(pcg_hash_pbr(state) & 0x00FFFFFFu) / 16777216.0;
 }
 
+#ifndef PBR_NO_RAY_QUERY
 bool traceShadowRay(vec3 origin, vec3 normal, vec3 lightDir, float maxDist) {
     if (maxDist <= 0.05) return false;
     rayQueryEXT sQuery;
@@ -326,6 +327,7 @@ bool traceShadowRay(vec3 origin, vec3 normal, vec3 lightDir, float maxDist) {
     while (rayQueryProceedEXT(sQuery)) {}
     return (rayQueryGetIntersectionTypeEXT(sQuery, true) != gl_RayQueryCommittedIntersectionNoneEXT);
 }
+#endif
 
 void getSceneSunParams(uint sceneType, out vec3 sunDir, out vec3 sunColor) {
     if (sceneType == 2u) { // Indoor Atrium (Sponza)
@@ -366,6 +368,7 @@ vec3 getSceneArchetypeAlbedo(uint sceneType, uint archetype) {
     }
 }
 
+#ifndef PBR_NO_RAY_QUERY
 float traceAreaShadow(vec3 origin, vec3 normal, vec3 lightDir, float maxDist, float lightRadius, inout uint rng, int numSamples) {
     vec3 up = abs(lightDir.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
     vec3 tangent = normalize(cross(up, lightDir));
@@ -428,6 +431,7 @@ float computeRTAO(vec3 origin, vec3 normal, inout uint rng, int numSamples, floa
 
     return clamp(1.0 - (occlusion / float(numSamples)), 0.0, 1.0);
 }
+#endif
 
 vec3 evaluateGltfPbrInternal(
     GltfMaterialGpu mat,
@@ -440,6 +444,8 @@ vec3 evaluateGltfPbrInternal(
     uint sceneType,
     bool enableShadows,
     bool directOnly,
+    bool usePrecomputedVis,
+    vec3 precomputedVis,
     inout uint rng
 ) {
     vec3 V = -inDir;
@@ -485,18 +491,39 @@ vec3 evaluateGltfPbrInternal(
         emissive *= pow(sampleTexture(uint(mat.emissiveTexIdx), uv).rgb, vec3(2.2));
     }
 
-    uint arch = (SPECIALIZED_ARCHETYPE != 0xFFFFFFFFu) ? SPECIALIZED_ARCHETYPE : mat.archetype;
+    uint arch = (SPECIALIZED_ARCHETYPE != 0xFFFFFFFFu && SPECIALIZED_ARCHETYPE < 8u) ? SPECIALIZED_ARCHETYPE : mat.archetype;
+    vec3 directColor = baseColor;
+    float directRough = roughness;
+    float directMetal = metallic;
+    uint directArch = arch;
+    if (usePrecomputedVis && arch == 4u) {
+        float rustNoise = rustFBM3D_common(hitPos * 0.05);
+        float rustFine = noise3D_common(hitPos * 0.2) * 0.5 + 0.5;
+        float rustVal = rustNoise * 0.80 + rustFine * 0.20;
+        float rustMask = smoothstep(0.44, 0.54, rustVal);
+        vec3 rustAlbedo = mix(vec3(0.85, 0.38, 0.12), vec3(0.35, 0.16, 0.08), rustFine);
+        directColor = mix(baseColor, rustAlbedo, rustMask);
+        directRough = mix(roughness, 0.85, rustMask);
+        directMetal = mix(metallic, 0.0, rustMask);
+        directArch = 0u;
+    }
     vec3 totalRadiance = vec3(0.0);
 
     if (sceneType == 2u) {
         // Sponza Indoor Atrium: Direct Sun Streaming through vaulted ceiling with Area Light Soft Shadow
         vec3 sunDir = normalize(vec3(0.35, 0.90, -0.25));
         float sunShadow = 1.0;
-        if (enableShadows && dot(geomNormal, sunDir) > 0.0) {
-            sunShadow = traceAreaShadow(hitPos, geomNormal, sunDir, 10000.0, 0.035, rng, 4);
+        if (enableShadows) {
+            if (usePrecomputedVis) {
+                sunShadow = precomputedVis.x;
+            }
+#ifndef PBR_NO_RAY_QUERY
+            else if (dot(geomNormal, sunDir) > 0.0) {
+                sunShadow = traceAreaShadow(hitPos, geomNormal, sunDir, 10000.0, 0.035, rng, 4);
+            }
+#endif
         }
         vec3 sunRadiance = vec3(1.0, 0.95, 0.88) * 4.5 * sunShadow;
-        totalRadiance += evaluateMaterialArchetypeDirect(arch, hitPos, baseColor, roughness, metallic, mat.ior, N, V, sunDir, sunRadiance, ao);
 
         // Warm Colonnade Lanterns
         const vec3 lightPos[3] = vec3[3](
@@ -509,16 +536,45 @@ vec3 evaluateGltfPbrInternal(
             vec3(1.0, 0.80, 0.50) * 1.8,
             vec3(1.0, 0.80, 0.50) * 1.8
         );
-        for (int i = 0; i < 3; ++i) {
-            vec3 toL = lightPos[i] - hitPos;
-            float dist2 = dot(toL, toL);
-            vec3 L = normalize(toL);
-            float atten = 1.0 / (1.0 + 0.000004 * dist2);
-            totalRadiance += evaluateMaterialArchetypeDirect(arch, hitPos, baseColor, roughness, metallic, mat.ior, N, V, L, lightColor[i] * atten, ao);
+        if (usePrecomputedVis) {
+            for (int i = 0; i < 4; ++i) {
+                vec3 L;
+                vec3 lRad;
+                if (i == 0) {
+                    L = sunDir;
+                    lRad = sunRadiance;
+                } else {
+                    vec3 toL = lightPos[i - 1] - hitPos;
+                    float dist2 = dot(toL, toL);
+                    L = normalize(toL);
+                    float atten = 1.0 / (1.0 + 0.000004 * dist2);
+                    lRad = lightColor[i - 1] * atten;
+                }
+                totalRadiance += evaluateMaterialArchetypeDirect(directArch, hitPos, directColor, directRough, directMetal, mat.ior, N, V, L, lRad, ao);
+            }
+        } else {
+            totalRadiance += evaluateMaterialArchetypeDirect(directArch, hitPos, directColor, directRough, directMetal, mat.ior, N, V, sunDir, sunRadiance, ao);
+            for (int i = 0; i < 3; ++i) {
+                vec3 toL = lightPos[i] - hitPos;
+                float dist2 = dot(toL, toL);
+                vec3 L = normalize(toL);
+                float atten = 1.0 / (1.0 + 0.000004 * dist2);
+                totalRadiance += evaluateMaterialArchetypeDirect(directArch, hitPos, directColor, directRough, directMetal, mat.ior, N, V, L, lightColor[i] * atten, ao);
+            }
         }
 
-        // Ray-Traced Ambient Occlusion (RTAO) with 4 stratified rays
-        float rtao = computeRTAO(hitPos, geomNormal, rng, 4, 350.0);
+        // Ray-Traced Ambient Occlusion (RTAO)
+        float rtao = 1.0;
+        if (enableShadows) {
+            if (usePrecomputedVis) {
+                rtao = precomputedVis.y;
+            }
+#ifndef PBR_NO_RAY_QUERY
+            else {
+                rtao = computeRTAO(hitPos, geomNormal, rng, 4, 350.0);
+            }
+#endif
+        }
         ao *= rtao;
         if (directOnly) {
             return totalRadiance * ao + emissive;
@@ -579,12 +635,26 @@ vec3 evaluateGltfPbrInternal(
 
         // Studio key light with Area Light Soft Shadow
         float keyShadow = 1.0;
-        if (enableShadows && dot(geomNormal, studioDir[0]) > 0.0) {
-            keyShadow = traceAreaShadow(hitPos, geomNormal, studioDir[0], 5000.0, 0.065, rng, 4);
+        if (enableShadows) {
+            if (usePrecomputedVis) {
+                keyShadow = precomputedVis.x;
+            }
+#ifndef PBR_NO_RAY_QUERY
+            else if (dot(geomNormal, studioDir[0]) > 0.0) {
+                keyShadow = traceAreaShadow(hitPos, geomNormal, studioDir[0], 5000.0, 0.065, rng, 4);
+            }
+#endif
         }
-        totalRadiance += evaluateMaterialArchetypeDirect(arch, hitPos, baseColor, roughness, metallic, mat.ior, N, V, studioDir[0], studioColor[0] * keyShadow, ao);
-        totalRadiance += evaluateMaterialArchetypeDirect(arch, hitPos, baseColor, roughness, metallic, mat.ior, N, V, studioDir[1], studioColor[1], ao);
-        totalRadiance += evaluateMaterialArchetypeDirect(arch, hitPos, baseColor, roughness, metallic, mat.ior, N, V, studioDir[2], studioColor[2], ao);
+        if (usePrecomputedVis) {
+            for (int i = 0; i < 3; ++i) {
+                vec3 lCol = (i == 0) ? (studioColor[0] * keyShadow) : studioColor[i];
+                totalRadiance += evaluateMaterialArchetypeDirect(directArch, hitPos, directColor, directRough, directMetal, mat.ior, N, V, studioDir[i], lCol, ao);
+            }
+        } else {
+            totalRadiance += evaluateMaterialArchetypeDirect(directArch, hitPos, directColor, directRough, directMetal, mat.ior, N, V, studioDir[0], studioColor[0] * keyShadow, ao);
+            totalRadiance += evaluateMaterialArchetypeDirect(directArch, hitPos, directColor, directRough, directMetal, mat.ior, N, V, studioDir[1], studioColor[1], ao);
+            totalRadiance += evaluateMaterialArchetypeDirect(directArch, hitPos, directColor, directRough, directMetal, mat.ior, N, V, studioDir[2], studioColor[2], ao);
+        }
 
         // Contact proximity shadow under vehicle chassis onto cloth pedestal
         if (enableShadows && hitPos.y < 35.0 && hitPos.y > 0.0) {
@@ -593,7 +663,17 @@ vec3 evaluateGltfPbrInternal(
         }
 
         // Studio RTAO (Ray-Traced Ambient Occlusion)
-        float rtao = computeRTAO(hitPos, geomNormal, rng, 4, 30.0);
+        float rtao = 1.0;
+        if (enableShadows) {
+            if (usePrecomputedVis) {
+                rtao = precomputedVis.y;
+            }
+#ifndef PBR_NO_RAY_QUERY
+            else {
+                rtao = computeRTAO(hitPos, geomNormal, rng, 4, 30.0);
+            }
+#endif
+        }
         ao *= rtao;
         if (directOnly) {
             return totalRadiance + emissive;
@@ -616,12 +696,29 @@ vec3 evaluateGltfPbrInternal(
         vec3 sunColor = vec3(1.0, 0.94, 0.84) * 3.8;
 
         float sunShadow = 1.0;
-        if (enableShadows && dot(geomNormal, sunDir) > 0.0) {
-            sunShadow = traceAreaShadow(hitPos, geomNormal, sunDir, 3500.0, 0.045, rng, 4);
+        if (enableShadows) {
+            if (usePrecomputedVis) {
+                sunShadow = precomputedVis.x;
+            }
+#ifndef PBR_NO_RAY_QUERY
+            else if (dot(geomNormal, sunDir) > 0.0) {
+                sunShadow = traceAreaShadow(hitPos, geomNormal, sunDir, 3500.0, 0.045, rng, 4);
+            }
+#endif
         }
 
         // RTAO (Ray-Traced Ambient Occlusion) under canopy and crevices
-        float rtao = computeRTAO(hitPos, geomNormal, rng, 4, 35.0);
+        float rtao = 1.0;
+        if (enableShadows) {
+            if (usePrecomputedVis) {
+                rtao = precomputedVis.y;
+            }
+#ifndef PBR_NO_RAY_QUERY
+            else {
+                rtao = computeRTAO(hitPos, geomNormal, rng, 4, 35.0);
+            }
+#endif
+        }
         ao *= rtao;
         if (directOnly) {
             return evaluateCookTorranceGGX(baseColor, roughness, metallic, N, V, sunDir, sunColor * sunShadow) * ao + emissive;
@@ -641,18 +738,36 @@ vec3 evaluateGltfPbrInternal(
 
             vec3 riverbedColor;
             if (enableShadows) {
-                rayQueryEXT waterQuery;
-                rayQueryInitializeEXT(waterQuery, topLevelAS, gl_RayFlagsOpaqueEXT, 0xFF, hitPos + refrDir * 0.05, 0.001, refrDir, 25.0);
-                while (rayQueryProceedEXT(waterQuery)) {}
+                if (usePrecomputedVis) {
+                    if (precomputedVis.z >= 0.0) {
+                        float depth = precomputedVis.z;
+                        vec3 bedBase = vec3(0.18, 0.22, 0.20); // Submerged river stones
+                        vec3 waterExtinction = exp(-vec3(0.15, 0.04, 0.02) * depth * 1.5);
+                        riverbedColor = bedBase * waterExtinction * (sunColor * 0.5 * sunShadow + skyRadiance);
+                    } else {
+                        riverbedColor = vec3(0.02, 0.08, 0.12);
+                    }
+                }
+#ifndef PBR_NO_RAY_QUERY
+                else {
+                    rayQueryEXT waterQuery;
+                    rayQueryInitializeEXT(waterQuery, topLevelAS, gl_RayFlagsOpaqueEXT, 0xFF, hitPos + refrDir * 0.05, 0.001, refrDir, 25.0);
+                    while (rayQueryProceedEXT(waterQuery)) {}
 
-                if (rayQueryGetIntersectionTypeEXT(waterQuery, true) != 0) {
-                    float depth = rayQueryGetIntersectionTEXT(waterQuery, true);
-                    vec3 bedBase = vec3(0.18, 0.22, 0.20); // Submerged river stones
-                    vec3 waterExtinction = exp(-vec3(0.15, 0.04, 0.02) * depth * 1.5);
-                    riverbedColor = bedBase * waterExtinction * (sunColor * 0.5 * sunShadow + skyRadiance);
-                } else {
+                    if (rayQueryGetIntersectionTypeEXT(waterQuery, true) != 0) {
+                        float depth = rayQueryGetIntersectionTEXT(waterQuery, true);
+                        vec3 bedBase = vec3(0.18, 0.22, 0.20); // Submerged river stones
+                        vec3 waterExtinction = exp(-vec3(0.15, 0.04, 0.02) * depth * 1.5);
+                        riverbedColor = bedBase * waterExtinction * (sunColor * 0.5 * sunShadow + skyRadiance);
+                    } else {
+                        riverbedColor = vec3(0.02, 0.08, 0.12);
+                    }
+                }
+#else
+                else {
                     riverbedColor = vec3(0.02, 0.08, 0.12);
                 }
+#endif
             } else {
                 riverbedColor = vec3(0.02, 0.08, 0.12);
             }
@@ -716,6 +831,22 @@ vec3 evaluateGltfPbrInternal(
     return totalRadiance;
 }
 
+vec3 evaluateGltfPbrPrecomputedVis(
+    GltfMaterialGpu mat,
+    vec3 hitPos,
+    vec3 geomNormal,
+    vec3 smoothNormal,
+    vec4 tangent,
+    vec2 uv,
+    vec3 inDir,
+    uint sceneType,
+    bool enableShadows,
+    vec3 precomputedVis,
+    inout uint rng
+) {
+    return evaluateGltfPbrInternal(mat, hitPos, geomNormal, smoothNormal, tangent, uv, inDir, sceneType, enableShadows, false, true, precomputedVis, rng);
+}
+
 vec3 evaluateGltfPbr(
     GltfMaterialGpu mat,
     vec3 hitPos,
@@ -728,7 +859,7 @@ vec3 evaluateGltfPbr(
     bool enableShadows,
     inout uint rng
 ) {
-    return evaluateGltfPbrInternal(mat, hitPos, geomNormal, smoothNormal, tangent, uv, inDir, sceneType, enableShadows, false, rng);
+    return evaluateGltfPbrInternal(mat, hitPos, geomNormal, smoothNormal, tangent, uv, inDir, sceneType, enableShadows, false, false, vec3(1.0, 1.0, -1.0), rng);
 }
 
 vec3 evaluateGltfPbrDirect(
@@ -742,7 +873,7 @@ vec3 evaluateGltfPbrDirect(
     uint sceneType,
     inout uint rng
 ) {
-    return evaluateGltfPbrInternal(mat, hitPos, geomNormal, smoothNormal, tangent, uv, inDir, sceneType, true, true, rng);
+    return evaluateGltfPbrInternal(mat, hitPos, geomNormal, smoothNormal, tangent, uv, inDir, sceneType, true, true, false, vec3(1.0, 1.0, -1.0), rng);
 }
 
 vec3 evaluateGltfPbr(
@@ -756,7 +887,7 @@ vec3 evaluateGltfPbr(
     uint sceneType,
     inout uint rng
 ) {
-    return evaluateGltfPbrInternal(mat, hitPos, geomNormal, smoothNormal, tangent, uv, inDir, sceneType, true, false, rng);
+    return evaluateGltfPbrInternal(mat, hitPos, geomNormal, smoothNormal, tangent, uv, inDir, sceneType, true, false, false, vec3(1.0, 1.0, -1.0), rng);
 }
 
 vec3 evaluateGltfPbr(
@@ -799,23 +930,26 @@ void getMultiLight(uint idx, uint totalLights, uint sceneType, out vec3 lightDir
         }
         lightColor = vec3(1.0, 0.95, 0.9) * 3.5;
     } else {
-        // Spherical Fibonacci distribution across upper hemisphere
-        const float PHI = 1.618033988749895;
-        float phi = 2.0 * 3.141592653589793 * (float(idx) / PHI);
-        float cosTheta = 0.08 + 0.90 * (1.0 - (float(idx) + 0.5) / float(totalLights));
+        // 8-Octant Clustered Light Distribution (16 lights per octant bin b = 0..7)
+        uint b = (idx >> 4u) & 7u;
+        uint li = idx & 15u;
+        float u = (float(li) + 0.5) / 16.0;
+        float v = fract(float(li) * 0.618033988749895 + float(b) * 0.125);
+        float phi = 0.15 + 1.27079632679 * v; // [0.15, pi/2 - 0.15] inside positive octant
+        float cosTheta = 0.20 + 0.70 * u;     // [0.20, 0.90]
         float sinTheta = sqrt(max(0.0, 1.0 - cosTheta * cosTheta));
 
-        vec3 rawDir;
-        if (sceneType == 2u || sceneType == 0u) {
-            rawDir = vec3(cos(phi) * sinTheta, cosTheta, sin(phi) * sinTheta);
-        } else {
-            rawDir = vec3(cos(phi) * sinTheta, sin(phi) * sinTheta, cosTheta);
-        }
-        lightDir = normalize(rawDir);
+        vec3 posOct = vec3(cos(phi) * sinTheta, sin(phi) * sinTheta, cosTheta);
+        vec3 octSign = vec3(
+            (b & 1u) != 0u ? 1.0 : -1.0,
+            (b & 2u) != 0u ? 1.0 : -1.0,
+            (b & 4u) != 0u ? 1.0 : -1.0
+        );
+        lightDir = normalize(posOct * octSign);
 
         float t = float(idx) / float(totalLights);
         vec3 col = mix(vec3(1.0, 0.88, 0.70), vec3(0.75, 0.88, 1.0), fract(t * 5.0));
-        lightColor = col * (7.0 / float(totalLights));
+        lightColor = col * (12.0 / float(totalLights));
     }
 }
 

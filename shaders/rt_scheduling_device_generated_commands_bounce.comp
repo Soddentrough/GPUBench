@@ -4,6 +4,8 @@
 #extension GL_KHR_shader_subgroup_basic : enable
 #extension GL_KHR_shader_subgroup_ballot : enable
 #extension GL_KHR_shader_subgroup_arithmetic : enable
+#extension GL_KHR_shader_subgroup_vote : enable
+#extension GL_KHR_shader_subgroup_shuffle : enable
 
 layout(local_size_x = 32) in;
 
@@ -29,7 +31,20 @@ layout(set = 0, binding = 3) readonly buffer VertexBuffer {
 #define BINDING_TRI_MAT_BUF 5
 #define BINDING_TEX_HDR_BUF 6
 #define BINDING_TEX_PIX_BUF 7
+#define PBR_NO_RAY_QUERY 1
 #include "pbr_common.glsl"
+
+rayQueryEXT query;
+
+bool traceShadowRay(vec3 origin, vec3 normal, vec3 lightDir, float maxDist) {
+    if (maxDist <= 0.05) return false;
+    vec3 rayOrig = origin + normal * 0.12;
+    rayQueryInitializeEXT(query, topLevelAS,
+        gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsSkipClosestHitShaderEXT | gl_RayFlagsOpaqueEXT,
+        0xFF, rayOrig, 0.05, lightDir, maxDist);
+    while (rayQueryProceedEXT(query)) {}
+    return (rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionNoneEXT);
+}
 
 layout(set = 0, binding = 8) buffer Framebuffer {
     vec4 pixels[];
@@ -119,19 +134,21 @@ vec3 align_to_normal(vec3 sample_dir, vec3 normal) {
 vec3 computeSmoothNormal(uint sceneType, uint primId, vec3 hitPos, vec3 rayDir, vec2 bary) {
     if (pc.isGltf != 0u) {
         uint base = primId * 36u;
-        vec3 p0 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
         vec3 n0 = vec3(vbuf.vertices[base + 3], vbuf.vertices[base + 4], vbuf.vertices[base + 5]);
-        base += 12u;
-        vec3 p1 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
-        vec3 n1 = vec3(vbuf.vertices[base + 3], vbuf.vertices[base + 4], vbuf.vertices[base + 5]);
-        base += 12u;
-        vec3 p2 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
-        vec3 n2 = vec3(vbuf.vertices[base + 3], vbuf.vertices[base + 4], vbuf.vertices[base + 5]);
+        vec3 n1 = vec3(vbuf.vertices[base + 15], vbuf.vertices[base + 16], vbuf.vertices[base + 17]);
+        vec3 n2 = vec3(vbuf.vertices[base + 27], vbuf.vertices[base + 28], vbuf.vertices[base + 29]);
 
         float w = 1.0 - bary.x - bary.y;
-        vec3 geomNorm = normalize(cross(p1 - p0, p2 - p0));
         vec3 smoothNorm = w * n0 + bary.x * n1 + bary.y * n2;
-        vec3 n = (length(smoothNorm) > 1e-4) ? normalize(smoothNorm) : geomNorm;
+        vec3 n;
+        if (length(smoothNorm) > 1e-4) {
+            n = normalize(smoothNorm);
+        } else {
+            vec3 p0 = vec3(vbuf.vertices[base + 0], vbuf.vertices[base + 1], vbuf.vertices[base + 2]);
+            vec3 p1 = vec3(vbuf.vertices[base + 12], vbuf.vertices[base + 13], vbuf.vertices[base + 14]);
+            vec3 p2 = vec3(vbuf.vertices[base + 24], vbuf.vertices[base + 25], vbuf.vertices[base + 26]);
+            n = normalize(cross(p1 - p0, p2 - p0));
+        }
         if (dot(n, rayDir) > 0.0) n = -n;
         return n;
     }
@@ -202,113 +219,341 @@ vec3 computeSmoothNormal(uint sceneType, uint primId, vec3 hitPos, vec3 rayDir, 
     return normal;
 }
 
-void main() {
-    uint waveId = gl_WorkGroupID.x;
-    uint oct = pc.inQueue;
-    uint waveOffsetInOct = 0u;
-    uint activeCount = 0u;
+vec3 evalStudioEnvironment(vec3 dir) {
+    float z = dir.z;
+    vec3 baseWall = mix(vec3(0.12, 0.13, 0.16), vec3(0.24, 0.26, 0.30), clamp(z * 1.5, 0.0, 1.0));
+    if (z < 0.0) {
+        baseWall = mix(vec3(0.12, 0.13, 0.16), vec3(0.06, 0.07, 0.08), clamp(-z * 2.0, 0.0, 1.0));
+    }
+    vec3 softboxDir1 = normalize(vec3(0.05, 0.30, 0.95));
+    float sb1 = pow(clamp(dot(dir, softboxDir1), 0.0, 1.0), 80.0) * 6.0;
+    vec3 softboxDir2 = normalize(vec3(-0.75, -0.20, 0.40));
+    float sb2 = pow(clamp(dot(dir, softboxDir2), 0.0, 1.0), 45.0) * 3.5;
+    vec3 softboxDir3 = normalize(vec3(0.65, 0.70, 0.30));
+    float sb3 = pow(clamp(dot(dir, softboxDir3), 0.0, 1.0), 40.0) * 2.5;
+    return baseWall + vec3(1.0, 0.98, 0.95) * sb1 + vec3(0.85, 0.92, 1.0) * sb2 + vec3(1.0, 0.90, 0.80) * sb3;
+}
 
-    if (BOUNCE_MODE == 2u) {
-        if (gl_LocalInvocationID.x == 0u) {
-            uint myOct = 0u;
-            for (uint i = 1u; i < 8u; ++i) {
-                if (waveId >= worklist.queueCounters[Q_PREFIX_IDX(i)]) {
-                    myOct = i;
+vec3 evalAtriumEnvironment(vec3 dir) {
+    float z = dir.z;
+    vec3 baseWall = mix(vec3(0.16, 0.15, 0.15), vec3(0.26, 0.24, 0.22), clamp(z * 1.5, 0.0, 1.0));
+    if (z < 0.0) {
+        baseWall = mix(vec3(0.16, 0.15, 0.15), vec3(0.08, 0.07, 0.06), clamp(-z * 2.0, 0.0, 1.0));
+    }
+    vec3 clerestoryDir = normalize(vec3(0.10, 0.30, 0.95));
+    float cs = pow(clamp(dot(dir, clerestoryDir), 0.0, 1.0), 30.0) * 3.5;
+    return baseWall + vec3(1.0, 0.95, 0.85) * cs;
+}
+
+vec3 evalSky(uint sceneType, vec3 dir) {
+    if (sceneType == SCENE_OUTDOOR_TERRAIN || sceneType == SCENE_AAA_FOREST) {
+        return evalOutdoorSky(dir);
+    } else if (sceneType == SCENE_INDOOR_ATRIUM) {
+        return evalAtriumEnvironment(dir);
+    }
+    return evalStudioEnvironment(dir);
+}
+
+uint computeMaterialId(uint sceneType, uint primId, vec3 hitPos, vec3 normal) {
+    if (sceneType == SCENE_OUTDOOR_TERRAIN) {
+        if (primId < PRIM_TERRAIN_END) {
+            if (hitPos.z >= -0.2 && hitPos.z <= 2.2 && abs(hitPos.x) < 185.0 && hitPos.y >= -145.0 && hitPos.y <= 930.0) {
+                return 7u;
+            }
+            if (normal.z >= 0.50) {
+                float baseSnowAlt = 60.0 + (1.0 - normal.z) * 28.0;
+                if (hitPos.z > baseSnowAlt + 16.0) {
+                    return 3u;
+                }
+                if (hitPos.z > baseSnowAlt - 16.0) {
+                    float snowHarmonics = sin(hitPos.x * 0.032 + hitPos.y * 0.018) * 9.5
+                                        + cos(hitPos.x * 0.068 - hitPos.y * 0.045) * 4.5
+                                        + sin(hitPos.x * 0.130 + hitPos.y * 0.110) * 2.0;
+                    if (hitPos.z > baseSnowAlt + snowHarmonics) {
+                        return 3u;
+                    }
                 }
             }
-            oct = myOct;
-            waveOffsetInOct = waveId - worklist.queueCounters[Q_PREFIX_IDX(myOct)];
-            activeCount = min(worklist.queueCounters[Q_SNAPSHOT_IDX(myOct)], pc.maxQueueSize);
+            if (normal.z < 0.65) {
+                return 4u;
+            }
+            if (normal.z < 0.82) {
+                return 0u;
+            }
+            return 5u;
         }
-        oct = subgroupBroadcastFirst(oct);
-        waveOffsetInOct = subgroupBroadcastFirst(waveOffsetInOct);
-        activeCount = subgroupBroadcastFirst(activeCount);
+        if (primId < PRIM_WATER_END) {
+            return 2u;
+        }
+        uint treeLocalTri = (primId - PRIM_WATER_END) % 224u;
+        if (treeLocalTri < 32u) {
+            return 6u;
+        }
+        return 1u;
     } else {
-        activeCount = min((pc.outQueue >= 32u) ? worklist.queueCounters[Q_SNAPSHOT_IDX(oct)] : worklist.queueCounters[Q_COUNTER_IDX(oct)], pc.maxQueueSize);
+        if (primId < PRIM_KNOT_PAINT_END)  return 0u;
+        if (primId < PRIM_KNOT_JADE_END)   return 1u;
+        if (primId < PRIM_KNOT_CHROME_END) return 7u;
+        if (primId < PRIM_KNOT_VELVET_END) return 3u;
+        if (primId < PRIM_KNOT_RUST_END)   return 4u;
+        if (primId < PRIM_SPHERE_END)      return 1u;
+        if (primId < PRIM_PEDESTAL_END)    return 6u;
+        if (primId < PRIM_SUZANNE_END)     return 2u;
+        if (primId < PRIM_FLOOR_END)       return 5u;
+        if (primId < PRIM_WALLS_END)       return 4u;
+        if (primId < PRIM_CEILING_END)     return 6u;
+        return 1u;
+    }
+}
+
+vec3 tonemapACES(vec3 x) {
+    const float a = 2.51;
+    const float b = 0.03;
+    const float c = 2.43;
+    const float d = 0.59;
+    const float e = 0.14;
+    return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
+}
+
+void main() {
+    uint waveId = gl_WorkGroupID.x;
+    uint lid = gl_LocalInvocationID.x;
+    uint baseQ = (BOUNCE_MODE == 2u) ? 0u : ((pc.inQueue & 1u) * 8u);
+    uint numQ = (BOUNCE_MODE == 2u) ? 16u : 8u;
+    uint qPref = (lid < numQ) ? worklist.queueCounters[Q_PREFIX_IDX(baseQ + lid)] : 0xFFFFFFFFu;
+    uint qSnap = (lid < numQ) ? worklist.queueCounters[Q_FAST_SNAP_IDX(baseQ + lid)] : 0u;
+    uvec4 geMask = subgroupBallot(waveId >= qPref);
+    uint myOct = uint(max(0, findMSB(geMask.x)));
+    uint oct = baseQ + myOct;
+    uint waveOffsetInOct = waveId - subgroupBroadcast(qPref, myOct);
+    uint activeCount = min(subgroupBroadcast(qSnap, myOct), pc.maxQueueSize);
+    uint sampleSeed = 0u;
+    uint packedMeta = 0u;
+    if (BOUNCE_MODE != 2u) {
+        if (lid == 0u) {
+            sampleSeed = worklist.queueCounters[Q_SEED_IDX];
+            packedMeta = worklist.queueCounters[Q_SEED_IDX + 1u];
+        }
+        sampleSeed = subgroupBroadcastFirst(sampleSeed);
+        packedMeta = subgroupBroadcastFirst(packedMeta);
     }
 
-    uint rayIdx = (BOUNCE_MODE == 2u) ? (waveOffsetInOct * 32u + gl_LocalInvocationID.x) : gl_GlobalInvocationID.x;
+    uint rayIdx = waveOffsetInOct * 32u + lid;
 
     bool activeRay = (rayIdx < activeCount);
     uint threadRays = activeRay ? 1u : 0u;
     uint threadHits = 0u;
     uint threadLum = 0u;
 
-    bool nextRayActive = false;
+    uint nextRayOct = 0xFFFFFFFFu;
     vec4 nextRayPayload = vec4(0.0);
+    vec4 nextRayPayload1 = vec4(0.0);
+
+    uint dumpRenders = packedMeta & 0xFFu;
+    uint totalSpp = (packedMeta >> 8u) & 0xFFu;
+    uint sampleIdx = (packedMeta >> 16u) & 0xFFu;
 
     if (activeRay) {
-        uint recordIdx = oct * pc.maxQueueSize + rayIdx;
+        uint recordIdx = (BOUNCE_MODE == 2u)
+            ? (oct * pc.maxQueueSize + rayIdx)
+            : ((oct * pc.maxQueueSize + rayIdx) * 2u);
         vec4 p = worklist.rayRecords[recordIdx];
         vec3 origin = p.xyz;
-        vec3 direction;
-        if (BOUNCE_MODE == 2u) {
-            vec2 xy = unpackSnorm2x16(floatBitsToUint(p.w));
-            float z = sqrt(max(0.0, 1.0 - dot(xy, xy)));
-            if ((oct & 4u) == 0u) z = -z;
-            direction = vec3(xy, z);
-        } else {
-            direction = octDecode(unpackSnorm2x16(floatBitsToUint(p.w)));
-        }
+        vec3 direction = octDecode(unpackSnorm2x16(floatBitsToUint(p.w)));
 
-        float tMaxBounce = (pc.isGltf != 0u) ? 5000.0 : ((pc.sceneType == SCENE_OUTDOOR_TERRAIN) ? 500.0 : 20.0);
+        float tMaxBounce = (BOUNCE_MODE == 2u)
+            ? ((pc.isGltf != 0u) ? 5000.0 : ((pc.sceneType == SCENE_OUTDOOR_TERRAIN) ? 500.0 : 20.0))
+            : ((pc.isGltf != 0u) ? 5000.0 : ((pc.sceneType == SCENE_OUTDOOR_TERRAIN) ? 2500.0 : 50.0));
         float rayOffset = (pc.isGltf != 0u) ? 0.05 : 0.005;
-        rayQueryEXT query;
-        uint rayFlags = gl_RayFlagsOpaqueEXT;
-        rayQueryInitializeEXT(query, topLevelAS, rayFlags, 0xFF, origin, rayOffset, direction, tMaxBounce);
+        rayQueryInitializeEXT(query, topLevelAS, gl_RayFlagsOpaqueEXT, 0xFF, origin, rayOffset, direction, tMaxBounce);
         while (rayQueryProceedEXT(query)) {}
 
-        if (rayQueryGetIntersectionTypeEXT(query, true) != 0) {
-            threadHits = 1u;
-            if (BOUNCE_MODE == 0u || BOUNCE_MODE == 1u) {
-                float t = rayQueryGetIntersectionTEXT(query, true);
-                vec3 hitPos = origin + direction * t;
-                uint primId = rayQueryGetIntersectionPrimitiveIndexEXT(query, true);
-                vec2 bary = rayQueryGetIntersectionBarycentricsEXT(query, true);
-                vec3 normal = computeSmoothNormal(pc.sceneType, primId, hitPos, direction, bary);
+        if (BOUNCE_MODE == 2u) {
+            if (rayQueryGetIntersectionTypeEXT(query, true) != 0) {
+                threadHits = 1u;
+            }
+        } else {
+            bool isTerminal = (BOUNCE_MODE != 0u) || (pc.outQueue >= 32u);
+            vec3 b_rad = vec3(0.0);
+            vec3 b_hitPos = vec3(0.0);
+            vec3 b_normal = vec3(0.0, 1.0, 0.0);
+            vec3 b_albedo = vec3(0.72);
 
-                vec3 sunDir, sunColor;
-                getSceneSunParams(pc.sceneType, sunDir, sunColor);
-                float NdotL = max(0.0, dot(normal, sunDir));
-                if (NdotL > 0.0) {
-                    bool shadowed = traceShadowRay(hitPos, normal, sunDir, (pc.isGltf != 0u ? 5000.0 : 2000.0));
-                    if (!shadowed) {
-                        threadLum = uint(clamp(NdotL, 0.0, 100.0) * 256.0);
+            if (rayQueryGetIntersectionTypeEXT(query, true) == gl_RayQueryCommittedIntersectionTriangleEXT) {
+                threadHits = 1u;
+                float b_t = rayQueryGetIntersectionTEXT(query, true);
+                b_hitPos = origin + direction * b_t;
+                uint b_primId = rayQueryGetIntersectionPrimitiveIndexEXT(query, true);
+                if (subgroupAllEqual(b_primId)) {
+                    b_primId = subgroupBroadcastFirst(b_primId);
+                }
+                vec2 b_bary = rayQueryGetIntersectionBarycentricsEXT(query, true);
+                b_normal = computeSmoothNormal(pc.sceneType, b_primId, b_hitPos, direction, b_bary);
+
+                if (pc.isGltf != 0u) {
+                    uint b_matId = triMatBuf.triangleMats[b_primId];
+                    if (subgroupAllEqual(b_matId)) {
+                        b_matId = subgroupBroadcastFirst(b_matId);
                     }
+                    b_albedo = matBuf.materials[b_matId].baseColorFactor.rgb;
+                    int b_baseTex = matBuf.materials[b_matId].baseColorTexIdx;
+                    if (b_baseTex >= 0) {
+                        vec2 b_ubary = unpackUnorm2x16(packUnorm2x16(b_bary));
+                        uint b_base = b_primId * 36u;
+                        vec2 b_uv0 = vec2(vbuf.vertices[b_base + 10], vbuf.vertices[b_base + 11]);
+                        vec2 b_uv1 = vec2(vbuf.vertices[b_base + 22], vbuf.vertices[b_base + 23]);
+                        vec2 b_uv2 = vec2(vbuf.vertices[b_base + 34], vbuf.vertices[b_base + 35]);
+                        float b_w = 1.0 - b_ubary.x - b_ubary.y;
+                        vec2 b_uv = b_w * b_uv0 + b_ubary.x * b_uv1 + b_ubary.y * b_uv2;
+                        b_albedo *= pow(sampleTexture(uint(b_baseTex), b_uv).rgb, vec3(2.2));
+                    }
+                } else {
+                    uint b_matId = computeMaterialId(pc.sceneType, b_primId, b_hitPos, b_normal);
+                    b_albedo = getSceneArchetypeAlbedo(pc.sceneType, b_matId);
                 }
 
-                if (BOUNCE_MODE == 0u && pc.outQueue < 32u) {
-                    uint rngState = rayIdx + pc.seed + pc.bounceIndex * 1337u;
-                    // Russian roulette: 40% termination probability on bounce >= 2
-                    bool survives = (pc.bounceIndex < 2u) || (rand_float(rngState) >= 0.4);
-                    if (survives) {
-                        float u1 = rand_float(rngState);
-                        float u2 = rand_float(rngState);
-                        vec3 nextDir = align_to_normal(cosine_sample_hemisphere(u1, u2), normal);
-                        nextRayActive = true;
-                        nextRayPayload = vec4(hitPos + normal * rayOffset, uintBitsToFloat(packSnorm2x16(octEncode(nextDir))));
+                if (pc.sceneType == 0u) {
+                    const vec3 studioDir[3] = vec3[3](
+                        normalize(vec3(0.6, 0.8, 0.5)),
+                        normalize(vec3(-0.7, 0.5, 0.4)),
+                        normalize(vec3(-0.2, 0.4, -0.9))
+                    );
+                    const vec3 studioColor[3] = vec3[3](
+                        vec3(1.0, 0.97, 0.92) * 3.8,
+                        vec3(0.75, 0.88, 1.0) * 1.8,
+                        vec3(1.0, 1.0, 1.0) * 2.5
+                    );
+                    for (int li = 0; li < 3; ++li) {
+                        float b_sNdotL = max(0.0, dot(b_normal, studioDir[li]));
+                        if (b_sNdotL > 0.0) {
+                            bool b_shad = traceShadowRay(b_hitPos, b_normal, studioDir[li], 5000.0);
+                            if (!b_shad) {
+                                b_rad += (b_albedo / 3.14159) * studioColor[li] * b_sNdotL;
+                            }
+                        }
+                    }
+                } else {
+                    vec3 sunDir, sunColor;
+                    getSceneSunParams(pc.sceneType, sunDir, sunColor);
+                    float b_NdotL = max(0.0, dot(b_normal, sunDir));
+                    if (b_NdotL > 0.0) {
+                        bool b_shadowed = traceShadowRay(b_hitPos, b_normal, sunDir, (pc.isGltf != 0u ? 5000.0 : 2000.0));
+                        if (!b_shadowed) {
+                            b_rad += (b_albedo / 3.14159) * sunColor * b_NdotL;
+                        }
                     }
                 }
+                if (pc.sceneType == 2u) {
+                    const vec3 lanternPos[3] = vec3[3](
+                        vec3(0.0, 450.0, 0.0),
+                        vec3(-650.0, 250.0, 0.0),
+                        vec3(650.0, 250.0, 0.0)
+                    );
+                    const vec3 lanternColor[3] = vec3[3](
+                        vec3(1.0, 0.85, 0.60) * 2.2,
+                        vec3(1.0, 0.80, 0.50) * 1.8,
+                        vec3(1.0, 0.80, 0.50) * 1.8
+                    );
+                    for (int li = 0; li < 3; ++li) {
+                        vec3 b_toL = lanternPos[li] - b_hitPos;
+                        float bl_NdotToL = dot(b_normal, b_toL);
+                        if (bl_NdotToL > 0.0) {
+                            float bd2 = dot(b_toL, b_toL);
+                            float bd = sqrt(bd2);
+                            float invBd = 1.0 / max(bd, 0.001);
+                            vec3 b_L = b_toL * invBd;
+                            bool bl_shad = traceShadowRay(b_hitPos, b_normal, b_L, bd - 0.1);
+                            if (!bl_shad) {
+                                float bl_NdotL = bl_NdotToL * invBd;
+                                float atten = 1.0 / (1.0 + 0.000004 * bd2);
+                                b_rad += (b_albedo / 3.14159) * lanternColor[li] * atten * bl_NdotL;
+                            }
+                        }
+                    }
+                }
+                b_rad += b_albedo * evalSky(pc.sceneType, b_normal) * 0.25;
+            } else {
+                b_rad = evalSky(pc.sceneType, direction);
+                isTerminal = true;
+            }
+
+            vec4 p1 = worklist.rayRecords[recordIdx + 1u];
+            vec3 throughput = p1.xyz;
+            uint pixelIdx = floatBitsToUint(p1.w);
+            vec3 indirectRadiance = throughput * b_rad;
+
+            if (!isTerminal) {
+                uint rngState = pixelIdx + sampleSeed + pc.bounceIndex * 1337u;
+                bool survives = (pc.bounceIndex < 2u) || (rand_float(rngState) >= 0.4);
+                if (survives) {
+                    float u1 = rand_float(rngState);
+                    float u2 = rand_float(rngState);
+                    vec3 nextDir = align_to_normal(cosine_sample_hemisphere(u1, u2), b_normal);
+                    vec2 hDir = (pc.sceneType == SCENE_OUTDOOR_TERRAIN || pc.sceneType == SCENE_AAA_FOREST) ? nextDir.xy : nextDir.xz;
+                    float upCoord = (pc.sceneType == SCENE_OUTDOOR_TERRAIN || pc.sceneType == SCENE_AAA_FOREST) ? nextDir.z : nextDir.y;
+                    uint thirdBit = (pc.sceneType == 2u) ? (upCoord >= 0.0 ? 4u : 0u) : (upCoord >= 0.45 ? 4u : 0u);
+                    nextRayOct = (hDir.x >= 0.0 ? 1u : 0u) |
+                                 (hDir.y >= 0.0 ? 2u : 0u) |
+                                 thirdBit;
+                    nextRayPayload = vec4(b_hitPos + b_normal * rayOffset, uintBitsToFloat(packSnorm2x16(octEncode(nextDir))));
+                    nextRayPayload1 = vec4(throughput * b_albedo, uintBitsToFloat(pixelIdx));
+                } else {
+                    isTerminal = true;
+                }
+            }
+
+            if (dumpRenders != 0u) {
+                if (!isTerminal) {
+                    fb.pixels[pixelIdx] += vec4(indirectRadiance, 0.0);
+                } else {
+                    vec3 total = fb.pixels[pixelIdx].rgb + indirectRadiance;
+                    float expGain = (pc.sceneType == 2u) ? 1.6 : 1.0;
+                    if (totalSpp <= 1u) {
+                        fb.pixels[pixelIdx] = vec4(tonemapACES(total * expGain), 1.0);
+                    } else if (sampleIdx < totalSpp - 1u) {
+                        fb.pixels[pixelIdx] = vec4(total, 1.0);
+                    } else {
+                        vec3 avg = (total / float(totalSpp)) * expGain;
+                        fb.pixels[pixelIdx] = vec4(tonemapACES(avg), 1.0);
+                    }
+                }
+            } else {
+                threadLum = uint(clamp(dot(indirectRadiance, vec3(0.2126, 0.7152, 0.0722)), 0.0, 100.0) * 256.0);
             }
         }
     }
 
-    // Ping-Pong Subgroup Compaction into outQueue (Path Tracing)
+    // Ping-Pong Subgroup Compaction into 8 Directional Octant Queues of outQueue Bank (Path Tracing)
     if (BOUNCE_MODE == 0u && pc.outQueue < 32u) {
-        uvec4 ballot = subgroupBallot(nextRayActive);
-        uint count = subgroupBallotBitCount(ballot);
-        if (count > 0u) {
-            uint slotInWave = subgroupBallotExclusiveBitCount(ballot);
-            uint firstLane = subgroupBallotFindLSB(ballot);
-            uint baseSlot = 0u;
-            if (gl_SubgroupInvocationID == firstLane) {
-                baseSlot = atomicAdd(worklist.queueCounters[Q_COUNTER_IDX(pc.outQueue)], count);
+        uint outBaseQ = (pc.outQueue & 1u) * 8u;
+        bool hasNext = (nextRayOct < 8u);
+        uint waveOctMask = subgroupOr(hasNext ? (1u << nextRayOct) : 0u);
+        if (waveOctMask != 0u) {
+            uint mySlotInWave = 0u;
+            uint qCount = 0u;
+            uint maskCopy = waveOctMask;
+            while (maskCopy != 0u) {
+                uint q = uint(findLSB(maskCopy));
+                maskCopy &= maskCopy - 1u;
+                uvec4 ballot = subgroupBallot(nextRayOct == q);
+                if (nextRayOct == q) {
+                    mySlotInWave = subgroupBallotExclusiveBitCount(ballot);
+                }
+                if (gl_SubgroupInvocationID == q) {
+                    qCount = subgroupBallotBitCount(ballot);
+                }
             }
-            baseSlot = subgroupBroadcast(baseSlot, firstLane);
-            if (nextRayActive) {
-                uint slot = baseSlot + slotInWave;
+            uint qBase = 0u;
+            if (qCount > 0u) {
+                qBase = atomicAdd(worklist.queueCounters[Q_COUNTER_IDX(outBaseQ + gl_SubgroupInvocationID)], qCount);
+            }
+            uint myBase = subgroupShuffle(qBase, min(nextRayOct, 7u));
+            if (hasNext) {
+                uint slot = myBase + mySlotInWave;
                 if (slot < pc.maxQueueSize) {
-                    worklist.rayRecords[pc.outQueue * pc.maxQueueSize + slot] = nextRayPayload;
+                    uint outRecIdx = ((outBaseQ + nextRayOct) * pc.maxQueueSize + slot) * 2u;
+                    worklist.rayRecords[outRecIdx] = nextRayPayload;
+                    worklist.rayRecords[outRecIdx + 1u] = nextRayPayload1;
                 }
             }
         }

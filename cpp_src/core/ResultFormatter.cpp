@@ -430,16 +430,14 @@ void ResultFormatter::print() {
           maxRayRate = rate;
           maxRayWorkload = cleanName;
         }
-        if (res.benchmarkName.find("Primary Rays (Compute Megakernel)") != std::string::npos ||
-            res.benchmarkName.find("Primary Rays (Megakernel)") != std::string::npos ||
+        if (res.benchmarkName.find("Scene Render: Full Frame (Megakernel)") != std::string::npos ||
             res.benchmarkName.find("Full Scene Ray Tracing (PBR) - Megakernel") != std::string::npos) {
           if (!hasPbrScene || sceneName == pbrSceneName) {
             megakernelPBRRate = (std::max)(megakernelPBRRate, rate);
             pbrSceneName = sceneName;
             hasPbrScene = true;
           }
-        } else if (res.benchmarkName.find("Primary Rays (Wavefront - DGC)") != std::string::npos ||
-                   res.benchmarkName.find("Primary Rays (DGC)") != std::string::npos ||
+        } else if (res.benchmarkName.find("Scene Render: Full Frame (DGC)") != std::string::npos ||
                    res.benchmarkName.find("Full Scene Ray Tracing (PBR) - DGC") != std::string::npos ||
                    res.benchmarkName.find("Full Scene Ray Tracing (PBR) - Work Lists") != std::string::npos ||
                    res.benchmarkName.find("Full Scene Ray Tracing (PBR) - Device-Generated Commands") != std::string::npos) {
