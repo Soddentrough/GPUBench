@@ -163,7 +163,8 @@ public:
 
     BenchmarkDisplayInfo getBenchmarkDisplayInfo(
         const BenchmarkItem& item,
-        uint32_t targetDeviceIndex) const;
+        uint32_t targetDeviceIndex,
+        const std::string& sceneOverride = "") const;
 
 private:
     void setupDarkTheme(float scale = 1.0f);
@@ -221,6 +222,7 @@ private:
 
     // Benchmark Suite Definitions
     std::vector<BenchmarkCategory> m_categories;
+    std::unordered_map<std::string, bool> m_sceneSubgroupCollapsed;
     int m_suiteCategoryFilter{0}; // 0: All, 1: Compute, 2: Memory, 3: Ray Tracing, 4: Graphics, 5: Host System
     std::string m_suiteActiveScene{"indoor"}; // Active scenario shown on Suite cards: "indoor", "forest", "outdoor", "showroom"
     bool m_hideUnsupported{false}; // Show all tests by default
@@ -253,7 +255,7 @@ private:
     uint32_t m_renderWidth{3840};
     uint32_t m_renderHeight{2160};
     uint32_t m_samplesPerPixel{1};
-    bool m_dumpRenders{false};
+    bool m_dumpRenders{true};
     bool m_showSettingsModal{false};
     int m_scorecardSceneFilter{0}; // 0: All, 1: Indoor (Sponza), 2: Forest, 3: Landscape, 4: Showroom
 
@@ -268,9 +270,8 @@ private:
     // Ray Tracing Viewport Configuration & State
     int m_rtViewportMode{0};   // 0: Scenes & Parity, 1: Pipeline Passes, 2: PBR Materials, 3: Geometry & BVH
     int m_rtSceneIndex{0};      // 0: Showroom Studio, 1: Indoor Atrium, 2: Open-World Forest, 3: Outdoor Landscape
-    int m_rtParityViewMode{0};  // 0: Split Slider, 1: Technique A Solo, 2: Technique B Solo, 3: Difference Heatmap, 4: Side-by-Side
-    float m_paritySplitRatio{0.5f};
-    int m_rtPassIndex{0};       // 0: BVH Heatmap, 1: G-Buffer Normals, 2: Shadows, 3: RTAO, 4: Direct PBR, 5: Indirect GI, 6: Path Traced
+    int m_rtParityViewMode{0};  // 0: DGC Render, 1: Megakernel Render, 2: Side-by-Side Parity, 3: Path Tracing (1 vs 16 SPP), 4: 128-Light Direct
+    int m_rtPassIndex{0};       // 0: BVH Heatmap, 1: G-Buffer Normals, 2: Shadows, 3: RTAO, 4: Direct PBR, 5: Indirect GI, 6: Final Render
     int m_rtMaterialIndex{0};   // 0: Lineup, 1: Car Paint, 2: Subsurface, 3: Velvet, 4: Glass, 5: Rust, 6: Range
     int m_rtGeometryIndex{0};   // 0: Vehicle Wireframe & BVH, 1: Alpha Cutout Layers, 2: Scene BVH Heatmap
 

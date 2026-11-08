@@ -711,28 +711,37 @@ if(UNIX AND NOT APPLE)
                   "${CMAKE_CURRENT_SOURCE_DIR}/packaging/linux/man/gpubench-gui.1"
             DESTINATION share/man/man1)
 
-    # Benchmark 3D Models
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets/models")
-        install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/assets/models/"
-                DESTINATION share/gpubench/models
-                FILES_MATCHING PATTERN "*.glb")
-    endif()
-
-    # GUI tooltip visualization thumbnails (400x225 pipeline previews).
-    # Resolved at runtime via VulkanContext::loadTextureFromFile's
-    # /usr/share/gpubench/<path> candidate, so keep the assets/ prefix.
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets/thumbnails")
-        install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/assets/thumbnails/"
-                DESTINATION share/gpubench/assets/thumbnails
-                FILES_MATCHING PATTERN "*.png")
-    endif()
-
     # Documentation and Legal Notices
     install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE"
                   "${CMAKE_CURRENT_SOURCE_DIR}/README.md"
                   "${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_NOTICES.md"
             DESTINATION share/doc/gpubench)
 
+endif()
+
+# Cross-platform runtime assets (3D Models, GUI Thumbnails, PBR/Geometry Reference Images, and Profile JSONs)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets/models")
+    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/assets/models/"
+            DESTINATION share/gpubench/models
+            FILES_MATCHING PATTERN "*.glb")
+endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets/thumbnails")
+    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/assets/thumbnails/"
+            DESTINATION share/gpubench/assets/thumbnails
+            FILES_MATCHING PATTERN "*.png")
+endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/docs/images")
+    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/docs/images/"
+            DESTINATION share/gpubench/docs/images
+            FILES_MATCHING PATTERN "*.png")
+endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/renders")
+    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/renders/"
+            DESTINATION share/gpubench/renders
+            FILES_MATCHING PATTERN "*.json")
 endif()
 
 # CPack configuration for creating packages

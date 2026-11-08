@@ -858,9 +858,9 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
           continue;
         }
 
-        // Deduplicate algorithmic microbenchmarks across non-Showroom scenes
+        // Deduplicate algorithmic microbenchmarks across non-Showroom scenes when running all scenes
         if (auto *rs = dynamic_cast<RaySchedulingBench *>(bench)) {
-          if (rs->GetSceneType() != RaySchedulingBench::SceneType::Showroom) {
+          if (sceneName == "all" && rs->GetSceneType() != RaySchedulingBench::SceneType::Showroom) {
             if (i == 12 || i == 13 || i == 14 || i == 15 || i == 16 || i == 26 || i == 28) {
               continue;
             }

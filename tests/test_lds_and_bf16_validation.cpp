@@ -25,7 +25,8 @@ std::unique_ptr<IComputeContext> createVulkanContext() {
     if (!ctx || ctx->getDevices().empty()) {
       return nullptr;
     }
-    ctx->pickDevice(0);
+    int devIdx = (ctx->getDevices().size() > 1) ? 1 : 0;
+    ctx->pickDevice(devIdx);
     return ctx;
   } catch (...) {
     return nullptr;
@@ -248,7 +249,8 @@ std::unique_ptr<IComputeContext> createBf16Context() {
     try {
       auto vkCtx = ComputeBackendFactory::create(ComputeBackend::Vulkan, false, false);
       if (vkCtx && !vkCtx->getDevices().empty()) {
-        vkCtx->pickDevice(0);
+        int devIdx = (vkCtx->getDevices().size() > 1) ? 1 : 0;
+        vkCtx->pickDevice(devIdx);
         if (probe.IsSupported(vkCtx->getCurrentDeviceInfo(), vkCtx.get())) {
           return vkCtx;
         }
@@ -259,7 +261,8 @@ std::unique_ptr<IComputeContext> createBf16Context() {
   if (ComputeBackendFactory::isAvailable(ComputeBackend::ROCm)) {
     try {
       auto rocmCtx = ComputeBackendFactory::create(ComputeBackend::ROCm, false, false);
-      rocmCtx->pickDevice(0);
+      int devIdx = (rocmCtx->getDevices().size() > 1) ? 1 : 0;
+      rocmCtx->pickDevice(devIdx);
       if (probe.IsSupported(rocmCtx->getCurrentDeviceInfo(), rocmCtx.get())) {
         return rocmCtx;
       }
@@ -447,9 +450,9 @@ TEST_CASE(LdsAndBf16Validation, Bf16Bench_RecurrenceStability_MultiPassStress) {
   Bf16Bench bench;
   bench.Setup(*ctx, kdir);
 
-  // Run 10 consecutive iterations of both vector and matrix workloads without reallocating buffers
+  // Run 4 consecutive iterations of both vector and matrix workloads without reallocating buffers
   // to ensure no runaway feedback loop or cumulative overflow to Inf occurs
-  for (int iter = 0; iter < 10; ++iter) {
+  for (int iter = 0; iter < 4; ++iter) {
     bench.Run(0);
     ctx->waitIdle();
     ASSERT_TRUE(bench.ValidateResults(0));

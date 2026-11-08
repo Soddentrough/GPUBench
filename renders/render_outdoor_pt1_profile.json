@@ -1,0 +1,19 @@
+{
+  "gpu": "AMD Radeon AI PRO R9700 (RADV GFX1201)",
+  "scene": "Outdoor Landscape - Path Tracing (1 SPP)",
+  "resolution": "3840x2160 (8294400 primary rays)",
+  "traditional": { "fps": 79.9499, "mrays": 663.1364, "frame_ms": 12.5078 },
+  "worklist": { "fps": 440.6551, "mrays": 3654.9693, "frame_ms": 2.2693 },
+  "parity": {
+    "psnr": 120.0000,
+    "mae": 0.0000,
+    "rmse": 0.0000,
+    "exact_pixels": 8294400,
+    "exact_pct": 100.0000,
+    "near_exact_pixels": 8294400,
+    "near_exact_pct": 100.0000,
+    "diff_pixels": 0,
+    "diff_pct": 0.0000,
+    "status": "VERIFIED PARITY PASSED"
+  }
+}

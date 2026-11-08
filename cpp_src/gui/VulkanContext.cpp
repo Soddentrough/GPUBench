@@ -913,18 +913,84 @@ VulkanContext::TextureResource VulkanContext::createTextureRgba(int width, int h
 
 VulkanContext::TextureResource VulkanContext::loadTextureFromFile(const std::string& filepath) {
     TextureResource tex{};
-    std::string candidatePaths[] = {
+    std::vector<std::string> writablePaths = {
         filepath,
         "../" + filepath,
-        "../../" + filepath,
-        "/usr/share/gpubench/" + filepath,
-        "/usr/local/share/gpubench/" + filepath
+        "../../" + filepath
     };
+#ifdef _WIN32
+    if (const char* localAppData = std::getenv("LOCALAPPDATA")) {
+        writablePaths.push_back((std::filesystem::path(localAppData) / "gpubench" / filepath).string());
+    }
+#else
+    if (const char* xdgCache = std::getenv("XDG_CACHE_HOME")) {
+        if (xdgCache[0] != '\0') {
+            writablePaths.push_back((std::filesystem::path(xdgCache) / "gpubench" / filepath).string());
+        }
+    }
+    if (const char* home = std::getenv("HOME")) {
+        if (home[0] != '\0') {
+            writablePaths.push_back((std::filesystem::path(home) / ".cache" / "gpubench" / filepath).string());
+        }
+    }
+#endif
+
     std::string resolvedPath = "";
-    for (const auto& p : candidatePaths) {
-        if (std::filesystem::exists(p)) {
-            resolvedPath = p;
-            break;
+    std::error_code ec;
+    std::filesystem::file_time_type newestTime{};
+    for (const auto& p : writablePaths) {
+        if (std::filesystem::exists(p, ec) && !ec) {
+            auto ftime = std::filesystem::last_write_time(p, ec);
+            if (!ec && (resolvedPath.empty() || ftime > newestTime)) {
+                newestTime = ftime;
+                resolvedPath = p;
+            } else if (resolvedPath.empty()) {
+                resolvedPath = p;
+            }
+        }
+    }
+
+    if (resolvedPath.empty()) {
+        std::vector<std::string> candidatePaths = {
+            "share/gpubench/" + filepath,
+            "../share/gpubench/" + filepath,
+            "/usr/share/gpubench/" + filepath,
+            "/usr/local/share/gpubench/" + filepath
+        };
+
+        // If a full-resolution render in renders/render_<scene>_<pass>.png is not yet generated on disk,
+        // fall back to the shipped preview in assets/thumbnails/thumb_<scene>_<pass>.png so packaged
+        // builds display valid rendered previews out of the box.
+        const std::string renderPrefix = "renders/render_";
+        if (filepath.rfind(renderPrefix, 0) == 0) {
+            std::string rest = filepath.substr(renderPrefix.size());
+            auto replaceSuffix = [&](const std::string& fromSuf, const std::string& toSuf) {
+                if (rest.size() >= fromSuf.size() &&
+                    rest.compare(rest.size() - fromSuf.size(), fromSuf.size(), fromSuf) == 0) {
+                    rest = rest.substr(0, rest.size() - fromSuf.size()) + toSuf;
+                }
+            };
+            replaceSuffix("_traditional_megakernel.png", "_stage7_final.png");
+            replaceSuffix("_worklist_dgc.png", "_stage7_final.png");
+            replaceSuffix("_pathtracing_1spp_worklist.png", "_pathtracing_1spp.png");
+            replaceSuffix("_pathtracing_1spp_traditional.png", "_pathtracing_1spp.png");
+            replaceSuffix("_pathtracing_16spp_worklist.png", "_pathtracing_16spp.png");
+            replaceSuffix("_pathtracing_16spp_traditional.png", "_pathtracing_16spp.png");
+            replaceSuffix("_multilight_128_traditional.png", "_multilight_128_dgc.png");
+
+            std::string thumbRel = "assets/thumbnails/thumb_" + rest;
+            candidatePaths.push_back(thumbRel);
+            candidatePaths.push_back("../" + thumbRel);
+            candidatePaths.push_back("../../" + thumbRel);
+            candidatePaths.push_back("/usr/share/gpubench/" + thumbRel);
+            candidatePaths.push_back("/usr/local/share/gpubench/" + thumbRel);
+        }
+
+        for (const auto& p : candidatePaths) {
+            if (std::filesystem::exists(p, ec) && !ec) {
+                resolvedPath = p;
+                break;
+            }
         }
     }
     if (resolvedPath.empty()) {

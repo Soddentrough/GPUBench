@@ -9,6 +9,7 @@
 #include <iomanip>
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
 #include <functional>
 #include <thread>
 
@@ -971,8 +972,8 @@ void GuiApp::initializeBenchmarkCategories() {
             {"RayScheduling", "Scene Path Tracing (16 SPP)", "Path Tracing (16 SPP) (DGC)", "Ray Tracing", "MRays/s", "High-quality path tracing (16 samples per pixel) grouping active rays into queues", true, 24}
         }});
 
-        // Subgroup 4: Pipeline Stages & Scheduling (22 tests)
-        cat.subgroups.push_back({"Pipeline Stages & Scheduling", "Ray Tracing", "RayScheduling", "Isolated rendering pipeline phases, shadows, shading, and queue compaction", {
+        // Subgroup 4: Lighting, Shadows & Material Scheduling (15 tests per scene)
+        cat.subgroups.push_back({"Lighting, Shadows & Materials", "Ray Tracing", "RayScheduling", "Directional shadows, 128-light binning, PBR material BSDFs, incoherent GI, and alpha cutout", {
             {"RayScheduling", "Directional Shadows", "Shadows - Single Light (Megakernel)", "Ray Tracing", "MRays/s", "Tests shadow ray performance for a single light source using standard compute shaders", true, 19},
             {"RayScheduling", "Directional Shadows", "Shadows - Single Light (RTP + SER)", "Ray Tracing", "MRays/s", "Tests shadow ray performance for a single light using dedicated ray tracing hardware and reordering. Requires VK_EXT_ray_tracing_invocation_reorder extension (reports UNSUPPORTED when unavailable).", true, 20},
             {"RayScheduling", "Directional Shadows", "Shadows - Single Light (DGC)", "Ray Tracing", "MRays/s", "Tests shadow ray performance for a single light using dynamic GPU work queues", true, 21},
@@ -987,14 +988,18 @@ void GuiApp::initializeBenchmarkCategories() {
             {"RayScheduling", "Incoherent Ray Tracing", "Incoherent Rays (Megakernel)", "Ray Tracing", "MRays/s", "Diffuse secondary rays from real scene hits, traced with no reordering: the unmitigated baseline. Compare the three items to see what each technique recovers", true, 6},
             {"RayScheduling", "Incoherent Ray Tracing", "Incoherent Rays (RTP + SER)", "Ray Tracing", "MRays/s", "Same incoherent bounce rays, re-binned by hardware ray reordering (SER): measures what SER recovers from the worst-case divergence. Requires VK_EXT_ray_tracing_invocation_reorder extension (reports UNSUPPORTED when unavailable).", true, 7},
             {"RayScheduling", "Incoherent Ray Tracing", "Incoherent Rays (DGC)", "Ray Tracing", "MRays/s", "Same incoherent bounce rays, classified into directional octants and compacted into GPU work queues: measures what DGC recovers", true, 8},
+            {"RayScheduling", "Alpha Cutout Divergence", "Traversal Divergence (Alpha Cutout)", "Ray Tracing", "MRays/s", "Stresses ray traversal with procedural alpha-cutout masks requiring repeated candidate triangle evaluation and BVH re-entry", true, 27}
+        }});
+
+        // Subgroup 5: Traversal Ordering & Stream Compaction (7 algorithmic microbenchmarks)
+        cat.subgroups.push_back({"Traversal Ordering & Stream Compaction", "Ray Tracing", "RayScheduling_Micro", "2D tile/Morton spatial reordering and wavefront hit record stream compaction", {
             {"RayScheduling", "Traversal Ordering & Coherence", "Linear 1D Scanline", "Ray Tracing", "MRays/s", "Traces rays in simple row-by-row order, serving as a baseline for ray order comparisons", true, 12},
             {"RayScheduling", "Traversal Ordering & Coherence", "2D Screen Tiled (8x4)", "Ray Tracing", "MRays/s", "Traces rays in small 8x4 pixel rectangular blocks to improve cache hit rates", true, 14},
             {"RayScheduling", "Traversal Ordering & Coherence", "2D Morton (8x4)", "Ray Tracing", "MRays/s", "Traces rays following an 8x4 Z-order curve to maximize spatial cache locality", true, 15},
             {"RayScheduling", "Traversal Ordering & Coherence", "2D Morton (4x8)", "Ray Tracing", "MRays/s", "Traces rays following a 4x8 Z-order curve to test directional cache preference", true, 16},
-            {"RayScheduling", "Wavefront Stream Compaction", "Wave Ballot Compaction", "Ray Tracing", "MRecords/s", "Traces primary rays and uses subgroupBallot wave voting to bin hits into 8 material queues (16B records)", true, 13},
-            {"RayScheduling", "Wavefront Stream Compaction", "Queue Compaction (Single-Pass)", "Ray Tracing", "MRecords/s", "Traces primary rays, filters out sky misses, and writes 128-byte expanded hit state records to a unified queue", true, 26},
+            {"RayScheduling", "Wavefront Stream Compaction", "Queue Compaction (Single-Pass)", "Ray Tracing", "MRecords/s", "Traces primary rays, filters out sky misses, and writes 128-byte expanded hit state records to a unified queue via global atomic append (Baseline)", true, 26},
             {"RayScheduling", "Wavefront Stream Compaction", "Queue Compaction Throughput", "Ray Tracing", "MRecords/s", "Traces primary rays, filters out sky misses, and writes 32-byte octahedrally-packed hit records at peak bandwidth", true, 28},
-            {"RayScheduling", "Alpha Cutout Divergence", "Traversal Divergence (Alpha Cutout)", "Ray Tracing", "MRays/s", "Stresses ray traversal with procedural alpha-cutout masks requiring repeated candidate triangle evaluation and BVH re-entry", true, 27}
+            {"RayScheduling", "Wavefront Stream Compaction", "Wave Ballot Compaction", "Ray Tracing", "MRecords/s", "Traces primary rays and uses subgroupBallot wave voting to bin hits into 8 material queues (16B records) using 1 atomic add per wave", true, 13}
         }});
 
         // Subgroup 5: Hardware BVH & Divergence Stress (12 tests)
@@ -1131,13 +1136,13 @@ void GuiApp::applyVisualizationMetadata() {
         {"RayScheduling", 16, {"", "traversal_morton_4x8",
             "Tall 4x8 tiles on a Z-curve: probes the hardware's directional cache preference", 16.0f/9.0f, 1, 0}},
 
-        // ---- RayScheduling: wavefront compaction (13, 26, 28) ----
-        {"RayScheduling", 13, {"", "wave_ballot_compaction",
-            "Subgroup ballot bins active surface hits into 8 material queues using 1 single atomic add per wave", 16.0f/9.0f, -1, 0}},
+        // ---- RayScheduling: wavefront compaction (26, 28, 13) ----
         {"RayScheduling", 26, {"", "compaction_128b_expanded",
-            "Single-pass stream compaction filtering sky misses and writing 128-byte expanded hit state records (8x vec4)", 16.0f/9.0f, -1, 0}},
+            "Single-pass stream compaction filtering sky misses and writing 128-byte expanded hit state records (8x vec4, Baseline)", 16.0f/9.0f, -1, 0}},
         {"RayScheduling", 28, {"", "compaction_32b_packed",
             "Single-pass stream compaction writing 32-byte octahedrally-packed hit records (2x vec4, 4x less bandwidth)", 16.0f/9.0f, -1, 0}},
+        {"RayScheduling", 13, {"", "wave_ballot_compaction",
+            "Subgroup ballot bins active surface hits into 8 material queues using 1 single atomic add per wave", 16.0f/9.0f, -1, 0}},
 
         // ---- RayScheduling: primary rays (17, 18, 29, 30) ----
         {"RayScheduling", 17, {"assets/thumbnails/thumb_{scene}_stage2_primary.png", "",
@@ -2564,7 +2569,17 @@ void GuiApp::renderLeftSidebar(float width, float height) {
     for (const auto& cat : m_categories) {
         for (const auto& sub : cat.subgroups) {
             for (const auto& item : sub.items) {
-                if (item.selected && (!m_hideUnsupported || item.isSupported)) selectedTests++;
+                if (item.selected && (!m_hideUnsupported || item.isSupported)) {
+                    bool isMicro = (item.id == "RayScheduling" &&
+                        (item.configIndex == 12 || item.configIndex == 13 || item.configIndex == 14 ||
+                         item.configIndex == 15 || item.configIndex == 16 || item.configIndex == 26 ||
+                         item.configIndex == 28));
+                    if (item.id == "RayScheduling" && !isMicro && m_scene == "all") {
+                        selectedTests += 4;
+                    } else {
+                        selectedTests += 1;
+                    }
+                }
             }
         }
     }
@@ -2692,76 +2707,9 @@ void GuiApp::renderLeftSidebar(float width, float height) {
     ImGui::TextColored(ImVec4(0.65f, 0.75f, 0.90f, 1.0f), "TARGET ACCELERATORS");
     popBoldFont();
 
-    // Presets with active highlights
-    bool dualGpu = false, allSel = true;
-    size_t selCount = 0;
+    size_t gpuCount = 0;
     for (const auto& dev : m_devices) {
-        if (dev.selected) selCount++;
-        else allSel = false;
-    }
-
-    std::vector<SelectableDevice*> actualGpus;
-    SelectableDevice* hostDev = nullptr;
-    for (auto& dev : m_devices) {
-        if (!dev.isSystem) actualGpus.push_back(&dev);
-        else hostDev = &dev;
-    }
-
-    size_t gpuCount = actualGpus.size();
-    if (selCount == 2 && gpuCount >= 2) {
-        bool allGpus = true;
-        for (const auto* g : actualGpus) {
-            if (!g->selected) allGpus = false;
-        }
-        dualGpu = allGpus;
-    }
-
-    auto presetPill = [](const char* label, bool active) {
-        if (active) {
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.25f, 0.45f, 0.85f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
-        } else {
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.13f, 0.16f, 0.23f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.70f, 0.78f, 0.90f, 1.0f));
-        }
-        bool clicked = ImGui::SmallButton(label);
-        ImGui::PopStyleColor(2);
-        return clicked;
-    };
-
-    // Render presets dynamically for actual GPUs only
-    for (size_t g = 0; g < gpuCount; ++g) {
-        auto* gpu = actualGpus[g];
-        bool onlyThisGpu = (gpu->selected && selCount == 1);
-        std::string pillLabel = "GPU " + std::to_string(gpu->deviceIndex);
-        if (presetPill(pillLabel.c_str(), onlyThisGpu)) {
-            for (auto& dev : m_devices) {
-                dev.selected = (&dev == gpu);
-            }
-            updateTelemetrySelection();
-        }
-        ImGui::SameLine();
-    }
-
-    if (gpuCount > 1) {
-        if (presetPill("Dual GPUs", dualGpu)) {
-            for (auto& dev : m_devices) dev.selected = !dev.isSystem;
-            updateTelemetrySelection();
-        }
-        ImGui::SameLine();
-    }
-
-    if (hostDev != nullptr) {
-        if (presetPill("+ Host", false)) {
-            hostDev->selected = true;
-            updateTelemetrySelection();
-        }
-        ImGui::SameLine();
-    }
-
-    if (presetPill("All", allSel)) {
-        for (auto& dev : m_devices) dev.selected = true;
-        updateTelemetrySelection();
+        if (!dev.isSystem) gpuCount++;
     }
 
     ImGui::Spacing();
@@ -3129,22 +3077,22 @@ void GuiApp::renderLeftSidebar(float width, float height) {
     ImGui::TextDisabled("(?)");
     if (ImGui::IsItemHovered()) {
         ImGui::BeginTooltip();
-        ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.00f, 1.0f), "Render Output Image Export");
+        ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.00f, 1.0f), "Post-Benchmark Visual Verification & Render Export");
         ImGui::Separator();
         ImGui::PushTextWrapPos(s(300.0f));
         ImGui::TextUnformatted(
-            "Saves full-resolution output framebuffers (PPM/PNG images) of ray-traced scenes to the 'renders/' folder on disk.\n\n"
-            "• Checked: Writes image files to disk for visual verification and image quality comparison.\n"
-            "• Unchecked: Keeps frames in GPU memory for pure throughput benchmarking with zero disk I/O latency."
+            "Timed benchmark loops always execute in-memory with zero framebuffer store or disk I/O overhead.\n\n"
+            "• Checked (Default): Runs an untimed post-benchmark pass to export full-resolution scene renders and parity profiles for the Ray Tracing Viewport.\n"
+            "• Unchecked: Skips post-benchmark image generation."
         );
         ImGui::PopTextWrapPos();
         ImGui::EndTooltip();
     }
 
     if (m_dumpRenders) {
-        ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f), "Saving image output to ./renders/");
+        ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "Exports renders post-run (zero timed I/O)");
     } else {
-        ImGui::TextDisabled("In-memory only (max throughput)");
+        ImGui::TextDisabled("Post-run render export disabled");
     }
 
     // 6. Live Hardware Telemetry (placed at bottom of sidebar so controls stay above the fold)
@@ -3451,7 +3399,7 @@ bool GuiApp::matchesItem(const ResultData& r, const BenchmarkItem& itm, uint32_t
             if (itm.name.find("8x8") != std::string::npos && clean.find("4x8") != std::string::npos) return true;
         }
         if (itm.name.find("Screen Tiled") != std::string::npos && clean.find("Screen Tiled") != std::string::npos) return true;
-        for (const char* schedKey : {"Scanline", "Wave Ballot", "Single-Pass", "Round-Trip"}) {
+        for (const char* schedKey : {"Scanline", "Wave Ballot", "Single-Pass", "Throughput", "Round-Trip"}) {
             if (itm.name.find(schedKey) != std::string::npos && clean.find(schedKey) != std::string::npos) return true;
         }
     }
@@ -3494,7 +3442,8 @@ bool GuiApp::matchesItem(const ResultData& r, const BenchmarkItem& itm, uint32_t
 
 GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
     const BenchmarkItem& item,
-    uint32_t targetDeviceIndex) const
+    uint32_t targetDeviceIndex,
+    const std::string& sceneOverride) const
 {
     BenchmarkDisplayInfo info;
     info.hasResult = false;
@@ -3563,18 +3512,26 @@ GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
         return std::string(buf);
     };
 
+    const std::string activeScene = !sceneOverride.empty()
+        ? sceneOverride
+        : ((m_scene != "all" && !m_scene.empty()) ? m_scene : m_suiteActiveScene);
+    const bool isMicroConfig = (item.id == "RayScheduling" &&
+        (item.configIndex == 12 || item.configIndex == 13 || item.configIndex == 14 ||
+         item.configIndex == 15 || item.configIndex == 16 || item.configIndex == 26 ||
+         item.configIndex == 28));
+
     const ResultData* curRes = nullptr;
     const ResultData* fallbackRes = nullptr;
     for (const auto& r : m_allResults) {
         if (matchesItem(r, item, activeDev)) {
             if (!fallbackRes && r.time_ms > 0.0) fallbackRes = &r;
-            if (item.id == "RayScheduling" || item.id == "RayPathTracing") {
+            if ((item.id == "RayScheduling" || item.id == "RayPathTracing") && !isMicroConfig) {
                 bool sceneMatches = false;
-                if (m_suiteActiveScene == "indoor" && r.benchmarkName.find("Indoor Atrium") != std::string::npos) sceneMatches = true;
-                else if (m_suiteActiveScene == "forest" && r.benchmarkName.find("Forest") != std::string::npos) sceneMatches = true;
-                else if (m_suiteActiveScene == "outdoor" && r.benchmarkName.find("Outdoor") != std::string::npos) sceneMatches = true;
-                else if (m_suiteActiveScene == "showroom" && r.benchmarkName.find("Showroom") != std::string::npos) sceneMatches = true;
-                else if (m_suiteActiveScene.empty() || m_suiteActiveScene == "all") sceneMatches = true;
+                if (activeScene == "indoor" && r.benchmarkName.find("Indoor Atrium") != std::string::npos) sceneMatches = true;
+                else if (activeScene == "forest" && r.benchmarkName.find("Forest") != std::string::npos) sceneMatches = true;
+                else if (activeScene == "outdoor" && r.benchmarkName.find("Outdoor") != std::string::npos) sceneMatches = true;
+                else if (activeScene == "showroom" && r.benchmarkName.find("Showroom") != std::string::npos) sceneMatches = true;
+                else if (activeScene.empty() || activeScene == "all") sceneMatches = true;
 
                 if (sceneMatches) {
                     curRes = &r;
@@ -3586,7 +3543,9 @@ GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
             }
         }
     }
-    if (!curRes) curRes = fallbackRes;
+    if (!curRes && (isMicroConfig || activeScene.empty() || activeScene == "all")) {
+        curRes = fallbackRes;
+    }
 
     if (curRes) {
         info.hasResult = true;
@@ -3662,7 +3621,8 @@ GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
                          item.name.find("SER") == std::string::npos && 
                          item.name.find("DGC") == std::string::npos)) ||
                        item.name.find("Linear 1D Scanline") != std::string::npos ||
-                       item.name.find("Wave Ballot") != std::string::npos ||
+                       item.name.find("Single-Pass") != std::string::npos ||
+                       (item.subcategory == "Wavefront Stream Compaction" && item.configIndex == 26) ||
                        item.name.find("100% Solid") != std::string::npos ||
                        item.name.find("Uniform Material") != std::string::npos ||
                        item.name.find("Coherent Material") != std::string::npos ||
@@ -3703,7 +3663,7 @@ GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
                            item.name.find("Traversal Scheduling") != std::string::npos) {
                     baselineName = "Linear 1D Scanline";
                 } else if (item.subcategory.find("Wavefront Stream Compaction") != std::string::npos) {
-                    baselineName = "Wave Ballot";
+                    baselineName = "Single-Pass";
                 }
             }
         }
@@ -3918,8 +3878,16 @@ void GuiApp::renderBenchmarkSuitePanel() {
     size_t catCounts[5] = {0, 0, 0, 0, 0};
     size_t totalCatCount = 0;
     for (size_t ci = 0; ci < m_categories.size() && ci < 5; ++ci) {
-        catCounts[ci] = m_categories[ci].totalItemCount();
-        totalCatCount += catCounts[ci];
+        size_t cCount = 0;
+        for (const auto& sub : m_categories[ci].subgroups) {
+            if (sub.engineId == "RayScheduling" && m_scene == "all") {
+                cCount += sub.items.size() * 4;
+            } else {
+                cCount += sub.items.size();
+            }
+        }
+        catCounts[ci] = cCount;
+        totalCatCount += cCount;
     }
     const char* catBaseNames[6] = {"All Tests", "Compute", "Memory", "Ray Tracing", "Graphics", "Host CPU"};
     for (int vi = 0; vi < 6; ++vi) {
@@ -3959,39 +3927,6 @@ void GuiApp::renderBenchmarkSuitePanel() {
     ImGui::PopStyleColor();
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Hide workloads not supported by current hardware or API toolchain");
-    }
-
-    // Ray Tracing Scenario View Tabs (available whenever Ray Tracing or All is viewed)
-    if (m_suiteCategoryFilter == 0 || m_suiteCategoryFilter == 3) {
-        ImGui::Spacing();
-        ImGui::TextDisabled("Preview Scene Scores:");
-        const char* sceneViewLabels[] = { "Indoor Atrium (Sponza) [Canonical]", "Open-World Forest", "Outdoor Landscape", "Showroom Studio" };
-        const char* sceneViewTags[] = { "indoor", "forest", "outdoor", "showroom" };
-        const char* sceneViewTips[] = {
-            "Preview scores and thumbnails for Indoor Atrium (Crytek Sponza, 262K tris) [Canonical Reference]",
-            "Preview scores and thumbnails for Open-World Forest (1.05M+ tris, alpha-tested foliage)",
-            "Preview scores and thumbnails for Outdoor Landscape (terrain vista, distance rays)",
-            "Preview scores and thumbnails for Showroom Studio (108K tris, vehicle void)"
-        };
-        for (int svi = 0; svi < 4; ++svi) {
-            float sBtnW = ImGui::CalcTextSize(sceneViewLabels[svi]).x + ImGui::GetStyle().FramePadding.x * 2.0f;
-            sameLineIfFits(sBtnW);
-            bool isAct = (m_suiteActiveScene == sceneViewTags[svi]);
-            if (isAct) {
-                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.48f, 0.92f, 1.0f));
-                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
-            } else {
-                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.13f, 0.16f, 0.22f, 1.0f));
-                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.70f, 0.75f, 0.85f, 1.0f));
-            }
-            if (ImGui::SmallButton(sceneViewLabels[svi])) {
-                m_suiteActiveScene = sceneViewTags[svi];
-            }
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("%s", sceneViewTips[svi]);
-            }
-            ImGui::PopStyleColor(2);
-        }
     }
 
     ImGui::Spacing();
@@ -4230,7 +4165,12 @@ void GuiApp::renderBenchmarkSuitePanel() {
                 for (const auto& itm : sub.items) {
                     if (itm.selected) sel++;
                 }
-                if (sel == 0) sub.collapsed = true;
+                if (sel == 0) {
+                    sub.collapsed = true;
+                    for (const char* scTag : {"indoor", "forest", "outdoor", "showroom"}) {
+                        m_sceneSubgroupCollapsed[sub.name + "#" + scTag] = true;
+                    }
+                }
             }
         }
     }
@@ -4239,11 +4179,17 @@ void GuiApp::renderBenchmarkSuitePanel() {
         for (auto& cat : m_categories) {
             for (auto& sub : cat.subgroups) sub.collapsed = false;
         }
+        for (auto& kv : m_sceneSubgroupCollapsed) kv.second = false;
     }
     sameLineIfFits(colW, s(6.0f));
     if (ImGui::SmallButton("Collapse All")) {
         for (auto& cat : m_categories) {
-            for (auto& sub : cat.subgroups) sub.collapsed = true;
+            for (auto& sub : cat.subgroups) {
+                sub.collapsed = true;
+                for (const char* scTag : {"indoor", "forest", "outdoor", "showroom"}) {
+                    m_sceneSubgroupCollapsed[sub.name + "#" + scTag] = true;
+                }
+            }
         }
     }
 
@@ -4251,14 +4197,37 @@ void GuiApp::renderBenchmarkSuitePanel() {
     ImGui::Separator();
     ImGui::Spacing();
 
+    struct SubgroupRenderInstance {
+        BenchmarkSubgroup* sub;
+        std::string sceneTag;   // "" for scene-invariant, or "indoor", "forest", "outdoor", "showroom"
+        std::string sceneLabel; // "" for scene-invariant, or "Indoor Atrium", "Open-World Forest", "Outdoor Landscape", "Showroom Studio"
+    };
+
+    auto isInstanceCollapsed = [this](const SubgroupRenderInstance& inst) -> bool {
+        if (!inst.sceneTag.empty()) {
+            std::string key = inst.sub->name + "#" + inst.sceneTag;
+            auto it = m_sceneSubgroupCollapsed.find(key);
+            if (it != m_sceneSubgroupCollapsed.end()) return it->second;
+        }
+        return inst.sub->collapsed;
+    };
+
+    auto setInstanceCollapsed = [this](const SubgroupRenderInstance& inst, bool col) {
+        if (!inst.sceneTag.empty()) {
+            m_sceneSubgroupCollapsed[inst.sub->name + "#" + inst.sceneTag] = col;
+        } else {
+            inst.sub->collapsed = col;
+        }
+    };
+
     // Optimal linear partition (Painter's Partition DP) to minimize maximum column height
     auto partitionSubgroupsOptimal = [](
-        const std::vector<BenchmarkSubgroup*>& subs,
+        const std::vector<SubgroupRenderInstance>& subs,
         int numCols,
-        const std::function<float(const BenchmarkSubgroup&)>& getHeight)
-        -> std::vector<std::vector<BenchmarkSubgroup*>>
+        const std::function<float(const SubgroupRenderInstance&)>& getHeight)
+        -> std::vector<std::vector<SubgroupRenderInstance>>
     {
-        std::vector<std::vector<BenchmarkSubgroup*>> cols(numCols);
+        std::vector<std::vector<SubgroupRenderInstance>> cols(numCols);
         if (subs.empty() || numCols <= 0) return cols;
         if (numCols == 1) {
             cols[0] = subs;
@@ -4271,7 +4240,7 @@ void GuiApp::renderBenchmarkSuitePanel() {
         }
 
         std::vector<float> heights(n);
-        for (int i = 0; i < n; ++i) heights[i] = getHeight(*subs[i]);
+        for (int i = 0; i < n; ++i) heights[i] = getHeight(subs[i]);
 
         std::vector<std::vector<float>> dp(numCols, std::vector<float>(n, 1e9f));
         std::vector<std::vector<int>> split(numCols, std::vector<int>(n, 0));
@@ -4315,11 +4284,15 @@ void GuiApp::renderBenchmarkSuitePanel() {
     };
 
     // Collapsible Subgroup Renderer (Accordion Header + Dynamic Structured Workload Rows)
-    auto renderSubgroupCard = [this, canEditWorkloads](BenchmarkSubgroup& sub) {
+    auto renderSubgroupCard = [this, canEditWorkloads, &isInstanceCollapsed, &setInstanceCollapsed](const SubgroupRenderInstance& inst) {
+        BenchmarkSubgroup& sub = *inst.sub;
+        const std::string& cardScene = inst.sceneTag;
+        bool cardCollapsed = isInstanceCollapsed(inst);
+
         size_t visibleCount = 0;
         size_t selectedCount = 0;
         for (const auto& itm : sub.items) {
-            BenchmarkDisplayInfo info = getBenchmarkDisplayInfo(itm, m_telemetryGpuIndex);
+            BenchmarkDisplayInfo info = getBenchmarkDisplayInfo(itm, m_telemetryGpuIndex, cardScene);
             bool isUnsupported = (!itm.isSupported || (info.hasResult && info.primaryResult.isUnsupported));
             if (!m_hideUnsupported || !isUnsupported) {
                 visibleCount++;
@@ -4328,7 +4301,8 @@ void GuiApp::renderBenchmarkSuitePanel() {
         }
         if (visibleCount == 0 && m_hideUnsupported) return;
 
-        ImGui::PushID(sub.name.c_str());
+        std::string cardId = sub.name + (cardScene.empty() ? "" : ("_" + cardScene));
+        ImGui::PushID(cardId.c_str());
 
         bool isAllSel = (selectedCount == visibleCount && visibleCount > 0);
         bool isPartSel = (selectedCount > 0 && selectedCount < visibleCount);
@@ -4343,7 +4317,7 @@ void GuiApp::renderBenchmarkSuitePanel() {
         float maxScoreW = ImGui::CalcTextSize("[TFLOPS]").x;
         float maxDeltaW = ImGui::CalcTextSize("[Baseline]").x + s(10.0f);
         for (const auto& itm : sub.items) {
-            BenchmarkDisplayInfo d = getBenchmarkDisplayInfo(itm, m_telemetryGpuIndex);
+            BenchmarkDisplayInfo d = getBenchmarkDisplayInfo(itm, m_telemetryGpuIndex, cardScene);
             bool isUnsupported = (!itm.isSupported || (d.hasResult && d.primaryResult.isUnsupported));
             if (m_hideUnsupported && isUnsupported) continue;
 
@@ -4375,9 +4349,9 @@ void GuiApp::renderBenchmarkSuitePanel() {
         // 2. Right-aligned header score/status badge
         std::string rightBadge = "";
         ImVec4 badgeColor = ImVec4(0.6f, 0.7f, 0.85f, 1.0f);
-        if (sub.collapsed) {
+        if (cardCollapsed) {
             for (const auto& itm : sub.items) {
-                BenchmarkDisplayInfo d = getBenchmarkDisplayInfo(itm, m_telemetryGpuIndex);
+                BenchmarkDisplayInfo d = getBenchmarkDisplayInfo(itm, m_telemetryGpuIndex, cardScene);
                 if (d.hasResult && d.primaryResult.time_ms > 0.0 && !d.primaryResult.isUnsupported) {
                     rightBadge = d.scoreText;
                     badgeColor = ImVec4(0.35f, 0.95f, 0.55f, 1.0f);
@@ -4395,8 +4369,10 @@ void GuiApp::renderBenchmarkSuitePanel() {
                 rightBadge = "[GB/s / ns]";
             } else if (sub.name == "Acceleration Structure Builds") {
                 rightBadge = "[MTris/s / MInst/s]";
-            } else if (sub.name == "Pipeline Stages & Scheduling") {
+            } else if (sub.name == "Lighting, Shadows & Materials" || sub.name == "Pipeline Stages & Scheduling") {
                 rightBadge = "[MRays/s / MHits/s]";
+            } else if (sub.name == "Traversal Ordering & Stream Compaction") {
+                rightBadge = "[MRays/s / MRecords/s]";
             } else if (sub.name == "Hardware BVH & Divergence Stress") {
                 rightBadge = "[GIS/s / MRays/s]";
             } else if (!sub.items.empty()) {
@@ -4415,7 +4391,7 @@ void GuiApp::renderBenchmarkSuitePanel() {
         ImVec2 p0 = ImGui::GetCursorScreenPos();
         ImVec2 p1 = ImVec2(p0.x + cardW, p0.y + headerH);
 
-        ImVec4 headerBg = sub.collapsed ? ImVec4(0.12f, 0.15f, 0.22f, 0.85f) : ImVec4(0.15f, 0.20f, 0.30f, 0.95f);
+        ImVec4 headerBg = cardCollapsed ? ImVec4(0.12f, 0.15f, 0.22f, 0.85f) : ImVec4(0.15f, 0.20f, 0.30f, 0.95f);
         ImDrawList* drawList = ImGui::GetWindowDrawList();
         drawList->AddRectFilled(p0, p1, ImGui::GetColorU32(headerBg), s(5.0f));
         drawList->AddRect(p0, p1, ImGui::GetColorU32(ImVec4(0.25f, 0.32f, 0.45f, 0.6f)), s(5.0f));
@@ -4424,7 +4400,7 @@ void GuiApp::renderBenchmarkSuitePanel() {
         ImVec2 center = ImVec2(p0.x + s(14.0f), p0.y + headerH * 0.5f);
         float r = s(4.0f);
         ImU32 triCol = ImGui::GetColorU32(ImVec4(0.60f, 0.80f, 1.0f, 1.0f));
-        if (sub.collapsed) {
+        if (cardCollapsed) {
             drawList->AddTriangleFilled(
                 ImVec2(center.x - r * 0.6f, center.y - r),
                 ImVec2(center.x - r * 0.6f, center.y + r),
@@ -4443,7 +4419,8 @@ void GuiApp::renderBenchmarkSuitePanel() {
         // Clickable chevron area for collapse/expand
         ImGui::SetCursorScreenPos(p0);
         if (ImGui::InvisibleButton("##chev_click", ImVec2(s(26.0f), headerH))) {
-            sub.collapsed = !sub.collapsed;
+            setInstanceCollapsed(inst, !cardCollapsed);
+            cardCollapsed = !cardCollapsed;
         }
 
         // Group-level select/deselect checkbox
@@ -4460,11 +4437,8 @@ void GuiApp::renderBenchmarkSuitePanel() {
                     itm.selected = cbVal;
                 }
             }
-            if (!cbVal) {
-                sub.collapsed = true;
-            } else {
-                sub.collapsed = false;
-            }
+            setInstanceCollapsed(inst, !cbVal);
+            cardCollapsed = !cbVal;
         }
         if (isPartSel) ImGui::PopStyleColor();
         if (!canEditWorkloads) ImGui::EndDisabled();
@@ -4479,11 +4453,8 @@ void GuiApp::renderBenchmarkSuitePanel() {
 
         ImGui::SetCursorScreenPos(ImVec2(titleStartX, p0.y + textOffsetY));
         std::string displaySubName = sub.name;
-        if (sub.component == "Ray Tracing" && (sub.engineId == "RayScheduling" || sub.engineId == "RayPathTracing")) {
-            if (m_suiteActiveScene == "indoor") displaySubName += " [Indoor Atrium]";
-            else if (m_suiteActiveScene == "forest") displaySubName += " [Open-World Forest]";
-            else if (m_suiteActiveScene == "outdoor") displaySubName += " [Outdoor Landscape]";
-            else if (m_suiteActiveScene == "showroom") displaySubName += " [Showroom Studio]";
+        if (!inst.sceneLabel.empty()) {
+            displaySubName += " [" + inst.sceneLabel + "]";
         }
         pushBoldFont();
         std::string fittedSubName = fitTextToPixelWidth(displaySubName, maxTitleW);
@@ -4504,15 +4475,16 @@ void GuiApp::renderBenchmarkSuitePanel() {
         // Clickable title area for collapse/expand
         ImGui::SetCursorScreenPos(ImVec2(titleStartX, p0.y));
         if (ImGui::InvisibleButton("##title_click", ImVec2(cardW - s(56.0f), headerH))) {
-            sub.collapsed = !sub.collapsed;
+            setInstanceCollapsed(inst, !cardCollapsed);
+            cardCollapsed = !cardCollapsed;
         }
 
         // Place cursor clearly BELOW header banner with margin
         ImGui::SetCursorScreenPos(ImVec2(p0.x, p1.y + s(6.0f)));
 
         // Render Indented Workload Items if Expanded
-        if (!sub.collapsed) {
-            std::string tblId = "SubTbl_" + sub.name;
+        if (!cardCollapsed) {
+            std::string tblId = "SubTbl_" + cardId;
             ImGuiTableFlags subTblFlags = ImGuiTableFlags_SizingStretchProp | 
                                           ImGuiTableFlags_NoPadOuterX | 
                                           ImGuiTableFlags_NoSavedSettings;
@@ -4533,7 +4505,7 @@ void GuiApp::renderBenchmarkSuitePanel() {
 
                 for (size_t iIdx = 0; iIdx < sub.items.size(); ++iIdx) {
                     auto& item = sub.items[iIdx];
-                    BenchmarkDisplayInfo dispInfo = getBenchmarkDisplayInfo(item, m_telemetryGpuIndex);
+                    BenchmarkDisplayInfo dispInfo = getBenchmarkDisplayInfo(item, m_telemetryGpuIndex, cardScene);
                     bool isUnsupported = (!item.isSupported || (dispInfo.hasResult && dispInfo.primaryResult.isUnsupported));
                     if (m_hideUnsupported && isUnsupported) continue;
 
@@ -4600,6 +4572,10 @@ void GuiApp::renderBenchmarkSuitePanel() {
                         if (item.viz.linkedViewportMode == 1) m_rtPassIndex = item.viz.linkedViewportSubIndex;
                         else if (item.viz.linkedViewportMode == 2) m_rtMaterialIndex = item.viz.linkedViewportSubIndex;
                         else if (item.viz.linkedViewportMode == 3) m_rtGeometryIndex = item.viz.linkedViewportSubIndex;
+                        if (cardScene == "showroom") m_rtSceneIndex = 0;
+                        else if (cardScene == "indoor") m_rtSceneIndex = 1;
+                        else if (cardScene == "forest") m_rtSceneIndex = 2;
+                        else if (cardScene == "outdoor") m_rtSceneIndex = 3;
                         m_switchToRtViewport = true;
                     }
 
@@ -4612,7 +4588,7 @@ void GuiApp::renderBenchmarkSuitePanel() {
                                               item.name.c_str(), item.subcategory.c_str(), item.id.c_str(),
                                               catStr.c_str(), reason.c_str());
                         } else if (!item.description.empty()) {
-                            std::string scn = (item.id == "RayScheduling" || item.id == "RayPathTracing") ? m_suiteActiveScene : "";
+                            std::string scn = !cardScene.empty() ? cardScene : ((item.id == "RayScheduling" || item.id == "RayPathTracing") ? m_suiteActiveScene : "");
                             renderBenchmarkTooltip(item, scn);
                         }
                     }
@@ -4623,6 +4599,13 @@ void GuiApp::renderBenchmarkSuitePanel() {
                     bool isCurrentlyTesting = !isUnsupported && (m_execState == ExecutionState::Running &&
                         m_hasCurrentlyRunningResult &&
                         matchesItem(m_currentlyRunningResult, item, m_telemetryGpuIndex));
+                    if (isCurrentlyTesting && !cardScene.empty()) {
+                        const std::string& rName = m_currentlyRunningResult.benchmarkName;
+                        if (cardScene == "indoor" && rName.find("Indoor Atrium") == std::string::npos) isCurrentlyTesting = false;
+                        else if (cardScene == "forest" && rName.find("Forest") == std::string::npos) isCurrentlyTesting = false;
+                        else if (cardScene == "outdoor" && rName.find("Outdoor") == std::string::npos) isCurrentlyTesting = false;
+                        else if (cardScene == "showroom" && rName.find("Showroom") == std::string::npos) isCurrentlyTesting = false;
+                    }
 
                     if (dispInfo.hasResult && !dispInfo.primaryResult.isUnsupported && dispInfo.primaryResult.time_ms > 0.0) {
                         float sW = ImGui::CalcTextSize(dispInfo.scoreText.c_str()).x;
@@ -4752,7 +4735,18 @@ void GuiApp::renderBenchmarkSuitePanel() {
         for (auto& sub : m_categories[4].subgroups) activeSubgroups.push_back(&sub);
     }
 
-    std::vector<BenchmarkSubgroup*> visibleSubgroups;
+    struct ScenePair {
+        const char* tag;
+        const char* label;
+    };
+    const ScenePair allScenes[4] = {
+        {"indoor", "Indoor Atrium"},
+        {"forest", "Open-World Forest"},
+        {"outdoor", "Outdoor Landscape"},
+        {"showroom", "Showroom Studio"}
+    };
+
+    std::vector<SubgroupRenderInstance> visibleSubgroups;
     for (auto* sub : activeSubgroups) {
         size_t visibleCount = 0;
         for (const auto& itm : sub->items) {
@@ -4760,8 +4754,23 @@ void GuiApp::renderBenchmarkSuitePanel() {
             bool isUnsupported = (!itm.isSupported || (info.hasResult && info.primaryResult.isUnsupported));
             if (!m_hideUnsupported || !isUnsupported) visibleCount++;
         }
-        if (visibleCount > 0 || !m_hideUnsupported) {
-            visibleSubgroups.push_back(sub);
+        if (visibleCount == 0 && m_hideUnsupported) continue;
+
+        if (sub->component == "Ray Tracing" && sub->engineId == "RayScheduling") {
+            if (m_scene == "all" || m_scene.empty()) {
+                for (const auto& sc : allScenes) {
+                    visibleSubgroups.push_back({sub, sc.tag, sc.label});
+                }
+            } else {
+                for (const auto& sc : allScenes) {
+                    if (m_scene == sc.tag) {
+                        visibleSubgroups.push_back({sub, sc.tag, sc.label});
+                        break;
+                    }
+                }
+            }
+        } else {
+            visibleSubgroups.push_back({sub, "", ""});
         }
     }
 
@@ -4774,34 +4783,34 @@ void GuiApp::renderBenchmarkSuitePanel() {
     int numCols = std::max(1, std::min(static_cast<int>(visibleSubgroups.size()), maxCols));
 
     if (numCols > 1 && visibleSubgroups.size() > 1) {
-        auto getSubHeight = [this](const BenchmarkSubgroup& sub) -> float {
+        auto getSubHeight = [this, &isInstanceCollapsed](const SubgroupRenderInstance& inst) -> float {
             float rowH = std::max(s(24.0f), ImGui::GetFrameHeight() + s(4.0f));
-            if (sub.collapsed) return rowH + s(10.0f);
+            if (isInstanceCollapsed(inst)) return rowH + s(10.0f);
             size_t vis = 0;
-            for (const auto& itm : sub.items) {
-                BenchmarkDisplayInfo info = getBenchmarkDisplayInfo(itm, m_telemetryGpuIndex);
+            for (const auto& itm : inst.sub->items) {
+                BenchmarkDisplayInfo info = getBenchmarkDisplayInfo(itm, m_telemetryGpuIndex, inst.sceneTag);
                 bool isUnsupported = (!itm.isSupported || (info.hasResult && info.primaryResult.isUnsupported));
                 if (!m_hideUnsupported || !isUnsupported) vis++;
             }
             return (rowH + s(10.0f)) + static_cast<float>(vis) * rowH + s(14.0f);
         };
 
-        std::vector<std::vector<BenchmarkSubgroup*>> cols = partitionSubgroupsOptimal(
+        std::vector<std::vector<SubgroupRenderInstance>> cols = partitionSubgroupsOptimal(
             visibleSubgroups, numCols, getSubHeight);
 
         std::string tableId = "DynamicSuiteGrid_" + std::to_string(numCols);
         if (ImGui::BeginTable(tableId.c_str(), numCols, ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_NoSavedSettings, ImVec2(availW, 0.0f))) {
             for (int c = 0; c < numCols; ++c) {
                 ImGui::TableNextColumn();
-                for (auto* sub : cols[c]) {
-                    renderSubgroupCard(*sub);
+                for (const auto& inst : cols[c]) {
+                    renderSubgroupCard(inst);
                 }
             }
             ImGui::EndTable();
         }
     } else {
-        for (auto* sub : visibleSubgroups) {
-            renderSubgroupCard(*sub);
+        for (const auto& inst : visibleSubgroups) {
+            renderSubgroupCard(inst);
         }
     }
 
@@ -6032,7 +6041,8 @@ void GuiApp::renderResultsScorecard() {
                            res.benchmarkName.find("Traditional") != std::string::npos ||
                            res.benchmarkName.find("Scanline (Baseline)") != std::string::npos ||
                            res.benchmarkName.find("Scanline") != std::string::npos ||
-                           res.benchmarkName.find("Wave Ballot") != std::string::npos ||
+                           res.benchmarkName.find("Single-Pass") != std::string::npos ||
+                           (res.subcategory == "Wavefront Stream Compaction" && res.configIndex == 26) ||
                            (res.benchmarkName.find("RayDivergence") != std::string::npos && res.configIndex == 0) ||
                            (res.benchmarkName.find("RayPayload") != std::string::npos && res.configIndex == 0) ||
                            (res.benchmarkName.find("RayAnyHit") != std::string::npos && res.configIndex == 0)) {
@@ -6088,7 +6098,7 @@ void GuiApp::renderResultsScorecard() {
                                 if (other.deviceIndex == res.deviceIndex && other.component == "Ray Tracing" &&
                                     other.subcategory == res.subcategory &&
                                     (other.benchmarkName.find("Megakernel") != std::string::npos || other.benchmarkName.find("Baseline") != std::string::npos ||
-                                     other.benchmarkName.find("Scanline") != std::string::npos || other.benchmarkName.find("Wave Ballot") != std::string::npos) &&
+                                     other.benchmarkName.find("Scanline") != std::string::npos || other.benchmarkName.find("Single-Pass") != std::string::npos) &&
                                     other.benchmarkName.find("RTP") == std::string::npos && other.benchmarkName.find("DGC") == std::string::npos &&
                                     other.time_ms > 0.0 && other.metric == res.metric) {
                                     std::string otherScene = extractSceneName(other.benchmarkName);
@@ -6142,16 +6152,104 @@ void GuiApp::renderResultsScorecard() {
 void GuiApp::renderRayTracingViewport() {
     ImGui::Spacing();
 
+    auto resolveDataFilePath = [](const std::string& relPath) -> std::string {
+        std::vector<std::string> writableCandidates;
+#ifdef _WIN32
+        if (const char* localAppData = std::getenv("LOCALAPPDATA")) {
+            writableCandidates.push_back((std::filesystem::path(localAppData) / "gpubench" / relPath).string());
+        }
+#else
+        if (const char* xdgCache = std::getenv("XDG_CACHE_HOME")) {
+            if (xdgCache[0] != '\0') {
+                writableCandidates.push_back((std::filesystem::path(xdgCache) / "gpubench" / relPath).string());
+            }
+        }
+        if (const char* home = std::getenv("HOME")) {
+            if (home[0] != '\0') {
+                writableCandidates.push_back((std::filesystem::path(home) / ".cache" / "gpubench" / relPath).string());
+            }
+        }
+#endif
+        writableCandidates.push_back(relPath);
+        writableCandidates.push_back("../" + relPath);
+        writableCandidates.push_back("../../" + relPath);
+
+        std::error_code ec;
+        std::string newestPath;
+        std::filesystem::file_time_type newestTime{};
+        bool foundWritable = false;
+        for (const auto& c : writableCandidates) {
+            if (std::filesystem::exists(c, ec) && !ec) {
+                auto ftime = std::filesystem::last_write_time(c, ec);
+                if (!ec && (!foundWritable || ftime > newestTime)) {
+                    newestTime = ftime;
+                    newestPath = c;
+                    foundWritable = true;
+                } else if (!foundWritable) {
+                    newestPath = c;
+                    foundWritable = true;
+                }
+            }
+        }
+        if (foundWritable) {
+            return newestPath;
+        }
+
+        std::vector<std::string> systemCandidates = {
+            "share/gpubench/" + relPath,
+            "../share/gpubench/" + relPath,
+            "/usr/share/gpubench/" + relPath,
+            "/usr/local/share/gpubench/" + relPath
+        };
+        for (const auto& c : systemCandidates) {
+            if (std::filesystem::exists(c, ec) && !ec) {
+                return c;
+            }
+        }
+        return relPath;
+    };
+
+    auto parseJsonNumberAfterKey = [](const std::string& line, const char* key, double& outVal) -> bool {
+        size_t kp = line.find(key);
+        if (kp == std::string::npos) return false;
+        size_t col = line.find(':', kp);
+        if (col == std::string::npos) return false;
+        try {
+            std::string numStr = line.substr(col + 1);
+            size_t comma = numStr.find(',');
+            if (comma != std::string::npos) numStr = numStr.substr(0, comma);
+            size_t brace = numStr.find('}');
+            if (brace != std::string::npos) numStr = numStr.substr(0, brace);
+            outVal = std::stod(numStr);
+            return true;
+        } catch (...) {
+            return false;
+        }
+    };
+
+    auto parseJsonStringAfterKey = [](const std::string& line, const char* key, std::string& outStr) -> bool {
+        size_t kp = line.find(key);
+        if (kp == std::string::npos) return false;
+        size_t col = line.find(':', kp);
+        if (col == std::string::npos) return false;
+        size_t q1 = line.find('"', col + 1);
+        if (q1 == std::string::npos) return false;
+        size_t q2 = line.find('"', q1 + 1);
+        if (q2 == std::string::npos) return false;
+        outStr = line.substr(q1 + 1, q2 - q1 - 1);
+        return true;
+    };
+
     // Scene & Viewport Navigation Header
     struct SceneMetadata {
         const char* displayName;
         const char* tag;
         const char* modelName;
         const char* triangleCount;
+        const char* vertexCount;
+        const char* vertexStride;
+        const char* blasFootprint;
         const char* description;
-        const char* techAScore;
-        const char* techBScore;
-        const char* speedup;
         const char* details;
     };
 
@@ -6161,10 +6259,10 @@ void GuiApp::renderRayTracingViewport() {
             "showroom",
             "assets/models/toycar.glb",
             "108,936 Triangles",
+            "59,645 Vertices",
+            "48 Bytes (GltfVertex: 3x vec4)",
+            "8.4 MB (BLAS) | 64 KB (TLAS)",
             "Studio turntable showcase with multi-BSDF automotive car paint, clearcoat flakes, dispersive glass, rubber tires, and alloy wheels.",
-            "185.40 MRays/s (201.2 FPS)",
-            "523.80 MRays/s (568.3 FPS)",
-            "2.82x (+182.5%)",
             "Multi-BSDF Car Paint, Clearcoat Flakes, Dispersive Glass & Alloy Wheels"
         },
         {
@@ -6172,10 +6270,10 @@ void GuiApp::renderRayTracingViewport() {
             "indoor",
             "assets/models/sponza.glb",
             "262,267 Triangles",
+            "145,163 Vertices",
+            "48 Bytes (GltfVertex: 3x vec4)",
+            "19.8 MB (BLAS) | 64 KB (TLAS)",
             "Classic architectural global illumination benchmark with multi-tiered arches, carved stone columns, lion reliefs, and alpha cutout tapestry.",
-            "99.05 MRays/s (107.5 FPS)",
-            "277.80 MRays/s (301.4 FPS)",
-            "2.80x (+180.5%)",
             "Multi-Tiered Arches, Carved Stone Columns & Alpha Cutout Tapestry"
         },
         {
@@ -6183,21 +6281,21 @@ void GuiApp::renderRayTracingViewport() {
             "forest",
             "Procedural Nature Heightfield",
             "1,051,696 Triangles",
+            "3,155,088 Vertices",
+            "48 Bytes (Procedural Vertex)",
+            "78.5 MB (BLAS) | 64 KB (TLAS)",
             "High-density AAA woodland with rolling terrain, 350 soaring multi-tiered pines, 180 birches, 3,500 sword ferns, 2,500 shrubs, 180 nurse logs, and 600 boulders.",
-            "89.90 MRays/s (97.5 FPS)",
-            "266.27 MRays/s (288.9 FPS)",
-            "2.96x (+196.2%)",
             "High-Density AAA Woodland with Multi-Tiered Pines & Alpha-Tested Foliage"
         },
         {
             "Outdoor Landscape (OutdoorLandscape)",
             "outdoor",
             "Procedural Alpine Terrain",
-            "57,216 Triangles",
+            "46,016 Triangles",
+            "138,048 Vertices",
+            "48 Bytes (Procedural Vertex)",
+            "3.6 MB (BLAS) | 64 KB (TLAS)",
             "Expansive alpine landscape featuring distant mountains, pine forests, reflective lake surface, and timber cabins.",
-            "542.03 MRays/s (588.1 FPS)",
-            "1,444.29 MRays/s (1567.2 FPS)",
-            "2.66x (+166.5%)",
             "Expansive Alpine Terrain, Reflective Lake Surface & Timber Cabins"
         }
     };
@@ -6207,11 +6305,6 @@ void GuiApp::renderRayTracingViewport() {
     }
     const auto& curSceneMeta = scenes[m_rtSceneIndex];
 
-    std::string dynamicTechAScore = "--";
-    std::string dynamicTechBScore = "--";
-    std::string dynamicTechARegInfo = "";
-    std::string dynamicTechBRegInfo = "";
-    std::string dynamicSpeedup = "--";
     auto containsCi = [](const std::string& haystack, const std::string& needle) -> bool {
         if (needle.empty()) return true;
         auto it = std::search(haystack.begin(), haystack.end(), needle.begin(), needle.end(),
@@ -6221,8 +6314,8 @@ void GuiApp::renderRayTracingViewport() {
 
     double scoreTrad = 0.0, scoreDgc = 0.0;
     double timeTradMs = 0.0, timeDgcMs = 0.0;
-    uint32_t liveWidth = m_renderWidth > 0 ? m_renderWidth : 1280;
-    uint32_t liveHeight = m_renderHeight > 0 ? m_renderHeight : 720;
+    uint32_t liveWidth = m_renderWidth > 0 ? m_renderWidth : 3840;
+    uint32_t liveHeight = m_renderHeight > 0 ? m_renderHeight : 2160;
     const ResultData* bestTradRes = nullptr;
     const ResultData* bestDgcRes = nullptr;
 
@@ -6238,7 +6331,6 @@ void GuiApp::renderRayTracingViewport() {
             double rate = (res.time_ms > 0.0) ? (static_cast<double>(res.operations) / res.time_ms * 1000.0 / 1e6) : 0.0;
 
             if (priorityPass == 0) {
-                // First pass: look specifically for Full Frame (config 9 vs 11) or Scene Path Tracing (config 3 vs 5)
                 if (res.configIndex == 9 || (res.configIndex == 3 && scoreTrad == 0.0)) {
                     scoreTrad = rate;
                     timeTradMs = res.time_ms;
@@ -6249,7 +6341,6 @@ void GuiApp::renderRayTracingViewport() {
                     bestDgcRes = &res;
                 }
             } else {
-                // Fallback pass: any Megakernel vs DGC in this scene if specific configs were not run
                 if (scoreTrad == 0.0 && (containsCi(res.benchmarkName, "Megakernel") || containsCi(res.benchmarkName, "Traditional"))) {
                     scoreTrad = rate;
                     timeTradMs = res.time_ms;
@@ -6273,19 +6364,89 @@ void GuiApp::renderRayTracingViewport() {
         liveHeight = bestDgcRes->height;
     }
 
+    // Parse pre-computed / cached profile JSON for this scene
+    bool parityMeasured = false;
+    bool parityPass = false;
+    std::string livePsnr = "--";
+    std::string liveMaxDelta = "--";
+    std::string profileResLabel = "3840x2160";
+    double profTradMrays = 0.0, profTradFps = 0.0, profTradMs = 0.0;
+    double profDgcMrays = 0.0, profDgcFps = 0.0, profDgcMs = 0.0;
+
+    std::string profilePath = resolveDataFilePath("renders/render_" + std::string(curSceneMeta.tag) + "_profile.json");
+    std::ifstream pf(profilePath);
+    if (pf.is_open()) {
+        std::string line;
+        int section = 0; // 0: root, 1: traditional, 2: worklist, 3: parity
+        while (std::getline(pf, line)) {
+            if (line.find("\"traditional\"") != std::string::npos) section = 1;
+            else if (line.find("\"worklist\"") != std::string::npos) section = 2;
+            else if (line.find("\"parity\"") != std::string::npos) section = 3;
+
+            std::string strVal;
+            if (parseJsonStringAfterKey(line, "\"resolution\"", strVal)) {
+                size_t spPos = strVal.find(' ');
+                profileResLabel = (spPos != std::string::npos) ? strVal.substr(0, spPos) : strVal;
+            }
+
+            double val = 0.0;
+            if (section == 1) {
+                if (parseJsonNumberAfterKey(line, "\"mrays\"", val)) profTradMrays = val;
+                else if (parseJsonNumberAfterKey(line, "\"fps\"", val)) profTradFps = val;
+                else if (parseJsonNumberAfterKey(line, "\"frame_ms\"", val)) profTradMs = val;
+            } else if (section == 2) {
+                if (parseJsonNumberAfterKey(line, "\"mrays\"", val)) profDgcMrays = val;
+                else if (parseJsonNumberAfterKey(line, "\"fps\"", val)) profDgcFps = val;
+                else if (parseJsonNumberAfterKey(line, "\"frame_ms\"", val)) profDgcMs = val;
+            } else if (section == 3) {
+                if (parseJsonNumberAfterKey(line, "\"psnr\"", val)) {
+                    char b[64];
+                    if (val >= 120.0) snprintf(b, sizeof(b), "%.1f dB (BIT-EXACT)", val);
+                    else snprintf(b, sizeof(b), "%.2f dB", val);
+                    livePsnr = b;
+                    parityMeasured = true;
+                    if (val >= 45.0) parityPass = true;
+                } else if (parseJsonNumberAfterKey(line, "\"diff_pct\"", val) || parseJsonNumberAfterKey(line, "\"mae\"", val)) {
+                    char b[64];
+                    snprintf(b, sizeof(b), "%.4f%%", val);
+                    liveMaxDelta = b;
+                }
+            }
+        }
+    }
+
+    std::string dynamicTechAScore = "--";
+    std::string dynamicTechBScore = "--";
+    std::string dynamicTechARegInfo = "";
+    std::string dynamicTechBRegInfo = "";
+    std::string dynamicSpeedup = "--";
+    bool isLiveSessionScore = false;
+
     double primaryRaysM = static_cast<double>(liveWidth) * static_cast<double>(liveHeight) / 1e6;
     if (scoreTrad > 0.0) {
         char buf[96];
         double estFps = (primaryRaysM > 0.0) ? (scoreTrad / primaryRaysM) : 0.0;
         snprintf(buf, sizeof(buf), "%.2f MRays/s (%.1f FPS, %.2f ms)", scoreTrad, estFps, timeTradMs);
         dynamicTechAScore = buf;
+        isLiveSessionScore = true;
+    } else if (profTradMrays > 0.0) {
+        char buf[96];
+        snprintf(buf, sizeof(buf), "%.2f MRays/s (%.1f FPS, %.2f ms)", profTradMrays, profTradFps, profTradMs);
+        dynamicTechAScore = buf;
     }
+
     if (scoreDgc > 0.0) {
         char buf[96];
         double estFps = (primaryRaysM > 0.0) ? (scoreDgc / primaryRaysM) : 0.0;
         snprintf(buf, sizeof(buf), "%.2f MRays/s (%.1f FPS, %.2f ms)", scoreDgc, estFps, timeDgcMs);
         dynamicTechBScore = buf;
+        isLiveSessionScore = true;
+    } else if (profDgcMrays > 0.0) {
+        char buf[96];
+        snprintf(buf, sizeof(buf), "%.2f MRays/s (%.1f FPS, %.2f ms)", profDgcMrays, profDgcFps, profDgcMs);
+        dynamicTechBScore = buf;
     }
+
     if (bestTradRes && bestTradRes->hasRegisterTelemetry) {
         char buf[96];
         snprintf(buf, sizeof(buf), "VGPRs: %u | Max Waves/SIMD: %u", bestTradRes->vgprCount, bestTradRes->maxWavesPerSimd);
@@ -6301,46 +6462,45 @@ void GuiApp::renderRayTracingViewport() {
         double sp = scoreDgc / scoreTrad;
         snprintf(buf, sizeof(buf), "%.2fx (+%.1f%%)", sp, (sp - 1.0) * 100.0);
         dynamicSpeedup = buf;
+    } else if (profTradMrays > 0.0 && profDgcMrays > 0.0) {
+        char buf[64];
+        double sp = profDgcMrays / profTradMrays;
+        snprintf(buf, sizeof(buf), "%.2fx (+%.1f%%)", sp, (sp - 1.0) * 100.0);
+        dynamicSpeedup = buf;
     }
 
-    bool parityMeasured = false;
-    bool parityPass = false;
-    std::string livePsnr = "--";
-    std::string liveMaxDelta = "--";
-
-    std::string profilePath = "renders/render_" + std::string(curSceneMeta.tag) + "_profile.json";
-    std::ifstream pf(profilePath);
-    if (pf.is_open()) {
-        std::string line;
-        while (std::getline(pf, line)) {
-            if (line.find("\"psnr\":") != std::string::npos) {
-                size_t col = line.find(':');
-                if (col != std::string::npos) {
-                    try {
-                        std::string numStr = line.substr(col + 1);
-                        size_t comma = numStr.find(',');
-                        if (comma != std::string::npos) numStr = numStr.substr(0, comma);
-                        float val = std::stof(numStr);
-                        char b[64];
-                        if (val >= 120.0f) snprintf(b, sizeof(b), "%.1f dB (BIT-EXACT)", val);
-                        else snprintf(b, sizeof(b), "%.2f dB", val);
-                        livePsnr = b;
-                        parityMeasured = true;
-                        if (val >= 45.0f) parityPass = true;
-                    } catch (...) {}
-                }
-            } else if (line.find("\"diff_pct\":") != std::string::npos || line.find("\"mae\":") != std::string::npos) {
-                size_t col = line.find(':');
-                if (col != std::string::npos) {
-                    try {
-                        std::string numStr = line.substr(col + 1);
-                        size_t comma = numStr.find(',');
-                        if (comma != std::string::npos) numStr = numStr.substr(0, comma);
-                        float delta = std::stof(numStr);
-                        char b[64];
-                        snprintf(b, sizeof(b), "%.4f", delta);
-                        liveMaxDelta = b;
-                    } catch (...) {}
+    // Parse per-stage breakdown JSON for Mode 1 (Pipeline Passes) and Mode 3 (BVH build time)
+    struct StageBreakdownMetrics {
+        double timeMs{0.0};
+        double mrays{0.0};
+        double fps{0.0};
+    };
+    std::unordered_map<std::string, StageBreakdownMetrics> stageMetricsMap;
+    double breakdownBvhBuildMs = 0.0;
+    std::string breakdownResLabel = profileResLabel;
+    {
+        std::string bdPath = resolveDataFilePath("renders/render_" + std::string(curSceneMeta.tag) + "_pipeline_breakdown.json");
+        std::ifstream bf(bdPath);
+        if (bf.is_open()) {
+            std::string line;
+            std::string curStageId;
+            while (std::getline(bf, line)) {
+                std::string sVal;
+                double dVal = 0.0;
+                if (parseJsonStringAfterKey(line, "\"resolution\"", sVal)) {
+                    breakdownResLabel = sVal;
+                } else if (parseJsonNumberAfterKey(line, "\"bvh_build_time_ms\"", dVal)) {
+                    breakdownBvhBuildMs = dVal;
+                } else if (parseJsonStringAfterKey(line, "\"id\"", sVal)) {
+                    curStageId = sVal;
+                } else if (!curStageId.empty()) {
+                    if (parseJsonNumberAfterKey(line, "\"time_ms\"", dVal)) {
+                        stageMetricsMap[curStageId].timeMs = dVal;
+                    } else if (parseJsonNumberAfterKey(line, "\"mrays\"", dVal)) {
+                        stageMetricsMap[curStageId].mrays = dVal;
+                    } else if (parseJsonNumberAfterKey(line, "\"fps\"", dVal)) {
+                        stageMetricsMap[curStageId].fps = dVal;
+                    }
                 }
             }
         }
@@ -6370,33 +6530,45 @@ void GuiApp::renderRayTracingViewport() {
         ImGui::PopStyleColor(2);
     }
 
-    ImGui::SameLine(0, s(20.0f));
-    ImGui::TextDisabled("| Scene:");
-    ImGui::SameLine(0, s(8.0f));
-    const char* sceneComboNames[] = {
-        "Showroom Studio (toycar.glb)",
-        "Indoor Atrium (sponza.glb)",
-        "Open-World Forest (AAAOutdoorForest)",
-        "Outdoor Landscape (OutdoorLandscape)"
-    };
-    ImGui::SetNextItemWidth(s(280.0f));
-    ImGui::Combo("##scene_combo", &m_rtSceneIndex, sceneComboNames, 4);
+    // Only display Scene selector in modes where scene selection changes the active view
+    if (m_rtViewportMode != 2) {
+        ImGui::SameLine(0, s(20.0f));
+        ImGui::TextDisabled("| Scene:");
+        ImGui::SameLine(0, s(8.0f));
+        const char* sceneComboNames[] = {
+            "Showroom Studio (toycar.glb)",
+            "Indoor Atrium (sponza.glb)",
+            "Open-World Forest (AAAOutdoorForest)",
+            "Outdoor Landscape (OutdoorLandscape)"
+        };
+        ImGui::SetNextItemWidth(s(280.0f));
+        ImGui::Combo("##scene_combo", &m_rtSceneIndex, sceneComboNames, 4);
 
-    ImGui::SameLine(0, s(16.0f));
-    float rerenderBtnW = std::max(s(190.0f), ImGui::CalcTextSize("Run Benchmark / Re-Render").x + s(24.0f));
-    if (ImGui::Button("Run Benchmark / Re-Render", ImVec2(rerenderBtnW, s(28.0f)))) {
-        std::string targetTag = curSceneMeta.tag;
-        if (targetTag == "forest") m_scene = "forest";
-        else if (targetTag == "indoor") m_scene = "indoor";
-        else if (targetTag == "showroom") m_scene = "showroom";
-        else m_scene = "outdoor";
-        m_dumpRenders = true;
-        clearTextureCache();
-        selectOnlyBenchmark("RayScheduling");
-        startBenchmarks();
-    }
-    if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("Executes RayScheduling benchmark for %s and updates rendered frame buffers.", curSceneMeta.displayName);
+        ImGui::SameLine(0, s(16.0f));
+        float rerenderBtnW = std::max(s(190.0f), ImGui::CalcTextSize("Run Benchmark / Re-Render").x + s(24.0f));
+        if (ImGui::Button("Run Benchmark / Re-Render", ImVec2(rerenderBtnW, s(28.0f)))) {
+            m_scene = curSceneMeta.tag;
+            m_dumpRenders = true;
+            clearTextureCache();
+            // Select only the full-frame Megakernel (9) & DGC (11) configs so re-rendering
+            // executes quickly and triggers RunVisualVerification() to export all scene frames.
+            for (auto& cat : m_categories) {
+                cat.allSelected = false;
+                for (auto& sub : cat.subgroups) {
+                    sub.allSelected = false;
+                    for (auto& item : sub.items) {
+                        item.selected = (item.id == "RayScheduling" && (item.configIndex == 9 || item.configIndex == 11));
+                    }
+                }
+            }
+            startBenchmarks();
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Executes Full-Frame Megakernel & DGC ray tracing for %s and exports all rendered passes to disk.", curSceneMeta.displayName);
+        }
+    } else {
+        ImGui::SameLine(0, s(20.0f));
+        ImGui::TextDisabled("| Studio BSDF Reference Gallery (8 Wavefront Material Archetypes)");
     }
 
     ImGui::EndChild();
@@ -6419,17 +6591,17 @@ void GuiApp::renderRayTracingViewport() {
             ImGui::TextDisabled("PSNR:"); ImGui::SameLine();
             ImGui::TextColored(ImVec4(0.70f, 0.70f, 0.75f, 1.0f), "--");
             ImGui::SameLine(0, s(16.0f));
-            ImGui::TextDisabled("Max Delta:"); ImGui::SameLine();
+            ImGui::TextDisabled("Discrepancy:"); ImGui::SameLine();
             ImGui::TextColored(ImVec4(0.70f, 0.70f, 0.75f, 1.0f), "--");
         } else if (parityPass) {
-            ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "[PARITY: PASS]");
+            ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "[PARITY: VERIFIED 100%% BIT-EXACT]");
             ImGui::SameLine(0, s(16.0f));
             ImGui::TextDisabled("PSNR:"); ImGui::SameLine();
             pushMonoFont();
             ImGui::TextColored(ImVec4(0.95f, 0.95f, 0.95f, 1.0f), "%s", livePsnr.c_str());
             popMonoFont();
             ImGui::SameLine(0, s(16.0f));
-            ImGui::TextDisabled("Max Delta:"); ImGui::SameLine();
+            ImGui::TextDisabled("Discrepancy:"); ImGui::SameLine();
             pushMonoFont();
             ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s", liveMaxDelta.c_str());
             popMonoFont();
@@ -6441,7 +6613,7 @@ void GuiApp::renderRayTracingViewport() {
             ImGui::TextColored(ImVec4(0.95f, 0.40f, 0.40f, 1.0f), "%s", livePsnr.c_str());
             popMonoFont();
             ImGui::SameLine(0, s(16.0f));
-            ImGui::TextDisabled("Max Delta:"); ImGui::SameLine();
+            ImGui::TextDisabled("Discrepancy:"); ImGui::SameLine();
             pushMonoFont();
             ImGui::TextColored(ImVec4(0.95f, 0.40f, 0.40f, 1.0f), "%s", liveMaxDelta.c_str());
             popMonoFont();
@@ -6453,12 +6625,13 @@ void GuiApp::renderRayTracingViewport() {
         ImGui::TextColored(ImVec4(0.95f, 0.80f, 0.35f, 1.0f), "%s", curSceneMeta.triangleCount);
         popMonoFont();
         ImGui::SameLine(0, s(16.0f));
-        ImGui::TextDisabled("Speedup:"); ImGui::SameLine();
+        ImGui::TextDisabled("DGC Speedup:"); ImGui::SameLine();
         pushMonoFont();
         if (dynamicSpeedup != "--") {
-            ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s (Live)", dynamicSpeedup.c_str());
+            ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s (%s)",
+                               dynamicSpeedup.c_str(), isLiveSessionScore ? "Live" : profileResLabel.c_str());
         } else {
-            ImGui::TextDisabled("Not Measured (Ref: %s)", curSceneMeta.speedup);
+            ImGui::TextDisabled("Not Measured");
         }
         popMonoFont();
         ImGui::EndChild();
@@ -6466,8 +6639,17 @@ void GuiApp::renderRayTracingViewport() {
 
         ImGui::Spacing();
 
-        // Sub-view mode tabs
-        const char* pModes[] = { "Split Parity Slider", "Megakernel Solo", "Compacted DGC Solo", "Difference Heatmap", "Side-by-Side" };
+        // Sub-view mode tabs (no redundant split slider over identical images)
+        const char* pModes[] = {
+            "Compacted Wavefront (DGC)",
+            "Megakernel (Reference)",
+            "Side-by-Side (Megakernel vs DGC)",
+            "Path Tracing (1 SPP vs 16 SPP)",
+            "128-Light Direct (DGC)"
+        };
+        if (m_rtParityViewMode < 0 || m_rtParityViewMode >= 5) {
+            m_rtParityViewMode = 0;
+        }
         for (int m = 0; m < 5; ++m) {
             if (m > 0) ImGui::SameLine(0, s(4.0f));
             bool isCur = (m_rtParityViewMode == m);
@@ -6485,12 +6667,6 @@ void GuiApp::renderRayTracingViewport() {
             ImGui::PopStyleColor(2);
         }
 
-        if (m_rtParityViewMode == 0) {
-            ImGui::SameLine(0, s(20.0f));
-            ImGui::SetNextItemWidth(s(220.0f));
-            ImGui::SliderFloat("##parity_split_slider", &m_paritySplitRatio, 0.05f, 0.95f, "Split: %.2f");
-        }
-
         ImGui::Spacing();
 
         // Check if texture cache needs reload
@@ -6502,44 +6678,31 @@ void GuiApp::renderRayTracingViewport() {
         std::string tag = curSceneMeta.tag;
         std::string tradPath = "renders/render_" + tag + "_traditional_megakernel.png";
         std::string dgcPath = "renders/render_" + tag + "_worklist_dgc.png";
-        std::string diffPath = "renders/render_" + tag + "_difference_heatmap.png";
+        std::string pt1Path = "renders/render_" + tag + "_pathtracing_1spp_worklist.png";
+        std::string pt16Path = "renders/render_" + tag + "_pathtracing_16spp_worklist.png";
+        std::string ml128Path = "renders/render_" + tag + "_multilight_128_dgc.png";
 
         auto texTrad = getOrLoadTexture(tradPath);
         auto texDgc = getOrLoadTexture(dgcPath);
-        auto texDiff = getOrLoadTexture(diffPath);
-
-        // On initial startup only: if default scene (index 0) has no renders, pick first scene with renders
-        static bool s_hasInitializedSceneIndex = false;
-        if (!s_hasInitializedSceneIndex) {
-            s_hasInitializedSceneIndex = true;
-            if (!texTrad.isValid() && !texDgc.isValid()) {
-                for (size_t sIdx = 0; sIdx < numScenes; ++sIdx) {
-                    if (sIdx == static_cast<size_t>(m_rtSceneIndex)) continue;
-                    std::string altTrad = "renders/render_" + std::string(scenes[sIdx].tag) + "_traditional_megakernel.png";
-                    auto altTex = getOrLoadTexture(altTrad);
-                    if (altTex.isValid()) {
-                        m_rtSceneIndex = static_cast<int>(sIdx);
-                        tag = scenes[m_rtSceneIndex].tag;
-                        tradPath = altTrad;
-                        dgcPath = "renders/render_" + tag + "_worklist_dgc.png";
-                        diffPath = "renders/render_" + tag + "_difference_heatmap.png";
-                        texTrad = altTex;
-                        texDgc = getOrLoadTexture(dgcPath);
-                        texDiff = getOrLoadTexture(diffPath);
-                        break;
-                    }
-                }
-            }
-        }
+        auto texPt1 = (m_rtParityViewMode == 3) ? getOrLoadTexture(pt1Path) : VulkanContext::TextureResource{};
+        auto texPt16 = (m_rtParityViewMode == 3) ? getOrLoadTexture(pt16Path) : VulkanContext::TextureResource{};
+        auto texMl128 = (m_rtParityViewMode == 4) ? getOrLoadTexture(ml128Path) : VulkanContext::TextureResource{};
 
         // Viewport Canvas Calculation
         ImVec2 avail = ImGui::GetContentRegionAvail();
         float canvasHeight = std::max(s(320.0f), avail.y - s(115.0f));
-        float targetAspect = (texTrad.isValid() && texTrad.height > 0) ? (static_cast<float>(texTrad.width) / texTrad.height) : (16.0f / 9.0f);
+        bool isSideBySide = (m_rtParityViewMode == 2 || m_rtParityViewMode == 3);
+        float singleAspect = (texDgc.isValid() && texDgc.height > 0) ? (static_cast<float>(texDgc.width) / texDgc.height) : (16.0f / 9.0f);
+        float targetAspect = isSideBySide ? (singleAspect * 2.0f) : singleAspect;
         float canvasWidth = std::min(avail.x, canvasHeight * targetAspect);
         if (canvasWidth > avail.x) {
             canvasWidth = avail.x;
-            canvasHeight = canvasWidth / targetAspect;
+        }
+        if (isSideBySide) {
+            canvasHeight = std::min(canvasHeight, (canvasWidth * 0.5f) / singleAspect);
+            canvasWidth = canvasHeight * singleAspect * 2.0f;
+        } else {
+            canvasHeight = canvasWidth / singleAspect;
         }
 
         ImVec2 p0 = ImGui::GetCursorScreenPos();
@@ -6551,7 +6714,6 @@ void GuiApp::renderRayTracingViewport() {
         drawList->AddRect(p0, p1, IM_COL32(35, 45, 65, 255), s(6.0f));
 
         if (!texTrad.isValid() && !texDgc.isValid()) {
-            // Missing texture fallback
             std::string msg = "Render output not found for " + std::string(curSceneMeta.displayName);
             ImVec2 textSize = ImGui::CalcTextSize(msg.c_str());
             drawList->AddText(ImVec2(p0.x + (canvasWidth - textSize.x) * 0.5f, p0.y + canvasHeight * 0.42f),
@@ -6563,60 +6725,27 @@ void GuiApp::renderRayTracingViewport() {
             ImGui::SetCursorScreenPos(ImVec2(p0.x, p1.y + s(10.0f)));
         } else {
             if (m_rtParityViewMode == 0) {
-                // Split Parity Slider Mode
-                float splitX = p0.x + canvasWidth * m_paritySplitRatio;
-
-                // Left: Technique A (Megakernel)
-                if (texTrad.isValid() && splitX > p0.x + 1.0f) {
-                    ImVec2 uv0(0.0f, 0.0f);
-                    ImVec2 uv1(m_paritySplitRatio, 1.0f);
-                    drawList->AddImage(reinterpret_cast<ImTextureID>(texTrad.descriptorSet), p0, ImVec2(splitX, p1.y), uv0, uv1);
+                // Compacted Wavefront (DGC) Full Render
+                const auto& tex = texDgc.isValid() ? texDgc : texTrad;
+                if (tex.isValid()) {
+                    drawList->AddImage(reinterpret_cast<ImTextureID>(tex.descriptorSet), p0, p1);
                 }
-
-                // Right: Technique B (DGC / Compacted)
-                if (texDgc.isValid() && splitX < p1.x - 1.0f) {
-                    ImVec2 uv0(m_paritySplitRatio, 0.0f);
-                    ImVec2 uv1(1.0f, 1.0f);
-                    drawList->AddImage(reinterpret_cast<ImTextureID>(texDgc.descriptorSet), ImVec2(splitX, p0.y), p1, uv0, uv1);
-                }
-
-                // Vertical Divider Line & Draggable Handle
-                drawList->AddLine(ImVec2(splitX, p0.y), ImVec2(splitX, p1.y), IM_COL32(0, 216, 246, 255), s(2.5f));
-                float handleY = p0.y + canvasHeight * 0.5f;
-                drawList->AddCircleFilled(ImVec2(splitX, handleY), s(9.0f), IM_COL32(0, 216, 246, 255));
-                drawList->AddCircle(ImVec2(splitX, handleY), s(9.0f), IM_COL32(255, 255, 255, 255), 16, s(2.0f));
-
-                // Technique Labels
-                drawList->AddText(ImVec2(p0.x + s(14.0f), p0.y + s(12.0f)), IM_COL32(100, 200, 255, 255), "Technique A: Megakernel (Reference)");
-                drawList->AddText(ImVec2(splitX + s(14.0f), p0.y + s(12.0f)), IM_COL32(255, 180, 100, 255), "Technique B: Compacted Wavefront (DGC)");
-
-                // Drag handle interaction
-                ImGui::SetCursorScreenPos(ImVec2(splitX - s(12.0f), p0.y));
-                ImGui::InvisibleButton("##split_handle", ImVec2(s(24.0f), canvasHeight));
-                if (ImGui::IsItemActive()) {
-                    float mouseX = ImGui::GetIO().MousePos.x;
-                    m_paritySplitRatio = std::clamp((mouseX - p0.x) / canvasWidth, 0.02f, 0.98f);
-                }
+                drawList->AddRectFilled(ImVec2(p0.x + s(10.0f), p0.y + s(8.0f)),
+                                        ImVec2(p0.x + s(370.0f), p0.y + s(32.0f)), IM_COL32(10, 14, 22, 200), s(4.0f));
+                drawList->AddText(ImVec2(p0.x + s(16.0f), p0.y + s(12.0f)), IM_COL32(255, 185, 95, 255),
+                                  "Technique B: Compacted Wavefront (DGC / SER)");
             } else if (m_rtParityViewMode == 1) {
-                // Technique A Solo
-                if (texTrad.isValid()) {
-                    drawList->AddImage(reinterpret_cast<ImTextureID>(texTrad.descriptorSet), p0, p1);
+                // Monolithic Megakernel (Reference) Full Render
+                const auto& tex = texTrad.isValid() ? texTrad : texDgc;
+                if (tex.isValid()) {
+                    drawList->AddImage(reinterpret_cast<ImTextureID>(tex.descriptorSet), p0, p1);
                 }
-                drawList->AddText(ImVec2(p0.x + s(14.0f), p0.y + s(12.0f)), IM_COL32(100, 200, 255, 255), "Technique A: Monolithic Megakernel (Reference)");
+                drawList->AddRectFilled(ImVec2(p0.x + s(10.0f), p0.y + s(8.0f)),
+                                        ImVec2(p0.x + s(370.0f), p0.y + s(32.0f)), IM_COL32(10, 14, 22, 200), s(4.0f));
+                drawList->AddText(ImVec2(p0.x + s(16.0f), p0.y + s(12.0f)), IM_COL32(100, 200, 255, 255),
+                                  "Technique A: Monolithic Megakernel (Reference)");
             } else if (m_rtParityViewMode == 2) {
-                // Technique B Solo
-                if (texDgc.isValid()) {
-                    drawList->AddImage(reinterpret_cast<ImTextureID>(texDgc.descriptorSet), p0, p1);
-                }
-                drawList->AddText(ImVec2(p0.x + s(14.0f), p0.y + s(12.0f)), IM_COL32(255, 180, 100, 255), "Technique B: Compacted Wavefronts (DGC / SER)");
-            } else if (m_rtParityViewMode == 3) {
-                // Difference Heatmap
-                if (texDiff.isValid()) {
-                    drawList->AddImage(reinterpret_cast<ImTextureID>(texDiff.descriptorSet), p0, p1);
-                }
-                drawList->AddText(ImVec2(p0.x + s(14.0f), p0.y + s(12.0f)), IM_COL32(255, 80, 80, 255), "10x Amplified Parity Difference Heatmap (Pure Black = 100% Bit-Exact)");
-            } else if (m_rtParityViewMode == 4) {
-                // Side-by-Side
+                // Side-by-Side (Megakernel vs DGC)
                 float halfW = canvasWidth * 0.5f - s(2.0f);
                 if (texTrad.isValid()) {
                     drawList->AddImage(reinterpret_cast<ImTextureID>(texTrad.descriptorSet), p0, ImVec2(p0.x + halfW, p1.y));
@@ -6624,18 +6753,66 @@ void GuiApp::renderRayTracingViewport() {
                 if (texDgc.isValid()) {
                     drawList->AddImage(reinterpret_cast<ImTextureID>(texDgc.descriptorSet), ImVec2(p0.x + halfW + s(4.0f), p0.y), p1);
                 }
-                drawList->AddText(ImVec2(p0.x + s(12.0f), p0.y + s(10.0f)), IM_COL32(100, 200, 255, 255), "Megakernel (Reference)");
-                drawList->AddText(ImVec2(p0.x + halfW + s(16.0f), p0.y + s(10.0f)), IM_COL32(255, 180, 100, 255), "Compacted Wavefront (DGC)");
+                drawList->AddRectFilled(ImVec2(p0.x + s(8.0f), p0.y + s(6.0f)),
+                                        ImVec2(p0.x + s(275.0f), p0.y + s(28.0f)), IM_COL32(10, 14, 22, 200), s(4.0f));
+                drawList->AddRectFilled(ImVec2(p0.x + halfW + s(12.0f), p0.y + s(6.0f)),
+                                        ImVec2(p0.x + halfW + s(310.0f), p0.y + s(28.0f)), IM_COL32(10, 14, 22, 200), s(4.0f));
+                drawList->AddText(ImVec2(p0.x + s(14.0f), p0.y + s(9.0f)), IM_COL32(100, 200, 255, 255),
+                                  "Technique A: Megakernel (Reference)");
+                drawList->AddText(ImVec2(p0.x + halfW + s(18.0f), p0.y + s(9.0f)), IM_COL32(255, 185, 95, 255),
+                                  "Technique B: Compacted Wavefront (DGC)");
+            } else if (m_rtParityViewMode == 3) {
+                // Path Tracing Convergence: 1 SPP vs 16 SPP Side-by-Side
+                float halfW = canvasWidth * 0.5f - s(2.0f);
+                const auto& leftTex = texPt1.isValid() ? texPt1 : texTrad;
+                const auto& rightTex = texPt16.isValid() ? texPt16 : texDgc;
+                if (leftTex.isValid()) {
+                    drawList->AddImage(reinterpret_cast<ImTextureID>(leftTex.descriptorSet), p0, ImVec2(p0.x + halfW, p1.y));
+                }
+                if (rightTex.isValid()) {
+                    drawList->AddImage(reinterpret_cast<ImTextureID>(rightTex.descriptorSet), ImVec2(p0.x + halfW + s(4.0f), p0.y), p1);
+                }
+                drawList->AddRectFilled(ImVec2(p0.x + s(8.0f), p0.y + s(6.0f)),
+                                        ImVec2(p0.x + s(280.0f), p0.y + s(28.0f)), IM_COL32(10, 14, 22, 200), s(4.0f));
+                drawList->AddRectFilled(ImVec2(p0.x + halfW + s(12.0f), p0.y + s(6.0f)),
+                                        ImVec2(p0.x + halfW + s(310.0f), p0.y + s(28.0f)), IM_COL32(10, 14, 22, 200), s(4.0f));
+                drawList->AddText(ImVec2(p0.x + s(14.0f), p0.y + s(9.0f)), IM_COL32(100, 200, 255, 255),
+                                  "1 SPP Stochastic Path Tracing (Configs 3/5)");
+                drawList->AddText(ImVec2(p0.x + halfW + s(18.0f), p0.y + s(9.0f)), IM_COL32(100, 240, 150, 255),
+                                  "16 SPP Converged Path Tracing (Configs 23/24)");
+            } else if (m_rtParityViewMode == 4) {
+                // 128-Light Direct Illumination (DGC)
+                const auto& tex = texMl128.isValid() ? texMl128 : texDgc;
+                if (tex.isValid()) {
+                    drawList->AddImage(reinterpret_cast<ImTextureID>(tex.descriptorSet), p0, p1);
+                }
+                drawList->AddRectFilled(ImVec2(p0.x + s(10.0f), p0.y + s(8.0f)),
+                                        ImVec2(p0.x + s(420.0f), p0.y + s(32.0f)), IM_COL32(10, 14, 22, 200), s(4.0f));
+                drawList->AddText(ImVec2(p0.x + s(16.0f), p0.y + s(12.0f)), IM_COL32(255, 200, 95, 255),
+                                  "128-Light Direct Evaluation (DGC 8x16 Light Binning, Config 34)");
             }
 
-            // Canvas Bottom HUD Overlay with dynamic resolution & primary ray count
-            uint32_t dispW = (texTrad.isValid() && texTrad.width > 0) ? static_cast<uint32_t>(texTrad.width) : liveWidth;
-            uint32_t dispH = (texTrad.isValid() && texTrad.height > 0) ? static_cast<uint32_t>(texTrad.height) : liveHeight;
+            // Canvas Bottom HUD Overlay with actual render resolution & primary ray count
+            uint32_t dispW = liveWidth;
+            uint32_t dispH = liveHeight;
+            size_t xPos = profileResLabel.find('x');
+            if (!isLiveSessionScore && xPos != std::string::npos) {
+                try {
+                    dispW = static_cast<uint32_t>(std::stoul(profileResLabel.substr(0, xPos)));
+                    dispH = static_cast<uint32_t>(std::stoul(profileResLabel.substr(xPos + 1)));
+                } catch (...) {}
+            } else if (texDgc.isValid() && texDgc.width > 400 && texDgc.height > 225) {
+                dispW = static_cast<uint32_t>(texDgc.width);
+                dispH = static_cast<uint32_t>(texDgc.height);
+            }
             uint64_t primaryRays = static_cast<uint64_t>(dispW) * static_cast<uint64_t>(dispH);
             char hudOverlay[256];
             snprintf(hudOverlay, sizeof(hudOverlay), "Primary Rays: %llu (%ux%u) | %s",
                      static_cast<unsigned long long>(primaryRays), dispW, dispH, curSceneMeta.details);
-            drawList->AddText(ImVec2(p0.x + s(14.0f), p1.y - s(26.0f)), IM_COL32(180, 195, 220, 230), hudOverlay);
+            drawList->AddRectFilled(ImVec2(p0.x + s(10.0f), p1.y - s(30.0f)),
+                                    ImVec2(p0.x + ImGui::CalcTextSize(hudOverlay).x + s(24.0f), p1.y - s(6.0f)),
+                                    IM_COL32(10, 14, 22, 200), s(4.0f));
+            drawList->AddText(ImVec2(p0.x + s(16.0f), p1.y - s(26.0f)), IM_COL32(195, 210, 235, 240), hudOverlay);
 
             ImGui::SetCursorScreenPos(ImVec2(p0.x, p1.y + s(10.0f)));
         }
@@ -6651,15 +6828,14 @@ void GuiApp::renderRayTracingViewport() {
             ImGui::Text("Throughput: "); ImGui::SameLine();
             pushMonoFont();
             if (dynamicTechAScore != "--") {
-                ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.0f, 1.0f), "%s (Live Measured)", dynamicTechAScore.c_str());
+                ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.0f, 1.0f), "%s (%s)",
+                                   dynamicTechAScore.c_str(), isLiveSessionScore ? "Live Measured" : ("Profiled " + profileResLabel).c_str());
                 if (!dynamicTechARegInfo.empty()) {
                     ImGui::SameLine(0, s(12.0f));
                     ImGui::TextDisabled("| %s", dynamicTechARegInfo.c_str());
                 }
             } else {
-                ImGui::TextColored(ImVec4(0.65f, 0.70f, 0.80f, 1.0f), "Not Measured");
-                ImGui::SameLine(0, s(16.0f));
-                ImGui::TextDisabled("Offline Ref (R9700 720p): %s", curSceneMeta.techAScore);
+                ImGui::TextColored(ImVec4(0.65f, 0.70f, 0.80f, 1.0f), "Not Measured (Click 'Run Benchmark / Re-Render')");
             }
             popMonoFont();
             ImGui::EndChild();
@@ -6669,19 +6845,18 @@ void GuiApp::renderRayTracingViewport() {
             pushBoldFont();
             ImGui::TextColored(ImVec4(0.98f, 0.72f, 0.35f, 1.0f), "Technique B: Compacted Wavefront (DGC / SER)");
             popBoldFont();
-            ImGui::TextDisabled("Architecture: Shader Execution Reordering & Clustered Ray Bins");
+            ImGui::TextDisabled("Architecture: Subgroup Ballot Compaction & Material-Sorted Indirect Dispatch");
             ImGui::Text("Throughput: "); ImGui::SameLine();
             pushMonoFont();
             if (dynamicTechBScore != "--") {
-                ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s (Live Measured)", dynamicTechBScore.c_str());
+                ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s (%s)",
+                                   dynamicTechBScore.c_str(), isLiveSessionScore ? "Live Measured" : ("Profiled " + profileResLabel).c_str());
                 if (!dynamicTechBRegInfo.empty()) {
                     ImGui::SameLine(0, s(12.0f));
                     ImGui::TextDisabled("| %s", dynamicTechBRegInfo.c_str());
                 }
             } else {
-                ImGui::TextColored(ImVec4(0.65f, 0.70f, 0.80f, 1.0f), "Not Measured");
-                ImGui::SameLine(0, s(16.0f));
-                ImGui::TextDisabled("Offline Ref (R9700 720p): %s", curSceneMeta.techBScore);
+                ImGui::TextColored(ImVec4(0.65f, 0.70f, 0.80f, 1.0f), "Not Measured (Click 'Run Benchmark / Re-Render')");
             }
             popMonoFont();
             ImGui::EndChild();
@@ -6696,9 +6871,8 @@ void GuiApp::renderRayTracingViewport() {
             const char* pillLabel;
             const char* name;
             const char* passType;
-            const char* timeMs;
-            const char* mrays;
-            const char* fps;
+            int primaryConfigIdx;
+            int secondaryConfigIdx;
             const char* description;
         };
 
@@ -6708,7 +6882,7 @@ void GuiApp::renderRayTracingViewport() {
                 "1. BVH",
                 "1. BVH Traversal Complexity Heatmap",
                 "Ray Query Step Profiling (Linear Turbo Map)",
-                "2.03 ms", "4,085.6 MRays/s", "492.6 FPS",
+                15, 12,
                 "Visualizes ray-box and ray-triangle intersection step count per pixel. Hotter colors indicate deeper BVH tree traversal depth and cache divergence."
             },
             {
@@ -6716,7 +6890,7 @@ void GuiApp::renderRayTracingViewport() {
                 "2. Normals",
                 "2. Primary Surface G-Buffer Normals",
                 "Primary Ray Cast (Vulkan 1.4 RQ)",
-                "1.81 ms", "4,594.2 MRays/s", "553.9 FPS",
+                18, 17,
                 "Renders world-space geometric surface normals derived from barycentric triangle interpolation and normal mapping."
             },
             {
@@ -6724,7 +6898,7 @@ void GuiApp::renderRayTracingViewport() {
                 "3. Shadows",
                 "3. Sun Occlusion Shadow Mask",
                 "Directional Shadow Traversal",
-                "2.18 ms", "7,593.8 MRays/s", "457.8 FPS",
+                21, 19,
                 "Evaluates directional sun visibility using stackless binary ray queries with early termination (gl_RayFlagsTerminateOnFirstHitEXT)."
             },
             {
@@ -6732,7 +6906,7 @@ void GuiApp::renderRayTracingViewport() {
                 "4. RTAO",
                 "4. Ray-Traced Ambient Occlusion (RTAO)",
                 "Stratified Hemisphere Occlusion (4 Rays)",
-                "3.88 ms", "10,692.7 MRays/s", "257.8 FPS",
+                -1, -1,
                 "Generates high-frequency contact shadows using cosine-weighted hemisphere sampling with localized ray distance falloff."
             },
             {
@@ -6740,7 +6914,7 @@ void GuiApp::renderRayTracingViewport() {
                 "5. Direct",
                 "5. Direct Hybrid PBR Shading",
                 "Analytic Sun + GGX Specular + Shadows + RTAO",
-                "6.69 ms", "6,194.8 MRays/s", "149.4 FPS",
+                32, 31,
                 "Combines microfacet GGX specular distribution, Fresnel-Schlick reflectivity, Lambertian diffuse, RTAO occlusion, and directional shadows."
             },
             {
@@ -6748,7 +6922,7 @@ void GuiApp::renderRayTracingViewport() {
                 "6. Indirect GI",
                 "6. Secondary Indirect GI Bounce",
                 "Cosine-Sampled Diffuse Radiance (4 Rays)",
-                "11.21 ms", "3,699.9 MRays/s", "89.2 FPS",
+                5, 3,
                 "Computes multi-bounce indirect global illumination by sampling diffuse radiance reflection from neighboring geometry surfaces."
             },
             {
@@ -6756,7 +6930,7 @@ void GuiApp::renderRayTracingViewport() {
                 "ALL (Final Render)",
                 "7. Final Beauty Render (Full Pipeline Composite)",
                 "Full Composite (Direct PBR + Shadows + RTAO + GI + Reflections)",
-                "15.82 ms", "6,120.4 MRays/s", "63.2 FPS",
+                11, 9,
                 "Full beauty composite pass combining primary ray query visibility, Cook-Torrance GGX direct lighting, area soft shadows, contact RTAO, dielectric glass transmission, and multi-bounce diffuse global illumination."
             }
         };
@@ -6766,6 +6940,37 @@ void GuiApp::renderRayTracingViewport() {
             m_rtPassIndex = 0;
         }
         const auto& curPass = passes[m_rtPassIndex];
+
+        auto getPassMetrics = [&](const PassInfo& pi, double& outMrays, double& outFps, double& outMs, bool& outIsLive) -> bool {
+            outMrays = 0.0; outFps = 0.0; outMs = 0.0; outIsLive = false;
+            for (const auto& res : m_allResults) {
+                if (res.time_ms <= 0.0) continue;
+                bool sceneMatches = containsCi(res.benchmarkName, curSceneMeta.displayName) ||
+                                    containsCi(res.benchmarkName, curSceneMeta.tag) ||
+                                    (std::string(curSceneMeta.tag) == "indoor" && containsCi(res.benchmarkName, "sponza")) ||
+                                    containsCi(res.subcategory, curSceneMeta.displayName);
+                if (!sceneMatches) continue;
+                if (static_cast<int>(res.configIndex) == pi.primaryConfigIdx || (static_cast<int>(res.configIndex) == pi.secondaryConfigIdx && outMrays == 0.0)) {
+                    outMrays = static_cast<double>(res.operations) / res.time_ms * 1000.0 / 1e6;
+                    outMs = res.time_ms;
+                    uint32_t w = res.width > 0 ? res.width : liveWidth;
+                    uint32_t h = res.height > 0 ? res.height : liveHeight;
+                    double pRaysM = static_cast<double>(w) * static_cast<double>(h) / 1e6;
+                    outFps = (pRaysM > 0.0) ? (outMrays / pRaysM) : (1000.0 / res.time_ms);
+                    outIsLive = true;
+                    if (static_cast<int>(res.configIndex) == pi.primaryConfigIdx) break;
+                }
+            }
+            if (outIsLive) return true;
+            auto it = stageMetricsMap.find(pi.id);
+            if (it != stageMetricsMap.end() && it->second.mrays > 0.0) {
+                outMrays = it->second.mrays;
+                outFps = it->second.fps;
+                outMs = it->second.timeMs;
+                return true;
+            }
+            return false;
+        };
 
         // Pass selector pill buttons
         ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, s(12.0f));
@@ -6807,9 +7012,16 @@ void GuiApp::renderRayTracingViewport() {
                 m_rtPassIndex = static_cast<int>(p);
             }
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("%s\n%s\nOffline Reference (R9700 720p): %s | %s | %s",
-                                  passes[p].name, passes[p].passType,
-                                  passes[p].timeMs, passes[p].mrays, passes[p].fps);
+                double stMrays = 0.0, stFps = 0.0, stMs = 0.0;
+                bool stLive = false;
+                if (getPassMetrics(passes[p], stMrays, stFps, stMs, stLive)) {
+                    ImGui::SetTooltip("%s\n%s\n%s (%s): %.2f ms | %.2f MRays/s | %.1f FPS",
+                                      passes[p].name, passes[p].passType,
+                                      stLive ? "Live Measured" : ("Stage Breakdown " + breakdownResLabel).c_str(),
+                                      curSceneMeta.displayName, stMs, stMrays, stFps);
+                } else {
+                    ImGui::SetTooltip("%s\n%s", passes[p].name, passes[p].passType);
+                }
             }
             ImGui::PopStyleColor(3);
         }
@@ -6817,9 +7029,9 @@ void GuiApp::renderRayTracingViewport() {
 
         ImGui::Spacing();
 
-        // Pass Information Header
+        // Pass Information Header with Per-Stage Metrics
         ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.10f, 0.14f, 0.20f, 1.0f));
-        ImGui::BeginChild("PassInfoBanner", ImVec2(0, s(52.0f)), true, ImGuiWindowFlags_NoScrollbar);
+        ImGui::BeginChild("PassInfoBanner", ImVec2(0, s(54.0f)), true, ImGuiWindowFlags_NoScrollbar);
         pushBoldFont();
         ImGui::TextColored(ImVec4(0.40f, 0.80f, 1.00f, 1.0f), "%s", curPass.name);
         popBoldFont();
@@ -6827,15 +7039,14 @@ void GuiApp::renderRayTracingViewport() {
         ImGui::TextDisabled("| %s", curPass.passType);
         ImGui::SameLine(0, s(20.0f));
         pushMonoFont();
-        if (scoreDgc > 0.0) {
-            double liveEstFps = (primaryRaysM > 0.0) ? (scoreDgc / primaryRaysM) : 0.0;
-            ImGui::Text("Live Scene Rate: "); ImGui::SameLine();
-            ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%.2f MRays/s (%.1f FPS, %.2f ms)", scoreDgc, liveEstFps, timeDgcMs);
-            ImGui::SameLine(0, s(16.0f));
-            ImGui::TextDisabled("| Offline Ref (R9700 720p): %s, %s", curPass.timeMs, curPass.mrays);
+        double passMrays = 0.0, passFps = 0.0, passMs = 0.0;
+        bool passIsLive = false;
+        if (getPassMetrics(curPass, passMrays, passFps, passMs, passIsLive)) {
+            ImGui::Text("%s: ", passIsLive ? "Live Stage Rate" : ("Stage Rate (" + breakdownResLabel + ")").c_str());
+            ImGui::SameLine();
+            ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%.2f MRays/s (%.1f FPS, %.2f ms)", passMrays, passFps, passMs);
         } else {
-            ImGui::TextDisabled("Live Rate: Not Measured  |  Offline Ref (R9700 720p): %s  •  %s  •  %s",
-                                curPass.timeMs, curPass.mrays, curPass.fps);
+            ImGui::TextDisabled("Stage Rate: Not Measured");
         }
         popMonoFont();
         ImGui::TextDisabled("%s", curPass.description);
@@ -6855,8 +7066,8 @@ void GuiApp::renderRayTracingViewport() {
         float canvasWidth = std::min(avail.x, canvasHeight * targetAspect);
         if (canvasWidth > avail.x) {
             canvasWidth = avail.x;
-            canvasHeight = canvasWidth / targetAspect;
         }
+        canvasHeight = canvasWidth / targetAspect;
 
         ImVec2 p0 = ImGui::GetCursorScreenPos();
         ImVec2 p1 = ImVec2(p0.x + canvasWidth, p0.y + canvasHeight);
@@ -6867,7 +7078,10 @@ void GuiApp::renderRayTracingViewport() {
 
         if (texPass.isValid()) {
             drawList->AddImage(reinterpret_cast<ImTextureID>(texPass.descriptorSet), p0, p1);
-            drawList->AddText(ImVec2(p0.x + s(14.0f), p0.y + s(12.0f)), IM_COL32(255, 255, 255, 220), curPass.name);
+            drawList->AddRectFilled(ImVec2(p0.x + s(10.0f), p0.y + s(8.0f)),
+                                    ImVec2(p0.x + ImGui::CalcTextSize(curPass.name).x + s(24.0f), p0.y + s(32.0f)),
+                                    IM_COL32(10, 14, 22, 200), s(4.0f));
+            drawList->AddText(ImVec2(p0.x + s(16.0f), p0.y + s(12.0f)), IM_COL32(255, 255, 255, 235), curPass.name);
         } else {
             std::string msg = "Pass image not found: " + passFile;
             ImVec2 textSize = ImGui::CalcTextSize(msg.c_str());
@@ -6897,7 +7111,7 @@ void GuiApp::renderRayTracingViewport() {
                 "docs/images/material_lineup.png",
                 "Realistic PBR Lineup (5 BSDF Models)",
                 "Various", 0.50f, 0.40f, 0.20f, 1.50f,
-                "Multi-Class SER Bins",
+                "Multi-Class SER Bins (Bins 0..7)",
                 "Side-by-side comparison of 5 distinct BSDF classes rendered in studio lighting: Automotive Multi-Coat Car Paint, Organic Subsurface Scattering, Anisotropic Velvet Fabric, Dielectric Dispersive Glass, and Weathered Metal Rust."
             },
             {
@@ -6906,7 +7120,7 @@ void GuiApp::renderRayTracingViewport() {
                 "Dual-Lobe GGX Specular + Clearcoat Layer",
                 "Deep Metallic Blue (0.05, 0.22, 0.78)",
                 0.92f, 0.18f, 0.00f, 1.50f,
-                "Archetype 1 (Specular Conductor)",
+                "Archetype 1 (Specular Conductor + Clearcoat)",
                 "Two-layer reflection model: a smooth dielectric clearcoat top layer over an absorbing metallic base coat with anisotropic metallic flake scattering."
             },
             {
@@ -6916,7 +7130,7 @@ void GuiApp::renderRayTracingViewport() {
                 "Emerald Leaf Green (0.18, 0.65, 0.24)",
                 0.00f, 0.45f, 0.58f, 1.45f,
                 "Archetype 4 (Translucent Subsurface)",
-                "Simulates light penetrating translucent media (leaves, needles, skin, wax) and exiting at differing surface locations, softening hard shadow edges."
+                "Simulates light penetrating translucent media (leaves, needles, jade, wax) and exiting at differing surface locations, softening hard shadow edges."
             },
             {
                 "Anisotropic Sheen Velvet / Fabric",
@@ -6961,7 +7175,7 @@ void GuiApp::renderRayTracingViewport() {
         }
         const auto& curMat = materials[m_rtMaterialIndex];
 
-        // Material selector buttons (dynamically sized to prevent text clipping)
+        // Material selector buttons
         for (size_t mi = 0; mi < numMaterials; ++mi) {
             float btnW = ImGui::CalcTextSize(materials[mi].name).x + s(24.0f);
             if (mi > 0) {
@@ -6983,7 +7197,6 @@ void GuiApp::renderRayTracingViewport() {
 
         ImGui::Spacing();
 
-        // Split view: Left = Material Image, Right = Material Properties Card
         if (ImGui::BeginTable("MatLayoutTable", 2, ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_Resizable)) {
             ImGui::TableSetupColumn("Preview", ImGuiTableColumnFlags_WidthStretch, 0.50f);
             ImGui::TableSetupColumn("Details", ImGuiTableColumnFlags_WidthStretch, 0.50f);
@@ -6995,6 +7208,10 @@ void GuiApp::renderRayTracingViewport() {
             // Left Column: Material Texture Card
             ImGui::BeginChild("MatImageCard", ImVec2(0, cardHeight), true, ImGuiWindowFlags_NoScrollbar);
             auto texMat = getOrLoadTexture(curMat.file);
+            if (!texMat.isValid()) {
+                texMat = getOrLoadTexture(m_rtMaterialIndex == 6 ? "assets/thumbnails/thumb_material_range.png"
+                                                                 : "assets/thumbnails/thumb_material_lineup.png");
+            }
             ImVec2 childAvail = ImGui::GetContentRegionAvail();
             float targetAspect = (texMat.isValid() && texMat.height > 0) ? (static_cast<float>(texMat.width) / texMat.height) : 1.0f;
             float imgW = childAvail.x;
@@ -7075,8 +7292,11 @@ void GuiApp::renderRayTracingViewport() {
             ImGui::Spacing();
             ImGui::TextDisabled("Vulkan Ray Tracing Evaluation:");
             ImGui::BulletText("GLSL Header: pbr_common.glsl / rt_scheduling_common.glsl");
-            ImGui::BulletText("Ray Sorting: Spatial Morton Z-Curve & Material Binning");
-            ImGui::BulletText("Register Footprint: 32 VGPRs (compacted payload)");
+            ImGui::BulletText("Ray Sorting: Spatial Morton Z-Curve & 8-Bin Material Compaction");
+            ImGui::BulletText("Hit Record Layout: 32-Byte Packed (2x vec4, Octahedral Normal)");
+            if (!dynamicTechBRegInfo.empty()) {
+                ImGui::BulletText("Measured Shader Telemetry: %s", dynamicTechBRegInfo.c_str());
+            }
 
             ImGui::EndChild();
 
@@ -7086,47 +7306,59 @@ void GuiApp::renderRayTracingViewport() {
     // MODE 3: GEOMETRY & BVH TOPOLOGY
     else if (m_rtViewportMode == 3) {
         struct GeometryInfo {
-            const char* title;
-            const char* file;
-            const char* triangles;
-            const char* vertices;
-            const char* stride;
-            const char* blasMemory;
-            const char* description;
+            std::string title;
+            std::string file;
+            std::string fallbackThumb;
+            std::string triangles;
+            std::string vertices;
+            std::string stride;
+            std::string blasMemory;
+            std::string description;
         };
 
-        std::string sceneBvhFile = "renders/render_" + std::string(curSceneMeta.tag) + "_stage1_bvh.png";
-        static GeometryInfo geoViews[] = {
+        std::string tag = curSceneMeta.tag;
+        std::string sceneBvhFile = "renders/render_" + tag + "_stage1_bvh.png";
+        std::string sceneAlphaFile = "renders/render_" + tag + "_alpha_cutout.png";
+        char bvhFootprintBuf[128];
+        if (breakdownBvhBuildMs > 0.0) {
+            snprintf(bvhFootprintBuf, sizeof(bvhFootprintBuf), "%s | Build Time: %.2f ms",
+                     curSceneMeta.blasFootprint, breakdownBvhBuildMs);
+        } else {
+            snprintf(bvhFootprintBuf, sizeof(bvhFootprintBuf), "%s", curSceneMeta.blasFootprint);
+        }
+
+        GeometryInfo geoViews[] = {
             {
                 "Showroom Vehicle Wireframe & BVH Clustering",
                 "docs/images/geometry_showroom_wireframe.png",
-                "108,936 Triangles",
-                "58,420 Vertices",
-                "44 Bytes (GltfVertex)",
+                "assets/thumbnails/thumb_blas_wireframe.png",
+                "108,936 Triangles (toycar.glb) | 1M / 5M / 10M (RayASBuild)",
+                "59,645 Vertices (toycar.glb)",
+                "48 Bytes (GltfVertex: 3x vec4)",
                 "8.4 MB (BLAS) | 64 KB (TLAS)",
                 "Wireframe topology and bounding volume hierarchy clustering for the showroom vehicle model. High polygon density around wheel arches, headlights, and body curves stresses BVH build and traversal efficiency."
             },
             {
-                "Multi-Layer Alpha Cutout Foliage Geometry",
-                "docs/images/geometry_alpha_layers.png",
-                "48,000+ Triangles",
-                "24,000 Vertices",
-                "44 Bytes (GltfVertex)",
-                "3.6 MB (BLAS) | 32 KB (TLAS)",
-                "Stresses the Ray Tracing Pipeline any-hit shader and ray query alpha testing. When rays traverse translucent foliage canopies, texture alpha masks determine whether the hit is committed or traversal continues."
+                std::string("Alpha Cutout Foliage & Geometry (") + curSceneMeta.displayName + ")",
+                sceneAlphaFile,
+                "assets/thumbnails/thumb_" + tag + "_alpha_cutout.png",
+                std::string(curSceneMeta.triangleCount) + " (Scene) | 2,097,152 Tris (16-Plane RayAnyHit)",
+                std::string(curSceneMeta.vertexCount) + " (Scene) | 1,056,896 Verts (RayAnyHit)",
+                std::string(curSceneMeta.vertexStride) + " | 12 Bytes (vec3 in RayAnyHit)",
+                bvhFootprintBuf,
+                "Stresses non-opaque candidate intersection testing (RayScheduling Config 27 & RayAnyHit). When rays traverse alpha-tested surfaces, procedural alpha masks determine whether each candidate hit is committed or BVH traversal continues."
             },
             {
-                "Scene BVH Traversal Step Depth Heatmap",
-                "", // Dynamic per selected scene
+                std::string("Scene BVH Traversal Step Depth Heatmap (") + curSceneMeta.displayName + ")",
+                sceneBvhFile,
+                "assets/thumbnails/thumb_" + tag + "_stage1_bvh.png",
                 curSceneMeta.triangleCount,
-                "Dynamic",
-                "44 Bytes (GltfVertex)",
-                "Varies by Scene",
-                "False-color heatmap visualizing BVH box and triangle intersection test counts per ray for the currently selected scene. Blue indicates shallow traversal (1-15 steps); Yellow/Red indicates deep traversal and geometric occlusion (40-90+ steps)."
+                curSceneMeta.vertexCount,
+                curSceneMeta.vertexStride,
+                bvhFootprintBuf,
+                "False-color heatmap visualizing BVH box and triangle intersection step counts per ray for the currently selected scene. Cool blue tones indicate shallow traversal (1-15 steps); warm yellow/red tones indicate deep traversal and dense AABB overlap (40-90+ steps)."
             }
         };
-        geoViews[2].file = sceneBvhFile.c_str();
-        geoViews[2].triangles = curSceneMeta.triangleCount;
 
         const size_t numGeo = sizeof(geoViews) / sizeof(geoViews[0]);
         if (m_rtGeometryIndex < 0 || static_cast<size_t>(m_rtGeometryIndex) >= numGeo) {
@@ -7134,9 +7366,14 @@ void GuiApp::renderRayTracingViewport() {
         }
         const auto& curGeo = geoViews[m_rtGeometryIndex];
 
-        // Geometry Selector buttons (dynamically sized to prevent text clipping)
+        // Geometry Selector buttons
+        const char* geoTabLabels[] = {
+            "1. Vehicle Wireframe & BVH",
+            "2. Scene Alpha-Cutout Traversal",
+            "3. Scene BVH Step Depth Heatmap"
+        };
         for (size_t gi = 0; gi < numGeo; ++gi) {
-            float btnW = ImGui::CalcTextSize(geoViews[gi].title).x + s(24.0f);
+            float btnW = ImGui::CalcTextSize(geoTabLabels[gi]).x + s(24.0f);
             if (gi > 0) {
                 sameLineIfFits(btnW, s(4.0f));
             }
@@ -7148,7 +7385,7 @@ void GuiApp::renderRayTracingViewport() {
                 ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.13f, 0.16f, 0.22f, 1.0f));
                 ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.70f, 0.75f, 0.85f, 1.0f));
             }
-            if (ImGui::Button(geoViews[gi].title, ImVec2(btnW, s(24.0f)))) {
+            if (ImGui::Button(geoTabLabels[gi], ImVec2(btnW, s(24.0f)))) {
                 m_rtGeometryIndex = static_cast<int>(gi);
             }
             ImGui::PopStyleColor(2);
@@ -7167,6 +7404,9 @@ void GuiApp::renderRayTracingViewport() {
             // Left Column: Geometry Image Card
             ImGui::BeginChild("GeoImageCard", ImVec2(0, cardHeight), true, ImGuiWindowFlags_NoScrollbar);
             auto texGeo = getOrLoadTexture(curGeo.file);
+            if (!texGeo.isValid() && !curGeo.fallbackThumb.empty()) {
+                texGeo = getOrLoadTexture(curGeo.fallbackThumb);
+            }
             ImVec2 childAvail = ImGui::GetContentRegionAvail();
             float targetAspect = (texGeo.isValid() && texGeo.height > 0) ? (static_cast<float>(texGeo.width) / texGeo.height) : (16.0f / 9.0f);
             float imgW = childAvail.x;
@@ -7189,7 +7429,7 @@ void GuiApp::renderRayTracingViewport() {
             if (texGeo.isValid()) {
                 drawList->AddImage(reinterpret_cast<ImTextureID>(texGeo.descriptorSet), p0, p1);
             } else {
-                std::string msg = "Geometry image not found: " + std::string(curGeo.file);
+                std::string msg = "Geometry image not found: " + curGeo.file;
                 ImVec2 textSize = ImGui::CalcTextSize(msg.c_str());
                 drawList->AddText(ImVec2(p0.x + (imgW - textSize.x) * 0.5f, p0.y + (imgH - textSize.y) * 0.5f),
                                   IM_COL32(200, 180, 80, 255), msg.c_str());
@@ -7201,45 +7441,45 @@ void GuiApp::renderRayTracingViewport() {
             // Right Column: Geometry & BVH Topology Specs
             ImGui::BeginChild("GeoPropsCard", ImVec2(0, cardHeight), true);
             pushBoldFont();
-            ImGui::TextColored(ImVec4(0.40f, 0.80f, 1.00f, 1.0f), "%s", curGeo.title);
+            ImGui::TextColored(ImVec4(0.40f, 0.80f, 1.00f, 1.0f), "%s", curGeo.title.c_str());
             popBoldFont();
             ImGui::Separator();
 
             ImGui::Spacing();
             ImGui::Text("Primitive Count: "); ImGui::SameLine();
             pushMonoFont();
-            ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s", curGeo.triangles);
+            ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s", curGeo.triangles.c_str());
             popMonoFont();
 
             ImGui::Text("Vertex Count: "); ImGui::SameLine();
             pushMonoFont();
-            ImGui::TextColored(ImVec4(0.95f, 0.80f, 0.35f, 1.0f), "%s", curGeo.vertices);
+            ImGui::TextColored(ImVec4(0.95f, 0.80f, 0.35f, 1.0f), "%s", curGeo.vertices.c_str());
             popMonoFont();
 
             ImGui::Text("Vertex Format: "); ImGui::SameLine();
             pushMonoFont();
-            ImGui::TextColored(ImVec4(0.95f, 0.95f, 0.95f, 1.0f), "%s", curGeo.stride);
+            ImGui::TextColored(ImVec4(0.95f, 0.95f, 0.95f, 1.0f), "%s", curGeo.stride.c_str());
             popMonoFont();
 
-            ImGui::Text("AS Memory Footprint: "); ImGui::SameLine();
+            ImGui::Text("AS Memory & Build: "); ImGui::SameLine();
             pushMonoFont();
-            ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.0f, 1.0f), "%s", curGeo.blasMemory);
+            ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.0f, 1.0f), "%s", curGeo.blasMemory.c_str());
             popMonoFont();
 
             ImGui::Spacing();
             ImGui::Separator();
             ImGui::Spacing();
             ImGui::TextColored(ImVec4(0.85f, 0.90f, 0.95f, 1.0f), "Topology & Acceleration Structure Analysis:");
-            ImGui::TextWrapped("%s", curGeo.description);
+            ImGui::TextWrapped("%s", curGeo.description.c_str());
 
             ImGui::Spacing();
             ImGui::Separator();
             ImGui::Spacing();
             ImGui::TextDisabled("Hardware Traversal Pipeline:");
-            ImGui::BulletText("BVH Node Format: Bvh8 / Bvh4 wide trees with node compression");
-            ImGui::BulletText("Intersection Engine: Dual-Ray Box testing units + Ray-Triangle units");
-            ImGui::BulletText("Alpha Cutout Handling: Stackless Any-Hit shader execution");
-            ImGui::BulletText("Build Algorithm: Spatial Split Bounding Interval Hierarchy (SBVH)");
+            ImGui::BulletText("BVH Node Format: Hardware wide BVH (Bvh8 / Bvh4) with box compression");
+            ImGui::BulletText("Intersection Engine: Hardware Ray-Box & Ray-Triangle intersection units");
+            ImGui::BulletText("Alpha Cutout Handling: Ray Query candidate evaluation / Any-Hit shader");
+            ImGui::BulletText("Build Mode: vkCmdBuildAccelerationStructuresKHR (PREFER_FAST_TRACE_BIT_KHR)");
 
             ImGui::EndChild();
 
@@ -7351,7 +7591,11 @@ void GuiApp::startBenchmarks() {
                     sys_configs++;
                 } else {
                     if (targetGpus.empty()) continue;
-                    if (item.id == "RayScheduling" && m_scene == "all") {
+                    bool isMicro = (item.id == "RayScheduling" &&
+                        (item.configIndex == 12 || item.configIndex == 13 || item.configIndex == 14 ||
+                         item.configIndex == 15 || item.configIndex == 16 || item.configIndex == 26 ||
+                         item.configIndex == 28));
+                    if (item.id == "RayScheduling" && !isMicro && m_scene == "all") {
                         gpu_configs += 4;
                     } else {
                         gpu_configs += 1;

@@ -29,7 +29,9 @@ void main() {
     uint index = gl_GlobalInvocationID.x;
 
     uint seedIdx = 524288u + ((index * 4093u + 17u) & 1023u);
-    vec4 seed = vec4(InOutBuffer.data[seedIdx]);
+    u16vec4 rawSeed = bfloat16BitsToUintEXT(InOutBuffer.data[seedIdx]);
+    vec4 seed = uintBitsToFloat(uvec4(rawSeed) << 16u);
+    seed = fma(seed, vec4(1.0f), vec4(1e-6f));
 
     bf16vec4 a[32];
     APPLY32(INIT)

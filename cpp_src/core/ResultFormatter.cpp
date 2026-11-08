@@ -604,7 +604,7 @@ void ResultFormatter::print() {
           bool hasMegakernel = false;
           bool hasVector = false;
           bool hasScanline = false;
-          bool hasWaveBallot = false;
+          bool hasSinglePassCompaction = false;
 
           for (const auto &benchPair : subcat.benchmarks) {
             std::string cName = std::get<2>(benchPair.first);
@@ -619,12 +619,12 @@ void ResultFormatter::print() {
                 cName.find("Baseline") != std::string::npos) {
               hasScanline = true;
             }
-            if (cName.find("Wave Ballot") != std::string::npos) {
-              hasWaveBallot = true;
+            if (cName.find("Single-Pass") != std::string::npos) {
+              hasSinglePassCompaction = true;
             }
           }
 
-          if (hasMegakernel || (hasVector && subcat.benchmarks.size() >= 2) || hasScanline || hasWaveBallot) {
+          if (hasMegakernel || (hasVector && subcat.benchmarks.size() >= 2) || hasScanline || hasSinglePassCompaction) {
             hasComparison = true;
             for (const auto &benchPair : subcat.benchmarks) {
               std::string cName = std::get<2>(benchPair.first);
@@ -635,7 +635,7 @@ void ResultFormatter::print() {
                 isCandidate = true;
               } else if (!hasMegakernel && !hasVector && hasScanline && (cName.find("Scanline") != std::string::npos || cName.find("Baseline") != std::string::npos)) {
                 isCandidate = true;
-              } else if (!hasMegakernel && !hasVector && !hasScanline && hasWaveBallot && cName.find("Wave Ballot") != std::string::npos) {
+              } else if (!hasMegakernel && !hasVector && !hasScanline && hasSinglePassCompaction && cName.find("Single-Pass") != std::string::npos) {
                 isCandidate = true;
               }
 
@@ -969,7 +969,7 @@ void ResultFormatter::print() {
                   } else if (fullName == baselineKeyName ||
                              (((fullName.find("Megakernel") != std::string::npos && fullName.find("RTP") == std::string::npos) ||
                                fullName.find("Traditional") != std::string::npos || fullName.find("Baseline") != std::string::npos ||
-                               fullName.find("Scanline") != std::string::npos || fullName.find("Wave Ballot") != std::string::npos))) {
+                               fullName.find("Scanline") != std::string::npos || fullName.find("Single-Pass") != std::string::npos))) {
                     isLocalBase = true;
                   } else if (hasComparison && baselineVal > 0.0 && baselineMetric == res.metric && res.baselineConfigIndex != -1) {
                     localBaseVal = baselineVal;

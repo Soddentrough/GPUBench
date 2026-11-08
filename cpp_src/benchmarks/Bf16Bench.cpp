@@ -55,6 +55,9 @@ void Bf16Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
       if (vectorKernel) {
         context.setKernelArg(vectorKernel, 0, buffer);
       }
+    } catch (const std::exception &e) {
+      std::cerr << "Bf16Bench Setup vectorKernel exception: " << e.what() << std::endl;
+      vectorKernel = nullptr;
     } catch (...) {
       vectorKernel = nullptr;
     }
@@ -125,9 +128,15 @@ BenchmarkResult Bf16Bench::GetResult(uint32_t config_idx) const {
 }
 
 bool Bf16Bench::ValidateResults(uint32_t config_idx) const {
-  if (!context || !buffer) return false;
+  if (!context || !buffer) {
+    std::cerr << "Bf16Bench validation failed: context or buffer is null" << std::endl;
+    return false;
+  }
   if (config_idx == 1 && !matrixKernel) return true;
-  if (config_idx == 0 && !vectorKernel) return false;
+  if (config_idx == 0 && !vectorKernel) {
+    std::cerr << "Bf16Bench validation failed: vectorKernel is null" << std::endl;
+    return false;
+  }
 
   try {
     auto bf16ToFloat = [](uint16_t bf) -> float {
@@ -168,6 +177,8 @@ bool Bf16Bench::ValidateResults(uint32_t config_idx) const {
 
       // 1. Verify buffer word changed from unwritten default seed (0x3D00)
       if (h == kUnwrittenSeed16) {
+        std::cerr << "Bf16Bench validation failed (config " << config_idx
+                  << "): hostBf16[" << i << "] is unwritten seed 0x3D00" << std::endl;
         return false;
       }
 
@@ -175,19 +186,31 @@ bool Bf16Bench::ValidateResults(uint32_t config_idx) const {
 
       // 2. Numerical sanity check
       if (std::isnan(v) || std::isinf(v) || v == 0.0f) {
+        std::cerr << "Bf16Bench validation failed (config " << config_idx
+                  << "): hostBf16[" << i << "] = " << v << " (raw=0x" << std::hex << h << std::dec << ")" << std::endl;
         return false;
       }
 
       // 3. Expected transformed boundaries per workload configuration
       if (config_idx == 0) {
-        if (v <= 0.0f) return false;
+        if (v <= 0.0f) {
+          std::cerr << "Bf16Bench validation failed (config 0): hostBf16[" << i << "] = " << v << " <= 0" << std::endl;
+          return false;
+        }
       } else {
         // Native BF16 coop_matrix produces v ~ 512.0f
-        if (v < 10.0f || v > 2000.0f) return false;
+        if (v < 10.0f || v > 2000.0f) {
+          std::cerr << "Bf16Bench validation failed (config 1): hostBf16[" << i << "] = " << v << " out of [10, 2000]" << std::endl;
+          return false;
+        }
       }
     }
     return true;
+  } catch (const std::exception &e) {
+    std::cerr << "Bf16Bench validation exception (config " << config_idx << "): " << e.what() << std::endl;
+    return false;
   } catch (...) {
+    std::cerr << "Bf16Bench validation unknown exception (config " << config_idx << ")" << std::endl;
     return false;
   }
 }

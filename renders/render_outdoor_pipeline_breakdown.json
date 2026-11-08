@@ -1,0 +1,73 @@
+{
+  "gpu": "AMD Radeon AI PRO R9700 (RADV GFX1201)",
+  "scene": "Outdoor Landscape",
+  "tag": "outdoor",
+  "resolution": "3840x2160",
+  "triangles": 46016,
+  "bvh_build_time_ms": 1.4474,
+  "stages": [
+    {
+      "id": "stage1_bvh",
+      "title": "BVH Traversal Complexity Heatmap",
+      "pass_type": "Ray Query Step Profiling (Linear Turbo Map)",
+      "time_ms": 12.9596,
+      "mrays": 640.0205,
+      "fps": 77.1630,
+      "png_file": "renders/render_outdoor_stage1_bvh.png"
+    },
+    {
+      "id": "stage2_primary",
+      "title": "Primary Surface G-Buffer Normals",
+      "pass_type": "Primary Ray Cast (Vulkan 1.4 RQ)",
+      "time_ms": 13.0092,
+      "mrays": 637.5817,
+      "fps": 76.8689,
+      "png_file": "renders/render_outdoor_stage2_primary.png"
+    },
+    {
+      "id": "stage3_shadow",
+      "title": "Sun Occlusion Shadow Mask",
+      "pass_type": "Directional Shadow Traversal",
+      "time_ms": 18.4917,
+      "mrays": 448.5471,
+      "fps": 54.0783,
+      "png_file": "renders/render_outdoor_stage3_shadow.png"
+    },
+    {
+      "id": "stage4_rtao",
+      "title": "Ray-Traced Ambient Occlusion (RTAO)",
+      "pass_type": "Stratified Hemisphere Occlusion (4 Rays)",
+      "time_ms": 32.1890,
+      "mrays": 257.6781,
+      "fps": 31.0665,
+      "png_file": "renders/render_outdoor_stage4_rtao.png"
+    },
+    {
+      "id": "stage5_direct",
+      "title": "Direct Hybrid PBR Shading",
+      "pass_type": "Direct Analytic Sun + GGX Specular + Shadows + RTAO",
+      "time_ms": 15.8197,
+      "mrays": 524.3074,
+      "fps": 63.2122,
+      "png_file": "renders/render_outdoor_stage5_direct.png"
+    },
+    {
+      "id": "stage6_indirect",
+      "title": "Secondary Indirect GI Bounce",
+      "pass_type": "Cosine-Sampled Diffuse Radiance (4 Rays)",
+      "time_ms": 58.0217,
+      "mrays": 142.9534,
+      "fps": 17.2349,
+      "png_file": "renders/render_outdoor_stage6_indirect.png"
+    },
+    {
+      "id": "stage7_final",
+      "title": "Final Beauty Render",
+      "pass_type": "Full Pipeline Composite (Primary + Direct + Indirect + IBL)",
+      "time_ms": 11.7262,
+      "mrays": 707.3412,
+      "fps": 85.2794,
+      "png_file": "renders/render_outdoor_stage7_final.png"
+    }
+  ]
+}

@@ -260,6 +260,7 @@ private:
   double recordedTimeMs[35] = {0.0};
   IComputeContext *context = nullptr;
   bool dumpRenders = false;
+  bool captureFramebuffer = false;
   bool verifyParity = false;
   bool parityFailure = false;
   ComputeBuffer fbTraditional = nullptr;
