@@ -6,7 +6,7 @@ gpubench-gui \- Graphical interface for GPU compute and hardware ray tracing ben
 [\fIOPTIONS\fR]
 .SH DESCRIPTION
 .B GPUBench GUI
-is the graphical interface for GPUBench, a cross-backend GPU compute and hardware ray tracing benchmark suite. It features real-time telemetry graphs (GPU clock, temperature, power, VRAM, activity), configurable test suites, visual parity inspection with split/diff/heatmap views, and analytical scorecard evaluations. Command line options can be supplied to preconfigure options or run benchmarks non-interactively.
+is the graphical workstation profiler for GPUBench, built on a shared Vulkan 1.4 device, Dear ImGui 1.93 dynamic font baking, and ImPlot v1.1. It features live cross-platform hardware telemetry graphs (GPU clock, temperature, power, VRAM, activity with explicit N/A reporting for unexposed sensors), configurable test suites, zero-disk-roundtrip GPU VRAM ray tracing viewport inspection with split/diff/heatmap views, interactive Empirical Roofline log-log charts, and unified v2.0 JSON session import/comparison/export.
 .SH OPTIONS
 .TP
 .BR \-h ", " \-\-help
@@ -19,28 +19,46 @@ Display program version information and exit.
 Select default compute backend: auto, vulkan, opencl, rocm.
 .TP
 .BR \-g ", " \-\-group ", " \-\-groups " \fINAMES\fR"
-Benchmark group(s) to enable: compute, memory, graphics (combines raster & raytracing), raster, raytracing, system, all.
+Benchmark group(s) to enable: compute, memory, scheduling, graphics (combines raster & raytracing), raster, raytracing, system, all.
 .TP
-.BR \-b ", " \-\-benchmark ", " \-\-benchmarks ", " \-t ", " \-\-test " \fIBENCHMARKS\fR"
-Specific benchmark(s) to enable (comma-separated). Supported identifiers include: fp32, fp64, dualissue, lds, indirect, fp16, bf16, fp8, fp6, fp4, int8, int4, membw, l0_cache, cache_latency_curve, pixelfill, rayrawtraversal, rayasbuild, rayintersect, rayanyhit, rayprocedural, rayscheduling, raydivergence, sysmembw, sysmemlatency, all.
+.BR \-b ", " \-\-benchmark ", " \-\-benchmarks " \fIBENCHMARKS\fR"
+Specific benchmark(s) to enable (comma-separated). Supported identifiers include: fp32, fp64, dualissue, lds, indirect, fp16, bf16, fp8, fp6, fp4, int8, int4, sparsematrix, coopvector, membw, interconnect, l0_cache, cache_latency_curve, asyncoverlap, workgraphs, pixelfill, rayrawtraversal, rayasbuild, rayintersect, rayanyhit, rayomm, rayprocedural, raypayload, rayscheduling, raydivergence, sysmembw, sysmemlatency, all.
 .TP
 .BR \-d ", " \-\-device " \fIDEVICES\fR"
 Target GPU device index(es) (e.g., 0, 1, 0,1, dual, or all).
 .TP
 .BR \-s ", " \-\-scene " \fISCENE\fR"
-Pre-select Ray Tracing scene: showroom, indoor, outdoor, forest.
+Pre-select Ray Tracing scene: showroom, indoor, outdoor, forest, or all.
 .TP
 .BR \-r ", " \-\-res ", " \-\-resolution " \fIPRESET\fR"
-Resolution preset: 720p, 1080p, 1440p, 4k, 8k, or custom WxH.
+Resolution preset: auto, 720p, 1080p, 1440p, 4k, 8k, or custom WxH.
+.TP
+.BR \-\-spp " \fISPP\fR"
+Samples per pixel for ray tracing accumulation (1..256).
 .TP
 .BR \-\-ui-scale ", " \-\-scale " \fISCALE\fR"
 Override UI DPI scaling factor (e.g., 1.0, 1.25, 1.5, 2.0).
 .TP
 .BR \-\-dump-renders ", " \-\-dump
-Enable visual verification and dump comparison frames to disk.
+Enable saving rendered PNG comparison frames to disk (\fIrenders/\fR).
 .TP
 .BR \-\-no-dump-renders ", " \-\-no-dump
-Disable saving rendered output images to disk.
+Disable saving rendered output images to disk (renders remain viewable directly in GPU VRAM via the shared Vulkan 1.4 device).
+.TP
+.BR \-i ", " \-\-import ", " \-\-input " \fIFILE\fR"
+Load a unified v2.0 or v1.x JSON report into the GUI session on startup.
+.TP
+.BR \-\-compare " \fIFILE\fR"
+Load a baseline JSON report for side-by-side delta comparison in the Results Scorecard.
+.TP
+.BR \-o ", " \-\-output-json " \fIFILE\fR"
+Automatically export unified v2.0 JSON results upon benchmark completion.
+.TP
+.BR \-\-roofline
+Open the Empirical Roofline tab automatically after loading or completing a run.
+.TP
+.BR \-\-screenshot " \fIPATH\fR"
+Capture the rendered GUI swapchain to a PNG image before exiting.
 .TP
 .BR \-\-auto-run ", " \-\-auto-start ", " \-\-run
 Automatically begin benchmark execution immediately upon launch.
@@ -55,7 +73,7 @@ Run for the specified number of frames and exit.
 Enable verbose logging output.
 .TP
 .BR \-\-debug
-Enable debug logging output.
+Enable Vulkan validation layers and debug logging output.
 .SH EXAMPLES
 .TP
 Launch GUI with Vulkan backend, Ray Tracing group, and GPU 0 selected:

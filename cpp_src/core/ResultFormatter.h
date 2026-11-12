@@ -42,6 +42,7 @@ struct ResultData {
   std::string errorString;
   bool isValid = true;
   int32_t baselineConfigIndex = -1;
+  double operationalIntensity = 0.0; // FLOP/Byte or OP/Byte for Empirical Roofline
   // Compiler / Kernel Resource Telemetry (Optimization O-4)
   bool hasRegisterTelemetry = false;
   uint32_t vgprCount = 0;
@@ -92,6 +93,13 @@ private:
   bool showTelemetry = false;
 };
 
+struct UnifiedSessionMetadata {
+  std::string scene = "all";
+  uint32_t samplesPerPixel = 1;
+  bool dumpRenders = true;
+  float uiScale = 1.0f;
+};
+
 double computeResultValue(const ResultData &r);
 std::string cleanWorkloadName(const std::string &rawName, const std::string &subcat);
 std::string extractSceneName(const std::string &rawName);
@@ -99,3 +107,6 @@ std::string getDefaultJsonFilename();
 std::string resultsToJson(const std::vector<ResultData> &results);
 std::string resultsToJson(const std::vector<ResultData> &results,
                           const std::vector<DeviceProfile> &profiles);
+std::string resultsToJson(const std::vector<ResultData> &results,
+                          const std::vector<DeviceProfile> &profiles,
+                          const UnifiedSessionMetadata *sessionMeta);

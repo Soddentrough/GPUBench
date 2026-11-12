@@ -4,6 +4,7 @@
 #include "OutdoorLandscapeScene.h"
 #include "ShowroomScene.h"
 #include "core/VulkanContext.h"
+#include "third_party/yyjson.h"
 #include "utils/ImageExport.h"
 #include <algorithm>
 #include <cmath>
@@ -164,7 +165,17 @@ void RaySchedulingBench::buildAS() {
     scratchBuffer = nullptr;
   }
 
-  VkDeviceAddress vAddr = vContext->getBufferDeviceAddress(vertexBuffer);
+  ComputeBuffer posBuildBuffer = nullptr;
+  VkDeviceAddress vAddr = 0;
+  VkDeviceSize vStride = isGltf ? sizeof(GltfVertex) : (sizeof(float) * 3);
+  if (isGltf && !compactBvhPositions.empty()) {
+    posBuildBuffer = context->createBuffer(
+        compactBvhPositions.size() * sizeof(float), compactBvhPositions.data());
+    vAddr = vContext->getBufferDeviceAddress(posBuildBuffer);
+    vStride = sizeof(float) * 3;
+  } else {
+    vAddr = vContext->getBufferDeviceAddress(vertexBuffer);
+  }
 
   VkAccelerationStructureGeometryKHR triGeom{
       VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR};
@@ -174,7 +185,7 @@ void RaySchedulingBench::buildAS() {
       VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
   triGeom.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
   triGeom.geometry.triangles.vertexData.deviceAddress = vAddr;
-  triGeom.geometry.triangles.vertexStride = isGltf ? sizeof(GltfVertex) : (sizeof(float) * 3);
+  triGeom.geometry.triangles.vertexStride = vStride;
   triGeom.geometry.triangles.maxVertex = numPrimitives * 3 - 1;
   triGeom.geometry.triangles.indexType = VK_INDEX_TYPE_NONE_KHR;
 
@@ -313,6 +324,14 @@ void RaySchedulingBench::buildAS() {
   bvhBuildTimeMs = std::chrono::duration<double, std::milli>(bvhT1 - bvhT0).count();
 
   vkDestroyCommandPool(device, tmpPool, nullptr);
+  if (posBuildBuffer) {
+    context->releaseBuffer(posBuildBuffer);
+    posBuildBuffer = nullptr;
+  }
+  if (scratchBuffer) {
+    context->releaseBuffer(scratchBuffer);
+    scratchBuffer = nullptr;
+  }
 }
 #endif // HAVE_VULKAN
 
@@ -566,10 +585,32 @@ const char *RaySchedulingBench::GetSubCategory(uint32_t config_idx) const {
   return "Pipeline Breakdown";
 }
 
+const char *RaySchedulingBench::GetDescription(uint32_t config_idx) const {
+  if (config_idx == 17 || config_idx == 18 || config_idx == 29 || config_idx == 30)
+    return "Primary ray cast and G-buffer normal evaluation comparing Compute Megakernel, Ray Tracing Pipeline (RTP), Hardware SER, and Wavefront DGC.";
+  if (config_idx >= 19 && config_idx <= 22)
+    return "Ray-traced directional sun and multi-light shadow visibility comparing Megakernel, RTP+SER, and directional-binned DGC.";
+  if (config_idx >= 31 && config_idx <= 34)
+    return "Direct illumination across 1 vs. 128 stochastic lights comparing Megakernel evaluation against spatial light-binned DGC.";
+  if (config_idx < 3)
+    return "Divergent 8-archetype PBR BSDF shading stage comparing monolithic Megakernel branching against RTP+SER and specialized DGC micro-kernels.";
+  if ((config_idx >= 3 && config_idx <= 5) || config_idx == 25 || config_idx == 23 || config_idx == 24)
+    return "Multi-bounce Monte Carlo path tracing comparing Megakernel, RTP+SER, Persistent Work-Stealing threads, and octant-sorted Wavefront DGC.";
+  if (config_idx >= 6 && config_idx <= 8)
+    return "Cosine-weighted hemisphere secondary bounce traversal measuring incoherent BVH cache pressure across Megakernel, SER, and DGC.";
+  if (config_idx >= 9 && config_idx <= 11)
+    return "End-to-end hybrid ray-traced beauty frame (Primary + PBR + Shadows + RTAO + Indirect GI) across Megakernel, RTP+SER, and Wavefront DGC.";
+  if (config_idx == 12 || config_idx == 14 || config_idx == 15 || config_idx == 16)
+    return "Screen-space ray launch ordering sensitivity (1D scanline vs. 2D tiles vs. Morton Z-order) on L1/L2 BVH cache locality.";
+  if (config_idx == 13 || config_idx == 26 || config_idx == 28)
+    return "Subgroup-ballot wavefront hit-record stream compaction throughput across 128B expanded, 32B packed, and 16B material-binned payloads.";
+  if (config_idx == 27)
+    return "Alpha-cutout foliage traversal divergence measuring mid-traversal texture alpha evaluation overhead.";
+  return "Hardware ray tracing execution paradigm and scheduling microbenchmark.";
+}
+
 std::string RaySchedulingBench::GetConfigCaveat(uint32_t config_idx) const {
-  if ((config_idx == 22 || config_idx == 34) && !isDGCAvailable) {
-    return "VK_EXT_device_generated_commands unavailable; executed via Vulkan 1.0 Core (vkCmdDispatchIndirect) fallback.";
-  }
+  (void)config_idx;
   return "";
 }
 
@@ -610,6 +651,7 @@ int RaySchedulingBench::GetSortWeight(uint32_t config_idx) const {
 void RaySchedulingBench::Setup(IComputeContext &context_ref,
                              const std::string &kernel_dir) {
   this->context = &context_ref;
+  this->cachedKernelDir = kernel_dir;
   VulkanContext *vContext = dynamic_cast<VulkanContext *>(&context_ref);
   if (!vContext)
     throw std::runtime_error("RaySchedulingBench requires VulkanContext");
@@ -629,9 +671,14 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
     dumpRenders = true;
   }
   captureFramebuffer = false;
+  rng.seed(1337u);
+  isDGCAvailable = false;
+  isDGCExecutionSetAvailable = false;
 
   for (int c = 0; c < 35; ++c) {
     lastCompletedPasses[c] = 1;
+    unsupportedConfig[c] = false;
+    unsupportedReason[c].clear();
   }
   lastCompletedPasses[23] = 16;
   lastCompletedPasses[24] = 16;
@@ -664,6 +711,7 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
 
   // Multi-Object Realistic Geometry based on SceneType (Showroom Studio vs. Indoor Atrium vs. Outdoor Landscape)
   isGltf = false;
+  compactBvhPositions.clear();
   std::vector<float> vertices;
 
   if (sceneType == SceneType::IndoorAtrium) {
@@ -767,6 +815,16 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
     // Outdoor Landscape
     vertices = OutdoorLandscapeScene::buildOutdoorLandscapeMesh();
     numPrimitives = static_cast<uint32_t>(vertices.size() / 9);
+  }
+
+  if (isGltf && vertices.size() >= static_cast<size_t>(numPrimitives) * 36u) {
+    const size_t numVerts = static_cast<size_t>(numPrimitives) * 3u;
+    compactBvhPositions.resize(numVerts * 3u);
+    for (size_t vi = 0; vi < numVerts; ++vi) {
+      compactBvhPositions[vi * 3u + 0u] = vertices[vi * 12u + 0u];
+      compactBvhPositions[vi * 3u + 1u] = vertices[vi * 12u + 1u];
+      compactBvhPositions[vi * 3u + 2u] = vertices[vi * 12u + 2u];
+    }
   }
 
   vertexBuffer =
@@ -1412,11 +1470,15 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
   }
 
   if (!isDGCAvailable) {
-    const std::vector<uint32_t> dgcConfigs = {2, 5, 8, 11, 18, 21, 24, 32, 34};
+    const std::vector<uint32_t> dgcConfigs = {2, 5, 8, 11, 18, 21, 22, 24, 32, 34};
     for (uint32_t c : dgcConfigs) {
       unsupportedConfig[c] = true;
       unsupportedReason[c] = "VK_EXT_device_generated_commands extension unsupported by device/driver";
     }
+  } else if (!isDGCExecutionSetAvailable) {
+    unsupportedConfig[2] = true;
+    unsupportedReason[2] =
+        "VK_EXT_device_generated_commands IndirectExecutionSet pipeline binding unsupported for compute on this driver";
   }
 #endif
 }
@@ -1437,7 +1499,7 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     lastRunConfig = config_idx;
   }
 
-  uint32_t seed = captureFramebuffer ? 1337u : rand();
+  uint32_t seed = captureFramebuffer ? 1337u : rng();
   uint32_t sceneTypeVal = (sceneType == SceneType::AAAOutdoorForest) ? 3u : ((sceneType == SceneType::OutdoorLandscape) ? 1u : ((sceneType == SceneType::IndoorAtrium) ? 2u : 0u));
   uint32_t isGltfVal = isGltf ? 1u : 0u;
   uint32_t dumpFlag = captureFramebuffer ? 1u : 0u;
@@ -1490,15 +1552,13 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
   case 2: { // Material Divergence - Device-Generated Commands (DGC) (Specialized Micro-Kernels, Pure Shading)
     if (isDGCAvailable && isDGCExecutionSetAvailable) {
       vContext->dispatchDGCSequence(kernelMaterialSpecialized[0], dgcInfoSpecialized);
-    } else {
-      vContext->dispatchIndirectSequence(kernelMaterial, indirectMaterialBuffer, materialBatchesBreakdown);
     }
     break;
   }
   case 3: { // Path Tracing - Traditional Megakernel
     uint32_t passes = (samplesPerPixel > 1) ? samplesPerPixel : 1u;
     bool ownBatch = (passes > 1u) && !vContext->isBatching();
-    if (ownBatch) vContext->beginBatch(passes);
+    if (ownBatch) vContext->beginBatch(passes, true);
     for (uint32_t s = 0; s < passes; ++s) {
       PushConstantsTraditional pc{rayCount, 1, 1 + bounceDepth, seed + s * 7919u, dumpFlag, renderWidth, renderHeight, 0, sceneTypeVal, isGltfVal, passes, s};
       vContext->setKernelArg(kernelTraditional, 8, sizeof(pc), &pc);
@@ -1511,7 +1571,7 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     if (kernelRTPSER) {
       uint32_t passes = (samplesPerPixel > 1) ? samplesPerPixel : 1u;
       bool ownBatch = (passes > 1u) && !vContext->isBatching();
-      if (ownBatch) vContext->beginBatch(passes);
+      if (ownBatch) vContext->beginBatch(passes, true);
       for (uint32_t s = 0; s < passes; ++s) {
         PushConstantsTraditional pc{rayCount, 1, 1 + bounceDepth, seed + s * 7919u, dumpFlag, renderWidth, renderHeight, 0, sceneTypeVal, isGltfVal, passes, s};
         vContext->setKernelArg(kernelRTPSER, 8, sizeof(pc), &pc);
@@ -1525,7 +1585,7 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     ComputeKernel kClass = kernelClassifySpecialized[1] ? kernelClassifySpecialized[1] : kernelClassify;
     uint32_t passes = (samplesPerPixel > 1) ? samplesPerPixel : 1u;
     bool ownBatch = (passes > 1u) && !vContext->isBatching();
-    if (ownBatch) vContext->beginBatch(passes);
+    if (ownBatch) vContext->beginBatch(passes, true);
     for (uint32_t s = 0; s < passes; ++s) {
       uint32_t sampleSeed = seed + s * 7919u;
       for (size_t b = 0; b < bounceBatches.size(); ++b) {
@@ -1754,7 +1814,7 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
   case 23: { // Full Scene Path Tracing (16 SPP) - Traditional Megakernel
     uint32_t passes = 16u;
     bool ownBatch = !vContext->isBatching();
-    if (ownBatch) vContext->beginBatch(passes);
+    if (ownBatch) vContext->beginBatch(passes, true);
     for (uint32_t s = 0; s < passes; ++s) {
       PushConstantsTraditional pc{rayCount, 1, 1 + bounceDepth, seed + s * 7919u, dumpFlag, renderWidth, renderHeight, 0, sceneTypeVal, isGltfVal, passes, s};
       vContext->setKernelArg(kernelTraditional, 8, sizeof(pc), &pc);
@@ -1768,7 +1828,7 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     ComputeKernel kClass = kernelClassifySpecialized[1] ? kernelClassifySpecialized[1] : kernelClassify;
     uint32_t passes = 16u;
     bool ownBatch = !vContext->isBatching();
-    if (ownBatch) vContext->beginBatch(passes);
+    if (ownBatch) vContext->beginBatch(passes, true);
     for (uint32_t s = 0; s < passes; ++s) {
       uint32_t sampleSeed = seed + s * 7919u;
       for (size_t b = 0; b < bounceBatches.size(); ++b) {
@@ -1808,15 +1868,17 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
       uint32_t sampleIdx{0};
     };
     uint32_t passes = (samplesPerPixel > 1) ? samplesPerPixel : 1u;
+    const uint32_t hwCUs = context->getCurrentDeviceInfo().computeUnits;
+    const uint32_t persistentGroups =
+        (hwCUs > 0) ? std::clamp(hwCUs * 6u, 64u, 2048u) : 384u;
     bool ownBatch = !vContext->isBatching();
-    if (ownBatch) vContext->beginBatch(passes * 2u);
+    if (ownBatch) vContext->beginBatch(passes * 2u, true);
     for (uint32_t s = 0; s < passes; ++s) {
       // Reset workQueue.currentWorkTileIndex (counter 0 in workListBuffer) on GPU without synchronous host staging stall
       vContext->dispatch(kernelReset, 1, 1, 1, 32, 1, 1);
       PushConstantsPersistent pc{rayCount, 1, 1 + bounceDepth, seed + s * 7919u, dumpFlag, renderWidth, renderHeight, 2, sceneTypeVal, isGltfVal, passes, s};
       vContext->setKernelArg(kernelPersistent, 9, sizeof(pc), &pc);
-      // Persistent workgroups: 384 groups * 32 threads = 12,288 threads saturating 64 CUs / 128 SIMDs on RDNA 4
-      vContext->dispatch(kernelPersistent, 384, 1, 1, 32, 1, 1);
+      vContext->dispatch(kernelPersistent, persistentGroups, 1, 1, 32, 1, 1);
     }
     if (ownBatch) vContext->endBatch();
     break;
@@ -1931,6 +1993,23 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
 void RaySchedulingBench::performVisualVerification(bool isInteractive) {
 #ifdef HAVE_VULKAN
   if (!context || !fbTraditional || !fbWorkList) return;
+  VulkanContext *vContext = dynamic_cast<VulkanContext *>(context);
+  const bool writeDiskFiles = wantDumpRenders || dumpRenders;
+  const std::string tag = (sceneType == SceneType::AAAOutdoorForest)
+                              ? "forest"
+                              : ((sceneType == SceneType::OutdoorLandscape)
+                                     ? "outdoor"
+                                     : ((sceneType == SceneType::IndoorAtrium) ? "indoor" : "showroom"));
+
+  if (!isDGCAvailable) {
+    if (context && !context->isQuiet()) {
+      std::cout << "\r\033[K[Info] Skipping Megakernel vs. DGC visual parity verification: VK_EXT_device_generated_commands unsupported on this device/driver.\n";
+    }
+    if (writeDiskFiles || captureGpuPreviews) {
+      dumpPipelineBreakdown(tag, isInteractive);
+    }
+    return;
+  }
 
   if (isInteractive && context && !context->isQuiet()) {
     std::cout << "\r\033[K  \033[36m⠋\033[0m [1/3] Tonemapping and exporting primary 4K frames..." << std::flush;
@@ -1971,6 +2050,29 @@ void RaySchedulingBench::performVisualVerification(bool isInteractive) {
     context->writeBuffer(dgcSequenceBuffer, 13 * sizeof(item128), sizeof(item128), item128);
   };
 
+  auto emitJsonDoc = [&](const std::string &jsonRelKey,
+                         const std::string &diskPath,
+                         yyjson_mut_doc *doc) {
+    if (!doc) return;
+    size_t len = 0;
+    char *jsonStr = yyjson_mut_write(doc, YYJSON_WRITE_PRETTY_TWO_SPACES, &len);
+    if (jsonStr) {
+      std::string content(jsonStr, len);
+      content.push_back('\n');
+      free(jsonStr);
+      if (vContext) {
+        vContext->storeInMemoryJson(jsonRelKey, content);
+      }
+      if (writeDiskFiles && !diskPath.empty()) {
+        std::ofstream jf(diskPath, std::ios::binary);
+        if (jf.is_open()) {
+          jf.write(content.data(), static_cast<std::streamsize>(content.size()));
+        }
+      }
+    }
+    yyjson_mut_doc_free(doc);
+  };
+
   // Explicitly render one complete frame from each pipeline with dump enabled
   captureFramebuffer = true;
   updateDgcDumpFlag(1u);
@@ -1982,6 +2084,15 @@ void RaySchedulingBench::performVisualVerification(bool isInteractive) {
   uint32_t width = renderWidth, height = renderHeight;
   size_t bufferSize = width * height * sizeof(float) * 4;
 
+  if (captureGpuPreviews && vContext) {
+    vContext->captureBufferToSharedPreviewImage(
+        "render_" + tag + "_traditional_megakernel.png", fbTraditional, fbTraditional, width, height, 0u, cachedKernelDir);
+    vContext->captureBufferToSharedPreviewImage(
+        "render_" + tag + "_worklist_dgc.png", fbWorkList, fbWorkList, width, height, 0u, cachedKernelDir);
+    vContext->captureBufferToSharedPreviewImage(
+        "render_" + tag + "_difference_heatmap.png", fbTraditional, fbWorkList, width, height, 1u, cachedKernelDir);
+  }
+
   std::vector<float> hdrTrad(width * height * 4, 0.0f);
   std::vector<float> hdrWork(width * height * 4, 0.0f);
 
@@ -1992,20 +2103,17 @@ void RaySchedulingBench::performVisualVerification(bool isInteractive) {
   auto metrics = gpubench::ImageExport::compareAndTonemap(
       hdrTrad.data(), hdrWork.data(), width, height, ldrTrad, ldrWork, ldrDiff);
 
-  const std::string rendersDir = resolveRendersDir();
-  std::string tag = (sceneType == SceneType::AAAOutdoorForest)
-                        ? "forest"
-                        : ((sceneType == SceneType::OutdoorLandscape)
-                               ? "outdoor"
-                               : ((sceneType == SceneType::IndoorAtrium) ? "indoor" : "showroom"));
+  const std::string rendersDir = writeDiskFiles ? resolveRendersDir() : "renders";
 
   std::string tradPng = rendersDir + "/render_" + tag + "_traditional_megakernel.png";
   std::string workPng = rendersDir + "/render_" + tag + "_worklist_dgc.png";
   std::string diffPng = rendersDir + "/render_" + tag + "_difference_heatmap.png";
 
-  gpubench::ImageExport::writePNG(tradPng, width, height, ldrTrad);
-  gpubench::ImageExport::writePNG(workPng, width, height, ldrWork);
-  gpubench::ImageExport::writePNG(diffPng, width, height, ldrDiff);
+  if (writeDiskFiles) {
+    gpubench::ImageExport::writePNG(tradPng, width, height, ldrTrad);
+    gpubench::ImageExport::writePNG(workPng, width, height, ldrWork);
+    gpubench::ImageExport::writePNG(diffPng, width, height, ldrDiff);
+  }
 
   // Extract timings for captioned telemetry slate (using recorded benchmark results or live measurements)
   double timeSecTrad = 0.0;
@@ -2086,57 +2194,70 @@ void RaySchedulingBench::performVisualVerification(bool isInteractive) {
   float nearExactPct = (float)(metrics.totalPixels - metrics.diffPixels) / (float)metrics.totalPixels * 100.0f;
   float diffPct = (float)metrics.diffPixels / (float)metrics.totalPixels * 100.0f;
 
-  std::string profileJson = rendersDir + "/render_" + tag + "_profile.json";
-  std::ofstream profFile(profileJson);
-  if (profFile.is_open()) {
-    profFile << std::fixed << std::setprecision(4);
-    profFile << "{\n";
-    profFile << "  \"gpu\": \"" << context->getCurrentDeviceInfo().name << "\",\n";
-    profFile << "  \"scene\": \"" << (sceneType == SceneType::AAAOutdoorForest ? "Open-World Forest" : ((sceneType == SceneType::OutdoorLandscape) ? "Outdoor Landscape" : ((sceneType == SceneType::IndoorAtrium) ? "Indoor Atrium" : "Showroom Studio"))) << "\",\n";
-    profFile << "  \"resolution\": \"" << width << "x" << height << " (" << (width * height) << " primary rays)\",\n";
-    profFile << "  \"traditional\": {\n";
-    profFile << "    \"fps\": " << fpsTrad << ",\n";
-    profFile << "    \"mrays\": " << mraysTrad << ",\n";
-    profFile << "    \"frame_ms\": " << frameMsTrad << ",\n";
-    profFile << "    \"bvh_ms\": " << bvhMs << ",\n";
-    profFile << "    \"bvh_pct\": " << bvhPctTrad << ",\n";
-    profFile << "    \"bvh_mrays\": " << bvhMRays << ",\n";
-    profFile << "    \"shading_ms\": " << shdMsTrad << ",\n";
-    profFile << "    \"shading_pct\": " << shdPctTrad << ",\n";
-    profFile << "    \"shading_mhits\": " << shdMHitsTrad << "\n";
-    profFile << "  },\n";
-    profFile << "  \"worklist\": {\n";
-    profFile << "    \"fps\": " << fpsWork << ",\n";
-    profFile << "    \"mrays\": " << mraysWork << ",\n";
-    profFile << "    \"frame_ms\": " << frameMsWork << ",\n";
-    profFile << "    \"bvh_ms\": " << bvhMs << ",\n";
-    profFile << "    \"bvh_pct\": " << bvhPctWork << ",\n";
-    profFile << "    \"bvh_mrays\": " << bvhMRays << ",\n";
-    profFile << "    \"compaction_ms\": " << cmpMs << ",\n";
-    profFile << "    \"compaction_pct\": " << cmpPctWork << ",\n";
-    profFile << "    \"compaction_mrecords\": " << cmpMRec << ",\n";
-    profFile << "    \"shading_ms\": " << shdMsWork << ",\n";
-    profFile << "    \"shading_pct\": " << shdPctWork << ",\n";
-    profFile << "    \"shading_mhits\": " << shdMHitsWork << ",\n";
-    profFile << "    \"shading_speedup\": " << shdSpeedup << "\n";
-    profFile << "  },\n";
-    profFile << "  \"parity\": {\n";
-    profFile << "    \"psnr\": " << metrics.psnr << ",\n";
-    profFile << "    \"mae\": " << metrics.mae << ",\n";
-    profFile << "    \"rmse\": " << metrics.rmse << ",\n";
-    profFile << "    \"exact_pixels\": " << metrics.exactPixels << ",\n";
-    profFile << "    \"exact_pct\": " << bitExactPct << ",\n";
-    profFile << "    \"near_exact_pixels\": " << (metrics.totalPixels - metrics.diffPixels) << ",\n";
-    profFile << "    \"near_exact_pct\": " << nearExactPct << ",\n";
-    profFile << "    \"diff_pixels\": " << metrics.diffPixels << ",\n";
-    profFile << "    \"diff_pct\": " << diffPct << ",\n";
-    profFile << "    \"status\": \"VERIFIED PARITY PASSED\"\n";
-    profFile << "  }\n";
-    profFile << "}\n";
-    profFile.close();
+  auto finiteOr = [](double v, double fallback) {
+    return std::isfinite(v) ? v : fallback;
+  };
+  bool passPBR = (metrics.psnr >= 45.0f && metrics.diffPixels <= std::max(32u, (uint32_t)(metrics.totalPixels * 0.0001f)));
+
+  const char *sceneLabel =
+      (sceneType == SceneType::AAAOutdoorForest
+           ? "Open-World Forest"
+           : ((sceneType == SceneType::OutdoorLandscape)
+                  ? "Outdoor Landscape"
+                  : ((sceneType == SceneType::IndoorAtrium) ? "Indoor Atrium" : "Showroom Studio")));
+  const std::string resDesc =
+      std::to_string(width) + "x" + std::to_string(height) + " (" +
+      std::to_string(width * height) + " primary rays)";
+
+  {
+    yyjson_mut_doc *doc = yyjson_mut_doc_new(nullptr);
+    yyjson_mut_val *root = yyjson_mut_obj(doc);
+    yyjson_mut_doc_set_root(doc, root);
+    yyjson_mut_obj_add_strcpy(doc, root, "gpu", context->getCurrentDeviceInfo().name.c_str());
+    yyjson_mut_obj_add_strcpy(doc, root, "scene", sceneLabel);
+    yyjson_mut_obj_add_strcpy(doc, root, "resolution", resDesc.c_str());
+
+    yyjson_mut_val *tradObj = yyjson_mut_obj_add_obj(doc, root, "traditional");
+    yyjson_mut_obj_add_real(doc, tradObj, "fps", finiteOr(fpsTrad, 0.0));
+    yyjson_mut_obj_add_real(doc, tradObj, "mrays", finiteOr(mraysTrad, 0.0));
+    yyjson_mut_obj_add_real(doc, tradObj, "frame_ms", finiteOr(frameMsTrad, 0.0));
+    yyjson_mut_obj_add_real(doc, tradObj, "bvh_ms", finiteOr(bvhMs, 0.0));
+    yyjson_mut_obj_add_real(doc, tradObj, "bvh_pct", finiteOr(bvhPctTrad, 0.0));
+    yyjson_mut_obj_add_real(doc, tradObj, "bvh_mrays", finiteOr(bvhMRays, 0.0));
+    yyjson_mut_obj_add_real(doc, tradObj, "shading_ms", finiteOr(shdMsTrad, 0.0));
+    yyjson_mut_obj_add_real(doc, tradObj, "shading_pct", finiteOr(shdPctTrad, 0.0));
+    yyjson_mut_obj_add_real(doc, tradObj, "shading_mhits", finiteOr(shdMHitsTrad, 0.0));
+
+    yyjson_mut_val *workObj = yyjson_mut_obj_add_obj(doc, root, "worklist");
+    yyjson_mut_obj_add_real(doc, workObj, "fps", finiteOr(fpsWork, 0.0));
+    yyjson_mut_obj_add_real(doc, workObj, "mrays", finiteOr(mraysWork, 0.0));
+    yyjson_mut_obj_add_real(doc, workObj, "frame_ms", finiteOr(frameMsWork, 0.0));
+    yyjson_mut_obj_add_real(doc, workObj, "bvh_ms", finiteOr(bvhMs, 0.0));
+    yyjson_mut_obj_add_real(doc, workObj, "bvh_pct", finiteOr(bvhPctWork, 0.0));
+    yyjson_mut_obj_add_real(doc, workObj, "bvh_mrays", finiteOr(bvhMRays, 0.0));
+    yyjson_mut_obj_add_real(doc, workObj, "compaction_ms", finiteOr(cmpMs, 0.0));
+    yyjson_mut_obj_add_real(doc, workObj, "compaction_pct", finiteOr(cmpPctWork, 0.0));
+    yyjson_mut_obj_add_real(doc, workObj, "compaction_mrecords", finiteOr(cmpMRec, 0.0));
+    yyjson_mut_obj_add_real(doc, workObj, "shading_ms", finiteOr(shdMsWork, 0.0));
+    yyjson_mut_obj_add_real(doc, workObj, "shading_pct", finiteOr(shdPctWork, 0.0));
+    yyjson_mut_obj_add_real(doc, workObj, "shading_mhits", finiteOr(shdMHitsWork, 0.0));
+    yyjson_mut_obj_add_real(doc, workObj, "shading_speedup", finiteOr(shdSpeedup, 1.0));
+
+    yyjson_mut_val *parObj = yyjson_mut_obj_add_obj(doc, root, "parity");
+    yyjson_mut_obj_add_real(doc, parObj, "psnr", finiteOr(metrics.psnr, 100.0));
+    yyjson_mut_obj_add_real(doc, parObj, "mae", finiteOr(metrics.mae, 0.0));
+    yyjson_mut_obj_add_real(doc, parObj, "rmse", finiteOr(metrics.rmse, 0.0));
+    yyjson_mut_obj_add_uint(doc, parObj, "exact_pixels", metrics.exactPixels);
+    yyjson_mut_obj_add_real(doc, parObj, "exact_pct", finiteOr(bitExactPct, 0.0));
+    yyjson_mut_obj_add_uint(doc, parObj, "near_exact_pixels", metrics.totalPixels - metrics.diffPixels);
+    yyjson_mut_obj_add_real(doc, parObj, "near_exact_pct", finiteOr(nearExactPct, 0.0));
+    yyjson_mut_obj_add_uint(doc, parObj, "diff_pixels", metrics.diffPixels);
+    yyjson_mut_obj_add_real(doc, parObj, "diff_pct", finiteOr(diffPct, 0.0));
+    yyjson_mut_obj_add_str(doc, parObj, "status", passPBR ? "VERIFIED PARITY PASSED" : "PARITY FAILED");
+
+    std::string relKey = "render_" + tag + "_profile.json";
+    emitJsonDoc(relKey, rendersDir + "/" + relKey, doc);
   }
-
-
 
   // Render and dump 1 SPP Path Tracing
   if (isInteractive && context && !context->isQuiet()) {
@@ -2148,16 +2269,23 @@ void RaySchedulingBench::performVisualVerification(bool isInteractive) {
   context->waitIdle();
   Run(5);
   context->waitIdle();
+  if (captureGpuPreviews && vContext) {
+    vContext->captureBufferToSharedPreviewImage(
+        "render_" + tag + "_pathtracing_1spp_traditional.png", fbTraditional, fbTraditional, width, height, 0u, cachedKernelDir);
+    vContext->captureBufferToSharedPreviewImage(
+        "render_" + tag + "_pathtracing_1spp_worklist.png", fbWorkList, fbWorkList, width, height, 0u, cachedKernelDir);
+    vContext->captureBufferToSharedPreviewImage(
+        "render_" + tag + "_pathtracing_1spp_difference.png", fbTraditional, fbWorkList, width, height, 1u, cachedKernelDir);
+  }
   context->readBuffer(fbTraditional, 0, bufferSize, hdrTrad.data());
   context->readBuffer(fbWorkList, 0, bufferSize, hdrWork.data());
   auto pt1Metrics = gpubench::ImageExport::compareAndTonemap(
       hdrTrad.data(), hdrWork.data(), width, height, ldrTrad, ldrWork, ldrDiff);
-  std::string pt1TradPng = rendersDir + "/render_" + tag + "_pathtracing_1spp_traditional.png";
-  std::string pt1WorkPng = rendersDir + "/render_" + tag + "_pathtracing_1spp_worklist.png";
-  std::string pt1DiffPng = rendersDir + "/render_" + tag + "_pathtracing_1spp_difference.png";
-  gpubench::ImageExport::writePNG(pt1TradPng, width, height, ldrTrad);
-  gpubench::ImageExport::writePNG(pt1WorkPng, width, height, ldrWork);
-  gpubench::ImageExport::writePNG(pt1DiffPng, width, height, ldrDiff);
+  if (writeDiskFiles) {
+    gpubench::ImageExport::writePNG(rendersDir + "/render_" + tag + "_pathtracing_1spp_traditional.png", width, height, ldrTrad);
+    gpubench::ImageExport::writePNG(rendersDir + "/render_" + tag + "_pathtracing_1spp_worklist.png", width, height, ldrWork);
+    gpubench::ImageExport::writePNG(rendersDir + "/render_" + tag + "_pathtracing_1spp_difference.png", width, height, ldrDiff);
+  }
 
   double pt1TimeTrad = (recordedInvocations[3] > 0 && recordedTimeMs[3] > 0.0)
       ? (recordedTimeMs[3] / 1000.0) / static_cast<double>(recordedInvocations[3]) : timeSecTrad;
@@ -2171,33 +2299,45 @@ void RaySchedulingBench::performVisualVerification(bool isInteractive) {
   double pt1MRaysWork = (pt1TimeWork > 0.0) ? ((static_cast<double>(rayCount) / pt1TimeWork) / 1e6) : 4000.0;
   double pt1MsWork = pt1TimeWork * 1000.0;
 
-  std::string pt1ProfileJson = rendersDir + "/render_" + tag + "_pt1_profile.json";
-  std::ofstream pt1Prof(pt1ProfileJson);
-  if (pt1Prof.is_open()) {
+  bool passPt1 = (pt1Metrics.psnr >= 45.0f && pt1Metrics.diffPixels <= std::max(32u, (uint32_t)(pt1Metrics.totalPixels * 0.0001f)));
+
+  {
     float pt1ExactPct = (float)pt1Metrics.exactPixels / (float)pt1Metrics.totalPixels * 100.0f;
     float pt1NearExactPct = (float)(pt1Metrics.totalPixels - pt1Metrics.diffPixels) / (float)pt1Metrics.totalPixels * 100.0f;
     float pt1DiffPct = (float)pt1Metrics.diffPixels / (float)pt1Metrics.totalPixels * 100.0f;
-    pt1Prof << std::fixed << std::setprecision(4);
-    pt1Prof << "{\n";
-    pt1Prof << "  \"gpu\": \"" << context->getCurrentDeviceInfo().name << "\",\n";
-    pt1Prof << "  \"scene\": \"" << (sceneType == SceneType::AAAOutdoorForest ? "Open-World Forest" : ((sceneType == SceneType::OutdoorLandscape) ? "Outdoor Landscape" : ((sceneType == SceneType::IndoorAtrium) ? "Indoor Atrium" : "Showroom Studio"))) << " - Path Tracing (1 SPP)\",\n";
-    pt1Prof << "  \"resolution\": \"" << width << "x" << height << " (" << (width * height) << " primary rays)\",\n";
-    pt1Prof << "  \"traditional\": { \"fps\": " << pt1FpsTrad << ", \"mrays\": " << pt1MRaysTrad << ", \"frame_ms\": " << pt1MsTrad << " },\n";
-    pt1Prof << "  \"worklist\": { \"fps\": " << pt1FpsWork << ", \"mrays\": " << pt1MRaysWork << ", \"frame_ms\": " << pt1MsWork << " },\n";
-    pt1Prof << "  \"parity\": {\n";
-    pt1Prof << "    \"psnr\": " << pt1Metrics.psnr << ",\n";
-    pt1Prof << "    \"mae\": " << pt1Metrics.mae << ",\n";
-    pt1Prof << "    \"rmse\": " << pt1Metrics.rmse << ",\n";
-    pt1Prof << "    \"exact_pixels\": " << pt1Metrics.exactPixels << ",\n";
-    pt1Prof << "    \"exact_pct\": " << pt1ExactPct << ",\n";
-    pt1Prof << "    \"near_exact_pixels\": " << (pt1Metrics.totalPixels - pt1Metrics.diffPixels) << ",\n";
-    pt1Prof << "    \"near_exact_pct\": " << pt1NearExactPct << ",\n";
-    pt1Prof << "    \"diff_pixels\": " << pt1Metrics.diffPixels << ",\n";
-    pt1Prof << "    \"diff_pct\": " << pt1DiffPct << ",\n";
-    pt1Prof << "    \"status\": \"VERIFIED PARITY PASSED\"\n";
-    pt1Prof << "  }\n";
-    pt1Prof << "}\n";
-    pt1Prof.close();
+    std::string scenePt1 = std::string(sceneLabel) + " - Path Tracing (1 SPP)";
+
+    yyjson_mut_doc *doc = yyjson_mut_doc_new(nullptr);
+    yyjson_mut_val *root = yyjson_mut_obj(doc);
+    yyjson_mut_doc_set_root(doc, root);
+    yyjson_mut_obj_add_strcpy(doc, root, "gpu", context->getCurrentDeviceInfo().name.c_str());
+    yyjson_mut_obj_add_strcpy(doc, root, "scene", scenePt1.c_str());
+    yyjson_mut_obj_add_strcpy(doc, root, "resolution", resDesc.c_str());
+
+    yyjson_mut_val *tradObj = yyjson_mut_obj_add_obj(doc, root, "traditional");
+    yyjson_mut_obj_add_real(doc, tradObj, "fps", finiteOr(pt1FpsTrad, 0.0));
+    yyjson_mut_obj_add_real(doc, tradObj, "mrays", finiteOr(pt1MRaysTrad, 0.0));
+    yyjson_mut_obj_add_real(doc, tradObj, "frame_ms", finiteOr(pt1MsTrad, 0.0));
+
+    yyjson_mut_val *workObj = yyjson_mut_obj_add_obj(doc, root, "worklist");
+    yyjson_mut_obj_add_real(doc, workObj, "fps", finiteOr(pt1FpsWork, 0.0));
+    yyjson_mut_obj_add_real(doc, workObj, "mrays", finiteOr(pt1MRaysWork, 0.0));
+    yyjson_mut_obj_add_real(doc, workObj, "frame_ms", finiteOr(pt1MsWork, 0.0));
+
+    yyjson_mut_val *parObj = yyjson_mut_obj_add_obj(doc, root, "parity");
+    yyjson_mut_obj_add_real(doc, parObj, "psnr", finiteOr(pt1Metrics.psnr, 100.0));
+    yyjson_mut_obj_add_real(doc, parObj, "mae", finiteOr(pt1Metrics.mae, 0.0));
+    yyjson_mut_obj_add_real(doc, parObj, "rmse", finiteOr(pt1Metrics.rmse, 0.0));
+    yyjson_mut_obj_add_uint(doc, parObj, "exact_pixels", pt1Metrics.exactPixels);
+    yyjson_mut_obj_add_real(doc, parObj, "exact_pct", finiteOr(pt1ExactPct, 0.0));
+    yyjson_mut_obj_add_uint(doc, parObj, "near_exact_pixels", pt1Metrics.totalPixels - pt1Metrics.diffPixels);
+    yyjson_mut_obj_add_real(doc, parObj, "near_exact_pct", finiteOr(pt1NearExactPct, 0.0));
+    yyjson_mut_obj_add_uint(doc, parObj, "diff_pixels", pt1Metrics.diffPixels);
+    yyjson_mut_obj_add_real(doc, parObj, "diff_pct", finiteOr(pt1DiffPct, 0.0));
+    yyjson_mut_obj_add_str(doc, parObj, "status", passPt1 ? "VERIFIED PARITY PASSED" : "PARITY FAILED");
+
+    std::string relKey = "render_" + tag + "_pt1_profile.json";
+    emitJsonDoc(relKey, rendersDir + "/" + relKey, doc);
   }
 
   // Render and dump 16 SPP Path Tracing
@@ -2205,18 +2345,25 @@ void RaySchedulingBench::performVisualVerification(bool isInteractive) {
   context->waitIdle();
   Run(24);
   context->waitIdle();
+  if (captureGpuPreviews && vContext) {
+    vContext->captureBufferToSharedPreviewImage(
+        "render_" + tag + "_pathtracing_16spp_traditional.png", fbTraditional, fbTraditional, width, height, 0u, cachedKernelDir);
+    vContext->captureBufferToSharedPreviewImage(
+        "render_" + tag + "_pathtracing_16spp_worklist.png", fbWorkList, fbWorkList, width, height, 0u, cachedKernelDir);
+    vContext->captureBufferToSharedPreviewImage(
+        "render_" + tag + "_pathtracing_16spp_difference.png", fbTraditional, fbWorkList, width, height, 1u, cachedKernelDir);
+  }
   context->readBuffer(fbTraditional, 0, bufferSize, hdrTrad.data());
   context->readBuffer(fbWorkList, 0, bufferSize, hdrWork.data());
   auto pt16Metrics = gpubench::ImageExport::compareAndTonemap(
       hdrTrad.data(), hdrWork.data(), width, height, ldrTrad, ldrWork, ldrDiff);
   samplesPerPixel = savedSpp;
 
-  std::string pt16TradPng = rendersDir + "/render_" + tag + "_pathtracing_16spp_traditional.png";
-  std::string pt16WorkPng = rendersDir + "/render_" + tag + "_pathtracing_16spp_worklist.png";
-  std::string pt16DiffPng = rendersDir + "/render_" + tag + "_pathtracing_16spp_difference.png";
-  gpubench::ImageExport::writePNG(pt16TradPng, width, height, ldrTrad);
-  gpubench::ImageExport::writePNG(pt16WorkPng, width, height, ldrWork);
-  gpubench::ImageExport::writePNG(pt16DiffPng, width, height, ldrDiff);
+  if (writeDiskFiles) {
+    gpubench::ImageExport::writePNG(rendersDir + "/render_" + tag + "_pathtracing_16spp_traditional.png", width, height, ldrTrad);
+    gpubench::ImageExport::writePNG(rendersDir + "/render_" + tag + "_pathtracing_16spp_worklist.png", width, height, ldrWork);
+    gpubench::ImageExport::writePNG(rendersDir + "/render_" + tag + "_pathtracing_16spp_difference.png", width, height, ldrDiff);
+  }
 
   uint32_t passes23 = lastCompletedPasses[23] > 0 ? lastCompletedPasses[23] : 16u;
   uint32_t passes24 = lastCompletedPasses[24] > 0 ? lastCompletedPasses[24] : 16u;
@@ -2232,33 +2379,45 @@ void RaySchedulingBench::performVisualVerification(bool isInteractive) {
   double pt16MRaysWork = (pt16TimeWork > 0.0) ? ((static_cast<double>(rayCount) * passes24 / pt16TimeWork) / 1e6) : 4000.0;
   double pt16MsWork = pt16TimeWork * 1000.0;
 
-  std::string pt16ProfileJson = rendersDir + "/render_" + tag + "_pt16_profile.json";
-  std::ofstream pt16Prof(pt16ProfileJson);
-  if (pt16Prof.is_open()) {
+  bool passPt16 = (pt16Metrics.psnr >= 45.0f && pt16Metrics.diffPixels <= std::max(32u, (uint32_t)(pt16Metrics.totalPixels * 0.0001f)));
+
+  {
     float pt16ExactPct = (float)pt16Metrics.exactPixels / (float)pt16Metrics.totalPixels * 100.0f;
     float pt16NearExactPct = (float)(pt16Metrics.totalPixels - pt16Metrics.diffPixels) / (float)pt16Metrics.totalPixels * 100.0f;
     float pt16DiffPct = (float)pt16Metrics.diffPixels / (float)pt16Metrics.totalPixels * 100.0f;
-    pt16Prof << std::fixed << std::setprecision(4);
-    pt16Prof << "{\n";
-    pt16Prof << "  \"gpu\": \"" << context->getCurrentDeviceInfo().name << "\",\n";
-    pt16Prof << "  \"scene\": \"" << (sceneType == SceneType::AAAOutdoorForest ? "Open-World Forest" : ((sceneType == SceneType::OutdoorLandscape) ? "Outdoor Landscape" : ((sceneType == SceneType::IndoorAtrium) ? "Indoor Atrium" : "Showroom Studio"))) << " - Path Tracing (16 SPP)\",\n";
-    pt16Prof << "  \"resolution\": \"" << width << "x" << height << " (" << (width * height) << " primary rays)\",\n";
-    pt16Prof << "  \"traditional\": { \"fps\": " << pt16FpsTrad << ", \"mrays\": " << pt16MRaysTrad << ", \"frame_ms\": " << pt16MsTrad << " },\n";
-    pt16Prof << "  \"worklist\": { \"fps\": " << pt16FpsWork << ", \"mrays\": " << pt16MRaysWork << ", \"frame_ms\": " << pt16MsWork << " },\n";
-    pt16Prof << "  \"parity\": {\n";
-    pt16Prof << "    \"psnr\": " << pt16Metrics.psnr << ",\n";
-    pt16Prof << "    \"mae\": " << pt16Metrics.mae << ",\n";
-    pt16Prof << "    \"rmse\": " << pt16Metrics.rmse << ",\n";
-    pt16Prof << "    \"exact_pixels\": " << pt16Metrics.exactPixels << ",\n";
-    pt16Prof << "    \"exact_pct\": " << pt16ExactPct << ",\n";
-    pt16Prof << "    \"near_exact_pixels\": " << (pt16Metrics.totalPixels - pt16Metrics.diffPixels) << ",\n";
-    pt16Prof << "    \"near_exact_pct\": " << pt16NearExactPct << ",\n";
-    pt16Prof << "    \"diff_pixels\": " << pt16Metrics.diffPixels << ",\n";
-    pt16Prof << "    \"diff_pct\": " << pt16DiffPct << ",\n";
-    pt16Prof << "    \"status\": \"VERIFIED PARITY PASSED\"\n";
-    pt16Prof << "  }\n";
-    pt16Prof << "}\n";
-    pt16Prof.close();
+    std::string scenePt16 = std::string(sceneLabel) + " - Path Tracing (16 SPP)";
+
+    yyjson_mut_doc *doc = yyjson_mut_doc_new(nullptr);
+    yyjson_mut_val *root = yyjson_mut_obj(doc);
+    yyjson_mut_doc_set_root(doc, root);
+    yyjson_mut_obj_add_strcpy(doc, root, "gpu", context->getCurrentDeviceInfo().name.c_str());
+    yyjson_mut_obj_add_strcpy(doc, root, "scene", scenePt16.c_str());
+    yyjson_mut_obj_add_strcpy(doc, root, "resolution", resDesc.c_str());
+
+    yyjson_mut_val *tradObj = yyjson_mut_obj_add_obj(doc, root, "traditional");
+    yyjson_mut_obj_add_real(doc, tradObj, "fps", finiteOr(pt16FpsTrad, 0.0));
+    yyjson_mut_obj_add_real(doc, tradObj, "mrays", finiteOr(pt16MRaysTrad, 0.0));
+    yyjson_mut_obj_add_real(doc, tradObj, "frame_ms", finiteOr(pt16MsTrad, 0.0));
+
+    yyjson_mut_val *workObj = yyjson_mut_obj_add_obj(doc, root, "worklist");
+    yyjson_mut_obj_add_real(doc, workObj, "fps", finiteOr(pt16FpsWork, 0.0));
+    yyjson_mut_obj_add_real(doc, workObj, "mrays", finiteOr(pt16MRaysWork, 0.0));
+    yyjson_mut_obj_add_real(doc, workObj, "frame_ms", finiteOr(pt16MsWork, 0.0));
+
+    yyjson_mut_val *parObj = yyjson_mut_obj_add_obj(doc, root, "parity");
+    yyjson_mut_obj_add_real(doc, parObj, "psnr", finiteOr(pt16Metrics.psnr, 100.0));
+    yyjson_mut_obj_add_real(doc, parObj, "mae", finiteOr(pt16Metrics.mae, 0.0));
+    yyjson_mut_obj_add_real(doc, parObj, "rmse", finiteOr(pt16Metrics.rmse, 0.0));
+    yyjson_mut_obj_add_uint(doc, parObj, "exact_pixels", pt16Metrics.exactPixels);
+    yyjson_mut_obj_add_real(doc, parObj, "exact_pct", finiteOr(pt16ExactPct, 0.0));
+    yyjson_mut_obj_add_uint(doc, parObj, "near_exact_pixels", pt16Metrics.totalPixels - pt16Metrics.diffPixels);
+    yyjson_mut_obj_add_real(doc, parObj, "near_exact_pct", finiteOr(pt16NearExactPct, 0.0));
+    yyjson_mut_obj_add_uint(doc, parObj, "diff_pixels", pt16Metrics.diffPixels);
+    yyjson_mut_obj_add_real(doc, parObj, "diff_pct", finiteOr(pt16DiffPct, 0.0));
+    yyjson_mut_obj_add_str(doc, parObj, "status", passPt16 ? "VERIFIED PARITY PASSED" : "PARITY FAILED");
+
+    std::string relKey = "render_" + tag + "_pt16_profile.json";
+    emitJsonDoc(relKey, rendersDir + "/" + relKey, doc);
   }
 
   // Render and dump 128 Lights Multi-Light Evaluation
@@ -2266,29 +2425,42 @@ void RaySchedulingBench::performVisualVerification(bool isInteractive) {
   context->waitIdle();
   Run(34);
   context->waitIdle();
+  if (captureGpuPreviews && vContext) {
+    vContext->captureBufferToSharedPreviewImage(
+        "render_" + tag + "_multilight_128_traditional.png", fbTraditional, fbTraditional, width, height, 0u, cachedKernelDir);
+    vContext->captureBufferToSharedPreviewImage(
+        "render_" + tag + "_multilight_128_dgc.png", fbWorkList, fbWorkList, width, height, 0u, cachedKernelDir);
+    vContext->captureBufferToSharedPreviewImage(
+        "render_" + tag + "_multilight_128_difference.png", fbTraditional, fbWorkList, width, height, 1u, cachedKernelDir);
+  }
   context->readBuffer(fbTraditional, 0, bufferSize, hdrTrad.data());
   context->readBuffer(fbWorkList, 0, bufferSize, hdrWork.data());
   auto mlMetrics = gpubench::ImageExport::compareAndTonemap(
       hdrTrad.data(), hdrWork.data(), width, height, ldrTrad, ldrWork, ldrDiff);
-  std::string mlTradPng = rendersDir + "/render_" + tag + "_multilight_128_traditional.png";
-  std::string mlWorkPng = rendersDir + "/render_" + tag + "_multilight_128_dgc.png";
-  std::string mlDiffPng = rendersDir + "/render_" + tag + "_multilight_128_difference.png";
-  gpubench::ImageExport::writePNG(mlTradPng, width, height, ldrTrad);
-  gpubench::ImageExport::writePNG(mlWorkPng, width, height, ldrWork);
-  gpubench::ImageExport::writePNG(mlDiffPng, width, height, ldrDiff);
+  if (writeDiskFiles) {
+    gpubench::ImageExport::writePNG(rendersDir + "/render_" + tag + "_multilight_128_traditional.png", width, height, ldrTrad);
+    gpubench::ImageExport::writePNG(rendersDir + "/render_" + tag + "_multilight_128_dgc.png", width, height, ldrWork);
+    gpubench::ImageExport::writePNG(rendersDir + "/render_" + tag + "_multilight_128_difference.png", width, height, ldrDiff);
+  }
 
   // Render and dump Alpha Cutout Traversal Divergence (Config 27)
   Run(27);
   context->waitIdle();
-  context->readBuffer(fbWorkList, 0, bufferSize, hdrWork.data());
-  std::vector<uint8_t> ldrAlpha(width * height * 3, 0);
-  for (uint32_t i = 0; i < width * height; ++i) {
-    ldrAlpha[i * 3 + 0] = gpubench::ImageExport::floatToSrgb(hdrWork[i * 4 + 0]);
-    ldrAlpha[i * 3 + 1] = gpubench::ImageExport::floatToSrgb(hdrWork[i * 4 + 1]);
-    ldrAlpha[i * 3 + 2] = gpubench::ImageExport::floatToSrgb(hdrWork[i * 4 + 2]);
+  if (captureGpuPreviews && vContext) {
+    vContext->captureBufferToSharedPreviewImage(
+        "render_" + tag + "_alpha_cutout.png", fbWorkList, fbWorkList, width, height, 0u, cachedKernelDir);
   }
-  std::string alphaPng = rendersDir + "/render_" + tag + "_alpha_cutout.png";
-  gpubench::ImageExport::writePNG(alphaPng, width, height, ldrAlpha);
+  if (writeDiskFiles) {
+    context->readBuffer(fbWorkList, 0, bufferSize, hdrWork.data());
+    std::vector<uint8_t> ldrAlpha(width * height * 3, 0);
+    for (uint32_t i = 0; i < width * height; ++i) {
+      ldrAlpha[i * 3 + 0] = gpubench::ImageExport::floatToSrgb(hdrWork[i * 4 + 0]);
+      ldrAlpha[i * 3 + 1] = gpubench::ImageExport::floatToSrgb(hdrWork[i * 4 + 1]);
+      ldrAlpha[i * 3 + 2] = gpubench::ImageExport::floatToSrgb(hdrWork[i * 4 + 2]);
+    }
+    std::string alphaPng = rendersDir + "/render_" + tag + "_alpha_cutout.png";
+    gpubench::ImageExport::writePNG(alphaPng, width, height, ldrAlpha);
+  }
 
   // Step-by-step pipeline decomposition breakdown
   dumpPipelineBreakdown(tag, isInteractive);
@@ -2300,13 +2472,7 @@ void RaySchedulingBench::performVisualVerification(bool isInteractive) {
     std::cout << "\r\033[K" << std::flush;
   }
 
-  std::string sceneTitle = (sceneType == SceneType::AAAOutdoorForest)
-                                ? "Open-World Forest Scenario"
-                                : ((sceneType == SceneType::OutdoorLandscape)
-                                       ? "Outdoor Landscape Scenario"
-                                       : ((sceneType == SceneType::IndoorAtrium)
-                                              ? "Indoor Atrium Scenario"
-                                              : "Showroom Studio Scenario"));
+  std::string sceneTitle = std::string(sceneLabel) + " Scenario";
 
   float pt1ExactPct = (float)pt1Metrics.exactPixels / (float)pt1Metrics.totalPixels * 100.0f;
   float pt16ExactPct = (float)pt16Metrics.exactPixels / (float)pt16Metrics.totalPixels * 100.0f;
@@ -2315,17 +2481,14 @@ void RaySchedulingBench::performVisualVerification(bool isInteractive) {
   double queueFootprintMb = (sizeof(uint32_t) * 4096u + (size_t)16 * queueCapacity * sizeof(float) * 4) / (1024.0 * 1024.0);
   double vramTrafficMb = (static_cast<double>(rayCount) * 64.0) / (1024.0 * 1024.0);
 
-  bool passPBR = (metrics.psnr >= 45.0f && metrics.diffPixels <= std::max(32u, (uint32_t)(metrics.totalPixels * 0.0001f)));
-  bool passPt1 = (pt1Metrics.psnr >= 45.0f && pt1Metrics.diffPixels <= std::max(32u, (uint32_t)(pt1Metrics.totalPixels * 0.0001f)));
-  bool passPt16 = (pt16Metrics.psnr >= 45.0f && pt16Metrics.diffPixels <= std::max(32u, (uint32_t)(pt16Metrics.totalPixels * 0.0001f)));
   bool passML = (mlMetrics.psnr >= 45.0f && mlMetrics.diffPixels <= std::max(32u, (uint32_t)(mlMetrics.totalPixels * 0.0001f)));
 
   if (context && !context->isQuiet()) {
     std::cout << "\n\033[1m\033[36m╭─ Ray Scheduling Visual & Analytical Parity: " << sceneTitle << " ─────────────────────────────────────╮\033[0m\n";
     std::cout << "│ \033[1mResolution\033[0m          : " << width << " x " << height << " (" << (width * height) << " rays)\n";
-    std::cout << "│ \033[1mMegakernel Render\033[0m   : \033[33m" << tradPng << "\033[0m\n";
-    std::cout << "│ \033[1mDGC Render\033[0m          : \033[33m" << workPng << "\033[0m\n";
-    std::cout << "│ \033[1mDifference Heatmap\033[0m  : \033[33m" << diffPng << "\033[0m (10x amplified)\n";
+    std::cout << "│ \033[1mMegakernel Render\033[0m   : \033[33m" << (writeDiskFiles ? tradPng : "[GPU SharedPreviewImage]") << "\033[0m\n";
+    std::cout << "│ \033[1mDGC Render\033[0m          : \033[33m" << (writeDiskFiles ? workPng : "[GPU SharedPreviewImage]") << "\033[0m\n";
+    std::cout << "│ \033[1mDifference Heatmap\033[0m  : \033[33m" << (writeDiskFiles ? diffPng : "[GPU SharedPreviewImage]") << "\033[0m (10x amplified)\n";
     std::cout << "├───────────────────────────────────────────────────────────────────────────────────────────────────┤\n";
     std::cout << "│ \033[1mFull Scene Ray Tracing (PBR) Performance (" << width << "x" << height << "):\033[0m\n";
     std::cout << "│   • Traditional Megakernel : \033[36m" << std::fixed << std::setprecision(2) << mraysTrad
@@ -2414,11 +2577,16 @@ void RaySchedulingBench::dumpPipelineBreakdown(const std::string &tag, bool isIn
 #ifdef HAVE_VULKAN
   if (!context || !fbTraditional || !kernelTraditional) return;
   VulkanContext *vContext = static_cast<VulkanContext *>(context);
+  const bool writeDiskFiles = wantDumpRenders || dumpRenders;
 
   uint32_t width = renderWidth, height = renderHeight;
   size_t bufferSize = width * height * sizeof(float) * 4;
-  std::vector<float> hdrBuf(width * height * 4, 0.0f);
-  std::vector<uint8_t> ldrBuf(width * height * 3, 0);
+  std::vector<float> hdrBuf;
+  std::vector<uint8_t> ldrBuf;
+  if (writeDiskFiles) {
+    hdrBuf.assign(width * height * 4, 0.0f);
+    ldrBuf.assign(width * height * 3, 0);
+  }
 
   uint32_t sceneTypeVal = (sceneType == SceneType::AAAOutdoorForest) ? 3u : ((sceneType == SceneType::OutdoorLandscape) ? 1u : ((sceneType == SceneType::IndoorAtrium) ? 2u : 0u));
   uint32_t isGltfVal = isGltf ? 1u : 0u;
@@ -2469,7 +2637,7 @@ void RaySchedulingBench::dumpPipelineBreakdown(const std::string &tag, bool isIn
   };
   std::vector<StageResult> stageResults;
 
-  const std::string rendersDir = resolveRendersDir();
+  const std::string rendersDir = writeDiskFiles ? resolveRendersDir() : "renders";
 
   for (size_t sIdx = 0; sIdx < stages.size(); ++sIdx) {
     const auto &st = stages[sIdx];
@@ -2504,7 +2672,7 @@ void RaySchedulingBench::dumpPipelineBreakdown(const std::string &tag, bool isIn
     double mrays = (timeSec > 0.0) ? ((static_cast<double>(rayCount) * st.rayMultiplier / timeSec) / 1e6) : 0.0;
     double fps = (timeSec > 0.0) ? (1.0 / timeSec) : 0.0;
 
-    // Untimed pass with dumpRenders=1u to capture framebuffer for PNG export
+    // Untimed pass with dumpRenders=1u to capture framebuffer for GPU preview / PNG export
     for (uint32_t s = 0; s < st.spp; ++s) {
       PushConstantsTraditional pc{rayCount, st.mode, st.bounces, 1337u + s * 7919u, 1u, renderWidth, renderHeight, 0, sceneTypeVal, isGltfVal, st.spp, s};
       vContext->setKernelArg(kernelTraditional, 8, sizeof(pc), &pc);
@@ -2512,56 +2680,81 @@ void RaySchedulingBench::dumpPipelineBreakdown(const std::string &tag, bool isIn
     }
     context->waitIdle();
 
-    // Read back framebuffer
-    context->readBuffer(fbTraditional, 0, bufferSize, hdrBuf.data());
-    for (uint32_t i = 0; i < width * height; ++i) {
-      ldrBuf[i * 3 + 0] = gpubench::ImageExport::floatToSrgb(hdrBuf[i * 4 + 0]);
-      ldrBuf[i * 3 + 1] = gpubench::ImageExport::floatToSrgb(hdrBuf[i * 4 + 1]);
-      ldrBuf[i * 3 + 2] = gpubench::ImageExport::floatToSrgb(hdrBuf[i * 4 + 2]);
+    std::string relPngKey = "render_" + tag + "_" + st.id + ".png";
+    std::string pngPath = rendersDir + "/" + relPngKey;
+    if (captureGpuPreviews && vContext) {
+      vContext->captureBufferToSharedPreviewImage(
+          relPngKey, fbTraditional, fbTraditional, width, height, 0u, cachedKernelDir);
     }
 
-    std::string pngPath = rendersDir + "/render_" + tag + "_" + st.id + ".png";
-    gpubench::ImageExport::writePNG(pngPath, width, height, ldrBuf);
-    if (st.id == "stage7_final") {
-      std::string tradPng = rendersDir + "/render_" + tag + "_traditional_megakernel.png";
-      if (std::filesystem::exists(tradPng)) {
-        std::error_code ec;
-        std::filesystem::copy_file(tradPng, pngPath, std::filesystem::copy_options::overwrite_existing, ec);
+    if (writeDiskFiles) {
+      context->readBuffer(fbTraditional, 0, bufferSize, hdrBuf.data());
+      for (uint32_t i = 0; i < width * height; ++i) {
+        ldrBuf[i * 3 + 0] = gpubench::ImageExport::floatToSrgb(hdrBuf[i * 4 + 0]);
+        ldrBuf[i * 3 + 1] = gpubench::ImageExport::floatToSrgb(hdrBuf[i * 4 + 1]);
+        ldrBuf[i * 3 + 2] = gpubench::ImageExport::floatToSrgb(hdrBuf[i * 4 + 2]);
+      }
+      gpubench::ImageExport::writePNG(pngPath, width, height, ldrBuf);
+      if (st.id == "stage7_final") {
+        std::string tradPng = rendersDir + "/render_" + tag + "_traditional_megakernel.png";
+        if (std::filesystem::exists(tradPng)) {
+          std::error_code ec;
+          std::filesystem::copy_file(tradPng, pngPath, std::filesystem::copy_options::overwrite_existing, ec);
+        }
       }
     }
 
     stageResults.push_back({st.id, st.title, st.passType, timeMs, mrays, fps, pngPath});
   }
 
-  // Dump telemetry breakdown JSON
-  std::string jsonPath = rendersDir + "/render_" + tag + "_pipeline_breakdown.json";
-  std::ofstream jf(jsonPath);
-  if (jf.is_open()) {
-    jf << std::fixed << std::setprecision(4);
-    jf << "{\n";
-    jf << "  \"gpu\": \"" << context->getCurrentDeviceInfo().name << "\",\n";
-    jf << "  \"scene\": \"" << (sceneType == SceneType::AAAOutdoorForest ? "Open-World Forest" : ((sceneType == SceneType::OutdoorLandscape) ? "Outdoor Landscape" : ((sceneType == SceneType::IndoorAtrium) ? "Indoor Atrium" : "Showroom Studio"))) << "\",\n";
-    jf << "  \"tag\": \"" << tag << "\",\n";
-    jf << "  \"resolution\": \"" << width << "x" << height << "\",\n";
-    jf << "  \"triangles\": " << numPrimitives << ",\n";
-    jf << "  \"bvh_build_time_ms\": " << bvhBuildTimeMs << ",\n";
-    jf << "  \"stages\": [\n";
-    for (size_t i = 0; i < stageResults.size(); ++i) {
-      const auto &sr = stageResults[i];
-      jf << "    {\n";
-      jf << "      \"id\": \"" << sr.id << "\",\n";
-      jf << "      \"title\": \"" << sr.title << "\",\n";
-      jf << "      \"pass_type\": \"" << sr.passType << "\",\n";
-      jf << "      \"time_ms\": " << sr.timeMs << ",\n";
-      jf << "      \"mrays\": " << sr.mrays << ",\n";
-      jf << "      \"fps\": " << sr.fps << ",\n";
-      jf << "      \"png_file\": \"" << sr.pngPath << "\"\n";
-      jf << "    }" << (i + 1 < stageResults.size() ? "," : "") << "\n";
-    }
-    jf << "  ]\n";
-    jf << "}\n";
-    jf.close();
+  // Serialize telemetry breakdown JSON via yyjson
+  auto finiteNum = [](double v) { return std::isfinite(v) ? v : 0.0; };
+  const char *sceneLabel =
+      (sceneType == SceneType::AAAOutdoorForest
+           ? "Open-World Forest"
+           : ((sceneType == SceneType::OutdoorLandscape)
+                  ? "Outdoor Landscape"
+                  : ((sceneType == SceneType::IndoorAtrium) ? "Indoor Atrium" : "Showroom Studio")));
+  std::string resStr = std::to_string(width) + "x" + std::to_string(height);
+
+  yyjson_mut_doc *doc = yyjson_mut_doc_new(nullptr);
+  yyjson_mut_val *root = yyjson_mut_obj(doc);
+  yyjson_mut_doc_set_root(doc, root);
+  yyjson_mut_obj_add_strcpy(doc, root, "gpu", context->getCurrentDeviceInfo().name.c_str());
+  yyjson_mut_obj_add_strcpy(doc, root, "scene", sceneLabel);
+  yyjson_mut_obj_add_strcpy(doc, root, "tag", tag.c_str());
+  yyjson_mut_obj_add_strcpy(doc, root, "resolution", resStr.c_str());
+  yyjson_mut_obj_add_uint(doc, root, "triangles", numPrimitives);
+  yyjson_mut_obj_add_real(doc, root, "bvh_build_time_ms", finiteNum(bvhBuildTimeMs));
+
+  yyjson_mut_val *stagesArr = yyjson_mut_obj_add_arr(doc, root, "stages");
+  for (const auto &sr : stageResults) {
+    yyjson_mut_val *stObj = yyjson_mut_arr_add_obj(doc, stagesArr);
+    yyjson_mut_obj_add_strcpy(doc, stObj, "id", sr.id.c_str());
+    yyjson_mut_obj_add_strcpy(doc, stObj, "title", sr.title.c_str());
+    yyjson_mut_obj_add_strcpy(doc, stObj, "pass_type", sr.passType.c_str());
+    yyjson_mut_obj_add_real(doc, stObj, "time_ms", finiteNum(sr.timeMs));
+    yyjson_mut_obj_add_real(doc, stObj, "mrays", finiteNum(sr.mrays));
+    yyjson_mut_obj_add_real(doc, stObj, "fps", finiteNum(sr.fps));
+    yyjson_mut_obj_add_strcpy(doc, stObj, "png_file", sr.pngPath.c_str());
   }
+
+  size_t jsonLen = 0;
+  char *jsonStr = yyjson_mut_write(doc, YYJSON_WRITE_PRETTY_TWO_SPACES, &jsonLen);
+  if (jsonStr) {
+    std::string content(jsonStr, jsonLen);
+    content.push_back('\n');
+    free(jsonStr);
+    std::string relKey = "render_" + tag + "_pipeline_breakdown.json";
+    vContext->storeInMemoryJson(relKey, content);
+    if (writeDiskFiles) {
+      std::ofstream jf(rendersDir + "/" + relKey, std::ios::binary);
+      if (jf.is_open()) {
+        jf.write(content.data(), static_cast<std::streamsize>(content.size()));
+      }
+    }
+  }
+  yyjson_mut_doc_free(doc);
 #endif
 }
 
@@ -2571,7 +2764,7 @@ void RaySchedulingBench::RunVisualVerification(bool isInteractive) {
     return;
   }
 
-  if (wantDumpRenders || dumpRenders || verifyParity) {
+  if (wantDumpRenders || dumpRenders || verifyParity || captureGpuPreviews) {
     try {
       performVisualVerification(isInteractive);
     } catch (const std::exception &e) {
@@ -2592,6 +2785,8 @@ void RaySchedulingBench::RunVisualVerification(bool isInteractive) {
 }
 
 void RaySchedulingBench::Teardown() {
+  compactBvhPositions.clear();
+  compactBvhPositions.shrink_to_fit();
 #ifdef HAVE_VULKAN
   if (!context) {
     return;

@@ -46,8 +46,11 @@ void Fp32Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
 }
 
 void Fp32Bench::Run(uint32_t config_idx) {
-  // Pass multiplier as push constant / arg 1
-  float multiplier = 0.999f;
+  (void)config_idx;
+  // Pre-scale multiplier on host across all backends so push-constant / kernarg
+  // multiplier remains in an SGPR without VALU v_mul_f32 lowering (which forces m
+  // into a VGPR on RDNA 3/4 and blocks v_dual_fmac_f32 VOPD dual-issue).
+  float multiplier = 0.999f * 0.000025f;
   context->setKernelArg(kernel, 1, sizeof(float), &multiplier);
 
   // Pass numElements as arg 2
@@ -69,13 +72,13 @@ void Fp32Bench::Teardown() {
 }
 
 BenchmarkResult Fp32Bench::GetResult(uint32_t config_idx) const {
+  (void)config_idx;
   // All backends (Vulkan, OpenCL, ROCm):
-  // 32 vec4/float4 FMAs × 4 components × 2 ops = 256 FP32 ops per iteration.
-  // 16384 iterations × 256 ops = 4,194,304 ops per thread.
+  // 8 independent vec4/float4 FMACs × 4 components × 2 ops = 64 ops/iter × 65536 iters = 4,194,304 ops/thread.
   // 8192 workgroups × 64 threads = 524,288 threads.
   // Total workload = 2,199,023,255,552 FP32 operations.
-  uint64_t iters = 16384;
-  uint64_t ops_per_iter = 256;
+  uint64_t iters = 65536;
+  uint64_t ops_per_iter = 64;
   uint64_t num_ops = iters * ops_per_iter * 8192ULL * 64ULL;
   return {num_ops, 0.0};
 }

@@ -15,11 +15,22 @@ struct ImportedDeviceProfile {
   std::string driverVersion;
   std::string apiVersion;
   uint64_t vramTotalMb = 0;
+  uint32_t computeUnits = 0;
   uint32_t subgroupSize = 0;
   uint32_t maxWorkgroupSize = 0;
+  bool isApu = false;
+  bool rebarSupported = false;
+  bool rayTracingSupported = false;
+  bool serSupported = false;
+  bool opacityMicromapSupported = false;
+  bool workGraphsSupported = false;
+  bool cooperativeMatrixSupported = false;
+  bool structuredSparsitySupported = false;
+  bool cooperativeVectorSupported = false;
 };
 
 struct ImportedRun {
+  std::string schemaVersion;
   std::string appVersion;
   uint64_t timestamp = 0;
   std::string backend;
@@ -28,6 +39,11 @@ struct ImportedRun {
   std::string cpuModel;
   uint32_t cpuCores = 0;
   double totalRamGb = 0.0;
+  bool hasGuiSession = false;
+  std::string sessionScene = "all";
+  uint32_t sessionSamplesPerPixel = 1;
+  bool sessionDumpRenders = true;
+  float sessionUiScale = 1.0f;
   ImportedDeviceProfile deviceProfile;
   std::vector<ResultData> results;
 };

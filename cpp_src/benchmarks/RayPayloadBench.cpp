@@ -67,9 +67,14 @@ void RayPayloadBench::Setup(IComputeContext &context,
   loadRTProcs(vContext->getVulkanDevice());
 
   rayCount = 4000000;
-  resultBuffer = context.createBuffer(sizeof(uint32_t));
-  uint32_t zero = 0;
-  context.writeBuffer(resultBuffer, 0, 4, &zero);
+  executedConfigsMask = 0;
+  lastRunConfig = -1;
+  const uint32_t zero = 0;
+  for (uint32_t i = 0; i < 3; ++i) {
+    resultBuffers[i] = context.createBuffer(sizeof(uint32_t));
+    context.writeBuffer(resultBuffers[i], 0, sizeof(uint32_t), &zero);
+  }
+  resultBuffer = resultBuffers[0];
 
   numPrimitives = 200000; 
   std::vector<float> vertices;
@@ -118,6 +123,15 @@ void RayPayloadBench::Setup(IComputeContext &context,
     kernel256 = vContext->createRTPipeline(
         (kdir / "vulkan" / "raypayload_256b.rgen").string(),
         (kdir / "vulkan" / "raypayload_256b.rmiss").string(), hit256, {}, {}, 2);
+
+    ComputeKernel kernels[3] = {kernel16, kernel128, kernel256};
+    for (uint32_t i = 0; i < 3; ++i) {
+      if (kernels[i]) {
+        vContext->setKernelAS(kernels[i], 0, (AccelerationStructure)triangleTlas);
+        vContext->setKernelArg(kernels[i], 1, resultBuffers[i]);
+        vContext->setKernelArg(kernels[i], 2, sizeof(uint32_t), &rayCount);
+      }
+    }
   }
 }
 
@@ -301,21 +315,19 @@ void RayPayloadBench::buildAS() {
 }
 
 void RayPayloadBench::Run(uint32_t config_idx) {
-  VulkanContext *vContext = static_cast<VulkanContext *>(context);
-  if (lastRunConfig != static_cast<int>(config_idx)) {
-    uint32_t zero = 0;
-    context->writeBuffer(resultBuffer, 0, sizeof(uint32_t), &zero);
-    lastRunConfig = static_cast<int>(config_idx);
+  if (!context || config_idx >= GetNumConfigs()) {
+    return;
   }
-  
+  VulkanContext *vContext = static_cast<VulkanContext *>(context);
   ComputeKernel activeKernel = kernel16;
   if (config_idx == 1) activeKernel = kernel128;
   if (config_idx == 2) activeKernel = kernel256;
+  if (!activeKernel) {
+    return;
+  }
 
-  vContext->setKernelAS(activeKernel, 0, (AccelerationStructure)triangleTlas);
-  vContext->setKernelArg(activeKernel, 1, resultBuffer);
-  vContext->setKernelArg(activeKernel, 2, sizeof(uint32_t), &rayCount);
-
+  lastRunConfig = static_cast<int>(config_idx);
+  executedConfigsMask |= (1u << config_idx);
   vContext->dispatch(activeKernel, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
 }
 
@@ -338,8 +350,14 @@ void RayPayloadBench::Teardown() {
     if (kernel16) { context->releaseKernel(kernel16); kernel16 = nullptr; }
     if (kernel128) { context->releaseKernel(kernel128); kernel128 = nullptr; }
     if (kernel256) { context->releaseKernel(kernel256); kernel256 = nullptr; }
-    
-    if (resultBuffer) { context->releaseBuffer(resultBuffer); resultBuffer = nullptr; }
+
+    resultBuffer = nullptr;
+    for (uint32_t i = 0; i < 3; ++i) {
+      if (resultBuffers[i]) {
+        context->releaseBuffer(resultBuffers[i]);
+        resultBuffers[i] = nullptr;
+      }
+    }
     if (vertexBuffer) { context->releaseBuffer(vertexBuffer); vertexBuffer = nullptr; }
     if (instanceBuffer) { context->releaseBuffer(instanceBuffer); instanceBuffer = nullptr; }
     if (triangleBlasBuffer) { context->releaseBuffer(triangleBlasBuffer); triangleBlasBuffer = nullptr; }
@@ -347,6 +365,7 @@ void RayPayloadBench::Teardown() {
     if (scratchBuffer) { context->releaseBuffer(scratchBuffer); scratchBuffer = nullptr; }
     context = nullptr;
   }
+  executedConfigsMask = 0;
   lastRunConfig = -1;
 }
 
@@ -357,32 +376,35 @@ BenchmarkResult RayPayloadBench::GetResult(uint32_t config_idx) const {
 
 const char *RayPayloadBench::GetName() const { return "RayPayload"; }
 const char *RayPayloadBench::GetComponent(uint32_t config_idx) const {
+  (void)config_idx;
   return "Ray Tracing";
 }
 const char *RayPayloadBench::GetMetric() const { return "MRays/s"; }
 const char *RayPayloadBench::GetSubCategory(uint32_t config_idx) const {
+  (void)config_idx;
   return "Payload Register Pressure";
 }
 
 std::string RayPayloadBench::GetConfigName(uint32_t config_idx) const {
   if (config_idx == 0) return "16B Payload (Shadow / AO Visibility Probe)";
   if (config_idx == 1) return "128B Payload (Real-Time Path Tracing & GI)";
-  return "256B Payload (Production / Film BSDF & MIS)";
+  if (config_idx == 2) return "256B Payload (Production / Film BSDF & MIS)";
+  return "";
 }
 
 bool RayPayloadBench::ValidateResults(uint32_t config_idx) const {
   if (config_idx >= GetNumConfigs()) {
     return false;
   }
-  if (!context || !resultBuffer) {
+  if (!context || !resultBuffers[config_idx]) {
     return false;
   }
-  if (lastRunConfig != static_cast<int>(config_idx)) {
+  if ((executedConfigsMask & (1u << config_idx)) == 0u) {
     return false;
   }
   try {
     uint32_t hits = 0;
-    context->readBuffer(resultBuffer, 0, sizeof(uint32_t), &hits);
+    context->readBuffer(resultBuffers[config_idx], 0, sizeof(uint32_t), &hits);
     return hits > 0;
   } catch (...) {
     return false;

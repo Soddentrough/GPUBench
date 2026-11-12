@@ -168,7 +168,7 @@ if [[ "${SELECTED_TIER}" == "1" || "${SELECTED_TIER}" == "all" ]]; then
   echo -e "${CLR_BOLD}─── Tier 1: Feature Coverage & CLI Mechanics ───────────────────────────────────${CLR_RESET}"
 
   run_test "Tier 1" "VersionFlag" \
-    "${BINARY_PATH} --version" "0" "1\.0\."
+    "${BINARY_PATH} --version" "0" "[0-9]+\\.[0-9]+\\.[0-9]+"
 
   run_test "Tier 1" "HelpFlag" \
     "${BINARY_PATH} --help" "0" "GPUBench" "--benchmarks" "--groups" "--device"
@@ -272,11 +272,6 @@ if [[ "${SELECTED_TIER}" == "3" || "${SELECTED_TIER}" == "all" ]]; then
   run_test "Tier 3" "JsonFileExportRoundTrip" \
     "${BINARY_PATH} -b FP32 -c 0 --profile-snapshot -f -o ${TMP_JSON}" "0"
 
-  # Sanitize any non-finite floats if background contention caused active cycles to be 0
-  if [[ -f "${TMP_JSON}" ]]; then
-    sed -i -E 's/:\s*(-?nan|inf|-inf|1\.#IND|-1\.#IND)/: 0.0/g' "${TMP_JSON}"
-  fi
-
   run_test "Tier 3" "JsonFileImportExecution" \
     "${BINARY_PATH} -i ${TMP_JSON}" "0" "FP32" "TFLOPS"
   rm -f "${TMP_JSON}"
@@ -286,17 +281,12 @@ if [[ "${SELECTED_TIER}" == "3" || "${SELECTED_TIER}" == "all" ]]; then
   eval "${BINARY_PATH} -b FP32 -c 0 --profile-snapshot -f -o ${TMP_RUN_A}" >/dev/null 2>&1
   eval "${BINARY_PATH} -b FP32 -c 0 --profile-snapshot -f -o ${TMP_RUN_B}" >/dev/null 2>&1
 
-  # Sanitize any non-finite floats if background contention caused active cycles to be 0
-  if [[ -f "${TMP_RUN_A}" && -f "${TMP_RUN_B}" ]]; then
-    sed -i -E 's/:\s*(-?nan|inf|-inf|1\.#IND|-1\.#IND)/: 0.0/g' "${TMP_RUN_A}" "${TMP_RUN_B}"
-  fi
-
   run_test "Tier 3" "JsonComparisonModeMultiRun" \
     "${BINARY_PATH} --compare ${TMP_RUN_A} ${TMP_RUN_B}" "0" "FP32" "TFLOPS"
   rm -f "${TMP_RUN_A}" "${TMP_RUN_B}"
 
   run_test "Tier 3" "QuietAndJsonOutputCleanliness" \
-    "${BINARY_PATH} -b FP32 -c 0 --profile-snapshot -f --json -q" "0" "\"version\": \"1.0.0\"" "\"results\":"
+    "${BINARY_PATH} -b FP32 -c 0 --profile-snapshot -f --json -q" "0" "\"version\": \"[0-9]+\\.[0-9]+\\.[0-9]+\"" "\"results\":"
 
   echo ""
 fi

@@ -7,41 +7,45 @@ GPUBench is a high-performance cross-platform GPU benchmarking tool designed to 
 
 ## Features
 
-- **Multi-Backend Support**: Benchmarks using Vulkan, OpenCL, and ROCm/HIP.
-- **Hardware Ray Tracing Suite**:
-  - **Ray Scheduling Architectures**: Megakernel vs. Decoupled Wavefronts via Device-Generated Commands (DGC) and Shader Execution Reordering (SER, where supported by hardware).
-  - **Raw Hardware BVH Traversal (`RayRawTraversal`)**: Hardware BVH8 node traversal evaluating zero-overhead in-register ray queries (Coherent Triangles & Deep Multi-Layer Box Stress models).
-  - **Real-World Material Divergence**: Realistic heterogeneous material distributions testing VGPR allocation pressure and SIMD wave divergence.
-  - **Spatial Ray Divergence**: Parametric cone divergence measuring BVH traversal cache hit rates.
-  - **Multi-Layer Alpha Testing**: AnyHit alpha evaluation through 16 stacked cutout planes.
-  - **Acceleration Structure Throughput**: BLAS/TLAS build and dynamic vertex refit rates.
-- **Comprehensive Compute Data Types**: 
-  - Actively Supported Hardware Types: FP64, FP32, FP16, BF16 (native ROCm/HIP `__hip_bfloat16` & Vulkan `VK_KHR_shader_bfloat16`), FP8 (Vulkan Cooperative Matrix / ROCm WMMA), INT8, INT4 (ROCm/HIP sub-byte 16x16x16 `iu4` WMMA on RDNA 4 / gfx12+ & Vulkan Cooperative Matrix probe)
-  - Capability-Probed / Vendor-Specific Types: FP6 (probed; NVIDIA `SPV_NV_float6`), FP4 (probed; `VK_NV_cooperative_matrix2` / `SPV_NV_float4` hardware only, software emulation avoided)
-- **Memory & Cache Hierarchy**: Measure Device VRAM Bandwidth, Host/PCIe Bandwidth, L0 Cache Latency, and full multi-level cache latency curves (16 KB to 256 MB spanning L0 TCP, GL1, GL2, L3 MALL, and GDDR6 DRAM). Cache bandwidth rows are disabled to prevent compiler dead-code elimination.
-- **Dynamic Loading**: Backends are loaded at runtime, making them optional and reducing installation dependencies.
-- **Cross-Platform**: Built for Linux and Windows.
+- **Multi-Backend Support**: Benchmarks using **Vulkan 1.4** (with **VulkanMemoryAllocator 3.5.0** & persistent disk-backed `VkPipelineCache`), **ROCm/HIP** (`hipGraphLaunch` stream capture + RDNA WMMA & CDNA MFMA), and **OpenCL 3.0**.
+- **Hardware Ray Tracing & Next-Gen 2026 Microbenchmarks**:
+  - **Ray Scheduling Architectures (`RayScheduling`)**: Megakernel vs. Decoupled Wavefronts via Device-Generated Commands (DGC), Persistent Workgroups (dynamically scaled by hardware CU/SM count), and Shader Execution Reordering (SER, where supported by hardware).
+  - **Hardware Opacity Micromaps (`RayOMM`)**: Evaluates `VK_EXT_opacity_micromap` 2-state and 4-state hardware BVH micromap culling vs. AnyHit shader fallback on dense alpha-cutout geometry.
+  - **GPU Work Graphs (`WorkGraphs`)**: Producer-to-consumer multi-node GPU work expansion via `VK_AMDX_shader_enqueue` (`SPV_AMDX_shader_enqueue`) compared against CPU/DGC indirect dispatch.
+  - **Async Compute & Copy Engine Concurrency (`AsyncOverlap`)**: Quantifies standalone vs. concurrent Graphics/RT + Async Compute (`VK_QUEUE_COMPUTE_BIT` ACE) + DMA Copy Engine (`VK_QUEUE_TRANSFER_BIT`) execution overlap.
+  - **Raw Hardware BVH Traversal (`RayRawTraversal`)**: Hardware BVH8 node traversal evaluating zero-overhead in-register ray queries (Coherent Triangles & 64-Layer `VK_GEOMETRY_TYPE_AABBS_KHR` Box Stress).
+  - **Real-World Material & Spatial Ray Divergence (`RayDivergence`, `RayAnyHit`, `RayASBuild`, `RayPayload`)**: Heterogeneous PBR material shading, parametric cone divergence, 16-layer AnyHit cutout stacks, BLAS/TLAS build/refit throughput, and 16B–256B payload register pressure.
+- **Comprehensive Compute, Structured Sparsity & Cooperative Vector**:
+  - **Hardware Arithmetic & Tensor Types**: FP64, FP32, DualIssue (`VOPD` / concurrent FP32+INT32), FP16, BF16 (`VK_KHR_shader_bfloat16` & HIP `__hip_bfloat16` with automatic ISA emulation detection), FP8, INT8, INT4 (`gfx12+` sub-byte `iu4` WMMA & dynamic `(M, N, K)` Cooperative Matrix tile selection), and OCP Microscaling **MXFP6** (`Float6E3M2EXT`) / **MXFP4** (`Float4E2M1EXT`).
+  - **2:4 Structured Sparsity (`SparseMatrix`) & Cooperative Vector (`CoopVector`)**: Evaluates 2:4 structured sparse tensor throughput vs. dense Cooperative Matrix baselines and `VK_NV_cooperative_vector` (`coopvecNV`) per-thread inference matmul+bias+ReLU kernels.
+- **Memory, Cache Hierarchy & PCIe / ReBAR / Multi-GPU P2P Interconnect**:
+  - **Device & Cache Hierarchy**: Device VRAM Bandwidth, L0/L1/L2/L3 Cache Bandwidth, L0 Cache Latency, and lazy per-tier cache latency curves (16 KB to 256 MB).
+  - **Host-Device Interconnect (`Interconnect`) & Host SIMD (`SysMem`)**: Pinned-DMA Host-to-Device (`H2D`), Device-to-Host (`D2H`), full-duplex bidirectional `H2D+D2H`, ReBAR CPU->VRAM write bandwidth, APU unified-memory atomic coherency latency, Multi-GPU Peer-to-Peer (`P2P`), AVX-512 / AVX2 / ARM64 NEON non-temporal host streaming, and Windows/Linux 2 MB Large Pages.
+- **Empirical Roofline Model & Cross-Platform Telemetry**:
+  - **Empirical Roofline (`--roofline` & Interactive GUI Tab)**: Automatically derives peak DRAM/L2/L1/L0 bandwidth ceilings, vector/matrix compute ceilings, ridge points, and workload operational intensity (`FLOP/Byte`).
+  - **Cross-Platform Hardware Telemetry**: Live GPU utilization, clocks, temperatures, VRAM, and package power across Windows (DXGI 1.4, WDDM PDH, AMD ADL2, NVIDIA NVML) and Linux (`amdgpu` `energy1_input` microjoule counters, Intel `xe`/`i915` hwmon, NVML), with explicit `"N/A"` reporting for unexposed sensors.
+  - **Unified Typed JSON (`v2.0` via `yyjson`)**: Bidirectional session compatibility between `gpubench -o` / `--import` / `--compare` and `gpubench-gui`.
 
 ## Supported Backends
 
 | Backend | Platform | Primary Use Case | Minimum Version |
 | :--- | :--- | :--- | :--- |
-| **Vulkan** | Linux, Windows | Standard cross-vendor compute & ray tracing | 1.4+ |
-| **OpenCL** | Linux, Windows | Fallback cross-vendor compute | 1.2+ |
-| **ROCm/HIP** | Linux | Native AMD performance | 6.4+ |
+| **Vulkan** | Linux, Windows | Primary cross-vendor compute, ray tracing, Work Graphs, OMM & GUI | **1.4+** |
+| **ROCm/HIP** | Linux, Windows | Native AMD RDNA WMMA & CDNA MFMA compute + `hipGraphLaunch` | **6.4+** |
+| **OpenCL** | Linux, Windows | Cross-vendor compute (`CL_TARGET_OPENCL_VERSION=300`) | **3.0** (1.2+ ICD) |
 
 ---
 
 ## Interfaces & Default Output
 
-GPUBench provides both a standalone graphical workstation profiler with live hardware telemetry and a rich command-line interface with hierarchical Unicode reporting.
+GPUBench provides both a standalone graphical workstation profiler built on a shared Vulkan 1.4 device (**Dear ImGui 1.93.0** dynamic glyph baking + **ImPlot v1.1**) and a rich command-line interface (**CLI11 v2.7.2**) with hierarchical Unicode reporting.
 
 ### Graphical User Interface (GUI)
 
-The Workstation Profiler dashboard (`gpubench-gui`) provides real-time GPU telemetry (utilization, package power, core and memory clocks, temperatures, and VRAM usage), dynamic physical hardware device detection, compute API diagnostics with requirement tooltips, responsive multi-scale DPI layout (1.0x–2.5x), benchmark suite configuration with dedicated score columns, and in-application comparative ray tracing inspection:
+The Workstation Profiler dashboard (`gpubench-gui`) shares its `VkInstance` and `VkDevice` directly with the Vulkan 1.4 compute engine—enabling zero-disk-roundtrip GPU VRAM ray tracing previews, real-time cross-platform telemetry charts, interactive log-log Empirical Roofline inspection, dynamic Ctrl+Scroll DPI zoom without `vkDeviceWaitIdle` stalls, and unified v2.0 JSON comparison:
 
 ![GPUBench Workstation Profiler GUI](docs/images/gpubench_gui.png)
-*Fig: GPUBench Workstation Profiler GUI showing real-time hardware telemetry HUD, backend selection, and benchmark suite configuration.*
+*Fig: GPUBench Workstation Profiler GUI showing real-time hardware telemetry HUD, backend selection, Empirical Roofline & RT viewport tabs, and benchmark suite configuration.*
 
 ### Command-Line Interface (CLI)
 
@@ -137,7 +141,7 @@ GPUBench evaluates how different GPU hardware architectures handle these workloa
 #### Four-Scenario Benchmarking Morphology
 All scenario throughput measurements below were evaluated at **4K UHD (3840x2160, ~8.29M primary rays)** on the **AMD Radeon AI PRO R9700** (RDNA 4 / gfx1201):
 - **Showroom Studio (`-s showroom`)**: $108,936$ triangles featuring the Khronos ToyCar glTF asset with clearcoat, decals, and velvet pedestal. Device-Generated Commands (DGC) achieve **101.3 FPS** vs. Megakernel **57.6 FPS** (**1.76x speedup**).
-- **Complex Indoor Atrium (`-s indoor`)**: $262,267$ triangles featuring Crytek Sponza glTF with 25 PBR materials and 0% sky escape. Device-Generated Commands (DGC) achieve **68.0 FPS** vs. Megakernel **30.5 FPS** (**2.23x speedup**).
+- **Complex Indoor Atrium (`-s indoor`)**: $426,064$ triangles featuring the Renaissance Colonnade Atrium glTF (`assets/models/sponza.glb`) with 25 PBR materials, open-air courtyard skylight, and two-story colonnade arcades. Device-Generated Commands (DGC) achieve **68.0 FPS** vs. Megakernel **30.5 FPS** (**2.23x speedup**).
 - **Open-World Outdoor Landscape (`-s outdoor`)**: $57,216$ triangles spanning $>2000\text{m}$ alpine terrain, lake, conifer foliage, and Rayleigh-Mie atmospheric scattering. Device-Generated Commands (DGC) achieve **420.0 FPS** vs. Megakernel **185.8 FPS** (**2.26x speedup**).
 - **Open-World Forest (`-s forest`)**: $1,051,696$ triangles featuring high-density 256×256 terrain, river bathymetry, 530 trees (350 pines, 180 birches), and 8 nature PBR shaders. Device-Generated Commands (DGC) achieve **55.0 FPS** vs. Megakernel **27.0 FPS** (**2.04x speedup**).
 - **100% Bit-Exact Analytical Parity**: Verified bit-exact 120.00 dB PSNR, 0.000000 MAE, and 0 discrepant pixels across all 8,294,400 pixels at 4K UHD across all four scenarios.
@@ -211,28 +215,25 @@ gpubench --list-backends
 # Run all benchmarks on default device
 gpubench
 
+# Run Next-Gen 2026 Interconnect, Async Overlap, Work Graphs, Sparsity, CoopVec & OMM benchmarks
+gpubench -d 0 -b interconnect,asyncoverlap,workgraphs,rayomm,sparsematrix,coopvector
+
+# Run Empirical Roofline analysis across memory/cache & compute tiers and export unified v2.0 JSON
+gpubench -d 0 -g compute,memory --roofline -o benchmark_results.json
+
+# Import or compare unified v2.0 JSON reports (compatible between CLI and gpubench-gui)
+gpubench --import benchmark_results.json --roofline
+gpubench --compare baseline.json candidate.json
+
 # Run Dual-Issue & Concurrency benchmark suite across backends
 gpubench -d 0 -b dualissue
 gpubench -d 0 -b dualissue -k vulkan,rocm
 
-# Run Ray Scheduling on a specific GPU device (e.g. Device 1)
-gpubench -d 1 -b RayScheduling
-
 # Select benchmark scene morphology: showroom, indoor, outdoor, forest, or all
-gpubench -d 0 -b rayscheduling -s forest
-gpubench -d 0 -b rayscheduling -s all
+gpubench -d 0 -b rayscheduling -s indoor -r 4k --verify-parity
 
-# Set render resolution preset (720p, 1080p, 1440p, 4k) or custom WxH (default: auto; 4K UHD on >=16GB VRAM)
-gpubench -d 0 -b rayscheduling -s forest -r 4k
-
-# Dump 4K UHD PPM/PNG render buffers, diff heatmaps, and 4-scenario comparative grid
-gpubench -d 0 -b rayscheduling -s all --dump-renders
-
-# Run specific config (e.g. Config 9: Scene Render: Full Frame (Megakernel), Config 11: Scene Render: Full Frame (DGC), Config 17: Primary Rays (Compute Megakernel), Config 18: Primary Rays (Wavefront - DGC), Config 29: Primary Rays (RTP)) in profiling snapshot mode
+# Run specific config (e.g. Config 9: Megakernel, Config 11: DGC, Config 25: Dynamic Persistent) in profiling snapshot mode
 gpubench -d 0 -b rayscheduling -s forest -c 11 --profile-snapshot
-
-# Export machine-readable results to JSON
-gpubench -d 0 -b rayscheduling -s all -o benchmark_results.json
 ```
 
 ### Hardware ISA Disassembly & Profiling
@@ -242,6 +243,8 @@ GPUBench includes built-in hardware ISA disassembly (`VK_KHR_pipeline_executable
 ```bash
 # Inspect hardware ISA, instruction histograms, hot-loop disassembly, and VGPR/SGPR usage
 gpubench --dump-isa bf16
+gpubench --dump-isa workgraphs
+gpubench --dump-isa rayomm
 gpubench --dump-isa dualissue --full-isa
 gpubench --dump-isa fp16 -k rocm
 
@@ -266,7 +269,6 @@ gpubench -d 0 -b rayscheduling -s indoor -c 11 --rra
 - [Dual-Issue & Datapath Concurrency](docs/DUAL_ISSUE_ANALYSIS.md) - RDNA 3 VOPD, RDNA 4 dual-issue SIMD32, and NVIDIA concurrent FP32+INT32 datapath analysis.
 - [OpenCL Backend](docs/OPENCL_BACKEND.md) - Architecture, feature matrix, and disk binary caching.
 - [Tooltip Visualizations](docs/TOOLTIP_VISUALIZATIONS.md) - Three-tier hover-tooltip visualization architecture for graphics and ray tracing workloads.
-- [Desktop Integration](docs/DESKTOP_INTEGRATION.md) - FreeDesktop XDG, Windows High-DPI manifest, and macOS app bundle integration.
 
 ## License
 

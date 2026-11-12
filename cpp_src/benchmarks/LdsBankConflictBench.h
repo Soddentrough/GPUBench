@@ -33,6 +33,9 @@ public:
 
   const char *GetComponent(uint32_t config_idx = 0) const override { return "Compute"; }
   const char *GetSubCategory(uint32_t config_idx = 0) const override { return "LDS Bank Conflicts"; }
+  const char *GetDescription() const override {
+    return "On-chip Local Data Share (LDS / Shared Memory) bank serialization sweep across conflict-free, power-of-two, and odd-stride access patterns.";
+  }
   int GetSortWeight() const override { return 26; }
 
   uint32_t GetNumConfigs() const override { return static_cast<uint32_t>(configs.size()); }
@@ -44,6 +47,7 @@ public:
   std::string GetConfigSupportNote(uint32_t config_idx) const override;
 
 private:
+  template <typename Tag> friend struct ::gpubench::test::TestBody;
   IComputeContext *context = nullptr;
   std::vector<LdsConflictConfig> configs;
   ComputeKernel kernel = nullptr;

@@ -20,8 +20,11 @@ public:
                    IComputeContext *context = nullptr) const override;
   std::string GetSupportNote(const DeviceInfo &info,
                              IComputeContext *context = nullptr) const override {
+    (void)context;
     if (targetCacheLevel == 0) {
-      return "Measures nearest vector cache latency: AMD RDNA WGP Vector L0 (TCP, 16-32 KB); NVIDIA L1 / Texture; Intel L1";
+      return (metric == "GB/s")
+                 ? "Measures nearest vector cache bandwidth: AMD RDNA WGP Vector L0 (TCP, 16-32 KB); NVIDIA L1; Intel L1"
+                 : "Measures nearest vector cache latency: AMD RDNA WGP Vector L0 (TCP, 16-32 KB); NVIDIA L1 / Texture; Intel L1";
     }
     if (targetCacheLevel == 3 && info.l3CacheSize == 0) {
       return "Device does not have an L3 / Infinity Cache (l3CacheSize = 0)";
@@ -33,7 +36,9 @@ public:
   }
   std::string GetSupportNote() const override {
     if (targetCacheLevel == 0) {
-      return "Measures nearest vector cache latency: AMD RDNA WGP Vector L0 (TCP, 16-32 KB); NVIDIA L1 / Texture; Intel L1";
+      return (metric == "GB/s")
+                 ? "Measures nearest vector cache bandwidth: AMD RDNA WGP Vector L0 (TCP, 16-32 KB); NVIDIA L1; Intel L1"
+                 : "Measures nearest vector cache latency: AMD RDNA WGP Vector L0 (TCP, 16-32 KB); NVIDIA L1 / Texture; Intel L1";
     }
     if (targetCacheLevel == 3) {
       return "Device does not have an L3 / Infinity Cache (l3CacheSize = 0)";
@@ -56,9 +61,20 @@ public:
   bool ValidateResults(uint32_t config_idx = 0) const override;
   const char *GetComponent(uint32_t config_idx = 0) const override;
   const char *GetSubCategory(uint32_t config_idx = 0) const override;
+  const char *GetDescription() const override {
+    return (metric == "GB/s")
+               ? "Multi-CU streaming GPU cache bandwidth across L0, L1, L2, and L3/MALL cache tiers."
+               : "Pointer-chasing dependent load latency across GPU L0, L1, L2, L3/MALL, and VRAM tiers.";
+  }
+  double GetOperationalIntensity(uint32_t config_idx = 0) const override {
+    (void)config_idx;
+    // cache_bw_robust.comp executes 8 vec4 FP32 additions (32 FLOPs) per 8 vec4 loads (128 bytes) = 0.25 OP/Byte
+    return (metric == "GB/s") ? 0.25 : 0.0;
+  }
   int GetSortWeight() const override;
 
 private:
+  template <typename Tag> friend struct ::gpubench::test::TestBody;
   std::string name;
   std::vector<std::string> aliases;
   std::string metric;
@@ -67,6 +83,7 @@ private:
   IComputeContext *context = nullptr;
   ComputeKernel kernel = nullptr;
   ComputeBuffer buffer = nullptr;
+  ComputeBuffer outBuffer = nullptr;
   ComputeBuffer pcBuffer = nullptr;
   std::vector<uint32_t> initData;
   void *hostMem = nullptr;

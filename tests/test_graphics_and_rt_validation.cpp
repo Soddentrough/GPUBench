@@ -11,15 +11,68 @@
 #include <array>
 #include <cmath>
 
-#define private public
 #include "benchmarks/PixelFillRateBench.h"
 #include "benchmarks/RayRawTraversalBench.h"
 #include "benchmarks/RayIntersectBench.h"
 #include "benchmarks/RayDivergenceBench.h"
 #include "benchmarks/RayAnyHitBench.h"
 #include "benchmarks/RayProceduralBench.h"
+#include "benchmarks/RayPayloadBench.h"
 #include "benchmarks/RaySchedulingBench.h"
-#undef private
+
+namespace gpubench::test {
+struct PixelFillClearHelperTag {};
+template <>
+struct TestBody<PixelFillClearHelperTag> {
+  static void clear(PixelFillRateBench &bench, uint32_t configIdx) {
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    VkCommandBufferAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocInfo.commandPool = bench.commandPool;
+    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocInfo.commandBufferCount = 1;
+    if (vkAllocateCommandBuffers(bench.device, &allocInfo, &cmd) != VK_SUCCESS) {
+      throw std::runtime_error("Failed to allocate command buffer for zero clearing!");
+    }
+
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(cmd, &beginInfo);
+
+    VkRenderingAttachmentInfoKHR colorAttachment{};
+    colorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR;
+    colorAttachment.imageView = bench.configs[configIdx].imageView;
+    colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    colorAttachment.clearValue.color = {{0.0f, 0.0f, 0.0f, 0.0f}};
+
+    VkRenderingInfoKHR renderingInfo{};
+    renderingInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO_KHR;
+    renderingInfo.renderArea.offset = {0, 0};
+    renderingInfo.renderArea.extent = {bench.width, bench.height};
+    renderingInfo.layerCount = 1;
+    renderingInfo.colorAttachmentCount = 1;
+    renderingInfo.pColorAttachments = &colorAttachment;
+
+    bench.pfnCmdBeginRendering(cmd, &renderingInfo);
+    bench.pfnCmdEndRendering(cmd);
+
+    vkEndCommandBuffer(cmd);
+
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &cmd;
+
+    vkQueueSubmit(bench.queue, 1, &submitInfo, VK_NULL_HANDLE);
+    vkQueueWaitIdle(bench.queue);
+
+    vkFreeCommandBuffers(bench.device, bench.commandPool, 1, &cmd);
+  }
+};
+} // namespace gpubench::test
 
 namespace {
 
@@ -40,51 +93,7 @@ std::unique_ptr<IComputeContext> createVulkanContext() {
 }
 
 void clearPixelFillImageToZero(PixelFillRateBench &bench, uint32_t configIdx) {
-  VkCommandBuffer cmd = VK_NULL_HANDLE;
-  VkCommandBufferAllocateInfo allocInfo{};
-  allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-  allocInfo.commandPool = bench.commandPool;
-  allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-  allocInfo.commandBufferCount = 1;
-  if (vkAllocateCommandBuffers(bench.device, &allocInfo, &cmd) != VK_SUCCESS) {
-    throw std::runtime_error("Failed to allocate command buffer for zero clearing!");
-  }
-
-  VkCommandBufferBeginInfo beginInfo{};
-  beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-  beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-  vkBeginCommandBuffer(cmd, &beginInfo);
-
-  VkRenderingAttachmentInfoKHR colorAttachment{};
-  colorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR;
-  colorAttachment.imageView = bench.configs[configIdx].imageView;
-  colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-  colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-  colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-  colorAttachment.clearValue.color = {{0.0f, 0.0f, 0.0f, 0.0f}};
-
-  VkRenderingInfoKHR renderingInfo{};
-  renderingInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO_KHR;
-  renderingInfo.renderArea.offset = {0, 0};
-  renderingInfo.renderArea.extent = {bench.width, bench.height};
-  renderingInfo.layerCount = 1;
-  renderingInfo.colorAttachmentCount = 1;
-  renderingInfo.pColorAttachments = &colorAttachment;
-
-  bench.pfnCmdBeginRendering(cmd, &renderingInfo);
-  bench.pfnCmdEndRendering(cmd);
-
-  vkEndCommandBuffer(cmd);
-
-  VkSubmitInfo submitInfo{};
-  submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-  submitInfo.commandBufferCount = 1;
-  submitInfo.pCommandBuffers = &cmd;
-
-  vkQueueSubmit(bench.queue, 1, &submitInfo, VK_NULL_HANDLE);
-  vkQueueWaitIdle(bench.queue);
-
-  vkFreeCommandBuffers(bench.device, bench.commandPool, 1, &cmd);
+  ::gpubench::test::TestBody<::gpubench::test::PixelFillClearHelperTag>::clear(bench, configIdx);
 }
 
 } // namespace
@@ -191,16 +200,24 @@ TEST_CASE(GraphicsAndRayTracingValidation, RayIntersect_PositiveAndNegativeValid
 
   bench.Setup(*ctx, kdir);
 
+  // Config 0: Ray-Triangle
   bench.Run(0);
   ctx->waitIdle();
   ASSERT_TRUE(bench.ValidateResults(0));
 
-  // Negative validation: zero out hits
   uint32_t zeroHit = 0;
   ctx->writeBuffer(bench.resultBuffer, 0, sizeof(uint32_t), &zeroHit);
   ctx->waitIdle();
-
   ASSERT_FALSE(bench.ValidateResults(0));
+
+  // Config 1: Ray-Box
+  bench.Run(1);
+  ctx->waitIdle();
+  ASSERT_TRUE(bench.ValidateResults(1));
+
+  ctx->writeBuffer(bench.resultBuffer, 0, sizeof(uint32_t), &zeroHit);
+  ctx->waitIdle();
+  ASSERT_FALSE(bench.ValidateResults(1));
 
   bench.Teardown();
 }
@@ -431,3 +448,59 @@ TEST_CASE(GraphicsAndRayTracingValidation, RayRawTraversal_Disclosures_JSON_And_
   std::string caveat = bench.GetConfigCaveat(1);
   ASSERT_TRUE(caveat.find("Synthetic 64-AABB Traversal Model") != std::string::npos);
 }
+
+// ============================================================================
+// 9. RayPayload Adversarial Positive, Isolation & Negative Validation
+// ============================================================================
+
+TEST_CASE(GraphicsAndRayTracingValidation, RayPayload_PositiveAndNegativeValidation_All3Configs) {
+  auto ctx = createVulkanContext();
+  if (!ctx) { return; }
+
+  std::string kdir = KernelPath::find();
+  ASSERT_FALSE(kdir.empty());
+
+  RayPayloadBench bench;
+  DeviceInfo info = ctx->getCurrentDeviceInfo();
+  if (!bench.IsSupported(info, ctx.get())) {
+    std::cout << "[SKIP] RayPayload not supported on current device" << std::endl;
+    return;
+  }
+
+  bench.Setup(*ctx, kdir);
+
+  // Before any Run(), all 3 configs must fail validation
+  for (uint32_t c = 0; c < 3; ++c) {
+    ASSERT_FALSE(bench.ValidateResults(c));
+  }
+
+  // Run Config 0 (16B): Config 0 must pass while Configs 1 & 2 remain unexecuted/false
+  bench.Run(0);
+  ctx->waitIdle();
+  ASSERT_TRUE(bench.ValidateResults(0));
+  ASSERT_FALSE(bench.ValidateResults(1));
+  ASSERT_FALSE(bench.ValidateResults(2));
+
+  // Run Configs 1 (128B) & 2 (256B): all 3 must pass
+  bench.Run(1);
+  bench.Run(2);
+  ctx->waitIdle();
+  ASSERT_TRUE(bench.ValidateResults(0));
+  ASSERT_TRUE(bench.ValidateResults(1));
+  ASSERT_TRUE(bench.ValidateResults(2));
+
+  // Negative injection: zero out each config's resultBuffer independently
+  uint32_t zeroHits = 0;
+  for (uint32_t c = 0; c < 3; ++c) {
+    ctx->writeBuffer(bench.resultBuffers[c], 0, sizeof(uint32_t), &zeroHits);
+    ctx->waitIdle();
+    ASSERT_FALSE(bench.ValidateResults(c));
+  }
+
+  // Out-of-bounds config index
+  ASSERT_FALSE(bench.ValidateResults(3));
+
+  bench.Teardown();
+  ASSERT_FALSE(bench.ValidateResults(0));
+}
+

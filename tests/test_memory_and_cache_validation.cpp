@@ -4,13 +4,11 @@
 #include "core/ResultFormatter.h"
 #include "utils/KernelPath.h"
 
-#define private public
 #include "benchmarks/MemBandwidthBench.h"
 #include "benchmarks/CacheBench.h"
 #include "benchmarks/CacheLatencyCurveBench.h"
 #include "benchmarks/SysMemBandwidthBench.h"
 #include "benchmarks/SysMemLatencyBench.h"
-#undef private
 
 #include <vector>
 #include <iostream>
@@ -378,3 +376,48 @@ TEST_CASE(MemoryAndCacheValidation, NoSelfValidatingStubs_OOBAndUninitialized) {
     ASSERT_FALSE(bench.ValidateResults(0));
   }
 }
+
+// ============================================================================
+// 7. CacheBench Bandwidth Positive & Negative Validation (incl. Non-Pow2 24 KB)
+// ============================================================================
+
+TEST_CASE(MemoryAndCacheValidation, CacheBenchBandwidth_PositiveAndNegative_IncludingNonPowerOfTwo) {
+  auto ctx = createVulkanContext();
+  if (!ctx) { return; }
+
+  std::string kdir = KernelPath::find();
+  ASSERT_FALSE(kdir.empty());
+
+  // Test both power-of-two (16 KB) and non-power-of-two (24 KB, e.g. 3/4 of 32 KB L0 or 6 MB L2)
+  const uint64_t testSizes[] = {16ULL * 1024ULL, 24ULL * 1024ULL};
+  for (uint64_t sz : testSizes) {
+    CacheBench bench("Cache Bandwidth Test", "GB/s", sz, "cache_bw_robust",
+                     {}, {"test_cbw"}, 0);
+    ASSERT_FALSE(bench.ValidateResults(0)); // Uninitialized must return false
+    bench.Setup(*ctx, kdir);
+    ASSERT_FALSE(bench.ValidateResults(0)); // Unwritten zeroed outBuffer must return false
+
+    bench.Run(0);
+    ctx->waitIdle();
+    ASSERT_TRUE(bench.ValidateResults(0));
+
+    // Negative injection: zero out outBuffer
+    std::vector<float> zeros(64 * 4, 0.0f);
+    ctx->writeBuffer(bench.outBuffer, 0, zeros.size() * sizeof(float), zeros.data());
+    ctx->waitIdle();
+    ASSERT_FALSE(bench.ValidateResults(0));
+
+    // Negative injection: NaN in outBuffer
+    float nanVal = std::numeric_limits<float>::quiet_NaN();
+    bench.Run(0);
+    ctx->waitIdle();
+    ASSERT_TRUE(bench.ValidateResults(0));
+    ctx->writeBuffer(bench.outBuffer, 0, sizeof(float), &nanVal);
+    ctx->waitIdle();
+    ASSERT_FALSE(bench.ValidateResults(0));
+
+    bench.Teardown();
+    ASSERT_FALSE(bench.ValidateResults(0));
+  }
+}
+

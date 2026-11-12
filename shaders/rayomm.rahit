@@ -1,0 +1,29 @@
+#version 460
+#extension GL_EXT_ray_tracing : require
+
+struct RayPayload {
+    vec3 color;
+    uint hits;
+};
+
+layout(location = 0) rayPayloadInEXT RayPayload payload;
+hitAttributeEXT vec2 attribs;
+
+// Deterministic botanical leaf cutout function shared with host OMM baker.
+// Triangle local UV corresponds to barycentrics (u = attribs.x, v = attribs.y).
+// Leaf blade fills elliptical region around center (0.33, 0.33).
+bool evaluateLeafAlphaOpaque(uint primId, vec2 bary) {
+    // Shift center slightly per layer/quad so stacked layers overlap partially
+    uint layer = primId >> 7u;
+    float shiftX = float((layer * 3u) & 7u) * 0.025 - 0.08;
+    float shiftY = float((layer * 5u) & 7u) * 0.025 - 0.08;
+    vec2 p = bary - vec2(0.32 + shiftX, 0.32 + shiftY);
+    float distSq = dot(p, p);
+    return distSq <= 0.055;
+}
+
+void main() {
+    if (!evaluateLeafAlphaOpaque(uint(gl_PrimitiveID), attribs)) {
+        ignoreIntersectionEXT;
+    }
+}

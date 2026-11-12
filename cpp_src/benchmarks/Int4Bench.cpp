@@ -83,10 +83,8 @@ BenchmarkResult Int4Bench::GetResult(uint32_t config_idx) const {
 }
 
 bool Int4Bench::ValidateResults(uint32_t config_idx) const {
-  (void)config_idx;
-  if (!context) return false;
-  // If INT4 is not supported on this backend/hardware, pass validation
-  if (!matrixKernel || !buffer) return true;
+  if (!context || config_idx != 0) return false;
+  if (!matrixKernel || !buffer) return false;
 
   std::vector<int32_t> hostOut(64, 0);
   try {

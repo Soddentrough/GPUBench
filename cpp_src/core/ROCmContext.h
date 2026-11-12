@@ -60,10 +60,14 @@ public:
   bool isQuiet() const override { return quiet; }
   void waitIdle() override;
 
-  // Hardware GPU timestamp profiling
+  // Hardware GPU timestamp profiling & HIP Graph batching
   void startTiming() override;
   double stopTiming() override;
   bool hasGpuTiming() const override;
+  void beginBatch(uint32_t expected_dispatches = 0,
+                  bool inter_dispatch_barrier = false) override;
+  void endBatch() override;
+  bool isBatching() const override { return m_inBatch; }
 
   hipDevice_t getROCmDevice() const override { return device; }
 
@@ -95,8 +99,31 @@ private:
   void printProgressBar(uint32_t current, uint32_t total,
                         const std::string &kernel_name);
 
+  struct RecordedDispatch {
+    hipFunction_t function = nullptr;
+    uint32_t gridX = 1, gridY = 1, gridZ = 1;
+    uint32_t blockX = 1, blockY = 1, blockZ = 1;
+    std::map<uint32_t, std::vector<char>> args;
+
+    bool operator==(const RecordedDispatch &o) const {
+      return function == o.function && gridX == o.gridX && gridY == o.gridY &&
+             gridZ == o.gridZ && blockX == o.blockX && blockY == o.blockY &&
+             blockZ == o.blockZ && args == o.args;
+    }
+  };
+
+  void invalidateCachedGraph();
+
+  hipStream_t batchStream = nullptr;
+  bool m_inBatch = false;
+  std::vector<RecordedDispatch> m_recordedBatch;
+  std::vector<RecordedDispatch> m_cachedBatch;
+  void *m_cachedGraphExec = nullptr;
+
   hipEvent_t timingStartEvent = nullptr;
   hipEvent_t timingStopEvent = nullptr;
   bool isTimingActive = false;
+  bool m_timingWindowHasLaunched = false;
   bool timingSupported = false;
 };
+

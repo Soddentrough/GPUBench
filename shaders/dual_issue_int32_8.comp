@@ -28,7 +28,7 @@ void main() {
     uint u6 = ubase + 6u;
     uint u7 = ubase + 7u;
 
-    uint mu = uint(pushConstants.multiplier * 1000.0) | 1u;
+    uint mu = (floatBitsToUint(pushConstants.multiplier) & 0x3FFu) | 1u;
     uint mask = (pushConstants.num_elements ^ 0x7FFF7FFFu) | 1u;
 
     // 65536 iterations * 8 scalar INT32 chains (add + and = 2 ops each) = 65536 * 16 = 1,048,576 INT32 ops

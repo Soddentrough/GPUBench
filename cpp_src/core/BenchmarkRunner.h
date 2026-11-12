@@ -74,6 +74,8 @@ public:
 
   void setVerifyParity(bool enable);
   bool getVerifyParity() const { return verifyParity; }
+  void setCaptureGpuPreviews(bool enable);
+  bool getCaptureGpuPreviews() const { return captureGpuPreviews; }
   void setForce(bool f) { forceExecution = f; }
   bool getForce() const { return forceExecution; }
   void setStrict(bool s) { strictMode = s; }
@@ -111,6 +113,7 @@ private:
   bool debug;
   bool dumpGeometry;
   bool dumpRenders;
+  bool captureGpuPreviews = false;
   bool verifyParity = false;
   bool parityFailure = false;
   bool executionFailure = false;

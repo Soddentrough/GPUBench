@@ -1,7 +1,9 @@
 #pragma once
 
 #include "IComputeContext.h"
-#define CL_TARGET_OPENCL_VERSION 220
+#ifndef CL_TARGET_OPENCL_VERSION
+#define CL_TARGET_OPENCL_VERSION 300
+#endif
 #include "utils/DynamicLibrary.h"
 #ifdef __APPLE__
 #include <OpenCL/opencl.h>
@@ -78,7 +80,8 @@ public:
   void startTiming() override;
   double stopTiming() override;
   bool hasGpuTiming() const override;
-  void beginBatch(uint32_t expected_dispatches) override;
+  void beginBatch(uint32_t expected_dispatches = 0,
+                  bool inter_dispatch_barrier = false) override;
   void endBatch() override;
 
   // OpenCL-specific accessors
@@ -117,6 +120,7 @@ private:
   bool verbose = false;
   bool quiet = false;
   bool available = false;
+  bool supportsOpenCL30 = false;
 
   std::vector<cl_event> timedEvents;
   bool isTimingActive = false;

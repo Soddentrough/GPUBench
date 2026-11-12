@@ -1,13 +1,14 @@
 # Third-Party Software and Asset Notices
 
-GPUBench incorporates or links against open-source software libraries and third-party assets.
-This document contains the notices, copyrights, and licenses required by their respective creators.
+GPUBench incorporates or links against open-source software libraries and clean-room benchmark assets.
+This document contains the notices, copyrights, exact versions, and licenses required by their respective creators.
 
 ---
 
-## 1. Dear ImGui
+## 1. Dear ImGui (v1.93.0)
 
 - **Project**: Dear ImGui (https://github.com/ocornut/imgui)
+- **Version**: 1.93.0
 - **Copyright**: (c) 2014-2026 Omar Cornut
 - **License**: MIT License
 
@@ -37,16 +38,18 @@ SOFTWARE.
 
 ---
 
-## 2. ImPlot
+## 2. ImPlot (v1.1)
 
 - **Project**: ImPlot (https://github.com/epezent/implot)
-- **Copyright**: (c) 2020-2026 Evan Pezent
+- **Version**: v1.1
+- **Copyright**: (c) 2020-2024 Evan Pezent, (c) 2025-2026 Breno Cunha Queiroz
 - **License**: MIT License
 
 ```text
 MIT License
 
-Copyright (c) 2020-2026 Evan Pezent
+Copyright (c) 2020-2024 Evan Pezent
+Copyright (c) 2025-2026 Breno Cunha Queiroz
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -69,7 +72,106 @@ SOFTWARE.
 
 ---
 
-## 3. cgltf
+## 3. Vulkan Memory Allocator (VMA v3.5.0)
+
+- **Project**: VulkanMemoryAllocator (https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator)
+- **Version**: 3.5.0
+- **Copyright**: (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
+- **License**: MIT License
+
+```text
+Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+```
+
+---
+
+## 4. yyjson (v0.13.0)
+
+- **Project**: yyjson (https://github.com/ibireme/yyjson)
+- **Version**: 0.13.0
+- **Copyright**: (c) 2020 YaoYuan <ibireme@gmail.com>
+- **License**: MIT License
+
+```text
+Copyright (c) 2020 YaoYuan <ibireme@gmail.com>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+---
+
+## 5. CLI11 (v2.7.2)
+
+- **Project**: CLI11 (https://github.com/CLIUtils/CLI11)
+- **Version**: 2.7.2
+- **Copyright**: (c) 2017-2026 University of Cincinnati, Henry Schreiner
+- **License**: BSD-3-Clause
+
+```text
+CLI11 2.7.2 Copyright (c) 2017-2026 University of Cincinnati, developed by Henry
+Schreiner under NSF AWARD 1414736. All rights reserved.
+
+Redistribution and use in source and binary forms of CLI11, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+3. Neither the name of the copyright holder nor the names of its contributors
+   may be used to endorse or promote products derived from this software without
+   specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
+---
+
+## 6. cgltf
 
 - **Project**: cgltf (https://github.com/jkuhlmann/cgltf)
 - **Copyright**: (c) 2018-2024 Johannes Kuhlmann
@@ -101,7 +203,7 @@ SOFTWARE.
 
 ---
 
-## 4. stb Libraries (stb_image, stb_image_write, imstb_truetype, imstb_textedit, imstb_rectpack)
+## 7. stb Libraries (stb_image, stb_image_write, imstb_rectpack, imstb_textedit, imstb_truetype)
 
 - **Project**: stb (https://github.com/nothings/stb)
 - **Copyright**: (c) Sean Barrett
@@ -134,43 +236,7 @@ SOFTWARE.
 
 ---
 
-## 5. CLI11
-
-- **Project**: CLI11 (https://github.com/CLIUtils/CLI11)
-- **Copyright**: (c) 2017-2024 University of Cincinnati, Henry Schreiner
-- **License**: BSD-3-Clause
-
-```text
-CLI11 2.4 Copyright (c) 2017-2024 University of Cincinnati, Henry Schreiner.
-All rights reserved.
-
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are met:
-
-1. Redistributions of source code must retain the above copyright notice, this
-   list of conditions and the following disclaimer.
-2. Redistributions in binary form must reproduce the above copyright notice,
-   this list of conditions and the following disclaimer in the documentation
-   and/or other materials provided with the distribution.
-3. Neither the name of the copyright holder nor the names of its contributors
-   may be used to endorse or promote products derived from this software
-   without specific prior written permission.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
-ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
-FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
-DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
-SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
-CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
-OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-```
-
----
-
-## 6. Vulkan Headers
+## 8. Vulkan Headers
 
 - **Project**: Vulkan Headers (https://github.com/KhronosGroup/Vulkan-Headers)
 - **Copyright**: (c) 2015-2026 The Khronos Group Inc.
@@ -192,7 +258,7 @@ limitations under the License.
 
 ---
 
-## 7. Simple DirectMedia Layer (SDL3)
+## 9. Simple DirectMedia Layer (SDL3)
 
 - **Project**: SDL3 (https://libsdl.org/)
 - **Copyright**: (c) 1997-2026 Sam Lantinga
@@ -218,11 +284,12 @@ freely, subject to the following restrictions:
 
 ---
 
-## 8. Benchmark 3D Models
+## 10. Benchmark 3D Models
 
-- **Toy Car Model (`toycar.glb`)**:
-  - glTF Sample Asset provided by Khronos Group.
+- **Toy Car Model (`assets/models/toycar.glb`)**:
+  - glTF Sample Asset provided by Khronos Group (`glTF-Sample-Assets/Models/ToyCar`).
   - License: CC0 1.0 Universal (Public Domain Dedication).
-- **Crytek Sponza (`sponza.glb`)**:
-  - Original model (c) Crytek GmbH; converted and distributed for research and benchmarking.
-  - Usage: Non-commercial benchmarking and architectural testing.
+- **Renaissance Colonnade Atrium (`assets/models/sponza.glb`)**:
+  - First-party clean-room procedural glTF 2.0 architectural benchmark scene generated by [`scripts/generate_sponza_atrium_glb.py`](scripts/generate_sponza_atrium_glb.py).
+  - Copyright: (c) 2026 GPUBench Contributors.
+  - License: Dual-licensed under the MIT License and CC0 1.0 Universal (Public Domain Dedication); unrestricted commercial and non-commercial redistribution permitted.

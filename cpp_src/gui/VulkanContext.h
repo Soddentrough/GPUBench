@@ -7,9 +7,14 @@
 #include <backends/imgui_impl_sdl3.h>
 #include <backends/imgui_impl_vulkan.h>
 
+#include "vk_mem_alloc.h"
+
+#include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
-#include <cstdint>
+
+class VulkanContext;
 
 namespace gpubench::gui {
 
@@ -18,7 +23,11 @@ public:
     VulkanContext();
     ~VulkanContext();
 
-    bool init(const char* title, int width, int height, float scaleOverride = 0.0f);
+    bool init(const char* title, int width, int height,
+              float scaleOverride = 0.0f,
+              bool verbose = false,
+              bool debug = false,
+              int preferredDeviceIndex = -1);
     void shutdown();
 
     float getDisplayScale() const { return m_displayScale; }
@@ -36,25 +45,33 @@ public:
     uint32_t getQueueFamily() const { return m_queueFamily; }
     VkQueue getQueue() const { return m_queue; }
     VkDescriptorPool getDescriptorPool() const { return m_descriptorPool; }
+    std::shared_ptr<::VulkanContext> getSharedComputeContext() const { return m_sharedComputeCtx; }
+    uint32_t getActiveDeviceIndex() const { return m_activeDeviceIndex; }
 
     bool isInitialized() const { return m_initialized; }
+    void waitDeviceIdleSafe();
 
     struct TextureResource {
         VkDescriptorSet descriptorSet{VK_NULL_HANDLE};
         VkImage image{VK_NULL_HANDLE};
         VkDeviceMemory memory{VK_NULL_HANDLE};
+        VmaAllocation vmaAllocation{VK_NULL_HANDLE};
         VkImageView imageView{VK_NULL_HANDLE};
         VkSampler sampler{VK_NULL_HANDLE};
         int width{0};
         int height{0};
         int channels{0};
+        bool borrowsExternalImage{false};
+        uint64_t generation{0};
 
         bool isValid() const { return descriptorSet != VK_NULL_HANDLE; }
     };
 
     TextureResource loadTextureFromFile(const std::string& filepath);
     TextureResource createTextureRgba(int width, int height, const uint8_t* rgbaPixels);
+    TextureResource createTextureFromSharedView(VkImageView imageView, int width, int height, uint64_t generation);
     void destroyTexture(TextureResource& tex);
+    bool saveScreenshot(const std::string& filepath);
     uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const;
 
     ImFont* getRegularFont() const { return m_fontRegular; }
@@ -62,12 +79,16 @@ public:
     ImFont* getMonoFont() const { return m_fontMono; }
 
 private:
-    bool setupVulkan();
+    bool setupVulkan(bool verbose, bool debug, int preferredDeviceIndex);
     void setupVulkanWindow(int width, int height);
     void cleanupVulkanWindow();
-    void loadSystemFont(float scale);
+    void loadSystemFont();
+    void flushDynamicImGuiTextures(ImDrawData* drawData);
     bool frameRender(ImDrawData* drawData);
     void framePresent();
+
+    std::shared_ptr<::VulkanContext> m_sharedComputeCtx;
+    uint32_t m_activeDeviceIndex{0};
 
     SDL_Window* m_window{nullptr};
     VkAllocationCallbacks* m_allocator{nullptr};

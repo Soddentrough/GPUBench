@@ -1,2507 +1,1242 @@
 #include "GuiApp.h"
-#include "core/DeviceDatabase.h"
-#include <imgui.h>
-#include <implot.h>
+#include "GuiUiHelpers.h"
+#include "core/ResultImporter.h"
+#include "core/VulkanContext.h"
+#include "utils/HardwareTelemetry.h"
 
-#include <iostream>
-#include <filesystem>
-#include <fstream>
-#include <sstream>
-#include <iomanip>
+#ifndef GPUBENCH_VERSION
+#define GPUBENCH_VERSION "1.0.0"
+#endif
+
+#include <SDL3/SDL.h>
+
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstring>
 #include <filesystem>
-#include <functional>
+#include <fstream>
+#include <iostream>
+#include <sstream>
 #include <thread>
 
 #ifdef _WIN32
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
 #include <windows.h>
-#include <intrin.h>
-#elif defined(__APPLE__)
-#include <sys/utsname.h>
-#include <sys/sysctl.h>
 #else
-#include <sys/utsname.h>
-#include <sys/sysinfo.h>
+#include <unistd.h>
 #endif
 
-#ifndef GPUBENCH_VERSION
-#error "GPUBENCH_VERSION must be defined by the build system"
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+#ifdef _MSC_VER
+#include <intrin.h>
+#else
+#include <cpuid.h>
+#endif
 #endif
 
 namespace gpubench::gui {
 
 namespace {
+struct HostCpuInfo {
+    std::string modelName;
+    int logicalCores = 0;
+};
 
-static std::string detectGpuArchitecture(const std::string& name, uint32_t vendorID, uint32_t deviceID) {
-    return gpubench::DeviceDatabase::getArchitectureName(vendorID, deviceID, name);
-}
+struct HostMemInfo {
+    double totalRamGB = 0.0;
+};
 
-static void getHostSystemInfo(std::string& outCpuModel, std::string& outCpuArch, std::string& outOsDriver, uint64_t& outRamMb) {
-    outCpuModel = "Host CPU";
-    outCpuArch = "x86_64";
-    outOsDriver = "Host OS";
-    outRamMb = 32768;
-
-#ifdef _WIN32
-    outOsDriver = "Windows 11 / 10";
-
-    int cpuInfo[4] = {-1};
-    __cpuid(cpuInfo, (int)0x80000000);
-    unsigned int nExIds = static_cast<unsigned int>(cpuInfo[0]);
-    if (nExIds >= 0x80000004) {
-        char brand[65] = {0};
-        __cpuid(reinterpret_cast<int*>(brand), (int)0x80000002);
-        __cpuid(reinterpret_cast<int*>(brand + 16), (int)0x80000003);
-        __cpuid(reinterpret_cast<int*>(brand + 32), (int)0x80000004);
-        std::string raw(brand);
-        size_t s = raw.find_first_not_of(" \t\r\n");
-        if (s != std::string::npos) {
-            size_t e = raw.find_last_not_of(" \t\r\n");
-            outCpuModel = raw.substr(s, e - s + 1);
-        } else if (!raw.empty()) {
-            outCpuModel = raw;
+HostCpuInfo queryHostCpuInfo() {
+    HostCpuInfo out;
+    out.logicalCores = static_cast<int>(std::thread::hardware_concurrency());
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+    auto cpuidLeaf = [](unsigned int leaf, unsigned int regs[4]) {
+#ifdef _MSC_VER
+        int msvcRegs[4] = {0, 0, 0, 0};
+        __cpuid(msvcRegs, static_cast<int>(leaf));
+        for (int i = 0; i < 4; ++i) regs[i] = static_cast<unsigned int>(msvcRegs[i]);
+#else
+        __cpuid(leaf, regs[0], regs[1], regs[2], regs[3]);
+#endif
+    };
+    unsigned int ext[4] = {0, 0, 0, 0};
+    cpuidLeaf(0x80000000u, ext);
+    if (ext[0] >= 0x80000004u) {
+        char brand[49];
+        std::memset(brand, 0, sizeof(brand));
+        for (unsigned int i = 0; i < 3; ++i) {
+            unsigned int r[4] = {0, 0, 0, 0};
+            cpuidLeaf(0x80000002u + i, r);
+            std::memcpy(brand + i * 16, r, 16);
+        }
+        std::string s(brand);
+        size_t first = s.find_first_not_of(' ');
+        size_t last = s.find_last_not_of(' ');
+        if (first != std::string::npos) {
+            out.modelName = s.substr(first, last - first + 1);
         }
     }
-
-    MEMORYSTATUSEX memStatus;
-    memStatus.dwLength = sizeof(memStatus);
-    if (GlobalMemoryStatusEx(&memStatus)) {
-        outRamMb = memStatus.ullTotalPhys / (1024 * 1024);
-    }
-#elif defined(__APPLE__)
-    outOsDriver = "macOS";
-    struct utsname un;
-    if (uname(&un) == 0) {
-        outOsDriver = std::string(un.sysname) + " " + std::string(un.release);
-    }
-
-    char cpuBrand[256] = {0};
-    size_t cpuBrandLen = sizeof(cpuBrand);
-    if (sysctlbyname("machdep.cpu.brand_string", cpuBrand, &cpuBrandLen, NULL, 0) == 0) {
-        outCpuModel = cpuBrand;
-    }
-
-    int64_t memBytes = 0;
-    size_t memBytesLen = sizeof(memBytes);
-    if (sysctlbyname("hw.memsize", &memBytes, &memBytesLen, NULL, 0) == 0) {
-        outRamMb = static_cast<uint64_t>(memBytes) / (1024 * 1024);
-    }
-#if defined(__arm64__) || defined(__aarch64__)
-    outCpuArch = "Apple Silicon (ARM64)";
 #endif
-#else
-    outOsDriver = "Linux";
-    struct utsname un;
-    if (uname(&un) == 0) {
-        outOsDriver = std::string(un.sysname) + " " + std::string(un.release);
-    }
-
-    std::ifstream cpuFile("/proc/cpuinfo");
-    if (cpuFile.is_open()) {
+#ifndef _WIN32
+    if (out.modelName.empty()) {
+        std::ifstream f("/proc/cpuinfo");
         std::string line;
-        while (std::getline(cpuFile, line)) {
+        while (std::getline(f, line)) {
             if (line.rfind("model name", 0) == 0) {
                 size_t colon = line.find(':');
                 if (colon != std::string::npos) {
                     std::string val = line.substr(colon + 1);
-                    size_t s = val.find_first_not_of(" \t\r\n");
-                    if (s != std::string::npos) {
-                        size_t e = val.find_last_not_of(" \t\r\n");
-                        outCpuModel = val.substr(s, e - s + 1);
-                    } else if (!val.empty()) {
-                        outCpuModel = val;
-                    }
+                    size_t s0 = val.find_first_not_of(" \t");
+                    if (s0 != std::string::npos) out.modelName = val.substr(s0);
                     break;
                 }
             }
         }
     }
+#endif
+    return out;
+}
 
-    struct sysinfo si;
-    if (sysinfo(&si) == 0) {
-        outRamMb = (static_cast<uint64_t>(si.totalram) * si.mem_unit) / (1024 * 1024);
+HostMemInfo queryHostMemInfo() {
+    HostMemInfo out;
+#ifdef _WIN32
+    MEMORYSTATUSEX ms{};
+    ms.dwLength = sizeof(ms);
+    if (GlobalMemoryStatusEx(&ms)) {
+        out.totalRamGB = static_cast<double>(ms.ullTotalPhys) / (1024.0 * 1024.0 * 1024.0);
+    }
+#elif defined(_SC_PHYS_PAGES) && defined(_SC_PAGE_SIZE)
+    long pages = sysconf(_SC_PHYS_PAGES);
+    long pageSz = sysconf(_SC_PAGE_SIZE);
+    if (pages > 0 && pageSz > 0) {
+        out.totalRamGB = (static_cast<double>(pages) * static_cast<double>(pageSz)) /
+                         (1024.0 * 1024.0 * 1024.0);
     }
 #endif
-
-    std::string lowerModel = outCpuModel;
-    std::transform(lowerModel.begin(), lowerModel.end(), lowerModel.begin(), ::tolower);
-    if (lowerModel.find("zen 5") != std::string::npos || lowerModel.find("9950") != std::string::npos || 
-        lowerModel.find("9900") != std::string::npos || lowerModel.find("9700") != std::string::npos || 
-        lowerModel.find("9800") != std::string::npos) {
-        outCpuArch = "x86_64 Zen 5";
-    } else if (lowerModel.find("zen 4") != std::string::npos || lowerModel.find("7800x3d") != std::string::npos || 
-               lowerModel.find("7950") != std::string::npos || lowerModel.find("7900") != std::string::npos || 
-               lowerModel.find("7700") != std::string::npos || lowerModel.find("7600") != std::string::npos) {
-        outCpuArch = "x86_64 Zen 4";
-    } else if (lowerModel.find("zen 3") != std::string::npos || lowerModel.find("5950") != std::string::npos || 
-               lowerModel.find("5900") != std::string::npos || lowerModel.find("5800") != std::string::npos || 
-               lowerModel.find("5600") != std::string::npos) {
-        outCpuArch = "x86_64 Zen 3";
-    } else if (lowerModel.find("zen 2") != std::string::npos || lowerModel.find("3970") != std::string::npos || 
-               lowerModel.find("3950") != std::string::npos || lowerModel.find("3900") != std::string::npos || 
-               lowerModel.find("3700") != std::string::npos || lowerModel.find("3600") != std::string::npos) {
-        outCpuArch = "x86_64 Zen 2";
-    } else if (lowerModel.find("intel") != std::string::npos) {
-        outCpuArch = "x86_64 Intel";
-    } else {
-        outCpuArch = "x86_64";
-    }
+    return out;
 }
+} // namespace
 
-static std::string formatCardDeviceSubtitle(const SelectableDevice& dev) {
-    std::string name = dev.name;
-    if (dev.isSystem) {
-        size_t thPos = name.find(" (");
-        if (thPos != std::string::npos && name.find("Threads)", thPos) != std::string::npos) {
-            name = name.substr(0, thPos);
-        }
-        size_t wPos = name.find(" w/ ");
-        if (wPos != std::string::npos) {
-            name = name.substr(0, wPos);
-        }
-        size_t withPos = name.find(" with ");
-        if (withPos != std::string::npos) {
-            name = name.substr(0, withPos);
-        }
-        size_t procPos = name.find(" Processor");
-        if (procPos != std::string::npos) {
-            name = name.substr(0, procPos);
-            size_t corePos = name.rfind("-Core");
-            if (corePos != std::string::npos) {
-                size_t spaceBefore = name.rfind(' ', corePos);
-                if (spaceBefore != std::string::npos) {
-                    name = name.substr(0, spaceBefore);
-                }
-            }
-        }
-        size_t rPos;
-        while ((rPos = name.find("(R)")) != std::string::npos) name.erase(rPos, 3);
-        while ((rPos = name.find("(TM)")) != std::string::npos) name.erase(rPos, 4);
-        while (name.find("  ") != std::string::npos) {
-            name.replace(name.find("  "), 2, " ");
-        }
-        size_t s = name.find_first_not_of(" \t\r\n");
-        if (s != std::string::npos) {
-            size_t e = name.find_last_not_of(" \t\r\n");
-            name = name.substr(s, e - s + 1);
-        }
-        return name;
-    } else {
-        if (name.empty()) {
-            return "GPU " + std::to_string(dev.deviceIndex);
-        }
-        size_t radvPos = name.find(" (RADV ");
-        if (radvPos != std::string::npos) {
-            name = name.substr(0, radvPos);
-        }
-        size_t llvmPos = name.find(" (LLVM ");
-        if (llvmPos != std::string::npos) {
-            name = name.substr(0, llvmPos);
-        }
-        return name;
-    }
-}
-
-static std::string fitTextToPixelWidth(const std::string& text, float maxWidth) {
-    if (text.empty() || maxWidth <= 0.0f) return text;
-    if (ImGui::CalcTextSize(text.c_str()).x <= maxWidth) return text;
-    const std::string ellipsis = "...";
-    float ellW = ImGui::CalcTextSize(ellipsis.c_str()).x;
-    if (maxWidth <= ellW) return ellipsis;
-    size_t len = text.size();
-    while (len > 0) {
-        // Step back to a valid UTF-8 codepoint boundary
-        do {
-            --len;
-        } while (len > 0 && (static_cast<unsigned char>(text[len]) & 0xC0) == 0x80);
-        std::string candidate = text.substr(0, len);
-        while (!candidate.empty() && candidate.back() == ' ') {
-            candidate.pop_back();
-        }
-        if (ImGui::CalcTextSize((candidate + ellipsis).c_str()).x <= maxWidth) {
-            return candidate + ellipsis;
-        }
-    }
-    return ellipsis;
-}
-
-static bool sameLineIfFits(float nextItemW, float spacing = -1.0f) {
-    float sp = (spacing >= 0.0f) ? spacing : ImGui::GetStyle().ItemSpacing.x;
-    float limitRight = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
-    float nextRight = ImGui::GetItemRectMax().x + sp + nextItemW;
-    if (nextRight <= limitRight) {
-        ImGui::SameLine(0.0f, spacing);
-        return true;
-    }
-    return false;
-}
-
-
-} // anonymous namespace
-
-GuiApp::GuiApp() {
-    m_benchmarkStartTime = std::chrono::steady_clock::now();
-    initializeBenchmarkCategories();
-}
+GuiApp::GuiApp() = default;
 
 GuiApp::~GuiApp() {
     abortBenchmarks();
+    m_telemetryWorker.stop();
     if (m_execThread.joinable()) {
         m_execThread.join();
     }
-    m_telemetryWorker.stop();
-
     clearTextureCache();
 }
 
 void GuiApp::clearTextureCache() {
-    if (m_vulkanContext) {
-        for (auto& pair : m_textureCache) {
-            m_vulkanContext->destroyTexture(pair.second);
-        }
+    if (!m_vulkanContext) {
         m_textureCache.clear();
+        return;
     }
+    if (!m_textureCache.empty()) {
+        m_vulkanContext->waitDeviceIdleSafe();
+        for (auto& kv : m_textureCache) {
+            if (kv.second.isValid() || kv.second.sampler != VK_NULL_HANDLE ||
+                kv.second.imageView != VK_NULL_HANDLE || kv.second.image != VK_NULL_HANDLE) {
+                m_vulkanContext->destroyTexture(kv.second);
+            }
+        }
+    }
+    m_textureCache.clear();
 }
 
 VulkanContext::TextureResource GuiApp::getOrLoadTexture(const std::string& relPath) {
-    if (relPath.empty()) return VulkanContext::TextureResource{};
-    auto it = m_textureCache.find(relPath);
-    if (it != m_textureCache.end()) {
+    if (!m_vulkanContext || !m_vulkanContext->isInitialized() || relPath.empty()) {
+        return {};
+    }
+
+    std::string normKey = relPath;
+    for (char& ch : normKey) {
+        if (ch == '\\') ch = '/';
+    }
+
+    // 1. Zero-disk on-GPU shared preview image fast path (when shared VulkanContext has captured HDR -> RGBA8)
+    if (auto sharedCtx = m_vulkanContext->getSharedComputeContext()) {
+        ::VulkanContext::SharedPreviewImage sharedImg{};
+        std::string bareKey = (normKey.rfind("renders/", 0) == 0) ? normKey.substr(8) : normKey;
+        if ((sharedCtx->getSharedPreviewImage(normKey, sharedImg) ||
+             sharedCtx->getSharedPreviewImage(bareKey, sharedImg)) &&
+            sharedImg.view != VK_NULL_HANDLE) {
+            auto it = m_textureCache.find(normKey);
+            if (it != m_textureCache.end()) {
+                if (it->second.borrowsExternalImage &&
+                    it->second.generation == sharedImg.generation &&
+                    it->second.isValid()) {
+                    return it->second;
+                }
+                m_vulkanContext->waitDeviceIdleSafe();
+                m_vulkanContext->destroyTexture(it->second);
+                m_textureCache.erase(it);
+            }
+            VulkanContext::TextureResource borrowedTex =
+                m_vulkanContext->createTextureFromSharedView(
+                    sharedImg.view,
+                    static_cast<int>(sharedImg.width),
+                    static_cast<int>(sharedImg.height),
+                    sharedImg.generation);
+            m_textureCache[normKey] = borrowedTex;
+            return borrowedTex;
+        }
+    }
+
+    // 2. Disk-backed texture cache fallback
+    auto it = m_textureCache.find(normKey);
+    if (it != m_textureCache.end() && !it->second.borrowsExternalImage) {
         return it->second;
     }
-    if (!m_vulkanContext) {
-        return VulkanContext::TextureResource{};
+    if (it != m_textureCache.end()) {
+        m_vulkanContext->waitDeviceIdleSafe();
+        m_vulkanContext->destroyTexture(it->second);
+        m_textureCache.erase(it);
     }
-    VulkanContext::TextureResource tex = m_vulkanContext->loadTextureFromFile(relPath);
-    if (tex.isValid()) {
-        m_textureCache[relPath] = tex;
+
+    namespace fs = std::filesystem;
+    std::vector<std::string> candidateRoots = {
+        "",
+        "../",
+        "../../"
+    };
+    if (const char* base = SDL_GetBasePath()) {
+        candidateRoots.push_back(std::string(base));
+        candidateRoots.push_back(std::string(base) + "../");
+        candidateRoots.push_back(std::string(base) + "../share/gpubench/");
     }
-    return tex;
+    candidateRoots.push_back("/usr/share/gpubench/");
+    candidateRoots.push_back("/usr/local/share/gpubench/");
+
+    for (const auto& root : candidateRoots) {
+        std::string fullPath = root + normKey;
+        std::error_code ec;
+        if (fs::exists(fullPath, ec) && fs::is_regular_file(fullPath, ec)) {
+            VulkanContext::TextureResource tex = m_vulkanContext->loadTextureFromFile(fullPath);
+            m_textureCache[normKey] = tex;
+            return tex;
+        }
+    }
+
+    m_textureCache[normKey] = VulkanContext::TextureResource{};
+    return {};
 }
 
 void GuiApp::init(VulkanContext* vulkanContext, float uiScale) {
     m_vulkanContext = vulkanContext;
-    m_baseScale = uiScale > 0.0f ? uiScale : 1.0f;
+    m_baseScale = std::clamp(uiScale, 0.5f, 3.0f);
     m_uiScale = m_baseScale;
-
-    // First initialize base unscaled theme metrics
-    setupDarkTheme(1.0f);
-
-    if (ImPlot::GetCurrentContext()) {
-        m_basePlotStyle = ImPlot::GetStyle();
-        m_basePlotStyleInitialized = true;
+    setupDarkTheme(m_uiScale);
+    if (m_vulkanContext && m_vulkanContext->isInitialized()) {
+        m_vulkanContext->requestFontRebuild(m_uiScale);
     }
-
-    // Apply effective target scale
-    setUiScale(m_uiScale);
-    m_zoomToastTimer = 0.0f; // Don't show toast on initial boot
+    ImGui::GetStyle().FontScaleDpi = m_uiScale;
+    ImGui::GetIO().FontGlobalScale = 1.0f;
 
     initializeBenchmarkCategories();
+    hydrateMetadataFromCatalog();
     discoverHardware();
-    m_apiSupportList = GetAllComputeApiSupportAPI();
-    for (const auto& api : m_apiSupportList) {
-        std::cout << "[GPUBench Compute API] " << api.label << ": " << (api.isSupported ? "Supported" : "Unsupported");
-        if (!api.isSupported) {
-            std::cout << " (" << api.reason << " | Missing: " << api.missingRequirement << ")";
-        }
-        std::cout << std::endl;
+    if (m_vulkanContext && m_vulkanContext->isInitialized()) {
+        setSelectedDevice(static_cast<int>(m_vulkanContext->getActiveDeviceIndex()));
     }
-
-    // Ensure initial backend selection is supported
-    bool currentBackendSupported = false;
-    for (const auto& api : m_apiSupportList) {
-        if (api.name == m_selectedBackend && api.isSupported) {
-            currentBackendSupported = true;
-            break;
-        }
-    }
-    if (!currentBackendSupported) {
-        for (const auto& api : m_apiSupportList) {
-            if (api.isSupported) {
-                m_selectedBackend = api.name;
-                break;
-            }
-        }
-    }
-
-    updateBenchmarkSupport();
     m_telemetryWorker.start();
 }
 
 void GuiApp::setUiScale(float scale) {
-    scale = std::clamp(scale, 0.75f, 4.0f);
-    if (std::abs(scale - m_uiScale) < 0.005f && m_zoomToastTimer > 0.0f) return;
+    scale = std::clamp(scale, 0.5f, 3.0f);
+    if (std::fabs(scale - m_uiScale) < 0.001f) return;
     m_uiScale = scale;
     setupDarkTheme(m_uiScale);
-
-    ImGuiIO& io = ImGui::GetIO();
     if (m_vulkanContext && m_vulkanContext->isInitialized()) {
-        float builtScale = m_vulkanContext->getBuiltFontScale();
-        if (builtScale > 0.0f) {
-            io.FontGlobalScale = m_uiScale / builtScale;
-        }
         m_vulkanContext->requestFontRebuild(m_uiScale);
-    } else if (m_baseScale > 0.0f) {
-        io.FontGlobalScale = m_uiScale / m_baseScale;
     }
-
-    if (m_basePlotStyleInitialized && ImPlot::GetCurrentContext()) {
-        ImPlotStyle& plotStyle = ImPlot::GetStyle();
-        plotStyle = m_basePlotStyle;
-        plotStyle.LineWeight *= m_uiScale;
-        plotStyle.MarkerSize *= m_uiScale;
-        plotStyle.MarkerWeight *= m_uiScale;
-        plotStyle.PlotBorderSize *= m_uiScale;
-        plotStyle.MajorTickLen = ImVec2(m_basePlotStyle.MajorTickLen.x * m_uiScale, m_basePlotStyle.MajorTickLen.y * m_uiScale);
-        plotStyle.MinorTickLen = ImVec2(m_basePlotStyle.MinorTickLen.x * m_uiScale, m_basePlotStyle.MinorTickLen.y * m_uiScale);
-        plotStyle.MajorTickSize = ImVec2(m_basePlotStyle.MajorTickSize.x * m_uiScale, m_basePlotStyle.MajorTickSize.y * m_uiScale);
-        plotStyle.MinorTickSize = ImVec2(m_basePlotStyle.MinorTickSize.x * m_uiScale, m_basePlotStyle.MinorTickSize.y * m_uiScale);
-        plotStyle.MajorGridSize = ImVec2(m_basePlotStyle.MajorGridSize.x * m_uiScale, m_basePlotStyle.MajorGridSize.y * m_uiScale);
-        plotStyle.MinorGridSize = ImVec2(m_basePlotStyle.MinorGridSize.x * m_uiScale, m_basePlotStyle.MinorGridSize.y * m_uiScale);
-        plotStyle.PlotPadding = ImVec2(m_basePlotStyle.PlotPadding.x * m_uiScale, m_basePlotStyle.PlotPadding.y * m_uiScale);
-        plotStyle.LabelPadding = ImVec2(m_basePlotStyle.LabelPadding.x * m_uiScale, m_basePlotStyle.LabelPadding.y * m_uiScale);
-        plotStyle.LegendPadding = ImVec2(m_basePlotStyle.LegendPadding.x * m_uiScale, m_basePlotStyle.LegendPadding.y * m_uiScale);
-        plotStyle.LegendInnerPadding = ImVec2(m_basePlotStyle.LegendInnerPadding.x * m_uiScale, m_basePlotStyle.LegendInnerPadding.y * m_uiScale);
-        plotStyle.LegendSpacing = ImVec2(m_basePlotStyle.LegendSpacing.x * m_uiScale, m_basePlotStyle.LegendSpacing.y * m_uiScale);
-    }
-
-    m_zoomToastTimer = 1.6f;
+    ImGui::GetStyle().FontScaleDpi = m_uiScale;
+    ImGui::GetIO().FontGlobalScale = 1.0f;
 }
 
 void GuiApp::updateZoomShortcuts() {
     ImGuiIO& io = ImGui::GetIO();
-    if (io.KeyCtrl) {
-        if (std::abs(io.MouseWheel) > 0.01f) {
-            float step = (io.MouseWheel > 0.0f) ? 0.1f : -0.1f;
-            setUiScale(std::round((m_uiScale + step) * 10.0f) / 10.0f);
-            io.MouseWheel = 0.0f;
-            io.MouseWheelH = 0.0f;
-        } else if (ImGui::IsKeyPressed(ImGuiKey_Equal) || ImGui::IsKeyPressed(ImGuiKey_KeypadAdd)) {
-            setUiScale(std::round((m_uiScale + 0.1f) * 10.0f) / 10.0f);
-        } else if (ImGui::IsKeyPressed(ImGuiKey_Minus) || ImGui::IsKeyPressed(ImGuiKey_KeypadSubtract)) {
-            setUiScale(std::round((m_uiScale - 0.1f) * 10.0f) / 10.0f);
-        } else if (ImGui::IsKeyPressed(ImGuiKey_0) || ImGui::IsKeyPressed(ImGuiKey_Keypad0)) {
-            setUiScale(m_baseScale);
-        }
+    if (m_zoomToastTimer > 0.0f) {
+        m_zoomToastTimer = std::max(0.0f, m_zoomToastTimer - io.DeltaTime);
+    }
+
+    if (io.WantTextInput) return;
+
+    const bool ctrlHeld = io.KeyCtrl || io.KeySuper;
+    if (!ctrlHeld) return;
+
+    const float step = 0.1f;
+    bool changed = false;
+    float target = m_uiScale;
+
+    if (ImGui::IsKeyPressed(ImGuiKey_Equal, false) ||
+        ImGui::IsKeyPressed(ImGuiKey_KeypadAdd, false)) {
+        target = std::round((m_uiScale + step) * 10.0f) / 10.0f;
+        changed = true;
+    } else if (ImGui::IsKeyPressed(ImGuiKey_Minus, false) ||
+               ImGui::IsKeyPressed(ImGuiKey_KeypadSubtract, false)) {
+        target = std::round((m_uiScale - step) * 10.0f) / 10.0f;
+        changed = true;
+    } else if (ImGui::IsKeyPressed(ImGuiKey_0, false) ||
+               ImGui::IsKeyPressed(ImGuiKey_Keypad0, false)) {
+        target = m_baseScale;
+        changed = true;
+    } else if (std::fabs(io.MouseWheel) > 0.01f) {
+        float delta = (io.MouseWheel > 0.0f) ? step : -step;
+        target = std::round((m_uiScale + delta) * 10.0f) / 10.0f;
+        changed = true;
+    }
+
+    if (changed) {
+        target = std::clamp(target, 0.5f, 3.0f);
+        setUiScale(target);
+        m_zoomToastTimer = 1.6f;
     }
 }
 
 void GuiApp::renderZoomToast() {
     if (m_zoomToastTimer <= 0.0f) return;
 
-    ImGuiIO& io = ImGui::GetIO();
-    m_zoomToastTimer -= io.DeltaTime;
-    float alpha = std::clamp(m_zoomToastTimer / 0.35f, 0.0f, 1.0f);
-
     const ImGuiViewport* vp = ImGui::GetMainViewport();
-    ImVec2 toastPos = ImVec2(vp->WorkPos.x + vp->WorkSize.x - s(250.0f), vp->WorkPos.y + s(16.0f));
-    ImGui::SetNextWindowPos(toastPos, ImGuiCond_Always);
-    ImGui::SetNextWindowBgAlpha(0.92f * alpha);
+    float alpha = std::min(1.0f, m_zoomToastTimer / 0.35f);
+    ImVec2 pos(vp->WorkPos.x + vp->WorkSize.x - s(20.0f),
+               vp->WorkPos.y + s(20.0f));
+    ImGui::SetNextWindowPos(pos, ImGuiCond_Always, ImVec2(1.0f, 0.0f));
+    ImGui::SetNextWindowBgAlpha(0.88f * alpha);
 
-    ImGuiWindowFlags toastFlags = ImGuiWindowFlags_NoDecoration 
-                                | ImGuiWindowFlags_AlwaysAutoResize 
-                                | ImGuiWindowFlags_NoSavedSettings 
-                                | ImGuiWindowFlags_NoFocusOnAppearing 
-                                | ImGuiWindowFlags_NoNav
-                                | ImGuiWindowFlags_NoMove;
-
-    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.38f, 0.75f, 1.0f, 0.75f * alpha));
-    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, alpha));
-    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.08f, 0.10f, 0.15f, 0.95f * alpha));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, s(6.0f));
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(s(12.0f), s(8.0f)));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(s(12.0f), s(7.0f)));
+    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.05f, 0.72f, 0.90f, 0.75f * alpha));
 
-    if (ImGui::Begin("##ZoomToastOverlay", nullptr, toastFlags)) {
-        int zoomPct = static_cast<int>(std::round((m_uiScale / m_baseScale) * 100.0f));
-        int absPct = static_cast<int>(std::round(m_uiScale * 100.0f));
-        ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.0f, alpha), "Zoom: %d%%", zoomPct);
-        ImGui::SameLine();
-        ImGui::TextDisabled("(%.1fx / %d%% DPI)", m_uiScale, absPct);
-        if (std::abs(m_uiScale - m_baseScale) > 0.01f) {
-            ImGui::TextDisabled("Press Ctrl+0 to reset");
-        }
+    ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration |
+                             ImGuiWindowFlags_AlwaysAutoResize |
+                             ImGuiWindowFlags_NoSavedSettings |
+                             ImGuiWindowFlags_NoFocusOnAppearing |
+                             ImGuiWindowFlags_NoNav |
+                             ImGuiWindowFlags_NoInputs;
+    if (ImGui::Begin("##ZoomToast", nullptr, flags)) {
+        int pct = static_cast<int>(std::round((m_uiScale / std::max(0.1f, m_baseScale)) * 100.0f));
+        ImGui::TextColored(ImVec4(0.92f, 0.96f, 1.0f, alpha),
+                           "UI Scale: %d%% (%.2fx)  [Ctrl+0 reset]", pct, m_uiScale);
     }
     ImGui::End();
+
+    ImGui::PopStyleColor();
     ImGui::PopStyleVar(2);
-    ImGui::PopStyleColor(3);
 }
 
-void GuiApp::setSelectedDevice(int deviceIndex) {
-    if (deviceIndex >= 0) {
-        bool found = false;
-        for (const auto& dev : m_devices) {
-            if (!dev.isSystem && dev.deviceIndex == static_cast<uint32_t>(deviceIndex)) {
-                found = true;
-                break;
-            }
-        }
-        // If requested deviceIndex does not exist, fallback to first available GPU
-        if (!found) {
-            for (const auto& dev : m_devices) {
-                if (!dev.isSystem) {
-                    deviceIndex = static_cast<int>(dev.deviceIndex);
-                    found = true;
-                    break;
-                }
-            }
-        }
-        if (found) {
-            for (auto& dev : m_devices) {
-                dev.selected = (dev.deviceIndex == static_cast<uint32_t>(deviceIndex) && !dev.isSystem);
-            }
-            m_telemetryGpuIndex = static_cast<uint32_t>(deviceIndex);
-            m_telemetryDualGpuMode = false;
-            updateBenchmarkSupport();
-        }
-    }
-}
+void GuiApp::setupDarkTheme(float scale) {
+    ImGuiStyle& style = ImGui::GetStyle();
+    if (!m_baseStyleInitialized) {
+        style = ImGuiStyle();
+        ImGui::StyleColorsDark(&style);
+        style.WindowRounding = 0.0f;
+        style.ChildRounding = 8.0f;
+        style.FrameRounding = 5.0f;
+        style.PopupRounding = 6.0f;
+        style.ScrollbarRounding = 6.0f;
+        style.GrabRounding = 4.0f;
+        style.TabRounding = 6.0f;
+        style.WindowBorderSize = 1.0f;
+        style.ChildBorderSize = 1.0f;
+        style.FrameBorderSize = 1.0f;
+        style.WindowPadding = ImVec2(12.0f, 12.0f);
+        style.FramePadding = ImVec2(8.0f, 5.0f);
+        style.ItemSpacing = ImVec2(8.0f, 6.0f);
+        style.CellPadding = ImVec2(7.0f, 5.0f);
+        style.ScrollbarSize = 12.0f;
 
-void GuiApp::setSelectedDevices(const std::vector<int>& deviceIndices) {
-    bool anySelected = false;
-    for (auto& dev : m_devices) {
-        dev.selected = false;
-        for (int idx : deviceIndices) {
-            if (idx < 0 && dev.isSystem) {
-                dev.selected = true;
-                anySelected = true;
-            } else if (!dev.isSystem && dev.deviceIndex == static_cast<uint32_t>(idx)) {
-                dev.selected = true;
-                anySelected = true;
-            }
-        }
-    }
-    // If none of the specified devices exist on this system, select the first actual GPU
-    if (!anySelected) {
-        for (auto& dev : m_devices) {
-            if (!dev.isSystem) {
-                dev.selected = true;
-                break;
-            }
-        }
-    }
-    updateTelemetrySelection();
-}
+        ImVec4* colors = style.Colors;
+        colors[ImGuiCol_WindowBg]             = ImVec4(0.055f, 0.063f, 0.082f, 1.00f);
+        colors[ImGuiCol_ChildBg]              = ImVec4(0.075f, 0.086f, 0.114f, 1.00f);
+        colors[ImGuiCol_PopupBg]              = ImVec4(0.085f, 0.098f, 0.130f, 0.98f);
+        colors[ImGuiCol_Border]               = ImVec4(0.165f, 0.195f, 0.255f, 0.85f);
+        colors[ImGuiCol_BorderShadow]         = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
+        colors[ImGuiCol_FrameBg]              = ImVec4(0.105f, 0.122f, 0.162f, 1.00f);
+        colors[ImGuiCol_FrameBgHovered]       = ImVec4(0.145f, 0.172f, 0.230f, 1.00f);
+        colors[ImGuiCol_FrameBgActive]        = ImVec4(0.180f, 0.220f, 0.295f, 1.00f);
+        colors[ImGuiCol_TitleBg]              = ImVec4(0.055f, 0.063f, 0.082f, 1.00f);
+        colors[ImGuiCol_TitleBgActive]        = ImVec4(0.075f, 0.090f, 0.125f, 1.00f);
+        colors[ImGuiCol_MenuBarBg]            = ImVec4(0.070f, 0.080f, 0.105f, 1.00f);
+        colors[ImGuiCol_ScrollbarBg]          = ImVec4(0.055f, 0.063f, 0.082f, 0.60f);
+        colors[ImGuiCol_ScrollbarGrab]        = ImVec4(0.200f, 0.235f, 0.305f, 1.00f);
+        colors[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.270f, 0.320f, 0.410f, 1.00f);
+        colors[ImGuiCol_ScrollbarGrabActive]  = ImVec4(0.05f, 0.68f, 0.88f, 1.00f);
+        colors[ImGuiCol_CheckMark]            = ImVec4(0.06f, 0.78f, 0.96f, 1.00f);
+        colors[ImGuiCol_SliderGrab]           = ImVec4(0.05f, 0.68f, 0.88f, 1.00f);
+        colors[ImGuiCol_SliderGrabActive]     = ImVec4(0.15f, 0.82f, 1.00f, 1.00f);
+        colors[ImGuiCol_Button]               = ImVec4(0.120f, 0.145f, 0.200f, 1.00f);
+        colors[ImGuiCol_ButtonHovered]        = ImVec4(0.175f, 0.220f, 0.305f, 1.00f);
+        colors[ImGuiCol_ButtonActive]         = ImVec4(0.05f, 0.60f, 0.82f, 1.00f);
+        colors[ImGuiCol_Header]               = ImVec4(0.125f, 0.155f, 0.220f, 0.90f);
+        colors[ImGuiCol_HeaderHovered]        = ImVec4(0.175f, 0.225f, 0.315f, 0.95f);
+        colors[ImGuiCol_HeaderActive]         = ImVec4(0.06f, 0.55f, 0.78f, 1.00f);
+        colors[ImGuiCol_Separator]            = ImVec4(0.165f, 0.195f, 0.255f, 0.85f);
+        colors[ImGuiCol_Tab]                  = ImVec4(0.090f, 0.108f, 0.145f, 1.00f);
+        colors[ImGuiCol_TabHovered]           = ImVec4(0.170f, 0.240f, 0.350f, 1.00f);
+        colors[ImGuiCol_TabSelected]          = ImVec4(0.045f, 0.460f, 0.680f, 1.00f);
+        colors[ImGuiCol_TabDimmed]            = ImVec4(0.070f, 0.082f, 0.110f, 1.00f);
+        colors[ImGuiCol_TabDimmedSelected]    = ImVec4(0.110f, 0.260f, 0.400f, 1.00f);
+        colors[ImGuiCol_TableHeaderBg]        = ImVec4(0.095f, 0.115f, 0.158f, 1.00f);
+        colors[ImGuiCol_TableBorderStrong]    = ImVec4(0.180f, 0.215f, 0.285f, 1.00f);
+        colors[ImGuiCol_TableBorderLight]     = ImVec4(0.125f, 0.150f, 0.200f, 0.80f);
+        colors[ImGuiCol_TableRowBg]           = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
+        colors[ImGuiCol_TableRowBgAlt]        = ImVec4(0.12f, 0.15f, 0.22f, 0.22f);
+        colors[ImGuiCol_Text]                 = ImVec4(0.93f, 0.95f, 0.98f, 1.00f);
+        colors[ImGuiCol_TextDisabled]         = ImVec4(0.46f, 0.51f, 0.60f, 1.00f);
 
-void GuiApp::updateTelemetrySelection() {
-    size_t gpuSelCount = 0;
-    uint32_t lastGpu = 0;
-    for (const auto& dev : m_devices) {
-        if (dev.selected && !dev.isSystem) {
-            gpuSelCount++;
-            lastGpu = dev.deviceIndex;
-        }
-    }
-    if (gpuSelCount >= 2) {
-        m_telemetryDualGpuMode = true;
+        m_baseStyle = style;
+        m_baseStyleInitialized = true;
     } else {
-        m_telemetryDualGpuMode = false;
-        if (gpuSelCount == 1) {
-            m_telemetryGpuIndex = lastGpu;
-        } else {
-            for (const auto& dev : m_devices) {
-                if (!dev.isSystem) {
-                    m_telemetryGpuIndex = dev.deviceIndex;
-                    break;
-                }
-            }
-        }
+        style = m_baseStyle;
     }
-    updateBenchmarkSupport();
+
+    if (std::fabs(scale - 1.0f) > 0.001f) {
+        style.ScaleAllSizes(scale);
+    }
+    style.FontScaleDpi = scale;
+
+    ImPlotStyle& plotStyle = ImPlot::GetStyle();
+    if (!m_basePlotStyleInitialized) {
+        ImPlot::StyleColorsDark(&plotStyle);
+        plotStyle.PlotBorderSize = 1.0f;
+        plotStyle.MajorGridSize = ImVec2(1.0f, 1.0f);
+        plotStyle.MinorGridSize = ImVec2(0.5f, 0.5f);
+        plotStyle.PlotPadding = ImVec2(10.0f, 8.0f);
+        plotStyle.LabelPadding = ImVec2(5.0f, 4.0f);
+        plotStyle.LegendPadding = ImVec2(8.0f, 6.0f);
+        plotStyle.Colors[ImPlotCol_PlotBg] = ImVec4(0.055f, 0.065f, 0.090f, 1.00f);
+        plotStyle.Colors[ImPlotCol_FrameBg] = ImVec4(0.075f, 0.086f, 0.114f, 0.00f);
+        plotStyle.Colors[ImPlotCol_PlotBorder] = ImVec4(0.165f, 0.195f, 0.255f, 0.85f);
+        m_basePlotStyle = plotStyle;
+        m_basePlotStyleInitialized = true;
+    } else {
+        plotStyle = m_basePlotStyle;
+    }
+    plotStyle.PlotPadding = ImVec2(10.0f * scale, 8.0f * scale);
+    plotStyle.LabelPadding = ImVec2(5.0f * scale, 4.0f * scale);
+    plotStyle.LegendPadding = ImVec2(8.0f * scale, 6.0f * scale);
 }
 
-void GuiApp::updateBenchmarkSupport() {
-    uint32_t targetGpu = 0;
-    bool foundGpu = false;
-    for (const auto& dev : m_devices) {
-        if (dev.selected && !dev.isSystem) {
-            targetGpu = dev.deviceIndex;
-            foundGpu = true;
+void GuiApp::discoverHardware() {
+    m_devices.clear();
+    m_apiSupportList = GetAllComputeApiSupportAPI();
+    m_deviceProfiles = GetDeviceProfilesAPI();
+
+    bool currentValid = false;
+    for (const auto& api : m_apiSupportList) {
+        if (api.name == m_selectedBackend && api.isSupported) {
+            currentValid = true;
             break;
         }
     }
-    if (!foundGpu) {
-        for (const auto& dev : m_devices) {
-            if (!dev.isSystem) {
-                targetGpu = dev.deviceIndex;
-                foundGpu = true;
+    if (!currentValid) {
+        for (const auto& api : m_apiSupportList) {
+            if (api.isSupported && api.name != "auto") {
+                m_selectedBackend = api.name;
                 break;
             }
         }
     }
 
-    if (m_selectedBackend == m_lastProbedBackend && targetGpu == m_lastProbedDeviceIndex) {
+    auto rawHw = GetAvailableHardwareAPI();
+    auto cpuInfo = queryHostCpuInfo();
+    auto memInfo = queryHostMemInfo();
+
+    bool addedSystem = false;
+    std::vector<uint32_t> seenGpuIndices;
+
+    for (const auto& entry : rawHw) {
+        std::stringstream ss(entry);
+        std::string backend, idxStr, name;
+        if (std::getline(ss, backend, '|') &&
+            std::getline(ss, idxStr, '|') &&
+            std::getline(ss, name)) {
+
+            if (backend == "System") {
+                if (!addedSystem) {
+                    SelectableDevice sysDev;
+                    sysDev.deviceIndex = 0xFFFFFFFF;
+                    sysDev.name = cpuInfo.modelName.empty() ? name : cpuInfo.modelName;
+                    sysDev.backend = "System";
+                    char sysDesc[128];
+                    std::snprintf(sysDesc, sizeof(sysDesc), "%d Threads | %.0f GB System RAM",
+                                  cpuInfo.logicalCores, memInfo.totalRamGB);
+                    sysDev.architecture = sysDesc;
+                    sysDev.isSystem = true;
+                    sysDev.selected = true;
+                    m_devices.push_back(sysDev);
+                    addedSystem = true;
+                }
+            } else {
+                uint32_t idx = static_cast<uint32_t>(std::stoul(idxStr));
+                if (std::find(seenGpuIndices.begin(), seenGpuIndices.end(), idx) == seenGpuIndices.end()) {
+                    seenGpuIndices.push_back(idx);
+                    SelectableDevice gpuDev;
+                    gpuDev.deviceIndex = idx;
+                    gpuDev.name = name;
+                    gpuDev.backend = backend;
+                    gpuDev.isSystem = false;
+                    gpuDev.selected = (seenGpuIndices.size() == 1);
+
+                    // Hydrate architecture, driver, and VRAM from DeviceProfile
+                    for (const auto& prof : m_deviceProfiles) {
+                        if (prof.deviceIndex == idx &&
+                            (prof.backend == m_selectedBackend || gpuDev.architecture.empty())) {
+                            gpuDev.vramTotalMb = prof.vramTotalMb;
+                            gpuDev.driver = prof.driverName.empty() ? prof.driverVersion : prof.driverName;
+                            std::ostringstream archSs;
+                            if (prof.computeUnits > 0) {
+                                archSs << prof.computeUnits << " CU/SM";
+                            }
+                            if (prof.vramTotalMb > 0) {
+                                if (archSs.tellp() > 0) archSs << " | ";
+                                archSs << (prof.vramTotalMb / 1024) << " GB VRAM";
+                            }
+                            if (prof.isApu) {
+                                archSs << " (Unified)";
+                            } else if (prof.rebarSupported) {
+                                archSs << " (ReBAR)";
+                            }
+                            gpuDev.architecture = archSs.str();
+                            if (prof.backend == m_selectedBackend) break;
+                        }
+                    }
+
+                    m_devices.push_back(gpuDev);
+                }
+            }
+        }
+    }
+
+    if (m_devices.empty()) {
+        SelectableDevice sysDev;
+        sysDev.deviceIndex = 0xFFFFFFFF;
+        sysDev.name = cpuInfo.modelName.empty() ? "Host CPU / System Memory" : cpuInfo.modelName;
+        sysDev.backend = "System";
+        sysDev.isSystem = true;
+        sysDev.selected = true;
+        m_devices.push_back(sysDev);
+    }
+
+    m_telemetryWorker.refreshDevices();
+    updateTelemetrySelection();
+    applyAutoRenderResolution();
+    updateBenchmarkSupport();
+}
+
+void GuiApp::setSelectedDevice(int deviceIndex) {
+    if (deviceIndex < 0) {
+        selectAllGpus();
+        return;
+    }
+    for (auto& dev : m_devices) {
+        if (!dev.isSystem) {
+            dev.selected = (dev.deviceIndex == static_cast<uint32_t>(deviceIndex));
+        }
+    }
+    updateTelemetrySelection();
+    applyAutoRenderResolution();
+    updateBenchmarkSupport();
+}
+
+void GuiApp::setSelectedDevices(const std::vector<int>& deviceIndices) {
+    if (deviceIndices.empty()) return;
+    for (int idx : deviceIndices) {
+        if (idx < 0) {
+            selectAllGpus();
+            return;
+        }
+    }
+    for (auto& dev : m_devices) {
+        if (!dev.isSystem) {
+            bool match = false;
+            for (int idx : deviceIndices) {
+                if (dev.deviceIndex == static_cast<uint32_t>(idx)) {
+                    match = true;
+                    break;
+                }
+            }
+            dev.selected = match;
+        }
+    }
+    updateTelemetrySelection();
+    applyAutoRenderResolution();
+    updateBenchmarkSupport();
+}
+
+void GuiApp::selectAllGpus() {
+    for (auto& dev : m_devices) {
+        if (!dev.isSystem) {
+            dev.selected = true;
+        }
+    }
+    updateTelemetrySelection();
+    applyAutoRenderResolution();
+    updateBenchmarkSupport();
+}
+
+void GuiApp::updateTelemetrySelection() {
+    std::vector<uint32_t> selectedGpus;
+    for (const auto& dev : m_devices) {
+        if (!dev.isSystem && dev.selected) {
+            selectedGpus.push_back(dev.deviceIndex);
+        }
+    }
+    if (selectedGpus.size() >= 2) {
+        m_telemetryDualGpuMode = true;
+        m_telemetryGpuIndex = selectedGpus[0];
+    } else if (selectedGpus.size() == 1) {
+        m_telemetryDualGpuMode = false;
+        m_telemetryGpuIndex = selectedGpus[0];
+    } else {
+        m_telemetryDualGpuMode = false;
+        m_telemetryGpuIndex = 0;
+    }
+}
+
+void GuiApp::updateBenchmarkSupport() {
+    uint32_t probeDev = 0;
+    bool foundSelectedGpu = false;
+    for (const auto& dev : m_devices) {
+        if (!dev.isSystem && dev.selected) {
+            probeDev = dev.deviceIndex;
+            foundSelectedGpu = true;
+            break;
+        }
+    }
+    if (!foundSelectedGpu) {
+        for (const auto& dev : m_devices) {
+            if (!dev.isSystem) {
+                probeDev = dev.deviceIndex;
+                break;
+            }
+        }
+    }
+
+    if (m_lastProbedBackend == m_selectedBackend && m_lastProbedDeviceIndex == probeDev) {
         return;
     }
     m_lastProbedBackend = m_selectedBackend;
-    m_lastProbedDeviceIndex = targetGpu;
+    m_lastProbedDeviceIndex = probeDev;
 
-    std::vector<BenchmarkSupportInfo> supportList = ProbeBenchmarkSupportAPI(m_selectedBackend, targetGpu);
-    std::unordered_map<std::string, BenchmarkSupportInfo> suppMap;
-    for (const auto& s : supportList) {
-        suppMap[s.id] = s;
+    auto supportList = ProbeBenchmarkSupportAPI(m_selectedBackend, probeDev);
+    std::unordered_map<std::string, BenchmarkSupportInfo> supportMap;
+    for (const auto& sInfo : supportList) {
+        supportMap[sInfo.id] = sInfo;
     }
 
     for (auto& cat : m_categories) {
-        for (auto& sub : cat.subgroups) {
-            for (auto& item : sub.items) {
-                if (item.category == "System" || item.category == "Host System" || item.category == "System Memory") {
+        for (auto& sg : cat.subgroups) {
+            for (auto& item : sg.items) {
+                if (item.category == "System") {
                     item.isSupported = true;
                     item.supportReason.clear();
                     item.limitationCategory.clear();
                     continue;
                 }
-                auto it = suppMap.find(item.id);
-                bool supported = (it != suppMap.end()) ? it->second.isSupported : true;
-                std::string reason = (it != suppMap.end()) ? it->second.reason : "";
-                std::string limCat = (it != suppMap.end()) ? it->second.limitationCategory : "";
 
-                // Check by specific config or item name
-                auto itName = suppMap.find(item.name);
-                if (itName != suppMap.end() && !itName->second.isSupported) {
-                    supported = false;
-                    reason = itName->second.reason;
-                    limCat = itName->second.limitationCategory;
+                bool found = false;
+                if (item.configIndex >= 0) {
+                    std::string cfgKey = item.id + "#" + std::to_string(item.configIndex);
+                    auto itCfg = supportMap.find(cfgKey);
+                    if (itCfg != supportMap.end()) {
+                        item.isSupported = itCfg->second.isSupported;
+                        item.supportReason = itCfg->second.reason;
+                        item.limitationCategory = itCfg->second.limitationCategory;
+                        found = true;
+                    }
                 }
-
-                // Check for SER items specifically
-                if (item.name.find("SER") != std::string::npos) {
-                    auto itSER = suppMap.find("SER");
-                    if (itSER != suppMap.end() && !itSER->second.isSupported) {
-                        supported = false;
-                        reason = itSER->second.reason;
-                        limCat = itSER->second.limitationCategory;
+                if (!found) {
+                    auto it = supportMap.find(item.id);
+                    if (it != supportMap.end()) {
+                        item.isSupported = it->second.isSupported;
+                        item.supportReason = it->second.reason;
+                        item.limitationCategory = it->second.limitationCategory;
+                    } else {
+                        item.isSupported = true;
+                        item.supportReason.clear();
+                        item.limitationCategory.clear();
                     }
                 }
 
-                item.isSupported = supported;
-                item.supportReason = reason;
-                item.limitationCategory = limCat;
                 if (!item.isSupported) {
                     item.selected = false;
                 }
             }
+            bool anySel = false;
+            for (const auto& item : sg.items) {
+                if (item.selected) { anySel = true; break; }
+            }
+            sg.allSelected = anySel;
         }
+        bool catAnySel = false;
+        for (const auto& sg : cat.subgroups) {
+            if (sg.allSelected) { catAnySel = true; break; }
+        }
+        cat.allSelected = catAnySel;
     }
 }
 
 void GuiApp::setSelectedBackend(const std::string& backend) {
-    if (!backend.empty()) {
-        std::string bLower = backend;
-        std::transform(bLower.begin(), bLower.end(), bLower.begin(), ::tolower);
-        if (m_apiSupportList.empty()) {
-            m_apiSupportList = GetAllComputeApiSupportAPI();
-        }
+    if (backend == "vulkan" || backend == "rocm" || backend == "opencl" || backend == "auto") {
         for (const auto& api : m_apiSupportList) {
-            if (api.name == bLower) {
-                if (!api.isSupported) {
-                    return; // Ignore selection of unsupported backend
-                }
-                break;
+            if (api.name == backend && !api.isSupported) {
+                return;
             }
         }
-        m_selectedBackend = bLower;
+        m_selectedBackend = backend;
+        m_lastProbedBackend.clear();
         updateBenchmarkSupport();
     }
 }
 
 void GuiApp::setScene(const std::string& scene) {
-    std::string sLower = scene;
-    std::transform(sLower.begin(), sLower.end(), sLower.begin(), ::tolower);
-    if (sLower == "sponza" || sLower == "indoor") {
+    if (scene == "indoor" || scene == "sponza") {
         m_scene = "indoor";
         m_suiteActiveScene = "indoor";
-        m_rtSceneIndex = 1;
-    } else if (sLower == "forest" || sLower == "jungle") {
+    } else if (scene == "forest" || scene == "foliage") {
         m_scene = "forest";
         m_suiteActiveScene = "forest";
-        m_rtSceneIndex = 2;
-    } else if (sLower == "outdoor" || sLower == "landscape") {
-        m_scene = "outdoor";
-        m_suiteActiveScene = "outdoor";
-        m_rtSceneIndex = 3;
-    } else if (sLower == "showroom" || sLower == "vehicle") {
+    } else if (scene == "landscape" || scene == "outdoor") {
+        m_scene = "landscape";
+        m_suiteActiveScene = "landscape";
+    } else if (scene == "showroom" || scene == "studio" || scene == "car") {
         m_scene = "showroom";
         m_suiteActiveScene = "showroom";
-        m_rtSceneIndex = 0;
-    } else if (sLower == "all") {
+    } else if (scene == "all") {
         m_scene = "all";
     }
 }
 
-void GuiApp::selectOnlyBenchmark(const std::string& benchmarkId) {
-    std::vector<std::string> targetIds;
-    std::stringstream ss(benchmarkId);
-    std::string itemToken;
-    while (std::getline(ss, itemToken, ',')) {
-        if (!itemToken.empty()) targetIds.push_back(itemToken);
-    }
-    if (targetIds.empty()) targetIds.push_back(benchmarkId);
-
-    auto eqCi = [](const std::string& a, const std::string& b) -> bool {
-        if (a.size() != b.size()) return false;
-        for (size_t i = 0; i < a.size(); ++i) {
-            if (std::tolower(static_cast<unsigned char>(a[i])) != std::tolower(static_cast<unsigned char>(b[i]))) return false;
+void GuiApp::applyAutoRenderResolution() {
+    bool isIntegratedGpu = false;
+    for (const auto& dev : m_devices) {
+        if (dev.isSystem || !dev.selected) continue;
+        for (const auto& prof : m_deviceProfiles) {
+            if (prof.deviceIndex == dev.deviceIndex && prof.isApu) {
+                isIntegratedGpu = true;
+                break;
+            }
         }
-        return true;
-    };
+        std::string lower = dev.name;
+        for (char& ch : lower) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+        if (lower.find("8060s") != std::string::npos ||
+            lower.find("8050s") != std::string::npos ||
+            lower.find("radeon 890m") != std::string::npos ||
+            lower.find("radeon 780m") != std::string::npos ||
+            lower.find("integrated") != std::string::npos ||
+            lower.find("apu") != std::string::npos) {
+            isIntegratedGpu = true;
+        }
+    }
 
-    auto mapCliAlias = [&](const std::string& raw) -> std::string {
-        std::string t = raw;
-        std::transform(t.begin(), t.end(), t.begin(), ::tolower);
-        if (t == "dualissue" || t == "dual_issue" || t == "ilp") return "ILP & Dual-Issue";
-        if (t == "lds" || t == "lds_bank_conflicts") return "LDS Bank Conflicts";
-        if (t == "indirect" || t == "indirect_synthesis") return "In-Shader Indirect Synthesis";
-        if (t == "membw" || t == "vram") return "Device Memory Bandwidth";
-        if (t == "l0_cache" || t == "l0") return "L0 Vector Cache Latency (16 KB)";
-        if (t == "cache_latency_curve" || t == "cache_curve") return "Cache Latency Curve";
-        if (t == "pixelfill" || t == "pixel_fill" || t == "rop") return "Pixel Fill Rate";
-        if (t == "sysmembw") return "System Memory Bandwidth";
-        if (t == "sysmemlatency") return "System Memory Latency";
-        if (t == "rt" || t == "raytracing" || t == "ray_tracing") return "Ray Tracing";
-        if (t == "raster" || t == "graphics") return "Graphics";
-        if (t == "system" || t == "host" || t == "cpu") return "Host System";
-        return raw;
-    };
+    if (isIntegratedGpu) {
+        m_renderWidth = 2560;
+        m_renderHeight = 1440;
+    } else {
+        m_renderWidth = 3840;
+        m_renderHeight = 2160;
+    }
+}
 
-    bool isSystemBenchmark = false;
+void GuiApp::selectOnlyBenchmark(const std::string& benchmarkId) {
+    if (benchmarkId.empty()) return;
+
+    std::vector<std::string> rawTokens;
+    std::stringstream ss(benchmarkId);
+    std::string itemStr;
+    while (std::getline(ss, itemStr, ',')) {
+        size_t s0 = itemStr.find_first_not_of(" \t");
+        size_t s1 = itemStr.find_last_not_of(" \t");
+        if (s0 != std::string::npos) {
+            rawTokens.push_back(itemStr.substr(s0, s1 - s0 + 1));
+        }
+    }
+    if (rawTokens.empty()) return;
+
+    std::unordered_map<std::string, std::string> aliasMap = {
+        {"raster", "Pixel Fill Rate"}, {"graphics", "Pixel Fill Rate"},
+        {"indirect", "In-Shader Indirect Synthesis"},
+        {"lds", "LDS Bank Conflicts"},
+        {"rayscheduling", "RayScheduling"}, {"rt", "RayScheduling"}
+    };
+    for (const auto& meta : GetBenchmarkMetadataCatalogAPI()) {
+        std::string targetId = meta.benchmarkName;
+        if (targetId.rfind("RayScheduling", 0) == 0) {
+            targetId = "RayScheduling";
+        }
+        std::string lowName = targetId;
+        for (char& ch : lowName) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+        aliasMap[lowName] = targetId;
+        for (const auto& al : meta.aliases) {
+            std::string lowAl = al;
+            for (char& ch : lowAl) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+            aliasMap[lowAl] = targetId;
+        }
+    }
+
     for (auto& cat : m_categories) {
         cat.allSelected = false;
-        bool catAnySel = false;
-        for (auto& sub : cat.subgroups) {
-            sub.allSelected = false;
-            bool subAnySel = false;
-            for (auto& item : sub.items) {
-                bool matches = false;
-                for (const auto& rawTid : targetIds) {
-                    if (eqCi(rawTid, "all")) {
-                        matches = true;
-                        break;
-                    }
-                    std::string tid = mapCliAlias(rawTid);
-                    if (eqCi(item.id, tid) || eqCi(item.subcategory, tid) || eqCi(item.name, tid) ||
-                        eqCi(sub.name, tid) || eqCi(cat.name, tid) || eqCi(item.category, tid)) {
-                        matches = true;
-                        break;
-                    }
-                    if (eqCi(rawTid, "pathtracing") || eqCi(rawTid, "path_tracing") || eqCi(rawTid, "path") || eqCi(rawTid, "Path Tracing") || eqCi(rawTid, "pathtrace")) {
-                        if (item.subcategory.find("Path Tracing") != std::string::npos || sub.name.find("Path Tracing") != std::string::npos || item.name.find("Path Tracing") != std::string::npos) {
-                            matches = true;
-                            break;
+        for (auto& sg : cat.subgroups) {
+            sg.allSelected = false;
+            for (auto& item : sg.items) {
+                item.selected = false;
+            }
+        }
+    }
+
+    bool anyGpuSelected = false;
+    bool anySysSelected = false;
+
+    for (const auto& tok : rawTokens) {
+        std::string lowerTok = tok;
+        for (char& ch : lowerTok) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+
+        if (lowerTok == "all") {
+            for (auto& cat : m_categories) {
+                for (auto& sg : cat.subgroups) {
+                    for (auto& item : sg.items) {
+                        if (item.isSupported) {
+                            item.selected = true;
+                            if (item.category == "System") anySysSelected = true;
+                            else anyGpuSelected = true;
                         }
                     }
                 }
-                item.selected = matches;
-                if (item.selected) {
-                    subAnySel = true;
-                    catAnySel = true;
-                    if (item.category == "System" || item.category == "Host System" || item.category == "System Memory") {
-                        isSystemBenchmark = true;
-                    }
-                }
             }
-            sub.allSelected = subAnySel;
+            continue;
         }
-        cat.allSelected = catAnySel;
-    }
-    if (isSystemBenchmark) {
-        for (auto& dev : m_devices) {
-            if (dev.isSystem) dev.selected = true;
-        }
-    }
 
-    // Auto-collapse untested subgroups and expand active ones
-    for (auto& cat : m_categories) {
-        for (auto& sub : cat.subgroups) {
-            size_t sel = 0;
-            for (const auto& item : sub.items) {
-                if (item.selected) sel++;
-            }
-            if (sel == 0) {
-                sub.collapsed = true;
-            } else {
-                sub.collapsed = false;
-            }
-        }
-    }
-}
-
-void GuiApp::setupDarkTheme(float scale) {
-    ImGuiStyle& style = ImGui::GetStyle();
-
-    if (!m_baseStyleInitialized) {
-        ImVec4* colors = style.Colors;
-
-    // Professional High-Contrast Workstation Dark Theme
-    colors[ImGuiCol_Text]                  = ImVec4(0.96f, 0.97f, 0.99f, 1.00f);
-    colors[ImGuiCol_TextDisabled]          = ImVec4(0.52f, 0.58f, 0.68f, 1.00f);
-    colors[ImGuiCol_WindowBg]              = ImVec4(0.08f, 0.09f, 0.13f, 1.00f);
-    colors[ImGuiCol_ChildBg]               = ImVec4(0.10f, 0.12f, 0.17f, 1.00f);
-    colors[ImGuiCol_PopupBg]               = ImVec4(0.12f, 0.14f, 0.20f, 0.98f);
-    colors[ImGuiCol_Border]                = ImVec4(0.20f, 0.25f, 0.35f, 0.70f);
-    colors[ImGuiCol_BorderShadow]          = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
-    colors[ImGuiCol_FrameBg]               = ImVec4(0.13f, 0.16f, 0.23f, 1.00f);
-    colors[ImGuiCol_FrameBgHovered]        = ImVec4(0.19f, 0.24f, 0.34f, 1.00f);
-    colors[ImGuiCol_FrameBgActive]         = ImVec4(0.25f, 0.32f, 0.45f, 1.00f);
-    colors[ImGuiCol_TitleBg]               = ImVec4(0.09f, 0.11f, 0.15f, 1.00f);
-    colors[ImGuiCol_TitleBgActive]         = ImVec4(0.14f, 0.18f, 0.26f, 1.00f);
-    colors[ImGuiCol_TitleBgCollapsed]      = ImVec4(0.07f, 0.08f, 0.11f, 1.00f);
-    colors[ImGuiCol_MenuBarBg]             = ImVec4(0.10f, 0.12f, 0.17f, 1.00f);
-    colors[ImGuiCol_ScrollbarBg]           = ImVec4(0.08f, 0.09f, 0.13f, 0.60f);
-    colors[ImGuiCol_ScrollbarGrab]         = ImVec4(0.22f, 0.27f, 0.38f, 1.00f);
-    colors[ImGuiCol_ScrollbarGrabHovered]  = ImVec4(0.30f, 0.38f, 0.52f, 1.00f);
-    colors[ImGuiCol_ScrollbarGrabActive]   = ImVec4(0.38f, 0.48f, 0.65f, 1.00f);
-    colors[ImGuiCol_CheckMark]             = ImVec4(0.38f, 0.75f, 1.00f, 1.00f); // Bright Cyan
-    colors[ImGuiCol_SliderGrab]            = ImVec4(0.35f, 0.50f, 0.98f, 1.00f); // Electric Blue
-    colors[ImGuiCol_SliderGrabActive]      = ImVec4(0.45f, 0.60f, 1.00f, 1.00f);
-    colors[ImGuiCol_Button]                = ImVec4(0.16f, 0.20f, 0.29f, 1.00f);
-    colors[ImGuiCol_ButtonHovered]         = ImVec4(0.24f, 0.30f, 0.44f, 1.00f);
-    colors[ImGuiCol_ButtonActive]          = ImVec4(0.32f, 0.40f, 0.60f, 1.00f);
-    colors[ImGuiCol_Header]                = ImVec4(0.18f, 0.23f, 0.33f, 1.00f);
-    colors[ImGuiCol_HeaderHovered]         = ImVec4(0.26f, 0.33f, 0.48f, 1.00f);
-    colors[ImGuiCol_HeaderActive]          = ImVec4(0.34f, 0.43f, 0.62f, 1.00f);
-    colors[ImGuiCol_Separator]             = ImVec4(0.20f, 0.25f, 0.35f, 0.70f);
-    colors[ImGuiCol_SeparatorHovered]      = ImVec4(0.32f, 0.40f, 0.58f, 1.00f);
-    colors[ImGuiCol_SeparatorActive]       = ImVec4(0.40f, 0.50f, 0.72f, 1.00f);
-    colors[ImGuiCol_Tab]                   = ImVec4(0.11f, 0.13f, 0.19f, 1.00f);
-    colors[ImGuiCol_TabHovered]            = ImVec4(0.24f, 0.30f, 0.45f, 1.00f);
-    colors[ImGuiCol_TabActive]             = ImVec4(0.20f, 0.27f, 0.42f, 1.00f);
-    colors[ImGuiCol_TabUnfocused]          = ImVec4(0.09f, 0.11f, 0.15f, 1.00f);
-    colors[ImGuiCol_TabUnfocusedActive]   = ImVec4(0.14f, 0.18f, 0.27f, 1.00f);
-    colors[ImGuiCol_TableHeaderBg]         = ImVec4(0.14f, 0.17f, 0.25f, 1.00f);
-    colors[ImGuiCol_TableBorderStrong]     = ImVec4(0.22f, 0.28f, 0.40f, 1.00f);
-    colors[ImGuiCol_TableBorderLight]      = ImVec4(0.16f, 0.20f, 0.28f, 0.80f);
-    colors[ImGuiCol_TableRowBg]            = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
-    colors[ImGuiCol_TableRowBgAlt]         = ImVec4(0.12f, 0.15f, 0.21f, 0.50f);
-
-        style.WindowRounding    = 0.0f;
-        style.ChildRounding     = 8.0f;
-        style.FrameRounding     = 6.0f;
-        style.PopupRounding     = 6.0f;
-        style.ScrollbarRounding = 6.0f;
-        style.GrabRounding      = 4.0f;
-        style.TabRounding       = 6.0f;
-        style.WindowBorderSize  = 1.0f;
-        style.FrameBorderSize   = 1.0f;
-        style.ItemSpacing       = ImVec2(10.0f, 8.0f);
-        style.FramePadding      = ImVec2(10.0f, 6.0f);
-        style.ItemInnerSpacing  = ImVec2(6.0f, 4.0f);
-
-        m_baseStyle = style;
-        m_baseStyleInitialized = true;
-    }
-
-    style = m_baseStyle;
-    if (scale > 1.01f || scale < 0.99f) {
-        style.ScaleAllSizes(scale);
-    }
-}
-
-void GuiApp::initializeBenchmarkCategories() {
-    m_categories.clear();
-
-    // 1. [Compute] (4 subgroups, 34 tests)
-    {
-        BenchmarkCategory cat;
-        cat.name = "Compute";
-        cat.description = "Vector and matrix compute arithmetic across IEEE precisions and quantized formats";
-
-        BenchmarkSubgroup sub;
-        sub.name = "Compute Precision";
-        sub.component = "Compute";
-        sub.engineId = "Compute";
-        sub.description = "Peak floating-point and integer vector/matrix throughput (FP64 down to INT4; capability-probed)";
-        sub.items = {
-            {"FP64", "FP64", "FP64 Double Precision", "Compute", "TFLOPS", "64-bit IEEE 754 floating-point peak throughput", true, 0},
-            {"FP32", "FP32", "FP32 Single Precision", "Compute", "TFLOPS", "32-bit floating-point peak TFLOPS (dual-issue FMA)", true, 0},
-            {"FP16", "FP16", "FP16 Half Precision - Vector", "Compute", "TFLOPS", "Packed 16-bit half-precision vector arithmetic", true, 0},
-            {"FP16", "FP16", "FP16 Half Precision - Matrix (WMMA)", "Compute", "TFLOPS", "Cooperative matrix / tensor half-precision throughput", true, 1},
-            {"BF16", "BF16", "BF16 Bfloat16 - Vector", "Compute", "TFLOPS", "Packed 16-bit bfloat16 vector arithmetic (v_dot2_bf16_bf16 / v_dot2_f32_bf16; requires VK_KHR_shader_bfloat16 on Vulkan or ROCm BF16 support)", true, 0},
-            {"BF16", "BF16", "BF16 Bfloat16 - Matrix (WMMA)", "Compute", "TFLOPS", "Cooperative matrix / tensor bfloat16 throughput (16x16x16 WMMA; requires VK_KHR_cooperative_matrix + VK_KHR_shader_bfloat16 or ROCm WMMA)", true, 1},
-            {"FP8", "FP8", "FP8 Micro-Float - Matrix (WMMA)", "Compute", "TFLOPS", "E4M3 / E5M2 8-bit floating point cooperative matrix ops", true, 0},
-            {"FP6", "FP6", "FP6 Micro-Float - Vector", "Compute", "TOPS", "Sub-byte 6-bit quantized floating point throughput (requires native NVIDIA SPV_NV_float6 extension; reports UNSUPPORTED otherwise)", true, 0},
-            {"FP4", "FP4", "FP4 Micro-Float - Vector", "Compute", "TOPS", "Sub-byte 4-bit quantized floating point throughput (requires native FP4 compute units; reports UNSUPPORTED otherwise)", true, 0},
-            {"INT8", "INT8", "INT8 Integer - Vector (DP4A)", "Compute", "TOPS", "INT8 dot product (DP4A) vector instructions", true, 0},
-            {"INT8", "INT8", "INT8 Integer - Matrix (WMMA)", "Compute", "TOPS", "INT8 cooperative matrix / WMMA tensor throughput", true, 1},
-            {"INT4", "INT4", "INT4 Integer - Matrix (WMMA)", "Compute", "TOPS", "Sub-byte 4-bit integer matrix core throughput (16x16x16 iu4 WMMA on RDNA 4 / gfx12+ via ROCm; reports UNSUPPORTED on RDNA 3/3.5, Vulkan, and OpenCL)", true, 0}
-        };
-        cat.subgroups.push_back(sub);
-
-        BenchmarkSubgroup dualSub;
-        dualSub.name = "ILP & Concurrency";
-        dualSub.component = "Compute";
-        dualSub.engineId = "ILP & Concurrency";
-        dualSub.description = "Instruction-level parallelism (ILP) scaling, arithmetic latency hiding, and concurrent FP32+INT32 arithmetic";
-        dualSub.items = {
-            {"ILP & Dual-Issue", "ILP & Concurrency", "FP32 Baseline (Ping-Pong)", "Compute", "TFLOPS", "Single-issue FP32 baseline (1 FMA/cycle); sequential ping-pong dependency prevents superscalar latency hiding and dual-issuing", true, 0},
-            {"ILP & Dual-Issue", "ILP & Concurrency", "FP32 Moderate ILP (8 Chains)", "Compute", "TFLOPS", "Moderate ILP (8 independent chains); measures latency hiding across arithmetic stages before peak saturation", true, 1},
-            {"ILP & Dual-Issue", "ILP & Concurrency", "FP32 Peak ILP / Co-Issue (16 Chains)", "Compute", "TFLOPS", "Peak ILP saturation (16 independent chains); saturates pipeline depth and evaluates dual-issue capacity on architectures with dual VALUs (e.g. RDNA 4 VOPD)", true, 2},
-            {"ILP & Dual-Issue", "ILP & Concurrency", "INT32 Baseline (Ping-Pong)", "Compute", "TOPS", "Single-issue integer baseline (1 ALU/cycle); sequential dependency prevents pipelined execution", true, 3},
-            {"ILP & Dual-Issue", "ILP & Concurrency", "INT32 Moderate ILP (8 Chains)", "Compute", "TOPS", "Moderate integer ILP (8 independent chains); evaluates integer ALU latency hiding under typical instruction-level parallelism", true, 4},
-            {"ILP & Dual-Issue", "ILP & Concurrency", "INT32 Peak ILP (16 Chains)", "Compute", "TOPS", "Peak integer ILP (16 independent chains); reveals whether integer datapath supports dual ALUs or single ALU/cycle", true, 5},
-            {"ILP & Dual-Issue", "ILP & Concurrency", "Concurrent Mixed (FP32+INT32)", "Compute", "TOPS", "Concurrent FP32 + INT32; evaluates simultaneous execution across decoupled float and integer ALU datapaths", true, 6}
-        };
-        cat.subgroups.push_back(dualSub);
-
-        BenchmarkSubgroup ldsSub;
-        ldsSub.name = "LDS & Shared Memory";
-        ldsSub.component = "Compute";
-        ldsSub.engineId = "LDS Bank Conflicts";
-        ldsSub.description = "Local Data Share 32-bank conflict sweep and serialization quantification";
-        ldsSub.items = {
-            {"LDS Bank Conflicts", "LDS Bank Conflicts", "Stride 1 (Conflict-Free Baseline)", "Compute", "TB/s", "1-way conflict-free; all 32 lanes access distinct 4-byte banks", true, 0},
-            {"LDS Bank Conflicts", "LDS Bank Conflicts", "Stride 2 (2-Way Conflict)", "Compute", "TB/s", "2 lanes per bank; 2x serialization reduces throughput to ~50%", true, 1},
-            {"LDS Bank Conflicts", "LDS Bank Conflicts", "Stride 4 (4-Way Conflict)", "Compute", "TB/s", "4 lanes per bank; 4x serialization reduces throughput to ~25%", true, 2},
-            {"LDS Bank Conflicts", "LDS Bank Conflicts", "Stride 8 (8-Way Conflict)", "Compute", "TB/s", "8 lanes per bank; 8x serialization reduces throughput to ~12.5%", true, 3},
-            {"LDS Bank Conflicts", "LDS Bank Conflicts", "Stride 16 (16-Way Conflict)", "Compute", "TB/s", "16 lanes per bank; 16x serialization reduces throughput to ~6.25%", true, 4},
-            {"LDS Bank Conflicts", "LDS Bank Conflicts", "Stride 32 (32-Way Full Serialization)", "Compute", "TB/s", "32 lanes collide on bank 0; fully serialized down to ~3.125%", true, 5},
-            {"LDS Bank Conflicts", "LDS Bank Conflicts", "Stride 3 (Odd Stride Control)", "Compute", "TB/s", "gcd(3,32)=1; conflict-free permutation proves modular collision theory", true, 6},
-            {"LDS Bank Conflicts", "LDS Bank Conflicts", "Stride 5 (Odd Stride Control)", "Compute", "TB/s", "gcd(5,32)=1; conflict-free permutation proves modular collision theory", true, 7}
-        };
-        cat.subgroups.push_back(ldsSub);
-
-        BenchmarkSubgroup indirectSub;
-        indirectSub.name = "Indirect Command Synthesis";
-        indirectSub.component = "Compute";
-        indirectSub.engineId = "In-Shader Indirect Synthesis";
-        indirectSub.description = "Dynamic GPU workgroup command synthesis and hardware zero-dispatch pruning";
-        indirectSub.items = {
-            {"In-Shader Indirect Synthesis", "Indirect Command Synthesis", "CPU Direct Fixed Grid (100% Active Baseline)", "Compute", "us", "Host fixed grid dispatch with 100% item activity; baseline compute throughput", true, 0},
-            {"In-Shader Indirect Synthesis", "Indirect Command Synthesis", "100% Active", "Compute", "us", "Classifier synthesizes VkDispatchIndirectCommand on GPU; measures indirect dispatch overhead", true, 1},
-            {"In-Shader Indirect Synthesis", "Indirect Command Synthesis", "50% Active", "Compute", "us", "Stream compaction bins 50% active work; launches half the workgroups dynamically", true, 2},
-            {"In-Shader Indirect Synthesis", "Indirect Command Synthesis", "10% Active", "Compute", "us", "Sparse workload; GPU skips 90% of workgroups via synthesized grid sizing", true, 3},
-            {"In-Shader Indirect Synthesis", "Indirect Command Synthesis", "1% Active", "Compute", "us", "Highly sparse workload; dynamic indirect dispatch processes only 1% work", true, 4},
-            {"In-Shader Indirect Synthesis", "Indirect Command Synthesis", "In-Shader Zero-Dispatch Pruning (0% Active)", "Compute", "us", "Hardware Command Processor instantaneously dismisses zero-workgroup (0,0,0) dispatches", true, 5},
-            {"In-Shader Indirect Synthesis", "Indirect Command Synthesis", "CPU Direct Fixed Grid (10% Active)", "Compute", "us", "Host fixed grid dispatch on sparse 10% active workload; shows wasted wave occupancy", true, 6}
-        };
-        cat.subgroups.push_back(indirectSub);
-
-        m_categories.push_back(cat);
-    }
-
-    // 2. [Memory] (3 subgroups, 25 tests)
-    {
-        BenchmarkCategory cat;
-        cat.name = "Memory";
-        cat.description = "On-chip cache hierarchy latencies (L0..L3), cache curves, and VRAM streaming bandwidth";
-
-        cat.subgroups.push_back({"Cache Latency", "Memory", "L0 Vector Cache Latency (16 KB)", "On-chip CU vector cache read latency", {
-            {"L0 Vector Cache Latency (16 KB)", "Cache Latency", "L0 Vector Cache Latency (16 KB)", "Memory", "ns", "16 KB pointer-chasing latency measuring nearest vector cache (AMD RDNA WGP Vector L0 / TCP, NVIDIA L1 / Texture, Intel L1)", true, 0}
-        }});
-
-        BenchmarkSubgroup cacheCurveSub;
-        cacheCurveSub.name = "Cache Latency Curve";
-        cacheCurveSub.component = "Memory";
-        cacheCurveSub.engineId = "Cache Latency Curve";
-        cacheCurveSub.description = "128-byte cache-line pointer chasing (16 KB to 256 MB) across L0, GL1, GL2, L3 MALL, and GDDR6";
-        cacheCurveSub.items = {
-            {"Cache Latency Curve", "Cache Latency Curve", "16 KB", "Memory", "ns", "L0 TCP Vector Cache (32B/64B/128B Cache Line)", true, 0},
-            {"Cache Latency Curve", "Cache Latency Curve", "32 KB", "Memory", "ns", "L0 TCP Capacity Boundary", true, 1},
-            {"Cache Latency Curve", "Cache Latency Curve", "64 KB", "Memory", "ns", "GL1 Cache Transition", true, 2},
-            {"Cache Latency Curve", "Cache Latency Curve", "128 KB", "Memory", "ns", "GL1 Cache Working Set", true, 3},
-            {"Cache Latency Curve", "Cache Latency Curve", "256 KB", "Memory", "ns", "GL1 Cache Capacity Boundary", true, 4},
-            {"Cache Latency Curve", "Cache Latency Curve", "512 KB", "Memory", "ns", "GL2 Cache Working Set", true, 5},
-            {"Cache Latency Curve", "Cache Latency Curve", "1 MB", "Memory", "ns", "GL2 Cache Working Set", true, 6},
-            {"Cache Latency Curve", "Cache Latency Curve", "2 MB", "Memory", "ns", "GL2 Cache Working Set", true, 7},
-            {"Cache Latency Curve", "Cache Latency Curve", "4 MB", "Memory", "ns", "GL2 Cache Capacity Boundary", true, 8},
-            {"Cache Latency Curve", "Cache Latency Curve", "8 MB", "Memory", "ns", "L3 MALL / Infinity Cache", true, 9},
-            {"Cache Latency Curve", "Cache Latency Curve", "16 MB", "Memory", "ns", "L3 MALL / Infinity Cache", true, 10},
-            {"Cache Latency Curve", "Cache Latency Curve", "32 MB", "Memory", "ns", "L3 MALL / Infinity Cache", true, 11},
-            {"Cache Latency Curve", "Cache Latency Curve", "64 MB", "Memory", "ns", "L3 MALL / Infinity Cache", true, 12},
-            {"Cache Latency Curve", "Cache Latency Curve", "128 MB", "Memory", "ns", "L3 MALL Capacity Boundary", true, 13},
-            {"Cache Latency Curve", "Cache Latency Curve", "256 MB", "Memory", "ns", "GDDR6 VRAM DRAM Step", true, 14}
-        };
-        cat.subgroups.push_back(cacheCurveSub);
-
-        cat.subgroups.push_back({"VRAM Streaming Bandwidth", "Memory", "Device Memory Bandwidth", "VRAM read/write streaming bandwidth across thread block sizes", {
-            {"Device Memory Bandwidth", "VRAM Bandwidth", "Read (128 threads/group)", "Memory", "GB/s", "Streaming VRAM read bandwidth at 128 threads/group", true, 0},
-            {"Device Memory Bandwidth", "VRAM Bandwidth", "Write (128 threads/group)", "Memory", "GB/s", "Streaming VRAM write bandwidth at 128 threads/group", true, 1},
-            {"Device Memory Bandwidth", "VRAM Bandwidth", "Read / Write (128 threads/group)", "Memory", "GB/s", "Combined VRAM read/write streaming bandwidth at 128 threads/group", true, 2},
-            {"Device Memory Bandwidth", "VRAM Bandwidth", "Read (256 threads/group)", "Memory", "GB/s", "Streaming VRAM read bandwidth at 256 threads/group", true, 3},
-            {"Device Memory Bandwidth", "VRAM Bandwidth", "Write (256 threads/group)", "Memory", "GB/s", "Streaming VRAM write bandwidth at 256 threads/group", true, 4},
-            {"Device Memory Bandwidth", "VRAM Bandwidth", "Read / Write (256 threads/group)", "Memory", "GB/s", "Combined VRAM read/write streaming bandwidth at 256 threads/group", true, 5},
-            {"Device Memory Bandwidth", "VRAM Bandwidth", "Read (1024 threads/group)", "Memory", "GB/s", "Streaming VRAM read bandwidth at 1024 threads/group", true, 6},
-            {"Device Memory Bandwidth", "VRAM Bandwidth", "Write (1024 threads/group)", "Memory", "GB/s", "Streaming VRAM write bandwidth at 1024 threads/group", true, 7},
-            {"Device Memory Bandwidth", "VRAM Bandwidth", "Read / Write (1024 threads/group)", "Memory", "GB/s", "Combined VRAM read/write streaming bandwidth at 1024 threads/group", true, 8}
-        }});
-
-        m_categories.push_back(cat);
-    }
-
-    // 3. [Ray Tracing] (5 subgroups, 55 tests)
-    {
-        BenchmarkCategory cat;
-        cat.name = "Ray Tracing";
-        cat.description = "Hardware BVH, acceleration structure builds, ray tracing & multi-bounce path tracing";
-
-        // Subgroup 1: Acceleration Structure Builds (8 tests)
-        cat.subgroups.push_back({"Acceleration Structure Builds", "Ray Tracing", "RayASBuild", "Ray tracing acceleration structure build and dynamic update performance", {
-            {"RayASBuild", "BLAS Build & Update", "BLAS Build (1M Triangles)", "Ray Tracing", "MTris/s", "Measures how fast the GPU builds ray tracing geometry structures for 1 million triangles", true, 0},
-            {"RayASBuild", "BLAS Build & Update", "BLAS Update (1M Triangles)", "Ray Tracing", "MTris/s", "Measures how fast the GPU updates geometry structures for moving objects (1 million triangles)", true, 1},
-            {"RayASBuild", "BLAS Build & Update", "BLAS Build (5M Triangles)", "Ray Tracing", "MTris/s", "Measures ray tracing structure build speed for complex geometry (5 million triangles)", true, 2},
-            {"RayASBuild", "BLAS Build & Update", "BLAS Update (5M Triangles)", "Ray Tracing", "MTris/s", "Measures dynamic update speed for complex moving geometry (5 million triangles)", true, 3},
-            {"RayASBuild", "BLAS Build & Update", "BLAS Build (10M Triangles)", "Ray Tracing", "MTris/s", "Measures ray tracing structure build speed under heavy geometry load (10 million triangles)", true, 4},
-            {"RayASBuild", "TLAS Construction", "TLAS: Indoor Corridor (20K Instances)", "Ray Tracing", "MInst/s", "Measures scene hierarchy build speed for 20,000 instanced objects in an indoor scene", true, 5},
-            {"RayASBuild", "TLAS Construction", "TLAS: Dense Jungle (50K Instances)", "Ray Tracing", "MInst/s", "Measures scene hierarchy build speed for 50,000 instanced objects in dense foliage", true, 6},
-            {"RayASBuild", "TLAS Construction", "TLAS: Massive Open World (200K Instances)", "Ray Tracing", "MInst/s", "Measures scene hierarchy build speed for 200,000 instanced objects across a massive open world", true, 7}
-        }});
-
-        // Subgroup 2: Primary & Full Frame Ray Tracing (7 tests)
-        cat.subgroups.push_back({"Primary & Full Frame Ray Tracing", "Ray Tracing", "RayScheduling", "Primary camera ray tracing and full-frame rendering across dispatch methods", {
-            {"RayScheduling", "Scene Ray Tracing (PBR)", "Primary Rays (Compute Megakernel)", "Ray Tracing", "MRays/s", "Traces initial camera rays into the scene using a standard compute shader", true, 17},
-            {"RayScheduling", "Scene Ray Tracing (PBR)", "Primary Rays (RTP)", "Ray Tracing", "MRays/s", "Traces initial camera rays using dedicated hardware ray tracing pipelines", true, 29},
-            {"RayScheduling", "Scene Ray Tracing (PBR)", "Primary Rays (RTP + SER)", "Ray Tracing", "MRays/s", "Traces camera rays with hardware reordering to group similar rays and maximize core efficiency. Requires VK_EXT_ray_tracing_invocation_reorder extension (reports UNSUPPORTED when unavailable).", true, 30},
-            {"RayScheduling", "Scene Ray Tracing (PBR)", "Primary Rays (Wavefront - DGC)", "Ray Tracing", "MRays/s", "Traces camera rays using GPU work queues that group active work to maximize utilization", true, 18},
-            {"RayScheduling", "Total Scene Render", "Full Frame (Megakernel)", "Ray Tracing", "MRays/s", "Renders complete frames with full lighting and shadows using standard compute shaders", true, 9},
-            {"RayScheduling", "Total Scene Render", "Full Frame (RTP + SER)", "Ray Tracing", "MRays/s", "Renders complete frames using dedicated ray tracing hardware and ray reordering. Requires VK_EXT_ray_tracing_invocation_reorder extension (reports UNSUPPORTED when unavailable).", true, 10},
-            {"RayScheduling", "Total Scene Render", "Full Frame (DGC)", "Ray Tracing", "MRays/s", "Renders complete frames using dynamic GPU-driven work queues", true, 11}
-        }});
-
-        // Subgroup 3: Scene Path Tracing (6 tests)
-        cat.subgroups.push_back({"Scene Path Tracing", "Ray Tracing", "RayScheduling", "Multi-bounce diffuse path tracing and high-sample stress workloads", {
-            {"RayScheduling", "Scene Path Tracing (Multi-Bounce)", "Path Tracing (1 SPP) (Megakernel)", "Ray Tracing", "MRays/s", "Calculates realistic indirect light bounces using a standard all-in-one compute shader", true, 3},
-            {"RayScheduling", "Scene Path Tracing (Multi-Bounce)", "Path Tracing (1 SPP) (RTP + SER)", "Ray Tracing", "MRays/s", "Calculates light bounces using dedicated ray tracing cores with hardware ray reordering. Requires VK_EXT_ray_tracing_invocation_reorder extension (reports UNSUPPORTED when unavailable).", true, 4},
-            {"RayScheduling", "Scene Path Tracing (Multi-Bounce)", "Path Tracing (1 SPP) (DGC)", "Ray Tracing", "MRays/s", "Calculates light bounces by grouping active rays into queues to keep GPU cores fully utilized", true, 5},
-            {"RayScheduling", "Scene Path Tracing (Multi-Bounce)", "Path Tracing (1 SPP) (Dynamic Load Balancing)", "Ray Tracing", "MRays/s", "Calculates light bounces using persistent threads that dynamically pull rays from a shared work queue", true, 25},
-            {"RayScheduling", "Scene Path Tracing (16 SPP)", "Path Tracing (16 SPP) (Megakernel)", "Ray Tracing", "MRays/s", "High-quality path tracing (16 samples per pixel) using a standard compute shader", true, 23},
-            {"RayScheduling", "Scene Path Tracing (16 SPP)", "Path Tracing (16 SPP) (DGC)", "Ray Tracing", "MRays/s", "High-quality path tracing (16 samples per pixel) grouping active rays into queues", true, 24}
-        }});
-
-        // Subgroup 4: Lighting, Shadows & Material Scheduling (15 tests per scene)
-        cat.subgroups.push_back({"Lighting, Shadows & Materials", "Ray Tracing", "RayScheduling", "Directional shadows, 128-light binning, PBR material BSDFs, incoherent GI, and alpha cutout", {
-            {"RayScheduling", "Directional Shadows", "Shadows - Single Light (Megakernel)", "Ray Tracing", "MRays/s", "Tests shadow ray performance for a single light source using standard compute shaders", true, 19},
-            {"RayScheduling", "Directional Shadows", "Shadows - Single Light (RTP + SER)", "Ray Tracing", "MRays/s", "Tests shadow ray performance for a single light using dedicated ray tracing hardware and reordering. Requires VK_EXT_ray_tracing_invocation_reorder extension (reports UNSUPPORTED when unavailable).", true, 20},
-            {"RayScheduling", "Directional Shadows", "Shadows - Single Light (DGC)", "Ray Tracing", "MRays/s", "Tests shadow ray performance for a single light using dynamic GPU work queues", true, 21},
-            {"RayScheduling", "Directional Shadows", "Shadows - Multi-Light (3 Lights, DGC)", "Ray Tracing", "MRays/s", "Tests shadow ray performance across 3 light sources using dynamic GPU work queues", true, 22},
-            {"RayScheduling", "Multi-Light Evaluation", "Multi-Light Shading - Single Light (Megakernel)", "Ray Tracing", "MRays/s", "Evaluates material surface shading under a single light source using standard compute shaders", true, 31},
-            {"RayScheduling", "Multi-Light Evaluation", "Multi-Light Shading - Single Light (DGC)", "Ray Tracing", "MRays/s", "Evaluates material surface shading under a single light source using dynamic work queues", true, 32},
-            {"RayScheduling", "Multi-Light Evaluation", "Multi-Light Shading - 128 Lights (Megakernel)", "Ray Tracing", "MRays/s", "Stresses GPU cores by evaluating material shading across 128 unbinned lights in a single pass", true, 33},
-            {"RayScheduling", "Multi-Light Evaluation", "Multi-Light Shading - 128 Lights (DGC Light Binning)", "Ray Tracing", "MRays/s", "Compacts active surface hits via DGC and evaluates 128 lights in 8x16 batched passes, eliminating sky-lane divergence", true, 34},
-            {"RayScheduling", "Material Shading", "Material (Megakernel)", "Ray Tracing", "MHits/s", "Evaluates 8 distinct surface BSDF archetypes (car paint, jade SSS, glass, velvet, rust, floor, gold, chrome) in a single monolithic compute pass", true, 0},
-            {"RayScheduling", "Material Shading", "Material (RTP + SER)", "Ray Tracing", "MHits/s", "Evaluates 8 surface BSDF archetypes using dedicated ray tracing closest-hit shaders and hardware SER reordering. Requires VK_EXT_ray_tracing_invocation_reorder extension (reports UNSUPPORTED when unavailable).", true, 1},
-            {"RayScheduling", "Material Shading", "Material (DGC)", "Ray Tracing", "MHits/s", "Evaluates 8 surface BSDF archetypes by dispatching specialized per-material micro-kernels via DGC", true, 2},
-            {"RayScheduling", "Incoherent Ray Tracing", "Incoherent Rays (Megakernel)", "Ray Tracing", "MRays/s", "Diffuse secondary rays from real scene hits, traced with no reordering: the unmitigated baseline. Compare the three items to see what each technique recovers", true, 6},
-            {"RayScheduling", "Incoherent Ray Tracing", "Incoherent Rays (RTP + SER)", "Ray Tracing", "MRays/s", "Same incoherent bounce rays, re-binned by hardware ray reordering (SER): measures what SER recovers from the worst-case divergence. Requires VK_EXT_ray_tracing_invocation_reorder extension (reports UNSUPPORTED when unavailable).", true, 7},
-            {"RayScheduling", "Incoherent Ray Tracing", "Incoherent Rays (DGC)", "Ray Tracing", "MRays/s", "Same incoherent bounce rays, classified into directional octants and compacted into GPU work queues: measures what DGC recovers", true, 8},
-            {"RayScheduling", "Alpha Cutout Divergence", "Traversal Divergence (Alpha Cutout)", "Ray Tracing", "MRays/s", "Stresses ray traversal with procedural alpha-cutout masks requiring repeated candidate triangle evaluation and BVH re-entry", true, 27}
-        }});
-
-        // Subgroup 5: Traversal Ordering & Stream Compaction (7 algorithmic microbenchmarks)
-        cat.subgroups.push_back({"Traversal Ordering & Stream Compaction", "Ray Tracing", "RayScheduling_Micro", "2D tile/Morton spatial reordering and wavefront hit record stream compaction", {
-            {"RayScheduling", "Traversal Ordering & Coherence", "Linear 1D Scanline", "Ray Tracing", "MRays/s", "Traces rays in simple row-by-row order, serving as a baseline for ray order comparisons", true, 12},
-            {"RayScheduling", "Traversal Ordering & Coherence", "2D Screen Tiled (8x4)", "Ray Tracing", "MRays/s", "Traces rays in small 8x4 pixel rectangular blocks to improve cache hit rates", true, 14},
-            {"RayScheduling", "Traversal Ordering & Coherence", "2D Morton (8x4)", "Ray Tracing", "MRays/s", "Traces rays following an 8x4 Z-order curve to maximize spatial cache locality", true, 15},
-            {"RayScheduling", "Traversal Ordering & Coherence", "2D Morton (4x8)", "Ray Tracing", "MRays/s", "Traces rays following a 4x8 Z-order curve to test directional cache preference", true, 16},
-            {"RayScheduling", "Wavefront Stream Compaction", "Queue Compaction (Single-Pass)", "Ray Tracing", "MRecords/s", "Traces primary rays, filters out sky misses, and writes 128-byte expanded hit state records to a unified queue via global atomic append (Baseline)", true, 26},
-            {"RayScheduling", "Wavefront Stream Compaction", "Queue Compaction Throughput", "Ray Tracing", "MRecords/s", "Traces primary rays, filters out sky misses, and writes 32-byte octahedrally-packed hit records at peak bandwidth", true, 28},
-            {"RayScheduling", "Wavefront Stream Compaction", "Wave Ballot Compaction", "Ray Tracing", "MRecords/s", "Traces primary rays and uses subgroupBallot wave voting to bin hits into 8 material queues (16B records) using 1 atomic add per wave", true, 13}
-        }});
-
-        // Subgroup 5: Hardware BVH & Divergence Stress (12 tests)
-        cat.subgroups.push_back({"Hardware BVH & Divergence Stress", "Ray Tracing", "RayRawTraversal", "Hardware ray-box (synthetic 64-AABB model), triangle traversal, alpha foliage, and SIMD divergence", {
-            {"RayRawTraversal", "Hardware BVH Traversal", "Coherent Triangles", "Ray Tracing", "MRays/s", "Measures raw hardware BVH traversal speed with parallel rays terminating immediately on Layer 0 (TerminateOnFirstHitEXT) with 0% root misses.", true, 0},
-            {"RayRawTraversal", "Hardware BVH Traversal", "Deep Box Stress", "Ray Tracing", "MRays/s", "Stresses hardware BVH traversal across 128 stratified triangle layers (262K tris), traversing all 128 layers before committing. Evaluates internal node traversal using a synthetic 64-AABB model (reporting Box GIS/s under idealized occupancy).", true, 1},
-            {"RayIntersect", "Intersection Tests", "Ray-Triangle", "Ray Tracing", "MRays/s", "Pure hardware test measuring maximum ray-triangle intersection tests per second", true, 0},
-            {"RayIntersect", "Intersection Tests", "Ray-Box", "Ray Tracing", "MRays/s", "Pure hardware test measuring maximum bounding box (AABB) intersection tests per second", true, 1},
-            {"RayAnyHit", "Alpha-Tested Geometry", "100% Solid (Any-Hit Baseline)", "Ray Tracing", "MRays/s", "Baseline opacity test where all geometry is fully solid with no transparency", true, 0},
-            {"RayAnyHit", "Alpha-Tested Geometry", "50% Solid (Cutout Stress)", "Ray Tracing", "MRays/s", "Measures any-hit shader re-traversal overhead when 50% of candidate hits are rejected across 16 geometric planes", true, 1},
-            {"RayProcedural", "Procedural Geometry", "AABB Spheres", "Ray Tracing", "MRays/s", "Tests ray intersection with mathematically defined spheres rather than polygons", true, 0},
-            {"RayDivergence", "Ray Directional Coherence", "90° Hemispherical (Incoherent)", "Ray Tracing", "MRays/s", "Worst-case divergence: full-hemisphere scatter (diffuse) on the controlled test chamber. This is the hardware cost floor - see 'Incoherent Ray Tracing' for how SER/DGC recover it", true, 0},
-            {"RayDivergence", "Ray Directional Coherence", "67.5° Cone Spread", "Ray Tracing", "MRays/s", "Wide 67.5-degree cone (rough surfaces): heavy but bounded divergence, part of the controlled cost-curve sweep", true, 1},
-            {"RayDivergence", "Ray Directional Coherence", "45° Cone Spread", "Ray Tracing", "MRays/s", "45-degree cone (semi-glossy surfaces): moderate spread with a measurable cache penalty on the controlled test chamber", true, 2},
-            {"RayDivergence", "Ray Directional Coherence", "22.5° Cone Spread", "Ray Tracing", "MRays/s", "22.5-degree cone (glossy surfaces): tight spread, small cache penalty on the controlled test chamber", true, 3},
-            {"RayDivergence", "Ray Directional Coherence", "0° Beam (Coherent)", "Ray Tracing", "MRays/s", "All rays perfectly parallel (mirror): peak traversal speed, the top of the cost-curve sweep", true, 4}
-        }});
-
-        m_categories.push_back(cat);
-    }
-
-    // 4. [Graphics] (1 subgroup, 3 tests)
-    {
-        BenchmarkCategory cat;
-        cat.name = "Graphics";
-        cat.description = "Fixed-function rasterizer ROP throughput and blending";
-
-        cat.subgroups.push_back({"Graphics & ROP Fill Rate", "Graphics", "Pixel Fill Rate", "Fixed-function rasterizer fill rate across color formats", {
-            {"Pixel Fill Rate", "ROP Throughput", "RGBA8 Color Fill", "Graphics", "GPixels/s", "Standard 32-bit color rendering fill rate to frame buffers", true, 0},
-            {"Pixel Fill Rate", "ROP Throughput", "RGBA16F HDR Fill", "Graphics", "GPixels/s", "High dynamic range 64-bit HDR color rendering fill rate", true, 1},
-            {"Pixel Fill Rate", "ROP Throughput", "Alpha Blending Fill", "Graphics", "GPixels/s", "Transparent surface blending fill rate combining overlapping pixels", true, 2}
-        }});
-
-        m_categories.push_back(cat);
-    }
-
-    // 5. [Host System] (1 subgroup, 7 tests)
-    {
-        BenchmarkCategory cat;
-        cat.name = "Host System";
-        cat.description = "Host CPU system memory DDR streaming bandwidth and latency";
-
-        cat.subgroups.push_back({"Host CPU System Memory", "Host System", "System Memory Bandwidth", "Host CPU DDR read, write, copy bandwidth and latency", {
-            {"System Memory Bandwidth", "Host CPU Memory Bandwidth", "Multi-Threaded Read", "System", "GB/s", "Main system RAM read speed using all CPU cores", true, 0},
-            {"System Memory Bandwidth", "Host CPU Memory Bandwidth", "Multi-Threaded Write", "System", "GB/s", "Main system RAM write speed using all CPU cores", true, 1},
-            {"System Memory Bandwidth", "Host CPU Memory Bandwidth", "Multi-Threaded Copy", "System", "GB/s", "Main system RAM copy speed using all CPU cores", true, 2},
-            {"System Memory Bandwidth", "Host CPU Memory Bandwidth", "Single-Threaded Read (1T)", "System", "GB/s", "Main system RAM read speed using a single CPU core", true, 3},
-            {"System Memory Bandwidth", "Host CPU Memory Bandwidth", "Single-Threaded Write (1T)", "System", "GB/s", "Main system RAM write speed using a single CPU core", true, 4},
-            {"System Memory Bandwidth", "Host CPU Memory Bandwidth", "Single-Threaded Copy (1T)", "System", "GB/s", "Main system RAM copy speed using a single CPU core", true, 5},
-            {"System Memory Latency", "Host CPU Memory Latency", "Default", "System", "ns", "Memory access response time (latency) from CPU caches down to RAM", true, 0}
-        }});
-
-        m_categories.push_back(cat);
-    }
-
-    applyVisualizationMetadata();
-}
-
-void GuiApp::applyVisualizationMetadata() {
-    // Declarative mapping of graphics-pipeline workloads to tooltip visualizations.
-    // Keyed by (engineId, configIndex) to keep the category initializer lists above
-    // untouched. Scene-relative assets use the "{scene}" token, resolved at render
-    // time against the currently selected benchmark scene (showroom fallback).
-    struct VizEntry {
-        const char* engineId;
-        int configIndex;
-        BenchmarkVisualization viz;
-    };
-
-    const VizEntry entries[] = {
-        // ---- RayASBuild: BLAS build/update (0-4), TLAS construction (5-7) ----
-        {"RayASBuild", 0, {"assets/thumbnails/thumb_blas_wireframe.png", "",
-            "Vehicle mesh enclosed by hierarchical AABBs - the geometry staged into the bottom-level structure", 16.0f/9.0f, 3, 0}},
-        {"RayASBuild", 1, {"assets/thumbnails/thumb_blas_wireframe.png", "",
-            "Incremental BLAS update: only moved geometry is re-inserted, sibling nodes are re-bounded in place", 16.0f/9.0f, 3, 0}},
-        {"RayASBuild", 2, {"assets/thumbnails/thumb_blas_wireframe.png", "",
-            "5M-triangle build: deeper tree levels, wider nodes, higher memory-bandwidth pressure during sorting", 16.0f/9.0f, 3, 0}},
-        {"RayASBuild", 3, {"assets/thumbnails/thumb_blas_wireframe.png", "",
-            "Dynamic update of complex geometry: per-instance transforms are refreshed without a full rebuild", 16.0f/9.0f, 3, 0}},
-        {"RayASBuild", 4, {"assets/thumbnails/thumb_blas_wireframe.png", "",
-            "10M-triangle build: stresses triangle sorting, node packing, and BVH memory allocation at scale", 16.0f/9.0f, 3, 0}},
-        {"RayASBuild", 5, {"", "tlas_corridor_20k",
-            "100 discrete rooms: disjoint non-overlapping AABBs with 1:4 mesh uniqueness (~5,000 unique BLASes)", 16.0f/9.0f, 3, 2}},
-        {"RayASBuild", 6, {"", "tlas_jungle_50k",
-            "Continuous undulating terrain: 50K foliage instances with heavy AABB overlap reusing 500 BLASes", 16.0f/9.0f, 3, 2}},
-        {"RayASBuild", 7, {"", "tlas_openworld_200k",
-            "Massive open world: 20 macro sectors (10K inst/sector) spanning kilometers; multi-tier tree", 16.0f/9.0f, 3, 2}},
-
-        // ---- RayScheduling: material shading (0-2) ----
-        {"RayScheduling", 0, {"assets/thumbnails/thumb_material_lineup.png", "",
-            "Eight BSDF archetypes (car paint, jade SSS, glass, velvet, rust, floor, gold, chrome) shaded per hit", 16.0f/9.0f, 2, 0}},
-        {"RayScheduling", 1, {"assets/thumbnails/thumb_material_lineup.png", "",
-            "Closest-hit shaders reordered by hardware SER (requires VK_EXT_ray_tracing_invocation_reorder) into 8 uniform material bins, removing wavefront divergence", 16.0f/9.0f, 2, 0}},
-        {"RayScheduling", 2, {"assets/thumbnails/thumb_material_lineup.png", "",
-            "DGC sorts hits into 8 material-coherent work queues and dispatches specialized PSOs", 16.0f/9.0f, 2, 0}},
-
-        // ---- RayScheduling: path tracing (3-5, 25: 1 SPP, 23-24: 16 SPP) ----
-        {"RayScheduling", 3, {"assets/thumbnails/thumb_{scene}_pathtracing_1spp.png", "",
-            "Full multi-bounce path tracing (1 SPP): direct sun/sky + stochastic indirect GI bounces in one megakernel", 16.0f/9.0f, 1, 5}},
-        {"RayScheduling", 4, {"assets/thumbnails/thumb_{scene}_pathtracing_1spp.png", "",
-            "Multi-bounce path tracing (1 SPP) on hardware ray tracing pipelines with SER coherence reordering (requires VK_EXT_ray_tracing_invocation_reorder)", 16.0f/9.0f, 1, 5}},
-        {"RayScheduling", 5, {"assets/thumbnails/thumb_{scene}_pathtracing_1spp.png", "",
-            "Multi-bounce path tracing (1 SPP) via DGC: active rays are compacted into ping-pong queues each bounce", 16.0f/9.0f, 1, 5}},
-        {"RayScheduling", 25, {"assets/thumbnails/thumb_{scene}_pathtracing_1spp.png", "",
-            "Persistent workgroups dynamically claim 8x4 Morton tiles from a global atomic queue to balance multi-bounce load", 16.0f/9.0f, 1, 5}},
-        {"RayScheduling", 23, {"assets/thumbnails/thumb_{scene}_pathtracing_16spp.png", "",
-            "16-sample-per-pixel multi-bounce path tracing: 16x the bounce rays of 1 SPP for converged global illumination", 16.0f/9.0f, 1, 5}},
-        {"RayScheduling", 24, {"assets/thumbnails/thumb_{scene}_pathtracing_16spp.png", "",
-            "16 SPP multi-bounce path tracing with DGC: per-bounce work queues keep cores saturated across all 16 samples", 16.0f/9.0f, 1, 5}},
-
-        // ---- RayScheduling: incoherent GI (6-8) - technique comparison ----
-        {"RayScheduling", 6, {"", "incoherent_naive",
-            "No reordering: every wavefront mixes all direction groups - the unmitigated baseline", 16.0f/9.0f, 1, 5}},
-        {"RayScheduling", 7, {"", "incoherent_ser",
-            "Hardware SER re-bins the same scattered rays into direction-coherent groups", 16.0f/9.0f, 1, 5}},
-        {"RayScheduling", 8, {"", "incoherent_dgc",
-            "DGC classifies the same rays into octants and compacts each into its own work queue", 16.0f/9.0f, 1, 5}},
-
-        // ---- RayScheduling: full frame (9-11) ----
-        {"RayScheduling", 9, {"assets/thumbnails/thumb_{scene}_stage7_final.png", "",
-            "Complete beauty pass: primary rays + shadows + RTAO + direct PBR + indirect GI in one pipeline", 16.0f/9.0f, 1, 6}},
-        {"RayScheduling", 10, {"assets/thumbnails/thumb_{scene}_stage7_final.png", "",
-            "Full frame on hardware ray tracing with SER reordering across every stage", 16.0f/9.0f, 1, 6}},
-        {"RayScheduling", 11, {"assets/thumbnails/thumb_{scene}_stage7_final.png", "",
-            "Full frame via GPU-driven command queues; each stage re-dispatches from compacted work", 16.0f/9.0f, 1, 6}},
-
-        // ---- RayScheduling: traversal ordering (12, 14-16) ----
-        {"RayScheduling", 12, {"", "traversal_scanline",
-            "Row-by-row dispatch: baseline order, long strides between consecutive rays", 16.0f/9.0f, 1, 0}},
-        {"RayScheduling", 14, {"", "traversal_tiled_8x4",
-            "8x4 pixel tiles dispatched together: short strides keep BVH nodes cache-hot", 16.0f/9.0f, 1, 0}},
-        {"RayScheduling", 15, {"", "traversal_morton_8x4",
-            "Tiles visited along a Morton Z-curve: spatial locality preserved across tile boundaries", 16.0f/9.0f, 1, 0}},
-        {"RayScheduling", 16, {"", "traversal_morton_4x8",
-            "Tall 4x8 tiles on a Z-curve: probes the hardware's directional cache preference", 16.0f/9.0f, 1, 0}},
-
-        // ---- RayScheduling: wavefront compaction (26, 28, 13) ----
-        {"RayScheduling", 26, {"", "compaction_128b_expanded",
-            "Single-pass stream compaction filtering sky misses and writing 128-byte expanded hit state records (8x vec4, Baseline)", 16.0f/9.0f, -1, 0}},
-        {"RayScheduling", 28, {"", "compaction_32b_packed",
-            "Single-pass stream compaction writing 32-byte octahedrally-packed hit records (2x vec4, 4x less bandwidth)", 16.0f/9.0f, -1, 0}},
-        {"RayScheduling", 13, {"", "wave_ballot_compaction",
-            "Subgroup ballot bins active surface hits into 8 material queues using 1 single atomic add per wave", 16.0f/9.0f, -1, 0}},
-
-        // ---- RayScheduling: primary rays (17, 18, 29, 30) ----
-        {"RayScheduling", 17, {"assets/thumbnails/thumb_{scene}_stage2_primary.png", "",
-            "Primary camera ray hits rendered as world-space G-Buffer normals", 16.0f/9.0f, 1, 1}},
-        {"RayScheduling", 18, {"assets/thumbnails/thumb_{scene}_stage2_primary.png", "",
-            "Primary rays classified into GPU work queues to evaluate G-Buffer normals without sky-lane waste", 16.0f/9.0f, 1, 1}},
-        {"RayScheduling", 29, {"assets/thumbnails/thumb_{scene}_stage2_primary.png", "",
-            "Primary rays on dedicated hardware ray-tracing pipelines (RTP) outputting G-Buffer normals", 16.0f/9.0f, 1, 1}},
-        {"RayScheduling", 30, {"assets/thumbnails/thumb_{scene}_stage2_primary.png", "",
-            "Hardware ray reordering (RTP + SER) groups primary rays before G-Buffer normal evaluation", 16.0f/9.0f, 1, 1}},
-
-        // ---- RayScheduling: directional shadows (19-22) ----
-        {"RayScheduling", 19, {"assets/thumbnails/thumb_{scene}_stage3_shadow.png", "",
-            "Per-pixel visibility rays toward the sun produce this binary shadow mask", 16.0f/9.0f, 1, 2}},
-        {"RayScheduling", 20, {"assets/thumbnails/thumb_{scene}_stage3_shadow.png", "",
-            "Shadow rays on hardware pipelines with early termination at first hit", 16.0f/9.0f, 1, 2}},
-        {"RayScheduling", 21, {"assets/thumbnails/thumb_{scene}_stage3_shadow.png", "",
-            "Shadow rays batched through GPU work queues", 16.0f/9.0f, 1, 2}},
-        {"RayScheduling", 22, {"assets/thumbnails/thumb_{scene}_stage3_shadow.png", "",
-            "3x the shadow rays: one visibility pass per light, batched by DGC light binning", 16.0f/9.0f, 1, 2}},
-
-        // ---- RayScheduling: alpha cutout divergence (27) ----
-        {"RayScheduling", 27, {"assets/thumbnails/thumb_{scene}_alpha_cutout.png", "",
-            "Procedural alpha-cutout masks reject candidate triangles mid-traversal, forcing repeated BVH re-entry", 16.0f/9.0f, 3, 1}},
-
-        // ---- RayScheduling: multi-light evaluation (31-34) ----
-        {"RayScheduling", 31, {"assets/thumbnails/thumb_{scene}_stage5_direct.png", "",
-            "Direct PBR shading under one light: GGX specular + Lambert diffuse per hit", 16.0f/9.0f, 1, 4}},
-        {"RayScheduling", 32, {"assets/thumbnails/thumb_{scene}_stage5_direct.png", "",
-            "Single-light shading with DGC-compacted surface hits", 16.0f/9.0f, 1, 4}},
-        {"RayScheduling", 33, {"assets/thumbnails/thumb_{scene}_multilight_128_dgc.png", "",
-            "128 lights evaluated per hit in one monolithic pass; sky misses stall active lanes", 16.0f/9.0f, 1, 4}},
-        {"RayScheduling", 34, {"assets/thumbnails/thumb_{scene}_multilight_128_dgc.png", "",
-            "DGC compacts active surface hits (eliminating sky misses) and evaluates 128 lights in 8x16 batched passes", 16.0f/9.0f, 1, 4}},
-
-        // ---- RayRawTraversal: coherent triangles (0), deep boxes (1) ----
-        {"RayRawTraversal", 0, {"", "bvh_coherent_triangles",
-            "32 planar triangle layers (65.5K tris): parallel vertical rays terminate immediately on Layer 0 with 0% misses", 16.0f/9.0f, -1, 0}},
-        {"RayRawTraversal", 1, {"", "bvh_nested_boxes",
-            "128 planar triangle layers (262K tris): rays traverse all 128 layers from top to bottom before committing", 16.0f/9.0f, -1, 0}},
-
-        // ---- RayIntersect: ray-triangle (0), ray-box (1) ----
-        {"RayIntersect", 0, {"", "intersect_ray_triangle",
-            "Moller-Trumbore ray-triangle test: the innermost intersection primitive", 16.0f/9.0f, -1, 0}},
-        {"RayIntersect", 1, {"", "intersect_ray_box",
-            "AABB slab test: the fast rejection primitive executed at every BVH node", 16.0f/9.0f, -1, 0}},
-
-        // ---- RayAnyHit: 100% solid (0), 50% cutout (1) ----
-        {"RayAnyHit", 0, {"", "anyhit_100_solid",
-            "16 planar layers: all geometry 100% solid; ray terminates on Plane 0 with zero BVH re-entries", 16.0f/9.0f, -1, 0}},
-        {"RayAnyHit", 1, {"", "anyhit_50_cutout",
-            "16 planar layers: 50% of candidate hits rejected, forcing hardware BVH traversal re-entry", 16.0f/9.0f, -1, 0}},
-
-        // ---- RayProcedural: AABB spheres (0) ----
-        {"RayProcedural", 0, {"", "procedural_sphere",
-            "Analytic sphere intersection: no triangle fetch, no barycentrics - pure ALU math", 16.0f/9.0f, -1, 0}},
-
-        // ---- RayDivergence: 90 (0), 67.5 (1), 45 (2), 22.5 (3), 0 (4) ----
-        {"RayDivergence", 0, {"", "cone_divergence_90",
-            "Incoming rays hit a matte surface and scatter across the full ±90° (180°) hemisphere into unrelated BVH branches", 16.0f/9.0f, -1, 0}},
-        {"RayDivergence", 1, {"", "cone_divergence_67.5",
-            "Incoming rays hit a rough surface and scatter within a ±67.5° (135°) cone with heavy cross-lane divergence", 16.0f/9.0f, -1, 0}},
-        {"RayDivergence", 2, {"", "cone_divergence_45",
-            "Incoming rays hit a semi-glossy surface and reflect within a ±45° (90°) cone with moderate BVH cache locality", 16.0f/9.0f, -1, 0}},
-        {"RayDivergence", 3, {"", "cone_divergence_22.5",
-            "Incoming rays hit a glossy surface and reflect within a tight ±22.5° (45°) cone around the reflection normal", 16.0f/9.0f, -1, 0}},
-        {"RayDivergence", 4, {"", "cone_divergence_0",
-            "Incoming rays reflect off a perfect mirror (0° spread): all wavefront lanes traverse the same BVH path in lockstep", 16.0f/9.0f, -1, 0}},
-
-        // ---- Pixel Fill Rate: RGBA8 (0), RGBA16F (1), Alpha blend (2) ----
-        {"Pixel Fill Rate", 0, {"", "rop_fill_rgba8",
-            "32-bit color fill: one pixel per ROP clock, pure rasterizer throughput", 16.0f/9.0f, -1, 0}},
-        {"Pixel Fill Rate", 1, {"", "rop_fill_hdr",
-            "64-bit RGBA16F HDR fill: 2x the color bandwidth of RGBA8 per pixel", 16.0f/9.0f, -1, 0}},
-        {"Pixel Fill Rate", 2, {"", "rop_fill_blend",
-            "Alpha blending: read-modify-write per overlapping pixel stresses the blend stage", 16.0f/9.0f, -1, 0}},
-    };
-
-    int matched = 0;
-    for (const auto& e : entries) {
-        bool found = false;
+        // Category match (compute, memory, raytracing, scheduling, graphics, system)
+        bool matchedCategory = false;
         for (auto& cat : m_categories) {
-            for (auto& sub : cat.subgroups) {
-                for (auto& item : sub.items) {
-                    if (item.id == e.engineId && item.configIndex == e.configIndex) {
-                        item.viz = e.viz;
-                        found = true;
+            std::string lowerCat = cat.name;
+            lowerCat.erase(std::remove(lowerCat.begin(), lowerCat.end(), ' '), lowerCat.end());
+            for (char& ch : lowerCat) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+            if (lowerTok == lowerCat || (lowerTok == "system" && lowerCat == "hostsystem")) {
+                for (auto& sg : cat.subgroups) {
+                    for (auto& item : sg.items) {
+                        if (item.isSupported) {
+                            item.selected = true;
+                            if (item.category == "System") anySysSelected = true;
+                            else anyGpuSelected = true;
+                        }
+                    }
+                }
+                matchedCategory = true;
+            }
+        }
+        if (matchedCategory) continue;
+
+        std::string resolvedId = tok;
+        auto aliasIt = aliasMap.find(lowerTok);
+        if (aliasIt != aliasMap.end()) {
+            resolvedId = aliasIt->second;
+        }
+
+        for (auto& cat : m_categories) {
+            for (auto& sg : cat.subgroups) {
+                for (auto& item : sg.items) {
+                    if (equalsCaseInsensitive(item.id, resolvedId) ||
+                        equalsCaseInsensitive(item.id, tok) ||
+                        equalsCaseInsensitive(item.subcategory, tok) ||
+                        containsCaseInsensitive(item.name, tok)) {
+                        if (item.isSupported) {
+                            item.selected = true;
+                            if (item.category == "System") anySysSelected = true;
+                            else anyGpuSelected = true;
+                        }
                     }
                 }
             }
         }
-        if (found) matched++;
-        else std::cerr << "[GPUBench GUI] WARNING: viz entry unmatched: "
-                      << e.engineId << " config " << e.configIndex << "\n";
-    }
-    std::cout << "[GPUBench GUI] Tooltip visualizations: " << matched << "/"
-              << sizeof(entries) / sizeof(entries[0]) << " workloads mapped\n";
-}
-
-std::string GuiApp::currentSceneTag() const {
-    // Sponza (Crytek Sponza atrium) is the canonical reference architecture scene.
-    if (m_scene == "forest" || m_scene == "outdoor" || m_scene == "showroom") return m_scene;
-    if (m_scene == "indoor") return "indoor";
-    if (!m_suiteActiveScene.empty() && m_suiteActiveScene != "all") return m_suiteActiveScene;
-    return "indoor";
-}
-
-void GuiApp::renderBenchmarkTooltip(const BenchmarkItem& item, const std::string& sceneOverride) {
-    ImGui::BeginTooltip();
-
-    float contentWidth = s(360.0f);
-
-    // 1. Header & badges
-    pushBoldFont();
-    ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + contentWidth);
-    ImGui::TextColored(ImVec4(0.40f, 0.80f, 1.00f, 1.0f), "%s", item.name.c_str());
-    ImGui::PopTextWrapPos();
-    popBoldFont();
-    ImGui::TextDisabled("Subcategory: %s | Metric: %s", item.subcategory.c_str(), item.metricType.c_str());
-    ImGui::Separator();
-
-    if (!item.isSupported) {
-        std::string catStr = !item.limitationCategory.empty() ? item.limitationCategory : "Limitation";
-        std::string reason = !item.supportReason.empty() ? item.supportReason : "Hardware or API limitation";
-        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + contentWidth);
-        ImGui::TextColored(ImVec4(0.95f, 0.60f, 0.20f, 1.0f), "Status: UNSUPPORTED (%s)", catStr.c_str());
-        ImGui::TextColored(ImVec4(0.90f, 0.75f, 0.50f, 1.0f), "Reason: %s", reason.c_str());
-        ImGui::PopTextWrapPos();
-        ImGui::Separator();
     }
 
-    // 2. Textual explanation
-    ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + contentWidth);
-    ImGui::TextUnformatted(item.description.c_str());
-    ImGui::PopTextWrapPos();
-
-    // 3. Visualization canvas (Tier 1 texture or Tier 2 procedural diagram)
-    if (item.viz.hasVisualization()) {
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::Spacing();
-
-        float canvasWidth = contentWidth;
-        float ar = item.viz.aspectRatio > 0.001f ? item.viz.aspectRatio : (16.0f / 9.0f);
-        float canvasHeight = canvasWidth / ar;
-
-        ImVec2 p0 = ImGui::GetCursorScreenPos();
-        ImVec2 p1 = ImVec2(p0.x + canvasWidth, p0.y + canvasHeight);
-        ImDrawList* drawList = ImGui::GetWindowDrawList();
-
-        drawList->AddRectFilled(p0, p1, IM_COL32(12, 14, 20, 255), s(4.0f));
-        drawList->PushClipRect(p0, p1, true);
-
-        if (!item.viz.assetPath.empty()) {
-            // Tier 1: static pre-baked thumbnail, lazily loaded & cached
-            std::string assetPath = item.viz.assetPath;
-            std::string scene = !sceneOverride.empty() ? sceneOverride : currentSceneTag();
-            size_t pos;
-            while ((pos = assetPath.find("{scene}")) != std::string::npos) {
-                assetPath.replace(pos, 7, scene);
+    for (auto& cat : m_categories) {
+        bool catAny = false;
+        for (auto& sg : cat.subgroups) {
+            bool sgAny = false;
+            for (const auto& item : sg.items) {
+                if (item.selected) { sgAny = true; break; }
             }
-            auto tex = getOrLoadTexture(assetPath);
-            if (tex.isValid()) {
-                // Letterbox the image inside the canvas preserving its aspect
-                float tar = (tex.height > 0) ? (static_cast<float>(tex.width) / tex.height) : ar;
-                float imgW = canvasWidth;
-                float imgH = canvasWidth / tar;
-                if (imgH > canvasHeight) {
-                    imgH = canvasHeight;
-                    imgW = canvasHeight * tar;
+            sg.allSelected = sgAny;
+            if (sgAny) catAny = true;
+        }
+        cat.allSelected = catAny;
+    }
+
+    for (auto& dev : m_devices) {
+        if (dev.isSystem) {
+            dev.selected = anySysSelected;
+        } else if (!anyGpuSelected && anySysSelected) {
+            dev.selected = false;
+        }
+    }
+}
+
+void GuiApp::startBenchmarks() {
+    if (m_execState == ExecutionState::Running) {
+        return;
+    }
+
+    if (m_execThread.joinable()) {
+        m_execThread.join();
+    }
+
+    // Release any borrowed VkImageView descriptors on the main thread BEFORE
+    // the background worker recreates SharedPreviewImages.
+    clearTextureCache();
+
+    std::vector<std::string> benchmarksToRun;
+    std::vector<std::string> selectedWorkloads;
+    size_t systemSelectedItemCount = 0;
+
+    for (const auto& cat : m_categories) {
+        for (const auto& sg : cat.subgroups) {
+            for (const auto& item : sg.items) {
+                if (item.selected && item.isSupported) {
+                    if (std::find(benchmarksToRun.begin(), benchmarksToRun.end(), item.id) == benchmarksToRun.end()) {
+                        benchmarksToRun.push_back(item.id);
+                    }
+                    if (item.configIndex >= 0) {
+                        selectedWorkloads.push_back(item.id + "#" + std::to_string(item.configIndex));
+                    } else {
+                        selectedWorkloads.push_back(item.id + ":" + item.name);
+                    }
+                    if (item.category == "System") {
+                        systemSelectedItemCount++;
+                    }
                 }
-                ImVec2 ip0 = ImVec2(p0.x + (canvasWidth - imgW) * 0.5f, p0.y + (canvasHeight - imgH) * 0.5f);
-                ImVec2 ip1 = ImVec2(ip0.x + imgW, ip0.y + imgH);
-                drawList->AddImage(reinterpret_cast<ImTextureID>(tex.descriptorSet), ip0, ip1);
+            }
+        }
+    }
+
+    if (benchmarksToRun.empty()) {
+        m_statusMessage = "No supported benchmarks selected!";
+        return;
+    }
+
+    std::vector<uint32_t> deviceIndices;
+    bool runSystemBenchmarks = false;
+    for (const auto& dev : m_devices) {
+        if (dev.selected) {
+            if (dev.isSystem) {
+                runSystemBenchmarks = true;
             } else {
-                std::string fallback = fitTextToPixelWidth("Preview unavailable: " + item.viz.caption, canvasWidth - s(16.0f));
-                ImVec2 tsz = ImGui::CalcTextSize(fallback.c_str());
-                drawList->AddText(ImVec2(p0.x + (canvasWidth - tsz.x) * 0.5f, p0.y + (canvasHeight - tsz.y) * 0.5f),
-                                  IM_COL32(160, 170, 190, 255), fallback.c_str());
+                deviceIndices.push_back(dev.deviceIndex);
             }
-        } else {
-            // Tier 2: procedural vector schematic (crisp at any UI scale)
-            renderProceduralDiagram(item.viz.diagramId, p0, p1);
-        }
-
-        drawList->PopClipRect();
-        drawList->AddRect(p0, p1, IM_COL32(50, 60, 80, 255), s(4.0f));
-        ImGui::Dummy(ImVec2(canvasWidth, canvasHeight));
-
-        // Caption & legend
-        if (!item.viz.caption.empty()) {
-            ImGui::Spacing();
-            ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + canvasWidth);
-            ImGui::TextColored(ImVec4(0.85f, 0.75f, 0.35f, 1.0f), "%s", item.viz.caption.c_str());
-            ImGui::PopTextWrapPos();
-        }
-
-        // Cross-link to the full Ray Tracing Viewport (right-click on row triggers jump)
-        if (item.viz.linkedViewportMode >= 0) {
-            ImGui::Spacing();
-            ImGui::TextColored(ImVec4(0.42f, 0.80f, 1.0f, 0.95f), "Right-click row to open in Ray Tracing Viewport →");
         }
     }
 
-    ImGui::EndTooltip();
-}
+    if (!runSystemBenchmarks) {
+        benchmarksToRun.erase(
+            std::remove_if(benchmarksToRun.begin(), benchmarksToRun.end(),
+                [](const std::string& b) {
+                    return b.find("System Memory") != std::string::npos;
+                }),
+            benchmarksToRun.end());
+        systemSelectedItemCount = 0;
+    }
 
-void GuiApp::renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, ImVec2 p1) const {
-    ImDrawList* dl = ImGui::GetWindowDrawList();
+    if (deviceIndices.empty()) {
+        benchmarksToRun.erase(
+            std::remove_if(benchmarksToRun.begin(), benchmarksToRun.end(),
+                [](const std::string& b) {
+                    return b.find("System Memory") == std::string::npos;
+                }),
+            benchmarksToRun.end());
+    }
 
-    // ImVec2 math helpers (project does not define IMGUI_DEFINE_MATH_OPERATORS)
-    auto add = [](const ImVec2& a, const ImVec2& b) { return ImVec2(a.x + b.x, a.y + b.y); };
-    auto sub = [](const ImVec2& a, const ImVec2& b) { return ImVec2(a.x - b.x, a.y - b.y); };
-    auto mul = [](const ImVec2& a, float s) { return ImVec2(a.x * s, a.y * s); };
-
-    // Shared palette
-    const ImU32 colGrid  = IM_COL32(35, 45, 60, 180);
-    const ImU32 colPath  = IM_COL32(0, 220, 180, 230);
-    const ImU32 colAmber = IM_COL32(255, 190, 60, 230);
-    const ImU32 colHot   = IM_COL32(255, 100, 80, 230);
-    const ImU32 colCool  = IM_COL32(80, 180, 255, 230);
-    const ImU32 colText  = IM_COL32(200, 210, 230, 255);
-    const ImU32 colDim   = IM_COL32(140, 150, 170, 255);
-    const ImU32 colGreen = IM_COL32(90, 220, 120, 230);
-
-    float pad = s(12.0f);
-    auto drawTitle = [&](const char* title) {
-        std::string fitted = fitTextToPixelWidth(title, (p1.x - p0.x) - pad * 2.0f);
-        dl->AddText(ImVec2(p0.x + pad, p0.y + s(6.0f)), colText, fitted.c_str());
-    };
-    ImVec2 area = ImVec2(p0.x + pad, p0.y + s(28.0f));
-    ImVec2 areaEnd = ImVec2(p1.x - pad, p1.y - s(10.0f));
-    float gw = areaEnd.x - area.x;
-    float gh = areaEnd.y - area.y;
-    // Note: item.viz.caption is already rendered with proper word-wrapping right below the canvas
-    auto drawFootnote = [&](const char* text) {
-        (void)text;
-    };
-
-    // ------------------------------------------------------------------
-    // Ray directional divergence cone (cone_divergence_<deg>)
-    // ------------------------------------------------------------------
-    if (diagramId.rfind("cone_divergence_", 0) == 0) {
-        float halfAngleDeg = 0.0f;
-        try { halfAngleDeg = std::stof(diagramId.substr(16)); } catch (...) {}
-        drawTitle(halfAngleDeg == 0.0f ? "Surface Bounce: 0° Beam (Mirror)" :
-                  (halfAngleDeg >= 89.0f ? "Surface Bounce: ±90° Hemisphere (Diffuse)" :
-                                           "Surface Bounce Divergence Cone"));
-
-        float surfY = areaEnd.y - s(6.0f);
-        float surfLeft = area.x + gw * 0.06f;
-        float surfRight = area.x + gw * 0.94f;
-        float surfW = surfRight - surfLeft;
-
-        // Draw rough/microfacet surface profile according to halfAngleDeg
-        float roughnessAmp = (halfAngleDeg / 90.0f) * s(3.5f);
-        const int surfSegs = 28;
-        for (int i = 0; i < surfSegs; ++i) {
-            float x0 = surfLeft + (surfW * i) / surfSegs;
-            float x1 = surfLeft + (surfW * (i + 1)) / surfSegs;
-            float y0 = surfY + ((i % 2 == 0) ? -roughnessAmp : roughnessAmp);
-            float y1 = surfY + (((i + 1) % 2 == 0) ? -roughnessAmp : roughnessAmp);
-            dl->AddLine(ImVec2(x0, y0), ImVec2(x1, y1), IM_COL32(130, 145, 170, 255), 2.0f);
-        }
-
-        // Surface normal N at center
-        ImVec2 centerHit(area.x + gw * 0.54f, surfY);
-        float normalLen = gh * 0.82f;
-        ImVec2 normalEnd(centerHit.x, centerHit.y - normalLen);
-        dl->AddLine(centerHit, normalEnd, IM_COL32(80, 180, 255, 140), 1.2f);
-        dl->AddText(ImVec2(normalEnd.x + s(4.0f), normalEnd.y - s(2.0f)), colCool, "N");
-
-        // True polar half-angle in radians (90 deg -> full +/-90 deg = 180 deg hemisphere!)
-        float maxRad = std::min(halfAngleDeg, 86.0f) * (3.14159265f / 180.0f);
-
-        // Cone envelope arc at center showing the +/-halfAngleDeg spread around N
-        if (halfAngleDeg > 0.0f) {
-            float arcR = normalLen * 0.36f;
-            float a0 = -3.14159265f / 2.0f - maxRad;
-            float a1 = -3.14159265f / 2.0f + maxRad;
-            dl->PathArcTo(centerHit, arcR, a0, a1, 28);
-            dl->PathStroke(IM_COL32(255, 190, 60, 170), 1.2f);
-            // Dashed/dim envelope boundary lines
-            ImVec2 envL(centerHit.x - std::sin(maxRad) * normalLen * 0.75f,
-                        centerHit.y - std::cos(maxRad) * normalLen * 0.75f);
-            ImVec2 envR(centerHit.x + std::sin(maxRad) * normalLen * 0.75f,
-                        centerHit.y - std::cos(maxRad) * normalLen * 0.75f);
-            dl->AddLine(centerHit, envL, IM_COL32(255, 190, 60, 80), 1.0f);
-            dl->AddLine(centerHit, envR, IM_COL32(255, 190, 60, 80), 1.0f);
-        }
-
-        // 6 incoming parallel primary rays hitting adjacent points across the surface,
-        // then bouncing outward with disordered angles inside [-maxRad, +maxRad]
-        const int nLanes = 6;
-        // Non-monotonic disordered scatter fractions in [-1, +1] so adjacent lanes visibly cross/diverge
-        const float scatterFrac[6] = { -0.92f, 0.78f, -0.35f, 0.96f, -0.74f, 0.22f };
-        const float lenScale[6]    = {  0.82f, 0.88f,  0.94f, 0.78f,  0.86f, 0.92f };
-        ImU32 bounceCol = (halfAngleDeg > 60.0f) ? colHot : ((halfAngleDeg > 30.0f) ? colAmber : colGreen);
-
-        for (int i = 0; i < nLanes; ++i) {
-            float laneT = static_cast<float>(i) / (nLanes - 1);
-            float hx = centerHit.x + (laneT - 0.5f) * (surfW * 0.44f);
-            ImVec2 hPt(hx, surfY);
-
-            // Incoming parallel ray (from top-left at a uniform 18-deg incidence angle)
-            float inAng = -18.0f * (3.14159265f / 180.0f);
-            float inLen = normalLen * 0.48f;
-            ImVec2 inStart(hx + std::sin(inAng) * inLen, surfY - std::cos(inAng) * inLen);
-            dl->AddLine(inStart, hPt, IM_COL32(80, 180, 255, 150), 1.2f);
-            dl->AddCircleFilled(hPt, s(2.0f), colCool);
-
-            // Outgoing bounce ray
-            float outAng = (halfAngleDeg == 0.0f) ? 0.0f : (scatterFrac[i] * maxRad);
-            float outLen = normalLen * lenScale[i];
-            ImVec2 outEnd(hPt.x + std::sin(outAng) * outLen, hPt.y - std::cos(outAng) * outLen);
-            dl->AddLine(hPt, outEnd, bounceCol, 1.6f);
-
-            // Arrowhead on outgoing bounce ray
-            ImVec2 dVec( std::sin(outAng), -std::cos(outAng));
-            ImVec2 ah1(outEnd.x - dVec.x * s(4.5f) - dVec.y * s(2.8f),
-                       outEnd.y - dVec.y * s(4.5f) + dVec.x * s(2.8f));
-            ImVec2 ah2(outEnd.x - dVec.x * s(4.5f) + dVec.y * s(2.8f),
-                       outEnd.y - dVec.y * s(4.5f) - dVec.x * s(2.8f));
-            dl->AddLine(outEnd, ah1, bounceCol, 1.4f);
-            dl->AddLine(outEnd, ah2, bounceCol, 1.4f);
-        }
-
-        char buf[64];
-        if (halfAngleDeg >= 89.0f) {
-            snprintf(buf, sizeof(buf), "Spread: ±90° (180° Hemisphere)");
-        } else if (halfAngleDeg == 0.0f) {
-            snprintf(buf, sizeof(buf), "Spread: 0.0° (Parallel Mirror)");
-        } else {
-            snprintf(buf, sizeof(buf), "Spread: ±%.1f° (%.0f° Cone)", halfAngleDeg, halfAngleDeg * 2.0f);
-        }
-        dl->AddText(ImVec2(area.x, area.y), colAmber, buf);
-        const char* sub = (halfAngleDeg == 0.0f) ? "coherent bounce - peak BVH cache reuse" :
-                          (halfAngleDeg <= 22.5f) ? "glossy bounce - tight ray bundle" :
-                          (halfAngleDeg <= 45.0f) ? "semi-glossy bounce - moderate spread" :
-                          (halfAngleDeg <= 67.5f) ? "rough bounce - wide crossing rays" :
-                                                    "diffuse bounce - disordered 180° scatter";
-        dl->AddText(ImVec2(area.x, area.y + s(15.0f)), colDim, sub);
+    if (benchmarksToRun.empty()) {
+        m_statusMessage = "Please select at least one target device matching your selected benchmarks.";
         return;
     }
 
-    // ------------------------------------------------------------------
-    // Traversal ordering: pixel-level scanline vs 8x4 tiled (16x8 grid)
-    // ------------------------------------------------------------------
-    if (diagramId == "traversal_scanline" || diagramId == "traversal_tiled_8x4") {
-        bool tiled = (diagramId == "traversal_tiled_8x4");
-        drawTitle(tiled ? "Traversal: 2D Screen Tiled (8x4)" : "Traversal: Linear 1D Scanline");
+    m_cancelToken.store(false);
+    m_execState = ExecutionState::Running;
+    m_completedTasks = 0;
 
-        const int cols = 16, rows = 8;
-        float cw = gw / cols, ch = gh / rows;
-        for (int r = 0; r < rows; ++r) {
-            for (int c = 0; c < cols; ++c) {
-                ImVec2 c0(area.x + c * cw, area.y + r * ch);
-                ImVec2 c1(c0.x + cw, c0.y + ch);
-                dl->AddRect(c0, c1, colGrid);
-            }
-        }
-
-        std::vector<ImVec2> centers;
-        centers.reserve(cols * rows);
-        if (!tiled) {
-            for (int r = 0; r < rows; ++r)
-                for (int c = 0; c < cols; ++c)
-                    centers.push_back(ImVec2(area.x + (c + 0.5f) * cw, area.y + (r + 0.5f) * ch));
-        } else {
-            const int tc = 8, tr = 4;
-            for (int tr0 = 0; tr0 < rows; tr0 += tr)
-                for (int tc0 = 0; tc0 < cols; tc0 += tc)
-                    for (int r = 0; r < tr; ++r)
-                        for (int c = 0; c < tc; ++c)
-                            centers.push_back(ImVec2(area.x + (tc0 + c + 0.5f) * cw, area.y + (tr0 + r + 0.5f) * ch));
-            for (int tr0 = 0; tr0 < rows; tr0 += tr)
-                for (int tc0 = 0; tc0 < cols; tc0 += tc) {
-                    ImVec2 t0(area.x + tc0 * cw, area.y + tr0 * ch);
-                    ImVec2 t1(area.x + (tc0 + tc) * cw, area.y + (tr0 + tr) * ch);
-                    dl->AddRect(t0, t1, colAmber, 2.0f);
+    size_t sceneMult = (m_scene == "all") ? 4 : 1;
+    size_t perGpuTasks = 0;
+    for (const auto& cat : m_categories) {
+        for (const auto& sg : cat.subgroups) {
+            for (const auto& item : sg.items) {
+                if (item.selected && item.isSupported && item.category != "System") {
+                    if (item.id == "RayScheduling") {
+                        perGpuTasks += sceneMult;
+                    } else if (item.id == "Cache Latency Curve") {
+                        perGpuTasks += 15;
+                    } else {
+                        perGpuTasks += 1;
+                    }
                 }
+            }
         }
-
-        for (size_t i = 1; i < centers.size(); ++i) {
-            dl->AddLine(centers[i - 1], centers[i], colPath, 1.2f);
-        }
-        dl->AddCircleFilled(centers.front(), s(3.0f), colGreen);
-        dl->AddCircleFilled(centers.back(), s(3.0f), colHot);
-        drawFootnote(tiled ? "wrap at tile edge keeps 8x4 ray groups cache-coherent"
-                           : "consecutive rays stride the full row width");
-        return;
     }
 
-    // ------------------------------------------------------------------
-    // Traversal ordering: Morton Z-curve over a 4x4 tile grid
-    // ------------------------------------------------------------------
-    if (diagramId == "traversal_morton_8x4" || diagramId == "traversal_morton_4x8") {
-        bool wide = (diagramId == "traversal_morton_8x4");
-        drawTitle(wide ? "Traversal: 2D Morton Z-Order (8x4)" : "Traversal: 2D Morton Z-Order (4x8)");
+    m_totalTasks = (perGpuTasks * std::max<size_t>(1, deviceIndices.size())) + systemSelectedItemCount;
+    if (m_totalTasks == 0) m_totalTasks = 1;
 
-        const int n = 4;
-        float cw = gw / n, ch = gh / n;
+    m_benchmarkStartTime = std::chrono::steady_clock::now();
+    m_elapsedSeconds = 0.0;
+    m_statusMessage = "Initializing compute contexts...";
+    m_currentBenchmarkName = "Starting...";
+    m_currentlyRunningTestId.clear();
+    m_hasCurrentlyRunningResult = false;
+    m_telemetryNeedsFit = true;
+    m_telemetryWorker.startRecording();
 
-        auto morton2D = [](uint32_t x, uint32_t y) -> uint32_t {
-            auto part1by1 = [](uint32_t v) -> uint32_t {
-                v &= 0x0000ffff;
-                v = (v | (v << 8)) & 0x00FF00FF;
-                v = (v | (v << 4)) & 0x0F0F0F0F;
-                v = (v | (v << 2)) & 0x33333333;
-                v = (v | (v << 1)) & 0x55555555;
-                return v;
+    {
+        std::lock_guard<std::mutex> lock(m_resultsMutex);
+        m_incomingResults.clear();
+    }
+
+    std::vector<std::string> backends = {m_selectedBackend};
+    uint32_t rw = m_renderWidth;
+    uint32_t rh = m_renderHeight;
+    std::string scene = m_scene;
+    uint32_t spp = m_samplesPerPixel;
+    bool dumpRenders = m_dumpRenders;
+    bool verbose = m_verbose;
+    bool debug = m_debug;
+
+    m_execThread = std::thread([this, benchmarksToRun, deviceIndices, backends,
+                                rw, rh, scene, spp, dumpRenders, verbose, debug,
+                                selectedWorkloads]() {
+        try {
+            auto callback = [this](const ResultData& res) {
+                std::lock_guard<std::mutex> lock(m_resultsMutex);
+                m_incomingResults.push_back(res);
             };
-            return (part1by1(y) << 1) | part1by1(x);
-        };
 
-        std::vector<std::pair<uint32_t, ImVec2>> tiles;
-        tiles.reserve(n * n);
-        for (int r = 0; r < n; ++r)
-            for (int c = 0; c < n; ++c)
-                tiles.push_back({morton2D(static_cast<uint32_t>(c), static_cast<uint32_t>(r)),
-                                 ImVec2(area.x + (c + 0.5f) * cw, area.y + (r + 0.5f) * ch)});
-        std::sort(tiles.begin(), tiles.end(),
-                  [](const auto& a, const auto& b) { return a.first < b.first; });
+            RunBenchmarksAPI(
+                benchmarksToRun,
+                deviceIndices,
+                backends,
+                verbose,
+                debug,
+                false,
+                dumpRenders,
+                rw,
+                rh,
+                callback,
+                scene,
+                spp,
+                &m_cancelToken,
+                true,
+                selectedWorkloads
+            );
 
-        for (int r = 0; r < n; ++r) {
-            for (int c = 0; c < n; ++c) {
-                ImVec2 t0(area.x + c * cw, area.y + r * ch);
-                ImVec2 t1(t0.x + cw, t0.y + ch);
-                dl->AddRect(t0, t1, colGrid);
-                // Mini-raster suggesting the intra-tile pixel order
-                if (wide) {
-                    for (int i = 1; i <= 3; ++i)
-                        dl->AddLine(ImVec2(t0.x + s(3.0f), t0.y + ch * i / 4.0f),
-                                    ImVec2(t1.x - s(3.0f), t0.y + ch * i / 4.0f),
-                                    IM_COL32(60, 75, 95, 200), 1.0f);
-                } else {
-                    for (int i = 1; i <= 3; ++i)
-                        dl->AddLine(ImVec2(t0.x + cw * i / 4.0f, t0.y + s(3.0f)),
-                                    ImVec2(t0.x + cw * i / 4.0f, t1.y - s(3.0f)),
-                                    IM_COL32(60, 75, 95, 200), 1.0f);
-                }
-            }
-        }
+            m_telemetryWorker.stopRecording();
+            m_textureCacheNeedsClear.store(true);
 
-        for (size_t i = 1; i < tiles.size(); ++i) {
-            dl->AddLine(tiles[i - 1].second, tiles[i].second, colPath, 1.5f);
-        }
-        for (size_t i = 0; i < tiles.size(); ++i) {
-            ImU32 dotCol = (i == 0) ? colGreen : ((i == tiles.size() - 1) ? colHot : colPath);
-            dl->AddCircleFilled(tiles[i].second, s(2.5f), dotCol);
-            if (i < 4 || i >= tiles.size() - 2) {
-                char b[16];
-                snprintf(b, sizeof(b), "%u", static_cast<unsigned>(i));
-                ImVec2 tsz = ImGui::CalcTextSize(b);
-                dl->AddText(ImVec2(tiles[i].second.x + s(4.0f), tiles[i].second.y - tsz.y - s(2.0f)), colDim, b);
-            }
-        }
-        drawFootnote("tiles visited along the Z-curve: locality across boundaries");
-        return;
-    }
-
-    // ------------------------------------------------------------------
-    // Wavefront stream compaction via ballot (Config 13: 8-queue material sort, 16B records)
-    // ------------------------------------------------------------------
-    if (diagramId == "wave_ballot_compaction") {
-        drawTitle("Wave Ballot Material Queue Sort (16B Records)");
-
-        const int lanes = 16;
-        static const bool active[16] = {
-            1,1,1,0, 1,1,0,1, 1,1,0,0, 1,0,1,1
-        };
-        float labelW = s(84.0f);
-        float barX = area.x + labelW;
-        float barW = areaEnd.x - barX;
-        float lw = barW / lanes;
-        float laneH = s(18.0f);
-        float rowGap = s(36.0f);
-        float startY = area.y + s(8.0f);
-
-        // Row 1: wavefront lanes
-        dl->AddText(ImVec2(area.x, startY + s(1.0f)), colDim, "wavefront");
-        for (int i = 0; i < lanes; ++i) {
-            ImVec2 l0(barX + i * lw + s(1.0f), startY);
-            ImVec2 l1(l0.x + lw - s(2.0f), l0.y + laneH);
-            if (active[i]) {
-                dl->AddRectFilled(l0, l1, IM_COL32(60, 140, 80, 255), s(2.0f));
-                dl->AddRect(l0, l1, colGreen);
+            std::lock_guard<std::mutex> lock(m_resultsMutex);
+            if (m_cancelToken.load()) {
+                m_execState = ExecutionState::Cancelled;
+                m_statusMessage = "Benchmark execution aborted by user.";
             } else {
-                dl->AddRectFilled(l0, l1, IM_COL32(70, 40, 40, 255), s(2.0f));
-                dl->AddRect(l0, l1, IM_COL32(150, 70, 60, 200));
+                m_execState = ExecutionState::Completed;
+                m_statusMessage = "Suite execution complete.";
+                m_switchToScorecard = true;
             }
+        } catch (const std::exception& e) {
+            m_telemetryWorker.stopRecording();
+            std::lock_guard<std::mutex> lock(m_resultsMutex);
+            m_execState = ExecutionState::Error;
+            m_statusMessage = std::string("Error: ") + e.what();
         }
-
-        // Row 2: ballot mask bits centered under each lane
-        float y2 = startY + rowGap;
-        dl->AddText(ImVec2(area.x, y2), colDim, "ballot mask");
-        for (int i = 0; i < lanes; ++i) {
-            const char* bitStr = active[i] ? "1" : "0";
-            ImVec2 bsz = ImGui::CalcTextSize(bitStr);
-            float bx = barX + (i + 0.5f) * lw - bsz.x * 0.5f;
-            dl->AddText(ImVec2(bx, y2), active[i] ? colAmber : colDim, bitStr);
-        }
-
-        // Row 3: compacted material queues (8 bins, 16B/hit)
-        float y3 = y2 + rowGap;
-        dl->AddText(ImVec2(area.x, y3 + s(1.0f)), colDim, "8 mat bins");
-        int k = 0;
-        const ImU32 binColors[4] = {colCool, colGreen, colAmber, colPath};
-        for (int i = 0; i < lanes; ++i) {
-            ImVec2 l0(barX + i * lw + s(1.0f), y3);
-            ImVec2 l1(l0.x + lw - s(2.0f), l0.y + laneH);
-            if (active[i]) {
-                ImU32 bc = binColors[(k / 3) % 4];
-                dl->AddRectFilled(l0, l1, IM_COL32(35, 70, 95, 255), s(2.0f));
-                dl->AddRect(l0, l1, bc);
-                ++k;
-            } else {
-                dl->AddRect(l0, l1, IM_COL32(40, 48, 60, 120));
-            }
-        }
-        return;
-    }
-
-    // ------------------------------------------------------------------
-    // Single-Pass Stream Compaction: 128B Expanded vs 32B Packed Records (Configs 26 & 28)
-    // ------------------------------------------------------------------
-    if (diagramId == "compaction_128b_expanded" || diagramId == "compaction_32b_packed") {
-        bool isPacked = (diagramId == "compaction_32b_packed");
-        drawTitle(isPacked ? "Queue Compaction: 32B Packed Hybrid Record"
-                           : "Queue Compaction: 128B Expanded Hit Record");
-
-        const int lanes = 16;
-        static const bool hitMask[16] = {1,1,0,1, 0,1,1,1, 0,0,1,1, 1,0,1,1};
-        float labelW = s(86.0f);
-        float barX = area.x + labelW;
-        float barW = areaEnd.x - barX;
-        float lw = barW / lanes;
-        float laneH = s(18.0f);
-        float startY = area.y + s(8.0f);
-
-        // Row 1: Primary ray traversal (Hits vs Sky Misses)
-        dl->AddText(ImVec2(area.x, startY + s(1.0f)), colDim, "primary rays");
-        int activeHits = 0;
-        for (int i = 0; i < lanes; ++i) {
-            ImVec2 l0(barX + i * lw + s(1.0f), startY);
-            ImVec2 l1(l0.x + lw - s(2.0f), l0.y + laneH);
-            if (hitMask[i]) {
-                dl->AddRectFilled(l0, l1, IM_COL32(45, 130, 75, 255), s(2.0f));
-                dl->AddRect(l0, l1, colGreen);
-                activeHits++;
-            } else {
-                dl->AddRectFilled(l0, l1, IM_COL32(65, 38, 38, 255), s(2.0f));
-                dl->AddRect(l0, l1, colHot);
-            }
-        }
-
-        // Row 2: Record layout comparison (8x vec4 = 128B vs 2x vec4 = 32B)
-        float y2 = startY + s(38.0f);
-        dl->AddText(ImVec2(area.x, y2 + s(1.0f)), colDim, isPacked ? "32B record" : "128B record");
-        int vec4Count = isPacked ? 2 : 8;
-        float slotW = (barW * (isPacked ? 0.42f : 0.98f)) / vec4Count;
-        const char* fields128[8] = {"pos+t", "dir+m", "norm", "bary", "v0", "v1", "v2", "pad"};
-        const char* fields32[2]  = {"pos+t", "octN+mat"};
-        for (int v = 0; v < vec4Count; ++v) {
-            ImVec2 b0(barX + v * slotW + s(1.0f), y2);
-            ImVec2 b1(b0.x + slotW - s(2.0f), b0.y + laneH);
-            ImU32 fillCol = isPacked ? IM_COL32(30, 85, 120, 255) : IM_COL32(85, 60, 25, 255);
-            ImU32 bordCol = isPacked ? colCool : colAmber;
-            dl->AddRectFilled(b0, b1, fillCol, s(2.0f));
-            dl->AddRect(b0, b1, bordCol);
-            const char* lbl = isPacked ? fields32[v] : fields128[v];
-            ImVec2 tsz = ImGui::CalcTextSize(lbl);
-            if (tsz.x < (slotW - s(2.0f))) {
-                dl->AddText(ImVec2(b0.x + (slotW - tsz.x) * 0.5f, b0.y + (laneH - tsz.y) * 0.5f), colText, lbl);
-            }
-        }
-        if (isPacked) {
-            dl->AddText(ImVec2(barX + barW * 0.45f, y2 + s(1.0f)), colGreen, "4x less VRAM traffic");
-        }
-
-        // Row 3: Unified compacted stream
-        float y3 = y2 + s(38.0f);
-        dl->AddText(ImVec2(area.x, y3 + s(1.0f)), colDim, "stream out");
-        for (int i = 0; i < lanes; ++i) {
-            ImVec2 l0(barX + i * lw + s(1.0f), y3);
-            ImVec2 l1(l0.x + lw - s(2.0f), l0.y + laneH);
-            if (i < activeHits) {
-                dl->AddRectFilled(l0, l1, isPacked ? IM_COL32(35, 110, 145, 255) : IM_COL32(110, 80, 30, 255), s(2.0f));
-                dl->AddRect(l0, l1, isPacked ? colCool : colAmber);
-            } else {
-                dl->AddRect(l0, l1, IM_COL32(40, 48, 60, 110));
-            }
-        }
-        return;
-    }
-
-    // ------------------------------------------------------------------
-    // TLAS 1: Indoor Corridor (20,000 Instances) - Disjoint Room Grid
-    // ------------------------------------------------------------------
-    if (diagramId == "tlas_corridor_20k") {
-        drawTitle("TLAS: Indoor Corridor (20K Instances)");
-
-        const int cols = 4;
-        const int rows = 3;
-        float padX = s(6.0f);
-        float padY = s(6.0f);
-        float rightLegendW = s(88.0f);
-        float roomW = (gw - rightLegendW - padX * (cols - 1)) / cols;
-        float roomH = (gh - padY * (rows - 1)) / rows;
-        float startX = area.x;
-        float startY = area.y;
-
-        for (int r = 0; r < rows; ++r) {
-            for (int c = 0; c < cols; ++c) {
-                ImVec2 r0(startX + c * (roomW + padX), startY + r * (roomH + padY));
-                ImVec2 r1(r0.x + roomW, r0.y + roomH);
-
-                // Room AABB (Disjoint / Non-overlapping)
-                dl->AddRectFilled(r0, r1, IM_COL32(20, 36, 56, 220), s(2.0f));
-                dl->AddRect(r0, r1, IM_COL32(50, 130, 210, 240), s(2.0f));
-
-                // Clustered instance primitives inside each room
-                for (int k = 0; k < 4; ++k) {
-                    float px = r0.x + roomW * (0.28f + 0.44f * (k % 2));
-                    float py = r0.y + roomH * (0.28f + 0.44f * (k / 2));
-                    dl->AddCircleFilled(ImVec2(px, py), s(2.0f), IM_COL32(90, 200, 255, 230));
-                }
-            }
-        }
-
-        // Ray culling demonstration on the right side
-        float legendX = startX + cols * (roomW + padX) + s(8.0f);
-        dl->AddText(ImVec2(legendX, startY + s(2.0f)), colCool, "100 Rooms");
-        dl->AddText(ImVec2(legendX, startY + s(20.0f)), colDim, "200 inst/rm");
-        dl->AddText(ImVec2(legendX, startY + s(38.0f)), colCool, "1:4 Unique");
-        dl->AddText(ImVec2(legendX, startY + s(56.0f)), colDim, "5K BLASes");
-
-        // Corridor ray (miss / culled early)
-        ImVec2 rayStart(startX + roomW + padX * 0.5f, startY + s(2.0f));
-        ImVec2 rayEnd(rayStart.x, startY + gh - s(2.0f));
-        dl->AddLine(rayStart, rayEnd, colAmber, 1.5f);
-        dl->AddCircleFilled(rayEnd, s(2.0f), colAmber);
-        dl->AddText(ImVec2(legendX, startY + gh - s(18.0f)), colAmber, "0 corridor hit");
-        return;
-    }
-
-    // ------------------------------------------------------------------
-    // TLAS 2: Dense Jungle (50,000 Instances) - Overlapping Foliage
-    // ------------------------------------------------------------------
-    if (diagramId == "tlas_jungle_50k") {
-        drawTitle("TLAS: Dense Jungle (50K Instances)");
-
-        float rightLegendW = s(84.0f);
-        float plotW = gw - rightLegendW;
-
-        // Undulating terrain curve
-        const int segs = 24;
-        for (int i = 0; i < segs; ++i) {
-            float t0 = (float)i / segs;
-            float t1 = (float)(i + 1) / segs;
-            float x0 = area.x + t0 * plotW;
-            float x1 = area.x + t1 * plotW;
-            float y0 = area.y + gh * 0.76f + std::sin(t0 * 6.283f * 1.3f) * s(10.0f);
-            float y1 = area.y + gh * 0.76f + std::sin(t1 * 6.283f * 1.3f) * s(10.0f);
-            dl->AddLine(ImVec2(x0, y0), ImVec2(x1, y1), IM_COL32(60, 115, 65, 255), 2.0f);
-        }
-
-        // Overlapping foliage bounding boxes across undulating terrain
-        const int foliageCount = 10;
-        float boxW = s(24.0f);
-        float boxH = s(36.0f);
-        float spacing = (plotW - boxW) / (foliageCount - 1);
-
-        for (int i = 0; i < foliageCount; ++i) {
-            float t = (float)i / (foliageCount - 1);
-            float fx = area.x + i * spacing;
-            float groundY = area.y + gh * 0.76f + std::sin(t * 6.283f * 1.3f) * s(10.0f);
-            float fy = groundY - boxH + s(4.0f);
-
-            // Translucent foliage AABB box
-            dl->AddRectFilled(ImVec2(fx, fy), ImVec2(fx + boxW, fy + boxH), IM_COL32(30, 110, 55, 65), s(2.0f));
-            dl->AddRect(ImVec2(fx, fy), ImVec2(fx + boxW, fy + boxH), IM_COL32(70, 200, 95, 170), s(2.0f));
-
-            // Foliage center tree/leaf dot
-            dl->AddCircleFilled(ImVec2(fx + boxW * 0.5f, fy + boxH * 0.45f), s(2.5f), IM_COL32(110, 240, 120, 240));
-        }
-
-        // Ray piercing overlapping canopy
-        float rayX = area.x + spacing * 4.5f;
-        ImVec2 rTop(rayX, area.y + s(2.0f));
-        ImVec2 rBot(rayX, area.y + gh - s(2.0f));
-        dl->AddLine(rTop, rBot, colHot, 1.8f);
-
-        // Highlight intersection points with multiple overlapping boxes
-        dl->AddCircleFilled(ImVec2(rayX, area.y + gh * 0.36f), s(3.0f), colHot);
-        dl->AddCircleFilled(ImVec2(rayX, area.y + gh * 0.50f), s(3.0f), colHot);
-        dl->AddCircleFilled(ImVec2(rayX, area.y + gh * 0.64f), s(3.0f), colHot);
-
-        // Legend panel on right
-        float legendX = area.x + plotW + s(8.0f);
-        dl->AddText(ImVec2(legendX, area.y + s(4.0f)), colGreen, "Heavy AABB");
-        dl->AddText(ImVec2(legendX, area.y + s(22.0f)), colHot, "Overlap!");
-        dl->AddText(ImVec2(legendX, area.y + s(40.0f)), colDim, "3+ hits/ray");
-        dl->AddText(ImVec2(legendX, area.y + s(58.0f)), colGreen, "1:100 Reuse");
-        return;
-    }
-
-    // ------------------------------------------------------------------
-    // TLAS 3: Massive Open World (200,000 Instances) - Macro Sectors
-    // ------------------------------------------------------------------
-    if (diagramId == "tlas_openworld_200k") {
-        drawTitle("TLAS: Massive Open World (200K Instances)");
-
-        // Left 60%: Macro Geographic Sectors (4x2 sector grid)
-        float mapW = gw * 0.60f;
-        const int cols = 4;
-        const int rows = 2;
-        float secPad = s(4.0f);
-        float secW = (mapW - secPad * (cols - 1)) / cols;
-        float secH = (gh - secPad * (rows - 1)) / rows;
-
-        for (int r = 0; r < rows; ++r) {
-            for (int c = 0; c < cols; ++c) {
-                ImVec2 s0(area.x + c * (secW + secPad), area.y + r * (secH + secPad));
-                ImVec2 s1(s0.x + secW, s0.y + secH);
-
-                // Sector AABB border (amber)
-                dl->AddRectFilled(s0, s1, IM_COL32(35, 30, 20, 180), s(2.0f));
-                dl->AddRect(s0, s1, IM_COL32(200, 160, 60, 220), s(2.0f));
-
-                // High-density instances inside sector
-                for (int k = 0; k < 6; ++k) {
-                    float px = s0.x + secW * (0.2f + 0.28f * (k % 3));
-                    float py = s0.y + secH * (0.3f + 0.40f * (k / 3));
-                    dl->AddCircleFilled(ImVec2(px, py), s(1.5f), IM_COL32(255, 210, 90, 220));
-                }
-            }
-        }
-
-        // Right 40%: Multi-tier hierarchy tree & stats
-        float treeX = area.x + mapW + s(8.0f);
-        float treeW = gw - mapW - s(8.0f);
-
-        auto drawTierBox = [&](float yOffset, const char* label, ImU32 fill, ImU32 border, ImU32 textCol) {
-            ImVec2 b0(treeX, area.y + yOffset);
-            ImVec2 b1(treeX + treeW, b0.y + s(18.0f));
-            dl->AddRectFilled(b0, b1, fill, s(2.0f));
-            dl->AddRect(b0, b1, border, s(2.0f));
-            ImVec2 tsz = ImGui::CalcTextSize(label);
-            dl->AddText(ImVec2(b0.x + (treeW - tsz.x) * 0.5f, b0.y + (s(18.0f) - tsz.y) * 0.5f), textCol, label);
-            return ImVec2(treeX + treeW * 0.5f, b1.y);
-        };
-
-        ImVec2 pRoot = drawTierBox(0.0f, "TLAS Root", IM_COL32(30, 50, 80, 255), colCool, colText);
-        ImVec2 pSec = drawTierBox(s(24.0f), "20 Sectors", IM_COL32(50, 42, 20, 255), colAmber, colAmber);
-        ImVec2 pLeaves = drawTierBox(s(48.0f), "200K Leaves", IM_COL32(25, 45, 35, 255), colGreen, colGreen);
-
-        dl->AddLine(pRoot, ImVec2(pSec.x, area.y + s(24.0f)), colDim, 1.0f);
-        dl->AddLine(pSec, ImVec2(pLeaves.x, area.y + s(48.0f)), colDim, 1.0f);
-
-        // Stats badge
-        dl->AddText(ImVec2(treeX, area.y + s(74.0f)), colAmber, "12.8 MB TLAS");
-        dl->AddText(ImVec2(treeX, area.y + s(92.0f)), colDim, "~500M Virt Tris");
-        return;
-    }
-
-    // ------------------------------------------------------------------
-    // Generic TLAS fallback (retained for backward compatibility)
-    // ------------------------------------------------------------------
-    if (diagramId == "tlas_hierarchy") {
-        drawTitle("TLAS Instance Hierarchy");
-
-        auto drawNode = [&](ImVec2 c, float nw, float nh, const char* label, ImU32 fill, ImU32 border) {
-            ImVec2 n0(c.x - nw * 0.5f, c.y - nh * 0.5f);
-            ImVec2 n1(c.x + nw * 0.5f, c.y + nh * 0.5f);
-            dl->AddRectFilled(n0, n1, fill, s(3.0f));
-            dl->AddRect(n0, n1, border, s(3.0f));
-            ImVec2 tsz = ImGui::CalcTextSize(label);
-            dl->AddText(ImVec2(c.x - tsz.x * 0.5f, c.y - tsz.y * 0.5f), colText, label);
-        };
-
-        ImVec2 rootC(area.x + gw * 0.5f, area.y + s(12.0f));
-        drawNode(rootC, s(92.0f), s(20.0f), "TLAS Root", IM_COL32(30, 50, 80, 255), colCool);
-
-        ImVec2 mid[3];
-        for (int i = 0; i < 3; ++i) {
-            mid[i] = ImVec2(area.x + gw * (0.2f + 0.3f * i), area.y + gh * 0.48f);
-            dl->AddLine(rootC, mid[i], IM_COL32(90, 110, 140, 200), 1.5f);
-            drawNode(mid[i], s(64.0f), s(18.0f), "Node", IM_COL32(28, 45, 70, 255), IM_COL32(80, 120, 170, 255));
-        }
-
-        int bi = 0;
-        for (int i = 0; i < 3; ++i) {
-            for (int j = 0; j < 2; ++j) {
-                ImVec2 leaf(mid[i].x + (j == 0 ? -1 : 1) * gw * 0.085f, area.y + gh * 0.85f);
-                dl->AddLine(mid[i], leaf, IM_COL32(90, 110, 140, 160), 1.2f);
-                char b[16];
-                snprintf(b, sizeof(b), "BLAS %d", bi++);
-                drawNode(leaf, s(56.0f), s(16.0f), b, IM_COL32(25, 40, 55, 255), IM_COL32(70, 100, 130, 255));
-            }
-        }
-        return;
-    }
-
-    // ------------------------------------------------------------------
-    // Ray-triangle intersection (Moller-Trumbore)
-    // ------------------------------------------------------------------
-    if (diagramId == "intersect_ray_triangle") {
-        drawTitle("Ray-Triangle (Moller-Trumbore)");
-
-        ImVec2 A(area.x + gw * 0.30f, area.y + gh * 0.15f);
-        ImVec2 B(area.x + gw * 0.88f, area.y + gh * 0.72f);
-        ImVec2 C(area.x + gw * 0.12f, area.y + gh * 0.88f);
-        dl->AddLine(A, B, colCool, 1.5f);
-        dl->AddLine(B, C, colCool, 1.5f);
-        dl->AddLine(C, A, colCool, 1.5f);
-
-        // Hit point via barycentric combination
-        ImVec2 H(A.x * 0.35f + B.x * 0.45f + C.x * 0.20f, A.y * 0.35f + B.y * 0.45f + C.y * 0.20f);
-
-        ImVec2 rayStart(area.x + gw * 0.02f, area.y + gh * 0.06f);
-        ImVec2 rayDir = sub(H, rayStart);
-        ImVec2 rayEnd = add(rayStart, mul(rayDir, 1.35f));
-        dl->AddLine(rayStart, rayEnd, colAmber, 1.8f);
-
-        dl->AddLine(H, A, IM_COL32(140, 150, 170, 160), 1.0f);
-        dl->AddLine(H, B, IM_COL32(140, 150, 170, 160), 1.0f);
-        dl->AddLine(H, C, IM_COL32(140, 150, 170, 160), 1.0f);
-        dl->AddCircleFilled(H, s(3.0f), colHot);
-        dl->AddText(ImVec2(H.x + s(6.0f), H.y - s(16.0f)), colHot, "hit (t, u, v)");
-        return;
-    }
-
-    // ------------------------------------------------------------------
-    // Ray-AABB slab test
-    // ------------------------------------------------------------------
-    if (diagramId == "intersect_ray_box") {
-        drawTitle("Ray-AABB (Slab Test)");
-
-        ImVec2 f0(area.x + gw * 0.30f, area.y + gh * 0.32f);
-        ImVec2 f1(area.x + gw * 0.72f, area.y + gh * 0.84f);
-        ImVec2 off(gw * 0.14f, -gh * 0.20f);
-        ImVec2 b0 = add(f0, off), b1 = add(f1, off);
-
-        // Back face + connecting edges
-        dl->AddLine(b0, b1, IM_COL32(70, 90, 120, 200), 1.2f);
-        dl->AddLine(ImVec2(b1.x, b0.y), b1, IM_COL32(70, 90, 120, 200), 1.2f);
-        dl->AddLine(b0, ImVec2(b0.x, b1.y), IM_COL32(70, 90, 120, 200), 1.2f);
-        dl->AddLine(f0, b0, IM_COL32(70, 90, 120, 200), 1.2f);
-        dl->AddLine(ImVec2(f1.x, f0.y), ImVec2(b1.x, b0.y), IM_COL32(70, 90, 120, 200), 1.2f);
-        dl->AddLine(f1, b1, IM_COL32(70, 90, 120, 200), 1.2f);
-        dl->AddLine(ImVec2(f0.x, f1.y), ImVec2(b0.x, b1.y), IM_COL32(70, 90, 120, 200), 1.2f);
-
-        // Front face
-        dl->AddLine(f0, ImVec2(f1.x, f0.y), colCool, 1.5f);
-        dl->AddLine(ImVec2(f1.x, f0.y), f1, colCool, 1.5f);
-        dl->AddLine(f1, ImVec2(f0.x, f1.y), colCool, 1.5f);
-        dl->AddLine(ImVec2(f0.x, f1.y), f0, colCool, 1.5f);
-
-        ImVec2 rayStart(area.x + gw * 0.04f, area.y + gh * 0.08f);
-        ImVec2 rayEnd(area.x + gw * 0.96f, area.y + gh * 0.94f);
-        dl->AddLine(rayStart, rayEnd, colAmber, 1.8f);
-
-        ImVec2 t0pt = add(rayStart, mul(sub(rayEnd, rayStart), 0.40f));
-        ImVec2 t1pt = add(rayStart, mul(sub(rayEnd, rayStart), 0.62f));
-        dl->AddCircleFilled(t0pt, s(3.0f), colGreen);
-        dl->AddCircleFilled(t1pt, s(3.0f), colHot);
-        dl->AddText(ImVec2(t0pt.x - s(38.0f), t0pt.y - s(18.0f)), colGreen, "t near");
-        dl->AddText(ImVec2(t1pt.x + s(6.0f), t1pt.y + s(2.0f)), colHot, "t far");
-        return;
-    }
-
-    // ------------------------------------------------------------------
-    // Procedural analytic sphere
-    // ------------------------------------------------------------------
-    if (diagramId == "procedural_sphere") {
-        drawTitle("Procedural: Analytic Sphere");
-
-        ImVec2 c(area.x + gw * 0.55f, area.y + gh * 0.50f);
-        float r = std::min(gw, gh) * 0.38f;
-        dl->AddCircleFilled(c, r, IM_COL32(25, 45, 70, 255));
-        dl->AddCircle(c, r, colCool, 1.5f);
-        dl->PathArcTo(c, r * 0.8f, -3.14159265f * 0.75f, -3.14159265f * 0.25f, 16);
-        dl->PathStroke(IM_COL32(120, 170, 220, 180), 1.5f);
-
-        ImVec2 rayStart(area.x + gw * 0.05f, area.y + gh * 0.10f);
-        ImVec2 dir = sub(c, rayStart);
-        float dlen = std::sqrt(dir.x * dir.x + dir.y * dir.y);
-        dir.x /= dlen;
-        dir.y /= dlen;
-        ImVec2 hit = sub(c, mul(dir, r));
-        ImVec2 rayEnd = add(hit, mul(dir, r * 0.55f));
-        dl->AddLine(rayStart, rayEnd, colAmber, 1.8f);
-        dl->AddCircleFilled(hit, s(3.0f), colHot);
-
-        ImVec2 nrm = sub(hit, c);
-        float nlen = std::sqrt(nrm.x * nrm.x + nrm.y * nrm.y);
-        nrm.x /= nlen;
-        nrm.y /= nlen;
-        ImVec2 nEnd = add(hit, mul(nrm, r * 0.5f));
-        dl->AddLine(hit, nEnd, colGreen, 1.5f);
-        dl->AddText(ImVec2(nEnd.x + s(4.0f), nEnd.y - s(14.0f)), colGreen, "N");
-        return;
-    }
-
-    // ------------------------------------------------------------------
-    // Hardware BVH: Coherent Triangles (32-Layer Grid, TerminateOnFirstHitEXT)
-    // ------------------------------------------------------------------
-    if (diagramId == "bvh_coherent_triangles") {
-        drawTitle("Hardware BVH: Coherent Triangles (First-Hit Fast Path)");
-
-        // 4 stratified planar triangle layers (Layer 0 active, Layers 1..3 skipped after first hit)
-        const int layers = 4;
-        float layerSpacing = gh * 0.22f;
-        float startY = area.y + s(20.0f);
-        float planeW = gw * 0.60f;
-
-        for (int l = 0; l < layers; ++l) {
-            float y = startY + l * layerSpacing;
-            ImVec2 pL(area.x, y);
-            ImVec2 pR(area.x + planeW, y);
-
-            ImU32 lineCol = (l == 0) ? colCool : IM_COL32(45, 55, 70, 140);
-            dl->AddLine(pL, pR, lineCol, (l == 0) ? 1.8f : 1.0f);
-
-            const int tris = 6;
-            float triW = planeW / tris;
-            for (int t = 0; t < tris; ++t) {
-                ImVec2 t0(area.x + t * triW, y);
-                ImVec2 t1(t0.x + triW, y);
-                ImVec2 t2(t0.x + triW * 0.5f, y - s(6.0f));
-                ImU32 tc = (l == 0) ? IM_COL32(55, 130, 210, 220) : IM_COL32(40, 55, 75, 110);
-                dl->AddTriangle(t0, t1, t2, tc);
-            }
-        }
-
-        // Parallel vertical coherent rays terminating immediately on Layer 0
-        const int rays = 5;
-        float raySpacing = planeW / (rays + 1);
-        for (int r = 0; r < rays; ++r) {
-            float rx = area.x + (r + 1) * raySpacing;
-            ImVec2 rayStart(rx, area.y + s(2.0f));
-            ImVec2 rayHit(rx, startY);
-
-            dl->AddLine(rayStart, rayHit, colGreen, 1.8f);
-            dl->AddCircleFilled(rayStart, s(2.0f), colGreen);
-            dl->AddCircleFilled(rayHit, s(3.0f), colAmber);
-        }
-
-        // Legend / Stats on right side
-        float statX = area.x + planeW + s(10.0f);
-        dl->AddText(ImVec2(statX, area.y + s(4.0f)), colCool, "32 Layers");
-        dl->AddText(ImVec2(statX, area.y + s(22.0f)), colGreen, "Hits Layer 0");
-        dl->AddText(ImVec2(statX, area.y + s(40.0f)), colAmber, "First-Hit Exit");
-        dl->AddText(ImVec2(statX, area.y + s(58.0f)), colGreen, "0% Misses");
-        dl->AddText(ImVec2(statX, area.y + s(76.0f)), colCool, "Max Coherence");
-        return;
-    }
-
-    // ------------------------------------------------------------------
-    // Hardware BVH: Deep 128-Layer Multi-Layer Traversal Stress
-    // ------------------------------------------------------------------
-    if (diagramId == "bvh_nested_boxes") {
-        drawTitle("Hardware BVH: Deep 128-Layer Traversal Stress");
-
-        const int layers = 6;
-        float layerSpacing = gh * 0.15f;
-        float startY = area.y + s(14.0f);
-        float planeW = gw * 0.60f;
-
-        for (int l = 0; l < layers; ++l) {
-            float y = startY + l * layerSpacing;
-            ImVec2 b0(area.x, y - s(3.0f));
-            ImVec2 b1(area.x + planeW, y + s(3.0f));
-            bool isLast = (l == layers - 1);
-            dl->AddRectFilled(b0, b1, isLast ? IM_COL32(35, 95, 65, 220) : IM_COL32(30, 50, 80, 150), s(1.5f));
-            dl->AddRect(b0, b1, isLast ? colGreen : IM_COL32(70, 120, 180, 190), s(1.5f));
-        }
-
-        // Parallel vertical rays traversing through all 128 layers to commit on Layer 127
-        const int rays = 4;
-        float raySpacing = planeW / (rays + 1);
-        float botY = startY + (layers - 1) * layerSpacing;
-        for (int r = 0; r < rays; ++r) {
-            float rx = area.x + (r + 1) * raySpacing;
-            dl->AddLine(ImVec2(rx, area.y + s(2.0f)), ImVec2(rx, botY), colHot, 1.6f);
-            for (int l = 0; l < layers; ++l) {
-                float hy = startY + l * layerSpacing;
-                bool isLast = (l == layers - 1);
-                dl->AddCircleFilled(ImVec2(rx, hy), isLast ? s(3.0f) : s(2.0f), isLast ? colGreen : colAmber);
-            }
-        }
-
-        float statX = area.x + planeW + s(10.0f);
-        dl->AddText(ImVec2(statX, area.y + s(4.0f)), colCool, "128 Layers");
-        dl->AddText(ImVec2(statX, area.y + s(22.0f)), colDim, "262K Tris");
-        dl->AddText(ImVec2(statX, area.y + s(40.0f)), colHot, "Full Depth");
-        dl->AddText(ImVec2(statX, area.y + s(58.0f)), colAmber, "128 Hits/Ray");
-        dl->AddText(ImVec2(statX, area.y + s(76.0f)), colGreen, "Layer 127 Hit");
-        return;
-    }
-
-    // ------------------------------------------------------------------
-    // Any-Hit Baseline: 100% Solid Geometry
-    // ------------------------------------------------------------------
-    if (diagramId == "anyhit_100_solid") {
-        drawTitle("Any-Hit Baseline: 100% Solid Geometry");
-
-        const int numPlanes = 4;
-        float planeSpacing = gh * 0.22f;
-        float startY = area.y + s(18.0f);
-        float planeW = gw * 0.58f;
-
-        for (int p = 0; p < numPlanes; ++p) {
-            float y = startY + p * planeSpacing;
-            ImVec2 p0_layer(area.x, y - s(3.0f));
-            ImVec2 p1_layer(area.x + planeW, y + s(3.0f));
-
-            if (p == 0) {
-                // Plane 0: Opaque Hit Surface
-                dl->AddRectFilled(p0_layer, p1_layer, IM_COL32(30, 80, 130, 240), s(2.0f));
-                dl->AddRect(p0_layer, p1_layer, colCool, s(2.0f));
-                char buf[24];
-                snprintf(buf, sizeof(buf), "Plane %d (Opaque)", p);
-                dl->AddText(ImVec2(area.x + s(6.0f), y - s(7.0f)), colText, buf);
-            } else {
-                // Lower planes: Untouched
-                dl->AddRect(p0_layer, p1_layer, IM_COL32(50, 65, 85, 140), s(2.0f));
-                char buf[24];
-                snprintf(buf, sizeof(buf), "Plane %d (unreached)", p);
-                dl->AddText(ImVec2(area.x + s(6.0f), y - s(7.0f)), colDim, buf);
-            }
-        }
-
-        // Ray entering and terminating immediately on Plane 0
-        const int rays = 3;
-        float raySpacing = planeW / (rays + 1);
-        for (int r = 0; r < rays; ++r) {
-            float rx = area.x + (r + 1) * raySpacing;
-            ImVec2 rayStart(rx, area.y + s(2.0f));
-            ImVec2 rayHit(rx, startY - s(3.0f));
-            dl->AddLine(rayStart, rayHit, colGreen, 1.8f);
-            dl->AddCircleFilled(rayHit, s(3.0f), colGreen);
-        }
-
-        // Stats on right
-        float statX = area.x + planeW + s(10.0f);
-        dl->AddText(ImVec2(statX, area.y + s(4.0f)), colCool, "16 Solid Planes");
-        dl->AddText(ImVec2(statX, area.y + s(22.0f)), colGreen, "Hits Plane 0");
-        dl->AddText(ImVec2(statX, area.y + s(40.0f)), colAmber, "0 Re-Entries");
-        dl->AddText(ImVec2(statX, area.y + s(58.0f)), colDim, "Fast Accept");
-        return;
-    }
-
-    // ------------------------------------------------------------------
-    // Any-Hit Stress: 50% Cutout Penetration
-    // ------------------------------------------------------------------
-    if (diagramId == "anyhit_50_cutout") {
-        drawTitle("Any-Hit Stress: 50% Cutout Penetration");
-
-        const int numPlanes = 4;
-        float planeSpacing = gh * 0.22f;
-        float startY = area.y + s(18.0f);
-        float planeW = gw * 0.58f;
-
-        for (int p = 0; p < numPlanes; ++p) {
-            float y = startY + p * planeSpacing;
-            float segW = planeW / 6.0f;
-            for (int sIdx = 0; sIdx < 6; ++sIdx) {
-                ImVec2 s0(area.x + sIdx * segW, y - s(3.0f));
-                ImVec2 s1(s0.x + segW - s(2.0f), y + s(3.0f));
-                bool solid = ((sIdx + p) % 2 == 0);
-                if (solid) {
-                    dl->AddRectFilled(s0, s1, IM_COL32(30, 80, 130, 240), s(1.0f));
-                    dl->AddRect(s0, s1, colCool, s(1.0f));
-                } else {
-                    dl->AddRect(s0, s1, IM_COL32(70, 50, 40, 160), s(1.0f));
-                }
-            }
-        }
-
-        // Ray 1: pierces Plane 0 (cutout), hits Plane 1 (solid)
-        float r1X = area.x + planeW * 0.25f;
-        dl->AddLine(ImVec2(r1X, area.y + s(2.0f)), ImVec2(r1X, startY + planeSpacing - s(3.0f)), colHot, 1.6f);
-        dl->AddCircleFilled(ImVec2(r1X, startY), s(2.5f), colAmber);
-        dl->AddCircleFilled(ImVec2(r1X, startY + planeSpacing), s(3.0f), colGreen);
-
-        // Ray 2: pierces Plane 0 (cutout), Plane 1 (cutout), hits Plane 2 (solid)
-        float r2X = area.x + planeW * 0.58f;
-        dl->AddLine(ImVec2(r2X, area.y + s(2.0f)), ImVec2(r2X, startY + 2 * planeSpacing - s(3.0f)), colHot, 1.6f);
-        dl->AddCircleFilled(ImVec2(r2X, startY), s(2.5f), colAmber);
-        dl->AddCircleFilled(ImVec2(r2X, startY + planeSpacing), s(2.5f), colAmber);
-        dl->AddCircleFilled(ImVec2(r2X, startY + 2 * planeSpacing), s(3.0f), colGreen);
-
-        // Stats on right
-        float statX = area.x + planeW + s(10.0f);
-        dl->AddText(ImVec2(statX, area.y + s(4.0f)), colCool, "16 Planes");
-        dl->AddText(ImVec2(statX, area.y + s(22.0f)), colHot, "50% Cutout");
-        dl->AddText(ImVec2(statX, area.y + s(40.0f)), colAmber, "Re-enters BVH");
-        dl->AddText(ImVec2(statX, area.y + s(58.0f)), colHot, "RTU Re-dispatch");
-        return;
-    }
-
-    // ------------------------------------------------------------------
-    // Incoherent bounce rays: technique comparison (naive / SER / DGC)
-    // ------------------------------------------------------------------
-    if (diagramId.rfind("incoherent_", 0) == 0) {
-        bool naive = (diagramId == "incoherent_naive");
-        bool ser = (diagramId == "incoherent_ser");
-        drawTitle(naive ? "Incoherent Bounce Rays: No Reordering" :
-                        ser ? "Incoherent Bounce Rays: Hardware SER" :
-                             "Incoherent Bounce Rays: DGC Octant Binning");
-
-        // 12 bounce rays from real scene hits: 4 direction groups x 3 rays.
-        // Angles chosen so rays visibly cross/diverge while staying cleanly inside their containers.
-        const int rayGroup[12] = {0, 1, 2, 3, 0, 2, 1, 3, 1, 3, 0, 2};
-        const float rayAng[12] = {-32, -12, 16, 34, -28, 12, -18, 30, -10, 26, -34, 18};
-        const float groupAng[4] = {-18, -6, 8, 18};
-        const ImU32 groupCol[4] = {colCool, colAmber, colGreen, colHot};
-
-        float subHeaderY = area.y;
-        float bodyY0 = area.y + s(16.0f);
-        float bodyY1 = areaEnd.y;
-        float bodyH = bodyY1 - bodyY0;
-
-        auto drawArrowBounded = [&](ImVec2 from, float angDeg, float len, ImU32 col, float minY, float maxY) {
-            float a = angDeg * 0.0174532925f;
-            ImVec2 dir(std::cos(a), std::sin(a));
-            ImVec2 to(from.x + dir.x * len, from.y + dir.y * len);
-            if (to.y < minY && std::abs(dir.y) > 1e-4f) {
-                float clampedLen = std::max(s(6.0f), (minY - from.y) / dir.y);
-                to = ImVec2(from.x + dir.x * clampedLen, from.y + dir.y * clampedLen);
-            } else if (to.y > maxY && std::abs(dir.y) > 1e-4f) {
-                float clampedLen = std::max(s(6.0f), (maxY - from.y) / dir.y);
-                to = ImVec2(from.x + dir.x * clampedLen, from.y + dir.y * clampedLen);
-            }
-            dl->AddLine(from, to, col, 1.5f);
-            ImVec2 h1(to.x - dir.x * s(4.5f) - dir.y * s(3.0f), to.y - dir.y * s(4.5f) + dir.x * s(3.0f));
-            ImVec2 h2(to.x - dir.x * s(4.5f) + dir.y * s(3.0f), to.y - dir.y * s(4.5f) - dir.x * s(3.0f));
-            dl->AddLine(to, h1, col, 1.4f);
-            dl->AddLine(to, h2, col, 1.4f);
-        };
-
-        // Left: scattered bounce rays from a column of scene hit points
-        dl->AddText(ImVec2(area.x, subHeaderY), colDim, "bounce rays");
-        float beforeX = area.x + gw * 0.08f;
-        float rowH = (bodyH - s(12.0f)) / 12.0f;
-        for (int i = 0; i < 12; ++i) {
-            ImVec2 from(beforeX, bodyY0 + s(6.0f) + (i + 0.5f) * rowH);
-            dl->AddCircleFilled(from, s(2.0f), IM_COL32(200, 210, 230, 255));
-            drawArrowBounded(from, rayAng[i], gw * 0.24f, groupCol[rayGroup[i]], bodyY0 + s(3.0f), bodyY1 - s(3.0f));
-        }
-
-        // Divider
-        float divX = area.x + gw * 0.44f;
-        dl->AddLine(ImVec2(divX, bodyY0), ImVec2(divX, bodyY1), IM_COL32(70, 85, 110, 200), 1.0f);
-        dl->AddText(ImVec2(divX - s(3.0f), bodyY0 + bodyH * 0.45f), colDim, ">");
-
-        // Right: the technique's reordering result
-        float afterX = area.x + gw * 0.50f;
-        float afterW = areaEnd.x - afterX;
-
-        if (naive) {
-            dl->AddText(ImVec2(afterX, subHeaderY), colDim, "one dispatch (unreordered)");
-            dl->AddRect(ImVec2(afterX, bodyY0), ImVec2(areaEnd.x, bodyY1), IM_COL32(70, 85, 110, 200), s(2.0f));
-            for (int i = 0; i < 12; ++i) {
-                ImVec2 from(afterX + afterW * 0.12f, bodyY0 + s(6.0f) + (i + 0.5f) * rowH);
-                dl->AddCircleFilled(from, s(1.8f), groupCol[rayGroup[i]]);
-                drawArrowBounded(from, rayAng[i], afterW * 0.62f, groupCol[rayGroup[i]], bodyY0 + s(4.0f), bodyY1 - s(4.0f));
-            }
-        } else if (ser) {
-            dl->AddText(ImVec2(afterX, subHeaderY), colDim, "SER coherence bins");
-            float gapX = afterW * 0.06f;
-            float gapY = bodyH * 0.08f;
-            float bw = (afterW - gapX) * 0.5f;
-            float bh = (bodyH - gapY) * 0.5f;
-            for (int g = 0; g < 4; ++g) {
-                int bx = (g % 2), by = (g / 2);
-                ImVec2 b0(afterX + bx * (bw + gapX), bodyY0 + by * (bh + gapY));
-                ImVec2 b1(b0.x + bw, b0.y + bh);
-                dl->AddRectFilled(b0, b1, IM_COL32(20, 28, 40, 180), s(2.0f));
-                dl->AddRect(b0, b1, groupCol[g], s(2.0f));
-                for (int k = 0; k < 3; ++k) {
-                    ImVec2 from(b0.x + bw * 0.16f, b0.y + bh * (0.28f + 0.22f * k));
-                    drawArrowBounded(from, groupAng[g], bw * 0.62f, groupCol[g], b0.y + s(3.0f), b1.y - s(3.0f));
-                }
-            }
-        } else {
-            dl->AddText(ImVec2(afterX, subHeaderY), colDim, "octant work queues");
-            float gapY = bodyH * 0.06f;
-            float qh = (bodyH - gapY * 3.0f) / 4.0f;
-            for (int g = 0; g < 4; ++g) {
-                float qy = bodyY0 + g * (qh + gapY);
-                ImVec2 q0(afterX + afterW * 0.18f, qy);
-                ImVec2 q1(areaEnd.x, qy + qh);
-                dl->AddRectFilled(q0, q1, IM_COL32(20, 28, 40, 180), s(2.0f));
-                dl->AddRect(q0, q1, groupCol[g], s(2.0f));
-                char lbl[8];
-                snprintf(lbl, sizeof(lbl), "O%d", g);
-                ImVec2 lsz = ImGui::CalcTextSize(lbl);
-                dl->AddText(ImVec2(afterX + s(2.0f), qy + (qh - lsz.y) * 0.5f), groupCol[g], lbl);
-                float qInnerW = q1.x - q0.x;
-                for (int k = 0; k < 3; ++k) {
-                    ImVec2 from(q0.x + qInnerW * (0.10f + 0.28f * k), qy + qh * 0.5f);
-                    drawArrowBounded(from, 0.0f, qInnerW * 0.20f, groupCol[g], q0.y + s(2.0f), q1.y - s(2.0f));
-                }
-            }
-        }
-        return;
-    }
-
-    // ------------------------------------------------------------------
-    // ROP fill-rate variants
-    // ------------------------------------------------------------------
-    if (diagramId.rfind("rop_fill_", 0) == 0) {
-        bool hdr = (diagramId == "rop_fill_hdr");
-        bool blend = (diagramId == "rop_fill_blend");
-        drawTitle(hdr ? "ROP: RGBA16F HDR Fill" : (blend ? "ROP: Alpha Blending" : "ROP: RGBA8 Color Fill"));
-
-        ImVec2 fb0(area.x, area.y);
-        ImVec2 fb1(areaEnd.x, areaEnd.y);
-        dl->AddRect(fb0, fb1, colGrid, 1.0f);
-
-        if (!blend) {
-            ImVec2 q0(area.x + gw * 0.15f, area.y + gh * 0.20f);
-            ImVec2 q1(area.x + gw * 0.85f, area.y + gh * 0.80f);
-            if (hdr) {
-                const int slices = 24;
-                for (int i = 0; i < slices; ++i) {
-                    float t0 = static_cast<float>(i) / slices;
-                    float t1 = static_cast<float>(i + 1) / slices;
-                    int v = (int)(30 + 225 * t1);
-                    dl->AddRectFilled(ImVec2(q0.x + (q1.x - q0.x) * t0, q0.y),
-                                      ImVec2(q0.x + (q1.x - q0.x) * t1, q1.y),
-                                      IM_COL32(v, v, v, 255));
-                }
-            } else {
-                dl->AddRectFilled(q0, q1, IM_COL32(40, 90, 200, 255));
-            }
-            // Rasterization scanline arrow
-            ImVec2 sl0(q0.x, q1.y + s(8.0f));
-            ImVec2 sl1(q1.x, q1.y + s(8.0f));
-            dl->AddLine(sl0, sl1, colAmber, 1.5f);
-            dl->AddLine(sl1, ImVec2(sl1.x - s(6.0f), sl1.y - s(4.0f)), colAmber, 1.5f);
-            dl->AddLine(sl1, ImVec2(sl1.x - s(6.0f), sl1.y + s(4.0f)), colAmber, 1.5f);
-            drawFootnote(hdr ? "64-bit color: 2x the memory bandwidth of RGBA8 per pixel"
-                             : "1 pixel per ROP clock - pure rasterizer throughput");
-        } else {
-            ImVec2 q0a(area.x + gw * 0.12f, area.y + gh * 0.18f);
-            ImVec2 q1a(area.x + gw * 0.55f, area.y + gh * 0.78f);
-            ImVec2 q0b(area.x + gw * 0.45f, area.y + gh * 0.22f);
-            ImVec2 q1b(area.x + gw * 0.88f, area.y + gh * 0.82f);
-            dl->AddRectFilled(q0a, q1a, IM_COL32(60, 120, 230, 160));
-            dl->AddRectFilled(q0b, q1b, IM_COL32(230, 90, 60, 160));
-            ImVec2 o0(std::max(q0a.x, q0b.x), std::max(q0a.y, q0b.y));
-            ImVec2 o1(std::min(q1a.x, q1b.x), std::min(q1a.y, q1b.y));
-            dl->AddRect(o0, o1, IM_COL32(240, 240, 255, 220), 1.5f);
-            dl->AddText(ImVec2(o0.x + s(4.0f), o0.y + s(2.0f)), colText, "src + dst");
-            drawFootnote("overlapping pixels: read old color, blend, write back");
-        }
-        return;
-    }
-
-    // ------------------------------------------------------------------
-    // Fallback: unknown diagram id
-    // ------------------------------------------------------------------
-    float canvasH = p1.y - p0.y;
-    dl->AddText(ImVec2(p0.x + pad, p0.y + canvasH * 0.45f), colDim, ("Unknown diagram: " + diagramId).c_str());
+    });
 }
 
-void GuiApp::discoverHardware() {
-    m_devices.clear();
+void GuiApp::abortBenchmarks() {
+    if (m_execState == ExecutionState::Running) {
+        m_cancelToken.store(true);
+        m_statusMessage = "Stopping after current dispatch...";
+    }
+}
 
-    std::vector<DeviceProfile> profiles = GetDeviceProfilesAPI();
-
-    for (const auto& prof : profiles) {
-        SelectableDevice dev;
-        dev.deviceIndex = prof.deviceIndex;
-        dev.name = prof.deviceName;
-        dev.backend = prof.backend;
-        dev.architecture = detectGpuArchitecture(prof.deviceName, prof.vendorID, prof.deviceID);
-        dev.driver = prof.driverName + (!prof.driverVersion.empty() ? (" " + prof.driverVersion) : "");
-        dev.vramTotalMb = prof.vramTotalMb;
-        dev.isSystem = false;
-        // Default GPU 0 (Primary) to selected
-        dev.selected = (prof.deviceIndex == 0);
-
-        m_devices.push_back(dev);
+void GuiApp::processIncomingResults() {
+    if (m_textureCacheNeedsClear.exchange(false)) {
+        clearTextureCache();
     }
 
-    // Fallback if profiles list was empty
-    if (m_devices.empty()) {
-        std::vector<std::string> hwEntries = GetAvailableHardwareAPI();
-        for (const auto& entry : hwEntries) {
-            size_t p1 = entry.find('|');
-            if (p1 != std::string::npos) {
-                size_t p2 = entry.find('|', p1 + 1);
-                if (p2 != std::string::npos) {
-                    std::string backend = entry.substr(0, p1);
-                    std::string idxStr = entry.substr(p1 + 1, p2 - (p1 + 1));
-                    std::string devName = entry.substr(p2 + 1);
-
-                    if (backend == "System") continue; // Handled dynamically below
-
-                    SelectableDevice dev;
-                    try {
-                        dev.deviceIndex = std::stoul(idxStr);
-                    } catch (...) {
-                        dev.deviceIndex = 0;
-                    }
-                    dev.name = devName;
-                    dev.backend = backend;
-                    dev.architecture = detectGpuArchitecture(devName, 0, 0);
-                    dev.driver = backend;
-                    dev.vramTotalMb = 0;
-                    dev.isSystem = false;
-                    dev.selected = (dev.deviceIndex == 0);
-                    m_devices.push_back(dev);
-                }
-            }
+    std::vector<ResultData> localBatch;
+    {
+        std::lock_guard<std::mutex> lock(m_resultsMutex);
+        if (!m_incomingResults.empty()) {
+            localBatch.swap(m_incomingResults);
         }
     }
 
-    // Dynamically query Host CPU & RAM system entry
-    std::string cpuModel, cpuArch, osDriver;
-    uint64_t ramMb = 0;
-    getHostSystemInfo(cpuModel, cpuArch, osDriver, ramMb);
+    for (const auto& res : localBatch) {
+        if (res.time_ms == -2.0) {
+            m_currentBenchmarkName = res.benchmarkName;
+            m_currentlyRunningTestId = res.benchmarkName;
+            m_currentlyRunningResult = res;
+            m_hasCurrentlyRunningResult = true;
+            m_statusMessage = "Running: " + res.benchmarkName + " (" + res.deviceName + ")";
+            continue;
+        }
 
-    unsigned int numThreads = std::thread::hardware_concurrency();
-    std::string cpuFullName = cpuModel;
-    if (numThreads > 0 && cpuFullName.find("Thread") == std::string::npos && cpuFullName.find("C/") == std::string::npos) {
-        cpuFullName += " (" + std::to_string(numThreads) + " Threads)";
+        auto existingIt = std::find_if(m_allResults.begin(), m_allResults.end(),
+            [&res](const ResultData& existing) {
+                return existing.deviceIndex == res.deviceIndex &&
+                       existing.backendName == res.backendName &&
+                       existing.benchmarkName == res.benchmarkName &&
+                       existing.configIndex == res.configIndex;
+            });
+        if (existingIt != m_allResults.end()) {
+            *existingIt = res;
+        } else {
+            m_allResults.push_back(res);
+        }
+
+        std::string key = std::to_string(res.deviceIndex) + "|" + res.benchmarkName +
+                          "|" + std::to_string(res.configIndex);
+        m_latestResults[key] = res;
+        m_currentBenchmarkName = res.benchmarkName;
+        if (m_currentlyRunningTestId == res.benchmarkName) {
+            m_currentlyRunningTestId.clear();
+            m_hasCurrentlyRunningResult = false;
+        }
+        m_completedTasks++;
+        if (m_completedTasks > m_totalTasks) {
+            m_totalTasks = m_completedTasks;
+        }
+        m_statusMessage = "Completed: " + res.benchmarkName;
     }
 
-    SelectableDevice sysDev;
-    sysDev.deviceIndex = 0xFFFFFFFF;
-    sysDev.name = cpuFullName;
-    sysDev.backend = "System";
-    sysDev.architecture = cpuArch;
-    sysDev.driver = osDriver;
-    sysDev.vramTotalMb = ramMb;
-    sysDev.isSystem = true;
-    m_devices.push_back(sysDev);
-
-    // Natural logical order: GPU 0 (Primary) first, GPU 1 (Secondary) second, Host CPU last
-    std::sort(m_devices.begin(), m_devices.end(), [](const SelectableDevice& a, const SelectableDevice& b) {
-        if (a.isSystem != b.isSystem) return !a.isSystem;
-        return a.deviceIndex < b.deviceIndex;
-    });
+    if (m_execState == ExecutionState::Running) {
+        auto now = std::chrono::steady_clock::now();
+        m_elapsedSeconds = std::chrono::duration<double>(now - m_benchmarkStartTime).count();
+    }
 }
 
 void GuiApp::processEvents() {
     processIncomingResults();
 }
 
+void GuiApp::exportResultsToJson(const std::string& filepath) {
+    UnifiedSessionMetadata sessionMeta;
+    sessionMeta.scene = m_scene;
+    sessionMeta.samplesPerPixel = m_samplesPerPixel;
+    sessionMeta.dumpRenders = m_dumpRenders;
+    sessionMeta.uiScale = m_uiScale;
+
+    if (m_deviceProfiles.empty()) {
+        m_deviceProfiles = GetDeviceProfilesAPI();
+    }
+
+    std::string jsonStr = resultsToJson(m_allResults, m_deviceProfiles, &sessionMeta);
+    std::ofstream out(filepath, std::ios::binary);
+    if (!out.is_open()) {
+        m_exportNotificationText = "Failed to open for writing: " + filepath;
+        m_exportNotificationTimer = 5.0f;
+        return;
+    }
+    out.write(jsonStr.data(), static_cast<std::streamsize>(jsonStr.size()));
+    out.close();
+
+    m_exportNotificationText = "Saved unified v2.0 JSON to " + filepath;
+    m_exportNotificationTimer = 4.5f;
+}
+
+bool GuiApp::importResultsFromJson(const std::string& filepath) {
+    ImportedRun run{};
+    std::string err;
+    if (!ResultImporter::loadFromFile(filepath, run, err)) {
+        m_exportNotificationText = "JSON Import Error: " + err;
+        m_exportNotificationTimer = 5.5f;
+        return false;
+    }
+
+    m_allResults = run.results;
+    m_latestResults.clear();
+    for (const auto& r : m_allResults) {
+        std::string key = std::to_string(r.deviceIndex) + "|" + r.benchmarkName +
+                          "|" + std::to_string(r.configIndex);
+        m_latestResults[key] = r;
+    }
+
+    if (run.hasGuiSession) {
+        setScene(run.sessionScene);
+        m_samplesPerPixel = std::clamp(run.sessionSamplesPerPixel, 1u, 256u);
+        m_dumpRenders = run.sessionDumpRenders;
+    }
+    if (!run.resolution.empty()) {
+        unsigned int w = 0, h = 0;
+        if (std::sscanf(run.resolution.c_str(), "%ux%u", &w, &h) == 2 && w >= 64 && h >= 64) {
+            m_renderWidth = w;
+            m_renderHeight = h;
+        }
+    }
+
+    m_execState = ExecutionState::Completed;
+    m_completedTasks = m_allResults.size();
+    m_totalTasks = std::max<size_t>(1, m_allResults.size());
+    m_statusMessage = "Loaded session (" + std::to_string(m_allResults.size()) +
+                      " results) from " + std::filesystem::path(filepath).filename().string();
+    m_exportNotificationText = "Imported " + std::to_string(m_allResults.size()) +
+                               " results from " + filepath;
+    m_exportNotificationTimer = 4.5f;
+    m_switchToScorecard = true;
+    return true;
+}
+
+bool GuiApp::loadComparisonFromJson(const std::string& filepath) {
+    ImportedRun run{};
+    std::string err;
+    if (!ResultImporter::loadFromFile(filepath, run, err)) {
+        m_exportNotificationText = "Comparison Load Error: " + err;
+        m_exportNotificationTimer = 5.5f;
+        return false;
+    }
+
+    m_comparisonResults = run.results;
+    std::string devTag = run.deviceProfile.deviceName;
+    std::string fn = std::filesystem::path(filepath).filename().string();
+    m_comparisonSourceLabel = devTag.empty() ? fn : (fn + " (" + devTag + ")");
+    m_exportNotificationText = "Loaded comparison baseline: " + m_comparisonSourceLabel;
+    m_exportNotificationTimer = 4.5f;
+    m_switchToScorecard = true;
+    return true;
+}
+
+void GuiApp::clearComparisonResults() {
+    m_comparisonResults.clear();
+    m_comparisonSourceLabel.clear();
+}
+
+const ResultData* GuiApp::findComparisonMatch(const ResultData& curRes) const {
+    if (m_comparisonResults.empty()) return nullptr;
+
+    // 1. Exact benchmarkName + configIndex match
+    for (const auto& cmp : m_comparisonResults) {
+        if (!cmp.isUnsupported && cmp.time_ms > 0.0 &&
+            cmp.benchmarkName == curRes.benchmarkName &&
+            cmp.configIndex == curRes.configIndex) {
+            return &cmp;
+        }
+    }
+    // 2. Exact benchmarkName match (ignoring configIndex for legacy v1 files)
+    for (const auto& cmp : m_comparisonResults) {
+        if (!cmp.isUnsupported && cmp.time_ms > 0.0 &&
+            cmp.benchmarkName == curRes.benchmarkName) {
+            return &cmp;
+        }
+    }
+    return nullptr;
+}
+
 void GuiApp::updateAndRender() {
     processIncomingResults();
     updateZoomShortcuts();
+
     if (m_exportNotificationTimer > 0.0f) {
         m_exportNotificationTimer -= ImGui::GetIO().DeltaTime;
     }
@@ -2509,616 +1244,282 @@ void GuiApp::updateAndRender() {
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->WorkPos);
     ImGui::SetNextWindowSize(viewport->WorkSize);
-    ImGui::SetNextWindowViewport(viewport->ID);
 
-    ImGuiWindowFlags rootFlags = ImGuiWindowFlags_NoDecoration 
-                               | ImGuiWindowFlags_NoMove 
-                               | ImGuiWindowFlags_NoResize 
-                               | ImGuiWindowFlags_NoSavedSettings 
-                               | ImGuiWindowFlags_NoBringToFrontOnFocus;
+    ImGuiWindowFlags rootFlags = ImGuiWindowFlags_NoTitleBar |
+                                 ImGuiWindowFlags_NoResize |
+                                 ImGuiWindowFlags_NoMove |
+                                 ImGuiWindowFlags_NoCollapse |
+                                 ImGuiWindowFlags_NoBringToFrontOnFocus |
+                                 ImGuiWindowFlags_NoNavFocus;
 
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(s(10.0f), s(10.0f)));
+    ImGui::Begin("GPUBenchRootWindow", nullptr, rootFlags);
+    ImGui::PopStyleVar();
 
-    if (ImGui::Begin("GPUBenchWorkstationRoot", nullptr, rootFlags)) {
-        float sidebarWidth = s(350.0f);
-        float fullHeight = ImGui::GetContentRegionAvail().y;
+    float availWidth = ImGui::GetContentRegionAvail().x;
+    float availHeight = ImGui::GetContentRegionAvail().y;
 
-        // Left Workstation Sidebar Rail (Controls, Devices, Telemetry, Actions)
-        renderLeftSidebar(sidebarWidth, fullHeight);
+    float minSidebar = std::min(s(300.0f), availWidth * 0.34f);
+    float maxSidebar = std::min(s(410.0f), availWidth * 0.38f);
+    float leftSidebarWidth = std::clamp(availWidth * 0.25f, minSidebar, std::max(minSidebar, maxSidebar));
+    float rightWorkspaceWidth = availWidth - leftSidebarWidth - s(10.0f);
 
-        ImGui::SameLine();
-
-        // Right Workstation Main Workspace (Tabs, Benchmark Suite, Scorecard, Viewport)
-        renderRightWorkspace(0.0f, fullHeight);
-    }
-    ImGui::End();
-    ImGui::PopStyleVar(3);
-
-    if (m_telemetryNeedsFit && m_execState != ExecutionState::Running) {
-        m_telemetryNeedsFit = false;
-    }
+    renderLeftSidebar(leftSidebarWidth, availHeight);
+    ImGui::SameLine(0.0f, s(10.0f));
+    renderRightWorkspace(rightWorkspaceWidth, availHeight);
 
     if (m_showSettingsModal) {
         renderSettingsModal();
     }
+    if (m_showJsonSessionModal) {
+        renderJsonSessionModal();
+    }
+
+    ImGui::End();
 
     renderZoomToast();
 }
 
 void GuiApp::renderLeftSidebar(float width, float height) {
-    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.10f, 0.12f, 0.17f, 1.00f));
-    ImGui::BeginChild("LeftSidebar", ImVec2(width, height), true, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+    ImGui::BeginChild("LeftSidebar", ImVec2(width, height), ImGuiChildFlags_Borders);
 
-    // 1. Top Brand & Prominent Start Action Block (Pinned at top left)
-    ImGui::AlignTextToFramePadding();
+    // Brand Header
     pushBoldFont();
-    ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.00f, 1.00f), "GPUBench");
+    ImGui::TextColored(ImVec4(0.06f, 0.80f, 0.98f, 1.0f), "GPUBench");
     popBoldFont();
     ImGui::SameLine();
-    ImGui::TextColored(ImVec4(0.60f, 0.70f, 0.90f, 1.00f), "v%s", GPUBENCH_VERSION);
-    {
-        float settingsBtnW = ImGui::CalcTextSize("Settings").x + ImGui::GetStyle().FramePadding.x * 2.0f + s(8.0f);
-        float availW = ImGui::GetContentRegionAvail().x;
-        if (availW > settingsBtnW) {
-            ImGui::SameLine(ImGui::GetCursorPosX() + availW - settingsBtnW);
-        } else {
-            ImGui::SameLine();
+    ImGui::TextDisabled("v" GPUBENCH_VERSION " | Vulkan 1.4");
+    ImGui::TextColored(ImVec4(0.55f, 0.62f, 0.72f, 1.0f), "Hardware Microarchitecture Suite");
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // Compute Backend Selector
+    pushBoldFont();
+    ImGui::TextColored(ImVec4(0.75f, 0.82f, 0.92f, 1.0f), "COMPUTE BACKEND");
+    popBoldFont();
+    const char* backends[] = {"vulkan", "rocm", "opencl", "auto"};
+    const char* backendLabels[] = {"Vulkan", "ROCm", "OpenCL", "Auto"};
+    float btnW = (ImGui::GetContentRegionAvail().x - s(18.0f)) / 4.0f;
+
+    bool isRunning = (m_execState == ExecutionState::Running);
+    if (isRunning) ImGui::BeginDisabled();
+
+    for (int i = 0; i < 4; ++i) {
+        if (i > 0) ImGui::SameLine(0.0f, s(6.0f));
+
+        bool apiAvailable = true;
+        const ComputeApiSupportInfo* apiInfo = nullptr;
+        for (const auto& info : m_apiSupportList) {
+            if (info.name == backends[i]) {
+                apiInfo = &info;
+                apiAvailable = info.isSupported;
+                break;
+            }
         }
-        if (ImGui::SmallButton("Settings")) {
-            m_showSettingsModal = true;
+
+        bool active = (m_selectedBackend == backends[i]);
+        if (!apiAvailable) {
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.08f, 0.09f, 0.11f, 0.60f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.12f, 0.13f, 0.16f, 0.75f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.08f, 0.09f, 0.11f, 0.60f));
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.42f, 0.45f, 0.52f, 0.80f));
+        } else if (active) {
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.05f, 0.55f, 0.78f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.08f, 0.65f, 0.90f, 1.0f));
         }
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Configure UI Zoom, VSync, Render Dumping, and Telemetry Options");
+
+        if (ImGui::Button(backendLabels[i], ImVec2(btnW, s(28.0f)))) {
+            if (apiAvailable) {
+                setSelectedBackend(backends[i]);
+            }
+        }
+
+        if (!apiAvailable) {
+            ImGui::PopStyleColor(4);
+        } else if (active) {
+            ImGui::PopStyleColor(2);
+        }
+
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled) && apiInfo) {
+            ImGui::BeginTooltip();
+            ImGui::PushTextWrapPos(ImGui::GetFontSize() * 26.0f);
+            if (apiInfo->isSupported) {
+                ImGui::TextColored(ImVec4(0.25f, 0.92f, 0.55f, 1.0f), "[AVAILABLE] %s Backend", apiInfo->label.c_str());
+                ImGui::Separator();
+                ImGui::TextUnformatted(apiInfo->reason.c_str());
+            } else {
+                ImGui::TextColored(ImVec4(0.95f, 0.40f, 0.35f, 1.0f), "[UNAVAILABLE] %s Backend", apiInfo->label.c_str());
+                ImGui::Separator();
+                ImGui::TextWrapped("Reason: %s", apiInfo->reason.c_str());
+                if (!apiInfo->missingRequirement.empty()) {
+                    ImGui::Spacing();
+                    ImGui::TextColored(ImVec4(0.95f, 0.78f, 0.30f, 1.0f), "Requirement: %s", apiInfo->missingRequirement.c_str());
+                }
+            }
+            ImGui::PopTextWrapPos();
+            ImGui::EndTooltip();
         }
     }
 
     ImGui::Spacing();
+    pushBoldFont();
+    ImGui::TextColored(ImVec4(0.75f, 0.82f, 0.92f, 1.0f), "TARGET DEVICES");
+    popBoldFont();
 
-    size_t selectedTests = 0;
-    for (const auto& cat : m_categories) {
-        for (const auto& sub : cat.subgroups) {
-            for (const auto& item : sub.items) {
-                if (item.selected && (!m_hideUnsupported || item.isSupported)) {
-                    bool isMicro = (item.id == "RayScheduling" &&
-                        (item.configIndex == 12 || item.configIndex == 13 || item.configIndex == 14 ||
-                         item.configIndex == 15 || item.configIndex == 16 || item.configIndex == 26 ||
-                         item.configIndex == 28));
-                    if (item.id == "RayScheduling" && !isMicro && m_scene == "all") {
-                        selectedTests += 4;
-                    } else {
-                        selectedTests += 1;
-                    }
+    size_t gpuCount = 0;
+    for (const auto& d : m_devices) {
+        if (!d.isSystem) gpuCount++;
+    }
+    if (gpuCount >= 2) {
+        float quickW = (ImGui::GetContentRegionAvail().x - s(12.0f)) / 3.0f;
+        if (ImGui::Button("GPU 0 Only", ImVec2(quickW, s(23.0f)))) setSelectedDevice(0);
+        ImGui::SameLine(0.0f, s(6.0f));
+        if (ImGui::Button("GPU 1 Only", ImVec2(quickW, s(23.0f)))) setSelectedDevice(1);
+        ImGui::SameLine(0.0f, s(6.0f));
+        if (ImGui::Button("All GPUs", ImVec2(quickW, s(23.0f)))) selectAllGpus();
+    }
+
+    ImGui::BeginChild("DeviceListRegion", ImVec2(0, s(128.0f)), ImGuiChildFlags_Borders);
+    for (size_t i = 0; i < m_devices.size(); ++i) {
+        auto& dev = m_devices[i];
+        ImGui::PushID(static_cast<int>(i));
+
+        std::string badge = dev.isSystem ? "[CPU] " : ("[GPU " + std::to_string(dev.deviceIndex) + "] ");
+        std::string fullLabel = badge + dev.name;
+        float maxLabelW = ImGui::GetContentRegionAvail().x - s(30.0f);
+        std::string fittedLabel = fitTextToPixelWidth(fullLabel, maxLabelW);
+
+        if (ImGui::Checkbox(fittedLabel.c_str(), &dev.selected)) {
+            updateTelemetrySelection();
+            applyAutoRenderResolution();
+            updateBenchmarkSupport();
+        }
+        if (fittedLabel != fullLabel && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+            ImGui::SetTooltip("%s", fullLabel.c_str());
+        }
+        if (!dev.architecture.empty()) {
+            ImGui::Indent(s(26.0f));
+            std::string fitArch = fitTextToPixelWidth(dev.architecture, ImGui::GetContentRegionAvail().x - s(4.0f));
+            ImGui::TextDisabled("%s", fitArch.c_str());
+            ImGui::Unindent(s(26.0f));
+        }
+        ImGui::PopID();
+    }
+    ImGui::EndChild();
+
+    if (isRunning) ImGui::EndDisabled();
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // Live Hardware Telemetry Summary
+    renderSidebarTelemetry();
+
+    // Bottom Action Controls
+    float currentY = ImGui::GetCursorPosY();
+    float footerReserve = s(172.0f);
+    if (height - currentY > footerReserve) {
+        ImGui::SetCursorPosY(height - footerReserve);
+    }
+
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    if (m_execState == ExecutionState::Running) {
+        float progress = (m_totalTasks > 0)
+            ? static_cast<float>(m_completedTasks) / static_cast<float>(m_totalTasks)
+            : 0.0f;
+        progress = std::clamp(progress, 0.0f, 1.0f);
+
+        char overlay[64];
+        std::snprintf(overlay, sizeof(overlay), "%zu / %zu  (%.1fs)",
+                      m_completedTasks, m_totalTasks, m_elapsedSeconds);
+        ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.05f, 0.68f, 0.90f, 1.0f));
+        ImGui::ProgressBar(progress, ImVec2(-1.0f, s(20.0f)), overlay);
+        ImGui::PopStyleColor();
+
+        std::string fittedStatus = fitTextToPixelWidth(m_statusMessage, ImGui::GetContentRegionAvail().x);
+        ImGui::TextColored(ImVec4(0.65f, 0.80f, 0.95f, 1.0f), "%s", fittedStatus.c_str());
+
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.72f, 0.16f, 0.18f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.86f, 0.22f, 0.24f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.60f, 0.12f, 0.14f, 1.0f));
+        if (ImGui::Button("STOP BENCHMARK", ImVec2(-1.0f, s(38.0f)))) {
+            abortBenchmarks();
+        }
+        ImGui::PopStyleColor(3);
+    } else {
+        size_t selCount = 0;
+        for (const auto& cat : m_categories) {
+            for (const auto& sg : cat.subgroups) {
+                for (const auto& itm : sg.items) {
+                    if (itm.selected && itm.isSupported) selCount++;
                 }
             }
         }
-    }
 
-    if (m_execState == ExecutionState::Running) {
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.85f, 0.20f, 0.20f, 1.00f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.95f, 0.25f, 0.25f, 1.00f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(1.00f, 0.30f, 0.30f, 1.00f));
-        pushBoldFont();
-        if (ImGui::Button("ABORT BENCHMARK", ImVec2(-1, s(38.0f)))) {
-            abortBenchmarks();
-        }
-        popBoldFont();
-        ImGui::PopStyleColor(3);
-    } else {
-        DeviceTelemetrySnapshot preSnap;
-        m_telemetryWorker.getSnapshot(m_telemetryGpuIndex, preSnap);
-        if (preSnap.gpuBusyPct >= 15.0f || (preSnap.gttUsedBytes / (1024ULL * 1024ULL * 1024ULL)) >= 16) {
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.75f, 0.20f, 1.0f));
-            if (preSnap.gpuBusyPct >= 15.0f) {
-                ImGui::Text("⚠ Contention: GPU %.0f%% busy", preSnap.gpuBusyPct);
-            } else {
-                ImGui::Text("⚠ Contention: %llu GB in-use", static_cast<unsigned long long>(preSnap.gttUsedBytes / (1024ULL * 1024ULL * 1024ULL)));
-            }
-            ImGui::PopStyleColor();
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("Active background GPU or resident memory load detected.\nBenchmark results will be contaminated or throttled.");
-            }
-            ImGui::Spacing();
+        DeviceTelemetrySnapshot preSnap{};
+        if (m_telemetryWorker.getSnapshot(m_telemetryGpuIndex, preSnap) &&
+            preSnap.hasGpuBusy && preSnap.gpuBusyPct >= 15.0f) {
+            ImGui::TextColored(ImVec4(0.96f, 0.72f, 0.20f, 1.0f),
+                               "Warning: GPU %u Busy %.0f%% (Contention Risk)",
+                               m_telemetryGpuIndex, preSnap.gpuBusyPct);
+        } else if (!m_statusMessage.empty()) {
+            std::string fittedStatus = fitTextToPixelWidth(m_statusMessage, ImGui::GetContentRegionAvail().x);
+            ImGui::TextDisabled("%s", fittedStatus.c_str());
+        } else {
+            ImGui::TextDisabled("Ready (%zu workloads selected)", selCount);
         }
 
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.45f, 0.95f, 1.00f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.28f, 0.55f, 1.00f, 1.00f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.35f, 0.65f, 1.00f, 1.00f));
-        std::string runLabel = (selectedTests > 1)
-            ? ("START BENCHMARKS (" + std::to_string(selectedTests) + ")")
-            : (selectedTests == 1 ? "START BENCHMARK (1)" : "START BENCHMARK");
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.05f, 0.56f, 0.34f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.08f, 0.68f, 0.42f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.04f, 0.46f, 0.28f, 1.0f));
         pushBoldFont();
-        if (ImGui::Button(runLabel.c_str(), ImVec2(-1, s(38.0f)))) {
+        char runLabel[64];
+        std::snprintf(runLabel, sizeof(runLabel), "RUN SELECTED SUITE (%zu)", selCount);
+        if (ImGui::Button(runLabel, ImVec2(-1.0f, s(38.0f)))) {
             startBenchmarks();
         }
         popBoldFont();
         ImGui::PopStyleColor(3);
     }
 
-    if (m_execState == ExecutionState::Running) {
-        ImGui::Spacing();
-        float progress = (m_totalTasks > 0) ? (static_cast<float>(m_completedTasks) / static_cast<float>(m_totalTasks)) : 0.0f;
-        progress = std::clamp(progress, 0.0f, 1.0f);
-        char progBuf[64];
-        snprintf(progBuf, sizeof(progBuf), "%zu/%zu (%d%%) • %.1fs",
-                 m_completedTasks, m_totalTasks, static_cast<int>(progress * 100.0f), m_elapsedSeconds);
-        pushMonoFont();
-        ImGui::ProgressBar(progress, ImVec2(-1, s(20.0f)), progBuf);
-        popMonoFont();
-        ImGui::TextDisabled("%s", m_currentBenchmarkName.c_str());
-    } else if (m_execState == ExecutionState::Completed) {
-        ImGui::Spacing();
-        ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.18f, 0.80f, 0.44f, 1.00f));
-        char compBuf[48];
-        snprintf(compBuf, sizeof(compBuf), "Complete (%.1fs)", m_elapsedSeconds);
-        ImGui::ProgressBar(1.0f, ImVec2(-1, s(20.0f)), compBuf);
-        ImGui::PopStyleColor();
-        ImGui::TextColored(ImVec4(0.35f, 0.85f, 0.55f, 1.0f), "✓ %zu workloads recorded", m_allResults.size());
-        ImGui::Spacing();
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.45f, 0.90f, 1.0f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.28f, 0.55f, 1.00f, 1.0f));
-        if (ImGui::Button("Export JSON", ImVec2(-1, s(28.0f)))) {
-            exportResultsToJson("");
+    ImGui::Spacing();
+    float thirdW = (ImGui::GetContentRegionAvail().x - s(12.0f)) / 3.0f;
+    if (ImGui::Button("Settings", ImVec2(thirdW, s(28.0f)))) {
+        m_showSettingsModal = true;
+    }
+    ImGui::SameLine(0.0f, s(6.0f));
+    if (ImGui::Button("Import/Diff", ImVec2(thirdW, s(28.0f)))) {
+        if (m_jsonPathBuffer[0] == '\0') {
+            std::string defName = getDefaultJsonFilename();
+            std::snprintf(m_jsonPathBuffer, sizeof(m_jsonPathBuffer), "%s", defName.c_str());
         }
-        ImGui::PopStyleColor(2);
-        if (m_exportNotificationTimer > 0.0f) {
-            ImGui::Spacing();
-            ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s", m_exportNotificationText.c_str());
-        }
-    } else if (m_execState == ExecutionState::Cancelled) {
-        ImGui::Spacing();
-        ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.85f, 0.55f, 0.15f, 1.00f));
-        ImGui::ProgressBar(1.0f, ImVec2(-1, s(20.0f)), "Cancelled");
-        ImGui::PopStyleColor();
-        ImGui::TextColored(ImVec4(0.95f, 0.65f, 0.20f, 1.0f), "[!] Cancelled by user");
-        if (!m_allResults.empty()) {
-            ImGui::Spacing();
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.45f, 0.90f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.28f, 0.55f, 1.00f, 1.0f));
-            if (ImGui::Button("Export JSON", ImVec2(-1, s(28.0f)))) {
-                exportResultsToJson("");
-            }
-            ImGui::PopStyleColor(2);
-            if (m_exportNotificationTimer > 0.0f) {
-                ImGui::Spacing();
-                ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s", m_exportNotificationText.c_str());
-            }
-        }
-    } else if (!m_allResults.empty()) {
-        ImGui::Spacing();
-        ImGui::TextColored(ImVec4(0.40f, 0.75f, 1.0f, 1.0f), "%zu records available", m_allResults.size());
-        ImGui::Spacing();
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.45f, 0.90f, 1.0f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.28f, 0.55f, 1.00f, 1.0f));
-        if (ImGui::Button("Export JSON", ImVec2(-1, s(28.0f)))) {
-            exportResultsToJson("");
-        }
-        ImGui::PopStyleColor(2);
-        if (m_exportNotificationTimer > 0.0f) {
-            ImGui::Spacing();
-            ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s", m_exportNotificationText.c_str());
-        }
-    } else if (!m_statusMessage.empty()) {
-        ImGui::Spacing();
-        ImGui::TextColored(ImVec4(0.95f, 0.40f, 0.30f, 1.0f), "%s", m_statusMessage.c_str());
+        m_showJsonSessionModal = true;
+    }
+    ImGui::SameLine(0.0f, s(6.0f));
+    bool canExport = !m_allResults.empty();
+    if (!canExport) ImGui::BeginDisabled();
+    if (ImGui::Button("Export JSON", ImVec2(thirdW, s(28.0f)))) {
+        exportResultsToJson(getDefaultJsonFilename());
+    }
+    if (!canExport) ImGui::EndDisabled();
+
+    if (m_exportNotificationTimer > 0.0f && !m_exportNotificationText.empty()) {
+        ImGui::TextColored(ImVec4(0.20f, 0.90f, 0.55f, 1.0f), "%s",
+                           fitTextToPixelWidth(m_exportNotificationText, ImGui::GetContentRegionAvail().x).c_str());
     }
 
-    ImGui::Spacing();
-    ImGui::Separator();
-    ImGui::Spacing();
-
-    // 2. Scrollable Body (Target Accelerators, Compute API, Resolution, Scenario, Telemetry)
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-    ImGui::BeginChild("LeftSidebarScroll", ImVec2(0, 0), false);
-    ImGui::PopStyleVar();
-
-    // 2. Target Accelerators (Multi-Selection)
-    pushBoldFont();
-    ImGui::TextColored(ImVec4(0.65f, 0.75f, 0.90f, 1.0f), "TARGET ACCELERATORS");
-    popBoldFont();
-
-    size_t gpuCount = 0;
-    for (const auto& dev : m_devices) {
-        if (!dev.isSystem) gpuCount++;
-    }
-
-    ImGui::Spacing();
-
-    // Device Cards in Left Sidebar
-    for (size_t i = 0; i < m_devices.size(); ++i) {
-        auto& dev = m_devices[i];
-        ImGui::PushID(static_cast<int>(i));
-
-        if (dev.selected) {
-            ImVec4 borderCol = dev.isSystem ? ImVec4(0.95f, 0.75f, 0.30f, 0.90f) : ImVec4(0.20f, 0.65f, 1.0f, 0.85f);
-            ImVec4 bgCol = dev.isSystem ? ImVec4(0.18f, 0.15f, 0.10f, 0.85f) : ImVec4(0.12f, 0.18f, 0.28f, 0.85f);
-            ImGui::PushStyleColor(ImGuiCol_Border, borderCol);
-            ImGui::PushStyleColor(ImGuiCol_ChildBg, bgCol);
-        } else {
-            ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.20f, 0.25f, 0.35f, 0.45f));
-            ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.08f, 0.10f, 0.14f, 0.70f));
-        }
-
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(s(8.0f), s(6.0f)));
-        ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, s(6.0f));
-        ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize, s(1.0f));
-
-        // Explicit NoScrollbar flags and scaled height
-        ImGui::BeginChild("DevCard", ImVec2(0, s(54.0f)), true, 
-                          ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
-
-        // Row 1: Checkbox + Device Role Title + Right-Aligned Memory Badge
-        float rowStartY = ImGui::GetCursorPosY();
-        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(s(3.0f), s(3.0f)));
-        ImGui::SetCursorPosY(rowStartY + s(1.0f));
-        if (ImGui::Checkbox("##dev_sel", &dev.selected)) {
-            updateTelemetrySelection();
-        }
-        ImGui::PopStyleVar();
-
-        float textIndentX = ImGui::GetCursorPosX() + ImGui::GetFrameHeight() + s(8.0f);
-        ImGui::SameLine(0, s(8.0f));
-        ImGui::SetCursorPosY(rowStartY + s(1.0f));
-        if (dev.isSystem) {
-            ImVec4 titleCol = dev.selected ? ImVec4(0.98f, 0.85f, 0.45f, 1.0f) : ImVec4(0.80f, 0.75f, 0.55f, 0.85f);
-            pushBoldFont();
-            ImGui::TextColored(titleCol, "Host CPU & RAM");
-            popBoldFont();
-        } else {
-            bool isPrimary = (dev.deviceIndex == 0);
-            std::string title = (gpuCount > 1)
-                ? (isPrimary ? "GPU 0 (Primary)" : ("GPU " + std::to_string(dev.deviceIndex) + " (Secondary)"))
-                : ("GPU " + std::to_string(dev.deviceIndex));
-            ImVec4 titleCol = dev.selected 
-                ? (isPrimary ? ImVec4(0.38f, 0.85f, 1.00f, 1.0f) : ImVec4(0.72f, 0.85f, 0.98f, 1.0f))
-                : ImVec4(0.60f, 0.68f, 0.80f, 0.8f);
-            pushBoldFont();
-            ImGui::TextColored(titleCol, "%s", title.c_str());
-            popBoldFont();
-        }
-
-        uint64_t memGb = (dev.vramTotalMb + 512) / 1024;
-        std::string badgeStr = dev.vramTotalMb > 0 ? ("[" + std::to_string(memGb) + " GB]") : "[N/A]";
-        ImVec4 badgeCol = dev.isSystem ? ImVec4(0.90f, 0.75f, 0.35f, 0.85f) : ImVec4(0.38f, 0.75f, 1.00f, 0.85f);
-        pushMonoFont();
-        float badgeW = ImGui::CalcTextSize(badgeStr.c_str()).x;
-        ImGui::SameLine();
-        float availRight = ImGui::GetContentRegionAvail().x;
-        if (availRight > badgeW) {
-            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (availRight - badgeW));
-        }
-        ImGui::SetCursorPosY(rowStartY + s(1.0f));
-        ImGui::TextColored(badgeCol, "%s", badgeStr.c_str());
-        popMonoFont();
-
-        // Row 2: Full-width device subtitle (indented beneath title, cleanly fitted)
-        ImGui::SetCursorPosX(textIndentX);
-        ImGui::SetCursorPosY(rowStartY + ImGui::GetTextLineHeight() + s(4.0f));
-        std::string sub = fitTextToPixelWidth(formatCardDeviceSubtitle(dev), ImGui::GetContentRegionAvail().x);
-        ImGui::TextDisabled("%s", sub.c_str());
-
-        // Clicking anywhere on the card toggles its selection
-        if (ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows) && ImGui::IsMouseClicked(0)) {
-            if (!ImGui::IsAnyItemHovered() && !ImGui::IsAnyItemActive()) {
-                dev.selected = !dev.selected;
-                updateTelemetrySelection();
-            }
-        }
-
-        ImGui::EndChild();
-        ImGui::PopStyleVar(3);
-        ImGui::PopStyleColor(2);
-
-        // Tooltip with detailed device information
-        if (ImGui::IsItemHovered()) {
-            if (dev.isSystem) {
-                uint64_t ramGb = (dev.vramTotalMb + 512) / 1024;
-                ImGui::SetTooltip("Host System Memory & CPU\nCPU: %s\nArchitecture: %s\nRAM: %llu GB (%llu MB)\nOS / Platform: %s\nRuns multi-threaded & single-threaded DDR bandwidth and pointer-chasing latency benchmarks",
-                                  dev.name.c_str(),
-                                  dev.architecture.c_str(),
-                                  static_cast<unsigned long long>(ramGb),
-                                  static_cast<unsigned long long>(dev.vramTotalMb),
-                                  dev.driver.c_str());
-            } else {
-                uint64_t vramGb = (dev.vramTotalMb + 512) / 1024;
-                std::string roleStr = (gpuCount > 1)
-                    ? (dev.deviceIndex == 0 ? "Primary Target GPU (-d 0)" : "Secondary Accelerator GPU (-d " + std::to_string(dev.deviceIndex) + ")")
-                    : "Target GPU (-d " + std::to_string(dev.deviceIndex) + ")";
-                ImGui::SetTooltip("%s\nArchitecture: %s\nVRAM: %llu GB (%llu MB)\nDriver: %s\nRole: %s",
-                                  dev.name.c_str(),
-                                  dev.architecture.c_str(),
-                                  static_cast<unsigned long long>(vramGb),
-                                  static_cast<unsigned long long>(dev.vramTotalMb),
-                                  dev.driver.c_str(),
-                                  roleStr.c_str());
-            }
-        }
-
-        ImGui::PopID();
-        ImGui::Spacing();
-    }
-
-    // 3. Compute API Selection
-    ImGui::Separator();
-    ImGui::Spacing();
-    pushBoldFont();
-    ImGui::TextColored(ImVec4(0.65f, 0.75f, 0.90f, 1.0f), "COMPUTE API");
-    popBoldFont();
-    const char* backends[] = { "vulkan", "rocm", "opencl", "auto" };
-    const char* backendLabels[] = { "Vulkan", "ROCm", "OpenCL", "Auto" };
-    if (m_apiSupportList.empty()) {
-        m_apiSupportList = GetAllComputeApiSupportAPI();
-    }
-    for (int b = 0; b < 4; ++b) {
-        const ComputeApiSupportInfo* suppInfo = nullptr;
-        for (const auto& info : m_apiSupportList) {
-            if (info.name == backends[b]) {
-                suppInfo = &info;
-                break;
-            }
-        }
-        bool isSupported = (suppInfo != nullptr) ? suppInfo->isSupported : true;
-        bool isActive = (m_selectedBackend == backends[b]);
-
-        if (!isSupported) {
-            ImGui::BeginDisabled(true);
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.42f, 0.46f, 0.54f, 0.65f));
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.09f, 0.11f, 0.15f, 0.45f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.09f, 0.11f, 0.15f, 0.45f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.09f, 0.11f, 0.15f, 0.45f));
-        } else if (isActive) {
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.25f, 0.45f, 0.90f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
-        } else {
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.12f, 0.15f, 0.22f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.75f, 0.82f, 0.92f, 1.0f));
-        }
-
-        if (ImGui::SmallButton(backendLabels[b])) {
-            if (isSupported) {
-                m_selectedBackend = backends[b];
-                updateBenchmarkSupport();
-            }
-        }
-
-        if (!isSupported) {
-            ImGui::PopStyleColor(4);
-            ImGui::EndDisabled();
-        } else {
-            ImGui::PopStyleColor(2);
-        }
-
-        // Hover tooltip explaining why (what is missing) or ready status
-        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-            if (ImGui::BeginTooltip()) {
-                if (suppInfo && !suppInfo->isSupported) {
-                    ImGui::TextColored(ImVec4(0.95f, 0.42f, 0.42f, 1.0f), "COMPUTE API: %s [UNSUPPORTED]", backendLabels[b]);
-                    ImGui::TextColored(ImVec4(0.85f, 0.40f, 0.40f, 1.0f), "Status: Unavailable / Unsupported");
-                    ImGui::Separator();
-                    ImGui::PushTextWrapPos(s(280.0f));
-                    ImGui::TextColored(ImVec4(0.70f, 0.75f, 0.85f, 1.0f), "Reason:");
-                    ImGui::TextUnformatted(suppInfo->reason.c_str());
-                    ImGui::Spacing();
-                    ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f), "Missing Requirement:");
-                    ImGui::TextUnformatted(suppInfo->missingRequirement.c_str());
-                    ImGui::PopTextWrapPos();
-                } else {
-                    ImGui::TextColored(ImVec4(0.35f, 0.85f, 0.45f, 1.0f), "COMPUTE API: %s [AVAILABLE]", backendLabels[b]);
-                    ImGui::TextColored(ImVec4(0.35f, 0.85f, 0.45f, 1.0f), "Status: Ready");
-                    ImGui::Separator();
-                    ImGui::PushTextWrapPos(s(280.0f));
-                    if (suppInfo && !suppInfo->reason.empty()) {
-                        ImGui::TextUnformatted(suppInfo->reason.c_str());
-                    } else {
-                        ImGui::TextUnformatted("Click to select this compute backend for benchmarking.");
-                    }
-                    ImGui::PopTextWrapPos();
-                }
-                ImGui::EndTooltip();
-            }
-        }
-
-        if (b < 3) ImGui::SameLine();
-    }
-
-    // 4. Render Target Resolution & Image Dump Options
-    ImGui::Spacing();
-    ImGui::Separator();
-    ImGui::Spacing();
-
-    pushBoldFont();
-    ImGui::TextColored(ImVec4(0.65f, 0.75f, 0.90f, 1.0f), "BENCHMARK RENDER RESOLUTION");
-    popBoldFont();
-    ImGui::SameLine();
-    ImGui::TextDisabled("(?)");
-    if (ImGui::IsItemHovered()) {
-        ImGui::BeginTooltip();
-        ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.00f, 1.0f), "Ray Tracing & Scene Render Target");
-        ImGui::Separator();
-        ImGui::PushTextWrapPos(s(300.0f));
-        ImGui::TextUnformatted(
-            "Controls the internal framebuffer canvas dimensions and total ray count for Ray Tracing, Path Tracing, and Graphics benchmark passes.\n\n"
-            "Higher resolutions increase compute and memory bandwidth load linearly / proportionally with pixel count (W x H):\n"
-            "  • 720p:  1280 x 720   (~0.92M primary rays)\n"
-            "  • 1080p: 1920 x 1080  (~2.07M primary rays) [FHD]\n"
-            "  • 1440p: 2560 x 1440  (~3.69M primary rays) [QHD]\n"
-            "  • 4K:    3840 x 2160  (~8.29M primary rays) [4K UHD / Default Stress]\n\n"
-            "Note: This sets internal benchmark workload dimensions and does not change your monitor or GUI window resolution."
-        );
-        ImGui::PopTextWrapPos();
-        ImGui::EndTooltip();
-    }
-
-    ImGui::TextDisabled("Ray Tracing & Graphics Workload Canvas");
-    ImGui::Spacing();
-
-    const char* resLabels[] = { "720p", "1080p", "1440p", "4K" };
-    const char* resTooltips[] = {
-        "720p (1280 x 720) - Fast / Low load (~0.92M rays)",
-        "1080p (1920 x 1080) - Standard Full HD ray tracing (~2.07M rays)",
-        "1440p (2560 x 1440) - High load QHD benchmark (~3.69M rays)",
-        "4K (3840 x 2160) - Extreme 4K UHD stress test (~8.29M rays) [Default]"
-    };
-    const uint32_t resDims[][2] = { {1280, 720}, {1920, 1080}, {2560, 1440}, {3840, 2160} };
-
-    for (int r = 0; r < 4; ++r) {
-        bool isSel = (m_renderWidth == resDims[r][0] && m_renderHeight == resDims[r][1]);
-        if (isSel) {
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.48f, 0.90f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.26f, 0.55f, 0.98f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.18f, 0.42f, 0.85f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
-        } else {
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.12f, 0.15f, 0.22f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.18f, 0.23f, 0.32f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.22f, 0.28f, 0.40f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.70f, 0.78f, 0.90f, 1.0f));
-        }
-
-        if (ImGui::SmallButton(resLabels[r])) {
-            m_renderWidth = resDims[r][0];
-            m_renderHeight = resDims[r][1];
-        }
-
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("%s", resTooltips[r]);
-        }
-
-        ImGui::PopStyleColor(4);
-        if (r < 3) ImGui::SameLine();
-    }
-
-    // Active Canvas dimensions readout
-    float raysM = static_cast<float>(m_renderWidth * m_renderHeight) / 1000000.0f;
-    pushMonoFont();
-    ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.00f, 1.0f), "%u x %u", m_renderWidth, m_renderHeight);
-    popMonoFont();
-    ImGui::SameLine();
-    ImGui::TextDisabled("(%.2f Mpix / frame)", raysM);
-
-    // 5. Ray Tracing Scenario Selection
-    ImGui::Spacing();
-    ImGui::Separator();
-    ImGui::Spacing();
-
-    pushBoldFont();
-    ImGui::TextColored(ImVec4(0.65f, 0.75f, 0.90f, 1.0f), "RAY TRACING SCENARIO");
-    popBoldFont();
-    ImGui::SameLine();
-    ImGui::TextDisabled("(?)");
-    if (ImGui::IsItemHovered()) {
-        ImGui::BeginTooltip();
-        ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.00f, 1.0f), "Ray Tracing Geometry & Architectural Workload");
-        ImGui::Separator();
-        ImGui::PushTextWrapPos(s(300.0f));
-        ImGui::TextUnformatted(
-            "Selects the 3D test scenario for ray tracing and path tracing passes:\n\n"
-            "  • All Scenes: Evaluates all 4 scenes sequentially (Console CLI parity)\n"
-            "  • Sponza (Indoor): Crytek Sponza atrium (262K tris, 25 PBR materials, 100% screen fill) [Canonical Architecture Benchmark]\n"
-            "  • AAA Forest: Heavy foliage, alpha-tested leaf cutouts & deep geometry stress (1.05M+ tris)\n"
-            "  • Landscape: Expansive outdoor terrain with wide depth range & sky escape rays\n"
-            "  • Showroom: Single vehicle model in empty studio void (108K tris)\n"
-        );
-        ImGui::PopTextWrapPos();
-        ImGui::EndTooltip();
-    }
-
-    ImGui::TextDisabled("Test Scene Geometry & Shading");
-    ImGui::Spacing();
-
-    const char* sceneBtnLabels[] = { "All", "Sponza", "Forest", "Landscape", "Showroom" };
-    const char* sceneBtnTags[] = { "all", "indoor", "forest", "outdoor", "showroom" };
-    const char* sceneBtnTooltips[] = {
-        "All Scenes - Runs all 4 scenarios sequentially (Console parity default)",
-        "Indoor Atrium (Crytek Sponza) - 262K triangles, 25 PBR materials, 100% screen fill [Canonical Benchmark]",
-        "Open-World Forest - 1.05M+ triangles, heavy alpha cutout foliage & traversal stress",
-        "Outdoor Landscape - Expansive terrain vista with wide depth variance & sky miss rays",
-        "Showroom Studio - Single high-detail vehicle in studio void (108K triangles)"
-    };
-
-    for (int sIdx = 0; sIdx < 5; ++sIdx) {
-        bool isSel = (m_scene == sceneBtnTags[sIdx]);
-        if (isSel) {
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.48f, 0.90f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.26f, 0.55f, 0.98f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.18f, 0.42f, 0.85f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
-        } else {
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.12f, 0.15f, 0.22f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.18f, 0.23f, 0.32f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.22f, 0.28f, 0.40f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.70f, 0.78f, 0.90f, 1.0f));
-        }
-
-        float btnW = ImGui::CalcTextSize(sceneBtnLabels[sIdx]).x + ImGui::GetStyle().FramePadding.x * 2.0f;
-        if (sIdx > 0) {
-            sameLineIfFits(btnW);
-        }
-
-        if (ImGui::SmallButton(sceneBtnLabels[sIdx])) {
-            m_scene = sceneBtnTags[sIdx];
-            if (m_scene != "all") {
-                m_suiteActiveScene = m_scene;
-            }
-        }
-
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("%s", sceneBtnTooltips[sIdx]);
-        }
-
-        ImGui::PopStyleColor(4);
-    }
-
-    if (m_scene == "all") {
-        ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.00f, 1.0f), "All 4 Scenarios (Console Parity)");
-    } else if (m_scene == "indoor") {
-        ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "Indoor Atrium (Sponza - Canonical)");
-    } else if (m_scene == "forest") {
-        ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "Open-World Forest (1.05M+ Tris)");
-    } else if (m_scene == "outdoor") {
-        ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "Outdoor Landscape (Terrain Vista)");
-    } else {
-        ImGui::TextColored(ImVec4(0.70f, 0.75f, 0.85f, 1.0f), "Showroom Studio (108K Tris)");
-    }
-
-    ImGui::Spacing();
-    ImGui::Checkbox("Dump Scene Renders to Disk", &m_dumpRenders);
-    ImGui::SameLine();
-    ImGui::TextDisabled("(?)");
-    if (ImGui::IsItemHovered()) {
-        ImGui::BeginTooltip();
-        ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.00f, 1.0f), "Post-Benchmark Visual Verification & Render Export");
-        ImGui::Separator();
-        ImGui::PushTextWrapPos(s(300.0f));
-        ImGui::TextUnformatted(
-            "Timed benchmark loops always execute in-memory with zero framebuffer store or disk I/O overhead.\n\n"
-            "• Checked (Default): Runs an untimed post-benchmark pass to export full-resolution scene renders and parity profiles for the Ray Tracing Viewport.\n"
-            "• Unchecked: Skips post-benchmark image generation."
-        );
-        ImGui::PopTextWrapPos();
-        ImGui::EndTooltip();
-    }
-
-    if (m_dumpRenders) {
-        ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "Exports renders post-run (zero timed I/O)");
-    } else {
-        ImGui::TextDisabled("Post-run render export disabled");
-    }
-
-    // 6. Live Hardware Telemetry (placed at bottom of sidebar so controls stay above the fold)
-    ImGui::Spacing();
-    renderSidebarTelemetry();
-
-    ImGui::EndChild(); // LeftSidebarScroll
-    ImGui::EndChild(); // LeftSidebar
-    ImGui::PopStyleColor();
+    ImGui::EndChild();
 }
 
 void GuiApp::renderRightWorkspace(float width, float height) {
-    ImGui::BeginChild("RightWorkspace", ImVec2(width, height), false);
+    ImGui::BeginChild("RightWorkspace", ImVec2(width, height), ImGuiChildFlags_None);
 
-    if (ImGui::BeginTabBar("MainWorkstationTabs", ImGuiTabBarFlags_None)) {
+    if (ImGui::BeginTabBar("MainWorkspaceTabs", ImGuiTabBarFlags_None)) {
         if (ImGui::BeginTabItem("Benchmark Suite")) {
             renderBenchmarkSuitePanel();
             ImGui::EndTabItem();
@@ -3129,9 +1530,24 @@ void GuiApp::renderRightWorkspace(float width, float height) {
             scorecardFlags |= ImGuiTabItemFlags_SetSelected;
             m_switchToScorecard = false;
         }
+        std::string scorecardLabel = "Results Scorecard";
+        if (!m_allResults.empty()) {
+            scorecardLabel += " (" + std::to_string(m_allResults.size()) + ")";
+        }
+        scorecardLabel += "###ResultsScorecardTab";
 
-        if (ImGui::BeginTabItem("Results Scorecard", nullptr, scorecardFlags)) {
+        if (ImGui::BeginTabItem(scorecardLabel.c_str(), nullptr, scorecardFlags)) {
             renderResultsScorecard();
+            ImGui::EndTabItem();
+        }
+
+        ImGuiTabItemFlags rooflineFlags = ImGuiTabItemFlags_None;
+        if (m_switchToRoofline) {
+            rooflineFlags |= ImGuiTabItemFlags_SetSelected;
+            m_switchToRoofline = false;
+        }
+        if (ImGui::BeginTabItem("Empirical Roofline###RooflineTab", nullptr, rooflineFlags)) {
+            renderRooflinePanel();
             ImGui::EndTabItem();
         }
 
@@ -3140,4429 +1556,104 @@ void GuiApp::renderRightWorkspace(float width, float height) {
             rtFlags |= ImGuiTabItemFlags_SetSelected;
             m_switchToRtViewport = false;
         }
-
-        if (ImGui::BeginTabItem("Ray Tracing Viewport", nullptr, rtFlags)) {
+        if (ImGui::BeginTabItem("Ray Tracing Viewport###RtViewportTab", nullptr, rtFlags)) {
             renderRayTracingViewport();
             ImGui::EndTabItem();
         }
+
         if (ImGui::BeginTabItem("Hardware Telemetry")) {
             renderLiveTelemetryDock();
             ImGui::EndTabItem();
         }
+
         ImGui::EndTabBar();
     }
 
     ImGui::EndChild();
 }
 
-static bool hasAngleToken(const std::string& str, const std::string& token) {
-    size_t pos = 0;
-    while ((pos = str.find(token, pos)) != std::string::npos) {
-        if (pos == 0 || !isdigit(static_cast<unsigned char>(str[pos - 1]))) {
-            return true;
-        }
-        pos += token.length();
-    }
-    return false;
-}
-
-bool GuiApp::matchesItem(const ResultData& r, const BenchmarkItem& itm, uint32_t activeDev) const {
-    bool isHostItem = (itm.category == "System" || itm.category == "Host System" || itm.category == "System Memory");
-    uint32_t expectedDev = isHostItem ? 0xFFFFFFFF : activeDev;
-    if (r.deviceIndex != expectedDev) return false;
-
-    // Fast path: Exact configIndex and benchmark id match
-    if (itm.configIndex >= 0) {
-        std::string baseName = r.benchmarkName;
-        size_t p = baseName.find(" (");
-        if (p != std::string::npos) {
-            baseName = baseName.substr(0, p);
-        }
-        if ((itm.id == baseName || (itm.id == "L0 Cache Latency" && baseName == "L0 Cache Latency") ||
-             (itm.id.find("L0") != std::string::npos && baseName.find("L0") != std::string::npos)) &&
-            r.configIndex == static_cast<uint32_t>(itm.configIndex)) {
-            return true;
-        }
-    }
-
-    // Subcategory matching with normalization
-    if (!itm.subcategory.empty() && !r.subcategory.empty()) {
-        bool subMatches = (itm.subcategory == r.subcategory);
-        if (!subMatches) {
-            if (itm.subcategory.find(r.subcategory) != std::string::npos ||
-                r.subcategory.find(itm.subcategory) != std::string::npos) {
-                subMatches = true;
-            }
-            if ((itm.subcategory.find("ROP") != std::string::npos || itm.subcategory.find("Fill Rate") != std::string::npos) &&
-                (r.subcategory.find("ROP") != std::string::npos || r.subcategory.find("Fill Rate") != std::string::npos)) {
-                subMatches = true;
-            }
-            if (itm.subcategory.find("Procedural") != std::string::npos &&
-                (r.subcategory.find("Procedural") != std::string::npos ||
-                 r.subcategory.find("Intersection") != std::string::npos)) {
-                subMatches = true;
-            }
-            if (itm.category == "System" || itm.category == "Host System") {
-                if (r.deviceIndex != 0xFFFFFFFF) subMatches = false;
-            } else {
-                if (r.deviceIndex == 0xFFFFFFFF) subMatches = false;
-            }
-        }
-        if (!subMatches) return false;
-    }
-
-    // Cache Latency matching
-    if (itm.subcategory == "Cache Latency" || r.subcategory == "Latency") {
-        if (r.deviceIndex != 0xFFFFFFFF) {
-            if (itm.name.find("L0") != std::string::npos && r.benchmarkName.find("L0") != std::string::npos) return true;
-            if (itm.name.find("L1") != std::string::npos && r.benchmarkName.find("L1") != std::string::npos) return true;
-            if (itm.name.find("L2") != std::string::npos && r.benchmarkName.find("L2") != std::string::npos) return true;
-            if (itm.name.find("L3") != std::string::npos && r.benchmarkName.find("L3") != std::string::npos) return true;
-        }
-    }
-
-    // Cache Latency Curve matching
-    if (itm.subcategory == "Cache Latency Curve" || r.subcategory == "Cache Latency Curve") {
-        std::string clean = cleanWorkloadName(r.benchmarkName, r.subcategory);
-        return (clean == itm.name || r.benchmarkName == itm.name);
-    }
-
-    // LDS Bank Conflicts matching
-    if (itm.subcategory == "LDS Bank Conflicts" || r.subcategory == "LDS Bank Conflicts") {
-        std::string clean = cleanWorkloadName(r.benchmarkName, r.subcategory);
-        return (clean == itm.name || r.benchmarkName == itm.name || r.benchmarkName.find(itm.name) != std::string::npos);
-    }
-
-    // In-Shader Indirect Synthesis matching
-    if (itm.subcategory == "Indirect Command Synthesis" || r.subcategory == "Indirect Command Synthesis") {
-        std::string clean = cleanWorkloadName(r.benchmarkName, r.subcategory);
-        return (clean == itm.name || r.benchmarkName == itm.name || r.benchmarkName.find(itm.name) != std::string::npos);
-    }
-
-    // Ray Directional Coherence matching
-    if (itm.subcategory == "Ray Directional Coherence" || r.subcategory == "Ray Directional Coherence") {
-        std::string clean = cleanWorkloadName(r.benchmarkName, r.subcategory);
-        if (clean == itm.name || r.benchmarkName == itm.name || clean.find(itm.name) != std::string::npos) {
-            return true;
-        }
-
-        if (hasAngleToken(itm.name, "90°") || itm.name.find("90 deg") != std::string::npos || itm.name.find("Hemispherical") != std::string::npos || itm.name.find("Diffuse") != std::string::npos) {
-            return r.configIndex == 0 || hasAngleToken(clean, "90°") || clean.find("90 deg") != std::string::npos || clean.find("Hemispherical") != std::string::npos || clean.find("Diffuse") != std::string::npos;
-        }
-        if (hasAngleToken(itm.name, "67.5°") || itm.name.find("67.5 deg") != std::string::npos) {
-            return r.configIndex == 1 || clean.find("67.5°") != std::string::npos || clean.find("67.5 deg") != std::string::npos;
-        }
-        if (hasAngleToken(itm.name, "45°") || itm.name.find("45 deg") != std::string::npos) {
-            return r.configIndex == 2 || clean.find("45°") != std::string::npos || clean.find("45 deg") != std::string::npos;
-        }
-        if (hasAngleToken(itm.name, "22.5°") || itm.name.find("22.5 deg") != std::string::npos) {
-            return r.configIndex == 3 || clean.find("22.5°") != std::string::npos || clean.find("22.5 deg") != std::string::npos;
-        }
-        if (hasAngleToken(itm.name, "0°") || itm.name.find("0 deg") != std::string::npos || itm.name.find("Beam") != std::string::npos) {
-            return r.configIndex == 4 || hasAngleToken(clean, "0°") || clean.find("0 deg") != std::string::npos || clean.find("Beam") != std::string::npos;
-        }
-        return false;
-    }
-
-    // VRAM Bandwidth matching
-    if (itm.subcategory == "VRAM Bandwidth" || r.subcategory == "Bandwidth" || itm.id == "Device Memory Bandwidth") {
-        if (r.deviceIndex != 0xFFFFFFFF) {
-            for (const char* tGrp : {"128", "256", "1024"}) {
-                if (itm.name.find(tGrp) != std::string::npos && r.benchmarkName.find(tGrp) != std::string::npos) {
-                    bool itmIsRW = (itm.name.find("Read / Write") != std::string::npos || itm.name.find("R/W") != std::string::npos);
-                    bool rIsRW = (r.benchmarkName.find("Read / Write") != std::string::npos || r.benchmarkName.find("R/W") != std::string::npos);
-                    if (itmIsRW && rIsRW) return true;
-                    if (!itmIsRW && !rIsRW) {
-                        if (itm.name.find("Read") != std::string::npos && r.benchmarkName.find("Read") != std::string::npos) return true;
-                        if (itm.name.find("Write") != std::string::npos && r.benchmarkName.find("Write") != std::string::npos) return true;
-                    }
-                }
-            }
-        }
-    }
-
-    // Host Memory matching
-    if (itm.category == "System" || itm.category == "Host System") {
-        if (r.deviceIndex == 0xFFFFFFFF) {
-            if ((itm.id == "System Memory Latency" || itm.name == "Default" || itm.name.find("Latency") != std::string::npos || itm.name.find("Pointer Chasing") != std::string::npos) && r.metric == "ns") return true;
-            bool is1T_itm = (itm.name.find("1T") != std::string::npos || itm.name.find("Single-Threaded") != std::string::npos);
-            bool is1T_r = (r.benchmarkName.find("1 Thread") != std::string::npos || r.benchmarkName.find("1T") != std::string::npos || r.benchmarkName.find("Single-Threaded") != std::string::npos);
-            if (is1T_itm == is1T_r && r.metric != "ns") {
-                if (itm.name.find("Read") != std::string::npos && r.benchmarkName.find("Read") != std::string::npos) return true;
-                if (itm.name.find("Write") != std::string::npos && r.benchmarkName.find("Write") != std::string::npos) return true;
-                if (itm.name.find("Copy") != std::string::npos && r.benchmarkName.find("Copy") != std::string::npos) return true;
-            }
-        }
-        return false;
-    }
-
-    // Dual-Issue / ILP & Concurrency matching
-    if (itm.subcategory == "Dual-Issue" || r.subcategory == "Dual-Issue" ||
-        itm.subcategory == "ILP & Concurrency" || r.subcategory == "ILP & Concurrency") {
-        if (itm.configIndex >= 0 && static_cast<uint32_t>(itm.configIndex) == r.configIndex) return true;
-        std::string clean = cleanWorkloadName(r.benchmarkName, r.subcategory);
-        return (clean == itm.name || r.benchmarkName == itm.name ||
-                r.benchmarkName.find(itm.name) != std::string::npos ||
-                itm.name.find(clean) != std::string::npos);
-    }
-
-    // Compute Precision matching
-    if (itm.category == "Compute") {
-        if (itm.name.find("Matrix") != std::string::npos) {
-            return (r.benchmarkName.find("Matrix") != std::string::npos);
-        } else if (itm.name.find("Vector") != std::string::npos) {
-            return (r.benchmarkName.find("Matrix") == std::string::npos);
-        }
-        return true;
-    }
-
-    std::string clean = cleanWorkloadName(r.benchmarkName, r.subcategory);
-
-    // Graphics / Pixel Fill Rate (ROP Throughput) matching
-    if (itm.id == "Pixel Fill Rate" || r.benchmarkName.find("Pixel Fill Rate") != std::string::npos ||
-        itm.subcategory == "ROP Throughput" || r.subcategory == "ROP Throughput") {
-        if (r.deviceIndex != 0xFFFFFFFF) {
-            if ((itm.name.find("RGBA8") != std::string::npos) &&
-                (r.benchmarkName.find("RGBA8") != std::string::npos || clean.find("RGBA8") != std::string::npos)) return true;
-            if ((itm.name.find("RGBA16") != std::string::npos || itm.name.find("HDR") != std::string::npos) &&
-                (r.benchmarkName.find("RGBA16") != std::string::npos || clean.find("RGBA16") != std::string::npos)) return true;
-            if ((itm.name.find("Alpha") != std::string::npos || itm.name.find("Blend") != std::string::npos) &&
-                (r.benchmarkName.find("Alpha") != std::string::npos || clean.find("Alpha") != std::string::npos)) return true;
-        }
-    }
-
-    if (clean == itm.name || r.benchmarkName == itm.name) return true;
-    if (clean.find(itm.name) != std::string::npos || itm.name.find(clean) != std::string::npos) return true;
-
-    // RayASBuild matching
-    if (itm.id == "RayASBuild") {
-        for (const char* tlasKey : {"Indoor Corridor", "Dense Jungle", "Massive Open World"}) {
-            if (itm.name.find(tlasKey) != std::string::npos && clean.find(tlasKey) != std::string::npos) return true;
-        }
-        for (const char* trisKey : {"1M", "5M", "10M"}) {
-            if (itm.name.find(trisKey) != std::string::npos && clean.find(trisKey) != std::string::npos) {
-                bool isUpdateItm = (itm.name.find("Update") != std::string::npos);
-                bool isUpdateR = (clean.find("Update") != std::string::npos);
-                if (isUpdateItm == isUpdateR) return true;
-            }
-        }
-    }
-
-    // RayScheduling dispatch keyword matching
-    if (itm.id == "RayScheduling" || itm.id == "RayPathTracing") {
-        if (!itm.subcategory.empty() && !r.subcategory.empty() && r.subcategory != itm.subcategory) {
-            return false;
-        }
-        if (itm.configIndex >= 0 && r.configIndex == static_cast<uint32_t>(itm.configIndex)) {
-            return true;
-        }
-
-        // Multi-Light Evaluation exact matching
-        if (itm.subcategory == "Multi-Light Evaluation" || r.subcategory == "Multi-Light Evaluation") {
-            bool itm128 = (itm.name.find("128") != std::string::npos);
-            bool r128 = (clean.find("128") != std::string::npos || r.benchmarkName.find("128") != std::string::npos || r.configIndex == 33 || r.configIndex == 34);
-            if (itm128 != r128) return false;
-            bool itmDGC = (itm.name.find("DGC") != std::string::npos || itm.name.find("Binning") != std::string::npos);
-            bool rDGC = (clean.find("DGC") != std::string::npos || clean.find("Binning") != std::string::npos || r.configIndex == 32 || r.configIndex == 34);
-            return (itmDGC == rDGC);
-        }
-
-        // Differentiate 128 Lights vs 1 Light
-        bool itm128 = (itm.name.find("128") != std::string::npos);
-        bool r128 = (clean.find("128") != std::string::npos || r.benchmarkName.find("128") != std::string::npos);
-        if (itm128 != r128) return false;
-
-        // Differentiate 3 Lights vs Single Light in Shadows
-        bool itm3L = (itm.name.find("3 Light") != std::string::npos || itm.name.find("Multi-Light (3") != std::string::npos);
-        bool r3L = (clean.find("3 Light") != std::string::npos || r.benchmarkName.find("3 Light") != std::string::npos);
-        if (itm3L != r3L) return false;
-
-        if (itm.name.find("Megakernel") != std::string::npos && clean.find("Megakernel") != std::string::npos &&
-            clean.find("RTP") == std::string::npos && itm.name.find("RTP") == std::string::npos) return true;
-        if (itm.name.find("RTP") != std::string::npos && clean.find("RTP") != std::string::npos) {
-            bool itmHasSER = (itm.name.find("SER") != std::string::npos);
-            bool cleanHasSER = (clean.find("SER") != std::string::npos);
-            if (itmHasSER == cleanHasSER) return true;
-        }
-        if ((itm.name.find("Multi-Light") != std::string::npos || itm.name.find("Many Lights") != std::string::npos) &&
-            (clean.find("Multi-Light") != std::string::npos || clean.find("Many Lights") != std::string::npos || clean.find("Binning") != std::string::npos)) return true;
-        if ((itm.name.find("Single Light") != std::string::npos || itm.name.find("DGC") != std::string::npos) &&
-            (clean.find("Single Light") != std::string::npos || clean.find("DGC") != std::string::npos || clean.find("Work Lists") != std::string::npos) &&
-            itm.name.find("Megakernel") == std::string::npos && clean.find("Megakernel") == std::string::npos &&
-            itm.name.find("RTP") == std::string::npos && clean.find("RTP") == std::string::npos &&
-            itm.name.find("Multi-Light") == std::string::npos && clean.find("Multi-Light") == std::string::npos &&
-            itm.name.find("Binning") == std::string::npos && clean.find("Binning") == std::string::npos) return true;
-        if ((itm.name.find("Persistent") != std::string::npos || itm.name.find("Load Balancing") != std::string::npos) &&
-            (clean.find("Persistent") != std::string::npos || clean.find("Load Balancing") != std::string::npos || r.configIndex == 25)) return true;
-        if (itm.name.find("Alpha Cutout") != std::string::npos && clean.find("Alpha") != std::string::npos) return true;
-        if (itm.name.find("SER") != std::string::npos && clean.find("SER") != std::string::npos) return true;
-        if (itm.name.find("Dedicated") != std::string::npos && clean.find("Dedicated") != std::string::npos) return true;
-        if (itm.name.find("DGC") != std::string::npos && (clean.find("DGC") != std::string::npos || clean.find("Work Lists") != std::string::npos)) {
-            bool itmMulti = (itm.name.find("Multi-Light") != std::string::npos || itm.name.find("Many Lights") != std::string::npos);
-            bool cleanMulti = (clean.find("Multi-Light") != std::string::npos || clean.find("Many Lights") != std::string::npos || clean.find("Binning") != std::string::npos);
-            if (itmMulti == cleanMulti) return true;
-        }
-        // Traversal Scheduling
-        if (itm.name.find("Morton") != std::string::npos && clean.find("Morton") != std::string::npos) {
-            if (itm.name.find("8x4") != std::string::npos && clean.find("8x4") != std::string::npos) return true;
-            if (itm.name.find("4x8") != std::string::npos && clean.find("4x8") != std::string::npos) return true;
-            if (itm.name.find("4x4") != std::string::npos && clean.find("8x4") != std::string::npos) return true;
-            if (itm.name.find("8x8") != std::string::npos && clean.find("4x8") != std::string::npos) return true;
-        }
-        if (itm.name.find("Screen Tiled") != std::string::npos && clean.find("Screen Tiled") != std::string::npos) return true;
-        for (const char* schedKey : {"Scanline", "Wave Ballot", "Single-Pass", "Throughput", "Round-Trip"}) {
-            if (itm.name.find(schedKey) != std::string::npos && clean.find(schedKey) != std::string::npos) return true;
-        }
-    }
-
-    // BVH & Divergence Stress matching
-    auto hasPercentToken = [](const std::string& str, const std::string& token) -> bool {
-        size_t pos = 0;
-        while ((pos = str.find(token, pos)) != std::string::npos) {
-            if (pos == 0 || !isdigit(static_cast<unsigned char>(str[pos - 1]))) {
-                return true;
-            }
-            pos += token.length();
-        }
-        return false;
-    };
-
-    for (const char* pct : {"100%", "75%", "50%", "25%", "10%", "0%"}) {
-        if (hasPercentToken(itm.name, pct) && hasPercentToken(clean, pct)) return true;
-    }
-    for (const char* deg : {"45 deg", "75 deg", "90 deg", "180 deg", "Microbench", "Mirror", "Diffuse", "0°", "22.5°", "45°", "67.5°", "90°"}) {
-        if (itm.name.find(deg) != std::string::npos && clean.find(deg) != std::string::npos) return true;
-    }
-    for (const char* pl : {"16B", "128B", "256B"}) {
-        if (itm.name.find(pl) != std::string::npos && clean.find(pl) != std::string::npos) return true;
-    }
-    if (itm.name.find("Ray-Triangle") != std::string::npos && clean.find("Ray-Triangle") != std::string::npos) return true;
-    if (itm.name.find("Ray-Box") != std::string::npos && clean.find("Ray-Box") != std::string::npos) return true;
-    if (itm.name.find("Coherent") != std::string::npos && itm.name.find("Incoherent") == std::string::npos &&
-        clean.find("Coherent") != std::string::npos && clean.find("Incoherent") == std::string::npos) return true;
-    if (itm.name.find("Deep Box") != std::string::npos && clean.find("Box") != std::string::npos) return true;
-    if (itm.name.find("Spheres") != std::string::npos && clean.find("Spheres") != std::string::npos) return true;
-    if (itm.id == "RayProcedural" || itm.name.find("Procedural") != std::string::npos) {
-        if (r.benchmarkName.find("RayProcedural") != std::string::npos ||
-            clean.find("Spheres") != std::string::npos ||
-            clean.find("Procedural") != std::string::npos) return true;
-    }
-
-    return false;
-}
-
-GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
-    const BenchmarkItem& item,
-    uint32_t targetDeviceIndex,
-    const std::string& sceneOverride) const
-{
-    BenchmarkDisplayInfo info;
-    info.hasResult = false;
-    info.isBaseline = false;
-    info.hasComparison = false;
-    info.speedupRatio = 1.0;
-    info.percentDelta = 0.0;
-    info.deltaColor = ImVec4(0.60f, 0.65f, 0.75f, 0.70f);
-
-    uint32_t activeDev = targetDeviceIndex;
-    bool isHostItem = (item.category == "System" || item.category == "Host System" || item.category == "System Memory");
-    if (isHostItem) {
-        activeDev = 0xFFFFFFFF;
-    } else {
-        bool hasTargetDev = false;
-        for (const auto& r : m_allResults) {
-            if (r.deviceIndex == activeDev) {
-                hasTargetDev = true;
-                break;
-            }
-        }
-        if (!hasTargetDev && !m_allResults.empty()) {
-            for (const auto& r : m_allResults) {
-                if (r.deviceIndex != 0xFFFFFFFF) {
-                    activeDev = r.deviceIndex;
-                    break;
-                }
-            }
-        }
-    }
-
-    auto formatScore = [](const ResultData& r) -> std::string {
-        if (r.time_ms == -3.0) return "ABORTED";
-        if (r.time_ms < 0.0) return "FAILED";
-        if (r.time_ms == 0.0 || r.operations == 0) return "-";
-        double opsPerSec = (static_cast<double>(r.operations) / r.time_ms) * 1000.0;
-        char buf[64];
-        if (r.metric.find("TFLOPS") != std::string::npos || r.metric.find("TOPS") != std::string::npos) {
-            snprintf(buf, sizeof(buf), "%.2f %s", opsPerSec / 1e12, r.metric.c_str());
-        } else if (r.metric.find("TB/s") != std::string::npos) {
-            snprintf(buf, sizeof(buf), "%.2f TB/s", opsPerSec / 1e12);
-        } else if (r.metric.find("GB/s") != std::string::npos) {
-            snprintf(buf, sizeof(buf), "%.1f GB/s", opsPerSec / 1e9);
-        } else if (r.metric.find("GIS/s") != std::string::npos) {
-            snprintf(buf, sizeof(buf), "%.2f GIS/s", opsPerSec / 1e9);
-        } else if (r.metric.find("MRays/s") != std::string::npos) {
-            snprintf(buf, sizeof(buf), "%.1f MRays/s", opsPerSec / 1e6);
-        } else if (r.metric.find("GPixels/s") != std::string::npos) {
-            snprintf(buf, sizeof(buf), "%.2f GPixels/s", opsPerSec / 1e9);
-        } else if (r.metric.find("MBVH/s") != std::string::npos ||
-                   r.metric.find("MTris/s") != std::string::npos ||
-                   r.metric.find("MInst/s") != std::string::npos ||
-                   r.metric.find("MHits/s") != std::string::npos ||
-                   r.metric.find("MItems/s") != std::string::npos ||
-                   r.metric.find("MRecords/s") != std::string::npos) {
-            snprintf(buf, sizeof(buf), "%.1f %s", opsPerSec / 1e6, r.metric.c_str());
-        } else if (r.metric.find("ns") != std::string::npos) {
-            double nsVal = (r.operations > 0) ? ((r.time_ms * 1e6) / r.operations) : r.time_ms;
-            snprintf(buf, sizeof(buf), "%.1f ns", nsVal);
-        } else if (r.metric == "us") {
-            double usVal = (r.operations > 0) ? ((r.time_ms * 1000.0) / r.operations) : r.time_ms;
-            snprintf(buf, sizeof(buf), "%.1f us", usVal);
-        } else {
-            snprintf(buf, sizeof(buf), "%.1f %s", opsPerSec, r.metric.c_str());
-        }
-        return std::string(buf);
-    };
-
-    const std::string activeScene = !sceneOverride.empty()
-        ? sceneOverride
-        : ((m_scene != "all" && !m_scene.empty()) ? m_scene : m_suiteActiveScene);
-    const bool isMicroConfig = (item.id == "RayScheduling" &&
-        (item.configIndex == 12 || item.configIndex == 13 || item.configIndex == 14 ||
-         item.configIndex == 15 || item.configIndex == 16 || item.configIndex == 26 ||
-         item.configIndex == 28));
-
-    const ResultData* curRes = nullptr;
-    const ResultData* fallbackRes = nullptr;
-    for (const auto& r : m_allResults) {
-        if (matchesItem(r, item, activeDev)) {
-            if (!fallbackRes && r.time_ms > 0.0) fallbackRes = &r;
-            if ((item.id == "RayScheduling" || item.id == "RayPathTracing") && !isMicroConfig) {
-                bool sceneMatches = false;
-                if (activeScene == "indoor" && r.benchmarkName.find("Indoor Atrium") != std::string::npos) sceneMatches = true;
-                else if (activeScene == "forest" && r.benchmarkName.find("Forest") != std::string::npos) sceneMatches = true;
-                else if (activeScene == "outdoor" && r.benchmarkName.find("Outdoor") != std::string::npos) sceneMatches = true;
-                else if (activeScene == "showroom" && r.benchmarkName.find("Showroom") != std::string::npos) sceneMatches = true;
-                else if (activeScene.empty() || activeScene == "all") sceneMatches = true;
-
-                if (sceneMatches) {
-                    curRes = &r;
-                    if (r.time_ms > 0.0) break;
-                }
-            } else {
-                curRes = &r;
-                if (r.time_ms > 0.0) break;
-            }
-        }
-    }
-    if (!curRes && (isMicroConfig || activeScene.empty() || activeScene == "all")) {
-        curRes = fallbackRes;
-    }
-
-    if (curRes) {
-        info.hasResult = true;
-        info.primaryResult = *curRes;
-        info.scoreText = formatScore(*curRes);
-
-        if (curRes->time_ms == -3.0) {
-            info.deltaText = !curRes->errorString.empty() ? ("[" + curRes->errorString + "]") : "[ABORTED]";
-            info.deltaColor = ImVec4(0.95f, 0.70f, 0.25f, 1.0f);
-        } else if (curRes->time_ms < 0.0) {
-            info.deltaText = !curRes->errorString.empty() ? ("[" + curRes->errorString + "]") : "[FAILED]";
-            info.deltaColor = ImVec4(0.95f, 0.35f, 0.35f, 1.0f);
-        }
-
-        bool isUnsupportedItem = (!item.isSupported || curRes->isUnsupported || curRes->time_ms <= 0.0);
-
-        // Determine baseline item name in the same subcategory
-        std::string baselineName = "";
-        if (!isUnsupportedItem) {
-            if (item.subcategory == "LDS Bank Conflicts") {
-                if (item.configIndex == 0) {
-                    info.isBaseline = true;
-                    info.deltaText = "[Baseline]";
-                    info.deltaColor = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
-                } else {
-                    baselineName = "LDS_Stride1_Baseline";
-                }
-            } else if (item.subcategory == "Indirect Command Synthesis") {
-                if (item.configIndex == 0) {
-                    info.isBaseline = true;
-                    info.deltaText = "[Baseline]";
-                    info.deltaColor = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
-                } else {
-                    baselineName = "Indirect_Config0_Baseline";
-                }
-            } else if (item.subcategory == "Dual-Issue" || item.subcategory == "ILP & Concurrency") {
-                if (item.name == "Standard FP32" || item.name == "FP32 Baseline (Ping-Pong)" || item.name.find("FP32 Baseline") != std::string::npos) {
-                    info.isBaseline = true;
-                    info.deltaText = "[Baseline]";
-                    info.deltaColor = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
-                } else if (item.name.find("Dual-Issue FP32") != std::string::npos || item.name.find("FP32 Moderate") != std::string::npos || item.name.find("FP32 Peak") != std::string::npos) {
-                    baselineName = "Dual_Issue_FP32_Baseline";
-                } else if (item.name == "Standard INT32" || item.name == "INT32 Baseline (Ping-Pong)" || item.name.find("INT32 Baseline") != std::string::npos) {
-                    info.isBaseline = true;
-                    info.deltaText = "[Baseline]";
-                    info.deltaColor = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
-                } else if (item.name.find("Dual-Issue INT32") != std::string::npos || item.name.find("INT32 Moderate") != std::string::npos || item.name.find("INT32 Peak") != std::string::npos) {
-                    baselineName = "Dual_Issue_INT32_Baseline";
-                } else if (item.name.find("Mixed") != std::string::npos || item.name.find("Concurrent") != std::string::npos) {
-                    baselineName = "Dual_Issue_Mixed_Harmonic";
-                }
-            } else if (item.category == "Compute") {
-                // In Compute Precision, Vector ALU is the baseline for Matrix (WMMA) within the SAME precision.
-                // Standalone precisions (FP64, FP32, FP4) do not compare against unrelated datatypes.
-                if (item.name.find("Vector") != std::string::npos) {
-                    if (item.id == "FP16" || item.id == "BF16" || item.id == "FP8" || item.id == "INT8" || item.id == "INT4") {
-                        info.isBaseline = true;
-                        info.deltaText = "[Baseline]";
-                        info.deltaColor = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
-                    }
-                } else if (item.name.find("Matrix") != std::string::npos) {
-                    baselineName = item.id + "_Vector";
-                }
-            } else if (item.name.find("Vector ALU") != std::string::npos || item.name == "Vector") {
-                info.isBaseline = true;
-                info.deltaText = "[Baseline]";
-                info.deltaColor = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
-            } else if (item.name.find("Matrix") != std::string::npos) {
-                baselineName = "Vector";
-            } else if ((item.name == "Compute Megakernel" || item.name.find("Compute Megakernel") != std::string::npos ||
-                        (item.name.find("Megakernel") != std::string::npos && 
-                         item.name.find("RTP") == std::string::npos && 
-                         item.name.find("SER") == std::string::npos && 
-                         item.name.find("DGC") == std::string::npos)) ||
-                       item.name.find("Linear 1D Scanline") != std::string::npos ||
-                       item.name.find("Single-Pass") != std::string::npos ||
-                       (item.subcategory == "Wavefront Stream Compaction" && item.configIndex == 26) ||
-                       item.name.find("100% Solid") != std::string::npos ||
-                       item.name.find("Uniform Material") != std::string::npos ||
-                       item.name.find("Coherent Material") != std::string::npos ||
-                       item.name.find("90° Hemispherical") != std::string::npos ||
-                       item.name.find("90 deg") != std::string::npos ||
-                       item.name.find("Diffuse Baseline") != std::string::npos ||
-                       item.name.find("16B Payload") != std::string::npos ||
-                       item.name.find("16B") != std::string::npos ||
-                       item.name.find("4 Bytes") != std::string::npos) {
-                info.isBaseline = true;
-                info.deltaText = "[Baseline]";
-                info.deltaColor = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
-            } else {
-                // Find appropriate baseline for this subcategory
-                if (item.subcategory == "Multi-Light Evaluation" || item.subcategory.find("Multi-Light") != std::string::npos) {
-                    if (item.name.find("128") != std::string::npos) {
-                        baselineName = "128_Megakernel";
-                    } else {
-                        baselineName = "Single_Megakernel";
-                    }
-                } else if (item.subcategory.find("Scene Ray Tracing") != std::string::npos ||
-                    item.subcategory.find("Path Tracing") != std::string::npos ||
-                    item.subcategory.find("Total Scene Render") != std::string::npos ||
-                    item.subcategory.find("Directional Shadows") != std::string::npos ||
-                    item.subcategory.find("Material Shading") != std::string::npos ||
-                    item.subcategory.find("Incoherent Ray Tracing") != std::string::npos) {
-                    baselineName = "Megakernel";
-                } else if (item.subcategory.find("Alpha-Tested") != std::string::npos || item.name.find("Solid") != std::string::npos) {
-                    baselineName = "100% Solid";
-                } else if (item.subcategory.find("Material Divergence") != std::string::npos || item.name.find("Material Divergence") != std::string::npos) {
-                    baselineName = "Uniform";
-                } else if (item.subcategory.find("Ray Directional Coherence") != std::string::npos || item.name.find("Coherence") != std::string::npos || item.name.find("Mirror") != std::string::npos || item.name.find("Diffuse") != std::string::npos) {
-                    baselineName = "90° Hemispherical";
-                } else if (item.subcategory.find("Payload Register Pressure") != std::string::npos || item.name.find("Payload") != std::string::npos) {
-                    baselineName = "16B";
-                } else if (item.subcategory.find("Traversal Ordering") != std::string::npos ||
-                           item.subcategory.find("Pipeline Breakdown") != std::string::npos ||
-                           item.name.find("Traversal Scheduling") != std::string::npos) {
-                    baselineName = "Linear 1D Scanline";
-                } else if (item.subcategory.find("Wavefront Stream Compaction") != std::string::npos) {
-                    baselineName = "Single-Pass";
-                }
-            }
-        }
-        const ResultData* baselineRes = nullptr;
-        if (!baselineName.empty()) {
-            for (const auto& r : m_allResults) {
-                if (r.deviceIndex == activeDev) {
-                    if (r.isUnsupported || r.time_ms <= 0.0) continue;
-                    if (baselineName == "LDS_Stride1_Baseline") {
-                        if (r.subcategory == "LDS Bank Conflicts" && r.configIndex == 0) {
-                            baselineRes = &r;
-                            break;
-                        }
-                    } else if (baselineName == "Indirect_Config0_Baseline") {
-                        if (r.subcategory == "Indirect Command Synthesis" && r.configIndex == 0) {
-                            baselineRes = &r;
-                            break;
-                        }
-                    } else if (baselineName == "Dual_Issue_FP32_Baseline") {
-                        if ((r.subcategory == "Dual-Issue" || r.subcategory == "ILP & Concurrency") &&
-                            (r.configIndex == 0 || r.benchmarkName.find("Standard FP32") != std::string::npos || r.benchmarkName.find("FP32 Baseline") != std::string::npos)) {
-                            baselineRes = &r;
-                            break;
-                        }
-                    } else if (baselineName == "Dual_Issue_INT32_Baseline") {
-                        if ((r.subcategory == "Dual-Issue" || r.subcategory == "ILP & Concurrency") &&
-                            (r.configIndex == 3 || r.benchmarkName.find("Standard INT32") != std::string::npos || r.benchmarkName.find("INT32 Baseline") != std::string::npos)) {
-                            baselineRes = &r;
-                            break;
-                        }
-                    } else if (baselineName.find("_Vector") != std::string::npos) {
-                        std::string targetSub = baselineName.substr(0, baselineName.find("_Vector"));
-                        if (r.subcategory == targetSub && r.benchmarkName.find("Vector") != std::string::npos) {
-                            baselineRes = &r;
-                            break;
-                        }
-                    } else if (baselineName == "128_Megakernel") {
-                        std::string curScene = extractSceneName(curRes->benchmarkName);
-                        std::string rScene = extractSceneName(r.benchmarkName);
-                        if ((!curScene.empty() && !rScene.empty() && curScene != rScene)) {
-                            continue;
-                        }
-                        if (r.subcategory == "Multi-Light Evaluation" &&
-                            (r.configIndex == 33 || (r.benchmarkName.find("128") != std::string::npos && r.benchmarkName.find("Megakernel") != std::string::npos && r.benchmarkName.find("DGC") == std::string::npos))) {
-                            baselineRes = &r;
-                            break;
-                        }
-                    } else if (baselineName == "Single_Megakernel") {
-                        std::string curScene = extractSceneName(curRes->benchmarkName);
-                        std::string rScene = extractSceneName(r.benchmarkName);
-                        if ((!curScene.empty() && !rScene.empty() && curScene != rScene)) {
-                            continue;
-                        }
-                        if (r.subcategory == "Multi-Light Evaluation" &&
-                            (r.configIndex == 31 || (r.benchmarkName.find("Single Light") != std::string::npos && r.benchmarkName.find("Megakernel") != std::string::npos && r.benchmarkName.find("DGC") == std::string::npos))) {
-                            baselineRes = &r;
-                            break;
-                        }
-                    } else if (baselineName == "90° Hemispherical") {
-                        if (r.subcategory == "Ray Directional Coherence" &&
-                            (r.configIndex == 0 || hasAngleToken(r.benchmarkName, "90°") || r.benchmarkName.find("90 deg") != std::string::npos ||
-                             r.benchmarkName.find("Hemispherical") != std::string::npos || r.benchmarkName.find("Diffuse") != std::string::npos)) {
-                            baselineRes = &r;
-                            break;
-                        }
-                    } else if (r.subcategory == item.subcategory) {
-                        if (item.id == "RayScheduling" || item.id == "RayPathTracing") {
-                            std::string curScene = extractSceneName(curRes->benchmarkName);
-                            std::string rScene = extractSceneName(r.benchmarkName);
-                            if (!curScene.empty() && !rScene.empty() && curScene != rScene) {
-                                continue;
-                            }
-                        }
-                        std::string cName = cleanWorkloadName(r.benchmarkName, r.subcategory);
-                        if (baselineName == "Megakernel") {
-                            if ((cName.find("Megakernel") != std::string::npos || r.benchmarkName.find("Megakernel") != std::string::npos) &&
-                                r.benchmarkName.find("RTP") == std::string::npos && r.benchmarkName.find("DGC") == std::string::npos) {
-                                if (item.subcategory == "Multi-Light Evaluation") {
-                                    bool itm128 = (item.name.find("128") != std::string::npos);
-                                    bool r128 = (r.benchmarkName.find("128") != std::string::npos || r.configIndex == 33 || r.configIndex == 34);
-                                    if (itm128 != r128) continue;
-                                }
-                                baselineRes = &r;
-                                break;
-                            }
-                        } else if (cName.find(baselineName) != std::string::npos || r.benchmarkName.find(baselineName) != std::string::npos) {
-                            baselineRes = &r;
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-
-        if (baselineRes && !baselineRes->isUnsupported && baselineRes->time_ms > 0.0 && baselineRes->operations > 0 &&
-            !curRes->isUnsupported && curRes->time_ms > 0.0 && curRes->operations > 0 &&
-            baselineRes->metric == curRes->metric) {
-            double curOps = (static_cast<double>(curRes->operations) / curRes->time_ms) * 1000.0;
-            double baseOps = (static_cast<double>(baselineRes->operations) / baselineRes->time_ms) * 1000.0;
-            if (baseOps > 0.0) {
-                info.hasComparison = true;
-                info.baselineResult = *baselineRes;
-                info.speedupRatio = curOps / baseOps;
-                info.percentDelta = (info.speedupRatio - 1.0) * 100.0;
-
-                char dBuf[64];
-                if (std::abs(info.percentDelta) >= 0.1) {
-                    snprintf(dBuf, sizeof(dBuf), "%.2fx (%s%.1f%%)",
-                             info.speedupRatio,
-                             info.percentDelta >= 0.0 ? "+" : "",
-                             info.percentDelta);
-                } else {
-                    snprintf(dBuf, sizeof(dBuf), "%.2fx", info.speedupRatio);
-                }
-                info.deltaText = dBuf;
-                info.deltaColor = (info.speedupRatio >= 1.0) ? ImVec4(0.35f, 0.95f, 0.55f, 1.0f) : ImVec4(0.70f, 0.75f, 0.85f, 1.0f);
-            }
-        } else if (baselineName == "Dual_Issue_Mixed_Harmonic" && !curRes->isUnsupported && curRes->time_ms > 0.0 && curRes->operations > 0) {
-            double baseFP32 = 0.0;
-            double baseINT32 = 0.0;
-            for (const auto& r : m_allResults) {
-                if (r.deviceIndex == activeDev && (r.subcategory == "Dual-Issue" || r.subcategory == "ILP & Concurrency") && !r.isUnsupported && r.time_ms > 0.0) {
-                    if (r.configIndex == 0 || r.benchmarkName.find("Standard FP32") != std::string::npos || r.benchmarkName.find("FP32 Baseline") != std::string::npos) {
-                        baseFP32 = (static_cast<double>(r.operations) / r.time_ms) * 1000.0;
-                    } else if (r.configIndex == 3 || r.benchmarkName.find("Standard INT32") != std::string::npos || r.benchmarkName.find("INT32 Baseline") != std::string::npos) {
-                        baseINT32 = (static_cast<double>(r.operations) / r.time_ms) * 1000.0;
-                    }
-                }
-            }
-            if (baseFP32 > 0.0 && baseINT32 > 0.0) {
-                double baseOps = 3.0 / ((2.0 / baseFP32) + (1.0 / baseINT32));
-                double curOps = (static_cast<double>(curRes->operations) / curRes->time_ms) * 1000.0;
-                info.hasComparison = true;
-                info.speedupRatio = curOps / baseOps;
-                info.percentDelta = (info.speedupRatio - 1.0) * 100.0;
-
-                char dBuf[64];
-                if (std::abs(info.percentDelta) >= 0.1) {
-                    snprintf(dBuf, sizeof(dBuf), "%.2fx (%s%.1f%%)",
-                             info.speedupRatio,
-                             info.percentDelta >= 0.0 ? "+" : "",
-                             info.percentDelta);
-                } else {
-                    snprintf(dBuf, sizeof(dBuf), "%.2fx", info.speedupRatio);
-                }
-                info.deltaText = dBuf;
-                info.deltaColor = (info.speedupRatio >= 1.0) ? ImVec4(0.35f, 0.95f, 0.55f, 1.0f) : ImVec4(0.70f, 0.75f, 0.85f, 1.0f);
-            }
-        }
-    }
-
-    return info;
-}
-
-void GuiApp::renderBenchmarkSuitePanel() {
-    ImGui::Spacing();
-    
-    bool canEditWorkloads = (m_execState != ExecutionState::Running);
-
-    if (m_execState == ExecutionState::Completed) {
-        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.12f, 0.18f, 0.25f, 0.95f));
-        ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.30f, 0.65f, 0.95f, 0.85f));
-
-        float btn1W = ImGui::CalcTextSize("View Results Scorecard").x + ImGui::GetStyle().FramePadding.x * 2.0f;
-        float btn2W = ImGui::CalcTextSize("Clear Results").x + ImGui::GetStyle().FramePadding.x * 2.0f;
-        float totalBtnsW = btn1W + btn2W + s(14.0f);
-        float bannerTextW = ImGui::CalcTextSize("✓ Benchmark suite finished (171 results recorded in 99.9s).").x;
-        bool needsTwoLines = (ImGui::GetContentRegionAvail().x < bannerTextW + totalBtnsW + s(30.0f));
-        float bannerH = needsTwoLines ? (ImGui::GetFrameHeight() * 2.0f + s(22.0f)) : (ImGui::GetFrameHeight() + s(16.0f));
-
-        ImGui::BeginChild("CompletedSuiteBanner", ImVec2(0, bannerH), true);
-        ImGui::AlignTextToFramePadding();
-        size_t failCnt = 0;
-        size_t abortCnt = 0;
-        for (const auto& r : m_allResults) {
-            if (r.time_ms == -3.0) abortCnt++;
-            else if (r.time_ms < 0.0 && !r.isUnsupported) failCnt++;
-        }
-        pushBoldFont();
-        if (failCnt > 0 || abortCnt > 0) {
-            ImGui::TextColored(ImVec4(0.95f, 0.40f, 0.35f, 1.0f), "⚠ Completed in %.1fs: %zu Passed | %zu Failed | %zu Aborted",
-                               m_elapsedSeconds, m_allResults.size() - failCnt - abortCnt, failCnt, abortCnt);
-        } else {
-            ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "✓ Benchmark suite finished in %.1fs (%zu results recorded)",
-                               m_elapsedSeconds, m_allResults.size());
-        }
-        popBoldFont();
-        
-        if (!needsTwoLines) {
-            ImGui::SameLine();
-            float availBanner = ImGui::GetContentRegionAvail().x;
-            if (availBanner >= totalBtnsW) {
-                ImGui::SetCursorPosX(ImGui::GetCursorPosX() + availBanner - totalBtnsW);
-            }
-        }
-        
-        if (ImGui::SmallButton("View Results Scorecard")) {
-            m_switchToScorecard = true;
-        }
-        ImGui::SameLine();
-        if (ImGui::SmallButton("Clear Results")) {
-            m_allResults.clear();
-            m_execState = ExecutionState::Idle;
-        }
-        ImGui::EndChild();
-        ImGui::PopStyleColor(2);
-        ImGui::Spacing();
-    }
-
-    // Category View Filter Tabs with dynamic flowing wrap
-    ImGui::TextDisabled("Filter View:");
-    size_t catCounts[5] = {0, 0, 0, 0, 0};
-    size_t totalCatCount = 0;
-    for (size_t ci = 0; ci < m_categories.size() && ci < 5; ++ci) {
-        size_t cCount = 0;
-        for (const auto& sub : m_categories[ci].subgroups) {
-            if (sub.engineId == "RayScheduling" && m_scene == "all") {
-                cCount += sub.items.size() * 4;
-            } else {
-                cCount += sub.items.size();
-            }
-        }
-        catCounts[ci] = cCount;
-        totalCatCount += cCount;
-    }
-    const char* catBaseNames[6] = {"All Tests", "Compute", "Memory", "Ray Tracing", "Graphics", "Host CPU"};
-    for (int vi = 0; vi < 6; ++vi) {
-        size_t count = (vi == 0) ? totalCatCount : catCounts[vi - 1];
-        std::string labelStr = std::string(catBaseNames[vi]) + " (" + std::to_string(count) + ")";
-        float btnW = ImGui::CalcTextSize(labelStr.c_str()).x + ImGui::GetStyle().FramePadding.x * 2.0f;
-        sameLineIfFits(btnW);
-        bool isAct = (m_suiteCategoryFilter == vi);
-        if (isAct) {
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.48f, 0.92f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
-        } else {
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.13f, 0.16f, 0.22f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.70f, 0.75f, 0.85f, 1.0f));
-        }
-        if (ImGui::SmallButton(labelStr.c_str())) {
-            m_suiteCategoryFilter = vi;
-        }
-        ImGui::PopStyleColor(2);
-    }
-
-    // Hide Unsupported Toggle placed cleanly with dynamic wrapping
-    float checkW = ImGui::GetFrameHeight() + ImGui::GetStyle().ItemInnerSpacing.x + ImGui::CalcTextSize("Hide Unsupported").x + s(10.0f);
-    sameLineIfFits(checkW);
-    ImGui::PushStyleColor(ImGuiCol_Text, m_hideUnsupported ? ImVec4(0.70f, 0.80f, 0.95f, 1.0f) : ImVec4(0.95f, 0.70f, 0.25f, 1.0f));
-    if (ImGui::Checkbox("Hide Unsupported", &m_hideUnsupported)) {
-        if (m_hideUnsupported) {
-            for (auto& cat : m_categories) {
-                for (auto& sub : cat.subgroups) {
-                    for (auto& item : sub.items) {
-                        if (!item.isSupported) item.selected = false;
-                    }
-                }
-            }
-        }
-    }
-    ImGui::PopStyleColor();
-    if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("Hide workloads not supported by current hardware or API toolchain");
-    }
-
-    ImGui::Spacing();
-
-    // Toolbar with Select Filters and Collapse/Expand Controls
-    ImGui::TextDisabled("Toggle Selection:");
-
-    auto getCatStatus = [&](const std::string& catName) -> int {
-        for (const auto& cat : m_categories) {
-            if (cat.name == catName) {
-                size_t total = 0, sel = 0;
-                for (const auto& sub : cat.subgroups) {
-                    for (const auto& it : sub.items) {
-                        total++;
-                        if (it.selected) sel++;
-                    }
-                }
-                if (total == 0 || sel == 0) return 0;
-                if (sel == total) return 2;
-                return 1;
-            }
-        }
-        return 0;
-    };
-
-    auto toggleCat = [&](const std::string& catName) {
-        for (auto& cat : m_categories) {
-            if (cat.name == catName) {
-                int st = getCatStatus(catName);
-                bool turnOn = (st != 2);
-                cat.allSelected = turnOn;
-                for (auto& sub : cat.subgroups) {
-                    sub.allSelected = turnOn;
-                    for (auto& it : sub.items) it.selected = turnOn;
-                }
-                break;
-            }
-        }
-        // Auto-collapse untested subgroups and expand active ones
-        for (auto& cat : m_categories) {
-            for (auto& sub : cat.subgroups) {
-                size_t sel = 0;
-                for (const auto& itm : sub.items) {
-                    if (itm.selected) sel++;
-                }
-                if (sel == 0) {
-                    sub.collapsed = true;
-                } else {
-                    sub.collapsed = false;
-                }
-            }
-        }
-    };
-
-    size_t totalSelectedItems = 0;
-    size_t totalPossibleItems = 0;
-    for (const auto& cat : m_categories) {
-        for (const auto& sub : cat.subgroups) {
-            for (const auto& it : sub.items) {
-                totalPossibleItems++;
-                if (it.selected) totalSelectedItems++;
-            }
-        }
-    }
-    bool allItemsSelected = (totalPossibleItems > 0 && totalSelectedItems == totalPossibleItems);
-    bool noneItemsSelected = (totalSelectedItems == 0);
-
-    // If only one category or subgroup is selected, auto-collapse untested groups
-    if (totalSelectedItems != m_prevTotalSelectedItems) {
-        m_prevTotalSelectedItems = totalSelectedItems;
-        size_t activeCats = 0;
-        size_t activeSubs = 0;
-        for (const auto& cat : m_categories) {
-            bool catHasSel = false;
-            for (const auto& sub : cat.subgroups) {
-                size_t sel = 0;
-                for (const auto& itm : sub.items) {
-                    if (itm.selected) sel++;
-                }
-                if (sel > 0) {
-                    activeSubs++;
-                    catHasSel = true;
-                }
-            }
-            if (catHasSel) activeCats++;
-        }
-        if (activeCats == 1 || activeSubs == 1) {
-            for (auto& cat : m_categories) {
-                for (auto& sub : cat.subgroups) {
-                    size_t sel = 0;
-                    for (const auto& itm : sub.items) {
-                        if (itm.selected) sel++;
-                    }
-                    if (sel == 0) sub.collapsed = true;
-                }
-            }
-        }
-    }
-
-    auto renderFilterPill = [this](const char* label, int status, const char* tooltip) -> bool {
-        if (status == 2) {
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.16f, 0.42f, 0.34f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.22f, 0.52f, 0.42f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.14f, 0.36f, 0.28f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.92f, 1.0f, 0.95f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.35f, 0.85f, 0.55f, 0.90f));
-        } else if (status == 1) {
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.16f, 0.28f, 0.48f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.22f, 0.38f, 0.62f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.12f, 0.22f, 0.40f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.85f, 0.92f, 1.00f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.35f, 0.65f, 0.90f, 0.70f));
-        } else {
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.12f, 0.15f, 0.22f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.18f, 0.22f, 0.32f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.10f, 0.12f, 0.18f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.60f, 0.68f, 0.80f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.20f, 0.24f, 0.34f, 0.50f));
-        }
-        ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
-        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, s(4.0f));
-        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(s(8.0f), s(3.0f)));
-
-        bool clicked = ImGui::SmallButton(label);
-
-        ImGui::PopStyleVar(3);
-        ImGui::PopStyleColor(5);
-
-        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled) && tooltip) {
-            ImGui::SetTooltip("%s", tooltip);
-        }
-
-        return clicked;
-    };
-
-    auto flowPill = [&](const char* label, int status, const char* tooltip) -> bool {
-        float pillW = ImGui::CalcTextSize(label).x + s(16.0f);
-        sameLineIfFits(pillW);
-        return renderFilterPill(label, status, tooltip);
-    };
-
-    auto catPillLabel = [](const char* base, int st) -> std::string {
-        if (st == 2) return std::string("✓ ") + base;
-        if (st == 1) return std::string("▪ ") + base;
-        return std::string("+ ") + base;
-    };
-
-    if (!canEditWorkloads) ImGui::BeginDisabled(true);
-    if (flowPill("All", allItemsSelected ? 2 : 0, "Select all workloads across all categories")) {
-        for (auto& cat : m_categories) {
-            cat.allSelected = true;
-            for (auto& sub : cat.subgroups) {
-                sub.allSelected = true;
-                sub.collapsed = false;
-                for (auto& item : sub.items) {
-                    if (!m_hideUnsupported || item.isSupported) item.selected = true;
-                }
-            }
-        }
-        for (auto& dev : m_devices) {
-            if (dev.isSystem) dev.selected = true;
-        }
-    }
-    if (flowPill("None", noneItemsSelected ? 2 : 0, "Deselect all workloads")) {
-        for (auto& cat : m_categories) {
-            cat.allSelected = false;
-            for (auto& sub : cat.subgroups) {
-                sub.allSelected = false;
-                sub.collapsed = true;
-                for (auto& item : sub.items) item.selected = false;
-            }
-        }
-    }
-    if (flowPill("Quick Suite", 0, "Select a fast ~15s representative subset across Compute, Memory, Ray Tracing, and Graphics")) {
-        for (auto& cat : m_categories) {
-            cat.allSelected = false;
-            for (auto& sub : cat.subgroups) {
-                sub.allSelected = false;
-                bool hasSel = false;
-                for (auto& item : sub.items) {
-                    bool pick = (item.id == "FP32Vector") ||
-                                (item.id == "FP16Matrix" || item.id == "FP16Vector") ||
-                                (item.id == "MemoryBandwidth" && item.configIndex == 1) ||
-                                (item.id == "CacheHierarchyBandwidth" && (item.configIndex == 0 || item.configIndex == 2)) ||
-                                (item.id == "RayRawTraversal") ||
-                                (item.id == "RayScheduling" && (item.configIndex == 9 || item.configIndex == 11)) ||
-                                (item.id == "PixelFillRate" && item.configIndex == 0);
-                    item.selected = pick && item.isSupported;
-                    if (item.selected) hasSel = true;
-                }
-                sub.collapsed = !hasSel;
-            }
-        }
-        if (m_scene == "all") m_scene = "indoor";
-    }
-    int stComp = getCatStatus("Compute");
-    if (flowPill(catPillLabel("Compute", stComp).c_str(), stComp, "Toggle Compute Precision & Concurrency workloads (FP64..INT4)")) {
-        toggleCat("Compute");
-    }
-    int stMem = getCatStatus("Memory");
-    if (flowPill(catPillLabel("Memory", stMem).c_str(), stMem, "Toggle VRAM streaming bandwidth and Cache Latency tests")) {
-        toggleCat("Memory");
-    }
-    int stRt = getCatStatus("Ray Tracing");
-    if (flowPill(catPillLabel("Ray Tracing", stRt).c_str(), stRt, "Toggle all Ray Tracing & BVH Stress workloads")) {
-        toggleCat("Ray Tracing");
-    }
-    int stGfx = getCatStatus("Graphics");
-    if (flowPill(catPillLabel("Graphics", stGfx).c_str(), stGfx, "Toggle Fixed-Function Pixel & Blend Fill Rate tests")) {
-        toggleCat("Graphics");
-    }
-    int stHost = getCatStatus("Host System");
-    if (flowPill(catPillLabel("Host CPU", stHost).c_str(), stHost, "Toggle Host System RAM Bandwidth and Latency tests")) {
-        toggleCat("Host System");
-        if (getCatStatus("Host System") > 0) {
-            for (auto& dev : m_devices) if (dev.isSystem) dev.selected = true;
-        }
-    }
-    if (!canEditWorkloads) ImGui::EndDisabled();
-
-    // Group Collapse / Expand Controls
-    float untestW = ImGui::CalcTextSize("Collapse Untested").x + ImGui::GetStyle().FramePadding.x * 2.0f;
-    float expW = ImGui::CalcTextSize("Expand All").x + ImGui::GetStyle().FramePadding.x * 2.0f;
-    float colW = ImGui::CalcTextSize("Collapse All").x + ImGui::GetStyle().FramePadding.x * 2.0f;
-    float groupControlsW = untestW + expW + colW + s(20.0f);
-    if (sameLineIfFits(groupControlsW + s(12.0f))) {
-        float availForExp = ImGui::GetContentRegionAvail().x;
-        if (availForExp > groupControlsW) {
-            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + availForExp - groupControlsW);
-        }
-    }
-    if (ImGui::SmallButton("Collapse Untested")) {
-        for (auto& cat : m_categories) {
-            for (auto& sub : cat.subgroups) {
-                size_t sel = 0;
-                for (const auto& itm : sub.items) {
-                    if (itm.selected) sel++;
-                }
-                if (sel == 0) {
-                    sub.collapsed = true;
-                    for (const char* scTag : {"indoor", "forest", "outdoor", "showroom"}) {
-                        m_sceneSubgroupCollapsed[sub.name + "#" + scTag] = true;
-                    }
-                }
-            }
-        }
-    }
-    sameLineIfFits(expW, s(6.0f));
-    if (ImGui::SmallButton("Expand All")) {
-        for (auto& cat : m_categories) {
-            for (auto& sub : cat.subgroups) sub.collapsed = false;
-        }
-        for (auto& kv : m_sceneSubgroupCollapsed) kv.second = false;
-    }
-    sameLineIfFits(colW, s(6.0f));
-    if (ImGui::SmallButton("Collapse All")) {
-        for (auto& cat : m_categories) {
-            for (auto& sub : cat.subgroups) {
-                sub.collapsed = true;
-                for (const char* scTag : {"indoor", "forest", "outdoor", "showroom"}) {
-                    m_sceneSubgroupCollapsed[sub.name + "#" + scTag] = true;
-                }
-            }
-        }
-    }
-
-    ImGui::Spacing();
-    ImGui::Separator();
-    ImGui::Spacing();
-
-    struct SubgroupRenderInstance {
-        BenchmarkSubgroup* sub;
-        std::string sceneTag;   // "" for scene-invariant, or "indoor", "forest", "outdoor", "showroom"
-        std::string sceneLabel; // "" for scene-invariant, or "Indoor Atrium", "Open-World Forest", "Outdoor Landscape", "Showroom Studio"
-    };
-
-    auto isInstanceCollapsed = [this](const SubgroupRenderInstance& inst) -> bool {
-        if (!inst.sceneTag.empty()) {
-            std::string key = inst.sub->name + "#" + inst.sceneTag;
-            auto it = m_sceneSubgroupCollapsed.find(key);
-            if (it != m_sceneSubgroupCollapsed.end()) return it->second;
-        }
-        return inst.sub->collapsed;
-    };
-
-    auto setInstanceCollapsed = [this](const SubgroupRenderInstance& inst, bool col) {
-        if (!inst.sceneTag.empty()) {
-            m_sceneSubgroupCollapsed[inst.sub->name + "#" + inst.sceneTag] = col;
-        } else {
-            inst.sub->collapsed = col;
-        }
-    };
-
-    // Optimal linear partition (Painter's Partition DP) to minimize maximum column height
-    auto partitionSubgroupsOptimal = [](
-        const std::vector<SubgroupRenderInstance>& subs,
-        int numCols,
-        const std::function<float(const SubgroupRenderInstance&)>& getHeight)
-        -> std::vector<std::vector<SubgroupRenderInstance>>
-    {
-        std::vector<std::vector<SubgroupRenderInstance>> cols(numCols);
-        if (subs.empty() || numCols <= 0) return cols;
-        if (numCols == 1) {
-            cols[0] = subs;
-            return cols;
-        }
-        int n = static_cast<int>(subs.size());
-        if (n <= numCols) {
-            for (int i = 0; i < n; ++i) cols[i].push_back(subs[i]);
-            return cols;
-        }
-
-        std::vector<float> heights(n);
-        for (int i = 0; i < n; ++i) heights[i] = getHeight(subs[i]);
-
-        std::vector<std::vector<float>> dp(numCols, std::vector<float>(n, 1e9f));
-        std::vector<std::vector<int>> split(numCols, std::vector<int>(n, 0));
-
-        float sum = 0.0f;
-        for (int i = 0; i < n; ++i) {
-            sum += heights[i];
-            dp[0][i] = sum;
-        }
-
-        for (int c = 1; c < numCols; ++c) {
-            for (int i = c; i < n; ++i) {
-                float runningSum = 0.0f;
-                for (int j = i; j >= c; --j) {
-                    runningSum += heights[j];
-                    float maxH = std::max(dp[c - 1][j - 1], runningSum);
-                    if (maxH < dp[c][i]) {
-                        dp[c][i] = maxH;
-                        split[c][i] = j;
-                    }
-                }
-            }
-        }
-
-        std::vector<int> cuts(numCols + 1, 0);
-        cuts[numCols] = n;
-        int currEnd = n - 1;
-        for (int c = numCols - 1; c >= 1; --c) {
-            cuts[c] = split[c][currEnd];
-            currEnd = cuts[c] - 1;
-        }
-        cuts[0] = 0;
-
-        for (int c = 0; c < numCols; ++c) {
-            for (int i = cuts[c]; i < cuts[c + 1]; ++i) {
-                cols[c].push_back(subs[i]);
-            }
-        }
-
-        return cols;
-    };
-
-    // Collapsible Subgroup Renderer (Accordion Header + Dynamic Structured Workload Rows)
-    auto renderSubgroupCard = [this, canEditWorkloads, &isInstanceCollapsed, &setInstanceCollapsed](const SubgroupRenderInstance& inst) {
-        BenchmarkSubgroup& sub = *inst.sub;
-        const std::string& cardScene = inst.sceneTag;
-        bool cardCollapsed = isInstanceCollapsed(inst);
-
-        size_t visibleCount = 0;
-        size_t selectedCount = 0;
-        for (const auto& itm : sub.items) {
-            BenchmarkDisplayInfo info = getBenchmarkDisplayInfo(itm, m_telemetryGpuIndex, cardScene);
-            bool isUnsupported = (!itm.isSupported || (info.hasResult && info.primaryResult.isUnsupported));
-            if (!m_hideUnsupported || !isUnsupported) {
-                visibleCount++;
-                if (itm.selected) selectedCount++;
-            }
-        }
-        if (visibleCount == 0 && m_hideUnsupported) return;
-
-        std::string cardId = sub.name + (cardScene.empty() ? "" : ("_" + cardScene));
-        ImGui::PushID(cardId.c_str());
-
-        bool isAllSel = (selectedCount == visibleCount && visibleCount > 0);
-        bool isPartSel = (selectedCount > 0 && selectedCount < visibleCount);
-
-        float availW = std::max(s(220.0f), ImGui::GetContentRegionAvail().x);
-        float frameH = ImGui::GetFrameHeight();
-        float headerH = std::max(s(32.0f), frameH + s(8.0f));
-
-        // 1. Dynamically measure actual Score and Delta column widths for this subgroup
-        bool hasAnyComparison = false;
-        pushMonoFont();
-        float maxScoreW = ImGui::CalcTextSize("[TFLOPS]").x;
-        float maxDeltaW = ImGui::CalcTextSize("[Baseline]").x + s(10.0f);
-        for (const auto& itm : sub.items) {
-            BenchmarkDisplayInfo d = getBenchmarkDisplayInfo(itm, m_telemetryGpuIndex, cardScene);
-            bool isUnsupported = (!itm.isSupported || (d.hasResult && d.primaryResult.isUnsupported));
-            if (m_hideUnsupported && isUnsupported) continue;
-
-            std::string scStr;
-            if (d.hasResult && !d.primaryResult.isUnsupported && d.primaryResult.time_ms > 0.0) {
-                scStr = d.scoreText;
-            } else if (isUnsupported) {
-                scStr = "[UNSUPPORTED]";
-            } else {
-                scStr = "[" + itm.metricType + "]";
-            }
-            maxScoreW = std::max(maxScoreW, ImGui::CalcTextSize(scStr.c_str()).x);
-
-            if ((d.hasResult && d.hasComparison && !d.primaryResult.isUnsupported) ||
-                (d.isBaseline && sub.items.size() > 1)) {
-                hasAnyComparison = true;
-                if (!d.deltaText.empty()) {
-                    float dw = ImGui::CalcTextSize(d.deltaText.c_str()).x + (d.isBaseline ? s(10.0f) : s(26.0f));
-                    maxDeltaW = std::max(maxDeltaW, dw);
-                }
-            }
-        }
-        popMonoFont();
-
-        float scoreColW = maxScoreW + s(12.0f);
-        float deltaColW = hasAnyComparison ? (maxDeltaW + s(8.0f)) : 0.0f;
-        int numSubCols = hasAnyComparison ? 3 : 2;
-
-        // 2. Right-aligned header score/status badge
-        std::string rightBadge = "";
-        ImVec4 badgeColor = ImVec4(0.6f, 0.7f, 0.85f, 1.0f);
-        if (cardCollapsed) {
-            for (const auto& itm : sub.items) {
-                BenchmarkDisplayInfo d = getBenchmarkDisplayInfo(itm, m_telemetryGpuIndex, cardScene);
-                if (d.hasResult && d.primaryResult.time_ms > 0.0 && !d.primaryResult.isUnsupported) {
-                    rightBadge = d.scoreText;
-                    badgeColor = ImVec4(0.35f, 0.95f, 0.55f, 1.0f);
-                    break;
-                }
-            }
-            if (rightBadge.empty()) {
-                rightBadge = std::to_string(selectedCount) + " selected";
-                badgeColor = ImVec4(0.55f, 0.65f, 0.75f, 0.9f);
-            }
-        } else {
-            if (sub.name == "Compute Precision" || sub.name == "Dual-Issue & Concurrency" || sub.name == "ILP & Concurrency") {
-                rightBadge = "[TFLOPS / TOPS]";
-            } else if (sub.name == "Host CPU System Memory") {
-                rightBadge = "[GB/s / ns]";
-            } else if (sub.name == "Acceleration Structure Builds") {
-                rightBadge = "[MTris/s / MInst/s]";
-            } else if (sub.name == "Lighting, Shadows & Materials" || sub.name == "Pipeline Stages & Scheduling") {
-                rightBadge = "[MRays/s / MHits/s]";
-            } else if (sub.name == "Traversal Ordering & Stream Compaction") {
-                rightBadge = "[MRays/s / MRecords/s]";
-            } else if (sub.name == "Hardware BVH & Divergence Stress") {
-                rightBadge = "[GIS/s / MRays/s]";
-            } else if (!sub.items.empty()) {
-                rightBadge = "[" + sub.items.front().metricType + "]";
-            }
-            badgeColor = ImVec4(0.35f, 0.65f, 0.95f, 0.85f);
-        }
-
-        pushMonoFont();
-        float badgeW = ImGui::CalcTextSize(rightBadge.c_str()).x;
-        popMonoFont();
-
-        // Clamp cardW strictly to availW so cards NEVER overflow or clip against parent grid columns!
-        float cardW = availW;
-
-        ImVec2 p0 = ImGui::GetCursorScreenPos();
-        ImVec2 p1 = ImVec2(p0.x + cardW, p0.y + headerH);
-
-        ImVec4 headerBg = cardCollapsed ? ImVec4(0.12f, 0.15f, 0.22f, 0.85f) : ImVec4(0.15f, 0.20f, 0.30f, 0.95f);
-        ImDrawList* drawList = ImGui::GetWindowDrawList();
-        drawList->AddRectFilled(p0, p1, ImGui::GetColorU32(headerBg), s(5.0f));
-        drawList->AddRect(p0, p1, ImGui::GetColorU32(ImVec4(0.25f, 0.32f, 0.45f, 0.6f)), s(5.0f));
-
-        // Draw crisp geometric triangle for chevron
-        ImVec2 center = ImVec2(p0.x + s(14.0f), p0.y + headerH * 0.5f);
-        float r = s(4.0f);
-        ImU32 triCol = ImGui::GetColorU32(ImVec4(0.60f, 0.80f, 1.0f, 1.0f));
-        if (cardCollapsed) {
-            drawList->AddTriangleFilled(
-                ImVec2(center.x - r * 0.6f, center.y - r),
-                ImVec2(center.x - r * 0.6f, center.y + r),
-                ImVec2(center.x + r * 0.8f, center.y),
-                triCol
-            );
-        } else {
-            drawList->AddTriangleFilled(
-                ImVec2(center.x - r, center.y - r * 0.6f),
-                ImVec2(center.x + r, center.y - r * 0.6f),
-                ImVec2(center.x, center.y + r * 0.8f),
-                triCol
-            );
-        }
-
-        // Clickable chevron area for collapse/expand
-        ImGui::SetCursorScreenPos(p0);
-        if (ImGui::InvisibleButton("##chev_click", ImVec2(s(26.0f), headerH))) {
-            setInstanceCollapsed(inst, !cardCollapsed);
-            cardCollapsed = !cardCollapsed;
-        }
-
-        // Group-level select/deselect checkbox
-        float cbOffsetY = (headerH - frameH) * 0.5f;
-        ImGui::SetCursorScreenPos(ImVec2(p0.x + s(28.0f), p0.y + cbOffsetY));
-        if (!canEditWorkloads) ImGui::BeginDisabled(true);
-        bool cbVal = isAllSel;
-        if (isPartSel) {
-            ImGui::PushStyleColor(ImGuiCol_CheckMark, ImVec4(0.95f, 0.70f, 0.25f, 1.0f));
-        }
-        if (ImGui::Checkbox("##sub_all", &cbVal)) {
-            for (auto& itm : sub.items) {
-                if (!m_hideUnsupported || itm.isSupported) {
-                    itm.selected = cbVal;
-                }
-            }
-            setInstanceCollapsed(inst, !cbVal);
-            cardCollapsed = !cbVal;
-        }
-        if (isPartSel) ImGui::PopStyleColor();
-        if (!canEditWorkloads) ImGui::EndDisabled();
-
-        // Subgroup Name and count (fitted so it never collides with right-aligned badge)
-        float textOffsetY = (headerH - ImGui::GetTextLineHeight()) * 0.5f;
-        float titleStartX = p0.x + s(56.0f);
-        float badgeStartX = p0.x + cardW - badgeW - s(10.0f);
-        std::string countStr = "(" + std::to_string(selectedCount) + "/" + std::to_string(visibleCount) + ")";
-        float countW = ImGui::CalcTextSize(countStr.c_str()).x;
-        float maxTitleW = std::max(s(80.0f), badgeStartX - titleStartX - countW - s(16.0f));
-
-        ImGui::SetCursorScreenPos(ImVec2(titleStartX, p0.y + textOffsetY));
-        std::string displaySubName = sub.name;
-        if (!inst.sceneLabel.empty()) {
-            displaySubName += " [" + inst.sceneLabel + "]";
-        }
-        pushBoldFont();
-        std::string fittedSubName = fitTextToPixelWidth(displaySubName, maxTitleW);
-        ImGui::TextColored(ImVec4(0.95f, 0.96f, 0.98f, 1.0f), "%s", fittedSubName.c_str());
-        popBoldFont();
-
-        ImGui::SameLine(0, s(6.0f));
-        ImGui::TextDisabled("%s", countStr.c_str());
-
-        // Render right-aligned header badge inside cardW
-        if (badgeStartX > titleStartX + s(60.0f)) {
-            ImGui::SetCursorScreenPos(ImVec2(badgeStartX, p0.y + textOffsetY));
-            pushMonoFont();
-            ImGui::TextColored(badgeColor, "%s", rightBadge.c_str());
-            popMonoFont();
-        }
-
-        // Clickable title area for collapse/expand
-        ImGui::SetCursorScreenPos(ImVec2(titleStartX, p0.y));
-        if (ImGui::InvisibleButton("##title_click", ImVec2(cardW - s(56.0f), headerH))) {
-            setInstanceCollapsed(inst, !cardCollapsed);
-            cardCollapsed = !cardCollapsed;
-        }
-
-        // Place cursor clearly BELOW header banner with margin
-        ImGui::SetCursorScreenPos(ImVec2(p0.x, p1.y + s(6.0f)));
-
-        // Render Indented Workload Items if Expanded
-        if (!cardCollapsed) {
-            std::string tblId = "SubTbl_" + cardId;
-            ImGuiTableFlags subTblFlags = ImGuiTableFlags_SizingStretchProp | 
-                                          ImGuiTableFlags_NoPadOuterX | 
-                                          ImGuiTableFlags_NoSavedSettings;
-            if (ImGui::BeginTable(tblId.c_str(), numSubCols, subTblFlags, ImVec2(cardW, 0.0f))) {
-                ImGui::TableSetupColumn("Workload", ImGuiTableColumnFlags_WidthStretch);
-                ImGui::TableSetupColumn("Score", ImGuiTableColumnFlags_WidthFixed, scoreColW);
-                if (hasAnyComparison) {
-                    ImGui::TableSetupColumn("Delta", ImGuiTableColumnFlags_WidthFixed, deltaColW);
-                }
-
-                float activeBaselineX = -1.0f;
-                float activeBaselineY = -1.0f;
-                bool hasActiveBaseline = false;
-                std::string activeBaselineSubcat = "";
-
-                std::string currentGroupKey = "";
-                int groupIndex = -1;
-
-                for (size_t iIdx = 0; iIdx < sub.items.size(); ++iIdx) {
-                    auto& item = sub.items[iIdx];
-                    BenchmarkDisplayInfo dispInfo = getBenchmarkDisplayInfo(item, m_telemetryGpuIndex, cardScene);
-                    bool isUnsupported = (!item.isSupported || (dispInfo.hasResult && dispInfo.primaryResult.isUnsupported));
-                    if (m_hideUnsupported && isUnsupported) continue;
-
-                    // Group identification for related tests
-                    std::string itemGroupKey;
-                    if (sub.name == "Dual-Issue & Concurrency" || sub.name == "ILP & Concurrency") {
-                        if (item.name.find("FP32") != std::string::npos && item.name.find("Mixed") == std::string::npos && item.name.find("Concurrent") == std::string::npos) {
-                            itemGroupKey = "Dual-Issue_FP32";
-                        } else if (item.name.find("INT32") != std::string::npos && item.name.find("Mixed") == std::string::npos && item.name.find("Concurrent") == std::string::npos) {
-                            itemGroupKey = "Dual-Issue_INT32";
-                        } else if (item.name.find("Mixed") != std::string::npos || item.name.find("Concurrent") != std::string::npos) {
-                            itemGroupKey = "Dual-Issue_Mixed";
-                        } else {
-                            itemGroupKey = item.subcategory;
-                        }
-                    } else if (sub.name == "VRAM Streaming Bandwidth") {
-                        if (item.name.find("128 threads") != std::string::npos) {
-                            itemGroupKey = "VRAM_128";
-                        } else if (item.name.find("256 threads") != std::string::npos) {
-                            itemGroupKey = "VRAM_256";
-                        } else if (item.name.find("1024 threads") != std::string::npos) {
-                            itemGroupKey = "VRAM_1024";
-                        } else {
-                            itemGroupKey = item.subcategory;
-                        }
-                    } else if (!item.subcategory.empty()) {
-                        itemGroupKey = item.subcategory;
-                    } else {
-                        itemGroupKey = item.name;
-                    }
-
-                    if (itemGroupKey != currentGroupKey) {
-                        currentGroupKey = itemGroupKey;
-                        groupIndex++;
-                    }
-
-                    ImGui::PushID(static_cast<int>(iIdx));
-                    float rowH = std::max(s(22.0f), frameH + s(2.0f));
-                    ImGui::TableNextRow(ImGuiTableRowFlags_None, rowH);
-
-                    // Slightly different background shading for alternating groups of related tests
-                    if (groupIndex >= 0 && (groupIndex % 2 == 1)) {
-                        ImU32 shadedBg = ImGui::GetColorU32(ImVec4(0.14f, 0.18f, 0.27f, 0.42f));
-                        ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0, shadedBg);
-                    }
-
-                    // Col 0: Workload Checkbox & Label (cleanly fitted to column width)
-                    ImGui::TableNextColumn();
-                    ImGui::Indent(s(12.0f));
-                    float maxLabelW = std::max(s(60.0f), ImGui::GetContentRegionAvail().x - frameH - ImGui::GetStyle().ItemInnerSpacing.x - s(4.0f));
-                    std::string cbLabel = fitTextToPixelWidth(item.name, maxLabelW) + "##itm_cb";
-
-                    if (isUnsupported || !canEditWorkloads) {
-                        ImGui::BeginDisabled(true);
-                        ImGui::Checkbox(cbLabel.c_str(), &item.selected);
-                        ImGui::EndDisabled();
-                    } else {
-                        ImGui::Checkbox(cbLabel.c_str(), &item.selected);
-                    }
-                    ImGui::Unindent(s(12.0f));
-
-                    if (item.viz.linkedViewportMode >= 0 && ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
-                        m_rtViewportMode = item.viz.linkedViewportMode;
-                        if (item.viz.linkedViewportMode == 1) m_rtPassIndex = item.viz.linkedViewportSubIndex;
-                        else if (item.viz.linkedViewportMode == 2) m_rtMaterialIndex = item.viz.linkedViewportSubIndex;
-                        else if (item.viz.linkedViewportMode == 3) m_rtGeometryIndex = item.viz.linkedViewportSubIndex;
-                        if (cardScene == "showroom") m_rtSceneIndex = 0;
-                        else if (cardScene == "indoor") m_rtSceneIndex = 1;
-                        else if (cardScene == "forest") m_rtSceneIndex = 2;
-                        else if (cardScene == "outdoor") m_rtSceneIndex = 3;
-                        m_switchToRtViewport = true;
-                    }
-
-                    bool rowHovered = ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled);
-
-                    // Col 1: Score / Status / Metric Badge (ALWAYS VISIBLE!)
-                    ImGui::TableNextColumn();
-                    pushMonoFont();
-                    bool isCurrentlyTesting = !isUnsupported && (m_execState == ExecutionState::Running &&
-                        m_hasCurrentlyRunningResult &&
-                        matchesItem(m_currentlyRunningResult, item, m_telemetryGpuIndex));
-                    if (isCurrentlyTesting && !cardScene.empty()) {
-                        const std::string& rName = m_currentlyRunningResult.benchmarkName;
-                        if (cardScene == "indoor" && rName.find("Indoor Atrium") == std::string::npos) isCurrentlyTesting = false;
-                        else if (cardScene == "forest" && rName.find("Forest") == std::string::npos) isCurrentlyTesting = false;
-                        else if (cardScene == "outdoor" && rName.find("Outdoor") == std::string::npos) isCurrentlyTesting = false;
-                        else if (cardScene == "showroom" && rName.find("Showroom") == std::string::npos) isCurrentlyTesting = false;
-                    }
-
-                    if (dispInfo.hasResult && !dispInfo.primaryResult.isUnsupported && dispInfo.primaryResult.time_ms > 0.0) {
-                        float sW = ImGui::CalcTextSize(dispInfo.scoreText.c_str()).x;
-                        float availC = ImGui::GetContentRegionAvail().x;
-                        if (availC > sW + s(4.0f)) {
-                            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + availC - sW - s(4.0f));
-                        }
-                        ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s", dispInfo.scoreText.c_str());
-                    } else if (dispInfo.hasResult && dispInfo.primaryResult.time_ms == -3.0) {
-                        float sW = ImGui::CalcTextSize("[ABORTED]").x;
-                        float availC = ImGui::GetContentRegionAvail().x;
-                        if (availC > sW + s(4.0f)) {
-                            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + availC - sW - s(4.0f));
-                        }
-                        ImGui::TextColored(ImVec4(0.95f, 0.70f, 0.25f, 1.0f), "[ABORTED]");
-                    } else if (dispInfo.hasResult && dispInfo.primaryResult.time_ms < 0.0) {
-                        float sW = ImGui::CalcTextSize("[FAILED]").x;
-                        float availC = ImGui::GetContentRegionAvail().x;
-                        if (availC > sW + s(4.0f)) {
-                            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + availC - sW - s(4.0f));
-                        }
-                        ImGui::TextColored(ImVec4(0.95f, 0.35f, 0.35f, 1.0f), "[FAILED]");
-                    } else if (isUnsupported) {
-                        ImGui::TextColored(ImVec4(0.85f, 0.55f, 0.15f, 1.0f), "[UNSUPPORTED]");
-                    } else if (isCurrentlyTesting) {
-                        float pulse = 0.5f + 0.5f * sinf(static_cast<float>(ImGui::GetTime()) * 8.0f);
-                        ImGui::TextColored(ImVec4(0.20f + 0.20f * pulse, 0.80f + 0.20f * pulse, 1.0f, 1.0f), "[RUNNING...]");
-                    } else {
-                        std::string badge = "[" + item.metricType + "]";
-                        float bW = ImGui::CalcTextSize(badge.c_str()).x;
-                        float availC = ImGui::GetContentRegionAvail().x;
-                        if (availC > bW + s(4.0f)) {
-                            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + availC - bW - s(4.0f));
-                        }
-                        ImGui::TextColored(ImVec4(0.35f, 0.65f, 0.95f, 0.85f), "%s", badge.c_str());
-                    }
-                    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-                        rowHovered = true;
-                    }
-                    popMonoFont();
-
-                    // Col 2: Delta Speedup / Baseline Connecting Branch
-                    if (hasAnyComparison) {
-                        ImGui::TableNextColumn();
-                        pushMonoFont();
-                        if (dispInfo.hasResult && dispInfo.primaryResult.time_ms == -3.0) {
-                            ImGui::TextColored(ImVec4(0.95f, 0.70f, 0.25f, 1.0f), "[Aborted]");
-                        } else if (dispInfo.hasResult && dispInfo.primaryResult.time_ms < 0.0) {
-                            std::string err = !dispInfo.primaryResult.errorString.empty() ? ("[" + dispInfo.primaryResult.errorString + "]") : "[Failed]";
-                            ImGui::TextColored(ImVec4(0.95f, 0.35f, 0.35f, 1.0f), "%s", err.c_str());
-                        } else {
-                        ImVec2 cellPos = ImGui::GetCursorScreenPos();
-                        float textH = ImGui::GetTextLineHeight();
-                        float curCenterY = cellPos.y + textH * 0.5f;
-
-                        if (dispInfo.isBaseline && !isUnsupported && dispInfo.hasResult && dispInfo.primaryResult.time_ms > 0.0) {
-                            activeBaselineX = cellPos.x + s(8.0f);
-                            activeBaselineY = curCenterY;
-                            hasActiveBaseline = true;
-                            activeBaselineSubcat = item.subcategory;
-
-                            ImVec4 baseColor = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
-                            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + s(4.0f));
-                            ImGui::TextColored(baseColor, "[Baseline]");
-                        } else if (dispInfo.hasComparison && dispInfo.hasResult && !isUnsupported && dispInfo.primaryResult.time_ms > 0.0 && !dispInfo.deltaText.empty()) {
-                            if (!item.subcategory.empty() && item.subcategory != activeBaselineSubcat) {
-                                hasActiveBaseline = false;
-                                activeBaselineY = -1.0f;
-                                activeBaselineSubcat = "";
-                            }
-                            float stemX = (hasActiveBaseline && activeBaselineX > 0.0f) ? activeBaselineX : (cellPos.x + s(8.0f));
-                            ImDrawList* drawList = ImGui::GetWindowDrawList();
-                            ImU32 branchCol = ImGui::GetColorU32(ImVec4(0.38f, 0.65f, 0.90f, 0.65f));
-                            float branchLen = s(10.0f);
-
-                            if (hasActiveBaseline && activeBaselineY > 0.0f && item.subcategory == activeBaselineSubcat) {
-                                // Draw vertical connecting stem from baseline down to current speedup row
-                                drawList->AddLine(ImVec2(stemX, activeBaselineY + s(8.0f)), ImVec2(stemX, curCenterY), branchCol, s(1.5f));
-                            }
-                            // Draw horizontal branch pointing to speedup value
-                            drawList->AddLine(ImVec2(stemX, curCenterY), ImVec2(stemX + branchLen, curCenterY), branchCol, s(1.5f));
-                            // Directional pointer arrow
-                            float arrowSz = s(3.5f);
-                            drawList->AddLine(ImVec2(stemX + branchLen - arrowSz, curCenterY - arrowSz), ImVec2(stemX + branchLen, curCenterY), branchCol, s(1.5f));
-                            drawList->AddLine(ImVec2(stemX + branchLen - arrowSz, curCenterY + arrowSz), ImVec2(stemX + branchLen, curCenterY), branchCol, s(1.5f));
-
-                            // Offset text past branch indicator
-                            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + s(21.0f));
-                            ImGui::TextColored(dispInfo.deltaColor, "%s", dispInfo.deltaText.c_str());
-                        } else {
-                            if (!item.subcategory.empty() && item.subcategory != activeBaselineSubcat) {
-                                hasActiveBaseline = false;
-                                activeBaselineY = -1.0f;
-                                activeBaselineSubcat = "";
-                            }
-                        }
-                        }
-                        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-                            rowHovered = true;
-                        }
-                        popMonoFont();
-                    }
-
-                    if (rowHovered) {
-                        if (!item.description.empty() || item.viz.hasVisualization()) {
-                            std::string scn = !cardScene.empty() ? cardScene : ((item.id == "RayScheduling" || item.id == "RayPathTracing") ? m_suiteActiveScene : "");
-                            renderBenchmarkTooltip(item, scn);
-                        } else if (isUnsupported) {
-                            std::string reason = !item.supportReason.empty() ? item.supportReason :
-                                (dispInfo.hasResult && !dispInfo.primaryResult.supportNote.empty() ? dispInfo.primaryResult.supportNote : "Hardware or API limitation");
-                            std::string catStr = !item.limitationCategory.empty() ? item.limitationCategory : "Limitation";
-                            ImGui::SetTooltip("Workload: %s (%s - %s)\nStatus: UNSUPPORTED (%s)\nReason: %s",
-                                              item.name.c_str(), item.subcategory.c_str(), item.id.c_str(),
-                                              catStr.c_str(), reason.c_str());
-                        }
-                    }
-
-                    ImGui::PopID();
-                }
-                ImGui::EndTable();
-            }
-        }
-
-        // Clean separation gap between subgroups
-        ImGui::Spacing();
-        ImGui::Dummy(ImVec2(0, s(4.0f)));
-        ImGui::PopID();
-    };
-
-    // Scrollable suite area ensures no content is ever clipped or lost off screen
-    ImGui::BeginChild("SuiteScrollArea", ImVec2(0, 0), false);
-
-    std::vector<BenchmarkSubgroup*> activeSubgroups;
-    if (m_suiteCategoryFilter == 0) {
-        for (auto& cat : m_categories) {
-            for (auto& sub : cat.subgroups) activeSubgroups.push_back(&sub);
-        }
-    } else if (m_suiteCategoryFilter == 1 && m_categories.size() > 0) {
-        for (auto& sub : m_categories[0].subgroups) activeSubgroups.push_back(&sub);
-    } else if (m_suiteCategoryFilter == 2 && m_categories.size() > 1) {
-        for (auto& sub : m_categories[1].subgroups) activeSubgroups.push_back(&sub);
-    } else if (m_suiteCategoryFilter == 3 && m_categories.size() > 2) {
-        for (auto& sub : m_categories[2].subgroups) activeSubgroups.push_back(&sub);
-    } else if (m_suiteCategoryFilter == 4 && m_categories.size() > 3) {
-        for (auto& sub : m_categories[3].subgroups) activeSubgroups.push_back(&sub);
-    } else if (m_suiteCategoryFilter == 5 && m_categories.size() > 4) {
-        for (auto& sub : m_categories[4].subgroups) activeSubgroups.push_back(&sub);
-    }
-
-    struct ScenePair {
-        const char* tag;
-        const char* label;
-    };
-    const ScenePair allScenes[4] = {
-        {"indoor", "Indoor Atrium"},
-        {"forest", "Open-World Forest"},
-        {"outdoor", "Outdoor Landscape"},
-        {"showroom", "Showroom Studio"}
-    };
-
-    std::vector<SubgroupRenderInstance> visibleSubgroups;
-    for (auto* sub : activeSubgroups) {
-        size_t visibleCount = 0;
-        for (const auto& itm : sub->items) {
-            BenchmarkDisplayInfo info = getBenchmarkDisplayInfo(itm, m_telemetryGpuIndex);
-            bool isUnsupported = (!itm.isSupported || (info.hasResult && info.primaryResult.isUnsupported));
-            if (!m_hideUnsupported || !isUnsupported) visibleCount++;
-        }
-        if (visibleCount == 0 && m_hideUnsupported) continue;
-
-        if (sub->component == "Ray Tracing" && sub->engineId == "RayScheduling") {
-            if (m_scene == "all" || m_scene.empty()) {
-                for (const auto& sc : allScenes) {
-                    visibleSubgroups.push_back({sub, sc.tag, sc.label});
-                }
-            } else {
-                for (const auto& sc : allScenes) {
-                    if (m_scene == sc.tag) {
-                        visibleSubgroups.push_back({sub, sc.tag, sc.label});
-                        break;
-                    }
-                }
-            }
-        } else {
-            visibleSubgroups.push_back({sub, "", ""});
-        }
-    }
-
-    float availW = ImGui::GetContentRegionAvail().x;
-    float fontScaleFactor = ImGui::GetFontSize() / 16.0f;
-    float minColW = std::max(s(460.0f), 420.0f * fontScaleFactor);
-    int maxCols = std::max(1, static_cast<int>(availW / minColW));
-    if (maxCols > 4) maxCols = 4;
-
-    int numCols = std::max(1, std::min(static_cast<int>(visibleSubgroups.size()), maxCols));
-
-    if (numCols > 1 && visibleSubgroups.size() > 1) {
-        auto getSubHeight = [this, &isInstanceCollapsed](const SubgroupRenderInstance& inst) -> float {
-            float rowH = std::max(s(24.0f), ImGui::GetFrameHeight() + s(4.0f));
-            if (isInstanceCollapsed(inst)) return rowH + s(10.0f);
-            size_t vis = 0;
-            for (const auto& itm : inst.sub->items) {
-                BenchmarkDisplayInfo info = getBenchmarkDisplayInfo(itm, m_telemetryGpuIndex, inst.sceneTag);
-                bool isUnsupported = (!itm.isSupported || (info.hasResult && info.primaryResult.isUnsupported));
-                if (!m_hideUnsupported || !isUnsupported) vis++;
-            }
-            return (rowH + s(10.0f)) + static_cast<float>(vis) * rowH + s(14.0f);
-        };
-
-        std::vector<std::vector<SubgroupRenderInstance>> cols = partitionSubgroupsOptimal(
-            visibleSubgroups, numCols, getSubHeight);
-
-        std::string tableId = "DynamicSuiteGrid_" + std::to_string(numCols);
-        if (ImGui::BeginTable(tableId.c_str(), numCols, ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_NoSavedSettings, ImVec2(availW, 0.0f))) {
-            for (int c = 0; c < numCols; ++c) {
-                ImGui::TableNextColumn();
-                for (const auto& inst : cols[c]) {
-                    renderSubgroupCard(inst);
-                }
-            }
-            ImGui::EndTable();
-        }
-    } else {
-        for (const auto& inst : visibleSubgroups) {
-            renderSubgroupCard(inst);
-        }
-    }
-
-    ImGui::EndChild();
-}
-
-void GuiApp::renderLiveTelemetryDock() {
-    std::vector<uint32_t> actualGpuIndices;
-    for (const auto& dev : m_devices) {
-        if (!dev.isSystem) {
-            actualGpuIndices.push_back(dev.deviceIndex);
-        }
-    }
-
-    if (actualGpuIndices.size() <= 1) {
-        m_telemetryDualGpuMode = false;
-        if (!actualGpuIndices.empty()) {
-            m_telemetryGpuIndex = actualGpuIndices[0];
-        }
-    } else {
-        bool validGpu = false;
-        for (uint32_t idx : actualGpuIndices) {
-            if (idx == m_telemetryGpuIndex) {
-                validGpu = true;
-                break;
-            }
-        }
-        if (!validGpu) {
-            m_telemetryGpuIndex = actualGpuIndices[0];
-        }
-    }
-
-    DeviceTelemetrySnapshot snap0, snap1;
-    if (!actualGpuIndices.empty()) {
-        m_telemetryWorker.getSnapshot(actualGpuIndices[0], snap0);
-    }
-    if (actualGpuIndices.size() > 1) {
-        m_telemetryWorker.getSnapshot(actualGpuIndices[1], snap1);
-    }
-
-    // Header bar with Device selection, Time Window, and live digital readout
-    pushBoldFont();
-    ImGui::TextColored(ImVec4(0.40f, 0.80f, 1.0f, 1.0f), "LIVE TELEMETRY MONITOR");
-    popBoldFont();
-    ImGui::SameLine();
-    ImGui::TextDisabled("|");
-    ImGui::SameLine();
-
-    if (m_execState == ExecutionState::Running) {
-        ImGui::TextColored(ImVec4(0.35f, 0.85f, 0.45f, 1.0f), "LIVE");
-    } else if (m_execState == ExecutionState::Completed) {
-        ImGui::TextColored(ImVec4(0.40f, 0.75f, 1.0f, 1.0f), "COMPLETE");
-    } else if (m_execState == ExecutionState::Cancelled) {
-        ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.35f, 1.0f), "ABORTED");
-    } else {
-        ImGui::TextDisabled("IDLE");
-    }
-    ImGui::SameLine();
-    ImGui::TextDisabled("|");
-    ImGui::SameLine();
-
-    // Device selection: ONLY actual devices!
-    if (actualGpuIndices.size() > 1) {
-        for (size_t g = 0; g < actualGpuIndices.size(); ++g) {
-            uint32_t idx = actualGpuIndices[g];
-            std::string label = (g == 0) ? ("GPU " + std::to_string(idx) + " (Primary)")
-                                         : ("GPU " + std::to_string(idx) + " (Secondary)");
-            if (ImGui::RadioButton(label.c_str(), !m_telemetryDualGpuMode && m_telemetryGpuIndex == idx)) {
-                m_telemetryGpuIndex = idx;
-                m_telemetryDualGpuMode = false;
-            }
-            ImGui::SameLine();
-        }
-        if (ImGui::RadioButton("Dual GPU Overlay", m_telemetryDualGpuMode)) {
-            m_telemetryDualGpuMode = true;
-        }
-    } else if (actualGpuIndices.size() == 1) {
-        std::string label = "GPU " + std::to_string(actualGpuIndices[0]);
-        for (const auto& dev : m_devices) {
-            if (dev.deviceIndex == actualGpuIndices[0] && !dev.isSystem) {
-                label += " (" + dev.name + ")";
-                break;
-            }
-        }
-        ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.0f, 1.0f), "%s", label.c_str());
-    }
-
-    // Time window selector
-    float winTextW = ImGui::CalcTextSize("Window:").x;
-    float bFullW = ImGui::CalcTextSize("Full Run").x + ImGui::GetStyle().FramePadding.x * 2.0f;
-    float b30W = ImGui::CalcTextSize("30s").x + ImGui::GetStyle().FramePadding.x * 2.0f;
-    float b60W = ImGui::CalcTextSize("60s").x + ImGui::GetStyle().FramePadding.x * 2.0f;
-    float b120W = ImGui::CalcTextSize("120s").x + ImGui::GetStyle().FramePadding.x * 2.0f;
-    float totalWinW = winTextW + bFullW + b30W + b60W + b120W + ImGui::GetStyle().ItemSpacing.x * 5.0f;
-
-    ImGui::SameLine();
-    float availWin = ImGui::GetContentRegionAvail().x;
-    if (availWin >= totalWinW + s(16.0f)) {
-        float targetX = ImGui::GetCursorPosX() + availWin - totalWinW;
-        if (targetX > ImGui::GetCursorPosX()) {
-            ImGui::SetCursorPosX(targetX);
-        }
-    } else {
-        ImGui::NewLine();
-    }
-    ImGui::TextDisabled("Window:");
-    ImGui::SameLine();
-    auto winBtn = [this](const char* label, float winSec) {
-        bool isAct = (m_telemetryTimeWindow == winSec);
-        if (isAct) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.22f, 0.48f, 0.90f, 1.0f));
-        else ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.12f, 0.15f, 0.22f, 1.0f));
-        if (ImGui::SmallButton(label)) {
-            m_telemetryTimeWindow = winSec;
-            m_telemetryNeedsFit = true;
-        }
-        ImGui::PopStyleColor();
-    };
-    winBtn("Full Run", 0.0f);
-    ImGui::SameLine();
-    winBtn("30s", 30.0f);
-    ImGui::SameLine();
-    winBtn("60s", 60.0f);
-    ImGui::SameLine();
-    winBtn("120s", 120.0f);
-
-    auto lookupDeviceVramMb = [this](uint32_t gpuIdx) -> float {
-        for (const auto& dev : m_devices) {
-            if (!dev.isSystem && dev.deviceIndex == gpuIdx && dev.vramTotalMb > 0) {
-                return static_cast<float>(dev.vramTotalMb);
-            }
-        }
-        return 0.0f;
-    };
-
-    // Live digital metrics banner with rock-solid fixed column offsets (zero bouncing text)
-    if (m_telemetryDualGpuMode) {
-        float v0 = static_cast<float>(snap0.vramUsedBytes / (1024 * 1024));
-        float t0 = static_cast<float>(snap0.vramTotalBytes / (1024 * 1024));
-        if (t0 <= 0.0f) t0 = lookupDeviceVramMb(0);
-        float v1 = static_cast<float>(snap1.vramUsedBytes / (1024 * 1024));
-        float t1 = static_cast<float>(snap1.vramTotalBytes / (1024 * 1024));
-        if (t1 <= 0.0f) t1 = lookupDeviceVramMb(1);
-
-        auto renderDualGpuRow = [this](const char* label, ImVec4 col, const DeviceTelemetrySnapshot& snap, float vMb, float tMb) {
-            float startX = ImGui::GetCursorPosX();
-            pushBoldFont();
-            ImGui::TextColored(col, "%s", label);
-            popBoldFont();
-            ImGui::SameLine(startX + s(140.0f));
-            ImGui::TextDisabled("Shader:");
-            ImGui::SameLine(startX + s(195.0f));
-            pushMonoFont();
-            ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.0f, 1.0f), "%4.0f MHz", snap.sclkMhz);
-            popMonoFont();
-
-            ImGui::SameLine(startX + s(270.0f));
-            ImGui::TextDisabled("| Mem:");
-            ImGui::SameLine(startX + s(315.0f));
-            pushMonoFont();
-            ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.0f, 1.0f), "%4.0f MHz", snap.mclkMhz);
-            popMonoFont();
-
-            ImGui::SameLine(startX + s(390.0f));
-            ImGui::TextDisabled("| Pwr:");
-            ImGui::SameLine(startX + s(435.0f));
-            pushMonoFont();
-            ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f), "%5.1f W", snap.powerWatts);
-            popMonoFont();
-
-            ImGui::SameLine(startX + s(510.0f));
-            ImGui::TextDisabled("| Temp:");
-            ImGui::SameLine(startX + s(560.0f));
-            ImVec4 tColor = (snap.tempJctC > 80.0f) ? ImVec4(0.95f, 0.3f, 0.3f, 1.0f) : ImVec4(0.35f, 0.85f, 0.65f, 1.0f);
-            pushMonoFont();
-            ImGui::TextColored(tColor, "%4.0f C", snap.tempJctC);
-            popMonoFont();
-
-            ImGui::SameLine(startX + s(630.0f));
-            ImGui::TextDisabled("| VRAM:");
-            ImGui::SameLine(startX + s(685.0f));
-            float vPct = (tMb > 0.0f) ? (vMb / tMb) * 100.0f : 0.0f;
-            pushMonoFont();
-            ImGui::TextColored(ImVec4(0.70f, 0.80f, 0.95f, 1.0f), "%5.0f / %5.0f MB (%2.0f%%)", vMb, tMb, vPct);
-            popMonoFont();
-        };
-        renderDualGpuRow("GPU 0 (Primary):", ImVec4(0.38f, 0.75f, 1.0f, 1.0f), snap0, v0, t0);
-        renderDualGpuRow("GPU 1 (Secondary):", ImVec4(0.75f, 0.50f, 1.0f, 1.0f), snap1, v1, t1);
-    } else {
-        const auto& snap = (m_telemetryGpuIndex == 1) ? snap1 : snap0;
-        float vramMb = static_cast<float>(snap.vramUsedBytes / (1024 * 1024));
-        float totalVramMb = static_cast<float>(snap.vramTotalBytes / (1024 * 1024));
-        if (totalVramMb <= 0.0f) totalVramMb = lookupDeviceVramMb(static_cast<uint32_t>(m_telemetryGpuIndex));
-        float vramPct = (totalVramMb > 0.0f) ? (vramMb / totalVramMb) * 100.0f : 0.0f;
-
-        float startX = ImGui::GetCursorPosX();
-        ImGui::TextDisabled("Shader Clk:");
-        ImGui::SameLine(startX + s(88.0f));
-        pushMonoFont();
-        ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.0f, 1.0f), "%4.0f MHz", snap.sclkMhz);
-        popMonoFont();
-
-        ImGui::SameLine(startX + s(185.0f));
-        ImGui::TextDisabled("| Mem Clk:");
-        ImGui::SameLine(startX + s(270.0f));
-        pushMonoFont();
-        ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.0f, 1.0f), "%4.0f MHz", snap.mclkMhz);
-        popMonoFont();
-
-        ImGui::SameLine(startX + s(365.0f));
-        ImGui::TextDisabled("| Power:");
-        ImGui::SameLine(startX + s(430.0f));
-        pushMonoFont();
-        ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f), "%5.1f W", snap.powerWatts);
-        popMonoFont();
-
-        ImGui::SameLine(startX + s(515.0f));
-        ImGui::TextDisabled("| Junction:");
-        ImGui::SameLine(startX + s(590.0f));
-        ImVec4 tColor = (snap.tempJctC > 80.0f) ? ImVec4(0.95f, 0.3f, 0.3f, 1.0f) : ImVec4(0.35f, 0.85f, 0.65f, 1.0f);
-        pushMonoFont();
-        ImGui::TextColored(tColor, "%4.1f C", snap.tempJctC);
-        popMonoFont();
-
-        ImGui::SameLine(startX + s(675.0f));
-        ImGui::TextDisabled("| VRAM:");
-        ImGui::SameLine(startX + s(735.0f));
-        pushMonoFont();
-        ImGui::TextColored(ImVec4(0.70f, 0.80f, 0.95f, 1.0f), "%5.0f / %5.0f MB (%2.0f%%)", vramMb, totalVramMb, vramPct);
-        popMonoFont();
-    }
-
-    ImGui::Spacing();
-
-    // Side-by-side real-time ImPlot graphs
-    float curT = snap0.timeHistory.empty() ? 0.0f : snap0.timeHistory.back();
-    if (m_telemetryDualGpuMode && !snap1.timeHistory.empty()) {
-        curT = std::max(curT, snap1.timeHistory.back());
-    } else if (m_telemetryGpuIndex == 1 && !snap1.timeHistory.empty()) {
-        curT = snap1.timeHistory.back();
-    }
-
-    float minT = 0.0f;
-    float maxT = 10.0f;
-    if (m_telemetryTimeWindow <= 0.0f) {
-        // Full Run: compress to cover the entire run
-        minT = 0.0f;
-        maxT = std::max(5.0f, curT + 0.2f);
-    } else {
-        // Fixed sliding window (30s, 60s, 120s)
-        minT = std::max(0.0f, curT - m_telemetryTimeWindow);
-        maxT = std::max(minT + 5.0f, curT + 0.2f);
-    }
-
-    ImPlotCond cond = (m_execState == ExecutionState::Running || m_telemetryNeedsFit) 
-                      ? ImPlotCond_Always 
-                      : ImPlotCond_Once;
-
-    float availW = ImGui::GetContentRegionAvail().x;
-    float graphW = (availW - s(14.0f)) * 0.5f;
-    float graphH = std::max(s(280.0f), ImGui::GetContentRegionAvail().y - s(20.0f));
-
-    // Left graph: Clocks (Shader & Memory)
-    if (ImPlot::BeginPlot("##suite_clocks", ImVec2(graphW, graphH), ImPlotFlags_NoTitle)) {
-        ImPlot::SetupAxes("Time (s)", "Clock (MHz)", ImPlotAxisFlags_None, ImPlotAxisFlags_None);
-        ImPlot::SetupAxisLimits(ImAxis_X1, minT, maxT, cond);
-        ImPlot::SetupAxisLimits(ImAxis_Y1, 0, 3500, ImPlotCond_Once);
-
-        if (m_telemetryDualGpuMode) {
-            if (snap0.timeHistory.size() > 1) {
-                ImPlot::PlotLine("GPU 0 Shader", snap0.timeHistory.data(), snap0.sclkHistory.data(),
-                                 static_cast<int>(snap0.sclkHistory.size()), 0, static_cast<int>(snap0.sclkHistory.offset()));
-                ImPlot::PlotLine("GPU 0 Memory", snap0.timeHistory.data(), snap0.mclkHistory.data(),
-                                 static_cast<int>(snap0.mclkHistory.size()), 0, static_cast<int>(snap0.mclkHistory.offset()));
-            }
-            if (snap1.timeHistory.size() > 1) {
-                ImPlot::PlotLine("GPU 1 Shader", snap1.timeHistory.data(), snap1.sclkHistory.data(),
-                                 static_cast<int>(snap1.sclkHistory.size()), 0, static_cast<int>(snap1.sclkHistory.offset()));
-                ImPlot::PlotLine("GPU 1 Memory", snap1.timeHistory.data(), snap1.mclkHistory.data(),
-                                 static_cast<int>(snap1.mclkHistory.size()), 0, static_cast<int>(snap1.mclkHistory.offset()));
-            }
-        } else {
-            const auto& snap = (m_telemetryGpuIndex == 1) ? snap1 : snap0;
-            if (snap.timeHistory.size() > 1) {
-                ImPlot::PlotLine("Shader Clock", snap.timeHistory.data(), snap.sclkHistory.data(),
-                                 static_cast<int>(snap.sclkHistory.size()), 0, static_cast<int>(snap.sclkHistory.offset()));
-                ImPlot::PlotLine("Memory Clock", snap.timeHistory.data(), snap.mclkHistory.data(),
-                                 static_cast<int>(snap.mclkHistory.size()), 0, static_cast<int>(snap.mclkHistory.offset()));
-            }
-        }
-        ImPlot::EndPlot();
-    }
-
-    ImGui::SameLine();
-
-    // Right graph: Thermal & Power Dynamics
-    if (ImPlot::BeginPlot("##suite_power", ImVec2(graphW, graphH), ImPlotFlags_NoTitle)) {
-        ImPlot::SetupAxes("Time (s)", "Temp (C)", ImPlotAxisFlags_None, ImPlotAxisFlags_None);
-        ImPlot::SetupAxis(ImAxis_Y2, "Power (W)", ImPlotAxisFlags_AuxDefault);
-        ImPlot::SetupAxisLimits(ImAxis_X1, minT, maxT, cond);
-        ImPlot::SetupAxisLimits(ImAxis_Y1, 20, 110, ImPlotCond_Once);
-        ImPlot::SetupAxisLimits(ImAxis_Y2, 0, 350, ImPlotCond_Once);
-
-        if (m_telemetryDualGpuMode) {
-            if (snap0.timeHistory.size() > 1) {
-                ImPlot::PlotLine("GPU 0 Temp", snap0.timeHistory.data(), snap0.tempJctHistory.data(),
-                                 static_cast<int>(snap0.tempJctHistory.size()), 0, static_cast<int>(snap0.tempJctHistory.offset()));
-                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y2);
-                ImPlot::PlotLine("GPU 0 Power", snap0.timeHistory.data(), snap0.powerHistory.data(),
-                                 static_cast<int>(snap0.powerHistory.size()), 0, static_cast<int>(snap0.powerHistory.offset()));
-            }
-            if (snap1.timeHistory.size() > 1) {
-                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y1);
-                ImPlot::PlotLine("GPU 1 Temp", snap1.timeHistory.data(), snap1.tempJctHistory.data(),
-                                 static_cast<int>(snap1.tempJctHistory.size()), 0, static_cast<int>(snap1.tempJctHistory.offset()));
-                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y2);
-                ImPlot::PlotLine("GPU 1 Power", snap1.timeHistory.data(), snap1.powerHistory.data(),
-                                 static_cast<int>(snap1.powerHistory.size()), 0, static_cast<int>(snap1.powerHistory.offset()));
-            }
-        } else {
-            const auto& snap = (m_telemetryGpuIndex == 1) ? snap1 : snap0;
-            if (snap.timeHistory.size() > 1) {
-                ImPlot::PlotLine("Junction Temp", snap.timeHistory.data(), snap.tempJctHistory.data(),
-                                 static_cast<int>(snap.tempJctHistory.size()), 0, static_cast<int>(snap.tempJctHistory.offset()));
-                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y2);
-                ImPlot::PlotLine("Board Power", snap.timeHistory.data(), snap.powerHistory.data(),
-                                 static_cast<int>(snap.powerHistory.size()), 0, static_cast<int>(snap.powerHistory.offset()));
-            }
-        }
-        ImPlot::EndPlot();
-    }
-}
-
-void GuiApp::renderSidebarTelemetry() {
-    std::vector<uint32_t> actualGpuIndices;
-    for (const auto& dev : m_devices) {
-        if (!dev.isSystem) {
-            actualGpuIndices.push_back(dev.deviceIndex);
-        }
-    }
-
-    if (actualGpuIndices.size() <= 1) {
-        m_telemetryDualGpuMode = false;
-        if (!actualGpuIndices.empty()) {
-            m_telemetryGpuIndex = actualGpuIndices[0];
-        }
-    } else {
-        bool validGpu = false;
-        for (uint32_t idx : actualGpuIndices) {
-            if (idx == m_telemetryGpuIndex) {
-                validGpu = true;
-                break;
-            }
-        }
-        if (!validGpu) {
-            m_telemetryGpuIndex = actualGpuIndices[0];
-        }
-    }
-
-    DeviceTelemetrySnapshot snap0, snap1;
-    if (!actualGpuIndices.empty()) {
-        m_telemetryWorker.getSnapshot(actualGpuIndices[0], snap0);
-    }
-    if (actualGpuIndices.size() > 1) {
-        m_telemetryWorker.getSnapshot(actualGpuIndices[1], snap1);
-    }
-
-    DeviceTelemetrySnapshot activeSnap;
-    if (actualGpuIndices.size() > 1 && m_telemetryGpuIndex == actualGpuIndices[1]) {
-        activeSnap = snap1;
-    } else {
-        activeSnap = snap0;
-    }
-
-    ImGui::Separator();
-    ImGui::Spacing();
-    pushBoldFont();
-    ImGui::TextColored(ImVec4(0.65f, 0.75f, 0.90f, 1.0f), "HARDWARE TELEMETRY");
-    popBoldFont();
-    ImGui::SameLine();
-    if (m_execState == ExecutionState::Running) {
-        ImGui::TextColored(ImVec4(0.35f, 0.85f, 0.45f, 1.0f), "LIVE");
-    } else if (m_execState == ExecutionState::Completed) {
-        ImGui::TextColored(ImVec4(0.40f, 0.75f, 1.0f, 1.0f), "COMPLETE");
-    } else if (m_execState == ExecutionState::Cancelled) {
-        ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.35f, 1.0f), "ABORTED");
-    }
-
-    // Device switch buttons (ONLY for actual devices!)
-    auto devPill = [this](const char* label, bool active) {
-        if (active) {
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.25f, 0.45f, 0.85f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
-        } else {
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.13f, 0.16f, 0.23f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.70f, 0.78f, 0.90f, 1.0f));
-        }
-        bool clicked = ImGui::SmallButton(label);
-        ImGui::PopStyleColor(2);
-        return clicked;
-    };
-
-    if (actualGpuIndices.size() > 1) {
-        for (size_t g = 0; g < actualGpuIndices.size(); ++g) {
-            uint32_t idx = actualGpuIndices[g];
-            std::string label = "GPU " + std::to_string(idx);
-            if (devPill(label.c_str(), !m_telemetryDualGpuMode && m_telemetryGpuIndex == idx)) {
-                m_telemetryGpuIndex = idx;
-                m_telemetryDualGpuMode = false;
-            }
-            ImGui::SameLine();
-        }
-        if (devPill("Dual", m_telemetryDualGpuMode)) {
-            m_telemetryDualGpuMode = true;
-        }
-    } else if (actualGpuIndices.size() == 1) {
-        std::string label = "GPU " + std::to_string(actualGpuIndices[0]);
-        devPill(label.c_str(), true);
-    }
-
-    // Time window selector on the right
-    float bFullW = ImGui::CalcTextSize("Full").x + ImGui::GetStyle().FramePadding.x * 2.0f;
-    float b30W = ImGui::CalcTextSize("30s").x + ImGui::GetStyle().FramePadding.x * 2.0f;
-    float b60W = ImGui::CalcTextSize("60s").x + ImGui::GetStyle().FramePadding.x * 2.0f;
-    float b120W = ImGui::CalcTextSize("120s").x + ImGui::GetStyle().FramePadding.x * 2.0f;
-    float totalBtnsW = bFullW + b30W + b60W + b120W + ImGui::GetStyle().ItemSpacing.x * 3.0f;
-
-    ImGui::SameLine();
-    float availSide = ImGui::GetContentRegionAvail().x;
-    if (availSide >= totalBtnsW + s(10.0f)) {
-        float targetX = ImGui::GetCursorPosX() + availSide - totalBtnsW;
-        if (targetX > ImGui::GetCursorPosX()) {
-            ImGui::SetCursorPosX(targetX);
-        }
-    } else {
-        ImGui::NewLine();
-    }
-    auto winBtn = [this](const char* label, float winSec) {
-        bool isAct = (m_telemetryTimeWindow == winSec);
-        if (isAct) {
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.22f, 0.48f, 0.90f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
-        } else {
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.12f, 0.15f, 0.22f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.65f, 0.70f, 0.80f, 1.0f));
-        }
-        if (ImGui::SmallButton(label)) {
-            m_telemetryTimeWindow = winSec;
-            m_telemetryNeedsFit = true;
-        }
-        ImGui::PopStyleColor(2);
-    };
-    winBtn("Full", 0.0f);
-    ImGui::SameLine();
-    winBtn("30s", 30.0f);
-    ImGui::SameLine();
-    winBtn("60s", 60.0f);
-    ImGui::SameLine();
-    winBtn("120s", 120.0f);
-
-    ImGui::Spacing();
-
-    // Time calculations
-    float curT = snap0.timeHistory.empty() ? 0.0f : snap0.timeHistory.back();
-    if (m_telemetryDualGpuMode && actualGpuIndices.size() > 1 && !snap1.timeHistory.empty()) {
-        curT = std::max(curT, snap1.timeHistory.back());
-    } else if (!activeSnap.timeHistory.empty()) {
-        curT = activeSnap.timeHistory.back();
-    }
-
-    float minT = 0.0f;
-    float maxT = 10.0f;
-    if (m_telemetryTimeWindow <= 0.0f) {
-        // Full Run: compress to cover the entire run
-        minT = 0.0f;
-        maxT = std::max(5.0f, curT + 0.2f);
-    } else {
-        // Fixed sliding window (30s, 60s, 120s)
-        minT = std::max(0.0f, curT - m_telemetryTimeWindow);
-        maxT = std::max(minT + 5.0f, curT + 0.2f);
-    }
-
-    ImPlotCond cond = (m_execState == ExecutionState::Running || m_telemetryNeedsFit) 
-                      ? ImPlotCond_Always 
-                      : ImPlotCond_Once;
-
-    float plotH = s(120.0f);
-
-    ImPlot::PushStyleVar(ImPlotStyleVar_PlotPadding, ImVec2(s(6.0f), s(4.0f)));
-    ImPlot::PushStyleVar(ImPlotStyleVar_LabelPadding, ImVec2(s(4.0f), s(2.0f)));
-
-    // Color definitions for telemetry traces & legend
-    const ImVec4 colGpu0Shader   = ImVec4(0.35f, 0.85f, 0.45f, 1.0f); // Green
-    const ImVec4 colGpu1Shader   = ImVec4(0.95f, 0.38f, 0.35f, 1.0f); // Coral Red
-    const ImVec4 colSingleShader = ImVec4(0.38f, 0.75f, 1.00f, 1.0f); // Sky Blue
-    const ImVec4 colSingleMem    = ImVec4(0.25f, 0.90f, 0.80f, 1.0f); // Cyan
-
-    const ImVec4 colGpu0Temp  = ImVec4(0.35f, 0.85f, 0.45f, 1.0f); // Green
-    const ImVec4 colGpu0Power = ImVec4(0.95f, 0.38f, 0.35f, 1.0f); // Red
-    const ImVec4 colGpu1Temp  = ImVec4(0.68f, 0.52f, 0.98f, 1.0f); // Purple
-    const ImVec4 colGpu1Power = ImVec4(0.95f, 0.72f, 0.30f, 1.0f); // Amber
-
-    const ImVec4 colSingleTemp  = ImVec4(0.35f, 0.85f, 0.55f, 1.0f); // Emerald Green
-    const ImVec4 colSinglePower = ImVec4(0.95f, 0.72f, 0.30f, 1.0f); // Amber Gold
-
-    auto renderLegendChip = [this](const char* label, ImVec4 color) {
-        ImVec2 p = ImGui::GetCursorScreenPos();
-        float lineH = ImGui::GetTextLineHeight();
-        float boxSize = s(7.0f);
-        float boxOffsetY = (lineH - boxSize) * 0.5f;
-        ImDrawList* drawList = ImGui::GetWindowDrawList();
-        ImU32 col = ImGui::GetColorU32(color);
-        drawList->AddRectFilled(ImVec2(p.x, p.y + boxOffsetY), ImVec2(p.x + boxSize, p.y + boxOffsetY + boxSize), col, s(1.5f));
-        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + boxSize + s(5.0f));
-        ImGui::TextColored(ImVec4(0.80f, 0.85f, 0.92f, 1.0f), "%s", label);
-    };
-
-    ImPlotFlags plotFlags = ImPlotFlags_NoTitle | ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText | ImPlotFlags_NoInputs;
-
-    // Graph 1: Frequencies (Shader & Memory Clock)
-    if (ImPlot::BeginPlot("##sidebar_clocks", ImVec2(-1, plotH), plotFlags)) {
-        ImPlot::SetupAxes(nullptr, "MHz", ImPlotAxisFlags_NoLabel, ImPlotAxisFlags_None);
-        ImPlot::SetupAxisLimits(ImAxis_X1, minT, maxT, cond);
-        ImPlot::SetupAxisLimits(ImAxis_Y1, 0, 3500, ImPlotCond_Once);
-
-        if (m_telemetryDualGpuMode && actualGpuIndices.size() > 1) {
-            if (snap0.timeHistory.size() > 1) {
-                ImPlot::SetNextLineStyle(colGpu0Shader, s(1.5f));
-                ImPlot::PlotLine("##g0s", snap0.timeHistory.data(), snap0.sclkHistory.data(),
-                                 static_cast<int>(snap0.sclkHistory.size()), 0, static_cast<int>(snap0.sclkHistory.offset()));
-            }
-            if (snap1.timeHistory.size() > 1) {
-                ImPlot::SetNextLineStyle(colGpu1Shader, s(1.5f));
-                ImPlot::PlotLine("##g1s", snap1.timeHistory.data(), snap1.sclkHistory.data(),
-                                 static_cast<int>(snap1.sclkHistory.size()), 0, static_cast<int>(snap1.sclkHistory.offset()));
-            }
-        } else {
-            if (activeSnap.timeHistory.size() > 1) {
-                ImPlot::SetNextLineStyle(colSingleShader, s(1.5f));
-                ImPlot::PlotLine("##sclk", activeSnap.timeHistory.data(), activeSnap.sclkHistory.data(),
-                                 static_cast<int>(activeSnap.sclkHistory.size()), 0, static_cast<int>(activeSnap.sclkHistory.offset()));
-                ImPlot::SetNextLineStyle(colSingleMem, s(1.5f));
-                ImPlot::PlotLine("##mclk", activeSnap.timeHistory.data(), activeSnap.mclkHistory.data(),
-                                 static_cast<int>(activeSnap.mclkHistory.size()), 0, static_cast<int>(activeSnap.mclkHistory.offset()));
-            }
-        }
-        ImPlot::EndPlot();
-    }
-
-    // Legend below Graph 1
-    if (ImGui::BeginTable("LegendClocks", 2, ImGuiTableFlags_SizingStretchSame)) {
-        ImGui::TableNextColumn();
-        if (m_telemetryDualGpuMode && actualGpuIndices.size() > 1) {
-            renderLegendChip("GPU 0 Shader", colGpu0Shader);
-            ImGui::TableNextColumn();
-            renderLegendChip("GPU 1 Shader", colGpu1Shader);
-        } else {
-            renderLegendChip("Shader Clock", colSingleShader);
-            ImGui::TableNextColumn();
-            renderLegendChip("Memory Clock", colSingleMem);
-        }
-        ImGui::EndTable();
-    }
-
-    ImGui::Spacing();
-
-    // Graph 2: Thermals & Power Dynamics
-    if (ImPlot::BeginPlot("##sidebar_thermals", ImVec2(-1, plotH), plotFlags)) {
-        ImPlot::SetupAxes(nullptr, "°C", ImPlotAxisFlags_NoLabel, ImPlotAxisFlags_None);
-        ImPlot::SetupAxis(ImAxis_Y2, "W", ImPlotAxisFlags_AuxDefault);
-        ImPlot::SetupAxisLimits(ImAxis_X1, minT, maxT, cond);
-        ImPlot::SetupAxisLimits(ImAxis_Y1, 20, 110, ImPlotCond_Once);
-        ImPlot::SetupAxisLimits(ImAxis_Y2, 0, 350, ImPlotCond_Once);
-
-        if (m_telemetryDualGpuMode && actualGpuIndices.size() > 1) {
-            if (snap0.timeHistory.size() > 1) {
-                ImPlot::SetNextLineStyle(colGpu0Temp, s(1.5f));
-                ImPlot::PlotLine("##g0t", snap0.timeHistory.data(), snap0.tempJctHistory.data(),
-                                 static_cast<int>(snap0.tempJctHistory.size()), 0, static_cast<int>(snap0.tempJctHistory.offset()));
-                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y2);
-                ImPlot::SetNextLineStyle(colGpu0Power, s(1.5f));
-                ImPlot::PlotLine("##g0p", snap0.timeHistory.data(), snap0.powerHistory.data(),
-                                 static_cast<int>(snap0.powerHistory.size()), 0, static_cast<int>(snap0.powerHistory.offset()));
-            }
-            if (snap1.timeHistory.size() > 1) {
-                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y1);
-                ImPlot::SetNextLineStyle(colGpu1Temp, s(1.5f));
-                ImPlot::PlotLine("##g1t", snap1.timeHistory.data(), snap1.tempJctHistory.data(),
-                                 static_cast<int>(snap1.tempJctHistory.size()), 0, static_cast<int>(snap1.tempJctHistory.offset()));
-                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y2);
-                ImPlot::SetNextLineStyle(colGpu1Power, s(1.5f));
-                ImPlot::PlotLine("##g1p", snap1.timeHistory.data(), snap1.powerHistory.data(),
-                                 static_cast<int>(snap1.powerHistory.size()), 0, static_cast<int>(snap1.powerHistory.offset()));
-            }
-        } else {
-            if (activeSnap.timeHistory.size() > 1) {
-                ImPlot::SetNextLineStyle(colSingleTemp, s(1.5f));
-                ImPlot::PlotLine("##jct", activeSnap.timeHistory.data(), activeSnap.tempJctHistory.data(),
-                                 static_cast<int>(activeSnap.tempJctHistory.size()), 0, static_cast<int>(activeSnap.tempJctHistory.offset()));
-                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y2);
-                ImPlot::SetNextLineStyle(colSinglePower, s(1.5f));
-                ImPlot::PlotLine("##pwr", activeSnap.timeHistory.data(), activeSnap.powerHistory.data(),
-                                 static_cast<int>(activeSnap.powerHistory.size()), 0, static_cast<int>(activeSnap.powerHistory.offset()));
-            }
-        }
-        ImPlot::EndPlot();
-    }
-
-    // Legend below Graph 2
-    if (ImGui::BeginTable("LegendThermals", 2, ImGuiTableFlags_SizingStretchSame)) {
-        if (m_telemetryDualGpuMode && actualGpuIndices.size() > 1) {
-            ImGui::TableNextColumn();
-            renderLegendChip("GPU 0 Temp", colGpu0Temp);
-            ImGui::TableNextColumn();
-            renderLegendChip("GPU 0 Power", colGpu0Power);
-            ImGui::TableNextColumn();
-            renderLegendChip("GPU 1 Temp", colGpu1Temp);
-            ImGui::TableNextColumn();
-            renderLegendChip("GPU 1 Power", colGpu1Power);
-        } else {
-            ImGui::TableNextColumn();
-            renderLegendChip("Junction Temp", colSingleTemp);
-            ImGui::TableNextColumn();
-            renderLegendChip("Board Power", colSinglePower);
-        }
-        ImGui::EndTable();
-    }
-
-    ImPlot::PopStyleVar(2);
-}
-
-void GuiApp::renderResultsScorecard() {
-    ImGui::Spacing();
-    
-    // Top Summary Banner when results are present
-    if (!m_allResults.empty()) {
-        size_t passedCount = 0, unsuppCount = 0, failedCount = 0, abortedCount = 0;
-        double peakCompute = 0.0, peakBandwidth = 0.0, peakRT = 0.0;
-
-        for (const auto& res : m_allResults) {
-            if (res.isUnsupported) { unsuppCount++; continue; }
-            if (res.time_ms == -3.0) { abortedCount++; continue; }
-            if (res.time_ms < 0.0) { failedCount++; continue; }
-            passedCount++;
-
-            if (res.time_ms > 0.0 && res.operations > 0) {
-                double opsPerSec = (static_cast<double>(res.operations) / res.time_ms) * 1000.0;
-                if (res.metric.find("TFLOPS") != std::string::npos) {
-                    peakCompute = std::max(peakCompute, opsPerSec / 1e12);
-                } else if (res.metric.find("GB/s") != std::string::npos &&
-                           res.deviceIndex != 0xFFFFFFFF &&
-                           (res.benchmarkName.find("Device Memory Bandwidth") != std::string::npos ||
-                            res.subcategory == "VRAM Bandwidth" || res.subcategory == "Bandwidth")) {
-                    peakBandwidth = std::max(peakBandwidth, opsPerSec / 1e9);
-                } else if (res.metric.find("MRays/s") != std::string::npos) {
-                    peakRT = std::max(peakRT, opsPerSec / 1e6);
-                }
-            }
-        }
-
-        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.11f, 0.14f, 0.20f, 1.0f));
-        ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.24f, 0.36f, 0.55f, 0.6f));
-        ImGui::BeginChild("ScorecardSummaryCard", ImVec2(0, s(60.0f)), true, ImGuiWindowFlags_NoScrollbar);
-
-        if (ImGui::BeginTable("ScorecardKpiTbl", 4, ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_BordersInnerV)) {
-            ImGui::TableNextRow();
-
-            // KPI 1: Workloads Status
-            ImGui::TableNextColumn();
-            ImGui::TextDisabled("WORKLOAD STATUS");
-            pushBoldFont();
-            ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "✓ %zu Passed", passedCount);
-            popBoldFont();
-            if (unsuppCount > 0) {
-                ImGui::SameLine();
-                ImGui::TextColored(ImVec4(0.85f, 0.55f, 0.15f, 1.0f), "• %zu Unsupp", unsuppCount);
-            }
-            if (failedCount > 0) {
-                ImGui::SameLine();
-                ImGui::TextColored(ImVec4(0.95f, 0.30f, 0.30f, 1.0f), "• %zu Failed", failedCount);
-            }
-            if (abortedCount > 0) {
-                ImGui::SameLine();
-                ImGui::TextColored(ImVec4(0.95f, 0.70f, 0.25f, 1.0f), "• %zu Aborted", abortedCount);
-            }
-
-            // KPI 2: Peak Compute
-            ImGui::TableNextColumn();
-            ImGui::TextDisabled("PEAK COMPUTE");
-            pushMonoFont();
-            if (peakCompute > 0.0) {
-                ImGui::TextColored(ImVec4(0.38f, 0.78f, 1.00f, 1.0f), "%.2f TFLOPS", peakCompute);
-            } else {
-                ImGui::TextDisabled("--");
-            }
-            popMonoFont();
-
-            // KPI 3: Peak VRAM Bandwidth
-            ImGui::TableNextColumn();
-            ImGui::TextDisabled("PEAK VRAM BANDWIDTH");
-            pushMonoFont();
-            if (peakBandwidth > 0.0) {
-                ImGui::TextColored(ImVec4(0.35f, 0.92f, 0.80f, 1.0f), "%.1f GB/s", peakBandwidth);
-            } else {
-                ImGui::TextDisabled("--");
-            }
-            popMonoFont();
-
-            // KPI 4: Peak Ray Tracing
-            ImGui::TableNextColumn();
-            ImGui::TextDisabled("PEAK RAY TRACING");
-            pushMonoFont();
-            if (peakRT > 0.0) {
-                ImGui::TextColored(ImVec4(0.98f, 0.75f, 0.35f, 1.0f), "%.1f MRays/s", peakRT);
-            } else {
-                ImGui::TextDisabled("--");
-            }
-            popMonoFont();
-
-            ImGui::EndTable();
-        }
-
-        ImGui::EndChild();
-        ImGui::PopStyleColor(2);
-        ImGui::Spacing();
-    } else {
-        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.10f, 0.12f, 0.18f, 1.0f));
-        ImGui::BeginChild("EmptyScorecardPrompt", ImVec2(0, s(64.0f)), true);
-        pushBoldFont();
-        ImGui::TextColored(ImVec4(0.70f, 0.78f, 0.90f, 1.0f), "No benchmark results recorded yet.");
-        popBoldFont();
-        ImGui::TextDisabled("Select workloads on the 'Benchmark Suite' tab and click 'START BENCHMARKS' to generate performance scorecards.");
-        ImGui::EndChild();
-        ImGui::PopStyleColor();
-        ImGui::Spacing();
-    }
-    
-    // Category Filter
-    ImGui::Text("Filter Category:");
-    ImGui::SameLine();
-    ImGui::RadioButton("All", &m_activeScorecardFilter, 0);
-    ImGui::SameLine();
-    ImGui::RadioButton("Compute", &m_activeScorecardFilter, 1);
-    ImGui::SameLine();
-    ImGui::RadioButton("Memory", &m_activeScorecardFilter, 2);
-    ImGui::SameLine();
-    ImGui::RadioButton("Ray Tracing", &m_activeScorecardFilter, 3);
-    ImGui::SameLine();
-    ImGui::RadioButton("Graphics", &m_activeScorecardFilter, 4);
-    ImGui::SameLine();
-    ImGui::RadioButton("Host System", &m_activeScorecardFilter, 5);
-
-    // Device Filter & Unsupported toggle (dynamically populated from actual devices)
-    float devTextW = ImGui::CalcTextSize("Device:").x;
-    float allDevW = ImGui::GetFrameHeight() + ImGui::GetStyle().ItemInnerSpacing.x + ImGui::CalcTextSize("All Devices").x;
-    float totalDevBlockW = devTextW + allDevW;
-    for (const auto& dev : m_devices) {
-        std::string label = dev.isSystem ? "Host CPU" : ("GPU " + std::to_string(dev.deviceIndex));
-        totalDevBlockW += ImGui::GetFrameHeight() + ImGui::GetStyle().ItemInnerSpacing.x + ImGui::CalcTextSize(label.c_str()).x;
-    }
-    float unsuppW = ImGui::GetFrameHeight() + ImGui::GetStyle().ItemInnerSpacing.x + ImGui::CalcTextSize("Hide Unsupported").x;
-    totalDevBlockW += unsuppW + ImGui::GetStyle().ItemSpacing.x * (m_devices.size() + 3);
-
-    ImGui::SameLine();
-    float availDev = ImGui::GetContentRegionAvail().x;
-    if (availDev >= totalDevBlockW + s(20.0f)) {
-        ImGui::TextDisabled("|");
-        ImGui::SameLine(0, s(12.0f));
-    } else {
-        ImGui::NewLine();
-    }
-
-    ImGui::Text("Device:");
-    ImGui::SameLine();
-    ImGui::RadioButton("All Devices", &m_activeDeviceScorecardFilter, -1);
-    for (const auto& dev : m_devices) {
-        ImGui::SameLine();
-        if (dev.isSystem) {
-            ImGui::RadioButton("Host CPU", &m_activeDeviceScorecardFilter, -2);
-        } else {
-            std::string label = "GPU " + std::to_string(dev.deviceIndex);
-            ImGui::RadioButton(label.c_str(), &m_activeDeviceScorecardFilter, static_cast<int>(dev.deviceIndex));
-        }
-    }
-
-    ImGui::SameLine();
-    ImGui::PushStyleColor(ImGuiCol_Text, m_hideUnsupported ? ImVec4(0.70f, 0.80f, 0.95f, 1.0f) : ImVec4(0.95f, 0.70f, 0.25f, 1.0f));
-    ImGui::Checkbox("Hide Unsupported##scorecard", &m_hideUnsupported);
-    ImGui::PopStyleColor();
-    if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("Hide tests with UNSUPPORTED status from results table (default: hidden)");
-    }
-
-    // Scenario Filter for Ray Tracing
-    ImGui::Text("Scenario:");
-    ImGui::SameLine();
-    ImGui::RadioButton("All Scenarios", &m_scorecardSceneFilter, 0);
-    ImGui::SameLine();
-    ImGui::RadioButton("Indoor (Sponza)", &m_scorecardSceneFilter, 1);
-    ImGui::SameLine();
-    ImGui::RadioButton("Forest", &m_scorecardSceneFilter, 2);
-    ImGui::SameLine();
-    ImGui::RadioButton("Landscape", &m_scorecardSceneFilter, 3);
-    ImGui::SameLine();
-    ImGui::RadioButton("Showroom", &m_scorecardSceneFilter, 4);
-
-    ImGui::Spacing();
-
-    const ImGuiTableFlags flags = ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
-                                  ImGuiTableFlags_Resizable | ImGuiTableFlags_Sortable |
-                                  ImGuiTableFlags_ScrollY | ImGuiTableFlags_ScrollX;
-
-    if (ImGui::BeginTable("ResultsTable", 9, flags, ImVec2(0, -1))) {
-        ImGui::TableSetupColumn("Status", ImGuiTableColumnFlags_WidthFixed, s(85.0f));
-        ImGui::TableSetupColumn("Device", ImGuiTableColumnFlags_WidthFixed, s(90.0f));
-        ImGui::TableSetupColumn("Backend", ImGuiTableColumnFlags_WidthFixed, s(85.0f));
-        ImGui::TableSetupColumn("Component", ImGuiTableColumnFlags_WidthFixed, s(100.0f));
-        ImGui::TableSetupColumn("Benchmark", ImGuiTableColumnFlags_WidthStretch, s(380.0f));
-        ImGui::TableSetupColumn("Metric", ImGuiTableColumnFlags_WidthFixed, s(95.0f));
-        ImGui::TableSetupColumn("Score / Throughput", ImGuiTableColumnFlags_WidthFixed, s(140.0f));
-        ImGui::TableSetupColumn("Speedup / Delta", ImGuiTableColumnFlags_WidthFixed, s(155.0f));
-        ImGui::TableSetupColumn("Time (ms)", ImGuiTableColumnFlags_WidthFixed, s(75.0f));
-        ImGui::TableHeadersRow();
-
-        std::vector<const ResultData*> sortedResults;
-        sortedResults.reserve(m_allResults.size());
-        for (const auto& r : m_allResults) {
-            sortedResults.push_back(&r);
-        }
-
-        if (ImGuiTableSortSpecs* sorts_specs = ImGui::TableGetSortSpecs()) {
-            if (sorts_specs->SpecsDirty) {
-                sorts_specs->SpecsDirty = false;
-            }
-            if (sorts_specs->SpecsCount > 0) {
-                const ImGuiTableColumnSortSpecs& sortSpec = sorts_specs->Specs[0];
-                const bool asc = (sortSpec.SortDirection == ImGuiSortDirection_Ascending);
-                auto statusRank = [](const ResultData& r) -> int {
-                    if (r.isUnsupported) return 3;
-                    if (r.time_ms == -3.0) return 2;
-                    if (r.time_ms < 0.0) return 1;
-                    return 0;
-                };
-                auto scoreValue = [](const ResultData& r) -> double {
-                    if (r.isUnsupported || r.time_ms <= 0.0 || r.operations == 0) return -1.0;
-                    if (r.metric.find("ns") != std::string::npos) {
-                        return (r.time_ms * 1e6) / static_cast<double>(r.operations);
-                    }
-                    if (r.metric == "us") {
-                        return (r.time_ms * 1000.0) / static_cast<double>(r.operations);
-                    }
-                    return (static_cast<double>(r.operations) / r.time_ms) * 1000.0;
-                };
-                std::stable_sort(sortedResults.begin(), sortedResults.end(),
-                    [&](const ResultData* a, const ResultData* b) {
-                        int cmp = 0;
-                        switch (sortSpec.ColumnIndex) {
-                            case 0: {
-                                int ra = statusRank(*a), rb = statusRank(*b);
-                                cmp = (ra < rb) ? -1 : (ra > rb ? 1 : 0);
-                                break;
-                            }
-                            case 1:
-                                cmp = (a->deviceIndex < b->deviceIndex) ? -1 : (a->deviceIndex > b->deviceIndex ? 1 : 0);
-                                break;
-                            case 2:
-                                cmp = a->backendName.compare(b->backendName);
-                                break;
-                            case 3:
-                                cmp = a->component.compare(b->component);
-                                break;
-                            case 4:
-                                cmp = a->benchmarkName.compare(b->benchmarkName);
-                                break;
-                            case 5:
-                                cmp = a->metric.compare(b->metric);
-                                break;
-                            case 6:
-                            case 7: {
-                                double sa = scoreValue(*a), sb = scoreValue(*b);
-                                cmp = (sa < sb) ? -1 : (sa > sb ? 1 : 0);
-                                break;
-                            }
-                            case 8:
-                                cmp = (a->time_ms < b->time_ms) ? -1 : (a->time_ms > b->time_ms ? 1 : 0);
-                                break;
-                            default:
-                                break;
-                        }
-                        return asc ? (cmp < 0) : (cmp > 0);
-                    });
-            }
-        }
-
-        for (const ResultData* resPtr : sortedResults) {
-            const auto& res = *resPtr;
-            // Apply category filter
-            if (m_activeScorecardFilter == 1 && res.component != "Compute") continue;
-            if (m_activeScorecardFilter == 2 && res.component != "Memory") continue;
-            if (m_activeScorecardFilter == 3 && res.component != "Ray Tracing") continue;
-            if (m_activeScorecardFilter == 4 && (res.component != "Graphics" && res.component != "Raster" && res.component != "Rasterization & ROP")) continue;
-            if (m_activeScorecardFilter == 5 && (res.component != "System" && res.component != "Host System" && res.component != "Host CPU System Memory")) continue;
-
-            // Apply device filter (only actual devices)
-            if (m_activeDeviceScorecardFilter >= 0 && res.deviceIndex != static_cast<uint32_t>(m_activeDeviceScorecardFilter)) continue;
-            if (m_activeDeviceScorecardFilter == -2 && res.deviceIndex != 0xFFFFFFFF) continue;
-
-            // Apply unsupported filter
-            if (m_hideUnsupported && res.isUnsupported) continue;
-
-            // Apply scenario filter for Ray Tracing
-            if (m_scorecardSceneFilter > 0 && res.component == "Ray Tracing" && res.benchmarkName.find("RayScheduling") != std::string::npos) {
-                std::string sName = extractSceneName(res.benchmarkName);
-                if (m_scorecardSceneFilter == 1 && sName.find("Indoor") == std::string::npos) continue;
-                if (m_scorecardSceneFilter == 2 && sName.find("Forest") == std::string::npos) continue;
-                if (m_scorecardSceneFilter == 3 && sName.find("Outdoor") == std::string::npos) continue;
-                if (m_scorecardSceneFilter == 4 && sName.find("Showroom") == std::string::npos) continue;
-            }
-
-            ImGui::TableNextRow();
-
-            // 1. Status
-            ImGui::TableNextColumn();
-            if (res.isUnsupported) {
-                ImGui::TextColored(ImVec4(0.85f, 0.55f, 0.15f, 1.0f), "UNSUPPORTED");
-            } else if (res.time_ms == -3.0) {
-                ImGui::TextColored(ImVec4(0.95f, 0.70f, 0.25f, 1.0f), "ABORTED");
-            } else if (res.time_ms < 0.0) {
-                ImGui::TextColored(ImVec4(0.95f, 0.25f, 0.25f, 1.0f), "FAILED");
-            } else {
-                ImGui::TextColored(ImVec4(0.25f, 0.85f, 0.35f, 1.0f), "PASS");
-            }
-
-            // 2. Device
-            ImGui::TableNextColumn();
-            if (res.deviceIndex == 0xFFFFFFFF) {
-                ImGui::Text("Host CPU");
-            } else {
-                ImGui::Text("GPU %u", res.deviceIndex);
-            }
-
-            // 3. Backend
-            ImGui::TableNextColumn();
-            ImGui::Text("%s", res.backendName.c_str());
-
-            // 4. Component
-            ImGui::TableNextColumn();
-            ImGui::Text("%s", res.component.c_str());
-
-            // 5. Benchmark
-            ImGui::TableNextColumn();
-            ImGui::Text("%s", res.benchmarkName.c_str());
-            if (ImGui::IsItemHovered() || ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
-                // Match the suite item by engine id + config index (the result's
-                // benchmarkName is "<id> (<config name>)" for multi-config benches)
-                const BenchmarkItem* match = nullptr;
-                {
-                    std::string baseName = res.benchmarkName;
-                    size_t p = baseName.find(" (");
-                    if (p != std::string::npos) baseName = baseName.substr(0, p);
-                    for (const auto& cat : m_categories) {
-                        for (const auto& sub : cat.subgroups) {
-                            for (const auto& itm : sub.items) {
-                                if (itm.id == baseName &&
-                                    static_cast<uint32_t>(itm.configIndex) == res.configIndex) {
-                                    match = &itm;
-                                    break;
-                                }
-                            }
-                            if (match) break;
-                        }
-                        if (match) break;
-                    }
-                }
-                if (match) {
-                    if (ImGui::IsItemClicked(ImGuiMouseButton_Right) && match->viz.linkedViewportMode >= 0) {
-                        m_rtViewportMode = match->viz.linkedViewportMode;
-                        if (match->viz.linkedViewportMode == 1) m_rtPassIndex = match->viz.linkedViewportSubIndex;
-                        else if (match->viz.linkedViewportMode == 2) m_rtMaterialIndex = match->viz.linkedViewportSubIndex;
-                        else if (match->viz.linkedViewportMode == 3) m_rtGeometryIndex = match->viz.linkedViewportSubIndex;
-                        m_switchToRtViewport = true;
-                    } else if (ImGui::IsItemHovered()) {
-                        std::string scn = "";
-                        std::string sName = extractSceneName(res.benchmarkName);
-                        if (sName.find("Indoor") != std::string::npos) scn = "indoor";
-                        else if (sName.find("Forest") != std::string::npos) scn = "forest";
-                        else if (sName.find("Outdoor") != std::string::npos) scn = "outdoor";
-                        else if (sName.find("Showroom") != std::string::npos) scn = "showroom";
-                        renderBenchmarkTooltip(*match, scn);
-                    }
-                }
-            }
-
-            // 6. Metric
-            ImGui::TableNextColumn();
-            ImGui::Text("%s", res.metric.c_str());
-
-            // 7. Score
-            ImGui::TableNextColumn();
-            pushMonoFont();
-            double curOpsPerSec = 0.0;
-            if (res.time_ms > 0.0 && res.operations > 0) {
-                curOpsPerSec = (static_cast<double>(res.operations) / res.time_ms) * 1000.0;
-                if (res.metric.find("TFLOPS") != std::string::npos || res.metric.find("TOPS") != std::string::npos) {
-                    ImGui::Text("%.2f %s", curOpsPerSec / 1e12, res.metric.c_str());
-                } else if (res.metric.find("TB/s") != std::string::npos) {
-                    ImGui::Text("%.2f TB/s", curOpsPerSec / 1e12);
-                } else if (res.metric.find("GB/s") != std::string::npos) {
-                    ImGui::Text("%.2f GB/s", curOpsPerSec / 1e9);
-                } else if (res.metric.find("GIS/s") != std::string::npos) {
-                    ImGui::Text("%.2f GIS/s", curOpsPerSec / 1e9);
-                } else if (res.metric.find("MRays/s") != std::string::npos || res.metric.find("MItems/s") != std::string::npos || res.metric.find("MHits/s") != std::string::npos || res.metric.find("MRecords/s") != std::string::npos) {
-                    ImGui::Text("%.2f %s", curOpsPerSec / 1e6, res.metric.c_str());
-                } else if (res.metric.find("GPixels/s") != std::string::npos) {
-                    ImGui::Text("%.2f GPixels/s", curOpsPerSec / 1e9);
-                } else if (res.metric.find("MTris/s") != std::string::npos) {
-                    ImGui::Text("%.2f MTris/s", curOpsPerSec / 1e6);
-                } else if (res.metric.find("MBVH/s") != std::string::npos) {
-                    ImGui::Text("%.2f MBVH/s", curOpsPerSec / 1e6);
-                } else if (res.metric.find("MInst/s") != std::string::npos) {
-                    ImGui::Text("%.2f MInst/s", curOpsPerSec / 1e6);
-                } else if (res.metric.find("ns") != std::string::npos) {
-                    double nsVal = (res.operations > 0) ? ((res.time_ms * 1e6) / res.operations) : res.time_ms;
-                    ImGui::Text("%.2f ns", nsVal);
-                } else if (res.metric == "us") {
-                    double usVal = (res.operations > 0) ? ((res.time_ms * 1000.0) / res.operations) : res.time_ms;
-                    ImGui::Text("%.2f us", usVal);
-                } else {
-                    ImGui::Text("%.2f %s", curOpsPerSec, res.metric.c_str());
-                }
-            } else if (res.isUnsupported && !res.supportNote.empty()) {
-                ImGui::TextDisabled("%s", res.supportNote.c_str());
-            } else if (res.time_ms == -3.0) {
-                ImGui::TextColored(ImVec4(0.95f, 0.70f, 0.25f, 1.0f), "ABORTED");
-            } else if (res.time_ms < 0.0) {
-                ImGui::TextColored(ImVec4(0.95f, 0.30f, 0.30f, 1.0f), "FAILED");
-            } else {
-                ImGui::TextDisabled("-");
-            }
-            popMonoFont();
-
-            // 8. Speedup / Delta (Parity with console output)
-            ImGui::TableNextColumn();
-            pushMonoFont();
-            std::string deltaStr = "-";
-            ImVec4 deltaCol = ImVec4(0.60f, 0.65f, 0.75f, 0.70f);
-
-            if (res.isUnsupported) {
-                deltaStr = "-";
-            } else if (res.time_ms == -3.0) {
-                deltaStr = !res.errorString.empty() ? ("[" + res.errorString + "]") : "[Aborted: GPU Lost]";
-                deltaCol = ImVec4(0.95f, 0.70f, 0.25f, 1.0f);
-            } else if (res.time_ms < 0.0) {
-                deltaStr = !res.errorString.empty() ? ("[" + res.errorString + "]") : "[Failed]";
-                deltaCol = ImVec4(0.95f, 0.30f, 0.30f, 1.0f);
-            } else if (res.component == "Compute") {
-                if (res.subcategory == "Dual-Issue" || res.subcategory == "ILP & Concurrency") {
-                    if (res.configIndex == 0 || res.configIndex == 3) {
-                        deltaStr = "[Baseline]";
-                        deltaCol = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
-                    } else if (res.configIndex == 6) {
-                        // Harmonic mean of Config 0 (FP32 Baseline) and Config 3 (INT32 Baseline)
-                        double baseFP32 = 0.0;
-                        double baseINT32 = 0.0;
-                        for (const auto& other : m_allResults) {
-                            if (other.deviceIndex == res.deviceIndex && other.backendName == res.backendName &&
-                                (other.subcategory == "Dual-Issue" || other.subcategory == "ILP & Concurrency") && other.time_ms > 0.0) {
-                                if (other.configIndex == 0 || other.benchmarkName.find("Standard FP32") != std::string::npos || other.benchmarkName.find("FP32 Baseline") != std::string::npos) {
-                                    baseFP32 = (static_cast<double>(other.operations) / other.time_ms) * 1000.0;
-                                } else if (other.configIndex == 3 || other.benchmarkName.find("Standard INT32") != std::string::npos || other.benchmarkName.find("INT32 Baseline") != std::string::npos) {
-                                    baseINT32 = (static_cast<double>(other.operations) / other.time_ms) * 1000.0;
-                                }
-                            }
-                        }
-                        if (baseFP32 > 0.0 && baseINT32 > 0.0) {
-                            double baseOps = 3.0 / ((2.0 / baseFP32) + (1.0 / baseINT32));
-                            double ratio = curOpsPerSec / baseOps;
-                            double pct = (ratio - 1.0) * 100.0;
-                            char dBuf[48];
-                            if (std::abs(pct) >= 0.1) {
-                                snprintf(dBuf, sizeof(dBuf), "%.2fx (%s%.1f%%)", ratio, (pct >= 0 ? "+" : ""), pct);
-                            } else {
-                                snprintf(dBuf, sizeof(dBuf), "%.2fx", ratio);
-                            }
-                            deltaStr = dBuf;
-                            deltaCol = (ratio >= 1.0) ? ImVec4(0.30f, 0.92f, 0.85f, 1.0f) : ImVec4(0.92f, 0.65f, 0.35f, 1.0f);
-                        }
-                    } else {
-                        uint32_t targetBaseConfig = (res.configIndex >= 3) ? 3 : 0;
-                        double baseOps = 0.0;
-                        for (const auto& other : m_allResults) {
-                            if (other.deviceIndex == res.deviceIndex && other.backendName == res.backendName &&
-                                (other.subcategory == "Dual-Issue" || other.subcategory == "ILP & Concurrency") &&
-                                other.configIndex == targetBaseConfig && other.time_ms > 0.0) {
-                                baseOps = (static_cast<double>(other.operations) / other.time_ms) * 1000.0;
-                                break;
-                            }
-                        }
-                        if (baseOps > 0.0) {
-                            double ratio = curOpsPerSec / baseOps;
-                            double pct = (ratio - 1.0) * 100.0;
-                            char dBuf[48];
-                            if (std::abs(pct) >= 0.1) {
-                                snprintf(dBuf, sizeof(dBuf), "%.2fx (%s%.1f%%)", ratio, (pct >= 0 ? "+" : ""), pct);
-                            } else {
-                                snprintf(dBuf, sizeof(dBuf), "%.2fx", ratio);
-                            }
-                            deltaStr = dBuf;
-                            deltaCol = (ratio >= 1.0) ? ImVec4(0.30f, 0.92f, 0.85f, 1.0f) : ImVec4(0.92f, 0.65f, 0.35f, 1.0f);
-                        }
-                    }
-                } else if (res.subcategory == "LDS Bank Conflicts") {
-                    if (res.configIndex == 0) {
-                        deltaStr = "[Baseline]";
-                        deltaCol = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
-                    } else {
-                        double baseOps = 0.0;
-                        for (const auto& other : m_allResults) {
-                            if (other.deviceIndex == res.deviceIndex && other.backendName == res.backendName &&
-                                other.subcategory == "LDS Bank Conflicts" && other.configIndex == 0 && other.time_ms > 0.0) {
-                                baseOps = (static_cast<double>(other.operations) / other.time_ms) * 1000.0;
-                                break;
-                            }
-                        }
-                        if (baseOps > 0.0) {
-                            double ratio = curOpsPerSec / baseOps;
-                            double pct = (ratio - 1.0) * 100.0;
-                            char dBuf[48];
-                            if (std::abs(pct) >= 0.1) {
-                                snprintf(dBuf, sizeof(dBuf), "%.2fx (%s%.1f%%)", ratio, (pct >= 0 ? "+" : ""), pct);
-                            } else {
-                                snprintf(dBuf, sizeof(dBuf), "%.2fx", ratio);
-                            }
-                            deltaStr = dBuf;
-                            deltaCol = (ratio >= 1.0) ? ImVec4(0.30f, 0.92f, 0.85f, 1.0f) : ImVec4(0.92f, 0.65f, 0.35f, 1.0f);
-                        }
-                    }
-                } else if (res.subcategory == "Indirect Command Synthesis") {
-                    if (res.configIndex == 0) {
-                        deltaStr = "[Baseline]";
-                        deltaCol = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
-                    } else {
-                        double baseOps = 0.0;
-                        for (const auto& other : m_allResults) {
-                            if (other.deviceIndex == res.deviceIndex && other.backendName == res.backendName &&
-                                other.subcategory == "Indirect Command Synthesis" && other.configIndex == 0 && other.time_ms > 0.0) {
-                                baseOps = (static_cast<double>(other.operations) / other.time_ms) * 1000.0;
-                                break;
-                            }
-                        }
-                        if (baseOps > 0.0) {
-                            double ratio = curOpsPerSec / baseOps;
-                            double pct = (ratio - 1.0) * 100.0;
-                            char dBuf[48];
-                            if (std::abs(pct) >= 0.1) {
-                                snprintf(dBuf, sizeof(dBuf), "%.2fx (%s%.1f%%)", ratio, (pct >= 0 ? "+" : ""), pct);
-                            } else {
-                                snprintf(dBuf, sizeof(dBuf), "%.2fx", ratio);
-                            }
-                            deltaStr = dBuf;
-                            deltaCol = (ratio >= 1.0) ? ImVec4(0.30f, 0.92f, 0.85f, 1.0f) : ImVec4(0.92f, 0.65f, 0.35f, 1.0f);
-                        }
-                    }
-                } else {
-                    // Compute Precision: Vector is the baseline for Matrix within the SAME precision.
-                    // Standalone precisions (FP64, FP32, FP4) do not compare against unrelated datatypes.
-                    bool isVector = (res.benchmarkName.find("Vector") != std::string::npos);
-                    bool isMatrix = (res.benchmarkName.find("Matrix") != std::string::npos);
-                    if (isVector && (res.subcategory == "FP16" || res.subcategory == "BF16" || res.subcategory == "FP8" ||
-                                     res.subcategory == "INT8" || res.subcategory == "INT4")) {
-                        deltaStr = "[Baseline]";
-                        deltaCol = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
-                    } else if (isMatrix && res.time_ms > 0.0 && curOpsPerSec > 0.0) {
-                        double baseOps = 0.0;
-                        for (const auto& other : m_allResults) {
-                            if (other.deviceIndex == res.deviceIndex && other.backendName == res.backendName &&
-                                other.subcategory == res.subcategory &&
-                                other.benchmarkName.find("Vector") != std::string::npos && other.time_ms > 0.0) {
-                                baseOps = (static_cast<double>(other.operations) / other.time_ms) * 1000.0;
-                                break;
-                            }
-                        }
-                        if (baseOps > 0.0) {
-                            double ratio = curOpsPerSec / baseOps;
-                            double pct = (ratio - 1.0) * 100.0;
-                            char dBuf[48];
-                            if (std::abs(pct) >= 0.1) {
-                                snprintf(dBuf, sizeof(dBuf), "%.2fx (%s%.1f%%)", ratio, (pct >= 0 ? "+" : ""), pct);
-                            } else {
-                                snprintf(dBuf, sizeof(dBuf), "%.2fx", ratio);
-                            }
-                            deltaStr = dBuf;
-                            deltaCol = (ratio >= 1.0) ? ImVec4(0.30f, 0.92f, 0.85f, 1.0f) : ImVec4(0.92f, 0.65f, 0.35f, 1.0f);
-                        }
-                    } else {
-                        deltaStr = "-";
-                    }
-                }
-            } else if (res.component == "Ray Tracing") {
-                if (res.benchmarkName.find("RayRawTraversal") != std::string::npos) {
-                    double time_s = res.time_ms / 1000.0;
-                    const auto &prof = DeviceDatabase::lookup(res.vendorId, res.deviceId, res.deviceName);
-                    double peakGis = (res.configIndex == 0) ? prof.theoreticalTriangleGis : prof.theoreticalBoxGis;
-                    if (res.configIndex == 0) {
-                        double gis_s = (time_s > 0.0) ? ((static_cast<double>(res.operations) / time_s) / 1e9) : 0.0;
-                        double pct = (peakGis > 0.0) ? ((gis_s / peakGis) * 100.0) : 0.0;
-                        char dBuf[64];
-                        if (peakGis > 0.0) {
-                            snprintf(dBuf, sizeof(dBuf), "%.1f%% of Peak (%s)", pct, prof.archName.c_str());
-                        } else {
-                            snprintf(dBuf, sizeof(dBuf), "%.1f GIS/s", gis_s);
-                        }
-                        deltaStr = dBuf;
-                        deltaCol = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
-                    } else {
-                        uint64_t boxOps = res.operations * 64;
-                        double box_gis_s = (time_s > 0.0) ? ((static_cast<double>(boxOps) / time_s) / 1e9) : 0.0;
-                        double pct = (peakGis > 0.0) ? ((box_gis_s / peakGis) * 100.0) : 0.0;
-                        char dBuf[64];
-                        if (peakGis > 0.0) {
-                            snprintf(dBuf, sizeof(dBuf), "%.1f%% of Peak (%s)", pct, prof.archName.c_str());
-                        } else {
-                            snprintf(dBuf, sizeof(dBuf), "%.1f GIS/s", box_gis_s);
-                        }
-                        deltaStr = dBuf;
-                        deltaCol = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
-                    }
-                } else if (res.benchmarkName.find("Megakernel") != std::string::npos ||
-                           res.benchmarkName.find("Traditional") != std::string::npos ||
-                           res.benchmarkName.find("Scanline (Baseline)") != std::string::npos ||
-                           res.benchmarkName.find("Scanline") != std::string::npos ||
-                           res.benchmarkName.find("Single-Pass") != std::string::npos ||
-                           (res.subcategory == "Wavefront Stream Compaction" && res.configIndex == 26) ||
-                           (res.benchmarkName.find("RayDivergence") != std::string::npos && res.configIndex == 0) ||
-                           (res.benchmarkName.find("RayPayload") != std::string::npos && res.configIndex == 0) ||
-                           (res.benchmarkName.find("RayAnyHit") != std::string::npos && res.configIndex == 0)) {
-                    deltaStr = "[Baseline]";
-                    deltaCol = ImVec4(0.38f, 0.75f, 1.00f, 0.95f);
-                } else if (res.time_ms > 0.0 && curOpsPerSec > 0.0) {
-                    double baseOps = 0.0;
-                    if (res.benchmarkName.find("RayDivergence") != std::string::npos) {
-                        for (const auto& other : m_allResults) {
-                            if (other.deviceIndex == res.deviceIndex && other.benchmarkName.find("RayDivergence") != std::string::npos &&
-                                other.configIndex == 0 && other.time_ms > 0.0) {
-                                baseOps = (static_cast<double>(other.operations) / other.time_ms) * 1000.0;
-                                break;
-                            }
-                        }
-                    } else if (res.benchmarkName.find("RayPayload") != std::string::npos) {
-                        for (const auto& other : m_allResults) {
-                            if (other.deviceIndex == res.deviceIndex && other.benchmarkName.find("RayPayload") != std::string::npos &&
-                                other.configIndex == 0 && other.time_ms > 0.0) {
-                                baseOps = (static_cast<double>(other.operations) / other.time_ms) * 1000.0;
-                                break;
-                            }
-                        }
-                    } else if (res.benchmarkName.find("RayAnyHit") != std::string::npos) {
-                        for (const auto& other : m_allResults) {
-                            if (other.deviceIndex == res.deviceIndex && other.benchmarkName.find("RayAnyHit") != std::string::npos &&
-                                other.configIndex == 0 && other.time_ms > 0.0) {
-                                baseOps = (static_cast<double>(other.operations) / other.time_ms) * 1000.0;
-                                break;
-                            }
-                        }
-                    } else {
-                        // RayScheduling and general Ray Tracing
-                        std::string resScene = extractSceneName(res.benchmarkName);
-                        if (res.baselineConfigIndex >= 0) {
-                            for (const auto& other : m_allResults) {
-                                if (other.deviceIndex == res.deviceIndex && other.component == "Ray Tracing" &&
-                                    other.subcategory == res.subcategory &&
-                                    other.configIndex == static_cast<uint32_t>(res.baselineConfigIndex) &&
-                                    other.time_ms > 0.0 && other.metric == res.metric) {
-                                    std::string otherScene = extractSceneName(other.benchmarkName);
-                                    if (!resScene.empty() && !otherScene.empty() && resScene != otherScene) {
-                                        continue;
-                                    }
-                                    baseOps = (static_cast<double>(other.operations) / other.time_ms) * 1000.0;
-                                    break;
-                                }
-                            }
-                        }
-                        if (baseOps == 0.0) {
-                            bool resIs128 = (res.benchmarkName.find("128") != std::string::npos || res.configIndex == 33 || res.configIndex == 34);
-                            for (const auto& other : m_allResults) {
-                                if (other.deviceIndex == res.deviceIndex && other.component == "Ray Tracing" &&
-                                    other.subcategory == res.subcategory &&
-                                    (other.benchmarkName.find("Megakernel") != std::string::npos || other.benchmarkName.find("Baseline") != std::string::npos ||
-                                     other.benchmarkName.find("Scanline") != std::string::npos || other.benchmarkName.find("Single-Pass") != std::string::npos) &&
-                                    other.benchmarkName.find("RTP") == std::string::npos && other.benchmarkName.find("DGC") == std::string::npos &&
-                                    other.time_ms > 0.0 && other.metric == res.metric) {
-                                    std::string otherScene = extractSceneName(other.benchmarkName);
-                                    if (!resScene.empty() && !otherScene.empty() && resScene != otherScene) {
-                                        continue;
-                                    }
-                                    if (res.subcategory == "Multi-Light Evaluation") {
-                                        bool otherIs128 = (other.benchmarkName.find("128") != std::string::npos || other.configIndex == 33 || other.configIndex == 34);
-                                        if (resIs128 != otherIs128) continue;
-                                    }
-                                    baseOps = (static_cast<double>(other.operations) / other.time_ms) * 1000.0;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-
-                    if (baseOps > 0.0) {
-                        double ratio = curOpsPerSec / baseOps;
-                        double pct = (ratio - 1.0) * 100.0;
-                        char dBuf[48];
-                        if (std::abs(pct) >= 0.1) {
-                            snprintf(dBuf, sizeof(dBuf), "%.2fx (%s%.1f%%)", ratio, (pct >= 0 ? "+" : ""), pct);
-                        } else {
-                            snprintf(dBuf, sizeof(dBuf), "%.2fx", ratio);
-                        }
-                        deltaStr = dBuf;
-                        deltaCol = (ratio >= 1.0) ? ImVec4(0.30f, 0.92f, 0.85f, 1.0f) : ImVec4(0.92f, 0.65f, 0.35f, 1.0f);
-                    }
-                }
-            }
-
-            ImGui::TextColored(deltaCol, "%s", deltaStr.c_str());
-            popMonoFont();
-
-            // 9. Time
-            ImGui::TableNextColumn();
-            pushMonoFont();
-            if (res.time_ms > 0.0) {
-                ImGui::Text("%.1f", res.time_ms);
-            } else {
-                ImGui::TextDisabled("-");
-            }
-            popMonoFont();
-        }
-
-        ImGui::EndTable();
-    }
-}
-
-void GuiApp::renderRayTracingViewport() {
-    ImGui::Spacing();
-
-    auto resolveDataFilePath = [](const std::string& relPath) -> std::string {
-        std::vector<std::string> writableCandidates;
-#ifdef _WIN32
-        if (const char* localAppData = std::getenv("LOCALAPPDATA")) {
-            writableCandidates.push_back((std::filesystem::path(localAppData) / "gpubench" / relPath).string());
-        }
-#else
-        if (const char* xdgCache = std::getenv("XDG_CACHE_HOME")) {
-            if (xdgCache[0] != '\0') {
-                writableCandidates.push_back((std::filesystem::path(xdgCache) / "gpubench" / relPath).string());
-            }
-        }
-        if (const char* home = std::getenv("HOME")) {
-            if (home[0] != '\0') {
-                writableCandidates.push_back((std::filesystem::path(home) / ".cache" / "gpubench" / relPath).string());
-            }
-        }
-#endif
-        writableCandidates.push_back(relPath);
-        writableCandidates.push_back("../" + relPath);
-        writableCandidates.push_back("../../" + relPath);
-
-        std::error_code ec;
-        std::string newestPath;
-        std::filesystem::file_time_type newestTime{};
-        bool foundWritable = false;
-        for (const auto& c : writableCandidates) {
-            if (std::filesystem::exists(c, ec) && !ec) {
-                auto ftime = std::filesystem::last_write_time(c, ec);
-                if (!ec && (!foundWritable || ftime > newestTime)) {
-                    newestTime = ftime;
-                    newestPath = c;
-                    foundWritable = true;
-                } else if (!foundWritable) {
-                    newestPath = c;
-                    foundWritable = true;
-                }
-            }
-        }
-        if (foundWritable) {
-            return newestPath;
-        }
-
-        std::vector<std::string> systemCandidates = {
-            "share/gpubench/" + relPath,
-            "../share/gpubench/" + relPath,
-            "/usr/share/gpubench/" + relPath,
-            "/usr/local/share/gpubench/" + relPath
-        };
-        if (const char* basePath = SDL_GetBasePath()) {
-            std::filesystem::path exeDir(basePath);
-            systemCandidates.push_back((exeDir / relPath).string());
-            systemCandidates.push_back((exeDir / ".." / relPath).string());
-            systemCandidates.push_back((exeDir / ".." / "share" / "gpubench" / relPath).string());
-            systemCandidates.push_back((exeDir / "share" / "gpubench" / relPath).string());
-        }
-        for (const auto& c : systemCandidates) {
-            if (std::filesystem::exists(c, ec) && !ec) {
-                return c;
-            }
-        }
-        return relPath;
-    };
-
-    auto parseJsonNumberAfterKey = [](const std::string& line, const char* key, double& outVal) -> bool {
-        size_t kp = line.find(key);
-        if (kp == std::string::npos) return false;
-        size_t col = line.find(':', kp);
-        if (col == std::string::npos) return false;
-        try {
-            std::string numStr = line.substr(col + 1);
-            size_t comma = numStr.find(',');
-            if (comma != std::string::npos) numStr = numStr.substr(0, comma);
-            size_t brace = numStr.find('}');
-            if (brace != std::string::npos) numStr = numStr.substr(0, brace);
-            outVal = std::stod(numStr);
-            return true;
-        } catch (...) {
-            return false;
-        }
-    };
-
-    auto parseJsonStringAfterKey = [](const std::string& line, const char* key, std::string& outStr) -> bool {
-        size_t kp = line.find(key);
-        if (kp == std::string::npos) return false;
-        size_t col = line.find(':', kp);
-        if (col == std::string::npos) return false;
-        size_t q1 = line.find('"', col + 1);
-        if (q1 == std::string::npos) return false;
-        size_t q2 = line.find('"', q1 + 1);
-        if (q2 == std::string::npos) return false;
-        outStr = line.substr(q1 + 1, q2 - q1 - 1);
-        return true;
-    };
-
-    // Scene & Viewport Navigation Header
-    struct SceneMetadata {
-        const char* displayName;
-        const char* tag;
-        const char* modelName;
-        const char* triangleCount;
-        const char* vertexCount;
-        const char* vertexStride;
-        const char* blasFootprint;
-        const char* description;
-        const char* details;
-    };
-
-    static const SceneMetadata scenes[] = {
-        {
-            "Showroom Studio (toycar.glb)",
-            "showroom",
-            "assets/models/toycar.glb",
-            "108,936 Triangles",
-            "59,645 Vertices",
-            "48 Bytes (GltfVertex: 3x vec4)",
-            "8.4 MB (BLAS) | 64 KB (TLAS)",
-            "Studio turntable showcase with multi-BSDF automotive car paint, clearcoat flakes, dispersive glass, rubber tires, and alloy wheels.",
-            "Multi-BSDF Car Paint, Clearcoat Flakes, Dispersive Glass & Alloy Wheels"
-        },
-        {
-            "Indoor Atrium (sponza.glb)",
-            "indoor",
-            "assets/models/sponza.glb",
-            "262,267 Triangles",
-            "145,163 Vertices",
-            "48 Bytes (GltfVertex: 3x vec4)",
-            "19.8 MB (BLAS) | 64 KB (TLAS)",
-            "Classic architectural global illumination benchmark with multi-tiered arches, carved stone columns, lion reliefs, and alpha cutout tapestry.",
-            "Multi-Tiered Arches, Carved Stone Columns & Alpha Cutout Tapestry"
-        },
-        {
-            "Open-World Forest (AAAOutdoorForest)",
-            "forest",
-            "Procedural Nature Heightfield",
-            "1,051,696 Triangles",
-            "3,155,088 Vertices",
-            "48 Bytes (Procedural Vertex)",
-            "78.5 MB (BLAS) | 64 KB (TLAS)",
-            "High-density AAA woodland with rolling terrain, 350 soaring multi-tiered pines, 180 birches, 3,500 sword ferns, 2,500 shrubs, 180 nurse logs, and 600 boulders.",
-            "High-Density AAA Woodland with Multi-Tiered Pines & Alpha-Tested Foliage"
-        },
-        {
-            "Outdoor Landscape (OutdoorLandscape)",
-            "outdoor",
-            "Procedural Alpine Terrain",
-            "46,016 Triangles",
-            "138,048 Vertices",
-            "48 Bytes (Procedural Vertex)",
-            "3.6 MB (BLAS) | 64 KB (TLAS)",
-            "Expansive alpine landscape featuring distant mountains, pine forests, reflective lake surface, and timber cabins.",
-            "Expansive Alpine Terrain, Reflective Lake Surface & Timber Cabins"
-        }
-    };
-    const size_t numScenes = sizeof(scenes) / sizeof(scenes[0]);
-    if (m_rtSceneIndex < 0 || static_cast<size_t>(m_rtSceneIndex) >= numScenes) {
-        m_rtSceneIndex = 0;
-    }
-    const auto& curSceneMeta = scenes[m_rtSceneIndex];
-
-    auto containsCi = [](const std::string& haystack, const std::string& needle) -> bool {
-        if (needle.empty()) return true;
-        auto it = std::search(haystack.begin(), haystack.end(), needle.begin(), needle.end(),
-            [](char c1, char c2) { return std::tolower(static_cast<unsigned char>(c1)) == std::tolower(static_cast<unsigned char>(c2)); });
-        return (it != haystack.end());
-    };
-
-    double scoreTrad = 0.0, scoreDgc = 0.0;
-    double timeTradMs = 0.0, timeDgcMs = 0.0;
-    uint32_t liveWidth = m_renderWidth > 0 ? m_renderWidth : 3840;
-    uint32_t liveHeight = m_renderHeight > 0 ? m_renderHeight : 2160;
-    const ResultData* bestTradRes = nullptr;
-    const ResultData* bestDgcRes = nullptr;
-
-    // Prefer matching full frame render (configs 9 & 11) or path tracing (configs 3 & 5)
-    for (int priorityPass = 0; priorityPass < 2; ++priorityPass) {
-        for (const auto& res : m_allResults) {
-            bool sceneMatches = containsCi(res.benchmarkName, curSceneMeta.displayName) ||
-                                containsCi(res.benchmarkName, curSceneMeta.tag) ||
-                                (std::string(curSceneMeta.tag) == "indoor" && containsCi(res.benchmarkName, "sponza")) ||
-                                containsCi(res.subcategory, curSceneMeta.displayName);
-            if (!sceneMatches) continue;
-
-            double rate = (res.time_ms > 0.0) ? (static_cast<double>(res.operations) / res.time_ms * 1000.0 / 1e6) : 0.0;
-
-            if (priorityPass == 0) {
-                if (res.configIndex == 9 || (res.configIndex == 3 && scoreTrad == 0.0)) {
-                    scoreTrad = rate;
-                    timeTradMs = res.time_ms;
-                    bestTradRes = &res;
-                } else if (res.configIndex == 11 || (res.configIndex == 5 && scoreDgc == 0.0)) {
-                    scoreDgc = rate;
-                    timeDgcMs = res.time_ms;
-                    bestDgcRes = &res;
-                }
-            } else {
-                if (scoreTrad == 0.0 && (containsCi(res.benchmarkName, "Megakernel") || containsCi(res.benchmarkName, "Traditional"))) {
-                    scoreTrad = rate;
-                    timeTradMs = res.time_ms;
-                    bestTradRes = &res;
-                }
-                if (scoreDgc == 0.0 && (containsCi(res.benchmarkName, "DGC") || containsCi(res.benchmarkName, "Work List"))) {
-                    scoreDgc = rate;
-                    timeDgcMs = res.time_ms;
-                    bestDgcRes = &res;
-                }
-            }
-        }
-        if (scoreTrad > 0.0 && scoreDgc > 0.0) break;
-    }
-
-    if (bestTradRes && bestTradRes->width > 0 && bestTradRes->height > 0) {
-        liveWidth = bestTradRes->width;
-        liveHeight = bestTradRes->height;
-    } else if (bestDgcRes && bestDgcRes->width > 0 && bestDgcRes->height > 0) {
-        liveWidth = bestDgcRes->width;
-        liveHeight = bestDgcRes->height;
-    }
-
-    // Parse pre-computed / cached profile JSON for this scene
-    bool parityMeasured = false;
-    bool parityPass = false;
-    std::string livePsnr = "--";
-    std::string liveMaxDelta = "--";
-    std::string profileResLabel = "3840x2160";
-    double profTradMrays = 0.0, profTradFps = 0.0, profTradMs = 0.0;
-    double profDgcMrays = 0.0, profDgcFps = 0.0, profDgcMs = 0.0;
-
-    std::string profilePath = resolveDataFilePath("renders/render_" + std::string(curSceneMeta.tag) + "_profile.json");
-    std::ifstream pf(profilePath);
-    if (pf.is_open()) {
-        std::string line;
-        int section = 0; // 0: root, 1: traditional, 2: worklist, 3: parity
-        while (std::getline(pf, line)) {
-            if (line.find("\"traditional\"") != std::string::npos) section = 1;
-            else if (line.find("\"worklist\"") != std::string::npos) section = 2;
-            else if (line.find("\"parity\"") != std::string::npos) section = 3;
-
-            std::string strVal;
-            if (parseJsonStringAfterKey(line, "\"resolution\"", strVal)) {
-                size_t spPos = strVal.find(' ');
-                profileResLabel = (spPos != std::string::npos) ? strVal.substr(0, spPos) : strVal;
-            }
-
-            double val = 0.0;
-            if (section == 1) {
-                if (parseJsonNumberAfterKey(line, "\"mrays\"", val)) profTradMrays = val;
-                else if (parseJsonNumberAfterKey(line, "\"fps\"", val)) profTradFps = val;
-                else if (parseJsonNumberAfterKey(line, "\"frame_ms\"", val)) profTradMs = val;
-            } else if (section == 2) {
-                if (parseJsonNumberAfterKey(line, "\"mrays\"", val)) profDgcMrays = val;
-                else if (parseJsonNumberAfterKey(line, "\"fps\"", val)) profDgcFps = val;
-                else if (parseJsonNumberAfterKey(line, "\"frame_ms\"", val)) profDgcMs = val;
-            } else if (section == 3) {
-                if (parseJsonNumberAfterKey(line, "\"psnr\"", val)) {
-                    char b[64];
-                    if (val >= 120.0) snprintf(b, sizeof(b), "%.1f dB (BIT-EXACT)", val);
-                    else snprintf(b, sizeof(b), "%.2f dB", val);
-                    livePsnr = b;
-                    parityMeasured = true;
-                    if (val >= 45.0) parityPass = true;
-                } else if (parseJsonNumberAfterKey(line, "\"diff_pct\"", val) || parseJsonNumberAfterKey(line, "\"mae\"", val)) {
-                    char b[64];
-                    snprintf(b, sizeof(b), "%.4f%%", val);
-                    liveMaxDelta = b;
-                }
-            }
-        }
-    }
-
-    std::string dynamicTechAScore = "--";
-    std::string dynamicTechBScore = "--";
-    std::string dynamicTechARegInfo = "";
-    std::string dynamicTechBRegInfo = "";
-    std::string dynamicSpeedup = "--";
-    bool isLiveSessionScore = false;
-
-    double primaryRaysM = static_cast<double>(liveWidth) * static_cast<double>(liveHeight) / 1e6;
-    if (scoreTrad > 0.0) {
-        char buf[96];
-        double estFps = (primaryRaysM > 0.0) ? (scoreTrad / primaryRaysM) : 0.0;
-        snprintf(buf, sizeof(buf), "%.2f MRays/s (%.1f FPS, %.2f ms)", scoreTrad, estFps, timeTradMs);
-        dynamicTechAScore = buf;
-        isLiveSessionScore = true;
-    } else if (profTradMrays > 0.0) {
-        char buf[96];
-        snprintf(buf, sizeof(buf), "%.2f MRays/s (%.1f FPS, %.2f ms)", profTradMrays, profTradFps, profTradMs);
-        dynamicTechAScore = buf;
-    }
-
-    if (scoreDgc > 0.0) {
-        char buf[96];
-        double estFps = (primaryRaysM > 0.0) ? (scoreDgc / primaryRaysM) : 0.0;
-        snprintf(buf, sizeof(buf), "%.2f MRays/s (%.1f FPS, %.2f ms)", scoreDgc, estFps, timeDgcMs);
-        dynamicTechBScore = buf;
-        isLiveSessionScore = true;
-    } else if (profDgcMrays > 0.0) {
-        char buf[96];
-        snprintf(buf, sizeof(buf), "%.2f MRays/s (%.1f FPS, %.2f ms)", profDgcMrays, profDgcFps, profDgcMs);
-        dynamicTechBScore = buf;
-    }
-
-    if (bestTradRes && bestTradRes->hasRegisterTelemetry) {
-        char buf[96];
-        snprintf(buf, sizeof(buf), "VGPRs: %u | Max Waves/SIMD: %u", bestTradRes->vgprCount, bestTradRes->maxWavesPerSimd);
-        dynamicTechARegInfo = buf;
-    }
-    if (bestDgcRes && bestDgcRes->hasRegisterTelemetry) {
-        char buf[96];
-        snprintf(buf, sizeof(buf), "VGPRs: %u | Max Waves/SIMD: %u", bestDgcRes->vgprCount, bestDgcRes->maxWavesPerSimd);
-        dynamicTechBRegInfo = buf;
-    }
-    if (scoreTrad > 0.0 && scoreDgc > 0.0) {
-        char buf[64];
-        double sp = scoreDgc / scoreTrad;
-        snprintf(buf, sizeof(buf), "%.2fx (+%.1f%%)", sp, (sp - 1.0) * 100.0);
-        dynamicSpeedup = buf;
-    } else if (profTradMrays > 0.0 && profDgcMrays > 0.0) {
-        char buf[64];
-        double sp = profDgcMrays / profTradMrays;
-        snprintf(buf, sizeof(buf), "%.2fx (+%.1f%%)", sp, (sp - 1.0) * 100.0);
-        dynamicSpeedup = buf;
-    }
-
-    // Parse per-stage breakdown JSON for Mode 1 (Pipeline Passes) and Mode 3 (BVH build time)
-    struct StageBreakdownMetrics {
-        double timeMs{0.0};
-        double mrays{0.0};
-        double fps{0.0};
-    };
-    std::unordered_map<std::string, StageBreakdownMetrics> stageMetricsMap;
-    double breakdownBvhBuildMs = 0.0;
-    std::string breakdownResLabel = profileResLabel;
-    {
-        std::string bdPath = resolveDataFilePath("renders/render_" + std::string(curSceneMeta.tag) + "_pipeline_breakdown.json");
-        std::ifstream bf(bdPath);
-        if (bf.is_open()) {
-            std::string line;
-            std::string curStageId;
-            while (std::getline(bf, line)) {
-                std::string sVal;
-                double dVal = 0.0;
-                if (parseJsonStringAfterKey(line, "\"resolution\"", sVal)) {
-                    breakdownResLabel = sVal;
-                } else if (parseJsonNumberAfterKey(line, "\"bvh_build_time_ms\"", dVal)) {
-                    breakdownBvhBuildMs = dVal;
-                } else if (parseJsonStringAfterKey(line, "\"id\"", sVal)) {
-                    curStageId = sVal;
-                } else if (!curStageId.empty()) {
-                    if (parseJsonNumberAfterKey(line, "\"time_ms\"", dVal)) {
-                        stageMetricsMap[curStageId].timeMs = dVal;
-                    } else if (parseJsonNumberAfterKey(line, "\"mrays\"", dVal)) {
-                        stageMetricsMap[curStageId].mrays = dVal;
-                    } else if (parseJsonNumberAfterKey(line, "\"fps\"", dVal)) {
-                        stageMetricsMap[curStageId].fps = dVal;
-                    }
-                }
-            }
-        }
-    }
-
-    // Top Controls Bar
-    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.10f, 0.12f, 0.16f, 1.0f));
-    ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, s(6.0f));
-    ImGui::BeginChild("RtToolbar", ImVec2(0, s(46.0f)), true, ImGuiWindowFlags_NoScrollbar);
-    
-    // Viewport Mode Buttons
-    const char* modes[] = { "Scenes & Parity", "Pipeline Passes", "PBR Materials", "Geometry & BVH" };
-    for (int i = 0; i < 4; ++i) {
-        if (i > 0) ImGui::SameLine(0, s(6.0f));
-        bool active = (m_rtViewportMode == i);
-        if (active) {
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.00f, 0.48f, 0.80f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
-        } else {
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.16f, 0.20f, 0.28f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.75f, 0.80f, 0.90f, 1.0f));
-        }
-        float modeBtnW = std::max(s(125.0f), ImGui::CalcTextSize(modes[i]).x + s(24.0f));
-        if (ImGui::Button(modes[i], ImVec2(modeBtnW, s(28.0f)))) {
-            m_rtViewportMode = i;
-        }
-        ImGui::PopStyleColor(2);
-    }
-
-    // Only display Scene selector in modes where scene selection changes the active view
-    if (m_rtViewportMode != 2) {
-        ImGui::SameLine(0, s(20.0f));
-        ImGui::TextDisabled("| Scene:");
-        ImGui::SameLine(0, s(8.0f));
-        const char* sceneComboNames[] = {
-            "Showroom Studio (toycar.glb)",
-            "Indoor Atrium (sponza.glb)",
-            "Open-World Forest (AAAOutdoorForest)",
-            "Outdoor Landscape (OutdoorLandscape)"
-        };
-        ImGui::SetNextItemWidth(s(280.0f));
-        ImGui::Combo("##scene_combo", &m_rtSceneIndex, sceneComboNames, 4);
-
-        ImGui::SameLine(0, s(16.0f));
-        float rerenderBtnW = std::max(s(190.0f), ImGui::CalcTextSize("Run Benchmark / Re-Render").x + s(24.0f));
-        if (ImGui::Button("Run Benchmark / Re-Render", ImVec2(rerenderBtnW, s(28.0f)))) {
-            m_scene = curSceneMeta.tag;
-            m_dumpRenders = true;
-            clearTextureCache();
-            // Select only the full-frame Megakernel (9) & DGC (11) configs so re-rendering
-            // executes quickly and triggers RunVisualVerification() to export all scene frames.
-            for (auto& cat : m_categories) {
-                cat.allSelected = false;
-                for (auto& sub : cat.subgroups) {
-                    sub.allSelected = false;
-                    for (auto& item : sub.items) {
-                        item.selected = (item.id == "RayScheduling" && (item.configIndex == 9 || item.configIndex == 11));
-                    }
-                }
-            }
-            startBenchmarks();
-        }
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Executes Full-Frame Megakernel & DGC ray tracing for %s and exports all rendered passes to disk.", curSceneMeta.displayName);
-        }
-    } else {
-        ImGui::SameLine(0, s(20.0f));
-        ImGui::TextDisabled("| Studio BSDF Reference Gallery (8 Wavefront Material Archetypes)");
-    }
-
-    ImGui::EndChild();
-    ImGui::PopStyleVar();
-    ImGui::PopStyleColor();
-
-    ImGui::Spacing();
-
-    // MODE 0: SCENES & PARITY
-    if (m_rtViewportMode == 0) {
-        // Parity Verification Status Banner
-        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.10f, 0.16f, 0.24f, 1.0f));
-        ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.20f, 0.50f, 0.80f, 0.6f));
-        ImGui::BeginChild("ParityBanner", ImVec2(0, s(34.0f)), true, ImGuiWindowFlags_NoScrollbar);
-        ImGui::AlignTextToFramePadding();
-
-        if (!parityMeasured) {
-            ImGui::TextColored(ImVec4(0.70f, 0.70f, 0.75f, 1.0f), "[PARITY: NOT MEASURED]");
-            ImGui::SameLine(0, s(16.0f));
-            ImGui::TextDisabled("PSNR:"); ImGui::SameLine();
-            ImGui::TextColored(ImVec4(0.70f, 0.70f, 0.75f, 1.0f), "--");
-            ImGui::SameLine(0, s(16.0f));
-            ImGui::TextDisabled("Discrepancy:"); ImGui::SameLine();
-            ImGui::TextColored(ImVec4(0.70f, 0.70f, 0.75f, 1.0f), "--");
-        } else if (parityPass) {
-            ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "[PARITY: VERIFIED 100%% BIT-EXACT]");
-            ImGui::SameLine(0, s(16.0f));
-            ImGui::TextDisabled("PSNR:"); ImGui::SameLine();
-            pushMonoFont();
-            ImGui::TextColored(ImVec4(0.95f, 0.95f, 0.95f, 1.0f), "%s", livePsnr.c_str());
-            popMonoFont();
-            ImGui::SameLine(0, s(16.0f));
-            ImGui::TextDisabled("Discrepancy:"); ImGui::SameLine();
-            pushMonoFont();
-            ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s", liveMaxDelta.c_str());
-            popMonoFont();
-        } else {
-            ImGui::TextColored(ImVec4(0.95f, 0.35f, 0.35f, 1.0f), "[PARITY: FAIL]");
-            ImGui::SameLine(0, s(16.0f));
-            ImGui::TextDisabled("PSNR:"); ImGui::SameLine();
-            pushMonoFont();
-            ImGui::TextColored(ImVec4(0.95f, 0.40f, 0.40f, 1.0f), "%s", livePsnr.c_str());
-            popMonoFont();
-            ImGui::SameLine(0, s(16.0f));
-            ImGui::TextDisabled("Discrepancy:"); ImGui::SameLine();
-            pushMonoFont();
-            ImGui::TextColored(ImVec4(0.95f, 0.40f, 0.40f, 1.0f), "%s", liveMaxDelta.c_str());
-            popMonoFont();
-        }
-
-        ImGui::SameLine(0, s(16.0f));
-        ImGui::TextDisabled("Triangles:"); ImGui::SameLine();
-        pushMonoFont();
-        ImGui::TextColored(ImVec4(0.95f, 0.80f, 0.35f, 1.0f), "%s", curSceneMeta.triangleCount);
-        popMonoFont();
-        ImGui::SameLine(0, s(16.0f));
-        ImGui::TextDisabled("DGC Speedup:"); ImGui::SameLine();
-        pushMonoFont();
-        if (dynamicSpeedup != "--") {
-            ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s (%s)",
-                               dynamicSpeedup.c_str(), isLiveSessionScore ? "Live" : profileResLabel.c_str());
-        } else {
-            ImGui::TextDisabled("Not Measured");
-        }
-        popMonoFont();
-        ImGui::EndChild();
-        ImGui::PopStyleColor(2);
-
-        ImGui::Spacing();
-
-        // Sub-view mode tabs (no redundant split slider over identical images)
-        const char* pModes[] = {
-            "Compacted Wavefront (DGC)",
-            "Megakernel (Reference)",
-            "Side-by-Side (Megakernel vs DGC)",
-            "Path Tracing (1 SPP vs 16 SPP)",
-            "128-Light Direct (DGC)"
-        };
-        if (m_rtParityViewMode < 0 || m_rtParityViewMode >= 5) {
-            m_rtParityViewMode = 0;
-        }
-        for (int m = 0; m < 5; ++m) {
-            if (m > 0) ImGui::SameLine(0, s(4.0f));
-            bool isCur = (m_rtParityViewMode == m);
-            if (isCur) {
-                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.18f, 0.40f, 0.65f, 1.0f));
-                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
-            } else {
-                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.13f, 0.16f, 0.22f, 1.0f));
-                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.65f, 0.70f, 0.80f, 1.0f));
-            }
-            float pBtnW = std::max(s(145.0f), ImGui::CalcTextSize(pModes[m]).x + s(24.0f));
-            if (ImGui::Button(pModes[m], ImVec2(pBtnW, s(24.0f)))) {
-                m_rtParityViewMode = m;
-            }
-            ImGui::PopStyleColor(2);
-        }
-
-        ImGui::Spacing();
-
-        // Check if texture cache needs reload
-        if (m_textureCacheNeedsClear.exchange(false)) {
-            clearTextureCache();
-        }
-
-        // Resolve Image Textures
-        std::string tag = curSceneMeta.tag;
-        std::string tradPath = "renders/render_" + tag + "_traditional_megakernel.png";
-        std::string dgcPath = "renders/render_" + tag + "_worklist_dgc.png";
-        std::string pt1Path = "renders/render_" + tag + "_pathtracing_1spp_worklist.png";
-        std::string pt16Path = "renders/render_" + tag + "_pathtracing_16spp_worklist.png";
-        std::string ml128Path = "renders/render_" + tag + "_multilight_128_dgc.png";
-
-        auto texTrad = getOrLoadTexture(tradPath);
-        auto texDgc = getOrLoadTexture(dgcPath);
-        auto texPt1 = (m_rtParityViewMode == 3) ? getOrLoadTexture(pt1Path) : VulkanContext::TextureResource{};
-        auto texPt16 = (m_rtParityViewMode == 3) ? getOrLoadTexture(pt16Path) : VulkanContext::TextureResource{};
-        auto texMl128 = (m_rtParityViewMode == 4) ? getOrLoadTexture(ml128Path) : VulkanContext::TextureResource{};
-
-        // Fall back to pre-bundled thumbnail preview if full 4K render has not been generated yet
-        if (!texTrad.isValid() && !texDgc.isValid()) {
-            auto thumbPreview = getOrLoadTexture("assets/thumbnails/thumb_" + tag + "_stage7_final.png");
-            if (thumbPreview.isValid()) {
-                texTrad = thumbPreview;
-                texDgc = thumbPreview;
-            }
-        }
-
-        // Viewport Canvas Calculation
-        ImVec2 avail = ImGui::GetContentRegionAvail();
-        float canvasHeight = std::max(s(320.0f), avail.y - s(115.0f));
-        bool isSideBySide = (m_rtParityViewMode == 2 || m_rtParityViewMode == 3);
-        float singleAspect = (texDgc.isValid() && texDgc.height > 0) ? (static_cast<float>(texDgc.width) / texDgc.height) : (16.0f / 9.0f);
-        float targetAspect = isSideBySide ? (singleAspect * 2.0f) : singleAspect;
-        float canvasWidth = std::min(avail.x, canvasHeight * targetAspect);
-        if (canvasWidth > avail.x) {
-            canvasWidth = avail.x;
-        }
-        if (isSideBySide) {
-            canvasHeight = std::min(canvasHeight, (canvasWidth * 0.5f) / singleAspect);
-            canvasWidth = canvasHeight * singleAspect * 2.0f;
-        } else {
-            canvasHeight = canvasWidth / singleAspect;
-        }
-
-        ImVec2 p0 = ImGui::GetCursorScreenPos();
-        ImVec2 p1 = ImVec2(p0.x + canvasWidth, p0.y + canvasHeight);
-        ImDrawList* drawList = ImGui::GetWindowDrawList();
-
-        // Background
-        drawList->AddRectFilled(p0, p1, IM_COL32(12, 14, 20, 255), s(6.0f));
-        drawList->AddRect(p0, p1, IM_COL32(35, 45, 65, 255), s(6.0f));
-
-        if (!texTrad.isValid() && !texDgc.isValid()) {
-            std::string msg = "Render output not found for " + std::string(curSceneMeta.displayName);
-            ImVec2 textSize = ImGui::CalcTextSize(msg.c_str());
-            drawList->AddText(ImVec2(p0.x + (canvasWidth - textSize.x) * 0.5f, p0.y + canvasHeight * 0.42f),
-                              IM_COL32(220, 180, 80, 255), msg.c_str());
-            std::string hint = "Click 'Run Benchmark / Re-Render' above to execute the Vulkan ray query pipeline.";
-            ImVec2 hintSize = ImGui::CalcTextSize(hint.c_str());
-            drawList->AddText(ImVec2(p0.x + (canvasWidth - hintSize.x) * 0.5f, p0.y + canvasHeight * 0.50f),
-                              IM_COL32(160, 170, 190, 255), hint.c_str());
-            ImGui::SetCursorScreenPos(ImVec2(p0.x, p1.y + s(10.0f)));
-        } else {
-            if (m_rtParityViewMode == 0) {
-                // Compacted Wavefront (DGC) Full Render
-                const auto& tex = texDgc.isValid() ? texDgc : texTrad;
-                if (tex.isValid()) {
-                    drawList->AddImage(reinterpret_cast<ImTextureID>(tex.descriptorSet), p0, p1);
-                }
-                drawList->AddRectFilled(ImVec2(p0.x + s(10.0f), p0.y + s(8.0f)),
-                                        ImVec2(p0.x + s(370.0f), p0.y + s(32.0f)), IM_COL32(10, 14, 22, 200), s(4.0f));
-                drawList->AddText(ImVec2(p0.x + s(16.0f), p0.y + s(12.0f)), IM_COL32(255, 185, 95, 255),
-                                  "Technique B: Compacted Wavefront (DGC / SER)");
-            } else if (m_rtParityViewMode == 1) {
-                // Monolithic Megakernel (Reference) Full Render
-                const auto& tex = texTrad.isValid() ? texTrad : texDgc;
-                if (tex.isValid()) {
-                    drawList->AddImage(reinterpret_cast<ImTextureID>(tex.descriptorSet), p0, p1);
-                }
-                drawList->AddRectFilled(ImVec2(p0.x + s(10.0f), p0.y + s(8.0f)),
-                                        ImVec2(p0.x + s(370.0f), p0.y + s(32.0f)), IM_COL32(10, 14, 22, 200), s(4.0f));
-                drawList->AddText(ImVec2(p0.x + s(16.0f), p0.y + s(12.0f)), IM_COL32(100, 200, 255, 255),
-                                  "Technique A: Monolithic Megakernel (Reference)");
-            } else if (m_rtParityViewMode == 2) {
-                // Side-by-Side (Megakernel vs DGC)
-                float halfW = canvasWidth * 0.5f - s(2.0f);
-                if (texTrad.isValid()) {
-                    drawList->AddImage(reinterpret_cast<ImTextureID>(texTrad.descriptorSet), p0, ImVec2(p0.x + halfW, p1.y));
-                }
-                if (texDgc.isValid()) {
-                    drawList->AddImage(reinterpret_cast<ImTextureID>(texDgc.descriptorSet), ImVec2(p0.x + halfW + s(4.0f), p0.y), p1);
-                }
-                drawList->AddRectFilled(ImVec2(p0.x + s(8.0f), p0.y + s(6.0f)),
-                                        ImVec2(p0.x + s(275.0f), p0.y + s(28.0f)), IM_COL32(10, 14, 22, 200), s(4.0f));
-                drawList->AddRectFilled(ImVec2(p0.x + halfW + s(12.0f), p0.y + s(6.0f)),
-                                        ImVec2(p0.x + halfW + s(310.0f), p0.y + s(28.0f)), IM_COL32(10, 14, 22, 200), s(4.0f));
-                drawList->AddText(ImVec2(p0.x + s(14.0f), p0.y + s(9.0f)), IM_COL32(100, 200, 255, 255),
-                                  "Technique A: Megakernel (Reference)");
-                drawList->AddText(ImVec2(p0.x + halfW + s(18.0f), p0.y + s(9.0f)), IM_COL32(255, 185, 95, 255),
-                                  "Technique B: Compacted Wavefront (DGC)");
-            } else if (m_rtParityViewMode == 3) {
-                // Path Tracing Convergence: 1 SPP vs 16 SPP Side-by-Side
-                float halfW = canvasWidth * 0.5f - s(2.0f);
-                const auto& leftTex = texPt1.isValid() ? texPt1 : texTrad;
-                const auto& rightTex = texPt16.isValid() ? texPt16 : texDgc;
-                if (leftTex.isValid()) {
-                    drawList->AddImage(reinterpret_cast<ImTextureID>(leftTex.descriptorSet), p0, ImVec2(p0.x + halfW, p1.y));
-                }
-                if (rightTex.isValid()) {
-                    drawList->AddImage(reinterpret_cast<ImTextureID>(rightTex.descriptorSet), ImVec2(p0.x + halfW + s(4.0f), p0.y), p1);
-                }
-                drawList->AddRectFilled(ImVec2(p0.x + s(8.0f), p0.y + s(6.0f)),
-                                        ImVec2(p0.x + s(280.0f), p0.y + s(28.0f)), IM_COL32(10, 14, 22, 200), s(4.0f));
-                drawList->AddRectFilled(ImVec2(p0.x + halfW + s(12.0f), p0.y + s(6.0f)),
-                                        ImVec2(p0.x + halfW + s(310.0f), p0.y + s(28.0f)), IM_COL32(10, 14, 22, 200), s(4.0f));
-                drawList->AddText(ImVec2(p0.x + s(14.0f), p0.y + s(9.0f)), IM_COL32(100, 200, 255, 255),
-                                  "1 SPP Stochastic Path Tracing (Configs 3/5)");
-                drawList->AddText(ImVec2(p0.x + halfW + s(18.0f), p0.y + s(9.0f)), IM_COL32(100, 240, 150, 255),
-                                  "16 SPP Converged Path Tracing (Configs 23/24)");
-            } else if (m_rtParityViewMode == 4) {
-                // 128-Light Direct Illumination (DGC)
-                const auto& tex = texMl128.isValid() ? texMl128 : texDgc;
-                if (tex.isValid()) {
-                    drawList->AddImage(reinterpret_cast<ImTextureID>(tex.descriptorSet), p0, p1);
-                }
-                drawList->AddRectFilled(ImVec2(p0.x + s(10.0f), p0.y + s(8.0f)),
-                                        ImVec2(p0.x + s(420.0f), p0.y + s(32.0f)), IM_COL32(10, 14, 22, 200), s(4.0f));
-                drawList->AddText(ImVec2(p0.x + s(16.0f), p0.y + s(12.0f)), IM_COL32(255, 200, 95, 255),
-                                  "128-Light Direct Evaluation (DGC 8x16 Light Binning, Config 34)");
-            }
-
-            // Canvas Bottom HUD Overlay with actual render resolution & primary ray count
-            uint32_t dispW = liveWidth;
-            uint32_t dispH = liveHeight;
-            size_t xPos = profileResLabel.find('x');
-            if (!isLiveSessionScore && xPos != std::string::npos) {
-                try {
-                    dispW = static_cast<uint32_t>(std::stoul(profileResLabel.substr(0, xPos)));
-                    dispH = static_cast<uint32_t>(std::stoul(profileResLabel.substr(xPos + 1)));
-                } catch (...) {}
-            } else if (texDgc.isValid() && texDgc.width > 400 && texDgc.height > 225) {
-                dispW = static_cast<uint32_t>(texDgc.width);
-                dispH = static_cast<uint32_t>(texDgc.height);
-            }
-            uint64_t primaryRays = static_cast<uint64_t>(dispW) * static_cast<uint64_t>(dispH);
-            char hudOverlay[256];
-            snprintf(hudOverlay, sizeof(hudOverlay), "Primary Rays: %llu (%ux%u) | %s",
-                     static_cast<unsigned long long>(primaryRays), dispW, dispH, curSceneMeta.details);
-            drawList->AddRectFilled(ImVec2(p0.x + s(10.0f), p1.y - s(30.0f)),
-                                    ImVec2(p0.x + ImGui::CalcTextSize(hudOverlay).x + s(24.0f), p1.y - s(6.0f)),
-                                    IM_COL32(10, 14, 22, 200), s(4.0f));
-            drawList->AddText(ImVec2(p0.x + s(16.0f), p1.y - s(26.0f)), IM_COL32(195, 210, 235, 240), hudOverlay);
-
-            ImGui::SetCursorScreenPos(ImVec2(p0.x, p1.y + s(10.0f)));
-        }
-
-        // Architecture Comparison Cards
-        if (ImGui::BeginTable("RtTechCompareTable", 2, ImGuiTableFlags_SizingStretchSame)) {
-            ImGui::TableNextColumn();
-            ImGui::BeginChild("TechACard", ImVec2(0, s(90.0f)), true);
-            pushBoldFont();
-            ImGui::TextColored(ImVec4(0.40f, 0.78f, 1.00f, 1.0f), "Technique A: Megakernel (Reference)");
-            popBoldFont();
-            ImGui::TextDisabled("Architecture: Monolithic Ray Query kernel (Stackless traversal)");
-            ImGui::Text("Throughput: "); ImGui::SameLine();
-            pushMonoFont();
-            if (dynamicTechAScore != "--") {
-                ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.0f, 1.0f), "%s (%s)",
-                                   dynamicTechAScore.c_str(), isLiveSessionScore ? "Live Measured" : ("Profiled " + profileResLabel).c_str());
-                if (!dynamicTechARegInfo.empty()) {
-                    ImGui::SameLine(0, s(12.0f));
-                    ImGui::TextDisabled("| %s", dynamicTechARegInfo.c_str());
-                }
-            } else {
-                ImGui::TextColored(ImVec4(0.65f, 0.70f, 0.80f, 1.0f), "Not Measured (Click 'Run Benchmark / Re-Render')");
-            }
-            popMonoFont();
-            ImGui::EndChild();
-
-            ImGui::TableNextColumn();
-            ImGui::BeginChild("TechBCard", ImVec2(0, s(90.0f)), true);
-            pushBoldFont();
-            ImGui::TextColored(ImVec4(0.98f, 0.72f, 0.35f, 1.0f), "Technique B: Compacted Wavefront (DGC / SER)");
-            popBoldFont();
-            ImGui::TextDisabled("Architecture: Subgroup Ballot Compaction & Material-Sorted Indirect Dispatch");
-            ImGui::Text("Throughput: "); ImGui::SameLine();
-            pushMonoFont();
-            if (dynamicTechBScore != "--") {
-                ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s (%s)",
-                                   dynamicTechBScore.c_str(), isLiveSessionScore ? "Live Measured" : ("Profiled " + profileResLabel).c_str());
-                if (!dynamicTechBRegInfo.empty()) {
-                    ImGui::SameLine(0, s(12.0f));
-                    ImGui::TextDisabled("| %s", dynamicTechBRegInfo.c_str());
-                }
-            } else {
-                ImGui::TextColored(ImVec4(0.65f, 0.70f, 0.80f, 1.0f), "Not Measured (Click 'Run Benchmark / Re-Render')");
-            }
-            popMonoFont();
-            ImGui::EndChild();
-
-            ImGui::EndTable();
-        }
-    }
-    // MODE 1: PIPELINE PASSES (7 STAGES)
-    else if (m_rtViewportMode == 1) {
-        struct PassInfo {
-            const char* id;
-            const char* pillLabel;
-            const char* name;
-            const char* passType;
-            int primaryConfigIdx;
-            int secondaryConfigIdx;
-            const char* description;
-        };
-
-        static const PassInfo passes[] = {
-            {
-                "stage1_bvh",
-                "1. BVH",
-                "1. BVH Traversal Complexity Heatmap",
-                "Ray Query Step Profiling (Linear Turbo Map)",
-                15, 12,
-                "Visualizes ray-box and ray-triangle intersection step count per pixel. Hotter colors indicate deeper BVH tree traversal depth and cache divergence."
-            },
-            {
-                "stage2_primary",
-                "2. Normals",
-                "2. Primary Surface G-Buffer Normals",
-                "Primary Ray Cast (Vulkan 1.4 RQ)",
-                18, 17,
-                "Renders world-space geometric surface normals derived from barycentric triangle interpolation and normal mapping."
-            },
-            {
-                "stage3_shadow",
-                "3. Shadows",
-                "3. Sun Occlusion Shadow Mask",
-                "Directional Shadow Traversal",
-                21, 19,
-                "Evaluates directional sun visibility using stackless binary ray queries with early termination (gl_RayFlagsTerminateOnFirstHitEXT)."
-            },
-            {
-                "stage4_rtao",
-                "4. RTAO",
-                "4. Ray-Traced Ambient Occlusion (RTAO)",
-                "Stratified Hemisphere Occlusion (4 Rays)",
-                -1, -1,
-                "Generates high-frequency contact shadows using cosine-weighted hemisphere sampling with localized ray distance falloff."
-            },
-            {
-                "stage5_direct",
-                "5. Direct",
-                "5. Direct Hybrid PBR Shading",
-                "Analytic Sun + GGX Specular + Shadows + RTAO",
-                32, 31,
-                "Combines microfacet GGX specular distribution, Fresnel-Schlick reflectivity, Lambertian diffuse, RTAO occlusion, and directional shadows."
-            },
-            {
-                "stage6_indirect",
-                "6. Indirect GI",
-                "6. Secondary Indirect GI Bounce",
-                "Cosine-Sampled Diffuse Radiance (4 Rays)",
-                5, 3,
-                "Computes multi-bounce indirect global illumination by sampling diffuse radiance reflection from neighboring geometry surfaces."
-            },
-            {
-                "stage7_final",
-                "ALL (Final Render)",
-                "7. Final Beauty Render (Full Pipeline Composite)",
-                "Full Composite (Direct PBR + Shadows + RTAO + GI + Reflections)",
-                11, 9,
-                "Full beauty composite pass combining primary ray query visibility, Cook-Torrance GGX direct lighting, area soft shadows, contact RTAO, dielectric glass transmission, and multi-bounce diffuse global illumination."
-            }
-        };
-
-        const size_t numPasses = sizeof(passes) / sizeof(passes[0]);
-        if (m_rtPassIndex < 0 || static_cast<size_t>(m_rtPassIndex) >= numPasses) {
-            m_rtPassIndex = 0;
-        }
-        const auto& curPass = passes[m_rtPassIndex];
-
-        auto getPassMetrics = [&](const PassInfo& pi, double& outMrays, double& outFps, double& outMs, bool& outIsLive) -> bool {
-            outMrays = 0.0; outFps = 0.0; outMs = 0.0; outIsLive = false;
-            for (const auto& res : m_allResults) {
-                if (res.time_ms <= 0.0) continue;
-                bool sceneMatches = containsCi(res.benchmarkName, curSceneMeta.displayName) ||
-                                    containsCi(res.benchmarkName, curSceneMeta.tag) ||
-                                    (std::string(curSceneMeta.tag) == "indoor" && containsCi(res.benchmarkName, "sponza")) ||
-                                    containsCi(res.subcategory, curSceneMeta.displayName);
-                if (!sceneMatches) continue;
-                if (static_cast<int>(res.configIndex) == pi.primaryConfigIdx || (static_cast<int>(res.configIndex) == pi.secondaryConfigIdx && outMrays == 0.0)) {
-                    outMrays = static_cast<double>(res.operations) / res.time_ms * 1000.0 / 1e6;
-                    outMs = res.time_ms;
-                    uint32_t w = res.width > 0 ? res.width : liveWidth;
-                    uint32_t h = res.height > 0 ? res.height : liveHeight;
-                    double pRaysM = static_cast<double>(w) * static_cast<double>(h) / 1e6;
-                    outFps = (pRaysM > 0.0) ? (outMrays / pRaysM) : (1000.0 / res.time_ms);
-                    outIsLive = true;
-                    if (static_cast<int>(res.configIndex) == pi.primaryConfigIdx) break;
-                }
-            }
-            if (outIsLive) return true;
-            auto it = stageMetricsMap.find(pi.id);
-            if (it != stageMetricsMap.end() && it->second.mrays > 0.0) {
-                outMrays = it->second.mrays;
-                outFps = it->second.fps;
-                outMs = it->second.timeMs;
-                return true;
-            }
-            return false;
-        };
-
-        // Pass selector pill buttons
-        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, s(12.0f));
-        for (size_t p = 0; p < numPasses; ++p) {
-            bool isAll = (p == numPasses - 1);
-            if (p > 0) {
-                if (isAll) {
-                    ImGui::SameLine(0, s(10.0f));
-                    ImGui::TextDisabled("|");
-                    ImGui::SameLine(0, s(10.0f));
-                } else {
-                    ImGui::SameLine(0, s(4.0f));
-                }
-            }
-            bool isCur = (static_cast<size_t>(m_rtPassIndex) == p);
-            if (isCur) {
-                if (isAll) {
-                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.00f, 0.58f, 0.65f, 1.0f));
-                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.05f, 0.68f, 0.75f, 1.0f));
-                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
-                } else {
-                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.00f, 0.48f, 0.80f, 1.0f));
-                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.10f, 0.56f, 0.88f, 1.0f));
-                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
-                }
-            } else {
-                if (isAll) {
-                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.12f, 0.22f, 0.26f, 1.0f));
-                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.16f, 0.30f, 0.36f, 1.0f));
-                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.40f, 0.90f, 0.85f, 1.0f));
-                } else {
-                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.13f, 0.16f, 0.22f, 1.0f));
-                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.18f, 0.24f, 0.32f, 1.0f));
-                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.70f, 0.75f, 0.85f, 1.0f));
-                }
-            }
-            float pillW = ImGui::CalcTextSize(passes[p].pillLabel).x + s(22.0f);
-            if (ImGui::Button(passes[p].pillLabel, ImVec2(pillW, s(24.0f)))) {
-                m_rtPassIndex = static_cast<int>(p);
-            }
-            if (ImGui::IsItemHovered()) {
-                double stMrays = 0.0, stFps = 0.0, stMs = 0.0;
-                bool stLive = false;
-                if (getPassMetrics(passes[p], stMrays, stFps, stMs, stLive)) {
-                    ImGui::SetTooltip("%s\n%s\n%s (%s): %.2f ms | %.2f MRays/s | %.1f FPS",
-                                      passes[p].name, passes[p].passType,
-                                      stLive ? "Live Measured" : ("Stage Breakdown " + breakdownResLabel).c_str(),
-                                      curSceneMeta.displayName, stMs, stMrays, stFps);
-                } else {
-                    ImGui::SetTooltip("%s\n%s", passes[p].name, passes[p].passType);
-                }
-            }
-            ImGui::PopStyleColor(3);
-        }
-        ImGui::PopStyleVar();
-
-        ImGui::Spacing();
-
-        // Pass Information Header with Per-Stage Metrics
-        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.10f, 0.14f, 0.20f, 1.0f));
-        ImGui::BeginChild("PassInfoBanner", ImVec2(0, s(54.0f)), true, ImGuiWindowFlags_NoScrollbar);
-        pushBoldFont();
-        ImGui::TextColored(ImVec4(0.40f, 0.80f, 1.00f, 1.0f), "%s", curPass.name);
-        popBoldFont();
-        ImGui::SameLine(0, s(16.0f));
-        ImGui::TextDisabled("| %s", curPass.passType);
-        ImGui::SameLine(0, s(20.0f));
-        pushMonoFont();
-        double passMrays = 0.0, passFps = 0.0, passMs = 0.0;
-        bool passIsLive = false;
-        if (getPassMetrics(curPass, passMrays, passFps, passMs, passIsLive)) {
-            ImGui::Text("%s: ", passIsLive ? "Live Stage Rate" : ("Stage Rate (" + breakdownResLabel + ")").c_str());
-            ImGui::SameLine();
-            ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%.2f MRays/s (%.1f FPS, %.2f ms)", passMrays, passFps, passMs);
-        } else {
-            ImGui::TextDisabled("Stage Rate: Not Measured");
-        }
-        popMonoFont();
-        ImGui::TextDisabled("%s", curPass.description);
-        ImGui::EndChild();
-        ImGui::PopStyleColor();
-
-        ImGui::Spacing();
-
-        // Render pass image
-        std::string tag = curSceneMeta.tag;
-        std::string passFile = "renders/render_" + tag + "_" + curPass.id + ".png";
-        auto texPass = getOrLoadTexture(passFile);
-        if (!texPass.isValid()) {
-            texPass = getOrLoadTexture("assets/thumbnails/thumb_" + tag + "_" + curPass.id + ".png");
-        }
-
-        ImVec2 avail = ImGui::GetContentRegionAvail();
-        float canvasHeight = std::max(s(320.0f), avail.y - s(20.0f));
-        float targetAspect = (texPass.isValid() && texPass.height > 0) ? (static_cast<float>(texPass.width) / texPass.height) : (16.0f / 9.0f);
-        float canvasWidth = std::min(avail.x, canvasHeight * targetAspect);
-        if (canvasWidth > avail.x) {
-            canvasWidth = avail.x;
-        }
-        canvasHeight = canvasWidth / targetAspect;
-
-        ImVec2 p0 = ImGui::GetCursorScreenPos();
-        ImVec2 p1 = ImVec2(p0.x + canvasWidth, p0.y + canvasHeight);
-        ImDrawList* drawList = ImGui::GetWindowDrawList();
-
-        drawList->AddRectFilled(p0, p1, IM_COL32(10, 12, 18, 255), s(6.0f));
-        drawList->AddRect(p0, p1, IM_COL32(35, 45, 65, 255), s(6.0f));
-
-        if (texPass.isValid()) {
-            drawList->AddImage(reinterpret_cast<ImTextureID>(texPass.descriptorSet), p0, p1);
-            drawList->AddRectFilled(ImVec2(p0.x + s(10.0f), p0.y + s(8.0f)),
-                                    ImVec2(p0.x + ImGui::CalcTextSize(curPass.name).x + s(24.0f), p0.y + s(32.0f)),
-                                    IM_COL32(10, 14, 22, 200), s(4.0f));
-            drawList->AddText(ImVec2(p0.x + s(16.0f), p0.y + s(12.0f)), IM_COL32(255, 255, 255, 235), curPass.name);
-        } else {
-            std::string msg = "Pass image not found: " + passFile;
-            ImVec2 textSize = ImGui::CalcTextSize(msg.c_str());
-            drawList->AddText(ImVec2(p0.x + (canvasWidth - textSize.x) * 0.5f, p0.y + canvasHeight * 0.48f),
-                              IM_COL32(200, 180, 80, 255), msg.c_str());
-        }
-        ImGui::SetCursorScreenPos(ImVec2(p0.x, p1.y + s(10.0f)));
-    }
-    // MODE 2: PBR MATERIALS
-    else if (m_rtViewportMode == 2) {
-        struct MaterialInfo {
-            const char* name;
-            const char* file;
-            const char* bsdfClass;
-            const char* baseColor;
-            float metallic;
-            float roughness;
-            float transmission;
-            float ior;
-            const char* archetype;
-            const char* notes;
-        };
-
-        static const MaterialInfo materials[] = {
-            {
-                "Full Material Lineup (Overview)",
-                "docs/images/material_lineup.png",
-                "Realistic PBR Lineup (5 BSDF Models)",
-                "Various", 0.50f, 0.40f, 0.20f, 1.50f,
-                "Multi-Class SER Bins (Bins 0..7)",
-                "Side-by-side comparison of 5 distinct BSDF classes rendered in studio lighting: Automotive Multi-Coat Car Paint, Organic Subsurface Scattering, Anisotropic Velvet Fabric, Dielectric Dispersive Glass, and Weathered Metal Rust."
-            },
-            {
-                "Automotive Multi-Coat Car Paint",
-                "docs/images/material_01_car_paint.png",
-                "Dual-Lobe GGX Specular + Clearcoat Layer",
-                "Deep Metallic Blue (0.05, 0.22, 0.78)",
-                0.92f, 0.18f, 0.00f, 1.50f,
-                "Archetype 1 (Specular Conductor + Clearcoat)",
-                "Two-layer reflection model: a smooth dielectric clearcoat top layer over an absorbing metallic base coat with anisotropic metallic flake scattering."
-            },
-            {
-                "Organic Subsurface Foliage",
-                "docs/images/material_02_organic_subsurface.png",
-                "Dipole BSSRDF + Translucent Transmission",
-                "Emerald Leaf Green (0.18, 0.65, 0.24)",
-                0.00f, 0.45f, 0.58f, 1.45f,
-                "Archetype 4 (Translucent Subsurface)",
-                "Simulates light penetrating translucent media (leaves, needles, jade, wax) and exiting at differing surface locations, softening hard shadow edges."
-            },
-            {
-                "Anisotropic Sheen Velvet / Fabric",
-                "docs/images/material_03_anisotropic_velvet.png",
-                "Kajiya-Kay Fiber Cylinder Anisotropy + Sheen",
-                "Crimson Red (0.72, 0.08, 0.14)",
-                0.00f, 0.75f, 0.00f, 1.55f,
-                "Archetype 2 (Anisotropic Sheen)",
-                "Evaluates microfiber scattering where reflections align perpendicular to cloth tangents, creating grazing-angle sheen effects on tapestry and upholstery."
-            },
-            {
-                "Dielectric Dispersive Refractive Glass",
-                "docs/images/material_04_dispersive_glass.png",
-                "Fresnel Dielectric Transmission + Cauchy Dispersion",
-                "Clear Tint (0.95, 0.98, 1.00)",
-                0.00f, 0.02f, 0.98f, 1.52f,
-                "Archetype 3 (Dielectric Refraction)",
-                "Evaluates Snell's Law refraction with wavelength-dependent index of refraction (Cauchy dispersion formula), splitting rays into spectral color bands."
-            },
-            {
-                "Rough Weathered Rust & Oxidized Metal",
-                "docs/images/material_05_weathered_rust.png",
-                "Coupled GGX Conductor / Dielectric Composite",
-                "Burnt Ochre (0.55, 0.28, 0.16)",
-                0.35f, 0.88f, 0.00f, 1.85f,
-                "Archetype 0 (Standard PBR Opaque)",
-                "Simulates aged, non-uniform oxidation where microscopic metal pits and ferric oxide deposits produce diffuse and high-roughness scattering."
-            },
-            {
-                "Comprehensive Scene Material Range",
-                "docs/images/realistic_scene_material_range.png",
-                "Full 8-Class Shader Execution Reordering Bins",
-                "Comprehensive Range", 0.50f, 0.50f, 0.50f, 1.50f,
-                "SER Archetype Bins 0-7",
-                "Demonstrates the full range of PBR material archetypes grouped by wavefront reordering to eliminate divergence across warp execution."
-            }
-        };
-
-        const size_t numMaterials = sizeof(materials) / sizeof(materials[0]);
-        if (m_rtMaterialIndex < 0 || static_cast<size_t>(m_rtMaterialIndex) >= numMaterials) {
-            m_rtMaterialIndex = 0;
-        }
-        const auto& curMat = materials[m_rtMaterialIndex];
-
-        // Material selector buttons
-        for (size_t mi = 0; mi < numMaterials; ++mi) {
-            float btnW = ImGui::CalcTextSize(materials[mi].name).x + s(24.0f);
-            if (mi > 0) {
-                sameLineIfFits(btnW, s(4.0f));
-            }
-            bool isCur = (static_cast<size_t>(m_rtMaterialIndex) == mi);
-            if (isCur) {
-                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.00f, 0.48f, 0.80f, 1.0f));
-                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
-            } else {
-                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.13f, 0.16f, 0.22f, 1.0f));
-                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.70f, 0.75f, 0.85f, 1.0f));
-            }
-            if (ImGui::Button(materials[mi].name, ImVec2(btnW, s(24.0f)))) {
-                m_rtMaterialIndex = static_cast<int>(mi);
-            }
-            ImGui::PopStyleColor(2);
-        }
-
-        ImGui::Spacing();
-
-        if (ImGui::BeginTable("MatLayoutTable", 2, ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_Resizable)) {
-            ImGui::TableSetupColumn("Preview", ImGuiTableColumnFlags_WidthStretch, 0.50f);
-            ImGui::TableSetupColumn("Details", ImGuiTableColumnFlags_WidthStretch, 0.50f);
-
-            float cardHeight = std::max(s(360.0f), ImGui::GetContentRegionAvail().y - s(20.0f));
-
-            ImGui::TableNextColumn();
-            
-            // Left Column: Material Texture Card
-            ImGui::BeginChild("MatImageCard", ImVec2(0, cardHeight), true, ImGuiWindowFlags_NoScrollbar);
-            auto texMat = getOrLoadTexture(curMat.file);
-            if (!texMat.isValid()) {
-                texMat = getOrLoadTexture(m_rtMaterialIndex == 6 ? "assets/thumbnails/thumb_material_range.png"
-                                                                 : "assets/thumbnails/thumb_material_lineup.png");
-            }
-            ImVec2 childAvail = ImGui::GetContentRegionAvail();
-            float targetAspect = (texMat.isValid() && texMat.height > 0) ? (static_cast<float>(texMat.width) / texMat.height) : 1.0f;
-            float imgW = childAvail.x;
-            float imgH = (targetAspect > 0.001f) ? (imgW / targetAspect) : imgW;
-            if (imgH > childAvail.y) {
-                imgH = childAvail.y;
-                imgW = imgH * targetAspect;
-            }
-            float offsetX = std::max(0.0f, (childAvail.x - imgW) * 0.5f);
-            float offsetY = std::max(0.0f, (childAvail.y - imgH) * 0.5f);
-
-            ImVec2 curPos = ImGui::GetCursorScreenPos();
-            ImVec2 p0 = ImVec2(curPos.x + offsetX, curPos.y + offsetY);
-            ImVec2 p1 = ImVec2(p0.x + imgW, p0.y + imgH);
-            ImDrawList* drawList = ImGui::GetWindowDrawList();
-
-            drawList->AddRectFilled(p0, p1, IM_COL32(10, 12, 18, 255), s(6.0f));
-            drawList->AddRect(p0, p1, IM_COL32(35, 45, 65, 255), s(6.0f));
-
-            if (texMat.isValid()) {
-                drawList->AddImage(reinterpret_cast<ImTextureID>(texMat.descriptorSet), p0, p1);
-            } else {
-                std::string msg = "Image not found: " + std::string(curMat.file);
-                ImVec2 textSize = ImGui::CalcTextSize(msg.c_str());
-                drawList->AddText(ImVec2(p0.x + (imgW - textSize.x) * 0.5f, p0.y + (imgH - textSize.y) * 0.5f),
-                                  IM_COL32(200, 180, 80, 255), msg.c_str());
-            }
-            ImGui::EndChild();
-
-            ImGui::TableNextColumn();
-
-            // Right Column: Physical Properties & Shader Formulation
-            ImGui::BeginChild("MatPropsCard", ImVec2(0, cardHeight), true);
-            pushBoldFont();
-            ImGui::TextColored(ImVec4(0.40f, 0.80f, 1.00f, 1.0f), "%s", curMat.name);
-            popBoldFont();
-            ImGui::TextDisabled("BSDF Formulation: %s", curMat.bsdfClass);
-            ImGui::Separator();
-
-            ImGui::Spacing();
-            ImGui::Text("Base Color Factor: "); ImGui::SameLine();
-            pushMonoFont();
-            ImGui::TextColored(ImVec4(0.95f, 0.95f, 0.95f, 1.0f), "%s", curMat.baseColor);
-            popMonoFont();
-
-            ImGui::Text("Metallic Factor: "); ImGui::SameLine();
-            pushMonoFont();
-            ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%.2f", curMat.metallic);
-            popMonoFont();
-            ImGui::SameLine(0, s(20.0f));
-            ImGui::Text("Roughness Factor: "); ImGui::SameLine();
-            pushMonoFont();
-            ImGui::TextColored(ImVec4(0.95f, 0.70f, 0.35f, 1.0f), "%.2f", curMat.roughness);
-            popMonoFont();
-
-            ImGui::Text("Transmission Factor: "); ImGui::SameLine();
-            pushMonoFont();
-            ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.0f, 1.0f), "%.2f", curMat.transmission);
-            popMonoFont();
-            ImGui::SameLine(0, s(20.0f));
-            ImGui::Text("Index of Refraction (IOR): "); ImGui::SameLine();
-            pushMonoFont();
-            ImGui::TextColored(ImVec4(0.95f, 0.95f, 0.95f, 1.0f), "%.2f", curMat.ior);
-            popMonoFont();
-
-            ImGui::Spacing();
-            ImGui::Text("Wavefront Archetype: "); ImGui::SameLine();
-            ImGui::TextColored(ImVec4(0.98f, 0.72f, 0.35f, 1.0f), "%s", curMat.archetype);
-
-            ImGui::Spacing();
-            ImGui::Separator();
-            ImGui::Spacing();
-            ImGui::TextColored(ImVec4(0.85f, 0.90f, 0.95f, 1.0f), "Physical Shading & Evaluation Notes:");
-            ImGui::TextWrapped("%s", curMat.notes);
-
-            ImGui::Spacing();
-            ImGui::Separator();
-            ImGui::Spacing();
-            ImGui::TextDisabled("Vulkan Ray Tracing Evaluation:");
-            ImGui::BulletText("GLSL Header: pbr_common.glsl / rt_scheduling_common.glsl");
-            ImGui::BulletText("Ray Sorting: Spatial Morton Z-Curve & 8-Bin Material Compaction");
-            ImGui::BulletText("Hit Record Layout: 32-Byte Packed (2x vec4, Octahedral Normal)");
-            if (!dynamicTechBRegInfo.empty()) {
-                ImGui::BulletText("Measured Shader Telemetry: %s", dynamicTechBRegInfo.c_str());
-            }
-
-            ImGui::EndChild();
-
-            ImGui::EndTable();
-        }
-    }
-    // MODE 3: GEOMETRY & BVH TOPOLOGY
-    else if (m_rtViewportMode == 3) {
-        struct GeometryInfo {
-            std::string title;
-            std::string file;
-            std::string fallbackThumb;
-            std::string triangles;
-            std::string vertices;
-            std::string stride;
-            std::string blasMemory;
-            std::string description;
-        };
-
-        std::string tag = curSceneMeta.tag;
-        std::string sceneBvhFile = "renders/render_" + tag + "_stage1_bvh.png";
-        std::string sceneAlphaFile = "renders/render_" + tag + "_alpha_cutout.png";
-        char bvhFootprintBuf[128];
-        if (breakdownBvhBuildMs > 0.0) {
-            snprintf(bvhFootprintBuf, sizeof(bvhFootprintBuf), "%s | Build Time: %.2f ms",
-                     curSceneMeta.blasFootprint, breakdownBvhBuildMs);
-        } else {
-            snprintf(bvhFootprintBuf, sizeof(bvhFootprintBuf), "%s", curSceneMeta.blasFootprint);
-        }
-
-        GeometryInfo geoViews[] = {
-            {
-                "Showroom Vehicle Wireframe & BVH Clustering",
-                "docs/images/geometry_showroom_wireframe.png",
-                "assets/thumbnails/thumb_blas_wireframe.png",
-                "108,936 Triangles (toycar.glb) | 1M / 5M / 10M (RayASBuild)",
-                "59,645 Vertices (toycar.glb)",
-                "48 Bytes (GltfVertex: 3x vec4)",
-                "8.4 MB (BLAS) | 64 KB (TLAS)",
-                "Wireframe topology and bounding volume hierarchy clustering for the showroom vehicle model. High polygon density around wheel arches, headlights, and body curves stresses BVH build and traversal efficiency."
-            },
-            {
-                std::string("Alpha Cutout Foliage & Geometry (") + curSceneMeta.displayName + ")",
-                sceneAlphaFile,
-                "assets/thumbnails/thumb_" + tag + "_alpha_cutout.png",
-                std::string(curSceneMeta.triangleCount) + " (Scene) | 2,097,152 Tris (16-Plane RayAnyHit)",
-                std::string(curSceneMeta.vertexCount) + " (Scene) | 1,056,896 Verts (RayAnyHit)",
-                std::string(curSceneMeta.vertexStride) + " | 12 Bytes (vec3 in RayAnyHit)",
-                bvhFootprintBuf,
-                "Stresses non-opaque candidate intersection testing (RayScheduling Config 27 & RayAnyHit). When rays traverse alpha-tested surfaces, procedural alpha masks determine whether each candidate hit is committed or BVH traversal continues."
-            },
-            {
-                std::string("Scene BVH Traversal Step Depth Heatmap (") + curSceneMeta.displayName + ")",
-                sceneBvhFile,
-                "assets/thumbnails/thumb_" + tag + "_stage1_bvh.png",
-                curSceneMeta.triangleCount,
-                curSceneMeta.vertexCount,
-                curSceneMeta.vertexStride,
-                bvhFootprintBuf,
-                "False-color heatmap visualizing BVH box and triangle intersection step counts per ray for the currently selected scene. Cool blue tones indicate shallow traversal (1-15 steps); warm yellow/red tones indicate deep traversal and dense AABB overlap (40-90+ steps)."
-            }
-        };
-
-        const size_t numGeo = sizeof(geoViews) / sizeof(geoViews[0]);
-        if (m_rtGeometryIndex < 0 || static_cast<size_t>(m_rtGeometryIndex) >= numGeo) {
-            m_rtGeometryIndex = 0;
-        }
-        const auto& curGeo = geoViews[m_rtGeometryIndex];
-
-        // Geometry Selector buttons
-        const char* geoTabLabels[] = {
-            "1. Vehicle Wireframe & BVH",
-            "2. Scene Alpha-Cutout Traversal",
-            "3. Scene BVH Step Depth Heatmap"
-        };
-        for (size_t gi = 0; gi < numGeo; ++gi) {
-            float btnW = ImGui::CalcTextSize(geoTabLabels[gi]).x + s(24.0f);
-            if (gi > 0) {
-                sameLineIfFits(btnW, s(4.0f));
-            }
-            bool isCur = (static_cast<size_t>(m_rtGeometryIndex) == gi);
-            if (isCur) {
-                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.00f, 0.48f, 0.80f, 1.0f));
-                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
-            } else {
-                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.13f, 0.16f, 0.22f, 1.0f));
-                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.70f, 0.75f, 0.85f, 1.0f));
-            }
-            if (ImGui::Button(geoTabLabels[gi], ImVec2(btnW, s(24.0f)))) {
-                m_rtGeometryIndex = static_cast<int>(gi);
-            }
-            ImGui::PopStyleColor(2);
-        }
-
-        ImGui::Spacing();
-
-        if (ImGui::BeginTable("GeoLayoutTable", 2, ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_Resizable)) {
-            ImGui::TableSetupColumn("Preview", ImGuiTableColumnFlags_WidthStretch, 0.50f);
-            ImGui::TableSetupColumn("Details", ImGuiTableColumnFlags_WidthStretch, 0.50f);
-
-            float cardHeight = std::max(s(360.0f), ImGui::GetContentRegionAvail().y - s(20.0f));
-
-            ImGui::TableNextColumn();
-
-            // Left Column: Geometry Image Card
-            ImGui::BeginChild("GeoImageCard", ImVec2(0, cardHeight), true, ImGuiWindowFlags_NoScrollbar);
-            auto texGeo = getOrLoadTexture(curGeo.file);
-            if (!texGeo.isValid() && !curGeo.fallbackThumb.empty()) {
-                texGeo = getOrLoadTexture(curGeo.fallbackThumb);
-            }
-            ImVec2 childAvail = ImGui::GetContentRegionAvail();
-            float targetAspect = (texGeo.isValid() && texGeo.height > 0) ? (static_cast<float>(texGeo.width) / texGeo.height) : (16.0f / 9.0f);
-            float imgW = childAvail.x;
-            float imgH = (targetAspect > 0.001f) ? (imgW / targetAspect) : imgW;
-            if (imgH > childAvail.y) {
-                imgH = childAvail.y;
-                imgW = imgH * targetAspect;
-            }
-            float offsetX = std::max(0.0f, (childAvail.x - imgW) * 0.5f);
-            float offsetY = std::max(0.0f, (childAvail.y - imgH) * 0.5f);
-
-            ImVec2 curPos = ImGui::GetCursorScreenPos();
-            ImVec2 p0 = ImVec2(curPos.x + offsetX, curPos.y + offsetY);
-            ImVec2 p1 = ImVec2(p0.x + imgW, p0.y + imgH);
-            ImDrawList* drawList = ImGui::GetWindowDrawList();
-
-            drawList->AddRectFilled(p0, p1, IM_COL32(10, 12, 18, 255), s(6.0f));
-            drawList->AddRect(p0, p1, IM_COL32(35, 45, 65, 255), s(6.0f));
-
-            if (texGeo.isValid()) {
-                drawList->AddImage(reinterpret_cast<ImTextureID>(texGeo.descriptorSet), p0, p1);
-            } else {
-                std::string msg = "Geometry image not found: " + curGeo.file;
-                ImVec2 textSize = ImGui::CalcTextSize(msg.c_str());
-                drawList->AddText(ImVec2(p0.x + (imgW - textSize.x) * 0.5f, p0.y + (imgH - textSize.y) * 0.5f),
-                                  IM_COL32(200, 180, 80, 255), msg.c_str());
-            }
-            ImGui::EndChild();
-
-            ImGui::TableNextColumn();
-
-            // Right Column: Geometry & BVH Topology Specs
-            ImGui::BeginChild("GeoPropsCard", ImVec2(0, cardHeight), true);
-            pushBoldFont();
-            ImGui::TextColored(ImVec4(0.40f, 0.80f, 1.00f, 1.0f), "%s", curGeo.title.c_str());
-            popBoldFont();
-            ImGui::Separator();
-
-            ImGui::Spacing();
-            ImGui::Text("Primitive Count: "); ImGui::SameLine();
-            pushMonoFont();
-            ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.55f, 1.0f), "%s", curGeo.triangles.c_str());
-            popMonoFont();
-
-            ImGui::Text("Vertex Count: "); ImGui::SameLine();
-            pushMonoFont();
-            ImGui::TextColored(ImVec4(0.95f, 0.80f, 0.35f, 1.0f), "%s", curGeo.vertices.c_str());
-            popMonoFont();
-
-            ImGui::Text("Vertex Format: "); ImGui::SameLine();
-            pushMonoFont();
-            ImGui::TextColored(ImVec4(0.95f, 0.95f, 0.95f, 1.0f), "%s", curGeo.stride.c_str());
-            popMonoFont();
-
-            ImGui::Text("AS Memory & Build: "); ImGui::SameLine();
-            pushMonoFont();
-            ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.0f, 1.0f), "%s", curGeo.blasMemory.c_str());
-            popMonoFont();
-
-            ImGui::Spacing();
-            ImGui::Separator();
-            ImGui::Spacing();
-            ImGui::TextColored(ImVec4(0.85f, 0.90f, 0.95f, 1.0f), "Topology & Acceleration Structure Analysis:");
-            ImGui::TextWrapped("%s", curGeo.description.c_str());
-
-            ImGui::Spacing();
-            ImGui::Separator();
-            ImGui::Spacing();
-            ImGui::TextDisabled("Hardware Traversal Pipeline:");
-            ImGui::BulletText("BVH Node Format: Hardware wide BVH (Bvh8 / Bvh4) with box compression");
-            ImGui::BulletText("Intersection Engine: Hardware Ray-Box & Ray-Triangle intersection units");
-            ImGui::BulletText("Alpha Cutout Handling: Ray Query candidate evaluation / Any-Hit shader");
-            ImGui::BulletText("Build Mode: vkCmdBuildAccelerationStructuresKHR (PREFER_FAST_TRACE_BIT_KHR)");
-
-            ImGui::EndChild();
-
-            ImGui::EndTable();
-        }
-    }
-}
-
 void GuiApp::renderSettingsModal() {
-    ImGui::OpenPopup("Benchmark Engine Configuration");
-    if (ImGui::BeginPopupModal("Benchmark Engine Configuration", &m_showSettingsModal, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::Text("Render Resolution:");
-        int w = static_cast<int>(m_renderWidth);
-        int h = static_cast<int>(m_renderHeight);
-        if (ImGui::InputInt("Width", &w)) m_renderWidth = std::max(64, w);
-        if (ImGui::InputInt("Height", &h)) m_renderHeight = std::max(64, h);
+    ImGui::OpenPopup("Advanced Benchmark Settings");
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(s(500.0f), 0.0f), ImGuiCond_Appearing);
 
-        ImGui::Spacing();
-        int spp = static_cast<int>(m_samplesPerPixel);
-        if (ImGui::SliderInt("Samples Per Pixel", &spp, 1, 64)) {
-            m_samplesPerPixel = static_cast<uint32_t>(spp);
-        }
-
-        ImGui::Checkbox("Dump Renders to Disk", &m_dumpRenders);
-
-        ImGui::Spacing();
+    if (ImGui::BeginPopupModal("Advanced Benchmark Settings", &m_showSettingsModal, ImGuiWindowFlags_AlwaysAutoResize)) {
+        pushBoldFont();
+        ImGui::TextColored(ImVec4(0.06f, 0.80f, 0.98f, 1.0f), "Ray Tracing & Rasterization Settings");
+        popBoldFont();
         ImGui::Separator();
         ImGui::Spacing();
 
-        ImGui::TextColored(ImVec4(0.38f, 0.75f, 1.00f, 1.00f), "User Interface Scaling:");
-        float curZoom = m_uiScale;
-        if (ImGui::SliderFloat("Zoom Level", &curZoom, 0.75f, 3.5f, "%.1fx")) {
-            setUiScale(curZoom);
+        const char* scenes[] = {"all", "showroom", "indoor", "forest", "landscape"};
+        const char* sceneLabels[] = {
+            "All 4 Scenes (Comprehensive)",
+            "Showroom Studio (Automotive Reflection)",
+            "Indoor Atrium (Architectural GI)",
+            "Open-World Forest (Alpha-Cutout Foliage)",
+            "Outdoor Landscape (Heightfield Terrain)"
+        };
+        int currentSceneIdx = 0;
+        for (int i = 0; i < 5; ++i) {
+            if (m_scene == scenes[i]) { currentSceneIdx = i; break; }
+        }
+        if (ImGui::Combo("Target Scene", &currentSceneIdx, sceneLabels, 5)) {
+            m_scene = scenes[currentSceneIdx];
+            if (m_scene != "all") m_suiteActiveScene = m_scene;
+        }
+
+        const char* resLabels[] = {
+            "1280 x 720 (HD)",
+            "1920 x 1080 (FHD)",
+            "2560 x 1440 (QHD)",
+            "3840 x 2160 (4K UHD)"
+        };
+        int resIdx = 3;
+        if (m_renderWidth == 1280) resIdx = 0;
+        else if (m_renderWidth == 1920) resIdx = 1;
+        else if (m_renderWidth == 2560) resIdx = 2;
+
+        if (ImGui::Combo("Render Resolution", &resIdx, resLabels, 4)) {
+            const uint32_t widths[]  = {1280, 1920, 2560, 3840};
+            const uint32_t heights[] = {720,  1080, 1440, 2160};
+            m_renderWidth = widths[resIdx];
+            m_renderHeight = heights[resIdx];
+        }
+
+        int spp = static_cast<int>(m_samplesPerPixel);
+        if (ImGui::SliderInt("Samples Per Pixel (SPP)", &spp, 1, 64)) {
+            m_samplesPerPixel = static_cast<uint32_t>(std::max(1, spp));
+        }
+
+        ImGui::Checkbox("Dump Scene Renders to Disk (renders/*.png)", &m_dumpRenders);
+        ImGui::TextDisabled("When unchecked, Ray Tracing Viewport still previews renders directly in GPU VRAM!");
+
+        ImGui::Spacing();
+        pushBoldFont();
+        ImGui::TextColored(ImVec4(0.06f, 0.80f, 0.98f, 1.0f), "Diagnostics & Display");
+        popBoldFont();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        float uiScalePct = (m_uiScale / std::max(0.1f, m_baseScale)) * 100.0f;
+        if (ImGui::SliderFloat("Interface Zoom (%)", &uiScalePct, 70.0f, 225.0f, "%.0f%%")) {
+            setUiScale((uiScalePct / 100.0f) * m_baseScale);
         }
         ImGui::SameLine();
-        if (ImGui::Button("Reset Default")) {
+        if (ImGui::SmallButton("Reset")) {
             setUiScale(m_baseScale);
         }
-        ImGui::TextDisabled("Tip: Hold CTRL and scroll mouse wheel anywhere to zoom in/out (Ctrl+0 to reset).");
+        ImGui::TextDisabled("Dynamic ImGui 1.93 glyph baking active (Ctrl+Scroll / Ctrl+/- / Ctrl+0)");
+
+        ImGui::Spacing();
+        ImGui::Checkbox("Verbose Console Logging", &m_verbose);
+        ImGui::Checkbox("Enable Vulkan Validation Layers (--debug)", &m_debug);
 
         ImGui::Spacing();
         ImGui::Separator();
         ImGui::Spacing();
 
-        if (ImGui::Button("Close", ImVec2(s(120.0f), 0))) {
+        if (ImGui::Button("Close", ImVec2(s(120.0f), s(30.0f)))) {
             m_showSettingsModal = false;
             ImGui::CloseCurrentPopup();
         }
@@ -7570,247 +1661,89 @@ void GuiApp::renderSettingsModal() {
     }
 }
 
-void GuiApp::startBenchmarks() {
-    if (m_execState == ExecutionState::Running) return;
+void GuiApp::renderJsonSessionModal() {
+    ImGui::OpenPopup("Unified JSON Session & Comparison");
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(s(560.0f), 0.0f), ImGuiCond_Appearing);
 
-    // Collect selected target devices
-    std::vector<uint32_t> targetGpus;
-    bool hasSystemDevice = false;
+    if (ImGui::BeginPopupModal("Unified JSON Session & Comparison", &m_showJsonSessionModal, ImGuiWindowFlags_AlwaysAutoResize)) {
+        pushBoldFont();
+        ImGui::TextColored(ImVec4(0.06f, 0.80f, 0.98f, 1.0f), "Unified CLI / GUI JSON Schema (v2.0)");
+        popBoldFont();
+        ImGui::TextWrapped("Files exported by `gpubench -o <file.json>` and `gpubench-gui` share the same "
+                           "yyjson v2.0 schema. Load a JSON file as the active session or as a baseline for side-by-side delta comparison.");
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
 
-    for (const auto& dev : m_devices) {
-        if (dev.selected) {
-            if (dev.isSystem) {
-                hasSystemDevice = true;
-            } else {
-                targetGpus.push_back(dev.deviceIndex);
+        ImGui::InputText("JSON File Path", m_jsonPathBuffer, sizeof(m_jsonPathBuffer));
+
+        // Quick-pick recent .json files in working directory
+        namespace fs = std::filesystem;
+        std::error_code ec;
+        std::vector<std::string> localJsons;
+        for (const auto& entry : fs::directory_iterator(".", ec)) {
+            if (entry.is_regular_file(ec) && entry.path().extension() == ".json") {
+                localJsons.push_back(entry.path().filename().string());
+                if (localJsons.size() >= 8) break;
             }
         }
-    }
-
-    // Auto-enable host device if user selected any host system benchmarks
-    bool hasSelectedHostBenchmarks = false;
-    for (const auto& cat : m_categories) {
-        for (const auto& sub : cat.subgroups) {
-            for (const auto& item : sub.items) {
-                if (item.selected && (item.category == "System" || item.category == "Host System" || item.id.find("System Memory") != std::string::npos)) {
-                    hasSelectedHostBenchmarks = true;
-                    break;
+        if (!localJsons.empty()) {
+            ImGui::TextDisabled("Workspace JSON files:");
+            for (size_t i = 0; i < localJsons.size(); ++i) {
+                if (i > 0) sameLineIfFits(s(140.0f), s(6.0f));
+                if (ImGui::SmallButton(localJsons[i].c_str())) {
+                    std::snprintf(m_jsonPathBuffer, sizeof(m_jsonPathBuffer), "%s", localJsons[i].c_str());
                 }
             }
         }
-    }
-    if (hasSelectedHostBenchmarks) {
-        hasSystemDevice = true;
-        for (auto& dev : m_devices) {
-            if (dev.isSystem) dev.selected = true;
-        }
-    }
 
-    if (targetGpus.empty() && !hasSystemDevice) {
-        m_statusMessage = "Select at least one GPU or host device.";
-        return;
-    }
+        ImGui::Spacing();
+        float btnW = (ImGui::GetContentRegionAvail().x - s(12.0f)) / 3.0f;
 
-    // Collect selected benchmarks and workloads dynamically
-    std::vector<std::string> selectedBenchmarks;
-    std::vector<std::string> selectedWorkloads;
-    size_t gpu_configs = 0;
-    size_t sys_configs = 0;
-
-    for (const auto& cat : m_categories) {
-        for (const auto& sub : cat.subgroups) {
-            for (const auto& item : sub.items) {
-                if (!item.selected) continue;
-                if (m_hideUnsupported && !item.isSupported) continue;
-
-                bool isHost = (item.category == "System" || item.category == "Host System" || item.id.find("System Memory") != std::string::npos);
-                if (isHost) {
-                    if (!hasSystemDevice) continue;
-                    sys_configs++;
-                } else {
-                    if (targetGpus.empty()) continue;
-                    bool isMicro = (item.id == "RayScheduling" &&
-                        (item.configIndex == 12 || item.configIndex == 13 || item.configIndex == 14 ||
-                         item.configIndex == 15 || item.configIndex == 16 || item.configIndex == 26 ||
-                         item.configIndex == 28));
-                    if (item.id == "RayScheduling" && !isMicro && m_scene == "all") {
-                        gpu_configs += 4;
-                    } else {
-                        gpu_configs += 1;
-                    }
-                }
-
-                selectedBenchmarks.push_back(item.id);
-                if (item.configIndex >= 0) {
-                    selectedWorkloads.push_back(item.id + "#" + std::to_string(item.configIndex));
-                }
-                selectedWorkloads.push_back(item.name);
+        if (ImGui::Button("Import as Session", ImVec2(btnW, s(32.0f)))) {
+            if (importResultsFromJson(m_jsonPathBuffer)) {
+                m_showJsonSessionModal = false;
+                ImGui::CloseCurrentPopup();
             }
         }
-    }
-
-    if (selectedBenchmarks.empty()) {
-        m_statusMessage = "Select at least one benchmark matching chosen device(s).";
-        return;
-    }
-
-    m_statusMessage.clear();
-    m_execState = ExecutionState::Running;
-    m_cancelToken.store(false);
-    m_completedTasks = 0;
-
-    std::vector<std::string> engineBenchmarks;
-    for (const auto& b : selectedBenchmarks) {
-        std::string mapped = b;
-        if (b == "SceneRayTracing" || b == "PathTracing" || b == "PipelineBreakdown") {
-            mapped = "RayScheduling";
-        }
-        if (std::find(engineBenchmarks.begin(), engineBenchmarks.end(), mapped) == engineBenchmarks.end()) {
-            engineBenchmarks.push_back(mapped);
-        }
-    }
-
-    m_totalTasks = (gpu_configs * targetGpus.size()) + sys_configs;
-    if (m_totalTasks == 0) m_totalTasks = 1;
-
-    m_allResults.clear();
-    m_latestResults.clear();
-    m_currentlyRunningTestId.clear();
-    m_hasCurrentlyRunningResult = false;
-    m_benchmarkStartTime = std::chrono::steady_clock::now();
-    m_telemetryWorker.startRecording();
-    m_telemetryNeedsFit = true;
-
-    if (m_execThread.joinable()) {
-        m_execThread.join();
-    }
-
-    std::string targetBackend = m_selectedBackend;
-    uint32_t rWidth = m_renderWidth;
-    uint32_t rHeight = m_renderHeight;
-    uint32_t spp = m_samplesPerPixel;
-    bool dumpR = m_dumpRenders ||
-                 (std::find(engineBenchmarks.begin(), engineBenchmarks.end(), "RayScheduling") != engineBenchmarks.end());
-    std::string scene = m_scene;
-
-    m_execThread = std::thread([this, engineBenchmarks, targetGpus, targetBackend, rWidth, rHeight, spp, dumpR, scene, selectedWorkloads]() {
-        auto callback = [this](const ResultData& res) {
-            std::lock_guard<std::mutex> lock(m_resultsMutex);
-            m_incomingResults.push_back(res);
-        };
-
-        RunBenchmarksAPI(
-            engineBenchmarks,
-            targetGpus,
-            {targetBackend},
-            false, false, false,
-            dumpR, rWidth, rHeight,
-            callback,
-            scene,
-            spp,
-            &m_cancelToken,
-            /*quiet=*/true,
-            selectedWorkloads
-        );
-
-        m_telemetryWorker.stopRecording();
-        m_telemetryNeedsFit = true;
-
-        if (m_cancelToken.load()) {
-            m_execState = ExecutionState::Cancelled;
-        } else {
-            m_execState = ExecutionState::Completed;
-        }
-        m_currentlyRunningTestId.clear();
-        m_hasCurrentlyRunningResult = false;
-        m_textureCacheNeedsClear.store(true);
-    });
-}
-
-void GuiApp::abortBenchmarks() {
-    if (m_execState == ExecutionState::Running) {
-        m_cancelToken.store(true);
-        m_telemetryWorker.stopRecording();
-        m_telemetryNeedsFit = true;
-    }
-}
-
-void GuiApp::processIncomingResults() {
-    std::vector<ResultData> batch;
-    {
-        std::lock_guard<std::mutex> lock(m_resultsMutex);
-        batch.swap(m_incomingResults);
-    }
-
-    for (const auto& res : batch) {
-        std::string baseName = res.benchmarkName;
-        size_t p = baseName.find(" (");
-        if (p != std::string::npos) {
-            baseName = baseName.substr(0, p);
-        }
-
-        if (res.time_ms < 0.0) {
-            if (res.time_ms == -2.0) {
-                m_completedTasks++;
-                m_allResults.push_back(res);
-                m_latestResults[baseName] = res;
-                m_latestResults[res.benchmarkName] = res;
-                if (!res.subcategory.empty()) m_latestResults[res.subcategory] = res;
-                if (m_currentlyRunningTestId == baseName) m_currentlyRunningTestId.clear();
-                if (m_hasCurrentlyRunningResult && m_currentlyRunningResult.benchmarkName == res.benchmarkName) {
-                    m_hasCurrentlyRunningResult = false;
-                }
-            } else if (res.time_ms == -1.0) {
-                std::string devTag = (res.deviceIndex == 0xFFFFFFFF) ? "Host CPU" : ("GPU " + std::to_string(res.deviceIndex));
-                m_currentBenchmarkName = res.benchmarkName + " on [" + devTag + "]";
-                m_currentlyRunningTestId = baseName;
-                m_currentlyRunningResult = res;
-                m_hasCurrentlyRunningResult = true;
-                if (res.deviceIndex < 2 && !m_telemetryDualGpuMode) {
-                    m_telemetryGpuIndex = res.deviceIndex;
-                }
-            }
-        } else {
-            m_completedTasks++;
-            m_allResults.push_back(res);
-
-            // Update m_latestResults for baseName (matches item.id)
-            if (baseName != "RayScheduling" || res.metric == "MRays/s") {
-                auto it = m_latestResults.find(baseName);
-                if (it == m_latestResults.end()) {
-                    m_latestResults[baseName] = res;
-                } else {
-                    double newOps = (res.time_ms > 0.0) ? ((static_cast<double>(res.operations) / res.time_ms) * 1000.0) : 0.0;
-                    double oldOps = (it->second.time_ms > 0.0) ? ((static_cast<double>(it->second.operations) / it->second.time_ms) * 1000.0) : 0.0;
-                    if (newOps >= oldOps || it->second.isUnsupported || it->second.time_ms < 0.0) {
-                        m_latestResults[baseName] = res;
-                    }
-                }
-            }
-
-            m_latestResults[res.benchmarkName] = res;
-            if (!res.subcategory.empty()) m_latestResults[res.subcategory] = res;
-            if (m_currentlyRunningTestId == baseName) m_currentlyRunningTestId.clear();
-            if (m_hasCurrentlyRunningResult && m_currentlyRunningResult.benchmarkName == res.benchmarkName) {
-                m_hasCurrentlyRunningResult = false;
+        ImGui::SameLine(0.0f, s(6.0f));
+        if (ImGui::Button("Load as Comparison", ImVec2(btnW, s(32.0f)))) {
+            if (loadComparisonFromJson(m_jsonPathBuffer)) {
+                m_showJsonSessionModal = false;
+                ImGui::CloseCurrentPopup();
             }
         }
-    }
-}
+        ImGui::SameLine(0.0f, s(6.0f));
+        bool canExport = !m_allResults.empty();
+        if (!canExport) ImGui::BeginDisabled();
+        if (ImGui::Button("Save Active Run", ImVec2(btnW, s(32.0f)))) {
+            exportResultsToJson(m_jsonPathBuffer);
+            m_showJsonSessionModal = false;
+            ImGui::CloseCurrentPopup();
+        }
+        if (!canExport) ImGui::EndDisabled();
 
-void GuiApp::exportResultsToJson(const std::string& filepath) {
-    std::string outPath = filepath.empty() ? getDefaultJsonFilename() : filepath;
-    std::ofstream file(outPath);
-    if (!file.is_open()) {
-        m_statusMessage = "Failed to export: " + outPath;
-        return;
-    }
+        if (!m_comparisonResults.empty()) {
+            ImGui::Spacing();
+            ImGui::TextColored(ImVec4(0.35f, 0.88f, 0.98f, 1.0f),
+                               "Active Comparison Baseline: %s (%zu items)",
+                               m_comparisonSourceLabel.c_str(), m_comparisonResults.size());
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Clear Comparison")) {
+                clearComparisonResults();
+            }
+        }
 
-    file << resultsToJson(m_allResults);
-    file.close();
-    m_exportNotificationText = "Exported " + std::to_string(m_allResults.size()) + " records to " + outPath;
-    m_exportNotificationTimer = 4.0f;
-    m_statusMessage = m_exportNotificationText;
+        ImGui::Spacing();
+        ImGui::Separator();
+        if (ImGui::Button("Close", ImVec2(s(110.0f), s(28.0f)))) {
+            m_showJsonSessionModal = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
 }
 
 } // namespace gpubench::gui

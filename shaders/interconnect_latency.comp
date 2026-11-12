@@ -1,0 +1,60 @@
+#version 460
+#extension GL_KHR_memory_scope_semantics : require
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+layout(std430, set = 0, binding = 0) buffer MailBoxBuffer {
+    uint data[];
+} mailbox;
+
+layout(std430, set = 0, binding = 1) buffer ResultBuffer {
+    uint outData[];
+} resultBuf;
+
+layout(push_constant) uniform PushConsts {
+    uint mode;       // 0 = ping-pong coherency latency, 1 = GPU VRAM pattern verify
+    uint count;      // iterations (mode 0) or element count (mode 1)
+    uint seed;       // expected XOR pattern seed (mode 1)
+} pc;
+
+void main() {
+    if (pc.mode == 0u) {
+        if (gl_GlobalInvocationID.x != 0u) {
+            return;
+        }
+        // Signal ready (state = 1) so host starts ping-pong loop
+        atomicStore(mailbox.data[0], 1u, gl_ScopeDevice,
+                    gl_StorageSemanticsBuffer, gl_SemanticsRelease);
+        uint completed = 0u;
+        for (uint step = 0u; step < pc.count; ++step) {
+            uint expectedFromCpu = step * 2u + 2u;
+            uint guard = 0u;
+            while (atomicLoad(mailbox.data[0], gl_ScopeDevice,
+                              gl_StorageSemanticsBuffer,
+                              gl_SemanticsAcquire) != expectedFromCpu) {
+                if (++guard > 20000000u) {
+                    resultBuf.outData[0] = completed;
+                    return;
+                }
+            }
+            uint replyFromGpu = expectedFromCpu + 1u;
+            atomicStore(mailbox.data[0], replyFromGpu, gl_ScopeDevice,
+                        gl_StorageSemanticsBuffer, gl_SemanticsRelease);
+            completed++;
+        }
+        resultBuf.outData[0] = completed;
+    } else {
+        // Mode 1: GPU-side verification of CPU-streamed ReBAR buffer
+        uint gid = gl_GlobalInvocationID.x;
+        if (gid >= pc.count) {
+            return;
+        }
+        uint val = mailbox.data[gid];
+        uint expected = pc.seed ^ gid;
+        if (val != expected) {
+            atomicAdd(resultBuf.outData[0], 1u);
+        } else if (gid == 0u) {
+            resultBuf.outData[1] = val;
+        }
+    }
+}

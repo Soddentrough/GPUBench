@@ -43,6 +43,8 @@ public:
   int GetSortWeight() const override { return 400; }
   uint32_t GetNumConfigs() const override;
   std::string GetConfigName(uint32_t config_idx) const override;
+  const char *GetDescription() const override { return GetDescription(0); }
+  const char *GetDescription(uint32_t config_idx) const override;
 
   // System benchmark is not tied to a specific GPU
   bool IsDeviceDependent() const override { return false; }
@@ -51,6 +53,7 @@ public:
   std::string GetConfigCaveat(uint32_t config_idx = 0) const override;
 
 private:
+  template <typename Tag> friend struct ::gpubench::test::TestBody;
   std::vector<SysMemConfig> configs;
   void *buffer = nullptr;
   void *destBuffer = nullptr; // For ReadWrite/Copy

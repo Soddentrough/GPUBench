@@ -80,6 +80,13 @@ public:
     return "Matrix";
   }
   const char *GetMetric() const override { return "TOPS"; }
+  const char *GetDescription() const override {
+    return "4-bit integer (INT4) packed WMMA matrix multiply-accumulate throughput.";
+  }
+  double GetOperationalIntensity(uint32_t config_idx = 0) const override {
+    (void)config_idx;
+    return 16384.0;
+  }
 
   bool IsEmulated(uint32_t config_idx = 0) const override {
     (void)config_idx;

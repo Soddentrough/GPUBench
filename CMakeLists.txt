@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(GPUBench VERSION 1.0.0)
+project(GPUBench VERSION 1.0.0 LANGUAGES C CXX)
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_CXX_STANDARD 23)
@@ -81,6 +81,17 @@ if(Vulkan_FOUND)
         endif()
     endif()
 
+    find_program(SPIRV_AS_EXECUTABLE spirv-as
+        HINTS "$ENV{VULKAN_SDK}/Bin" "$ENV{VULKAN_SDK}/bin" "$ENV{VULKAN_SDK}/x86_64/bin"
+    )
+    if(NOT SPIRV_AS_EXECUTABLE)
+        file(GLOB SPIRV_AS_FALLBACK "C:/VulkanSDK/*/Bin/spirv-as.exe")
+        if(SPIRV_AS_FALLBACK)
+            list(GET SPIRV_AS_FALLBACK 0 SPIRV_AS_EXECUTABLE)
+            set(SPIRV_AS_EXECUTABLE ${SPIRV_AS_EXECUTABLE} CACHE FILEPATH "spirv-as executable")
+        endif()
+    endif()
+
     if(NOT GLSLC_EXECUTABLE)
         message(WARNING "glslc not found! Vulkan backend will be disabled.")
         set(Vulkan_FOUND FALSE)
@@ -124,7 +135,7 @@ if(ROCM_PATH)
         set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} --rocm-device-lib-path=${ROCM_PATH}/amdgcn/bitcode")
     endif()
 endif()
-find_package(HIP)
+find_package(HIP QUIET)
 if(HIP_FOUND)
     message(STATUS "HIP (ROCm) found: ${HIP_LIBRARIES}")
     
@@ -192,6 +203,32 @@ if(Vulkan_FOUND)
         list(APPEND VULKAN_SHADERS ${DEST_SHADER} ${SPV_SHADER})
     endforeach()
 
+    file(GLOB SPVASM_SHADERS CONFIGURE_DEPENDS "shaders/*.spvasm")
+    foreach(SPVASM ${SPVASM_SHADERS})
+        get_filename_component(SPVASM_NAME ${SPVASM} NAME)
+        get_filename_component(SPVASM_STEM ${SPVASM} NAME_WE)
+        set(DEST_SPVASM "${CMAKE_CURRENT_BINARY_DIR}/kernels/vulkan/${SPVASM_NAME}")
+        set(SPV_SPVASM "${CMAKE_CURRENT_BINARY_DIR}/kernels/vulkan/${SPVASM_STEM}.comp.spv")
+
+        add_custom_command(
+            OUTPUT ${DEST_SPVASM}
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${SPVASM} ${DEST_SPVASM}
+            DEPENDS ${SPVASM}
+            COMMENT "Copying Vulkan SPIR-V assembly source: ${SPVASM}"
+        )
+        list(APPEND VULKAN_SHADERS ${DEST_SPVASM})
+
+        if(SPIRV_AS_EXECUTABLE)
+            add_custom_command(
+                OUTPUT ${SPV_SPVASM}
+                COMMAND ${SPIRV_AS_EXECUTABLE} --target-env vulkan1.4 ${SPVASM} -o ${SPV_SPVASM}
+                DEPENDS ${SPVASM}
+                COMMENT "Assembling Vulkan 1.4 SPIR-V shader: ${SPVASM}"
+            )
+            list(APPEND VULKAN_SHADERS ${SPV_SPVASM})
+        endif()
+    endforeach()
+
     file(GLOB EXISTING_VULKAN_ARTIFACTS "${CMAKE_CURRENT_BINARY_DIR}/kernels/vulkan/*")
     foreach(EXISTING_FILE ${EXISTING_VULKAN_ARTIFACTS})
         if(NOT "${EXISTING_FILE}" IN_LIST VULKAN_SHADERS)
@@ -248,6 +285,17 @@ if(HIP_FOUND)
     set(OFFLOAD_ARCHS "all" CACHE STRING "Target GPU architectures for HIP code objects: 'all', 'native', or custom list (e.g. 'gfx1151;gfx1201')")
     if(OFFLOAD_ARCHS STREQUAL "all")
         set(TARGET_ARCH_LIST "gfx1030;gfx1100;gfx1101;gfx1102;gfx1103;gfx1150;gfx1151;gfx1200;gfx1201;gfx90a;gfx942")
+        execute_process(
+            COMMAND ${HIPCC_ENV} ${HIPCC_EXECUTABLE} -O3 --genco --offload-arch=gfx950
+                    "${CMAKE_CURRENT_SOURCE_DIR}/hip_kernels/fp4_matrix.hip"
+                    -o "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/probe_gfx950.co"
+            RESULT_VARIABLE HIPCC_GFX950_RES
+            OUTPUT_QUIET ERROR_QUIET
+        )
+        file(REMOVE "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/probe_gfx950.co")
+        if(HIPCC_GFX950_RES EQUAL 0)
+            list(APPEND TARGET_ARCH_LIST "gfx950")
+        endif()
     elseif(OFFLOAD_ARCHS STREQUAL "native")
         set(TARGET_ARCH_LIST "native")
     else()
@@ -299,9 +347,11 @@ endif()
 
 # Source files - always include core files
 set(LIB_SOURCES
+    cpp_src/third_party/yyjson.c
     cpp_src/core/BenchmarkRunner.cpp
     cpp_src/core/BlockSuballocator.cpp
     cpp_src/core/DeviceDatabase.cpp
+    cpp_src/core/RooflineModel.cpp
     cpp_src/core/ResultFormatter.cpp
     cpp_src/core/ResultImporter.cpp
     cpp_src/benchmarks/Fp32Bench.cpp
@@ -321,6 +371,12 @@ set(LIB_SOURCES
     cpp_src/benchmarks/CacheLatencyCurveBench.cpp
     cpp_src/benchmarks/LdsBankConflictBench.cpp
     cpp_src/benchmarks/InShaderIndirectBench.cpp
+    cpp_src/benchmarks/InterconnectBench.cpp
+    cpp_src/benchmarks/AsyncOverlapBench.cpp
+    cpp_src/benchmarks/SparseMatrixBench.cpp
+    cpp_src/benchmarks/CoopVectorBench.cpp
+    cpp_src/benchmarks/WorkGraphsBench.cpp
+    cpp_src/benchmarks/RayOMMBench.cpp
     cpp_src/benchmarks/PixelFillRateBench.cpp
     cpp_src/benchmarks/RayIntersectBench.cpp
     cpp_src/benchmarks/RayRawTraversalBench.cpp
@@ -339,9 +395,25 @@ set(LIB_SOURCES
     cpp_src/utils/SleepInhibitor.cpp
 )
 
+set(CORE_THIRD_PARTY_SOURCES cpp_src/third_party/yyjson.c)
+
 # Add backend-specific sources
 if(Vulkan_FOUND)
-    list(APPEND LIB_SOURCES cpp_src/core/VulkanContext.cpp)
+    list(APPEND LIB_SOURCES
+        cpp_src/core/VulkanContext.cpp
+        cpp_src/core/VmaImpl.cpp
+    )
+    list(APPEND CORE_THIRD_PARTY_SOURCES cpp_src/core/VmaImpl.cpp)
+endif()
+
+if(MSVC)
+    set_source_files_properties(${CORE_THIRD_PARTY_SOURCES} PROPERTIES
+        COMPILE_OPTIONS "/wd4100;/wd4127;/wd4189;/wd4324;/wd4701;/wd4703"
+    )
+else()
+    set_source_files_properties(${CORE_THIRD_PARTY_SOURCES} PROPERTIES
+        COMPILE_OPTIONS "-Wno-unused-parameter;-Wno-unused-variable;-Wno-unused-function;-Wno-missing-field-initializers;-Wno-implicit-fallthrough"
+    )
 endif()
 
 if(OpenCL_FOUND)
@@ -354,7 +426,7 @@ endif()
 
 list(APPEND LIB_SOURCES cpp_src/core/RunnerAPI.cpp)
 
-set(SOURCES cpp_src/main.cpp ${LIB_SOURCES})
+set(SOURCES cpp_src/main.cpp)
 if(WIN32)
     if(MINGW)
         set_source_files_properties(packaging/windows/gpubench.rc PROPERTIES
@@ -373,19 +445,22 @@ endif()
 
 add_library(gpubench_lib STATIC ${LIB_SOURCES})
 set_target_properties(gpubench_lib PROPERTIES POSITION_INDEPENDENT_CODE ON)
-target_link_libraries(gpubench_lib PUBLIC gpubench_compiler_flags)
+target_link_libraries(gpubench_lib PUBLIC gpubench_compiler_flags Threads::Threads ${CMAKE_DL_LIBS})
 
 add_executable(gpubench ${SOURCES})
-target_link_libraries(gpubench PRIVATE gpubench_compiler_flags)
+target_link_libraries(gpubench PRIVATE gpubench_lib gpubench_compiler_flags)
 
 # Add dependencies on shader/kernel compilation
 if(Vulkan_FOUND)
+    add_dependencies(gpubench_lib shaders)
     add_dependencies(gpubench shaders)
 endif()
 if(OpenCL_FOUND)
+    add_dependencies(gpubench_lib kernels)
     add_dependencies(gpubench kernels)
 endif()
 if(HIP_FOUND)
+    add_dependencies(gpubench_lib hip_kernels)
     add_dependencies(gpubench hip_kernels)
 endif()
 
@@ -433,30 +508,20 @@ endif()
 
 if(WIN32)
     target_include_directories(gpubench PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/packaging/windows)
+    target_link_libraries(gpubench_lib PUBLIC advapi32)
 endif()
 
 # Link libraries
 if(Vulkan_FOUND)
     target_link_libraries(gpubench PUBLIC Vulkan::Vulkan)
     target_link_libraries(gpubench_lib PUBLIC Vulkan::Vulkan)
-    # Removing shaderc dependency for runtime compilation
-    # if(SHADERC_FOUND)
-    #     target_link_libraries(gpubench PUBLIC ${SHADERC_LIBRARY})
-    #     target_compile_definitions(gpubench PRIVATE HAVE_SHADERC)
-    # endif()
 endif()
 
 if(OpenCL_FOUND)
-    # No longer linking OpenCL directly to avoid RPM dependency
-    # target_link_libraries(gpubench PUBLIC ${OpenCL_LIBRARIES})
+    # Dynamically loaded at runtime via dlopen / LoadLibraryA
 endif()
 
 if(HIP_FOUND)
-    # No longer linking HIP directly to avoid RPM dependency
-    # target_link_libraries(gpubench PRIVATE hip::host)
-    # if(HIPRTC_LIBRARY)
-    #     target_link_libraries(gpubench PRIVATE ${HIPRTC_LIBRARY})
-    # endif()
     target_compile_definitions(gpubench PRIVATE HAVE_HIPRTC __HIP_PLATFORM_AMD__)
     target_compile_definitions(gpubench_lib PRIVATE HAVE_HIPRTC __HIP_PLATFORM_AMD__)
 endif()
@@ -512,6 +577,7 @@ add_subdirectory(tests)
 # Build Native C++ Workstation GUI (Option D: Dear ImGui + ImPlot + Vulkan/SDL3)
 option(GPUBENCH_BUILD_GUI "Build native C++ Dear ImGui workstation GUI" ON)
 
+set(GPUBENCH_SYSTEM_SDL3 FALSE)
 if(GPUBENCH_BUILD_GUI)
     find_package(SDL3 QUIET)
     if(NOT SDL3_FOUND)
@@ -520,24 +586,37 @@ if(GPUBENCH_BUILD_GUI)
             pkg_check_modules(SDL3 sdl3)
         endif()
     endif()
+    if(SDL3_FOUND)
+        set(GPUBENCH_SYSTEM_SDL3 TRUE)
+    endif()
 
     if(NOT SDL3_FOUND AND Vulkan_FOUND)
         include(FetchContent)
         message(STATUS "SDL3 not found on system; fetching SDL3 via FetchContent...")
+        set(SDL_INSTALL OFF CACHE BOOL "" FORCE)
+        set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
+        set(SDL_TESTS OFF CACHE BOOL "" FORCE)
+        set(SDL_TEST_ENABLE OFF CACHE BOOL "" FORCE)
+        set(SDL_WERROR OFF CACHE BOOL "" FORCE)
+        if(WIN32)
+            set(SDL_SHARED ON CACHE BOOL "" FORCE)
+            set(SDL_STATIC OFF CACHE BOOL "" FORCE)
+        else()
+            # Statically link FetchContent SDL3 on Linux/macOS so packaged binaries (.tar.gz/.deb/.rpm/.dmg)
+            # run standalone without requiring an unshipped libSDL3.so.0 or distros lacking libsdl3-0.
+            set(SDL_SHARED OFF CACHE BOOL "" FORCE)
+            set(SDL_STATIC ON CACHE BOOL "" FORCE)
+        endif()
+        set(SDL_X11_XSCRNSAVER OFF CACHE BOOL "" FORCE)
+        set(SDL_X11_XTEST OFF CACHE BOOL "" FORCE)
         FetchContent_Declare(
             SDL3
             GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
             GIT_TAG release-3.4.16
             GIT_SHALLOW TRUE
             SYSTEM
+            EXCLUDE_FROM_ALL
         )
-        set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
-        set(SDL_TESTS OFF CACHE BOOL "" FORCE)
-        set(SDL_TEST_ENABLE OFF CACHE BOOL "" FORCE)
-        set(SDL_WERROR OFF CACHE BOOL "" FORCE)
-        set(SDL_SHARED ON CACHE BOOL "" FORCE)
-        set(SDL_X11_XSCRNSAVER OFF CACHE BOOL "" FORCE)
-        set(SDL_X11_XTEST OFF CACHE BOOL "" FORCE)
         FetchContent_MakeAvailable(SDL3)
         set(SDL3_FOUND TRUE)
     endif()
@@ -551,6 +630,12 @@ if(GPUBENCH_BUILD_GUI)
         set(GUI_SOURCES
             cpp_src/gui/main.cpp
             cpp_src/gui/GuiApp.cpp
+            cpp_src/gui/GuiSuitePanel.cpp
+            cpp_src/gui/GuiDiagramRenderer.cpp
+            cpp_src/gui/GuiTelemetryPanel.cpp
+            cpp_src/gui/GuiScorecardPanel.cpp
+            cpp_src/gui/GuiViewportPanel.cpp
+            cpp_src/gui/GuiRooflinePanel.cpp
             cpp_src/gui/TelemetryWorker.cpp
             cpp_src/gui/VulkanContext.cpp
         )
@@ -579,14 +664,26 @@ if(GPUBENCH_BUILD_GUI)
             ${IMPLOT_DIR}/implot.cpp
             ${IMPLOT_DIR}/implot_items.cpp
         )
-        if(NOT MSVC)
+        if(MSVC)
             set_source_files_properties(${GUI_THIRD_PARTY_SOURCES} PROPERTIES
-                COMPILE_OPTIONS "-Wno-unused-parameter;-Wno-missing-field-initializers"
+                COMPILE_OPTIONS "/wd4100;/wd4127;/wd4189;/wd4244;/wd4305;/wd4456;/wd4457;/wd4701"
+            )
+        else()
+            set_source_files_properties(${GUI_THIRD_PARTY_SOURCES} PROPERTIES
+                COMPILE_OPTIONS "-Wno-unused-parameter;-Wno-missing-field-initializers;-Wno-unused-variable;-Wno-unused-function;-Wno-implicit-fallthrough"
             )
         endif()
 
         add_executable(gpubench-gui WIN32 ${GUI_SOURCES} ${GUI_THIRD_PARTY_SOURCES})
         set_target_properties(gpubench-gui PROPERTIES CXX_STANDARD 23 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+        if(Vulkan_FOUND)
+            add_dependencies(gpubench-gui shaders)
+        endif()
+        if(UNIX AND NOT APPLE)
+            set_target_properties(gpubench-gui PROPERTIES
+                INSTALL_RPATH "$ORIGIN;$ORIGIN/../lib;$ORIGIN/../lib64"
+            )
+        endif()
         target_compile_definitions(gpubench-gui PRIVATE GPUBENCH_VERSION="${PROJECT_FULL_VERSION}" HAVE_VULKAN)
         if(OpenCL_FOUND)
             target_compile_definitions(gpubench-gui PRIVATE HAVE_OPENCL)
@@ -597,16 +694,21 @@ if(GPUBENCH_BUILD_GUI)
 
         target_include_directories(gpubench-gui PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/cpp_src
+            ${CMAKE_CURRENT_BINARY_DIR}/cpp_src
             ${CMAKE_CURRENT_SOURCE_DIR}/cpp_src/gui
         )
         target_include_directories(gpubench-gui SYSTEM PRIVATE
             ${Vulkan_INCLUDE_DIRS}
+            ${CMAKE_CURRENT_SOURCE_DIR}/cpp_src/third_party
+            ${CMAKE_CURRENT_SOURCE_DIR}/external
             ${IMGUI_DIR}
             ${IMGUI_DIR}/backends
             ${IMPLOT_DIR}
         )
 
-        if(TARGET SDL3::SDL3)
+        if(NOT WIN32 AND NOT GPUBENCH_SYSTEM_SDL3 AND TARGET SDL3::SDL3-static)
+            target_link_libraries(gpubench-gui PRIVATE SDL3::SDL3-static)
+        elseif(TARGET SDL3::SDL3)
             target_link_libraries(gpubench-gui PRIVATE SDL3::SDL3)
         elseif(SDL3_LIBRARIES)
             target_include_directories(gpubench-gui SYSTEM PRIVATE ${SDL3_INCLUDE_DIRS})
@@ -630,7 +732,7 @@ if(GPUBENCH_BUILD_GUI)
                     ${CMAKE_CURRENT_BINARY_DIR}/
                     COMMENT "Copying SDL3 runtime DLL to binary directory"
                 )
-                install(TARGETS SDL3-shared DESTINATION bin)
+                install(FILES $<TARGET_FILE:SDL3-shared> DESTINATION bin)
             elseif(TARGET SDL3::SDL3-shared)
                 add_custom_command(TARGET gpubench-gui POST_BUILD
                     COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -667,6 +769,12 @@ if(GPUBENCH_BUILD_GUI)
     endif()
 endif()
 
+if(UNIX AND NOT APPLE)
+    set_target_properties(gpubench PROPERTIES
+        INSTALL_RPATH "$ORIGIN;$ORIGIN/../lib;$ORIGIN/../lib64"
+    )
+endif()
+
 # Install targets
 install(TARGETS gpubench DESTINATION bin)
 
@@ -698,6 +806,7 @@ if(Vulkan_FOUND)
             PATTERN "*.vert"
             PATTERN "*.frag"
             PATTERN "*.glsl"
+            PATTERN "*.spvasm"
             PATTERN "*.spv")
 endif()
 
@@ -871,7 +980,11 @@ elseif(UNIX AND NOT APPLE)
     # DEB package dependencies (Debian package names; libvulkan1 is the Vulkan loader).
     # OpenCL/ROCm stay OPTIONAL -- they are resolved at runtime via dynamic loading,
     # so they are intentionally not listed here (mirrors the RPM policy below).
-    set(CPACK_DEBIAN_PACKAGE_DEPENDS "libvulkan1, libc6, libstdc++6, libsdl3-0")
+    if(GPUBENCH_SYSTEM_SDL3)
+        set(CPACK_DEBIAN_PACKAGE_DEPENDS "libvulkan1, libc6, libstdc++6, libsdl3-0")
+    else()
+        set(CPACK_DEBIAN_PACKAGE_DEPENDS "libvulkan1, libc6, libstdc++6")
+    endif()
     
     # RPM package settings
     set(CPACK_RPM_PACKAGE_LICENSE "MIT")
@@ -883,7 +996,11 @@ elseif(UNIX AND NOT APPLE)
     # Manually specify minimal required dependencies
     # We only REQUIRE Vulkan loader and standard libraries
     # OpenCL/ROCm are OPTIONAL due to dynamic loading
-    set(CPACK_RPM_PACKAGE_REQUIRES "vulkan-loader, glibc, libgcc, libstdc++, SDL3")
+    if(GPUBENCH_SYSTEM_SDL3)
+        set(CPACK_RPM_PACKAGE_REQUIRES "vulkan-loader, glibc, libgcc, libstdc++, SDL3")
+    else()
+        set(CPACK_RPM_PACKAGE_REQUIRES "vulkan-loader, glibc, libgcc, libstdc++")
+    endif()
     file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tmp")
     set(CPACK_RPM_SPEC_MORE_DEFINE "%define _tmppath ${CMAKE_CURRENT_BINARY_DIR}/tmp\n%define _build_id_links none")
 

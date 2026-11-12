@@ -1,0 +1,59 @@
+#version 460
+#extension GL_NV_cooperative_vector : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int8 : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int32 : require
+
+layout(local_size_x = 128, local_size_y = 1, local_size_z = 1) in;
+
+layout(std430, set = 0, binding = 0) readonly buffer WeightBuffer {
+    int8_t weights[];
+} weightBuf;
+
+layout(std430, set = 0, binding = 1) readonly buffer BiasBuffer {
+    int32_t biases[];
+} biasBuf;
+
+layout(std430, set = 0, binding = 2) buffer OutputBuffer {
+    int32_t outVals[];
+} outBuf;
+
+layout(push_constant) uniform PushConsts {
+    uint numThreads;
+    uint iterations;
+} pc;
+
+void main() {
+    uint tid = gl_GlobalInvocationID.x;
+    if (tid >= pc.numThreads) {
+        return;
+    }
+
+    coopvecNV<int8_t, 16> v;
+    for (uint c = 0u; c < 16u; ++c) {
+        v[c] = int8_t(int((tid + c) & 7u) + 1);
+    }
+
+    coopvecNV<int32_t, 16> acc;
+    for (uint it = 0u; it < pc.iterations; ++it) {
+        coopVecMatMulAddNV(
+            acc,
+            v,
+            gl_ComponentTypeSignedInt8NV,
+            weightBuf.weights, 0u,
+            gl_ComponentTypeSignedInt8NV,
+            biasBuf.biases, 0u,
+            gl_ComponentTypeSignedInt32NV,
+            16, 16,
+            gl_CooperativeVectorMatrixLayoutRowMajorNV,
+            false,
+            16u);
+        for (uint c = 0u; c < 16u; ++c) {
+            v[c] = int8_t(clamp(acc[c] >> 4, -64, 64));
+        }
+    }
+
+    uint baseOut = (tid & 4095u) * 16u;
+    for (uint c = 0u; c < 16u; ++c) {
+        outBuf.outVals[baseOut + c] = acc[c];
+    }
+}

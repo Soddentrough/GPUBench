@@ -1,4 +1,8 @@
 #include "benchmarks/Fp16Bench.h"
+#ifdef HAVE_VULKAN
+#include "core/VulkanContext.h"
+#endif
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <filesystem>
@@ -6,21 +10,28 @@
 
 bool Fp16Bench::IsSupported(const DeviceInfo &info,
                             IComputeContext *context) const {
+  (void)context;
   return info.fp16Support;
 }
 
 void Fp16Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
   this->context = &context;
+  tileM = 16;
+  tileN = 16;
+  tileK = 16;
+  matrixBlockX = 32;
 
   // Create storage buffers (separate vector and matrix buffers prevent config aliasing)
   size_t bufferSize =
       8192 * 64 * 4 * 4; // 8MB buffer to prevent out of bounds
   buffer = context.createBuffer(bufferSize);
+  matrixInputBuffer = context.createBuffer(bufferSize);
   matrixBuffer = context.createBuffer(bufferSize);
 
   // Initialize buffers with packed FP16 0.03125 (0x2800) so both vector and matrix loads see non-zero finite values
   std::vector<uint32_t> initData(bufferSize / sizeof(uint32_t), 0x28002800u);
   context.writeBuffer(buffer, 0, bufferSize, initData.data());
+  context.writeBuffer(matrixInputBuffer, 0, bufferSize, initData.data());
   context.writeBuffer(matrixBuffer, 0, bufferSize, initData.data());
 
   // Load Vector Kernel
@@ -42,20 +53,46 @@ void Fp16Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
   vectorKernel = context.createKernel(vector_file.string(), vector_kernel_name, 1);
   context.setKernelArg(vectorKernel, 0, buffer);
 
+  DeviceInfo devInfo = context.getCurrentDeviceInfo();
+  if (context.getBackend() == ComputeBackend::ROCm) {
+    matrixBlockX = std::max(32u, devInfo.subgroupSize);
+  }
+
   // Optionally load Matrix Kernel if supported
   bool try_load_matrix = false;
   if ((context.getBackend() == ComputeBackend::Vulkan ||
        context.getBackend() == ComputeBackend::ROCm) &&
-      context.getCurrentDeviceInfo().cooperativeMatrixSupport) {
+      devInfo.cooperativeMatrixSupport) {
     try_load_matrix = true;
   }
 
   if (try_load_matrix) {
     try {
-      std::string func_name = (context.getBackend() == ComputeBackend::ROCm) ? "run_benchmark" : "main";
-      matrixKernel = context.createKernel(matrix_file.string(), func_name, 1);
-      if (matrixKernel) {
+      if (context.getBackend() == ComputeBackend::Vulkan) {
+#ifdef HAVE_VULKAN
+        auto *vc = static_cast<VulkanContext *>(&context);
+        auto tile = vc->selectCoopMatrixTile(VK_COMPONENT_TYPE_FLOAT16_KHR,
+                                             VK_COMPONENT_TYPE_FLOAT32_KHR);
+        if (tile.supported) {
+          tileM = tile.M;
+          tileN = tile.N;
+          tileK = tile.K;
+          matrixBlockX = tile.subgroupSize;
+        }
+#endif
+        matrixKernel = context.createKernelWithSpecConstants(
+            matrix_file.string(), "main", 2,
+            {tileM, tileN, tileK, matrixBlockX});
+        if (matrixKernel) {
+          context.setKernelArg(matrixKernel, 0, matrixInputBuffer);
+          context.setKernelArg(matrixKernel, 1, matrixBuffer);
+        }
+      } else {
+        matrixKernel =
+            context.createKernel(matrix_file.string(), "run_benchmark", 1);
+        if (matrixKernel) {
           context.setKernelArg(matrixKernel, 0, matrixBuffer);
+        }
       }
     } catch (...) {
       matrixKernel = nullptr;
@@ -65,10 +102,12 @@ void Fp16Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
 
 void Fp16Bench::Run(uint32_t config_idx) {
   if (config_idx == 0) {
-    context->dispatch(vectorKernel, 8192, 1, 1, 64, 1, 1);
-  } else if (matrixKernel) {
-    // 65536 WGs of 32 threads each — double dispatch to saturate tensor units
-    context->dispatch(matrixKernel, 65536, 1, 1, 32, 1, 1);
+    if (vectorKernel) {
+      context->dispatch(vectorKernel, 8192, 1, 1, 64, 1, 1);
+    }
+  } else if (config_idx == 1 && matrixKernel) {
+    // 65536 WGs (32768 x 2 2D grid <= 65535 baseline limit) of matrixBlockX threads each
+    context->dispatch(matrixKernel, 32768, 2, 1, matrixBlockX, 1, 1);
   }
 }
 
@@ -86,6 +125,10 @@ void Fp16Bench::Teardown() {
       context->releaseBuffer(buffer);
       buffer = nullptr;
     }
+    if (matrixInputBuffer) {
+      context->releaseBuffer(matrixInputBuffer);
+      matrixInputBuffer = nullptr;
+    }
     if (matrixBuffer) {
       context->releaseBuffer(matrixBuffer);
       matrixBuffer = nullptr;
@@ -96,34 +139,27 @@ void Fp16Bench::Teardown() {
 
 BenchmarkResult Fp16Bench::GetResult(uint32_t config_idx) const {
   if (config_idx == 0) {
-    // Vulkan: 16 f16vec4 FMAs per iteration = 16 * 8 = 128 FP16 ops per iteration, 65536 iters.
-    // Total ops per thread = 65536 * 128 = 8,388,608 ops (<=64 VGPRs, 100% occupancy)
-    uint64_t iters = 65536; // Vulkan default
-    uint64_t ops_per_iter = 128; // 16 FMAs × 8 ops each
+    uint64_t iters = 65536;
+    uint64_t ops_per_iter = 128;
     if (context) {
-      if (context->getBackend() == ComputeBackend::ROCm) {
-        iters = 16384;
-        ops_per_iter = 128;
-      } else if (context->getBackend() == ComputeBackend::OpenCL) {
+      if (context->getBackend() == ComputeBackend::ROCm ||
+          context->getBackend() == ComputeBackend::OpenCL) {
         iters = 16384;
         ops_per_iter = 128;
       }
     }
-    // 8192 workgroups × 64 threads
     uint64_t num_ops = iters * ops_per_iter * 8192 * 64;
     return {num_ops, 0.0};
   } else {
-    // coopmat 16x16x16: 16*16*16*2 = 8192 FP16 ops per coopMatMulAdd.
-    // Each subgroup (32 threads) computes one tile — not multiplied by thread count.
-    // Shader loops 4096 iters * 8 accumulators = 32768 WMMA ops. Dispatch: 65536 WGs.
-    uint64_t num_ops = (uint64_t)65536 * 32768 * 8192;
+    uint64_t tile_ops = 2ULL * tileM * tileN * tileK;
+    uint64_t num_ops = 65536ULL * 32768ULL * tile_ops;
     return {num_ops, 0.0};
   }
 }
 
 bool Fp16Bench::ValidateResults(uint32_t config_idx) const {
-  if (!context || !buffer) return false;
-  if (config_idx == 1 && !matrixKernel) return true;
+  if (!context || !buffer || config_idx >= 2) return false;
+  if (config_idx == 1 && !matrixKernel) return false;
   if (config_idx == 0 && !vectorKernel) return false;
 
   try {
@@ -158,16 +194,23 @@ bool Fp16Bench::ValidateResults(uint32_t config_idx) const {
     constexpr uint16_t kUnwrittenSeed16 = 0x2800u;
     constexpr uint32_t kUnwrittenSeed32 = 0x28002800u;
 
-    if (config_idx == 1 && context->getBackend() == ComputeBackend::ROCm) {
-      std::vector<float> hostOut(64, 0.0f);
+    if (config_idx == 1) {
+      const size_t checkCount =
+          std::max<size_t>(16u, std::min<size_t>(64u, static_cast<size_t>(tileM) * tileN));
+      std::vector<float> hostOut(checkCount, 0.0f);
       context->readBuffer(targetBuf, 0, hostOut.size() * sizeof(float), hostOut.data());
       for (float v : hostOut) {
         if (std::isnan(v) || std::isinf(v) || v == 0.0f) return false;
         uint32_t rawBits = 0;
         std::memcpy(&rawBits, &v, sizeof(uint32_t));
         if (rawBits == kUnwrittenSeed32) return false;
-        // fp16_matrix.hip sums 8 elements of (8 accumulators * 4096 * 0.015625) = ~4096.0f
-        if (v < 4000.0f || v > 4200.0f) return false;
+        if (context->getBackend() == ComputeBackend::ROCm) {
+          // fp16_matrix.hip sums 8 elements of (8 accumulators * 4096 * 0.015625) = ~4096.0f
+          if (v < 4000.0f || v > 4200.0f) return false;
+        } else {
+          // coop_matrix_fp16.comp stores float32 accumulator (~5.12f)
+          if (v < 3.0f || v > 10.0f) return false;
+        }
       }
       return true;
     }
@@ -178,7 +221,7 @@ bool Fp16Bench::ValidateResults(uint32_t config_idx) const {
       if (h == kUnwrittenSeed16) return false;
       float v = fp16ToFloat(h);
       if (std::isnan(v) || std::isinf(v) || v == 0.0f) return false;
-      // Vector converges to ~4.0f (Vulkan) or ~8.0f (ROCm/OpenCL); Vulkan Matrix outputs ~5.12f
+      // Vector converges to ~4.0f (Vulkan) or ~8.0f (ROCm/OpenCL)
       if (v < 3.0f || v > 10.0f) return false;
     }
     return true;

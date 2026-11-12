@@ -462,11 +462,9 @@ vec3 evaluateGltfPbrInternal(
     }
     if (dot(N, inDir) > 0.0) N = -N;
 
-    // Base Color & Alpha
+    // Base Color
     vec4 baseSample = (mat.baseColorTexIdx >= 0) ? sampleTexture(uint(mat.baseColorTexIdx), uv) : vec4(1.0);
     vec3 baseColor = pow(baseSample.rgb, vec3(2.2)) * mat.baseColorFactor.rgb;
-    float alpha = baseSample.a * mat.baseColorFactor.a;
-    if (mat.alphaMode == 1u && alpha < mat.alphaCutoff) return vec3(0.0);
 
     // Metallic & Roughness
     float roughness = mat.roughnessFactor;

@@ -8,6 +8,13 @@
 #include <functional>
 #include <atomic>
 
+#include <memory>
+
+class VulkanContext;
+
+void SetSharedVulkanContextAPI(std::shared_ptr<VulkanContext> sharedCtx);
+std::shared_ptr<VulkanContext> GetSharedVulkanContextAPI();
+
 std::vector<ResultData> RunBenchmarksAPI(
     const std::vector<std::string>& benchmarks_to_run,
     const std::vector<uint32_t>& device_indices,
@@ -26,29 +33,53 @@ std::vector<ResultData> RunBenchmarksAPI(
 
 struct DeviceProfile {
     std::string backend;
-    uint32_t deviceIndex;
+    uint32_t deviceIndex = 0;
     std::string deviceName;
-    uint32_t vendorID;
-    uint32_t deviceID;
+    uint32_t vendorID = 0;
+    uint32_t deviceID = 0;
     std::string driverName;
     std::string driverInfo;
     std::string driverVersion;
     std::string apiVersion;
-    uint64_t vramTotalMb;
-    uint32_t subgroupSize;
-    uint32_t maxWorkGroupSize;
-    bool rayTracingSupported;
-    bool serSupported;
-    bool workGraphsSupported;
-    bool cooperativeMatrixSupported;
-    bool float16Supported;
-    bool int8Supported;
+    uint64_t vramTotalMb = 0;
+    uint32_t computeUnits = 0;
+    uint32_t subgroupSize = 0;
+    uint32_t maxWorkGroupSize = 0;
+    bool isApu = false;
+    bool rebarSupported = false;
+    bool rayTracingSupported = false;
+    bool serSupported = false;
+    bool opacityMicromapSupported = false;
+    bool workGraphsSupported = false;
+    bool cooperativeMatrixSupported = false;
+    bool structuredSparsitySupported = false;
+    bool cooperativeVectorSupported = false;
+    bool float16Supported = false;
+    bool int8Supported = false;
+    bool ocpFp6Supported = false;
+    bool ocpFp4Supported = false;
     bool performanceQuerySupported = false;
+};
+
+struct BenchmarkConfigMetadata {
+    std::string benchmarkName;
+    uint32_t configIndex = 0;
+    std::string configName;
+    std::string displayName;
+    std::string component;
+    std::string subcategory;
+    std::string metric;
+    std::string description;
+    int sortWeight = 0;
+    double operationalIntensity = 0.0;
+    bool isDeviceDependent = true;
+    std::vector<std::string> aliases;
 };
 
 std::vector<std::string> GetAvailableHardwareAPI();
 std::vector<std::string> GetAvailableBenchmarksAPI();
 std::vector<DeviceProfile> GetDeviceProfilesAPI();
+std::vector<BenchmarkConfigMetadata> GetBenchmarkMetadataCatalogAPI();
 
 struct BenchmarkSupportInfo {
     std::string id;

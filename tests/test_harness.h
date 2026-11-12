@@ -96,12 +96,21 @@ public:
   using std::runtime_error::runtime_error;
 };
 
+template <typename Tag> struct TestBody;
+
 } // namespace gpubench::test
 
 #define TEST_CASE(suite, name) \
-  static void suite##_##name##_impl(); \
-  static ::gpubench::test::TestRegistrar suite##_##name##_reg(#suite, #name, suite##_##name##_impl); \
-  static void suite##_##name##_impl()
+  namespace gpubench::test { \
+  struct suite##_##name##_tag {}; \
+  template <> \
+  struct TestBody<suite##_##name##_tag> { \
+    static void run(); \
+  }; \
+  } \
+  static ::gpubench::test::TestRegistrar suite##_##name##_reg( \
+      #suite, #name, &::gpubench::test::TestBody<::gpubench::test::suite##_##name##_tag>::run); \
+  void ::gpubench::test::TestBody<::gpubench::test::suite##_##name##_tag>::run()
 
 #define ASSERT_TRUE(cond) \
   do { \

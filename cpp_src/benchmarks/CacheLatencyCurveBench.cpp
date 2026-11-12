@@ -97,49 +97,15 @@ std::string CacheLatencyCurveBench::GetConfigSupportNote(
 
 void CacheLatencyCurveBench::Setup(IComputeContext &context, const std::string &kernel_dir) {
   this->context = &context;
+  activeConfigIdx = -1;
+  totalBufferBytes = 0;
 
   DeviceInfo info = context.getCurrentDeviceInfo();
   for (auto &cfg : configs) {
     cfg.cacheLevelHint = ComputeAdaptiveHint(cfg.workingSetBytes, info);
+    cfg.startWordIndex = 0;
+    cfg.expectedTerminalIndex = 0;
   }
-
-  // Calculate total buffer allocation
-  totalBufferBytes = 0;
-  for (const auto &cfg : configs) {
-    totalBufferBytes += cfg.workingSetBytes;
-  }
-
-  size_t totalWords = totalBufferBytes / sizeof(uint32_t);
-  std::vector<uint32_t> hostBuffer(totalWords, 0);
-
-  uint64_t currentByteOffset = 0;
-  for (size_t c = 0; c < configs.size(); ++c) {
-    uint32_t baseWordOffset = static_cast<uint32_t>(currentByteOffset / sizeof(uint32_t));
-    uint64_t numLines = configs[c].workingSetBytes / 128; // 128 bytes per cache line
-    if (numLines == 0) numLines = 1;
-
-    std::vector<uint32_t> perm(numLines);
-    std::iota(perm.begin(), perm.end(), 0);
-    std::mt19937 g(1337 + static_cast<uint32_t>(c));
-    std::shuffle(perm.begin(), perm.end(), g);
-
-    for (size_t i = 0; i < numLines; ++i) {
-      uint32_t curLine = perm[i];
-      uint32_t nextLine = perm[(i + 1) % numLines];
-      // Store next line's word index in the first word of curLine
-      size_t curWord = baseWordOffset + static_cast<size_t>(curLine) * 32;
-      uint32_t nextWord = baseWordOffset + nextLine * 32;
-      hostBuffer[curWord] = nextWord;
-    }
-
-    configs[c].startWordIndex = baseWordOffset + perm[0] * 32;
-    size_t targetStep = kIterations % numLines;
-    configs[c].expectedTerminalIndex = baseWordOffset + perm[targetStep] * 32;
-    currentByteOffset += configs[c].workingSetBytes;
-  }
-
-  buffer = context.createBuffer(totalBufferBytes);
-  context.writeBuffer(buffer, 0, totalBufferBytes, hostBuffer.data());
 
   std::filesystem::path kdir(kernel_dir);
   std::filesystem::path full_kernel_path;
@@ -157,12 +123,70 @@ void CacheLatencyCurveBench::Setup(IComputeContext &context, const std::string &
   }
 
   kernel = context.createKernel(full_kernel_path.string(), kernel_func, 1);
-  context.setKernelArg(kernel, 0, buffer);
+}
+
+void CacheLatencyCurveBench::PrepareConfig(uint32_t config_idx) {
+  if (!context || !kernel || config_idx >= configs.size()) {
+    return;
+  }
+  if (activeConfigIdx == static_cast<int32_t>(config_idx) && buffer != nullptr) {
+    return;
+  }
+  if (buffer != nullptr) {
+    context->waitIdle();
+    context->releaseBuffer(buffer);
+    buffer = nullptr;
+  }
+
+  uint64_t stepBytes = configs[config_idx].workingSetBytes;
+  size_t stepWords = static_cast<size_t>(stepBytes / sizeof(uint32_t));
+  std::vector<uint32_t> hostBuffer(stepWords, 0);
+
+  uint64_t numLines = stepBytes / 128ULL;
+  if (numLines == 0) {
+    numLines = 1;
+  }
+
+  std::vector<uint32_t> perm(static_cast<size_t>(numLines));
+  std::iota(perm.begin(), perm.end(), 0u);
+  std::mt19937 g(1337u + config_idx);
+  std::shuffle(perm.begin(), perm.end(), g);
+
+  for (size_t i = 0; i < static_cast<size_t>(numLines); ++i) {
+    uint32_t curLine = perm[i];
+    uint32_t nextLine = perm[(i + 1) % static_cast<size_t>(numLines)];
+    size_t curWord = static_cast<size_t>(curLine) * 32u;
+    uint32_t nextWord = nextLine * 32u;
+    hostBuffer[curWord] = nextWord;
+  }
+
+  configs[config_idx].startWordIndex = perm[0] * 32u;
+  size_t targetStep = kIterations % static_cast<size_t>(numLines);
+  configs[config_idx].expectedTerminalIndex = perm[targetStep] * 32u;
+
+  buffer = context->createBuffer(stepBytes);
+  context->writeBuffer(buffer, 0, stepBytes, hostBuffer.data());
+  context->setKernelArg(kernel, 0, buffer);
+  totalBufferBytes = stepBytes;
+  activeConfigIdx = static_cast<int32_t>(config_idx);
+}
+
+void CacheLatencyCurveBench::ReleaseConfigResources(uint32_t /*config_idx*/) {
+  if (context && buffer) {
+    context->waitIdle();
+    context->releaseBuffer(buffer);
+    buffer = nullptr;
+  }
+  totalBufferBytes = 0;
+  activeConfigIdx = -1;
 }
 
 void CacheLatencyCurveBench::Run(uint32_t config_idx) {
   if (config_idx >= configs.size() || !kernel || !context) {
     throw std::runtime_error("CacheLatencyCurveBench: invalid config or uninitialized state");
+  }
+  if (activeConfigIdx != static_cast<int32_t>(config_idx) || !buffer) {
+    PrepareConfig(config_idx);
   }
 
   uint32_t iterations = kIterations;
@@ -185,9 +209,12 @@ void CacheLatencyCurveBench::Teardown() {
     }
     context = nullptr;
   }
+  totalBufferBytes = 0;
+  activeConfigIdx = -1;
 }
 
 BenchmarkResult CacheLatencyCurveBench::GetResult(uint32_t config_idx) const {
+  (void)config_idx;
   return { kIterations, 0.0 };
 }
 

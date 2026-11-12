@@ -17,7 +17,8 @@ layout(push_constant) uniform PushConstants {
 } pc;
 
 void main() {
-    uint idx = gl_GlobalInvocationID.x;
+    uint wgId = gl_WorkGroupID.y * gl_NumWorkGroups.x + gl_WorkGroupID.x;
+    uint idx = wgId * 32u + gl_LocalInvocationID.x;
     if (idx >= pc.rayCount) return;
 
     // Conformal 2D mapping into geometry bounds [0.01, 0.99]
@@ -31,20 +32,22 @@ void main() {
 
     rayQueryEXT query;
     if (pc.mode == 0u) {
-        // Coherent shallow traversal: opaque fast path with immediate termination on Layer 0
+        // Coherent shallow traversal: opaque triangle fast path with immediate termination on Layer 0
         rayQueryInitializeEXT(query, topLevelAS,
                               gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT,
                               0xFF, origin, pc.tMin, direction, pc.tMax);
         while (rayQueryProceedEXT(query)) {}
     } else {
-        // Deep multi-layer BVH stress: traverse through all 64 stratified layers
-        // (z = 0.0 .. 6.3, t = 1.0 .. 7.3) before committing the deepest layer hit
+        // Deep multi-layer AABB BVH stress: traverse all 64 stratified VK_GEOMETRY_TYPE_AABBS_KHR layers
+        // (z = 0.0 .. 6.3, t = 0.99 .. 7.31) and commit a generated procedural hit on Layer 63.
         rayQueryInitializeEXT(query, topLevelAS,
-                              gl_RayFlagsNoOpaqueEXT,
+                              gl_RayFlagsNoneEXT,
                               0xFF, origin, pc.tMin, direction, pc.tMax);
         while (rayQueryProceedEXT(query)) {
-            if (rayQueryGetIntersectionTEXT(query, false) >= 7.25) {
-                rayQueryConfirmIntersectionEXT(query);
+            if (rayQueryGetIntersectionTypeEXT(query, false) == gl_RayQueryCandidateIntersectionAABBEXT &&
+                (rayQueryGetIntersectionPrimitiveIndexEXT(query, false) >> 10u) == 63u &&
+                rayQueryGetIntersectionTypeEXT(query, true) == gl_RayQueryCommittedIntersectionNoneEXT) {
+                rayQueryGenerateIntersectionEXT(query, 7.30);
             }
         }
     }
@@ -52,6 +55,6 @@ void main() {
     bool hasHit = (rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionNoneEXT);
     uvec4 ballot = subgroupBallot(hasHit);
     if (subgroupElect()) {
-        results.hits[gl_WorkGroupID.x] = subgroupBallotBitCount(ballot);
+        results.hits[wgId] = subgroupBallotBitCount(ballot);
     }
 }

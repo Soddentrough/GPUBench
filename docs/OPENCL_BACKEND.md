@@ -27,12 +27,13 @@ GPUBench classifies tests cleanly into fully supported native workloads and tran
 | **FP16 Compute** | ✅ **Supported** | `cl_khr_fp16` (`half` / `half2`) | Vector compute throughput. (Matrix mode requires cooperative matrix). |
 | **BF16 Compute** | ⚠️ *API Limitation* | None (`cl_khr_bfloat16` not standard) | Reported as `UNSUPPORTED (API Limitation)` without error/crash. |
 | **FP8 Compute** | ⚠️ *API Limitation* | None | Reported as `UNSUPPORTED (API Limitation)`. |
-| **FP6 / FP4** | ⚠️ *API / Hardware Limitation* | None (Sub-byte 4/6-bit FP extensions not standardized in OpenCL C) | Reported as `UNSUPPORTED`. |
+| **FP6 / FP4** | ⚠️ *API / Hardware Limitation* | None (OCP MXFP6/MXFP4 cooperative matrix not standardized in OpenCL C) | Reported as `UNSUPPORTED`. |
 | **INT8 Compute** | ✅ **Supported** | Standard vector math (`char4` / `v_dot4_i32_i8`) | Vector throughput across all OpenCL vendors. (Matrix mode requires cooperative matrix). |
-| **INT4 Compute** | ✅ **Supported (Vector)** | Packed sub-byte nibbles (`uint`) | Vector throughput supported (`kernels/opencl/int4.cl`); Matrix mode reported as `UNSUPPORTED`. |
+| **INT4 Compute** | ⚠️ *API Limitation* | Cooperative Matrix required (`VK_KHR_cooperative_matrix`) | Matrix-only benchmark; reported as `UNSUPPORTED (API Limitation)` on OpenCL without silent fallback. |
 | **ILP & Concurrency** | ✅ **Supported** | Standard OpenCL C 1.2+ (`fma`, integer add/bitwise) | 7 configurations spanning FP32 Ping-Pong/ILP8/ILP16, INT32 Ping-Pong/ILP8/ILP16, and Concurrent Mixed FP32+INT32. |
 | **LDS Bank Conflicts** | ✅ **Supported** | `__local` shared memory | 32-bank conflict sweep (Stride 1 to Stride 32). |
 | **Device Memory Bandwidth** | ✅ **Supported** | Standard OpenCL Buffers | 128, 256, and 1024 threads/group sweep modes (Read, Write, R/W). |
+| **L0/L1/L2/L3 Cache Bandwidth** | ✅ **Supported** | Constant-offset `float4` streaming (`kernels/opencl/cache_bw_robust.cl`) | Working-set-resident cache bandwidth across L0, L1, L2, and L3/Infinity Cache tiers. |
 | **Cache Latency & Curve** | ✅ **Supported** | Pointer-chasing buffer traversal | Single-workitem pointer chasing across L0/L1/L2/L3/VRAM hierarchy (4 KB to 256 MB). |
 | **Pixel Fill Rate (ROPs)** | ⚠️ *API Limitation* | Graphics pipeline required | Reported as `UNSUPPORTED (API Limitation)` (OpenCL lacks rasterizer/ROPs). |
 | **Ray Tracing (All 8 Suites)** | ⚠️ *API Limitation* | `VK_KHR_ray_query` / hardware BVH acceleration required | Reported as `UNSUPPORTED (API Limitation)` (OpenCL lacks hardware BVH traversal and ray query primitives). |

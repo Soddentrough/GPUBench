@@ -87,13 +87,14 @@ void RayRawTraversalBench::Setup(IComputeContext &context,
   vertexBufferCoherent =
       context.createBuffer(coherentVertices.size() * sizeof(float), coherentVertices.data());
 
-  // 2. Geometry 1: Deep Multi-Layer BVH Hierarchy (64 layers of 32x32 cells = 131,072 triangles)
-  // Forces deep internal node and leaf traversal through 64 stratified BVH layers.
+  // 2. Geometry 1: Deep Multi-Layer AABB BVH Hierarchy (64 layers of 32x32 cells = 65,536 AABBs)
+  // Uses true VK_GEOMETRY_TYPE_AABBS_KHR slabs so every ray traverses all 64 stratified AABB layers
+  // before generating a procedural intersection on Layer 63.
   uint32_t deepLayers = 64;
-  deepPrimitives = gridDim * gridDim * 2 * deepLayers;
+  deepPrimitives = gridDim * gridDim * deepLayers;
 
-  std::vector<float> deepVertices;
-  deepVertices.reserve(deepPrimitives * 9);
+  std::vector<VkAabbPositionsKHR> deepAabbs;
+  deepAabbs.reserve(deepPrimitives);
   for (uint32_t z = 0; z < deepLayers; ++z) {
     float fz = static_cast<float>(z) * 0.1f;
     for (uint32_t y = 0; y < gridDim; ++y) {
@@ -102,27 +103,25 @@ void RayRawTraversalBench::Setup(IComputeContext &context,
         float x1 = static_cast<float>(x + 1) / static_cast<float>(gridDim);
         float y0 = static_cast<float>(y) / static_cast<float>(gridDim);
         float y1 = static_cast<float>(y + 1) / static_cast<float>(gridDim);
-
-        // Triangle A
-        deepVertices.push_back(x0); deepVertices.push_back(y0); deepVertices.push_back(fz);
-        deepVertices.push_back(x1); deepVertices.push_back(y0); deepVertices.push_back(fz);
-        deepVertices.push_back(x0); deepVertices.push_back(y1); deepVertices.push_back(fz);
-
-        // Triangle B
-        deepVertices.push_back(x1); deepVertices.push_back(y0); deepVertices.push_back(fz);
-        deepVertices.push_back(x1); deepVertices.push_back(y1); deepVertices.push_back(fz);
-        deepVertices.push_back(x0); deepVertices.push_back(y1); deepVertices.push_back(fz);
+        deepAabbs.push_back({x0, y0, fz - 0.01f, x1, y1, fz + 0.01f});
       }
     }
   }
-  vertexBufferDeep =
-      context.createBuffer(deepVertices.size() * sizeof(float), deepVertices.data());
+  vertexBufferDeep = context.createBuffer(
+      deepAabbs.size() * sizeof(VkAabbPositionsKHR), deepAabbs.data());
 
   buildAS();
 
   std::filesystem::path kdir(kernel_dir);
   std::filesystem::path kernel_file = kdir / "vulkan" / "rt_raw_traversal.comp";
-  kernel = context.createKernel(kernel_file.string(), "main", 2);
+  kernels[0] = context.createKernel(kernel_file.string(), "main", 2);
+  kernels[1] = context.createKernel(kernel_file.string(), "main", 2);
+  kernel = kernels[0];
+
+  vContext->setKernelAS(kernels[0], 0, (AccelerationStructure)coherentTlas);
+  vContext->setKernelArg(kernels[0], 1, resultBuffer);
+  vContext->setKernelAS(kernels[1], 0, (AccelerationStructure)deepTlas);
+  vContext->setKernelArg(kernels[1], 1, resultBuffer);
 #endif // HAVE_VULKAN
 }
 
@@ -133,70 +132,92 @@ void RayRawTraversalBench::buildAS() {
   VkQueue queue = vContext->getComputeQueue();
 
   VkDeviceAddress vAddrCoherent = vContext->getBufferDeviceAddress(vertexBufferCoherent);
-  VkDeviceAddress vAddrDeep = vContext->getBufferDeviceAddress(vertexBufferDeep);
+  VkDeviceAddress aAddrDeep = vContext->getBufferDeviceAddress(vertexBufferDeep);
 
-  // Helper lambda for BLAS creation
-  auto createBLAS = [&](VkDeviceAddress vertexAddr, uint32_t primCount,
-                        VkAccelerationStructureKHR &blasHandle,
-                        ComputeBuffer &blasBufferHandle,
-                        VkAccelerationStructureBuildGeometryInfoKHR &buildInfoOut,
-                        VkAccelerationStructureGeometryKHR &geomOut,
-                        VkAccelerationStructureBuildSizesInfoKHR &sizesOut) {
-    geomOut.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
-    geomOut.pNext = nullptr;
-    geomOut.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
-    geomOut.flags = VK_GEOMETRY_OPAQUE_BIT_KHR; // Strict hardware opaque fast path
-    geomOut.geometry.triangles.sType =
-        VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
-    geomOut.geometry.triangles.pNext = nullptr;
-    geomOut.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
-    geomOut.geometry.triangles.vertexData.deviceAddress = vertexAddr;
-    geomOut.geometry.triangles.vertexStride = sizeof(float) * 3;
-    geomOut.geometry.triangles.maxVertex = primCount * 3 - 1;
-    geomOut.geometry.triangles.indexType = VK_INDEX_TYPE_NONE_KHR;
-    geomOut.geometry.triangles.transformData.deviceAddress = 0;
+  // 1. Coherent Triangle BLAS (strict hardware opaque triangle fast path)
+  VkAccelerationStructureGeometryKHR geomCoherent{};
+  geomCoherent.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
+  geomCoherent.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
+  geomCoherent.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+  geomCoherent.geometry.triangles.sType =
+      VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
+  geomCoherent.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
+  geomCoherent.geometry.triangles.vertexData.deviceAddress = vAddrCoherent;
+  geomCoherent.geometry.triangles.vertexStride = sizeof(float) * 3;
+  geomCoherent.geometry.triangles.maxVertex = coherentPrimitives * 3 - 1;
+  geomCoherent.geometry.triangles.indexType = VK_INDEX_TYPE_NONE_KHR;
 
-    buildInfoOut.sType =
-        VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
-    buildInfoOut.pNext = nullptr;
-    buildInfoOut.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-    buildInfoOut.flags =
-        VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR |
-        VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
-    buildInfoOut.geometryCount = 1;
-    buildInfoOut.pGeometries = &geomOut;
-    buildInfoOut.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+  VkAccelerationStructureBuildGeometryInfoKHR buildInfoCoherent{};
+  buildInfoCoherent.sType =
+      VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
+  buildInfoCoherent.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+  buildInfoCoherent.flags =
+      VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR |
+      VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
+  buildInfoCoherent.geometryCount = 1;
+  buildInfoCoherent.pGeometries = &geomCoherent;
+  buildInfoCoherent.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
 
-    sizesOut.sType =
-        VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
-    sizesOut.pNext = nullptr;
-    uint32_t maxPrimCount = primCount;
-    vkGetAccelerationStructureBuildSizesKHR_ptr(
-        device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &buildInfoOut,
-        &maxPrimCount, &sizesOut);
+  VkAccelerationStructureBuildSizesInfoKHR sizesCoherent{};
+  sizesCoherent.sType =
+      VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
+  uint32_t maxPrimCoherent = coherentPrimitives;
+  vkGetAccelerationStructureBuildSizesKHR_ptr(
+      device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &buildInfoCoherent,
+      &maxPrimCoherent, &sizesCoherent);
 
-    blasBufferHandle = context->createBuffer(sizesOut.accelerationStructureSize);
+  coherentBlasBuffer = context->createBuffer(sizesCoherent.accelerationStructureSize);
+  {
     VkAccelerationStructureCreateInfoKHR createInfo{
         VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR};
-    createInfo.buffer = vContext->getVkBuffer(blasBufferHandle);
-    createInfo.size = sizesOut.accelerationStructureSize;
+    createInfo.buffer = vContext->getVkBuffer(coherentBlasBuffer);
+    createInfo.size = sizesCoherent.accelerationStructureSize;
     createInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-    if (vkCreateAccelerationStructureKHR_ptr(device, &createInfo, nullptr, &blasHandle) != VK_SUCCESS) {
-      throw std::runtime_error("Failed to create BLAS in RayRawTraversalBench");
+    if (vkCreateAccelerationStructureKHR_ptr(device, &createInfo, nullptr, &coherentBlas) != VK_SUCCESS) {
+      throw std::runtime_error("Failed to create coherent BLAS in RayRawTraversalBench");
     }
-  };
+  }
 
-  VkAccelerationStructureGeometryKHR geomCoherent{};
-  VkAccelerationStructureBuildGeometryInfoKHR buildInfoCoherent{};
-  VkAccelerationStructureBuildSizesInfoKHR sizesCoherent{};
-  createBLAS(vAddrCoherent, coherentPrimitives, coherentBlas, coherentBlasBuffer,
-             buildInfoCoherent, geomCoherent, sizesCoherent);
-
+  // 2. Deep Multi-Layer AABB BLAS (non-opaque procedural AABBs so rayQueryProceedEXT yields all 64 layer candidates)
   VkAccelerationStructureGeometryKHR geomDeep{};
+  geomDeep.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
+  geomDeep.geometryType = VK_GEOMETRY_TYPE_AABBS_KHR;
+  geomDeep.flags = 0;
+  geomDeep.geometry.aabbs.sType =
+      VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_AABBS_DATA_KHR;
+  geomDeep.geometry.aabbs.data.deviceAddress = aAddrDeep;
+  geomDeep.geometry.aabbs.stride = sizeof(VkAabbPositionsKHR);
+
   VkAccelerationStructureBuildGeometryInfoKHR buildInfoDeep{};
+  buildInfoDeep.sType =
+      VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
+  buildInfoDeep.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+  buildInfoDeep.flags =
+      VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR |
+      VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
+  buildInfoDeep.geometryCount = 1;
+  buildInfoDeep.pGeometries = &geomDeep;
+  buildInfoDeep.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+
   VkAccelerationStructureBuildSizesInfoKHR sizesDeep{};
-  createBLAS(vAddrDeep, deepPrimitives, deepBlas, deepBlasBuffer,
-             buildInfoDeep, geomDeep, sizesDeep);
+  sizesDeep.sType =
+      VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
+  uint32_t maxPrimDeep = deepPrimitives;
+  vkGetAccelerationStructureBuildSizesKHR_ptr(
+      device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &buildInfoDeep,
+      &maxPrimDeep, &sizesDeep);
+
+  deepBlasBuffer = context->createBuffer(sizesDeep.accelerationStructureSize);
+  {
+    VkAccelerationStructureCreateInfoKHR createInfo{
+        VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR};
+    createInfo.buffer = vContext->getVkBuffer(deepBlasBuffer);
+    createInfo.size = sizesDeep.accelerationStructureSize;
+    createInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+    if (vkCreateAccelerationStructureKHR_ptr(device, &createInfo, nullptr, &deepBlas) != VK_SUCCESS) {
+      throw std::runtime_error("Failed to create deep AABB BLAS in RayRawTraversalBench");
+    }
+  }
 
   // TLAS Device Addresses
   VkAccelerationStructureDeviceAddressInfoKHR addrInfo{
@@ -224,8 +245,7 @@ void RayRawTraversalBench::buildAS() {
   instDeep.instanceCustomIndex = 0;
   instDeep.mask = 0xFF;
   instDeep.accelerationStructureReference = blasAddrDeep;
-  instDeep.flags =
-      VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
+  instDeep.flags = VK_GEOMETRY_INSTANCE_FORCE_NO_OPAQUE_BIT_KHR;
 
   instanceBufferCoherent = context->createBuffer(sizeof(instCoherent), &instCoherent);
   instanceBufferDeep = context->createBuffer(sizeof(instDeep), &instDeep);
@@ -240,7 +260,7 @@ void RayRawTraversalBench::buildAS() {
     tlasGeomOut.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
     tlasGeomOut.pNext = nullptr;
     tlasGeomOut.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
-    tlasGeomOut.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+    tlasGeomOut.flags = 0;
     tlasGeomOut.geometry.instances.sType =
         VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
     tlasGeomOut.geometry.instances.pNext = nullptr;
@@ -369,29 +389,32 @@ void RayRawTraversalBench::buildAS() {
 
 void RayRawTraversalBench::Run(uint32_t config_idx) {
 #ifdef HAVE_VULKAN
+  if (config_idx >= 2 || !kernels[config_idx]) {
+    return;
+  }
   VulkanContext *vContext = static_cast<VulkanContext *>(context);
-  if (lastRunConfig != static_cast<int>(config_idx)) {
+  if (lastRunConfig != -1 && lastRunConfig != static_cast<int>(config_idx)) {
     uint32_t checkCount = 1024;
     std::vector<uint32_t> zeroHits(checkCount, 0);
     context->writeBuffer(resultBuffer, 0, checkCount * sizeof(uint32_t), zeroHits.data());
-    lastRunConfig = static_cast<int>(config_idx);
   }
-  VkAccelerationStructureKHR activeTlas =
-      (config_idx == 0) ? coherentTlas : deepTlas;
+  lastRunConfig = static_cast<int>(config_idx);
 
-  vContext->setKernelAS(kernel, 0, (AccelerationStructure)activeTlas);
-  vContext->setKernelArg(kernel, 1, resultBuffer);
-
-  uint32_t mode = config_idx; // 0 for coherent, 1 for deep
+  ComputeKernel activeKernel = kernels[config_idx];
+  uint32_t mode = config_idx; // 0 for coherent triangles, 1 for deep 64-layer AABBs
   float tMin = 0.001f;
   float tMax = 100.0f;
 
-  vContext->setKernelArg(kernel, 2, sizeof(uint32_t), &rayCount);
-  vContext->setKernelArg(kernel, 3, sizeof(uint32_t), &mode);
-  vContext->setKernelArg(kernel, 4, sizeof(float), &tMin);
-  vContext->setKernelArg(kernel, 5, sizeof(float), &tMax);
+  vContext->setKernelArg(activeKernel, 2, sizeof(uint32_t), &rayCount);
+  vContext->setKernelArg(activeKernel, 3, sizeof(uint32_t), &mode);
+  vContext->setKernelArg(activeKernel, 4, sizeof(float), &tMin);
+  vContext->setKernelArg(activeKernel, 5, sizeof(float), &tMax);
 
-  vContext->dispatch(kernel, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
+  // 2D grid (31250 x 64 = 2,000,000 workgroups * 32 threads = 64,000,000 rays) stays strictly <= 65535
+  uint32_t totalWg = (rayCount + 31u) / 32u;
+  uint32_t gridY = 64u;
+  uint32_t gridX = (totalWg + gridY - 1u) / gridY;
+  vContext->dispatch(activeKernel, gridX, gridY, 1, 32, 1, 1);
 #else
   (void)config_idx;
 #endif
@@ -422,7 +445,13 @@ void RayRawTraversalBench::Teardown() {
   }
 
   if (context) {
-    if (kernel) { context->releaseKernel(kernel); kernel = nullptr; }
+    for (uint32_t i = 0; i < 2; ++i) {
+      if (kernels[i]) {
+        context->releaseKernel(kernels[i]);
+        kernels[i] = nullptr;
+      }
+    }
+    kernel = nullptr;
     if (resultBuffer) { context->releaseBuffer(resultBuffer); resultBuffer = nullptr; }
     if (vertexBufferCoherent) { context->releaseBuffer(vertexBufferCoherent); vertexBufferCoherent = nullptr; }
     if (vertexBufferDeep) { context->releaseBuffer(vertexBufferDeep); vertexBufferDeep = nullptr; }
@@ -435,6 +464,7 @@ void RayRawTraversalBench::Teardown() {
     if (scratchBuffer) { context->releaseBuffer(scratchBuffer); scratchBuffer = nullptr; }
     context = nullptr;
   }
+  lastRunConfig = -1;
 #endif
 }
 
@@ -555,11 +585,13 @@ void RayRawTraversalBench::DumpGeometry() const {
   if (!objFile.is_open()) return;
 
   uint32_t gridDim = 32;
-  uint32_t layers = 8; // Dump representative 8 layers for visualization
+  uint32_t layers = 64; // Dump all 64 stratified AABB layers (65,536 boxes) matching Deep Box Stress geometry
   uint32_t vIdx = 1;
 
   for (uint32_t z = 0; z < layers; ++z) {
     float fz = static_cast<float>(z) * 0.1f;
+    float z0 = fz - 0.01f;
+    float z1 = fz + 0.01f;
     for (uint32_t y = 0; y < gridDim; ++y) {
       for (uint32_t x = 0; x < gridDim; ++x) {
         float x0 = static_cast<float>(x) / static_cast<float>(gridDim);
@@ -567,16 +599,26 @@ void RayRawTraversalBench::DumpGeometry() const {
         float y0 = static_cast<float>(y) / static_cast<float>(gridDim);
         float y1 = static_cast<float>(y + 1) / static_cast<float>(gridDim);
 
-        // Quad vertices
-        objFile << "v " << x0 << " " << y0 << " " << fz << "\n";
-        objFile << "v " << x1 << " " << y0 << " " << fz << "\n";
-        objFile << "v " << x1 << " " << y1 << " " << fz << "\n";
-        objFile << "v " << x0 << " " << y1 << " " << fz << "\n";
+        objFile << "v " << x0 << " " << y0 << " " << z0 << "\n"
+                << "v " << x1 << " " << y0 << " " << z0 << "\n"
+                << "v " << x1 << " " << y1 << " " << z0 << "\n"
+                << "v " << x0 << " " << y1 << " " << z0 << "\n"
+                << "v " << x0 << " " << y0 << " " << z1 << "\n"
+                << "v " << x1 << " " << y0 << " " << z1 << "\n"
+                << "v " << x1 << " " << y1 << " " << z1 << "\n"
+                << "v " << x0 << " " << y1 << " " << z1 << "\n";
 
-        // Two triangles
-        objFile << "f " << vIdx << " " << vIdx + 1 << " " << vIdx + 3 << "\n";
-        objFile << "f " << vIdx + 1 << " " << vIdx + 2 << " " << vIdx + 3 << "\n";
-        vIdx += 4;
+        auto f = [&](uint32_t a, uint32_t b, uint32_t c, uint32_t d) {
+          objFile << "f " << (vIdx + a) << " " << (vIdx + b) << " "
+                  << (vIdx + c) << " " << (vIdx + d) << "\n";
+        };
+        f(0, 1, 2, 3);
+        f(4, 7, 6, 5);
+        f(0, 4, 5, 1);
+        f(3, 2, 6, 7);
+        f(0, 3, 7, 4);
+        f(1, 5, 6, 2);
+        vIdx += 8;
       }
     }
   }

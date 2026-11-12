@@ -3,14 +3,14 @@
 #include "core/VulkanContext.h"
 #include "utils/KernelPath.h"
 
-#define private public
 #include "benchmarks/Fp64Bench.h"
 #include "benchmarks/Fp32Bench.h"
 #include "benchmarks/Fp16Bench.h"
+#include "benchmarks/Fp6Bench.h"
+#include "benchmarks/Fp4Bench.h"
 #include "benchmarks/Int8Bench.h"
 #include "benchmarks/DualIssueBench.h"
 #include "benchmarks/Bf16Bench.h"
-#undef private
 
 #include <cmath>
 #include <iostream>
@@ -618,5 +618,81 @@ TEST_CASE(ComputeValidation, Fp32_Fp16_Int8_SentinelSeedRejection_NoSelfValidati
     }
   }
 }
+
+// ============================================================================
+// 11. FP6 & FP4 OCP Microscaling Capability Gating & Analytical Validation
+// ============================================================================
+
+TEST_CASE(ComputeValidation, Fp6_Fp4_CapabilityGating_And_Validation) {
+  auto ctx = createVulkanContext();
+  if (!ctx) { return; }
+
+  std::string kdir = KernelPath::find();
+  ASSERT_FALSE(kdir.empty());
+
+  DeviceInfo info = ctx->getCurrentDeviceInfo();
+
+  // Verify synthetic capability gating when fp6Support / fp4Support bits are toggled
+  {
+    Fp6Bench fp6Probe;
+    DeviceInfo noFp6 = info;
+    noFp6.fp6Support = false;
+    noFp6.cooperativeMatrixSupport = true;
+    ASSERT_FALSE(fp6Probe.IsSupported(noFp6, ctx.get()));
+    ASSERT_FALSE(fp6Probe.ValidateResults(0)); // Uninitialized must return false (never self-validate)
+
+    DeviceInfo yesFp6 = info;
+    yesFp6.fp6Support = true;
+    yesFp6.cooperativeMatrixSupport = true;
+    ASSERT_TRUE(fp6Probe.IsSupported(yesFp6, ctx.get()));
+  }
+  {
+    Fp4Bench fp4Probe;
+    DeviceInfo noFp4 = info;
+    noFp4.fp4Support = false;
+    noFp4.cooperativeMatrixSupport = true;
+    ASSERT_FALSE(fp4Probe.IsSupported(noFp4, ctx.get()));
+    ASSERT_FALSE(fp4Probe.ValidateResults(0)); // Uninitialized must return false (never self-validate)
+
+    DeviceInfo yesFp4 = info;
+    yesFp4.fp4Support = true;
+    yesFp4.cooperativeMatrixSupport = true;
+    ASSERT_TRUE(fp4Probe.IsSupported(yesFp4, ctx.get()));
+  }
+
+  // If the current hardware exposes native MXFP6 / MXFP4, run full positive & negative GPU validation
+  Fp6Bench fp6;
+  if (fp6.IsSupported(info, ctx.get())) {
+    fp6.Setup(*ctx, kdir);
+    ASSERT_FALSE(fp6.ValidateResults(0));
+    if (fp6.matrixKernel != nullptr) {
+      fp6.Run(0);
+      ctx->waitIdle();
+      ASSERT_TRUE(fp6.ValidateResults(0));
+      std::vector<float> zeros(64, 0.0f);
+      ctx->writeBuffer(fp6.outputBuffer, 0, zeros.size() * sizeof(float), zeros.data());
+      ctx->waitIdle();
+      ASSERT_FALSE(fp6.ValidateResults(0));
+    }
+    fp6.Teardown();
+  }
+
+  Fp4Bench fp4;
+  if (fp4.IsSupported(info, ctx.get())) {
+    fp4.Setup(*ctx, kdir);
+    ASSERT_FALSE(fp4.ValidateResults(0));
+    if (fp4.matrixKernel != nullptr) {
+      fp4.Run(0);
+      ctx->waitIdle();
+      ASSERT_TRUE(fp4.ValidateResults(0));
+      std::vector<float> zeros(64, 0.0f);
+      ctx->writeBuffer(fp4.outputBuffer, 0, zeros.size() * sizeof(float), zeros.data());
+      ctx->waitIdle();
+      ASSERT_FALSE(fp4.ValidateResults(0));
+    }
+    fp4.Teardown();
+  }
+}
+
 
 

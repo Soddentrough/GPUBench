@@ -1,5 +1,6 @@
 #include "benchmarks/CacheBench.h"
-#include <algorithm> // for std::min
+#include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -31,6 +32,7 @@ CacheBench::~CacheBench() {
 
 bool CacheBench::IsSupported(const DeviceInfo &info,
                              IComputeContext *context) const {
+  (void)context;
   if (targetCacheLevel == 3 && info.l3CacheSize == 0) {
     return false;
   }
@@ -44,10 +46,74 @@ void CacheBench::Setup(IComputeContext &context,
                        const std::string &kernel_dir) {
   this->context = &context;
 
-  // Ensure initData contains a valid cycle of exact buffer element count for pointer chasing
-  if (metric == "ns" && bufferSize > 0) {
-    // Inter-cache-line pointer chasing across 128-byte cache lines
-    // (matches CacheLatencyCurveBench methodology to ensure consistent hardware cache latency)
+  std::filesystem::path kdir(kernel_dir);
+  std::filesystem::path full_kernel_path;
+  if (context.getBackend() == ComputeBackend::ROCm) {
+    full_kernel_path = kdir / "rocm" / (kernelFile + ".hip");
+  } else if (context.getBackend() == ComputeBackend::OpenCL) {
+    full_kernel_path = kdir / "opencl" / (kernelFile + ".cl");
+  } else {
+    full_kernel_path = kdir / "vulkan" / (kernelFile + ".comp");
+  }
+
+  const std::string kernel_name =
+      (context.getBackend() == ComputeBackend::Vulkan) ? "main"
+                                                       : "run_benchmark";
+
+  if (metric == "GB/s") {
+    const DeviceInfo info = context.getCurrentDeviceInfo();
+    if (targetCacheLevel == 2 && info.l2CacheSize > 0) {
+      bufferSize = std::clamp<uint64_t>(info.l2CacheSize / 2,
+                                        512ULL * 1024ULL,
+                                        16ULL * 1024ULL * 1024ULL);
+    } else if (targetCacheLevel == 3 && info.l3CacheSize > 0) {
+      bufferSize = std::clamp<uint64_t>(info.l3CacheSize / 2,
+                                        8ULL * 1024ULL * 1024ULL,
+                                        128ULL * 1024ULL * 1024ULL);
+    }
+    bufferSize = std::max<uint64_t>(16384ULL, (bufferSize + 16383ULL) & ~16383ULL);
+    numWorkgroups = 2048u; // 2048 WGs x 128 threads = 262,144 threads (strictly <= 65535 WGs)
+
+    const size_t numFloats = static_cast<size_t>(bufferSize / sizeof(float));
+    std::vector<float> bwInit(numFloats);
+    for (size_t i = 0; i < numFloats; ++i) {
+      bwInit[i] = 1.0f + static_cast<float>(i & 15u) * 0.0625f;
+    }
+
+    buffer = context.createBuffer(bufferSize);
+    context.writeBuffer(buffer, 0, bufferSize, bwInit.data());
+
+    constexpr size_t kOutFloats = 65536;
+    std::vector<float> zeroOut(kOutFloats, 0.0f);
+    outBuffer = context.createBuffer(kOutFloats * sizeof(float));
+    context.writeBuffer(outBuffer, 0, kOutFloats * sizeof(float), zeroOut.data());
+
+    const uint32_t numBuffers =
+        (context.getBackend() == ComputeBackend::Vulkan) ? 2u : 3u;
+    kernel = context.createKernel(full_kernel_path.string(), kernel_name, numBuffers);
+
+    struct PushConstants {
+      uint32_t stride;
+      uint32_t numVec4;
+      uint32_t iterations;
+      uint32_t padding;
+    } pc = {1024u, static_cast<uint32_t>(bufferSize / 16ULL), 2000u, 0u};
+
+    context.setKernelArg(kernel, 0, buffer);
+    context.setKernelArg(kernel, 1, outBuffer);
+    if (context.getBackend() == ComputeBackend::Vulkan) {
+      context.setKernelArg(kernel, 2, sizeof(pc), &pc);
+    } else {
+      pcBuffer = context.createBuffer(sizeof(PushConstants));
+      context.writeBuffer(pcBuffer, 0, sizeof(PushConstants), &pc);
+      context.setKernelArg(kernel, 2, pcBuffer);
+    }
+    return;
+  }
+
+  // Latency path (metric == "ns"): inter-cache-line pointer chasing across 128-byte cache lines
+  numWorkgroups = 1u;
+  if (bufferSize > 0) {
     constexpr size_t kLineBytes = 128;
     size_t numLines = bufferSize / kLineBytes;
     if (numLines == 0) numLines = 1;
@@ -62,141 +128,31 @@ void CacheBench::Setup(IComputeContext &context,
     for (size_t i = 0; i < numLines; ++i) {
       uint32_t curLine = perm[i];
       uint32_t nextLine = perm[(i + 1) % numLines];
-      initData[curLine * (kLineBytes / sizeof(uint32_t))] = static_cast<uint32_t>(nextLine * (kLineBytes / sizeof(uint32_t)));
+      initData[curLine * (kLineBytes / sizeof(uint32_t))] =
+          static_cast<uint32_t>(nextLine * (kLineBytes / sizeof(uint32_t)));
     }
+
+    buffer = context.createBuffer(bufferSize);
+    context.writeBuffer(buffer, 0, initData.size() * sizeof(uint32_t), initData.data());
   }
 
-  // Determine numWorkgroups to cover the buffer exactly once.
-  // Each thread accesses 32 vec4s for Bandwidth tests (except L1 which is
-  // different but we'll adapt). Let's standardize on the L3 pattern: 256
-  // threads * 32 vec4s/thread = 8192 vec4s per workgroup.
-  if (metric == "GB/s") {
-    uint64_t vec4_count = bufferSize / 16;
-    uint64_t elements_per_wg = 8192; // Default for L3
-    if (targetCacheLevel == 0 || targetCacheLevel == 1) {
-      numWorkgroups = 1024; // Saturation for L0/L1
-    } else if (targetCacheLevel == 2) {
-      elements_per_wg = 256;
-      numWorkgroups = static_cast<uint32_t>(
-          std::max<uint64_t>(1, vec4_count / elements_per_wg));
-    } else {
-      numWorkgroups = static_cast<uint32_t>(
-          std::max<uint64_t>(1, vec4_count / elements_per_wg));
-    }
-    // Clamp to avoid excessive dispatch
-    if (numWorkgroups > 65536)
-      numWorkgroups = 65536;
-  } else {
-    numWorkgroups = 1;
-  }
-
-  if (bufferSize > 0) {
-    // Allocate page-aligned host memory for Zero Copy / Pinned access.
-    // This is critical for stability on Unified Memory (APU) platforms like
-    // Strix Halo to ensure the driver can map the memory without page faults or
-    // copying.
-    hostMem = ALIGNED_ALLOC(4096, bufferSize);
-
-    if (hostMem) {
-      // Initialize memory
-      if (!initData.empty()) {
-        size_t copySize =
-            std::min((size_t)bufferSize, initData.size() * sizeof(uint32_t));
-        memcpy(hostMem, initData.data(), copySize);
-        // Zero fill the rest if any
-        if (copySize < bufferSize) {
-          memset((char *)hostMem + copySize, 0, bufferSize - copySize);
-        }
-      } else {
-        memset(hostMem, 0, bufferSize);
-      }
-
-      // Create buffer using the aligned host pointer (CL_MEM_USE_HOST_PTR)
-      // Print buffer range for debugging
-      if (debug) {
-        std::cout << "  [DEBUG] CacheBench Buffer: " << hostMem << " - "
-                  << (void *)((char *)hostMem + bufferSize) << " ("
-                  << (bufferSize / 1024 / 1024) << " MB)" << std::endl;
-      }
-      if (context.getBackend() == ComputeBackend::OpenCL) {
-        // Do not use CL_MEM_USE_HOST_PTR on OpenCL because on discrete PCIe GPUs it places
-        // memory in host RAM across the PCIe bus, measuring PCIe transfer latency instead of GPU cache.
-        buffer = context.createBuffer(bufferSize);
-        context.writeBuffer(buffer, 0, bufferSize, hostMem);
-      } else {
-        buffer = context.createBuffer(bufferSize, hostMem);
-      }
-    } else {
-      // Fallback to standard allocation if host allocation fails (unlikely)
-      buffer = context.createBuffer(bufferSize);
-      if (!initData.empty()) {
-        context.writeBuffer(buffer, 0, initData.size() * sizeof(uint32_t),
-                            initData.data());
-      }
-    }
-  }
-
-  std::filesystem::path kdir(kernel_dir);
-  std::filesystem::path full_kernel_path;
-
-  if (context.getBackend() == ComputeBackend::ROCm) {
-    full_kernel_path = kdir / "rocm" / (kernelFile + ".hip");
-  } else if (context.getBackend() == ComputeBackend::OpenCL) {
-    full_kernel_path = kdir / "opencl" / (kernelFile + ".cl");
-  } else { // Default to Vulkan
-    full_kernel_path = kdir / "vulkan" / (kernelFile + ".comp");
-  }
-
-  std::string kernel_name;
-  if (context.getBackend() == ComputeBackend::Vulkan) {
-    kernel_name = "main";
-  } else if (context.getBackend() == ComputeBackend::ROCm) {
-    kernel_name = "run_benchmark";
-  } else { // OpenCL
-    kernel_name = "run_benchmark";
-  }
-
-  // Vulkan uses 1 storage buffer descriptor + push constants; OpenCL/ROCm pass push constants in a 2nd buffer
-  uint32_t numBuffers = (context.getBackend() == ComputeBackend::Vulkan) ? 1 : 2;
+  const uint32_t numBuffers =
+      (context.getBackend() == ComputeBackend::Vulkan) ? 1u : 2u;
   kernel = context.createKernel(full_kernel_path.string(), kernel_name, numBuffers);
   if (buffer) {
     context.setKernelArg(kernel, 0, buffer);
-
-    // Calculate mask (element count - 1)
-    uint32_t mask = (metric == "ns") ? (uint32_t)(bufferSize / 4 - 1)
-                                     : (uint32_t)(bufferSize / 16 - 1);
-
-    uint32_t stride = 1;
-    uint32_t iterations = 1000000;
-
-    if (metric == "GB/s") {
-      // Set architectural strides to ensure we hit the targeted cache level
-      if (targetCacheLevel == 2)
-        stride = 32; // 512 bytes stride
-      else if (targetCacheLevel == 3)
-        stride = 128; // 2048 bytes stride
-      
-      // We expect 2000 iterations for GB/s benchmark
-      iterations = 2000;
-    } else {
-      // Latency tests use their own logic and don't yet use the robust kernel,
-      // but for consistency we'll set defaults.
-      iterations = 1000000;
-    }
 
     struct PushConstants {
       uint32_t stride;
       uint32_t mask;
       uint32_t iterations;
       uint32_t padding;
-    } pc = {stride, mask, iterations, 0};
+    } pc = {1u, static_cast<uint32_t>(bufferSize / 4ULL - 1ULL), 1000000u, 0u};
 
     if (context.getBackend() == ComputeBackend::Vulkan) {
       context.setKernelArg(kernel, 1, sizeof(pc), &pc);
     } else {
-      if (!pcBuffer) {
-        pcBuffer = context.createBuffer(sizeof(PushConstants));
-      }
+      pcBuffer = context.createBuffer(sizeof(PushConstants));
       context.writeBuffer(pcBuffer, 0, sizeof(PushConstants), &pc);
       context.setKernelArg(kernel, 1, pcBuffer);
     }
@@ -204,13 +160,13 @@ void CacheBench::Setup(IComputeContext &context,
 }
 
 void CacheBench::Run(uint32_t config_idx) {
-  if (!context) {
-    throw std::runtime_error("Context is not set up");
+  (void)config_idx;
+  if (!context || !kernel) {
+    throw std::runtime_error("CacheBench is not set up");
   }
   if (metric == "GB/s") {
-    context->dispatch(kernel, numWorkgroups, 1, 1, 256, 1, 1);
+    context->dispatch(kernel, std::min<uint32_t>(numWorkgroups, 65535u), 1, 1, 128, 1, 1);
   } else {
-    // For latency, we run a single thread to measure the dependency chain.
     context->dispatch(kernel, 1, 1, 1, 1, 1, 1);
   }
 }
@@ -224,6 +180,10 @@ void CacheBench::Teardown() {
     if (buffer) {
       context->releaseBuffer(buffer);
       buffer = nullptr;
+    }
+    if (outBuffer) {
+      context->releaseBuffer(outBuffer);
+      outBuffer = nullptr;
     }
     if (pcBuffer) {
       context->releaseBuffer(pcBuffer);
@@ -244,49 +204,69 @@ std::vector<std::string> CacheBench::GetAliases() const { return aliases; }
 const char *CacheBench::GetMetric() const { return metric.c_str(); }
 
 BenchmarkResult CacheBench::GetResult(uint32_t config_idx) const {
+  (void)config_idx;
   uint64_t operations = 0;
-  uint64_t num_threads_bw = (uint64_t)numWorkgroups * 256;
+  uint64_t num_threads_bw =
+      static_cast<uint64_t>(std::min<uint32_t>(numWorkgroups, 65535u)) * 128ULL;
 
-  if (name == "L0 Cache Bandwidth" || name == "L1 Cache Bandwidth" ||
-      name == "L2 Cache Bandwidth" || name == "L3 Cache Bandwidth") {
-    // Robust kernel loops 2,000 times * 8 float4 loads * 16 bytes
-    operations = num_threads_bw * 16000ULL * 16;
-  } else if (name.find("Latency") != std::string::npos || metric == "ns") {
+  if (metric == "GB/s") {
+    // cache_bw_robust loops 2,000 times * 8 float4 loads * 16 bytes
+    operations = num_threads_bw * 16000ULL * 16ULL;
+  } else {
     // 1,000,000 pointer chasing steps
-    operations = 1000000;
-  } else if (metric == "GB/s") {
-    // Generic bandwidth: assume 1024 reads
-    operations = num_threads_bw * 1024 * sizeof(uint32_t);
-  } else if (metric == "ns") {
-    // 1,000,000 dependent reads
-    operations = 1000000;
+    operations = 1000000ULL;
   }
   return {operations, 0.0};
 }
 
 const char *CacheBench::GetComponent(uint32_t config_idx) const {
+  (void)config_idx;
   return "Memory";
 }
 
 const char *CacheBench::GetSubCategory(uint32_t config_idx) const {
-  return (metric == "GB/s") ? "Bandwidth" : "Latency";
+  (void)config_idx;
+  return (metric == "GB/s") ? "Cache Bandwidth" : "Latency";
 }
 
-int CacheBench::GetSortWeight() const { return (metric == "GB/s") ? 100 : 200; }
+int CacheBench::GetSortWeight() const { return (metric == "GB/s") ? 150 : 200; }
 
 bool CacheBench::ValidateResults(uint32_t config_idx) const {
-  (void)config_idx;
-  if (!context || !buffer) {
+  if (config_idx >= GetNumConfigs()) {
+    return false;
+  }
+  if (!context || !kernel || !buffer) {
     return false;
   }
 
+  if (metric == "GB/s") {
+    if (!outBuffer) {
+      return false;
+    }
+    try {
+      std::vector<float> samples(64, 0.0f);
+      context->readBuffer(outBuffer, 0, samples.size() * sizeof(float),
+                          samples.data());
+      for (float v : samples) {
+        if (!std::isfinite(v) || v < 60000.0f || v > 130000.0f) {
+          std::cerr << "CacheBench bandwidth validation failed: sample=" << v
+                    << "\n";
+          return false;
+        }
+      }
+      return true;
+    } catch (const std::exception &e) {
+      std::cerr << "CacheBench bandwidth validation error: " << e.what()
+                << "\n";
+      return false;
+    }
+  }
+
   if (metric == "ns") {
-    // Inter-cache-line pointer chasing over 128-byte cache lines
     constexpr size_t kLineBytes = 128;
     size_t numLines = bufferSize / kLineBytes;
     if (numLines == 0) numLines = 1;
 
-    // Deterministic simulation of 1,000,000 hops starting from index 0
     uint32_t expectedIndex = 0;
     if (!initData.empty()) {
       size_t targetStep = 1000000 % numLines;
@@ -297,8 +277,8 @@ bool CacheBench::ValidateResults(uint32_t config_idx) const {
 
     uint32_t readbackIndex = 0;
     try {
-      // Read terminal index stored in word 1 (offset 4 bytes)
-      context->readBuffer(buffer, sizeof(uint32_t), sizeof(uint32_t), &readbackIndex);
+      context->readBuffer(buffer, sizeof(uint32_t), sizeof(uint32_t),
+                          &readbackIndex);
       if (readbackIndex != expectedIndex) {
         std::cerr << "CacheBench validation failed: readback " << readbackIndex
                   << " != expected " << expectedIndex << "\n";
@@ -311,6 +291,6 @@ bool CacheBench::ValidateResults(uint32_t config_idx) const {
     }
   }
 
-  return true;
+  return false;
 }
 

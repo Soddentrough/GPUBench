@@ -59,10 +59,15 @@ public:
   std::string GetConfigName(uint32_t config_idx) const override;
   const char *GetComponent(uint32_t config_idx = 0) const override;
   const char *GetSubCategory(uint32_t config_idx = 0) const override;
+  const char *GetDescription() const override {
+    return "Hardware ray-triangle and ray-box primitive intersection throughput under VK_KHR_ray_query.";
+  }
 
 private:
+  template <typename Tag> friend struct ::gpubench::test::TestBody;
   IComputeContext *context = nullptr;
   ComputeKernel kernel = nullptr;
+  ComputeKernel kernels[2] = {nullptr, nullptr};
   ComputeBuffer resultBuffer = nullptr;
 
 #ifdef HAVE_VULKAN

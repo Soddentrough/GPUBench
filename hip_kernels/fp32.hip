@@ -1,107 +1,57 @@
 // Requires ROCm 6.4+
 #include <hip/hip_runtime.h>
 
-// Helper for float4 fmac (acc = fmaf(a, b, acc)) for VOPD dual-issue pairing
-__device__ inline float4 fmac4(float4 acc, float4 a, float4 b) {
+// Helper for float4 fmac (acc = fmaf(m, acc, acc)) with scalar SGPR m in src0 and dst == addend for VOPD v_dual_fmac_f32 pairing
+__device__ inline float4 fmac4_self(float m, float4 acc) {
     return make_float4(
-        fmaf(a.x, b.x, acc.x),
-        fmaf(a.y, b.y, acc.y),
-        fmaf(a.z, b.z, acc.z),
-        fmaf(a.w, b.w, acc.w)
+        fmaf(m, acc.x, acc.x),
+        fmaf(m, acc.y, acc.y),
+        fmaf(m, acc.z, acc.z),
+        fmaf(m, acc.w, acc.w)
     );
 }
 
+__device__ inline float4 add4(float4 a, float4 b) {
+    return make_float4(a.x + b.x, a.y + b.y, a.z + b.z, a.w + b.w);
+}
+
+#define INIT_ACC(i) make_float4(seed + 0.04f * (4 * (i) + 1), seed + 0.04f * (4 * (i) + 2), seed + 0.04f * (4 * (i) + 3), seed + 0.04f * (4 * (i) + 4))
+
 extern "C" __global__ void run_benchmark(float* data, float multiplier, uint32_t num_elements) {
-    uint index = blockIdx.x * blockDim.x + threadIdx.x;
+    uint32_t index = blockIdx.x * blockDim.x + threadIdx.x;
     if (index >= num_elements) return;
 
-    // Use 32 independent float4 accumulators for high ILP and dual-issue ALU saturation (128 scalar FMAs in flight)
-    float seed   = data[index & 0x1FFFu] * 0.0001f;
-    float4 val0  = make_float4(seed + 0.1f, seed + 0.2f, seed + 0.3f, seed + 0.4f);
-    float4 val1  = make_float4(seed + 0.2f, seed + 0.3f, seed + 0.4f, seed + 0.5f);
-    float4 val2  = make_float4(seed + 0.3f, seed + 0.4f, seed + 0.5f, seed + 0.6f);
-    float4 val3  = make_float4(seed + 0.4f, seed + 0.5f, seed + 0.6f, seed + 0.7f);
-    float4 val4  = make_float4(seed + 0.5f, seed + 0.6f, seed + 0.7f, seed + 0.8f);
-    float4 val5  = make_float4(seed + 0.6f, seed + 0.7f, seed + 0.8f, seed + 0.9f);
-    float4 val6  = make_float4(seed + 0.7f, seed + 0.8f, seed + 0.9f, seed + 1.0f);
-    float4 val7  = make_float4(seed + 0.8f, seed + 0.9f, seed + 1.0f, seed + 1.1f);
-    float4 val8  = make_float4(seed + 0.9f, seed + 1.0f, seed + 1.1f, seed + 1.2f);
-    float4 val9  = make_float4(seed + 1.0f, seed + 1.1f, seed + 1.2f, seed + 1.3f);
-    float4 val10 = make_float4(seed + 1.1f, seed + 1.2f, seed + 1.3f, seed + 1.4f);
-    float4 val11 = make_float4(seed + 1.2f, seed + 1.3f, seed + 1.4f, seed + 1.5f);
-    float4 val12 = make_float4(seed + 1.3f, seed + 1.4f, seed + 1.5f, seed + 1.6f);
-    float4 val13 = make_float4(seed + 1.4f, seed + 1.5f, seed + 1.6f, seed + 1.7f);
-    float4 val14 = make_float4(seed + 1.5f, seed + 1.6f, seed + 1.7f, seed + 1.8f);
-    float4 val15 = make_float4(seed + 1.6f, seed + 1.7f, seed + 1.8f, seed + 1.9f);
-    float4 val16 = make_float4(seed + 1.7f, seed + 1.8f, seed + 1.9f, seed + 2.0f);
-    float4 val17 = make_float4(seed + 1.8f, seed + 1.9f, seed + 2.0f, seed + 2.1f);
-    float4 val18 = make_float4(seed + 1.9f, seed + 2.0f, seed + 2.1f, seed + 2.2f);
-    float4 val19 = make_float4(seed + 2.0f, seed + 2.1f, seed + 2.2f, seed + 2.3f);
-    float4 val20 = make_float4(seed + 2.1f, seed + 2.2f, seed + 2.3f, seed + 2.4f);
-    float4 val21 = make_float4(seed + 2.2f, seed + 2.3f, seed + 2.4f, seed + 2.5f);
-    float4 val22 = make_float4(seed + 2.3f, seed + 2.4f, seed + 2.5f, seed + 2.6f);
-    float4 val23 = make_float4(seed + 2.4f, seed + 2.5f, seed + 2.6f, seed + 2.7f);
-    float4 val24 = make_float4(seed + 2.5f, seed + 2.6f, seed + 2.7f, seed + 2.8f);
-    float4 val25 = make_float4(seed + 2.6f, seed + 2.7f, seed + 2.8f, seed + 2.9f);
-    float4 val26 = make_float4(seed + 2.7f, seed + 2.8f, seed + 2.9f, seed + 3.0f);
-    float4 val27 = make_float4(seed + 2.8f, seed + 2.9f, seed + 3.0f, seed + 3.1f);
-    float4 val28 = make_float4(seed + 2.9f, seed + 3.0f, seed + 3.1f, seed + 3.2f);
-    float4 val29 = make_float4(seed + 3.0f, seed + 3.1f, seed + 3.2f, seed + 3.3f);
-    float4 val30 = make_float4(seed + 3.1f, seed + 3.2f, seed + 3.3f, seed + 3.4f);
-    float4 val31 = make_float4(seed + 3.2f, seed + 3.3f, seed + 3.4f, seed + 3.5f);
-    
-    // Spectral radius (1 + m)^16384 stays bounded in [0.2, 5.2] with |m| <= 1e-4,
-    // avoiding IEEE-754 saturation to +inf while preserving dst == addend for v_dual_fmac_f32
-    float scaled_m = multiplier * 0.0001f;
-    float4 m = make_float4(scaled_m, scaled_m, scaled_m, scaled_m);
+    // 8 independent float4 accumulators (32 scalar FMACs in flight, ~34-40 VGPRs) matching shaders/fp32.comp:
+    // avoids >128 VGPR occupancy collapse and preserves dst == addend + SGPR src0 for RDNA 3/4 v_dual_fmac_f32.
+    float seed = data[index & 0x1FFFu] * 0.0001f;
+    float4 a0 = INIT_ACC(0);
+    float4 a1 = INIT_ACC(1);
+    float4 a2 = INIT_ACC(2);
+    float4 a3 = INIT_ACC(3);
+    float4 a4 = INIT_ACC(4);
+    float4 a5 = INIT_ACC(5);
+    float4 a6 = INIT_ACC(6);
+    float4 a7 = INIT_ACC(7);
 
-    // Each iteration performs 32 float4 FMACs = 32 * 4 * 2 = 256 FP32 ops.
+    // Pre-scaled on host (0.999f * 0.000025f) so m stays directly in a kernarg SGPR without VALU scaling.
+    float m = multiplier;
+
+    // 8 float4 FMACs × 4 components × 2 ops = 64 FP32 ops/iter × 65536 iters = 4,194,304 ops/thread.
     #pragma unroll 4
-    for (int i = 0; i < 16384; ++i) {
-        val0  = fmac4(val0,  m, val1);
-        val1  = fmac4(val1,  m, val2);
-        val2  = fmac4(val2,  m, val3);
-        val3  = fmac4(val3,  m, val4);
-        val4  = fmac4(val4,  m, val5);
-        val5  = fmac4(val5,  m, val6);
-        val6  = fmac4(val6,  m, val7);
-        val7  = fmac4(val7,  m, val8);
-        val8  = fmac4(val8,  m, val9);
-        val9  = fmac4(val9,  m, val10);
-        val10 = fmac4(val10, m, val11);
-        val11 = fmac4(val11, m, val12);
-        val12 = fmac4(val12, m, val13);
-        val13 = fmac4(val13, m, val14);
-        val14 = fmac4(val14, m, val15);
-        val15 = fmac4(val15, m, val16);
-        val16 = fmac4(val16, m, val17);
-        val17 = fmac4(val17, m, val18);
-        val18 = fmac4(val18, m, val19);
-        val19 = fmac4(val19, m, val20);
-        val20 = fmac4(val20, m, val21);
-        val21 = fmac4(val21, m, val22);
-        val22 = fmac4(val22, m, val23);
-        val23 = fmac4(val23, m, val24);
-        val24 = fmac4(val24, m, val25);
-        val25 = fmac4(val25, m, val26);
-        val26 = fmac4(val26, m, val27);
-        val27 = fmac4(val27, m, val28);
-        val28 = fmac4(val28, m, val29);
-        val29 = fmac4(val29, m, val30);
-        val30 = fmac4(val30, m, val31);
-        val31 = fmac4(val31, m, val0);
+    for (int i = 0; i < 65536; ++i) {
+        a0 = fmac4_self(m, a0);
+        a1 = fmac4_self(m, a1);
+        a2 = fmac4_self(m, a2);
+        a3 = fmac4_self(m, a3);
+        a4 = fmac4_self(m, a4);
+        a5 = fmac4_self(m, a5);
+        a6 = fmac4_self(m, a6);
+        a7 = fmac4_self(m, a7);
     }
-    
-    // Reduce results to prevent dead-code elimination
-    float4 res1 = make_float4(val0.x + val1.y, val2.z + val3.w, val4.x + val5.y, val6.z + val7.w);
-    float4 res2 = make_float4(val8.x + val9.y, val10.z + val11.w, val12.x + val13.y, val14.z + val15.w);
-    float4 res3 = make_float4(val16.x + val17.y, val18.z + val19.w, val20.x + val21.y, val22.z + val23.w);
-    float4 res4 = make_float4(val24.x + val25.y, val26.z + val27.w, val28.x + val29.y, val30.z + val31.w);
 
-    float4 res = make_float4(res1.x + res2.x + res3.x + res4.x,
-                             res1.y + res2.y + res3.y + res4.y,
-                             res1.z + res2.z + res3.z + res4.z,
-                             res1.w + res2.w + res3.w + res4.w);
+    float4 g0 = add4(add4(a0, a1), add4(a2, a3));
+    float4 g1 = add4(add4(a4, a5), add4(a6, a7));
+    float4 sum = add4(g0, g1);
 
-    data[index] = res.x + res.y + res.z + res.w;
+    data[index] = sum.x + sum.y + sum.z + sum.w;
 }

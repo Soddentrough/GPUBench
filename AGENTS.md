@@ -44,3 +44,9 @@ Do not search for SMI tool paths across runs; use these exact absolute paths:
 - No Python virtual environments or containers (system-wide packages only).
 - Do not ignore warnings or deprecation notices.
 - Rigorous end-to-end verification and visual parity testing before concluding tasks.
+
+## User Command Shorthands
+- **`cmp` / `Cmp`**: Shorthand for **"commit and push"**. When the user enters `cmp` or `Cmp`, interpret this directly as:
+  1. Stage relevant project modifications (`git add`).
+  2. Create a concise, descriptive commit summarizing verified changes.
+  3. Push to the tracking branch (`git push`).

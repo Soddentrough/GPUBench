@@ -37,12 +37,16 @@ public:
   const char *GetComponent(uint32_t config_idx) const override;
   const char *GetMetric() const override;
   const char *GetSubCategory(uint32_t config_idx) const override;
+  const char *GetDescription() const override {
+    return "Procedural AABB acceleration structure traversal with analytic ray-sphere intersection evaluation.";
+  }
   std::string GetConfigName(uint32_t config_idx) const override;
 
   uint32_t GetNumConfigs() const override { return 1; }
   int GetSortWeight(uint32_t = 0) const override { return 618; }
 
 private:
+  template <typename Tag> friend struct ::gpubench::test::TestBody;
   void loadRTProcs(VkDevice device);
   void buildAS();
 

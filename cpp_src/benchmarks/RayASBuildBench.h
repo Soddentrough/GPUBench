@@ -55,6 +55,12 @@ public:
   std::string GetConfigName(uint32_t config_idx) const override;
 
   uint32_t GetNumConfigs() const override { return 8; } // 1M/5M/10M BLAS Build/Update + 3 Real-World Branched TLAS scenes
+  const char *GetDescription() const override {
+    return "Hardware BVH Bottom-Level (BLAS) build/refit and Top-Level (TLAS) multi-instance scene construction throughput.";
+  }
+  bool RequiresInterIterationBarrier(uint32_t /*config_idx*/ = 0) const override {
+    return true;
+  }
   int GetSortWeight(uint32_t config_idx = 0) const override {
     return 600 + static_cast<int>(config_idx);
   }
@@ -76,6 +82,7 @@ public:
   };
 
 private:
+  template <typename Tag> friend struct ::gpubench::test::TestBody;
   void loadRTProcs(VkDevice device);
   void recordBuildCommand(VkCommandBuffer cmd, uint32_t config_idx,
                           VulkanContext *vContext);

@@ -6,7 +6,7 @@ gpubench \- Modern cross-backend GPU compute and hardware ray tracing benchmark
 [\fIOPTIONS\fR]
 .SH DESCRIPTION
 .B GPUBench
-is a high-performance cross-backend GPU compute and ray tracing benchmarking utility supporting Vulkan 1.4, AMD ROCm/HIP, and OpenCL. It evaluates raw compute capabilities (FP64, FP32, DualIssue, LDS, Indirect, FP16, BF16, FP8, FP6, FP4, INT8, INT4), VRAM and cache bandwidth/latency, hardware-accelerated BVH traversal, and dynamic wavefront ray scheduling via Device-Generated Commands (DGC).
+is a high-performance cross-backend GPU compute and ray tracing benchmarking utility supporting Vulkan 1.4, AMD ROCm/HIP, and OpenCL 3.0. It evaluates raw compute capabilities (FP64, FP32, DualIssue, LDS, Indirect, FP16, BF16, FP8, FP6, FP4, INT8, INT4, 2:4 Structured Sparsity, Cooperative Vector), VRAM, cache, and PCIe/ReBAR/P2P interconnect bandwidth/latency, Async Compute & Copy Engine concurrency, GPU Work Graphs, hardware-accelerated BVH traversal (including Opacity Micromaps), dynamic wavefront ray scheduling via Device-Generated Commands (DGC), and Empirical Roofline modeling.
 .SH OPTIONS
 .TP
 \fB\-h\fR, \fB\-\-help\fR
@@ -16,10 +16,10 @@ Print help message and exit.
 Display program version information and exit.
 .TP
 \fB\-b\fR, \fB\-\-benchmark\fR, \fB\-\-benchmarks\fR \fIBENCHMARKS\fR
-Comma-separated list of benchmarks to run (e.g., fp32,fp64,dualissue,lds,indirect,fp16,bf16,fp8,fp6,fp4,int8,int4,membw,l0_cache,cache_latency_curve,pixelfill,rayrawtraversal,rayasbuild,rayintersect,rayanyhit,rayprocedural,rayscheduling,raydivergence,sysmembw,sysmemlatency,all).
+Comma-separated list of benchmarks to run (e.g., fp32,fp64,dualissue,lds,indirect,fp16,bf16,fp8,fp6,fp4,int8,int4,sparsematrix,coopvector,membw,interconnect,l0b,l1b,l2b,l3b,cachebw,l0_cache,cache_latency_curve,asyncoverlap,workgraphs,pixelfill,rayrawtraversal,rayasbuild,rayintersect,rayanyhit,rayomm,rayprocedural,raypayload,rayscheduling,raydivergence,sysmembw,sysmemlatency,all).
 .TP
 \fB\-g\fR, \fB\-\-group\fR, \fB\-\-groups\fR \fIGROUPS\fR
-Benchmark groups to run: compute, memory, graphics (combines raster & raytracing), raster, raytracing, system, or all.
+Benchmark groups to run: compute, memory, scheduling, graphics (combines raster & raytracing), raster, raytracing, system, or all.
 .TP
 \fB\-\-list\fR, \fB\-\-list\-benchmarks\fR
 List all available benchmarks organized by group.
@@ -40,13 +40,13 @@ List available compute backends.
 Specify compute backend: auto, vulkan, opencl, rocm (default: auto).
 .TP
 \fB\-c\fR, \fB\-\-config\fR \fIINDEX\fR
-Run only a specific sub-test configuration index within a multi-configuration benchmark.
+Run only specific sub-test configuration index(es) within a multi-configuration benchmark.
 .TP
 \fB\-s\fR, \fB\-\-scene\fR \fISCENE\fR
 Ray tracing scenario: showroom, indoor, outdoor, forest, all (default: all).
 .TP
 \fB\-r\fR, \fB\-\-resolution\fR \fIRESPRESET\fR
-Resolution preset: auto, 720p, 1080p, 1440p, 4k, 8k, 1024x1024, or custom WxH.
+Resolution preset: auto (scales dynamically by GPU VRAM capacity: 720p < 6 GB, 1080p < 10 GB, 1440p < 16 GB, 4K >= 16 GB), 720p, 1080p, 1440p, 4k, 8k, 1024x1024, or custom WxH (default: 4k).
 .TP
 \fB\-\-bounces\fR \fIBOUNCES\fR
 Number of light bounces for multi-bounce path tracing (1..8, default: 2).
@@ -72,6 +72,18 @@ Run in single-frame deterministic profiling snapshot mode for RGP / Nsight captu
 \fB\-\-rra\fR
 Enable Radeon Raytracing Analyzer (RRA) BVH capture mode.
 .TP
+\fB\-\-dump\-isa\fR \fITARGET\fR
+Disassemble compiled hardware shader/kernel ISA, VGPR/SGPR/LDS footprint, and instruction histograms via \fIVK_KHR_pipeline_executable_properties\fR or ROCm \fIllvm-objdump\fR without running benchmark loops. Combine with \fB\-\-full\-isa\fR to emit complete assembly.
+.TP
+\fB\-\-roofline\fR
+Compute and display the Empirical Roofline analysis (peak memory/cache bandwidth ceilings, peak vector/matrix compute ceilings, ridge points, arithmetic intensity, and bottleneck classification) and include it in exported v2.0 JSON reports.
+.TP
+\fB\-\-power\fR
+Display per-workload GPU package power and energy efficiency metrics (GFLOPS/W, GB/s/W, MRays/J).
+.TP
+\fB\-\-telemetry\fR
+Display hardware compiler resource usage (VGPR/SGPR/LDS) and hardware performance counters where available.
+.TP
 \fB\-f\fR, \fB\-\-force\fR
 Force execution even if concurrent GPU load or high GTT usage is detected.
 .TP
@@ -79,22 +91,22 @@ Force execution even if concurrent GPU load or high GTT usage is detected.
 Suppress informational banners and progress output.
 .TP
 \fB\-\-strict\fR
-Return a non-zero exit code if any requested benchmark fails or is unsupported.
+Enforce strict execution hygiene: abort with a non-zero exit code if active background GPU contention is detected (override with \fB\-f\fR/\fB\-\-force\fR). Numerical validation failures always return a non-zero exit code regardless of \fB\-\-strict\fR.
 .TP
 \fB\-\-verbose\fR
 Enable verbose logging output.
 .TP
 \fB\-\-debug\fR
-Enable detailed debug logging output.
+Enable Vulkan validation layers and detailed debug logging output.
 .TP
 \fB\-o\fR, \fB\-\-output\-json\fR [\fIFILE\fR]
-Write benchmark results to a JSON report file. If \fIFILE\fR is omitted, a default timestamped filename including the hostname is generated (e.g., \fIgpubench_<hostname>_<timestamp>.json\fR). Specify \fB\-\fR to direct pure JSON to standard output.
+Write benchmark results to a unified v2.0 JSON report file (compatible with both \fBgpubench \-\-import\fR/\fB\-\-compare\fR and \fBgpubench-gui\fR). Specify \fB\-\fR to direct pure JSON to standard output.
 .TP
 \fB\-\-json\fR
 Output pure JSON report directly to standard output (equivalent to \fB\-o \-\fR).
 .TP
 \fB\-i\fR, \fB\-\-import\fR, \fB\-\-input\fR \fIFILE\fR...
-Load and display results from one or more benchmark JSON report files.
+Load and display results from one or more unified v2.0 or v1.x benchmark JSON report files.
 .TP
 \fB\-\-compare\fR \fIFILE1\fR \fIFILE2\fR [\fIFILE3\fR...]
 Compare benchmark JSON report files side-by-side with cross-device win tallies and relative performance deltas.

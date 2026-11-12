@@ -1,0 +1,56 @@
+#version 460
+
+layout(local_size_x = 128, local_size_y = 1, local_size_z = 1) in;
+
+layout(std430, set = 0, binding = 0) readonly buffer InputBuffer {
+    vec4 data[];
+} inBuf;
+
+layout(std430, set = 0, binding = 1) writeonly buffer OutputBuffer {
+    float data[];
+} outBuf;
+
+layout(push_constant) uniform PushConstants {
+    uint stride;     // Block step in vec4 units (multiple of 1024)
+    uint numVec4;    // Working-set size in vec4 units (multiple of 1024, >= 1024)
+    uint iterations; // Loop trip count (2000)
+    uint padding;
+} pc;
+
+void main() {
+    uint lid = gl_LocalInvocationID.x;
+    uint wid = gl_WorkGroupID.x;
+    uint gid = gl_GlobalInvocationID.x;
+
+    uint n = pc.numVec4;
+    uint numBlocks = max(n >> 10u, 1u);
+    uint blockBase = ((wid * 1009u) % numBlocks) << 10u;
+    uint stepVec4 = pc.stride;
+    uint lane = lid;
+
+    vec4 acc0 = vec4(0.0);
+    vec4 acc1 = vec4(0.0);
+
+    for (uint i = 0u; i < pc.iterations; ++i) {
+        uint p0 = blockBase + lane;
+        vec4 v0 = inBuf.data[p0];
+        vec4 v1 = inBuf.data[p0 + 128u];
+        vec4 v2 = inBuf.data[p0 + 256u];
+        vec4 v3 = inBuf.data[p0 + 384u];
+        vec4 v4 = inBuf.data[p0 + 512u];
+        vec4 v5 = inBuf.data[p0 + 640u];
+        vec4 v6 = inBuf.data[p0 + 768u];
+        vec4 v7 = inBuf.data[p0 + 896u];
+
+        acc0 += (v0 + v1) + (v2 + v3);
+        acc1 += (v4 + v5) + (v6 + v7);
+
+        blockBase += stepVec4;
+        if (blockBase >= n) {
+            blockBase -= n;
+        }
+    }
+
+    vec4 total = acc0 + acc1;
+    outBuf.data[gid & 65535u] = (total.x + total.y) + (total.z + total.w);
+}

@@ -24,6 +24,13 @@
 #include "benchmarks/CacheLatencyCurveBench.h"
 #include "benchmarks/LdsBankConflictBench.h"
 #include "benchmarks/InShaderIndirectBench.h"
+#include "benchmarks/InterconnectBench.h"
+#include "benchmarks/AsyncOverlapBench.h"
+#include "benchmarks/SparseMatrixBench.h"
+#include "benchmarks/CoopVectorBench.h"
+#include "benchmarks/WorkGraphsBench.h"
+#include "benchmarks/RayOMMBench.h"
+#include "core/VulkanContext.h"
 #include <iomanip>
 
 static std::vector<int> g_targetConfigs;
@@ -110,6 +117,15 @@ void BenchmarkRunner::setVerifyParity(bool enable) {
   }
 }
 
+void BenchmarkRunner::setCaptureGpuPreviews(bool enable) {
+  captureGpuPreviews = enable;
+  for (auto &bench : benchmarks) {
+    if (auto *rs = dynamic_cast<RaySchedulingBench *>(bench.get())) {
+      rs->SetCaptureGpuPreviews(enable);
+    }
+  }
+}
+
 void BenchmarkRunner::setShowPower(bool p) {
   if (formatter) formatter->setShowPower(p);
 }
@@ -134,11 +150,12 @@ std::vector<std::string> BenchmarkRunner::getAvailableBenchmarks() const {
 
 std::vector<BenchmarkGroupInfo> BenchmarkRunner::getAvailableGroups() const {
   std::vector<BenchmarkGroupInfo> groups = {
-    {"Compute", "compute", {"comp"}, "Vector and matrix compute arithmetic (FP64 down to INT4)", {}},
-    {"Memory", "memory", {"mem", "cache"}, "Device memory bandwidth and cache latency", {}},
+    {"Compute", "compute", {"comp"}, "Vector, matrix, sparse, and neural shading compute arithmetic", {}},
+    {"Memory", "memory", {"mem", "cache"}, "Device memory, PCIe/ReBAR/P2P interconnect, and cache hierarchy", {}},
     {"Graphics", "graphics", {"gfx"}, "Complete 3D graphics rendering pipelines (combines Raster and Ray Tracing)", {}},
     {"Raster", "raster", {"rop", "rasterization"}, "Fixed-function rasterization and ROP pixel/blend fill rates (subset of Graphics)", {}},
-    {"Ray Tracing", "raytracing", {"rt", "ray", "ray tracing", "ray_tracing"}, "Hardware BVH traversal, intersection, and scheduling architectures (subset of Graphics)", {}},
+    {"Ray Tracing", "raytracing", {"rt", "ray", "ray tracing", "ray_tracing"}, "Hardware BVH traversal, Opacity Micromaps, intersection, and scheduling architectures", {}},
+    {"Scheduling", "scheduling", {"sched"}, "Multi-queue concurrency, async compute/copy overlap, and GPU Work Graphs", {}},
     {"System", "system", {"sys", "host"}, "Host system memory bandwidth and latency", {}}
   };
 
@@ -149,8 +166,8 @@ std::vector<BenchmarkGroupInfo> BenchmarkRunner::getAvailableGroups() const {
       name = "RayScheduling";
     }
     if (!bench->IsDeviceDependent() || comp == "System") {
-      if (std::find(groups[5].benchmarks.begin(), groups[5].benchmarks.end(), name) == groups[5].benchmarks.end())
-        groups[5].benchmarks.push_back(name);
+      if (std::find(groups[6].benchmarks.begin(), groups[6].benchmarks.end(), name) == groups[6].benchmarks.end())
+        groups[6].benchmarks.push_back(name);
     } else if (comp == "Compute") {
       if (std::find(groups[0].benchmarks.begin(), groups[0].benchmarks.end(), name) == groups[0].benchmarks.end())
         groups[0].benchmarks.push_back(name);
@@ -167,6 +184,9 @@ std::vector<BenchmarkGroupInfo> BenchmarkRunner::getAvailableGroups() const {
         groups[2].benchmarks.push_back(name);
       if (std::find(groups[3].benchmarks.begin(), groups[3].benchmarks.end(), name) == groups[3].benchmarks.end())
         groups[3].benchmarks.push_back(name);
+    } else if (comp == "Scheduling") {
+      if (std::find(groups[5].benchmarks.begin(), groups[5].benchmarks.end(), name) == groups[5].benchmarks.end())
+        groups[5].benchmarks.push_back(name);
     }
   }
 
@@ -259,6 +279,8 @@ void BenchmarkRunner::discoverBenchmarks() {
   benchmarks.push_back(std::make_unique<DualIssueBench>());
   benchmarks.push_back(std::make_unique<LdsBankConflictBench>());
   benchmarks.push_back(std::make_unique<InShaderIndirectBench>());
+  benchmarks.push_back(std::make_unique<WorkGraphsBench>());
+  benchmarks.push_back(std::make_unique<AsyncOverlapBench>());
   benchmarks.push_back(std::make_unique<Fp16Bench>());
   benchmarks.push_back(std::make_unique<Bf16Bench>());
   benchmarks.push_back(std::make_unique<Fp8Bench>());
@@ -266,148 +288,71 @@ void BenchmarkRunner::discoverBenchmarks() {
   benchmarks.push_back(std::make_unique<Fp4Bench>());
   benchmarks.push_back(std::make_unique<Int8Bench>());
   benchmarks.push_back(std::make_unique<Int4Bench>());
+  benchmarks.push_back(std::make_unique<SparseMatrixBench>());
+  benchmarks.push_back(std::make_unique<CoopVectorBench>());
   benchmarks.push_back(std::make_unique<MemBandwidthBench>());
+  benchmarks.push_back(std::make_unique<InterconnectBench>());
   benchmarks.push_back(std::make_unique<PixelFillRateBench>());
   benchmarks.push_back(std::make_unique<SysMemBandwidthBench>());
   benchmarks.push_back(std::make_unique<SysMemLatencyBench>());
-  // Ray Tracing Acceleration (Real-World Pipeline Order: AS Build -> Primary Rays/Intersection -> Ray Scheduling -> Secondary Rays/Divergence -> Path Tracing -> Payload Pressure)
+  // Ray Tracing Acceleration (Real-World Pipeline Order: AS Build -> Primary Rays/Intersection -> OMM -> Ray Scheduling -> Secondary Rays/Divergence -> Payload Pressure)
   benchmarks.push_back(std::make_unique<RayRawTraversalBench>());
   benchmarks.push_back(std::make_unique<RayASBuildBench>());
   benchmarks.push_back(std::make_unique<RayIntersectBench>());
   benchmarks.push_back(std::make_unique<RayAnyHitBench>());
+  benchmarks.push_back(std::make_unique<RayOMMBench>());
   benchmarks.push_back(std::make_unique<RayProceduralBench>());
-  if (sceneName == "all") {
-    auto showroom = std::make_unique<RaySchedulingBench>(RaySchedulingBench::SceneType::Showroom);
-    showroom->SetBounceDepth(bounceDepth);
-    showroom->SetSamplesPerPixel(samplesPerPixel);
-    showroom->SetDumpRenders(dumpRenders || verifyParity);
-    showroom->SetVerifyParity(verifyParity);
-    benchmarks.push_back(std::move(showroom));
-
-    auto indoor = std::make_unique<RaySchedulingBench>(RaySchedulingBench::SceneType::IndoorAtrium);
-    indoor->SetBounceDepth(bounceDepth);
-    indoor->SetSamplesPerPixel(samplesPerPixel);
-    indoor->SetDumpRenders(dumpRenders || verifyParity);
-    indoor->SetVerifyParity(verifyParity);
-    benchmarks.push_back(std::move(indoor));
-
-    auto outdoor = std::make_unique<RaySchedulingBench>(RaySchedulingBench::SceneType::OutdoorLandscape);
-    outdoor->SetBounceDepth(bounceDepth);
-    outdoor->SetSamplesPerPixel(samplesPerPixel);
-    outdoor->SetDumpRenders(dumpRenders || verifyParity);
-    outdoor->SetVerifyParity(verifyParity);
-    benchmarks.push_back(std::move(outdoor));
-
-    auto forest = std::make_unique<RaySchedulingBench>(RaySchedulingBench::SceneType::AAAOutdoorForest);
-    forest->SetBounceDepth(bounceDepth);
-    forest->SetSamplesPerPixel(samplesPerPixel);
-    forest->SetDumpRenders(dumpRenders || verifyParity);
-    forest->SetVerifyParity(verifyParity);
-    benchmarks.push_back(std::move(forest));
-  } else if (sceneName == "outdoor") {
-    auto outdoor = std::make_unique<RaySchedulingBench>(RaySchedulingBench::SceneType::OutdoorLandscape);
-    outdoor->SetBounceDepth(bounceDepth);
-    outdoor->SetSamplesPerPixel(samplesPerPixel);
-    outdoor->SetDumpRenders(dumpRenders || verifyParity);
-    outdoor->SetVerifyParity(verifyParity);
-    benchmarks.push_back(std::move(outdoor));
+  auto addRayScene = [&](RaySchedulingBench::SceneType sType) {
+    auto sc = std::make_unique<RaySchedulingBench>(sType);
+    sc->SetBounceDepth(bounceDepth);
+    sc->SetSamplesPerPixel(samplesPerPixel);
+    sc->SetDumpRenders(dumpRenders || verifyParity);
+    sc->SetCaptureGpuPreviews(captureGpuPreviews);
+    sc->SetVerifyParity(verifyParity);
+    benchmarks.push_back(std::move(sc));
+  };
+  if (sceneName == "outdoor") {
+    addRayScene(RaySchedulingBench::SceneType::OutdoorLandscape);
   } else if (sceneName == "forest" || sceneName == "aaa_forest") {
-    auto forest = std::make_unique<RaySchedulingBench>(RaySchedulingBench::SceneType::AAAOutdoorForest);
-    forest->SetBounceDepth(bounceDepth);
-    forest->SetSamplesPerPixel(samplesPerPixel);
-    forest->SetDumpRenders(dumpRenders || verifyParity);
-    forest->SetVerifyParity(verifyParity);
-    benchmarks.push_back(std::move(forest));
+    addRayScene(RaySchedulingBench::SceneType::AAAOutdoorForest);
   } else if (sceneName == "showroom") {
-    auto showroom = std::make_unique<RaySchedulingBench>(RaySchedulingBench::SceneType::Showroom);
-    showroom->SetBounceDepth(bounceDepth);
-    showroom->SetSamplesPerPixel(samplesPerPixel);
-    showroom->SetDumpRenders(dumpRenders || verifyParity);
-    showroom->SetVerifyParity(verifyParity);
-    benchmarks.push_back(std::move(showroom));
+    addRayScene(RaySchedulingBench::SceneType::Showroom);
   } else if (sceneName == "indoor") {
-    auto indoor = std::make_unique<RaySchedulingBench>(RaySchedulingBench::SceneType::IndoorAtrium);
-    indoor->SetBounceDepth(bounceDepth);
-    indoor->SetSamplesPerPixel(samplesPerPixel);
-    indoor->SetDumpRenders(dumpRenders || verifyParity);
-    indoor->SetVerifyParity(verifyParity);
-    benchmarks.push_back(std::move(indoor));
+    addRayScene(RaySchedulingBench::SceneType::IndoorAtrium);
   } else {
-    // Default fallback: all scenes
-    auto showroom = std::make_unique<RaySchedulingBench>(RaySchedulingBench::SceneType::Showroom);
-    showroom->SetBounceDepth(bounceDepth);
-    showroom->SetSamplesPerPixel(samplesPerPixel);
-    showroom->SetDumpRenders(dumpRenders || verifyParity);
-    showroom->SetVerifyParity(verifyParity);
-    benchmarks.push_back(std::move(showroom));
-
-    auto indoor = std::make_unique<RaySchedulingBench>(RaySchedulingBench::SceneType::IndoorAtrium);
-    indoor->SetBounceDepth(bounceDepth);
-    indoor->SetSamplesPerPixel(samplesPerPixel);
-    indoor->SetDumpRenders(dumpRenders || verifyParity);
-    indoor->SetVerifyParity(verifyParity);
-    benchmarks.push_back(std::move(indoor));
-
-    auto outdoor = std::make_unique<RaySchedulingBench>(RaySchedulingBench::SceneType::OutdoorLandscape);
-    outdoor->SetBounceDepth(bounceDepth);
-    outdoor->SetSamplesPerPixel(samplesPerPixel);
-    outdoor->SetDumpRenders(dumpRenders || verifyParity);
-    outdoor->SetVerifyParity(verifyParity);
-    benchmarks.push_back(std::move(outdoor));
-
-    auto forest = std::make_unique<RaySchedulingBench>(RaySchedulingBench::SceneType::AAAOutdoorForest);
-    forest->SetBounceDepth(bounceDepth);
-    forest->SetSamplesPerPixel(samplesPerPixel);
-    forest->SetDumpRenders(dumpRenders || verifyParity);
-    forest->SetVerifyParity(verifyParity);
-    benchmarks.push_back(std::move(forest));
+    addRayScene(RaySchedulingBench::SceneType::Showroom);
+    addRayScene(RaySchedulingBench::SceneType::IndoorAtrium);
+    addRayScene(RaySchedulingBench::SceneType::OutdoorLandscape);
+    addRayScene(RaySchedulingBench::SceneType::AAAOutdoorForest);
   }
   benchmarks.push_back(std::make_unique<RayDivergenceBench>());
-  // RayPayload benchmark disabled (payload size invariance on modern wide VGPR files)
-  // benchmarks.push_back(std::make_unique<RayPayloadBench>());
+  benchmarks.push_back(std::make_unique<RayPayloadBench>());
 
   // Cache Bandwidth
-  const size_t l0_size = 16 * 1024; // 16KB L0 cache
-  std::vector<uint32_t> l0_init(l0_size / sizeof(uint32_t));
-  std::iota(l0_init.begin(), l0_init.end(), 0);
+  const size_t l0_size = 16 * 1024;        // 16 KB L0 cache
+  const size_t l1_size = 128 * 1024;       // 128 KB L1 cache
+  const size_t l2_size = 4 * 1024 * 1024;  // 4 MB L2 fallback (dynamically scaled from l2CacheSize)
+  const size_t l3_size = 64 * 1024 * 1024; // 64 MB L3 fallback (dynamically scaled from l3CacheSize)
 
-  // Cache Bandwidth is currently difficult to measure reliably because shader compilers
-  // aggressively optimize out the memory reading loops via Dead-Code Elimination. 
-  // We've disabled these by default until a more robust measurement technique is implemented.
-  /*
   benchmarks.push_back(std::make_unique<CacheBench>(
-      "L0 Cache Bandwidth", "GB/s", l0_size, "cache_bw_robust", l0_init,
-      std::vector<std::string>{"l0b"}, 0));
+      "L0 Cache Bandwidth", "GB/s", l0_size, "cache_bw_robust",
+      std::vector<uint32_t>{},
+      std::vector<std::string>{"l0b", "l0bw", "l0_cache_bandwidth", "l0-cache-bandwidth", "l0_vector_cache_bandwidth", "cachebw", "cache_bw"}, 0));
 
-  // Define target cache sizes for isolation
-  const size_t l1_size = 128 * 1024;       // 128KB
-  const size_t l2_size = 4 * 1024 * 1024;  // 4MB
-  const size_t l3_size = 64 * 1024 * 1024; // 64MB
-
-  // For cachebw_l1 (L1 cache), allocate 2MB (enough for the access pattern)
-  size_t cachebw_l1_size = 2 * 1024 * 1024;
-  std::vector<uint32_t> l1_bw_init(cachebw_l1_size / sizeof(uint32_t), 1);
-
-  // L1 Cache Bandwidth
   benchmarks.push_back(std::make_unique<CacheBench>(
       "L1 Cache Bandwidth", "GB/s", l1_size, "cache_bw_robust",
-      std::vector<uint32_t>{}, std::vector<std::string>{"l1b"}, 1));
+      std::vector<uint32_t>{},
+      std::vector<std::string>{"l1b", "l1bw", "l1_cache_bandwidth", "l1-cache-bandwidth", "cachebw", "cache_bw"}, 1));
 
-  // L2 Cache Bandwidth
   benchmarks.push_back(std::make_unique<CacheBench>(
       "L2 Cache Bandwidth", "GB/s", l2_size, "cache_bw_robust",
-      std::vector<uint32_t>{}, std::vector<std::string>{"l2b"}, 2));
+      std::vector<uint32_t>{},
+      std::vector<std::string>{"l2b", "l2bw", "l2_cache_bandwidth", "l2-cache-bandwidth", "cachebw", "cache_bw"}, 2));
 
-  // L3 Cache Bandwidth
   benchmarks.push_back(std::make_unique<CacheBench>(
       "L3 Cache Bandwidth", "GB/s", l3_size, "cache_bw_robust",
-      std::vector<uint32_t>{}, std::vector<std::string>{"l3b"}, 3));
-  */
-
-  // We still need the sizes for latency tests (commented out while L1-L3 latency tests disabled)
-  // const size_t l1_size = 128 * 1024;       // 128KB
-  // const size_t l2_size = 4 * 1024 * 1024;  // 4MB
-  // const size_t l3_size = 64 * 1024 * 1024; // 64MB
+      std::vector<uint32_t>{},
+      std::vector<std::string>{"l3b", "l3bw", "l3_cache_bandwidth", "l3-cache-bandwidth", "cachebw", "cache_bw"}, 3));
 
   // Cache Latency
   benchmarks.push_back(std::make_unique<CacheBench>(
@@ -483,9 +428,16 @@ static bool benchmarkMatches(const IBenchmark *bench, const std::string &run_nam
     }
   }
 
-  // Cache latency benchmark alias & general cache matching
+  // Cache benchmark alias & general cache matching
   if (dynamic_cast<const CacheBench *>(bench)) {
-    if (normRun == "cache" || normRun == "cachelatency" || normRun == "caches" || normRun == "cachelat") {
+    if (normRun == "cache" || normRun == "caches") {
+      return true;
+    }
+    const std::string metric = bench->GetMetric();
+    if (metric == "ns" && (normRun == "cachelatency" || normRun == "cachelat")) {
+      return true;
+    }
+    if (metric == "GB/s" && (normRun == "cachebw" || normRun == "cachebandwidth")) {
       return true;
     }
   }
@@ -630,7 +582,8 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
       std::string line2_plain = "Backend / API : " + backendStr + " | VRAM: " + std::to_string(vramGb) + " " + memLabel;
 
       std::string resPreset = "";
-      if (effectiveWidth == 3840 && effectiveHeight == 2160) resPreset = " (4K UHD)";
+      if (effectiveWidth == 7680 && effectiveHeight == 4320) resPreset = " (8K UHD)";
+      else if (effectiveWidth == 3840 && effectiveHeight == 2160) resPreset = " (4K UHD)";
       else if (effectiveWidth == 2560 && effectiveHeight == 1440) resPreset = " (1440p QHD)";
       else if (effectiveWidth == 1920 && effectiveHeight == 1080) resPreset = " (1080p FHD)";
       else if (effectiveWidth == 1280 && effectiveHeight == 720) resPreset = " (720p HD)";
@@ -717,19 +670,15 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
       return;
     }
 
-    if (!quiet && !verbose && !onResult) {
-      if (hasVisualVerification) {
-        std::cout << "  \033[1m[1/3] Preparation Phase\033[0m (compiling kernels, uploading data, building BVHs)..." << std::endl;
-      } else {
-        std::cout << "  \033[1m[1/2] Preparation Phase\033[0m (compiling kernels, uploading data, building BVHs)..." << std::endl;
-      }
-    } else if (!quiet) {
-      std::cout << "Preparing benchmarks (compiling kernels, uploading "
-                   "data, building acceleration structures)..."
-                << std::endl;
-    }
+    struct BenchmarkGroupPlan {
+      IBenchmark *bench = nullptr;
+      std::vector<uint32_t> configs;
+      int minSortWeight = 0;
+    };
 
-    std::vector<IBenchmark *> runnable;
+    std::vector<BenchmarkGroupPlan> groupPlans;
+    size_t totalPlannedTasks = 0;
+
     for (auto &bench : benchmarks) {
       bool should_run = isSelected(bench.get());
 
@@ -740,29 +689,86 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
         if (!bench->IsDeviceDependent())
           continue;
 
-        try {
-          if (auto *membw = dynamic_cast<MemBandwidthBench *>(bench.get())) {
-            membw->setDebug(debug);
-          } else if (auto *cache = dynamic_cast<CacheBench *>(bench.get())) {
-            cache->setDebug(debug);
-          } else if (auto *rs = dynamic_cast<RaySchedulingBench *>(bench.get())) {
-            rs->SetBounceDepth(bounceDepth);
-            rs->SetSamplesPerPixel(samplesPerPixel);
+        uint32_t num_configs = bench->GetNumConfigs();
+        std::vector<uint32_t> selectedConfigs;
+        int minWeight = 1000000000;
+
+        for (uint32_t i = 0; i < num_configs; ++i) {
+          if (!g_targetConfigs.empty()) {
+            if (std::find(g_targetConfigs.begin(), g_targetConfigs.end(), static_cast<int>(i)) == g_targetConfigs.end()) {
+              continue;
+            }
+          } else if (targetConfig >= 0 && static_cast<int>(i) != targetConfig) {
+            continue;
           }
 
-          if (verbose) {
-            std::cout << "Setting up " << bench->GetName() << "..." << std::endl;
+          // Deduplicate algorithmic microbenchmarks across non-Showroom scenes when running all scenes
+          if (auto *rs = dynamic_cast<RaySchedulingBench *>(bench.get())) {
+            if (sceneName == "all" && rs->GetSceneType() != RaySchedulingBench::SceneType::Showroom) {
+              if (i == 12 || i == 13 || i == 14 || i == 15 || i == 16 || i == 26 || i == 28) {
+                continue;
+              }
+            }
           }
-          bench->SetResolution(effectiveWidth, effectiveHeight);
-          bench->Setup(*context, KernelPath::find());
-          runnable.push_back(bench.get());
-        } catch (const std::exception &e) {
-          std::cerr << "Error setting up " << bench->GetName() << ": "
-                    << e.what() << std::endl;
-          try {
-            bench->Teardown();
-          } catch (...) {
+
+          if (!workloadFilter.empty()) {
+            bool matched = false;
+            std::string bName = bench->GetName();
+            std::string cName = bench->GetConfigName(i);
+            std::string fullTaskName = bName;
+            if (cName.rfind(bName, 0) == 0) {
+              fullTaskName = cName;
+            } else if (!cName.empty()) {
+              fullTaskName += " (" + cName + ")";
+            }
+            std::string keyIndex = bName + "#" + std::to_string(i);
+
+            // Strip any parenthesized scene name from RayScheduling (e.g. "RayScheduling (Indoor Atrium)" -> "RayScheduling")
+            std::string baseBenchName = bName;
+            size_t p = baseBenchName.find(" (");
+            if (p != std::string::npos) {
+              baseBenchName = baseBenchName.substr(0, p);
+            }
+            std::string baseKeyIndex = baseBenchName + "#" + std::to_string(i);
+
+            for (const auto &filt : workloadFilter) {
+              if (filt == baseBenchName || filt == bName) {
+                matched = true;
+                break;
+              }
+              if (filt == baseKeyIndex || filt == keyIndex) {
+                matched = true;
+                break;
+              }
+              if (!cName.empty() && filt == cName) {
+                matched = true;
+                break;
+              }
+              if (filt == fullTaskName) {
+                matched = true;
+                break;
+              }
+            }
+            if (!matched) {
+              continue;
+            }
           }
+
+          selectedConfigs.push_back(i);
+          int w = bench->GetSortWeight(i);
+          if (w < minWeight) {
+            minWeight = w;
+          }
+        }
+
+        if (!selectedConfigs.empty()) {
+          IBenchmark *bPtr = bench.get();
+          std::stable_sort(selectedConfigs.begin(), selectedConfigs.end(),
+                           [bPtr](uint32_t a, uint32_t b) {
+                             return bPtr->GetSortWeight(a) < bPtr->GetSortWeight(b);
+                           });
+          totalPlannedTasks += selectedConfigs.size();
+          groupPlans.push_back({bPtr, std::move(selectedConfigs), minWeight});
         }
       } else if (should_run && bench->IsDeviceDependent()) {
         // Skip logging unsupported Ray Tracing benchmarks under compute-only backends (ROCm / OpenCL)
@@ -839,6 +845,7 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
           result_data.deviceIndex = context->getSelectedDeviceIndex();
           result_data.configIndex = ci;
           result_data.sortWeight = bench->GetSortWeight(ci);
+          result_data.operationalIntensity = bench->GetOperationalIntensity(ci);
 
           formatter->addResult(result_data);
           numBenchmarksRun++;
@@ -849,215 +856,528 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
       }
     }
 
-    struct BenchmarkTask {
-      IBenchmark *bench;
-      uint32_t configIndex;
-      int sortWeight;
-    };
-
-    std::vector<BenchmarkTask> tasks;
-    for (auto *bench : runnable) {
-      uint32_t num_configs = bench->GetNumConfigs();
-      for (uint32_t i = 0; i < num_configs; ++i) {
-        if (!g_targetConfigs.empty()) {
-          if (std::find(g_targetConfigs.begin(), g_targetConfigs.end(), static_cast<int>(i)) == g_targetConfigs.end()) {
-            continue;
-          }
-        } else if (targetConfig >= 0 && static_cast<int>(i) != targetConfig) {
-          continue;
-        }
-
-        // Deduplicate algorithmic microbenchmarks across non-Showroom scenes when running all scenes
-        if (auto *rs = dynamic_cast<RaySchedulingBench *>(bench)) {
-          if (sceneName == "all" && rs->GetSceneType() != RaySchedulingBench::SceneType::Showroom) {
-            if (i == 12 || i == 13 || i == 14 || i == 15 || i == 16 || i == 26 || i == 28) {
-              continue;
-            }
-          }
-        }
-
-        if (!workloadFilter.empty()) {
-          bool matched = false;
-          std::string bName = bench->GetName();
-          std::string cName = bench->GetConfigName(i);
-          std::string fullTaskName = bName;
-          if (cName.rfind(bName, 0) == 0) {
-            fullTaskName = cName;
-          } else if (!cName.empty()) {
-            fullTaskName += " (" + cName + ")";
-          }
-          std::string keyIndex = bName + "#" + std::to_string(i);
-
-          // Strip any parenthesized scene name from RayScheduling (e.g. "RayScheduling (Indoor Atrium)" -> "RayScheduling")
-          std::string baseBenchName = bName;
-          size_t p = baseBenchName.find(" (");
-          if (p != std::string::npos) {
-            baseBenchName = baseBenchName.substr(0, p);
-          }
-          std::string baseKeyIndex = baseBenchName + "#" + std::to_string(i);
-
-          for (const auto &filt : workloadFilter) {
-            if (filt == baseBenchName || filt == bName) {
-              matched = true;
-              break;
-            }
-            if (filt == baseKeyIndex || filt == keyIndex) {
-              matched = true;
-              break;
-            }
-            if (!cName.empty() && filt == cName) {
-              matched = true;
-              break;
-            }
-            if (filt == fullTaskName) {
-              matched = true;
-              break;
-            }
-          }
-          if (!matched) {
-            continue;
-          }
-        }
-
-        tasks.push_back({bench, i, bench->GetSortWeight(i)});
-      }
-    }
-
-    std::stable_sort(tasks.begin(), tasks.end(),
-                     [](const BenchmarkTask &a, const BenchmarkTask &b) {
-                       return a.sortWeight < b.sortWeight;
+    std::stable_sort(groupPlans.begin(), groupPlans.end(),
+                     [](const BenchmarkGroupPlan &a, const BenchmarkGroupPlan &b) {
+                       return a.minSortWeight < b.minSortWeight;
                      });
 
     const bool isInteractive = !quiet && !verbose && !onResult && isatty(fileno(stdout));
-    if (!quiet && !verbose && !onResult) {
-      std::cout << "\r\033[K  \033[32m✔\033[0m Preparation complete.\n\n";
-      if (!tasks.empty()) {
-        if (hasVisualVerification) {
-          std::cout << "  \033[1m[2/3] Running Benchmarks\033[0m ("
-                    << tasks.size() << " workloads)..." << std::endl;
-        } else {
-          std::cout << "  \033[1m[2/2] Running Benchmarks\033[0m ("
-                    << tasks.size() << " workloads)..." << std::endl;
-        }
+    if (!quiet && !verbose && !onResult && totalPlannedTasks > 0) {
+      if (hasVisualVerification) {
+        std::cout << "  \033[1m[1/2] Running Benchmarks & Lazy Scene Lifecycle\033[0m ("
+                  << totalPlannedTasks << " workloads)..." << std::endl;
+      } else {
+        std::cout << "  \033[1m[1/1] Running Benchmarks\033[0m ("
+                  << totalPlannedTasks << " workloads)..." << std::endl;
       }
+    } else if (!quiet && verbose && totalPlannedTasks > 0) {
+      std::cout << "Executing " << totalPlannedTasks
+                << " benchmark workloads with lazy per-benchmark VRAM lifecycle..."
+                << std::endl;
     }
 
     IBenchmark *prevBench = nullptr;
     size_t taskIdx = 0;
     bool deviceLost = false;
-    for (const auto &task : tasks) {
+
+    auto emitAbortedTask = [&](IBenchmark *abortedBench, uint32_t abortedConfig, const std::string &reason) {
+      std::string abortedName = abortedBench->GetName();
+      std::string cfgName = abortedBench->GetConfigName(abortedConfig);
+      if (cfgName.rfind(abortedName, 0) == 0) {
+        abortedName = cfgName;
+      } else if (!cfgName.empty()) {
+        abortedName += " (" + cfgName + ")";
+      }
+      ResultData abort_data;
+      abort_data.backendName = ComputeBackendFactory::getBackendName(context->getBackend());
+      abort_data.deviceName = info.name;
+      abort_data.vendorId = info.vendorID;
+      abort_data.deviceId = info.deviceID;
+      abort_data.benchmarkName = abortedName;
+      abort_data.component = abortedBench->GetComponent(abortedConfig);
+      abort_data.subcategory = abortedBench->GetSubCategory(abortedConfig);
+      abort_data.metric = abortedBench->GetMetric(abortedConfig);
+      abort_data.operations = 0;
+      abort_data.time_ms = -3.0; // Signals aborted
+      abort_data.isEmulated = false;
+      abort_data.isUnsupported = false;
+      abort_data.isValid = false;
+      abort_data.maxWorkGroupSize = info.maxWorkGroupSize;
+      abort_data.deviceIndex = context->getSelectedDeviceIndex();
+      abort_data.configIndex = abortedConfig;
+      abort_data.sortWeight = abortedBench->GetSortWeight(abortedConfig);
+      abort_data.operationalIntensity = abortedBench->GetOperationalIntensity(abortedConfig);
+      abort_data.width = effectiveWidth;
+      abort_data.height = effectiveHeight;
+      abort_data.errorString = reason;
+
+      formatter->addResult(abort_data);
+      if (onResult) {
+        onResult(abort_data);
+      }
+    };
+
+    for (size_t gIdx = 0; gIdx < groupPlans.size(); ++gIdx) {
+      auto &group = groupPlans[gIdx];
+      IBenchmark *bench = group.bench;
+
       if (cancelToken && cancelToken->load()) {
         if (!quiet && !verbose && !onResult) {
           std::cout << "\n  \033[33m⚠\033[0m Benchmark run cancelled by user." << std::endl;
         }
         break;
       }
-      auto *bench = task.bench;
-      uint32_t i = task.configIndex;
-
-      if (prevBench) {
-        if (prevBench != bench) {
-          std::this_thread::sleep_for(std::chrono::milliseconds(150));
-        } else if (dynamic_cast<MemBandwidthBench *>(bench)) {
-          std::this_thread::sleep_for(std::chrono::milliseconds(50));
+      if (deviceLost) {
+        for (uint32_t cfg : group.configs) {
+          emitAbortedTask(bench, cfg, "Aborted: GPU device hung/lost");
         }
-      }
-      prevBench = bench;
-
-      std::string bench_name = bench->GetName();
-      std::string config_name = bench->GetConfigName(i);
-      if (config_name.rfind(bench_name, 0) == 0) {
-        bench_name = config_name;
-      } else if (!config_name.empty()) {
-        bench_name += " (" + config_name + ")";
+        continue;
       }
 
+      if (prevBench && prevBench != bench) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      }
+
+      // Lazy per-benchmark Setup()
+      bool setupSucceeded = false;
       try {
+        if (auto *membw = dynamic_cast<MemBandwidthBench *>(bench)) {
+          membw->setDebug(debug);
+        } else if (auto *cache = dynamic_cast<CacheBench *>(bench)) {
+          cache->setDebug(debug);
+        } else if (auto *rs = dynamic_cast<RaySchedulingBench *>(bench)) {
+          rs->SetBounceDepth(bounceDepth);
+          rs->SetSamplesPerPixel(samplesPerPixel);
+          rs->SetDumpRenders(dumpRenders);
+          rs->SetVerifyParity(verifyParity);
+          rs->SetCaptureGpuPreviews(captureGpuPreviews);
+        }
+        bench->SetVerifyParity(verifyParity);
+
         if (verbose) {
-          std::cout << "[D" << context->getSelectedDeviceIndex()
-                    << "] Running " << bench_name << "..." << std::endl;
+          std::cout << "Setting up " << bench->GetName() << "..." << std::endl;
         } else if (isInteractive) {
-          std::string disp = bench_name;
-          if (disp.rfind("RayScheduling (", 0) == 0) {
-            size_t firstClose = disp.find(')', 15);
-            size_t secondOpen = disp.find(") (");
-            if (firstClose != std::string::npos && secondOpen != std::string::npos && disp.back() == ')') {
-              std::string sc = disp.substr(15, firstClose - 15);
-              std::string cfg = disp.substr(secondOpen + 3, disp.length() - (secondOpen + 4));
-              disp = "[" + sc + "] " + cfg;
-            }
-          } else if (disp.rfind("RayASBuild (", 0) == 0 && disp.back() == ')') {
-            disp = disp.substr(12, disp.length() - 13);
-          }
-          if (disp.length() > 64) disp = disp.substr(0, 61) + "...";
-          static const char* kSpinnerFrames[] = {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"};
-          const char* spinner = kSpinnerFrames[taskIdx % 10];
-          std::cout << "\r\033[K  \033[36m" << spinner << "\033[0m [" << (taskIdx + 1) << "/" << tasks.size() << "] "
-                    << disp << "..." << std::flush;
-        } else if (!quiet) {
-          std::cout << "  - [" << ComputeBackendFactory::getBackendName(context->getBackend())
-                    << "] Running " << bench_name << "..." << std::flush;
+          std::cout << "\r\033[K  \033[36m⚙\033[0m Preparing " << bench->GetName() << "..." << std::flush;
         }
-
-        if (onResult) {
-          ResultData start_data;
-          start_data.backendName = ComputeBackendFactory::getBackendName(context->getBackend());
-          start_data.deviceName = info.name;
-          start_data.benchmarkName = bench_name;
-          start_data.component = bench->GetComponent(i);
-          start_data.subcategory = bench->GetSubCategory(i);
-          start_data.metric = bench->GetMetric(i);
-          start_data.operations = 0;
-          start_data.time_ms = -1.0;
-          start_data.isEmulated = false;
-          start_data.isUnsupported = false;
-          start_data.maxWorkGroupSize = info.maxWorkGroupSize;
-          start_data.deviceIndex = context->getSelectedDeviceIndex();
-          start_data.configIndex = i;
-          start_data.sortWeight = bench->GetSortWeight(i);
-          start_data.width = effectiveWidth;
-          start_data.height = effectiveHeight;
-          onResult(start_data);
+        bench->SetResolution(effectiveWidth, effectiveHeight);
+        bench->Setup(*context, KernelPath::find());
+        setupSucceeded = true;
+      } catch (const std::exception &e) {
+        executionFailure = true;
+        std::cerr << "Error setting up " << bench->GetName() << ": "
+                  << e.what() << std::endl;
+        try {
+          bench->Teardown();
+        } catch (...) {
         }
-
-        if (!bench->IsConfigSupported(i, info, context)) {
-          std::string note = bench->GetConfigSupportNote(i, info, context);
-          if (note.empty()) {
-            note = bench->GetSupportNote(info, context);
+        for (uint32_t cfg : group.configs) {
+          std::string failName = bench->GetName();
+          std::string cfgName = bench->GetConfigName(cfg);
+          if (cfgName.rfind(failName, 0) == 0) {
+            failName = cfgName;
+          } else if (!cfgName.empty()) {
+            failName += " (" + cfgName + ")";
           }
-          if (!quiet && !verbose && !isInteractive) {
-            if (!note.empty()) {
-              std::cout << " Unsupported (" << note << ")." << std::endl;
-            } else {
-              std::cout << " Unsupported." << std::endl;
-            }
+          ResultData fail_data;
+          fail_data.backendName = ComputeBackendFactory::getBackendName(context->getBackend());
+          fail_data.deviceName = info.name;
+          fail_data.vendorId = info.vendorID;
+          fail_data.deviceId = info.deviceID;
+          fail_data.benchmarkName = failName;
+          fail_data.component = bench->GetComponent(cfg);
+          fail_data.subcategory = bench->GetSubCategory(cfg);
+          fail_data.metric = bench->GetMetric(cfg);
+          fail_data.operations = 0;
+          fail_data.time_ms = -2.0;
+          fail_data.isEmulated = false;
+          fail_data.isUnsupported = false;
+          fail_data.isValid = false;
+          fail_data.maxWorkGroupSize = info.maxWorkGroupSize;
+          fail_data.deviceIndex = context->getSelectedDeviceIndex();
+          fail_data.configIndex = cfg;
+          fail_data.sortWeight = bench->GetSortWeight(cfg);
+          fail_data.operationalIntensity = bench->GetOperationalIntensity(cfg);
+          fail_data.width = effectiveWidth;
+          fail_data.height = effectiveHeight;
+          fail_data.errorString = e.what();
+          formatter->addResult(fail_data);
+          if (onResult) {
+            onResult(fail_data);
           }
           taskIdx++;
+        }
+      }
+
+      if (!setupSucceeded) {
+        continue;
+      }
+
+      for (size_t cPos = 0; cPos < group.configs.size(); ++cPos) {
+        uint32_t i = group.configs[cPos];
+        if (cancelToken && cancelToken->load()) {
+          if (!quiet && !verbose && !onResult) {
+            std::cout << "\n  \033[33m⚠\033[0m Benchmark run cancelled by user." << std::endl;
+          }
+          break;
+        }
+
+        if (prevBench == bench && dynamic_cast<MemBandwidthBench *>(bench)) {
+          std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+        prevBench = bench;
+
+        std::string bench_name = bench->GetName();
+        std::string config_name = bench->GetConfigName(i);
+        if (config_name.rfind(bench_name, 0) == 0) {
+          bench_name = config_name;
+        } else if (!config_name.empty()) {
+          bench_name += " (" + config_name + ")";
+        }
+
+        try {
+          if (verbose) {
+            std::cout << "[D" << context->getSelectedDeviceIndex()
+                      << "] Running " << bench_name << "..." << std::endl;
+          } else if (isInteractive) {
+            std::string disp = bench_name;
+            if (disp.rfind("RayScheduling (", 0) == 0) {
+              size_t firstClose = disp.find(')', 15);
+              size_t secondOpen = disp.find(") (");
+              if (firstClose != std::string::npos && secondOpen != std::string::npos && disp.back() == ')') {
+                std::string sc = disp.substr(15, firstClose - 15);
+                std::string cfg = disp.substr(secondOpen + 3, disp.length() - (secondOpen + 4));
+                disp = "[" + sc + "] " + cfg;
+              }
+            } else if (disp.rfind("RayASBuild (", 0) == 0 && disp.back() == ')') {
+              disp = disp.substr(12, disp.length() - 13);
+            }
+            if (disp.length() > 64) disp = disp.substr(0, 61) + "...";
+            static const char* kSpinnerFrames[] = {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"};
+            const char* spinner = kSpinnerFrames[taskIdx % 10];
+            std::cout << "\r\033[K  \033[36m" << spinner << "\033[0m [" << (taskIdx + 1) << "/" << totalPlannedTasks << "] "
+                      << disp << "..." << std::flush;
+          } else if (!quiet) {
+            std::cout << "  - [" << ComputeBackendFactory::getBackendName(context->getBackend())
+                      << "] Running " << bench_name << "..." << std::flush;
+          }
+
+          if (onResult) {
+            ResultData start_data;
+            start_data.backendName = ComputeBackendFactory::getBackendName(context->getBackend());
+            start_data.deviceName = info.name;
+            start_data.benchmarkName = bench_name;
+            start_data.component = bench->GetComponent(i);
+            start_data.subcategory = bench->GetSubCategory(i);
+            start_data.metric = bench->GetMetric(i);
+            start_data.operations = 0;
+            start_data.time_ms = -1.0;
+            start_data.isEmulated = false;
+            start_data.isUnsupported = false;
+            start_data.maxWorkGroupSize = info.maxWorkGroupSize;
+            start_data.deviceIndex = context->getSelectedDeviceIndex();
+            start_data.configIndex = i;
+            start_data.sortWeight = bench->GetSortWeight(i);
+            start_data.operationalIntensity = bench->GetOperationalIntensity(i);
+            start_data.width = effectiveWidth;
+            start_data.height = effectiveHeight;
+            onResult(start_data);
+          }
+
+          if (!bench->IsConfigSupported(i, info, context)) {
+            std::string note = bench->GetConfigSupportNote(i, info, context);
+            if (note.empty()) {
+              note = bench->GetSupportNote(info, context);
+            }
+            if (!quiet && !verbose && !isInteractive) {
+              if (!note.empty()) {
+                std::cout << " Unsupported (" << note << ")." << std::endl;
+              } else {
+                std::cout << " Unsupported." << std::endl;
+              }
+            }
+            taskIdx++;
+            ResultData result_data;
+            result_data.backendName = ComputeBackendFactory::getBackendName(context->getBackend());
+            result_data.deviceName = info.name;
+            result_data.vendorId = info.vendorID;
+            result_data.deviceId = info.deviceID;
+            result_data.benchmarkName = bench_name;
+            result_data.metric = bench->GetMetric(i);
+            result_data.operations = 0;
+            result_data.time_ms = 0;
+            result_data.isEmulated = false;
+            result_data.isUnsupported = true;
+            result_data.supportNote = note;
+            switch (bench->GetConfigSupportLimitation(i, info, context)) {
+            case IBenchmark::SupportLimitation::kHardware:
+              result_data.supportCategory = "hardware";
+              break;
+            case IBenchmark::SupportLimitation::kApi:
+              result_data.supportCategory = "driver/api";
+              break;
+            case IBenchmark::SupportLimitation::kToolchain:
+              result_data.supportCategory = "toolchain";
+              break;
+            default:
+              result_data.supportCategory = "hardware";
+              break;
+            }
+            result_data.component = bench->GetComponent(i);
+            result_data.subcategory = bench->GetSubCategory(i);
+            result_data.maxWorkGroupSize = info.maxWorkGroupSize;
+            result_data.deviceIndex = context->getSelectedDeviceIndex();
+            result_data.configIndex = i;
+            result_data.sortWeight = bench->GetSortWeight(i);
+            result_data.operationalIntensity = bench->GetOperationalIntensity(i);
+            result_data.width = effectiveWidth;
+            result_data.height = effectiveHeight;
+
+            formatter->addResult(result_data);
+            numBenchmarksRun++;
+            if (onResult) {
+              onResult(result_data);
+            }
+            continue;
+          }
+
+          struct ConfigResourceGuard {
+            IBenchmark *b;
+            uint32_t idx;
+            ~ConfigResourceGuard() {
+              try {
+                b->ReleaseConfigResources(idx);
+              } catch (...) {
+              }
+            }
+          };
+          bench->PrepareConfig(i);
+          ConfigResourceGuard configGuard{bench, i};
+
+          const bool usesCustomTiming = bench->UsesCustomTiming(i);
+          const bool needsBarrier = bench->RequiresInterIterationBarrier(i);
+
+          double total_time_ms = 0;
+          uint64_t total_invocations = 0;
+          double stat_min_ms = 0.0;
+          double stat_med_ms = 0.0;
+          double stat_mean_ms = 0.0;
+          double stat_p95_ms = 0.0;
+          uint32_t stat_sample_count = 0;
+          std::vector<double> stat_samples;
+          uint32_t devIdx = context->getSelectedDeviceIndex();
+          GpuTelemetryData powerStart{};
+          float avgPowerWatts = 0.0f;
+          HardwarePerformanceCounters measuredPerfCounters;
+          context->clearLastDispatchedKernel();
+
+          // Time-bounded warmup & measurement windows:
+          // Never execute a fixed amount of work; execute sets of operations over
+          // a fixed time window and count total completed work.
+          const double target_warmup_ms = profileSnapshot ? 25.0 : 250.0;
+          const double target_measurement_ms = profileSnapshot ? 60.0 : 500.0;
+          const double target_batch_ms = profileSnapshot ? 20.0 : 50.0;
+
+          double warmup_elapsed_ms = 0.0;
+          double single_run_ms = 0.0;
+          while (warmup_elapsed_ms < target_warmup_ms) {
+            if (cancelToken && cancelToken->load()) break;
+            auto w_start = std::chrono::high_resolution_clock::now();
+            bench->Run(i);
+            if (!usesCustomTiming) {
+              context->waitIdle();
+            }
+            auto w_end = std::chrono::high_resolution_clock::now();
+            double w_ms = usesCustomTiming
+                ? bench->GetLastRunDurationMs(i)
+                : std::chrono::duration<double, std::milli>(w_end - w_start).count();
+            if (w_ms <= 0.0) {
+              w_ms = std::chrono::duration<double, std::milli>(w_end - w_start).count();
+            }
+            if (w_ms <= 0.0) w_ms = 0.001;
+            warmup_elapsed_ms += w_ms;
+            single_run_ms = w_ms;
+          }
+
+          uint64_t batch_iters = 1;
+          if (!usesCustomTiming && single_run_ms > 0.0 && single_run_ms < target_batch_ms) {
+            batch_iters = static_cast<uint64_t>(
+                std::max(1.0, std::round(target_batch_ms / single_run_ms)));
+          }
+          batch_iters = std::clamp<uint64_t>(batch_iters, 1, 256);
+
+          std::vector<double> sample_time_per_invoc;
+          total_invocations = 0;
+          double accumulated_time_ms = 0.0;
+          double wall_elapsed_ms = 0.0;
+          const double max_wall_ms = target_measurement_ms * 4.0 + 2000.0;
+
+          powerStart = HardwareTelemetry::queryGpu(devIdx);
+          auto loop_wall_start = std::chrono::high_resolution_clock::now();
+
+          while (accumulated_time_ms < target_measurement_ms &&
+                 wall_elapsed_ms < max_wall_ms) {
+            if (cancelToken && cancelToken->load()) break;
+
+            double sample_ms = 0.0;
+            if (usesCustomTiming) {
+              auto s_start = std::chrono::high_resolution_clock::now();
+              bench->Run(i);
+              sample_ms = bench->GetLastRunDurationMs(i);
+              if (sample_ms <= 0.0) {
+                auto s_end = std::chrono::high_resolution_clock::now();
+                sample_ms =
+                    std::chrono::duration<double, std::milli>(s_end - s_start).count();
+              }
+            } else {
+              if (context->hasGpuTiming()) {
+                context->startTiming();
+              }
+              auto s_start = std::chrono::high_resolution_clock::now();
+
+              if (batch_iters > 1) {
+                context->beginBatch(static_cast<uint32_t>(batch_iters), needsBarrier);
+                for (uint64_t it = 0; it < batch_iters; ++it) {
+                  bench->Run(i);
+                }
+                context->endBatch();
+              } else {
+                bench->Run(i);
+              }
+
+              if (context->hasGpuTiming()) {
+                double gpu_time = context->stopTiming();
+                if (gpu_time > 0.0) {
+                  sample_ms = gpu_time;
+                } else {
+                  context->waitIdle();
+                  auto s_end = std::chrono::high_resolution_clock::now();
+                  sample_ms =
+                      std::chrono::duration<double, std::milli>(s_end - s_start).count();
+                }
+              } else {
+                context->waitIdle();
+                auto s_end = std::chrono::high_resolution_clock::now();
+                sample_ms =
+                    std::chrono::duration<double, std::milli>(s_end - s_start).count();
+              }
+            }
+
+            if (sample_ms > 0.0) {
+              accumulated_time_ms += sample_ms;
+              total_invocations += batch_iters;
+              sample_time_per_invoc.push_back(
+                  sample_ms / static_cast<double>(batch_iters));
+            }
+
+            auto now = std::chrono::high_resolution_clock::now();
+            wall_elapsed_ms =
+                std::chrono::duration<double, std::milli>(now - loop_wall_start).count();
+          }
+
+          if (!sample_time_per_invoc.empty()) {
+            total_time_ms = bench->FilterDuration(i, total_invocations, accumulated_time_ms);
+            if (accumulated_time_ms > 0.0 && total_time_ms != accumulated_time_ms) {
+              const double delta_per_inv =
+                  (total_time_ms - accumulated_time_ms) /
+                  static_cast<double>(std::max<uint64_t>(1, total_invocations));
+              for (double &val : sample_time_per_invoc) {
+                val = std::max(0.0, val + delta_per_inv);
+              }
+            }
+
+            std::vector<double> sorted_samples = sample_time_per_invoc;
+            std::sort(sorted_samples.begin(), sorted_samples.end());
+            size_t S = sorted_samples.size();
+
+            double min_per_inv = sorted_samples.front();
+            double sum_per_inv = 0.0;
+            for (double val : sorted_samples) sum_per_inv += val;
+            double mean_per_inv = sum_per_inv / S;
+
+            double med_per_inv = (S % 2 == 1)
+                ? sorted_samples[S / 2]
+                : 0.5 * (sorted_samples[S / 2 - 1] + sorted_samples[S / 2]);
+
+            size_t p95_idx = std::min(static_cast<size_t>(std::ceil(0.95 * S)) - 1, S - 1);
+            double p95_per_inv = sorted_samples[p95_idx];
+
+            stat_min_ms = min_per_inv * total_invocations;
+            stat_med_ms = med_per_inv * total_invocations;
+            stat_mean_ms = mean_per_inv * total_invocations;
+            stat_p95_ms = p95_per_inv * total_invocations;
+            stat_sample_count = static_cast<uint32_t>(S);
+            stat_samples = sample_time_per_invoc;
+          }
+
+          if (total_invocations == 0) {
+            emitAbortedTask(bench, i, "Benchmark cancelled by user before execution");
+            executionFailure = true;
+            continue;
+          }
+          if (verbose) {
+            std::cout << "[STATS " << bench_name << "] " << stat_sample_count << " samples"
+                      << ", invocations: " << total_invocations
+                      << ", total_ms: " << total_time_ms
+                      << " | median_inv: " << (stat_med_ms / (total_invocations ? total_invocations : 1)) << " ms"
+                      << " | min_inv: " << (stat_min_ms / (total_invocations ? total_invocations : 1)) << " ms"
+                      << " | mean_inv: " << (stat_mean_ms / (total_invocations ? total_invocations : 1)) << " ms"
+                      << " | p95_inv: " << (stat_p95_ms / (total_invocations ? total_invocations : 1)) << " ms"
+                      << std::endl;
+          }
+
+          GpuTelemetryData powerEnd = HardwareTelemetry::queryGpu(devIdx);
+          avgPowerWatts = HardwareTelemetry::computeWindowPowerWatts(
+              powerStart, powerEnd, wall_elapsed_ms);
+
+          // Run VK_KHR_performance_query in an isolated untimed pass so SPM/SQTT
+          // serialization barriers do not contaminate the timed throughput measurement.
+          if (!usesCustomTiming && context->hasPerformanceQuery() &&
+              (!cancelToken || !cancelToken->load())) {
+            context->startPerformanceQuery();
+            context->beginBatch(1, needsBarrier);
+            bench->Run(i);
+            context->endBatch();
+            measuredPerfCounters = context->stopPerformanceQuery();
+          }
+
+          bool isValid = bench->ValidateResults(i);
+          if (!isValid) {
+            validationFailure = true;
+            if (verbose) {
+              std::cerr << " [WARNING] Result validation failed for "
+                        << bench_name << std::endl;
+            }
+          }
+
+          BenchmarkResult bench_result = bench->GetResult(i);
+          bench->RecordRunResult(i, total_invocations, total_time_ms);
+
           ResultData result_data;
-          result_data.backendName = ComputeBackendFactory::getBackendName(context->getBackend());
+          result_data.backendName = ComputeBackendFactory::getBackendName(
+              context->getBackend());
           result_data.deviceName = info.name;
           result_data.vendorId = info.vendorID;
           result_data.deviceId = info.deviceID;
           result_data.benchmarkName = bench_name;
           result_data.metric = bench->GetMetric(i);
-          result_data.operations = 0;
-          result_data.time_ms = 0;
-          result_data.isEmulated = false;
-          result_data.isUnsupported = true;
-          result_data.supportNote = note;
-          switch (bench->GetConfigSupportLimitation(i, info, context)) {
-          case IBenchmark::SupportLimitation::kHardware:
-            result_data.supportCategory = "hardware";
-            break;
-          case IBenchmark::SupportLimitation::kApi:
-            result_data.supportCategory = "driver/api";
-            break;
-          case IBenchmark::SupportLimitation::kToolchain:
-            result_data.supportCategory = "toolchain";
-            break;
-          default:
-            result_data.supportCategory = "hardware";
-            break;
+          result_data.operations =
+              bench_result.operations * total_invocations;
+          result_data.time_ms = total_time_ms;
+          result_data.min_time_ms = stat_min_ms;
+          result_data.median_time_ms = stat_med_ms;
+          result_data.mean_time_ms = stat_mean_ms;
+          result_data.p95_time_ms = stat_p95_ms;
+          result_data.sample_count = stat_sample_count;
+          result_data.sample_durations_ms = stat_samples;
+          result_data.isValid = isValid;
+          result_data.baselineConfigIndex = bench->GetBaselineConfigIndex(i);
+          result_data.isEmulated = bench->IsEmulated(i);
+          result_data.supportNote = bench->GetConfigCaveat(i, info, context);
+          if (result_data.supportNote.empty() && dynamic_cast<CacheLatencyCurveBench *>(bench)) {
+            result_data.supportNote = bench->GetConfigSupportNote(i, info, context);
+          }
+          if (result_data.supportNote.empty() && result_data.isEmulated) {
+            result_data.supportNote = "Emulated via software unpack";
           }
           result_data.component = bench->GetComponent(i);
           result_data.subcategory = bench->GetSubCategory(i);
@@ -1065,525 +1385,270 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
           result_data.deviceIndex = context->getSelectedDeviceIndex();
           result_data.configIndex = i;
           result_data.sortWeight = bench->GetSortWeight(i);
+          result_data.operationalIntensity = bench->GetOperationalIntensity(i);
           result_data.width = effectiveWidth;
           result_data.height = effectiveHeight;
 
-          formatter->addResult(result_data);
-          numBenchmarksRun++;
-          if (onResult) {
-            onResult(result_data);
-          }
-          continue;
-        }
+          KernelResourceUsage kUsage = context->getLastKernelResourceUsage();
+          if (kUsage.available) {
+            result_data.hasRegisterTelemetry = true;
+            result_data.vgprCount = kUsage.vgprCount;
+            result_data.sgprCount = kUsage.sgprCount;
+            result_data.ldsSizeBytes = kUsage.ldsSizeBytes;
+            result_data.scratchSizeBytes = kUsage.scratchSizeBytes;
+            result_data.codeSizeBytes = kUsage.codeSizeBytes;
+            result_data.maxWavesPerSimd = kUsage.maxWavesPerSimd;
+            result_data.compilerTarget = kUsage.compilerNotes;
 
-        double total_time_ms = 0;
-        uint64_t total_invocations = 0;
-        double stat_min_ms = 0.0;
-        double stat_med_ms = 0.0;
-        double stat_mean_ms = 0.0;
-        double stat_p95_ms = 0.0;
-        uint32_t stat_sample_count = 0;
-        std::vector<double> stat_samples;
-        uint32_t devIdx = context->getSelectedDeviceIndex();
-        GpuTelemetryData powerStart{};
-        float avgPowerWatts = 0.0f;
-        HardwarePerformanceCounters measuredPerfCounters;
-        context->clearLastDispatchedKernel();
-
-        // Time-bounded warmup & measurement windows:
-        // Never execute a fixed amount of work; execute sets of operations over
-        // a fixed time window and count total completed work.
-        const double target_warmup_ms = profileSnapshot ? 25.0 : 250.0;
-        const double target_measurement_ms = profileSnapshot ? 60.0 : 500.0;
-        const double target_batch_ms = profileSnapshot ? 20.0 : 50.0;
-
-        double warmup_elapsed_ms = 0.0;
-        double single_run_ms = 0.0;
-        while (warmup_elapsed_ms < target_warmup_ms) {
-          if (cancelToken && cancelToken->load()) break;
-          auto w_start = std::chrono::high_resolution_clock::now();
-          bench->Run(i);
-          context->waitIdle();
-          auto w_end = std::chrono::high_resolution_clock::now();
-          double w_ms =
-              std::chrono::duration<double, std::milli>(w_end - w_start).count();
-          if (w_ms <= 0.0) w_ms = 0.001;
-          warmup_elapsed_ms += w_ms;
-          single_run_ms = w_ms;
-        }
-
-        uint64_t batch_iters = 1;
-        if (single_run_ms > 0.0 && single_run_ms < target_batch_ms) {
-          batch_iters = static_cast<uint64_t>(
-              std::max(1.0, std::round(target_batch_ms / single_run_ms)));
-        }
-        batch_iters = std::clamp<uint64_t>(batch_iters, 1, 256);
-
-        std::vector<double> sample_time_per_invoc;
-        total_invocations = 0;
-        double accumulated_time_ms = 0.0;
-        double wall_elapsed_ms = 0.0;
-        const double max_wall_ms = target_measurement_ms * 4.0 + 2000.0;
-
-        powerStart = HardwareTelemetry::queryGpu(devIdx);
-        auto loop_wall_start = std::chrono::high_resolution_clock::now();
-
-        while (accumulated_time_ms < target_measurement_ms &&
-               wall_elapsed_ms < max_wall_ms) {
-          if (cancelToken && cancelToken->load()) break;
-
-          if (context->hasGpuTiming()) {
-            context->startTiming();
-          }
-          auto s_start = std::chrono::high_resolution_clock::now();
-
-          if (batch_iters > 1) {
-            context->beginBatch(static_cast<uint32_t>(batch_iters));
-            for (uint64_t it = 0; it < batch_iters; ++it) {
-              bench->Run(i);
+            if (verbose) {
+              std::cout << " [COMPILER TELEMETRY " << ComputeBackendFactory::getBackendName(context->getBackend())
+                        << "] VGPRs: " << kUsage.vgprCount
+                        << (kUsage.sgprCount > 0 ? (" | SGPRs: " + std::to_string(kUsage.sgprCount)) : "")
+                        << " | LDS: " << kUsage.ldsSizeBytes << " B"
+                        << " | Scratch/Spill: " << kUsage.scratchSizeBytes << " B"
+                        << (kUsage.codeSizeBytes > 0 ? (" | Code: " + std::to_string(kUsage.codeSizeBytes) + " B") : "")
+                        << (kUsage.maxWavesPerSimd > 0 ? (" | Occupancy: " + std::to_string(kUsage.maxWavesPerSimd) + "/16 waves (" + std::to_string(static_cast<int>(kUsage.maxWavesPerSimd * 100.0 / 16.0)) + "%)") : "")
+                        << " (" << kUsage.compilerNotes << ")"
+                        << std::endl;
             }
-            context->endBatch();
-          } else {
-            bench->Run(i);
           }
 
-          double sample_ms = 0.0;
-          if (context->hasGpuTiming()) {
-            double gpu_time = context->stopTiming();
-            if (gpu_time > 0.0) {
-              sample_ms = gpu_time;
-            } else {
-              context->waitIdle();
-              auto s_end = std::chrono::high_resolution_clock::now();
-              sample_ms =
-                  std::chrono::duration<double, std::milli>(s_end - s_start).count();
+          if (measuredPerfCounters.available) {
+            result_data.hasPerfQueryTelemetry = true;
+            result_data.perfCounters = measuredPerfCounters;
+
+            if (verbose) {
+              std::cout << " [HARDWARE TELEMETRY VK_KHR_performance_query] Active Cycles: "
+                        << measuredPerfCounters.gpuActiveCycles
+                        << " | Waves: " << measuredPerfCounters.waves
+                        << " | VALU Insts: " << measuredPerfCounters.valuInstructions
+                        << " | SALU Insts: " << measuredPerfCounters.saluInstructions
+                        << " | VALU Busy: " << std::fixed << std::setprecision(1) << measuredPerfCounters.valuBusyPct << "%"
+                        << " | SALU Busy: " << measuredPerfCounters.saluBusyPct << "%"
+                        << " | VRAM Read: " << (static_cast<double>(measuredPerfCounters.vramReadBytes) / (1024.0 * 1024.0)) << " MB"
+                        << " | L0 Hit: " << measuredPerfCounters.l0CacheHitRatio << "%"
+                        << " | L1 Hit: " << measuredPerfCounters.l1CacheHitRatio << "%"
+                        << std::defaultfloat
+                        << std::endl;
             }
-          } else {
-            context->waitIdle();
-            auto s_end = std::chrono::high_resolution_clock::now();
-            sample_ms =
-                std::chrono::duration<double, std::milli>(s_end - s_start).count();
           }
 
-          if (sample_ms > 0.0) {
-            accumulated_time_ms += sample_ms;
-            total_invocations += batch_iters;
-            sample_time_per_invoc.push_back(
-                sample_ms / static_cast<double>(batch_iters));
-          }
+          if (avgPowerWatts > 0.0f && total_time_ms > 0.0) {
+            result_data.hasPowerTelemetry = true;
+            result_data.powerWatts = avgPowerWatts;
+            double durationSec = total_time_ms / 1000.0;
+            result_data.energyJoules = avgPowerWatts * durationSec;
 
-          auto now = std::chrono::high_resolution_clock::now();
-          wall_elapsed_ms =
-              std::chrono::duration<double, std::milli>(now - loop_wall_start).count();
-        }
-
-        if (!sample_time_per_invoc.empty()) {
-          std::vector<double> sorted_samples = sample_time_per_invoc;
-          std::sort(sorted_samples.begin(), sorted_samples.end());
-          size_t S = sorted_samples.size();
-
-          double min_per_inv = sorted_samples.front();
-          double sum_per_inv = 0.0;
-          for (double val : sorted_samples) sum_per_inv += val;
-          double mean_per_inv = sum_per_inv / S;
-
-          double med_per_inv = (S % 2 == 1)
-              ? sorted_samples[S / 2]
-              : 0.5 * (sorted_samples[S / 2 - 1] + sorted_samples[S / 2]);
-
-          size_t p95_idx = std::min(static_cast<size_t>(std::ceil(0.95 * S)) - 1, S - 1);
-          double p95_per_inv = sorted_samples[p95_idx];
-
-          total_time_ms = bench->FilterDuration(i, total_invocations, accumulated_time_ms);
-
-          stat_min_ms = min_per_inv * total_invocations;
-          stat_med_ms = med_per_inv * total_invocations;
-          stat_mean_ms = mean_per_inv * total_invocations;
-          stat_p95_ms = p95_per_inv * total_invocations;
-          stat_sample_count = static_cast<uint32_t>(S);
-          stat_samples = sample_time_per_invoc;
-        }
-
-        if (total_invocations == 0) {
-          ResultData abort_data;
-          abort_data.backendName = ComputeBackendFactory::getBackendName(context->getBackend());
-          abort_data.deviceName = info.name;
-          abort_data.vendorId = info.vendorID;
-          abort_data.deviceId = info.deviceID;
-          abort_data.benchmarkName = bench_name;
-          abort_data.time_ms = -3.0; // ABORTED
-          abort_data.errorString = "Benchmark cancelled by user before execution";
-          abort_data.isUnsupported = false;
-          abort_data.isValid = false;
-          abort_data.component = bench->GetComponent(i);
-          abort_data.subcategory = bench->GetSubCategory(i);
-          abort_data.configIndex = i;
-          abort_data.sortWeight = bench->GetSortWeight(i);
-          formatter->addResult(abort_data);
-          executionFailure = true;
-          continue;
-        }
-        if (verbose) {
-          std::cout << "[STATS " << bench_name << "] " << stat_sample_count << " samples"
-                    << ", invocations: " << total_invocations
-                    << ", total_ms: " << total_time_ms
-                    << " | median_inv: " << (stat_med_ms / (total_invocations ? total_invocations : 1)) << " ms"
-                    << " | min_inv: " << (stat_min_ms / (total_invocations ? total_invocations : 1)) << " ms"
-                    << " | mean_inv: " << (stat_mean_ms / (total_invocations ? total_invocations : 1)) << " ms"
-                    << " | p95_inv: " << (stat_p95_ms / (total_invocations ? total_invocations : 1)) << " ms"
-                    << std::endl;
-        }
-
-        GpuTelemetryData powerEnd = HardwareTelemetry::queryGpu(devIdx);
-        if (powerStart.powerWatts > 0.0f && powerEnd.powerWatts > 0.0f) {
-          avgPowerWatts = (powerStart.powerWatts + powerEnd.powerWatts) * 0.5f;
-        } else if (powerStart.powerWatts > 0.0f) {
-          avgPowerWatts = powerStart.powerWatts;
-        } else if (powerEnd.powerWatts > 0.0f) {
-          avgPowerWatts = powerEnd.powerWatts;
-        }
-
-        // Run VK_KHR_performance_query in an isolated untimed pass so SPM/SQTT
-        // serialization barriers do not contaminate the timed throughput measurement.
-        // Batch all sub-dispatches of bench->Run(i) into a single command buffer so
-        // multi-pass workloads capture the full sequence instead of only the reset pass.
-        if (context->hasPerformanceQuery() && (!cancelToken || !cancelToken->load())) {
-          context->startPerformanceQuery();
-          context->beginBatch(1);
-          bench->Run(i);
-          context->endBatch();
-          measuredPerfCounters = context->stopPerformanceQuery();
-        }
-
-        bool isValid = bench->ValidateResults(i);
-        if (!isValid) {
-          validationFailure = true;
-          if (verbose) {
-            std::cerr << " [WARNING] Result validation failed for "
-                      << bench_name << std::endl;
-          }
-        }
-
-        BenchmarkResult bench_result = bench->GetResult(i);
-        bench->RecordRunResult(i, total_invocations, total_time_ms);
-
-        ResultData result_data;
-        result_data.backendName = ComputeBackendFactory::getBackendName(
-            context->getBackend());
-        result_data.deviceName = info.name;
-        result_data.vendorId = info.vendorID;
-        result_data.deviceId = info.deviceID;
-        result_data.benchmarkName = bench_name;
-        result_data.metric = bench->GetMetric(i);
-        result_data.operations =
-            bench_result.operations * total_invocations;
-        result_data.time_ms = total_time_ms;
-        result_data.min_time_ms = stat_min_ms;
-        result_data.median_time_ms = stat_med_ms;
-        result_data.mean_time_ms = stat_mean_ms;
-        result_data.p95_time_ms = stat_p95_ms;
-        result_data.sample_count = stat_sample_count;
-        result_data.sample_durations_ms = stat_samples;
-        result_data.isValid = isValid;
-        result_data.baselineConfigIndex = bench->GetBaselineConfigIndex(i);
-        result_data.isEmulated = bench->IsEmulated(i);
-        result_data.supportNote = bench->GetConfigCaveat(i, info, context);
-        if (result_data.supportNote.empty() && dynamic_cast<CacheLatencyCurveBench *>(bench)) {
-          result_data.supportNote = bench->GetConfigSupportNote(i, info, context);
-        }
-        if (result_data.supportNote.empty() && result_data.isEmulated) {
-          result_data.supportNote = "Emulated via software unpack";
-        }
-        result_data.component = bench->GetComponent(i);
-        result_data.subcategory = bench->GetSubCategory(i);
-        result_data.maxWorkGroupSize = info.maxWorkGroupSize;
-        result_data.deviceIndex = context->getSelectedDeviceIndex();
-        result_data.configIndex = i;
-        result_data.sortWeight = bench->GetSortWeight(i);
-        result_data.width = effectiveWidth;
-        result_data.height = effectiveHeight;
-
-        KernelResourceUsage kUsage = context->getLastKernelResourceUsage();
-        if (kUsage.available) {
-          result_data.hasRegisterTelemetry = true;
-          result_data.vgprCount = kUsage.vgprCount;
-          result_data.sgprCount = kUsage.sgprCount;
-          result_data.ldsSizeBytes = kUsage.ldsSizeBytes;
-          result_data.scratchSizeBytes = kUsage.scratchSizeBytes;
-          result_data.codeSizeBytes = kUsage.codeSizeBytes;
-          result_data.maxWavesPerSimd = kUsage.maxWavesPerSimd;
-          result_data.compilerTarget = kUsage.compilerNotes;
-
-          if (verbose) {
-            std::cout << " [COMPILER TELEMETRY " << ComputeBackendFactory::getBackendName(context->getBackend())
-                      << "] VGPRs: " << kUsage.vgprCount
-                      << (kUsage.sgprCount > 0 ? (" | SGPRs: " + std::to_string(kUsage.sgprCount)) : "")
-                      << " | LDS: " << kUsage.ldsSizeBytes << " B"
-                      << " | Scratch/Spill: " << kUsage.scratchSizeBytes << " B"
-                      << (kUsage.codeSizeBytes > 0 ? (" | Code: " + std::to_string(kUsage.codeSizeBytes) + " B") : "")
-                      << (kUsage.maxWavesPerSimd > 0 ? (" | Occupancy: " + std::to_string(kUsage.maxWavesPerSimd) + "/16 waves (" + std::to_string(static_cast<int>(kUsage.maxWavesPerSimd * 100.0 / 16.0)) + "%)") : "")
-                      << " (" << kUsage.compilerNotes << ")"
-                      << std::endl;
-          }
-        }
-
-        if (measuredPerfCounters.available) {
-          result_data.hasPerfQueryTelemetry = true;
-          result_data.perfCounters = measuredPerfCounters;
-
-          if (verbose) {
-            std::cout << " [HARDWARE TELEMETRY VK_KHR_performance_query] Active Cycles: "
-                      << measuredPerfCounters.gpuActiveCycles
-                      << " | Waves: " << measuredPerfCounters.waves
-                      << " | VALU Insts: " << measuredPerfCounters.valuInstructions
-                      << " | SALU Insts: " << measuredPerfCounters.saluInstructions
-                      << " | VALU Busy: " << std::fixed << std::setprecision(1) << measuredPerfCounters.valuBusyPct << "%"
-                      << " | SALU Busy: " << measuredPerfCounters.saluBusyPct << "%"
-                      << " | VRAM Read: " << (static_cast<double>(measuredPerfCounters.vramReadBytes) / (1024.0 * 1024.0)) << " MB"
-                      << " | L0 Hit: " << measuredPerfCounters.l0CacheHitRatio << "%"
-                      << " | L1 Hit: " << measuredPerfCounters.l1CacheHitRatio << "%"
-                      << std::defaultfloat
-                      << std::endl;
-          }
-        }
-
-        if (avgPowerWatts > 0.0f && total_time_ms > 0.0) {
-          result_data.hasPowerTelemetry = true;
-          result_data.powerWatts = avgPowerWatts;
-          double durationSec = total_time_ms / 1000.0;
-          result_data.energyJoules = avgPowerWatts * durationSec;
-
-          if ((result_data.metric == "TFLOPS" || result_data.metric == "GFLOPS" ||
-               result_data.metric == "TOPS") &&
-              result_data.operations > 0) {
-            double ops12 = (static_cast<double>(result_data.operations) / durationSec) / 1e12;
-            if (ops12 > 0.0) {
-              result_data.joulesPerUnit = avgPowerWatts / ops12;
-              result_data.unitPerWatt = (ops12 * 1000.0) / avgPowerWatts;
-              result_data.efficiencyUnit = (result_data.metric == "TOPS") ? "J/TOP" : "J/TFLOP";
-            }
-          } else if ((result_data.metric == "GB/s" || result_data.metric == "TB/s") &&
-                     result_data.operations > 0) {
-            double gbps = (static_cast<double>(result_data.operations) / durationSec) / 1e9;
-            if (gbps > 0.0) {
-              result_data.joulesPerUnit = avgPowerWatts / gbps;
-              result_data.unitPerWatt = gbps / avgPowerWatts; // GB/Joule
-              result_data.efficiencyUnit = "J/GB";
-            }
-          } else if (result_data.component == "Ray Tracing" && result_data.operations > 0) {
-            if (result_data.metric == "GIS/s") {
-              double gis = (static_cast<double>(result_data.operations) / durationSec) / 1e9;
-              if (gis > 0.0) {
-                result_data.joulesPerUnit = avgPowerWatts / gis;
-                result_data.unitPerWatt = (gis * 1000.0) / avgPowerWatts; // MIS/Joule
-                result_data.efficiencyUnit = "J/GIS";
+            if ((result_data.metric == "TFLOPS" || result_data.metric == "GFLOPS" ||
+                 result_data.metric == "TOPS") &&
+                result_data.operations > 0) {
+              double ops12 = (static_cast<double>(result_data.operations) / durationSec) / 1e12;
+              if (ops12 > 0.0) {
+                result_data.joulesPerUnit = avgPowerWatts / ops12;
+                result_data.unitPerWatt = (ops12 * 1000.0) / avgPowerWatts;
+                result_data.efficiencyUnit = (result_data.metric == "TOPS") ? "J/TOP" : "J/TFLOP";
               }
-            } else {
-              double munits = (static_cast<double>(result_data.operations) / durationSec) / 1e6;
-              if (munits > 0.0) {
-                result_data.joulesPerUnit = avgPowerWatts / munits;
-                result_data.unitPerWatt = (munits * 1000.0) / avgPowerWatts; // kUnits/Joule
-                if (result_data.metric == "MTris/s") {
-                  result_data.efficiencyUnit = "J/MTri";
-                } else if (result_data.metric == "MInst/s") {
-                  result_data.efficiencyUnit = "J/MInst";
-                } else if (result_data.metric == "MRecords/s") {
+            } else if ((result_data.metric == "GB/s" || result_data.metric == "TB/s") &&
+                       result_data.operations > 0) {
+              double gbps = (static_cast<double>(result_data.operations) / durationSec) / 1e9;
+              if (gbps > 0.0) {
+                result_data.joulesPerUnit = avgPowerWatts / gbps;
+                result_data.unitPerWatt = gbps / avgPowerWatts; // GB/Joule
+                result_data.efficiencyUnit = "J/GB";
+              }
+            } else if (result_data.component == "Ray Tracing" && result_data.operations > 0) {
+              if (result_data.metric == "GIS/s") {
+                double gis = (static_cast<double>(result_data.operations) / durationSec) / 1e9;
+                if (gis > 0.0) {
+                  result_data.joulesPerUnit = avgPowerWatts / gis;
+                  result_data.unitPerWatt = (gis * 1000.0) / avgPowerWatts; // MIS/Joule
+                  result_data.efficiencyUnit = "J/GIS";
+                }
+              } else {
+                double munits = (static_cast<double>(result_data.operations) / durationSec) / 1e6;
+                if (munits > 0.0) {
+                  result_data.joulesPerUnit = avgPowerWatts / munits;
+                  result_data.unitPerWatt = (munits * 1000.0) / avgPowerWatts; // kUnits/Joule
+                  if (result_data.metric == "MTris/s") {
+                    result_data.efficiencyUnit = "J/MTri";
+                  } else if (result_data.metric == "MInst/s") {
+                    result_data.efficiencyUnit = "J/MInst";
+                  } else if (result_data.metric == "MRecords/s") {
+                    result_data.efficiencyUnit = "J/MRecord";
+                  } else if (result_data.metric == "MHits/s") {
+                    result_data.efficiencyUnit = "J/MHit";
+                  } else {
+                    result_data.efficiencyUnit = "J/MRay";
+                  }
+                }
+              }
+            } else if (result_data.component == "Scheduling" && result_data.operations > 0) {
+              if (result_data.metric == "GOPS") {
+                double gops = (static_cast<double>(result_data.operations) / durationSec) / 1e9;
+                if (gops > 0.0) {
+                  result_data.joulesPerUnit = avgPowerWatts / gops;
+                  result_data.unitPerWatt = gops / avgPowerWatts;
+                  result_data.efficiencyUnit = "J/GOP";
+                }
+              } else if (result_data.metric == "MRecords/s") {
+                double mrec = (static_cast<double>(result_data.operations) / durationSec) / 1e6;
+                if (mrec > 0.0) {
+                  result_data.joulesPerUnit = avgPowerWatts / mrec;
+                  result_data.unitPerWatt = (mrec * 1000.0) / avgPowerWatts;
                   result_data.efficiencyUnit = "J/MRecord";
-                } else if (result_data.metric == "MHits/s") {
-                  result_data.efficiencyUnit = "J/MHit";
-                } else {
-                  result_data.efficiencyUnit = "J/MRay";
                 }
               }
             }
-          }
 
-          if (verbose && result_data.hasPowerTelemetry) {
-            std::cout << " [POWER & ENERGY] Measured: " << ResultFormatter::formatDouble(result_data.powerWatts, 1) << " W"
-                      << " | Energy: " << ResultFormatter::formatDouble(result_data.energyJoules, 2) << " J";
-            if (result_data.joulesPerUnit > 0.0) {
-              std::cout << " | Efficiency: " << ResultFormatter::formatDouble(result_data.joulesPerUnit, 2) << " " << result_data.efficiencyUnit;
-              if (result_data.efficiencyUnit == "J/TFLOP") {
-                std::cout << " (" << ResultFormatter::formatDouble(result_data.unitPerWatt, 1) << " GFLOPS/W)";
-              } else if (result_data.efficiencyUnit == "J/TOP") {
-                std::cout << " (" << ResultFormatter::formatDouble(result_data.unitPerWatt, 1) << " GOPS/W)";
-              } else if (result_data.efficiencyUnit == "J/GB") {
-                std::cout << " (" << ResultFormatter::formatDouble(result_data.unitPerWatt, 2) << " GB/J)";
-              } else if (result_data.efficiencyUnit == "J/MRay") {
-                std::cout << " (" << ResultFormatter::formatDouble(result_data.unitPerWatt, 1) << " kRays/J)";
-              } else if (result_data.efficiencyUnit == "J/MTri") {
-                std::cout << " (" << ResultFormatter::formatDouble(result_data.unitPerWatt, 1) << " kTris/J)";
-              } else if (result_data.efficiencyUnit == "J/MInst") {
-                std::cout << " (" << ResultFormatter::formatDouble(result_data.unitPerWatt, 1) << " kInst/J)";
-              } else if (result_data.efficiencyUnit == "J/MRecord") {
-                std::cout << " (" << ResultFormatter::formatDouble(result_data.unitPerWatt, 1) << " kRecords/J)";
-              } else if (result_data.efficiencyUnit == "J/MHit") {
-                std::cout << " (" << ResultFormatter::formatDouble(result_data.unitPerWatt, 1) << " kHits/J)";
-              } else if (result_data.efficiencyUnit == "J/GIS") {
-                std::cout << " (" << ResultFormatter::formatDouble(result_data.unitPerWatt, 1) << " MIS/J)";
+            if (verbose && result_data.hasPowerTelemetry) {
+              std::cout << " [POWER & ENERGY] Measured: " << ResultFormatter::formatDouble(result_data.powerWatts, 1) << " W"
+                        << " | Energy: " << ResultFormatter::formatDouble(result_data.energyJoules, 2) << " J";
+              if (result_data.joulesPerUnit > 0.0) {
+                std::cout << " | Efficiency: " << ResultFormatter::formatDouble(result_data.joulesPerUnit, 2) << " " << result_data.efficiencyUnit;
+                if (result_data.efficiencyUnit == "J/TFLOP") {
+                  std::cout << " (" << ResultFormatter::formatDouble(result_data.unitPerWatt, 1) << " GFLOPS/W)";
+                } else if (result_data.efficiencyUnit == "J/TOP") {
+                  std::cout << " (" << ResultFormatter::formatDouble(result_data.unitPerWatt, 1) << " GOPS/W)";
+                } else if (result_data.efficiencyUnit == "J/GB") {
+                  std::cout << " (" << ResultFormatter::formatDouble(result_data.unitPerWatt, 2) << " GB/J)";
+                } else if (result_data.efficiencyUnit == "J/MRay") {
+                  std::cout << " (" << ResultFormatter::formatDouble(result_data.unitPerWatt, 1) << " kRays/J)";
+                } else if (result_data.efficiencyUnit == "J/MTri") {
+                  std::cout << " (" << ResultFormatter::formatDouble(result_data.unitPerWatt, 1) << " kTris/J)";
+                } else if (result_data.efficiencyUnit == "J/MInst") {
+                  std::cout << " (" << ResultFormatter::formatDouble(result_data.unitPerWatt, 1) << " kInst/J)";
+                } else if (result_data.efficiencyUnit == "J/MRecord") {
+                  std::cout << " (" << ResultFormatter::formatDouble(result_data.unitPerWatt, 1) << " kRecords/J)";
+                } else if (result_data.efficiencyUnit == "J/MHit") {
+                  std::cout << " (" << ResultFormatter::formatDouble(result_data.unitPerWatt, 1) << " kHits/J)";
+                } else if (result_data.efficiencyUnit == "J/GIS") {
+                  std::cout << " (" << ResultFormatter::formatDouble(result_data.unitPerWatt, 1) << " MIS/J)";
+                }
               }
+              std::cout << std::endl;
             }
-            std::cout << std::endl;
           }
-        }
 
-        formatter->addResult(result_data);
-        double opsPerSec = (result_data.time_ms > 0.0 && result_data.operations > 0)
-            ? (static_cast<double>(result_data.operations) / result_data.time_ms) * 1000.0
-            : 0.0;
-        char scoreBuf[64];
-        if (result_data.metric.find("TFLOPS") != std::string::npos || result_data.metric.find("TOPS") != std::string::npos) {
-          snprintf(scoreBuf, sizeof(scoreBuf), "%.2f %s", opsPerSec / 1e12, result_data.metric.c_str());
-        } else if (result_data.metric.find("TB/s") != std::string::npos) {
-          snprintf(scoreBuf, sizeof(scoreBuf), "%.2f TB/s", opsPerSec / 1e12);
-        } else if (result_data.metric.find("GB/s") != std::string::npos) {
-          snprintf(scoreBuf, sizeof(scoreBuf), "%.1f GB/s", opsPerSec / 1e9);
-        } else if (result_data.metric.find("GIS/s") != std::string::npos) {
-          snprintf(scoreBuf, sizeof(scoreBuf), "%.2f GIS/s", opsPerSec / 1e9);
-        } else if (result_data.metric.find("MRays/s") != std::string::npos) {
-          snprintf(scoreBuf, sizeof(scoreBuf), "%.1f MRays/s", opsPerSec / 1e6);
-        } else if (result_data.metric.find("GPixels/s") != std::string::npos) {
-          snprintf(scoreBuf, sizeof(scoreBuf), "%.2f GPixels/s", opsPerSec / 1e9);
-        } else if (result_data.metric.find("ns") != std::string::npos) {
-          double nsVal = (result_data.operations > 0) ? ((result_data.time_ms * 1e6) / result_data.operations) : result_data.time_ms;
-          snprintf(scoreBuf, sizeof(scoreBuf), "%.1f ns", nsVal);
-        } else if (result_data.metric.find("us") != std::string::npos) {
-          double usVal = (result_data.operations > 0) ? ((result_data.time_ms * 1000.0) / result_data.operations) : (result_data.time_ms * 1000.0);
-          snprintf(scoreBuf, sizeof(scoreBuf), "%.1f us", usVal);
-        } else if (result_data.metric.find("M") != std::string::npos) {
-          snprintf(scoreBuf, sizeof(scoreBuf), "%.1f %s", opsPerSec / 1e6, result_data.metric.c_str());
-        } else {
-          snprintf(scoreBuf, sizeof(scoreBuf), "%.1f %s", opsPerSec, result_data.metric.c_str());
-        }
-
-        if (isInteractive) {
-          // Keep transient single-line progress; do not print permanent newline per task
-        } else if (!quiet && !verbose) {
-          std::cout << " Done. [" << scoreBuf << "]" << std::endl;
-        }
-        numBenchmarksRun++;
-        taskIdx++;
-        if (onResult) {
-          onResult(result_data);
-        }
-        context->waitIdle();
-      } catch (const std::exception &e) {
-        taskIdx++;
-        executionFailure = true;
-        if (!verbose) {
-          if (!quiet) {
-            std::cout << " Failed (" << e.what() << ")" << std::endl;
+          formatter->addResult(result_data);
+          double opsPerSec = (result_data.time_ms > 0.0 && result_data.operations > 0)
+              ? (static_cast<double>(result_data.operations) / result_data.time_ms) * 1000.0
+              : 0.0;
+          char scoreBuf[64];
+          if (result_data.metric.find("TFLOPS") != std::string::npos || result_data.metric.find("TOPS") != std::string::npos) {
+            snprintf(scoreBuf, sizeof(scoreBuf), "%.2f %s", opsPerSec / 1e12, result_data.metric.c_str());
+          } else if (result_data.metric.find("GOPS") != std::string::npos || result_data.metric.find("GFLOPS") != std::string::npos) {
+            snprintf(scoreBuf, sizeof(scoreBuf), "%.2f %s", opsPerSec / 1e9, result_data.metric.c_str());
+          } else if (result_data.metric.find("TB/s") != std::string::npos) {
+            snprintf(scoreBuf, sizeof(scoreBuf), "%.2f TB/s", opsPerSec / 1e12);
+          } else if (result_data.metric.find("GB/s") != std::string::npos) {
+            snprintf(scoreBuf, sizeof(scoreBuf), "%.1f GB/s", opsPerSec / 1e9);
+          } else if (result_data.metric.find("GIS/s") != std::string::npos) {
+            snprintf(scoreBuf, sizeof(scoreBuf), "%.2f GIS/s", opsPerSec / 1e9);
+          } else if (result_data.metric.find("MRays/s") != std::string::npos) {
+            snprintf(scoreBuf, sizeof(scoreBuf), "%.1f MRays/s", opsPerSec / 1e6);
+          } else if (result_data.metric.find("GPixels/s") != std::string::npos) {
+            snprintf(scoreBuf, sizeof(scoreBuf), "%.2f GPixels/s", opsPerSec / 1e9);
+          } else if (result_data.metric.find("ns") != std::string::npos) {
+            double nsVal = (result_data.operations > 0) ? ((result_data.time_ms * 1e6) / result_data.operations) : result_data.time_ms;
+            snprintf(scoreBuf, sizeof(scoreBuf), "%.1f ns", nsVal);
+          } else if (result_data.metric.find("us") != std::string::npos) {
+            double usVal = (result_data.operations > 0) ? ((result_data.time_ms * 1000.0) / result_data.operations) : (result_data.time_ms * 1000.0);
+            snprintf(scoreBuf, sizeof(scoreBuf), "%.1f us", usVal);
+          } else if (result_data.metric.find("M") != std::string::npos) {
+            snprintf(scoreBuf, sizeof(scoreBuf), "%.1f %s", opsPerSec / 1e6, result_data.metric.c_str());
           } else {
-            std::cerr << " [ERROR] Task " << bench_name << " failed: " << e.what() << std::endl;
+            snprintf(scoreBuf, sizeof(scoreBuf), "%.1f %s", opsPerSec, result_data.metric.c_str());
           }
-        } else {
-          std::cerr << "Error running task " << bench_name << ": " << e.what() << std::endl;
-        }
 
-        std::string errStr = e.what();
-        ResultData fail_data;
-        fail_data.backendName = ComputeBackendFactory::getBackendName(context->getBackend());
-        fail_data.deviceName = info.name;
-        fail_data.benchmarkName = bench_name;
-        fail_data.component = bench->GetComponent(i);
-        fail_data.subcategory = bench->GetSubCategory(i);
-        fail_data.metric = bench->GetMetric(i);
-        fail_data.operations = 0;
-        fail_data.time_ms = -2.0; // Signals error/failure
-        fail_data.isEmulated = false;
-        fail_data.isUnsupported = false;
-        fail_data.maxWorkGroupSize = info.maxWorkGroupSize;
-        fail_data.deviceIndex = context->getSelectedDeviceIndex();
-        fail_data.configIndex = i;
-        fail_data.sortWeight = bench->GetSortWeight(i);
-        fail_data.width = effectiveWidth;
-        fail_data.height = effectiveHeight;
-        fail_data.errorString = errStr;
-
-        formatter->addResult(fail_data);
-        if (onResult) {
-          onResult(fail_data);
-        }
-
-        bool isLost = (errStr.find("DEVICE_LOST") != std::string::npos ||
-                       errStr.find("timed out") != std::string::npos ||
-                       errStr.find("timeout") != std::string::npos ||
-                       errStr.find("context lost") != std::string::npos ||
-                       errStr.find("Device lost") != std::string::npos ||
-                       errStr.find("result: -4") != std::string::npos);
-        if (isLost) {
-          deviceLost = true;
-          std::cerr << "  [CRITICAL] GPU device hung or lost during " << bench_name
-                    << ". Aborting remaining tasks on this device." << std::endl;
-          for (size_t k = taskIdx; k < tasks.size(); ++k) {
-            auto *abortedBench = tasks[k].bench;
-            uint32_t abortedConfig = tasks[k].configIndex;
-            std::string abortedName = abortedBench->GetConfigName(abortedConfig);
-            if (abortedName.empty()) {
-              abortedName = abortedBench->GetName();
-            }
-            ResultData abort_data;
-            abort_data.backendName = ComputeBackendFactory::getBackendName(context->getBackend());
-            abort_data.deviceName = info.name;
-            abort_data.benchmarkName = abortedName;
-            abort_data.component = abortedBench->GetComponent(abortedConfig);
-            abort_data.subcategory = abortedBench->GetSubCategory(abortedConfig);
-            abort_data.metric = abortedBench->GetMetric(abortedConfig);
-            abort_data.operations = 0;
-            abort_data.time_ms = -3.0; // Signals aborted
-            abort_data.isEmulated = false;
-            abort_data.isUnsupported = false;
-            abort_data.maxWorkGroupSize = info.maxWorkGroupSize;
-            abort_data.deviceIndex = context->getSelectedDeviceIndex();
-            abort_data.configIndex = abortedConfig;
-            abort_data.sortWeight = abortedBench->GetSortWeight(abortedConfig);
-            abort_data.width = effectiveWidth;
-            abort_data.height = effectiveHeight;
-            abort_data.errorString = "Aborted: GPU device hung/lost";
-
-            formatter->addResult(abort_data);
-            if (onResult) {
-              onResult(abort_data);
-            }
+          if (isInteractive) {
+            // Keep transient single-line progress; do not print permanent newline per task
+          } else if (!quiet && !verbose) {
+            std::cout << " Done. [" << scoreBuf << "]" << std::endl;
           }
-          break;
-        }
-      }
-    }
+          numBenchmarksRun++;
+          taskIdx++;
+          if (onResult) {
+            onResult(result_data);
+          }
+          context->waitIdle();
+        } catch (const std::exception &e) {
+          taskIdx++;
+          executionFailure = true;
+          if (!verbose) {
+            if (!quiet) {
+              std::cout << " Failed (" << e.what() << ")" << std::endl;
+            } else {
+              std::cerr << " [ERROR] Task " << bench_name << " failed: " << e.what() << std::endl;
+            }
+          } else {
+            std::cerr << "Error running task " << bench_name << ": " << e.what() << std::endl;
+          }
 
-    if (hasVisualVerification && !deviceLost) {
-      if (!quiet && !verbose && !onResult) {
-        std::cout << "\r\033[K  \033[32m✔\033[0m Benchmark execution complete ("
-                  << tasks.size() << " workloads).\n\n  \033[1m[3/3] Visual Parity & Frame Export\033[0m..." << std::endl;
-      }
-      for (auto *bench : runnable) {
-        if (bench->HasVisualVerification()) {
-          try {
-            bench->RunVisualVerification(isInteractive);
-          } catch (const std::exception &e) {
-            parityFailure = true;
-            if (verbose || verifyParity) {
-              std::cerr << "Visual verification error on " << bench->GetName() << ": " << e.what() << std::endl;
+          std::string errStr = e.what();
+          ResultData fail_data;
+          fail_data.backendName = ComputeBackendFactory::getBackendName(context->getBackend());
+          fail_data.deviceName = info.name;
+          fail_data.vendorId = info.vendorID;
+          fail_data.deviceId = info.deviceID;
+          fail_data.benchmarkName = bench_name;
+          fail_data.component = bench->GetComponent(i);
+          fail_data.subcategory = bench->GetSubCategory(i);
+          fail_data.metric = bench->GetMetric(i);
+          fail_data.operations = 0;
+          fail_data.time_ms = -2.0; // Signals error/failure
+          fail_data.isEmulated = false;
+          fail_data.isUnsupported = false;
+          fail_data.isValid = false;
+          fail_data.maxWorkGroupSize = info.maxWorkGroupSize;
+          fail_data.deviceIndex = context->getSelectedDeviceIndex();
+          fail_data.configIndex = i;
+          fail_data.sortWeight = bench->GetSortWeight(i);
+          fail_data.operationalIntensity = bench->GetOperationalIntensity(i);
+          fail_data.width = effectiveWidth;
+          fail_data.height = effectiveHeight;
+          fail_data.errorString = errStr;
+
+          formatter->addResult(fail_data);
+          if (onResult) {
+            onResult(fail_data);
+          }
+
+          bool isLost = (errStr.find("DEVICE_LOST") != std::string::npos ||
+                         errStr.find("timed out") != std::string::npos ||
+                         errStr.find("timeout") != std::string::npos ||
+                         errStr.find("context lost") != std::string::npos ||
+                         errStr.find("Device lost") != std::string::npos ||
+                         errStr.find("result: -4") != std::string::npos);
+          if (isLost) {
+            deviceLost = true;
+            std::cerr << "  [CRITICAL] GPU device hung or lost during " << bench_name
+                      << ". Aborting remaining tasks on this device." << std::endl;
+            for (size_t remPos = cPos + 1; remPos < group.configs.size(); ++remPos) {
+              emitAbortedTask(bench, group.configs[remPos], "Aborted: GPU device hung/lost");
             }
-          } catch (...) {
-            parityFailure = true;
-            if (verbose || verifyParity) {
-              std::cerr << "Visual verification error on " << bench->GetName() << ": unknown exception" << std::endl;
-            }
+            break;
           }
         }
       }
-      if (!quiet && !verbose && !onResult) {
-        std::cout << "\r\033[K  \033[32m✔\033[0m Visual parity verification & frame export complete." << std::endl;
-      }
-    } else {
-      if (!quiet && isInteractive) {
-        std::cout << "\r\033[K  \033[32m✔\033[0m Benchmark suite completed ("
-                  << tasks.size() << " workloads)." << std::endl;
-      }
-    }
 
-    for (auto *bench : runnable) {
+      // Immediate per-benchmark visual parity / preview capture before releasing VRAM
+      if (!deviceLost && (!cancelToken || !cancelToken->load()) && bench->HasVisualVerification()) {
+        try {
+          bench->RunVisualVerification(isInteractive);
+        } catch (const std::exception &e) {
+          parityFailure = true;
+          if (verbose || verifyParity) {
+            std::cerr << "Visual verification error on " << bench->GetName() << ": " << e.what() << std::endl;
+          }
+        } catch (...) {
+          parityFailure = true;
+          if (verbose || verifyParity) {
+            std::cerr << "Visual verification error on " << bench->GetName() << ": unknown exception" << std::endl;
+          }
+        }
+      }
+
+      // Immediate per-benchmark Teardown() — releases scene BVH/buffers before next benchmark/scene
       try {
         bench->Teardown();
       } catch (const std::exception &e) {
@@ -1611,6 +1676,22 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
         parityFailure = true;
       }
     }
+
+    if (!deviceLost && totalPlannedTasks > 0) {
+      if (hasVisualVerification && !quiet && !verbose && !onResult) {
+        std::cout << "\r\033[K  \033[32m✔\033[0m Benchmark execution, visual parity & frame export complete ("
+                  << totalPlannedTasks << " workloads)." << std::endl;
+      } else if (!quiet && isInteractive) {
+        std::cout << "\r\033[K  \033[32m✔\033[0m Benchmark suite completed ("
+                  << totalPlannedTasks << " workloads)." << std::endl;
+      }
+    }
+
+#ifdef HAVE_VULKAN
+    if (auto *vc = dynamic_cast<VulkanContext *>(context)) {
+      vc->flushPipelineCacheToDisk();
+    }
+#endif
   } catch (const std::exception &e) {
     std::cerr << "Error processing device: " << e.what() << std::endl;
   }
@@ -1734,8 +1815,22 @@ void BenchmarkRunner::runHostBenchmarks(const std::vector<std::string> &benchmar
             start_data.deviceIndex = 0xFFFFFFFF;
             start_data.configIndex = i;
             start_data.sortWeight = bench->GetSortWeight(i);
+            start_data.operationalIntensity = bench->GetOperationalIntensity(i);
             onResult(start_data);
           }
+
+          struct HostConfigGuard {
+            IBenchmark *b;
+            uint32_t idx;
+            ~HostConfigGuard() {
+              try {
+                b->ReleaseConfigResources(idx);
+              } catch (...) {
+              }
+            }
+          };
+          bench->PrepareConfig(i);
+          HostConfigGuard hostCfgGuard{bench.get(), i};
 
           const double target_warmup_ms = profileSnapshot ? 25.0 : 150.0;
           const double target_measurement_ms = profileSnapshot ? 60.0 : 500.0;
@@ -1828,6 +1923,7 @@ void BenchmarkRunner::runHostBenchmarks(const std::vector<std::string> &benchmar
           result_data.deviceIndex = 0xFFFFFFFF;
           result_data.configIndex = i;
           result_data.sortWeight = bench->GetSortWeight(i);
+          result_data.operationalIntensity = bench->GetOperationalIntensity(i);
 
           formatter->addResult(result_data);
           numBenchmarksRun++;
@@ -1853,6 +1949,7 @@ void BenchmarkRunner::runHostBenchmarks(const std::vector<std::string> &benchmar
         fail_data.deviceIndex = 0xFFFFFFFF;
         fail_data.configIndex = 0;
         fail_data.sortWeight = bench->GetSortWeight(0);
+        fail_data.operationalIntensity = bench->GetOperationalIntensity(0);
         fail_data.errorString = e.what();
         formatter->addResult(fail_data);
         if (onResult) {

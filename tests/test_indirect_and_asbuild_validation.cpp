@@ -5,10 +5,8 @@
 #include "core/ResultImporter.h"
 #include "utils/KernelPath.h"
 
-#define private public
 #include "benchmarks/InShaderIndirectBench.h"
 #include "benchmarks/RayASBuildBench.h"
-#undef private
 
 #include <vector>
 #include <iostream>

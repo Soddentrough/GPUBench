@@ -83,11 +83,23 @@ public:
   std::string GetConfigName(uint32_t config_idx) const override {
     return config_idx == 0 ? "Vector" : "Matrix";
   }
+  const char *GetDescription() const override {
+    return "Half-precision IEEE 754 binary16 throughput across packed f16vec2/f16vec4 VALU and Cooperative Matrix / WMMA / MFMA cores.";
+  }
+  double GetOperationalIntensity(uint32_t config_idx = 0) const override {
+    return config_idx == 0 ? 1048576.0 : 4096.0;
+  }
 
 private:
+  template <typename Tag> friend struct ::gpubench::test::TestBody;
   IComputeContext *context = nullptr;
   ComputeKernel vectorKernel = nullptr;
   ComputeKernel matrixKernel = nullptr;
   ComputeBuffer buffer = nullptr;
+  ComputeBuffer matrixInputBuffer = nullptr;
   ComputeBuffer matrixBuffer = nullptr;
+  uint32_t tileM = 16;
+  uint32_t tileN = 16;
+  uint32_t tileK = 16;
+  uint32_t matrixBlockX = 32;
 };

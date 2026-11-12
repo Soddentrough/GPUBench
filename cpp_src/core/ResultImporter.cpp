@@ -1,6 +1,9 @@
 #include "ResultImporter.h"
+#include "third_party/yyjson.h"
+#include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <map>
@@ -10,273 +13,100 @@
 
 namespace {
 
-// Lightweight self-contained JSON parser
-enum class JsonType { Null, Bool, Number, String, Array, Object };
+struct YyjsonDocGuard {
+  yyjson_doc *doc = nullptr;
+  ~YyjsonDocGuard() {
+    if (doc != nullptr) {
+      yyjson_doc_free(doc);
+    }
+  }
+};
 
-struct JsonValue {
-  JsonType type = JsonType::Null;
-  bool boolVal = false;
-  double numVal = 0.0;
-  std::string strVal;
-  std::vector<JsonValue> arrVal;
-  std::map<std::string, JsonValue> objVal;
+struct JsonView {
+  yyjson_val *v = nullptr;
 
-  bool is_null() const { return type == JsonType::Null; }
-  bool is_bool() const { return type == JsonType::Bool; }
-  bool is_number() const { return type == JsonType::Number; }
-  bool is_string() const { return type == JsonType::String; }
-  bool is_array() const { return type == JsonType::Array; }
-  bool is_object() const { return type == JsonType::Object; }
+  bool is_null() const { return v == nullptr || yyjson_is_null(v); }
+  bool is_bool() const { return v != nullptr && yyjson_is_bool(v); }
+  bool is_number() const { return v != nullptr && yyjson_is_num(v); }
+  bool is_string() const { return v != nullptr && yyjson_is_str(v); }
+  bool is_array() const { return v != nullptr && yyjson_is_arr(v); }
+  bool is_object() const { return v != nullptr && yyjson_is_obj(v); }
 
-  const JsonValue &operator[](const std::string &key) const {
-    static const JsonValue nullVal;
-    if (type != JsonType::Object) return nullVal;
-    auto it = objVal.find(key);
-    return (it != objVal.end()) ? it->second : nullVal;
+  size_t size() const {
+    if (is_array()) return yyjson_arr_size(v);
+    if (is_object()) return yyjson_obj_size(v);
+    return 0;
   }
 
-  const JsonValue &operator[](size_t idx) const {
-    static const JsonValue nullVal;
-    if (type != JsonType::Array || idx >= arrVal.size()) return nullVal;
-    return arrVal[idx];
+  bool empty() const { return size() == 0; }
+
+  JsonView operator[](const char *key) const {
+    if (!is_object() || key == nullptr) return {nullptr};
+    return {yyjson_obj_get(v, key)};
   }
 
-  bool has(const std::string &key) const {
-    return type == JsonType::Object && objVal.find(key) != objVal.end();
+  JsonView operator[](const std::string &key) const {
+    return (*this)[key.c_str()];
+  }
+
+  JsonView operator[](size_t idx) const {
+    if (!is_array()) return {nullptr};
+    return {yyjson_arr_get(v, idx)};
+  }
+
+  bool has(const char *key) const {
+    return is_object() && key != nullptr && yyjson_obj_get(v, key) != nullptr;
   }
 
   std::string as_string(const std::string &fallback = "") const {
-    return is_string() ? strVal : fallback;
+    if (!is_string()) return fallback;
+    const char *s = yyjson_get_str(v);
+    const size_t n = yyjson_get_len(v);
+    return s != nullptr ? std::string(s, n) : fallback;
   }
 
   double as_double(double fallback = 0.0) const {
-    return is_number() ? numVal : fallback;
+    if (!is_number()) return fallback;
+    return yyjson_get_num(v);
   }
 
   uint64_t as_uint64(uint64_t fallback = 0) const {
-    return is_number() ? static_cast<uint64_t>(std::max(0.0, numVal)) : fallback;
+    if (v == nullptr) return fallback;
+    if (yyjson_is_uint(v)) return yyjson_get_uint(v);
+    if (yyjson_is_sint(v)) {
+      const int64_t s = yyjson_get_sint(v);
+      return s > 0 ? static_cast<uint64_t>(s) : 0ULL;
+    }
+    if (yyjson_is_real(v)) {
+      const double d = yyjson_get_real(v);
+      return d > 0.0 ? static_cast<uint64_t>(d) : 0ULL;
+    }
+    return fallback;
   }
 
   uint32_t as_uint32(uint32_t fallback = 0) const {
-    return is_number() ? static_cast<uint32_t>(std::max(0.0, numVal)) : fallback;
+    return static_cast<uint32_t>(as_uint64(fallback));
+  }
+
+  int32_t as_int32(int32_t fallback = 0) const {
+    if (v == nullptr) return fallback;
+    if (yyjson_is_sint(v)) return static_cast<int32_t>(yyjson_get_sint(v));
+    if (yyjson_is_uint(v)) return static_cast<int32_t>(yyjson_get_uint(v));
+    if (yyjson_is_real(v)) return static_cast<int32_t>(yyjson_get_real(v));
+    return fallback;
   }
 
   bool as_bool(bool fallback = false) const {
-    return is_bool() ? boolVal : fallback;
+    return is_bool() ? yyjson_get_bool(v) : fallback;
   }
 };
 
-class SimpleJsonReader {
-public:
-  static bool parse(const std::string &content, JsonValue &outVal, std::string &err) {
-    size_t pos = 0;
-    skipWhitespace(content, pos);
-    if (!parseValue(content, pos, outVal, err)) {
-      return false;
-    }
-    return true;
-  }
-
-private:
-  static void skipWhitespace(const std::string &s, size_t &pos) {
-    while (pos < s.size() && (std::isspace(static_cast<unsigned char>(s[pos])) || s[pos] == '\0')) {
-      pos++;
-    }
-  }
-
-  static bool parseValue(const std::string &s, size_t &pos, JsonValue &val, std::string &err) {
-    skipWhitespace(s, pos);
-    if (pos >= s.size()) {
-      err = "Unexpected end of input";
-      return false;
-    }
-
-    char c = s[pos];
-    if (c == '{') return parseObject(s, pos, val, err);
-    if (c == '[') return parseArray(s, pos, val, err);
-    if (c == '"') return parseString(s, pos, val, err);
-    if (c == 't' || c == 'f') return parseBool(s, pos, val, err);
-    if (c == 'n') return parseNull(s, pos, val, err);
-    if (c == '-' || std::isdigit(static_cast<unsigned char>(c))) return parseNumber(s, pos, val, err);
-
-    err = std::string("Unexpected character: '") + c + "'";
-    return false;
-  }
-
-  static bool parseObject(const std::string &s, size_t &pos, JsonValue &val, std::string &err) {
-    pos++; // skip '{'
-    val.type = JsonType::Object;
-    val.objVal.clear();
-
-    while (pos < s.size()) {
-      skipWhitespace(s, pos);
-      if (pos >= s.size()) {
-        err = "Unterminated object";
-        return false;
-      }
-      if (s[pos] == '}') {
-        pos++;
-        return true;
-      }
-
-      if (s[pos] != '"') {
-        err = "Expected string key in object";
-        return false;
-      }
-
-      JsonValue keyVal;
-      if (!parseString(s, pos, keyVal, err)) return false;
-
-      skipWhitespace(s, pos);
-      if (pos >= s.size() || s[pos] != ':') {
-        err = "Expected ':' after key";
-        return false;
-      }
-      pos++; // skip ':'
-
-      JsonValue memberVal;
-      if (!parseValue(s, pos, memberVal, err)) return false;
-
-      val.objVal[keyVal.strVal] = std::move(memberVal);
-
-      skipWhitespace(s, pos);
-      if (pos < s.size() && s[pos] == ',') {
-        pos++;
-      } else if (pos < s.size() && s[pos] == '}') {
-        pos++;
-        return true;
-      } else {
-        err = "Expected ',' or '}' in object";
-        return false;
-      }
-    }
-    err = "Unterminated object at EOF";
-    return false;
-  }
-
-  static bool parseArray(const std::string &s, size_t &pos, JsonValue &val, std::string &err) {
-    pos++; // skip '['
-    val.type = JsonType::Array;
-    val.arrVal.clear();
-
-    while (pos < s.size()) {
-      skipWhitespace(s, pos);
-      if (pos >= s.size()) {
-        err = "Unterminated array";
-        return false;
-      }
-      if (s[pos] == ']') {
-        pos++;
-        return true;
-      }
-
-      JsonValue item;
-      if (!parseValue(s, pos, item, err)) return false;
-      val.arrVal.push_back(std::move(item));
-
-      skipWhitespace(s, pos);
-      if (pos < s.size() && s[pos] == ',') {
-        pos++;
-      } else if (pos < s.size() && s[pos] == ']') {
-        pos++;
-        return true;
-      } else {
-        err = "Expected ',' or ']' in array";
-        return false;
-      }
-    }
-    err = "Unterminated array at EOF";
-    return false;
-  }
-
-  static bool parseString(const std::string &s, size_t &pos, JsonValue &val, std::string &err) {
-    pos++; // skip '"'
-    val.type = JsonType::String;
-    val.strVal.clear();
-
-    while (pos < s.size()) {
-      char c = s[pos++];
-      if (c == '"') {
-        return true;
-      }
-      if (c == '\\') {
-        if (pos >= s.size()) {
-          err = "Unterminated string escape";
-          return false;
-        }
-        char esc = s[pos++];
-        switch (esc) {
-        case '"': val.strVal += '"'; break;
-        case '\\': val.strVal += '\\'; break;
-        case '/': val.strVal += '/'; break;
-        case 'b': val.strVal += '\b'; break;
-        case 'f': val.strVal += '\f'; break;
-        case 'n': val.strVal += '\n'; break;
-        case 'r': val.strVal += '\r'; break;
-        case 't': val.strVal += '\t'; break;
-        case 'u': {
-          // Skip 4 hex characters
-          if (pos + 4 <= s.size()) {
-            pos += 4;
-            val.strVal += '?';
-          }
-          break;
-        }
-        default: val.strVal += esc; break;
-        }
-      } else {
-        val.strVal += c;
-      }
-    }
-    err = "Unterminated string literal";
-    return false;
-  }
-
-  static bool parseNumber(const std::string &s, size_t &pos, JsonValue &val, std::string &/*err*/) {
-    size_t start = pos;
-    if (pos < s.size() && (s[pos] == '-' || s[pos] == '+')) pos++;
-    while (pos < s.size() && (std::isdigit(static_cast<unsigned char>(s[pos])) ||
-                              s[pos] == '.' || s[pos] == 'e' || s[pos] == 'E' ||
-                              s[pos] == '+' || s[pos] == '-')) {
-      pos++;
-    }
-    std::string numStr = s.substr(start, pos - start);
-    val.type = JsonType::Number;
-    try {
-      val.numVal = std::stod(numStr);
-    } catch (...) {
-      val.numVal = 0.0;
-    }
-    return true;
-  }
-
-  static bool parseBool(const std::string &s, size_t &pos, JsonValue &val, std::string &err) {
-    if (s.compare(pos, 4, "true") == 0) {
-      pos += 4;
-      val.type = JsonType::Bool;
-      val.boolVal = true;
-      return true;
-    }
-    if (s.compare(pos, 5, "false") == 0) {
-      pos += 5;
-      val.type = JsonType::Bool;
-      val.boolVal = false;
-      return true;
-    }
-    err = "Invalid boolean literal";
-    return false;
-  }
-
-  static bool parseNull(const std::string &s, size_t &pos, JsonValue &val, std::string &err) {
-    if (s.compare(pos, 4, "null") == 0) {
-      pos += 4;
-      val.type = JsonType::Null;
-      return true;
-    }
-    err = "Invalid null literal";
-    return false;
-  }
-};
+uint32_t parseHexUint32(const std::string &hexStr) {
+  if (hexStr.empty()) return 0;
+  char *endPtr = nullptr;
+  unsigned long parsed = std::strtoul(hexStr.c_str(), &endPtr, 0);
+  return static_cast<uint32_t>(parsed);
+}
 
 void parseResolution(const std::string &resStr, uint32_t &width, uint32_t &height) {
   width = 0;
@@ -329,12 +159,24 @@ bool ResultImporter::loadFromString(const std::string &content, ImportedRun &out
     return false;
   }
 
-  JsonValue root;
-  if (!SimpleJsonReader::parse(content, root, errorMessage)) {
+  yyjson_read_err readErr{};
+  YyjsonDocGuard docGuard{yyjson_read_opts(const_cast<char *>(content.data()),
+                                           content.size(), 0, nullptr, &readErr)};
+  if (docGuard.doc == nullptr) {
+    errorMessage = std::string("JSON parse error: ") +
+                   (readErr.msg != nullptr ? readErr.msg : "invalid syntax") +
+                   " at byte " + std::to_string(readErr.pos);
     return false;
   }
 
-  outRun.results.clear();
+  const JsonView root{yyjson_doc_get_root(docGuard.doc)};
+  if (root.is_null() || (!root.is_object() && !root.is_array())) {
+    errorMessage = "Invalid JSON root: expected object or array";
+    return false;
+  }
+
+  outRun = ImportedRun{};
+  outRun.schemaVersion = root["schema_version"].as_string("1.0");
   outRun.appVersion = root["app_version"].as_string(root["version"].as_string("1.0.0"));
   outRun.timestamp = root["timestamp"].as_uint64(0);
   outRun.backend = root["backend"].as_string("Vulkan");
@@ -344,15 +186,26 @@ bool ResultImporter::loadFromString(const std::string &content, ImportedRun &out
   parseResolution(outRun.resolution, resWidth, resHeight);
 
   if (root.has("system_info")) {
-    const auto &sys = root["system_info"];
+    const JsonView sys = root["system_info"];
     outRun.osName = sys["os_name"].as_string();
     outRun.cpuModel = sys["cpu_model"].as_string();
     outRun.cpuCores = sys["cpu_logical_cores"].as_uint32(0);
     outRun.totalRamGb = sys["total_ram_gb"].as_double(0.0);
   }
 
-  if (root["device_profiles"].is_array() && !root["device_profiles"].arrVal.empty()) {
-    const auto &p = root["device_profiles"][0];
+  if (root.has("gui_session") && root["gui_session"].is_object()) {
+    const JsonView gs = root["gui_session"];
+    outRun.hasGuiSession = true;
+    outRun.sessionScene = gs["scene"].as_string("all");
+    outRun.sessionSamplesPerPixel = gs["samples_per_pixel"].as_uint32(1);
+    outRun.sessionDumpRenders = gs["dump_renders"].as_bool(true);
+    outRun.sessionUiScale = static_cast<float>(gs["ui_scale"].as_double(1.0));
+  }
+
+  uint32_t profileVendorId = 0;
+  uint32_t profileDeviceId = 0;
+  if (root["device_profiles"].is_array() && !root["device_profiles"].empty()) {
+    const JsonView p = root["device_profiles"][static_cast<size_t>(0)];
     outRun.deviceProfile.backend = p["backend"].as_string();
     outRun.deviceProfile.deviceIndex = p["device_index"].as_uint32(0);
     outRun.deviceProfile.deviceName = p["device_name"].as_string();
@@ -363,49 +216,65 @@ bool ResultImporter::loadFromString(const std::string &content, ImportedRun &out
     outRun.deviceProfile.driverVersion = p["driver_version"].as_string();
     outRun.deviceProfile.apiVersion = p["api_version"].as_string();
     outRun.deviceProfile.vramTotalMb = p["vram_total_mb"].as_uint64(0);
+    outRun.deviceProfile.computeUnits = p["compute_units"].as_uint32(0);
     outRun.deviceProfile.subgroupSize = p["subgroup_size"].as_uint32(0);
     outRun.deviceProfile.maxWorkgroupSize = p["max_workgroup_size"].as_uint32(1024);
+    outRun.deviceProfile.isApu = p["is_apu"].as_bool(false);
+    outRun.deviceProfile.rebarSupported = p["rebar_supported"].as_bool(false);
+    outRun.deviceProfile.rayTracingSupported = p["ray_tracing_supported"].as_bool(false);
+    outRun.deviceProfile.serSupported = p["ser_supported"].as_bool(false);
+    outRun.deviceProfile.opacityMicromapSupported = p["opacity_micromap_supported"].as_bool(false);
+    outRun.deviceProfile.workGraphsSupported = p["work_graphs_supported"].as_bool(false);
+    outRun.deviceProfile.cooperativeMatrixSupported = p["cooperative_matrix_supported"].as_bool(false);
+    outRun.deviceProfile.structuredSparsitySupported = p["structured_sparsity_supported"].as_bool(false);
+    outRun.deviceProfile.cooperativeVectorSupported = p["cooperative_vector_supported"].as_bool(false);
+    profileVendorId = parseHexUint32(outRun.deviceProfile.vendorId);
+    profileDeviceId = parseHexUint32(outRun.deviceProfile.deviceId);
   }
 
   if (outRun.deviceProfile.deviceName.empty()) {
-    if (root["devices"].is_array() && !root["devices"].arrVal.empty()) {
-      std::string dn = root["devices"][0].as_string();
+    if (root["devices"].is_array() && !root["devices"].empty()) {
+      std::string dn = root["devices"][static_cast<size_t>(0)].as_string();
       size_t colonPos = dn.find(": ");
       if (colonPos != std::string::npos && colonPos <= 3) dn = dn.substr(colonPos + 2);
       outRun.deviceProfile.deviceName = dn;
     }
   }
 
-  JsonValue resultsJson;
+  JsonView resultsJson;
   bool isGuiSchema = false;
 
   if (root.is_array()) {
     resultsJson = root;
-    if (!root.arrVal.empty()) {
-      outRun.backend = root[0]["backend"].as_string("Vulkan");
-      outRun.deviceProfile.deviceName = root[0]["device"].as_string();
-      outRun.deviceProfile.deviceIndex = root[0]["device_index"].as_uint32(0);
+    if (!root.empty()) {
+      const JsonView first = root[static_cast<size_t>(0)];
+      outRun.backend = first["backend"].as_string("Vulkan");
+      outRun.deviceProfile.deviceName = first["device"].as_string();
+      outRun.deviceProfile.deviceIndex = first["device_index"].as_uint32(0);
       outRun.deviceProfile.backend = outRun.backend;
-      outRun.deviceProfile.maxWorkgroupSize = root[0]["max_workgroup_size"].as_uint32(1024);
-      if (root[0].has("resolution")) {
-        outRun.resolution = root[0]["resolution"].as_string();
+      outRun.deviceProfile.maxWorkgroupSize = first["max_workgroup_size"].as_uint32(1024);
+      if (first.has("resolution")) {
+        outRun.resolution = first["resolution"].as_string();
         parseResolution(outRun.resolution, resWidth, resHeight);
       }
     }
   } else {
-    const auto &rj = root["results"];
+    const JsonView rj = root["results"];
     if (!rj.is_array()) {
       errorMessage = "Invalid JSON: missing 'results' array";
       return false;
     }
     resultsJson = rj;
-    if (!resultsJson.arrVal.empty() && resultsJson[0].has("benchmarks")) {
+    if (!resultsJson.empty() && resultsJson[static_cast<size_t>(0)].has("benchmarks")) {
       isGuiSchema = true;
     }
   }
 
   if (isGuiSchema) {
-    for (const auto &devEntry : resultsJson.arrVal) {
+    size_t devIdxIter = 0, devMaxIter = 0;
+    yyjson_val *devRaw = nullptr;
+    yyjson_arr_foreach(resultsJson.v, devIdxIter, devMaxIter, devRaw) {
+      const JsonView devEntry{devRaw};
       uint32_t devId = devEntry["device_id"].as_uint32(0);
       std::string devName = devEntry["device_name"].as_string();
 
@@ -420,10 +289,13 @@ bool ResultImporter::loadFromString(const std::string &content, ImportedRun &out
         outRun.deviceProfile.deviceName = devName;
       }
 
-      const auto &benchmarksArr = devEntry["benchmarks"];
+      const JsonView benchmarksArr = devEntry["benchmarks"];
       if (!benchmarksArr.is_array()) continue;
 
-      for (const auto &bm : benchmarksArr.arrVal) {
+      size_t bmIdxIter = 0, bmMaxIter = 0;
+      yyjson_val *bmRaw = nullptr;
+      yyjson_arr_foreach(benchmarksArr.v, bmIdxIter, bmMaxIter, bmRaw) {
+        const JsonView bm{bmRaw};
         std::string id = bm["id"].as_string();
         std::string label = bm["label"].as_string();
         std::string category = bm["category"].as_string();
@@ -916,18 +788,24 @@ bool ResultImporter::loadFromString(const std::string &content, ImportedRun &out
       }
     }
   } else {
-    // CLI schema: flat results array
-    for (const auto &entry : resultsJson.arrVal) {
+    // Unified v2.0 / CLI schema: flat results array
+    size_t entryIdxIter = 0, entryMaxIter = 0;
+    yyjson_val *entryRaw = nullptr;
+    yyjson_arr_foreach(resultsJson.v, entryIdxIter, entryMaxIter, entryRaw) {
+      const JsonView entry{entryRaw};
       ResultData rd;
       rd.backendName = entry["backend"].as_string("Vulkan");
       rd.deviceName = entry["device"].as_string("Target GPU");
       rd.deviceIndex = entry["device_index"].is_null() ? 0xFFFFFFFF : entry["device_index"].as_uint32(0);
+      rd.vendorId = profileVendorId;
+      rd.deviceId = profileDeviceId;
       rd.benchmarkName = entry["benchmark"].as_string();
       rd.component = entry["component"].as_string("Compute");
       rd.subcategory = entry["subcategory"].as_string();
       rd.metric = entry["metric"].as_string();
       rd.operations = entry["operations"].as_uint64(0);
       rd.time_ms = entry["time_ms"].as_double(0.0);
+      rd.operationalIntensity = entry["operational_intensity"].as_double(0.0);
       rd.isValid = entry["is_valid"].as_bool(true);
       rd.errorString = entry["error"].as_string();
       std::string status = entry["status"].as_string();
@@ -948,7 +826,7 @@ bool ResultImporter::loadFromString(const std::string &content, ImportedRun &out
       rd.maxWorkGroupSize = entry["max_workgroup_size"].as_uint32(1024);
       bool hasExplicitConfigIndex = entry.has("config_index");
       rd.configIndex = entry["config_index"].as_uint32(0);
-      rd.baselineConfigIndex = static_cast<int>(entry["baseline_config_index"].as_double(-1.0));
+      rd.baselineConfigIndex = entry["baseline_config_index"].as_int32(-1);
 
       uint32_t entryW = resWidth, entryH = resHeight;
       if (entry.has("resolution")) {
@@ -958,7 +836,7 @@ bool ResultImporter::loadFromString(const std::string &content, ImportedRun &out
       rd.height = entry["height"].as_uint32(entryH);
 
       if (entry.has("statistics")) {
-        const auto &st = entry["statistics"];
+        const JsonView st = entry["statistics"];
         rd.sample_count = st["samples"].as_uint32(st["sample_count"].as_uint32(0));
         rd.min_time_ms = st["min_time_ms"].as_double(0.0);
         rd.median_time_ms = st["median_time_ms"].as_double(0.0);
@@ -966,7 +844,7 @@ bool ResultImporter::loadFromString(const std::string &content, ImportedRun &out
         rd.p95_time_ms = st["p95_time_ms"].as_double(0.0);
       }
       if (entry.has("compiler_telemetry")) {
-        const auto &ct = entry["compiler_telemetry"];
+        const JsonView ct = entry["compiler_telemetry"];
         rd.hasRegisterTelemetry = ct["available"].as_bool(true);
         rd.vgprCount = ct["vgpr_count"].as_uint32(0);
         rd.sgprCount = ct["sgpr_count"].as_uint32(0);
@@ -977,7 +855,7 @@ bool ResultImporter::loadFromString(const std::string &content, ImportedRun &out
         rd.compilerTarget = ct["compiler"].as_string();
       }
       if (entry.has("power_telemetry")) {
-        const auto &pt = entry["power_telemetry"];
+        const JsonView pt = entry["power_telemetry"];
         rd.hasPowerTelemetry = pt["available"].as_bool(true);
         rd.powerWatts = static_cast<float>(pt["power_watts"].as_double(0.0));
         rd.energyJoules = pt["energy_joules"].as_double(0.0);
@@ -986,7 +864,7 @@ bool ResultImporter::loadFromString(const std::string &content, ImportedRun &out
         rd.efficiencyUnit = pt["efficiency_unit"].as_string();
       }
       if (entry.has("performance_query")) {
-        const auto &pq = entry["performance_query"];
+        const JsonView pq = entry["performance_query"];
         rd.hasPerfQueryTelemetry = pq["available"].as_bool(true);
         rd.perfCounters.available = rd.hasPerfQueryTelemetry;
         rd.perfCounters.gpuActiveCycles = pq["gpu_active_cycles"].as_uint64(0);
@@ -1003,17 +881,27 @@ bool ResultImporter::loadFromString(const std::string &content, ImportedRun &out
         rd.perfCounters.l0CacheHitRatio = static_cast<float>(pq["l0_cache_hit_ratio"].as_double(0.0));
         rd.perfCounters.l1CacheHitRatio = static_cast<float>(pq["l1_cache_hit_ratio"].as_double(0.0));
         if (pq.has("raw_counters") && pq["raw_counters"].is_object()) {
-          for (const auto &kv : pq["raw_counters"].objVal) {
-            rd.perfCounters.rawCounters[kv.first] = kv.second.as_double(0.0);
+          yyjson_val *rawObj = pq["raw_counters"].v;
+          size_t rcIdx = 0, rcMax = 0;
+          yyjson_val *rcKey = nullptr, *rcVal = nullptr;
+          yyjson_obj_foreach(rawObj, rcIdx, rcMax, rcKey, rcVal) {
+            const char *kStr = yyjson_get_str(rcKey);
+            if (kStr != nullptr) {
+              rd.perfCounters.rawCounters[kStr] = JsonView{rcVal}.as_double(0.0);
+            }
           }
         }
       }
 
-      // Deduce sort weight and normalize to standard hierarchical schema
+      // Deduce sort weight and normalize legacy CLI schema while preserving 2026 subcategories
       if (rd.component == "Compute") {
         rd.sortWeight = 10;
-        if (rd.subcategory == "Dual-Issue" || rd.subcategory == "ILP & Concurrency" ||
-            rd.benchmarkName.rfind("Dual-Issue", 0) == 0 || rd.benchmarkName.rfind("ILP & Dual-Issue", 0) == 0) {
+        if (rd.subcategory == "Sparse Matrix (2:4)") {
+          rd.sortWeight = 75;
+        } else if (rd.subcategory == "Cooperative Vector") {
+          rd.sortWeight = 78;
+        } else if (rd.subcategory == "Dual-Issue" || rd.subcategory == "ILP & Concurrency" ||
+                   rd.benchmarkName.rfind("Dual-Issue", 0) == 0 || rd.benchmarkName.rfind("ILP & Dual-Issue", 0) == 0) {
           if (rd.subcategory.empty()) rd.subcategory = "ILP & Concurrency";
           rd.sortWeight = 25;
         } else if (rd.subcategory == "LDS Bank Conflicts" || rd.benchmarkName.find("LDS") != std::string::npos) {
@@ -1066,7 +954,11 @@ bool ResultImporter::loadFromString(const std::string &content, ImportedRun &out
         }
       } else if (rd.component == "Memory") {
         rd.sortWeight = 100;
-        if (rd.subcategory == "Performance" || rd.benchmarkName.find("Performance") != std::string::npos) {
+        if (rd.subcategory == "Host-Device Interconnect") {
+          rd.sortWeight = 160;
+        } else if (rd.subcategory == "Host System Memory") {
+          rd.sortWeight = 700;
+        } else if (rd.subcategory == "Performance" || rd.benchmarkName.find("Performance") != std::string::npos) {
           if (rd.benchmarkName.find("Read 256") != std::string::npos || rd.benchmarkName.find("Read 1024") != std::string::npos) {
             rd.subcategory = "Bandwidth";
             rd.benchmarkName = "GPU VRAM Bandwidth";
@@ -1091,15 +983,20 @@ bool ResultImporter::loadFromString(const std::string &content, ImportedRun &out
         } else if (rd.subcategory == "Cache Latency Curve" || rd.benchmarkName.find("Cache Latency Curve") != std::string::npos) {
           rd.subcategory = "Cache Latency Curve";
           rd.sortWeight = 115;
-        } else if (rd.subcategory == "Latency" || rd.benchmarkName.find("Latency") != std::string::npos) {
+        } else if (rd.subcategory == "Latency" ||
+                   (rd.subcategory.empty() && rd.benchmarkName.find("Latency") != std::string::npos)) {
           rd.subcategory = "Latency";
           rd.sortWeight = 110;
         }
+      } else if (rd.component == "Scheduling") {
+        rd.sortWeight = (rd.subcategory == "GPU Work Graphs") ? 185 : 180;
       } else if (rd.component == "Rasterization & ROP") {
         rd.sortWeight = 200;
       } else if (rd.component == "Ray Tracing") {
         rd.sortWeight = 500;
-        if (rd.benchmarkName.find("Ray-Triangle") != std::string::npos) {
+        if (rd.subcategory == "Opacity Micromap (OMM)") {
+          rd.sortWeight = 525;
+        } else if (rd.benchmarkName.find("Ray-Triangle") != std::string::npos) {
           rd.subcategory = "Hardware Traversal & Intersection";
           rd.benchmarkName = "Ray-Triangle Intersection";
           rd.sortWeight = 500;
@@ -1153,7 +1050,7 @@ bool ResultImporter::loadFromString(const std::string &content, ImportedRun &out
       }
 
       if (entry.has("sort_weight")) {
-        int explicitSortWeight = static_cast<int>(entry["sort_weight"].as_double(0.0));
+        int explicitSortWeight = entry["sort_weight"].as_int32(0);
         if (explicitSortWeight > 0) {
           rd.sortWeight = explicitSortWeight;
         }

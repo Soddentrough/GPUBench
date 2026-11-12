@@ -40,6 +40,12 @@ public:
   const char *GetSubCategory(uint32_t /*config_idx*/ = 0) const override {
     return "ILP & Concurrency";
   }
+  const char *GetDescription() const override {
+    return "Instruction-level parallelism, VOPD dual-issue, and VALU + SALU co-execution efficiency.";
+  }
+  double GetOperationalIntensity(uint32_t config_idx = 0) const override {
+    return config_idx == 0 ? 131072.0 : 524288.0;
+  }
   int GetSortWeight() const override { return 25; }
 
   uint32_t GetNumConfigs() const override {
@@ -52,6 +58,7 @@ public:
   std::string GetConfigSupportNote(uint32_t config_idx) const override;
 
 private:
+  template <typename Tag> friend struct ::gpubench::test::TestBody;
   IComputeContext *context = nullptr;
   std::vector<DualIssueConfig> configs;
   std::vector<ComputeKernel> kernels;

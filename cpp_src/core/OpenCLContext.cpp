@@ -334,13 +334,20 @@ const std::vector<DeviceInfo> &OpenCLContext::getDevices() const {
                         sizeof(maxWorkGroupSize), &maxWorkGroupSize, nullptr);
       info.maxWorkGroupSize = static_cast<uint32_t>(maxWorkGroupSize);
 
-      size_t maxItemSizes[3] = {0, 0, 0};
-      if (f_clGetDeviceInfo(dev, CL_DEVICE_MAX_WORK_ITEM_SIZES, sizeof(maxItemSizes),
-                            maxItemSizes, nullptr) == CL_SUCCESS) {
-        info.maxComputeWorkGroupCountX = static_cast<uint32_t>(maxItemSizes[0]);
-        info.maxComputeWorkGroupCountY = static_cast<uint32_t>(maxItemSizes[1]);
-        info.maxComputeWorkGroupCountZ = static_cast<uint32_t>(maxItemSizes[2]);
+      cl_uint maxCu = 0;
+      if (f_clGetDeviceInfo(dev, CL_DEVICE_MAX_COMPUTE_UNITS, sizeof(maxCu),
+                            &maxCu, nullptr) == CL_SUCCESS) {
+        info.computeUnits = maxCu;
       }
+
+      cl_uint addrBits = 64;
+      f_clGetDeviceInfo(dev, CL_DEVICE_ADDRESS_BITS, sizeof(addrBits),
+                        &addrBits, nullptr);
+      // OpenCL clEnqueueNDRangeKernel global_work_size is size_t; do not conflate
+      // local CL_DEVICE_MAX_WORK_ITEM_SIZES with global workgroup count limits.
+      info.maxComputeWorkGroupCountX = (addrBits >= 64) ? 0x7FFFFFFFu : 65535u;
+      info.maxComputeWorkGroupCountY = 65535u;
+      info.maxComputeWorkGroupCountZ = 65535u;
 
       cl_ulong localMemSize;
       f_clGetDeviceInfo(dev, CL_DEVICE_LOCAL_MEM_SIZE, sizeof(localMemSize),
@@ -444,6 +451,13 @@ void OpenCLContext::pickDevice(uint32_t index) {
   device = devices[index];
   f_clGetDeviceInfo(device, CL_DEVICE_PLATFORM, sizeof(cl_platform_id),
                     &platform, nullptr);
+  char devVer[128] = {0};
+  if (f_clGetDeviceInfo(device, CL_DEVICE_VERSION, sizeof(devVer), devVer,
+                        nullptr) == CL_SUCCESS) {
+    supportsOpenCL30 = (std::string(devVer).find("OpenCL 3.") != std::string::npos);
+  } else {
+    supportsOpenCL30 = false;
+  }
   createContext();
   createCommandQueue();
 }
@@ -482,13 +496,18 @@ DeviceInfo OpenCLContext::getCurrentDeviceInfo() const {
                     sizeof(maxWorkGroupSize), &maxWorkGroupSize, nullptr);
   info.maxWorkGroupSize = static_cast<uint32_t>(maxWorkGroupSize);
 
-  size_t maxItemSizes[3] = {0, 0, 0};
-  if (f_clGetDeviceInfo(device, CL_DEVICE_MAX_WORK_ITEM_SIZES, sizeof(maxItemSizes),
-                        maxItemSizes, nullptr) == CL_SUCCESS) {
-    info.maxComputeWorkGroupCountX = static_cast<uint32_t>(maxItemSizes[0]);
-    info.maxComputeWorkGroupCountY = static_cast<uint32_t>(maxItemSizes[1]);
-    info.maxComputeWorkGroupCountZ = static_cast<uint32_t>(maxItemSizes[2]);
+  cl_uint maxCu = 0;
+  if (f_clGetDeviceInfo(device, CL_DEVICE_MAX_COMPUTE_UNITS, sizeof(maxCu),
+                        &maxCu, nullptr) == CL_SUCCESS) {
+    info.computeUnits = maxCu;
   }
+
+  cl_uint addrBits = 64;
+  f_clGetDeviceInfo(device, CL_DEVICE_ADDRESS_BITS, sizeof(addrBits),
+                    &addrBits, nullptr);
+  info.maxComputeWorkGroupCountX = (addrBits >= 64) ? 0x7FFFFFFFu : 65535u;
+  info.maxComputeWorkGroupCountY = 65535u;
+  info.maxComputeWorkGroupCountZ = 65535u;
 
   cl_ulong localMemSize;
   f_clGetDeviceInfo(device, CL_DEVICE_LOCAL_MEM_SIZE, sizeof(localMemSize),
@@ -662,7 +681,13 @@ ComputeKernel OpenCLContext::createKernel(const std::string &file_name,
     }
   }
 
-  err = f_clBuildProgram(program, 1, &device, nullptr, nullptr, nullptr);
+  const char *buildOpts = (supportsOpenCL30 && program_binary.empty())
+                              ? "-cl-std=CL3.0"
+                              : nullptr;
+  err = f_clBuildProgram(program, 1, &device, buildOpts, nullptr, nullptr);
+  if (err != CL_SUCCESS && buildOpts != nullptr) {
+    err = f_clBuildProgram(program, 1, &device, nullptr, nullptr, nullptr);
+  }
   if (err != CL_SUCCESS) {
     size_t log_size;
     f_clGetProgramBuildInfo(program, device, CL_PROGRAM_BUILD_LOG, 0, nullptr,
@@ -830,7 +855,8 @@ void OpenCLContext::printProgressBar(uint32_t current, uint32_t total,
             << (current == total ? "\n" : "") << std::flush;
 }
 
-void OpenCLContext::beginBatch(uint32_t /*expected_dispatches*/) {
+void OpenCLContext::beginBatch(uint32_t /*expected_dispatches*/,
+                               bool /*inter_dispatch_barrier*/) {
   m_inBatch = true;
 }
 

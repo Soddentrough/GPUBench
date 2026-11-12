@@ -68,6 +68,12 @@ jobs:
         run: |
           $tag = if ("${{ github.event_name }}" -eq "push") { "${{ github.ref_name }}" } else { "${{ inputs.tag_name }}" }
           if (-not $tag) { $tag = "v1.0.0" }
+          Write-Host "Ensuring GitHub release $tag exists..."
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --generate-notes
+            if ($LASTEXITCODE -ne 0) { gh release view $tag *> $null }
+          }
           Write-Host "Uploading Windows packages to release $tag..."
           gh release upload $tag (Get-Item build/GPUBench-*-win64.zip).FullName (Get-Item build/GPUBench-*-win64.exe).FullName --clobber
         env:
@@ -118,7 +124,8 @@ jobs:
             TAG="${{ inputs.tag_name }}"
           fi
           [ -z "$TAG" ] && TAG="v1.0.0"
-          Write-Host "Uploading macOS packages to release $TAG..." 2>/dev/null || echo "Uploading macOS packages to release $TAG..."
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --generate-notes || true
+          echo "Uploading macOS packages to release $TAG..."
           gh release upload "$TAG" build/GPUBench-*-Darwin.dmg build/GPUBench-*-Darwin.tar.gz --clobber
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -191,6 +198,7 @@ jobs:
             TAG="${{ inputs.tag_name }}"
           fi
           [ -z "$TAG" ] && TAG="v1.0.0"
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --generate-notes || true
           echo "Uploading Linux packages to release $TAG..."
           gh release upload "$TAG" build/GPUBench-*-Linux.deb build/GPUBench-*-Linux.rpm build/GPUBench-*-Linux.tar.gz --clobber
         env:

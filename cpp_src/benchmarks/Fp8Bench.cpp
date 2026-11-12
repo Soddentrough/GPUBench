@@ -1,4 +1,8 @@
 #include "benchmarks/Fp8Bench.h"
+#ifdef HAVE_VULKAN
+#include "core/VulkanContext.h"
+#endif
+#include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -22,8 +26,15 @@ bool Fp8Bench::IsSupported(const DeviceInfo &info,
 
 void Fp8Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
   this->context = &context;
+  tileM = 16;
+  tileN = 16;
+  tileK = 16;
+  matrixBlockX = 32;
 
   DeviceInfo info = context.getCurrentDeviceInfo();
+  if (context.getBackend() == ComputeBackend::ROCm) {
+    matrixBlockX = std::max(32u, info.subgroupSize);
+  }
 
   // Create separate input A/B and output C storage buffers to prevent aliasing
   size_t bufferSize = 8192 * 64 * sizeof(float) * 2;
@@ -35,7 +46,6 @@ void Fp8Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
   std::vector<uint32_t> zeroData(bufferSize / sizeof(uint32_t), 0u);
   context.writeBuffer(outputBuffer, 0, bufferSize, zeroData.data());
 
-  // Helper to check if file exists
   auto file_exists = [](const std::string &path) {
     std::ifstream f(path.c_str());
     return f.good();
@@ -65,22 +75,35 @@ void Fp8Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
   }
 
   if (context.getBackend() == ComputeBackend::OpenCL) {
-    // OpenCL FP8 has no native support in API.
     is_native_matrix = false;
     return;
   }
 
-  // Vulkan Path
-  // Note: SPV_EXT_float8 / VK_EXT_shader_float8 defines FP8 types for cooperative matrices,
-  // memory, and conversions, but does not define general scalar/vector FP8 arithmetic ALUs.
   is_native_matrix = false;
   if (info.cooperativeMatrixSupport && info.fp8Support &&
       context.getBackend() == ComputeBackend::Vulkan) {
     std::filesystem::path matrix_file =
         kdir / "vulkan" / "coop_matrix_fp8.comp";
-    if (file_exists(matrix_file.string())) {
+    if (file_exists(matrix_file.string()) ||
+        file_exists(matrix_file.string() + ".spv")) {
       try {
-        matrixKernel = context.createKernel(matrix_file.string(), "main", 2);
+#ifdef HAVE_VULKAN
+        auto *vc = static_cast<VulkanContext *>(&context);
+        (void)vc;
+#ifdef VK_EXT_shader_float8
+        auto tile = vc->selectCoopMatrixTile(VK_COMPONENT_TYPE_FLOAT8_E4M3_EXT,
+                                             VK_COMPONENT_TYPE_FLOAT32_KHR);
+        if (tile.supported) {
+          tileM = tile.M;
+          tileN = tile.N;
+          tileK = tile.K;
+          matrixBlockX = tile.subgroupSize;
+        }
+#endif
+#endif
+        matrixKernel = context.createKernelWithSpecConstants(
+            matrix_file.string(), "main", 2,
+            {tileM, tileN, tileK, matrixBlockX});
         if (matrixKernel) {
           context.setKernelArg(matrixKernel, 0, buffer);
           context.setKernelArg(matrixKernel, 1, outputBuffer);
@@ -96,10 +119,8 @@ void Fp8Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
 }
 
 void Fp8Bench::Run(uint32_t config_idx) {
-  (void)config_idx;
-  if (matrixKernel != nullptr) {
-    // 65536 WGs of 32 threads each (subgroup wave32)
-    context->dispatch(matrixKernel, 65536, 1, 1, 32, 1, 1);
+  if (config_idx == 0 && matrixKernel != nullptr) {
+    context->dispatch(matrixKernel, 32768, 2, 1, matrixBlockX, 1, 1);
   }
 }
 
@@ -120,39 +141,35 @@ void Fp8Bench::Teardown() {
 
 BenchmarkResult Fp8Bench::GetResult(uint32_t config_idx) const {
   (void)config_idx;
-  // 16x16x16 matrix multiply = 8192 ops per WMMA
-  // In coop_matrix_fp8.comp: 4096 iters * 8 accumulators = 32768 WMMA ops per workgroup
-  // In ROCm fp8_matrix.hip: 4096 iters * 8 WMMA ops = 32768 WMMA ops per workgroup
-  // Dispatch: 65536 WGs
   uint64_t wmma_per_wg = 32768ULL;
-  uint64_t num_ops = (uint64_t)65536 * wmma_per_wg * 8192ULL;
+  uint64_t tile_ops = 2ULL * tileM * tileN * tileK;
+  uint64_t num_ops = 65536ULL * wmma_per_wg * tile_ops;
   return {num_ops, 0.0};
 }
 
 bool Fp8Bench::ValidateResults(uint32_t config_idx) const {
-  (void)config_idx;
-  if (!context) return false;
-  // If FP8 matrix is not supported or not loaded on this device, pass validation
-  if (!matrixKernel) return true;
+  if (!context || config_idx != 0) return false;
+  if (!matrixKernel) return false;
 
   ComputeBuffer targetBuf = outputBuffer ? outputBuffer : buffer;
   if (!targetBuf) return false;
 
-  std::vector<float> hostOut(64, 0.0f);
+  const size_t checkCount =
+      std::max<size_t>(16u, std::min<size_t>(64u, static_cast<size_t>(tileM) * tileN));
+  std::vector<float> hostOut(checkCount, 0.0f);
   try {
     context->readBuffer(targetBuf, 0, hostOut.size() * sizeof(float), hostOut.data());
     bool anyNonZero = false;
     for (float v : hostOut) {
       if (std::isnan(v) || std::isinf(v)) return false;
       if (v != 0.0f) anyNonZero = true;
-      // On Vulkan coop_matrix_fp8, 8 accumulators * 4096 iters * (16 * 0.5 * 0.5) = ~131072.0f
       if (context->getBackend() == ComputeBackend::Vulkan) {
         if (v < 125000.0f || v > 135000.0f) {
           return false;
         }
       } else if (context->getBackend() == ComputeBackend::ROCm) {
-        // On ROCm fp8_matrix.hip, 8 accumulators * 8 elements * 4096 iters * (16 * 0.5 * 0.5) = ~1048576.0f
-        if (v < 1000000.0f || v > 1100000.0f) {
+        // RDNA 4 OCP FP8 sums to ~1,048,576; CDNA 3 FNUZ / CDNA 4 OCP MFMA sums to ~131,072..524,288
+        if (v < 120000.0f || v > 1100000.0f) {
           return false;
         }
       }

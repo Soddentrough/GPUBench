@@ -33,9 +33,9 @@ static const std::vector<HardwareProfile> s_knownProfiles = {
         /* l1CacheBytes */ 32 * 1024,
         /* l2CacheBytes */ 8 * 1024 * 1024,
         /* l3CacheBytes */ 64 * 1024 * 1024,
-        /* theoreticalFp32Tflops */ 41.06,
-        /* theoreticalTriangleGis */ 253.8,
-        /* theoreticalBoxGis */ 1015.2,
+        /* theoreticalFp32Tflops */ 47.80,
+        /* theoreticalTriangleGis */ 295.5,
+        /* theoreticalBoxGis */ 1182.0,
         /* theoreticalBandwidthGBps */ 640.0,
         /* memoryType */ "GDDR6",
     },
@@ -403,9 +403,9 @@ static HardwareProfile synthesizePatternProfile(uint32_t vendorId, uint32_t devi
       p.isApu = false;
       p.l2CacheBytes = 8 * 1024 * 1024;
       p.l3CacheBytes = 64 * 1024 * 1024;
-      p.theoreticalTriangleGis = 253.8;
-      p.theoreticalBoxGis = 1015.2;
-      p.theoreticalFp32Tflops = 41.06;
+      p.theoreticalTriangleGis = 295.5;
+      p.theoreticalBoxGis = 1182.0;
+      p.theoreticalFp32Tflops = 47.80;
       p.theoreticalBandwidthGBps = 640.0;
       p.memoryType = "GDDR6";
       return p;

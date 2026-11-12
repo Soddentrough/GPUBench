@@ -48,8 +48,14 @@ public:
   BenchmarkResult GetResult(uint32_t config_idx = 0) const override;
   bool ValidateResults(uint32_t config_idx = 0) const override;
 
-  const char *GetComponent(uint32_t config_idx = 0) const override { return "Compute"; }
-  const char *GetSubCategory(uint32_t config_idx = 0) const override { return "Indirect Command Synthesis"; }
+  const char *GetComponent(uint32_t config_idx = 0) const override { (void)config_idx; return "Compute"; }
+  const char *GetSubCategory(uint32_t config_idx = 0) const override { (void)config_idx; return "Indirect Command Synthesis"; }
+  const char *GetDescription() const override {
+    return "GPU-side indirect dispatch argument synthesis (reset -> classify -> vkCmdDispatchIndirect) vs CPU direct dispatch.";
+  }
+  bool RequiresInterIterationBarrier(uint32_t /*config_idx*/ = 0) const override {
+    return true;
+  }
   int GetSortWeight() const override { return 28; }
 
   uint32_t GetNumConfigs() const override { return static_cast<uint32_t>(configs.size()); }
@@ -58,6 +64,7 @@ public:
   std::string GetConfigSupportNote(uint32_t config_idx) const override;
 
 private:
+  template <typename Tag> friend struct ::gpubench::test::TestBody;
   IComputeContext *context = nullptr;
   std::vector<IndirectBenchConfig> configs;
 

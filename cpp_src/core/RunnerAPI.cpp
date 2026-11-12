@@ -1,12 +1,54 @@
 #include "core/RunnerAPI.h"
 #include "core/BenchmarkRunner.h"
 #include "core/ComputeBackendFactory.h"
+#ifdef HAVE_VULKAN
+#include "core/VulkanContext.h"
+#endif
 #include <iostream>
 #include <memory>
 #include <mutex>
 #include <map>
 #include <algorithm>
 #include <cctype>
+
+namespace {
+std::mutex g_sharedVkMutex;
+std::shared_ptr<VulkanContext> g_sharedVulkanContext;
+
+void populateDeviceProfileFromInfo(DeviceProfile &p, const DeviceInfo &dev) {
+    p.deviceName = dev.name;
+    p.vendorID = dev.vendorID;
+    p.deviceID = dev.deviceID;
+    p.vramTotalMb = dev.memorySize / (1024 * 1024);
+    p.computeUnits = dev.computeUnits;
+    p.subgroupSize = dev.subgroupSize;
+    p.maxWorkGroupSize = dev.maxWorkGroupSize;
+    p.isApu = dev.isApu;
+    p.rebarSupported = dev.rebarSupported;
+    p.rayTracingSupported = dev.rayTracingSupport;
+    p.serSupported = dev.serSupported;
+    p.opacityMicromapSupported = dev.opacityMicromapSupport;
+    p.workGraphsSupported = dev.workGraphsSupported;
+    p.cooperativeMatrixSupported = dev.cooperativeMatrixSupport;
+    p.structuredSparsitySupported = dev.structuredSparsitySupport;
+    p.cooperativeVectorSupported = dev.cooperativeVectorSupport;
+    p.float16Supported = dev.fp16Support;
+    p.int8Supported = dev.int8Support;
+    p.ocpFp6Supported = dev.fp6Support;
+    p.ocpFp4Supported = dev.fp4Support;
+    p.performanceQuerySupported = dev.performanceQuerySupported;
+}
+} // namespace
+
+void SetSharedVulkanContextAPI(std::shared_ptr<VulkanContext> sharedCtx) {
+    std::lock_guard<std::mutex> lock(g_sharedVkMutex);
+    g_sharedVulkanContext = std::move(sharedCtx);
+}
+
+std::shared_ptr<VulkanContext> GetSharedVulkanContextAPI() {
+    std::lock_guard<std::mutex> lock(g_sharedVkMutex);
+    return g_sharedVulkanContext;
+}
 
 std::vector<ResultData> RunBenchmarksAPI(
     const std::vector<std::string>& benchmarks_to_run,
@@ -24,35 +66,41 @@ std::vector<ResultData> RunBenchmarksAPI(
     const std::vector<std::string>& selected_workloads,
     uint32_t bounce_depth)
 {
-    // Never let C++ exceptions cross the cxx FFI boundary into Rust (that
-    // would call std::terminate). On error, return an empty result list.
     try {
-    std::vector<std::unique_ptr<IComputeContext>> contexts;
+    auto sharedVk = GetSharedVulkanContextAPI();
+
+    std::vector<ComputeBackend> target_backends;
     if (backend_strs.empty() || (backend_strs.size() == 1 && backend_strs[0] == "auto")) {
-        const ComputeBackend auto_order[] = {
-            ComputeBackend::Vulkan, ComputeBackend::ROCm, ComputeBackend::OpenCL};
-        for (ComputeBackend backend : auto_order) {
-            if (!ComputeBackendFactory::isAvailable(backend)) {
-                continue;
-            }
-            try {
-                auto ctx = ComputeBackendFactory::create(backend, verbose, debug);
-                if (ctx && ctx->isAvailable() && !ctx->getDevices().empty()) {
-                    contexts.push_back(std::move(ctx));
-                    break;
+#ifdef HAVE_VULKAN
+        if (sharedVk && sharedVk->isAvailable() && !sharedVk->getDevices().empty()) {
+            target_backends.push_back(ComputeBackend::Vulkan);
+        }
+#endif
+        if (target_backends.empty()) {
+            const ComputeBackend auto_order[] = {
+                ComputeBackend::Vulkan, ComputeBackend::ROCm, ComputeBackend::OpenCL};
+            for (ComputeBackend backend : auto_order) {
+                if (!ComputeBackendFactory::isAvailable(backend)) {
+                    continue;
                 }
-            } catch (...) {
-                // Backend compiled in but failed at runtime; try next backend
+                try {
+                    auto ctx = ComputeBackendFactory::create(backend, verbose, debug);
+                    if (ctx && ctx->isAvailable() && !ctx->getDevices().empty()) {
+                        target_backends.push_back(backend);
+                        break;
+                    }
+                } catch (...) {
+                }
             }
         }
     } else {
         for (const auto& backend_str : backend_strs) {
             if (backend_str == "vulkan" && ComputeBackendFactory::isAvailable(ComputeBackend::Vulkan)) {
-                contexts.push_back(ComputeBackendFactory::create(ComputeBackend::Vulkan, verbose, debug));
+                target_backends.push_back(ComputeBackend::Vulkan);
             } else if (backend_str == "rocm" && ComputeBackendFactory::isAvailable(ComputeBackend::ROCm)) {
-                contexts.push_back(ComputeBackendFactory::create(ComputeBackend::ROCm, verbose, debug));
+                target_backends.push_back(ComputeBackend::ROCm);
             } else if (backend_str == "opencl" && ComputeBackendFactory::isAvailable(ComputeBackend::OpenCL)) {
-                contexts.push_back(ComputeBackendFactory::create(ComputeBackend::OpenCL, verbose, debug));
+                target_backends.push_back(ComputeBackend::OpenCL);
             }
         }
     }
@@ -62,6 +110,9 @@ std::vector<ResultData> RunBenchmarksAPI(
     runner.setBounceDepth(bounce_depth);
     runner.setSamplesPerPixel(samples_per_pixel);
     runner.setQuiet(quiet || (callback != nullptr));
+    if (sharedVk != nullptr) {
+        runner.setCaptureGpuPreviews(true);
+    }
     if (!selected_workloads.empty()) {
         runner.setWorkloadFilter(selected_workloads);
     }
@@ -73,7 +124,6 @@ std::vector<ResultData> RunBenchmarksAPI(
     }
 
     std::vector<uint32_t> target_indices = device_indices;
-    // Only default to GPU 0 if no device was specified AND there are non-host workloads to run
     if (target_indices.empty()) {
         bool hasGpuWorkloads = false;
         for (const auto& b : benchmarks_to_run) {
@@ -83,20 +133,29 @@ std::vector<ResultData> RunBenchmarksAPI(
             }
         }
         if (hasGpuWorkloads) {
-            target_indices.push_back(0);
+#ifdef HAVE_VULKAN
+            if (sharedVk) {
+                target_indices.push_back(sharedVk->getSelectedDeviceIndex());
+            } else
+#endif
+            {
+                target_indices.push_back(0);
+            }
         }
     }
-
-    std::vector<ComputeBackend> target_backends;
-    for (const auto &proto_context : contexts) {
-        target_backends.push_back(proto_context->getBackend());
-    }
-    contexts.clear();
 
     for (ComputeBackend backend : target_backends) {
         if (cancel_token && cancel_token->load()) break;
         for (uint32_t device_idx : target_indices) {
             if (cancel_token && cancel_token->load()) break;
+#ifdef HAVE_VULKAN
+            if (backend == ComputeBackend::Vulkan && sharedVk &&
+                sharedVk->isAvailable() &&
+                device_idx == sharedVk->getSelectedDeviceIndex()) {
+                runner.runForContext(sharedVk.get(), benchmarks_to_run);
+                continue;
+            }
+#endif
             std::unique_ptr<IComputeContext> new_context =
                 ComputeBackendFactory::create(backend, verbose, debug);
             if (new_context) {
@@ -122,26 +181,33 @@ std::vector<ResultData> RunBenchmarksAPI(
 }
 
 std::vector<std::string> GetAvailableHardwareAPI() {
-    // Never let C++ exceptions cross the cxx FFI boundary into Rust. On
-    // error, return whatever was gathered (possibly just the System entry).
     std::vector<std::string> results;
-
-    // System
     results.push_back("System|0|System Memory / Host CPU");
 
     try {
     if (ComputeBackendFactory::isAvailable(ComputeBackend::Vulkan)) {
         try {
-            auto ctx = ComputeBackendFactory::create(ComputeBackend::Vulkan, false, false);
-            if (ctx) {
+#ifdef HAVE_VULKAN
+            auto sharedVk = GetSharedVulkanContextAPI();
+            if (sharedVk && sharedVk->isAvailable()) {
                 uint32_t i = 0;
-                for (const auto& dev : ctx->getDevices()) {
+                for (const auto& dev : sharedVk->getDevices()) {
                     results.push_back("vulkan|" + std::to_string(i) + "|" + dev.name);
                     i++;
                 }
+            } else
+#endif
+            {
+                auto ctx = ComputeBackendFactory::create(ComputeBackend::Vulkan, false, false);
+                if (ctx) {
+                    uint32_t i = 0;
+                    for (const auto& dev : ctx->getDevices()) {
+                        results.push_back("vulkan|" + std::to_string(i) + "|" + dev.name);
+                        i++;
+                    }
+                }
             }
         } catch (...) {
-            // Vulkan compiled in but not usable at runtime; skip it
         }
     }
     if (ComputeBackendFactory::isAvailable(ComputeBackend::ROCm)) {
@@ -155,7 +221,6 @@ std::vector<std::string> GetAvailableHardwareAPI() {
                 }
             }
         } catch (...) {
-            // ROCm compiled in but not usable at runtime; skip it
         }
     }
     if (ComputeBackendFactory::isAvailable(ComputeBackend::OpenCL)) {
@@ -169,7 +234,6 @@ std::vector<std::string> GetAvailableHardwareAPI() {
                 }
             }
         } catch (...) {
-            // OpenCL compiled in but not usable at runtime; skip it
         }
     }
     } catch (const std::exception& e) {
@@ -181,8 +245,6 @@ std::vector<std::string> GetAvailableHardwareAPI() {
 }
 
 std::vector<std::string> GetAvailableBenchmarksAPI() {
-    // Never let C++ exceptions cross the cxx FFI boundary into Rust. On
-    // error, return an empty list.
     try {
         std::vector<IComputeContext*> dummy;
         BenchmarkRunner runner(dummy, false, false, false, false, "all");
@@ -196,21 +258,59 @@ std::vector<std::string> GetAvailableBenchmarksAPI() {
     }
 }
 
+std::vector<BenchmarkConfigMetadata> GetBenchmarkMetadataCatalogAPI() {
+    std::vector<BenchmarkConfigMetadata> catalog;
+    try {
+        std::vector<IComputeContext*> dummy;
+        BenchmarkRunner runner(dummy, false, false, false, false, "all");
+        for (const auto& bench : runner.getBenchmarkList()) {
+            std::string bName = bench->GetName();
+            uint32_t numConfigs = bench->GetNumConfigs();
+            auto aliases = bench->GetAliases();
+            for (uint32_t ci = 0; ci < numConfigs; ++ci) {
+                BenchmarkConfigMetadata meta;
+                meta.benchmarkName = bName;
+                meta.configIndex = ci;
+                meta.configName = bench->GetConfigName(ci);
+                if (meta.configName.rfind(bName, 0) == 0) {
+                    meta.displayName = meta.configName;
+                } else if (!meta.configName.empty()) {
+                    meta.displayName = bName + " (" + meta.configName + ")";
+                } else {
+                    meta.displayName = bName;
+                }
+                meta.component = bench->GetComponent(ci);
+                meta.subcategory = bench->GetSubCategory(ci);
+                meta.metric = bench->GetMetric(ci);
+                const char* desc = bench->GetDescription(ci);
+                meta.description = desc ? desc : "";
+                meta.sortWeight = bench->GetSortWeight(ci);
+                meta.operationalIntensity = bench->GetOperationalIntensity(ci);
+                meta.isDeviceDependent = bench->IsDeviceDependent();
+                meta.aliases = aliases;
+                catalog.push_back(std::move(meta));
+            }
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "GetBenchmarkMetadataCatalogAPI failed: " << e.what() << std::endl;
+    } catch (...) {
+        std::cerr << "GetBenchmarkMetadataCatalogAPI failed: unknown error" << std::endl;
+    }
+    return catalog;
+}
+
 std::vector<DeviceProfile> GetDeviceProfilesAPI() {
     std::vector<DeviceProfile> profiles;
     try {
         if (ComputeBackendFactory::isAvailable(ComputeBackend::Vulkan)) {
             try {
-                auto ctx = ComputeBackendFactory::create(ComputeBackend::Vulkan, false, false);
-                if (ctx) {
+                auto appendVulkanDevices = [&](const std::vector<DeviceInfo>& devices) {
                     uint32_t i = 0;
-                    for (const auto& dev : ctx->getDevices()) {
+                    for (const auto& dev : devices) {
                         DeviceProfile p{};
                         p.backend = "Vulkan";
                         p.deviceIndex = i;
-                        p.deviceName = dev.name;
-                        p.vendorID = dev.vendorID;
-                        p.deviceID = dev.deviceID;
+                        populateDeviceProfileFromInfo(p, dev);
                         p.driverName = dev.driverName;
                         p.driverInfo = dev.driverInfo;
                         p.driverVersion = dev.driverVersionStr;
@@ -218,18 +318,20 @@ std::vector<DeviceProfile> GetDeviceProfilesAPI() {
                         uint32_t apiMinor = (dev.apiVersion >> 12) & 0x3FF;
                         uint32_t apiPatch = dev.apiVersion & 0xFFF;
                         p.apiVersion = std::to_string(apiMajor) + "." + std::to_string(apiMinor) + "." + std::to_string(apiPatch);
-                        p.vramTotalMb = dev.memorySize / (1024 * 1024);
-                        p.subgroupSize = dev.subgroupSize;
-                        p.maxWorkGroupSize = dev.maxWorkGroupSize;
-                        p.rayTracingSupported = dev.rayTracingSupport;
-                        p.serSupported = dev.serSupported;
-                        p.workGraphsSupported = dev.workGraphsSupported;
-                        p.cooperativeMatrixSupported = dev.cooperativeMatrixSupport;
-                        p.float16Supported = dev.fp16Support;
-                        p.int8Supported = dev.int8Support;
-                        p.performanceQuerySupported = dev.performanceQuerySupported;
-                        profiles.push_back(p);
+                        profiles.push_back(std::move(p));
                         i++;
+                    }
+                };
+#ifdef HAVE_VULKAN
+                auto sharedVk = GetSharedVulkanContextAPI();
+                if (sharedVk && sharedVk->isAvailable()) {
+                    appendVulkanDevices(sharedVk->getDevices());
+                } else
+#endif
+                {
+                    auto ctx = ComputeBackendFactory::create(ComputeBackend::Vulkan, false, false);
+                    if (ctx) {
+                        appendVulkanDevices(ctx->getDevices());
                     }
                 }
             } catch (...) {}
@@ -243,9 +345,7 @@ std::vector<DeviceProfile> GetDeviceProfilesAPI() {
                         DeviceProfile p{};
                         p.backend = "ROCm";
                         p.deviceIndex = i;
-                        p.deviceName = dev.name;
-                        p.vendorID = dev.vendorID;
-                        p.deviceID = dev.deviceID;
+                        populateDeviceProfileFromInfo(p, dev);
                         p.driverName = dev.driverName.empty() ? "AMD ROCm / HIP" : dev.driverName;
                         p.driverInfo = dev.driverInfo.empty() ? (dev.archName.empty() ? "HIP Runtime" : dev.archName) : dev.driverInfo;
                         p.driverVersion = dev.driverVersionStr.empty() ? std::to_string(dev.driverVersion) : dev.driverVersionStr;
@@ -254,16 +354,7 @@ std::vector<DeviceProfile> GetDeviceProfilesAPI() {
                         } else {
                             p.apiVersion = "ROCm";
                         }
-                        p.vramTotalMb = dev.memorySize / (1024 * 1024);
-                        p.subgroupSize = dev.subgroupSize;
-                        p.maxWorkGroupSize = dev.maxWorkGroupSize;
-                        p.rayTracingSupported = dev.rayTracingSupport;
-                        p.serSupported = dev.serSupported;
-                        p.workGraphsSupported = dev.workGraphsSupported;
-                        p.cooperativeMatrixSupported = dev.cooperativeMatrixSupport;
-                        p.float16Supported = dev.fp16Support;
-                        p.int8Supported = dev.int8Support;
-                        profiles.push_back(p);
+                        profiles.push_back(std::move(p));
                         i++;
                     }
                 }
@@ -278,11 +369,9 @@ std::vector<DeviceProfile> GetDeviceProfilesAPI() {
                         DeviceProfile p{};
                         p.backend = "OpenCL";
                         p.deviceIndex = i;
-                        p.deviceName = dev.name;
-                        p.vendorID = dev.vendorID;
-                        p.deviceID = dev.deviceID;
+                        populateDeviceProfileFromInfo(p, dev);
                         p.driverName = dev.driverName.empty() ? "OpenCL Driver" : dev.driverName;
-                        p.driverInfo = dev.driverInfo.empty() ? "OpenCL" : dev.driverInfo;
+                        p.driverInfo = dev.driverInfo.empty() ? "OpenCL 3.0" : dev.driverInfo;
                         p.driverVersion = dev.driverVersionStr.empty() ? std::to_string(dev.driverVersion) : dev.driverVersionStr;
                         if (dev.apiVersion > 0) {
                             uint32_t apiMajor = dev.apiVersion >> 22;
@@ -290,18 +379,9 @@ std::vector<DeviceProfile> GetDeviceProfilesAPI() {
                             uint32_t apiPatch = dev.apiVersion & 0xFFF;
                             p.apiVersion = std::to_string(apiMajor) + "." + std::to_string(apiMinor) + "." + std::to_string(apiPatch);
                         } else {
-                            p.apiVersion = "OpenCL";
+                            p.apiVersion = "OpenCL 3.0";
                         }
-                        p.vramTotalMb = dev.memorySize / (1024 * 1024);
-                        p.subgroupSize = dev.subgroupSize;
-                        p.maxWorkGroupSize = dev.maxWorkGroupSize;
-                        p.rayTracingSupported = dev.rayTracingSupport;
-                        p.serSupported = dev.serSupported;
-                        p.workGraphsSupported = dev.workGraphsSupported;
-                        p.cooperativeMatrixSupported = dev.cooperativeMatrixSupport;
-                        p.float16Supported = dev.fp16Support;
-                        p.int8Supported = dev.int8Support;
-                        profiles.push_back(p);
+                        profiles.push_back(std::move(p));
                         i++;
                     }
                 }
@@ -337,80 +417,100 @@ std::vector<BenchmarkSupportInfo> ProbeBenchmarkSupportAPI(
         else if (backend_name == "opencl") backend = ComputeBackend::OpenCL;
 
         if (ComputeBackendFactory::isAvailable(backend)) {
-            auto ctx = ComputeBackendFactory::create(backend, false, false);
-            if (ctx) {
-                const auto& devices = ctx->getDevices();
-                if (device_idx < devices.size()) {
-                    ctx->pickDevice(device_idx);
-                    DeviceInfo info = ctx->getCurrentDeviceInfo();
-                    BenchmarkRunner runner({}, false, false, false, false, "all");
-                    for (const auto& bench : runner.getBenchmarkList()) {
-                        BenchmarkSupportInfo item;
-                        item.id = bench->GetName();
-                        item.isSupported = bench->IsSupported(info, ctx.get());
-                        if (!item.isSupported) {
-                            item.reason = bench->GetSupportNote(info, ctx.get());
-                            switch (bench->GetSupportLimitation(info, ctx.get())) {
+            std::unique_ptr<IComputeContext> ownedCtx;
+            IComputeContext* activeCtx = nullptr;
+#ifdef HAVE_VULKAN
+            auto sharedVk = GetSharedVulkanContextAPI();
+            if (backend == ComputeBackend::Vulkan && sharedVk &&
+                sharedVk->isAvailable() &&
+                device_idx == sharedVk->getSelectedDeviceIndex()) {
+                activeCtx = sharedVk.get();
+            }
+#endif
+            if (!activeCtx) {
+                ownedCtx = ComputeBackendFactory::create(backend, false, false);
+                if (ownedCtx && device_idx < ownedCtx->getDevices().size()) {
+                    ownedCtx->pickDevice(device_idx);
+                    activeCtx = ownedCtx.get();
+                }
+            }
+
+            if (activeCtx) {
+                DeviceInfo info = activeCtx->getCurrentDeviceInfo();
+                BenchmarkRunner runner({}, false, false, false, false, "all");
+                for (const auto& bench : runner.getBenchmarkList()) {
+                    BenchmarkSupportInfo item;
+                    item.id = bench->GetName();
+                    item.isSupported = bench->IsSupported(info, activeCtx);
+                    if (!item.isSupported) {
+                        item.reason = bench->GetSupportNote(info, activeCtx);
+                        switch (bench->GetSupportLimitation(info, activeCtx)) {
+                        case IBenchmark::SupportLimitation::kHardware:
+                            item.limitationCategory = "Hardware Limitation";
+                            break;
+                        case IBenchmark::SupportLimitation::kApi:
+                            item.limitationCategory = "API Limitation";
+                            break;
+                        case IBenchmark::SupportLimitation::kToolchain:
+                            item.limitationCategory = "Toolchain Limitation";
+                            break;
+                        default:
+                            item.limitationCategory = "Unsupported";
+                            break;
+                        }
+                    }
+                    results.push_back(item);
+
+                    if (std::string(bench->GetName()).rfind("RayScheduling", 0) == 0) {
+                        BenchmarkSupportInfo baseItem = item;
+                        baseItem.id = "RayScheduling";
+                        results.push_back(baseItem);
+                    }
+
+                    uint32_t num_configs = bench->GetNumConfigs();
+                    for (uint32_t ci = 0; ci < num_configs; ++ci) {
+                        if (!bench->IsConfigSupported(ci, info, activeCtx)) {
+                            BenchmarkSupportInfo cfgItem;
+                            cfgItem.id = bench->GetConfigName(ci);
+                            cfgItem.isSupported = false;
+                            cfgItem.reason = bench->GetConfigSupportNote(ci, info, activeCtx);
+                            if (cfgItem.reason.empty()) {
+                                cfgItem.reason = bench->GetSupportNote(info, activeCtx);
+                            }
+                            switch (bench->GetConfigSupportLimitation(ci, info, activeCtx)) {
                             case IBenchmark::SupportLimitation::kHardware:
-                                item.limitationCategory = "Hardware Limitation";
+                                cfgItem.limitationCategory = "Hardware Limitation";
                                 break;
                             case IBenchmark::SupportLimitation::kApi:
-                                item.limitationCategory = "API Limitation";
+                                cfgItem.limitationCategory = "API Limitation";
                                 break;
                             case IBenchmark::SupportLimitation::kToolchain:
-                                item.limitationCategory = "Toolchain Limitation";
+                                cfgItem.limitationCategory = "Toolchain Limitation";
                                 break;
                             default:
-                                item.limitationCategory = "Unsupported";
+                                cfgItem.limitationCategory = "Unsupported";
                                 break;
                             }
-                        }
-                        results.push_back(item);
-
-                        if (std::string(bench->GetName()).rfind("RayScheduling", 0) == 0) {
-                            BenchmarkSupportInfo baseItem = item;
-                            baseItem.id = "RayScheduling";
-                            results.push_back(baseItem);
-                        }
-
-                        // Probe individual configuration support
-                        uint32_t num_configs = bench->GetNumConfigs();
-                        for (uint32_t ci = 0; ci < num_configs; ++ci) {
-                            if (!bench->IsConfigSupported(ci, info, ctx.get())) {
-                                BenchmarkSupportInfo cfgItem;
-                                cfgItem.id = bench->GetConfigName(ci);
-                                cfgItem.isSupported = false;
-                                cfgItem.reason = bench->GetConfigSupportNote(ci, info, ctx.get());
-                                if (cfgItem.reason.empty()) {
-                                    cfgItem.reason = bench->GetSupportNote(info, ctx.get());
-                                }
-                                switch (bench->GetConfigSupportLimitation(ci, info, ctx.get())) {
-                                case IBenchmark::SupportLimitation::kHardware:
-                                    cfgItem.limitationCategory = "Hardware Limitation";
-                                    break;
-                                case IBenchmark::SupportLimitation::kApi:
-                                    cfgItem.limitationCategory = "API Limitation";
-                                    break;
-                                case IBenchmark::SupportLimitation::kToolchain:
-                                    cfgItem.limitationCategory = "Toolchain Limitation";
-                                    break;
-                                default:
-                                    cfgItem.limitationCategory = "Unsupported";
-                                    break;
-                                }
-                                results.push_back(cfgItem);
+                            results.push_back(cfgItem);
+                            BenchmarkSupportInfo indexedItem = cfgItem;
+                            indexedItem.id = std::string(bench->GetName()) + "#" + std::to_string(ci);
+                            results.push_back(indexedItem);
+                            if (std::string(bench->GetName()).rfind("RayScheduling", 0) == 0) {
+                                BenchmarkSupportInfo baseIndexed = cfgItem;
+                                baseIndexed.id = "RayScheduling#" + std::to_string(ci);
+                                results.push_back(baseIndexed);
                             }
                         }
                     }
+                }
 
-                    if (!info.serSupported) {
-                        BenchmarkSupportInfo serItem;
-                        serItem.id = "SER";
-                        serItem.isSupported = false;
-                        serItem.reason = "VK_EXT_ray_tracing_invocation_reorder requires Ray Tracing Pipeline with hardware SER support";
-                        serItem.limitationCategory = "Hardware Limitation";
-                        results.push_back(serItem);
-                    }
+                if (!info.serSupported) {
+                    BenchmarkSupportInfo serItem;
+                    serItem.id = "SER";
+                    serItem.isSupported = false;
+                    serItem.reason = "VK_EXT_ray_tracing_invocation_reorder requires Ray Tracing Pipeline with hardware SER support";
+                    serItem.limitationCategory = "Hardware Limitation";
+                    results.push_back(serItem);
                 }
             }
         }
@@ -451,36 +551,45 @@ ComputeApiSupportInfo ProbeComputeApiSupportAPI(const std::string& backend_name)
         info.label = "Vulkan";
 #ifdef HAVE_VULKAN
         try {
-            auto ctx = ComputeBackendFactory::create(ComputeBackend::Vulkan, false, false);
-            if (ctx) {
-                const auto& devices = ctx->getDevices();
-                if (devices.empty()) {
-                    info.isSupported = false;
-                    info.reason = "Vulkan runtime initialized, but no compatible Vulkan compute devices were found.";
-                    info.missingRequirement = "Compatible Vulkan-capable graphics hardware or vendor ICD driver.";
-                } else {
-                    info.isSupported = true;
-                    info.reason = "Vulkan compute backend is operational with " + std::to_string(devices.size()) + " detected device(s).";
-                    info.missingRequirement = "";
-                }
+            auto sharedVk = GetSharedVulkanContextAPI();
+            if (sharedVk && sharedVk->isAvailable() && !sharedVk->getDevices().empty()) {
+                info.isSupported = true;
+                info.reason = "Vulkan 1.4 compute backend is operational with " +
+                              std::to_string(sharedVk->getDevices().size()) +
+                              " detected device(s) (shared device active).";
+                info.missingRequirement = "";
             } else {
-                info.isSupported = false;
-                info.reason = "Vulkan context could not be instantiated.";
-                info.missingRequirement = "Vulkan loader runtime (vulkan-1.dll / libvulkan.so.1).";
+                auto ctx = ComputeBackendFactory::create(ComputeBackend::Vulkan, false, false);
+                if (ctx) {
+                    const auto& devices = ctx->getDevices();
+                    if (devices.empty()) {
+                        info.isSupported = false;
+                        info.reason = "Vulkan 1.4 runtime initialized, but no Vulkan 1.4 capable compute devices were found.";
+                        info.missingRequirement = "Vulkan 1.4-capable graphics hardware and vendor ICD driver.";
+                    } else {
+                        info.isSupported = true;
+                        info.reason = "Vulkan 1.4 compute backend is operational with " + std::to_string(devices.size()) + " detected device(s).";
+                        info.missingRequirement = "";
+                    }
+                } else {
+                    info.isSupported = false;
+                    info.reason = "Vulkan 1.4 context could not be instantiated.";
+                    info.missingRequirement = "Vulkan 1.4 loader runtime (vulkan-1.dll / libvulkan.so.1).";
+                }
             }
         } catch (const std::exception& e) {
             info.isSupported = false;
-            info.reason = std::string("Vulkan runtime initialization failed: ") + e.what();
-            info.missingRequirement = "Vulkan ICD driver or loader runtime (vulkan-1.dll).";
+            info.reason = std::string("Vulkan 1.4 runtime initialization failed: ") + e.what();
+            info.missingRequirement = "Vulkan 1.4 ICD driver or loader runtime (vulkan-1.dll).";
         } catch (...) {
             info.isSupported = false;
-            info.reason = "Vulkan runtime initialization failed with an unknown error.";
-            info.missingRequirement = "Vulkan ICD driver or loader runtime.";
+            info.reason = "Vulkan 1.4 runtime initialization failed with an unknown error.";
+            info.missingRequirement = "Vulkan 1.4 ICD driver or loader runtime.";
         }
 #else
         info.isSupported = false;
         info.reason = "Vulkan compute backend was not compiled into this GPUBench binary.";
-        info.missingRequirement = "Vulkan SDK headers and libraries (vulkan/vulkan.h, Vulkan-1) at build time.";
+        info.missingRequirement = "Vulkan 1.4 SDK headers and libraries (vulkan/vulkan.h, Vulkan-1) at build time.";
 #endif
     } else if (lower == "rocm") {
         info.label = "ROCm";
@@ -492,7 +601,7 @@ ComputeApiSupportInfo ProbeComputeApiSupportAPI(const std::string& backend_name)
                 if (devices.empty()) {
                     info.isSupported = false;
                     info.reason = "ROCm/HIP runtime initialized, but no compatible AMD ROCm devices were detected.";
-                    info.missingRequirement = "Compatible AMD GPU with ROCm/KFD kernel driver support.";
+                    info.missingRequirement = "Compatible AMD GPU with HIP runtime driver support.";
                 } else {
                     info.isSupported = true;
                     info.reason = "AMD ROCm (HIP) backend is operational with " + std::to_string(devices.size()) + " detected device(s).";
@@ -506,17 +615,17 @@ ComputeApiSupportInfo ProbeComputeApiSupportAPI(const std::string& backend_name)
         } catch (const std::exception& e) {
             info.isSupported = false;
             info.reason = std::string("ROCm initialization failed: ") + e.what();
-            info.missingRequirement = "AMD ROCm driver and HIP runtime stack.";
+            info.missingRequirement = "AMD ROCm / HIP runtime stack (amdhip64).";
         } catch (...) {
             info.isSupported = false;
             info.reason = "ROCm initialization failed with an unknown error.";
-            info.missingRequirement = "AMD ROCm driver and HIP runtime stack.";
+            info.missingRequirement = "AMD ROCm / HIP runtime stack.";
         }
 #else
         info.isSupported = false;
 #ifdef _WIN32
-        info.reason = "AMD ROCm (HIP) compute backend is not supported on Windows.";
-        info.missingRequirement = "Linux operating system with AMD ROCm kernel driver (amdgpu/kfd) and HIP runtime.";
+        info.reason = "ROCm (HIP) backend was not compiled into this Windows binary (HIP SDK headers absent at build time).";
+        info.missingRequirement = "AMD HIP SDK headers at build time + amdhip64_7.dll / amdhip64_6.dll at runtime.";
 #else
         info.reason = "ROCm compute backend was not compiled into this GPUBench binary.";
         info.missingRequirement = "AMD ROCm development packages and HIP runtime headers at build time.";
@@ -535,7 +644,7 @@ ComputeApiSupportInfo ProbeComputeApiSupportAPI(const std::string& backend_name)
                     info.missingRequirement = "OpenCL ICD vendor driver (AMD, NVIDIA, or Intel OpenCL runtime).";
                 } else {
                     info.isSupported = true;
-                    info.reason = "OpenCL compute backend is operational with " + std::to_string(devices.size()) + " detected device(s).";
+                    info.reason = "OpenCL 3.0 compute backend is operational with " + std::to_string(devices.size()) + " detected device(s).";
                     info.missingRequirement = "";
                 }
             } else {
@@ -565,7 +674,7 @@ ComputeApiSupportInfo ProbeComputeApiSupportAPI(const std::string& backend_name)
 
         if (vInfo.isSupported) {
             info.isSupported = true;
-            info.reason = "Auto selects Vulkan (highest priority available backend on this workstation).";
+            info.reason = "Auto selects Vulkan 1.4 (highest priority available backend on this workstation).";
             info.missingRequirement = "";
         } else if (rInfo.isSupported) {
             info.isSupported = true;
@@ -573,12 +682,12 @@ ComputeApiSupportInfo ProbeComputeApiSupportAPI(const std::string& backend_name)
             info.missingRequirement = "";
         } else if (oInfo.isSupported) {
             info.isSupported = true;
-            info.reason = "Auto selects OpenCL.";
+            info.reason = "Auto selects OpenCL 3.0.";
             info.missingRequirement = "";
         } else {
             info.isSupported = false;
             info.reason = "No compatible compute backend runtime is available on this system.";
-            info.missingRequirement = "A functional graphics driver and runtime supporting Vulkan, ROCm, or OpenCL.";
+            info.missingRequirement = "A functional graphics driver and runtime supporting Vulkan 1.4, ROCm, or OpenCL.";
         }
     } else {
         info.label = backend_name;

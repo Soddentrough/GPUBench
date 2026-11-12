@@ -1,4 +1,5 @@
 #version 460
+#extension GL_KHR_shader_subgroup_ballot : enable
 // GPUBench Dual-Issue & Concurrency Benchmark Suite
 // Config 6: Dual-Issue Mixed (FP32+INT32, 1:1 Instruction Co-Issue)
 // Evaluates concurrent execution across mixed datapaths (16 FP32 FMA instructions + 16 INT32 ALU instructions).
@@ -39,7 +40,7 @@ void main() {
     float f14 = base + 1.4;
     float f15 = base + 1.5;
 
-    float mf = pushConstants.multiplier * 0.00001;
+    float mf = pushConstants.multiplier;
 
     // 8 independent INT32 scalar accumulator chains (8 add + 8 and = 16 INT32 instructions = 16 IOPs/iter)
     uint u0 = ubase;
@@ -51,43 +52,43 @@ void main() {
     uint u6 = ubase + 6u;
     uint u7 = ubase + 7u;
 
-    uint mu = uint(pushConstants.multiplier * 1000.0) | 1u;
+    uint mu = (floatBitsToUint(pushConstants.multiplier) & 0x3FFu) | 1u;
     uint mask = (pushConstants.num_elements ^ 0x7FFF7FFFu) | 1u;
 
     // 65536 iterations * (16 scalar FMAs + 8 scalar INT add+and)
     // = 65536 * (32 FP32 ops + 16 INT32 ops) = 65536 * 48 = 3,145,728 operations
     for (int i = 0; i < 65536; ++i) {
-        f0  = fma(f0,  mf, f0);
+        f0  = fma(mf, f0,  f0);
         u0  = (u0 + mu) & mask;
-        f1  = fma(f1,  mf, f1);
+        f1  = fma(mf, f1,  f1);
 
-        f2  = fma(f2,  mf, f2);
+        f2  = fma(mf, f2,  f2);
         u1  = (u1 + mu) & mask;
-        f3  = fma(f3,  mf, f3);
+        f3  = fma(mf, f3,  f3);
 
-        f4  = fma(f4,  mf, f4);
+        f4  = fma(mf, f4,  f4);
         u2  = (u2 + mu) & mask;
-        f5  = fma(f5,  mf, f5);
+        f5  = fma(mf, f5,  f5);
 
-        f6  = fma(f6,  mf, f6);
+        f6  = fma(mf, f6,  f6);
         u3  = (u3 + mu) & mask;
-        f7  = fma(f7,  mf, f7);
+        f7  = fma(mf, f7,  f7);
 
-        f8  = fma(f8,  mf, f8);
+        f8  = fma(mf, f8,  f8);
         u4  = (u4 + mu) & mask;
-        f9  = fma(f9,  mf, f9);
+        f9  = fma(mf, f9,  f9);
 
-        f10 = fma(f10, mf, f10);
+        f10 = fma(mf, f10, f10);
         u5  = (u5 + mu) & mask;
-        f11 = fma(f11, mf, f11);
+        f11 = fma(mf, f11, f11);
 
-        f12 = fma(f12, mf, f12);
+        f12 = fma(mf, f12, f12);
         u6  = (u6 + mu) & mask;
-        f13 = fma(f13, mf, f13);
+        f13 = fma(mf, f13, f13);
 
-        f14 = fma(f14, mf, f14);
+        f14 = fma(mf, f14, f14);
         u7  = (u7 + mu) & mask;
-        f15 = fma(f15, mf, f15);
+        f15 = fma(mf, f15, f15);
     }
 
     float fres = ((f0 + f1) + (f2 + f3)) + ((f4 + f5) + (f6 + f7)) +

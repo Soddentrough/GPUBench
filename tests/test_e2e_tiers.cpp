@@ -259,18 +259,6 @@ bool hasUsableGpu() {
   return cached == 1;
 }
 
-std::string sanitizeJsonFloats(std::string json) {
-  const std::vector<std::string> targets = {": -nan", ": nan", ": inf", ": -inf", ": 1.#IND", ": -1.#IND"};
-  for (const auto &t : targets) {
-    size_t pos = 0;
-    while ((pos = json.find(t, pos)) != std::string::npos) {
-      json.replace(pos, t.length(), ": 0.0");
-      pos += 5;
-    }
-  }
-  return json;
-}
-
 } // namespace
 
 // ============================================================================
@@ -280,8 +268,7 @@ std::string sanitizeJsonFloats(std::string json) {
 TEST_CASE(E2E_Tier1, VersionFlag) {
   auto res = runGpubench({"--version"});
   ASSERT_EQ(res.exitCode, 0);
-  ASSERT_TRUE(res.stdoutStr.find("1.0.0") != std::string::npos ||
-              res.stdoutStr.find(GPUBENCH_VERSION) != std::string::npos);
+  ASSERT_TRUE(res.stdoutStr.find(GPUBENCH_VERSION) != std::string::npos);
 }
 
 TEST_CASE(E2E_Tier1, HelpFlag) {
@@ -462,7 +449,7 @@ TEST_CASE(E2E_Tier2, CorruptJsonFileImportRejection) {
   const std::string corruptPath = getTempFilePath("gpubench_corrupt_test");
   {
     std::ofstream ofs(corruptPath);
-    ofs << "{\"version\": \"1.0.0\", \"incomplete\": [";
+    ofs << "{\"version\": \"" << GPUBENCH_VERSION << "\", \"incomplete\": [";
   }
 
   auto res = runGpubench({"-i", corruptPath});
@@ -555,21 +542,17 @@ TEST_CASE(E2E_Tier3, JsonStdoutSchemaValidation) {
   auto res = runGpubench({"-b", "FP32", "-c", "0", "--profile-snapshot", "-f", "--json"});
   ASSERT_EQ(res.exitCode, 0);
 
-  // Load and validate JSON structure via ResultImporter.
-  // Under background GPU contention, if active cycles is 0, driver counters may produce
-  // non-finite values (-nan / inf). Sanitize any non-finite tokens to validate functional schema.
-  std::string sanitized = sanitizeJsonFloats(res.stdoutStr);
-
+  // Load and validate raw RFC 8259 JSON structure directly without float scrubbing
   ImportedRun run;
   std::string err;
-  bool ok = ResultImporter::loadFromString(sanitized, run, err);
+  bool ok = ResultImporter::loadFromString(res.stdoutStr, run, err);
   if (!ok) {
-    std::cerr << "JSON Parse error: " << err << "\nPayload:\n" << sanitized << "\n";
+    std::cerr << "JSON Parse error: " << err << "\nPayload:\n" << res.stdoutStr << "\n";
   }
   ASSERT_TRUE(ok);
 
   // Validate top-level metadata schema
-  ASSERT_EQ(run.appVersion, "1.0.0");
+  ASSERT_EQ(run.appVersion, GPUBENCH_VERSION);
   ASSERT_GT(run.timestamp, 0ULL);
   ASSERT_EQ(run.backend, "Vulkan");
 
@@ -604,20 +587,7 @@ TEST_CASE(E2E_Tier3, JsonComparisonModeMultiRun) {
   auto resB = runGpubench({"-b", "FP32", "-c", "0", "--profile-snapshot", "-f", "-o", runB});
   ASSERT_EQ(resB.exitCode, 0);
 
-  // Sanitize any non-compliant floats emitted due to active cycle contention before comparison
-  auto sanitizeFile = [](const std::string &path) {
-    std::ifstream ifs(path);
-    if (!ifs.is_open()) return;
-    std::string s((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
-    ifs.close();
-    std::string clean = sanitizeJsonFloats(s);
-    std::ofstream ofs(path);
-    ofs << clean;
-  };
-  sanitizeFile(runA);
-  sanitizeFile(runB);
-
-  // Compare both runs side-by-side
+  // Compare both raw JSON runs side-by-side without post-hoc sanitization
   auto cmpRes = runGpubench({"--compare", runA, runB});
   ASSERT_EQ(cmpRes.exitCode, 0);
   ASSERT_TRUE(cmpRes.stdoutStr.find("FP32") != std::string::npos);
@@ -633,11 +603,10 @@ TEST_CASE(E2E_Tier3, QuietAndJsonOutputCleanliness) {
   auto res = runGpubench({"-b", "FP32", "-c", "0", "--profile-snapshot", "-f", "--json", "-q"});
   ASSERT_EQ(res.exitCode, 0);
 
-  // Under --json and -q, stdout should contain valid parseable JSON without console noise
-  std::string sanitized = sanitizeJsonFloats(res.stdoutStr);
+  // Under --json and -q, stdout must contain valid RFC 8259 JSON without console noise
   ImportedRun run;
   std::string err;
-  bool ok = ResultImporter::loadFromString(sanitized, run, err);
+  bool ok = ResultImporter::loadFromString(res.stdoutStr, run, err);
   ASSERT_TRUE(ok);
   ASSERT_GE(run.results.size(), 1u);
 }
@@ -707,4 +676,27 @@ TEST_CASE(E2E_Tier4, ParityFlagHonestyAndExecution) {
   auto res = runGpubench({"-b", "Pixel Fill Rate", "-c", "0", "--verify-parity", "--profile-snapshot", "-f"});
   ASSERT_EQ(res.exitCode, 0);
   ASSERT_TRUE(res.stdoutStr.find("Pixel Fill Rate") != std::string::npos);
+}
+
+TEST_CASE(E2E_Tier4, DumpIsaFp6AndFp4GracefulSkipOrDisassembly) {
+  if (!hasUsableGpu()) { return; }
+  auto resFp6 = runGpubench({"--dump-isa", "fp6"});
+  ASSERT_EQ(resFp6.exitCode, 0);
+  ASSERT_TRUE(resFp6.combinedStr.find("coop_matrix_fp6") != std::string::npos ||
+              resFp6.combinedStr.find("FP6") != std::string::npos);
+
+  auto resFp4 = runGpubench({"--dump-isa", "fp4"});
+  ASSERT_EQ(resFp4.exitCode, 0);
+  ASSERT_TRUE(resFp4.combinedStr.find("coop_matrix_fp4") != std::string::npos ||
+              resFp4.combinedStr.find("FP4") != std::string::npos);
+}
+
+TEST_CASE(E2E_Tier4, CacheBandwidthGroupExecution) {
+  if (!hasUsableGpu()) { return; }
+  auto res = runGpubench({"-b", "cachebw", "--profile-snapshot", "--strict", "-f"});
+  ASSERT_EQ(res.exitCode, 0);
+  ASSERT_TRUE(res.stdoutStr.find("L0 Cache Bandwidth") != std::string::npos);
+  ASSERT_TRUE(res.stdoutStr.find("L1 Cache Bandwidth") != std::string::npos);
+  ASSERT_TRUE(res.stdoutStr.find("L2 Cache Bandwidth") != std::string::npos);
+  ASSERT_TRUE(res.stdoutStr.find("GB/s") != std::string::npos);
 }

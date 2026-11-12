@@ -19,6 +19,7 @@ struct BandwidthConfig {
 
 class MemBandwidthBench : public IBenchmark {
 public:
+  MemBandwidthBench();
   const char *GetName() const override { return "Device Memory Bandwidth"; }
   std::vector<std::string> GetAliases() const override {
     return {"membw", "bandwidth", "devicemem"};
@@ -26,6 +27,8 @@ public:
   const char *GetMetric() const override;
   bool IsSupported(const DeviceInfo &info,
                    IComputeContext *context = nullptr) const override;
+  bool IsConfigSupported(uint32_t config_idx, const DeviceInfo &info,
+                         IComputeContext *context = nullptr) const override;
   void Setup(IComputeContext &context, const std::string &kernel_dir) override;
   void Run(uint32_t config_idx = 0) override;
   void Teardown() override;
@@ -35,7 +38,22 @@ public:
     return "Memory";
   }
   const char *GetSubCategory(uint32_t config_idx = 0) const override {
+    (void)config_idx;
     return "Bandwidth";
+  }
+  const char *GetDescription() const override {
+    return "Streaming device VRAM read, write, and read-write bandwidth across coalesced workgroup sizes.";
+  }
+  double GetOperationalIntensity(uint32_t config_idx = 0) const override {
+    // Streaming read/write does ~0.0625..0.125 ops per byte transferred
+    return (config_idx % 3 == 2) ? 0.125 : 0.0625;
+  }
+  bool RequiresInterIterationBarrier(uint32_t config_idx = 0) const override {
+    (void)config_idx;
+    // Prevent Dispatch N+1 from overlapping with Dispatch N on high-CU GPUs
+    // (e.g., 96 CUs / 96 MB Infinity Cache), ensuring each 512 MB sweep fully
+    // evicts L3 before the next iteration reads chunk 0.
+    return true;
   }
   int GetSortWeight() const override { return 300; }
   uint32_t GetNumConfigs() const override;
@@ -47,6 +65,7 @@ public:
   void setDebug(bool debug) { this->debug = debug; }
 
 private:
+  template <typename Tag> friend struct ::gpubench::test::TestBody;
   IComputeContext *context = nullptr;
   std::vector<BandwidthConfig> configs;
   ComputeBuffer inputBuffer = nullptr;
@@ -54,5 +73,6 @@ private:
   size_t bufferSize = 0;
   bool debug = false;
 
+  void initDefaultConfigs(uint32_t maxWorkgroupSize = 1024);
   void createKernel(BandwidthConfig &config, const std::string &kernel_dir);
 };

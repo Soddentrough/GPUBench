@@ -1,0 +1,158 @@
+; SPV_AMDX_shader_enqueue (VK_AMDX_shader_enqueue) GPU Work Graph
+; Parity workload with workgraphs_producer.comp + workgraphs_consumer.comp:
+;   - Producer: 1024 x 256 threads, PCG classification hash ((hash & 1u) == 0u)
+;   - Consumer: Coalescing 64-lane node, 32-iteration GLSL.std.450 Fma loop
+; Validated with: spirv-as --target-env vulkan1.4 && spirv-val --target-env vulkan1.4
+               OpCapability Shader
+               OpCapability ShaderEnqueueAMDX
+               OpExtension "SPV_AMDX_shader_enqueue"
+    %glsl450 = OpExtInstImport "GLSL.std.450"
+               OpMemoryModel Logical GLSL450
+               OpEntryPoint GLCompute %producerMain "producerNode" %gl_GlobalInvocationID %outPayloads
+               OpEntryPoint GLCompute %consumerMain "consumerNode" %gl_LocalInvocationIndex %inPayloads %outBuf
+               OpExecutionMode %producerMain LocalSize 256 1 1
+               OpExecutionModeId %producerMain IsApiEntryAMDX %true_val
+               OpExecutionModeId %producerMain ShaderIndexAMDX %uint_0
+               OpExecutionModeId %producerMain StaticNumWorkgroupsAMDX %uint_1024 %uint_1 %uint_1
+               OpExecutionMode %consumerMain LocalSize 64 1 1
+               OpExecutionMode %consumerMain CoalescingAMDX
+               OpExecutionModeId %consumerMain ShaderIndexAMDX %uint_1
+               OpDecorate %gl_GlobalInvocationID BuiltIn GlobalInvocationId
+               OpDecorate %gl_LocalInvocationIndex BuiltIn LocalInvocationIndex
+               OpDecorate %PayloadStruct Block
+               OpMemberDecorate %PayloadStruct 0 Offset 0
+               OpMemberDecorate %PayloadStruct 1 Offset 4
+               OpMemberDecorate %PayloadStruct 2 Offset 8
+               OpDecorateId %outPayloads PayloadNodeBaseIndexAMDX %uint_1
+               OpDecorateId %outPayloads PayloadNodeArraySizeAMDX %uint_1
+               OpDecorateId %inPayloads NodeMaxPayloadsAMDX %uint_64
+               OpDecorate %outPayloads TrackFinishWritingAMDX
+               OpDecorate %rta ArrayStride 4
+               OpDecorate %OutBlock Block
+               OpMemberDecorate %OutBlock 0 Offset 0
+               OpDecorate %outBuf DescriptorSet 0
+               OpDecorate %outBuf Binding 0
+       %void = OpTypeVoid
+       %func = OpTypeFunction %void
+       %uint = OpTypeInt 32 0
+     %v3uint = OpTypeVector %uint 3
+      %float = OpTypeFloat 32
+       %bool = OpTypeBool
+   %true_val = OpConstantTrue %bool
+     %uint_0 = OpConstant %uint 0
+     %uint_1 = OpConstant %uint 1
+     %uint_2 = OpConstant %uint 2
+     %uint_4 = OpConstant %uint 4
+    %uint_22 = OpConstant %uint 22
+    %uint_28 = OpConstant %uint 28
+    %uint_32 = OpConstant %uint 32
+    %uint_64 = OpConstant %uint 64
+   %uint_255 = OpConstant %uint 255
+  %uint_1024 = OpConstant %uint 1024
+ %uint_65535 = OpConstant %uint 65535
+  %pcg_mul_0 = OpConstant %uint 747796405
+  %pcg_add_0 = OpConstant %uint 2891336453
+  %pcg_mul_1 = OpConstant %uint 277803737
+     %flt_c0 = OpConstant %float 0.0001220703125
+     %flt_c1 = OpConstant %float 0.125
+%flt_fma_mul = OpConstant %float 0.99951171875
+%flt_fma_add = OpConstant %float 0.0009765625
+%PayloadStruct = OpTypeStruct %uint %uint %uint
+%PayloadArr  = OpTypeNodePayloadArrayAMDX %PayloadStruct
+%_ptr_PayloadArr = OpTypePointer NodePayloadAMDX %PayloadArr
+%_ptr_PayloadU = OpTypePointer NodePayloadAMDX %uint
+%_ptr_InputV3U = OpTypePointer Input %v3uint
+%_ptr_InputU = OpTypePointer Input %uint
+        %rta = OpTypeRuntimeArray %float
+   %OutBlock = OpTypeStruct %rta
+%_ptr_SB_Out = OpTypePointer StorageBuffer %OutBlock
+%_ptr_SB_Flt = OpTypePointer StorageBuffer %float
+%gl_GlobalInvocationID = OpVariable %_ptr_InputV3U Input
+%gl_LocalInvocationIndex = OpVariable %_ptr_InputU Input
+%outPayloads = OpVariable %_ptr_PayloadArr NodePayloadAMDX
+ %inPayloads = OpVariable %_ptr_PayloadArr NodePayloadAMDX
+     %outBuf = OpVariable %_ptr_SB_Out StorageBuffer
+
+%producerMain = OpFunction %void None %func
+ %prod_entry = OpLabel
+      %gidP  = OpAccessChain %_ptr_InputU %gl_GlobalInvocationID %uint_0
+       %gid  = OpLoad %uint %gidP
+    %h0_mul  = OpIMul %uint %gid %pcg_mul_0
+        %h0  = OpIAdd %uint %h0_mul %pcg_add_0
+    %sh_top  = OpShiftRightLogical %uint %h0 %uint_28
+    %sh_amt  = OpIAdd %uint %sh_top %uint_4
+    %h1_shr  = OpShiftRightLogical %uint %h0 %sh_amt
+    %h1_xor  = OpBitwiseXor %uint %h1_shr %h0
+        %h1  = OpIMul %uint %h1_xor %pcg_mul_1
+    %h2_shr  = OpShiftRightLogical %uint %h1 %uint_22
+      %hash  = OpBitwiseXor %uint %h2_shr %h1
+       %low  = OpBitwiseAnd %uint %hash %uint_1
+  %isActive  = OpIEqual %bool %low %uint_0
+    %recCnt  = OpSelect %uint %isActive %uint_1 %uint_0
+       %pArr = OpAllocateNodePayloadsAMDX %_ptr_PayloadArr %uint_2 %recCnt %uint_1
+               OpSelectionMerge %prod_done None
+               OpBranchConditional %isActive %prod_emit %prod_finish
+  %prod_emit = OpLabel
+       %wPx  = OpAccessChain %_ptr_PayloadU %pArr %uint_0 %uint_0
+       %wPy  = OpAccessChain %_ptr_PayloadU %pArr %uint_0 %uint_1
+       %wPz  = OpAccessChain %_ptr_PayloadU %pArr %uint_0 %uint_2
+    %hashOr1 = OpBitwiseOr %uint %hash %uint_1
+    %gidMask = OpBitwiseAnd %uint %gid %uint_255
+     %pzVal  = OpIAdd %uint %gidMask %uint_1
+               OpStore %wPx %gid
+               OpStore %wPy %hashOr1
+               OpStore %wPz %pzVal
+               OpBranch %prod_finish
+%prod_finish = OpLabel
+   %finished = OpFinishWritingNodePayloadAMDX %bool %pArr
+               OpSelectionMerge %enq_done None
+               OpBranchConditional %finished %do_enq %enq_done
+     %do_enq = OpLabel
+               OpEnqueueNodePayloadsAMDX %pArr
+               OpBranch %enq_done
+   %enq_done = OpLabel
+               OpBranch %prod_done
+  %prod_done = OpLabel
+               OpReturn
+               OpFunctionEnd
+
+%consumerMain = OpFunction %void None %func
+      %entry = OpLabel
+        %lid = OpLoad %uint %gl_LocalInvocationIndex
+        %cnt = OpNodePayloadArrayLengthAMDX %uint %inPayloads
+       %cond = OpULessThan %bool %lid %cnt
+               OpSelectionMerge %merge None
+               OpBranchConditional %cond %body %merge
+       %body = OpLabel
+       %pPx  = OpAccessChain %_ptr_PayloadU %inPayloads %lid %uint_0
+       %pPy  = OpAccessChain %_ptr_PayloadU %inPayloads %lid %uint_1
+       %pPz  = OpAccessChain %_ptr_PayloadU %inPayloads %lid %uint_2
+        %px  = OpLoad %uint %pPx
+        %py  = OpLoad %uint %pPy
+        %pz  = OpLoad %uint %pPz
+    %pyMask  = OpBitwiseAnd %uint %py %uint_65535
+       %fPy  = OpConvertUToF %float %pyMask
+     %term0  = OpFMul %float %fPy %flt_c0
+       %fPz  = OpConvertUToF %float %pz
+     %term1  = OpFMul %float %fPz %flt_c1
+        %v0  = OpFAdd %float %term0 %term1
+               OpBranch %loop_hdr
+   %loop_hdr = OpLabel
+         %i  = OpPhi %uint %uint_0 %body %i_next %loop_cont
+         %v  = OpPhi %float %v0 %body %v_next %loop_cont
+     %lt_32  = OpULessThan %bool %i %uint_32
+               OpLoopMerge %loop_exit %loop_cont None
+               OpBranchConditional %lt_32 %loop_body %loop_exit
+  %loop_body = OpLabel
+     %v_next = OpExtInst %float %glsl450 Fma %v %flt_fma_mul %flt_fma_add
+               OpBranch %loop_cont
+  %loop_cont = OpLabel
+     %i_next = OpIAdd %uint %i %uint_1
+               OpBranch %loop_hdr
+  %loop_exit = OpLabel
+       %outP = OpAccessChain %_ptr_SB_Flt %outBuf %uint_0 %px
+               OpStore %outP %v
+               OpBranch %merge
+      %merge = OpLabel
+               OpReturn
+               OpFunctionEnd

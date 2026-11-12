@@ -139,6 +139,10 @@ void RayAnyHitBench::Setup(IComputeContext &context,
           (kdir / "vulkan" / "rayanyhit_pipeline.rmiss").string(), hit_shaders,
           anyhit_shaders, {},
           2); // 2 buffer descriptors (TLAS + Result Buffer)
+      if (kernel) {
+        vContext->setKernelAS(kernel, 0, (AccelerationStructure)triangleTlas);
+        vContext->setKernelArg(kernel, 1, resultBuffer);
+      }
     } else {
       std::cerr
           << "RayAnyHitBench currently only supports Vulkan RT backend."
@@ -338,16 +342,13 @@ void RayAnyHitBench::buildAS() {
 }
 
 void RayAnyHitBench::Run(uint32_t config_idx) {
+  if (!kernel) return;
   VulkanContext *vContext = static_cast<VulkanContext *>(context);
-  if (lastRunConfig != static_cast<int>(config_idx)) {
+  if (lastRunConfig != -1 && lastRunConfig != static_cast<int>(config_idx)) {
     uint32_t zero = 0;
     context->writeBuffer(resultBuffer, 0, sizeof(uint32_t), &zero);
-    lastRunConfig = static_cast<int>(config_idx);
   }
-  VkAccelerationStructureKHR activeTlas = triangleTlas;
-
-  vContext->setKernelAS(kernel, 0, (AccelerationStructure)activeTlas);
-  vContext->setKernelArg(kernel, 1, resultBuffer);
+  lastRunConfig = static_cast<int>(config_idx);
 
   // config_idx 0 = 100% Solid (1.0 alpha density) -> Almost all rays hit opaque
   // config_idx 1 = 50% Solid (0.5 alpha density) -> Cutout stress with any-hit evaluation

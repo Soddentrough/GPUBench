@@ -9,6 +9,10 @@
 #include <vector>
 
 #ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
 #include <malloc.h>
 #define ALIGNED_ALLOC(alignment, size) _aligned_malloc(size, alignment)
 #define ALIGNED_FREE(ptr) _aligned_free(ptr)
@@ -16,6 +20,31 @@
 #include <sys/mman.h>
 #define ALIGNED_ALLOC(alignment, size) aligned_alloc(alignment, size)
 #define ALIGNED_FREE(ptr) free(ptr)
+#endif
+
+#ifdef _WIN32
+namespace {
+static bool tryEnableSeLockMemoryPrivilege() {
+  HANDLE hToken = nullptr;
+  if (!OpenProcessToken(GetCurrentProcess(),
+                        TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hToken)) {
+    return false;
+  }
+  TOKEN_PRIVILEGES tp{};
+  if (!LookupPrivilegeValueA(nullptr, "SeLockMemoryPrivilege",
+                             &tp.Privileges[0].Luid)) {
+    CloseHandle(hToken);
+    return false;
+  }
+  tp.PrivilegeCount = 1;
+  tp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
+  SetLastError(ERROR_SUCCESS);
+  BOOL ok = AdjustTokenPrivileges(hToken, FALSE, &tp, 0, nullptr, nullptr);
+  DWORD lastErr = GetLastError();
+  CloseHandle(hToken);
+  return ok && (lastErr == ERROR_SUCCESS);
+}
+} // namespace
 #endif
 
 SysMemLatencyBench::SysMemLatencyBench() {}
@@ -28,19 +57,50 @@ const char *SysMemLatencyBench::GetName() const {
 
 const char *SysMemLatencyBench::GetMetric() const { return "ns"; }
 
-bool SysMemLatencyBench::IsSupported(const DeviceInfo &info,
-                                     IComputeContext *context) const {
+const char *SysMemLatencyBench::GetDescription(uint32_t /*config_idx*/) const {
+  return "256 MB random Hamiltonian-cycle cache-line pointer chasing measuring true host DRAM latency.";
+}
+
+std::string SysMemLatencyBench::GetConfigCaveat(uint32_t /*config_idx*/) const {
+  return pageCaveat;
+}
+
+bool SysMemLatencyBench::IsSupported(const DeviceInfo & /*info*/,
+                                     IComputeContext * /*context*/) const {
   return true;
 }
 
-void SysMemLatencyBench::Setup(IComputeContext &context,
-                               const std::string &kernel_dir) {
-  // 256MB buffer to ensure we bypass CPU caches (including 32MB - 128MB L3)
-  bufferSize = 256ULL * 1024ULL * 1024ULL;
+void SysMemLatencyBench::Setup(IComputeContext & /*context*/,
+                               const std::string & /*kernel_dir*/) {
+  Teardown();
 
+  // 256 MB buffer to bypass CPU L3 caches (including 3D V-Cache 96-128 MB)
+  bufferSize = 256ULL * 1024ULL * 1024ULL;
   buffer = nullptr;
+  usedVirtualAlloc = false;
+  usingLargePages = false;
+  pageCaveat.clear();
+
 #ifdef _WIN32
-  buffer = ALIGNED_ALLOC(2 * 1024 * 1024, bufferSize);
+  SIZE_T largePageMin = GetLargePageMinimum();
+  if (largePageMin > 0) {
+    tryEnableSeLockMemoryPrivilege();
+    SIZE_T allocSize =
+        ((bufferSize + largePageMin - 1) / largePageMin) * largePageMin;
+    void *lp = VirtualAlloc(nullptr, allocSize,
+                            MEM_COMMIT | MEM_RESERVE | MEM_LARGE_PAGES,
+                            PAGE_READWRITE);
+    if (lp != nullptr) {
+      buffer = lp;
+      usedVirtualAlloc = true;
+      usingLargePages = true;
+    }
+  }
+  if (!buffer) {
+    buffer = ALIGNED_ALLOC(2 * 1024 * 1024, bufferSize);
+    pageCaveat =
+        "Normal 4 KB pages (TLB walk overhead included; grant SeLockMemoryPrivilege for 2 MB Large Pages)";
+  }
 #else
   if (posix_memalign(&buffer, 2 * 1024 * 1024, bufferSize) != 0) {
     buffer = nullptr;
@@ -60,12 +120,10 @@ void SysMemLatencyBench::Setup(IComputeContext &context,
 #endif
 #endif
 
-  // Pointer chasing across 64-byte cache lines.
-  // Striding by 64 bytes (16 uint32_t elements) guarantees that every jump
-  // targets a distinct cache line, defeating hardware prefetchers and ensuring
-  // true DRAM access latency while reducing index generation time from 8s to <100ms.
-  constexpr uint32_t kStrideElements = 16; // 16 * sizeof(uint32_t) = 64 bytes
-  uint32_t numLines = static_cast<uint32_t>(bufferSize / (kStrideElements * sizeof(uint32_t)));
+  // Pointer chasing across 64-byte cache lines (16 uint32_t elements)
+  constexpr uint32_t kStrideElements = 16;
+  uint32_t numLines =
+      static_cast<uint32_t>(bufferSize / (kStrideElements * sizeof(uint32_t)));
   uint32_t *pBuffer = reinterpret_cast<uint32_t *>(buffer);
 
   std::vector<uint32_t> lineIndices(numLines);
@@ -75,11 +133,12 @@ void SysMemLatencyBench::Setup(IComputeContext &context,
   std::mt19937 g(rd());
   std::shuffle(lineIndices.begin(), lineIndices.end(), g);
 
-  // Create chasing chain on cache-line boundaries:
   for (uint32_t i = 0; i < numLines - 1; ++i) {
-    pBuffer[lineIndices[i] * kStrideElements] = lineIndices[i + 1] * kStrideElements;
+    pBuffer[lineIndices[i] * kStrideElements] =
+        lineIndices[i + 1] * kStrideElements;
   }
-  pBuffer[lineIndices[numLines - 1] * kStrideElements] = lineIndices[0] * kStrideElements; // Close the cycle
+  pBuffer[lineIndices[numLines - 1] * kStrideElements] =
+      lineIndices[0] * kStrideElements;
   currentIndex = 0;
 }
 
@@ -88,9 +147,6 @@ void SysMemLatencyBench::Run(uint32_t config_idx) {
   uint32_t *pBuffer = reinterpret_cast<uint32_t *>(buffer);
   uint32_t index = currentIndex;
 
-  // Execute one fixed quantum (100,000 pointer-chase hops);
-  // BenchmarkRunner::runHostBenchmarks executes warmup and then runs this
-  // repeatedly over the fixed measurement time window.
   const uint64_t iterations = 100000;
 
   auto start = std::chrono::high_resolution_clock::now();
@@ -113,18 +169,28 @@ void SysMemLatencyBench::Run(uint32_t config_idx) {
 
 void SysMemLatencyBench::Teardown() {
   if (buffer) {
+#ifdef _WIN32
+    if (usedVirtualAlloc) {
+      VirtualFree(buffer, 0, MEM_RELEASE);
+    } else {
+      ALIGNED_FREE(buffer);
+    }
+#else
     ALIGNED_FREE(buffer);
+#endif
     buffer = nullptr;
   }
+  usedVirtualAlloc = false;
+  usingLargePages = false;
 }
 
-BenchmarkResult SysMemLatencyBench::GetResult(uint32_t config_idx) const {
+BenchmarkResult SysMemLatencyBench::GetResult(uint32_t /*config_idx*/) const {
   return {lastRunOps, lastRunTimeMs};
 }
 
 uint32_t SysMemLatencyBench::GetNumConfigs() const { return 1; }
 
-std::string SysMemLatencyBench::GetConfigName(uint32_t config_idx) const {
+std::string SysMemLatencyBench::GetConfigName(uint32_t /*config_idx*/) const {
   return "Default";
 }
 
@@ -137,26 +203,23 @@ bool SysMemLatencyBench::ValidateResults(uint32_t config_idx) const {
   }
 
   const uint32_t *pBuffer = reinterpret_cast<const uint32_t *>(buffer);
-  constexpr uint32_t kStrideElements = 16; // 64 bytes
-  const uint32_t totalElements = static_cast<uint32_t>(bufferSize / sizeof(uint32_t));
+  constexpr uint32_t kStrideElements = 16;
+  const uint32_t totalElements =
+      static_cast<uint32_t>(bufferSize / sizeof(uint32_t));
 
-  // Traverse 10,000 steps of the pointer chasing chain starting from index 0
   uint32_t curr = 0;
   for (uint32_t step = 0; step < 10000; ++step) {
     uint32_t next = pBuffer[curr];
-    // Must be 64-byte aligned (multiple of 16 uint32s)
     if (next % kStrideElements != 0) {
       std::cerr << "SysMemLatencyBench validation failed: unaligned pointer chase target "
                 << next << " at step " << step << "\n";
       return false;
     }
-    // Must be within buffer boundaries
     if (next >= totalElements) {
       std::cerr << "SysMemLatencyBench validation failed: out-of-bounds index "
                 << next << " at step " << step << "\n";
       return false;
     }
-    // Must not be a degenerate self-loop
     if (next == curr) {
       std::cerr << "SysMemLatencyBench validation failed: degenerate self-loop at index "
                 << curr << "\n";
@@ -167,4 +230,3 @@ bool SysMemLatencyBench::ValidateResults(uint32_t config_idx) const {
 
   return true;
 }
-

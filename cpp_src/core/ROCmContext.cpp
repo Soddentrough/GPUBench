@@ -49,6 +49,16 @@ typedef hipError_t (*p_hipEventDestroy)(hipEvent_t);
 typedef hipError_t (*p_hipEventRecord)(hipEvent_t, hipStream_t);
 typedef hipError_t (*p_hipEventSynchronize)(hipEvent_t);
 typedef hipError_t (*p_hipEventElapsedTime)(float *, hipEvent_t, hipEvent_t);
+typedef hipError_t (*p_hipStreamCreate)(hipStream_t *);
+typedef hipError_t (*p_hipStreamDestroy)(hipStream_t);
+typedef hipError_t (*p_hipStreamSynchronize)(hipStream_t);
+typedef hipError_t (*p_hipStreamBeginCapture)(hipStream_t, hipStreamCaptureMode);
+typedef hipError_t (*p_hipStreamEndCapture)(hipStream_t, hipGraph_t *);
+typedef hipError_t (*p_hipGraphInstantiate)(hipGraphExec_t *, hipGraph_t,
+                                            hipGraphNode_t *, char *, size_t);
+typedef hipError_t (*p_hipGraphLaunch)(hipGraphExec_t, hipStream_t);
+typedef hipError_t (*p_hipGraphExecDestroy)(hipGraphExec_t);
+typedef hipError_t (*p_hipGraphDestroy)(hipGraph_t);
 
 // Function pointers for HIPRTC
 #ifdef HAVE_HIPRTC
@@ -93,6 +103,15 @@ static p_hipEventDestroy f_hipEventDestroy;
 static p_hipEventRecord f_hipEventRecord;
 static p_hipEventSynchronize f_hipEventSynchronize;
 static p_hipEventElapsedTime f_hipEventElapsedTime;
+static p_hipStreamCreate f_hipStreamCreate;
+static p_hipStreamDestroy f_hipStreamDestroy;
+static p_hipStreamSynchronize f_hipStreamSynchronize;
+static p_hipStreamBeginCapture f_hipStreamBeginCapture;
+static p_hipStreamEndCapture f_hipStreamEndCapture;
+static p_hipGraphInstantiate f_hipGraphInstantiate;
+static p_hipGraphLaunch f_hipGraphLaunch;
+static p_hipGraphExecDestroy f_hipGraphExecDestroy;
+static p_hipGraphDestroy f_hipGraphDestroy;
 typedef hipError_t (*p_hipFuncGetAttribute)(int *, hipFunction_attribute, hipFunction_t);
 static p_hipFuncGetAttribute f_hipFuncGetAttribute;
 
@@ -101,7 +120,31 @@ bool ROCmContext::loadLibraries() {
     return hipLib && hipLib->isValid();
 
 #ifdef _WIN32
-  hipLib = std::make_unique<utils::DynamicLibrary>("amdhip64.dll");
+  std::vector<std::string> hipCandidates = {
+      "amdhip64_7.dll",
+      "amdhip64_6.dll",
+      "amdhip64.dll",
+  };
+  const char *hipEnv = std::getenv("HIP_PATH");
+  if (hipEnv && hipEnv[0] != '\0') {
+    std::string base(hipEnv);
+    hipCandidates.push_back(base + "/bin/amdhip64_7.dll");
+    hipCandidates.push_back(base + "/bin/amdhip64_6.dll");
+    hipCandidates.push_back(base + "/bin/amdhip64.dll");
+  }
+  const char *rocmEnv = std::getenv("ROCM_PATH");
+  if (rocmEnv && rocmEnv[0] != '\0') {
+    std::string base(rocmEnv);
+    hipCandidates.push_back(base + "/bin/amdhip64_7.dll");
+    hipCandidates.push_back(base + "/bin/amdhip64_6.dll");
+    hipCandidates.push_back(base + "/bin/amdhip64.dll");
+  }
+  for (const auto &dllName : hipCandidates) {
+    hipLib = std::make_unique<utils::DynamicLibrary>(dllName);
+    if (hipLib && hipLib->isValid()) {
+      break;
+    }
+  }
 #else
   hipLib = std::make_unique<utils::DynamicLibrary>("libamdhip64.so.7");
   if (!hipLib->isValid()) {
@@ -139,12 +182,16 @@ bool ROCmContext::loadLibraries() {
   }
 #endif
 
-  if (hipLib->isValid()) {
+  if (hipLib && hipLib->isValid()) {
     f_hipInit = hipLib->getFunction<p_hipInit>("hipInit");
     f_hipGetDeviceCount =
         hipLib->getFunction<p_hipGetDeviceCount>("hipGetDeviceCount");
     f_hipGetDeviceProperties =
-        hipLib->getFunction<p_hipGetDeviceProperties>("hipGetDeviceProperties");
+        hipLib->getFunction<p_hipGetDeviceProperties>("hipGetDevicePropertiesR0600");
+    if (!f_hipGetDeviceProperties) {
+      f_hipGetDeviceProperties =
+          hipLib->getFunction<p_hipGetDeviceProperties>("hipGetDeviceProperties");
+    }
     f_hipRuntimeGetVersion =
         hipLib->getFunction<p_hipRuntimeGetVersion>("hipRuntimeGetVersion");
     f_hipSetDevice = hipLib->getFunction<p_hipSetDevice>("hipSetDevice");
@@ -170,13 +217,36 @@ bool ROCmContext::loadLibraries() {
     f_hipEventRecord = hipLib->getFunction<p_hipEventRecord>("hipEventRecord");
     f_hipEventSynchronize = hipLib->getFunction<p_hipEventSynchronize>("hipEventSynchronize");
     f_hipEventElapsedTime = hipLib->getFunction<p_hipEventElapsedTime>("hipEventElapsedTime");
+    f_hipStreamCreate = hipLib->getFunction<p_hipStreamCreate>("hipStreamCreate");
+    f_hipStreamDestroy = hipLib->getFunction<p_hipStreamDestroy>("hipStreamDestroy");
+    f_hipStreamSynchronize = hipLib->getFunction<p_hipStreamSynchronize>("hipStreamSynchronize");
+    f_hipStreamBeginCapture = hipLib->getFunction<p_hipStreamBeginCapture>("hipStreamBeginCapture");
+    f_hipStreamEndCapture = hipLib->getFunction<p_hipStreamEndCapture>("hipStreamEndCapture");
+    f_hipGraphInstantiate = hipLib->getFunction<p_hipGraphInstantiate>("hipGraphInstantiate");
+    f_hipGraphLaunch = hipLib->getFunction<p_hipGraphLaunch>("hipGraphLaunch");
+    f_hipGraphExecDestroy = hipLib->getFunction<p_hipGraphExecDestroy>("hipGraphExecDestroy");
+    f_hipGraphDestroy = hipLib->getFunction<p_hipGraphDestroy>("hipGraphDestroy");
     f_hipFuncGetAttribute = hipLib->getFunction<p_hipFuncGetAttribute>("hipFuncGetAttribute");
 
 #ifdef HAVE_HIPRTC
 #ifdef _WIN32
-    hiprtcLib = std::make_unique<utils::DynamicLibrary>("hiprtc.dll");
-    if (!hiprtcLib->isValid()) {
-      hiprtcLib = std::make_unique<utils::DynamicLibrary>("hiprtc64.dll");
+    std::vector<std::string> rtcCandidates = {
+        "hiprtc0700.dll", "hiprtc0605.dll", "hiprtc0604.dll",
+        "hiprtc0603.dll", "hiprtc0602.dll", "hiprtc_7.dll",
+        "hiprtc_6.dll",   "hiprtc64.dll",   "hiprtc.dll",
+    };
+    if (hipEnv && hipEnv[0] != '\0') {
+      std::string base(hipEnv);
+      rtcCandidates.push_back(base + "/bin/hiprtc0700.dll");
+      rtcCandidates.push_back(base + "/bin/hiprtc0605.dll");
+      rtcCandidates.push_back(base + "/bin/hiprtc64.dll");
+      rtcCandidates.push_back(base + "/bin/hiprtc.dll");
+    }
+    for (const auto &rtcName : rtcCandidates) {
+      hiprtcLib = std::make_unique<utils::DynamicLibrary>(rtcName);
+      if (hiprtcLib && hiprtcLib->isValid()) {
+        break;
+      }
     }
 #else
     hiprtcLib = std::make_unique<utils::DynamicLibrary>("libhiprtc.so.7");
@@ -215,7 +285,7 @@ bool ROCmContext::loadLibraries() {
     }
 #endif
 
-    if (hiprtcLib->isValid()) {
+    if (hiprtcLib && hiprtcLib->isValid()) {
       f_hiprtcCreateProgram =
           hiprtcLib->getFunction<p_hiprtcCreateProgram>("hiprtcCreateProgram");
       f_hiprtcCompileProgram = hiprtcLib->getFunction<p_hiprtcCompileProgram>(
@@ -259,9 +329,15 @@ ROCmContext::ROCmContext(bool verbose)
 
 ROCmContext::~ROCmContext() {
   try {
+    if (m_inBatch) {
+      m_inBatch = false;
+      m_recordedBatch.clear();
+    }
     waitIdle();
   } catch (...) {
   }
+
+  invalidateCachedGraph();
 
   if (f_hipFree) {
     for (ComputeBuffer buf : allocatedBuffers) {
@@ -286,6 +362,11 @@ ROCmContext::~ROCmContext() {
   }
   modules.clear();
 
+  if (batchStream && f_hipStreamDestroy) {
+    (void)f_hipStreamDestroy(batchStream);
+    batchStream = nullptr;
+  }
+
   if (f_hipEventDestroy) {
     if (timingStartEvent) {
       (void)f_hipEventDestroy(timingStartEvent);
@@ -298,25 +379,36 @@ ROCmContext::~ROCmContext() {
   }
 }
 
+void ROCmContext::invalidateCachedGraph() {
+  if (m_cachedGraphExec != nullptr && f_hipGraphExecDestroy) {
+    f_hipGraphExecDestroy(static_cast<hipGraphExec_t>(m_cachedGraphExec));
+  }
+  m_cachedGraphExec = nullptr;
+  m_cachedBatch.clear();
+}
+
 void ROCmContext::enumerateDevices() {
   if (!available)
     return;
 
   int deviceCount = 0;
-  if (f_hipGetDeviceCount(&deviceCount) != hipSuccess) {
+  if (!f_hipGetDeviceCount || f_hipGetDeviceCount(&deviceCount) != hipSuccess) {
     return;
   }
 
   for (int i = 0; i < deviceCount; ++i) {
-    hipDeviceProp_t prop;
-    if (f_hipGetDeviceProperties(&prop, i) == hipSuccess) {
+    hipDeviceProp_t prop{};
+    if (f_hipGetDeviceProperties && f_hipGetDeviceProperties(&prop, i) == hipSuccess) {
       DeviceInfo info;
       info.vendorID = 0x1002;
       info.name = prop.name;
       info.archName = prop.gcnArchName;
+      info.computeUnits = static_cast<uint32_t>(std::max(0, prop.multiProcessorCount));
 
       int runtimeVersion = 0;
-      (void)f_hipRuntimeGetVersion(&runtimeVersion);
+      if (f_hipRuntimeGetVersion) {
+        (void)f_hipRuntimeGetVersion(&runtimeVersion);
+      }
       info.driverVersion = static_cast<uint32_t>(runtimeVersion);
 
       char uuid_str[64];
@@ -352,21 +444,27 @@ void ROCmContext::enumerateDevices() {
       const auto &prof = DeviceDatabase::lookup(info.vendorID, info.deviceID, info.name);
       bool is_rdna4 = (prof.archFamily == "RDNA 4") || (archNameStr.find("gfx12") != std::string::npos);
       bool is_rdna3 = (prof.archFamily == "RDNA 3" || prof.archFamily == "RDNA 3.5") || (archNameStr.find("gfx11") != std::string::npos);
-      bool is_cdna3 = (prof.archFamily == "CDNA 3") || (archNameStr.find("gfx942") != std::string::npos);
+      bool is_cdna2 = (prof.archFamily == "CDNA 2") || (archNameStr.find("gfx90a") != std::string::npos);
+      bool is_cdna3 = (prof.archFamily == "CDNA 3") || (archNameStr.find("gfx94") != std::string::npos);
+      bool is_cdna4 = (prof.archFamily == "CDNA 4") || (archNameStr.find("gfx95") != std::string::npos);
 
-      info.fp8Support = (is_cdna3 || is_rdna4);
-      info.fp6Support = false;
-      // RDNA4 (gfx12) has no FP4 hardware; FP4 arrived with CDNA4 (gfx950).
-      info.fp4Support = false;
+      info.fp8Support = (is_cdna3 || is_cdna4 || is_rdna4);
+      info.fp6Support = is_cdna4;
+      // RDNA4 (gfx12) and CDNA2/3 have no FP4 hardware; FP4/FP6 microscaling arrived with CDNA4 (gfx950).
+      info.fp4Support = is_cdna4;
       info.fp64Support = true;
       info.fp16Support = true;
-      info.bf16Support = (is_cdna3 || is_rdna3 || is_rdna4);
-      info.shaderBfloat16DotProductSupport = (is_cdna3 || is_rdna3 || is_rdna4);
-      info.shaderBfloat16CoopMatrixSupport = (is_cdna3 || is_rdna3 || is_rdna4);
+      info.bf16Support = (is_cdna2 || is_cdna3 || is_cdna4 || is_rdna3 || is_rdna4);
+      // VALU packed BF16 dot2 (v_dot2_f32_bf16 / dot12-insts) exists on RDNA 3/4 and CDNA 4 (gfx950),
+      // whereas CDNA 2/3 (gfx90a / gfx94x) provide BF16 exclusively via Matrix Core MFMA instructions.
+      info.shaderBfloat16DotProductSupport = (is_cdna4 || is_rdna3 || is_rdna4);
+      info.shaderBfloat16CoopMatrixSupport = (is_cdna2 || is_cdna3 || is_cdna4 || is_rdna3 || is_rdna4);
       info.int8Support = true;
-      info.int4Support = is_rdna4;
+      // CDNA 2/3/4 lack iu4 MFMA instructions; RDNA 3/4 expose hardware iu4 WMMA.
+      info.int4Support = (is_rdna3 || is_rdna4);
 
-      info.cooperativeMatrixSupport = (is_cdna3 || is_rdna3 || is_rdna4);
+      info.cooperativeMatrixSupport = (is_cdna2 || is_cdna3 || is_cdna4 || is_rdna3 || is_rdna4);
+      info.structuredSparsitySupport = (is_cdna3 || is_cdna4 || is_rdna4);
       devices.push_back(info);
     }
   }
@@ -387,8 +485,20 @@ void ROCmContext::pickDevice(uint32_t index) {
                              std::string(f_hipGetErrorString(err)));
   }
 
+  invalidateCachedGraph();
+  m_inBatch = false;
+  m_recordedBatch.clear();
+
   device = index;
   selectedDeviceIndex = index;
+
+  if (batchStream && f_hipStreamDestroy) {
+    (void)f_hipStreamDestroy(batchStream);
+    batchStream = nullptr;
+  }
+  if (f_hipStreamCreate) {
+    (void)f_hipStreamCreate(&batchStream);
+  }
 
   if (f_hipEventCreate) {
     if (timingStartEvent && f_hipEventDestroy) {
@@ -450,6 +560,9 @@ ComputeBuffer ROCmContext::createBuffer(size_t size, const void *host_ptr) {
 
 void ROCmContext::writeBuffer(ComputeBuffer buffer, size_t offset, size_t size,
                               const void *host_ptr) {
+  if (m_inBatch) {
+    endBatch();
+  }
   void *device_ptr = static_cast<char *>(buffer) + offset;
   if (f_hipMemcpy(device_ptr, host_ptr, size, hipMemcpyHostToDevice) !=
       hipSuccess) {
@@ -459,6 +572,9 @@ void ROCmContext::writeBuffer(ComputeBuffer buffer, size_t offset, size_t size,
 
 void ROCmContext::readBuffer(ComputeBuffer buffer, size_t offset, size_t size,
                              void *host_ptr) const {
+  if (batchStream && f_hipStreamSynchronize) {
+    (void)f_hipStreamSynchronize(batchStream);
+  }
   const void *device_ptr = static_cast<const char *>(buffer) + offset;
   if (f_hipMemcpy(host_ptr, device_ptr, size, hipMemcpyDeviceToHost) !=
       hipSuccess) {
@@ -468,6 +584,10 @@ void ROCmContext::readBuffer(ComputeBuffer buffer, size_t offset, size_t size,
 
 void ROCmContext::releaseBuffer(ComputeBuffer buffer) {
   if (buffer) {
+    if (m_inBatch) {
+      endBatch();
+    }
+    invalidateCachedGraph();
     allocatedBuffers.erase(buffer);
     if (f_hipFree(buffer) != hipSuccess) {
       std::cerr << "hipFree failed" << std::endl;
@@ -673,6 +793,22 @@ void ROCmContext::dispatch(ComputeKernel kernel, uint32_t grid_x,
     throw std::runtime_error("Invalid kernel handle");
   }
 
+  lastDispatchedKernel = kernel;
+
+  if (m_inBatch) {
+    RecordedDispatch rec;
+    rec.function = it->second.function;
+    rec.gridX = grid_x;
+    rec.gridY = grid_y;
+    rec.gridZ = grid_z;
+    rec.blockX = block_x;
+    rec.blockY = block_y;
+    rec.blockZ = block_z;
+    rec.args = it->second.args;
+    m_recordedBatch.push_back(std::move(rec));
+    return;
+  }
+
   std::vector<void *> arg_pointers;
   if (!it->second.args.empty()) {
     arg_pointers.resize(it->second.args.rbegin()->first + 1, nullptr);
@@ -681,10 +817,10 @@ void ROCmContext::dispatch(ComputeKernel kernel, uint32_t grid_x,
     }
   }
 
-  lastDispatchedKernel = kernel;
-
+  m_timingWindowHasLaunched = true;
+  hipStream_t targetStream = batchStream ? batchStream : nullptr;
   if (f_hipModuleLaunchKernel(it->second.function, grid_x, grid_y, grid_z,
-                              block_x, block_y, block_z, 0, nullptr,
+                              block_x, block_y, block_z, 0, targetStream,
                               arg_pointers.data(), nullptr) != hipSuccess) {
     throw std::runtime_error("Failed to launch kernel");
   }
@@ -719,14 +855,27 @@ KernelResourceUsage ROCmContext::getKernelResourceUsage(ComputeKernel kernel) co
   }
 
   if (usage.vgprCount > 0) {
-    // AMD RDNA architecture SIMD32 budget (1536 physical VGPRs per SIMD32, max 16 waves)
-    usage.maxWavesPerSimd = std::min(16u, 1536u / usage.vgprCount);
+    const bool isWave64 =
+        (selectedDeviceIndex >= 0 &&
+         selectedDeviceIndex < static_cast<int>(devices.size()) &&
+         devices[selectedDeviceIndex].subgroupSize == 64u);
+    if (isWave64) {
+      // CDNA SIMD64 ArchVGPR budget (512 ArchVGPRs per SIMD, max 8 waves)
+      usage.maxWavesPerSimd = std::min(8u, 512u / usage.vgprCount);
+    } else {
+      // RDNA SIMD32 physical VGPR budget (1536 VGPRs per SIMD32, max 16 waves)
+      usage.maxWavesPerSimd = std::min(16u, 1536u / usage.vgprCount);
+    }
   }
 
   return usage;
 }
 
 void ROCmContext::releaseKernel(ComputeKernel kernel) {
+  if (m_inBatch) {
+    endBatch();
+  }
+  invalidateCachedGraph();
   if (lastDispatchedKernel == kernel) {
     lastDispatchedKernel = nullptr;
   }
@@ -738,7 +887,16 @@ void ROCmContext::releaseKernel(ComputeKernel kernel) {
 }
 
 void ROCmContext::waitIdle() {
-  if (available && f_hipDeviceSynchronize() != hipSuccess) {
+  if (!available) {
+    return;
+  }
+  if (m_inBatch) {
+    endBatch();
+  }
+  if (batchStream && f_hipStreamSynchronize) {
+    (void)f_hipStreamSynchronize(batchStream);
+  }
+  if (f_hipDeviceSynchronize() != hipSuccess) {
     throw std::runtime_error("hipDeviceSynchronize failed");
   }
 }
@@ -786,23 +944,133 @@ void ROCmContext::printProgressBar(uint32_t current, uint32_t total,
             << (current == total ? "\n" : "") << std::flush;
 }
 
+void ROCmContext::beginBatch(uint32_t expected_dispatches,
+                             bool /*inter_dispatch_barrier*/) {
+  if (!available || m_inBatch) {
+    return;
+  }
+  m_inBatch = true;
+  m_recordedBatch.clear();
+  if (expected_dispatches > 0) {
+    m_recordedBatch.reserve(expected_dispatches);
+  }
+}
+
+void ROCmContext::endBatch() {
+  if (!m_inBatch) {
+    return;
+  }
+  m_inBatch = false;
+
+  if (m_recordedBatch.empty()) {
+    return;
+  }
+
+  std::vector<RecordedDispatch> batch;
+  batch.swap(m_recordedBatch);
+
+  hipStream_t targetStream = batchStream ? batchStream : nullptr;
+
+  auto launchDirect = [&](hipStream_t st) -> bool {
+    for (auto &rec : batch) {
+      std::vector<void *> argPtrs;
+      if (!rec.args.empty()) {
+        argPtrs.resize(rec.args.rbegin()->first + 1, nullptr);
+        for (auto &[key, val] : rec.args) {
+          argPtrs[key] = static_cast<void *>(val.data());
+        }
+      }
+      if (f_hipModuleLaunchKernel(rec.function, rec.gridX, rec.gridY, rec.gridZ,
+                                  rec.blockX, rec.blockY, rec.blockZ, 0, st,
+                                  argPtrs.data(), nullptr) != hipSuccess) {
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const bool canUseGraph =
+      (batch.size() > 1 && batchStream != nullptr &&
+       f_hipStreamBeginCapture != nullptr && f_hipStreamEndCapture != nullptr &&
+       f_hipGraphInstantiate != nullptr && f_hipGraphLaunch != nullptr &&
+       f_hipGraphExecDestroy != nullptr && f_hipGraphDestroy != nullptr);
+
+  if (canUseGraph) {
+    if (m_cachedGraphExec == nullptr || m_cachedBatch != batch) {
+      invalidateCachedGraph();
+      if (f_hipStreamBeginCapture(batchStream, hipStreamCaptureModeRelaxed) ==
+          hipSuccess) {
+        const bool capturedOk = launchDirect(batchStream);
+        hipGraph_t graph = nullptr;
+        const hipError_t endErr = f_hipStreamEndCapture(batchStream, &graph);
+        if (capturedOk && endErr == hipSuccess && graph != nullptr) {
+          hipGraphExec_t exec = nullptr;
+          if (f_hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0) ==
+                  hipSuccess &&
+              exec != nullptr) {
+            m_cachedGraphExec = exec;
+            m_cachedBatch = batch;
+          }
+          f_hipGraphDestroy(graph);
+        } else if (graph != nullptr) {
+          f_hipGraphDestroy(graph);
+        }
+      }
+    }
+
+    if (m_cachedGraphExec != nullptr) {
+      if (isTimingActive && !m_timingWindowHasLaunched && timingStartEvent &&
+          f_hipEventRecord) {
+        // Re-record start event prior to the first launch in this timing window
+        // so graph capture/instantiation CPU overhead is excluded from GPU time.
+        (void)f_hipEventRecord(timingStartEvent, batchStream);
+      }
+      m_timingWindowHasLaunched = true;
+      if (f_hipGraphLaunch(static_cast<hipGraphExec_t>(m_cachedGraphExec),
+                           batchStream) == hipSuccess) {
+        return;
+      }
+      // If hipGraphLaunch fails at runtime, invalidate and fall back to direct
+      // stream execution so zero dispatches are ever silently lost.
+      invalidateCachedGraph();
+    }
+  }
+
+  if (isTimingActive && !m_timingWindowHasLaunched && timingStartEvent &&
+      f_hipEventRecord) {
+    (void)f_hipEventRecord(timingStartEvent, targetStream);
+  }
+  m_timingWindowHasLaunched = true;
+  if (!launchDirect(targetStream)) {
+    throw std::runtime_error("Failed to launch batched HIP kernel(s)");
+  }
+}
+
 void ROCmContext::startTiming() {
   if (!timingSupported || !timingStartEvent || !f_hipEventRecord) {
     return;
   }
   waitIdle();
-  hipError_t err = f_hipEventRecord(timingStartEvent, 0);
+  m_timingWindowHasLaunched = false;
+  hipStream_t targetStream = batchStream ? batchStream : nullptr;
+  hipError_t err = f_hipEventRecord(timingStartEvent, targetStream);
   isTimingActive = (err == hipSuccess);
 }
 
 double ROCmContext::stopTiming() {
+  if (m_inBatch) {
+    endBatch();
+  }
   if (!isTimingActive || !timingSupported || !timingStopEvent || !f_hipEventRecord ||
       !f_hipEventElapsedTime) {
     isTimingActive = false;
+    m_timingWindowHasLaunched = false;
     return 0.0;
   }
   isTimingActive = false;
-  hipError_t err = f_hipEventRecord(timingStopEvent, 0);
+  m_timingWindowHasLaunched = false;
+  hipStream_t targetStream = batchStream ? batchStream : nullptr;
+  hipError_t err = f_hipEventRecord(timingStopEvent, targetStream);
   if (err != hipSuccess) {
     return 0.0;
   }

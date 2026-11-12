@@ -24,14 +24,14 @@ TEST_CASE(DeviceDatabase, NpuNotConflatedWithGpu) {
 }
 
 TEST_CASE(DeviceDatabase, Navi48ArchitectureSeparation) {
-  // R9700 (54 CUs cut-down Navi 48)
+  // R9700 (64 CUs / 4,096 SPs Navi 48 workstation SKU, 47.8 TFLOPS FP32)
   const auto r9700 = DeviceDatabase::lookup(0x1002, 0x7551);
   ASSERT_EQ(r9700.archName, "gfx1201 (RDNA 4)");
   ASSERT_EQ(r9700.archFamily, "RDNA 4");
   ASSERT_FALSE(r9700.isApu);
   // Verify 64 MB Infinity Cache (Navi 48 specification: 4x 16 MB MALL slices = 64 MB)
   ASSERT_EQ(r9700.l3CacheBytes, 64u * 1024u * 1024u);
-  ASSERT_NEAR(r9700.theoreticalFp32Tflops, 41.06, 0.5);
+  ASSERT_NEAR(r9700.theoreticalFp32Tflops, 47.80, 0.5);
 
   // RX 9070 XT (Full 64 CUs Navi 48)
   const auto rx9070xt = DeviceDatabase::lookup(0x1002, 0x7550);

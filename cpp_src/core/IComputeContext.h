@@ -40,6 +40,7 @@ struct DeviceInfo {
   uint32_t maxComputeWorkGroupCountZ = 0;
   uint32_t maxComputeSharedMemorySize = 0;
   uint32_t subgroupSize = 0;
+  uint32_t computeUnits = 0;
   uint32_t l1CacheSize = 0;
   uint32_t l2CacheSize = 0;
   uint32_t l3CacheSize = 0;
@@ -55,11 +56,17 @@ struct DeviceInfo {
   bool int4Support = false;
   bool cooperativeMatrixSupport = false;
   bool structuredSparsitySupport = false;
+  bool cooperativeVectorSupport = false;
   bool rayTracingSupport = false;
+  bool opacityMicromapSupport = false;
   bool serSupported = false;
   bool dgcSupported = false;
   bool workGraphsSupported = false;
   bool performanceQuerySupported = false;
+  bool dedicatedAsyncComputeQueue = false;
+  bool dedicatedTransferQueue = false;
+  bool rebarSupported = false;
+  uint64_t rebarSizeBytes = 0;
   uint32_t vendorID = 0;
   uint32_t deviceID = 0;
   uint32_t apiVersion = 0;
@@ -162,6 +169,12 @@ public:
   virtual ComputeKernel createKernel(const std::string &file_name,
                                      const std::string &kernel_name,
                                      uint32_t num_args) = 0;
+  virtual ComputeKernel createKernelWithSpecConstants(
+      const std::string &file_name, const std::string &kernel_name,
+      uint32_t num_args, const std::vector<uint32_t> &spec_uints) {
+    (void)spec_uints;
+    return createKernel(file_name, kernel_name, num_args);
+  }
 
   // Create an RT pipeline from multiple shaders (raygen, miss, closest hits)
   virtual ComputeKernel createRTPipeline(
@@ -187,7 +200,8 @@ public:
   virtual void waitIdle() = 0;
 
   // Command buffer batching for short compute microbenchmarks (Optimization O-2)
-  virtual void beginBatch(uint32_t /*expected_dispatches*/ = 0) {}
+  virtual void beginBatch(uint32_t /*expected_dispatches*/ = 0,
+                          bool /*inter_dispatch_barrier*/ = false) {}
   virtual void endBatch() {}
   virtual bool isBatching() const { return false; }
 

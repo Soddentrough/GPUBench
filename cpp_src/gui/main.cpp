@@ -1,5 +1,7 @@
 #include "VulkanContext.h"
 #include "GuiApp.h"
+
+#include <CLI11.hpp>
 #include <implot.h>
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
@@ -9,11 +11,16 @@
 #include <io.h>
 #endif
 
-#include <iostream>
-#include <string>
-#include <sstream>
 #include <algorithm>
 #include <cctype>
+#include <iostream>
+#include <sstream>
+#include <string>
+#include <vector>
+
+#ifndef GPUBENCH_VERSION
+#error "GPUBENCH_VERSION must be defined by the build system"
+#endif
 
 int main(int argc, char** argv) {
 #ifdef _WIN32
@@ -37,143 +44,148 @@ int main(int argc, char** argv) {
     std::cout.clear();
     std::cerr.clear();
 #endif
+
+    CLI::App cli{"GPUBench GUI - Workstation GPU Microarchitecture & Roofline Profiler", "gpubench-gui"};
+    cli.set_version_flag("-v,--version", std::string("GPUBench GUI v") + GPUBENCH_VERSION);
+
+    std::string deviceOpt;
+    std::string preselectedBackend;
+    std::string benchmarkOpt;
+    std::string testOpt;
+    std::string groupOpt;
+    std::string preselectedScene;
+    std::string resolutionOpt;
+    std::string importJsonPath;
+    std::string compareJsonPath;
+    std::string outputJsonPath;
+    std::string screenshotPath;
+    float uiScaleOverride = 0.0f;
     int maxFrames = -1;
-    std::vector<int> preselectedDevices;
-    std::string preselectedBackend = "";
-    std::string preselectedTest = "";
-    std::string preselectedScene = "";
     bool autoRun = false;
     bool exitOnComplete = false;
-    float uiScaleOverride = 0.0f;
-    uint32_t preselectedWidth = 0;
-    uint32_t preselectedHeight = 0;
-    bool dumpRendersFlagSet = false;
-    bool dumpRendersVal = false;
+    bool dumpRenders = false;
+    bool noDumpRenders = false;
     bool verboseMode = false;
     bool debugMode = false;
 
-#ifndef GPUBENCH_VERSION
-#error "GPUBENCH_VERSION must be defined by the build system"
-#endif
+    cli.add_option("-d,--device", deviceOpt, "Pre-select GPU index (e.g. 0, 1, 0,1, dual, or all)");
+    cli.add_option("-k,--backend", preselectedBackend, "Pre-select compute backend (vulkan, rocm, opencl, auto)");
+    cli.add_option("-b,--benchmark,--benchmarks", benchmarkOpt, "Pre-select benchmark(s) or comma-separated list");
+    cli.add_option("-t,--test", testOpt, "Alias for --benchmark");
+    cli.add_option("-g,--group,--groups", groupOpt, "Pre-select benchmark category (compute, memory, raytracing, scheduling, graphics, system, all)");
+    cli.add_option("-s,--scene", preselectedScene, "Pre-select Ray Tracing scene (indoor, forest, outdoor, showroom, all)");
+    cli.add_option("-r,--res,--resolution", resolutionOpt, "Pre-select render resolution (720p, 1080p, 1440p, 4k, 8k, auto, or WxH)");
+    cli.add_option("-i,--import", importJsonPath, "Import a unified CLI/GUI JSON session file on startup");
+    cli.add_option("--compare", compareJsonPath, "Load a unified CLI/GUI JSON file as comparison baseline");
+    cli.add_option("-o,--output", outputJsonPath, "Export unified v2.0 JSON results to path upon completion");
+    cli.add_flag("--dump-renders,--dump", dumpRenders, "Enable saving rendered scene PNGs to disk");
+    cli.add_flag("--no-dump-renders,--no-dump", noDumpRenders, "Disable saving rendered scene PNGs to disk (uses GPU SharedPreviewImages)");
+    cli.add_flag("--auto-run,--auto-start,--run", autoRun, "Automatically start benchmarks upon launch");
+    cli.add_flag("--exit-on-complete", exitOnComplete, "Exit automatically when benchmark run finishes");
+    cli.add_option("--frames", maxFrames, "Run for specified number of frames and exit");
+    cli.add_option("--screenshot", screenshotPath, "Save rendered GUI window PNG before exit");
+    cli.add_option("--ui-scale,--scale", uiScaleOverride, "UI scaling factor (e.g. 1.0, 1.5, 2.0)");
+    cli.add_flag("--verbose", verboseMode, "Enable verbose logging output");
+    cli.add_flag("--debug", debugMode, "Enable Vulkan Khronos Validation Layers");
 
-    for (int i = 1; i < argc; ++i) {
-        std::string arg = argv[i];
-        if (arg == "--version" || arg == "-v") {
-            std::cout << "GPUBench GUI v" << GPUBENCH_VERSION << std::endl;
-            return 0;
-        } else if (arg == "--help" || arg == "-h") {
-            std::cout << "Usage: gpubench-gui [options]\n\n"
-                      << "Options:\n"
-                      << "  -d, --device <index>       Pre-select GPU index (e.g. 0, 1, 0,1, or dual/all)\n"
-                      << "  -k, --backend <name>       Pre-select backend (vulkan, rocm, opencl, auto)\n"
-                      << "  -b, --benchmark <name>     Pre-select a specific benchmark or comma-separated list\n"
-                      << "  -t, --test <name>          Alias for --benchmark\n"
-                      << "  -g, --group <name>         Pre-select a benchmark category (compute, memory, rt, graphics, system, all)\n"
-                      << "  -s, --scene <name>         Pre-select Ray Tracing scene (indoor, forest, outdoor, showroom)\n"
-                      << "  -r, --res <preset|WxH>     Pre-select render resolution (720p, 1080p, 1440p, 4k, 8k)\n"
-                      << "      --dump-renders, --dump Enable saving rendered output images to disk\n"
-                      << "      --no-dump-renders      Disable saving rendered output images to disk\n"
-                      << "      --auto-run, --auto-start Automatically start benchmarks upon launch\n"
-                      << "      --exit-on-complete     Exit automatically when benchmark run finishes\n"
-                      << "      --frames <count>       Run for specified number of frames and exit\n"
-                      << "      --ui-scale <scale>     UI scaling factor (default: auto-detected from DPI, e.g. 1.0, 1.5, 2.0, 2.5)\n"
-                      << "      --verbose              Enable verbose logging output\n"
-                      << "      --debug                Enable debug logging output\n"
-                      << "  -h, --help                 Display this help message\n"
-                      << "  -v, --version              Display version information\n\n";
-            return 0;
-        } else if ((arg == "-d" || arg == "--device") && i + 1 < argc) {
-            std::string dStr = argv[++i];
-            if (dStr == "all" || dStr == "dual" || dStr == "0,1") {
-                preselectedDevices = {0, 1};
-            } else {
-                try {
-                    preselectedDevices.push_back(static_cast<int>(std::stoi(dStr)));
-                } catch (...) {}
-            }
-        } else if ((arg == "-k" || arg == "--backend") && i + 1 < argc) {
-            preselectedBackend = argv[++i];
-        } else if ((arg == "-b" || arg == "--benchmark" || arg == "--benchmarks") && i + 1 < argc) {
-            std::string val = argv[++i];
-            std::string valLower = val;
-            std::transform(valLower.begin(), valLower.end(), valLower.begin(), ::tolower);
-            if (valLower == "vulkan" || valLower == "rocm" || valLower == "hip" || valLower == "opencl" || valLower == "cl" || valLower == "auto") {
-                preselectedBackend = val;
-            } else {
-                preselectedTest = val;
-            }
-        } else if ((arg == "-t" || arg == "--test" || arg == "-g" || arg == "--group" || arg == "--groups") && i + 1 < argc) {
-            preselectedTest = argv[++i];
-        } else if ((arg == "-s" || arg == "--scene") && i + 1 < argc) {
-            preselectedScene = argv[++i];
-        } else if (arg == "--auto-run" || arg == "--auto-start" || arg == "--run") {
-            autoRun = true;
-        } else if (arg == "--exit-on-complete") {
-            exitOnComplete = true;
-        } else if (arg == "--frames" && i + 1 < argc) {
-            try {
-                maxFrames = std::stoi(argv[++i]);
-            } catch (...) {}
-        } else if ((arg == "--ui-scale" || arg == "--scale") && i + 1 < argc) {
-            try {
-                uiScaleOverride = std::stof(argv[++i]);
-            } catch (...) {}
-        } else if ((arg == "-r" || arg == "--res" || arg == "--resolution") && i + 1 < argc) {
-            std::string resStr = argv[++i];
-            std::string rLower = resStr;
-            std::transform(rLower.begin(), rLower.end(), rLower.begin(), ::tolower);
-            if (rLower == "720p" || rLower == "hd") {
-                preselectedWidth = 1280; preselectedHeight = 720;
-            } else if (rLower == "1080p" || rLower == "fhd") {
-                preselectedWidth = 1920; preselectedHeight = 1080;
-            } else if (rLower == "1440p" || rLower == "2k" || rLower == "qhd") {
-                preselectedWidth = 2560; preselectedHeight = 1440;
-            } else if (rLower == "4k" || rLower == "uhd" || rLower == "2160p") {
-                preselectedWidth = 3840; preselectedHeight = 2160;
-            } else if (rLower == "8k" || rLower == "4320p") {
-                preselectedWidth = 7680; preselectedHeight = 4320;
-            } else {
-                size_t xPos = rLower.find('x');
-                if (xPos != std::string::npos) {
+    CLI11_PARSE(cli, argc, argv);
+
+    bool selectAllGpus = false;
+    std::vector<int> preselectedDevices;
+    if (!deviceOpt.empty()) {
+        std::string dLower = deviceOpt;
+        std::transform(dLower.begin(), dLower.end(), dLower.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        if (dLower == "all") {
+            selectAllGpus = true;
+        } else if (dLower == "dual") {
+            preselectedDevices = {0, 1};
+        } else {
+            std::stringstream dss(deviceOpt);
+            std::string tok;
+            while (std::getline(dss, tok, ',')) {
+                if (!tok.empty()) {
                     try {
-                        preselectedWidth = static_cast<uint32_t>(std::stoul(rLower.substr(0, xPos)));
-                        preselectedHeight = static_cast<uint32_t>(std::stoul(rLower.substr(xPos + 1)));
+                        preselectedDevices.push_back(static_cast<int>(std::stoi(tok)));
                     } catch (...) {}
                 }
             }
-        } else if (arg == "--dump-renders" || arg == "--dump") {
-            dumpRendersFlagSet = true;
-            dumpRendersVal = true;
-        } else if (arg == "--no-dump-renders" || arg == "--no-dump") {
-            dumpRendersFlagSet = true;
-            dumpRendersVal = false;
-        } else if (arg == "--verbose") {
-            verboseMode = true;
-        } else if (arg == "--debug") {
-            debugMode = true;
         }
     }
-    (void)verboseMode;
-    (void)debugMode;
+
+    std::string preselectedTest = benchmarkOpt;
+    if (!preselectedTest.empty()) {
+        std::string valLower = preselectedTest;
+        std::transform(valLower.begin(), valLower.end(), valLower.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        if (valLower == "vulkan" || valLower == "rocm" || valLower == "hip" ||
+            valLower == "opencl" || valLower == "cl" || valLower == "auto") {
+            preselectedBackend = preselectedTest;
+            preselectedTest.clear();
+        }
+    }
+    if (preselectedTest.empty() && !testOpt.empty()) preselectedTest = testOpt;
+    if (preselectedTest.empty() && !groupOpt.empty()) preselectedTest = groupOpt;
+
+    bool autoResolution = false;
+    uint32_t preselectedWidth = 0;
+    uint32_t preselectedHeight = 0;
+    if (!resolutionOpt.empty()) {
+        std::string rLower = resolutionOpt;
+        std::transform(rLower.begin(), rLower.end(), rLower.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        if (rLower == "auto") {
+            autoResolution = true;
+        } else if (rLower == "720p" || rLower == "hd") {
+            preselectedWidth = 1280; preselectedHeight = 720;
+        } else if (rLower == "1080p" || rLower == "fhd") {
+            preselectedWidth = 1920; preselectedHeight = 1080;
+        } else if (rLower == "1440p" || rLower == "2k" || rLower == "qhd") {
+            preselectedWidth = 2560; preselectedHeight = 1440;
+        } else if (rLower == "4k" || rLower == "uhd" || rLower == "2160p") {
+            preselectedWidth = 3840; preselectedHeight = 2160;
+        } else if (rLower == "8k" || rLower == "4320p") {
+            preselectedWidth = 7680; preselectedHeight = 4320;
+        } else {
+            size_t xPos = rLower.find('x');
+            if (xPos != std::string::npos) {
+                try {
+                    preselectedWidth = static_cast<uint32_t>(std::stoul(rLower.substr(0, xPos)));
+                    preselectedHeight = static_cast<uint32_t>(std::stoul(rLower.substr(xPos + 1)));
+                } catch (...) {}
+            }
+        }
+    }
+
+    int preferredGuiDeviceIndex = (!preselectedDevices.empty() && preselectedDevices[0] >= 0)
+        ? preselectedDevices[0]
+        : -1;
 
     gpubench::gui::VulkanContext vulkanContext;
     std::string winTitle = std::string("GPUBench v") + GPUBENCH_VERSION + " - Workstation GPU Profiler";
-    if (!vulkanContext.init(winTitle.c_str(), 1760, 1000, uiScaleOverride)) {
-        std::cerr << "Failed to initialize Vulkan GUI context!" << std::endl;
+    if (!vulkanContext.init(winTitle.c_str(), 1760, 1000, uiScaleOverride,
+                            verboseMode, debugMode, preferredGuiDeviceIndex)) {
+        std::cerr << "Failed to initialize Vulkan 1.4 GUI context!" << std::endl;
         return 1;
     }
+
     float effectiveScale = vulkanContext.getDisplayScale();
     int curW = 0, curH = 0;
     SDL_GetWindowSize(vulkanContext.getWindow(), &curW, &curH);
-    std::cout << "[GPUBench GUI] Initialized. Video driver: " << (SDL_GetCurrentVideoDriver() ? SDL_GetCurrentVideoDriver() : "null")
+    std::cout << "[GPUBench GUI] Initialized (Shared Vulkan 1.4 Device #" << vulkanContext.getActiveDeviceIndex()
+              << "). Video driver: " << (SDL_GetCurrentVideoDriver() ? SDL_GetCurrentVideoDriver() : "null")
               << " | Display scale: " << effectiveScale << "x | Window: " << curW << "x" << curH << std::endl;
 
-    // Initialize ImPlot Context
     ImPlot::CreateContext();
 
     gpubench::gui::GuiApp app;
+    app.setVerbose(verboseMode);
+    app.setDebug(debugMode);
     app.init(&vulkanContext, effectiveScale);
-    if (!preselectedDevices.empty()) {
+
+    if (selectAllGpus) {
+        app.selectAllGpus();
+    } else if (!preselectedDevices.empty()) {
         app.setSelectedDevices(preselectedDevices);
     }
     if (!preselectedBackend.empty()) {
@@ -185,16 +197,27 @@ int main(int argc, char** argv) {
     if (!preselectedTest.empty()) {
         app.selectOnlyBenchmark(preselectedTest);
     }
-    if (preselectedWidth > 0 && preselectedHeight > 0) {
+    if (autoResolution) {
+        app.applyAutoRenderResolution();
+    } else if (preselectedWidth > 0 && preselectedHeight > 0) {
         app.setRenderResolution(preselectedWidth, preselectedHeight);
     }
-    if (dumpRendersFlagSet) {
-        app.setDumpRenders(dumpRendersVal);
+    if (noDumpRenders) {
+        app.setDumpRenders(false);
+    } else if (dumpRenders) {
+        app.setDumpRenders(true);
+    }
+    if (!importJsonPath.empty()) {
+        app.importResultsFromJson(importJsonPath);
+    }
+    if (!compareJsonPath.empty()) {
+        app.loadComparisonFromJson(compareJsonPath);
     }
     if (autoRun) {
         app.startBenchmarks();
     }
 
+    bool exportedOnComplete = false;
     int frameCount = 0;
     bool running = true;
     auto processEvent = [&](const SDL_Event& ev) {
@@ -226,13 +249,31 @@ int main(int argc, char** argv) {
             SDL_Delay(2);
         }
 
-        if (exitOnComplete && app.getExecutionState() == gpubench::gui::ExecutionState::Completed) {
-            running = false;
+        if (app.getExecutionState() == gpubench::gui::ExecutionState::Completed) {
+            if (!outputJsonPath.empty() && !exportedOnComplete) {
+                app.exportResultsToJson(outputJsonPath);
+                exportedOnComplete = true;
+            }
+            if (exitOnComplete) {
+                // Render one more frame after completion so screenshots/UI reflect completed Scorecard
+                vulkanContext.beginFrame();
+                app.updateAndRender();
+                vulkanContext.endFrame();
+                running = false;
+            }
         }
 
         frameCount++;
         if (maxFrames > 0 && frameCount >= maxFrames) {
             running = false;
+        }
+    }
+
+    if (!screenshotPath.empty()) {
+        if (vulkanContext.saveScreenshot(screenshotPath)) {
+            std::cout << "[GPUBench GUI] Saved screenshot to " << screenshotPath << std::endl;
+        } else {
+            std::cerr << "[GPUBench GUI] Failed to save screenshot to " << screenshotPath << std::endl;
         }
     }
 

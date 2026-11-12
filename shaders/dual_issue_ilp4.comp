@@ -1,4 +1,5 @@
 #version 460
+#extension GL_KHR_shader_subgroup_ballot : enable
 // GPUBench Dual-Issue & Concurrency Benchmark Suite
 // Config 0: Standard FP32 (Single-Issue Baseline)
 // Evaluates single-issue saturation where a strict sequential scalar dependency
@@ -25,12 +26,12 @@ void main() {
     float base = uintBitsToFloat((floatBitsToUint(InOutBuffer.data[index]) & 0x007FFFFFu) | 0x3F800000u);
     float val0 = base;
     float val1 = base + 0.1;
-    float m = pushConstants.multiplier * 0.00001;
+    float m = pushConstants.multiplier;
 
     // 131072 iterations * 2 scalar FMAs = 131072 * 4 = 524,288 FP32 operations
     for (int i = 0; i < 131072; ++i) {
-        val0 = fma(val0, m, val1);
-        val1 = fma(val1, m, val0);
+        val0 = fma(m, val0, val1);
+        val1 = fma(m, val1, val0);
     }
 
     InOutBuffer.data[index] = val0 + val1;

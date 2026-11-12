@@ -11,6 +11,7 @@
 #include "benchmarks/Fp4Bench.h"
 #include "benchmarks/Int8Bench.h"
 #include "benchmarks/Int4Bench.h"
+#include "benchmarks/CacheBench.h"
 #include "benchmarks/CacheLatencyCurveBench.h"
 #include "benchmarks/PixelFillRateBench.h"
 #include "benchmarks/SysMemBandwidthBench.h"
@@ -21,6 +22,7 @@
 #include "benchmarks/RayAnyHitBench.h"
 #include "benchmarks/RayProceduralBench.h"
 #include "benchmarks/RayDivergenceBench.h"
+#include "benchmarks/RayPayloadBench.h"
 #include "benchmarks/RaySchedulingBench.h"
 
 #include <filesystem>
@@ -58,16 +60,17 @@ TEST_CASE(DescriptionsAndThumbnails, QuantizedAndFloatPrecisionConfigs) {
   ASSERT_EQ(fp8.GetNumConfigs(), 1u);
   ASSERT_EQ(fp8.GetConfigName(0), "Matrix");
 
-  // FP6: Vector only (0)
+  // FP6: Matrix only (0) — native OCP MXFP6 cooperative matrix / MFMA
   Fp6Bench fp6;
   ASSERT_EQ(fp6.GetNumConfigs(), 1u);
-  ASSERT_EQ(std::string(fp6.GetMetric()), "TOPS");
+  ASSERT_EQ(fp6.GetConfigName(0), "Matrix");
+  ASSERT_EQ(std::string(fp6.GetMetric()), "TFLOPS");
 
-  // FP4: Vector only (0)
+  // FP4: Matrix only (0) — native OCP MXFP4 cooperative matrix / MFMA
   Fp4Bench fp4;
   ASSERT_EQ(fp4.GetNumConfigs(), 1u);
-  ASSERT_EQ(fp4.GetConfigName(0), "Vector");
-  ASSERT_EQ(std::string(fp4.GetMetric()), "TOPS");
+  ASSERT_EQ(fp4.GetConfigName(0), "Matrix");
+  ASSERT_EQ(std::string(fp4.GetMetric()), "TFLOPS");
 
   // INT8: Vector (0), Matrix (1)
   Int8Bench int8;
@@ -160,6 +163,13 @@ TEST_CASE(DescriptionsAndThumbnails, RayHardwareTraversalAndDivergenceConfigs) {
   ASSERT_EQ(div.GetConfigName(2), "Bounce Divergence: Brushed Metal (r=0.5, 45° Spread)");
   ASSERT_EQ(div.GetConfigName(3), "Bounce Divergence: Glossy Coat (r=0.25, 22.5° Spread)");
   ASSERT_EQ(div.GetConfigName(4), "Bounce Divergence: Mirror Reflection (r=0.0, 0° Coherent)");
+
+  RayPayloadBench payload;
+  ASSERT_EQ(payload.GetNumConfigs(), 3u);
+  ASSERT_EQ(std::string(payload.GetMetric()), "MRays/s");
+  ASSERT_EQ(payload.GetConfigName(0), "16B Payload (Shadow / AO Visibility Probe)");
+  ASSERT_EQ(payload.GetConfigName(1), "128B Payload (Real-Time Path Tracing & GI)");
+  ASSERT_EQ(payload.GetConfigName(2), "256B Payload (Production / Film BSDF & MIS)");
 }
 
 TEST_CASE(DescriptionsAndThumbnails, RasterizerAndMemoryConfigs) {
@@ -168,6 +178,11 @@ TEST_CASE(DescriptionsAndThumbnails, RasterizerAndMemoryConfigs) {
   ASSERT_EQ(rop.GetConfigName(0), "RGBA8 Color Fill");
   ASSERT_EQ(rop.GetConfigName(1), "RGBA16F HDR Fill");
   ASSERT_EQ(rop.GetConfigName(2), "Alpha Blending Fill");
+
+  CacheBench l0bw("L0 Vector Cache Bandwidth (16 KB)", "GB/s", 16 * 1024,
+                  "cache_bw_robust", {}, {"l0b", "cachebw"}, 0);
+  ASSERT_EQ(std::string(l0bw.GetMetric()), "GB/s");
+  ASSERT_EQ(std::string(l0bw.GetSubCategory()), "Cache Bandwidth");
 
   CacheLatencyCurveBench curve;
   ASSERT_EQ(curve.GetNumConfigs(), 15u);

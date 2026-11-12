@@ -99,7 +99,14 @@ void RayIntersectBench::Setup(IComputeContext &context,
 
   std::filesystem::path kdir(kernel_dir);
   std::filesystem::path kernel_file = kdir / "vulkan" / "rt_benchmark.comp";
-  kernel = context.createKernel(kernel_file.string(), "main", 2);
+  kernels[0] = context.createKernel(kernel_file.string(), "main", 2);
+  kernels[1] = context.createKernel(kernel_file.string(), "main", 2);
+  kernel = kernels[0];
+
+  vContext->setKernelAS(kernels[0], 0, (AccelerationStructure)triangleTlas);
+  vContext->setKernelArg(kernels[0], 1, resultBuffer);
+  vContext->setKernelAS(kernels[1], 0, (AccelerationStructure)boxTlas);
+  vContext->setKernelArg(kernels[1], 1, resultBuffer);
 }
 
 void RayIntersectBench::buildAS() {
@@ -353,23 +360,26 @@ void RayIntersectBench::buildAS() {
 }
 
 void RayIntersectBench::Run(uint32_t config_idx) {
+  if (config_idx >= 2 || !kernels[config_idx]) {
+    return;
+  }
   VulkanContext *vContext = static_cast<VulkanContext *>(context);
-  if (lastRunConfig != static_cast<int>(config_idx)) {
+  if (lastRunConfig != -1 && lastRunConfig != static_cast<int>(config_idx)) {
     std::vector<uint32_t> zeroHits(1024, 0);
     context->writeBuffer(resultBuffer, 0, zeroHits.size() * sizeof(uint32_t), zeroHits.data());
-    lastRunConfig = static_cast<int>(config_idx);
   }
-  VkAccelerationStructureKHR activeTlas =
-      (config_idx == 0) ? triangleTlas : boxTlas;
+  lastRunConfig = static_cast<int>(config_idx);
 
-  vContext->setKernelAS(kernel, 0, (AccelerationStructure)activeTlas);
-  vContext->setKernelArg(kernel, 1, resultBuffer);
-
+  ComputeKernel activeKernel = kernels[config_idx];
   uint32_t testMode = config_idx; // 0 for triangle, 1 for box
-  vContext->setKernelArg(kernel, 2, sizeof(uint32_t), &rayCount);
-  vContext->setKernelArg(kernel, 3, sizeof(uint32_t), &testMode);
+  vContext->setKernelArg(activeKernel, 2, sizeof(uint32_t), &rayCount);
+  vContext->setKernelArg(activeKernel, 3, sizeof(uint32_t), &testMode);
 
-  vContext->dispatch(kernel, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
+  // 2D grid (62500 x 64 = 4,000,000 workgroups * 32 threads = 128,000,000 rays) stays strictly <= 65535
+  uint32_t totalWg = (rayCount + 31u) / 32u;
+  uint32_t gridY = 64u;
+  uint32_t gridX = (totalWg + gridY - 1u) / gridY;
+  vContext->dispatch(activeKernel, gridX, gridY, 1, 32, 1, 1);
 }
 
 void RayIntersectBench::Teardown() {
@@ -396,7 +406,13 @@ void RayIntersectBench::Teardown() {
   }
 
   if (context) {
-    if (kernel) { context->releaseKernel(kernel); kernel = nullptr; }
+    for (uint32_t i = 0; i < 2; ++i) {
+      if (kernels[i]) {
+        context->releaseKernel(kernels[i]);
+        kernels[i] = nullptr;
+      }
+    }
+    kernel = nullptr;
     if (resultBuffer) { context->releaseBuffer(resultBuffer); resultBuffer = nullptr; }
 #ifdef HAVE_VULKAN
     if (vertexBuffer) { context->releaseBuffer(vertexBuffer); vertexBuffer = nullptr; }

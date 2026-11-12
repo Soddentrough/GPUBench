@@ -19,6 +19,9 @@ public:
   const char *GetComponent(uint32_t config_idx) const override;
   const char *GetMetric() const override;
   const char *GetSubCategory(uint32_t config_idx) const override;
+  const char *GetDescription() const override {
+    return "Ray-tracing Any-Hit alpha-cutout evaluation overhead comparing hardware opaque culling against stochastic procedural rejection.";
+  }
   std::string GetConfigName(uint32_t config_idx) const override;
 
   bool IsSupported(const DeviceInfo &info,
@@ -40,6 +43,7 @@ public:
                              IComputeContext *context = nullptr) const override;
 
 private:
+  template <typename Tag> friend struct ::gpubench::test::TestBody;
   void buildAS();
 
   IComputeContext *context = nullptr;

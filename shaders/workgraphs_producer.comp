@@ -1,0 +1,44 @@
+#version 460
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+// Indirect dispatch header: [0]=groupCountX, [1]=groupCountY, [2]=groupCountZ, [3]=itemCount
+layout(std430, set = 0, binding = 0) buffer IndirectArgsBuffer {
+    uint args[];
+} indirectBuf;
+
+layout(std430, set = 0, binding = 1) buffer PayloadQueueBuffer {
+    uvec4 payloads[];
+} queueBuf;
+
+layout(push_constant) uniform PushConsts {
+    uint totalItems;
+    uint mode; // 0 = reset indirect header, 1 = classify & enqueue active payloads
+} pc;
+
+void main() {
+    uint gid = gl_GlobalInvocationID.x;
+    if (pc.mode == 0u) {
+        if (gid == 0u) {
+            indirectBuf.args[0] = 0u;
+            indirectBuf.args[1] = 1u;
+            indirectBuf.args[2] = 1u;
+            indirectBuf.args[3] = 0u;
+        }
+        return;
+    }
+
+    if (gid < pc.totalItems) {
+        // Deterministic spatial tile classification: ~50% active tiles emit consumer records
+        uint hash = (gid * 747796405u + 2891336453u);
+        hash = ((hash >> ((hash >> 28u) + 4u)) ^ hash) * 277803737u;
+        hash = (hash >> 22u) ^ hash;
+        if ((hash & 1u) == 0u) {
+            uint slot = atomicAdd(indirectBuf.args[3], 1u);
+            queueBuf.payloads[slot] = uvec4(gid, hash | 1u, (gid & 255u) + 1u, 0x5A5AA5A5u);
+            if ((slot & 63u) == 0u) {
+                atomicAdd(indirectBuf.args[0], 1u);
+            }
+        }
+    }
+}

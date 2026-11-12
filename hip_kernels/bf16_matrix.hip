@@ -131,6 +131,59 @@ extern "C" __global__ void run_benchmark(float* data) {
     for (int j = 0; j < 8; ++j) {
         bf16_out[outBase + j * 16u] = f32_to_bf16_bits(c0[j]);
     }
+#elif defined(__gfx90a__) || defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__) || defined(__gfx950__)
+    using float4_v = __attribute__((ext_vector_type(4))) float;
+    using short4_v = __attribute__((ext_vector_type(4))) short;
+
+    unsigned int lane64 = threadIdx.x & 63u;
+    const short4_v* a_ptr = reinterpret_cast<const short4_v*>(bf16_data + loadOffset + lane64 * 4u);
+    const short4_v* b_ptr = reinterpret_cast<const short4_v*>(bf16_data + loadOffset + ((lane64 + 16u) & 63u) * 4u);
+    short4_v a = *a_ptr;
+    short4_v b = *b_ptr;
+
+    float seed = bf16_bits_to_f32(bf16_data[loadOffset]);
+    float s1 = seed * 1.0f;
+    float s2 = seed * 2.0f;
+    float s3 = seed * 3.0f;
+    float s4 = seed * 4.0f;
+    float s5 = seed * 5.0f;
+    float s6 = seed * 6.0f;
+    float s7 = seed * 7.0f;
+    float s8 = seed * 8.0f;
+    float4_v c0 = {s1, s1, s1, s1};
+    float4_v c1 = {s2, s2, s2, s2};
+    float4_v c2 = {s3, s3, s3, s3};
+    float4_v c3 = {s4, s4, s4, s4};
+    float4_v c4 = {s5, s5, s5, s5};
+    float4_v c5 = {s6, s6, s6, s6};
+    float4_v c6 = {s7, s7, s7, s7};
+    float4_v c7 = {s8, s8, s8, s8};
+
+    #pragma unroll 4
+    for (int i = 0; i < 4096; i++) {
+        c0 = __builtin_amdgcn_mfma_f32_16x16x16bf16_1k(a, b, c0, 0, 0, 0);
+        c1 = __builtin_amdgcn_mfma_f32_16x16x16bf16_1k(a, b, c1, 0, 0, 0);
+        c2 = __builtin_amdgcn_mfma_f32_16x16x16bf16_1k(a, b, c2, 0, 0, 0);
+        c3 = __builtin_amdgcn_mfma_f32_16x16x16bf16_1k(a, b, c3, 0, 0, 0);
+        c4 = __builtin_amdgcn_mfma_f32_16x16x16bf16_1k(a, b, c4, 0, 0, 0);
+        c5 = __builtin_amdgcn_mfma_f32_16x16x16bf16_1k(a, b, c5, 0, 0, 0);
+        c6 = __builtin_amdgcn_mfma_f32_16x16x16bf16_1k(a, b, c6, 0, 0, 0);
+        c7 = __builtin_amdgcn_mfma_f32_16x16x16bf16_1k(a, b, c7, 0, 0, 0);
+    }
+
+    c0 = c0 + c1;
+    c2 = c2 + c3;
+    c4 = c4 + c5;
+    c6 = c6 + c7;
+    c0 = c0 + c2;
+    c4 = c4 + c6;
+    c0 = c0 + c4;
+
+    unsigned int outBase = wgOffset + lane64 * 4u;
+    #pragma unroll
+    for (int j = 0; j < 4; ++j) {
+        bf16_out[outBase + static_cast<unsigned int>(j)] = f32_to_bf16_bits(c0[j]);
+    }
 #else
     bf16_out[wgOffset + lane] = 0u;
 #endif

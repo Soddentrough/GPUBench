@@ -3,6 +3,7 @@
 #extension GL_EXT_shader_16bit_storage : require
 #extension GL_EXT_shader_explicit_arithmetic_types : require
 #extension GL_EXT_bfloat16 : require
+#extension GL_KHR_shader_subgroup_ballot : require
 
 layout (local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
@@ -10,20 +11,22 @@ layout(set = 0, binding = 0) buffer Data {
     bf16vec4 data[];
 } InOutBuffer;
 
-#define INIT(i) a[i] = bf16vec4(seed + vec4( \
-    0.01f * float(4 * (i) + 1), \
-    0.01f * float(4 * (i) + 2), \
-    0.01f * float(4 * (i) + 3), \
-    0.01f * float(4 * (i) + 4)  \
-));
-#define STEP(i) { bfloat16_t d = dot(a[i], m); a[i].z = a[i].x; a[i].x = d; }
+#define INIT(i) \
+    v[i] = bf16vec4(seed + vec4( \
+        0.01f * float(4 * (i) + 1), \
+        0.01f * float(4 * (i) + 2), \
+        0.01f * float(4 * (i) + 3), \
+        0.01f * float(4 * (i) + 4))); \
+    acc[i] = 0.5f;
+
+#define STEP(i) \
+    acc[i] = (((acc[i] + float(dot(v[i].xy, m0))) + float(dot(v[i].zw, m0))) \
+            + float(dot(v[i].xy, m1))) + float(dot(v[i].zw, m1));
 
 #define APPLY4(OP, i)  OP(i) OP((i)+1) OP((i)+2) OP((i)+3)
-#define APPLY16(OP, i) APPLY4(OP, i) APPLY4(OP, (i)+4) \
-                       APPLY4(OP, (i)+8) APPLY4(OP, (i)+12)
-#define APPLY32(OP)    APPLY16(OP, 0) APPLY16(OP, 16)
+#define APPLY16(OP)    APPLY4(OP, 0) APPLY4(OP, 4) APPLY4(OP, 8) APPLY4(OP, 12)
 
-#define GROUP(i) ((float(a[(i)].x) + float(a[(i)+1].x)) + (float(a[(i)+2].x) + float(a[(i)+3].x)))
+#define GROUP(i) ((acc[(i)] + acc[(i)+1]) + (acc[(i)+2] + acc[(i)+3]))
 
 void main() {
     uint index = gl_GlobalInvocationID.x;
@@ -33,18 +36,22 @@ void main() {
     vec4 seed = uintBitsToFloat(uvec4(rawSeed) << 16u);
     seed = fma(seed, vec4(1.0f), vec4(1e-6f));
 
-    bf16vec4 a[32];
-    APPLY32(INIT)
+    uint rawM = subgroupBroadcastFirst(uint(rawSeed.x) | (uint(rawSeed.y) << 16u));
 
-    bf16vec4 m = bf16vec4(vec4(-0.248046875f, 0.125f, -0.0625f, 0.1875f));
+    bf16vec4 v[16];
+    float acc[16];
+    APPLY16(INIT)
 
-    // Each iteration performs 32 bf16vec4 dot products (256 BF16 ops; lowered to 64 v_dot2_bf16_bf16 on RDNA 4 / gfx12).
-    // Stays purely in BF16 inside the loop — zero FP32 adds or BF16<->FP32 conversions.
+    // Each iteration performs 64 bf16vec2 dot-accumulates into FP32 (256 BF16 ops/iter),
+    // matching hip_kernels/bf16.hip (v_dot2_f32_bf16 semantics) across 32,768 iterations.
     for (int i = 0; i < 32768; ++i) {
-        APPLY32(STEP)
+        bf16vec2 m0 = uintBitsToBFloat16EXT(u16vec2(uint16_t(rawM & 0xFFFFu), uint16_t(rawM >> 16u)));
+        uint rawM1 = rawM ^ 0x00020001u;
+        bf16vec2 m1 = uintBitsToBFloat16EXT(u16vec2(uint16_t(rawM1 & 0xFFFFu), uint16_t(rawM1 >> 16u)));
+        APPLY16(STEP)
+        rawM ^= 1u;
     }
 
-    float total = GROUP(0)  + GROUP(4)  + GROUP(8)  + GROUP(12)
-                + GROUP(16) + GROUP(20) + GROUP(24) + GROUP(28);
+    float total = (GROUP(0) + GROUP(4)) + (GROUP(8) + GROUP(12));
     InOutBuffer.data[index] = bf16vec4(vec4(total));
 }

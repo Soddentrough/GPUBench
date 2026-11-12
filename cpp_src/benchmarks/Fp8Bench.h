@@ -83,6 +83,13 @@ public:
     return "Matrix";
   }
   const char *GetMetric() const override { return "TFLOPS"; }
+  const char *GetDescription() const override {
+    return "8-bit floating-point (FP8 E4M3) Cooperative Matrix / WMMA / MFMA tensor throughput.";
+  }
+  double GetOperationalIntensity(uint32_t config_idx = 0) const override {
+    (void)config_idx;
+    return 8192.0;
+  }
 
   bool IsEmulated(uint32_t config_idx = 0) const override {
     (void)config_idx;
@@ -92,11 +99,16 @@ public:
   bool ValidateResults(uint32_t config_idx = 0) const override;
 
 private:
+  template <typename Tag> friend struct ::gpubench::test::TestBody;
   IComputeContext *context = nullptr;
   mutable IComputeContext *lastCheckedContext = nullptr;
   ComputeKernel matrixKernel = nullptr;
   ComputeBuffer buffer = nullptr;
   ComputeBuffer outputBuffer = nullptr;
   bool is_native_matrix = false;
+  uint32_t tileM = 16;
+  uint32_t tileN = 16;
+  uint32_t tileK = 16;
+  uint32_t matrixBlockX = 32;
   mutable std::string name = "FP8";
 };

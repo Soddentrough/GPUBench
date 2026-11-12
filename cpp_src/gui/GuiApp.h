@@ -7,14 +7,14 @@
 #include <imgui.h>
 #include <implot.h>
 
-#include <vector>
-#include <string>
-#include <unordered_map>
-#include <mutex>
-#include <thread>
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <mutex>
+#include <string>
+#include <thread>
+#include <unordered_map>
+#include <vector>
 
 namespace gpubench::gui {
 
@@ -37,11 +37,10 @@ struct SelectableDevice {
     bool selected{false};
 };
 
-// Visualization descriptor attached to benchmarks that operate on graphics
-// pipeline data (BVH, scenes, materials, ray scheduling).
+// Visualization descriptor attached to benchmarks that operate on graphics/compute
+// pipeline data (BVH, scenes, materials, ray scheduling, OMM, Work Graphs, etc.).
 // Tier 1: static pre-baked 400x225 thumbnail (assetPath, may contain "{scene}").
 // Tier 2: procedural vector schematic drawn via ImDrawList (diagramId).
-// Exactly one of assetPath / diagramId should be set.
 struct BenchmarkVisualization {
     std::string assetPath;           // e.g. "assets/thumbnails/thumb_{scene}_stage1_bvh.png"
     std::string diagramId;           // e.g. "cone_divergence_45", "traversal_morton_8x4"
@@ -57,9 +56,9 @@ struct BenchmarkItem {
     std::string id;          // Exact C++ engine benchmark name (e.g. "FP16", "RayASBuild", "RayScheduling")
     std::string subcategory; // Subcategory / group name (e.g. "FP16", "BLAS Build & Update", "Directional Shadows")
     std::string name;        // Friendly display name / config name (e.g. "Vector", "Matrix", "BLAS Build (1M Tris)")
-    std::string category;    // Component name (e.g. "Compute", "Memory", "Ray Tracing", "Graphics", "System")
-    std::string metricType;  // e.g. TFLOPS, GB/s, GIS/s, MRays/s
-    std::string description; // Tooltip / detail description
+    std::string category;    // Component name (e.g. "Compute", "Memory", "Ray Tracing", "Scheduling", "Graphics", "System")
+    std::string metricType;  // e.g. TFLOPS, GB/s, GIS/s, MRays/s, MItems/s, us
+    std::string description; // Tooltip / detail description (hydrated from IBenchmark metadata)
     bool selected{true};
     bool isSupported{true};
     std::string supportReason;
@@ -76,8 +75,8 @@ struct BenchmarkItem {
 };
 
 struct BenchmarkSubgroup {
-    std::string name;        // e.g. "FP16", "Bandwidth", "BLAS Build & Update"
-    std::string component;   // e.g. "Compute", "Memory", "Ray Tracing", "Graphics", "System"
+    std::string name;        // e.g. "Compute Precision", "BLAS Build & Update"
+    std::string component;   // e.g. "Compute", "Memory", "Ray Tracing", "Scheduling", "Graphics", "System"
     std::string engineId;    // e.g. "FP16", "Device Memory Bandwidth", "RayASBuild"
     std::string description;
     std::vector<BenchmarkItem> items;
@@ -86,7 +85,7 @@ struct BenchmarkSubgroup {
 };
 
 struct BenchmarkCategory {
-    std::string name;        // e.g. "Compute", "Memory", "Ray Tracing", "Graphics", "Host System"
+    std::string name;        // e.g. "Compute", "Memory", "Ray Tracing", "Scheduling", "Graphics", "Host System"
     std::string description;
     std::vector<BenchmarkSubgroup> subgroups;
     bool allSelected{true};
@@ -119,17 +118,27 @@ public:
 
     void setSelectedDevice(int deviceIndex);
     void setSelectedDevices(const std::vector<int>& deviceIndices);
+    void selectAllGpus();
     void setSelectedBackend(const std::string& backend);
     void selectOnlyBenchmark(const std::string& benchmarkId);
     void setScene(const std::string& scene);
     void setRenderResolution(uint32_t width, uint32_t height) { m_renderWidth = width; m_renderHeight = height; }
+    void applyAutoRenderResolution();
     void setDumpRenders(bool dump) { m_dumpRenders = dump; }
+    void setVerbose(bool verbose) { m_verbose = verbose; }
+    void setDebug(bool debug) { m_debug = debug; if (debug) m_verbose = true; }
     uint32_t getRenderWidth() const { return m_renderWidth; }
     uint32_t getRenderHeight() const { return m_renderHeight; }
     bool getDumpRenders() const { return m_dumpRenders; }
 
     void startBenchmarks();
     void abortBenchmarks();
+
+    // Unified v2.0 JSON Session Import / Export / Comparison
+    bool importResultsFromJson(const std::string& filepath);
+    bool loadComparisonFromJson(const std::string& filepath);
+    void clearComparisonResults();
+    void exportResultsToJson(const std::string& filepath);
 
     ExecutionState getExecutionState() const { return m_execState; }
     ExecutionState getState() const { return m_execState; }
@@ -169,6 +178,7 @@ public:
 private:
     void setupDarkTheme(float scale = 1.0f);
     void initializeBenchmarkCategories();
+    void hydrateMetadataFromCatalog();
     void applyVisualizationMetadata();
     void discoverHardware();
 
@@ -177,9 +187,9 @@ private:
 
     ImFont* boldFont() const { return m_vulkanContext ? m_vulkanContext->getBoldFont() : nullptr; }
     ImFont* monoFont() const { return m_vulkanContext ? m_vulkanContext->getMonoFont() : nullptr; }
-    void pushBoldFont() const { if (ImFont* f = boldFont()) ImGui::PushFont(f); }
+    void pushBoldFont() const { if (ImFont* f = boldFont()) ImGui::PushFont(f, f->LegacySize); }
     void popBoldFont() const { if (boldFont()) ImGui::PopFont(); }
-    void pushMonoFont() const { if (ImFont* f = monoFont()) ImGui::PushFont(f); }
+    void pushMonoFont() const { if (ImFont* f = monoFont()) ImGui::PushFont(f, f->LegacySize); }
     void popMonoFont() const { if (monoFont()) ImGui::PopFont(); }
 
     float m_uiScale{1.0f};
@@ -190,20 +200,21 @@ private:
     bool m_basePlotStyleInitialized{false};
     float m_zoomToastTimer{0.0f};
 
-    // UI Panels
+    // UI Panels (implemented across modular translation units)
     void renderLeftSidebar(float width, float height);
     void renderSidebarTelemetry();
     void renderRightWorkspace(float width, float height);
     void renderBenchmarkSuitePanel();
     void renderLiveTelemetryDock();
     void renderResultsScorecard();
+    void renderRooflinePanel();
     void renderRayTracingViewport();
     void renderSettingsModal();
+    void renderJsonSessionModal();
 
     void processIncomingResults();
-    void exportResultsToJson(const std::string& filepath);
 
-    // Benchmark Tooltip Visualizations
+    // Benchmark Tooltip Visualizations (GuiDiagramRenderer.cpp)
     void renderBenchmarkTooltip(const BenchmarkItem& item, const std::string& sceneOverride = "");
     void renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, ImVec2 p1) const;
     std::string currentSceneTag() const;
@@ -214,18 +225,19 @@ private:
 
     // Hardware & Device Selection
     std::vector<SelectableDevice> m_devices;
+    std::vector<DeviceProfile> m_deviceProfiles;
     std::string m_selectedBackend{"vulkan"};
     std::vector<ComputeApiSupportInfo> m_apiSupportList;
-    uint32_t m_telemetryGpuIndex{0}; // Which GPU to inspect in Telemetry HUD (default GPU 0 Primary)
-    bool m_telemetryDualGpuMode{false}; // Dual GPU comparative overlay
+    uint32_t m_telemetryGpuIndex{0};
+    bool m_telemetryDualGpuMode{false};
     void updateTelemetrySelection();
 
     // Benchmark Suite Definitions
     std::vector<BenchmarkCategory> m_categories;
     std::unordered_map<std::string, bool> m_sceneSubgroupCollapsed;
-    int m_suiteCategoryFilter{0}; // 0: All, 1: Compute, 2: Memory, 3: Ray Tracing, 4: Graphics, 5: Host System
-    std::string m_suiteActiveScene{"indoor"}; // Active scenario shown on Suite cards: "indoor", "forest", "outdoor", "showroom"
-    bool m_hideUnsupported{false}; // Show all tests by default
+    int m_suiteCategoryFilter{0}; // 0: All, 1..N: m_categories[idx - 1]
+    std::string m_suiteActiveScene{"indoor"};
+    bool m_hideUnsupported{false};
     std::string m_lastProbedBackend{""};
     uint32_t m_lastProbedDeviceIndex{0xFFFFFFFF};
     void updateBenchmarkSupport();
@@ -239,11 +251,18 @@ private:
     std::vector<ResultData> m_allResults;
     std::unordered_map<std::string, ResultData> m_latestResults;
 
+    // Loaded Comparison Baseline (from unified CLI/GUI v2.0 JSON)
+    std::vector<ResultData> m_comparisonResults;
+    std::string m_comparisonSourceLabel;
+    char m_jsonPathBuffer[512]{};
+    bool m_showJsonSessionModal{false};
+
     std::string m_currentBenchmarkName;
     std::string m_currentlyRunningTestId;
     ResultData m_currentlyRunningResult;
     bool m_hasCurrentlyRunningResult{false};
     bool matchesItem(const ResultData& r, const BenchmarkItem& itm, uint32_t activeDev) const;
+    const ResultData* findComparisonMatch(const ResultData& curRes) const;
     size_t m_completedTasks{0};
     size_t m_totalTasks{0};
     std::chrono::steady_clock::time_point m_benchmarkStartTime;
@@ -256,6 +275,8 @@ private:
     uint32_t m_renderHeight{2160};
     uint32_t m_samplesPerPixel{1};
     bool m_dumpRenders{true};
+    bool m_verbose{false};
+    bool m_debug{false};
     bool m_showSettingsModal{false};
     int m_scorecardSceneFilter{0}; // 0: All, 1: Indoor (Sponza), 2: Forest, 3: Landscape, 4: Showroom
 
@@ -268,7 +289,7 @@ private:
     size_t m_prevTotalSelectedItems{(size_t)-1};
 
     // Ray Tracing Viewport Configuration & State
-    int m_rtViewportMode{0};   // 0: Scenes & Parity, 1: Pipeline Passes, 2: PBR Materials, 3: Geometry & BVH
+    int m_rtViewportMode{0};    // 0: Scenes & Parity, 1: Pipeline Passes, 2: PBR Materials, 3: Geometry & BVH
     int m_rtSceneIndex{0};      // 0: Showroom Studio, 1: Indoor Atrium, 2: Open-World Forest, 3: Outdoor Landscape
     int m_rtParityViewMode{0};  // 0: DGC Render, 1: Megakernel Render, 2: Side-by-Side Parity, 3: Path Tracing (1 vs 16 SPP), 4: 128-Light Direct
     int m_rtPassIndex{0};       // 0: BVH Heatmap, 1: G-Buffer Normals, 2: Shadows, 3: RTAO, 4: Direct PBR, 5: Indirect GI, 6: Final Render
@@ -277,15 +298,17 @@ private:
 
     // Navigation & Notifications
     bool m_switchToScorecard{false};
+    bool m_switchToRoofline{false};
     bool m_switchToRtViewport{false};
     std::string m_exportNotificationText;
     float m_exportNotificationTimer{0.0f};
-    float m_telemetryTimeWindow{0.0f}; // 0.0f = Full Run (compressed to cover entire run), or 30s, 60s, 120s
+    float m_telemetryTimeWindow{0.0f};
     bool m_telemetryNeedsFit{true};
 
-    // Scorecard Filters
-    int m_activeScorecardFilter{0}; // 0: All, 1: Compute, 2: Memory, 3: Ray Tracing, 4: Raster, 5: System
-    int m_activeDeviceScorecardFilter{-1}; // -1: All, 0: GPU 0, 1: GPU 1, etc.
+    // Scorecard & Roofline Filters
+    int m_activeScorecardFilter{0}; // 0: All, 1: Compute, 2: Memory, 3: Ray Tracing, 4: Scheduling, 5: Graphics, 6: Host System
+    int m_activeDeviceScorecardFilter{-1}; // -1: All, -2: Host CPU, 0: GPU 0, 1: GPU 1, etc.
+    int m_rooflineDeviceFilter{0};
 };
 
 } // namespace gpubench::gui

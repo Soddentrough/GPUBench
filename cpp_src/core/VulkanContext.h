@@ -4,6 +4,7 @@
 #include "BlockSuballocator.h"
 #include <array>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <set>
 #include <string>
@@ -14,10 +15,12 @@
 #endif
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_beta.h>
+#include "vk_mem_alloc.h"
 
 class VulkanContext : public IComputeContext {
 public:
-  VulkanContext(bool verbose = false, bool debug = false);
+  VulkanContext(bool verbose = false, bool debug = false,
+                const std::vector<const char *> &extraInstanceExtensions = {});
   ~VulkanContext();
 
   VulkanContext(const VulkanContext &) = delete;
@@ -33,15 +36,42 @@ public:
     return selectedDeviceIndex;
   }
 
-  // Buffer management
+  // Buffer management (VMA-backed)
   ComputeBuffer createBuffer(size_t size,
                              const void *host_ptr = nullptr) override;
+  ComputeBuffer createPinnedHostBuffer(size_t size, bool forUpload,
+                                       void **outMappedPtr = nullptr);
+  ComputeBuffer createRebarBuffer(size_t size, void **outMappedPtr = nullptr);
+  void *getBufferMappedPtr(ComputeBuffer buffer) const;
   void writeBuffer(ComputeBuffer buffer, size_t offset, size_t size,
                    const void *host_ptr) override;
   void readBuffer(ComputeBuffer buffer, size_t offset, size_t size,
                   void *host_ptr) const override;
   void releaseBuffer(ComputeBuffer buffer) override;
   VkDeviceAddress getBufferDeviceAddress(ComputeBuffer buffer) const;
+
+  struct VmaBudgetSummary {
+    bool available = false;
+    uint64_t usageBytes = 0;
+    uint64_t budgetBytes = 0;
+  };
+  VmaAllocator getVmaAllocator() const { return m_vmaAllocator; }
+  VmaBudgetSummary queryVramBudget() const;
+
+  static constexpr VkComponentTypeKHR kVkComponentTypeFloat6E3M2EXT =
+      static_cast<VkComponentTypeKHR>(1000672001);
+  static constexpr VkComponentTypeKHR kVkComponentTypeFloat4E2M1EXT =
+      static_cast<VkComponentTypeKHR>(1000672002);
+
+  struct CoopMatrixTile {
+    bool supported = false;
+    uint32_t M = 16;
+    uint32_t N = 16;
+    uint32_t K = 16;
+    uint32_t subgroupSize = 32;
+  };
+  CoopMatrixTile selectCoopMatrixTile(VkComponentTypeKHR abType,
+                                      VkComponentTypeKHR cType) const;
 
   // Kernel management
   ComputeKernel createKernel(const std::string &file_name,
@@ -52,6 +82,10 @@ public:
                                      uint32_t num_buffer_args,
                                      uint32_t spec_id,
                                      uint32_t spec_val);
+  ComputeKernel createKernelWithSpecConstants(
+      const std::string &file_name, const std::string &kernel_name,
+      uint32_t num_buffer_args,
+      const std::vector<uint32_t> &spec_uints) override;
   ComputeKernel createRTPipeline(const std::string &rgen_path,
                                  const std::string &rmiss_path,
                                  const std::vector<std::string> &rchit_paths,
@@ -72,10 +106,71 @@ public:
   void releaseKernel(ComputeKernel kernel) override;
   void waitIdle() override;
 
-  // Command buffer batching (Optimization O-2)
-  void beginBatch(uint32_t expected_dispatches = 0) override;
+  // Command buffer batching (Optimization O-2 + Group 3 barrier control)
+  void beginBatch(uint32_t expected_dispatches = 0,
+                  bool inter_dispatch_barrier = false) override;
   void endBatch() override;
   bool isBatching() const override { return m_inBatch; }
+
+  // Persistent disk-backed VkPipelineCache
+  VkPipelineCache getPipelineCache() const { return m_pipelineCache; }
+  void flushPipelineCacheToDisk() const;
+
+  // Shared GUI/Compute presentation + multi-queue accessors
+  void setPresentationSurface(VkSurfaceKHR surface) {
+    m_presentationSurface = surface;
+  }
+  VkQueue getPresentationQueue() const {
+    return presentationQueue != VK_NULL_HANDLE ? presentationQueue
+                                               : graphicsQueue;
+  }
+  uint32_t getPresentationQueueFamilyIndex() const {
+    return presentationQueueFamilyIndex;
+  }
+  std::recursive_mutex &getQueueMutex() const { return m_queueMutex; }
+
+  bool hasAsyncComputeQueue() const {
+    return asyncComputeQueue != VK_NULL_HANDLE;
+  }
+  VkQueue getAsyncComputeQueue() const { return asyncComputeQueue; }
+  uint32_t getAsyncComputeQueueFamilyIndex() const {
+    return asyncComputeQueueFamilyIndex;
+  }
+
+  bool hasDedicatedTransferQueue() const {
+    return transferQueue != VK_NULL_HANDLE;
+  }
+  VkQueue getTransferQueue() const { return transferQueue; }
+  bool hasSecondaryTransferQueue() const {
+    return secondaryTransferQueue != VK_NULL_HANDLE;
+  }
+  VkQueue getSecondaryTransferQueue() const { return secondaryTransferQueue; }
+  uint32_t getTransferQueueFamilyIndex() const {
+    return transferQueueFamilyIndex;
+  }
+
+  // Zero-disk on-GPU shared preview images & in-memory profile JSONs
+  struct SharedPreviewImage {
+    VkImage image = VK_NULL_HANDLE;
+    VkImageView view = VK_NULL_HANDLE;
+    VmaAllocation allocation = VK_NULL_HANDLE;
+    uint32_t width = 0;
+    uint32_t height = 0;
+    uint64_t generation = 0;
+  };
+  bool captureBufferToSharedPreviewImage(const std::string &key,
+                                         ComputeBuffer hdrBufA,
+                                         ComputeBuffer hdrBufB,
+                                         uint32_t width, uint32_t height,
+                                         uint32_t mode,
+                                         const std::string &kernelDir);
+  bool getSharedPreviewImage(const std::string &key,
+                             SharedPreviewImage &outInfo) const;
+  void clearSharedPreviewImages();
+  void storeInMemoryJson(const std::string &key,
+                         const std::string &jsonContent);
+  bool getInMemoryJson(const std::string &key,
+                       std::string &outJsonContent) const;
 
   void setExpectedKernelCount(uint32_t count) override;
   void notifyKernelCreated(const std::string &kernel_name) override;
@@ -130,7 +225,16 @@ public:
     return maintenance5Supported;
   }
   bool isWorkGraphsSupported() const {
-    return isExtensionEnabled("VK_AMDX_shader_enqueue");
+    return workGraphsSupported;
+  }
+  bool isCooperativeVectorSupported() const {
+    return cooperativeVectorSupported;
+  }
+  bool isOpacityMicromapSupported() const {
+    return opacityMicromapSupported;
+  }
+  bool isStructuredSparsitySupported() const {
+    return structuredSparsitySupported;
   }
   bool isSERSupported() const {
     return serSupported;
@@ -148,6 +252,7 @@ public:
     return vkCmdEndRendering_ptr;
   }
   KernelResourceUsage getKernelResourceUsage(ComputeKernel kernel) const override;
+  bool isKernelBf16Emulated(ComputeKernel kernel) const;
 
   bool isPerformanceQuerySupported() const {
     return performanceQuerySupported;
@@ -251,6 +356,8 @@ public:
 private:
   struct VulkanBuffer {
     VkBuffer buffer = VK_NULL_HANDLE;
+    VmaAllocation vmaAllocation = VK_NULL_HANDLE;
+    void *mappedPtr = nullptr;
     VkDeviceMemory memory = VK_NULL_HANDLE;
     VkDeviceSize offset = 0;
     VkDeviceSize size = 0;
@@ -280,19 +387,36 @@ private:
   void createInstance();
   void enumeratePhysicalDevices();
   void createDevice();
+  void initVmaAllocator(bool bufferDeviceAddressEnabled, bool memoryBudgetEnabled);
+  void cleanupVmaAllocator();
+  void initPipelineCache();
+  void cleanupPipelineCache();
   uint32_t findMemoryType(uint32_t typeFilter,
                           VkMemoryPropertyFlags properties) const;
+
+  std::vector<std::string> m_extraInstanceExtensions;
+  VkSurfaceKHR m_presentationSurface = VK_NULL_HANDLE;
+  mutable std::recursive_mutex m_queueMutex;
 
   VkInstance instance = VK_NULL_HANDLE;
   std::vector<VkPhysicalDevice> physicalDevices;
   VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
   VkDevice device = VK_NULL_HANDLE;
   VkPhysicalDeviceProperties properties;
+  VmaAllocator m_vmaAllocator = VK_NULL_HANDLE;
+  VkPipelineCache m_pipelineCache = VK_NULL_HANDLE;
 
   uint32_t computeQueueFamilyIndex = 0;
   VkQueue computeQueue = VK_NULL_HANDLE;
   uint32_t graphicsQueueFamilyIndex = 0;
   VkQueue graphicsQueue = VK_NULL_HANDLE;
+  uint32_t presentationQueueFamilyIndex = 0;
+  VkQueue presentationQueue = VK_NULL_HANDLE;
+  uint32_t asyncComputeQueueFamilyIndex = UINT32_MAX;
+  VkQueue asyncComputeQueue = VK_NULL_HANDLE;
+  uint32_t transferQueueFamilyIndex = UINT32_MAX;
+  VkQueue transferQueue = VK_NULL_HANDLE;
+  VkQueue secondaryTransferQueue = VK_NULL_HANDLE;
   VkCommandPool commandPool = VK_NULL_HANDLE;
 
   static constexpr size_t kMaxInFlight = 4;
@@ -305,6 +429,7 @@ private:
   size_t currentFrameIndex = 0;
   bool m_inBatch = false;
   bool m_batchCmdRecording = false;
+  bool m_batchInterDispatchBarrier = false;
   uint32_t m_batchDispatchCount = 0;
 
   VkQueryPool timestampQueryPool = VK_NULL_HANDLE;
@@ -346,10 +471,16 @@ private:
   std::map<ComputeKernel, VulkanKernel *> kernels;
   VulkanKernel *getKernel(ComputeKernel handle) const;
 
-  // Staging buffer pool (eliminates repeated per-transfer staging allocations)
+  mutable std::mutex m_sharedPreviewMutex;
+  std::map<std::string, SharedPreviewImage> m_sharedPreviewImages;
+  std::map<std::string, std::string> m_inMemoryJsons;
+  uint64_t m_previewGenerationCounter = 0;
+
+  // Staging buffer pool (VMA-backed)
   static constexpr size_t kStagingBufferSize = 64ULL * 1024ULL * 1024ULL;
   mutable std::mutex stagingMutex;
   mutable VkBuffer stagingBuffer = VK_NULL_HANDLE;
+  mutable VmaAllocation stagingVmaAllocation = VK_NULL_HANDLE;
   mutable VkDeviceMemory stagingMemory = VK_NULL_HANDLE;
   mutable void *stagingMappedPtr = nullptr;
   mutable VkCommandBuffer stagingCmdBuffer = VK_NULL_HANDLE;
@@ -357,7 +488,7 @@ private:
   void initStagingBuffer();
   void cleanupStagingBuffer();
 
-  // Memory block suballocator (eliminates raw vkAllocateMemory churn for <= 32 MB buffers)
+  // Retained legacy helpers
   static constexpr VkDeviceSize kDefaultBlockSize = gpubench::BlockSuballocator::kDefaultBlockSize;
   static constexpr VkDeviceSize kMaxSuballocSize = gpubench::BlockSuballocator::kMaxSuballocSize;
   mutable std::mutex suballocatorMutex;
@@ -382,8 +513,9 @@ private:
   ComputeKernel createKernelInternal(const std::string &file_name,
                                      const std::string &kernel_name,
                                      uint32_t num_buffer_args,
-                                     const uint32_t *spec_id,
-                                     const uint32_t *spec_val);
+                                     const uint32_t *spec_ids,
+                                     const uint32_t *spec_vals,
+                                     uint32_t spec_count);
   std::set<std::string> enabledExtensionsSet;
   void printProgressBar(uint32_t current, uint32_t total,
                         const std::string &kernel_name);
@@ -397,6 +529,12 @@ private:
   bool maintenance5Supported = false;
   bool dgcSupported = false;
   bool dgcExecutionSetSupported = false;
+  bool workGraphsSupported = false;
+  bool cooperativeVectorSupported = false;
+  bool opacityMicromapSupported = false;
+  bool structuredSparsitySupported = false;
+  bool memoryBudgetSupported = false;
+  bool amdDeviceCoherentMemorySupported = false;
 
   // DGC (VK_EXT_device_generated_commands) function pointers
   PFN_vkGetGeneratedCommandsMemoryRequirementsEXT vkGetGeneratedCommandsMemoryRequirementsEXT_ptr = nullptr;

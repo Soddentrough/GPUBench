@@ -1,0 +1,83 @@
+#version 460
+#extension GL_EXT_spirv_intrinsics : require
+#extension GL_KHR_cooperative_matrix : require
+#extension GL_KHR_memory_scope_semantics : require
+
+// Khronos SPV_EXT_ocp_microscaling_types + SPV_KHR_cooperative_matrix:
+//   SpvCapabilityFloat6EXT       = 4228
+//   SpvCapabilityCooperativeMatrixKHR = 6022
+//   SpvFPEncodingFloat6E3M2EXT   = 4224
+//   OpTypeFloat                  = 22
+//   OpTypeCooperativeMatrixKHR   = 4456
+//   OpCooperativeMatrixLoadKHR   = 4457
+//   OpCooperativeMatrixMulAddKHR = 4459
+
+const uint kScopeSubgroup = 3u;
+const uint kDim16 = 16u;
+const uint kUseA = 0u;
+const uint kUseB = 1u;
+
+#define fp6_e3m2_t spirv_type(extensions = ["SPV_EXT_ocp_microscaling_types"], capabilities = [4228], id = 22, 6, 4224)
+#define coopmat_fp6_a_t spirv_type(extensions = ["SPV_KHR_cooperative_matrix", "SPV_EXT_ocp_microscaling_types"], capabilities = [6022, 4228], id = 4456, fp6_e3m2_t, kScopeSubgroup, kDim16, kDim16, kUseA)
+#define coopmat_fp6_b_t spirv_type(extensions = ["SPV_KHR_cooperative_matrix", "SPV_EXT_ocp_microscaling_types"], capabilities = [6022, 4228], id = 4456, fp6_e3m2_t, kScopeSubgroup, kDim16, kDim16, kUseB)
+
+spirv_instruction(extensions = ["SPV_KHR_cooperative_matrix"], capabilities = [6022], id = 4457)
+coopmat_fp6_a_t coopMatLoadFp6A(spirv_by_reference uint ptr, int memLayout, uint stride, spirv_literal int memOperand);
+
+spirv_instruction(extensions = ["SPV_KHR_cooperative_matrix"], capabilities = [6022], id = 4457)
+coopmat_fp6_b_t coopMatLoadFp6B(spirv_by_reference uint ptr, int memLayout, uint stride, spirv_literal int memOperand);
+
+spirv_instruction(extensions = ["SPV_KHR_cooperative_matrix"], capabilities = [6022], id = 4459)
+coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> coopMatMulAddFp6(
+    coopmat_fp6_a_t a, coopmat_fp6_b_t b,
+    coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> c);
+
+layout (local_size_x = 32, local_size_y = 1, local_size_z = 1) in;
+layout (local_size_x_id = 3) in;
+
+layout(set = 0, binding = 0) buffer DataA {
+    uint data[];
+} BufferA;
+
+layout(set = 0, binding = 1) buffer DataC {
+    float data[];
+} BufferC;
+
+void main() {
+    uint gid = gl_WorkGroupID.y * gl_NumWorkGroups.x + gl_WorkGroupID.x;
+    // 16x16 packed 6-bit matrix = 1536 bits = 48 uint32 words; row stride = 96 bits = 3 uint32 words
+    coopmat_fp6_a_t matA = coopMatLoadFp6A(BufferA.data[(gid % 8192u) * 48u], 0, 3u, 0);
+    coopmat_fp6_b_t matB = coopMatLoadFp6B(BufferA.data[((gid + 1u) % 8192u) * 48u], 0, 3u, 0);
+
+    float seed = float((gid & 255u) + 1u) * 0.001;
+    coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC0 = coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(seed * 1.0);
+    coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC1 = coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(seed * 2.0);
+    coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC2 = coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(seed * 3.0);
+    coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC3 = coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(seed * 4.0);
+    coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC4 = coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(seed * 5.0);
+    coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC5 = coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(seed * 6.0);
+    coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC6 = coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(seed * 7.0);
+    coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC7 = coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(seed * 8.0);
+
+    // 4096 * 8 = 32768 total 16x16x16 matrix operations per workgroup
+    for (int i = 0; i < 4096; ++i) {
+        matC0 = coopMatMulAddFp6(matA, matB, matC0);
+        matC1 = coopMatMulAddFp6(matA, matB, matC1);
+        matC2 = coopMatMulAddFp6(matA, matB, matC2);
+        matC3 = coopMatMulAddFp6(matA, matB, matC3);
+        matC4 = coopMatMulAddFp6(matA, matB, matC4);
+        matC5 = coopMatMulAddFp6(matA, matB, matC5);
+        matC6 = coopMatMulAddFp6(matA, matB, matC6);
+        matC7 = coopMatMulAddFp6(matA, matB, matC7);
+    }
+
+    matC0 = matC0 + matC1;
+    matC2 = matC2 + matC3;
+    matC4 = matC4 + matC5;
+    matC6 = matC6 + matC7;
+    matC0 = matC0 + matC2;
+    matC4 = matC4 + matC6;
+    matC0 = matC0 + matC4;
+
+    coopMatStore(matC0, BufferC.data, (gid % 2048u) * 256u, 16u, 0);
+}

@@ -28,14 +28,19 @@ public:
   bool IsSupported(const DeviceInfo &info, IComputeContext *context = nullptr) const override { return true; }
 
   void Setup(IComputeContext &context, const std::string &kernel_dir) override;
+  void PrepareConfig(uint32_t config_idx) override;
+  void ReleaseConfigResources(uint32_t config_idx) override;
   void Run(uint32_t config_idx = 0) override;
   void Teardown() override;
   BenchmarkResult GetResult(uint32_t config_idx = 0) const override;
   bool ValidateResults(uint32_t config_idx = 0) const override;
   double FilterDuration(uint32_t config_idx, uint64_t total_invocations, double duration_ms) override;
 
-  const char *GetComponent(uint32_t config_idx = 0) const override { return "Memory"; }
-  const char *GetSubCategory(uint32_t config_idx = 0) const override { return "Cache Latency Curve"; }
+  const char *GetComponent(uint32_t config_idx = 0) const override { (void)config_idx; return "Memory"; }
+  const char *GetSubCategory(uint32_t config_idx = 0) const override { (void)config_idx; return "Cache Latency Curve"; }
+  const char *GetDescription() const override {
+    return "15-step pointer-chasing latency curve (16 KB to 256 MB) mapping L0, L1, L2, L3/MALL, and DRAM transitions.";
+  }
   int GetSortWeight() const override { return 210; }
 
   uint32_t GetNumConfigs() const override { return static_cast<uint32_t>(configs.size()); }
@@ -47,6 +52,7 @@ public:
                                    IComputeContext *context = nullptr) const override;
 
 private:
+  template <typename Tag> friend struct ::gpubench::test::TestBody;
   std::string ComputeAdaptiveHint(uint64_t workingSetBytes,
                                   const DeviceInfo &info) const;
   IComputeContext *context = nullptr;
@@ -54,5 +60,6 @@ private:
   ComputeKernel kernel = nullptr;
   ComputeBuffer buffer = nullptr;
   uint64_t totalBufferBytes = 0;
+  int32_t activeConfigIdx = -1;
   static constexpr uint32_t kIterations = 1000000;
 };

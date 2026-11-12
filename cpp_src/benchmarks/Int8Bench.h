@@ -85,12 +85,23 @@ public:
     return config_idx == 0 ? "Vector" : "Matrix";
   }
   const char *GetMetric() const override { return "TOPS"; }
+  const char *GetDescription() const override {
+    return "8-bit integer (INT8) packed dot-product VALU and Cooperative Matrix / WMMA / MFMA throughput.";
+  }
+  double GetOperationalIntensity(uint32_t config_idx = 0) const override {
+    return config_idx == 0 ? 524288.0 : 8192.0;
+  }
 
 private:
+  template <typename Tag> friend struct ::gpubench::test::TestBody;
   IComputeContext *context = nullptr;
   ComputeKernel vectorKernel = nullptr;
   ComputeKernel matrixKernel = nullptr;
   ComputeBuffer buffer = nullptr;
   ComputeBuffer matrixInputBuffer = nullptr;
   ComputeBuffer outputBuffer = nullptr;
+  uint32_t tileM = 16;
+  uint32_t tileN = 16;
+  uint32_t tileK = 16;
+  uint32_t matrixBlockX = 32;
 };

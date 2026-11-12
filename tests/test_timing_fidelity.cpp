@@ -3,10 +3,9 @@
 #include "core/VulkanContext.h"
 #include "utils/KernelPath.h"
 
-#define private public
+#include "core/BenchmarkRunner.h"
 #include "benchmarks/InShaderIndirectBench.h"
 #include "benchmarks/RayASBuildBench.h"
-#undef private
 
 #include <algorithm>
 #include <chrono>
@@ -285,3 +284,34 @@ TEST_CASE(TimingFidelity, RayASBuild_PreRecordedCommandExecutionIntegrity) {
 
   bench.Teardown();
 }
+
+// ============================================================================
+// 5. Regression Test: FilterDuration() Updates Summary Statistics Consistently
+// ============================================================================
+
+TEST_CASE(TimingFidelity, BenchmarkRunner_FilterDurationUpdatesSummaryStatistics) {
+  auto ctx = createVulkanContext();
+  if (!ctx) { return; }
+
+  // Run CacheLatencyCurveBench config 0 (16 KB) through BenchmarkRunner with multi-sample timing.
+  // CacheLatencyCurveBench::FilterDuration subtracts baseline launch overhead from each sample,
+  // so min_time_ms, median_time_ms, mean_time_ms, and p95_time_ms must all reflect the filtered
+  // durations (with time_ms == mean_time_ms and min_time_ms <= median_time_ms <= p95_time_ms).
+  std::vector<IComputeContext *> contexts = {ctx.get()};
+  BenchmarkRunner runner(contexts, false, false, false, false, "showroom");
+  runner.setQuiet(true);
+  runner.setTargetConfig(0);
+  runner.run({"cache-curve"});
+
+  const auto &results = runner.getResults();
+  ASSERT_EQ(results.size(), 1u);
+  const auto &r = results[0];
+  ASSERT_TRUE(r.isValid);
+  ASSERT_GE(r.sample_count, 2u);
+  ASSERT_GT(r.min_time_ms, 0.0);
+  ASSERT_NEAR(r.time_ms, r.mean_time_ms, 1e-6);
+  ASSERT_LE(r.min_time_ms, r.time_ms + 1e-9);
+  ASSERT_LE(r.min_time_ms, r.median_time_ms + 1e-9);
+  ASSERT_LE(r.median_time_ms, r.p95_time_ms + 1e-9);
+}
+

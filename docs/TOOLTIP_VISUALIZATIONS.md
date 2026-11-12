@@ -267,8 +267,8 @@ top, footnote at bottom. 26 active diagram ids (+ 1 legacy fallback):
 | `intersect_ray_triangle` | Triangle, ray with hit point, dashed barycentric spokes, `hit (t, u, v)` label |
 | `intersect_ray_box` | 2.5D AABB wireframe, ray with `t near` / `t far` markers |
 | `procedural_sphere` | Analytic sphere with rim highlight, ray, radial normal |
-| `bvh_coherent_triangles` | 4 stratified planar triangle layers (65.5K tris) pierced by 5 parallel vertical rays with 0% miss rate |
-| `bvh_nested_boxes` | 3-level nested AABBs (1 → 2 → 4) with a ray and per-level step dots |
+| `bvh_coherent_triangles` | 4 stratified planar triangle layers (65.5K tris, 32 layers) pierced by 5 parallel vertical rays with 0% miss rate |
+| `bvh_nested_boxes` | 64 stratified AABB layers (65.5K `VK_GEOMETRY_TYPE_AABBS_KHR` boxes) pierced by parallel vertical rays traversing full depth before committing on Layer 63 |
 | `anyhit_100_solid` | 4 planar layers with Plane 0 opaque termination and zero BVH re-entries |
 | `anyhit_50_cutout` | 4 planar layers with 50% checkerboard cutout segments forcing hardware BVH traversal re-entry |
 | `incoherent_naive` / `incoherent_ser` / `incoherent_dgc` | Left: 12 color-coded bounce rays scattered from a column of scene hit points (4 direction groups). Right: the technique's result — one undivided dispatch (naive), 2×2 direction bins with parallel arrows (SER), or 4 compacted octant queue rows O0–O3 (DGC) |

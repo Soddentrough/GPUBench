@@ -8,6 +8,7 @@
 #include "core/ComputeBackendFactory.h"
 #include "core/ResultFormatter.h"
 #include "core/ResultImporter.h"
+#include "core/RooflineModel.h"
 #include "core/RunnerAPI.h"
 #include "utils/HardwareTelemetry.h"
 #include "utils/IsaDumper.h"
@@ -51,37 +52,42 @@ int main(int argc, char **argv) {
 
   std::vector<std::string> groups_to_run;
   app.add_option("-g,--groups,--group", groups_to_run,
-                 "Benchmark group(s) to run: compute, memory, graphics, raster, raytracing, system (or all)")
+                 "Benchmark group(s) to run: compute, memory, scheduling, graphics, raster, raytracing, system (or all)")
       ->delimiter(',');
 
   app.footer(
       "\nBENCHMARK GROUPS & INCLUDED TESTS:\n"
-      "  compute     Compute arithmetic units (vector & matrix tensor operations):\n"
+      "  compute     Compute arithmetic units (vector, matrix & sparse tensor operations):\n"
       "              FP64, FP32, ILP & Dual-Issue, LDS Bank Conflicts,\n"
-      "              In-Shader Indirect Synthesis, FP16, FP8, INT8 (BF16, FP6, FP4, INT4 capability-probed)\n"
-      "  memory      VRAM and GPU cache hierarchy:\n"
-      "              Device Memory Bandwidth, L0 Vector Cache Latency (16 KB), Cache Latency Curve\n"
+      "              In-Shader Indirect Synthesis, FP16, FP8, INT8,\n"
+      "              BF16, FP6, FP4, INT4, SparseMatrix (2:4), CoopVector (capability-probed)\n"
+      "  memory      VRAM, cache hierarchy & PCIe/host-device interconnect:\n"
+      "              Device Memory Bandwidth, L0/L1/L2/L3 Cache Bandwidth,\n"
+      "              L0 Vector Cache Latency (16 KB), Cache Latency Curve,\n"
+      "              Interconnect (PCIe H2D/D2H/Bidir, ReBAR, Unified Memory, Multi-GPU P2P)\n"
+      "  scheduling  Multi-queue async overlap & GPU-driven work graphs:\n"
+      "              AsyncOverlap (Graphics + Async Compute + Copy DMA), WorkGraphs (DGC vs AMDX)\n"
       "  graphics    All 3D graphics rendering pipelines (combines 'raster' and 'raytracing', alias: 'gfx'):\n"
       "              Runs both fixed-function rasterization (ROP) and hardware ray tracing\n"
       "  raster      Fixed-function rasterization & ROP pixel fill rates (subset of graphics):\n"
       "              Pixel Fill Rate (RGBA8, RGBA16F HDR, Alpha Blending)\n"
       "  raytracing  Hardware BVH traversal, intersection & scheduling (subset of graphics, alias: 'rt'):\n"
       "              RayRawTraversal (Raw BVH Traversal: Coherent Triangles & Deep Multi-Layer BVH8),\n"
-      "              RayIntersect, RayAnyHit, RayProcedural, RayDivergence, RayASBuild,\n"
-      "              RayScheduling (Megakernel vs DGC / SER)\n"
+      "              RayIntersect, RayAnyHit, RayOMM (Opacity Micromaps), RayProcedural,\n"
+      "              RayDivergence, RayPayload, RayASBuild, RayScheduling (Megakernel vs DGC / SER)\n"
       "  system      Host CPU & RAM system memory:\n"
       "              System Memory Bandwidth (Multi & Single-Threaded), System Memory Latency\n"
       "  all         Run all benchmark groups across enabled devices\n\n"
       "METHODOLOGY DISCLOSURES & EXECUTION NOTES:\n"
-      "  Precisions:  BF16, FP8, FP6, FP4, and INT4 require native hardware and API/driver support\n"
-      "               (e.g., VK_KHR_shader_bfloat16 / GL_EXT_bfloat16 or ROCm v_dot2_f32_bf16 / WMMA);\n"
-      "               unsupported backend/hardware combinations report UNSUPPORTED without silent fallback.\n"
-      "  Synthetic:   Raw BVH Traversal Deep Box Stress evaluates internal node traversal using an idealized\n"
-      "               synthetic 64-AABB model (reporting Box GIS/s under full wavefront occupancy).\n"
-      "  Extensions:  Ray Scheduling SER configurations strictly require VK_EXT_ray_tracing_invocation_reorder;\n"
-      "               unequipped devices report UNSUPPORTED.\n"
-      "  Strict Mode: --strict enforces zero-tolerance numerical validation on output buffers AND aborts execution\n"
-      "               if active background GPU contention is detected (override with -f/--force).\n"
+      "  Baseline:    Vulkan backend targets Vulkan 1.4 with VMA 3.5.0 and persistent disk VkPipelineCache.\n"
+      "  Precisions:  BF16, FP8, FP6, FP4, INT4, SparseMatrix, CoopVector, WorkGraphs, and RayOMM require\n"
+      "               native hardware and API/driver support; unsupported combinations report UNSUPPORTED\n"
+      "               without silent fallback or fake stubs.\n"
+      "  Roofline:    Pass --roofline to print an Empirical Roofline Model table (ridge points & bottleneck\n"
+      "               classification) from measured memory/cache ceilings and compute peaks.\n"
+      "  Validation:  Executed benchmarks always verify output buffers analytically and exit non-zero on INVALID.\n"
+      "  Strict Mode: --strict aborts execution with a non-zero exit code if active background GPU contention\n"
+      "               is detected (override with -f/--force).\n"
   );
 
   bool list_benchmarks = false;
@@ -125,6 +131,10 @@ int main(int argc, char **argv) {
   app.add_flag("--telemetry", show_telemetry,
                "Display hardware performance counters and compiler register telemetry inline in benchmark tables");
 
+  bool show_roofline = false;
+  app.add_flag("--roofline", show_roofline,
+               "Compute and display the Empirical Roofline Model (ridge points and bottleneck analysis)");
+
   bool dump_geometry = false;
   app.add_flag("--dump-geometry", dump_geometry,
                "Dump ray tracing geometry to OBJ files");
@@ -142,7 +152,7 @@ int main(int argc, char **argv) {
 
   bool strict = false;
   app.add_flag("--strict", strict,
-               "Enforce strict validation; aborts on active background GPU contention (override with -f/--force) and exits with non-zero code if any benchmark fails numerical validation");
+               "Enforce strict execution hygiene; aborts with a non-zero exit code if active background GPU contention is detected (override with -f/--force)");
 
   bool force = false;
   app.add_flag("-f,--force", force,
@@ -155,7 +165,7 @@ int main(int argc, char **argv) {
 
   std::string resolution_str = "4k";
   app.add_option("-r,--resolution", resolution_str,
-                 "Resolution preset (4k, 1440p, 1080p, 720p, 1024x1024) or custom WxH (default: 4k)");
+                 "Resolution preset (auto, 8k, 4k, 1440p, 1080p, 720p, 1024x1024) or custom WxH (default: 4k)");
 
   std::vector<int> config_targets;
   app.add_option("-c,--config", config_targets,
@@ -303,6 +313,10 @@ int main(int argc, char **argv) {
       formatter.addResult(res);
     }
     formatter.print();
+    if (show_roofline) {
+      gpubench::RooflineModel::printReport(
+          gpubench::RooflineModel::analyze(run.results));
+    }
 
     // Also support re-exporting to json if requested
     if (want_json_output) {
@@ -327,19 +341,25 @@ int main(int argc, char **argv) {
 #ifdef __linux__
     setenv("MESA_VK_TRACE", "rra", 0);
     setenv("MESA_VK_TRACE_FRAME", "1", 0);
-#elif defined(_WIN32)
-    _putenv("MESA_VK_TRACE=rra");
-    _putenv("MESA_VK_TRACE_FRAME=1");
 #endif
   }
 
-  // Parse resolution (default: fixed 3840x2160 4K UHD across all devices)
+  // Parse resolution (default: fixed 3840x2160 4K UHD across all devices;
+  // 'auto' scales dynamically per-device from detected VRAM capacity)
   uint32_t render_width = 3840;
   uint32_t render_height = 2160;
+  bool auto_resolution = false;
   std::string res_lower;
   for (char c : resolution_str) res_lower.push_back(std::tolower(static_cast<unsigned char>(c)));
 
-  if (res_lower == "4k" || res_lower == "2160p" || res_lower == "uhd" || res_lower == "auto") {
+  if (res_lower == "auto") {
+    auto_resolution = true;
+    render_width = 3840;
+    render_height = 2160;
+  } else if (res_lower == "8k" || res_lower == "4320p") {
+    render_width = 7680;
+    render_height = 4320;
+  } else if (res_lower == "4k" || res_lower == "2160p" || res_lower == "uhd") {
     render_width = 3840;
     render_height = 2160;
   } else if (res_lower == "720p") {
@@ -617,6 +637,21 @@ int main(int argc, char **argv) {
         if (new_context) {
           if (device_idx < new_context->getDevices().size()) {
             new_context->pickDevice(device_idx);
+            if (auto_resolution) {
+              const auto &devInfo = new_context->getCurrentDeviceInfo();
+              const uint64_t vramBytes =
+                  (devInfo.dedicatedVramBytes > 0) ? devInfo.dedicatedVramBytes : devInfo.memorySize;
+              const uint64_t gb = 1024ULL * 1024ULL * 1024ULL;
+              if (vramBytes > 0 && vramBytes < 6ULL * gb) {
+                runner.setResolution(1280, 720);
+              } else if (vramBytes > 0 && vramBytes < 10ULL * gb) {
+                runner.setResolution(1920, 1080);
+              } else if (vramBytes > 0 && vramBytes < 16ULL * gb) {
+                runner.setResolution(2560, 1440);
+              } else {
+                runner.setResolution(3840, 2160);
+              }
+            }
             runner.runForContext(new_context.get(), benchmarks_to_run);
           } else {
             std::cerr << "Warning: Device index " << device_idx
@@ -632,6 +667,10 @@ int main(int argc, char **argv) {
     runner.runHostBenchmarks(benchmarks_to_run);
     if (!runner.onResult) {
       runner.printReport();
+      if (show_roofline) {
+        gpubench::RooflineModel::printReport(
+            gpubench::RooflineModel::analyze(runner.getResults()));
+      }
     }
 
     // Warn about requested benchmark names that matched nothing
@@ -687,8 +726,8 @@ int main(int argc, char **argv) {
       std::cerr << "Error: One or more benchmarks failed or were aborted." << std::endl;
       return EXIT_FAILURE;
     }
-    if (strict && runner.hasValidationFailure()) {
-      std::cerr << "Error: One or more benchmarks failed numerical validation (--strict enabled)." << std::endl;
+    if (runner.hasValidationFailure()) {
+      std::cerr << "Error: One or more executed benchmarks failed numerical validation (INVALID)." << std::endl;
       return EXIT_FAILURE;
     }
 

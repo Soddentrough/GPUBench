@@ -16,7 +16,30 @@
 #include <vector>
 
 #ifdef HAVE_VULKAN
+#ifndef VK_ENABLE_BETA_EXTENSIONS
+#define VK_ENABLE_BETA_EXTENSIONS
+#endif
 #include <vulkan/vulkan.h>
+#include <vulkan/vulkan_beta.h>
+#ifndef VK_EXT_shader_ocp_microscaling_types
+#define VK_EXT_shader_ocp_microscaling_types 1
+#define VK_EXT_SHADER_OCP_MICROSCALING_TYPES_EXTENSION_NAME "VK_EXT_shader_ocp_microscaling_types"
+static constexpr VkStructureType
+    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_OCP_MICROSCALING_TYPES_FEATURES_EXT =
+        static_cast<VkStructureType>(1000672000);
+typedef struct VkPhysicalDeviceShaderOCPMicroscalingTypesFeaturesEXT {
+  VkStructureType sType;
+  void *pNext;
+  VkBool32 shaderFloat4;
+  VkBool32 shaderFloat6;
+  VkBool32 shaderFloat8UnsignedE8M0;
+  VkBool32 shaderMXInt8;
+} VkPhysicalDeviceShaderOCPMicroscalingTypesFeaturesEXT;
+#endif
+static constexpr VkComponentTypeKHR kIsaComponentTypeFloat6E3M2EXT =
+    static_cast<VkComponentTypeKHR>(1000672001);
+static constexpr VkComponentTypeKHR kIsaComponentTypeFloat4E2M1EXT =
+    static_cast<VkComponentTypeKHR>(1000672002);
 #endif
 
 namespace fs = std::filesystem;
@@ -63,8 +86,8 @@ static std::vector<BenchmarkMapping> getBenchmarkMappings() {
       {"FP32", {"fp32"}, 0, "FP32 (Vector)", "fp32.comp.spv", "fp32.co", "fp32.cl"},
       {"FP64", {"fp64"}, 0, "FP64 (Vector)", "fp64.comp.spv", "fp64.co", "fp64.cl"},
       {"FP8", {"fp8", "coopmatrixfp8"}, 0, "FP8 (Matrix)", "coop_matrix_fp8.comp.spv", "fp8_matrix.co", ""},
-      {"FP6", {"fp6"}, 0, "FP6 (Vector)", "", "", ""},
-      {"FP4", {"fp4"}, 0, "FP4 (Vector)", "", "", ""},
+      {"FP6", {"fp6", "mxfp6", "coopmatrixfp6"}, 0, "FP6 (Matrix)", "coop_matrix_fp6.comp.spv", "fp6_matrix.co", ""},
+      {"FP4", {"fp4", "mxfp4", "coopmatrixfp4"}, 0, "FP4 (Matrix)", "coop_matrix_fp4.comp.spv", "fp4_matrix.co", ""},
       {"INT8", {"int8"}, 0, "INT8 (Vector)", "int8.comp.spv", "int8.co", "int8.cl"},
       {"INT8", {"int8", "int8matrix", "coopmatrixint8"}, 1, "INT8 (Matrix)", "coop_matrix_int8.comp.spv", "int8_matrix.co", ""},
       {"INT4", {"int4", "int4matrix"}, 0, "INT4 (Matrix)", "", "int4_matrix.co", ""},
@@ -82,6 +105,7 @@ static std::vector<BenchmarkMapping> getBenchmarkMappings() {
       {"Device Memory Bandwidth", {"membw", "devicememorybandwidth"}, 0, "MemBW 128", "membw_128.comp.spv", "membw_128.co", "membw_128.cl"},
       {"Device Memory Bandwidth", {"membw", "devicememorybandwidth"}, 1, "MemBW 256", "membw_256.comp.spv", "membw_256.co", "membw_256.cl"},
       {"Device Memory Bandwidth", {"membw", "devicememorybandwidth"}, 2, "MemBW 1024", "membw_1024.comp.spv", "membw_1024.co", "membw_1024.cl"},
+      {"Cache Bandwidth", {"cachebw", "l0b", "l1b", "l2b", "l3b"}, 0, "Cache Bandwidth", "cache_bw_robust.comp.spv", "cache_bw_robust.co", "cache_bw_robust.cl"},
       {"L0 Vector Cache Latency", {"l0cache", "l0cachelatency", "cache"}, 0, "L0 Cache Latency", "l0_cache_latency.comp.spv", "l0_cache_latency.co", "l0_cache_latency.cl"},
       {"Cache Latency Curve", {"cachelatencycurve", "cachecurve"}, 0, "Cache Latency Curve", "cache_latency_curve.comp.spv", "cache_latency_curve.co", "cache_latency_curve.cl"},
       {"Pixel Fill Rate", {"pixelfill", "pixelfillrate", "raster", "rop"}, 0, "Pixel Fill Rate (Vertex + Fragment)", "pixel_fill.frag.spv", "", ""},
@@ -102,6 +126,19 @@ static std::vector<BenchmarkMapping> getBenchmarkMappings() {
       {"RayScheduling", {"rayscheduling", "rtscheduling"}, 6, "RT Scheduling — Persistent Threads", "rt_scheduling_persistent.comp.spv", "", ""},
       {"RayScheduling", {"rayscheduling", "rtscheduling"}, 7, "RT Scheduling — RTP Baseline", "rt_scheduling.rgen.spv", "", ""},
       {"RayScheduling", {"rayscheduling", "rtscheduling"}, 8, "RT Scheduling — RTP + SER", "rt_scheduling_ser.rgen.spv", "", ""},
+      {"Interconnect", {"interconnect", "pcie", "rebar", "p2p"}, 4, "Interconnect — Unified Memory Coherency Latency", "interconnect_latency.comp.spv", "", ""},
+      {"AsyncOverlap", {"asyncoverlap", "async", "multiqueue"}, 0, "AsyncOverlap — Graphics Pass", "async_gfx.frag.spv", "", ""},
+      {"AsyncOverlap", {"asyncoverlap", "async", "multiqueue"}, 1, "AsyncOverlap — Async Compute Pass", "async_compute_heavy.comp.spv", "", ""},
+      {"SparseMatrix", {"sparsematrix", "sparse", "sparsity"}, 0, "Sparse FP16 2:4 (Matrix)", "", "sparse_fp16_matrix.co", ""},
+      {"SparseMatrix", {"sparsematrix", "sparse", "sparsity"}, 1, "Sparse FP8 2:4 (Matrix)", "", "sparse_fp8_matrix.co", ""},
+      {"SparseMatrix", {"sparsematrix", "sparse", "sparsity"}, 2, "Sparse INT8 2:4 (Matrix)", "", "sparse_int8_matrix.co", ""},
+      {"CoopVector", {"coopvector", "cooperativevector"}, 0, "CoopVector FP16 MatVec", "coop_vector_fp16.comp.spv", "", ""},
+      {"CoopVector", {"coopvector", "cooperativevector"}, 1, "CoopVector INT8 MatVec", "coop_vector_int8.comp.spv", "", ""},
+      {"WorkGraphs", {"workgraphs", "shaderenqueue"}, 0, "WorkGraphs — DGC Producer", "workgraphs_producer.comp.spv", "", ""},
+      {"WorkGraphs", {"workgraphs", "shaderenqueue"}, 1, "WorkGraphs — DGC Consumer", "workgraphs_consumer.comp.spv", "", ""},
+      {"WorkGraphs", {"workgraphs", "shaderenqueue"}, 2, "WorkGraphs — VK_AMDX_shader_enqueue", "workgraphs_amdx.comp.spv", "", ""},
+      {"RayOMM", {"rayomm", "opacitymicromap", "omm"}, 0, "RayOMM — Any-Hit Baseline", "rayomm.rgen.spv", "", ""},
+      {"RayOMM", {"rayomm", "opacitymicromap", "omm"}, 1, "RayOMM — Hardware Opacity Micromap", "rayomm_omm.rgen.spv", "", ""},
   };
 }
 
@@ -277,14 +314,67 @@ public:
   bool bf16DotProductSupported = false;
   bool bf16CoopMatrixSupported = false;
   bool fp8CoopMatrixSupported = false;
+  bool fp6CoopMatrixSupported = false;
+  bool fp4CoopMatrixSupported = false;
   bool fp16Supported = false;
   bool fp64Supported = false;
   bool int8Supported = false;
+  bool coopVectorSupported = false;
+  bool workGraphsSupported = false;
+  bool opacityMicromapSupported = false;
 
   PFN_vkGetPipelineExecutablePropertiesKHR pfnGetProps = nullptr;
   PFN_vkGetPipelineExecutableStatisticsKHR pfnGetStats = nullptr;
   PFN_vkGetPipelineExecutableInternalRepresentationsKHR pfnGetIrs = nullptr;
   PFN_vkCreateRayTracingPipelinesKHR pfnCreateRTPipelines = nullptr;
+
+  bool selectCoopTile(VkComponentTypeKHR abType, VkComponentTypeKHR cType,
+                      uint32_t &outM, uint32_t &outN, uint32_t &outK) const {
+    outM = 16;
+    outN = 16;
+    outK = 16;
+    auto pfnGetCoopProps =
+        reinterpret_cast<PFN_vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR>(
+            vkGetInstanceProcAddr(
+                instance, "vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR"));
+    if (!pfnGetCoopProps) {
+      return false;
+    }
+    uint32_t propCount = 0;
+    if (pfnGetCoopProps(physicalDevice, &propCount, nullptr) != VK_SUCCESS ||
+        propCount == 0) {
+      return false;
+    }
+    std::vector<VkCooperativeMatrixPropertiesKHR> props(propCount);
+    for (auto &p : props) {
+      p = {};
+      p.sType = VK_STRUCTURE_TYPE_COOPERATIVE_MATRIX_PROPERTIES_KHR;
+    }
+    if (pfnGetCoopProps(physicalDevice, &propCount, props.data()) != VK_SUCCESS) {
+      return false;
+    }
+    uint64_t bestVol = 0;
+    for (const auto &p : props) {
+      if (p.AType == abType && p.BType == abType && p.CType == cType &&
+          p.ResultType == cType && p.scope == VK_SCOPE_SUBGROUP_KHR &&
+          p.MSize > 0 && p.NSize > 0 && p.KSize > 0) {
+        if (p.MSize == 16 && p.NSize == 16 && p.KSize == 16) {
+          outM = 16;
+          outN = 16;
+          outK = 16;
+          return true;
+        }
+        const uint64_t vol = static_cast<uint64_t>(p.MSize) * p.NSize * p.KSize;
+        if (vol > bestVol) {
+          bestVol = vol;
+          outM = p.MSize;
+          outN = p.NSize;
+          outK = p.KSize;
+        }
+      }
+    }
+    return bestVol > 0;
+  }
 
   bool init(uint32_t deviceIdx) {
     VkApplicationInfo appInfo{};
@@ -293,14 +383,14 @@ public:
     appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
     appInfo.pEngineName = "GPUBench";
     appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
-    appInfo.apiVersion = VK_API_VERSION_1_3;
+    appInfo.apiVersion = VK_API_VERSION_1_4;
 
     VkInstanceCreateInfo instInfo{};
     instInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
     instInfo.pApplicationInfo = &appInfo;
 
     if (vkCreateInstance(&instInfo, nullptr, &instance) != VK_SUCCESS) {
-      std::cerr << "Error: Failed to create Vulkan instance for ISA inspection.\n";
+      std::cerr << "Error: Failed to create Vulkan 1.4 instance for ISA inspection.\n";
       return false;
     }
 
@@ -312,6 +402,19 @@ public:
     }
     std::vector<VkPhysicalDevice> devs(devCount);
     vkEnumeratePhysicalDevices(instance, &devCount, devs.data());
+    std::stable_sort(devs.begin(), devs.end(),
+                     [](VkPhysicalDevice a, VkPhysicalDevice b) {
+                       VkPhysicalDeviceProperties pa{}, pb{};
+                       vkGetPhysicalDeviceProperties(a, &pa);
+                       vkGetPhysicalDeviceProperties(b, &pb);
+                       auto rank = [](VkPhysicalDeviceType t) -> int {
+                         if (t == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) return 0;
+                         if (t == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU) return 1;
+                         if (t == VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU) return 2;
+                         return 3;
+                       };
+                       return rank(pa.deviceType) < rank(pb.deviceType);
+                     });
     if (deviceIdx >= devCount) {
       deviceIdx = 0;
     }
@@ -361,7 +464,9 @@ public:
         VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME,
         "VK_KHR_shader_bfloat16",
         "VK_KHR_cooperative_matrix",
+        "VK_NV_cooperative_vector",
         "VK_EXT_shader_float8",
+        VK_EXT_SHADER_OCP_MICROSCALING_TYPES_EXTENSION_NAME,
         "VK_KHR_shader_float16_int8",
         "VK_KHR_16bit_storage",
         "VK_KHR_8bit_storage",
@@ -372,6 +477,8 @@ public:
         "VK_KHR_acceleration_structure",
         "VK_KHR_ray_query",
         "VK_KHR_ray_tracing_pipeline",
+        "VK_EXT_opacity_micromap",
+        "VK_KHR_synchronization2",
         "VK_EXT_ray_tracing_invocation_reorder",
         "VK_NV_ray_tracing_invocation_reorder",
         "VK_KHR_deferred_host_operations",
@@ -396,9 +503,17 @@ public:
     fp8Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT8_FEATURES_EXT;
     bf16Features.pNext = &fp8Features;
 
+    VkPhysicalDeviceShaderOCPMicroscalingTypesFeaturesEXT ocpFeatures{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_OCP_MICROSCALING_TYPES_FEATURES_EXT,
+        nullptr, VK_FALSE, VK_FALSE, VK_FALSE, VK_FALSE};
     VkPhysicalDeviceCooperativeMatrixFeaturesKHR coopFeatures{};
     coopFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR;
-    fp8Features.pNext = &coopFeatures;
+    if (hasExt(VK_EXT_SHADER_OCP_MICROSCALING_TYPES_EXTENSION_NAME)) {
+      fp8Features.pNext = &ocpFeatures;
+      ocpFeatures.pNext = &coopFeatures;
+    } else {
+      fp8Features.pNext = &coopFeatures;
+    }
 
     VkPhysicalDeviceRayQueryFeaturesKHR rqFeatures{};
     rqFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR;
@@ -416,9 +531,17 @@ public:
     asFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
     serFeatures.pNext = &asFeatures;
 
+    VkPhysicalDeviceOpacityMicromapFeaturesEXT ommFeatures{};
+    ommFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_OPACITY_MICROMAP_FEATURES_EXT;
+
     VkPhysicalDeviceVulkan11Features v11Features{};
     v11Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
-    asFeatures.pNext = &v11Features;
+    if (hasExt("VK_EXT_opacity_micromap")) {
+      asFeatures.pNext = &ommFeatures;
+      ommFeatures.pNext = &v11Features;
+    } else {
+      asFeatures.pNext = &v11Features;
+    }
 
     VkPhysicalDeviceVulkan12Features v12Features{};
     v12Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
@@ -452,6 +575,10 @@ public:
                     hasExt("VK_NV_ray_tracing_invocation_reorder"));
     coopMatrixSupported = hasExt(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME) &&
                           (coopFeatures.cooperativeMatrix == VK_TRUE);
+    coopVectorSupported = hasExt("VK_NV_cooperative_vector");
+    workGraphsSupported = hasExt("VK_AMDX_shader_enqueue");
+    opacityMicromapSupported = hasExt("VK_EXT_opacity_micromap") &&
+                               (ommFeatures.micromap == VK_TRUE);
     bool hasBf16 = hasExt("VK_KHR_shader_bfloat16") || hasExt("VK_EXT_shader_bfloat16");
     bf16DotProductSupported = hasBf16 && (bf16Features.shaderBFloat16DotProduct == VK_TRUE);
     bf16CoopMatrixSupported = hasBf16 && coopMatrixSupported &&
@@ -459,6 +586,16 @@ public:
     fp8CoopMatrixSupported = hasExt("VK_EXT_shader_float8") && coopMatrixSupported &&
                              (fp8Features.shaderFloat8 == VK_TRUE) &&
                              (fp8Features.shaderFloat8CooperativeMatrix == VK_TRUE);
+    bool hasOcp = hasExt(VK_EXT_SHADER_OCP_MICROSCALING_TYPES_EXTENSION_NAME);
+    uint32_t tm = 16, tn = 16, tk = 16;
+    fp6CoopMatrixSupported = hasOcp && coopMatrixSupported && subgroupSize32Supported &&
+                             (ocpFeatures.shaderFloat6 == VK_TRUE) &&
+                             selectCoopTile(kIsaComponentTypeFloat6E3M2EXT,
+                                            VK_COMPONENT_TYPE_FLOAT32_KHR, tm, tn, tk);
+    fp4CoopMatrixSupported = hasOcp && coopMatrixSupported && subgroupSize32Supported &&
+                             (ocpFeatures.shaderFloat4 == VK_TRUE) &&
+                             selectCoopTile(kIsaComponentTypeFloat4E2M1EXT,
+                                            VK_COMPONENT_TYPE_FLOAT32_KHR, tm, tn, tk);
     fp16Supported = (v12Features.shaderFloat16 == VK_TRUE);
     fp64Supported = (features2.features.shaderFloat64 == VK_TRUE);
     int8Supported = (v12Features.shaderInt8 == VK_TRUE);
@@ -542,10 +679,35 @@ public:
         if (opcode == 5341 /* OpTypeAccelerationStructureKHR */) {
           return true;
         }
+        if (opcode == 54 /* OpFunction */) {
+          break;
+        }
         idx += len;
       }
     }
     return false;
+  }
+
+  static uint32_t spirvGetLocalSizeX(const std::vector<uint32_t> &spvCode) {
+    if (spvCode.size() >= 5 && spvCode[0] == 0x07230203) {
+      size_t idx = 5;
+      while (idx < spvCode.size()) {
+        uint32_t word = spvCode[idx];
+        uint16_t opcode = static_cast<uint16_t>(word & 0xFFFF);
+        uint16_t len = static_cast<uint16_t>((word >> 16) & 0xFFFF);
+        if (len == 0 || idx + len > spvCode.size())
+          break;
+        if (opcode == 16 /* OpExecutionMode */ && len >= 6 &&
+            spvCode[idx + 2] == 17 /* ExecutionModeLocalSize */) {
+          return spvCode[idx + 3];
+        }
+        if (opcode == 54 /* OpFunction */) {
+          break;
+        }
+        idx += len;
+      }
+    }
+    return 0;
   }
 
   void printPipelineExecutables(VkPipeline pipeline, const KernelArtifact &art, bool fullIsa) {
@@ -654,9 +816,10 @@ public:
 
   bool inspectRasterSpv(const KernelArtifact &art, bool fullIsa) {
     fs::path dir = art.filePath.parent_path();
-    fs::path vertPath = dir / "pixel_fill.vert.spv";
-    fs::path fragPath = dir / "pixel_fill.frag.spv";
     std::string fname = art.filePath.filename().string();
+    const bool isAsyncGfx = (fname.rfind("async_gfx.", 0) == 0);
+    fs::path vertPath = dir / (isAsyncGfx ? "async_gfx.vert.spv" : "pixel_fill.vert.spv");
+    fs::path fragPath = dir / (isAsyncGfx ? "async_gfx.frag.spv" : "pixel_fill.frag.spv");
     if (fname.find(".vert.spv") != std::string::npos) {
       vertPath = art.filePath;
     } else if (fname.find(".frag.spv") != std::string::npos) {
@@ -672,13 +835,31 @@ public:
       return false;
     }
 
+    VkDescriptorSetLayout dsl = VK_NULL_HANDLE;
+    if (isAsyncGfx) {
+      VkDescriptorSetLayoutBinding b{};
+      b.binding = 0;
+      b.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+      b.descriptorCount = 1;
+      b.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+      VkDescriptorSetLayoutCreateInfo dslInfo{};
+      dslInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+      dslInfo.bindingCount = 1;
+      dslInfo.pBindings = &b;
+      vkCreateDescriptorSetLayout(device, &dslInfo, nullptr, &dsl);
+    }
+
     VkPushConstantRange pcRange{};
     pcRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
     pcRange.offset = 0;
-    pcRange.size = 16;
+    pcRange.size = 32;
 
     VkPipelineLayoutCreateInfo plInfo{};
     plInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    if (dsl != VK_NULL_HANDLE) {
+      plInfo.setLayoutCount = 1;
+      plInfo.pSetLayouts = &dsl;
+    }
     plInfo.pushConstantRangeCount = 1;
     plInfo.pPushConstantRanges = &pcRange;
 
@@ -763,6 +944,9 @@ public:
     }
 
     vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
+    if (dsl != VK_NULL_HANDLE) {
+      vkDestroyDescriptorSetLayout(device, dsl, nullptr);
+    }
     vkDestroyShaderModule(device, vertMod, nullptr);
     vkDestroyShaderModule(device, fragMod, nullptr);
     return res == VK_SUCCESS;
@@ -782,6 +966,7 @@ public:
       prefix = prefix.substr(0, dotPos);
     }
     std::string basePrefix = prefix;
+    bool isOmm = false;
     if (prefix == "rt_scheduling_ser" || prefix == "raydiv_pipeline_ser") {
       if (!serSupported) {
         std::cout << "━━━ [vulkan] " << art.configName
@@ -791,6 +976,16 @@ public:
         return true;
       }
       basePrefix = (prefix == "rt_scheduling_ser") ? "rt_scheduling" : "raydiv_pipeline";
+    } else if (prefix == "rayomm_omm") {
+      if (!opacityMicromapSupported) {
+        std::cout << "━━━ [vulkan] " << art.configName
+                  << " (" << art.filePath.filename().string() << ") ━━━\n"
+                  << "  [Skipped] Hardware Opacity Micromap (VK_EXT_opacity_micromap) is not "
+                     "exposed by the active Vulkan driver (" << driverInfo << ").\n\n";
+        return true;
+      }
+      basePrefix = "rayomm";
+      isOmm = true;
     } else if (prefix.rfind("raydiv_pipeline_", 0) == 0) {
       basePrefix = "raydiv_pipeline";
     }
@@ -918,6 +1113,9 @@ public:
     rtPipeInfo.sType = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR;
     rtPipeInfo.flags = VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR |
                        VK_PIPELINE_CREATE_CAPTURE_INTERNAL_REPRESENTATIONS_BIT_KHR;
+    if (isOmm) {
+      rtPipeInfo.flags |= VK_PIPELINE_CREATE_RAY_TRACING_OPACITY_MICROMAP_BIT_EXT;
+    }
     rtPipeInfo.stageCount = static_cast<uint32_t>(stages.size());
     rtPipeInfo.pStages = stages.data();
     rtPipeInfo.groupCount = static_cast<uint32_t>(groups.size());
@@ -958,10 +1156,20 @@ public:
       return inspectRasterSpv(art, fullIsa);
     }
 
-    // Pre-flight capability checks to avoid compiling shaders whose required
-    // Vulkan sub-features are not supported by the active device/driver
-    // (e.g. bf16.comp requires shaderBFloat16DotProduct, which is false on RDNA 3.5 / gfx1151
-    // where RADV only exposes shaderBFloat16CooperativeMatrix, causing ACO to crash on scalar bfmul/bffma).
+    if ((fname == "coop_vector_fp16.comp.spv" || fname == "coop_vector_int8.comp.spv") &&
+        !coopVectorSupported) {
+      std::cout << "━━━ [vulkan] " << art.configName << " (" << fname << ") ━━━\n"
+                << "  [Skipped] Cooperative vector (VK_NV_cooperative_vector) "
+                   "is not supported on " << deviceName << " (" << driverInfo << ").\n\n";
+      return true;
+    }
+    if (fname == "workgraphs_amdx.comp.spv" && !workGraphsSupported) {
+      std::cout << "━━━ [vulkan] " << art.configName << " (" << fname << ") ━━━\n"
+                << "  [Skipped] GPU Work Graphs (VK_AMDX_shader_enqueue) "
+                   "is not exposed on " << deviceName << " (" << driverInfo << ").\n\n";
+      return true;
+    }
+
     if (fname == "bf16.comp.spv" && !bf16DotProductSupported) {
       std::cout << "━━━ [vulkan] " << art.configName << " (" << fname << ") ━━━\n"
                 << "  [Skipped] BF16 vector dot product (VK_KHR_shader_bfloat16::shaderBFloat16DotProduct / v_dot2_bf16_bf16) "
@@ -978,6 +1186,18 @@ public:
     if (fname == "coop_matrix_fp8.comp.spv" && !fp8CoopMatrixSupported) {
       std::cout << "━━━ [vulkan] " << art.configName << " (" << fname << ") ━━━\n"
                 << "  [Skipped] FP8 cooperative matrix (VK_EXT_shader_float8::shaderFloat8CooperativeMatrix) "
+                   "is not supported on " << deviceName << " (" << driverInfo << ").\n\n";
+      return true;
+    }
+    if (fname == "coop_matrix_fp6.comp.spv" && !fp6CoopMatrixSupported) {
+      std::cout << "━━━ [vulkan] " << art.configName << " (" << fname << ") ━━━\n"
+                << "  [Skipped] FP6 cooperative matrix (VK_EXT_shader_ocp_microscaling_types::shaderFloat6 + Float6E3M2EXT tile) "
+                   "is not supported on " << deviceName << " (" << driverInfo << ").\n\n";
+      return true;
+    }
+    if (fname == "coop_matrix_fp4.comp.spv" && !fp4CoopMatrixSupported) {
+      std::cout << "━━━ [vulkan] " << art.configName << " (" << fname << ") ━━━\n"
+                << "  [Skipped] FP4 cooperative matrix (VK_EXT_shader_ocp_microscaling_types::shaderFloat4 + Float4E2M1EXT tile) "
                    "is not supported on " << deviceName << " (" << driverInfo << ").\n\n";
       return true;
     }
@@ -1044,8 +1264,81 @@ public:
     VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
     vkCreatePipelineLayout(device, &plInfo, nullptr, &pipelineLayout);
 
-    // Match VulkanContext::createKernel exactly: request Wave32 (requiredSubgroupSize = 32)
-    // so RDNA 3 / RDNA 4 VOPD dual-issue instructions (v_dual_fmac_f32, etc.) are enabled!
+    // Populate cooperative matrix specialization constants [TILE_M, TILE_N, TILE_K, LOCAL_SIZE_X] when applicable
+    bool useCoopSpec = (fname.rfind("coop_matrix_", 0) == 0);
+    uint32_t coopSpecVals[4] = {16u, 16u, 16u, subgroupSize32Supported ? 32u : 64u};
+    if (useCoopSpec) {
+      VkComponentTypeKHR abT = VK_COMPONENT_TYPE_FLOAT16_KHR;
+      VkComponentTypeKHR cT = VK_COMPONENT_TYPE_FLOAT32_KHR;
+      if (fname == "coop_matrix_bf16.comp.spv") {
+        abT = VK_COMPONENT_TYPE_BFLOAT16_KHR;
+      } else if (fname == "coop_matrix_fp8.comp.spv") {
+        abT = static_cast<VkComponentTypeKHR>(1000491002); // FLOAT8_E4M3_EXT
+      } else if (fname == "coop_matrix_fp6.comp.spv") {
+        abT = kIsaComponentTypeFloat6E3M2EXT;
+      } else if (fname == "coop_matrix_fp4.comp.spv") {
+        abT = kIsaComponentTypeFloat4E2M1EXT;
+      } else if (fname == "coop_matrix_int8.comp.spv") {
+        abT = VK_COMPONENT_TYPE_SINT8_KHR;
+        cT = VK_COMPONENT_TYPE_SINT32_KHR;
+      }
+      selectCoopTile(abT, cT, coopSpecVals[0], coopSpecVals[1], coopSpecVals[2]);
+    }
+    VkSpecializationMapEntry coopSpecEntries[4] = {
+        {0, 0, sizeof(uint32_t)},
+        {1, sizeof(uint32_t), sizeof(uint32_t)},
+        {2, 2 * sizeof(uint32_t), sizeof(uint32_t)},
+        {3, 3 * sizeof(uint32_t), sizeof(uint32_t)}};
+    VkSpecializationInfo coopSpecInfo{4, coopSpecEntries, sizeof(coopSpecVals), coopSpecVals};
+
+    if (fname == "workgraphs_amdx.comp.spv") {
+      auto pfnCreateGraph =
+          reinterpret_cast<PFN_vkCreateExecutionGraphPipelinesAMDX>(
+              vkGetDeviceProcAddr(device, "vkCreateExecutionGraphPipelinesAMDX"));
+      if (!pfnCreateGraph) {
+        vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
+        vkDestroyDescriptorSetLayout(device, dsl, nullptr);
+        vkDestroyShaderModule(device, shaderModule, nullptr);
+        return false;
+      }
+      VkPipelineShaderStageNodeCreateInfoAMDX n0{
+          VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_NODE_CREATE_INFO_AMDX, nullptr,
+          "producerNode", 0};
+      VkPipelineShaderStageNodeCreateInfoAMDX n1{
+          VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_NODE_CREATE_INFO_AMDX, nullptr,
+          "consumerNode", 1};
+      VkPipelineShaderStageCreateInfo wgStages[2]{};
+      wgStages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+      wgStages[0].pNext = &n0;
+      wgStages[0].stage = VK_SHADER_STAGE_COMPUTE_BIT;
+      wgStages[0].module = shaderModule;
+      wgStages[0].pName = "producerNode";
+      wgStages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+      wgStages[1].pNext = &n1;
+      wgStages[1].stage = VK_SHADER_STAGE_COMPUTE_BIT;
+      wgStages[1].module = shaderModule;
+      wgStages[1].pName = "consumerNode";
+
+      VkExecutionGraphPipelineCreateInfoAMDX egCi{
+          VK_STRUCTURE_TYPE_EXECUTION_GRAPH_PIPELINE_CREATE_INFO_AMDX};
+      egCi.flags = VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR |
+                   VK_PIPELINE_CREATE_CAPTURE_INTERNAL_REPRESENTATIONS_BIT_KHR;
+      egCi.stageCount = 2;
+      egCi.pStages = wgStages;
+      egCi.layout = pipelineLayout;
+
+      VkPipeline wgPipe = VK_NULL_HANDLE;
+      VkResult egRes = pfnCreateGraph(device, VK_NULL_HANDLE, 1, &egCi, nullptr, &wgPipe);
+      if (egRes == VK_SUCCESS && wgPipe != VK_NULL_HANDLE) {
+        printPipelineExecutables(wgPipe, art, fullIsa);
+        vkDestroyPipeline(device, wgPipe, nullptr);
+      }
+      vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
+      vkDestroyDescriptorSetLayout(device, dsl, nullptr);
+      vkDestroyShaderModule(device, shaderModule, nullptr);
+      return egRes == VK_SUCCESS;
+    }
+
     VkPipelineShaderStageRequiredSubgroupSizeCreateInfo reqSubgroupInfo{};
     reqSubgroupInfo.sType =
         VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO;
@@ -1059,9 +1352,15 @@ public:
     pipeInfo.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
     pipeInfo.stage.module = shaderModule;
     pipeInfo.stage.pName = "main";
+    if (useCoopSpec) {
+      pipeInfo.stage.pSpecializationInfo = &coopSpecInfo;
+    }
     if (subgroupSize32Supported) {
       pipeInfo.stage.pNext = &reqSubgroupInfo;
-      pipeInfo.stage.flags |= VK_PIPELINE_SHADER_STAGE_CREATE_REQUIRE_FULL_SUBGROUPS_BIT;
+      uint32_t localSizeX = spirvGetLocalSizeX(spvCode);
+      if (localSizeX > 0 && (localSizeX % 32u == 0u)) {
+        pipeInfo.stage.flags |= VK_PIPELINE_SHADER_STAGE_CREATE_REQUIRE_FULL_SUBGROUPS_BIT;
+      }
     }
     pipeInfo.layout = pipelineLayout;
 

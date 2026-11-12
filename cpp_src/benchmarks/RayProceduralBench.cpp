@@ -113,7 +113,11 @@ void RayProceduralBench::Setup(IComputeContext &context,
     kernel = vContext->createRTPipeline(
         (kdir / "vulkan" / "rayprocedural.rgen").string(),
         (kdir / "vulkan" / "rayprocedural.rmiss").string(), hit, {}, rint, 3);
-
+    if (kernel) {
+      vContext->setKernelAS(kernel, 0, (AccelerationStructure)aabbTlas);
+      vContext->setKernelArg(kernel, 1, resultBuffer);
+      vContext->setKernelArg(kernel, 2, sphereBuffer);
+    }
   }
 }
 
@@ -277,16 +281,13 @@ void RayProceduralBench::buildAS() {
 }
 
 void RayProceduralBench::Run(uint32_t config_idx) {
+  if (!kernel) return;
   VulkanContext *vContext = static_cast<VulkanContext *>(context);
-  if (lastRunConfig != static_cast<int>(config_idx)) {
+  if (lastRunConfig != -1 && lastRunConfig != static_cast<int>(config_idx)) {
     uint32_t zero = 0;
     context->writeBuffer(resultBuffer, 0, sizeof(uint32_t), &zero);
-    lastRunConfig = static_cast<int>(config_idx);
   }
-  
-  vContext->setKernelAS(kernel, 0, (AccelerationStructure)aabbTlas);
-  vContext->setKernelArg(kernel, 1, resultBuffer);
-  vContext->setKernelArg(kernel, 2, sphereBuffer);
+  lastRunConfig = static_cast<int>(config_idx);
 
   vContext->setKernelArg(kernel, 3, sizeof(uint32_t), &rayCount);
 

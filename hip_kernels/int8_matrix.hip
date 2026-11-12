@@ -2,14 +2,15 @@
 #include <hip/hip_runtime.h>
 
 extern "C" __global__ void run_benchmark(const int* in_data, int* out_data) {
-    uint32_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+    uint32_t wg_id = blockIdx.y * gridDim.x + blockIdx.x;
+    uint32_t idx = wg_id * blockDim.x + threadIdx.x;
     uint32_t lane = threadIdx.x & 31u;
 
 #if defined(__gfx1200__) || defined(__gfx1201__)
     typedef int int2_v __attribute__((vector_size(8)));
     typedef int int8_v __attribute__((vector_size(32)));
 
-    uint32_t wg_offset = (blockIdx.x & 4095u) * 32u;
+    uint32_t wg_offset = (wg_id & 4095u) * 32u;
     const int2_v* iptr = reinterpret_cast<const int2_v*>(in_data) + wg_offset;
     int2_v a = iptr[lane];
     int2_v b = iptr[lane + 32u];
@@ -41,7 +42,7 @@ extern "C" __global__ void run_benchmark(const int* in_data, int* out_data) {
     using int4_v = __attribute__((ext_vector_type(4))) int;
     using int8_v = __attribute__((ext_vector_type(8))) int;
 
-    uint32_t wg_offset = (blockIdx.x & 4095u) * 16u;
+    uint32_t wg_offset = (wg_id & 4095u) * 16u;
     const int4_v* iptr = reinterpret_cast<const int4_v*>(in_data) + wg_offset;
     int4_v a = iptr[lane];
     int4_v b = iptr[lane + 32u];
@@ -69,6 +70,70 @@ extern "C" __global__ void run_benchmark(const int* in_data, int* out_data) {
 
     int8_v c = c0 + c1 + c2 + c3 + c4 + c5 + c6 + c7;
     out_data[idx % 524288u] = c[0] + c[1] + c[2] + c[3] + c[4] + c[5] + c[6] + c[7];
+#elif defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__) || defined(__gfx950__)
+    using int4_out_v = __attribute__((ext_vector_type(4))) int;
+
+    uint32_t lane64 = threadIdx.x & 63u;
+    uint32_t wg_offset = (wg_id & 2047u) * 64u;
+    const long long* lptr = reinterpret_cast<const long long*>(in_data) + wg_offset;
+    long long a = lptr[lane64];
+    long long b = lptr[(lane64 + 32u) & 63u];
+
+    int seed = static_cast<int>(a & 0xFF) + static_cast<int>((lane64 & 31u) + 1u);
+    int4_out_v c0 = {seed * 1, seed, seed, seed};
+    int4_out_v c1 = {seed * 2, seed, seed, seed};
+    int4_out_v c2 = {seed * 3, seed, seed, seed};
+    int4_out_v c3 = {seed * 4, seed, seed, seed};
+    int4_out_v c4 = {seed * 5, seed, seed, seed};
+    int4_out_v c5 = {seed * 6, seed, seed, seed};
+    int4_out_v c6 = {seed * 7, seed, seed, seed};
+    int4_out_v c7 = {seed * 8, seed, seed, seed};
+
+    for (int i = 0; i < 2048; i++) {
+        c0 = __builtin_amdgcn_mfma_i32_16x16x32_i8(a, b, c0, 0, 0, 0);
+        c1 = __builtin_amdgcn_mfma_i32_16x16x32_i8(a, b, c1, 0, 0, 0);
+        c2 = __builtin_amdgcn_mfma_i32_16x16x32_i8(a, b, c2, 0, 0, 0);
+        c3 = __builtin_amdgcn_mfma_i32_16x16x32_i8(a, b, c3, 0, 0, 0);
+        c4 = __builtin_amdgcn_mfma_i32_16x16x32_i8(a, b, c4, 0, 0, 0);
+        c5 = __builtin_amdgcn_mfma_i32_16x16x32_i8(a, b, c5, 0, 0, 0);
+        c6 = __builtin_amdgcn_mfma_i32_16x16x32_i8(a, b, c6, 0, 0, 0);
+        c7 = __builtin_amdgcn_mfma_i32_16x16x32_i8(a, b, c7, 0, 0, 0);
+    }
+
+    int4_out_v c = c0 + c1 + c2 + c3 + c4 + c5 + c6 + c7;
+    out_data[idx % 524288u] = (c[0] + c[1] + c[2] + c[3]) * 2;
+#elif defined(__gfx90a__)
+    using int4_out_v = __attribute__((ext_vector_type(4))) int;
+
+    uint32_t lane64 = threadIdx.x & 63u;
+    uint32_t wg_offset = (wg_id & 4095u) * 64u;
+    const int* iptr = in_data + wg_offset;
+    int a = iptr[lane64];
+    int b = iptr[(lane64 + 32u) & 63u];
+
+    int seed = (a & 0xFF) + static_cast<int>((lane64 & 31u) + 1u);
+    int4_out_v c0 = {seed * 1, seed, seed, seed};
+    int4_out_v c1 = {seed * 2, seed, seed, seed};
+    int4_out_v c2 = {seed * 3, seed, seed, seed};
+    int4_out_v c3 = {seed * 4, seed, seed, seed};
+    int4_out_v c4 = {seed * 5, seed, seed, seed};
+    int4_out_v c5 = {seed * 6, seed, seed, seed};
+    int4_out_v c6 = {seed * 7, seed, seed, seed};
+    int4_out_v c7 = {seed * 8, seed, seed, seed};
+
+    for (int i = 0; i < 4096; i++) {
+        c0 = __builtin_amdgcn_mfma_i32_16x16x16i8(a, b, c0, 0, 0, 0);
+        c1 = __builtin_amdgcn_mfma_i32_16x16x16i8(a, b, c1, 0, 0, 0);
+        c2 = __builtin_amdgcn_mfma_i32_16x16x16i8(a, b, c2, 0, 0, 0);
+        c3 = __builtin_amdgcn_mfma_i32_16x16x16i8(a, b, c3, 0, 0, 0);
+        c4 = __builtin_amdgcn_mfma_i32_16x16x16i8(a, b, c4, 0, 0, 0);
+        c5 = __builtin_amdgcn_mfma_i32_16x16x16i8(a, b, c5, 0, 0, 0);
+        c6 = __builtin_amdgcn_mfma_i32_16x16x16i8(a, b, c6, 0, 0, 0);
+        c7 = __builtin_amdgcn_mfma_i32_16x16x16i8(a, b, c7, 0, 0, 0);
+    }
+
+    int4_out_v c = c0 + c1 + c2 + c3 + c4 + c5 + c6 + c7;
+    out_data[idx % 524288u] = (c[0] + c[1] + c[2] + c[3]) * 2;
 #else
     out_data[idx % 524288u] = 0;
 #endif

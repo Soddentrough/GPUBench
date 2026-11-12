@@ -4,10 +4,8 @@
 #include "core/ResultFormatter.h"
 #include "utils/KernelPath.h"
 
-#define private public
 #include "benchmarks/LdsBankConflictBench.h"
 #include "benchmarks/Bf16Bench.h"
-#undef private
 
 #include <vector>
 #include <iostream>

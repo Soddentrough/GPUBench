@@ -1,53 +1,18 @@
 #include "TelemetryWorker.h"
-#include <filesystem>
-#include <fstream>
-#include <sstream>
-#include <iostream>
-#include <chrono>
-#include <algorithm>
+#include "core/RunnerAPI.h"
+#ifdef HAVE_VULKAN
+#include "core/VulkanContext.h"
+#endif
 
-namespace fs = std::filesystem;
+#include <algorithm>
+#include <chrono>
 
 namespace gpubench::gui {
 
-static float readSysfsFloat(const std::string& path, float fallback = 0.0f, float scale = 1.0f) {
-    if (path.empty()) return fallback;
-    std::ifstream file(path);
-    if (!file.is_open()) return fallback;
-    float val = 0.0f;
-    if (file >> val) {
-        return val * scale;
-    }
-    return fallback;
-}
-
-static uint64_t readSysfsUint64(const std::string& path, uint64_t fallback = 0) {
-    if (path.empty()) return fallback;
-    std::ifstream file(path);
-    if (!file.is_open()) return fallback;
-    uint64_t val = 0;
-    if (file >> val) {
-        return val;
-    }
-    return fallback;
-}
-
-static std::string readSysfsString(const std::string& path, const std::string& fallback = "") {
-    if (path.empty()) return fallback;
-    std::ifstream file(path);
-    if (!file.is_open()) return fallback;
-    std::string line;
-    if (std::getline(file, line)) {
-        while (!line.empty() && (line.back() == '\n' || line.back() == '\r' || line.back() == ' ')) {
-            line.pop_back();
-        }
-        return line;
-    }
-    return fallback;
-}
-
 TelemetryWorker::TelemetryWorker() {
-    m_startTime = std::chrono::steady_clock::now();
+    auto now = std::chrono::steady_clock::now();
+    m_startTime = now;
+    m_idleStartTime = now;
     discoverDevices();
 }
 
@@ -55,74 +20,69 @@ TelemetryWorker::~TelemetryWorker() {
     stop();
 }
 
+void TelemetryWorker::refreshDevices() {
+    discoverDevices();
+}
+
 void TelemetryWorker::discoverDevices() {
     std::lock_guard<std::mutex> lock(m_mutex);
-    m_devicePaths.clear();
+    m_pollStates.clear();
     m_snapshots.clear();
 
-    const std::string drmRoot = "/sys/class/drm";
-    if (!fs::exists(drmRoot)) return;
+    std::vector<GpuTelemetryData> hwGpus = HardwareTelemetry::queryAllGpus();
+    std::vector<DeviceProfile> profiles = GetDeviceProfilesAPI();
 
-    for (const auto& entry : fs::directory_iterator(drmRoot)) {
-        std::string filename = entry.path().filename().string();
-        // Match only card0, card1, etc. - skip card0-DP-1, etc.
-        if (filename.rfind("card", 0) == 0 && filename.find('-') == std::string::npos) {
-            std::string cardIdxStr = filename.substr(4);
-            try {
-                uint32_t cardIdx = std::stoul(cardIdxStr);
-                DeviceSysfsPaths paths;
-                paths.deviceIndex = cardIdx;
-                paths.cardName = filename;
-                paths.drmDeviceDir = entry.path().string() + "/device";
+    size_t count = std::max(hwGpus.size(), profiles.size());
+    auto now = std::chrono::steady_clock::now();
 
-                // Find hwmon dir
-                std::string hwmonBase = paths.drmDeviceDir + "/hwmon";
-                if (fs::exists(hwmonBase)) {
-                    for (const auto& hEntry : fs::directory_iterator(hwmonBase)) {
-                        std::string hName = hEntry.path().filename().string();
-                        if (hName.rfind("hwmon", 0) == 0) {
-                            paths.hwmonDir = hEntry.path().string();
-                            break;
-                        }
-                    }
-                }
+    for (size_t i = 0; i < count; ++i) {
+        uint32_t devIdx = static_cast<uint32_t>(i);
+        std::string devName;
+        std::string pciBus;
 
-                m_devicePaths.push_back(paths);
-            } catch (...) {
-                continue;
+        for (const auto& prof : profiles) {
+            if (prof.deviceIndex == devIdx && !prof.deviceName.empty()) {
+                devName = prof.deviceName;
+                break;
             }
         }
+        if (i < hwGpus.size()) {
+            if (devName.empty() && !hwGpus[i].deviceName.empty()) {
+                devName = hwGpus[i].deviceName;
+            }
+            pciBus = hwGpus[i].pciBusId;
+        }
+        if (devName.empty()) {
+            devName = "GPU " + std::to_string(devIdx);
+        }
+
+        DevicePollState pollState;
+        pollState.deviceIndex = devIdx;
+        if (i < hwGpus.size() && hwGpus[i].isAvailable) {
+            pollState.prevSample = hwGpus[i];
+            pollState.prevSampleTime = now;
+            pollState.hasPrevSample = true;
+        }
+        m_pollStates.push_back(pollState);
+
+        DeviceTelemetrySnapshot snap;
+        snap.deviceIndex = devIdx;
+        snap.name = "GPU " + std::to_string(devIdx) + ": " + devName;
+        snap.pciBus = pciBus;
+        m_snapshots.push_back(std::move(snap));
     }
 
-    // Sort paths by canonical PCI path to match Vulkan and ROCm device enumeration
-    // (PCI 0000:23:00.0 is GPU 0, PCI 0000:4d:00.0 is GPU 1)
-    std::sort(m_devicePaths.begin(), m_devicePaths.end(), [](const DeviceSysfsPaths& a, const DeviceSysfsPaths& b) {
-        std::string pciA = fs::exists(a.drmDeviceDir) ? fs::canonical(a.drmDeviceDir).string() : a.drmDeviceDir;
-        std::string pciB = fs::exists(b.drmDeviceDir) ? fs::canonical(b.drmDeviceDir).string() : b.drmDeviceDir;
-        return pciA < pciB;
-    });
-
-    // Build snapshots with matching deviceIndex (0, 1, ...)
-    for (size_t i = 0; i < m_devicePaths.size(); ++i) {
-        m_devicePaths[i].deviceIndex = static_cast<uint32_t>(i);
-        DeviceTelemetrySnapshot snap;
-        snap.deviceIndex = static_cast<uint32_t>(i);
-        std::string productName = readSysfsString(m_devicePaths[i].drmDeviceDir + "/product_name");
-        if (productName.empty()) {
-            productName = readSysfsString(m_devicePaths[i].hwmonDir + "/name", "AMD Radeon GPU");
-        }
-        snap.name = "GPU " + std::to_string(i) + ": " + productName;
-        try {
-            snap.pciBus = fs::canonical(m_devicePaths[i].drmDeviceDir).filename().string();
-        } catch (...) {
-            snap.pciBus = readSysfsString(m_devicePaths[i].drmDeviceDir + "/uevent");
-        }
-        m_snapshots.push_back(snap);
+    // Perform an initial synchronous sample so readouts are populated on frame 0
+    for (size_t i = 0; i < m_pollStates.size() && i < m_snapshots.size(); ++i) {
+        pollDevice(m_pollStates[i], m_snapshots[i], 0.0, false);
     }
 }
 
 void TelemetryWorker::start() {
     if (m_running.load()) return;
+    if (m_snapshots.empty()) {
+        discoverDevices();
+    }
     m_running.store(true);
     m_workerThread = std::thread(&TelemetryWorker::workerLoop, this);
 }
@@ -139,6 +99,7 @@ void TelemetryWorker::startRecording() {
     std::lock_guard<std::mutex> lock(m_mutex);
     m_runStartTime = std::chrono::steady_clock::now();
     m_runDuration = 0.0;
+    m_hasCompletedRun.store(false);
     for (auto& snap : m_snapshots) {
         snap.timeHistory.clear();
         snap.sclkHistory.clear();
@@ -158,6 +119,7 @@ void TelemetryWorker::stopRecording() {
     if (m_isRecording.load()) {
         auto now = std::chrono::steady_clock::now();
         m_runDuration = std::chrono::duration<double>(now - m_runStartTime).count();
+        m_hasCompletedRun.store(true);
     }
     m_isRecording.store(false);
 }
@@ -174,6 +136,8 @@ double TelemetryWorker::getRunDuration() const {
 void TelemetryWorker::resetHistory() {
     std::lock_guard<std::mutex> lock(m_mutex);
     m_runDuration = 0.0;
+    m_hasCompletedRun.store(false);
+    m_idleStartTime = std::chrono::steady_clock::now();
     for (auto& snap : m_snapshots) {
         snap.timeHistory.clear();
         snap.sclkHistory.clear();
@@ -210,100 +174,137 @@ bool TelemetryWorker::getSnapshot(uint32_t deviceIndex, DeviceTelemetrySnapshot&
 std::vector<std::string> TelemetryWorker::getDeviceNames() const {
     std::lock_guard<std::mutex> lock(m_mutex);
     std::vector<std::string> names;
+    names.reserve(m_snapshots.size());
     for (const auto& snap : m_snapshots) {
         names.push_back(snap.name);
     }
     return names;
 }
 
-void TelemetryWorker::pollDevice(const DeviceSysfsPaths& paths, DeviceTelemetrySnapshot& snap, double timestampSec, bool recordHistory) {
-    // 1. Clocks: freq1_input is in Hz for AMDGPU hwmon -> divide by 1e6 for MHz
-    float sclk = readSysfsFloat(paths.hwmonDir + "/freq1_input", 0.0f, 1e-6f);
-    if (sclk <= 0.0f) {
-        sclk = readSysfsFloat(paths.drmDeviceDir + "/current_gfxclk", 0.0f);
+void TelemetryWorker::pollDevice(DevicePollState& state, DeviceTelemetrySnapshot& snap,
+                                 double timestampSec, bool isRecordingRun) {
+    auto now = std::chrono::steady_clock::now();
+    GpuTelemetryData hw = HardwareTelemetry::queryGpu(state.deviceIndex);
+
+    float powerWatts = 0.0f;
+    bool hasPower = false;
+    if (state.hasPrevSample && hw.hasEnergyCounter && state.prevSample.hasEnergyCounter) {
+        double dtMs = std::chrono::duration<double, std::milli>(now - state.prevSampleTime).count();
+        if (dtMs >= 10.0) {
+            float energyWatts = HardwareTelemetry::computeWindowPowerWatts(state.prevSample, hw, dtMs);
+            if (energyWatts > 0.0f) {
+                powerWatts = energyWatts;
+                hasPower = true;
+            }
+        }
+    }
+    if (!hasPower && hw.hasPower) {
+        powerWatts = hw.powerWatts;
+        hasPower = true;
     }
 
-    float mclk = readSysfsFloat(paths.hwmonDir + "/freq2_input", 0.0f, 1e-6f);
-    if (mclk <= 0.0f) {
-        mclk = readSysfsFloat(paths.drmDeviceDir + "/current_uclk", 0.0f);
+    state.prevSample = hw;
+    state.prevSampleTime = now;
+    state.hasPrevSample = hw.isAvailable;
+
+    uint64_t vramUsed = hw.vramUsedBytes;
+    uint64_t vramTotal = hw.vramTotalBytes;
+    bool hasVram = hw.hasVram;
+
+#ifdef HAVE_VULKAN
+    if (!hasVram || vramTotal == 0) {
+        auto sharedVk = GetSharedVulkanContextAPI();
+        if (sharedVk && sharedVk->getSelectedDeviceIndex() == state.deviceIndex) {
+            auto budget = sharedVk->queryVramBudget();
+            if (budget.available && budget.budgetBytes > 0) {
+                vramUsed = budget.usageBytes;
+                vramTotal = std::max(budget.budgetBytes, sharedVk->getCurrentDeviceInfo().memorySize);
+                hasVram = true;
+            }
+        }
     }
+#endif
 
-    // 2. Power: power1_average or power1_input in microwatts -> divide by 1e6 for Watts
-    float power = readSysfsFloat(paths.hwmonDir + "/power1_average", 0.0f, 1e-6f);
-    if (power <= 0.0f) {
-        power = readSysfsFloat(paths.hwmonDir + "/power1_input", 0.0f, 1e-6f);
-    }
+    snap.isAvailable = hw.isAvailable || hasVram;
+    snap.hasSclk = hw.hasCoreClock;
+    snap.sclkMhz = hw.hasCoreClock ? static_cast<float>(hw.coreClockMhz) : 0.0f;
 
-    // 3. Temperatures: millidegrees Celsius -> divide by 1000.0f
-    float tempEdge = readSysfsFloat(paths.hwmonDir + "/temp1_input", 0.0f, 0.001f);
-    float tempJct = readSysfsFloat(paths.hwmonDir + "/temp2_input", 0.0f, 0.001f);
-    float tempMem = readSysfsFloat(paths.hwmonDir + "/temp3_input", 0.0f, 0.001f);
+    snap.hasMclk = hw.hasMemoryClock;
+    snap.mclkMhz = hw.hasMemoryClock ? static_cast<float>(hw.memoryClockMhz) : 0.0f;
 
-    // Fallback: if junction or edge temperature sensor is absent, cross-populate
-    if (tempJct <= 0.0f && tempEdge > 0.0f) {
-        tempJct = tempEdge;
-    } else if (tempEdge <= 0.0f && tempJct > 0.0f) {
-        tempEdge = tempJct;
-    }
-    if (tempMem <= 0.0f) {
-        tempMem = (tempJct > 0.0f) ? tempJct : tempEdge;
-    }
+    snap.hasPower = hasPower;
+    snap.powerWatts = hasPower ? powerWatts : 0.0f;
 
-    // 4. Fan RPM
-    float fan = readSysfsFloat(paths.hwmonDir + "/fan1_input", 0.0f);
+    snap.hasTempEdge = hw.hasTempEdge;
+    snap.tempEdgeC = hw.hasTempEdge ? hw.temperatureC : 0.0f;
 
-    // 5. Utilization
-    float gpuBusy = readSysfsFloat(paths.drmDeviceDir + "/gpu_busy_percent", 0.0f);
-    float memBusy = readSysfsFloat(paths.drmDeviceDir + "/mem_busy_percent", 0.0f);
+    snap.hasTempJct = hw.hasTempJct;
+    snap.tempJctC = hw.hasTempJct ? hw.tempJunctionC : 0.0f;
 
-    // 6. VRAM & GTT
-    uint64_t vramUsed = readSysfsUint64(paths.drmDeviceDir + "/mem_info_vram_used", 0);
-    uint64_t vramTotal = readSysfsUint64(paths.drmDeviceDir + "/mem_info_vram_total", 0);
-    uint64_t gttUsed = readSysfsUint64(paths.drmDeviceDir + "/mem_info_gtt_used", 0);
-    uint64_t gttTotal = readSysfsUint64(paths.drmDeviceDir + "/mem_info_gtt_total", 0);
+    snap.hasTempMem = hw.hasTempMem;
+    snap.tempMemC = hw.hasTempMem ? hw.tempMemoryC : 0.0f;
 
-    // Update current snapshot scalars (always live for digital readouts)
-    snap.sclkMhz = sclk;
-    snap.mclkMhz = mclk;
-    snap.powerWatts = power;
-    snap.tempEdgeC = tempEdge;
-    snap.tempJctC = tempJct;
-    snap.tempMemC = tempMem;
-    snap.fanRpm = fan;
-    snap.gpuBusyPct = gpuBusy;
-    snap.memBusyPct = memBusy;
-    snap.vramUsedBytes = vramUsed;
-    snap.vramTotalBytes = vramTotal;
-    snap.gttUsedBytes = gttUsed;
-    snap.gttTotalBytes = gttTotal;
+    snap.hasFanRpm = hw.hasFanRpm;
+    snap.fanRpm = hw.hasFanRpm ? static_cast<float>(hw.fanRpm) : 0.0f;
 
-    // Only record into history during an active benchmark run
-    if (recordHistory) {
+    snap.hasFanSpeedPct = hw.hasFanSpeed;
+    snap.fanSpeedPct = hw.hasFanSpeed ? static_cast<float>(hw.fanSpeedPct) : 0.0f;
+
+    snap.hasGpuBusy = hw.hasGpuActivity;
+    snap.gpuBusyPct = hw.hasGpuActivity ? static_cast<float>(hw.gpuActivityPct) : 0.0f;
+
+    snap.hasMemBusy = hw.hasMemActivity;
+    snap.memBusyPct = hw.hasMemActivity ? static_cast<float>(hw.memActivityPct) : 0.0f;
+
+    snap.hasVram = hasVram;
+    snap.vramUsedBytes = hasVram ? vramUsed : 0;
+    snap.vramTotalBytes = hasVram ? vramTotal : 0;
+
+    snap.hasGtt = hw.hasGtt;
+    snap.gttUsedBytes = hw.hasGtt ? hw.gttUsedBytes : 0;
+    snap.gttTotalBytes = hw.hasGtt ? hw.gttTotalBytes : 0;
+
+    // Record history during active benchmark run, OR maintain a live 60s rolling trace when idle
+    // (preserving a completed benchmark run's full trace until reset or next run).
+    bool pushSample = isRecordingRun || !m_hasCompletedRun.load();
+    if (pushSample && snap.isAvailable) {
         snap.timeHistory.push(static_cast<float>(timestampSec));
-        snap.sclkHistory.push(sclk);
-        snap.mclkHistory.push(mclk);
-        snap.powerHistory.push(power);
-        snap.tempEdgeHistory.push(tempEdge);
-        snap.tempJctHistory.push(tempJct);
-        snap.tempMemHistory.push(tempMem);
-        snap.vramUsedMbHistory.push(static_cast<float>(vramUsed / (1024 * 1024)));
-        snap.gpuBusyHistory.push(gpuBusy);
+        snap.sclkHistory.push(snap.sclkMhz);
+        snap.mclkHistory.push(snap.mclkMhz);
+        snap.powerHistory.push(snap.powerWatts);
+        snap.tempEdgeHistory.push(snap.tempEdgeC);
+        snap.tempJctHistory.push(snap.tempJctC);
+        snap.tempMemHistory.push(snap.tempMemC);
+        snap.vramUsedMbHistory.push(static_cast<float>(snap.vramUsedBytes / (1024ULL * 1024ULL)));
+        snap.gpuBusyHistory.push(snap.gpuBusyPct);
+
+        if (!isRecordingRun) {
+            constexpr size_t kIdleRollingSamples = 600; // 60s at 10Hz
+            snap.timeHistory.trimRolling(kIdleRollingSamples);
+            snap.sclkHistory.trimRolling(kIdleRollingSamples);
+            snap.mclkHistory.trimRolling(kIdleRollingSamples);
+            snap.powerHistory.trimRolling(kIdleRollingSamples);
+            snap.tempEdgeHistory.trimRolling(kIdleRollingSamples);
+            snap.tempJctHistory.trimRolling(kIdleRollingSamples);
+            snap.tempMemHistory.trimRolling(kIdleRollingSamples);
+            snap.vramUsedMbHistory.trimRolling(kIdleRollingSamples);
+            snap.gpuBusyHistory.trimRolling(kIdleRollingSamples);
+        }
     }
 }
 
 void TelemetryWorker::workerLoop() {
     while (m_running.load()) {
         bool recording = m_isRecording.load();
-        double timestamp = 0.0;
-        if (recording) {
-            auto now = std::chrono::steady_clock::now();
-            timestamp = std::chrono::duration<double>(now - m_runStartTime).count();
-        }
+        auto now = std::chrono::steady_clock::now();
+        double timestamp = recording
+            ? std::chrono::duration<double>(now - m_runStartTime).count()
+            : std::chrono::duration<double>(now - m_idleStartTime).count();
 
         {
             std::lock_guard<std::mutex> lock(m_mutex);
-            for (size_t i = 0; i < m_devicePaths.size() && i < m_snapshots.size(); ++i) {
-                pollDevice(m_devicePaths[i], m_snapshots[i], timestamp, recording);
+            for (size_t i = 0; i < m_pollStates.size() && i < m_snapshots.size(); ++i) {
+                pollDevice(m_pollStates[i], m_snapshots[i], timestamp, recording);
             }
         }
 

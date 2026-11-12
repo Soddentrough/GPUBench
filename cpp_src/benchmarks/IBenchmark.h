@@ -5,6 +5,12 @@
 #include <string>
 #include <vector>
 
+namespace gpubench {
+namespace test {
+template <typename Tag> struct TestBody;
+} // namespace test
+} // namespace gpubench
+
 struct BenchmarkResult {
   uint64_t operations;
   double elapsedTime; // in milliseconds
@@ -21,12 +27,19 @@ public:
                            IComputeContext *context = nullptr) const = 0;
   virtual void Setup(IComputeContext &context,
                      const std::string &kernel_dir) = 0;
+  virtual void PrepareConfig(uint32_t /*config_idx*/) {}
+  virtual void ReleaseConfigResources(uint32_t /*config_idx*/) {}
   virtual void SetResolution(uint32_t /*w*/, uint32_t /*h*/) {}
   virtual void Run(uint32_t config_idx = 0) = 0;
   virtual void Teardown() = 0;
+  virtual bool RequiresInterIterationBarrier(uint32_t /*config_idx*/ = 0) const {
+    return false;
+  }
   virtual BenchmarkResult GetResult(uint32_t config_idx = 0) const = 0;
   virtual void RecordRunResult(uint32_t /*config_idx*/, uint64_t /*total_invocations*/, double /*total_time_ms*/) {}
   virtual double FilterDuration(uint32_t /*config_idx*/, uint64_t /*total_invocations*/, double duration_ms) { return duration_ms; }
+  virtual bool UsesCustomTiming(uint32_t /*config_idx*/ = 0) const { return false; }
+  virtual double GetLastRunDurationMs(uint32_t /*config_idx*/ = 0) const { return 0.0; }
   virtual void RebuildAccelerationStructures() {}
   virtual bool ValidateResults(uint32_t /*config_idx*/ = 0) const { return true; }
   // Optional 0-indexed baseline config index for speedup comparison within this benchmark.
@@ -67,6 +80,11 @@ public:
   }
   virtual uint32_t GetNumConfigs() const { return 1; }
   virtual std::string GetConfigName(uint32_t /*config_idx*/) const { return ""; }
+  virtual const char *GetDescription() const { return ""; }
+  virtual const char *GetDescription(uint32_t /*config_idx*/) const { return GetDescription(); }
+  // Empirical Roofline Operational Intensity (FLOPs or OPs per byte of memory traffic).
+  // Returns > 0.0 for compute/matrix/vector workloads plotted on the Roofline chart.
+  virtual double GetOperationalIntensity(uint32_t /*config_idx*/ = 0) const { return 0.0; }
   virtual bool IsConfigSupported(uint32_t /*config_idx*/) const { return true; }
   virtual bool IsConfigSupported(uint32_t config_idx, const DeviceInfo &info,
                                  IComputeContext *context = nullptr) const {

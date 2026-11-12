@@ -3,6 +3,7 @@
 #include "IBenchmark.h"
 #include "scene/GltfScene.h"
 #include <algorithm>
+#include <random>
 #include <string>
 #include <vector>
 #ifdef HAVE_VULKAN
@@ -129,8 +130,17 @@ public:
       }
 #endif
     }
-    if (config_idx == 2 || config_idx == 5 || config_idx == 8 ||
-        config_idx == 11 || config_idx == 18 || config_idx == 21 ||
+    if (config_idx == 2) {
+      if (!info.dgcSupported) return false;
+#ifdef HAVE_VULKAN
+      if (context && context->getBackend() == ComputeBackend::Vulkan) {
+        const VulkanContext *vc = static_cast<const VulkanContext *>(context);
+        if (!vc->isDGCSupported() || !vc->isDGCExecutionSetSupported()) return false;
+      }
+#endif
+    }
+    if (config_idx == 5 || config_idx == 8 || config_idx == 11 ||
+        config_idx == 18 || config_idx == 21 || config_idx == 22 ||
         config_idx == 24 || config_idx == 32 || config_idx == 34) {
       if (!info.dgcSupported) return false;
 #ifdef HAVE_VULKAN
@@ -169,8 +179,8 @@ public:
       return "VK_EXT_device_generated_commands unsupported by device/driver";
     }
     if (config_idx == 5 || config_idx == 8 || config_idx == 11 ||
-        config_idx == 18 || config_idx == 21 || config_idx == 24 ||
-        config_idx == 32 || config_idx == 34) {
+        config_idx == 18 || config_idx == 21 || config_idx == 22 ||
+        config_idx == 24 || config_idx == 32 || config_idx == 34) {
       if (!info.dgcSupported) {
         return "VK_EXT_device_generated_commands unsupported by device/driver";
       }
@@ -197,7 +207,8 @@ public:
     }
     if (config_idx == 2 || config_idx == 5 || config_idx == 8 ||
         config_idx == 11 || config_idx == 18 || config_idx == 21 ||
-        config_idx == 24 || config_idx == 32 || config_idx == 34) {
+        config_idx == 22 || config_idx == 24 || config_idx == 32 ||
+        config_idx == 34) {
       return SupportLimitation::kHardware;
     }
     return SupportLimitation::kNone;
@@ -221,9 +232,16 @@ public:
   }
   const char *GetComponent(uint32_t config_idx = 0) const override { return "Ray Tracing"; }
   const char *GetSubCategory(uint32_t config_idx = 0) const override;
+  const char *GetDescription() const override { return GetDescription(0); }
+  const char *GetDescription(uint32_t config_idx) const override;
+  bool RequiresInterIterationBarrier(uint32_t /*config_idx*/ = 0) const override {
+    return true;
+  }
 
   void SetDumpRenders(bool dump) { wantDumpRenders = dump; }
   bool GetDumpRenders() const { return wantDumpRenders; }
+  void SetCaptureGpuPreviews(bool capture) { captureGpuPreviews = capture; }
+  bool GetCaptureGpuPreviews() const { return captureGpuPreviews; }
 
   void SetResolution(uint32_t w, uint32_t h) override {
     renderWidth = w;
@@ -251,7 +269,9 @@ public:
     }
   }
 
-  bool HasVisualVerification() const override { return wantDumpRenders || verifyParity; }
+  bool HasVisualVerification() const override {
+    return wantDumpRenders || verifyParity || captureGpuPreviews;
+  }
   void RunVisualVerification(bool isInteractive = false) override;
 
 private:
@@ -261,8 +281,11 @@ private:
   bool dumpRenders = false;
   bool captureFramebuffer = false;
   bool wantDumpRenders = false;
+  bool captureGpuPreviews = false;
   bool verifyParity = false;
   bool parityFailure = false;
+  std::string cachedKernelDir;
+  std::vector<float> compactBvhPositions;
   ComputeBuffer fbTraditional = nullptr;
   ComputeBuffer fbWorkList = nullptr;
   void performVisualVerification(bool isInteractive = false);
@@ -368,4 +391,7 @@ private:
   mutable bool unsupportedConfig[35] = {false};
   mutable std::string unsupportedReason[35];
   uint32_t lastRunConfig = 0xFFFFFFFFu;
+  std::mt19937 rng{1337u};
+
+  template <typename Tag> friend struct ::gpubench::test::TestBody;
 };

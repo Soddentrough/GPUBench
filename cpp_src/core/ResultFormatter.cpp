@@ -1,13 +1,16 @@
 #include "ResultFormatter.h"
 #include "DeviceDatabase.h"
 #include "ResultImporter.h"
+#include "RooflineModel.h"
 #include "RunnerAPI.h"
+#include "third_party/yyjson.h"
 #include "utils/HardwareTelemetry.h"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cctype>
 #include <cstdio>
+#include <cstdlib>
 #include <ctime>
 #include <iomanip>
 #include <iostream>
@@ -15,6 +18,7 @@
 #include <map>
 #include <set>
 #include <sstream>
+#include <thread>
 #include <type_traits>
 #include <vector>
 
@@ -227,21 +231,40 @@ std::string cleanWorkloadName(const std::string &rawName, const std::string &sub
     } else if (name.rfind("Dual-Issue ", 0) == 0) {
       name = name.substr(11);
     }
-  } else if (name.rfind("Ray", 0) == 0 ||
-             name.rfind("LDS Bank Conflicts (", 0) == 0 ||
-             name.rfind("In-Shader Indirect Synthesis (", 0) == 0 ||
-             name.rfind("Cache Latency Curve (", 0) == 0 ||
-             name.rfind("Device Memory Bandwidth (", 0) == 0 ||
-             name.rfind("Pixel Fill Rate (", 0) == 0 ||
-             name.rfind("System Memory Bandwidth (", 0) == 0) {
-    // Strip redundant outer benchmark prefix when the subcategory header already conveys it
-    size_t firstOpen = name.find(" (");
-    if (firstOpen != std::string::npos && name.back() == ')') {
-      name = name.substr(firstOpen + 2, name.length() - (firstOpen + 3));
+  } else {
+    static const std::vector<std::string> kExactPrefixes = {
+        "PCIe & Host-Device Interconnect (",
+        "Async Compute & Copy Overlap (",
+        "2:4 Structured Sparsity (",
+        "Cooperative Vector (Neural Shading) (",
+        "GPU Work Graphs (Producer-Consumer) (",
+    };
+    bool strippedExact = false;
+    for (const auto &pfx : kExactPrefixes) {
+      if (name.rfind(pfx, 0) == 0 && name.back() == ')') {
+        name = name.substr(pfx.length(), name.length() - pfx.length() - 1);
+        strippedExact = true;
+        break;
+      }
+    }
+    if (!strippedExact &&
+        (name.rfind("Ray", 0) == 0 ||
+         name.rfind("LDS Bank Conflicts (", 0) == 0 ||
+         name.rfind("In-Shader Indirect Synthesis (", 0) == 0 ||
+         name.rfind("Cache Latency Curve (", 0) == 0 ||
+         name.rfind("Device Memory Bandwidth (", 0) == 0 ||
+         name.rfind("Pixel Fill Rate (", 0) == 0 ||
+         name.rfind("System Memory Bandwidth (", 0) == 0)) {
+      // Strip redundant outer benchmark prefix when the subcategory header already conveys it
+      size_t firstOpen = name.find(" (");
+      if (firstOpen != std::string::npos && name.back() == ')') {
+        name = name.substr(firstOpen + 2, name.length() - (firstOpen + 3));
+      }
     }
   }
 
-  if (name == "Raw BVH Traversal - Coherent Triangle Traversal (Max Occupancy)") {
+  if (name == "Raw BVH - Coherent Triangle Traversal (Max Occupancy)" ||
+      name == "Raw BVH Traversal - Coherent Triangle Traversal (Max Occupancy)") {
     name = "Raw BVH - Coherent Triangle Traversal";
   } else if (name == "Raw BVH Traversal - Deep BVH Multi-Layer Stress") {
     name = "Raw BVH - Deep Multi-Layer Box Stress";
@@ -389,11 +412,12 @@ void ResultFormatter::print() {
 
   for (const auto &res : results) {
     totalWorkloadsEvaluated++;
-    int compWeight = 5;
+    int compWeight = 6;
     if (res.component == "Compute") compWeight = 1;
     else if (res.component == "Memory") compWeight = 2;
-    else if (res.component == "Graphics" || res.component == "Rasterization & ROP") compWeight = 3;
-    else if (res.component == "Ray Tracing") compWeight = 4;
+    else if (res.component == "Scheduling") compWeight = 3;
+    else if (res.component == "Graphics" || res.component == "Rasterization & ROP") compWeight = 4;
+    else if (res.component == "Ray Tracing") compWeight = 5;
 
     std::string cleanName = cleanWorkloadName(res.benchmarkName, res.subcategory);
     if (res.isEmulated) cleanName += " (Emulated)";
@@ -651,7 +675,8 @@ void ResultFormatter::print() {
                         val = static_cast<double>(res.operations) / (res.time_ms / 1000.0);
                         if (res.metric == "TB/s" || res.metric == "TFLOPS" || res.metric == "TOPS") {
                           val /= 1e12;
-                        } else if (res.metric == "GB/s" || res.metric == "GIS/s" || res.metric == "GRays/s" || res.metric == "GPixels/s") {
+                        } else if (res.metric == "GB/s" || res.metric == "GIS/s" || res.metric == "GRays/s" ||
+                                   res.metric == "GPixels/s" || res.metric == "GOPS" || res.metric == "GFLOPS") {
                           val /= 1e9;
                         } else if (res.metric == "MItems/s" || res.metric == "MSamples/s" || res.metric == "MBVH/s" ||
                                    res.metric == "MRays/s" || res.metric == "MHits/s" || res.metric == "MTris/s" ||
@@ -721,7 +746,7 @@ void ResultFormatter::print() {
                 double value = 0.0;
                 if (res.metric == "MItems/s" || res.metric == "MSamples/s" || res.metric == "MBVH/s") {
                   value = (static_cast<double>(res.operations) / (res.time_ms / 1000.0)) / 1e6;
-                } else if (res.metric == "GB/s") {
+                } else if (res.metric == "GB/s" || res.metric == "GOPS" || res.metric == "GFLOPS") {
                   value = (static_cast<double>(res.operations) / (res.time_ms / 1000.0)) / 1e9;
                 } else if (res.metric == "us") {
                   value = (res.time_ms * 1000.0) / static_cast<double>(res.operations);
@@ -846,19 +871,36 @@ void ResultFormatter::print() {
                   valStr = formatDouble(value, 2) + " GB/s";
                 }
               } else {
-                double value = static_cast<double>(res.operations) / (res.time_ms / 1000.0);
+                double value = 0.0;
                 int precision = 2;
-                if (res.metric == "TB/s") {
-                  value /= 1e12;
-                } else if (res.metric == "GIS/s" || res.metric == "GRays/s" ||
-                           res.metric == "GPixels/s" || res.metric == "GB/s") {
-                  value /= 1e9;
-                  if (res.metric == "GRays/s") precision = 3;
-                } else if (res.metric == "MTris/s" || res.metric == "MInst/s" ||
-                           res.metric == "MRays/s" || res.metric == "MHits/s" ||
-                           res.metric == "MRecords/s" || res.metric == "MSamples/s" ||
-                           res.metric == "MBVH/s" || res.metric == "MItems/s") {
-                  value /= 1e6;
+                if (res.metric == "us") {
+                  value = (res.operations > 0)
+                              ? ((res.time_ms * 1000.0) / static_cast<double>(res.operations))
+                              : (res.time_ms * 1000.0);
+                } else if (res.metric == "ns") {
+                  value = (res.operations > 0)
+                              ? ((res.time_ms * 1e6) / static_cast<double>(res.operations))
+                              : 0.0;
+                } else if (res.metric == "ms") {
+                  value = (res.operations > 0)
+                              ? (res.time_ms / static_cast<double>(res.operations))
+                              : res.time_ms;
+                } else {
+                  value = static_cast<double>(res.operations) / (res.time_ms / 1000.0);
+                  if (res.metric == "TB/s" || res.metric == "TFLOPS" || res.metric == "TOPS") {
+                    value /= 1e12;
+                  } else if (res.metric == "GIS/s" || res.metric == "GRays/s" ||
+                             res.metric == "GPixels/s" || res.metric == "GB/s" ||
+                             res.metric == "GOPS" || res.metric == "GFLOPS") {
+                    value /= 1e9;
+                    if (res.metric == "GRays/s") precision = 3;
+                  } else if (res.metric == "MTris/s" || res.metric == "MInst/s" ||
+                             res.metric == "MRays/s" || res.metric == "MHits/s" ||
+                             res.metric == "MRecords/s" || res.metric == "MSamples/s" ||
+                             res.metric == "MBVH/s" || res.metric == "MItems/s" ||
+                             res.metric == "MPixels/s") {
+                    value /= 1e6;
+                  }
                 }
                 valStr = formatDouble(value, precision) + " " + res.metric;
 
@@ -958,7 +1000,7 @@ void ResultFormatter::print() {
                       if (bp.second.count(backend)) {
                         const auto &br = bp.second.at(backend);
                         if (br.configIndex == static_cast<uint32_t>(res.baselineConfigIndex) && br.time_ms > 0.0 && br.isValid) {
-                          localBaseVal = static_cast<double>(br.operations) / (br.time_ms / 1000.0) / 1e6;
+                          localBaseVal = computeResultValue(br);
                           localBaseMetric = br.metric;
                           break;
                         }
@@ -977,7 +1019,9 @@ void ResultFormatter::print() {
                   if (isLocalBase) {
                     noteStr = "[Baseline]" + (fpsStr.empty() ? "" : " [" + fpsStr + "]");
                   } else if (localBaseVal > 0.0 && value > 0.0 && (localBaseMetric.empty() || localBaseMetric == res.metric)) {
-                    double ratio = value / localBaseVal;
+                    const bool lowerIsBetter =
+                        (res.metric == "us" || res.metric == "ns" || res.metric == "ms");
+                    double ratio = lowerIsBetter ? (localBaseVal / value) : (value / localBaseVal);
                     double pct = (ratio - 1.0) * 100.0;
                     std::string pctStr = (std::abs(pct) >= 0.1) ? (std::string(" (") + (pct >= 0 ? "+" : "") + formatDouble(pct, 1) + "%)") : "";
                     noteStr = "└──> " + formatDouble(ratio, 2) + "x" + pctStr + (fpsStr.empty() ? "" : " [" + fpsStr + "]");
@@ -1378,11 +1422,12 @@ void ResultFormatter::printComparison(const std::vector<ImportedRun> &runs) {
 
   for (size_t runIdx = 0; runIdx < N; ++runIdx) {
     for (const auto &res : runs[runIdx].results) {
-      int compWeight = 4;
+      int compWeight = 5;
       if (res.component == "Compute") compWeight = 1;
       else if (res.component == "Memory") compWeight = 2;
-      else if (res.component == "Rasterization & ROP") compWeight = 3;
-      else if (res.component == "Ray Tracing") compWeight = 4;
+      else if (res.component == "Scheduling") compWeight = 3;
+      else if (res.component == "Rasterization & ROP") compWeight = 4;
+      else if (res.component == "Ray Tracing") compWeight = 5;
 
       std::string cName = cleanWorkloadName(res.benchmarkName, res.subcategory);
       std::string effectiveSubcat = res.subcategory;
@@ -1446,7 +1491,7 @@ void ResultFormatter::printComparison(const std::vector<ImportedRun> &runs) {
       if (res.metric == "MItems/s" || res.metric == "MSamples/s" || res.metric == "MBVH/s") {
         wv.val = rawRate / 1e6;
         wv.metric = res.metric;
-      } else if (res.metric == "GB/s") {
+      } else if (res.metric == "GB/s" || res.metric == "GOPS" || res.metric == "GFLOPS") {
         wv.val = rawRate / 1e9;
         wv.metric = res.metric;
       } else if (res.metric == "us") {
@@ -1476,10 +1521,23 @@ void ResultFormatter::printComparison(const std::vector<ImportedRun> &runs) {
         wv.metric = "GB/s";
       }
     } else {
-      if (res.metric == "TB/s") {
+      if (res.metric == "us") {
+        wv.val = (res.time_ms * 1000.0) / static_cast<double>(res.operations);
+        wv.isLatency = true;
+        wv.metric = "us";
+      } else if (res.metric == "ns") {
+        wv.val = (res.time_ms * 1e6) / static_cast<double>(res.operations);
+        wv.isLatency = true;
+        wv.metric = "ns";
+      } else if (res.metric == "ms") {
+        wv.val = res.time_ms / static_cast<double>(res.operations);
+        wv.isLatency = true;
+        wv.metric = "ms";
+      } else if (res.metric == "TB/s" || res.metric == "TFLOPS" || res.metric == "TOPS") {
         wv.val = rawRate / 1e12;
         wv.metric = res.metric;
-      } else if (res.metric == "GIS/s" || res.metric == "GRays/s" || res.metric == "GPixels/s" || res.metric == "GB/s") {
+      } else if (res.metric == "GIS/s" || res.metric == "GRays/s" || res.metric == "GPixels/s" ||
+                 res.metric == "GB/s" || res.metric == "GOPS" || res.metric == "GFLOPS") {
         wv.val = rawRate / 1e9;
         if (res.metric == "GRays/s") prec = 3;
         wv.metric = res.metric;
@@ -1796,43 +1854,96 @@ void ResultFormatter::printComparison(const std::vector<ImportedRun> &runs) {
 }
 
 namespace {
-std::string jsonEscape(const std::string &s) {
-  std::string out;
-  out.reserve(s.size() + 8);
-  for (char c : s) {
-    switch (c) {
-    case '"':
-      out += "\\\"";
-      break;
-    case '\\':
-      out += "\\\\";
-      break;
-    case '\n':
-      out += "\\n";
-      break;
-    case '\r':
-      out += "\\r";
-      break;
-    case '\t':
-      out += "\\t";
-      break;
-    default:
-      out += c;
-      break;
-    }
+
+void addFixed6(yyjson_mut_doc *doc, yyjson_mut_val *obj, const char *key,
+               double val) {
+  char buf[64];
+  const double safeVal = std::isfinite(val) ? val : 0.0;
+  int len = std::snprintf(buf, sizeof(buf), "%.6f", safeVal);
+  if (len <= 0 || static_cast<size_t>(len) >= sizeof(buf)) {
+    yyjson_mut_obj_add_val(doc, obj, key, yyjson_mut_rawncpy(doc, "0.000000", 8));
+    return;
   }
-  return out;
+  yyjson_mut_obj_add_val(doc, obj, key,
+                         yyjson_mut_rawncpy(doc, buf, static_cast<size_t>(len)));
 }
 
-template <typename T>
-std::string jsonNumber(T val, const char *fallback = "0.0") {
-  if constexpr (std::is_floating_point_v<T>) {
-    if (!std::isfinite(val)) {
-      return fallback;
+void addFixed6DynamicKey(yyjson_mut_doc *doc, yyjson_mut_val *obj,
+                         const std::string &key, double val) {
+  char buf[64];
+  const double safeVal = std::isfinite(val) ? val : 0.0;
+  int len = std::snprintf(buf, sizeof(buf), "%.6f", safeVal);
+  yyjson_mut_val *k = yyjson_mut_strcpy(doc, key.c_str());
+  yyjson_mut_val *v = (len > 0 && static_cast<size_t>(len) < sizeof(buf))
+                          ? yyjson_mut_rawncpy(doc, buf, static_cast<size_t>(len))
+                          : yyjson_mut_rawncpy(doc, "0.000000", 8);
+  yyjson_mut_obj_add(obj, k, v);
+}
+
+struct HostSystemSummary {
+  std::string osName;
+  std::string cpuModel;
+  uint32_t cpuLogicalCores = 0;
+  double totalRamGb = 0.0;
+};
+
+HostSystemSummary collectHostSystemSummary() {
+  HostSystemSummary s;
+  s.cpuLogicalCores = std::thread::hardware_concurrency();
+#if defined(_WIN32)
+  s.osName = "Windows";
+  MEMORYSTATUSEX mem{};
+  mem.dwLength = sizeof(mem);
+  if (GlobalMemoryStatusEx(&mem)) {
+    s.totalRamGb = static_cast<double>(mem.ullTotalPhys) /
+                   (1024.0 * 1024.0 * 1024.0);
+  }
+  char cpuName[256] = {0};
+  DWORD bufSize = sizeof(cpuName);
+  if (RegGetValueA(HKEY_LOCAL_MACHINE,
+                   "HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0",
+                   "ProcessorNameString", RRF_RT_REG_SZ, nullptr, cpuName,
+                   &bufSize) == ERROR_SUCCESS) {
+    s.cpuModel = cpuName;
+    while (!s.cpuModel.empty() &&
+           std::isspace(static_cast<unsigned char>(s.cpuModel.back()))) {
+      s.cpuModel.pop_back();
     }
   }
-  return std::to_string(val);
+#else
+  s.osName = "Linux";
+  long pages = sysconf(_SC_PHYS_PAGES);
+  long pageSize = sysconf(_SC_PAGE_SIZE);
+  if (pages > 0 && pageSize > 0) {
+    s.totalRamGb = (static_cast<double>(pages) * static_cast<double>(pageSize)) /
+                   (1024.0 * 1024.0 * 1024.0);
+  }
+  if (FILE *f = std::fopen("/proc/cpuinfo", "r")) {
+    char line[512];
+    while (std::fgets(line, sizeof(line), f)) {
+      std::string ln(line);
+      if (ln.rfind("model name", 0) == 0) {
+        size_t colon = ln.find(':');
+        if (colon != std::string::npos) {
+          std::string model = ln.substr(colon + 1);
+          size_t first = model.find_first_not_of(" \t\r\n");
+          size_t last = model.find_last_not_of(" \t\r\n");
+          if (first != std::string::npos && last != std::string::npos) {
+            s.cpuModel = model.substr(first, last - first + 1);
+          }
+          break;
+        }
+      }
+    }
+    std::fclose(f);
+  }
+#endif
+  if (s.cpuModel.empty()) {
+    s.cpuModel = "Host CPU";
+  }
+  return s;
 }
+
 } // namespace
 
 double computeResultValue(const ResultData &r) {
@@ -1842,7 +1953,8 @@ double computeResultValue(const ResultData &r) {
     if (r.metric == "TFLOPS" || r.metric == "TOPS" || r.metric == "TB/s") {
       value = (static_cast<double>(r.operations) / seconds) / 1e12;
     } else if (r.metric == "GB/s" || r.metric == "GIS/s" ||
-               r.metric == "GRays/s" || r.metric == "GPixels/s") {
+               r.metric == "GRays/s" || r.metric == "GPixels/s" ||
+               r.metric == "GOPS" || r.metric == "GFLOPS") {
       value = (static_cast<double>(r.operations) / seconds) / 1e9;
     } else if (r.metric == "MRays/s" || r.metric == "MHits/s" ||
                r.metric == "MTris/s" || r.metric == "MInst/s" ||
@@ -1854,6 +1966,8 @@ double computeResultValue(const ResultData &r) {
       value = (r.time_ms * 1000.0) / static_cast<double>(r.operations);
     } else if (r.metric == "ns") {
       value = (r.time_ms * 1e6) / static_cast<double>(r.operations);
+    } else if (r.metric == "ms") {
+      value = r.time_ms / static_cast<double>(r.operations);
     }
   }
   return value;
@@ -1897,15 +2011,29 @@ std::string getDefaultJsonFilename() {
 }
 
 std::string resultsToJson(const std::vector<ResultData> &results) {
-  return resultsToJson(results, GetDeviceProfilesAPI());
+  return resultsToJson(results, GetDeviceProfilesAPI(), nullptr);
 }
 
 std::string resultsToJson(const std::vector<ResultData> &results,
                           const std::vector<DeviceProfile> &profiles) {
-  uint64_t nowTs = static_cast<uint64_t>(
+  return resultsToJson(results, profiles, nullptr);
+}
+
+std::string resultsToJson(const std::vector<ResultData> &results,
+                          const std::vector<DeviceProfile> &profiles,
+                          const UnifiedSessionMetadata *sessionMeta) {
+  yyjson_mut_doc *doc = yyjson_mut_doc_new(nullptr);
+  if (!doc) {
+    return "{}";
+  }
+  yyjson_mut_val *root = yyjson_mut_obj(doc);
+  yyjson_mut_doc_set_root(doc, root);
+
+  const uint64_t nowTs = static_cast<uint64_t>(
       std::chrono::duration_cast<std::chrono::seconds>(
           std::chrono::system_clock::now().time_since_epoch())
           .count());
+
   std::string topBackend = "Vulkan";
   for (const auto &r : results) {
     if (!r.backendName.empty() && r.backendName != "System") {
@@ -1916,6 +2044,7 @@ std::string resultsToJson(const std::vector<ResultData> &results,
   if (topBackend == "Vulkan" && !profiles.empty() && !profiles[0].backend.empty()) {
     topBackend = profiles[0].backend;
   }
+
   uint32_t topW = 0, topH = 0;
   for (const auto &r : results) {
     if (r.width > 0 && r.height > 0) {
@@ -1924,116 +2053,155 @@ std::string resultsToJson(const std::vector<ResultData> &results,
       break;
     }
   }
-  std::string topRes = (topW > 0 && topH > 0)
-                           ? (std::to_string(topW) + "x" + std::to_string(topH))
-                           : "3840x2160";
+  const std::string topRes =
+      (topW > 0 && topH > 0)
+          ? (std::to_string(topW) + "x" + std::to_string(topH))
+          : "3840x2160";
 
-  std::string out = "{\n";
-  out += "  \"version\": \"" + std::string(GPUBENCH_VERSION) + "\",\n";
-  out += "  \"timestamp\": " + std::to_string(nowTs) + ",\n";
-  out += "  \"backend\": \"" + jsonEscape(topBackend) + "\",\n";
-  out += "  \"resolution\": \"" + jsonEscape(topRes) + "\",\n";
-  out += "  \"device_profiles\": [\n";
-  for (size_t d = 0; d < profiles.size(); ++d) {
-    const auto &dp = profiles[d];
+  yyjson_mut_obj_add_strcpy(doc, root, "schema_version", "2.0");
+  yyjson_mut_obj_add_strcpy(doc, root, "version", GPUBENCH_VERSION);
+  yyjson_mut_obj_add_strcpy(doc, root, "app_version", GPUBENCH_VERSION);
+  yyjson_mut_obj_add_uint(doc, root, "timestamp", nowTs);
+  yyjson_mut_obj_add_strcpy(doc, root, "backend", topBackend.c_str());
+  yyjson_mut_obj_add_strcpy(doc, root, "resolution", topRes.c_str());
+
+  const HostSystemSummary hostSys = collectHostSystemSummary();
+  yyjson_mut_val *sysObj = yyjson_mut_obj_add_obj(doc, root, "system_info");
+  yyjson_mut_obj_add_strcpy(doc, sysObj, "os_name", hostSys.osName.c_str());
+  yyjson_mut_obj_add_strcpy(doc, sysObj, "cpu_model", hostSys.cpuModel.c_str());
+  yyjson_mut_obj_add_uint(doc, sysObj, "cpu_logical_cores", hostSys.cpuLogicalCores);
+  addFixed6(doc, sysObj, "total_ram_gb", hostSys.totalRamGb);
+
+  if (sessionMeta != nullptr) {
+    yyjson_mut_val *sessObj = yyjson_mut_obj_add_obj(doc, root, "gui_session");
+    yyjson_mut_obj_add_strcpy(doc, sessObj, "scene", sessionMeta->scene.c_str());
+    yyjson_mut_obj_add_uint(doc, sessObj, "samples_per_pixel", sessionMeta->samplesPerPixel);
+    yyjson_mut_obj_add_bool(doc, sessObj, "dump_renders", sessionMeta->dumpRenders);
+    addFixed6(doc, sessObj, "ui_scale", sessionMeta->uiScale);
+  }
+
+  yyjson_mut_val *profArr = yyjson_mut_obj_add_arr(doc, root, "device_profiles");
+  for (const auto &dp : profiles) {
     char vendorHex[16], deviceHex[16];
     std::snprintf(vendorHex, sizeof(vendorHex), "0x%04X", dp.vendorID);
     std::snprintf(deviceHex, sizeof(deviceHex), "0x%04X", dp.deviceID);
 
-    out += "    {\n";
-    out += "      \"backend\": \"" + jsonEscape(dp.backend) + "\",\n";
-    out += "      \"device_index\": " + std::to_string(dp.deviceIndex) + ",\n";
-    out += "      \"device_name\": \"" + jsonEscape(dp.deviceName) + "\",\n";
-    out += "      \"vendor_id\": \"" + std::string(vendorHex) + "\",\n";
-    out += "      \"device_id\": \"" + std::string(deviceHex) + "\",\n";
-    out += "      \"driver_name\": \"" + jsonEscape(dp.driverName) + "\",\n";
-    out += "      \"driver_info\": \"" + jsonEscape(dp.driverInfo) + "\",\n";
-    out += "      \"driver_version\": \"" + jsonEscape(dp.driverVersion) + "\",\n";
-    out += "      \"api_version\": \"" + jsonEscape(dp.apiVersion) + "\",\n";
-    out += "      \"vram_total_mb\": " + std::to_string(dp.vramTotalMb) + ",\n";
-    out += "      \"subgroup_size\": " + std::to_string(dp.subgroupSize) + ",\n";
-    out += "      \"max_workgroup_size\": " + std::to_string(dp.maxWorkGroupSize) + ",\n";
-    out += "      \"ray_tracing_supported\": " + std::string(dp.rayTracingSupported ? "true" : "false") + ",\n";
-    out += "      \"ser_supported\": " + std::string(dp.serSupported ? "true" : "false") + ",\n";
-    out += "      \"work_graphs_supported\": " + std::string(dp.workGraphsSupported ? "true" : "false") + ",\n";
-    out += "      \"cooperative_matrix_supported\": " + std::string(dp.cooperativeMatrixSupported ? "true" : "false") + ",\n";
-    out += "      \"float16_supported\": " + std::string(dp.float16Supported ? "true" : "false") + ",\n";
+    yyjson_mut_val *pObj = yyjson_mut_arr_add_obj(doc, profArr);
+    yyjson_mut_obj_add_strcpy(doc, pObj, "backend", dp.backend.c_str());
+    yyjson_mut_obj_add_uint(doc, pObj, "device_index", dp.deviceIndex);
+    yyjson_mut_obj_add_strcpy(doc, pObj, "device_name", dp.deviceName.c_str());
+    yyjson_mut_obj_add_strcpy(doc, pObj, "vendor_id", vendorHex);
+    yyjson_mut_obj_add_strcpy(doc, pObj, "device_id", deviceHex);
+    yyjson_mut_obj_add_strcpy(doc, pObj, "driver_name", dp.driverName.c_str());
+    yyjson_mut_obj_add_strcpy(doc, pObj, "driver_info", dp.driverInfo.c_str());
+    yyjson_mut_obj_add_strcpy(doc, pObj, "driver_version", dp.driverVersion.c_str());
+    yyjson_mut_obj_add_strcpy(doc, pObj, "api_version", dp.apiVersion.c_str());
+    yyjson_mut_obj_add_uint(doc, pObj, "vram_total_mb", dp.vramTotalMb);
+    yyjson_mut_obj_add_uint(doc, pObj, "compute_units", dp.computeUnits);
+    yyjson_mut_obj_add_uint(doc, pObj, "subgroup_size", dp.subgroupSize);
+    yyjson_mut_obj_add_uint(doc, pObj, "max_workgroup_size", dp.maxWorkGroupSize);
+    yyjson_mut_obj_add_bool(doc, pObj, "is_apu", dp.isApu);
+    yyjson_mut_obj_add_bool(doc, pObj, "rebar_supported", dp.rebarSupported);
+    yyjson_mut_obj_add_bool(doc, pObj, "ray_tracing_supported", dp.rayTracingSupported);
+    yyjson_mut_obj_add_bool(doc, pObj, "ser_supported", dp.serSupported);
+    yyjson_mut_obj_add_bool(doc, pObj, "opacity_micromap_supported", dp.opacityMicromapSupported);
+    yyjson_mut_obj_add_bool(doc, pObj, "work_graphs_supported", dp.workGraphsSupported);
+    yyjson_mut_obj_add_bool(doc, pObj, "cooperative_matrix_supported", dp.cooperativeMatrixSupported);
+    yyjson_mut_obj_add_bool(doc, pObj, "structured_sparsity_supported", dp.structuredSparsitySupported);
+    yyjson_mut_obj_add_bool(doc, pObj, "cooperative_vector_supported", dp.cooperativeVectorSupported);
+    yyjson_mut_obj_add_bool(doc, pObj, "float16_supported", dp.float16Supported);
+    yyjson_mut_obj_add_bool(doc, pObj, "int8_supported", dp.int8Supported);
+    yyjson_mut_obj_add_bool(doc, pObj, "ocp_fp6_supported", dp.ocpFp6Supported);
+    yyjson_mut_obj_add_bool(doc, pObj, "ocp_fp4_supported", dp.ocpFp4Supported);
+    yyjson_mut_obj_add_bool(doc, pObj, "performance_query_supported", dp.performanceQuerySupported);
+
     const auto &prof = DeviceDatabase::lookup(dp.vendorID, dp.deviceID, dp.deviceName);
-    out += "      \"int8_supported\": " + std::string(dp.int8Supported ? "true" : "false") + ",\n";
-    out += "      \"performance_query_supported\": " + std::string(dp.performanceQuerySupported ? "true" : "false") + ",\n";
-    out += "      \"architecture\": \"" + jsonEscape(prof.archName) + "\",\n";
-    out += "      \"memory_type\": \"" + jsonEscape(prof.memoryType) + "\"";
+    yyjson_mut_obj_add_strcpy(doc, pObj, "architecture", prof.archName.c_str());
+    yyjson_mut_obj_add_strcpy(doc, pObj, "memory_type", prof.memoryType.c_str());
     if (prof.theoreticalFp32Tflops > 0.0) {
-      out += ",\n      \"theoretical_fp32_tflops\": " + jsonNumber(prof.theoreticalFp32Tflops);
+      addFixed6(doc, pObj, "theoretical_fp32_tflops", prof.theoreticalFp32Tflops);
     }
     if (prof.theoreticalBandwidthGBps > 0.0) {
-      out += ",\n      \"theoretical_bandwidth_gbps\": " + jsonNumber(prof.theoreticalBandwidthGBps);
+      addFixed6(doc, pObj, "theoretical_bandwidth_gbps", prof.theoreticalBandwidthGBps);
     }
     if (prof.theoreticalTriangleGis > 0.0) {
-      out += ",\n      \"theoretical_triangle_gis\": " + jsonNumber(prof.theoreticalTriangleGis) + ",\n";
-      out += "      \"theoretical_box_gis\": " + jsonNumber(prof.theoreticalBoxGis);
+      addFixed6(doc, pObj, "theoretical_triangle_gis", prof.theoreticalTriangleGis);
+      addFixed6(doc, pObj, "theoretical_box_gis", prof.theoreticalBoxGis);
     }
-    GpuContentionInfo cont = HardwareTelemetry::checkContention(dp.deviceIndex);
-    out += ",\n      \"hardware_contention\": {\n";
-    out += "        \"detected\": " + std::string(cont.hasContention ? "true" : "false") + ",\n";
-    out += "        \"is_critical\": " + std::string(cont.isCritical ? "true" : "false") + ",\n";
-    out += "        \"gpu_busy_percent\": " + std::to_string(cont.gpuBusyPct) + ",\n";
-    out += "        \"vram_used_mb\": " + std::to_string(cont.vramUsedMb) + ",\n";
-    out += "        \"vram_total_mb\": " + std::to_string(cont.vramTotalMb) + ",\n";
-    out += "        \"gtt_used_mb\": " + std::to_string(cont.gttUsedMb) + ",\n";
-    out += "        \"cpu_load_1min\": " + jsonNumber(cont.cpuLoad1Min) + ",\n";
-    out += "        \"reasons\": [";
-    for (size_t r = 0; r < cont.reasons.size(); ++r) {
-      out += "\"" + jsonEscape(cont.reasons[r]) + "\"" + (r + 1 < cont.reasons.size() ? ", " : "");
-    }
-    out += "]\n      }\n";
-    out += (d + 1 < profiles.size()) ? "    },\n" : "    }\n";
-  }
-  out += "  ],\n";
-  out += "  \"results\": [\n";
-  for (size_t i = 0; i < results.size(); ++i) {
-    const ResultData &r = results[i];
-    std::string devIdxStr = (r.deviceIndex == 0xFFFFFFFF || r.backendName == "System")
-                                ? "null"
-                                : std::to_string(r.deviceIndex);
-    double value = computeResultValue(r);
 
-    out += "    {\n";
-    out += "      \"backend\": \"" + jsonEscape(r.backendName) + "\",\n";
-    out += "      \"device\": \"" + jsonEscape(r.deviceName) + "\",\n";
-    out += "      \"device_index\": " + devIdxStr + ",\n";
-    out += "      \"benchmark\": \"" + jsonEscape(r.benchmarkName) + "\",\n";
-    out += "      \"component\": \"" + jsonEscape(r.component) + "\",\n";
-    out += "      \"subcategory\": \"" + jsonEscape(r.subcategory) + "\",\n";
-    out += "      \"metric\": \"" + jsonEscape(r.metric) + "\",\n";
-    out += "      \"metric_unit\": \"" + jsonEscape(r.metric) + "\",\n";
-    out += "      \"value\": " + jsonNumber(value) + ",\n";
-    if (r.benchmarkName.find("RayScheduling") != std::string::npos && r.metric == "MRays/s") {
-      uint32_t w = r.width ? r.width : 1920;
-      uint32_t h = r.height ? r.height : 1080;
-      double fps = (value * 1e6) / static_cast<double>(w * h);
-      out += "      \"fps\": " + jsonNumber(fps) + ",\n";
-      out += "      \"resolution\": \"" + std::to_string(w) + "x" + std::to_string(h) + "\",\n";
+    const GpuContentionInfo cont = HardwareTelemetry::checkContention(dp.deviceIndex);
+    yyjson_mut_val *contObj = yyjson_mut_obj_add_obj(doc, pObj, "hardware_contention");
+    yyjson_mut_obj_add_bool(doc, contObj, "detected", cont.hasContention);
+    yyjson_mut_obj_add_bool(doc, contObj, "is_critical", cont.isCritical);
+    yyjson_mut_obj_add_uint(doc, contObj, "gpu_busy_percent", cont.gpuBusyPct);
+    yyjson_mut_obj_add_uint(doc, contObj, "vram_used_mb", cont.vramUsedMb);
+    yyjson_mut_obj_add_uint(doc, contObj, "vram_total_mb", cont.vramTotalMb);
+    yyjson_mut_obj_add_uint(doc, contObj, "gtt_used_mb", cont.gttUsedMb);
+    addFixed6(doc, contObj, "cpu_load_1min", cont.cpuLoad1Min);
+    yyjson_mut_val *reasonsArr = yyjson_mut_obj_add_arr(doc, contObj, "reasons");
+    for (const auto &reason : cont.reasons) {
+      yyjson_mut_arr_add_strcpy(doc, reasonsArr, reason.c_str());
     }
+  }
+
+  yyjson_mut_val *resArr = yyjson_mut_obj_add_arr(doc, root, "results");
+  for (const ResultData &r : results) {
+    yyjson_mut_val *rObj = yyjson_mut_arr_add_obj(doc, resArr);
+    const double value = computeResultValue(r);
+
+    yyjson_mut_obj_add_strcpy(doc, rObj, "backend", r.backendName.c_str());
+    yyjson_mut_obj_add_strcpy(doc, rObj, "device", r.deviceName.c_str());
+    if (r.deviceIndex == 0xFFFFFFFF || r.backendName == "System") {
+      yyjson_mut_obj_add_null(doc, rObj, "device_index");
+    } else {
+      yyjson_mut_obj_add_uint(doc, rObj, "device_index", r.deviceIndex);
+    }
+    yyjson_mut_obj_add_strcpy(doc, rObj, "benchmark", r.benchmarkName.c_str());
+    yyjson_mut_obj_add_strcpy(doc, rObj, "component", r.component.c_str());
+    yyjson_mut_obj_add_strcpy(doc, rObj, "subcategory", r.subcategory.c_str());
+    yyjson_mut_obj_add_strcpy(doc, rObj, "metric", r.metric.c_str());
+    yyjson_mut_obj_add_strcpy(doc, rObj, "metric_unit", r.metric.c_str());
+    addFixed6(doc, rObj, "value", value);
+    if (r.operationalIntensity > 0.0) {
+      addFixed6(doc, rObj, "operational_intensity", r.operationalIntensity);
+    }
+
+    if (r.benchmarkName.find("RayScheduling") != std::string::npos && r.metric == "MRays/s") {
+      const uint32_t w = r.width ? r.width : 1920;
+      const uint32_t h = r.height ? r.height : 1080;
+      const double fps = (value * 1e6) / static_cast<double>(w * h);
+      addFixed6(doc, rObj, "fps", fps);
+      const std::string resStr = std::to_string(w) + "x" + std::to_string(h);
+      yyjson_mut_obj_add_strcpy(doc, rObj, "resolution", resStr.c_str());
+    }
+
     if (r.benchmarkName.find("RayRawTraversal") != std::string::npos ||
         r.subcategory == "Hardware BVH Traversal") {
-      double time_s = r.time_ms / 1000.0;
+      const double time_s = r.time_ms / 1000.0;
       double throughputGis = 0.0;
       if (time_s > 0.0) {
-        uint64_t ops = (r.configIndex == 0) ? r.operations : (r.operations * 64);
+        const uint64_t ops = (r.configIndex == 0) ? r.operations : (r.operations * 64);
         throughputGis = (static_cast<double>(ops) / time_s) / 1e9;
       }
-      out += "      \"peak_type\": \"" + std::string(r.configIndex == 0 ? "Triangle" : "Box") + "\",\n";
-      out += "      \"traversal_model\": \"" + std::string(r.configIndex == 0 ? "coherent_single_layer_triangle" : "synthetic_64_layer_aabb") + "\",\n";
-      out += "      \"synthetic_model\": \"" + std::string(r.configIndex == 0 ? "coherent_single_layer_triangle" : "synthetic_64_layer_aabb") + "\",\n";
-      out += "      \"model_box_tests_per_ray\": " + std::to_string(r.configIndex == 0 ? 1 : 64) + ",\n";
-      out += "      \"synthetic_disclosure\": \"" + std::string(r.configIndex == 0 ?
-          "Measures sustained hardware triangle intersection rate terminating on Layer 0." :
-          "Measures synthetic 64-layer AABB traversal (assuming 8 BVH8 nodes x 8 box tests = 64 box tests/ray) under idealized occupancy; does not represent real triangle mesh geometry.") + "\",\n";
-      out += "      \"throughput_gis\": " + jsonNumber(throughputGis) + ",\n";
+      yyjson_mut_obj_add_strcpy(doc, rObj, "peak_type", r.configIndex == 0 ? "Triangle" : "Box");
+      yyjson_mut_obj_add_strcpy(doc, rObj, "traversal_model",
+                                r.configIndex == 0 ? "coherent_single_layer_triangle"
+                                                   : "synthetic_64_layer_aabb");
+      yyjson_mut_obj_add_strcpy(doc, rObj, "synthetic_model",
+                                r.configIndex == 0 ? "coherent_single_layer_triangle"
+                                                   : "synthetic_64_layer_aabb");
+      yyjson_mut_obj_add_uint(doc, rObj, "model_box_tests_per_ray",
+                              r.configIndex == 0 ? 1u : 64u);
+      yyjson_mut_obj_add_strcpy(
+          doc, rObj, "synthetic_disclosure",
+          r.configIndex == 0
+              ? "Measures sustained hardware triangle intersection rate terminating on Layer 0."
+              : "Measures synthetic 64-layer AABB traversal (assuming 8 BVH8 nodes x 8 box tests = 64 box tests/ray) under idealized occupancy; does not represent real triangle mesh geometry.");
+      addFixed6(doc, rObj, "throughput_gis", throughputGis);
 
       const auto &prof = DeviceDatabase::lookup(r.vendorId, r.deviceId, r.deviceName);
-      double peakGis = (r.configIndex == 0) ? prof.theoreticalTriangleGis : prof.theoreticalBoxGis;
+      const double peakGis =
+          (r.configIndex == 0) ? prof.theoreticalTriangleGis : prof.theoreticalBoxGis;
       if (peakGis > 0.0) {
         double pctPeak = (throughputGis / peakGis) * 100.0;
         if (!std::isfinite(pctPeak)) pctPeak = 0.0;
@@ -2045,14 +2213,16 @@ std::string resultsToJson(const std::vector<ResultData> &results,
           std::snprintf(buf, sizeof(buf), "%.1f%% of %.2f TIS/s %s Boost Peak", pctPeak,
                         peakGis / 1000.0, prof.archName.c_str());
         }
-        std::string detailsStr(buf);
-        out += "      \"target_architecture\": \"" + jsonEscape(prof.archName) + "\",\n";
-        out += "      \"theoretical_peak_gis\": " + jsonNumber(peakGis) + ",\n";
-        out += "      \"pct_theoretical_peak\": " + jsonNumber(pctPeak) + ",\n";
-        out += "      \"details_speedup\": \"" + jsonEscape(detailsStr) + "\",\n";
+        yyjson_mut_obj_add_strcpy(doc, rObj, "target_architecture", prof.archName.c_str());
+        addFixed6(doc, rObj, "theoretical_peak_gis", peakGis);
+        addFixed6(doc, rObj, "pct_theoretical_peak", pctPeak);
+        yyjson_mut_obj_add_strcpy(doc, rObj, "details_speedup", buf);
       }
     }
-    if ((r.benchmarkName.find("FP32") != std::string::npos || r.benchmarkName.find("Dual-Issue") != std::string::npos) && r.metric == "TFLOPS") {
+
+    if ((r.benchmarkName.find("FP32") != std::string::npos ||
+         r.benchmarkName.find("Dual-Issue") != std::string::npos) &&
+        r.metric == "TFLOPS") {
       const auto &prof = DeviceDatabase::lookup(r.vendorId, r.deviceId, r.deviceName);
       if (prof.theoreticalFp32Tflops > 0.0) {
         double pctPeak = (value / prof.theoreticalFp32Tflops) * 100.0;
@@ -2060,13 +2230,16 @@ std::string resultsToJson(const std::vector<ResultData> &results,
         char buf[96];
         std::snprintf(buf, sizeof(buf), "%.1f%% of %.2f TFLOPS %s Peak", pctPeak,
                       prof.theoreticalFp32Tflops, prof.archName.c_str());
-        out += "      \"target_architecture\": \"" + jsonEscape(prof.archName) + "\",\n";
-        out += "      \"theoretical_peak_tflops\": " + jsonNumber(prof.theoreticalFp32Tflops) + ",\n";
-        out += "      \"pct_theoretical_peak\": " + jsonNumber(pctPeak) + ",\n";
-        out += "      \"details_speedup\": \"" + jsonEscape(std::string(buf)) + "\",\n";
+        yyjson_mut_obj_add_strcpy(doc, rObj, "target_architecture", prof.archName.c_str());
+        addFixed6(doc, rObj, "theoretical_peak_tflops", prof.theoreticalFp32Tflops);
+        addFixed6(doc, rObj, "pct_theoretical_peak", pctPeak);
+        yyjson_mut_obj_add_strcpy(doc, rObj, "details_speedup", buf);
       }
     }
-    if ((r.benchmarkName.find("Device Memory Bandwidth") != std::string::npos || r.benchmarkName.find("MemBandwidth") != std::string::npos) && r.metric == "GB/s") {
+
+    if ((r.benchmarkName.find("Device Memory Bandwidth") != std::string::npos ||
+         r.benchmarkName.find("MemBandwidth") != std::string::npos) &&
+        r.metric == "GB/s") {
       const auto &prof = DeviceDatabase::lookup(r.vendorId, r.deviceId, r.deviceName);
       if (prof.theoreticalBandwidthGBps > 0.0) {
         double pctPeak = (value / prof.theoreticalBandwidthGBps) * 100.0;
@@ -2074,139 +2247,177 @@ std::string resultsToJson(const std::vector<ResultData> &results,
         char buf[96];
         std::snprintf(buf, sizeof(buf), "%.1f%% of %.1f GB/s %s Peak", pctPeak,
                       prof.theoreticalBandwidthGBps, prof.archName.c_str());
-        out += "      \"target_architecture\": \"" + jsonEscape(prof.archName) + "\",\n";
-        out += "      \"theoretical_peak_gbps\": " + jsonNumber(prof.theoreticalBandwidthGBps) + ",\n";
-        out += "      \"pct_theoretical_peak\": " + jsonNumber(pctPeak) + ",\n";
-        out += "      \"details_speedup\": \"" + jsonEscape(std::string(buf)) + "\",\n";
+        yyjson_mut_obj_add_strcpy(doc, rObj, "target_architecture", prof.archName.c_str());
+        addFixed6(doc, rObj, "theoretical_peak_gbps", prof.theoreticalBandwidthGBps);
+        addFixed6(doc, rObj, "pct_theoretical_peak", pctPeak);
+        yyjson_mut_obj_add_strcpy(doc, rObj, "details_speedup", buf);
       }
     }
-    out += "      \"operations\": " + std::to_string(r.operations) + ",\n";
-    out += "      \"time_ms\": " + jsonNumber(r.time_ms) + ",\n";
-    if (r.sample_count > 0) {
-      out += "      \"statistics\": {\n";
-      out += "        \"samples\": " + std::to_string(r.sample_count) + ",\n";
-      out += "        \"min_time_ms\": " + jsonNumber(r.min_time_ms) + ",\n";
-      out += "        \"median_time_ms\": " + jsonNumber(r.median_time_ms) + ",\n";
-      out += "        \"mean_time_ms\": " + jsonNumber(r.mean_time_ms) + ",\n";
-      out += "        \"p95_time_ms\": " + jsonNumber(r.p95_time_ms) + "\n";
-      out += "      },\n";
-    }
-    if (r.hasRegisterTelemetry) {
-      out += "      \"compiler_telemetry\": {\n";
-      out += "        \"available\": true,\n";
-      out += "        \"vgpr_count\": " + std::to_string(r.vgprCount) + ",\n";
-      out += "        \"sgpr_count\": " + std::to_string(r.sgprCount) + ",\n";
-      out += "        \"lds_size_bytes\": " + std::to_string(r.ldsSizeBytes) + ",\n";
-      out += "        \"scratch_spill_bytes\": " + std::to_string(r.scratchSizeBytes) + ",\n";
-      out += "        \"code_size_bytes\": " + std::to_string(r.codeSizeBytes) + ",\n";
-      out += "        \"max_waves_per_simd\": " + std::to_string(r.maxWavesPerSimd) + ",\n";
-      out += "        \"compiler\": \"" + jsonEscape(r.compilerTarget) + "\"\n";
-      out += "      },\n";
-    }
-    if (r.hasPowerTelemetry) {
-      out += "      \"power_telemetry\": {\n";
-      out += "        \"available\": true,\n";
-      out += "        \"power_watts\": " + jsonNumber(r.powerWatts) + ",\n";
-      out += "        \"energy_joules\": " + jsonNumber(r.energyJoules) + ",\n";
-      out += "        \"joules_per_unit\": " + jsonNumber(r.joulesPerUnit) + ",\n";
-      out += "        \"unit_per_watt\": " + jsonNumber(r.unitPerWatt) + ",\n";
-      out += "        \"efficiency_unit\": \"" + jsonEscape(r.efficiencyUnit) + "\"\n";
-      out += "      },\n";
-    }
-    if (r.hasPerfQueryTelemetry) {
-      out += "      \"performance_query\": {\n";
-      out += "        \"available\": true,\n";
-      out += "        \"gpu_active_cycles\": " + std::to_string(r.perfCounters.gpuActiveCycles) + ",\n";
-      out += "        \"waves\": " + std::to_string(r.perfCounters.waves) + ",\n";
-      out += "        \"valu_instructions\": " + std::to_string(r.perfCounters.valuInstructions) + ",\n";
-      out += "        \"salu_instructions\": " + std::to_string(r.perfCounters.saluInstructions) + ",\n";
-      out += "        \"vmem_load_instructions\": " + std::to_string(r.perfCounters.vmemLoadInstructions) + ",\n";
-      out += "        \"smem_load_instructions\": " + std::to_string(r.perfCounters.smemLoadInstructions) + ",\n";
-      out += "        \"vmem_store_instructions\": " + std::to_string(r.perfCounters.vmemStoreInstructions) + ",\n";
-      out += "        \"lds_instructions\": " + std::to_string(r.perfCounters.ldsInstructions) + ",\n";
-      out += "        \"valu_busy_pct\": " + jsonNumber(r.perfCounters.valuBusyPct) + ",\n";
-      out += "        \"salu_busy_pct\": " + jsonNumber(r.perfCounters.saluBusyPct) + ",\n";
-      out += "        \"vram_read_bytes\": " + std::to_string(r.perfCounters.vramReadBytes) + ",\n";
-      out += "        \"l0_cache_hit_ratio\": " + jsonNumber(r.perfCounters.l0CacheHitRatio) + ",\n";
-      out += "        \"l1_cache_hit_ratio\": " + jsonNumber(r.perfCounters.l1CacheHitRatio) + ",\n";
-      out += "        \"raw_counters\": {\n";
-      size_t rcIdx = 0;
-      for (const auto &[cName, cVal] : r.perfCounters.rawCounters) {
-        out += "          \"" + jsonEscape(cName) + "\": " + jsonNumber(cVal) +
-               (rcIdx + 1 < r.perfCounters.rawCounters.size() ? ",\n" : "\n");
-        rcIdx++;
-      }
-      out += "        }\n";
-      out += "      },\n";
-    }
-    if (r.time_ms == -3.0) {
-      out += "      \"status\": \"ABORTED\",\n";
-      out += "      \"error\": \"" + jsonEscape(r.errorString) + "\",\n";
-    } else if (r.time_ms < 0.0) {
-      out += "      \"status\": \"FAILED\",\n";
-      out += "      \"error\": \"" + jsonEscape(r.errorString) + "\",\n";
-    } else if (r.isUnsupported) {
-      out += "      \"status\": \"UNSUPPORTED\",\n";
-    } else if (!r.isValid) {
-      out += "      \"status\": \"INVALID\",\n";
-      out += "      \"error\": \"Result validation failed (numerical divergence or NaN/Inf detected)\",\n";
-    } else {
-      out += "      \"status\": \"SUCCESS\",\n";
-    }
-    out += std::string("      \"is_valid\": ") +
-           (r.isValid ? "true" : "false") + ",\n";
-    out += std::string("      \"is_emulated\": ") +
-           (r.isEmulated ? "true" : "false") + ",\n";
-    out += std::string("      \"emulated\": ") +
-           (r.isEmulated ? "true" : "false") + ",\n";
-    std::string emulationReason = "";
-    if (r.isEmulated) {
-      emulationReason = r.supportNote.empty() ? "Emulated via software unpack" : r.supportNote;
-    }
-    out += "      \"emulation_reason\": \"" + jsonEscape(emulationReason) + "\",\n";
-    out += std::string("      \"unsupported\": ") +
-           (r.isUnsupported ? "true" : "false") + ",\n";
-    if (r.isUnsupported) {
-      out += "      \"unsupported_category\": \"" +
-             jsonEscape(r.supportCategory) + "\",\n";
-      out += "      \"unsupported_reason\": \"" + jsonEscape(r.supportNote) +
-             "\",\n";
-    } else if (!r.supportNote.empty()) {
-      out += "      \"support_note\": \"" + jsonEscape(r.supportNote) + "\",\n";
-      out += "      \"caveat\": \"" + jsonEscape(r.supportNote) + "\",\n";
-    }
-    out += "      \"notes\": \"" + jsonEscape(r.supportNote) + "\",\n";
-    out += "      \"max_workgroup_size\": " +
-           std::to_string(r.maxWorkGroupSize) + ",\n";
-    out += "      \"sort_weight\": " + std::to_string(r.sortWeight) + ",\n";
-    out += "      \"baseline_config_index\": " + std::to_string(r.baselineConfigIndex) + ",\n";
-    out += "      \"width\": " + std::to_string(r.width) + ",\n";
-    out += "      \"height\": " + std::to_string(r.height) + ",\n";
-    out += "      \"config_index\": " + std::to_string(r.configIndex) + "\n";
-    out += (i + 1 < results.size()) ? "    },\n" : "    }\n";
-  }
-  out += "  ]";
 
-  bool hasAnyPowerInJson = false;
+    yyjson_mut_obj_add_uint(doc, rObj, "operations", r.operations);
+    addFixed6(doc, rObj, "time_ms", r.time_ms);
+
+    if (r.sample_count > 0) {
+      yyjson_mut_val *statObj = yyjson_mut_obj_add_obj(doc, rObj, "statistics");
+      yyjson_mut_obj_add_uint(doc, statObj, "samples", r.sample_count);
+      addFixed6(doc, statObj, "min_time_ms", r.min_time_ms);
+      addFixed6(doc, statObj, "median_time_ms", r.median_time_ms);
+      addFixed6(doc, statObj, "mean_time_ms", r.mean_time_ms);
+      addFixed6(doc, statObj, "p95_time_ms", r.p95_time_ms);
+    }
+
+    if (r.hasRegisterTelemetry) {
+      yyjson_mut_val *compObj = yyjson_mut_obj_add_obj(doc, rObj, "compiler_telemetry");
+      yyjson_mut_obj_add_bool(doc, compObj, "available", true);
+      yyjson_mut_obj_add_uint(doc, compObj, "vgpr_count", r.vgprCount);
+      yyjson_mut_obj_add_uint(doc, compObj, "sgpr_count", r.sgprCount);
+      yyjson_mut_obj_add_uint(doc, compObj, "lds_size_bytes", r.ldsSizeBytes);
+      yyjson_mut_obj_add_uint(doc, compObj, "scratch_spill_bytes", r.scratchSizeBytes);
+      yyjson_mut_obj_add_uint(doc, compObj, "code_size_bytes", r.codeSizeBytes);
+      yyjson_mut_obj_add_uint(doc, compObj, "max_waves_per_simd", r.maxWavesPerSimd);
+      yyjson_mut_obj_add_strcpy(doc, compObj, "compiler", r.compilerTarget.c_str());
+    }
+
+    if (r.hasPowerTelemetry) {
+      yyjson_mut_val *pwrObj = yyjson_mut_obj_add_obj(doc, rObj, "power_telemetry");
+      yyjson_mut_obj_add_bool(doc, pwrObj, "available", true);
+      addFixed6(doc, pwrObj, "power_watts", r.powerWatts);
+      addFixed6(doc, pwrObj, "energy_joules", r.energyJoules);
+      addFixed6(doc, pwrObj, "joules_per_unit", r.joulesPerUnit);
+      addFixed6(doc, pwrObj, "unit_per_watt", r.unitPerWatt);
+      yyjson_mut_obj_add_strcpy(doc, pwrObj, "efficiency_unit", r.efficiencyUnit.c_str());
+    }
+
+    if (r.hasPerfQueryTelemetry) {
+      yyjson_mut_val *pqObj = yyjson_mut_obj_add_obj(doc, rObj, "performance_query");
+      yyjson_mut_obj_add_bool(doc, pqObj, "available", true);
+      yyjson_mut_obj_add_uint(doc, pqObj, "gpu_active_cycles", r.perfCounters.gpuActiveCycles);
+      yyjson_mut_obj_add_uint(doc, pqObj, "waves", r.perfCounters.waves);
+      yyjson_mut_obj_add_uint(doc, pqObj, "valu_instructions", r.perfCounters.valuInstructions);
+      yyjson_mut_obj_add_uint(doc, pqObj, "salu_instructions", r.perfCounters.saluInstructions);
+      yyjson_mut_obj_add_uint(doc, pqObj, "vmem_load_instructions", r.perfCounters.vmemLoadInstructions);
+      yyjson_mut_obj_add_uint(doc, pqObj, "smem_load_instructions", r.perfCounters.smemLoadInstructions);
+      yyjson_mut_obj_add_uint(doc, pqObj, "vmem_store_instructions", r.perfCounters.vmemStoreInstructions);
+      yyjson_mut_obj_add_uint(doc, pqObj, "lds_instructions", r.perfCounters.ldsInstructions);
+      addFixed6(doc, pqObj, "valu_busy_pct", r.perfCounters.valuBusyPct);
+      addFixed6(doc, pqObj, "salu_busy_pct", r.perfCounters.saluBusyPct);
+      yyjson_mut_obj_add_uint(doc, pqObj, "vram_read_bytes", r.perfCounters.vramReadBytes);
+      addFixed6(doc, pqObj, "l0_cache_hit_ratio", r.perfCounters.l0CacheHitRatio);
+      addFixed6(doc, pqObj, "l1_cache_hit_ratio", r.perfCounters.l1CacheHitRatio);
+      yyjson_mut_val *rawObj = yyjson_mut_obj_add_obj(doc, pqObj, "raw_counters");
+      for (const auto &[cName, cVal] : r.perfCounters.rawCounters) {
+        addFixed6DynamicKey(doc, rawObj, cName, cVal);
+      }
+    }
+
+    if (r.time_ms == -3.0) {
+      yyjson_mut_obj_add_strcpy(doc, rObj, "status", "ABORTED");
+      yyjson_mut_obj_add_strcpy(doc, rObj, "error", r.errorString.c_str());
+    } else if (r.time_ms < 0.0) {
+      yyjson_mut_obj_add_strcpy(doc, rObj, "status", "FAILED");
+      yyjson_mut_obj_add_strcpy(doc, rObj, "error", r.errorString.c_str());
+    } else if (r.isUnsupported) {
+      yyjson_mut_obj_add_strcpy(doc, rObj, "status", "UNSUPPORTED");
+    } else if (!r.isValid) {
+      yyjson_mut_obj_add_strcpy(doc, rObj, "status", "INVALID");
+      yyjson_mut_obj_add_strcpy(
+          doc, rObj, "error",
+          "Result validation failed (numerical divergence or NaN/Inf detected)");
+    } else {
+      yyjson_mut_obj_add_strcpy(doc, rObj, "status", "SUCCESS");
+    }
+
+    yyjson_mut_obj_add_bool(doc, rObj, "is_valid", r.isValid);
+    yyjson_mut_obj_add_bool(doc, rObj, "is_emulated", r.isEmulated);
+    yyjson_mut_obj_add_bool(doc, rObj, "emulated", r.isEmulated);
+    const std::string emulationReason =
+        r.isEmulated
+            ? (r.supportNote.empty() ? "Emulated via software unpack" : r.supportNote)
+            : "";
+    yyjson_mut_obj_add_strcpy(doc, rObj, "emulation_reason", emulationReason.c_str());
+    yyjson_mut_obj_add_bool(doc, rObj, "unsupported", r.isUnsupported);
+    if (r.isUnsupported) {
+      yyjson_mut_obj_add_strcpy(doc, rObj, "unsupported_category", r.supportCategory.c_str());
+      yyjson_mut_obj_add_strcpy(doc, rObj, "unsupported_reason", r.supportNote.c_str());
+    } else if (!r.supportNote.empty()) {
+      yyjson_mut_obj_add_strcpy(doc, rObj, "support_note", r.supportNote.c_str());
+      yyjson_mut_obj_add_strcpy(doc, rObj, "caveat", r.supportNote.c_str());
+    }
+    yyjson_mut_obj_add_strcpy(doc, rObj, "notes", r.supportNote.c_str());
+    yyjson_mut_obj_add_uint(doc, rObj, "max_workgroup_size", r.maxWorkGroupSize);
+    yyjson_mut_obj_add_sint(doc, rObj, "sort_weight", r.sortWeight);
+    yyjson_mut_obj_add_sint(doc, rObj, "baseline_config_index", r.baselineConfigIndex);
+    yyjson_mut_obj_add_uint(doc, rObj, "width", r.width);
+    yyjson_mut_obj_add_uint(doc, rObj, "height", r.height);
+    yyjson_mut_obj_add_uint(doc, rObj, "config_index", r.configIndex);
+  }
+
+  const std::vector<gpubench::DeviceRoofline> rooflines =
+      gpubench::RooflineModel::analyze(results);
+  if (!rooflines.empty()) {
+    yyjson_mut_val *rfArr = yyjson_mut_obj_add_arr(doc, root, "roofline");
+    for (const auto &dr : rooflines) {
+      yyjson_mut_val *rfObj = yyjson_mut_arr_add_obj(doc, rfArr);
+      yyjson_mut_obj_add_strcpy(doc, rfObj, "device_name", dr.deviceName.c_str());
+      yyjson_mut_obj_add_strcpy(doc, rfObj, "backend_name", dr.backendName.c_str());
+      yyjson_mut_obj_add_uint(doc, rfObj, "device_index", dr.deviceIndex);
+      addFixed6(doc, rfObj, "primary_vram_bw_gbps", dr.primaryVramGBps());
+      addFixed6(doc, rfObj, "primary_fp32_tflops", dr.primaryFp32Gops() / 1000.0);
+      addFixed6(doc, rfObj, "highest_compute_tflops", dr.highestComputeGops() / 1000.0);
+
+      yyjson_mut_val *bwArr = yyjson_mut_obj_add_arr(doc, rfObj, "bandwidth_ceilings");
+      for (const auto &bw : dr.bandwidthCeilings) {
+        yyjson_mut_val *bwObj = yyjson_mut_arr_add_obj(doc, bwArr);
+        yyjson_mut_obj_add_strcpy(doc, bwObj, "level", bw.level.c_str());
+        yyjson_mut_obj_add_strcpy(doc, bwObj, "source", bw.sourceLabel.c_str());
+        addFixed6(doc, bwObj, "bandwidth_gbps", bw.bandwidthGBps);
+      }
+
+      yyjson_mut_val *ccArr = yyjson_mut_obj_add_arr(doc, rfObj, "compute_ceilings");
+      for (const auto &cc : dr.computeCeilings) {
+        yyjson_mut_val *ccObj = yyjson_mut_arr_add_obj(doc, ccArr);
+        yyjson_mut_obj_add_strcpy(doc, ccObj, "name", cc.name.c_str());
+        yyjson_mut_obj_add_strcpy(doc, ccObj, "metric", cc.metric.c_str());
+        yyjson_mut_obj_add_strcpy(doc, ccObj, "source", cc.sourceLabel.c_str());
+        addFixed6(doc, ccObj, "peak_tops", cc.peakTops);
+      }
+
+      yyjson_mut_val *rpArr = yyjson_mut_obj_add_arr(doc, rfObj, "ridge_points");
+      for (const auto &rp : dr.ridgePoints) {
+        yyjson_mut_val *rpObj = yyjson_mut_arr_add_obj(doc, rpArr);
+        yyjson_mut_obj_add_strcpy(doc, rpObj, "memory_level", rp.memoryLevel.c_str());
+        yyjson_mut_obj_add_strcpy(doc, rpObj, "compute_ceiling", rp.computeCeiling.c_str());
+        addFixed6(doc, rpObj, "ridge_ops_per_byte", rp.ridgeOpsPerByte);
+      }
+    }
+  }
+
   double totalPowerSumInJson = 0.0;
   double totalEnergySumInJson = 0.0;
   size_t powerCountInJson = 0;
   for (const auto &r : results) {
-    if (r.hasPowerTelemetry && r.powerWatts > 0.0f) {
-      hasAnyPowerInJson = true;
+    if (r.hasPowerTelemetry && std::isfinite(r.powerWatts) && r.powerWatts > 0.0f) {
       totalPowerSumInJson += r.powerWatts;
-      totalEnergySumInJson += r.energyJoules;
+      totalEnergySumInJson += std::isfinite(r.energyJoules) ? r.energyJoules : 0.0;
       powerCountInJson++;
     }
   }
-  if (hasAnyPowerInJson && powerCountInJson > 0) {
-    out += ",\n  \"power_summary\": {\n";
-    out += "    \"average_power_watts\": " + jsonNumber(totalPowerSumInJson / powerCountInJson) + ",\n";
-    out += "    \"total_energy_joules\": " + jsonNumber(totalEnergySumInJson) + "\n";
-    out += "  }\n";
-  } else {
-    out += "\n";
+  if (powerCountInJson > 0) {
+    yyjson_mut_val *pwrSumObj = yyjson_mut_obj_add_obj(doc, root, "power_summary");
+    addFixed6(doc, pwrSumObj, "average_power_watts",
+              totalPowerSumInJson / static_cast<double>(powerCountInJson));
+    addFixed6(doc, pwrSumObj, "total_energy_joules", totalEnergySumInJson);
   }
-  out += "}\n";
+
+  size_t outLen = 0;
+  char *rawJson = yyjson_mut_write_opts(
+      doc, YYJSON_WRITE_PRETTY_TWO_SPACES | YYJSON_WRITE_NEWLINE_AT_END, nullptr,
+      &outLen, nullptr);
+  std::string out;
+  if (rawJson != nullptr) {
+    out.assign(rawJson, outLen);
+    std::free(rawJson);
+  }
+  yyjson_mut_doc_free(doc);
   return out;
 }

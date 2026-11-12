@@ -1,0 +1,30 @@
+#version 460
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+layout(std430, set = 0, binding = 0) readonly buffer IndirectArgsBuffer {
+    uint args[];
+} indirectBuf;
+
+layout(std430, set = 0, binding = 1) readonly buffer PayloadQueueBuffer {
+    uvec4 payloads[];
+} queueBuf;
+
+layout(std430, set = 0, binding = 2) buffer OutputBuffer {
+    float results[];
+} outBuf;
+
+void main() {
+    uint gid = gl_GlobalInvocationID.x;
+    uint itemCount = indirectBuf.args[3];
+    if (gid >= itemCount) {
+        return;
+    }
+
+    uvec4 p = queueBuf.payloads[gid];
+    float v = float(p.y & 0xFFFFu) * 0.0001220703125 + float(p.z) * 0.125;
+    for (uint i = 0u; i < 32u; ++i) {
+        v = fma(v, 0.99951171875, 0.0009765625);
+    }
+    outBuf.results[p.x] = v;
+}

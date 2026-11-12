@@ -47,8 +47,12 @@ public:
   std::string GetConfigName(uint32_t config_idx) const override;
   const char *GetComponent(uint32_t config_idx = 0) const override;
   const char *GetSubCategory(uint32_t config_idx = 0) const override;
+  const char *GetDescription() const override {
+    return "SIMT wavefront execution divergence across coherent, block-coherent, and fully random ray directions and material branches.";
+  }
 
 private:
+  template <typename Tag> friend struct ::gpubench::test::TestBody;
   IComputeContext *context = nullptr;
   ComputeKernel kernel = nullptr;
   ComputeBuffer resultBuffer = nullptr;

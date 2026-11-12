@@ -36,15 +36,22 @@ public:
   BenchmarkResult GetResult(uint32_t config_idx) const override;
   bool ValidateResults(uint32_t config_idx = 0) const override;
   const char *GetName() const override;
+  std::vector<std::string> GetAliases() const override {
+    return {"raypayload", "payload"};
+  }
   const char *GetComponent(uint32_t config_idx) const override;
   const char *GetMetric() const override;
   const char *GetSubCategory(uint32_t config_idx) const override;
+  const char *GetDescription() const override {
+    return "VK_KHR_ray_tracing_pipeline register-file and stack spill sensitivity across 16 B, 128 B, and 256 B ray payload sizes.";
+  }
   std::string GetConfigName(uint32_t config_idx) const override;
 
   uint32_t GetNumConfigs() const override { return 3; } // 16B, 128B, 256B
   int GetSortWeight(uint32_t = 0) const override { return 684; }
 
 private:
+  template <typename Tag> friend struct ::gpubench::test::TestBody;
   void loadRTProcs(VkDevice device);
   void buildAS();
 
@@ -57,6 +64,7 @@ private:
   ComputeBuffer instanceBuffer = nullptr;
   ComputeBuffer scratchBuffer = nullptr;
   ComputeBuffer resultBuffer = nullptr;
+  ComputeBuffer resultBuffers[3] = {nullptr, nullptr, nullptr};
 
   ComputeBuffer triangleBlasBuffer = nullptr;
   ComputeBuffer triangleTlasBuffer = nullptr;
@@ -66,6 +74,7 @@ private:
 
   uint32_t rayCount = 0;
   uint32_t numPrimitives = 0;
+  uint32_t executedConfigsMask = 0;
   int lastRunConfig = -1;
   std::map<uint32_t, double> rtResults;
 

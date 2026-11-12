@@ -39,11 +39,24 @@ public:
     return "Compute";
   }
   const char *GetSubCategory(uint32_t config_idx = 0) const override {
+    (void)config_idx;
     return "FP64";
+  }
+  const char *GetDescription() const override {
+    return "Double-precision IEEE 754 binary64 FMA throughput across hardware FP64 ALUs.";
+  }
+  double GetOperationalIntensity(uint32_t config_idx = 0) const override {
+    (void)config_idx;
+    return 262144.0;
+  }
+  bool RequiresInterIterationBarrier(uint32_t config_idx = 0) const override {
+    (void)config_idx;
+    return true;
   }
   int GetSortWeight() const override { return 10; }
 
 private:
+  template <typename Tag> friend struct ::gpubench::test::TestBody;
   IComputeContext *context = nullptr;
   ComputeKernel kernel = nullptr;
   ComputeBuffer buffer = nullptr;

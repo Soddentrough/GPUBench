@@ -134,8 +134,12 @@ void DualIssueBench::Run(uint32_t config_idx) {
                              std::to_string(config_idx));
   }
 
-  context->setKernelArg(kernels[config_idx], 0, buffers[config_idx]);
   float multiplier = 0.999f;
+  if (config_idx <= 2 || config_idx == 6) {
+    // Pre-scale on host across all backends so multiplier stays directly in a
+    // push-constant / kernarg SGPR without VALU v_mul_f32 lowering (which blocks VOPD).
+    multiplier = 0.999f * 0.00001f;
+  }
   context->setKernelArg(kernels[config_idx], 1, sizeof(float), &multiplier);
   context->setKernelArg(kernels[config_idx], 2, sizeof(uint32_t), &numElements);
 

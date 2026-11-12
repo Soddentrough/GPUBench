@@ -15,6 +15,7 @@ set(TEST_SOURCES
     test_memory_and_cache_validation.cpp
     test_graphics_and_rt_validation.cpp
     test_rfc8259_json_stress.cpp
+    test_modernization_and_2026.cpp
 )
 
 add_executable(gpubench_tests ${TEST_SOURCES})
@@ -61,7 +62,6 @@ add_test(NAME E2E_Tier1 COMMAND gpubench_tests --filter=E2E_Tier1)
 add_test(NAME E2E_Tier2 COMMAND gpubench_tests --filter=E2E_Tier2)
 add_test(NAME E2E_Tier3 COMMAND gpubench_tests --filter=E2E_Tier3)
 add_test(NAME E2E_Tier4 COMMAND gpubench_tests --filter=E2E_Tier4)
-add_test(NAME E2E_All COMMAND gpubench_tests --filter=E2E_)
 add_test(NAME IndirectAndASBuildValidation COMMAND gpubench_tests --filter=IndirectAndASBuildValidation)
 add_test(NAME TimingFidelity COMMAND gpubench_tests --filter=TimingFidelity)
 add_test(NAME LdsAndBf16Validation COMMAND gpubench_tests --filter=LdsAndBf16Validation)
@@ -69,7 +69,7 @@ add_test(NAME ComputeValidation COMMAND gpubench_tests --filter=ComputeValidatio
 add_test(NAME MemoryAndCacheValidation COMMAND gpubench_tests --filter=MemoryAndCacheValidation)
 add_test(NAME GraphicsAndRayTracingValidation COMMAND gpubench_tests --filter=GraphicsAndRayTracingValidation)
 add_test(NAME RFC8259_JsonStress COMMAND gpubench_tests --filter=RFC8259_JsonStress)
-add_test(NAME AllTests COMMAND gpubench_tests)
+add_test(NAME ModernizationAnd2026 COMMAND gpubench_tests --filter=ModernizationAnd2026)
 
 set_tests_properties(
     DeviceDatabase
@@ -83,7 +83,6 @@ set_tests_properties(
     E2E_Tier2
     E2E_Tier3
     E2E_Tier4
-    E2E_All
     IndirectAndASBuildValidation
     TimingFidelity
     LdsAndBf16Validation
@@ -91,7 +90,7 @@ set_tests_properties(
     MemoryAndCacheValidation
     GraphicsAndRayTracingValidation
     RFC8259_JsonStress
-    AllTests
+    ModernizationAnd2026
     PROPERTIES WORKING_DIRECTORY "${CMAKE_BINARY_DIR}" RESOURCE_LOCK gpu_execution
 )
 

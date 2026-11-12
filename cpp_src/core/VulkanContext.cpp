@@ -2,13 +2,185 @@
 #include "DeviceDatabase.h"
 #include "utils/ShaderCache.h"
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <sstream>
 #include <stdexcept>
 #include <vector>
+
+#ifndef VK_EXT_shader_ocp_microscaling_types
+#define VK_EXT_shader_ocp_microscaling_types 1
+#define VK_EXT_SHADER_OCP_MICROSCALING_TYPES_EXTENSION_NAME "VK_EXT_shader_ocp_microscaling_types"
+static constexpr VkStructureType
+    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_OCP_MICROSCALING_TYPES_FEATURES_EXT =
+        static_cast<VkStructureType>(1000672000);
+typedef struct VkPhysicalDeviceShaderOCPMicroscalingTypesFeaturesEXT {
+  VkStructureType sType;
+  void *pNext;
+  VkBool32 shaderFloat4;
+  VkBool32 shaderFloat6;
+  VkBool32 shaderFloat8UnsignedE8M0;
+  VkBool32 shaderMXInt8;
+} VkPhysicalDeviceShaderOCPMicroscalingTypesFeaturesEXT;
+#endif
+
+#ifndef VK_NV_cooperative_vector
+#define VK_NV_cooperative_vector 1
+#define VK_NV_COOPERATIVE_VECTOR_EXTENSION_NAME "VK_NV_cooperative_vector"
+static constexpr VkStructureType
+    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_VECTOR_FEATURES_NV =
+        static_cast<VkStructureType>(1000491000);
+typedef struct VkPhysicalDeviceCooperativeVectorFeaturesNV {
+  VkStructureType sType;
+  void *pNext;
+  VkBool32 cooperativeVector;
+  VkBool32 cooperativeVectorTraining;
+} VkPhysicalDeviceCooperativeVectorFeaturesNV;
+#endif
+
+#ifndef VK_NV_cooperative_matrix2
+#define VK_NV_cooperative_matrix2 1
+#define VK_NV_COOPERATIVE_MATRIX_2_EXTENSION_NAME "VK_NV_cooperative_matrix2"
+static constexpr VkStructureType
+    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_2_FEATURES_NV =
+        static_cast<VkStructureType>(1000593000);
+typedef struct VkPhysicalDeviceCooperativeMatrix2FeaturesNV {
+  VkStructureType sType;
+  void *pNext;
+  VkBool32 cooperativeMatrixWorkgroupScope;
+  VkBool32 cooperativeMatrixFlexibleDimensions;
+  VkBool32 cooperativeMatrixReductions;
+  VkBool32 cooperativeMatrixConversions;
+  VkBool32 cooperativeMatrixPerElementOperations;
+  VkBool32 cooperativeMatrixTensorAddressing;
+  VkBool32 cooperativeMatrixBlockLoads;
+} VkPhysicalDeviceCooperativeMatrix2FeaturesNV;
+#endif
+
+namespace {
+VulkanContext::CoopMatrixTile selectBestSubgroupCoopMatrixTile(
+    VkInstance inst, VkPhysicalDevice physDev, VkComponentTypeKHR abType,
+    VkComponentTypeKHR cType, uint32_t defaultSubgroupSize, bool wave32Ok) {
+  VulkanContext::CoopMatrixTile result{};
+  result.subgroupSize = wave32Ok ? 32u : (defaultSubgroupSize > 0 ? defaultSubgroupSize : 32u);
+  auto pfnGetCoopProps =
+      reinterpret_cast<PFN_vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR>(
+          vkGetInstanceProcAddr(
+              inst, "vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR"));
+  if (!pfnGetCoopProps) {
+    return result;
+  }
+  uint32_t propCount = 0;
+  if (pfnGetCoopProps(physDev, &propCount, nullptr) != VK_SUCCESS ||
+      propCount == 0) {
+    return result;
+  }
+  std::vector<VkCooperativeMatrixPropertiesKHR> props(propCount);
+  for (auto &p : props) {
+    p = {};
+    p.sType = VK_STRUCTURE_TYPE_COOPERATIVE_MATRIX_PROPERTIES_KHR;
+  }
+  if (pfnGetCoopProps(physDev, &propCount, props.data()) != VK_SUCCESS) {
+    return result;
+  }
+
+  uint64_t bestVol = 0;
+  for (const auto &p : props) {
+    if (p.AType == abType && p.BType == abType && p.CType == cType &&
+        p.ResultType == cType && p.scope == VK_SCOPE_SUBGROUP_KHR &&
+        p.MSize > 0 && p.NSize > 0 && p.KSize > 0) {
+      if (p.MSize == 16 && p.NSize == 16 && p.KSize == 16) {
+        result.supported = true;
+        result.M = 16;
+        result.N = 16;
+        result.K = 16;
+        return result;
+      }
+      uint64_t vol = static_cast<uint64_t>(p.MSize) * p.NSize * p.KSize;
+      if (!result.supported || vol > bestVol) {
+        result.supported = true;
+        result.M = p.MSize;
+        result.N = p.NSize;
+        result.K = p.KSize;
+        bestVol = vol;
+      }
+    }
+  }
+  return result;
+}
+
+bool hasSubgroupCoopMatrix16x16x16(VkInstance inst, VkPhysicalDevice physDev,
+                                   VkComponentTypeKHR abType,
+                                   VkComponentTypeKHR cType) {
+  auto pfnGetCoopProps =
+      reinterpret_cast<PFN_vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR>(
+          vkGetInstanceProcAddr(
+              inst, "vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR"));
+  if (!pfnGetCoopProps) {
+    return false;
+  }
+  uint32_t propCount = 0;
+  if (pfnGetCoopProps(physDev, &propCount, nullptr) != VK_SUCCESS ||
+      propCount == 0) {
+    return false;
+  }
+  std::vector<VkCooperativeMatrixPropertiesKHR> props(propCount);
+  for (auto &p : props) {
+    p = {};
+    p.sType = VK_STRUCTURE_TYPE_COOPERATIVE_MATRIX_PROPERTIES_KHR;
+  }
+  if (pfnGetCoopProps(physDev, &propCount, props.data()) != VK_SUCCESS) {
+    return false;
+  }
+  for (const auto &p : props) {
+    if (p.AType == abType && p.BType == abType && p.CType == cType &&
+        p.ResultType == cType && p.scope == VK_SCOPE_SUBGROUP_KHR &&
+        p.MSize == 16 && p.NSize == 16 && p.KSize == 16) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool supportsWave32Compute(VkPhysicalDevice physDev,
+                           uint32_t defaultSubgroupSize,
+                           bool hasSubgroupSizeCtrlExt) {
+  if (defaultSubgroupSize == 32) {
+    return true;
+  }
+  if (!hasSubgroupSizeCtrlExt) {
+    return false;
+  }
+  VkPhysicalDeviceSubgroupSizeControlProperties sgCtrlProps{};
+  sgCtrlProps.sType =
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_PROPERTIES;
+  VkPhysicalDeviceProperties2 p2{};
+  p2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+  p2.pNext = &sgCtrlProps;
+  vkGetPhysicalDeviceProperties2(physDev, &p2);
+  return (sgCtrlProps.minSubgroupSize <= 32 &&
+          sgCtrlProps.maxSubgroupSize >= 32 &&
+          (sgCtrlProps.requiredSubgroupSizeStages & VK_SHADER_STAGE_COMPUTE_BIT) != 0);
+}
+
+int scoreDeviceTypePriority(VkPhysicalDeviceType devType) {
+  switch (devType) {
+  case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:
+    return 3;
+  case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:
+    return 2;
+  case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:
+    return 1;
+  default:
+    return 0;
+  }
+}
+} // namespace
 
 #ifdef HAVE_SHADERC
 #include <shaderc/shaderc.hpp>
@@ -34,6 +206,7 @@ void VulkanContext::waitIdle() {
       inFlightFrames[i].inUse = false;
     }
   }
+  std::lock_guard<std::recursive_mutex> qlock(m_queueMutex);
   if (computeQueue != VK_NULL_HANDLE) {
     VkResult queueResult = vkQueueWaitIdle(computeQueue);
     if (queueResult != VK_SUCCESS) {
@@ -48,9 +221,35 @@ void VulkanContext::waitIdle() {
                                std::to_string(queueResult));
     }
   }
+  if (asyncComputeQueue != VK_NULL_HANDLE &&
+      asyncComputeQueue != computeQueue &&
+      asyncComputeQueue != graphicsQueue) {
+    vkQueueWaitIdle(asyncComputeQueue);
+  }
+  if (transferQueue != VK_NULL_HANDLE &&
+      transferQueue != computeQueue &&
+      transferQueue != graphicsQueue &&
+      transferQueue != asyncComputeQueue) {
+    vkQueueWaitIdle(transferQueue);
+  }
+  if (secondaryTransferQueue != VK_NULL_HANDLE &&
+      secondaryTransferQueue != transferQueue &&
+      secondaryTransferQueue != computeQueue &&
+      secondaryTransferQueue != graphicsQueue &&
+      secondaryTransferQueue != asyncComputeQueue) {
+    vkQueueWaitIdle(secondaryTransferQueue);
+  }
 }
 
-VulkanContext::VulkanContext(bool verbose, bool debug) : verbose(verbose), debug(debug) {
+VulkanContext::VulkanContext(
+    bool verbose, bool debug,
+    const std::vector<const char *> &extraInstanceExtensions)
+    : verbose(verbose), debug(debug) {
+  for (const char *ext : extraInstanceExtensions) {
+    if (ext && ext[0] != '\0') {
+      m_extraInstanceExtensions.emplace_back(ext);
+    }
+  }
   char *verbose_env = std::getenv("GPUBENCH_VERBOSE");
   if (verbose_env && std::string(verbose_env) == "1") {
     this->verbose = true;
@@ -69,6 +268,7 @@ VulkanContext::~VulkanContext() {
     waitIdle();
   } catch (...) {
   }
+  clearSharedPreviewImages();
   while (!kernels.empty()) {
     try {
       releaseKernel(kernels.begin()->first);
@@ -83,8 +283,10 @@ VulkanContext::~VulkanContext() {
       buffers.erase(buffers.begin());
     }
   }
+  cleanupPipelineCache();
   cleanupStagingBuffer();
   cleanupMemoryBlocks();
+  cleanupVmaAllocator();
   if (device != VK_NULL_HANDLE) {
     for (size_t i = 0; i < kMaxInFlight; ++i) {
       if (inFlightFrames[i].fence != VK_NULL_HANDLE) {
@@ -131,25 +333,20 @@ void VulkanContext::createInstance() {
   appInfo.pEngineName = "No Engine";
   appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
 
-  // Negotiate the instance API version: request up to Vulkan 1.4 but clamp
-  // to what the loader/driver stack actually supports (MoltenVK and older
-  // drivers may only expose 1.0-1.3). vkEnumerateInstanceVersion does not
-  // exist on Vulkan 1.0 loaders, so resolve it dynamically and fall back to
-  // 1.0 when it is missing.
-  uint32_t apiVersion = VK_API_VERSION_1_0;
+  uint32_t supportedVersion = VK_API_VERSION_1_0;
   auto pfnEnumerateInstanceVersion =
       reinterpret_cast<PFN_vkEnumerateInstanceVersion>(
           vkGetInstanceProcAddr(nullptr, "vkEnumerateInstanceVersion"));
   if (pfnEnumerateInstanceVersion) {
-    uint32_t supportedVersion = VK_API_VERSION_1_0;
-    if (pfnEnumerateInstanceVersion(&supportedVersion) == VK_SUCCESS) {
-      apiVersion = supportedVersion;
-    }
+    pfnEnumerateInstanceVersion(&supportedVersion);
   }
-  if (apiVersion > VK_API_VERSION_1_4) {
-    apiVersion = VK_API_VERSION_1_4;
+  if (supportedVersion < VK_API_VERSION_1_4) {
+    throw std::runtime_error(
+        "Vulkan 1.4 loader/runtime is required, but detected instance API " +
+        std::to_string(VK_VERSION_MAJOR(supportedVersion)) + "." +
+        std::to_string(VK_VERSION_MINOR(supportedVersion)));
   }
-  appInfo.apiVersion = apiVersion;
+  appInfo.apiVersion = VK_API_VERSION_1_4;
 
   VkInstanceCreateInfo createInfo{};
   createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
@@ -167,24 +364,37 @@ void VulkanContext::createInstance() {
   };
 
   std::vector<const char*> extensions;
+  auto pushUniqueExt = [&](const char *extName) {
+    for (const char *existing : extensions) {
+      if (strcmp(existing, extName) == 0) return;
+    }
+    extensions.push_back(extName);
+  };
+
+  for (const auto &extra : m_extraInstanceExtensions) {
+    if (hasInstExt(extra.c_str())) {
+      pushUniqueExt(extra.c_str());
+    }
+  }
+
 #if defined(__APPLE__) || defined(VK_KHR_portability_enumeration)
   if (hasInstExt(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME)) {
-    extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+    pushUniqueExt(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
     createInfo.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
   }
 #endif
 
   headlessSurfaceSupported = false;
   if (hasInstExt(VK_KHR_SURFACE_EXTENSION_NAME)) {
-    extensions.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
+    pushUniqueExt(VK_KHR_SURFACE_EXTENSION_NAME);
     if (hasInstExt(VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME)) {
-      extensions.push_back(VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME);
+      pushUniqueExt(VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME);
       headlessSurfaceSupported = true;
     }
   }
 
   if (debug && hasInstExt(VK_EXT_DEBUG_UTILS_EXTENSION_NAME)) {
-    extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+    pushUniqueExt(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
   }
 
   createInfo.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
@@ -193,13 +403,24 @@ void VulkanContext::createInstance() {
 
   std::vector<const char*> layers;
   if (debug) {
-      layers.push_back("VK_LAYER_KHRONOS_validation");
+    uint32_t layerCount = 0;
+    vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
+    std::vector<VkLayerProperties> availLayers(layerCount);
+    if (layerCount > 0) {
+      vkEnumerateInstanceLayerProperties(&layerCount, availLayers.data());
+    }
+    for (const auto &lp : availLayers) {
+      if (strcmp(lp.layerName, "VK_LAYER_KHRONOS_validation") == 0) {
+        layers.push_back("VK_LAYER_KHRONOS_validation");
+        break;
+      }
+    }
   }
   createInfo.enabledLayerCount = static_cast<uint32_t>(layers.size());
   createInfo.ppEnabledLayerNames = layers.empty() ? nullptr : layers.data();
 
   if (vkCreateInstance(&createInfo, nullptr, &instance) != VK_SUCCESS) {
-    throw std::runtime_error("failed to create instance!");
+    throw std::runtime_error("failed to create Vulkan 1.4 instance!");
   }
 
   if (debug && hasInstExt(VK_EXT_DEBUG_UTILS_EXTENSION_NAME)) {
@@ -225,6 +446,9 @@ void VulkanContext::createInstance() {
              VkDebugUtilsMessageTypeFlagsEXT type,
              const VkDebugUtilsMessengerCallbackDataEXT *pCallbackData,
              void *pUserData) -> VkBool32 {
+        (void)severity;
+        (void)type;
+        (void)pUserData;
         if (pCallbackData && pCallbackData->pMessage) {
           std::cerr << "[Vulkan Validation] " << pCallbackData->pMessage << std::endl;
         }
@@ -246,18 +470,39 @@ void VulkanContext::enumeratePhysicalDevices() {
   std::vector<VkPhysicalDevice> allDevices(deviceCount);
   vkEnumeratePhysicalDevices(instance, &deviceCount, allDevices.data());
 
-  for (const auto &device : allDevices) {
+  for (const auto &dev : allDevices) {
     VkPhysicalDeviceProperties props;
-    vkGetPhysicalDeviceProperties(device, &props);
+    vkGetPhysicalDeviceProperties(dev, &props);
 
-    // Filter out software renderers (llvmpipe) and CPUs
     std::string name = props.deviceName;
     if (name.find("llvmpipe") != std::string::npos)
       continue;
     if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU)
       continue;
+    if (props.apiVersion < VK_API_VERSION_1_4) {
+      if (verbose) {
+        std::cerr << "Skipping pre-Vulkan 1.4 device: " << name << " (API "
+                  << VK_VERSION_MAJOR(props.apiVersion) << "."
+                  << VK_VERSION_MINOR(props.apiVersion) << ")" << std::endl;
+      }
+      continue;
+    }
 
-    physicalDevices.push_back(device);
+    physicalDevices.push_back(dev);
+  }
+
+  // Prefer discrete GPUs over integrated/virtual GPUs while preserving deterministic order
+  std::stable_sort(physicalDevices.begin(), physicalDevices.end(),
+                   [](VkPhysicalDevice a, VkPhysicalDevice b) {
+                     VkPhysicalDeviceProperties pa{}, pb{};
+                     vkGetPhysicalDeviceProperties(a, &pa);
+                     vkGetPhysicalDeviceProperties(b, &pb);
+                     return scoreDeviceTypePriority(pa.deviceType) >
+                            scoreDeviceTypePriority(pb.deviceType);
+                   });
+
+  if (physicalDevices.empty()) {
+    throw std::runtime_error("No Vulkan 1.4-capable hardware GPU found!");
   }
 }
 
@@ -324,14 +569,163 @@ bool queryHardwareSERSupport(VkPhysicalDevice physDev, uint32_t vendorID,
 }
 } // namespace
 
+namespace {
+void populateExtendedCapabilities(VkInstance inst, VkPhysicalDevice physDev,
+                                  const VkPhysicalDeviceProperties &props,
+                                  const VkPhysicalDeviceMemoryProperties &memProps,
+                                  const std::vector<VkExtensionProperties> &availableExts,
+                                  uint32_t subgroupSize,
+                                  DeviceInfo &info) {
+  auto hasExt = [&](const char *name) {
+    for (const auto &ext : availableExts) {
+      if (strcmp(ext.extensionName, name) == 0)
+        return true;
+    }
+    return false;
+  };
+
+  // Compute units / SMs discovery
+  info.computeUnits = 0;
+#ifdef VK_AMD_shader_core_properties2
+  if (hasExt(VK_AMD_SHADER_CORE_PROPERTIES_2_EXTENSION_NAME)) {
+    VkPhysicalDeviceShaderCoreProperties2AMD amdCore2{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_CORE_PROPERTIES_2_AMD};
+    VkPhysicalDeviceProperties2 p2{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &amdCore2};
+    vkGetPhysicalDeviceProperties2(physDev, &p2);
+    if (amdCore2.activeComputeUnitCount > 0) {
+      info.computeUnits = amdCore2.activeComputeUnitCount;
+    }
+  }
+#endif
+#ifdef VK_AMD_shader_core_properties
+  if (info.computeUnits == 0 && hasExt(VK_AMD_SHADER_CORE_PROPERTIES_EXTENSION_NAME)) {
+    VkPhysicalDeviceShaderCorePropertiesAMD amdCore{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_CORE_PROPERTIES_AMD};
+    VkPhysicalDeviceProperties2 p2{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &amdCore};
+    vkGetPhysicalDeviceProperties2(physDev, &p2);
+    uint32_t totalCu = amdCore.shaderEngineCount *
+                       amdCore.shaderArraysPerEngineCount *
+                       amdCore.computeUnitsPerShaderArray;
+    if (totalCu > 0) {
+      info.computeUnits = totalCu;
+    }
+  }
+#endif
+#ifdef VK_NV_shader_sm_builtins
+  if (info.computeUnits == 0 && hasExt(VK_NV_SHADER_SM_BUILTINS_EXTENSION_NAME)) {
+    VkPhysicalDeviceShaderSMBuiltinsPropertiesNV nvSm{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_SM_BUILTINS_PROPERTIES_NV};
+    VkPhysicalDeviceProperties2 p2{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &nvSm};
+    vkGetPhysicalDeviceProperties2(physDev, &p2);
+    if (nvSm.shaderSMCount > 0) {
+      info.computeUnits = nvSm.shaderSMCount;
+    }
+  }
+#endif
+
+  // ReBAR (HOST_VISIBLE | DEVICE_LOCAL heap) discovery
+  uint64_t maxRebarHeap = 0;
+  for (uint32_t t = 0; t < memProps.memoryTypeCount; ++t) {
+    constexpr VkMemoryPropertyFlags kRebarFlags =
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
+    if ((memProps.memoryTypes[t].propertyFlags & kRebarFlags) == kRebarFlags) {
+      uint32_t hIdx = memProps.memoryTypes[t].heapIndex;
+      if (hIdx < memProps.memoryHeapCount) {
+        maxRebarHeap = std::max<uint64_t>(maxRebarHeap, memProps.memoryHeaps[hIdx].size);
+      }
+    }
+  }
+  info.rebarSizeBytes = maxRebarHeap;
+  if (info.isApu) {
+    info.rebarSupported = (maxRebarHeap > 0);
+  } else {
+    // Legacy PCIe BAR1 aperture is <= 256 MB; ReBAR exposes >= 512 MB (typically full VRAM)
+    info.rebarSupported = (maxRebarHeap >= 512ULL * 1024ULL * 1024ULL);
+  }
+
+  // Dedicated Async Compute (ACE) and DMA Transfer (SDMA) queue families
+  uint32_t qCount = 0;
+  vkGetPhysicalDeviceQueueFamilyProperties(physDev, &qCount, nullptr);
+  std::vector<VkQueueFamilyProperties> qProps(qCount);
+  if (qCount > 0) {
+    vkGetPhysicalDeviceQueueFamilyProperties(physDev, &qCount, qProps.data());
+  }
+  info.dedicatedAsyncComputeQueue = false;
+  info.dedicatedTransferQueue = false;
+  for (const auto &qf : qProps) {
+    if (qf.queueCount == 0) continue;
+    if ((qf.queueFlags & VK_QUEUE_COMPUTE_BIT) &&
+        !(qf.queueFlags & VK_QUEUE_GRAPHICS_BIT)) {
+      info.dedicatedAsyncComputeQueue = true;
+    }
+    if ((qf.queueFlags & VK_QUEUE_TRANSFER_BIT) &&
+        !(qf.queueFlags & (VK_QUEUE_COMPUTE_BIT | VK_QUEUE_GRAPHICS_BIT))) {
+      info.dedicatedTransferQueue = true;
+    }
+  }
+
+  // VK_NV_cooperative_vector
+  info.cooperativeVectorSupport = false;
+  if (hasExt(VK_NV_COOPERATIVE_VECTOR_EXTENSION_NAME)) {
+    VkPhysicalDeviceCooperativeVectorFeaturesNV coopVecFeat{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_VECTOR_FEATURES_NV,
+        nullptr, VK_FALSE, VK_FALSE};
+    VkPhysicalDeviceFeatures2 f2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+                                 &coopVecFeat};
+    vkGetPhysicalDeviceFeatures2(physDev, &f2);
+    info.cooperativeVectorSupport = (coopVecFeat.cooperativeVector == VK_TRUE);
+  }
+
+  // VK_EXT_opacity_micromap
+  info.opacityMicromapSupport = false;
+#ifdef VK_EXT_opacity_micromap
+  if (hasExt(VK_EXT_OPACITY_MICROMAP_EXTENSION_NAME)) {
+    VkPhysicalDeviceOpacityMicromapFeaturesEXT ommFeat{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_OPACITY_MICROMAP_FEATURES_EXT};
+    VkPhysicalDeviceFeatures2 f2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+                                 &ommFeat};
+    vkGetPhysicalDeviceFeatures2(physDev, &f2);
+    info.opacityMicromapSupport = (ommFeat.micromap == VK_TRUE);
+  }
+#endif
+
+  (void)inst;
+  (void)props;
+  (void)subgroupSize;
+}
+
+std::filesystem::path getPipelineCacheDirectory() {
+  std::filesystem::path baseDir;
+#ifdef _WIN32
+  if (const char *localAppData = std::getenv("LOCALAPPDATA")) {
+    baseDir = std::filesystem::path(localAppData) / "gpubench" / "pipeline_cache";
+  }
+#else
+  if (const char *xdgCache = std::getenv("XDG_CACHE_HOME")) {
+    baseDir = std::filesystem::path(xdgCache) / "gpubench" / "pipeline_cache";
+  } else if (const char *home = std::getenv("HOME")) {
+    baseDir = std::filesystem::path(home) / ".cache" / "gpubench" / "pipeline_cache";
+  }
+#endif
+  if (baseDir.empty()) {
+    std::error_code ec;
+    baseDir = std::filesystem::temp_directory_path(ec) / "gpubench" / "pipeline_cache";
+  }
+  return baseDir;
+}
+} // namespace
+
 const std::vector<DeviceInfo> &VulkanContext::getDevices() const {
   if (deviceInfos.empty()) {
-    for (const auto &device : physicalDevices) {
+    for (const auto &dev : physicalDevices) {
       VkPhysicalDeviceProperties props;
-      vkGetPhysicalDeviceProperties(device, &props);
+      vkGetPhysicalDeviceProperties(dev, &props);
 
       VkPhysicalDeviceMemoryProperties memProps;
-      vkGetPhysicalDeviceMemoryProperties(device, &memProps);
+      vkGetPhysicalDeviceMemoryProperties(dev, &memProps);
 
       VkPhysicalDeviceDriverProperties driverProps{};
       driverProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES;
@@ -344,7 +738,7 @@ const std::vector<DeviceInfo> &VulkanContext::getDevices() const {
       VkPhysicalDeviceProperties2 props2{};
       props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
       props2.pNext = &subgroupProps;
-      vkGetPhysicalDeviceProperties2(device, &props2);
+      vkGetPhysicalDeviceProperties2(dev, &props2);
 
       uint64_t vramSize = 0;
       for (uint32_t i = 0; i < memProps.memoryHeapCount; ++i) {
@@ -353,8 +747,12 @@ const std::vector<DeviceInfo> &VulkanContext::getDevices() const {
         }
       }
 
+      VkPhysicalDeviceShaderOCPMicroscalingTypesFeaturesEXT ocpFeatures{
+          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_OCP_MICROSCALING_TYPES_FEATURES_EXT,
+          nullptr, VK_FALSE, VK_FALSE, VK_FALSE, VK_FALSE};
+
       VkPhysicalDeviceShaderFloat8FeaturesEXT float8Features{
-          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT8_FEATURES_EXT};
+          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT8_FEATURES_EXT, &ocpFeatures};
 
       VkPhysicalDeviceShaderBfloat16FeaturesKHR bfloat16Features{
           VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_BFLOAT16_FEATURES_KHR, &float8Features};
@@ -375,13 +773,12 @@ const std::vector<DeviceInfo> &VulkanContext::getDevices() const {
       VkPhysicalDeviceFeatures2 features2{};
       features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
       features2.pNext = &features8bit;
-      vkGetPhysicalDeviceFeatures2(device, &features2);
+      vkGetPhysicalDeviceFeatures2(dev, &features2);
 
-      // Check extensions
-      uint32_t extCount;
-      vkEnumerateDeviceExtensionProperties(device, nullptr, &extCount, nullptr);
+      uint32_t extCount = 0;
+      vkEnumerateDeviceExtensionProperties(dev, nullptr, &extCount, nullptr);
       std::vector<VkExtensionProperties> availableExts(extCount);
-      vkEnumerateDeviceExtensionProperties(device, nullptr, &extCount,
+      vkEnumerateDeviceExtensionProperties(dev, nullptr, &extCount,
                                            availableExts.data());
 
       auto hasExt = [&](const char *name) {
@@ -396,9 +793,9 @@ const std::vector<DeviceInfo> &VulkanContext::getDevices() const {
       VkPhysicalDevicePCIBusInfoPropertiesEXT pciBusProps{};
       pciBusProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PCI_BUS_INFO_PROPERTIES_EXT;
       if (pciExtSupported) {
-        pciBusProps.pNext = (void*)props2.pNext;
+        pciBusProps.pNext = (void *)props2.pNext;
         props2.pNext = &pciBusProps;
-        vkGetPhysicalDeviceProperties2(device, &props2);
+        vkGetPhysicalDeviceProperties2(dev, &props2);
       }
 
       DeviceInfo info;
@@ -407,9 +804,9 @@ const std::vector<DeviceInfo> &VulkanContext::getDevices() const {
       info.deviceID = props.deviceID;
       info.apiVersion = props.apiVersion;
       info.driverVersion = props.driverVersion;
-      info.dedicatedVramBytes = vramSize;
-      info.memorySize = vramSize;
       info.isApu = (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU);
+      info.memorySize = vramSize;
+      info.dedicatedVramBytes = info.isApu ? 0 : vramSize;
 
       if (pciExtSupported) {
         char busBuf[32];
@@ -440,12 +837,11 @@ const std::vector<DeviceInfo> &VulkanContext::getDevices() const {
 
       char uuid_str[33];
       for (uint32_t i = 0; i < VK_UUID_SIZE; ++i) {
-        std::snprintf(&uuid_str[i * 2], sizeof(uuid_str) - (i * 2), "%02x", props.pipelineCacheUUID[i]);
+        std::snprintf(&uuid_str[i * 2], sizeof(uuid_str) - (i * 2), "%02x",
+                      props.pipelineCacheUUID[i]);
       }
       info.driverUUID = std::string(uuid_str);
 
-      info.memorySize = vramSize;
-      info.dedicatedVramBytes = info.isApu ? 0 : vramSize;
       info.maxWorkGroupSize = props.limits.maxComputeWorkGroupInvocations;
       info.maxComputeWorkGroupCountX = props.limits.maxComputeWorkGroupCount[0];
       info.maxComputeWorkGroupCountY = props.limits.maxComputeWorkGroupCount[1];
@@ -455,32 +851,54 @@ const std::vector<DeviceInfo> &VulkanContext::getDevices() const {
       info.fp64Support = (features2.features.shaderFloat64 == VK_TRUE);
       info.fp16Support = (features168.shaderFloat16 == VK_TRUE);
       bool hasBf16Ext = hasExt("VK_KHR_shader_bfloat16") || hasExt("VK_EXT_shader_bfloat16");
-      info.shaderBfloat16DotProductSupport = hasBf16Ext && (bfloat16Features.shaderBFloat16DotProduct == VK_TRUE);
-      info.shaderBfloat16CoopMatrixSupport = hasBf16Ext && (bfloat16Features.shaderBFloat16CooperativeMatrix == VK_TRUE);
-      info.bf16Support = info.shaderBfloat16DotProductSupport || info.shaderBfloat16CoopMatrixSupport;
+      info.shaderBfloat16DotProductSupport =
+          hasBf16Ext && (bfloat16Features.shaderBFloat16DotProduct == VK_TRUE);
+      info.shaderBfloat16CoopMatrixSupport =
+          hasBf16Ext && (bfloat16Features.shaderBFloat16CooperativeMatrix == VK_TRUE);
+      info.bf16Support =
+          info.shaderBfloat16DotProductSupport || info.shaderBfloat16CoopMatrixSupport;
       info.int8Support = (features168.shaderInt8 == VK_TRUE);
       info.cooperativeMatrixSupport =
           hasExt(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME) &&
           (coopMatrixFeatures.cooperativeMatrix == VK_TRUE);
-      info.structuredSparsitySupport = hasExt("VK_NV_cooperative_matrix2");
+      // Vulkan has no standardized 2:4 sparse cooperative matrix extension yet
+      // (VK_NV_cooperative_matrix2 exposes flexible/workgroup dense matrices, not 2:4 sparse MMA).
+      info.structuredSparsitySupport = false;
       info.fp8Support = hasExt("VK_EXT_shader_float8") &&
                         (float8Features.shaderFloat8 == VK_TRUE) &&
                         (float8Features.shaderFloat8CooperativeMatrix == VK_TRUE);
-      info.fp6Support = false;
-      info.fp4Support = false;
+      bool hasOcpExt = hasExt(VK_EXT_SHADER_OCP_MICROSCALING_TYPES_EXTENSION_NAME);
+      bool wave32Ok = supportsWave32Compute(
+          dev, subgroupProps.subgroupSize,
+          hasExt(VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME));
+      info.fp6Support =
+          hasOcpExt && (ocpFeatures.shaderFloat6 == VK_TRUE) &&
+          info.cooperativeMatrixSupport && wave32Ok &&
+          hasSubgroupCoopMatrix16x16x16(
+              instance, dev, VulkanContext::kVkComponentTypeFloat6E3M2EXT,
+              VK_COMPONENT_TYPE_FLOAT32_KHR);
+      info.fp4Support =
+          hasOcpExt && (ocpFeatures.shaderFloat4 == VK_TRUE) &&
+          info.cooperativeMatrixSupport && wave32Ok &&
+          hasSubgroupCoopMatrix16x16x16(
+              instance, dev, VulkanContext::kVkComponentTypeFloat4E2M1EXT,
+              VK_COMPONENT_TYPE_FLOAT32_KHR);
       info.int4Support = false;
       info.rayTracingSupport =
           hasExt(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) &&
           hasExt(VK_KHR_RAY_QUERY_EXTENSION_NAME);
 
       info.serSupported = queryHardwareSERSupport(
-          device, props.vendorID,
+          dev, props.vendorID,
           hasExt("VK_EXT_ray_tracing_invocation_reorder"),
           hasExt("VK_NV_ray_tracing_invocation_reorder"));
-      info.workGraphsSupported = hasExt("VK_AMDX_shader_enqueue") || hasExt("VK_KHR_work_graphs");
+      info.workGraphsSupported =
+          hasExt("VK_AMDX_shader_enqueue") || hasExt("VK_KHR_work_graphs");
       info.dgcSupported = hasExt("VK_EXT_device_generated_commands");
       info.performanceQuerySupported = hasExt(VK_KHR_PERFORMANCE_QUERY_EXTENSION_NAME);
 
+      populateExtendedCapabilities(instance, dev, props, memProps, availableExts,
+                                   subgroupProps.subgroupSize, info);
       DeviceDatabase::enrichDeviceInfo(info);
 
       deviceInfos.push_back(info);
@@ -495,141 +913,35 @@ DeviceInfo VulkanContext::getCurrentDeviceInfo() const {
   if (physicalDevice == VK_NULL_HANDLE) {
     throw std::runtime_error("No device selected");
   }
-
-  VkPhysicalDeviceMemoryProperties memProps;
-  vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memProps);
-
-  VkPhysicalDeviceDriverProperties driverProps{};
-  driverProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES;
-
-  VkPhysicalDeviceSubgroupProperties subgroupProps{};
-  subgroupProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
-  subgroupProps.pNext = &driverProps;
-
-  VkPhysicalDeviceProperties2 props2{};
-  props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
-  props2.pNext = &subgroupProps;
-  vkGetPhysicalDeviceProperties2(physicalDevice, &props2);
-
-  uint64_t vramSize = 0;
-  for (uint32_t i = 0; i < memProps.memoryHeapCount; ++i) {
-    if (memProps.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) {
-      vramSize += memProps.memoryHeaps[i].size;
-    }
+  const auto &allDevs = getDevices();
+  if (selectedDeviceIndex < allDevs.size()) {
+    DeviceInfo info = allDevs[selectedDeviceIndex];
+    info.dgcSupported = dgcSupported;
+    info.performanceQuerySupported = performanceQuerySupported;
+    info.workGraphsSupported = workGraphsSupported;
+    info.cooperativeVectorSupport = cooperativeVectorSupported;
+    info.opacityMicromapSupport = opacityMicromapSupported;
+    info.structuredSparsitySupport = structuredSparsitySupported;
+    return info;
   }
+  throw std::runtime_error("Selected device index out of range");
+}
 
-  VkPhysicalDeviceShaderFloat8FeaturesEXT float8Features_curr{
-      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT8_FEATURES_EXT};
-
-  VkPhysicalDeviceShaderBfloat16FeaturesKHR bfloat16Features_curr{
-      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_BFLOAT16_FEATURES_KHR, &float8Features_curr};
-
-  VkPhysicalDeviceCooperativeMatrixFeaturesKHR coopMatrixFeatures_curr{
-      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR, &bfloat16Features_curr};
-
-  VkPhysicalDeviceShaderFloat16Int8Features features168_curr{};
-  features168_curr.sType =
-      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES;
-  features168_curr.pNext = &coopMatrixFeatures_curr;
-
-  VkPhysicalDevice8BitStorageFeatures features8bit_curr{};
-  features8bit_curr.sType =
-      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES;
-  features8bit_curr.pNext = &features168_curr;
-
-  VkPhysicalDeviceFeatures2 features2_2{};
-  features2_2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-  features2_2.pNext = &features8bit_curr;
-  vkGetPhysicalDeviceFeatures2(physicalDevice, &features2_2);
-
-  // Check extensions
-  uint32_t extCount;
-  vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &extCount,
-                                       nullptr);
-  std::vector<VkExtensionProperties> availableExts(extCount);
-  vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &extCount,
-                                       availableExts.data());
-
-  auto hasExt = [&](const char *name) {
-    for (const auto &ext : availableExts) {
-      if (strcmp(ext.extensionName, name) == 0)
-        return true;
-    }
-    return false;
-  };
-
-  DeviceInfo info;
-  info.name = properties.deviceName;
-  info.vendorID = properties.vendorID;
-  info.deviceID = properties.deviceID;
-  info.apiVersion = properties.apiVersion;
-  info.driverVersion = properties.driverVersion;
-
-  std::string driverVerStr;
-  if (properties.vendorID == 0x10DE) {
-    uint32_t major = (properties.driverVersion >> 22) & 0x3FF;
-    uint32_t minor = (properties.driverVersion >> 14) & 0xFF;
-    uint32_t sec = (properties.driverVersion >> 6) & 0xFF;
-    uint32_t tert = properties.driverVersion & 0x3F;
-    driverVerStr = std::to_string(major) + "." + std::to_string(minor);
-    if (sec > 0 || tert > 0) {
-      driverVerStr += "." + std::to_string(sec) + "." + std::to_string(tert);
-    }
-  } else {
-    driverVerStr = std::to_string(VK_VERSION_MAJOR(properties.driverVersion)) + "." +
-                   std::to_string(VK_VERSION_MINOR(properties.driverVersion)) + "." +
-                   std::to_string(VK_VERSION_PATCH(properties.driverVersion));
+VulkanContext::CoopMatrixTile VulkanContext::selectCoopMatrixTile(
+    VkComponentTypeKHR abType, VkComponentTypeKHR cType) const {
+  if (physicalDevice == VK_NULL_HANDLE) {
+    return CoopMatrixTile{};
   }
-  info.driverVersionStr = driverVerStr;
-  info.driverName = (driverProps.driverName[0] != '\0') ? driverProps.driverName : "";
-  info.driverInfo = (driverProps.driverInfo[0] != '\0') ? driverProps.driverInfo : "";
-
-  info.memorySize = vramSize;
-  info.maxWorkGroupSize = properties.limits.maxComputeWorkGroupInvocations;
-  info.maxComputeWorkGroupCountX =
-      properties.limits.maxComputeWorkGroupCount[0];
-  info.maxComputeWorkGroupCountY =
-      properties.limits.maxComputeWorkGroupCount[1];
-  info.maxComputeWorkGroupCountZ =
-      properties.limits.maxComputeWorkGroupCount[2];
-  info.maxComputeSharedMemorySize =
-      properties.limits.maxComputeSharedMemorySize;
-  info.subgroupSize = subgroupProps.subgroupSize;
-  info.fp64Support = (features2_2.features.shaderFloat64 == VK_TRUE);
-  info.fp16Support = (features168_curr.shaderFloat16 == VK_TRUE);
-  bool hasBf16Ext_curr = hasExt("VK_KHR_shader_bfloat16") || hasExt("VK_EXT_shader_bfloat16");
-  info.shaderBfloat16DotProductSupport = hasBf16Ext_curr && (bfloat16Features_curr.shaderBFloat16DotProduct == VK_TRUE);
-  info.shaderBfloat16CoopMatrixSupport = hasBf16Ext_curr && (bfloat16Features_curr.shaderBFloat16CooperativeMatrix == VK_TRUE);
-  info.bf16Support = info.shaderBfloat16DotProductSupport || info.shaderBfloat16CoopMatrixSupport;
-  info.int8Support = (features168_curr.shaderInt8 == VK_TRUE);
-  info.cooperativeMatrixSupport =
-      hasExt(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME) &&
-      (coopMatrixFeatures_curr.cooperativeMatrix == VK_TRUE);
-  info.fp8Support = hasExt("VK_EXT_shader_float8") &&
-                    (float8Features_curr.shaderFloat8 == VK_TRUE) &&
-                    (float8Features_curr.shaderFloat8CooperativeMatrix == VK_TRUE);
-  info.fp6Support = false;
-  info.fp4Support = false; // No Vulkan FP4 shader type exists; Fp4Bench is
-                           // deliberately disabled (see its IsSupported).
-  // No Vulkan/SPIR-V cooperative-matrix component type for 4-bit integers
-  // exists, so native INT4 rates cannot be measured through Vulkan. The
-  // coop_matrix_int4.comp shader actually performs INT8 math.
-  info.int4Support = false;
-  info.structuredSparsitySupport = hasExt("VK_NV_cooperative_matrix2");
-  info.rayTracingSupport =
-      hasExt(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) &&
-      hasExt(VK_KHR_RAY_QUERY_EXTENSION_NAME);
-
-  info.serSupported = queryHardwareSERSupport(
-      physicalDevice, properties.vendorID,
-      hasExt("VK_EXT_ray_tracing_invocation_reorder"),
-      hasExt("VK_NV_ray_tracing_invocation_reorder"));
-  info.workGraphsSupported = hasExt("VK_AMDX_shader_enqueue") || hasExt("VK_KHR_work_graphs");
-  info.dgcSupported = dgcSupported;
-
-  info.performanceQuerySupported = performanceQuerySupported;
-  DeviceDatabase::enrichDeviceInfo(info);
-  return info;
+  VkPhysicalDeviceSubgroupProperties sgProps{
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES};
+  VkPhysicalDeviceProperties2 p2{
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &sgProps};
+  vkGetPhysicalDeviceProperties2(physicalDevice, &p2);
+  bool wave32Ok = supportsWave32Compute(
+      physicalDevice, sgProps.subgroupSize,
+      enabledExtensionsSet.count(VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME) > 0);
+  return selectBestSubgroupCoopMatrixTile(
+      instance, physicalDevice, abType, cType, sgProps.subgroupSize, wave32Ok);
 }
 
 void VulkanContext::pickPhysicalDevice(uint32_t index) {
@@ -637,7 +949,7 @@ void VulkanContext::pickPhysicalDevice(uint32_t index) {
     throw std::runtime_error("invalid device index");
   }
   if (physicalDevice == physicalDevices[index] && device != VK_NULL_HANDLE) {
-    return; // Already initialized for this device
+    return;
   }
 
   if (device != VK_NULL_HANDLE) {
@@ -645,14 +957,17 @@ void VulkanContext::pickPhysicalDevice(uint32_t index) {
       waitIdle();
     } catch (...) {
     }
+    clearSharedPreviewImages();
     while (!kernels.empty()) {
       releaseKernel(kernels.begin()->first);
     }
     while (!buffers.empty()) {
       releaseBuffer(buffers.begin()->first);
     }
+    cleanupPipelineCache();
     cleanupStagingBuffer();
     cleanupMemoryBlocks();
+    cleanupVmaAllocator();
     for (size_t i = 0; i < kMaxInFlight; ++i) {
       if (inFlightFrames[i].fence != VK_NULL_HANDLE) {
         vkDestroyFence(device, inFlightFrames[i].fence, nullptr);
@@ -683,12 +998,205 @@ void VulkanContext::pickPhysicalDevice(uint32_t index) {
     destroyHeadlessSwapchain();
     vkDestroyDevice(device, nullptr);
     device = VK_NULL_HANDLE;
+    computeQueue = VK_NULL_HANDLE;
+    graphicsQueue = VK_NULL_HANDLE;
+    presentationQueue = VK_NULL_HANDLE;
+    asyncComputeQueue = VK_NULL_HANDLE;
+    transferQueue = VK_NULL_HANDLE;
+    secondaryTransferQueue = VK_NULL_HANDLE;
   }
 
   selectedDeviceIndex = index;
   physicalDevice = physicalDevices[index];
   vkGetPhysicalDeviceProperties(physicalDevice, &properties);
   createDevice();
+}
+
+void VulkanContext::initVmaAllocator(bool bufferDeviceAddressEnabled,
+                                     bool memoryBudgetEnabled) {
+  cleanupVmaAllocator();
+  if (device == VK_NULL_HANDLE || physicalDevice == VK_NULL_HANDLE) {
+    return;
+  }
+
+  VmaVulkanFunctions vulkanFunctions{};
+  vulkanFunctions.vkGetInstanceProcAddr = &vkGetInstanceProcAddr;
+  vulkanFunctions.vkGetDeviceProcAddr = &vkGetDeviceProcAddr;
+
+  VmaAllocatorCreateInfo allocatorInfo{};
+  allocatorInfo.vulkanApiVersion = VK_API_VERSION_1_4;
+  allocatorInfo.physicalDevice = physicalDevice;
+  allocatorInfo.device = device;
+  allocatorInfo.instance = instance;
+  allocatorInfo.pVulkanFunctions = &vulkanFunctions;
+  if (bufferDeviceAddressEnabled) {
+    allocatorInfo.flags |= VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
+  }
+  if (memoryBudgetEnabled) {
+    allocatorInfo.flags |= VMA_ALLOCATOR_CREATE_EXT_MEMORY_BUDGET_BIT;
+  }
+  if (amdDeviceCoherentMemorySupported) {
+    allocatorInfo.flags |= VMA_ALLOCATOR_CREATE_AMD_DEVICE_COHERENT_MEMORY_BIT;
+  }
+#ifdef VMA_ALLOCATOR_CREATE_KHR_MAINTENANCE5_BIT
+  if (maintenance5Supported) {
+    allocatorInfo.flags |= VMA_ALLOCATOR_CREATE_KHR_MAINTENANCE5_BIT;
+  }
+#endif
+
+  if (vmaCreateAllocator(&allocatorInfo, &m_vmaAllocator) != VK_SUCCESS) {
+    throw std::runtime_error("failed to initialize VulkanMemoryAllocator (VMA)!");
+  }
+}
+
+void VulkanContext::cleanupVmaAllocator() {
+  if (m_vmaAllocator != VK_NULL_HANDLE) {
+    vmaDestroyAllocator(m_vmaAllocator);
+    m_vmaAllocator = VK_NULL_HANDLE;
+  }
+}
+
+VulkanContext::VmaBudgetSummary VulkanContext::queryVramBudget() const {
+  VmaBudgetSummary summary{};
+  if (m_vmaAllocator == VK_NULL_HANDLE || physicalDevice == VK_NULL_HANDLE) {
+    return summary;
+  }
+  VkPhysicalDeviceMemoryProperties memProps{};
+  vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memProps);
+  std::array<VmaBudget, VK_MAX_MEMORY_HEAPS> budgets{};
+  vmaGetHeapBudgets(m_vmaAllocator, budgets.data());
+
+  for (uint32_t h = 0; h < memProps.memoryHeapCount; ++h) {
+    if (memProps.memoryHeaps[h].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) {
+      summary.usageBytes += budgets[h].usage;
+      summary.budgetBytes += budgets[h].budget;
+      summary.available = true;
+    }
+  }
+  return summary;
+}
+
+void VulkanContext::initPipelineCache() {
+  cleanupPipelineCache();
+  if (device == VK_NULL_HANDLE) {
+    return;
+  }
+
+  char uuidHex[33];
+  for (uint32_t i = 0; i < VK_UUID_SIZE; ++i) {
+    std::snprintf(&uuidHex[i * 2], sizeof(uuidHex) - (i * 2), "%02x",
+                  properties.pipelineCacheUUID[i]);
+  }
+  char fileName[128];
+  std::snprintf(fileName, sizeof(fileName), "vk_pipe_%04x_%04x_%s.bin",
+                properties.vendorID, properties.deviceID, uuidHex);
+
+  std::filesystem::path cachePath = getPipelineCacheDirectory() / fileName;
+  std::vector<uint8_t> initialData;
+
+  std::ifstream in(cachePath, std::ios::binary | std::ios::ate);
+  if (in.is_open()) {
+    std::streamsize sz = in.tellg();
+    if (sz >= static_cast<std::streamsize>(sizeof(VkPipelineCacheHeaderVersionOne)) &&
+        sz <= static_cast<std::streamsize>(256ULL * 1024ULL * 1024ULL)) {
+      initialData.resize(static_cast<size_t>(sz));
+      in.seekg(0, std::ios::beg);
+      if (in.read(reinterpret_cast<char *>(initialData.data()), sz)) {
+        VkPipelineCacheHeaderVersionOne hdr{};
+        std::memcpy(&hdr, initialData.data(), sizeof(hdr));
+        bool validHeader =
+            (hdr.headerSize == sizeof(VkPipelineCacheHeaderVersionOne)) &&
+            (hdr.headerVersion == VK_PIPELINE_CACHE_HEADER_VERSION_ONE) &&
+            (hdr.vendorID == properties.vendorID) &&
+            (hdr.deviceID == properties.deviceID) &&
+            (std::memcmp(hdr.pipelineCacheUUID, properties.pipelineCacheUUID,
+                         VK_UUID_SIZE) == 0);
+        if (!validHeader) {
+          initialData.clear();
+        }
+      } else {
+        initialData.clear();
+      }
+    }
+  }
+
+  VkPipelineCacheCreateInfo cacheCI{VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO};
+  cacheCI.initialDataSize = initialData.size();
+  cacheCI.pInitialData = initialData.empty() ? nullptr : initialData.data();
+
+  if (vkCreatePipelineCache(device, &cacheCI, nullptr, &m_pipelineCache) !=
+      VK_SUCCESS) {
+    // Fallback to empty cache if driver rejected cached blob
+    cacheCI.initialDataSize = 0;
+    cacheCI.pInitialData = nullptr;
+    if (vkCreatePipelineCache(device, &cacheCI, nullptr, &m_pipelineCache) !=
+        VK_SUCCESS) {
+      m_pipelineCache = VK_NULL_HANDLE;
+    }
+  }
+}
+
+void VulkanContext::flushPipelineCacheToDisk() const {
+  if (device == VK_NULL_HANDLE || m_pipelineCache == VK_NULL_HANDLE) {
+    return;
+  }
+  size_t dataSize = 0;
+  if (vkGetPipelineCacheData(device, m_pipelineCache, &dataSize, nullptr) !=
+          VK_SUCCESS ||
+      dataSize < sizeof(VkPipelineCacheHeaderVersionOne)) {
+    return;
+  }
+  std::vector<uint8_t> blob(dataSize);
+  if (vkGetPipelineCacheData(device, m_pipelineCache, &dataSize, blob.data()) !=
+      VK_SUCCESS) {
+    return;
+  }
+
+  std::error_code ec;
+  std::filesystem::path dir = getPipelineCacheDirectory();
+  std::filesystem::create_directories(dir, ec);
+  if (ec) {
+    return;
+  }
+
+  char uuidHex[33];
+  for (uint32_t i = 0; i < VK_UUID_SIZE; ++i) {
+    std::snprintf(&uuidHex[i * 2], sizeof(uuidHex) - (i * 2), "%02x",
+                  properties.pipelineCacheUUID[i]);
+  }
+  char fileName[128];
+  std::snprintf(fileName, sizeof(fileName), "vk_pipe_%04x_%04x_%s.bin",
+                properties.vendorID, properties.deviceID, uuidHex);
+
+  std::filesystem::path finalPath = dir / fileName;
+  std::filesystem::path tmpPath = dir / (std::string(fileName) + ".tmp");
+  {
+    std::ofstream out(tmpPath, std::ios::binary | std::ios::trunc);
+    if (!out.is_open()) {
+      return;
+    }
+    out.write(reinterpret_cast<const char *>(blob.data()),
+              static_cast<std::streamsize>(blob.size()));
+    if (!out.good()) {
+      out.close();
+      std::filesystem::remove(tmpPath, ec);
+      return;
+    }
+  }
+  std::filesystem::rename(tmpPath, finalPath, ec);
+  if (ec) {
+    std::filesystem::copy_file(
+        tmpPath, finalPath, std::filesystem::copy_options::overwrite_existing, ec);
+    std::filesystem::remove(tmpPath, ec);
+  }
+}
+
+void VulkanContext::cleanupPipelineCache() {
+  if (m_pipelineCache != VK_NULL_HANDLE && device != VK_NULL_HANDLE) {
+    flushPipelineCacheToDisk();
+    vkDestroyPipelineCache(device, m_pipelineCache, nullptr);
+    m_pipelineCache = VK_NULL_HANDLE;
+  }
 }
 
 void VulkanContext::createDevice() {
@@ -701,10 +1209,15 @@ void VulkanContext::createDevice() {
 
   computeQueueFamilyIndex = 0;
   graphicsQueueFamilyIndex = 0;
+  presentationQueueFamilyIndex = 0;
+  asyncComputeQueueFamilyIndex = UINT32_MAX;
+  transferQueueFamilyIndex = UINT32_MAX;
+
   bool foundUniversal = false;
   for (uint32_t q = 0; q < queueFamilyCount; ++q) {
     if ((queueFamilies[q].queueFlags & VK_QUEUE_COMPUTE_BIT) &&
-        (queueFamilies[q].queueFlags & VK_QUEUE_GRAPHICS_BIT)) {
+        (queueFamilies[q].queueFlags & VK_QUEUE_GRAPHICS_BIT) &&
+        queueFamilies[q].queueCount > 0) {
       computeQueueFamilyIndex = q;
       graphicsQueueFamilyIndex = q;
       foundUniversal = true;
@@ -713,38 +1226,109 @@ void VulkanContext::createDevice() {
   }
   if (!foundUniversal) {
     for (uint32_t q = 0; q < queueFamilyCount; ++q) {
-      if (queueFamilies[q].queueFlags & VK_QUEUE_COMPUTE_BIT) {
+      if ((queueFamilies[q].queueFlags & VK_QUEUE_COMPUTE_BIT) &&
+          queueFamilies[q].queueCount > 0) {
         computeQueueFamilyIndex = q;
         break;
       }
     }
     for (uint32_t q = 0; q < queueFamilyCount; ++q) {
-      if (queueFamilies[q].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+      if ((queueFamilies[q].queueFlags & VK_QUEUE_GRAPHICS_BIT) &&
+          queueFamilies[q].queueCount > 0) {
         graphicsQueueFamilyIndex = q;
         break;
       }
     }
   }
 
-  std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
-  float queuePriority = 1.0f;
-  VkDeviceQueueCreateInfo qciCompute{};
-  qciCompute.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-  qciCompute.queueFamilyIndex = computeQueueFamilyIndex;
-  qciCompute.queueCount = 1;
-  qciCompute.pQueuePriorities = &queuePriority;
-  queueCreateInfos.push_back(qciCompute);
-
-  if (graphicsQueueFamilyIndex != computeQueueFamilyIndex) {
-    VkDeviceQueueCreateInfo qciGraphics{};
-    qciGraphics.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-    qciGraphics.queueFamilyIndex = graphicsQueueFamilyIndex;
-    qciGraphics.queueCount = 1;
-    qciGraphics.pQueuePriorities = &queuePriority;
-    queueCreateInfos.push_back(qciGraphics);
+  // Discover dedicated Async Compute (ACE) and DMA Transfer (SDMA) queue families
+  for (uint32_t q = 0; q < queueFamilyCount; ++q) {
+    if (queueFamilies[q].queueCount == 0) continue;
+    if (asyncComputeQueueFamilyIndex == UINT32_MAX &&
+        (queueFamilies[q].queueFlags & VK_QUEUE_COMPUTE_BIT) &&
+        !(queueFamilies[q].queueFlags & VK_QUEUE_GRAPHICS_BIT)) {
+      asyncComputeQueueFamilyIndex = q;
+    }
+    if (transferQueueFamilyIndex == UINT32_MAX &&
+        (queueFamilies[q].queueFlags & VK_QUEUE_TRANSFER_BIT) &&
+        !(queueFamilies[q].queueFlags & (VK_QUEUE_COMPUTE_BIT | VK_QUEUE_GRAPHICS_BIT))) {
+      transferQueueFamilyIndex = q;
+    }
   }
 
-  // Use features2 chain to enable modern features like FP16 and INT8
+  // Presentation queue selection when GUI shares VkInstance/VkDevice
+  presentationQueueFamilyIndex = graphicsQueueFamilyIndex;
+  uint32_t presentationQueueSubIndex = 0;
+  if (m_presentationSurface != VK_NULL_HANDLE) {
+    VkBool32 gfxPresent = VK_FALSE;
+    vkGetPhysicalDeviceSurfaceSupportKHR(physicalDevice, graphicsQueueFamilyIndex,
+                                         m_presentationSurface, &gfxPresent);
+    if (gfxPresent == VK_TRUE) {
+      presentationQueueFamilyIndex = graphicsQueueFamilyIndex;
+      if (queueFamilies[graphicsQueueFamilyIndex].queueCount >= 2) {
+        presentationQueueSubIndex = 1;
+      }
+    } else {
+      for (uint32_t q = 0; q < queueFamilyCount; ++q) {
+        VkBool32 qPresent = VK_FALSE;
+        vkGetPhysicalDeviceSurfaceSupportKHR(physicalDevice, q,
+                                             m_presentationSurface, &qPresent);
+        if (qPresent == VK_TRUE && queueFamilies[q].queueCount > 0) {
+          presentationQueueFamilyIndex = q;
+          presentationQueueSubIndex = 0;
+          break;
+        }
+      }
+    }
+  }
+
+  // Deduplicate requested queue counts per family
+  std::map<uint32_t, uint32_t> requestedQueues;
+  requestedQueues[computeQueueFamilyIndex] =
+      std::max(requestedQueues[computeQueueFamilyIndex], 1u);
+  requestedQueues[graphicsQueueFamilyIndex] =
+      std::max(requestedQueues[graphicsQueueFamilyIndex], 1u);
+  if (m_presentationSurface != VK_NULL_HANDLE) {
+    requestedQueues[presentationQueueFamilyIndex] = std::max(
+        requestedQueues[presentationQueueFamilyIndex], presentationQueueSubIndex + 1u);
+  }
+  if (asyncComputeQueueFamilyIndex != UINT32_MAX) {
+    requestedQueues[asyncComputeQueueFamilyIndex] =
+        std::max(requestedQueues[asyncComputeQueueFamilyIndex], 1u);
+  }
+  if (transferQueueFamilyIndex != UINT32_MAX) {
+    requestedQueues[transferQueueFamilyIndex] =
+        std::max(requestedQueues[transferQueueFamilyIndex], 2u);
+  }
+
+  std::vector<std::vector<float>> queuePrioritiesStorage;
+  std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
+  queuePrioritiesStorage.reserve(requestedQueues.size());
+  for (const auto &[qFamily, reqCount] : requestedQueues) {
+    uint32_t clampedCount = std::min(reqCount, queueFamilies[qFamily].queueCount);
+    if (clampedCount == 0) continue;
+    queuePrioritiesStorage.emplace_back(clampedCount, 1.0f);
+    VkDeviceQueueCreateInfo qci{VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO};
+    qci.queueFamilyIndex = qFamily;
+    qci.queueCount = clampedCount;
+    qci.pQueuePriorities = queuePrioritiesStorage.back().data();
+    queueCreateInfos.push_back(qci);
+  }
+
+  // Query supported extensions first
+  uint32_t extensionCount = 0;
+  vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &extensionCount, nullptr);
+  std::vector<VkExtensionProperties> availableExtensions(extensionCount);
+  vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &extensionCount,
+                                       availableExtensions.data());
+
+  auto hasExt = [&](const char *name) {
+    for (const auto &available : availableExtensions) {
+      if (strcmp(name, available.extensionName) == 0) return true;
+    }
+    return false;
+  };
+
   VkPhysicalDeviceFeatures2 features2{
       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
   VkPhysicalDeviceShaderFloat16Int8Features features168{
@@ -761,7 +1345,6 @@ void VulkanContext::createDevice() {
       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES_KHR, nullptr, VK_TRUE};
   VkPhysicalDeviceHostQueryResetFeatures hostQueryResetFeatures{
       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_QUERY_RESET_FEATURES};
-
   VkPhysicalDeviceAccelerationStructureFeaturesKHR asFeatures{
       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR};
   VkPhysicalDeviceRayQueryFeaturesKHR rayQueryFeatures{
@@ -769,123 +1352,141 @@ void VulkanContext::createDevice() {
   VkPhysicalDeviceBufferDeviceAddressFeatures bufferDeviceAddressFeatures{
       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES};
 
-  // Query supported extensions first
-  uint32_t extensionCount;
-  vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &extensionCount, nullptr);
-  std::vector<VkExtensionProperties> availableExtensions(extensionCount);
-  vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &extensionCount, availableExtensions.data());
-
-  auto hasExt = [&](const char *name) {
-    for (const auto &available : availableExtensions) {
-      if (strcmp(name, available.extensionName) == 0) return true;
-    }
-    return false;
-  };
-
   VkPhysicalDeviceShaderBfloat16FeaturesKHR bfloat16Features{
       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_BFLOAT16_FEATURES_KHR, nullptr,
       VK_FALSE, VK_FALSE, VK_FALSE};
-
   VkPhysicalDeviceShaderFloat8FeaturesEXT float8Features{
       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT8_FEATURES_EXT, nullptr, VK_FALSE};
-
+  VkPhysicalDeviceShaderOCPMicroscalingTypesFeaturesEXT ocpFeatures{
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_OCP_MICROSCALING_TYPES_FEATURES_EXT,
+      nullptr, VK_FALSE, VK_FALSE, VK_FALSE, VK_FALSE};
   VkPhysicalDeviceShaderFloatControls2FeaturesKHR floatControls2Features{
       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT_CONTROLS_2_FEATURES_KHR, nullptr, VK_FALSE};
-
   VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtPipelineFeatures{
       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR, nullptr};
-
   VkPhysicalDeviceRayTracingInvocationReorderFeaturesEXT serFeatures{
       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_INVOCATION_REORDER_FEATURES_EXT, nullptr, VK_FALSE};
-
   VkPhysicalDeviceRayTracingMaintenance1FeaturesKHR rtMaint1Features{
       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_MAINTENANCE_1_FEATURES_KHR,
       nullptr, VK_FALSE, VK_FALSE};
-
   VkPhysicalDeviceDeviceGeneratedCommandsFeaturesEXT dgcFeatures{
       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEVICE_GENERATED_COMMANDS_FEATURES_EXT,
       nullptr, VK_FALSE, VK_FALSE};
-
   VkPhysicalDeviceMaintenance5FeaturesKHR maintenance5Features{
       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_5_FEATURES_KHR,
       nullptr, VK_FALSE};
-
   VkPhysicalDeviceShaderEnqueueFeaturesAMDX enqueueFeatures{
       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ENQUEUE_FEATURES_AMDX,
       nullptr, VK_FALSE, VK_FALSE};
-
   VkPhysicalDeviceShaderIntegerDotProductFeatures dotProductFeatures{
       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_DOT_PRODUCT_FEATURES, nullptr};
-
   VkPhysicalDeviceDynamicRenderingFeaturesKHR dynamicRenderingFeatures{
       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES_KHR, nullptr, VK_FALSE};
+  VkPhysicalDeviceCooperativeVectorFeaturesNV coopVectorFeatures{
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_VECTOR_FEATURES_NV,
+      nullptr, VK_FALSE, VK_FALSE};
+  VkPhysicalDeviceCooperativeMatrix2FeaturesNV coopMatrix2Features{
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_2_FEATURES_NV,
+      nullptr, VK_FALSE, VK_FALSE, VK_FALSE, VK_FALSE, VK_FALSE, VK_FALSE, VK_FALSE};
+#ifdef VK_EXT_opacity_micromap
+  VkPhysicalDeviceOpacityMicromapFeaturesEXT ommFeatures{
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_OPACITY_MICROMAP_FEATURES_EXT,
+      nullptr, VK_FALSE, VK_FALSE, VK_FALSE};
+#endif
 
-  void** currentPNext = (void**)&features2.pNext;
+  void **currentPNext = (void **)&features2.pNext;
   *currentPNext = &features168; currentPNext = &features168.pNext;
   *currentPNext = &features16Storage; currentPNext = &features16Storage.pNext;
   *currentPNext = &features8Storage; currentPNext = &features8Storage.pNext;
-  *currentPNext = &coopMatrixFeatures; currentPNext = &coopMatrixFeatures.pNext;
+  if (hasExt(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME)) {
+    *currentPNext = &coopMatrixFeatures; currentPNext = &coopMatrixFeatures.pNext;
+  }
   *currentPNext = &dotProductFeatures; currentPNext = &dotProductFeatures.pNext;
   *currentPNext = &subgroupSizeFeatures; currentPNext = &subgroupSizeFeatures.pNext;
-  *currentPNext = &asFeatures; currentPNext = &asFeatures.pNext;
-  *currentPNext = &rayQueryFeatures; currentPNext = &rayQueryFeatures.pNext;
+  if (hasExt(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME)) {
+    *currentPNext = &asFeatures; currentPNext = &asFeatures.pNext;
+  }
+  if (hasExt(VK_KHR_RAY_QUERY_EXTENSION_NAME)) {
+    *currentPNext = &rayQueryFeatures; currentPNext = &rayQueryFeatures.pNext;
+  }
   *currentPNext = &bufferDeviceAddressFeatures; currentPNext = &bufferDeviceAddressFeatures.pNext;
 
   if (hasExt("VK_KHR_shader_bfloat16")) {
-      *currentPNext = &bfloat16Features; currentPNext = &bfloat16Features.pNext;
+    *currentPNext = &bfloat16Features; currentPNext = &bfloat16Features.pNext;
   }
   if (hasExt("VK_EXT_shader_float8")) {
-      *currentPNext = &float8Features; currentPNext = &float8Features.pNext;
+    *currentPNext = &float8Features; currentPNext = &float8Features.pNext;
+  }
+  if (hasExt(VK_EXT_SHADER_OCP_MICROSCALING_TYPES_EXTENSION_NAME)) {
+    *currentPNext = &ocpFeatures; currentPNext = &ocpFeatures.pNext;
   }
   if (hasExt("VK_KHR_shader_float_controls2")) {
-      *currentPNext = &floatControls2Features; currentPNext = &floatControls2Features.pNext;
+    *currentPNext = &floatControls2Features; currentPNext = &floatControls2Features.pNext;
   }
   if (hasExt(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME)) {
-      *currentPNext = &rtPipelineFeatures; currentPNext = &rtPipelineFeatures.pNext;
+    *currentPNext = &rtPipelineFeatures; currentPNext = &rtPipelineFeatures.pNext;
   }
   serSupported = queryHardwareSERSupport(
       physicalDevice, properties.vendorID,
       hasExt("VK_EXT_ray_tracing_invocation_reorder"),
       hasExt("VK_NV_ray_tracing_invocation_reorder"));
-
   if (serSupported &&
       (hasExt("VK_EXT_ray_tracing_invocation_reorder") ||
        hasExt("VK_NV_ray_tracing_invocation_reorder"))) {
-      *currentPNext = &serFeatures; currentPNext = &serFeatures.pNext;
+    *currentPNext = &serFeatures; currentPNext = &serFeatures.pNext;
   }
   if (hasExt(VK_KHR_RAY_TRACING_MAINTENANCE_1_EXTENSION_NAME)) {
-      *currentPNext = &rtMaint1Features; currentPNext = &rtMaint1Features.pNext;
+    *currentPNext = &rtMaint1Features; currentPNext = &rtMaint1Features.pNext;
   }
   if (hasExt(VK_EXT_DEVICE_GENERATED_COMMANDS_EXTENSION_NAME)) {
-      *currentPNext = &dgcFeatures; currentPNext = &dgcFeatures.pNext;
+    *currentPNext = &dgcFeatures; currentPNext = &dgcFeatures.pNext;
   }
-  if (hasExt("VK_KHR_maintenance5")) {
-      *currentPNext = &maintenance5Features; currentPNext = &maintenance5Features.pNext;
+  if (hasExt("VK_KHR_maintenance5") || properties.apiVersion >= VK_API_VERSION_1_4) {
+    *currentPNext = &maintenance5Features; currentPNext = &maintenance5Features.pNext;
   }
   if (hasExt("VK_AMDX_shader_enqueue")) {
-      *currentPNext = &enqueueFeatures; currentPNext = &enqueueFeatures.pNext;
+    *currentPNext = &enqueueFeatures; currentPNext = &enqueueFeatures.pNext;
   }
+  if (hasExt(VK_NV_COOPERATIVE_VECTOR_EXTENSION_NAME)) {
+    *currentPNext = &coopVectorFeatures; currentPNext = &coopVectorFeatures.pNext;
+  }
+  if (hasExt(VK_NV_COOPERATIVE_MATRIX_2_EXTENSION_NAME)) {
+    *currentPNext = &coopMatrix2Features; currentPNext = &coopMatrix2Features.pNext;
+  }
+#ifdef VK_EXT_opacity_micromap
+  if (hasExt(VK_EXT_OPACITY_MICROMAP_EXTENSION_NAME)) {
+    *currentPNext = &ommFeatures; currentPNext = &ommFeatures.pNext;
+  }
+#endif
   VkPhysicalDevicePipelineExecutablePropertiesFeaturesKHR pipelineExecutablePropertiesFeatures{
       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_EXECUTABLE_PROPERTIES_FEATURES_KHR,
       nullptr, VK_FALSE};
   if (hasExt(VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME)) {
-      *currentPNext = &pipelineExecutablePropertiesFeatures; currentPNext = &pipelineExecutablePropertiesFeatures.pNext;
+    *currentPNext = &pipelineExecutablePropertiesFeatures; currentPNext = &pipelineExecutablePropertiesFeatures.pNext;
   }
-  if (hasExt(VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME)) {
-      *currentPNext = &sync2Features; currentPNext = &sync2Features.pNext;
-  }
+  *currentPNext = &sync2Features; currentPNext = &sync2Features.pNext;
   VkPhysicalDevicePerformanceQueryFeaturesKHR perfQueryFeatures{
       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PERFORMANCE_QUERY_FEATURES_KHR, nullptr, VK_FALSE};
   if (hasExt(VK_KHR_PERFORMANCE_QUERY_EXTENSION_NAME)) {
-      *currentPNext = &perfQueryFeatures; currentPNext = &perfQueryFeatures.pNext;
+    *currentPNext = &perfQueryFeatures; currentPNext = &perfQueryFeatures.pNext;
   }
-  if (hasExt(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME) || properties.apiVersion >= VK_API_VERSION_1_3) {
-      *currentPNext = &dynamicRenderingFeatures; currentPNext = &dynamicRenderingFeatures.pNext;
+  VkPhysicalDeviceCoherentMemoryFeaturesAMD amdCoherentFeatures{
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COHERENT_MEMORY_FEATURES_AMD, nullptr, VK_FALSE};
+  if (hasExt(VK_AMD_DEVICE_COHERENT_MEMORY_EXTENSION_NAME)) {
+    *currentPNext = &amdCoherentFeatures; currentPNext = &amdCoherentFeatures.pNext;
   }
+  VkPhysicalDeviceVulkanMemoryModelFeatures memoryModelFeatures{
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_MEMORY_MODEL_FEATURES, nullptr,
+      VK_FALSE, VK_FALSE, VK_FALSE};
+  VkPhysicalDeviceMaintenance4Features maintenance4Features{
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_FEATURES, nullptr,
+      VK_FALSE};
+  *currentPNext = &memoryModelFeatures; currentPNext = &memoryModelFeatures.pNext;
+  *currentPNext = &maintenance4Features; currentPNext = &maintenance4Features.pNext;
+  *currentPNext = &dynamicRenderingFeatures; currentPNext = &dynamicRenderingFeatures.pNext;
   *currentPNext = &hostQueryResetFeatures; currentPNext = &hostQueryResetFeatures.pNext;
   *currentPNext = nullptr;
 
-  // Query supported features and enable them
   vkGetPhysicalDeviceFeatures2(physicalDevice, &features2);
   hostQueryResetSupported = (hostQueryResetFeatures.hostQueryReset == VK_TRUE);
 
@@ -909,34 +1510,39 @@ void VulkanContext::createDevice() {
       VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME,
       VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME,
       VK_KHR_PERFORMANCE_QUERY_EXTENSION_NAME,
+      VK_EXT_MEMORY_BUDGET_EXTENSION_NAME,
+      VK_AMD_DEVICE_COHERENT_MEMORY_EXTENSION_NAME,
       "VK_KHR_maintenance5",
+      "VK_KHR_pipeline_library",
       "VK_KHR_shader_bfloat16",
       "VK_EXT_shader_float8",
+      VK_EXT_SHADER_OCP_MICROSCALING_TYPES_EXTENSION_NAME,
       "VK_KHR_shader_float_controls2",
-      "VK_AMDX_shader_enqueue"};
+      "VK_AMDX_shader_enqueue",
+      VK_NV_COOPERATIVE_VECTOR_EXTENSION_NAME,
+      VK_NV_COOPERATIVE_MATRIX_2_EXTENSION_NAME
+#ifdef VK_EXT_opacity_micromap
+      , VK_EXT_OPACITY_MICROMAP_EXTENSION_NAME
+#endif
+  };
   if (serSupported) {
     desiredExtensions.push_back("VK_EXT_ray_tracing_invocation_reorder");
     desiredExtensions.push_back("VK_NV_ray_tracing_invocation_reorder");
   }
 
   swapchainSupported = hasExt(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+  memoryBudgetSupported = hasExt(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
+  amdDeviceCoherentMemorySupported =
+      hasExt(VK_AMD_DEVICE_COHERENT_MEMORY_EXTENSION_NAME) &&
+      (amdCoherentFeatures.deviceCoherentMemory == VK_TRUE);
 
   std::vector<const char *> enabledExtensions;
   for (const auto &extension : desiredExtensions) {
-    bool found = false;
-    for (const auto &available : availableExtensions) {
-      if (strcmp(extension, available.extensionName) == 0) {
-        found = true;
-        break;
-      }
-    }
-    if (found) {
+    if (hasExt(extension)) {
       enabledExtensions.push_back(extension);
-    } else {
-      if (verbose) {
-          std::cerr << "Warning: Extension " << extension
-                    << " not supported by device, disabling." << std::endl;
-      }
+    } else if (verbose) {
+      std::cerr << "Warning: Extension " << extension
+                << " not supported by device, disabling." << std::endl;
     }
   }
 
@@ -945,30 +1551,42 @@ void VulkanContext::createDevice() {
     enabledExtensionsSet.insert(ext);
   }
 
-  subgroupSizeControlSupported = hasExt(VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME) &&
-                                 (subgroupSizeFeatures.subgroupSizeControl == VK_TRUE);
-
-  maintenance5Supported = hasExt("VK_KHR_maintenance5") &&
-                          (maintenance5Features.maintenance5 == VK_TRUE);
+  subgroupSizeControlSupported =
+      (subgroupSizeFeatures.subgroupSizeControl == VK_TRUE);
+  maintenance5Supported = (maintenance5Features.maintenance5 == VK_TRUE);
+  workGraphsSupported =
+      hasExt("VK_AMDX_shader_enqueue") && hasExt("VK_KHR_pipeline_library") &&
+      maintenance5Supported && (enqueueFeatures.shaderEnqueue == VK_TRUE);
+  cooperativeVectorSupported =
+      hasExt(VK_NV_COOPERATIVE_VECTOR_EXTENSION_NAME) &&
+      (coopVectorFeatures.cooperativeVector == VK_TRUE);
+#ifdef VK_EXT_opacity_micromap
+  opacityMicromapSupported =
+      hasExt(VK_EXT_OPACITY_MICROMAP_EXTENSION_NAME) &&
+      (ommFeatures.micromap == VK_TRUE);
+#else
+  opacityMicromapSupported = false;
+#endif
+  structuredSparsitySupported = false;
 
   VkDeviceCreateInfo createInfo{};
   createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-  createInfo.pNext = &features2; // Enable all modern features
+  createInfo.pNext = &features2;
   createInfo.pQueueCreateInfos = queueCreateInfos.data();
   createInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
   createInfo.ppEnabledExtensionNames = enabledExtensions.data();
   createInfo.enabledExtensionCount =
       static_cast<uint32_t>(enabledExtensions.size());
-  createInfo.pEnabledFeatures =
-      nullptr; // Must be NULL if pNext contains a VkPhysicalDeviceFeatures2
+  createInfo.pEnabledFeatures = nullptr;
 
   if (vkCreateDevice(physicalDevice, &createInfo, nullptr, &device) !=
       VK_SUCCESS) {
     throw std::runtime_error("failed to create logical device!");
   }
 
-  pipelineExecutablePropertiesSupported = hasExt(VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME) &&
-                                         (pipelineExecutablePropertiesFeatures.pipelineExecutableInfo == VK_TRUE);
+  pipelineExecutablePropertiesSupported =
+      hasExt(VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME) &&
+      (pipelineExecutablePropertiesFeatures.pipelineExecutableInfo == VK_TRUE);
   if (pipelineExecutablePropertiesSupported) {
     vkGetPipelineExecutablePropertiesKHR_ptr =
         (PFN_vkGetPipelineExecutablePropertiesKHR)vkGetDeviceProcAddr(
@@ -1048,11 +1666,6 @@ void VulkanContext::createDevice() {
 
           if (vkCreateQueryPool(device, &poolCI, nullptr, &perfQueryPool) == VK_SUCCESS) {
             performanceQueryEnabled = true;
-            if (verbose) {
-              std::cout << " [VK_KHR_performance_query] Initialized performance query pool with "
-                        << perfQuerySelectedIndices.size() << " 1-pass counters (out of "
-                        << counterCount << " available)" << std::endl;
-            }
           }
         }
       }
@@ -1061,7 +1674,6 @@ void VulkanContext::createDevice() {
     }
   }
 
-  // Load DGC function pointers and query DGC properties if extension is enabled
   if (hasExt(VK_EXT_DEVICE_GENERATED_COMMANDS_EXTENSION_NAME)) {
     VkPhysicalDeviceDeviceGeneratedCommandsPropertiesEXT dgcProperties{
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEVICE_GENERATED_COMMANDS_PROPERTIES_EXT};
@@ -1117,8 +1729,31 @@ void VulkanContext::createDevice() {
 
   vkGetDeviceQueue(device, computeQueueFamilyIndex, 0, &computeQueue);
   vkGetDeviceQueue(device, graphicsQueueFamilyIndex, 0, &graphicsQueue);
+  if (m_presentationSurface != VK_NULL_HANDLE) {
+    uint32_t maxQ = queueFamilies[presentationQueueFamilyIndex].queueCount;
+    uint32_t subQ = (presentationQueueSubIndex < maxQ) ? presentationQueueSubIndex : 0u;
+    vkGetDeviceQueue(device, presentationQueueFamilyIndex, subQ, &presentationQueue);
+  } else {
+    presentationQueue = VK_NULL_HANDLE;
+  }
+  if (asyncComputeQueueFamilyIndex != UINT32_MAX) {
+    vkGetDeviceQueue(device, asyncComputeQueueFamilyIndex, 0, &asyncComputeQueue);
+  } else {
+    asyncComputeQueue = VK_NULL_HANDLE;
+  }
+  if (transferQueueFamilyIndex != UINT32_MAX) {
+    vkGetDeviceQueue(device, transferQueueFamilyIndex, 0, &transferQueue);
+    if (queueFamilies[transferQueueFamilyIndex].queueCount >= 2u) {
+      vkGetDeviceQueue(device, transferQueueFamilyIndex, 1,
+                       &secondaryTransferQueue);
+    } else {
+      secondaryTransferQueue = VK_NULL_HANDLE;
+    }
+  } else {
+    transferQueue = VK_NULL_HANDLE;
+    secondaryTransferQueue = VK_NULL_HANDLE;
+  }
 
-  // Initialize GPU hardware timestamp query pool
   VkQueryPoolCreateInfo qpInfo{};
   qpInfo.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
   qpInfo.queryType = VK_QUERY_TYPE_TIMESTAMP;
@@ -1133,9 +1768,9 @@ void VulkanContext::createDevice() {
     timingSupported = false;
   }
 
-  vkCmdPipelineBarrier2KHR_ptr = (PFN_vkCmdPipelineBarrier2KHR)vkGetDeviceProcAddr(device, "vkCmdPipelineBarrier2KHR");
+  vkCmdPipelineBarrier2KHR_ptr = (PFN_vkCmdPipelineBarrier2KHR)vkGetDeviceProcAddr(device, "vkCmdPipelineBarrier2");
   if (!vkCmdPipelineBarrier2KHR_ptr) {
-    vkCmdPipelineBarrier2KHR_ptr = (PFN_vkCmdPipelineBarrier2KHR)vkGetDeviceProcAddr(device, "vkCmdPipelineBarrier2");
+    vkCmdPipelineBarrier2KHR_ptr = (PFN_vkCmdPipelineBarrier2KHR)vkGetDeviceProcAddr(device, "vkCmdPipelineBarrier2KHR");
   }
   sync2Supported = (sync2Features.synchronization2 == VK_TRUE) &&
                    (vkCmdPipelineBarrier2KHR_ptr != nullptr);
@@ -1186,6 +1821,9 @@ void VulkanContext::createDevice() {
   }
   currentFrameIndex = 0;
 
+  initVmaAllocator(bufferDeviceAddressFeatures.bufferDeviceAddress == VK_TRUE,
+                   memoryBudgetSupported);
+  initPipelineCache();
   initStagingBuffer();
 }
 
@@ -1436,80 +2074,61 @@ uint32_t VulkanContext::findMemoryType(uint32_t typeFilter,
   throw std::runtime_error("failed to find suitable memory type!");
 }
 
-// Staging Buffer Pool Implementation
+// Staging Buffer Pool Implementation (VMA-backed)
 void VulkanContext::initStagingBuffer() {
   std::lock_guard<std::mutex> lock(stagingMutex);
-  if (device == VK_NULL_HANDLE || commandPool == VK_NULL_HANDLE) return;
+  if (device == VK_NULL_HANDLE || commandPool == VK_NULL_HANDLE ||
+      m_vmaAllocator == VK_NULL_HANDLE) {
+    return;
+  }
 
   VkBufferCreateInfo bufferInfo{};
   bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
   bufferInfo.size = kStagingBufferSize;
-  bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+  bufferInfo.usage =
+      VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
   bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-  if (vkCreateBuffer(device, &bufferInfo, nullptr, &stagingBuffer) != VK_SUCCESS) {
-    throw std::runtime_error("failed to create persistent staging buffer!");
-  }
+  VmaAllocationCreateInfo vmaAllocCI{};
+  vmaAllocCI.usage = VMA_MEMORY_USAGE_AUTO_PREFER_HOST;
+  vmaAllocCI.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT |
+                     VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT;
+  vmaAllocCI.requiredFlags =
+      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
 
-  VkMemoryRequirements memRequirements;
-  vkGetBufferMemoryRequirements(device, stagingBuffer, &memRequirements);
-
-  VkMemoryAllocateInfo allocInfo{};
-  allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-  allocInfo.allocationSize = memRequirements.size;
-  allocInfo.memoryTypeIndex = findMemoryType(
-      memRequirements.memoryTypeBits,
-      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-
-  if (vkAllocateMemory(device, &allocInfo, nullptr, &stagingMemory) != VK_SUCCESS) {
-    vkDestroyBuffer(device, stagingBuffer, nullptr);
+  VmaAllocationInfo vmaOut{};
+  if (vmaCreateBuffer(m_vmaAllocator, &bufferInfo, &vmaAllocCI, &stagingBuffer,
+                      &stagingVmaAllocation, &vmaOut) != VK_SUCCESS ||
+      !vmaOut.pMappedData) {
     stagingBuffer = VK_NULL_HANDLE;
-    throw std::runtime_error("failed to allocate persistent staging memory!");
+    stagingVmaAllocation = VK_NULL_HANDLE;
+    throw std::runtime_error("failed to create VMA persistent staging buffer!");
   }
-
-  if (vkBindBufferMemory(device, stagingBuffer, stagingMemory, 0) != VK_SUCCESS) {
-    vkDestroyBuffer(device, stagingBuffer, nullptr);
-    stagingBuffer = VK_NULL_HANDLE;
-    vkFreeMemory(device, stagingMemory, nullptr);
-    stagingMemory = VK_NULL_HANDLE;
-    throw std::runtime_error("failed to bind persistent staging memory!");
-  }
-
-  if (vkMapMemory(device, stagingMemory, 0, kStagingBufferSize, 0, &stagingMappedPtr) != VK_SUCCESS) {
-    vkDestroyBuffer(device, stagingBuffer, nullptr);
-    stagingBuffer = VK_NULL_HANDLE;
-    vkFreeMemory(device, stagingMemory, nullptr);
-    stagingMemory = VK_NULL_HANDLE;
-    throw std::runtime_error("failed to map persistent staging memory!");
-  }
+  stagingMappedPtr = vmaOut.pMappedData;
 
   VkCommandBufferAllocateInfo cmdAllocInfo{};
   cmdAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
   cmdAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
   cmdAllocInfo.commandPool = commandPool;
   cmdAllocInfo.commandBufferCount = 1;
-  if (vkAllocateCommandBuffers(device, &cmdAllocInfo, &stagingCmdBuffer) != VK_SUCCESS) {
-    vkUnmapMemory(device, stagingMemory);
-    stagingMappedPtr = nullptr;
-    vkDestroyBuffer(device, stagingBuffer, nullptr);
+  if (vkAllocateCommandBuffers(device, &cmdAllocInfo, &stagingCmdBuffer) !=
+      VK_SUCCESS) {
+    vmaDestroyBuffer(m_vmaAllocator, stagingBuffer, stagingVmaAllocation);
     stagingBuffer = VK_NULL_HANDLE;
-    vkFreeMemory(device, stagingMemory, nullptr);
-    stagingMemory = VK_NULL_HANDLE;
+    stagingVmaAllocation = VK_NULL_HANDLE;
+    stagingMappedPtr = nullptr;
     throw std::runtime_error("failed to allocate staging command buffer!");
   }
 
   VkFenceCreateInfo fenceInfo{};
   fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-  fenceInfo.flags = 0;
   if (vkCreateFence(device, &fenceInfo, nullptr, &stagingFence) != VK_SUCCESS) {
     vkFreeCommandBuffers(device, commandPool, 1, &stagingCmdBuffer);
     stagingCmdBuffer = VK_NULL_HANDLE;
-    vkUnmapMemory(device, stagingMemory);
-    stagingMappedPtr = nullptr;
-    vkDestroyBuffer(device, stagingBuffer, nullptr);
+    vmaDestroyBuffer(m_vmaAllocator, stagingBuffer, stagingVmaAllocation);
     stagingBuffer = VK_NULL_HANDLE;
-    vkFreeMemory(device, stagingMemory, nullptr);
-    stagingMemory = VK_NULL_HANDLE;
+    stagingVmaAllocation = VK_NULL_HANDLE;
+    stagingMappedPtr = nullptr;
     throw std::runtime_error("failed to create staging fence!");
   }
 }
@@ -1526,21 +2145,28 @@ void VulkanContext::cleanupStagingBuffer() {
     vkFreeCommandBuffers(device, commandPool, 1, &stagingCmdBuffer);
     stagingCmdBuffer = VK_NULL_HANDLE;
   }
-  if (stagingMappedPtr != nullptr && stagingMemory != VK_NULL_HANDLE) {
-    vkUnmapMemory(device, stagingMemory);
-    stagingMappedPtr = nullptr;
-  }
-  if (stagingBuffer != VK_NULL_HANDLE) {
-    vkDestroyBuffer(device, stagingBuffer, nullptr);
+  if (stagingVmaAllocation != VK_NULL_HANDLE && m_vmaAllocator != VK_NULL_HANDLE) {
+    vmaDestroyBuffer(m_vmaAllocator, stagingBuffer, stagingVmaAllocation);
     stagingBuffer = VK_NULL_HANDLE;
-  }
-  if (stagingMemory != VK_NULL_HANDLE) {
-    vkFreeMemory(device, stagingMemory, nullptr);
-    stagingMemory = VK_NULL_HANDLE;
+    stagingVmaAllocation = VK_NULL_HANDLE;
+    stagingMappedPtr = nullptr;
+  } else {
+    if (stagingMappedPtr != nullptr && stagingMemory != VK_NULL_HANDLE) {
+      vkUnmapMemory(device, stagingMemory);
+      stagingMappedPtr = nullptr;
+    }
+    if (stagingBuffer != VK_NULL_HANDLE) {
+      vkDestroyBuffer(device, stagingBuffer, nullptr);
+      stagingBuffer = VK_NULL_HANDLE;
+    }
+    if (stagingMemory != VK_NULL_HANDLE) {
+      vkFreeMemory(device, stagingMemory, nullptr);
+      stagingMemory = VK_NULL_HANDLE;
+    }
   }
 }
 
-// Memory Block Suballocator Implementation
+// Retained legacy helpers
 bool VulkanContext::allocateSuballocatedBuffer(VkDeviceSize size,
                                                VkDeviceSize alignment,
                                                uint32_t memoryTypeIndex,
@@ -1557,7 +2183,6 @@ bool VulkanContext::allocateSuballocatedBuffer(VkDeviceSize size,
     return true;
   }
 
-  // Allocate a new 64 MB block
   VkMemoryAllocateInfo allocInfo{};
   allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
   allocInfo.allocationSize = kDefaultBlockSize;
@@ -1607,110 +2232,166 @@ void VulkanContext::cleanupMemoryBlocks() {
 }
 
 ComputeBuffer VulkanContext::createBuffer(size_t size, const void *host_ptr) {
-  auto vulkanBuffer = new VulkanBuffer();
+  if (m_vmaAllocator == VK_NULL_HANDLE) {
+    throw std::runtime_error("VMA allocator not initialized in createBuffer!");
+  }
+  auto *vulkanBuffer = new VulkanBuffer();
+  VkDeviceSize allocByteSize = std::max<VkDeviceSize>(size, 16);
 
   VkBufferCreateInfo bufferInfo{};
   bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-  bufferInfo.size = size;
+  bufferInfo.size = allocByteSize;
   bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
                      VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
                      VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-                     VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
+                     VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
+                     VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
 
-  bool needDeviceAddress = getCurrentDeviceInfo().rayTracingSupport || dgcSupported;
-  if (needDeviceAddress) {
+  if (enabledExtensionsSet.count(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) > 0) {
     bufferInfo.usage |=
-        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
         VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
-        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
-        VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR;
+        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR;
   }
+  if (enabledExtensionsSet.count(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME) > 0) {
+    bufferInfo.usage |= VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR;
+  }
+#ifdef VK_EXT_opacity_micromap
+  if (opacityMicromapSupported) {
+    bufferInfo.usage |=
+        VK_BUFFER_USAGE_MICROMAP_BUILD_INPUT_READ_ONLY_BIT_EXT |
+        VK_BUFFER_USAGE_MICROMAP_STORAGE_BIT_EXT;
+  }
+#endif
   bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-  if (vkCreateBuffer(device, &bufferInfo, nullptr, &vulkanBuffer->buffer) !=
-      VK_SUCCESS) {
+  VmaAllocationCreateInfo vmaAllocCI{};
+  vmaAllocCI.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+
+  VmaAllocationInfo vmaOut{};
+  if (vmaCreateBuffer(m_vmaAllocator, &bufferInfo, &vmaAllocCI,
+                      &vulkanBuffer->buffer, &vulkanBuffer->vmaAllocation,
+                      &vmaOut) != VK_SUCCESS) {
     delete vulkanBuffer;
-    throw std::runtime_error("failed to create buffer!");
+    throw std::runtime_error("failed to allocate VMA device buffer!");
   }
 
-  VkMemoryRequirements memRequirements;
-  vkGetBufferMemoryRequirements(device, vulkanBuffer->buffer, &memRequirements);
+  vulkanBuffer->size = allocByteSize;
+  vulkanBuffer->mappedPtr = vmaOut.pMappedData;
 
-  uint32_t memTypeIndex = findMemoryType(
-      memRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
-  bool suballocated = false;
-  if (memRequirements.size <= kMaxSuballocSize) {
-    std::lock_guard<std::mutex> lock(suballocatorMutex);
-    suballocated = allocateSuballocatedBuffer(memRequirements.size,
-                                              memRequirements.alignment,
-                                              memTypeIndex,
-                                              needDeviceAddress,
-                                              vulkanBuffer);
-  }
-
-  if (suballocated) {
-    if (vkBindBufferMemory(device, vulkanBuffer->buffer, vulkanBuffer->memory, vulkanBuffer->offset) != VK_SUCCESS) {
-      {
-        std::lock_guard<std::mutex> lock(suballocatorMutex);
-        freeSuballocatedBuffer(vulkanBuffer);
-      }
-      suballocated = false;
-    }
-  }
-
-  if (!suballocated) {
-    VkMemoryAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    allocInfo.allocationSize = memRequirements.size;
-    allocInfo.memoryTypeIndex = memTypeIndex;
-
-    VkMemoryAllocateFlagsInfo flagsInfo{};
-    if (needDeviceAddress) {
-      flagsInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
-      flagsInfo.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
-      allocInfo.pNext = &flagsInfo;
-    }
-
-    if (vkAllocateMemory(device, &allocInfo, nullptr, &vulkanBuffer->memory) !=
-        VK_SUCCESS) {
-      vkDestroyBuffer(device, vulkanBuffer->buffer, nullptr);
-      delete vulkanBuffer;
-      throw std::runtime_error("failed to allocate buffer memory!");
-    }
-
-    vulkanBuffer->offset = 0;
-    vulkanBuffer->isSuballocated = false;
-    if (vkBindBufferMemory(device, vulkanBuffer->buffer, vulkanBuffer->memory, 0) != VK_SUCCESS) {
-      vkDestroyBuffer(device, vulkanBuffer->buffer, nullptr);
-      vkFreeMemory(device, vulkanBuffer->memory, nullptr);
-      delete vulkanBuffer;
-      throw std::runtime_error("failed to bind buffer memory!");
-    }
-  }
-
-  vulkanBuffer->size = memRequirements.size;
-
-  if (needDeviceAddress) {
-    VkBufferDeviceAddressInfo bdaInfo{
-        VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO};
-    bdaInfo.buffer = vulkanBuffer->buffer;
-    if (vkGetBufferDeviceAddressKHR_ptr) {
-      vulkanBuffer->address = vkGetBufferDeviceAddressKHR_ptr(device, &bdaInfo);
-    } else {
-      vulkanBuffer->address = vkGetBufferDeviceAddress(device, &bdaInfo);
-    }
-  } else {
-    vulkanBuffer->address = 0;
-  }
+  VkBufferDeviceAddressInfo bdaInfo{VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO};
+  bdaInfo.buffer = vulkanBuffer->buffer;
+  vulkanBuffer->address = vkGetBufferDeviceAddress(device, &bdaInfo);
 
   buffers[vulkanBuffer] = vulkanBuffer;
 
-  if (host_ptr) {
+  if (host_ptr && size > 0) {
     writeBuffer(vulkanBuffer, 0, size, host_ptr);
   }
 
   return vulkanBuffer;
+}
+
+ComputeBuffer VulkanContext::createPinnedHostBuffer(size_t size, bool forUpload,
+                                                    void **outMappedPtr) {
+  if (m_vmaAllocator == VK_NULL_HANDLE) {
+    throw std::runtime_error("VMA allocator not initialized in createPinnedHostBuffer!");
+  }
+  auto *vulkanBuffer = new VulkanBuffer();
+  VkDeviceSize allocByteSize = std::max<VkDeviceSize>(size, 16);
+
+  VkBufferCreateInfo bufferInfo{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+  bufferInfo.size = allocByteSize;
+  bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                     VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+                     VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                     VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+  bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+  VmaAllocationCreateInfo vmaAllocCI{};
+  vmaAllocCI.usage = VMA_MEMORY_USAGE_AUTO_PREFER_HOST;
+  vmaAllocCI.flags =
+      VMA_ALLOCATION_CREATE_MAPPED_BIT |
+      (forUpload ? VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT
+                 : VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT);
+  vmaAllocCI.requiredFlags =
+      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+  if (!forUpload) {
+    vmaAllocCI.preferredFlags = VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
+  }
+
+  VmaAllocationInfo vmaOut{};
+  if (vmaCreateBuffer(m_vmaAllocator, &bufferInfo, &vmaAllocCI,
+                      &vulkanBuffer->buffer, &vulkanBuffer->vmaAllocation,
+                      &vmaOut) != VK_SUCCESS ||
+      !vmaOut.pMappedData) {
+    delete vulkanBuffer;
+    throw std::runtime_error("failed to allocate VMA pinned host buffer!");
+  }
+
+  vulkanBuffer->size = allocByteSize;
+  vulkanBuffer->mappedPtr = vmaOut.pMappedData;
+  VkBufferDeviceAddressInfo bdaInfo{VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO};
+  bdaInfo.buffer = vulkanBuffer->buffer;
+  vulkanBuffer->address = vkGetBufferDeviceAddress(device, &bdaInfo);
+
+  buffers[vulkanBuffer] = vulkanBuffer;
+  if (outMappedPtr) {
+    *outMappedPtr = vulkanBuffer->mappedPtr;
+  }
+  return vulkanBuffer;
+}
+
+ComputeBuffer VulkanContext::createRebarBuffer(size_t size, void **outMappedPtr) {
+  if (m_vmaAllocator == VK_NULL_HANDLE) {
+    return nullptr;
+  }
+  auto *vulkanBuffer = new VulkanBuffer();
+  VkDeviceSize allocByteSize = std::max<VkDeviceSize>(size, 16);
+
+  VkBufferCreateInfo bufferInfo{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+  bufferInfo.size = allocByteSize;
+  bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                     VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+                     VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                     VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+  bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+  VmaAllocationCreateInfo vmaAllocCI{};
+  vmaAllocCI.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+  vmaAllocCI.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT |
+                     VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+  vmaAllocCI.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
+                             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                             VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+
+  VmaAllocationInfo vmaOut{};
+  if (vmaCreateBuffer(m_vmaAllocator, &bufferInfo, &vmaAllocCI,
+                      &vulkanBuffer->buffer, &vulkanBuffer->vmaAllocation,
+                      &vmaOut) != VK_SUCCESS ||
+      !vmaOut.pMappedData) {
+    delete vulkanBuffer;
+    return nullptr;
+  }
+
+  vulkanBuffer->size = allocByteSize;
+  vulkanBuffer->mappedPtr = vmaOut.pMappedData;
+  VkBufferDeviceAddressInfo bdaInfo{VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO};
+  bdaInfo.buffer = vulkanBuffer->buffer;
+  vulkanBuffer->address = vkGetBufferDeviceAddress(device, &bdaInfo);
+
+  buffers[vulkanBuffer] = vulkanBuffer;
+  if (outMappedPtr) {
+    *outMappedPtr = vulkanBuffer->mappedPtr;
+  }
+  return vulkanBuffer;
+}
+
+void *VulkanContext::getBufferMappedPtr(ComputeBuffer buffer) const {
+  auto it = buffers.find(buffer);
+  if (it != buffers.end() && it->second) {
+    return it->second->mappedPtr;
+  }
+  return nullptr;
 }
 
 void VulkanContext::writeBuffer(ComputeBuffer buffer, size_t offset,
@@ -1778,7 +2459,11 @@ void VulkanContext::writeBuffer(ComputeBuffer buffer, size_t offset,
 
     if (stagingFence != VK_NULL_HANDLE) {
       vkResetFences(device, 1, &stagingFence);
-      VkResult submitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, stagingFence);
+      VkResult submitRes;
+      {
+        std::lock_guard<std::recursive_mutex> qlock(m_queueMutex);
+        submitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, stagingFence);
+      }
       if (submitRes != VK_SUCCESS) {
         throw std::runtime_error("vkQueueSubmit failed in writeBuffer with result: " +
                                  std::to_string(submitRes));
@@ -1789,6 +2474,7 @@ void VulkanContext::writeBuffer(ComputeBuffer buffer, size_t offset,
                                  std::to_string(waitRes));
       }
     } else {
+      std::lock_guard<std::recursive_mutex> qlock(m_queueMutex);
       VkResult submitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, VK_NULL_HANDLE);
       if (submitRes != VK_SUCCESS) {
         throw std::runtime_error("vkQueueSubmit failed in writeBuffer with result: " +
@@ -1870,7 +2556,11 @@ void VulkanContext::readBuffer(ComputeBuffer buffer, size_t offset, size_t size,
 
     if (stagingFence != VK_NULL_HANDLE) {
       vkResetFences(device, 1, &stagingFence);
-      VkResult submitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, stagingFence);
+      VkResult submitRes;
+      {
+        std::lock_guard<std::recursive_mutex> qlock(m_queueMutex);
+        submitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, stagingFence);
+      }
       if (submitRes != VK_SUCCESS) {
         throw std::runtime_error("vkQueueSubmit failed in readBuffer with result: " +
                                  std::to_string(submitRes));
@@ -1881,6 +2571,7 @@ void VulkanContext::readBuffer(ComputeBuffer buffer, size_t offset, size_t size,
                                  std::to_string(waitRes));
       }
     } else {
+      std::lock_guard<std::recursive_mutex> qlock(m_queueMutex);
       VkResult submitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, VK_NULL_HANDLE);
       if (submitRes != VK_SUCCESS) {
         throw std::runtime_error("vkQueueSubmit failed in readBuffer with result: " +
@@ -1903,16 +2594,24 @@ void VulkanContext::releaseBuffer(ComputeBuffer buffer) {
   if (it != buffers.end()) {
     VulkanBuffer *vulkanBuffer = it->second;
     if (vulkanBuffer) {
-      if (vulkanBuffer->buffer != VK_NULL_HANDLE) {
-        vkDestroyBuffer(device, vulkanBuffer->buffer, nullptr);
+      if (vulkanBuffer->vmaAllocation != VK_NULL_HANDLE &&
+          m_vmaAllocator != VK_NULL_HANDLE) {
+        vmaDestroyBuffer(m_vmaAllocator, vulkanBuffer->buffer,
+                         vulkanBuffer->vmaAllocation);
         vulkanBuffer->buffer = VK_NULL_HANDLE;
-      }
-      if (vulkanBuffer->isSuballocated) {
-        std::lock_guard<std::mutex> lock(suballocatorMutex);
-        freeSuballocatedBuffer(vulkanBuffer);
-      } else if (vulkanBuffer->memory != VK_NULL_HANDLE) {
-        vkFreeMemory(device, vulkanBuffer->memory, nullptr);
-        vulkanBuffer->memory = VK_NULL_HANDLE;
+        vulkanBuffer->vmaAllocation = VK_NULL_HANDLE;
+      } else {
+        if (vulkanBuffer->buffer != VK_NULL_HANDLE) {
+          vkDestroyBuffer(device, vulkanBuffer->buffer, nullptr);
+          vulkanBuffer->buffer = VK_NULL_HANDLE;
+        }
+        if (vulkanBuffer->isSuballocated) {
+          std::lock_guard<std::mutex> lock(suballocatorMutex);
+          freeSuballocatedBuffer(vulkanBuffer);
+        } else if (vulkanBuffer->memory != VK_NULL_HANDLE) {
+          vkFreeMemory(device, vulkanBuffer->memory, nullptr);
+          vulkanBuffer->memory = VK_NULL_HANDLE;
+        }
       }
       delete vulkanBuffer;
     }
@@ -1940,22 +2639,41 @@ VkBuffer VulkanContext::getVkBuffer(ComputeBuffer buffer) const {
 ComputeKernel VulkanContext::createKernel(const std::string &file_name,
                                           const std::string &kernel_name,
                                           uint32_t num_buffer_args) {
-  return createKernelInternal(file_name, kernel_name, num_buffer_args, nullptr, nullptr);
+  return createKernelInternal(file_name, kernel_name, num_buffer_args, nullptr,
+                              nullptr, 0);
 }
 
 ComputeKernel VulkanContext::createKernelWithSpec(const std::string &file_name,
-                                                 const std::string &kernel_name,
-                                                 uint32_t num_buffer_args,
-                                                 uint32_t spec_id,
-                                                 uint32_t spec_val) {
-  return createKernelInternal(file_name, kernel_name, num_buffer_args, &spec_id, &spec_val);
+                                                  const std::string &kernel_name,
+                                                  uint32_t num_buffer_args,
+                                                  uint32_t spec_id,
+                                                  uint32_t spec_val) {
+  return createKernelInternal(file_name, kernel_name, num_buffer_args, &spec_id,
+                              &spec_val, 1);
+}
+
+ComputeKernel VulkanContext::createKernelWithSpecConstants(
+    const std::string &file_name, const std::string &kernel_name,
+    uint32_t num_buffer_args, const std::vector<uint32_t> &spec_uints) {
+  if (spec_uints.empty()) {
+    return createKernelInternal(file_name, kernel_name, num_buffer_args,
+                                nullptr, nullptr, 0);
+  }
+  std::vector<uint32_t> ids(spec_uints.size());
+  for (uint32_t i = 0; i < static_cast<uint32_t>(spec_uints.size()); ++i) {
+    ids[i] = i;
+  }
+  return createKernelInternal(file_name, kernel_name, num_buffer_args,
+                              ids.data(), spec_uints.data(),
+                              static_cast<uint32_t>(spec_uints.size()));
 }
 
 ComputeKernel VulkanContext::createKernelInternal(const std::string &file_name,
-                                                 const std::string &kernel_name,
-                                                 uint32_t num_buffer_args,
-                                                 const uint32_t *spec_id,
-                                                 const uint32_t *spec_val) {
+                                                  const std::string &kernel_name,
+                                                  uint32_t num_buffer_args,
+                                                  const uint32_t *spec_ids,
+                                                  const uint32_t *spec_vals,
+                                                  uint32_t spec_count) {
   notifyKernelCreated(file_name);
   if (file_name.find(".rgen") != std::string::npos ||
       file_name.find(".rmiss") != std::string::npos ||
@@ -2026,8 +2744,13 @@ ComputeKernel VulkanContext::createKernelInternal(const std::string &file_name,
         shaderc::Compiler compiler;
         shaderc::CompileOptions options;
 
+#if defined(shaderc_env_version_vulkan_1_4)
+        options.SetTargetEnvironment(shaderc_target_env_vulkan,
+                                     shaderc_env_version_vulkan_1_4);
+#else
         options.SetTargetEnvironment(shaderc_target_env_vulkan,
                                      shaderc_env_version_vulkan_1_3);
+#endif
         options.SetOptimizationLevel(shaderc_optimization_level_performance);
 
         shaderc::SpvCompilationResult result = compiler.CompileGlslToSpv(
@@ -2065,8 +2788,8 @@ ComputeKernel VulkanContext::createKernelInternal(const std::string &file_name,
     throw std::runtime_error("failed to create shader module!");
   }
 
-  // Inspect SPIR-V bytecode opcodes for OpTypeAccelerationStructureKHR (5341)
   bool has_accel_struct = false;
+  uint32_t spirv_local_size_x = 0;
   if (spirv_code.size() >= 5 && spirv_code[0] == 0x07230203) {
     size_t spvIdx = 5;
     while (spvIdx < spirv_code.size()) {
@@ -2074,8 +2797,12 @@ ComputeKernel VulkanContext::createKernelInternal(const std::string &file_name,
       uint16_t opcode = static_cast<uint16_t>(instrWord & 0xFFFF);
       uint16_t length = static_cast<uint16_t>((instrWord >> 16) & 0xFFFF);
       if (length == 0 || spvIdx + length > spirv_code.size()) break;
-      if (opcode == 5341 /* OpTypeAccelerationStructureKHR / NV */) {
+      if (opcode == 16 /* OpExecutionMode */ && length >= 6 &&
+          spirv_code[spvIdx + 2] == 17 /* ExecutionModeLocalSize */) {
+        spirv_local_size_x = spirv_code[spvIdx + 3];
+      } else if (opcode == 5341 /* OpTypeAccelerationStructureKHR / NV */) {
         has_accel_struct = true;
+      } else if (opcode == 54 /* OpFunction */) {
         break;
       }
       spvIdx += length;
@@ -2110,15 +2837,15 @@ ComputeKernel VulkanContext::createKernelInternal(const std::string &file_name,
   if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr,
                                   &vulkanKernel->descriptorSetLayout) !=
       VK_SUCCESS) {
+    vkDestroyShaderModule(device, vulkanKernel->shaderModule, nullptr);
     delete vulkanKernel;
     throw std::runtime_error("failed to create descriptor set layout!");
   }
 
-  // Set up push constants for non-buffer arguments (e.g., mode, bufferSize)
   VkPushConstantRange pushConstantRange{};
   pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
   pushConstantRange.offset = 0;
-  pushConstantRange.size = 128; // Allocate 128 bytes for push constants
+  pushConstantRange.size = 128;
 
   VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
   pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -2129,17 +2856,21 @@ ComputeKernel VulkanContext::createKernelInternal(const std::string &file_name,
 
   if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr,
                              &vulkanKernel->pipelineLayout) != VK_SUCCESS) {
+    vkDestroyDescriptorSetLayout(device, vulkanKernel->descriptorSetLayout, nullptr);
+    vkDestroyShaderModule(device, vulkanKernel->shaderModule, nullptr);
     delete vulkanKernel;
     throw std::runtime_error("failed to create pipeline layout!");
   }
 
-  // Initialize push constant data buffer
   vulkanKernel->pushConstantData.resize(128, 0);
 
   VkComputePipelineCreateInfo pipelineInfo{};
   pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
   if (pipelineExecutablePropertiesSupported) {
     pipelineInfo.flags |= VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR;
+    if (file_name.find("bf16.comp") != std::string::npos) {
+      pipelineInfo.flags |= VK_PIPELINE_CREATE_CAPTURE_INTERNAL_REPRESENTATIONS_BIT_KHR;
+    }
   }
   pipelineInfo.layout = vulkanKernel->pipelineLayout;
   pipelineInfo.stage.sType =
@@ -2164,23 +2895,26 @@ ComputeKernel VulkanContext::createKernelInternal(const std::string &file_name,
          VK_SHADER_STAGE_COMPUTE_BIT)) {
       reqSubgroupInfo.pNext = (void *)pipelineInfo.stage.pNext;
       pipelineInfo.stage.pNext = &reqSubgroupInfo;
-      pipelineInfo.stage.flags |=
-          VK_PIPELINE_SHADER_STAGE_CREATE_REQUIRE_FULL_SUBGROUPS_BIT;
+      if (spirv_local_size_x > 0 && (spirv_local_size_x % 32u == 0u)) {
+        pipelineInfo.stage.flags |=
+            VK_PIPELINE_SHADER_STAGE_CREATE_REQUIRE_FULL_SUBGROUPS_BIT;
+      }
     }
   }
 
-  VkSpecializationMapEntry specEntry{};
+  std::vector<VkSpecializationMapEntry> specEntries;
   VkSpecializationInfo specInfo{};
-  if (spec_id && spec_val) {
-    specEntry.constantID = *spec_id;
-    specEntry.offset = 0;
-    specEntry.size = sizeof(uint32_t);
-
-    specInfo.mapEntryCount = 1;
-    specInfo.pMapEntries = &specEntry;
-    specInfo.dataSize = sizeof(uint32_t);
-    specInfo.pData = spec_val;
-
+  if (spec_ids && spec_vals && spec_count > 0) {
+    specEntries.resize(spec_count);
+    for (uint32_t s = 0; s < spec_count; ++s) {
+      specEntries[s].constantID = spec_ids[s];
+      specEntries[s].offset = s * static_cast<uint32_t>(sizeof(uint32_t));
+      specEntries[s].size = sizeof(uint32_t);
+    }
+    specInfo.mapEntryCount = spec_count;
+    specInfo.pMapEntries = specEntries.data();
+    specInfo.dataSize = spec_count * sizeof(uint32_t);
+    specInfo.pData = spec_vals;
     pipelineInfo.stage.pSpecializationInfo = &specInfo;
   }
 
@@ -2193,7 +2927,7 @@ ComputeKernel VulkanContext::createKernelInternal(const std::string &file_name,
   }
 
   VkResult result =
-      vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo,
+      vkCreateComputePipelines(device, m_pipelineCache, 1, &pipelineInfo,
                                nullptr, &vulkanKernel->pipeline);
   if (result != VK_SUCCESS) {
     vkDestroyPipelineLayout(device, vulkanKernel->pipelineLayout, nullptr);
@@ -2208,7 +2942,7 @@ ComputeKernel VulkanContext::createKernelInternal(const std::string &file_name,
 
   VkDescriptorPoolSize poolSizes[2] = {};
   poolSizes[0].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-  poolSizes[0].descriptorCount = num_buffer_args;
+  poolSizes[0].descriptorCount = std::max(1u, num_buffer_args);
   poolSizes[1].type = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
   poolSizes[1].descriptorCount = 1;
 
@@ -2220,6 +2954,10 @@ ComputeKernel VulkanContext::createKernelInternal(const std::string &file_name,
 
   if (vkCreateDescriptorPool(device, &poolInfo, nullptr,
                              &vulkanKernel->descriptorPool) != VK_SUCCESS) {
+    vkDestroyPipeline(device, vulkanKernel->pipeline, nullptr);
+    vkDestroyPipelineLayout(device, vulkanKernel->pipelineLayout, nullptr);
+    vkDestroyDescriptorSetLayout(device, vulkanKernel->descriptorSetLayout, nullptr);
+    vkDestroyShaderModule(device, vulkanKernel->shaderModule, nullptr);
     delete vulkanKernel;
     throw std::runtime_error("failed to create descriptor pool!");
   }
@@ -2232,6 +2970,11 @@ ComputeKernel VulkanContext::createKernelInternal(const std::string &file_name,
 
   if (vkAllocateDescriptorSets(device, &allocInfo,
                                &vulkanKernel->descriptorSet) != VK_SUCCESS) {
+    vkDestroyDescriptorPool(device, vulkanKernel->descriptorPool, nullptr);
+    vkDestroyPipeline(device, vulkanKernel->pipeline, nullptr);
+    vkDestroyPipelineLayout(device, vulkanKernel->pipelineLayout, nullptr);
+    vkDestroyDescriptorSetLayout(device, vulkanKernel->descriptorSetLayout, nullptr);
+    vkDestroyShaderModule(device, vulkanKernel->shaderModule, nullptr);
     delete vulkanKernel;
     throw std::runtime_error("failed to allocate descriptor sets!");
   }
@@ -2298,12 +3041,6 @@ void VulkanContext::setKernelArg(ComputeKernel kernel, uint32_t arg_index,
     throw std::runtime_error("Invalid kernel handle");
   }
 
-  // For Vulkan, non-buffer arguments are passed via push constants
-  // Arguments are laid out sequentially in the push constant buffer
-  // We map arg_index directly to offset to handle mixed buffer/value args
-  // Buffer arguments (descriptors) take indices 0 to numBufferDescriptors-1.
-  // Push constants start AFTER the descriptor indices.
-
   if (arg_index < it->second->numBufferDescriptors) {
     throw std::runtime_error("setKernelArg (value) called for index " +
                              std::to_string(arg_index) +
@@ -2321,12 +3058,14 @@ void VulkanContext::setKernelArg(ComputeKernel kernel, uint32_t arg_index,
   memcpy(it->second->pushConstantData.data() + offset, arg_value, arg_size);
 }
 
-void VulkanContext::beginBatch(uint32_t /*expected_dispatches*/) {
+void VulkanContext::beginBatch(uint32_t /*expected_dispatches*/,
+                               bool inter_dispatch_barrier) {
   if (m_inBatch) {
     endBatch();
   }
   m_inBatch = true;
   m_batchCmdRecording = false;
+  m_batchInterDispatchBarrier = inter_dispatch_barrier;
   m_batchDispatchCount = 0;
 }
 
@@ -2351,7 +3090,11 @@ void VulkanContext::endBatch() {
       perfQueryNeedsSubmitInfo = false;
     }
 
-    VkResult submitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, frame.fence);
+    VkResult submitRes;
+    {
+      std::lock_guard<std::recursive_mutex> qlock(m_queueMutex);
+      submitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, frame.fence);
+    }
     if (submitRes != VK_SUCCESS) {
       throw std::runtime_error("vkQueueSubmit failed in endBatch with result: " +
                                std::to_string(submitRes));
@@ -2361,6 +3104,7 @@ void VulkanContext::endBatch() {
     m_batchCmdRecording = false;
   }
   m_inBatch = false;
+  m_batchInterDispatchBarrier = false;
   m_batchDispatchCount = 0;
 }
 
@@ -2406,8 +3150,8 @@ void VulkanContext::dispatch(ComputeKernel kernel, uint32_t grid_x,
                                         ? VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR
                                         : VK_PIPELINE_BIND_POINT_COMPUTE;
 
-    // Memory barrier between dispatches in a batch to serialize sequential writes
-    if (m_batchDispatchCount > 0) {
+    // Only emit inter-dispatch memory barrier for stateful/dependent kernels
+    if (m_batchDispatchCount > 0 && m_batchInterDispatchBarrier) {
       VkPipelineStageFlags2 stageMask =
           VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT |
           (vulkanKernel->isRTPipeline
@@ -2497,7 +3241,6 @@ void VulkanContext::dispatch(ComputeKernel kernel, uint32_t grid_x,
                            vulkanKernel->pipelineLayout, 0, 1,
                            &vulkanKernel->descriptorSet, 0, nullptr);
 
-  // Push constants for non-buffer arguments
   if (!vulkanKernel->pushConstantData.empty()) {
     VkShaderStageFlags stageFlags = vulkanKernel->isRTPipeline
                                         ? (VK_SHADER_STAGE_RAYGEN_BIT_KHR |
@@ -2543,7 +3286,11 @@ void VulkanContext::dispatch(ComputeKernel kernel, uint32_t grid_x,
     perfQueryNeedsSubmitInfo = false;
   }
 
-  VkResult submitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, frame.fence);
+  VkResult submitRes;
+  {
+    std::lock_guard<std::recursive_mutex> qlock(m_queueMutex);
+    submitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, frame.fence);
+  }
   if (submitRes != VK_SUCCESS) {
     throw std::runtime_error("vkQueueSubmit failed in dispatch with result: " +
                              std::to_string(submitRes));
@@ -2615,6 +3362,9 @@ KernelResourceUsage VulkanContext::getKernelResourceUsage(ComputeKernel kernel) 
       }
       for (const auto &s : stats) {
         std::string name = s.name;
+        std::string lname = name;
+        std::transform(lname.begin(), lname.end(), lname.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
         uint64_t val = 0;
         if (s.format == VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_UINT64_KHR) {
           val = s.value.u64;
@@ -2624,28 +3374,153 @@ KernelResourceUsage VulkanContext::getKernelResourceUsage(ComputeKernel kernel) 
           val = static_cast<uint64_t>(s.value.f64);
         }
 
-        if (name == "VGPRs" || (name.find("VGPR") != std::string::npos && name.find("Spill") == std::string::npos && name.find("Pre-Sched") == std::string::npos)) {
+        if (lname == "vgprs" || lname == "numusedvgprs" ||
+            (lname.find("vgpr") != std::string::npos &&
+             lname.find("spill") == std::string::npos &&
+             lname.find("pre-sched") == std::string::npos &&
+             lname.find("available") == std::string::npos &&
+             lname.find("physical") == std::string::npos)) {
           usage.vgprCount = static_cast<uint32_t>(val);
-        } else if (name == "SGPRs" || (name.find("SGPR") != std::string::npos && name.find("Spill") == std::string::npos && name.find("Pre-Sched") == std::string::npos)) {
+        } else if (lname == "sgprs" || lname == "numusedsgprs" ||
+                   (lname.find("sgpr") != std::string::npos &&
+                    lname.find("spill") == std::string::npos &&
+                    lname.find("pre-sched") == std::string::npos &&
+                    lname.find("available") == std::string::npos &&
+                    lname.find("physical") == std::string::npos)) {
           usage.sgprCount = static_cast<uint32_t>(val);
-        } else if (name.find("Scratch") != std::string::npos || name.find("Spill") != std::string::npos) {
+        } else if (lname.find("scratch") != std::string::npos ||
+                   lname.find("spill") != std::string::npos) {
           usage.scratchSizeBytes = std::max(usage.scratchSizeBytes, static_cast<uint32_t>(val));
-        } else if (name.find("LDS") != std::string::npos) {
+        } else if (lname.find("lds") != std::string::npos &&
+                   lname.find("available") == std::string::npos) {
           usage.ldsSizeBytes = static_cast<uint32_t>(val);
-        } else if (name.find("Code") != std::string::npos) {
+        } else if (lname.find("code") != std::string::npos ||
+                   lname.find("binary") != std::string::npos) {
           usage.codeSizeBytes = static_cast<uint32_t>(val);
-        } else if (name.find("Subgroups per SIMD") != std::string::npos ||
-                   name.find("Waves per SIMD") != std::string::npos ||
-                   name.find("Occupancy") != std::string::npos) {
+        } else if (lname.find("subgroups per simd") != std::string::npos ||
+                   lname.find("waves per simd") != std::string::npos ||
+                   lname.find("occupancy") != std::string::npos) {
           usage.maxWavesPerSimd = static_cast<uint32_t>(val);
         }
       }
-      if (usage.maxWavesPerSimd == 0 && usage.vgprCount > 0) {
-        usage.maxWavesPerSimd = std::min(16u, 1536u / usage.vgprCount);
+      if (usage.maxWavesPerSimd == 0 && usage.vgprCount > 0 &&
+          properties.vendorID == 0x1002) {
+        const std::string devNameStr(properties.deviceName);
+        const auto &prof = DeviceDatabase::lookup(
+            properties.vendorID, properties.deviceID, devNameStr);
+        if (prof.archFamily == "RDNA 3" || prof.archFamily == "RDNA 3.5" ||
+            prof.archFamily == "RDNA 4") {
+          usage.maxWavesPerSimd = std::min(16u, 1536u / usage.vgprCount);
+        } else if (prof.archFamily == "RDNA 2" || prof.archFamily == "RDNA 1") {
+          usage.maxWavesPerSimd = std::min(16u, 1024u / usage.vgprCount);
+        } else if (prof.archFamily.find("CDNA") != std::string::npos ||
+                   prof.archFamily.find("GCN") != std::string::npos) {
+          usage.maxWavesPerSimd = std::min(8u, 512u / usage.vgprCount);
+        }
       }
     }
   }
   return usage;
+}
+
+bool VulkanContext::isKernelBf16Emulated(ComputeKernel kernel) const {
+  if (!pipelineExecutablePropertiesSupported ||
+      !vkGetPipelineExecutableInternalRepresentationsKHR_ptr ||
+      device == VK_NULL_HANDLE || !kernel) {
+    return false;
+  }
+  const auto *vkKernel = static_cast<const VulkanKernel *>(kernel);
+  if (!vkKernel || vkKernel->pipeline == VK_NULL_HANDLE) {
+    return false;
+  }
+
+  VkPipelineExecutableInfoKHR execInfo{};
+  execInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_EXECUTABLE_INFO_KHR;
+  execInfo.pipeline = vkKernel->pipeline;
+  execInfo.executableIndex = 0;
+
+  uint32_t repCount = 0;
+  if (vkGetPipelineExecutableInternalRepresentationsKHR_ptr(
+          device, &execInfo, &repCount, nullptr) != VK_SUCCESS ||
+      repCount == 0) {
+    return false;
+  }
+
+  std::vector<VkPipelineExecutableInternalRepresentationKHR> reps(repCount);
+  for (auto &r : reps) {
+    r.sType = VK_STRUCTURE_TYPE_PIPELINE_EXECUTABLE_INTERNAL_REPRESENTATION_KHR;
+    r.pNext = nullptr;
+    r.dataSize = 0;
+    r.pData = nullptr;
+  }
+  if (vkGetPipelineExecutableInternalRepresentationsKHR_ptr(
+          device, &execInfo, &repCount, reps.data()) != VK_SUCCESS) {
+    return false;
+  }
+
+  std::vector<std::vector<char>> buffers(repCount);
+  for (uint32_t i = 0; i < repCount; ++i) {
+    if (reps[i].dataSize > 0) {
+      buffers[i].resize(reps[i].dataSize);
+      reps[i].pData = buffers[i].data();
+    }
+  }
+  if (vkGetPipelineExecutableInternalRepresentationsKHR_ptr(
+          device, &execInfo, &repCount, reps.data()) != VK_SUCCESS) {
+    return false;
+  }
+
+  for (uint32_t i = 0; i < repCount; ++i) {
+    if (reps[i].isText != VK_TRUE || buffers[i].empty()) {
+      continue;
+    }
+    std::string repName = reps[i].name;
+    std::transform(repName.begin(), repName.end(), repName.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    // Skip intermediate IR dumps (LLVM IR / SPIR-V / NIR) and inspect final hardware ISA
+    if (repName.find("ir") != std::string::npos ||
+        repName.find("nir") != std::string::npos ||
+        repName.find("spirv") != std::string::npos ||
+        repName.find("amdil") != std::string::npos) {
+      continue;
+    }
+
+    std::string text(buffers[i].data(),
+                     strnlen(buffers[i].data(), buffers[i].size()));
+    std::istringstream iss(text);
+    std::string line;
+    uint32_t valuCount = 0;
+    uint32_t nativeBf16Count = 0;
+
+    while (std::getline(iss, line)) {
+      size_t start = line.find_first_not_of(" \t\r");
+      if (start == std::string::npos || line[start] == ';' ||
+          line[start] == '#' ||
+          (start + 1 < line.size() && line[start] == '/' &&
+           line[start + 1] == '/')) {
+        continue;
+      }
+      size_t end = line.find_first_of(" \t\r", start);
+      std::string mnemonic = line.substr(start, end - start);
+      if (mnemonic.empty() || mnemonic.back() == ':') {
+        continue;
+      }
+      std::transform(mnemonic.begin(), mnemonic.end(), mnemonic.begin(),
+                     [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+      if (mnemonic.rfind("v_", 0) == 0) {
+        ++valuCount;
+        if (mnemonic.find("bf16") != std::string::npos) {
+          ++nativeBf16Count;
+        }
+      }
+    }
+
+    if (properties.vendorID == 0x1002 && valuCount >= 8) {
+      return (nativeBf16Count == 0);
+    }
+  }
+
+  return false;
 }
 
 void VulkanContext::dispatchIndirect(ComputeKernel kernel_handle,
@@ -2695,7 +3570,7 @@ void VulkanContext::dispatchIndirect(ComputeKernel kernel_handle,
               VK_ACCESS_2_SHADER_READ_BIT |
               VK_ACCESS_2_SHADER_WRITE_BIT);
     }
-  } else if (m_batchDispatchCount > 0) {
+  } else if (m_batchDispatchCount > 0 && m_batchInterDispatchBarrier) {
     cmdPipelineMemoryBarrier2(
         frame.commandBuffer,
         VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
@@ -2745,7 +3620,11 @@ void VulkanContext::dispatchIndirect(ComputeKernel kernel_handle,
     perfQueryNeedsSubmitInfo = false;
   }
 
-  VkResult indSubmitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, frame.fence);
+  VkResult indSubmitRes = VK_SUCCESS;
+  {
+    std::lock_guard<std::recursive_mutex> qlock(m_queueMutex);
+    indSubmitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, frame.fence);
+  }
   if (indSubmitRes != VK_SUCCESS) {
     throw std::runtime_error("vkQueueSubmit failed in dispatchIndirect with result: " +
                              std::to_string(indSubmitRes));
@@ -2792,7 +3671,7 @@ void VulkanContext::dispatchIndirectSequence(
       m_batchCmdRecording = true;
       m_batchDispatchCount = 0;
     }
-  } else if (m_batchDispatchCount > 0) {
+  } else if (m_batchDispatchCount > 0 && m_batchInterDispatchBarrier) {
     cmdPipelineMemoryBarrier2(
         frame.commandBuffer,
         VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
@@ -2855,7 +3734,11 @@ void VulkanContext::dispatchIndirectSequence(
     perfQueryNeedsSubmitInfo = false;
   }
 
-  VkResult indSeqSubmitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, frame.fence);
+  VkResult indSeqSubmitRes = VK_SUCCESS;
+  {
+    std::lock_guard<std::recursive_mutex> qlock(m_queueMutex);
+    indSeqSubmitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, frame.fence);
+  }
   if (indSeqSubmitRes != VK_SUCCESS) {
     throw std::runtime_error("vkQueueSubmit failed in dispatchIndirectSequence with result: " +
                              std::to_string(indSeqSubmitRes));
@@ -3183,7 +4066,11 @@ void VulkanContext::dispatchWorkListSequence(
     perfQueryNeedsSubmitInfo = false;
   }
 
-  VkResult wlSubmitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, frame.fence);
+  VkResult wlSubmitRes = VK_SUCCESS;
+  {
+    std::lock_guard<std::recursive_mutex> qlock(m_queueMutex);
+    wlSubmitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, frame.fence);
+  }
   if (wlSubmitRes != VK_SUCCESS) {
     throw std::runtime_error("vkQueueSubmit failed in dispatchWorkListSequence with result: " +
                              std::to_string(wlSubmitRes));
@@ -3230,7 +4117,7 @@ void VulkanContext::dispatchRayTracingIndirect(ComputeKernel kernel_handle,
       m_batchCmdRecording = true;
       m_batchDispatchCount = 0;
     }
-  } else if (m_batchDispatchCount > 0) {
+  } else if (m_batchDispatchCount > 0 && m_batchInterDispatchBarrier) {
     cmdPipelineMemoryBarrier2(
         frame.commandBuffer,
         VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR |
@@ -3290,7 +4177,11 @@ void VulkanContext::dispatchRayTracingIndirect(ComputeKernel kernel_handle,
     perfQueryNeedsSubmitInfo = false;
   }
 
-  VkResult rtSubmitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, frame.fence);
+  VkResult rtSubmitRes = VK_SUCCESS;
+  {
+    std::lock_guard<std::recursive_mutex> qlock(m_queueMutex);
+    rtSubmitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, frame.fence);
+  }
   if (rtSubmitRes != VK_SUCCESS) {
     throw std::runtime_error("vkQueueSubmit failed in dispatchRayTracingIndirect with result: " +
                              std::to_string(rtSubmitRes));
@@ -3592,6 +4483,12 @@ ComputeKernel VulkanContext::createRTPipeline(
   // Pipeline execution
   VkRayTracingPipelineCreateInfoKHR pipelineInfo{
       VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR};
+  if (pipelineExecutablePropertiesSupported) {
+    pipelineInfo.flags |= VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR;
+  }
+  if (opacityMicromapSupported) {
+    pipelineInfo.flags |= VK_PIPELINE_CREATE_RAY_TRACING_OPACITY_MICROMAP_BIT_EXT;
+  }
   pipelineInfo.stageCount = static_cast<uint32_t>(stages.size());
   pipelineInfo.pStages = stages.data();
   pipelineInfo.groupCount = static_cast<uint32_t>(groups.size());
@@ -3602,7 +4499,7 @@ ComputeKernel VulkanContext::createRTPipeline(
   auto pfnCreateRays = (PFN_vkCreateRayTracingPipelinesKHR)vkGetDeviceProcAddr(
       device, "vkCreateRayTracingPipelinesKHR");
   if (!pfnCreateRays ||
-      pfnCreateRays(device, VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &pipelineInfo,
+      pfnCreateRays(device, VK_NULL_HANDLE, m_pipelineCache, 1, &pipelineInfo,
                     nullptr, &vulkanKernel->pipeline) != VK_SUCCESS) {
     cleanupOnError();
     throw std::runtime_error("Failed to create RT Pipeline");
@@ -3617,11 +4514,18 @@ ComputeKernel VulkanContext::createRTPipeline(
   vkGetPhysicalDeviceProperties2(physicalDevice, &props2);
 
   uint32_t handleSize = rtProps.shaderGroupHandleSize;
-  uint32_t handleSizeAligned =
-      (handleSize + rtProps.shaderGroupHandleAlignment - 1) &
-      ~(rtProps.shaderGroupHandleAlignment - 1);
+  uint32_t handleAlign =
+      rtProps.shaderGroupHandleAlignment > 0 ? rtProps.shaderGroupHandleAlignment : 1u;
+  uint32_t baseAlign =
+      rtProps.shaderGroupBaseAlignment > 0 ? rtProps.shaderGroupBaseAlignment : handleAlign;
+  uint32_t handleSizeAligned = (handleSize + handleAlign - 1u) & ~(handleAlign - 1u);
   uint32_t groupCount = static_cast<uint32_t>(groups.size());
-  uint32_t sbtSize = groupCount * handleSizeAligned;
+  uint32_t hitGroupCount = (groupCount > 2u) ? (groupCount - 2u) : 0u;
+
+  uint32_t rgenOffset = 0u;
+  uint32_t missOffset = (rgenOffset + handleSizeAligned + baseAlign - 1u) & ~(baseAlign - 1u);
+  uint32_t hitOffset = (missOffset + handleSizeAligned + baseAlign - 1u) & ~(baseAlign - 1u);
+  uint32_t sbtPayloadSize = hitOffset + hitGroupCount * handleSizeAligned;
 
   std::vector<uint8_t> handles(groupCount * handleSize);
   auto pfnGetHandles =
@@ -3634,30 +4538,46 @@ ComputeKernel VulkanContext::createRTPipeline(
     throw std::runtime_error("Failed to get RT shader group handles");
   }
 
-  vulkanKernel->sbtBuffer = createBuffer(sbtSize);
-  VkDeviceAddress sbtAddr = getBufferDeviceAddress(vulkanKernel->sbtBuffer);
+  vulkanKernel->sbtBuffer = createBuffer(sbtPayloadSize + baseAlign);
+  VkDeviceAddress rawSbtAddr = getBufferDeviceAddress(vulkanKernel->sbtBuffer);
+  VkDeviceAddress sbtAddr =
+      (rawSbtAddr + static_cast<VkDeviceAddress>(baseAlign) - 1ULL) &
+      ~(static_cast<VkDeviceAddress>(baseAlign) - 1ULL);
+  size_t sbtPadOffset = static_cast<size_t>(sbtAddr - rawSbtAddr);
 
-  // Upload handles
-  std::vector<uint8_t> sbtData(sbtSize, 0);
-  for (uint32_t i = 0; i < groupCount; i++) {
-    memcpy(sbtData.data() + i * handleSizeAligned,
+  // Upload handles at baseAlign-aligned region boundaries
+  std::vector<uint8_t> sbtData(sbtPayloadSize, 0);
+  if (groupCount > 0u) {
+    memcpy(sbtData.data() + rgenOffset, handles.data(), handleSize);
+  }
+  if (groupCount > 1u) {
+    memcpy(sbtData.data() + missOffset, handles.data() + handleSize, handleSize);
+  }
+  for (uint32_t i = 2u; i < groupCount; ++i) {
+    memcpy(sbtData.data() + hitOffset + (i - 2u) * handleSizeAligned,
            handles.data() + i * handleSize, handleSize);
   }
-  writeBuffer(vulkanKernel->sbtBuffer, 0, sbtSize, sbtData.data());
+  writeBuffer(vulkanKernel->sbtBuffer, sbtPadOffset, sbtPayloadSize, sbtData.data());
 
-  // Regions
-  // 0: rgen, 1: miss, 2..N: closest hit
-  vulkanKernel->rgenRegion.deviceAddress = sbtAddr;
+  // Regions (each deviceAddress aligned to shaderGroupBaseAlignment)
+  // 0: rgen, 1: miss, 2..N: hit groups
+  vulkanKernel->rgenRegion.deviceAddress = sbtAddr + rgenOffset;
   vulkanKernel->rgenRegion.stride = handleSizeAligned;
   vulkanKernel->rgenRegion.size = handleSizeAligned;
 
-  vulkanKernel->missRegion.deviceAddress = sbtAddr + handleSizeAligned;
+  vulkanKernel->missRegion.deviceAddress = sbtAddr + missOffset;
   vulkanKernel->missRegion.stride = handleSizeAligned;
   vulkanKernel->missRegion.size = handleSizeAligned;
 
-  vulkanKernel->hitRegion.deviceAddress = sbtAddr + 2 * handleSizeAligned;
-  vulkanKernel->hitRegion.stride = handleSizeAligned;
-  vulkanKernel->hitRegion.size = (groupCount - 2) * handleSizeAligned;
+  if (hitGroupCount > 0u) {
+    vulkanKernel->hitRegion.deviceAddress = sbtAddr + hitOffset;
+    vulkanKernel->hitRegion.stride = handleSizeAligned;
+    vulkanKernel->hitRegion.size = hitGroupCount * handleSizeAligned;
+  } else {
+    vulkanKernel->hitRegion.deviceAddress = 0;
+    vulkanKernel->hitRegion.stride = 0;
+    vulkanKernel->hitRegion.size = 0;
+  }
 
   vulkanKernel->callRegion.deviceAddress = 0;
   vulkanKernel->callRegion.stride = 0;
@@ -3794,6 +4714,7 @@ void VulkanContext::presentFrame() {
   pi.swapchainCount = 1;
   pi.pSwapchains = &headlessSwapchain;
   pi.pImageIndices = &imageIndex;
+  std::lock_guard<std::recursive_mutex> qlock(m_queueMutex);
   vkQueuePresentKHR(computeQueue, &pi);
 }
 
@@ -3825,42 +4746,56 @@ ComputeBuffer VulkanContext::createPreprocessBuffer(size_t size) {
   VkBufferCreateInfo bufferInfo{};
   bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
   bufferInfo.pNext = &usage2Info;
-  bufferInfo.size = size;
+  bufferInfo.size = std::max<size_t>(size, 256);
   bufferInfo.usage = 0;
   bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-  if (vkCreateBuffer(device, &bufferInfo, nullptr, &vulkanBuffer->buffer) != VK_SUCCESS) {
-    delete vulkanBuffer;
-    throw std::runtime_error("failed to create preprocess buffer!");
+  bool allocatedViaVma = false;
+  if (m_vmaAllocator != VK_NULL_HANDLE) {
+    VmaAllocationCreateInfo vmaAllocCi{};
+    vmaAllocCi.usage = maintenance5Supported
+                           ? VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE
+                           : VMA_MEMORY_USAGE_UNKNOWN;
+    vmaAllocCi.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+    VmaAllocationInfo vmaInfo{};
+    if (vmaCreateBuffer(m_vmaAllocator, &bufferInfo, &vmaAllocCi,
+                        &vulkanBuffer->buffer, &vulkanBuffer->vmaAllocation,
+                        &vmaInfo) == VK_SUCCESS) {
+      vulkanBuffer->size = vmaInfo.size;
+      allocatedViaVma = true;
+    }
   }
+  if (!allocatedViaVma) {
+    if (vkCreateBuffer(device, &bufferInfo, nullptr, &vulkanBuffer->buffer) != VK_SUCCESS) {
+      delete vulkanBuffer;
+      throw std::runtime_error("failed to create preprocess buffer!");
+    }
+    VkMemoryRequirements memRequirements{};
+    vkGetBufferMemoryRequirements(device, vulkanBuffer->buffer, &memRequirements);
 
-  VkMemoryRequirements memRequirements;
-  vkGetBufferMemoryRequirements(device, vulkanBuffer->buffer, &memRequirements);
+    VkMemoryAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    allocInfo.allocationSize = memRequirements.size;
+    allocInfo.memoryTypeIndex = findMemoryType(
+        memRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
-  VkMemoryAllocateInfo allocInfo{};
-  allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-  allocInfo.allocationSize = memRequirements.size;
-  allocInfo.memoryTypeIndex = findMemoryType(
-      memRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    VkMemoryAllocateFlagsInfo flagsInfo{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO};
+    flagsInfo.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
+    allocInfo.pNext = &flagsInfo;
 
-  VkMemoryAllocateFlagsInfo flagsInfo{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO};
-  flagsInfo.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
-  allocInfo.pNext = &flagsInfo;
-
-  if (vkAllocateMemory(device, &allocInfo, nullptr, &vulkanBuffer->memory) != VK_SUCCESS) {
-    vkDestroyBuffer(device, vulkanBuffer->buffer, nullptr);
-    delete vulkanBuffer;
-    throw std::runtime_error("failed to allocate preprocess buffer memory!");
+    if (vkAllocateMemory(device, &allocInfo, nullptr, &vulkanBuffer->memory) != VK_SUCCESS) {
+      vkDestroyBuffer(device, vulkanBuffer->buffer, nullptr);
+      delete vulkanBuffer;
+      throw std::runtime_error("failed to allocate preprocess buffer memory!");
+    }
+    if (vkBindBufferMemory(device, vulkanBuffer->buffer, vulkanBuffer->memory, 0) != VK_SUCCESS) {
+      vkDestroyBuffer(device, vulkanBuffer->buffer, nullptr);
+      vkFreeMemory(device, vulkanBuffer->memory, nullptr);
+      delete vulkanBuffer;
+      throw std::runtime_error("failed to bind preprocess buffer memory!");
+    }
+    vulkanBuffer->size = memRequirements.size;
   }
-
-  if (vkBindBufferMemory(device, vulkanBuffer->buffer, vulkanBuffer->memory, 0) != VK_SUCCESS) {
-    vkDestroyBuffer(device, vulkanBuffer->buffer, nullptr);
-    vkFreeMemory(device, vulkanBuffer->memory, nullptr);
-    delete vulkanBuffer;
-    throw std::runtime_error("failed to bind preprocess buffer memory!");
-  }
-
-  vulkanBuffer->size = memRequirements.size;
 
   VkBufferDeviceAddressInfo bdaInfo{VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO};
   bdaInfo.buffer = vulkanBuffer->buffer;
@@ -4105,7 +5040,11 @@ void VulkanContext::dispatchDGCWorkListSequence(
     perfQueryNeedsSubmitInfo = false;
   }
 
-  VkResult submitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, frame.fence);
+  VkResult submitRes = VK_SUCCESS;
+  {
+    std::lock_guard<std::recursive_mutex> qlock(m_queueMutex);
+    submitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, frame.fence);
+  }
   if (submitRes != VK_SUCCESS) {
     throw std::runtime_error("vkQueueSubmit failed in dispatchDGCWorkListSequence: " +
                              std::to_string(submitRes));
@@ -4147,7 +5086,7 @@ void VulkanContext::dispatchDGCSequence(ComputeKernel kernel_handle,
       m_batchCmdRecording = true;
       m_batchDispatchCount = 0;
     }
-  } else if (m_batchDispatchCount > 0) {
+  } else if (m_batchDispatchCount > 0 && m_batchInterDispatchBarrier) {
     cmdPipelineMemoryBarrier2(
         frame.commandBuffer,
         VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
@@ -4203,7 +5142,11 @@ void VulkanContext::dispatchDGCSequence(ComputeKernel kernel_handle,
     perfQueryNeedsSubmitInfo = false;
   }
 
-  VkResult submitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, frame.fence);
+  VkResult submitRes = VK_SUCCESS;
+  {
+    std::lock_guard<std::recursive_mutex> qlock(m_queueMutex);
+    submitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, frame.fence);
+  }
   if (submitRes != VK_SUCCESS) {
     throw std::runtime_error("vkQueueSubmit failed in dispatchDGCSequence: " +
                              std::to_string(submitRes));
@@ -4244,4 +5187,365 @@ void VulkanContext::cmdPipelineMemoryBarrier2(
         0, 1, &barrier, 0, nullptr, 0, nullptr);
   }
 }
+
+bool VulkanContext::captureBufferToSharedPreviewImage(
+    const std::string &key, ComputeBuffer hdrBufA, ComputeBuffer hdrBufB,
+    uint32_t width, uint32_t height, uint32_t mode,
+    const std::string &kernelDir) {
+  if (device == VK_NULL_HANDLE || m_vmaAllocator == VK_NULL_HANDLE ||
+      !hdrBufA || width == 0 || height == 0) {
+    return false;
+  }
+
+  VkBuffer vkBufA = getVkBuffer(hdrBufA);
+  VkBuffer vkBufB = hdrBufB ? getVkBuffer(hdrBufB) : vkBufA;
+  if (vkBufA == VK_NULL_HANDLE) {
+    return false;
+  }
+
+  std::vector<std::string> candidatePaths = {
+      kernelDir + "/vulkan/tonemap_preview.comp.spv",
+      kernelDir + "/tonemap_preview.comp.spv",
+      kernelDir + "/vulkan/tonemap_preview.spv",
+      kernelDir + "/tonemap_preview.spv",
+      "kernels/vulkan/tonemap_preview.comp.spv",
+      "kernels/vulkan/tonemap_preview.spv",
+  };
+  std::string spvPath;
+  for (const auto &cand : candidatePaths) {
+    std::ifstream probe(cand, std::ios::binary);
+    if (probe.is_open()) {
+      spvPath = cand;
+      break;
+    }
+  }
+  if (spvPath.empty()) {
+    return false;
+  }
+
+  std::ifstream spvFile(spvPath, std::ios::ate | std::ios::binary);
+  if (!spvFile.is_open()) {
+    return false;
+  }
+  size_t codeBytes = static_cast<size_t>(spvFile.tellg());
+  if (codeBytes == 0 || (codeBytes % 4) != 0) {
+    return false;
+  }
+  std::vector<uint32_t> spvWords(codeBytes / 4);
+  spvFile.seekg(0);
+  spvFile.read(reinterpret_cast<char *>(spvWords.data()), codeBytes);
+  spvFile.close();
+
+  SharedPreviewImage preview{};
+  {
+    std::lock_guard<std::mutex> plock(m_sharedPreviewMutex);
+    auto it = m_sharedPreviewImages.find(key);
+    if (it != m_sharedPreviewImages.end()) {
+      if (it->second.width == width && it->second.height == height &&
+          it->second.image != VK_NULL_HANDLE &&
+          it->second.view != VK_NULL_HANDLE) {
+        preview = it->second;
+      } else {
+        waitIdle();
+        if (it->second.view != VK_NULL_HANDLE) {
+          vkDestroyImageView(device, it->second.view, nullptr);
+        }
+        if (it->second.image != VK_NULL_HANDLE &&
+            it->second.allocation != VK_NULL_HANDLE) {
+          vmaDestroyImage(m_vmaAllocator, it->second.image,
+                          it->second.allocation);
+        }
+        m_sharedPreviewImages.erase(it);
+      }
+    }
+  }
+
+  if (preview.image == VK_NULL_HANDLE) {
+    VkImageCreateInfo imgCi{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+    imgCi.imageType = VK_IMAGE_TYPE_2D;
+    imgCi.format = VK_FORMAT_R8G8B8A8_UNORM;
+    imgCi.extent = {width, height, 1};
+    imgCi.mipLevels = 1;
+    imgCi.arrayLayers = 1;
+    imgCi.samples = VK_SAMPLE_COUNT_1_BIT;
+    imgCi.tiling = VK_IMAGE_TILING_OPTIMAL;
+    imgCi.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    imgCi.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    imgCi.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    VmaAllocationCreateInfo vmaCi{};
+    vmaCi.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+    if (vmaCreateImage(m_vmaAllocator, &imgCi, &vmaCi, &preview.image,
+                       &preview.allocation, nullptr) != VK_SUCCESS) {
+      return false;
+    }
+
+    VkImageViewCreateInfo viewCi{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+    viewCi.image = preview.image;
+    viewCi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    viewCi.format = VK_FORMAT_R8G8B8A8_UNORM;
+    viewCi.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    viewCi.subresourceRange.baseMipLevel = 0;
+    viewCi.subresourceRange.levelCount = 1;
+    viewCi.subresourceRange.baseArrayLayer = 0;
+    viewCi.subresourceRange.layerCount = 1;
+    if (vkCreateImageView(device, &viewCi, nullptr, &preview.view) !=
+        VK_SUCCESS) {
+      vmaDestroyImage(m_vmaAllocator, preview.image, preview.allocation);
+      return false;
+    }
+    preview.width = width;
+    preview.height = height;
+  }
+
+  VkShaderModuleCreateInfo smCi{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
+  smCi.codeSize = codeBytes;
+  smCi.pCode = spvWords.data();
+  VkShaderModule shaderMod = VK_NULL_HANDLE;
+  if (vkCreateShaderModule(device, &smCi, nullptr, &shaderMod) != VK_SUCCESS) {
+    return false;
+  }
+
+  VkDescriptorSetLayoutBinding bindings[3]{};
+  bindings[0].binding = 0;
+  bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+  bindings[0].descriptorCount = 1;
+  bindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+  bindings[1].binding = 1;
+  bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+  bindings[1].descriptorCount = 1;
+  bindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+  bindings[2].binding = 2;
+  bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+  bindings[2].descriptorCount = 1;
+  bindings[2].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+  VkDescriptorSetLayoutCreateInfo dslCi{
+      VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+  dslCi.bindingCount = 3;
+  dslCi.pBindings = bindings;
+  VkDescriptorSetLayout dsl = VK_NULL_HANDLE;
+  if (vkCreateDescriptorSetLayout(device, &dslCi, nullptr, &dsl) !=
+      VK_SUCCESS) {
+    vkDestroyShaderModule(device, shaderMod, nullptr);
+    return false;
+  }
+
+  VkPushConstantRange pcRange{};
+  pcRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+  pcRange.offset = 0;
+  pcRange.size = sizeof(uint32_t) * 3;
+
+  VkPipelineLayoutCreateInfo plCi{
+      VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+  plCi.setLayoutCount = 1;
+  plCi.pSetLayouts = &dsl;
+  plCi.pushConstantRangeCount = 1;
+  plCi.pPushConstantRanges = &pcRange;
+  VkPipelineLayout pipeLayout = VK_NULL_HANDLE;
+  if (vkCreatePipelineLayout(device, &plCi, nullptr, &pipeLayout) !=
+      VK_SUCCESS) {
+    vkDestroyDescriptorSetLayout(device, dsl, nullptr);
+    vkDestroyShaderModule(device, shaderMod, nullptr);
+    return false;
+  }
+
+  VkComputePipelineCreateInfo pipeCi{
+      VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
+  pipeCi.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+  pipeCi.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+  pipeCi.stage.module = shaderMod;
+  pipeCi.stage.pName = "main";
+  pipeCi.layout = pipeLayout;
+  VkPipeline pipeline = VK_NULL_HANDLE;
+  if (vkCreateComputePipelines(device, m_pipelineCache, 1, &pipeCi, nullptr,
+                               &pipeline) != VK_SUCCESS) {
+    vkDestroyPipelineLayout(device, pipeLayout, nullptr);
+    vkDestroyDescriptorSetLayout(device, dsl, nullptr);
+    vkDestroyShaderModule(device, shaderMod, nullptr);
+    return false;
+  }
+
+  VkDescriptorPoolSize poolSizes[2]{
+      {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 2},
+      {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1},
+  };
+  VkDescriptorPoolCreateInfo poolCi{
+      VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+  poolCi.maxSets = 1;
+  poolCi.poolSizeCount = 2;
+  poolCi.pPoolSizes = poolSizes;
+  VkDescriptorPool descPool = VK_NULL_HANDLE;
+  if (vkCreateDescriptorPool(device, &poolCi, nullptr, &descPool) !=
+      VK_SUCCESS) {
+    vkDestroyPipeline(device, pipeline, nullptr);
+    vkDestroyPipelineLayout(device, pipeLayout, nullptr);
+    vkDestroyDescriptorSetLayout(device, dsl, nullptr);
+    vkDestroyShaderModule(device, shaderMod, nullptr);
+    return false;
+  }
+
+  VkDescriptorSetAllocateInfo dsAi{
+      VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+  dsAi.descriptorPool = descPool;
+  dsAi.descriptorSetCount = 1;
+  dsAi.pSetLayouts = &dsl;
+  VkDescriptorSet descSet = VK_NULL_HANDLE;
+  vkAllocateDescriptorSets(device, &dsAi, &descSet);
+
+  VkDescriptorBufferInfo bufInfoA{vkBufA, 0, VK_WHOLE_SIZE};
+  VkDescriptorBufferInfo bufInfoB{vkBufB, 0, VK_WHOLE_SIZE};
+  VkDescriptorImageInfo imgInfo{VK_NULL_HANDLE, preview.view,
+                                VK_IMAGE_LAYOUT_GENERAL};
+
+  VkWriteDescriptorSet writes[3]{};
+  writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+  writes[0].dstSet = descSet;
+  writes[0].dstBinding = 0;
+  writes[0].descriptorCount = 1;
+  writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+  writes[0].pBufferInfo = &bufInfoA;
+
+  writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+  writes[1].dstSet = descSet;
+  writes[1].dstBinding = 1;
+  writes[1].descriptorCount = 1;
+  writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+  writes[1].pBufferInfo = &bufInfoB;
+
+  writes[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+  writes[2].dstSet = descSet;
+  writes[2].dstBinding = 2;
+  writes[2].descriptorCount = 1;
+  writes[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+  writes[2].pImageInfo = &imgInfo;
+  vkUpdateDescriptorSets(device, 3, writes, 0, nullptr);
+
+  waitIdle();
+  VkCommandBuffer cmd = VK_NULL_HANDLE;
+  VkCommandBufferAllocateInfo cmdAi{
+      VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+  cmdAi.commandPool = commandPool;
+  cmdAi.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+  cmdAi.commandBufferCount = 1;
+  vkAllocateCommandBuffers(device, &cmdAi, &cmd);
+
+  VkCommandBufferBeginInfo cmdBi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+  cmdBi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  vkBeginCommandBuffer(cmd, &cmdBi);
+
+  VkImageMemoryBarrier toGen{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+  toGen.srcAccessMask = 0;
+  toGen.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+  toGen.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+  toGen.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+  toGen.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  toGen.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  toGen.image = preview.image;
+  toGen.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+  vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                       VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0,
+                       nullptr, 1, &toGen);
+
+  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
+  vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeLayout, 0, 1,
+                          &descSet, 0, nullptr);
+  uint32_t pcVals[3] = {width, height, mode};
+  vkCmdPushConstants(cmd, pipeLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                     sizeof(pcVals), pcVals);
+  vkCmdDispatch(cmd, (width + 15u) / 16u, (height + 15u) / 16u, 1u);
+
+  VkImageMemoryBarrier toRead{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+  toRead.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+  toRead.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+  toRead.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+  toRead.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+  toRead.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  toRead.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  toRead.image = preview.image;
+  toRead.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+  vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                       VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT |
+                           VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                       0, 0, nullptr, 0, nullptr, 1, &toRead);
+
+  vkEndCommandBuffer(cmd);
+
+  VkFence fence = VK_NULL_HANDLE;
+  VkFenceCreateInfo fenceCi{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+  vkCreateFence(device, &fenceCi, nullptr, &fence);
+
+  VkSubmitInfo submitInfo{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+  submitInfo.commandBufferCount = 1;
+  submitInfo.pCommandBuffers = &cmd;
+  {
+    std::lock_guard<std::recursive_mutex> qlock(m_queueMutex);
+    vkQueueSubmit(computeQueue, 1, &submitInfo, fence);
+  }
+  vkWaitForFences(device, 1, &fence, VK_TRUE, 30'000'000'000ULL);
+
+  vkDestroyFence(device, fence, nullptr);
+  vkFreeCommandBuffers(device, commandPool, 1, &cmd);
+  vkDestroyDescriptorPool(device, descPool, nullptr);
+  vkDestroyPipeline(device, pipeline, nullptr);
+  vkDestroyPipelineLayout(device, pipeLayout, nullptr);
+  vkDestroyDescriptorSetLayout(device, dsl, nullptr);
+  vkDestroyShaderModule(device, shaderMod, nullptr);
+
+  {
+    std::lock_guard<std::mutex> plock(m_sharedPreviewMutex);
+    preview.generation = ++m_previewGenerationCounter;
+    m_sharedPreviewImages[key] = preview;
+  }
+  return true;
+}
+
+bool VulkanContext::getSharedPreviewImage(const std::string &key,
+                                          SharedPreviewImage &outInfo) const {
+  std::lock_guard<std::mutex> plock(m_sharedPreviewMutex);
+  auto it = m_sharedPreviewImages.find(key);
+  if (it == m_sharedPreviewImages.end()) {
+    return false;
+  }
+  outInfo = it->second;
+  return true;
+}
+
+void VulkanContext::clearSharedPreviewImages() {
+  std::lock_guard<std::mutex> plock(m_sharedPreviewMutex);
+  if (device != VK_NULL_HANDLE) {
+    for (auto &kv : m_sharedPreviewImages) {
+      if (kv.second.view != VK_NULL_HANDLE) {
+        vkDestroyImageView(device, kv.second.view, nullptr);
+      }
+      if (kv.second.image != VK_NULL_HANDLE &&
+          kv.second.allocation != VK_NULL_HANDLE &&
+          m_vmaAllocator != VK_NULL_HANDLE) {
+        vmaDestroyImage(m_vmaAllocator, kv.second.image, kv.second.allocation);
+      }
+    }
+  }
+  m_sharedPreviewImages.clear();
+  m_inMemoryJsons.clear();
+}
+
+void VulkanContext::storeInMemoryJson(const std::string &key,
+                                      const std::string &jsonContent) {
+  std::lock_guard<std::mutex> plock(m_sharedPreviewMutex);
+  m_inMemoryJsons[key] = jsonContent;
+}
+
+bool VulkanContext::getInMemoryJson(const std::string &key,
+                                    std::string &outJsonContent) const {
+  std::lock_guard<std::mutex> plock(m_sharedPreviewMutex);
+  auto it = m_inMemoryJsons.find(key);
+  if (it == m_inMemoryJsons.end()) {
+    return false;
+  }
+  outJsonContent = it->second;
+  return true;
+}
+
 

@@ -1,22 +1,29 @@
 #include "benchmarks/Int8Bench.h"
+#ifdef HAVE_VULKAN
+#include "core/VulkanContext.h"
+#include <vulkan/vulkan.h>
+#endif
+#include <algorithm>
 #include <filesystem>
 #include <iostream>
 #include <vector>
-#ifdef HAVE_VULKAN
-#include <vulkan/vulkan.h>
-#endif
 
 bool Int8Bench::IsSupported(const DeviceInfo &info,
                             IComputeContext *context) const {
+  (void)context;
   return info.int8Support;
 }
 
 void Int8Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
   this->context = &context;
+  tileM = 16;
+  tileN = 16;
+  tileK = 16;
+  matrixBlockX = 32;
 
   // Create storage buffers (separate matrixInputBuffer and outputBuffer prevent int8 BufferA and vector buffer from aliasing)
   size_t bufferSize =
-      8192 * 64 * 4; // 8192 workgroups * 64 threads * 4 bytes (i8vec4)
+      8192 * 64 * 4 * 2; // 4 MB buffers for safe arbitrary tile strides
   buffer = context.createBuffer(bufferSize);
   matrixInputBuffer = context.createBuffer(bufferSize);
   outputBuffer = context.createBuffer(bufferSize);
@@ -27,7 +34,6 @@ void Int8Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
   context.writeBuffer(matrixInputBuffer, 0, bufferSize, matInitData.data());
   context.writeBuffer(outputBuffer, 0, bufferSize, zeroData.data());
 
-  // Load Vector Kernel
   std::filesystem::path kdir(kernel_dir);
   std::filesystem::path vector_file_path;
 
@@ -46,15 +52,37 @@ void Int8Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
       context.createKernel(vector_file_path.string(), kernel_name, 1);
   context.setKernelArg(vectorKernel, 0, buffer);
 
+  DeviceInfo devInfo = context.getCurrentDeviceInfo();
+  if (context.getBackend() == ComputeBackend::ROCm) {
+    matrixBlockX = std::max(32u, devInfo.subgroupSize);
+  }
+
   // Optionally load Matrix Kernel
-  if (context.getCurrentDeviceInfo().cooperativeMatrixSupport) {
+  if (devInfo.cooperativeMatrixSupport) {
     if (context.getBackend() == ComputeBackend::Vulkan) {
       std::filesystem::path matrix_file_path =
           kdir / "vulkan" / "coop_matrix_int8.comp";
-      matrixKernel = context.createKernel(matrix_file_path.string(), "main", 2);
-      if (matrixKernel) {
-        context.setKernelArg(matrixKernel, 0, matrixInputBuffer); // Binding 0: int8 (A/B)
-        context.setKernelArg(matrixKernel, 1, outputBuffer);      // Binding 1: int32 (C)
+      try {
+#ifdef HAVE_VULKAN
+        auto *vc = static_cast<VulkanContext *>(&context);
+        auto tile = vc->selectCoopMatrixTile(VK_COMPONENT_TYPE_SINT8_KHR,
+                                             VK_COMPONENT_TYPE_SINT32_KHR);
+        if (tile.supported) {
+          tileM = tile.M;
+          tileN = tile.N;
+          tileK = tile.K;
+          matrixBlockX = tile.subgroupSize;
+        }
+#endif
+        matrixKernel = context.createKernelWithSpecConstants(
+            matrix_file_path.string(), "main", 2,
+            {tileM, tileN, tileK, matrixBlockX});
+        if (matrixKernel) {
+          context.setKernelArg(matrixKernel, 0, matrixInputBuffer);
+          context.setKernelArg(matrixKernel, 1, outputBuffer);
+        }
+      } catch (...) {
+        matrixKernel = nullptr;
       }
     } else if (context.getBackend() == ComputeBackend::ROCm) {
       std::filesystem::path matrix_file_path =
@@ -65,7 +93,7 @@ void Int8Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
           context.setKernelArg(matrixKernel, 0, matrixInputBuffer);
           context.setKernelArg(matrixKernel, 1, outputBuffer);
         }
-      } catch (const std::exception &e) {
+      } catch (const std::exception &) {
         matrixKernel = nullptr;
       }
     }
@@ -74,10 +102,11 @@ void Int8Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
 
 void Int8Bench::Run(uint32_t config_idx) {
   if (config_idx == 0) {
-    context->dispatch(vectorKernel, 8192, 1, 1, 64, 1, 1);
-  } else if (matrixKernel) {
-    // 65536 WGs of 32 threads each — double dispatch to saturate tensor units
-    context->dispatch(matrixKernel, 65536, 1, 1, 32, 1, 1);
+    if (vectorKernel) {
+      context->dispatch(vectorKernel, 8192, 1, 1, 64, 1, 1);
+    }
+  } else if (config_idx == 1 && matrixKernel) {
+    context->dispatch(matrixKernel, 32768, 2, 1, matrixBlockX, 1, 1);
   }
 }
 
@@ -106,24 +135,18 @@ void Int8Bench::Teardown() {
 
 BenchmarkResult Int8Bench::GetResult(uint32_t config_idx) const {
   if (config_idx == 0) {
-    // Shader: 8 i8vec4 multiply-adds per iteration.
-    // Each MAD on i8vec4 = 4 components × 2 ops = 8 ops per MAD.
-    // 8 MADs × 8 = 64 INT8 operations per iteration.
-    // Vulkan, OpenCL, and ROCm all run 16384 iterations.
     uint64_t iters = 16384;
     uint64_t num_ops = iters * 64 * 8192 * 64;
     return {num_ops, 0.0};
   } else {
-    // coopmat 16x16x16: 16*16*16*2 = 8192 INT8 ops per coopMatMulAdd.
-    // Each subgroup (32 threads) computes one tile — not multiplied by thread count.
-    // Shader loops 32768 iters. Dispatch: 65536 WGs.
-    uint64_t num_ops = (uint64_t)65536 * 32768 * 8192;
+    uint64_t tile_ops = 2ULL * tileM * tileN * tileK;
+    uint64_t num_ops = 65536ULL * 32768ULL * tile_ops;
     return {num_ops, 0.0};
   }
 }
 
 bool Int8Bench::ValidateResults(uint32_t config_idx) const {
-  if (!context || !buffer) return false;
+  if (!context || !buffer || config_idx >= 2) return false;
 
   if (config_idx == 0) {
     if (!vectorKernel) return false;
@@ -132,7 +155,6 @@ bool Int8Bench::ValidateResults(uint32_t config_idx) const {
       context->readBuffer(buffer, 0, hostBytes.size() * sizeof(int8_t), hostBytes.data());
       for (size_t i = 0; i < hostBytes.size(); i += 4) {
         int8_t v = hostBytes[i];
-        // Kernels write ((total >> 16) | 1), which is odd (bit 0 == 1) and never 0 or unwritten seed 2
         if (v == 0 || v == 2 || (v & 1) == 0) return false;
       }
       return true;
@@ -140,22 +162,23 @@ bool Int8Bench::ValidateResults(uint32_t config_idx) const {
       return false;
     }
   } else {
-    if (!matrixKernel) return true; // Not supported on current device
+    if (!matrixKernel) return false;
     ComputeBuffer targetBuf = outputBuffer ? outputBuffer : buffer;
     if (!targetBuf) return false;
 
-    std::vector<int32_t> hostInts(64, 0);
+    const size_t checkCount =
+        std::max<size_t>(16u, std::min<size_t>(64u, static_cast<size_t>(tileM) * tileN));
+    std::vector<int32_t> hostInts(checkCount, 0);
     try {
       context->readBuffer(targetBuf, 0, hostInts.size() * sizeof(int32_t), hostInts.data());
+      int32_t expectedBase = static_cast<int32_t>(32768u * tileK);
       for (size_t i = 0; i < hostInts.size(); ++i) {
         int32_t v = hostInts[i];
-        // Analytical match: 524,288 WMMA ops + 72 seed perturbation = 524,360
         if (context->getBackend() == ComputeBackend::Vulkan) {
-          if (v != 524360 && v != 524288) {
+          if (v != expectedBase + 72 && v != expectedBase) {
             return false;
           }
         } else {
-          // ROCm int8_matrix.hip sums 8 elements of (8 accumulators * 4096 iters * 16 + seed) >= 4,194,304
           if (v < 4194304 || v > 4250000) return false;
         }
       }

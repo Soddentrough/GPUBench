@@ -24,21 +24,33 @@ public:
   bool ValidateResults(uint32_t config_idx = 0) const override;
   uint32_t GetNumConfigs() const override;
   std::string GetConfigName(uint32_t config_idx) const override;
+  const char *GetDescription() const override { return GetDescription(0); }
+  const char *GetDescription(uint32_t config_idx) const override;
+  std::string GetConfigCaveat(uint32_t config_idx = 0) const override;
   const char *GetComponent(uint32_t config_idx = 0) const override {
+    (void)config_idx;
     return "Memory";
   }
   const char *GetSubCategory(uint32_t config_idx = 0) const override {
+    (void)config_idx;
     return "Latency";
   }
   int GetSortWeight() const override { return 500; }
 
   bool IsDeviceDependent() const override { return false; }
-  bool IsEmulated(uint32_t config_idx = 0) const override { return false; }
+  bool IsEmulated(uint32_t config_idx = 0) const override {
+    (void)config_idx;
+    return false;
+  }
 
 private:
+  template <typename Tag> friend struct ::gpubench::test::TestBody;
   void *buffer = nullptr;
   size_t bufferSize = 0;
   uint32_t currentIndex = 0;
   double lastRunTimeMs = 0.0;
   uint64_t lastRunOps = 0;
+  bool usedVirtualAlloc = false;
+  bool usingLargePages = false;
+  std::string pageCaveat;
 };
