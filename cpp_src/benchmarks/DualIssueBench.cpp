@@ -143,7 +143,7 @@ void DualIssueBench::Run(uint32_t config_idx) {
   context->setKernelArg(kernels[config_idx], 1, sizeof(float), &multiplier);
   context->setKernelArg(kernels[config_idx], 2, sizeof(uint32_t), &numElements);
 
-  context->dispatch(kernels[config_idx], 8192, 1, 1, 64, 1, 1);
+  context->dispatch(kernels[config_idx], ScaledGroups(8192), 1, 1, 64, 1, 1);
 }
 
 void DualIssueBench::Teardown() {
@@ -167,7 +167,7 @@ void DualIssueBench::Teardown() {
 BenchmarkResult DualIssueBench::GetResult(uint32_t config_idx) const {
   if (config_idx >= configs.size()) return {0, 0.0};
   uint64_t total_ops = configs[config_idx].opsPerThread * 8192ULL * 64ULL;
-  return {total_ops, 0.0};
+  return {ScaledOps(total_ops, 8192), 0.0};
 }
 
 bool DualIssueBench::ValidateResults(uint32_t config_idx) const {

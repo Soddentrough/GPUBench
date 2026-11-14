@@ -20,6 +20,7 @@ struct ImportedDeviceProfile {
   uint32_t maxWorkgroupSize = 0;
   bool isApu = false;
   bool rebarSupported = false;
+  uint64_t rebarSizeMb = 0;
   bool rayTracingSupported = false;
   bool serSupported = false;
   bool opacityMicromapSupported = false;

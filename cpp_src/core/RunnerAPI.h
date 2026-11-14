@@ -47,6 +47,7 @@ struct DeviceProfile {
     uint32_t maxWorkGroupSize = 0;
     bool isApu = false;
     bool rebarSupported = false;
+    uint64_t rebarSizeBytes = 0;
     bool rayTracingSupported = false;
     bool serSupported = false;
     bool opacityMicromapSupported = false;

@@ -861,14 +861,19 @@ void ResultFormatter::print() {
                   if (!res.supportNote.empty()) {
                     noteStr = "[" + res.supportNote + "]";
                   }
-                } else if (res.metric == "TB/s") {
-                  double value = (static_cast<double>(res.operations) /
-                                 (res.time_ms / 1000.0)) / 1e12; // TB/s
-                  valStr = formatDouble(value, 2) + " TB/s";
                 } else {
-                  double value = (static_cast<double>(res.operations) /
-                                 (res.time_ms / 1000.0)) / 1e9; // GB/s
-                  valStr = formatDouble(value, 2) + " GB/s";
+                  if (res.metric == "TB/s") {
+                    double value = (static_cast<double>(res.operations) /
+                                   (res.time_ms / 1000.0)) / 1e12; // TB/s
+                    valStr = formatDouble(value, 2) + " TB/s";
+                  } else {
+                    double value = (static_cast<double>(res.operations) /
+                                   (res.time_ms / 1000.0)) / 1e9; // GB/s
+                    valStr = formatDouble(value, 2) + " GB/s";
+                  }
+                  if (!res.supportNote.empty()) {
+                    noteStr = "[" + cleanSupportNote(res.supportNote) + "]";
+                  }
                 }
               } else {
                 double value = 0.0;
@@ -2102,6 +2107,7 @@ std::string resultsToJson(const std::vector<ResultData> &results,
     yyjson_mut_obj_add_uint(doc, pObj, "max_workgroup_size", dp.maxWorkGroupSize);
     yyjson_mut_obj_add_bool(doc, pObj, "is_apu", dp.isApu);
     yyjson_mut_obj_add_bool(doc, pObj, "rebar_supported", dp.rebarSupported);
+    yyjson_mut_obj_add_uint(doc, pObj, "rebar_size_mb", dp.rebarSizeBytes / (1024ULL * 1024ULL));
     yyjson_mut_obj_add_bool(doc, pObj, "ray_tracing_supported", dp.rayTracingSupported);
     yyjson_mut_obj_add_bool(doc, pObj, "ser_supported", dp.serSupported);
     yyjson_mut_obj_add_bool(doc, pObj, "opacity_micromap_supported", dp.opacityMicromapSupported);

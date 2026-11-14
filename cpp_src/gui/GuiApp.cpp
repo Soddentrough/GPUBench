@@ -438,8 +438,9 @@ void GuiApp::discoverHardware() {
                             }
                             if (prof.isApu) {
                                 archSs << " (Unified)";
-                            } else if (prof.rebarSupported) {
-                                archSs << " (ReBAR)";
+                            } else if (prof.backend == "Vulkan" || prof.rebarSupported || prof.rebarSizeBytes > 0) {
+                                archSs << " | ReBAR: "
+                                       << gpubench::formatRebarStatus(prof.rebarSupported, prof.rebarSizeBytes, prof.isApu, true);
                             }
                             gpuDev.architecture = archSs.str();
                             if (prof.backend == m_selectedBackend) break;
@@ -870,7 +871,9 @@ void GuiApp::startBenchmarks() {
                     if (item.configIndex >= 0) {
                         selectedWorkloads.push_back(item.id + "#" + std::to_string(item.configIndex));
                     } else {
-                        selectedWorkloads.push_back(item.id + ":" + item.name);
+                        // Whole-benchmark items (e.g. the Cache Latency Curve sweep)
+                        // must match by bare id; "id:name" never matched any task.
+                        selectedWorkloads.push_back(item.id);
                     }
                     if (item.category == "System") {
                         systemSelectedItemCount++;
@@ -1197,6 +1200,32 @@ void GuiApp::processEvents() {
     processIncomingResults();
 }
 
+namespace {
+
+std::filesystem::path getDocumentsResultsDir() {
+    namespace fs = std::filesystem;
+#ifdef _WIN32
+    if (const char* userProfile = std::getenv("USERPROFILE"); userProfile && *userProfile) {
+        return fs::path(userProfile) / "Documents" / "GPUBench";
+    }
+    const char* homeDrive = std::getenv("HOMEDRIVE");
+    const char* homePath = std::getenv("HOMEPATH");
+    if (homeDrive && *homeDrive && homePath && *homePath) {
+        return (fs::path(std::string(homeDrive) + std::string(homePath))) / "Documents" / "GPUBench";
+    }
+#else
+    if (const char* xdgDocs = std::getenv("XDG_DOCUMENTS_DIR"); xdgDocs && *xdgDocs) {
+        return fs::path(xdgDocs) / "GPUBench";
+    }
+#endif
+    if (const char* home = std::getenv("HOME"); home && *home) {
+        return fs::path(home) / "Documents" / "GPUBench";
+    }
+    return {};
+}
+
+} // namespace
+
 void GuiApp::exportResultsToJson(const std::string& filepath) {
     UnifiedSessionMetadata sessionMeta;
     sessionMeta.scene = m_scene;
@@ -1209,17 +1238,70 @@ void GuiApp::exportResultsToJson(const std::string& filepath) {
     }
 
     std::string jsonStr = resultsToJson(m_allResults, m_deviceProfiles, &sessionMeta);
-    std::ofstream out(filepath, std::ios::binary);
-    if (!out.is_open()) {
-        m_exportNotificationText = "Failed to open for writing: " + filepath;
-        m_exportNotificationTimer = 5.0f;
+
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    fs::path requested(filepath);
+    fs::path fileName = requested.filename();
+    if (fileName.empty()) fileName = "gpubench_results.json";
+
+    const fs::path docsDir = getDocumentsResultsDir();
+    const bool hasExplicitDir = requested.has_parent_path() && requested.parent_path() != fs::path(".");
+
+    // When no explicit directory was given (the normal GUI export case),
+    // save to ~/Documents/GPUBench/ first on both Windows and Linux, and only
+    // fall back to the local working directory, home, or temp if that fails.
+    std::vector<fs::path> candidates;
+    if (hasExplicitDir) {
+        candidates.push_back(fs::absolute(requested, ec));
+        if (!docsDir.empty()) candidates.push_back(docsDir / fileName);
+    } else {
+        if (!docsDir.empty()) candidates.push_back(docsDir / fileName);
+        candidates.push_back(fs::absolute(fileName, ec));
+    }
+    if (const char* home = std::getenv("HOME"); home && *home) {
+        candidates.push_back(fs::path(home) / fileName);
+    }
+    candidates.push_back(fs::temp_directory_path(ec) / fileName);
+
+    std::string failures;
+    for (const fs::path& cand : candidates) {
+        if (cand.empty()) continue;
+        if (!cand.parent_path().empty()) {
+            fs::create_directories(cand.parent_path(), ec);
+        }
+        errno = 0;
+        std::ofstream out(cand, std::ios::binary | std::ios::trunc);
+        if (!out.is_open()) {
+            failures += "\n  " + cand.string() + ": " + std::strerror(errno);
+            continue;
+        }
+        out.write(jsonStr.data(), static_cast<std::streamsize>(jsonStr.size()));
+        out.close();
+        if (out.fail()) {
+            failures += "\n  " + cand.string() + ": write error";
+            continue;
+        }
+
+        m_lastExportPath = fs::weakly_canonical(cand, ec).string();
+        if (ec || m_lastExportPath.empty()) m_lastExportPath = cand.string();
+        SDL_SetClipboardText(m_lastExportPath.c_str());
+        m_exportNotificationText = "Saved JSON (copied): " + m_lastExportPath;
+        m_exportNotificationTimer = 12.0f;
+        std::cout << "[Export] Saved JSON to " << m_lastExportPath << std::endl;
         return;
     }
-    out.write(jsonStr.data(), static_cast<std::streamsize>(jsonStr.size()));
-    out.close();
 
-    m_exportNotificationText = "Saved unified v2.0 JSON to " + filepath;
-    m_exportNotificationTimer = 4.5f;
+    m_exportNotificationText = "Export failed. Tried:" + failures;
+    m_exportNotificationTimer = 15.0f;
+    std::cerr << "[Export] " << m_exportNotificationText << std::endl;
+}
+
+void GuiApp::openLastExportFolder() {
+    if (m_lastExportPath.empty()) return;
+    std::filesystem::path dir = std::filesystem::path(m_lastExportPath).parent_path();
+    std::string url = "file:///" + dir.generic_string();
+    SDL_OpenURL(url.c_str());
 }
 
 bool GuiApp::importResultsFromJson(const std::string& filepath) {
@@ -1802,7 +1884,8 @@ void GuiApp::executeCommand(const std::string& rawCmd) {
     } else if (lowVerb == "export") {
         std::string outPath = rest.empty() ? getDefaultJsonFilename() : rest;
         exportResultsToJson(outPath);
-        m_cmdStatusText = "EXPORTED: " + outPath;
+        m_cmdStatusText = m_lastExportPath.empty() ? ("EXPORT FAILED: " + outPath)
+                                                   : ("EXPORTED: " + m_lastExportPath);
     } else {
         m_cmdStatusText = "UNKNOWN CMD '" + verb + "' (TYPE 'help')";
     }
@@ -2096,7 +2179,9 @@ void GuiApp::renderTopInstrumentHeader(float width) {
         if (tacticalButton("##TopJson", "SESSION", ImVec2(jsonW, bh), m_showJsonSessionModal, c)) {
             if (m_jsonPathBuffer[0] == '\0') {
                 std::string defName = getDefaultJsonFilename();
-                std::snprintf(m_jsonPathBuffer, sizeof(m_jsonPathBuffer), "%s", defName.c_str());
+                std::filesystem::path docsDir = getDocumentsResultsDir();
+                std::string defPath = docsDir.empty() ? defName : (docsDir / defName).string();
+                std::snprintf(m_jsonPathBuffer, sizeof(m_jsonPathBuffer), "%s", defPath.c_str());
             }
             m_showJsonSessionModal = true;
         }
@@ -2159,14 +2244,50 @@ void GuiApp::renderTopInstrumentHeader(float width) {
             statusCol = c.phosphorHi;
         } else if (m_exportNotificationTimer > 0.0f && !m_exportNotificationText.empty()) {
             statusBanner = m_exportNotificationText;
-            statusCol = c.okColor;
+            statusCol = (m_exportNotificationText.rfind("Export failed", 0) == 0) ? c.errColor : c.okColor;
         } else if (!m_statusMessage.empty()) {
             statusBanner = m_statusMessage;
         } else {
-            statusBanner = "DUT READY // " + std::to_string(armedCount) + " TESTS SELECTED";
+            std::string rebarTag;
+            for (const auto& d : m_devices) {
+                if (!d.isSystem && d.selected && d.deviceIndex == m_telemetryGpuIndex) {
+                    for (const auto& prof : m_deviceProfiles) {
+                        if (prof.deviceIndex == d.deviceIndex &&
+                            (prof.backend == "Vulkan" || prof.rebarSupported || prof.rebarSizeBytes > 0) &&
+                            !prof.isApu) {
+                            rebarTag = prof.rebarSupported ? " | ReBAR: ON" : " | ReBAR: OFF";
+                            break;
+                        }
+                    }
+                    break;
+                }
+            }
+            statusBanner = "DUT READY" + rebarTag + " // " + std::to_string(armedCount) + " TESTS SELECTED";
         }
-        const float remW = std::max(s(60.0f), ImGui::GetContentRegionAvail().x);
+        const bool showExportActions = !isRunning && !m_lastExportPath.empty();
+        const float copyBtnW = s(78.0f);
+        const float openBtnW = s(72.0f);
+        const float actionReserve = showExportActions ? (copyBtnW + openBtnW + s(12.0f)) : 0.0f;
+        const float remW = std::max(s(60.0f), ImGui::GetContentRegionAvail().x - actionReserve);
         ImGui::TextColored(statusCol, "%s", fitTextToPixelWidth(statusBanner, remW).c_str());
+        if (showExportActions && ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("%s", m_lastExportPath.c_str());
+        }
+        if (showExportActions) {
+            ImGui::SameLine(0.0f, s(6.0f));
+            if (tacticalButton("##CopyExportPath", "COPY PATH", ImVec2(copyBtnW, mbH), false, c)) {
+                SDL_SetClipboardText(m_lastExportPath.c_str());
+                m_exportNotificationText = "Path copied: " + m_lastExportPath;
+                m_exportNotificationTimer = 6.0f;
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Copy exported JSON path:\n%s", m_lastExportPath.c_str());
+            }
+            ImGui::SameLine(0.0f, s(4.0f));
+            if (tacticalButton("##OpenExportDir", "OPEN DIR", ImVec2(openBtnW, mbH), false, c)) {
+                openLastExportFolder();
+            }
+        }
     }
     ImGui::EndChild();
     ImGui::PopStyleColor();
@@ -2314,19 +2435,27 @@ void GuiApp::renderJsonSessionModal() {
 
         namespace fs = std::filesystem;
         std::error_code ec;
-        std::vector<std::string> localJsons;
-        for (const auto& entry : fs::directory_iterator(".", ec)) {
-            if (entry.is_regular_file(ec) && entry.path().extension() == ".json") {
-                localJsons.push_back(entry.path().filename().string());
-                if (localJsons.size() >= 8) break;
+        std::vector<std::pair<std::string, std::string>> quickJsons;
+        auto scanJsonDir = [&](const fs::path& dir) {
+            if (dir.empty() || !fs::exists(dir, ec)) return;
+            for (const auto& entry : fs::directory_iterator(dir, ec)) {
+                if (entry.is_regular_file(ec) && entry.path().extension() == ".json") {
+                    quickJsons.emplace_back(entry.path().filename().string(), entry.path().string());
+                    if (quickJsons.size() >= 8) break;
+                }
             }
-        }
-        if (!localJsons.empty()) {
-            ImGui::TextColored(c.textMuted, "WORKSPACE JSON FILES:");
-            for (size_t i = 0; i < localJsons.size(); ++i) {
+        };
+        scanJsonDir(getDocumentsResultsDir());
+        if (quickJsons.size() < 8) scanJsonDir(".");
+        if (!quickJsons.empty()) {
+            ImGui::TextColored(c.textMuted, "RECENT JSON FILES:");
+            for (size_t i = 0; i < quickJsons.size(); ++i) {
                 if (i > 0) sameLineIfFits(s(140.0f), s(6.0f));
-                if (ImGui::SmallButton(localJsons[i].c_str())) {
-                    std::snprintf(m_jsonPathBuffer, sizeof(m_jsonPathBuffer), "%s", localJsons[i].c_str());
+                if (ImGui::SmallButton(quickJsons[i].first.c_str())) {
+                    std::snprintf(m_jsonPathBuffer, sizeof(m_jsonPathBuffer), "%s", quickJsons[i].second.c_str());
+                }
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("%s", quickJsons[i].second.c_str());
                 }
             }
         }
@@ -2356,6 +2485,23 @@ void GuiApp::renderJsonSessionModal() {
             ImGui::CloseCurrentPopup();
         }
         ImGui::EndDisabled();
+
+        if (!m_lastExportPath.empty()) {
+            ImGui::Spacing();
+            if (ImGui::SmallButton("Copy path")) {
+                SDL_SetClipboardText(m_lastExportPath.c_str());
+                m_exportNotificationText = "Path copied: " + m_lastExportPath;
+                m_exportNotificationTimer = 6.0f;
+            }
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Open folder")) {
+                openLastExportFolder();
+            }
+            ImGui::SameLine();
+            ImGui::TextColored(c.textMuted, "Last export: %s",
+                               std::filesystem::path(m_lastExportPath).filename().string().c_str());
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", m_lastExportPath.c_str());
+        }
 
         if (!m_comparisonResults.empty()) {
             ImGui::Spacing();

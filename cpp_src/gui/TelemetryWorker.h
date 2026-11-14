@@ -72,6 +72,12 @@ struct DeviceTelemetrySnapshot {
     uint64_t gttUsedBytes{0};
     uint64_t gttTotalBytes{0};
 
+    // Filtered / smoothed display metrics (exponential moving average, alpha = 0.25 at 10Hz ~350ms window)
+    // Prevents high-frequency DPM p-state jumping between ~150 MHz and 1.4 GHz from jittering the UI
+    float sclkSmoothMhz{0.0f};
+    float powerSmoothWatts{0.0f};
+    float gpuBusySmoothPct{0.0f};
+
     // Explicit per-sensor availability flags (never display fake 0.0 W / 0 C)
     bool isAvailable{false};
     bool hasSclk{false};

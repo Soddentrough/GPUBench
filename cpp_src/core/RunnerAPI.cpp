@@ -25,6 +25,7 @@ void populateDeviceProfileFromInfo(DeviceProfile &p, const DeviceInfo &dev) {
     p.maxWorkGroupSize = dev.maxWorkGroupSize;
     p.isApu = dev.isApu;
     p.rebarSupported = dev.rebarSupported;
+    p.rebarSizeBytes = dev.rebarSizeBytes;
     p.rayTracingSupported = dev.rayTracingSupport;
     p.serSupported = dev.serSupported;
     p.opacityMicromapSupported = dev.opacityMicromapSupport;

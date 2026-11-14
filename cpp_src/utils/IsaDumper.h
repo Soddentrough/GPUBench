@@ -57,6 +57,7 @@ struct IsaExecutableReport {
   int hotLoopEndLine = -1;   // 1-based inclusive line in fullIsaLines
   std::vector<std::string> hotLoopLines;
   std::vector<std::string> fullIsaLines;
+  std::string unavailableReason;
 };
 
 struct IsaArtifactReport {

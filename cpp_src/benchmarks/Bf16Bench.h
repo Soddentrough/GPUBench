@@ -15,6 +15,10 @@ public:
       return "No support for native BFloat16 floating-point arithmetic in OpenCL API (extension cl_khr_bfloat16 missing)";
     }
     if (!info.bf16Support) {
+      if (info.archName.find("RDNA 3") != std::string::npos ||
+          info.archName.find("gfx11") != std::string::npos) {
+        return "RDNA 3 lacks native BF16 VALU dot-product hardware (no native BF16 support on Vulkan)";
+      }
       return "shaderBfloat16 / BF16 hardware support bit not set";
     }
     return "";
@@ -108,6 +112,7 @@ public:
   void Run(uint32_t config_idx) override;
   void Teardown() override;
 
+  bool SupportsWorkScaling(uint32_t config_idx = 0) const override { (void)config_idx; return true; }
   BenchmarkResult GetResult(uint32_t config_idx) const override;
   uint32_t GetNumConfigs() const override { return 2; }
   std::string GetConfigName(uint32_t config_idx) const override {

@@ -901,6 +901,15 @@ const std::vector<DeviceInfo> &VulkanContext::getDevices() const {
                                    subgroupProps.subgroupSize, info);
       DeviceDatabase::enrichDeviceInfo(info);
 
+      // RDNA 3 / 3.5 (gfx11xx) lacks native BF16 VALU dot-product instructions
+      // (v_dot2_f32_bf16 arrived in RDNA 4); LLPC advertises shaderBFloat16DotProduct
+      // via slow FP32 software emulation, so gate it as unsupported.
+      const auto &dbProf = DeviceDatabase::lookup(info.vendorID, info.deviceID, info.name);
+      if (dbProf.archFamily == "RDNA 3" || dbProf.archFamily == "RDNA 3.5") {
+        info.shaderBfloat16DotProductSupport = false;
+        info.bf16Support = info.shaderBfloat16CoopMatrixSupport;
+      }
+
       deviceInfos.push_back(info);
     }
   }

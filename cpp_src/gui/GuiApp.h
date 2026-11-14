@@ -152,6 +152,7 @@ public:
     bool loadComparisonFromJson(const std::string& filepath);
     void clearComparisonResults();
     void exportResultsToJson(const std::string& filepath);
+    void openLastExportFolder();
 
     ExecutionState getExecutionState() const { return m_execState; }
     ExecutionState getState() const { return m_execState; }
@@ -329,6 +330,7 @@ private:
     bool m_switchToRoofline{false};
     bool m_switchToRtViewport{false};
     std::string m_exportNotificationText;
+    std::string m_lastExportPath;
     float m_exportNotificationTimer{0.0f};
     float m_telemetryTimeWindow{0.0f};
     bool m_telemetryNeedsFit{true};

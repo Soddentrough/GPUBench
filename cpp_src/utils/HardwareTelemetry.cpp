@@ -499,20 +499,48 @@ public:
     return inst;
   }
 
+  static bool isComputeOr3DEngine(const char *name) {
+    if (!name) return false;
+    const char *eng = std::strstr(name, "engtype_");
+    if (!eng) return true;
+    eng += 8; // skip "engtype_"
+    // Exclude dedicated fixed-function media/copy/security engines that do NOT compete with shaders or compute kernels:
+    if (HardwareTelemetry::containsAsciiCaseInsensitive(eng, "Video") ||
+        HardwareTelemetry::containsAsciiCaseInsensitive(eng, "Codec") ||
+        HardwareTelemetry::containsAsciiCaseInsensitive(eng, "Decode") ||
+        HardwareTelemetry::containsAsciiCaseInsensitive(eng, "Encode") ||
+        HardwareTelemetry::containsAsciiCaseInsensitive(eng, "JPEG") ||
+        HardwareTelemetry::containsAsciiCaseInsensitive(eng, "Copy") ||
+        HardwareTelemetry::containsAsciiCaseInsensitive(eng, "Security")) {
+      return false;
+    }
+    // Genuine compute/graphics engines: 3D, Compute, VR
+    return true;
+  }
+
   bool queryAdapterBusyPct(LUID luid, uint32_t &outBusyPct) {
     std::lock_guard<std::mutex> lock(m_mutex);
-    if (!m_ready || !pfnCollect || !pfnGetArray) return false;
+    if (!m_ready || !m_counterEngine || !pfnCollect || !pfnGetArray) return false;
+
+    auto now = std::chrono::steady_clock::now();
+    double dtMs = std::chrono::duration<double, std::milli>(now - m_lastCollectTime).count();
+    if (!m_hasBaseline || dtMs < 40.0) {
+      pfnCollect(m_query);
+      std::this_thread::sleep_for(std::chrono::milliseconds(50));
+      m_hasBaseline = true;
+    }
     if (pfnCollect(m_query) != 0) return false;
+    m_lastCollectTime = std::chrono::steady_clock::now();
 
     DWORD bufSize = 0;
     DWORD itemCount = 0;
     constexpr DWORD kPdhFmtDouble = 0x00000200;
-    pfnGetArray(m_counter, kPdhFmtDouble, &bufSize, &itemCount, nullptr);
+    pfnGetArray(m_counterEngine, kPdhFmtDouble, &bufSize, &itemCount, nullptr);
     if (bufSize == 0 || itemCount == 0) return false;
 
     m_scratch.resize(bufSize);
     auto *items = reinterpret_cast<PdhFmtCounterValueItemA *>(m_scratch.data());
-    if (pfnGetArray(m_counter, kPdhFmtDouble, &bufSize, &itemCount, items) != 0) {
+    if (pfnGetArray(m_counterEngine, kPdhFmtDouble, &bufSize, &itemCount, items) != 0) {
       return false;
     }
 
@@ -527,6 +555,7 @@ public:
       if (!items[i].szName || items[i].FmtValue.CStatus != 0) continue;
       const char *name = items[i].szName;
       if (!HardwareTelemetry::containsAsciiCaseInsensitive(name, luidTag)) continue;
+      if (!isComputeOr3DEngine(name)) continue;
       matchedAny = true;
       const char *engType = std::strstr(name, "engtype_");
       std::string key = engType ? std::string(engType) : std::string("total");
@@ -540,6 +569,52 @@ public:
     }
     outBusyPct = static_cast<uint32_t>(std::clamp(std::round(maxEng), 0.0, 100.0));
     return true;
+  }
+
+  bool queryAdapterMemoryBytes(LUID luid, uint64_t &outDedicatedBytes, uint64_t &outSharedBytes) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (!m_ready || !pfnCollect || !pfnGetArray) return false;
+
+    auto now = std::chrono::steady_clock::now();
+    double dtMs = std::chrono::duration<double, std::milli>(now - m_lastCollectTime).count();
+    if (dtMs > 50.0 || !m_hasBaseline) {
+      pfnCollect(m_query);
+      m_lastCollectTime = now;
+      m_hasBaseline = true;
+    }
+
+    char luidTag[48];
+    std::snprintf(luidTag, sizeof(luidTag), "luid_0x%08lx_0x%08lx",
+                  static_cast<unsigned long>(luid.HighPart),
+                  static_cast<unsigned long>(luid.LowPart));
+
+    auto queryCounterBytes = [&](PdhCounterHandle hCounter, uint64_t &outVal) -> bool {
+      if (!hCounter) return false;
+      DWORD bufSize = 0;
+      DWORD itemCount = 0;
+      constexpr DWORD kPdhFmtDouble = 0x00000200;
+      pfnGetArray(hCounter, kPdhFmtDouble, &bufSize, &itemCount, nullptr);
+      if (bufSize == 0 || itemCount == 0) return false;
+      std::vector<uint8_t> buf(bufSize);
+      auto *items = reinterpret_cast<PdhFmtCounterValueItemA *>(buf.data());
+      if (pfnGetArray(hCounter, kPdhFmtDouble, &bufSize, &itemCount, items) != 0) {
+        return false;
+      }
+      for (DWORD i = 0; i < itemCount; ++i) {
+        if (!items[i].szName || items[i].FmtValue.CStatus != 0) continue;
+        if (HardwareTelemetry::containsAsciiCaseInsensitive(items[i].szName, luidTag)) {
+          if (items[i].FmtValue.doubleValue >= 0.0) {
+            outVal = static_cast<uint64_t>(items[i].FmtValue.doubleValue);
+            return true;
+          }
+        }
+      }
+      return false;
+    };
+
+    bool okDed = queryCounterBytes(m_counterDedicatedMem, outDedicatedBytes);
+    bool okShr = queryCounterBytes(m_counterSharedMem, outSharedBytes);
+    return okDed || okShr;
   }
 
 private:
@@ -570,9 +645,13 @@ private:
     if (!pfnOpen || !pfnAdd || !pfnCollect || !pfnGetArray || !pfnClose) return;
 
     if (pfnOpen(nullptr, 0, &m_query) == 0 && m_query) {
-      if (pfnAdd(m_query, "\\GPU Engine(*)\\Utilization Percentage", 0, &m_counter) == 0 && m_counter) {
-        pfnCollect(m_query); // Prime baseline sample for rate counters
+      if (pfnAdd(m_query, "\\GPU Engine(*)\\Utilization Percentage", 0, &m_counterEngine) == 0 && m_counterEngine) {
         m_ready = true;
+      }
+      pfnAdd(m_query, "\\GPU Adapter Memory(*)\\Dedicated Usage", 0, &m_counterDedicatedMem);
+      pfnAdd(m_query, "\\GPU Adapter Memory(*)\\Shared Usage", 0, &m_counterSharedMem);
+      if (m_ready) {
+        pfnCollect(m_query); // Prime baseline sample for rate counters
       }
     }
   }
@@ -584,8 +663,12 @@ private:
 
   HMODULE m_pdhLib = nullptr;
   PdhQueryHandle m_query = nullptr;
-  PdhCounterHandle m_counter = nullptr;
+  PdhCounterHandle m_counterEngine = nullptr;
+  PdhCounterHandle m_counterDedicatedMem = nullptr;
+  PdhCounterHandle m_counterSharedMem = nullptr;
   bool m_ready = false;
+  bool m_hasBaseline = false;
+  std::chrono::steady_clock::time_point m_lastCollectTime{};
   std::mutex m_mutex;
   std::vector<uint8_t> m_scratch;
   PFN_PdhOpenQueryA pfnOpen = nullptr;
@@ -650,6 +733,22 @@ public:
         }
       }
 
+      // If DXGI QueryVideoMemoryInfo returned 0 (pure non-D3D / Vulkan processes),
+      // query Windows WDDM PDH system-wide dedicated & shared adapter memory.
+      uint64_t pdhDedicated = 0;
+      uint64_t pdhShared = 0;
+      if (WindowsWddmGpuUtilization::instance().queryAdapterMemoryBytes(
+              rec.desc.AdapterLuid, pdhDedicated, pdhShared)) {
+        if (d.vramUsedBytes == 0 && pdhDedicated > 0) {
+          d.vramUsedBytes = pdhDedicated;
+          d.hasVram = true;
+        }
+        if (d.gttUsedBytes == 0 && pdhShared > 0) {
+          d.gttUsedBytes = pdhShared;
+          d.hasGtt = true;
+        }
+      }
+
       d.vramUsedMb = d.vramUsedBytes / (1024ULL * 1024ULL);
       d.vramTotalMb = d.vramTotalBytes / (1024ULL * 1024ULL);
       d.gttUsedMb = d.gttUsedBytes / (1024ULL * 1024ULL);
@@ -662,13 +761,13 @@ public:
             d.pciBusId, static_cast<uint32_t>(nvOrdinal++), d);
       }
 
-      if (!d.hasGpuActivity) {
-        uint32_t wddmBusy = 0;
-        if (WindowsWddmGpuUtilization::instance().queryAdapterBusyPct(
-                rec.desc.AdapterLuid, wddmBusy)) {
-          d.gpuActivityPct = wddmBusy;
-          d.hasGpuActivity = true;
-        }
+      // On Windows, prefer WDDM per-engine filtered compute/3D activity
+      // to avoid false contention warnings from hardware video decoders (VCN/NVDEC).
+      uint32_t wddmBusy = 0;
+      if (WindowsWddmGpuUtilization::instance().queryAdapterBusyPct(
+              rec.desc.AdapterLuid, wddmBusy)) {
+        d.gpuActivityPct = wddmBusy;
+        d.hasGpuActivity = true;
       }
 
       list.push_back(std::move(d));

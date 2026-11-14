@@ -48,6 +48,9 @@ public:
   std::string GetConfigSupportNote(
       uint32_t config_idx, const DeviceInfo &info,
       IComputeContext *context = nullptr) const override;
+  std::string GetConfigCaveat(
+      uint32_t config_idx, const DeviceInfo &info,
+      IComputeContext *context = nullptr) const override;
 
   bool UsesCustomTiming(uint32_t /*config_idx*/ = 0) const override {
     return true;

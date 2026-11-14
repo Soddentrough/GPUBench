@@ -2,6 +2,7 @@
 
 #include "ComputeBackend.h"
 #include <cstdint>
+#include <cstdio>
 #include <map>
 #include <string>
 #include <vector>
@@ -230,3 +231,63 @@ public:
 protected:
   ComputeKernel lastDispatchedKernel = nullptr;
 };
+
+namespace gpubench {
+
+inline std::string formatRebarSize(uint64_t bytes) {
+  if (bytes == 0) {
+    return "0 MB";
+  }
+  char buf[32];
+  if (bytes >= 1024ULL * 1024ULL * 1024ULL) {
+    double gb = static_cast<double>(bytes) / (1024.0 * 1024.0 * 1024.0);
+    std::snprintf(buf, sizeof(buf), "%.1f GB", gb);
+    return buf;
+  }
+  double mb = static_cast<double>(bytes) / (1024.0 * 1024.0);
+  std::snprintf(buf, sizeof(buf), "%.0f MB", mb);
+  return buf;
+}
+
+inline std::string formatRebarStatus(bool rebarSupported,
+                                     uint64_t rebarSizeBytes,
+                                     bool isApu,
+                                     bool isVulkanOrProbed = true) {
+  if (isApu) {
+    return (rebarSizeBytes > 0)
+               ? ("N/A (Unified, " + formatRebarSize(rebarSizeBytes) + ")")
+               : "N/A (Unified)";
+  }
+  if (!isVulkanOrProbed && !rebarSupported && rebarSizeBytes == 0) {
+    return "Unknown";
+  }
+  if (rebarSupported) {
+    return (rebarSizeBytes > 0)
+               ? ("ON (" + formatRebarSize(rebarSizeBytes) + ")")
+               : "ON";
+  }
+  return (rebarSizeBytes > 0)
+             ? ("OFF (" + formatRebarSize(rebarSizeBytes) + " BAR)")
+             : "OFF (<=256 MB BAR)";
+}
+
+inline std::string formatRebarCaveat(const DeviceInfo &info,
+                                     const IComputeContext *context = nullptr) {
+  if (info.isApu) {
+    return "";
+  }
+  if (context && context->getBackend() != ComputeBackend::Vulkan) {
+    return "";
+  }
+  return "ReBAR: " + formatRebarStatus(info.rebarSupported, info.rebarSizeBytes,
+                                       info.isApu, true);
+}
+
+inline std::string appendCaveat(const std::string &primary,
+                                const std::string &secondary) {
+  if (primary.empty()) return secondary;
+  if (secondary.empty()) return primary;
+  return primary + "; " + secondary;
+}
+
+} // namespace gpubench

@@ -103,6 +103,15 @@ std::string AsyncOverlapBench::GetConfigSupportNote(
   return "";
 }
 
+std::string AsyncOverlapBench::GetConfigCaveat(uint32_t config_idx,
+                                               const DeviceInfo &info,
+                                               IComputeContext *context) const {
+  if (config_idx == 2 || config_idx == 3) {
+    return gpubench::formatRebarCaveat(info, context);
+  }
+  return "";
+}
+
 VkShaderModule
 AsyncOverlapBench::loadSpirvModule(const std::string &shaderStem) const {
   std::filesystem::path spvPath =

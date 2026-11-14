@@ -306,6 +306,40 @@ void TelemetryWorker::applySample(DevicePollState& state, DeviceTelemetrySnapsho
     snap.gttUsedBytes = hw.hasGtt ? hw.gttUsedBytes : 0;
     snap.gttTotalBytes = hw.hasGtt ? hw.gttTotalBytes : 0;
 
+    // Update EMA smoothing for UI display (alpha = 0.25 at 10Hz ~350ms window)
+    if (snap.hasSclk) {
+        if (snap.sclkSmoothMhz <= 1.0f) {
+            snap.sclkSmoothMhz = snap.sclkMhz;
+        } else {
+            constexpr float kAlpha = 0.25f;
+            snap.sclkSmoothMhz = snap.sclkSmoothMhz + kAlpha * (snap.sclkMhz - snap.sclkSmoothMhz);
+        }
+    } else {
+        snap.sclkSmoothMhz = 0.0f;
+    }
+
+    if (snap.hasPower) {
+        if (snap.powerSmoothWatts <= 0.1f) {
+            snap.powerSmoothWatts = snap.powerWatts;
+        } else {
+            constexpr float kAlpha = 0.25f;
+            snap.powerSmoothWatts = snap.powerSmoothWatts + kAlpha * (snap.powerWatts - snap.powerSmoothWatts);
+        }
+    } else {
+        snap.powerSmoothWatts = 0.0f;
+    }
+
+    if (snap.hasGpuBusy) {
+        if (snap.gpuBusySmoothPct <= 0.1f && snap.gpuBusyPct <= 0.1f) {
+            snap.gpuBusySmoothPct = snap.gpuBusyPct;
+        } else {
+            constexpr float kAlpha = 0.25f;
+            snap.gpuBusySmoothPct = snap.gpuBusySmoothPct + kAlpha * (snap.gpuBusyPct - snap.gpuBusySmoothPct);
+        }
+    } else {
+        snap.gpuBusySmoothPct = 0.0f;
+    }
+
     // Record history during active benchmark run, OR maintain a live 60s rolling trace when idle
     // (preserving a completed benchmark run's full trace until reset or next run).
     bool pushSample = isRecordingRun || !m_hasCompletedRun.load();

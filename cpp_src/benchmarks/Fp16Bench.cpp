@@ -103,11 +103,11 @@ void Fp16Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
 void Fp16Bench::Run(uint32_t config_idx) {
   if (config_idx == 0) {
     if (vectorKernel) {
-      context->dispatch(vectorKernel, 8192, 1, 1, 64, 1, 1);
+      context->dispatch(vectorKernel, ScaledGroups(8192), 1, 1, 64, 1, 1);
     }
   } else if (config_idx == 1 && matrixKernel) {
     // 65536 WGs (32768 x 2 2D grid <= 65535 baseline limit) of matrixBlockX threads each
-    context->dispatch(matrixKernel, 32768, 2, 1, matrixBlockX, 1, 1);
+    context->dispatch(matrixKernel, ScaledGroups(32768), 2, 1, matrixBlockX, 1, 1);
   }
 }
 
@@ -149,11 +149,11 @@ BenchmarkResult Fp16Bench::GetResult(uint32_t config_idx) const {
       }
     }
     uint64_t num_ops = iters * ops_per_iter * 8192 * 64;
-    return {num_ops, 0.0};
+    return {ScaledOps(num_ops, 8192), 0.0};
   } else {
     uint64_t tile_ops = 2ULL * tileM * tileN * tileK;
     uint64_t num_ops = 65536ULL * 32768ULL * tile_ops;
-    return {num_ops, 0.0};
+    return {ScaledOps(num_ops, 32768), 0.0};
   }
 }
 

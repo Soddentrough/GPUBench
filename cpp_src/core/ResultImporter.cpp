@@ -221,6 +221,7 @@ bool ResultImporter::loadFromString(const std::string &content, ImportedRun &out
     outRun.deviceProfile.maxWorkgroupSize = p["max_workgroup_size"].as_uint32(1024);
     outRun.deviceProfile.isApu = p["is_apu"].as_bool(false);
     outRun.deviceProfile.rebarSupported = p["rebar_supported"].as_bool(false);
+    outRun.deviceProfile.rebarSizeMb = p["rebar_size_mb"].as_uint64(0);
     outRun.deviceProfile.rayTracingSupported = p["ray_tracing_supported"].as_bool(false);
     outRun.deviceProfile.serSupported = p["ser_supported"].as_bool(false);
     outRun.deviceProfile.opacityMicromapSupported = p["opacity_micromap_supported"].as_bool(false);

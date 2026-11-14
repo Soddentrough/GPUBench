@@ -236,7 +236,10 @@ std::string InterconnectBench::GetConfigSupportNote(
       return "Unified memory APU detected (no discrete PCIe BAR aperture; see Config 4)";
     }
     if (!info.rebarSupported) {
-      return "Resizable BAR (HOST_VISIBLE | DEVICE_LOCAL >= 256 MB) not enabled";
+      return "Resizable BAR " +
+             gpubench::formatRebarStatus(info.rebarSupported, info.rebarSizeBytes,
+                                         info.isApu, true) +
+             " (requires >= 512 MB HOST_VISIBLE | DEVICE_LOCAL heap)";
     }
   }
   if (config_idx == 4 && !info.isApu) {
@@ -253,18 +256,26 @@ std::string InterconnectBench::GetConfigSupportNote(
 }
 
 std::string InterconnectBench::GetConfigCaveat(uint32_t config_idx,
-                                               const DeviceInfo & /*info*/,
+                                               const DeviceInfo &info,
                                                IComputeContext *context) const {
+  std::string caveat;
+  if (config_idx == 0 || config_idx == 1 || config_idx == 2 ||
+      config_idx == 3 || config_idx == 5) {
+    caveat = gpubench::formatRebarCaveat(info, context);
+  }
   if (config_idx == 2) {
     const auto *vc = dynamic_cast<const VulkanContext *>(context);
     if (vc && !vc->hasDedicatedTransferQueue()) {
-      return "No dedicated SDMA transfer queue family; H2D and D2H recorded on shared queue";
-    }
-    if (vc && !vc->hasSecondaryTransferQueue()) {
-      return "Driver exposes 1 dedicated SDMA transfer queue; H2D issued on primary queue alongside SDMA D2H";
+      caveat = gpubench::appendCaveat(
+          caveat,
+          "No dedicated SDMA transfer queue family; H2D and D2H recorded on shared queue");
+    } else if (vc && !vc->hasSecondaryTransferQueue()) {
+      caveat = gpubench::appendCaveat(
+          caveat,
+          "Driver exposes 1 dedicated SDMA transfer queue; H2D issued on primary queue alongside SDMA D2H");
     }
   }
-  return "";
+  return caveat;
 }
 
 bool InterconnectBench::UsesCustomTiming(uint32_t /*config_idx*/) const {

@@ -22,6 +22,7 @@
 #include "core/RooflineModel.h"
 #include "core/RunnerAPI.h"
 #include "utils/HardwareTelemetry.h"
+#include "utils/IsaDumper.h"
 #include "utils/KernelPath.h"
 
 #include <cmath>
@@ -422,4 +423,101 @@ TEST_CASE(ModernizationAnd2026, Vulkan14_2026BenchmarksEndToEndValidation) {
 
   CoopVectorBench coopVector;
   exerciseVulkanBenchmarkConfigs(*ctx, kdir, coopVector);
+}
+
+TEST_CASE(ModernizationAnd2026, IsaDumper_HonestReportingAndHotLoopAccuracy) {
+  auto ctx = createVulkanTestContext();
+  if (!ctx) {
+    std::cout << "[SKIP] Vulkan backend unavailable" << std::endl;
+    return;
+  }
+
+  const DeviceInfo info = ctx->getCurrentDeviceInfo();
+
+  // 1. BF16 Vector ISA inspection must match Bf16Bench support (skipped if emulated/unsupported)
+  {
+    IsaDumperOptions opts;
+    opts.targets = {"bf16"};
+    opts.backends = {"vulkan"};
+    opts.configs = {0};
+    const IsaInspectionResult res = IsaDumper::inspect(opts);
+    ASSERT_TRUE(res.ok);
+    ASSERT_EQ(res.artifacts.size(), size_t{1});
+    if (!info.shaderBfloat16DotProductSupport) {
+      ASSERT_FALSE(res.artifacts[0].skipReason.empty());
+      ASSERT_TRUE(res.artifacts[0].executables.empty());
+    }
+  }
+
+  // 2. Unrolled direct_worker (indirect config 2) must not fabricate a bogus prologue hot loop
+  {
+    IsaDumperOptions opts;
+    opts.targets = {"indirect"};
+    opts.backends = {"vulkan"};
+    opts.configs = {2};
+    const IsaInspectionResult res = IsaDumper::inspect(opts);
+    ASSERT_TRUE(res.ok);
+    ASSERT_EQ(res.artifacts.size(), size_t{1});
+    if (res.artifacts[0].skipReason.empty() && !res.artifacts[0].executables.empty()) {
+      const auto &exec = res.artifacts[0].executables[0];
+      if (!exec.fullIsaLines.empty()) {
+        ASSERT_EQ(exec.hotLoopStartLine, -1);
+        ASSERT_TRUE(exec.hotLoopLines.empty());
+      }
+    }
+  }
+
+  // 3. WorkGraphs shaders must not mistake forward branch or s_endpgm exit stub for a hot loop
+  if (info.workGraphsSupported) {
+    IsaDumperOptions opts;
+    opts.targets = {"workgraphs"};
+    opts.backends = {"vulkan"};
+    const IsaInspectionResult res = IsaDumper::inspect(opts);
+    ASSERT_TRUE(res.ok);
+    for (const auto &art : res.artifacts) {
+      for (const auto &exec : art.executables) {
+        if (!exec.fullIsaLines.empty()) {
+          ASSERT_EQ(exec.hotLoopStartLine, -1);
+          ASSERT_TRUE(exec.hotLoopLines.empty());
+        }
+      }
+    }
+  }
+
+  // 4. Genuine loop shader (membw config 0) must still detect a valid non-empty hot loop
+  {
+    IsaDumperOptions opts;
+    opts.targets = {"membw"};
+    opts.backends = {"vulkan"};
+    opts.configs = {0};
+    const IsaInspectionResult res = IsaDumper::inspect(opts);
+    ASSERT_TRUE(res.ok);
+    ASSERT_EQ(res.artifacts.size(), size_t{1});
+    if (res.artifacts[0].skipReason.empty() && !res.artifacts[0].executables.empty()) {
+      const auto &exec = res.artifacts[0].executables[0];
+      if (!exec.fullIsaLines.empty()) {
+        ASSERT_TRUE(exec.hotLoopStartLine > 0);
+        ASSERT_FALSE(exec.hotLoopLines.empty());
+        ASSERT_TRUE(exec.hotLoopEndLine <= static_cast<int>(exec.fullIsaLines.size()));
+        for (const auto &line : exec.hotLoopLines) {
+          ASSERT_TRUE(line.find("s_endpgm") == std::string::npos);
+        }
+      }
+    }
+  }
+
+  // 5. RayTracingPipeline alias & honest unavailableReason reporting when text IR is absent
+  if (info.rayTracingSupport) {
+    IsaDumperOptions opts;
+    opts.targets = {"raydiv"};
+    opts.backends = {"vulkan"};
+    const IsaInspectionResult res = IsaDumper::inspect(opts);
+    ASSERT_TRUE(res.ok);
+    ASSERT_EQ(res.artifacts.size(), size_t{1});
+    ASSERT_EQ(res.artifacts[0].benchName, std::string("RayDivergence"));
+    if (res.artifacts[0].skipReason.empty() && !res.artifacts[0].executables.empty()) {
+      const auto &exec = res.artifacts[0].executables[0];
+      ASSERT_TRUE(!exec.fullIsaLines.empty() || !exec.unavailableReason.empty());
+    }
+  }
 }

@@ -572,6 +572,11 @@ int main(int argc, char **argv) {
           if (!d.driverName.empty() || !d.driverVersionStr.empty()) {
             std::cout << " [Driver: " << d.driverName << " " << d.driverVersionStr << "]";
           }
+          if (context->getBackend() == ComputeBackend::Vulkan || d.rebarSupported || d.rebarSizeBytes > 0) {
+            std::cout << " [ReBAR: "
+                      << gpubench::formatRebarStatus(d.rebarSupported, d.rebarSizeBytes, d.isApu, true)
+                      << "]";
+          }
           std::cout << std::endl;
         }
       }

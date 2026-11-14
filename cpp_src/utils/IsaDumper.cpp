@@ -112,7 +112,7 @@ static std::vector<BenchmarkMapping> getBenchmarkMappings() {
       {"RayRawTraversal", {"rayrawtraversal", "rawtraversal"}, 0, "Raw Traversal", "rt_raw_traversal.comp.spv", "", ""},
       {"RayIntersect", {"rayintersect"}, 0, "Ray Intersect", "rt_benchmark.comp.spv", "", ""},
       {"RayAnyHit", {"rayanyhit"}, 0, "Ray Any-Hit (RTP)", "rayanyhit_pipeline.rgen.spv", "", ""},
-      {"RayDivergence", {"raydivergence"}, 0, "Ray Divergence (RTP)", "raydiv_pipeline.rgen.spv", "", ""},
+      {"RayDivergence", {"raydivergence", "raydiv"}, 0, "Ray Divergence (RTP)", "raydiv_pipeline.rgen.spv", "", ""},
       {"RayProcedural", {"rayprocedural"}, 0, "Ray Procedural AABB (RTP)", "rayprocedural.rgen.spv", "", ""},
       {"RayPayload", {"raypayload"}, 0, "Ray Payload 16B (RTP)", "raypayload_16b.rgen.spv", "", ""},
       {"RayPayload", {"raypayload"}, 1, "Ray Payload 128B (RTP)", "raypayload_128b.rgen.spv", "", ""},
@@ -240,44 +240,69 @@ static void analyzeIsaText(const std::string &isaText, IsaExecutableReport &outE
     }
   }
 
+  auto findBranchTargetLine = [&labelLines](const std::string &line) -> int {
+    size_t pos = line.find("s_cbranch_");
+    if (pos == std::string::npos) pos = line.find("s_branch");
+    if (pos == std::string::npos) return -1;
+    size_t spacePos = line.find_first_of(" \t", pos);
+    if (spacePos == std::string::npos) return -1;
+    size_t targetStart = line.find_first_not_of(" \t", spacePos);
+    if (targetStart == std::string::npos) return -1;
+    size_t targetEnd = line.find_first_of(" \t;/", targetStart);
+    std::string targetLabel = line.substr(targetStart, targetEnd - targetStart);
+    auto it = labelLines.find(targetLabel);
+    if (it == labelLines.end()) {
+      size_t lt = line.find('<', targetEnd);
+      size_t gt = line.find('>', lt != std::string::npos ? lt : 0);
+      if (lt != std::string::npos && gt != std::string::npos && gt > lt) {
+        it = labelLines.find(line.substr(lt, gt - lt + 1));
+      }
+    }
+    return (it != labelLines.end()) ? it->second : -1;
+  };
+
+  auto isExitStubTarget = [&lines, &findBranchTargetLine](int labelLineIdx, int branchLineIdx) -> bool {
+    int seenInsns = 0;
+    for (int j = labelLineIdx + 1; j < branchLineIdx && seenInsns < 8; ++j) {
+      std::string s = lines[j];
+      size_t first = s.find_first_not_of(" \t\r");
+      if (first == std::string::npos) continue;
+      s = s.substr(first);
+      if (s.rfind(";", 0) == 0 || s.rfind("//", 0) == 0) continue;
+      while (!s.empty() && (s.back() == ' ' || s.back() == '\t' || s.back() == '\r'))
+        s.pop_back();
+      if (!s.empty() && s.back() == ':') continue;
+      ++seenInsns;
+      if (s.rfind("s_endpgm", 0) == 0) return true;
+      if (s.rfind("s_cbranch_", 0) == 0 || s.rfind("s_branch", 0) == 0) {
+        int dest = findBranchTargetLine(s);
+        if (dest <= branchLineIdx) return false;
+        continue;
+      }
+      if (s.rfind("s_cmp_", 0) == 0 || s.rfind("s_waitcnt", 0) == 0 ||
+          s.rfind("s_delay_alu", 0) == 0 || s.rfind("s_and_", 0) == 0 ||
+          s.rfind("s_or_", 0) == 0 || s.rfind("s_mov_", 0) == 0) {
+        continue;
+      }
+      return false;
+    }
+    return false;
+  };
+
   int loopStartIdx = -1;
   int loopEndIdx = -1;
   int maxLoopSpan = 0;
   for (int i = 0; i < static_cast<int>(lines.size()); ++i) {
     if (lines[i].find("s_cbranch_") != std::string::npos) {
-      size_t pos = lines[i].find("s_cbranch_");
-      size_t spacePos = lines[i].find_first_of(" \t", pos);
-      if (spacePos != std::string::npos) {
-        size_t targetStart = lines[i].find_first_not_of(" \t", spacePos);
-        if (targetStart != std::string::npos) {
-          size_t targetEnd = lines[i].find_first_of(" \t;/", targetStart);
-          std::string targetLabel = lines[i].substr(targetStart, targetEnd - targetStart);
-          auto it = labelLines.find(targetLabel);
-          if (it == labelLines.end()) {
-            size_t lt = lines[i].find('<', targetEnd);
-            size_t gt = lines[i].find('>', lt != std::string::npos ? lt : 0);
-            if (lt != std::string::npos && gt != std::string::npos && gt > lt) {
-              it = labelLines.find(lines[i].substr(lt, gt - lt + 1));
-            }
-          }
-          if (it != labelLines.end() && it->second < i) {
-            int span = i - it->second + 1;
-            if (span >= maxLoopSpan) {
-              maxLoopSpan = span;
-              loopStartIdx = it->second;
-              loopEndIdx = i;
-            }
-          }
+      int targetIdx = findBranchTargetLine(lines[i]);
+      // Skip backward branches targeting shared s_endpgm exit/epilogue stubs
+      if (targetIdx != -1 && targetIdx < i && !isExitStubTarget(targetIdx, i)) {
+        int span = i - targetIdx + 1;
+        if (span >= maxLoopSpan) {
+          maxLoopSpan = span;
+          loopStartIdx = targetIdx;
+          loopEndIdx = i;
         }
-      }
-    }
-  }
-  if (loopStartIdx == -1) {
-    for (int i = static_cast<int>(lines.size()) - 1; i >= 0; --i) {
-      if (lines[i].find("s_cbranch_") != std::string::npos) {
-        loopEndIdx = i;
-        loopStartIdx = std::max(0, i - 80);
-        break;
       }
     }
   }
@@ -376,6 +401,17 @@ static void printIsaExecSummary(const IsaExecutableReport &exec, bool fullIsa) {
   }
 
   const auto &lines = exec.fullIsaLines;
+  if (lines.empty()) {
+    const std::string reason = exec.unavailableReason.empty()
+                                   ? "Driver did not return text ISA disassembly for this executable."
+                                   : exec.unavailableReason;
+    std::cout << "  Disassembly Unavailable (0 text lines):\n";
+    std::cout << "  ──────────────────────────────────────────────────────────────────────────────\n";
+    std::cout << "  " << reason << "\n";
+    std::cout << "  ──────────────────────────────────────────────────────────────────────────────\n\n";
+    return;
+  }
+
   if (fullIsa) {
     std::cout << "  Full Disassembly (" << lines.size() << " lines):\n";
     std::cout << "  ──────────────────────────────────────────────────────────────────────────────\n";
@@ -438,6 +474,8 @@ public:
   bool serSupported = false;
   bool coopMatrixSupported = false;
   bool bf16DotProductSupported = false;
+  bool bf16DotProductEmulatedOnArch = false;
+  std::string bf16ArchFamily;
   bool bf16CoopMatrixSupported = false;
   bool fp8CoopMatrixSupported = false;
   bool fp6CoopMatrixSupported = false;
@@ -717,6 +755,17 @@ public:
     bf16DotProductSupported = hasBf16 && (bf16Features.shaderBFloat16DotProduct == VK_TRUE);
     bf16CoopMatrixSupported = hasBf16 && coopMatrixSupported &&
                               (bf16Features.shaderBFloat16CooperativeMatrix == VK_TRUE);
+    const auto &dbProf = DeviceDatabase::lookup(vendorId, deviceId, deviceName);
+    bf16ArchFamily = dbProf.archFamily;
+    // Match VulkanContext/Bf16Bench: RDNA 3/3.5 drivers expose shaderBFloat16DotProduct
+    // via FP32 bit-manipulation emulation rather than native hardware BF16 dot ops.
+    if (bf16ArchFamily == "RDNA 3" || bf16ArchFamily == "RDNA 3.5") {
+      if (bf16DotProductSupported) {
+        bf16DotProductEmulatedOnArch = true;
+      }
+      bf16DotProductSupported = false;
+      bf16CoopMatrixSupported = false;
+    }
     fp8CoopMatrixSupported = hasExt("VK_EXT_shader_float8") && coopMatrixSupported &&
                              (fp8Features.shaderFloat8 == VK_TRUE) &&
                              (fp8Features.shaderFloat8CooperativeMatrix == VK_TRUE);
@@ -954,8 +1003,29 @@ public:
       }
 
       if (chosenIr != -1 && irs[chosenIr].isText && irs[chosenIr].pData) {
-        std::string isaStr(static_cast<const char *>(irs[chosenIr].pData));
+        const char *rawIr = static_cast<const char *>(irs[chosenIr].pData);
+        size_t safeLen = strnlen(rawIr, irs[chosenIr].dataSize);
+        std::string isaStr(rawIr, safeLen);
         analyzeIsaText(isaStr, execRep);
+        if (execRep.fullIsaLines.empty()) {
+          execRep.unavailableReason =
+              "Driver returned empty text internal representation ('" +
+              std::string(irs[chosenIr].name) + "').";
+        }
+      } else if (irCount == 0) {
+        execRep.unavailableReason =
+            "Vulkan driver exposed pipeline statistics but returned 0 internal representations "
+            "(no text ISA emitted for this pipeline/stage).";
+      } else if (chosenIr != -1) {
+        execRep.unavailableReason =
+            "Driver returned non-text / binary internal representation ('" +
+            std::string(irs[chosenIr].name) + "', " +
+            std::to_string(irs[chosenIr].dataSize) +
+            " bytes); text ISA disassembly unavailable.";
+      } else {
+        execRep.unavailableReason =
+            "No usable ISA internal representation found in " +
+            std::to_string(irCount) + " driver entries.";
       }
 
       outArt.executables.push_back(std::move(execRep));
@@ -982,9 +1052,18 @@ public:
               << " (" << art.filePath.filename().string() << ") ━━━\n";
     for (size_t e = 0; e < rep.executables.size(); ++e) {
       const auto &ex = rep.executables[e];
+      std::string subgroupDesc;
+      if (ex.subgroupSize == 32 || ex.subgroupSize == 64) {
+        subgroupDesc = "Wave" + std::to_string(ex.subgroupSize);
+      } else if (ex.subgroupSize == 0) {
+        subgroupDesc = "N/A (driver reported 0)";
+      } else {
+        subgroupDesc = std::to_string(ex.subgroupSize) +
+                       " (driver-reported non-wavefront / workgroup value)";
+      }
       std::cout << "  Executable [" << e << "] : " << ex.name << " — "
                 << ex.description
-                << " (Subgroup Size: " << ex.subgroupSize << ")\n";
+                << " (Subgroup Size: " << subgroupDesc << ")\n";
       std::cout << "  Hardware Statistics (VK_KHR_pipeline_executable_properties):\n    ";
       int col = 0;
       for (const auto &st : ex.stats) {
@@ -1379,9 +1458,14 @@ public:
                       deviceName + " (" + driverInfo + ").");
     }
     if (fname == "bf16.comp.spv" && !bf16DotProductSupported) {
+      if (bf16DotProductEmulatedOnArch) {
+        return emitSkip(
+            "BF16 vector dot product (v_dot2_bf16_bf16) is not natively supported in hardware on " +
+            deviceName + " (" + bf16ArchFamily + ") under Vulkan (" + driverInfo +
+            ") — driver emulates dot() via FP32 bit-manipulation (UNSUPPORTED).");
+      }
       return emitSkip("BF16 vector dot product (VK_KHR_shader_bfloat16::shaderBFloat16DotProduct / v_dot2_bf16_bf16) "
-                      "is not supported on " + deviceName + " under Vulkan (" + driverInfo + ").\n"
-                      "            Use '-k rocm' to inspect the ROCm HIP BF16 vector kernel (v_dot2_f32_bf16 in bf16.co).");
+                      "is not supported on " + deviceName + " under Vulkan (" + driverInfo + ").");
     }
     if (fname == "coop_matrix_bf16.comp.spv" && !bf16CoopMatrixSupported) {
       return emitSkip("BF16 cooperative matrix (VK_KHR_shader_bfloat16::shaderBFloat16CooperativeMatrix) "

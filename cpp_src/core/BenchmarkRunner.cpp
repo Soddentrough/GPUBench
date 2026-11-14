@@ -536,6 +536,11 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
       std::cout << "  - Shared Memory: "
                 << (info.maxComputeSharedMemorySize / 1024) << " KB"
                 << std::endl;
+      if (context->getBackend() == ComputeBackend::Vulkan || info.rebarSupported || info.rebarSizeBytes > 0) {
+        std::cout << "  - ReBAR:         "
+                  << gpubench::formatRebarStatus(info.rebarSupported, info.rebarSizeBytes, info.isApu, true)
+                  << std::endl;
+      }
       std::cout << std::endl;
     }
 
@@ -578,8 +583,15 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
       std::string backendStr = ComputeBackendFactory::getBackendName(context->getBackend());
       int vramGb = static_cast<int>(std::round(info.memorySize / (1024.0 * 1024.0 * 1024.0)));
       std::string memLabel = info.isApu ? "GB Unified Memory" : "GB Dedicated VRAM";
+      std::string rebarPlain;
+      std::string rebarColored;
+      if ((context->getBackend() == ComputeBackend::Vulkan || info.rebarSupported || info.rebarSizeBytes > 0) && !info.isApu) {
+        std::string rStat = gpubench::formatRebarStatus(info.rebarSupported, info.rebarSizeBytes, info.isApu, true);
+        rebarPlain = " | ReBAR: " + rStat;
+        rebarColored = " | \033[1mReBAR\033[0m: " + std::string(info.rebarSupported ? "\033[32m" : "\033[33m") + rStat + "\033[0m";
+      }
       std::string line1_plain = "Target Device : [GPU " + std::to_string(context->getSelectedDeviceIndex()) + "] " + info.name;
-      std::string line2_plain = "Backend / API : " + backendStr + " | VRAM: " + std::to_string(vramGb) + " " + memLabel;
+      std::string line2_plain = "Backend / API : " + backendStr + " | VRAM: " + std::to_string(vramGb) + " " + memLabel + rebarPlain;
 
       std::string resPreset = "";
       if (effectiveWidth == 7680 && effectiveHeight == 4320) resPreset = " (8K UHD)";
@@ -620,7 +632,7 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
       std::cout << "\033[1m\033[36m│\033[0m \033[1mTarget Device\033[0m : [GPU " << context->getSelectedDeviceIndex() << "] \033[33m" << info.name << "\033[0m"
                 << std::string(pad1, ' ') << " \033[1m\033[36m│\033[0m\n";
       std::cout << "\033[1m\033[36m│\033[0m \033[1mBackend / API\033[0m : \033[32m" << backendStr << "\033[0m | \033[1mVRAM\033[0m: \033[32m" << vramGb << " " << memLabel << "\033[0m"
-                << std::string(pad2, ' ') << " \033[1m\033[36m│\033[0m\n";
+                << rebarColored << std::string(pad2, ' ') << " \033[1m\033[36m│\033[0m\n";
       std::cout << "\033[1m\033[36m│\033[0m \033[1mResolution\033[0m    : \033[36m" << effectiveWidth << "x" << effectiveHeight << resPreset << "\033[0m"
                 << std::string(pad3, ' ') << " \033[1m\033[36m│\033[0m\n";
       if (hasRayTracing) {
@@ -674,6 +686,7 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
       IBenchmark *bench = nullptr;
       std::vector<uint32_t> configs;
       int minSortWeight = 0;
+      size_t minFilterRank = 0;
     };
 
     std::vector<BenchmarkGroupPlan> groupPlans;
@@ -691,6 +704,7 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
 
         uint32_t num_configs = bench->GetNumConfigs();
         std::vector<uint32_t> selectedConfigs;
+        std::map<uint32_t, size_t> configRank; // position in the caller's (GUI) workload list
         int minWeight = 1000000000;
 
         for (uint32_t i = 0; i < num_configs; ++i) {
@@ -731,21 +745,13 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
             }
             std::string baseKeyIndex = baseBenchName + "#" + std::to_string(i);
 
-            for (const auto &filt : workloadFilter) {
-              if (filt == baseBenchName || filt == bName) {
+            for (size_t fi = 0; fi < workloadFilter.size(); ++fi) {
+              const auto &filt = workloadFilter[fi];
+              if (filt == baseBenchName || filt == bName || filt == baseKeyIndex ||
+                  filt == keyIndex || (!cName.empty() && filt == cName) ||
+                  filt == fullTaskName) {
                 matched = true;
-                break;
-              }
-              if (filt == baseKeyIndex || filt == keyIndex) {
-                matched = true;
-                break;
-              }
-              if (!cName.empty() && filt == cName) {
-                matched = true;
-                break;
-              }
-              if (filt == fullTaskName) {
-                matched = true;
+                configRank[i] = fi;
                 break;
               }
             }
@@ -763,12 +769,18 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
 
         if (!selectedConfigs.empty()) {
           IBenchmark *bPtr = bench.get();
+          // When the caller supplied an ordered workload list (the GUI), run in
+          // exactly that order so execution matches what the user sees listed.
+          // Otherwise fall back to the intrinsic sort weight.
+          const bool ordered = !workloadFilter.empty();
           std::stable_sort(selectedConfigs.begin(), selectedConfigs.end(),
-                           [bPtr](uint32_t a, uint32_t b) {
+                           [bPtr, ordered, &configRank](uint32_t a, uint32_t b) {
+                             if (ordered) return configRank[a] < configRank[b];
                              return bPtr->GetSortWeight(a) < bPtr->GetSortWeight(b);
                            });
+          size_t minRank = ordered ? configRank[selectedConfigs.front()] : 0;
           totalPlannedTasks += selectedConfigs.size();
-          groupPlans.push_back({bPtr, std::move(selectedConfigs), minWeight});
+          groupPlans.push_back({bPtr, std::move(selectedConfigs), minWeight, minRank});
         }
       } else if (should_run && bench->IsDeviceDependent()) {
         // Skip logging unsupported Ray Tracing benchmarks under compute-only backends (ROCm / OpenCL)
@@ -857,7 +869,8 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
     }
 
     std::stable_sort(groupPlans.begin(), groupPlans.end(),
-                     [](const BenchmarkGroupPlan &a, const BenchmarkGroupPlan &b) {
+                     [this](const BenchmarkGroupPlan &a, const BenchmarkGroupPlan &b) {
+                       if (!workloadFilter.empty()) return a.minFilterRank < b.minFilterRank;
                        return a.minSortWeight < b.minSortWeight;
                      });
 
@@ -1177,6 +1190,55 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
           const double target_measurement_ms = profileSnapshot ? 60.0 : 500.0;
           const double target_batch_ms = profileSnapshot ? 20.0 : 50.0;
 
+          // Always start each config from the full-size reference workload.
+          bench->SetWorkScale(i, 1.0);
+
+          // Adaptive work sizing: size a single Run() so it takes ~target_run_ms
+          // on *this* GPU. Start from a tiny grid (safe on any hardware, can
+          // never trip a driver watchdog) and ramp up; fast GPUs end at full
+          // scale and are saturated via batching below, slow GPUs settle at a
+          // fraction of the reference workload. Measured work is always
+          // reported via GetResult() for the scale in effect.
+          if (!usesCustomTiming && bench->SupportsWorkScaling(i)) {
+            const double target_run_ms = profileSnapshot ? 10.0 : 25.0;
+            const double min_scale = 1.0 / 8192.0;
+            double scale = 1.0 / 1024.0;
+            for (int probe = 0; probe < 12; ++probe) {
+              if (cancelToken && cancelToken->load()) break;
+              bench->SetWorkScale(i, scale);
+              double probe_ms = 0.0;
+              // Two runs; keep the faster to discard cold-start (pipeline /
+              // clock ramp) noise.
+              for (int rep = 0; rep < 2; ++rep) {
+                auto p_start = std::chrono::high_resolution_clock::now();
+                bench->Run(i);
+                context->waitIdle();
+                auto p_end = std::chrono::high_resolution_clock::now();
+                double ms = std::chrono::duration<double, std::milli>(p_end - p_start).count();
+                if (ms <= 0.0) ms = 0.001;
+                probe_ms = (rep == 0) ? ms : std::min(probe_ms, ms);
+              }
+              if (probe_ms >= 0.5 * target_run_ms && probe_ms <= 2.0 * target_run_ms) break;
+              if (probe_ms > 2.0 * target_run_ms) {
+                // Too long (only possible at the smallest scales on very slow
+                // hardware or after a mispredict): shrink toward the target.
+                double next = std::max(min_scale, scale * target_run_ms / probe_ms);
+                if (next >= scale) break;
+                scale = next;
+                if (scale <= min_scale) { bench->SetWorkScale(i, scale); break; }
+                continue;
+              }
+              if (scale >= 1.0) break;
+              // Grow by at most 16x per step so the next dispatch is bounded.
+              double factor = std::clamp(target_run_ms / probe_ms, 1.5, 16.0);
+              scale = std::min(1.0, scale * factor);
+            }
+            bench->SetWorkScale(i, scale);
+            if (verbose) {
+              std::cout << "[WORK-SCALE " << bench_name << "] scale=" << scale << std::endl;
+            }
+          }
+
           double warmup_elapsed_ms = 0.0;
           double single_run_ms = 0.0;
           while (warmup_elapsed_ms < target_warmup_ms) {
@@ -1203,7 +1265,7 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
             batch_iters = static_cast<uint64_t>(
                 std::max(1.0, std::round(target_batch_ms / single_run_ms)));
           }
-          batch_iters = std::clamp<uint64_t>(batch_iters, 1, 256);
+          batch_iters = std::clamp<uint64_t>(batch_iters, 1, 4096);
 
           std::vector<double> sample_time_per_invoc;
           total_invocations = 0;

@@ -33,6 +33,7 @@ public:
   void Setup(IComputeContext &context, const std::string &kernel_dir) override;
   void Run(uint32_t config_idx = 0) override;
   void Teardown() override;
+  bool SupportsWorkScaling(uint32_t config_idx = 0) const override { (void)config_idx; return true; }
   BenchmarkResult GetResult(uint32_t config_idx = 0) const override;
   bool ValidateResults(uint32_t config_idx = 0) const override;
   const char *GetComponent(uint32_t config_idx = 0) const override {

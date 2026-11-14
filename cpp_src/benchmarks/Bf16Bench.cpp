@@ -132,11 +132,11 @@ void Bf16Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
 void Bf16Bench::Run(uint32_t config_idx) {
   if (config_idx == 0) {
     if (vectorKernel != nullptr) {
-      context->dispatch(vectorKernel, 8192, 1, 1, 64, 1, 1);
+      context->dispatch(vectorKernel, ScaledGroups(8192), 1, 1, 64, 1, 1);
     }
   } else if (config_idx == 1) {
     if (matrixKernel != nullptr) {
-      context->dispatch(matrixKernel, 32768, 1, 1, matrixBlockX, 1, 1);
+      context->dispatch(matrixKernel, ScaledGroups(32768), 1, 1, matrixBlockX, 1, 1);
     }
   }
 }
@@ -168,13 +168,13 @@ BenchmarkResult Bf16Bench::GetResult(uint32_t config_idx) const {
     uint64_t iters = 32768;
     uint64_t ops_per_iter = 256; // 64 bf16vec2 dot-accumulates * 4 ops = 256 BF16 ops
     uint64_t num_ops = iters * ops_per_iter * 8192 * 64;
-    return {num_ops, 0.0};
+    return {ScaledOps(num_ops, 8192), 0.0};
   } else { // Matrix
     uint64_t iters = 4096;
     uint64_t muladds = iters * 8;
     uint64_t tile_ops = 2ULL * tileM * tileN * tileK;
     uint64_t num_ops = muladds * tile_ops * 32768ULL;
-    return {num_ops, 0.0};
+    return {ScaledOps(num_ops, 32768), 0.0};
   }
 }
 

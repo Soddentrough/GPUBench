@@ -41,6 +41,19 @@ public:
   virtual bool UsesCustomTiming(uint32_t /*config_idx*/ = 0) const { return false; }
   virtual double GetLastRunDurationMs(uint32_t /*config_idx*/ = 0) const { return 0.0; }
   virtual void RebuildAccelerationStructures() {}
+
+  // --- Adaptive work sizing -------------------------------------------------
+  // Benchmarks are measured over a fixed time window, not a fixed amount of
+  // work. A benchmark whose single Run() has a grid that can be shrunk
+  // linearly (per-workgroup work is constant) opts in by returning true here.
+  // The runner then probes with a tiny scale and grows it until one Run()
+  // takes a target duration, so slow GPUs never submit a dispatch long enough
+  // to trigger a driver watchdog (TDR) and fast GPUs are fed via batching.
+  // GetResult() must report the operations of the *currently scaled* Run().
+  virtual bool SupportsWorkScaling(uint32_t /*config_idx*/ = 0) const { return false; }
+  // scale is in (0, 1]; 1.0 is the full-size reference workload.
+  virtual void SetWorkScale(uint32_t /*config_idx*/, double scale) { m_workScale = scale; }
+
   virtual bool ValidateResults(uint32_t /*config_idx*/ = 0) const { return true; }
   // Optional 0-indexed baseline config index for speedup comparison within this benchmark.
   // Returns -1 if this config is itself a baseline or has no comparable baseline.
@@ -140,4 +153,21 @@ public:
   // Exports the scene geometry to an external file (e.g. OBJ) for
   // visualization.
   virtual void DumpGeometry() const {}
+
+protected:
+  double m_workScale = 1.0;
+
+  // Workgroup count for the current work scale (never below 1).
+  uint32_t ScaledGroups(uint32_t baseGroups) const {
+    double g = static_cast<double>(baseGroups) * m_workScale;
+    if (g < 1.0) g = 1.0;
+    if (g > static_cast<double>(baseGroups)) g = static_cast<double>(baseGroups);
+    return static_cast<uint32_t>(g);
+  }
+  // Operation count of a Run() that dispatched ScaledGroups(baseGroups).
+  uint64_t ScaledOps(uint64_t fullOps, uint32_t baseGroups) const {
+    return static_cast<uint64_t>(static_cast<double>(fullOps) *
+                                     static_cast<double>(ScaledGroups(baseGroups)) /
+                                     static_cast<double>(baseGroups) + 0.5);
+  }
 };

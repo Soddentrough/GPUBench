@@ -57,7 +57,7 @@ void Fp32Bench::Run(uint32_t config_idx) {
   context->setKernelArg(kernel, 2, sizeof(uint32_t), &numElements);
 
   // Increase to 8192 workgroups for better GPU saturation
-  context->dispatch(kernel, 8192, 1, 1, 64, 1, 1);
+  context->dispatch(kernel, ScaledGroups(8192), 1, 1, 64, 1, 1);
 }
 
 void Fp32Bench::Teardown() {
@@ -80,7 +80,7 @@ BenchmarkResult Fp32Bench::GetResult(uint32_t config_idx) const {
   uint64_t iters = 65536;
   uint64_t ops_per_iter = 64;
   uint64_t num_ops = iters * ops_per_iter * 8192ULL * 64ULL;
-  return {num_ops, 0.0};
+  return {ScaledOps(num_ops, 8192), 0.0};
 }
 
 bool Fp32Bench::ValidateResults(uint32_t config_idx) const {

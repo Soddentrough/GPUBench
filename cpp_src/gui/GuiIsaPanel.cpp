@@ -282,8 +282,10 @@ void GuiApp::renderIsaInspectorPanel() {
             ImGui::TextWrapped("  32-bit registers shared across all lanes in a wave for descriptors, loop counters, and uniform constants.");
             ImGui::TextColored(c.violetAccent, "LDS (Local Data Share): %u B", ldsB);
             ImGui::TextWrapped("  On-CU shared scratchpad memory allocated per workgroup for thread cooperation and matrix/shared tiling.");
-            if (subgrpSz > 0) {
+            if (subgrpSz == 32 || subgrpSz == 64) {
                 ImGui::TextColored(c.phosphorHi, "WAVES / SIMD: %u / 16 (%.0f%% occupancy | Wave%u)", waves, occPct, subgrpSz);
+            } else if (subgrpSz > 0) {
+                ImGui::TextColored(c.phosphorHi, "WAVES / SIMD: %u / 16 (%.0f%% occupancy | Driver SG %u)", waves, occPct, subgrpSz);
             } else {
                 ImGui::TextColored(c.phosphorHi, "WAVES / SIMD: %u / 16 (%.0f%% occupancy)", waves, occPct);
             }
@@ -324,6 +326,11 @@ void GuiApp::renderIsaInspectorPanel() {
                             ImGui::Text("  %s x%d", activeExec->topOpcodes[oi].first.c_str(), activeExec->topOpcodes[oi].second);
                         }
                     }
+                } else if (activeExec && !activeExec->unavailableReason.empty()) {
+                    ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
+                    ImGui::TextColored(c.textMuted, "Instruction mix unavailable: %s",
+                                       activeExec->unavailableReason.c_str());
+                    ImGui::PopTextWrapPos();
                 } else {
                     ImGui::TextColored(c.textMuted, "Instruction mix breakdown populates once compiled hardware ISA is probed.");
                 }
@@ -389,8 +396,12 @@ void GuiApp::renderIsaInspectorPanel() {
     // RIGHT COLUMN: Hardware Shader / Kernel ISA Disassembly
     ImGui::BeginChild("F1RightIsaDisassembly", ImVec2(rightW, availH), ImGuiChildFlags_Borders);
     {
-        drawEtchedHeader("04", "LIVE HARDWARE ISA DISASSEMBLY", c,
-                         activeExec && activeExec->hotLoopStartLine > 0 ? "HOT-LOOP TAGGED" : "NATIVE PROBE");
+        const char *isaTag = (activeExec && activeExec->hotLoopStartLine > 0)
+                                 ? "HOT-LOOP TAGGED"
+                                 : ((activeExec && activeExec->fullIsaLines.empty() && !activeExec->unavailableReason.empty())
+                                        ? "STATS ONLY"
+                                        : "NATIVE PROBE");
+        drawEtchedHeader("04", "LIVE HARDWARE ISA DISASSEMBLY", c, isaTag);
 
         // Controls Toolbar
         ImGui::Spacing();
@@ -438,9 +449,17 @@ void GuiApp::renderIsaInspectorPanel() {
                 ImGui::TextColored(c.errColor, "[ERROR] %s", activeArt->errorMessage.c_str());
             } else if (hasCachedIsa && !cachedIsa.ok && !cachedIsa.errorSummary.empty()) {
                 ImGui::TextColored(c.errColor, "[PROBE INFO] %s", cachedIsa.errorSummary.c_str());
-            } else if (!activeExec || activeExec->fullIsaLines.empty()) {
+            } else if (!activeExec) {
                 ImGui::TextColored(c.textMuted,
                                    "NO COMPILED HARDWARE ISA ARTIFACT FOR THIS SLOT (HOST / CAPABILITY SLOT).");
+            } else if (activeExec->fullIsaLines.empty()) {
+                ImGui::TextColored(c.warnColor, "[DISASSEMBLY UNAVAILABLE]");
+                const char *reason = activeExec->unavailableReason.empty()
+                                         ? "Driver did not return text ISA disassembly for this executable."
+                                         : activeExec->unavailableReason.c_str();
+                ImGui::PushStyleColor(ImGuiCol_Text, c.textMuted);
+                ImGui::TextWrapped("%s", reason);
+                ImGui::PopStyleColor();
             } else {
                 const bool useHotLoop = m_isaHotLoopOnly &&
                                         !activeExec->hotLoopLines.empty() &&

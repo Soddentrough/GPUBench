@@ -42,7 +42,7 @@ void Fp64Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
 }
 
 void Fp64Bench::Run(uint32_t config_idx) {
-  context->dispatch(kernel, 8192, 1, 1, 64, 1, 1);
+  context->dispatch(kernel, ScaledGroups(8192), 1, 1, 64, 1, 1);
 }
 
 void Fp64Bench::Teardown() {
@@ -60,7 +60,7 @@ BenchmarkResult Fp64Bench::GetResult(uint32_t config_idx) const {
   // All backends (Vulkan, ROCm, OpenCL): 256 iters * 8 cyclic ring-dependent FMAs * 2 ops = 4096 FP64 ops per thread
   uint64_t num_threads = 8192 * 64;
   uint64_t num_ops = 4096ULL * num_threads;
-  return {num_ops, 0.0};
+  return {ScaledOps(num_ops, 8192), 0.0};
 }
 
 bool Fp64Bench::ValidateResults(uint32_t config_idx) const {

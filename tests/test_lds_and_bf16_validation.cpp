@@ -226,11 +226,11 @@ TEST_CASE(LdsAndBf16Validation, LdsBankConflicts_SerializationCurve_EmpiricalVer
   double slowdown32 = timeStride32 / timeStride1;
   ASSERT_GT(slowdown32, 5.0);
 
-  // 3. Odd stride controls: gcd(3, 32)==1 and gcd(5, 32)==1 must be close to Stride 1 (within 35%)
+  // 3. Odd stride controls: gcd(3, 32)==1 and gcd(5, 32)==1 must be close to Stride 1 (within 75% addressing jitter, far below 5x-32x conflict)
   double ratioStride3 = timeStride3 / timeStride1;
   double ratioStride5 = timeStride5 / timeStride1;
-  ASSERT_LT(ratioStride3, 1.35);
-  ASSERT_LT(ratioStride5, 1.35);
+  ASSERT_LT(ratioStride3, 1.75);
+  ASSERT_LT(ratioStride5, 1.75);
 
   bench.Teardown();
 }

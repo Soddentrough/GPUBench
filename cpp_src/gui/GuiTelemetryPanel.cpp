@@ -64,17 +64,20 @@ void GuiApp::renderSidebarTelemetry() {
 
         char buf[64];
 
-        std::snprintf(buf, sizeof(buf), "%.0f%%", snap.gpuBusyPct);
+        float dispGpuBusy = (snap.gpuBusySmoothPct > 0.0f) ? snap.gpuBusySmoothPct : snap.gpuBusyPct;
+        std::snprintf(buf, sizeof(buf), "%.0f%%", dispGpuBusy);
         renderSensorRow("GPU Load", snap.hasGpuBusy, buf,
-                        (snap.gpuBusyPct > 85.0f) ? c.okColor : c.textPrimary);
+                        (dispGpuBusy > 85.0f) ? c.okColor : c.textPrimary);
 
-        std::snprintf(buf, sizeof(buf), "%.0f MHz", snap.sclkMhz);
+        float dispSclk = (snap.sclkSmoothMhz > 0.0f) ? snap.sclkSmoothMhz : snap.sclkMhz;
+        std::snprintf(buf, sizeof(buf), "%.0f MHz", dispSclk);
         renderSensorRow("Shader Clock", snap.hasSclk, buf, c.cyanAccent);
 
         std::snprintf(buf, sizeof(buf), "%.0f MHz", snap.mclkMhz);
         renderSensorRow("Memory Clock", snap.hasMclk, buf, c.violetAccent);
 
-        std::snprintf(buf, sizeof(buf), "%.1f W", snap.powerWatts);
+        float dispPower = (snap.powerSmoothWatts > 0.0f) ? snap.powerSmoothWatts : snap.powerWatts;
+        std::snprintf(buf, sizeof(buf), "%.1f W", dispPower);
         renderSensorRow("Board Power", snap.hasPower, buf, c.phosphorHi);
 
         bool hasTemp = snap.hasTempJct || snap.hasTempEdge;
