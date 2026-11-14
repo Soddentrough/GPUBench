@@ -174,46 +174,33 @@ void GuiApp::renderLiveTelemetryDock() {
         }
     }
 
-    DeviceTelemetrySnapshot snap{};
-    if (!m_telemetryWorker.getSnapshot(m_telemetryGpuIndex, snap)) {
+    std::shared_ptr<const PreparedGraphData> graph;
+    if (!m_telemetryWorker.getPreparedGraphs(m_telemetryGpuIndex, graph) || !graph) {
         ImGui::TextColored(c.textMuted, "Waiting for 10 Hz telemetry samples...");
         return;
     }
 
-    const size_t nPts = snap.timeHistory.size();
-    const float* tData = (nPts > 0) ? snap.timeHistory.data() : nullptr;
-    const double tMin = (nPts >= 2) ? static_cast<double>(tData[0]) : 0.0;
-    const double tMax = (nPts >= 2) ? std::max(tMin + 5.0, static_cast<double>(tData[nPts - 1])) : 60.0;
-    const double tSpan = std::max(0.5, tMax - tMin);
+    const size_t nPts = graph->timePts.size();
+    const float* tData = (nPts > 0) ? graph->timePts.data() : nullptr;
+    const double tMin = graph->tMin;
+    const double tMax = graph->tMax;
+    const double tSpan = graph->tSpan;
+    const double vramUsedGb = graph->vramUsedGb;
+    const double vramTotGb = graph->vramTotGb;
 
-    // Compute dynamic Y ranges for SCLK & PWR so trace fills vertically with headroom
-    float sclkCeiling = 3000.0f;
-    if (snap.hasSclk && snap.sclkHistory.size() == nPts) {
-        const float* d = snap.sclkHistory.data();
-        for (size_t i = 0; i < nPts; ++i) sclkCeiling = std::max(sclkCeiling, d[i] * 1.15f);
-    }
-    float pwrCeiling = 360.0f;
-    if (snap.hasPower && snap.powerHistory.size() == nPts) {
-        const float* d = snap.powerHistory.data();
-        for (size_t i = 0; i < nPts; ++i) pwrCeiling = std::max(pwrCeiling, d[i] * 1.15f);
-    }
-    double vramUsedGb = static_cast<double>(snap.vramUsedBytes) / (1024.0 * 1024.0 * 1024.0);
-    double vramTotGb = std::max(0.1, static_cast<double>(snap.vramTotalBytes) / (1024.0 * 1024.0 * 1024.0));
-
-    // Helper to draw a crisp oscilloscope trace card via ImDrawList
+    // Helper to draw a crisp oscilloscope trace card via ImDrawList using pre-normalized
+    // points computed on the low-priority background graph thread.
+    static std::vector<ImVec2> s_scopePtsScratch;
     auto drawScopeChannel = [&](const char* chId,
                                 const char* title,
                                 const char* readout,
                                 ImVec4 traceCol,
                                 bool hasData,
-                                const TelemetryBuffer& hist,
-                                float yMin,
-                                float yMax,
+                                const std::vector<NormalizedGraphPoint>& normPts,
+                                const std::vector<float>& rawPts,
                                 ImVec2 size,
                                 bool showTriggerLabels,
-                                const TelemetryBuffer* secondaryHist = nullptr,
-                                float secMin = 0.0f,
-                                float secMax = 1.0f,
+                                const std::vector<NormalizedGraphPoint>* secondaryNormPts = nullptr,
                                 ImVec4 secCol = ImVec4(0, 0, 0, 0)) {
         ImVec2 p0 = ImGui::GetCursorScreenPos();
         ImVec2 p1(p0.x + size.x, p0.y + size.y);
@@ -265,38 +252,31 @@ void GuiApp::renderLiveTelemetryDock() {
         dl->PushClipRect(ImVec2(gx0, gy0), ImVec2(gx1, gy1), true);
 
         // Draw optional secondary trace first (e.g., VRAM MB inside CH4)
-        if (secondaryHist && secondaryHist->size() == nPts && nPts >= 2) {
-            const float* secData = secondaryHist->data();
-            std::vector<ImVec2> pts;
-            pts.reserve(nPts);
-            float denom = std::max(0.001f, secMax - secMin);
-            for (size_t i = 0; i < nPts; ++i) {
-                float tx = static_cast<float>((static_cast<double>(tData[i]) - tMin) / tSpan);
-                float ty = std::clamp((secData[i] - secMin) / denom, 0.0f, 1.0f);
-                pts.emplace_back(gx0 + tx * gw, gy1 - ty * gh);
+        if (secondaryNormPts && secondaryNormPts->size() >= 2) {
+            s_scopePtsScratch.clear();
+            s_scopePtsScratch.reserve(secondaryNormPts->size());
+            for (const auto& np : *secondaryNormPts) {
+                s_scopePtsScratch.emplace_back(gx0 + np.tx * gw, gy1 - np.ty * gh);
             }
-            dl->AddPolyline(pts.data(), static_cast<int>(pts.size()), toU32(secCol, 0.78f), ImDrawFlags_None, 1.3f);
+            dl->AddPolyline(s_scopePtsScratch.data(), static_cast<int>(s_scopePtsScratch.size()),
+                            toU32(secCol, 0.78f), ImDrawFlags_None, 1.3f);
         }
 
         // Primary Waveform
-        if (hasData && hist.size() == nPts && nPts >= 2) {
-            const float* hData = hist.data();
-            std::vector<ImVec2> pts;
-            pts.reserve(nPts);
-            float denom = std::max(0.001f, yMax - yMin);
-            for (size_t i = 0; i < nPts; ++i) {
-                float tx = static_cast<float>((static_cast<double>(tData[i]) - tMin) / tSpan);
-                float ty = std::clamp((hData[i] - yMin) / denom, 0.0f, 1.0f);
-                ImVec2 pt(gx0 + tx * gw, gy1 - ty * gh);
-                pts.push_back(pt);
+        if (hasData && normPts.size() >= 2) {
+            s_scopePtsScratch.clear();
+            s_scopePtsScratch.reserve(normPts.size());
+            for (const auto& np : normPts) {
+                s_scopePtsScratch.emplace_back(gx0 + np.tx * gw, gy1 - np.ty * gh);
             }
-            for (size_t i = 0; i + 1 < pts.size(); ++i) {
+            for (size_t i = 0; i + 1 < s_scopePtsScratch.size(); ++i) {
                 dl->AddQuadFilled(
-                    pts[i], pts[i + 1],
-                    ImVec2(pts[i + 1].x, gy1), ImVec2(pts[i].x, gy1),
+                    s_scopePtsScratch[i], s_scopePtsScratch[i + 1],
+                    ImVec2(s_scopePtsScratch[i + 1].x, gy1), ImVec2(s_scopePtsScratch[i].x, gy1),
                     toU32(traceCol, 0.13f));
             }
-            dl->AddPolyline(pts.data(), static_cast<int>(pts.size()), toU32(traceCol), ImDrawFlags_None, 1.8f);
+            dl->AddPolyline(s_scopePtsScratch.data(), static_cast<int>(s_scopePtsScratch.size()),
+                            toU32(traceCol), ImDrawFlags_None, 1.8f);
         } else if (!hasData) {
             dl->AddText(ImVec2(gx0 + s(6.0f), gy0 + gh * 0.35f), toU32(c.textMuted), "NO SENSOR");
         }
@@ -316,12 +296,11 @@ void GuiApp::renderLiveTelemetryDock() {
 
         dl->PopClipRect();
 
-        if (hovered && hasData && !hist.empty()) {
-            const float* hData = hist.data();
-            float minV = hData[0], maxV = hData[0];
-            for (size_t i = 1; i < hist.size(); ++i) {
-                minV = std::min(minV, hData[i]);
-                maxV = std::max(maxV, hData[i]);
+        if (hovered && hasData && !rawPts.empty()) {
+            float minV = rawPts[0], maxV = rawPts[0];
+            for (size_t i = 1; i < rawPts.size(); ++i) {
+                minV = std::min(minV, rawPts[i]);
+                maxV = std::max(maxV, rawPts[i]);
             }
             ImGui::BeginTooltip();
             ImGui::TextColored(traceCol, "%s : %s", title, readout);
@@ -343,41 +322,40 @@ void GuiApp::renderLiveTelemetryDock() {
         : std::max(s(44.0f), availH - s(2.0f));
 
     char ch1Val[40], ch2Val[40], ch3Val[40], ch4Val[64];
-    std::snprintf(ch1Val, sizeof(ch1Val), snap.hasSclk ? "%.0f MHz" : "N/A", snap.sclkMhz);
-    std::snprintf(ch2Val, sizeof(ch2Val), snap.hasPower ? "%.1f W" : "N/A", snap.powerWatts);
-    std::snprintf(ch3Val, sizeof(ch3Val), snap.hasGpuBusy ? "%.0f%%" : "N/A", snap.gpuBusyPct);
+    std::snprintf(ch1Val, sizeof(ch1Val), graph->hasSclk ? "%.0f MHz" : "N/A", graph->sclkMhz);
+    std::snprintf(ch2Val, sizeof(ch2Val), graph->hasPower ? "%.1f W" : "N/A", graph->powerWatts);
+    std::snprintf(ch3Val, sizeof(ch3Val), graph->hasGpuBusy ? "%.0f%%" : "N/A", graph->gpuBusyPct);
 
-    float refTemp = snap.hasTempJct ? snap.tempJctC : snap.tempEdgeC;
-    bool hasTemp = snap.hasTempJct || snap.hasTempEdge;
-    if (hasTemp && snap.hasVram) {
+    float refTemp = graph->hasTempJct ? graph->tempJctC : graph->tempEdgeC;
+    bool hasTemp = graph->hasTempJct || graph->hasTempEdge;
+    if (hasTemp && graph->hasVram) {
         std::snprintf(ch4Val, sizeof(ch4Val), "%.0fC | %.1f/%.0fG", refTemp, vramUsedGb, vramTotGb);
     } else if (hasTemp) {
         std::snprintf(ch4Val, sizeof(ch4Val), "%.0f C", refTemp);
-    } else if (snap.hasVram) {
+    } else if (graph->hasVram) {
         std::snprintf(ch4Val, sizeof(ch4Val), "%.1f/%.0fG", vramUsedGb, vramTotGb);
     } else {
         std::snprintf(ch4Val, sizeof(ch4Val), "N/A");
     }
 
     drawScopeChannel("##Ch1Sclk", "CH1 SCLK", ch1Val, c.cyanAccent,
-                     snap.hasSclk, snap.sclkHistory, 0.0f, sclkCeiling,
+                     graph->hasSclk, graph->sclkNorm, graph->sclkPts,
                      ImVec2(colW, stripH), true);
     ImGui::SameLine(0.0f, gap);
     drawScopeChannel("##Ch2Pwr", "CH2 PWR", ch2Val, c.phosphorHi,
-                     snap.hasPower, snap.powerHistory, 0.0f, pwrCeiling,
+                     graph->hasPower, graph->pwrNorm, graph->powerPts,
                      ImVec2(colW, stripH), false);
     ImGui::SameLine(0.0f, gap);
     drawScopeChannel("##Ch3Busy", "CH3 BUSY", ch3Val, c.okColor,
-                     snap.hasGpuBusy, snap.gpuBusyHistory, 0.0f, 105.0f,
+                     graph->hasGpuBusy, graph->busyNorm, graph->gpuBusyPts,
                      ImVec2(colW, stripH), false);
     ImGui::SameLine(0.0f, gap);
-    const TelemetryBuffer& tempHist = snap.hasTempJct ? snap.tempJctHistory : snap.tempEdgeHistory;
-    float maxVramMb = static_cast<float>(vramTotGb * 1024.0);
+    const std::vector<float>& tempPts = graph->hasTempJct ? graph->tempJctPts : graph->tempEdgePts;
     drawScopeChannel("##Ch4TempVram", "CH4 TMP/VRAM", ch4Val, c.warnColor,
-                     hasTemp || snap.hasVram, tempHist, 20.0f, 105.0f,
+                     hasTemp || graph->hasVram, graph->tempNorm, tempPts,
                      ImVec2(colW, stripH), false,
-                     snap.hasVram ? &snap.vramUsedMbHistory : nullptr,
-                     0.0f, std::max(1024.0f, maxVramMb), c.violetAccent);
+                     graph->hasVram ? &graph->vramNorm : nullptr,
+                     c.violetAccent);
 
     if (!m_telemetryExpanded) {
         return;
@@ -407,19 +385,16 @@ void GuiApp::renderLiveTelemetryDock() {
         ImPlot::SetupAxis(ImAxis_Y2, "VRAM (MB)", ImPlotAxisFlags_AuxDefault);
         ImPlot::SetupAxisLimits(ImAxis_X1, tMin, tMax, ImPlotCond_Always);
         ImPlot::SetupAxisLimits(ImAxis_Y1, 0.0, 105.0, ImPlotCond_Once);
-        double maxVramMbPlot = (snap.vramTotalBytes > 0)
-            ? static_cast<double>(snap.vramTotalBytes) / (1024.0 * 1024.0)
-            : 16384.0;
-        ImPlot::SetupAxisLimits(ImAxis_Y2, 0.0, maxVramMbPlot * 1.05, ImPlotCond_Always);
+        ImPlot::SetupAxisLimits(ImAxis_Y2, 0.0, graph->maxVramMbPlot * 1.05, ImPlotCond_Always);
 
-        if (snap.hasGpuBusy && snap.gpuBusyHistory.size() == nPts) {
+        if (graph->hasGpuBusy && graph->gpuBusyPts.size() == nPts) {
             ImPlot::SetAxes(ImAxis_X1, ImAxis_Y1);
-            ImPlot::PlotLine("GPU Busy (%)", tData, snap.gpuBusyHistory.data(), static_cast<int>(nPts),
+            ImPlot::PlotLine("GPU Busy (%)", tData, graph->gpuBusyPts.data(), static_cast<int>(nPts),
                              makeLineSpec(c.okColor, s(2.0f)));
         }
-        if (snap.hasVram && snap.vramUsedMbHistory.size() == nPts) {
+        if (graph->hasVram && graph->vramUsedMbPts.size() == nPts) {
             ImPlot::SetAxes(ImAxis_X1, ImAxis_Y2);
-            ImPlot::PlotLine("VRAM (MB)", tData, snap.vramUsedMbHistory.data(), static_cast<int>(nPts),
+            ImPlot::PlotLine("VRAM (MB)", tData, graph->vramUsedMbPts.data(), static_cast<int>(nPts),
                              makeLineSpec(c.violetAccent, s(2.0f)));
         }
         ImPlot::EndPlot();
@@ -432,15 +407,15 @@ void GuiApp::renderLiveTelemetryDock() {
         ImPlot::SetupAxes("Time (s)", "MHz", ImPlotAxisFlags_None, ImPlotAxisFlags_AutoFit);
         ImPlot::SetupAxisLimits(ImAxis_X1, tMin, tMax, ImPlotCond_Always);
 
-        if (snap.hasSclk && snap.sclkHistory.size() == nPts) {
-            ImPlot::PlotLine("SCLK", tData, snap.sclkHistory.data(), static_cast<int>(nPts),
+        if (graph->hasSclk && graph->sclkPts.size() == nPts) {
+            ImPlot::PlotLine("SCLK", tData, graph->sclkPts.data(), static_cast<int>(nPts),
                              makeLineSpec(c.cyanAccent, s(2.0f)));
         }
-        if (snap.hasMclk && snap.mclkHistory.size() == nPts) {
-            ImPlot::PlotLine("MCLK", tData, snap.mclkHistory.data(), static_cast<int>(nPts),
+        if (graph->hasMclk && graph->mclkPts.size() == nPts) {
+            ImPlot::PlotLine("MCLK", tData, graph->mclkPts.data(), static_cast<int>(nPts),
                              makeLineSpec(c.violetAccent, s(2.0f)));
         }
-        if (!snap.hasSclk && !snap.hasMclk) {
+        if (!graph->hasSclk && !graph->hasMclk) {
             ImPlot::PlotText("Clock telemetry N/A", (tMin + tMax) * 0.5, 0.5);
         }
         ImPlot::EndPlot();
@@ -454,27 +429,27 @@ void GuiApp::renderLiveTelemetryDock() {
         ImPlot::SetupAxis(ImAxis_Y2, "Temp (C)", ImPlotAxisFlags_AuxDefault | ImPlotAxisFlags_AutoFit);
         ImPlot::SetupAxisLimits(ImAxis_X1, tMin, tMax, ImPlotCond_Always);
 
-        if (snap.hasPower && snap.powerHistory.size() == nPts) {
+        if (graph->hasPower && graph->powerPts.size() == nPts) {
             ImPlot::SetAxes(ImAxis_X1, ImAxis_Y1);
-            ImPlot::PlotLine("Power (W)", tData, snap.powerHistory.data(), static_cast<int>(nPts),
+            ImPlot::PlotLine("Power (W)", tData, graph->powerPts.data(), static_cast<int>(nPts),
                              makeLineSpec(c.phosphorHi, s(2.0f)));
         }
-        if (snap.hasTempJct && snap.tempJctHistory.size() == nPts) {
+        if (graph->hasTempJct && graph->tempJctPts.size() == nPts) {
             ImPlot::SetAxes(ImAxis_X1, ImAxis_Y2);
-            ImPlot::PlotLine("Jct (C)", tData, snap.tempJctHistory.data(), static_cast<int>(nPts),
+            ImPlot::PlotLine("Jct (C)", tData, graph->tempJctPts.data(), static_cast<int>(nPts),
                              makeLineSpec(c.errColor, s(2.0f)));
         }
-        if (snap.hasTempEdge && snap.tempEdgeHistory.size() == nPts) {
+        if (graph->hasTempEdge && graph->tempEdgePts.size() == nPts) {
             ImPlot::SetAxes(ImAxis_X1, ImAxis_Y2);
-            ImPlot::PlotLine("Edge (C)", tData, snap.tempEdgeHistory.data(), static_cast<int>(nPts),
+            ImPlot::PlotLine("Edge (C)", tData, graph->tempEdgePts.data(), static_cast<int>(nPts),
                              makeLineSpec(c.warnColor, s(1.8f)));
         }
-        if (snap.hasTempMem && snap.tempMemHistory.size() == nPts) {
+        if (graph->hasTempMem && graph->tempMemPts.size() == nPts) {
             ImPlot::SetAxes(ImAxis_X1, ImAxis_Y2);
-            ImPlot::PlotLine("Mem (C)", tData, snap.tempMemHistory.data(), static_cast<int>(nPts),
+            ImPlot::PlotLine("Mem (C)", tData, graph->tempMemPts.data(), static_cast<int>(nPts),
                              makeLineSpec(c.okColor, s(1.8f)));
         }
-        if (!snap.hasPower && !snap.hasTempJct && !snap.hasTempEdge) {
+        if (!graph->hasPower && !graph->hasTempJct && !graph->hasTempEdge) {
             ImPlot::PlotText("Power / Thermal N/A", (tMin + tMax) * 0.5, 0.5);
         }
         ImPlot::EndPlot();

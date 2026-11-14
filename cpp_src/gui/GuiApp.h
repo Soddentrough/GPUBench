@@ -219,6 +219,7 @@ private:
     void syncBringUpTheme();
 
     const BenchmarkItem* getInspectedItem() const;
+    bool findBenchmarkItemIndices(const ResultData& res, int& outCatIdx, int& outSgIdx, int& outItemIdx) const;
     void selectInspectedBenchmark(int catIdx, int sgIdx, int itemIdx, bool switchToF1 = false);
     void ensureDefaultInspectedBenchmark();
     std::string makeIsaCacheKey(const BenchmarkItem& item) const;
@@ -351,6 +352,7 @@ private:
     int m_inspectedCategoryIdx{-1};
     int m_inspectedSubgroupIdx{-1};
     int m_inspectedItemIdx{-1};
+    bool m_suiteAutoScrollToInspected{false};
     bool m_isaHotLoopOnly{true};
     int m_isaExecStageIdx{0};
     char m_isaFilterBuf[128]{};

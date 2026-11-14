@@ -804,6 +804,10 @@ void GuiApp::renderBenchmarkSuitePanel() {
 
                         if (isInspected) {
                             ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg1, toU32(c.phosphorGlow));
+                            if (m_suiteAutoScrollToInspected) {
+                                ImGui::SetScrollHereY(0.35f);
+                                m_suiteAutoScrollToInspected = false;
+                            }
                         }
 
                         // Col 0: Hardware Arm Toggle + 3px Left Phosphor Indicator

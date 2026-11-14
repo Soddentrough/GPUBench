@@ -6,6 +6,18 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
+
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#elif defined(__linux__)
+#include <pthread.h>
+#include <sched.h>
+#include <sys/resource.h>
+#endif
 
 namespace gpubench::gui {
 
@@ -86,14 +98,24 @@ void TelemetryWorker::start() {
         discoverDevices();
     }
     m_running.store(true);
+    m_graphWorkPending = true;
     m_workerThread = std::thread(&TelemetryWorker::workerLoop, this);
+    m_graphThread = std::thread(&TelemetryWorker::graphPrepLoop, this);
 }
 
 void TelemetryWorker::stop() {
     if (!m_running.load()) return;
     m_running.store(false);
+    {
+        std::lock_guard<std::mutex> lock(m_graphMutex);
+        m_graphWorkPending = true;
+    }
+    m_graphCv.notify_all();
     if (m_workerThread.joinable()) {
         m_workerThread.join();
+    }
+    if (m_graphThread.joinable()) {
+        m_graphThread.join();
     }
 }
 
@@ -114,6 +136,7 @@ void TelemetryWorker::startRecording() {
         snap.gpuBusyHistory.clear();
     }
     m_isRecording.store(true);
+    notifyGraphThread();
 }
 
 void TelemetryWorker::stopRecording() {
@@ -151,6 +174,7 @@ void TelemetryWorker::resetHistory() {
         snap.vramUsedMbHistory.clear();
         snap.gpuBusyHistory.clear();
     }
+    notifyGraphThread();
 }
 
 uint32_t TelemetryWorker::getDeviceCount() const {
@@ -168,6 +192,22 @@ bool TelemetryWorker::getSnapshot(uint32_t deviceIndex, DeviceTelemetrySnapshot&
     }
     if (!m_snapshots.empty()) {
         outSnapshot = m_snapshots.front();
+        return true;
+    }
+    return false;
+}
+
+bool TelemetryWorker::getPreparedGraphs(uint32_t deviceIndex,
+                                        std::shared_ptr<const PreparedGraphData>& outData) const {
+    std::lock_guard<std::mutex> lock(m_graphMutex);
+    for (const auto& ptr : m_preparedGraphs) {
+        if (ptr && ptr->deviceIndex == deviceIndex) {
+            outData = ptr;
+            return true;
+        }
+    }
+    if (!m_preparedGraphs.empty() && m_preparedGraphs.front()) {
+        outData = m_preparedGraphs.front();
         return true;
     }
     return false;
@@ -295,7 +335,176 @@ void TelemetryWorker::applySample(DevicePollState& state, DeviceTelemetrySnapsho
     }
 }
 
+void TelemetryWorker::setLowThreadPriority() {
+#ifdef _WIN32
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_LOWEST);
+#elif defined(__linux__)
+    // Lower thread scheduling priority so telemetry & graph prep never contend with benchmark timing
+    struct sched_param sp{};
+    sp.sched_priority = 0;
+#ifdef SCHED_IDLE
+    if (pthread_setschedparam(pthread_self(), SCHED_IDLE, &sp) != 0) {
+#ifdef SCHED_BATCH
+        pthread_setschedparam(pthread_self(), SCHED_BATCH, &sp);
+#endif
+        setpriority(PRIO_PROCESS, 0, 19);
+    }
+#else
+    setpriority(PRIO_PROCESS, 0, 19);
+#endif
+#endif
+}
+
+void TelemetryWorker::notifyGraphThread() {
+    {
+        std::lock_guard<std::mutex> lock(m_graphMutex);
+        m_sampleGeneration++;
+        m_graphWorkPending = true;
+    }
+    m_graphCv.notify_one();
+}
+
+void TelemetryWorker::graphPrepLoop() {
+    setLowThreadPriority();
+
+    constexpr size_t kMaxPlotPoints = 256;
+
+    while (m_running.load()) {
+        {
+            std::unique_lock<std::mutex> lk(m_graphMutex);
+            m_graphCv.wait(lk, [this]() { return !m_running.load() || m_graphWorkPending; });
+            if (!m_running.load()) {
+                break;
+            }
+            m_graphWorkPending = false;
+        }
+
+        std::vector<DeviceTelemetrySnapshot> localSnapshots;
+        uint64_t gen = 0;
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            localSnapshots = m_snapshots;
+        }
+        {
+            std::lock_guard<std::mutex> lock(m_graphMutex);
+            gen = m_sampleGeneration;
+        }
+
+        std::vector<std::shared_ptr<const PreparedGraphData>> built;
+        built.reserve(localSnapshots.size());
+
+        for (const auto& snap : localSnapshots) {
+            auto g = std::make_shared<PreparedGraphData>();
+            g->deviceIndex = snap.deviceIndex;
+            g->generation = gen;
+            g->sclkMhz = snap.sclkMhz;
+            g->mclkMhz = snap.mclkMhz;
+            g->powerWatts = snap.powerWatts;
+            g->tempEdgeC = snap.tempEdgeC;
+            g->tempJctC = snap.tempJctC;
+            g->tempMemC = snap.tempMemC;
+            g->vramUsedBytes = snap.vramUsedBytes;
+            g->vramTotalBytes = snap.vramTotalBytes;
+            g->gpuBusyPct = snap.gpuBusyPct;
+
+            g->hasSclk = snap.hasSclk;
+            g->hasMclk = snap.hasMclk;
+            g->hasPower = snap.hasPower;
+            g->hasTempEdge = snap.hasTempEdge;
+            g->hasTempJct = snap.hasTempJct;
+            g->hasTempMem = snap.hasTempMem;
+            g->hasVram = snap.hasVram;
+            g->hasGpuBusy = snap.hasGpuBusy;
+
+            const size_t nPts = snap.timeHistory.size();
+            const float* tData = (nPts > 0) ? snap.timeHistory.data() : nullptr;
+            g->tMin = (nPts >= 2) ? static_cast<double>(tData[0]) : 0.0;
+            g->tMax = (nPts >= 2) ? std::max(g->tMin + 5.0, static_cast<double>(tData[nPts - 1])) : 60.0;
+            g->tSpan = std::max(0.5, g->tMax - g->tMin);
+
+            g->sclkCeiling = 3000.0f;
+            if (snap.hasSclk && snap.sclkHistory.size() == nPts) {
+                const float* d = snap.sclkHistory.data();
+                for (size_t i = 0; i < nPts; ++i) g->sclkCeiling = std::max(g->sclkCeiling, d[i] * 1.15f);
+            }
+            g->pwrCeiling = 360.0f;
+            if (snap.hasPower && snap.powerHistory.size() == nPts) {
+                const float* d = snap.powerHistory.data();
+                for (size_t i = 0; i < nPts; ++i) g->pwrCeiling = std::max(g->pwrCeiling, d[i] * 1.15f);
+            }
+            g->vramUsedGb = static_cast<double>(snap.vramUsedBytes) / (1024.0 * 1024.0 * 1024.0);
+            g->vramTotGb = std::max(0.1, static_cast<double>(snap.vramTotalBytes) / (1024.0 * 1024.0 * 1024.0));
+            g->maxVramMbPlot = (snap.vramTotalBytes > 0)
+                ? static_cast<double>(snap.vramTotalBytes) / (1024.0 * 1024.0)
+                : 16384.0;
+
+            if (nPts > 0) {
+                std::vector<size_t> indices;
+                if (nPts <= kMaxPlotPoints) {
+                    indices.resize(nPts);
+                    for (size_t i = 0; i < nPts; ++i) indices[i] = i;
+                } else {
+                    indices.reserve(kMaxPlotPoints);
+                    const double step = static_cast<double>(nPts - 1) / static_cast<double>(kMaxPlotPoints - 1);
+                    for (size_t k = 0; k < kMaxPlotPoints - 1; ++k) {
+                        indices.push_back(static_cast<size_t>(std::round(static_cast<double>(k) * step)));
+                    }
+                    indices.push_back(nPts - 1);
+                }
+
+                auto copyDecimated = [&](const TelemetryBuffer& src, std::vector<float>& dst) {
+                    if (src.size() != nPts) return;
+                    dst.reserve(indices.size());
+                    const float* raw = src.data();
+                    for (size_t idx : indices) dst.push_back(raw[idx]);
+                };
+
+                copyDecimated(snap.timeHistory, g->timePts);
+                if (snap.hasSclk) copyDecimated(snap.sclkHistory, g->sclkPts);
+                if (snap.hasMclk) copyDecimated(snap.mclkHistory, g->mclkPts);
+                if (snap.hasPower) copyDecimated(snap.powerHistory, g->powerPts);
+                if (snap.hasTempEdge) copyDecimated(snap.tempEdgeHistory, g->tempEdgePts);
+                if (snap.hasTempJct) copyDecimated(snap.tempJctHistory, g->tempJctPts);
+                if (snap.hasTempMem) copyDecimated(snap.tempMemHistory, g->tempMemPts);
+                if (snap.hasVram) copyDecimated(snap.vramUsedMbHistory, g->vramUsedMbPts);
+                if (snap.hasGpuBusy) copyDecimated(snap.gpuBusyHistory, g->gpuBusyPts);
+
+                auto buildNorm = [&](const std::vector<float>& ys, float yMin, float yMax,
+                                     std::vector<NormalizedGraphPoint>& outNorm) {
+                    if (ys.size() != g->timePts.size() || ys.size() < 2) return;
+                    outNorm.reserve(ys.size());
+                    const float denom = std::max(0.001f, yMax - yMin);
+                    for (size_t i = 0; i < ys.size(); ++i) {
+                        float tx = static_cast<float>((static_cast<double>(g->timePts[i]) - g->tMin) / g->tSpan);
+                        float ty = std::clamp((ys[i] - yMin) / denom, 0.0f, 1.0f);
+                        outNorm.push_back(NormalizedGraphPoint{tx, ty});
+                    }
+                };
+
+                buildNorm(g->sclkPts, 0.0f, g->sclkCeiling, g->sclkNorm);
+                buildNorm(g->powerPts, 0.0f, g->pwrCeiling, g->pwrNorm);
+                buildNorm(g->gpuBusyPts, 0.0f, 105.0f, g->busyNorm);
+                if (snap.hasTempJct) {
+                    buildNorm(g->tempJctPts, 20.0f, 105.0f, g->tempNorm);
+                } else if (snap.hasTempEdge) {
+                    buildNorm(g->tempEdgePts, 20.0f, 105.0f, g->tempNorm);
+                }
+                const float maxVramMb = std::max(1024.0f, static_cast<float>(g->vramTotGb * 1024.0));
+                buildNorm(g->vramUsedMbPts, 0.0f, maxVramMb, g->vramNorm);
+            }
+
+            built.push_back(std::move(g));
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(m_graphMutex);
+            m_preparedGraphs.swap(built);
+        }
+    }
+}
+
 void TelemetryWorker::workerLoop() {
+    setLowThreadPriority();
     while (m_running.load()) {
         std::vector<uint32_t> deviceIndices;
         {
@@ -342,6 +551,7 @@ void TelemetryWorker::workerLoop() {
             }
         }
 
+        notifyGraphThread();
         std::this_thread::sleep_for(std::chrono::milliseconds(100)); // 10Hz sampling
     }
 }

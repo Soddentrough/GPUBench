@@ -976,10 +976,76 @@ void GuiApp::startBenchmarks() {
              benchmarksToRun.end());
     m_stayOnRtViewportAfterRun = false;
 
+    struct IsaPreprobeTarget {
+        std::string id;
+        int configIndex{-1};
+        std::string cacheKey;
+    };
+    std::vector<IsaPreprobeTarget> isaPreprobeTargets;
+    for (const auto& cat : m_categories) {
+        for (const auto& sg : cat.subgroups) {
+            for (const auto& item : sg.items) {
+                if (!item.selected || !item.isSupported || item.category == "System") {
+                    continue;
+                }
+                const std::string key = makeIsaCacheKey(item);
+                const bool dup = std::any_of(isaPreprobeTargets.begin(), isaPreprobeTargets.end(),
+                                             [&key](const IsaPreprobeTarget& t) { return t.cacheKey == key; });
+                if (!dup) {
+                    isaPreprobeTargets.push_back(IsaPreprobeTarget{item.id, item.configIndex, key});
+                }
+            }
+        }
+    }
+    const std::string preprobeBackend = m_selectedBackend;
+    const uint32_t preprobeDeviceIdx = m_telemetryGpuIndex;
+
     m_execThread = std::thread([this, benchmarksToRun, deviceIndices, backends,
                                 rw, rh, scene, spp, dumpRenders, verbose, debug,
-                                selectedWorkloads, keepRtViewport]() {
+                                selectedWorkloads, keepRtViewport,
+                                isaPreprobeTargets, preprobeBackend, preprobeDeviceIdx]() {
         try {
+            // Pre-populate missing ISA cache entries BEFORE timing starts (zero contention)
+            // so each auto-selected test displays its hot loop & register file live as it runs.
+            for (const auto& target : isaPreprobeTargets) {
+                if (m_cancelToken.load()) {
+                    break;
+                }
+                {
+                    std::lock_guard<std::mutex> lock(m_isaMutex);
+                    if (m_isaCache.find(target.cacheKey) != m_isaCache.end()) {
+                        continue;
+                    }
+                }
+                IsaDumperOptions opts;
+                opts.targets = {target.id};
+                if (target.configIndex >= 0) {
+                    opts.configs = {target.configIndex};
+                }
+                opts.backends = {preprobeBackend};
+                opts.deviceIndex = preprobeDeviceIdx;
+                opts.fullIsa = true;
+
+                IsaInspectionResult isaRes = IsaDumper::inspect(opts);
+                if (isaRes.artifacts.empty() && !opts.configs.empty()) {
+                    opts.configs.clear();
+                    isaRes = IsaDumper::inspect(opts);
+                }
+                {
+                    std::lock_guard<std::mutex> lock(m_isaMutex);
+                    m_isaCache[target.cacheKey] = std::move(isaRes);
+                }
+            }
+
+            if (m_cancelToken.load()) {
+                m_telemetryWorker.stopRecording();
+                m_textureCacheNeedsClear.store(true);
+                std::lock_guard<std::mutex> lock(m_resultsMutex);
+                m_execState = ExecutionState::Cancelled;
+                m_statusMessage = "Benchmark execution aborted by user.";
+                return;
+            }
+
             auto callback = [this](const ResultData& res) {
                 std::lock_guard<std::mutex> lock(m_resultsMutex);
                 m_incomingResults.push_back(res);
@@ -1055,6 +1121,13 @@ void GuiApp::processIncomingResults() {
             m_currentlyRunningResult = res;
             m_hasCurrentlyRunningResult = true;
             m_statusMessage = "Running: " + res.benchmarkName + " (" + res.deviceName + ")";
+
+            int ci = -1, sgi = -1, ii = -1;
+            if (findBenchmarkItemIndices(res, ci, sgi, ii)) {
+                m_categories[static_cast<size_t>(ci)].subgroups[static_cast<size_t>(sgi)].collapsed = false;
+                selectInspectedBenchmark(ci, sgi, ii, false);
+                m_suiteAutoScrollToInspected = true;
+            }
             continue;
         }
 
@@ -1335,6 +1408,27 @@ void GuiApp::ensureDefaultInspectedBenchmark() {
         m_inspectedItemIdx = 0;
         m_isaExecStageIdx = 0;
     }
+}
+
+bool GuiApp::findBenchmarkItemIndices(const ResultData& res,
+                                        int& outCatIdx,
+                                        int& outSgIdx,
+                                        int& outItemIdx) const {
+    for (size_t ci = 0; ci < m_categories.size(); ++ci) {
+        const auto& cat = m_categories[ci];
+        for (size_t sgi = 0; sgi < cat.subgroups.size(); ++sgi) {
+            const auto& sg = cat.subgroups[sgi];
+            for (size_t ii = 0; ii < sg.items.size(); ++ii) {
+                if (matchesItem(res, sg.items[ii], res.deviceIndex)) {
+                    outCatIdx = static_cast<int>(ci);
+                    outSgIdx = static_cast<int>(sgi);
+                    outItemIdx = static_cast<int>(ii);
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
 }
 
 void GuiApp::selectInspectedBenchmark(int catIdx, int sgIdx, int itemIdx, bool switchToF1) {
@@ -1978,9 +2072,10 @@ void GuiApp::renderTopInstrumentHeader(float width) {
         const float palGreenW = s(60.0f);
         const float paperW = s(58.0f);
         const float jsonW = s(64.0f);
+        const float exportW = s(92.0f);
         const float cfgW = s(44.0f);
         const float execW = s(134.0f);
-        const float rightClusterW = palAmberW + palGreenW + paperW + jsonW + cfgW + execW + s(20.0f);
+        const float rightClusterW = palAmberW + palGreenW + paperW + jsonW + exportW + cfgW + execW + s(24.0f);
         const float targetX = ImGui::GetWindowWidth() - rightClusterW - s(10.0f);
         if (targetX > ImGui::GetCursorPosX() + s(8.0f)) {
             ImGui::SetCursorPosX(targetX);
@@ -2004,6 +2099,20 @@ void GuiApp::renderTopInstrumentHeader(float width) {
                 std::snprintf(m_jsonPathBuffer, sizeof(m_jsonPathBuffer), "%s", defName.c_str());
             }
             m_showJsonSessionModal = true;
+        }
+        ImGui::SameLine(0.0f, s(3.0f));
+        ImGui::BeginDisabled(m_allResults.empty());
+        if (tacticalButton("##TopExportJson", "EXPORT JSON", ImVec2(exportW, bh), false, c)) {
+            std::string outPath = (m_jsonPathBuffer[0] != '\0')
+                ? std::string(m_jsonPathBuffer)
+                : getDefaultJsonFilename();
+            exportResultsToJson(outPath);
+        }
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+            ImGui::SetTooltip("%s", m_allResults.empty()
+                ? "Run benchmarks or import a session before exporting JSON."
+                : "Export all system information and benchmark results to unified v2.0 JSON.");
         }
         ImGui::SameLine(0.0f, s(3.0f));
         if (tacticalButton("##TopCfg", "CFG", ImVec2(cfgW, bh), m_showSettingsModal, c)) {

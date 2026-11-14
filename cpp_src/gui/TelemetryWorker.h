@@ -4,7 +4,9 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -97,6 +99,64 @@ struct DeviceTelemetrySnapshot {
     TelemetryBuffer gpuBusyHistory;
 };
 
+struct NormalizedGraphPoint {
+    float tx{0.0f};
+    float ty{0.0f};
+};
+
+// Pre-decimated, pre-normalized graph data prepared on a low-priority background thread
+// so the UI thread does zero heavy scanning/copying during benchmark runs.
+struct PreparedGraphData {
+    uint32_t deviceIndex{0};
+    uint64_t generation{0};
+
+    float sclkMhz{0.0f};
+    float mclkMhz{0.0f};
+    float powerWatts{0.0f};
+    float tempEdgeC{0.0f};
+    float tempJctC{0.0f};
+    float tempMemC{0.0f};
+    uint64_t vramUsedBytes{0};
+    uint64_t vramTotalBytes{0};
+    float gpuBusyPct{0.0f};
+
+    bool hasSclk{false};
+    bool hasMclk{false};
+    bool hasPower{false};
+    bool hasTempEdge{false};
+    bool hasTempJct{false};
+    bool hasTempMem{false};
+    bool hasVram{false};
+    bool hasGpuBusy{false};
+
+    double tMin{0.0};
+    double tMax{60.0};
+    double tSpan{60.0};
+    float sclkCeiling{3000.0f};
+    float pwrCeiling{360.0f};
+    double vramUsedGb{0.0};
+    double vramTotGb{0.1};
+    double maxVramMbPlot{16384.0};
+
+    // Decimated time-series points for ImPlot
+    std::vector<float> timePts;
+    std::vector<float> sclkPts;
+    std::vector<float> mclkPts;
+    std::vector<float> powerPts;
+    std::vector<float> tempEdgePts;
+    std::vector<float> tempJctPts;
+    std::vector<float> tempMemPts;
+    std::vector<float> vramUsedMbPts;
+    std::vector<float> gpuBusyPts;
+
+    // Pre-normalized [0..1] points for compact scope channels
+    std::vector<NormalizedGraphPoint> sclkNorm;
+    std::vector<NormalizedGraphPoint> pwrNorm;
+    std::vector<NormalizedGraphPoint> busyNorm;
+    std::vector<NormalizedGraphPoint> tempNorm;
+    std::vector<NormalizedGraphPoint> vramNorm;
+};
+
 class TelemetryWorker {
 public:
     TelemetryWorker();
@@ -115,6 +175,7 @@ public:
 
     uint32_t getDeviceCount() const;
     bool getSnapshot(uint32_t deviceIndex, DeviceTelemetrySnapshot& outSnapshot);
+    bool getPreparedGraphs(uint32_t deviceIndex, std::shared_ptr<const PreparedGraphData>& outData) const;
     std::vector<std::string> getDeviceNames() const;
 
 private:
@@ -126,6 +187,9 @@ private:
     };
 
     void workerLoop();
+    void graphPrepLoop();
+    void notifyGraphThread();
+    static void setLowThreadPriority();
     void discoverDevices();
     void applySample(DevicePollState& state, DeviceTelemetrySnapshot& snapshot,
                      const GpuTelemetryData& hw,
@@ -136,9 +200,15 @@ private:
     std::atomic<bool> m_isRecording{false};
     std::atomic<bool> m_hasCompletedRun{false};
     std::thread m_workerThread;
+    std::thread m_graphThread;
     mutable std::mutex m_mutex;
+    mutable std::mutex m_graphMutex;
+    std::condition_variable m_graphCv;
+    uint64_t m_sampleGeneration{0};
+    bool m_graphWorkPending{false};
     std::vector<DevicePollState> m_pollStates;
     std::vector<DeviceTelemetrySnapshot> m_snapshots;
+    std::vector<std::shared_ptr<const PreparedGraphData>> m_preparedGraphs;
     std::chrono::steady_clock::time_point m_startTime;
     std::chrono::steady_clock::time_point m_idleStartTime;
     std::chrono::steady_clock::time_point m_runStartTime;

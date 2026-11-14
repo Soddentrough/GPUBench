@@ -292,7 +292,7 @@ int main(int argc, char** argv) {
         const bool isRunning = (app.getExecutionState() == gpubench::gui::ExecutionState::Running);
         SDL_Event event;
         if (maxFrames <= 0) {
-            const int waitMs = isRunning ? 33 : 50;
+            const int waitMs = isRunning ? 100 : 50;
             if (SDL_WaitEventTimeout(&event, waitMs)) {
                 processEvent(event);
             }
