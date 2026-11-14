@@ -311,13 +311,13 @@ void BenchmarkRunner::discoverBenchmarks() {
     sc->SetVerifyParity(verifyParity);
     benchmarks.push_back(std::move(sc));
   };
-  if (sceneName == "outdoor") {
+  if (sceneName == "outdoor" || sceneName == "landscape") {
     addRayScene(RaySchedulingBench::SceneType::OutdoorLandscape);
-  } else if (sceneName == "forest" || sceneName == "aaa_forest") {
+  } else if (sceneName == "forest" || sceneName == "aaa_forest" || sceneName == "foliage") {
     addRayScene(RaySchedulingBench::SceneType::AAAOutdoorForest);
-  } else if (sceneName == "showroom") {
+  } else if (sceneName == "showroom" || sceneName == "studio" || sceneName == "car") {
     addRayScene(RaySchedulingBench::SceneType::Showroom);
-  } else if (sceneName == "indoor") {
+  } else if (sceneName == "indoor" || sceneName == "sponza") {
     addRayScene(RaySchedulingBench::SceneType::IndoorAtrium);
   } else {
     addRayScene(RaySchedulingBench::SceneType::Showroom);

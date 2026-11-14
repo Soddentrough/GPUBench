@@ -244,6 +244,7 @@ private:
     void renderBenchmarkTooltip(const BenchmarkItem& item, const std::string& sceneOverride = "");
     void renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, ImVec2 p1) const;
     std::string currentSceneTag() const;
+    void startSceneVerificationCapture(const std::string& sceneTag);
 
     // Subsystems
     TelemetryWorker m_telemetryWorker;
@@ -368,6 +369,9 @@ private:
     bool m_focusCmdInput{false};
     bool m_singleSlotSelectionRestore{false};
     std::vector<bool> m_savedSelectionSnapshot;
+    bool m_stayOnRtViewportAfterRun{false};
+    bool m_restoreSceneAfterRun{false};
+    std::string m_savedSceneBeforeCapture;
 };
 
 } // namespace gpubench::gui

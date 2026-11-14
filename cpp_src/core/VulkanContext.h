@@ -164,6 +164,9 @@ public:
                                          uint32_t width, uint32_t height,
                                          uint32_t mode,
                                          const std::string &kernelDir);
+  bool uploadRgbToSharedPreviewImage(const std::string &key,
+                                     uint32_t width, uint32_t height,
+                                     const uint8_t *rgbPixels);
   bool getSharedPreviewImage(const std::string &key,
                              SharedPreviewImage &outInfo) const;
   void clearSharedPreviewImages();

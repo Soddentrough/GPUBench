@@ -560,7 +560,7 @@ void GuiApp::renderBenchmarkSuitePanel() {
                         itm.id == "L0 Cache Bandwidth" || itm.id == "L1 Cache Bandwidth" ||
                         itm.id == "L2 Cache Bandwidth" || itm.id == "L3 Cache Bandwidth" ||
                         (itm.id == "PCIe & Host-Device Interconnect" && itm.configIndex <= 1) ||
-                        (itm.id == "RayScheduling" && (itm.configIndex == 9 || itm.configIndex == 10)));
+                        (itm.id == "RayScheduling" && (itm.configIndex == 9 || itm.configIndex == 10 || itm.configIndex == 11)));
                     itm.selected = pick;
                     if (pick) sgSel = true;
                 }

@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -210,6 +211,18 @@ VulkanContext::TextureResource GuiApp::getOrLoadTexture(const std::string& relPa
         candidateRoots.push_back(std::string(base) + "../");
         candidateRoots.push_back(std::string(base) + "../share/gpubench/");
     }
+#ifdef _WIN32
+    if (const char* localApp = std::getenv("LOCALAPPDATA")) {
+        if (*localApp) candidateRoots.push_back(std::string(localApp) + "/gpubench/");
+    }
+#else
+    if (const char* xdg = std::getenv("XDG_CACHE_HOME")) {
+        if (*xdg) candidateRoots.push_back(std::string(xdg) + "/gpubench/");
+    }
+    if (const char* home = std::getenv("HOME")) {
+        if (*home) candidateRoots.push_back(std::string(home) + "/.cache/gpubench/");
+    }
+#endif
     candidateRoots.push_back("/usr/share/gpubench/");
     candidateRoots.push_back("/usr/local/share/gpubench/");
 
@@ -628,15 +641,19 @@ void GuiApp::setScene(const std::string& scene) {
     if (scene == "indoor" || scene == "sponza") {
         m_scene = "indoor";
         m_suiteActiveScene = "indoor";
+        m_rtSceneIndex = 1;
     } else if (scene == "forest" || scene == "foliage") {
         m_scene = "forest";
         m_suiteActiveScene = "forest";
+        m_rtSceneIndex = 2;
     } else if (scene == "landscape" || scene == "outdoor") {
         m_scene = "landscape";
         m_suiteActiveScene = "landscape";
+        m_rtSceneIndex = 3;
     } else if (scene == "showroom" || scene == "studio" || scene == "car") {
         m_scene = "showroom";
         m_suiteActiveScene = "showroom";
+        m_rtSceneIndex = 0;
     } else if (scene == "all") {
         m_scene = "all";
     }
@@ -952,10 +969,16 @@ void GuiApp::startBenchmarks() {
     bool dumpRenders = m_dumpRenders;
     bool verbose = m_verbose;
     bool debug = m_debug;
+    const bool keepRtViewport =
+        m_stayOnRtViewportAfterRun ||
+        (m_instrumentMode == 2 &&
+         std::find(benchmarksToRun.begin(), benchmarksToRun.end(), "RayScheduling") !=
+             benchmarksToRun.end());
+    m_stayOnRtViewportAfterRun = false;
 
     m_execThread = std::thread([this, benchmarksToRun, deviceIndices, backends,
                                 rw, rh, scene, spp, dumpRenders, verbose, debug,
-                                selectedWorkloads]() {
+                                selectedWorkloads, keepRtViewport]() {
         try {
             auto callback = [this](const ResultData& res) {
                 std::lock_guard<std::mutex> lock(m_resultsMutex);
@@ -990,7 +1013,11 @@ void GuiApp::startBenchmarks() {
             } else {
                 m_execState = ExecutionState::Completed;
                 m_statusMessage = "Suite execution complete.";
-                m_switchToScorecard = true;
+                if (keepRtViewport) {
+                    m_switchToRtViewport = true;
+                } else {
+                    m_switchToScorecard = true;
+                }
             }
         } catch (const std::exception& e) {
             m_telemetryWorker.stopRecording();
@@ -1085,6 +1112,10 @@ void GuiApp::processIncomingResults() {
             }
             m_savedSelectionSnapshot.clear();
             m_singleSlotSelectionRestore = false;
+            if (m_restoreSceneAfterRun) {
+                m_scene = m_savedSceneBeforeCapture;
+                m_restoreSceneAfterRun = false;
+            }
         }
     }
 }
@@ -1442,6 +1473,119 @@ void GuiApp::runSingleBenchmarkItem(const BenchmarkItem& targetItem) {
         }
         m_savedSelectionSnapshot.clear();
         m_singleSlotSelectionRestore = false;
+    }
+}
+
+void GuiApp::startSceneVerificationCapture(const std::string& sceneTag) {
+    if (m_execState == ExecutionState::Running) {
+        return;
+    }
+
+    if (m_selectedBackend != "vulkan") {
+        setSelectedBackend("vulkan");
+    }
+
+    bool hasGpu = false;
+    for (const auto& d : m_devices) {
+        if (!d.isSystem && d.selected) {
+            hasGpu = true;
+            break;
+        }
+    }
+    if (!hasGpu) {
+        for (auto& d : m_devices) {
+            if (!d.isSystem && d.deviceIndex == m_telemetryGpuIndex) {
+                d.selected = true;
+                hasGpu = true;
+                break;
+            }
+        }
+        if (!hasGpu) {
+            for (auto& d : m_devices) {
+                if (!d.isSystem) {
+                    d.selected = true;
+                    hasGpu = true;
+                    break;
+                }
+            }
+        }
+        if (hasGpu) {
+            m_lastProbedBackend.clear();
+            updateBenchmarkSupport();
+        }
+    }
+
+    m_savedSelectionSnapshot.clear();
+    bool anyPicked = false;
+    for (auto& cat : m_categories) {
+        for (auto& sg : cat.subgroups) {
+            for (auto& itm : sg.items) {
+                m_savedSelectionSnapshot.push_back(itm.selected);
+                const bool match =
+                    (itm.id == "RayScheduling" && itm.isSupported &&
+                     (itm.configIndex == 9 || itm.configIndex == 11));
+                itm.selected = match;
+                if (match) anyPicked = true;
+            }
+        }
+    }
+    if (!anyPicked) {
+        for (auto& cat : m_categories) {
+            for (auto& sg : cat.subgroups) {
+                for (auto& itm : sg.items) {
+                    if (itm.id == "RayScheduling" && itm.isSupported && itm.configIndex == 0) {
+                        itm.selected = true;
+                        anyPicked = true;
+                        break;
+                    }
+                }
+                if (anyPicked) break;
+            }
+            if (anyPicked) break;
+        }
+    }
+
+    if (!anyPicked) {
+        size_t idx = 0;
+        for (auto& cat : m_categories) {
+            for (auto& sg : cat.subgroups) {
+                for (auto& itm : sg.items) {
+                    if (idx < m_savedSelectionSnapshot.size()) {
+                        itm.selected = m_savedSelectionSnapshot[idx++];
+                    }
+                }
+            }
+        }
+        m_savedSelectionSnapshot.clear();
+        m_statusMessage = "RayScheduling requires a Vulkan GPU supporting ray tracing.";
+        return;
+    }
+
+    m_savedSceneBeforeCapture = m_scene;
+    m_restoreSceneAfterRun = true;
+    m_scene = (sceneTag == "outdoor") ? "landscape" : sceneTag;
+    m_singleSlotSelectionRestore = true;
+    m_stayOnRtViewportAfterRun = true;
+
+    startBenchmarks();
+    if (m_execState != ExecutionState::Running) {
+        size_t idx = 0;
+        for (auto& cat : m_categories) {
+            for (auto& sg : cat.subgroups) {
+                for (auto& itm : sg.items) {
+                    if (idx < m_savedSelectionSnapshot.size()) {
+                        itm.selected = m_savedSelectionSnapshot[idx++];
+                    }
+                }
+            }
+        }
+        m_savedSelectionSnapshot.clear();
+        m_singleSlotSelectionRestore = false;
+        if (m_restoreSceneAfterRun) {
+            m_scene = m_savedSceneBeforeCapture;
+            m_restoreSceneAfterRun = false;
+        }
+        m_stayOnRtViewportAfterRun = false;
     }
 }
 
@@ -1982,8 +2126,7 @@ void GuiApp::renderSettingsModal() {
             if (m_scene == scenes[i]) { currentSceneIdx = i; break; }
         }
         if (ImGui::Combo("Target Scene", &currentSceneIdx, sceneLabels, 5)) {
-            m_scene = scenes[currentSceneIdx];
-            if (m_scene != "all") m_suiteActiveScene = m_scene;
+            setScene(scenes[currentSceneIdx]);
         }
 
         const char* resLabels[] = {

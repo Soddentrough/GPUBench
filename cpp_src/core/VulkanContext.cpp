@@ -5269,7 +5269,8 @@ bool VulkanContext::captureBufferToSharedPreviewImage(
     imgCi.arrayLayers = 1;
     imgCi.samples = VK_SAMPLE_COUNT_1_BIT;
     imgCi.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imgCi.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    imgCi.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
+                  VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     imgCi.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     imgCi.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
@@ -5493,6 +5494,235 @@ bool VulkanContext::captureBufferToSharedPreviewImage(
   vkDestroyPipelineLayout(device, pipeLayout, nullptr);
   vkDestroyDescriptorSetLayout(device, dsl, nullptr);
   vkDestroyShaderModule(device, shaderMod, nullptr);
+
+  {
+    std::lock_guard<std::mutex> plock(m_sharedPreviewMutex);
+    preview.generation = ++m_previewGenerationCounter;
+    m_sharedPreviewImages[key] = preview;
+  }
+  return true;
+}
+
+bool VulkanContext::uploadRgbToSharedPreviewImage(const std::string &key,
+                                                  uint32_t width,
+                                                  uint32_t height,
+                                                  const uint8_t *rgbPixels) {
+  if (device == VK_NULL_HANDLE || m_vmaAllocator == VK_NULL_HANDLE ||
+      computeQueue == VK_NULL_HANDLE || !rgbPixels || width == 0 ||
+      height == 0) {
+    return false;
+  }
+
+  SharedPreviewImage preview{};
+  SharedPreviewImage stale{};
+  bool hasStale = false;
+  bool reusedExisting = false;
+  {
+    std::lock_guard<std::mutex> plock(m_sharedPreviewMutex);
+    auto it = m_sharedPreviewImages.find(key);
+    if (it != m_sharedPreviewImages.end()) {
+      if (it->second.width == width && it->second.height == height &&
+          it->second.image != VK_NULL_HANDLE &&
+          it->second.view != VK_NULL_HANDLE) {
+        preview = it->second;
+        reusedExisting = true;
+      } else {
+        stale = it->second;
+        hasStale = true;
+        m_sharedPreviewImages.erase(it);
+      }
+    }
+  }
+
+  if (hasStale) {
+    waitIdle();
+    if (stale.view != VK_NULL_HANDLE) {
+      vkDestroyImageView(device, stale.view, nullptr);
+    }
+    if (stale.image != VK_NULL_HANDLE && stale.allocation != VK_NULL_HANDLE) {
+      vmaDestroyImage(m_vmaAllocator, stale.image, stale.allocation);
+    }
+  } else if (reusedExisting) {
+    waitIdle();
+  }
+
+  if (preview.image == VK_NULL_HANDLE) {
+    VkImageCreateInfo imgCi{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+    imgCi.imageType = VK_IMAGE_TYPE_2D;
+    imgCi.format = VK_FORMAT_R8G8B8A8_UNORM;
+    imgCi.extent = {width, height, 1};
+    imgCi.mipLevels = 1;
+    imgCi.arrayLayers = 1;
+    imgCi.samples = VK_SAMPLE_COUNT_1_BIT;
+    imgCi.tiling = VK_IMAGE_TILING_OPTIMAL;
+    imgCi.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
+                  VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    imgCi.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    imgCi.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    VmaAllocationCreateInfo vmaCi{};
+    vmaCi.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+    if (vmaCreateImage(m_vmaAllocator, &imgCi, &vmaCi, &preview.image,
+                       &preview.allocation, nullptr) != VK_SUCCESS) {
+      return false;
+    }
+
+    VkImageViewCreateInfo viewCi{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+    viewCi.image = preview.image;
+    viewCi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    viewCi.format = VK_FORMAT_R8G8B8A8_UNORM;
+    viewCi.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    viewCi.subresourceRange.baseMipLevel = 0;
+    viewCi.subresourceRange.levelCount = 1;
+    viewCi.subresourceRange.baseArrayLayer = 0;
+    viewCi.subresourceRange.layerCount = 1;
+    if (vkCreateImageView(device, &viewCi, nullptr, &preview.view) !=
+        VK_SUCCESS) {
+      vmaDestroyImage(m_vmaAllocator, preview.image, preview.allocation);
+      return false;
+    }
+    preview.width = width;
+    preview.height = height;
+  }
+
+  auto cleanupNewPreviewOnFail = [&]() {
+    if (!reusedExisting) {
+      if (preview.view != VK_NULL_HANDLE) {
+        vkDestroyImageView(device, preview.view, nullptr);
+      }
+      if (preview.image != VK_NULL_HANDLE &&
+          preview.allocation != VK_NULL_HANDLE) {
+        vmaDestroyImage(m_vmaAllocator, preview.image, preview.allocation);
+      }
+    }
+  };
+
+  const size_t pixelCount = static_cast<size_t>(width) * height;
+  const VkDeviceSize stagingBytes = static_cast<VkDeviceSize>(pixelCount) * 4;
+
+  VkBufferCreateInfo bufCi{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+  bufCi.size = stagingBytes;
+  bufCi.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+  bufCi.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+  VmaAllocationCreateInfo stagingAllocCi{};
+  stagingAllocCi.usage = VMA_MEMORY_USAGE_AUTO;
+  stagingAllocCi.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+                         VMA_ALLOCATION_CREATE_MAPPED_BIT;
+  VkBuffer stagingBuf = VK_NULL_HANDLE;
+  VmaAllocation stagingAlloc = VK_NULL_HANDLE;
+  VmaAllocationInfo stagingInfo{};
+  if (vmaCreateBuffer(m_vmaAllocator, &bufCi, &stagingAllocCi, &stagingBuf,
+                      &stagingAlloc, &stagingInfo) != VK_SUCCESS ||
+      !stagingInfo.pMappedData) {
+    if (stagingBuf != VK_NULL_HANDLE && stagingAlloc != VK_NULL_HANDLE) {
+      vmaDestroyBuffer(m_vmaAllocator, stagingBuf, stagingAlloc);
+    }
+    cleanupNewPreviewOnFail();
+    return false;
+  }
+
+  uint8_t *dst = static_cast<uint8_t *>(stagingInfo.pMappedData);
+  for (size_t i = 0; i < pixelCount; ++i) {
+    dst[i * 4 + 0] = rgbPixels[i * 3 + 0];
+    dst[i * 4 + 1] = rgbPixels[i * 3 + 1];
+    dst[i * 4 + 2] = rgbPixels[i * 3 + 2];
+    dst[i * 4 + 3] = 255u;
+  }
+  vmaFlushAllocation(m_vmaAllocator, stagingAlloc, 0, stagingBytes);
+
+  VkCommandPool transientPool = VK_NULL_HANDLE;
+  VkCommandPoolCreateInfo poolCi{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
+  poolCi.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
+  poolCi.queueFamilyIndex = computeQueueFamilyIndex;
+  if (vkCreateCommandPool(device, &poolCi, nullptr, &transientPool) !=
+      VK_SUCCESS) {
+    vmaDestroyBuffer(m_vmaAllocator, stagingBuf, stagingAlloc);
+    cleanupNewPreviewOnFail();
+    return false;
+  }
+
+  VkCommandBuffer cmd = VK_NULL_HANDLE;
+  VkCommandBufferAllocateInfo cmdAi{
+      VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+  cmdAi.commandPool = transientPool;
+  cmdAi.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+  cmdAi.commandBufferCount = 1;
+  if (vkAllocateCommandBuffers(device, &cmdAi, &cmd) != VK_SUCCESS) {
+    vkDestroyCommandPool(device, transientPool, nullptr);
+    vmaDestroyBuffer(m_vmaAllocator, stagingBuf, stagingAlloc);
+    cleanupNewPreviewOnFail();
+    return false;
+  }
+
+  VkCommandBufferBeginInfo cmdBi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+  cmdBi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  vkBeginCommandBuffer(cmd, &cmdBi);
+
+  VkImageMemoryBarrier toTransfer{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+  toTransfer.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+  toTransfer.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+  toTransfer.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  toTransfer.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  toTransfer.image = preview.image;
+  toTransfer.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+  toTransfer.srcAccessMask = 0;
+  toTransfer.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+  vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                       VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr,
+                       1, &toTransfer);
+
+  VkBufferImageCopy copyRegion{};
+  copyRegion.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+  copyRegion.imageExtent = {width, height, 1};
+  vkCmdCopyBufferToImage(cmd, stagingBuf, preview.image,
+                         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
+
+  VkImageMemoryBarrier toRead{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+  toRead.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+  toRead.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+  toRead.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  toRead.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  toRead.image = preview.image;
+  toRead.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+  toRead.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+  toRead.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+  vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                       VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT |
+                           VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                       0, 0, nullptr, 0, nullptr, 1, &toRead);
+
+  vkEndCommandBuffer(cmd);
+
+  VkFence fence = VK_NULL_HANDLE;
+  VkFenceCreateInfo fenceCi{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+  if (vkCreateFence(device, &fenceCi, nullptr, &fence) != VK_SUCCESS) {
+    vkDestroyCommandPool(device, transientPool, nullptr);
+    vmaDestroyBuffer(m_vmaAllocator, stagingBuf, stagingAlloc);
+    cleanupNewPreviewOnFail();
+    return false;
+  }
+
+  VkSubmitInfo submitInfo{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+  submitInfo.commandBufferCount = 1;
+  submitInfo.pCommandBuffers = &cmd;
+  VkResult subRes = VK_SUCCESS;
+  {
+    std::lock_guard<std::recursive_mutex> qlock(m_queueMutex);
+    subRes = vkQueueSubmit(computeQueue, 1, &submitInfo, fence);
+  }
+  bool ok = (subRes == VK_SUCCESS) &&
+            (vkWaitForFences(device, 1, &fence, VK_TRUE, 30'000'000'000ULL) ==
+             VK_SUCCESS);
+
+  vkDestroyFence(device, fence, nullptr);
+  vkDestroyCommandPool(device, transientPool, nullptr);
+  vmaDestroyBuffer(m_vmaAllocator, stagingBuf, stagingAlloc);
+
+  if (!ok) {
+    cleanupNewPreviewOnFail();
+    return false;
+  }
 
   {
     std::lock_guard<std::mutex> plock(m_sharedPreviewMutex);

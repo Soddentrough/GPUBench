@@ -51,8 +51,6 @@ imgui.ini
 
 # Render output dumps & benchmark result exports
 renders/*
-!renders/render_*_profile.json
-!renders/render_*_pipeline_breakdown.json
 gpubench_results*
 gpubench_*.json
 

@@ -1295,37 +1295,6 @@ VulkanContext::TextureResource VulkanContext::loadTextureFromFile(const std::str
             candidatePaths.push_back((exeDir / "share" / "gpubench" / filepath).string());
         }
 
-        const std::string renderPrefix = "renders/render_";
-        if (filepath.rfind(renderPrefix, 0) == 0) {
-            std::string rest = filepath.substr(renderPrefix.size());
-            auto replaceSuffix = [&](const std::string& fromSuf, const std::string& toSuf) {
-                if (rest.size() >= fromSuf.size() &&
-                    rest.compare(rest.size() - fromSuf.size(), fromSuf.size(), fromSuf) == 0) {
-                    rest = rest.substr(0, rest.size() - fromSuf.size()) + toSuf;
-                }
-            };
-            replaceSuffix("_traditional_megakernel.png", "_stage7_final.png");
-            replaceSuffix("_worklist_dgc.png", "_stage7_final.png");
-            replaceSuffix("_pathtracing_1spp_worklist.png", "_pathtracing_1spp.png");
-            replaceSuffix("_pathtracing_1spp_traditional.png", "_pathtracing_1spp.png");
-            replaceSuffix("_pathtracing_16spp_worklist.png", "_pathtracing_16spp.png");
-            replaceSuffix("_pathtracing_16spp_traditional.png", "_pathtracing_16spp.png");
-            replaceSuffix("_multilight_128_traditional.png", "_multilight_128_dgc.png");
-
-            std::string thumbRel = "assets/thumbnails/thumb_" + rest;
-            candidatePaths.push_back(thumbRel);
-            candidatePaths.push_back("../" + thumbRel);
-            candidatePaths.push_back("../../" + thumbRel);
-            if (!exeDir.empty()) {
-                candidatePaths.push_back((exeDir / thumbRel).string());
-                candidatePaths.push_back((exeDir / ".." / thumbRel).string());
-                candidatePaths.push_back((exeDir / ".." / "share" / "gpubench" / thumbRel).string());
-                candidatePaths.push_back((exeDir / "share" / "gpubench" / thumbRel).string());
-            }
-            candidatePaths.push_back("/usr/share/gpubench/" + thumbRel);
-            candidatePaths.push_back("/usr/local/share/gpubench/" + thumbRel);
-        }
-
         for (const auto& p : candidatePaths) {
             if (std::filesystem::exists(p, ec) && !ec) {
                 resolvedPath = p;

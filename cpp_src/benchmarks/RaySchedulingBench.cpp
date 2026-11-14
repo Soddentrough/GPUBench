@@ -3,6 +3,7 @@
 #include "IndoorAtriumScene.h"
 #include "OutdoorLandscapeScene.h"
 #include "ShowroomScene.h"
+#include "core/RunnerAPI.h"
 #include "core/VulkanContext.h"
 #include "third_party/yyjson.h"
 #include "utils/ImageExport.h"
@@ -315,11 +316,28 @@ void RaySchedulingBench::buildAS() {
   vkEndCommandBuffer(cmd);
 
   auto bvhT0 = std::chrono::high_resolution_clock::now();
+  VkFence bvhFence = VK_NULL_HANDLE;
+  VkFenceCreateInfo fenceInfo{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+  if (vkCreateFence(device, &fenceInfo, nullptr, &bvhFence) != VK_SUCCESS) {
+    vkDestroyCommandPool(device, tmpPool, nullptr);
+    throw std::runtime_error("Failed to create fence for AS build in RaySchedulingBench");
+  }
   VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
   submit.commandBufferCount = 1;
   submit.pCommandBuffers = &cmd;
-  vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE);
-  vkQueueWaitIdle(queue);
+  VkResult subRes = VK_SUCCESS;
+  {
+    std::lock_guard<std::recursive_mutex> qlock(vContext->getQueueMutex());
+    subRes = vkQueueSubmit(queue, 1, &submit, bvhFence);
+  }
+  VkResult waitRes = (subRes == VK_SUCCESS)
+                         ? vkWaitForFences(device, 1, &bvhFence, VK_TRUE, UINT64_MAX)
+                         : subRes;
+  vkDestroyFence(device, bvhFence, nullptr);
+  if (subRes != VK_SUCCESS || waitRes != VK_SUCCESS) {
+    vkDestroyCommandPool(device, tmpPool, nullptr);
+    throw std::runtime_error("Failed to build acceleration structures in RaySchedulingBench");
+  }
   auto bvhT1 = std::chrono::high_resolution_clock::now();
   bvhBuildTimeMs = std::chrono::duration<double, std::milli>(bvhT1 - bvhT0).count();
 
@@ -1994,7 +2012,12 @@ void RaySchedulingBench::performVisualVerification(bool isInteractive) {
 #ifdef HAVE_VULKAN
   if (!context || !fbTraditional || !fbWorkList) return;
   VulkanContext *vContext = dynamic_cast<VulkanContext *>(context);
+  std::shared_ptr<VulkanContext> sharedVk = GetSharedVulkanContextAPI();
   const bool writeDiskFiles = wantDumpRenders || dumpRenders;
+  const bool directGpuPreview =
+      captureGpuPreviews && vContext && (!sharedVk || sharedVk.get() == vContext);
+  const bool crossGpuPreview =
+      captureGpuPreviews && sharedVk && (sharedVk.get() != vContext);
   const std::string tag = (sceneType == SceneType::AAAOutdoorForest)
                               ? "forest"
                               : ((sceneType == SceneType::OutdoorLandscape)
@@ -2063,6 +2086,9 @@ void RaySchedulingBench::performVisualVerification(bool isInteractive) {
       if (vContext) {
         vContext->storeInMemoryJson(jsonRelKey, content);
       }
+      if (sharedVk && sharedVk.get() != vContext) {
+        sharedVk->storeInMemoryJson(jsonRelKey, content);
+      }
       if (writeDiskFiles && !diskPath.empty()) {
         std::ofstream jf(diskPath, std::ios::binary);
         if (jf.is_open()) {
@@ -2084,7 +2110,7 @@ void RaySchedulingBench::performVisualVerification(bool isInteractive) {
   uint32_t width = renderWidth, height = renderHeight;
   size_t bufferSize = width * height * sizeof(float) * 4;
 
-  if (captureGpuPreviews && vContext) {
+  if (directGpuPreview) {
     vContext->captureBufferToSharedPreviewImage(
         "render_" + tag + "_traditional_megakernel.png", fbTraditional, fbTraditional, width, height, 0u, cachedKernelDir);
     vContext->captureBufferToSharedPreviewImage(
@@ -2102,6 +2128,15 @@ void RaySchedulingBench::performVisualVerification(bool isInteractive) {
   std::vector<uint8_t> ldrTrad, ldrWork, ldrDiff;
   auto metrics = gpubench::ImageExport::compareAndTonemap(
       hdrTrad.data(), hdrWork.data(), width, height, ldrTrad, ldrWork, ldrDiff);
+
+  if (crossGpuPreview) {
+    sharedVk->uploadRgbToSharedPreviewImage(
+        "render_" + tag + "_traditional_megakernel.png", width, height, ldrTrad.data());
+    sharedVk->uploadRgbToSharedPreviewImage(
+        "render_" + tag + "_worklist_dgc.png", width, height, ldrWork.data());
+    sharedVk->uploadRgbToSharedPreviewImage(
+        "render_" + tag + "_difference_heatmap.png", width, height, ldrDiff.data());
+  }
 
   const std::string rendersDir = writeDiskFiles ? resolveRendersDir() : "renders";
 
@@ -2269,7 +2304,7 @@ void RaySchedulingBench::performVisualVerification(bool isInteractive) {
   context->waitIdle();
   Run(5);
   context->waitIdle();
-  if (captureGpuPreviews && vContext) {
+  if (directGpuPreview) {
     vContext->captureBufferToSharedPreviewImage(
         "render_" + tag + "_pathtracing_1spp_traditional.png", fbTraditional, fbTraditional, width, height, 0u, cachedKernelDir);
     vContext->captureBufferToSharedPreviewImage(
@@ -2281,6 +2316,14 @@ void RaySchedulingBench::performVisualVerification(bool isInteractive) {
   context->readBuffer(fbWorkList, 0, bufferSize, hdrWork.data());
   auto pt1Metrics = gpubench::ImageExport::compareAndTonemap(
       hdrTrad.data(), hdrWork.data(), width, height, ldrTrad, ldrWork, ldrDiff);
+  if (crossGpuPreview) {
+    sharedVk->uploadRgbToSharedPreviewImage(
+        "render_" + tag + "_pathtracing_1spp_traditional.png", width, height, ldrTrad.data());
+    sharedVk->uploadRgbToSharedPreviewImage(
+        "render_" + tag + "_pathtracing_1spp_worklist.png", width, height, ldrWork.data());
+    sharedVk->uploadRgbToSharedPreviewImage(
+        "render_" + tag + "_pathtracing_1spp_difference.png", width, height, ldrDiff.data());
+  }
   if (writeDiskFiles) {
     gpubench::ImageExport::writePNG(rendersDir + "/render_" + tag + "_pathtracing_1spp_traditional.png", width, height, ldrTrad);
     gpubench::ImageExport::writePNG(rendersDir + "/render_" + tag + "_pathtracing_1spp_worklist.png", width, height, ldrWork);
@@ -2345,7 +2388,7 @@ void RaySchedulingBench::performVisualVerification(bool isInteractive) {
   context->waitIdle();
   Run(24);
   context->waitIdle();
-  if (captureGpuPreviews && vContext) {
+  if (directGpuPreview) {
     vContext->captureBufferToSharedPreviewImage(
         "render_" + tag + "_pathtracing_16spp_traditional.png", fbTraditional, fbTraditional, width, height, 0u, cachedKernelDir);
     vContext->captureBufferToSharedPreviewImage(
@@ -2358,6 +2401,15 @@ void RaySchedulingBench::performVisualVerification(bool isInteractive) {
   auto pt16Metrics = gpubench::ImageExport::compareAndTonemap(
       hdrTrad.data(), hdrWork.data(), width, height, ldrTrad, ldrWork, ldrDiff);
   samplesPerPixel = savedSpp;
+
+  if (crossGpuPreview) {
+    sharedVk->uploadRgbToSharedPreviewImage(
+        "render_" + tag + "_pathtracing_16spp_traditional.png", width, height, ldrTrad.data());
+    sharedVk->uploadRgbToSharedPreviewImage(
+        "render_" + tag + "_pathtracing_16spp_worklist.png", width, height, ldrWork.data());
+    sharedVk->uploadRgbToSharedPreviewImage(
+        "render_" + tag + "_pathtracing_16spp_difference.png", width, height, ldrDiff.data());
+  }
 
   if (writeDiskFiles) {
     gpubench::ImageExport::writePNG(rendersDir + "/render_" + tag + "_pathtracing_16spp_traditional.png", width, height, ldrTrad);
@@ -2425,7 +2477,7 @@ void RaySchedulingBench::performVisualVerification(bool isInteractive) {
   context->waitIdle();
   Run(34);
   context->waitIdle();
-  if (captureGpuPreviews && vContext) {
+  if (directGpuPreview) {
     vContext->captureBufferToSharedPreviewImage(
         "render_" + tag + "_multilight_128_traditional.png", fbTraditional, fbTraditional, width, height, 0u, cachedKernelDir);
     vContext->captureBufferToSharedPreviewImage(
@@ -2437,6 +2489,14 @@ void RaySchedulingBench::performVisualVerification(bool isInteractive) {
   context->readBuffer(fbWorkList, 0, bufferSize, hdrWork.data());
   auto mlMetrics = gpubench::ImageExport::compareAndTonemap(
       hdrTrad.data(), hdrWork.data(), width, height, ldrTrad, ldrWork, ldrDiff);
+  if (crossGpuPreview) {
+    sharedVk->uploadRgbToSharedPreviewImage(
+        "render_" + tag + "_multilight_128_traditional.png", width, height, ldrTrad.data());
+    sharedVk->uploadRgbToSharedPreviewImage(
+        "render_" + tag + "_multilight_128_dgc.png", width, height, ldrWork.data());
+    sharedVk->uploadRgbToSharedPreviewImage(
+        "render_" + tag + "_multilight_128_difference.png", width, height, ldrDiff.data());
+  }
   if (writeDiskFiles) {
     gpubench::ImageExport::writePNG(rendersDir + "/render_" + tag + "_multilight_128_traditional.png", width, height, ldrTrad);
     gpubench::ImageExport::writePNG(rendersDir + "/render_" + tag + "_multilight_128_dgc.png", width, height, ldrWork);
@@ -2446,11 +2506,11 @@ void RaySchedulingBench::performVisualVerification(bool isInteractive) {
   // Render and dump Alpha Cutout Traversal Divergence (Config 27)
   Run(27);
   context->waitIdle();
-  if (captureGpuPreviews && vContext) {
+  if (directGpuPreview) {
     vContext->captureBufferToSharedPreviewImage(
         "render_" + tag + "_alpha_cutout.png", fbWorkList, fbWorkList, width, height, 0u, cachedKernelDir);
   }
-  if (writeDiskFiles) {
+  if (writeDiskFiles || crossGpuPreview) {
     context->readBuffer(fbWorkList, 0, bufferSize, hdrWork.data());
     std::vector<uint8_t> ldrAlpha(width * height * 3, 0);
     for (uint32_t i = 0; i < width * height; ++i) {
@@ -2458,8 +2518,14 @@ void RaySchedulingBench::performVisualVerification(bool isInteractive) {
       ldrAlpha[i * 3 + 1] = gpubench::ImageExport::floatToSrgb(hdrWork[i * 4 + 1]);
       ldrAlpha[i * 3 + 2] = gpubench::ImageExport::floatToSrgb(hdrWork[i * 4 + 2]);
     }
-    std::string alphaPng = rendersDir + "/render_" + tag + "_alpha_cutout.png";
-    gpubench::ImageExport::writePNG(alphaPng, width, height, ldrAlpha);
+    if (crossGpuPreview) {
+      sharedVk->uploadRgbToSharedPreviewImage(
+          "render_" + tag + "_alpha_cutout.png", width, height, ldrAlpha.data());
+    }
+    if (writeDiskFiles) {
+      std::string alphaPng = rendersDir + "/render_" + tag + "_alpha_cutout.png";
+      gpubench::ImageExport::writePNG(alphaPng, width, height, ldrAlpha);
+    }
   }
 
   // Step-by-step pipeline decomposition breakdown
@@ -2577,13 +2643,18 @@ void RaySchedulingBench::dumpPipelineBreakdown(const std::string &tag, bool isIn
 #ifdef HAVE_VULKAN
   if (!context || !fbTraditional || !kernelTraditional) return;
   VulkanContext *vContext = static_cast<VulkanContext *>(context);
+  std::shared_ptr<VulkanContext> sharedVk = GetSharedVulkanContextAPI();
   const bool writeDiskFiles = wantDumpRenders || dumpRenders;
+  const bool directGpuPreview =
+      captureGpuPreviews && vContext && (!sharedVk || sharedVk.get() == vContext);
+  const bool crossGpuPreview =
+      captureGpuPreviews && sharedVk && (sharedVk.get() != vContext);
 
   uint32_t width = renderWidth, height = renderHeight;
   size_t bufferSize = width * height * sizeof(float) * 4;
   std::vector<float> hdrBuf;
   std::vector<uint8_t> ldrBuf;
-  if (writeDiskFiles) {
+  if (writeDiskFiles || crossGpuPreview) {
     hdrBuf.assign(width * height * 4, 0.0f);
     ldrBuf.assign(width * height * 3, 0);
   }
@@ -2682,24 +2753,29 @@ void RaySchedulingBench::dumpPipelineBreakdown(const std::string &tag, bool isIn
 
     std::string relPngKey = "render_" + tag + "_" + st.id + ".png";
     std::string pngPath = rendersDir + "/" + relPngKey;
-    if (captureGpuPreviews && vContext) {
+    if (directGpuPreview) {
       vContext->captureBufferToSharedPreviewImage(
           relPngKey, fbTraditional, fbTraditional, width, height, 0u, cachedKernelDir);
     }
 
-    if (writeDiskFiles) {
+    if (writeDiskFiles || crossGpuPreview) {
       context->readBuffer(fbTraditional, 0, bufferSize, hdrBuf.data());
       for (uint32_t i = 0; i < width * height; ++i) {
         ldrBuf[i * 3 + 0] = gpubench::ImageExport::floatToSrgb(hdrBuf[i * 4 + 0]);
         ldrBuf[i * 3 + 1] = gpubench::ImageExport::floatToSrgb(hdrBuf[i * 4 + 1]);
         ldrBuf[i * 3 + 2] = gpubench::ImageExport::floatToSrgb(hdrBuf[i * 4 + 2]);
       }
-      gpubench::ImageExport::writePNG(pngPath, width, height, ldrBuf);
-      if (st.id == "stage7_final") {
-        std::string tradPng = rendersDir + "/render_" + tag + "_traditional_megakernel.png";
-        if (std::filesystem::exists(tradPng)) {
-          std::error_code ec;
-          std::filesystem::copy_file(tradPng, pngPath, std::filesystem::copy_options::overwrite_existing, ec);
+      if (crossGpuPreview) {
+        sharedVk->uploadRgbToSharedPreviewImage(relPngKey, width, height, ldrBuf.data());
+      }
+      if (writeDiskFiles) {
+        gpubench::ImageExport::writePNG(pngPath, width, height, ldrBuf);
+        if (st.id == "stage7_final") {
+          std::string tradPng = rendersDir + "/render_" + tag + "_traditional_megakernel.png";
+          if (std::filesystem::exists(tradPng)) {
+            std::error_code ec;
+            std::filesystem::copy_file(tradPng, pngPath, std::filesystem::copy_options::overwrite_existing, ec);
+          }
         }
       }
     }
@@ -2747,6 +2823,9 @@ void RaySchedulingBench::dumpPipelineBreakdown(const std::string &tag, bool isIn
     free(jsonStr);
     std::string relKey = "render_" + tag + "_pipeline_breakdown.json";
     vContext->storeInMemoryJson(relKey, content);
+    if (sharedVk && sharedVk.get() != vContext) {
+      sharedVk->storeInMemoryJson(relKey, content);
+    }
     if (writeDiskFiles) {
       std::ofstream jf(rendersDir + "/" + relKey, std::ios::binary);
       if (jf.is_open()) {
