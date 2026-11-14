@@ -184,11 +184,16 @@ if(Vulkan_FOUND)
         get_filename_component(SHADER_NAME ${SHADER} NAME)
         set(DEST_SHADER "${CMAKE_CURRENT_BINARY_DIR}/kernels/vulkan/${SHADER_NAME}")
         set(SPV_SHADER "${DEST_SHADER}.spv")
+        # spirv-opt in shaderc 2026.2 rejects SPV_EXT_ocp_microscaling_types capability operands (4228/4229).
+        set(SHADER_OPT_FLAG "-O")
+        if(SHADER_NAME STREQUAL "coop_matrix_fp4.comp" OR SHADER_NAME STREQUAL "coop_matrix_fp6.comp")
+            set(SHADER_OPT_FLAG "-O0")
+        endif()
         
         # Pre-compile GLSL to SPIR-V
         add_custom_command(
             OUTPUT ${SPV_SHADER}
-            COMMAND ${GLSLC_EXECUTABLE} -O --target-env=vulkan1.4 -I${CMAKE_CURRENT_SOURCE_DIR}/shaders ${SHADER} -o ${SPV_SHADER}
+            COMMAND ${GLSLC_EXECUTABLE} ${SHADER_OPT_FLAG} --target-env=vulkan1.4 -I${CMAKE_CURRENT_SOURCE_DIR}/shaders ${SHADER} -o ${SPV_SHADER}
             DEPENDS ${SHADER} ${SHADER_HEADERS}
             COMMENT "Compiling Vulkan shader to SPIR-V: ${SHADER}"
         )
@@ -632,6 +637,7 @@ if(GPUBENCH_BUILD_GUI)
             cpp_src/gui/GuiApp.cpp
             cpp_src/gui/GuiSuitePanel.cpp
             cpp_src/gui/GuiDiagramRenderer.cpp
+            cpp_src/gui/GuiIsaPanel.cpp
             cpp_src/gui/GuiTelemetryPanel.cpp
             cpp_src/gui/GuiScorecardPanel.cpp
             cpp_src/gui/GuiViewportPanel.cpp

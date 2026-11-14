@@ -1,316 +1,610 @@
 #include "GuiApp.h"
 #include "GuiUiHelpers.h"
-#include "core/RooflineModel.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
+#include <string>
+#include <vector>
 
 namespace gpubench::gui {
 
-void GuiApp::renderRooflinePanel() {
-    ImGui::Spacing();
+namespace {
 
-    auto rooflines = gpubench::RooflineModel::analyze(m_allResults);
-    if (rooflines.empty()) {
+bool isHostSystemResult(const ResultData& r) {
+    return r.component == "System" || r.backendName == "CPU" ||
+           r.backendName == "System" || r.deviceIndex == UINT32_MAX ||
+           r.deviceName == "Host CPU";
+}
+
+enum ChartDomain : int {
+    DOMAIN_COMPUTE = 0,
+    DOMAIN_MEMORY = 1,
+    DOMAIN_RAY = 2,
+    DOMAIN_BVH = 3,
+    DOMAIN_SCHED_GFX = 4,
+    DOMAIN_LATENCY = 5,
+    DOMAIN_COUNT = 6
+};
+
+struct ChartDeviceGroup {
+    bool isHost{false};
+    uint32_t deviceIndex{0};
+    std::string deviceName;
+    std::string backendName;
+    std::vector<const ResultData*> results;
+};
+
+struct ChartBarItem {
+    const ResultData* res{nullptr};
+    std::string shortLabel;
+    std::string fullLabel;
+    double perfVal{0.0};
+    std::string perfText;
+    double effVal{0.0};
+    std::string effText;
+    double watts{0.0};
+    double medianMs{0.0};
+    bool isMatrix{false};
+};
+
+std::string buildChartFullLabel(const ResultData& r) {
+    if (r.benchmarkName == "Vector" || r.benchmarkName == "Matrix") {
+        if (!r.subcategory.empty()) {
+            const size_t lp = r.subcategory.find('(');
+            const size_t rp = r.subcategory.find(')', lp);
+            if (lp != std::string::npos && rp != std::string::npos && rp > lp + 1) {
+                return r.subcategory.substr(lp + 1, rp - lp - 1) + " (" + r.benchmarkName + ")";
+            }
+            return r.subcategory + " (" + r.benchmarkName + ")";
+        }
+    }
+    return r.benchmarkName;
+}
+
+std::string abbreviateChartTickLabel(const std::string& full) {
+    std::string s = full;
+    if (s.rfind("ILP & Dual-Issue (", 0) == 0) {
+        s = s.substr(18);
+        if (!s.empty() && s.back() == ')') s.pop_back();
+        if (s.find("Ping-Pong") != std::string::npos) {
+            s = (s.rfind("FP32", 0) == 0) ? "FP32 Base" : "INT32 Base";
+        } else if (s.find("Moderate ILP") != std::string::npos) {
+            s = (s.rfind("FP32", 0) == 0) ? "FP32 Mid ILP" : "INT32 Mid ILP";
+        } else if (s.find("Peak ILP") != std::string::npos) {
+            s = (s.rfind("FP32", 0) == 0) ? "FP32 Peak ILP" : "INT32 Peak ILP";
+        } else if (s.find("Combined FP32 + INT32") != std::string::npos) {
+            s = "FP32+INT32 Dual";
+        }
+    } else if (s.rfind("Device Memory Bandwidth (", 0) == 0) {
+        s = "VRAM: " + s.substr(25);
+        if (!s.empty() && s.back() == ')') s.pop_back();
+    } else if (s.rfind("RayScheduling - ", 0) == 0) {
+        s = "RT " + s.substr(16);
+    } else if (s.rfind("Cache Latency Curve - ", 0) == 0) {
+        s = "Cache: " + s.substr(22);
+    }
+    if (s.size() > 16) {
+        s = s.substr(0, 14) + "..";
+    }
+    return s;
+}
+
+int classifyChartDomain(const ResultData& r) {
+    if (isLowerBetterMetric(r.metric)) {
+        return DOMAIN_LATENCY;
+    }
+    if (r.metric.find("FLOPS") != std::string::npos || r.metric.find("OPS") != std::string::npos) {
+        return DOMAIN_COMPUTE;
+    }
+    if (r.metric.find("GB/s") != std::string::npos || r.metric.find("TB/s") != std::string::npos) {
+        return DOMAIN_MEMORY;
+    }
+    if (r.metric == "MRays/s" || r.metric == "MHits/s") {
+        return DOMAIN_RAY;
+    }
+    if (r.metric == "GIS/s" || r.metric == "MBVH/s" ||
+        r.metric == "MTris/s" || r.metric == "MInst/s") {
+        return DOMAIN_BVH;
+    }
+    return DOMAIN_SCHED_GFX;
+}
+
+const char* domainTabName(int dom) {
+    switch (dom) {
+    case DOMAIN_COMPUTE:   return "COMPUTE";
+    case DOMAIN_MEMORY:    return "MEMORY BW";
+    case DOMAIN_RAY:       return "RAY TRACING";
+    case DOMAIN_BVH:       return "BVH & INTERSECT";
+    case DOMAIN_SCHED_GFX: return "SCHED & GFX";
+    case DOMAIN_LATENCY:   return "LATENCY";
+    default:               return "OTHER";
+    }
+}
+
+const char* domainPerfAxisLabel(int dom) {
+    switch (dom) {
+    case DOMAIN_COMPUTE:   return "Throughput (TFLOPS / TOPS)";
+    case DOMAIN_MEMORY:    return "Bandwidth (GB/s)";
+    case DOMAIN_RAY:       return "Ray Throughput (MRays/s)";
+    case DOMAIN_BVH:       return "BVH / Primitives Rate (MOp/s)";
+    case DOMAIN_SCHED_GFX: return "Throughput (MItems/s or MOp/s)";
+    case DOMAIN_LATENCY:   return "Latency (ns — lower is faster)";
+    default:               return "Throughput";
+    }
+}
+
+const char* domainEffAxisLabel(int dom) {
+    switch (dom) {
+    case DOMAIN_COMPUTE:   return "Efficiency (GFLOPS/W | GOPS/W)";
+    case DOMAIN_MEMORY:    return "Efficiency (GB/s per Watt)";
+    case DOMAIN_RAY:       return "Efficiency (MRays/s per Watt)";
+    case DOMAIN_BVH:       return "Efficiency (MOp/s per Watt)";
+    case DOMAIN_SCHED_GFX: return "Efficiency (MOp/s per Watt)";
+    case DOMAIN_LATENCY:   return "Board Power (Watts)";
+    default:               return "Perf / Watt";
+    }
+}
+
+double computeLatencyNs(const ResultData& r) {
+    if (r.metric == "ns") {
+        return (r.operations > 0) ? ((r.time_ms * 1e6) / static_cast<double>(r.operations)) : r.time_ms;
+    }
+    if (r.metric == "us") {
+        return (r.operations > 1) ? ((r.time_ms * 1e6) / static_cast<double>(r.operations)) : (r.time_ms * 1000.0);
+    }
+    return r.time_ms * 1e6;
+}
+
+} // namespace
+
+void GuiApp::renderRooflinePanel() {
+    const BringUpColors c = getBringUpColors(m_palette);
+
+    std::vector<ChartDeviceGroup> devGroups;
+    for (const auto& r : m_allResults) {
+        if (r.isUnsupported || !r.isValid || r.time_ms <= 0.0) continue;
+        if (r.operations == 0 && r.metric != "us" && r.metric != "ms") continue;
+
+        const bool rHost = isHostSystemResult(r);
+        ChartDeviceGroup* target = nullptr;
+        for (auto& g : devGroups) {
+            if (g.isHost == rHost &&
+                (rHost || (g.deviceIndex == r.deviceIndex && g.backendName == r.backendName))) {
+                target = &g;
+                break;
+            }
+        }
+        if (!target) {
+            devGroups.push_back(ChartDeviceGroup{
+                rHost, r.deviceIndex, r.deviceName, rHost ? "CPU" : r.backendName, {}
+            });
+            target = &devGroups.back();
+        }
+        target->results.push_back(&r);
+    }
+
+    if (devGroups.empty()) {
+        drawEtchedHeader("INS-02", "THROUGHPUT & POWER EFFICIENCY", c, "NO DATA");
         ImGui::Spacing();
-        ImGui::TextDisabled("Empirical Roofline Model requires at least one measured GPU compute or memory bandwidth result.");
-        ImGui::TextDisabled("Tip: Click 'Quick Roofline Preset' in the 'Benchmark Suite' tab and run, or import a JSON file.");
+        ImGui::TextColored(c.textSecondary, "Run at least one valid GPU or CPU workload to view Throughput & Power Efficiency charts.");
+        ImGui::TextColored(c.textMuted, "Tip: Click [RUN TESTS] in the top bar or load a saved JSON file via [SESSION].");
         return;
     }
 
-    if (m_rooflineDeviceFilter < 0 || m_rooflineDeviceFilter >= static_cast<int>(rooflines.size())) {
+    if (m_rooflineDeviceFilter < 0 || m_rooflineDeviceFilter >= static_cast<int>(devGroups.size())) {
         m_rooflineDeviceFilter = 0;
     }
+    const auto& devGroup = devGroups[static_cast<size_t>(m_rooflineDeviceFilter)];
 
-    // Device Selector Pills (if multi-GPU / multi-backend results exist)
-    if (rooflines.size() > 1) {
-        for (size_t i = 0; i < rooflines.size(); ++i) {
-            if (i > 0) sameLineIfFits(s(180.0f), s(6.0f));
-            std::string lbl = "[GPU " + std::to_string(rooflines[i].deviceIndex) + "] " +
-                              rooflines[i].deviceName + " (" + rooflines[i].backendName + ")";
-            bool active = (m_rooflineDeviceFilter == static_cast<int>(i));
-            if (active) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.05f, 0.55f, 0.78f, 1.0f));
-            if (ImGui::SmallButton(lbl.c_str())) {
-                m_rooflineDeviceFilter = static_cast<int>(i);
+    char devTag[96];
+    if (devGroup.isHost) {
+        std::snprintf(devTag, sizeof(devTag), "HOST CPU");
+    } else {
+        std::snprintf(devTag, sizeof(devTag), "GPU %u | %s", devGroup.deviceIndex, devGroup.backendName.c_str());
+    }
+    drawEtchedHeader("INS-02", "THROUGHPUT & POWER EFFICIENCY", c, devTag);
+
+    // Group device results by domain
+    std::array<std::vector<ChartBarItem>, DOMAIN_COUNT> domainItems;
+    for (const ResultData* rPtr : devGroup.results) {
+        const ResultData& r = *rPtr;
+        const int dom = classifyChartDomain(r);
+        const double opsPerSec = (r.operations > 0)
+            ? ((static_cast<double>(r.operations) / r.time_ms) * 1000.0)
+            : 0.0;
+        const double watts = (r.hasPowerTelemetry && r.powerWatts > 0.0f)
+            ? static_cast<double>(r.powerWatts)
+            : 0.0;
+
+        ChartBarItem item{};
+        item.res = &r;
+        item.fullLabel = buildChartFullLabel(r);
+        item.shortLabel = abbreviateChartTickLabel(item.fullLabel);
+        item.perfText = formatResultScoreString(r, true);
+        item.watts = watts;
+        item.medianMs = (r.median_time_ms > 0.0) ? r.median_time_ms : r.time_ms;
+        item.isMatrix = (item.fullLabel.find("Matrix") != std::string::npos ||
+                         item.fullLabel.find("FP8") != std::string::npos ||
+                         item.fullLabel.find("INT8") != std::string::npos ||
+                         item.fullLabel.find("WMMA") != std::string::npos);
+
+        switch (dom) {
+        case DOMAIN_COMPUTE:
+            item.perfVal = opsPerSec / 1e12;
+            if (watts > 0.0) {
+                item.effVal = (opsPerSec / 1e9) / watts;
+                char eb[48];
+                const char* unitStr = (r.metric.find("FLOP") != std::string::npos) ? "GFLOPS/W" : "GOPS/W";
+                if (item.effVal >= 100.0) {
+                    std::snprintf(eb, sizeof(eb), "%.0f %s", item.effVal, unitStr);
+                } else {
+                    std::snprintf(eb, sizeof(eb), "%.1f %s", item.effVal, unitStr);
+                }
+                item.effText = eb;
             }
-            if (active) ImGui::PopStyleColor();
+            break;
+        case DOMAIN_MEMORY:
+            item.perfVal = opsPerSec / 1e9;
+            if (watts > 0.0) {
+                item.effVal = item.perfVal / watts;
+                char eb[48];
+                std::snprintf(eb, sizeof(eb), "%.2f GB/s/W", item.effVal);
+                item.effText = eb;
+            }
+            break;
+        case DOMAIN_RAY:
+            item.perfVal = opsPerSec / 1e6;
+            if (watts > 0.0) {
+                item.effVal = item.perfVal / watts;
+                char eb[48];
+                std::snprintf(eb, sizeof(eb), "%.2f MR/s/W", item.effVal);
+                item.effText = eb;
+            }
+            break;
+        case DOMAIN_BVH:
+        case DOMAIN_SCHED_GFX:
+            item.perfVal = opsPerSec / 1e6;
+            if (watts > 0.0) {
+                item.effVal = item.perfVal / watts;
+                char eb[48];
+                std::snprintf(eb, sizeof(eb), "%.1f M/s/W", item.effVal);
+                item.effText = eb;
+            }
+            break;
+        case DOMAIN_LATENCY:
+            item.perfVal = computeLatencyNs(r);
+            if (watts > 0.0) {
+                item.effVal = watts;
+                char eb[48];
+                std::snprintf(eb, sizeof(eb), "%.0f W", watts);
+                item.effText = eb;
+            }
+            break;
+        default:
+            break;
         }
-        ImGui::Spacing();
+
+        if (item.perfVal > 0.0) {
+            domainItems[dom].push_back(std::move(item));
+        }
     }
 
-    const auto& rf = rooflines[static_cast<size_t>(m_rooflineDeviceFilter)];
-    const double vramGbs = rf.primaryVramGBps();
-    const double fp32Tops = rf.primaryFp32Gops() / 1000.0;
-    const double maxTops = rf.highestComputeGops() / 1000.0;
-    const double fp32Ridge = (vramGbs > 0.0 && fp32Tops > 0.0) ? ((fp32Tops * 1000.0) / vramGbs) : 0.0;
+    int firstPopulatedDom = -1;
+    int populatedCount = 0;
+    for (int d = 0; d < DOMAIN_COUNT; ++d) {
+        if (!domainItems[d].empty()) {
+            if (firstPopulatedDom < 0) firstPopulatedDom = d;
+            populatedCount++;
+        }
+    }
+    if (firstPopulatedDom < 0) return;
 
-    // 4-Card Roofline Summary Strip
-    if (ImGui::BeginTable("RooflineKpiStrip", 4, ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_SizingStretchSame)) {
+    if (m_chartDomainFilter < 0 || m_chartDomainFilter >= DOMAIN_COUNT ||
+        domainItems[m_chartDomainFilter].empty()) {
+        m_chartDomainFilter = firstPopulatedDom;
+    }
+
+    // Optional selector bar (Devices & Metric Domains)
+    if (devGroups.size() > 1 || populatedCount > 1) {
+        ImGui::Spacing();
+        bool needSameLine = false;
+        if (devGroups.size() > 1) {
+            for (size_t i = 0; i < devGroups.size(); ++i) {
+                std::string lbl = devGroups[i].isHost
+                    ? "HOST CPU"
+                    : ("GPU " + std::to_string(devGroups[i].deviceIndex) + " (" + devGroups[i].backendName + ")");
+                float bw = ImGui::CalcTextSize(lbl.c_str()).x + s(16.0f);
+                if (needSameLine) sameLineIfFits(bw, s(4.0f));
+                needSameLine = true;
+                std::string bid = "##ChartDev_" + std::to_string(i);
+                if (tacticalButton(bid.c_str(), lbl.c_str(), ImVec2(0.0f, s(21.0f)),
+                                   m_rooflineDeviceFilter == static_cast<int>(i), c)) {
+                    m_rooflineDeviceFilter = static_cast<int>(i);
+                }
+            }
+        }
+        if (populatedCount > 1) {
+            if (devGroups.size() > 1) {
+                ImGui::SameLine(0.0f, s(12.0f));
+                ImGui::TextColored(c.textMuted, "|");
+                needSameLine = true;
+            }
+            for (int d = 0; d < DOMAIN_COUNT; ++d) {
+                if (domainItems[d].empty()) continue;
+                char dlbl[48];
+                std::snprintf(dlbl, sizeof(dlbl), "%s (%zu)", domainTabName(d), domainItems[d].size());
+                float bw = ImGui::CalcTextSize(dlbl).x + s(16.0f);
+                if (needSameLine) sameLineIfFits(bw, s(4.0f));
+                needSameLine = true;
+                std::string bid = "##ChartDom_" + std::to_string(d);
+                if (tacticalButton(bid.c_str(), dlbl, ImVec2(0.0f, s(21.0f)), m_chartDomainFilter == d, c)) {
+                    m_chartDomainFilter = d;
+                }
+            }
+        }
+    }
+
+    std::vector<ChartBarItem> bars = domainItems[m_chartDomainFilter];
+    const bool isLatencyDom = (m_chartDomainFilter == DOMAIN_LATENCY);
+
+    // Sort ascending so highest-performing entry is drawn at the top row (y = count - 1)
+    std::sort(bars.begin(), bars.end(), [&](const ChartBarItem& a, const ChartBarItem& b) {
+        return isLatencyDom ? (a.perfVal > b.perfVal) : (a.perfVal < b.perfVal);
+    });
+
+    const size_t totalInDomain = bars.size();
+    const size_t maxBars = (m_f2SubMode == 0) ? 7u : 15u;
+    if (bars.size() > maxBars) {
+        // Keep the top-performing tail (end of ascending-sorted array)
+        bars.erase(bars.begin(), bars.end() - static_cast<std::ptrdiff_t>(maxBars));
+    }
+
+    // Compute domain KPI stats across all entries in this domain
+    const auto& allDom = domainItems[m_chartDomainFilter];
+    const ChartBarItem* topPerfItem = &bars.back();
+    const ChartBarItem* topEffItem = nullptr;
+    double sumWatts = 0.0;
+    double maxWatts = 0.0;
+    int powerCount = 0;
+    double fp32PerfVal = 0.0;
+
+    for (const auto& it : allDom) {
+        if (m_chartDomainFilter == DOMAIN_COMPUTE && it.fullLabel == "FP32") {
+            fp32PerfVal = it.perfVal;
+        }
+        if (it.watts > 0.0) {
+            sumWatts += it.watts;
+            if (it.watts > maxWatts) maxWatts = it.watts;
+            powerCount++;
+            if (!isLatencyDom && (!topEffItem || it.effVal > topEffItem->effVal)) {
+                topEffItem = &it;
+            }
+        }
+    }
+    const bool hasAnyPower = (powerCount > 0);
+
+    ImGui::Spacing();
+
+    // 4-Cell Summary Strip
+    if (ImGui::BeginTable("PerfEfficiencyKpiStrip", 4, ImGuiTableFlags_Borders | ImGuiTableFlags_SizingStretchSame)) {
         ImGui::TableNextRow();
 
         ImGui::TableNextColumn();
-        ImGui::TextDisabled("EMPIRICAL VRAM CEILING");
+        ImGui::TextColored(c.textMuted, isLatencyDom ? "FASTEST LATENCY" : "TOP THROUGHPUT");
         pushBoldFont();
-        if (vramGbs > 0.0) ImGui::TextColored(ImVec4(0.22f, 0.92f, 0.56f, 1.0f), "%.1f GB/s", vramGbs);
-        else ImGui::TextDisabled("Not Measured");
+        ImGui::TextColored(c.phosphorHi, "%s", topPerfItem->perfText.c_str());
+        popBoldFont();
+        ImGui::TextColored(c.textMuted, "%s",
+                           fitTextToPixelWidth(topPerfItem->fullLabel, ImGui::GetContentRegionAvail().x).c_str());
+
+        ImGui::TableNextColumn();
+        ImGui::TextColored(c.textMuted, isLatencyDom ? "AVG / PEAK POWER" : "PEAK POWER EFFICIENCY");
+        pushBoldFont();
+        if (isLatencyDom && hasAnyPower) {
+            ImGui::TextColored(c.warnColor, "%.0f W avg / %.0f W pk", sumWatts / powerCount, maxWatts);
+        } else if (topEffItem && !topEffItem->effText.empty()) {
+            ImGui::TextColored(c.okColor, "%s", topEffItem->effText.c_str());
+        } else {
+            ImGui::TextColored(c.textMuted, "N/A (No Power Sensor)");
+        }
+        popBoldFont();
+        if (topEffItem) {
+            ImGui::TextColored(c.textMuted, "%s (%.0f W)",
+                               fitTextToPixelWidth(topEffItem->shortLabel, std::max(s(60.0f), ImGui::GetContentRegionAvail().x - s(55.0f))).c_str(),
+                               topEffItem->watts);
+        }
+
+        ImGui::TableNextColumn();
+        ImGui::TextColored(c.textMuted, hasAnyPower ? "BOARD POWER RANGE" : "FASTEST KERNEL TIME");
+        pushBoldFont();
+        if (hasAnyPower) {
+            ImGui::TextColored(c.warnColor, "%.0f W avg  |  %.0f W peak", sumWatts / powerCount, maxWatts);
+        } else {
+            double minMs = topPerfItem->medianMs;
+            for (const auto& it : allDom) minMs = std::min(minMs, it.medianMs);
+            ImGui::TextColored(c.cyanAccent, "%.2f ms median", minMs);
+        }
         popBoldFont();
 
         ImGui::TableNextColumn();
-        ImGui::TextDisabled("EMPIRICAL FP32 CEILING");
+        ImGui::TextColored(c.textMuted, "WORKLOADS COMPARED");
         pushBoldFont();
-        if (fp32Tops > 0.0) ImGui::TextColored(ImVec4(0.12f, 0.84f, 0.98f, 1.0f), "%.2f TFLOPS", fp32Tops);
-        else ImGui::TextDisabled("Not Measured");
-        popBoldFont();
-
-        ImGui::TableNextColumn();
-        ImGui::TextDisabled("PEAK MATRIX / TENSOR CEILING");
-        pushBoldFont();
-        if (maxTops > 0.0) ImGui::TextColored(ImVec4(0.98f, 0.76f, 0.22f, 1.0f), "%.2f TOPS/TFLOPS", maxTops);
-        else ImGui::TextDisabled("Not Measured");
-        popBoldFont();
-
-        ImGui::TableNextColumn();
-        ImGui::TextDisabled("FP32 x VRAM RIDGE POINT");
-        pushBoldFont();
-        if (fp32Ridge > 0.0) ImGui::TextColored(ImVec4(0.86f, 0.58f, 0.98f, 1.0f), "%.2f FLOP/Byte", fp32Ridge);
-        else ImGui::TextDisabled("—");
+        if (fp32PerfVal > 0.0 && topPerfItem->perfVal > fp32PerfVal * 1.05) {
+            ImGui::TextColored(c.cyanAccent, "%zu shown (%.1fx vs FP32)", bars.size(), topPerfItem->perfVal / fp32PerfVal);
+        } else {
+            ImGui::TextColored(c.textPrimary, "%zu of %zu shown", bars.size(), totalInDomain);
+        }
         popBoldFont();
 
         ImGui::EndTable();
     }
 
     ImGui::Spacing();
-    ImGui::Separator();
-    ImGui::Spacing();
 
-    // Interactive Log-Log Empirical Roofline Chart
-    float plotH = std::max(s(320.0f), ImGui::GetContentRegionAvail().y * 0.58f);
-    const double oiMin = 0.03;
-    const double oiMax = 4096.0;
-    const double gopsMin = 10.0;
-    const double gopsMax = std::max(100000.0, rf.highestComputeGops() * 2.5);
+    const int count = static_cast<int>(bars.size());
+    std::vector<double> yPos(static_cast<size_t>(count));
+    std::vector<std::string> leftTickStorage(static_cast<size_t>(count));
+    std::vector<const char*> leftTickPtrs(static_cast<size_t>(count));
+    std::vector<double> perfVals(static_cast<size_t>(count));
+    std::vector<double> rightVals(static_cast<size_t>(count));
+    std::vector<std::string> rightTickStorage(static_cast<size_t>(count));
+    std::vector<const char*> rightTickPtrs(static_cast<size_t>(count));
+    std::vector<ImU32> leftFillCols(static_cast<size_t>(count));
+    std::vector<ImU32> leftLineCols(static_cast<size_t>(count));
+    std::vector<ImU32> rightFillCols(static_cast<size_t>(count));
+    std::vector<ImU32> rightLineCols(static_cast<size_t>(count));
 
-    std::string plotTitle = "Empirical Log-Log Roofline — " + rf.deviceName + " (" + rf.backendName + ")###RooflineLogLogPlot";
-    if (ImPlot::BeginPlot(plotTitle.c_str(), ImVec2(-1.0f, plotH))) {
-        ImPlot::SetupAxes("Operational Intensity (FLOP/Byte or OP/Byte)",
-                          "Achieved Performance (GFLOPS / GOPS)",
-                          ImPlotAxisFlags_None, ImPlotAxisFlags_None);
-        ImPlot::SetupAxisScale(ImAxis_X1, ImPlotScale_Log10);
-        ImPlot::SetupAxisScale(ImAxis_Y1, ImPlotScale_Log10);
-        ImPlot::SetupAxesLimits(oiMin, oiMax, gopsMin, gopsMax, ImPlotCond_Once);
-        ImPlot::SetupLegend(ImPlotLocation_NorthWest, ImPlotLegendFlags_None);
+    double maxPerf = 0.0;
+    double maxRight = 0.0;
+    for (int i = 0; i < count; ++i) {
+        const auto& b = bars[static_cast<size_t>(i)];
+        yPos[i] = static_cast<double>(i);
+        leftTickStorage[i] = b.shortLabel;
+        perfVals[i] = b.perfVal;
+        if (b.perfVal > maxPerf) maxPerf = b.perfVal;
 
-        const double topCapGops = (rf.highestComputeGops() > 0.0) ? rf.highestComputeGops() : (gopsMax * 0.6);
-
-        // 1. Slanted Bandwidth Ceilings (P = BW * OI, capped at highest compute ceiling)
-        static const ImVec4 bwColors[] = {
-            ImVec4(0.22f, 0.94f, 0.56f, 0.95f), // L0 / VRAM
-            ImVec4(0.16f, 0.82f, 0.98f, 0.90f),
-            ImVec4(0.54f, 0.72f, 0.98f, 0.88f),
-            ImVec4(0.84f, 0.60f, 0.98f, 0.88f),
-            ImVec4(0.98f, 0.76f, 0.24f, 0.90f),
-            ImVec4(0.94f, 0.48f, 0.38f, 0.85f)
-        };
-
-        for (size_t bi = 0; bi < rf.bandwidthCeilings.size(); ++bi) {
-            const auto& bw = rf.bandwidthCeilings[bi];
-            if (bw.bandwidthGBps <= 0.0) continue;
-
-            double kneeOi = std::clamp(topCapGops / bw.bandwidthGBps, oiMin * 1.05, oiMax);
-            double xs[2] = {oiMin, kneeOi};
-            double ys[2] = {std::max(0.1, bw.bandwidthGBps * oiMin), bw.bandwidthGBps * kneeOi};
-
-            ImPlotSpec spec;
-            spec.LineColor = bwColors[bi % 6];
-            spec.LineWeight = (bw.level == "VRAM") ? s(2.6f) : s(1.7f);
-
-            char lbl[96];
-            std::snprintf(lbl, sizeof(lbl), "%s BW (%.0f GB/s)", bw.level.c_str(), bw.bandwidthGBps);
-            ImPlot::PlotLine(lbl, xs, ys, 2, spec);
+        if (b.isMatrix) {
+            leftFillCols[i] = toU32(c.phosphorHi, 0.82f);
+            leftLineCols[i] = toU32(c.phosphorHi, 1.0f);
+        } else {
+            leftFillCols[i] = toU32(c.cyanAccent, 0.82f);
+            leftLineCols[i] = toU32(c.cyanAccent, 1.0f);
         }
 
-        // 2. Horizontal Compute Ceilings (starting from VRAM ridge point when VRAM BW is known)
-        static const ImVec4 compColors[] = {
-            ImVec4(0.10f, 0.84f, 0.98f, 0.95f),
-            ImVec4(0.98f, 0.78f, 0.22f, 0.95f),
-            ImVec4(0.32f, 0.94f, 0.66f, 0.95f),
-            ImVec4(0.96f, 0.46f, 0.68f, 0.95f),
-            ImVec4(0.68f, 0.56f, 0.98f, 0.95f)
-        };
-
-        for (size_t ci = 0; ci < rf.computeCeilings.size(); ++ci) {
-            const auto& cc = rf.computeCeilings[ci];
-            if (cc.peakGops <= 0.0) continue;
-
-            double startOi = (vramGbs > 0.0)
-                ? std::clamp(cc.peakGops / vramGbs, oiMin, oiMax * 0.8)
-                : oiMin;
-            double xs[2] = {startOi, oiMax};
-            double ys[2] = {cc.peakGops, cc.peakGops};
-
-            ImPlotSpec spec;
-            spec.LineColor = compColors[ci % 5];
-            spec.LineWeight = s(2.2f);
-
-            char lbl[96];
-            std::snprintf(lbl, sizeof(lbl), "%s (%.1f %s)", cc.name.c_str(), cc.peakTops, cc.metric.c_str());
-            ImPlot::PlotLine(lbl, xs, ys, 2, spec);
-        }
-
-        // 3. Ridge Point Markers (Diamonds)
-        if (!rf.ridgePoints.empty()) {
-            std::vector<double> rxs, rys;
-            for (const auto& rp : rf.ridgePoints) {
-                if (rp.ridgeOpsPerByte > 0.0 && rp.peakTops > 0.0) {
-                    rxs.push_back(rp.ridgeOpsPerByte);
-                    rys.push_back(rp.peakTops * 1000.0);
-                }
-            }
-            if (!rxs.empty()) {
-                ImPlotSpec rSpec;
-                rSpec.Marker = ImPlotMarker_Diamond;
-                rSpec.MarkerSize = s(6.0f);
-                rSpec.LineColor = ImVec4(1.0f, 0.92f, 0.36f, 1.0f);
-                rSpec.MarkerFillColor = ImVec4(1.0f, 0.92f, 0.36f, 1.0f);
-                ImPlot::PlotScatter("Ridge Points", rxs.data(), rys.data(), static_cast<int>(rxs.size()), rSpec);
-            }
-        }
-
-        // 4. Measured Workload Scatter Points (Vector/Memory vs Matrix Cores)
-        std::vector<double> vecX, vecY, matX, matY;
-        for (const auto& wp : rf.workloadPoints) {
-            if (wp.operationalIntensity <= 0.0 || wp.achievedGops <= 0.0) continue;
-            if (wp.isMatrix) {
-                matX.push_back(wp.operationalIntensity);
-                matY.push_back(wp.achievedGops);
+        if (hasAnyPower) {
+            rightVals[i] = b.effVal;
+            if (b.watts > 0.0) {
+                char wtLbl[24];
+                std::snprintf(wtLbl, sizeof(wtLbl), "%.0f W", b.watts);
+                rightTickStorage[i] = wtLbl;
             } else {
-                vecX.push_back(wp.operationalIntensity);
-                vecY.push_back(wp.achievedGops);
+                rightTickStorage[i] = "N/A";
             }
+            rightFillCols[i] = toU32(isLatencyDom ? c.warnColor : c.okColor, 0.82f);
+            rightLineCols[i] = toU32(isLatencyDom ? c.warnColor : c.okColor, 1.0f);
+        } else {
+            rightVals[i] = b.medianMs;
+            rightTickStorage[i] = b.shortLabel;
+            rightFillCols[i] = toU32(c.violetAccent, 0.82f);
+            rightLineCols[i] = toU32(c.violetAccent, 1.0f);
         }
-
-        if (!vecX.empty()) {
-            ImPlotSpec vSpec;
-            vSpec.Marker = ImPlotMarker_Circle;
-            vSpec.MarkerSize = s(5.5f);
-            vSpec.LineColor = ImVec4(0.16f, 0.90f, 1.0f, 1.0f);
-            vSpec.MarkerFillColor = ImVec4(0.16f, 0.90f, 1.0f, 0.90f);
-            ImPlot::PlotScatter("Vector / Bandwidth Workloads", vecX.data(), vecY.data(), static_cast<int>(vecX.size()), vSpec);
-        }
-        if (!matX.empty()) {
-            ImPlotSpec mSpec;
-            mSpec.Marker = ImPlotMarker_Square;
-            mSpec.MarkerSize = s(6.0f);
-            mSpec.LineColor = ImVec4(0.98f, 0.62f, 0.22f, 1.0f);
-            mSpec.MarkerFillColor = ImVec4(0.98f, 0.62f, 0.22f, 0.92f);
-            ImPlot::PlotScatter("Matrix / Tensor Workloads", matX.data(), matY.data(), static_cast<int>(matX.size()), mSpec);
-        }
-
-        // Interactive Hover Tooltip over Nearest Workload Point (in log10 space)
-        if (ImPlot::IsPlotHovered() && !rf.workloadPoints.empty()) {
-            ImPlotPoint mouse = ImPlot::GetPlotMousePos();
-            if (mouse.x > 0.0 && mouse.y > 0.0) {
-                double logMx = std::log10(mouse.x);
-                double logMy = std::log10(mouse.y);
-                const gpubench::RooflineWorkloadPoint* bestPt = nullptr;
-                double bestDist2 = 0.035; // log10 proximity radius squared
-                for (const auto& wp : rf.workloadPoints) {
-                    if (wp.operationalIntensity <= 0.0 || wp.achievedGops <= 0.0) continue;
-                    double dx = std::log10(wp.operationalIntensity) - logMx;
-                    double dy = std::log10(wp.achievedGops) - logMy;
-                    double d2 = dx * dx + dy * dy;
-                    if (d2 < bestDist2) {
-                        bestDist2 = d2;
-                        bestPt = &wp;
-                    }
-                }
-                if (bestPt) {
-                    ImGui::BeginTooltip();
-                    pushBoldFont();
-                    ImGui::TextColored(ImVec4(0.12f, 0.86f, 0.98f, 1.0f), "%s", bestPt->label.c_str());
-                    popBoldFont();
-                    ImGui::Separator();
-                    ImGui::Text("Operational Intensity: %.2f OP/Byte", bestPt->operationalIntensity);
-                    ImGui::Text("Achieved Performance:  %.2f %s (%.0f GOPS)",
-                                bestPt->achievedGops / 1000.0, bestPt->metric.c_str(), bestPt->achievedGops);
-                    if (bestPt->attainmentPct > 0.0) {
-                        ImGui::Text("Roofline Attainment:   %.1f%% of %s (%s)",
-                                    bestPt->attainmentPct,
-                                    bestPt->targetCeilingName.c_str(),
-                                    bestPt->isMemoryBound ? "Memory-Bound" : "Compute-Bound");
-                    }
-                    ImGui::EndTooltip();
-                }
-            }
-        }
-
-        ImPlot::EndPlot();
+        if (rightVals[i] > maxRight) maxRight = rightVals[i];
     }
+    for (int i = 0; i < count; ++i) {
+        leftTickPtrs[i] = leftTickStorage[i].c_str();
+        rightTickPtrs[i] = rightTickStorage[i].c_str();
+    }
+    maxPerf = std::max(maxPerf, 1e-6);
+    maxRight = std::max(maxRight, 1e-6);
 
-    ImGui::Spacing();
+    const float plotH = std::max(s(175.0f), ImGui::GetContentRegionAvail().y - s(4.0f));
+    const ImPlotFlags chartFlags = ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText | ImPlotFlags_NoBoxSelect;
+    const ImPlotAxisFlags xAxisFlags = ImPlotAxisFlags_Lock | ImPlotAxisFlags_NoHighlight;
+    const ImPlotAxisFlags yAxisFlags = ImPlotAxisFlags_Lock | ImPlotAxisFlags_NoGridLines | ImPlotAxisFlags_NoHighlight;
 
-    // Workload Roofline Attainment Table
-    if (!rf.workloadPoints.empty()) {
-        ImGuiTableFlags tblFlags = ImGuiTableFlags_Borders |
-                                   ImGuiTableFlags_RowBg |
-                                   ImGuiTableFlags_ScrollY |
-                                   ImGuiTableFlags_SizingStretchProp;
-        if (ImGui::BeginTable("RooflineAttainmentTable", 6, tblFlags, ImVec2(0.0f, 0.0f))) {
-            ImGui::TableSetupScrollFreeze(0, 1);
-            ImGui::TableSetupColumn("Workload", ImGuiTableColumnFlags_WidthStretch, 0.34f);
-            ImGui::TableSetupColumn("Operational Intensity", ImGuiTableColumnFlags_WidthStretch, 0.14f);
-            ImGui::TableSetupColumn("Achieved", ImGuiTableColumnFlags_WidthStretch, 0.16f);
-            ImGui::TableSetupColumn("Target Ceiling", ImGuiTableColumnFlags_WidthStretch, 0.16f);
-            ImGui::TableSetupColumn("Regime", ImGuiTableColumnFlags_WidthStretch, 0.10f);
-            ImGui::TableSetupColumn("Attainment", ImGuiTableColumnFlags_WidthStretch, 0.10f);
-            ImGui::TableHeadersRow();
-
-            for (const auto& wp : rf.workloadPoints) {
-                ImGui::TableNextRow();
-                ImGui::TableSetColumnIndex(0);
-                ImGui::TextUnformatted(wp.label.c_str());
-
-                ImGui::TableSetColumnIndex(1);
-                pushMonoFont();
-                ImGui::Text("%.2f OP/B", wp.operationalIntensity);
-                popMonoFont();
-
-                ImGui::TableSetColumnIndex(2);
-                pushMonoFont();
-                if (wp.achievedGops >= 1000.0) {
-                    ImGui::TextColored(ImVec4(0.90f, 0.96f, 1.0f, 1.0f), "%.2f %s",
-                                       wp.achievedGops / 1000.0, wp.metric.c_str());
-                } else {
-                    ImGui::TextColored(ImVec4(0.90f, 0.96f, 1.0f, 1.0f), "%.1f GOPS", wp.achievedGops);
-                }
-                popMonoFont();
-
-                ImGui::TableSetColumnIndex(3);
-                ImGui::TextDisabled("%s", wp.targetCeilingName.c_str());
-
-                ImGui::TableSetColumnIndex(4);
-                if (wp.isMemoryBound) {
-                    ImGui::TextColored(ImVec4(0.22f, 0.90f, 0.62f, 1.0f), "Memory-Bound");
-                } else {
-                    ImGui::TextColored(ImVec4(0.18f, 0.82f, 0.98f, 1.0f), "Compute-Bound");
-                }
-
-                ImGui::TableSetColumnIndex(5);
-                pushMonoFont();
-                if (wp.attainmentPct > 0.0) {
-                    ImVec4 attCol = (wp.attainmentPct >= 75.0)
-                        ? ImVec4(0.20f, 0.92f, 0.54f, 1.0f)
-                        : ((wp.attainmentPct >= 40.0) ? ImVec4(0.98f, 0.78f, 0.24f, 1.0f)
-                                                      : ImVec4(0.82f, 0.86f, 0.92f, 1.0f));
-                    ImGui::TextColored(attCol, "%.1f%%", wp.attainmentPct);
-                } else {
-                    ImGui::TextDisabled("—");
-                }
-                popMonoFont();
-            }
-            ImGui::EndTable();
+    auto renderHoverTooltipForBar = [&](int idx) {
+        if (idx < 0 || idx >= count) return;
+        const auto& b = bars[static_cast<size_t>(idx)];
+        ImGui::BeginTooltip();
+        pushBoldFont();
+        ImGui::TextColored(c.phosphorHi, "%s", b.fullLabel.c_str());
+        popBoldFont();
+        ImGui::Separator();
+        ImGui::Text("Throughput / Score: %s", b.perfText.c_str());
+        if (m_chartDomainFilter == DOMAIN_COMPUTE && fp32PerfVal > 0.0 && b.fullLabel != "FP32") {
+            ImGui::Text("vs FP32 Vector:     %.2fx", b.perfVal / fp32PerfVal);
         }
+        ImGui::Text("Median Kernel Time: %.3f ms", b.medianMs);
+        if (b.watts > 0.0) {
+            ImGui::TextColored(c.warnColor, "Board Power Draw:   %.1f W", b.watts);
+            if (!isLatencyDom && !b.effText.empty()) {
+                ImGui::TextColored(c.okColor, "Power Efficiency:   %s", b.effText.c_str());
+            }
+        }
+        ImGui::EndTooltip();
+    };
+
+    if (ImGui::BeginTable("DualPerfCharts", 2, ImGuiTableFlags_SizingStretchSame)) {
+        // ---- LEFT CHART: RAW THROUGHPUT ----
+        ImGui::TableNextColumn();
+        std::string leftTitle = std::string(domainTabName(m_chartDomainFilter)) + " THROUGHPUT###RawThroughputBars";
+        if (ImPlot::BeginPlot(leftTitle.c_str(), ImVec2(-1.0f, plotH), chartFlags)) {
+            ImPlot::SetupAxes(domainPerfAxisLabel(m_chartDomainFilter), nullptr, xAxisFlags, yAxisFlags);
+            ImPlot::SetupAxisTicks(ImAxis_Y1, yPos.data(), count, leftTickPtrs.data(), false);
+            ImPlot::SetupAxesLimits(0.0, maxPerf * 1.48, -0.6, static_cast<double>(count) - 0.4, ImPlotCond_Always);
+
+            ImPlotSpec spec;
+            spec.Flags = static_cast<ImPlotItemFlags>(ImPlotBarsFlags_Horizontal) |
+                         static_cast<ImPlotItemFlags>(ImPlotItemFlags_NoLegend);
+            spec.FillColors = leftFillCols.data();
+            spec.LineColors = leftLineCols.data();
+            spec.LineWeight = 1.0f;
+            ImPlot::PlotBars("##RawPerfBars", perfVals.data(), count, 0.62, 0.0, spec);
+
+            ImPlot::PushStyleColor(ImPlotCol_InlayText, c.textPrimary);
+            for (int i = 0; i < count; ++i) {
+                const std::string& tip = bars[static_cast<size_t>(i)].perfText;
+                const float txtW = ImGui::CalcTextSize(tip.c_str()).x;
+                ImPlot::PlotText(tip.c_str(), perfVals[i], yPos[i], ImVec2(txtW * 0.5f + s(6.0f), 0.0f));
+            }
+            ImPlot::PopStyleColor();
+
+            if (ImPlot::IsPlotHovered()) {
+                const int hoveredIdx = static_cast<int>(std::round(ImPlot::GetPlotMousePos().y));
+                renderHoverTooltipForBar(hoveredIdx);
+            }
+            ImPlot::EndPlot();
+        }
+
+        // ---- RIGHT CHART: POWER EFFICIENCY (OR MEDIAN TIME IF NO POWER TELEMETRY) ----
+        ImGui::TableNextColumn();
+        const char* rightTitle = hasAnyPower
+            ? (isLatencyDom ? "BOARD POWER DRAW (W)###PowerEffBars" : "POWER EFFICIENCY (PERF / WATT)###PowerEffBars")
+            : "MEDIAN KERNEL TIME (ms)###PowerEffBars";
+        const char* rightXAxis = hasAnyPower
+            ? domainEffAxisLabel(m_chartDomainFilter)
+            : "Median Kernel Duration (ms)";
+
+        if (ImPlot::BeginPlot(rightTitle, ImVec2(-1.0f, plotH), chartFlags)) {
+            ImPlot::SetupAxes(rightXAxis, nullptr, xAxisFlags, yAxisFlags);
+            ImPlot::SetupAxisTicks(ImAxis_Y1, yPos.data(), count, rightTickPtrs.data(), false);
+            ImPlot::SetupAxesLimits(0.0, maxRight * 1.45, -0.6, static_cast<double>(count) - 0.4, ImPlotCond_Always);
+
+            ImPlotSpec spec;
+            spec.Flags = static_cast<ImPlotItemFlags>(ImPlotBarsFlags_Horizontal) |
+                         static_cast<ImPlotItemFlags>(ImPlotItemFlags_NoLegend);
+            spec.FillColors = rightFillCols.data();
+            spec.LineColors = rightLineCols.data();
+            spec.LineWeight = 1.0f;
+            ImPlot::PlotBars("##EffBars", rightVals.data(), count, 0.62, 0.0, spec);
+
+            ImPlot::PushStyleColor(ImPlotCol_InlayText, c.textPrimary);
+            for (int i = 0; i < count; ++i) {
+                char buf[48];
+                if (hasAnyPower) {
+                    std::snprintf(buf, sizeof(buf), "%s",
+                                  bars[static_cast<size_t>(i)].effText.empty()
+                                      ? "N/A"
+                                      : bars[static_cast<size_t>(i)].effText.c_str());
+                } else {
+                    std::snprintf(buf, sizeof(buf), "%.2f ms", rightVals[i]);
+                }
+                const float txtW = ImGui::CalcTextSize(buf).x;
+                ImPlot::PlotText(buf, rightVals[i], yPos[i], ImVec2(txtW * 0.5f + s(6.0f), 0.0f));
+            }
+            ImPlot::PopStyleColor();
+
+            if (ImPlot::IsPlotHovered()) {
+                const int hoveredIdx = static_cast<int>(std::round(ImPlot::GetPlotMousePos().y));
+                renderHoverTooltipForBar(hoveredIdx);
+            }
+            ImPlot::EndPlot();
+        }
+
+        ImGui::EndTable();
     }
 }
 

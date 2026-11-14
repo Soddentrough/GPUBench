@@ -142,7 +142,44 @@ static std::vector<BenchmarkMapping> getBenchmarkMappings() {
   };
 }
 
-static void printIsaTextSummary(const std::string &isaText, bool fullIsa) {
+static std::string toLowerCopy(std::string s) {
+  for (char &c : s) {
+    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  }
+  return s;
+}
+
+static void classifyMnemonic(const std::string &mnemonic, IsaInstructionMix &mix) {
+  std::string low = toLowerCopy(mnemonic);
+  mix.total++;
+  if (low.find("wmma") != std::string::npos ||
+      low.find("mfma") != std::string::npos ||
+      low.find("smfmac") != std::string::npos ||
+      low.find("swmmac") != std::string::npos ||
+      low.find("mma") != std::string::npos ||
+      low.rfind("v_dot", 0) == 0) {
+    mix.wmma++;
+  } else if (low.find("bvh") != std::string::npos) {
+    mix.bvh++;
+  } else if (low.rfind("ds_", 0) == 0 || low.rfind("lds_", 0) == 0) {
+    mix.lds++;
+  } else if (low.rfind("global_", 0) == 0 ||
+             low.rfind("buffer_", 0) == 0 ||
+             low.rfind("flat_", 0) == 0 ||
+             low.rfind("scratch_", 0) == 0 ||
+             low.rfind("image_", 0) == 0 ||
+             low.rfind("tbuffer_", 0) == 0) {
+    mix.vmem++;
+  } else if (low.rfind("s_", 0) == 0) {
+    mix.salu++;
+  } else if (low.rfind("v_", 0) == 0) {
+    mix.valu++;
+  } else {
+    mix.other++;
+  }
+}
+
+static void analyzeIsaText(const std::string &isaText, IsaExecutableReport &outExec) {
   std::istringstream iss(isaText);
   std::vector<std::string> lines;
   std::string line;
@@ -163,39 +200,26 @@ static void printIsaTextSummary(const std::string &isaText, bool fullIsa) {
         std::string mnemonic = line.substr(start, end - start);
         if (!mnemonic.empty() && mnemonic.back() != ':') {
           opcodeHistogram[mnemonic]++;
+          classifyMnemonic(mnemonic, outExec.mix);
         }
       }
     }
   }
+
+  outExec.fullIsaLines = lines;
 
   if (!opcodeHistogram.empty()) {
     std::vector<std::pair<std::string, int>> sortedOps(opcodeHistogram.begin(),
                                                        opcodeHistogram.end());
     std::sort(sortedOps.begin(), sortedOps.end(),
               [](const auto &a, const auto &b) { return b.second < a.second; });
-
-    std::cout << "  Instruction Mix (Top Opcodes):\n    ";
-    int printed = 0;
     for (const auto &[op, count] : sortedOps) {
       if (op == "s_wait_alu" || op == "s_delay_alu" || op == "s_nop")
         continue;
-      if (printed > 0 && printed % 3 == 0)
-        std::cout << "\n    ";
-      std::cout << std::left << std::setw(32) << (op + ": " + std::to_string(count));
-      if (++printed >= 12)
+      outExec.topOpcodes.emplace_back(op, count);
+      if (outExec.topOpcodes.size() >= 12)
         break;
     }
-    std::cout << "\n\n";
-  }
-
-  if (fullIsa) {
-    std::cout << "  Full Disassembly (" << lines.size() << " lines):\n";
-    std::cout << "  ──────────────────────────────────────────────────────────────────────────────\n";
-    for (const auto &l : lines) {
-      std::cout << "  " << l << "\n";
-    }
-    std::cout << "  ──────────────────────────────────────────────────────────────────────────────\n\n";
-    return;
   }
 
   // Locate hot loop: look for backward branch (s_cbranch_* jumping to an earlier label)
@@ -221,7 +245,6 @@ static void printIsaTextSummary(const std::string &isaText, bool fullIsa) {
   int maxLoopSpan = 0;
   for (int i = 0; i < static_cast<int>(lines.size()); ++i) {
     if (lines[i].find("s_cbranch_") != std::string::npos) {
-      // Extract target label token after s_cbranch_*
       size_t pos = lines[i].find("s_cbranch_");
       size_t spacePos = lines[i].find_first_of(" \t", pos);
       if (spacePos != std::string::npos) {
@@ -249,7 +272,6 @@ static void printIsaTextSummary(const std::string &isaText, bool fullIsa) {
       }
     }
   }
-  // Fallback for numeric relative offsets (e.g. llvm-objdump without symbol labels)
   if (loopStartIdx == -1) {
     for (int i = static_cast<int>(lines.size()) - 1; i >= 0; --i) {
       if (lines[i].find("s_cbranch_") != std::string::npos) {
@@ -261,23 +283,127 @@ static void printIsaTextSummary(const std::string &isaText, bool fullIsa) {
   }
 
   if (loopStartIdx != -1 && loopEndIdx != -1) {
-    int totalLoopLines = loopEndIdx - loopStartIdx + 1;
-    std::cout << "  Hot Loop Disassembly (lines " << (loopStartIdx + 1) << "–" << (loopEndIdx + 1)
+    outExec.hotLoopStartLine = loopStartIdx + 1;
+    outExec.hotLoopEndLine = loopEndIdx + 1;
+    for (int i = loopStartIdx; i <= loopEndIdx; ++i) {
+      outExec.hotLoopLines.push_back(lines[i]);
+    }
+  }
+}
+
+static void inferRocmRegisterCounts(const std::vector<std::string> &lines,
+                                    uint32_t &outVgpr, uint32_t &outSgpr) {
+  int maxV = -1;
+  int maxS = -1;
+  auto parseRegToken = [&](const std::string &tok) {
+    if (tok.size() < 2) return;
+    const char prefix = tok[0];
+    if (prefix != 'v' && prefix != 's') return;
+    int &targetMax = (prefix == 'v') ? maxV : maxS;
+    if (tok[1] == '[' && tok.back() == ']') {
+      size_t colon = tok.find(':', 2);
+      if (colon != std::string::npos) {
+        try {
+          int lo = std::stoi(tok.substr(2, colon - 2));
+          int hi = std::stoi(tok.substr(colon + 1, tok.size() - colon - 2));
+          if (lo >= 0 && hi >= lo && hi < 512) {
+            targetMax = std::max(targetMax, hi);
+          }
+        } catch (...) {}
+      }
+    } else if (std::isdigit(static_cast<unsigned char>(tok[1]))) {
+      bool allDigits = true;
+      for (size_t k = 2; k < tok.size(); ++k) {
+        if (!std::isdigit(static_cast<unsigned char>(tok[k]))) {
+          allDigits = false;
+          break;
+        }
+      }
+      if (allDigits) {
+        try {
+          int idx = std::stoi(tok.substr(1));
+          if (idx >= 0 && idx < 512) {
+            targetMax = std::max(targetMax, idx);
+          }
+        } catch (...) {}
+      }
+    }
+  };
+
+  for (const auto &line : lines) {
+    if (line.empty() || (line[0] != '\t' && line[0] != ' ')) continue;
+    size_t commentPos = std::min(line.find(';'), line.find("//"));
+    std::string code = (commentPos == std::string::npos) ? line : line.substr(0, commentPos);
+    size_t i = 0;
+    while (i < code.size()) {
+      char c = code[i];
+      if ((c == 'v' || c == 's') &&
+          (i == 0 || (!std::isalnum(static_cast<unsigned char>(code[i - 1])) && code[i - 1] != '_'))) {
+        if (i + 1 < code.size() && (code[i + 1] == '[' || std::isdigit(static_cast<unsigned char>(code[i + 1])))) {
+          size_t end = i + 1;
+          if (code[end] == '[') {
+            while (end < code.size() && code[end] != ']') ++end;
+            if (end < code.size()) ++end;
+          } else {
+            while (end < code.size() && std::isdigit(static_cast<unsigned char>(code[end]))) ++end;
+          }
+          if (end >= code.size() || !std::isalnum(static_cast<unsigned char>(code[end]))) {
+            parseRegToken(code.substr(i, end - i));
+          }
+          i = end;
+          continue;
+        }
+      }
+      ++i;
+    }
+  }
+  if (outVgpr == 0 && maxV >= 0) outVgpr = static_cast<uint32_t>(maxV + 1);
+  if (outSgpr == 0 && maxS >= 0) outSgpr = static_cast<uint32_t>(maxS + 1);
+}
+
+static void printIsaExecSummary(const IsaExecutableReport &exec, bool fullIsa) {
+  if (!exec.topOpcodes.empty()) {
+    std::cout << "  Instruction Mix (Top Opcodes):\n    ";
+    int printed = 0;
+    for (const auto &[op, count] : exec.topOpcodes) {
+      if (printed > 0 && printed % 3 == 0)
+        std::cout << "\n    ";
+      std::cout << std::left << std::setw(32) << (op + ": " + std::to_string(count));
+      if (++printed >= 12)
+        break;
+    }
+    std::cout << "\n\n";
+  }
+
+  const auto &lines = exec.fullIsaLines;
+  if (fullIsa) {
+    std::cout << "  Full Disassembly (" << lines.size() << " lines):\n";
+    std::cout << "  ──────────────────────────────────────────────────────────────────────────────\n";
+    for (const auto &l : lines) {
+      std::cout << "  " << l << "\n";
+    }
+    std::cout << "  ──────────────────────────────────────────────────────────────────────────────\n\n";
+    return;
+  }
+
+  if (exec.hotLoopStartLine > 0 && !exec.hotLoopLines.empty()) {
+    int totalLoopLines = static_cast<int>(exec.hotLoopLines.size());
+    std::cout << "  Hot Loop Disassembly (lines " << exec.hotLoopStartLine << "–" << exec.hotLoopEndLine
               << ", " << totalLoopLines << " instructions — pass --full-isa for entire shader):\n";
     std::cout << "  ──────────────────────────────────────────────────────────────────────────────\n";
     const int maxPreview = 110;
     if (totalLoopLines <= maxPreview) {
-      for (int i = loopStartIdx; i <= loopEndIdx; ++i) {
-        std::cout << "  " << lines[i] << "\n";
+      for (const auto &l : exec.hotLoopLines) {
+        std::cout << "  " << l << "\n";
       }
     } else {
-      for (int i = loopStartIdx; i < loopStartIdx + 50; ++i) {
-        std::cout << "  " << lines[i] << "\n";
+      for (int i = 0; i < 50; ++i) {
+        std::cout << "  " << exec.hotLoopLines[i] << "\n";
       }
       std::cout << "  \t... (" << (totalLoopLines - 70)
                 << " instructions omitted; use --full-isa to view all) ...\n";
-      for (int i = loopEndIdx - 19; i <= loopEndIdx; ++i) {
-        std::cout << "  " << lines[i] << "\n";
+      for (int i = totalLoopLines - 20; i < totalLoopLines; ++i) {
+        std::cout << "  " << exec.hotLoopLines[i] << "\n";
       }
     }
     std::cout << "  ──────────────────────────────────────────────────────────────────────────────\n\n";
@@ -376,7 +502,12 @@ public:
     return bestVol > 0;
   }
 
-  bool init(uint32_t deviceIdx) {
+  bool quiet = false;
+  std::string lastError;
+
+  bool init(uint32_t deviceIdx, bool quietMode = false) {
+    quiet = quietMode;
+    lastError.clear();
     VkApplicationInfo appInfo{};
     appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
     appInfo.pApplicationName = "GPUBench ISA Inspector";
@@ -390,14 +521,16 @@ public:
     instInfo.pApplicationInfo = &appInfo;
 
     if (vkCreateInstance(&instInfo, nullptr, &instance) != VK_SUCCESS) {
-      std::cerr << "Error: Failed to create Vulkan 1.4 instance for ISA inspection.\n";
+      lastError = "Failed to create Vulkan 1.4 instance for ISA inspection.";
+      if (!quiet) std::cerr << "Error: " << lastError << "\n";
       return false;
     }
 
     uint32_t devCount = 0;
     vkEnumeratePhysicalDevices(instance, &devCount, nullptr);
     if (devCount == 0) {
-      std::cerr << "Error: No Vulkan physical devices found.\n";
+      lastError = "No Vulkan physical devices found.";
+      if (!quiet) std::cerr << "Error: " << lastError << "\n";
       return false;
     }
     std::vector<VkPhysicalDevice> devs(devCount);
@@ -453,8 +586,9 @@ public:
     };
 
     if (!hasExt(VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME)) {
-      std::cerr << "Error: Active Vulkan driver does not support "
-                << VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME << ".\n";
+      lastError = std::string("Active Vulkan driver does not support ") +
+                  VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME + ".";
+      if (!quiet) std::cerr << "Error: " << lastError << "\n";
       return false;
     }
 
@@ -710,10 +844,7 @@ public:
     return 0;
   }
 
-  void printPipelineExecutables(VkPipeline pipeline, const KernelArtifact &art, bool fullIsa) {
-    std::cout << "━━━ [vulkan] " << art.configName
-              << " (" << art.filePath.filename().string() << ") ━━━\n";
-
+  void capturePipelineExecutables(VkPipeline pipeline, IsaArtifactReport &outArt) {
     VkPipelineInfoKHR pInfo{};
     pInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_INFO_KHR;
     pInfo.pipeline = pipeline;
@@ -727,6 +858,11 @@ public:
     pfnGetProps(device, &pInfo, &execCount, execProps.data());
 
     for (uint32_t e = 0; e < execCount; ++e) {
+      IsaExecutableReport execRep;
+      execRep.name = execProps[e].name;
+      execRep.description = execProps[e].description;
+      execRep.subgroupSize = execProps[e].subgroupSize;
+
       VkPipelineExecutableInfoKHR execInfo{};
       execInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_EXECUTABLE_INFO_KHR;
       execInfo.pipeline = pipeline;
@@ -740,40 +876,52 @@ public:
       }
       pfnGetStats(device, &execInfo, &statCount, stats.data());
 
-      std::cout << "  Executable [" << e << "] : " << execProps[e].name << " — "
-                << execProps[e].description
-                << " (Subgroup Size: " << execProps[e].subgroupSize << ")\n";
-      std::cout << "  Hardware Statistics (VK_KHR_pipeline_executable_properties):\n    ";
-      int col = 0;
       for (const auto &st : stats) {
         if (std::strcmp(st.name, "Driver pipeline hash") == 0 ||
             std::strcmp(st.name, "Hash") == 0) {
           continue;
         }
         std::ostringstream valStream;
+        uint32_t numericVal = 0;
         switch (st.format) {
         case VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_BOOL32_KHR:
           valStream << (st.value.b32 ? "true" : "false");
+          numericVal = st.value.b32 ? 1u : 0u;
           break;
         case VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_INT64_KHR:
           valStream << st.value.i64;
+          numericVal = (st.value.i64 > 0) ? static_cast<uint32_t>(st.value.i64) : 0u;
           break;
         case VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_UINT64_KHR:
           valStream << st.value.u64;
+          numericVal = static_cast<uint32_t>(st.value.u64);
           break;
         case VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_FLOAT64_KHR:
           valStream << st.value.f64;
+          numericVal = (st.value.f64 > 0.0) ? static_cast<uint32_t>(st.value.f64) : 0u;
           break;
         default:
           break;
         }
-        if (col > 0 && col % 3 == 0)
-          std::cout << "\n    ";
-        std::cout << std::left << std::setw(32)
-                  << (std::string(st.name) + ": " + valStream.str());
-        ++col;
+        execRep.stats.push_back({st.name, valStream.str()});
+
+        std::string lowName = toLowerCopy(st.name);
+        if (lowName == "vgprs" || (execRep.vgprCount == 0 && lowName.find("vgpr") != std::string::npos &&
+                                   lowName.find("spill") == std::string::npos &&
+                                   lowName.find("pre") == std::string::npos)) {
+          execRep.vgprCount = numericVal;
+        } else if (lowName == "sgprs" || (execRep.sgprCount == 0 && lowName.find("sgpr") != std::string::npos &&
+                                          lowName.find("spill") == std::string::npos &&
+                                          lowName.find("pre") == std::string::npos)) {
+          execRep.sgprCount = numericVal;
+        } else if (lowName == "lds size" || lowName.find("lds") != std::string::npos ||
+                   lowName.find("shared") != std::string::npos) {
+          if (execRep.ldsBytes == 0) execRep.ldsBytes = numericVal;
+        } else if (lowName == "scratch size" || lowName.find("scratch") != std::string::npos ||
+                   lowName.find("private") != std::string::npos) {
+          if (execRep.scratchBytes == 0) execRep.scratchBytes = numericVal;
+        }
       }
-      std::cout << "\n\n";
 
       uint32_t irCount = 0;
       pfnGetIrs(device, &execInfo, &irCount, nullptr);
@@ -793,9 +941,7 @@ public:
 
       int chosenIr = -1;
       for (uint32_t i = 0; i < irCount; ++i) {
-        std::string irName = irs[i].name;
-        for (char &c : irName)
-          c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        std::string irName = toLowerCopy(irs[i].name);
         if (irName.find("disassembly") != std::string::npos ||
             irName.find("isa") != std::string::npos ||
             irName.find("assembly") != std::string::npos) {
@@ -809,17 +955,58 @@ public:
 
       if (chosenIr != -1 && irs[chosenIr].isText && irs[chosenIr].pData) {
         std::string isaStr(static_cast<const char *>(irs[chosenIr].pData));
-        printIsaTextSummary(isaStr, fullIsa);
+        analyzeIsaText(isaStr, execRep);
       }
+
+      outArt.executables.push_back(std::move(execRep));
     }
   }
 
-  bool inspectRasterSpv(const KernelArtifact &art, bool fullIsa) {
+  void printPipelineExecutables(VkPipeline pipeline, const KernelArtifact &art, bool fullIsa,
+                                IsaArtifactReport *outReport) {
+    IsaArtifactReport localRep;
+    IsaArtifactReport &rep = outReport ? *outReport : localRep;
+    rep.benchName = art.benchmarkName;
+    rep.configLabel = art.configName;
+    rep.configIndex = art.configIndex;
+    rep.backend = art.backend;
+    rep.artifactFile = art.filePath.filename().string();
+
+    capturePipelineExecutables(pipeline, rep);
+
+    if (quiet || outReport) {
+      return;
+    }
+
+    std::cout << "━━━ [vulkan] " << art.configName
+              << " (" << art.filePath.filename().string() << ") ━━━\n";
+    for (size_t e = 0; e < rep.executables.size(); ++e) {
+      const auto &ex = rep.executables[e];
+      std::cout << "  Executable [" << e << "] : " << ex.name << " — "
+                << ex.description
+                << " (Subgroup Size: " << ex.subgroupSize << ")\n";
+      std::cout << "  Hardware Statistics (VK_KHR_pipeline_executable_properties):\n    ";
+      int col = 0;
+      for (const auto &st : ex.stats) {
+        if (col > 0 && col % 3 == 0)
+          std::cout << "\n    ";
+        std::cout << std::left << std::setw(32) << (st.name + ": " + st.value);
+        ++col;
+      }
+      std::cout << "\n\n";
+      printIsaExecSummary(ex, fullIsa);
+    }
+  }
+
+  bool inspectRasterSpv(const KernelArtifact &art, bool fullIsa, IsaArtifactReport *outReport = nullptr) {
     fs::path dir = art.filePath.parent_path();
     std::string fname = art.filePath.filename().string();
     const bool isAsyncGfx = (fname.rfind("async_gfx.", 0) == 0);
-    fs::path vertPath = dir / (isAsyncGfx ? "async_gfx.vert.spv" : "pixel_fill.vert.spv");
-    fs::path fragPath = dir / (isAsyncGfx ? "async_gfx.frag.spv" : "pixel_fill.frag.spv");
+    const bool isCrtOverlay = (fname.rfind("gui_crt_overlay.", 0) == 0);
+    fs::path vertPath = dir / (isAsyncGfx ? "async_gfx.vert.spv"
+                                          : (isCrtOverlay ? "gui_crt_overlay.vert.spv" : "pixel_fill.vert.spv"));
+    fs::path fragPath = dir / (isAsyncGfx ? "async_gfx.frag.spv"
+                                          : (isCrtOverlay ? "gui_crt_overlay.frag.spv" : "pixel_fill.frag.spv"));
     if (fname.find(".vert.spv") != std::string::npos) {
       vertPath = art.filePath;
     } else if (fname.find(".frag.spv") != std::string::npos) {
@@ -831,7 +1018,9 @@ public:
     if (!vertMod || !fragMod) {
       if (vertMod) vkDestroyShaderModule(device, vertMod, nullptr);
       if (fragMod) vkDestroyShaderModule(device, fragMod, nullptr);
-      std::cerr << "  [Error] Failed to load vertex/fragment SPIR-V modules for " << art.filePath << "\n";
+      std::string err = "Failed to load vertex/fragment SPIR-V modules for " + art.filePath.string();
+      if (outReport) outReport->errorMessage = err;
+      if (!quiet) std::cerr << "  [Error] " << err << "\n";
       return false;
     }
 
@@ -850,9 +1039,10 @@ public:
     }
 
     VkPushConstantRange pcRange{};
-    pcRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    pcRange.stageFlags = isCrtOverlay ? VK_SHADER_STAGE_FRAGMENT_BIT
+                                      : (VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
     pcRange.offset = 0;
-    pcRange.size = 32;
+    pcRange.size = isCrtOverlay ? 16 : 32;
 
     VkPipelineLayoutCreateInfo plInfo{};
     plInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -936,11 +1126,13 @@ public:
     VkPipeline pipeline = VK_NULL_HANDLE;
     VkResult res = vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipeInfo, nullptr, &pipeline);
     if (res == VK_SUCCESS && pipeline != VK_NULL_HANDLE) {
-      printPipelineExecutables(pipeline, art, fullIsa);
+      printPipelineExecutables(pipeline, art, fullIsa, outReport);
       vkDestroyPipeline(device, pipeline, nullptr);
     } else {
-      std::cerr << "  [Error] vkCreateGraphicsPipelines failed for " << art.filePath
-                << " (VkResult=" << res << ")\n";
+      std::string err = "vkCreateGraphicsPipelines failed for " + art.filePath.string() +
+                        " (VkResult=" + std::to_string(res) + ")";
+      if (outReport) outReport->errorMessage = err;
+      if (!quiet) std::cerr << "  [Error] " << err << "\n";
     }
 
     vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
@@ -952,9 +1144,11 @@ public:
     return res == VK_SUCCESS;
   }
 
-  bool inspectRayTracingSpv(const KernelArtifact &art, bool fullIsa) {
+  bool inspectRayTracingSpv(const KernelArtifact &art, bool fullIsa, IsaArtifactReport *outReport = nullptr) {
     if (!rtPipelineSupported || !pfnCreateRTPipelines) {
-      std::cerr << "  [Error] VK_KHR_ray_tracing_pipeline not supported on this device.\n";
+      std::string err = "VK_KHR_ray_tracing_pipeline not supported on this device.";
+      if (outReport) outReport->skipReason = err;
+      if (!quiet) std::cerr << "  [Error] " << err << "\n";
       return false;
     }
 
@@ -969,19 +1163,27 @@ public:
     bool isOmm = false;
     if (prefix == "rt_scheduling_ser" || prefix == "raydiv_pipeline_ser") {
       if (!serSupported) {
-        std::cout << "━━━ [vulkan] " << art.configName
-                  << " (" << art.filePath.filename().string() << ") ━━━\n"
-                  << "  [Skipped] Hardware SER (VK_EXT_ray_tracing_invocation_reorder) is not "
-                     "exposed by the active Vulkan driver (" << driverInfo << ").\n\n";
+        std::string reason = "Hardware SER (VK_EXT_ray_tracing_invocation_reorder) is not "
+                             "exposed by the active Vulkan driver (" + driverInfo + ").";
+        if (outReport) outReport->skipReason = reason;
+        if (!quiet) {
+          std::cout << "━━━ [vulkan] " << art.configName
+                    << " (" << art.filePath.filename().string() << ") ━━━\n"
+                    << "  [Skipped] " << reason << "\n\n";
+        }
         return true;
       }
       basePrefix = (prefix == "rt_scheduling_ser") ? "rt_scheduling" : "raydiv_pipeline";
     } else if (prefix == "rayomm_omm") {
       if (!opacityMicromapSupported) {
-        std::cout << "━━━ [vulkan] " << art.configName
-                  << " (" << art.filePath.filename().string() << ") ━━━\n"
-                  << "  [Skipped] Hardware Opacity Micromap (VK_EXT_opacity_micromap) is not "
-                     "exposed by the active Vulkan driver (" << driverInfo << ").\n\n";
+        std::string reason = "Hardware Opacity Micromap (VK_EXT_opacity_micromap) is not "
+                             "exposed by the active Vulkan driver (" + driverInfo + ").";
+        if (outReport) outReport->skipReason = reason;
+        if (!quiet) {
+          std::cout << "━━━ [vulkan] " << art.configName
+                    << " (" << art.filePath.filename().string() << ") ━━━\n"
+                    << "  [Skipped] " << reason << "\n\n";
+        }
         return true;
       }
       basePrefix = "rayomm";
@@ -1127,11 +1329,13 @@ public:
     VkResult res = pfnCreateRTPipelines(device, VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &rtPipeInfo,
                                         nullptr, &pipeline);
     if (res == VK_SUCCESS && pipeline != VK_NULL_HANDLE) {
-      printPipelineExecutables(pipeline, art, fullIsa);
+      printPipelineExecutables(pipeline, art, fullIsa, outReport);
       vkDestroyPipeline(device, pipeline, nullptr);
     } else {
-      std::cerr << "  [Error] vkCreateRayTracingPipelinesKHR failed for " << art.filePath
-                << " (VkResult=" << res << ")\n";
+      std::string err = "vkCreateRayTracingPipelinesKHR failed for " + art.filePath.string() +
+                        " (VkResult=" + std::to_string(res) + ")";
+      if (outReport) outReport->errorMessage = err;
+      if (!quiet) std::cerr << "  [Error] " << err << "\n";
     }
 
     vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
@@ -1142,95 +1346,84 @@ public:
     return res == VK_SUCCESS;
   }
 
-  bool inspectSpv(const KernelArtifact &art, bool fullIsa) {
+  bool inspectSpv(const KernelArtifact &art, bool fullIsa, IsaArtifactReport *outReport = nullptr) {
     std::string fname = art.filePath.filename().string();
     if (fname.find(".rgen.spv") != std::string::npos ||
         fname.find(".rmiss.spv") != std::string::npos ||
         fname.find(".rchit.spv") != std::string::npos ||
         fname.find(".rahit.spv") != std::string::npos ||
         fname.find(".rint.spv") != std::string::npos) {
-      return inspectRayTracingSpv(art, fullIsa);
+      return inspectRayTracingSpv(art, fullIsa, outReport);
     }
     if (fname.find(".vert.spv") != std::string::npos ||
         fname.find(".frag.spv") != std::string::npos) {
-      return inspectRasterSpv(art, fullIsa);
+      return inspectRasterSpv(art, fullIsa, outReport);
     }
+
+    auto emitSkip = [&](const std::string &reason) -> bool {
+      if (outReport) outReport->skipReason = reason;
+      if (!quiet) {
+        std::cout << "━━━ [vulkan] " << art.configName << " (" << fname << ") ━━━\n"
+                  << "  [Skipped] " << reason << "\n\n";
+      }
+      return true;
+    };
 
     if ((fname == "coop_vector_fp16.comp.spv" || fname == "coop_vector_int8.comp.spv") &&
         !coopVectorSupported) {
-      std::cout << "━━━ [vulkan] " << art.configName << " (" << fname << ") ━━━\n"
-                << "  [Skipped] Cooperative vector (VK_NV_cooperative_vector) "
-                   "is not supported on " << deviceName << " (" << driverInfo << ").\n\n";
-      return true;
+      return emitSkip("Cooperative vector (VK_NV_cooperative_vector) is not supported on " +
+                      deviceName + " (" + driverInfo + ").");
     }
     if (fname == "workgraphs_amdx.comp.spv" && !workGraphsSupported) {
-      std::cout << "━━━ [vulkan] " << art.configName << " (" << fname << ") ━━━\n"
-                << "  [Skipped] GPU Work Graphs (VK_AMDX_shader_enqueue) "
-                   "is not exposed on " << deviceName << " (" << driverInfo << ").\n\n";
-      return true;
+      return emitSkip("GPU Work Graphs (VK_AMDX_shader_enqueue) is not exposed on " +
+                      deviceName + " (" + driverInfo + ").");
     }
-
     if (fname == "bf16.comp.spv" && !bf16DotProductSupported) {
-      std::cout << "━━━ [vulkan] " << art.configName << " (" << fname << ") ━━━\n"
-                << "  [Skipped] BF16 vector dot product (VK_KHR_shader_bfloat16::shaderBFloat16DotProduct / v_dot2_bf16_bf16) "
-                   "is not supported on " << deviceName << " under Vulkan (" << driverInfo << ").\n"
-                << "            Use '-k rocm' to inspect the ROCm HIP BF16 vector kernel (v_dot2_f32_bf16 in bf16.co).\n\n";
-      return true;
+      return emitSkip("BF16 vector dot product (VK_KHR_shader_bfloat16::shaderBFloat16DotProduct / v_dot2_bf16_bf16) "
+                      "is not supported on " + deviceName + " under Vulkan (" + driverInfo + ").\n"
+                      "            Use '-k rocm' to inspect the ROCm HIP BF16 vector kernel (v_dot2_f32_bf16 in bf16.co).");
     }
     if (fname == "coop_matrix_bf16.comp.spv" && !bf16CoopMatrixSupported) {
-      std::cout << "━━━ [vulkan] " << art.configName << " (" << fname << ") ━━━\n"
-                << "  [Skipped] BF16 cooperative matrix (VK_KHR_shader_bfloat16::shaderBFloat16CooperativeMatrix) "
-                   "is not supported on " << deviceName << " (" << driverInfo << ").\n\n";
-      return true;
+      return emitSkip("BF16 cooperative matrix (VK_KHR_shader_bfloat16::shaderBFloat16CooperativeMatrix) "
+                      "is not supported on " + deviceName + " (" + driverInfo + ").");
     }
     if (fname == "coop_matrix_fp8.comp.spv" && !fp8CoopMatrixSupported) {
-      std::cout << "━━━ [vulkan] " << art.configName << " (" << fname << ") ━━━\n"
-                << "  [Skipped] FP8 cooperative matrix (VK_EXT_shader_float8::shaderFloat8CooperativeMatrix) "
-                   "is not supported on " << deviceName << " (" << driverInfo << ").\n\n";
-      return true;
+      return emitSkip("FP8 cooperative matrix (VK_EXT_shader_float8::shaderFloat8CooperativeMatrix) "
+                      "is not supported on " + deviceName + " (" + driverInfo + ").");
     }
     if (fname == "coop_matrix_fp6.comp.spv" && !fp6CoopMatrixSupported) {
-      std::cout << "━━━ [vulkan] " << art.configName << " (" << fname << ") ━━━\n"
-                << "  [Skipped] FP6 cooperative matrix (VK_EXT_shader_ocp_microscaling_types::shaderFloat6 + Float6E3M2EXT tile) "
-                   "is not supported on " << deviceName << " (" << driverInfo << ").\n\n";
-      return true;
+      return emitSkip("FP6 cooperative matrix (VK_EXT_shader_ocp_microscaling_types::shaderFloat6 + Float6E3M2EXT tile) "
+                      "is not supported on " + deviceName + " (" + driverInfo + ").");
     }
     if (fname == "coop_matrix_fp4.comp.spv" && !fp4CoopMatrixSupported) {
-      std::cout << "━━━ [vulkan] " << art.configName << " (" << fname << ") ━━━\n"
-                << "  [Skipped] FP4 cooperative matrix (VK_EXT_shader_ocp_microscaling_types::shaderFloat4 + Float4E2M1EXT tile) "
-                   "is not supported on " << deviceName << " (" << driverInfo << ").\n\n";
-      return true;
+      return emitSkip("FP4 cooperative matrix (VK_EXT_shader_ocp_microscaling_types::shaderFloat4 + Float4E2M1EXT tile) "
+                      "is not supported on " + deviceName + " (" + driverInfo + ").");
     }
     if ((fname == "coop_matrix_fp16.comp.spv" || fname == "coop_matrix_int8.comp.spv") &&
         !coopMatrixSupported) {
-      std::cout << "━━━ [vulkan] " << art.configName << " (" << fname << ") ━━━\n"
-                << "  [Skipped] Cooperative matrix (VK_KHR_cooperative_matrix) "
-                   "is not supported on " << deviceName << " (" << driverInfo << ").\n\n";
-      return true;
+      return emitSkip("Cooperative matrix (VK_KHR_cooperative_matrix) is not supported on " +
+                      deviceName + " (" + driverInfo + ").");
     }
     if (fname == "fp64.comp.spv" && !fp64Supported) {
-      std::cout << "━━━ [vulkan] " << art.configName << " (" << fname << ") ━━━\n"
-                << "  [Skipped] FP64 (shaderFloat64) is not supported on " << deviceName << ".\n\n";
-      return true;
+      return emitSkip("FP64 (shaderFloat64) is not supported on " + deviceName + ".");
     }
 
     std::vector<uint32_t> spvCode;
     VkShaderModule shaderModule = loadSpvModule(art.filePath, &spvCode);
     if (!shaderModule) {
-      std::cerr << "  [Error] Failed to create VkShaderModule for " << art.filePath << "\n";
+      std::string err = "Failed to create VkShaderModule for " + art.filePath.string();
+      if (outReport) outReport->errorMessage = err;
+      if (!quiet) std::cerr << "  [Error] " << err << "\n";
       return false;
     }
 
     bool hasAccelStruct = spirvHasAccelerationStructure(spvCode);
     if (hasAccelStruct && !rayQuerySupported) {
-      std::cout << "━━━ [vulkan] " << art.configName << " (" << fname << ") ━━━\n"
-                << "  [Skipped] Ray query / acceleration structure (VK_KHR_ray_query) "
-                   "is not supported on " << deviceName << " (" << driverInfo << ").\n\n";
       vkDestroyShaderModule(device, shaderModule, nullptr);
-      return true;
+      return emitSkip("Ray query / acceleration structure (VK_KHR_ray_query) is not supported on " +
+                      deviceName + " (" + driverInfo + ").");
     }
 
-    // Create a generous descriptor set layout (up to 12 bindings; binding 0 is TLAS if ray_query)
     std::vector<VkDescriptorSetLayoutBinding> bindings(12);
     for (uint32_t i = 0; i < 12; ++i) {
       bindings[i].binding = i;
@@ -1264,7 +1457,6 @@ public:
     VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
     vkCreatePipelineLayout(device, &plInfo, nullptr, &pipelineLayout);
 
-    // Populate cooperative matrix specialization constants [TILE_M, TILE_N, TILE_K, LOCAL_SIZE_X] when applicable
     bool useCoopSpec = (fname.rfind("coop_matrix_", 0) == 0);
     uint32_t coopSpecVals[4] = {16u, 16u, 16u, subgroupSize32Supported ? 32u : 64u};
     if (useCoopSpec) {
@@ -1273,7 +1465,7 @@ public:
       if (fname == "coop_matrix_bf16.comp.spv") {
         abT = VK_COMPONENT_TYPE_BFLOAT16_KHR;
       } else if (fname == "coop_matrix_fp8.comp.spv") {
-        abT = static_cast<VkComponentTypeKHR>(1000491002); // FLOAT8_E4M3_EXT
+        abT = static_cast<VkComponentTypeKHR>(1000491002);
       } else if (fname == "coop_matrix_fp6.comp.spv") {
         abT = kIsaComponentTypeFloat6E3M2EXT;
       } else if (fname == "coop_matrix_fp4.comp.spv") {
@@ -1296,6 +1488,7 @@ public:
           reinterpret_cast<PFN_vkCreateExecutionGraphPipelinesAMDX>(
               vkGetDeviceProcAddr(device, "vkCreateExecutionGraphPipelinesAMDX"));
       if (!pfnCreateGraph) {
+        if (outReport) outReport->skipReason = "vkCreateExecutionGraphPipelinesAMDX unavailable.";
         vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
         vkDestroyDescriptorSetLayout(device, dsl, nullptr);
         vkDestroyShaderModule(device, shaderModule, nullptr);
@@ -1330,7 +1523,7 @@ public:
       VkPipeline wgPipe = VK_NULL_HANDLE;
       VkResult egRes = pfnCreateGraph(device, VK_NULL_HANDLE, 1, &egCi, nullptr, &wgPipe);
       if (egRes == VK_SUCCESS && wgPipe != VK_NULL_HANDLE) {
-        printPipelineExecutables(wgPipe, art, fullIsa);
+        printPipelineExecutables(wgPipe, art, fullIsa, outReport);
         vkDestroyPipeline(device, wgPipe, nullptr);
       }
       vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
@@ -1367,15 +1560,17 @@ public:
     VkPipeline pipeline = VK_NULL_HANDLE;
     VkResult res = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipeInfo, nullptr, &pipeline);
     if (res != VK_SUCCESS || pipeline == VK_NULL_HANDLE) {
-      std::cerr << "  [Error] vkCreateComputePipelines failed for " << art.filePath
-                << " (VkResult=" << res << ")\n";
+      std::string err = "vkCreateComputePipelines failed for " + art.filePath.string() +
+                        " (VkResult=" + std::to_string(res) + ")";
+      if (outReport) outReport->errorMessage = err;
+      if (!quiet) std::cerr << "  [Error] " << err << "\n";
       vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
       vkDestroyDescriptorSetLayout(device, dsl, nullptr);
       vkDestroyShaderModule(device, shaderModule, nullptr);
       return false;
     }
 
-    printPipelineExecutables(pipeline, art, fullIsa);
+    printPipelineExecutables(pipeline, art, fullIsa, outReport);
 
     vkDestroyPipeline(device, pipeline, nullptr);
     vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
@@ -1423,7 +1618,9 @@ static std::string extractGfxToken(const std::string &s) {
   return "";
 }
 
-static bool inspectRocmCodeObject(const KernelArtifact &art, const std::string &asic, bool fullIsa) {
+static bool inspectRocmCodeObject(const KernelArtifact &art, const std::string &asic,
+                                  bool fullIsa, bool quiet,
+                                  IsaArtifactReport *outReport = nullptr) {
   // Locate clang-offload-bundler and llvm-objdump from standard ROCm LLVM paths
   std::string bundler = "clang-offload-bundler";
   std::string objdump = "llvm-objdump";
@@ -1457,21 +1654,57 @@ static bool inspectRocmCodeObject(const KernelArtifact &art, const std::string &
     fs::remove(tmpObj, ec);
   }
   if (rc != 0 || out.empty()) {
-    std::cerr << "  [Error] Failed to disassemble ROCm code object: " << art.filePath << "\n";
+    std::string err = "Failed to disassemble ROCm code object: " + art.filePath.string();
+    if (outReport) {
+      outReport->benchName = art.benchmarkName;
+      outReport->configLabel = art.configName;
+      outReport->configIndex = art.configIndex;
+      outReport->backend = art.backend;
+      outReport->artifactFile = art.filePath.filename().string();
+      outReport->errorMessage = err;
+    }
+    if (!quiet) {
+      std::cerr << "  [Error] " << err << "\n";
+    }
     return false;
   }
 
-  std::cout << "━━━ [rocm] " << art.configName
-            << " (" << art.filePath.filename().string()
-            << (!art.rocmSymbol.empty() ? (" :: " + art.rocmSymbol) : "")
-            << " — " << asic << ") ━━━\n\n";
-  printIsaTextSummary(out, fullIsa);
+  IsaExecutableReport exec;
+  exec.name = !art.rocmSymbol.empty() ? art.rocmSymbol : art.filePath.filename().string();
+  exec.description = "ROCm AMDGPU Disassembly (" + asic + ")";
+  exec.subgroupSize = 32;
+  analyzeIsaText(out, exec);
+  inferRocmRegisterCounts(exec.fullIsaLines, exec.vgprCount, exec.sgprCount);
+  exec.stats.push_back({"Instructions", std::to_string(exec.mix.total)});
+  if (exec.vgprCount > 0) {
+    exec.stats.push_back({"VGPRs (inferred)", std::to_string(exec.vgprCount)});
+  }
+  if (exec.sgprCount > 0) {
+    exec.stats.push_back({"SGPRs (inferred)", std::to_string(exec.sgprCount)});
+  }
+
+  if (outReport) {
+    outReport->benchName = art.benchmarkName;
+    outReport->configLabel = art.configName;
+    outReport->configIndex = art.configIndex;
+    outReport->backend = art.backend;
+    outReport->artifactFile = art.filePath.filename().string();
+    outReport->executables.push_back(std::move(exec));
+    return true;
+  }
+
+  if (!quiet) {
+    std::cout << "━━━ [rocm] " << art.configName
+              << " (" << art.filePath.filename().string()
+              << (!art.rocmSymbol.empty() ? (" :: " + art.rocmSymbol) : "")
+              << " — " << asic << ") ━━━\n\n";
+    printIsaExecSummary(exec, fullIsa);
+  }
   return true;
 }
 
-} // namespace
-
-int IsaDumper::dump(const IsaDumperOptions &opts) {
+static bool runInspectionCore(const IsaDumperOptions &opts, bool emitStdout,
+                              IsaInspectionResult *outResult) {
   fs::path kernelDir = KernelPath::find();
 
   // Resolve requested backends (default to Vulkan native pipeline executable inspection)
@@ -1603,9 +1836,17 @@ int IsaDumper::dump(const IsaDumperOptions &opts) {
   }
 
   if (artifacts.empty()) {
-    std::cerr << "Error: No compiled shaders or kernels matched for --dump-isa (searched in "
-              << kernelDir.string() << ").\n";
-    return EXIT_FAILURE;
+    std::string msg = "No compiled shaders or kernels matched for ISA inspection (searched in " +
+                      kernelDir.string() + ").";
+    if (outResult) {
+      outResult->ok = false;
+      outResult->errorSummary = msg;
+    }
+    if (emitStdout) {
+      std::cerr << "Error: No compiled shaders or kernels matched for --dump-isa (searched in "
+                << kernelDir.string() << ").\n";
+    }
+    return false;
   }
 
   std::string resolvedAsic = opts.asic;
@@ -1625,25 +1866,38 @@ int IsaDumper::dump(const IsaDumperOptions &opts) {
   }
   if (needVulkan || (needRocm && resolvedAsic.empty())) {
     vkInspector = std::make_unique<NativeVulkanIsaInspector>();
-    if (vkInspector->init(opts.deviceIndex)) {
+    if (vkInspector->init(opts.deviceIndex, !emitStdout)) {
       if (resolvedAsic.empty()) {
         const auto &prof = DeviceDatabase::lookup(vkInspector->vendorId, vkInspector->deviceId,
                                                   vkInspector->deviceName);
         resolvedAsic = extractGfxToken(prof.archName);
       }
-      if (needVulkan) {
+      if (outResult) {
+        outResult->deviceName = vkInspector->deviceName;
+        outResult->driverInfo = vkInspector->driverInfo;
+      }
+      if (emitStdout && needVulkan) {
         std::cout << "╭─ GPUBench Native Shader ISA Inspector (VK_KHR_pipeline_executable_properties) ─╮\n";
         std::cout << "│ Target Device : " << std::left << std::setw(63) << vkInspector->deviceName << "│\n";
         std::cout << "│ Active Driver : " << std::left << std::setw(63) << vkInspector->driverInfo << "│\n";
         std::cout << "╰────────────────────────────────────────────────────────────────────────────────╯\n\n";
       }
     } else if (needVulkan) {
-      return EXIT_FAILURE;
+      if (outResult) {
+        outResult->ok = false;
+        outResult->errorSummary = !vkInspector->lastError.empty()
+                                      ? vkInspector->lastError
+                                      : "Vulkan ISA inspector initialization failed.";
+      }
+      return false;
     }
   }
 #endif
   if (resolvedAsic.empty()) {
     resolvedAsic = "gfx1201";
+  }
+  if (outResult) {
+    outResult->resolvedAsic = resolvedAsic;
   }
 
   std::set<std::string> visitedFiles;
@@ -1654,21 +1908,59 @@ int IsaDumper::dump(const IsaDumperOptions &opts) {
     }
 
     if (!art.skipReason.empty()) {
-      std::cout << "━━━ [" << art.backend << "] " << art.configName << " ━━━\n"
-                << "  [Skipped] " << art.skipReason << "\n\n";
+      if (outResult) {
+        IsaArtifactReport rep;
+        rep.benchName = art.benchmarkName;
+        rep.configLabel = art.configName;
+        rep.configIndex = art.configIndex;
+        rep.backend = art.backend;
+        rep.artifactFile = art.filePath.filename().string();
+        rep.skipReason = art.skipReason;
+        outResult->artifacts.push_back(std::move(rep));
+      } else if (emitStdout) {
+        std::cout << "━━━ [" << art.backend << "] " << art.configName << " ━━━\n"
+                  << "  [Skipped] " << art.skipReason << "\n\n";
+      }
       continue;
     }
 
     if (art.backend == "vulkan") {
 #ifdef HAVE_VULKAN
       if (vkInspector) {
-        vkInspector->inspectSpv(art, opts.fullIsa);
+        if (outResult) {
+          IsaArtifactReport rep;
+          vkInspector->inspectSpv(art, opts.fullIsa, &rep);
+          outResult->artifacts.push_back(std::move(rep));
+        } else {
+          vkInspector->inspectSpv(art, opts.fullIsa, nullptr);
+        }
       }
 #endif
     } else if (art.backend == "rocm") {
-      inspectRocmCodeObject(art, resolvedAsic, opts.fullIsa);
+      if (outResult) {
+        IsaArtifactReport rep;
+        inspectRocmCodeObject(art, resolvedAsic, opts.fullIsa, !emitStdout, &rep);
+        outResult->artifacts.push_back(std::move(rep));
+      } else {
+        inspectRocmCodeObject(art, resolvedAsic, opts.fullIsa, !emitStdout, nullptr);
+      }
     }
   }
 
-  return EXIT_SUCCESS;
+  if (outResult) {
+    outResult->ok = true;
+  }
+  return true;
+}
+
+} // namespace
+
+int IsaDumper::dump(const IsaDumperOptions &opts) {
+  return runInspectionCore(opts, true, nullptr) ? EXIT_SUCCESS : EXIT_FAILURE;
+}
+
+IsaInspectionResult IsaDumper::inspect(const IsaDumperOptions &opts) {
+  IsaInspectionResult res;
+  runInspectionCore(opts, false, &res);
+  return res;
 }

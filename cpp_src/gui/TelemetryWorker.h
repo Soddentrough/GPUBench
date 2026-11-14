@@ -127,8 +127,10 @@ private:
 
     void workerLoop();
     void discoverDevices();
-    void pollDevice(DevicePollState& state, DeviceTelemetrySnapshot& snapshot,
-                    double timestampSec, bool isRecordingRun);
+    void applySample(DevicePollState& state, DeviceTelemetrySnapshot& snapshot,
+                     const GpuTelemetryData& hw,
+                     std::chrono::steady_clock::time_point now,
+                     double timestampSec, bool isRecordingRun);
 
     std::atomic<bool> m_running{false};
     std::atomic<bool> m_isRecording{false};

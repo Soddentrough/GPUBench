@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -45,7 +46,7 @@ int main(int argc, char** argv) {
     std::cerr.clear();
 #endif
 
-    CLI::App cli{"GPUBench GUI - Workstation GPU Microarchitecture & Roofline Profiler", "gpubench-gui"};
+    CLI::App cli{"GPUBench GUI - Workstation GPU Microarchitecture & Performance Profiler", "gpubench-gui"};
     cli.set_version_flag("-v,--version", std::string("GPUBench GUI v") + GPUBENCH_VERSION);
 
     std::string deviceOpt;
@@ -59,6 +60,8 @@ int main(int argc, char** argv) {
     std::string compareJsonPath;
     std::string outputJsonPath;
     std::string screenshotPath;
+    std::string modeStr;
+    std::string paletteStr;
     float uiScaleOverride = 0.0f;
     int maxFrames = -1;
     bool autoRun = false;
@@ -85,6 +88,8 @@ int main(int argc, char** argv) {
     cli.add_option("--frames", maxFrames, "Run for specified number of frames and exit");
     cli.add_option("--screenshot", screenshotPath, "Save rendered GUI window PNG before exit");
     cli.add_option("--ui-scale,--scale", uiScaleOverride, "UI scaling factor (e.g. 1.0, 1.5, 2.0)");
+    cli.add_option("--mode", modeStr, "Initial instrument mode (f1/isa, f2/charts/perf/scorecard, f3/rt/viewport)");
+    cli.add_option("--palette", paletteStr, "Bring-up phosphor palette (amber, green, paper)");
     cli.add_flag("--verbose", verboseMode, "Enable verbose logging output");
     cli.add_flag("--debug", debugMode, "Enable Vulkan Khronos Validation Layers");
 
@@ -213,27 +218,82 @@ int main(int argc, char** argv) {
     if (!compareJsonPath.empty()) {
         app.loadComparisonFromJson(compareJsonPath);
     }
+    auto toLowerAscii = [](const std::string& input) {
+        std::string out = input;
+        for (char& ch : out) {
+            if (ch >= 'A' && ch <= 'Z') {
+                ch = static_cast<char>(ch - 'A' + 'a');
+            }
+        }
+        return out;
+    };
+    if (!modeStr.empty()) {
+        const std::string m = toLowerAscii(modeStr);
+        if (m == "f1" || m == "isa") {
+            app.setInstrumentMode(0);
+        } else if (m == "f2" || m == "charts" || m == "perf" || m == "roofline" || m == "scorecard") {
+            app.setInstrumentMode(1);
+        } else if (m == "f3" || m == "rt" || m == "viewport") {
+            app.setInstrumentMode(2);
+        } else {
+            std::cerr << "Warning: Unknown --mode '" << modeStr << "', expected f1|f2|f3.\n";
+        }
+    }
+    if (!paletteStr.empty()) {
+        const std::string p = toLowerAscii(paletteStr);
+        if (p == "amber" || p == "p3") {
+            app.setPalette(gpubench::gui::BringUpPalette::AmberP3);
+        } else if (p == "green" || p == "p1") {
+            app.setPalette(gpubench::gui::BringUpPalette::GreenP1);
+        } else if (p == "paper" || p == "datasheet") {
+            app.setPalette(gpubench::gui::BringUpPalette::PaperDatasheet);
+        } else {
+            std::cerr << "Warning: Unknown --palette '" << paletteStr << "', expected amber|green|paper.\n";
+        }
+    }
     if (autoRun) {
         app.startBenchmarks();
     }
+    bool screenshotIsaSettled = false;
 
     bool exportedOnComplete = false;
     int frameCount = 0;
     bool running = true;
+    auto queryMinFrameIntervalNs = [](SDL_Window* window) -> uint64_t {
+        float refreshHz = 60.0f;
+        if (window) {
+            SDL_DisplayID displayId = SDL_GetDisplayForWindow(window);
+            if (displayId != 0) {
+                const SDL_DisplayMode* mode = SDL_GetCurrentDisplayMode(displayId);
+                if (mode && mode->refresh_rate > 1.0f) {
+                    refreshHz = mode->refresh_rate;
+                }
+            }
+        }
+        const double clampedHz = std::clamp(static_cast<double>(refreshHz), 30.0, 240.0);
+        return static_cast<uint64_t>(1'000'000'000.0 / clampedHz);
+    };
+
     auto processEvent = [&](const SDL_Event& ev) {
         ImGui_ImplSDL3_ProcessEvent(&ev);
-        if (ev.type == SDL_EVENT_QUIT) {
+        if (ev.type == SDL_EVENT_QUIT || ev.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
             running = false;
         }
-        if (ev.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) {
-            vulkanContext.resize(ev.window.data1, ev.window.data2);
+        if (ev.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED ||
+            ev.type == SDL_EVENT_WINDOW_RESIZED ||
+            ev.type == SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED) {
+            vulkanContext.requestSwapchainRebuild();
         }
     };
 
+    auto lastFrameEnd = std::chrono::steady_clock::now();
+
     while (running && !app.shouldQuit()) {
+        const bool isRunning = (app.getExecutionState() == gpubench::gui::ExecutionState::Running);
         SDL_Event event;
-        if (maxFrames <= 0 && app.getExecutionState() == gpubench::gui::ExecutionState::Idle) {
-            if (SDL_WaitEventTimeout(&event, 50)) {
+        if (maxFrames <= 0) {
+            const int waitMs = isRunning ? 33 : 50;
+            if (SDL_WaitEventTimeout(&event, waitMs)) {
                 processEvent(event);
             }
         }
@@ -241,13 +301,23 @@ int main(int argc, char** argv) {
             processEvent(event);
         }
 
+        if (!running || app.shouldQuit()) {
+            break;
+        }
+
         vulkanContext.beginFrame();
         app.updateAndRender();
         vulkanContext.endFrame();
 
-        if (app.getExecutionState() == gpubench::gui::ExecutionState::Running) {
-            SDL_Delay(2);
+        if (maxFrames <= 0) {
+            const uint64_t minIntervalNs = queryMinFrameIntervalNs(vulkanContext.getWindow());
+            const auto now = std::chrono::steady_clock::now();
+            const int64_t elapsedNs = std::chrono::duration_cast<std::chrono::nanoseconds>(now - lastFrameEnd).count();
+            if (elapsedNs >= 0 && static_cast<uint64_t>(elapsedNs) < minIntervalNs) {
+                SDL_DelayNS(minIntervalNs - static_cast<uint64_t>(elapsedNs));
+            }
         }
+        lastFrameEnd = std::chrono::steady_clock::now();
 
         if (app.getExecutionState() == gpubench::gui::ExecutionState::Completed) {
             if (!outputJsonPath.empty() && !exportedOnComplete) {
@@ -264,12 +334,23 @@ int main(int argc, char** argv) {
         }
 
         frameCount++;
+        if (!screenshotPath.empty() && !screenshotIsaSettled && maxFrames > 0 && frameCount >= maxFrames) {
+            app.waitForPendingInspections(2500);
+            screenshotIsaSettled = true;
+            maxFrames = frameCount + 2;
+        }
         if (maxFrames > 0 && frameCount >= maxFrames) {
             running = false;
         }
     }
 
     if (!screenshotPath.empty()) {
+        app.waitForPendingInspections(2500);
+        for (int settle = 0; settle < 2; ++settle) {
+            vulkanContext.beginFrame();
+            app.updateAndRender();
+            vulkanContext.endFrame();
+        }
         if (vulkanContext.saveScreenshot(screenshotPath)) {
             std::cout << "[GPUBench GUI] Saved screenshot to " << screenshotPath << std::endl;
         } else {

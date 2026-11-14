@@ -37,6 +37,7 @@ public:
     void beginFrame();
     void endFrame();
     void resize(int width, int height);
+    void requestSwapchainRebuild();
 
     SDL_Window* getWindow() const { return m_window; }
     VkInstance getInstance() const { return m_instance; }
@@ -50,6 +51,8 @@ public:
 
     bool isInitialized() const { return m_initialized; }
     void waitDeviceIdleSafe();
+    void setClearColor(float r, float g, float b, float a = 1.0f);
+    void setCrtPostFx(bool enabled, int paletteMode, float intensity = 1.0f);
 
     struct TextureResource {
         VkDescriptorSet descriptorSet{VK_NULL_HANDLE};
@@ -86,6 +89,9 @@ private:
     void flushDynamicImGuiTextures(ImDrawData* drawData);
     bool frameRender(ImDrawData* drawData);
     void framePresent();
+    bool createCrtPipeline();
+    void destroyCrtPipeline();
+    void recordCrtOverlay(VkCommandBuffer cmd, uint32_t width, uint32_t height);
 
     std::shared_ptr<::VulkanContext> m_sharedComputeCtx;
     uint32_t m_activeDeviceIndex{0};
@@ -104,6 +110,7 @@ private:
     ImGui_ImplVulkanH_Window m_mainWindowData;
     uint32_t m_minImageCount{2};
     bool m_swapchainRebuild{false};
+    bool m_windowResizePending{false};
     bool m_initialized{false};
     float m_displayScale{1.0f};
     float m_builtFontScale{1.0f};
@@ -111,7 +118,12 @@ private:
     ImFont* m_fontRegular{nullptr};
     ImFont* m_fontBold{nullptr};
     ImFont* m_fontMono{nullptr};
-    VkClearColorValue m_clearColor{{0.08f, 0.09f, 0.12f, 1.00f}};
+    VkClearColorValue m_clearColor{{0.031f, 0.035f, 0.031f, 1.00f}};
+    VkPipelineLayout m_crtPipelineLayout{VK_NULL_HANDLE};
+    VkPipeline m_crtPipeline{VK_NULL_HANDLE};
+    bool m_crtEnabled{false};
+    int m_crtPaletteMode{0};
+    float m_crtIntensity{1.0f};
 };
 
 } // namespace gpubench::gui

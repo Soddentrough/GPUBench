@@ -3,21 +3,51 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <set>
 
 namespace gpubench::gui {
 
+namespace {
+
+bool isHostSystemResult(const ResultData& r) {
+    return r.component == "System" || r.backendName == "CPU" ||
+           r.backendName == "System" || r.deviceIndex == UINT32_MAX ||
+           r.deviceName == "Host CPU";
+}
+
+std::string formatScorecardWorkloadName(const ResultData& r) {
+    if (r.benchmarkName == "Vector" || r.benchmarkName == "Matrix") {
+        if (!r.subcategory.empty()) {
+            const size_t lp = r.subcategory.find('(');
+            const size_t rp = r.subcategory.find(')', lp);
+            if (lp != std::string::npos && rp != std::string::npos && rp > lp + 1) {
+                return r.subcategory.substr(lp + 1, rp - lp - 1) + " (" + r.benchmarkName + ")";
+            }
+            return r.subcategory + " (" + r.benchmarkName + ")";
+        }
+    }
+    return r.benchmarkName;
+}
+
+} // namespace
+
 void GuiApp::renderResultsScorecard() {
-    ImGui::Spacing();
+    const BringUpColors c = getBringUpColors(m_palette);
 
     if (m_allResults.empty()) {
+        drawEtchedHeader("DAT-02", "SCORECARD & DELTA MATRIX", c, "0 RECORDS");
         ImGui::Spacing();
-        ImGui::TextDisabled("No benchmark results recorded yet.");
-        ImGui::TextDisabled("Select workloads in the 'Benchmark Suite' tab and click 'RUN SELECTED SUITE', "
-                            "or click 'Import/Diff' to load a unified CLI/GUI JSON file.");
+        ImGui::TextColored(c.textSecondary, "No benchmark results recorded yet.");
+        ImGui::TextColored(c.textMuted, "Select workloads in ROM-01 Workload Matrix and click [RUN TESTS], or click [SESSION] to load JSON.");
         return;
     }
+
+    char countTag[48];
+    std::snprintf(countTag, sizeof(countTag), "%zu RECORDS", m_allResults.size());
+    drawEtchedHeader("DAT-02", "SCORECARD & DELTA MATRIX", c, countTag);
+    ImGui::Spacing();
 
     // Compute Executive KPI Peaks
     double peakComputeTops = 0.0;
@@ -47,11 +77,12 @@ void GuiApp::renderResultsScorecard() {
             double tops = opsPerSec / 1e12;
             if (tops > peakComputeTops) {
                 peakComputeTops = tops;
-                peakComputeName = r.benchmarkName;
+                peakComputeName = formatScorecardWorkloadName(r);
                 peakComputeUnit = r.metric;
             }
         }
-        if (r.component == "Memory" && r.subcategory == "Bandwidth" && r.metric == "GB/s") {
+        if (r.component == "Memory" && !isHostSystemResult(r) &&
+            r.subcategory == "Bandwidth" && r.metric == "GB/s") {
             double gbs = opsPerSec / 1e9;
             if (gbs > peakVramGbs) {
                 peakVramGbs = gbs;
@@ -67,60 +98,60 @@ void GuiApp::renderResultsScorecard() {
         }
     }
 
-    // Executive KPI Cards
-    if (ImGui::BeginTable("ScorecardKpiStrip", 4, ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_SizingStretchSame)) {
+    // Executive KPI Strip
+    if (ImGui::BeginTable("ScorecardKpiStrip", 4, ImGuiTableFlags_Borders | ImGuiTableFlags_SizingStretchSame)) {
         ImGui::TableNextRow();
 
         ImGui::TableNextColumn();
-        ImGui::TextDisabled("PEAK COMPUTE");
+        ImGui::TextColored(c.textMuted, "PEAK COMPUTE");
         pushBoldFont();
         if (peakComputeTops > 0.0) {
-            ImGui::TextColored(ImVec4(0.10f, 0.84f, 0.98f, 1.0f), "%.2f %s", peakComputeTops, peakComputeUnit.c_str());
+            ImGui::TextColored(c.cyanAccent, "%.2f %s", peakComputeTops, peakComputeUnit.c_str());
         } else {
-            ImGui::TextDisabled("—");
+            ImGui::TextColored(c.textMuted, "—");
         }
         popBoldFont();
         if (!peakComputeName.empty()) {
-            ImGui::TextDisabled("%s", fitTextToPixelWidth(peakComputeName, ImGui::GetContentRegionAvail().x).c_str());
+            ImGui::TextColored(c.textMuted, "%s", fitTextToPixelWidth(peakComputeName, ImGui::GetContentRegionAvail().x).c_str());
         }
 
         ImGui::TableNextColumn();
-        ImGui::TextDisabled("PEAK VRAM BANDWIDTH");
+        ImGui::TextColored(c.textMuted, "PEAK VRAM BANDWIDTH");
         pushBoldFont();
         if (peakVramGbs > 0.0) {
-            ImGui::TextColored(ImVec4(0.22f, 0.92f, 0.56f, 1.0f), "%.1f GB/s", peakVramGbs);
+            ImGui::TextColored(c.okColor, "%.1f GB/s", peakVramGbs);
         } else {
-            ImGui::TextDisabled("—");
+            ImGui::TextColored(c.textMuted, "—");
         }
         popBoldFont();
         if (!peakVramName.empty()) {
-            ImGui::TextDisabled("%s", fitTextToPixelWidth(peakVramName, ImGui::GetContentRegionAvail().x).c_str());
+            ImGui::TextColored(c.textMuted, "%s", fitTextToPixelWidth(peakVramName, ImGui::GetContentRegionAvail().x).c_str());
         }
 
         ImGui::TableNextColumn();
-        ImGui::TextDisabled("PEAK RAY TRACING");
+        ImGui::TextColored(c.textMuted, "PEAK RAY TRACING");
         pushBoldFont();
         if (peakRtMrays > 0.0) {
-            ImGui::TextColored(ImVec4(0.98f, 0.76f, 0.24f, 1.0f), "%.1f MRays/s", peakRtMrays);
+            ImGui::TextColored(c.phosphorHi, "%.1f MRays/s", peakRtMrays);
         } else {
-            ImGui::TextDisabled("—");
+            ImGui::TextColored(c.textMuted, "—");
         }
         popBoldFont();
         if (!peakRtName.empty()) {
-            ImGui::TextDisabled("%s", fitTextToPixelWidth(peakRtName, ImGui::GetContentRegionAvail().x).c_str());
+            ImGui::TextColored(c.textMuted, "%s", fitTextToPixelWidth(peakRtName, ImGui::GetContentRegionAvail().x).c_str());
         }
 
         ImGui::TableNextColumn();
-        ImGui::TextDisabled("VALIDATION & ROOFLINE");
+        ImGui::TextColored(c.textMuted, "VALIDATION & CHARTS");
         pushBoldFont();
         if (invalidCount > 0) {
-            ImGui::TextColored(ImVec4(0.96f, 0.36f, 0.34f, 1.0f), "%zu Valid / %zu INVALID", validCount, invalidCount);
+            ImGui::TextColored(c.errColor, "%zu Valid / %zu INVALID", validCount, invalidCount);
         } else {
-            ImGui::TextColored(ImVec4(0.22f, 0.92f, 0.56f, 1.0f), "%zu Valid (%zu Unsup)", validCount, unsupportedCount);
+            ImGui::TextColored(c.okColor, "%zu Valid (%zu Unsup)", validCount, unsupportedCount);
         }
         popBoldFont();
-        if (ImGui::SmallButton("View Empirical Roofline ->")) {
-            m_switchToRoofline = true;
+        if (tacticalButton("##BtnScorecardToRoofline", "VIEW CHARTS ->", ImVec2(0.0f, s(21.0f)), false, c)) {
+            m_f2SubMode = 1;
         }
 
         ImGui::EndTable();
@@ -129,56 +160,64 @@ void GuiApp::renderResultsScorecard() {
     // Active Comparison Banner
     if (!m_comparisonResults.empty()) {
         ImGui::Spacing();
-        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.08f, 0.16f, 0.24f, 0.95f));
-        ImGui::BeginChild("ComparisonBanner", ImVec2(0, s(34.0f)), ImGuiChildFlags_Borders);
-        ImGui::TextColored(ImVec4(0.25f, 0.88f, 0.98f, 1.0f),
-                           "Comparison Mode Active  |  Baseline: %s (%zu records)",
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, c.bgElevated);
+        ImGui::PushStyleColor(ImGuiCol_Border, c.cyanAccent);
+        ImGui::BeginChild("ComparisonBanner", ImVec2(0, s(32.0f)), ImGuiChildFlags_Borders);
+        ImGui::TextColored(c.cyanAccent,
+                           "DIFF MODE ACTIVE  |  BASELINE: %s (%zu records)",
                            m_comparisonSourceLabel.c_str(), m_comparisonResults.size());
-        ImGui::SameLine();
-        if (ImGui::SmallButton("Clear Baseline")) {
+        ImGui::SameLine(0.0f, s(10.0f));
+        if (tacticalButton("##BtnClearBaseline", "CLEAR BASELINE", ImVec2(0.0f, s(20.0f)), false, c, true)) {
             clearComparisonResults();
         }
         ImGui::EndChild();
-        ImGui::PopStyleColor();
+        ImGui::PopStyleColor(2);
     }
 
     ImGui::Spacing();
-    ImGui::Separator();
-    ImGui::Spacing();
 
-    // Category Filter Pills
-    const char* catFilters[] = {"All", "Compute", "Memory", "Ray Tracing", "Scheduling", "Graphics", "Host System"};
+    // Category Filter Strip
+    const char* catFilters[] = {"ALL", "COMPUTE", "MEMORY", "RAY TRACING", "SCHEDULING", "GRAPHICS", "HOST CPU"};
     for (int i = 0; i < 7; ++i) {
-        if (i > 0) sameLineIfFits(s(95.0f), s(6.0f));
+        float bw = ImGui::CalcTextSize(catFilters[i]).x + s(16.0f);
+        if (i > 0) sameLineIfFits(bw, s(4.0f));
         bool active = (m_activeScorecardFilter == i);
-        if (active) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.05f, 0.55f, 0.78f, 1.0f));
-        if (ImGui::SmallButton(catFilters[i])) {
+        std::string fId = "##ScCat_" + std::to_string(i);
+        if (tacticalButton(fId.c_str(), catFilters[i], ImVec2(0.0f, s(21.0f)), active, c)) {
             m_activeScorecardFilter = i;
         }
-        if (active) ImGui::PopStyleColor();
     }
 
-    // Device Filter Pills (if multiple devices exist in results)
+    // Device Filter Strip (if multiple devices exist in results)
     std::set<uint32_t> seenDevs;
     bool hasHostCpu = false;
     for (const auto& r : m_allResults) {
-        if (r.component == "System" || r.backendName == "CPU") hasHostCpu = true;
+        if (isHostSystemResult(r)) hasHostCpu = true;
         else seenDevs.insert(r.deviceIndex);
     }
     if (seenDevs.size() > 1 || (seenDevs.size() >= 1 && hasHostCpu)) {
-        ImGui::SameLine(0.0f, s(18.0f));
-        ImGui::TextDisabled("Device:");
-        ImGui::SameLine();
-        if (ImGui::SmallButton("All Devs")) m_activeDeviceScorecardFilter = -1;
+        ImGui::SameLine(0.0f, s(14.0f));
+        ImGui::TextColored(c.textMuted, "DUT:");
+        ImGui::SameLine(0.0f, s(4.0f));
+        if (tacticalButton("##ScDevAll", "ALL DUT", ImVec2(0.0f, s(21.0f)), (m_activeDeviceScorecardFilter == -1), c)) {
+            m_activeDeviceScorecardFilter = -1;
+        }
         for (uint32_t d : seenDevs) {
-            ImGui::SameLine();
+            ImGui::SameLine(0.0f, s(4.0f));
             char dlbl[32];
             std::snprintf(dlbl, sizeof(dlbl), "GPU %u", d);
-            if (ImGui::SmallButton(dlbl)) m_activeDeviceScorecardFilter = static_cast<int>(d);
+            std::string dId = "##ScDevGpu_" + std::to_string(d);
+            if (tacticalButton(dId.c_str(), dlbl, ImVec2(0.0f, s(21.0f)),
+                               (m_activeDeviceScorecardFilter == static_cast<int>(d)), c)) {
+                m_activeDeviceScorecardFilter = static_cast<int>(d);
+            }
         }
         if (hasHostCpu) {
-            ImGui::SameLine();
-            if (ImGui::SmallButton("Host CPU")) m_activeDeviceScorecardFilter = -2;
+            ImGui::SameLine(0.0f, s(4.0f));
+            if (tacticalButton("##ScDevCpu", "HOST CPU", ImVec2(0.0f, s(21.0f)),
+                               (m_activeDeviceScorecardFilter == -2), c)) {
+                m_activeDeviceScorecardFilter = -2;
+            }
         }
     }
 
@@ -188,21 +227,52 @@ void GuiApp::renderResultsScorecard() {
         switch (m_activeScorecardFilter) {
         case 0: return true;
         case 1: return r.component == "Compute" && r.subcategory.find("Indirect") == std::string::npos;
-        case 2: return r.component == "Memory";
+        case 2: return r.component == "Memory" && !isHostSystemResult(r);
         case 3: return r.component == "Ray Tracing";
         case 4: return r.component == "Scheduling" || r.subcategory.find("Indirect") != std::string::npos;
         case 5: return r.component == "Graphics" || r.component == "Raster";
-        case 6: return r.component == "System" || r.backendName == "CPU";
+        case 6: return isHostSystemResult(r);
         default: return true;
         }
     };
 
     auto matchesDeviceFilter = [&](const ResultData& r) {
         if (m_activeDeviceScorecardFilter == -1) return true;
-        if (m_activeDeviceScorecardFilter == -2) return r.component == "System" || r.backendName == "CPU";
-        if (r.component == "System" || r.backendName == "CPU") return false;
+        if (m_activeDeviceScorecardFilter == -2) return isHostSystemResult(r);
+        if (isHostSystemResult(r)) return false;
         return static_cast<int>(r.deviceIndex) == m_activeDeviceScorecardFilter;
     };
+
+    auto resolveRowBaseline = [&](const ResultData& r) -> const ResultData* {
+        if (const ResultData* cmp = findComparisonMatch(r)) {
+            return cmp;
+        }
+        if (m_comparisonResults.empty() && r.baselineConfigIndex >= 0 && !r.isUnsupported) {
+            std::string rScene = extractSceneName(r.benchmarkName);
+            for (const auto& cand : m_allResults) {
+                if (cand.deviceIndex == r.deviceIndex &&
+                    cand.backendName == r.backendName &&
+                    cand.subcategory == r.subcategory &&
+                    static_cast<int32_t>(cand.configIndex) == r.baselineConfigIndex &&
+                    extractSceneName(cand.benchmarkName) == rScene &&
+                    !cand.isUnsupported && cand.time_ms > 0.0) {
+                    return &cand;
+                }
+            }
+        }
+        return nullptr;
+    };
+
+    std::vector<const ResultData*> filteredRows;
+    filteredRows.reserve(m_allResults.size());
+    bool showDeltaColumn = !m_comparisonResults.empty();
+    for (const auto& r : m_allResults) {
+        if (!matchesCategoryFilter(r) || !matchesDeviceFilter(r)) continue;
+        filteredRows.push_back(&r);
+        if (!showDeltaColumn && resolveRowBaseline(r) != nullptr) {
+            showDeltaColumn = true;
+        }
+    }
 
     ImGuiTableFlags flags = ImGuiTableFlags_Borders |
                             ImGuiTableFlags_RowBg |
@@ -210,58 +280,70 @@ void GuiApp::renderResultsScorecard() {
                             ImGuiTableFlags_Resizable |
                             ImGuiTableFlags_SizingStretchProp;
 
-    const char* deltaColTitle = m_comparisonResults.empty() ? "vs Baseline" : "vs Comparison JSON";
-    if (ImGui::BeginTable("ResultsScorecardTable", 7, flags, ImVec2(0.0f, 0.0f))) {
+    const char* tableId = showDeltaColumn ? "ResultsScorecardTableWithBase" : "ResultsScorecardTableNoBase";
+    const int numCols = showDeltaColumn ? 7 : 6;
+    if (ImGui::BeginTable(tableId, numCols, flags, ImVec2(0.0f, 0.0f))) {
         ImGui::TableSetupScrollFreeze(0, 1);
-        ImGui::TableSetupColumn("Device", ImGuiTableColumnFlags_WidthStretch, 0.14f);
-        ImGui::TableSetupColumn("Domain", ImGuiTableColumnFlags_WidthStretch, 0.13f);
-        ImGui::TableSetupColumn("Workload", ImGuiTableColumnFlags_WidthStretch, 0.30f);
-        ImGui::TableSetupColumn("Throughput / Score", ImGuiTableColumnFlags_WidthStretch, 0.14f);
-        ImGui::TableSetupColumn("Median Time", ImGuiTableColumnFlags_WidthStretch, 0.10f);
-        ImGui::TableSetupColumn(deltaColTitle, ImGuiTableColumnFlags_WidthStretch, 0.10f);
-        ImGui::TableSetupColumn("ISA / Power", ImGuiTableColumnFlags_WidthStretch, 0.09f);
+        if (showDeltaColumn) {
+            const char* deltaColTitle = m_comparisonResults.empty() ? "Speedup" : "vs Comparison JSON";
+            ImGui::TableSetupColumn("Device", ImGuiTableColumnFlags_WidthStretch, 0.14f);
+            ImGui::TableSetupColumn("Domain", ImGuiTableColumnFlags_WidthStretch, 0.13f);
+            ImGui::TableSetupColumn("Workload", ImGuiTableColumnFlags_WidthStretch, 0.30f);
+            ImGui::TableSetupColumn("Throughput / Score", ImGuiTableColumnFlags_WidthStretch, 0.14f);
+            ImGui::TableSetupColumn("Median Time", ImGuiTableColumnFlags_WidthStretch, 0.10f);
+            ImGui::TableSetupColumn(deltaColTitle, ImGuiTableColumnFlags_WidthStretch, 0.10f);
+            ImGui::TableSetupColumn("ISA / Power", ImGuiTableColumnFlags_WidthStretch, 0.09f);
+        } else {
+            ImGui::TableSetupColumn("Device", ImGuiTableColumnFlags_WidthStretch, 0.15f);
+            ImGui::TableSetupColumn("Domain", ImGuiTableColumnFlags_WidthStretch, 0.14f);
+            ImGui::TableSetupColumn("Workload", ImGuiTableColumnFlags_WidthStretch, 0.35f);
+            ImGui::TableSetupColumn("Throughput / Score", ImGuiTableColumnFlags_WidthStretch, 0.16f);
+            ImGui::TableSetupColumn("Median Time", ImGuiTableColumnFlags_WidthStretch, 0.10f);
+            ImGui::TableSetupColumn("ISA / Power", ImGuiTableColumnFlags_WidthStretch, 0.10f);
+        }
         ImGui::TableHeadersRow();
 
         int rowId = 0;
-        for (const auto& r : m_allResults) {
-            if (!matchesCategoryFilter(r) || !matchesDeviceFilter(r)) continue;
+        for (const ResultData* rPtr : filteredRows) {
+            const ResultData& r = *rPtr;
 
             ImGui::PushID(rowId++);
             ImGui::TableNextRow();
 
             // Col 0: Device
             ImGui::TableSetColumnIndex(0);
-            std::string devBadge = (r.component == "System" || r.backendName == "CPU")
+            std::string devBadge = isHostSystemResult(r)
                 ? "[CPU] " + r.deviceName
                 : ("[GPU " + std::to_string(r.deviceIndex) + "] " + r.deviceName);
-            ImGui::TextUnformatted(fitTextToPixelWidth(devBadge, ImGui::GetContentRegionAvail().x).c_str());
+            ImGui::TextColored(c.textSecondary, "%s", fitTextToPixelWidth(devBadge, ImGui::GetContentRegionAvail().x).c_str());
 
             // Col 1: Domain / Subcategory
             ImGui::TableSetColumnIndex(1);
-            ImGui::TextDisabled("%s", fitTextToPixelWidth(r.subcategory.empty() ? r.component : r.subcategory,
-                                                           ImGui::GetContentRegionAvail().x).c_str());
+            ImGui::TextColored(c.textMuted, "%s", fitTextToPixelWidth(r.subcategory.empty() ? r.component : r.subcategory,
+                                                                      ImGui::GetContentRegionAvail().x).c_str());
 
             // Col 2: Workload Name + Honest Badges
             ImGui::TableSetColumnIndex(2);
-            ImGui::TextUnformatted(r.benchmarkName.c_str());
-            if (r.isEmulated && r.benchmarkName.find("Emulated") == std::string::npos) {
+            const std::string displayWorkload = formatScorecardWorkloadName(r);
+            ImGui::TextColored(c.textPrimary, "%s", displayWorkload.c_str());
+            if (r.isEmulated && displayWorkload.find("Emulated") == std::string::npos) {
                 ImGui::SameLine();
-                ImGui::TextColored(ImVec4(0.98f, 0.76f, 0.24f, 1.0f), "(Emulated)");
+                ImGui::TextColored(c.warnColor, "(Emulated)");
             }
             if (!r.isUnsupported && !r.isValid) {
                 ImGui::SameLine();
-                ImGui::TextColored(ImVec4(0.98f, 0.32f, 0.32f, 1.0f), "[INVALID]");
+                ImGui::TextColored(c.errColor, "[INVALID]");
             }
 
             if (ImGui::IsItemHovered()) {
                 ImGui::BeginTooltip();
                 pushBoldFont();
-                ImGui::TextColored(ImVec4(0.10f, 0.84f, 0.98f, 1.0f), "%s", r.benchmarkName.c_str());
+                ImGui::TextColored(c.phosphorHi, "%s", displayWorkload.c_str());
                 popBoldFont();
-                ImGui::TextDisabled("Backend: %s  |  Device: %s", r.backendName.c_str(), r.deviceName.c_str());
+                ImGui::TextColored(c.textMuted, "Backend: %s  |  Device: %s", r.backendName.c_str(), r.deviceName.c_str());
                 ImGui::Separator();
                 if (r.isUnsupported) {
-                    ImGui::TextColored(ImVec4(0.96f, 0.44f, 0.36f, 1.0f), "UNSUPPORTED (%s)",
+                    ImGui::TextColored(c.errColor, "UNSUPPORTED (%s)",
                                        r.supportCategory.empty() ? "capability" : r.supportCategory.c_str());
                     if (!r.supportNote.empty()) {
                         ImGui::TextWrapped("%s", r.supportNote.c_str());
@@ -283,12 +365,12 @@ void GuiApp::renderResultsScorecard() {
                                     r.powerWatts, r.energyJoules, r.unitPerWatt, r.efficiencyUnit.c_str());
                     }
                     if (!r.supportNote.empty()) {
-                        ImGui::TextColored(ImVec4(0.95f, 0.80f, 0.35f, 1.0f), "Note: %s", r.supportNote.c_str());
+                        ImGui::TextColored(c.warnColor, "Note: %s", r.supportNote.c_str());
                     }
                 }
                 if (r.benchmarkName.rfind("RayScheduling", 0) == 0) {
                     ImGui::Separator();
-                    ImGui::TextDisabled("Right-click row to inspect scene in Ray Tracing Viewport");
+                    ImGui::TextColored(c.textMuted, "Right-click row to inspect scene in F3 RT Parity Viewport");
                 }
                 ImGui::EndTooltip();
             }
@@ -307,11 +389,11 @@ void GuiApp::renderResultsScorecard() {
             ImGui::TableSetColumnIndex(3);
             pushMonoFont();
             if (r.isUnsupported) {
-                ImGui::TextColored(ImVec4(0.65f, 0.50f, 0.45f, 1.0f), "UNSUPPORTED");
+                ImGui::TextColored(c.textMuted, "UNSUPPORTED");
             } else if (!r.isValid) {
-                ImGui::TextColored(ImVec4(0.98f, 0.32f, 0.32f, 1.0f), "INVALID");
+                ImGui::TextColored(c.errColor, "INVALID");
             } else {
-                ImGui::TextColored(ImVec4(0.92f, 0.97f, 1.0f, 1.0f), "%s",
+                ImGui::TextColored(c.textPrimary, "%s",
                                    formatResultScoreString(r, false).c_str());
             }
             popMonoFont();
@@ -321,59 +403,47 @@ void GuiApp::renderResultsScorecard() {
             pushMonoFont();
             double tDisp = (r.median_time_ms > 0.0) ? r.median_time_ms : r.time_ms;
             if (!r.isUnsupported && tDisp > 0.0) {
-                ImGui::TextDisabled("%.3f ms", tDisp);
+                ImGui::TextColored(c.textSecondary, "%.3f ms", tDisp);
             } else {
-                ImGui::TextDisabled("—");
+                ImGui::TextColored(c.textMuted, "—");
             }
             popMonoFont();
 
-            // Col 5: Speedup / Comparison Delta
-            ImGui::TableSetColumnIndex(5);
-            pushMonoFont();
-            const ResultData* basePtr = findComparisonMatch(r);
-            if (!basePtr && m_comparisonResults.empty() && r.baselineConfigIndex >= 0 && !r.isUnsupported) {
-                std::string rScene = extractSceneName(r.benchmarkName);
-                for (const auto& cand : m_allResults) {
-                    if (cand.deviceIndex == r.deviceIndex &&
-                        cand.backendName == r.backendName &&
-                        cand.subcategory == r.subcategory &&
-                        static_cast<int32_t>(cand.configIndex) == r.baselineConfigIndex &&
-                        extractSceneName(cand.benchmarkName) == rScene &&
-                        !cand.isUnsupported && cand.time_ms > 0.0) {
-                        basePtr = &cand;
-                        break;
+            int powerColIdx = 5;
+            if (showDeltaColumn) {
+                // Col 5: Speedup / Comparison Delta
+                ImGui::TableSetColumnIndex(5);
+                pushMonoFont();
+                const ResultData* basePtr = resolveRowBaseline(r);
+                if (basePtr && !r.isUnsupported && r.time_ms > 0.0) {
+                    double curRate = computeThroughputOrInvLatency(r);
+                    double baseRate = computeThroughputOrInvLatency(*basePtr);
+                    if (curRate > 0.0 && baseRate > 0.0) {
+                        double ratio = curRate / baseRate;
+                        double pct = (ratio - 1.0) * 100.0;
+                        ImVec4 dCol = (ratio >= 1.01)
+                            ? c.okColor
+                            : ((ratio <= 0.99) ? c.errColor : c.textSecondary);
+                        ImGui::TextColored(dCol, "%.2fx (%+.1f%%)", ratio, pct);
+                    } else {
+                        ImGui::TextColored(c.textMuted, "—");
                     }
-                }
-            }
-
-            if (basePtr && !r.isUnsupported && r.time_ms > 0.0) {
-                double curRate = computeThroughputOrInvLatency(r);
-                double baseRate = computeThroughputOrInvLatency(*basePtr);
-                if (curRate > 0.0 && baseRate > 0.0) {
-                    double ratio = curRate / baseRate;
-                    double pct = (ratio - 1.0) * 100.0;
-                    ImVec4 dCol = (ratio >= 1.01)
-                        ? ImVec4(0.20f, 0.92f, 0.52f, 1.0f)
-                        : ((ratio <= 0.99) ? ImVec4(0.95f, 0.42f, 0.36f, 1.0f)
-                                           : ImVec4(0.75f, 0.80f, 0.88f, 1.0f));
-                    ImGui::TextColored(dCol, "%.2fx (%+.1f%%)", ratio, pct);
                 } else {
-                    ImGui::TextDisabled("—");
+                    ImGui::TextColored(c.textMuted, "—");
                 }
-            } else {
-                ImGui::TextDisabled("—");
+                popMonoFont();
+                powerColIdx = 6;
             }
-            popMonoFont();
 
-            // Col 6: ISA / Power
-            ImGui::TableSetColumnIndex(6);
+            // ISA / Power
+            ImGui::TableSetColumnIndex(powerColIdx);
             pushMonoFont();
             if (r.hasPowerTelemetry && r.powerWatts > 0.0f) {
-                ImGui::TextColored(ImVec4(0.98f, 0.78f, 0.25f, 1.0f), "%.0f W", r.powerWatts);
+                ImGui::TextColored(c.warnColor, "%.0f W", r.powerWatts);
             } else if (r.hasRegisterTelemetry && r.vgprCount > 0) {
-                ImGui::TextDisabled("%uV/%uS", r.vgprCount, r.sgprCount);
+                ImGui::TextColored(c.textSecondary, "%uV/%uS", r.vgprCount, r.sgprCount);
             } else {
-                ImGui::TextDisabled("—");
+                ImGui::TextColored(c.textMuted, "—");
             }
             popMonoFont();
 

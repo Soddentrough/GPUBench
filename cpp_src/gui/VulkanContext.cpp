@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <mutex>
 #include <stdexcept>
@@ -23,6 +24,7 @@
 
 #include "third_party/stb_image.h"
 #include "utils/ImageExport.h"
+#include "utils/KernelPath.h"
 
 void ImGui_ImplVulkanH_CreateWindowSwapChain(VkPhysicalDevice physical_device, VkDevice device, ImGui_ImplVulkanH_Window* wd, const VkAllocationCallbacks* allocator, int w, int h, uint32_t min_image_count, VkImageUsageFlags image_usage);
 void ImGui_ImplVulkanH_CreateWindowCommandBuffers(VkPhysicalDevice physical_device, VkDevice device, ImGui_ImplVulkanH_Window* wd, uint32_t queue_family, const VkAllocationCallbacks* allocator);
@@ -181,6 +183,7 @@ void VulkanContext::loadSystemFont() {
         0x2190, 0x21FF, // Arrows (←, ↑, →, ↓, ↔, ⇒)
         0x2200, 0x22FF, // Mathematical Operators (≥, ≤, ≈, ≠, ∞, ∆, ∑)
         0x2300, 0x23FF, // Miscellaneous Technical (⏱, ⏳)
+        0x2500, 0x259F, // Box Drawing & Block Elements (─, │, ┌, ┐, └, ┘, █, ▓)
         0x25A0, 0x25FF, // Geometric Shapes (▪, ▸, ▾, ▲, ▼, ●, ◆)
         0x2600, 0x26FF, // Miscellaneous Symbols (⚠, ⚡, ★)
         0x2700, 0x27BF, // Dingbats (✓, ✔, ✕, ✖, ✗, ✘)
@@ -189,38 +192,47 @@ void VulkanContext::loadSystemFont() {
 
     const char* regularCandidates[] = {
 #if defined(_WIN32)
+        "C:\\Windows\\Fonts\\consola.ttf",
         "C:\\Windows\\Fonts\\segoeui.ttf",
         "C:\\Windows\\Fonts\\arial.ttf",
         "C:\\Windows\\Fonts\\calibri.ttf",
 #elif defined(__APPLE__)
+        "/System/Library/Fonts/Monaco.ttf",
         "/System/Library/Fonts/SFNS.ttf",
         "/System/Library/Fonts/Supplemental/Arial.ttf",
         "/Library/Fonts/Arial.ttf",
 #endif
+        "/usr/share/fonts/adwaita-mono-fonts/AdwaitaMono-Regular.ttf",
+        "/usr/share/fonts/liberation-mono-fonts/LiberationMono-Regular.ttf",
+        "/usr/share/fonts/dejavu-sans-mono-fonts/DejaVuSansMono.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
         "/usr/share/fonts/rsms-inter-fonts/Inter-Regular.ttf",
         "/usr/share/fonts/adwaita-sans-fonts/AdwaitaSans-Regular.ttf",
         "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/liberation-sans-fonts/LiberationSans-Regular.ttf",
-        "/usr/share/fonts/open-sans/OpenSans-Regular.ttf",
-        "/usr/share/fonts/google-noto/NotoSans-Regular.ttf"
+        "/usr/share/fonts/liberation-sans-fonts/LiberationSans-Regular.ttf"
     };
 
     const char* boldCandidates[] = {
 #if defined(_WIN32)
+        "C:\\Windows\\Fonts\\consolab.ttf",
         "C:\\Windows\\Fonts\\segoeuib.ttf",
         "C:\\Windows\\Fonts\\arialbd.ttf",
         "C:\\Windows\\Fonts\\calibrib.ttf",
 #elif defined(__APPLE__)
+        "/System/Library/Fonts/Supplemental/Courier New Bold.ttf",
         "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
         "/Library/Fonts/Arial Bold.ttf",
 #endif
+        "/usr/share/fonts/adwaita-mono-fonts/AdwaitaMono-Bold.ttf",
+        "/usr/share/fonts/liberation-mono-fonts/LiberationMono-Bold.ttf",
+        "/usr/share/fonts/dejavu-sans-mono-fonts/DejaVuSansMono-Bold.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf",
         "/usr/share/fonts/rsms-inter-fonts/Inter-SemiBold.ttf",
         "/usr/share/fonts/rsms-inter-fonts/Inter-Bold.ttf",
         "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans-Bold.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-        "/usr/share/fonts/liberation-sans-fonts/LiberationSans-Bold.ttf",
-        "/usr/share/fonts/open-sans/OpenSans-Bold.ttf"
+        "/usr/share/fonts/liberation-sans-fonts/LiberationSans-Bold.ttf"
     };
 
     const char* monoCandidates[] = {
@@ -271,9 +283,9 @@ void VulkanContext::loadSystemFont() {
         }
     };
 
-    constexpr float kBaseRegFontSize  = 15.5f;
-    constexpr float kBaseBoldFontSize = 16.5f;
-    constexpr float kBaseMonoFontSize = 14.5f;
+    constexpr float kBaseRegFontSize  = 14.0f;
+    constexpr float kBaseBoldFontSize = 15.0f;
+    constexpr float kBaseMonoFontSize = 13.5f;
 
     // 1. Primary Regular UI Font (unscaled base size; dynamic atlas bakes glyphs on demand)
     for (const char* fontPath : regularCandidates) {
@@ -475,14 +487,19 @@ void VulkanContext::setupVulkanWindow(int width, int height) {
     );
 
     const VkPresentModeKHR presentModes[] = {
-        VK_PRESENT_MODE_FIFO_KHR,
         VK_PRESENT_MODE_MAILBOX_KHR,
+        VK_PRESENT_MODE_FIFO_KHR,
         VK_PRESENT_MODE_IMMEDIATE_KHR
     };
     m_mainWindowData.PresentMode = ImGui_ImplVulkanH_SelectPresentMode(
         m_physicalDevice, m_mainWindowData.Surface,
         presentModes, sizeof(presentModes) / sizeof(presentModes[0])
     );
+
+    {
+        const int presentMin = ImGui_ImplVulkanH_GetMinImageCountFromPresentMode(m_mainWindowData.PresentMode);
+        m_minImageCount = presentMin > 2 ? static_cast<uint32_t>(presentMin) : 2u;
+    }
 
     {
         std::unique_lock<std::recursive_mutex> qlock;
@@ -496,6 +513,10 @@ void VulkanContext::setupVulkanWindow(int width, int height) {
         ImGui_ImplVulkanH_CreateWindowCommandBuffers(
             m_physicalDevice, m_device, &m_mainWindowData, m_queueFamily, m_allocator
         );
+    }
+
+    if (m_mainWindowData.ImageCount > 0 && m_minImageCount > m_mainWindowData.ImageCount) {
+        m_minImageCount = m_mainWindowData.ImageCount >= 2u ? m_mainWindowData.ImageCount : 2u;
     }
 
     ImGui_ImplSDL3_InitForVulkan(m_window);
@@ -517,6 +538,211 @@ void VulkanContext::setupVulkanWindow(int width, int height) {
     initInfo.Allocator = m_allocator;
 
     ImGui_ImplVulkan_Init(&initInfo);
+    createCrtPipeline();
+}
+
+void VulkanContext::setClearColor(float r, float g, float b, float a) {
+    m_clearColor.float32[0] = r;
+    m_clearColor.float32[1] = g;
+    m_clearColor.float32[2] = b;
+    m_clearColor.float32[3] = a;
+}
+
+void VulkanContext::setCrtPostFx(bool enabled, int paletteMode, float intensity) {
+    m_crtEnabled = enabled;
+    m_crtPaletteMode = paletteMode;
+    m_crtIntensity = intensity;
+}
+
+bool VulkanContext::createCrtPipeline() {
+    if (m_device == VK_NULL_HANDLE || m_mainWindowData.RenderPass == VK_NULL_HANDLE) {
+        return false;
+    }
+    destroyCrtPipeline();
+
+    std::vector<std::filesystem::path> searchDirs;
+    std::filesystem::path kp = KernelPath::find();
+    if (!kp.empty()) {
+        searchDirs.push_back(kp / "vulkan");
+    }
+    if (const char* base = SDL_GetBasePath()) {
+        std::filesystem::path bp(base);
+        searchDirs.push_back(bp / "kernels" / "vulkan");
+        searchDirs.push_back(bp / ".." / "share" / "gpubench" / "kernels" / "vulkan");
+    }
+    searchDirs.push_back(std::filesystem::current_path() / "kernels" / "vulkan");
+
+    auto loadSpv = [&](const char* filename) -> VkShaderModule {
+        std::error_code ec;
+        for (const auto& dir : searchDirs) {
+            std::filesystem::path p = dir / filename;
+            if (!std::filesystem::exists(p, ec)) continue;
+            std::ifstream ifs(p, std::ios::binary | std::ios::ate);
+            if (!ifs) continue;
+            std::streamsize sz = ifs.tellg();
+            if (sz <= 0 || (sz % 4) != 0) continue;
+            ifs.seekg(0, std::ios::beg);
+            std::vector<uint32_t> code(static_cast<size_t>(sz) / sizeof(uint32_t));
+            if (!ifs.read(reinterpret_cast<char*>(code.data()), sz)) continue;
+            VkShaderModuleCreateInfo ci{};
+            ci.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+            ci.codeSize = static_cast<size_t>(sz);
+            ci.pCode = code.data();
+            VkShaderModule mod = VK_NULL_HANDLE;
+            if (vkCreateShaderModule(m_device, &ci, m_allocator, &mod) == VK_SUCCESS) {
+                return mod;
+            }
+        }
+        return VK_NULL_HANDLE;
+    };
+
+    VkShaderModule vertMod = loadSpv("gui_crt_overlay.vert.spv");
+    VkShaderModule fragMod = loadSpv("gui_crt_overlay.frag.spv");
+    if (vertMod == VK_NULL_HANDLE || fragMod == VK_NULL_HANDLE) {
+        if (vertMod != VK_NULL_HANDLE) vkDestroyShaderModule(m_device, vertMod, m_allocator);
+        if (fragMod != VK_NULL_HANDLE) vkDestroyShaderModule(m_device, fragMod, m_allocator);
+        return false;
+    }
+
+    VkPushConstantRange pushRange{};
+    pushRange.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    pushRange.offset = 0;
+    pushRange.size = 16;
+
+    VkPipelineLayoutCreateInfo layoutInfo{};
+    layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    layoutInfo.pushConstantRangeCount = 1;
+    layoutInfo.pPushConstantRanges = &pushRange;
+    if (vkCreatePipelineLayout(m_device, &layoutInfo, m_allocator, &m_crtPipelineLayout) != VK_SUCCESS) {
+        vkDestroyShaderModule(m_device, vertMod, m_allocator);
+        vkDestroyShaderModule(m_device, fragMod, m_allocator);
+        return false;
+    }
+
+    VkPipelineShaderStageCreateInfo stages[2]{};
+    stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+    stages[0].module = vertMod;
+    stages[0].pName = "main";
+    stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+    stages[1].module = fragMod;
+    stages[1].pName = "main";
+
+    VkPipelineVertexInputStateCreateInfo vertexInput{};
+    vertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+
+    VkPipelineInputAssemblyStateCreateInfo inputAsm{};
+    inputAsm.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+    inputAsm.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+    VkPipelineViewportStateCreateInfo viewportState{};
+    viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+    viewportState.viewportCount = 1;
+    viewportState.scissorCount = 1;
+
+    VkPipelineRasterizationStateCreateInfo raster{};
+    raster.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    raster.polygonMode = VK_POLYGON_MODE_FILL;
+    raster.cullMode = VK_CULL_MODE_NONE;
+    raster.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    raster.lineWidth = 1.0f;
+
+    VkPipelineMultisampleStateCreateInfo ms{};
+    ms.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+    VkPipelineColorBlendAttachmentState blendAtt{};
+    blendAtt.blendEnable = VK_TRUE;
+    blendAtt.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+    blendAtt.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    blendAtt.colorBlendOp = VK_BLEND_OP_ADD;
+    blendAtt.srcAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+    blendAtt.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+    blendAtt.alphaBlendOp = VK_BLEND_OP_ADD;
+    blendAtt.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+                              VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+
+    VkPipelineColorBlendStateCreateInfo blend{};
+    blend.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    blend.attachmentCount = 1;
+    blend.pAttachments = &blendAtt;
+
+    VkDynamicState dynStates[2] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+    VkPipelineDynamicStateCreateInfo dynInfo{};
+    dynInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+    dynInfo.dynamicStateCount = 2;
+    dynInfo.pDynamicStates = dynStates;
+
+    VkGraphicsPipelineCreateInfo pipeInfo{};
+    pipeInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    pipeInfo.stageCount = 2;
+    pipeInfo.pStages = stages;
+    pipeInfo.pVertexInputState = &vertexInput;
+    pipeInfo.pInputAssemblyState = &inputAsm;
+    pipeInfo.pViewportState = &viewportState;
+    pipeInfo.pRasterizationState = &raster;
+    pipeInfo.pMultisampleState = &ms;
+    pipeInfo.pColorBlendState = &blend;
+    pipeInfo.pDynamicState = &dynInfo;
+    pipeInfo.layout = m_crtPipelineLayout;
+    pipeInfo.renderPass = m_mainWindowData.RenderPass;
+    pipeInfo.subpass = 0;
+
+    VkResult res = vkCreateGraphicsPipelines(
+        m_device, m_pipelineCache, 1, &pipeInfo, m_allocator, &m_crtPipeline);
+
+    vkDestroyShaderModule(m_device, vertMod, m_allocator);
+    vkDestroyShaderModule(m_device, fragMod, m_allocator);
+
+    if (res != VK_SUCCESS) {
+        destroyCrtPipeline();
+        return false;
+    }
+    return true;
+}
+
+void VulkanContext::destroyCrtPipeline() {
+    if (m_device == VK_NULL_HANDLE) return;
+    if (m_crtPipeline != VK_NULL_HANDLE) {
+        vkDestroyPipeline(m_device, m_crtPipeline, m_allocator);
+        m_crtPipeline = VK_NULL_HANDLE;
+    }
+    if (m_crtPipelineLayout != VK_NULL_HANDLE) {
+        vkDestroyPipelineLayout(m_device, m_crtPipelineLayout, m_allocator);
+        m_crtPipelineLayout = VK_NULL_HANDLE;
+    }
+}
+
+void VulkanContext::recordCrtOverlay(VkCommandBuffer cmd, uint32_t width, uint32_t height) {
+    if (!m_crtEnabled || m_crtPipeline == VK_NULL_HANDLE ||
+        m_crtPipelineLayout == VK_NULL_HANDLE || width == 0 || height == 0) {
+        return;
+    }
+
+    VkViewport vp{};
+    vp.x = 0.0f;
+    vp.y = 0.0f;
+    vp.width = static_cast<float>(width);
+    vp.height = static_cast<float>(height);
+    vp.minDepth = 0.0f;
+    vp.maxDepth = 1.0f;
+    vkCmdSetViewport(cmd, 0, 1, &vp);
+
+    VkRect2D scissor{};
+    scissor.offset = {0, 0};
+    scissor.extent = {width, height};
+    vkCmdSetScissor(cmd, 0, 1, &scissor);
+
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_crtPipeline);
+    struct {
+        float width;
+        float height;
+        float intensity;
+        int32_t paletteMode;
+    } pc{vp.width, vp.height, m_crtIntensity, static_cast<int32_t>(m_crtPaletteMode)};
+    vkCmdPushConstants(cmd, m_crtPipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pc), &pc);
+    vkCmdDraw(cmd, 3, 1, 0, 0);
 }
 
 void VulkanContext::cleanupVulkanWindow() {
@@ -525,6 +751,10 @@ void VulkanContext::cleanupVulkanWindow() {
         qlock = std::unique_lock<std::recursive_mutex>(m_sharedComputeCtx->getQueueMutex());
     }
     ImGui_ImplVulkanH_DestroyWindow(m_instance, m_device, &m_mainWindowData, m_allocator);
+}
+
+void VulkanContext::requestSwapchainRebuild() {
+    m_windowResizePending = true;
 }
 
 void VulkanContext::resize(int width, int height) {
@@ -538,19 +768,29 @@ void VulkanContext::resize(int width, int height) {
         m_physicalDevice, m_device, &m_mainWindowData, m_allocator,
         width, height, m_minImageCount, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT
     );
+    if (m_mainWindowData.ImageCount > 0 && m_minImageCount > m_mainWindowData.ImageCount) {
+        m_minImageCount = m_mainWindowData.ImageCount >= 2u ? m_mainWindowData.ImageCount : 2u;
+        ImGui_ImplVulkan_SetMinImageCount(m_minImageCount);
+    }
     ImGui_ImplVulkanH_CreateWindowCommandBuffers(
         m_physicalDevice, m_device, &m_mainWindowData, m_queueFamily, m_allocator
     );
     m_mainWindowData.FrameIndex = 0;
+    m_mainWindowData.SemaphoreIndex = 0;
     m_swapchainRebuild = false;
+    m_windowResizePending = false;
 }
 
 void VulkanContext::beginFrame() {
-    if (m_swapchainRebuild) {
+    if (m_swapchainRebuild || m_windowResizePending) {
         int w = 0, h = 0;
         SDL_GetWindowSizeInPixels(m_window, &w, &h);
         if (w > 0 && h > 0) {
-            resize(w, h);
+            if (m_swapchainRebuild || w != m_mainWindowData.Width || h != m_mainWindowData.Height) {
+                resize(w, h);
+            } else {
+                m_windowResizePending = false;
+            }
         }
     }
 
@@ -605,17 +845,19 @@ bool VulkanContext::frameRender(ImDrawData* drawData) {
     VkSemaphore imageAcquiredSemaphore = m_mainWindowData.FrameSemaphores[m_mainWindowData.SemaphoreIndex].ImageAcquiredSemaphore;
     VkSemaphore renderCompleteSemaphore = m_mainWindowData.FrameSemaphores[m_mainWindowData.SemaphoreIndex].RenderCompleteSemaphore;
 
-    constexpr uint64_t kAcquireTimeoutNs = 16'000'000ULL;
+    constexpr uint64_t kAcquireTimeoutNs = 100'000'000ULL;
     err = vkAcquireNextImageKHR(m_device, m_mainWindowData.Swapchain, kAcquireTimeoutNs, imageAcquiredSemaphore, VK_NULL_HANDLE, &m_mainWindowData.FrameIndex);
     if (err == VK_TIMEOUT || err == VK_NOT_READY) {
         SDL_PumpEvents();
         return false;
     }
-    if (err == VK_ERROR_OUT_OF_DATE_KHR || err == VK_SUBOPTIMAL_KHR) {
+    if (err == VK_ERROR_OUT_OF_DATE_KHR) {
         m_swapchainRebuild = true;
         return false;
     }
-    if (err != VK_SUCCESS) {
+    if (err == VK_SUBOPTIMAL_KHR) {
+        m_swapchainRebuild = true;
+    } else if (err != VK_SUCCESS) {
         return false;
     }
 
@@ -663,6 +905,11 @@ bool VulkanContext::frameRender(ImDrawData* drawData) {
     vkCmdBeginRenderPass(fd->CommandBuffer, &rpInfo, VK_SUBPASS_CONTENTS_INLINE);
 
     ImGui_ImplVulkan_RenderDrawData(drawData, fd->CommandBuffer);
+    if (m_crtEnabled) {
+        recordCrtOverlay(fd->CommandBuffer,
+                         static_cast<uint32_t>(m_mainWindowData.Width),
+                         static_cast<uint32_t>(m_mainWindowData.Height));
+    }
 
     vkCmdEndRenderPass(fd->CommandBuffer);
 
@@ -690,8 +937,6 @@ bool VulkanContext::frameRender(ImDrawData* drawData) {
 }
 
 void VulkanContext::framePresent() {
-    if (m_swapchainRebuild) return;
-
     VkSemaphore renderCompleteSemaphore = m_mainWindowData.FrameSemaphores[m_mainWindowData.SemaphoreIndex].RenderCompleteSemaphore;
     VkPresentInfoKHR presentInfo{};
     presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -711,7 +956,6 @@ void VulkanContext::framePresent() {
     }
     if (err == VK_ERROR_OUT_OF_DATE_KHR || err == VK_SUBOPTIMAL_KHR) {
         m_swapchainRebuild = true;
-        return;
     }
 
     m_mainWindowData.SemaphoreIndex = (m_mainWindowData.SemaphoreIndex + 1) % m_mainWindowData.SemaphoreCount;
@@ -721,6 +965,8 @@ void VulkanContext::shutdown() {
     if (!m_initialized) return;
 
     waitDeviceIdleSafe();
+
+    destroyCrtPipeline();
 
     {
         std::unique_lock<std::recursive_mutex> qlock;
@@ -1328,6 +1574,9 @@ bool VulkanContext::saveScreenshot(const std::string& filepath) {
 
     vkCmdBeginRenderPass(cmd, &rpBegin, VK_SUBPASS_CONTENTS_INLINE);
     ImGui_ImplVulkan_RenderDrawData(drawData, cmd);
+    if (m_crtEnabled) {
+        recordCrtOverlay(cmd, w, h);
+    }
     vkCmdEndRenderPass(cmd);
 
     VkMemoryBarrier copyMemBarrier{};

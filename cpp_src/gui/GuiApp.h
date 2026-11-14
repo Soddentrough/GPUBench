@@ -1,9 +1,11 @@
 #pragma once
 
+#include "GuiBringUpTheme.h"
 #include "TelemetryWorker.h"
 #include "VulkanContext.h"
 #include "core/RunnerAPI.h"
 #include "core/ResultFormatter.h"
+#include "utils/IsaDumper.h"
 #include <imgui.h>
 #include <implot.h>
 
@@ -134,6 +136,17 @@ public:
     void startBenchmarks();
     void abortBenchmarks();
 
+    struct ScopeTrigger {
+        float timestampSec{0.0f};
+        std::string label;
+    };
+
+    void setInstrumentMode(int mode);
+    int getInstrumentMode() const { return m_instrumentMode; }
+    void setPalette(BringUpPalette p);
+    BringUpPalette getPalette() const { return m_palette; }
+    bool waitForPendingInspections(uint32_t timeoutMs = 2500);
+
     // Unified v2.0 JSON Session Import / Export / Comparison
     bool importResultsFromJson(const std::string& filepath);
     bool loadComparisonFromJson(const std::string& filepath);
@@ -200,10 +213,23 @@ private:
     bool m_basePlotStyleInitialized{false};
     float m_zoomToastTimer{0.0f};
 
+    void renderTopInstrumentHeader(float width);
+    void renderIsaInspectorPanel();
+    void renderCommandPromptBar(float width);
+    void syncBringUpTheme();
+
+    const BenchmarkItem* getInspectedItem() const;
+    void selectInspectedBenchmark(int catIdx, int sgIdx, int itemIdx, bool switchToF1 = false);
+    void ensureDefaultInspectedBenchmark();
+    std::string makeIsaCacheKey(const BenchmarkItem& item) const;
+    void requestIsaInspection(const BenchmarkItem& item, bool forceRefresh = false);
+    void joinIsaThread();
+    void runSingleBenchmarkItem(const BenchmarkItem& item);
+    void stampScopeTrigger(const std::string& label);
+    void executeCommand(const std::string& rawCmd);
+
     // UI Panels (implemented across modular translation units)
-    void renderLeftSidebar(float width, float height);
     void renderSidebarTelemetry();
-    void renderRightWorkspace(float width, float height);
     void renderBenchmarkSuitePanel();
     void renderLiveTelemetryDock();
     void renderResultsScorecard();
@@ -305,10 +331,43 @@ private:
     float m_telemetryTimeWindow{0.0f};
     bool m_telemetryNeedsFit{true};
 
-    // Scorecard & Roofline Filters
+    // Scorecard & Charts Filters
     int m_activeScorecardFilter{0}; // 0: All, 1: Compute, 2: Memory, 3: Ray Tracing, 4: Scheduling, 5: Graphics, 6: Host System
     int m_activeDeviceScorecardFilter{-1}; // -1: All, -2: Host CPU, 0: GPU 0, 1: GPU 1, etc.
     int m_rooflineDeviceFilter{0};
+    int m_chartDomainFilter{-1};
+
+    // Silicon Bring-Up Mode & Palette
+    BringUpPalette m_palette{BringUpPalette::AmberP3};
+    bool m_themeDirty{true};
+    int m_instrumentMode{0}; // 0: F1 ISA & DIE, 1: F2 PERFORMANCE & SCORECARD, 2: F3 RT PARITY
+    int m_f2SubMode{0};      // 0: Split, 1: Charts, 2: Scorecard
+    bool m_telemetryExpanded{false};
+    float m_rtSplitRatio{0.5f};
+    int m_rtComparatorPair{0};
+
+    // Inspected ROM Slot & Async ISA Disassembly Cache
+    int m_inspectedCategoryIdx{-1};
+    int m_inspectedSubgroupIdx{-1};
+    int m_inspectedItemIdx{-1};
+    bool m_isaHotLoopOnly{true};
+    int m_isaExecStageIdx{0};
+    char m_isaFilterBuf[128]{};
+    char m_suiteSearchBuf[128]{};
+    std::mutex m_isaMutex;
+    std::thread m_isaThread;
+    std::atomic<bool> m_isaLoading{false};
+    std::string m_isaActiveKey;
+    std::unordered_map<std::string, IsaInspectionResult> m_isaCache;
+
+    // Oscilloscope Triggers & Hardware Command Prompt
+    std::vector<ScopeTrigger> m_scopeTriggers;
+    char m_cmdBuffer[256]{};
+    std::vector<std::string> m_cmdHistory;
+    std::string m_cmdStatusText;
+    bool m_focusCmdInput{false};
+    bool m_singleSlotSelectionRestore{false};
+    std::vector<bool> m_savedSelectionSnapshot;
 };
 
 } // namespace gpubench::gui

@@ -381,7 +381,7 @@ ROCmContext::~ROCmContext() {
 
 void ROCmContext::invalidateCachedGraph() {
   if (m_cachedGraphExec != nullptr && f_hipGraphExecDestroy) {
-    f_hipGraphExecDestroy(static_cast<hipGraphExec_t>(m_cachedGraphExec));
+    (void)f_hipGraphExecDestroy(static_cast<hipGraphExec_t>(m_cachedGraphExec));
   }
   m_cachedGraphExec = nullptr;
   m_cachedBatch.clear();
@@ -1011,9 +1011,9 @@ void ROCmContext::endBatch() {
             m_cachedGraphExec = exec;
             m_cachedBatch = batch;
           }
-          f_hipGraphDestroy(graph);
+          (void)f_hipGraphDestroy(graph);
         } else if (graph != nullptr) {
-          f_hipGraphDestroy(graph);
+          (void)f_hipGraphDestroy(graph);
         }
       }
     }

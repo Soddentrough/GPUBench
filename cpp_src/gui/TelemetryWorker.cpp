@@ -74,7 +74,9 @@ void TelemetryWorker::discoverDevices() {
 
     // Perform an initial synchronous sample so readouts are populated on frame 0
     for (size_t i = 0; i < m_pollStates.size() && i < m_snapshots.size(); ++i) {
-        pollDevice(m_pollStates[i], m_snapshots[i], 0.0, false);
+        auto now = std::chrono::steady_clock::now();
+        GpuTelemetryData hw = HardwareTelemetry::queryGpu(m_pollStates[i].deviceIndex);
+        applySample(m_pollStates[i], m_snapshots[i], hw, now, 0.0, false);
     }
 }
 
@@ -181,10 +183,10 @@ std::vector<std::string> TelemetryWorker::getDeviceNames() const {
     return names;
 }
 
-void TelemetryWorker::pollDevice(DevicePollState& state, DeviceTelemetrySnapshot& snap,
-                                 double timestampSec, bool isRecordingRun) {
-    auto now = std::chrono::steady_clock::now();
-    GpuTelemetryData hw = HardwareTelemetry::queryGpu(state.deviceIndex);
+void TelemetryWorker::applySample(DevicePollState& state, DeviceTelemetrySnapshot& snap,
+                                  const GpuTelemetryData& hw,
+                                  std::chrono::steady_clock::time_point now,
+                                  double timestampSec, bool isRecordingRun) {
 
     float powerWatts = 0.0f;
     bool hasPower = false;
@@ -295,16 +297,48 @@ void TelemetryWorker::pollDevice(DevicePollState& state, DeviceTelemetrySnapshot
 
 void TelemetryWorker::workerLoop() {
     while (m_running.load()) {
-        bool recording = m_isRecording.load();
-        auto now = std::chrono::steady_clock::now();
-        double timestamp = recording
-            ? std::chrono::duration<double>(now - m_runStartTime).count()
-            : std::chrono::duration<double>(now - m_idleStartTime).count();
+        std::vector<uint32_t> deviceIndices;
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            deviceIndices.reserve(m_pollStates.size());
+            for (const auto& st : m_pollStates) {
+                deviceIndices.push_back(st.deviceIndex);
+            }
+        }
+
+        struct RawSample {
+            uint32_t deviceIndex{0};
+            std::chrono::steady_clock::time_point sampleTime;
+            GpuTelemetryData hw;
+        };
+        std::vector<RawSample> rawSamples;
+        rawSamples.reserve(deviceIndices.size());
+        for (uint32_t devIdx : deviceIndices) {
+            RawSample sample;
+            sample.deviceIndex = devIdx;
+            sample.sampleTime = std::chrono::steady_clock::now();
+            sample.hw = HardwareTelemetry::queryGpu(devIdx);
+            rawSamples.push_back(std::move(sample));
+        }
+
+        const bool recording = m_isRecording.load();
+        const auto applyNow = std::chrono::steady_clock::now();
+        const double timestamp = recording
+            ? std::chrono::duration<double>(applyNow - m_runStartTime).count()
+            : std::chrono::duration<double>(applyNow - m_idleStartTime).count();
 
         {
             std::lock_guard<std::mutex> lock(m_mutex);
             for (size_t i = 0; i < m_pollStates.size() && i < m_snapshots.size(); ++i) {
-                pollDevice(m_pollStates[i], m_snapshots[i], timestamp, recording);
+                const uint32_t targetIdx = m_pollStates[i].deviceIndex;
+                for (const auto& sample : rawSamples) {
+                    if (sample.deviceIndex == targetIdx) {
+                        applySample(m_pollStates[i], m_snapshots[i],
+                                    sample.hw, sample.sampleTime,
+                                    timestamp, recording);
+                        break;
+                    }
+                }
             }
         }
 
