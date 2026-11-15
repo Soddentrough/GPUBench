@@ -50,6 +50,8 @@ struct DeviceInfo {
   bool bf16Support = false;
   bool shaderBfloat16DotProductSupport = false;
   bool shaderBfloat16CoopMatrixSupport = false;
+  bool bf16DotProductHardwareSupported = false;
+  bool bf16CoopMatrixHardwareSupported = false;
   bool fp8Support = false;
   bool fp6Support = false;
   bool fp4Support = false;
@@ -61,7 +63,9 @@ struct DeviceInfo {
   bool rayTracingSupport = false;
   bool opacityMicromapSupport = false;
   bool serSupported = false;
+  bool serHardwareSupported = false;
   bool dgcSupported = false;
+  bool dgcExecutionSetSupported = false;
   bool workGraphsSupported = false;
   bool performanceQuerySupported = false;
   bool dedicatedAsyncComputeQueue = false;

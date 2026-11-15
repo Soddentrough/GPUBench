@@ -67,6 +67,10 @@ struct BenchmarkItem {
     bool isSupported{true};
     std::string supportReason;
     std::string limitationCategory;
+    bool hasSupportDiscrepancy{false};
+    std::string hardwareSupportText;
+    std::string driverSupportText;
+    std::string supportDiscrepancySummary;
     int configIndex{-1};
     BenchmarkVisualization viz;   // Optional pipeline visualization for the hover tooltip
 

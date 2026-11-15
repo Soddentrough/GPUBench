@@ -625,8 +625,30 @@ const char *RaySchedulingBench::GetDescription(uint32_t config_idx) const {
 }
 
 std::string RaySchedulingBench::GetConfigCaveat(uint32_t config_idx) const {
-  (void)config_idx;
+  if (isSERConfigIdx(config_idx) && serEmulated) {
+    return "Driver exposes VK_EXT_ray_tracing_invocation_reorder, but hardware reordering hint is NONE (pass-through / no dedicated hardware SER unit)";
+  }
   return "";
+}
+
+std::string RaySchedulingBench::GetConfigCaveat(
+    uint32_t config_idx, const DeviceInfo &info,
+    IComputeContext *context) const {
+  if (isSERConfigIdx(config_idx)) {
+    bool driverSer = info.serSupported;
+    bool hwSer = info.serHardwareSupported;
+#ifdef HAVE_VULKAN
+    if (context && context->getBackend() == ComputeBackend::Vulkan) {
+      const VulkanContext *vc = static_cast<const VulkanContext *>(context);
+      driverSer = vc->isSERSupported();
+      hwSer = vc->isSERHardwareSupported();
+    }
+#endif
+    if (serEmulated || (driverSer && !hwSer)) {
+      return "Driver exposes VK_EXT_ray_tracing_invocation_reorder, but hardware reordering hint is NONE (pass-through / no dedicated hardware SER unit)";
+    }
+  }
+  return GetConfigCaveat(config_idx);
 }
 
 int RaySchedulingBench::GetSortWeight(uint32_t config_idx) const {
@@ -1081,10 +1103,11 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
     kernelRTP = nullptr;
   }
 
-  // Check hardware SER support & Load RTP+SER Pipeline
+  // Check driver SER support & Load RTP+SER Pipeline
   bool hasSERExt = vContext->isExtensionEnabled("VK_EXT_ray_tracing_invocation_reorder") ||
                    vContext->isExtensionEnabled("VK_NV_ray_tracing_invocation_reorder");
   bool serSupported = vContext->isSERSupported();
+  serEmulated = false;
 
   if (serSupported) {
     try {
@@ -1101,11 +1124,13 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
       vContext->setKernelArg(kernelRTPSER, 5, triangleMaterialBuffer);
       vContext->setKernelArg(kernelRTPSER, 6, texHeaderBuffer);
       vContext->setKernelArg(kernelRTPSER, 7, texPixelBuffer);
+      serEmulated = !vContext->isSERHardwareSupported();
     } catch (const std::exception &e) {
       if (vContext->isVerbose()) {
         std::cerr << "[RayScheduling] Warning: Failed to create RTP+SER pipeline: " << e.what() << std::endl;
       }
       kernelRTPSER = nullptr;
+      serEmulated = false;
     }
   }
 
@@ -1550,14 +1575,14 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
 
   switch (config_idx) {
   case 0: { // Material Divergence - Traditional Megakernel (Pure Shading Microbenchmark, 4 Lights)
-    PushConstantsTraditional pc{rayCount, 4, 1, seed, 0, renderWidth, renderHeight, 0, sceneTypeVal, isGltfVal, 1u};
+    PushConstantsTraditional pc{rayCount, 4, 1, seed, 0, renderWidth, renderHeight, 2, sceneTypeVal, isGltfVal, 1u};
     vContext->setKernelArg(kernelTraditional, 8, sizeof(pc), &pc);
     vContext->dispatch(kernelTraditional, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     break;
   }
   case 1: { // Stage: Material Shading - RTP + Hardware SER
     if (kernelRTPSER) {
-      PushConstantsTraditional pc{rayCount, 4, 1, seed, 0, renderWidth, renderHeight, 0, sceneTypeVal, isGltfVal, 1u};
+      PushConstantsTraditional pc{rayCount, 4, 1, seed, 0, renderWidth, renderHeight, 2, sceneTypeVal, isGltfVal, 1u};
       vContext->setKernelArg(kernelRTPSER, 8, sizeof(pc), &pc);
       vContext->dispatch(kernelRTPSER, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     }
@@ -1574,7 +1599,7 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     bool ownBatch = (passes > 1u) && !vContext->isBatching();
     if (ownBatch) vContext->beginBatch(passes, true);
     for (uint32_t s = 0; s < passes; ++s) {
-      PushConstantsTraditional pc{rayCount, 1, 1 + bounceDepth, seed + s * 7919u, dumpFlag, renderWidth, renderHeight, 0, sceneTypeVal, isGltfVal, passes, s};
+      PushConstantsTraditional pc{rayCount, 1, 1 + bounceDepth, seed + s * 7919u, dumpFlag, renderWidth, renderHeight, 2, sceneTypeVal, isGltfVal, passes, s};
       vContext->setKernelArg(kernelTraditional, 8, sizeof(pc), &pc);
       vContext->dispatch(kernelTraditional, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     }
@@ -1587,7 +1612,7 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
       bool ownBatch = (passes > 1u) && !vContext->isBatching();
       if (ownBatch) vContext->beginBatch(passes, true);
       for (uint32_t s = 0; s < passes; ++s) {
-        PushConstantsTraditional pc{rayCount, 1, 1 + bounceDepth, seed + s * 7919u, dumpFlag, renderWidth, renderHeight, 0, sceneTypeVal, isGltfVal, passes, s};
+        PushConstantsTraditional pc{rayCount, 1, 1 + bounceDepth, seed + s * 7919u, dumpFlag, renderWidth, renderHeight, 2, sceneTypeVal, isGltfVal, passes, s};
         vContext->setKernelArg(kernelRTPSER, 8, sizeof(pc), &pc);
         vContext->dispatch(kernelRTPSER, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
       }
@@ -1623,14 +1648,14 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     break;
   }
   case 6: { // Incoherent Ray Tracing - Traditional Megakernel
-    PushConstantsTraditional pc{rayCount, 2, 1, seed, 0, renderWidth, renderHeight, 0, sceneTypeVal, isGltfVal, 1u};
+    PushConstantsTraditional pc{rayCount, 2, 1, seed, 0, renderWidth, renderHeight, 2, sceneTypeVal, isGltfVal, 1u};
     vContext->setKernelArg(kernelTraditional, 8, sizeof(pc), &pc);
     vContext->dispatch(kernelTraditional, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     break;
   }
   case 7: { // Incoherent Ray Tracing - RTP + Hardware SER
     if (kernelRTPSER) {
-      PushConstantsTraditional pc{rayCount, 2, 1, seed, 0, renderWidth, renderHeight, 0, sceneTypeVal, isGltfVal, 1u};
+      PushConstantsTraditional pc{rayCount, 2, 1, seed, 0, renderWidth, renderHeight, 2, sceneTypeVal, isGltfVal, 1u};
       vContext->setKernelArg(kernelRTPSER, 8, sizeof(pc), &pc);
       vContext->dispatch(kernelRTPSER, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     }
@@ -1651,7 +1676,7 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     break;
   }
   case 9: { // Primary Ray Tracing - Traditional Megakernel
-    PushConstantsTraditional pc{rayCount, 0, 1, seed, dumpFlag, renderWidth, renderHeight, 0, sceneTypeVal, isGltfVal, 1u};
+    PushConstantsTraditional pc{rayCount, 0, 1, seed, dumpFlag, renderWidth, renderHeight, 2, sceneTypeVal, isGltfVal, 1u};
     vContext->setKernelArg(kernelTraditional, 8, sizeof(pc), &pc);
     vContext->dispatch(kernelTraditional, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     break;
@@ -1702,7 +1727,7 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
   }
   case 13: { // Stage Breakdown - Queue Compaction Overhead
     vContext->dispatch(kernelReset, 1, 1, 1, 32, 1, 1);
-    PushConstantsClassify pcClassify{rayCount, 3, 0, seed, 0, renderWidth, renderHeight, octantCapacity, 0, sceneTypeVal, isGltfVal, 1u};
+    PushConstantsClassify pcClassify{rayCount, 3, 0, seed, 0, renderWidth, renderHeight, octantCapacity, 2, sceneTypeVal, isGltfVal, 1u};
     vContext->setKernelArg(kernelClassify, 10, sizeof(pcClassify), &pcClassify);
     vContext->dispatch(kernelClassify, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     break;
@@ -1725,8 +1750,8 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     vContext->dispatch(kernelTraditional, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     break;
   }
-  case 17: { // Stage Breakdown - Primary Ray Tracing (Linear 32x1, Traditional Megakernel)
-    PushConstantsTraditional pc{rayCount, 7, 1, seed, dumpFlag, renderWidth, renderHeight, 0, sceneTypeVal, isGltfVal, 1u};
+  case 17: { // Stage Breakdown - Primary Ray Tracing (2D Morton 8x4, Traditional Megakernel)
+    PushConstantsTraditional pc{rayCount, 7, 1, seed, dumpFlag, renderWidth, renderHeight, 2, sceneTypeVal, isGltfVal, 1u};
     vContext->setKernelArg(kernelTraditional, 8, sizeof(pc), &pc);
     vContext->dispatch(kernelTraditional, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     break;
@@ -1760,14 +1785,14 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     break;
   }
   case 19: { // Ray-Traced Shadows - Traditional Megakernel (Directional Shadow Rays, In-Kernel Traversal)
-    PushConstantsTraditional pc{rayCount, 5, 1, seed, dumpFlag, renderWidth, renderHeight, 0, sceneTypeVal, isGltfVal, 1u};
+    PushConstantsTraditional pc{rayCount, 5, 1, seed, dumpFlag, renderWidth, renderHeight, 2, sceneTypeVal, isGltfVal, 1u};
     vContext->setKernelArg(kernelTraditional, 8, sizeof(pc), &pc);
     vContext->dispatch(kernelTraditional, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     break;
   }
   case 20: { // Ray-Traced Shadows - RTP + Hardware SER
     if (kernelRTPSER) {
-      PushConstantsTraditional pc{rayCount, 5, 1, seed, dumpFlag, renderWidth, renderHeight, 0, sceneTypeVal, isGltfVal, 1u};
+      PushConstantsTraditional pc{rayCount, 5, 1, seed, dumpFlag, renderWidth, renderHeight, 2, sceneTypeVal, isGltfVal, 1u};
       vContext->setKernelArg(kernelRTPSER, 8, sizeof(pc), &pc);
       vContext->dispatch(kernelRTPSER, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     }
@@ -1848,7 +1873,7 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     auto recordPasses = [&](uint32_t beginPass, uint32_t endPass) {
       for (uint32_t s = beginPass; s < endPass; ++s) {
         if (config_idx == 23u) {
-          PushConstantsTraditional pc{rayCount, 1, 1 + bounceDepth, seed + s * 7919u, dumpFlag, renderWidth, renderHeight, 0, sceneTypeVal, isGltfVal, passes, s};
+          PushConstantsTraditional pc{rayCount, 1, 1 + bounceDepth, seed + s * 7919u, dumpFlag, renderWidth, renderHeight, 2, sceneTypeVal, isGltfVal, passes, s};
           vContext->setKernelArg(kernelTraditional, 8, sizeof(pc), &pc);
           vContext->dispatch(kernelTraditional, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
         } else {
@@ -1936,7 +1961,7 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     break;
   }
   case 30: { // Stage: Multi-Light Evaluation - Single Light (1 Light, Megakernel)
-    PushConstantsTraditional pc{rayCount, 11, 0, seed, dumpFlag, renderWidth, renderHeight, 0, sceneTypeVal, isGltfVal, 1u};
+    PushConstantsTraditional pc{rayCount, 11, 0, seed, dumpFlag, renderWidth, renderHeight, 2, sceneTypeVal, isGltfVal, 1u};
     vContext->setKernelArg(kernelTraditional, 8, sizeof(pc), &pc);
     vContext->dispatch(kernelTraditional, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     break;
@@ -1969,7 +1994,7 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     break;
   }
   case 32: { // Stage: Multi-Light Evaluation - 128 Lights (128 Lights, Megakernel)
-    PushConstantsTraditional pc{rayCount, 11, 0, seed, dumpFlag, renderWidth, renderHeight, 0, sceneTypeVal, isGltfVal, 128u};
+    PushConstantsTraditional pc{rayCount, 11, 0, seed, dumpFlag, renderWidth, renderHeight, 2, sceneTypeVal, isGltfVal, 128u};
     vContext->setKernelArg(kernelTraditional, 8, sizeof(pc), &pc);
     vContext->dispatch(kernelTraditional, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     break;
@@ -2194,9 +2219,11 @@ void RaySchedulingBench::performVisualVerification(bool isInteractive) {
   double mraysWork = (timeSecWork > 0.0) ? ((static_cast<double>(rayCount) / timeSecWork) / 1e6) : 4000.0;
   double frameMsWork = timeSecWork * 1000.0;
 
-  double timeSecBvh = (recordedInvocations[12] > 0 && recordedTimeMs[12] > 0.0)
-      ? (recordedTimeMs[12] / 1000.0) / static_cast<double>(recordedInvocations[12])
-      : std::min(timeSecTrad * 0.55, timeSecWork * 0.65);
+  double timeSecBvh = (recordedInvocations[15] > 0 && recordedTimeMs[15] > 0.0)
+      ? (recordedTimeMs[15] / 1000.0) / static_cast<double>(recordedInvocations[15])
+      : ((recordedInvocations[12] > 0 && recordedTimeMs[12] > 0.0)
+             ? (recordedTimeMs[12] / 1000.0) / static_cast<double>(recordedInvocations[12])
+             : std::min(timeSecTrad * 0.55, timeSecWork * 0.65));
   double bvhMs = timeSecBvh * 1000.0;
   double bvhMRays = (timeSecBvh > 0.0) ? ((static_cast<double>(rayCount) / timeSecBvh) / 1e6) : (mraysTrad * 1.8);
 
@@ -2716,7 +2743,7 @@ void RaySchedulingBench::dumpPipelineBreakdown(const std::string &tag, bool isIn
     // Warmup
     for (int w = 0; w < 2; ++w) {
       for (uint32_t s = 0; s < st.spp; ++s) {
-        PushConstantsTraditional pc{rayCount, st.mode, st.bounces, 1337u + s * 7919u, 0u, renderWidth, renderHeight, 0, sceneTypeVal, isGltfVal, st.spp, s};
+        PushConstantsTraditional pc{rayCount, st.mode, st.bounces, 1337u + s * 7919u, 0u, renderWidth, renderHeight, 2, sceneTypeVal, isGltfVal, st.spp, s};
         vContext->setKernelArg(kernelTraditional, 8, sizeof(pc), &pc);
         vContext->dispatch(kernelTraditional, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
       }
@@ -2728,7 +2755,7 @@ void RaySchedulingBench::dumpPipelineBreakdown(const std::string &tag, bool isIn
     auto t0 = std::chrono::high_resolution_clock::now();
     for (int it = 0; it < iters; ++it) {
       for (uint32_t s = 0; s < st.spp; ++s) {
-        PushConstantsTraditional pc{rayCount, st.mode, st.bounces, 1337u + s * 7919u, 0u, renderWidth, renderHeight, 0, sceneTypeVal, isGltfVal, st.spp, s};
+        PushConstantsTraditional pc{rayCount, st.mode, st.bounces, 1337u + s * 7919u, 0u, renderWidth, renderHeight, 2, sceneTypeVal, isGltfVal, st.spp, s};
         vContext->setKernelArg(kernelTraditional, 8, sizeof(pc), &pc);
         vContext->dispatch(kernelTraditional, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
       }
@@ -2742,7 +2769,7 @@ void RaySchedulingBench::dumpPipelineBreakdown(const std::string &tag, bool isIn
 
     // Untimed pass with dumpRenders=1u to capture framebuffer for GPU preview / PNG export
     for (uint32_t s = 0; s < st.spp; ++s) {
-      PushConstantsTraditional pc{rayCount, st.mode, st.bounces, 1337u + s * 7919u, 1u, renderWidth, renderHeight, 0, sceneTypeVal, isGltfVal, st.spp, s};
+      PushConstantsTraditional pc{rayCount, st.mode, st.bounces, 1337u + s * 7919u, 1u, renderWidth, renderHeight, 2, sceneTypeVal, isGltfVal, st.spp, s};
       vContext->setKernelArg(kernelTraditional, 8, sizeof(pc), &pc);
       vContext->dispatch(kernelTraditional, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     }
@@ -2861,6 +2888,7 @@ void RaySchedulingBench::RunVisualVerification(bool isInteractive) {
 }
 
 void RaySchedulingBench::Teardown() {
+  serEmulated = false;
   compactBvhPositions.clear();
   compactBvhPositions.shrink_to_fit();
 #ifdef HAVE_VULKAN

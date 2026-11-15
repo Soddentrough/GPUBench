@@ -79,6 +79,27 @@ std::string SparseMatrixBench::GetSupportNote(const DeviceInfo &info,
   return "Requires ROCm backend on RDNA 4 (gfx12) or CDNA 3+ (gfx942/gfx950)";
 }
 
+IBenchmark::SupportDiscrepancy SparseMatrixBench::GetConfigSupportDiscrepancy(
+    uint32_t /*config_idx*/, const DeviceInfo &info,
+    IComputeContext *context) const {
+  SupportDiscrepancy d{};
+  if (hardwarePotentiallyHas2to4Sparsity(info) && !info.structuredSparsitySupport) {
+    d.differs = true;
+    d.hardwareStatus = "Supported in hardware (GPU architecture includes 2:4 sparse matrix units)";
+    if (context && context->getBackend() == ComputeBackend::Vulkan) {
+      d.driverStatus = "Unsupported (Vulkan driver/API lacks 2:4 structured sparse matrix extension)";
+      d.summary = "Hardware has 2:4 sparse units, but Vulkan API/driver does not expose them";
+    } else if (context && context->getBackend() == ComputeBackend::OpenCL) {
+      d.driverStatus = "Unsupported (OpenCL C lacks 2:4 sparse matrix intrinsics)";
+      d.summary = "Hardware has 2:4 sparse units, but OpenCL API does not expose them";
+    } else {
+      d.driverStatus = "Unsupported by active runtime/driver";
+      d.summary = "Hardware has 2:4 sparse units, but active driver does not expose them";
+    }
+  }
+  return d;
+}
+
 void SparseMatrixBench::Setup(IComputeContext &context,
                               const std::string &kernel_dir) {
   m_context = &context;

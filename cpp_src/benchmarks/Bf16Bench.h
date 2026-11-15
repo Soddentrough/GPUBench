@@ -108,6 +108,28 @@ public:
     }
     return GetSupportLimitation(info, context);
   }
+  SupportDiscrepancy GetConfigSupportDiscrepancy(
+      uint32_t config_idx, const DeviceInfo &info,
+      IComputeContext *context = nullptr) const override {
+    SupportDiscrepancy d{};
+    if (context && context->getBackend() == ComputeBackend::Vulkan) {
+      if (config_idx == 0 && info.shaderBfloat16DotProductSupport &&
+          !info.bf16DotProductHardwareSupported) {
+        d.differs = true;
+        d.hardwareStatus = "Unsupported natively (architecture lacks native BF16 VALU dot2; uses FP32 lowering)";
+        d.driverStatus = "Supported (VK_KHR_shader_bfloat16::shaderBFloat16DotProduct = true; allowed to run)";
+        d.summary = "Driver exposes BF16 dot2 via FP32 lowering (no native BF16 VALU hardware)";
+      } else if (config_idx == 1 && info.cooperativeMatrixSupport &&
+                 !info.shaderBfloat16CoopMatrixSupport &&
+                 info.bf16CoopMatrixHardwareSupported) {
+        d.differs = true;
+        d.hardwareStatus = "Supported in hardware (architecture includes BF16 WMMA/Matrix units)";
+        d.driverStatus = "Unsupported (shaderBFloat16CooperativeMatrix = false in active Vulkan driver)";
+        d.summary = "Hardware includes BF16 WMMA units, but active Vulkan driver does not expose shaderBFloat16CooperativeMatrix";
+      }
+    }
+    return d;
+  }
   void Setup(IComputeContext &context, const std::string &kernel_dir) override;
   void Run(uint32_t config_idx) override;
   void Teardown() override;
@@ -148,6 +170,18 @@ public:
       return "Driver lowered BF16 vector arithmetic to FP32 VALU instructions (no native BF16 vector instructions in compiled ISA)";
     }
     return "";
+  }
+  std::string GetConfigCaveat(uint32_t config_idx,
+                              const DeviceInfo &info,
+                              IComputeContext *context = nullptr) const override {
+    if (config_idx == 0 &&
+        (vectorEmulated ||
+         (context && context->getBackend() == ComputeBackend::Vulkan &&
+          info.shaderBfloat16DotProductSupport &&
+          !info.bf16DotProductHardwareSupported))) {
+      return "Driver lowered BF16 vector arithmetic to FP32 VALU instructions (no native BF16 VALU dot2 hardware)";
+    }
+    return GetConfigCaveat(config_idx);
   }
 
 private:

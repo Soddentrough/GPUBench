@@ -244,6 +244,9 @@ public:
   bool isSERSupported() const {
     return serSupported;
   }
+  bool isSERHardwareSupported() const {
+    return serHardwareSupported;
+  }
   bool isPipelineExecutablePropertiesSupported() const {
     return pipelineExecutablePropertiesSupported;
   }
@@ -538,6 +541,7 @@ private:
   bool headlessSurfaceSupported = false;
   bool swapchainSupported = false;
   bool serSupported = false;
+  bool serHardwareSupported = false;
   bool maintenance5Supported = false;
   bool dgcSupported = false;
   bool dgcExecutionSetSupported = false;

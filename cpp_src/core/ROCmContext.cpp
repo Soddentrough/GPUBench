@@ -459,6 +459,8 @@ void ROCmContext::enumerateDevices() {
       // whereas CDNA 2/3 (gfx90a / gfx94x) provide BF16 exclusively via Matrix Core MFMA instructions.
       info.shaderBfloat16DotProductSupport = (is_cdna4 || is_rdna3 || is_rdna4);
       info.shaderBfloat16CoopMatrixSupport = (is_cdna2 || is_cdna3 || is_cdna4 || is_rdna3 || is_rdna4);
+      info.bf16DotProductHardwareSupported = info.shaderBfloat16DotProductSupport;
+      info.bf16CoopMatrixHardwareSupported = info.shaderBfloat16CoopMatrixSupport;
       info.int8Support = true;
       // CDNA 2/3/4 lack iu4 MFMA instructions; RDNA 3/4 expose hardware iu4 WMMA.
       info.int4Support = (is_rdna3 || is_rdna4);

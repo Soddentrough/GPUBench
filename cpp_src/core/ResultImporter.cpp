@@ -547,25 +547,29 @@ bool ResultImporter::loadFromString(const std::string &content, ImportedRun &out
           rd.subcategory = "Multi-Light Evaluation";
           rd.benchmarkName = "RayScheduling (Multi-Light - Single Light (Megakernel))";
           rd.sortWeight = 405;
-          rd.configIndex = 0;
+          rd.configIndex = 30;
+          rd.baselineConfigIndex = -1;
         } else if (id == "rt_sched_multilight_single_dgc") {
           rd.component = "Ray Tracing";
           rd.subcategory = "Multi-Light Evaluation";
           rd.benchmarkName = "RayScheduling (Multi-Light - Single Light (DGC))";
           rd.sortWeight = 406;
-          rd.configIndex = 1;
+          rd.configIndex = 31;
+          rd.baselineConfigIndex = 30;
         } else if (id == "rt_sched_multilight_128_trad") {
           rd.component = "Ray Tracing";
           rd.subcategory = "Multi-Light Evaluation";
           rd.benchmarkName = "RayScheduling (Multi-Light - 128 Lights (Megakernel))";
           rd.sortWeight = 407;
-          rd.configIndex = 2;
+          rd.configIndex = 32;
+          rd.baselineConfigIndex = -1;
         } else if (id == "rt_sched_multilight_128_dgc") {
           rd.component = "Ray Tracing";
           rd.subcategory = "Multi-Light Evaluation";
           rd.benchmarkName = "RayScheduling (Multi-Light - 128 Lights (DGC Light Binning))";
           rd.sortWeight = 408;
-          rd.configIndex = 3;
+          rd.configIndex = 33;
+          rd.baselineConfigIndex = 32;
         } else if (id == "rt_sched_mat_trad") {
           rd.component = "Ray Tracing";
           rd.subcategory = "Material Shading";

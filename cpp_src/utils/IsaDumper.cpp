@@ -478,6 +478,7 @@ public:
   bool rtPipelineSupported = false;
   bool rayQuerySupported = false;
   bool serSupported = false;
+  bool serHardwareSupported = false;
   bool coopMatrixSupported = false;
   bool bf16DotProductSupported = false;
   bool bf16DotProductEmulatedOnArch = false;
@@ -745,12 +746,16 @@ public:
     rayQuerySupported = hasExt(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) &&
                         hasExt(VK_KHR_RAY_QUERY_EXTENSION_NAME) &&
                         (rqFeatures.rayQuery == VK_TRUE);
-    serSupported = (vendorId != 0x1002) &&
-                   ((hasExt("VK_EXT_ray_tracing_invocation_reorder") &&
-                     (serFeatures.rayTracingInvocationReorder == VK_TRUE) &&
-                     (serProps.rayTracingInvocationReorderReorderingHint ==
-                      VK_RAY_TRACING_INVOCATION_REORDER_MODE_REORDER_EXT)) ||
-                    hasExt("VK_NV_ray_tracing_invocation_reorder"));
+    serSupported = (hasExt("VK_EXT_ray_tracing_invocation_reorder") &&
+                    (serFeatures.rayTracingInvocationReorder == VK_TRUE)) ||
+                   hasExt("VK_NV_ray_tracing_invocation_reorder");
+    serHardwareSupported =
+        (vendorId != 0x1002) &&
+        ((hasExt("VK_EXT_ray_tracing_invocation_reorder") &&
+          (serFeatures.rayTracingInvocationReorder == VK_TRUE) &&
+          (serProps.rayTracingInvocationReorderReorderingHint ==
+           VK_RAY_TRACING_INVOCATION_REORDER_MODE_REORDER_EXT)) ||
+         hasExt("VK_NV_ray_tracing_invocation_reorder"));
     coopMatrixSupported = hasExt(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME) &&
                           (coopFeatures.cooperativeMatrix == VK_TRUE);
     coopVectorSupported = hasExt("VK_NV_cooperative_vector");
@@ -763,14 +768,13 @@ public:
                               (bf16Features.shaderBFloat16CooperativeMatrix == VK_TRUE);
     const auto &dbProf = DeviceDatabase::lookup(vendorId, deviceId, deviceName);
     bf16ArchFamily = dbProf.archFamily;
-    // Match VulkanContext/Bf16Bench: RDNA 3/3.5 drivers expose shaderBFloat16DotProduct
-    // via FP32 bit-manipulation emulation rather than native hardware BF16 dot ops.
+    // RDNA 3/3.5 drivers expose shaderBFloat16DotProduct via FP32 bit-manipulation
+    // emulation rather than native BF16 VALU dot2; preserve driver support so ISA
+    // inspection continues while flagging the hardware discrepancy.
     if (bf16ArchFamily == "RDNA 3" || bf16ArchFamily == "RDNA 3.5") {
       if (bf16DotProductSupported) {
         bf16DotProductEmulatedOnArch = true;
       }
-      bf16DotProductSupported = false;
-      bf16CoopMatrixSupported = false;
     }
     fp8CoopMatrixSupported = hasExt("VK_EXT_shader_float8") && coopMatrixSupported &&
                              (fp8Features.shaderFloat8 == VK_TRUE) &&

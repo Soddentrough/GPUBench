@@ -87,6 +87,10 @@ struct BenchmarkSupportInfo {
     bool isSupported{true};
     std::string reason;
     std::string limitationCategory;
+    bool hasSupportDiscrepancy{false};
+    std::string hardwareSupportText;
+    std::string driverSupportText;
+    std::string supportDiscrepancySummary;
 };
 
 std::vector<BenchmarkSupportInfo> ProbeBenchmarkSupportAPI(

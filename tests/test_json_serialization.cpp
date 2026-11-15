@@ -1,8 +1,11 @@
 #include "test_harness.h"
+#include "benchmarks/RaySchedulingBench.h"
 #include "core/ResultFormatter.h"
 #include "core/ResultImporter.h"
 #include "core/RunnerAPI.h"
 #include "third_party/yyjson.h"
+#include <iostream>
+#include <sstream>
 
 TEST_CASE(JsonSerialization, RoundTripCompletePayload) {
   // Construct a synthetic DeviceProfile
@@ -238,4 +241,127 @@ TEST_CASE(JsonSerialization, RayScheduling16SppFpsDividedBySamplesPerPixel) {
   ASSERT_TRUE(ResultImporter::loadFromString(jsonPayload, imported, err));
   ASSERT_EQ(imported.results.size(), 1u);
   ASSERT_EQ(imported.results[0].samplesPerFrame, 16u);
+}
+
+TEST_CASE(JsonSerialization, RaySchedulingMultiLightBaselineFormatting) {
+  // 1. Verify RaySchedulingBench::GetBaselineConfigIndex maps Single Light (31->30) and 128 Lights (33->32)
+  RaySchedulingBench bench(RaySchedulingBench::SceneType::Showroom);
+  ASSERT_EQ(bench.GetBaselineConfigIndex(30), -1);
+  ASSERT_EQ(bench.GetBaselineConfigIndex(31), 30);
+  ASSERT_EQ(bench.GetBaselineConfigIndex(32), -1);
+  ASSERT_EQ(bench.GetBaselineConfigIndex(33), 32);
+
+  // 2. Verify ResultFormatter::print() marks both MK configs as [Baseline] and compares 31->30 and 33->32
+  auto makeMultiLightResult = [&](uint32_t cfg, int32_t baseCfg, double timeMs, int sortWeight, const std::string &name) {
+    ResultData r{};
+    r.backendName = "Vulkan";
+    r.deviceName = "Test GPU";
+    r.deviceIndex = 0;
+    r.benchmarkName = "RayScheduling (Showroom Studio) (" + name + ")";
+    r.component = "Ray Tracing";
+    r.subcategory = "Multi-Light Evaluation";
+    r.metric = "MRays/s";
+    r.operations = 8294400ULL;
+    r.time_ms = timeMs;
+    r.width = 3840;
+    r.height = 2160;
+    r.configIndex = cfg;
+    r.baselineConfigIndex = baseCfg;
+    r.sortWeight = sortWeight;
+    r.isValid = true;
+    return r;
+  };
+
+  ResultFormatter fmt;
+  fmt.addResult(makeMultiLightResult(30, -1, 2.0, 639, "Stage: Multi-Light Evaluation - Single Light (Megakernel)"));
+  fmt.addResult(makeMultiLightResult(31, 30, 1.6, 640, "Stage: Multi-Light Evaluation - Single Light (DGC)"));
+  fmt.addResult(makeMultiLightResult(32, -1, 8.0, 641, "Stage: Multi-Light Evaluation - 128 Lights (Megakernel)"));
+  fmt.addResult(makeMultiLightResult(33, 32, 6.4, 642, "Stage: Multi-Light Evaluation - 128 Lights (DGC Light Binning)"));
+
+  std::ostringstream captured;
+  struct CoutRedirectGuard {
+    std::streambuf *saved = nullptr;
+    explicit CoutRedirectGuard(std::streambuf *buf) : saved(std::cout.rdbuf(buf)) {}
+    ~CoutRedirectGuard() {
+      if (saved) std::cout.rdbuf(saved);
+    }
+  };
+  {
+    CoutRedirectGuard redirect(captured.rdbuf());
+    fmt.print();
+  }
+
+  auto stripAnsi = [](const std::string &in) {
+    std::string out;
+    out.reserve(in.size());
+    bool inEsc = false;
+    for (char ch : in) {
+      if (ch == '\033') {
+        inEsc = true;
+      } else if (inEsc) {
+        if (ch == 'm') inEsc = false;
+      } else {
+        out.push_back(ch);
+      }
+    }
+    return out;
+  };
+
+  std::string lineSingleMk, lineSingleDgc, line128Mk, line128Dgc;
+  std::istringstream lines(stripAnsi(captured.str()));
+  std::string line;
+  while (std::getline(lines, line)) {
+    if (line.find("Vulkan") == std::string::npos) continue;
+    if (lineSingleMk.empty() && line.find("Single Light (Megakernel)") != std::string::npos) lineSingleMk = line;
+    else if (lineSingleDgc.empty() && line.find("Single Light (DGC)") != std::string::npos) lineSingleDgc = line;
+    else if (line128Mk.empty() && line.find("128 Lights (Megakernel)") != std::string::npos) line128Mk = line;
+    else if (line128Dgc.empty() && line.find("128 Lights (DGC Light Binning)") != std::string::npos) line128Dgc = line;
+  }
+
+  ASSERT_TRUE(!lineSingleMk.empty());
+  ASSERT_TRUE(lineSingleMk.find("[Baseline]") != std::string::npos);
+  ASSERT_TRUE(lineSingleMk.find("└──>") == std::string::npos);
+
+  ASSERT_TRUE(!lineSingleDgc.empty());
+  ASSERT_TRUE(lineSingleDgc.find("└──>") != std::string::npos);
+  ASSERT_TRUE(lineSingleDgc.find("1.25x (+25.0%)") != std::string::npos);
+
+  ASSERT_TRUE(!line128Mk.empty());
+  ASSERT_TRUE(line128Mk.find("[Baseline]") != std::string::npos);
+  ASSERT_TRUE(line128Mk.find("└──>") == std::string::npos);
+  ASSERT_TRUE(line128Mk.find("0.2") == std::string::npos);
+
+  ASSERT_TRUE(!line128Dgc.empty());
+  ASSERT_TRUE(line128Dgc.find("└──>") != std::string::npos);
+  ASSERT_TRUE(line128Dgc.find("1.25x (+25.0%)") != std::string::npos);
+
+  // 3. Verify legacy GUI schema import assigns matching configIndex & baselineConfigIndex
+  const std::string guiJson = R"json({
+    "schema_version": "1.0",
+    "backend": "Vulkan",
+    "resolution": "4K (UHD) (3840x2160)",
+    "results": [{
+      "device_id": 0,
+      "device_name": "0: Test GPU",
+      "benchmarks": [
+        {"id": "rt_sched_multilight_single_trad", "unit": "MRays/s", "status": "ok", "raw_operations": 8294400, "raw_time_ms": 2.0},
+        {"id": "rt_sched_multilight_single_dgc",  "unit": "MRays/s", "status": "ok", "raw_operations": 8294400, "raw_time_ms": 1.6},
+        {"id": "rt_sched_multilight_128_trad",    "unit": "MRays/s", "status": "ok", "raw_operations": 8294400, "raw_time_ms": 8.0},
+        {"id": "rt_sched_multilight_128_dgc",     "unit": "MRays/s", "status": "ok", "raw_operations": 8294400, "raw_time_ms": 6.4}
+      ]
+    }]
+  })json";
+
+  ImportedRun guiImported;
+  std::string guiErr;
+  ASSERT_TRUE(ResultImporter::loadFromString(guiJson, guiImported, guiErr));
+  ASSERT_EQ(guiImported.results.size(), 4u);
+  ASSERT_EQ(guiImported.results[0].configIndex, 30u);
+  ASSERT_EQ(guiImported.results[0].baselineConfigIndex, -1);
+  ASSERT_EQ(guiImported.results[1].configIndex, 31u);
+  ASSERT_EQ(guiImported.results[1].baselineConfigIndex, 30);
+  ASSERT_EQ(guiImported.results[2].configIndex, 32u);
+  ASSERT_EQ(guiImported.results[2].baselineConfigIndex, -1);
+  ASSERT_EQ(guiImported.results[3].configIndex, 33u);
+  ASSERT_EQ(guiImported.results[3].baselineConfigIndex, 32);
 }

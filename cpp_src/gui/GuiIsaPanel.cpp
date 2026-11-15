@@ -379,8 +379,8 @@ void GuiApp::renderIsaInspectorPanel() {
         const std::string diagramId = resolveDiagramIdForItem(
             item->id, item->subcategory, item->name, item->viz.diagramId);
         const float remainH = ImGui::GetContentRegionAvail().y;
-        const float descReserve = s(52.0f);
-        const float diagH = std::clamp(remainH - descReserve, s(104.0f), s(190.0f));
+        const float descReserve = item->hasSupportDiscrepancy ? s(110.0f) : s(52.0f);
+        const float diagH = std::clamp(remainH - descReserve, s(96.0f), s(185.0f));
         ImVec2 dp0 = ImGui::GetCursorScreenPos();
         ImVec2 dp1(dp0.x + gridW, dp0.y + diagH);
         ImGui::Dummy(ImVec2(gridW, diagH));
@@ -394,6 +394,28 @@ void GuiApp::renderIsaInspectorPanel() {
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("%s", item->description.c_str());
             }
+        }
+        if (item->hasSupportDiscrepancy) {
+            ImGui::Spacing();
+            ImGui::TextColored(c.warnColor, "HARDWARE VS DRIVER SUPPORT");
+            if (!item->hardwareSupportText.empty()) {
+                ImGui::PushStyleColor(ImGuiCol_Text, c.textSecondary);
+                ImGui::TextWrapped("HW:  %s", item->hardwareSupportText.c_str());
+                ImGui::PopStyleColor();
+            }
+            if (!item->driverSupportText.empty()) {
+                ImGui::PushStyleColor(ImGuiCol_Text, c.textSecondary);
+                ImGui::TextWrapped("DRV: %s", item->driverSupportText.c_str());
+                ImGui::PopStyleColor();
+            }
+        }
+        if (!item->isSupported && !item->supportReason.empty()) {
+            ImGui::Spacing();
+            ImGui::PushStyleColor(ImGuiCol_Text, c.errColor);
+            ImGui::TextWrapped("%s: %s",
+                               item->limitationCategory.empty() ? "UNSUPPORTED" : item->limitationCategory.c_str(),
+                               item->supportReason.c_str());
+            ImGui::PopStyleColor();
         }
     }
     ImGui::EndChild();

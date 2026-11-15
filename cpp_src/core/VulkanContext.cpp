@@ -511,17 +511,16 @@ void VulkanContext::enumeratePhysicalDevices() {
 }
 
 namespace {
-bool queryHardwareSERSupport(VkPhysicalDevice physDev, uint32_t vendorID,
-                             bool hasExtEXT, bool hasExtNV) {
+struct SerSupportFlags {
+  bool driverSupported = false;
+  bool hardwareSupported = false;
+};
+
+SerSupportFlags querySERSupport(VkPhysicalDevice physDev, uint32_t vendorID,
+                                bool hasExtEXT, bool hasExtNV) {
+  SerSupportFlags flags{};
   if (!hasExtEXT && !hasExtNV) {
-    return false;
-  }
-  // AMD RDNA architectures (RDNA 2, RDNA 3, RDNA 3.5, RDNA 4) do not have
-  // dedicated hardware Shader Execution Reordering (SER). Drivers that expose
-  // VK_EXT_ray_tracing_invocation_reorder only accept the SPIR-V capability
-  // with VK_RAY_TRACING_INVOCATION_REORDER_MODE_NONE_EXT or software emulation.
-  if (vendorID == 0x1002) {
-    return false;
+    return flags;
   }
 #if defined(VK_EXT_RAY_TRACING_INVOCATION_REORDER_EXTENSION_NAME)
   if (hasExtEXT) {
@@ -539,10 +538,16 @@ bool queryHardwareSERSupport(VkPhysicalDevice physDev, uint32_t vendorID,
     p2.pNext = &serProps;
     vkGetPhysicalDeviceProperties2(physDev, &p2);
 
-    if (serFeatures.rayTracingInvocationReorder == VK_TRUE &&
-        serProps.rayTracingInvocationReorderReorderingHint ==
-            VK_RAY_TRACING_INVOCATION_REORDER_MODE_REORDER_EXT) {
-      return true;
+    if (serFeatures.rayTracingInvocationReorder == VK_TRUE) {
+      flags.driverSupported = true;
+      // AMD RDNA architectures (RDNA 2..4) expose SER with MODE_NONE_EXT (no-op);
+      // hardware SER reordering requires REORDER_EXT.
+      if (vendorID != 0x1002 &&
+          serProps.rayTracingInvocationReorderReorderingHint ==
+              VK_RAY_TRACING_INVOCATION_REORDER_MODE_REORDER_EXT) {
+        flags.hardwareSupported = true;
+      }
+      return flags;
     }
   }
 #endif
@@ -562,14 +567,18 @@ bool queryHardwareSERSupport(VkPhysicalDevice physDev, uint32_t vendorID,
     p2.pNext = &serPropsNV;
     vkGetPhysicalDeviceProperties2(physDev, &p2);
 
-    if (serFeaturesNV.rayTracingInvocationReorder == VK_TRUE &&
-        serPropsNV.rayTracingInvocationReorderReorderingHint ==
-            VK_RAY_TRACING_INVOCATION_REORDER_MODE_REORDER_NV) {
-      return true;
+    if (serFeaturesNV.rayTracingInvocationReorder == VK_TRUE) {
+      flags.driverSupported = true;
+      if (vendorID != 0x1002 &&
+          serPropsNV.rayTracingInvocationReorderReorderingHint ==
+              VK_RAY_TRACING_INVOCATION_REORDER_MODE_REORDER_NV) {
+        flags.hardwareSupported = true;
+      }
+      return flags;
     }
   }
 #endif
-  return false;
+  return flags;
 }
 } // namespace
 
@@ -892,26 +901,57 @@ const std::vector<DeviceInfo> &VulkanContext::getDevices() const {
           hasExt(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) &&
           hasExt(VK_KHR_RAY_QUERY_EXTENSION_NAME);
 
-      info.serSupported = queryHardwareSERSupport(
-          dev, props.vendorID,
-          hasExt("VK_EXT_ray_tracing_invocation_reorder"),
-          hasExt("VK_NV_ray_tracing_invocation_reorder"));
+      {
+        SerSupportFlags serFlags = querySERSupport(
+            dev, props.vendorID,
+            hasExt("VK_EXT_ray_tracing_invocation_reorder"),
+            hasExt("VK_NV_ray_tracing_invocation_reorder"));
+        info.serSupported = serFlags.driverSupported;
+        info.serHardwareSupported = serFlags.hardwareSupported;
+      }
       info.workGraphsSupported =
           hasExt("VK_AMDX_shader_enqueue") || hasExt("VK_KHR_work_graphs");
       info.dgcSupported = hasExt("VK_EXT_device_generated_commands");
+      info.dgcExecutionSetSupported = false;
+      if (info.dgcSupported) {
+        VkPhysicalDeviceDeviceGeneratedCommandsPropertiesEXT dgcProps{
+            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEVICE_GENERATED_COMMANDS_PROPERTIES_EXT};
+        VkPhysicalDeviceProperties2 dgcProps2{
+            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &dgcProps};
+        vkGetPhysicalDeviceProperties2(dev, &dgcProps2);
+        VkPhysicalDeviceDeviceGeneratedCommandsFeaturesEXT dgcFeat{
+            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEVICE_GENERATED_COMMANDS_FEATURES_EXT};
+        VkPhysicalDeviceFeatures2 dgcFeat2{
+            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &dgcFeat};
+        vkGetPhysicalDeviceFeatures2(dev, &dgcFeat2);
+        info.dgcSupported =
+            (dgcFeat.deviceGeneratedCommands == VK_TRUE) &&
+            ((dgcProps.supportedIndirectCommandsShaderStages & VK_SHADER_STAGE_COMPUTE_BIT) != 0);
+        info.dgcExecutionSetSupported =
+            info.dgcSupported &&
+            ((dgcProps.supportedIndirectCommandsShaderStagesPipelineBinding & VK_SHADER_STAGE_COMPUTE_BIT) != 0);
+      }
       info.performanceQuerySupported = hasExt(VK_KHR_PERFORMANCE_QUERY_EXTENSION_NAME);
 
       populateExtendedCapabilities(instance, dev, props, memProps, availableExts,
                                    subgroupProps.subgroupSize, info);
       DeviceDatabase::enrichDeviceInfo(info);
 
-      // RDNA 3 / 3.5 (gfx11xx) lacks native BF16 VALU dot-product instructions
-      // (v_dot2_f32_bf16 arrived in RDNA 4); LLPC advertises shaderBFloat16DotProduct
-      // via slow FP32 software emulation, so gate it as unsupported.
+      // Preserve driver-reported shaderBFloat16DotProductSupport so the user can
+      // still run BF16 Vector when the driver supports it, while recording the
+      // hardware vs driver discrepancy (RDNA 3 / 3.5 lack native BF16 VALU dot2
+      // and have native BF16 WMMA not yet exposed on some Vulkan drivers).
+      info.bf16DotProductHardwareSupported = info.shaderBfloat16DotProductSupport;
+      info.bf16CoopMatrixHardwareSupported = info.shaderBfloat16CoopMatrixSupport;
       const auto &dbProf = DeviceDatabase::lookup(info.vendorID, info.deviceID, info.name);
       if (dbProf.archFamily == "RDNA 3" || dbProf.archFamily == "RDNA 3.5") {
-        info.shaderBfloat16DotProductSupport = false;
-        info.bf16Support = info.shaderBfloat16CoopMatrixSupport;
+        info.bf16DotProductHardwareSupported = false;
+        info.bf16CoopMatrixHardwareSupported = true;
+      } else if (dbProf.archFamily == "RDNA 4" ||
+                 dbProf.archFamily == "CDNA 2" ||
+                 dbProf.archFamily == "CDNA 3" ||
+                 dbProf.archFamily == "CDNA 4") {
+        info.bf16CoopMatrixHardwareSupported = true;
       }
 
       deviceInfos.push_back(info);
@@ -929,7 +969,10 @@ DeviceInfo VulkanContext::getCurrentDeviceInfo() const {
   const auto &allDevs = getDevices();
   if (selectedDeviceIndex < allDevs.size()) {
     DeviceInfo info = allDevs[selectedDeviceIndex];
+    info.serSupported = serSupported;
+    info.serHardwareSupported = serHardwareSupported;
     info.dgcSupported = dgcSupported;
+    info.dgcExecutionSetSupported = dgcExecutionSetSupported;
     info.performanceQuerySupported = performanceQuerySupported;
     info.workGraphsSupported = workGraphsSupported;
     info.cooperativeVectorSupport = cooperativeVectorSupported;
@@ -1448,10 +1491,14 @@ void VulkanContext::createDevice() {
   if (hasExt(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME)) {
     *currentPNext = &rtPipelineFeatures; currentPNext = &rtPipelineFeatures.pNext;
   }
-  serSupported = queryHardwareSERSupport(
-      physicalDevice, properties.vendorID,
-      hasExt("VK_EXT_ray_tracing_invocation_reorder"),
-      hasExt("VK_NV_ray_tracing_invocation_reorder"));
+  {
+    SerSupportFlags serFlags = querySERSupport(
+        physicalDevice, properties.vendorID,
+        hasExt("VK_EXT_ray_tracing_invocation_reorder"),
+        hasExt("VK_NV_ray_tracing_invocation_reorder"));
+    serSupported = serFlags.driverSupported;
+    serHardwareSupported = serFlags.hardwareSupported;
+  }
   if (serSupported &&
       (hasExt("VK_EXT_ray_tracing_invocation_reorder") ||
        hasExt("VK_NV_ray_tracing_invocation_reorder"))) {

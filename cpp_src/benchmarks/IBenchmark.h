@@ -136,6 +136,23 @@ public:
     (void)context;
     return GetConfigSupportLimitation(config_idx);
   }
+  // Structured difference between physical hardware capability and active
+  // driver/API support (e.g., driver emulates a missing hardware instruction,
+  // or driver omits an extension feature that the hardware supports).
+  struct SupportDiscrepancy {
+    bool differs = false;
+    std::string hardwareStatus;
+    std::string driverStatus;
+    std::string summary;
+  };
+  virtual SupportDiscrepancy GetConfigSupportDiscrepancy(
+      uint32_t config_idx, const DeviceInfo &info,
+      IComputeContext *context = nullptr) const {
+    (void)config_idx;
+    (void)info;
+    (void)context;
+    return SupportDiscrepancy{};
+  }
   virtual uint32_t GetExpectedKernelCount() const { return 1; }
 
   // Returns true if this benchmark depends on the selected GPU device context.

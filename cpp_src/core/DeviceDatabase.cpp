@@ -623,7 +623,7 @@ void DeviceDatabase::enrichDeviceInfo(DeviceInfo &info) {
   }
   if (info.vendorID == 0x1002 || containsCi(prof.archFamily, "RDNA") ||
       containsCi(prof.archFamily, "CDNA") || containsCi(prof.archFamily, "GCN")) {
-    info.serSupported = false;
+    info.serHardwareSupported = false;
   }
 }
 

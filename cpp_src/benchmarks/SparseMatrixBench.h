@@ -43,6 +43,9 @@ public:
       IComputeContext *context = nullptr) const override;
   std::string GetSupportNote(const DeviceInfo &info,
                              IComputeContext *context = nullptr) const override;
+  SupportDiscrepancy GetConfigSupportDiscrepancy(
+      uint32_t config_idx, const DeviceInfo &info,
+      IComputeContext *context = nullptr) const override;
 
   void Setup(IComputeContext &context,
              const std::string &kernel_dir) override;

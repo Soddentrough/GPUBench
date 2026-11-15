@@ -114,15 +114,33 @@ void computePixelCoords(uint idx, uint pattern, uint width, uint height, out uin
         px_u = tileX * 8 + (inTile % 8);
         py_u = tileY * 4 + (inTile / 8);
     } else if (pattern == 2) {
-        uint tilesX = (width + 7) / 8;
-        uint tileIdx = idx / 32;
-        uint inTile = idx % 32;
-        uint tileX = tileIdx % tilesX;
-        uint tileY = tileIdx / tilesX;
-        uint mx = ((inTile >> 0) & 1) | (((inTile >> 2) & 1) << 1) | (((inTile >> 4) & 1) << 2);
-        uint my = ((inTile >> 1) & 1) | (((inTile >> 3) & 1) << 1);
-        px_u = tileX * 8 + mx;
-        py_u = tileY * 4 + my;
+        uint tilesX = (width + 7u) >> 3u;
+        uint tilesY = (height + 3u) >> 2u;
+        uint tileIdx = idx >> 5u;
+        uint inTile = idx & 31u;
+        uint tileX, tileY;
+        if (pc.isGltf != 0u && (tilesX & 7u) == 0u && (tilesY & 3u) == 0u) {
+            uint macroX = tilesX >> 3u;
+            uint macroIdx = tileIdx >> 5u;
+            uint inMacro = tileIdx & 31u;
+            uint subX = ((inMacro >> 0u) & 1u) | (((inMacro >> 2u) & 1u) << 1u) | (((inMacro >> 4u) & 1u) << 2u);
+            uint subY = ((inMacro >> 1u) & 1u) | (((inMacro >> 3u) & 1u) << 1u);
+            tileX = (macroIdx % macroX) * 8u + subX;
+            tileY = (macroIdx / macroX) * 4u + subY;
+        } else if ((tilesX & 3u) == 0u && (tilesY & 1u) == 0u) {
+            uint macroX = tilesX >> 2u;
+            uint macroIdx = tileIdx >> 3u;
+            uint inMacro = tileIdx & 7u;
+            tileX = (macroIdx % macroX) * 4u + (inMacro & 3u);
+            tileY = (macroIdx / macroX) * 2u + (inMacro >> 2u);
+        } else {
+            tileX = tileIdx % tilesX;
+            tileY = tileIdx / tilesX;
+        }
+        uint mx = ((inTile >> 0u) & 1u) | (((inTile >> 2u) & 1u) << 1u) | (((inTile >> 4u) & 1u) << 2u);
+        uint my = ((inTile >> 1u) & 1u) | (((inTile >> 3u) & 1u) << 1u);
+        px_u = tileX * 8u + mx;
+        py_u = tileY * 4u + my;
     } else if (pattern == 3) {
         uint tilesX = (width + 3) / 4;
         uint tileIdx = idx / 32;

@@ -111,6 +111,13 @@ public:
   void SetVerifyParity(bool verify) override { verifyParity = verify; }
   bool GetVerifyParity() const { return verifyParity; }
   bool HasParityFailure() const override { return parityFailure; }
+  static constexpr bool isSERConfigIdx(uint32_t c) {
+    return c == 1 || c == 4 || c == 7 || c == 10 || c == 20 || c == 29;
+  }
+  static constexpr bool isStandardDGCConfigIdx(uint32_t c) {
+    return c == 5 || c == 8 || c == 11 || c == 18 || c == 21 || c == 22 ||
+           c == 24 || c == 31 || c == 33;
+  }
   bool IsConfigSupported(uint32_t config_idx) const override {
     return !unsupportedConfig[config_idx];
   }
@@ -130,7 +137,7 @@ public:
         return false;
       }
     }
-    if (config_idx == 1 || config_idx == 4 || config_idx == 7 || config_idx == 10 || config_idx == 20 || config_idx == 29) {
+    if (isSERConfigIdx(config_idx)) {
       if (!info.serSupported) return false;
 #ifdef HAVE_VULKAN
       if (context && context->getBackend() == ComputeBackend::Vulkan) {
@@ -147,10 +154,9 @@ public:
         if (!vc->isDGCSupported() || !vc->isDGCExecutionSetSupported()) return false;
       }
 #endif
+      if (!info.dgcExecutionSetSupported) return false;
     }
-    if (config_idx == 5 || config_idx == 8 || config_idx == 11 ||
-        config_idx == 18 || config_idx == 21 || config_idx == 22 ||
-        config_idx == 24 || config_idx == 31 || config_idx == 33) {
+    if (isStandardDGCConfigIdx(config_idx)) {
       if (!info.dgcSupported) return false;
 #ifdef HAVE_VULKAN
       if (context && context->getBackend() == ComputeBackend::Vulkan) {
@@ -170,8 +176,8 @@ public:
     if (!unsupportedReason[config_idx].empty()) {
       return unsupportedReason[config_idx];
     }
-    if (config_idx == 1 || config_idx == 4 || config_idx == 7 || config_idx == 10 || config_idx == 20 || config_idx == 29) {
-      return "VK_EXT_ray_tracing_invocation_reorder requires Ray Tracing Pipeline with hardware SER support";
+    if (isSERConfigIdx(config_idx)) {
+      return "VK_EXT_ray_tracing_invocation_reorder not supported by device/driver";
     }
     if (config_idx == 28) {
       return "Vulkan Ray Tracing Pipeline unsupported or pipeline creation failed";
@@ -185,11 +191,12 @@ public:
         }
       }
 #endif
+      if (info.dgcSupported && !info.dgcExecutionSetSupported) {
+        return "VK_EXT_device_generated_commands IndirectExecutionSet pipeline binding unsupported for compute on this driver";
+      }
       return "VK_EXT_device_generated_commands unsupported by device/driver";
     }
-    if (config_idx == 5 || config_idx == 8 || config_idx == 11 ||
-        config_idx == 18 || config_idx == 21 || config_idx == 22 ||
-        config_idx == 24 || config_idx == 31 || config_idx == 33) {
+    if (isStandardDGCConfigIdx(config_idx)) {
       if (!info.dgcSupported) {
         return "VK_EXT_device_generated_commands unsupported by device/driver";
       }
@@ -208,16 +215,8 @@ public:
     return "";
   }
   SupportLimitation GetConfigSupportLimitation(uint32_t config_idx) const override {
-    if (config_idx == 1 || config_idx == 4 || config_idx == 7 || config_idx == 10 || config_idx == 20 || config_idx == 29) {
-      return SupportLimitation::kHardware;
-    }
-    if (config_idx == 28) {
-      return SupportLimitation::kHardware;
-    }
-    if (config_idx == 2 || config_idx == 5 || config_idx == 8 ||
-        config_idx == 11 || config_idx == 18 || config_idx == 21 ||
-        config_idx == 22 || config_idx == 24 || config_idx == 31 ||
-        config_idx == 33) {
+    if (isSERConfigIdx(config_idx) || config_idx == 28 ||
+        config_idx == 2 || isStandardDGCConfigIdx(config_idx)) {
       return SupportLimitation::kHardware;
     }
     return SupportLimitation::kNone;
@@ -225,20 +224,70 @@ public:
   SupportLimitation GetConfigSupportLimitation(uint32_t config_idx,
                                                const DeviceInfo &info,
                                                IComputeContext *context = nullptr) const override {
-    (void)info;
-    (void)context;
+    if (context && (context->getBackend() == ComputeBackend::OpenCL ||
+                    context->getBackend() == ComputeBackend::ROCm)) {
+      return SupportLimitation::kApi;
+    }
+    if (config_idx == 2) {
+      bool basicDgc = info.dgcSupported;
+      bool execSet = info.dgcExecutionSetSupported;
+#ifdef HAVE_VULKAN
+      if (context && context->getBackend() == ComputeBackend::Vulkan) {
+        const VulkanContext *vc = static_cast<const VulkanContext *>(context);
+        basicDgc = vc->isDGCSupported();
+        execSet = vc->isDGCExecutionSetSupported();
+      }
+#endif
+      if (basicDgc && !execSet) {
+        return SupportLimitation::kApi;
+      }
+      return SupportLimitation::kHardware;
+    }
+    if (isSERConfigIdx(config_idx) && info.serSupported) {
+      return SupportLimitation::kApi;
+    }
     return GetConfigSupportLimitation(config_idx);
+  }
+  SupportDiscrepancy GetConfigSupportDiscrepancy(
+      uint32_t config_idx, const DeviceInfo &info,
+      IComputeContext *context = nullptr) const override {
+    SupportDiscrepancy d{};
+    if (!context || context->getBackend() != ComputeBackend::Vulkan) {
+      return d;
+    }
+#ifdef HAVE_VULKAN
+    const VulkanContext *vc = static_cast<const VulkanContext *>(context);
+    if (isSERConfigIdx(config_idx)) {
+      bool driverSer = vc ? vc->isSERSupported() : info.serSupported;
+      bool hwSer = vc ? vc->isSERHardwareSupported() : info.serHardwareSupported;
+      if (driverSer && !hwSer) {
+        d.differs = true;
+        d.hardwareStatus = "Unsupported natively (reorderingHint = NONE; no dedicated hardware SER unit)";
+        d.driverStatus = "Supported (VK_EXT_ray_tracing_invocation_reorder = true; allowed to run)";
+        d.summary = "Driver exposes SER API (pass-through/no-op); GPU lacks dedicated hardware SER";
+      }
+    } else if (config_idx == 2) {
+      bool basicDgc = vc ? vc->isDGCSupported() : info.dgcSupported;
+      bool execSet = vc ? vc->isDGCExecutionSetSupported() : info.dgcExecutionSetSupported;
+      if (basicDgc && !execSet) {
+        d.differs = true;
+        d.hardwareStatus = "Partial DGC active (VK_EXT_device_generated_commands compute stage supported)";
+        d.driverStatus = "Unsupported for IndirectExecutionSet (supportedIndirectCommandsShaderStagesPipelineBinding omits COMPUTE_BIT)";
+        d.summary = "Driver supports compute DGC, but omits compute pipeline binding for IndirectExecutionSet";
+      }
+    }
+#endif
+    return d;
+  }
+  bool IsEmulated(uint32_t config_idx = 0) const override {
+    return isSERConfigIdx(config_idx) && serEmulated;
   }
   bool IsDGCAvailable() const { return isDGCAvailable; }
   bool IsDGCExecutionSetAvailable() const { return isDGCExecutionSetAvailable; }
   std::string GetConfigCaveat(uint32_t config_idx = 0) const override;
   std::string GetConfigCaveat(uint32_t config_idx,
                               const DeviceInfo &info,
-                              IComputeContext *context = nullptr) const override {
-    (void)info;
-    (void)context;
-    return GetConfigCaveat(config_idx);
-  }
+                              IComputeContext *context = nullptr) const override;
   const char *GetComponent(uint32_t config_idx = 0) const override { return "Ray Tracing"; }
   const char *GetSubCategory(uint32_t config_idx = 0) const override;
   const char *GetDescription() const override { return GetDescription(0); }
@@ -367,6 +416,7 @@ private:
 #endif
   bool isDGCAvailable = false;
   bool isDGCExecutionSetAvailable = false;
+  bool serEmulated = false;
 #ifdef HAVE_VULKAN
   VkIndirectCommandsLayoutEXT dgcLayoutStandard = VK_NULL_HANDLE;
   VkIndirectCommandsLayoutEXT dgcLayoutSpecialized = VK_NULL_HANDLE;

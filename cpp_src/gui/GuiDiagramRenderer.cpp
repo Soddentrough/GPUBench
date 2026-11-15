@@ -274,6 +274,21 @@ void GuiApp::renderBenchmarkTooltip(const BenchmarkItem& item, const std::string
         }
     }
 
+    if (item.hasSupportDiscrepancy) {
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::TextColored(c.warnColor, "HARDWARE VS DRIVER SUPPORT");
+        if (!item.hardwareSupportText.empty()) {
+            ImGui::TextColored(c.textSecondary, "HW:  %s", item.hardwareSupportText.c_str());
+        }
+        if (!item.driverSupportText.empty()) {
+            ImGui::TextColored(c.textSecondary, "DRV: %s", item.driverSupportText.c_str());
+        }
+        if (!item.supportDiscrepancySummary.empty()) {
+            ImGui::TextColored(c.warnColor, "%s", item.supportDiscrepancySummary.c_str());
+        }
+    }
+
     if (!item.isSupported && !item.supportReason.empty()) {
         ImGui::Spacing();
         ImGui::Separator();

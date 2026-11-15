@@ -585,6 +585,10 @@ void GuiApp::updateBenchmarkSupport() {
                     item.isSupported = true;
                     item.supportReason.clear();
                     item.limitationCategory.clear();
+                    item.hasSupportDiscrepancy = false;
+                    item.hardwareSupportText.clear();
+                    item.driverSupportText.clear();
+                    item.supportDiscrepancySummary.clear();
                     continue;
                 }
 
@@ -596,6 +600,10 @@ void GuiApp::updateBenchmarkSupport() {
                         item.isSupported = itCfg->second.isSupported;
                         item.supportReason = itCfg->second.reason;
                         item.limitationCategory = itCfg->second.limitationCategory;
+                        item.hasSupportDiscrepancy = itCfg->second.hasSupportDiscrepancy;
+                        item.hardwareSupportText = itCfg->second.hardwareSupportText;
+                        item.driverSupportText = itCfg->second.driverSupportText;
+                        item.supportDiscrepancySummary = itCfg->second.supportDiscrepancySummary;
                         found = true;
                     }
                 }
@@ -605,10 +613,18 @@ void GuiApp::updateBenchmarkSupport() {
                         item.isSupported = it->second.isSupported;
                         item.supportReason = it->second.reason;
                         item.limitationCategory = it->second.limitationCategory;
+                        item.hasSupportDiscrepancy = it->second.hasSupportDiscrepancy;
+                        item.hardwareSupportText = it->second.hardwareSupportText;
+                        item.driverSupportText = it->second.driverSupportText;
+                        item.supportDiscrepancySummary = it->second.supportDiscrepancySummary;
                     } else {
                         item.isSupported = true;
                         item.supportReason.clear();
                         item.limitationCategory.clear();
+                        item.hasSupportDiscrepancy = false;
+                        item.hardwareSupportText.clear();
+                        item.driverSupportText.clear();
+                        item.supportDiscrepancySummary.clear();
                     }
                 }
 

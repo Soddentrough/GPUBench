@@ -449,14 +449,14 @@ int main(int argc, char **argv) {
           }
         }
         if (name == "BF16") {
-          std::cout << "      [0] Vector  (Requires native VK_KHR_shader_bfloat16 on Vulkan or ROCm BF16)" << std::endl;
-          std::cout << "      [1] Matrix  (Requires native VK_KHR_cooperative_matrix + BF16 or ROCm WMMA)" << std::endl;
+          std::cout << "      [0] Vector  (Runs when VK_KHR_shader_bfloat16 dotProduct or ROCm BF16 is driver-supported; lowerings flagged if no native VALU dot2)" << std::endl;
+          std::cout << "      [1] Matrix  (Requires VK_KHR_cooperative_matrix + BF16 or ROCm BF16 WMMA driver support)" << std::endl;
         }
         if (name == "INT4" || name == "FP4" || name == "FP6") {
           std::cout << "      Note: Requires native sub-byte hardware/API support (e.g. ROCm RDNA 4 iu4 WMMA for INT4); reports UNSUPPORTED otherwise" << std::endl;
         }
         if (name == "RayScheduling") {
-          std::cout << "      Note: SER configs strictly require VK_EXT_ray_tracing_invocation_reorder; DGC configs require VK_EXT_device_generated_commands" << std::endl;
+          std::cout << "      Note: SER configs run when VK_EXT_ray_tracing_invocation_reorder is driver-supported (pass-through flagged if hint=NONE); DGC configs require VK_EXT_device_generated_commands" << std::endl;
         }
         if (name == "ILP & Dual-Issue") {
           DualIssueBench diBench;

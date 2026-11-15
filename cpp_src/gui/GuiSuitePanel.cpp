@@ -1174,10 +1174,19 @@ void GuiApp::renderBenchmarkSuitePanel() {
                             ImGui::TextColored(c.warnColor, "RUNNING...");
                         } else if (!itm.isSupported) {
                             ImGui::TextColored(c.errColor, "UNSUP");
-                            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled) && !itm.supportReason.empty()) {
-                                ImGui::SetTooltip("%s: %s",
-                                    itm.limitationCategory.empty() ? "Unsupported" : itm.limitationCategory.c_str(),
-                                    itm.supportReason.c_str());
+                            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled) &&
+                                (!itm.supportReason.empty() || itm.hasSupportDiscrepancy)) {
+                                if (itm.hasSupportDiscrepancy) {
+                                    ImGui::SetTooltip("%s: %s\nHW: %s\nDRV: %s",
+                                        itm.limitationCategory.empty() ? "Unsupported" : itm.limitationCategory.c_str(),
+                                        itm.supportReason.c_str(),
+                                        itm.hardwareSupportText.c_str(),
+                                        itm.driverSupportText.c_str());
+                                } else {
+                                    ImGui::SetTooltip("%s: %s",
+                                        itm.limitationCategory.empty() ? "Unsupported" : itm.limitationCategory.c_str(),
+                                        itm.supportReason.c_str());
+                                }
                             }
                         } else if (disp.hasResult) {
                             ImGui::TextColored(c.textPrimary, "%s", disp.scoreText.c_str());
@@ -1188,6 +1197,15 @@ void GuiApp::renderBenchmarkSuitePanel() {
                             }
                         } else {
                             ImGui::TextColored(c.textMuted, "— %s", itm.metricType.c_str());
+                            if (itm.hasSupportDiscrepancy && ImGui::GetContentRegionAvail().x > s(36.0f)) {
+                                ImGui::SameLine(0.0f, s(4.0f));
+                                ImGui::TextColored(c.warnColor, "[DRV]");
+                                if (ImGui::IsItemHovered()) {
+                                    ImGui::SetTooltip("Hardware vs Driver Support Differ\nHW: %s\nDRV: %s",
+                                        itm.hardwareSupportText.c_str(),
+                                        itm.driverSupportText.c_str());
+                                }
+                            }
                         }
                         popMonoFont();
 

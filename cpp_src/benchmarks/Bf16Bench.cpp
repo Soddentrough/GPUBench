@@ -70,6 +70,10 @@ void Bf16Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
         if (context.getBackend() == ComputeBackend::Vulkan) {
           auto *vc = static_cast<VulkanContext *>(&context);
           vectorEmulated = vc->isKernelBf16Emulated(vectorKernel);
+          if (!vectorEmulated && !vc->isPipelineExecutablePropertiesSupported() &&
+              !devInfo.bf16DotProductHardwareSupported) {
+            vectorEmulated = true;
+          }
         }
 #endif
       }

@@ -450,7 +450,7 @@ std::vector<BenchmarkSupportInfo> ProbeBenchmarkSupportAPI(
                             item.limitationCategory = "Hardware Limitation";
                             break;
                         case IBenchmark::SupportLimitation::kApi:
-                            item.limitationCategory = "API Limitation";
+                            item.limitationCategory = "API / Driver Limitation";
                             break;
                         case IBenchmark::SupportLimitation::kToolchain:
                             item.limitationCategory = "Toolchain Limitation";
@@ -470,27 +470,35 @@ std::vector<BenchmarkSupportInfo> ProbeBenchmarkSupportAPI(
 
                     uint32_t num_configs = bench->GetNumConfigs();
                     for (uint32_t ci = 0; ci < num_configs; ++ci) {
-                        if (!bench->IsConfigSupported(ci, info, activeCtx)) {
+                        const bool cfgSupported = bench->IsConfigSupported(ci, info, activeCtx);
+                        const auto disc = bench->GetConfigSupportDiscrepancy(ci, info, activeCtx);
+                        if (!cfgSupported || disc.differs) {
                             BenchmarkSupportInfo cfgItem;
                             cfgItem.id = bench->GetConfigName(ci);
-                            cfgItem.isSupported = false;
-                            cfgItem.reason = bench->GetConfigSupportNote(ci, info, activeCtx);
-                            if (cfgItem.reason.empty()) {
-                                cfgItem.reason = bench->GetSupportNote(info, activeCtx);
-                            }
-                            switch (bench->GetConfigSupportLimitation(ci, info, activeCtx)) {
-                            case IBenchmark::SupportLimitation::kHardware:
-                                cfgItem.limitationCategory = "Hardware Limitation";
-                                break;
-                            case IBenchmark::SupportLimitation::kApi:
-                                cfgItem.limitationCategory = "API Limitation";
-                                break;
-                            case IBenchmark::SupportLimitation::kToolchain:
-                                cfgItem.limitationCategory = "Toolchain Limitation";
-                                break;
-                            default:
-                                cfgItem.limitationCategory = "Unsupported";
-                                break;
+                            cfgItem.isSupported = cfgSupported;
+                            cfgItem.hasSupportDiscrepancy = disc.differs;
+                            cfgItem.hardwareSupportText = disc.hardwareStatus;
+                            cfgItem.driverSupportText = disc.driverStatus;
+                            cfgItem.supportDiscrepancySummary = disc.summary;
+                            if (!cfgSupported) {
+                                cfgItem.reason = bench->GetConfigSupportNote(ci, info, activeCtx);
+                                if (cfgItem.reason.empty()) {
+                                    cfgItem.reason = bench->GetSupportNote(info, activeCtx);
+                                }
+                                switch (bench->GetConfigSupportLimitation(ci, info, activeCtx)) {
+                                case IBenchmark::SupportLimitation::kHardware:
+                                    cfgItem.limitationCategory = "Hardware Limitation";
+                                    break;
+                                case IBenchmark::SupportLimitation::kApi:
+                                    cfgItem.limitationCategory = "API / Driver Limitation";
+                                    break;
+                                case IBenchmark::SupportLimitation::kToolchain:
+                                    cfgItem.limitationCategory = "Toolchain Limitation";
+                                    break;
+                                default:
+                                    cfgItem.limitationCategory = "Unsupported";
+                                    break;
+                                }
                             }
                             results.push_back(cfgItem);
                             BenchmarkSupportInfo indexedItem = cfgItem;
@@ -505,12 +513,19 @@ std::vector<BenchmarkSupportInfo> ProbeBenchmarkSupportAPI(
                     }
                 }
 
-                if (!info.serSupported) {
+                if (!info.serSupported || !info.serHardwareSupported) {
                     BenchmarkSupportInfo serItem;
                     serItem.id = "SER";
-                    serItem.isSupported = false;
-                    serItem.reason = "VK_EXT_ray_tracing_invocation_reorder requires Ray Tracing Pipeline with hardware SER support";
-                    serItem.limitationCategory = "Hardware Limitation";
+                    serItem.isSupported = info.serSupported;
+                    if (!info.serSupported) {
+                        serItem.reason = "VK_EXT_ray_tracing_invocation_reorder not exposed by active driver/device";
+                        serItem.limitationCategory = info.serHardwareSupported ? "API / Driver Limitation" : "Hardware Limitation";
+                    } else {
+                        serItem.hasSupportDiscrepancy = true;
+                        serItem.hardwareSupportText = "No native SER execution reordering (reorderingHint = NONE)";
+                        serItem.driverSupportText = "VK_EXT_ray_tracing_invocation_reorder exposed by driver (test allowed to run)";
+                        serItem.supportDiscrepancySummary = "Driver exposes SER extension; shader runs with pass-through reordering";
+                    }
                     results.push_back(serItem);
                 }
             }

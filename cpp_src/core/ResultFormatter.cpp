@@ -939,33 +939,7 @@ void ResultFormatter::print() {
                   std::string localBaseMetric = "";
                   bool isLocalBase = false;
 
-                  if (res.benchmarkName.find("Multi-Light Evaluation") != std::string::npos) {
-                    if (res.configIndex == 31 || res.configIndex == 33) {
-                      isLocalBase = true;
-                    } else if (res.configIndex == 32) {
-                      for (const auto &bp : subcat.benchmarks) {
-                        if (bp.second.count(backend)) {
-                          const auto &br = bp.second.at(backend);
-                          if (br.configIndex == 31 && br.time_ms > 0.0) {
-                            localBaseVal = static_cast<double>(br.operations) / (br.time_ms / 1000.0) / 1e6;
-                            localBaseMetric = br.metric;
-                            break;
-                          }
-                        }
-                      }
-                    } else if (res.configIndex == 34) {
-                      for (const auto &bp : subcat.benchmarks) {
-                        if (bp.second.count(backend)) {
-                          const auto &br = bp.second.at(backend);
-                          if (br.configIndex == 33 && br.time_ms > 0.0) {
-                            localBaseVal = static_cast<double>(br.operations) / (br.time_ms / 1000.0) / 1e6;
-                            localBaseMetric = br.metric;
-                            break;
-                          }
-                        }
-                      }
-                    }
-                  } else if (res.benchmarkName.find("RayDivergence") != std::string::npos) {
+                  if (res.benchmarkName.find("RayDivergence") != std::string::npos) {
                     if (res.configIndex == 0) isLocalBase = true;
                     else {
                       for (const auto &bp : subcat.benchmarks) {
