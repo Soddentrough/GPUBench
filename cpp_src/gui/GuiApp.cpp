@@ -126,6 +126,7 @@ GuiApp::GuiApp() = default;
 GuiApp::~GuiApp() {
     abortBenchmarks();
     m_telemetryWorker.stop();
+    joinIsaWarmThread();
     joinIsaThread();
     if (m_execThread.joinable()) {
         m_execThread.join();
@@ -258,9 +259,7 @@ void GuiApp::init(VulkanContext* vulkanContext, float uiScale) {
         setSelectedDevice(static_cast<int>(m_vulkanContext->getActiveDeviceIndex()));
     }
     ensureDefaultInspectedBenchmark();
-    if (const BenchmarkItem* defItem = getInspectedItem()) {
-        requestIsaInspection(*defItem, false);
-    }
+    startIsaWarmup();
     m_telemetryWorker.start();
 }
 
@@ -482,6 +481,9 @@ void GuiApp::setSelectedDevice(int deviceIndex) {
     updateTelemetrySelection();
     applyAutoRenderResolution();
     updateBenchmarkSupport();
+    if (m_execState != ExecutionState::Running && m_inspectedCategoryIdx >= 0) {
+        startIsaWarmup();
+    }
 }
 
 void GuiApp::setSelectedDevices(const std::vector<int>& deviceIndices) {
@@ -507,6 +509,9 @@ void GuiApp::setSelectedDevices(const std::vector<int>& deviceIndices) {
     updateTelemetrySelection();
     applyAutoRenderResolution();
     updateBenchmarkSupport();
+    if (m_execState != ExecutionState::Running && m_inspectedCategoryIdx >= 0) {
+        startIsaWarmup();
+    }
 }
 
 void GuiApp::selectAllGpus() {
@@ -518,6 +523,9 @@ void GuiApp::selectAllGpus() {
     updateTelemetrySelection();
     applyAutoRenderResolution();
     updateBenchmarkSupport();
+    if (m_execState != ExecutionState::Running && m_inspectedCategoryIdx >= 0) {
+        startIsaWarmup();
+    }
 }
 
 void GuiApp::updateTelemetrySelection() {
@@ -635,6 +643,9 @@ void GuiApp::setSelectedBackend(const std::string& backend) {
         m_selectedBackend = backend;
         m_lastProbedBackend.clear();
         updateBenchmarkSupport();
+        if (m_execState != ExecutionState::Running && m_inspectedCategoryIdx >= 0) {
+            startIsaWarmup();
+        }
     }
 }
 
@@ -847,6 +858,7 @@ void GuiApp::startBenchmarks() {
     }
 
     // Zero-Contention Interlock: ensure no background ISA compiler thread runs during timing.
+    joinIsaWarmThread();
     joinIsaThread();
 
     if (m_execThread.joinable()) {
@@ -1130,8 +1142,12 @@ void GuiApp::processIncomingResults() {
         }
         if (m_wasRunning) {
             m_wasRunning = false;
+            startIsaWarmup();
             if (const BenchmarkItem* inspected = getInspectedItem()) {
-                requestIsaInspection(*inspected, false);
+                if (inspected->id == "RayScheduling" &&
+                    (inspected->configIndex == 0 || inspected->configIndex == 1)) {
+                    requestIsaInspection(*inspected, false);
+                }
             }
         }
     }
@@ -1365,6 +1381,14 @@ void GuiApp::joinIsaThread() {
     m_isaLoading.store(false);
 }
 
+void GuiApp::joinIsaWarmThread() {
+    m_isaWarmCancel.store(true, std::memory_order_release);
+    if (m_isaWarmThread.joinable()) {
+        m_isaWarmThread.join();
+    }
+    m_isaWarmActive.store(false, std::memory_order_release);
+}
+
 bool GuiApp::waitForPendingInspections(uint32_t timeoutMs) {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
     while (m_isaLoading.load() && std::chrono::steady_clock::now() < deadline) {
@@ -1476,6 +1500,195 @@ std::string GuiApp::makeIsaCacheKey(const BenchmarkItem& item) const {
            m_selectedBackend + "|" + std::to_string(m_telemetryGpuIndex);
 }
 
+IsaCacheContext GuiApp::makeIsaCacheContext() const {
+    IsaCacheContext ctx;
+    auto eqCi = [](const std::string& a, const std::string& b) {
+        if (a.size() != b.size()) return false;
+        for (size_t i = 0; i < a.size(); ++i) {
+            if (std::tolower(static_cast<unsigned char>(a[i])) !=
+                std::tolower(static_cast<unsigned char>(b[i]))) {
+                return false;
+            }
+        }
+        return true;
+    };
+    const std::string wantBackend =
+        (m_selectedBackend == "auto" || m_selectedBackend.empty())
+            ? std::string("vulkan")
+            : m_selectedBackend;
+
+    const DeviceProfile* best = nullptr;
+    for (const auto& prof : m_deviceProfiles) {
+        if (prof.deviceIndex != m_telemetryGpuIndex) continue;
+        if (!best) best = &prof;
+        if (eqCi(prof.backend, wantBackend)) {
+            best = &prof;
+            break;
+        }
+    }
+    if (!best) {
+        for (const auto& prof : m_deviceProfiles) {
+            if (!prof.backend.empty() && prof.vendorID != 0) {
+                best = &prof;
+                break;
+            }
+        }
+    }
+    if (best) {
+        ctx.vendorId = best->vendorID;
+        ctx.deviceId = best->deviceID;
+        ctx.driverVersion = best->driverVersion;
+        if (!best->driverName.empty() && !best->driverInfo.empty()) {
+            ctx.driverInfo = best->driverName + " (" + best->driverInfo + ")";
+        } else {
+            ctx.driverInfo = !best->driverInfo.empty() ? best->driverInfo : best->driverName;
+        }
+    }
+    return ctx;
+}
+
+bool GuiApp::tryPopulateIsaFromDiskCache(const BenchmarkItem& item, IsaInspectionResult& outRes) {
+    const std::string key = makeIsaCacheKey(item);
+    {
+        std::lock_guard<std::mutex> lock(m_isaMutex);
+        auto it = m_isaCache.find(key);
+        if (it != m_isaCache.end()) {
+            outRes = it->second;
+            return true;
+        }
+        if (m_isaDiskMisses.find(key) != m_isaDiskMisses.end()) {
+            return false;
+        }
+    }
+
+    IsaDumperOptions opts;
+    opts.targets = {item.id};
+    if (item.configIndex >= 0) {
+        opts.configs = {item.configIndex};
+    }
+    opts.backends = {m_selectedBackend};
+    opts.deviceIndex = m_telemetryGpuIndex;
+    opts.fullIsa = true;
+
+    IsaInspectionResult loaded;
+    if (IsaDumper::tryLoadCached(opts, makeIsaCacheContext(), loaded)) {
+        std::lock_guard<std::mutex> lock(m_isaMutex);
+        m_isaDiskMisses.erase(key);
+        m_isaCache[key] = loaded;
+        outRes = std::move(loaded);
+        return true;
+    }
+
+    std::lock_guard<std::mutex> lock(m_isaMutex);
+    m_isaDiskMisses.insert(key);
+    return false;
+}
+
+void GuiApp::startIsaWarmup() {
+    if (m_execState == ExecutionState::Running) {
+        return;
+    }
+    joinIsaWarmThread();
+
+    const IsaCacheContext cacheCtx = makeIsaCacheContext();
+    struct WarmCandidate {
+        std::string key;
+        IsaDumperOptions opts;
+        int priority = 1; // 0 = inspected, 1 = supported, 2 = unsupported
+    };
+    std::vector<WarmCandidate> candidates;
+    std::unordered_set<std::string> seenKeys;
+
+    const BenchmarkItem* inspected = getInspectedItem();
+    auto pushItem = [&](const BenchmarkItem& item, int prio) {
+        if (item.category == "System") return;
+        const std::string key = makeIsaCacheKey(item);
+        if (!seenKeys.insert(key).second) return;
+
+        {
+            std::lock_guard<std::mutex> lock(m_isaMutex);
+            if (m_isaCache.find(key) != m_isaCache.end()) {
+                return;
+            }
+        }
+
+        IsaDumperOptions opts;
+        opts.targets = {item.id};
+        if (item.configIndex >= 0) {
+            opts.configs = {item.configIndex};
+        }
+        opts.backends = {m_selectedBackend};
+        opts.deviceIndex = m_telemetryGpuIndex;
+        opts.fullIsa = true;
+
+        // Instant, zero-contention disk cache preload
+        IsaInspectionResult cached;
+        if (IsaDumper::tryLoadCached(opts, cacheCtx, cached)) {
+            std::lock_guard<std::mutex> lock(m_isaMutex);
+            m_isaDiskMisses.erase(key);
+            m_isaCache[key] = std::move(cached);
+            return;
+        }
+
+        // Skip multi-second RayScheduling shaders during automatic idle warmup so pressing
+        // RUN TESTS always cancels cleanly in < 100 ms; explicit selection in F1 still caches them.
+        if (item.id == "RayScheduling" && (item.configIndex == 0 || item.configIndex == 1)) {
+            return;
+        }
+
+        candidates.push_back({key, std::move(opts), prio});
+    };
+
+    if (inspected) {
+        pushItem(*inspected, 0);
+    }
+    for (const auto& cat : m_categories) {
+        if (cat.name == "System") continue;
+        for (const auto& sg : cat.subgroups) {
+            for (const auto& item : sg.items) {
+                pushItem(item, item.isSupported ? 1 : 2);
+            }
+        }
+    }
+
+    if (candidates.empty()) {
+        return;
+    }
+
+    std::stable_sort(candidates.begin(), candidates.end(),
+                     [](const WarmCandidate& a, const WarmCandidate& b) {
+                         return a.priority < b.priority;
+                     });
+
+    std::vector<IsaDumperOptions> batchOpts;
+    std::vector<std::string> batchKeys;
+    batchOpts.reserve(candidates.size());
+    batchKeys.reserve(candidates.size());
+    for (auto& c : candidates) {
+        batchOpts.push_back(std::move(c.opts));
+        batchKeys.push_back(std::move(c.key));
+    }
+
+    m_isaWarmCancel.store(false, std::memory_order_release);
+    m_isaWarmActive.store(true, std::memory_order_release);
+    m_isaWarmThread = std::thread([this, batchOpts = std::move(batchOpts),
+                                   batchKeys = std::move(batchKeys), cacheCtx]() mutable {
+        size_t idx = 0;
+        IsaDumper::warmCacheBatch(
+            batchOpts, cacheCtx, &m_isaWarmCancel,
+            [this, &batchKeys, &idx](const IsaDumperOptions& /*opts*/, IsaInspectionResult&& res) {
+                const std::string& key = (idx < batchKeys.size()) ? batchKeys[idx] : std::string();
+                ++idx;
+                if (!key.empty()) {
+                    std::lock_guard<std::mutex> lock(m_isaMutex);
+                    m_isaDiskMisses.erase(key);
+                    m_isaCache[key] = std::move(res);
+                }
+            });
+        m_isaWarmActive.store(false, std::memory_order_release);
+    });
+}
+
 void GuiApp::requestIsaInspection(const BenchmarkItem& item, bool forceRefresh) {
     if (m_execState == ExecutionState::Running) {
         return;
@@ -1492,10 +1705,6 @@ void GuiApp::requestIsaInspection(const BenchmarkItem& item, bool forceRefresh) 
         return;
     }
 
-    joinIsaThread();
-    m_isaActiveKey = key;
-    m_isaLoading.store(true);
-
     IsaDumperOptions opts;
     opts.targets = {item.id};
     if (item.configIndex >= 0) {
@@ -1505,7 +1714,24 @@ void GuiApp::requestIsaInspection(const BenchmarkItem& item, bool forceRefresh) 
     opts.deviceIndex = m_telemetryGpuIndex;
     opts.fullIsa = true;
 
-    m_isaThread = std::thread([this, key, opts]() mutable {
+    const IsaCacheContext cacheCtx = makeIsaCacheContext();
+    if (!forceRefresh) {
+        IsaInspectionResult cached;
+        if (IsaDumper::tryLoadCached(opts, cacheCtx, cached)) {
+            std::lock_guard<std::mutex> lock(m_isaMutex);
+            m_isaDiskMisses.erase(key);
+            m_isaCache[key] = std::move(cached);
+            return;
+        }
+    }
+
+    joinIsaWarmThread();
+    joinIsaThread();
+    m_isaActiveKey = key;
+    m_isaLoading.store(true);
+
+    m_isaThread = std::thread([this, key, opts, cacheCtx]() mutable {
+        const IsaDumperOptions origOpts = opts;
         IsaInspectionResult res = IsaDumper::inspect(opts);
         if (res.artifacts.empty() && !opts.configs.empty()) {
             // Avoid compiling all 9 RayScheduling shaders (~16s in LLPC) for unmapped sub-configs;
@@ -1517,8 +1743,10 @@ void GuiApp::requestIsaInspection(const BenchmarkItem& item, bool forceRefresh) 
             }
             res = IsaDumper::inspect(opts);
         }
+        IsaDumper::saveCached(origOpts, cacheCtx, res);
         {
             std::lock_guard<std::mutex> lock(m_isaMutex);
+            m_isaDiskMisses.erase(key);
             m_isaCache[key] = std::move(res);
         }
         m_isaLoading.store(false);

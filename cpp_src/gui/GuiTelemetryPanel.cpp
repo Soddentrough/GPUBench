@@ -200,9 +200,13 @@ void GuiApp::renderLiveTelemetryDock() {
                                 ImVec4 traceCol,
                                 bool hasData,
                                 const std::vector<NormalizedGraphPoint>& normPts,
-                                const std::vector<float>& rawPts,
                                 ImVec2 size,
                                 bool showTriggerLabels,
+                                const char* scaleTopLabel,
+                                const char* scaleInfoStr,
+                                float winMin,
+                                float winMax,
+                                bool hasExtrema,
                                 const std::vector<NormalizedGraphPoint>* secondaryNormPts = nullptr,
                                 ImVec4 secCol = ImVec4(0, 0, 0, 0)) {
         ImVec2 p0 = ImGui::GetCursorScreenPos();
@@ -297,17 +301,26 @@ void GuiApp::renderLiveTelemetryDock() {
             }
         }
 
+        if (scaleTopLabel && scaleTopLabel[0] != '\0') {
+            const float lblW = ImGui::CalcTextSize(scaleTopLabel).x;
+            if (gx1 - gx0 > lblW + s(12.0f)) {
+                ImVec4 dimCol = c.textMuted;
+                dimCol.w *= 0.78f;
+                dl->AddText(ImVec2(gx1 - lblW - s(4.0f), gy0 + s(1.0f)), toU32(dimCol), scaleTopLabel);
+            }
+        }
+
         dl->PopClipRect();
 
-        if (hovered && hasData && !rawPts.empty()) {
-            float minV = rawPts[0], maxV = rawPts[0];
-            for (size_t i = 1; i < rawPts.size(); ++i) {
-                minV = std::min(minV, rawPts[i]);
-                maxV = std::max(maxV, rawPts[i]);
-            }
+        if (hovered && hasData) {
             ImGui::BeginTooltip();
             ImGui::TextColored(traceCol, "%s : %s", title, readout);
-            ImGui::Text("Window Min/Max: %.1f .. %.1f", minV, maxV);
+            if (hasExtrema) {
+                ImGui::Text("Window Min/Max: %.1f .. %.1f", winMin, winMax);
+            }
+            if (scaleInfoStr && scaleInfoStr[0] != '\0') {
+                ImGui::TextDisabled("%s", scaleInfoStr);
+            }
             if (!m_scopeTriggers.empty()) {
                 const auto& lastTrig = m_scopeTriggers.back();
                 ImGui::TextColored(c.warnColor, "Last TRIG: %s (%.1fs)", lastTrig.label.c_str(), lastTrig.timestampSec);
@@ -341,22 +354,55 @@ void GuiApp::renderLiveTelemetryDock() {
         std::snprintf(ch4Val, sizeof(ch4Val), "N/A");
     }
 
+    char ch1ScaleTop[24], ch1ScaleInfo[64];
+    std::snprintf(ch1ScaleTop, sizeof(ch1ScaleTop), "%.0fM", graph->sclkCeiling);
+    std::snprintf(ch1ScaleInfo, sizeof(ch1ScaleInfo), "Scale: 0 .. %.0f MHz", graph->sclkCeiling);
+
+    char ch2ScaleTop[24], ch2ScaleInfo[64];
+    std::snprintf(ch2ScaleTop, sizeof(ch2ScaleTop), "%.0fW", graph->pwrCeiling);
+    std::snprintf(ch2ScaleInfo, sizeof(ch2ScaleInfo), "Scale: 0 .. %.0f W", graph->pwrCeiling);
+
+    char ch4ScaleTop[32] = "";
+    char ch4ScaleInfo[128] = "";
+    if (hasTemp && graph->hasVram) {
+        std::snprintf(ch4ScaleTop, sizeof(ch4ScaleTop), "%.0fC|%.0fG", graph->tempMaxScale, graph->vramTotGb);
+        std::snprintf(ch4ScaleInfo, sizeof(ch4ScaleInfo),
+                      "Scale: %.0f..%.0f C | 0..%.1f G (VRAM: %.1f..%.1f GB)",
+                      graph->tempMinScale, graph->tempMaxScale, graph->vramTotGb,
+                      graph->vramWinMinGb, graph->vramWinMaxGb);
+    } else if (hasTemp) {
+        std::snprintf(ch4ScaleTop, sizeof(ch4ScaleTop), "%.0fC", graph->tempMaxScale);
+        std::snprintf(ch4ScaleInfo, sizeof(ch4ScaleInfo), "Scale: %.0f .. %.0f C",
+                      graph->tempMinScale, graph->tempMaxScale);
+    } else if (graph->hasVram) {
+        std::snprintf(ch4ScaleTop, sizeof(ch4ScaleTop), "%.0fG", graph->vramTotGb);
+        std::snprintf(ch4ScaleInfo, sizeof(ch4ScaleInfo), "VRAM Scale: 0 .. %.1f GB (Min/Max %.1f..%.1f GB)",
+                      graph->vramTotGb, graph->vramWinMinGb, graph->vramWinMaxGb);
+    }
+
     drawScopeChannel("##Ch1Sclk", "CH1 SCLK", ch1Val, c.cyanAccent,
-                     graph->hasSclk, graph->sclkNorm, graph->sclkPts,
-                     ImVec2(colW, stripH), true);
+                     graph->hasSclk, graph->sclkNorm,
+                     ImVec2(colW, stripH), true,
+                     ch1ScaleTop, ch1ScaleInfo,
+                     graph->sclkWinMin, graph->sclkWinMax, graph->hasSclk);
     ImGui::SameLine(0.0f, gap);
     drawScopeChannel("##Ch2Pwr", "CH2 PWR", ch2Val, c.phosphorHi,
-                     graph->hasPower, graph->pwrNorm, graph->powerPts,
-                     ImVec2(colW, stripH), false);
+                     graph->hasPower, graph->pwrNorm,
+                     ImVec2(colW, stripH), false,
+                     ch2ScaleTop, ch2ScaleInfo,
+                     graph->pwrWinMin, graph->pwrWinMax, graph->hasPower);
     ImGui::SameLine(0.0f, gap);
     drawScopeChannel("##Ch3Busy", "CH3 BUSY", ch3Val, c.okColor,
-                     graph->hasGpuBusy, graph->busyNorm, graph->gpuBusyPts,
-                     ImVec2(colW, stripH), false);
-    ImGui::SameLine(0.0f, gap);
-    const std::vector<float>& tempPts = graph->hasTempJct ? graph->tempJctPts : graph->tempEdgePts;
-    drawScopeChannel("##Ch4TempVram", "CH4 TMP/VRAM", ch4Val, c.warnColor,
-                     hasTemp || graph->hasVram, graph->tempNorm, tempPts,
+                     graph->hasGpuBusy, graph->busyNorm,
                      ImVec2(colW, stripH), false,
+                     "100%", "Scale: 0 .. 100 %",
+                     graph->busyWinMin, graph->busyWinMax, graph->hasGpuBusy);
+    ImGui::SameLine(0.0f, gap);
+    drawScopeChannel("##Ch4TempVram", "CH4 TMP/VRAM", ch4Val, c.warnColor,
+                     hasTemp || graph->hasVram, graph->tempNorm,
+                     ImVec2(colW, stripH), false,
+                     ch4ScaleTop, ch4ScaleInfo,
+                     graph->tempWinMin, graph->tempWinMax, hasTemp,
                      graph->hasVram ? &graph->vramNorm : nullptr,
                      c.violetAccent);
 
@@ -387,7 +433,7 @@ void GuiApp::renderLiveTelemetryDock() {
         ImPlot::SetupAxes("Time (s)", "GPU Load (%)", ImPlotAxisFlags_None, ImPlotAxisFlags_None);
         ImPlot::SetupAxis(ImAxis_Y2, "VRAM (MB)", ImPlotAxisFlags_AuxDefault);
         ImPlot::SetupAxisLimits(ImAxis_X1, tMin, tMax, ImPlotCond_Always);
-        ImPlot::SetupAxisLimits(ImAxis_Y1, 0.0, 105.0, ImPlotCond_Once);
+        ImPlot::SetupAxisLimits(ImAxis_Y1, 0.0, 105.0, ImPlotCond_Always);
         ImPlot::SetupAxisLimits(ImAxis_Y2, 0.0, graph->maxVramMbPlot * 1.05, ImPlotCond_Always);
 
         if (graph->hasGpuBusy && graph->gpuBusyPts.size() == nPts) {
@@ -407,8 +453,9 @@ void GuiApp::renderLiveTelemetryDock() {
 
     // Chart 2: Shader & Memory Clocks (MHz)
     if (ImPlot::BeginPlot("CH1 // CLOCKS (MHz)###PlotClocks", ImVec2(plotColW, plotH))) {
-        ImPlot::SetupAxes("Time (s)", "MHz", ImPlotAxisFlags_None, ImPlotAxisFlags_AutoFit);
+        ImPlot::SetupAxes("Time (s)", "MHz", ImPlotAxisFlags_None, ImPlotAxisFlags_None);
         ImPlot::SetupAxisLimits(ImAxis_X1, tMin, tMax, ImPlotCond_Always);
+        ImPlot::SetupAxisLimits(ImAxis_Y1, 0.0, static_cast<double>(graph->clockCeilingPlot), ImPlotCond_Always);
 
         if (graph->hasSclk && graph->sclkPts.size() == nPts) {
             ImPlot::PlotLine("SCLK", tData, graph->sclkPts.data(), static_cast<int>(nPts),
@@ -428,9 +475,12 @@ void GuiApp::renderLiveTelemetryDock() {
 
     // Chart 3: Board Power (W) & Thermal Sensors (C)
     if (ImPlot::BeginPlot("CH2/CH4 // POWER & THERMALS###PlotPowerTemp", ImVec2(plotColW, plotH))) {
-        ImPlot::SetupAxes("Time (s)", "Power (W)", ImPlotAxisFlags_None, ImPlotAxisFlags_AutoFit);
-        ImPlot::SetupAxis(ImAxis_Y2, "Temp (C)", ImPlotAxisFlags_AuxDefault | ImPlotAxisFlags_AutoFit);
+        ImPlot::SetupAxes("Time (s)", "Power (W)", ImPlotAxisFlags_None, ImPlotAxisFlags_None);
+        ImPlot::SetupAxis(ImAxis_Y2, "Temp (C)", ImPlotAxisFlags_AuxDefault);
         ImPlot::SetupAxisLimits(ImAxis_X1, tMin, tMax, ImPlotCond_Always);
+        ImPlot::SetupAxisLimits(ImAxis_Y1, 0.0, static_cast<double>(graph->pwrCeiling), ImPlotCond_Always);
+        ImPlot::SetupAxisLimits(ImAxis_Y2, static_cast<double>(graph->tempMinScale),
+                                static_cast<double>(graph->tempMaxScale), ImPlotCond_Always);
 
         if (graph->hasPower && graph->powerPts.size() == nPts) {
             ImPlot::SetAxes(ImAxis_X1, ImAxis_Y1);

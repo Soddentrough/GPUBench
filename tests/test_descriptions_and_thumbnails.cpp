@@ -125,15 +125,15 @@ TEST_CASE(DescriptionsAndThumbnails, IndirectSynthesisConfigs) {
 
 TEST_CASE(DescriptionsAndThumbnails, RaySchedulingConfigsCount) {
   RaySchedulingBench rs(RaySchedulingBench::SceneType::Showroom);
-  ASSERT_EQ(rs.GetNumConfigs(), 35u);
+  ASSERT_EQ(rs.GetNumConfigs(), 34u);
   ASSERT_EQ(rs.GetConfigName(0), "Stage: Material Shading (Megakernel)");
   ASSERT_EQ(rs.GetConfigName(9), "Scene Render: Full Frame (Megakernel)");
   ASSERT_EQ(rs.GetConfigName(17), "Primary Rays (Compute Megakernel)");
   ASSERT_EQ(rs.GetConfigName(19), "Stage: Directional Shadows - Single Light (Megakernel)");
-  ASSERT_EQ(rs.GetConfigName(27), "Stage: Traversal Divergence - Alpha Cutout Geometry");
-  ASSERT_EQ(rs.GetConfigName(31), "Stage: Multi-Light Evaluation - Single Light (Megakernel)");
-  ASSERT_EQ(rs.GetConfigName(33), "Stage: Multi-Light Evaluation - 128 Lights (Megakernel)");
-  ASSERT_EQ(rs.GetConfigName(34), "Stage: Multi-Light Evaluation - 128 Lights (DGC Light Binning)");
+  ASSERT_EQ(rs.GetConfigName(26), "Stage: Traversal Divergence - Alpha Cutout Geometry");
+  ASSERT_EQ(rs.GetConfigName(30), "Stage: Multi-Light Evaluation - Single Light (Megakernel)");
+  ASSERT_EQ(rs.GetConfigName(32), "Stage: Multi-Light Evaluation - 128 Lights (Megakernel)");
+  ASSERT_EQ(rs.GetConfigName(33), "Stage: Multi-Light Evaluation - 128 Lights (DGC Light Binning)");
 }
 
 TEST_CASE(DescriptionsAndThumbnails, RayHardwareTraversalAndDivergenceConfigs) {

@@ -46,10 +46,10 @@ void GuiApp::applyVisualizationMetadata() {
                         viz.caption = "Unbiased Monte Carlo Path Tracing (16 SPP Converged)";
                         viz.linkedViewportMode = 2;
                         viz.linkedViewportSubIndex = 0;
-                    } else if (containsCaseInsensitive(nm, "Path Tracing") || containsCaseInsensitive(nm, "Persistent")) {
+                    } else if (containsCaseInsensitive(nm, "Path Tracing")) {
                         viz.assetPath = "renders/render_{scene}_pathtracing_1spp_worklist.png";
                         viz.diagramId = "cone_divergence";
-                        viz.caption = "Unbiased Path Tracing & Persistent Ray Queue";
+                        viz.caption = "Unbiased Monte Carlo Path Tracing (1 SPP)";
                         viz.linkedViewportMode = 2;
                         viz.linkedViewportSubIndex = 1;
                     } else if (containsCaseInsensitive(nm, "Shadow")) {

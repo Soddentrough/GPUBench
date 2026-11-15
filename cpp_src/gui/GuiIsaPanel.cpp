@@ -97,9 +97,17 @@ void GuiApp::renderIsaInspectorPanel() {
             hasCachedIsa = true;
         }
     }
+    if (!hasCachedIsa) {
+        hasCachedIsa = tryPopulateIsaFromDiskCache(*item, cachedIsa);
+    }
     const bool isLoadingThis = m_isaLoading.load() && (m_isaActiveKey == cacheKey);
+    const bool isWarmingThis = !hasCachedIsa && !isLoadingThis && !isRunning &&
+                               m_isaWarmActive.load();
+    const bool skipAutoWarmupSlot = (item->id == "RayScheduling") &&
+                                    (item->configIndex == 0 || item->configIndex == 1);
 
-    if (!hasCachedIsa && !isLoadingThis && !isRunning) {
+    if (!hasCachedIsa && !isLoadingThis && !isRunning &&
+        (!m_isaWarmActive.load() || skipAutoWarmupSlot)) {
         requestIsaInspection(*item, false);
     }
 
@@ -440,9 +448,11 @@ void GuiApp::renderIsaInspectorPanel() {
         {
             if (isLoadingThis) {
                 ImGui::TextColored(c.phosphorHi, "PROBING HARDWARE PIPELINE EXECUTABLES...");
+            } else if (isWarmingThis) {
+                ImGui::TextColored(c.phosphorHi, "WARMING HARDWARE ISA CACHE...");
             } else if (!hasCachedIsa && isRunning) {
                 ImGui::TextColored(c.warnColor,
-                                   "ZERO-CONTENTION INTERLOCK: HARDWARE ISA PROBE DEFERRED DURING ACTIVE RUN.");
+                                   "ZERO-CONTENTION INTERLOCK: PROBE QUEUED (POPULATES AUTOMATICALLY AFTER RUN).");
             } else if (activeArt && !activeArt->skipReason.empty()) {
                 ImGui::TextColored(c.warnColor, "[SKIPPED] %s", activeArt->skipReason.c_str());
             } else if (activeArt && !activeArt->errorMessage.empty()) {

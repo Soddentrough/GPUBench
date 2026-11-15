@@ -401,7 +401,53 @@ void TelemetryWorker::notifyGraphThread() {
 void TelemetryWorker::graphPrepLoop() {
     setLowThreadPriority();
 
-    constexpr size_t kMaxPlotPoints = 256;
+    constexpr size_t kMaxScopePoints = 256;
+    constexpr size_t kMaxImPlotPoints = 512;
+    std::vector<float> scratchStats;
+
+    auto computeChannelStats = [&](const TelemetryBuffer& buf, size_t nPts,
+                                   float minFloor, float roundStep,
+                                   float& outMin, float& outMax, float& outCeiling) {
+        outMin = 0.0f;
+        outMax = 0.0f;
+        outCeiling = minFloor;
+        if (nPts == 0 || buf.size() != nPts) return;
+
+        const float* d = buf.data();
+        scratchStats.clear();
+        scratchStats.reserve(nPts);
+        bool any = false;
+        for (size_t i = 0; i < nPts; ++i) {
+            const float v = d[i];
+            if (!std::isfinite(v)) continue;
+            if (!any) {
+                outMin = v;
+                outMax = v;
+                any = true;
+            } else {
+                outMin = std::min(outMin, v);
+                outMax = std::max(outMax, v);
+            }
+            if (v > 0.0f) {
+                scratchStats.push_back(v);
+            }
+        }
+        if (scratchStats.empty()) return;
+
+        float refPeak = outMax;
+        if (scratchStats.size() >= 20) {
+            const size_t p99Idx = (scratchStats.size() * 99) / 100;
+            const size_t clampedIdx = std::min(p99Idx, scratchStats.size() - 1);
+            std::nth_element(scratchStats.begin(),
+                             scratchStats.begin() + static_cast<std::ptrdiff_t>(clampedIdx),
+                             scratchStats.end());
+            refPeak = scratchStats[clampedIdx];
+        }
+        const float target = std::max(minFloor, refPeak * 1.06f);
+        outCeiling = (roundStep > 0.0f)
+                         ? std::ceil(target / roundStep) * roundStep
+                         : target;
+    };
 
     while (m_running.load()) {
         {
@@ -456,31 +502,69 @@ void TelemetryWorker::graphPrepLoop() {
             g->tMax = (nPts >= 2) ? std::max(g->tMin + 5.0, static_cast<double>(tData[nPts - 1])) : 60.0;
             g->tSpan = std::max(0.5, g->tMax - g->tMin);
 
-            g->sclkCeiling = 3000.0f;
-            if (snap.hasSclk && snap.sclkHistory.size() == nPts) {
-                const float* d = snap.sclkHistory.data();
-                for (size_t i = 0; i < nPts; ++i) g->sclkCeiling = std::max(g->sclkCeiling, d[i] * 1.15f);
+            if (snap.hasSclk) {
+                computeChannelStats(snap.sclkHistory, nPts, 1000.0f, 250.0f,
+                                    g->sclkWinMin, g->sclkWinMax, g->sclkCeiling);
+            } else {
+                g->sclkCeiling = 1000.0f;
             }
-            g->pwrCeiling = 360.0f;
-            if (snap.hasPower && snap.powerHistory.size() == nPts) {
-                const float* d = snap.powerHistory.data();
-                for (size_t i = 0; i < nPts; ++i) g->pwrCeiling = std::max(g->pwrCeiling, d[i] * 1.15f);
+            float mclkMin = 0.0f, mclkMax = 0.0f, mclkCeiling = 1000.0f;
+            if (snap.hasMclk) {
+                computeChannelStats(snap.mclkHistory, nPts, 1000.0f, 250.0f,
+                                    mclkMin, mclkMax, mclkCeiling);
             }
+            g->clockCeilingPlot = std::max(g->sclkCeiling, snap.hasMclk ? mclkCeiling : 1000.0f);
+
+            if (snap.hasPower) {
+                computeChannelStats(snap.powerHistory, nPts, 100.0f, 50.0f,
+                                    g->pwrWinMin, g->pwrWinMax, g->pwrCeiling);
+            } else {
+                g->pwrCeiling = 100.0f;
+            }
+
+            if (snap.hasGpuBusy) {
+                float unusedCeil = 105.0f;
+                computeChannelStats(snap.gpuBusyHistory, nPts, 100.0f, 10.0f,
+                                    g->busyWinMin, g->busyWinMax, unusedCeil);
+            }
+
+            float tempFloor = 20.0f;
+            float tempCeil = 105.0f;
+            const TelemetryBuffer& activeTempHist = snap.hasTempJct ? snap.tempJctHistory : snap.tempEdgeHistory;
+            if ((snap.hasTempJct || snap.hasTempEdge) && activeTempHist.size() == nPts && nPts > 0) {
+                float rawTempCeil = 105.0f;
+                computeChannelStats(activeTempHist, nPts, 105.0f, 5.0f,
+                                    g->tempWinMin, g->tempWinMax, rawTempCeil);
+                if (g->tempWinMin > 0.0f && g->tempWinMin < 20.0f) {
+                    tempFloor = std::max(0.0f, std::floor(g->tempWinMin / 5.0f) * 5.0f);
+                }
+                tempCeil = std::max(105.0f, rawTempCeil);
+            }
+            g->tempMinScale = tempFloor;
+            g->tempMaxScale = tempCeil;
+
             g->vramUsedGb = static_cast<double>(snap.vramUsedBytes) / (1024.0 * 1024.0 * 1024.0);
             g->vramTotGb = std::max(0.1, static_cast<double>(snap.vramTotalBytes) / (1024.0 * 1024.0 * 1024.0));
             g->maxVramMbPlot = (snap.vramTotalBytes > 0)
                 ? static_cast<double>(snap.vramTotalBytes) / (1024.0 * 1024.0)
                 : 16384.0;
+            if (snap.hasVram && snap.vramUsedMbHistory.size() == nPts && nPts > 0) {
+                float vMinMb = 0.0f, vMaxMb = 0.0f, vCeil = 0.0f;
+                computeChannelStats(snap.vramUsedMbHistory, nPts, 1024.0f, 256.0f,
+                                    vMinMb, vMaxMb, vCeil);
+                g->vramWinMinGb = vMinMb / 1024.0f;
+                g->vramWinMaxGb = vMaxMb / 1024.0f;
+            }
 
             if (nPts > 0) {
                 std::vector<size_t> indices;
-                if (nPts <= kMaxPlotPoints) {
+                if (nPts <= kMaxImPlotPoints) {
                     indices.resize(nPts);
                     for (size_t i = 0; i < nPts; ++i) indices[i] = i;
                 } else {
-                    indices.reserve(kMaxPlotPoints);
-                    const double step = static_cast<double>(nPts - 1) / static_cast<double>(kMaxPlotPoints - 1);
-                    for (size_t k = 0; k < kMaxPlotPoints - 1; ++k) {
+                    indices.reserve(kMaxImPlotPoints);
+                    const double step = static_cast<double>(nPts - 1) / static_cast<double>(kMaxImPlotPoints - 1);
+                    for (size_t k = 0; k < kMaxImPlotPoints - 1; ++k) {
                         indices.push_back(static_cast<size_t>(std::round(static_cast<double>(k) * step)));
                     }
                     indices.push_back(nPts - 1);
@@ -503,28 +587,73 @@ void TelemetryWorker::graphPrepLoop() {
                 if (snap.hasVram) copyDecimated(snap.vramUsedMbHistory, g->vramUsedMbPts);
                 if (snap.hasGpuBusy) copyDecimated(snap.gpuBusyHistory, g->gpuBusyPts);
 
-                auto buildNorm = [&](const std::vector<float>& ys, float yMin, float yMax,
-                                     std::vector<NormalizedGraphPoint>& outNorm) {
-                    if (ys.size() != g->timePts.size() || ys.size() < 2) return;
-                    outNorm.reserve(ys.size());
+                // Peak-and-trough preserving bucket envelope for crisp oscilloscope traces
+                auto buildNormEnvelope = [&](const TelemetryBuffer& yBuf, float yMin, float yMax,
+                                             std::vector<NormalizedGraphPoint>& outNorm) {
+                    if (yBuf.size() != nPts || nPts < 2 || !tData) return;
+                    const float* ys = yBuf.data();
                     const float denom = std::max(0.001f, yMax - yMin);
-                    for (size_t i = 0; i < ys.size(); ++i) {
-                        float tx = static_cast<float>((static_cast<double>(g->timePts[i]) - g->tMin) / g->tSpan);
-                        float ty = std::clamp((ys[i] - yMin) / denom, 0.0f, 1.0f);
-                        outNorm.push_back(NormalizedGraphPoint{tx, ty});
+                    auto emitPt = [&](size_t idx) {
+                        float tx = static_cast<float>((static_cast<double>(tData[idx]) - g->tMin) / g->tSpan);
+                        float ty = std::clamp((ys[idx] - yMin) / denom, 0.0f, 1.0f);
+                        outNorm.push_back(NormalizedGraphPoint{std::clamp(tx, 0.0f, 1.0f), ty});
+                    };
+
+                    if (nPts <= kMaxScopePoints) {
+                        outNorm.reserve(nPts);
+                        for (size_t i = 0; i < nPts; ++i) emitPt(i);
+                        return;
+                    }
+
+                    const size_t bucketCount = kMaxScopePoints / 2;
+                    outNorm.reserve(kMaxScopePoints);
+                    size_t lastEmitted = nPts;
+                    for (size_t b = 0; b < bucketCount; ++b) {
+                        const size_t bStart = (b * nPts) / bucketCount;
+                        const size_t bEnd = std::min(nPts, ((b + 1) * nPts) / bucketCount);
+                        if (bStart >= bEnd) continue;
+                        size_t minIdx = bStart;
+                        size_t maxIdx = bStart;
+                        for (size_t i = bStart + 1; i < bEnd; ++i) {
+                            if (ys[i] < ys[minIdx]) minIdx = i;
+                            if (ys[i] > ys[maxIdx]) maxIdx = i;
+                        }
+                        if (b == 0 && minIdx != 0 && maxIdx != 0) {
+                            emitPt(0);
+                            lastEmitted = 0;
+                        }
+                        if (minIdx == maxIdx) {
+                            if (minIdx != lastEmitted) {
+                                emitPt(minIdx);
+                                lastEmitted = minIdx;
+                            }
+                        } else if (minIdx < maxIdx) {
+                            if (minIdx != lastEmitted) emitPt(minIdx);
+                            emitPt(maxIdx);
+                            lastEmitted = maxIdx;
+                        } else {
+                            if (maxIdx != lastEmitted) emitPt(maxIdx);
+                            emitPt(minIdx);
+                            lastEmitted = minIdx;
+                        }
+                    }
+                    if (lastEmitted != nPts - 1) {
+                        emitPt(nPts - 1);
                     }
                 };
 
-                buildNorm(g->sclkPts, 0.0f, g->sclkCeiling, g->sclkNorm);
-                buildNorm(g->powerPts, 0.0f, g->pwrCeiling, g->pwrNorm);
-                buildNorm(g->gpuBusyPts, 0.0f, 105.0f, g->busyNorm);
+                if (snap.hasSclk) buildNormEnvelope(snap.sclkHistory, 0.0f, g->sclkCeiling, g->sclkNorm);
+                if (snap.hasPower) buildNormEnvelope(snap.powerHistory, 0.0f, g->pwrCeiling, g->pwrNorm);
+                if (snap.hasGpuBusy) buildNormEnvelope(snap.gpuBusyHistory, 0.0f, 100.0f, g->busyNorm);
                 if (snap.hasTempJct) {
-                    buildNorm(g->tempJctPts, 20.0f, 105.0f, g->tempNorm);
+                    buildNormEnvelope(snap.tempJctHistory, g->tempMinScale, g->tempMaxScale, g->tempNorm);
                 } else if (snap.hasTempEdge) {
-                    buildNorm(g->tempEdgePts, 20.0f, 105.0f, g->tempNorm);
+                    buildNormEnvelope(snap.tempEdgeHistory, g->tempMinScale, g->tempMaxScale, g->tempNorm);
                 }
-                const float maxVramMb = std::max(1024.0f, static_cast<float>(g->vramTotGb * 1024.0));
-                buildNorm(g->vramUsedMbPts, 0.0f, maxVramMb, g->vramNorm);
+                if (snap.hasVram) {
+                    const float maxVramMb = std::max(1024.0f, static_cast<float>(g->vramTotGb * 1024.0));
+                    buildNormEnvelope(snap.vramUsedMbHistory, 0.0f, maxVramMb, g->vramNorm);
+                }
             }
 
             built.push_back(std::move(g));

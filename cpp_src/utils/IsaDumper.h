@@ -1,6 +1,8 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -80,6 +82,13 @@ struct IsaInspectionResult {
   std::vector<IsaArtifactReport> artifacts;
 };
 
+struct IsaCacheContext {
+  uint32_t vendorId = 0;
+  uint32_t deviceId = 0;
+  std::string driverVersion;
+  std::string driverInfo;
+};
+
 class IsaDumper {
 public:
   // Extracts shader/kernel hardware ISA and register statistics.
@@ -89,4 +98,22 @@ public:
 
   // Structured in-memory ISA inspection for IDE/GUI hardware inspectors without stdout spam.
   static IsaInspectionResult inspect(const IsaDumperOptions &opts);
+
+  // Disk-backed ISA cache keyed and strictly validated by GPU identity, driver version/info,
+  // target/config/backend, and underlying shader/kernel artifact file sizes & modification times.
+  static bool tryLoadCached(const IsaDumperOptions &opts,
+                            const IsaCacheContext &ctx,
+                            IsaInspectionResult &outResult);
+
+  static bool saveCached(const IsaDumperOptions &opts,
+                         const IsaCacheContext &ctx,
+                         const IsaInspectionResult &result);
+
+  // Interruptible batch warmup reusing a single Vulkan inspector session across items.
+  // Checks cancelFlag before each item and invokes onItemReady as each result finishes.
+  static void warmCacheBatch(
+      const std::vector<IsaDumperOptions> &items,
+      const IsaCacheContext &ctx,
+      const std::atomic<bool> *cancelFlag,
+      const std::function<void(const IsaDumperOptions &, IsaInspectionResult &&)> &onItemReady);
 };

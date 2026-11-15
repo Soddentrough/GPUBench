@@ -491,24 +491,22 @@ std::string RaySchedulingBench::GetConfigName(uint32_t config_idx) const {
   case 24:
     return "Path Tracing (16 SPP) (DGC)";
   case 25:
-    return "Path Tracing (" + std::to_string(samplesPerPixel) + " SPP) (Dynamic Load Balancing)";
-  case 26:
     return "Stage: Queue Compaction - Single-Pass Unified Stream";
-  case 27:
+  case 26:
     return "Stage: Traversal Divergence - Alpha Cutout Geometry";
-  case 28:
+  case 27:
     return "Stage: Queue Compaction - Queue Compaction Throughput";
-  case 29:
+  case 28:
     return "Primary Rays (RTP)";
-  case 30:
+  case 29:
     return "Primary Rays (RTP + SER)";
-  case 31:
+  case 30:
     return "Stage: Multi-Light Evaluation - Single Light (Megakernel)";
-  case 32:
+  case 31:
     return "Stage: Multi-Light Evaluation - Single Light (DGC)";
-  case 33:
+  case 32:
     return "Stage: Multi-Light Evaluation - 128 Lights (Megakernel)";
-  case 34:
+  case 33:
     return "Stage: Multi-Light Evaluation - 128 Lights (DGC Light Binning)";
   default:
     return "Unknown";
@@ -519,8 +517,8 @@ int32_t RaySchedulingBench::GetBaselineConfigIndex(uint32_t config_idx) const {
   switch (config_idx) {
   // Scene Ray Tracing (PBR): baseline is 17 (Primary Rays Compute Megakernel)
   case 18: // Primary Rays (Wavefront - DGC)
-  case 29: // Primary Rays (RTP)
-  case 30: // Primary Rays (RTP + SER)
+  case 28: // Primary Rays (RTP)
+  case 29: // Primary Rays (RTP + SER)
     return 17;
 
   // Total Scene Render: baseline is 9 (Scene Render: Full Frame Megakernel)
@@ -542,7 +540,6 @@ int32_t RaySchedulingBench::GetBaselineConfigIndex(uint32_t config_idx) const {
   // Scene Path Tracing (Multi-Bounce): baseline is 3 (Megakernel)
   case 4:  // Path Tracing (RTP + SER)
   case 5:  // Path Tracing (DGC)
-  case 25: // Path Tracing (Dynamic Load Balancing / Persistent Threads)
     return 3;
 
   // Scene Path Tracing (16 SPP): baseline is 23 (Megakernel)
@@ -555,21 +552,21 @@ int32_t RaySchedulingBench::GetBaselineConfigIndex(uint32_t config_idx) const {
   case 22: // Multi-Light (3 Lights, DGC)
     return 19;
 
-  // Multi-Light Evaluation: Single Light baseline 31, 128 Lights baseline 33
-  case 32:
-    return 31;
-  case 34:
-    return 33;
+  // Multi-Light Evaluation: Single Light baseline 30, 128 Lights baseline 32
+  case 31:
+    return 30;
+  case 33:
+    return 32;
 
   // Incoherent Ray Tracing: baseline is 6 (Megakernel)
   case 7: // Incoherent Diffuse GI (RTP + SER)
   case 8: // Incoherent Diffuse GI (DGC)
     return 6;
 
-  // Wavefront Stream Compaction: baseline is 26 (Single-Pass Unified Stream, 128B expanded hit record)
+  // Wavefront Stream Compaction: baseline is 25 (Single-Pass Unified Stream, 128B expanded hit record)
   case 13: // Wave Ballot Stream Sort (16B material bins)
-  case 28: // Queue Compaction Throughput (32B packed record)
-    return 26;
+  case 27: // Queue Compaction Throughput (32B packed record)
+    return 25;
 
   // Configs with no work-equivalent baseline (or that are baselines themselves):
   default:
@@ -578,15 +575,15 @@ int32_t RaySchedulingBench::GetBaselineConfigIndex(uint32_t config_idx) const {
 }
 
 const char *RaySchedulingBench::GetSubCategory(uint32_t config_idx) const {
-  if (config_idx == 17 || config_idx == 18 || config_idx == 29 || config_idx == 30)
+  if (config_idx == 17 || config_idx == 18 || config_idx == 28 || config_idx == 29)
     return "Scene Ray Tracing (PBR)";
   if (config_idx >= 19 && config_idx <= 22)
     return "Directional Shadows";
-  if (config_idx >= 31 && config_idx <= 34)
+  if (config_idx >= 30 && config_idx <= 33)
     return "Multi-Light Evaluation";
   if (config_idx < 3)
     return "Material Shading";
-  if ((config_idx >= 3 && config_idx <= 5) || config_idx == 25)
+  if (config_idx >= 3 && config_idx <= 5)
     return "Scene Path Tracing (Multi-Bounce)";
   if (config_idx == 23 || config_idx == 24)
     return "Scene Path Tracing (16 SPP)";
@@ -596,33 +593,33 @@ const char *RaySchedulingBench::GetSubCategory(uint32_t config_idx) const {
     return "Total Scene Render";
   if (config_idx == 12 || config_idx == 14 || config_idx == 15 || config_idx == 16)
     return "Traversal Ordering & Coherence";
-  if (config_idx == 13 || config_idx == 26 || config_idx == 28)
+  if (config_idx == 13 || config_idx == 25 || config_idx == 27)
     return "Wavefront Stream Compaction";
-  if (config_idx == 27)
+  if (config_idx == 26)
     return "Alpha Cutout Divergence";
   return "Pipeline Breakdown";
 }
 
 const char *RaySchedulingBench::GetDescription(uint32_t config_idx) const {
-  if (config_idx == 17 || config_idx == 18 || config_idx == 29 || config_idx == 30)
+  if (config_idx == 17 || config_idx == 18 || config_idx == 28 || config_idx == 29)
     return "Primary ray cast and G-buffer normal evaluation comparing Compute Megakernel, Ray Tracing Pipeline (RTP), Hardware SER, and Wavefront DGC.";
   if (config_idx >= 19 && config_idx <= 22)
     return "Ray-traced directional sun and multi-light shadow visibility comparing Megakernel, RTP+SER, and directional-binned DGC.";
-  if (config_idx >= 31 && config_idx <= 34)
+  if (config_idx >= 30 && config_idx <= 33)
     return "Direct illumination across 1 vs. 128 stochastic lights comparing Megakernel evaluation against spatial light-binned DGC.";
   if (config_idx < 3)
     return "Divergent 8-archetype PBR BSDF shading stage comparing monolithic Megakernel branching against RTP+SER and specialized DGC micro-kernels.";
-  if ((config_idx >= 3 && config_idx <= 5) || config_idx == 25 || config_idx == 23 || config_idx == 24)
-    return "Multi-bounce Monte Carlo path tracing comparing Megakernel, RTP+SER, Persistent Work-Stealing threads, and octant-sorted Wavefront DGC.";
+  if ((config_idx >= 3 && config_idx <= 5) || config_idx == 23 || config_idx == 24)
+    return "Multi-bounce Monte Carlo path tracing comparing Megakernel, RTP+SER, and octant-sorted Wavefront DGC.";
   if (config_idx >= 6 && config_idx <= 8)
     return "Cosine-weighted hemisphere secondary bounce traversal measuring incoherent BVH cache pressure across Megakernel, SER, and DGC.";
   if (config_idx >= 9 && config_idx <= 11)
     return "End-to-end hybrid ray-traced beauty frame (Primary + PBR + Shadows + RTAO + Indirect GI) across Megakernel, RTP+SER, and Wavefront DGC.";
   if (config_idx == 12 || config_idx == 14 || config_idx == 15 || config_idx == 16)
     return "Screen-space ray launch ordering sensitivity (1D scanline vs. 2D tiles vs. Morton Z-order) on L1/L2 BVH cache locality.";
-  if (config_idx == 13 || config_idx == 26 || config_idx == 28)
+  if (config_idx == 13 || config_idx == 25 || config_idx == 27)
     return "Subgroup-ballot wavefront hit-record stream compaction throughput across 128B expanded, 32B packed, and 16B material-binned payloads.";
-  if (config_idx == 27)
+  if (config_idx == 26)
     return "Alpha-cutout foliage traversal divergence measuring mid-traversal texture alpha evaluation overhead.";
   return "Hardware ray tracing execution paradigm and scheduling microbenchmark.";
 }
@@ -638,8 +635,8 @@ int RaySchedulingBench::GetSortWeight(uint32_t config_idx) const {
   if (config_idx == 14) return 609; // Traversal Ordering - 2D Screen Tiled (8x4)
   if (config_idx == 15) return 610; // Traversal Ordering - 2D Morton (8x4)
   if (config_idx == 16) return 611; // Traversal Ordering - 2D Morton (4x8)
-  if (config_idx == 26) return 612; // Wavefront Stream Compaction - Single-Pass (128B Baseline)
-  if (config_idx == 28) return 613; // Wavefront Stream Compaction - Throughput (32B Packed)
+  if (config_idx == 25) return 612; // Wavefront Stream Compaction - Single-Pass (128B Baseline)
+  if (config_idx == 27) return 613; // Wavefront Stream Compaction - Throughput (32B Packed)
   if (config_idx == 13) return 614; // Wavefront Stream Compaction - Wave Ballot (16B Material Bins)
 
   // Group multi-scene rendering benchmarks by Scene first, then by Stage within each scene
@@ -650,19 +647,18 @@ int RaySchedulingBench::GetSortWeight(uint32_t config_idx) const {
   else if (sceneType == SceneType::AAAOutdoorForest) sceneBase = 740;
 
   if (config_idx == 17) return sceneBase + 0;  // Scene RT (PBR) - Compute Megakernel (Baseline)
-  if (config_idx == 29) return sceneBase + 1;  // Scene RT (PBR) - Dedicated RTP
-  if (config_idx == 30) return sceneBase + 2;  // Scene RT (PBR) - RTP + Hardware SER
+  if (config_idx == 28) return sceneBase + 1;  // Scene RT (PBR) - Dedicated RTP
+  if (config_idx == 29) return sceneBase + 2;  // Scene RT (PBR) - RTP + Hardware SER
   if (config_idx == 18) return sceneBase + 3;  // Scene RT (PBR) - Wavefront DGC
   if (config_idx >= 3 && config_idx <= 5) return sceneBase + 5 + static_cast<int>(config_idx - 3); // Path Tracing (1 SPP): +5..+7
-  if (config_idx == 25) return sceneBase + 8;  // Path Tracing (Dynamic Load Balancing)
   if (config_idx == 23) return sceneBase + 9;  // Path Tracing 16 SPP (Megakernel)
   if (config_idx == 24) return sceneBase + 10; // Path Tracing 16 SPP (DGC)
   if (config_idx >= 9 && config_idx <= 11) return sceneBase + 12 + static_cast<int>(config_idx - 9); // Total Scene Render: +12..+14
   if (config_idx >= 19 && config_idx <= 22) return sceneBase + 15 + static_cast<int>(config_idx - 19); // Directional Shadows: +15..+18
-  if (config_idx >= 31 && config_idx <= 34) return sceneBase + 19 + static_cast<int>(config_idx - 31); // Multi-Light Evaluation: +19..+22
+  if (config_idx >= 30 && config_idx <= 33) return sceneBase + 19 + static_cast<int>(config_idx - 30); // Multi-Light Evaluation: +19..+22
   if (config_idx < 3) return sceneBase + 23 + static_cast<int>(config_idx); // Material Shading: +23..+25
   if (config_idx >= 6 && config_idx <= 8) return sceneBase + 26 + static_cast<int>(config_idx - 6); // Incoherent Ray Tracing: +26..+28
-  if (config_idx == 27) return sceneBase + 29; // Alpha Cutout Divergence: +29
+  if (config_idx == 26) return sceneBase + 29; // Alpha Cutout Divergence: +29
   return sceneBase + 30 + static_cast<int>(config_idx);
 }
 
@@ -693,7 +689,7 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
   isDGCAvailable = false;
   isDGCExecutionSetAvailable = false;
 
-  for (int c = 0; c < 35; ++c) {
+  for (int c = 0; c < 34; ++c) {
     lastCompletedPasses[c] = 1;
     unsupportedConfig[c] = false;
     unsupportedReason[c].clear();
@@ -1051,18 +1047,6 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
   vContext->setKernelArg(kernelMultiLight, 7, texHeaderBuffer);
   vContext->setKernelArg(kernelMultiLight, 8, texPixelBuffer);
 
-  kernelPersistent = vContext->createKernel(
-      (kdir / "vulkan" / "rt_scheduling_persistent.comp").string(), "main", 9);
-  vContext->setKernelAS(kernelPersistent, 0, (AccelerationStructure)sceneTlas);
-  vContext->setKernelArg(kernelPersistent, 1, resultBuffer);
-  vContext->setKernelArg(kernelPersistent, 2, workListBuffer);
-  vContext->setKernelArg(kernelPersistent, 3, fbTraditional);
-  vContext->setKernelArg(kernelPersistent, 4, vertexBuffer);
-  vContext->setKernelArg(kernelPersistent, 5, materialBuffer);
-  vContext->setKernelArg(kernelPersistent, 6, triangleMaterialBuffer);
-  vContext->setKernelArg(kernelPersistent, 7, texHeaderBuffer);
-  vContext->setKernelArg(kernelPersistent, 8, texPixelBuffer);
-
   // Load RTP Baseline Pipeline
   try {
     kernelRTP = vContext->createRTPipeline(
@@ -1113,14 +1097,14 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
     }
   }
 
-  for (int i = 0; i < 35; ++i) {
+  for (int i = 0; i < 34; ++i) {
     unsupportedConfig[i] = false;
     unsupportedReason[i] = "";
   }
 
   if (!kernelRTP) {
-    unsupportedConfig[29] = true;
-    unsupportedReason[29] = "Vulkan Ray Tracing Pipeline creation failed";
+    unsupportedConfig[28] = true;
+    unsupportedReason[28] = "Vulkan Ray Tracing Pipeline creation failed";
   }
 
   if (!kernelRTPSER) {
@@ -1139,8 +1123,8 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
     unsupportedReason[10] = serReason;
     unsupportedConfig[20] = true;
     unsupportedReason[20] = serReason;
-    unsupportedConfig[30] = true;
-    unsupportedReason[30] = serReason;
+    unsupportedConfig[29] = true;
+    unsupportedReason[29] = serReason;
   }
 
   uint32_t perQueue = rayCount / 8;
@@ -1488,7 +1472,7 @@ void RaySchedulingBench::Setup(IComputeContext &context_ref,
   }
 
   if (!isDGCAvailable) {
-    const std::vector<uint32_t> dgcConfigs = {2, 5, 8, 11, 18, 21, 22, 24, 32, 34};
+    const std::vector<uint32_t> dgcConfigs = {2, 5, 8, 11, 18, 21, 22, 24, 31, 33};
     for (uint32_t c : dgcConfigs) {
       unsupportedConfig[c] = true;
       unsupportedReason[c] = "VK_EXT_device_generated_commands extension unsupported by device/driver";
@@ -1870,59 +1854,28 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     lastCompletedPasses[24] = passes;
     break;
   }
-  case 25: { // Full Scene Path Tracing - Persistent Threads (Work Stealing)
-    struct PushConstantsPersistent {
-      uint32_t rayCount;
-      uint32_t mode;
-      uint32_t bounces;
-      uint32_t seed;
-      uint32_t dumpRenders;
-      uint32_t width;
-      uint32_t height;
-      uint32_t spatialPattern;
-      uint32_t sceneType;
-      uint32_t isGltf;
-      uint32_t spp;
-      uint32_t sampleIdx{0};
-    };
-    uint32_t passes = (samplesPerPixel > 1) ? samplesPerPixel : 1u;
-    const uint32_t hwCUs = context->getCurrentDeviceInfo().computeUnits;
-    const uint32_t persistentGroups =
-        (hwCUs > 0) ? std::clamp(hwCUs * 6u, 64u, 2048u) : 384u;
-    bool ownBatch = !vContext->isBatching();
-    if (ownBatch) vContext->beginBatch(passes * 2u, true);
-    for (uint32_t s = 0; s < passes; ++s) {
-      // Reset workQueue.currentWorkTileIndex (counter 0 in workListBuffer) on GPU without synchronous host staging stall
-      vContext->dispatch(kernelReset, 1, 1, 1, 32, 1, 1);
-      PushConstantsPersistent pc{rayCount, 1, 1 + bounceDepth, seed + s * 7919u, dumpFlag, renderWidth, renderHeight, 2, sceneTypeVal, isGltfVal, passes, s};
-      vContext->setKernelArg(kernelPersistent, 9, sizeof(pc), &pc);
-      vContext->dispatch(kernelPersistent, persistentGroups, 1, 1, 32, 1, 1);
-    }
-    if (ownBatch) vContext->endBatch();
-    break;
-  }
-  case 26: { // Queue Compaction - Single-Pass Unified Stream (128B Expanded Hit Record)
+  case 25: { // Queue Compaction - Single-Pass Unified Stream (128B Expanded Hit Record)
     vContext->dispatch(kernelReset, 1, 1, 1, 32, 1, 1);
     PushConstantsClassify pcClassify{rayCount, 6, 1, seed, 0, renderWidth, renderHeight, materialCapacity, 2, sceneTypeVal, isGltfVal, 1u};
     vContext->setKernelArg(kernelClassify, 10, sizeof(pcClassify), &pcClassify);
     vContext->dispatch(kernelClassify, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     break;
   }
-  case 27: { // Scene Ray Tracing - Alpha-Mask Cutout Traversal Divergence
+  case 26: { // Scene Ray Tracing - Alpha-Mask Cutout Traversal Divergence
     vContext->dispatch(kernelReset, 1, 1, 1, 32, 1, 1);
     PushConstantsClassify pcClassify{rayCount, 7, 0, seed, dumpFlag, renderWidth, renderHeight, materialCapacity, 2, sceneTypeVal, isGltfVal, 1u};
     vContext->setKernelArg(kernelClassify, 10, sizeof(pcClassify), &pcClassify);
     vContext->dispatch(kernelClassify, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     break;
   }
-  case 28: { // Queue Compaction - Queue Compaction Throughput (32B Packed Hybrid Record)
+  case 27: { // Queue Compaction - Queue Compaction Throughput (32B Packed Hybrid Record)
     vContext->dispatch(kernelReset, 1, 1, 1, 32, 1, 1);
     PushConstantsClassify pcClassify{rayCount, 6, 0, seed, 0, renderWidth, renderHeight, materialCapacity, 2, sceneTypeVal, isGltfVal, 1u};
     vContext->setKernelArg(kernelClassify, 10, sizeof(pcClassify), &pcClassify);
     vContext->dispatch(kernelClassify, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     break;
   }
-  case 29: { // Primary Rays - Dedicated Ray Tracing Pipeline (RTP)
+  case 28: { // Primary Rays - Dedicated Ray Tracing Pipeline (RTP)
     if (kernelRTP) {
       PushConstantsTraditional pc{rayCount, 7, 1, seed, dumpFlag, renderWidth, renderHeight, 2, sceneTypeVal, isGltfVal, 1u};
       vContext->setKernelArg(kernelRTP, 8, sizeof(pc), &pc);
@@ -1930,7 +1883,7 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     }
     break;
   }
-  case 30: { // Primary Rays - RTP + Hardware SER
+  case 29: { // Primary Rays - RTP + Hardware SER
     if (kernelRTPSER) {
       PushConstantsTraditional pc{rayCount, 7, 1, seed, dumpFlag, renderWidth, renderHeight, 2, sceneTypeVal, isGltfVal, 1u};
       vContext->setKernelArg(kernelRTPSER, 8, sizeof(pc), &pc);
@@ -1938,13 +1891,13 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
     }
     break;
   }
-  case 31: { // Stage: Multi-Light Evaluation - Single Light (1 Light, Megakernel)
+  case 30: { // Stage: Multi-Light Evaluation - Single Light (1 Light, Megakernel)
     PushConstantsTraditional pc{rayCount, 11, 0, seed, dumpFlag, renderWidth, renderHeight, 0, sceneTypeVal, isGltfVal, 1u};
     vContext->setKernelArg(kernelTraditional, 8, sizeof(pc), &pc);
     vContext->dispatch(kernelTraditional, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     break;
   }
-  case 32: { // Stage: Multi-Light Evaluation - Single Light (1 Light, DGC)
+  case 31: { // Stage: Multi-Light Evaluation - Single Light (1 Light, DGC)
     for (uint32_t b = 0; b < multiLightBatchesSingle.size(); ++b) {
       struct {
         uint32_t queueId;
@@ -1971,13 +1924,13 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
         isDGCAvailable ? &dgcInfoStandard : nullptr, isDGCAvailable ? 5u : 0u);
     break;
   }
-  case 33: { // Stage: Multi-Light Evaluation - 128 Lights (128 Lights, Megakernel)
+  case 32: { // Stage: Multi-Light Evaluation - 128 Lights (128 Lights, Megakernel)
     PushConstantsTraditional pc{rayCount, 11, 0, seed, dumpFlag, renderWidth, renderHeight, 0, sceneTypeVal, isGltfVal, 128u};
     vContext->setKernelArg(kernelTraditional, 8, sizeof(pc), &pc);
     vContext->dispatch(kernelTraditional, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
     break;
   }
-  case 34: { // Stage: Multi-Light Evaluation - 128 Lights (128 Lights, DGC Light Binning)
+  case 33: { // Stage: Multi-Light Evaluation - 128 Lights (128 Lights, DGC Light Binning)
     for (uint32_t b = 0; b < multiLightBatches128.size(); ++b) {
       struct {
         uint32_t queueId;
@@ -2473,9 +2426,9 @@ void RaySchedulingBench::performVisualVerification(bool isInteractive) {
   }
 
   // Render and dump 128 Lights Multi-Light Evaluation
-  Run(33);
+  Run(32);
   context->waitIdle();
-  Run(34);
+  Run(33);
   context->waitIdle();
   if (directGpuPreview) {
     vContext->captureBufferToSharedPreviewImage(
@@ -2503,8 +2456,8 @@ void RaySchedulingBench::performVisualVerification(bool isInteractive) {
     gpubench::ImageExport::writePNG(rendersDir + "/render_" + tag + "_multilight_128_difference.png", width, height, ldrDiff);
   }
 
-  // Render and dump Alpha Cutout Traversal Divergence (Config 27)
-  Run(27);
+  // Render and dump Alpha Cutout Traversal Divergence (Config 26)
+  Run(26);
   context->waitIdle();
   if (directGpuPreview) {
     vContext->captureBufferToSharedPreviewImage(
@@ -2949,10 +2902,6 @@ void RaySchedulingBench::Teardown() {
     context->releaseKernel(kernelMultiLight);
     kernelMultiLight = nullptr;
   }
-  if (kernelPersistent) {
-    context->releaseKernel(kernelPersistent);
-    kernelPersistent = nullptr;
-  }
   if (kernelRTP) {
     context->releaseKernel(kernelRTP);
     kernelRTP = nullptr;
@@ -3075,10 +3024,10 @@ BenchmarkResult RaySchedulingBench::GetResult(uint32_t config_idx) const {
   if (config_idx == 23 || config_idx == 24) {
     uint32_t passes = lastCompletedPasses[config_idx] > 0 ? lastCompletedPasses[config_idx] : 16u;
     r.operations = static_cast<uint64_t>(rayCount) * passes;
-  } else if ((config_idx >= 3 && config_idx <= 5) || config_idx == 25) {
+  } else if (config_idx >= 3 && config_idx <= 5) {
     r.operations = static_cast<uint64_t>(rayCount) * ((samplesPerPixel > 1) ? samplesPerPixel : 1u);
   } else {
-    // Stage compaction benchmarks (configs 13, 26, 28) and primary rays report ray/record operations
+    // Stage compaction benchmarks (configs 13, 25, 27) and primary rays report ray/record operations
     r.operations = static_cast<uint64_t>(rayCount);
   }
   r.elapsedTime = 0.0;

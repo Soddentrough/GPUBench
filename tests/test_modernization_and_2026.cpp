@@ -25,6 +25,7 @@
 #include "utils/IsaDumper.h"
 #include "utils/KernelPath.h"
 
+#include <atomic>
 #include <cmath>
 #include <iostream>
 #include <limits>
@@ -520,4 +521,98 @@ TEST_CASE(ModernizationAnd2026, IsaDumper_HonestReportingAndHotLoopAccuracy) {
       ASSERT_TRUE(!exec.fullIsaLines.empty() || !exec.unavailableReason.empty());
     }
   }
+}
+
+TEST_CASE(Modernization2026, IsaDiskCacheAndWarmupValidation) {
+  auto ctx = createVulkanTestContext();
+  if (!ctx) {
+    return;
+  }
+  const DeviceInfo &info = ctx->getCurrentDeviceInfo();
+
+  IsaCacheContext cacheCtx;
+  cacheCtx.vendorId = info.vendorID != 0 ? info.vendorID : 0x1002u;
+  cacheCtx.deviceId = info.deviceID != 0 ? info.deviceID : 0x744Cu;
+  cacheCtx.driverVersion = !info.driverVersionStr.empty()
+                               ? info.driverVersionStr
+                               : std::to_string(info.driverVersion);
+  cacheCtx.driverInfo = "GPUBench-TestDriver";
+
+  IsaDumperOptions opts;
+  opts.targets = {"fp64"};
+  opts.backends = {"vulkan"};
+  opts.configs = {0};
+  opts.deviceIndex = 0;
+  opts.fullIsa = true;
+
+  const IsaInspectionResult inspected = IsaDumper::inspect(opts);
+  ASSERT_TRUE(inspected.ok);
+  ASSERT_FALSE(inspected.artifacts.empty());
+
+  ASSERT_TRUE(IsaDumper::saveCached(opts, cacheCtx, inspected));
+
+  IsaInspectionResult loaded;
+  ASSERT_TRUE(IsaDumper::tryLoadCached(opts, cacheCtx, loaded));
+  ASSERT_TRUE(loaded.ok);
+  ASSERT_EQ(loaded.artifacts.size(), inspected.artifacts.size());
+  ASSERT_EQ(loaded.artifacts[0].benchName, inspected.artifacts[0].benchName);
+  ASSERT_EQ(loaded.artifacts[0].executables.size(), inspected.artifacts[0].executables.size());
+  if (!loaded.artifacts[0].executables.empty()) {
+    ASSERT_EQ(loaded.artifacts[0].executables[0].vgprCount,
+              inspected.artifacts[0].executables[0].vgprCount);
+    ASSERT_EQ(loaded.artifacts[0].executables[0].fullIsaLines.size(),
+              inspected.artifacts[0].executables[0].fullIsaLines.size());
+  }
+
+  // Strict invalidation on driver update / identity mismatch / backend change
+  {
+    IsaCacheContext staleDriver = cacheCtx;
+    staleDriver.driverVersion = cacheCtx.driverVersion + "-updated";
+    IsaInspectionResult miss;
+    ASSERT_FALSE(IsaDumper::tryLoadCached(opts, staleDriver, miss));
+  }
+  {
+    IsaCacheContext staleInfo = cacheCtx;
+    staleInfo.driverInfo = cacheCtx.driverInfo + "-new";
+    IsaInspectionResult miss;
+    ASSERT_FALSE(IsaDumper::tryLoadCached(opts, staleInfo, miss));
+  }
+  {
+    IsaCacheContext otherGpu = cacheCtx;
+    otherGpu.deviceId = cacheCtx.deviceId ^ 0x1u;
+    IsaInspectionResult miss;
+    ASSERT_FALSE(IsaDumper::tryLoadCached(opts, otherGpu, miss));
+  }
+  {
+    IsaDumperOptions rocmOpts = opts;
+    rocmOpts.backends = {"rocm"};
+    IsaInspectionResult miss;
+    ASSERT_FALSE(IsaDumper::tryLoadCached(rocmOpts, cacheCtx, miss));
+  }
+
+  // warmCacheBatch: multi-item shared session + cancel token test
+  std::vector<IsaDumperOptions> batch(3, opts);
+  batch[1].targets = {"fp32"};
+  batch[2].targets = {"membw"};
+  batch[2].configs = {0};
+
+  std::atomic<bool> cancel{false};
+  size_t readyCount = 0;
+  IsaDumper::warmCacheBatch(batch, cacheCtx, &cancel,
+                            [&](const IsaDumperOptions &, IsaInspectionResult &&res) {
+                              ASSERT_TRUE(res.ok);
+                              ASSERT_FALSE(res.artifacts.empty());
+                              ++readyCount;
+                            });
+  ASSERT_EQ(readyCount, size_t{3});
+
+  // Cancel after first item
+  cancel.store(false);
+  size_t canceledCount = 0;
+  IsaDumper::warmCacheBatch(batch, cacheCtx, &cancel,
+                            [&](const IsaDumperOptions &, IsaInspectionResult &&) {
+                              ++canceledCount;
+                              cancel.store(true);
+                            });
+  ASSERT_EQ(canceledCount, size_t{1});
 }

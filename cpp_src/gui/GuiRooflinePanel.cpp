@@ -24,9 +24,10 @@ enum ChartDomain : int {
     DOMAIN_MEMORY = 1,
     DOMAIN_RAY = 2,
     DOMAIN_BVH = 3,
-    DOMAIN_SCHED_GFX = 4,
-    DOMAIN_LATENCY = 5,
-    DOMAIN_COUNT = 6
+    DOMAIN_GFX = 4,
+    DOMAIN_SCHED_GFX = 5,
+    DOMAIN_LATENCY = 6,
+    DOMAIN_COUNT = 7
 };
 
 struct ChartDeviceGroup {
@@ -102,14 +103,27 @@ int classifyChartDomain(const ResultData& r) {
     if (r.metric.find("GB/s") != std::string::npos || r.metric.find("TB/s") != std::string::npos) {
         return DOMAIN_MEMORY;
     }
-    if (r.metric == "MRays/s" || r.metric == "MHits/s") {
+    if (r.metric == "MRays/s" || r.metric == "MHits/s" || r.metric == "GIS/s") {
         return DOMAIN_RAY;
     }
-    if (r.metric == "GIS/s" || r.metric == "MBVH/s" ||
-        r.metric == "MTris/s" || r.metric == "MInst/s") {
+    if (r.metric == "MBVH/s" || r.metric == "MTris/s" || r.metric == "MInst/s") {
         return DOMAIN_BVH;
     }
+    if (r.metric.find("Pixels") != std::string::npos) {
+        return DOMAIN_GFX;
+    }
     return DOMAIN_SCHED_GFX;
+}
+
+double metricPrefixDivisor(const std::string& metric, const char** prefixTag) {
+    if (!metric.empty()) {
+        if (metric[0] == 'T') { *prefixTag = "T"; return 1e12; }
+        if (metric[0] == 'G') { *prefixTag = "G"; return 1e9; }
+        if (metric[0] == 'M') { *prefixTag = "M"; return 1e6; }
+        if (metric[0] == 'K' || metric[0] == 'k') { *prefixTag = "K"; return 1e3; }
+    }
+    *prefixTag = "";
+    return 1.0;
 }
 
 const char* domainTabName(int dom) {
@@ -117,8 +131,9 @@ const char* domainTabName(int dom) {
     case DOMAIN_COMPUTE:   return "COMPUTE";
     case DOMAIN_MEMORY:    return "MEMORY BW";
     case DOMAIN_RAY:       return "RAY TRACING";
-    case DOMAIN_BVH:       return "BVH & INTERSECT";
-    case DOMAIN_SCHED_GFX: return "SCHED & GFX";
+    case DOMAIN_BVH:       return "BVH BUILD";
+    case DOMAIN_GFX:       return "RASTER / GFX";
+    case DOMAIN_SCHED_GFX: return "SCHEDULING";
     case DOMAIN_LATENCY:   return "LATENCY";
     default:               return "OTHER";
     }
@@ -128,9 +143,10 @@ const char* domainPerfAxisLabel(int dom) {
     switch (dom) {
     case DOMAIN_COMPUTE:   return "Throughput (TFLOPS / TOPS)";
     case DOMAIN_MEMORY:    return "Bandwidth (GB/s)";
-    case DOMAIN_RAY:       return "Ray Throughput (MRays/s)";
-    case DOMAIN_BVH:       return "BVH / Primitives Rate (MOp/s)";
-    case DOMAIN_SCHED_GFX: return "Throughput (MItems/s or MOp/s)";
+    case DOMAIN_RAY:       return "Ray & Intersection Rate (M/s)";
+    case DOMAIN_BVH:       return "BVH / Geometry Rate (M/s)";
+    case DOMAIN_GFX:       return "Pixel Fill Throughput (GPixels/s)";
+    case DOMAIN_SCHED_GFX: return "Dispatch / Record Rate (metric units)";
     case DOMAIN_LATENCY:   return "Latency (ns — lower is faster)";
     default:               return "Throughput";
     }
@@ -140,9 +156,10 @@ const char* domainEffAxisLabel(int dom) {
     switch (dom) {
     case DOMAIN_COMPUTE:   return "Efficiency (GFLOPS/W | GOPS/W)";
     case DOMAIN_MEMORY:    return "Efficiency (GB/s per Watt)";
-    case DOMAIN_RAY:       return "Efficiency (MRays/s per Watt)";
+    case DOMAIN_RAY:       return "Efficiency (M/s per Watt)";
     case DOMAIN_BVH:       return "Efficiency (MOp/s per Watt)";
-    case DOMAIN_SCHED_GFX: return "Efficiency (MOp/s per Watt)";
+    case DOMAIN_GFX:       return "Efficiency (GPixels/s per Watt)";
+    case DOMAIN_SCHED_GFX: return "Efficiency (Rate per Watt)";
     case DOMAIN_LATENCY:   return "Board Power (Watts)";
     default:               return "Perf / Watt";
     }
@@ -265,7 +282,6 @@ void GuiApp::renderRooflinePanel() {
             }
             break;
         case DOMAIN_BVH:
-        case DOMAIN_SCHED_GFX:
             item.perfVal = opsPerSec / 1e6;
             if (watts > 0.0) {
                 item.effVal = item.perfVal / watts;
@@ -274,6 +290,28 @@ void GuiApp::renderRooflinePanel() {
                 item.effText = eb;
             }
             break;
+        case DOMAIN_GFX:
+            item.perfVal = opsPerSec / 1e9;
+            if (watts > 0.0) {
+                item.effVal = item.perfVal / watts;
+                char eb[48];
+                std::snprintf(eb, sizeof(eb), "%.2f GPix/s/W", item.effVal);
+                item.effText = eb;
+            }
+            break;
+        case DOMAIN_SCHED_GFX: {
+            const char* pfx = "";
+            const double div = metricPrefixDivisor(r.metric, &pfx);
+            item.perfVal = opsPerSec / div;
+            if (watts > 0.0) {
+                item.effVal = item.perfVal / watts;
+                char eb[48];
+                std::snprintf(eb, sizeof(eb), (item.effVal >= 100.0) ? "%.0f %s/s/W" : "%.2f %s/s/W",
+                              item.effVal, pfx);
+                item.effText = eb;
+            }
+            break;
+        }
         case DOMAIN_LATENCY:
             item.perfVal = computeLatencyNs(r);
             if (watts > 0.0) {
@@ -449,7 +487,9 @@ void GuiApp::renderRooflinePanel() {
     std::vector<std::string> leftTickStorage(static_cast<size_t>(count));
     std::vector<const char*> leftTickPtrs(static_cast<size_t>(count));
     std::vector<double> perfVals(static_cast<size_t>(count));
+    std::vector<std::string> leftBarTexts(static_cast<size_t>(count));
     std::vector<double> rightVals(static_cast<size_t>(count));
+    std::vector<std::string> rightBarTexts(static_cast<size_t>(count));
     std::vector<std::string> rightTickStorage(static_cast<size_t>(count));
     std::vector<const char*> rightTickPtrs(static_cast<size_t>(count));
     std::vector<ImU32> leftFillCols(static_cast<size_t>(count));
@@ -464,6 +504,7 @@ void GuiApp::renderRooflinePanel() {
         yPos[i] = static_cast<double>(i);
         leftTickStorage[i] = b.shortLabel;
         perfVals[i] = b.perfVal;
+        leftBarTexts[i] = b.perfText;
         if (b.perfVal > maxPerf) maxPerf = b.perfVal;
 
         if (b.isMatrix) {
@@ -476,6 +517,7 @@ void GuiApp::renderRooflinePanel() {
 
         if (hasAnyPower) {
             rightVals[i] = b.effVal;
+            rightBarTexts[i] = b.effText.empty() ? "N/A" : b.effText;
             if (b.watts > 0.0) {
                 char wtLbl[24];
                 std::snprintf(wtLbl, sizeof(wtLbl), "%.0f W", b.watts);
@@ -487,6 +529,9 @@ void GuiApp::renderRooflinePanel() {
             rightLineCols[i] = toU32(isLatencyDom ? c.warnColor : c.okColor, 1.0f);
         } else {
             rightVals[i] = b.medianMs;
+            char msBuf[48];
+            std::snprintf(msBuf, sizeof(msBuf), "%.2f ms", b.medianMs);
+            rightBarTexts[i] = msBuf;
             rightTickStorage[i] = b.shortLabel;
             rightFillCols[i] = toU32(c.violetAccent, 0.82f);
             rightLineCols[i] = toU32(c.violetAccent, 1.0f);
@@ -499,6 +544,34 @@ void GuiApp::renderRooflinePanel() {
     }
     maxPerf = std::max(maxPerf, 1e-6);
     maxRight = std::max(maxRight, 1e-6);
+
+    auto computeBarAxisMax = [&](const std::vector<double>& vals,
+                                 const std::vector<std::string>& yLabels,
+                                 const std::vector<std::string>& barTexts,
+                                 double rawMax) {
+        const float colWidth = std::max(s(220.0f), (ImGui::GetContentRegionAvail().x - s(16.0f)) * 0.5f);
+        float maxYTickPx = 0.0f;
+        for (const auto& lbl : yLabels) {
+            maxYTickPx = std::max(maxYTickPx, ImGui::CalcTextSize(lbl.c_str()).x);
+        }
+        const float plotAreaPx = std::max(s(120.0f), colWidth - maxYTickPx - s(44.0f));
+        double xMax = std::max(rawMax * 1.12, 1e-6);
+        const int n = static_cast<int>(vals.size());
+        for (int i = 0; i < n; ++i) {
+            const size_t ui = static_cast<size_t>(i);
+            if (vals[ui] <= 0.0) continue;
+            const float labelPx = ImGui::CalcTextSize(barTexts[ui].c_str()).x + s(14.0f);
+            double candidate = vals[ui] * 1.48;
+            if (plotAreaPx > labelPx + s(24.0f)) {
+                candidate = vals[ui] * (static_cast<double>(plotAreaPx) /
+                                        static_cast<double>(plotAreaPx - labelPx));
+            }
+            if (candidate > xMax) xMax = candidate;
+        }
+        return xMax;
+    };
+    const double leftAxisMax = computeBarAxisMax(perfVals, leftTickStorage, leftBarTexts, maxPerf);
+    const double rightAxisMax = computeBarAxisMax(rightVals, rightTickStorage, rightBarTexts, maxRight);
 
     const float plotH = std::max(s(175.0f), ImGui::GetContentRegionAvail().y - s(4.0f));
     const ImPlotFlags chartFlags = ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText | ImPlotFlags_NoBoxSelect;
@@ -534,7 +607,7 @@ void GuiApp::renderRooflinePanel() {
         if (ImPlot::BeginPlot(leftTitle.c_str(), ImVec2(-1.0f, plotH), chartFlags)) {
             ImPlot::SetupAxes(domainPerfAxisLabel(m_chartDomainFilter), nullptr, xAxisFlags, yAxisFlags);
             ImPlot::SetupAxisTicks(ImAxis_Y1, yPos.data(), count, leftTickPtrs.data(), false);
-            ImPlot::SetupAxesLimits(0.0, maxPerf * 1.48, -0.6, static_cast<double>(count) - 0.4, ImPlotCond_Always);
+            ImPlot::SetupAxesLimits(0.0, leftAxisMax, -0.6, static_cast<double>(count) - 0.4, ImPlotCond_Always);
 
             ImPlotSpec spec;
             spec.Flags = static_cast<ImPlotItemFlags>(ImPlotBarsFlags_Horizontal) |
@@ -571,7 +644,7 @@ void GuiApp::renderRooflinePanel() {
         if (ImPlot::BeginPlot(rightTitle, ImVec2(-1.0f, plotH), chartFlags)) {
             ImPlot::SetupAxes(rightXAxis, nullptr, xAxisFlags, yAxisFlags);
             ImPlot::SetupAxisTicks(ImAxis_Y1, yPos.data(), count, rightTickPtrs.data(), false);
-            ImPlot::SetupAxesLimits(0.0, maxRight * 1.45, -0.6, static_cast<double>(count) - 0.4, ImPlotCond_Always);
+            ImPlot::SetupAxesLimits(0.0, rightAxisMax, -0.6, static_cast<double>(count) - 0.4, ImPlotCond_Always);
 
             ImPlotSpec spec;
             spec.Flags = static_cast<ImPlotItemFlags>(ImPlotBarsFlags_Horizontal) |
@@ -583,17 +656,9 @@ void GuiApp::renderRooflinePanel() {
 
             ImPlot::PushStyleColor(ImPlotCol_InlayText, c.textPrimary);
             for (int i = 0; i < count; ++i) {
-                char buf[48];
-                if (hasAnyPower) {
-                    std::snprintf(buf, sizeof(buf), "%s",
-                                  bars[static_cast<size_t>(i)].effText.empty()
-                                      ? "N/A"
-                                      : bars[static_cast<size_t>(i)].effText.c_str());
-                } else {
-                    std::snprintf(buf, sizeof(buf), "%.2f ms", rightVals[i]);
-                }
-                const float txtW = ImGui::CalcTextSize(buf).x;
-                ImPlot::PlotText(buf, rightVals[i], yPos[i], ImVec2(txtW * 0.5f + s(6.0f), 0.0f));
+                const std::string& tip = rightBarTexts[static_cast<size_t>(i)];
+                const float txtW = ImGui::CalcTextSize(tip.c_str()).x;
+                ImPlot::PlotText(tip.c_str(), rightVals[i], yPos[i], ImVec2(txtW * 0.5f + s(6.0f), 0.0f));
             }
             ImPlot::PopStyleColor();
 

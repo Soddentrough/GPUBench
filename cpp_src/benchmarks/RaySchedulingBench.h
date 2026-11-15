@@ -80,7 +80,7 @@ public:
   int GetSortWeight(uint32_t config_idx = 0) const override;
   uint32_t GetExpectedKernelCount() const override { return 22; }
 
-  uint32_t GetNumConfigs() const override { return 35; }
+  uint32_t GetNumConfigs() const override { return 34; }
   std::vector<std::string> GetAliases() const override {
     if (sceneType == SceneType::AAAOutdoorForest) {
       return {"rayscheduling", "rtscheduling", "forest", "aaa_forest", "rayscheduling_forest", "wavefront_queues", "dgc", "scene_render", "total_scene_render", "total_frame", "primary", "primary_rays", "shadow", "shadows", "rts", "ray_shadows", "ray_shadow", "multilight", "multi_light", "lightbinning", "light_binning", "pathtracing", "path_tracing", "path", "pathtrace"};
@@ -96,7 +96,7 @@ public:
   int32_t GetBaselineConfigIndex(uint32_t config_idx) const override;
   const char *GetMetric(uint32_t config_idx = 0) const override {
     if (config_idx < 3) return "MHits/s";
-    if (config_idx == 13 || config_idx == 26 || config_idx == 28) return "MRecords/s";
+    if (config_idx == 13 || config_idx == 25 || config_idx == 27) return "MRecords/s";
     return "MRays/s";
   }
   void SetVerifyParity(bool verify) override { verifyParity = verify; }
@@ -116,12 +116,12 @@ public:
     // Algorithmic traversal ordering and queue compaction microbenchmarks are only run on the primary reference scene (Showroom)
     if (sceneType != SceneType::Showroom) {
       if (config_idx == 12 || config_idx == 13 || config_idx == 14 ||
-          config_idx == 15 || config_idx == 16 || config_idx == 26 ||
-          config_idx == 28) {
+          config_idx == 15 || config_idx == 16 || config_idx == 25 ||
+          config_idx == 27) {
         return false;
       }
     }
-    if (config_idx == 1 || config_idx == 4 || config_idx == 7 || config_idx == 10 || config_idx == 20 || config_idx == 30) {
+    if (config_idx == 1 || config_idx == 4 || config_idx == 7 || config_idx == 10 || config_idx == 20 || config_idx == 29) {
       if (!info.serSupported) return false;
 #ifdef HAVE_VULKAN
       if (context && context->getBackend() == ComputeBackend::Vulkan) {
@@ -141,7 +141,7 @@ public:
     }
     if (config_idx == 5 || config_idx == 8 || config_idx == 11 ||
         config_idx == 18 || config_idx == 21 || config_idx == 22 ||
-        config_idx == 24 || config_idx == 32 || config_idx == 34) {
+        config_idx == 24 || config_idx == 31 || config_idx == 33) {
       if (!info.dgcSupported) return false;
 #ifdef HAVE_VULKAN
       if (context && context->getBackend() == ComputeBackend::Vulkan) {
@@ -161,10 +161,10 @@ public:
     if (!unsupportedReason[config_idx].empty()) {
       return unsupportedReason[config_idx];
     }
-    if (config_idx == 1 || config_idx == 4 || config_idx == 7 || config_idx == 10 || config_idx == 20 || config_idx == 30) {
+    if (config_idx == 1 || config_idx == 4 || config_idx == 7 || config_idx == 10 || config_idx == 20 || config_idx == 29) {
       return "VK_EXT_ray_tracing_invocation_reorder requires Ray Tracing Pipeline with hardware SER support";
     }
-    if (config_idx == 29) {
+    if (config_idx == 28) {
       return "Vulkan Ray Tracing Pipeline unsupported or pipeline creation failed";
     }
     if (config_idx == 2) {
@@ -180,7 +180,7 @@ public:
     }
     if (config_idx == 5 || config_idx == 8 || config_idx == 11 ||
         config_idx == 18 || config_idx == 21 || config_idx == 22 ||
-        config_idx == 24 || config_idx == 32 || config_idx == 34) {
+        config_idx == 24 || config_idx == 31 || config_idx == 33) {
       if (!info.dgcSupported) {
         return "VK_EXT_device_generated_commands unsupported by device/driver";
       }
@@ -199,16 +199,16 @@ public:
     return "";
   }
   SupportLimitation GetConfigSupportLimitation(uint32_t config_idx) const override {
-    if (config_idx == 1 || config_idx == 4 || config_idx == 7 || config_idx == 10 || config_idx == 20 || config_idx == 30) {
+    if (config_idx == 1 || config_idx == 4 || config_idx == 7 || config_idx == 10 || config_idx == 20 || config_idx == 29) {
       return SupportLimitation::kHardware;
     }
-    if (config_idx == 29) {
+    if (config_idx == 28) {
       return SupportLimitation::kHardware;
     }
     if (config_idx == 2 || config_idx == 5 || config_idx == 8 ||
         config_idx == 11 || config_idx == 18 || config_idx == 21 ||
-        config_idx == 22 || config_idx == 24 || config_idx == 32 ||
-        config_idx == 34) {
+        config_idx == 22 || config_idx == 24 || config_idx == 31 ||
+        config_idx == 33) {
       return SupportLimitation::kHardware;
     }
     return SupportLimitation::kNone;
@@ -263,7 +263,7 @@ public:
   uint32_t GetQueueCapacity() const { return queueCapacity; }
 
   void RecordRunResult(uint32_t config_idx, uint64_t total_invocations, double total_time_ms) override {
-    if (config_idx < 35) {
+    if (config_idx < 34) {
       recordedInvocations[config_idx] = total_invocations;
       recordedTimeMs[config_idx] = total_time_ms;
     }
@@ -275,8 +275,8 @@ public:
   void RunVisualVerification(bool isInteractive = false) override;
 
 private:
-  uint64_t recordedInvocations[35] = {0};
-  double recordedTimeMs[35] = {0.0};
+  uint64_t recordedInvocations[34] = {0};
+  double recordedTimeMs[34] = {0.0};
   IComputeContext *context = nullptr;
   bool dumpRenders = false;
   bool captureFramebuffer = false;
@@ -309,7 +309,6 @@ private:
   ComputeKernel kernelMultiLight = nullptr;
   ComputeKernel kernelReset = nullptr;
   ComputeKernel kernelResolve = nullptr;
-  ComputeKernel kernelPersistent = nullptr;
 
   // Storage Buffers
   ComputeBuffer resultBuffer = nullptr;
@@ -386,10 +385,10 @@ private:
   uint32_t octantCapacity = 262144;
   uint32_t numPrimitives = 4096;
   SceneType sceneType = SceneType::IndoorAtrium;
-  mutable double results[35] = {0.0};
-  mutable uint32_t lastCompletedPasses[35] = {0};
-  mutable bool unsupportedConfig[35] = {false};
-  mutable std::string unsupportedReason[35];
+  mutable double results[34] = {0.0};
+  mutable uint32_t lastCompletedPasses[34] = {0};
+  mutable bool unsupportedConfig[34] = {false};
+  mutable std::string unsupportedReason[34];
   uint32_t lastRunConfig = 0xFFFFFFFFu;
   std::mt19937 rng{1337u};
 

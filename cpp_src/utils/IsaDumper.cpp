@@ -1,5 +1,6 @@
 #include "utils/IsaDumper.h"
 #include "core/DeviceDatabase.h"
+#include "third_party/yyjson.h"
 #include "utils/KernelPath.h"
 #include <algorithm>
 #include <cctype>
@@ -13,6 +14,7 @@
 #include <map>
 #include <set>
 #include <sstream>
+#include <system_error>
 #include <vector>
 
 #ifdef HAVE_VULKAN
@@ -123,9 +125,8 @@ static std::vector<BenchmarkMapping> getBenchmarkMappings() {
       {"RayScheduling", {"rayscheduling", "rtscheduling"}, 3, "RT Scheduling — DGC Bounce", "rt_scheduling_device_generated_commands_bounce.comp.spv", "", ""},
       {"RayScheduling", {"rayscheduling", "rtscheduling"}, 4, "RT Scheduling — DGC Shadow", "rt_scheduling_device_generated_commands_shadow.comp.spv", "", ""},
       {"RayScheduling", {"rayscheduling", "rtscheduling"}, 5, "RT Scheduling — DGC Multi-Light", "rt_scheduling_device_generated_commands_light.comp.spv", "", ""},
-      {"RayScheduling", {"rayscheduling", "rtscheduling"}, 6, "RT Scheduling — Persistent Threads", "rt_scheduling_persistent.comp.spv", "", ""},
-      {"RayScheduling", {"rayscheduling", "rtscheduling"}, 7, "RT Scheduling — RTP Baseline", "rt_scheduling.rgen.spv", "", ""},
-      {"RayScheduling", {"rayscheduling", "rtscheduling"}, 8, "RT Scheduling — RTP + SER", "rt_scheduling_ser.rgen.spv", "", ""},
+      {"RayScheduling", {"rayscheduling", "rtscheduling"}, 6, "RT Scheduling — RTP Baseline", "rt_scheduling.rgen.spv", "", ""},
+      {"RayScheduling", {"rayscheduling", "rtscheduling"}, 7, "RT Scheduling — RTP + SER", "rt_scheduling_ser.rgen.spv", "", ""},
       {"Interconnect", {"interconnect", "pcie", "rebar", "p2p"}, 4, "Interconnect — Unified Memory Coherency Latency", "interconnect_latency.comp.spv", "", ""},
       {"AsyncOverlap", {"asyncoverlap", "async", "multiqueue"}, 0, "AsyncOverlap — Graphics Pass", "async_gfx.frag.spv", "", ""},
       {"AsyncOverlap", {"asyncoverlap", "async", "multiqueue"}, 1, "AsyncOverlap — Async Compute Pass", "async_compute_heavy.comp.spv", "", ""},
@@ -1787,11 +1788,7 @@ static bool inspectRocmCodeObject(const KernelArtifact &art, const std::string &
   return true;
 }
 
-static bool runInspectionCore(const IsaDumperOptions &opts, bool emitStdout,
-                              IsaInspectionResult *outResult) {
-  fs::path kernelDir = KernelPath::find();
-
-  // Resolve requested backends (default to Vulkan native pipeline executable inspection)
+static std::set<std::string> resolveWantedBackends(const IsaDumperOptions &opts) {
   std::set<std::string> wantedBackends;
   for (const auto &b : opts.backends) {
     std::string low = normalizeKey(b);
@@ -1807,7 +1804,12 @@ static bool runInspectionCore(const IsaDumperOptions &opts, bool emitStdout,
   if (wantedBackends.empty()) {
     wantedBackends = {"vulkan"};
   }
+  return wantedBackends;
+}
 
+static std::vector<KernelArtifact> resolveArtifactsForOptions(const IsaDumperOptions &opts,
+                                                              const fs::path &kernelDir,
+                                                              const std::set<std::string> &wantedBackends) {
   std::vector<KernelArtifact> artifacts;
   auto mappings = getBenchmarkMappings();
 
@@ -1918,6 +1920,201 @@ static bool runInspectionCore(const IsaDumperOptions &opts, bool emitStdout,
       }
     }
   }
+
+  return artifacts;
+}
+
+static IsaDumperOptions applyUnmappedConfigFallback(const IsaDumperOptions &opts) {
+  IsaDumperOptions fb = opts;
+  if (!fb.targets.empty() && fb.targets[0] == "RayScheduling") {
+    fb.configs = {7};
+  } else {
+    fb.configs.clear();
+  }
+  return fb;
+}
+
+static std::vector<KernelArtifact> resolveEffectiveArtifacts(const IsaDumperOptions &opts,
+                                                             const fs::path &kernelDir,
+                                                             const std::set<std::string> &wantedBackends) {
+  std::vector<KernelArtifact> artifacts = resolveArtifactsForOptions(opts, kernelDir, wantedBackends);
+  if (artifacts.empty() && !opts.configs.empty()) {
+    IsaDumperOptions fb = applyUnmappedConfigFallback(opts);
+    artifacts = resolveArtifactsForOptions(fb, kernelDir, wantedBackends);
+  }
+  return artifacts;
+}
+
+struct FileStamp {
+  std::string path;
+  uint64_t size = 0;
+  int64_t mtime = 0;
+};
+
+static void appendUniqueFileStamp(const fs::path &p, std::vector<FileStamp> &out, std::set<std::string> &seen) {
+  if (p.empty()) return;
+  std::error_code ec;
+  if (!fs::exists(p, ec) || !fs::is_regular_file(p, ec)) return;
+  std::string key = p.lexically_normal().string();
+  if (!seen.insert(key).second) return;
+  uint64_t sz = fs::file_size(p, ec);
+  if (ec) return;
+  auto tp = fs::last_write_time(p, ec);
+  if (ec) return;
+  int64_t mt = static_cast<int64_t>(tp.time_since_epoch().count());
+  out.push_back({key, sz, mt});
+}
+
+static std::vector<FileStamp> collectDependencyStamps(const IsaDumperOptions &opts) {
+  std::vector<FileStamp> stamps;
+  std::set<std::string> seen;
+  fs::path kernelDir = KernelPath::find();
+  std::set<std::string> wantedBackends = resolveWantedBackends(opts);
+  std::vector<KernelArtifact> artifacts = resolveEffectiveArtifacts(opts, kernelDir, wantedBackends);
+
+  for (const auto &art : artifacts) {
+    if (!art.skipReason.empty() || art.filePath.empty()) continue;
+    appendUniqueFileStamp(art.filePath, stamps, seen);
+    if (art.backend != "vulkan") continue;
+
+    fs::path dir = art.filePath.parent_path();
+    std::string fname = art.filePath.filename().string();
+    if (fname.find(".frag.spv") != std::string::npos || fname.find(".vert.spv") != std::string::npos) {
+      const bool isAsyncGfx = (fname.rfind("async_gfx.", 0) == 0);
+      const bool isCrtOverlay = (fname.rfind("gui_crt_overlay.", 0) == 0);
+      fs::path vertPath = dir / (isAsyncGfx ? "async_gfx.vert.spv"
+                                            : (isCrtOverlay ? "gui_crt_overlay.vert.spv" : "pixel_fill.vert.spv"));
+      fs::path fragPath = dir / (isAsyncGfx ? "async_gfx.frag.spv"
+                                            : (isCrtOverlay ? "gui_crt_overlay.frag.spv" : "pixel_fill.frag.spv"));
+      appendUniqueFileStamp(vertPath, stamps, seen);
+      appendUniqueFileStamp(fragPath, stamps, seen);
+    } else if (fname.find(".rgen.spv") != std::string::npos) {
+      std::string prefix = fname;
+      size_t dotPos = prefix.find('.');
+      if (dotPos != std::string::npos) prefix = prefix.substr(0, dotPos);
+      std::string basePrefix = prefix;
+      if (prefix == "rt_scheduling_ser") basePrefix = "rt_scheduling";
+      else if (prefix == "raydiv_pipeline_ser" || prefix.rfind("raydiv_pipeline_", 0) == 0) basePrefix = "raydiv_pipeline";
+      else if (prefix == "rayomm_omm") basePrefix = "rayomm";
+
+      appendUniqueFileStamp(dir / (prefix + ".rgen.spv"), stamps, seen);
+      appendUniqueFileStamp(dir / (basePrefix + ".rgen.spv"), stamps, seen);
+      appendUniqueFileStamp(dir / (basePrefix + ".rmiss.spv"), stamps, seen);
+      appendUniqueFileStamp(dir / (prefix + ".rchit.spv"), stamps, seen);
+      appendUniqueFileStamp(dir / (basePrefix + ".rchit.spv"), stamps, seen);
+      appendUniqueFileStamp(dir / (basePrefix + "_a.rchit.spv"), stamps, seen);
+      appendUniqueFileStamp(dir / (basePrefix + ".rahit.spv"), stamps, seen);
+      appendUniqueFileStamp(dir / (basePrefix + ".rint.spv"), stamps, seen);
+    }
+  }
+  return stamps;
+}
+
+static fs::path getIsaCacheRoot() {
+  fs::path base;
+#if defined(_WIN32)
+  if (const char *localApp = std::getenv("LOCALAPPDATA")) {
+    if (*localApp) base = fs::path(localApp) / "gpubench" / "cache";
+  }
+  if (base.empty()) {
+    const char *userProfile = std::getenv("USERPROFILE");
+    base = (userProfile && *userProfile ? fs::path(userProfile) : fs::path(".")) / ".cache" / "gpubench";
+  }
+#else
+  if (const char *xdg = std::getenv("XDG_CACHE_HOME")) {
+    if (*xdg) base = fs::path(xdg) / "gpubench";
+  }
+  if (base.empty()) {
+    const char *home = std::getenv("HOME");
+    base = (home && *home ? fs::path(home) : fs::path(".")) / ".cache" / "gpubench";
+  }
+#endif
+  return base / "isa_v1";
+}
+
+static std::string canonicalBackendForCache(const IsaDumperOptions &opts) {
+  if (opts.backends.empty()) return "vulkan";
+  std::string low = toLowerCopy(opts.backends[0]);
+  if (low.empty() || low == "auto") return "vulkan";
+  return low;
+}
+
+static bool hasValidCacheContext(const IsaCacheContext &ctx) {
+  return ctx.vendorId != 0 || !ctx.driverVersion.empty() || !ctx.driverInfo.empty();
+}
+
+static uint64_t fnv1a64(const std::string &s) {
+  uint64_t h = 14695981039346656037ULL;
+  for (unsigned char c : s) {
+    h ^= c;
+    h *= 1099511628211ULL;
+  }
+  return h;
+}
+
+static std::string sanitizeFilenamePart(const std::string &s) {
+  std::string out;
+  out.reserve(s.size());
+  for (unsigned char c : s) {
+    if (std::isalnum(c)) out.push_back(static_cast<char>(c));
+    else if (out.empty() || out.back() != '_') out.push_back('_');
+  }
+  while (!out.empty() && out.back() == '_') out.pop_back();
+  if (out.empty()) out = "target";
+  if (out.size() > 36) out.resize(36);
+  return out;
+}
+
+static fs::path buildIsaCachePath(const IsaDumperOptions &opts, const IsaCacheContext &ctx) {
+  const std::string target = opts.targets.empty() ? "" : opts.targets[0];
+  const int cfg = opts.configs.empty() ? -1 : opts.configs[0];
+  const std::string backend = canonicalBackendForCache(opts);
+
+  std::ostringstream keySs;
+  keySs << "v1|" << ctx.vendorId << "|" << ctx.deviceId << "|"
+        << ctx.driverVersion << "|" << ctx.driverInfo << "|"
+        << backend << "|" << opts.deviceIndex << "|"
+        << target << "|" << cfg << "|" << (opts.fullIsa ? 1 : 0);
+
+  std::ostringstream nameSs;
+  nameSs << sanitizeFilenamePart(target)
+         << "_c" << (cfg >= 0 ? std::to_string(cfg) : std::string("all"))
+         << "_" << sanitizeFilenamePart(backend)
+         << "_" << std::hex << std::setw(16) << std::setfill('0') << fnv1a64(keySs.str())
+         << ".json";
+  return getIsaCacheRoot() / nameSs.str();
+}
+
+static std::string readJsonStr(yyjson_val *obj, const char *key) {
+  if (!obj) return "";
+  yyjson_val *v = yyjson_obj_get(obj, key);
+  const char *s = v ? yyjson_get_str(v) : nullptr;
+  return s ? std::string(s) : std::string();
+}
+
+static uint64_t readJsonU64(yyjson_val *obj, const char *key) {
+  if (!obj) return 0;
+  yyjson_val *v = yyjson_obj_get(obj, key);
+  return v ? yyjson_get_uint(v) : 0;
+}
+
+static int64_t readJsonI64(yyjson_val *obj, const char *key) {
+  if (!obj) return 0;
+  yyjson_val *v = yyjson_obj_get(obj, key);
+  return v ? yyjson_get_sint(v) : 0;
+}
+
+static bool readJsonBool(yyjson_val *obj, const char *key) {
+  if (!obj) return false;
+  yyjson_val *v = yyjson_obj_get(obj, key);
+  return v ? yyjson_get_bool(v) : false;
+}
+
+static bool runInspectionCore(const IsaDumperOptions &opts, bool emitStdout,
+                              IsaInspectionResult *outResult) {
+  fs::path kernelDir = KernelPath::find();
+  std::set<std::string> wantedBackends = resolveWantedBackends(opts);
+  std::vector<KernelArtifact> artifacts = resolveArtifactsForOptions(opts, kernelDir, wantedBackends);
 
   if (artifacts.empty()) {
     std::string msg = "No compiled shaders or kernels matched for ISA inspection (searched in " +
@@ -2047,4 +2244,429 @@ IsaInspectionResult IsaDumper::inspect(const IsaDumperOptions &opts) {
   IsaInspectionResult res;
   runInspectionCore(opts, false, &res);
   return res;
+}
+
+bool IsaDumper::tryLoadCached(const IsaDumperOptions &opts,
+                              const IsaCacheContext &ctx,
+                              IsaInspectionResult &outResult) {
+  if (opts.targets.size() != 1 || !hasValidCacheContext(ctx)) {
+    return false;
+  }
+
+  const fs::path cachePath = buildIsaCachePath(opts, ctx);
+  std::error_code ec;
+  if (!fs::exists(cachePath, ec) || !fs::is_regular_file(cachePath, ec)) {
+    return false;
+  }
+
+  yyjson_doc *rawDoc = yyjson_read_file(cachePath.string().c_str(), 0, nullptr, nullptr);
+  if (!rawDoc) {
+    return false;
+  }
+  struct DocGuard {
+    yyjson_doc *d = nullptr;
+    ~DocGuard() { if (d) yyjson_doc_free(d); }
+  } guard{rawDoc};
+
+  yyjson_val *root = yyjson_doc_get_root(rawDoc);
+  if (!root || !yyjson_is_obj(root)) {
+    return false;
+  }
+
+  if (readJsonI64(root, "schemaVersion") != 1) return false;
+  if (readJsonU64(root, "vendorId") != ctx.vendorId) return false;
+  if (readJsonU64(root, "deviceId") != ctx.deviceId) return false;
+  if (readJsonStr(root, "driverVersion") != ctx.driverVersion) return false;
+  if (readJsonStr(root, "driverInfo") != ctx.driverInfo) return false;
+  if (readJsonStr(root, "backend") != canonicalBackendForCache(opts)) return false;
+  if (readJsonU64(root, "deviceIndex") != opts.deviceIndex) return false;
+  if (readJsonStr(root, "target") != opts.targets[0]) return false;
+  const int64_t wantCfg = opts.configs.empty() ? -1 : static_cast<int64_t>(opts.configs[0]);
+  if (readJsonI64(root, "configIndex") != wantCfg) return false;
+  if (readJsonBool(root, "fullIsa") != opts.fullIsa) return false;
+
+  // Strictly verify every backing shader/kernel file size and mtime against disk.
+  yyjson_val *depsArr = yyjson_obj_get(root, "deps");
+  if (!depsArr || !yyjson_is_arr(depsArr)) {
+    return false;
+  }
+  const std::vector<FileStamp> curDeps = collectDependencyStamps(opts);
+  if (yyjson_arr_size(depsArr) != curDeps.size()) {
+    return false;
+  }
+  std::map<std::string, std::pair<uint64_t, int64_t>> curMap;
+  for (const auto &d : curDeps) {
+    curMap[d.path] = {d.size, d.mtime};
+  }
+  size_t depIdx = 0;
+  size_t depMax = 0;
+  yyjson_val *depVal = nullptr;
+  yyjson_arr_foreach(depsArr, depIdx, depMax, depVal) {
+    if (!yyjson_is_obj(depVal)) return false;
+    std::string p = readJsonStr(depVal, "path");
+    auto it = curMap.find(p);
+    if (it == curMap.end()) return false;
+    if (readJsonU64(depVal, "size") != it->second.first) return false;
+    if (readJsonI64(depVal, "mtime") != it->second.second) return false;
+  }
+
+  yyjson_val *resObj = yyjson_obj_get(root, "result");
+  if (!resObj || !yyjson_is_obj(resObj)) {
+    return false;
+  }
+
+  IsaInspectionResult loaded;
+  loaded.ok = readJsonBool(resObj, "ok");
+  loaded.deviceName = readJsonStr(resObj, "deviceName");
+  loaded.driverInfo = readJsonStr(resObj, "driverInfo");
+  loaded.resolvedAsic = readJsonStr(resObj, "resolvedAsic");
+  loaded.errorSummary = readJsonStr(resObj, "errorSummary");
+
+  yyjson_val *artsArr = yyjson_obj_get(resObj, "artifacts");
+  if (!artsArr || !yyjson_is_arr(artsArr)) {
+    return false;
+  }
+  size_t aIdx = 0, aMax = 0;
+  yyjson_val *artVal = nullptr;
+  yyjson_arr_foreach(artsArr, aIdx, aMax, artVal) {
+    if (!yyjson_is_obj(artVal)) return false;
+    IsaArtifactReport rep;
+    rep.benchName = readJsonStr(artVal, "benchName");
+    rep.configLabel = readJsonStr(artVal, "configLabel");
+    rep.configIndex = static_cast<int>(readJsonI64(artVal, "configIndex"));
+    rep.backend = readJsonStr(artVal, "backend");
+    rep.artifactFile = readJsonStr(artVal, "artifactFile");
+    rep.skipReason = readJsonStr(artVal, "skipReason");
+    rep.errorMessage = readJsonStr(artVal, "errorMessage");
+
+    yyjson_val *execArr = yyjson_obj_get(artVal, "executables");
+    if (execArr && yyjson_is_arr(execArr)) {
+      size_t eIdx = 0, eMax = 0;
+      yyjson_val *execVal = nullptr;
+      yyjson_arr_foreach(execArr, eIdx, eMax, execVal) {
+        if (!yyjson_is_obj(execVal)) return false;
+        IsaExecutableReport ex;
+        ex.name = readJsonStr(execVal, "name");
+        ex.description = readJsonStr(execVal, "description");
+        ex.subgroupSize = static_cast<uint32_t>(readJsonU64(execVal, "subgroupSize"));
+        ex.vgprCount = static_cast<uint32_t>(readJsonU64(execVal, "vgprCount"));
+        ex.sgprCount = static_cast<uint32_t>(readJsonU64(execVal, "sgprCount"));
+        ex.ldsBytes = static_cast<uint32_t>(readJsonU64(execVal, "ldsBytes"));
+        ex.scratchBytes = static_cast<uint32_t>(readJsonU64(execVal, "scratchBytes"));
+        ex.hotLoopStartLine = static_cast<int>(readJsonI64(execVal, "hotLoopStartLine"));
+        ex.hotLoopEndLine = static_cast<int>(readJsonI64(execVal, "hotLoopEndLine"));
+        ex.unavailableReason = readJsonStr(execVal, "unavailableReason");
+
+        if (yyjson_val *mixObj = yyjson_obj_get(execVal, "mix"); mixObj && yyjson_is_obj(mixObj)) {
+          ex.mix.wmma = static_cast<int>(readJsonI64(mixObj, "wmma"));
+          ex.mix.valu = static_cast<int>(readJsonI64(mixObj, "valu"));
+          ex.mix.vmem = static_cast<int>(readJsonI64(mixObj, "vmem"));
+          ex.mix.lds = static_cast<int>(readJsonI64(mixObj, "lds"));
+          ex.mix.bvh = static_cast<int>(readJsonI64(mixObj, "bvh"));
+          ex.mix.salu = static_cast<int>(readJsonI64(mixObj, "salu"));
+          ex.mix.other = static_cast<int>(readJsonI64(mixObj, "other"));
+          ex.mix.total = static_cast<int>(readJsonI64(mixObj, "total"));
+        }
+
+        if (yyjson_val *statsArr = yyjson_obj_get(execVal, "stats"); statsArr && yyjson_is_arr(statsArr)) {
+          size_t sIdx = 0, sMax = 0;
+          yyjson_val *stVal = nullptr;
+          yyjson_arr_foreach(statsArr, sIdx, sMax, stVal) {
+            if (yyjson_is_obj(stVal)) {
+              ex.stats.push_back({readJsonStr(stVal, "name"), readJsonStr(stVal, "value")});
+            }
+          }
+        }
+        if (yyjson_val *opArr = yyjson_obj_get(execVal, "topOpcodes"); opArr && yyjson_is_arr(opArr)) {
+          size_t oIdx = 0, oMax = 0;
+          yyjson_val *opVal = nullptr;
+          yyjson_arr_foreach(opArr, oIdx, oMax, opVal) {
+            if (yyjson_is_obj(opVal)) {
+              ex.topOpcodes.emplace_back(readJsonStr(opVal, "op"),
+                                         static_cast<int>(readJsonI64(opVal, "count")));
+            }
+          }
+        }
+        if (yyjson_val *hlArr = yyjson_obj_get(execVal, "hotLoopLines"); hlArr && yyjson_is_arr(hlArr)) {
+          size_t lIdx = 0, lMax = 0;
+          yyjson_val *lv = nullptr;
+          yyjson_arr_foreach(hlArr, lIdx, lMax, lv) {
+            const char *s = yyjson_get_str(lv);
+            ex.hotLoopLines.emplace_back(s ? s : "");
+          }
+        }
+        if (yyjson_val *flArr = yyjson_obj_get(execVal, "fullIsaLines"); flArr && yyjson_is_arr(flArr)) {
+          size_t lIdx = 0, lMax = 0;
+          yyjson_val *lv = nullptr;
+          yyjson_arr_foreach(flArr, lIdx, lMax, lv) {
+            const char *s = yyjson_get_str(lv);
+            ex.fullIsaLines.emplace_back(s ? s : "");
+          }
+        }
+        rep.executables.push_back(std::move(ex));
+      }
+    }
+    loaded.artifacts.push_back(std::move(rep));
+  }
+
+  if (!loaded.ok || loaded.artifacts.empty()) {
+    return false;
+  }
+  outResult = std::move(loaded);
+  return true;
+}
+
+bool IsaDumper::saveCached(const IsaDumperOptions &opts,
+                           const IsaCacheContext &ctx,
+                           const IsaInspectionResult &result) {
+  if (opts.targets.size() != 1 || !hasValidCacheContext(ctx) || !result.ok || result.artifacts.empty()) {
+    return false;
+  }
+  for (const auto &art : result.artifacts) {
+    if (!art.errorMessage.empty()) {
+      return false;
+    }
+  }
+
+  const fs::path cachePath = buildIsaCachePath(opts, ctx);
+  std::error_code ec;
+  fs::create_directories(cachePath.parent_path(), ec);
+  if (ec) {
+    return false;
+  }
+
+  yyjson_mut_doc *doc = yyjson_mut_doc_new(nullptr);
+  if (!doc) return false;
+  struct MutGuard {
+    yyjson_mut_doc *d = nullptr;
+    ~MutGuard() { if (d) yyjson_mut_doc_free(d); }
+  } guard{doc};
+
+  yyjson_mut_val *root = yyjson_mut_obj(doc);
+  yyjson_mut_doc_set_root(doc, root);
+
+  yyjson_mut_obj_add_int(doc, root, "schemaVersion", 1);
+  yyjson_mut_obj_add_uint(doc, root, "vendorId", ctx.vendorId);
+  yyjson_mut_obj_add_uint(doc, root, "deviceId", ctx.deviceId);
+  yyjson_mut_obj_add_strcpy(doc, root, "driverVersion", ctx.driverVersion.c_str());
+  yyjson_mut_obj_add_strcpy(doc, root, "driverInfo", ctx.driverInfo.c_str());
+  const std::string backendStr = canonicalBackendForCache(opts);
+  yyjson_mut_obj_add_strcpy(doc, root, "backend", backendStr.c_str());
+  yyjson_mut_obj_add_uint(doc, root, "deviceIndex", opts.deviceIndex);
+  yyjson_mut_obj_add_strcpy(doc, root, "target", opts.targets[0].c_str());
+  yyjson_mut_obj_add_int(doc, root, "configIndex", opts.configs.empty() ? -1 : opts.configs[0]);
+  yyjson_mut_obj_add_bool(doc, root, "fullIsa", opts.fullIsa);
+
+  yyjson_mut_val *depsArr = yyjson_mut_obj_add_arr(doc, root, "deps");
+  const std::vector<FileStamp> deps = collectDependencyStamps(opts);
+  for (const auto &d : deps) {
+    yyjson_mut_val *doObj = yyjson_mut_arr_add_obj(doc, depsArr);
+    yyjson_mut_obj_add_strcpy(doc, doObj, "path", d.path.c_str());
+    yyjson_mut_obj_add_uint(doc, doObj, "size", d.size);
+    yyjson_mut_obj_add_int(doc, doObj, "mtime", d.mtime);
+  }
+
+  yyjson_mut_val *resObj = yyjson_mut_obj_add_obj(doc, root, "result");
+  yyjson_mut_obj_add_bool(doc, resObj, "ok", result.ok);
+  yyjson_mut_obj_add_strcpy(doc, resObj, "deviceName", result.deviceName.c_str());
+  yyjson_mut_obj_add_strcpy(doc, resObj, "driverInfo", result.driverInfo.c_str());
+  yyjson_mut_obj_add_strcpy(doc, resObj, "resolvedAsic", result.resolvedAsic.c_str());
+  yyjson_mut_obj_add_strcpy(doc, resObj, "errorSummary", result.errorSummary.c_str());
+
+  yyjson_mut_val *artsArr = yyjson_mut_obj_add_arr(doc, resObj, "artifacts");
+  for (const auto &art : result.artifacts) {
+    yyjson_mut_val *aObj = yyjson_mut_arr_add_obj(doc, artsArr);
+    yyjson_mut_obj_add_strcpy(doc, aObj, "benchName", art.benchName.c_str());
+    yyjson_mut_obj_add_strcpy(doc, aObj, "configLabel", art.configLabel.c_str());
+    yyjson_mut_obj_add_int(doc, aObj, "configIndex", art.configIndex);
+    yyjson_mut_obj_add_strcpy(doc, aObj, "backend", art.backend.c_str());
+    yyjson_mut_obj_add_strcpy(doc, aObj, "artifactFile", art.artifactFile.c_str());
+    yyjson_mut_obj_add_strcpy(doc, aObj, "skipReason", art.skipReason.c_str());
+    yyjson_mut_obj_add_strcpy(doc, aObj, "errorMessage", art.errorMessage.c_str());
+
+    yyjson_mut_val *execArr = yyjson_mut_obj_add_arr(doc, aObj, "executables");
+    for (const auto &ex : art.executables) {
+      yyjson_mut_val *eObj = yyjson_mut_arr_add_obj(doc, execArr);
+      yyjson_mut_obj_add_strcpy(doc, eObj, "name", ex.name.c_str());
+      yyjson_mut_obj_add_strcpy(doc, eObj, "description", ex.description.c_str());
+      yyjson_mut_obj_add_uint(doc, eObj, "subgroupSize", ex.subgroupSize);
+      yyjson_mut_obj_add_uint(doc, eObj, "vgprCount", ex.vgprCount);
+      yyjson_mut_obj_add_uint(doc, eObj, "sgprCount", ex.sgprCount);
+      yyjson_mut_obj_add_uint(doc, eObj, "ldsBytes", ex.ldsBytes);
+      yyjson_mut_obj_add_uint(doc, eObj, "scratchBytes", ex.scratchBytes);
+      yyjson_mut_obj_add_int(doc, eObj, "hotLoopStartLine", ex.hotLoopStartLine);
+      yyjson_mut_obj_add_int(doc, eObj, "hotLoopEndLine", ex.hotLoopEndLine);
+      yyjson_mut_obj_add_strcpy(doc, eObj, "unavailableReason", ex.unavailableReason.c_str());
+
+      yyjson_mut_val *mixObj = yyjson_mut_obj_add_obj(doc, eObj, "mix");
+      yyjson_mut_obj_add_int(doc, mixObj, "wmma", ex.mix.wmma);
+      yyjson_mut_obj_add_int(doc, mixObj, "valu", ex.mix.valu);
+      yyjson_mut_obj_add_int(doc, mixObj, "vmem", ex.mix.vmem);
+      yyjson_mut_obj_add_int(doc, mixObj, "lds", ex.mix.lds);
+      yyjson_mut_obj_add_int(doc, mixObj, "bvh", ex.mix.bvh);
+      yyjson_mut_obj_add_int(doc, mixObj, "salu", ex.mix.salu);
+      yyjson_mut_obj_add_int(doc, mixObj, "other", ex.mix.other);
+      yyjson_mut_obj_add_int(doc, mixObj, "total", ex.mix.total);
+
+      yyjson_mut_val *statsArr = yyjson_mut_obj_add_arr(doc, eObj, "stats");
+      for (const auto &st : ex.stats) {
+        yyjson_mut_val *sObj = yyjson_mut_arr_add_obj(doc, statsArr);
+        yyjson_mut_obj_add_strcpy(doc, sObj, "name", st.name.c_str());
+        yyjson_mut_obj_add_strcpy(doc, sObj, "value", st.value.c_str());
+      }
+
+      yyjson_mut_val *opArr = yyjson_mut_obj_add_arr(doc, eObj, "topOpcodes");
+      for (const auto &op : ex.topOpcodes) {
+        yyjson_mut_val *oObj = yyjson_mut_arr_add_obj(doc, opArr);
+        yyjson_mut_obj_add_strcpy(doc, oObj, "op", op.first.c_str());
+        yyjson_mut_obj_add_int(doc, oObj, "count", op.second);
+      }
+
+      yyjson_mut_val *hlArr = yyjson_mut_obj_add_arr(doc, eObj, "hotLoopLines");
+      for (const auto &line : ex.hotLoopLines) {
+        yyjson_mut_arr_add_strcpy(doc, hlArr, line.c_str());
+      }
+
+      yyjson_mut_val *flArr = yyjson_mut_obj_add_arr(doc, eObj, "fullIsaLines");
+      for (const auto &line : ex.fullIsaLines) {
+        yyjson_mut_arr_add_strcpy(doc, flArr, line.c_str());
+      }
+    }
+  }
+
+  fs::path tmpPath = cachePath;
+  tmpPath += ".tmp";
+  if (!yyjson_mut_write_file(tmpPath.string().c_str(), doc, 0, nullptr, nullptr)) {
+    return false;
+  }
+  fs::rename(tmpPath, cachePath, ec);
+  if (ec) {
+    fs::remove(tmpPath, ec);
+    return false;
+  }
+  return true;
+}
+
+void IsaDumper::warmCacheBatch(
+    const std::vector<IsaDumperOptions> &items,
+    const IsaCacheContext &ctx,
+    const std::atomic<bool> *cancelFlag,
+    const std::function<void(const IsaDumperOptions &, IsaInspectionResult &&)> &onItemReady) {
+  if (items.empty()) return;
+
+  const fs::path kernelDir = KernelPath::find();
+#ifdef HAVE_VULKAN
+  std::unique_ptr<NativeVulkanIsaInspector> vkInspector;
+  uint32_t vkInitDevice = 0xFFFFFFFFu;
+  std::string vkResolvedAsic;
+#endif
+
+  for (const auto &opts : items) {
+    if (cancelFlag && cancelFlag->load(std::memory_order_acquire)) {
+      break;
+    }
+
+    IsaInspectionResult res;
+    if (tryLoadCached(opts, ctx, res)) {
+      if (onItemReady) onItemReady(opts, std::move(res));
+      continue;
+    }
+
+    const std::set<std::string> wantedBackends = resolveWantedBackends(opts);
+    const std::vector<KernelArtifact> artifacts = resolveEffectiveArtifacts(opts, kernelDir, wantedBackends);
+    if (artifacts.empty()) {
+      res.ok = false;
+      res.errorSummary = "No compiled shaders or kernels matched for ISA inspection (searched in " +
+                         kernelDir.string() + ").";
+      if (onItemReady) onItemReady(opts, std::move(res));
+      continue;
+    }
+
+    std::string resolvedAsic = opts.asic;
+    bool needVulkan = false;
+    bool needRocm = false;
+    for (const auto &a : artifacts) {
+      if (!a.skipReason.empty()) continue;
+      if (a.backend == "vulkan") needVulkan = true;
+      else if (a.backend == "rocm") needRocm = true;
+    }
+
+#ifdef HAVE_VULKAN
+    if (needVulkan || (needRocm && resolvedAsic.empty())) {
+      if (!vkInspector || vkInitDevice != opts.deviceIndex) {
+        vkInspector = std::make_unique<NativeVulkanIsaInspector>();
+        if (vkInspector->init(opts.deviceIndex, true)) {
+          vkInitDevice = opts.deviceIndex;
+          const auto &prof = DeviceDatabase::lookup(vkInspector->vendorId, vkInspector->deviceId,
+                                                    vkInspector->deviceName);
+          vkResolvedAsic = extractGfxToken(prof.archName);
+        } else {
+          const std::string err = !vkInspector->lastError.empty()
+                                      ? vkInspector->lastError
+                                      : "Vulkan ISA inspector initialization failed.";
+          vkInspector.reset();
+          vkInitDevice = 0xFFFFFFFFu;
+          if (needVulkan) {
+            res.ok = false;
+            res.errorSummary = err;
+            if (onItemReady) onItemReady(opts, std::move(res));
+            continue;
+          }
+        }
+      }
+      if (vkInspector) {
+        if (resolvedAsic.empty()) resolvedAsic = vkResolvedAsic;
+        res.deviceName = vkInspector->deviceName;
+        res.driverInfo = vkInspector->driverInfo;
+      }
+    }
+#endif
+    if (resolvedAsic.empty()) resolvedAsic = "gfx1201";
+    res.resolvedAsic = resolvedAsic;
+
+    std::set<std::string> visitedFiles;
+    for (const auto &art : artifacts) {
+      if (cancelFlag && cancelFlag->load(std::memory_order_acquire)) {
+        break;
+      }
+      const std::string visitKey = art.backend + ":" + art.filePath.string() + ":" + art.rocmSymbol + ":" + art.configName;
+      if (!visitedFiles.insert(visitKey).second) {
+        continue;
+      }
+      if (!art.skipReason.empty()) {
+        IsaArtifactReport rep;
+        rep.benchName = art.benchmarkName;
+        rep.configLabel = art.configName;
+        rep.configIndex = art.configIndex;
+        rep.backend = art.backend;
+        rep.artifactFile = art.filePath.filename().string();
+        rep.skipReason = art.skipReason;
+        res.artifacts.push_back(std::move(rep));
+        continue;
+      }
+      if (art.backend == "vulkan") {
+#ifdef HAVE_VULKAN
+        if (vkInspector) {
+          IsaArtifactReport rep;
+          vkInspector->inspectSpv(art, opts.fullIsa, &rep);
+          res.artifacts.push_back(std::move(rep));
+        }
+#endif
+      } else if (art.backend == "rocm") {
+        IsaArtifactReport rep;
+        inspectRocmCodeObject(art, resolvedAsic, opts.fullIsa, true, &rep);
+        res.artifacts.push_back(std::move(rep));
+      }
+    }
+
+    if (cancelFlag && cancelFlag->load(std::memory_order_acquire)) {
+      break;
+    }
+
+    res.ok = true;
+    saveCached(opts, ctx, res);
+    if (onItemReady) {
+      onItemReady(opts, std::move(res));
+    }
+  }
 }

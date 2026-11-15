@@ -16,6 +16,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace gpubench::gui {
@@ -224,8 +225,12 @@ private:
     void selectInspectedBenchmark(int catIdx, int sgIdx, int itemIdx, bool switchToF1 = false);
     void ensureDefaultInspectedBenchmark();
     std::string makeIsaCacheKey(const BenchmarkItem& item) const;
+    IsaCacheContext makeIsaCacheContext() const;
+    bool tryPopulateIsaFromDiskCache(const BenchmarkItem& item, IsaInspectionResult& outRes);
     void requestIsaInspection(const BenchmarkItem& item, bool forceRefresh = false);
     void joinIsaThread();
+    void startIsaWarmup();
+    void joinIsaWarmThread();
     void runSingleBenchmarkItem(const BenchmarkItem& item);
     void stampScopeTrigger(const std::string& label);
     void executeCommand(const std::string& rawCmd);
@@ -363,8 +368,12 @@ private:
     std::mutex m_isaMutex;
     std::thread m_isaThread;
     std::atomic<bool> m_isaLoading{false};
+    std::thread m_isaWarmThread;
+    std::atomic<bool> m_isaWarmCancel{false};
+    std::atomic<bool> m_isaWarmActive{false};
     std::string m_isaActiveKey;
     std::unordered_map<std::string, IsaInspectionResult> m_isaCache;
+    std::unordered_set<std::string> m_isaDiskMisses;
 
     // Oscilloscope Triggers & Hardware Command Prompt
     std::vector<ScopeTrigger> m_scopeTriggers;

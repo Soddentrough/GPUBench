@@ -354,8 +354,8 @@ TEST_CASE(GraphicsAndRayTracingValidation, RayScheduling_PositiveAndNegativeVali
   ASSERT_TRUE(bench.ValidateResults(0));
 
   // Verify non-zero worklist compaction for Incoherent GI (Config 8, mode 2),
-  // Primary Rays G-Buffer (Config 18, mode 9), and Single Light (Config 32, mode 8)
-  for (uint32_t cfg : {8u, 18u, 32u}) {
+  // Primary Rays G-Buffer (Config 18, mode 9), and Single Light (Config 31, mode 8)
+  for (uint32_t cfg : {8u, 18u, 31u}) {
     if (!bench.unsupportedConfig[cfg]) {
       bench.Run(cfg);
       ctx->waitIdle();
@@ -400,7 +400,7 @@ TEST_CASE(GraphicsAndRayTracingValidation, RayScheduling_PositiveAndNegativeVali
   for (const auto &sc : extraScenes) {
     RaySchedulingBench sceneBench(sc.first);
     sceneBench.Setup(*ctx, kdir);
-    for (uint32_t cfg : {8u, 18u, 32u}) {
+    for (uint32_t cfg : {8u, 18u, 31u}) {
       if (!sceneBench.unsupportedConfig[cfg]) {
         sceneBench.Run(cfg);
         ctx->waitIdle();

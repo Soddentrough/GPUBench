@@ -109,6 +109,58 @@ std::string subgroupTitleForCatalogEntry(const BenchmarkConfigMetadata& meta, st
     return "Compute Precision (Vec & Matrix)";
 }
 
+bool isCoreSuiteSlot(const BenchmarkItem& itm) {
+    return itm.id == "FP32" || itm.id == "FP16" || itm.id == "BF16" ||
+           itm.id == "FP8" || itm.id == "INT8" ||
+           (itm.id == "Device Memory Bandwidth" && itm.configIndex == 0) ||
+           itm.id == "L0 Cache Bandwidth" || itm.id == "L1 Cache Bandwidth" ||
+           itm.id == "L2 Cache Bandwidth" || itm.id == "L3 Cache Bandwidth" ||
+           (itm.id == "PCIe & Host-Device Interconnect" && itm.configIndex <= 1) ||
+           (itm.id == "RayScheduling" && (itm.configIndex == 9 || itm.configIndex == 10 || itm.configIndex == 11));
+}
+
+const char* shortCategoryTag(const std::string& name) {
+    if (name == "Ray Tracing") return "RT";
+    if (name == "Scheduling") return "SCHED";
+    if (name == "Graphics") return "GFX";
+    if (name == "Host System") return "HOST";
+    if (name == "Compute") return "COMP";
+    if (name == "Memory") return "MEM";
+    return name.c_str();
+}
+
+void syncSelectionFlags(std::vector<BenchmarkCategory>& categories) {
+    for (auto& cat : categories) {
+        bool catAny = false;
+        for (auto& sg : cat.subgroups) {
+            bool sgAny = false;
+            for (const auto& itm : sg.items) {
+                if (itm.selected && itm.isSupported) {
+                    sgAny = true;
+                    break;
+                }
+            }
+            sg.allSelected = sgAny;
+            if (sgAny) catAny = true;
+        }
+        cat.allSelected = catAny;
+    }
+}
+
+void setCategoryArmed(BenchmarkCategory& cat, bool arm) {
+    bool any = false;
+    for (auto& sg : cat.subgroups) {
+        bool sgAny = false;
+        for (auto& itm : sg.items) {
+            itm.selected = arm ? itm.isSupported : false;
+            if (itm.selected) sgAny = true;
+        }
+        sg.allSelected = sgAny;
+        if (sgAny) any = true;
+    }
+    cat.allSelected = any;
+}
+
 } // namespace
 
 void GuiApp::initializeBenchmarkCategories() {
@@ -503,9 +555,14 @@ void GuiApp::renderBenchmarkSuitePanel() {
 
     size_t totalArmed = 0;
     size_t totalSupported = 0;
+    bool matchesCorePreset = true;
     for (const auto& cat : m_categories) {
         for (const auto& sg : cat.subgroups) {
             for (const auto& itm : sg.items) {
+                const bool wantCore = itm.isSupported && isCoreSuiteSlot(itm);
+                if (itm.selected != wantCore) {
+                    matchesCorePreset = false;
+                }
                 if (itm.isSupported) {
                     totalSupported++;
                     if (itm.selected) totalArmed++;
@@ -513,70 +570,102 @@ void GuiApp::renderBenchmarkSuitePanel() {
             }
         }
     }
+    const bool isAllPresetActive = (totalSupported > 0 && totalArmed == totalSupported);
+    const bool isNonePresetActive = (totalArmed == 0);
+    const bool isCorePresetActive = (totalArmed > 0 && matchesCorePreset);
 
     char rightTag[48];
-    std::snprintf(rightTag, sizeof(rightTag), "SELECTED %zu/%zu", totalArmed, totalSupported);
-    drawEtchedHeader("ROM-01", "WORKLOAD SLOT MATRIX", c, rightTag);
+    std::snprintf(rightTag, sizeof(rightTag), "%zu/%zu ARMED", totalArmed, totalSupported);
+    drawEtchedHeader("ROM-01", "WORKLOAD MATRIX", c, rightTag);
 
     // Preset & Bulk Selection Bar
     if (isRunning) ImGui::BeginDisabled();
     const float btnH = s(22.0f);
-    if (tacticalButton("##BtnSelectAll", "ALL", ImVec2(s(46.0f), btnH), false, c)) {
+    if (tacticalButton("##BtnSelectAll", "ALL", ImVec2(s(46.0f), btnH), isAllPresetActive, c)) {
         for (auto& cat : m_categories) {
-            bool catSel = false;
-            for (auto& sg : cat.subgroups) {
-                bool sgSel = false;
-                for (auto& itm : sg.items) {
-                    itm.selected = itm.isSupported;
-                    if (itm.selected) sgSel = true;
-                }
-                sg.allSelected = sgSel;
-                if (sgSel) catSel = true;
-            }
-            cat.allSelected = catSel;
+            setCategoryArmed(cat, true);
         }
+        syncSelectionFlags(m_categories);
+    }
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+        ImGui::SetTooltip("Arm all %zu supported benchmarks across every group.", totalSupported);
     }
     ImGui::SameLine(0.0f, s(4.0f));
-    if (tacticalButton("##BtnDeselectAll", "NONE", ImVec2(s(50.0f), btnH), false, c)) {
+    if (tacticalButton("##BtnDeselectAll", "NONE", ImVec2(s(50.0f), btnH), isNonePresetActive, c)) {
         for (auto& cat : m_categories) {
-            cat.allSelected = false;
-            for (auto& sg : cat.subgroups) {
-                sg.allSelected = false;
-                for (auto& itm : sg.items) itm.selected = false;
-            }
+            setCategoryArmed(cat, false);
         }
+        syncSelectionFlags(m_categories);
+    }
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+        ImGui::SetTooltip("Disarm all benchmarks so you can pick specific groups or slots.");
     }
     ImGui::SameLine(0.0f, s(4.0f));
-    if (tacticalButton("##BtnRooflinePreset", "CORE SUITE", ImVec2(s(88.0f), btnH), false, c)) {
+    if (tacticalButton("##BtnRooflinePreset", "CORE SUITE", ImVec2(s(88.0f), btnH), isCorePresetActive, c)) {
         for (auto& cat : m_categories) {
-            bool catSel = false;
             for (auto& sg : cat.subgroups) {
-                bool sgSel = false;
                 for (auto& itm : sg.items) {
-                    bool pick = itm.isSupported && (
-                        itm.id == "FP32" || itm.id == "FP16" || itm.id == "BF16" ||
-                        itm.id == "FP8" || itm.id == "INT8" ||
-                        (itm.id == "Device Memory Bandwidth" && itm.configIndex == 0) ||
-                        itm.id == "L0 Cache Bandwidth" || itm.id == "L1 Cache Bandwidth" ||
-                        itm.id == "L2 Cache Bandwidth" || itm.id == "L3 Cache Bandwidth" ||
-                        (itm.id == "PCIe & Host-Device Interconnect" && itm.configIndex <= 1) ||
-                        (itm.id == "RayScheduling" && (itm.configIndex == 9 || itm.configIndex == 10 || itm.configIndex == 11)));
-                    itm.selected = pick;
-                    if (pick) sgSel = true;
+                    itm.selected = itm.isSupported && isCoreSuiteSlot(itm);
                 }
-                sg.allSelected = sgSel;
-                if (sgSel) catSel = true;
             }
-            cat.allSelected = catSel;
         }
+        syncSelectionFlags(m_categories);
+        if (m_suiteCategoryFilter > 0 &&
+            m_suiteCategoryFilter <= static_cast<int>(m_categories.size()) &&
+            !m_categories[static_cast<size_t>(m_suiteCategoryFilter - 1)].allSelected) {
+            m_suiteCategoryFilter = 0;
+        }
+    }
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+        ImGui::SetTooltip("Arm curated Core Suite (FP32/FP16/BF16/FP8/INT8, VRAM & L0-L3 Cache BW, PCIe DMA, Core RT Path Tracing).");
     }
     if (isRunning) ImGui::EndDisabled();
 
-    ImGui::SameLine(0.0f, s(6.0f));
-    if (tacticalButton("##BtnHideUnsup", m_hideUnsupported ? "UNSUP: HIDDEN" : "UNSUP: SHOWN",
-                       ImVec2(0.0f, btnH), m_hideUnsupported, c)) {
+    const char* unsupLabel = m_hideUnsupported ? "UNSUP: HIDDEN" : "UNSUP: SHOWN";
+    const float unsupW = ImGui::CalcTextSize(unsupLabel).x + s(16.0f);
+    sameLineIfFits(unsupW, s(6.0f));
+    if (tacticalButton("##BtnHideUnsup", unsupLabel, ImVec2(0.0f, btnH), m_hideUnsupported, c)) {
         m_hideUnsupported = !m_hideUnsupported;
     }
+
+    // Test Group Arming Bar (toggle whole categories ON/OFF for execution)
+    ImGui::Spacing();
+    if (isRunning) ImGui::BeginDisabled();
+    {
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextColored(c.textMuted, "ARM:");
+        for (size_t ci = 0; ci < m_categories.size(); ++ci) {
+            auto& cat = m_categories[ci];
+            size_t catArmed = 0;
+            size_t catSup = 0;
+            for (const auto& sg : cat.subgroups) {
+                for (const auto& itm : sg.items) {
+                    if (itm.isSupported) {
+                        catSup++;
+                        if (itm.selected) catArmed++;
+                    }
+                }
+            }
+            const bool groupOn = (catArmed > 0);
+            const bool partial = (catArmed > 0 && catArmed < catSup);
+            const char* tag = shortCategoryTag(cat.name);
+            char lbl[32];
+            std::snprintf(lbl, sizeof(lbl), "%s%s", tag, partial ? "*" : "");
+
+            const float pillW = std::max(s(36.0f), ImGui::CalcTextSize(lbl).x + s(14.0f));
+            sameLineIfFits(pillW, s(3.0f));
+            std::string grpId = "##GrpArm_" + std::to_string(ci);
+            if (tacticalButton(grpId.c_str(), lbl, ImVec2(pillW, s(21.0f)), groupOn, c)) {
+                setCategoryArmed(cat, !groupOn);
+                syncSelectionFlags(m_categories);
+            }
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                ImGui::SetTooltip("%s: %zu/%zu armed (click to turn %s).",
+                                  cat.name.c_str(), catArmed, catSup, groupOn ? "OFF" : "ON");
+            }
+        }
+    }
+    if (isRunning) ImGui::EndDisabled();
 
     // Slot Filter Input
     ImGui::Spacing();
@@ -598,23 +687,19 @@ void GuiApp::renderBenchmarkSuitePanel() {
         }
     }
 
-    // Category Selector Matrix
+    // Category View Filter Matrix
     ImGui::Spacing();
     {
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextColored(c.textMuted, "VIEW:");
+        ImGui::SameLine(0.0f, s(4.0f));
         bool allActive = (m_suiteCategoryFilter == 0);
         if (tacticalButton("##CatAll", "ALL", ImVec2(0.0f, s(21.0f)), allActive, c)) {
             m_suiteCategoryFilter = 0;
         }
         for (size_t ci = 0; ci < m_categories.size(); ++ci) {
-            std::string shortName = m_categories[ci].name;
-            if (shortName == "Ray Tracing") shortName = "RT";
-            else if (shortName == "Scheduling") shortName = "SCHED";
-            else if (shortName == "Graphics") shortName = "GFX";
-            else if (shortName == "Host System") shortName = "HOST";
-            else if (shortName == "Compute") shortName = "COMP";
-            else if (shortName == "Memory") shortName = "MEM";
-
-            std::string pillLabel = shortName + " [" + std::to_string(m_categories[ci].totalItemCount()) + "]";
+            std::string pillLabel = std::string(shortCategoryTag(m_categories[ci].name)) +
+                                    " [" + std::to_string(m_categories[ci].totalItemCount()) + "]";
             float pillW = ImGui::CalcTextSize(pillLabel.c_str()).x + s(16.0f);
             sameLineIfFits(pillW, s(4.0f));
             bool active = (m_suiteCategoryFilter == static_cast<int>(ci + 1));
@@ -687,12 +772,60 @@ void GuiApp::renderBenchmarkSuitePanel() {
         ImGui::PushID(static_cast<int>(ci));
         ImGui::Spacing();
 
-        // Category Etched Band
-        pushBoldFont();
-        ImGui::TextColored(c.phosphorHi, "// %s", cat.name.c_str());
-        popBoldFont();
-        ImGui::SameLine();
-        ImGui::TextColored(c.textMuted, "%s", fitTextToPixelWidth(cat.description, ImGui::GetContentRegionAvail().x).c_str());
+        // Category Etched Band with group Arm toggle & +ALL / -CLR
+        {
+            size_t catArmed = 0;
+            size_t catSupported = 0;
+            for (const auto& sg : cat.subgroups) {
+                for (const auto& itm : sg.items) {
+                    if (itm.isSupported) {
+                        catSupported++;
+                        if (itm.selected) catArmed++;
+                    }
+                }
+            }
+            bool catToggle = (catArmed > 0);
+            const bool catDisabled = isRunning || (catSupported == 0);
+            if (catDisabled) ImGui::BeginDisabled();
+            if (hardwareArmToggle("##CatArm", &catToggle, c, m_uiScale)) {
+                setCategoryArmed(cat, catToggle);
+                syncSelectionFlags(m_categories);
+            }
+            if (catDisabled) ImGui::EndDisabled();
+
+            ImGui::SameLine(0.0f, s(6.0f));
+            const float rightBtnsW = isRunning ? 0.0f : (s(32.0f) * 2.0f + s(8.0f));
+            const float labelAvailW = std::max(s(60.0f), ImGui::GetContentRegionAvail().x - rightBtnsW);
+            char catBuf[128];
+            std::snprintf(catBuf, sizeof(catBuf), "// %s [%zu/%zu]",
+                          cat.name.c_str(), catArmed, catSupported);
+            pushBoldFont();
+            ImGui::TextColored(c.phosphorHi, "%s", fitTextToPixelWidth(catBuf, labelAvailW).c_str());
+            popBoldFont();
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled) && !cat.description.empty()) {
+                ImGui::SetTooltip("%s", cat.description.c_str());
+            }
+
+            if (!isRunning) {
+                const float smallBtnW = s(32.0f);
+                const float btnH2 = s(18.0f);
+                ImGui::SameLine();
+                const float endX = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
+                const float btnsX = endX - (smallBtnW * 2.0f + s(4.0f));
+                if (btnsX > ImGui::GetCursorPosX() + s(4.0f)) {
+                    ImGui::SetCursorPosX(btnsX);
+                }
+                if (tacticalButton("##CatAll", "+ALL", ImVec2(smallBtnW, btnH2), false, c)) {
+                    setCategoryArmed(cat, true);
+                    syncSelectionFlags(m_categories);
+                }
+                ImGui::SameLine(0.0f, s(4.0f));
+                if (tacticalButton("##CatClr", "-CLR", ImVec2(smallBtnW, btnH2), false, c)) {
+                    setCategoryArmed(cat, false);
+                    syncSelectionFlags(m_categories);
+                }
+            }
+        }
 
         // RayTracing Scene Selector Strip
         if (cat.name == "Ray Tracing") {
@@ -768,12 +901,12 @@ void GuiApp::renderBenchmarkSuitePanel() {
                         for (auto& itm : sg.items) {
                             if (itm.isSupported) itm.selected = true;
                         }
-                        sg.allSelected = true;
+                        syncSelectionFlags(m_categories);
                     }
                     ImGui::SameLine(0.0f, s(4.0f));
                     if (tacticalButton("##SGNone", "-CLR", ImVec2(smallBtnW, hdrH), false, c)) {
                         for (auto& itm : sg.items) itm.selected = false;
-                        sg.allSelected = false;
+                        syncSelectionFlags(m_categories);
                     }
                 }
             }
@@ -823,11 +956,7 @@ void GuiApp::renderBenchmarkSuitePanel() {
                         bool rowDisabled = isRunning || !itm.isSupported;
                         if (rowDisabled) ImGui::BeginDisabled();
                         if (hardwareArmToggle("##ArmSlot", &itm.selected, c, m_uiScale)) {
-                            bool anySg = false;
-                            for (const auto& check : sg.items) {
-                                if (check.selected) { anySg = true; break; }
-                            }
-                            sg.allSelected = anySg;
+                            syncSelectionFlags(m_categories);
                         }
                         if (rowDisabled) ImGui::EndDisabled();
 

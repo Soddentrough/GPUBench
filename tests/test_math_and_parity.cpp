@@ -92,12 +92,12 @@ TEST_CASE(MathAndParity, BenchmarkBaselineAndSortWeightIntegrity) {
   // Verify Config 2 (Material Shading DGC) and Config 6 (Incoherent GI Megakernel) do not share sortWeight
   ASSERT_NE(rtBench.GetSortWeight(2), rtBench.GetSortWeight(6));
 
-  // Verify Wavefront Stream Compaction orders naive Single-Pass (26) as baseline before Throughput (28) and Wave Ballot (13)
-  ASSERT_EQ(rtBench.GetBaselineConfigIndex(26), -1);
-  ASSERT_EQ(rtBench.GetBaselineConfigIndex(28), 26);
-  ASSERT_EQ(rtBench.GetBaselineConfigIndex(13), 26);
-  ASSERT_LT(rtBench.GetSortWeight(26), rtBench.GetSortWeight(28));
-  ASSERT_LT(rtBench.GetSortWeight(28), rtBench.GetSortWeight(13));
+  // Verify Wavefront Stream Compaction orders naive Single-Pass (25) as baseline before Throughput (27) and Wave Ballot (13)
+  ASSERT_EQ(rtBench.GetBaselineConfigIndex(25), -1);
+  ASSERT_EQ(rtBench.GetBaselineConfigIndex(27), 25);
+  ASSERT_EQ(rtBench.GetBaselineConfigIndex(13), 25);
+  ASSERT_LT(rtBench.GetSortWeight(25), rtBench.GetSortWeight(27));
+  ASSERT_LT(rtBench.GetSortWeight(27), rtBench.GetSortWeight(13));
 
   DualIssueBench diBench;
   ASSERT_EQ(std::string(diBench.GetName()), "ILP & Dual-Issue");

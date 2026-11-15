@@ -139,10 +139,20 @@ struct PreparedGraphData {
     double tMax{60.0};
     double tSpan{60.0};
     float sclkCeiling{3000.0f};
+    float clockCeilingPlot{3000.0f};
     float pwrCeiling{360.0f};
+    float tempMinScale{20.0f};
+    float tempMaxScale{105.0f};
     double vramUsedGb{0.0};
     double vramTotGb{0.1};
     double maxVramMbPlot{16384.0};
+
+    // Full-window unfiltered extrema (not lost during decimation)
+    float sclkWinMin{0.0f}, sclkWinMax{0.0f};
+    float pwrWinMin{0.0f},  pwrWinMax{0.0f};
+    float busyWinMin{0.0f}, busyWinMax{0.0f};
+    float tempWinMin{0.0f}, tempWinMax{0.0f};
+    float vramWinMinGb{0.0f}, vramWinMaxGb{0.0f};
 
     // Decimated time-series points for ImPlot
     std::vector<float> timePts;
