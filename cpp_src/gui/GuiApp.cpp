@@ -2134,7 +2134,7 @@ void GuiApp::renderTopInstrumentHeader(float width) {
         }
         if (isRunning) ImGui::EndDisabled();
 
-        // Right cluster on Row 1: Palette + Session + Cfg + Primary RUN/ABORT
+        // Right cluster on Row 1: Session + Export JSON + Config + Primary RUN/ABORT
         size_t armedCount = 0;
         for (const auto& cat : m_categories) {
             for (const auto& sg : cat.subgroups) {
@@ -2151,31 +2151,16 @@ void GuiApp::renderTopInstrumentHeader(float width) {
             std::snprintf(runBtnLbl, sizeof(runBtnLbl), "RUN TESTS (%zu)", armedCount);
         }
 
-        const float palAmberW = s(60.0f);
-        const float palGreenW = s(60.0f);
-        const float paperW = s(58.0f);
-        const float jsonW = s(64.0f);
-        const float exportW = s(92.0f);
-        const float cfgW = s(44.0f);
+        const float jsonW = s(68.0f);
+        const float exportW = s(96.0f);
+        const float cfgW = s(68.0f);
         const float execW = s(134.0f);
-        const float rightClusterW = palAmberW + palGreenW + paperW + jsonW + exportW + cfgW + execW + s(24.0f);
+        const float rightClusterW = jsonW + exportW + cfgW + execW + s(11.0f);
         const float targetX = ImGui::GetWindowWidth() - rightClusterW - s(10.0f);
         if (targetX > ImGui::GetCursorPosX() + s(8.0f)) {
             ImGui::SetCursorPosX(targetX);
         }
 
-        if (tacticalButton("##PalAmber", "AMBER", ImVec2(palAmberW, bh), m_palette == BringUpPalette::AmberP3, c)) {
-            setPalette(BringUpPalette::AmberP3);
-        }
-        ImGui::SameLine(0.0f, s(3.0f));
-        if (tacticalButton("##PalGreen", "GREEN", ImVec2(palGreenW, bh), m_palette == BringUpPalette::GreenP1, c)) {
-            setPalette(BringUpPalette::GreenP1);
-        }
-        ImGui::SameLine(0.0f, s(3.0f));
-        if (tacticalButton("##PalPaper", "PAPER", ImVec2(paperW, bh), m_palette == BringUpPalette::PaperDatasheet, c)) {
-            setPalette(BringUpPalette::PaperDatasheet);
-        }
-        ImGui::SameLine(0.0f, s(5.0f));
         if (tacticalButton("##TopJson", "SESSION", ImVec2(jsonW, bh), m_showJsonSessionModal, c)) {
             if (m_jsonPathBuffer[0] == '\0') {
                 std::string defName = getDefaultJsonFilename();
@@ -2187,20 +2172,17 @@ void GuiApp::renderTopInstrumentHeader(float width) {
         }
         ImGui::SameLine(0.0f, s(3.0f));
         ImGui::BeginDisabled(m_allResults.empty());
-        if (tacticalButton("##TopExportJson", "EXPORT JSON", ImVec2(exportW, bh), false, c)) {
-            std::string outPath = (m_jsonPathBuffer[0] != '\0')
-                ? std::string(m_jsonPathBuffer)
-                : getDefaultJsonFilename();
-            exportResultsToJson(outPath);
+        if (tacticalButton("##TopExportJson", "EXPORT JSON", ImVec2(exportW, bh), !m_allResults.empty(), c)) {
+            exportResultsToJson(getDefaultJsonFilename());
         }
         ImGui::EndDisabled();
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
             ImGui::SetTooltip("%s", m_allResults.empty()
                 ? "Run benchmarks or import a session before exporting JSON."
-                : "Export all system information and benchmark results to unified v2.0 JSON.");
+                : "Export all system information and benchmark results to a timestamped JSON in Documents/GPUBench.");
         }
         ImGui::SameLine(0.0f, s(3.0f));
-        if (tacticalButton("##TopCfg", "CFG", ImVec2(cfgW, bh), m_showSettingsModal, c)) {
+        if (tacticalButton("##TopCfg", "CONFIG", ImVec2(cfgW, bh), m_showSettingsModal, c)) {
             m_showSettingsModal = true;
         }
         ImGui::SameLine(0.0f, s(4.0f));
@@ -2390,6 +2372,28 @@ void GuiApp::renderSettingsModal() {
         ImGui::TextColored(c.phosphorHi, "INSTRUMENT DISPLAY & DIAGNOSTICS");
         popBoldFont();
         ImGui::Separator();
+        ImGui::Spacing();
+
+        ImGui::TextColored(c.textMuted, "Display Theme:");
+        struct ThemeOption {
+            BringUpPalette palette;
+            const char* id;
+            const char* label;
+        };
+        const ThemeOption themeOpts[] = {
+            {BringUpPalette::AmberP3, "##CfgPalAmber", "AMBER (P3)"},
+            {BringUpPalette::GreenP1, "##CfgPalGreen", "GREEN (P1)"},
+            {BringUpPalette::PaperDatasheet, "##CfgPalPaper", "PAPER (DATASHEET)"}
+        };
+        const float themeBtnW = (ImGui::GetContentRegionAvail().x - s(8.0f)) / 3.0f;
+        const float themeBtnH = s(24.0f);
+        for (int ti = 0; ti < 3; ++ti) {
+            if (ti > 0) ImGui::SameLine(0.0f, s(4.0f));
+            if (tacticalButton(themeOpts[ti].id, themeOpts[ti].label, ImVec2(themeBtnW, themeBtnH),
+                               m_palette == themeOpts[ti].palette, c)) {
+                setPalette(themeOpts[ti].palette);
+            }
+        }
         ImGui::Spacing();
 
         float uiScalePct = (m_uiScale / std::max(0.1f, m_baseScale)) * 100.0f;
