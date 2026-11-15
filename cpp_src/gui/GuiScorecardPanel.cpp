@@ -177,7 +177,7 @@ void GuiApp::renderResultsScorecard() {
     ImGui::Spacing();
 
     // Category Filter Strip
-    const char* catFilters[] = {"ALL", "COMPUTE", "MEMORY", "RAY TRACING", "SCHEDULING", "GRAPHICS", "HOST CPU"};
+    const char* catFilters[] = {"ALL", "COMPUTE", "MEMORY", "RAY TRACING", "SCHEDULING", "RASTER", "HOST CPU"};
     for (int i = 0; i < 7; ++i) {
         float bw = ImGui::CalcTextSize(catFilters[i]).x + s(16.0f);
         if (i > 0) sameLineIfFits(bw, s(4.0f));
@@ -230,7 +230,7 @@ void GuiApp::renderResultsScorecard() {
         case 2: return r.component == "Memory" && !isHostSystemResult(r);
         case 3: return r.component == "Ray Tracing";
         case 4: return r.component == "Scheduling" || r.subcategory.find("Indirect") != std::string::npos;
-        case 5: return r.component == "Graphics" || r.component == "Raster";
+        case 5: return r.component == "Raster" || r.component == "Graphics" || r.component == "Rasterization & ROP";
         case 6: return isHostSystemResult(r);
         default: return true;
         }

@@ -110,7 +110,9 @@ public:
   void beginBatch(uint32_t expected_dispatches = 0,
                   bool inter_dispatch_barrier = false) override;
   void endBatch() override;
+  void abortBatch() override;
   bool isBatching() const override { return m_inBatch; }
+  bool isDeviceLost() const { return m_deviceLost; }
 
   // Persistent disk-backed VkPipelineCache
   VkPipelineCache getPipelineCache() const { return m_pipelineCache; }
@@ -434,6 +436,13 @@ private:
   bool m_batchCmdRecording = false;
   bool m_batchInterDispatchBarrier = false;
   uint32_t m_batchDispatchCount = 0;
+  bool m_deviceLost = false;
+
+  void resetQueryStateOnFailure();
+  void waitForFrameFence(InFlightFrame &frame, uint64_t timeoutNs,
+                         const char *timeoutMessage,
+                         const char *where = nullptr);
+  void finishAndSubmitFrame(InFlightFrame &frame, const char *where);
 
   VkQueryPool timestampQueryPool = VK_NULL_HANDLE;
   bool timingSupported = false;

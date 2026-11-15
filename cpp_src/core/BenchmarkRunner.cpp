@@ -1634,6 +1634,7 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
           }
           context->waitIdle();
         } catch (const std::exception &e) {
+          context->abortBatch();
           taskIdx++;
           executionFailure = true;
           if (!verbose) {

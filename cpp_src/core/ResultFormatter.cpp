@@ -416,7 +416,7 @@ void ResultFormatter::print() {
     if (res.component == "Compute") compWeight = 1;
     else if (res.component == "Memory") compWeight = 2;
     else if (res.component == "Scheduling") compWeight = 3;
-    else if (res.component == "Graphics" || res.component == "Rasterization & ROP") compWeight = 4;
+    else if (res.component == "Raster" || res.component == "Graphics" || res.component == "Rasterization & ROP") compWeight = 4;
     else if (res.component == "Ray Tracing") compWeight = 5;
 
     std::string cleanName = cleanWorkloadName(res.benchmarkName, res.subcategory);
@@ -1427,11 +1427,11 @@ void ResultFormatter::printComparison(const std::vector<ImportedRun> &runs) {
 
   for (size_t runIdx = 0; runIdx < N; ++runIdx) {
     for (const auto &res : runs[runIdx].results) {
-      int compWeight = 5;
+      int compWeight = 6;
       if (res.component == "Compute") compWeight = 1;
       else if (res.component == "Memory") compWeight = 2;
       else if (res.component == "Scheduling") compWeight = 3;
-      else if (res.component == "Rasterization & ROP") compWeight = 4;
+      else if (res.component == "Raster" || res.component == "Graphics" || res.component == "Rasterization & ROP") compWeight = 4;
       else if (res.component == "Ray Tracing") compWeight = 5;
 
       std::string cName = cleanWorkloadName(res.benchmarkName, res.subcategory);

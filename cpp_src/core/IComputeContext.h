@@ -204,6 +204,7 @@ public:
   virtual void beginBatch(uint32_t /*expected_dispatches*/ = 0,
                           bool /*inter_dispatch_barrier*/ = false) {}
   virtual void endBatch() {}
+  virtual void abortBatch() {}
   virtual bool isBatching() const { return false; }
 
   // Hardware GPU timestamp profiling

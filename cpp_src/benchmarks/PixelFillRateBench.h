@@ -39,7 +39,7 @@ public:
   bool ValidateResults(uint32_t config_idx = 0) const override;
 
   const char *GetComponent(uint32_t /*config_idx*/ = 0) const override {
-    return "Graphics";
+    return "Raster";
   }
   const char *GetSubCategory(uint32_t /*config_idx*/ = 0) const override {
     return "ROP Throughput";

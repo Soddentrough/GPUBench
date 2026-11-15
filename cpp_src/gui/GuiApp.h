@@ -59,7 +59,7 @@ struct BenchmarkItem {
     std::string id;          // Exact C++ engine benchmark name (e.g. "FP16", "RayASBuild", "RayScheduling")
     std::string subcategory; // Subcategory / group name (e.g. "FP16", "BLAS Build & Update", "Directional Shadows")
     std::string name;        // Friendly display name / config name (e.g. "Vector", "Matrix", "BLAS Build (1M Tris)")
-    std::string category;    // Component name (e.g. "Compute", "Memory", "Ray Tracing", "Scheduling", "Graphics", "System")
+    std::string category;    // Component name (e.g. "Compute", "Memory", "Ray Tracing", "Scheduling", "Raster", "System")
     std::string metricType;  // e.g. TFLOPS, GB/s, GIS/s, MRays/s, MItems/s, us
     std::string description; // Tooltip / detail description (hydrated from IBenchmark metadata)
     bool selected{true};
@@ -79,7 +79,7 @@ struct BenchmarkItem {
 
 struct BenchmarkSubgroup {
     std::string name;        // e.g. "Compute Precision", "BLAS Build & Update"
-    std::string component;   // e.g. "Compute", "Memory", "Ray Tracing", "Scheduling", "Graphics", "System"
+    std::string component;   // e.g. "Compute", "Memory", "Ray Tracing", "Scheduling", "Raster", "System"
     std::string engineId;    // e.g. "FP16", "Device Memory Bandwidth", "RayASBuild"
     std::string description;
     std::vector<BenchmarkItem> items;
@@ -88,7 +88,7 @@ struct BenchmarkSubgroup {
 };
 
 struct BenchmarkCategory {
-    std::string name;        // e.g. "Compute", "Memory", "Ray Tracing", "Scheduling", "Graphics", "Host System"
+    std::string name;        // e.g. "Compute", "Memory", "Ray Tracing", "Scheduling", "Raster", "Host System"
     std::string description;
     std::vector<BenchmarkSubgroup> subgroups;
     bool allSelected{true};
@@ -342,7 +342,7 @@ private:
     bool m_telemetryNeedsFit{true};
 
     // Scorecard & Charts Filters
-    int m_activeScorecardFilter{0}; // 0: All, 1: Compute, 2: Memory, 3: Ray Tracing, 4: Scheduling, 5: Graphics, 6: Host System
+    int m_activeScorecardFilter{0}; // 0: All, 1: Compute, 2: Memory, 3: Ray Tracing, 4: Scheduling, 5: Raster, 6: Host System
     int m_activeDeviceScorecardFilter{-1}; // -1: All, -2: Host CPU, 0: GPU 0, 1: GPU 1, etc.
     int m_rooflineDeviceFilter{0};
     int m_chartDomainFilter{-1};

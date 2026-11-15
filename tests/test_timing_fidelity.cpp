@@ -315,3 +315,48 @@ TEST_CASE(TimingFidelity, BenchmarkRunner_FilterDurationUpdatesSummaryStatistics
   ASSERT_LE(r.median_time_ms, r.p95_time_ms + 1e-9);
 }
 
+// ============================================================================
+// 6. Regression Test: abortBatch() Recovery and Multi-Chunk Timing Integrity
+// ============================================================================
+
+TEST_CASE(TimingFidelity, VulkanContext_AbortBatchAndMultiChunkTimingIntegrity) {
+  auto ctx = createVulkanContext();
+  if (!ctx) { return; }
+
+  auto *vCtx = dynamic_cast<VulkanContext *>(ctx.get());
+  ASSERT_TRUE(vCtx != nullptr);
+
+  std::string kdir = KernelPath::find();
+  ASSERT_FALSE(kdir.empty());
+
+  InShaderIndirectBench bench;
+  bench.Setup(*ctx, kdir);
+
+  // 1. Open a timed batch, record one dispatch, then abort without submitting.
+  vCtx->startTiming();
+  vCtx->beginBatch(4, true);
+  vCtx->dispatch(bench.kernelReset, 1, 1, 1, 1, 1, 1);
+  ASSERT_TRUE(vCtx->isBatching());
+  vCtx->abortBatch();
+  ASSERT_FALSE(vCtx->isBatching());
+
+  // 2. Verify subsequent multi-chunk timed batches sum GPU durations cleanly
+  //    without including host sleeps between chunks.
+  vCtx->startTiming();
+  for (int chunk = 0; chunk < 2; ++chunk) {
+    vCtx->beginBatch(2, true);
+    vCtx->dispatch(bench.kernelReset, 1, 1, 1, 1, 1, 1);
+    vCtx->dispatch(bench.kernelReset, 1, 1, 1, 1, 1, 1);
+    vCtx->endBatch();
+    if (chunk == 0) {
+      vCtx->waitIdle();
+      std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+  }
+  double elapsedMs = vCtx->stopTiming();
+  ASSERT_GT(elapsedMs, 0.0);
+  ASSERT_LT(elapsedMs, 1.0);
+
+  bench.Teardown();
+}
+

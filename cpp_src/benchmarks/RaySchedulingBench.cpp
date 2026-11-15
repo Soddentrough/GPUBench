@@ -1815,14 +1815,50 @@ void RaySchedulingBench::Run(uint32_t config_idx) {
   }
   case 23: { // Full Scene Path Tracing (16 SPP) - Traditional Megakernel
     uint32_t passes = 16u;
-    bool ownBatch = !vContext->isBatching();
-    if (ownBatch) vContext->beginBatch(passes, true);
-    for (uint32_t s = 0; s < passes; ++s) {
-      PushConstantsTraditional pc{rayCount, 1, 1 + bounceDepth, seed + s * 7919u, dumpFlag, renderWidth, renderHeight, 0, sceneTypeVal, isGltfVal, passes, s};
-      vContext->setKernelArg(kernelTraditional, 8, sizeof(pc), &pc);
-      vContext->dispatch(kernelTraditional, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
+    // Bound per-submit GPU duration well below Linux amdgpu's 2,000 ms gfx ring TDR
+    // (~400 ms target when 1-SPP config 3 has been measured; safe 2-pass default at >=500K rays).
+    uint32_t passesPerSubmit = (rayCount >= 500'000u) ? 2u : passes;
+    if (recordedInvocations[3] > 0 && recordedTimeMs[3] > 0.0) {
+      double singlePassMs =
+          recordedTimeMs[3] / static_cast<double>(recordedInvocations[3]);
+      if (singlePassMs > 0.0) {
+        uint32_t targetPasses =
+            static_cast<uint32_t>(std::floor(400.0 / singlePassMs));
+        passesPerSubmit = std::clamp(targetPasses, 1u, passes);
+      }
     }
-    if (ownBatch) vContext->endBatch();
+
+    auto recordPasses = [&](uint32_t beginPass, uint32_t endPass) {
+      for (uint32_t s = beginPass; s < endPass; ++s) {
+        PushConstantsTraditional pc{rayCount, 1, 1 + bounceDepth, seed + s * 7919u, dumpFlag, renderWidth, renderHeight, 0, sceneTypeVal, isGltfVal, passes, s};
+        vContext->setKernelArg(kernelTraditional, 8, sizeof(pc), &pc);
+        vContext->dispatch(kernelTraditional, (rayCount + 31) / 32, 1, 1, 32, 1, 1);
+      }
+    };
+
+    if (passesPerSubmit >= passes) {
+      bool ownBatch = !vContext->isBatching();
+      if (ownBatch) vContext->beginBatch(passes, true);
+      recordPasses(0u, passes);
+      if (ownBatch) vContext->endBatch();
+    } else {
+      const bool wasBatching = vContext->isBatching();
+      if (wasBatching) {
+        vContext->endBatch();
+      }
+      for (uint32_t base = 0; base < passes; base += passesPerSubmit) {
+        uint32_t endPass = std::min(base + passesPerSubmit, passes);
+        vContext->beginBatch(endPass - base, true);
+        recordPasses(base, endPass);
+        vContext->endBatch();
+        if (endPass < passes) {
+          vContext->waitIdle();
+        }
+      }
+      if (wasBatching) {
+        vContext->beginBatch(1, true);
+      }
+    }
     lastCompletedPasses[23] = passes;
     break;
   }

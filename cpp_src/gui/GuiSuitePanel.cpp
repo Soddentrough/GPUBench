@@ -65,8 +65,8 @@ std::string subgroupTitleForCatalogEntry(const BenchmarkConfigMetadata& meta, st
         return "In-Shader Indirect Command Synthesis";
     }
 
-    if (meta.component == "Graphics" || meta.component == "Raster") {
-        outCategory = "Graphics";
+    if (meta.component == "Raster" || meta.component == "Graphics" || meta.component == "Rasterization & ROP") {
+        outCategory = "Raster";
         return "ROP Pixel & Blend Fill Rate";
     }
 
@@ -122,7 +122,7 @@ bool isCoreSuiteSlot(const BenchmarkItem& itm) {
 const char* shortCategoryTag(const std::string& name) {
     if (name == "Ray Tracing") return "RT";
     if (name == "Scheduling") return "SCHED";
-    if (name == "Graphics") return "GFX";
+    if (name == "Raster" || name == "Graphics") return "RASTER";
     if (name == "Host System") return "HOST";
     if (name == "Compute") return "COMP";
     if (name == "Memory") return "MEM";
@@ -171,7 +171,7 @@ void GuiApp::initializeBenchmarkCategories() {
         {"Memory",       "VRAM streaming bandwidth, L0-L3 cache hierarchy, PCIe/ReBAR/P2P interconnect, and pointer-chasing latency."},
         {"Ray Tracing",  "Hardware BVH build/traversal, Opacity Micromaps (OMM), SER/DGC scheduling, and 4-scene PBR path tracing."},
         {"Scheduling",   "GPU Work Graphs (producer-consumer), Async Compute/Copy engine overlap, and GPU indirect command synthesis."},
-        {"Graphics",     "Vulkan 1.4 dynamic rendering rasterization and Render Output Unit (ROP) pixel/blend fill throughput."},
+        {"Raster",       "Vulkan 1.4 dynamic rendering rasterization and Render Output Unit (ROP) pixel/blend fill throughput."},
         {"Host System",  "CPU host DRAM streaming bandwidth (AVX-512 / AVX2 / NEON) and 2 MB Large Page pointer-chasing latency."}
     };
 
@@ -482,7 +482,7 @@ GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
         return info;
     }
 
-    // 3. Standard single-config benchmarks (Compute, Memory, Scheduling, OMM, BVH, Graphics, Host System)
+    // 3. Standard single-config benchmarks (Compute, Memory, Scheduling, OMM, BVH, Raster, Host System)
     const ResultData* matched = nullptr;
     for (auto it = m_allResults.rbegin(); it != m_allResults.rend(); ++it) {
         if (matchesItem(*it, item, targetDeviceIndex)) {

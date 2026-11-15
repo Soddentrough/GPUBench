@@ -75,7 +75,7 @@ int main(int argc, char** argv) {
     cli.add_option("-k,--backend", preselectedBackend, "Pre-select compute backend (vulkan, rocm, opencl, auto)");
     cli.add_option("-b,--benchmark,--benchmarks", benchmarkOpt, "Pre-select benchmark(s) or comma-separated list");
     cli.add_option("-t,--test", testOpt, "Alias for --benchmark");
-    cli.add_option("-g,--group,--groups", groupOpt, "Pre-select benchmark category (compute, memory, raytracing, scheduling, graphics, system, all)");
+    cli.add_option("-g,--group,--groups", groupOpt, "Pre-select benchmark category (compute, memory, raytracing, scheduling, raster, graphics, system, all)");
     cli.add_option("-s,--scene", preselectedScene, "Pre-select Ray Tracing scene (indoor, forest, outdoor, showroom, all)");
     cli.add_option("-r,--res,--resolution", resolutionOpt, "Pre-select render resolution (720p, 1080p, 1440p, 4k, 8k, auto, or WxH)");
     cli.add_option("-i,--import", importJsonPath, "Import a unified CLI/GUI JSON session file on startup");

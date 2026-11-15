@@ -299,6 +299,7 @@ TEST_CASE(E2E_Tier1, ListBenchmarksFlag) {
   ASSERT_TRUE(res.stdoutStr.find("FP64") != std::string::npos);
   ASSERT_TRUE(res.stdoutStr.find("[Memory]") != std::string::npos);
   ASSERT_TRUE(res.stdoutStr.find("[Graphics]") != std::string::npos);
+  ASSERT_TRUE(res.stdoutStr.find("[Raster]") != std::string::npos);
   ASSERT_TRUE(res.stdoutStr.find("Pixel Fill Rate") != std::string::npos);
   ASSERT_TRUE(res.stdoutStr.find("[Ray Tracing]") != std::string::npos);
   ASSERT_TRUE(res.stdoutStr.find("RayRawTraversal") != std::string::npos);
@@ -339,6 +340,7 @@ TEST_CASE(E2E_Tier1, GroupSelectionFlag) {
   if (!hasUsableGpu()) { return; }
   auto res = runGpubench({"-g", "raster", "-c", "0", "--profile-snapshot", "-f"});
   ASSERT_EQ(res.exitCode, 0);
+  ASSERT_TRUE(res.stdoutStr.find("Raster") != std::string::npos);
   ASSERT_TRUE(res.stdoutStr.find("Pixel Fill Rate") != std::string::npos);
   ASSERT_TRUE(res.stdoutStr.find("GPixels/s") != std::string::npos);
 }

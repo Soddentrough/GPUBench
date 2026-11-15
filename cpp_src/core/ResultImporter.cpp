@@ -991,7 +991,7 @@ bool ResultImporter::loadFromString(const std::string &content, ImportedRun &out
         }
       } else if (rd.component == "Scheduling") {
         rd.sortWeight = (rd.subcategory == "GPU Work Graphs") ? 185 : 180;
-      } else if (rd.component == "Rasterization & ROP") {
+      } else if (rd.component == "Raster" || rd.component == "Graphics" || rd.component == "Rasterization & ROP") {
         rd.sortWeight = 200;
       } else if (rd.component == "Ray Tracing") {
         rd.sortWeight = 500;

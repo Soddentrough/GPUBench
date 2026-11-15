@@ -718,7 +718,7 @@ void GuiApp::selectOnlyBenchmark(const std::string& benchmarkId) {
     if (rawTokens.empty()) return;
 
     std::unordered_map<std::string, std::string> aliasMap = {
-        {"raster", "Pixel Fill Rate"}, {"graphics", "Pixel Fill Rate"},
+        {"raster", "Pixel Fill Rate"},
         {"indirect", "In-Shader Indirect Synthesis"},
         {"lds", "LDS Bank Conflicts"},
         {"rayscheduling", "RayScheduling"}, {"rt", "RayScheduling"}
@@ -773,13 +773,16 @@ void GuiApp::selectOnlyBenchmark(const std::string& benchmarkId) {
             continue;
         }
 
-        // Category match (compute, memory, raytracing, scheduling, graphics, system)
+        // Category match (compute, memory, raytracing, scheduling, raster, graphics/gfx, system)
         bool matchedCategory = false;
         for (auto& cat : m_categories) {
             std::string lowerCat = cat.name;
             lowerCat.erase(std::remove(lowerCat.begin(), lowerCat.end(), ' '), lowerCat.end());
             for (char& ch : lowerCat) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
-            if (lowerTok == lowerCat || (lowerTok == "system" && lowerCat == "hostsystem")) {
+            const bool isGraphicsUmbrella = (lowerTok == "graphics" || lowerTok == "gfx") &&
+                                            (lowerCat == "raster" || lowerCat == "raytracing");
+            if (lowerTok == lowerCat || (lowerTok == "system" && lowerCat == "hostsystem") ||
+                isGraphicsUmbrella) {
                 for (auto& sg : cat.subgroups) {
                     for (auto& item : sg.items) {
                         if (item.isSupported) {

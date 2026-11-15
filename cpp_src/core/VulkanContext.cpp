@@ -188,28 +188,31 @@ int scoreDeviceTypePriority(VkPhysicalDeviceType devType) {
 
 void VulkanContext::waitIdle() {
   if (device == VK_NULL_HANDLE) return;
+  if (m_deviceLost) {
+    m_inBatch = false;
+    m_batchCmdRecording = false;
+    m_batchInterDispatchBarrier = false;
+    m_batchDispatchCount = 0;
+    for (size_t i = 0; i < kMaxInFlight; ++i) {
+      inFlightFrames[i].inUse = false;
+    }
+    throw std::runtime_error("GPU device already lost in waitIdle()");
+  }
   if (m_inBatch) {
     endBatch();
   }
   for (size_t i = 0; i < kMaxInFlight; ++i) {
     if (inFlightFrames[i].inUse && inFlightFrames[i].fence != VK_NULL_HANDLE) {
-      constexpr uint64_t kTimeoutNs = 30'000'000'000ULL;
-      VkResult waitResult =
-          vkWaitForFences(device, 1, &inFlightFrames[i].fence, VK_TRUE, kTimeoutNs);
-      if (waitResult == VK_TIMEOUT) {
-        throw std::runtime_error("GPU dispatch timed out (>30 s) in waitIdle()");
-      } else if (waitResult != VK_SUCCESS) {
-        throw std::runtime_error("vkWaitForFences failed in waitIdle with result: " +
-                                 std::to_string(waitResult));
-      }
-      vkResetFences(device, 1, &inFlightFrames[i].fence);
-      inFlightFrames[i].inUse = false;
+      waitForFrameFence(inFlightFrames[i], 30'000'000'000ULL,
+                        "GPU dispatch timed out (>30 s) in waitIdle()",
+                        "waitIdle");
     }
   }
   std::lock_guard<std::recursive_mutex> qlock(m_queueMutex);
   if (computeQueue != VK_NULL_HANDLE) {
     VkResult queueResult = vkQueueWaitIdle(computeQueue);
     if (queueResult != VK_SUCCESS) {
+      if (queueResult == VK_ERROR_DEVICE_LOST) m_deviceLost = true;
       throw std::runtime_error("vkQueueWaitIdle failed in waitIdle with result: " +
                                std::to_string(queueResult));
     }
@@ -217,6 +220,7 @@ void VulkanContext::waitIdle() {
   if (graphicsQueue != VK_NULL_HANDLE && graphicsQueue != computeQueue) {
     VkResult queueResult = vkQueueWaitIdle(graphicsQueue);
     if (queueResult != VK_SUCCESS) {
+      if (queueResult == VK_ERROR_DEVICE_LOST) m_deviceLost = true;
       throw std::runtime_error("vkQueueWaitIdle(graphicsQueue) failed in waitIdle with result: " +
                                std::to_string(queueResult));
     }
@@ -998,6 +1002,15 @@ void VulkanContext::pickPhysicalDevice(uint32_t index) {
       vkDestroyQueryPool(device, perfQueryPool, nullptr);
       perfQueryPool = VK_NULL_HANDLE;
     }
+    m_inBatch = false;
+    m_batchCmdRecording = false;
+    m_batchInterDispatchBarrier = false;
+    m_batchDispatchCount = 0;
+    m_deviceLost = false;
+    isTimingActive = false;
+    timingRecording = false;
+    timingSubmitted = false;
+    m_activeTimingPairs.clear();
     performanceQuerySupported = false;
     performanceQueryEnabled = false;
     isPerfQueryActive = false;
@@ -1146,7 +1159,7 @@ void VulkanContext::initPipelineCache() {
 }
 
 void VulkanContext::flushPipelineCacheToDisk() const {
-  if (device == VK_NULL_HANDLE || m_pipelineCache == VK_NULL_HANDLE) {
+  if (device == VK_NULL_HANDLE || m_pipelineCache == VK_NULL_HANDLE || m_deviceLost) {
     return;
   }
   size_t dataSize = 0;
@@ -2474,11 +2487,13 @@ void VulkanContext::writeBuffer(ComputeBuffer buffer, size_t offset,
         submitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, stagingFence);
       }
       if (submitRes != VK_SUCCESS) {
+        if (submitRes == VK_ERROR_DEVICE_LOST) m_deviceLost = true;
         throw std::runtime_error("vkQueueSubmit failed in writeBuffer with result: " +
                                  std::to_string(submitRes));
       }
       VkResult waitRes = vkWaitForFences(device, 1, &stagingFence, VK_TRUE, UINT64_MAX);
       if (waitRes != VK_SUCCESS) {
+        if (waitRes == VK_ERROR_DEVICE_LOST) m_deviceLost = true;
         throw std::runtime_error("vkWaitForFences failed in writeBuffer with result: " +
                                  std::to_string(waitRes));
       }
@@ -2486,11 +2501,13 @@ void VulkanContext::writeBuffer(ComputeBuffer buffer, size_t offset,
       std::lock_guard<std::recursive_mutex> qlock(m_queueMutex);
       VkResult submitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, VK_NULL_HANDLE);
       if (submitRes != VK_SUCCESS) {
+        if (submitRes == VK_ERROR_DEVICE_LOST) m_deviceLost = true;
         throw std::runtime_error("vkQueueSubmit failed in writeBuffer with result: " +
                                  std::to_string(submitRes));
       }
       VkResult waitRes = vkQueueWaitIdle(computeQueue);
       if (waitRes != VK_SUCCESS) {
+        if (waitRes == VK_ERROR_DEVICE_LOST) m_deviceLost = true;
         throw std::runtime_error("vkQueueWaitIdle failed in writeBuffer with result: " +
                                  std::to_string(waitRes));
       }
@@ -2571,11 +2588,13 @@ void VulkanContext::readBuffer(ComputeBuffer buffer, size_t offset, size_t size,
         submitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, stagingFence);
       }
       if (submitRes != VK_SUCCESS) {
+        if (submitRes == VK_ERROR_DEVICE_LOST) mutableThis->m_deviceLost = true;
         throw std::runtime_error("vkQueueSubmit failed in readBuffer with result: " +
                                  std::to_string(submitRes));
       }
       VkResult waitRes = vkWaitForFences(device, 1, &stagingFence, VK_TRUE, UINT64_MAX);
       if (waitRes != VK_SUCCESS) {
+        if (waitRes == VK_ERROR_DEVICE_LOST) mutableThis->m_deviceLost = true;
         throw std::runtime_error("vkWaitForFences failed in readBuffer with result: " +
                                  std::to_string(waitRes));
       }
@@ -2583,11 +2602,13 @@ void VulkanContext::readBuffer(ComputeBuffer buffer, size_t offset, size_t size,
       std::lock_guard<std::recursive_mutex> qlock(m_queueMutex);
       VkResult submitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, VK_NULL_HANDLE);
       if (submitRes != VK_SUCCESS) {
+        if (submitRes == VK_ERROR_DEVICE_LOST) mutableThis->m_deviceLost = true;
         throw std::runtime_error("vkQueueSubmit failed in readBuffer with result: " +
                                  std::to_string(submitRes));
       }
       VkResult waitRes = vkQueueWaitIdle(computeQueue);
       if (waitRes != VK_SUCCESS) {
+        if (waitRes == VK_ERROR_DEVICE_LOST) mutableThis->m_deviceLost = true;
         throw std::runtime_error("vkQueueWaitIdle failed in readBuffer with result: " +
                                  std::to_string(waitRes));
       }
@@ -3078,43 +3099,132 @@ void VulkanContext::beginBatch(uint32_t /*expected_dispatches*/,
   m_batchDispatchCount = 0;
 }
 
+void VulkanContext::resetQueryStateOnFailure() {
+  isTimingActive = false;
+  timingRecording = false;
+  timingSubmitted = false;
+  timingSubmittedFence = VK_NULL_HANDLE;
+  m_activeTimingPairs.clear();
+  if (isPerfQueryActive) {
+    if (!m_deviceLost && device != VK_NULL_HANDLE && pfnReleaseProfilingLockKHR_ptr) {
+      pfnReleaseProfilingLockKHR_ptr(device);
+    }
+    isPerfQueryActive = false;
+    perfQueryRecording = false;
+    perfQuerySubmitted = false;
+    perfQueryNeedsSubmitInfo = false;
+  }
+}
+
+void VulkanContext::waitForFrameFence(InFlightFrame &frame, uint64_t timeoutNs,
+                                      const char *timeoutMessage,
+                                      const char *where) {
+  if (!frame.inUse || frame.fence == VK_NULL_HANDLE) {
+    return;
+  }
+  if (m_deviceLost) {
+    frame.inUse = false;
+    throw std::runtime_error(std::string("GPU device already lost") +
+                             (where ? (std::string(" in ") + where) : ""));
+  }
+  VkResult waitResult =
+      vkWaitForFences(device, 1, &frame.fence, VK_TRUE, timeoutNs);
+  if (waitResult == VK_TIMEOUT) {
+    throw std::runtime_error(timeoutMessage);
+  } else if (waitResult != VK_SUCCESS) {
+    if (waitResult == VK_ERROR_DEVICE_LOST) {
+      m_deviceLost = true;
+    }
+    frame.inUse = false;
+    throw std::runtime_error(std::string("vkWaitForFences failed") +
+                             (where ? (std::string(" in ") + where) : "") +
+                             " with result: " + std::to_string(waitResult));
+  }
+  vkResetFences(device, 1, &frame.fence);
+  frame.inUse = false;
+}
+
+void VulkanContext::finishAndSubmitFrame(InFlightFrame &frame, const char *where) {
+  if (m_deviceLost || device == VK_NULL_HANDLE) {
+    resetQueryStateOnFailure();
+    throw std::runtime_error(std::string("GPU device already lost in ") + where);
+  }
+
+  maybeEndPerfQuery(frame.commandBuffer);
+  maybeEndTiming(frame.commandBuffer);
+  VkResult endRes = vkEndCommandBuffer(frame.commandBuffer);
+  if (endRes != VK_SUCCESS) {
+    if (endRes == VK_ERROR_DEVICE_LOST) {
+      m_deviceLost = true;
+    }
+    resetQueryStateOnFailure();
+    throw std::runtime_error(std::string("vkEndCommandBuffer failed in ") +
+                             where + " with result: " + std::to_string(endRes));
+  }
+
+  VkSubmitInfo submitInfo{};
+  submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+  submitInfo.commandBufferCount = 1;
+  submitInfo.pCommandBuffers = &frame.commandBuffer;
+
+  VkPerformanceQuerySubmitInfoKHR perfSubmitInfo{
+      VK_STRUCTURE_TYPE_PERFORMANCE_QUERY_SUBMIT_INFO_KHR};
+  perfSubmitInfo.counterPassIndex = 0;
+  if (perfQueryNeedsSubmitInfo) {
+    perfSubmitInfo.pNext = submitInfo.pNext;
+    submitInfo.pNext = &perfSubmitInfo;
+    perfQueryNeedsSubmitInfo = false;
+  }
+
+  VkResult submitRes;
+  {
+    std::lock_guard<std::recursive_mutex> qlock(m_queueMutex);
+    submitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, frame.fence);
+  }
+  if (submitRes != VK_SUCCESS) {
+    if (submitRes == VK_ERROR_DEVICE_LOST) {
+      m_deviceLost = true;
+    }
+    resetQueryStateOnFailure();
+    throw std::runtime_error(std::string("vkQueueSubmit failed in ") + where +
+                             " with result: " + std::to_string(submitRes));
+  }
+  frame.inUse = true;
+  currentFrameIndex = (currentFrameIndex + 1) % kMaxInFlight;
+}
+
 void VulkanContext::endBatch() {
   if (!m_inBatch) return;
-  if (m_batchCmdRecording) {
-    InFlightFrame &frame = inFlightFrames[currentFrameIndex];
-    maybeEndPerfQuery(frame.commandBuffer);
-    maybeEndTiming(frame.commandBuffer);
-    vkEndCommandBuffer(frame.commandBuffer);
-
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &frame.commandBuffer;
-
-    VkPerformanceQuerySubmitInfoKHR perfSubmitInfo{VK_STRUCTURE_TYPE_PERFORMANCE_QUERY_SUBMIT_INFO_KHR};
-    perfSubmitInfo.counterPassIndex = 0;
-    if (perfQueryNeedsSubmitInfo) {
-      perfSubmitInfo.pNext = submitInfo.pNext;
-      submitInfo.pNext = &perfSubmitInfo;
-      perfQueryNeedsSubmitInfo = false;
-    }
-
-    VkResult submitRes;
-    {
-      std::lock_guard<std::recursive_mutex> qlock(m_queueMutex);
-      submitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, frame.fence);
-    }
-    if (submitRes != VK_SUCCESS) {
-      throw std::runtime_error("vkQueueSubmit failed in endBatch with result: " +
-                               std::to_string(submitRes));
-    }
-    frame.inUse = true;
-    currentFrameIndex = (currentFrameIndex + 1) % kMaxInFlight;
-    m_batchCmdRecording = false;
-  }
+  const bool wasRecording = m_batchCmdRecording;
+  m_batchCmdRecording = false;
   m_inBatch = false;
   m_batchInterDispatchBarrier = false;
   m_batchDispatchCount = 0;
+
+  if (!wasRecording) return;
+  if (m_deviceLost || device == VK_NULL_HANDLE) {
+    resetQueryStateOnFailure();
+    return;
+  }
+
+  InFlightFrame &frame = inFlightFrames[currentFrameIndex];
+  finishAndSubmitFrame(frame, "endBatch");
+}
+
+void VulkanContext::abortBatch() {
+  if (!m_inBatch) return;
+  const bool wasRecording = m_batchCmdRecording;
+  m_batchCmdRecording = false;
+  m_inBatch = false;
+  m_batchInterDispatchBarrier = false;
+  m_batchDispatchCount = 0;
+
+  InFlightFrame &frame = inFlightFrames[currentFrameIndex];
+  if (wasRecording && !m_deviceLost && device != VK_NULL_HANDLE &&
+      frame.commandBuffer != VK_NULL_HANDLE) {
+    vkResetCommandBuffer(frame.commandBuffer, 0);
+  }
+  resetQueryStateOnFailure();
 }
 
 void VulkanContext::dispatch(ComputeKernel kernel, uint32_t grid_x,
@@ -3130,20 +3240,9 @@ void VulkanContext::dispatch(ComputeKernel kernel, uint32_t grid_x,
   if (m_inBatch) {
     InFlightFrame &frame = inFlightFrames[currentFrameIndex];
     if (!m_batchCmdRecording) {
-      if (frame.inUse) {
-        constexpr uint64_t kTimeoutNs = 30'000'000'000ULL;
-        VkResult waitResult =
-            vkWaitForFences(device, 1, &frame.fence, VK_TRUE, kTimeoutNs);
-        if (waitResult == VK_TIMEOUT) {
-          throw std::runtime_error(
-              "GPU dispatch timed out (>30 s) — aborting benchmark to prevent amdgpu TDR crash.");
-        } else if (waitResult != VK_SUCCESS) {
-          throw std::runtime_error("vkWaitForFences failed with result: " +
-                                   std::to_string(waitResult));
-        }
-        vkResetFences(device, 1, &frame.fence);
-        frame.inUse = false;
-      }
+      waitForFrameFence(
+          frame, 30'000'000'000ULL,
+          "GPU dispatch timed out (>30 s) — aborting benchmark to prevent amdgpu TDR crash.");
 
       VkCommandBufferBeginInfo beginInfo{};
       beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -3209,20 +3308,9 @@ void VulkanContext::dispatch(ComputeKernel kernel, uint32_t grid_x,
   }
 
   InFlightFrame &frame = inFlightFrames[currentFrameIndex];
-  if (frame.inUse) {
-    constexpr uint64_t kTimeoutNs = 30'000'000'000ULL;
-    VkResult waitResult =
-        vkWaitForFences(device, 1, &frame.fence, VK_TRUE, kTimeoutNs);
-    if (waitResult == VK_TIMEOUT) {
-      throw std::runtime_error(
-          "GPU dispatch timed out (>30 s) — aborting benchmark to prevent amdgpu TDR crash.");
-    } else if (waitResult != VK_SUCCESS) {
-      throw std::runtime_error("vkWaitForFences failed with result: " +
-                               std::to_string(waitResult));
-    }
-    vkResetFences(device, 1, &frame.fence);
-    frame.inUse = false;
-  }
+  waitForFrameFence(
+      frame, 30'000'000'000ULL,
+      "GPU dispatch timed out (>30 s) — aborting benchmark to prevent amdgpu TDR crash.");
 
   VkCommandBufferBeginInfo beginInfo{};
   beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -3278,35 +3366,7 @@ void VulkanContext::dispatch(ComputeKernel kernel, uint32_t grid_x,
     vkCmdDispatch(frame.commandBuffer, grid_x, grid_y, grid_z);
   }
 
-  maybeEndPerfQuery(frame.commandBuffer);
-  maybeEndTiming(frame.commandBuffer);
-  vkEndCommandBuffer(frame.commandBuffer);
-
-  VkSubmitInfo submitInfo{};
-  submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-  submitInfo.commandBufferCount = 1;
-  submitInfo.pCommandBuffers = &frame.commandBuffer;
-
-  VkPerformanceQuerySubmitInfoKHR perfSubmitInfo{VK_STRUCTURE_TYPE_PERFORMANCE_QUERY_SUBMIT_INFO_KHR};
-  perfSubmitInfo.counterPassIndex = 0;
-  if (perfQueryNeedsSubmitInfo) {
-    perfSubmitInfo.pNext = submitInfo.pNext;
-    submitInfo.pNext = &perfSubmitInfo;
-    perfQueryNeedsSubmitInfo = false;
-  }
-
-  VkResult submitRes;
-  {
-    std::lock_guard<std::recursive_mutex> qlock(m_queueMutex);
-    submitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, frame.fence);
-  }
-  if (submitRes != VK_SUCCESS) {
-    throw std::runtime_error("vkQueueSubmit failed in dispatch with result: " +
-                             std::to_string(submitRes));
-  }
-  frame.inUse = true;
-
-  currentFrameIndex = (currentFrameIndex + 1) % kMaxInFlight;
+  finishAndSubmitFrame(frame, "dispatch");
 }
 
 KernelResourceUsage VulkanContext::getKernelResourceUsage(ComputeKernel kernel) const {
@@ -3542,20 +3602,9 @@ void VulkanContext::dispatchIndirect(ComputeKernel kernel_handle,
 
   auto &frame = inFlightFrames[currentFrameIndex];
   if (!m_inBatch || !m_batchCmdRecording) {
-    if (frame.inUse) {
-      constexpr uint64_t kTimeoutNs = 30'000'000'000ULL;
-      VkResult waitResult =
-          vkWaitForFences(device, 1, &frame.fence, VK_TRUE, kTimeoutNs);
-      if (waitResult == VK_TIMEOUT) {
-        throw std::runtime_error(
-            "GPU dispatch timed out (>30 s) — aborting benchmark to prevent amdgpu TDR crash.");
-      } else if (waitResult != VK_SUCCESS) {
-        throw std::runtime_error("vkWaitForFences failed with result: " +
-                                 std::to_string(waitResult));
-      }
-      vkResetFences(device, 1, &frame.fence);
-      frame.inUse = false;
-    }
+    waitForFrameFence(
+        frame, 30'000'000'000ULL,
+        "GPU dispatch timed out (>30 s) — aborting benchmark to prevent amdgpu TDR crash.");
 
     vkResetCommandBuffer(frame.commandBuffer, 0);
 
@@ -3612,35 +3661,7 @@ void VulkanContext::dispatchIndirect(ComputeKernel kernel_handle,
     return;
   }
 
-  maybeEndPerfQuery(frame.commandBuffer);
-  maybeEndTiming(frame.commandBuffer);
-  vkEndCommandBuffer(frame.commandBuffer);
-
-  VkSubmitInfo submitInfo{};
-  submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-  submitInfo.commandBufferCount = 1;
-  submitInfo.pCommandBuffers = &frame.commandBuffer;
-
-  VkPerformanceQuerySubmitInfoKHR perfSubmitInfo{VK_STRUCTURE_TYPE_PERFORMANCE_QUERY_SUBMIT_INFO_KHR};
-  perfSubmitInfo.counterPassIndex = 0;
-  if (perfQueryNeedsSubmitInfo) {
-    perfSubmitInfo.pNext = submitInfo.pNext;
-    submitInfo.pNext = &perfSubmitInfo;
-    perfQueryNeedsSubmitInfo = false;
-  }
-
-  VkResult indSubmitRes = VK_SUCCESS;
-  {
-    std::lock_guard<std::recursive_mutex> qlock(m_queueMutex);
-    indSubmitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, frame.fence);
-  }
-  if (indSubmitRes != VK_SUCCESS) {
-    throw std::runtime_error("vkQueueSubmit failed in dispatchIndirect with result: " +
-                             std::to_string(indSubmitRes));
-  }
-  frame.inUse = true;
-
-  currentFrameIndex = (currentFrameIndex + 1) % kMaxInFlight;
+  finishAndSubmitFrame(frame, "dispatchIndirect");
 }
 
 void VulkanContext::dispatchIndirectSequence(
@@ -3653,20 +3674,9 @@ void VulkanContext::dispatchIndirectSequence(
 
   auto &frame = inFlightFrames[currentFrameIndex];
   if (!m_inBatch || !m_batchCmdRecording) {
-    if (frame.inUse) {
-      constexpr uint64_t kTimeoutNs = 30'000'000'000ULL;
-      VkResult waitResult =
-          vkWaitForFences(device, 1, &frame.fence, VK_TRUE, kTimeoutNs);
-      if (waitResult == VK_TIMEOUT) {
-        throw std::runtime_error(
-            "GPU dispatch timed out (>30 s) — aborting benchmark to prevent amdgpu TDR crash.");
-      } else if (waitResult != VK_SUCCESS) {
-        throw std::runtime_error("vkWaitForFences failed with result: " +
-                                 std::to_string(waitResult));
-      }
-      vkResetFences(device, 1, &frame.fence);
-      frame.inUse = false;
-    }
+    waitForFrameFence(
+        frame, 30'000'000'000ULL,
+        "GPU dispatch timed out (>30 s) — aborting benchmark to prevent amdgpu TDR crash.");
 
     vkResetCommandBuffer(frame.commandBuffer, 0);
 
@@ -3726,35 +3736,7 @@ void VulkanContext::dispatchIndirectSequence(
     return;
   }
 
-  maybeEndPerfQuery(frame.commandBuffer);
-  maybeEndTiming(frame.commandBuffer);
-  vkEndCommandBuffer(frame.commandBuffer);
-
-  VkSubmitInfo submitInfo{};
-  submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-  submitInfo.commandBufferCount = 1;
-  submitInfo.pCommandBuffers = &frame.commandBuffer;
-
-  VkPerformanceQuerySubmitInfoKHR perfSubmitInfo{VK_STRUCTURE_TYPE_PERFORMANCE_QUERY_SUBMIT_INFO_KHR};
-  perfSubmitInfo.counterPassIndex = 0;
-  if (perfQueryNeedsSubmitInfo) {
-    perfSubmitInfo.pNext = submitInfo.pNext;
-    submitInfo.pNext = &perfSubmitInfo;
-    perfQueryNeedsSubmitInfo = false;
-  }
-
-  VkResult indSeqSubmitRes = VK_SUCCESS;
-  {
-    std::lock_guard<std::recursive_mutex> qlock(m_queueMutex);
-    indSeqSubmitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, frame.fence);
-  }
-  if (indSeqSubmitRes != VK_SUCCESS) {
-    throw std::runtime_error("vkQueueSubmit failed in dispatchIndirectSequence with result: " +
-                             std::to_string(indSeqSubmitRes));
-  }
-  frame.inUse = true;
-
-  currentFrameIndex = (currentFrameIndex + 1) % kMaxInFlight;
+  finishAndSubmitFrame(frame, "dispatchIndirectSequence");
 }
 
 void VulkanContext::dispatchWorkListSequence(
@@ -3774,20 +3756,9 @@ void VulkanContext::dispatchWorkListSequence(
 
   auto &frame = inFlightFrames[currentFrameIndex];
   if (!m_inBatch || !m_batchCmdRecording) {
-    if (frame.inUse) {
-      constexpr uint64_t kTimeoutNs = 30'000'000'000ULL;
-      VkResult waitResult =
-          vkWaitForFences(device, 1, &frame.fence, VK_TRUE, kTimeoutNs);
-      if (waitResult == VK_TIMEOUT) {
-        throw std::runtime_error(
-            "GPU dispatch timed out (>30 s) — aborting benchmark to prevent amdgpu TDR crash.");
-      } else if (waitResult != VK_SUCCESS) {
-        throw std::runtime_error("vkWaitForFences failed with result: " +
-                                 std::to_string(waitResult));
-      }
-      vkResetFences(device, 1, &frame.fence);
-      frame.inUse = false;
-    }
+    waitForFrameFence(
+        frame, 30'000'000'000ULL,
+        "GPU dispatch timed out (>30 s) — aborting benchmark to prevent amdgpu TDR crash.");
 
     vkResetCommandBuffer(frame.commandBuffer, 0);
 
@@ -4058,35 +4029,7 @@ void VulkanContext::dispatchWorkListSequence(
     return;
   }
 
-  maybeEndPerfQuery(frame.commandBuffer);
-  maybeEndTiming(frame.commandBuffer);
-  vkEndCommandBuffer(frame.commandBuffer);
-
-  VkSubmitInfo submitInfo{};
-  submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-  submitInfo.commandBufferCount = 1;
-  submitInfo.pCommandBuffers = &frame.commandBuffer;
-
-  VkPerformanceQuerySubmitInfoKHR perfSubmitInfo{VK_STRUCTURE_TYPE_PERFORMANCE_QUERY_SUBMIT_INFO_KHR};
-  perfSubmitInfo.counterPassIndex = 0;
-  if (perfQueryNeedsSubmitInfo) {
-    perfSubmitInfo.pNext = submitInfo.pNext;
-    submitInfo.pNext = &perfSubmitInfo;
-    perfQueryNeedsSubmitInfo = false;
-  }
-
-  VkResult wlSubmitRes = VK_SUCCESS;
-  {
-    std::lock_guard<std::recursive_mutex> qlock(m_queueMutex);
-    wlSubmitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, frame.fence);
-  }
-  if (wlSubmitRes != VK_SUCCESS) {
-    throw std::runtime_error("vkQueueSubmit failed in dispatchWorkListSequence with result: " +
-                             std::to_string(wlSubmitRes));
-  }
-  frame.inUse = true;
-
-  currentFrameIndex = (currentFrameIndex + 1) % kMaxInFlight;
+  finishAndSubmitFrame(frame, "dispatchWorkListSequence");
 }
 
 void VulkanContext::dispatchRayTracingIndirect(ComputeKernel kernel_handle,
@@ -4099,20 +4042,9 @@ void VulkanContext::dispatchRayTracingIndirect(ComputeKernel kernel_handle,
 
   auto &frame = inFlightFrames[currentFrameIndex];
   if (!m_inBatch || !m_batchCmdRecording) {
-    if (frame.inUse) {
-      constexpr uint64_t kTimeoutNs = 30'000'000'000ULL;
-      VkResult waitResult =
-          vkWaitForFences(device, 1, &frame.fence, VK_TRUE, kTimeoutNs);
-      if (waitResult == VK_TIMEOUT) {
-        throw std::runtime_error(
-            "GPU dispatch timed out (>30 s) — aborting benchmark to prevent amdgpu TDR crash.");
-      } else if (waitResult != VK_SUCCESS) {
-        throw std::runtime_error("vkWaitForFences failed with result: " +
-                                 std::to_string(waitResult));
-      }
-      vkResetFences(device, 1, &frame.fence);
-      frame.inUse = false;
-    }
+    waitForFrameFence(
+        frame, 30'000'000'000ULL,
+        "GPU dispatch timed out (>30 s) — aborting benchmark to prevent amdgpu TDR crash.");
 
     vkResetCommandBuffer(frame.commandBuffer, 0);
 
@@ -4169,35 +4101,7 @@ void VulkanContext::dispatchRayTracingIndirect(ComputeKernel kernel_handle,
     return;
   }
 
-  maybeEndPerfQuery(frame.commandBuffer);
-  maybeEndTiming(frame.commandBuffer);
-  vkEndCommandBuffer(frame.commandBuffer);
-
-  VkSubmitInfo submitInfo{};
-  submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-  submitInfo.commandBufferCount = 1;
-  submitInfo.pCommandBuffers = &frame.commandBuffer;
-
-  VkPerformanceQuerySubmitInfoKHR perfSubmitInfo{VK_STRUCTURE_TYPE_PERFORMANCE_QUERY_SUBMIT_INFO_KHR};
-  perfSubmitInfo.counterPassIndex = 0;
-  if (perfQueryNeedsSubmitInfo) {
-    perfSubmitInfo.pNext = submitInfo.pNext;
-    submitInfo.pNext = &perfSubmitInfo;
-    perfQueryNeedsSubmitInfo = false;
-  }
-
-  VkResult rtSubmitRes = VK_SUCCESS;
-  {
-    std::lock_guard<std::recursive_mutex> qlock(m_queueMutex);
-    rtSubmitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, frame.fence);
-  }
-  if (rtSubmitRes != VK_SUCCESS) {
-    throw std::runtime_error("vkQueueSubmit failed in dispatchRayTracingIndirect with result: " +
-                             std::to_string(rtSubmitRes));
-  }
-  frame.inUse = true;
-
-  currentFrameIndex = (currentFrameIndex + 1) % kMaxInFlight;
+  finishAndSubmitFrame(frame, "dispatchRayTracingIndirect");
 }
 
 VulkanContext::VulkanKernel *VulkanContext::getKernel(ComputeKernel handle) const {
@@ -4914,16 +4818,8 @@ void VulkanContext::dispatchDGCWorkListSequence(
 
   auto &frame = inFlightFrames[currentFrameIndex];
   if (!m_inBatch || !m_batchCmdRecording) {
-    if (frame.inUse) {
-      VkResult waitResult = vkWaitForFences(device, 1, &frame.fence, VK_TRUE, 3000000000ULL);
-      if (waitResult == VK_TIMEOUT) {
-        throw std::runtime_error("GPU dispatch timed out in dispatchDGCWorkListSequence");
-      } else if (waitResult != VK_SUCCESS) {
-        throw std::runtime_error("vkWaitForFences failed: " + std::to_string(waitResult));
-      }
-      vkResetFences(device, 1, &frame.fence);
-      frame.inUse = false;
-    }
+    waitForFrameFence(frame, 3000000000ULL,
+                      "GPU dispatch timed out in dispatchDGCWorkListSequence");
 
     vkResetCommandBuffer(frame.commandBuffer, 0);
     VkCommandBufferBeginInfo beginInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
@@ -5033,33 +4929,7 @@ void VulkanContext::dispatchDGCWorkListSequence(
     return;
   }
 
-  maybeEndPerfQuery(frame.commandBuffer);
-  maybeEndTiming(frame.commandBuffer);
-  vkEndCommandBuffer(frame.commandBuffer);
-
-  VkSubmitInfo submitInfo{VK_STRUCTURE_TYPE_SUBMIT_INFO};
-  submitInfo.commandBufferCount = 1;
-  submitInfo.pCommandBuffers = &frame.commandBuffer;
-
-  VkPerformanceQuerySubmitInfoKHR perfSubmitInfo{VK_STRUCTURE_TYPE_PERFORMANCE_QUERY_SUBMIT_INFO_KHR};
-  perfSubmitInfo.counterPassIndex = 0;
-  if (perfQueryNeedsSubmitInfo) {
-    perfSubmitInfo.pNext = submitInfo.pNext;
-    submitInfo.pNext = &perfSubmitInfo;
-    perfQueryNeedsSubmitInfo = false;
-  }
-
-  VkResult submitRes = VK_SUCCESS;
-  {
-    std::lock_guard<std::recursive_mutex> qlock(m_queueMutex);
-    submitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, frame.fence);
-  }
-  if (submitRes != VK_SUCCESS) {
-    throw std::runtime_error("vkQueueSubmit failed in dispatchDGCWorkListSequence: " +
-                             std::to_string(submitRes));
-  }
-  frame.inUse = true;
-  currentFrameIndex = (currentFrameIndex + 1) % kMaxInFlight;
+  finishAndSubmitFrame(frame, "dispatchDGCWorkListSequence");
 }
 
 void VulkanContext::dispatchDGCSequence(ComputeKernel kernel_handle,
@@ -5074,16 +4944,8 @@ void VulkanContext::dispatchDGCSequence(ComputeKernel kernel_handle,
 
   auto &frame = inFlightFrames[currentFrameIndex];
   if (!m_inBatch || !m_batchCmdRecording) {
-    if (frame.inUse) {
-      VkResult waitResult = vkWaitForFences(device, 1, &frame.fence, VK_TRUE, 3000000000ULL);
-      if (waitResult == VK_TIMEOUT) {
-        throw std::runtime_error("GPU dispatch timed out in dispatchDGCSequence");
-      } else if (waitResult != VK_SUCCESS) {
-        throw std::runtime_error("vkWaitForFences failed: " + std::to_string(waitResult));
-      }
-      vkResetFences(device, 1, &frame.fence);
-      frame.inUse = false;
-    }
+    waitForFrameFence(frame, 3000000000ULL,
+                      "GPU dispatch timed out in dispatchDGCSequence");
 
     vkResetCommandBuffer(frame.commandBuffer, 0);
     VkCommandBufferBeginInfo beginInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
@@ -5135,33 +4997,7 @@ void VulkanContext::dispatchDGCSequence(ComputeKernel kernel_handle,
     return;
   }
 
-  maybeEndPerfQuery(frame.commandBuffer);
-  maybeEndTiming(frame.commandBuffer);
-  vkEndCommandBuffer(frame.commandBuffer);
-
-  VkSubmitInfo submitInfo{VK_STRUCTURE_TYPE_SUBMIT_INFO};
-  submitInfo.commandBufferCount = 1;
-  submitInfo.pCommandBuffers = &frame.commandBuffer;
-
-  VkPerformanceQuerySubmitInfoKHR perfSubmitInfo{VK_STRUCTURE_TYPE_PERFORMANCE_QUERY_SUBMIT_INFO_KHR};
-  perfSubmitInfo.counterPassIndex = 0;
-  if (perfQueryNeedsSubmitInfo) {
-    perfSubmitInfo.pNext = submitInfo.pNext;
-    submitInfo.pNext = &perfSubmitInfo;
-    perfQueryNeedsSubmitInfo = false;
-  }
-
-  VkResult submitRes = VK_SUCCESS;
-  {
-    std::lock_guard<std::recursive_mutex> qlock(m_queueMutex);
-    submitRes = vkQueueSubmit(computeQueue, 1, &submitInfo, frame.fence);
-  }
-  if (submitRes != VK_SUCCESS) {
-    throw std::runtime_error("vkQueueSubmit failed in dispatchDGCSequence: " +
-                             std::to_string(submitRes));
-  }
-  frame.inUse = true;
-  currentFrameIndex = (currentFrameIndex + 1) % kMaxInFlight;
+  finishAndSubmitFrame(frame, "dispatchDGCSequence");
 }
 
 void VulkanContext::cmdPipelineMemoryBarrier2(

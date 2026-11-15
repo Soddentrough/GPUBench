@@ -8,7 +8,7 @@ TEST_CASE(PixelFill, MetadataAndInvariants) {
   PixelFillRateBench bench;
   ASSERT_EQ(std::string(bench.GetName()), "Pixel Fill Rate");
   ASSERT_EQ(std::string(bench.GetMetric()), "GPixels/s");
-  ASSERT_EQ(std::string(bench.GetComponent()), "Graphics");
+  ASSERT_EQ(std::string(bench.GetComponent()), "Raster");
   ASSERT_EQ(std::string(bench.GetSubCategory()), "ROP Throughput");
   ASSERT_EQ(bench.GetSortWeight(), 450);
 

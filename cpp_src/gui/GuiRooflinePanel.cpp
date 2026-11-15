@@ -132,7 +132,7 @@ const char* domainTabName(int dom) {
     case DOMAIN_MEMORY:    return "MEMORY BW";
     case DOMAIN_RAY:       return "RAY TRACING";
     case DOMAIN_BVH:       return "BVH BUILD";
-    case DOMAIN_GFX:       return "RASTER / GFX";
+    case DOMAIN_GFX:       return "RASTER";
     case DOMAIN_SCHED_GFX: return "SCHEDULING";
     case DOMAIN_LATENCY:   return "LATENCY";
     default:               return "OTHER";
