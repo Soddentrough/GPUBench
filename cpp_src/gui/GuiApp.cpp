@@ -979,76 +979,10 @@ void GuiApp::startBenchmarks() {
              benchmarksToRun.end());
     m_stayOnRtViewportAfterRun = false;
 
-    struct IsaPreprobeTarget {
-        std::string id;
-        int configIndex{-1};
-        std::string cacheKey;
-    };
-    std::vector<IsaPreprobeTarget> isaPreprobeTargets;
-    for (const auto& cat : m_categories) {
-        for (const auto& sg : cat.subgroups) {
-            for (const auto& item : sg.items) {
-                if (!item.selected || !item.isSupported || item.category == "System") {
-                    continue;
-                }
-                const std::string key = makeIsaCacheKey(item);
-                const bool dup = std::any_of(isaPreprobeTargets.begin(), isaPreprobeTargets.end(),
-                                             [&key](const IsaPreprobeTarget& t) { return t.cacheKey == key; });
-                if (!dup) {
-                    isaPreprobeTargets.push_back(IsaPreprobeTarget{item.id, item.configIndex, key});
-                }
-            }
-        }
-    }
-    const std::string preprobeBackend = m_selectedBackend;
-    const uint32_t preprobeDeviceIdx = m_telemetryGpuIndex;
-
     m_execThread = std::thread([this, benchmarksToRun, deviceIndices, backends,
                                 rw, rh, scene, spp, dumpRenders, verbose, debug,
-                                selectedWorkloads, keepRtViewport,
-                                isaPreprobeTargets, preprobeBackend, preprobeDeviceIdx]() {
+                                selectedWorkloads, keepRtViewport]() {
         try {
-            // Pre-populate missing ISA cache entries BEFORE timing starts (zero contention)
-            // so each auto-selected test displays its hot loop & register file live as it runs.
-            for (const auto& target : isaPreprobeTargets) {
-                if (m_cancelToken.load()) {
-                    break;
-                }
-                {
-                    std::lock_guard<std::mutex> lock(m_isaMutex);
-                    if (m_isaCache.find(target.cacheKey) != m_isaCache.end()) {
-                        continue;
-                    }
-                }
-                IsaDumperOptions opts;
-                opts.targets = {target.id};
-                if (target.configIndex >= 0) {
-                    opts.configs = {target.configIndex};
-                }
-                opts.backends = {preprobeBackend};
-                opts.deviceIndex = preprobeDeviceIdx;
-                opts.fullIsa = true;
-
-                IsaInspectionResult isaRes = IsaDumper::inspect(opts);
-                if (isaRes.artifacts.empty() && !opts.configs.empty()) {
-                    opts.configs.clear();
-                    isaRes = IsaDumper::inspect(opts);
-                }
-                {
-                    std::lock_guard<std::mutex> lock(m_isaMutex);
-                    m_isaCache[target.cacheKey] = std::move(isaRes);
-                }
-            }
-
-            if (m_cancelToken.load()) {
-                m_telemetryWorker.stopRecording();
-                m_textureCacheNeedsClear.store(true);
-                std::lock_guard<std::mutex> lock(m_resultsMutex);
-                m_execState = ExecutionState::Cancelled;
-                m_statusMessage = "Benchmark execution aborted by user.";
-                return;
-            }
-
             auto callback = [this](const ResultData& res) {
                 std::lock_guard<std::mutex> lock(m_resultsMutex);
                 m_incomingResults.push_back(res);
@@ -1166,6 +1100,7 @@ void GuiApp::processIncomingResults() {
     if (m_execState == ExecutionState::Running) {
         auto now = std::chrono::steady_clock::now();
         m_elapsedSeconds = std::chrono::duration<double>(now - m_benchmarkStartTime).count();
+        m_wasRunning = true;
     } else {
         m_hasCurrentlyRunningResult = false;
         m_currentlyRunningTestId.clear();
@@ -1191,6 +1126,12 @@ void GuiApp::processIncomingResults() {
             if (m_restoreSceneAfterRun) {
                 m_scene = m_savedSceneBeforeCapture;
                 m_restoreSceneAfterRun = false;
+            }
+        }
+        if (m_wasRunning) {
+            m_wasRunning = false;
+            if (const BenchmarkItem* inspected = getInspectedItem()) {
+                requestIsaInspection(*inspected, false);
             }
         }
     }
@@ -1567,7 +1508,13 @@ void GuiApp::requestIsaInspection(const BenchmarkItem& item, bool forceRefresh) 
     m_isaThread = std::thread([this, key, opts]() mutable {
         IsaInspectionResult res = IsaDumper::inspect(opts);
         if (res.artifacts.empty() && !opts.configs.empty()) {
-            opts.configs.clear();
+            // Avoid compiling all 9 RayScheduling shaders (~16s in LLPC) for unmapped sub-configs;
+            // fall back to a single representative RTP shader (~89ms) for RayScheduling.
+            if (!opts.targets.empty() && opts.targets[0] == "RayScheduling") {
+                opts.configs = {7};
+            } else {
+                opts.configs.clear();
+            }
             res = IsaDumper::inspect(opts);
         }
         {
@@ -2152,10 +2099,10 @@ void GuiApp::renderTopInstrumentHeader(float width) {
         }
 
         const float jsonW = s(68.0f);
-        const float exportW = s(96.0f);
         const float cfgW = s(68.0f);
+        const float exportW = s(100.0f);
         const float execW = s(134.0f);
-        const float rightClusterW = jsonW + exportW + cfgW + execW + s(11.0f);
+        const float rightClusterW = jsonW + cfgW + exportW + execW + s(12.0f);
         const float targetX = ImGui::GetWindowWidth() - rightClusterW - s(10.0f);
         if (targetX > ImGui::GetCursorPosX() + s(8.0f)) {
             ImGui::SetCursorPosX(targetX);
@@ -2171,19 +2118,22 @@ void GuiApp::renderTopInstrumentHeader(float width) {
             m_showJsonSessionModal = true;
         }
         ImGui::SameLine(0.0f, s(3.0f));
-        ImGui::BeginDisabled(m_allResults.empty());
-        if (tacticalButton("##TopExportJson", "EXPORT JSON", ImVec2(exportW, bh), !m_allResults.empty(), c)) {
+        if (tacticalButton("##TopCfg", "CONFIG", ImVec2(cfgW, bh), m_showSettingsModal, c)) {
+            m_showSettingsModal = true;
+        }
+        ImGui::SameLine(0.0f, s(4.0f));
+        const bool canExportJson = !isRunning && !m_allResults.empty();
+        ImGui::BeginDisabled(!canExportJson);
+        if (tacticalButton("##TopExportJson", "EXPORT JSON", ImVec2(exportW, bh), false, c, false, false, canExportJson)) {
             exportResultsToJson(getDefaultJsonFilename());
         }
         ImGui::EndDisabled();
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-            ImGui::SetTooltip("%s", m_allResults.empty()
-                ? "Run benchmarks or import a session before exporting JSON."
-                : "Export all system information and benchmark results to a timestamped JSON in Documents/GPUBench.");
-        }
-        ImGui::SameLine(0.0f, s(3.0f));
-        if (tacticalButton("##TopCfg", "CONFIG", ImVec2(cfgW, bh), m_showSettingsModal, c)) {
-            m_showSettingsModal = true;
+            ImGui::SetTooltip("%s", isRunning
+                ? "Wait for benchmark run to finish before exporting JSON."
+                : (m_allResults.empty()
+                    ? "Run benchmarks or import a session before exporting JSON."
+                    : "Export all system information and benchmark results to a timestamped JSON in Documents/GPUBench."));
         }
         ImGui::SameLine(0.0f, s(4.0f));
         if (isRunning) {
@@ -2481,9 +2431,9 @@ void GuiApp::renderJsonSessionModal() {
             }
         }
         ImGui::SameLine(0.0f, s(6.0f));
-        bool canExport = !m_allResults.empty();
+        bool canExport = (m_execState != ExecutionState::Running) && !m_allResults.empty();
         ImGui::BeginDisabled(!canExport);
-        if (tacticalButton("##JsonExp", "EXPORT ACTIVE", ImVec2(btnW, s(30.0f)), false, c)) {
+        if (tacticalButton("##JsonExp", "EXPORT ACTIVE", ImVec2(btnW, s(30.0f)), false, c, false, false, canExport)) {
             exportResultsToJson(m_jsonPathBuffer);
             m_showJsonSessionModal = false;
             ImGui::CloseCurrentPopup();

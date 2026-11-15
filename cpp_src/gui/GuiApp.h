@@ -273,6 +273,7 @@ private:
 
     // Execution State
     ExecutionState m_execState{ExecutionState::Idle};
+    bool m_wasRunning{false};
     std::atomic<bool> m_cancelToken{false};
     std::thread m_execThread;
     std::mutex m_resultsMutex;

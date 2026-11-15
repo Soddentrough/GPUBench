@@ -469,16 +469,18 @@ inline void drawEtchedHeader(const char* sectionCode, const char* title,
 }
 
 inline bool tacticalButton(const char* id, const char* label, ImVec2 size, bool active,
-                           const BringUpColors& c, bool danger = false, bool primaryFill = false) {
+                           const BringUpColors& c, bool danger = false,
+                           bool primaryFill = false, bool successFill = false) {
     ImVec2 pos = ImGui::GetCursorScreenPos();
     ImVec2 txtSz = ImGui::CalcTextSize(label);
     ImVec2 resolvedSz = size;
     if (resolvedSz.x <= 0.0f) resolvedSz.x = txtSz.x + 16.0f;
     if (resolvedSz.y <= 0.0f) resolvedSz.y = txtSz.y + 8.0f;
 
+    const bool disabled = (ImGui::GetStyle().Alpha < 0.99f);
     bool pressed = ImGui::InvisibleButton(id, resolvedSz);
-    bool hovered = ImGui::IsItemHovered();
-    bool held = ImGui::IsItemActive();
+    bool hovered = !disabled && ImGui::IsItemHovered();
+    bool held = !disabled && ImGui::IsItemActive();
 
     ImVec2 p0 = pos;
     ImVec2 p1(pos.x + resolvedSz.x, pos.y + resolvedSz.y);
@@ -488,7 +490,11 @@ inline bool tacticalButton(const char* id, const char* label, ImVec2 size, bool 
     ImVec4 border = c.borderOuter;
     ImVec4 fg = c.textPrimary;
 
-    if (danger) {
+    if (disabled) {
+        bg = c.bgVoid;
+        border = c.borderInner;
+        fg = ImVec4(c.textMuted.x, c.textMuted.y, c.textMuted.z, 0.45f);
+    } else if (danger) {
         bg = held ? c.errColor : (hovered ? rgbaHex(0x611A16) : rgbaHex(0x3D1210));
         if (c.isLightTheme && !held) bg = hovered ? rgbaHex(0xF6D2D0) : rgbaHex(0xFCE8E6);
         border = c.errColor;
@@ -496,6 +502,13 @@ inline bool tacticalButton(const char* id, const char* label, ImVec2 size, bool 
     } else if (primaryFill) {
         bg = held ? c.phosphorMid : (hovered ? c.phosphorHi : c.phosphorMid);
         border = c.phosphorHi;
+        fg = c.textInverse;
+    } else if (successFill) {
+        bg = held ? c.okColor : (hovered ? ImVec4(std::min(1.0f, c.okColor.x * 1.12f),
+                                                 std::min(1.0f, c.okColor.y * 1.08f),
+                                                 std::min(1.0f, c.okColor.z * 1.08f), 1.0f)
+                                        : c.okColor);
+        border = c.okColor;
         fg = c.textInverse;
     } else if (active) {
         bg = c.phosphorGlow;
@@ -512,8 +525,9 @@ inline bool tacticalButton(const char* id, const char* label, ImVec2 size, bool 
     }
 
     dl->AddRectFilled(p0, p1, toU32(bg), 0.0f);
-    dl->AddRect(p0, p1, toU32(border), 0.0f, 0, active || primaryFill ? 1.5f : 1.0f);
-    if (active && !primaryFill && !danger) {
+    const float borderThick = (!disabled && (active || primaryFill || successFill)) ? 1.5f : 1.0f;
+    dl->AddRect(p0, p1, toU32(border), 0.0f, 0, borderThick);
+    if (!disabled && active && !primaryFill && !successFill && !danger) {
         dl->AddRectFilled(p0, ImVec2(p0.x + 2.5f, p1.y), toU32(c.phosphorHi), 0.0f);
     }
 
