@@ -1271,12 +1271,14 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
           total_invocations = 0;
           double accumulated_time_ms = 0.0;
           double wall_elapsed_ms = 0.0;
-          const double max_wall_ms = target_measurement_ms * 4.0 + 2000.0;
+          const uint32_t min_samples = profileSnapshot ? 1u : 4u;
+          const double max_wall_ms = target_measurement_ms * 4.0 + 4000.0;
 
           powerStart = HardwareTelemetry::queryGpu(devIdx);
           auto loop_wall_start = std::chrono::high_resolution_clock::now();
 
-          while (accumulated_time_ms < target_measurement_ms &&
+          while ((accumulated_time_ms < target_measurement_ms ||
+                  sample_time_per_invoc.size() < min_samples) &&
                  wall_elapsed_ms < max_wall_ms) {
             if (cancelToken && cancelToken->load()) break;
 
@@ -1450,6 +1452,7 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
           result_data.operationalIntensity = bench->GetOperationalIntensity(i);
           result_data.width = effectiveWidth;
           result_data.height = effectiveHeight;
+          result_data.samplesPerFrame = bench->GetSamplesPerFrame(i);
 
           KernelResourceUsage kUsage = context->getLastKernelResourceUsage();
           if (kUsage.available) {

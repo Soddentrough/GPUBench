@@ -819,7 +819,7 @@ vec3 evalMaterialBSDF(uint sceneType, uint matId, vec3 normal, vec3 inDir, vec3 
 
 void main() {
     uint threadIdx = gl_GlobalInvocationID.x;
-    if (SPECIALIZED_ARCHETYPE == 8u || (SPECIALIZED_ARCHETYPE != 9u && pc.mode == 2u)) {
+    if (SPECIALIZED_ARCHETYPE == 8u || (SPECIALIZED_ARCHETYPE != 9u && SPECIALIZED_ARCHETYPE != 10u && pc.mode == 2u)) {
         uint count = worklist.queueCounters[Q_SNAPSHOT_IDX(0u)];
         if (threadIdx >= count || threadIdx >= pc.queueCapacity) return;
         vec4 p = worklist.rayRecords[threadIdx];
@@ -876,10 +876,10 @@ void main() {
         return;
     }
 
-    uint count = (SPECIALIZED_ARCHETYPE != 9u && pc.mode == 1u) ? pc.queueCapacity : worklist.queueCounters[Q_SNAPSHOT_IDX(pc.materialId)];
+    uint count = (SPECIALIZED_ARCHETYPE != 9u && SPECIALIZED_ARCHETYPE != 10u && pc.mode == 1u) ? pc.queueCapacity : worklist.queueCounters[Q_SNAPSHOT_IDX(pc.materialId)];
     if (threadIdx >= count || threadIdx >= pc.queueCapacity) return;
 
-    if (SPECIALIZED_ARCHETYPE != 9u && threadIdx == 0) {
+    if (SPECIALIZED_ARCHETYPE != 9u && SPECIALIZED_ARCHETYPE != 10u && threadIdx == 0) {
         if (pc.mode == 1u) {
             atomicAdd(results.totalRays, count);
             atomicAdd(results.totalHits, count);
@@ -888,11 +888,11 @@ void main() {
 
     uint recordIdx = pc.materialId * pc.queueCapacity + threadIdx;
     vec4 p = vec4(0.0);
-    if (SPECIALIZED_ARCHETYPE == 9u || pc.mode != 1u) {
+    if (SPECIALIZED_ARCHETYPE == 9u || SPECIALIZED_ARCHETYPE == 10u || pc.mode != 1u) {
         p = worklist.rayRecords[recordIdx];
     }
 
-    uint pixelIdx = (SPECIALIZED_ARCHETYPE != 9u && pc.mode == 1u) ? (pc.materialId * pc.queueCapacity + threadIdx) : floatBitsToUint(p.y);
+    uint pixelIdx = (SPECIALIZED_ARCHETYPE != 9u && SPECIALIZED_ARCHETYPE != 10u && pc.mode == 1u) ? (pc.materialId * pc.queueCapacity + threadIdx) : floatBitsToUint(p.y);
     uint primId = floatBitsToUint(p.z);
     uint rngState = pixelIdx;
 
@@ -908,7 +908,7 @@ void main() {
     vec3 inDir = normalize(camForward + (px / halfH * fov) * camRight - (py / halfH * fov) * camUp);
 
     vec3 shadedColor;
-    if (SPECIALIZED_ARCHETYPE != 9u && pc.mode == 1u) {
+    if (SPECIALIZED_ARCHETYPE != 9u && SPECIALIZED_ARCHETYPE != 10u && pc.mode == 1u) {
         if (pc.isGltf != 0u) {
             uint uniformArch = subgroupBroadcastFirst(pc.materialId & 7u);
             GltfMaterialGpu mat = matBuf.materials[uniformArch];
@@ -924,7 +924,7 @@ void main() {
             shadedColor = evalMaterialBSDF(pc.sceneType, subgroupBroadcastFirst(pc.materialId & 7u), dummyNorm, inDir, dummyPos, false, 1.0, uvec3(0xFFFFFFFFu, 0u, 0u), rngState);
         }
     } else {
-        if (SPECIALIZED_ARCHETYPE == 9u || pc.isGltf != 0u) {
+        if (SPECIALIZED_ARCHETYPE == 9u || (SPECIALIZED_ARCHETYPE != 10u && pc.isGltf != 0u)) {
             vec2 vis = unpackHalf2x16(floatBitsToUint(p.x));
             float waterDepth = -1.0;
             uint uniformArch = (SPECIALIZED_ARCHETYPE < 8u) ? SPECIALIZED_ARCHETYPE : subgroupBroadcastFirst(pc.materialId & 7u);

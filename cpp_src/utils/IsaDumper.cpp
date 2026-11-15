@@ -71,75 +71,80 @@ static std::string normalizeKey(const std::string &s) {
 struct BenchmarkMapping {
   std::string benchName;
   std::vector<std::string> aliases;
-  int configIndex;
+  std::vector<int> configIndices;
   std::string configLabel;
   std::string vulkanSpv;
   std::string rocmCo;
   std::string openclCl;
   std::string rocmSymbol = "";
+  std::string fixedSkipReason = "";
 };
 
 static std::vector<BenchmarkMapping> getBenchmarkMappings() {
   return {
-      {"BF16", {"bf16"}, 0, "BF16 (Vector)", "bf16.comp.spv", "bf16.co", ""},
-      {"BF16", {"bf16", "bf16matrix", "coopmatrixbf16"}, 1, "BF16 (Matrix)", "coop_matrix_bf16.comp.spv", "bf16_matrix.co", ""},
-      {"FP16", {"fp16"}, 0, "FP16 (Vector)", "fp16.comp.spv", "fp16.co", "fp16.cl"},
-      {"FP16", {"fp16", "fp16matrix", "coopmatrixfp16"}, 1, "FP16 (Matrix)", "coop_matrix_fp16.comp.spv", "fp16_matrix.co", ""},
-      {"FP32", {"fp32"}, 0, "FP32 (Vector)", "fp32.comp.spv", "fp32.co", "fp32.cl"},
-      {"FP64", {"fp64"}, 0, "FP64 (Vector)", "fp64.comp.spv", "fp64.co", "fp64.cl"},
-      {"FP8", {"fp8", "coopmatrixfp8"}, 0, "FP8 (Matrix)", "coop_matrix_fp8.comp.spv", "fp8_matrix.co", ""},
-      {"FP6", {"fp6", "mxfp6", "coopmatrixfp6"}, 0, "FP6 (Matrix)", "coop_matrix_fp6.comp.spv", "fp6_matrix.co", ""},
-      {"FP4", {"fp4", "mxfp4", "coopmatrixfp4"}, 0, "FP4 (Matrix)", "coop_matrix_fp4.comp.spv", "fp4_matrix.co", ""},
-      {"INT8", {"int8"}, 0, "INT8 (Vector)", "int8.comp.spv", "int8.co", "int8.cl"},
-      {"INT8", {"int8", "int8matrix", "coopmatrixint8"}, 1, "INT8 (Matrix)", "coop_matrix_int8.comp.spv", "int8_matrix.co", ""},
-      {"INT4", {"int4", "int4matrix"}, 0, "INT4 (Matrix)", "", "int4_matrix.co", ""},
-      {"ILP & Dual-Issue", {"dualissue", "ilp"}, 0, "FP32 ILP4", "dual_issue_ilp4.comp.spv", "dual_issue.co", "dual_issue.cl", "run_dual_issue_ilp4"},
-      {"ILP & Dual-Issue", {"dualissue", "ilp"}, 1, "FP32 ILP8", "dual_issue_ilp8.comp.spv", "dual_issue.co", "dual_issue.cl", "run_dual_issue_ilp8"},
-      {"ILP & Dual-Issue", {"dualissue", "ilp"}, 2, "FP32 ILP16", "dual_issue_ilp16.comp.spv", "dual_issue.co", "dual_issue.cl", "run_dual_issue_ilp16"},
-      {"ILP & Dual-Issue", {"dualissue", "ilp"}, 3, "INT32 ILP4", "dual_issue_int32_4.comp.spv", "dual_issue.co", "dual_issue.cl", "run_dual_issue_int32_4"},
-      {"ILP & Dual-Issue", {"dualissue", "ilp"}, 4, "INT32 ILP8", "dual_issue_int32_8.comp.spv", "dual_issue.co", "dual_issue.cl", "run_dual_issue_int32_8"},
-      {"ILP & Dual-Issue", {"dualissue", "ilp"}, 5, "INT32 ILP16", "dual_issue_int32.comp.spv", "dual_issue.co", "dual_issue.cl", "run_dual_issue_int32"},
-      {"ILP & Dual-Issue", {"dualissue", "ilp"}, 6, "Mixed FP32+INT32", "dual_issue_mixed.comp.spv", "dual_issue.co", "dual_issue.cl", "run_dual_issue_mixed"},
-      {"LDS Bank Conflicts", {"lds", "ldsbankconflicts"}, 0, "LDS Bank Conflicts", "lds_bank_conflicts.comp.spv", "lds_bank_conflicts.co", "lds_bank_conflicts.cl"},
-      {"In-Shader Indirect Synthesis", {"indirect", "inshaderindirect"}, 0, "Direct Dispatch", "direct_worker.comp.spv", "", ""},
-      {"In-Shader Indirect Synthesis", {"indirect", "inshaderindirect"}, 1, "Indirect Classify", "indirect_classify.comp.spv", "", ""},
-      {"In-Shader Indirect Synthesis", {"indirect", "inshaderindirect"}, 2, "Indirect Worker", "indirect_worker.comp.spv", "", ""},
-      {"Device Memory Bandwidth", {"membw", "devicememorybandwidth"}, 0, "MemBW 128", "membw_128.comp.spv", "membw_128.co", "membw_128.cl"},
-      {"Device Memory Bandwidth", {"membw", "devicememorybandwidth"}, 1, "MemBW 256", "membw_256.comp.spv", "membw_256.co", "membw_256.cl"},
-      {"Device Memory Bandwidth", {"membw", "devicememorybandwidth"}, 2, "MemBW 1024", "membw_1024.comp.spv", "membw_1024.co", "membw_1024.cl"},
-      {"Cache Bandwidth", {"cachebw", "l0b", "l1b", "l2b", "l3b"}, 0, "Cache Bandwidth", "cache_bw_robust.comp.spv", "cache_bw_robust.co", "cache_bw_robust.cl"},
-      {"L0 Vector Cache Latency", {"l0cache", "l0cachelatency", "cache"}, 0, "L0 Cache Latency", "l0_cache_latency.comp.spv", "l0_cache_latency.co", "l0_cache_latency.cl"},
-      {"Cache Latency Curve", {"cachelatencycurve", "cachecurve"}, 0, "Cache Latency Curve", "cache_latency_curve.comp.spv", "cache_latency_curve.co", "cache_latency_curve.cl"},
-      {"Pixel Fill Rate", {"pixelfill", "pixelfillrate", "raster", "rop"}, 0, "Pixel Fill Rate (Vertex + Fragment)", "pixel_fill.frag.spv", "", ""},
-      {"RayRawTraversal", {"rayrawtraversal", "rawtraversal"}, 0, "Raw Traversal", "rt_raw_traversal.comp.spv", "", ""},
-      {"RayIntersect", {"rayintersect"}, 0, "Ray Intersect", "rt_benchmark.comp.spv", "", ""},
-      {"RayAnyHit", {"rayanyhit"}, 0, "Ray Any-Hit (RTP)", "rayanyhit_pipeline.rgen.spv", "", ""},
-      {"RayDivergence", {"raydivergence", "raydiv"}, 0, "Ray Divergence (RTP)", "raydiv_pipeline.rgen.spv", "", ""},
-      {"RayProcedural", {"rayprocedural"}, 0, "Ray Procedural AABB (RTP)", "rayprocedural.rgen.spv", "", ""},
-      {"RayPayload", {"raypayload"}, 0, "Ray Payload 16B (RTP)", "raypayload_16b.rgen.spv", "", ""},
-      {"RayPayload", {"raypayload"}, 1, "Ray Payload 128B (RTP)", "raypayload_128b.rgen.spv", "", ""},
-      {"RayPayload", {"raypayload"}, 2, "Ray Payload 256B (RTP)", "raypayload_256b.rgen.spv", "", ""},
-      {"RayScheduling", {"rayscheduling", "rtscheduling"}, 0, "RT Scheduling — Compute Megakernel", "rt_scheduling_traditional_megakernel.comp.spv", "", ""},
-      {"RayScheduling", {"rayscheduling", "rtscheduling"}, 1, "RT Scheduling — DGC Classify", "rt_scheduling_device_generated_commands_classify.comp.spv", "", ""},
-      {"RayScheduling", {"rayscheduling", "rtscheduling"}, 2, "RT Scheduling — DGC Material", "rt_scheduling_device_generated_commands_material.comp.spv", "", ""},
-      {"RayScheduling", {"rayscheduling", "rtscheduling"}, 3, "RT Scheduling — DGC Bounce", "rt_scheduling_device_generated_commands_bounce.comp.spv", "", ""},
-      {"RayScheduling", {"rayscheduling", "rtscheduling"}, 4, "RT Scheduling — DGC Shadow", "rt_scheduling_device_generated_commands_shadow.comp.spv", "", ""},
-      {"RayScheduling", {"rayscheduling", "rtscheduling"}, 5, "RT Scheduling — DGC Multi-Light", "rt_scheduling_device_generated_commands_light.comp.spv", "", ""},
-      {"RayScheduling", {"rayscheduling", "rtscheduling"}, 6, "RT Scheduling — RTP Baseline", "rt_scheduling.rgen.spv", "", ""},
-      {"RayScheduling", {"rayscheduling", "rtscheduling"}, 7, "RT Scheduling — RTP + SER", "rt_scheduling_ser.rgen.spv", "", ""},
-      {"Interconnect", {"interconnect", "pcie", "rebar", "p2p"}, 4, "Interconnect — Unified Memory Coherency Latency", "interconnect_latency.comp.spv", "", ""},
-      {"AsyncOverlap", {"asyncoverlap", "async", "multiqueue"}, 0, "AsyncOverlap — Graphics Pass", "async_gfx.frag.spv", "", ""},
-      {"AsyncOverlap", {"asyncoverlap", "async", "multiqueue"}, 1, "AsyncOverlap — Async Compute Pass", "async_compute_heavy.comp.spv", "", ""},
-      {"SparseMatrix", {"sparsematrix", "sparse", "sparsity"}, 0, "Sparse FP16 2:4 (Matrix)", "", "sparse_fp16_matrix.co", ""},
-      {"SparseMatrix", {"sparsematrix", "sparse", "sparsity"}, 1, "Sparse FP8 2:4 (Matrix)", "", "sparse_fp8_matrix.co", ""},
-      {"SparseMatrix", {"sparsematrix", "sparse", "sparsity"}, 2, "Sparse INT8 2:4 (Matrix)", "", "sparse_int8_matrix.co", ""},
-      {"CoopVector", {"coopvector", "cooperativevector"}, 0, "CoopVector FP16 MatVec", "coop_vector_fp16.comp.spv", "", ""},
-      {"CoopVector", {"coopvector", "cooperativevector"}, 1, "CoopVector INT8 MatVec", "coop_vector_int8.comp.spv", "", ""},
-      {"WorkGraphs", {"workgraphs", "shaderenqueue"}, 0, "WorkGraphs — DGC Producer", "workgraphs_producer.comp.spv", "", ""},
-      {"WorkGraphs", {"workgraphs", "shaderenqueue"}, 1, "WorkGraphs — DGC Consumer", "workgraphs_consumer.comp.spv", "", ""},
-      {"WorkGraphs", {"workgraphs", "shaderenqueue"}, 2, "WorkGraphs — VK_AMDX_shader_enqueue", "workgraphs_amdx.comp.spv", "", ""},
-      {"RayOMM", {"rayomm", "opacitymicromap", "omm"}, 0, "RayOMM — Any-Hit Baseline", "rayomm.rgen.spv", "", ""},
-      {"RayOMM", {"rayomm", "opacitymicromap", "omm"}, 1, "RayOMM — Hardware Opacity Micromap", "rayomm_omm.rgen.spv", "", ""},
+      {"BF16", {"bf16"}, {0}, "BF16 (Vector)", "bf16.comp.spv", "bf16.co", ""},
+      {"BF16", {"bf16", "bf16matrix", "coopmatrixbf16"}, {1}, "BF16 (Matrix)", "coop_matrix_bf16.comp.spv", "bf16_matrix.co", ""},
+      {"FP16", {"fp16"}, {0}, "FP16 (Vector)", "fp16.comp.spv", "fp16.co", "fp16.cl"},
+      {"FP16", {"fp16", "fp16matrix", "coopmatrixfp16"}, {1}, "FP16 (Matrix)", "coop_matrix_fp16.comp.spv", "fp16_matrix.co", ""},
+      {"FP32", {"fp32"}, {0}, "FP32 (Vector)", "fp32.comp.spv", "fp32.co", "fp32.cl"},
+      {"FP64", {"fp64"}, {0}, "FP64 (Vector)", "fp64.comp.spv", "fp64.co", "fp64.cl"},
+      {"FP8", {"fp8", "coopmatrixfp8"}, {0}, "FP8 (Matrix)", "coop_matrix_fp8.comp.spv", "fp8_matrix.co", ""},
+      {"FP6", {"fp6", "mxfp6", "coopmatrixfp6"}, {0}, "FP6 (Matrix)", "coop_matrix_fp6.comp.spv", "fp6_matrix.co", ""},
+      {"FP4", {"fp4", "mxfp4", "coopmatrixfp4"}, {0}, "FP4 (Matrix)", "coop_matrix_fp4.comp.spv", "fp4_matrix.co", ""},
+      {"INT8", {"int8"}, {0}, "INT8 (Vector)", "int8.comp.spv", "int8.co", "int8.cl"},
+      {"INT8", {"int8", "int8matrix", "coopmatrixint8"}, {1}, "INT8 (Matrix)", "coop_matrix_int8.comp.spv", "int8_matrix.co", ""},
+      {"INT4", {"int4", "int4matrix"}, {0}, "INT4 (Matrix)", "", "int4_matrix.co", ""},
+      {"ILP & Dual-Issue", {"dualissue", "ilp"}, {0}, "FP32 ILP4", "dual_issue_ilp4.comp.spv", "dual_issue.co", "dual_issue.cl", "run_dual_issue_ilp4"},
+      {"ILP & Dual-Issue", {"dualissue", "ilp"}, {1}, "FP32 ILP8", "dual_issue_ilp8.comp.spv", "dual_issue.co", "dual_issue.cl", "run_dual_issue_ilp8"},
+      {"ILP & Dual-Issue", {"dualissue", "ilp"}, {2}, "FP32 ILP16", "dual_issue_ilp16.comp.spv", "dual_issue.co", "dual_issue.cl", "run_dual_issue_ilp16"},
+      {"ILP & Dual-Issue", {"dualissue", "ilp"}, {3}, "INT32 ILP4", "dual_issue_int32_4.comp.spv", "dual_issue.co", "dual_issue.cl", "run_dual_issue_int32_4"},
+      {"ILP & Dual-Issue", {"dualissue", "ilp"}, {4}, "INT32 ILP8", "dual_issue_int32_8.comp.spv", "dual_issue.co", "dual_issue.cl", "run_dual_issue_int32_8"},
+      {"ILP & Dual-Issue", {"dualissue", "ilp"}, {5}, "INT32 ILP16", "dual_issue_int32.comp.spv", "dual_issue.co", "dual_issue.cl", "run_dual_issue_int32"},
+      {"ILP & Dual-Issue", {"dualissue", "ilp"}, {6}, "Mixed FP32+INT32", "dual_issue_mixed.comp.spv", "dual_issue.co", "dual_issue.cl", "run_dual_issue_mixed"},
+      {"LDS Bank Conflicts", {"lds", "ldsbankconflicts"}, {0, 1, 2, 3, 4, 5, 6, 7}, "LDS Bank Conflicts", "lds_bank_conflicts.comp.spv", "lds_bank_conflicts.co", "lds_bank_conflicts.cl"},
+      {"In-Shader Indirect Synthesis", {"indirect", "inshaderindirect"}, {0, 6}, "Direct Dispatch", "direct_worker.comp.spv", "", ""},
+      {"In-Shader Indirect Synthesis", {"indirect", "inshaderindirect"}, {1}, "Indirect Classify", "indirect_classify.comp.spv", "", ""},
+      {"In-Shader Indirect Synthesis", {"indirect", "inshaderindirect"}, {2, 3, 4, 5}, "Indirect Worker", "indirect_worker.comp.spv", "", ""},
+      {"Device Memory Bandwidth", {"membw", "devicememorybandwidth"}, {0, 1, 2}, "MemBW 128", "membw_128.comp.spv", "membw_128.co", "membw_128.cl"},
+      {"Device Memory Bandwidth", {"membw", "devicememorybandwidth"}, {3, 4, 5}, "MemBW 256", "membw_256.comp.spv", "membw_256.co", "membw_256.cl"},
+      {"Device Memory Bandwidth", {"membw", "devicememorybandwidth"}, {6, 7, 8}, "MemBW 1024", "membw_1024.comp.spv", "membw_1024.co", "membw_1024.cl"},
+      {"Cache Bandwidth", {"cachebw", "l0cachebandwidth", "l1cachebandwidth", "l2cachebandwidth", "l3cachebandwidth", "l0b", "l1b", "l2b", "l3b", "l0bw", "l1bw", "l2bw", "l3bw"}, {0}, "Cache Bandwidth", "cache_bw_robust.comp.spv", "cache_bw_robust.co", "cache_bw_robust.cl"},
+      {"L0 Vector Cache Latency", {"l0cache", "l0cachelatency", "l0vectorcachelatency16kb", "l0l", "cache"}, {0}, "L0 Cache Latency", "l0_cache_latency.comp.spv", "l0_cache_latency.co", "l0_cache_latency.cl"},
+      {"Cache Latency Curve", {"cachelatencycurve", "cachecurve"}, {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14}, "Cache Latency Curve", "cache_latency_curve.comp.spv", "cache_latency_curve.co", "cache_latency_curve.cl"},
+      {"Pixel Fill Rate", {"pixelfill", "pixelfillrate", "fillrate", "raster", "rop"}, {0, 1, 2}, "Pixel Fill Rate (Vertex + Fragment)", "pixel_fill.frag.spv", "", ""},
+      {"RayRawTraversal", {"rayrawtraversal", "rawtraversal"}, {0, 1}, "Raw Traversal", "rt_raw_traversal.comp.spv", "", ""},
+      {"RayASBuild", {"rayasbuild", "asbuild", "bvhbuild"}, {0, 1, 2, 3, 4, 5, 6, 7}, "Acceleration Structure Build/Update", "", "", "", "", "Fixed-function Vulkan Acceleration Structure Builder (vkCmdBuildAccelerationStructuresKHR) — executes on hardware BVH build unit with no programmable shader ISA."},
+      {"RayIntersect", {"rayintersect"}, {0, 1}, "Ray Intersect", "rt_benchmark.comp.spv", "", ""},
+      {"RayAnyHit", {"rayanyhit"}, {0, 1}, "Ray Any-Hit (RTP)", "rayanyhit_pipeline.rgen.spv", "", ""},
+      {"RayDivergence", {"raydivergence", "raydiv"}, {0, 1, 2, 3, 4}, "Ray Divergence (RTP)", "raydiv_pipeline.rgen.spv", "", ""},
+      {"RayProcedural", {"rayprocedural"}, {0}, "Ray Procedural AABB (RTP)", "rayprocedural.rgen.spv", "", ""},
+      {"RayPayload", {"raypayload"}, {0}, "Ray Payload 16B (RTP)", "raypayload_16b.rgen.spv", "", ""},
+      {"RayPayload", {"raypayload"}, {1}, "Ray Payload 128B (RTP)", "raypayload_128b.rgen.spv", "", ""},
+      {"RayPayload", {"raypayload"}, {2}, "Ray Payload 256B (RTP)", "raypayload_256b.rgen.spv", "", ""},
+      {"RayScheduling", {"rayscheduling", "rtscheduling", "rayschedulingopenworldforest", "rayschedulingoutdoorlandscape", "rayschedulingindooratrium", "rayschedulingshowroomstudio", "rayexecutionparadigm"}, {0, 3, 6, 9, 12, 14, 15, 16, 17, 19, 23, 30, 32}, "RT Scheduling — Compute Megakernel", "rt_scheduling_traditional_megakernel.comp.spv", "", ""},
+      {"RayScheduling", {"rayscheduling", "rtscheduling", "rayschedulingopenworldforest", "rayschedulingoutdoorlandscape", "rayschedulingindooratrium", "rayschedulingshowroomstudio", "rayexecutionparadigm"}, {13, 25, 26, 27}, "RT Scheduling — DGC Classify", "rt_scheduling_device_generated_commands_classify.comp.spv", "", ""},
+      {"RayScheduling", {"rayscheduling", "rtscheduling", "rayschedulingopenworldforest", "rayschedulingoutdoorlandscape", "rayschedulingindooratrium", "rayschedulingshowroomstudio", "rayexecutionparadigm"}, {2, 11, 18}, "RT Scheduling — DGC Material", "rt_scheduling_device_generated_commands_material.comp.spv", "", ""},
+      {"RayScheduling", {"rayscheduling", "rtscheduling", "rayschedulingopenworldforest", "rayschedulingoutdoorlandscape", "rayschedulingindooratrium", "rayschedulingshowroomstudio", "rayexecutionparadigm"}, {5, 8, 24}, "RT Scheduling — DGC Bounce", "rt_scheduling_device_generated_commands_bounce.comp.spv", "", ""},
+      {"RayScheduling", {"rayscheduling", "rtscheduling", "rayschedulingopenworldforest", "rayschedulingoutdoorlandscape", "rayschedulingindooratrium", "rayschedulingshowroomstudio", "rayexecutionparadigm"}, {21, 22}, "RT Scheduling — DGC Shadow", "rt_scheduling_device_generated_commands_shadow.comp.spv", "", ""},
+      {"RayScheduling", {"rayscheduling", "rtscheduling", "rayschedulingopenworldforest", "rayschedulingoutdoorlandscape", "rayschedulingindooratrium", "rayschedulingshowroomstudio", "rayexecutionparadigm"}, {31, 33}, "RT Scheduling — DGC Multi-Light", "rt_scheduling_device_generated_commands_light.comp.spv", "", ""},
+      {"RayScheduling", {"rayscheduling", "rtscheduling", "rayschedulingopenworldforest", "rayschedulingoutdoorlandscape", "rayschedulingindooratrium", "rayschedulingshowroomstudio", "rayexecutionparadigm"}, {28}, "RT Scheduling — RTP Baseline", "rt_scheduling.rgen.spv", "", ""},
+      {"RayScheduling", {"rayscheduling", "rtscheduling", "rayschedulingopenworldforest", "rayschedulingoutdoorlandscape", "rayschedulingindooratrium", "rayschedulingshowroomstudio", "rayexecutionparadigm"}, {1, 4, 7, 10, 20, 29}, "RT Scheduling — RTP + SER", "rt_scheduling_ser.rgen.spv", "", ""},
+      {"Interconnect", {"interconnect", "pciehostdeviceinterconnect", "pcie", "rebar", "p2p"}, {0, 1, 2, 3, 5}, "Interconnect — DMA / ReBAR / P2P Transfer", "", "", "", "", "PCIe DMA / Resizable BAR / Peer-to-Peer transfer benchmark — executes via Vulkan copy/transfer engines and host CPU streaming with no timed compute shader ISA."},
+      {"Interconnect", {"interconnect", "pciehostdeviceinterconnect", "pcie", "rebar", "p2p"}, {4}, "Interconnect — Unified Memory Coherency Latency", "interconnect_latency.comp.spv", "", ""},
+      {"AsyncOverlap", {"asyncoverlap", "asynccomputecopyoverlap", "async", "multiqueue", "ace", "sdma"}, {0, 1}, "AsyncOverlap — Graphics Pass", "async_gfx.frag.spv", "", ""},
+      {"AsyncOverlap", {"asyncoverlap", "asynccomputecopyoverlap", "async", "multiqueue", "ace", "sdma"}, {2, 3}, "AsyncOverlap — Async Compute Pass", "async_compute_heavy.comp.spv", "", ""},
+      {"SparseMatrix", {"sparsematrix", "2:4structuredsparsematrix", "sparse", "sparsity"}, {0}, "Sparse FP16 2:4 (Matrix)", "", "sparse_fp16_matrix.co", ""},
+      {"SparseMatrix", {"sparsematrix", "2:4structuredsparsematrix", "sparse", "sparsity"}, {1}, "Sparse FP8 2:4 (Matrix)", "", "sparse_fp8_matrix.co", ""},
+      {"SparseMatrix", {"sparsematrix", "2:4structuredsparsematrix", "sparse", "sparsity"}, {2}, "Sparse INT8 2:4 (Matrix)", "", "sparse_int8_matrix.co", ""},
+      {"CoopVector", {"coopvector", "cooperativevector", "cooperativevectorneuralshading"}, {0}, "CoopVector FP16 MatVec", "coop_vector_fp16.comp.spv", "", ""},
+      {"CoopVector", {"coopvector", "cooperativevector", "cooperativevectorneuralshading"}, {1}, "CoopVector INT8 MatVec", "coop_vector_int8.comp.spv", "", ""},
+      {"WorkGraphs", {"workgraphs", "gpuworkgraphsproducerconsumer", "shaderenqueue"}, {0}, "WorkGraphs — DGC Producer", "workgraphs_producer.comp.spv", "", ""},
+      {"WorkGraphs", {"workgraphs", "gpuworkgraphsproducerconsumer", "shaderenqueue"}, {1}, "WorkGraphs — DGC Consumer", "workgraphs_consumer.comp.spv", "", ""},
+      {"WorkGraphs", {"workgraphs", "gpuworkgraphsproducerconsumer", "shaderenqueue"}, {2}, "WorkGraphs — VK_AMDX_shader_enqueue", "workgraphs_amdx.comp.spv", "", ""},
+      {"RayOMM", {"rayomm", "raytracingopacitymicromap", "opacitymicromap", "omm"}, {0}, "RayOMM — Any-Hit Baseline", "rayomm.rgen.spv", "", ""},
+      {"RayOMM", {"rayomm", "raytracingopacitymicromap", "opacitymicromap", "omm"}, {1, 2}, "RayOMM — Hardware Opacity Micromap", "rayomm_omm.rgen.spv", "", ""},
+      {"System Memory Bandwidth", {"sysmembandwidth", "rambandwidth", "sysmembw", "sysmem"}, {0, 1, 2}, "Host SIMD Memory Bandwidth", "", "", "", "", "Host CPU SIMD benchmark (AVX-512 / AVX2 / NEON) — executes on system RAM with no GPU shader ISA."},
+      {"System Memory Latency", {"sysmemlatency", "ramlatency", "sysmemlat", "sl"}, {0}, "Host Pointer-Chasing Latency", "", "", "", "", "Host CPU pointer-chasing latency benchmark — executes on CPU caches/DRAM with no GPU shader ISA."},
   };
 }
 
@@ -979,15 +984,61 @@ public:
       for (auto &ir : irs) {
         ir.sType = VK_STRUCTURE_TYPE_PIPELINE_EXECUTABLE_INTERNAL_REPRESENTATION_KHR;
         ir.pData = nullptr;
+        ir.dataSize = 0;
       }
-      pfnGetIrs(device, &execInfo, &irCount, irs.data());
 
+      // AMD LLPC on Ray Tracing pipelines often leaves later IR entries at dataSize=0 until
+      // earlier entries have non-null pData buffers. Iterate until all advertised IR sizes are fetched.
       std::vector<std::vector<char>> irBuffers(irCount);
-      for (uint32_t i = 0; i < irCount; ++i) {
-        irBuffers[i].resize(irs[i].dataSize);
-        irs[i].pData = irBuffers[i].data();
+      const uint32_t maxIrPasses = irCount + 2;
+      for (uint32_t pass = 0; pass < maxIrPasses && irCount > 0; ++pass) {
+        for (uint32_t i = 0; i < irCount; ++i) {
+          if (irs[i].dataSize > irBuffers[i].size()) {
+            irBuffers[i].resize(irs[i].dataSize);
+          }
+          irs[i].pData = irBuffers[i].empty() ? nullptr : irBuffers[i].data();
+          irs[i].dataSize = irBuffers[i].size();
+        }
+        VkResult irRes = pfnGetIrs(device, &execInfo, &irCount, irs.data());
+        bool needRetry = false;
+        for (uint32_t i = 0; i < irCount; ++i) {
+          if (irs[i].dataSize > irBuffers[i].size()) {
+            needRetry = true;
+          }
+        }
+        if (!needRetry && irRes != VK_INCOMPLETE) {
+          break;
+        }
       }
-      pfnGetIrs(device, &execInfo, &irCount, irs.data());
+
+      auto looksLikeIsaText = [](const char *data, size_t rawSize) -> size_t {
+        if (!data || rawSize == 0) return 0;
+        // Trim trailing NUL padding if present
+        size_t len = rawSize;
+        while (len > 0 && data[len - 1] == '\0') {
+          --len;
+        }
+        if (len == 0) return 0;
+        // Reject ELF binaries (\x7FELF) or binary headers
+        if (len >= 4 && static_cast<unsigned char>(data[0]) == 0x7F &&
+            data[1] == 'E' && data[2] == 'L' && data[3] == 'F') {
+          return 0;
+        }
+        size_t printable = 0;
+        size_t newlines = 0;
+        for (size_t k = 0; k < len; ++k) {
+          unsigned char ch = static_cast<unsigned char>(data[k]);
+          if (ch == '\n') {
+            ++newlines;
+            ++printable;
+          } else if (ch == '\r' || ch == '\t' || (ch >= 0x20 && ch < 0x7F) || ch >= 0x80) {
+            ++printable;
+          } else {
+            return 0; // Binary control byte / embedded NUL
+          }
+        }
+        return (printable == len && newlines > 0) ? len : 0;
+      };
 
       int chosenIr = -1;
       for (uint32_t i = 0; i < irCount; ++i) {
@@ -1003,26 +1054,35 @@ public:
         chosenIr = static_cast<int>(irCount) - 1;
       }
 
-      if (chosenIr != -1 && irs[chosenIr].isText && irs[chosenIr].pData) {
+      if (chosenIr != -1 && irs[chosenIr].pData) {
         const char *rawIr = static_cast<const char *>(irs[chosenIr].pData);
-        size_t safeLen = strnlen(rawIr, irs[chosenIr].dataSize);
-        std::string isaStr(rawIr, safeLen);
-        analyzeIsaText(isaStr, execRep);
-        if (execRep.fullIsaLines.empty()) {
+        const size_t availBytes = std::min(irs[chosenIr].dataSize, irBuffers[chosenIr].size());
+        size_t textLen = 0;
+        if (irs[chosenIr].isText) {
+          textLen = strnlen(rawIr, availBytes);
+        } else {
+          // Some drivers (e.g. AMD proprietary LLPC for RTP ISA.ray-gen) emit ASCII ISA with isText=VK_FALSE
+          textLen = looksLikeIsaText(rawIr, availBytes);
+        }
+        if (textLen > 0) {
+          std::string isaStr(rawIr, textLen);
+          analyzeIsaText(isaStr, execRep);
+          if (execRep.fullIsaLines.empty()) {
+            execRep.unavailableReason =
+                "Driver returned empty text internal representation ('" +
+                std::string(irs[chosenIr].name) + "').";
+          }
+        } else {
           execRep.unavailableReason =
-              "Driver returned empty text internal representation ('" +
-              std::string(irs[chosenIr].name) + "').";
+              "Driver returned non-text / binary internal representation ('" +
+              std::string(irs[chosenIr].name) + "', " +
+              std::to_string(irs[chosenIr].dataSize) +
+              " bytes); text ISA disassembly unavailable.";
         }
       } else if (irCount == 0) {
         execRep.unavailableReason =
             "Vulkan driver exposed pipeline statistics but returned 0 internal representations "
             "(no text ISA emitted for this pipeline/stage).";
-      } else if (chosenIr != -1) {
-        execRep.unavailableReason =
-            "Driver returned non-text / binary internal representation ('" +
-            std::string(irs[chosenIr].name) + "', " +
-            std::to_string(irs[chosenIr].dataSize) +
-            " bytes); text ISA disassembly unavailable.";
       } else {
         execRep.unavailableReason =
             "No usable ISA internal representation found in " +
@@ -1428,6 +1488,13 @@ public:
 
   bool inspectSpv(const KernelArtifact &art, bool fullIsa, IsaArtifactReport *outReport = nullptr) {
     std::string fname = art.filePath.filename().string();
+    if (outReport) {
+      outReport->benchName = art.benchmarkName;
+      outReport->configLabel = art.configName;
+      outReport->configIndex = art.configIndex;
+      outReport->backend = art.backend;
+      outReport->artifactFile = fname;
+    }
     if (fname.find(".rgen.spv") != std::string::npos ||
         fname.find(".rmiss.spv") != std::string::npos ||
         fname.find(".rchit.spv") != std::string::npos ||
@@ -1807,6 +1874,19 @@ static std::set<std::string> resolveWantedBackends(const IsaDumperOptions &opts)
   return wantedBackends;
 }
 
+static bool matchesBenchmarkMapping(const BenchmarkMapping &m, const std::string &normTarget) {
+  if ((normalizeKey(m.benchName) == normTarget) ||
+      (normalizeKey(m.configLabel) == normTarget)) {
+    return true;
+  }
+  for (const auto &al : m.aliases) {
+    if (normalizeKey(al) == normTarget) {
+      return true;
+    }
+  }
+  return false;
+}
+
 static std::vector<KernelArtifact> resolveArtifactsForOptions(const IsaDumperOptions &opts,
                                                               const fs::path &kernelDir,
                                                               const std::set<std::string> &wantedBackends) {
@@ -1824,23 +1904,39 @@ static std::vector<KernelArtifact> resolveArtifactsForOptions(const IsaDumperOpt
     }
 
     std::string normTarget = normalizeKey(target);
+    auto resolveMatchingConfigs = [&opts](const BenchmarkMapping &m) {
+      std::vector<int> matched;
+      if (m.configIndices.empty()) {
+        return matched;
+      }
+      if (opts.configs.empty()) {
+        matched.push_back(m.configIndices.front());
+        return matched;
+      }
+      for (int cfg : opts.configs) {
+        if (std::find(m.configIndices.begin(), m.configIndices.end(), cfg) !=
+            m.configIndices.end()) {
+          matched.push_back(cfg);
+        }
+      }
+      return matched;
+    };
+
     if (normTarget == "all") {
       for (const auto &m : mappings) {
-        if (!opts.configs.empty() &&
-            std::find(opts.configs.begin(), opts.configs.end(), m.configIndex) ==
-                opts.configs.end()) {
-          continue;
-        }
-        if (wantedBackends.count("vulkan") && !m.vulkanSpv.empty()) {
-          fs::path p = kernelDir / "vulkan" / m.vulkanSpv;
-          if (fs::exists(p)) {
-            artifacts.push_back({m.benchName, m.configLabel, m.configIndex, "vulkan", p, "", ""});
+        const std::vector<int> matchedConfigs = resolveMatchingConfigs(m);
+        for (int cfgIdx : matchedConfigs) {
+          if (wantedBackends.count("vulkan") && !m.vulkanSpv.empty()) {
+            fs::path p = kernelDir / "vulkan" / m.vulkanSpv;
+            if (fs::exists(p)) {
+              artifacts.push_back({m.benchName, m.configLabel, cfgIdx, "vulkan", p, "", ""});
+            }
           }
-        }
-        if (wantedBackends.count("rocm") && !m.rocmCo.empty()) {
-          fs::path p = kernelDir / "rocm" / m.rocmCo;
-          if (fs::exists(p)) {
-            artifacts.push_back({m.benchName, m.configLabel, m.configIndex, "rocm", p, m.rocmSymbol, ""});
+          if (wantedBackends.count("rocm") && !m.rocmCo.empty()) {
+            fs::path p = kernelDir / "rocm" / m.rocmCo;
+            if (fs::exists(p)) {
+              artifacts.push_back({m.benchName, m.configLabel, cfgIdx, "rocm", p, m.rocmSymbol, ""});
+            }
           }
         }
       }
@@ -1849,50 +1945,52 @@ static std::vector<KernelArtifact> resolveArtifactsForOptions(const IsaDumperOpt
 
     bool matchedBench = false;
     for (const auto &m : mappings) {
-      bool nameMatch = (normalizeKey(m.benchName) == normTarget) ||
-                       (normalizeKey(m.configLabel) == normTarget);
-      if (!nameMatch) {
-        for (const auto &al : m.aliases) {
-          if (normalizeKey(al) == normTarget) {
-            nameMatch = true;
-            break;
-          }
-        }
-      }
-      if (!nameMatch)
+      if (!matchesBenchmarkMapping(m, normTarget)) {
         continue;
+      }
 
-      if (!opts.configs.empty() &&
-          std::find(opts.configs.begin(), opts.configs.end(), m.configIndex) ==
-              opts.configs.end()) {
+      const std::vector<int> matchedConfigs = resolveMatchingConfigs(m);
+      if (matchedConfigs.empty()) {
         continue;
       }
 
       matchedBench = true;
-      if (wantedBackends.count("vulkan")) {
-        if (!m.vulkanSpv.empty()) {
-          fs::path p = kernelDir / "vulkan" / m.vulkanSpv;
-          if (fs::exists(p)) {
-            artifacts.push_back({m.benchName, m.configLabel, m.configIndex, "vulkan", p, "", ""});
+      for (int cfgIdx : matchedConfigs) {
+        if (wantedBackends.count("vulkan")) {
+          if (!m.vulkanSpv.empty()) {
+            fs::path p = kernelDir / "vulkan" / m.vulkanSpv;
+            if (fs::exists(p)) {
+              artifacts.push_back({m.benchName, m.configLabel, cfgIdx, "vulkan", p, "", ""});
+            }
+          } else if (wantedBackends.size() == 1) {
+            std::string reason;
+            if (!m.fixedSkipReason.empty()) {
+              reason = m.fixedSkipReason;
+            } else if (!m.rocmCo.empty()) {
+              reason = m.configLabel + " has no Vulkan shader artifact (supported on ROCm via " + m.rocmCo + "; pass '-k rocm').";
+            } else {
+              reason = m.configLabel + " is a capability-probed benchmark with no compiled shader artifact on this toolchain.";
+            }
+            artifacts.push_back({m.benchName, m.configLabel, cfgIdx, "vulkan", {}, "", reason});
           }
-        } else if (wantedBackends.size() == 1) {
-          std::string reason = !m.rocmCo.empty()
-              ? (m.configLabel + " has no Vulkan shader artifact (supported on ROCm via " + m.rocmCo + "; pass '-k rocm').")
-              : (m.configLabel + " is a capability-probed benchmark with no compiled shader artifact on this toolchain.");
-          artifacts.push_back({m.benchName, m.configLabel, m.configIndex, "vulkan", {}, "", reason});
         }
-      }
-      if (wantedBackends.count("rocm")) {
-        if (!m.rocmCo.empty()) {
-          fs::path p = kernelDir / "rocm" / m.rocmCo;
-          if (fs::exists(p)) {
-            artifacts.push_back({m.benchName, m.configLabel, m.configIndex, "rocm", p, m.rocmSymbol, ""});
+        if (wantedBackends.count("rocm")) {
+          if (!m.rocmCo.empty()) {
+            fs::path p = kernelDir / "rocm" / m.rocmCo;
+            if (fs::exists(p)) {
+              artifacts.push_back({m.benchName, m.configLabel, cfgIdx, "rocm", p, m.rocmSymbol, ""});
+            }
+          } else if (wantedBackends.size() == 1) {
+            std::string reason;
+            if (!m.fixedSkipReason.empty()) {
+              reason = m.fixedSkipReason;
+            } else if (!m.vulkanSpv.empty()) {
+              reason = m.configLabel + " has no ROCm kernel artifact (supported on Vulkan via " + m.vulkanSpv + "; pass '-k vulkan').";
+            } else {
+              reason = m.configLabel + " is a capability-probed benchmark with no compiled kernel artifact on this toolchain.";
+            }
+            artifacts.push_back({m.benchName, m.configLabel, cfgIdx, "rocm", {}, "", reason});
           }
-        } else if (wantedBackends.size() == 1) {
-          std::string reason = !m.vulkanSpv.empty()
-              ? (m.configLabel + " has no ROCm kernel artifact (supported on Vulkan via " + m.vulkanSpv + "; pass '-k vulkan').")
-              : (m.configLabel + " is a capability-probed benchmark with no compiled kernel artifact on this toolchain.");
-          artifacts.push_back({m.benchName, m.configLabel, m.configIndex, "rocm", {}, "", reason});
         }
       }
     }
@@ -1926,8 +2024,8 @@ static std::vector<KernelArtifact> resolveArtifactsForOptions(const IsaDumperOpt
 
 static IsaDumperOptions applyUnmappedConfigFallback(const IsaDumperOptions &opts) {
   IsaDumperOptions fb = opts;
-  if (!fb.targets.empty() && fb.targets[0] == "RayScheduling") {
-    fb.configs = {7};
+  if (!fb.targets.empty() && normalizeKey(fb.targets[0]) == "rayscheduling") {
+    fb.configs = {28};
   } else {
     fb.configs.clear();
   }
@@ -2029,7 +2127,7 @@ static fs::path getIsaCacheRoot() {
     base = (home && *home ? fs::path(home) : fs::path(".")) / ".cache" / "gpubench";
   }
 #endif
-  return base / "isa_v1";
+  return base / "isa_v2";
 }
 
 static std::string canonicalBackendForCache(const IsaDumperOptions &opts) {
@@ -2071,7 +2169,7 @@ static fs::path buildIsaCachePath(const IsaDumperOptions &opts, const IsaCacheCo
   const std::string backend = canonicalBackendForCache(opts);
 
   std::ostringstream keySs;
-  keySs << "v1|" << ctx.vendorId << "|" << ctx.deviceId << "|"
+  keySs << "v2|" << ctx.vendorId << "|" << ctx.deviceId << "|"
         << ctx.driverVersion << "|" << ctx.driverInfo << "|"
         << backend << "|" << opts.deviceIndex << "|"
         << target << "|" << cfg << "|" << (opts.fullIsa ? 1 : 0);
@@ -2273,7 +2371,7 @@ bool IsaDumper::tryLoadCached(const IsaDumperOptions &opts,
     return false;
   }
 
-  if (readJsonI64(root, "schemaVersion") != 1) return false;
+  if (readJsonI64(root, "schemaVersion") != 2) return false;
   if (readJsonU64(root, "vendorId") != ctx.vendorId) return false;
   if (readJsonU64(root, "deviceId") != ctx.deviceId) return false;
   if (readJsonStr(root, "driverVersion") != ctx.driverVersion) return false;
@@ -2445,7 +2543,7 @@ bool IsaDumper::saveCached(const IsaDumperOptions &opts,
   yyjson_mut_val *root = yyjson_mut_obj(doc);
   yyjson_mut_doc_set_root(doc, root);
 
-  yyjson_mut_obj_add_int(doc, root, "schemaVersion", 1);
+  yyjson_mut_obj_add_int(doc, root, "schemaVersion", 2);
   yyjson_mut_obj_add_uint(doc, root, "vendorId", ctx.vendorId);
   yyjson_mut_obj_add_uint(doc, root, "deviceId", ctx.deviceId);
   yyjson_mut_obj_add_strcpy(doc, root, "driverVersion", ctx.driverVersion.c_str());
@@ -2545,6 +2643,24 @@ bool IsaDumper::saveCached(const IsaDumperOptions &opts,
     return false;
   }
   return true;
+}
+
+bool IsaDumper::isDeferredWarmupTarget(const std::string &target, int configIndex) {
+  const std::string normTarget = normalizeKey(target);
+  if (normTarget.empty()) {
+    return false;
+  }
+  const auto mappings = getBenchmarkMappings();
+  for (const auto &m : mappings) {
+    if (!matchesBenchmarkMapping(m, normTarget)) {
+      continue;
+    }
+    if (std::find(m.configIndices.begin(), m.configIndices.end(), configIndex) !=
+        m.configIndices.end()) {
+      return m.vulkanSpv == "rt_scheduling_traditional_megakernel.comp.spv";
+    }
+  }
+  return false;
 }
 
 void IsaDumper::warmCacheBatch(

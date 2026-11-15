@@ -93,7 +93,7 @@ struct DeviceTelemetrySnapshot {
     bool hasVram{false};
     bool hasGtt{false};
 
-    // Histories for ImPlot (rolling live window when idle; full run from t=0 when recording)
+    // Histories for ImPlot (recorded only during active benchmark runs)
     TelemetryBuffer timeHistory;
     TelemetryBuffer sclkHistory;
     TelemetryBuffer mclkHistory;
@@ -186,6 +186,7 @@ public:
     void startRecording();
     void stopRecording();
     bool isRecording() const { return m_isRecording.load(); }
+    bool hasCompletedRun() const { return m_hasCompletedRun.load(); }
     double getRunDuration() const;
     void resetHistory();
 
@@ -226,7 +227,6 @@ private:
     std::vector<DeviceTelemetrySnapshot> m_snapshots;
     std::vector<std::shared_ptr<const PreparedGraphData>> m_preparedGraphs;
     std::chrono::steady_clock::time_point m_startTime;
-    std::chrono::steady_clock::time_point m_idleStartTime;
     std::chrono::steady_clock::time_point m_runStartTime;
     double m_runDuration{0.0};
 };

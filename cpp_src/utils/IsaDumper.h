@@ -109,6 +109,10 @@ public:
                          const IsaCacheContext &ctx,
                          const IsaInspectionResult &result);
 
+  // Returns true when automatic idle background warmup should defer this target/config
+  // (e.g., multi-second LLPC megakernel shaders) until explicit selection or test completion.
+  static bool isDeferredWarmupTarget(const std::string &target, int configIndex);
+
   // Interruptible batch warmup reusing a single Vulkan inspector session across items.
   // Checks cancelFlag before each item and invokes onItemReady as each result finishes.
   static void warmCacheBatch(

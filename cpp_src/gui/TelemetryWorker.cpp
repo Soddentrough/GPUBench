@@ -21,10 +21,39 @@
 
 namespace gpubench::gui {
 
+namespace {
+
+void clearHistoryBuffers(DeviceTelemetrySnapshot& snap) {
+    snap.timeHistory.clear();
+    snap.sclkHistory.clear();
+    snap.mclkHistory.clear();
+    snap.powerHistory.clear();
+    snap.tempEdgeHistory.clear();
+    snap.tempJctHistory.clear();
+    snap.tempMemHistory.clear();
+    snap.vramUsedMbHistory.clear();
+    snap.gpuBusyHistory.clear();
+}
+
+void pushHistoryPoint(DeviceTelemetrySnapshot& snap, float timestampSec) {
+    if (!snap.isAvailable) {
+        return;
+    }
+    snap.timeHistory.push(timestampSec);
+    snap.sclkHistory.push(snap.sclkMhz);
+    snap.mclkHistory.push(snap.mclkMhz);
+    snap.powerHistory.push(snap.powerWatts);
+    snap.tempEdgeHistory.push(snap.tempEdgeC);
+    snap.tempJctHistory.push(snap.tempJctC);
+    snap.tempMemHistory.push(snap.tempMemC);
+    snap.vramUsedMbHistory.push(static_cast<float>(snap.vramUsedBytes / (1024ULL * 1024ULL)));
+    snap.gpuBusyHistory.push(snap.gpuBusyPct);
+}
+
+} // namespace
+
 TelemetryWorker::TelemetryWorker() {
-    auto now = std::chrono::steady_clock::now();
-    m_startTime = now;
-    m_idleStartTime = now;
+    m_startTime = std::chrono::steady_clock::now();
     discoverDevices();
 }
 
@@ -125,15 +154,8 @@ void TelemetryWorker::startRecording() {
     m_runDuration = 0.0;
     m_hasCompletedRun.store(false);
     for (auto& snap : m_snapshots) {
-        snap.timeHistory.clear();
-        snap.sclkHistory.clear();
-        snap.mclkHistory.clear();
-        snap.powerHistory.clear();
-        snap.tempEdgeHistory.clear();
-        snap.tempJctHistory.clear();
-        snap.tempMemHistory.clear();
-        snap.vramUsedMbHistory.clear();
-        snap.gpuBusyHistory.clear();
+        clearHistoryBuffers(snap);
+        pushHistoryPoint(snap, 0.0f);
     }
     m_isRecording.store(true);
     notifyGraphThread();
@@ -144,9 +166,16 @@ void TelemetryWorker::stopRecording() {
     if (m_isRecording.load()) {
         auto now = std::chrono::steady_clock::now();
         m_runDuration = std::chrono::duration<double>(now - m_runStartTime).count();
+        const float endSec = static_cast<float>(m_runDuration);
+        for (auto& snap : m_snapshots) {
+            if (snap.timeHistory.empty() || snap.timeHistory.back() < endSec) {
+                pushHistoryPoint(snap, endSec);
+            }
+        }
         m_hasCompletedRun.store(true);
     }
     m_isRecording.store(false);
+    notifyGraphThread();
 }
 
 double TelemetryWorker::getRunDuration() const {
@@ -160,19 +189,13 @@ double TelemetryWorker::getRunDuration() const {
 
 void TelemetryWorker::resetHistory() {
     std::lock_guard<std::mutex> lock(m_mutex);
+    if (m_isRecording.load()) {
+        m_runStartTime = std::chrono::steady_clock::now();
+    }
     m_runDuration = 0.0;
     m_hasCompletedRun.store(false);
-    m_idleStartTime = std::chrono::steady_clock::now();
     for (auto& snap : m_snapshots) {
-        snap.timeHistory.clear();
-        snap.sclkHistory.clear();
-        snap.mclkHistory.clear();
-        snap.powerHistory.clear();
-        snap.tempEdgeHistory.clear();
-        snap.tempJctHistory.clear();
-        snap.tempMemHistory.clear();
-        snap.vramUsedMbHistory.clear();
-        snap.gpuBusyHistory.clear();
+        clearHistoryBuffers(snap);
     }
     notifyGraphThread();
 }
@@ -340,32 +363,10 @@ void TelemetryWorker::applySample(DevicePollState& state, DeviceTelemetrySnapsho
         snap.gpuBusySmoothPct = 0.0f;
     }
 
-    // Record history during active benchmark run, OR maintain a live 60s rolling trace when idle
-    // (preserving a completed benchmark run's full trace until reset or next run).
-    bool pushSample = isRecordingRun || !m_hasCompletedRun.load();
-    if (pushSample && snap.isAvailable) {
-        snap.timeHistory.push(static_cast<float>(timestampSec));
-        snap.sclkHistory.push(snap.sclkMhz);
-        snap.mclkHistory.push(snap.mclkMhz);
-        snap.powerHistory.push(snap.powerWatts);
-        snap.tempEdgeHistory.push(snap.tempEdgeC);
-        snap.tempJctHistory.push(snap.tempJctC);
-        snap.tempMemHistory.push(snap.tempMemC);
-        snap.vramUsedMbHistory.push(static_cast<float>(snap.vramUsedBytes / (1024ULL * 1024ULL)));
-        snap.gpuBusyHistory.push(snap.gpuBusyPct);
-
-        if (!isRecordingRun) {
-            constexpr size_t kIdleRollingSamples = 600; // 60s at 10Hz
-            snap.timeHistory.trimRolling(kIdleRollingSamples);
-            snap.sclkHistory.trimRolling(kIdleRollingSamples);
-            snap.mclkHistory.trimRolling(kIdleRollingSamples);
-            snap.powerHistory.trimRolling(kIdleRollingSamples);
-            snap.tempEdgeHistory.trimRolling(kIdleRollingSamples);
-            snap.tempJctHistory.trimRolling(kIdleRollingSamples);
-            snap.tempMemHistory.trimRolling(kIdleRollingSamples);
-            snap.vramUsedMbHistory.trimRolling(kIdleRollingSamples);
-            snap.gpuBusyHistory.trimRolling(kIdleRollingSamples);
-        }
+    // Record lower-graph history only while an active benchmark run is executing.
+    // Instantaneous sensor readouts above continue updating even when idle.
+    if (isRecordingRun) {
+        pushHistoryPoint(snap, static_cast<float>(timestampSec));
     }
 }
 
@@ -693,14 +694,14 @@ void TelemetryWorker::workerLoop() {
             rawSamples.push_back(std::move(sample));
         }
 
-        const bool recording = m_isRecording.load();
         const auto applyNow = std::chrono::steady_clock::now();
-        const double timestamp = recording
-            ? std::chrono::duration<double>(applyNow - m_runStartTime).count()
-            : std::chrono::duration<double>(applyNow - m_idleStartTime).count();
 
         {
             std::lock_guard<std::mutex> lock(m_mutex);
+            const bool recording = m_isRecording.load();
+            const double timestamp = recording
+                ? std::chrono::duration<double>(applyNow - m_runStartTime).count()
+                : 0.0;
             for (size_t i = 0; i < m_pollStates.size() && i < m_snapshots.size(); ++i) {
                 const uint32_t targetIdx = m_pollStates[i].deviceIndex;
                 for (const auto& sample : rawSamples) {

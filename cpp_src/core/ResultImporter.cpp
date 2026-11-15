@@ -835,6 +835,8 @@ bool ResultImporter::loadFromString(const std::string &content, ImportedRun &out
       }
       rd.width = entry["width"].as_uint32(entryW);
       rd.height = entry["height"].as_uint32(entryH);
+      rd.samplesPerFrame = entry["samples_per_pixel"].as_uint32(
+          (rd.configIndex == 23 || rd.configIndex == 24) ? 16u : 1u);
 
       if (entry.has("statistics")) {
         const JsonView st = entry["statistics"];

@@ -161,6 +161,98 @@ void setCategoryArmed(BenchmarkCategory& cat, bool arm) {
     cat.allSelected = any;
 }
 
+/// Produce a compact sidebar slot label by stripping subgroup-redundant prefixes
+/// while preserving full names in tooltips, inspectors, and exported charts.
+std::string compactWorkloadSlotLabel(const std::string& fullName, const std::string& subgroupName) {
+    std::string out = fullName;
+
+    static constexpr const char* kLeadingTags[] = {
+        "Stage: ",
+        "Scene Render: ",
+        "Stage Breakdown - "
+    };
+    for (const char* tag : kLeadingTags) {
+        const size_t len = std::char_traits<char>::length(tag);
+        if (out.rfind(tag, 0) == 0) {
+            out.erase(0, len);
+            break;
+        }
+    }
+
+    auto stripPrefixWithSep = [](std::string& s, const std::string& prefix) -> bool {
+        if (prefix.empty() || s.size() <= prefix.size() || s.rfind(prefix, 0) != 0) {
+            return false;
+        }
+        const size_t n = prefix.size();
+        for (const char* sep : {" - ", ": ", " "}) {
+            const size_t sepLen = std::char_traits<char>::length(sep);
+            if (s.compare(n, sepLen, sep) == 0 && s.size() > n + sepLen) {
+                s.erase(0, n + sepLen);
+                return true;
+            }
+        }
+        return false;
+    };
+
+    if (!stripPrefixWithSep(out, subgroupName)) {
+        static constexpr const char* kGroupPrefixes[] = {
+            "Multi-Light Evaluation",
+            "Directional Shadows",
+            "BVH Traversal",
+            "Queue Compaction",
+            "Traversal Divergence",
+            "Alpha-Cutout Traversal Divergence",
+            "Incoherent Ray Tracing",
+            "Primary Ray Tracing",
+            "Full Scene Path Tracing",
+            "Material Shading"
+        };
+        for (const char* gp : kGroupPrefixes) {
+            if (stripPrefixWithSep(out, gp)) {
+                break;
+            }
+        }
+    }
+
+    struct ReplaceRule { const char* from; const char* to; };
+    static constexpr ReplaceRule kRules[] = {
+        {"(Device-Generated Commands (DGC))", "(DGC)"},
+        {"Device-Generated Commands (DGC)", "DGC"},
+        {"(DGC Light Binning)", "(DGC)"},
+        {"(DGC Indirect)", "(DGC)"},
+        {"(DGC Specialized)", "(DGC Spec)"},
+        {"DGC Specialized", "DGC Spec"},
+        {"(Traditional Megakernel)", "(MK)"},
+        {"Traditional Megakernel", "MK"},
+        {"(Megakernel)", "(MK)"},
+        {"Wavefront Compaction (Material Sorting)", "Wavefront (Mat)"},
+        {"Wavefront Compaction (Directional Binning)", "Wavefront (Dir)"},
+        {"Wavefront Compaction (Ray Reordering)", "Wavefront (Reorder)"},
+        {"RTP + Hardware SER", "RTP + SER"},
+        {"Single Light", "1 Light"},
+        {"In-Shader Indirect Synthesis", "Indirect"},
+        {"In-Shader Zero-Dispatch ", "Zero-Dispatch "},
+        {"CPU Direct Fixed Grid", "CPU Fixed Grid"}
+    };
+    for (const auto& rule : kRules) {
+        const size_t fromLen = std::char_traits<char>::length(rule.from);
+        const size_t toLen = std::char_traits<char>::length(rule.to);
+        size_t pos = 0;
+        while ((pos = out.find(rule.from, pos)) != std::string::npos) {
+            out.replace(pos, fromLen, rule.to);
+            pos += toLen;
+        }
+    }
+
+    if (out.size() >= 2 && out.front() == '(' && out.back() == ')') {
+        std::string inner = out.substr(1, out.size() - 2);
+        if (inner.find('(') == std::string::npos && inner.find(')') == std::string::npos) {
+            out = std::move(inner);
+        }
+    }
+    return out;
+}
+
 } // namespace
 
 void GuiApp::initializeBenchmarkCategories() {
@@ -578,6 +670,68 @@ void GuiApp::renderBenchmarkSuitePanel() {
     std::snprintf(rightTag, sizeof(rightTag), "%zu/%zu ARMED", totalArmed, totalSupported);
     drawEtchedHeader("ROM-01", "WORKLOAD MATRIX", c, rightTag);
 
+    auto allCategoriesMask = [&]() -> uint32_t {
+        if (m_categories.empty()) return 0u;
+        return (m_categories.size() >= 32)
+            ? 0xFFFFFFFFu
+            : ((1u << m_categories.size()) - 1u);
+    };
+    auto isCategoryInView = [&](size_t ci) -> bool {
+        if (m_suiteViewCategoryMask == 0u) return true;
+        if (ci >= 32) return true;
+        return (m_suiteViewCategoryMask & (1u << ci)) != 0u;
+    };
+    auto searchMatchesAnyItemInMask = [&](uint32_t mask) -> bool {
+        if (m_suiteSearchBuf[0] == '\0') return true;
+        const std::string q(m_suiteSearchBuf);
+        for (size_t ci = 0; ci < m_categories.size(); ++ci) {
+            if (mask != 0u && ci < 32 && (mask & (1u << ci)) == 0u) continue;
+            const auto& cat = m_categories[ci];
+            if (containsCaseInsensitive(cat.name, q)) return true;
+            for (const auto& sg : cat.subgroups) {
+                if (containsCaseInsensitive(sg.name, q)) return true;
+                for (const auto& itm : sg.items) {
+                    if (itm.selected && itm.isSupported &&
+                        (containsCaseInsensitive(itm.name, q) || containsCaseInsensitive(itm.id, q))) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    };
+    auto computeArmedCategoryMask = [&]() -> uint32_t {
+        uint32_t mask = 0u;
+        for (size_t ci = 0; ci < m_categories.size() && ci < 32; ++ci) {
+            bool catHasArmed = false;
+            for (const auto& sg : m_categories[ci].subgroups) {
+                for (const auto& itm : sg.items) {
+                    if (itm.selected && itm.isSupported) {
+                        catHasArmed = true;
+                        break;
+                    }
+                }
+                if (catHasArmed) break;
+            }
+            if (catHasArmed) mask |= (1u << ci);
+        }
+        return mask;
+    };
+    auto syncViewToArmedCategories = [&](int focusCatIdx) {
+        const uint32_t allMask = allCategoriesMask();
+        const uint32_t armedMask = computeArmedCategoryMask();
+        m_suiteViewCategoryMask = (armedMask == 0u || (armedMask & allMask) == allMask)
+            ? 0u
+            : armedMask;
+        if (m_suiteSearchBuf[0] != '\0' && !searchMatchesAnyItemInMask(m_suiteViewCategoryMask)) {
+            m_suiteSearchBuf[0] = '\0';
+        }
+        if (focusCatIdx >= 0) {
+            m_suiteScrollToCategoryIdx = focusCatIdx;
+            m_suiteScrollRetries = 2;
+        }
+    };
+
     // Preset & Bulk Selection Bar
     if (isRunning) ImGui::BeginDisabled();
     const float btnH = s(22.0f);
@@ -586,6 +740,7 @@ void GuiApp::renderBenchmarkSuitePanel() {
             setCategoryArmed(cat, true);
         }
         syncSelectionFlags(m_categories);
+        syncViewToArmedCategories(0);
     }
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
         ImGui::SetTooltip("Arm all %zu supported benchmarks across every group.", totalSupported);
@@ -596,25 +751,24 @@ void GuiApp::renderBenchmarkSuitePanel() {
             setCategoryArmed(cat, false);
         }
         syncSelectionFlags(m_categories);
+        syncViewToArmedCategories(-1);
     }
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
         ImGui::SetTooltip("Disarm all benchmarks so you can pick specific groups or slots.");
     }
     ImGui::SameLine(0.0f, s(4.0f));
     if (tacticalButton("##BtnRooflinePreset", "CORE SUITE", ImVec2(s(88.0f), btnH), isCorePresetActive, c)) {
-        for (auto& cat : m_categories) {
-            for (auto& sg : cat.subgroups) {
+        int firstArmedCat = -1;
+        for (size_t ci = 0; ci < m_categories.size(); ++ci) {
+            for (auto& sg : m_categories[ci].subgroups) {
                 for (auto& itm : sg.items) {
                     itm.selected = itm.isSupported && isCoreSuiteSlot(itm);
+                    if (itm.selected && firstArmedCat < 0) firstArmedCat = static_cast<int>(ci);
                 }
             }
         }
         syncSelectionFlags(m_categories);
-        if (m_suiteCategoryFilter > 0 &&
-            m_suiteCategoryFilter <= static_cast<int>(m_categories.size()) &&
-            !m_categories[static_cast<size_t>(m_suiteCategoryFilter - 1)].allSelected) {
-            m_suiteCategoryFilter = 0;
-        }
+        syncViewToArmedCategories(firstArmedCat);
     }
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
         ImGui::SetTooltip("Arm curated Core Suite (FP32/FP16/BF16/FP8/INT8, VRAM & L0-L3 Cache BW, PCIe DMA, Core RT Path Tracing).");
@@ -656,8 +810,10 @@ void GuiApp::renderBenchmarkSuitePanel() {
             sameLineIfFits(pillW, s(3.0f));
             std::string grpId = "##GrpArm_" + std::to_string(ci);
             if (tacticalButton(grpId.c_str(), lbl, ImVec2(pillW, s(21.0f)), groupOn, c)) {
-                setCategoryArmed(cat, !groupOn);
+                const bool arming = !groupOn;
+                setCategoryArmed(cat, arming);
                 syncSelectionFlags(m_categories);
+                syncViewToArmedCategories(arming ? static_cast<int>(ci) : -1);
             }
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
                 ImGui::SetTooltip("%s: %zu/%zu armed (click to turn %s).",
@@ -687,25 +843,46 @@ void GuiApp::renderBenchmarkSuitePanel() {
         }
     }
 
-    // Category View Filter Matrix
+    // Category View Filter Matrix (multi-category bitmask: 0 = ALL)
     ImGui::Spacing();
     {
+        const uint32_t allMask = allCategoriesMask();
+        const bool multiMod = ImGui::GetIO().KeyCtrl || ImGui::GetIO().KeyShift;
         ImGui::AlignTextToFramePadding();
         ImGui::TextColored(c.textMuted, "VIEW:");
         ImGui::SameLine(0.0f, s(4.0f));
-        bool allActive = (m_suiteCategoryFilter == 0);
+        bool allActive = (m_suiteViewCategoryMask == 0u);
         if (tacticalButton("##CatAll", "ALL", ImVec2(0.0f, s(21.0f)), allActive, c)) {
-            m_suiteCategoryFilter = 0;
+            m_suiteViewCategoryMask = 0u;
         }
         for (size_t ci = 0; ci < m_categories.size(); ++ci) {
+            const uint32_t bit = (ci < 32) ? (1u << ci) : 0u;
             std::string pillLabel = std::string(shortCategoryTag(m_categories[ci].name)) +
                                     " [" + std::to_string(m_categories[ci].totalItemCount()) + "]";
             float pillW = ImGui::CalcTextSize(pillLabel.c_str()).x + s(16.0f);
             sameLineIfFits(pillW, s(4.0f));
-            bool active = (m_suiteCategoryFilter == static_cast<int>(ci + 1));
+            bool active = (m_suiteViewCategoryMask != 0u) && ((m_suiteViewCategoryMask & bit) != 0u);
             std::string btnId = "##CatBtn_" + std::to_string(ci);
             if (tacticalButton(btnId.c_str(), pillLabel.c_str(), ImVec2(0.0f, s(21.0f)), active, c)) {
-                m_suiteCategoryFilter = static_cast<int>(ci + 1);
+                if (bit != 0u) {
+                    if (multiMod) {
+                        if (m_suiteViewCategoryMask == 0u) {
+                            m_suiteViewCategoryMask = bit;
+                        } else {
+                            m_suiteViewCategoryMask ^= bit;
+                            if (m_suiteViewCategoryMask == 0u ||
+                                (m_suiteViewCategoryMask & allMask) == allMask) {
+                                m_suiteViewCategoryMask = 0u;
+                            }
+                        }
+                    } else {
+                        m_suiteViewCategoryMask = bit;
+                    }
+                }
+            }
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                ImGui::SetTooltip("View %s (Ctrl/Shift+click to multi-select view groups).",
+                                  m_categories[ci].name.c_str());
             }
         }
     }
@@ -721,7 +898,7 @@ void GuiApp::renderBenchmarkSuitePanel() {
     const std::string searchQuery(m_suiteSearchBuf);
 
     for (size_t ci = 0; ci < m_categories.size(); ++ci) {
-        if (m_suiteCategoryFilter != 0 && m_suiteCategoryFilter != static_cast<int>(ci + 1)) {
+        if (!isCategoryInView(ci)) {
             continue;
         }
         const auto& cat = m_categories[ci];
@@ -754,7 +931,7 @@ void GuiApp::renderBenchmarkSuitePanel() {
 
     size_t cursorRow = 0;
     for (size_t ci = 0; ci < m_categories.size(); ++ci) {
-        if (m_suiteCategoryFilter != 0 && m_suiteCategoryFilter != static_cast<int>(ci + 1)) {
+        if (!isCategoryInView(ci)) {
             continue;
         }
 
@@ -771,6 +948,12 @@ void GuiApp::renderBenchmarkSuitePanel() {
 
         ImGui::PushID(static_cast<int>(ci));
         ImGui::Spacing();
+        if (m_suiteScrollToCategoryIdx == static_cast<int>(ci) && m_suiteScrollRetries > 0) {
+            ImGui::SetScrollHereY(0.05f);
+            if (--m_suiteScrollRetries <= 0) {
+                m_suiteScrollToCategoryIdx = -1;
+            }
+        }
 
         // Category Etched Band with group Arm toggle & +ALL / -CLR
         {
@@ -901,6 +1084,7 @@ void GuiApp::renderBenchmarkSuitePanel() {
                         for (auto& itm : sg.items) {
                             if (itm.isSupported) itm.selected = true;
                         }
+                        sg.collapsed = false;
                         syncSelectionFlags(m_categories);
                     }
                     ImGui::SameLine(0.0f, s(4.0f));
@@ -964,7 +1148,8 @@ void GuiApp::renderBenchmarkSuitePanel() {
                         ImGui::TableSetColumnIndex(1);
                         {
                             float colW = std::max(s(40.0f), ImGui::GetContentRegionAvail().x);
-                            std::string fittedName = fitTextToPixelWidth(itm.name, colW - s(4.0f));
+                            std::string compactName = compactWorkloadSlotLabel(itm.name, sg.name);
+                            std::string fittedName = fitTextToPixelWidth(compactName, colW - s(4.0f));
                             ImVec2 textPos = ImGui::GetCursorScreenPos();
                             float rowH = s(18.0f);
                             if (ImGui::InvisibleButton("##SelectSlot", ImVec2(colW, rowH))) {

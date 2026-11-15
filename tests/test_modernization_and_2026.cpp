@@ -21,16 +21,19 @@
 #include "core/ResultImporter.h"
 #include "core/RooflineModel.h"
 #include "core/RunnerAPI.h"
+#include "gui/TelemetryWorker.h"
 #include "utils/HardwareTelemetry.h"
 #include "utils/IsaDumper.h"
 #include "utils/KernelPath.h"
 
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <iostream>
 #include <limits>
 #include <set>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -521,6 +524,95 @@ TEST_CASE(ModernizationAnd2026, IsaDumper_HonestReportingAndHotLoopAccuracy) {
       ASSERT_TRUE(!exec.fullIsaLines.empty() || !exec.unavailableReason.empty());
     }
   }
+
+  // 6. RayScheduling non-SER configs must never fall back to SER, and GUI benchmark names must resolve
+  {
+    ASSERT_TRUE(IsaDumper::isDeferredWarmupTarget("RayScheduling", 0));
+    ASSERT_TRUE(IsaDumper::isDeferredWarmupTarget("RayScheduling", 32));
+    ASSERT_FALSE(IsaDumper::isDeferredWarmupTarget("RayScheduling", 1));
+    ASSERT_FALSE(IsaDumper::isDeferredWarmupTarget("RayScheduling", 33));
+
+    auto inspectSingle = [](const std::string &target, int cfg) {
+      IsaDumperOptions opts;
+      opts.targets = {target};
+      opts.backends = {"vulkan"};
+      opts.configs = {cfg};
+      return IsaDumper::inspect(opts);
+    };
+
+    const IsaInspectionResult rs33 = inspectSingle("RayScheduling", 33);
+    ASSERT_TRUE(rs33.ok);
+    ASSERT_EQ(rs33.artifacts.size(), size_t{1});
+    ASSERT_EQ(rs33.artifacts[0].configIndex, 33);
+    ASSERT_EQ(rs33.artifacts[0].artifactFile,
+              std::string("rt_scheduling_device_generated_commands_light.comp.spv"));
+    ASSERT_TRUE(rs33.artifacts[0].skipReason.empty());
+    ASSERT_FALSE(rs33.artifacts[0].executables.empty());
+
+    const IsaInspectionResult rs28 = inspectSingle("RayScheduling", 28);
+    ASSERT_TRUE(rs28.ok);
+    ASSERT_EQ(rs28.artifacts.size(), size_t{1});
+    ASSERT_EQ(rs28.artifacts[0].artifactFile, std::string("rt_scheduling.rgen.spv"));
+    if (info.rayTracingSupport) {
+      ASSERT_TRUE(rs28.artifacts[0].skipReason.empty());
+    }
+
+    const IsaInspectionResult rs1 = inspectSingle("RayScheduling", 1);
+    ASSERT_TRUE(rs1.ok);
+    ASSERT_EQ(rs1.artifacts.size(), size_t{1});
+    ASSERT_EQ(rs1.artifacts[0].artifactFile, std::string("rt_scheduling_ser.rgen.spv"));
+
+    const IsaInspectionResult l0bw = inspectSingle("L0 Cache Bandwidth", 0);
+    ASSERT_TRUE(l0bw.ok);
+    ASSERT_EQ(l0bw.artifacts.size(), size_t{1});
+    ASSERT_EQ(l0bw.artifacts[0].artifactFile, std::string("cache_bw_robust.comp.spv"));
+    ASSERT_TRUE(l0bw.artifacts[0].skipReason.empty());
+
+    const IsaInspectionResult l0lat = inspectSingle("L0 Vector Cache Latency (16 KB)", 0);
+    ASSERT_TRUE(l0lat.ok);
+    ASSERT_EQ(l0lat.artifacts.size(), size_t{1});
+    ASSERT_EQ(l0lat.artifacts[0].artifactFile, std::string("l0_cache_latency.comp.spv"));
+
+    const IsaInspectionResult wg0 = inspectSingle("GPU Work Graphs (Producer-Consumer)", 0);
+    ASSERT_TRUE(wg0.ok);
+    ASSERT_EQ(wg0.artifacts.size(), size_t{1});
+    ASSERT_EQ(wg0.artifacts[0].artifactFile, std::string("workgraphs_producer.comp.spv"));
+
+    const IsaInspectionResult async2 = inspectSingle("Async Compute & Copy Overlap", 2);
+    ASSERT_TRUE(async2.ok);
+    ASSERT_EQ(async2.artifacts.size(), size_t{1});
+    ASSERT_EQ(async2.artifacts[0].artifactFile, std::string("async_compute_heavy.comp.spv"));
+
+    const IsaInspectionResult membw4 = inspectSingle("Device Memory Bandwidth", 4);
+    ASSERT_TRUE(membw4.ok);
+    ASSERT_EQ(membw4.artifacts.size(), size_t{1});
+    ASSERT_EQ(membw4.artifacts[0].artifactFile, std::string("membw_256.comp.spv"));
+
+    const IsaInspectionResult ic4 = inspectSingle("PCIe & Host-Device Interconnect", 4);
+    ASSERT_TRUE(ic4.ok);
+    ASSERT_EQ(ic4.artifacts.size(), size_t{1});
+    ASSERT_EQ(ic4.artifacts[0].artifactFile, std::string("interconnect_latency.comp.spv"));
+
+    const IsaInspectionResult cv0 = inspectSingle("Cooperative Vector (Neural Shading)", 0);
+    ASSERT_TRUE(cv0.ok);
+    ASSERT_EQ(cv0.artifacts.size(), size_t{1});
+    ASSERT_EQ(cv0.artifacts[0].artifactFile, std::string("coop_vector_fp16.comp.spv"));
+
+    const IsaInspectionResult omm2 = inspectSingle("Ray Tracing Opacity Micromap", 2);
+    ASSERT_TRUE(omm2.ok);
+    ASSERT_EQ(omm2.artifacts.size(), size_t{1});
+    ASSERT_EQ(omm2.artifacts[0].artifactFile, std::string("rayomm_omm.rgen.spv"));
+
+    const IsaInspectionResult ind6 = inspectSingle("In-Shader Indirect Synthesis", 6);
+    ASSERT_TRUE(ind6.ok);
+    ASSERT_EQ(ind6.artifacts.size(), size_t{1});
+    ASSERT_EQ(ind6.artifacts[0].artifactFile, std::string("direct_worker.comp.spv"));
+
+    const IsaInspectionResult asb0 = inspectSingle("RayASBuild", 0);
+    ASSERT_TRUE(asb0.ok);
+    ASSERT_EQ(asb0.artifacts.size(), size_t{1});
+    ASSERT_FALSE(asb0.artifacts[0].skipReason.empty());
+  }
 }
 
 TEST_CASE(Modernization2026, IsaDiskCacheAndWarmupValidation) {
@@ -615,4 +707,55 @@ TEST_CASE(Modernization2026, IsaDiskCacheAndWarmupValidation) {
                               cancel.store(true);
                             });
   ASSERT_EQ(canceledCount, size_t{1});
+}
+
+TEST_CASE(ModernizationAnd2026, TelemetryWorkerRecordsOnlyDuringRunAndStops) {
+  gpubench::gui::TelemetryWorker worker;
+  worker.start();
+
+  // Idle before any test run: must not accumulate lower-graph trace samples.
+  std::this_thread::sleep_for(std::chrono::milliseconds(250));
+  ASSERT_FALSE(worker.isRecording());
+  ASSERT_FALSE(worker.hasCompletedRun());
+
+  if (worker.getDeviceCount() > 0) {
+    gpubench::gui::DeviceTelemetrySnapshot idleSnap{};
+    ASSERT_TRUE(worker.getSnapshot(0, idleSnap));
+    ASSERT_EQ(idleSnap.timeHistory.size(), size_t{0});
+
+    // Active test run: must record samples until stopped.
+    worker.startRecording();
+    ASSERT_TRUE(worker.isRecording());
+    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+
+    gpubench::gui::DeviceTelemetrySnapshot recSnap{};
+    ASSERT_TRUE(worker.getSnapshot(0, recSnap));
+    if (recSnap.isAvailable) {
+      ASSERT_GE(recSnap.timeHistory.size(), size_t{2});
+    }
+
+    // Stopped after test run: sample count must freeze and remain stopped.
+    worker.stopRecording();
+    ASSERT_FALSE(worker.isRecording());
+    ASSERT_TRUE(worker.hasCompletedRun());
+
+    gpubench::gui::DeviceTelemetrySnapshot stoppedSnap{};
+    ASSERT_TRUE(worker.getSnapshot(0, stoppedSnap));
+    const size_t frozenCount = stoppedSnap.timeHistory.size();
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    gpubench::gui::DeviceTelemetrySnapshot afterIdleSnap{};
+    ASSERT_TRUE(worker.getSnapshot(0, afterIdleSnap));
+    ASSERT_EQ(afterIdleSnap.timeHistory.size(), frozenCount);
+
+    // CLR / resetHistory must clear history and remain stopped while idle.
+    worker.resetHistory();
+    ASSERT_FALSE(worker.hasCompletedRun());
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    gpubench::gui::DeviceTelemetrySnapshot clearedSnap{};
+    ASSERT_TRUE(worker.getSnapshot(0, clearedSnap));
+    ASSERT_EQ(clearedSnap.timeHistory.size(), size_t{0});
+  }
+
+  worker.stop();
 }

@@ -25,71 +25,94 @@ void GuiApp::applyVisualizationMetadata() {
                 BenchmarkVisualization& viz = item.viz;
                 viz = BenchmarkVisualization{};
 
-                // 1. RayScheduling 3D Scene Actual Renders (with procedural schematic fallback until captured)
+                // 1. RayScheduling 3D Scene Actual Renders (falling back to shipped scene thumbnails / procedural schematics)
                 if (item.id == "RayScheduling") {
                     const std::string& nm = item.name;
-                    if (containsCaseInsensitive(nm, "128 Lights")) {
+                    if (containsCaseInsensitive(nm, "Queue Compaction")) {
+                        viz.diagramId = "queue_compaction";
+                        viz.caption = "Wave Ballot Stream Compaction & Compact Active Ray Worklist";
+                        viz.linkedViewportMode = 0;
+                        viz.linkedViewportSubIndex = 1;
+                    } else if (containsCaseInsensitive(nm, "BVH Traversal")) {
+                        viz.assetPath = "renders/render_{scene}_stage1_bvh.png";
+                        viz.fallbackAssetPath = "assets/thumbnails/thumb_{scene}_stage1_bvh.png";
+                        viz.diagramId = "bvh_raw_traversal";
+                        viz.caption = "Screen-Space Ray Dispatch Ordering & BVH Traversal Cache Locality";
+                        viz.linkedViewportMode = 1;
+                        viz.linkedViewportSubIndex = 0;
+                    } else if (containsCaseInsensitive(nm, "128 Lights")) {
                         viz.assetPath = "renders/render_{scene}_multilight_128_dgc.png";
+                        viz.fallbackAssetPath = "assets/thumbnails/thumb_{scene}_multilight_128_dgc.png";
                         viz.diagramId = "bvh_cutout_layers";
                         viz.caption = "128-Light Direct Evaluation (Megakernel vs DGC Light Binning)";
                         viz.linkedViewportMode = 0;
                         viz.linkedViewportSubIndex = 4;
                     } else if (containsCaseInsensitive(nm, "Alpha Cutout")) {
                         viz.assetPath = "renders/render_{scene}_alpha_cutout.png";
+                        viz.fallbackAssetPath = "assets/thumbnails/thumb_{scene}_alpha_cutout.png";
                         viz.diagramId = "bvh_cutout_layers";
                         viz.caption = "Alpha-Cutout Any-Hit Foliage & Grate Traversal";
                         viz.linkedViewportMode = 3;
                         viz.linkedViewportSubIndex = 1;
                     } else if (containsCaseInsensitive(nm, "Path Tracing") && containsCaseInsensitive(nm, "16 SPP")) {
                         viz.assetPath = "renders/render_{scene}_pathtracing_16spp_worklist.png";
+                        viz.fallbackAssetPath = "assets/thumbnails/thumb_{scene}_pathtracing_16spp.png";
                         viz.diagramId = "cone_divergence";
                         viz.caption = "Unbiased Monte Carlo Path Tracing (16 SPP Converged)";
                         viz.linkedViewportMode = 2;
                         viz.linkedViewportSubIndex = 0;
                     } else if (containsCaseInsensitive(nm, "Path Tracing")) {
                         viz.assetPath = "renders/render_{scene}_pathtracing_1spp_worklist.png";
+                        viz.fallbackAssetPath = "assets/thumbnails/thumb_{scene}_pathtracing_1spp.png";
                         viz.diagramId = "cone_divergence";
                         viz.caption = "Unbiased Monte Carlo Path Tracing (1 SPP)";
                         viz.linkedViewportMode = 2;
                         viz.linkedViewportSubIndex = 1;
                     } else if (containsCaseInsensitive(nm, "Shadow")) {
                         viz.assetPath = "renders/render_{scene}_stage3_shadow.png";
+                        viz.fallbackAssetPath = "assets/thumbnails/thumb_{scene}_stage3_shadow.png";
                         viz.diagramId = "bvh_cutout_layers";
                         viz.caption = "Directional Shadow Ray Visibility Pass";
                         viz.linkedViewportMode = 1;
                         viz.linkedViewportSubIndex = 2;
                     } else if (containsCaseInsensitive(nm, "Ambient Occlusion") || containsCaseInsensitive(nm, "RTAO")) {
                         viz.assetPath = "renders/render_{scene}_stage4_rtao.png";
+                        viz.fallbackAssetPath = "assets/thumbnails/thumb_{scene}_stage4_rtao.png";
                         viz.diagramId = "cone_divergence";
                         viz.caption = "Cosine-Weighted Hemisphere RTAO Pass";
                         viz.linkedViewportMode = 1;
                         viz.linkedViewportSubIndex = 3;
                     } else if (containsCaseInsensitive(nm, "Indirect") || containsCaseInsensitive(nm, "GI")) {
                         viz.assetPath = "renders/render_{scene}_stage6_indirect.png";
+                        viz.fallbackAssetPath = "assets/thumbnails/thumb_{scene}_stage6_indirect.png";
                         viz.diagramId = "cone_divergence";
                         viz.caption = "Secondary Diffuse Global Illumination Bounce";
                         viz.linkedViewportMode = 1;
                         viz.linkedViewportSubIndex = 5;
                     } else if (containsCaseInsensitive(nm, "Primary")) {
                         viz.assetPath = "renders/render_{scene}_stage2_primary.png";
+                        viz.fallbackAssetPath = "assets/thumbnails/thumb_{scene}_stage2_primary.png";
                         viz.diagramId = "bvh_cutout_layers";
                         viz.caption = "Coherent Primary G-Buffer Ray Generation";
                         viz.linkedViewportMode = 1;
                         viz.linkedViewportSubIndex = 1;
                     } else if (containsCaseInsensitive(nm, "Material")) {
                         viz.assetPath = "renders/render_{scene}_worklist_dgc.png";
+                        viz.fallbackAssetPath = "assets/thumbnails/thumb_material_lineup.png";
                         viz.diagramId = "cone_divergence";
                         viz.caption = "Heterogeneous Uber-Material BSDF Shading";
                         viz.linkedViewportMode = 0;
                         viz.linkedViewportSubIndex = 1;
                     } else if (containsCaseInsensitive(nm, "Full Frame") || containsCaseInsensitive(nm, "Deferred")) {
                         viz.assetPath = "renders/render_{scene}_stage7_final.png";
+                        viz.fallbackAssetPath = "assets/thumbnails/thumb_{scene}_stage7_final.png";
                         viz.diagramId = "bvh_cutout_layers";
                         viz.caption = "Full Multi-Stage Deferred Ray-Traced Frame";
                         viz.linkedViewportMode = 0;
                         viz.linkedViewportSubIndex = 2;
                     } else {
                         viz.assetPath = "renders/render_{scene}_stage5_direct.png";
+                        viz.fallbackAssetPath = "assets/thumbnails/thumb_{scene}_stage5_direct.png";
                         viz.diagramId = "bvh_cutout_layers";
                         viz.caption = "Direct PBR Illumination & Reflection Evaluation";
                         viz.linkedViewportMode = 1;
@@ -106,25 +129,35 @@ void GuiApp::applyVisualizationMetadata() {
                 }
                 if (containsCaseInsensitive(item.id, "Acceleration Structure") ||
                     containsCaseInsensitive(item.id, "RayASBuild")) {
-                    viz.assetPath = "renders/render_{scene}_stage2_primary.png";
+                    if (containsCaseInsensitive(item.name, "Indoor Corridor")) {
+                        viz.assetPath = "assets/thumbnails/thumb_indoor_stage1_bvh.png";
+                        viz.caption = "Top-Level AS (TLAS): 20K Indoor Corridor Instances across 5K BLAS Meshes";
+                    } else if (containsCaseInsensitive(item.name, "Dense Jungle")) {
+                        viz.assetPath = "assets/thumbnails/thumb_forest_stage1_bvh.png";
+                        viz.caption = "Top-Level AS (TLAS): 50K Dense Jungle Instances across 500 BLAS Meshes";
+                    } else if (containsCaseInsensitive(item.name, "Massive Open World")) {
+                        viz.assetPath = "assets/thumbnails/thumb_outdoor_stage1_bvh.png";
+                        viz.caption = "Top-Level AS (TLAS): 200K Open-World Instances across 5K BLAS Meshes";
+                    } else {
+                        viz.assetPath = "assets/thumbnails/thumb_blas_wireframe.png";
+                        viz.caption = "Bottom-Level Acceleration Structure (BLAS) Triangle Mesh BVH";
+                    }
                     viz.diagramId = "bvh_cutout_layers";
-                    viz.caption = "Hardware Bottom-Level (BLAS) & Multi-Instance Top-Level (TLAS) BVH";
                     viz.linkedViewportMode = 3;
                     viz.linkedViewportSubIndex = 0;
                     continue;
                 }
                 if (containsCaseInsensitive(item.id, "Any-Hit") || containsCaseInsensitive(item.id, "RayAnyHit")) {
-                    viz.assetPath = "renders/render_{scene}_alpha_cutout.png";
+                    viz.assetPath = "assets/thumbnails/thumb_alpha_layers.png";
                     viz.diagramId = "bvh_cutout_layers";
-                    viz.caption = "Multi-Layer Alpha-Cutout Any-Hit Shader Invocation";
+                    viz.caption = "16-Layer Stacked Alpha-Cutout Planes (Any-Hit vs Opaque Traversal)";
                     viz.linkedViewportMode = 3;
                     viz.linkedViewportSubIndex = 1;
                     continue;
                 }
                 if (containsCaseInsensitive(item.id, "Raw") && containsCaseInsensitive(item.id, "Traversal")) {
-                    viz.assetPath = "renders/render_{scene}_stage1_bvh.png";
-                    viz.diagramId = "bvh_cutout_layers";
-                    viz.caption = "Raw Fixed-Function BVH Box/Triangle Intersection Units";
+                    viz.diagramId = "bvh_raw_traversal";
+                    viz.caption = "Raw Fixed-Function BVH Box/Triangle Intersection across Stratified Layers";
                     viz.linkedViewportMode = 1;
                     viz.linkedViewportSubIndex = 0;
                     continue;
@@ -209,10 +242,14 @@ void GuiApp::renderBenchmarkTooltip(const BenchmarkItem& item, const std::string
         float canvasH = std::round(canvasW / std::max(1.2f, item.viz.aspectRatio));
 
         bool drewImage = false;
-        if (!item.viz.assetPath.empty()) {
-            std::string path = item.viz.assetPath;
-            std::string scTag = !sceneOverride.empty() ? sceneOverride : currentSceneTag();
-            if (scTag == "landscape") scTag = "outdoor";
+        const std::string scTag = [&]() {
+            std::string tag = !sceneOverride.empty() ? sceneOverride : currentSceneTag();
+            if (tag == "landscape") tag = "outdoor";
+            return tag;
+        }();
+        auto tryDrawAsset = [&](const std::string& tmpl) -> bool {
+            if (tmpl.empty()) return false;
+            std::string path = tmpl;
             size_t pos = path.find("{scene}");
             if (pos != std::string::npos) {
                 path.replace(pos, 7, scTag);
@@ -220,9 +257,11 @@ void GuiApp::renderBenchmarkTooltip(const BenchmarkItem& item, const std::string
             VulkanContext::TextureResource tex = getOrLoadTexture(path);
             if (tex.isValid()) {
                 ImGui::Image(reinterpret_cast<ImTextureID>(tex.descriptorSet), ImVec2(canvasW, canvasH));
-                drewImage = true;
+                return true;
             }
-        }
+            return false;
+        };
+        drewImage = tryDrawAsset(item.viz.assetPath) || tryDrawAsset(item.viz.fallbackAssetPath);
         if (!drewImage && !item.viz.diagramId.empty()) {
             ImVec2 p0 = ImGui::GetCursorScreenPos();
             ImVec2 p1(p0.x + canvasW, p0.y + canvasH);
@@ -505,6 +544,42 @@ void GuiApp::renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, Im
             dl->AddRect(r0, r1, greenCol, 0.0f);
             dl->AddLine(ImVec2(l1.x, (y0 + y1) * 0.5f), ImVec2(u0.x, (y0 + y1) * 0.5f), midCol, 1.5f);
             dl->AddLine(ImVec2(u1.x, (y0 + y1) * 0.5f), ImVec2(r0.x, (y0 + y1) * 0.5f), greenCol, 1.5f);
+        }
+    } else if (diagramId == "queue_compaction") {
+        dl->AddText(ImVec2(p0.x + w * 0.05f, p0.y + h * 0.08f), cyanCol, "SPARSE WAVEFRONT (BALLOT MASK)");
+        const int active[8] = {1, 0, 1, 0, 0, 1, 1, 0};
+        const float cellW = (w * 0.88f) / 8.0f;
+        for (int i = 0; i < 8; ++i) {
+            ImVec2 c0(p0.x + w * 0.06f + i * cellW, p0.y + h * 0.24f);
+            ImVec2 c1(c0.x + cellW - s(4.0f), p0.y + h * 0.42f);
+            dl->AddRectFilled(c0, c1, active[i] ? amberCol : toU32(pal.ledOff), 0.0f);
+            dl->AddRect(c0, c1, active[i] ? amberCol : borderCol, 0.0f);
+        }
+        dl->AddText(ImVec2(p0.x + w * 0.05f, p0.y + h * 0.50f), greenCol, "COMPACTED WORKLIST (100% ACTIVE)");
+        int outIdx = 0;
+        for (int i = 0; i < 8; ++i) {
+            if (!active[i]) continue;
+            ImVec2 srcMid(p0.x + w * 0.06f + (i + 0.45f) * cellW, p0.y + h * 0.42f);
+            ImVec2 d0(p0.x + w * 0.06f + outIdx * cellW, p0.y + h * 0.67f);
+            ImVec2 d1(d0.x + cellW - s(4.0f), p0.y + h * 0.86f);
+            dl->AddLine(srcMid, ImVec2((d0.x + d1.x) * 0.5f, d0.y), greenCol, 1.5f);
+            dl->AddRectFilled(d0, d1, greenCol, 0.0f);
+            ++outIdx;
+        }
+    } else if (diagramId == "bvh_raw_traversal") {
+        dl->AddText(ImVec2(p0.x + w * 0.05f, p0.y + h * 0.07f), cyanCol, "COHERENT RAY WARP -> STRATIFIED BVH4 LAYERS");
+        for (int layer = 0; layer < 5; ++layer) {
+            float x0 = p0.x + w * (0.28f + layer * 0.13f);
+            float x1 = x0 + w * 0.08f;
+            float y0 = p0.y + h * (0.22f + (layer % 2) * 0.06f);
+            float y1 = p0.y + h * (0.86f - (layer % 2) * 0.06f);
+            ImU32 col = (layer < 2) ? midCol : ((layer < 4) ? amberCol : greenCol);
+            dl->AddRectFilled(ImVec2(x0, y0), ImVec2(x1, y1), elevCol, 0.0f);
+            dl->AddRect(ImVec2(x0, y0), ImVec2(x1, y1), col, 0.0f);
+        }
+        for (int r = 0; r < 4; ++r) {
+            float ry = p0.y + h * (0.31f + r * 0.16f);
+            dl->AddLine(ImVec2(p0.x + w * 0.06f, ry), ImVec2(p0.x + w * 0.90f, ry), cyanCol, 1.8f);
         }
     } else if (diagramId == "bvh_cutout_layers") {
         const char* stages[4] = {"TLAS INST", "BLAS BVH4", "TRI / BOX HW", "AHS / HIT"};

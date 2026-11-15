@@ -2,6 +2,7 @@
 #include "core/ResultFormatter.h"
 #include "core/ResultImporter.h"
 #include "core/RunnerAPI.h"
+#include "third_party/yyjson.h"
 
 TEST_CASE(JsonSerialization, RoundTripCompletePayload) {
   // Construct a synthetic DeviceProfile
@@ -199,4 +200,42 @@ TEST_CASE(JsonSerialization, MalformedJsonRejected) {
 
   // Missing results array
   ASSERT_FALSE(ResultImporter::loadFromString("{\"version\": \"1.0.0\"}", run, error));
+}
+
+TEST_CASE(JsonSerialization, RayScheduling16SppFpsDividedBySamplesPerPixel) {
+  // 4K resolution (8,294,400 pixels) at 16 SPP (configs 23/24):
+  // 16 passes/frame * 8,294,400 rays / 0.1 s = 1,327.104 MRays/s => true FPS must be 10.0, not 160.0.
+  ResultData pt16{};
+  pt16.backendName = "Vulkan";
+  pt16.deviceName = "Test GPU";
+  pt16.benchmarkName = "RayScheduling (Open-World Forest) (Full Scene Path Tracing (16 SPP) - DGC)";
+  pt16.component = "Ray Tracing";
+  pt16.subcategory = "Full Scene Path Tracing";
+  pt16.metric = "MRays/s";
+  pt16.operations = 8294400ULL * 16ULL;
+  pt16.time_ms = 100.0;
+  pt16.width = 3840;
+  pt16.height = 2160;
+  pt16.samplesPerFrame = 16;
+  pt16.configIndex = 24;
+  pt16.isValid = true;
+
+  std::string jsonPayload = resultsToJson({pt16});
+  ASSERT_TRUE(jsonPayload.find("\"samples_per_pixel\": 16") != std::string::npos);
+
+  yyjson_doc *doc = yyjson_read(jsonPayload.data(), jsonPayload.size(), 0);
+  ASSERT_TRUE(doc != nullptr);
+  yyjson_val *root = yyjson_doc_get_root(doc);
+  yyjson_val *resultsArr = yyjson_obj_get(root, "results");
+  ASSERT_TRUE(yyjson_is_arr(resultsArr) && yyjson_arr_size(resultsArr) == 1);
+  yyjson_val *entry = yyjson_arr_get_first(resultsArr);
+  ASSERT_NEAR(yyjson_get_num(yyjson_obj_get(entry, "value")), 1327.104, 1e-3);
+  ASSERT_NEAR(yyjson_get_num(yyjson_obj_get(entry, "fps")), 10.0, 1e-4);
+  yyjson_doc_free(doc);
+
+  ImportedRun imported;
+  std::string err;
+  ASSERT_TRUE(ResultImporter::loadFromString(jsonPayload, imported, err));
+  ASSERT_EQ(imported.results.size(), 1u);
+  ASSERT_EQ(imported.results[0].samplesPerFrame, 16u);
 }

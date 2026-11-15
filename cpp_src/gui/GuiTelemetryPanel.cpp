@@ -172,8 +172,10 @@ void GuiApp::renderLiveTelemetryDock() {
 
         if (m_telemetryWorker.isRecording()) {
             ImGui::TextColored(c.okColor, "[REC %.1fs]", m_telemetryWorker.getRunDuration());
+        } else if (m_telemetryWorker.hasCompletedRun()) {
+            ImGui::TextColored(c.textSecondary, "[STOPPED %.1fs]", m_telemetryWorker.getRunDuration());
         } else {
-            ImGui::TextColored(c.textMuted, "[ROLLING 60s]");
+            ImGui::TextColored(c.textMuted, "[IDLE // REC ON TEST]");
         }
     }
 
@@ -380,29 +382,30 @@ void GuiApp::renderLiveTelemetryDock() {
                       graph->vramTotGb, graph->vramWinMinGb, graph->vramWinMaxGb);
     }
 
+    const bool hasTraceStats = (nPts >= 2);
     drawScopeChannel("##Ch1Sclk", "CH1 SCLK", ch1Val, c.cyanAccent,
                      graph->hasSclk, graph->sclkNorm,
                      ImVec2(colW, stripH), true,
                      ch1ScaleTop, ch1ScaleInfo,
-                     graph->sclkWinMin, graph->sclkWinMax, graph->hasSclk);
+                     graph->sclkWinMin, graph->sclkWinMax, hasTraceStats && graph->hasSclk);
     ImGui::SameLine(0.0f, gap);
     drawScopeChannel("##Ch2Pwr", "CH2 PWR", ch2Val, c.phosphorHi,
                      graph->hasPower, graph->pwrNorm,
                      ImVec2(colW, stripH), false,
                      ch2ScaleTop, ch2ScaleInfo,
-                     graph->pwrWinMin, graph->pwrWinMax, graph->hasPower);
+                     graph->pwrWinMin, graph->pwrWinMax, hasTraceStats && graph->hasPower);
     ImGui::SameLine(0.0f, gap);
     drawScopeChannel("##Ch3Busy", "CH3 BUSY", ch3Val, c.okColor,
                      graph->hasGpuBusy, graph->busyNorm,
                      ImVec2(colW, stripH), false,
                      "100%", "Scale: 0 .. 100 %",
-                     graph->busyWinMin, graph->busyWinMax, graph->hasGpuBusy);
+                     graph->busyWinMin, graph->busyWinMax, hasTraceStats && graph->hasGpuBusy);
     ImGui::SameLine(0.0f, gap);
     drawScopeChannel("##Ch4TempVram", "CH4 TMP/VRAM", ch4Val, c.warnColor,
                      hasTemp || graph->hasVram, graph->tempNorm,
                      ImVec2(colW, stripH), false,
                      ch4ScaleTop, ch4ScaleInfo,
-                     graph->tempWinMin, graph->tempWinMax, hasTemp,
+                     graph->tempWinMin, graph->tempWinMax, hasTraceStats && hasTemp,
                      graph->hasVram ? &graph->vramNorm : nullptr,
                      c.violetAccent);
 
@@ -412,7 +415,10 @@ void GuiApp::renderLiveTelemetryDock() {
 
     // Expanded Detailed ImPlot Traces
     if (nPts < 2) {
-        ImGui::TextColored(c.textMuted, "Collecting initial time-series samples...");
+        ImGui::TextColored(c.textMuted,
+                           m_telemetryWorker.isRecording()
+                               ? "Collecting test run telemetry samples..."
+                               : "Telemetry graphs record only during active test runs. Run a test to capture traces.");
         return;
     }
 

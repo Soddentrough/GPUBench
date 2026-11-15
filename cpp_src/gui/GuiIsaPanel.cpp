@@ -103,8 +103,7 @@ void GuiApp::renderIsaInspectorPanel() {
     const bool isLoadingThis = m_isaLoading.load() && (m_isaActiveKey == cacheKey);
     const bool isWarmingThis = !hasCachedIsa && !isLoadingThis && !isRunning &&
                                m_isaWarmActive.load();
-    const bool skipAutoWarmupSlot = (item->id == "RayScheduling") &&
-                                    (item->configIndex == 0 || item->configIndex == 1);
+    const bool skipAutoWarmupSlot = IsaDumper::isDeferredWarmupTarget(item->id, item->configIndex);
 
     if (!hasCachedIsa && !isLoadingThis && !isRunning &&
         (!m_isaWarmActive.load() || skipAutoWarmupSlot)) {

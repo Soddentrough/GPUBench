@@ -36,6 +36,9 @@ public:
     return false;
   }
   virtual BenchmarkResult GetResult(uint32_t config_idx = 0) const = 0;
+  /// Number of frame accumulation passes / samples per pixel bundled into one Run()
+  /// (e.g. 16 for 16-SPP Path Tracing) so frame-rate conversion divides throughput by SPP.
+  virtual uint32_t GetSamplesPerFrame(uint32_t /*config_idx*/ = 0) const { return 1; }
   virtual void RecordRunResult(uint32_t /*config_idx*/, uint64_t /*total_invocations*/, double /*total_time_ms*/) {}
   virtual double FilterDuration(uint32_t /*config_idx*/, uint64_t /*total_invocations*/, double duration_ms) { return duration_ms; }
   virtual bool UsesCustomTiming(uint32_t /*config_idx*/ = 0) const { return false; }

@@ -45,14 +45,15 @@ struct SelectableDevice {
 // Tier 1: static pre-baked 400x225 thumbnail (assetPath, may contain "{scene}").
 // Tier 2: procedural vector schematic drawn via ImDrawList (diagramId).
 struct BenchmarkVisualization {
-    std::string assetPath;           // e.g. "assets/thumbnails/thumb_{scene}_stage1_bvh.png"
-    std::string diagramId;           // e.g. "cone_divergence_45", "traversal_morton_8x4"
+    std::string assetPath;           // e.g. "renders/render_{scene}_stage1_bvh.png" or "assets/thumbnails/..."
+    std::string fallbackAssetPath;   // Optional shipped PNG fallback when live capture does not exist
+    std::string diagramId;           // e.g. "cone_divergence", "bvh_raw_traversal"
     std::string caption;             // One-line explanation shown under the canvas
     float aspectRatio{16.0f / 9.0f}; // Canvas aspect (thumbnails are 16:9)
     int linkedViewportMode{-1};      // -1: none | 0: Scenes & Parity | 1: Pipeline Passes | 2: PBR Materials | 3: Geometry & BVH
     int linkedViewportSubIndex{0};   // Pass / material / geometry index within that mode
 
-    bool hasVisualization() const { return !assetPath.empty() || !diagramId.empty(); }
+    bool hasVisualization() const { return !assetPath.empty() || !fallbackAssetPath.empty() || !diagramId.empty(); }
 };
 
 struct BenchmarkItem {
@@ -269,7 +270,9 @@ private:
     // Benchmark Suite Definitions
     std::vector<BenchmarkCategory> m_categories;
     std::unordered_map<std::string, bool> m_sceneSubgroupCollapsed;
-    int m_suiteCategoryFilter{0}; // 0: All, 1..N: m_categories[idx - 1]
+    uint32_t m_suiteViewCategoryMask{0}; // 0: All categories visible, otherwise bitmask (1u << ci)
+    int m_suiteScrollToCategoryIdx{-1};  // One-shot scroll target after arming a category
+    int m_suiteScrollRetries{0};         // Countdown frames so ImGui ScrollMaxY settles before scroll
     std::string m_suiteActiveScene{"indoor"};
     bool m_hideUnsupported{false};
     std::string m_lastProbedBackend{""};
@@ -351,7 +354,7 @@ private:
     BringUpPalette m_palette{BringUpPalette::AmberP3};
     bool m_themeDirty{true};
     int m_instrumentMode{0}; // 0: F1 ISA & DIE, 1: F2 PERFORMANCE & SCORECARD, 2: F3 RT PARITY
-    int m_f2SubMode{0};      // 0: Split, 1: Charts, 2: Scorecard
+    int m_f2SubMode{0};      // 0: Charts, 1: Scorecard
     bool m_telemetryExpanded{false};
     float m_rtSplitRatio{0.5f};
     int m_rtComparatorPair{0};

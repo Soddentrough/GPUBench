@@ -971,6 +971,7 @@ void GuiApp::startBenchmarks() {
     m_currentlyRunningTestId.clear();
     m_hasCurrentlyRunningResult = false;
     m_telemetryNeedsFit = true;
+    m_scopeTriggers.clear();
     m_telemetryWorker.startRecording();
     stampScopeTrigger(selectedWorkloads.size() == 1 ? selectedWorkloads.front() : "SUITE RUN");
 
@@ -1147,8 +1148,7 @@ void GuiApp::processIncomingResults() {
             m_wasRunning = false;
             startIsaWarmup();
             if (const BenchmarkItem* inspected = getInspectedItem()) {
-                if (inspected->id == "RayScheduling" &&
-                    (inspected->configIndex == 0 || inspected->configIndex == 1)) {
+                if (IsaDumper::isDeferredWarmupTarget(inspected->id, inspected->configIndex)) {
                     requestIsaInspection(*inspected, false);
                 }
             }
@@ -1633,9 +1633,9 @@ void GuiApp::startIsaWarmup() {
             return;
         }
 
-        // Skip multi-second RayScheduling shaders during automatic idle warmup so pressing
+        // Skip multi-second RayScheduling megakernel shaders during automatic idle warmup so pressing
         // RUN TESTS always cancels cleanly in < 100 ms; explicit selection in F1 still caches them.
-        if (item.id == "RayScheduling" && (item.configIndex == 0 || item.configIndex == 1)) {
+        if (IsaDumper::isDeferredWarmupTarget(item.id, item.configIndex)) {
             return;
         }
 
@@ -1737,10 +1737,10 @@ void GuiApp::requestIsaInspection(const BenchmarkItem& item, bool forceRefresh) 
         const IsaDumperOptions origOpts = opts;
         IsaInspectionResult res = IsaDumper::inspect(opts);
         if (res.artifacts.empty() && !opts.configs.empty()) {
-            // Avoid compiling all 9 RayScheduling shaders (~16s in LLPC) for unmapped sub-configs;
-            // fall back to a single representative RTP shader (~89ms) for RayScheduling.
+            // Avoid compiling all RayScheduling shaders for unmapped sub-configs;
+            // fall back to the non-SER baseline RTP shader instead of SER.
             if (!opts.targets.empty() && opts.targets[0] == "RayScheduling") {
-                opts.configs = {7};
+                opts.configs = {28};
             } else {
                 opts.configs.clear();
             }
@@ -1974,11 +1974,10 @@ void GuiApp::executeCommand(const std::string& rawCmd) {
     } else if (lowVerb == "f1") {
         setInstrumentMode(0);
         m_cmdStatusText = "MODE -> F1: ISA & DIE INSPECTOR";
-    } else if (lowVerb == "f2" || lowVerb == "charts" || lowVerb == "perf" || lowVerb == "roofline" || lowVerb == "scorecard" || lowVerb == "split") {
+    } else if (lowVerb == "f2" || lowVerb == "charts" || lowVerb == "perf" || lowVerb == "roofline" || lowVerb == "scorecard") {
         setInstrumentMode(1);
-        if (lowVerb == "charts" || lowVerb == "perf" || lowVerb == "roofline") m_f2SubMode = 1;
-        else if (lowVerb == "scorecard") m_f2SubMode = 2;
-        else if (lowVerb == "split") m_f2SubMode = 0;
+        if (lowVerb == "charts" || lowVerb == "perf" || lowVerb == "roofline") m_f2SubMode = 0;
+        else if (lowVerb == "scorecard") m_f2SubMode = 1;
         m_cmdStatusText = "MODE -> F2: PERFORMANCE & SCORECARD";
     } else if (lowVerb == "f3" || lowVerb == "rt" || lowVerb == "viewport") {
         setInstrumentMode(2);
@@ -2094,10 +2093,10 @@ void GuiApp::updateAndRender() {
         setInstrumentMode(2);
     } else if (m_switchToRoofline) {
         setInstrumentMode(1);
-        m_f2SubMode = 1;
+        m_f2SubMode = 0;
     } else if (m_switchToScorecard) {
         setInstrumentMode(1);
-        m_f2SubMode = 0; // Split view shows both Roofline & Scorecard cleanly
+        m_f2SubMode = 1;
     }
 
     // Global function-key & prompt shortcuts
@@ -2160,16 +2159,14 @@ void GuiApp::updateAndRender() {
     if (m_instrumentMode == 0) {
         renderIsaInspectorPanel();
     } else if (m_instrumentMode == 1) {
-        // F2 Sub-Mode Bar: [SPLIT VIEW | CHARTS | SCORECARD]
+        // F2 Sub-Mode Bar: [CHARTS | SCORECARD]
         ImGui::PushStyleColor(ImGuiCol_ChildBg, c.bgElevated);
         ImGui::BeginChild("F2SubModeBar", ImVec2(0, s(32.0f)), ImGuiChildFlags_Borders);
         {
             const float bh = s(22.0f);
-            if (tacticalButton("##F2Split", "SPLIT VIEW", ImVec2(s(98.0f), bh), m_f2SubMode == 0, c)) m_f2SubMode = 0;
+            if (tacticalButton("##F2Roof", "CHARTS", ImVec2(s(86.0f), bh), m_f2SubMode == 0, c)) m_f2SubMode = 0;
             ImGui::SameLine(0.0f, s(4.0f));
-            if (tacticalButton("##F2Roof", "CHARTS", ImVec2(s(86.0f), bh), m_f2SubMode == 1, c)) m_f2SubMode = 1;
-            ImGui::SameLine(0.0f, s(4.0f));
-            if (tacticalButton("##F2Score", "SCORECARD", ImVec2(s(98.0f), bh), m_f2SubMode == 2, c)) m_f2SubMode = 2;
+            if (tacticalButton("##F2Score", "SCORECARD", ImVec2(s(98.0f), bh), m_f2SubMode == 1, c)) m_f2SubMode = 1;
 
             ImGui::SameLine(0.0f, s(16.0f));
             if (m_comparisonResults.empty()) {
@@ -2182,18 +2179,7 @@ void GuiApp::updateAndRender() {
         ImGui::EndChild();
         ImGui::PopStyleColor();
 
-        const float f2AvailH = std::max(s(140.0f), ImGui::GetContentRegionAvail().y);
         if (m_f2SubMode == 0) {
-            const float topH = std::floor(f2AvailH * 0.52f);
-            const float botH = std::max(s(100.0f), f2AvailH - topH - s(6.0f));
-            ImGui::BeginChild("F2RooflineRegion", ImVec2(0, topH), ImGuiChildFlags_None);
-            renderRooflinePanel();
-            ImGui::EndChild();
-            ImGui::Spacing();
-            ImGui::BeginChild("F2ScorecardRegion", ImVec2(0, botH), ImGuiChildFlags_None);
-            renderResultsScorecard();
-            ImGui::EndChild();
-        } else if (m_f2SubMode == 1) {
             renderRooflinePanel();
         } else {
             renderResultsScorecard();

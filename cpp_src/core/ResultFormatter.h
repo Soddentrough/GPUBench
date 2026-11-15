@@ -39,6 +39,7 @@ struct ResultData {
   int sortWeight;
   uint32_t width = 0;
   uint32_t height = 0;
+  uint32_t samplesPerFrame = 1;
   std::string errorString;
   bool isValid = true;
   int32_t baselineConfigIndex = -1;

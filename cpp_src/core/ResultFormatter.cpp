@@ -43,6 +43,16 @@ static bool shouldUseColor() {
 #endif
 }
 
+static double computeRaySchedulingFps(const ResultData &r, double mraysPerSec) {
+  const uint32_t w = r.width ? r.width : 1920u;
+  const uint32_t h = r.height ? r.height : 1080u;
+  const uint32_t spp = (r.samplesPerFrame > 1u)
+      ? r.samplesPerFrame
+      : ((r.configIndex == 23u || r.configIndex == 24u) ? 16u : 1u);
+  return (mraysPerSec * 1e6) /
+         (static_cast<double>(w) * static_cast<double>(h) * static_cast<double>(spp));
+}
+
 static size_t getTerminalWidth() {
 #if defined(_WIN32)
   CONSOLE_SCREEN_BUFFER_INFO csbi;
@@ -911,10 +921,7 @@ void ResultFormatter::print() {
 
                 std::string fpsStr = "";
                 if (res.benchmarkName.find("RayScheduling") != std::string::npos && res.metric == "MRays/s") {
-                  uint32_t w = res.width ? res.width : 1920;
-                  uint32_t h = res.height ? res.height : 1080;
-                  double fps = (value * 1e6) / static_cast<double>(w * h);
-                  fpsStr = formatDouble(fps, 1) + " FPS";
+                  fpsStr = formatDouble(computeRaySchedulingFps(res, value), 1) + " FPS";
                 }
 
                 if (res.benchmarkName.find("RayRawTraversal") != std::string::npos ||
@@ -2173,10 +2180,16 @@ std::string resultsToJson(const std::vector<ResultData> &results,
     }
 
     if (r.benchmarkName.find("RayScheduling") != std::string::npos && r.metric == "MRays/s") {
-      const uint32_t w = r.width ? r.width : 1920;
-      const uint32_t h = r.height ? r.height : 1080;
-      const double fps = (value * 1e6) / static_cast<double>(w * h);
+      const uint32_t w = r.width ? r.width : 1920u;
+      const uint32_t h = r.height ? r.height : 1080u;
+      const uint32_t spp = (r.samplesPerFrame > 1u)
+          ? r.samplesPerFrame
+          : ((r.configIndex == 23u || r.configIndex == 24u) ? 16u : 1u);
+      const double fps = computeRaySchedulingFps(r, value);
       addFixed6(doc, rObj, "fps", fps);
+      if (spp > 1u) {
+        yyjson_mut_obj_add_uint(doc, rObj, "samples_per_pixel", spp);
+      }
       const std::string resStr = std::to_string(w) + "x" + std::to_string(h);
       yyjson_mut_obj_add_strcpy(doc, rObj, "resolution", resStr.c_str());
     }

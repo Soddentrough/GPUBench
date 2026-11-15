@@ -76,9 +76,18 @@ public:
   void Teardown() override;
 
   BenchmarkResult GetResult(uint32_t config_idx = 0) const override;
+  uint32_t GetSamplesPerFrame(uint32_t config_idx = 0) const override {
+    if (config_idx == 23 || config_idx == 24) {
+      return (lastCompletedPasses[config_idx] > 0) ? lastCompletedPasses[config_idx] : 16u;
+    }
+    if (config_idx >= 3 && config_idx <= 5) {
+      return (samplesPerPixel > 1) ? samplesPerPixel : 1u;
+    }
+    return 1u;
+  }
   bool ValidateResults(uint32_t config_idx = 0) const override;
   int GetSortWeight(uint32_t config_idx = 0) const override;
-  uint32_t GetExpectedKernelCount() const override { return 22; }
+  uint32_t GetExpectedKernelCount() const override { return 23; }
 
   uint32_t GetNumConfigs() const override { return 34; }
   std::vector<std::string> GetAliases() const override {
@@ -301,6 +310,7 @@ private:
   ComputeKernel kernelMaterial = nullptr;
   ComputeKernel kernelMaterialPrimary = nullptr;
   ComputeKernel kernelMaterialGltf = nullptr;
+  ComputeKernel kernelMaterialProcedural = nullptr;
   ComputeKernel kernelMaterialSpecialized[8] = {nullptr};
   ComputeKernel kernelBounce = nullptr;
   ComputeKernel kernelBounceTerminal = nullptr;

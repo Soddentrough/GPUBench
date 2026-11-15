@@ -724,6 +724,26 @@ vec3 evaluateGltfPbrInternal(
 
         vec3 skyRadiance = evalOutdoorSky(N) * 0.45 * ao;
 
+        if (!enableShadows) {
+            // Pure material-shading microbenchmark (mode 4 MK / mode 1 DGC):
+            // exercise all 8 divergent BSDF archetypes across sun + canopy/sky fill lights
+            // without altering shadow-enabled Full Frame or Path Tracing renders.
+            vec3 skyFillDir1 = normalize(vec3(-0.6, 0.5, 0.6));
+            vec3 skyFillDir2 = normalize(vec3(0.2, -0.7, 0.5));
+            if (arch == 2u) {
+                vec3 reflSky = evalOutdoorSky(reflect(inDir, N));
+                float F_w = 0.02 + 0.98 * pow(clamp(1.0 - max(dot(N, V), 0.0), 0.0, 1.0), 5.0);
+                vec3 specLights = evaluateMaterialArchetypeDirect(2u, hitPos, directColor, directRough, directMetal, mat.ior, N, V, sunDir, sunColor, ao)
+                                + evaluateMaterialArchetypeDirect(2u, hitPos, directColor, directRough, directMetal, mat.ior, N, V, skyFillDir1, skyRadiance, ao)
+                                + evaluateMaterialArchetypeDirect(2u, hitPos, directColor, directRough, directMetal, mat.ior, N, V, skyFillDir2, skyRadiance * 0.5, ao);
+                return mix(vec3(0.02, 0.08, 0.12), reflSky, F_w) + specLights + emissive;
+            }
+            totalRadiance += evaluateMaterialArchetypeDirect(directArch, hitPos, directColor, directRough, directMetal, mat.ior, N, V, sunDir, sunColor, ao);
+            totalRadiance += evaluateMaterialArchetypeDirect(directArch, hitPos, directColor, directRough, directMetal, mat.ior, N, V, skyFillDir1, skyRadiance, ao);
+            totalRadiance += evaluateMaterialArchetypeDirect(directArch, hitPos, directColor, directRough, directMetal, mat.ior, N, V, skyFillDir2, skyRadiance * 0.5, ao);
+            return totalRadiance + baseColor * skyRadiance + emissive;
+        }
+
         if (mat.transmissionFactor > 0.80) {
             // High-transmission water surface (transmissionFactor > 0.80): Snell's Law Refraction & Riverbed Bathymetry
             vec2 waveUV = hitPos.xy * 0.08;

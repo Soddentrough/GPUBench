@@ -16,6 +16,7 @@ set(TEST_SOURCES
     test_graphics_and_rt_validation.cpp
     test_rfc8259_json_stress.cpp
     test_modernization_and_2026.cpp
+    ../cpp_src/gui/TelemetryWorker.cpp
 )
 
 add_executable(gpubench_tests ${TEST_SOURCES})
