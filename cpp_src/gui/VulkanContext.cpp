@@ -22,6 +22,7 @@
 #include <windows.h>
 #endif
 
+#define STB_IMAGE_IMPLEMENTATION
 #include "third_party/stb_image.h"
 #include "utils/ImageExport.h"
 #include "utils/KernelPath.h"

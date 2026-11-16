@@ -277,10 +277,11 @@ private:
     uint32_t m_suiteViewCategoryMask{0}; // 0: All categories visible, otherwise bitmask (1u << ci)
     int m_suiteScrollToCategoryIdx{-1};  // One-shot scroll target after arming a category
     int m_suiteScrollRetries{0};         // Countdown frames so ImGui ScrollMaxY settles before scroll
-    std::string m_suiteActiveScene{"indoor"};
+    std::string m_suiteActiveScene{"reactor"};
     bool m_hideUnsupported{false};
     std::string m_lastProbedBackend{""};
     uint32_t m_lastProbedDeviceIndex{0xFFFFFFFF};
+    bool m_appliedInitialApuDiagnostics{false};
     void updateBenchmarkSupport();
 
     // Execution State
@@ -312,7 +313,7 @@ private:
     std::string m_statusMessage;
 
     // Settings
-    std::string m_scene{"all"};
+    std::string m_scene{"reactor"};
     uint32_t m_renderWidth{3840};
     uint32_t m_renderHeight{2160};
     uint32_t m_samplesPerPixel{1};
@@ -320,7 +321,7 @@ private:
     bool m_verbose{false};
     bool m_debug{false};
     bool m_showSettingsModal{false};
-    int m_scorecardSceneFilter{0}; // 0: All, 1: Indoor (Sponza), 2: Forest, 3: Landscape, 4: Showroom
+    int m_scorecardSceneFilter{0}; // 0: All, 1: Zero-Day Reactor Bay
 
     // Vulkan GUI Context & Texture Management
     VulkanContext* m_vulkanContext{nullptr};
@@ -331,8 +332,8 @@ private:
     size_t m_prevTotalSelectedItems{(size_t)-1};
 
     // Ray Tracing Viewport Configuration & State
-    int m_rtViewportMode{0};    // 0: Scenes & Parity, 1: Pipeline Passes, 2: PBR Materials, 3: Geometry & BVH
-    int m_rtSceneIndex{0};      // 0: Showroom Studio, 1: Indoor Atrium, 2: Open-World Forest, 3: Outdoor Landscape
+    int m_rtViewportMode{0};    // 0: Scenes & Parity, 1: Pipeline Passes, 2: Path Tracing, 3: Geometry & BVH
+    int m_rtSceneIndex{0};      // 0: Zero-Day Reactor Bay
     int m_rtParityViewMode{0};  // 0: DGC Render, 1: Megakernel Render, 2: Side-by-Side Parity, 3: Path Tracing (1 vs 16 SPP), 4: 128-Light Direct
     int m_rtPassIndex{0};       // 0: BVH Heatmap, 1: G-Buffer Normals, 2: Shadows, 3: RTAO, 4: Direct PBR, 5: Indirect GI, 6: Final Render
     int m_rtMaterialIndex{0};   // 0: Lineup, 1: Car Paint, 2: Subsurface, 3: Velvet, 4: Glass, 5: Rust, 6: Range

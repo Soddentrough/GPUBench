@@ -1,0 +1,21 @@
+#version 460
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+layout(std430, set = 0, binding = 0) writeonly buffer BucketCounters {
+    uint counts[2048];
+} bucketCounters;
+
+layout(std430, set = 0, binding = 1) writeonly buffer DgcCountBuf {
+    uint seqCount;
+} dgcCountBuf;
+
+void main() {
+    uint gid = gl_GlobalInvocationID.x;
+    if (gid < 2048u) {
+        bucketCounters.counts[gid] = 0u;
+    }
+    if (gid == 0u) {
+        dgcCountBuf.seqCount = 0u;
+    }
+}

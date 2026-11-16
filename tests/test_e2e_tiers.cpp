@@ -51,6 +51,19 @@ std::string getGpubenchPath() {
     return std::string(envBin);
   }
 #ifdef _WIN32
+  {
+    char selfBuf[MAX_PATH] = {};
+    DWORD len = GetModuleFileNameA(nullptr, selfBuf, MAX_PATH);
+    if (len > 0 && len < MAX_PATH) {
+      std::filesystem::path exeDir = std::filesystem::path(selfBuf).parent_path();
+      for (const std::filesystem::path &cand : {exeDir / "gpubench.exe", exeDir.parent_path() / "gpubench.exe"}) {
+        std::error_code ec;
+        if (std::filesystem::exists(cand, ec)) {
+          return cand.string();
+        }
+      }
+    }
+  }
   const std::vector<std::string> candidates = {
       "./Release/gpubench.exe", "./build-release/gpubench.exe", "./build-win/gpubench.exe",
       "./gpubench.exe",
@@ -70,6 +83,19 @@ std::string getGpubenchPath() {
   }
   return "./Release/gpubench.exe";
 #else
+  {
+    char selfBuf[4096] = {};
+    ssize_t len = readlink("/proc/self/exe", selfBuf, sizeof(selfBuf) - 1);
+    if (len > 0) {
+      selfBuf[len] = '\0';
+      std::filesystem::path exeDir = std::filesystem::path(selfBuf).parent_path();
+      for (const std::filesystem::path &cand : {exeDir / "gpubench", exeDir.parent_path() / "gpubench"}) {
+        if (access(cand.c_str(), X_OK) == 0) {
+          return cand.string();
+        }
+      }
+    }
+  }
   const std::vector<std::string> candidates = {
       "./gpubench",
       "./build/gpubench",
@@ -349,7 +375,7 @@ TEST_CASE(E2E_Tier1, ConfigTargetSelectionFlag) {
   if (!hasUsableGpu()) { return; }
   auto res = runGpubench({"-b", "Device Memory Bandwidth", "-c", "0", "--profile-snapshot", "-f"});
   ASSERT_EQ(res.exitCode, 0);
-  ASSERT_TRUE(res.stdoutStr.find("Read 128 threads/group") != std::string::npos);
+  ASSERT_TRUE(res.stdoutStr.find("Read 256 threads/group") != std::string::npos);
   ASSERT_TRUE(res.stdoutStr.find("GB/s") != std::string::npos);
 }
 
@@ -371,9 +397,13 @@ TEST_CASE(E2E_Tier1, VerboseFlag) {
 }
 
 TEST_CASE(E2E_Tier1, SceneFlag) {
-  auto res = runGpubench({"-s", "showroom", "--list-benchmarks"});
-  ASSERT_EQ(res.exitCode, 0);
-  ASSERT_TRUE(res.stdoutStr.find("RayRawTraversal") != std::string::npos);
+  auto resReactor = runGpubench({"-s", "reactor", "--list-benchmarks"});
+  ASSERT_EQ(resReactor.exitCode, 0);
+  ASSERT_TRUE(resReactor.stdoutStr.find("RayRawTraversal") != std::string::npos);
+
+  auto resLegacy = runGpubench({"-s", "showroom", "--list-benchmarks"});
+  ASSERT_EQ(resLegacy.exitCode, 0);
+  ASSERT_TRUE(resLegacy.stdoutStr.find("RayRawTraversal") != std::string::npos);
 }
 
 // ============================================================================
@@ -631,11 +661,11 @@ TEST_CASE(E2E_Tier4, RealComputeWorkloadExecution) {
 
 TEST_CASE(E2E_Tier4, RealMemoryWorkloadExecution) {
   if (!hasUsableGpu()) { return; }
-  auto res = runGpubench({"-b", "Device Memory Bandwidth,L0 Vector Cache Latency (16 KB)", "-c", "0", "--profile-snapshot", "--strict", "-f"});
+  auto res = runGpubench({"-b", "Device Memory Bandwidth,Cache Latency Curve", "-c", "0", "--profile-snapshot", "--strict", "-f"});
   ASSERT_EQ(res.exitCode, 0);
   ASSERT_TRUE(res.stdoutStr.find("Device Memory Bandwidth") != std::string::npos);
   ASSERT_TRUE(res.stdoutStr.find("GB/s") != std::string::npos);
-  ASSERT_TRUE(res.stdoutStr.find("L0 Vector Cache Latency") != std::string::npos);
+  ASSERT_TRUE(res.stdoutStr.find("Cache Latency Curve") != std::string::npos);
   ASSERT_TRUE(res.stdoutStr.find("ns") != std::string::npos);
 }
 

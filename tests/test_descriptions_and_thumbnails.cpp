@@ -11,6 +11,7 @@
 #include "benchmarks/Fp4Bench.h"
 #include "benchmarks/Int8Bench.h"
 #include "benchmarks/Int4Bench.h"
+#include "benchmarks/CacheBandwidthBench.h"
 #include "benchmarks/CacheBench.h"
 #include "benchmarks/CacheLatencyCurveBench.h"
 #include "benchmarks/PixelFillRateBench.h"
@@ -20,10 +21,12 @@
 #include "benchmarks/RayRawTraversalBench.h"
 #include "benchmarks/RayIntersectBench.h"
 #include "benchmarks/RayAnyHitBench.h"
+#include "benchmarks/RayOMMBench.h"
 #include "benchmarks/RayProceduralBench.h"
 #include "benchmarks/RayDivergenceBench.h"
 #include "benchmarks/RayPayloadBench.h"
 #include "benchmarks/RaySchedulingBench.h"
+#include "benchmarks/WorkGraphsBench.h"
 
 #include <filesystem>
 #include <fstream>
@@ -89,6 +92,7 @@ TEST_CASE(DescriptionsAndThumbnails, QuantizedAndFloatPrecisionConfigs) {
 TEST_CASE(DescriptionsAndThumbnails, DualIssueConfigs) {
   DualIssueBench di;
   ASSERT_EQ(di.GetNumConfigs(), 7u);
+  ASSERT_FALSE(di.IsResolutionDependent(0));
   ASSERT_EQ(di.GetConfigName(0), "FP32 Baseline (Ping-Pong)");
   ASSERT_EQ(di.GetConfigName(1), "FP32 Moderate ILP (8 Chains)");
   ASSERT_EQ(di.GetConfigName(2), "FP32 Peak ILP / Co-Issue (16 Chains)");
@@ -124,23 +128,46 @@ TEST_CASE(DescriptionsAndThumbnails, IndirectSynthesisConfigs) {
 }
 
 TEST_CASE(DescriptionsAndThumbnails, RaySchedulingConfigsCount) {
-  RaySchedulingBench rs(RaySchedulingBench::SceneType::Showroom);
-  ASSERT_EQ(rs.GetNumConfigs(), 34u);
+  RaySchedulingBench rs(RaySchedulingBench::SceneType::ReactorBay);
+  ASSERT_EQ(rs.GetNumConfigs(), 24u);
+  ASSERT_TRUE(rs.IsResolutionDependent(0));
   ASSERT_EQ(rs.GetConfigName(0), "Stage: Material Shading (Megakernel)");
-  ASSERT_EQ(rs.GetConfigName(9), "Scene Render: Full Frame (Megakernel)");
-  ASSERT_EQ(rs.GetConfigName(17), "Primary Rays (Compute Megakernel)");
-  ASSERT_EQ(rs.GetConfigName(19), "Stage: Directional Shadows - Single Light (Megakernel)");
-  ASSERT_EQ(rs.GetConfigName(26), "Stage: Traversal Divergence - Alpha Cutout Geometry");
-  ASSERT_EQ(rs.GetConfigName(30), "Stage: Multi-Light Evaluation - Single Light (Megakernel)");
-  ASSERT_EQ(rs.GetConfigName(32), "Stage: Multi-Light Evaluation - 128 Lights (Megakernel)");
-  ASSERT_EQ(rs.GetConfigName(33), "Stage: Multi-Light Evaluation - 128 Lights (DGC Light Binning)");
+  ASSERT_EQ(rs.GetConfigName(6), "Scene Render: Full Frame (Megakernel)");
+  ASSERT_EQ(rs.GetConfigName(8), "Scene Render: Full Frame (DGC)");
+  ASSERT_EQ(rs.GetConfigName(14), "Primary Rays (Compute Megakernel)");
+  ASSERT_EQ(rs.GetConfigName(15), "Stage: Directional Shadows - Single Light (Megakernel)");
+  ASSERT_EQ(rs.GetConfigName(18), "Stage: Traversal Divergence - Alpha Cutout Geometry");
+  ASSERT_EQ(rs.GetConfigName(20), "Primary Rays (RTP)");
+  ASSERT_EQ(rs.GetConfigName(22), "Stage: Multi-Light Evaluation - 128 Lights (Megakernel)");
+  ASSERT_EQ(rs.GetConfigName(23), "Stage: Multi-Light Evaluation - 128 Lights (DGC Light Binning)");
+  ASSERT_EQ(rs.GetBaselineConfigIndex(22), -1);
+  ASSERT_EQ(rs.GetBaselineConfigIndex(23), 22);
+  ASSERT_EQ(std::string(rs.GetSubCategory(22)), "Multi-Light Evaluation");
+  ASSERT_EQ(std::string(rs.GetSubCategory(23)), "Multi-Light Evaluation");
+
+  WorkGraphsBench wg;
+  ASSERT_EQ(wg.GetNumConfigs(), 3u);
+  ASSERT_EQ(wg.GetSortWeight(0), 415);
+  ASSERT_EQ(wg.GetSortWeight(1), 416);
+  ASSERT_EQ(wg.GetSortWeight(2), 417);
+  ASSERT_FALSE(wg.IsResolutionDependent(0));
 }
 
 TEST_CASE(DescriptionsAndThumbnails, RayHardwareTraversalAndDivergenceConfigs) {
   RayRawTraversalBench raw;
-  ASSERT_EQ(raw.GetNumConfigs(), 2u);
+  ASSERT_EQ(raw.GetNumConfigs(), 3u);
   ASSERT_EQ(raw.GetConfigName(0), "Raw BVH - Coherent Triangle Traversal (Max Occupancy)");
   ASSERT_EQ(raw.GetConfigName(1), "Raw BVH - Deep Multi-Layer Box Stress");
+  ASSERT_EQ(raw.GetConfigName(2), "Software BVH Stack - 64-Layer Procedural AABB Grid (ALU Baseline)");
+  ASSERT_EQ(raw.GetBaselineConfigIndex(1), 2);
+
+  RayOMMBench omm;
+  ASSERT_EQ(omm.GetNumConfigs(), 5u);
+  ASSERT_EQ(omm.GetConfigName(0), "Compute RayQuery Alpha-Cutout (Software Baseline)");
+  ASSERT_EQ(omm.GetConfigName(1), "RTP AnyHit Alpha-Cutout (Pipeline Baseline)");
+  ASSERT_EQ(omm.GetConfigName(2), "Hardware Opacity Micromap (2-State OMM)");
+  ASSERT_EQ(omm.GetConfigName(3), "Hardware Opacity Micromap (4-State OMM)");
+  ASSERT_EQ(omm.GetConfigName(4), "RTP Force-Opaque Reference (Zero-AnyHit Ceiling)");
 
   RayIntersectBench isect;
   ASSERT_EQ(isect.GetNumConfigs(), 2u);
@@ -179,6 +206,15 @@ TEST_CASE(DescriptionsAndThumbnails, RasterizerAndMemoryConfigs) {
   ASSERT_EQ(rop.GetConfigName(1), "RGBA16F HDR Fill");
   ASSERT_EQ(rop.GetConfigName(2), "Alpha Blending Fill");
 
+  CacheBandwidthBench cbw;
+  ASSERT_EQ(cbw.GetNumConfigs(), 4u);
+  ASSERT_EQ(cbw.GetConfigName(0), "L0 Cache Bandwidth (16 KB)");
+  ASSERT_EQ(cbw.GetConfigName(1), "L1 Cache Bandwidth (128 KB)");
+  ASSERT_EQ(cbw.GetConfigName(2), "L2 Cache Bandwidth");
+  ASSERT_EQ(cbw.GetConfigName(3), "L3 / Infinity Cache Bandwidth");
+  ASSERT_EQ(std::string(cbw.GetMetric()), "GB/s");
+  ASSERT_EQ(std::string(cbw.GetSubCategory()), "Cache Bandwidth");
+
   CacheBench l0bw("L0 Vector Cache Bandwidth (16 KB)", "GB/s", 16 * 1024,
                   "cache_bw_robust", {}, {"l0b", "cachebw"}, 0);
   ASSERT_EQ(std::string(l0bw.GetMetric()), "GB/s");
@@ -196,8 +232,8 @@ TEST_CASE(DescriptionsAndThumbnails, RasterizerAndMemoryConfigs) {
 }
 
 TEST_CASE(DescriptionsAndThumbnails, ThumbnailPngAssetsIntegrity) {
-  // Verify all 48 shipped PNG thumbnails exist and have PNG magic headers
-  const std::vector<std::string> scenes = {"showroom", "indoor", "forest", "outdoor"};
+  // Verify all 15 shipped PNG thumbnails exist and have PNG magic headers
+  const std::vector<std::string> scenes = {"reactor"};
   const std::vector<std::string> stages = {
     "stage1_bvh", "stage2_primary", "stage3_shadow", "stage4_rtao",
     "stage5_direct", "stage6_indirect", "stage7_final", "multilight_128_dgc",
@@ -217,7 +253,7 @@ TEST_CASE(DescriptionsAndThumbnails, ThumbnailPngAssetsIntegrity) {
     allThumbs.push_back(stat + ".png");
   }
 
-  ASSERT_EQ(allThumbs.size(), 48u);
+  ASSERT_EQ(allThumbs.size(), 15u);
 
   std::vector<std::string> probeDirs = {
     "assets/thumbnails",

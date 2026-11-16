@@ -1,6 +1,8 @@
 #version 460
 #extension GL_EXT_ray_tracing : require
 
+layout(constant_id = 0) const uint kForceOpaque = 0u;
+
 layout(set = 0, binding = 0) uniform accelerationStructureEXT topLevelAS;
 layout(std430, set = 0, binding = 1) buffer OutputBuffer {
     vec4 pixels[];
@@ -25,7 +27,9 @@ void main() {
     payload.color = vec3(0.0);
     payload.hits = 0u;
 
-    traceRayEXT(topLevelAS, gl_RayFlagsNoneEXT, 0xFFu, 0u, 0u, 0u,
+    uint rayFlags = (kForceOpaque != 0u) ? gl_RayFlagsOpaqueEXT : gl_RayFlagsNoneEXT;
+
+    traceRayEXT(topLevelAS, rayFlags, 0xFFu, 0u, 0u, 0u,
                 origin, 0.001, direction, 100.0, 0);
 
     outBuf.pixels[pixelIdx] = vec4(payload.color, float(payload.hits));

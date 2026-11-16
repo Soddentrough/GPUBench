@@ -54,11 +54,15 @@ void sampleMicroTriangleVertices(uint32_t microIdx, float &u0, float &v0,
 std::string RayOMMBench::GetConfigName(uint32_t config_idx) const {
   switch (config_idx) {
   case 0:
-    return "Software AnyHit Alpha-Cutout (Baseline)";
+    return "Compute RayQuery Alpha-Cutout (Software Baseline)";
   case 1:
-    return "Hardware Opacity Micromap (2-State OMM)";
+    return "RTP AnyHit Alpha-Cutout (Pipeline Baseline)";
   case 2:
+    return "Hardware Opacity Micromap (2-State OMM)";
+  case 3:
     return "Hardware Opacity Micromap (4-State OMM)";
+  case 4:
+    return "RTP Force-Opaque Reference (Zero-AnyHit Ceiling)";
   default:
     return "";
   }
@@ -67,13 +71,17 @@ std::string RayOMMBench::GetConfigName(uint32_t config_idx) const {
 const char *RayOMMBench::GetDescription(uint32_t config_idx) const {
   switch (config_idx) {
   case 0:
-    return "Traces primary rays through 16 stacked alpha-cutout foliage layers invoking software AnyHit shaders on every hit candidate.";
+    return "Traces primary rays via compute GL_EXT_ray_query through 16 stacked alpha-cutout foliage layers evaluating alpha in inline shader logic.";
   case 1:
-    return "Evaluates alpha-cutout micro-triangles in fixed-function BVH hardware via VK_EXT_opacity_micromap (2-State OMM, zero AnyHit invocations).";
+    return "Traces primary rays via VK_KHR_ray_tracing_pipeline through 16 stacked alpha-cutout foliage layers invoking software AnyHit shaders.";
   case 2:
+    return "Evaluates alpha-cutout micro-triangles in fixed-function BVH hardware via VK_EXT_opacity_micromap (2-State OMM, zero AnyHit invocations).";
+  case 3:
     return "Uses 4-State hardware Opacity Micromaps to resolve interior/exterior micro-triangles in BVH hardware and invoke AnyHit only along leaf silhouettes.";
+  case 4:
+    return "Force-opaque upper-bound reference skipping AnyHit evaluation across the identical 16-layer foliage BLAS to isolate AnyHit shader overhead.";
   default:
-    return "Alpha-cutout foliage ray traversal benchmark comparing AnyHit vs VK_EXT_opacity_micromap.";
+    return "Alpha-cutout foliage ray traversal benchmark comparing Compute RayQuery, RTP AnyHit, VK_EXT_opacity_micromap, and force-opaque traversal.";
   }
 }
 
@@ -83,17 +91,25 @@ bool RayOMMBench::IsSupported(const DeviceInfo &info,
   if (!context) return true;
   if (context->getBackend() != ComputeBackend::Vulkan) return false;
   const auto *vc = dynamic_cast<const VulkanContext *>(context);
-  return vc && vc->isExtensionEnabled(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);
+  return vc && (vc->isExtensionEnabled(VK_KHR_RAY_QUERY_EXTENSION_NAME) ||
+                vc->isExtensionEnabled(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME));
 }
 
 bool RayOMMBench::IsConfigSupported(uint32_t config_idx,
                                      const DeviceInfo &info,
                                      IComputeContext *context) const {
   if (!IsSupported(info, context)) return false;
-  if (config_idx == 0) return true;
   const auto *vc = dynamic_cast<const VulkanContext *>(context);
-  if (config_idx == 1 || config_idx == 2) {
-    return vc ? vc->isOpacityMicromapSupported() : info.opacityMicromapSupport;
+  if (config_idx == 0u) {
+    return vc ? vc->isExtensionEnabled(VK_KHR_RAY_QUERY_EXTENSION_NAME) : true;
+  }
+  if (config_idx == 1u || config_idx == 4u) {
+    return vc ? vc->isExtensionEnabled(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME) : true;
+  }
+  if (config_idx == 2u || config_idx == 3u) {
+    const bool hasRtp = vc ? vc->isExtensionEnabled(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME) : true;
+    const bool hasOmm = vc ? vc->isOpacityMicromapSupported() : info.opacityMicromapSupport;
+    return hasRtp && hasOmm;
   }
   return false;
 }
@@ -119,8 +135,11 @@ IBenchmark::SupportLimitation RayOMMBench::GetConfigSupportLimitation(
   if (!info.rayTracingSupport) {
     return SupportLimitation::kHardware;
   }
-  if (config_idx == 1 || config_idx == 2) {
+  if (config_idx == 2u || config_idx == 3u) {
     return SupportLimitation::kHardware;
+  }
+  if (config_idx == 0u || config_idx == 1u || config_idx == 4u) {
+    return IsConfigSupported(config_idx, info, context) ? SupportLimitation::kNone : SupportLimitation::kApi;
   }
   return SupportLimitation::kNone;
 }
@@ -128,12 +147,12 @@ IBenchmark::SupportLimitation RayOMMBench::GetConfigSupportLimitation(
 std::string RayOMMBench::GetSupportNote(const DeviceInfo &info,
                                         IComputeContext *context) const {
   if (context && context->getBackend() != ComputeBackend::Vulkan) {
-    return "Requires Vulkan 1.4 ray tracing pipeline";
+    return "Requires Vulkan 1.4 ray tracing (RayQuery or Ray Tracing Pipeline)";
   }
   if (!info.rayTracingSupport) {
     return "GPU lacks hardware ray tracing support";
   }
-  return "VK_KHR_ray_tracing_pipeline not enabled";
+  return "VK_KHR_ray_query / VK_KHR_ray_tracing_pipeline not enabled";
 }
 
 std::string RayOMMBench::GetConfigSupportNote(uint32_t config_idx,
@@ -142,7 +161,13 @@ std::string RayOMMBench::GetConfigSupportNote(uint32_t config_idx,
   if (!IsSupported(info, context)) {
     return GetSupportNote(info, context);
   }
-  if (config_idx == 1 || config_idx == 2) {
+  if (config_idx == 0u && !IsConfigSupported(0u, info, context)) {
+    return "Requires VK_KHR_ray_query";
+  }
+  if ((config_idx == 1u || config_idx == 4u) && !IsConfigSupported(config_idx, info, context)) {
+    return "Requires VK_KHR_ray_tracing_pipeline";
+  }
+  if (config_idx == 2u || config_idx == 3u) {
     return "Requires VK_EXT_opacity_micromap (hardware Opacity Micromap traversal)";
   }
   return "";
@@ -247,13 +272,13 @@ void RayOMMBench::buildFoliageAS(uint32_t config_idx) {
   VkAccelerationStructureTrianglesOpacityMicromapEXT triOmm{
       VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_TRIANGLES_OPACITY_MICROMAP_EXT};
 
-  if ((config_idx == 1 || config_idx == 2) && m_pfnCreateMicromap &&
+  if ((config_idx == 2 || config_idx == 3) && m_pfnCreateMicromap &&
       m_pfnGetMicromapBuildSizes && m_pfnCmdBuildMicromaps) {
     const uint16_t ommFormat =
-        (config_idx == 1)
+        (config_idx == 2)
             ? static_cast<uint16_t>(VK_OPACITY_MICROMAP_FORMAT_2_STATE_EXT)
             : static_cast<uint16_t>(VK_OPACITY_MICROMAP_FORMAT_4_STATE_EXT);
-    const uint32_t bytesPerTri = (config_idx == 1) ? 8u : 16u;
+    const uint32_t bytesPerTri = (config_idx == 2) ? 8u : 16u;
 
     ommUsage.count = kNumPrimitives;
     ommUsage.subdivisionLevel = 3u;
@@ -275,7 +300,7 @@ void RayOMMBench::buildFoliageAS(uint32_t config_idx) {
         sampleMicroTriangleVertices(m, u0, v0, u1, v1, u2, v2);
         float uc = (u0 + u1 + u2) * (1.0f / 3.0f);
         float vc = (v0 + v1 + v2) * (1.0f / 3.0f);
-        if (config_idx == 1) {
+        if (config_idx == 2) {
           if (evalLeafOpaqueHost(p, uc, vc)) {
             dstBytes[m >> 3u] |= static_cast<uint8_t>(1u << (m & 7u));
           }
@@ -407,7 +432,9 @@ void RayOMMBench::buildFoliageAS(uint32_t config_idx) {
   VkAccelerationStructureGeometryKHR triGeom{
       VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR};
   triGeom.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
-  triGeom.flags = 0; // Non-opaque so AnyHit / OMM controls transparency
+  triGeom.flags = (config_idx == 4u)
+                      ? static_cast<VkGeometryFlagsKHR>(VK_GEOMETRY_OPAQUE_BIT_KHR)
+                      : static_cast<VkGeometryFlagsKHR>(0); // Non-opaque so AnyHit / OMM controls transparency
   triGeom.geometry.triangles.sType =
       VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
   if (m_micromap != VK_NULL_HANDLE) {
@@ -538,17 +565,29 @@ void RayOMMBench::PrepareConfig(uint32_t config_idx) {
   buildFoliageAS(config_idx);
 
   std::filesystem::path vkDir = std::filesystem::path(m_kernelDir) / "vulkan";
-  bool useOmmShader = (config_idx == 1 || config_idx == 2);
+  if (config_idx == 0u) {
+    m_rqKernel = m_vk->createKernel((vkDir / "rayomm_rq_alpha.comp").string(), "main", 2);
+    m_vk->setKernelAS(m_rqKernel, 0, reinterpret_cast<AccelerationStructure>(m_tlas));
+    m_vk->setKernelArg(m_rqKernel, 1, m_outBuf);
+    m_vk->setKernelArg(m_rqKernel, 2, sizeof(uint32_t), &m_width);
+    m_vk->setKernelArg(m_rqKernel, 3, sizeof(uint32_t), &m_height);
+    return;
+  }
+
+  const bool useOmmShader = (config_idx == 2u || config_idx == 3u);
+  const bool useForceOpaque = (config_idx == 4u);
   std::string rgenPath =
       (vkDir / (useOmmShader ? "rayomm_omm.rgen" : "rayomm.rgen")).string();
   std::string rmissPath = (vkDir / "rayomm.rmiss").string();
   std::vector<std::string> rchitPaths = {(vkDir / "rayomm.rchit").string()};
-  std::vector<std::string> rahitPaths = {(vkDir / "rayomm.rahit").string()};
+  std::vector<std::string> rahitPaths =
+      useForceOpaque ? std::vector<std::string>{}
+                     : std::vector<std::string>{(vkDir / "rayomm.rahit").string()};
 
-  uint32_t force2State = (config_idx == 1) ? 1u : 0u;
+  uint32_t specConstVal = (config_idx == 2u || config_idx == 4u) ? 1u : 0u;
   m_rtKernel = m_vk->createRTPipeline(rgenPath, rmissPath, rchitPaths,
-                                      rahitPaths, {}, 2, force2State,
-                                      useOmmShader);
+                                      rahitPaths, {}, 2, specConstVal,
+                                      true);
   m_vk->setKernelAS(m_rtKernel, 0, reinterpret_cast<AccelerationStructure>(m_tlas));
   m_vk->setKernelArg(m_rtKernel, 1, m_outBuf);
 }
@@ -558,6 +597,10 @@ void RayOMMBench::ReleaseConfigResources(uint32_t /*config_idx*/) {
   m_vk->waitIdle();
   VkDevice dev = m_vk->getDevice();
 
+  if (m_rqKernel) {
+    m_vk->releaseKernel(m_rqKernel);
+    m_rqKernel = nullptr;
+  }
   if (m_rtKernel) {
     m_vk->releaseKernel(m_rtKernel);
     m_rtKernel = nullptr;
@@ -595,8 +638,15 @@ void RayOMMBench::ReleaseConfigResources(uint32_t /*config_idx*/) {
   }
 }
 
-void RayOMMBench::Run(uint32_t /*config_idx*/) {
-  if (!m_vk || !m_rtKernel) return;
+void RayOMMBench::Run(uint32_t config_idx) {
+  if (!m_vk) return;
+  if (config_idx == 0u) {
+    if (!m_rqKernel) return;
+    m_vk->dispatch(m_rqKernel, (m_width + 7u) / 8u, (m_height + 7u) / 8u, 1u,
+                   8u, 8u, 1u);
+    return;
+  }
+  if (!m_rtKernel) return;
   m_vk->dispatch(m_rtKernel, m_width, m_height, 1, 1, 1, 1);
 }
 
@@ -604,7 +654,7 @@ BenchmarkResult RayOMMBench::GetResult(uint32_t /*config_idx*/) const {
   return {static_cast<uint64_t>(m_width) * static_cast<uint64_t>(m_height), 0.0};
 }
 
-bool RayOMMBench::ValidateResults(uint32_t /*config_idx*/) const {
+bool RayOMMBench::ValidateResults(uint32_t config_idx) const {
   if (!m_vk || !m_outBuf) return false;
   // Read middle scanlines where both foliage hits and sky misses exist
   uint32_t samplePixels = std::min<uint32_t>(m_width * 8u, 16384u);
@@ -630,6 +680,9 @@ bool RayOMMBench::ValidateResults(uint32_t /*config_idx*/) const {
     } else if (std::fabs(w) < 1e-4f && b > 0.4f) {
       skyMisses++;
     }
+  }
+  if (config_idx == 4u) {
+    return leafHits > 32u;
   }
   return (leafHits > 32u) && (skyMisses > 32u);
 }

@@ -110,18 +110,97 @@ void RayRawTraversalBench::Setup(IComputeContext &context,
   vertexBufferDeep = context.createBuffer(
       deepAabbs.size() * sizeof(VkAabbPositionsKHR), deepAabbs.data());
 
+  struct SoftBvhNode {
+    float minX, minY, minZ;
+    uint32_t leftOrPrim;
+    float maxX, maxY, maxZ;
+    uint32_t rightOrFlags; // 0x80000000u bit = leaf, otherwise right child node index
+  };
+  static_assert(sizeof(SoftBvhNode) == 32, "SoftBvhNode must be 32 bytes (2 x uvec4)");
+
+  std::vector<SoftBvhNode> bvhNodes;
+  bvhNodes.reserve(static_cast<size_t>(deepPrimitives) * 2u);
+  std::vector<uint32_t> primIndices(deepPrimitives);
+  for (uint32_t i = 0; i < deepPrimitives; ++i) {
+    primIndices[i] = i;
+  }
+
+  auto buildSoftBvh = [&](auto &self, uint32_t begin, uint32_t end) -> uint32_t {
+    const uint32_t nodeIdx = static_cast<uint32_t>(bvhNodes.size());
+    bvhNodes.emplace_back();
+    const uint32_t count = end - begin;
+    if (count == 1u) {
+      const uint32_t primIdx = primIndices[begin];
+      const VkAabbPositionsKHR &aabb = deepAabbs[primIdx];
+      bvhNodes[nodeIdx] = {
+          aabb.minX, aabb.minY, aabb.minZ, primIdx,
+          aabb.maxX, aabb.maxY, aabb.maxZ, 0x80000000u};
+      return nodeIdx;
+    }
+
+    float minCx = deepAabbs[primIndices[begin]].minX + deepAabbs[primIndices[begin]].maxX;
+    float maxCx = minCx;
+    float minCy = deepAabbs[primIndices[begin]].minY + deepAabbs[primIndices[begin]].maxY;
+    float maxCy = minCy;
+    float minCz = deepAabbs[primIndices[begin]].minZ + deepAabbs[primIndices[begin]].maxZ;
+    float maxCz = minCz;
+    for (uint32_t i = begin + 1u; i < end; ++i) {
+      const VkAabbPositionsKHR &a = deepAabbs[primIndices[i]];
+      const float cx = a.minX + a.maxX;
+      const float cy = a.minY + a.maxY;
+      const float cz = a.minZ + a.maxZ;
+      minCx = std::min(minCx, cx); maxCx = std::max(maxCx, cx);
+      minCy = std::min(minCy, cy); maxCy = std::max(maxCy, cy);
+      minCz = std::min(minCz, cz); maxCz = std::max(maxCz, cz);
+    }
+    const float extX = maxCx - minCx;
+    const float extY = maxCy - minCy;
+    const float extZ = maxCz - minCz;
+    const int axis = (extX >= extY && extX >= extZ) ? 0 : ((extY >= extZ) ? 1 : 2);
+
+    const uint32_t mid = begin + count / 2u;
+    std::nth_element(
+        primIndices.begin() + begin,
+        primIndices.begin() + mid,
+        primIndices.begin() + end,
+        [&](uint32_t aIdx, uint32_t bIdx) {
+          const VkAabbPositionsKHR &a = deepAabbs[aIdx];
+          const VkAabbPositionsKHR &b = deepAabbs[bIdx];
+          const float ca = (axis == 0) ? (a.minX + a.maxX) : ((axis == 1) ? (a.minY + a.maxY) : (a.minZ + a.maxZ));
+          const float cb = (axis == 0) ? (b.minX + b.maxX) : ((axis == 1) ? (b.minY + b.maxY) : (b.minZ + b.maxZ));
+          return ca < cb;
+        });
+
+    const uint32_t leftIdx = self(self, begin, mid);
+    const uint32_t rightIdx = self(self, mid, end);
+    const SoftBvhNode &L = bvhNodes[leftIdx];
+    const SoftBvhNode &R = bvhNodes[rightIdx];
+    bvhNodes[nodeIdx] = {
+        std::min(L.minX, R.minX), std::min(L.minY, R.minY), std::min(L.minZ, R.minZ), leftIdx,
+        std::max(L.maxX, R.maxX), std::max(L.maxY, R.maxY), std::max(L.maxZ, R.maxZ), rightIdx};
+    return nodeIdx;
+  };
+  buildSoftBvh(buildSoftBvh, 0u, deepPrimitives);
+  softBvhBuffer = context.createBuffer(bvhNodes.size() * sizeof(SoftBvhNode), bvhNodes.data());
+
   buildAS();
 
   std::filesystem::path kdir(kernel_dir);
   std::filesystem::path kernel_file = kdir / "vulkan" / "rt_raw_traversal.comp";
-  kernels[0] = context.createKernel(kernel_file.string(), "main", 2);
-  kernels[1] = context.createKernel(kernel_file.string(), "main", 2);
+  kernels[0] = context.createKernel(kernel_file.string(), "main", 3);
+  kernels[1] = context.createKernel(kernel_file.string(), "main", 3);
+  kernels[2] = context.createKernel(kernel_file.string(), "main", 3);
   kernel = kernels[0];
 
   vContext->setKernelAS(kernels[0], 0, (AccelerationStructure)coherentTlas);
   vContext->setKernelArg(kernels[0], 1, resultBuffer);
+  vContext->setKernelArg(kernels[0], 2, softBvhBuffer);
   vContext->setKernelAS(kernels[1], 0, (AccelerationStructure)deepTlas);
   vContext->setKernelArg(kernels[1], 1, resultBuffer);
+  vContext->setKernelArg(kernels[1], 2, softBvhBuffer);
+  vContext->setKernelAS(kernels[2], 0, (AccelerationStructure)deepTlas);
+  vContext->setKernelArg(kernels[2], 1, resultBuffer);
+  vContext->setKernelArg(kernels[2], 2, softBvhBuffer);
 #endif // HAVE_VULKAN
 }
 
@@ -389,7 +468,7 @@ void RayRawTraversalBench::buildAS() {
 
 void RayRawTraversalBench::Run(uint32_t config_idx) {
 #ifdef HAVE_VULKAN
-  if (config_idx >= 2 || !kernels[config_idx]) {
+  if (config_idx >= 3 || !kernels[config_idx]) {
     return;
   }
   VulkanContext *vContext = static_cast<VulkanContext *>(context);
@@ -401,14 +480,14 @@ void RayRawTraversalBench::Run(uint32_t config_idx) {
   lastRunConfig = static_cast<int>(config_idx);
 
   ComputeKernel activeKernel = kernels[config_idx];
-  uint32_t mode = config_idx; // 0 for coherent triangles, 1 for deep 64-layer AABBs
+  uint32_t mode = config_idx; // 0: coherent triangles, 1: deep 64-layer AABB BVH, 2: software VALU 64-layer slab loop
   float tMin = 0.001f;
   float tMax = 100.0f;
 
-  vContext->setKernelArg(activeKernel, 2, sizeof(uint32_t), &rayCount);
-  vContext->setKernelArg(activeKernel, 3, sizeof(uint32_t), &mode);
-  vContext->setKernelArg(activeKernel, 4, sizeof(float), &tMin);
-  vContext->setKernelArg(activeKernel, 5, sizeof(float), &tMax);
+  vContext->setKernelArg(activeKernel, 3, sizeof(uint32_t), &rayCount);
+  vContext->setKernelArg(activeKernel, 4, sizeof(uint32_t), &mode);
+  vContext->setKernelArg(activeKernel, 5, sizeof(float), &tMin);
+  vContext->setKernelArg(activeKernel, 6, sizeof(float), &tMax);
 
   // 2D grid (31250 x 64 = 2,000,000 workgroups * 32 threads = 64,000,000 rays) stays strictly <= 65535
   uint32_t totalWg = (rayCount + 31u) / 32u;
@@ -445,7 +524,7 @@ void RayRawTraversalBench::Teardown() {
   }
 
   if (context) {
-    for (uint32_t i = 0; i < 2; ++i) {
+    for (uint32_t i = 0; i < 3; ++i) {
       if (kernels[i]) {
         context->releaseKernel(kernels[i]);
         kernels[i] = nullptr;
@@ -455,6 +534,7 @@ void RayRawTraversalBench::Teardown() {
     if (resultBuffer) { context->releaseBuffer(resultBuffer); resultBuffer = nullptr; }
     if (vertexBufferCoherent) { context->releaseBuffer(vertexBufferCoherent); vertexBufferCoherent = nullptr; }
     if (vertexBufferDeep) { context->releaseBuffer(vertexBufferDeep); vertexBufferDeep = nullptr; }
+    if (softBvhBuffer) { context->releaseBuffer(softBvhBuffer); softBvhBuffer = nullptr; }
     if (instanceBufferCoherent) { context->releaseBuffer(instanceBufferCoherent); instanceBufferCoherent = nullptr; }
     if (instanceBufferDeep) { context->releaseBuffer(instanceBufferDeep); instanceBufferDeep = nullptr; }
     if (coherentBlasBuffer) { context->releaseBuffer(coherentBlasBuffer); coherentBlasBuffer = nullptr; }
@@ -476,14 +556,14 @@ BenchmarkResult RayRawTraversalBench::GetResult(uint32_t config_idx) const {
 void RayRawTraversalBench::RecordRunResult(uint32_t config_idx,
                                           uint64_t total_invocations,
                                           double total_time_ms) {
-  if (config_idx < 2) {
+  if (config_idx < 3) {
     recordedInvocations[config_idx] = total_invocations;
     recordedTimeMs[config_idx] = total_time_ms;
   }
 }
 
 std::string RayRawTraversalBench::GetConfigCaveat(uint32_t config_idx) const {
-  if (config_idx >= 2 || recordedTimeMs[config_idx] <= 0.0 || recordedInvocations[config_idx] == 0) {
+  if (config_idx >= 3 || recordedTimeMs[config_idx] <= 0.0 || recordedInvocations[config_idx] == 0) {
     return "";
   }
 
@@ -496,10 +576,14 @@ std::string RayRawTraversalBench::GetConfigCaveat(uint32_t config_idx) const {
 
   if (config_idx == 0) {
     ss << mrays_s << " MRays/s (Coherent Triangle Fast-Path)";
-  } else {
+  } else if (config_idx == 1) {
     uint64_t boxOps = totalRays * 64;
     double gis = (time_s > 0.0) ? ((static_cast<double>(boxOps) / time_s) / 1e9) : 0.0;
     ss << mrays_s << " MRays/s (Synthetic 64-AABB Traversal Model; " << gis << " Box GIS/s)";
+  } else {
+    uint64_t boxOps = totalRays * 64;
+    double gis = (time_s > 0.0) ? ((static_cast<double>(boxOps) / time_s) / 1e9) : 0.0;
+    ss << mrays_s << " MRays/s (Software VALU 64-AABB BVH Stack; " << gis << " Box GIS/s)";
   }
 
   return ss.str();
@@ -541,7 +625,7 @@ const char *RayRawTraversalBench::GetName() const {
 }
 
 std::vector<std::string> RayRawTraversalBench::GetAliases() const {
-  return {"rawtraversal", "rtraw", "bvhraw", "raw_traversal"};
+  return {"rawtraversal", "rtraw", "bvhraw", "raw_traversal", "rayintersect", "ray_intersect", "intersect"};
 }
 
 const char *RayRawTraversalBench::GetMetric() const {
@@ -564,18 +648,38 @@ const char *RayRawTraversalBench::GetSubCategory(uint32_t config_idx) const {
 }
 
 std::string RayRawTraversalBench::GetConfigName(uint32_t config_idx) const {
-  return config_idx == 0
-      ? "Raw BVH - Coherent Triangle Traversal (Max Occupancy)"
-      : "Raw BVH - Deep Multi-Layer Box Stress";
+  switch (config_idx) {
+  case 0:
+    return "Raw BVH - Coherent Triangle Traversal (Max Occupancy)";
+  case 1:
+    return "Raw BVH - Deep Multi-Layer Box Stress";
+  case 2:
+    return "Software BVH Stack - 64-Layer Procedural AABB Grid (ALU Baseline)";
+  default:
+    return "";
+  }
+}
+
+const char *RayRawTraversalBench::GetDescription(uint32_t config_idx) const {
+  switch (config_idx) {
+  case 0:
+    return "Hardware BVH coherent shallow traversal hitting an opaque 32x32 triangle grid with immediate first-hit termination.";
+  case 1:
+    return "Hardware BVH traversal stress across 64 stratified AABB layers (65,536 boxes) isolating fixed-function box-test throughput.";
+  case 2:
+    return "Software compute shader (VALU) binary BVH stack traversal over identical 65,536-box (32x32x64) hierarchy without hardware RT units.";
+  default:
+    return GetDescription();
+  }
 }
 
 uint64_t RayRawTraversalBench::GetTraversedRays(uint32_t config_idx) const {
-  if (config_idx >= 2) return 0;
+  if (config_idx >= 3) return 0;
   return static_cast<uint64_t>(rayCount) * recordedInvocations[config_idx];
 }
 
 double RayRawTraversalBench::GetThroughputMRays(uint32_t config_idx) const {
-  if (config_idx >= 2 || recordedTimeMs[config_idx] <= 0.0) return 0.0;
+  if (config_idx >= 3 || recordedTimeMs[config_idx] <= 0.0) return 0.0;
   double time_s = recordedTimeMs[config_idx] / 1000.0;
   return (static_cast<double>(GetTraversedRays(config_idx)) / time_s) / 1e6;
 }

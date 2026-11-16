@@ -127,5 +127,7 @@ private:
   uint32_t samplesPerPixel = 1;
   int targetConfig = -1;
   bool profileSnapshot = false;
+  bool observedAnyGpuContext = false;
+  bool observedApuContext = false;
   std::atomic<bool> *cancelToken = nullptr;
 };

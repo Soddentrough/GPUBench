@@ -18,6 +18,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <set>
 #include <sstream>
 #include <thread>
 
@@ -192,10 +193,13 @@ VulkanContext::TextureResource GuiApp::getOrLoadTexture(const std::string& relPa
 
     // 2. Disk-backed texture cache fallback
     auto it = m_textureCache.find(normKey);
+    const bool isDynamicRender = (normKey.rfind("renders/", 0) == 0);
     if (it != m_textureCache.end() && !it->second.borrowsExternalImage) {
-        return it->second;
-    }
-    if (it != m_textureCache.end()) {
+        if (it->second.isValid() || !isDynamicRender) {
+            return it->second;
+        }
+        m_textureCache.erase(it);
+    } else if (it != m_textureCache.end()) {
         m_vulkanContext->waitDeviceIdleSafe();
         m_vulkanContext->destroyTexture(it->second);
         m_textureCache.erase(it);
@@ -237,7 +241,9 @@ VulkanContext::TextureResource GuiApp::getOrLoadTexture(const std::string& relPa
         }
     }
 
-    m_textureCache[normKey] = VulkanContext::TextureResource{};
+    if (!isDynamicRender) {
+        m_textureCache[normKey] = VulkanContext::TextureResource{};
+    }
     return {};
 }
 
@@ -578,7 +584,23 @@ void GuiApp::updateBenchmarkSupport() {
         supportMap[sInfo.id] = sInfo;
     }
 
+    bool isApuDevice = false;
+    for (const auto& prof : m_deviceProfiles) {
+        if (prof.deviceIndex == probeDev &&
+            (prof.backend == m_selectedBackend || !isApuDevice)) {
+            if (prof.isApu) {
+                isApuDevice = true;
+                if (prof.backend == m_selectedBackend) break;
+            }
+        }
+    }
+    const bool applyInitialApuSystemArm = isApuDevice && !m_appliedInitialApuDiagnostics;
+    if (applyInitialApuSystemArm) {
+        m_appliedInitialApuDiagnostics = true;
+    }
+
     for (auto& cat : m_categories) {
+        const bool isDiagnosticGroup = (cat.name == "Host & Raster Diagnostics");
         for (auto& sg : cat.subgroups) {
             for (auto& item : sg.items) {
                 if (item.category == "System") {
@@ -589,6 +611,9 @@ void GuiApp::updateBenchmarkSupport() {
                     item.hardwareSupportText.clear();
                     item.driverSupportText.clear();
                     item.supportDiscrepancySummary.clear();
+                    if (applyInitialApuSystemArm) {
+                        item.selected = true;
+                    }
                     continue;
                 }
 
@@ -639,7 +664,7 @@ void GuiApp::updateBenchmarkSupport() {
                 if (item.isSupported) anySupported = true;
             }
             sg.allSelected = anySel;
-            sg.collapsed = (!sg.items.empty() && !anySupported);
+            sg.collapsed = (!sg.items.empty() && (!anySupported || (isDiagnosticGroup && !anySel)));
         }
         bool catAnySel = false;
         for (const auto& sg : cat.subgroups) {
@@ -666,24 +691,13 @@ void GuiApp::setSelectedBackend(const std::string& backend) {
 }
 
 void GuiApp::setScene(const std::string& scene) {
-    if (scene == "indoor" || scene == "sponza") {
-        m_scene = "indoor";
-        m_suiteActiveScene = "indoor";
-        m_rtSceneIndex = 1;
-    } else if (scene == "forest" || scene == "foliage") {
-        m_scene = "forest";
-        m_suiteActiveScene = "forest";
-        m_rtSceneIndex = 2;
-    } else if (scene == "landscape" || scene == "outdoor") {
-        m_scene = "landscape";
-        m_suiteActiveScene = "landscape";
-        m_rtSceneIndex = 3;
-    } else if (scene == "showroom" || scene == "studio" || scene == "car") {
-        m_scene = "showroom";
-        m_suiteActiveScene = "showroom";
+    if (scene == "reactor" || scene == "zeroday" || scene == "hangar" || scene == "all" ||
+        scene == "indoor" || scene == "sponza" || scene == "forest" || scene == "foliage" ||
+        scene == "aaa_forest" || scene == "landscape" || scene == "outdoor" ||
+        scene == "showroom" || scene == "studio" || scene == "car") {
+        m_scene = "reactor";
+        m_suiteActiveScene = "reactor";
         m_rtSceneIndex = 0;
-    } else if (scene == "all") {
-        m_scene = "all";
     }
 }
 
@@ -789,23 +803,31 @@ void GuiApp::selectOnlyBenchmark(const std::string& benchmarkId) {
             continue;
         }
 
-        // Category match (compute, memory, raytracing, scheduling, raster, graphics/gfx, system)
+        // Category match (compute, memory, raytracing, scheduling, raster, graphics/gfx, system, diagnostics)
         bool matchedCategory = false;
         for (auto& cat : m_categories) {
             std::string lowerCat = cat.name;
             lowerCat.erase(std::remove(lowerCat.begin(), lowerCat.end(), ' '), lowerCat.end());
             for (char& ch : lowerCat) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
             const bool isGraphicsUmbrella = (lowerTok == "graphics" || lowerTok == "gfx") &&
-                                            (lowerCat == "raster" || lowerCat == "raytracing");
-            if (lowerTok == lowerCat || (lowerTok == "system" && lowerCat == "hostsystem") ||
-                isGraphicsUmbrella) {
+                                            (cat.name == "Ray Tracing" || cat.name == "Host & Raster Diagnostics");
+            const bool isDiagnosticMatch = (lowerTok == "diagnostics" || lowerTok == "diag" || lowerTok == "full") &&
+                                           (cat.name == "Host & Raster Diagnostics");
+            const bool isRasterSubMatch = (lowerTok == "raster" || lowerTok == "rop") &&
+                                          (cat.name == "Host & Raster Diagnostics");
+            const bool isSystemSubMatch = (lowerTok == "system" || lowerTok == "host" || lowerTok == "hostsystem") &&
+                                          (cat.name == "Host & Raster Diagnostics");
+            if (lowerTok == lowerCat || isDiagnosticMatch || isGraphicsUmbrella ||
+                isRasterSubMatch || isSystemSubMatch) {
                 for (auto& sg : cat.subgroups) {
                     for (auto& item : sg.items) {
-                        if (item.isSupported) {
-                            item.selected = true;
-                            if (item.category == "System") anySysSelected = true;
-                            else anyGpuSelected = true;
-                        }
+                        if (!item.isSupported) continue;
+                        if (isGraphicsUmbrella && cat.name == "Host & Raster Diagnostics" && item.category != "Raster") continue;
+                        if (isRasterSubMatch && item.category != "Raster") continue;
+                        if (isSystemSubMatch && item.category != "System") continue;
+                        item.selected = true;
+                        if (item.category == "System") anySysSelected = true;
+                        else anyGpuSelected = true;
                     }
                 }
                 matchedCategory = true;
@@ -890,6 +912,8 @@ void GuiApp::startBenchmarks() {
 
     std::vector<std::string> benchmarksToRun;
     std::vector<std::string> selectedWorkloads;
+    std::set<std::string> activeSubgroups;
+    std::set<std::string> activeIds;
     size_t systemSelectedItemCount = 0;
 
     for (const auto& cat : m_categories) {
@@ -899,6 +923,8 @@ void GuiApp::startBenchmarks() {
                     if (std::find(benchmarksToRun.begin(), benchmarksToRun.end(), item.id) == benchmarksToRun.end()) {
                         benchmarksToRun.push_back(item.id);
                     }
+                    activeIds.insert(item.id);
+                    activeSubgroups.insert(item.category + "|" + item.subcategory);
                     if (item.configIndex >= 0) {
                         selectedWorkloads.push_back(item.id + "#" + std::to_string(item.configIndex));
                     } else {
@@ -908,6 +934,50 @@ void GuiApp::startBenchmarks() {
                     }
                     if (item.category == "System") {
                         systemSelectedItemCount++;
+                    }
+                }
+            }
+        }
+    }
+
+    // In suite/category runs (multiple subgroups or multiple items armed), also
+    // emit structured UNSUPPORTED records for unsupported siblings in active
+    // subgroups or fully-selected categories so exported reports & scorecards
+    // match CLI suite coverage.
+    if (activeSubgroups.size() > 1 || selectedWorkloads.size() > 1) {
+        for (const auto& cat : m_categories) {
+            bool anyCatSupported = false;
+            bool allCatSupportedSelected = true;
+            for (const auto& sg : cat.subgroups) {
+                for (const auto& item : sg.items) {
+                    if (item.isSupported) {
+                        anyCatSupported = true;
+                        if (!item.selected) {
+                            allCatSupportedSelected = false;
+                        }
+                    }
+                }
+            }
+            const bool emitWholeCategoryUnsupported =
+                anyCatSupported && allCatSupportedSelected && cat.subgroups.size() > 1;
+
+            for (const auto& sg : cat.subgroups) {
+                for (const auto& item : sg.items) {
+                    if (!item.isSupported) {
+                        const bool siblingActive =
+                            activeIds.count(item.id) > 0 ||
+                            activeSubgroups.count(item.category + "|" + item.subcategory) > 0;
+                        if (siblingActive || (emitWholeCategoryUnsupported && item.category != "System")) {
+                            if (std::find(benchmarksToRun.begin(), benchmarksToRun.end(), item.id) == benchmarksToRun.end()) {
+                                benchmarksToRun.push_back(item.id);
+                            }
+                            const std::string tag = (item.configIndex >= 0)
+                                ? (item.id + "#" + std::to_string(item.configIndex))
+                                : item.id;
+                            if (std::find(selectedWorkloads.begin(), selectedWorkloads.end(), tag) == selectedWorkloads.end()) {
+                                selectedWorkloads.push_back(tag);
+                            }
+                        }
                     }
                 }
             }
@@ -959,7 +1029,7 @@ void GuiApp::startBenchmarks() {
     m_execState = ExecutionState::Running;
     m_completedTasks = 0;
 
-    size_t sceneMult = (m_scene == "all") ? 4 : 1;
+    size_t sceneMult = 1;
     size_t perGpuTasks = 0;
     for (const auto& cat : m_categories) {
         for (const auto& sg : cat.subgroups) {
@@ -1756,7 +1826,7 @@ void GuiApp::requestIsaInspection(const BenchmarkItem& item, bool forceRefresh) 
             // Avoid compiling all RayScheduling shaders for unmapped sub-configs;
             // fall back to the non-SER baseline RTP shader instead of SER.
             if (!opts.targets.empty() && opts.targets[0] == "RayScheduling") {
-                opts.configs = {28};
+                opts.configs = {20};
             } else {
                 opts.configs.clear();
             }
@@ -1893,7 +1963,7 @@ void GuiApp::startSceneVerificationCapture(const std::string& sceneTag) {
                 m_savedSelectionSnapshot.push_back(itm.selected);
                 const bool match =
                     (itm.id == "RayScheduling" && itm.isSupported &&
-                     (itm.configIndex == 9 || itm.configIndex == 11));
+                     (itm.configIndex == 6 || itm.configIndex == 8));
                 itm.selected = match;
                 if (match) anyPicked = true;
             }
@@ -1933,7 +2003,7 @@ void GuiApp::startSceneVerificationCapture(const std::string& sceneTag) {
 
     m_savedSceneBeforeCapture = m_scene;
     m_restoreSceneAfterRun = true;
-    m_scene = (sceneTag == "outdoor") ? "landscape" : sceneTag;
+    m_scene = "reactor";
     m_singleSlotSelectionRestore = true;
     m_stayOnRtViewportAfterRun = true;
 
@@ -2301,17 +2371,6 @@ void GuiApp::renderTopInstrumentHeader(float width) {
             ImGui::SameLine(0.0f, s(3.0f));
         }
 
-        // Compact scene pills
-        ImGui::SameLine(0.0f, s(6.0f));
-        const char* scIds[] = {"all", "showroom", "indoor", "forest", "landscape"};
-        const char* scLbls[] = {"ALL SC", "SHOW", "INDR", "FRST", "OUTD"};
-        for (int si = 0; si < 5; ++si) {
-            std::string sid = "##TopSc" + std::to_string(si);
-            if (tacticalButton(sid.c_str(), scLbls[si], ImVec2(0, bh), m_scene == scIds[si], c)) {
-                setScene(scIds[si]);
-            }
-            ImGui::SameLine(0.0f, s(2.0f));
-        }
         if (isRunning) ImGui::EndDisabled();
 
         // Right cluster on Row 1: Session + Export JSON + Config + Primary RUN/ABORT
@@ -2508,21 +2567,10 @@ void GuiApp::renderSettingsModal() {
         ImGui::Separator();
         ImGui::Spacing();
 
-        const char* scenes[] = {"all", "showroom", "indoor", "forest", "landscape"};
-        const char* sceneLabels[] = {
-            "All 4 Scenes (Comprehensive)",
-            "Showroom Studio (Automotive Reflection)",
-            "Indoor Atrium (Architectural GI)",
-            "Open-World Forest (Alpha-Cutout Foliage)",
-            "Outdoor Landscape (Heightfield Terrain)"
-        };
-        int currentSceneIdx = 0;
-        for (int i = 0; i < 5; ++i) {
-            if (m_scene == scenes[i]) { currentSceneIdx = i; break; }
-        }
-        if (ImGui::Combo("Target Scene", &currentSceneIdx, sceneLabels, 5)) {
-            setScene(scenes[currentSceneIdx]);
-        }
+        ImGui::TextColored(c.textMuted, "Target Scene:");
+        ImGui::SameLine();
+        ImGui::TextColored(c.textPrimary, "Zero-Day Reactor Bay (AAA Procedural Hangar)");
+        ImGui::Spacing();
 
         const char* resLabels[] = {
             "1280 x 720 (HD)",

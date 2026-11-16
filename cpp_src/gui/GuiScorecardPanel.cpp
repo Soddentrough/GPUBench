@@ -132,7 +132,10 @@ void GuiApp::renderResultsScorecard() {
         ImGui::TextColored(c.textMuted, "PEAK RAY TRACING");
         pushBoldFont();
         if (peakRtMrays > 0.0) {
-            ImGui::TextColored(c.phosphorHi, "%.1f MRays/s", peakRtMrays);
+            const ScaledMetricValue peakRtScaled = scaleMetricForDisplay(peakRtMrays, "MRays/s", 1);
+            ImGui::TextColored(c.phosphorHi,
+                               peakRtScaled.scaled ? "%.2f %s" : "%.1f %s",
+                               peakRtScaled.value, peakRtScaled.unit.c_str());
         } else {
             ImGui::TextColored(c.textMuted, "—");
         }
@@ -377,11 +380,7 @@ void GuiApp::renderResultsScorecard() {
 
             if (r.benchmarkName.rfind("RayScheduling", 0) == 0 &&
                 ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
-                std::string sc = extractSceneName(r.benchmarkName);
-                if (sc == "Showroom") m_rtSceneIndex = 0;
-                else if (sc == "Indoor") m_rtSceneIndex = 1;
-                else if (sc == "Forest") m_rtSceneIndex = 2;
-                else if (sc == "Landscape") m_rtSceneIndex = 3;
+                m_rtSceneIndex = 0;
                 m_switchToRtViewport = true;
             }
 

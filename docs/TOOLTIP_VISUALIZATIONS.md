@@ -57,41 +57,33 @@ hardware output, and the cross-link button (below) jumps straight to it.
 to **400×225** (16:9, Lanczos) with Pillow:
 
 ```
-python3 scripts/make_thumbnails.py            # regenerate all 36 thumbnails
+python3 scripts/make_thumbnails.py            # regenerate all 15 thumbnails
 python3 scripts/make_thumbnails.py --check    # CI-style staleness check
 ```
 
 | Source | Output | Count |
 |:-------|:-------|:------|
-| `renders/render_<scene>_<stage>.png` (4K pipeline captures) | `assets/thumbnails/thumb_<scene>_<stage>.png` | 4 scenes × 8 stages = 32 |
+| `renders/render_<scene>_<stage>.png` (runtime pipeline captures) | `assets/thumbnails/thumb_<scene>_<stage>.png` | 1 scene × 11 stages = 11 |
 | `docs/images/geometry_showroom_wireframe.png` | `thumb_blas_wireframe.png` | 1 |
 | `docs/images/geometry_alpha_layers.png` | `thumb_alpha_layers.png` | 1 |
 | `docs/images/material_lineup.png` | `thumb_material_lineup.png` | 1 |
 | `docs/images/realistic_scene_material_range.png` | `thumb_material_range.png` | 1 |
 
-Total payload ≈ **3 MB**. The generated files are committed and ship with the
+Total payload ≈ **1.3 MB**. The generated files are committed and ship with the
 package (see §7).
 
-Scenes: `showroom`, `indoor`, `forest`, `outdoor`. Stages: `stage1_bvh`,
+Scene: `reactor` (Zero-Day Reactor Bay). Stages: `stage1_bvh`,
 `stage2_primary`, `stage3_shadow`, `stage4_rtao`, `stage5_direct`,
-`stage6_indirect`, `stage7_final`, `multilight_128_dgc`.
-
-Note: `thumb_<scene>_stage1_bvh.png`, `thumb_<scene>_stage4_rtao.png`, and
-`thumb_material_range.png` are generated for parity with the Ray Tracing
-Viewport's full asset set but are not directly referenced by tooltip metadata
-today (BVH traversal uses Tier 2 procedural schematics for clarity, and no
-RTAO-specific benchmark workload exists); they cost ~480 KB total and ensure
-clean parity with viewport tabs.
+`stage6_indirect`, `stage7_final`, `multilight_128_dgc`, `alpha_cutout`,
+`pathtracing_1spp`, `pathtracing_16spp`.
 
 ### 2.2 Scene-relative assets
 
 Scene-dependent thumbnails carry a `{scene}` token in their metadata path,
 e.g. `assets/thumbnails/thumb_{scene}_stage1_bvh.png`. At render time
 `renderBenchmarkTooltip()` substitutes the active scene via
-`currentSceneTag()` (or an explicit `sceneOverride` for scorecard rows that
-belong to a specific scenario): the scene chosen in the Ray Tracing Scenario
-selector, or the canonical Sponza/`indoor` scene when `all` is selected. This
-keeps the tooltip in sync with what the test actually runs on.
+`currentSceneTag()` (or normalizes legacy `sceneOverride` aliases to `reactor`).
+This keeps the tooltip in sync with what the test actually runs on.
 
 ### 2.3 Loading & caching
 

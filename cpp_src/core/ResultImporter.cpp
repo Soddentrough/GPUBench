@@ -561,15 +561,29 @@ bool ResultImporter::loadFromString(const std::string &content, ImportedRun &out
           rd.subcategory = "Multi-Light Evaluation";
           rd.benchmarkName = "RayScheduling (Multi-Light - 128 Lights (Megakernel))";
           rd.sortWeight = 407;
-          rd.configIndex = 32;
+          rd.configIndex = 22;
           rd.baselineConfigIndex = -1;
         } else if (id == "rt_sched_multilight_128_dgc") {
           rd.component = "Ray Tracing";
           rd.subcategory = "Multi-Light Evaluation";
           rd.benchmarkName = "RayScheduling (Multi-Light - 128 Lights (DGC Light Binning))";
           rd.sortWeight = 408;
-          rd.configIndex = 33;
-          rd.baselineConfigIndex = 32;
+          rd.configIndex = 23;
+          rd.baselineConfigIndex = 22;
+        } else if (id == "rt_sched_volumetric_trad") {
+          rd.component = "Ray Tracing";
+          rd.subcategory = "Volumetric & Clustered Lighting";
+          rd.benchmarkName = "RayScheduling (Volumetric & Clustered Lights (Megakernel))";
+          rd.sortWeight = 409;
+          rd.configIndex = 27;
+          rd.baselineConfigIndex = -1;
+        } else if (id == "rt_sched_volumetric_dgc") {
+          rd.component = "Ray Tracing";
+          rd.subcategory = "Volumetric & Clustered Lighting";
+          rd.benchmarkName = "RayScheduling (Volumetric & Clustered Lights (DGC))";
+          rd.sortWeight = 409;
+          rd.configIndex = 28;
+          rd.baselineConfigIndex = 27;
         } else if (id == "rt_sched_mat_trad") {
           rd.component = "Ray Tracing";
           rd.subcategory = "Material Shading";
@@ -666,6 +680,33 @@ bool ResultImporter::loadFromString(const std::string &content, ImportedRun &out
           rd.benchmarkName = "BVH Traversal - 2D Morton Z-Curve (4x8)";
           rd.sortWeight = 520;
           rd.configIndex = 4;
+        } else if (id == "rt_sched_full_reactor_trad") {
+          rd.component = "Ray Tracing";
+          rd.subcategory = "Scene Ray Tracing (Reactor Bay)";
+          rd.benchmarkName = "RayScheduling (Zero-Day Reactor Bay) (Scene Render: Full Frame (Megakernel))";
+          rd.sortWeight = 595;
+          rd.configIndex = 6;
+          rd.baselineConfigIndex = -1;
+        } else if (id == "rt_sched_full_reactor_wl") {
+          rd.component = "Ray Tracing";
+          rd.subcategory = "Scene Ray Tracing (Reactor Bay)";
+          rd.benchmarkName = "RayScheduling (Zero-Day Reactor Bay) (Scene Render: Full Frame (DGC))";
+          rd.sortWeight = 596;
+          rd.configIndex = 8;
+          rd.baselineConfigIndex = 6;
+        } else if (id == "rt_sched_full_reactor_rtp") {
+          rd.component = "Ray Tracing";
+          rd.subcategory = "Scene Ray Tracing (Reactor Bay)";
+          rd.benchmarkName = "RayScheduling (Zero-Day Reactor Bay) (Primary Rays (RTP))";
+          rd.sortWeight = 597;
+          rd.configIndex = 20;
+        } else if (id == "rt_sched_full_reactor_ser") {
+          rd.component = "Ray Tracing";
+          rd.subcategory = "Scene Ray Tracing (Reactor Bay)";
+          rd.benchmarkName = "RayScheduling (Zero-Day Reactor Bay) (Scene Render: Full Frame (RTP + SER))";
+          rd.sortWeight = 598;
+          rd.configIndex = 7;
+          rd.baselineConfigIndex = 6;
         } else if (id == "rt_sched_full_showroom_trad") {
           rd.component = "Ray Tracing";
           rd.subcategory = "Scene Ray Tracing (Showroom)";
@@ -839,8 +880,7 @@ bool ResultImporter::loadFromString(const std::string &content, ImportedRun &out
       }
       rd.width = entry["width"].as_uint32(entryW);
       rd.height = entry["height"].as_uint32(entryH);
-      rd.samplesPerFrame = entry["samples_per_pixel"].as_uint32(
-          (rd.configIndex == 23 || rd.configIndex == 24) ? 16u : 1u);
+      rd.samplesPerFrame = entry["samples_per_pixel"].as_uint32(1u);
 
       if (entry.has("statistics")) {
         const JsonView st = entry["statistics"];

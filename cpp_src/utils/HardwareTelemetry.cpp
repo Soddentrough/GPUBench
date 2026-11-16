@@ -775,6 +775,34 @@ public:
     return list;
   }
 
+  bool queryPowerSample(uint32_t deviceIndex, GpuTelemetryData &out) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (!m_ready || deviceIndex >= m_adapters.size()) return false;
+    size_t amdOrdinal = 0;
+    size_t nvOrdinal = 0;
+    for (size_t i = 0; i < deviceIndex; ++i) {
+      if (m_adapters[i].desc.VendorId == 0x1002) {
+        amdOrdinal++;
+      } else if (m_adapters[i].desc.VendorId == 0x10DE) {
+        nvOrdinal++;
+      }
+    }
+    const auto &rec = m_adapters[deviceIndex];
+    out = GpuTelemetryData{};
+    out.deviceIndex = deviceIndex;
+    out.vendorId = rec.desc.VendorId;
+    out.deviceId = rec.desc.DeviceId;
+    out.deviceName = rec.nameUtf8;
+    out.isAvailable = true;
+    if (rec.desc.VendorId == 0x1002) {
+      return WindowsAmdAdl::instance().queryByOrdinal(amdOrdinal, out);
+    } else if (rec.desc.VendorId == 0x10DE) {
+      return DynamicNvml::instance().queryDeviceByPciOrIndex(
+          out.pciBusId, static_cast<uint32_t>(nvOrdinal), out);
+    }
+    return false;
+  }
+
 private:
   using PFN_CreateDXGIFactory1 = HRESULT(WINAPI *)(REFIID, void **);
 
@@ -1149,6 +1177,24 @@ GpuTelemetryData HardwareTelemetry::queryGpu(uint32_t deviceIndex) {
   }
 
   return data;
+#endif
+}
+
+GpuTelemetryData HardwareTelemetry::queryGpuPowerSample(uint32_t deviceIndex) {
+#ifdef _WIN32
+  GpuTelemetryData sample;
+  sample.deviceIndex = deviceIndex;
+  if (WindowsDxgiTelemetry::instance().queryPowerSample(deviceIndex, sample)) {
+    return sample;
+  }
+  if (DynamicNvml::instance().available() &&
+      deviceIndex < DynamicNvml::instance().deviceCount()) {
+    DynamicNvml::instance().queryDevice(deviceIndex, sample);
+    return sample;
+  }
+  return sample;
+#else
+  return queryGpu(deviceIndex);
 #endif
 }
 

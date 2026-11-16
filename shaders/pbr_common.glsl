@@ -52,6 +52,20 @@ vec3 evalOutdoorSky(vec3 dir) {
 }
 #endif
 
+#ifndef EVAL_REACTOR_ENV_DEFINED
+#define EVAL_REACTOR_ENV_DEFINED
+vec3 evalReactorEnvironment(vec3 dir) {
+    vec3 sunDir = normalize(vec3(0.24, -0.22, 0.945));
+    float sunDot = max(dot(dir, sunDir), 0.0);
+    vec3 lowerBay = mix(vec3(0.05, 0.07, 0.10), vec3(0.12, 0.16, 0.22), smoothstep(-0.35, 0.15, dir.z));
+    vec3 skyDome = mix(vec3(0.20, 0.30, 0.44), vec3(0.46, 0.68, 0.94), clamp(dir.z, 0.0, 1.0));
+    vec3 env = mix(lowerBay, skyDome, smoothstep(0.08, 0.26, dir.z));
+    env += vec3(1.0, 0.95, 0.88) * pow(sunDot, 96.0) * 6.0;
+    env += vec3(0.22, 0.78, 1.00) * (0.14 * max(0.0, 1.0 - abs(dir.z)));
+    return env;
+}
+#endif
+
 #ifdef BINDING_MAT_BUF
 layout(set = 0, binding = BINDING_MAT_BUF) readonly buffer MaterialBuffer {
     GltfMaterialGpu materials[];
@@ -169,7 +183,7 @@ vec3 evaluateCookTorranceGGX(
     return (diffuse + specular) * lightRadiance * NdotL;
 }
 
-// 8 Production AAA BSDF Archetype Evaluator
+// 8 Production AAA BSDF Archetype Evaluator (NaN-safe, rich multi-lobe shader diversity)
 vec3 evaluateMaterialArchetypeDirect(
     uint archetype,
     vec3 hitPos,
@@ -185,100 +199,182 @@ vec3 evaluateMaterialArchetypeDirect(
 ) {
     uint arch = (SPECIALIZED_ARCHETYPE != 0xFFFFFFFFu && SPECIALIZED_ARCHETYPE < 8u) ? SPECIALIZED_ARCHETYPE : archetype;
 
+    vec3 vpl = V + L;
+    vec3 H = vpl * inversesqrt(max(dot(vpl, vpl), 1e-12));
+    float NdotL = max(dot(N, L), 0.0);
+    float NdotV = max(dot(N, V), 1e-4);
+    float NdotH = max(dot(N, H), 0.0);
+    float VdotH = max(dot(V, H), 0.0);
+    float fresnel5 = pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
+
+    vec3 upRef = (abs(N.z) < 0.99) ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+    vec3 T_raw = cross(upRef, N);
+    vec3 T = T_raw * inversesqrt(max(dot(T_raw, T_raw), 1e-12));
+    vec3 B = cross(N, T);
+    float TdotH = dot(T, H);
+    float BdotH = dot(B, H);
+    float TdotV = dot(T, V);
+    float BdotV = dot(B, V);
+    float TdotL = dot(T, L);
+    float BdotL = dot(B, L);
+
     switch (arch) {
-        case 0: { // Archetype 0: Standard Dielectric/Conductor PBR (Cook-Torrance GGX)
-            return evaluateCookTorranceGGX(baseColor, roughness, metallic, N, V, L, lightRadiance);
-        }
-        case 1: { // Archetype 1: Subsurface Scattering (Diffusion Profile)
-            float NdotL = max(dot(N, L), 0.0);
-            float wrappedNdotL = clamp((dot(N, L) + 0.40) / 1.40, 0.0, 1.0);
-            vec3 sssColor = exp(-vec3(0.40, 0.08, 0.18) * (1.0 - wrappedNdotL) * 2.0) * baseColor;
-            vec3 H = normalize(V + L);
-            float NdotH = max(dot(N, H), 0.0);
-            float VdotH = max(dot(V, H), 0.0);
-            float d_j = NdotH * NdotH * (0.008 - 1.0) + 1.0;
-            float D_j = 0.008 / (3.14159265 * d_j * d_j + 0.0001);
-            float F_j = 0.05 + 0.95 * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
-            float NdotV = max(dot(N, V), 1e-4);
-            vec3 specJade = vec3(D_j * F_j * 0.65 / (4.0 * max(NdotL, 0.01) * NdotV + 0.001) * max(NdotL, 0.01));
-            return (sssColor * wrappedNdotL * 0.95 + specJade) * lightRadiance;
-        }
-        case 2: { // Archetype 2: Dielectric Transmission / Glass
-            vec3 H = normalize(V + L);
-            float NdotH = max(dot(N, H), 0.0);
-            float VdotH = max(dot(V, H), 0.0);
-            float NdotL = max(dot(N, L), 0.0);
-            float NdotV = max(dot(N, V), 1e-4);
+        case 0: { // Archetype 0: Brushed Aerospace Titanium (Anisotropic GGX + Multi-Scattering Energy Comp)
             if (NdotL <= 0.0) return vec3(0.0);
-            float d = NdotH * NdotH * (0.0004 - 1.0) + 1.0;
-            float D = 0.0004 / (3.14159265 * d * d + 0.0001);
-            float F_l = 0.04 + 0.96 * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
-            return lightRadiance * (D * F_l / (4.0 * NdotL * NdotV + 0.001) * NdotL);
+            float microGrain = sin(hitPos.x * 38.0 + hitPos.z * 26.0) * cos(hitPos.y * 22.0) * 0.035;
+            float rEff = clamp(roughness + microGrain, 0.06, 0.95);
+            float a = rEff * rEff;
+            float ax = max(a * 1.45, 0.012);
+            float ay = max(a * 0.45, 0.008);
+            float dAniso = (TdotH * TdotH) / (ax * ax) + (BdotH * BdotH) / (ay * ay) + NdotH * NdotH;
+            float D = 1.0 / (3.14159265 * ax * ay * max(dAniso * dAniso, 1e-7));
+            float lambdaV = NdotL * sqrt(ax * ax * TdotV * TdotV + ay * ay * BdotV * BdotV + NdotV * NdotV);
+            float lambdaL = NdotV * sqrt(ax * ax * TdotL * TdotL + ay * ay * BdotL * BdotL + NdotL * NdotL);
+            float Vis = 0.5 / max(lambdaV + lambdaL, 1e-4);
+            vec3 F0 = mix(vec3(0.04), baseColor, metallic);
+            vec3 F = F0 + (1.0 - F0) * fresnel5;
+            vec3 multiComp = 1.0 + F0 * (0.38 * rEff);
+            vec3 spec = (D * Vis * F) * multiComp;
+            vec3 kD = (vec3(1.0) - F) * (1.0 - metallic);
+            vec3 diff = kD * (baseColor / 3.1415926535);
+            return (diff + spec) * lightRadiance * NdotL;
         }
-        case 3: { // Archetype 3: Anisotropic Velvet / Fabric Sheen (Charlie Micro-Fiber)
-            float NdotL = max(dot(N, L), 0.0);
-            vec3 H = normalize(V + L);
-            float NdotH = max(dot(N, H), 0.0);
-            float VdotH = max(dot(V, H), 0.0);
+        case 1: { // Archetype 1: Cryo Ceramic Dielectric (Subsurface Diffusion Profile + SiO2 Glaze Topcoat)
+            float rawNdotL = dot(N, L);
+            float wrappedNdotL = clamp((rawNdotL + 0.42) / 1.42, 0.0, 1.0);
+            vec3 sssColor = exp(-vec3(0.32, 0.14, 0.06) * (1.0 - wrappedNdotL) * 2.1) * baseColor;
+            vec3 baseLobe = evaluateCookTorranceGGX(sssColor, max(roughness, 0.25), 0.0, N, V, L, vec3(1.0));
+            float f0_coat = pow((max(ior, 1.2) - 1.0) / (max(ior, 1.2) + 1.0), 2.0);
+            float a2c = 0.012;
+            float dc = NdotH * NdotH * (a2c - 1.0) + 1.0;
+            float Dc = a2c / (3.14159265 * dc * dc + 1e-5);
+            float kc = 0.125 * 1.12 * 1.12;
+            float Gc = (NdotV / (NdotV * (1.0 - kc) + kc)) * (max(NdotL, 0.01) / (max(NdotL, 0.01) * (1.0 - kc) + kc));
+            float Fc = f0_coat + (1.0 - f0_coat) * fresnel5;
+            vec3 glazeSpec = vec3((Dc * Gc * Fc * 0.72) / max(4.0 * NdotV * max(NdotL, 0.01), 1e-4) * NdotL);
+            return (sssColor * wrappedNdotL * 0.62 + baseLobe * 0.45 + glazeSpec) * lightRadiance;
+        }
+        case 2: { // Archetype 2: Armored Borosilicate Glass (Exact IOR Fresnel + Dual-Lobe Dispersion Specular)
+            if (NdotL <= 0.0) return vec3(0.0);
+            float iorSafe = max(ior, 1.05);
+            float f0_g = pow((iorSafe - 1.0) / (iorSafe + 1.0), 2.0);
+            float F_g = f0_g + (1.0 - f0_g) * fresnel5;
+            float a2p = 0.00045;
+            float d1 = NdotH * NdotH * (a2p - 1.0) + 1.0;
+            float D1 = a2p / (3.14159265 * d1 * d1 + 1e-5);
+            float a2b = 0.0144;
+            float d2 = NdotH * NdotH * (a2b - 1.0) + 1.0;
+            float D2 = a2b / (3.14159265 * d2 * d2 + 1e-5);
+            float Vis = 1.0 / max(4.0 * NdotL * NdotV, 1e-3);
+            vec3 arTint = vec3(0.82, 0.96, 1.00) + 0.18 * sin(vec3(0.0, 2.094, 4.188) + VdotH * 6.28318);
+            vec3 spec = arTint * ((D1 * 0.85 + D2 * 0.15) * F_g * Vis * NdotL);
+            return lightRadiance * spec;
+        }
+        case 3: { // Archetype 3: Kapton MLI Foil (3D Micro-Crinkle Normal Perturb + Metallic GGX + Grazing Sheen)
+            float c1 = noise3D_common(hitPos * 3.8) * 2.0 - 1.0;
+            float c2 = noise3D_common(hitPos * 9.5 + vec3(4.1, 7.3, 1.9)) * 2.0 - 1.0;
+            vec3 nc_raw = N + T * (c1 * 0.22) + B * (c2 * 0.22);
+            vec3 Nc = nc_raw * inversesqrt(max(dot(nc_raw, nc_raw), 1e-12));
+            vec3 baseSpec = evaluateCookTorranceGGX(baseColor, clamp(roughness * 0.85, 0.10, 0.70), metallic, Nc, V, L, lightRadiance);
             float invAlpha = 1.0 / max(roughness, 0.25);
             float sinThetaH = sqrt(max(0.0, 1.0 - NdotH * NdotH));
-            float D_charlie = (2.0 + invAlpha) * pow(sinThetaH, invAlpha) / 6.283185;
+            float D_charlie = (2.0 + invAlpha) * pow(max(sinThetaH, 0.0), invAlpha) / 6.283185;
             float F_velvet = pow(clamp(1.0 - VdotH, 0.0, 1.0), 4.0);
-            vec3 sheen = vec3(0.95, 0.85, 0.95) * (D_charlie * F_velvet * 0.75 * NdotL);
-            return (baseColor * (NdotL * 0.40 + 0.06) + sheen) * lightRadiance;
+            vec3 crinkleSheen = mix(baseColor, vec3(1.0, 0.86, 0.54), 0.5) * (D_charlie * F_velvet * 0.52 * NdotL);
+            return baseSpec + crinkleSheen * lightRadiance;
         }
-        case 4: { // Archetype 4: Weathered Multi-Layered Conductor/Dielectric (Dynamic Rust & Patina)
-            float rustNoise = rustFBM3D_common(hitPos * 0.05);
-            float rustFine = noise3D_common(hitPos * 0.2) * 0.5 + 0.5;
-            float rustVal = rustNoise * 0.80 + rustFine * 0.20;
-            float rustMask = smoothstep(0.44, 0.54, rustVal);
-            vec3 rustAlbedo = mix(vec3(0.85, 0.38, 0.12), vec3(0.35, 0.16, 0.08), rustFine);
-            vec3 finalAlbedo = mix(baseColor, rustAlbedo, rustMask);
-            float finalRough = mix(roughness, 0.85, rustMask);
+        case 4: { // Archetype 4: Weathered Industrial Ferrocrete (FBM Oxide/Spall Layering + Oren-Nayar Rough Diffuse + GGX)
+            float rustNoise = rustFBM3D_common(hitPos * 0.10);
+            float rustFine = noise3D_common(hitPos * 1.4) * 0.5 + 0.5;
+            float spallGrain = hash31_common(floor(hitPos * 14.0));
+            float rustVal = rustNoise * 0.72 + rustFine * 0.20 + spallGrain * 0.08;
+            float rustMask = smoothstep(0.44, 0.56, rustVal);
+            vec3 rustAlbedo = mix(vec3(0.58, 0.28, 0.14), vec3(0.24, 0.15, 0.10), rustFine);
+            vec3 finalAlbedo = mix(baseColor, rustAlbedo, rustMask * 0.85);
+            float finalRough = mix(roughness, 0.88, rustMask);
             float finalMetal = mix(metallic, 0.0, rustMask);
-            return evaluateCookTorranceGGX(finalAlbedo, finalRough, finalMetal, N, V, L, lightRadiance);
+            float sigma2 = finalRough * finalRough;
+            float onA = 1.0 - 0.5 * (sigma2 / (sigma2 + 0.33));
+            float onB = 0.45 * (sigma2 / (sigma2 + 0.09));
+            float VdotL_proj = dot(V - N * NdotV, L - N * NdotL);
+            float s = max(NdotL, NdotV);
+            float t = mix(1.0, max(s, 1e-4), step(0.0, VdotL_proj));
+            vec3 orenDiff = finalAlbedo * (1.0 - finalMetal) / 3.14159265 * (onA + onB * max(0.0, VdotL_proj) / max(t, 1e-4)) * NdotL;
+            vec3 dampSpec = evaluateCookTorranceGGX(finalAlbedo, clamp(finalRough * 0.82, 0.18, 0.95), finalMetal, N, V, L, vec3(1.0));
+            return (orenDiff * 0.55 + dampSpec * 0.65) * lightRadiance;
         }
-        case 5: { // Archetype 5: Polished Architectural Stone / Terrazzo
-            float NdotL = max(dot(N, L), 0.0);
-            vec3 H = normalize(V + L);
-            float NdotH = max(dot(N, H), 0.0);
-            float VdotH = max(dot(V, H), 0.0);
-            float NdotV = max(dot(N, V), 1e-4);
-            vec3 diff = baseColor * (NdotL / 3.14159265);
-            float alpha2 = 0.008;
-            float d_f = NdotH * NdotH * (alpha2 - 1.0) + 1.0;
-            float D_f = alpha2 / (3.14159265 * d_f * d_f + 0.0001);
-            float F_f = 0.06 + 0.94 * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
-            vec3 coatSpec = vec3((D_f * F_f * 0.70) / (4.0 * max(NdotL, 0.01) * NdotV + 0.001) * NdotL);
-            return (diff + coatSpec) * lightRadiance;
+        case 5: { // Archetype 5: Cryo-Plasma Conduit Jacket (Thin-Film Interference Specular + Forward Translucent Scatter)
+            float opd = 2.0 * 1.38 * 0.42 * max(VdotH, 0.05);
+            vec3 filmTint = 0.55 + 0.45 * cos(6.283185 * (opd + vec3(0.0, 0.333, 0.667)));
+            vec3 coatSpec = evaluateCookTorranceGGX(mix(baseColor, filmTint, 0.42), clamp(roughness, 0.05, 0.55), metallic, N, V, L, vec3(1.0));
+            float fwdScatter = pow(clamp(dot(-V, L), 0.0, 1.0), 4.0) * 0.35;
+            float wrappedNdotL = clamp((dot(N, L) + 0.25) / 1.25, 0.0, 1.0);
+            vec3 transDiff = baseColor * (wrappedNdotL * 0.45 + fwdScatter) * filmTint;
+            return (coatSpec + transDiff * 0.35) * lightRadiance;
         }
-        case 6: { // Archetype 6: Clearcoat Automotive Paint with Procedural Grid-Cell Micro-Flakes
-            float NdotL = max(dot(N, L), 0.0);
-            vec3 H = normalize(V + L);
-            float NdotH = max(dot(N, H), 0.0);
-            float VdotH = max(dot(V, H), 0.0);
-            float NdotV = max(dot(N, V), 1e-4);
-            float D_c = NdotH * NdotH * (0.0003 - 1.0) + 1.0;
-            float D_clear = 0.0003 / (3.14159265 * D_c * D_c + 0.0001);
-            float F_clear = 0.04 + 0.96 * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
-            vec3 specClear = vec3((D_clear * F_clear * 0.90) / (4.0 * max(NdotL, 0.01) * NdotV + 0.001) * NdotL);
-            vec3 baseSpec = evaluateCookTorranceGGX(baseColor, 0.25, 0.85, N, V, L, lightRadiance);
-            float flakeNoise = hash31_common(floor(hitPos * 12.0));
-            float flakeGlint = pow(NdotH, 140.0) * step(0.65, flakeNoise) * 4.0;
-            return baseSpec + (specClear + vec3(flakeGlint)) * lightRadiance;
+        case 6: { // Archetype 6: Industrial Hazard Clearcoat Enamel (Metallic Primer GGX + Smith Clearcoat + Grid Micro-Flakes)
+            vec3 baseSpec = evaluateCookTorranceGGX(baseColor, clamp(roughness + 0.14, 0.18, 0.65), 0.80, N, V, L, vec3(1.0));
+            float a2c = 0.00035;
+            float D_c = NdotH * NdotH * (a2c - 1.0) + 1.0;
+            float D_clear = a2c / (3.14159265 * D_c * D_c + 1e-5);
+            float kc = 0.025;
+            float G_clear = (NdotV / (NdotV * (1.0 - kc) + kc)) * (max(NdotL, 0.01) / (max(NdotL, 0.01) * (1.0 - kc) + kc));
+            float F_clear = 0.04 + 0.96 * fresnel5;
+            vec3 specClear = vec3((D_clear * G_clear * F_clear * 0.90) / max(4.0 * max(NdotL, 0.01) * NdotV, 1e-4) * NdotL);
+            float flakeNoise = hash31_common(floor(hitPos * 16.0));
+            float flakeGlint = pow(max(NdotH, 0.0), 96.0) * step(0.62, flakeNoise) * 3.2 * NdotL;
+            return (baseSpec * (1.0 - F_clear * 0.85) + specClear + vec3(flakeGlint)) * lightRadiance;
         }
-        case 7: { // Archetype 7: Alpha-Tested Foliage & Thin-Sheet Transmission
-            float NdotL = dot(N, L);
-            float wrappedNdotL = clamp((NdotL + 0.35) / 1.35, 0.0, 1.0);
-            float backTrans = clamp((-NdotL + 0.30) / 1.30, 0.0, 1.0);
-            vec3 transColor = baseColor * vec3(1.1, 1.3, 0.4) * backTrans * 0.70;
-            vec3 H = normalize(V + L);
-            float NdotH = max(dot(N, H), 0.0);
-            float D_wax = pow(NdotH, 18.0) * 0.25;
-            return (baseColor * (wrappedNdotL * 0.65 + 0.08) + transColor + vec3(D_wax)) * lightRadiance;
+        case 7: { // Archetype 7: Perforated Anisotropic Hex-Grate (Cross-Wire Aniso GGX + Diffraction Rim + Cavity Atten)
+            float rawNdotL = dot(N, L);
+            float wrappedNdotL = clamp((rawNdotL + 0.35) / 1.35, 0.0, 1.0);
+            float backTrans = clamp((-rawNdotL + 0.25) / 1.25, 0.0, 1.0);
+            float cav = mix(0.48, 1.0, ao);
+            vec3 meshRim = baseColor * vec3(0.45, 0.72, 0.96) * (backTrans * 0.38 * cav);
+            float ax = max(roughness * roughness * 1.6, 0.02);
+            float ay = max(roughness * roughness * 0.35, 0.008);
+            float dAniso = (TdotH * TdotH) / (ax * ax) + (BdotH * BdotH) / (ay * ay) + NdotH * NdotH;
+            float D_wire = 1.0 / (3.14159265 * ax * ay * max(dAniso * dAniso, 1e-6));
+            float diffGlint = (0.35 + 0.65 * pow(max(sin(TdotH * 14.0), 0.0), 2.0)) * D_wire * (0.04 + 0.96 * fresnel5) * 0.25;
+            vec3 wireSpec = baseColor * (diffGlint / max(4.0 * NdotV * max(NdotL, 0.05), 1e-3)) * NdotL;
+            return (baseColor * (wrappedNdotL * 0.58 + 0.08) * cav + meshRim + wireSpec) * lightRadiance;
         }
     }
     return vec3(0.0);
+}
+
+// Deterministic AAA Industrial Trim-Sheet & Sub-Panel Hardware Material Resolver
+// Preserves ~64% primary material identity (and 100% pure borosilicate glass on baseMatId == 2u)
+// while adding physical 12.5 cm bolted titanium seam frames, ceramic bushings, and 4.17 cm micro-ribs/louvers.
+uint resolveReactorBayMaterialId(uint baseMatId, vec3 hitPos, vec3 geomNormal) {
+    if (baseMatId == 2u) return 2u;
+    vec3 an = abs(geomNormal);
+    vec2 suv = (an.z >= an.x && an.z >= an.y) ? hitPos.xy
+             : ((an.x >= an.y) ? hitPos.yz : hitPos.xz);
+    vec2 panelCell = fract(suv * 8.0);
+    vec2 microCell = fract(suv * 24.0);
+    float diagStripe = fract((suv.x + suv.y) * 10.0);
+    uint cellHash = (uint(floor(suv.x * 8.0) + 1024.0) * 1664525u) ^
+                    (uint(floor(suv.y * 8.0) + 1024.0) * 1013904223u) ^
+                    (baseMatId * 374761393u);
+
+    if (panelCell.x < 0.09 || panelCell.y < 0.09) {
+        if (panelCell.x < 0.09 && panelCell.y < 0.09) {
+            return 1u;
+        }
+        return (baseMatId == 0u) ? 4u : 0u;
+    }
+    if (microCell.x < 0.16 && microCell.y > 0.22 && microCell.y < 0.78) {
+        uint sel = (cellHash >> 28u) & 3u;
+        if (sel == 0u) return 7u;
+        if (sel == 1u) return 6u;
+        if (sel == 2u) return 3u;
+        return (baseMatId == 5u) ? 0u : 5u;
+    }
+    if (microCell.y < 0.13 && ((cellHash & 1u) != 0u)) {
+        return (diagStripe < 0.35) ? 6u : ((baseMatId == 4u) ? 0u : 4u);
+    }
+    return baseMatId;
 }
 
 #if defined(BINDING_TEX_HDR_BUF) && defined(BINDING_TEX_PIX_BUF)
@@ -320,26 +416,26 @@ float rand_float_pbr(inout uint state) {
 bool traceShadowRay(vec3 origin, vec3 normal, vec3 lightDir, float maxDist) {
     if (maxDist <= 0.05) return false;
     rayQueryEXT sQuery;
-    vec3 rayOrig = origin + normal * 0.12;
+    vec3 rayOrig = origin + normal * 0.04;
     rayQueryInitializeEXT(sQuery, topLevelAS,
         gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsSkipClosestHitShaderEXT | gl_RayFlagsOpaqueEXT,
-        0xFF, rayOrig, 0.05, lightDir, maxDist);
+        0xFF, rayOrig, 0.02, lightDir, maxDist);
     while (rayQueryProceedEXT(sQuery)) {}
     return (rayQueryGetIntersectionTypeEXT(sQuery, true) != gl_RayQueryCommittedIntersectionNoneEXT);
 }
 #endif
 
 void getSceneSunParams(uint sceneType, out vec3 sunDir, out vec3 sunColor) {
-    if (sceneType == 2u) { // Indoor Atrium (Sponza)
+    if (sceneType == 2u) { // Indoor Atrium
         sunDir = normalize(vec3(0.35, 0.90, -0.25));
         sunColor = vec3(1.0, 0.95, 0.88) * 4.5;
-    } else if (sceneType == 0u) { // Showroom Studio (ToyCar)
+    } else if (sceneType == 0u) { // Showroom Studio
         sunDir = normalize(vec3(0.6, 0.8, 0.5));
         sunColor = vec3(1.0, 0.97, 0.92) * 3.5;
-    } else if (sceneType == 3u) { // Open-World Forest
-        sunDir = normalize(vec3(0.42, 0.38, 0.78));
-        sunColor = vec3(1.0, 0.94, 0.84) * 3.8;
-    } else { // Outdoor Landscape
+    } else if (sceneType == 3u) { // Zero-Day Reactor Bay (Skylight Sun)
+        sunDir = normalize(vec3(0.24, -0.22, 0.945));
+        sunColor = vec3(1.0, 0.95, 0.88) * 4.2;
+    } else {
         sunDir = normalize(vec3(0.45, 0.35, 0.82));
         sunColor = vec3(1.0, 0.95, 0.85) * 3.5;
     }
@@ -375,7 +471,7 @@ float traceAreaShadow(vec3 origin, vec3 normal, vec3 lightDir, float maxDist, fl
     vec3 bitangent = cross(lightDir, tangent);
 
     float unoccluded = 0.0;
-    vec3 rayOrig = origin + normal * 0.12;
+    vec3 rayOrig = origin + normal * 0.04;
 
     for (int i = 0; i < numSamples; ++i) {
         float phi = float(i) * 2.3999632 + rand_float_pbr(rng) * 0.5;
@@ -389,7 +485,7 @@ float traceAreaShadow(vec3 origin, vec3 normal, vec3 lightDir, float maxDist, fl
         rayQueryEXT sQuery;
         rayQueryInitializeEXT(sQuery, topLevelAS,
             gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsSkipClosestHitShaderEXT | gl_RayFlagsOpaqueEXT,
-            0xFF, rayOrig, 0.05, jitterDir, maxDist);
+            0xFF, rayOrig, 0.02, jitterDir, maxDist);
         while (rayQueryProceedEXT(sQuery)) {}
 
         if (rayQueryGetIntersectionTypeEXT(sQuery, true) == gl_RayQueryCommittedIntersectionNoneEXT) {
@@ -402,7 +498,7 @@ float traceAreaShadow(vec3 origin, vec3 normal, vec3 lightDir, float maxDist, fl
 
 float computeRTAO(vec3 origin, vec3 normal, inout uint rng, int numSamples, float maxDist) {
     float occlusion = 0.0;
-    vec3 rayOrig = origin + normal * 0.08;
+    vec3 rayOrig = origin + normal * 0.04;
 
     vec3 up = abs(normal.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
     vec3 tangent = normalize(cross(up, normal));
@@ -419,7 +515,7 @@ float computeRTAO(vec3 origin, vec3 normal, inout uint rng, int numSamples, floa
         rayQueryEXT aoQuery;
         rayQueryInitializeEXT(aoQuery, topLevelAS,
             gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsSkipClosestHitShaderEXT | gl_RayFlagsOpaqueEXT,
-            0xFF, rayOrig, 0.02, aoDir, maxDist);
+            0xFF, rayOrig, 0.015, aoDir, maxDist);
         while (rayQueryProceedEXT(aoQuery)) {}
 
         if (rayQueryGetIntersectionTypeEXT(aoQuery, true) != gl_RayQueryCommittedIntersectionNoneEXT) {
@@ -494,204 +590,12 @@ vec3 evaluateGltfPbrInternal(
     float directRough = roughness;
     float directMetal = metallic;
     uint directArch = arch;
-    if (usePrecomputedVis && arch == 4u) {
-        float rustNoise = rustFBM3D_common(hitPos * 0.05);
-        float rustFine = noise3D_common(hitPos * 0.2) * 0.5 + 0.5;
-        float rustVal = rustNoise * 0.80 + rustFine * 0.20;
-        float rustMask = smoothstep(0.44, 0.54, rustVal);
-        vec3 rustAlbedo = mix(vec3(0.85, 0.38, 0.12), vec3(0.35, 0.16, 0.08), rustFine);
-        directColor = mix(baseColor, rustAlbedo, rustMask);
-        directRough = mix(roughness, 0.85, rustMask);
-        directMetal = mix(metallic, 0.0, rustMask);
-        directArch = 0u;
-    }
     vec3 totalRadiance = vec3(0.0);
 
-    if (sceneType == 2u) {
-        // Sponza Indoor Atrium: Direct Sun Streaming through vaulted ceiling with Area Light Soft Shadow
-        vec3 sunDir = normalize(vec3(0.35, 0.90, -0.25));
-        float sunShadow = 1.0;
-        if (enableShadows) {
-            if (usePrecomputedVis) {
-                sunShadow = precomputedVis.x;
-            }
-#ifndef PBR_NO_RAY_QUERY
-            else if (dot(geomNormal, sunDir) > 0.0) {
-                sunShadow = traceAreaShadow(hitPos, geomNormal, sunDir, 10000.0, 0.035, rng, 4);
-            }
-#endif
-        }
-        vec3 sunRadiance = vec3(1.0, 0.95, 0.88) * 4.5 * sunShadow;
-
-        // Warm Colonnade Lanterns
-        const vec3 lightPos[3] = vec3[3](
-            vec3(0.0, 450.0, 0.0),
-            vec3(-650.0, 250.0, 0.0),
-            vec3(650.0, 250.0, 0.0)
-        );
-        const vec3 lightColor[3] = vec3[3](
-            vec3(1.0, 0.85, 0.60) * 2.2,
-            vec3(1.0, 0.80, 0.50) * 1.8,
-            vec3(1.0, 0.80, 0.50) * 1.8
-        );
-        if (usePrecomputedVis) {
-            for (int i = 0; i < 4; ++i) {
-                vec3 L;
-                vec3 lRad;
-                if (i == 0) {
-                    L = sunDir;
-                    lRad = sunRadiance;
-                } else {
-                    vec3 toL = lightPos[i - 1] - hitPos;
-                    float dist2 = dot(toL, toL);
-                    L = normalize(toL);
-                    float atten = 1.0 / (1.0 + 0.000004 * dist2);
-                    lRad = lightColor[i - 1] * atten;
-                }
-                totalRadiance += evaluateMaterialArchetypeDirect(directArch, hitPos, directColor, directRough, directMetal, mat.ior, N, V, L, lRad, ao);
-            }
-        } else {
-            totalRadiance += evaluateMaterialArchetypeDirect(directArch, hitPos, directColor, directRough, directMetal, mat.ior, N, V, sunDir, sunRadiance, ao);
-            for (int i = 0; i < 3; ++i) {
-                vec3 toL = lightPos[i] - hitPos;
-                float dist2 = dot(toL, toL);
-                vec3 L = normalize(toL);
-                float atten = 1.0 / (1.0 + 0.000004 * dist2);
-                totalRadiance += evaluateMaterialArchetypeDirect(directArch, hitPos, directColor, directRough, directMetal, mat.ior, N, V, L, lightColor[i] * atten, ao);
-            }
-        }
-
-        // Ray-Traced Ambient Occlusion (RTAO)
-        float rtao = 1.0;
-        if (enableShadows) {
-            if (usePrecomputedVis) {
-                rtao = precomputedVis.y;
-            }
-#ifndef PBR_NO_RAY_QUERY
-            else {
-                rtao = computeRTAO(hitPos, geomNormal, rng, 4, 350.0);
-            }
-#endif
-        }
-        ao *= rtao;
-        if (directOnly) {
-            return totalRadiance * ao + emissive;
-        }
-
-        // Vaulted Atrium Sky Ambient & Floor Bounce
-        vec3 skyAmb = mix(vec3(0.12, 0.15, 0.22), vec3(0.70, 0.78, 0.95), clamp(N.y * 0.5 + 0.5, 0.0, 1.0)) * 0.9 * ao;
-        vec3 diffAmb = (1.0 - metallic) * baseColor * skyAmb;
-        totalRadiance += diffAmb;
-
-        // Specular IBL Approximation
-        vec3 R = reflect(inDir, N);
-        vec3 F0 = mix(vec3(0.04), baseColor, metallic);
-        vec3 F_env = F0 + (max(vec3(1.0 - roughness), F0) - F0) * pow(clamp(1.0 - max(dot(N, V), 0.0), 0.0, 1.0), 5.0);
-        vec3 specEnv = mix(vec3(0.12, 0.15, 0.20), vec3(0.80, 0.88, 1.0), clamp(R.y * 0.5 + 0.5, 0.0, 1.0)) * F_env * (1.0 - roughness * 0.7) * 0.6 * ao;
-        totalRadiance += specEnv;
-    } else if (sceneType == 0u) {
-        // ToyCar Automotive Showroom: 3-Point Studio Softbox Rig with Contact Grounding
-        const vec3 studioDir[3] = vec3[3](
-            normalize(vec3(0.6, 0.8, 0.5)),
-            normalize(vec3(-0.7, 0.5, 0.4)),
-            normalize(vec3(-0.2, 0.4, -0.9))
-        );
-        const vec3 studioColor[3] = vec3[3](
-            vec3(1.0, 0.97, 0.92) * 3.8,
-            vec3(0.75, 0.88, 1.0) * 1.8,
-            vec3(1.0, 1.0, 1.0) * 2.5
-        );
-
-        if (arch == 2u) {
-            // Automotive Dielectric Safety Glass (Transmission + Cauchy Chromatic Dispersion)
-            vec3 cabinInterior = vec3(0.02, 0.025, 0.03);
-            vec3 R = reflect(inDir, N);
-            vec3 refrDirR = refract(inDir, N, 1.0 / (mat.ior - 0.02));
-            vec3 refrDirG = refract(inDir, N, 1.0 / mat.ior);
-            vec3 refrDirB = refract(inDir, N, 1.0 / (mat.ior + 0.02));
-            if (length(refrDirG) < 0.01) { refrDirR = R; refrDirG = R; refrDirB = R; }
-
-            vec3 envRefl = mix(vec3(0.12, 0.13, 0.16), vec3(0.40, 0.44, 0.50), clamp(R.y * 1.5, 0.0, 1.0));
-            vec3 envRefr;
-            envRefr.r = mix(vec3(0.06, 0.07, 0.09), vec3(0.18, 0.20, 0.24), clamp(refrDirR.y * 1.5, 0.0, 1.0)).r;
-            envRefr.g = mix(vec3(0.06, 0.07, 0.09), vec3(0.18, 0.20, 0.24), clamp(refrDirG.y * 1.5, 0.0, 1.0)).g;
-            envRefr.b = mix(vec3(0.06, 0.07, 0.09), vec3(0.18, 0.20, 0.24), clamp(refrDirB.y * 1.5, 0.0, 1.0)).b;
-
-            vec3 glassTint = vec3(0.88, 0.92, 0.94);
-            vec3 transmittedLight = mix(cabinInterior, envRefr, 0.35) * glassTint;
-            float F = 0.04 + 0.96 * pow(clamp(1.0 - max(dot(N, V), 0.0), 0.0, 1.0), 5.0);
-
-            vec3 specLights = vec3(0.0);
-            for (int i = 0; i < 3; ++i) {
-                specLights += evaluateMaterialArchetypeDirect(2u, hitPos, baseColor, roughness, metallic, mat.ior, N, V, studioDir[i], studioColor[i], ao);
-            }
-            if (directOnly) {
-                return specLights + cabinInterior + emissive;
-            }
-            return mix(transmittedLight, envRefl, F) + specLights;
-        }
-
-        // Studio key light with Area Light Soft Shadow
-        float keyShadow = 1.0;
-        if (enableShadows) {
-            if (usePrecomputedVis) {
-                keyShadow = precomputedVis.x;
-            }
-#ifndef PBR_NO_RAY_QUERY
-            else if (dot(geomNormal, studioDir[0]) > 0.0) {
-                keyShadow = traceAreaShadow(hitPos, geomNormal, studioDir[0], 5000.0, 0.065, rng, 4);
-            }
-#endif
-        }
-        if (usePrecomputedVis) {
-            for (int i = 0; i < 3; ++i) {
-                vec3 lCol = (i == 0) ? (studioColor[0] * keyShadow) : studioColor[i];
-                totalRadiance += evaluateMaterialArchetypeDirect(directArch, hitPos, directColor, directRough, directMetal, mat.ior, N, V, studioDir[i], lCol, ao);
-            }
-        } else {
-            totalRadiance += evaluateMaterialArchetypeDirect(directArch, hitPos, directColor, directRough, directMetal, mat.ior, N, V, studioDir[0], studioColor[0] * keyShadow, ao);
-            totalRadiance += evaluateMaterialArchetypeDirect(directArch, hitPos, directColor, directRough, directMetal, mat.ior, N, V, studioDir[1], studioColor[1], ao);
-            totalRadiance += evaluateMaterialArchetypeDirect(directArch, hitPos, directColor, directRough, directMetal, mat.ior, N, V, studioDir[2], studioColor[2], ao);
-        }
-
-        // Contact proximity shadow under vehicle chassis onto cloth pedestal
-        if (enableShadows && hitPos.y < 35.0 && hitPos.y > 0.0) {
-            float contactOcc = mix(0.35, 1.0, clamp(hitPos.y / 35.0, 0.0, 1.0));
-            ao *= contactOcc;
-        }
-
-        // Studio RTAO (Ray-Traced Ambient Occlusion)
-        float rtao = 1.0;
-        if (enableShadows) {
-            if (usePrecomputedVis) {
-                rtao = precomputedVis.y;
-            }
-#ifndef PBR_NO_RAY_QUERY
-            else {
-                rtao = computeRTAO(hitPos, geomNormal, rng, 4, 30.0);
-            }
-#endif
-        }
-        ao *= rtao;
-        if (directOnly) {
-            return totalRadiance + emissive;
-        }
-
-        // Studio Floor & Ceiling Ambient
-        vec3 studioAmb = mix(vec3(0.06, 0.06, 0.07), vec3(0.25, 0.26, 0.28), clamp(N.y * 0.5 + 0.5, 0.0, 1.0)) * ao;
-        totalRadiance += (1.0 - metallic) * baseColor * studioAmb;
-
-        // Automotive Clearcoat & Metallic Reflection
-        vec3 R = reflect(inDir, N);
-        vec3 F0 = mix(vec3(0.04), baseColor, metallic);
-        vec3 F_env = F0 + (max(vec3(1.0 - roughness), F0) - F0) * pow(clamp(1.0 - max(dot(N, V), 0.0), 0.0, 1.0), 5.0);
-        vec3 envRefl = mix(vec3(0.12, 0.13, 0.16), vec3(0.24, 0.26, 0.30), clamp(R.y * 1.5, 0.0, 1.0));
-        vec3 specEnv = envRefl * F_env * (1.0 - roughness * 0.5) * ao;
-        totalRadiance += specEnv;
-    } else if (sceneType == 3u) {
-        // AAA Open-World Alpine Forest: Physical Outdoor Sun, Sky, Nature PBR & Water Refraction
-        vec3 sunDir = normalize(vec3(0.42, 0.38, 0.78));
-        vec3 sunColor = vec3(1.0, 0.94, 0.84) * 3.8;
+    if (sceneType == 3u) {
+        // Zero-Day Reactor Bay: Overhead Skylight Sun + 3 Hangar Point Lights + Refractive Armored Glass
+        vec3 sunDir = normalize(vec3(0.24, -0.22, 0.945));
+        vec3 sunColor = vec3(1.0, 0.95, 0.88) * 4.2;
 
         float sunShadow = 1.0;
         if (enableShadows) {
@@ -700,12 +604,12 @@ vec3 evaluateGltfPbrInternal(
             }
 #ifndef PBR_NO_RAY_QUERY
             else if (dot(geomNormal, sunDir) > 0.0) {
-                sunShadow = traceAreaShadow(hitPos, geomNormal, sunDir, 3500.0, 0.045, rng, 4);
+                sunShadow = traceAreaShadow(hitPos, geomNormal, sunDir, 2500.0, 0.040, rng, 4);
             }
 #endif
         }
 
-        // RTAO (Ray-Traced Ambient Occlusion) under canopy and crevices
+        // RTAO (Ray-Traced Ambient Occlusion) inside industrial bay corners & catwalk structures
         float rtao = 1.0;
         if (enableShadows) {
             if (usePrecomputedVis) {
@@ -713,136 +617,165 @@ vec3 evaluateGltfPbrInternal(
             }
 #ifndef PBR_NO_RAY_QUERY
             else {
-                rtao = computeRTAO(hitPos, geomNormal, rng, 4, 35.0);
+                rtao = computeRTAO(hitPos, geomNormal, rng, 4, 6.5);
             }
 #endif
         }
         ao *= rtao;
-        if (directOnly) {
-            return evaluateCookTorranceGGX(baseColor, roughness, metallic, N, V, sunDir, sunColor * sunShadow) * ao + emissive;
-        }
 
-        vec3 skyRadiance = evalOutdoorSky(N) * 0.45 * ao;
+        const vec3 rbLightPos[15] = vec3[15](
+            vec3( 5.8,   5.2,  7.6),
+            vec3(-5.8,   5.2,  7.6),
+            vec3( 0.0,  -0.6,  9.2),
+            vec3( 0.0,  11.0,  6.0),
+            vec3(-11.5, -5.5,  7.2),
+            vec3( 11.5, -5.5,  7.2),
+            vec3(-11.5, 12.5,  8.5),
+            vec3( 11.5, 12.5,  8.5),
+            vec3( 12.5,  2.5,  8.0),
+            vec3(-14.0,  3.0,  7.8),
+            vec3(  0.0, 24.0,  9.5),
+            vec3( -4.3, -12.0, 1.4),
+            vec3(  4.3, -12.0, 1.4),
+            vec3( -8.5, -16.5, 5.0),
+            vec3(  8.5, -16.5, 5.0)
+        );
+        const vec3 rbLightCol[15] = vec3[15](
+            vec3(0.18, 0.82, 1.00) * 18.0,
+            vec3(0.18, 0.82, 1.00) * 18.0,
+            vec3(0.22, 0.86, 1.00) * 16.0,
+            vec3(0.22, 0.86, 1.00) * 16.0,
+            vec3(1.00, 0.56, 0.16) * 16.0,
+            vec3(1.00, 0.56, 0.16) * 16.0,
+            vec3(1.00, 0.58, 0.20) * 15.0,
+            vec3(1.00, 0.58, 0.20) * 15.0,
+            vec3(0.42, 0.92, 0.72) * 15.0,
+            vec3(0.42, 0.92, 0.72) * 15.0,
+            vec3(0.45, 0.90, 0.78) * 14.0,
+            vec3(0.26, 0.78, 0.98) * 12.0,
+            vec3(0.26, 0.78, 0.98) * 12.0,
+            vec3(1.00, 0.72, 0.38) * 13.0,
+            vec3(1.00, 0.72, 0.38) * 13.0
+        );
+
+        vec3 envAmb = evalReactorEnvironment(N) * ao;
 
         if (!enableShadows) {
             // Pure material-shading microbenchmark (mode 4 MK / mode 1 DGC):
-            // exercise all 8 divergent BSDF archetypes across sun + canopy/sky fill lights
-            // without altering shadow-enabled Full Frame or Path Tracing renders.
-            vec3 skyFillDir1 = normalize(vec3(-0.6, 0.5, 0.6));
-            vec3 skyFillDir2 = normalize(vec3(0.2, -0.7, 0.5));
-            if (arch == 2u) {
-                vec3 reflSky = evalOutdoorSky(reflect(inDir, N));
-                float F_w = 0.02 + 0.98 * pow(clamp(1.0 - max(dot(N, V), 0.0), 0.0, 1.0), 5.0);
-                vec3 specLights = evaluateMaterialArchetypeDirect(2u, hitPos, directColor, directRough, directMetal, mat.ior, N, V, sunDir, sunColor, ao)
-                                + evaluateMaterialArchetypeDirect(2u, hitPos, directColor, directRough, directMetal, mat.ior, N, V, skyFillDir1, skyRadiance, ao)
-                                + evaluateMaterialArchetypeDirect(2u, hitPos, directColor, directRough, directMetal, mat.ior, N, V, skyFillDir2, skyRadiance * 0.5, ao);
-                return mix(vec3(0.02, 0.08, 0.12), reflSky, F_w) + specLights + emissive;
+            // exercise all 8 divergent BSDF archetypes across 16 Reactor Bay lights
+            vec3 reflEnv = evalReactorEnvironment(reflect(inDir, N));
+            vec3 shadeLights = vec3(0.0);
+#ifdef GL_EXT_control_flow_attributes
+            [[dont_unroll]]
+#endif
+            for (uint li = 0u; li < 16u; ++li) {
+                vec3 lDir;
+                vec3 lRad;
+                if (li == 0u) {
+                    lDir = sunDir;
+                    lRad = sunColor;
+                } else {
+                    vec3 toL = rbLightPos[li - 1u] - hitPos;
+                    float dist2 = max(dot(toL, toL), 0.25);
+                    lDir = toL * inversesqrt(dist2);
+                    lRad = rbLightCol[li - 1u] / (1.0 + 0.022 * dist2);
+                }
+                shadeLights += evaluateMaterialArchetypeDirect(directArch, hitPos, directColor, directRough, directMetal, mat.ior, N, V, lDir, lRad, ao);
             }
-            totalRadiance += evaluateMaterialArchetypeDirect(directArch, hitPos, directColor, directRough, directMetal, mat.ior, N, V, sunDir, sunColor, ao);
-            totalRadiance += evaluateMaterialArchetypeDirect(directArch, hitPos, directColor, directRough, directMetal, mat.ior, N, V, skyFillDir1, skyRadiance, ao);
-            totalRadiance += evaluateMaterialArchetypeDirect(directArch, hitPos, directColor, directRough, directMetal, mat.ior, N, V, skyFillDir2, skyRadiance * 0.5, ao);
-            return totalRadiance + baseColor * skyRadiance + emissive;
+            if (arch == 2u) {
+                float F_g = 0.04 + 0.96 * pow(clamp(1.0 - max(dot(N, V), 0.0), 0.0, 1.0), 5.0);
+                return mix(vec3(0.03, 0.11, 0.16), reflEnv, F_g) + shadeLights + emissive;
+            }
+            return shadeLights + (1.0 - directMetal) * directColor * envAmb * 0.55 + emissive;
         }
 
         if (mat.transmissionFactor > 0.80) {
-            // High-transmission water surface (transmissionFactor > 0.80): Snell's Law Refraction & Riverbed Bathymetry
-            vec2 waveUV = hitPos.xy * 0.08;
-            float w1 = sin(waveUV.x * 3.2 + waveUV.y * 2.1) * 0.025;
-            float w2 = cos(waveUV.x * 6.5 - waveUV.y * 4.2) * 0.015;
-            vec3 waterNorm = normalize(N + vec3(w1, w2, 0.0));
+            // Refractive Armored Control-Booth Glass & Coolant Covers (Snell + Beer-Lambert)
+            vec3 refrDir = refract(inDir, N, 1.0 / max(mat.ior, 1.01));
+            if (length(refrDir) < 0.01) refrDir = reflect(inDir, N);
 
-            vec3 refrDir = refract(inDir, waterNorm, 1.0 / 1.333);
-            if (length(refrDir) < 0.01) refrDir = reflect(inDir, waterNorm);
-
-            vec3 riverbedColor;
-            if (enableShadows) {
-                if (usePrecomputedVis) {
-                    if (precomputedVis.z >= 0.0) {
-                        float depth = precomputedVis.z;
-                        vec3 bedBase = vec3(0.18, 0.22, 0.20); // Submerged river stones
-                        vec3 waterExtinction = exp(-vec3(0.15, 0.04, 0.02) * depth * 1.5);
-                        riverbedColor = bedBase * waterExtinction * (sunColor * 0.5 * sunShadow + skyRadiance);
-                    } else {
-                        riverbedColor = vec3(0.02, 0.08, 0.12);
-                    }
-                }
+            vec3 transmittedCol = vec3(0.03, 0.10, 0.14);
+            float refrDepth = -1.0;
+            if (usePrecomputedVis) {
+                refrDepth = precomputedVis.z;
+            }
 #ifndef PBR_NO_RAY_QUERY
-                else {
-                    rayQueryEXT waterQuery;
-                    rayQueryInitializeEXT(waterQuery, topLevelAS, gl_RayFlagsOpaqueEXT, 0xFF, hitPos + refrDir * 0.05, 0.001, refrDir, 25.0);
-                    while (rayQueryProceedEXT(waterQuery)) {}
-
-                    if (rayQueryGetIntersectionTypeEXT(waterQuery, true) != 0) {
-                        float depth = rayQueryGetIntersectionTEXT(waterQuery, true);
-                        vec3 bedBase = vec3(0.18, 0.22, 0.20); // Submerged river stones
-                        vec3 waterExtinction = exp(-vec3(0.15, 0.04, 0.02) * depth * 1.5);
-                        riverbedColor = bedBase * waterExtinction * (sunColor * 0.5 * sunShadow + skyRadiance);
-                    } else {
-                        riverbedColor = vec3(0.02, 0.08, 0.12);
-                    }
+            else {
+                rayQueryEXT glassQuery;
+                rayQueryInitializeEXT(glassQuery, topLevelAS, gl_RayFlagsOpaqueEXT, 0xFF, hitPos + refrDir * 0.05, 0.001, refrDir, 25.0);
+                while (rayQueryProceedEXT(glassQuery)) {}
+                if (rayQueryGetIntersectionTypeEXT(glassQuery, true) != 0) {
+                    refrDepth = rayQueryGetIntersectionTEXT(glassQuery, true);
                 }
-#else
-                else {
-                    riverbedColor = vec3(0.02, 0.08, 0.12);
-                }
+            }
 #endif
-            } else {
-                riverbedColor = vec3(0.02, 0.08, 0.12);
+            if (refrDepth >= 0.0) {
+                vec3 glassExtinction = exp(-vec3(0.18, 0.05, 0.03) * clamp(refrDepth, 0.0, 20.0) * 0.85);
+                vec3 interiorBase = mix(vec3(0.10, 0.18, 0.24), vec3(0.22, 0.42, 0.54), clamp(1.0 - refrDepth * 0.08, 0.0, 1.0));
+                transmittedCol = interiorBase * glassExtinction * (sunColor * 0.35 * sunShadow + vec3(0.35, 0.55, 0.72));
             }
 
-            float F_w = 0.02 + 0.98 * pow(clamp(1.0 - max(dot(waterNorm, V), 0.0), 0.0, 1.0), 5.0);
-            vec3 reflSky = evalOutdoorSky(reflect(inDir, waterNorm));
-            vec3 halfVec = normalize(V + sunDir);
-            float sunGlint = pow(max(dot(waterNorm, halfVec), 0.0), 180.0) * 12.0 * sunShadow;
-            totalRadiance = mix(riverbedColor, reflSky, F_w) + sunColor * sunGlint;
-        } else if (mat.transmissionFactor > 0.25) {
-            // Translucent foliage / canopy leaves & needles (0.25 < transmissionFactor <= 0.80): two-sided thin-surface transmission
-            float backNdotL = max(dot(-N, sunDir), 0.0);
-            vec3 transmission = baseColor * vec3(1.1, 1.4, 0.6) * backNdotL * sunColor * sunShadow * 0.85;
-            float F_sheen = pow(clamp(1.0 - max(dot(N, V), 0.0), 0.0, 1.0), 4.0) * 0.45;
-            totalRadiance = evaluateCookTorranceGGX(baseColor, roughness, metallic, N, V, sunDir, sunColor * sunShadow)
-                          + transmission + vec3(F_sheen) * skyRadiance + baseColor * skyRadiance;
-        } else if (roughness < 0.35 && baseColor.r > 0.85) {
-            // Bright low-roughness surfaces (Alpine Snow & Frost): Crystalline Micro-Glints
-            vec3 halfVec = normalize(V + sunDir);
-            float NdotH = max(dot(N, halfVec), 0.0);
-            float glint = pow(NdotH, 120.0) * 8.0 * sunShadow;
-            totalRadiance = evaluateCookTorranceGGX(baseColor, 0.35, 0.0, N, V, sunDir, sunColor * sunShadow)
-                          + vec3(glint) * sunColor + baseColor * skyRadiance;
+            vec3 specLights = vec3(0.0);
+#ifdef GL_EXT_control_flow_attributes
+            [[dont_unroll]]
+#endif
+            for (uint li = 0u; li < 16u; ++li) {
+                vec3 lDir;
+                vec3 lRad;
+                if (li == 0u) {
+                    lDir = sunDir;
+                    lRad = sunColor * sunShadow;
+                } else {
+                    vec3 toL = rbLightPos[li - 1u] - hitPos;
+                    float dist2 = max(dot(toL, toL), 0.25);
+                    lDir = toL * inversesqrt(dist2);
+                    lRad = rbLightCol[li - 1u] / (1.0 + 0.022 * dist2);
+                }
+                specLights += evaluateMaterialArchetypeDirect(2u, hitPos, directColor, directRough, directMetal, mat.ior, N, V, lDir, lRad, ao);
+            }
+            if (directOnly) {
+                return specLights + emissive;
+            }
+            float F_g = 0.04 + 0.96 * pow(clamp(1.0 - max(dot(N, V), 0.0), 0.0, 1.0), 5.0);
+            vec3 reflEnv = evalReactorEnvironment(reflect(inDir, N));
+            totalRadiance = mix(transmittedCol, reflEnv, F_g) + specLights;
         } else {
-            // Opaque natural terrain & woodland surfaces (Bark, Granite Rock, Dirt, Grass, Timber)
+            // Opaque Reactor Bay PBR (Titanium, Ceramic/Cryo, MLI Foil, Ferrocrete, Coolant Coils, Clearcoat, Perf Grate)
             vec3 effColor = baseColor;
             float effRough = roughness;
-            // Moisture darkening on dirt/rocks near waterline
-            if (hitPos.z <= 2.2 && baseColor.g < 0.40) {
-                float wetness = clamp(1.0 - hitPos.z / 2.2, 0.0, 1.0);
-                effColor = mix(effColor, effColor * 0.55, wetness);
-                effRough = mix(effRough, 0.15, wetness);
+            vec2 fuv = hitPos.xy * 0.20;
+            float panelVar = sin(fuv.x * 2.7 + fuv.y * 1.9) * cos(fuv.x * 1.5 - fuv.y * 3.1) * 0.08;
+            effColor = clamp(effColor * (1.0 + panelVar), 0.0, 1.0);
+
+#ifdef GL_EXT_control_flow_attributes
+            [[dont_unroll]]
+#endif
+            for (uint li = 0u; li < 16u; ++li) {
+                vec3 lDir;
+                vec3 lRad;
+                if (li == 0u) {
+                    lDir = sunDir;
+                    lRad = sunColor * sunShadow;
+                } else {
+                    vec3 toL = rbLightPos[li - 1u] - hitPos;
+                    float dist2 = max(dot(toL, toL), 0.25);
+                    lDir = toL * inversesqrt(dist2);
+                    lRad = rbLightCol[li - 1u] / (1.0 + 0.022 * dist2);
+                }
+                totalRadiance += evaluateMaterialArchetypeDirect(directArch, hitPos, effColor, effRough, directMetal, mat.ior, N, V, lDir, lRad, ao);
             }
-            // Multi-frequency natural procedural surface variation
-            vec2 fuv = hitPos.xy * 0.15;
-            float texVar = sin(fuv.x * 3.7 + fuv.y * 2.3) * cos(fuv.x * 1.9 - fuv.y * 4.1) * 0.12;
-            effColor = clamp(effColor * (1.0 + texVar), 0.0, 1.0);
 
-            totalRadiance = evaluateCookTorranceGGX(effColor, effRough, metallic, N, V, sunDir, sunColor * sunShadow)
-                          + effColor * skyRadiance;
-        }
+            if (directOnly) {
+                return totalRadiance * ao + emissive;
+            }
 
-        if (directOnly) {
-            return totalRadiance + emissive;
+            totalRadiance += (1.0 - directMetal) * effColor * envAmb * 0.55;
+            vec3 R = reflect(inDir, N);
+            vec3 F0 = mix(vec3(0.04), effColor, directMetal);
+            vec3 F_env = F0 + (max(vec3(1.0 - effRough), F0) - F0) * pow(clamp(1.0 - max(dot(N, V), 0.0), 0.0, 1.0), 5.0);
+            vec3 specEnv = evalReactorEnvironment(R) * F_env * (1.0 - effRough * 0.55) * 0.65 * ao;
+            totalRadiance += specEnv;
         }
-
-        // Atmospheric Aerial Perspective Haze
-        vec3 camPos = vec3(-35.0, -50.0, 20.0);
-        float camDist = length(hitPos - camPos);
-        vec3 rayDirToHit = (camDist > 0.001) ? ((hitPos - camPos) / camDist) : inDir;
-        vec3 skyHorizon = evalOutdoorSky(rayDirToHit);
-        float hazeFactor = clamp(1.0 - exp(-camDist * 0.00065), 0.0, 1.0);
-        if (camDist > 1400.0) {
-            float fadeToEnd = smoothstep(1400.0, 2200.0, camDist);
-            hazeFactor = mix(hazeFactor, 1.0, fadeToEnd);
-        }
-        totalRadiance = mix(totalRadiance, skyHorizon, hazeFactor);
     }
 
     totalRadiance += emissive;
@@ -943,6 +876,8 @@ void getMultiLight(uint idx, uint totalLights, uint sceneType, out vec3 lightDir
             lightDir = normalize(vec3(0.35, 0.90, -0.25));
         } else if (sceneType == 0u) {
             lightDir = normalize(vec3(0.6, 0.8, 0.5));
+        } else if (sceneType == 3u) {
+            lightDir = normalize(vec3(0.24, -0.22, 0.945));
         } else {
             lightDir = normalize(vec3(0.45, 0.35, 0.82));
         }
@@ -966,8 +901,8 @@ void getMultiLight(uint idx, uint totalLights, uint sceneType, out vec3 lightDir
         lightDir = normalize(posOct * octSign);
 
         float t = float(idx) / float(totalLights);
-        vec3 col = mix(vec3(1.0, 0.88, 0.70), vec3(0.75, 0.88, 1.0), fract(t * 5.0));
-        lightColor = col * (12.0 / float(totalLights));
+        vec3 col = mix(vec3(1.0, 0.74, 0.42), vec3(0.32, 0.82, 1.0), fract(t * 5.0));
+        lightColor = col * (18.0 / float(totalLights));
     }
 }
 

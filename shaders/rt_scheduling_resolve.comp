@@ -88,7 +88,7 @@ void main() {
     if (rpc.dgcMode == 1u) {
         bool isActive = false;
         uint count = 0u;
-        if (id < 16u) {
+        if (id < 8u) {
             count = worklist.queueCounters[Q_SNAPSHOT_IDX(id)];
             isActive = (count > 0u);
             dgcData.templates[id].cmdX = (count + 31u) / 32u;

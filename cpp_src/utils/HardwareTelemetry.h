@@ -67,6 +67,8 @@ struct GpuContentionInfo {
 class HardwareTelemetry {
 public:
   static GpuTelemetryData queryGpu(uint32_t deviceIndex);
+  // Fast instantaneous power/energy sensor sample without WDDM PDH Sleep delays.
+  static GpuTelemetryData queryGpuPowerSample(uint32_t deviceIndex);
   static std::vector<GpuTelemetryData> queryAllGpus();
   static GpuContentionInfo checkContention(uint32_t deviceIndex);
 

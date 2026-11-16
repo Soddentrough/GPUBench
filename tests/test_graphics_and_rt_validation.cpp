@@ -169,6 +169,11 @@ TEST_CASE(GraphicsAndRayTracingValidation, RayRawTraversal_PositiveAndNegativeVa
   ctx->waitIdle();
   ASSERT_TRUE(bench.ValidateResults(1));
 
+  // Config 2 (Software Slab Loop - 64-Layer Procedural AABB Grid)
+  bench.Run(2);
+  ctx->waitIdle();
+  ASSERT_TRUE(bench.ValidateResults(2));
+
   // Negative validation: zero out resultBuffer
   std::vector<uint32_t> zeroHits(1024, 0);
   ctx->writeBuffer(bench.resultBuffer, 0, zeroHits.size() * sizeof(uint32_t), zeroHits.data());
@@ -176,6 +181,7 @@ TEST_CASE(GraphicsAndRayTracingValidation, RayRawTraversal_PositiveAndNegativeVa
 
   ASSERT_FALSE(bench.ValidateResults(0));
   ASSERT_FALSE(bench.ValidateResults(1));
+  ASSERT_FALSE(bench.ValidateResults(2));
 
   bench.Teardown();
 }
@@ -340,7 +346,7 @@ TEST_CASE(GraphicsAndRayTracingValidation, RayScheduling_PositiveAndNegativeVali
   std::string kdir = KernelPath::find();
   ASSERT_FALSE(kdir.empty());
 
-  RaySchedulingBench bench(RaySchedulingBench::SceneType::Showroom);
+  RaySchedulingBench bench(RaySchedulingBench::SceneType::ReactorBay);
   DeviceInfo info = ctx->getCurrentDeviceInfo();
   if (!bench.IsSupported(info, ctx.get())) {
     std::cout << "[SKIP] RayScheduling not supported" << std::endl;
@@ -353,9 +359,9 @@ TEST_CASE(GraphicsAndRayTracingValidation, RayScheduling_PositiveAndNegativeVali
   ctx->waitIdle();
   ASSERT_TRUE(bench.ValidateResults(0));
 
-  // Verify non-zero worklist compaction for Incoherent GI (Config 8, mode 2),
-  // Primary Rays G-Buffer (Config 18, mode 9), and Single Light (Config 31, mode 8)
-  for (uint32_t cfg : {8u, 18u, 31u}) {
+  // Verify non-zero worklist compaction for Path Tracing (Config 5),
+  // Full Frame (Config 8), and 128 Lights (Config 23)
+  for (uint32_t cfg : {5u, 8u, 23u}) {
     if (!bench.unsupportedConfig[cfg]) {
       bench.Run(cfg);
       ctx->waitIdle();
@@ -366,8 +372,13 @@ TEST_CASE(GraphicsAndRayTracingValidation, RayScheduling_PositiveAndNegativeVali
       for (uint32_t q = 0; q < 16; ++q) {
         totalCompacted += snaps[q];
       }
-      std::cout << "[Showroom cfg " << cfg << " compacted=" << totalCompacted << "] ";
+      std::cout << "[ReactorBay cfg " << cfg << " compacted=" << totalCompacted << "] ";
       ASSERT_TRUE(totalCompacted > 0);
+      if (cfg == 8u && bench.IsDGCAvailable()) {
+        uint32_t activeSeqs = 0;
+        ctx->readBuffer(bench.dgcSequenceCountBuffer, 0, sizeof(activeSeqs), &activeSeqs);
+        ASSERT_TRUE(activeSeqs >= 4u && activeSeqs <= 8u);
+      }
     }
   }
 
@@ -389,34 +400,10 @@ TEST_CASE(GraphicsAndRayTracingValidation, RayScheduling_PositiveAndNegativeVali
   ctx->waitIdle();
   ASSERT_FALSE(bench.ValidateResults(0));
 
-  bench.Teardown();
+  // Negative validation D: Out-of-bounds config index
+  ASSERT_FALSE(bench.ValidateResults(24));
 
-  // Also verify IndoorAtrium, OutdoorLandscape, and AAAOutdoorForest worklist compaction
-  const std::pair<RaySchedulingBench::SceneType, const char *> extraScenes[] = {
-      {RaySchedulingBench::SceneType::IndoorAtrium, "Indoor"},
-      {RaySchedulingBench::SceneType::OutdoorLandscape, "Outdoor"},
-      {RaySchedulingBench::SceneType::AAAOutdoorForest, "Forest"},
-  };
-  for (const auto &sc : extraScenes) {
-    RaySchedulingBench sceneBench(sc.first);
-    sceneBench.Setup(*ctx, kdir);
-    for (uint32_t cfg : {8u, 18u, 31u}) {
-      if (!sceneBench.unsupportedConfig[cfg]) {
-        sceneBench.Run(cfg);
-        ctx->waitIdle();
-        ASSERT_TRUE(sceneBench.ValidateResults(cfg));
-        uint32_t snaps[16] = {0};
-        ctx->readBuffer(sceneBench.workListBuffer, 2064u * sizeof(uint32_t), sizeof(snaps), snaps);
-        uint64_t totalCompacted = 0;
-        for (uint32_t q = 0; q < 16; ++q) {
-          totalCompacted += snaps[q];
-        }
-        std::cout << "[" << sc.second << " cfg " << cfg << " compacted=" << totalCompacted << "] ";
-        ASSERT_TRUE(totalCompacted > 0);
-      }
-    }
-    sceneBench.Teardown();
-  }
+  bench.Teardown();
 }
 
 // ============================================================================

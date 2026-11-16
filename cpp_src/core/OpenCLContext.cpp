@@ -759,7 +759,7 @@ void OpenCLContext::dispatch(ComputeKernel kernel, uint32_t grid_x,
                                 (size_t)grid_z * block_z};
   size_t local_work_size[3] = {(size_t)block_x, (size_t)block_y,
                                (size_t)block_z};
-  lastDispatchedKernel = kernel;
+  recordDispatchedKernel(kernel);
   cl_event kernel_event = nullptr;
   cl_event *event_ptr = (isTimingActive && timingSupported) ? &kernel_event : nullptr;
   cl_int err = f_clEnqueueNDRangeKernel(commandQueue, kernel_cl->kernel, 3,
@@ -804,9 +804,7 @@ KernelResourceUsage OpenCLContext::getKernelResourceUsage(ComputeKernel kernel) 
 }
 
 void OpenCLContext::releaseKernel(ComputeKernel kernel) {
-  if (lastDispatchedKernel == kernel) {
-    lastDispatchedKernel = nullptr;
-  }
+  forgetDispatchedKernel(kernel);
   if (kernel) {
     auto *kernel_cl = static_cast<ComputeKernel_cl *>(kernel);
     f_clReleaseKernel(kernel_cl->kernel);

@@ -38,7 +38,7 @@ std::string fallbackDescriptionForBenchmark(const BenchmarkConfigMetadata& meta)
     if (bn == "System Memory Bandwidth") return "Host CPU DRAM streaming read/write/copy throughput using runtime-dispatched AVX-512, AVX2, or ARM64 NEON non-temporal stores.";
     if (bn == "System Memory Latency") return "Host CPU DRAM pointer-chasing latency using 2 MB Large Pages / Transparent Huge Pages to isolate DRAM access from TLB walks.";
     if (bn.find("Latency") != std::string::npos) return "Dependent pointer-chasing latency isolating GPU cache hierarchy and VRAM controller round-trip time.";
-    if (bn.find("Cache Bandwidth") != std::string::npos) return "Streaming coalesced bandwidth targeting a dedicated GPU cache hierarchy residency tier.";
+    if (bn.find("Cache Bandwidth") != std::string::npos || bn == "Cache Hierarchy Bandwidth") return "Streaming coalesced bandwidth targeting a dedicated GPU cache hierarchy residency tier.";
     if (bn.rfind("RayScheduling", 0) == 0) {
         return "Hardware ray-tracing execution paradigm & lighting stage (" + meta.configName + ") evaluated across complex 3D PBR geometry.";
     }
@@ -47,7 +47,7 @@ std::string fallbackDescriptionForBenchmark(const BenchmarkConfigMetadata& meta)
 
 std::string subgroupTitleForCatalogEntry(const BenchmarkConfigMetadata& meta, std::string& outCategory) {
     if (!meta.isDeviceDependent || meta.component == "System") {
-        outCategory = "Host System";
+        outCategory = "Host & Raster Diagnostics";
         if (meta.benchmarkName.find("Bandwidth") != std::string::npos) {
             return "Host DRAM Streaming Bandwidth (AVX-512 / AVX2 / NEON)";
         }
@@ -66,7 +66,7 @@ std::string subgroupTitleForCatalogEntry(const BenchmarkConfigMetadata& meta, st
     }
 
     if (meta.component == "Raster" || meta.component == "Graphics" || meta.component == "Rasterization & ROP") {
-        outCategory = "Raster";
+        outCategory = "Host & Raster Diagnostics";
         return "ROP Pixel & Blend Fill Rate";
     }
 
@@ -78,7 +78,8 @@ std::string subgroupTitleForCatalogEntry(const BenchmarkConfigMetadata& meta, st
         if (meta.benchmarkName == "Device Memory Bandwidth") {
             return "Device VRAM Streaming Bandwidth";
         }
-        if (meta.benchmarkName.find("Cache Bandwidth") != std::string::npos) {
+        if (meta.benchmarkName.find("Cache Bandwidth") != std::string::npos ||
+            meta.benchmarkName == "Cache Hierarchy Bandwidth") {
             return "Cache Hierarchy Bandwidth (L0 -> L3)";
         }
         return "Pointer-Chasing Latency & Working-Set Curve";
@@ -113,15 +114,17 @@ bool isCoreSuiteSlot(const BenchmarkItem& itm) {
     return itm.id == "FP32" || itm.id == "FP16" || itm.id == "BF16" ||
            itm.id == "FP8" || itm.id == "INT8" ||
            (itm.id == "Device Memory Bandwidth" && itm.configIndex == 0) ||
+           itm.id == "Cache Hierarchy Bandwidth" ||
            itm.id == "L0 Cache Bandwidth" || itm.id == "L1 Cache Bandwidth" ||
            itm.id == "L2 Cache Bandwidth" || itm.id == "L3 Cache Bandwidth" ||
            (itm.id == "PCIe & Host-Device Interconnect" && itm.configIndex <= 1) ||
-           (itm.id == "RayScheduling" && (itm.configIndex == 9 || itm.configIndex == 10 || itm.configIndex == 11));
+           (itm.id == "RayScheduling" && (itm.configIndex == 6 || itm.configIndex == 7 || itm.configIndex == 8));
 }
 
 const char* shortCategoryTag(const std::string& name) {
     if (name == "Ray Tracing") return "RT";
     if (name == "Scheduling") return "SCHED";
+    if (name == "Host & Raster Diagnostics") return "DIAG";
     if (name == "Raster" || name == "Graphics") return "RASTER";
     if (name == "Host System") return "HOST";
     if (name == "Compute") return "COMP";
@@ -261,17 +264,16 @@ void GuiApp::initializeBenchmarkCategories() {
     const std::vector<std::pair<std::string, std::string>> categoryDefs = {
         {"Compute",      "Floating-point, quantized matrix, 2:4 sparse, neural Cooperative Vector, ILP, and LDS bank throughput."},
         {"Memory",       "VRAM streaming bandwidth, L0-L3 cache hierarchy, PCIe/ReBAR/P2P interconnect, and pointer-chasing latency."},
-        {"Ray Tracing",  "Hardware BVH build/traversal, Opacity Micromaps (OMM), SER/DGC scheduling, and 4-scene PBR path tracing."},
+        {"Ray Tracing",  "Hardware BVH build/traversal, Opacity Micromaps (OMM), SER/DGC scheduling, and Zero-Day Reactor Bay PBR path tracing."},
         {"Scheduling",   "GPU Work Graphs (producer-consumer), Async Compute/Copy engine overlap, and GPU indirect command synthesis."},
-        {"Raster",       "Vulkan 1.4 dynamic rendering rasterization and Render Output Unit (ROP) pixel/blend fill throughput."},
-        {"Host System",  "CPU host DRAM streaming bandwidth (AVX-512 / AVX2 / NEON) and 2 MB Large Page pointer-chasing latency."}
+        {"Host & Raster Diagnostics", "Optional host CPU DRAM (AVX-512 / AVX2 / NEON, 2 MB Large Pages) and legacy ROP pixel fill diagnostics (collapsed by default on dGPUs; Host DRAM auto-armed on unified-memory APUs)."}
     };
 
     for (const auto& [catName, catDesc] : categoryDefs) {
         BenchmarkCategory cat;
         cat.name = catName;
         cat.description = catDesc;
-        cat.allSelected = true;
+        cat.allSelected = (catName != "Host & Raster Diagnostics");
         m_categories.push_back(std::move(cat));
     }
 
@@ -350,6 +352,11 @@ void GuiApp::initializeBenchmarkCategories() {
             : meta.component;
 
         auto& sg = findOrAddSubgroup(*cat, sgTitle, itemComponent, sgEngineId, "");
+        const bool defaultSelected = (targetCatName != "Host & Raster Diagnostics");
+        if (!defaultSelected) {
+            sg.allSelected = false;
+            sg.collapsed = true;
+        }
 
         std::string friendlyName;
         if (isRaySched) {
@@ -357,7 +364,6 @@ void GuiApp::initializeBenchmarkCategories() {
         } else if (sgTitle.rfind("Compute Precision", 0) == 0 ||
                    sgTitle.rfind("Structured Sparsity", 0) == 0 ||
                    sgTitle.rfind("Hardware BVH", 0) == 0 ||
-                   sgTitle.rfind("Cache Hierarchy Bandwidth", 0) == 0 ||
                    sgTitle.rfind("Pointer-Chasing Latency", 0) == 0) {
             friendlyName = meta.displayName;
         } else {
@@ -371,7 +377,7 @@ void GuiApp::initializeBenchmarkCategories() {
             itemComponent,
             meta.metric,
             fallbackDescriptionForBenchmark(meta),
-            true,
+            defaultSelected,
             static_cast<int>(meta.configIndex));
         sg.items.push_back(std::move(item));
     }
@@ -499,6 +505,9 @@ GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
             if (targetScene == "all") return true;
             std::string low = bName;
             for (char& ch : low) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+            if (targetScene == "reactor" || targetScene == "zeroday" || targetScene == "hangar") {
+                return low.find("reactor") != std::string::npos || low.find("zero-day") != std::string::npos;
+            }
             if (targetScene == "indoor") return low.find("indoor") != std::string::npos || low.find("sponza") != std::string::npos;
             if (targetScene == "forest") return low.find("forest") != std::string::npos;
             if (targetScene == "landscape" || targetScene == "outdoor") return low.find("landscape") != std::string::npos || low.find("outdoor") != std::string::npos;
@@ -1008,22 +1017,6 @@ void GuiApp::renderBenchmarkSuitePanel() {
                     syncSelectionFlags(m_categories);
                 }
             }
-        }
-
-        // RayTracing Scene Selector Strip
-        if (cat.name == "Ray Tracing") {
-            const char* sceneIds[] = {"all", "indoor", "showroom", "forest", "landscape"};
-            const char* scenePills[] = {"ALL 4", "INDOOR", "SHOWROOM", "FOREST", "LANDSCAPE"};
-            for (int si = 0; si < 5; ++si) {
-                float pw = ImGui::CalcTextSize(scenePills[si]).x + s(14.0f);
-                if (si > 0) sameLineIfFits(pw, s(4.0f));
-                bool activeSceneSel = (m_scene == sceneIds[si]);
-                std::string sId = "##RtScene_" + std::to_string(si);
-                if (tacticalButton(sId.c_str(), scenePills[si], ImVec2(0.0f, s(20.0f)), activeSceneSel, c)) {
-                    setScene(sceneIds[si]);
-                }
-            }
-            ImGui::Spacing();
         }
 
         for (size_t sgi = 0; sgi < cat.subgroups.size(); ++sgi) {

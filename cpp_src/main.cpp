@@ -52,7 +52,7 @@ int main(int argc, char **argv) {
 
   std::vector<std::string> groups_to_run;
   app.add_option("-g,--groups,--group", groups_to_run,
-                 "Benchmark group(s) to run: compute, memory, scheduling, graphics, raster, raytracing, system (or all)")
+                 "Benchmark group(s) to run: compute, memory, scheduling, raytracing, graphics, raster, system, diagnostics, all, full")
       ->delimiter(',');
 
   app.footer(
@@ -60,24 +60,24 @@ int main(int argc, char **argv) {
       "  compute     Compute arithmetic units (vector, matrix & sparse tensor operations):\n"
       "              FP64, FP32, ILP & Dual-Issue, LDS Bank Conflicts,\n"
       "              In-Shader Indirect Synthesis, FP16, FP8, INT8,\n"
-      "              BF16, FP6, FP4, INT4, SparseMatrix (2:4), CoopVector (capability-probed)\n"
+      "              BF16, FP6, FP4, INT4, SparseMatrix (2:4), CoopVector (Shader Baseline vs NV)\n"
       "  memory      VRAM, cache hierarchy & PCIe/host-device interconnect:\n"
-      "              Device Memory Bandwidth, L0/L1/L2/L3 Cache Bandwidth,\n"
-      "              L0 Vector Cache Latency (16 KB), Cache Latency Curve,\n"
-      "              Interconnect (PCIe H2D/D2H/Bidir, ReBAR, Unified Memory, Multi-GPU P2P)\n"
+      "              Device Memory Bandwidth (256 threads/group Read/Write/R-W), Cache Hierarchy Bandwidth (L0-L3),\n"
+      "              Cache Latency Curve (16 KB -> 256 MB), Interconnect (PCIe, ReBAR, Unified Memory, Multi-GPU P2P)\n"
       "  scheduling  Multi-queue async overlap & GPU-driven work graphs:\n"
       "              AsyncOverlap (Graphics + Async Compute + Copy DMA), WorkGraphs (DGC vs AMDX)\n"
-      "  graphics    All 3D graphics rendering pipelines (combines 'raster' and 'raytracing', alias: 'gfx'):\n"
-      "              Runs both fixed-function rasterization (ROP) and hardware ray tracing\n"
-      "  raster      Fixed-function rasterization & ROP pixel fill rates (subset of graphics):\n"
-      "              Pixel Fill Rate (RGBA8, RGBA16F HDR, Alpha Blending)\n"
-      "  raytracing  Hardware BVH traversal, intersection & scheduling (subset of graphics, alias: 'rt'):\n"
-      "              RayRawTraversal (Raw BVH Traversal: Coherent Triangles & Deep Multi-Layer BVH8),\n"
-      "              RayIntersect, RayAnyHit, RayOMM (Opacity Micromaps), RayProcedural,\n"
+      "  raytracing  Hardware BVH traversal, intersection & scheduling (alias: 'rt'):\n"
+      "              RayRawTraversal (Coherent Triangles, Deep 64-AABB Stress, VALU Slab Baseline),\n"
+      "              RayOMM (Compute RayQuery, AnyHit, 2/4-State OMM, Force-Opaque), RayProcedural,\n"
       "              RayDivergence, RayPayload, RayASBuild, RayScheduling (Megakernel vs DGC / SER)\n"
+      "  graphics    All 3D graphics rendering pipelines (combines 'raster' and 'raytracing', alias: 'gfx')\n"
+      "  raster      Fixed-function rasterization & ROP pixel fill rates:\n"
+      "              Pixel Fill Rate (RGBA8, RGBA16F HDR, Alpha Blending)\n"
       "  system      Host CPU & RAM system memory:\n"
       "              System Memory Bandwidth (Multi & Single-Threaded), System Memory Latency\n"
-      "  all         Run all benchmark groups across enabled devices\n\n"
+      "  diagnostics Optional Host & Raster Diagnostics (combines 'raster' and 'system', excluded from default dGPU runs)\n"
+      "  all         Run core GPU groups (compute, memory, scheduling, raytracing; auto-includes system on APUs)\n"
+      "  full        Run all groups including Host & Raster Diagnostics across enabled devices\n\n"
       "METHODOLOGY DISCLOSURES & EXECUTION NOTES:\n"
       "  Baseline:    Vulkan backend targets Vulkan 1.4 with VMA 3.5.0 and persistent disk VkPipelineCache.\n"
       "  Precisions:  BF16, FP8, FP6, FP4, INT4, SparseMatrix, CoopVector, WorkGraphs, and RayOMM require\n"
@@ -158,10 +158,10 @@ int main(int argc, char **argv) {
   app.add_flag("-f,--force", force,
                "Bypass background contention checks and force benchmark execution");
 
-  std::string scene_str = "all";
+  std::string scene_str = "reactor";
   app.add_option("-s,--scene", scene_str,
-                 "Ray tracing benchmark scenario: showroom, indoor, outdoor, forest, all (default: all)")
-      ->check(CLI::IsMember({"showroom", "indoor", "outdoor", "forest", "aaa_forest", "all"}));
+                 "Ray tracing benchmark scenario: reactor, zeroday, hangar, all (legacy aliases: showroom, indoor, outdoor, forest) (default: reactor)")
+      ->check(CLI::IsMember({"reactor", "reactor_bay", "zeroday", "zero_day", "hangar", "showroom", "indoor", "outdoor", "forest", "aaa_forest", "all"}));
 
   std::string resolution_str = "4k";
   app.add_option("-r,--resolution", resolution_str,
@@ -444,6 +444,8 @@ int main(int argc, char **argv) {
               std::cout << "  (Coherent Triangle fast-path; 0% root misses)";
             } else if (c == 1) {
               std::cout << "  (Synthetic 64-AABB model; 64 box tests/ray)";
+            } else if (c == 2) {
+              std::cout << "  (Software VALU 64-AABB slab baseline; no RT hardware)";
             }
             std::cout << std::endl;
           }

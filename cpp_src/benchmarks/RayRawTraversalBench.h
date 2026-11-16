@@ -57,14 +57,19 @@ public:
                               IComputeContext *context = nullptr) const override;
   void DumpGeometry() const override;
 
-  uint32_t GetNumConfigs() const override { return 2; }
+  uint32_t GetNumConfigs() const override { return 3; }
+  uint32_t GetExpectedKernelCount() const override { return 3; }
   int GetSortWeight(uint32_t = 0) const override { return 615; }
+  int32_t GetBaselineConfigIndex(uint32_t config_idx) const override {
+    return (config_idx == 1u) ? 2 : -1;
+  }
   std::string GetConfigName(uint32_t config_idx) const override;
   const char *GetComponent(uint32_t config_idx = 0) const override;
   const char *GetSubCategory(uint32_t config_idx = 0) const override;
   const char *GetDescription() const override {
-    return "Hardware BVH box-intersection and traversal throughput across coherent flat grids and 64-layer nested AABB hierarchies.";
+    return "Hardware BVH triangle & 64-layer box traversal throughput vs software VALU BVH stack baseline.";
   }
+  const char *GetDescription(uint32_t config_idx) const override;
   bool ValidateResults(uint32_t config_idx = 0) const override;
 
   // Telemetry accessors
@@ -75,7 +80,7 @@ private:
   template <typename Tag> friend struct ::gpubench::test::TestBody;
   IComputeContext *context = nullptr;
   ComputeKernel kernel = nullptr;
-  ComputeKernel kernels[2] = {nullptr, nullptr};
+  ComputeKernel kernels[3] = {nullptr, nullptr, nullptr};
   ComputeBuffer resultBuffer = nullptr;
 
 #ifdef HAVE_VULKAN
@@ -87,6 +92,7 @@ private:
 
   ComputeBuffer vertexBufferCoherent = nullptr;
   ComputeBuffer vertexBufferDeep = nullptr;
+  ComputeBuffer softBvhBuffer = nullptr;
   ComputeBuffer instanceBufferCoherent = nullptr;
   ComputeBuffer instanceBufferDeep = nullptr;
   ComputeBuffer coherentBlasBuffer = nullptr;
@@ -114,7 +120,7 @@ private:
   uint32_t rayCount = 64000000;
   uint32_t coherentPrimitives = 0;
   uint32_t deepPrimitives = 0;
-  uint64_t recordedInvocations[2] = {0, 0};
-  double recordedTimeMs[2] = {0.0, 0.0};
+  uint64_t recordedInvocations[3] = {0, 0, 0};
+  double recordedTimeMs[3] = {0.0, 0.0, 0.0};
   int lastRunConfig = -1;
 };

@@ -1,6 +1,6 @@
 ; SPV_AMDX_shader_enqueue (VK_AMDX_shader_enqueue) GPU Work Graph
 ; Parity workload with workgraphs_producer.comp + workgraphs_consumer.comp:
-;   - Producer: 1024 x 256 threads, PCG classification hash ((hash & 1u) == 0u)
+;   - Producer: 1024 x 256 threads, PCG classification hash ((hash & 7u) == 0u)
 ;   - Consumer: Coalescing 64-lane node, 32-iteration GLSL.std.450 Fma loop
 ; Validated with: spirv-as --target-env vulkan1.4 && spirv-val --target-env vulkan1.4
                OpCapability Shader
@@ -43,6 +43,7 @@
      %uint_1 = OpConstant %uint 1
      %uint_2 = OpConstant %uint 2
      %uint_4 = OpConstant %uint 4
+     %uint_7 = OpConstant %uint 7
     %uint_22 = OpConstant %uint 22
     %uint_28 = OpConstant %uint 28
     %uint_32 = OpConstant %uint 32
@@ -86,7 +87,7 @@
         %h1  = OpIMul %uint %h1_xor %pcg_mul_1
     %h2_shr  = OpShiftRightLogical %uint %h1 %uint_22
       %hash  = OpBitwiseXor %uint %h2_shr %h1
-       %low  = OpBitwiseAnd %uint %hash %uint_1
+       %low  = OpBitwiseAnd %uint %hash %uint_7
   %isActive  = OpIEqual %bool %low %uint_0
     %recCnt  = OpSelect %uint %isActive %uint_1 %uint_0
        %pArr = OpAllocateNodePayloadsAMDX %_ptr_PayloadArr %uint_2 %recCnt %uint_1
@@ -136,22 +137,40 @@
        %fPz  = OpConvertUToF %float %pz
      %term1  = OpFMul %float %fPz %flt_c1
         %v0  = OpFAdd %float %term0 %term1
-               OpBranch %loop_hdr
-   %loop_hdr = OpLabel
-         %i  = OpPhi %uint %uint_0 %body %i_next %loop_cont
-         %v  = OpPhi %float %v0 %body %v_next %loop_cont
-     %lt_32  = OpULessThan %bool %i %uint_32
-               OpLoopMerge %loop_exit %loop_cont None
-               OpBranchConditional %lt_32 %loop_body %loop_exit
-  %loop_body = OpLabel
-     %v_next = OpExtInst %float %glsl450 Fma %v %flt_fma_mul %flt_fma_add
-               OpBranch %loop_cont
-  %loop_cont = OpLabel
-     %i_next = OpIAdd %uint %i %uint_1
-               OpBranch %loop_hdr
-  %loop_exit = OpLabel
+        %v1  = OpExtInst %float %glsl450 Fma %v0  %flt_fma_mul %flt_fma_add
+        %v2  = OpExtInst %float %glsl450 Fma %v1  %flt_fma_mul %flt_fma_add
+        %v3  = OpExtInst %float %glsl450 Fma %v2  %flt_fma_mul %flt_fma_add
+        %v4  = OpExtInst %float %glsl450 Fma %v3  %flt_fma_mul %flt_fma_add
+        %v5  = OpExtInst %float %glsl450 Fma %v4  %flt_fma_mul %flt_fma_add
+        %v6  = OpExtInst %float %glsl450 Fma %v5  %flt_fma_mul %flt_fma_add
+        %v7  = OpExtInst %float %glsl450 Fma %v6  %flt_fma_mul %flt_fma_add
+        %v8  = OpExtInst %float %glsl450 Fma %v7  %flt_fma_mul %flt_fma_add
+        %v9  = OpExtInst %float %glsl450 Fma %v8  %flt_fma_mul %flt_fma_add
+       %v10  = OpExtInst %float %glsl450 Fma %v9  %flt_fma_mul %flt_fma_add
+       %v11  = OpExtInst %float %glsl450 Fma %v10 %flt_fma_mul %flt_fma_add
+       %v12  = OpExtInst %float %glsl450 Fma %v11 %flt_fma_mul %flt_fma_add
+       %v13  = OpExtInst %float %glsl450 Fma %v12 %flt_fma_mul %flt_fma_add
+       %v14  = OpExtInst %float %glsl450 Fma %v13 %flt_fma_mul %flt_fma_add
+       %v15  = OpExtInst %float %glsl450 Fma %v14 %flt_fma_mul %flt_fma_add
+       %v16  = OpExtInst %float %glsl450 Fma %v15 %flt_fma_mul %flt_fma_add
+       %v17  = OpExtInst %float %glsl450 Fma %v16 %flt_fma_mul %flt_fma_add
+       %v18  = OpExtInst %float %glsl450 Fma %v17 %flt_fma_mul %flt_fma_add
+       %v19  = OpExtInst %float %glsl450 Fma %v18 %flt_fma_mul %flt_fma_add
+       %v20  = OpExtInst %float %glsl450 Fma %v19 %flt_fma_mul %flt_fma_add
+       %v21  = OpExtInst %float %glsl450 Fma %v20 %flt_fma_mul %flt_fma_add
+       %v22  = OpExtInst %float %glsl450 Fma %v21 %flt_fma_mul %flt_fma_add
+       %v23  = OpExtInst %float %glsl450 Fma %v22 %flt_fma_mul %flt_fma_add
+       %v24  = OpExtInst %float %glsl450 Fma %v23 %flt_fma_mul %flt_fma_add
+       %v25  = OpExtInst %float %glsl450 Fma %v24 %flt_fma_mul %flt_fma_add
+       %v26  = OpExtInst %float %glsl450 Fma %v25 %flt_fma_mul %flt_fma_add
+       %v27  = OpExtInst %float %glsl450 Fma %v26 %flt_fma_mul %flt_fma_add
+       %v28  = OpExtInst %float %glsl450 Fma %v27 %flt_fma_mul %flt_fma_add
+       %v29  = OpExtInst %float %glsl450 Fma %v28 %flt_fma_mul %flt_fma_add
+       %v30  = OpExtInst %float %glsl450 Fma %v29 %flt_fma_mul %flt_fma_add
+       %v31  = OpExtInst %float %glsl450 Fma %v30 %flt_fma_mul %flt_fma_add
+       %v32  = OpExtInst %float %glsl450 Fma %v31 %flt_fma_mul %flt_fma_add
        %outP = OpAccessChain %_ptr_SB_Flt %outBuf %uint_0 %px
-               OpStore %outP %v
+               OpStore %outP %v32
                OpBranch %merge
       %merge = OpLabel
                OpReturn

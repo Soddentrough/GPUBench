@@ -17,15 +17,9 @@ bool MemBandwidthBench::IsSupported(const DeviceInfo &info,
 bool MemBandwidthBench::IsConfigSupported(uint32_t config_idx,
                                           const DeviceInfo &info,
                                           IComputeContext *context) const {
+  (void)info;
   (void)context;
-  if (config_idx >= configs.size()) {
-    return false;
-  }
-  if (config_idx >= 6 && info.maxWorkGroupSize > 0 &&
-      info.maxWorkGroupSize < 1024) {
-    return false;
-  }
-  return true;
+  return config_idx < configs.size();
 }
 
 void MemBandwidthBench::initDefaultConfigs(uint32_t maxWorkgroupSize) {
@@ -38,14 +32,6 @@ void MemBandwidthBench::initDefaultConfigs(uint32_t maxWorkgroupSize) {
 
   configs.clear();
 
-  uint32_t numWorkgroups128 = std::min(16384u, maxTotalThreads / 128u);
-  configs.push_back({"Read 128 threads/group", "membw_128", 128,
-                     numWorkgroups128, TestMode::Read, nullptr});
-  configs.push_back({"Write 128 threads/group", "membw_128", 128,
-                     numWorkgroups128, TestMode::Write, nullptr});
-  configs.push_back({"R/W 128 threads/group", "membw_128", 128,
-                     numWorkgroups128, TestMode::ReadWrite, nullptr});
-
   uint32_t workgroupSize256 = std::min(256u, maxWorkgroupSize);
   uint32_t numWorkgroups256 =
       std::min(8192u, maxTotalThreads / workgroupSize256);
@@ -55,14 +41,6 @@ void MemBandwidthBench::initDefaultConfigs(uint32_t maxWorkgroupSize) {
                      numWorkgroups256, TestMode::Write, nullptr});
   configs.push_back({"R/W 256 threads/group", "membw_256", workgroupSize256,
                      numWorkgroups256, TestMode::ReadWrite, nullptr});
-
-  uint32_t numWorkgroups1024 = std::min(2048u, maxTotalThreads / 1024u);
-  configs.push_back({"Read 1024 threads/group", "membw_1024", 1024,
-                     numWorkgroups1024, TestMode::Read, nullptr});
-  configs.push_back({"Write 1024 threads/group", "membw_1024", 1024,
-                     numWorkgroups1024, TestMode::Write, nullptr});
-  configs.push_back({"R/W 1024 threads/group", "membw_1024", 1024,
-                     numWorkgroups1024, TestMode::ReadWrite, nullptr});
 }
 
 void MemBandwidthBench::createKernel(BandwidthConfig &config,

@@ -1,44 +1,69 @@
 #version 460
+#extension GL_KHR_shader_subgroup_basic : enable
+#extension GL_KHR_shader_subgroup_ballot : enable
 
 layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
 
-// Indirect dispatch header: [0]=groupCountX, [1]=groupCountY, [2]=groupCountZ, [3]=itemCount
-layout(std430, set = 0, binding = 0) buffer IndirectArgsBuffer {
-    uint args[];
-} indirectBuf;
+layout(std430, set = 0, binding = 0) coherent buffer BucketCounters {
+    uint counts[2048];
+} bucketCounters;
 
-layout(std430, set = 0, binding = 1) buffer PayloadQueueBuffer {
+layout(std430, set = 0, binding = 1) writeonly buffer PayloadQueueBuffer {
     uvec4 payloads[];
 } queueBuf;
 
 layout(push_constant) uniform PushConsts {
     uint totalItems;
-    uint mode; // 0 = reset indirect header, 1 = classify & enqueue active payloads
+    uint bucketCapacity;
 } pc;
 
 void main() {
     uint gid = gl_GlobalInvocationID.x;
-    if (pc.mode == 0u) {
-        if (gid == 0u) {
-            indirectBuf.args[0] = 0u;
-            indirectBuf.args[1] = 1u;
-            indirectBuf.args[2] = 1u;
-            indirectBuf.args[3] = 0u;
-        }
+    if (gid >= pc.totalItems) {
         return;
     }
 
-    if (gid < pc.totalItems) {
-        // Deterministic spatial tile classification: ~50% active tiles emit consumer records
-        uint hash = (gid * 747796405u + 2891336453u);
-        hash = ((hash >> ((hash >> 28u) + 4u)) ^ hash) * 277803737u;
-        hash = (hash >> 22u) ^ hash;
-        if ((hash & 1u) == 0u) {
-            uint slot = atomicAdd(indirectBuf.args[3], 1u);
-            queueBuf.payloads[slot] = uvec4(gid, hash | 1u, (gid & 255u) + 1u, 0x5A5AA5A5u);
-            if ((slot & 63u) == 0u) {
-                atomicAdd(indirectBuf.args[0], 1u);
-            }
-        }
+    // Deterministic PCG classification hash: 12.5% active items classified across
+    // 8 sparse non-contiguous buckets {47, 311, 589, 863, 1157, 1429, 1703, 1973}
+    // out of 2048 total buckets (2040 empty).
+    uint hash = (gid * 747796405u + 2891336453u);
+    hash = ((hash >> ((hash >> 28u) + 4u)) ^ hash) * 277803737u;
+    hash = (hash >> 22u) ^ hash;
+
+    bool activeItem = ((hash & 7u) == 0u);
+    uint slot8 = (hash >> 3u) & 7u;
+
+    // Fully unrolled across all 8 active buckets (no backward branches) to
+    // keep wave ballot coalescing fast and ISA loop-free.
+#define ENQUEUE_SLOT(S, BUCKET_ID)                                              \
+    {                                                                           \
+        bool match = activeItem && (slot8 == (S));                              \
+        uvec4 mask = subgroupBallot(match);                                     \
+        uint count = subgroupBallotBitCount(mask);                              \
+        if (count > 0u) {                                                       \
+            uint firstLane = subgroupBallotFindLSB(mask);                       \
+            uint baseOffset = 0u;                                               \
+            if (gl_SubgroupInvocationID == firstLane) {                         \
+                baseOffset = atomicAdd(bucketCounters.counts[BUCKET_ID], count); \
+            }                                                                   \
+            baseOffset = subgroupBroadcast(baseOffset, firstLane);              \
+            if (match) {                                                        \
+                uint laneRank = subgroupBallotExclusiveBitCount(mask);          \
+                uint dst = (BUCKET_ID) * pc.bucketCapacity + baseOffset + laneRank; \
+                queueBuf.payloads[dst] =                                        \
+                    uvec4(gid, hash | 1u, (gid & 255u) + 1u, 0x5A5AA5A5u);      \
+            }                                                                   \
+        }                                                                       \
     }
+
+    ENQUEUE_SLOT(0u, 47u)
+    ENQUEUE_SLOT(1u, 311u)
+    ENQUEUE_SLOT(2u, 589u)
+    ENQUEUE_SLOT(3u, 863u)
+    ENQUEUE_SLOT(4u, 1157u)
+    ENQUEUE_SLOT(5u, 1429u)
+    ENQUEUE_SLOT(6u, 1703u)
+    ENQUEUE_SLOT(7u, 1973u)
+
+#undef ENQUEUE_SLOT
 }

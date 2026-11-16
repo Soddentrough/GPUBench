@@ -22,7 +22,10 @@ public:
     return "GPU Work Graphs";
   }
   int GetSortWeight() const override { return 415; }
-  uint32_t GetExpectedKernelCount() const override { return 2; }
+  int GetSortWeight(uint32_t config_idx) const override {
+    return 415 + static_cast<int>(config_idx);
+  }
+  uint32_t GetExpectedKernelCount() const override { return 4; }
 
   uint32_t GetNumConfigs() const override { return 3; }
   std::string GetConfigName(uint32_t config_idx) const override;
@@ -68,21 +71,29 @@ public:
   bool ValidateResults(uint32_t config_idx = 0) const override;
 
 private:
-  static constexpr uint32_t kTotalItems = 262144u; // 1024 * 256
+  static constexpr uint32_t kTotalItems = 262144u;    // 1024 * 256
+  static constexpr uint32_t kCheckCount = 16384u;
+  static constexpr uint32_t kNumBuckets = 2048u;      // 8 sparse active, 2040 empty
+  static constexpr uint32_t kBucketCapacity = 8192u;  // Max items per bucket (~4096 mean active)
 
   VulkanContext *m_vk = nullptr;
   std::string m_kernelDir;
+  ComputeKernel m_resetKernel = nullptr;
   ComputeKernel m_producerKernel = nullptr;
+  ComputeKernel m_resolveKernel = nullptr;
   ComputeKernel m_consumerKernel = nullptr;
 
+  ComputeBuffer m_bucketCounterBuf = nullptr;
   ComputeBuffer m_indirectBuf = nullptr;
   ComputeBuffer m_payloadQueueBuf = nullptr;
   ComputeBuffer m_outBuf = nullptr;
+  std::vector<VulkanContext::IndirectBatchEntry> m_indirectEntries;
 
   // DGC resources (Config 1)
   VkIndirectCommandsLayoutEXT m_dgcLayout = VK_NULL_HANDLE;
   ComputeBuffer m_dgcPreprocessBuf = nullptr;
   VkDeviceSize m_dgcPreprocessSize = 4096;
+  ComputeBuffer m_dgcSeqBuf = nullptr;
   ComputeBuffer m_dgcCountBuf = nullptr;
 
   // VK_AMDX_shader_enqueue resources (Config 2)

@@ -10,7 +10,7 @@ namespace {
 
 // Validated SPV_AMDX_shader_enqueue module (see shaders/workgraphs_amdx.spvasm)
 const uint32_t kWorkGraphAmdxSpv[] = {
-    0x07230203u, 0x00010600u, 0x00070000u, 0x00000064u, 0x00000000u, 0x00020011u, 0x00000001u, 0x00020011u,
+    0x07230203u, 0x00010600u, 0x00070000u, 0x0000007Cu, 0x00000000u, 0x00020011u, 0x00000001u, 0x00020011u,
     0x000013CBu, 0x0007000Au, 0x5F565053u, 0x58444D41u, 0x6168735Fu, 0x5F726564u, 0x75716E65u, 0x00657565u,
     0x0006000Bu, 0x00000001u, 0x4C534C47u, 0x6474732Eu, 0x3035342Eu, 0x00000000u, 0x0003000Eu, 0x00000000u,
     0x00000001u, 0x0009000Fu, 0x00000005u, 0x00000002u, 0x646F7270u, 0x72656375u, 0x65646F4Eu, 0x00000000u,
@@ -32,60 +32,86 @@ const uint32_t kWorkGraphAmdxSpv[] = {
     0x00000015u, 0x00000020u, 0x00020014u, 0x00000016u, 0x00030029u, 0x00000016u, 0x00000009u, 0x0004002Bu,
     0x00000013u, 0x0000000Au, 0x00000000u, 0x0004002Bu, 0x00000013u, 0x0000000Cu, 0x00000001u, 0x0004002Bu,
     0x00000013u, 0x00000017u, 0x00000002u, 0x0004002Bu, 0x00000013u, 0x00000018u, 0x00000004u, 0x0004002Bu,
-    0x00000013u, 0x00000019u, 0x00000016u, 0x0004002Bu, 0x00000013u, 0x0000001Au, 0x0000001Cu, 0x0004002Bu,
-    0x00000013u, 0x0000001Bu, 0x00000020u, 0x0004002Bu, 0x00000013u, 0x0000000Eu, 0x00000040u, 0x0004002Bu,
-    0x00000013u, 0x0000001Cu, 0x000000FFu, 0x0004002Bu, 0x00000013u, 0x0000000Bu, 0x00000400u, 0x0004002Bu,
-    0x00000013u, 0x0000001Du, 0x0000FFFFu, 0x0004002Bu, 0x00000013u, 0x0000001Eu, 0x2C9277B5u, 0x0004002Bu,
-    0x00000013u, 0x0000001Fu, 0xAC564B05u, 0x0004002Bu, 0x00000013u, 0x00000020u, 0x108EF2D9u, 0x0004002Bu,
-    0x00000015u, 0x00000021u, 0x39000000u, 0x0004002Bu, 0x00000015u, 0x00000022u, 0x3E000000u, 0x0004002Bu,
-    0x00000015u, 0x00000023u, 0x3F7FE000u, 0x0004002Bu, 0x00000015u, 0x00000024u, 0x3A800000u, 0x0005001Eu,
-    0x0000000Du, 0x00000013u, 0x00000013u, 0x00000013u, 0x000313D4u, 0x00000025u, 0x0000000Du, 0x00040020u,
-    0x00000026u, 0x000013CCu, 0x00000025u, 0x00040020u, 0x00000027u, 0x000013CCu, 0x00000013u, 0x00040020u,
-    0x00000028u, 0x00000001u, 0x00000014u, 0x00040020u, 0x00000029u, 0x00000001u, 0x00000013u, 0x0003001Du,
-    0x0000000Fu, 0x00000015u, 0x0003001Eu, 0x00000010u, 0x0000000Fu, 0x00040020u, 0x0000002Au, 0x0000000Cu,
-    0x00000010u, 0x00040020u, 0x0000002Bu, 0x0000000Cu, 0x00000015u, 0x0004003Bu, 0x00000028u, 0x00000003u,
-    0x00000001u, 0x0004003Bu, 0x00000029u, 0x00000006u, 0x00000001u, 0x0004003Bu, 0x00000026u, 0x00000004u,
-    0x000013CCu, 0x0004003Bu, 0x00000026u, 0x00000007u, 0x000013CCu, 0x0004003Bu, 0x0000002Au, 0x00000008u,
-    0x0000000Cu, 0x00050036u, 0x00000011u, 0x00000002u, 0x00000000u, 0x00000012u, 0x000200F8u, 0x0000002Cu,
-    0x00050041u, 0x00000029u, 0x0000002Du, 0x00000003u, 0x0000000Au, 0x0004003Du, 0x00000013u, 0x0000002Eu,
-    0x0000002Du, 0x00050084u, 0x00000013u, 0x0000002Fu, 0x0000002Eu, 0x0000001Eu, 0x00050080u, 0x00000013u,
-    0x00000030u, 0x0000002Fu, 0x0000001Fu, 0x000500C2u, 0x00000013u, 0x00000031u, 0x00000030u, 0x0000001Au,
-    0x00050080u, 0x00000013u, 0x00000032u, 0x00000031u, 0x00000018u, 0x000500C2u, 0x00000013u, 0x00000033u,
-    0x00000030u, 0x00000032u, 0x000500C6u, 0x00000013u, 0x00000034u, 0x00000033u, 0x00000030u, 0x00050084u,
-    0x00000013u, 0x00000035u, 0x00000034u, 0x00000020u, 0x000500C2u, 0x00000013u, 0x00000036u, 0x00000035u,
-    0x00000019u, 0x000500C6u, 0x00000013u, 0x00000037u, 0x00000036u, 0x00000035u, 0x000500C7u, 0x00000013u,
-    0x00000038u, 0x00000037u, 0x0000000Cu, 0x000500AAu, 0x00000016u, 0x00000039u, 0x00000038u, 0x0000000Au,
-    0x000600A9u, 0x00000013u, 0x0000003Au, 0x00000039u, 0x0000000Cu, 0x0000000Au, 0x000613D2u, 0x00000026u,
-    0x0000003Bu, 0x00000017u, 0x0000003Au, 0x0000000Cu, 0x000300F7u, 0x0000003Cu, 0x00000000u, 0x000400FAu,
-    0x00000039u, 0x0000003Du, 0x0000003Eu, 0x000200F8u, 0x0000003Du, 0x00060041u, 0x00000027u, 0x0000003Fu,
-    0x0000003Bu, 0x0000000Au, 0x0000000Au, 0x00060041u, 0x00000027u, 0x00000040u, 0x0000003Bu, 0x0000000Au,
-    0x0000000Cu, 0x00060041u, 0x00000027u, 0x00000041u, 0x0000003Bu, 0x0000000Au, 0x00000017u, 0x000500C5u,
-    0x00000013u, 0x00000042u, 0x00000037u, 0x0000000Cu, 0x000500C7u, 0x00000013u, 0x00000043u, 0x0000002Eu,
-    0x0000001Cu, 0x00050080u, 0x00000013u, 0x00000044u, 0x00000043u, 0x0000000Cu, 0x0003003Eu, 0x0000003Fu,
-    0x0000002Eu, 0x0003003Eu, 0x00000040u, 0x00000042u, 0x0003003Eu, 0x00000041u, 0x00000044u, 0x000200F9u,
-    0x0000003Eu, 0x000200F8u, 0x0000003Eu, 0x000413D6u, 0x00000016u, 0x00000045u, 0x0000003Bu, 0x000300F7u,
-    0x00000046u, 0x00000000u, 0x000400FAu, 0x00000045u, 0x00000047u, 0x00000046u, 0x000200F8u, 0x00000047u,
-    0x000213D3u, 0x0000003Bu, 0x000200F9u, 0x00000046u, 0x000200F8u, 0x00000046u, 0x000200F9u, 0x0000003Cu,
-    0x000200F8u, 0x0000003Cu, 0x000100FDu, 0x00010038u, 0x00050036u, 0x00000011u, 0x00000005u, 0x00000000u,
-    0x00000012u, 0x000200F8u, 0x00000048u, 0x0004003Du, 0x00000013u, 0x00000049u, 0x00000006u, 0x000413E2u,
-    0x00000013u, 0x0000004Au, 0x00000007u, 0x000500B0u, 0x00000016u, 0x0000004Bu, 0x00000049u, 0x0000004Au,
-    0x000300F7u, 0x0000004Cu, 0x00000000u, 0x000400FAu, 0x0000004Bu, 0x0000004Du, 0x0000004Cu, 0x000200F8u,
-    0x0000004Du, 0x00060041u, 0x00000027u, 0x0000004Eu, 0x00000007u, 0x00000049u, 0x0000000Au, 0x00060041u,
-    0x00000027u, 0x0000004Fu, 0x00000007u, 0x00000049u, 0x0000000Cu, 0x00060041u, 0x00000027u, 0x00000050u,
-    0x00000007u, 0x00000049u, 0x00000017u, 0x0004003Du, 0x00000013u, 0x00000051u, 0x0000004Eu, 0x0004003Du,
-    0x00000013u, 0x00000052u, 0x0000004Fu, 0x0004003Du, 0x00000013u, 0x00000053u, 0x00000050u, 0x000500C7u,
-    0x00000013u, 0x00000054u, 0x00000052u, 0x0000001Du, 0x00040070u, 0x00000015u, 0x00000055u, 0x00000054u,
-    0x00050085u, 0x00000015u, 0x00000056u, 0x00000055u, 0x00000021u, 0x00040070u, 0x00000015u, 0x00000057u,
-    0x00000053u, 0x00050085u, 0x00000015u, 0x00000058u, 0x00000057u, 0x00000022u, 0x00050081u, 0x00000015u,
-    0x00000059u, 0x00000056u, 0x00000058u, 0x000200F9u, 0x0000005Au, 0x000200F8u, 0x0000005Au, 0x000700F5u,
-    0x00000013u, 0x0000005Bu, 0x0000000Au, 0x0000004Du, 0x0000005Cu, 0x0000005Du, 0x000700F5u, 0x00000015u,
-    0x0000005Eu, 0x00000059u, 0x0000004Du, 0x0000005Fu, 0x0000005Du, 0x000500B0u, 0x00000016u, 0x00000060u,
-    0x0000005Bu, 0x0000001Bu, 0x000400F6u, 0x00000061u, 0x0000005Du, 0x00000000u, 0x000400FAu, 0x00000060u,
-    0x00000062u, 0x00000061u, 0x000200F8u, 0x00000062u, 0x0008000Cu, 0x00000015u, 0x0000005Fu, 0x00000001u,
-    0x00000032u, 0x0000005Eu, 0x00000023u, 0x00000024u, 0x000200F9u, 0x0000005Du, 0x000200F8u, 0x0000005Du,
-    0x00050080u, 0x00000013u, 0x0000005Cu, 0x0000005Bu, 0x0000000Cu, 0x000200F9u, 0x0000005Au, 0x000200F8u,
-    0x00000061u, 0x00060041u, 0x0000002Bu, 0x00000063u, 0x00000008u, 0x0000000Au, 0x00000051u, 0x0003003Eu,
-    0x00000063u, 0x0000005Eu, 0x000200F9u, 0x0000004Cu, 0x000200F8u, 0x0000004Cu, 0x000100FDu, 0x00010038u};
+    0x00000013u, 0x00000019u, 0x00000007u, 0x0004002Bu, 0x00000013u, 0x0000001Au, 0x00000016u, 0x0004002Bu,
+    0x00000013u, 0x0000001Bu, 0x0000001Cu, 0x0004002Bu, 0x00000013u, 0x0000001Cu, 0x00000020u, 0x0004002Bu,
+    0x00000013u, 0x0000000Eu, 0x00000040u, 0x0004002Bu, 0x00000013u, 0x0000001Du, 0x000000FFu, 0x0004002Bu,
+    0x00000013u, 0x0000000Bu, 0x00000400u, 0x0004002Bu, 0x00000013u, 0x0000001Eu, 0x0000FFFFu, 0x0004002Bu,
+    0x00000013u, 0x0000001Fu, 0x2C9277B5u, 0x0004002Bu, 0x00000013u, 0x00000020u, 0xAC564B05u, 0x0004002Bu,
+    0x00000013u, 0x00000021u, 0x108EF2D9u, 0x0004002Bu, 0x00000015u, 0x00000022u, 0x39000000u, 0x0004002Bu,
+    0x00000015u, 0x00000023u, 0x3E000000u, 0x0004002Bu, 0x00000015u, 0x00000024u, 0x3F7FE000u, 0x0004002Bu,
+    0x00000015u, 0x00000025u, 0x3A800000u, 0x0005001Eu, 0x0000000Du, 0x00000013u, 0x00000013u, 0x00000013u,
+    0x000313D4u, 0x00000026u, 0x0000000Du, 0x00040020u, 0x00000027u, 0x000013CCu, 0x00000026u, 0x00040020u,
+    0x00000028u, 0x000013CCu, 0x00000013u, 0x00040020u, 0x00000029u, 0x00000001u, 0x00000014u, 0x00040020u,
+    0x0000002Au, 0x00000001u, 0x00000013u, 0x0003001Du, 0x0000000Fu, 0x00000015u, 0x0003001Eu, 0x00000010u,
+    0x0000000Fu, 0x00040020u, 0x0000002Bu, 0x0000000Cu, 0x00000010u, 0x00040020u, 0x0000002Cu, 0x0000000Cu,
+    0x00000015u, 0x0004003Bu, 0x00000029u, 0x00000003u, 0x00000001u, 0x0004003Bu, 0x0000002Au, 0x00000006u,
+    0x00000001u, 0x0004003Bu, 0x00000027u, 0x00000004u, 0x000013CCu, 0x0004003Bu, 0x00000027u, 0x00000007u,
+    0x000013CCu, 0x0004003Bu, 0x0000002Bu, 0x00000008u, 0x0000000Cu, 0x00050036u, 0x00000011u, 0x00000002u,
+    0x00000000u, 0x00000012u, 0x000200F8u, 0x0000002Du, 0x00050041u, 0x0000002Au, 0x0000002Eu, 0x00000003u,
+    0x0000000Au, 0x0004003Du, 0x00000013u, 0x0000002Fu, 0x0000002Eu, 0x00050084u, 0x00000013u, 0x00000030u,
+    0x0000002Fu, 0x0000001Fu, 0x00050080u, 0x00000013u, 0x00000031u, 0x00000030u, 0x00000020u, 0x000500C2u,
+    0x00000013u, 0x00000032u, 0x00000031u, 0x0000001Bu, 0x00050080u, 0x00000013u, 0x00000033u, 0x00000032u,
+    0x00000018u, 0x000500C2u, 0x00000013u, 0x00000034u, 0x00000031u, 0x00000033u, 0x000500C6u, 0x00000013u,
+    0x00000035u, 0x00000034u, 0x00000031u, 0x00050084u, 0x00000013u, 0x00000036u, 0x00000035u, 0x00000021u,
+    0x000500C2u, 0x00000013u, 0x00000037u, 0x00000036u, 0x0000001Au, 0x000500C6u, 0x00000013u, 0x00000038u,
+    0x00000037u, 0x00000036u, 0x000500C7u, 0x00000013u, 0x00000039u, 0x00000038u, 0x00000019u, 0x000500AAu,
+    0x00000016u, 0x0000003Au, 0x00000039u, 0x0000000Au, 0x000600A9u, 0x00000013u, 0x0000003Bu, 0x0000003Au,
+    0x0000000Cu, 0x0000000Au, 0x000613D2u, 0x00000027u, 0x0000003Cu, 0x00000017u, 0x0000003Bu, 0x0000000Cu,
+    0x000300F7u, 0x0000003Du, 0x00000000u, 0x000400FAu, 0x0000003Au, 0x0000003Eu, 0x0000003Fu, 0x000200F8u,
+    0x0000003Eu, 0x00060041u, 0x00000028u, 0x00000040u, 0x0000003Cu, 0x0000000Au, 0x0000000Au, 0x00060041u,
+    0x00000028u, 0x00000041u, 0x0000003Cu, 0x0000000Au, 0x0000000Cu, 0x00060041u, 0x00000028u, 0x00000042u,
+    0x0000003Cu, 0x0000000Au, 0x00000017u, 0x000500C5u, 0x00000013u, 0x00000043u, 0x00000038u, 0x0000000Cu,
+    0x000500C7u, 0x00000013u, 0x00000044u, 0x0000002Fu, 0x0000001Du, 0x00050080u, 0x00000013u, 0x00000045u,
+    0x00000044u, 0x0000000Cu, 0x0003003Eu, 0x00000040u, 0x0000002Fu, 0x0003003Eu, 0x00000041u, 0x00000043u,
+    0x0003003Eu, 0x00000042u, 0x00000045u, 0x000200F9u, 0x0000003Fu, 0x000200F8u, 0x0000003Fu, 0x000413D6u,
+    0x00000016u, 0x00000046u, 0x0000003Cu, 0x000300F7u, 0x00000047u, 0x00000000u, 0x000400FAu, 0x00000046u,
+    0x00000048u, 0x00000047u, 0x000200F8u, 0x00000048u, 0x000213D3u, 0x0000003Cu, 0x000200F9u, 0x00000047u,
+    0x000200F8u, 0x00000047u, 0x000200F9u, 0x0000003Du, 0x000200F8u, 0x0000003Du, 0x000100FDu, 0x00010038u,
+    0x00050036u, 0x00000011u, 0x00000005u, 0x00000000u, 0x00000012u, 0x000200F8u, 0x00000049u, 0x0004003Du,
+    0x00000013u, 0x0000004Au, 0x00000006u, 0x000413E2u, 0x00000013u, 0x0000004Bu, 0x00000007u, 0x000500B0u,
+    0x00000016u, 0x0000004Cu, 0x0000004Au, 0x0000004Bu, 0x000300F7u, 0x0000004Du, 0x00000000u, 0x000400FAu,
+    0x0000004Cu, 0x0000004Eu, 0x0000004Du, 0x000200F8u, 0x0000004Eu, 0x00060041u, 0x00000028u, 0x0000004Fu,
+    0x00000007u, 0x0000004Au, 0x0000000Au, 0x00060041u, 0x00000028u, 0x00000050u, 0x00000007u, 0x0000004Au,
+    0x0000000Cu, 0x00060041u, 0x00000028u, 0x00000051u, 0x00000007u, 0x0000004Au, 0x00000017u, 0x0004003Du,
+    0x00000013u, 0x00000052u, 0x0000004Fu, 0x0004003Du, 0x00000013u, 0x00000053u, 0x00000050u, 0x0004003Du,
+    0x00000013u, 0x00000054u, 0x00000051u, 0x000500C7u, 0x00000013u, 0x00000055u, 0x00000053u, 0x0000001Eu,
+    0x00040070u, 0x00000015u, 0x00000056u, 0x00000055u, 0x00050085u, 0x00000015u, 0x00000057u, 0x00000056u,
+    0x00000022u, 0x00040070u, 0x00000015u, 0x00000058u, 0x00000054u, 0x00050085u, 0x00000015u, 0x00000059u,
+    0x00000058u, 0x00000023u, 0x00050081u, 0x00000015u, 0x0000005Au, 0x00000057u, 0x00000059u, 0x0008000Cu,
+    0x00000015u, 0x0000005Bu, 0x00000001u, 0x00000032u, 0x0000005Au, 0x00000024u, 0x00000025u, 0x0008000Cu,
+    0x00000015u, 0x0000005Cu, 0x00000001u, 0x00000032u, 0x0000005Bu, 0x00000024u, 0x00000025u, 0x0008000Cu,
+    0x00000015u, 0x0000005Du, 0x00000001u, 0x00000032u, 0x0000005Cu, 0x00000024u, 0x00000025u, 0x0008000Cu,
+    0x00000015u, 0x0000005Eu, 0x00000001u, 0x00000032u, 0x0000005Du, 0x00000024u, 0x00000025u, 0x0008000Cu,
+    0x00000015u, 0x0000005Fu, 0x00000001u, 0x00000032u, 0x0000005Eu, 0x00000024u, 0x00000025u, 0x0008000Cu,
+    0x00000015u, 0x00000060u, 0x00000001u, 0x00000032u, 0x0000005Fu, 0x00000024u, 0x00000025u, 0x0008000Cu,
+    0x00000015u, 0x00000061u, 0x00000001u, 0x00000032u, 0x00000060u, 0x00000024u, 0x00000025u, 0x0008000Cu,
+    0x00000015u, 0x00000062u, 0x00000001u, 0x00000032u, 0x00000061u, 0x00000024u, 0x00000025u, 0x0008000Cu,
+    0x00000015u, 0x00000063u, 0x00000001u, 0x00000032u, 0x00000062u, 0x00000024u, 0x00000025u, 0x0008000Cu,
+    0x00000015u, 0x00000064u, 0x00000001u, 0x00000032u, 0x00000063u, 0x00000024u, 0x00000025u, 0x0008000Cu,
+    0x00000015u, 0x00000065u, 0x00000001u, 0x00000032u, 0x00000064u, 0x00000024u, 0x00000025u, 0x0008000Cu,
+    0x00000015u, 0x00000066u, 0x00000001u, 0x00000032u, 0x00000065u, 0x00000024u, 0x00000025u, 0x0008000Cu,
+    0x00000015u, 0x00000067u, 0x00000001u, 0x00000032u, 0x00000066u, 0x00000024u, 0x00000025u, 0x0008000Cu,
+    0x00000015u, 0x00000068u, 0x00000001u, 0x00000032u, 0x00000067u, 0x00000024u, 0x00000025u, 0x0008000Cu,
+    0x00000015u, 0x00000069u, 0x00000001u, 0x00000032u, 0x00000068u, 0x00000024u, 0x00000025u, 0x0008000Cu,
+    0x00000015u, 0x0000006Au, 0x00000001u, 0x00000032u, 0x00000069u, 0x00000024u, 0x00000025u, 0x0008000Cu,
+    0x00000015u, 0x0000006Bu, 0x00000001u, 0x00000032u, 0x0000006Au, 0x00000024u, 0x00000025u, 0x0008000Cu,
+    0x00000015u, 0x0000006Cu, 0x00000001u, 0x00000032u, 0x0000006Bu, 0x00000024u, 0x00000025u, 0x0008000Cu,
+    0x00000015u, 0x0000006Du, 0x00000001u, 0x00000032u, 0x0000006Cu, 0x00000024u, 0x00000025u, 0x0008000Cu,
+    0x00000015u, 0x0000006Eu, 0x00000001u, 0x00000032u, 0x0000006Du, 0x00000024u, 0x00000025u, 0x0008000Cu,
+    0x00000015u, 0x0000006Fu, 0x00000001u, 0x00000032u, 0x0000006Eu, 0x00000024u, 0x00000025u, 0x0008000Cu,
+    0x00000015u, 0x00000070u, 0x00000001u, 0x00000032u, 0x0000006Fu, 0x00000024u, 0x00000025u, 0x0008000Cu,
+    0x00000015u, 0x00000071u, 0x00000001u, 0x00000032u, 0x00000070u, 0x00000024u, 0x00000025u, 0x0008000Cu,
+    0x00000015u, 0x00000072u, 0x00000001u, 0x00000032u, 0x00000071u, 0x00000024u, 0x00000025u, 0x0008000Cu,
+    0x00000015u, 0x00000073u, 0x00000001u, 0x00000032u, 0x00000072u, 0x00000024u, 0x00000025u, 0x0008000Cu,
+    0x00000015u, 0x00000074u, 0x00000001u, 0x00000032u, 0x00000073u, 0x00000024u, 0x00000025u, 0x0008000Cu,
+    0x00000015u, 0x00000075u, 0x00000001u, 0x00000032u, 0x00000074u, 0x00000024u, 0x00000025u, 0x0008000Cu,
+    0x00000015u, 0x00000076u, 0x00000001u, 0x00000032u, 0x00000075u, 0x00000024u, 0x00000025u, 0x0008000Cu,
+    0x00000015u, 0x00000077u, 0x00000001u, 0x00000032u, 0x00000076u, 0x00000024u, 0x00000025u, 0x0008000Cu,
+    0x00000015u, 0x00000078u, 0x00000001u, 0x00000032u, 0x00000077u, 0x00000024u, 0x00000025u, 0x0008000Cu,
+    0x00000015u, 0x00000079u, 0x00000001u, 0x00000032u, 0x00000078u, 0x00000024u, 0x00000025u, 0x0008000Cu,
+    0x00000015u, 0x0000007Au, 0x00000001u, 0x00000032u, 0x00000079u, 0x00000024u, 0x00000025u, 0x00060041u,
+    0x0000002Cu, 0x0000007Bu, 0x00000008u, 0x0000000Au, 0x00000052u, 0x0003003Eu, 0x0000007Bu, 0x0000007Au,
+    0x000200F9u, 0x0000004Du, 0x000200F8u, 0x0000004Du, 0x000100FDu, 0x00010038u};
 
 uint32_t pcgClassifyHash(uint32_t gid) {
   uint32_t hash = (gid * 747796405u + 2891336453u);
@@ -121,9 +147,9 @@ std::string WorkGraphsBench::GetConfigName(uint32_t config_idx) const {
 const char *WorkGraphsBench::GetDescription(uint32_t config_idx) const {
   switch (config_idx) {
   case 0:
-    return "Two-pass producer-consumer pipeline using atomic work-queue compaction + vkCmdDispatchIndirect.";
+    return "2048-bucket sparse classification pipeline (8 active buckets, 2040 empty) executing 2048 host-recorded vkCmdDispatchIndirect calls with per-bucket push constants.";
   case 1:
-    return "Two-pass producer-consumer pipeline using VK_EXT_device_generated_commands GPU command preprocessing + execution.";
+    return "2048-bucket sparse classification pipeline (8 active buckets, 2040 empty) using VK_EXT_device_generated_commands (PUSH_CONSTANT + DISPATCH tokens) with GPU sequence compaction to prune empty buckets.";
   case 2:
     return "Single-submission hardware GPU Work Graph (VK_AMDX_shader_enqueue) with on-chip producer-to-coalescing-consumer payload enqueue.";
   default:
@@ -205,8 +231,12 @@ void WorkGraphsBench::Setup(IComputeContext &context,
   m_kernelDir = kernel_dir;
 
   std::filesystem::path vkDir = std::filesystem::path(kernel_dir) / "vulkan";
+  m_resetKernel = m_vk->createKernel(
+      (vkDir / "workgraphs_reset.comp").string(), "main", 2);
   m_producerKernel = m_vk->createKernel(
       (vkDir / "workgraphs_producer.comp").string(), "main", 2);
+  m_resolveKernel = m_vk->createKernel(
+      (vkDir / "workgraphs_resolve.comp").string(), "main", 4);
   m_consumerKernel = m_vk->createKernel(
       (vkDir / "workgraphs_consumer.comp").string(), "main", 3);
 }
@@ -215,43 +245,91 @@ void WorkGraphsBench::PrepareConfig(uint32_t config_idx) {
   ReleaseConfigResources(config_idx);
   if (!m_vk) return;
 
-  uint32_t initHeader[4] = {0u, 1u, 1u, 0u};
-  m_indirectBuf = m_vk->createBuffer(sizeof(initHeader), initHeader);
-  m_payloadQueueBuf =
-      m_vk->createBuffer(static_cast<size_t>(kTotalItems) * sizeof(uint32_t) * 4u);
   std::vector<float> zeroOut(kTotalItems, 0.0f);
   m_outBuf =
       m_vk->createBuffer(zeroOut.size() * sizeof(float), zeroOut.data());
 
-  m_vk->setKernelArg(m_producerKernel, 0, m_indirectBuf);
-  m_vk->setKernelArg(m_producerKernel, 1, m_payloadQueueBuf);
+  if (config_idx <= 1u) {
+    std::vector<uint32_t> zeroCounters(kNumBuckets, 0u);
+    m_bucketCounterBuf = m_vk->createBuffer(
+        zeroCounters.size() * sizeof(uint32_t), zeroCounters.data());
 
-  m_vk->setKernelArg(m_consumerKernel, 0, m_indirectBuf);
-  m_vk->setKernelArg(m_consumerKernel, 1, m_payloadQueueBuf);
-  m_vk->setKernelArg(m_consumerKernel, 2, m_outBuf);
+    std::vector<uint32_t> initIndirect(kNumBuckets * 4u, 0u);
+    for (uint32_t b = 0; b < kNumBuckets; ++b) {
+      initIndirect[b * 4u + 1u] = 1u;
+      initIndirect[b * 4u + 2u] = 1u;
+    }
+    m_indirectBuf = m_vk->createBuffer(
+        initIndirect.size() * sizeof(uint32_t), initIndirect.data());
+
+    uint32_t zeroSeqCount = 0u;
+    m_dgcCountBuf = m_vk->createBuffer(sizeof(uint32_t), &zeroSeqCount);
+
+    std::vector<uint32_t> zeroDgcSeq(kNumBuckets * 6u, 0u);
+    m_dgcSeqBuf = m_vk->createBuffer(
+        zeroDgcSeq.size() * sizeof(uint32_t), zeroDgcSeq.data());
+
+    m_payloadQueueBuf = m_vk->createBuffer(
+        static_cast<size_t>(kNumBuckets) * static_cast<size_t>(kBucketCapacity) *
+        sizeof(uint32_t) * 4u);
+
+    m_vk->setKernelArg(m_resetKernel, 0, m_bucketCounterBuf);
+    m_vk->setKernelArg(m_resetKernel, 1, m_dgcCountBuf);
+
+    m_vk->setKernelArg(m_producerKernel, 0, m_bucketCounterBuf);
+    m_vk->setKernelArg(m_producerKernel, 1, m_payloadQueueBuf);
+
+    m_vk->setKernelArg(m_resolveKernel, 0, m_bucketCounterBuf);
+    m_vk->setKernelArg(m_resolveKernel, 1, m_indirectBuf);
+    m_vk->setKernelArg(m_resolveKernel, 2, m_dgcCountBuf);
+    m_vk->setKernelArg(m_resolveKernel, 3, m_dgcSeqBuf);
+
+    m_vk->setKernelArg(m_consumerKernel, 0, m_bucketCounterBuf);
+    m_vk->setKernelArg(m_consumerKernel, 1, m_payloadQueueBuf);
+    m_vk->setKernelArg(m_consumerKernel, 2, m_outBuf);
+
+    m_indirectEntries.clear();
+    m_indirectEntries.reserve(kNumBuckets);
+    for (uint32_t b = 0; b < kNumBuckets; ++b) {
+      uint32_t pc[2] = {b, kBucketCapacity};
+      std::vector<uint8_t> pcBytes(sizeof(pc));
+      std::memcpy(pcBytes.data(), pc, sizeof(pc));
+      m_indirectEntries.push_back(
+          {static_cast<VkDeviceSize>(b) * sizeof(uint32_t) * 4u,
+           std::move(pcBytes), nullptr});
+    }
+  }
 
   if (config_idx == 1 && m_vk->isDGCSupported()) {
-    VkIndirectCommandsLayoutTokenEXT token{
-        VK_STRUCTURE_TYPE_INDIRECT_COMMANDS_LAYOUT_TOKEN_EXT};
-    token.type = VK_INDIRECT_COMMANDS_TOKEN_TYPE_DISPATCH_EXT;
-    token.offset = 0;
+    VkIndirectCommandsPushConstantTokenEXT pcToken{};
+    pcToken.updateRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    pcToken.updateRange.offset = 0;
+    pcToken.updateRange.size = sizeof(uint32_t) * 2u;
+
+    VkIndirectCommandsLayoutTokenEXT tokens[2]{};
+    tokens[0].sType = VK_STRUCTURE_TYPE_INDIRECT_COMMANDS_LAYOUT_TOKEN_EXT;
+    tokens[0].type = VK_INDIRECT_COMMANDS_TOKEN_TYPE_PUSH_CONSTANT_EXT;
+    tokens[0].data.pPushConstant = &pcToken;
+    tokens[0].offset = 0;
+
+    tokens[1].sType = VK_STRUCTURE_TYPE_INDIRECT_COMMANDS_LAYOUT_TOKEN_EXT;
+    tokens[1].type = VK_INDIRECT_COMMANDS_TOKEN_TYPE_DISPATCH_EXT;
+    tokens[1].offset = sizeof(uint32_t) * 2u;
 
     VkIndirectCommandsLayoutCreateInfoEXT layoutCi{
         VK_STRUCTURE_TYPE_INDIRECT_COMMANDS_LAYOUT_CREATE_INFO_EXT};
     layoutCi.shaderStages = VK_SHADER_STAGE_COMPUTE_BIT;
-    layoutCi.indirectStride = sizeof(VkDispatchIndirectCommand);
+    layoutCi.indirectStride = sizeof(uint32_t) * 6u; // 24 bytes
     layoutCi.pipelineLayout = m_vk->getVkPipelineLayout(m_consumerKernel);
-    layoutCi.tokenCount = 1;
-    layoutCi.pTokens = &token;
+    layoutCi.tokenCount = 2;
+    layoutCi.pTokens = tokens;
     m_dgcLayout = m_vk->createIndirectCommandsLayout(layoutCi);
 
     VkDeviceSize preSize = m_vk->getGeneratedCommandsMemoryRequirements(
-        m_dgcLayout, VK_NULL_HANDLE, 1, m_consumerKernel);
+        m_dgcLayout, VK_NULL_HANDLE, kNumBuckets, m_consumerKernel);
     m_dgcPreprocessSize = std::max<VkDeviceSize>(preSize, 4096);
     m_dgcPreprocessBuf =
         m_vk->createPreprocessBuffer(static_cast<size_t>(m_dgcPreprocessSize));
-    uint32_t oneSeq = 1u;
-    m_dgcCountBuf = m_vk->createBuffer(sizeof(uint32_t), &oneSeq);
   } else if (config_idx == 2 && m_vk->isWorkGraphsSupported()) {
     VkDevice dev = m_vk->getDevice();
     m_pfnCreateGraphPipelines =
@@ -470,9 +548,17 @@ void WorkGraphsBench::ReleaseConfigResources(uint32_t /*config_idx*/) {
     m_vk->releaseBuffer(m_dgcPreprocessBuf);
     m_dgcPreprocessBuf = nullptr;
   }
+  if (m_dgcSeqBuf) {
+    m_vk->releaseBuffer(m_dgcSeqBuf);
+    m_dgcSeqBuf = nullptr;
+  }
   if (m_dgcCountBuf) {
     m_vk->releaseBuffer(m_dgcCountBuf);
     m_dgcCountBuf = nullptr;
+  }
+  if (m_bucketCounterBuf) {
+    m_vk->releaseBuffer(m_bucketCounterBuf);
+    m_bucketCounterBuf = nullptr;
   }
   if (m_indirectBuf) {
     m_vk->releaseBuffer(m_indirectBuf);
@@ -486,6 +572,7 @@ void WorkGraphsBench::ReleaseConfigResources(uint32_t /*config_idx*/) {
     m_vk->releaseBuffer(m_outBuf);
     m_outBuf = nullptr;
   }
+  m_indirectEntries.clear();
 
   if (m_wgTsPool != VK_NULL_HANDLE) {
     vkDestroyQueryPool(dev, m_wgTsPool, nullptr);
@@ -528,41 +615,47 @@ void WorkGraphsBench::Run(uint32_t config_idx) {
   if (!m_vk) return;
 
   if (config_idx == 0) {
-    uint32_t total = kTotalItems;
-    uint32_t resetMode = 0u;
-    m_vk->setKernelArg(m_producerKernel, 2, sizeof(uint32_t), &total);
-    m_vk->setKernelArg(m_producerKernel, 3, sizeof(uint32_t), &resetMode);
-    m_vk->dispatch(m_producerKernel, 1, 1, 1, 256, 1, 1);
+    m_vk->dispatch(m_resetKernel, kNumBuckets / 256u, 1, 1, 256, 1, 1);
 
-    uint32_t classifyMode = 1u;
-    m_vk->setKernelArg(m_producerKernel, 2, sizeof(uint32_t), &total);
-    m_vk->setKernelArg(m_producerKernel, 3, sizeof(uint32_t), &classifyMode);
+    struct {
+      uint32_t totalItems;
+      uint32_t bucketCapacity;
+    } prodPc{kTotalItems, kBucketCapacity};
+    m_vk->setKernelArg(m_producerKernel, 2, sizeof(prodPc), &prodPc);
     m_vk->dispatch(m_producerKernel, kTotalItems / 256u, 1, 1, 256, 1, 1);
 
-    m_vk->dispatchIndirect(m_consumerKernel, m_indirectBuf, 0);
+    uint32_t resolvePc = kBucketCapacity;
+    m_vk->setKernelArg(m_resolveKernel, 4, sizeof(resolvePc), &resolvePc);
+    m_vk->dispatch(m_resolveKernel, kNumBuckets / 256u, 1, 1, 256, 1, 1);
+
+    m_vk->dispatchIndirectSequence(m_consumerKernel, m_indirectBuf,
+                                   m_indirectEntries);
   } else if (config_idx == 1) {
-    uint32_t total = kTotalItems;
-    uint32_t resetMode = 0u;
-    m_vk->setKernelArg(m_producerKernel, 2, sizeof(uint32_t), &total);
-    m_vk->setKernelArg(m_producerKernel, 3, sizeof(uint32_t), &resetMode);
-    m_vk->dispatch(m_producerKernel, 1, 1, 1, 256, 1, 1);
+    m_vk->dispatch(m_resetKernel, kNumBuckets / 256u, 1, 1, 256, 1, 1);
 
-    uint32_t classifyMode = 1u;
-    m_vk->setKernelArg(m_producerKernel, 2, sizeof(uint32_t), &total);
-    m_vk->setKernelArg(m_producerKernel, 3, sizeof(uint32_t), &classifyMode);
+    struct {
+      uint32_t totalItems;
+      uint32_t bucketCapacity;
+    } prodPc{kTotalItems, kBucketCapacity};
+    m_vk->setKernelArg(m_producerKernel, 2, sizeof(prodPc), &prodPc);
     m_vk->dispatch(m_producerKernel, kTotalItems / 256u, 1, 1, 256, 1, 1);
+
+    uint32_t resolvePc = kBucketCapacity;
+    m_vk->setKernelArg(m_resolveKernel, 4, sizeof(resolvePc), &resolvePc);
+    m_vk->dispatch(m_resolveKernel, kNumBuckets / 256u, 1, 1, 256, 1, 1);
 
     VulkanContext::DGCExecutionInfo dgcInfo{};
     dgcInfo.layout = m_dgcLayout;
     dgcInfo.executionSet = VK_NULL_HANDLE;
-    dgcInfo.sequenceBuffer = m_indirectBuf;
+    dgcInfo.sequenceBuffer = m_dgcSeqBuf;
     dgcInfo.sequenceBufferOffset = 0;
-    dgcInfo.sequenceBufferSize = sizeof(VkDispatchIndirectCommand);
+    dgcInfo.sequenceBufferSize =
+        static_cast<VkDeviceSize>(kNumBuckets) * sizeof(uint32_t) * 6u;
     dgcInfo.sequenceCountBuffer = m_dgcCountBuf;
     dgcInfo.sequenceCountBufferOffset = 0;
     dgcInfo.preprocessBuffer = m_dgcPreprocessBuf;
     dgcInfo.preprocessBufferSize = m_dgcPreprocessSize;
-    dgcInfo.maxSequenceCount = 1;
+    dgcInfo.maxSequenceCount = kNumBuckets;
     m_vk->dispatchDGCSequence(m_consumerKernel, dgcInfo);
   } else if (config_idx == 2 && m_wgPipeline != VK_NULL_HANDLE) {
     VkDevice dev = m_vk->getDevice();
@@ -633,35 +726,54 @@ BenchmarkResult WorkGraphsBench::GetResult(uint32_t config_idx) const {
 
 bool WorkGraphsBench::ValidateResults(uint32_t config_idx) const {
   if (!m_vk || !m_outBuf) return false;
-  constexpr uint32_t kCheckCount = 4096u;
+  if (config_idx > 2u) return false;
+
+  if (config_idx <= 1u && m_bucketCounterBuf) {
+    std::vector<uint32_t> counts(kNumBuckets, 0u);
+    m_vk->readBuffer(m_bucketCounterBuf, 0,
+                     counts.size() * sizeof(uint32_t), counts.data());
+    uint64_t sum = 0;
+    for (uint32_t b = 0; b < kNumBuckets; ++b) {
+      const bool expectedActive =
+          (b == 47u || b == 311u || b == 589u || b == 863u ||
+           b == 1157u || b == 1429u || b == 1703u || b == 1973u);
+      if (expectedActive && counts[b] == 0u) return false;
+      if (!expectedActive && counts[b] != 0u) return false;
+      if (counts[b] > kBucketCapacity) return false;
+      sum += counts[b];
+    }
+    if (sum == 0u || sum > kTotalItems) return false;
+  }
+
   std::vector<float> out(kCheckCount, -1.0f);
   m_vk->readBuffer(m_outBuf, 0, kCheckCount * sizeof(float), out.data());
 
-  if (config_idx <= 2u) {
-    uint32_t activeChecked = 0;
-    for (uint32_t gid = 0; gid < kCheckCount; ++gid) {
-      if (!std::isfinite(out[gid])) return false;
-      uint32_t h = pcgClassifyHash(gid);
-      if ((h & 1u) == 0u) {
-        float expVal = expectedIndirectConsumerVal(gid, h);
-        if (std::fabs(out[gid] - expVal) > 1e-3f) return false;
-        activeChecked++;
-      } else {
-        if (std::fabs(out[gid]) > 1e-6f) return false;
-      }
+  uint32_t activeChecked = 0;
+  for (uint32_t gid = 0; gid < kCheckCount; ++gid) {
+    if (!std::isfinite(out[gid])) return false;
+    uint32_t h = pcgClassifyHash(gid);
+    if ((h & 7u) == 0u) {
+      float expVal = expectedIndirectConsumerVal(gid, h);
+      if (std::fabs(out[gid] - expVal) > 1e-4f) return false;
+      activeChecked++;
+    } else {
+      if (std::fabs(out[gid]) > 1e-6f) return false;
     }
-    return activeChecked > 1000u;
   }
-  return false;
+  return activeChecked > 1500u;
 }
 
 void WorkGraphsBench::Teardown() {
   ReleaseConfigResources(0);
   if (m_vk) {
+    if (m_resetKernel) m_vk->releaseKernel(m_resetKernel);
     if (m_producerKernel) m_vk->releaseKernel(m_producerKernel);
+    if (m_resolveKernel) m_vk->releaseKernel(m_resolveKernel);
     if (m_consumerKernel) m_vk->releaseKernel(m_consumerKernel);
   }
+  m_resetKernel = nullptr;
   m_producerKernel = nullptr;
+  m_resolveKernel = nullptr;
   m_consumerKernel = nullptr;
   m_vk = nullptr;
 }

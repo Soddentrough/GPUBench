@@ -9,13 +9,7 @@
 namespace gpubench::gui {
 
 std::string GuiApp::currentSceneTag() const {
-    if (m_scene == "showroom") return "showroom";
-    if (m_scene == "forest") return "forest";
-    if (m_scene == "landscape" || m_scene == "outdoor") return "outdoor";
-    if (m_scene == "indoor") return "indoor";
-    if (m_suiteActiveScene == "landscape") return "outdoor";
-    if (!m_suiteActiveScene.empty() && m_suiteActiveScene != "all") return m_suiteActiveScene;
-    return "indoor";
+    return "reactor";
 }
 
 void GuiApp::applyVisualizationMetadata() {
@@ -61,13 +55,20 @@ void GuiApp::applyVisualizationMetadata() {
                         viz.caption = "Unbiased Monte Carlo Path Tracing (16 SPP Converged)";
                         viz.linkedViewportMode = 2;
                         viz.linkedViewportSubIndex = 0;
-                    } else if (containsCaseInsensitive(nm, "Path Tracing")) {
+                    } else if (containsCaseInsensitive(nm, "Path Tracing") && containsCaseInsensitive(nm, "1 SPP")) {
                         viz.assetPath = "renders/render_{scene}_pathtracing_1spp_worklist.png";
                         viz.fallbackAssetPath = "assets/thumbnails/thumb_{scene}_pathtracing_1spp.png";
                         viz.diagramId = "cone_divergence";
                         viz.caption = "Unbiased Monte Carlo Path Tracing (1 SPP)";
                         viz.linkedViewportMode = 2;
                         viz.linkedViewportSubIndex = 1;
+                    } else if (containsCaseInsensitive(nm, "Path Tracing")) {
+                        viz.assetPath = "renders/render_{scene}_pathtracing_16spp_worklist.png";
+                        viz.fallbackAssetPath = "assets/thumbnails/thumb_{scene}_pathtracing_16spp.png";
+                        viz.diagramId = "cone_divergence";
+                        viz.caption = "Unbiased Monte Carlo Path Tracing (Multi-SPP)";
+                        viz.linkedViewportMode = 2;
+                        viz.linkedViewportSubIndex = 0;
                     } else if (containsCaseInsensitive(nm, "Shadow")) {
                         viz.assetPath = "renders/render_{scene}_stage3_shadow.png";
                         viz.fallbackAssetPath = "assets/thumbnails/thumb_{scene}_stage3_shadow.png";
@@ -130,19 +131,19 @@ void GuiApp::applyVisualizationMetadata() {
                 if (containsCaseInsensitive(item.id, "Acceleration Structure") ||
                     containsCaseInsensitive(item.id, "RayASBuild")) {
                     if (containsCaseInsensitive(item.name, "Indoor Corridor")) {
-                        viz.assetPath = "assets/thumbnails/thumb_indoor_stage1_bvh.png";
+                        viz.assetPath = "assets/thumbnails/thumb_reactor_stage1_bvh.png";
                         viz.caption = "Top-Level AS (TLAS): 20K Indoor Corridor Instances across 5K BLAS Meshes";
                     } else if (containsCaseInsensitive(item.name, "Dense Jungle")) {
-                        viz.assetPath = "assets/thumbnails/thumb_forest_stage1_bvh.png";
+                        viz.assetPath = "assets/thumbnails/thumb_reactor_stage1_bvh.png";
                         viz.caption = "Top-Level AS (TLAS): 50K Dense Jungle Instances across 500 BLAS Meshes";
                     } else if (containsCaseInsensitive(item.name, "Massive Open World")) {
-                        viz.assetPath = "assets/thumbnails/thumb_outdoor_stage1_bvh.png";
+                        viz.assetPath = "assets/thumbnails/thumb_reactor_stage1_bvh.png";
                         viz.caption = "Top-Level AS (TLAS): 200K Open-World Instances across 5K BLAS Meshes";
                     } else {
                         viz.assetPath = "assets/thumbnails/thumb_blas_wireframe.png";
                         viz.caption = "Bottom-Level Acceleration Structure (BLAS) Triangle Mesh BVH";
                     }
-                    viz.diagramId = "bvh_cutout_layers";
+                    viz.diagramId = "bvh_raw_traversal";
                     viz.linkedViewportMode = 3;
                     viz.linkedViewportSubIndex = 0;
                     continue;
@@ -244,7 +245,12 @@ void GuiApp::renderBenchmarkTooltip(const BenchmarkItem& item, const std::string
         bool drewImage = false;
         const std::string scTag = [&]() {
             std::string tag = !sceneOverride.empty() ? sceneOverride : currentSceneTag();
-            if (tag == "landscape") tag = "outdoor";
+            if (tag == "zeroday" || tag == "hangar" || tag == "all" ||
+                tag == "indoor" || tag == "sponza" || tag == "forest" || tag == "foliage" ||
+                tag == "aaa_forest" || tag == "landscape" || tag == "outdoor" ||
+                tag == "showroom" || tag == "studio" || tag == "car") {
+                tag = "reactor";
+            }
             return tag;
         }();
         auto tryDrawAsset = [&](const std::string& tmpl) -> bool {

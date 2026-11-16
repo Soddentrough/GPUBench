@@ -21,7 +21,12 @@ public:
 
   const char *GetName() const override { return "Cache Latency Curve"; }
   std::vector<std::string> GetAliases() const override {
-    return {"cache-curve", "cachelatencycurve", "cache_latency_curve", "cache-latency-curve", "cachecurve"};
+    return {"cache-curve", "cachelatencycurve", "cache_latency_curve",
+            "cache-latency-curve", "cachecurve", "l0l", "l0latency",
+            "l0_cache_latency", "l0-cache-latency", "l0-latency",
+            "l0cache", "l0_vector_cache_latency", "l0 vector cache latency",
+            "l0 vector cache latency (16 kb)", "cachelatency", "cachelat",
+            "cache", "caches"};
   }
   const char *GetMetric() const override { return "ns"; }
   const char *GetMetric(uint32_t config_idx) const override { return "ns"; }

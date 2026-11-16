@@ -1,6 +1,7 @@
 #pragma once
 
 #include "IBenchmark.h"
+#include "ReactorBayScene.h"
 #include "scene/GltfScene.h"
 #include <algorithm>
 #include <random>
@@ -17,24 +18,17 @@
 class RaySchedulingBench : public IBenchmark {
 public:
   enum class SceneType : uint32_t {
-    Showroom = 0,
-    IndoorAtrium = 1,
-    OutdoorLandscape = 2,
-    AAAOutdoorForest = 3
+    ReactorBay = 0,
+    Showroom = ReactorBay,
+    IndoorAtrium = ReactorBay,
+    OutdoorLandscape = ReactorBay,
+    AAAOutdoorForest = ReactorBay
   };
 
-  RaySchedulingBench(SceneType scene = SceneType::IndoorAtrium) : sceneType(scene) {}
+  RaySchedulingBench(SceneType scene = SceneType::ReactorBay) : sceneType(scene) {}
 
   const char *GetName() const override {
-    if (sceneType == SceneType::AAAOutdoorForest) {
-      return "RayScheduling (Open-World Forest)";
-    } else if (sceneType == SceneType::OutdoorLandscape) {
-      return "RayScheduling (Outdoor Landscape)";
-    } else if (sceneType == SceneType::IndoorAtrium) {
-      return "RayScheduling (Indoor Atrium)";
-    } else {
-      return "RayScheduling (Showroom Studio)";
-    }
+    return "RayScheduling (Zero-Day Reactor Bay)";
   }
 
   void SetSceneType(SceneType type) { sceneType = type; }
@@ -77,65 +71,51 @@ public:
 
   BenchmarkResult GetResult(uint32_t config_idx = 0) const override;
   uint32_t GetSamplesPerFrame(uint32_t config_idx = 0) const override {
-    if (config_idx == 23 || config_idx == 24) {
-      return (lastCompletedPasses[config_idx] > 0) ? lastCompletedPasses[config_idx] : 16u;
-    }
     if (config_idx >= 3 && config_idx <= 5) {
-      return (samplesPerPixel > 1) ? samplesPerPixel : 1u;
+      return (samplesPerPixel > 1)
+          ? ((lastCompletedPasses[config_idx] > 0) ? lastCompletedPasses[config_idx] : samplesPerPixel)
+          : 1u;
     }
     return 1u;
   }
   bool ValidateResults(uint32_t config_idx = 0) const override;
   int GetSortWeight(uint32_t config_idx = 0) const override;
-  uint32_t GetExpectedKernelCount() const override { return 23; }
+  uint32_t GetExpectedKernelCount() const override { return 29; }
 
-  uint32_t GetNumConfigs() const override { return 34; }
+  uint32_t GetNumConfigs() const override { return 24; }
   std::vector<std::string> GetAliases() const override {
-    if (sceneType == SceneType::AAAOutdoorForest) {
-      return {"rayscheduling", "rtscheduling", "forest", "aaa_forest", "rayscheduling_forest", "wavefront_queues", "dgc", "scene_render", "total_scene_render", "total_frame", "primary", "primary_rays", "shadow", "shadows", "rts", "ray_shadows", "ray_shadow", "multilight", "multi_light", "lightbinning", "light_binning", "pathtracing", "path_tracing", "path", "pathtrace"};
-    } else if (sceneType == SceneType::OutdoorLandscape) {
-      return {"rayscheduling", "rtscheduling", "outdoor", "landscape", "rayscheduling_outdoor", "wavefront_queues", "dgc", "scene_render", "total_scene_render", "total_frame", "primary", "primary_rays", "shadow", "shadows", "rts", "ray_shadows", "ray_shadow", "multilight", "multi_light", "lightbinning", "light_binning", "pathtracing", "path_tracing", "path", "pathtrace"};
-    } else if (sceneType == SceneType::IndoorAtrium) {
-      return {"rayscheduling", "rtscheduling", "indoor", "atrium", "rayscheduling_indoor", "wavefront_queues", "dgc", "scene_render", "total_scene_render", "total_frame", "primary", "primary_rays", "shadow", "shadows", "rts", "ray_shadows", "ray_shadow", "multilight", "multi_light", "lightbinning", "light_binning", "pathtracing", "path_tracing", "path", "pathtrace"};
-    } else {
-      return {"rayscheduling", "rtscheduling", "showroom", "studio", "rayscheduling_showroom", "wavefront_queues", "dgc", "scene_render", "total_scene_render", "total_frame", "primary", "primary_rays", "shadow", "shadows", "rts", "ray_shadows", "ray_shadow", "multilight", "multi_light", "lightbinning", "light_binning", "pathtracing", "path_tracing", "path", "pathtrace"};
-    }
+    return {"rayscheduling", "rtscheduling", "reactor", "reactor_bay", "zeroday", "zero_day", "hangar", "rayscheduling_reactor",
+            "showroom", "studio", "indoor", "atrium", "outdoor", "landscape", "forest", "aaa_forest",
+            "wavefront_queues", "dgc", "scene_render", "total_scene_render", "total_frame",
+            "primary", "primary_rays", "shadow", "shadows", "rts", "ray_shadows", "ray_shadow",
+            "multilight", "multi_light", "lightbinning", "light_binning", "pathtracing", "path_tracing", "path", "pathtrace"};
   }
   std::string GetConfigName(uint32_t config_idx) const override;
   int32_t GetBaselineConfigIndex(uint32_t config_idx) const override;
   const char *GetMetric(uint32_t config_idx = 0) const override {
     if (config_idx < 3) return "MHits/s";
-    if (config_idx == 13 || config_idx == 25 || config_idx == 27) return "MRecords/s";
+    if (config_idx == 10 || config_idx == 17 || config_idx == 19) return "MRecords/s";
     return "MRays/s";
   }
   void SetVerifyParity(bool verify) override { verifyParity = verify; }
   bool GetVerifyParity() const { return verifyParity; }
   bool HasParityFailure() const override { return parityFailure; }
   static constexpr bool isSERConfigIdx(uint32_t c) {
-    return c == 1 || c == 4 || c == 7 || c == 10 || c == 20 || c == 29;
+    return c == 1 || c == 4 || c == 7 || c == 16 || c == 21;
   }
   static constexpr bool isStandardDGCConfigIdx(uint32_t c) {
-    return c == 5 || c == 8 || c == 11 || c == 18 || c == 21 || c == 22 ||
-           c == 24 || c == 31 || c == 33;
+    return c == 5 || c == 8 || c == 23;
   }
   bool IsConfigSupported(uint32_t config_idx) const override {
-    return !unsupportedConfig[config_idx];
+    return config_idx < 24 && !unsupportedConfig[config_idx];
   }
   bool IsConfigSupported(uint32_t config_idx, const DeviceInfo &info,
                          IComputeContext *context = nullptr) const override {
     if (!IsSupported(info, context)) {
       return false;
     }
-    if (unsupportedConfig[config_idx]) {
+    if (config_idx >= 24 || unsupportedConfig[config_idx]) {
       return false;
-    }
-    // Algorithmic traversal ordering and queue compaction microbenchmarks are only run on the primary reference scene (Showroom)
-    if (sceneType != SceneType::Showroom) {
-      if (config_idx == 12 || config_idx == 13 || config_idx == 14 ||
-          config_idx == 15 || config_idx == 16 || config_idx == 25 ||
-          config_idx == 27) {
-        return false;
-      }
     }
     if (isSERConfigIdx(config_idx)) {
       if (!info.serSupported) return false;
@@ -146,17 +126,7 @@ public:
       }
 #endif
     }
-    if (config_idx == 2) {
-      if (!info.dgcSupported) return false;
-#ifdef HAVE_VULKAN
-      if (context && context->getBackend() == ComputeBackend::Vulkan) {
-        const VulkanContext *vc = static_cast<const VulkanContext *>(context);
-        if (!vc->isDGCSupported() || !vc->isDGCExecutionSetSupported()) return false;
-      }
-#endif
-      if (!info.dgcExecutionSetSupported) return false;
-    }
-    if (isStandardDGCConfigIdx(config_idx)) {
+    if (config_idx == 2 || isStandardDGCConfigIdx(config_idx)) {
       if (!info.dgcSupported) return false;
 #ifdef HAVE_VULKAN
       if (context && context->getBackend() == ComputeBackend::Vulkan) {
@@ -168,35 +138,21 @@ public:
     return true;
   }
   std::string GetConfigSupportNote(uint32_t config_idx) const override {
-    return unsupportedReason[config_idx];
+    return (config_idx < 24) ? unsupportedReason[config_idx] : std::string();
   }
   std::string GetConfigSupportNote(uint32_t config_idx,
                                    const DeviceInfo &info,
                                    IComputeContext *context = nullptr) const override {
-    if (!unsupportedReason[config_idx].empty()) {
+    if (config_idx < 24 && !unsupportedReason[config_idx].empty()) {
       return unsupportedReason[config_idx];
     }
     if (isSERConfigIdx(config_idx)) {
       return "VK_EXT_ray_tracing_invocation_reorder not supported by device/driver";
     }
-    if (config_idx == 28) {
+    if (config_idx == 20) {
       return "Vulkan Ray Tracing Pipeline unsupported or pipeline creation failed";
     }
-    if (config_idx == 2) {
-#ifdef HAVE_VULKAN
-      if (context && context->getBackend() == ComputeBackend::Vulkan) {
-        const VulkanContext *vc = static_cast<const VulkanContext *>(context);
-        if (vc->isDGCSupported() && !vc->isDGCExecutionSetSupported()) {
-          return "VK_EXT_device_generated_commands IndirectExecutionSet pipeline binding unsupported for compute on this driver";
-        }
-      }
-#endif
-      if (info.dgcSupported && !info.dgcExecutionSetSupported) {
-        return "VK_EXT_device_generated_commands IndirectExecutionSet pipeline binding unsupported for compute on this driver";
-      }
-      return "VK_EXT_device_generated_commands unsupported by device/driver";
-    }
-    if (isStandardDGCConfigIdx(config_idx)) {
+    if (config_idx == 2 || isStandardDGCConfigIdx(config_idx)) {
       if (!info.dgcSupported) {
         return "VK_EXT_device_generated_commands unsupported by device/driver";
       }
@@ -215,7 +171,7 @@ public:
     return "";
   }
   SupportLimitation GetConfigSupportLimitation(uint32_t config_idx) const override {
-    if (isSERConfigIdx(config_idx) || config_idx == 28 ||
+    if (isSERConfigIdx(config_idx) || config_idx == 20 ||
         config_idx == 2 || isStandardDGCConfigIdx(config_idx)) {
       return SupportLimitation::kHardware;
     }
@@ -230,18 +186,13 @@ public:
     }
     if (config_idx == 2) {
       bool basicDgc = info.dgcSupported;
-      bool execSet = info.dgcExecutionSetSupported;
 #ifdef HAVE_VULKAN
       if (context && context->getBackend() == ComputeBackend::Vulkan) {
         const VulkanContext *vc = static_cast<const VulkanContext *>(context);
         basicDgc = vc->isDGCSupported();
-        execSet = vc->isDGCExecutionSetSupported();
       }
 #endif
-      if (basicDgc && !execSet) {
-        return SupportLimitation::kApi;
-      }
-      return SupportLimitation::kHardware;
+      return basicDgc ? SupportLimitation::kNone : SupportLimitation::kHardware;
     }
     if (isSERConfigIdx(config_idx) && info.serSupported) {
       return SupportLimitation::kApi;
@@ -310,6 +261,7 @@ public:
       queueCapacity *= 2;
     }
   }
+  bool IsResolutionDependent(uint32_t = 0) const override { return true; }
   void SetBounceDepth(uint32_t bounces);
   uint32_t GetBounceDepth() const { return bounceDepth; }
 
@@ -321,7 +273,7 @@ public:
   uint32_t GetQueueCapacity() const { return queueCapacity; }
 
   void RecordRunResult(uint32_t config_idx, uint64_t total_invocations, double total_time_ms) override {
-    if (config_idx < 34) {
+    if (config_idx < 24) {
       recordedInvocations[config_idx] = total_invocations;
       recordedTimeMs[config_idx] = total_time_ms;
     }
@@ -333,8 +285,8 @@ public:
   void RunVisualVerification(bool isInteractive = false) override;
 
 private:
-  uint64_t recordedInvocations[34] = {0};
-  double recordedTimeMs[34] = {0.0};
+  uint64_t recordedInvocations[24] = {0};
+  double recordedTimeMs[24] = {0.0};
   IComputeContext *context = nullptr;
   bool dumpRenders = false;
   bool captureFramebuffer = false;
@@ -352,19 +304,16 @@ private:
 
   // Compute & RT Kernels
   ComputeKernel kernelTraditional = nullptr;
+  ComputeKernel kernelTraditionalSpecialized[13] = {nullptr};
   ComputeKernel kernelRTP = nullptr;
   ComputeKernel kernelRTPSER = nullptr;
   ComputeKernel kernelClassify = nullptr;
   ComputeKernel kernelClassifySpecialized[10] = {nullptr};
   ComputeKernel kernelMaterial = nullptr;
-  ComputeKernel kernelMaterialPrimary = nullptr;
   ComputeKernel kernelMaterialGltf = nullptr;
-  ComputeKernel kernelMaterialProcedural = nullptr;
   ComputeKernel kernelMaterialSpecialized[8] = {nullptr};
   ComputeKernel kernelBounce = nullptr;
   ComputeKernel kernelBounceTerminal = nullptr;
-  ComputeKernel kernelBounceOctant = nullptr;
-  ComputeKernel kernelShadow = nullptr;
   ComputeKernel kernelMultiLight = nullptr;
   ComputeKernel kernelReset = nullptr;
   ComputeKernel kernelResolve = nullptr;
@@ -375,14 +324,12 @@ private:
   ComputeBuffer indirectBuffer = nullptr;
   ComputeBuffer indirectMaterialBuffer = nullptr;
 
-  // glTF Scene & PBR Storage Buffers
-  GltfScene gltfScene;
-  bool isGltf = false;
+  // PBR Scene & Material Storage Buffers
+  bool isGltf = true;
   ComputeBuffer materialBuffer = nullptr;
   ComputeBuffer triangleMaterialBuffer = nullptr;
   ComputeBuffer texHeaderBuffer = nullptr;
   ComputeBuffer texPixelBuffer = nullptr;
-  std::string findModelPath(const std::string &modelName) const;
 
 #ifdef HAVE_VULKAN
   VkAccelerationStructureKHR triangleBlas = VK_NULL_HANDLE;
@@ -403,13 +350,8 @@ private:
   void buildAS();
 
   std::vector<VulkanContext::IndirectBatchEntry> materialBatches;
-  std::vector<VulkanContext::IndirectBatchEntry> primaryMaterialBatches;
   std::vector<VulkanContext::IndirectBatchEntry> materialBatchesBreakdown;
   std::vector<VulkanContext::IndirectBatchEntry> bounceBatches;
-  std::vector<VulkanContext::IndirectBatchEntry> octantBatches;
-  std::vector<VulkanContext::IndirectBatchEntry> shadowBatches;
-  std::vector<VulkanContext::IndirectBatchEntry> shadowBinBatches;
-  std::vector<VulkanContext::IndirectBatchEntry> multiLightBatchesSingle;
   std::vector<VulkanContext::IndirectBatchEntry> multiLightBatches128;
   void rebuildBounceBatches();
 
@@ -428,8 +370,8 @@ private:
   VkDeviceSize dgcPreprocessBufferSize = 0;
 
   VulkanContext::DGCExecutionInfo dgcInfoStandard;
+  VulkanContext::DGCExecutionInfo dgcInfoFullFrame;
   VulkanContext::DGCExecutionInfo dgcInfoSpecialized;
-  VulkanContext::DGCExecutionInfo dgcInfoOctant;
   std::vector<VulkanContext::DGCExecutionInfo> dgcBounceBatches;
   void rebuildDGCBounceBatches();
 #endif
@@ -444,11 +386,11 @@ private:
   uint32_t bounceCapacity = 1500000;
   uint32_t octantCapacity = 262144;
   uint32_t numPrimitives = 4096;
-  SceneType sceneType = SceneType::IndoorAtrium;
-  mutable double results[34] = {0.0};
-  mutable uint32_t lastCompletedPasses[34] = {0};
-  mutable bool unsupportedConfig[34] = {false};
-  mutable std::string unsupportedReason[34];
+  SceneType sceneType = SceneType::ReactorBay;
+  mutable double results[24] = {0.0};
+  mutable uint32_t lastCompletedPasses[24] = {0};
+  mutable bool unsupportedConfig[24] = {false};
+  mutable std::string unsupportedReason[24];
   uint32_t lastRunConfig = 0xFFFFFFFFu;
   std::mt19937 rng{1337u};
 

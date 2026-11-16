@@ -48,7 +48,7 @@ static double computeRaySchedulingFps(const ResultData &r, double mraysPerSec) {
   const uint32_t h = r.height ? r.height : 1080u;
   const uint32_t spp = (r.samplesPerFrame > 1u)
       ? r.samplesPerFrame
-      : ((r.configIndex == 23u || r.configIndex == 24u) ? 16u : 1u);
+      : 1u;
   return (mraysPerSec * 1e6) /
          (static_cast<double>(w) * static_cast<double>(h) * static_cast<double>(spp));
 }
@@ -89,6 +89,45 @@ std::string ResultFormatter::formatDouble(double value, int precision) {
     insertPosition -= 3;
   }
   return integerPart + fractionalPart;
+}
+
+ScaledMetricValue scaleMetricForDisplay(double rawValue,
+                                        const std::string &rawMetric,
+                                        int defaultPrecision) {
+  ScaledMetricValue out{rawValue, rawMetric, defaultPrecision, false};
+  if (!std::isfinite(rawValue) || rawValue < 999.995) {
+    return out;
+  }
+
+  static constexpr struct {
+    const char *from;
+    const char *to;
+  } kMegaToGigaUnits[] = {
+      {"MRays/s", "GRays/s"},
+      {"MTris/s", "GTris/s"},
+      {"MInst/s", "GInst/s"},
+      {"MInstances/s", "GInstances/s"},
+      {"MHits/s", "GHits/s"},
+  };
+  for (const auto &entry : kMegaToGigaUnits) {
+    if (rawMetric == entry.from) {
+      out.value = rawValue / 1000.0;
+      out.unit = entry.to;
+      out.precision = 2;
+      out.scaled = true;
+      break;
+    }
+  }
+  return out;
+}
+
+std::string formatScaledMetricString(double rawValue,
+                                       const std::string &rawMetric,
+                                       int defaultPrecision) {
+  const ScaledMetricValue scaled =
+      scaleMetricForDisplay(rawValue, rawMetric, defaultPrecision);
+  return ResultFormatter::formatDouble(scaled.value, scaled.precision) + " " +
+         scaled.unit;
 }
 
 std::string ResultFormatter::formatNumber(uint64_t value) {
@@ -213,6 +252,7 @@ std::string extractSceneName(const std::string &rawName) {
 }
 
 static int getSceneOrder(const std::string &name) {
+  if (name.find("[Zero-Day Reactor Bay]") != std::string::npos || name.find("Reactor") != std::string::npos || name.find("Zero-Day") != std::string::npos) return 0;
   if (name.find("[Showroom Studio]") != std::string::npos || name.find("Showroom") != std::string::npos) return 1;
   if (name.find("[Indoor Atrium]") != std::string::npos || name.find("Indoor") != std::string::npos || name.find("Atrium") != std::string::npos) return 2;
   if (name.find("[Outdoor Landscape]") != std::string::npos || name.find("Outdoor") != std::string::npos || name.find("Landscape") != std::string::npos) return 3;
@@ -248,6 +288,7 @@ std::string cleanWorkloadName(const std::string &rawName, const std::string &sub
         "2:4 Structured Sparsity (",
         "Cooperative Vector (Neural Shading) (",
         "GPU Work Graphs (Producer-Consumer) (",
+        "Cache Hierarchy Bandwidth (",
     };
     bool strippedExact = false;
     for (const auto &pfx : kExactPrefixes) {
@@ -412,6 +453,10 @@ void ResultFormatter::print() {
   double dgcPBRRate = 0.0;
   std::string pbrSceneName = "";
   bool hasPbrScene = false;
+  double megakernelPTRate = 0.0;
+  double dgcPTRate = 0.0;
+  std::string ptSceneName = "";
+  bool hasPtScene = false;
   double scanlineRate = 0.0;
   double tiledRate = 0.0;
   double maxBlasUpdateRate = 0.0;
@@ -419,6 +464,15 @@ void ResultFormatter::print() {
   double rawBoxGis = 0.0;
   double rawTriangleGis = 0.0;
   size_t totalWorkloadsEvaluated = 0;
+
+  auto sceneRank = [](const std::string &s) -> int {
+    if (s == "Zero-Day Reactor Bay") return 5;
+    if (s == "Open-World Forest") return 4;
+    if (s == "Indoor Atrium") return 3;
+    if (s == "Outdoor Landscape") return 2;
+    if (s == "Showroom Studio") return 1;
+    return 0;
+  };
 
   for (const auto &res : results) {
     totalWorkloadsEvaluated++;
@@ -455,7 +509,7 @@ void ResultFormatter::print() {
         double gis = (time_s > 0.0) ? ((static_cast<double>(ops) / time_s) / 1e9) : 0.0;
         if (res.configIndex == 0) {
           rawTriangleGis = (std::max)(rawTriangleGis, gis);
-        } else {
+        } else if (res.configIndex == 1) {
           rawBoxGis = (std::max)(rawBoxGis, gis);
         }
       }
@@ -466,19 +520,43 @@ void ResultFormatter::print() {
         }
         if (res.benchmarkName.find("Scene Render: Full Frame (Megakernel)") != std::string::npos ||
             res.benchmarkName.find("Full Scene Ray Tracing (PBR) - Megakernel") != std::string::npos) {
-          if (!hasPbrScene || sceneName == pbrSceneName) {
-            megakernelPBRRate = (std::max)(megakernelPBRRate, rate);
+          if (!hasPbrScene || sceneRank(sceneName) > sceneRank(pbrSceneName)) {
+            megakernelPBRRate = rate;
+            dgcPBRRate = 0.0;
             pbrSceneName = sceneName;
             hasPbrScene = true;
+          } else if (sceneName == pbrSceneName) {
+            megakernelPBRRate = (std::max)(megakernelPBRRate, rate);
           }
         } else if (res.benchmarkName.find("Scene Render: Full Frame (DGC)") != std::string::npos ||
                    res.benchmarkName.find("Full Scene Ray Tracing (PBR) - DGC") != std::string::npos ||
                    res.benchmarkName.find("Full Scene Ray Tracing (PBR) - Work Lists") != std::string::npos ||
                    res.benchmarkName.find("Full Scene Ray Tracing (PBR) - Device-Generated Commands") != std::string::npos) {
-          if (!hasPbrScene || sceneName == pbrSceneName) {
-            dgcPBRRate = (std::max)(dgcPBRRate, rate);
+          if (!hasPbrScene || sceneRank(sceneName) > sceneRank(pbrSceneName)) {
+            megakernelPBRRate = 0.0;
+            dgcPBRRate = rate;
             pbrSceneName = sceneName;
             hasPbrScene = true;
+          } else if (sceneName == pbrSceneName) {
+            dgcPBRRate = (std::max)(dgcPBRRate, rate);
+          }
+        } else if (res.benchmarkName.find("Path Tracing (1 SPP) (Megakernel)") != std::string::npos) {
+          if (!hasPtScene || sceneRank(sceneName) > sceneRank(ptSceneName)) {
+            megakernelPTRate = rate;
+            dgcPTRate = 0.0;
+            ptSceneName = sceneName;
+            hasPtScene = true;
+          } else if (sceneName == ptSceneName) {
+            megakernelPTRate = (std::max)(megakernelPTRate, rate);
+          }
+        } else if (res.benchmarkName.find("Path Tracing (1 SPP) (DGC)") != std::string::npos) {
+          if (!hasPtScene || sceneRank(sceneName) > sceneRank(ptSceneName)) {
+            megakernelPTRate = 0.0;
+            dgcPTRate = rate;
+            ptSceneName = sceneName;
+            hasPtScene = true;
+          } else if (sceneName == ptSceneName) {
+            dgcPTRate = (std::max)(dgcPTRate, rate);
           }
         } else if (res.benchmarkName.find("1D Scanline") != std::string::npos) {
           scanlineRate = (std::max)(scanlineRate, rate);
@@ -917,7 +995,7 @@ void ResultFormatter::print() {
                     value /= 1e6;
                   }
                 }
-                valStr = formatDouble(value, precision) + " " + res.metric;
+                valStr = formatScaledMetricString(value, res.metric, precision);
 
                 std::string fpsStr = "";
                 if (res.benchmarkName.find("RayScheduling") != std::string::npos && res.metric == "MRays/s") {
@@ -931,8 +1009,28 @@ void ResultFormatter::print() {
                   double gis = (time_s > 0.0) ? ((static_cast<double>(ops) / time_s) / 1e9) : 0.0;
                   if (res.configIndex == 0) {
                     noteStr = "[" + formatDouble(gis, 1) + " GIS/s Max Occupancy]";
+                  } else if (res.configIndex == 2) {
+                    noteStr = "[Baseline] [" + formatDouble(gis, 1) + " VALU BVH GIS/s]";
                   } else {
-                    noteStr = "[" + formatDouble(gis, 1) + " Box GIS/s (64-AABB Model)]";
+                    std::string hwNote = "[" + formatDouble(gis, 1) + " Box GIS/s (64-AABB Model)]";
+                    double swRate = 0.0;
+                    for (const auto &bp : subcat.benchmarks) {
+                      if (bp.second.count(backend)) {
+                        const auto &br = bp.second.at(backend);
+                        if (br.benchmarkName.find("RayRawTraversal") != std::string::npos && br.configIndex == 2 && br.time_ms > 0.0 && br.isValid) {
+                          swRate = computeResultValue(br);
+                          break;
+                        }
+                      }
+                    }
+                    if (swRate > 0.0 && value > 0.0) {
+                      double ratio = value / swRate;
+                      double pct = (ratio - 1.0) * 100.0;
+                      std::string pctStr = (std::abs(pct) >= 0.1) ? (std::string(" (") + (pct >= 0 ? "+" : "") + formatDouble(pct, 1) + "%)") : "";
+                      noteStr = "└──> " + formatDouble(ratio, 2) + "x" + pctStr + " " + hwNote;
+                    } else {
+                      noteStr = hwNote;
+                    }
                   }
                 } else {
                   double localBaseVal = 0.0;
@@ -1152,24 +1250,37 @@ void ResultFormatter::print() {
                 << BOLD << CYAN << " │" << RESET << "\n";
     };
 
+    if (megakernelPTRate > 0.0 && dgcPTRate > 0.0) {
+      double ptSpeedup = dgcPTRate / megakernelPTRate;
+      std::string col = (ptSpeedup >= 1.0) ? GREEN : YELLOW;
+      std::string val = BOLD + col + formatDouble(ptSpeedup, 2) + "x" + RESET;
+      std::string sceneTag = ptSceneName.empty() ? "" : (" [" + ptSceneName + "]");
+      std::string extra = " in Path Tracing (1 SPP)" + sceneTag + " (" +
+                          formatScaledMetricString(dgcPTRate, "MRays/s", 2) + " vs " +
+                          formatScaledMetricString(megakernelPTRate, "MRays/s", 2) + ")";
+      printSummaryRow("Wavefront Path Tracing (1 SPP)", val, extra);
+    }
     if (megakernelPBRRate > 0.0 && dgcPBRRate > 0.0) {
       double pbrSpeedup = dgcPBRRate / megakernelPBRRate;
-      std::string val = BOLD + GREEN + formatDouble(pbrSpeedup, 2) + "x" + RESET;
+      std::string col = (pbrSpeedup >= 1.0) ? GREEN : YELLOW;
+      std::string val = BOLD + col + formatDouble(pbrSpeedup, 2) + "x" + RESET;
       std::string sceneTag = pbrSceneName.empty() ? "" : (" [" + pbrSceneName + "]");
-      std::string extra = " in PBR Ray Tracing" + sceneTag + " (" + formatDouble(dgcPBRRate, 1) + " vs " +
-                          formatDouble(megakernelPBRRate, 1) + " MRays/s)";
+      std::string extra = " in PBR Ray Tracing" + sceneTag + " (" +
+                          formatScaledMetricString(dgcPBRRate, "MRays/s", 2) + " vs " +
+                          formatScaledMetricString(megakernelPBRRate, "MRays/s", 2) + ")";
       printSummaryRow("Wavefront Scheduling Speedup", val, extra);
     }
     if (scanlineRate > 0.0 && tiledRate > 0.0) {
       double cacheGain = ((tiledRate - scanlineRate) / scanlineRate) * 100.0;
       std::string val = BOLD + CYAN + (cacheGain >= 0.0 ? "+" : "") + formatDouble(cacheGain, 1) + "%" + RESET;
-      std::string extra = " with 2D Screen Tiling (" + formatDouble(tiledRate, 1) + " vs " +
-                          formatDouble(scanlineRate, 1) + " MRays/s)";
+      std::string extra = " with 2D Screen Tiling (" +
+                          formatScaledMetricString(tiledRate, "MRays/s", 1) + " vs " +
+                          formatScaledMetricString(scanlineRate, "MRays/s", 1) + ")";
       printSummaryRow("BVH Traversal Cache Locality", val, extra);
     }
     if (maxBlasUpdateRate > 0.0 || maxTlasRate > 0.0) {
-      std::string val = BOLD + YELLOW + formatDouble(maxBlasUpdateRate, 1) + " MTris/s" + RESET + " (BLAS Update) | " +
-                        BOLD + YELLOW + formatDouble(maxTlasRate, 1) + " MInst/s" + RESET + " (TLAS Construction)";
+      std::string val = BOLD + YELLOW + formatScaledMetricString(maxBlasUpdateRate, "MTris/s", 1) + RESET + " (BLAS Update) | " +
+                        BOLD + YELLOW + formatScaledMetricString(maxTlasRate, "MInst/s", 1) + RESET + " (TLAS Construction)";
       printSummaryRow("Acceleration Build Peak Rates", val, "");
     }
     if (rawBoxGis > 0.0) {
@@ -1181,7 +1292,7 @@ void ResultFormatter::print() {
       printSummaryRow("Hardware BVH Traversal (Coherent)", val, " (Max Occupancy)");
     }
     if (maxRayRate > 0.0) {
-      std::string val = BOLD + GREEN + formatDouble(maxRayRate, 1) + " MRays/s" + RESET;
+      std::string val = BOLD + GREEN + formatScaledMetricString(maxRayRate, "MRays/s", 1) + RESET;
       std::string extra = " (" + maxRayWorkload + ")";
       printSummaryRow("Peak Measured Ray Rate       ", val, extra);
     }
@@ -1533,7 +1644,7 @@ void ResultFormatter::printComparison(const std::vector<ImportedRun> &runs) {
       }
     }
     wv.isValid = true;
-    wv.formattedStr = formatDouble(wv.val, prec) + " " + wv.metric;
+    wv.formattedStr = formatScaledMetricString(wv.val, wv.metric, prec);
     return wv;
   };
 
@@ -1640,14 +1751,14 @@ void ResultFormatter::printComparison(const std::vector<ImportedRun> &runs) {
           if (subcat.name == "Device Memory Bandwidth" && wl.configIndex == 0) vramBwRates[i] = vals[i].val;
           if (subcat.name == "Latency" && wl.cleanName.find("L0") != std::string::npos) l0LatRates[i] = vals[i].val;
           if (subcat.name.find("Scene Path Tracing (Multi-Bounce)") != std::string::npos && wl.configIndex == 3) {
-            if (ptTradRates[i] == 0.0 || subcat.name.find("Indoor") != std::string::npos) {
+            if (ptTradRates[i] == 0.0 || subcat.name.find("Reactor") != std::string::npos || subcat.name.find("Indoor") != std::string::npos) {
               ptTradRates[i] = vals[i].val;
             }
           }
           if (subcat.name.find("Material Shading") != std::string::npos) {
-            if (wl.configIndex == 0 && (matTradRates[i] == 0.0 || subcat.name.find("Showroom") != std::string::npos)) {
+            if (wl.configIndex == 0 && (matTradRates[i] == 0.0 || subcat.name.find("Reactor") != std::string::npos || subcat.name.find("Showroom") != std::string::npos)) {
               matTradRates[i] = vals[i].val;
-            } else if (wl.configIndex == 2 && (matWlRates[i] == 0.0 || subcat.name.find("Showroom") != std::string::npos)) {
+            } else if (wl.configIndex == 2 && (matWlRates[i] == 0.0 || subcat.name.find("Reactor") != std::string::npos || subcat.name.find("Showroom") != std::string::npos)) {
               matWlRates[i] = vals[i].val;
             }
           }
@@ -1680,7 +1791,8 @@ void ResultFormatter::printComparison(const std::vector<ImportedRun> &runs) {
 
             std::string unit = vals[bestIdx].metric;
             int prec = (std::abs(realDelta) >= 100.0) ? 1 : 2;
-            std::string realStr = (isLatency ? "-" : "+") + formatDouble(std::abs(realDelta), prec) + " " + unit;
+            std::string realStr = (isLatency ? "-" : "+") +
+                                  formatScaledMetricString(std::abs(realDelta), unit, prec);
             std::string relRatioStr = formatDouble(ratio, 2) + "x";
 
             if (N == 2) {
@@ -1799,18 +1911,21 @@ void ResultFormatter::printComparison(const std::vector<ImportedRun> &runs) {
       double ratio = lowerIsBetter ? (sVal / bVal) : (bVal / sVal);
       double realLead = lowerIsBetter ? (sVal - bVal) : (bVal - sVal);
       std::string color = devColors[best % devColors.size()];
+      const ScaledMetricValue scaledLead =
+          scaleMetricForDisplay(std::abs(realLead), unit, 1);
       std::string valStr = BOLD + color + std::string(1, bLetter) + " (" + devNicks[best] + ")" + RESET +
                            " leads by " + BOLD + GREEN + formatDouble(ratio, 2) + "x" + RESET +
-                           " (" + (lowerIsBetter ? "-" : "+") + formatDouble(std::abs(realLead), 1) + " " + unit + ")";
+                           " (" + (lowerIsBetter ? "-" : "+") +
+                           formatDouble(scaledLead.value, scaledLead.precision) + " " + scaledLead.unit + ")";
 
       std::string details = " [";
       for (size_t i = 0; i < N; ++i) {
         if (rates[i] <= 0.0) continue;
         char l = static_cast<char>('A' + i);
         if (details.length() > 2) details += " vs ";
-        details += std::string(1, l) + ": " + formatDouble(rates[i], 1);
+        details += std::string(1, l) + ": " + formatScaledMetricString(rates[i], unit, 1);
       }
-      details += " " + unit + "]";
+      details += "]";
       printRow(label, valStr, details);
     }
   };
@@ -2158,7 +2273,7 @@ std::string resultsToJson(const std::vector<ResultData> &results,
       const uint32_t h = r.height ? r.height : 1080u;
       const uint32_t spp = (r.samplesPerFrame > 1u)
           ? r.samplesPerFrame
-          : ((r.configIndex == 23u || r.configIndex == 24u) ? 16u : 1u);
+          : 1u;
       const double fps = computeRaySchedulingFps(r, value);
       addFixed6(doc, rObj, "fps", fps);
       if (spp > 1u) {
@@ -2176,40 +2291,45 @@ std::string resultsToJson(const std::vector<ResultData> &results,
         const uint64_t ops = (r.configIndex == 0) ? r.operations : (r.operations * 64);
         throughputGis = (static_cast<double>(ops) / time_s) / 1e9;
       }
-      yyjson_mut_obj_add_strcpy(doc, rObj, "peak_type", r.configIndex == 0 ? "Triangle" : "Box");
-      yyjson_mut_obj_add_strcpy(doc, rObj, "traversal_model",
-                                r.configIndex == 0 ? "coherent_single_layer_triangle"
-                                                   : "synthetic_64_layer_aabb");
-      yyjson_mut_obj_add_strcpy(doc, rObj, "synthetic_model",
-                                r.configIndex == 0 ? "coherent_single_layer_triangle"
-                                                   : "synthetic_64_layer_aabb");
+      const char *peakType = (r.configIndex == 0)
+          ? "Triangle"
+          : (r.configIndex == 2 ? "Software_Box" : "Box");
+      const char *travModel = (r.configIndex == 0)
+          ? "coherent_single_layer_triangle"
+          : (r.configIndex == 2 ? "software_64_layer_aabb_slab" : "synthetic_64_layer_aabb");
+      const char *disclosure = (r.configIndex == 0)
+          ? "Measures sustained hardware triangle intersection rate terminating on Layer 0."
+          : (r.configIndex == 2
+              ? "Measures software compute shader (VALU) 64-layer AABB slab intersection loop baseline without hardware BVH traversal."
+              : "Measures synthetic 64-layer AABB traversal (assuming 8 BVH8 nodes x 8 box tests = 64 box tests/ray) under idealized occupancy; does not represent real triangle mesh geometry.");
+      yyjson_mut_obj_add_strcpy(doc, rObj, "peak_type", peakType);
+      yyjson_mut_obj_add_strcpy(doc, rObj, "traversal_model", travModel);
+      yyjson_mut_obj_add_strcpy(doc, rObj, "synthetic_model", travModel);
       yyjson_mut_obj_add_uint(doc, rObj, "model_box_tests_per_ray",
                               r.configIndex == 0 ? 1u : 64u);
-      yyjson_mut_obj_add_strcpy(
-          doc, rObj, "synthetic_disclosure",
-          r.configIndex == 0
-              ? "Measures sustained hardware triangle intersection rate terminating on Layer 0."
-              : "Measures synthetic 64-layer AABB traversal (assuming 8 BVH8 nodes x 8 box tests = 64 box tests/ray) under idealized occupancy; does not represent real triangle mesh geometry.");
+      yyjson_mut_obj_add_strcpy(doc, rObj, "synthetic_disclosure", disclosure);
       addFixed6(doc, rObj, "throughput_gis", throughputGis);
 
-      const auto &prof = DeviceDatabase::lookup(r.vendorId, r.deviceId, r.deviceName);
-      const double peakGis =
-          (r.configIndex == 0) ? prof.theoreticalTriangleGis : prof.theoreticalBoxGis;
-      if (peakGis > 0.0) {
-        double pctPeak = (throughputGis / peakGis) * 100.0;
-        if (!std::isfinite(pctPeak)) pctPeak = 0.0;
-        char buf[96];
-        if (r.configIndex == 0) {
-          std::snprintf(buf, sizeof(buf), "%.1f%% of %.1f GIS/s %s Boost Peak", pctPeak,
-                        peakGis, prof.archName.c_str());
-        } else {
-          std::snprintf(buf, sizeof(buf), "%.1f%% of %.2f TIS/s %s Boost Peak", pctPeak,
-                        peakGis / 1000.0, prof.archName.c_str());
+      if (r.configIndex == 0 || r.configIndex == 1) {
+        const auto &prof = DeviceDatabase::lookup(r.vendorId, r.deviceId, r.deviceName);
+        const double peakGis =
+            (r.configIndex == 0) ? prof.theoreticalTriangleGis : prof.theoreticalBoxGis;
+        if (peakGis > 0.0) {
+          double pctPeak = (throughputGis / peakGis) * 100.0;
+          if (!std::isfinite(pctPeak)) pctPeak = 0.0;
+          char buf[96];
+          if (r.configIndex == 0) {
+            std::snprintf(buf, sizeof(buf), "%.1f%% of %.1f GIS/s %s Boost Peak", pctPeak,
+                          peakGis, prof.archName.c_str());
+          } else {
+            std::snprintf(buf, sizeof(buf), "%.1f%% of %.2f TIS/s %s Boost Peak", pctPeak,
+                          peakGis / 1000.0, prof.archName.c_str());
+          }
+          yyjson_mut_obj_add_strcpy(doc, rObj, "target_architecture", prof.archName.c_str());
+          addFixed6(doc, rObj, "theoretical_peak_gis", peakGis);
+          addFixed6(doc, rObj, "pct_theoretical_peak", pctPeak);
+          yyjson_mut_obj_add_strcpy(doc, rObj, "details_speedup", buf);
         }
-        yyjson_mut_obj_add_strcpy(doc, rObj, "target_architecture", prof.archName.c_str());
-        addFixed6(doc, rObj, "theoretical_peak_gis", peakGis);
-        addFixed6(doc, rObj, "pct_theoretical_peak", pctPeak);
-        yyjson_mut_obj_add_strcpy(doc, rObj, "details_speedup", buf);
       }
     }
 

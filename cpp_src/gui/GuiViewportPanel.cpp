@@ -25,11 +25,9 @@ struct SceneMeta {
     const char* geometryNote;
 };
 
-constexpr SceneMeta kScenes[4] = {
-    {"Showroom Studio",    "showroom", "SHOWROOM", "High-poly automotive clear-coat studio with area lights & glossy reflections"},
-    {"Indoor Atrium",      "indoor",   "INDOOR",   "First-party MIT/CC0 Renaissance Colonnade Atrium (426K triangles, multi-bounce GI)"},
-    {"Open-World Forest",  "forest",   "FOREST",   "Dense instanced alpha-cutout foliage canopy & bark geometry"},
-    {"Outdoor Landscape",  "outdoor",  "OUTDOOR",  "Procedural eroded heightfield terrain with directional sun & sky atmosphere"}
+constexpr SceneMeta kScenes[1] = {
+    {"Zero-Day Reactor Bay", "reactor", "REACTOR",
+     "Procedural industrial tokamak hangar (8 BSDF archetypes, hex-grate catwalks, refractive glass booth, 24 PBR textures)"}
 };
 
 bool loadViewportJsonContent(VulkanContext* guiVk, const std::string& bareJsonName, std::string& outJson) {
@@ -182,8 +180,8 @@ ParsedPipelineBreakdown parsePipelineBreakdownJson(const std::string& jsonStr) {
 
 void GuiApp::renderRayTracingViewport() {
     const BringUpColors c = getBringUpColors(m_palette);
-    m_rtSceneIndex = std::clamp(m_rtSceneIndex, 0, 3);
-    const SceneMeta& curScene = kScenes[m_rtSceneIndex];
+    m_rtSceneIndex = 0;
+    const SceneMeta& curScene = kScenes[0];
     const std::string tag = curScene.tag;
     const bool isRunning = (m_execState == ExecutionState::Running);
 
@@ -211,39 +209,22 @@ void GuiApp::renderRayTracingViewport() {
         }
     }
 
-    // Scene Selector & Direct Capture Toolbar (applicable across all 4 modes)
+    // Scene Readout & Direct Capture Toolbar
     ImGui::Spacing();
     ImGui::TextColored(c.textMuted, "SCENE:");
-    for (int si = 0; si < 4; ++si) {
-        float bw = ImGui::CalcTextSize(kScenes[si].title).x + s(14.0f);
-        sameLineIfFits(bw, s(4.0f));
-        bool sel = (m_rtSceneIndex == si);
-        std::string sId = "##RtSceneSel_" + std::to_string(si);
-        if (tacticalButton(sId.c_str(), kScenes[si].title, ImVec2(0.0f, s(21.0f)), sel, c)) {
-            m_rtSceneIndex = si;
-        }
-    }
+    ImGui::SameLine(0.0f, s(6.0f));
+    ImGui::TextColored(c.phosphorHi, "%s", curScene.title);
 
     if (isRunning) ImGui::BeginDisabled();
     {
         std::string capSceneLbl = std::string("CAPTURE ") + curScene.shortCap;
         float capW = ImGui::CalcTextSize(capSceneLbl.c_str()).x + s(16.0f);
-        sameLineIfFits(capW, s(10.0f));
+        sameLineIfFits(capW, s(12.0f));
         if (tacticalButton("##RtCaptureScene", capSceneLbl.c_str(), ImVec2(0.0f, s(21.0f)), false, c)) {
             startSceneVerificationCapture(tag);
         }
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
             ImGui::SetTooltip("Render & verify actual GPU output for %s (stays on F3)", curScene.title);
-        }
-
-        const char* capAllLbl = "CAPTURE ALL 4";
-        float capAllW = ImGui::CalcTextSize(capAllLbl).x + s(14.0f);
-        sameLineIfFits(capAllW, s(4.0f));
-        if (tacticalButton("##RtCaptureAll", capAllLbl, ImVec2(0.0f, s(21.0f)), false, c)) {
-            startSceneVerificationCapture("all");
-        }
-        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-            ImGui::SetTooltip("Render & verify actual GPU output across all 4 scenes");
         }
     }
     if (isRunning) ImGui::EndDisabled();
@@ -372,13 +353,23 @@ void GuiApp::renderRayTracingViewport() {
     auto renderParityBannerIfMeasured = [&](const ParsedParityProfile& prof) {
         double speedup = (prof.tradMs > 0.0 && prof.workMs > 0.0) ? (prof.tradMs / prof.workMs) : 1.0;
         ImVec4 statusCol = (prof.psnr >= 45.0) ? c.okColor : c.errColor;
+        const ScaledMetricValue tradScaled = scaleMetricForDisplay(prof.tradMrays, "MRays/s", 0);
+        const ScaledMetricValue workScaled = scaleMetricForDisplay(prof.workMrays, "MRays/s", 0);
+        char tradRateBuf[48];
+        char workRateBuf[48];
+        std::snprintf(tradRateBuf, sizeof(tradRateBuf),
+                      tradScaled.scaled ? "%.2f %s" : "%.0f MR/s",
+                      tradScaled.value, tradScaled.unit.c_str());
+        std::snprintf(workRateBuf, sizeof(workRateBuf),
+                      workScaled.scaled ? "%.2f %s" : "%.0f MR/s",
+                      workScaled.value, workScaled.unit.c_str());
         pushMonoFont();
         ImGui::TextColored(statusCol,
-                           "%s  |  PSNR: %.2f dB  |  EXACT: %.2f%%  |  MEGAKERNEL: %.2f ms (%.0f MR/s)  |  DGC: %.2f ms (%.0f MR/s, %.2fx)",
+                           "%s  |  PSNR: %.2f dB  |  EXACT: %.2f%%  |  MEGAKERNEL: %.2f ms (%s)  |  DGC: %.2f ms (%s, %.2fx)",
                            prof.status.empty() ? "PARITY TELEMETRY" : prof.status.c_str(),
                            prof.psnr, prof.exactPct,
-                           prof.tradMs, prof.tradMrays,
-                           prof.workMs, prof.workMrays, speedup);
+                           prof.tradMs, tradRateBuf,
+                           prof.workMs, workRateBuf, speedup);
         popMonoFont();
         ImGui::Spacing();
     };
@@ -690,7 +681,13 @@ void GuiApp::renderRayTracingViewport() {
                     ImGui::TableSetColumnIndex(0); ImGui::TextColored(c.textPrimary, "%s", st.title.c_str());
                     ImGui::TableSetColumnIndex(1); ImGui::TextColored(c.textMuted, "%s", st.passType.c_str());
                     ImGui::TableSetColumnIndex(2); pushMonoFont(); ImGui::TextColored(c.textSecondary, "%.2f ms", st.timeMs); popMonoFont();
-                    ImGui::TableSetColumnIndex(3); pushMonoFont(); ImGui::TextColored(c.cyanAccent, "%.1f MRays/s", st.mrays); popMonoFont();
+                    ImGui::TableSetColumnIndex(3);
+                    pushMonoFont();
+                    const ScaledMetricValue stScaled = scaleMetricForDisplay(st.mrays, "MRays/s", 1);
+                    ImGui::TextColored(c.cyanAccent,
+                                       stScaled.scaled ? "%.2f %s" : "%.1f %s",
+                                       stScaled.value, stScaled.unit.c_str());
+                    popMonoFont();
                 }
                 ImGui::EndTable();
             }

@@ -102,6 +102,18 @@ struct UnifiedSessionMetadata {
 };
 
 double computeResultValue(const ResultData &r);
+struct ScaledMetricValue {
+  double value = 0.0;
+  std::string unit;
+  int precision = 2;
+  bool scaled = false;
+};
+ScaledMetricValue scaleMetricForDisplay(double rawValue,
+                                        const std::string &rawMetric,
+                                        int defaultPrecision = 2);
+std::string formatScaledMetricString(double rawValue,
+                                       const std::string &rawMetric,
+                                       int defaultPrecision = 2);
 std::string cleanWorkloadName(const std::string &rawName, const std::string &subcat);
 std::string extractSceneName(const std::string &rawName);
 std::string getDefaultJsonFilename();

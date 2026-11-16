@@ -372,6 +372,7 @@ set(LIB_SOURCES
     cpp_src/benchmarks/MemBandwidthBench.cpp
     cpp_src/benchmarks/SysMemBandwidthBench.cpp
     cpp_src/benchmarks/SysMemLatencyBench.cpp
+    cpp_src/benchmarks/CacheBandwidthBench.cpp
     cpp_src/benchmarks/CacheBench.cpp
     cpp_src/benchmarks/CacheLatencyCurveBench.cpp
     cpp_src/benchmarks/LdsBankConflictBench.cpp
@@ -391,7 +392,6 @@ set(LIB_SOURCES
     cpp_src/benchmarks/RayASBuildBench.cpp
     cpp_src/benchmarks/RayProceduralBench.cpp
     cpp_src/benchmarks/RaySchedulingBench.cpp
-    cpp_src/scene/GltfScene.cpp
     cpp_src/utils/HardwareTelemetry.cpp
     cpp_src/utils/ImageExport.cpp
     cpp_src/utils/IsaDumper.cpp
@@ -878,13 +878,7 @@ if(UNIX AND NOT APPLE)
 
 endif()
 
-# Cross-platform runtime assets (3D Models, GUI Thumbnails, PBR/Geometry Reference Images, and Profile JSONs)
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets/models")
-    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/assets/models/"
-            DESTINATION share/gpubench/models
-            FILES_MATCHING PATTERN "*.glb")
-endif()
-
+# Cross-platform runtime assets (GUI Thumbnails, PBR/Geometry Reference Images, and Profile JSONs)
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets/thumbnails")
     install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/assets/thumbnails/"
             DESTINATION share/gpubench/assets/thumbnails

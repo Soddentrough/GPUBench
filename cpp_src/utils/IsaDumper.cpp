@@ -105,14 +105,12 @@ static std::vector<BenchmarkMapping> getBenchmarkMappings() {
       {"In-Shader Indirect Synthesis", {"indirect", "inshaderindirect"}, {0, 6}, "Direct Dispatch", "direct_worker.comp.spv", "", ""},
       {"In-Shader Indirect Synthesis", {"indirect", "inshaderindirect"}, {1}, "Indirect Classify", "indirect_classify.comp.spv", "", ""},
       {"In-Shader Indirect Synthesis", {"indirect", "inshaderindirect"}, {2, 3, 4, 5}, "Indirect Worker", "indirect_worker.comp.spv", "", ""},
-      {"Device Memory Bandwidth", {"membw", "devicememorybandwidth"}, {0, 1, 2}, "MemBW 128", "membw_128.comp.spv", "membw_128.co", "membw_128.cl"},
-      {"Device Memory Bandwidth", {"membw", "devicememorybandwidth"}, {3, 4, 5}, "MemBW 256", "membw_256.comp.spv", "membw_256.co", "membw_256.cl"},
-      {"Device Memory Bandwidth", {"membw", "devicememorybandwidth"}, {6, 7, 8}, "MemBW 1024", "membw_1024.comp.spv", "membw_1024.co", "membw_1024.cl"},
-      {"Cache Bandwidth", {"cachebw", "l0cachebandwidth", "l1cachebandwidth", "l2cachebandwidth", "l3cachebandwidth", "l0b", "l1b", "l2b", "l3b", "l0bw", "l1bw", "l2bw", "l3bw"}, {0}, "Cache Bandwidth", "cache_bw_robust.comp.spv", "cache_bw_robust.co", "cache_bw_robust.cl"},
+      {"Device Memory Bandwidth", {"membw", "devicememorybandwidth"}, {0, 1, 2}, "MemBW 256", "membw_256.comp.spv", "membw_256.co", "membw_256.cl"},
+      {"Cache Hierarchy Bandwidth", {"cachebw", "cachehierarchybandwidth", "cachebandwidth", "l0cachebandwidth", "l1cachebandwidth", "l2cachebandwidth", "l3cachebandwidth", "l0b", "l1b", "l2b", "l3b", "l0bw", "l1bw", "l2bw", "l3bw"}, {0, 1, 2, 3}, "Cache Bandwidth", "cache_bw_robust.comp.spv", "cache_bw_robust.co", "cache_bw_robust.cl"},
       {"L0 Vector Cache Latency", {"l0cache", "l0cachelatency", "l0vectorcachelatency16kb", "l0l", "cache"}, {0}, "L0 Cache Latency", "l0_cache_latency.comp.spv", "l0_cache_latency.co", "l0_cache_latency.cl"},
       {"Cache Latency Curve", {"cachelatencycurve", "cachecurve"}, {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14}, "Cache Latency Curve", "cache_latency_curve.comp.spv", "cache_latency_curve.co", "cache_latency_curve.cl"},
       {"Pixel Fill Rate", {"pixelfill", "pixelfillrate", "fillrate", "raster", "rop"}, {0, 1, 2}, "Pixel Fill Rate (Vertex + Fragment)", "pixel_fill.frag.spv", "", ""},
-      {"RayRawTraversal", {"rayrawtraversal", "rawtraversal"}, {0, 1}, "Raw Traversal", "rt_raw_traversal.comp.spv", "", ""},
+      {"RayRawTraversal", {"rayrawtraversal", "rawtraversal", "rtraw", "bvhraw", "rayintersect", "intersect"}, {0, 1, 2}, "Raw Traversal", "rt_raw_traversal.comp.spv", "", ""},
       {"RayASBuild", {"rayasbuild", "asbuild", "bvhbuild"}, {0, 1, 2, 3, 4, 5, 6, 7}, "Acceleration Structure Build/Update", "", "", "", "", "Fixed-function Vulkan Acceleration Structure Builder (vkCmdBuildAccelerationStructuresKHR) — executes on hardware BVH build unit with no programmable shader ISA."},
       {"RayIntersect", {"rayintersect"}, {0, 1}, "Ray Intersect", "rt_benchmark.comp.spv", "", ""},
       {"RayAnyHit", {"rayanyhit"}, {0, 1}, "Ray Any-Hit (RTP)", "rayanyhit_pipeline.rgen.spv", "", ""},
@@ -121,14 +119,13 @@ static std::vector<BenchmarkMapping> getBenchmarkMappings() {
       {"RayPayload", {"raypayload"}, {0}, "Ray Payload 16B (RTP)", "raypayload_16b.rgen.spv", "", ""},
       {"RayPayload", {"raypayload"}, {1}, "Ray Payload 128B (RTP)", "raypayload_128b.rgen.spv", "", ""},
       {"RayPayload", {"raypayload"}, {2}, "Ray Payload 256B (RTP)", "raypayload_256b.rgen.spv", "", ""},
-      {"RayScheduling", {"rayscheduling", "rtscheduling", "rayschedulingopenworldforest", "rayschedulingoutdoorlandscape", "rayschedulingindooratrium", "rayschedulingshowroomstudio", "rayexecutionparadigm"}, {0, 3, 6, 9, 12, 14, 15, 16, 17, 19, 23, 30, 32}, "RT Scheduling — Compute Megakernel", "rt_scheduling_traditional_megakernel.comp.spv", "", ""},
-      {"RayScheduling", {"rayscheduling", "rtscheduling", "rayschedulingopenworldforest", "rayschedulingoutdoorlandscape", "rayschedulingindooratrium", "rayschedulingshowroomstudio", "rayexecutionparadigm"}, {13, 25, 26, 27}, "RT Scheduling — DGC Classify", "rt_scheduling_device_generated_commands_classify.comp.spv", "", ""},
-      {"RayScheduling", {"rayscheduling", "rtscheduling", "rayschedulingopenworldforest", "rayschedulingoutdoorlandscape", "rayschedulingindooratrium", "rayschedulingshowroomstudio", "rayexecutionparadigm"}, {2, 11, 18}, "RT Scheduling — DGC Material", "rt_scheduling_device_generated_commands_material.comp.spv", "", ""},
-      {"RayScheduling", {"rayscheduling", "rtscheduling", "rayschedulingopenworldforest", "rayschedulingoutdoorlandscape", "rayschedulingindooratrium", "rayschedulingshowroomstudio", "rayexecutionparadigm"}, {5, 8, 24}, "RT Scheduling — DGC Bounce", "rt_scheduling_device_generated_commands_bounce.comp.spv", "", ""},
-      {"RayScheduling", {"rayscheduling", "rtscheduling", "rayschedulingopenworldforest", "rayschedulingoutdoorlandscape", "rayschedulingindooratrium", "rayschedulingshowroomstudio", "rayexecutionparadigm"}, {21, 22}, "RT Scheduling — DGC Shadow", "rt_scheduling_device_generated_commands_shadow.comp.spv", "", ""},
-      {"RayScheduling", {"rayscheduling", "rtscheduling", "rayschedulingopenworldforest", "rayschedulingoutdoorlandscape", "rayschedulingindooratrium", "rayschedulingshowroomstudio", "rayexecutionparadigm"}, {31, 33}, "RT Scheduling — DGC Multi-Light", "rt_scheduling_device_generated_commands_light.comp.spv", "", ""},
-      {"RayScheduling", {"rayscheduling", "rtscheduling", "rayschedulingopenworldforest", "rayschedulingoutdoorlandscape", "rayschedulingindooratrium", "rayschedulingshowroomstudio", "rayexecutionparadigm"}, {28}, "RT Scheduling — RTP Baseline", "rt_scheduling.rgen.spv", "", ""},
-      {"RayScheduling", {"rayscheduling", "rtscheduling", "rayschedulingopenworldforest", "rayschedulingoutdoorlandscape", "rayschedulingindooratrium", "rayschedulingshowroomstudio", "rayexecutionparadigm"}, {1, 4, 7, 10, 20, 29}, "RT Scheduling — RTP + SER", "rt_scheduling_ser.rgen.spv", "", ""},
+      {"RayScheduling", {"rayscheduling", "rtscheduling", "reactor", "reactorbay", "zeroday", "hangar", "rayschedulingzerodayreactorbay", "rayschedulingopenworldforest", "rayschedulingoutdoorlandscape", "rayschedulingindooratrium", "rayschedulingshowroomstudio", "rayexecutionparadigm"}, {0, 3, 6, 9, 11, 12, 13, 14, 15, 22}, "RT Scheduling — Compute Megakernel", "rt_scheduling_traditional_megakernel.comp.spv", "", ""},
+      {"RayScheduling", {"rayscheduling", "rtscheduling", "reactor", "reactorbay", "zeroday", "hangar", "rayschedulingzerodayreactorbay", "rayschedulingopenworldforest", "rayschedulingoutdoorlandscape", "rayschedulingindooratrium", "rayschedulingshowroomstudio", "rayexecutionparadigm"}, {10, 17, 18, 19}, "RT Scheduling — DGC Classify", "rt_scheduling_device_generated_commands_classify.comp.spv", "", ""},
+      {"RayScheduling", {"rayscheduling", "rtscheduling", "reactor", "reactorbay", "zeroday", "hangar", "rayschedulingzerodayreactorbay", "rayschedulingopenworldforest", "rayschedulingoutdoorlandscape", "rayschedulingindooratrium", "rayschedulingshowroomstudio", "rayexecutionparadigm"}, {2, 8}, "RT Scheduling — DGC Material", "rt_scheduling_device_generated_commands_material.comp.spv", "", ""},
+      {"RayScheduling", {"rayscheduling", "rtscheduling", "reactor", "reactorbay", "zeroday", "hangar", "rayschedulingzerodayreactorbay", "rayschedulingopenworldforest", "rayschedulingoutdoorlandscape", "rayschedulingindooratrium", "rayschedulingshowroomstudio", "rayexecutionparadigm"}, {5}, "RT Scheduling — DGC Bounce", "rt_scheduling_device_generated_commands_bounce.comp.spv", "", ""},
+      {"RayScheduling", {"rayscheduling", "rtscheduling", "reactor", "reactorbay", "zeroday", "hangar", "rayschedulingzerodayreactorbay", "rayschedulingopenworldforest", "rayschedulingoutdoorlandscape", "rayschedulingindooratrium", "rayschedulingshowroomstudio", "rayexecutionparadigm"}, {23}, "RT Scheduling — DGC Multi-Light", "rt_scheduling_device_generated_commands_light.comp.spv", "", ""},
+      {"RayScheduling", {"rayscheduling", "rtscheduling", "reactor", "reactorbay", "zeroday", "hangar", "rayschedulingzerodayreactorbay", "rayschedulingopenworldforest", "rayschedulingoutdoorlandscape", "rayschedulingindooratrium", "rayschedulingshowroomstudio", "rayexecutionparadigm"}, {20}, "RT Scheduling — RTP Baseline", "rt_scheduling.rgen.spv", "", ""},
+      {"RayScheduling", {"rayscheduling", "rtscheduling", "reactor", "reactorbay", "zeroday", "hangar", "rayschedulingzerodayreactorbay", "rayschedulingopenworldforest", "rayschedulingoutdoorlandscape", "rayschedulingindooratrium", "rayschedulingshowroomstudio", "rayexecutionparadigm"}, {1, 4, 7, 16, 21}, "RT Scheduling — RTP + SER", "rt_scheduling_ser.rgen.spv", "", ""},
       {"Interconnect", {"interconnect", "pciehostdeviceinterconnect", "pcie", "rebar", "p2p"}, {0, 1, 2, 3, 5}, "Interconnect — DMA / ReBAR / P2P Transfer", "", "", "", "", "PCIe DMA / Resizable BAR / Peer-to-Peer transfer benchmark — executes via Vulkan copy/transfer engines and host CPU streaming with no timed compute shader ISA."},
       {"Interconnect", {"interconnect", "pciehostdeviceinterconnect", "pcie", "rebar", "p2p"}, {4}, "Interconnect — Unified Memory Coherency Latency", "interconnect_latency.comp.spv", "", ""},
       {"AsyncOverlap", {"asyncoverlap", "asynccomputecopyoverlap", "async", "multiqueue", "ace", "sdma"}, {0, 1}, "AsyncOverlap — Graphics Pass", "async_gfx.frag.spv", "", ""},
@@ -136,13 +133,16 @@ static std::vector<BenchmarkMapping> getBenchmarkMappings() {
       {"SparseMatrix", {"sparsematrix", "2:4structuredsparsematrix", "sparse", "sparsity"}, {0}, "Sparse FP16 2:4 (Matrix)", "", "sparse_fp16_matrix.co", ""},
       {"SparseMatrix", {"sparsematrix", "2:4structuredsparsematrix", "sparse", "sparsity"}, {1}, "Sparse FP8 2:4 (Matrix)", "", "sparse_fp8_matrix.co", ""},
       {"SparseMatrix", {"sparsematrix", "2:4structuredsparsematrix", "sparse", "sparsity"}, {2}, "Sparse INT8 2:4 (Matrix)", "", "sparse_int8_matrix.co", ""},
-      {"CoopVector", {"coopvector", "cooperativevector", "cooperativevectorneuralshading"}, {0}, "CoopVector FP16 MatVec", "coop_vector_fp16.comp.spv", "", ""},
-      {"CoopVector", {"coopvector", "cooperativevector", "cooperativevectorneuralshading"}, {1}, "CoopVector INT8 MatVec", "coop_vector_int8.comp.spv", "", ""},
+      {"CoopVector", {"coopvector", "cooperativevector", "cooperativevectorneuralshading", "neural", "mlp"}, {0}, "CoopVector FP16 Shader Baseline", "coop_vector_fp16_baseline.comp.spv", "", ""},
+      {"CoopVector", {"coopvector", "cooperativevector", "cooperativevectorneuralshading", "neural", "mlp"}, {1}, "CoopVector FP16 MatVec", "coop_vector_fp16.comp.spv", "", ""},
+      {"CoopVector", {"coopvector", "cooperativevector", "cooperativevectorneuralshading", "neural", "mlp"}, {2}, "CoopVector INT8 Shader Baseline", "coop_vector_int8_baseline.comp.spv", "", ""},
+      {"CoopVector", {"coopvector", "cooperativevector", "cooperativevectorneuralshading", "neural", "mlp"}, {3}, "CoopVector INT8 MatVec", "coop_vector_int8.comp.spv", "", ""},
       {"WorkGraphs", {"workgraphs", "gpuworkgraphsproducerconsumer", "shaderenqueue"}, {0}, "WorkGraphs — DGC Producer", "workgraphs_producer.comp.spv", "", ""},
       {"WorkGraphs", {"workgraphs", "gpuworkgraphsproducerconsumer", "shaderenqueue"}, {1}, "WorkGraphs — DGC Consumer", "workgraphs_consumer.comp.spv", "", ""},
       {"WorkGraphs", {"workgraphs", "gpuworkgraphsproducerconsumer", "shaderenqueue"}, {2}, "WorkGraphs — VK_AMDX_shader_enqueue", "workgraphs_amdx.comp.spv", "", ""},
-      {"RayOMM", {"rayomm", "raytracingopacitymicromap", "opacitymicromap", "omm"}, {0}, "RayOMM — Any-Hit Baseline", "rayomm.rgen.spv", "", ""},
-      {"RayOMM", {"rayomm", "raytracingopacitymicromap", "opacitymicromap", "omm"}, {1, 2}, "RayOMM — Hardware Opacity Micromap", "rayomm_omm.rgen.spv", "", ""},
+      {"RayOMM", {"rayomm", "raytracingopacitymicromap", "opacitymicromap", "omm", "rayanyhit", "anyhit", "alphacutout"}, {0}, "RayOMM — Compute RayQuery Alpha-Cutout", "rayomm_rq_alpha.comp.spv", "", ""},
+      {"RayOMM", {"rayomm", "raytracingopacitymicromap", "opacitymicromap", "omm", "rayanyhit", "anyhit", "alphacutout"}, {1, 4}, "RayOMM — RTP Any-Hit / Force-Opaque", "rayomm.rgen.spv", "", ""},
+      {"RayOMM", {"rayomm", "raytracingopacitymicromap", "opacitymicromap", "omm", "rayanyhit", "anyhit", "alphacutout"}, {2, 3}, "RayOMM — Hardware Opacity Micromap", "rayomm_omm.rgen.spv", "", ""},
       {"System Memory Bandwidth", {"sysmembandwidth", "rambandwidth", "sysmembw", "sysmem"}, {0, 1, 2}, "Host SIMD Memory Bandwidth", "", "", "", "", "Host CPU SIMD benchmark (AVX-512 / AVX2 / NEON) — executes on system RAM with no GPU shader ISA."},
       {"System Memory Latency", {"sysmemlatency", "ramlatency", "sysmemlat", "sl"}, {0}, "Host Pointer-Chasing Latency", "", "", "", "", "Host CPU pointer-chasing latency benchmark — executes on CPU caches/DRAM with no GPU shader ISA."},
   };
@@ -1520,6 +1520,14 @@ public:
       return true;
     };
 
+    if (fname == "coop_vector_fp16_baseline.comp.spv" && !fp16Supported) {
+      return emitSkip("FP16 shader arithmetic (shaderFloat16) is not supported on " +
+                      deviceName + " (" + driverInfo + ").");
+    }
+    if (fname == "coop_vector_int8_baseline.comp.spv" && !int8Supported) {
+      return emitSkip("INT8 shader arithmetic (shaderInt8) is not supported on " +
+                      deviceName + " (" + driverInfo + ").");
+    }
     if ((fname == "coop_vector_fp16.comp.spv" || fname == "coop_vector_int8.comp.spv") &&
         !coopVectorSupported) {
       return emitSkip("Cooperative vector (VK_NV_cooperative_vector) is not supported on " +
@@ -2029,7 +2037,7 @@ static std::vector<KernelArtifact> resolveArtifactsForOptions(const IsaDumperOpt
 static IsaDumperOptions applyUnmappedConfigFallback(const IsaDumperOptions &opts) {
   IsaDumperOptions fb = opts;
   if (!fb.targets.empty() && normalizeKey(fb.targets[0]) == "rayscheduling") {
-    fb.configs = {28};
+    fb.configs = {23};
   } else {
     fb.configs.clear();
   }

@@ -42,7 +42,7 @@ public:
     return "Bandwidth";
   }
   const char *GetDescription() const override {
-    return "Streaming device VRAM read, write, and read-write bandwidth across coalesced workgroup sizes.";
+    return "Streaming device VRAM read, write, and read-write bandwidth at 256 threads/workgroup.";
   }
   double GetOperationalIntensity(uint32_t config_idx = 0) const override {
     // Streaming read/write does ~0.0625..0.125 ops per byte transferred
@@ -59,7 +59,7 @@ public:
   uint32_t GetNumConfigs() const override;
   std::string GetConfigName(uint32_t config_idx) const override;
   virtual uint32_t GetExpectedKernelCount() const override {
-    return 9; // Read/Write/RW for 128, 256, and 1024 threads
+    return 3; // Read / Write / R-W at 256 threads/group
   }
 
   void setDebug(bool debug) { this->debug = debug; }

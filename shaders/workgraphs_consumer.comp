@@ -2,29 +2,46 @@
 
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
-layout(std430, set = 0, binding = 0) readonly buffer IndirectArgsBuffer {
-    uint args[];
-} indirectBuf;
+layout(std430, set = 0, binding = 0) readonly buffer BucketCounters {
+    uint counts[2048];
+} bucketCounters;
 
 layout(std430, set = 0, binding = 1) readonly buffer PayloadQueueBuffer {
     uvec4 payloads[];
 } queueBuf;
 
-layout(std430, set = 0, binding = 2) buffer OutputBuffer {
+layout(std430, set = 0, binding = 2) writeonly buffer OutputBuffer {
     float results[];
 } outBuf;
 
+layout(push_constant) uniform PushConsts {
+    uint bucketId;
+    uint bucketCapacity;
+} pc;
+
+#define FMA4(x) \
+    x = fma(x, 0.99951171875, 0.0009765625); \
+    x = fma(x, 0.99951171875, 0.0009765625); \
+    x = fma(x, 0.99951171875, 0.0009765625); \
+    x = fma(x, 0.99951171875, 0.0009765625);
+
+#define FMA32(x) \
+    FMA4(x) FMA4(x) FMA4(x) FMA4(x) \
+    FMA4(x) FMA4(x) FMA4(x) FMA4(x)
+
 void main() {
     uint gid = gl_GlobalInvocationID.x;
-    uint itemCount = indirectBuf.args[3];
+    uint itemCount = bucketCounters.counts[pc.bucketId];
     if (gid >= itemCount) {
         return;
     }
 
-    uvec4 p = queueBuf.payloads[gid];
+    uvec4 p = queueBuf.payloads[pc.bucketId * pc.bucketCapacity + gid];
     float v = float(p.y & 0xFFFFu) * 0.0001220703125 + float(p.z) * 0.125;
-    for (uint i = 0u; i < 32u; ++i) {
-        v = fma(v, 0.99951171875, 0.0009765625);
-    }
+    // Unrolled 32-step FMA evaluation (loop-free ISA parity with AMDX consumer)
+    FMA32(v)
     outBuf.results[p.x] = v;
 }
+
+#undef FMA32
+#undef FMA4

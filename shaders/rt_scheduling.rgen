@@ -35,17 +35,17 @@ layout(push_constant) uniform PushConstants {
 const uint SCENE_SHOWROOM_STUDIO = 0u;
 const uint SCENE_OUTDOOR_TERRAIN = 1u;
 const uint SCENE_INDOOR_ATRIUM   = 2u;
-const uint SCENE_AAA_FOREST       = 3u;
+const uint SCENE_REACTOR_BAY     = 3u;
 
 void getCamera(uint sceneType, out vec3 camPos, out vec3 camForward, out vec3 camRight, out vec3 camUp, out float fov) {
     if (pc.isGltf != 0u) {
-        if (sceneType == SCENE_AAA_FOREST) {
-            // AAA Open-World Woodland Forest: Eye-level trail camera gazing through dense canopy
-            camPos = vec3(0.0, -18.0, 0.55);
-            camForward = normalize(vec3(0.0, 33.0, 1.2));
+        if (sceneType == SCENE_REACTOR_BAY) {
+            // Zero-Day Reactor Bay: Elevated observation catwalk overlooking magnetic confinement core (+Z Up)
+            camPos = vec3(0.0, -21.0, 4.15);
+            camForward = normalize(vec3(0.0, 5.2, 6.2) - camPos);
             camRight = normalize(cross(camForward, vec3(0.0, 0.0, 1.0)));
             camUp = cross(camRight, camForward);
-            fov = 0.65;
+            fov = 0.62;
             return;
         } else if (sceneType == SCENE_INDOOR_ATRIUM) {
             camPos = vec3(-1150.0, 280.0, -40.0);

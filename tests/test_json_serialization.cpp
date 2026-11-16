@@ -220,7 +220,7 @@ TEST_CASE(JsonSerialization, RayScheduling16SppFpsDividedBySamplesPerPixel) {
   pt16.width = 3840;
   pt16.height = 2160;
   pt16.samplesPerFrame = 16;
-  pt16.configIndex = 24;
+  pt16.configIndex = 3;
   pt16.isValid = true;
 
   std::string jsonPayload = resultsToJson({pt16});
@@ -244,22 +244,26 @@ TEST_CASE(JsonSerialization, RayScheduling16SppFpsDividedBySamplesPerPixel) {
 }
 
 TEST_CASE(JsonSerialization, RaySchedulingMultiLightBaselineFormatting) {
-  // 1. Verify RaySchedulingBench::GetBaselineConfigIndex maps Single Light (31->30) and 128 Lights (33->32)
-  RaySchedulingBench bench(RaySchedulingBench::SceneType::Showroom);
-  ASSERT_EQ(bench.GetBaselineConfigIndex(30), -1);
-  ASSERT_EQ(bench.GetBaselineConfigIndex(31), 30);
-  ASSERT_EQ(bench.GetBaselineConfigIndex(32), -1);
-  ASSERT_EQ(bench.GetBaselineConfigIndex(33), 32);
+  // 1. Verify RaySchedulingBench::GetBaselineConfigIndex maps Total Scene Render (8->6),
+  //    Directional Shadows (16->15), and Multi-Light (23->22)
+  RaySchedulingBench bench(RaySchedulingBench::SceneType::ReactorBay);
+  ASSERT_EQ(bench.GetBaselineConfigIndex(6), -1);
+  ASSERT_EQ(bench.GetBaselineConfigIndex(8), 6);
+  ASSERT_EQ(bench.GetBaselineConfigIndex(15), -1);
+  ASSERT_EQ(bench.GetBaselineConfigIndex(16), 15);
+  ASSERT_EQ(bench.GetBaselineConfigIndex(22), -1);
+  ASSERT_EQ(bench.GetBaselineConfigIndex(23), 22);
 
-  // 2. Verify ResultFormatter::print() marks both MK configs as [Baseline] and compares 31->30 and 33->32
-  auto makeMultiLightResult = [&](uint32_t cfg, int32_t baseCfg, double timeMs, int sortWeight, const std::string &name) {
+  // 2. Verify ResultFormatter::print() marks both MK configs as [Baseline] and compares 23->22 and 8->6
+  auto makeMultiLightResult = [&](uint32_t cfg, int32_t baseCfg, double timeMs, int sortWeight,
+                                  const std::string &subcategory, const std::string &name) {
     ResultData r{};
     r.backendName = "Vulkan";
     r.deviceName = "Test GPU";
     r.deviceIndex = 0;
-    r.benchmarkName = "RayScheduling (Showroom Studio) (" + name + ")";
+    r.benchmarkName = "RayScheduling (Zero-Day Reactor Bay) (" + name + ")";
     r.component = "Ray Tracing";
-    r.subcategory = "Multi-Light Evaluation";
+    r.subcategory = subcategory;
     r.metric = "MRays/s";
     r.operations = 8294400ULL;
     r.time_ms = timeMs;
@@ -273,10 +277,14 @@ TEST_CASE(JsonSerialization, RaySchedulingMultiLightBaselineFormatting) {
   };
 
   ResultFormatter fmt;
-  fmt.addResult(makeMultiLightResult(30, -1, 2.0, 639, "Stage: Multi-Light Evaluation - Single Light (Megakernel)"));
-  fmt.addResult(makeMultiLightResult(31, 30, 1.6, 640, "Stage: Multi-Light Evaluation - Single Light (DGC)"));
-  fmt.addResult(makeMultiLightResult(32, -1, 8.0, 641, "Stage: Multi-Light Evaluation - 128 Lights (Megakernel)"));
-  fmt.addResult(makeMultiLightResult(33, 32, 6.4, 642, "Stage: Multi-Light Evaluation - 128 Lights (DGC Light Binning)"));
+  fmt.addResult(makeMultiLightResult(6, -1, 20.0, 632, "Total Scene Render",
+                                     "Scene Render: Full Frame (Megakernel)"));
+  fmt.addResult(makeMultiLightResult(8, 6, 16.0, 634, "Total Scene Render",
+                                     "Scene Render: Full Frame (DGC)"));
+  fmt.addResult(makeMultiLightResult(22, -1, 8.0, 639, "Multi-Light Evaluation",
+                                     "Stage: Multi-Light Evaluation - 128 Lights (Megakernel)"));
+  fmt.addResult(makeMultiLightResult(23, 22, 6.4, 640, "Multi-Light Evaluation",
+                                     "Stage: Multi-Light Evaluation - 128 Lights (DGC Light Binning)"));
 
   std::ostringstream captured;
   struct CoutRedirectGuard {
@@ -307,35 +315,35 @@ TEST_CASE(JsonSerialization, RaySchedulingMultiLightBaselineFormatting) {
     return out;
   };
 
-  std::string lineSingleMk, lineSingleDgc, line128Mk, line128Dgc;
+  std::string lineFullMk, lineFullDgc, line128Mk, line128Dgc;
   std::istringstream lines(stripAnsi(captured.str()));
   std::string line;
   while (std::getline(lines, line)) {
     if (line.find("Vulkan") == std::string::npos) continue;
-    if (lineSingleMk.empty() && line.find("Single Light (Megakernel)") != std::string::npos) lineSingleMk = line;
-    else if (lineSingleDgc.empty() && line.find("Single Light (DGC)") != std::string::npos) lineSingleDgc = line;
+    if (lineFullMk.empty() && line.find("Full Frame (Megakernel)") != std::string::npos) lineFullMk = line;
+    else if (lineFullDgc.empty() && line.find("Full Frame (DGC)") != std::string::npos) lineFullDgc = line;
     else if (line128Mk.empty() && line.find("128 Lights (Megakernel)") != std::string::npos) line128Mk = line;
     else if (line128Dgc.empty() && line.find("128 Lights (DGC Light Binning)") != std::string::npos) line128Dgc = line;
   }
 
-  ASSERT_TRUE(!lineSingleMk.empty());
-  ASSERT_TRUE(lineSingleMk.find("[Baseline]") != std::string::npos);
-  ASSERT_TRUE(lineSingleMk.find("└──>") == std::string::npos);
+  ASSERT_TRUE(!lineFullMk.empty());
+  ASSERT_TRUE(lineFullMk.find("[Baseline]") != std::string::npos);
+  ASSERT_TRUE(lineFullMk.find("└──>") == std::string::npos);
 
-  ASSERT_TRUE(!lineSingleDgc.empty());
-  ASSERT_TRUE(lineSingleDgc.find("└──>") != std::string::npos);
-  ASSERT_TRUE(lineSingleDgc.find("1.25x (+25.0%)") != std::string::npos);
+  ASSERT_TRUE(!lineFullDgc.empty());
+  ASSERT_TRUE(lineFullDgc.find("└──>") != std::string::npos);
+  ASSERT_TRUE(lineFullDgc.find("1.25x (+25.0%)") != std::string::npos);
 
   ASSERT_TRUE(!line128Mk.empty());
   ASSERT_TRUE(line128Mk.find("[Baseline]") != std::string::npos);
   ASSERT_TRUE(line128Mk.find("└──>") == std::string::npos);
-  ASSERT_TRUE(line128Mk.find("0.2") == std::string::npos);
 
   ASSERT_TRUE(!line128Dgc.empty());
   ASSERT_TRUE(line128Dgc.find("└──>") != std::string::npos);
   ASSERT_TRUE(line128Dgc.find("1.25x (+25.0%)") != std::string::npos);
 
   // 3. Verify legacy GUI schema import assigns matching configIndex & baselineConfigIndex
+  //    for current Reactor Bay IDs and archival volumetric IDs
   const std::string guiJson = R"json({
     "schema_version": "1.0",
     "backend": "Vulkan",
@@ -344,10 +352,12 @@ TEST_CASE(JsonSerialization, RaySchedulingMultiLightBaselineFormatting) {
       "device_id": 0,
       "device_name": "0: Test GPU",
       "benchmarks": [
-        {"id": "rt_sched_multilight_single_trad", "unit": "MRays/s", "status": "ok", "raw_operations": 8294400, "raw_time_ms": 2.0},
-        {"id": "rt_sched_multilight_single_dgc",  "unit": "MRays/s", "status": "ok", "raw_operations": 8294400, "raw_time_ms": 1.6},
-        {"id": "rt_sched_multilight_128_trad",    "unit": "MRays/s", "status": "ok", "raw_operations": 8294400, "raw_time_ms": 8.0},
-        {"id": "rt_sched_multilight_128_dgc",     "unit": "MRays/s", "status": "ok", "raw_operations": 8294400, "raw_time_ms": 6.4}
+        {"id": "rt_sched_multilight_128_trad", "unit": "MRays/s", "status": "ok", "raw_operations": 8294400, "raw_time_ms": 8.0},
+        {"id": "rt_sched_multilight_128_dgc",  "unit": "MRays/s", "status": "ok", "raw_operations": 8294400, "raw_time_ms": 6.4},
+        {"id": "rt_sched_volumetric_trad",     "unit": "MRays/s", "status": "ok", "raw_operations": 8294400, "raw_time_ms": 20.0},
+        {"id": "rt_sched_volumetric_dgc",      "unit": "MRays/s", "status": "ok", "raw_operations": 8294400, "raw_time_ms": 16.0},
+        {"id": "rt_sched_full_reactor_trad",   "unit": "MRays/s", "status": "ok", "raw_operations": 8294400, "raw_time_ms": 20.0},
+        {"id": "rt_sched_full_reactor_wl",     "unit": "MRays/s", "status": "ok", "raw_operations": 8294400, "raw_time_ms": 16.0}
       ]
     }]
   })json";
@@ -355,13 +365,64 @@ TEST_CASE(JsonSerialization, RaySchedulingMultiLightBaselineFormatting) {
   ImportedRun guiImported;
   std::string guiErr;
   ASSERT_TRUE(ResultImporter::loadFromString(guiJson, guiImported, guiErr));
-  ASSERT_EQ(guiImported.results.size(), 4u);
-  ASSERT_EQ(guiImported.results[0].configIndex, 30u);
+  ASSERT_EQ(guiImported.results.size(), 6u);
+  ASSERT_EQ(guiImported.results[0].configIndex, 22u);
   ASSERT_EQ(guiImported.results[0].baselineConfigIndex, -1);
-  ASSERT_EQ(guiImported.results[1].configIndex, 31u);
-  ASSERT_EQ(guiImported.results[1].baselineConfigIndex, 30);
-  ASSERT_EQ(guiImported.results[2].configIndex, 32u);
+  ASSERT_EQ(guiImported.results[1].configIndex, 23u);
+  ASSERT_EQ(guiImported.results[1].baselineConfigIndex, 22);
+  ASSERT_EQ(guiImported.results[2].configIndex, 27u);
   ASSERT_EQ(guiImported.results[2].baselineConfigIndex, -1);
-  ASSERT_EQ(guiImported.results[3].configIndex, 33u);
-  ASSERT_EQ(guiImported.results[3].baselineConfigIndex, 32);
+  ASSERT_EQ(guiImported.results[3].configIndex, 28u);
+  ASSERT_EQ(guiImported.results[3].baselineConfigIndex, 27);
+  ASSERT_EQ(guiImported.results[4].configIndex, 6u);
+  ASSERT_EQ(guiImported.results[4].baselineConfigIndex, -1);
+  ASSERT_EQ(guiImported.results[5].configIndex, 8u);
+  ASSERT_EQ(guiImported.results[5].baselineConfigIndex, 6);
+}
+
+TEST_CASE(JsonSerialization, GigaUnitAutoScalingAndSpeedupParity) {
+  ASSERT_EQ(formatScaledMetricString(999.99, "MRays/s"), std::string("999.99 MRays/s"));
+  ASSERT_EQ(formatScaledMetricString(999.996, "MRays/s"), std::string("1.00 GRays/s"));
+  ASSERT_EQ(formatScaledMetricString(2621.45, "MRays/s"), std::string("2.62 GRays/s"));
+  ASSERT_EQ(formatScaledMetricString(14765.8, "MTris/s"), std::string("14.77 GTris/s"));
+  ASSERT_EQ(formatScaledMetricString(8502.3, "MInst/s"), std::string("8.50 GInst/s"));
+  ASSERT_EQ(formatScaledMetricString(1540.0, "MHits/s"), std::string("1.54 GHits/s"));
+  // Non-RT units must remain untouched
+  ASSERT_EQ(formatScaledMetricString(1250.0, "GB/s"), std::string("1,250.00 GB/s"));
+
+  // Verify ResultFormatter table scales >=1000 MRays/s to 2-decimal GRays/s while computing exact 2.50x speedup
+  auto makeRt = [](uint32_t cfg, int32_t baseCfg, double mrays, const std::string &name) {
+    ResultData r{};
+    r.backendName = "Vulkan";
+    r.deviceName = "Test GPU";
+    r.deviceIndex = 0;
+    r.benchmarkName = "RayScheduling (Showroom Studio) (" + name + ")";
+    r.component = "Ray Tracing";
+    r.subcategory = "Material Shading";
+    r.metric = "MRays/s";
+    r.operations = static_cast<uint64_t>(mrays * 1e6);
+    r.time_ms = 1000.0;
+    r.width = 3840;
+    r.height = 2160;
+    r.configIndex = cfg;
+    r.baselineConfigIndex = baseCfg;
+    r.sortWeight = 600 + static_cast<int>(cfg);
+    r.isValid = true;
+    return r;
+  };
+
+  ResultFormatter fmt;
+  fmt.addResult(makeRt(0, -1, 500.0, "Material Shading (Megakernel)"));
+  fmt.addResult(makeRt(2, 0, 1250.0, "Material Shading (DGC)"));
+
+  std::ostringstream captured;
+  {
+    std::streambuf *saved = std::cout.rdbuf(captured.rdbuf());
+    fmt.print();
+    std::cout.rdbuf(saved);
+  }
+  std::string out = captured.str();
+  ASSERT_TRUE(out.find("500.00 MRays/s") != std::string::npos);
+  ASSERT_TRUE(out.find("1.25 GRays/s") != std::string::npos);
+  ASSERT_TRUE(out.find("2.50x") != std::string::npos);
 }

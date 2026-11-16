@@ -81,23 +81,24 @@ TEST_CASE(MathAndParity, LdsBankConflictStridePreservation) {
 
 TEST_CASE(MathAndParity, BenchmarkBaselineAndSortWeightIntegrity) {
   RaySchedulingBench rtBench;
-  // Verify DGC Path Tracing and GI configs map to their Megakernel baselines
+  // Verify DGC Path Tracing and Scheduling configs map to their Megakernel / baseline configs
   ASSERT_EQ(rtBench.GetBaselineConfigIndex(2), 0);
   ASSERT_EQ(rtBench.GetBaselineConfigIndex(5), 3);
   ASSERT_EQ(rtBench.GetBaselineConfigIndex(8), 6);
-  ASSERT_EQ(rtBench.GetBaselineConfigIndex(11), 9);
-  ASSERT_EQ(rtBench.GetBaselineConfigIndex(18), 17);
-  ASSERT_EQ(rtBench.GetBaselineConfigIndex(24), 23);
+  ASSERT_EQ(rtBench.GetBaselineConfigIndex(16), 15);
+  ASSERT_EQ(rtBench.GetBaselineConfigIndex(20), 14);
+  ASSERT_EQ(rtBench.GetBaselineConfigIndex(21), 14);
+  ASSERT_EQ(rtBench.GetBaselineConfigIndex(23), 22);
 
-  // Verify Config 2 (Material Shading DGC) and Config 6 (Incoherent GI Megakernel) do not share sortWeight
+  // Verify Config 2 (Material Shading DGC) and Config 6 (Full Frame Megakernel) do not share sortWeight
   ASSERT_NE(rtBench.GetSortWeight(2), rtBench.GetSortWeight(6));
 
-  // Verify Wavefront Stream Compaction orders naive Single-Pass (25) as baseline before Throughput (27) and Wave Ballot (13)
-  ASSERT_EQ(rtBench.GetBaselineConfigIndex(25), -1);
-  ASSERT_EQ(rtBench.GetBaselineConfigIndex(27), 25);
-  ASSERT_EQ(rtBench.GetBaselineConfigIndex(13), 25);
-  ASSERT_LT(rtBench.GetSortWeight(25), rtBench.GetSortWeight(27));
-  ASSERT_LT(rtBench.GetSortWeight(27), rtBench.GetSortWeight(13));
+  // Verify Wavefront Stream Compaction orders Single-Pass (17) as baseline before Throughput (19) and Wave Ballot (10)
+  ASSERT_EQ(rtBench.GetBaselineConfigIndex(17), -1);
+  ASSERT_EQ(rtBench.GetBaselineConfigIndex(19), 17);
+  ASSERT_EQ(rtBench.GetBaselineConfigIndex(10), 17);
+  ASSERT_LT(rtBench.GetSortWeight(17), rtBench.GetSortWeight(19));
+  ASSERT_LT(rtBench.GetSortWeight(19), rtBench.GetSortWeight(10));
 
   DualIssueBench diBench;
   ASSERT_EQ(std::string(diBench.GetName()), "ILP & Dual-Issue");

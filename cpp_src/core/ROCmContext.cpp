@@ -795,7 +795,7 @@ void ROCmContext::dispatch(ComputeKernel kernel, uint32_t grid_x,
     throw std::runtime_error("Invalid kernel handle");
   }
 
-  lastDispatchedKernel = kernel;
+  recordDispatchedKernel(kernel);
 
   if (m_inBatch) {
     RecordedDispatch rec;
@@ -878,9 +878,7 @@ void ROCmContext::releaseKernel(ComputeKernel kernel) {
     endBatch();
   }
   invalidateCachedGraph();
-  if (lastDispatchedKernel == kernel) {
-    lastDispatchedKernel = nullptr;
-  }
+  forgetDispatchedKernel(kernel);
   auto it = kernels.find(kernel);
   if (it != kernels.end()) {
     delete static_cast<ROCmKernel *>(kernel);

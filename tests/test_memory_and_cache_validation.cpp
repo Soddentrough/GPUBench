@@ -51,9 +51,9 @@ TEST_CASE(MemoryAndCacheValidation, MemBandwidth_PositiveValidation_AllModes) {
   bench.Setup(*ctx, kdir);
 
   uint32_t numConfigs = bench.GetNumConfigs();
-  ASSERT_EQ(numConfigs, 9u);
+  ASSERT_EQ(numConfigs, 3u);
 
-  // Run and validate every configuration (Read, Write, R/W across 128, 256, 1024 threads)
+  // Run and validate every configuration (Read, Write, R/W at 256 threads/group)
   for (uint32_t cfg = 0; cfg < numConfigs; ++cfg) {
     bench.Run(cfg);
     ctx->waitIdle();
@@ -129,14 +129,14 @@ TEST_CASE(MemoryAndCacheValidation, MemBandwidth_NegativeValidation_CorruptedFlo
   ASSERT_FALSE(bench.ValidateResults(0));
 
   // Test single corrupted float element at lane 100 component 2
-  bench.Run(6); // Read 1024
+  bench.Run(2); // R/W 256
   ctx->waitIdle();
-  ASSERT_TRUE(bench.ValidateResults(6));
+  ASSERT_TRUE(bench.ValidateResults(2));
 
   size_t offsetBytes = (100 * 4 + 2) * sizeof(float);
   ctx->writeBuffer(bench.outputBuffer, offsetBytes, sizeof(float), &corruptVal);
   ctx->waitIdle();
-  ASSERT_FALSE(bench.ValidateResults(6));
+  ASSERT_FALSE(bench.ValidateResults(2));
 
   bench.Teardown();
 }

@@ -111,10 +111,15 @@ inline std::string formatResultScoreString(const ResultData& r, bool compactPrec
                r.metric.find("MBVH/s") != std::string::npos ||
                r.metric.find("MTris/s") != std::string::npos ||
                r.metric.find("MInst/s") != std::string::npos ||
+               r.metric.find("MInstances/s") != std::string::npos ||
                r.metric.find("MHits/s") != std::string::npos ||
                r.metric.find("MItems/s") != std::string::npos ||
                r.metric.find("MRecords/s") != std::string::npos) {
-        std::snprintf(buf, sizeof(buf), f1, opsPerSec / 1e6, r.metric.c_str());
+        const ScaledMetricValue scaled = scaleMetricForDisplay(
+            opsPerSec / 1e6, r.metric, compactPrecision ? 1 : 2);
+        std::snprintf(buf, sizeof(buf),
+                      scaled.scaled ? "%.2f %s" : f1,
+                      scaled.value, scaled.unit.c_str());
     } else if (r.metric.find("ns") != std::string::npos) {
         double nsVal = (r.operations > 0) ? ((r.time_ms * 1e6) / static_cast<double>(r.operations)) : r.time_ms;
         std::snprintf(buf, sizeof(buf), compactPrecision ? "%.1f ns" : "%.2f ns", nsVal);

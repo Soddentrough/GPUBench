@@ -317,7 +317,7 @@ TEST_CASE(ModernizationAnd2026, BenchmarkMetadataCatalogAndBarrierSemantics) {
   Fp64Bench fp64;
   InShaderIndirectBench ind;
   WorkGraphsBench wg;
-  RaySchedulingBench rs(RaySchedulingBench::SceneType::Showroom);
+  RaySchedulingBench rs(RaySchedulingBench::SceneType::ReactorBay);
 
   ASSERT_FALSE(fp32.RequiresInterIterationBarrier(0));
   ASSERT_FALSE(fp16.RequiresInterIterationBarrier(0));
@@ -528,9 +528,11 @@ TEST_CASE(ModernizationAnd2026, IsaDumper_HonestReportingAndHotLoopAccuracy) {
   // 6. RayScheduling non-SER configs must never fall back to SER, and GUI benchmark names must resolve
   {
     ASSERT_TRUE(IsaDumper::isDeferredWarmupTarget("RayScheduling", 0));
-    ASSERT_TRUE(IsaDumper::isDeferredWarmupTarget("RayScheduling", 32));
+    ASSERT_TRUE(IsaDumper::isDeferredWarmupTarget("RayScheduling", 6));
+    ASSERT_TRUE(IsaDumper::isDeferredWarmupTarget("RayScheduling", 22));
     ASSERT_FALSE(IsaDumper::isDeferredWarmupTarget("RayScheduling", 1));
-    ASSERT_FALSE(IsaDumper::isDeferredWarmupTarget("RayScheduling", 33));
+    ASSERT_FALSE(IsaDumper::isDeferredWarmupTarget("RayScheduling", 8));
+    ASSERT_FALSE(IsaDumper::isDeferredWarmupTarget("RayScheduling", 23));
 
     auto inspectSingle = [](const std::string &target, int cfg) {
       IsaDumperOptions opts;
@@ -540,21 +542,39 @@ TEST_CASE(ModernizationAnd2026, IsaDumper_HonestReportingAndHotLoopAccuracy) {
       return IsaDumper::inspect(opts);
     };
 
-    const IsaInspectionResult rs33 = inspectSingle("RayScheduling", 33);
-    ASSERT_TRUE(rs33.ok);
-    ASSERT_EQ(rs33.artifacts.size(), size_t{1});
-    ASSERT_EQ(rs33.artifacts[0].configIndex, 33);
-    ASSERT_EQ(rs33.artifacts[0].artifactFile,
+    const IsaInspectionResult rs23 = inspectSingle("RayScheduling", 23);
+    ASSERT_TRUE(rs23.ok);
+    ASSERT_EQ(rs23.artifacts.size(), size_t{1});
+    ASSERT_EQ(rs23.artifacts[0].configIndex, 23);
+    ASSERT_EQ(rs23.artifacts[0].artifactFile,
               std::string("rt_scheduling_device_generated_commands_light.comp.spv"));
-    ASSERT_TRUE(rs33.artifacts[0].skipReason.empty());
-    ASSERT_FALSE(rs33.artifacts[0].executables.empty());
+    ASSERT_TRUE(rs23.artifacts[0].skipReason.empty());
+    ASSERT_FALSE(rs23.artifacts[0].executables.empty());
 
-    const IsaInspectionResult rs28 = inspectSingle("RayScheduling", 28);
-    ASSERT_TRUE(rs28.ok);
-    ASSERT_EQ(rs28.artifacts.size(), size_t{1});
-    ASSERT_EQ(rs28.artifacts[0].artifactFile, std::string("rt_scheduling.rgen.spv"));
+    const IsaInspectionResult rs8 = inspectSingle("RayScheduling (Zero-Day Reactor Bay)", 8);
+    ASSERT_TRUE(rs8.ok);
+    ASSERT_EQ(rs8.artifacts.size(), size_t{1});
+    ASSERT_EQ(rs8.artifacts[0].configIndex, 8);
+    ASSERT_EQ(rs8.artifacts[0].artifactFile,
+              std::string("rt_scheduling_device_generated_commands_material.comp.spv"));
+    ASSERT_TRUE(rs8.artifacts[0].skipReason.empty());
+    ASSERT_FALSE(rs8.artifacts[0].executables.empty());
+
+    const IsaInspectionResult rs5 = inspectSingle("reactor", 5);
+    ASSERT_TRUE(rs5.ok);
+    ASSERT_EQ(rs5.artifacts.size(), size_t{1});
+    ASSERT_EQ(rs5.artifacts[0].configIndex, 5);
+    ASSERT_EQ(rs5.artifacts[0].artifactFile,
+              std::string("rt_scheduling_device_generated_commands_bounce.comp.spv"));
+    ASSERT_TRUE(rs5.artifacts[0].skipReason.empty());
+    ASSERT_FALSE(rs5.artifacts[0].executables.empty());
+
+    const IsaInspectionResult rs20 = inspectSingle("RayScheduling", 20);
+    ASSERT_TRUE(rs20.ok);
+    ASSERT_EQ(rs20.artifacts.size(), size_t{1});
+    ASSERT_EQ(rs20.artifacts[0].artifactFile, std::string("rt_scheduling.rgen.spv"));
     if (info.rayTracingSupport) {
-      ASSERT_TRUE(rs28.artifacts[0].skipReason.empty());
+      ASSERT_TRUE(rs20.artifacts[0].skipReason.empty());
     }
 
     const IsaInspectionResult rs1 = inspectSingle("RayScheduling", 1);
@@ -583,10 +603,10 @@ TEST_CASE(ModernizationAnd2026, IsaDumper_HonestReportingAndHotLoopAccuracy) {
     ASSERT_EQ(async2.artifacts.size(), size_t{1});
     ASSERT_EQ(async2.artifacts[0].artifactFile, std::string("async_compute_heavy.comp.spv"));
 
-    const IsaInspectionResult membw4 = inspectSingle("Device Memory Bandwidth", 4);
-    ASSERT_TRUE(membw4.ok);
-    ASSERT_EQ(membw4.artifacts.size(), size_t{1});
-    ASSERT_EQ(membw4.artifacts[0].artifactFile, std::string("membw_256.comp.spv"));
+    const IsaInspectionResult membw0 = inspectSingle("Device Memory Bandwidth", 0);
+    ASSERT_TRUE(membw0.ok);
+    ASSERT_EQ(membw0.artifacts.size(), size_t{1});
+    ASSERT_EQ(membw0.artifacts[0].artifactFile, std::string("membw_256.comp.spv"));
 
     const IsaInspectionResult ic4 = inspectSingle("PCIe & Host-Device Interconnect", 4);
     ASSERT_TRUE(ic4.ok);
@@ -596,7 +616,12 @@ TEST_CASE(ModernizationAnd2026, IsaDumper_HonestReportingAndHotLoopAccuracy) {
     const IsaInspectionResult cv0 = inspectSingle("Cooperative Vector (Neural Shading)", 0);
     ASSERT_TRUE(cv0.ok);
     ASSERT_EQ(cv0.artifacts.size(), size_t{1});
-    ASSERT_EQ(cv0.artifacts[0].artifactFile, std::string("coop_vector_fp16.comp.spv"));
+    ASSERT_EQ(cv0.artifacts[0].artifactFile, std::string("coop_vector_fp16_baseline.comp.spv"));
+
+    const IsaInspectionResult cv1 = inspectSingle("Cooperative Vector (Neural Shading)", 1);
+    ASSERT_TRUE(cv1.ok);
+    ASSERT_EQ(cv1.artifacts.size(), size_t{1});
+    ASSERT_EQ(cv1.artifacts[0].artifactFile, std::string("coop_vector_fp16.comp.spv"));
 
     const IsaInspectionResult omm2 = inspectSingle("Ray Tracing Opacity Micromap", 2);
     ASSERT_TRUE(omm2.ok);

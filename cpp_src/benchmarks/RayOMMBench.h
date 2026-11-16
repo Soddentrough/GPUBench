@@ -12,7 +12,7 @@ public:
     return "Ray Tracing Opacity Micromap";
   }
   std::vector<std::string> GetAliases() const override {
-    return {"rayomm", "omm", "micromap"};
+    return {"rayomm", "omm", "micromap", "rayanyhit", "anyhit", "ray_anyhit", "alphacutout"};
   }
   const char *GetMetric() const override { return "MRays/s"; }
   const char *GetComponent(uint32_t /*config_idx*/ = 0) const override {
@@ -24,12 +24,14 @@ public:
   int GetSortWeight() const override { return 325; }
   uint32_t GetExpectedKernelCount() const override { return 1; }
 
-  uint32_t GetNumConfigs() const override { return 3; }
+  uint32_t GetNumConfigs() const override { return 5; }
   std::string GetConfigName(uint32_t config_idx) const override;
   const char *GetDescription() const override { return GetDescription(0); }
   const char *GetDescription(uint32_t config_idx) const override;
   int32_t GetBaselineConfigIndex(uint32_t config_idx) const override {
-    return (config_idx == 1u || config_idx == 2u) ? 0 : -1;
+    if (config_idx == 1u) return 0; // RTP AnyHit vs Compute RayQuery cutout
+    if (config_idx == 2u || config_idx == 3u || config_idx == 4u) return 1; // OMM / Opaque ref vs RTP AnyHit
+    return -1;
   }
 
   void SetResolution(uint32_t w, uint32_t h) override {
@@ -38,6 +40,7 @@ public:
       m_height = h;
     }
   }
+  bool IsResolutionDependent(uint32_t = 0) const override { return true; }
 
   bool IsSupported(const DeviceInfo &info,
                    IComputeContext *context = nullptr) const override;
@@ -77,6 +80,7 @@ private:
 
   ComputeBuffer m_vertexBuf = nullptr;
   ComputeBuffer m_outBuf = nullptr;
+  ComputeKernel m_rqKernel = nullptr;
   ComputeKernel m_rtKernel = nullptr;
 
   VkAccelerationStructureKHR m_blas = VK_NULL_HANDLE;

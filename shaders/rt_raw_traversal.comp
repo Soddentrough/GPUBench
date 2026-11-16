@@ -5,9 +5,12 @@
 layout(local_size_x = 32, local_size_y = 1, local_size_z = 1) in;
 
 layout(set = 0, binding = 0) uniform accelerationStructureEXT topLevelAS;
-layout(set = 0, binding = 1) writeonly buffer ResultBuffer {
+layout(std430, set = 0, binding = 1) writeonly buffer ResultBuffer {
     uint hits[];
 } results;
+layout(std430, set = 0, binding = 2) readonly buffer SoftBvhBuffer {
+    uvec4 nodes[];
+} softBvh;
 
 layout(push_constant) uniform PushConstants {
     uint rayCount;
@@ -30,16 +33,19 @@ void main() {
     vec3 origin = vec3(fx, fy, -1.0);
     vec3 direction = vec3(0.0, 0.0, 1.0);
 
-    rayQueryEXT query;
+    bool hasHit = false;
     if (pc.mode == 0u) {
         // Coherent shallow traversal: opaque triangle fast path with immediate termination on Layer 0
+        rayQueryEXT query;
         rayQueryInitializeEXT(query, topLevelAS,
                               gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT,
                               0xFF, origin, pc.tMin, direction, pc.tMax);
         while (rayQueryProceedEXT(query)) {}
-    } else {
+        hasHit = (rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionNoneEXT);
+    } else if (pc.mode == 1u) {
         // Deep multi-layer AABB BVH stress: traverse all 64 stratified VK_GEOMETRY_TYPE_AABBS_KHR layers
         // (z = 0.0 .. 6.3, t = 0.99 .. 7.31) and commit a generated procedural hit on Layer 63.
+        rayQueryEXT query;
         rayQueryInitializeEXT(query, topLevelAS,
                               gl_RayFlagsNoneEXT,
                               0xFF, origin, pc.tMin, direction, pc.tMax);
@@ -50,9 +56,49 @@ void main() {
                 rayQueryGenerateIntersectionEXT(query, 7.30);
             }
         }
+        hasHit = (rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionNoneEXT);
+    } else {
+        // Software VALU binary BVH stack traversal over identical 65,536-box (32x32x64) hierarchy.
+        vec3 swDir = vec3(pc.tMin * 1e-4, pc.tMin * 1e-4, 1.0);
+        vec3 invDir = 1.0 / swDir;
+        uint stack[24];
+        int sp = 0;
+        uint curr = 0u;
+        uint visitedLeaves = 0u;
+        bool hitLayer63 = false;
+        float closestT = pc.tMax;
+        while (curr != 0xFFFFFFFFu) {
+            uvec4 n0 = softBvh.nodes[curr * 2u];
+            uvec4 n1 = softBvh.nodes[curr * 2u + 1u];
+            vec3 bmin = uintBitsToFloat(n0.xyz);
+            vec3 bmax = uintBitsToFloat(n1.xyz);
+            vec3 t0 = (bmin - origin) * invDir;
+            vec3 t1 = (bmax - origin) * invDir;
+            vec3 tsmall = min(t0, t1);
+            vec3 tlarge = max(t0, t1);
+            float tEnter = max(max(tsmall.x, tsmall.y), tsmall.z);
+            float tExit = min(min(tlarge.x, tlarge.y), tlarge.z);
+            if (tExit >= max(tEnter, pc.tMin) && tEnter <= closestT) {
+                if ((n1.w & 0x80000000u) != 0u) {
+                    visitedLeaves++;
+                    if ((n0.w >> 10u) == 63u && !hitLayer63) {
+                        closestT = 7.30;
+                        hitLayer63 = true;
+                    }
+                    curr = (sp > 0) ? stack[--sp] : 0xFFFFFFFFu;
+                } else {
+                    if (sp < 24) {
+                        stack[sp++] = n1.w;
+                    }
+                    curr = n0.w;
+                }
+            } else {
+                curr = (sp > 0) ? stack[--sp] : 0xFFFFFFFFu;
+            }
+        }
+        hasHit = (visitedLeaves == 64u && hitLayer63);
     }
 
-    bool hasHit = (rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionNoneEXT);
     uvec4 ballot = subgroupBallot(hasHit);
     if (subgroupElect()) {
         results.hits[wgId] = subgroupBallotBitCount(ballot);

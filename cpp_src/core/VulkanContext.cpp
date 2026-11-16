@@ -150,12 +150,11 @@ bool hasSubgroupCoopMatrix16x16x16(VkInstance inst, VkPhysicalDevice physDev,
 bool supportsWave32Compute(VkPhysicalDevice physDev,
                            uint32_t defaultSubgroupSize,
                            bool hasSubgroupSizeCtrlExt) {
+  (void)hasSubgroupSizeCtrlExt;
   if (defaultSubgroupSize == 32) {
     return true;
   }
-  if (!hasSubgroupSizeCtrlExt) {
-    return false;
-  }
+  // GPUBench requires Vulkan 1.4 (VK_EXT_subgroup_size_control is core in Vulkan 1.3).
   VkPhysicalDeviceSubgroupSizeControlProperties sgCtrlProps{};
   sgCtrlProps.sType =
       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_PROPERTIES;
@@ -884,6 +883,14 @@ const std::vector<DeviceInfo> &VulkanContext::getDevices() const {
       bool wave32Ok = supportsWave32Compute(
           dev, subgroupProps.subgroupSize,
           hasExt(VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME));
+      if (props.vendorID == 0x1002 && wave32Ok) {
+        const auto &prof = DeviceDatabase::lookup(
+            props.vendorID, props.deviceID, info.name);
+        if (prof.archFamily.rfind("RDNA", 0) == 0) {
+          // Compute pipelines enforce Wave32 via requiredSubgroupSize=32 on RDNA.
+          info.subgroupSize = 32u;
+        }
+      }
       info.fp6Support =
           hasOcpExt && (ocpFeatures.shaderFloat6 == VK_TRUE) &&
           info.cooperativeMatrixSupport && wave32Ok &&
@@ -2867,6 +2874,8 @@ ComputeKernel VulkanContext::createKernelInternal(const std::string &file_name,
 
   bool has_accel_struct = false;
   uint32_t spirv_local_size_x = 0;
+  uint32_t spirv_local_size_y = 1;
+  uint32_t spirv_local_size_z = 1;
   if (spirv_code.size() >= 5 && spirv_code[0] == 0x07230203) {
     size_t spvIdx = 5;
     while (spvIdx < spirv_code.size()) {
@@ -2877,6 +2886,8 @@ ComputeKernel VulkanContext::createKernelInternal(const std::string &file_name,
       if (opcode == 16 /* OpExecutionMode */ && length >= 6 &&
           spirv_code[spvIdx + 2] == 17 /* ExecutionModeLocalSize */) {
         spirv_local_size_x = spirv_code[spvIdx + 3];
+        spirv_local_size_y = spirv_code[spvIdx + 4];
+        spirv_local_size_z = spirv_code[spvIdx + 5];
       } else if (opcode == 5341 /* OpTypeAccelerationStructureKHR / NV */) {
         has_accel_struct = true;
       } else if (opcode == 54 /* OpFunction */) {
@@ -2885,6 +2896,9 @@ ComputeKernel VulkanContext::createKernelInternal(const std::string &file_name,
       spvIdx += length;
     }
   }
+  vulkanKernel->workgroupSizeX = spirv_local_size_x;
+  vulkanKernel->workgroupSizeY = spirv_local_size_y;
+  vulkanKernel->workgroupSizeZ = spirv_local_size_z;
 
   bool is_rt = has_accel_struct ||
                (file_name.find("rt_") != std::string::npos &&
@@ -3282,7 +3296,12 @@ void VulkanContext::dispatch(ComputeKernel kernel, uint32_t grid_x,
     throw std::runtime_error("Invalid kernel handle");
   }
   VulkanKernel *vulkanKernel = it->second;
-  lastDispatchedKernel = kernel;
+  if (!vulkanKernel->isRTPipeline && block_x > 0 && vulkanKernel->workgroupSizeX == 0) {
+    vulkanKernel->workgroupSizeX = block_x;
+    vulkanKernel->workgroupSizeY = std::max(1u, block_y);
+    vulkanKernel->workgroupSizeZ = std::max(1u, block_z);
+  }
+  recordDispatchedKernel(kernel);
 
   if (m_inBatch) {
     InFlightFrame &frame = inFlightFrames[currentFrameIndex];
@@ -3446,19 +3465,30 @@ KernelResourceUsage VulkanContext::getKernelResourceUsage(ComputeKernel kernel) 
     return usage;
   }
 
-  VkPipelineExecutableInfoKHR execInfo{};
-  execInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_EXECUTABLE_INFO_KHR;
-  execInfo.pipeline = vkKernel->pipeline;
-  execInfo.executableIndex = 0;
+  uint32_t minNonZeroWaves = 0;
+  uint32_t reportedSubgroupSize = 0;
 
-  uint32_t statCount = 0;
-  if (vkGetPipelineExecutableStatisticsKHR_ptr(device, &execInfo, &statCount, nullptr) == VK_SUCCESS && statCount > 0) {
+  for (uint32_t execIdx = 0; execIdx < executableCount; ++execIdx) {
+    VkPipelineExecutableInfoKHR execInfo{};
+    execInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_EXECUTABLE_INFO_KHR;
+    execInfo.pipeline = vkKernel->pipeline;
+    execInfo.executableIndex = execIdx;
+
+    uint32_t statCount = 0;
+    if (vkGetPipelineExecutableStatisticsKHR_ptr(device, &execInfo, &statCount, nullptr) != VK_SUCCESS ||
+        statCount == 0) {
+      continue;
+    }
     std::vector<VkPipelineExecutableStatisticKHR> stats(statCount);
     for (auto &s : stats) {
       s.sType = VK_STRUCTURE_TYPE_PIPELINE_EXECUTABLE_STATISTIC_KHR;
       s.pNext = nullptr;
     }
-    if (vkGetPipelineExecutableStatisticsKHR_ptr(device, &execInfo, &statCount, stats.data()) == VK_SUCCESS) {
+    if (vkGetPipelineExecutableStatisticsKHR_ptr(device, &execInfo, &statCount, stats.data()) != VK_SUCCESS) {
+      continue;
+    }
+
+    if (!usage.available) {
       usage.available = true;
       VkPhysicalDeviceDriverProperties driverProps{
           VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES};
@@ -3476,64 +3506,110 @@ KernelResourceUsage VulkanContext::getKernelResourceUsage(ComputeKernel kernel) 
       } else {
         usage.compilerNotes = "Vulkan Pipeline Compiler";
       }
-      for (const auto &s : stats) {
-        std::string name = s.name;
-        std::string lname = name;
-        std::transform(lname.begin(), lname.end(), lname.begin(),
-                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-        uint64_t val = 0;
-        if (s.format == VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_UINT64_KHR) {
-          val = s.value.u64;
-        } else if (s.format == VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_INT64_KHR) {
-          val = static_cast<uint64_t>(s.value.i64);
-        } else if (s.format == VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_FLOAT64_KHR) {
-          val = static_cast<uint64_t>(s.value.f64);
-        }
+    }
 
-        if (lname == "vgprs" || lname == "numusedvgprs" ||
-            (lname.find("vgpr") != std::string::npos &&
-             lname.find("spill") == std::string::npos &&
-             lname.find("pre-sched") == std::string::npos &&
-             lname.find("available") == std::string::npos &&
-             lname.find("physical") == std::string::npos)) {
-          usage.vgprCount = static_cast<uint32_t>(val);
-        } else if (lname == "sgprs" || lname == "numusedsgprs" ||
-                   (lname.find("sgpr") != std::string::npos &&
-                    lname.find("spill") == std::string::npos &&
-                    lname.find("pre-sched") == std::string::npos &&
-                    lname.find("available") == std::string::npos &&
-                    lname.find("physical") == std::string::npos)) {
-          usage.sgprCount = static_cast<uint32_t>(val);
-        } else if (lname.find("scratch") != std::string::npos ||
-                   lname.find("spill") != std::string::npos) {
-          usage.scratchSizeBytes = std::max(usage.scratchSizeBytes, static_cast<uint32_t>(val));
-        } else if (lname.find("lds") != std::string::npos &&
-                   lname.find("available") == std::string::npos) {
-          usage.ldsSizeBytes = static_cast<uint32_t>(val);
-        } else if (lname.find("code") != std::string::npos ||
-                   lname.find("binary") != std::string::npos) {
-          usage.codeSizeBytes = static_cast<uint32_t>(val);
-        } else if (lname.find("subgroups per simd") != std::string::npos ||
-                   lname.find("waves per simd") != std::string::npos ||
-                   lname.find("occupancy") != std::string::npos) {
-          usage.maxWavesPerSimd = static_cast<uint32_t>(val);
-        }
+    uint32_t execVgpr = 0;
+    uint32_t execSgpr = 0;
+    uint32_t execScratch = 0;
+    uint32_t execLds = 0;
+    uint32_t execCode = 0;
+    uint32_t execWavesPerSimd = 0;
+
+    for (const auto &s : stats) {
+      std::string name = s.name;
+      std::string lname = name;
+      std::transform(lname.begin(), lname.end(), lname.begin(),
+                     [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+      uint64_t val = 0;
+      if (s.format == VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_UINT64_KHR) {
+        val = s.value.u64;
+      } else if (s.format == VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_INT64_KHR) {
+        val = static_cast<uint64_t>(s.value.i64);
+      } else if (s.format == VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_FLOAT64_KHR) {
+        val = static_cast<uint64_t>(s.value.f64);
       }
-      if (usage.maxWavesPerSimd == 0 && usage.vgprCount > 0 &&
-          properties.vendorID == 0x1002) {
-        const std::string devNameStr(properties.deviceName);
-        const auto &prof = DeviceDatabase::lookup(
-            properties.vendorID, properties.deviceID, devNameStr);
-        if (prof.archFamily == "RDNA 3" || prof.archFamily == "RDNA 3.5" ||
-            prof.archFamily == "RDNA 4") {
-          usage.maxWavesPerSimd = std::min(16u, 1536u / usage.vgprCount);
-        } else if (prof.archFamily == "RDNA 2" || prof.archFamily == "RDNA 1") {
-          usage.maxWavesPerSimd = std::min(16u, 1024u / usage.vgprCount);
-        } else if (prof.archFamily.find("CDNA") != std::string::npos ||
-                   prof.archFamily.find("GCN") != std::string::npos) {
-          usage.maxWavesPerSimd = std::min(8u, 512u / usage.vgprCount);
-        }
+
+      if (lname == "subgroup size" || lname == "subgroupsize" ||
+          lname == "wavefront size" || lname == "wavefrontsize") {
+        reportedSubgroupSize = std::max(reportedSubgroupSize, static_cast<uint32_t>(val));
+      } else if (lname == "vgprs" || lname == "numusedvgprs" ||
+                 (lname.find("vgpr") != std::string::npos &&
+                  lname.find("spill") == std::string::npos &&
+                  lname.find("pre-sched") == std::string::npos &&
+                  lname.find("available") == std::string::npos &&
+                  lname.find("physical") == std::string::npos)) {
+        execVgpr = std::max(execVgpr, static_cast<uint32_t>(val));
+      } else if (lname == "sgprs" || lname == "numusedsgprs" ||
+                 (lname.find("sgpr") != std::string::npos &&
+                  lname.find("spill") == std::string::npos &&
+                  lname.find("pre-sched") == std::string::npos &&
+                  lname.find("available") == std::string::npos &&
+                  lname.find("physical") == std::string::npos)) {
+        execSgpr = std::max(execSgpr, static_cast<uint32_t>(val));
+      } else if (lname.find("scratch") != std::string::npos ||
+                 lname.find("spill") != std::string::npos) {
+        execScratch = std::max(execScratch, static_cast<uint32_t>(val));
+      } else if (lname.find("lds") != std::string::npos &&
+                 lname.find("available") == std::string::npos &&
+                 lname.find("perlocalworkgroup") == std::string::npos &&
+                 lname.find("per local work") == std::string::npos &&
+                 lname.find("perworkgroup") == std::string::npos &&
+                 lname.find("per workgroup") == std::string::npos) {
+        execLds = std::max(execLds, static_cast<uint32_t>(val));
+      } else if (lname.find("code") != std::string::npos ||
+                 lname.find("binary") != std::string::npos) {
+        execCode = std::max(execCode, static_cast<uint32_t>(val));
+      } else if (lname.find("subgroups per simd") != std::string::npos ||
+                 lname.find("waves per simd") != std::string::npos ||
+                 lname.find("occupancy") != std::string::npos) {
+        execWavesPerSimd = std::max(execWavesPerSimd, static_cast<uint32_t>(val));
       }
+    }
+
+    usage.vgprCount = std::max(usage.vgprCount, execVgpr);
+    usage.sgprCount = std::max(usage.sgprCount, execSgpr);
+    usage.scratchSizeBytes = std::max(usage.scratchSizeBytes, execScratch);
+    usage.ldsSizeBytes = std::max(usage.ldsSizeBytes, execLds);
+    usage.codeSizeBytes += execCode;
+    if (execWavesPerSimd > 0) {
+      minNonZeroWaves = (minNonZeroWaves == 0)
+                            ? execWavesPerSimd
+                            : std::min(minNonZeroWaves, execWavesPerSimd);
+    }
+  }
+
+  usage.maxWavesPerSimd = minNonZeroWaves;
+  if (usage.available && properties.vendorID == 0x1002) {
+    const std::string devNameStr(properties.deviceName);
+    const auto &prof = DeviceDatabase::lookup(
+        properties.vendorID, properties.deviceID, devNameStr);
+    if (usage.maxWavesPerSimd == 0 && usage.vgprCount > 0) {
+      if (prof.archFamily == "RDNA 3" || prof.archFamily == "RDNA 3.5" ||
+          prof.archFamily == "RDNA 4") {
+        usage.maxWavesPerSimd = std::min(16u, 1536u / usage.vgprCount);
+      } else if (prof.archFamily == "RDNA 2" || prof.archFamily == "RDNA 1") {
+        usage.maxWavesPerSimd = std::min(16u, 1024u / usage.vgprCount);
+      } else if (prof.archFamily.find("CDNA") != std::string::npos ||
+                 prof.archFamily.find("GCN") != std::string::npos) {
+        usage.maxWavesPerSimd = std::min(8u, 512u / usage.vgprCount);
+      }
+    }
+    if (usage.ldsSizeBytes > 0 &&
+        vkKernel->workgroupSizeX > 0 &&
+        prof.archFamily.rfind("RDNA", 0) == 0) {
+      const uint32_t wgpLdsBytes = 131072u; // 1 WGP = 2 CUs = 4 SIMD32s = 128 KB physical LDS across RDNA 1-4
+      const uint32_t waveWidth = (reportedSubgroupSize == 64u) ? 64u : 32u;
+      const uint32_t wgThreads =
+          vkKernel->workgroupSizeX *
+          std::max(1u, vkKernel->workgroupSizeY) *
+          std::max(1u, vkKernel->workgroupSizeZ);
+      const uint32_t wavesPerWg = std::max(1u, (wgThreads + waveWidth - 1u) / waveWidth);
+      const uint32_t maxWgsPerWgp = wgpLdsBytes / usage.ldsSizeBytes;
+      const uint32_t ldsMaxWavesPerSimd =
+          std::max(1u, (maxWgsPerWgp * wavesPerWg) / 4u);
+      usage.maxWavesPerSimd = (usage.maxWavesPerSimd == 0)
+                                  ? ldsMaxWavesPerSimd
+                                  : std::min(usage.maxWavesPerSimd, ldsMaxWavesPerSimd);
     }
   }
   return usage;
@@ -3645,7 +3721,7 @@ void VulkanContext::dispatchIndirect(ComputeKernel kernel_handle,
   auto *vulkanKernel = getKernel(kernel_handle);
   if (!vulkanKernel)
     return;
-  lastDispatchedKernel = kernel_handle;
+  recordDispatchedKernel(kernel_handle);
 
   auto &frame = inFlightFrames[currentFrameIndex];
   if (!m_inBatch || !m_batchCmdRecording) {
@@ -3717,7 +3793,12 @@ void VulkanContext::dispatchIndirectSequence(
   auto *vulkanKernel = getKernel(kernel_handle);
   if (!vulkanKernel || entries.empty())
     return;
-  lastDispatchedKernel = kernel_handle;
+  recordDispatchedKernel(kernel_handle);
+  for (const auto &entry : entries) {
+    if (entry.specializedKernel) {
+      recordDispatchedKernel(entry.specializedKernel);
+    }
+  }
 
   auto &frame = inFlightFrames[currentFrameIndex];
   if (!m_inBatch || !m_batchCmdRecording) {
@@ -3799,7 +3880,19 @@ void VulkanContext::dispatchWorkListSequence(
   auto *secondKernel = getKernel(secondKernel_handle);
   if (!classifyKernel || !secondKernel)
     return;
-  lastDispatchedKernel = secondKernel_handle;
+  if (resetKernel_handle && getKernel(resetKernel_handle)) {
+    recordDispatchedKernel(resetKernel_handle);
+  }
+  recordDispatchedKernel(classifyKernel_handle);
+  if (resolveKernel_handle && getKernel(resolveKernel_handle)) {
+    recordDispatchedKernel(resolveKernel_handle);
+  }
+  for (const auto &entry : entries) {
+    if (entry.specializedKernel) {
+      recordDispatchedKernel(entry.specializedKernel);
+    }
+  }
+  recordDispatchedKernel(secondKernel_handle);
 
   auto &frame = inFlightFrames[currentFrameIndex];
   if (!m_inBatch || !m_batchCmdRecording) {
@@ -4085,7 +4178,7 @@ void VulkanContext::dispatchRayTracingIndirect(ComputeKernel kernel_handle,
   auto *vulkanKernel = getKernel(kernel_handle);
   if (!vulkanKernel || !vulkanKernel->isRTPipeline)
     return;
-  lastDispatchedKernel = kernel_handle;
+  recordDispatchedKernel(kernel_handle);
 
   auto &frame = inFlightFrames[currentFrameIndex];
   if (!m_inBatch || !m_batchCmdRecording) {
@@ -4158,9 +4251,7 @@ VulkanContext::VulkanKernel *VulkanContext::getKernel(ComputeKernel handle) cons
 }
 
 void VulkanContext::releaseKernel(ComputeKernel kernel) {
-  if (lastDispatchedKernel == kernel) {
-    lastDispatchedKernel = nullptr;
-  }
+  forgetDispatchedKernel(kernel);
   auto it = kernels.find(kernel);
   if (it != kernels.end()) {
     VulkanKernel *vulkanKernel = it->second;
@@ -4861,7 +4952,14 @@ void VulkanContext::dispatchDGCWorkListSequence(
   auto *classifyKernel = getKernel(classifyKernel_handle);
   auto *secondKernel = getKernel(secondKernel_handle);
   if (!classifyKernel || !secondKernel) return;
-  lastDispatchedKernel = secondKernel_handle;
+  if (resetKernel_handle && getKernel(resetKernel_handle)) {
+    recordDispatchedKernel(resetKernel_handle);
+  }
+  recordDispatchedKernel(classifyKernel_handle);
+  if (resolveKernel_handle && getKernel(resolveKernel_handle)) {
+    recordDispatchedKernel(resolveKernel_handle);
+  }
+  recordDispatchedKernel(secondKernel_handle);
 
   auto &frame = inFlightFrames[currentFrameIndex];
   if (!m_inBatch || !m_batchCmdRecording) {
@@ -4942,7 +5040,7 @@ void VulkanContext::dispatchDGCWorkListSequence(
       frame.commandBuffer,
       VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT,
       VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_COMMAND_PREPROCESS_BIT_EXT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-      VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT);
+      VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT);
 
   // 6. Bind base pipeline and descriptor set
   vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, secondKernel->pipeline);
@@ -4987,7 +5085,7 @@ void VulkanContext::dispatchDGCSequence(ComputeKernel kernel_handle,
 
   auto *kernel = getKernel(kernel_handle);
   if (!kernel) return;
-  lastDispatchedKernel = kernel_handle;
+  recordDispatchedKernel(kernel_handle);
 
   auto &frame = inFlightFrames[currentFrameIndex];
   if (!m_inBatch || !m_batchCmdRecording) {
@@ -5009,8 +5107,11 @@ void VulkanContext::dispatchDGCSequence(ComputeKernel kernel_handle,
         frame.commandBuffer,
         VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
         VK_ACCESS_2_SHADER_WRITE_BIT,
-        VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-        VK_ACCESS_2_SHADER_READ_BIT |
+        VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT |
+            VK_PIPELINE_STAGE_2_COMMAND_PREPROCESS_BIT_EXT |
+            VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+        VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT |
+            VK_ACCESS_2_SHADER_READ_BIT |
             VK_ACCESS_2_SHADER_WRITE_BIT);
   }
 

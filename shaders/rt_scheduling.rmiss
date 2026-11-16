@@ -21,18 +21,17 @@ layout(push_constant) uniform PushConstants {
 const uint SCENE_SHOWROOM_STUDIO = 0u;
 const uint SCENE_OUTDOOR_TERRAIN = 1u;
 const uint SCENE_INDOOR_ATRIUM   = 2u;
-const uint SCENE_AAA_FOREST       = 3u;
+const uint SCENE_REACTOR_BAY     = 3u;
 
-vec3 evalOutdoorSky(vec3 dir) {
-    vec3 sunDir = normalize(vec3(0.45, 0.35, 0.82));
+vec3 evalReactorEnvironment(vec3 dir) {
+    vec3 sunDir = normalize(vec3(0.24, -0.22, 0.945));
     float sunDot = max(dot(dir, sunDir), 0.0);
-    vec3 sky = mix(vec3(0.70, 0.82, 0.95), vec3(0.18, 0.42, 0.82), clamp(dir.z, 0.0, 1.0));
-    if (dir.z < 0.0) {
-        sky = mix(vec3(0.70, 0.82, 0.95), vec3(0.35, 0.30, 0.25), clamp(-dir.z * 2.0, 0.0, 1.0));
-    }
-    sky += vec3(1.0, 0.95, 0.85) * pow(sunDot, 120.0) * 8.0;
-    sky += vec3(1.0, 0.85, 0.60) * pow(sunDot, 12.0) * 0.8;
-    return sky;
+    vec3 lowerBay = mix(vec3(0.05, 0.07, 0.10), vec3(0.12, 0.16, 0.22), smoothstep(-0.35, 0.15, dir.z));
+    vec3 skyDome = mix(vec3(0.20, 0.30, 0.44), vec3(0.46, 0.68, 0.94), clamp(dir.z, 0.0, 1.0));
+    vec3 env = mix(lowerBay, skyDome, smoothstep(0.08, 0.26, dir.z));
+    env += vec3(1.0, 0.95, 0.88) * pow(sunDot, 96.0) * 6.0;
+    env += vec3(0.22, 0.78, 1.00) * (0.14 * max(0.0, 1.0 - abs(dir.z)));
+    return env;
 }
 
 vec3 evalStudioEnvironment(vec3 dir) {
@@ -69,8 +68,8 @@ void main() {
         return;
     }
     vec3 sky;
-    if (pc.sceneType == SCENE_OUTDOOR_TERRAIN || pc.sceneType == SCENE_AAA_FOREST) {
-        sky = evalOutdoorSky(gl_WorldRayDirectionEXT);
+    if (pc.sceneType == SCENE_OUTDOOR_TERRAIN || pc.sceneType == SCENE_REACTOR_BAY) {
+        sky = evalReactorEnvironment(gl_WorldRayDirectionEXT);
     } else if (pc.sceneType == SCENE_INDOOR_ATRIUM) {
         sky = evalAtriumEnvironment(gl_WorldRayDirectionEXT);
     } else {

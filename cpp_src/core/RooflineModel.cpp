@@ -78,14 +78,15 @@ double RooflineModel::inferOperationalIntensity(const ResultData &r) {
     return 0.0;
   }
 
-  // Matrix / Tensor / Cooperative Vector workloads
+  // Matrix / Tensor / Cooperative Vector workloads (exclude shader baselines)
+  const bool isShaderBaseline = (lowName.find("shader baseline") != std::string::npos);
   const bool isMatrix = (lowName.find("matrix") != std::string::npos) ||
                         (lowName.find("fp8") != std::string::npos) ||
                         (lowName.find("mxfp6") != std::string::npos) ||
                         (lowName.find("mxfp4") != std::string::npos) ||
                         (lowName.find("int4") != std::string::npos) ||
                         (lowName.find("sparse") != std::string::npos) ||
-                        (lowName.find("coop") != std::string::npos);
+                        ((lowName.find("coop") != std::string::npos) && !isShaderBaseline);
   if (isMatrix) {
     if (lowName.find("sparse") != std::string::npos) return 8192.0;
     if (lowName.find("mxfp4") != std::string::npos || lowName.find("int4") != std::string::npos)
@@ -186,12 +187,14 @@ RooflineModel::analyze(const std::vector<ResultData> &results) {
           updatePeak(bwPcie, val, r.benchmarkName);
         }
       } else if (r.metric == "TFLOPS" || r.metric == "TOPS") {
+        const bool isShaderBaseline = (lowName.find("shader baseline") != std::string::npos);
         const bool isMat = (lowName.find("matrix") != std::string::npos) ||
                            (lowName.find("fp8") != std::string::npos) ||
                            (lowName.find("mxfp6") != std::string::npos) ||
                            (lowName.find("mxfp4") != std::string::npos) ||
                            (lowName.find("int4") != std::string::npos) ||
-                           (lowName.find("sparse") != std::string::npos);
+                           (lowName.find("sparse") != std::string::npos) ||
+                           ((lowName.find("coop") != std::string::npos) && !isShaderBaseline);
 
         if (lowName.find("fp64") != std::string::npos) {
           updatePeak(cFp64, val, r.benchmarkName, r.metric);
@@ -279,13 +282,14 @@ RooflineModel::analyze(const std::vector<ResultData> &results) {
       wp.operationalIntensity = oi;
 
       const std::string lowName = toLowerCopy(r.benchmarkName);
+      const bool isShaderBaseline = (lowName.find("shader baseline") != std::string::npos);
       wp.isMatrix = (lowName.find("matrix") != std::string::npos) ||
                     (lowName.find("fp8") != std::string::npos) ||
                     (lowName.find("mxfp6") != std::string::npos) ||
                     (lowName.find("mxfp4") != std::string::npos) ||
                     (lowName.find("int4") != std::string::npos) ||
                     (lowName.find("sparse") != std::string::npos) ||
-                    (lowName.find("coop") != std::string::npos);
+                    ((lowName.find("coop") != std::string::npos) && !isShaderBaseline);
 
       if (r.metric == "GB/s") {
         // Achieved effective GOPS at streaming operational intensity: GB/s * OP/Byte

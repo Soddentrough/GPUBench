@@ -383,6 +383,9 @@ private:
     VkDescriptorSet descriptorSet;
     std::map<uint32_t, ComputeBuffer> arg_buffers;
     uint32_t numBufferDescriptors;
+    uint32_t workgroupSizeX = 0;
+    uint32_t workgroupSizeY = 0;
+    uint32_t workgroupSizeZ = 0;
     std::vector<uint8_t> pushConstantData;
     bool isRTPipeline = false;
     VkStridedDeviceAddressRegionKHR rgenRegion{};
