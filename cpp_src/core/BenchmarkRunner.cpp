@@ -47,6 +47,7 @@ void SetRunnerTargetConfigs(const std::vector<int> &configs) {
 #include "utils/HardwareTelemetry.h"
 #include "benchmarks/Fp6Bench.h"
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <iostream>
 #include <locale>
@@ -946,8 +947,8 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
       abort_data.configIndex = abortedConfig;
       abort_data.sortWeight = abortedBench->GetSortWeight(abortedConfig);
       abort_data.operationalIntensity = abortedBench->GetOperationalIntensity(abortedConfig);
-      abort_data.width = effectiveWidth;
-      abort_data.height = effectiveHeight;
+      abort_data.width = abortedBench->IsResolutionDependent(abortedConfig) ? effectiveWidth : 0u;
+      abort_data.height = abortedBench->IsResolutionDependent(abortedConfig) ? effectiveHeight : 0u;
       abort_data.errorString = reason;
 
       formatter->addResult(abort_data);
@@ -1036,8 +1037,8 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
           fail_data.configIndex = cfg;
           fail_data.sortWeight = bench->GetSortWeight(cfg);
           fail_data.operationalIntensity = bench->GetOperationalIntensity(cfg);
-          fail_data.width = effectiveWidth;
-          fail_data.height = effectiveHeight;
+          fail_data.width = bench->IsResolutionDependent(cfg) ? effectiveWidth : 0u;
+          fail_data.height = bench->IsResolutionDependent(cfg) ? effectiveHeight : 0u;
           fail_data.errorString = e.what();
           formatter->addResult(fail_data);
           if (onResult) {
@@ -1117,8 +1118,8 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
             start_data.configIndex = i;
             start_data.sortWeight = bench->GetSortWeight(i);
             start_data.operationalIntensity = bench->GetOperationalIntensity(i);
-            start_data.width = effectiveWidth;
-            start_data.height = effectiveHeight;
+            start_data.width = bench->IsResolutionDependent(i) ? effectiveWidth : 0u;
+            start_data.height = bench->IsResolutionDependent(i) ? effectiveHeight : 0u;
             onResult(start_data);
           }
 
@@ -1168,8 +1169,8 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
             result_data.configIndex = i;
             result_data.sortWeight = bench->GetSortWeight(i);
             result_data.operationalIntensity = bench->GetOperationalIntensity(i);
-            result_data.width = effectiveWidth;
-            result_data.height = effectiveHeight;
+            result_data.width = bench->IsResolutionDependent(i) ? effectiveWidth : 0u;
+            result_data.height = bench->IsResolutionDependent(i) ? effectiveHeight : 0u;
 
             formatter->addResult(result_data);
             numBenchmarksRun++;
@@ -1323,6 +1324,35 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
 
           powerStart = HardwareTelemetry::queryGpuByPciBusId(info.pcieBusId, devIdx);
           auto loop_wall_start = std::chrono::high_resolution_clock::now();
+          double polledPowerSumWatts = 0.0;
+          uint32_t polledPowerCount = 0;
+
+          // On platforms without hardware energy accumulators (e.g. Windows AMD ADL / DXGI),
+          // sample live board power from a lightweight 15ms background thread while the GPU
+          // executes batches so idle waits/barriers never bias the wattage reading downward.
+          std::atomic<bool> stopPowerSampler{false};
+          std::thread powerSamplerThread;
+          if (!powerStart.hasEnergyCounter) {
+            powerSamplerThread = std::thread([&]() {
+              // Brief yield so the first timed dispatch is actively in flight before sampling.
+              for (int step = 0; step < 5 && !stopPowerSampler.load(std::memory_order_relaxed);
+                   ++step) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+              }
+              while (!stopPowerSampler.load(std::memory_order_relaxed)) {
+                GpuTelemetryData samplePwr =
+                    HardwareTelemetry::queryGpuPowerSample(devIdx);
+                if (samplePwr.hasPower && samplePwr.powerWatts > 0.0f) {
+                  polledPowerSumWatts += samplePwr.powerWatts;
+                  polledPowerCount++;
+                }
+                for (int step = 0; step < 15 && !stopPowerSampler.load(std::memory_order_relaxed);
+                     ++step) {
+                  std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                }
+              }
+            });
+          }
 
           while (sample_time_per_invoc.size() < max_samples &&
                  (accumulated_time_ms < target_measurement_ms ||
@@ -1395,6 +1425,11 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
                 std::chrono::duration<double, std::milli>(now - loop_wall_start).count();
           }
 
+          if (powerSamplerThread.joinable()) {
+            stopPowerSampler.store(true, std::memory_order_relaxed);
+            powerSamplerThread.join();
+          }
+
           if (!sample_time_per_invoc.empty()) {
             total_time_ms = bench->FilterDuration(i, total_invocations, accumulated_time_ms);
             if (accumulated_time_ms > 0.0 && total_time_ms != accumulated_time_ms) {
@@ -1448,8 +1483,18 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
 
           GpuTelemetryData powerEnd =
               HardwareTelemetry::queryGpuByPciBusId(info.pcieBusId, devIdx);
-          avgPowerWatts = HardwareTelemetry::computeWindowPowerWatts(
-              powerStart, powerEnd, wall_elapsed_ms);
+          if (powerStart.hasEnergyCounter && powerEnd.hasEnergyCounter) {
+            avgPowerWatts = HardwareTelemetry::computeWindowPowerWatts(
+                powerStart, powerEnd, wall_elapsed_ms);
+            if (avgPowerWatts <= 0.0f && polledPowerCount > 0) {
+              avgPowerWatts = static_cast<float>(polledPowerSumWatts / polledPowerCount);
+            }
+          } else if (polledPowerCount > 0) {
+            avgPowerWatts = static_cast<float>(polledPowerSumWatts / polledPowerCount);
+          } else {
+            avgPowerWatts = HardwareTelemetry::computeWindowPowerWatts(
+                powerStart, powerEnd, wall_elapsed_ms);
+          }
 
           // Capture compiler resource usage from the timed benchmark run BEFORE
           // validation or secondary helper dispatches can overwrite it.
@@ -1525,8 +1570,8 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
           result_data.configIndex = i;
           result_data.sortWeight = bench->GetSortWeight(i);
           result_data.operationalIntensity = bench->GetOperationalIntensity(i);
-          result_data.width = effectiveWidth;
-          result_data.height = effectiveHeight;
+          result_data.width = bench->IsResolutionDependent(i) ? effectiveWidth : 0u;
+          result_data.height = bench->IsResolutionDependent(i) ? effectiveHeight : 0u;
           result_data.samplesPerFrame = bench->GetSamplesPerFrame(i);
 
           if (kUsage.available) {
@@ -1766,8 +1811,8 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
           fail_data.configIndex = i;
           fail_data.sortWeight = bench->GetSortWeight(i);
           fail_data.operationalIntensity = bench->GetOperationalIntensity(i);
-          fail_data.width = effectiveWidth;
-          fail_data.height = effectiveHeight;
+          fail_data.width = bench->IsResolutionDependent(i) ? effectiveWidth : 0u;
+          fail_data.height = bench->IsResolutionDependent(i) ? effectiveHeight : 0u;
           fail_data.errorString = errStr;
 
           formatter->addResult(fail_data);

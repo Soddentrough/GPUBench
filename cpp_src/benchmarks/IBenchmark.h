@@ -30,6 +30,7 @@ public:
   virtual void PrepareConfig(uint32_t /*config_idx*/) {}
   virtual void ReleaseConfigResources(uint32_t /*config_idx*/) {}
   virtual void SetResolution(uint32_t /*w*/, uint32_t /*h*/) {}
+  virtual bool IsResolutionDependent(uint32_t /*config_idx*/ = 0) const { return false; }
   virtual void Run(uint32_t config_idx = 0) = 0;
   virtual void Teardown() = 0;
   virtual bool RequiresInterIterationBarrier(uint32_t /*config_idx*/ = 0) const {

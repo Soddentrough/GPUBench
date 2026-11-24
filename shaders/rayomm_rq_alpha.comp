@@ -1,0 +1,63 @@
+#version 460
+#extension GL_EXT_ray_query : require
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform accelerationStructureEXT topLevelAS;
+layout(std430, set = 0, binding = 1) buffer OutputBuffer {
+    vec4 pixels[];
+} outBuf;
+
+layout(push_constant) uniform PushConsts {
+    uint width;
+    uint height;
+} pc;
+
+// Must match rayomm.rahit / RayOMMBench::evalLeafOpaqueHost identically
+bool evaluateLeafAlphaOpaque(uint primId, vec2 bary) {
+    uint layer = primId >> 13u;
+    float shiftX = float((layer * 3u) & 7u) * 0.025 - 0.08;
+    float shiftY = float((layer * 5u) & 7u) * 0.025 - 0.08;
+    vec2 p = bary - vec2(0.32 + shiftX, 0.32 + shiftY);
+    float distSq = dot(p, p);
+    return distSq <= 0.055;
+}
+
+void main() {
+    uvec2 launchID = gl_GlobalInvocationID.xy;
+    if (launchID.x >= pc.width || launchID.y >= pc.height) {
+        return;
+    }
+    uint pixelIdx = launchID.y * pc.width + launchID.x;
+
+    vec2 uv = (vec2(launchID) + vec2(0.5)) / vec2(pc.width, pc.height);
+    vec3 origin = vec3(uv.x * 2.0 - 1.0, uv.y * 2.0 - 1.0, -2.0);
+    vec3 direction = normalize(vec3(0.0, 0.0, 1.0));
+
+    rayQueryEXT rq;
+    rayQueryInitializeEXT(rq, topLevelAS, gl_RayFlagsNoneEXT, 0xFFu,
+                          origin, 0.001, direction, 100.0);
+    while (rayQueryProceedEXT(rq)) {
+        if (rayQueryGetIntersectionTypeEXT(rq, false) == gl_RayQueryCandidateIntersectionTriangleEXT) {
+            uint candPrimId = uint(rayQueryGetIntersectionPrimitiveIndexEXT(rq, false));
+            vec2 bary = rayQueryGetIntersectionBarycentricsEXT(rq, false);
+            if (evaluateLeafAlphaOpaque(candPrimId, bary)) {
+                rayQueryConfirmIntersectionEXT(rq);
+            }
+        }
+    }
+
+    if (rayQueryGetIntersectionTypeEXT(rq, true) == gl_RayQueryCommittedIntersectionTriangleEXT) {
+        vec2 attribs = rayQueryGetIntersectionBarycentricsEXT(rq, true);
+        float b0 = 1.0 - attribs.x - attribs.y;
+        vec3 leafTint = vec3(0.18 + 0.25 * attribs.x,
+                             0.55 + 0.30 * attribs.y,
+                             0.14 + 0.15 * b0);
+        float hitT = rayQueryGetIntersectionTEXT(rq, true);
+        float depthAtten = 1.0 / (1.0 + 0.08 * hitT);
+        uint primId = uint(rayQueryGetIntersectionPrimitiveIndexEXT(rq, true));
+        outBuf.pixels[pixelIdx] = vec4(leafTint * depthAtten, float(primId + 1u));
+    } else {
+        outBuf.pixels[pixelIdx] = vec4(0.15, 0.28, 0.52, 0.0);
+    }
+}

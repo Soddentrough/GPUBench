@@ -3408,7 +3408,7 @@ void VulkanContext::dispatch(ComputeKernel kernel, uint32_t grid_x,
     throw std::runtime_error("Invalid kernel handle");
   }
   VulkanKernel *vulkanKernel = it->second;
-  lastDispatchedKernel = kernel;
+  recordDispatchedKernel(kernel);
 
   if (m_inBatch) {
     InFlightFrame &frame = inFlightFrames[currentFrameIndex];
@@ -3771,7 +3771,7 @@ void VulkanContext::dispatchIndirect(ComputeKernel kernel_handle,
   auto *vulkanKernel = getKernel(kernel_handle);
   if (!vulkanKernel)
     return;
-  lastDispatchedKernel = kernel_handle;
+  recordDispatchedKernel(kernel_handle);
 
   auto &frame = inFlightFrames[currentFrameIndex];
   if (!m_inBatch || !m_batchCmdRecording) {
@@ -3843,7 +3843,12 @@ void VulkanContext::dispatchIndirectSequence(
   auto *vulkanKernel = getKernel(kernel_handle);
   if (!vulkanKernel || entries.empty())
     return;
-  lastDispatchedKernel = kernel_handle;
+  recordDispatchedKernel(kernel_handle);
+  for (const auto &entry : entries) {
+    if (entry.specializedKernel) {
+      recordDispatchedKernel(entry.specializedKernel);
+    }
+  }
 
   auto &frame = inFlightFrames[currentFrameIndex];
   if (!m_inBatch || !m_batchCmdRecording) {
@@ -3925,7 +3930,19 @@ void VulkanContext::dispatchWorkListSequence(
   auto *secondKernel = getKernel(secondKernel_handle);
   if (!classifyKernel || !secondKernel)
     return;
-  lastDispatchedKernel = secondKernel_handle;
+  if (resetKernel_handle && getKernel(resetKernel_handle)) {
+    recordDispatchedKernel(resetKernel_handle);
+  }
+  recordDispatchedKernel(classifyKernel_handle);
+  if (resolveKernel_handle && getKernel(resolveKernel_handle)) {
+    recordDispatchedKernel(resolveKernel_handle);
+  }
+  for (const auto &entry : entries) {
+    if (entry.specializedKernel) {
+      recordDispatchedKernel(entry.specializedKernel);
+    }
+  }
+  recordDispatchedKernel(secondKernel_handle);
 
   auto &frame = inFlightFrames[currentFrameIndex];
   if (!m_inBatch || !m_batchCmdRecording) {
@@ -4211,7 +4228,7 @@ void VulkanContext::dispatchRayTracingIndirect(ComputeKernel kernel_handle,
   auto *vulkanKernel = getKernel(kernel_handle);
   if (!vulkanKernel || !vulkanKernel->isRTPipeline)
     return;
-  lastDispatchedKernel = kernel_handle;
+  recordDispatchedKernel(kernel_handle);
 
   auto &frame = inFlightFrames[currentFrameIndex];
   if (!m_inBatch || !m_batchCmdRecording) {
@@ -4284,9 +4301,7 @@ VulkanContext::VulkanKernel *VulkanContext::getKernel(ComputeKernel handle) cons
 }
 
 void VulkanContext::releaseKernel(ComputeKernel kernel) {
-  if (lastDispatchedKernel == kernel) {
-    lastDispatchedKernel = nullptr;
-  }
+  forgetDispatchedKernel(kernel);
   auto it = kernels.find(kernel);
   if (it != kernels.end()) {
     VulkanKernel *vulkanKernel = it->second;
@@ -5119,7 +5134,14 @@ void VulkanContext::dispatchDGCWorkListSequence(
   auto *classifyKernel = getKernel(classifyKernel_handle);
   auto *secondKernel = getKernel(secondKernel_handle);
   if (!classifyKernel || !secondKernel) return;
-  lastDispatchedKernel = secondKernel_handle;
+  if (resetKernel_handle && getKernel(resetKernel_handle)) {
+    recordDispatchedKernel(resetKernel_handle);
+  }
+  recordDispatchedKernel(classifyKernel_handle);
+  if (resolveKernel_handle && getKernel(resolveKernel_handle)) {
+    recordDispatchedKernel(resolveKernel_handle);
+  }
+  recordDispatchedKernel(secondKernel_handle);
 
   auto &frame = inFlightFrames[currentFrameIndex];
   if (!m_inBatch || !m_batchCmdRecording) {
@@ -5245,7 +5267,7 @@ void VulkanContext::dispatchDGCSequence(ComputeKernel kernel_handle,
 
   auto *kernel = getKernel(kernel_handle);
   if (!kernel) return;
-  lastDispatchedKernel = kernel_handle;
+  recordDispatchedKernel(kernel_handle);
 
   auto &frame = inFlightFrames[currentFrameIndex];
   if (!m_inBatch || !m_batchCmdRecording) {

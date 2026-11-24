@@ -923,7 +923,7 @@ void ROCmContext::dispatch(ComputeKernel kernel, uint32_t grid_x,
     throw std::runtime_error("Invalid kernel handle");
   }
 
-  lastDispatchedKernel = kernel;
+  recordDispatchedKernel(kernel);
   it->second.lastBlockSize = block_x * block_y * block_z;
 
   if (m_inBatch) {
@@ -1034,9 +1034,7 @@ void ROCmContext::releaseKernel(ComputeKernel kernel) {
     endBatch();
   }
   invalidateCachedGraph();
-  if (lastDispatchedKernel == kernel) {
-    lastDispatchedKernel = nullptr;
-  }
+  forgetDispatchedKernel(kernel);
   auto it = kernels.find(kernel);
   if (it != kernels.end()) {
     delete static_cast<ROCmKernel *>(kernel);
@@ -1402,7 +1400,7 @@ void ROCmContext::dispatchOnStream(ComputeKernel kernel, uint32_t grid_x,
   if (it == kernels.end()) {
     throw std::runtime_error("Invalid kernel handle");
   }
-  lastDispatchedKernel = kernel;
+  recordDispatchedKernel(kernel);
   it->second.lastBlockSize = block_x * block_y * block_z;
   std::vector<void *> arg_pointers;
   if (!it->second.args.empty()) {

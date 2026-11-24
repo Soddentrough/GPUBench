@@ -654,7 +654,17 @@ TEST_CASE(ModernizationAnd2026, IsaDumper_HonestReportingAndHotLoopAccuracy) {
     const IsaInspectionResult cv0 = inspectSingle("Cooperative Vector (Neural Shading)", 0);
     ASSERT_TRUE(cv0.ok);
     ASSERT_EQ(cv0.artifacts.size(), size_t{1});
-    ASSERT_EQ(cv0.artifacts[0].artifactFile, std::string("coop_vector_fp16.comp.spv"));
+    ASSERT_EQ(cv0.artifacts[0].artifactFile, std::string("coop_vector_fp16_baseline.comp.spv"));
+
+    const IsaInspectionResult cv1 = inspectSingle("Cooperative Vector (Neural Shading)", 1);
+    ASSERT_TRUE(cv1.ok);
+    ASSERT_EQ(cv1.artifacts.size(), size_t{1});
+    ASSERT_EQ(cv1.artifacts[0].artifactFile, std::string("coop_vector_fp16.comp.spv"));
+
+    const IsaInspectionResult omm0 = inspectSingle("Ray Tracing Opacity Micromap", 0);
+    ASSERT_TRUE(omm0.ok);
+    ASSERT_EQ(omm0.artifacts.size(), size_t{1});
+    ASSERT_EQ(omm0.artifacts[0].artifactFile, std::string("rayomm_rq_alpha.comp.spv"));
 
     const IsaInspectionResult omm2 = inspectSingle("Ray Tracing Opacity Micromap", 2);
     ASSERT_TRUE(omm2.ok);

@@ -1,4 +1,5 @@
 #include "CoopVectorBench.h"
+#include "core/VulkanContext.h"
 #include <cmath>
 #include <cstring>
 #include <filesystem>
@@ -7,9 +8,13 @@
 std::string CoopVectorBench::GetConfigName(uint32_t config_idx) const {
   switch (config_idx) {
   case 0:
-    return "FP16 Per-Thread MLP (16x16)";
+    return "FP16 Per-Thread MLP (Shader Baseline)";
   case 1:
-    return "INT8 Per-Thread MLP (16x16)";
+    return "FP16 Per-Thread MLP (VK_NV_cooperative_vector)";
+  case 2:
+    return "INT8 Per-Thread MLP (Shader Baseline)";
+  case 3:
+    return "INT8 Per-Thread MLP (VK_NV_cooperative_vector)";
   default:
     return "";
   }
@@ -18,25 +23,40 @@ std::string CoopVectorBench::GetConfigName(uint32_t config_idx) const {
 const char *CoopVectorBench::GetDescription(uint32_t config_idx) const {
   switch (config_idx) {
   case 0:
-    return "Evaluates a 256-layer 16x16 FP16 per-invocation neural shading MLP using VK_NV_cooperative_vector (coopVecMatMulAddNV).";
+    return "Evaluates a 256-layer 16x16 FP16 per-invocation neural shading MLP using standard shader packed f16vec2 arithmetic.";
   case 1:
+    return "Evaluates a 256-layer 16x16 FP16 per-invocation neural shading MLP using VK_NV_cooperative_vector (coopVecMatMulAddNV).";
+  case 2:
+    return "Evaluates a 256-layer 16x16 INT8 quantized per-invocation neural material MLP using standard shader integer arithmetic.";
+  case 3:
     return "Evaluates a 256-layer 16x16 INT8 quantized per-invocation neural material MLP using VK_NV_cooperative_vector.";
   default:
-    return "Per-invocation neural shading MLP inference benchmark via VK_NV_cooperative_vector.";
+    return "Per-invocation neural shading MLP inference benchmark comparing shader baselines against VK_NV_cooperative_vector.";
   }
 }
 
 bool CoopVectorBench::IsSupported(const DeviceInfo &info,
                                   IComputeContext *context) const {
-  if (!info.cooperativeVectorSupport) return false;
   if (context && context->getBackend() != ComputeBackend::Vulkan) return false;
-  return true;
+  return info.fp16Support || info.int8Support || info.cooperativeVectorSupport;
 }
 
 bool CoopVectorBench::IsConfigSupported(uint32_t config_idx,
                                         const DeviceInfo &info,
                                         IComputeContext *context) const {
-  return (config_idx < 2u) && IsSupported(info, context);
+  if (context && context->getBackend() != ComputeBackend::Vulkan) return false;
+  switch (config_idx) {
+  case 0:
+    return info.fp16Support;
+  case 1:
+    return info.cooperativeVectorSupport;
+  case 2:
+    return info.int8Support;
+  case 3:
+    return info.cooperativeVectorSupport;
+  default:
+    return false;
+  }
 }
 
 IBenchmark::SupportLimitation
@@ -45,18 +65,53 @@ CoopVectorBench::GetSupportLimitation(const DeviceInfo &info,
   if (context && context->getBackend() != ComputeBackend::Vulkan) {
     return SupportLimitation::kApi;
   }
-  if (!info.cooperativeVectorSupport) {
+  if (!info.fp16Support && !info.int8Support && !info.cooperativeVectorSupport) {
     return SupportLimitation::kHardware;
   }
+  return SupportLimitation::kNone;
+}
+
+IBenchmark::SupportLimitation
+CoopVectorBench::GetConfigSupportLimitation(uint32_t config_idx,
+                                            const DeviceInfo &info,
+                                            IComputeContext *context) const {
+  if (context && context->getBackend() != ComputeBackend::Vulkan) {
+    return SupportLimitation::kApi;
+  }
+  if ((config_idx == 1u || config_idx == 3u) && !info.cooperativeVectorSupport) {
+    return SupportLimitation::kHardware;
+  }
+  if (config_idx == 0u && !info.fp16Support) return SupportLimitation::kHardware;
+  if (config_idx == 2u && !info.int8Support) return SupportLimitation::kHardware;
   return SupportLimitation::kNone;
 }
 
 std::string CoopVectorBench::GetSupportNote(const DeviceInfo &info,
                                             IComputeContext *context) const {
   if (context && context->getBackend() != ComputeBackend::Vulkan) {
-    return "Requires Vulkan 1.4 with VK_NV_cooperative_vector";
+    return "Requires Vulkan 1.4";
   }
-  if (!info.cooperativeVectorSupport) {
+  if (!info.fp16Support && !info.int8Support && !info.cooperativeVectorSupport) {
+    return "Requires shaderFloat16, shaderInt8, or VK_NV_cooperative_vector support";
+  }
+  return "";
+}
+
+std::string CoopVectorBench::GetConfigSupportNote(uint32_t config_idx,
+                                                  const DeviceInfo &info,
+                                                  IComputeContext *context) const {
+  if (context && context->getBackend() != ComputeBackend::Vulkan) {
+    return (config_idx == 1u || config_idx == 3u)
+               ? "Requires Vulkan 1.4 with VK_NV_cooperative_vector"
+               : "Requires Vulkan 1.4 compute pipeline";
+  }
+  if (config_idx == 0u && !info.fp16Support) {
+    return "shaderFloat16 not supported by GPU / Vulkan driver";
+  }
+  if (config_idx == 2u && !info.int8Support) {
+    return "shaderInt8 not supported by GPU / Vulkan driver";
+  }
+  if ((config_idx == 1u || config_idx == 3u) && !info.cooperativeVectorSupport) {
     return "VK_NV_cooperative_vector not supported by GPU / Vulkan driver";
   }
   return "";
@@ -65,6 +120,7 @@ std::string CoopVectorBench::GetSupportNote(const DeviceInfo &info,
 void CoopVectorBench::Setup(IComputeContext &context,
                             const std::string &kernel_dir) {
   m_context = &context;
+  const DeviceInfo info = context.getCurrentDeviceInfo();
   std::filesystem::path vkDir = std::filesystem::path(kernel_dir) / "vulkan";
 
   // FP16 16x16 weights = 256 fp16 values (0x2C00 = 0.0625f -> row sum = 1.0f)
@@ -73,6 +129,7 @@ void CoopVectorBench::Setup(IComputeContext &context,
   std::vector<uint16_t> fp16Z(4096 * 16, 0u);
   m_fp16Weights = context.createBuffer(fp16W.size() * sizeof(uint16_t), fp16W.data());
   m_fp16Biases = context.createBuffer(fp16B.size() * sizeof(uint16_t), fp16B.data());
+  m_fp16BaselineOut = context.createBuffer(fp16Z.size() * sizeof(uint16_t), fp16Z.data());
   m_fp16Out = context.createBuffer(fp16Z.size() * sizeof(uint16_t), fp16Z.data());
 
   std::vector<int8_t> int8W(256, 1);
@@ -80,32 +137,57 @@ void CoopVectorBench::Setup(IComputeContext &context,
   std::vector<int32_t> int8Z(4096 * 16, 0);
   m_int8Weights = context.createBuffer(int8W.size() * sizeof(int8_t), int8W.data());
   m_int8Biases = context.createBuffer(int8B.size() * sizeof(int32_t), int8B.data());
+  m_int8BaselineOut = context.createBuffer(int8Z.size() * sizeof(int32_t), int8Z.data());
   m_int8Out = context.createBuffer(int8Z.size() * sizeof(int32_t), int8Z.data());
-
-  m_fp16Kernel = context.createKernel(
-      (vkDir / "coop_vector_fp16.comp").string(), "main", 3);
-  m_int8Kernel = context.createKernel(
-      (vkDir / "coop_vector_int8.comp").string(), "main", 3);
 
   uint32_t nThreads = kNumThreads;
   uint32_t nIters = kIterations;
 
-  context.setKernelArg(m_fp16Kernel, 0, m_fp16Weights);
-  context.setKernelArg(m_fp16Kernel, 1, m_fp16Biases);
-  context.setKernelArg(m_fp16Kernel, 2, m_fp16Out);
-  context.setKernelArg(m_fp16Kernel, 3, sizeof(uint32_t), &nThreads);
-  context.setKernelArg(m_fp16Kernel, 4, sizeof(uint32_t), &nIters);
+  auto bindFp16Kernel = [&](ComputeKernel k, ComputeBuffer outBuf) {
+    context.setKernelArg(k, 0, m_fp16Weights);
+    context.setKernelArg(k, 1, m_fp16Biases);
+    context.setKernelArg(k, 2, outBuf);
+    context.setKernelArg(k, 3, sizeof(uint32_t), &nThreads);
+    context.setKernelArg(k, 4, sizeof(uint32_t), &nIters);
+  };
+  auto bindInt8Kernel = [&](ComputeKernel k, ComputeBuffer outBuf) {
+    context.setKernelArg(k, 0, m_int8Weights);
+    context.setKernelArg(k, 1, m_int8Biases);
+    context.setKernelArg(k, 2, outBuf);
+    context.setKernelArg(k, 3, sizeof(uint32_t), &nThreads);
+    context.setKernelArg(k, 4, sizeof(uint32_t), &nIters);
+  };
 
-  context.setKernelArg(m_int8Kernel, 0, m_int8Weights);
-  context.setKernelArg(m_int8Kernel, 1, m_int8Biases);
-  context.setKernelArg(m_int8Kernel, 2, m_int8Out);
-  context.setKernelArg(m_int8Kernel, 3, sizeof(uint32_t), &nThreads);
-  context.setKernelArg(m_int8Kernel, 4, sizeof(uint32_t), &nIters);
+  if (info.fp16Support) {
+    m_fp16BaselineKernel = context.createKernel(
+        (vkDir / "coop_vector_fp16_baseline.comp").string(), "main", 3);
+    bindFp16Kernel(m_fp16BaselineKernel, m_fp16BaselineOut);
+  }
+  if (info.int8Support) {
+    m_int8BaselineKernel = context.createKernel(
+        (vkDir / "coop_vector_int8_baseline.comp").string(), "main", 3);
+    bindInt8Kernel(m_int8BaselineKernel, m_int8BaselineOut);
+  }
+  if (info.cooperativeVectorSupport) {
+    m_fp16Kernel = context.createKernel(
+        (vkDir / "coop_vector_fp16.comp").string(), "main", 3);
+    bindFp16Kernel(m_fp16Kernel, m_fp16Out);
+    m_int8Kernel = context.createKernel(
+        (vkDir / "coop_vector_int8.comp").string(), "main", 3);
+    bindInt8Kernel(m_int8Kernel, m_int8Out);
+  }
 }
 
 void CoopVectorBench::Run(uint32_t config_idx) {
   if (!m_context) return;
-  ComputeKernel k = (config_idx == 0) ? m_fp16Kernel : m_int8Kernel;
+  ComputeKernel k = nullptr;
+  switch (config_idx) {
+  case 0: k = m_fp16BaselineKernel; break;
+  case 1: k = m_fp16Kernel; break;
+  case 2: k = m_int8BaselineKernel; break;
+  case 3: k = m_int8Kernel; break;
+  default: return;
+  }
   if (!k) return;
   m_context->dispatch(k, kNumThreads / 128u, 1, 1, 128, 1, 1);
 }
@@ -119,10 +201,12 @@ BenchmarkResult CoopVectorBench::GetResult(uint32_t /*config_idx*/) const {
 
 bool CoopVectorBench::ValidateResults(uint32_t config_idx) const {
   if (!m_context) return false;
-  if (config_idx == 0) {
-    if (!m_fp16Out) return false;
+  if (config_idx == 0u || config_idx == 1u) {
+    ComputeKernel k = (config_idx == 0u) ? m_fp16BaselineKernel : m_fp16Kernel;
+    ComputeBuffer outBuf = (config_idx == 0u) ? m_fp16BaselineOut : m_fp16Out;
+    if (!k || !outBuf) return false;
     std::vector<uint16_t> out(256, 0u);
-    m_context->readBuffer(m_fp16Out, 0, out.size() * sizeof(uint16_t),
+    m_context->readBuffer(outBuf, 0, out.size() * sizeof(uint16_t),
                           out.data());
     bool anyPositive = false;
     for (uint16_t h : out) {
@@ -132,10 +216,12 @@ bool CoopVectorBench::ValidateResults(uint32_t config_idx) const {
     }
     return anyPositive;
   }
-  if (config_idx == 1) {
-    if (!m_int8Out) return false;
+  if (config_idx == 2u || config_idx == 3u) {
+    ComputeKernel k = (config_idx == 2u) ? m_int8BaselineKernel : m_int8Kernel;
+    ComputeBuffer outBuf = (config_idx == 2u) ? m_int8BaselineOut : m_int8Out;
+    if (!k || !outBuf) return false;
     std::vector<int32_t> out(256, 0);
-    m_context->readBuffer(m_int8Out, 0, out.size() * sizeof(int32_t),
+    m_context->readBuffer(outBuf, 0, out.size() * sizeof(int32_t),
                           out.data());
     bool anyNonZero = false;
     for (int32_t v : out) {
@@ -148,22 +234,30 @@ bool CoopVectorBench::ValidateResults(uint32_t config_idx) const {
 
 void CoopVectorBench::Teardown() {
   if (m_context) {
+    if (m_fp16BaselineKernel) m_context->releaseKernel(m_fp16BaselineKernel);
     if (m_fp16Kernel) m_context->releaseKernel(m_fp16Kernel);
+    if (m_int8BaselineKernel) m_context->releaseKernel(m_int8BaselineKernel);
     if (m_int8Kernel) m_context->releaseKernel(m_int8Kernel);
     if (m_fp16Weights) m_context->releaseBuffer(m_fp16Weights);
     if (m_fp16Biases) m_context->releaseBuffer(m_fp16Biases);
+    if (m_fp16BaselineOut) m_context->releaseBuffer(m_fp16BaselineOut);
     if (m_fp16Out) m_context->releaseBuffer(m_fp16Out);
     if (m_int8Weights) m_context->releaseBuffer(m_int8Weights);
     if (m_int8Biases) m_context->releaseBuffer(m_int8Biases);
+    if (m_int8BaselineOut) m_context->releaseBuffer(m_int8BaselineOut);
     if (m_int8Out) m_context->releaseBuffer(m_int8Out);
   }
+  m_fp16BaselineKernel = nullptr;
   m_fp16Kernel = nullptr;
+  m_int8BaselineKernel = nullptr;
   m_int8Kernel = nullptr;
   m_fp16Weights = nullptr;
   m_fp16Biases = nullptr;
+  m_fp16BaselineOut = nullptr;
   m_fp16Out = nullptr;
   m_int8Weights = nullptr;
   m_int8Biases = nullptr;
+  m_int8BaselineOut = nullptr;
   m_int8Out = nullptr;
   m_context = nullptr;
 }

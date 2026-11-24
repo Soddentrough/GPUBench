@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ComputeBackend.h"
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <map>
@@ -147,9 +148,36 @@ public:
     return KernelResourceUsage{};
   }
   virtual KernelResourceUsage getLastKernelResourceUsage() const {
-    return getKernelResourceUsage(lastDispatchedKernel);
+    if (dispatchedKernels.empty()) {
+      return getKernelResourceUsage(lastDispatchedKernel);
+    }
+    KernelResourceUsage agg{};
+    for (ComputeKernel k : dispatchedKernels) {
+      KernelResourceUsage ku = getKernelResourceUsage(k);
+      if (!ku.available) {
+        continue;
+      }
+      agg.available = true;
+      agg.vgprCount = std::max(agg.vgprCount, ku.vgprCount);
+      agg.sgprCount = std::max(agg.sgprCount, ku.sgprCount);
+      agg.ldsSizeBytes = std::max(agg.ldsSizeBytes, ku.ldsSizeBytes);
+      agg.scratchSizeBytes += ku.scratchSizeBytes;
+      agg.codeSizeBytes += ku.codeSizeBytes;
+      if (ku.maxWavesPerSimd > 0) {
+        agg.maxWavesPerSimd = (agg.maxWavesPerSimd == 0)
+                                  ? ku.maxWavesPerSimd
+                                  : std::min(agg.maxWavesPerSimd, ku.maxWavesPerSimd);
+      }
+      if (agg.compilerNotes.empty() && !ku.compilerNotes.empty()) {
+        agg.compilerNotes = ku.compilerNotes;
+      }
+    }
+    return agg.available ? agg : getKernelResourceUsage(lastDispatchedKernel);
   }
-  void clearLastDispatchedKernel() { lastDispatchedKernel = nullptr; }
+  void clearLastDispatchedKernel() {
+    lastDispatchedKernel = nullptr;
+    dispatchedKernels.clear();
+  }
 
   // Hardware Performance Query (VK_KHR_performance_query)
   virtual void startPerformanceQuery() {}
@@ -234,7 +262,24 @@ public:
   virtual hipCtx_t getROCmContext() const { return nullptr; }
 
 protected:
+  void recordDispatchedKernel(ComputeKernel kernel) {
+    lastDispatchedKernel = kernel;
+    if (kernel && std::find(dispatchedKernels.begin(), dispatchedKernels.end(), kernel) ==
+                      dispatchedKernels.end()) {
+      dispatchedKernels.push_back(kernel);
+    }
+  }
+  void forgetDispatchedKernel(ComputeKernel kernel) {
+    if (lastDispatchedKernel == kernel) {
+      lastDispatchedKernel = nullptr;
+    }
+    dispatchedKernels.erase(
+        std::remove(dispatchedKernels.begin(), dispatchedKernels.end(), kernel),
+        dispatchedKernels.end());
+  }
+
   ComputeKernel lastDispatchedKernel = nullptr;
+  std::vector<ComputeKernel> dispatchedKernels;
 };
 
 namespace gpubench {

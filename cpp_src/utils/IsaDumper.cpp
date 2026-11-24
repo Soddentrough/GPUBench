@@ -218,16 +218,20 @@ static std::vector<BenchmarkMapping> getBenchmarkMappings() {
       {"SparseMatrix", {"sparsematrix", "2:4structuredsparsematrix", "sparse", "sparsity"}, {0}, "Sparse FP16 2:4 (Matrix)", "", "sparse_fp16_matrix.co", ""},
       {"SparseMatrix", {"sparsematrix", "2:4structuredsparsematrix", "sparse", "sparsity"}, {1}, "Sparse FP8 2:4 (Matrix)", "", "sparse_fp8_matrix.co", ""},
       {"SparseMatrix", {"sparsematrix", "2:4structuredsparsematrix", "sparse", "sparsity"}, {2}, "Sparse INT8 2:4 (Matrix)", "", "sparse_int8_matrix.co", ""},
-      {"CoopVector", {"coopvector", "cooperativevector", "cooperativevectorneuralshading"}, {0}, "CoopVector FP16 MatVec", "coop_vector_fp16.comp.spv", "", ""},
-      {"CoopVector", {"coopvector", "cooperativevector", "cooperativevectorneuralshading"}, {1}, "CoopVector INT8 MatVec", "coop_vector_int8.comp.spv", "", ""},
+      {"CoopVector", {"coopvector", "cooperativevector", "cooperativevectorneuralshading", "neural", "mlp"}, {0}, "CoopVector FP16 Shader Baseline", "coop_vector_fp16_baseline.comp.spv", "", ""},
+      {"CoopVector", {"coopvector", "cooperativevector", "cooperativevectorneuralshading", "neural", "mlp"}, {1}, "CoopVector FP16 MatVec", "coop_vector_fp16.comp.spv", "", ""},
+      {"CoopVector", {"coopvector", "cooperativevector", "cooperativevectorneuralshading", "neural", "mlp"}, {2}, "CoopVector INT8 Shader Baseline", "coop_vector_int8_baseline.comp.spv", "", ""},
+      {"CoopVector", {"coopvector", "cooperativevector", "cooperativevectorneuralshading", "neural", "mlp"}, {3}, "CoopVector INT8 MatVec", "coop_vector_int8.comp.spv", "", ""},
 #ifdef GPUBENCH_ENABLE_EXPERIMENTAL_WORKGRAPHS
       {"WorkGraphs", {"workgraphs", "gpuworkgraphsproducerconsumer", "shaderenqueue"}, {0}, "WorkGraphs — Indirect / Persistent Producer", "workgraphs_producer.comp.spv", "workgraphs_producer.co", ""},
       {"WorkGraphs", {"workgraphs", "gpuworkgraphsproducerconsumer", "shaderenqueue"}, {1}, "WorkGraphs — Indirect / Persistent Consumer", "workgraphs_consumer.comp.spv", "workgraphs_consumer.co", ""},
       {"WorkGraphs", {"workgraphs", "gpuworkgraphsproducerconsumer", "shaderenqueue"}, {2}, "WorkGraphs — VK_AMDX_shader_enqueue", "workgraphs_amdx.comp.spv", "", ""},
 #endif
-      {"RayOMM", {"rayomm", "raytracingopacitymicromap", "opacitymicromap", "omm"}, {0}, "RayOMM — Any-Hit Baseline", "rayomm.rgen.spv", "", ""},
-      {"RayOMM", {"rayomm", "raytracingopacitymicromap", "opacitymicromap", "omm"}, {1}, "RayOMM — Hardware 2-State OMM", "rayomm_omm.rgen.spv", "", "", "", "", {{0u, 1u}}},
-      {"RayOMM", {"rayomm", "raytracingopacitymicromap", "opacitymicromap", "omm"}, {2}, "RayOMM — Hardware 4-State OMM", "rayomm_omm.rgen.spv", "", "", "", "", {{0u, 0u}}},
+      {"RayOMM", {"rayomm", "raytracingopacitymicromap", "opacitymicromap", "omm", "micromap"}, {0}, "RayOMM — Compute RayQuery Alpha-Cutout", "rayomm_rq_alpha.comp.spv", "", ""},
+      {"RayOMM", {"rayomm", "raytracingopacitymicromap", "opacitymicromap", "omm", "micromap"}, {1}, "RayOMM — RTP Any-Hit Baseline", "rayomm.rgen.spv", "", "", "", "", {{0u, 0u}}},
+      {"RayOMM", {"rayomm", "raytracingopacitymicromap", "opacitymicromap", "omm", "micromap"}, {2}, "RayOMM — Hardware 2-State OMM", "rayomm_omm.rgen.spv", "", "", "", "", {{0u, 1u}}},
+      {"RayOMM", {"rayomm", "raytracingopacitymicromap", "opacitymicromap", "omm", "micromap"}, {3}, "RayOMM — Hardware 4-State OMM", "rayomm_omm.rgen.spv", "", "", "", "", {{0u, 0u}}},
+      {"RayOMM", {"rayomm", "raytracingopacitymicromap", "opacitymicromap", "omm", "micromap"}, {4}, "RayOMM — RTP Force-Opaque Reference", "rayomm.rgen.spv", "", "", "", "", {{0u, 1u}}},
       {"System Memory Bandwidth", {"sysmembandwidth", "rambandwidth", "sysmembw", "sysmem"}, {0, 1, 2, 3, 4, 5}, "Host SIMD Memory Bandwidth", "", "", "", "", "Host CPU SIMD benchmark (AVX-512 / AVX2 / NEON) — executes on system RAM with no GPU shader ISA."},
       {"System Memory Latency", {"sysmemlatency", "ramlatency", "sysmemlat", "sl"}, {0}, "Host Pointer-Chasing Latency", "", "", "", "", "Host CPU pointer-chasing latency benchmark — executes on CPU caches/DRAM with no GPU shader ISA."},
   };
@@ -1736,6 +1740,14 @@ public:
       return true;
     };
 
+    if (fname == "coop_vector_fp16_baseline.comp.spv" && !fp16Supported) {
+      return emitSkip("FP16 shader arithmetic (shaderFloat16) is not supported on " +
+                      deviceName + " (" + driverInfo + ").");
+    }
+    if (fname == "coop_vector_int8_baseline.comp.spv" && !int8Supported) {
+      return emitSkip("INT8 shader arithmetic (shaderInt8) is not supported on " +
+                      deviceName + " (" + driverInfo + ").");
+    }
     if ((fname == "coop_vector_fp16.comp.spv" || fname == "coop_vector_int8.comp.spv") &&
         !coopVectorSupported) {
       return emitSkip("Cooperative vector (VK_NV_cooperative_vector) is not supported on " +

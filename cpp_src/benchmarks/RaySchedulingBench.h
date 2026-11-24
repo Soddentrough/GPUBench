@@ -318,6 +318,7 @@ public:
       queueCapacity *= 2;
     }
   }
+  bool IsResolutionDependent(uint32_t = 0) const override { return true; }
   void SetBounceDepth(uint32_t bounces);
   uint32_t GetBounceDepth() const { return bounceDepth; }
 
