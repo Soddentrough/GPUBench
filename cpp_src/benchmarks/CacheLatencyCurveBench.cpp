@@ -1,5 +1,6 @@
 #include "benchmarks/CacheLatencyCurveBench.h"
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <iostream>
 #include <numeric>
@@ -8,21 +9,21 @@
 
 CacheLatencyCurveBench::CacheLatencyCurveBench() {
   configs = {
-    {"16 KB", 16ULL * 1024, "L0 TCP Cache", 0},
-    {"32 KB", 32ULL * 1024, "L0 TCP Boundary", 0},
-    {"64 KB", 64ULL * 1024, "GL1 Cache Transition", 0},
-    {"128 KB", 128ULL * 1024, "GL1 Cache", 0},
-    {"256 KB", 256ULL * 1024, "GL1 Boundary", 0},
-    {"512 KB", 512ULL * 1024, "GL2 Cache", 0},
-    {"1 MB", 1ULL * 1024 * 1024, "GL2 Cache", 0},
-    {"2 MB", 2ULL * 1024 * 1024, "GL2 Cache", 0},
-    {"4 MB", 4ULL * 1024 * 1024, "GL2 Boundary", 0},
-    {"8 MB", 8ULL * 1024 * 1024, "L3 MALL Cache", 0},
-    {"16 MB", 16ULL * 1024 * 1024, "L3 MALL Cache", 0},
-    {"32 MB", 32ULL * 1024 * 1024, "L3 MALL Cache", 0},
-    {"64 MB", 64ULL * 1024 * 1024, "L3 MALL Cache", 0},
-    {"128 MB", 128ULL * 1024 * 1024, "L3 MALL Boundary", 0},
-    {"256 MB", 256ULL * 1024 * 1024, "GDDR6 VRAM DRAM", 0}
+    {"16 KB", 16ULL * 1024, "L0 / L1 Cache", 0},
+    {"32 KB", 32ULL * 1024, "L0 / L1 Cache Boundary", 0},
+    {"64 KB", 64ULL * 1024, "L1 / L2 Cache Transition", 0},
+    {"128 KB", 128ULL * 1024, "L1 / L2 Cache", 0},
+    {"256 KB", 256ULL * 1024, "L1 / L2 Cache", 0},
+    {"512 KB", 512ULL * 1024, "L2 Cache", 0},
+    {"1 MB", 1ULL * 1024 * 1024, "L2 Cache", 0},
+    {"2 MB", 2ULL * 1024 * 1024, "L2 Cache", 0},
+    {"4 MB", 4ULL * 1024 * 1024, "L2 Cache Boundary", 0},
+    {"8 MB", 8ULL * 1024 * 1024, "L3 / VRAM Transition", 0},
+    {"16 MB", 16ULL * 1024 * 1024, "L3 / VRAM", 0},
+    {"32 MB", 32ULL * 1024 * 1024, "L3 / VRAM", 0},
+    {"64 MB", 64ULL * 1024 * 1024, "L3 / VRAM", 0},
+    {"128 MB", 128ULL * 1024 * 1024, "L3 / VRAM Boundary", 0},
+    {"256 MB", 256ULL * 1024 * 1024, "VRAM / System DRAM", 0}
   };
 }
 
@@ -39,23 +40,39 @@ std::string CacheLatencyCurveBench::GetConfigName(uint32_t config_idx) const {
 
 std::string CacheLatencyCurveBench::ComputeAdaptiveHint(
     uint64_t workingSetBytes, const DeviceInfo &info) const {
+  auto containsCi = [](const std::string &haystack, const char *needle) {
+    std::string h = haystack;
+    std::string n = needle;
+    std::transform(h.begin(), h.end(), h.begin(),
+                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    std::transform(n.begin(), n.end(), n.begin(),
+                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    return h.find(n) != std::string::npos;
+  };
+  const bool isAmdRdna =
+      (info.vendorID == 0x1002) &&
+      (containsCi(info.archName, "rdna") || containsCi(info.archName, "gfx10") ||
+       containsCi(info.archName, "gfx11") || containsCi(info.archName, "gfx12"));
+
   uint64_t l0Bytes = info.l1CacheSize > 0 ? info.l1CacheSize : (32ULL * 1024);
-  uint64_t l1Bytes = 256ULL * 1024;
   uint64_t l2Bytes =
       info.l2CacheSize > 0 ? info.l2CacheSize : (4ULL * 1024 * 1024);
   uint64_t l3Bytes = info.l3CacheSize;
 
   if (workingSetBytes < l0Bytes) {
-    return "L0 Vector Cache";
+    return isAmdRdna ? "L0 Vector Cache" : "L1 / Vector Cache";
   }
   if (workingSetBytes == l0Bytes) {
-    return "L0 Vector Cache Boundary";
+    return isAmdRdna ? "L0 Vector Cache Boundary" : "L1 / Vector Cache Boundary";
   }
-  if (workingSetBytes < l1Bytes) {
-    return "L1 / GL1 Cache";
-  }
-  if (workingSetBytes == l1Bytes) {
-    return "L1 / GL1 Cache Boundary";
+  if (isAmdRdna) {
+    constexpr uint64_t l1Gl1Bytes = 256ULL * 1024;
+    if (workingSetBytes < l1Gl1Bytes) {
+      return "L1 / GL1 Cache";
+    }
+    if (workingSetBytes == l1Gl1Bytes) {
+      return "L1 / GL1 Cache Boundary";
+    }
   }
   if (workingSetBytes < l2Bytes) {
     return "L2 Cache";

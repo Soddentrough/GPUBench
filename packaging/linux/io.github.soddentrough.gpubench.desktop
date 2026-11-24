@@ -3,7 +3,7 @@ Type=Application
 Version=1.5
 Name=GPUBench
 GenericName=GPU Compute Benchmark
-Comment=Modern cross-backend Vulkan, ROCm, and OpenCL benchmarking utility
+Comment=Vulkan 1.4 GPU compute and hardware ray tracing benchmark (optional ROCm and OpenCL backends)
 Exec=gpubench-gui
 Icon=io.github.soddentrough.gpubench
 Terminal=false
@@ -12,8 +12,8 @@ Keywords=GPU;Benchmark;Vulkan;ROCm;OpenCL;RayTracing;Compute;Hardware;
 StartupNotify=true
 StartupWMClass=gpubench-gui
 MimeType=application/x-gpubench+json;
-Actions=RunCLI;
+Actions=AutoRun;
 
-[Desktop Action RunCLI]
-Name=Run CLI Benchmark
+[Desktop Action AutoRun]
+Name=Auto-Run Benchmarks
 Exec=gpubench-gui --auto-run

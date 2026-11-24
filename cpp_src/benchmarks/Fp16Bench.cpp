@@ -25,13 +25,17 @@ void Fp16Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
   size_t bufferSize =
       8192 * 64 * 4 * 4; // 8MB buffer to prevent out of bounds
   buffer = context.createBuffer(bufferSize);
-  matrixInputBuffer = context.createBuffer(bufferSize);
+  if (context.getBackend() == ComputeBackend::Vulkan) {
+    matrixInputBuffer = context.createBuffer(bufferSize);
+  }
   matrixBuffer = context.createBuffer(bufferSize);
 
   // Initialize buffers with packed FP16 0.03125 (0x2800) so both vector and matrix loads see non-zero finite values
   std::vector<uint32_t> initData(bufferSize / sizeof(uint32_t), 0x28002800u);
   context.writeBuffer(buffer, 0, bufferSize, initData.data());
-  context.writeBuffer(matrixInputBuffer, 0, bufferSize, initData.data());
+  if (matrixInputBuffer) {
+    context.writeBuffer(matrixInputBuffer, 0, bufferSize, initData.data());
+  }
   context.writeBuffer(matrixBuffer, 0, bufferSize, initData.data());
 
   // Load Vector Kernel
@@ -142,8 +146,7 @@ BenchmarkResult Fp16Bench::GetResult(uint32_t config_idx) const {
     uint64_t iters = 65536;
     uint64_t ops_per_iter = 128;
     if (context) {
-      if (context->getBackend() == ComputeBackend::ROCm ||
-          context->getBackend() == ComputeBackend::OpenCL) {
+      if (context->getBackend() == ComputeBackend::OpenCL) {
         iters = 16384;
         ops_per_iter = 128;
       }

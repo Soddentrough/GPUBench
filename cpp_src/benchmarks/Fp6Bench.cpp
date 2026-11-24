@@ -1,5 +1,7 @@
 #include "benchmarks/Fp6Bench.h"
+#ifdef HAVE_VULKAN
 #include "core/VulkanContext.h"
+#endif
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -43,11 +45,6 @@ void Fp6Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
   std::vector<uint32_t> zeroData(bufferSize / sizeof(uint32_t), 0u);
   context.writeBuffer(outputBuffer, 0, bufferSize, zeroData.data());
 
-  auto file_exists = [](const std::string &path) {
-    std::ifstream f(path.c_str());
-    return f.good();
-  };
-
   std::filesystem::path kdir(kernel_dir);
 
   if (context.getBackend() == ComputeBackend::ROCm) {
@@ -68,6 +65,12 @@ void Fp6Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
     return;
   }
 
+#ifdef HAVE_VULKAN
+  auto file_exists = [](const std::string &path) {
+    std::ifstream f(path.c_str());
+    return f.good();
+  };
+
   if (context.getBackend() == ComputeBackend::Vulkan &&
       info.fp6Support && info.cooperativeMatrixSupport) {
     auto *vc = dynamic_cast<VulkanContext *>(&context);
@@ -75,23 +78,26 @@ void Fp6Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
                          VulkanContext::kVkComponentTypeFloat6E3M2EXT,
                          VK_COMPONENT_TYPE_FLOAT32_KHR)
                    : VulkanContext::CoopMatrixTile{};
-    matrixBlockX = tile.supported ? tile.subgroupSize : 32u;
-    std::filesystem::path matrix_file = kdir / "vulkan" / "coop_matrix_fp6.comp";
-    if (file_exists(matrix_file.string()) ||
-        file_exists(matrix_file.string() + ".spv")) {
-      try {
-        matrixKernel = context.createKernelWithSpecConstants(
-            matrix_file.string(), "main", 2, {16u, 16u, 16u, matrixBlockX});
-        if (matrixKernel) {
-          context.setKernelArg(matrixKernel, 0, buffer);
-          context.setKernelArg(matrixKernel, 1, outputBuffer);
+    if (tile.supported && tile.M == 16u && tile.N == 16u && tile.K == 16u) {
+      matrixBlockX = tile.subgroupSize;
+      std::filesystem::path matrix_file = kdir / "vulkan" / "coop_matrix_fp6.comp";
+      if (file_exists(matrix_file.string()) ||
+          file_exists(matrix_file.string() + ".spv")) {
+        try {
+          matrixKernel = context.createKernelWithSpecConstants(
+              matrix_file.string(), "main", 2, {16u, 16u, 16u, matrixBlockX});
+          if (matrixKernel) {
+            context.setKernelArg(matrixKernel, 0, buffer);
+            context.setKernelArg(matrixKernel, 1, outputBuffer);
+          }
+        } catch (const std::exception &e) {
+          std::cerr << "Vulkan FP6 Matrix kernel compilation failed: " << e.what() << std::endl;
+          matrixKernel = nullptr;
         }
-      } catch (const std::exception &e) {
-        std::cerr << "Vulkan FP6 Matrix kernel compilation failed: " << e.what() << std::endl;
-        matrixKernel = nullptr;
       }
     }
   }
+#endif
 }
 
 void Fp6Bench::Run(uint32_t config_idx) {

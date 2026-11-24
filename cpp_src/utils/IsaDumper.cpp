@@ -3,19 +3,35 @@
 #include "third_party/yyjson.h"
 #include "utils/KernelPath.h"
 #include <algorithm>
+#include <atomic>
 #include <cctype>
+#include <cerrno>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iomanip>
 #include <iostream>
 #include <map>
 #include <set>
 #include <sstream>
 #include <system_error>
+#include <thread>
 #include <vector>
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#else
+#include <fcntl.h>
+#include <spawn.h>
+#include <sys/wait.h>
+#include <unistd.h>
+extern char **environ;
+#endif
 
 #ifdef HAVE_VULKAN
 #ifndef VK_ENABLE_BETA_EXTENSIONS
@@ -48,6 +64,25 @@ namespace fs = std::filesystem;
 
 namespace {
 
+struct SpecConstEntry {
+  uint32_t id = 0;
+  uint32_t value = 0;
+};
+
+enum class RasterColorFormat {
+  RGBA8_UNORM,
+  RGBA16F_SFLOAT,
+};
+
+struct RasterPipelineConfig {
+  bool custom = false;
+  RasterColorFormat colorFormat = RasterColorFormat::RGBA8_UNORM;
+  bool blendEnable = false;
+  bool depthEnable = false;
+  uint32_t pushConstantSize = 16u;
+  bool hasStorageBufferBinding = false;
+};
+
 struct KernelArtifact {
   std::string benchmarkName;
   std::string configName;
@@ -56,6 +91,8 @@ struct KernelArtifact {
   fs::path filePath;
   std::string rocmSymbol;
   std::string skipReason;
+  std::vector<SpecConstEntry> specConstants;
+  RasterPipelineConfig rasterConfig;
 };
 
 static std::string normalizeKey(const std::string &s) {
@@ -78,9 +115,29 @@ struct BenchmarkMapping {
   std::string openclCl;
   std::string rocmSymbol = "";
   std::string fixedSkipReason = "";
+  std::vector<SpecConstEntry> specConstants = {};
+  RasterPipelineConfig rasterConfig = {};
+  std::string rocmConfigLabel = "";
 };
 
 static std::vector<BenchmarkMapping> getBenchmarkMappings() {
+  const std::vector<std::string> rsAliases = {
+      "rayscheduling",
+      "rtscheduling",
+      "rayschedulingopenworldforest",
+      "rayschedulingoutdoorlandscape",
+      "rayschedulingindooratrium",
+      "rayschedulingshowroomstudio",
+      "rayexecutionparadigm"};
+  const RasterPipelineConfig pixelFillRgba8{
+      true, RasterColorFormat::RGBA8_UNORM, false, false, 16u, false};
+  const RasterPipelineConfig pixelFillRgba16f{
+      true, RasterColorFormat::RGBA16F_SFLOAT, false, false, 16u, false};
+  const RasterPipelineConfig pixelFillBlend{
+      true, RasterColorFormat::RGBA8_UNORM, true, false, 16u, false};
+  const RasterPipelineConfig asyncGfxRaster{
+      true, RasterColorFormat::RGBA16F_SFLOAT, false, true, 8u, false};
+
   return {
       {"BF16", {"bf16"}, {0}, "BF16 (Vector)", "bf16.comp.spv", "bf16.co", ""},
       {"BF16", {"bf16", "bf16matrix", "coopmatrixbf16"}, {1}, "BF16 (Matrix)", "coop_matrix_bf16.comp.spv", "bf16_matrix.co", ""},
@@ -94,24 +151,35 @@ static std::vector<BenchmarkMapping> getBenchmarkMappings() {
       {"INT8", {"int8"}, {0}, "INT8 (Vector)", "int8.comp.spv", "int8.co", "int8.cl"},
       {"INT8", {"int8", "int8matrix", "coopmatrixint8"}, {1}, "INT8 (Matrix)", "coop_matrix_int8.comp.spv", "int8_matrix.co", ""},
       {"INT4", {"int4", "int4matrix"}, {0}, "INT4 (Matrix)", "", "int4_matrix.co", ""},
-      {"ILP & Dual-Issue", {"dualissue", "ilp"}, {0}, "FP32 ILP4", "dual_issue_ilp4.comp.spv", "dual_issue.co", "dual_issue.cl", "run_dual_issue_ilp4"},
-      {"ILP & Dual-Issue", {"dualissue", "ilp"}, {1}, "FP32 ILP8", "dual_issue_ilp8.comp.spv", "dual_issue.co", "dual_issue.cl", "run_dual_issue_ilp8"},
-      {"ILP & Dual-Issue", {"dualissue", "ilp"}, {2}, "FP32 ILP16", "dual_issue_ilp16.comp.spv", "dual_issue.co", "dual_issue.cl", "run_dual_issue_ilp16"},
-      {"ILP & Dual-Issue", {"dualissue", "ilp"}, {3}, "INT32 ILP4", "dual_issue_int32_4.comp.spv", "dual_issue.co", "dual_issue.cl", "run_dual_issue_int32_4"},
-      {"ILP & Dual-Issue", {"dualissue", "ilp"}, {4}, "INT32 ILP8", "dual_issue_int32_8.comp.spv", "dual_issue.co", "dual_issue.cl", "run_dual_issue_int32_8"},
-      {"ILP & Dual-Issue", {"dualissue", "ilp"}, {5}, "INT32 ILP16", "dual_issue_int32.comp.spv", "dual_issue.co", "dual_issue.cl", "run_dual_issue_int32"},
-      {"ILP & Dual-Issue", {"dualissue", "ilp"}, {6}, "Mixed FP32+INT32", "dual_issue_mixed.comp.spv", "dual_issue.co", "dual_issue.cl", "run_dual_issue_mixed"},
+      {"ILP & Dual-Issue", {"dualissue", "ilp"}, {0}, "FP32 Baseline (Ping-Pong)", "dual_issue_ilp4.comp.spv", "dual_issue.co", "dual_issue.cl", "run_dual_issue_ilp4"},
+      {"ILP & Dual-Issue", {"dualissue", "ilp"}, {1}, "FP32 Moderate ILP (8 Chains)", "dual_issue_ilp8.comp.spv", "dual_issue.co", "dual_issue.cl", "run_dual_issue_ilp8"},
+      {"ILP & Dual-Issue", {"dualissue", "ilp"}, {2}, "FP32 Peak ILP / Co-Issue (16 Chains)", "dual_issue_ilp16.comp.spv", "dual_issue.co", "dual_issue.cl", "run_dual_issue_ilp16"},
+      {"ILP & Dual-Issue", {"dualissue", "ilp"}, {3}, "INT32 Baseline (Ping-Pong)", "dual_issue_int32_4.comp.spv", "dual_issue.co", "dual_issue.cl", "run_dual_issue_int32_4"},
+      {"ILP & Dual-Issue", {"dualissue", "ilp"}, {4}, "INT32 Moderate ILP (8 Chains)", "dual_issue_int32_8.comp.spv", "dual_issue.co", "dual_issue.cl", "run_dual_issue_int32_8"},
+      {"ILP & Dual-Issue", {"dualissue", "ilp"}, {5}, "INT32 Peak ILP (16 Chains)", "dual_issue_int32.comp.spv", "dual_issue.co", "dual_issue.cl", "run_dual_issue_int32"},
+      {"ILP & Dual-Issue", {"dualissue", "ilp"}, {6}, "Concurrent Mixed (FP32+INT32)", "dual_issue_mixed.comp.spv", "dual_issue.co", "dual_issue.cl", "run_dual_issue_mixed"},
       {"LDS Bank Conflicts", {"lds", "ldsbankconflicts"}, {0, 1, 2, 3, 4, 5, 6, 7}, "LDS Bank Conflicts", "lds_bank_conflicts.comp.spv", "lds_bank_conflicts.co", "lds_bank_conflicts.cl"},
-      {"In-Shader Indirect Synthesis", {"indirect", "inshaderindirect"}, {0, 6}, "Direct Dispatch", "direct_worker.comp.spv", "", ""},
-      {"In-Shader Indirect Synthesis", {"indirect", "inshaderindirect"}, {1}, "Indirect Classify", "indirect_classify.comp.spv", "", ""},
-      {"In-Shader Indirect Synthesis", {"indirect", "inshaderindirect"}, {2, 3, 4, 5}, "Indirect Worker", "indirect_worker.comp.spv", "", ""},
-      {"Device Memory Bandwidth", {"membw", "devicememorybandwidth"}, {0, 1, 2}, "MemBW 128", "membw_128.comp.spv", "membw_128.co", "membw_128.cl"},
-      {"Device Memory Bandwidth", {"membw", "devicememorybandwidth"}, {3, 4, 5}, "MemBW 256", "membw_256.comp.spv", "membw_256.co", "membw_256.cl"},
-      {"Device Memory Bandwidth", {"membw", "devicememorybandwidth"}, {6, 7, 8}, "MemBW 1024", "membw_1024.comp.spv", "membw_1024.co", "membw_1024.cl"},
+      {"In-Shader Indirect Synthesis", {"indirect", "inshaderindirect"}, {0, 1}, "Direct Dispatch", "direct_worker.comp.spv", "direct_worker.co", ""},
+      {"In-Shader Indirect Synthesis", {"indirect", "inshaderindirect"}, {2, 3, 4}, "Indirect Classify", "indirect_classify.comp.spv", "indirect_classify.co", "", "", "", {}, {}, "Persistent Work-Queue Classify"},
+      {"In-Shader Indirect Synthesis", {"indirect", "inshaderindirect"}, {2, 3, 4}, "Indirect Worker", "indirect_worker.comp.spv", "indirect_worker.co", "", "", "", {}, {}, "Persistent Work-Queue Worker"},
+      {"In-Shader Indirect Synthesis", {"indirect", "inshaderindirect"}, {5, 6}, "Multi-Bucket Classify", "indirect_multibucket_classify.comp.spv", "", ""},
+      {"In-Shader Indirect Synthesis", {"indirect", "inshaderindirect"}, {5, 6}, "Multi-Bucket Resolve", "indirect_multibucket_resolve.comp.spv", "", ""},
+      {"In-Shader Indirect Synthesis", {"indirect", "inshaderindirect"}, {5, 6}, "Multi-Bucket Worker", "indirect_multibucket_worker.comp.spv", "", "", "", "", {{0u, 0u}}},
+      {"Device Memory Bandwidth", {"membw", "devicememorybandwidth"}, {0}, "MemBW 128 — Read", "membw_128.comp.spv", "membw_128.co", "membw_128.cl", "", "", {{0u, 0u}}, {}, "MemBW 128 (Runtime Mode)"},
+      {"Device Memory Bandwidth", {"membw", "devicememorybandwidth"}, {1}, "MemBW 128 — Write", "membw_128.comp.spv", "membw_128.co", "membw_128.cl", "", "", {{0u, 1u}}, {}, "MemBW 128 (Runtime Mode)"},
+      {"Device Memory Bandwidth", {"membw", "devicememorybandwidth"}, {2}, "MemBW 128 — R/W", "membw_128.comp.spv", "membw_128.co", "membw_128.cl", "", "", {{0u, 2u}}, {}, "MemBW 128 (Runtime Mode)"},
+      {"Device Memory Bandwidth", {"membw", "devicememorybandwidth"}, {3}, "MemBW 256 — Read", "membw_256.comp.spv", "membw_256.co", "membw_256.cl", "", "", {{0u, 0u}}, {}, "MemBW 256 (Runtime Mode)"},
+      {"Device Memory Bandwidth", {"membw", "devicememorybandwidth"}, {4}, "MemBW 256 — Write", "membw_256.comp.spv", "membw_256.co", "membw_256.cl", "", "", {{0u, 1u}}, {}, "MemBW 256 (Runtime Mode)"},
+      {"Device Memory Bandwidth", {"membw", "devicememorybandwidth"}, {5}, "MemBW 256 — R/W", "membw_256.comp.spv", "membw_256.co", "membw_256.cl", "", "", {{0u, 2u}}, {}, "MemBW 256 (Runtime Mode)"},
+      {"Device Memory Bandwidth", {"membw", "devicememorybandwidth"}, {6}, "MemBW 1024 — Read", "membw_1024.comp.spv", "membw_1024.co", "membw_1024.cl", "", "", {{0u, 0u}}, {}, "MemBW 1024 (Runtime Mode)"},
+      {"Device Memory Bandwidth", {"membw", "devicememorybandwidth"}, {7}, "MemBW 1024 — Write", "membw_1024.comp.spv", "membw_1024.co", "membw_1024.cl", "", "", {{0u, 1u}}, {}, "MemBW 1024 (Runtime Mode)"},
+      {"Device Memory Bandwidth", {"membw", "devicememorybandwidth"}, {8}, "MemBW 1024 — R/W", "membw_1024.comp.spv", "membw_1024.co", "membw_1024.cl", "", "", {{0u, 2u}}, {}, "MemBW 1024 (Runtime Mode)"},
       {"Cache Bandwidth", {"cachebw", "l0cachebandwidth", "l1cachebandwidth", "l2cachebandwidth", "l3cachebandwidth", "l0b", "l1b", "l2b", "l3b", "l0bw", "l1bw", "l2bw", "l3bw"}, {0}, "Cache Bandwidth", "cache_bw_robust.comp.spv", "cache_bw_robust.co", "cache_bw_robust.cl"},
-      {"L0 Vector Cache Latency", {"l0cache", "l0cachelatency", "l0vectorcachelatency16kb", "l0l", "cache"}, {0}, "L0 Cache Latency", "l0_cache_latency.comp.spv", "l0_cache_latency.co", "l0_cache_latency.cl"},
+      {"L0 Vector Cache Latency", {"l0cache", "l0cachelatency", "l0vectorcachelatency16kb", "l0l", "cache"}, {0}, "L0 Cache Latency", "l0_cache_latency.comp.spv", "l0_cache_latency.co", "l0_cache_latency.cl", "run_benchmark"},
       {"Cache Latency Curve", {"cachelatencycurve", "cachecurve"}, {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14}, "Cache Latency Curve", "cache_latency_curve.comp.spv", "cache_latency_curve.co", "cache_latency_curve.cl"},
-      {"Pixel Fill Rate", {"pixelfill", "pixelfillrate", "fillrate", "raster", "rop"}, {0, 1, 2}, "Pixel Fill Rate (Vertex + Fragment)", "pixel_fill.frag.spv", "", ""},
+      {"Pixel Fill Rate", {"pixelfill", "pixelfillrate", "fillrate", "raster", "rop"}, {0}, "Pixel Fill Rate — RGBA8 Color Fill", "pixel_fill.frag.spv", "", "", "", "", {}, pixelFillRgba8},
+      {"Pixel Fill Rate", {"pixelfill", "pixelfillrate", "fillrate", "raster", "rop"}, {1}, "Pixel Fill Rate — RGBA16F HDR Fill", "pixel_fill.frag.spv", "", "", "", "", {}, pixelFillRgba16f},
+      {"Pixel Fill Rate", {"pixelfill", "pixelfillrate", "fillrate", "raster", "rop"}, {2}, "Pixel Fill Rate — Alpha Blending Fill", "pixel_fill.frag.spv", "", "", "", "", {}, pixelFillBlend},
       {"RayRawTraversal", {"rayrawtraversal", "rawtraversal"}, {0, 1}, "Raw Traversal", "rt_raw_traversal.comp.spv", "", ""},
       {"RayASBuild", {"rayasbuild", "asbuild", "bvhbuild"}, {0, 1, 2, 3, 4, 5, 6, 7}, "Acceleration Structure Build/Update", "", "", "", "", "Fixed-function Vulkan Acceleration Structure Builder (vkCmdBuildAccelerationStructuresKHR) — executes on hardware BVH build unit with no programmable shader ISA."},
       {"RayIntersect", {"rayintersect"}, {0, 1}, "Ray Intersect", "rt_benchmark.comp.spv", "", ""},
@@ -121,29 +189,46 @@ static std::vector<BenchmarkMapping> getBenchmarkMappings() {
       {"RayPayload", {"raypayload"}, {0}, "Ray Payload 16B (RTP)", "raypayload_16b.rgen.spv", "", ""},
       {"RayPayload", {"raypayload"}, {1}, "Ray Payload 128B (RTP)", "raypayload_128b.rgen.spv", "", ""},
       {"RayPayload", {"raypayload"}, {2}, "Ray Payload 256B (RTP)", "raypayload_256b.rgen.spv", "", ""},
-      {"RayScheduling", {"rayscheduling", "rtscheduling", "rayschedulingopenworldforest", "rayschedulingoutdoorlandscape", "rayschedulingindooratrium", "rayschedulingshowroomstudio", "rayexecutionparadigm"}, {0, 3, 6, 9, 12, 14, 15, 16, 17, 19, 23, 30, 32}, "RT Scheduling — Compute Megakernel", "rt_scheduling_traditional_megakernel.comp.spv", "", ""},
-      {"RayScheduling", {"rayscheduling", "rtscheduling", "rayschedulingopenworldforest", "rayschedulingoutdoorlandscape", "rayschedulingindooratrium", "rayschedulingshowroomstudio", "rayexecutionparadigm"}, {13, 25, 26, 27}, "RT Scheduling — DGC Classify", "rt_scheduling_device_generated_commands_classify.comp.spv", "", ""},
-      {"RayScheduling", {"rayscheduling", "rtscheduling", "rayschedulingopenworldforest", "rayschedulingoutdoorlandscape", "rayschedulingindooratrium", "rayschedulingshowroomstudio", "rayexecutionparadigm"}, {2, 11, 18}, "RT Scheduling — DGC Material", "rt_scheduling_device_generated_commands_material.comp.spv", "", ""},
-      {"RayScheduling", {"rayscheduling", "rtscheduling", "rayschedulingopenworldforest", "rayschedulingoutdoorlandscape", "rayschedulingindooratrium", "rayschedulingshowroomstudio", "rayexecutionparadigm"}, {5, 8, 24}, "RT Scheduling — DGC Bounce", "rt_scheduling_device_generated_commands_bounce.comp.spv", "", ""},
-      {"RayScheduling", {"rayscheduling", "rtscheduling", "rayschedulingopenworldforest", "rayschedulingoutdoorlandscape", "rayschedulingindooratrium", "rayschedulingshowroomstudio", "rayexecutionparadigm"}, {21, 22}, "RT Scheduling — DGC Shadow", "rt_scheduling_device_generated_commands_shadow.comp.spv", "", ""},
-      {"RayScheduling", {"rayscheduling", "rtscheduling", "rayschedulingopenworldforest", "rayschedulingoutdoorlandscape", "rayschedulingindooratrium", "rayschedulingshowroomstudio", "rayexecutionparadigm"}, {31, 33}, "RT Scheduling — DGC Multi-Light", "rt_scheduling_device_generated_commands_light.comp.spv", "", ""},
-      {"RayScheduling", {"rayscheduling", "rtscheduling", "rayschedulingopenworldforest", "rayschedulingoutdoorlandscape", "rayschedulingindooratrium", "rayschedulingshowroomstudio", "rayexecutionparadigm"}, {28}, "RT Scheduling — RTP Baseline", "rt_scheduling.rgen.spv", "", ""},
-      {"RayScheduling", {"rayscheduling", "rtscheduling", "rayschedulingopenworldforest", "rayschedulingoutdoorlandscape", "rayschedulingindooratrium", "rayschedulingshowroomstudio", "rayexecutionparadigm"}, {1, 4, 7, 10, 20, 29}, "RT Scheduling — RTP + SER", "rt_scheduling_ser.rgen.spv", "", ""},
-      {"Interconnect", {"interconnect", "pciehostdeviceinterconnect", "pcie", "rebar", "p2p"}, {0, 1, 2, 3, 5}, "Interconnect — DMA / ReBAR / P2P Transfer", "", "", "", "", "PCIe DMA / Resizable BAR / Peer-to-Peer transfer benchmark — executes via Vulkan copy/transfer engines and host CPU streaming with no timed compute shader ISA."},
-      {"Interconnect", {"interconnect", "pciehostdeviceinterconnect", "pcie", "rebar", "p2p"}, {4}, "Interconnect — Unified Memory Coherency Latency", "interconnect_latency.comp.spv", "", ""},
-      {"AsyncOverlap", {"asyncoverlap", "asynccomputecopyoverlap", "async", "multiqueue", "ace", "sdma"}, {0, 1}, "AsyncOverlap — Graphics Pass", "async_gfx.frag.spv", "", ""},
-      {"AsyncOverlap", {"asyncoverlap", "asynccomputecopyoverlap", "async", "multiqueue", "ace", "sdma"}, {2, 3}, "AsyncOverlap — Async Compute Pass", "async_compute_heavy.comp.spv", "", ""},
+      // RayScheduling: exact specialization constant_id=0 per config (0..27) matching RaySchedulingBench.cpp
+      {"RayScheduling", rsAliases, {0}, "RT Scheduling — Material Shading (Megakernel)", "rt_scheduling_traditional_megakernel.comp.spv", "", "", "", "", {{0u, 4u}}},
+      {"RayScheduling", rsAliases, {4}, "RT Scheduling — Full Frame (Megakernel)", "rt_scheduling_traditional_megakernel.comp.spv", "", "", "", "", {{0u, 0u}}},
+      {"RayScheduling", rsAliases, {8, 11}, "RT Scheduling — Path Tracing (Megakernel)", "rt_scheduling_traditional_megakernel.comp.spv", "", "", "", "", {{0u, 1u}}},
+      {"RayScheduling", rsAliases, {13}, "RT Scheduling — Primary Rays (Megakernel)", "rt_scheduling_traditional_megakernel.comp.spv", "", "", "", "", {{0u, 7u}}},
+      {"RayScheduling", rsAliases, {17}, "RT Scheduling — Incoherent Diffuse GI (Megakernel)", "rt_scheduling_traditional_megakernel.comp.spv", "", "", "", "", {{0u, 2u}}},
+      {"RayScheduling", rsAliases, {19}, "RT Scheduling — Directional Shadows (Megakernel)", "rt_scheduling_traditional_megakernel.comp.spv", "", "", "", "", {{0u, 5u}}},
+      {"RayScheduling", rsAliases, {21}, "RT Scheduling — Multi-Light 128 (Megakernel)", "rt_scheduling_traditional_megakernel.comp.spv", "", "", "", "", {{0u, 11u}}},
+      {"RayScheduling", rsAliases, {24, 25}, "RT Scheduling — BVH Traversal (Megakernel)", "rt_scheduling_traditional_megakernel.comp.spv", "", "", "", "", {{0u, 3u}}},
+      {"RayScheduling", rsAliases, {23}, "RT Scheduling — Wavefront Classify / Stream Compaction (Alpha Cutout)", "rt_scheduling_device_generated_commands_classify.comp.spv", "", "", "", "", {{0u, 7u}}},
+      {"RayScheduling", rsAliases, {26}, "RT Scheduling — Wavefront Classify / Stream Compaction (128B Stream)", "rt_scheduling_device_generated_commands_classify.comp.spv", "", "", "", "", {{0u, 6u}}},
+      {"RayScheduling", rsAliases, {27}, "RT Scheduling — Wavefront Classify / Stream Compaction (16B Ballot)", "rt_scheduling_device_generated_commands_classify.comp.spv", "", "", "", "", {{0u, 3u}}},
+      {"RayScheduling", rsAliases, {1, 5}, "RT Scheduling — Wavefront Material (Legacy Indirect)", "rt_scheduling_device_generated_commands_material.comp.spv", "", "", "", "", {{0u, 0u}}},
+      {"RayScheduling", rsAliases, {2, 6}, "RT Scheduling — DGC Material (ExecutionSet)", "rt_scheduling_device_generated_commands_material.comp.spv", "", "", "", "", {{0u, 0u}}},
+      {"RayScheduling", rsAliases, {14}, "RT Scheduling — DGC Primary Material", "rt_scheduling_device_generated_commands_material.comp.spv", "", "", "", "", {{0u, 8u}}},
+      {"RayScheduling", rsAliases, {9, 12}, "RT Scheduling — DGC Path Tracing Bounce", "rt_scheduling_device_generated_commands_bounce.comp.spv", "", "", "", "", {{0u, 0u}}},
+      {"RayScheduling", rsAliases, {18}, "RT Scheduling — DGC Octant Bounce", "rt_scheduling_device_generated_commands_bounce.comp.spv", "", "", "", "", {{0u, 2u}}},
+      {"RayScheduling", rsAliases, {20}, "RT Scheduling — DGC Shadow", "rt_scheduling_device_generated_commands_shadow.comp.spv", "", ""},
+      {"RayScheduling", rsAliases, {22}, "RT Scheduling — DGC Multi-Light", "rt_scheduling_device_generated_commands_light.comp.spv", "", ""},
+      {"RayScheduling", rsAliases, {15}, "RT Scheduling — RTP Baseline", "rt_scheduling.rgen.spv", "", "", "", "", {{0u, 7u}}},
+      {"RayScheduling", rsAliases, {3, 7, 10, 16}, "RT Scheduling — RTP + SER", "rt_scheduling_ser.rgen.spv", "", "", "", "", {{0u, 0u}}},
+      {"Interconnect", {"interconnect", "pciehostdeviceinterconnect", "pcie", "rebar", "p2p"}, {0, 1, 2, 3, 5}, "Interconnect — DMA / ReBAR / P2P Transfer", "", "", "", "", "PCIe DMA / Resizable BAR / Peer-to-Peer transfer benchmark — executes via Vulkan/ROCm DMA copy engines and host CPU streaming with no timed compute shader ISA."},
+      {"Interconnect", {"interconnect", "pciehostdeviceinterconnect", "pcie", "rebar", "p2p"}, {4}, "Interconnect — Unified Memory Coherency Latency", "interconnect_latency.comp.spv", "interconnect_latency.co", ""},
+      {"AsyncOverlap", {"asyncoverlap", "asynccomputecopyoverlap", "async", "multiqueue", "ace", "sdma"}, {0, 1}, "AsyncOverlap — Graphics Pass", "async_gfx.frag.spv", "", "", "", "", {}, asyncGfxRaster},
+      {"AsyncOverlap", {"asyncoverlap", "asynccomputecopyoverlap", "async", "multiqueue", "ace", "sdma"}, {0, 1}, "AsyncOverlap — Async Compute Pass", "async_compute_heavy.comp.spv", "", ""},
+      {"AsyncOverlap", {"asyncoverlap", "asynccomputecopyoverlap", "async", "multiqueue", "ace", "sdma"}, {2, 3}, "AsyncOverlap — Async Compute Pass", "async_compute_heavy.comp.spv", "async_compute_heavy.co", ""},
       {"SparseMatrix", {"sparsematrix", "2:4structuredsparsematrix", "sparse", "sparsity"}, {0}, "Sparse FP16 2:4 (Matrix)", "", "sparse_fp16_matrix.co", ""},
       {"SparseMatrix", {"sparsematrix", "2:4structuredsparsematrix", "sparse", "sparsity"}, {1}, "Sparse FP8 2:4 (Matrix)", "", "sparse_fp8_matrix.co", ""},
       {"SparseMatrix", {"sparsematrix", "2:4structuredsparsematrix", "sparse", "sparsity"}, {2}, "Sparse INT8 2:4 (Matrix)", "", "sparse_int8_matrix.co", ""},
       {"CoopVector", {"coopvector", "cooperativevector", "cooperativevectorneuralshading"}, {0}, "CoopVector FP16 MatVec", "coop_vector_fp16.comp.spv", "", ""},
       {"CoopVector", {"coopvector", "cooperativevector", "cooperativevectorneuralshading"}, {1}, "CoopVector INT8 MatVec", "coop_vector_int8.comp.spv", "", ""},
-      {"WorkGraphs", {"workgraphs", "gpuworkgraphsproducerconsumer", "shaderenqueue"}, {0}, "WorkGraphs — DGC Producer", "workgraphs_producer.comp.spv", "", ""},
-      {"WorkGraphs", {"workgraphs", "gpuworkgraphsproducerconsumer", "shaderenqueue"}, {1}, "WorkGraphs — DGC Consumer", "workgraphs_consumer.comp.spv", "", ""},
+#ifdef GPUBENCH_ENABLE_EXPERIMENTAL_WORKGRAPHS
+      {"WorkGraphs", {"workgraphs", "gpuworkgraphsproducerconsumer", "shaderenqueue"}, {0}, "WorkGraphs — Indirect / Persistent Producer", "workgraphs_producer.comp.spv", "workgraphs_producer.co", ""},
+      {"WorkGraphs", {"workgraphs", "gpuworkgraphsproducerconsumer", "shaderenqueue"}, {1}, "WorkGraphs — Indirect / Persistent Consumer", "workgraphs_consumer.comp.spv", "workgraphs_consumer.co", ""},
       {"WorkGraphs", {"workgraphs", "gpuworkgraphsproducerconsumer", "shaderenqueue"}, {2}, "WorkGraphs — VK_AMDX_shader_enqueue", "workgraphs_amdx.comp.spv", "", ""},
+#endif
       {"RayOMM", {"rayomm", "raytracingopacitymicromap", "opacitymicromap", "omm"}, {0}, "RayOMM — Any-Hit Baseline", "rayomm.rgen.spv", "", ""},
-      {"RayOMM", {"rayomm", "raytracingopacitymicromap", "opacitymicromap", "omm"}, {1, 2}, "RayOMM — Hardware Opacity Micromap", "rayomm_omm.rgen.spv", "", ""},
-      {"System Memory Bandwidth", {"sysmembandwidth", "rambandwidth", "sysmembw", "sysmem"}, {0, 1, 2}, "Host SIMD Memory Bandwidth", "", "", "", "", "Host CPU SIMD benchmark (AVX-512 / AVX2 / NEON) — executes on system RAM with no GPU shader ISA."},
+      {"RayOMM", {"rayomm", "raytracingopacitymicromap", "opacitymicromap", "omm"}, {1}, "RayOMM — Hardware 2-State OMM", "rayomm_omm.rgen.spv", "", "", "", "", {{0u, 1u}}},
+      {"RayOMM", {"rayomm", "raytracingopacitymicromap", "opacitymicromap", "omm"}, {2}, "RayOMM — Hardware 4-State OMM", "rayomm_omm.rgen.spv", "", "", "", "", {{0u, 0u}}},
+      {"System Memory Bandwidth", {"sysmembandwidth", "rambandwidth", "sysmembw", "sysmem"}, {0, 1, 2, 3, 4, 5}, "Host SIMD Memory Bandwidth", "", "", "", "", "Host CPU SIMD benchmark (AVX-512 / AVX2 / NEON) — executes on system RAM with no GPU shader ISA."},
       {"System Memory Latency", {"sysmemlatency", "ramlatency", "sysmemlat", "sl"}, {0}, "Host Pointer-Chasing Latency", "", "", "", "", "Host CPU pointer-chasing latency benchmark — executes on CPU caches/DRAM with no GPU shader ISA."},
   };
 }
@@ -230,6 +315,9 @@ static void analyzeIsaText(const std::string &isaText, IsaExecutableReport &outE
 
   // Locate hot loop: look for backward branch (s_cbranch_* jumping to an earlier label)
   std::map<std::string, int> labelLines;
+  std::map<std::string, uint64_t> symbolBaseAddr;
+  std::map<uint64_t, int> addrToLine;
+
   for (int i = 0; i < static_cast<int>(lines.size()); ++i) {
     std::string trimmed = lines[i];
     while (!trimmed.empty() && (trimmed.back() == ' ' || trimmed.back() == '\t'))
@@ -242,11 +330,48 @@ static void analyzeIsaText(const std::string &isaText, IsaExecutableReport &outE
       size_t gt = trimmed.find('>', lt != std::string::npos ? lt : 0);
       if (lt != std::string::npos && gt != std::string::npos && gt > lt) {
         labelLines[trimmed.substr(lt, gt - lt + 1)] = i;
+        if (lt > 0) {
+          std::string addrPart = trimmed.substr(0, lt);
+          while (!addrPart.empty() &&
+                 (addrPart.back() == ' ' || addrPart.back() == '\t')) {
+            addrPart.pop_back();
+          }
+          if (!addrPart.empty() &&
+              std::all_of(addrPart.begin(), addrPart.end(),
+                          [](unsigned char ch) { return std::isxdigit(ch) != 0; })) {
+            try {
+              uint64_t symAddr = std::stoull(addrPart, nullptr, 16);
+              std::string symName = trimmed.substr(lt + 1, gt - lt - 1);
+              symbolBaseAddr[symName] = symAddr;
+            } catch (...) {
+            }
+          }
+        }
+      }
+    }
+    // Parse llvm-objdump instruction address comment: "// 000000001934: ..."
+    size_t cmtPos = lines[i].find("// ");
+    if (cmtPos != std::string::npos) {
+      size_t hexStart = cmtPos + 3;
+      size_t hexEnd = hexStart;
+      while (hexEnd < lines[i].size() &&
+             std::isxdigit(static_cast<unsigned char>(lines[i][hexEnd]))) {
+        ++hexEnd;
+      }
+      if (hexEnd - hexStart >= 4 && hexEnd < lines[i].size() &&
+          lines[i][hexEnd] == ':') {
+        try {
+          uint64_t instAddr =
+              std::stoull(lines[i].substr(hexStart, hexEnd - hexStart), nullptr, 16);
+          addrToLine.emplace(instAddr, i);
+        } catch (...) {
+        }
       }
     }
   }
 
-  auto findBranchTargetLine = [&labelLines](const std::string &line) -> int {
+  auto findBranchTargetLine = [&labelLines, &symbolBaseAddr,
+                               &addrToLine](const std::string &line) -> int {
     size_t pos = line.find("s_cbranch_");
     if (pos == std::string::npos) pos = line.find("s_branch");
     if (pos == std::string::npos) return -1;
@@ -261,7 +386,29 @@ static void analyzeIsaText(const std::string &isaText, IsaExecutableReport &outE
       size_t lt = line.find('<', targetEnd);
       size_t gt = line.find('>', lt != std::string::npos ? lt : 0);
       if (lt != std::string::npos && gt != std::string::npos && gt > lt) {
-        it = labelLines.find(line.substr(lt, gt - lt + 1));
+        std::string angleTok = line.substr(lt, gt - lt + 1);
+        it = labelLines.find(angleTok);
+        if (it == labelLines.end()) {
+          std::string inner = line.substr(lt + 1, gt - lt - 1);
+          size_t plusPos = inner.find('+');
+          std::string symName =
+              (plusPos != std::string::npos) ? inner.substr(0, plusPos) : inner;
+          uint64_t offset = 0;
+          if (plusPos != std::string::npos) {
+            try {
+              offset = std::stoull(inner.substr(plusPos + 1), nullptr, 0);
+            } catch (...) {
+              offset = 0;
+            }
+          }
+          auto baseIt = symbolBaseAddr.find(symName);
+          if (baseIt != symbolBaseAddr.end()) {
+            auto addrIt = addrToLine.find(baseIt->second + offset);
+            if (addrIt != addrToLine.end()) {
+              return addrIt->second;
+            }
+          }
+        }
       }
     }
     return (it != labelLines.end()) ? it->second : -1;
@@ -269,7 +416,10 @@ static void analyzeIsaText(const std::string &isaText, IsaExecutableReport &outE
 
   auto isExitStubTarget = [&lines, &findBranchTargetLine](int labelLineIdx, int branchLineIdx) -> bool {
     int seenInsns = 0;
-    for (int j = labelLineIdx + 1; j < branchLineIdx && seenInsns < 8; ++j) {
+    // Start at labelLineIdx (not labelLineIdx + 1) because llvm-objdump <sym+offset>
+    // targets resolve directly to the instruction line (e.g. s_endpgm) rather than a
+    // preceding label line; label lines ending in ':' are skipped below.
+    for (int j = labelLineIdx; j < branchLineIdx && seenInsns < 8; ++j) {
       std::string s = lines[j];
       size_t first = s.find_first_not_of(" \t\r");
       if (first == std::string::npos) continue;
@@ -491,7 +641,9 @@ public:
   bool fp64Supported = false;
   bool int8Supported = false;
   bool coopVectorSupported = false;
+#ifdef GPUBENCH_ENABLE_EXPERIMENTAL_WORKGRAPHS
   bool workGraphsSupported = false;
+#endif
   bool opacityMicromapSupported = false;
 
   PFN_vkGetPipelineExecutablePropertiesKHR pfnGetProps = nullptr;
@@ -759,7 +911,9 @@ public:
     coopMatrixSupported = hasExt(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME) &&
                           (coopFeatures.cooperativeMatrix == VK_TRUE);
     coopVectorSupported = hasExt("VK_NV_cooperative_vector");
+#ifdef GPUBENCH_ENABLE_EXPERIMENTAL_WORKGRAPHS
     workGraphsSupported = hasExt("VK_AMDX_shader_enqueue");
+#endif
     opacityMicromapSupported = hasExt("VK_EXT_opacity_micromap") &&
                                (ommFeatures.micromap == VK_TRUE);
     bool hasBf16 = hasExt("VK_KHR_shader_bfloat16") || hasExt("VK_EXT_shader_bfloat16");
@@ -1146,15 +1300,29 @@ public:
     fs::path dir = art.filePath.parent_path();
     std::string fname = art.filePath.filename().string();
     const bool isAsyncGfx = (fname.rfind("async_gfx.", 0) == 0);
-    const bool isCrtOverlay = (fname.rfind("gui_crt_overlay.", 0) == 0);
-    fs::path vertPath = dir / (isAsyncGfx ? "async_gfx.vert.spv"
-                                          : (isCrtOverlay ? "gui_crt_overlay.vert.spv" : "pixel_fill.vert.spv"));
-    fs::path fragPath = dir / (isAsyncGfx ? "async_gfx.frag.spv"
-                                          : (isCrtOverlay ? "gui_crt_overlay.frag.spv" : "pixel_fill.frag.spv"));
+    fs::path vertPath = dir / (isAsyncGfx ? "async_gfx.vert.spv" : "pixel_fill.vert.spv");
+    fs::path fragPath = dir / (isAsyncGfx ? "async_gfx.frag.spv" : "pixel_fill.frag.spv");
     if (fname.find(".vert.spv") != std::string::npos) {
       vertPath = art.filePath;
     } else if (fname.find(".frag.spv") != std::string::npos) {
       fragPath = art.filePath;
+    }
+
+    RasterPipelineConfig rc = art.rasterConfig;
+    if (!rc.custom) {
+      if (isAsyncGfx) {
+        rc.colorFormat = RasterColorFormat::RGBA16F_SFLOAT;
+        rc.blendEnable = false;
+        rc.depthEnable = true;
+        rc.pushConstantSize = 8u;
+        rc.hasStorageBufferBinding = false;
+      } else {
+        rc.colorFormat = RasterColorFormat::RGBA8_UNORM;
+        rc.blendEnable = false;
+        rc.depthEnable = false;
+        rc.pushConstantSize = 16u;
+        rc.hasStorageBufferBinding = false;
+      }
     }
 
     VkShaderModule vertMod = loadSpvModule(vertPath);
@@ -1169,7 +1337,7 @@ public:
     }
 
     VkDescriptorSetLayout dsl = VK_NULL_HANDLE;
-    if (isAsyncGfx) {
+    if (rc.hasStorageBufferBinding) {
       VkDescriptorSetLayoutBinding b{};
       b.binding = 0;
       b.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
@@ -1183,10 +1351,11 @@ public:
     }
 
     VkPushConstantRange pcRange{};
-    pcRange.stageFlags = isCrtOverlay ? VK_SHADER_STAGE_FRAGMENT_BIT
-                                      : (VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
+    pcRange.stageFlags = isAsyncGfx
+                             ? (VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
+                             : VK_SHADER_STAGE_FRAGMENT_BIT;
     pcRange.offset = 0;
-    pcRange.size = isCrtOverlay ? 16 : 32;
+    pcRange.size = rc.pushConstantSize;
 
     VkPipelineLayoutCreateInfo plInfo{};
     plInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -1194,8 +1363,10 @@ public:
       plInfo.setLayoutCount = 1;
       plInfo.pSetLayouts = &dsl;
     }
-    plInfo.pushConstantRangeCount = 1;
-    plInfo.pPushConstantRanges = &pcRange;
+    if (rc.pushConstantSize > 0u) {
+      plInfo.pushConstantRangeCount = 1;
+      plInfo.pPushConstantRanges = &pcRange;
+    }
 
     VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
     vkCreatePipelineLayout(device, &plInfo, nullptr, &pipelineLayout);
@@ -1238,19 +1409,43 @@ public:
     multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
     multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
 
+    VkPipelineDepthStencilStateCreateInfo depthStencil{};
+    depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+    if (rc.depthEnable) {
+      depthStencil.depthTestEnable = VK_TRUE;
+      depthStencil.depthWriteEnable = VK_TRUE;
+      depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
+    }
+
     VkPipelineColorBlendAttachmentState blendAttachment{};
     blendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
                                      VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+    if (rc.blendEnable) {
+      blendAttachment.blendEnable = VK_TRUE;
+      blendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+      blendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+      blendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
+      blendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+      blendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+      blendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
+    } else {
+      blendAttachment.blendEnable = VK_FALSE;
+    }
     VkPipelineColorBlendStateCreateInfo colorBlending{};
     colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
     colorBlending.attachmentCount = 1;
     colorBlending.pAttachments = &blendAttachment;
 
-    VkFormat colorFormat = VK_FORMAT_R8G8B8A8_UNORM;
+    VkFormat colorFormat = (rc.colorFormat == RasterColorFormat::RGBA16F_SFLOAT)
+                               ? VK_FORMAT_R16G16B16A16_SFLOAT
+                               : VK_FORMAT_R8G8B8A8_UNORM;
     VkPipelineRenderingCreateInfo renderingInfo{};
     renderingInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
     renderingInfo.colorAttachmentCount = 1;
     renderingInfo.pColorAttachmentFormats = &colorFormat;
+    if (rc.depthEnable) {
+      renderingInfo.depthAttachmentFormat = VK_FORMAT_D32_SFLOAT;
+    }
 
     VkGraphicsPipelineCreateInfo pipeInfo{};
     pipeInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
@@ -1264,6 +1459,9 @@ public:
     pipeInfo.pViewportState = &viewportState;
     pipeInfo.pRasterizationState = &rasterizer;
     pipeInfo.pMultisampleState = &multisampling;
+    if (rc.depthEnable) {
+      pipeInfo.pDepthStencilState = &depthStencil;
+    }
     pipeInfo.pColorBlendState = &colorBlending;
     pipeInfo.layout = pipelineLayout;
 
@@ -1355,10 +1553,28 @@ public:
     std::vector<VkPipelineShaderStageCreateInfo> stages;
     std::vector<VkRayTracingShaderGroupCreateInfoKHR> groups;
 
-    uint32_t specVal = (prefix == "rt_scheduling_ser") ? 0u : 7u;
-    bool useSpec = (prefix == "rt_scheduling_ser" || basePrefix == "rt_scheduling");
-    VkSpecializationMapEntry specEntry{0, 0, sizeof(uint32_t)};
-    VkSpecializationInfo specInfo{1, &specEntry, sizeof(uint32_t), &specVal};
+    std::vector<VkSpecializationMapEntry> specEntries;
+    std::vector<uint32_t> specValues;
+    if (!art.specConstants.empty()) {
+      specEntries.reserve(art.specConstants.size());
+      specValues.reserve(art.specConstants.size());
+      for (size_t si = 0; si < art.specConstants.size(); ++si) {
+        specEntries.push_back(
+            {art.specConstants[si].id, static_cast<uint32_t>(si * sizeof(uint32_t)), sizeof(uint32_t)});
+        specValues.push_back(art.specConstants[si].value);
+      }
+    } else if (prefix == "rt_scheduling_ser" || basePrefix == "rt_scheduling") {
+      specEntries.push_back({0u, 0u, sizeof(uint32_t)});
+      specValues.push_back((prefix == "rt_scheduling_ser") ? 0u : 7u);
+    }
+    const bool useSpec = !specEntries.empty();
+    VkSpecializationInfo specInfo{};
+    if (useSpec) {
+      specInfo.mapEntryCount = static_cast<uint32_t>(specEntries.size());
+      specInfo.pMapEntries = specEntries.data();
+      specInfo.dataSize = specValues.size() * sizeof(uint32_t);
+      specInfo.pData = specValues.data();
+    }
 
     auto addStage = [&](const fs::path &p, VkShaderStageFlagBits stageBit) -> int {
       if (!fs::exists(p))
@@ -1525,16 +1741,17 @@ public:
       return emitSkip("Cooperative vector (VK_NV_cooperative_vector) is not supported on " +
                       deviceName + " (" + driverInfo + ").");
     }
+#ifdef GPUBENCH_ENABLE_EXPERIMENTAL_WORKGRAPHS
     if (fname == "workgraphs_amdx.comp.spv" && !workGraphsSupported) {
       return emitSkip("GPU Work Graphs (VK_AMDX_shader_enqueue) is not exposed on " +
                       deviceName + " (" + driverInfo + ").");
     }
+#endif
     if (fname == "bf16.comp.spv" && !bf16DotProductSupported) {
-      if (bf16DotProductEmulatedOnArch) {
+      if (bf16ArchFamily == "RDNA 3" || bf16ArchFamily == "RDNA 3.5") {
         return emitSkip(
             "BF16 vector dot product (v_dot2_bf16_bf16) is not natively supported in hardware on " +
-            deviceName + " (" + bf16ArchFamily + ") under Vulkan (" + driverInfo +
-            ") — driver emulates dot() via FP32 bit-manipulation (UNSUPPORTED).");
+            deviceName + " (" + bf16ArchFamily + ") under Vulkan (" + driverInfo + ").");
       }
       return emitSkip("BF16 vector dot product (VK_KHR_shader_bfloat16::shaderBFloat16DotProduct / v_dot2_bf16_bf16) "
                       "is not supported on " + deviceName + " under Vulkan (" + driverInfo + ").");
@@ -1639,6 +1856,25 @@ public:
         {3, 3 * sizeof(uint32_t), sizeof(uint32_t)}};
     VkSpecializationInfo coopSpecInfo{4, coopSpecEntries, sizeof(coopSpecVals), coopSpecVals};
 
+    std::vector<VkSpecializationMapEntry> customSpecEntries;
+    std::vector<uint32_t> customSpecVals;
+    VkSpecializationInfo customSpecInfo{};
+    const bool useCustomSpec = (!useCoopSpec && !art.specConstants.empty());
+    if (useCustomSpec) {
+      customSpecEntries.reserve(art.specConstants.size());
+      customSpecVals.reserve(art.specConstants.size());
+      for (size_t si = 0; si < art.specConstants.size(); ++si) {
+        customSpecEntries.push_back(
+            {art.specConstants[si].id, static_cast<uint32_t>(si * sizeof(uint32_t)), sizeof(uint32_t)});
+        customSpecVals.push_back(art.specConstants[si].value);
+      }
+      customSpecInfo.mapEntryCount = static_cast<uint32_t>(customSpecEntries.size());
+      customSpecInfo.pMapEntries = customSpecEntries.data();
+      customSpecInfo.dataSize = customSpecVals.size() * sizeof(uint32_t);
+      customSpecInfo.pData = customSpecVals.data();
+    }
+
+#ifdef GPUBENCH_ENABLE_EXPERIMENTAL_WORKGRAPHS
     if (fname == "workgraphs_amdx.comp.spv") {
       auto pfnCreateGraph =
           reinterpret_cast<PFN_vkCreateExecutionGraphPipelinesAMDX>(
@@ -1668,8 +1904,8 @@ public:
       wgStages[1].module = shaderModule;
       wgStages[1].pName = "consumerNode";
 
-      VkExecutionGraphPipelineCreateInfoAMDX egCi{
-          VK_STRUCTURE_TYPE_EXECUTION_GRAPH_PIPELINE_CREATE_INFO_AMDX};
+      VkExecutionGraphPipelineCreateInfoAMDX egCi{};
+      egCi.sType = VK_STRUCTURE_TYPE_EXECUTION_GRAPH_PIPELINE_CREATE_INFO_AMDX;
       egCi.flags = VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR |
                    VK_PIPELINE_CREATE_CAPTURE_INTERNAL_REPRESENTATIONS_BIT_KHR;
       egCi.stageCount = 2;
@@ -1687,6 +1923,7 @@ public:
       vkDestroyShaderModule(device, shaderModule, nullptr);
       return egRes == VK_SUCCESS;
     }
+#endif
 
     VkPipelineShaderStageRequiredSubgroupSizeCreateInfo reqSubgroupInfo{};
     reqSubgroupInfo.sType =
@@ -1703,6 +1940,8 @@ public:
     pipeInfo.stage.pName = "main";
     if (useCoopSpec) {
       pipeInfo.stage.pSpecializationInfo = &coopSpecInfo;
+    } else if (useCustomSpec) {
+      pipeInfo.stage.pSpecializationInfo = &customSpecInfo;
     }
     if (subgroupSize32Supported) {
       pipeInfo.stage.pNext = &reqSubgroupInfo;
@@ -1727,6 +1966,18 @@ public:
     }
 
     printPipelineExecutables(pipeline, art, fullIsa, outReport);
+    if (fname == "bf16.comp.spv" && bf16DotProductEmulatedOnArch) {
+      const std::string note =
+          "Driver lowers BF16 dot() to FP32 on " + bf16ArchFamily +
+          " (no native BF16 VALU dot2 hardware)";
+      if (outReport) {
+        for (auto &ex : outReport->executables) {
+          ex.stats.push_back({"Hardware Note", note});
+        }
+      } else if (!quiet) {
+        std::cout << "  [Hardware Note] " << note << "\n\n";
+      }
+    }
 
     vkDestroyPipeline(device, pipeline, nullptr);
     vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
@@ -1737,25 +1988,183 @@ public:
 };
 #endif
 
-static int runCommandSilent(const std::string &cmd, std::string &output) {
-  output.clear();
-  std::string fullCmd = cmd + " 2>&1";
+static std::atomic<uint64_t> g_isaTmpCounter{0};
+
+static bool isValidAsicToken(const std::string &s) {
+  if (s.empty() || s.size() > 64 || s[0] == '-' || s == "." || s == "..") {
+    return false;
+  }
+  for (unsigned char c : s) {
+    if (!std::isalnum(c) && c != '_' && c != '-' && c != '.') {
+      return false;
+    }
+  }
+  return true;
+}
+
+static bool isValidSymbolToken(const std::string &s) {
+  if (s.empty() || s.size() > 256) {
+    return false;
+  }
+  for (unsigned char c : s) {
+    if (!std::isalnum(c) && c != '_' && c != '$' && c != '.' && c != ':') {
+      return false;
+    }
+  }
+  return true;
+}
+
+struct TempFileGuard {
+  fs::path path;
+  ~TempFileGuard() {
+    if (!path.empty()) {
+      std::error_code ec;
+      fs::remove(path, ec);
+    }
+  }
+};
+
 #ifdef _WIN32
-  FILE *pipe = _popen(fullCmd.c_str(), "r");
-#else
-  FILE *pipe = popen(fullCmd.c_str(), "r");
+static std::string quoteWinArg(const std::string &arg) {
+  if (!arg.empty() && arg.find_first_of(" \t\n\v\"") == std::string::npos) {
+    return arg;
+  }
+  std::string q = "\"";
+  for (size_t i = 0; i < arg.size(); ++i) {
+    size_t backslashes = 0;
+    while (i < arg.size() && arg[i] == '\\') {
+      ++backslashes;
+      ++i;
+    }
+    if (i == arg.size()) {
+      q.append(backslashes * 2, '\\');
+      break;
+    }
+    if (arg[i] == '"') {
+      q.append(backslashes * 2 + 1, '\\');
+      q.push_back('"');
+    } else {
+      q.append(backslashes, '\\');
+      q.push_back(arg[i]);
+    }
+  }
+  q.push_back('"');
+  return q;
+}
 #endif
-  if (!pipe) {
+
+static int runCommandSilent(const std::vector<std::string> &argv, std::string &output) {
+  output.clear();
+  if (argv.empty()) {
     return -1;
   }
-  char buffer[512];
-  while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-    output += buffer;
-  }
 #ifdef _WIN32
-  return _pclose(pipe);
+  SECURITY_ATTRIBUTES sa{};
+  sa.nLength = sizeof(sa);
+  sa.bInheritHandle = TRUE;
+  HANDLE hRead = nullptr, hWrite = nullptr;
+  if (!CreatePipe(&hRead, &hWrite, &sa, 0)) {
+    return -1;
+  }
+  SetHandleInformation(hRead, HANDLE_FLAG_INHERIT, 0);
+
+  STARTUPINFOA si{};
+  si.cb = sizeof(si);
+  si.dwFlags = STARTF_USESTDHANDLES;
+  si.hStdOutput = hWrite;
+  si.hStdError = hWrite;
+  si.hStdInput = nullptr;
+
+  std::string cmdLine;
+  for (size_t i = 0; i < argv.size(); ++i) {
+    if (i > 0) cmdLine.push_back(' ');
+    cmdLine += quoteWinArg(argv[i]);
+  }
+  std::vector<char> mutableCmd(cmdLine.begin(), cmdLine.end());
+  mutableCmd.push_back('\0');
+
+  PROCESS_INFORMATION pi{};
+  BOOL ok = CreateProcessA(nullptr, mutableCmd.data(), nullptr, nullptr, TRUE,
+                           CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi);
+  CloseHandle(hWrite);
+  if (!ok) {
+    CloseHandle(hRead);
+    return -1;
+  }
+
+  char buffer[512];
+  DWORD bytesRead = 0;
+  while (ReadFile(hRead, buffer, sizeof(buffer), &bytesRead, nullptr) && bytesRead > 0) {
+    output.append(buffer, bytesRead);
+  }
+  CloseHandle(hRead);
+  WaitForSingleObject(pi.hProcess, INFINITE);
+  DWORD exitCode = 1;
+  GetExitCodeProcess(pi.hProcess, &exitCode);
+  CloseHandle(pi.hProcess);
+  CloseHandle(pi.hThread);
+  return static_cast<int>(exitCode);
 #else
-  return pclose(pipe);
+  int pipefd[2] = {-1, -1};
+  if (pipe(pipefd) != 0) {
+    return -1;
+  }
+  posix_spawn_file_actions_t actions;
+  if (posix_spawn_file_actions_init(&actions) != 0) {
+    close(pipefd[0]);
+    close(pipefd[1]);
+    return -1;
+  }
+  bool setupOk =
+      (posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0) == 0) &&
+      (posix_spawn_file_actions_adddup2(&actions, pipefd[1], STDOUT_FILENO) == 0) &&
+      (posix_spawn_file_actions_adddup2(&actions, pipefd[1], STDERR_FILENO) == 0) &&
+      (posix_spawn_file_actions_addclose(&actions, pipefd[0]) == 0) &&
+      (posix_spawn_file_actions_addclose(&actions, pipefd[1]) == 0);
+
+  std::vector<std::string> ownedArgs = argv;
+  std::vector<char *> cArgs;
+  cArgs.reserve(ownedArgs.size() + 1);
+  for (std::string &s : ownedArgs) {
+    cArgs.push_back(s.data());
+  }
+  cArgs.push_back(nullptr);
+
+  pid_t pid = -1;
+  int spawnRc = setupOk ? posix_spawnp(&pid, ownedArgs[0].c_str(), &actions, nullptr,
+                                       cArgs.data(), environ)
+                        : -1;
+  posix_spawn_file_actions_destroy(&actions);
+  close(pipefd[1]);
+
+  if (spawnRc != 0) {
+    close(pipefd[0]);
+    return -1;
+  }
+
+  char buffer[512];
+  for (;;) {
+    ssize_t n = read(pipefd[0], buffer, sizeof(buffer));
+    if (n > 0) {
+      output.append(buffer, static_cast<size_t>(n));
+    } else if (n == 0) {
+      break;
+    } else if (errno != EINTR) {
+      break;
+    }
+  }
+  close(pipefd[0]);
+
+  int status = 0;
+  while (waitpid(pid, &status, 0) < 0) {
+    if (errno != EINTR) {
+      return -1;
+    }
+  }
+  if (WIFEXITED(status)) {
+    return WEXITSTATUS(status);
+  }
+  return -1;
 #endif
 }
 
@@ -1774,43 +2183,46 @@ static std::string extractGfxToken(const std::string &s) {
   return "";
 }
 
+static std::string getRocmAsicSkipReason(const std::string &fname, const std::string &asic) {
+  const std::string lowAsic = toLowerCopy(asic);
+  const bool isGfx950 = (lowAsic == "gfx950");
+  const bool isGfx94x = (lowAsic.rfind("gfx94", 0) == 0);
+  const bool isGfx90a = (lowAsic == "gfx90a");
+  const bool isGfx11x = (lowAsic.rfind("gfx11", 0) == 0);
+  const bool isGfx12x = (lowAsic.rfind("gfx12", 0) == 0);
+
+  if (fname == "fp6_matrix.co" || fname == "fp4_matrix.co") {
+    if (!isGfx950) {
+      return "ROCm " + fname +
+             " requires AMD CDNA 4 (gfx950) MXFP6/MXFP4 MFMA hardware; target ASIC '" +
+             asic + "' compiles only a fallback stub.";
+    }
+  } else if (fname == "fp8_matrix.co" ||
+             (fname.rfind("sparse_", 0) == 0 && fname.find("_matrix.co") != std::string::npos)) {
+    if (!(isGfx12x || isGfx94x || isGfx950)) {
+      return "ROCm " + fname +
+             " requires AMD RDNA 4 (gfx12*) or CDNA 3/4 (gfx94*/gfx950) matrix hardware; target ASIC '" +
+             asic + "' is unsupported.";
+    }
+  } else if (fname == "int4_matrix.co") {
+    if (!(isGfx11x || isGfx12x)) {
+      return "ROCm int4_matrix.co requires AMD RDNA 3/3.5/4 (gfx11*/gfx12*) WMMA hardware; target ASIC '" +
+             asic + "' is unsupported.";
+    }
+  } else if (fname == "fp16_matrix.co" || fname == "bf16_matrix.co" || fname == "int8_matrix.co") {
+    if (!(isGfx11x || isGfx12x || isGfx90a || isGfx94x || isGfx950)) {
+      return "ROCm " + fname +
+             " requires AMD RDNA 3/4 (gfx11*/gfx12*) WMMA or CDNA 2/3/4 (gfx90a/gfx94*/gfx950) MFMA hardware; target ASIC '" +
+             asic + "' is unsupported.";
+    }
+  }
+  return "";
+}
+
 static bool inspectRocmCodeObject(const KernelArtifact &art, const std::string &asic,
                                   bool fullIsa, bool quiet,
                                   IsaArtifactReport *outReport = nullptr) {
-  // Locate clang-offload-bundler and llvm-objdump from standard ROCm LLVM paths
-  std::string bundler = "clang-offload-bundler";
-  std::string objdump = "llvm-objdump";
-
-  std::error_code ec;
-  if (fs::is_directory("/opt/rocm", ec)) {
-    for (const auto &entry : fs::directory_iterator("/opt/rocm", ec)) {
-      fs::path b = entry.path() / "lib" / "llvm" / "bin" / "clang-offload-bundler";
-      fs::path d = entry.path() / "lib" / "llvm" / "bin" / "llvm-objdump";
-      if (fs::exists(b, ec) && fs::exists(d, ec)) {
-        bundler = b.string();
-        objdump = d.string();
-        break;
-      }
-    }
-  }
-
-  fs::path tmpObj = fs::temp_directory_path() / (art.filePath.stem().string() + "_" + asic + ".o");
-  std::string out;
-  std::string unbundleCmd = "\"" + bundler + "\" --type=o --bundle-align=4096 "
-                            "--targets=hipv4-amdgcn-amd-amdhsa--" + asic +
-                            " --input=\"" + art.filePath.string() + "\""
-                            " --output=\"" + tmpObj.string() + "\" --unbundle";
-  runCommandSilent(unbundleCmd, out);
-
-  fs::path targetPath = fs::exists(tmpObj, ec) ? tmpObj : art.filePath;
-  std::string symArg = !art.rocmSymbol.empty() ? (" --disassemble-symbols=" + art.rocmSymbol) : "";
-  std::string disCmd = "\"" + objdump + "\" -d --mcpu=" + asic + symArg + " \"" + targetPath.string() + "\"";
-  int rc = runCommandSilent(disCmd, out);
-  if (fs::exists(tmpObj, ec)) {
-    fs::remove(tmpObj, ec);
-  }
-  if (rc != 0 || out.empty()) {
-    std::string err = "Failed to disassemble ROCm code object: " + art.filePath.string();
+  auto failReport = [&](const std::string &err) -> bool {
     if (outReport) {
       outReport->benchName = art.benchmarkName;
       outReport->configLabel = art.configName;
@@ -1823,12 +2235,135 @@ static bool inspectRocmCodeObject(const KernelArtifact &art, const std::string &
       std::cerr << "  [Error] " << err << "\n";
     }
     return false;
+  };
+
+  if (!isValidAsicToken(asic)) {
+    return failReport("Rejected invalid ROCm target ASIC token");
+  }
+  if (!art.rocmSymbol.empty() && !isValidSymbolToken(art.rocmSymbol)) {
+    return failReport("Rejected invalid ROCm symbol token");
+  }
+
+  const std::string fname = art.filePath.filename().string();
+  const std::string archSkip = getRocmAsicSkipReason(fname, asic);
+  if (!archSkip.empty()) {
+    if (outReport) {
+      outReport->benchName = art.benchmarkName;
+      outReport->configLabel = art.configName;
+      outReport->configIndex = art.configIndex;
+      outReport->backend = art.backend;
+      outReport->artifactFile = fname;
+      outReport->skipReason = archSkip;
+    }
+    if (!quiet) {
+      std::cout << "━━━ [rocm] " << art.configName
+                << " (" << fname << " — " << asic << ") ━━━\n"
+                << "  [Skipped] " << archSkip << "\n\n";
+    }
+    return true;
+  }
+
+  // Locate clang-offload-bundler and llvm-objdump deterministically, preferring active ROCm 10.2+
+  std::string bundler = "clang-offload-bundler";
+  std::string objdump = "llvm-objdump";
+
+  std::error_code ec;
+  bool foundTools = false;
+  auto tryToolDir = [&](const fs::path &binDir) -> bool {
+    fs::path b = binDir / "clang-offload-bundler";
+    fs::path d = binDir / "llvm-objdump";
+    if (fs::exists(b, ec) && fs::exists(d, ec)) {
+      bundler = b.string();
+      objdump = d.string();
+      return true;
+    }
+    return false;
+  };
+
+  std::vector<fs::path> rocmBinCandidates;
+  if (const char *rocmEnv = std::getenv("ROCM_PATH"); rocmEnv && rocmEnv[0] != '\0') {
+    rocmBinCandidates.emplace_back(fs::path(rocmEnv) / "lib" / "llvm" / "bin");
+    rocmBinCandidates.emplace_back(fs::path(rocmEnv) / "llvm" / "bin");
+  }
+  rocmBinCandidates.emplace_back("/opt/rocm/core/lib/llvm/bin");
+  rocmBinCandidates.emplace_back("/opt/rocm/llvm/bin");
+  rocmBinCandidates.emplace_back("/opt/rocm/lib/llvm/bin");
+  rocmBinCandidates.emplace_back("/opt/rocm/core-10.2/lib/llvm/bin");
+  rocmBinCandidates.emplace_back("/opt/rocm/current/lib/llvm/bin");
+
+  for (const auto &dir : rocmBinCandidates) {
+    if (tryToolDir(dir)) {
+      foundTools = true;
+      break;
+    }
+  }
+  if (!foundTools && fs::is_directory("/opt/rocm", ec)) {
+    std::vector<fs::path> versionedDirs;
+    for (const auto &entry : fs::directory_iterator("/opt/rocm", ec)) {
+      if (entry.is_directory(ec)) {
+        versionedDirs.push_back(entry.path());
+      }
+    }
+    std::sort(versionedDirs.begin(), versionedDirs.end(), std::greater<fs::path>());
+    for (const auto &dir : versionedDirs) {
+      if (tryToolDir(dir / "lib" / "llvm" / "bin") ||
+          tryToolDir(dir / "llvm" / "bin")) {
+        foundTools = true;
+        break;
+      }
+    }
+  }
+
+  TempFileGuard tmpGuard;
+  fs::path tmpDir = fs::temp_directory_path(ec);
+  if (ec || tmpDir.empty()) {
+    return failReport("Failed to resolve temp directory for ROCm code object extraction");
+  }
+#ifdef _WIN32
+  char tmpBuf[MAX_PATH] = {};
+  if (GetTempFileNameA(tmpDir.string().c_str(), "gpu", 0, tmpBuf) == 0) {
+    return failReport("Failed to create unique temp file for ROCm code object extraction");
+  }
+  tmpGuard.path = tmpBuf;
+#else
+  std::string tmpl = (tmpDir / "gpubench_rocm_XXXXXX").string();
+  std::vector<char> tmplBuf(tmpl.begin(), tmpl.end());
+  tmplBuf.push_back('\0');
+  int tmpFd = mkstemp(tmplBuf.data());
+  if (tmpFd < 0) {
+    return failReport("Failed to create unique temp file for ROCm code object extraction");
+  }
+  close(tmpFd);
+  tmpGuard.path = tmplBuf.data();
+#endif
+
+  std::string out;
+  std::vector<std::string> unbundleArgs = {
+      bundler,
+      "--type=o",
+      "--bundle-align=4096",
+      "--targets=hipv4-amdgcn-amd-amdhsa--" + asic,
+      "--input=" + art.filePath.string(),
+      "--output=" + tmpGuard.path.string(),
+      "--unbundle"};
+  runCommandSilent(unbundleArgs, out);
+
+  const uintmax_t tmpSz = fs::file_size(tmpGuard.path, ec);
+  fs::path targetPath = (!ec && tmpSz > 0) ? tmpGuard.path : art.filePath;
+  std::vector<std::string> disArgs = {objdump, "-d", "--mcpu=" + asic};
+  if (!art.rocmSymbol.empty()) {
+    disArgs.push_back("--disassemble-symbols=" + art.rocmSymbol);
+  }
+  disArgs.push_back(targetPath.string());
+  int rc = runCommandSilent(disArgs, out);
+  if (rc != 0 || out.empty()) {
+    return failReport("Failed to disassemble ROCm code object: " + art.filePath.string());
   }
 
   IsaExecutableReport exec;
   exec.name = !art.rocmSymbol.empty() ? art.rocmSymbol : art.filePath.filename().string();
   exec.description = "ROCm AMDGPU Disassembly (" + asic + ")";
-  exec.subgroupSize = 32;
+  exec.subgroupSize = (asic.rfind("gfx9", 0) == 0) ? 64 : 32;
   analyzeIsaText(out, exec);
   inferRocmRegisterCounts(exec.fullIsaLines, exec.vgprCount, exec.sgprCount);
   exec.stats.push_back({"Instructions", std::to_string(exec.mix.total)});
@@ -1891,6 +2426,30 @@ static bool matchesBenchmarkMapping(const BenchmarkMapping &m, const std::string
   return false;
 }
 
+static std::string buildArtifactVisitKey(const KernelArtifact &art, bool explicitConfigs) {
+  std::string key = art.backend + ":";
+  if (explicitConfigs || art.backend == "vulkan") {
+    key += std::to_string(art.configIndex) + ":";
+  }
+  key += art.filePath.string() + ":" + art.rocmSymbol + ":" + art.configName;
+  if (!art.specConstants.empty()) {
+    key += ":spec(";
+    for (size_t i = 0; i < art.specConstants.size(); ++i) {
+      if (i > 0) key.push_back(',');
+      key += std::to_string(art.specConstants[i].id) + "=" +
+             std::to_string(art.specConstants[i].value);
+    }
+    key.push_back(')');
+  }
+  if (art.rasterConfig.custom) {
+    key += ":raster(" +
+           std::to_string(static_cast<int>(art.rasterConfig.colorFormat)) + "," +
+           (art.rasterConfig.blendEnable ? "1" : "0") + "," +
+           (art.rasterConfig.depthEnable ? "1" : "0") + ")";
+  }
+  return key;
+}
+
 static std::vector<KernelArtifact> resolveArtifactsForOptions(const IsaDumperOptions &opts,
                                                               const fs::path &kernelDir,
                                                               const std::set<std::string> &wantedBackends) {
@@ -1903,7 +2462,7 @@ static std::vector<KernelArtifact> resolveArtifactsForOptions(const IsaDumperOpt
       std::string ext = directPath.extension().string();
       std::string backend = (ext == ".co" || ext == ".hsaco" || ext == ".o") ? "rocm" : "vulkan";
       artifacts.push_back(
-          {directPath.filename().string(), directPath.filename().string(), 0, backend, directPath, "", ""});
+          {directPath.filename().string(), directPath.filename().string(), 0, backend, directPath, "", "", {}, {}});
       continue;
     }
 
@@ -1929,17 +2488,20 @@ static std::vector<KernelArtifact> resolveArtifactsForOptions(const IsaDumperOpt
     if (normTarget == "all") {
       for (const auto &m : mappings) {
         const std::vector<int> matchedConfigs = resolveMatchingConfigs(m);
+        const std::string rocmLabel =
+            !m.rocmConfigLabel.empty() ? m.rocmConfigLabel : m.configLabel;
         for (int cfgIdx : matchedConfigs) {
           if (wantedBackends.count("vulkan") && !m.vulkanSpv.empty()) {
             fs::path p = kernelDir / "vulkan" / m.vulkanSpv;
             if (fs::exists(p)) {
-              artifacts.push_back({m.benchName, m.configLabel, cfgIdx, "vulkan", p, "", ""});
+              artifacts.push_back({m.benchName, m.configLabel, cfgIdx, "vulkan", p, "", "",
+                                   m.specConstants, m.rasterConfig});
             }
           }
           if (wantedBackends.count("rocm") && !m.rocmCo.empty()) {
             fs::path p = kernelDir / "rocm" / m.rocmCo;
             if (fs::exists(p)) {
-              artifacts.push_back({m.benchName, m.configLabel, cfgIdx, "rocm", p, m.rocmSymbol, ""});
+              artifacts.push_back({m.benchName, rocmLabel, cfgIdx, "rocm", p, m.rocmSymbol, "", {}, {}});
             }
           }
         }
@@ -1948,6 +2510,15 @@ static std::vector<KernelArtifact> resolveArtifactsForOptions(const IsaDumperOpt
     }
 
     bool matchedBench = false;
+    struct PendingSkip {
+      KernelArtifact artifact;
+      bool isFixedSkip = false;
+    };
+    std::vector<KernelArtifact> realTargetArtifacts;
+    std::vector<PendingSkip> pendingSkips;
+    std::set<std::string> realBackendKeys; // benchName|cfgIdx|backend
+    std::set<std::string> realBackendsPresent;
+
     for (const auto &m : mappings) {
       if (!matchesBenchmarkMapping(m, normTarget)) {
         continue;
@@ -1959,12 +2530,17 @@ static std::vector<KernelArtifact> resolveArtifactsForOptions(const IsaDumperOpt
       }
 
       matchedBench = true;
+      const std::string rocmLabel =
+          !m.rocmConfigLabel.empty() ? m.rocmConfigLabel : m.configLabel;
       for (int cfgIdx : matchedConfigs) {
         if (wantedBackends.count("vulkan")) {
           if (!m.vulkanSpv.empty()) {
             fs::path p = kernelDir / "vulkan" / m.vulkanSpv;
             if (fs::exists(p)) {
-              artifacts.push_back({m.benchName, m.configLabel, cfgIdx, "vulkan", p, "", ""});
+              realTargetArtifacts.push_back({m.benchName, m.configLabel, cfgIdx, "vulkan", p, "", "",
+                                             m.specConstants, m.rasterConfig});
+              realBackendKeys.insert(m.benchName + "|" + std::to_string(cfgIdx) + "|vulkan");
+              realBackendsPresent.insert("vulkan");
             }
           } else if (wantedBackends.size() == 1) {
             std::string reason;
@@ -1975,14 +2551,25 @@ static std::vector<KernelArtifact> resolveArtifactsForOptions(const IsaDumperOpt
             } else {
               reason = m.configLabel + " is a capability-probed benchmark with no compiled shader artifact on this toolchain.";
             }
-            artifacts.push_back({m.benchName, m.configLabel, cfgIdx, "vulkan", {}, "", reason});
+            pendingSkips.push_back(
+                {{m.benchName, m.configLabel, cfgIdx, "vulkan", {}, "", reason, {}, {}},
+                 !m.fixedSkipReason.empty()});
           }
         }
         if (wantedBackends.count("rocm")) {
           if (!m.rocmCo.empty()) {
             fs::path p = kernelDir / "rocm" / m.rocmCo;
             if (fs::exists(p)) {
-              artifacts.push_back({m.benchName, m.configLabel, cfgIdx, "rocm", p, m.rocmSymbol, ""});
+              realTargetArtifacts.push_back(
+                  {m.benchName, rocmLabel, cfgIdx, "rocm", p, m.rocmSymbol, "", {}, {}});
+              realBackendKeys.insert(m.benchName + "|" + std::to_string(cfgIdx) + "|rocm");
+              realBackendsPresent.insert("rocm");
+            } else if (wantedBackends.size() == 1) {
+              std::string reason =
+                  rocmLabel + " ROCm code object (" + m.rocmCo +
+                  ") not found on disk; build with -DGPUBENCH_ENABLE_ROCM=ON.";
+              pendingSkips.push_back(
+                  {{m.benchName, rocmLabel, cfgIdx, "rocm", {}, "", reason, {}, {}}, false});
             }
           } else if (wantedBackends.size() == 1) {
             std::string reason;
@@ -1993,10 +2580,35 @@ static std::vector<KernelArtifact> resolveArtifactsForOptions(const IsaDumperOpt
             } else {
               reason = m.configLabel + " is a capability-probed benchmark with no compiled kernel artifact on this toolchain.";
             }
-            artifacts.push_back({m.benchName, m.configLabel, cfgIdx, "rocm", {}, "", reason});
+            pendingSkips.push_back(
+                {{m.benchName, m.configLabel, cfgIdx, "rocm", {}, "", reason, {}, {}},
+                 !m.fixedSkipReason.empty()});
           }
         }
       }
+    }
+
+    for (auto &ra : realTargetArtifacts) {
+      artifacts.push_back(std::move(ra));
+    }
+    std::set<std::string> emittedSkipKeys;
+    for (auto &ps : pendingSkips) {
+      const std::string cfgKey =
+          ps.artifact.benchmarkName + "|" + std::to_string(ps.artifact.configIndex) + "|" +
+          ps.artifact.backend;
+      // Never emit a skip when this (bench, config, backend) already has real artifact(s),
+      // and deduplicate multi-stage Vulkan-only skips to one entry per config.
+      if (realBackendKeys.count(cfgKey) || !emittedSkipKeys.insert(cfgKey).second) {
+        continue;
+      }
+      // When inspecting a whole benchmark without -c and the requested backend already has
+      // supported configs (e.g. --dump-isa indirect -k rocm or --dump-isa async -k rocm),
+      // cleanly omit backend-absent skips for other-backend-only configs.
+      if (opts.configs.empty() && !ps.isFixedSkip &&
+          realBackendsPresent.count(ps.artifact.backend) > 0) {
+        continue;
+      }
+      artifacts.push_back(std::move(ps.artifact));
     }
 
     if (!matchedBench) {
@@ -2005,7 +2617,7 @@ static std::vector<KernelArtifact> resolveArtifactsForOptions(const IsaDumperOpt
           if (entry.path().extension() == ".spv") {
             std::string fname = entry.path().filename().string();
             if (normalizeKey(fname).find(normTarget) != std::string::npos) {
-              artifacts.push_back({fname, fname, 0, "vulkan", entry.path(), "", ""});
+              artifacts.push_back({fname, fname, 0, "vulkan", entry.path(), "", "", {}, {}});
             }
           }
         }
@@ -2015,7 +2627,7 @@ static std::vector<KernelArtifact> resolveArtifactsForOptions(const IsaDumperOpt
           if (entry.path().extension() == ".co") {
             std::string fname = entry.path().filename().string();
             if (normalizeKey(fname).find(normTarget) != std::string::npos) {
-              artifacts.push_back({fname, fname, 0, "rocm", entry.path(), "", ""});
+              artifacts.push_back({fname, fname, 0, "rocm", entry.path(), "", "", {}, {}});
             }
           }
         }
@@ -2029,7 +2641,7 @@ static std::vector<KernelArtifact> resolveArtifactsForOptions(const IsaDumperOpt
 static IsaDumperOptions applyUnmappedConfigFallback(const IsaDumperOptions &opts) {
   IsaDumperOptions fb = opts;
   if (!fb.targets.empty() && normalizeKey(fb.targets[0]) == "rayscheduling") {
-    fb.configs = {28};
+    fb.configs = {15};
   } else {
     fb.configs.clear();
   }
@@ -2083,11 +2695,8 @@ static std::vector<FileStamp> collectDependencyStamps(const IsaDumperOptions &op
     std::string fname = art.filePath.filename().string();
     if (fname.find(".frag.spv") != std::string::npos || fname.find(".vert.spv") != std::string::npos) {
       const bool isAsyncGfx = (fname.rfind("async_gfx.", 0) == 0);
-      const bool isCrtOverlay = (fname.rfind("gui_crt_overlay.", 0) == 0);
-      fs::path vertPath = dir / (isAsyncGfx ? "async_gfx.vert.spv"
-                                            : (isCrtOverlay ? "gui_crt_overlay.vert.spv" : "pixel_fill.vert.spv"));
-      fs::path fragPath = dir / (isAsyncGfx ? "async_gfx.frag.spv"
-                                            : (isCrtOverlay ? "gui_crt_overlay.frag.spv" : "pixel_fill.frag.spv"));
+      fs::path vertPath = dir / (isAsyncGfx ? "async_gfx.vert.spv" : "pixel_fill.vert.spv");
+      fs::path fragPath = dir / (isAsyncGfx ? "async_gfx.frag.spv" : "pixel_fill.frag.spv");
       appendUniqueFileStamp(vertPath, stamps, seen);
       appendUniqueFileStamp(fragPath, stamps, seen);
     } else if (fname.find(".rgen.spv") != std::string::npos) {
@@ -2173,9 +2782,9 @@ static fs::path buildIsaCachePath(const IsaDumperOptions &opts, const IsaCacheCo
   const std::string backend = canonicalBackendForCache(opts);
 
   std::ostringstream keySs;
-  keySs << "v2|" << ctx.vendorId << "|" << ctx.deviceId << "|"
+  keySs << "v4|" << ctx.vendorId << "|" << ctx.deviceId << "|"
         << ctx.driverVersion << "|" << ctx.driverInfo << "|"
-        << backend << "|" << opts.deviceIndex << "|"
+        << opts.asic << "|" << backend << "|" << opts.deviceIndex << "|"
         << target << "|" << cfg << "|" << (opts.fullIsa ? 1 : 0);
 
   std::ostringstream nameSs;
@@ -2284,8 +2893,9 @@ static bool runInspectionCore(const IsaDumperOptions &opts, bool emitStdout,
   }
 
   std::set<std::string> visitedFiles;
+  const bool explicitConfigs = !opts.configs.empty();
   for (const auto &art : artifacts) {
-    std::string visitKey = art.backend + ":" + art.filePath.string() + ":" + art.rocmSymbol + ":" + art.configName;
+    const std::string visitKey = buildArtifactVisitKey(art, explicitConfigs);
     if (!visitedFiles.insert(visitKey).second) {
       continue;
     }
@@ -2636,8 +3246,15 @@ bool IsaDumper::saveCached(const IsaDumperOptions &opts,
     }
   }
 
+  const uint64_t tmpSeq = g_isaTmpCounter.fetch_add(1, std::memory_order_relaxed);
+  const size_t tidHash = std::hash<std::thread::id>{}(std::this_thread::get_id());
+#ifdef _WIN32
+  const unsigned long pid = static_cast<unsigned long>(GetCurrentProcessId());
+#else
+  const unsigned long pid = static_cast<unsigned long>(getpid());
+#endif
   fs::path tmpPath = cachePath;
-  tmpPath += ".tmp";
+  tmpPath += ".tmp." + std::to_string(pid) + "." + std::to_string(tidHash) + "." + std::to_string(tmpSeq);
   if (!yyjson_mut_write_file(tmpPath.string().c_str(), doc, 0, nullptr, nullptr)) {
     return false;
   }
@@ -2703,6 +3320,7 @@ void IsaDumper::warmCacheBatch(
     }
 
     std::string resolvedAsic = opts.asic;
+#ifdef HAVE_VULKAN
     bool needVulkan = false;
     bool needRocm = false;
     for (const auto &a : artifacts) {
@@ -2711,7 +3329,6 @@ void IsaDumper::warmCacheBatch(
       else if (a.backend == "rocm") needRocm = true;
     }
 
-#ifdef HAVE_VULKAN
     if (needVulkan || (needRocm && resolvedAsic.empty())) {
       if (!vkInspector || vkInitDevice != opts.deviceIndex) {
         vkInspector = std::make_unique<NativeVulkanIsaInspector>();
@@ -2745,11 +3362,12 @@ void IsaDumper::warmCacheBatch(
     res.resolvedAsic = resolvedAsic;
 
     std::set<std::string> visitedFiles;
+    const bool explicitConfigs = !opts.configs.empty();
     for (const auto &art : artifacts) {
       if (cancelFlag && cancelFlag->load(std::memory_order_acquire)) {
         break;
       }
-      const std::string visitKey = art.backend + ":" + art.filePath.string() + ":" + art.rocmSymbol + ":" + art.configName;
+      const std::string visitKey = buildArtifactVisitKey(art, explicitConfigs);
       if (!visitedFiles.insert(visitKey).second) {
         continue;
       }

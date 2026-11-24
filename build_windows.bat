@@ -93,7 +93,7 @@ if %errorlevel% neq 0 (
     )
 )
 
-:: 3. Detect Vulkan SDK
+:: 3. Detect Vulkan SDK (provides glslc.exe & slangc.exe)
 if "%VULKAN_SDK%"=="" (
     for /d %%i in (C:\VulkanSDK\*) do set "VULKAN_SDK=%%i"
 )
@@ -101,7 +101,8 @@ if not "%VULKAN_SDK%"=="" (
     set "PATH=%VULKAN_SDK%\Bin;%PATH%"
 )
 
-:: 4. Detect Build Generator (Prefer Ninja)
+:: 4. Detect Build Generator (Prefer Ninja, fallback MinGW Makefiles or CMake default VS)
+set "CMAKE_GENERATOR="
 where ninja >nul 2>nul
 if %errorlevel% == 0 (
     set "CMAKE_GENERATOR=Ninja"
@@ -109,12 +110,20 @@ if %errorlevel% == 0 (
     set "CMAKE_GENERATOR=Ninja"
     set "PATH=%MINGW_BIN%;%PATH%"
 ) else (
-    set "CMAKE_GENERATOR=MinGW Makefiles"
+    where mingw32-make >nul 2>nul
+    if %errorlevel% == 0 (
+        set "CMAKE_GENERATOR=MinGW Makefiles"
+    )
 )
 
 :: 5. Configure CMake
-echo [GPUBench] Configuring with %CMAKE_GENERATOR%...
-cmake -B build-release -S . -DCMAKE_BUILD_TYPE=Release -G "%CMAKE_GENERATOR%"
+if "%CMAKE_GENERATOR%"=="" (
+    echo [GPUBench] Configuring with default CMake generator...
+    cmake -B build-release -S . -DCMAKE_BUILD_TYPE=Release
+) else (
+    echo [GPUBench] Configuring with %CMAKE_GENERATOR%...
+    cmake -B build-release -S . -DCMAKE_BUILD_TYPE=Release -G "%CMAKE_GENERATOR%"
+)
 if %errorlevel% neq 0 (
     echo [ERROR] CMake configuration failed.
     if "%DO_PAUSE%"=="1" pause
@@ -123,46 +132,51 @@ if %errorlevel% neq 0 (
 
 :: 6. Build GPUBench
 echo [GPUBench] Building Release target...
-cmake --build build-release
+cmake --build build-release --config Release
 if %errorlevel% neq 0 (
     echo [ERROR] Build failed.
     if "%DO_PAUSE%"=="1" pause
     exit /b %errorlevel%
 )
 
-:: 7. Ensure MinGW Runtime DLLs exist in build-release for standalone execution
+set "OUT_BIN_DIR=build-release"
+if exist "build-release\Release\gpubench.exe" (
+    set "OUT_BIN_DIR=build-release\Release"
+)
+
+:: 7. Ensure MinGW Runtime DLLs exist in output directory for standalone execution
 if not "%MINGW_BIN%"=="" (
     for %%f in (libstdc++-6.dll libgcc_s_seh-1.dll libwinpthread-1.dll) do (
         if exist "%MINGW_BIN%\%%f" (
-            copy /y "%MINGW_BIN%\%%f" "build-release\" >nul 2>&1
+            copy /y "%MINGW_BIN%\%%f" "%OUT_BIN_DIR%\" >nul 2>&1
         )
     )
 )
 if exist "build-release\_deps\sdl3-build\SDL3.dll" (
-    copy /y "build-release\_deps\sdl3-build\SDL3.dll" "build-release\" >nul 2>&1
+    copy /y "build-release\_deps\sdl3-build\SDL3.dll" "%OUT_BIN_DIR%\" >nul 2>&1
 )
 
-echo [GPUBench] Build successful: build-release\gpubench.exe
+echo [GPUBench] Build successful: %OUT_BIN_DIR%\gpubench.exe
 
 :: 8. Execute Requested Action
 if "%ACTION%"=="test" (
     echo.
     echo [GPUBench] Listing available devices:
-    build-release\gpubench.exe -l
+    "%OUT_BIN_DIR%\gpubench.exe" -l
     exit /b %errorlevel%
 )
 
 if "%ACTION%"=="run" (
     echo.
-    echo [GPUBench] Running: build-release\gpubench.exe !RUN_ARGS!
-    build-release\gpubench.exe !RUN_ARGS!
+    echo [GPUBench] Running: %OUT_BIN_DIR%\gpubench.exe !RUN_ARGS!
+    "%OUT_BIN_DIR%\gpubench.exe" !RUN_ARGS!
     exit /b !errorlevel!
 )
 
 if "%ACTION%"=="gui" (
     echo.
-    echo [GPUBench] Launching GUI: build-release\gpubench-gui.exe !RUN_ARGS!
-    build-release\gpubench-gui.exe !RUN_ARGS!
+    echo [GPUBench] Launching GUI: %OUT_BIN_DIR%\gpubench-gui.exe !RUN_ARGS!
+    "%OUT_BIN_DIR%\gpubench-gui.exe" !RUN_ARGS!
     exit /b !errorlevel!
 )
 

@@ -61,10 +61,11 @@ Install OpenCL ICD loader development packages:
 
 ### Build Steps
 
+OpenCL support is soft-disabled by default; enable it explicitly at configure time with `-DGPUBENCH_ENABLE_OPENCL=ON`:
+
 ```bash
-mkdir -p build && cd build
-cmake ..
-make -j16
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DGPUBENCH_ENABLE_OPENCL=ON
+cmake --build build --parallel 16
 ```
 
 ---

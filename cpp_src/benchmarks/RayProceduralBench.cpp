@@ -32,7 +32,7 @@ std::string RayProceduralBench::GetSupportNote(const DeviceInfo &info,
     return "No support for ray tracing pipelines in ROCm/HIP API";
   }
   if (!info.rayTracingSupport) {
-    return "VK_KHR_acceleration_structure or VK_KHR_ray_query missing";
+    return "VK_KHR_acceleration_structure or VK_KHR_ray_tracing_pipeline missing";
   }
   if (context) {
     const VulkanContext *vc = dynamic_cast<const VulkanContext *>(context);
@@ -272,8 +272,15 @@ void RayProceduralBench::buildAS() {
   VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
   submit.commandBufferCount = 1;
   submit.pCommandBuffers = &cmd;
-  VkResult submitRes = vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE);
-  VkResult waitRes = vkQueueWaitIdle(queue);
+  VkResult submitRes = VK_SUCCESS;
+  VkResult waitRes = VK_SUCCESS;
+  {
+    std::lock_guard<std::recursive_mutex> qlock(vContext->getQueueMutex());
+    submitRes = vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE);
+    if (submitRes == VK_SUCCESS) {
+      waitRes = vkQueueWaitIdle(queue);
+    }
+  }
   vkDestroyCommandPool(device, tmpPool, nullptr);
   if (submitRes != VK_SUCCESS || waitRes != VK_SUCCESS) {
     throw std::runtime_error("RayProceduralBench: AS build queue submission failed");

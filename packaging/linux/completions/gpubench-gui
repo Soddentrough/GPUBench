@@ -4,7 +4,8 @@ _gpubench_gui() {
     local cur prev words cword
     _init_completion || return
 
-    local opts="--help -h --version -v --backend -k --group --groups -g --benchmark --benchmarks -b --test -t --device -d --scene -s --res --resolution -r --ui-scale --scale --dump-renders --dump --no-dump-renders --no-dump --auto-run --auto-start --run --exit-on-complete --frames --verbose --debug"
+    local opts="-h --help -v --version -d --device -k --backend -b --benchmark --benchmarks -t --test -g --group --groups -s --scene -r --res --resolution --spp -i --import --input --compare -o --output --output-json --dump-renders --dump --no-dump-renders --no-dump --auto-run --auto-start --run --roofline --exit-on-complete --frames --screenshot --ui-scale --scale --mode --palette --verbose --debug"
+    local benchmarks="fp64 fp32 dualissue lds indirect fp16 bf16 fp8 fp6 fp4 int8 int4 sparsematrix coopvector membw interconnect l0b l1b l2b l3b cachebw l0_cache cache_latency_curve asyncoverlap pixelfill rayrawtraversal rayasbuild rayintersect rayanyhit rayomm rayprocedural raypayload rayscheduling raydivergence sysmembw sysmemlatency all"
 
     case "$prev" in
         -k|--backend)
@@ -12,23 +13,43 @@ _gpubench_gui() {
             return 0
             ;;
         -g|--group|--groups)
-            COMPREPLY=( $(compgen -W "compute memory raster graphics raytracing system all" -- "$cur") )
+            COMPREPLY=( $(compgen -W "compute memory scheduling graphics raster raytracing system all" -- "$cur") )
             return 0
             ;;
         -s|--scene)
-            COMPREPLY=( $(compgen -W "showroom indoor outdoor forest" -- "$cur") )
+            COMPREPLY=( $(compgen -W "all showroom indoor outdoor forest" -- "$cur") )
             return 0
             ;;
         -r|--res|--resolution)
-            COMPREPLY=( $(compgen -W "720p 1080p 1440p 4k 8k" -- "$cur") )
+            COMPREPLY=( $(compgen -W "auto 720p 1080p 1440p 4k 8k 1024x1024" -- "$cur") )
+            return 0
+            ;;
+        --spp)
+            COMPREPLY=( $(compgen -W "1 2 4 8 16 32 64 128 256" -- "$cur") )
             return 0
             ;;
         --ui-scale|--scale)
             COMPREPLY=( $(compgen -W "1.0 1.25 1.5 1.75 2.0 2.5" -- "$cur") )
             return 0
             ;;
+        --mode)
+            COMPREPLY=( $(compgen -W "f1 isa f2 charts perf roofline scorecard f3 rt viewport" -- "$cur") )
+            return 0
+            ;;
+        --palette)
+            COMPREPLY=( $(compgen -W "amber green paper" -- "$cur") )
+            return 0
+            ;;
+        -i|--import|--input|--compare|-o|--output|--output-json)
+            _filedir json
+            return 0
+            ;;
+        --screenshot)
+            _filedir png
+            return 0
+            ;;
         -b|--benchmark|--benchmarks|-t|--test)
-            COMPREPLY=( $(compgen -W "fp64 fp32 dualissue lds indirect fp16 bf16 fp8 fp6 fp4 int8 int4 membw l0_cache cache_latency_curve pixelfill rayrawtraversal rayasbuild rayintersect rayanyhit rayprocedural rayscheduling raydivergence sysmembw sysmemlatency all" -- "$cur") )
+            COMPREPLY=( $(compgen -W "$benchmarks" -- "$cur") )
             return 0
             ;;
     esac
@@ -37,6 +58,8 @@ _gpubench_gui() {
         COMPREPLY=( $(compgen -W "$opts" -- "$cur") )
         return 0
     fi
+
+    _filedir json
 }
 
 complete -F _gpubench_gui gpubench-gui

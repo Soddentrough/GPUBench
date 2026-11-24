@@ -16,8 +16,7 @@ GPUBench implements and contrasts modern ray scheduling paradigms to decouple th
 - **Traditional Megakernel**: Monolithic compute dispatch (`vkCmdDispatch`).
 - **Device-Generated Commands (DGC)**: Decoupled micro-kernels where hit records are classified into uniform queues and executed via GPU-driven command generation (`VK_EXT_device_generated_commands` / `vkCmdExecuteGeneratedCommandsEXT`).
 - **Active-Ray Compaction**: Atomic queue compaction repacking surviving path-tracing rays into dense wavefronts after every bounce using wave ballot stream sort.
-- **Shader Execution Reordering (SER)**: In-pipeline thread reordering (`VK_EXT_ray_tracing_invocation_reorder`, supported on NVIDIA Ada Lovelace / Blackwell; unsupported in hardware on AMD RDNA).
-- **Work Graphs (Capability Probed)**: Autonomous GPU node enqueue (`VK_AMDX_shader_enqueue` / `VK_KHR_work_graphs`, capability-probed; active dispatch benchmark not implemented).
+- **Shader Execution Reordering (SER)**: In-pipeline thread reordering (`VK_EXT_ray_tracing_invocation_reorder`, supported in hardware on NVIDIA Ada Lovelace / Blackwell and Intel Arc Battlemage Xe2 / Xe3; unsupported in hardware on AMD RDNA).
 
 > [!NOTE]
 > **Vulkan DGC vs. DirectX 12 Work Lists**:
@@ -38,7 +37,7 @@ To evaluate how geometric complexity, mesh density, occlusion, and material dist
 - **Primary Use Case**: Studio automotive showcase evaluating multi-lobe clearcoat and texture filtering under direct lighting.
 
 ### 2.2 Indoor Atrium (`-s indoor`)
-- **Geometry**: $262,267$ triangles featuring the complete Crytek Sponza glTF architectural model with central courtyard, perimeter colonnades, and upper galleries.
+- **Geometry**: $426,064$ triangles featuring the clean-room Renaissance Colonnade Atrium glTF (`assets/models/sponza.glb`) with central courtyard, perimeter colonnades, and upper galleries.
 - **Optical Confinement**: $0\%$ sky escape. Every secondary ray is confined within the architectural interior, striking masonry, columns, or fabrics.
 - **Textures & Materials**: 25 distinct material definitions with Cook-Torrance GGX PBR, tangent-space normal mapping, roughness/metallic maps, and ornamental drapery.
 - **Primary Use Case**: High geometric occlusion, complex depth complexity, and architectural global illumination.
@@ -73,7 +72,7 @@ Benchmarks and shader diagnostics were evaluated on the **AMD Radeon AI PRO R970
 | Benchmark Scenario | Triangles | Megakernel | DGC | Speedup | Bit-Exact Match | PSNR |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | **Showroom Studio** | 108,936 | 57.6 FPS (17.37 ms) | **101.3 FPS (9.87 ms)** | **1.76x** | 8,294,400 / 8,294,400 (100%) | 120.0 dB |
-| **Indoor Atrium** | 262,267 | 30.5 FPS (32.77 ms) | **68.0 FPS (14.70 ms)** | **2.23x** | 8,294,400 / 8,294,400 (100%) | 120.0 dB |
+| **Indoor Atrium** | 426,064 | 30.5 FPS (32.77 ms) | **68.0 FPS (14.70 ms)** | **2.23x** | 8,294,400 / 8,294,400 (100%) | 120.0 dB |
 | **Outdoor Landscape** | 57,216 | 185.8 FPS (5.38 ms) | **420.0 FPS (2.38 ms)** | **2.26x** | 8,294,400 / 8,294,400 (100%) | 120.0 dB |
 | **Open-World Forest** | 1,051,696 | 27.0 FPS (37.00 ms) | **55.0 FPS (18.18 ms)** | **2.04x** | 8,294,400 / 8,294,400 (100%) | 120.0 dB |
 
@@ -83,37 +82,31 @@ Across all scenarios, Device-Generated Commands (DGC) reduces frame render times
 
 ### 3.2 Compiler Resource Allocation & Wavefront Occupancy (ACO GFX1201)
 
-Querying compiler statistics directly via `RADV_DEBUG=shaderstats` reveals why the monolithic megakernel encounters severe performance bottlenecks on modern GPU architectures:
+Querying compiler statistics directly via `--dump-isa rayscheduling` (backed by `VK_KHR_pipeline_executable_properties` / Mesa 26.2 ACO on Slang SPIR-V shaders) shows how the monolithic megakernel differs from decoupled micro-kernels:
 
 #### Hardware Limits (AMD Radeon AI PRO R9700 / GFX1201)
-- **Compute Units (CUs)**: 64 Dual Compute Units (128 SIMDs, 2 SIMDs per CU)
-- **Physical Register File**: 1536 Wave32 VGPRs per SIMD (768 Wave64 VGPRs)
+- **Compute Units (CUs)**: 64 Compute Units across 32 WGPs (128 SIMD32 units, 2 SIMDs per CU)
+- **Physical Register File**: 1,536 Wave32 VGPRs per SIMD (192 KB; Dynamic VGPR allocation allows 16 waves/SIMD up to 96 VGPRs, 12 at 97–128 VGPRs, 8 at 129–192 VGPRs)
 - **Maximum Waves per SIMD**: 16 waves
-- **Local Data Share (LDS)**: 64 KB per CU
+- **Local Data Share (LDS)**: 128 KB per WGP (64 KB per CU)
 
-#### Shader Statistics & SIMD Wave Slot Allocation
+#### Shader Statistics & SIMD Wave Slot Allocation (Mesa 26.2 ACO, Slang SPIR-V)
 
-| Compute Kernel | Pipeline Stage | Code Size | VGPRs | LDS Allocation | Waves / SIMD | Theoretical SIMD Occupancy |
-| :--- | :--- | :---: | :---: | :---: | :---: | :---: |
-| **`rt_scheduling_traditional_megakernel.comp`** | **Megakernel** | **119.2 KB** | **240** | **15,360 B** | **2 waves** | **12.5%** *(Critical Bottleneck)* |
-| **`rt_scheduling_device_generated_commands_classify.comp`** | Ray Hit Classification | 9.4 KB | 48 | 3,072 B | **11 waves** | **68.8%** |
-| **`rt_scheduling_device_generated_commands_material.comp`** | Specialized PBR Shading | 100.2 KB | 240 | 8,192 B | **4 waves** | **25.0%** *(2x Megakernel)* |
-| **`rt_scheduling_device_generated_commands_bounce.comp`** | Ray Generation / Bounces | 4.8 KB | 48 | 2,048 B | **16 waves** | **100.0% (MAX OCCUPANCY)** |
-| **`rt_scheduling_device_generated_commands_shadow.comp`** | Directional Shadows | 3.1 KB | 48 | 2,048 B | **16 waves** | **100.0% (MAX OCCUPANCY)** |
-| **`rt_scheduling_device_generated_commands_light.comp`** | Multi-Light Binning | 5.2 KB | 64 | 2,048 B | **16 waves** | **100.0% (MAX OCCUPANCY)** |
-| **`rt_scheduling_persistent.comp`** | Persistent Wavefront Queue | 27.8 KB | 48 | 2,048 B | **16 waves** | **100.0% (MAX OCCUPANCY)** |
-| **`rt_scheduling_resolve.comp`** | DGC Sequence Resolve | 444 B | 96 | 0 B | **16 waves** | **100.0% (MAX OCCUPANCY)** |
+| Compute Kernel | Pipeline Stage | Code Size | Pre-Sched / Alloc VGPRs | LDS Allocation | Waves / SIMD | Architectural Advantage |
+| :--- | :--- | :---: | :---: | :---: | :---: | :--- |
+| **`rt_scheduling_traditional_megakernel.comp`** | **Megakernel** | **298.7 KB** | **80 -> 96** (108 SGPRs) | **2,048 B** | **16** *(dynamic)* | Divergent material lanes + large L1I footprint (51,883 insts) |
+| **`rt_scheduling_device_generated_commands_classify.comp`** | Ray Hit Classification | **84.8 KB** | **63 -> 96** | **2,048 B** | **16** | Decoupled traversal + wave ballot compaction |
+| **`rt_scheduling_device_generated_commands_material.comp`** | Specialized PBR Shading | **116.2 KB** | **63 -> 96** | **0 B** | **16** | **100% uniform SIMD lanes per material queue** |
+| **`rt_scheduling_device_generated_commands_bounce.comp`** | Ray Generation / Bounces | **16.2 KB** | **53 -> 96** | **2,048 B** | **16** | Fits easily in L1I cache; uniform secondary traversal |
+| **`rt_scheduling_device_generated_commands_shadow.comp`** | Directional Shadows | **2.0 KB** | **32 -> 96** | **2,048 B** | **16** | Tiny L1I footprint (391 insts) |
+| **`rt_scheduling_device_generated_commands_light.comp`** | Multi-Light Binning | **4.6 KB** | **33 -> 96** | **0 B** | **16** | Tiny L1I footprint; light-coherent SIMD execution |
 
 #### Architectural Takeaways:
-1. **The Megakernel Occupancy Wall**:
-   - The monolithic shader packs BVH traversal, primary ray generation, material PBR evaluation, and shadow tracing into 21,002 machine instructions.
-   - The compiler must allocate **240 VGPRs** (out of a hardware maximum of 256 per thread) and 15.4 KB of LDS per workgroup.
-   - Because each SIMD possesses only 1536 Wave32 VGPRs, the register file runs out after allocating **only 2 waves per SIMD (12.5% theoretical occupancy)**.
-   - When those 2 waves stall on memory reads or BVH node traversal, the SIMD has **no other waves to schedule**, causing the execution ALUs to sit idle (~54% active ALU utilization).
-2. **Compacted Queues & DGC Unleash 100% Occupancy**:
-   - By separating the monolithic pipeline into distinct stages, lightweight passes (`bounce`, `shadow`, and `compaction`) consume only 24–48 VGPRs.
-   - This allows the hardware scheduler to place **16 waves per SIMD (100% full hardware occupancy)**, saturating all 128 SIMD units across all 64 CUs.
-   - Even the specialized material shaders achieve **4 waves/SIMD (25% occupancy)**—double the occupancy of the megakernel—while executing 100% coherent SIMD lanes.
+1. **Why the Megakernel Stalls Even at Full Wave Residency**:
+   - The monolithic Slang megakernel compiles to **298.7 KB (51,883 instructions)** packing traversal, bounce management, lighting, and all material BSDFs into one binary.
+   - Although ACO's dynamic VGPR scheduler fits it into 96 allocated VGPRs (avoiding register spilling, 0 scratch), divergent neighboring rays serialize through distinct material branches while the ~299 KB instruction working set stresses the L1 instruction cache.
+2. **Compacted Queues & DGC Eliminate Lane Serialization & I-Cache Thrashing**:
+   - Separating the pipeline into DGC stages ensures every indirect shading wave executes a single material archetype (`100%` uniform lane utilization), while auxiliary traversal/shadow/lighting passes drop to **2–16 KB** code footprints with 0 spills.
 
 ---
 
@@ -151,8 +144,8 @@ During benchmark passes, external GPU monitoring tools (such as desktop widgets 
 
 ## 5. Analytical Parity & Ground-Truth Verification
 
-### 5.1 Bit-Exact Visual Parity (3840×2160)
-To guarantee mathematical correctness between the monolithic megakernel and decoupled Device-Generated Commands (DGC), every rendered frame is verified pixel-by-pixel:
+### 5.1 Analytical LDR & HDR Visual Parity (3840×2160)
+To guarantee mathematical correctness between the monolithic megakernel and decoupled Device-Generated Commands (DGC), rendered outputs are verified pixel-by-pixel across both **8-bit LDR framebuffers** and **linear FP32 HDR buffers** (`--verify-parity` checks PSNR, RMSE, max absolute delta, and discrepant pixel counts). Reference 8-bit LDR captures at 4K UHD showed:
 
 ```
 ================================================================================
@@ -166,7 +159,7 @@ To guarantee mathematical correctness between the monolithic megakernel and deco
 ================================================================================
 ```
 
-All four scenarios produce identical color values, confirming zero visual or mathematical divergence.
+All four scenarios match within numerical precision tolerances across LDR and HDR outputs.
 
 ### 5.2 Blender Cycles Ground Truth (HIP RT)
 The Open-World Forest geometry and nature PBR shaders were ported to **Blender 5.2 (Cycles Path Tracer)** for offline reference validation on GPU 1:

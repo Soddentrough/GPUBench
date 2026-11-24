@@ -32,13 +32,19 @@ CLR_GRAY="\033[90m"
 SELECTED_TIER="all"
 VERBOSE=0
 STRICT_MODE=0
+TARGET_DEVICE="${GPUBENCH_TEST_DEVICE:-}"
 BINARY_PATH="${PROJECT_ROOT}/build/gpubench"
+E2E_TMP="${TMPDIR:-/tmp}"
 
 # Parse CLI options
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --tier|-t)
       SELECTED_TIER="$2"
+      shift 2
+      ;;
+    --device|-d)
+      TARGET_DEVICE="$2"
       shift 2
       ;;
     --binary|-b)
@@ -57,6 +63,7 @@ while [[ $# -gt 0 ]]; do
       echo "Usage: $0 [options]"
       echo "Options:"
       echo "  -t, --tier <1|2|3|4|all>   Run specific test tier (default: all)"
+      echo "  -d, --device <index>       Target GPU device index (defaults to GPUBENCH_TEST_DEVICE if set)"
       echo "  -b, --binary <path>        Path to gpubench binary (default: ${BINARY_PATH})"
       echo "  -v, --verbose              Show command outputs"
       echo "  -s, --strict               Enforce strict validation mode"
@@ -74,6 +81,11 @@ if [[ ! -x "${BINARY_PATH}" ]]; then
   echo -e "${CLR_RED}Error: GPUBench binary not found or not executable at: ${BINARY_PATH}${CLR_RESET}"
   echo "Please build the project first: cmake --build build --parallel"
   exit 1
+fi
+
+DEV_FLAG=""
+if [[ -n "${TARGET_DEVICE}" ]]; then
+  DEV_FLAG="-d ${TARGET_DEVICE}"
 fi
 
 TOTAL_TESTS=0
@@ -95,9 +107,9 @@ run_test() {
   t_start=$(date +%s%N)
 
   local tmp_out
-  tmp_out=$(mktemp /tmp/gpubench_e2e_out_XXXXXX.txt)
+  tmp_out=$(mktemp "${E2E_TMP}/gpubench_e2e_out_XXXXXX.txt")
   local tmp_err
-  tmp_err=$(mktemp /tmp/gpubench_e2e_err_XXXXXX.txt)
+  tmp_err=$(mktemp "${E2E_TMP}/gpubench_e2e_err_XXXXXX.txt")
 
   local exit_code=0
   eval "${cmd}" >"${tmp_out}" 2>"${tmp_err}" || exit_code=$?
@@ -177,7 +189,7 @@ if [[ "${SELECTED_TIER}" == "1" || "${SELECTED_TIER}" == "all" ]]; then
     "${BINARY_PATH} --list-devices" "0" "Backend:" "0:" "VRAM:"
 
   run_test "Tier 1" "ListBenchmarksFlag" \
-    "${BINARY_PATH} --list-benchmarks" "0" "\\[Compute\\]" "\\[Memory\\]" "\\[Graphics\\]" "\\[Ray Tracing\\]"
+    "${BINARY_PATH} --list-benchmarks" "0" "\\[Compute\\]" "\\[Memory\\]" "\\[Raster\\]" "\\[Ray Tracing\\]" "-g graphics"
 
   run_test "Tier 1" "ListGroupsFlag" \
     "${BINARY_PATH} --list-groups" "0" "Compute" "Memory" "Graphics" "Ray Tracing"
@@ -186,16 +198,16 @@ if [[ "${SELECTED_TIER}" == "1" || "${SELECTED_TIER}" == "all" ]]; then
     "${BINARY_PATH} --list-backends" "0" "Compute API Support & Diagnostics:" "Vulkan:" "ROCm:" "OpenCL:"
 
   run_test "Tier 1" "BenchmarkSelectionFlag" \
-    "${BINARY_PATH} -b FP32 -c 0 --profile-snapshot -f" "0" "FP32" "TFLOPS"
+    "${BINARY_PATH} ${DEV_FLAG} -b FP32 -c 0 --profile-snapshot -f" "0" "FP32" "TFLOPS"
 
   run_test "Tier 1" "GroupSelectionFlag" \
-    "${BINARY_PATH} -g raster -c 0 --profile-snapshot -f" "0" "Pixel Fill Rate" "GPixels/s"
+    "${BINARY_PATH} ${DEV_FLAG} -g raster -c 0 --profile-snapshot -f" "0" "Pixel Fill Rate" "GPixels/s"
 
   run_test "Tier 1" "ConfigTargetSelectionFlag" \
-    "${BINARY_PATH} -b 'Device Memory Bandwidth' -c 0 --profile-snapshot -f" "0" "Read 128 threads" "GB/s"
+    "${BINARY_PATH} ${DEV_FLAG} -b 'Device Memory Bandwidth' -c 0 --profile-snapshot -f" "0" "Read 128 threads" "GB/s"
 
   run_test "Tier 1" "QuietFlag" \
-    "${BINARY_PATH} -b FP32 -c 0 --profile-snapshot -f -q" "0" "FP32"
+    "${BINARY_PATH} ${DEV_FLAG} -b FP32 -c 0 --profile-snapshot -f -q" "0" "FP32"
 
   run_test "Tier 1" "VerboseFlag" \
     "${BINARY_PATH} --verbose --list-devices" "0" "Backend:"
@@ -234,7 +246,7 @@ if [[ "${SELECTED_TIER}" == "2" || "${SELECTED_TIER}" == "all" ]]; then
     "${BINARY_PATH} --spp 0" "nonzero" "spp"
 
   # Create a corrupted JSON file for testing
-  CORRUPT_JSON="/tmp/gpubench_corrupt_$$.json"
+  CORRUPT_JSON="${E2E_TMP}/gpubench_corrupt_$$.json"
   echo "{\"version\": \"1.0.0\", \"incomplete\": [" > "${CORRUPT_JSON}"
 
   run_test "Tier 2" "CorruptJsonFileImportRejection" \
@@ -242,13 +254,13 @@ if [[ "${SELECTED_TIER}" == "2" || "${SELECTED_TIER}" == "all" ]]; then
   rm -f "${CORRUPT_JSON}"
 
   run_test "Tier 2" "NonExistentJsonFileImportRejection" \
-    "${BINARY_PATH} -i /tmp/nonexistent_file_$$.json" "nonzero" "Error"
+    "${BINARY_PATH} -i ${E2E_TMP}/nonexistent_file_$$.json" "nonzero" "Error"
 
   run_test "Tier 2" "CompareRequiresTwoFilesRejection" \
     "${BINARY_PATH} --compare single_file.json" "nonzero" "requires at least two JSON report files"
 
   run_test "Tier 2" "OutOfRangeConfigIndexHandling" \
-    "${BINARY_PATH} -b FP32 -c 999 --profile-snapshot -f" "nonzero" "no benchmarks were run"
+    "${BINARY_PATH} ${DEV_FLAG} -b FP32 -c 999 --profile-snapshot -f" "nonzero" "no benchmarks were run"
 
   echo ""
 fi
@@ -260,33 +272,33 @@ if [[ "${SELECTED_TIER}" == "3" || "${SELECTED_TIER}" == "all" ]]; then
   echo -e "${CLR_BOLD}─── Tier 3: Cross-Feature Interactions & JSON Pipelines ────────────────────────${CLR_RESET}"
 
   run_test "Tier 3" "GroupAndConfigCombination" \
-    "${BINARY_PATH} -g raster -c 0 --profile-snapshot -f" "0" "Pixel Fill Rate" "RGBA8 Color Fill"
+    "${BINARY_PATH} ${DEV_FLAG} -g raster -c 0 --profile-snapshot -f" "0" "Pixel Fill Rate" "RGBA8 Color Fill"
 
   run_test "Tier 3" "MultipleBenchmarksSelection" \
-    "${BINARY_PATH} -b FP32,FP16 -c 0 --profile-snapshot -f" "0" "FP32" "FP16"
+    "${BINARY_PATH} ${DEV_FLAG} -b FP32,FP16 -c 0 --profile-snapshot -f" "0" "FP32" "FP16"
 
   run_test "Tier 3" "GroupPlusIndividualBenchmark" \
-    "${BINARY_PATH} -g raster -b FP32 -c 0 --profile-snapshot -f" "0" "Pixel Fill Rate" "FP32"
+    "${BINARY_PATH} ${DEV_FLAG} -g raster -b FP32 -c 0 --profile-snapshot -f" "0" "Pixel Fill Rate" "FP32"
 
-  TMP_JSON="/tmp/gpubench_e2e_roundtrip_$$.json"
+  TMP_JSON="${E2E_TMP}/gpubench_e2e_roundtrip_$$.json"
   run_test "Tier 3" "JsonFileExportRoundTrip" \
-    "${BINARY_PATH} -b FP32 -c 0 --profile-snapshot -f -o ${TMP_JSON}" "0"
+    "${BINARY_PATH} ${DEV_FLAG} -b FP32 -c 0 --profile-snapshot -f -o ${TMP_JSON}" "0"
 
   run_test "Tier 3" "JsonFileImportExecution" \
     "${BINARY_PATH} -i ${TMP_JSON}" "0" "FP32" "TFLOPS"
   rm -f "${TMP_JSON}"
 
-  TMP_RUN_A="/tmp/gpubench_e2e_runA_$$.json"
-  TMP_RUN_B="/tmp/gpubench_e2e_runB_$$.json"
-  eval "${BINARY_PATH} -b FP32 -c 0 --profile-snapshot -f -o ${TMP_RUN_A}" >/dev/null 2>&1
-  eval "${BINARY_PATH} -b FP32 -c 0 --profile-snapshot -f -o ${TMP_RUN_B}" >/dev/null 2>&1
+  TMP_RUN_A="${E2E_TMP}/gpubench_e2e_runA_$$.json"
+  TMP_RUN_B="${E2E_TMP}/gpubench_e2e_runB_$$.json"
+  eval "${BINARY_PATH} ${DEV_FLAG} -b FP32 -c 0 --profile-snapshot -f -o ${TMP_RUN_A}" >/dev/null 2>&1
+  eval "${BINARY_PATH} ${DEV_FLAG} -b FP32 -c 0 --profile-snapshot -f -o ${TMP_RUN_B}" >/dev/null 2>&1
 
   run_test "Tier 3" "JsonComparisonModeMultiRun" \
     "${BINARY_PATH} --compare ${TMP_RUN_A} ${TMP_RUN_B}" "0" "FP32" "TFLOPS"
   rm -f "${TMP_RUN_A}" "${TMP_RUN_B}"
 
   run_test "Tier 3" "QuietAndJsonOutputCleanliness" \
-    "${BINARY_PATH} -b FP32 -c 0 --profile-snapshot -f --json -q" "0" "\"version\": \"[0-9]+\\.[0-9]+\\.[0-9]+\"" "\"results\":"
+    "${BINARY_PATH} ${DEV_FLAG} -b FP32 -c 0 --profile-snapshot -f --json -q" "0" "\"version\": \"[0-9]+\\.[0-9]+\\.[0-9]+\"" "\"results\":"
 
   echo ""
 fi
@@ -298,25 +310,25 @@ if [[ "${SELECTED_TIER}" == "4" || "${SELECTED_TIER}" == "all" ]]; then
   echo -e "${CLR_BOLD}─── Tier 4: Real-World Workload Integration (Live GPU Execution) ───────────────${CLR_RESET}"
 
   run_test "Tier 4" "RealComputeWorkloadExecution" \
-    "${BINARY_PATH} -b 'FP32,FP16,LDS Bank Conflicts' -c 0 --profile-snapshot --strict -f" "0" "FP32" "FP16" "LDS" "TFLOPS" "TB/s"
+    "${BINARY_PATH} ${DEV_FLAG} -b 'FP32,FP16,LDS Bank Conflicts' -c 0 --profile-snapshot --strict -f" "0" "FP32" "FP16" "LDS" "TFLOPS" "TB/s"
 
   run_test "Tier 4" "RealMemoryWorkloadExecution" \
-    "${BINARY_PATH} -b 'Device Memory Bandwidth,L0 Vector Cache Latency (16 KB)' -c 0 --profile-snapshot --strict -f" "0" "Device Memory Bandwidth" "GB/s" "L0 Vector Cache Latency" "ns"
+    "${BINARY_PATH} ${DEV_FLAG} -b 'Device Memory Bandwidth,L0 Vector Cache Latency (16 KB)' -c 0 --profile-snapshot --strict -f" "0" "Device Memory Bandwidth" "GB/s" "L0 Vector Cache Latency" "ns"
 
   run_test "Tier 4" "RealGraphicsWorkloadExecution" \
-    "${BINARY_PATH} -b 'Pixel Fill Rate' -c 0 --profile-snapshot --strict -f" "0" "Pixel Fill Rate" "GPixels/s"
+    "${BINARY_PATH} ${DEV_FLAG} -b 'Pixel Fill Rate' -c 0 --profile-snapshot --strict -f" "0" "Pixel Fill Rate" "GPixels/s"
 
   run_test "Tier 4" "RealRayTracingWorkloadExecution" \
-    "${BINARY_PATH} -b 'RayRawTraversal' -c 0 --profile-snapshot --strict -f" "0" "Hardware BVH Traversal" "MRays/s|GIS/s"
+    "${BINARY_PATH} ${DEV_FLAG} -b 'RayRawTraversal' -c 0 --profile-snapshot --strict -f" "0" "Hardware BVH Traversal" "MRays/s|GIS/s"
 
   run_test "Tier 4" "RealSystemMemoryWorkloadExecution" \
-    "${BINARY_PATH} -b 'System Memory Bandwidth,System Memory Latency' -c 0 --profile-snapshot --strict -f" "0" "System" "GB/s" "System Memory Latency" "ns"
+    "${BINARY_PATH} ${DEV_FLAG} -b 'System Memory Bandwidth,System Memory Latency' -c 0 --profile-snapshot --strict -f" "0" "System" "GB/s" "System Memory Latency" "ns"
 
   run_test "Tier 4" "SceneParameterValidation" \
-    "${BINARY_PATH} -b 'RayRawTraversal' -s showroom -c 0 --profile-snapshot --strict -f" "0" "Hardware BVH Traversal"
+    "${BINARY_PATH} ${DEV_FLAG} -b 'RayRawTraversal' -s showroom -c 0 --profile-snapshot --strict -f" "0" "Hardware BVH Traversal"
 
   run_test "Tier 4" "ParityFlagHonestyAndExecution" \
-    "${BINARY_PATH} -b 'Pixel Fill Rate' -c 0 --verify-parity --profile-snapshot -f" "0" "Pixel Fill Rate"
+    "${BINARY_PATH} ${DEV_FLAG} -b 'RayScheduling' -s showroom -c 6 --verify-parity --profile-snapshot -f" "0" "PSNR"
 
   echo ""
 fi

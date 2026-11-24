@@ -124,6 +124,14 @@ HostMemInfo queryHostMemInfo() {
 GuiApp::GuiApp() = default;
 
 GuiApp::~GuiApp() {
+    shutdown();
+}
+
+void GuiApp::shutdown() {
+    if (m_shutdownDone) {
+        return;
+    }
+    m_shutdownDone = true;
     abortBenchmarks();
     m_telemetryWorker.stop();
     joinIsaWarmThread();
@@ -131,10 +139,13 @@ GuiApp::~GuiApp() {
     if (m_execThread.joinable()) {
         m_execThread.join();
     }
+    shutdownShowcase();
     clearTextureCache();
 }
 
 void GuiApp::clearTextureCache() {
+    m_viewportJsonCache.clear();
+    m_viewportJsonEpoch++;
     if (!m_vulkanContext) {
         m_textureCache.clear();
         return;
@@ -275,6 +286,14 @@ void GuiApp::setUiScale(float scale) {
     ImGui::GetIO().FontGlobalScale = 1.0f;
 }
 
+void GuiApp::updateBaseScale(float newBaseScale) {
+    newBaseScale = std::clamp(newBaseScale, 0.5f, 3.0f);
+    if (std::fabs(newBaseScale - m_baseScale) < 0.001f) return;
+    const float zoomRatio = m_uiScale / std::max(0.1f, m_baseScale);
+    m_baseScale = newBaseScale;
+    setUiScale(m_baseScale * zoomRatio);
+}
+
 void GuiApp::updateZoomShortcuts() {
     ImGuiIO& io = ImGui::GetIO();
     if (m_zoomToastTimer > 0.0f) {
@@ -351,7 +370,6 @@ void GuiApp::syncBringUpTheme() {
     if (m_vulkanContext && m_vulkanContext->isInitialized()) {
         const BringUpColors c = getBringUpColors(m_palette);
         m_vulkanContext->setClearColor(c.bgVoid.x, c.bgVoid.y, c.bgVoid.z, 1.0f);
-        m_vulkanContext->setCrtPostFx(false, static_cast<int>(m_palette), 1.0f);
     }
 }
 
@@ -423,8 +441,10 @@ void GuiApp::discoverHardware() {
 
                     // Hydrate architecture, driver, and VRAM from DeviceProfile
                     for (const auto& prof : m_deviceProfiles) {
+                        const bool backendMatch =
+                            equalsCaseInsensitive(prof.backend, m_selectedBackend);
                         if (prof.deviceIndex == idx &&
-                            (prof.backend == m_selectedBackend || gpuDev.architecture.empty())) {
+                            (backendMatch || gpuDev.architecture.empty())) {
                             gpuDev.vramTotalMb = prof.vramTotalMb;
                             gpuDev.driver = prof.driverName.empty() ? prof.driverVersion : prof.driverName;
                             std::ostringstream archSs;
@@ -437,12 +457,13 @@ void GuiApp::discoverHardware() {
                             }
                             if (prof.isApu) {
                                 archSs << " (Unified)";
-                            } else if (prof.backend == "Vulkan" || prof.rebarSupported || prof.rebarSizeBytes > 0) {
+                            } else if (equalsCaseInsensitive(prof.backend, "Vulkan") ||
+                                       prof.rebarSupported || prof.rebarSizeBytes > 0) {
                                 archSs << " | ReBAR: "
                                        << gpubench::formatRebarStatus(prof.rebarSupported, prof.rebarSizeBytes, prof.isApu, true);
                             }
                             gpuDev.architecture = archSs.str();
-                            if (prof.backend == m_selectedBackend) break;
+                            if (backendMatch) break;
                         }
                     }
 
@@ -547,6 +568,33 @@ void GuiApp::updateTelemetrySelection() {
     }
 }
 
+std::string GuiApp::resolvedBackendName() const {
+    auto lowerStr = [](std::string s) {
+        std::transform(s.begin(), s.end(), s.begin(),
+                       [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+        return s;
+    };
+    const std::string sel = lowerStr(m_selectedBackend);
+    if (!sel.empty() && sel != "auto") {
+        return sel;
+    }
+    for (const auto& api : m_apiSupportList) {
+        if (lowerStr(api.name) == "vulkan" && api.isSupported) return "vulkan";
+    }
+    for (const auto& api : m_apiSupportList) {
+        if (lowerStr(api.name) == "rocm" && api.isSupported) return "rocm";
+    }
+    for (const auto& api : m_apiSupportList) {
+        if (lowerStr(api.name) == "opencl" && api.isSupported) return "opencl";
+    }
+    for (const auto& dev : m_devices) {
+        if (!dev.isSystem && dev.selected && !dev.backend.empty()) {
+            return lowerStr(dev.backend);
+        }
+    }
+    return "vulkan";
+}
+
 void GuiApp::updateBenchmarkSupport() {
     uint32_t probeDev = 0;
     bool foundSelectedGpu = false;
@@ -578,9 +626,59 @@ void GuiApp::updateBenchmarkSupport() {
         supportMap[sInfo.id] = sInfo;
     }
 
+    const auto metaCatalog = GetBenchmarkMetadataCatalogAPI(m_selectedBackend, probeDev);
+    std::unordered_map<std::string, BenchmarkConfigMetadata> metaMap;
+    for (const auto& meta : metaCatalog) {
+        const bool isRaySched = (meta.benchmarkName.rfind("RayScheduling", 0) == 0);
+        const std::string keyId = isRaySched ? "RayScheduling" : meta.benchmarkName;
+        const std::string cfgKey = keyId + "#" + std::to_string(meta.configIndex);
+        if (metaMap.find(cfgKey) == metaMap.end()) {
+            metaMap[cfgKey] = meta;
+        }
+        if (metaMap.find(keyId) == metaMap.end()) {
+            metaMap[keyId] = meta;
+        }
+    }
+
     for (auto& cat : m_categories) {
         for (auto& sg : cat.subgroups) {
             for (auto& item : sg.items) {
+                // Refresh backend-aware name, description, and caveat from RunnerAPI catalog
+                const BenchmarkConfigMetadata* matchedMeta = nullptr;
+                if (item.configIndex >= 0) {
+                    auto itM = metaMap.find(item.id + "#" + std::to_string(item.configIndex));
+                    if (itM != metaMap.end()) matchedMeta = &itM->second;
+                }
+                if (!matchedMeta) {
+                    auto itM = metaMap.find(item.id);
+                    if (itM != metaMap.end()) matchedMeta = &itM->second;
+                }
+                if (matchedMeta) {
+                    if (item.id != "Cache Latency Curve") {
+                        const bool isRaySched = (item.id == "RayScheduling");
+                        if (isRaySched) {
+                            if (!matchedMeta->configName.empty()) item.name = matchedMeta->configName;
+                        } else if (sg.name.rfind("Compute Precision", 0) == 0 ||
+                                   sg.name.rfind("Structured Sparsity", 0) == 0 ||
+                                   sg.name.rfind("Hardware BVH", 0) == 0 ||
+                                   sg.name.rfind("Cache Hierarchy Bandwidth", 0) == 0 ||
+                                   sg.name.rfind("Pointer-Chasing Latency", 0) == 0) {
+                            if (!matchedMeta->displayName.empty()) item.name = matchedMeta->displayName;
+                        } else {
+                            const std::string& nextName = matchedMeta->configName.empty()
+                                ? matchedMeta->displayName
+                                : matchedMeta->configName;
+                            if (!nextName.empty()) item.name = nextName;
+                        }
+                    }
+                    if (!matchedMeta->description.empty()) {
+                        item.description = matchedMeta->description;
+                    }
+                    item.configCaveat = matchedMeta->configCaveat;
+                } else {
+                    item.configCaveat.clear();
+                }
+
                 if (item.category == "System") {
                     item.isSupported = true;
                     item.supportReason.clear();
@@ -604,6 +702,9 @@ void GuiApp::updateBenchmarkSupport() {
                         item.hardwareSupportText = itCfg->second.hardwareSupportText;
                         item.driverSupportText = itCfg->second.driverSupportText;
                         item.supportDiscrepancySummary = itCfg->second.supportDiscrepancySummary;
+                        if (!itCfg->second.configCaveat.empty()) {
+                            item.configCaveat = itCfg->second.configCaveat;
+                        }
                         found = true;
                     }
                 }
@@ -617,6 +718,9 @@ void GuiApp::updateBenchmarkSupport() {
                         item.hardwareSupportText = it->second.hardwareSupportText;
                         item.driverSupportText = it->second.driverSupportText;
                         item.supportDiscrepancySummary = it->second.supportDiscrepancySummary;
+                        if (!it->second.configCaveat.empty()) {
+                            item.configCaveat = it->second.configCaveat;
+                        }
                     } else {
                         item.isSupported = true;
                         item.supportReason.clear();
@@ -647,6 +751,9 @@ void GuiApp::updateBenchmarkSupport() {
         }
         cat.allSelected = catAnySel;
     }
+
+    // Re-apply backend-aware diagrams & captions after metadata refresh
+    applyVisualizationMetadata();
 }
 
 void GuiApp::setSelectedBackend(const std::string& backend) {
@@ -688,28 +795,38 @@ void GuiApp::setScene(const std::string& scene) {
 }
 
 void GuiApp::applyAutoRenderResolution() {
+    uint64_t selectedVramMb = 0;
+    bool haveVram = false;
     bool isIntegratedGpu = false;
     for (const auto& dev : m_devices) {
         if (dev.isSystem || !dev.selected) continue;
+        if (dev.vramTotalMb > 0) {
+            selectedVramMb = haveVram ? std::min(selectedVramMb, dev.vramTotalMb) : dev.vramTotalMb;
+            haveVram = true;
+        }
         for (const auto& prof : m_deviceProfiles) {
             if (prof.deviceIndex == dev.deviceIndex && prof.isApu) {
                 isIntegratedGpu = true;
                 break;
             }
         }
-        std::string lower = dev.name;
-        for (char& ch : lower) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
-        if (lower.find("8060s") != std::string::npos ||
-            lower.find("8050s") != std::string::npos ||
-            lower.find("radeon 890m") != std::string::npos ||
-            lower.find("radeon 780m") != std::string::npos ||
-            lower.find("integrated") != std::string::npos ||
-            lower.find("apu") != std::string::npos) {
-            isIntegratedGpu = true;
-        }
     }
 
-    if (isIntegratedGpu) {
+    if (haveVram) {
+        if (selectedVramMb < 6144ULL) {
+            m_renderWidth = 1280;
+            m_renderHeight = 720;
+        } else if (selectedVramMb < 10240ULL) {
+            m_renderWidth = 1920;
+            m_renderHeight = 1080;
+        } else if (selectedVramMb < 16384ULL) {
+            m_renderWidth = 2560;
+            m_renderHeight = 1440;
+        } else {
+            m_renderWidth = 3840;
+            m_renderHeight = 2160;
+        }
+    } else if (isIntegratedGpu) {
         m_renderWidth = 2560;
         m_renderHeight = 1440;
     } else {
@@ -737,7 +854,7 @@ void GuiApp::selectOnlyBenchmark(const std::string& benchmarkId) {
         {"raster", "Pixel Fill Rate"},
         {"indirect", "In-Shader Indirect Synthesis"},
         {"lds", "LDS Bank Conflicts"},
-        {"rayscheduling", "RayScheduling"}, {"rt", "RayScheduling"}
+        {"rayscheduling", "RayScheduling"}
     };
     for (const auto& meta : GetBenchmarkMetadataCatalogAPI()) {
         std::string targetId = meta.benchmarkName;
@@ -797,8 +914,11 @@ void GuiApp::selectOnlyBenchmark(const std::string& benchmarkId) {
             for (char& ch : lowerCat) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
             const bool isGraphicsUmbrella = (lowerTok == "graphics" || lowerTok == "gfx") &&
                                             (lowerCat == "raster" || lowerCat == "raytracing");
+            const bool isRtAlias = ((lowerTok == "rt" || lowerTok == "ray") && lowerCat == "raytracing");
+            const bool isMemAlias = ((lowerTok == "mem") && lowerCat == "memory");
+            const bool isSchedAlias = ((lowerTok == "sched") && lowerCat == "scheduling");
             if (lowerTok == lowerCat || (lowerTok == "system" && lowerCat == "hostsystem") ||
-                isGraphicsUmbrella) {
+                isGraphicsUmbrella || isRtAlias || isMemAlias || isSchedAlias) {
                 for (auto& sg : cat.subgroups) {
                     for (auto& item : sg.items) {
                         if (item.isSupported) {
@@ -860,7 +980,9 @@ void GuiApp::selectOnlyBenchmark(const std::string& benchmarkId) {
 
     for (auto& dev : m_devices) {
         if (dev.isSystem) {
-            dev.selected = anySysSelected;
+            if (anySysSelected) {
+                dev.selected = true;
+            }
         } else if (!anyGpuSelected && anySysSelected) {
             dev.selected = false;
         }
@@ -915,7 +1037,7 @@ void GuiApp::startBenchmarks() {
     }
 
     if (benchmarksToRun.empty()) {
-        m_statusMessage = "No supported benchmarks selected!";
+        setStatusMessage("No supported benchmarks selected!");
         return;
     }
 
@@ -951,12 +1073,12 @@ void GuiApp::startBenchmarks() {
     }
 
     if (benchmarksToRun.empty()) {
-        m_statusMessage = "Please select at least one target device matching your selected benchmarks.";
+        setStatusMessage("Please select at least one target device matching your selected benchmarks.");
         return;
     }
 
     m_cancelToken.store(false);
-    m_execState = ExecutionState::Running;
+    m_execState.store(ExecutionState::Running);
     m_completedTasks = 0;
 
     size_t sceneMult = (m_scene == "all") ? 4 : 1;
@@ -982,7 +1104,7 @@ void GuiApp::startBenchmarks() {
 
     m_benchmarkStartTime = std::chrono::steady_clock::now();
     m_elapsedSeconds = 0.0;
-    m_statusMessage = "Initializing compute contexts...";
+    setStatusMessage("Initializing compute contexts...");
     m_currentBenchmarkName = "Starting...";
     m_currentlyRunningTestId.clear();
     m_hasCurrentlyRunningResult = false;
@@ -1043,30 +1165,30 @@ void GuiApp::startBenchmarks() {
 
             std::lock_guard<std::mutex> lock(m_resultsMutex);
             if (m_cancelToken.load()) {
-                m_execState = ExecutionState::Cancelled;
+                m_execState.store(ExecutionState::Cancelled);
                 m_statusMessage = "Benchmark execution aborted by user.";
             } else {
-                m_execState = ExecutionState::Completed;
+                m_execState.store(ExecutionState::Completed);
                 m_statusMessage = "Suite execution complete.";
                 if (keepRtViewport) {
-                    m_switchToRtViewport = true;
+                    m_switchToRtViewport.store(true);
                 } else {
-                    m_switchToScorecard = true;
+                    m_switchToScorecard.store(true);
                 }
             }
         } catch (const std::exception& e) {
             m_telemetryWorker.stopRecording();
             std::lock_guard<std::mutex> lock(m_resultsMutex);
-            m_execState = ExecutionState::Error;
+            m_execState.store(ExecutionState::Error);
             m_statusMessage = std::string("Error: ") + e.what();
         }
     });
 }
 
 void GuiApp::abortBenchmarks() {
-    if (m_execState == ExecutionState::Running) {
+    if (m_execState.load() == ExecutionState::Running) {
         m_cancelToken.store(true);
-        m_statusMessage = "Stopping after current dispatch...";
+        setStatusMessage("Stopping after current dispatch...");
     }
 }
 
@@ -1089,7 +1211,7 @@ void GuiApp::processIncomingResults() {
             m_currentlyRunningTestId = res.benchmarkName;
             m_currentlyRunningResult = res;
             m_hasCurrentlyRunningResult = true;
-            m_statusMessage = "Running: " + res.benchmarkName + " (" + res.deviceName + ")";
+            setStatusMessage("Running: " + res.benchmarkName + " (" + res.deviceName + ")");
 
             int ci = -1, sgi = -1, ii = -1;
             if (findBenchmarkItemIndices(res, ci, sgi, ii)) {
@@ -1126,10 +1248,10 @@ void GuiApp::processIncomingResults() {
         if (m_completedTasks > m_totalTasks) {
             m_totalTasks = m_completedTasks;
         }
-        m_statusMessage = "Completed: " + res.benchmarkName;
+        setStatusMessage("Completed: " + res.benchmarkName);
     }
 
-    if (m_execState == ExecutionState::Running) {
+    if (m_execState.load() == ExecutionState::Running) {
         auto now = std::chrono::steady_clock::now();
         m_elapsedSeconds = std::chrono::duration<double>(now - m_benchmarkStartTime).count();
         m_wasRunning = true;
@@ -1310,15 +1432,15 @@ bool GuiApp::importResultsFromJson(const std::string& filepath) {
         }
     }
 
-    m_execState = ExecutionState::Completed;
+    m_execState.store(ExecutionState::Completed);
     m_completedTasks = m_allResults.size();
     m_totalTasks = std::max<size_t>(1, m_allResults.size());
-    m_statusMessage = "Loaded session (" + std::to_string(m_allResults.size()) +
-                      " results) from " + std::filesystem::path(filepath).filename().string();
+    setStatusMessage("Loaded session (" + std::to_string(m_allResults.size()) +
+                     " results) from " + std::filesystem::path(filepath).filename().string());
     m_exportNotificationText = "Imported " + std::to_string(m_allResults.size()) +
                                " results from " + filepath;
     m_exportNotificationTimer = 4.5f;
-    m_switchToScorecard = true;
+    m_switchToScorecard.store(true);
     return true;
 }
 
@@ -1380,10 +1502,14 @@ const ResultData* GuiApp::findComparisonMatch(const ResultData& curRes) const {
 }
 
 void GuiApp::setInstrumentMode(int mode) {
-    m_instrumentMode = std::clamp(mode, 0, 2);
+    m_instrumentMode = std::clamp(mode, 0, 3);
     m_switchToScorecard = false;
     m_switchToRoofline = false;
     m_switchToRtViewport = false;
+    if (m_instrumentMode != 3 && m_showcaseCallbackBound && m_vulkanContext) {
+        m_vulkanContext->setPreRenderPassCallback(nullptr);
+        m_showcaseCallbackBound = false;
+    }
 }
 
 void GuiApp::setPalette(BringUpPalette p) {
@@ -1394,10 +1520,76 @@ void GuiApp::setPalette(BringUpPalette p) {
 }
 
 void GuiApp::joinIsaThread() {
+    {
+        std::lock_guard<std::mutex> lock(m_isaMutex);
+        m_isaStopWorker = true;
+        m_isaHasPending = false;
+    }
+    m_isaCv.notify_all();
     if (m_isaThread.joinable()) {
         m_isaThread.join();
     }
+    {
+        std::lock_guard<std::mutex> lock(m_isaMutex);
+        m_isaStopWorker = false;
+    }
     m_isaLoading.store(false);
+}
+
+void GuiApp::isaWorkerLoop() {
+    while (true) {
+        std::string key;
+        IsaDumperOptions opts;
+        IsaCacheContext cacheCtx;
+        {
+            std::unique_lock<std::mutex> lock(m_isaMutex);
+            m_isaCv.wait(lock, [this]() { return m_isaStopWorker || m_isaHasPending; });
+            if (m_isaStopWorker) {
+                m_isaLoading.store(false);
+                return;
+            }
+            m_isaHasPending = false;
+            key = m_isaPendingKey;
+            opts = m_isaPendingOpts;
+            cacheCtx = m_isaPendingCacheCtx;
+            m_isaLoading.store(true);
+        }
+
+        // Cooperatively stop background warmup inside the worker so the UI thread never stalls
+        joinIsaWarmThread();
+
+        {
+            std::lock_guard<std::mutex> lock(m_isaMutex);
+            if (m_isaStopWorker) {
+                m_isaLoading.store(false);
+                return;
+            }
+            if (m_isaHasPending) {
+                // Newer request superseded this one while stopping warmup
+                continue;
+            }
+        }
+
+        const IsaDumperOptions origOpts = opts;
+        IsaInspectionResult res = IsaDumper::inspect(opts);
+        if (res.artifacts.empty() && !opts.configs.empty()) {
+            if (!opts.targets.empty() && opts.targets[0] == "RayScheduling") {
+                opts.configs = {15};
+            } else {
+                opts.configs.clear();
+            }
+            res = IsaDumper::inspect(opts);
+        }
+        IsaDumper::saveCached(origOpts, cacheCtx, res);
+        {
+            std::lock_guard<std::mutex> lock(m_isaMutex);
+            m_isaDiskMisses.erase(key);
+            m_isaCache[key] = std::move(res);
+            if (!m_isaHasPending) {
+                m_isaLoading.store(false);
+            }
+        }
+    }
 }
 
 void GuiApp::joinIsaWarmThread() {
@@ -1410,13 +1602,19 @@ void GuiApp::joinIsaWarmThread() {
 
 bool GuiApp::waitForPendingInspections(uint32_t timeoutMs) {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
-    while (m_isaLoading.load() && std::chrono::steady_clock::now() < deadline) {
+    while (std::chrono::steady_clock::now() < deadline) {
+        bool busy = m_isaLoading.load();
+        if (!busy) {
+            std::lock_guard<std::mutex> lock(m_isaMutex);
+            busy = m_isaHasPending;
+        }
+        if (!busy) {
+            return true;
+        }
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
-    if (!m_isaLoading.load() && m_isaThread.joinable()) {
-        m_isaThread.join();
-    }
-    return !m_isaLoading.load();
+    std::lock_guard<std::mutex> lock(m_isaMutex);
+    return !m_isaLoading.load() && !m_isaHasPending;
 }
 
 const BenchmarkItem* GuiApp::getInspectedItem() const {
@@ -1744,32 +1942,22 @@ void GuiApp::requestIsaInspection(const BenchmarkItem& item, bool forceRefresh) 
         }
     }
 
-    joinIsaWarmThread();
-    joinIsaThread();
+    m_isaWarmCancel.store(true, std::memory_order_release);
     m_isaActiveKey = key;
-    m_isaLoading.store(true);
-
-    m_isaThread = std::thread([this, key, opts, cacheCtx]() mutable {
-        const IsaDumperOptions origOpts = opts;
-        IsaInspectionResult res = IsaDumper::inspect(opts);
-        if (res.artifacts.empty() && !opts.configs.empty()) {
-            // Avoid compiling all RayScheduling shaders for unmapped sub-configs;
-            // fall back to the non-SER baseline RTP shader instead of SER.
-            if (!opts.targets.empty() && opts.targets[0] == "RayScheduling") {
-                opts.configs = {28};
-            } else {
-                opts.configs.clear();
-            }
-            res = IsaDumper::inspect(opts);
+    {
+        std::lock_guard<std::mutex> lock(m_isaMutex);
+        m_isaPendingKey = key;
+        m_isaPendingOpts = opts;
+        m_isaPendingCacheCtx = cacheCtx;
+        m_isaHasPending = true;
+        m_isaRequestSeq++;
+        m_isaLoading.store(true);
+        if (!m_isaThread.joinable()) {
+            m_isaStopWorker = false;
+            m_isaThread = std::thread(&GuiApp::isaWorkerLoop, this);
         }
-        IsaDumper::saveCached(origOpts, cacheCtx, res);
-        {
-            std::lock_guard<std::mutex> lock(m_isaMutex);
-            m_isaDiskMisses.erase(key);
-            m_isaCache[key] = std::move(res);
-        }
-        m_isaLoading.store(false);
-    });
+    }
+    m_isaCv.notify_one();
 }
 
 void GuiApp::stampScopeTrigger(const std::string& label) {
@@ -1893,7 +2081,7 @@ void GuiApp::startSceneVerificationCapture(const std::string& sceneTag) {
                 m_savedSelectionSnapshot.push_back(itm.selected);
                 const bool match =
                     (itm.id == "RayScheduling" && itm.isSupported &&
-                     (itm.configIndex == 9 || itm.configIndex == 11));
+                     (itm.configIndex == 4 || itm.configIndex == 5 || itm.configIndex == 6));
                 itm.selected = match;
                 if (match) anyPicked = true;
             }
@@ -1927,7 +2115,7 @@ void GuiApp::startSceneVerificationCapture(const std::string& sceneTag) {
             }
         }
         m_savedSelectionSnapshot.clear();
-        m_statusMessage = "RayScheduling requires a Vulkan GPU supporting ray tracing.";
+        setStatusMessage("RayScheduling requires a Vulkan GPU supporting ray tracing.");
         return;
     }
 
@@ -1986,18 +2174,22 @@ void GuiApp::executeCommand(const std::string& rawCmd) {
     const std::string lowRest = lowerStr(rest);
 
     if (lowVerb == "help" || lowVerb == "?") {
-        m_cmdStatusText = "CMDS: run [slot|all] | abort | isa <name> | f1 | f2 | f3 | palette <amber|green|paper> | gpu <0|1|all> | backend <vk|rocm|cl> | scene <id> | import <file> | diff <file> | export [file]";
+        m_cmdStatusText = "CMDS: run [slot|all] | abort | isa <name> | f1 | f2 | f3 | f4 | showcase | palette <amber|green|paper> | gpu <0|1|all> | backend <vk|rocm|cl> | scene <id> | import <file> | diff <file> | export [file]";
     } else if (lowVerb == "f1") {
         setInstrumentMode(0);
         m_cmdStatusText = "MODE -> F1: ISA & DIE INSPECTOR";
     } else if (lowVerb == "f2" || lowVerb == "charts" || lowVerb == "perf" || lowVerb == "roofline" || lowVerb == "scorecard") {
         setInstrumentMode(1);
-        if (lowVerb == "charts" || lowVerb == "perf" || lowVerb == "roofline") m_f2SubMode = 0;
-        else if (lowVerb == "scorecard") m_f2SubMode = 1;
-        m_cmdStatusText = "MODE -> F2: PERFORMANCE & SCORECARD";
+        if (lowVerb == "charts" || lowVerb == "perf") m_f2SubMode = 0;
+        else if (lowVerb == "roofline") m_f2SubMode = 1;
+        else if (lowVerb == "scorecard") m_f2SubMode = 2;
+        m_cmdStatusText = "MODE -> F2: PERFORMANCE, ROOFLINE & SCORECARD";
     } else if (lowVerb == "f3" || lowVerb == "rt" || lowVerb == "viewport") {
         setInstrumentMode(2);
         m_cmdStatusText = "MODE -> F3: RT PARITY VIEWPORT";
+    } else if (lowVerb == "f4" || lowVerb == "showcase") {
+        setInstrumentMode(3);
+        m_cmdStatusText = "MODE -> F4: AAA OPTIMIZATION SHOWCASE";
     } else if (lowVerb == "palette" || lowVerb == "theme") {
         if (lowRest == "green" || lowRest == "p1") {
             setPalette(BringUpPalette::GreenP1);
@@ -2101,18 +2293,18 @@ void GuiApp::updateAndRender() {
     if (m_vulkanContext && m_vulkanContext->isInitialized()) {
         const BringUpColors c = getBringUpColors(m_palette);
         m_vulkanContext->setClearColor(c.bgVoid.x, c.bgVoid.y, c.bgVoid.z, 1.0f);
-        m_vulkanContext->setCrtPostFx(false, static_cast<int>(m_palette), 1.0f);
     }
 
     // Handle pending deferred tab switches
-    if (m_switchToRtViewport) {
+    if (m_switchToRtViewport.exchange(false)) {
         setInstrumentMode(2);
     } else if (m_switchToRoofline) {
-        setInstrumentMode(1);
-        m_f2SubMode = 0;
-    } else if (m_switchToScorecard) {
+        m_switchToRoofline = false;
         setInstrumentMode(1);
         m_f2SubMode = 1;
+    } else if (m_switchToScorecard.exchange(false)) {
+        setInstrumentMode(1);
+        m_f2SubMode = 2;
     }
 
     // Global function-key & prompt shortcuts
@@ -2121,6 +2313,7 @@ void GuiApp::updateAndRender() {
         if (ImGui::IsKeyPressed(ImGuiKey_F1, false)) setInstrumentMode(0);
         else if (ImGui::IsKeyPressed(ImGuiKey_F2, false)) setInstrumentMode(1);
         else if (ImGui::IsKeyPressed(ImGuiKey_F3, false)) setInstrumentMode(2);
+        else if (ImGui::IsKeyPressed(ImGuiKey_F4, false)) setInstrumentMode(3);
         else if (ImGui::IsKeyPressed(ImGuiKey_Slash, false) ||
                  (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_K, false))) {
             m_focusCmdInput = true;
@@ -2150,7 +2343,7 @@ void GuiApp::updateAndRender() {
 
     const float headerH = s(68.0f);
     const float scopeH = m_telemetryExpanded ? std::clamp(availHeight * 0.34f, s(220.0f), s(310.0f))
-                                             : s(96.0f);
+                                             : std::min(s(96.0f), availHeight * 0.16f);
     const float cmdH = s(30.0f);
     const float middleH = std::max(s(220.0f), availHeight - headerH - scopeH - cmdH - s(16.0f));
 
@@ -2159,51 +2352,65 @@ void GuiApp::updateAndRender() {
 
     ImGui::Spacing();
 
-    // ZONE 2 + ZONE 3: Left ROM-Slot Matrix & Right Main Instrument Stage
-    const float minSidebar = std::min(s(320.0f), availWidth * 0.34f);
-    const float maxSidebar = std::min(s(440.0f), availWidth * 0.36f);
-    const float leftW = std::clamp(availWidth * 0.27f, minSidebar, std::max(minSidebar, maxSidebar));
-    const float rightW = std::max(s(320.0f), availWidth - leftW - s(8.0f));
+    // ZONE 2 + ZONE 3: Left ROM-Slot Matrix & Right Main Instrument Stage (F4 uses full width)
+    if (m_instrumentMode == 3) {
+        ImGui::BeginChild("ZoneRightMainStage", ImVec2(availWidth, middleH), ImGuiChildFlags_Borders);
+        renderOptimizationShowcase();
+        ImGui::EndChild();
+    } else {
+        if (m_showcaseCallbackBound && m_vulkanContext) {
+            m_vulkanContext->setPreRenderPassCallback(nullptr);
+            m_showcaseCallbackBound = false;
+        }
+        const float minSidebar = std::min(s(320.0f), availWidth * 0.34f);
+        const float maxSidebar = std::min(s(440.0f), availWidth * 0.36f);
+        const float leftW = std::clamp(availWidth * 0.27f, minSidebar, std::max(minSidebar, maxSidebar));
+        const float rightW = std::max(s(320.0f), availWidth - leftW - s(8.0f));
 
-    ImGui::BeginChild("ZoneLeftRomMatrix", ImVec2(leftW, middleH), ImGuiChildFlags_Borders);
-    renderBenchmarkSuitePanel();
-    ImGui::EndChild();
+        ImGui::BeginChild("ZoneLeftRomMatrix", ImVec2(leftW, middleH), ImGuiChildFlags_Borders);
+        renderBenchmarkSuitePanel();
+        ImGui::EndChild();
 
-    ImGui::SameLine(0.0f, s(8.0f));
+        ImGui::SameLine(0.0f, s(8.0f));
 
-    ImGui::BeginChild("ZoneRightMainStage", ImVec2(rightW, middleH), ImGuiChildFlags_Borders);
-    if (m_instrumentMode == 0) {
-        renderIsaInspectorPanel();
-    } else if (m_instrumentMode == 1) {
-        // F2 Sub-Mode Bar: [CHARTS | SCORECARD]
-        ImGui::PushStyleColor(ImGuiCol_ChildBg, c.bgElevated);
-        ImGui::BeginChild("F2SubModeBar", ImVec2(0, s(32.0f)), ImGuiChildFlags_Borders);
-        {
-            const float bh = s(22.0f);
-            if (tacticalButton("##F2Roof", "CHARTS", ImVec2(s(86.0f), bh), m_f2SubMode == 0, c)) m_f2SubMode = 0;
-            ImGui::SameLine(0.0f, s(4.0f));
-            if (tacticalButton("##F2Score", "SCORECARD", ImVec2(s(98.0f), bh), m_f2SubMode == 1, c)) m_f2SubMode = 1;
+        ImGui::BeginChild("ZoneRightMainStage", ImVec2(rightW, middleH), ImGuiChildFlags_Borders);
+        if (m_instrumentMode == 0) {
+            renderIsaInspectorPanel();
+        } else if (m_instrumentMode == 1) {
+            // F2 Sub-Mode Bar: [CHARTS | ROOFLINE | SCORECARD]
+            ImGui::PushStyleColor(ImGuiCol_ChildBg, c.bgElevated);
+            ImGui::BeginChild("F2SubModeBar", ImVec2(0, s(32.0f)), ImGuiChildFlags_Borders);
+            {
+                const float bh = s(22.0f);
+                if (tacticalButton("##F2Charts", "CHARTS", ImVec2(s(86.0f), bh), m_f2SubMode == 0, c)) m_f2SubMode = 0;
+                ImGui::SameLine(0.0f, s(4.0f));
+                if (tacticalButton("##F2Roofline", "ROOFLINE", ImVec2(s(96.0f), bh), m_f2SubMode == 1, c)) m_f2SubMode = 1;
+                ImGui::SameLine(0.0f, s(4.0f));
+                if (tacticalButton("##F2Score", "SCORECARD", ImVec2(s(98.0f), bh), m_f2SubMode == 2, c)) m_f2SubMode = 2;
 
-            ImGui::SameLine(0.0f, s(16.0f));
-            if (m_comparisonResults.empty()) {
-                ImGui::TextColored(c.textMuted, "SAMPLES: %zu", m_allResults.size());
-            } else {
-                ImGui::TextColored(c.cyanAccent, "SAMPLES: %zu   COMPARING: %s",
-                                   m_allResults.size(), m_comparisonSourceLabel.c_str());
+                ImGui::SameLine(0.0f, s(16.0f));
+                if (m_comparisonResults.empty()) {
+                    ImGui::TextColored(c.textMuted, "SAMPLES: %zu", m_allResults.size());
+                } else {
+                    ImGui::TextColored(c.cyanAccent, "SAMPLES: %zu   COMPARING: %s",
+                                       m_allResults.size(), m_comparisonSourceLabel.c_str());
+                }
             }
+            ImGui::EndChild();
+            ImGui::PopStyleColor();
+
+            if (m_f2SubMode == 0) {
+                renderRooflinePanel();
+            } else if (m_f2SubMode == 1) {
+                renderEmpiricalRooflineView();
+            } else {
+                renderResultsScorecard();
+            }
+        } else {
+            renderRayTracingViewport();
         }
         ImGui::EndChild();
-        ImGui::PopStyleColor();
-
-        if (m_f2SubMode == 0) {
-            renderRooflinePanel();
-        } else {
-            renderResultsScorecard();
-        }
-    } else {
-        renderRayTracingViewport();
     }
-    ImGui::EndChild();
 
     ImGui::Spacing();
 
@@ -2234,6 +2441,8 @@ void GuiApp::updateAndRender() {
 void GuiApp::renderTopInstrumentHeader(float width) {
     const BringUpColors c = getBringUpColors(m_palette);
     const bool isRunning = (m_execState == ExecutionState::Running);
+    const bool compactRow1 = (width < s(1280.0f));
+    const bool compactRow2 = (width < s(1180.0f));
 
     ImGui::PushStyleColor(ImGuiCol_ChildBg, c.bgPanel);
     ImGui::BeginChild("ZoneTopHeader", ImVec2(width, s(68.0f)), ImGuiChildFlags_Borders);
@@ -2248,7 +2457,7 @@ void GuiApp::renderTopInstrumentHeader(float width) {
         ImGui::TextColored(c.textMuted, "//");
         ImGui::SameLine(0.0f, s(6.0f));
 
-        // DUT GPU selector pills
+        // DUT GPU + Host CPU selector pills
         if (isRunning) ImGui::BeginDisabled();
         int gpuCount = 0;
         for (const auto& d : m_devices) {
@@ -2272,7 +2481,18 @@ void GuiApp::renderTopInstrumentHeader(float width) {
             if (tacticalButton("##TopGpuAll", "ALL", ImVec2(s(38.0f), bh), allSel, c)) {
                 selectAllGpus();
             }
-            ImGui::SameLine(0.0f, s(8.0f));
+            ImGui::SameLine(0.0f, s(4.0f));
+        }
+        for (auto& d : m_devices) {
+            if (!d.isSystem) continue;
+            if (tacticalButton("##TopCpuSys", "CPU", ImVec2(s(38.0f), bh), d.selected, c)) {
+                d.selected = !d.selected;
+            }
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                ImGui::SetTooltip("Host CPU / System Memory (%s | %s)", d.name.c_str(), d.architecture.c_str());
+            }
+            ImGui::SameLine(0.0f, s(6.0f));
+            break;
         }
 
         // Backend pills
@@ -2288,9 +2508,12 @@ void GuiApp::renderTopInstrumentHeader(float width) {
                     break;
                 }
             }
+            if (compactRow1 && !avail) {
+                continue;
+            }
             std::string bid = "##TopApi" + std::string(bLabels[bi]);
             ImGui::BeginDisabled(!avail);
-            if (tacticalButton(bid.c_str(), bLabels[bi], ImVec2(s(46.0f), bh),
+            if (tacticalButton(bid.c_str(), bLabels[bi], ImVec2(compactRow1 ? 0.0f : s(46.0f), bh),
                                m_selectedBackend == backends[bi], c)) {
                 setSelectedBackend(backends[bi]);
             }
@@ -2302,15 +2525,17 @@ void GuiApp::renderTopInstrumentHeader(float width) {
         }
 
         // Compact scene pills
-        ImGui::SameLine(0.0f, s(6.0f));
-        const char* scIds[] = {"all", "showroom", "indoor", "forest", "landscape"};
-        const char* scLbls[] = {"ALL SC", "SHOW", "INDR", "FRST", "OUTD"};
-        for (int si = 0; si < 5; ++si) {
-            std::string sid = "##TopSc" + std::to_string(si);
-            if (tacticalButton(sid.c_str(), scLbls[si], ImVec2(0, bh), m_scene == scIds[si], c)) {
-                setScene(scIds[si]);
+        if (!compactRow1) {
+            ImGui::SameLine(0.0f, s(6.0f));
+            const char* scIds[] = {"all", "showroom", "indoor", "forest", "landscape"};
+            const char* scLbls[] = {"ALL SC", "SHOW", "INDR", "FRST", "OUTD"};
+            for (int si = 0; si < 5; ++si) {
+                std::string sid = "##TopSc" + std::to_string(si);
+                if (tacticalButton(sid.c_str(), scLbls[si], ImVec2(0, bh), m_scene == scIds[si], c)) {
+                    setScene(scIds[si]);
+                }
+                ImGui::SameLine(0.0f, s(2.0f));
             }
-            ImGui::SameLine(0.0f, s(2.0f));
         }
         if (isRunning) ImGui::EndDisabled();
 
@@ -2327,14 +2552,18 @@ void GuiApp::renderTopInstrumentHeader(float width) {
         if (isRunning) {
             int pct = (m_totalTasks > 0) ? static_cast<int>((100 * m_completedTasks) / m_totalTasks) : 0;
             std::snprintf(runBtnLbl, sizeof(runBtnLbl), "ABORT %d%%", pct);
+        } else if (compactRow1) {
+            std::snprintf(runBtnLbl, sizeof(runBtnLbl), "RUN (%zu)", armedCount);
         } else {
             std::snprintf(runBtnLbl, sizeof(runBtnLbl), "RUN TESTS (%zu)", armedCount);
         }
 
-        const float jsonW = s(68.0f);
-        const float cfgW = s(68.0f);
-        const float exportW = s(100.0f);
-        const float execW = s(134.0f);
+        const char* cfgLbl = compactRow1 ? "CFG" : "CONFIG";
+        const char* exportLbl = compactRow1 ? "EXPORT" : "EXPORT JSON";
+        const float jsonW = compactRow1 ? (ImGui::CalcTextSize("SESSION").x + 16.0f) : s(68.0f);
+        const float cfgW = compactRow1 ? (ImGui::CalcTextSize(cfgLbl).x + 16.0f) : s(68.0f);
+        const float exportW = compactRow1 ? (ImGui::CalcTextSize(exportLbl).x + 16.0f) : s(100.0f);
+        const float execW = compactRow1 ? (ImGui::CalcTextSize(runBtnLbl).x + 16.0f) : s(134.0f);
         const float rightClusterW = jsonW + cfgW + exportW + execW + s(12.0f);
         const float targetX = ImGui::GetWindowWidth() - rightClusterW - s(10.0f);
         if (targetX > ImGui::GetCursorPosX() + s(8.0f)) {
@@ -2348,16 +2577,17 @@ void GuiApp::renderTopInstrumentHeader(float width) {
                 std::string defPath = docsDir.empty() ? defName : (docsDir / defName).string();
                 std::snprintf(m_jsonPathBuffer, sizeof(m_jsonPathBuffer), "%s", defPath.c_str());
             }
+            m_jsonDirCacheValid = false;
             m_showJsonSessionModal = true;
         }
         ImGui::SameLine(0.0f, s(3.0f));
-        if (tacticalButton("##TopCfg", "CONFIG", ImVec2(cfgW, bh), m_showSettingsModal, c)) {
+        if (tacticalButton("##TopCfg", cfgLbl, ImVec2(cfgW, bh), m_showSettingsModal, c)) {
             m_showSettingsModal = true;
         }
         ImGui::SameLine(0.0f, s(4.0f));
         const bool canExportJson = !isRunning && !m_allResults.empty();
         ImGui::BeginDisabled(!canExportJson);
-        if (tacticalButton("##TopExportJson", "EXPORT JSON", ImVec2(exportW, bh), false, c, false, false, canExportJson)) {
+        if (tacticalButton("##TopExportJson", exportLbl, ImVec2(exportW, bh), false, c, false, false, canExportJson)) {
             exportResultsToJson(getDefaultJsonFilename());
         }
         ImGui::EndDisabled();
@@ -2381,37 +2611,49 @@ void GuiApp::renderTopInstrumentHeader(float width) {
 
         // ---- ROW 2: Hardware Instrument Mode Bus + Status Readout ----
         const float mbH = s(24.0f);
-        if (tacticalButton("##ModeF1", "F1: ISA & DIE INSPECTOR", ImVec2(s(200.0f), mbH),
+        if (tacticalButton("##ModeF1", compactRow2 ? "F1: ISA" : "F1: ISA & DIE INSPECTOR",
+                           ImVec2(compactRow2 ? 0.0f : s(200.0f), mbH),
                            m_instrumentMode == 0, c)) {
             setInstrumentMode(0);
         }
         ImGui::SameLine(0.0f, s(4.0f));
         char f2Lbl[64];
-        std::snprintf(f2Lbl, sizeof(f2Lbl), "F2: PERFORMANCE & SCORECARD (%zu)", m_allResults.size());
-        if (tacticalButton("##ModeF2", f2Lbl, ImVec2(s(246.0f), mbH), m_instrumentMode == 1, c)) {
+        std::snprintf(f2Lbl, sizeof(f2Lbl),
+                      compactRow2 ? "F2: PERF (%zu)" : "F2: PERFORMANCE & SCORECARD (%zu)",
+                      m_allResults.size());
+        if (tacticalButton("##ModeF2", f2Lbl,
+                           ImVec2(compactRow2 ? 0.0f : s(246.0f), mbH), m_instrumentMode == 1, c)) {
             setInstrumentMode(1);
         }
         ImGui::SameLine(0.0f, s(4.0f));
-        if (tacticalButton("##ModeF3", "F3: RT PARITY VIEWPORT", ImVec2(s(192.0f), mbH),
+        if (tacticalButton("##ModeF3", compactRow2 ? "F3: RT VIEW" : "F3: RT PARITY VIEWPORT",
+                           ImVec2(compactRow2 ? 0.0f : s(192.0f), mbH),
                            m_instrumentMode == 2, c)) {
             setInstrumentMode(2);
+        }
+        ImGui::SameLine(0.0f, s(4.0f));
+        if (tacticalButton("##ModeF4", compactRow2 ? "F4: SHOWCASE" : "F4: OPT SHOWCASE",
+                           ImVec2(compactRow2 ? 0.0f : s(166.0f), mbH),
+                           m_instrumentMode == 3, c)) {
+            setInstrumentMode(3);
         }
 
         // Right-aligned live DUT status + contention / notification strip
         ImGui::SameLine(0.0f, s(14.0f));
         std::string statusBanner;
         ImVec4 statusCol = c.textSecondary;
+        const std::string statusMsg = getStatusMessage();
         if (isRunning) {
             char buf[128];
             std::snprintf(buf, sizeof(buf), "RUNNING [%zu/%zu | %.1fs] %s",
-                          m_completedTasks, m_totalTasks, m_elapsedSeconds, m_statusMessage.c_str());
+                          m_completedTasks, m_totalTasks, m_elapsedSeconds, statusMsg.c_str());
             statusBanner = buf;
             statusCol = c.phosphorHi;
         } else if (m_exportNotificationTimer > 0.0f && !m_exportNotificationText.empty()) {
             statusBanner = m_exportNotificationText;
             statusCol = (m_exportNotificationText.rfind("Export failed", 0) == 0) ? c.errColor : c.okColor;
-        } else if (!m_statusMessage.empty()) {
-            statusBanner = m_statusMessage;
+        } else if (!statusMsg.empty()) {
+            statusBanner = statusMsg;
         } else {
             std::string rebarTag;
             for (const auto& d : m_devices) {
@@ -2485,7 +2727,7 @@ void GuiApp::renderCommandPromptBar(float width) {
         ImGui::SameLine(0.0f, s(10.0f));
         const std::string rightInfo = !m_cmdStatusText.empty()
             ? m_cmdStatusText
-            : "KEYS: F1/F2/F3 SWITCH   / OR CTRL+K FOCUS PROMPT";
+            : "KEYS: F1-F4 SWITCH   / OR CTRL+K FOCUS PROMPT";
         ImGui::TextColored(c.textMuted, "%s",
                            fitTextToPixelWidth(rightInfo, ImGui::GetContentRegionAvail().x).c_str());
         popMonoFont();
@@ -2524,26 +2766,38 @@ void GuiApp::renderSettingsModal() {
             setScene(scenes[currentSceneIdx]);
         }
 
-        const char* resLabels[] = {
+        char customResBuf[64]{};
+        std::vector<const char*> resLabels = {
             "1280 x 720 (HD)",
             "1920 x 1080 (FHD)",
             "2560 x 1440 (QHD)",
-            "3840 x 2160 (4K UHD)"
+            "3840 x 2160 (4K UHD)",
+            "7680 x 4320 (8K UHD)"
         };
-        int resIdx = 3;
-        if (m_renderWidth == 1280) resIdx = 0;
-        else if (m_renderWidth == 1920) resIdx = 1;
-        else if (m_renderWidth == 2560) resIdx = 2;
+        int resIdx = -1;
+        if (m_renderWidth == 1280 && m_renderHeight == 720) resIdx = 0;
+        else if (m_renderWidth == 1920 && m_renderHeight == 1080) resIdx = 1;
+        else if (m_renderWidth == 2560 && m_renderHeight == 1440) resIdx = 2;
+        else if (m_renderWidth == 3840 && m_renderHeight == 2160) resIdx = 3;
+        else if (m_renderWidth == 7680 && m_renderHeight == 4320) resIdx = 4;
+        else {
+            std::snprintf(customResBuf, sizeof(customResBuf), "%u x %u (Custom)",
+                          m_renderWidth, m_renderHeight);
+            resLabels.push_back(customResBuf);
+            resIdx = 5;
+        }
 
-        if (ImGui::Combo("Render Resolution", &resIdx, resLabels, 4)) {
-            const uint32_t widths[]  = {1280, 1920, 2560, 3840};
-            const uint32_t heights[] = {720,  1080, 1440, 2160};
-            m_renderWidth = widths[resIdx];
-            m_renderHeight = heights[resIdx];
+        if (ImGui::Combo("Render Resolution", &resIdx, resLabels.data(), static_cast<int>(resLabels.size()))) {
+            const uint32_t widths[]  = {1280, 1920, 2560, 3840, 7680};
+            const uint32_t heights[] = {720,  1080, 1440, 2160, 4320};
+            if (resIdx >= 0 && resIdx < 5) {
+                m_renderWidth = widths[resIdx];
+                m_renderHeight = heights[resIdx];
+            }
         }
 
         int spp = static_cast<int>(m_samplesPerPixel);
-        if (ImGui::SliderInt("Samples Per Pixel (SPP)", &spp, 1, 64)) {
+        if (ImGui::SliderInt("Samples Per Pixel (SPP)", &spp, 1, 256)) {
             m_samplesPerPixel = static_cast<uint32_t>(std::max(1, spp));
         }
 
@@ -2588,7 +2842,15 @@ void GuiApp::renderSettingsModal() {
             setUiScale(m_baseScale);
         }
         ImGui::Checkbox("Verbose Console Logging", &m_verbose);
-        ImGui::Checkbox("Enable Vulkan Validation Layers (--debug)", &m_debug);
+        ImGui::TextColored(c.textMuted, "Vulkan Validation Layers (--debug):");
+        ImGui::SameLine();
+        pushBoldFont();
+        ImGui::TextColored(m_debug ? c.okColor : c.textSecondary,
+                           "%s", m_debug ? "ACTIVE (Launch Flag)" : "DISABLED (Launch with --debug to enable)");
+        popBoldFont();
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Vulkan validation layers are configured at VkInstance creation; relaunch gpubench-gui with --debug to validate the shared GUI Vulkan context.");
+        }
 
         ImGui::Spacing();
         ImGui::Separator();
@@ -2619,30 +2881,40 @@ void GuiApp::renderJsonSessionModal() {
         ImGui::Spacing();
 
         ImGui::InputText("JSON File Path", m_jsonPathBuffer, sizeof(m_jsonPathBuffer));
+        ImGui::SameLine();
+        if (ImGui::SmallButton("REFRESH")) {
+            m_jsonDirCacheValid = false;
+        }
 
         namespace fs = std::filesystem;
-        std::error_code ec;
-        std::vector<std::pair<std::string, std::string>> quickJsons;
-        auto scanJsonDir = [&](const fs::path& dir) {
-            if (dir.empty() || !fs::exists(dir, ec)) return;
-            for (const auto& entry : fs::directory_iterator(dir, ec)) {
-                if (entry.is_regular_file(ec) && entry.path().extension() == ".json") {
-                    quickJsons.emplace_back(entry.path().filename().string(), entry.path().string());
-                    if (quickJsons.size() >= 8) break;
+        const auto nowTp = std::chrono::steady_clock::now();
+        if (!m_jsonDirCacheValid ||
+            (nowTp - m_lastJsonDirScan) >= std::chrono::seconds(3)) {
+            m_cachedQuickJsons.clear();
+            std::error_code ec;
+            auto scanJsonDir = [&](const fs::path& dir) {
+                if (dir.empty() || !fs::exists(dir, ec)) return;
+                for (const auto& entry : fs::directory_iterator(dir, ec)) {
+                    if (entry.is_regular_file(ec) && entry.path().extension() == ".json") {
+                        m_cachedQuickJsons.emplace_back(entry.path().filename().string(), entry.path().string());
+                        if (m_cachedQuickJsons.size() >= 8) break;
+                    }
                 }
-            }
-        };
-        scanJsonDir(getDocumentsResultsDir());
-        if (quickJsons.size() < 8) scanJsonDir(".");
-        if (!quickJsons.empty()) {
+            };
+            scanJsonDir(getDocumentsResultsDir());
+            if (m_cachedQuickJsons.size() < 8) scanJsonDir(".");
+            m_lastJsonDirScan = nowTp;
+            m_jsonDirCacheValid = true;
+        }
+        if (!m_cachedQuickJsons.empty()) {
             ImGui::TextColored(c.textMuted, "RECENT JSON FILES:");
-            for (size_t i = 0; i < quickJsons.size(); ++i) {
+            for (size_t i = 0; i < m_cachedQuickJsons.size(); ++i) {
                 if (i > 0) sameLineIfFits(s(140.0f), s(6.0f));
-                if (ImGui::SmallButton(quickJsons[i].first.c_str())) {
-                    std::snprintf(m_jsonPathBuffer, sizeof(m_jsonPathBuffer), "%s", quickJsons[i].second.c_str());
+                if (ImGui::SmallButton(m_cachedQuickJsons[i].first.c_str())) {
+                    std::snprintf(m_jsonPathBuffer, sizeof(m_jsonPathBuffer), "%s", m_cachedQuickJsons[i].second.c_str());
                 }
                 if (ImGui::IsItemHovered()) {
-                    ImGui::SetTooltip("%s", quickJsons[i].second.c_str());
+                    ImGui::SetTooltip("%s", m_cachedQuickJsons[i].second.c_str());
                 }
             }
         }

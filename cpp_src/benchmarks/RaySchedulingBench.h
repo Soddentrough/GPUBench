@@ -23,6 +23,8 @@ public:
     AAAOutdoorForest = 3
   };
 
+  static constexpr uint32_t kNumConfigs = 28u;
+
   RaySchedulingBench(SceneType scene = SceneType::IndoorAtrium) : sceneType(scene) {}
 
   const char *GetName() const override {
@@ -77,19 +79,19 @@ public:
 
   BenchmarkResult GetResult(uint32_t config_idx = 0) const override;
   uint32_t GetSamplesPerFrame(uint32_t config_idx = 0) const override {
-    if (config_idx == 23 || config_idx == 24) {
+    if (config_idx == 11u || config_idx == 12u) {
       return (lastCompletedPasses[config_idx] > 0) ? lastCompletedPasses[config_idx] : 16u;
     }
-    if (config_idx >= 3 && config_idx <= 5) {
+    if (config_idx >= 8u && config_idx <= 10u) {
       return (samplesPerPixel > 1) ? samplesPerPixel : 1u;
     }
     return 1u;
   }
   bool ValidateResults(uint32_t config_idx = 0) const override;
   int GetSortWeight(uint32_t config_idx = 0) const override;
-  uint32_t GetExpectedKernelCount() const override { return 23; }
+  uint32_t GetExpectedKernelCount() const override { return 31; }
 
-  uint32_t GetNumConfigs() const override { return 34; }
+  uint32_t GetNumConfigs() const override { return kNumConfigs; }
   std::vector<std::string> GetAliases() const override {
     if (sceneType == SceneType::AAAOutdoorForest) {
       return {"rayscheduling", "rtscheduling", "forest", "aaa_forest", "rayscheduling_forest", "wavefront_queues", "dgc", "scene_render", "total_scene_render", "total_frame", "primary", "primary_rays", "shadow", "shadows", "rts", "ray_shadows", "ray_shadow", "multilight", "multi_light", "lightbinning", "light_binning", "pathtracing", "path_tracing", "path", "pathtrace"};
@@ -104,38 +106,42 @@ public:
   std::string GetConfigName(uint32_t config_idx) const override;
   int32_t GetBaselineConfigIndex(uint32_t config_idx) const override;
   const char *GetMetric(uint32_t config_idx = 0) const override {
-    if (config_idx < 3) return "MHits/s";
-    if (config_idx == 13 || config_idx == 25 || config_idx == 27) return "MRecords/s";
+    if (config_idx <= 3u) return "MHits/s";
+    if (config_idx == 26u || config_idx == 27u) return "MRecords/s";
     return "MRays/s";
   }
   void SetVerifyParity(bool verify) override { verifyParity = verify; }
   bool GetVerifyParity() const { return verifyParity; }
   bool HasParityFailure() const override { return parityFailure; }
   static constexpr bool isSERConfigIdx(uint32_t c) {
-    return c == 1 || c == 4 || c == 7 || c == 10 || c == 20 || c == 29;
+    return c == 3u || c == 7u || c == 10u || c == 16u;
+  }
+  static constexpr bool isDGCExecutionSetConfigIdx(uint32_t c) {
+    return c == 2u || c == 6u;
   }
   static constexpr bool isStandardDGCConfigIdx(uint32_t c) {
-    return c == 5 || c == 8 || c == 11 || c == 18 || c == 21 || c == 22 ||
-           c == 24 || c == 31 || c == 33;
+    return c == 9u || c == 12u || c == 14u ||
+           c == 18u || c == 20u || c == 22u;
+  }
+  static constexpr bool isShowroomOnlyConfigIdx(uint32_t c) {
+    return c >= 24u && c <= 27u;
   }
   bool IsConfigSupported(uint32_t config_idx) const override {
-    return !unsupportedConfig[config_idx];
+    return config_idx < kNumConfigs && !unsupportedConfig[config_idx];
   }
   bool IsConfigSupported(uint32_t config_idx, const DeviceInfo &info,
                          IComputeContext *context = nullptr) const override {
+    if (config_idx >= kNumConfigs) {
+      return false;
+    }
     if (!IsSupported(info, context)) {
       return false;
     }
     if (unsupportedConfig[config_idx]) {
       return false;
     }
-    // Algorithmic traversal ordering and queue compaction microbenchmarks are only run on the primary reference scene (Showroom)
-    if (sceneType != SceneType::Showroom) {
-      if (config_idx == 12 || config_idx == 13 || config_idx == 14 ||
-          config_idx == 15 || config_idx == 16 || config_idx == 25 ||
-          config_idx == 27) {
-        return false;
-      }
+    if (sceneType != SceneType::Showroom && isShowroomOnlyConfigIdx(config_idx)) {
+      return false;
     }
     if (isSERConfigIdx(config_idx)) {
       if (!info.serSupported) return false;
@@ -146,15 +152,14 @@ public:
       }
 #endif
     }
-    if (config_idx == 2) {
-      if (!info.dgcSupported) return false;
+    if (isDGCExecutionSetConfigIdx(config_idx)) {
+      if (!info.dgcSupported || !info.dgcExecutionSetSupported) return false;
 #ifdef HAVE_VULKAN
       if (context && context->getBackend() == ComputeBackend::Vulkan) {
         const VulkanContext *vc = static_cast<const VulkanContext *>(context);
         if (!vc->isDGCSupported() || !vc->isDGCExecutionSetSupported()) return false;
       }
 #endif
-      if (!info.dgcExecutionSetSupported) return false;
     }
     if (isStandardDGCConfigIdx(config_idx)) {
       if (!info.dgcSupported) return false;
@@ -168,21 +173,21 @@ public:
     return true;
   }
   std::string GetConfigSupportNote(uint32_t config_idx) const override {
-    return unsupportedReason[config_idx];
+    return (config_idx < kNumConfigs) ? unsupportedReason[config_idx] : "";
   }
   std::string GetConfigSupportNote(uint32_t config_idx,
                                    const DeviceInfo &info,
                                    IComputeContext *context = nullptr) const override {
-    if (!unsupportedReason[config_idx].empty()) {
+    if (config_idx < kNumConfigs && !unsupportedReason[config_idx].empty()) {
       return unsupportedReason[config_idx];
     }
     if (isSERConfigIdx(config_idx)) {
       return "VK_EXT_ray_tracing_invocation_reorder not supported by device/driver";
     }
-    if (config_idx == 28) {
+    if (config_idx == 15u) {
       return "Vulkan Ray Tracing Pipeline unsupported or pipeline creation failed";
     }
-    if (config_idx == 2) {
+    if (isDGCExecutionSetConfigIdx(config_idx)) {
 #ifdef HAVE_VULKAN
       if (context && context->getBackend() == ComputeBackend::Vulkan) {
         const VulkanContext *vc = static_cast<const VulkanContext *>(context);
@@ -212,11 +217,14 @@ public:
     if (!IsSupported(info, context)) {
       return GetSupportNote(info, context);
     }
+    if (sceneType != SceneType::Showroom && isShowroomOnlyConfigIdx(config_idx)) {
+      return "Showroom-only traversal ordering / queue compaction microbenchmark";
+    }
     return "";
   }
   SupportLimitation GetConfigSupportLimitation(uint32_t config_idx) const override {
-    if (isSERConfigIdx(config_idx) || config_idx == 28 ||
-        config_idx == 2 || isStandardDGCConfigIdx(config_idx)) {
+    if (isSERConfigIdx(config_idx) || config_idx == 15u ||
+        isDGCExecutionSetConfigIdx(config_idx) || isStandardDGCConfigIdx(config_idx)) {
       return SupportLimitation::kHardware;
     }
     return SupportLimitation::kNone;
@@ -228,7 +236,7 @@ public:
                     context->getBackend() == ComputeBackend::ROCm)) {
       return SupportLimitation::kApi;
     }
-    if (config_idx == 2) {
+    if (isDGCExecutionSetConfigIdx(config_idx)) {
       bool basicDgc = info.dgcSupported;
       bool execSet = info.dgcExecutionSetSupported;
 #ifdef HAVE_VULKAN
@@ -266,7 +274,7 @@ public:
         d.driverStatus = "Supported (VK_EXT_ray_tracing_invocation_reorder = true; allowed to run)";
         d.summary = "Driver exposes SER API (pass-through/no-op); GPU lacks dedicated hardware SER";
       }
-    } else if (config_idx == 2) {
+    } else if (isDGCExecutionSetConfigIdx(config_idx)) {
       bool basicDgc = vc ? vc->isDGCSupported() : info.dgcSupported;
       bool execSet = vc ? vc->isDGCExecutionSetSupported() : info.dgcExecutionSetSupported;
       if (basicDgc && !execSet) {
@@ -288,7 +296,7 @@ public:
   std::string GetConfigCaveat(uint32_t config_idx,
                               const DeviceInfo &info,
                               IComputeContext *context = nullptr) const override;
-  const char *GetComponent(uint32_t config_idx = 0) const override { return "Ray Tracing"; }
+  const char *GetComponent(uint32_t config_idx = 0) const override { (void)config_idx; return "Ray Tracing"; }
   const char *GetSubCategory(uint32_t config_idx = 0) const override;
   const char *GetDescription() const override { return GetDescription(0); }
   const char *GetDescription(uint32_t config_idx) const override;
@@ -321,7 +329,7 @@ public:
   uint32_t GetQueueCapacity() const { return queueCapacity; }
 
   void RecordRunResult(uint32_t config_idx, uint64_t total_invocations, double total_time_ms) override {
-    if (config_idx < 34) {
+    if (config_idx < kNumConfigs) {
       recordedInvocations[config_idx] = total_invocations;
       recordedTimeMs[config_idx] = total_time_ms;
     }
@@ -333,8 +341,8 @@ public:
   void RunVisualVerification(bool isInteractive = false) override;
 
 private:
-  uint64_t recordedInvocations[34] = {0};
-  double recordedTimeMs[34] = {0.0};
+  uint64_t recordedInvocations[kNumConfigs] = {0};
+  double recordedTimeMs[kNumConfigs] = {0.0};
   IComputeContext *context = nullptr;
   bool dumpRenders = false;
   bool captureFramebuffer = false;
@@ -352,6 +360,7 @@ private:
 
   // Compute & RT Kernels
   ComputeKernel kernelTraditional = nullptr;
+  ComputeKernel kernelTraditionalSpecialized[12] = {nullptr};
   ComputeKernel kernelRTP = nullptr;
   ComputeKernel kernelRTPSER = nullptr;
   ComputeKernel kernelClassify = nullptr;
@@ -412,7 +421,6 @@ private:
   std::vector<VulkanContext::IndirectBatchEntry> multiLightBatchesSingle;
   std::vector<VulkanContext::IndirectBatchEntry> multiLightBatches128;
   void rebuildBounceBatches();
-
 #endif
   bool isDGCAvailable = false;
   bool isDGCExecutionSetAvailable = false;
@@ -429,6 +437,7 @@ private:
 
   VulkanContext::DGCExecutionInfo dgcInfoStandard;
   VulkanContext::DGCExecutionInfo dgcInfoSpecialized;
+  VulkanContext::DGCExecutionInfo dgcInfoSpecializedDynamic;
   VulkanContext::DGCExecutionInfo dgcInfoOctant;
   std::vector<VulkanContext::DGCExecutionInfo> dgcBounceBatches;
   void rebuildDGCBounceBatches();
@@ -445,11 +454,13 @@ private:
   uint32_t octantCapacity = 262144;
   uint32_t numPrimitives = 4096;
   SceneType sceneType = SceneType::IndoorAtrium;
-  mutable double results[34] = {0.0};
-  mutable uint32_t lastCompletedPasses[34] = {0};
-  mutable bool unsupportedConfig[34] = {false};
-  mutable std::string unsupportedReason[34];
+  mutable double results[kNumConfigs] = {0.0};
+  mutable uint32_t lastCompletedPasses[kNumConfigs] = {0};
+  mutable bool unsupportedConfig[kNumConfigs] = {false};
+  mutable std::string unsupportedReason[kNumConfigs];
   uint32_t lastRunConfig = 0xFFFFFFFFu;
+  uint32_t lastDgcDumpFlag = 0xFFFFFFFFu;
+  void syncDgcDumpFlag(uint32_t dumpFlag);
   std::mt19937 rng{1337u};
 
   template <typename Tag> friend struct ::gpubench::test::TestBody;

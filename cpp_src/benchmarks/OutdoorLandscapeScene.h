@@ -14,8 +14,8 @@ constexpr uint32_t PRIM_TERRAIN_END = 32768;
 // 2. Alpine Lake / River Water Plane: 32x32 quads = 2,048 triangles (Material 2)
 constexpr uint32_t PRIM_WATER_END   = 34816;
 
-// 3. 100 Conifer Pine Trees: 100 * 224 = 22,400 triangles (Trunk: Material 6, Needles: Material 1)
-constexpr uint32_t PRIM_TREES_END   = 57216;
+// 3. 100 Conifer Pine Trees: 100 * 112 = 11,200 triangles (Trunk: Material 6, Needles: Material 1)
+constexpr uint32_t PRIM_TREES_END   = 46016;
 
 // Procedural multi-frequency analytical heightfield
 inline float terrainHeight(float x, float y) {
@@ -105,12 +105,12 @@ inline void appendPineTree(std::vector<float> &vertices, float root_x, float roo
     float x1 = root_x + r_trunk * std::cos(a1);
     float y1 = root_y + r_trunk * std::sin(a1);
 
-    vertices.insert(vertices.end(), {x0, y0, root_z, x1, y0, root_z, x1, y1, root_z + h_trunk});
+    vertices.insert(vertices.end(), {x0, y0, root_z, x1, y1, root_z, x1, y1, root_z + h_trunk});
     vertices.insert(vertices.end(), {x0, y0, root_z, x1, y1, root_z + h_trunk, x0, y0, root_z + h_trunk});
   }
 
-  // 2. Three Conical Needle Tiers (3 cones: 16 radial segs x 2 = 32 quads / 64 tris each = 192 tris)
-  // Total tree triangles = 32 + 192 = 224 triangles
+  // 2. Three Conical Needle Tiers (3 cones: 16 radial segs x 2 tris/seg = 32 tris each = 96 tris)
+  // Total tree triangles = 16 trunk + 96 needle = 112 triangles
   const uint32_t tier_segs = 16;
   for (uint32_t tier = 0; tier < 3; ++tier) {
     float tier_base_z = root_z + (2.5f + float(tier) * 3.2f) * scale;

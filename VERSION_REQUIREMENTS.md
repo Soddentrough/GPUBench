@@ -5,8 +5,8 @@ This document specifies the minimum version requirements for all GPU compute bac
 ## Summary
 
 - **Vulkan**: **1.4+** uncompromising baseline (`VK_API_VERSION_1_4` / SPIR-V 1.4+ — legacy Vulkan 1.2/1.3 runtime fallbacks removed)
-- **ROCm/HIP**: **6.4+** (Linux & Windows dynamic `amdhip64_7.dll` / `amdhip64_6.dll` / `libamdhip64.so` + `hipGraphLaunch` stream capture)
-- **OpenCL**: **3.0** target headers (`CL_TARGET_OPENCL_VERSION=300`; compatible with OpenCL 1.2–3.0 ICD runtimes exposing required feature queries)
+- **ROCm/HIP** *(enabled by default via `GPUBENCH_ENABLE_ROCM=ON`, auto-detects SDK and falls back gracefully if absent)*: **6.4–10.2+** (Linux & Windows dynamic `amdhip64_7.dll` / `amdhip64_6.dll` / `libamdhip64.so.7` + `hipGraphLaunch` stream capture)
+- **OpenCL** *(optional compile-time backend, `GPUBENCH_ENABLE_OPENCL=OFF` by default)*: **3.0** target headers (`CL_TARGET_OPENCL_VERSION=300`; compatible with OpenCL 1.2–3.0 ICD runtimes exposing required feature queries)
 - **Compiler Standard**: C++23 (`-std=c++23` / `/std:c++latest`) and C11
 
 ## Backend Details
@@ -17,14 +17,14 @@ This document specifies the minimum version requirements for all GPU compute bac
 
 GPUBench requires a native Vulkan 1.4 loader and physical device driver (`apiVersion >= VK_API_VERSION_1_4`). Devices reporting Vulkan 1.3 or earlier are cleanly skipped during physical device enumeration without silent downgrade.
 
-All GLSL (`#version 460`) and SPIR-V (`--target-env vulkan1.4`) shaders in `shaders/` target Vulkan 1.4 core capabilities and optional hardware-probed extensions:
+All Slang (`shaders/slang/*.slang`, compiled via `slangc`), GLSL (`#version 460`, compiled via `glslc`), and SPIR-V assembly (`--target-env vulkan1.4`) shaders in `shaders/` target Vulkan 1.4 core capabilities and optional hardware-probed extensions:
 - **Memory Management**: Managed via **VulkanMemoryAllocator (VMA 3.5.0)** with `VK_EXT_memory_budget`, `VK_KHR_buffer_device_address` (Vulkan 1.2/1.4 core), and ReBAR (`HOST_VISIBLE | DEVICE_LOCAL`) awareness, plus persistent disk-backed `VkPipelineCache` keyed by `(vendorID, deviceID, pipelineCacheUUID)`.
 - **Matrix, Sparsity & Cooperative Vector**: `VK_KHR_cooperative_matrix` (dynamic `(M, N, K)` tile selection via specialization constants), `VK_KHR_shader_bfloat16`, `VK_EXT_shader_float8`, `VK_EXT_shader_ocp_microscaling_types` (`Float6E3M2EXT` / `Float4E2M1EXT`), and `VK_NV_cooperative_vector` (`coopvecNV` inference matmul+bias+ReLU).
 - **Hardware Ray Tracing & Execution Reordering**: `VK_KHR_acceleration_structure`, `VK_KHR_ray_query`, `VK_KHR_ray_tracing_pipeline`, `VK_EXT_ray_tracing_invocation_reorder` (SER), and `VK_EXT_opacity_micromap` (2-state / 4-state hardware Opacity Micromaps).
-- **GPU-Driven Scheduling**: `VK_EXT_device_generated_commands` (DGC wavefront compaction) and `VK_AMDX_shader_enqueue` (`SPV_AMDX_shader_enqueue` GPU Work Graphs producer->consumer multi-node expansion).
+- **GPU-Driven Scheduling**: `VK_EXT_device_generated_commands` (DGC wavefront compaction and indirect execution sets).
 
 **Affected Files**:
-- `shaders/*.comp`, `shaders/*.rgen`, `shaders/*.rmiss`, `shaders/*.rchit`, `shaders/*.rahit`, `shaders/workgraphs_amdx.spvasm`
+- `shaders/slang/*.slang`, `shaders/slang/modules/*.slang`, `shaders/*.comp`, `shaders/*.rgen`, `shaders/*.rmiss`, `shaders/*.rchit`, `shaders/*.rahit`
 
 ### ROCm/HIP Requirements
 
@@ -61,7 +61,7 @@ OpenCL kernels in `kernels/*.cl` use `fma`, vector arithmetic, and hardware capa
 
 ## Build & Runtime Requirements
 
-- **Vulkan SDK**: 1.4+ (`glslc`, `spirv-as`, `spirv-val`, `Vulkan-Headers` 1.4+)
-- **CMake**: 3.20+ and Ninja / Make / MSBuild
+- **Vulkan SDK**: 1.4+ (`glslc`, `slangc`, `spirv-as`, `spirv-val`, `Vulkan-Headers` 1.4+)
+- **CMake**: 3.28+ and Ninja / Make / MSBuild
 - **C++23 Compiler**: GCC 13+, Clang 17+, or MSVC 19.38+ (Visual Studio 2022 17.8+)
-- **Optional SDKs**: ROCm/HIP SDK 6.4+, OpenCL 3.0 ICD Loader & Headers, SDL3 (required for `gpubench-gui`)
+- **Optional SDKs**: ROCm/HIP SDK 6.4+ (`-DGPUBENCH_ENABLE_ROCM=ON`), OpenCL 3.0 ICD Loader & Headers (`-DGPUBENCH_ENABLE_OPENCL=ON`), SDL3 (required for `gpubench-gui`, auto-fetched via CMake if not installed)

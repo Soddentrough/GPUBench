@@ -67,25 +67,15 @@ bool VulkanContext::init(const char* title, int width, int height,
     int winW = width;
     int winH = height;
     SDL_DisplayID displayID = SDL_GetPrimaryDisplay();
-    float detectedScale = 1.0f;
-    if (displayID != 0) {
-        float contentScale = SDL_GetDisplayContentScale(displayID);
-        if (contentScale > 0.0f) {
-            detectedScale = contentScale;
+    SDL_Rect usableBounds{};
+    const bool hasUsableBounds =
+        (displayID != 0) && SDL_GetDisplayUsableBounds(displayID, &usableBounds);
+    if (hasUsableBounds) {
+        if (usableBounds.h > 0 && winH > usableBounds.h - 80) {
+            winH = std::max(600, usableBounds.h - 80);
         }
-        SDL_Rect usableBounds{};
-        if (SDL_GetDisplayUsableBounds(displayID, &usableBounds)) {
-            float sFactor = (scaleOverride > 0.0f) ? scaleOverride : detectedScale;
-            if (sFactor > 1.2f) {
-                winW = static_cast<int>(winW * std::min(sFactor, 1.8f));
-                winH = static_cast<int>(winH * std::min(sFactor, 1.6f));
-            }
-            if (usableBounds.h > 0 && winH > usableBounds.h - 80) {
-                winH = std::max(600, usableBounds.h - 80);
-            }
-            if (usableBounds.w > 0 && winW > usableBounds.w - 60) {
-                winW = std::max(800, usableBounds.w - 60);
-            }
+        if (usableBounds.w > 0 && winW > usableBounds.w - 60) {
+            winW = std::max(800, usableBounds.w - 60);
         }
     }
 
@@ -123,13 +113,20 @@ bool VulkanContext::init(const char* title, int width, int height,
     }
 #endif
 
-    float winScale = SDL_GetWindowDisplayScale(m_window);
-    if (winScale > 0.0f) {
-        detectedScale = winScale;
-    }
-    m_displayScale = (scaleOverride > 0.0f) ? scaleOverride : detectedScale;
-    if (m_displayScale <= 0.0f) {
-        m_displayScale = 1.0f;
+    const float pixDensity = SDL_GetWindowPixelDensity(m_window);
+    refreshDisplayScale(scaleOverride);
+    if (pixDensity <= 1.05f && m_displayScale > 1.2f) {
+        int scaledW = static_cast<int>(std::round(static_cast<float>(width) * std::min(m_displayScale, 1.8f)));
+        int scaledH = static_cast<int>(std::round(static_cast<float>(height) * std::min(m_displayScale, 1.6f)));
+        if (hasUsableBounds) {
+            if (usableBounds.w > 0 && scaledW > usableBounds.w - 60) {
+                scaledW = std::max(800, usableBounds.w - 60);
+            }
+            if (usableBounds.h > 0 && scaledH > usableBounds.h - 80) {
+                scaledH = std::max(600, usableBounds.h - 80);
+            }
+        }
+        SDL_SetWindowSize(m_window, scaledW, scaledH);
     }
 
     if (!setupVulkan(verbose, debug, preferredDeviceIndex)) {
@@ -341,6 +338,28 @@ void VulkanContext::loadSystemFont() {
     }
 }
 
+float VulkanContext::refreshDisplayScale(float scaleOverride) {
+    float logicalScale = 1.0f;
+    if (m_window) {
+        float winScale = SDL_GetWindowDisplayScale(m_window);
+        float pixDensity = SDL_GetWindowPixelDensity(m_window);
+        if (winScale <= 0.0f) {
+            const SDL_DisplayID displayID = SDL_GetDisplayForWindow(m_window);
+            if (displayID != 0) {
+                winScale = SDL_GetDisplayContentScale(displayID);
+            }
+        }
+        if (winScale > 0.0f) {
+            logicalScale = (pixDensity > 0.0f) ? (winScale / pixDensity) : winScale;
+        }
+    }
+    m_displayScale = (scaleOverride > 0.0f) ? scaleOverride : std::clamp(logicalScale, 0.5f, 3.0f);
+    if (m_displayScale <= 0.0f) {
+        m_displayScale = 1.0f;
+    }
+    return m_displayScale;
+}
+
 void VulkanContext::requestFontRebuild(float scale) {
     if (scale > 0.0f && std::abs(scale - m_builtFontScale) > 0.005f) {
         m_pendingFontScale = scale;
@@ -538,7 +557,6 @@ void VulkanContext::setupVulkanWindow(int width, int height) {
     initInfo.Allocator = m_allocator;
 
     ImGui_ImplVulkan_Init(&initInfo);
-    createCrtPipeline();
 }
 
 void VulkanContext::setClearColor(float r, float g, float b, float a) {
@@ -546,203 +564,6 @@ void VulkanContext::setClearColor(float r, float g, float b, float a) {
     m_clearColor.float32[1] = g;
     m_clearColor.float32[2] = b;
     m_clearColor.float32[3] = a;
-}
-
-void VulkanContext::setCrtPostFx(bool enabled, int paletteMode, float intensity) {
-    m_crtEnabled = enabled;
-    m_crtPaletteMode = paletteMode;
-    m_crtIntensity = intensity;
-}
-
-bool VulkanContext::createCrtPipeline() {
-    if (m_device == VK_NULL_HANDLE || m_mainWindowData.RenderPass == VK_NULL_HANDLE) {
-        return false;
-    }
-    destroyCrtPipeline();
-
-    std::vector<std::filesystem::path> searchDirs;
-    std::filesystem::path kp = KernelPath::find();
-    if (!kp.empty()) {
-        searchDirs.push_back(kp / "vulkan");
-    }
-    if (const char* base = SDL_GetBasePath()) {
-        std::filesystem::path bp(base);
-        searchDirs.push_back(bp / "kernels" / "vulkan");
-        searchDirs.push_back(bp / ".." / "share" / "gpubench" / "kernels" / "vulkan");
-    }
-    searchDirs.push_back(std::filesystem::current_path() / "kernels" / "vulkan");
-
-    auto loadSpv = [&](const char* filename) -> VkShaderModule {
-        std::error_code ec;
-        for (const auto& dir : searchDirs) {
-            std::filesystem::path p = dir / filename;
-            if (!std::filesystem::exists(p, ec)) continue;
-            std::ifstream ifs(p, std::ios::binary | std::ios::ate);
-            if (!ifs) continue;
-            std::streamsize sz = ifs.tellg();
-            if (sz <= 0 || (sz % 4) != 0) continue;
-            ifs.seekg(0, std::ios::beg);
-            std::vector<uint32_t> code(static_cast<size_t>(sz) / sizeof(uint32_t));
-            if (!ifs.read(reinterpret_cast<char*>(code.data()), sz)) continue;
-            VkShaderModuleCreateInfo ci{};
-            ci.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-            ci.codeSize = static_cast<size_t>(sz);
-            ci.pCode = code.data();
-            VkShaderModule mod = VK_NULL_HANDLE;
-            if (vkCreateShaderModule(m_device, &ci, m_allocator, &mod) == VK_SUCCESS) {
-                return mod;
-            }
-        }
-        return VK_NULL_HANDLE;
-    };
-
-    VkShaderModule vertMod = loadSpv("gui_crt_overlay.vert.spv");
-    VkShaderModule fragMod = loadSpv("gui_crt_overlay.frag.spv");
-    if (vertMod == VK_NULL_HANDLE || fragMod == VK_NULL_HANDLE) {
-        if (vertMod != VK_NULL_HANDLE) vkDestroyShaderModule(m_device, vertMod, m_allocator);
-        if (fragMod != VK_NULL_HANDLE) vkDestroyShaderModule(m_device, fragMod, m_allocator);
-        return false;
-    }
-
-    VkPushConstantRange pushRange{};
-    pushRange.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-    pushRange.offset = 0;
-    pushRange.size = 16;
-
-    VkPipelineLayoutCreateInfo layoutInfo{};
-    layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    layoutInfo.pushConstantRangeCount = 1;
-    layoutInfo.pPushConstantRanges = &pushRange;
-    if (vkCreatePipelineLayout(m_device, &layoutInfo, m_allocator, &m_crtPipelineLayout) != VK_SUCCESS) {
-        vkDestroyShaderModule(m_device, vertMod, m_allocator);
-        vkDestroyShaderModule(m_device, fragMod, m_allocator);
-        return false;
-    }
-
-    VkPipelineShaderStageCreateInfo stages[2]{};
-    stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-    stages[0].module = vertMod;
-    stages[0].pName = "main";
-    stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    stages[1].module = fragMod;
-    stages[1].pName = "main";
-
-    VkPipelineVertexInputStateCreateInfo vertexInput{};
-    vertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-
-    VkPipelineInputAssemblyStateCreateInfo inputAsm{};
-    inputAsm.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    inputAsm.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-
-    VkPipelineViewportStateCreateInfo viewportState{};
-    viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-    viewportState.viewportCount = 1;
-    viewportState.scissorCount = 1;
-
-    VkPipelineRasterizationStateCreateInfo raster{};
-    raster.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    raster.polygonMode = VK_POLYGON_MODE_FILL;
-    raster.cullMode = VK_CULL_MODE_NONE;
-    raster.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-    raster.lineWidth = 1.0f;
-
-    VkPipelineMultisampleStateCreateInfo ms{};
-    ms.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-
-    VkPipelineColorBlendAttachmentState blendAtt{};
-    blendAtt.blendEnable = VK_TRUE;
-    blendAtt.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
-    blendAtt.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-    blendAtt.colorBlendOp = VK_BLEND_OP_ADD;
-    blendAtt.srcAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
-    blendAtt.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-    blendAtt.alphaBlendOp = VK_BLEND_OP_ADD;
-    blendAtt.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
-                              VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-
-    VkPipelineColorBlendStateCreateInfo blend{};
-    blend.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-    blend.attachmentCount = 1;
-    blend.pAttachments = &blendAtt;
-
-    VkDynamicState dynStates[2] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
-    VkPipelineDynamicStateCreateInfo dynInfo{};
-    dynInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-    dynInfo.dynamicStateCount = 2;
-    dynInfo.pDynamicStates = dynStates;
-
-    VkGraphicsPipelineCreateInfo pipeInfo{};
-    pipeInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    pipeInfo.stageCount = 2;
-    pipeInfo.pStages = stages;
-    pipeInfo.pVertexInputState = &vertexInput;
-    pipeInfo.pInputAssemblyState = &inputAsm;
-    pipeInfo.pViewportState = &viewportState;
-    pipeInfo.pRasterizationState = &raster;
-    pipeInfo.pMultisampleState = &ms;
-    pipeInfo.pColorBlendState = &blend;
-    pipeInfo.pDynamicState = &dynInfo;
-    pipeInfo.layout = m_crtPipelineLayout;
-    pipeInfo.renderPass = m_mainWindowData.RenderPass;
-    pipeInfo.subpass = 0;
-
-    VkResult res = vkCreateGraphicsPipelines(
-        m_device, m_pipelineCache, 1, &pipeInfo, m_allocator, &m_crtPipeline);
-
-    vkDestroyShaderModule(m_device, vertMod, m_allocator);
-    vkDestroyShaderModule(m_device, fragMod, m_allocator);
-
-    if (res != VK_SUCCESS) {
-        destroyCrtPipeline();
-        return false;
-    }
-    return true;
-}
-
-void VulkanContext::destroyCrtPipeline() {
-    if (m_device == VK_NULL_HANDLE) return;
-    if (m_crtPipeline != VK_NULL_HANDLE) {
-        vkDestroyPipeline(m_device, m_crtPipeline, m_allocator);
-        m_crtPipeline = VK_NULL_HANDLE;
-    }
-    if (m_crtPipelineLayout != VK_NULL_HANDLE) {
-        vkDestroyPipelineLayout(m_device, m_crtPipelineLayout, m_allocator);
-        m_crtPipelineLayout = VK_NULL_HANDLE;
-    }
-}
-
-void VulkanContext::recordCrtOverlay(VkCommandBuffer cmd, uint32_t width, uint32_t height) {
-    if (!m_crtEnabled || m_crtPipeline == VK_NULL_HANDLE ||
-        m_crtPipelineLayout == VK_NULL_HANDLE || width == 0 || height == 0) {
-        return;
-    }
-
-    VkViewport vp{};
-    vp.x = 0.0f;
-    vp.y = 0.0f;
-    vp.width = static_cast<float>(width);
-    vp.height = static_cast<float>(height);
-    vp.minDepth = 0.0f;
-    vp.maxDepth = 1.0f;
-    vkCmdSetViewport(cmd, 0, 1, &vp);
-
-    VkRect2D scissor{};
-    scissor.offset = {0, 0};
-    scissor.extent = {width, height};
-    vkCmdSetScissor(cmd, 0, 1, &scissor);
-
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_crtPipeline);
-    struct {
-        float width;
-        float height;
-        float intensity;
-        int32_t paletteMode;
-    } pc{vp.width, vp.height, m_crtIntensity, static_cast<int32_t>(m_crtPaletteMode)};
-    vkCmdPushConstants(cmd, m_crtPipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pc), &pc);
-    vkCmdDraw(cmd, 3, 1, 0, 0);
 }
 
 void VulkanContext::cleanupVulkanWindow() {
@@ -892,6 +713,10 @@ bool VulkanContext::frameRender(ImDrawData* drawData) {
     beginInfo.flags |= VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     err = vkBeginCommandBuffer(fd->CommandBuffer, &beginInfo);
 
+    if (m_preRenderPassCallback) {
+        m_preRenderPassCallback(fd->CommandBuffer, m_mainWindowData.FrameIndex);
+    }
+
     VkRenderPassBeginInfo rpInfo{};
     rpInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     rpInfo.renderPass = m_mainWindowData.RenderPass;
@@ -905,11 +730,6 @@ bool VulkanContext::frameRender(ImDrawData* drawData) {
     vkCmdBeginRenderPass(fd->CommandBuffer, &rpInfo, VK_SUBPASS_CONTENTS_INLINE);
 
     ImGui_ImplVulkan_RenderDrawData(drawData, fd->CommandBuffer);
-    if (m_crtEnabled) {
-        recordCrtOverlay(fd->CommandBuffer,
-                         static_cast<uint32_t>(m_mainWindowData.Width),
-                         static_cast<uint32_t>(m_mainWindowData.Height));
-    }
 
     vkCmdEndRenderPass(fd->CommandBuffer);
 
@@ -964,9 +784,8 @@ void VulkanContext::framePresent() {
 void VulkanContext::shutdown() {
     if (!m_initialized) return;
 
+    m_preRenderPassCallback = nullptr;
     waitDeviceIdleSafe();
-
-    destroyCrtPipeline();
 
     {
         std::unique_lock<std::recursive_mutex> qlock;
@@ -1168,34 +987,42 @@ VulkanContext::TextureResource VulkanContext::createTextureRgba(int width, int h
         cmdBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
         vkBeginCommandBuffer(cmd, &cmdBeginInfo);
 
-        VkImageMemoryBarrier barrier1{};
-        barrier1.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        VkImageMemoryBarrier2 barrier1{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
+        barrier1.srcStageMask = VK_PIPELINE_STAGE_2_NONE;
+        barrier1.srcAccessMask = VK_ACCESS_2_NONE;
+        barrier1.dstStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
+        barrier1.dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
         barrier1.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         barrier1.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
         barrier1.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         barrier1.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         barrier1.image = tex.image;
         barrier1.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-        barrier1.srcAccessMask = 0;
-        barrier1.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier1);
+        VkDependencyInfo dep1{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+        dep1.imageMemoryBarrierCount = 1;
+        dep1.pImageMemoryBarriers = &barrier1;
+        vkCmdPipelineBarrier2(cmd, &dep1);
 
         VkBufferImageCopy region{};
         region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
         region.imageExtent = {static_cast<uint32_t>(width), static_cast<uint32_t>(height), 1};
         vkCmdCopyBufferToImage(cmd, stagingBuffer, tex.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 
-        VkImageMemoryBarrier barrier2{};
-        barrier2.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        VkImageMemoryBarrier2 barrier2{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
+        barrier2.srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
+        barrier2.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+        barrier2.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+        barrier2.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
         barrier2.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
         barrier2.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         barrier2.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         barrier2.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         barrier2.image = tex.image;
         barrier2.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-        barrier2.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        barrier2.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier2);
+        VkDependencyInfo dep2{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+        dep2.imageMemoryBarrierCount = 1;
+        dep2.pImageMemoryBarriers = &barrier2;
+        vkCmdPipelineBarrier2(cmd, &dep2);
 
         vkEndCommandBuffer(cmd);
 
@@ -1543,19 +1370,17 @@ bool VulkanContext::saveScreenshot(const std::string& filepath) {
 
     vkCmdBeginRenderPass(cmd, &rpBegin, VK_SUBPASS_CONTENTS_INLINE);
     ImGui_ImplVulkan_RenderDrawData(drawData, cmd);
-    if (m_crtEnabled) {
-        recordCrtOverlay(cmd, w, h);
-    }
     vkCmdEndRenderPass(cmd);
 
-    VkMemoryBarrier copyMemBarrier{};
-    copyMemBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-    copyMemBarrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-    copyMemBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-    vkCmdPipelineBarrier(cmd,
-                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                         VK_PIPELINE_STAGE_TRANSFER_BIT,
-                         0, 1, &copyMemBarrier, 0, nullptr, 0, nullptr);
+    VkMemoryBarrier2 copyMemBarrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER_2};
+    copyMemBarrier.srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+    copyMemBarrier.srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+    copyMemBarrier.dstStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
+    copyMemBarrier.dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT;
+    VkDependencyInfo copyDep{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+    copyDep.memoryBarrierCount = 1;
+    copyDep.pMemoryBarriers = &copyMemBarrier;
+    vkCmdPipelineBarrier2(cmd, &copyDep);
 
     VkBufferImageCopy copyRegion{};
     copyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;

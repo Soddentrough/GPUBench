@@ -6,12 +6,15 @@
 #include "core/RunnerAPI.h"
 #include "core/ResultFormatter.h"
 #include "utils/IsaDumper.h"
+#include "showcase/ShowcaseRenderer.h"
 #include <imgui.h>
 #include <implot.h>
 
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -41,7 +44,7 @@ struct SelectableDevice {
 };
 
 // Visualization descriptor attached to benchmarks that operate on graphics/compute
-// pipeline data (BVH, scenes, materials, ray scheduling, OMM, Work Graphs, etc.).
+// pipeline data (BVH, scenes, materials, ray scheduling, OMM, indirect dispatch, etc.).
 // Tier 1: static pre-baked 400x225 thumbnail (assetPath, may contain "{scene}").
 // Tier 2: procedural vector schematic drawn via ImDrawList (diagramId).
 struct BenchmarkVisualization {
@@ -71,6 +74,7 @@ struct BenchmarkItem {
     std::string hardwareSupportText;
     std::string driverSupportText;
     std::string supportDiscrepancySummary;
+    std::string configCaveat;
     int configIndex{-1};
     BenchmarkVisualization viz;   // Optional pipeline visualization for the hover tooltip
 
@@ -115,6 +119,7 @@ public:
     void processEvents();
 
     void setUiScale(float scale);
+    void updateBaseScale(float newBaseScale);
     float getUiScale() const { return m_uiScale; }
     float getBaseScale() const { return m_baseScale; }
     float s(float v) const { return std::round(v * m_uiScale); }
@@ -131,6 +136,7 @@ public:
     void selectOnlyBenchmark(const std::string& benchmarkId);
     void setScene(const std::string& scene);
     void setRenderResolution(uint32_t width, uint32_t height) { m_renderWidth = width; m_renderHeight = height; }
+    void setSamplesPerPixel(uint32_t spp) { m_samplesPerPixel = std::clamp(spp, 1u, 256u); }
     void applyAutoRenderResolution();
     void setDumpRenders(bool dump) { m_dumpRenders = dump; }
     void setVerbose(bool verbose) { m_verbose = verbose; }
@@ -141,6 +147,7 @@ public:
 
     void startBenchmarks();
     void abortBenchmarks();
+    void shutdown();
 
     struct ScopeTrigger {
         float timestampSec{0.0f};
@@ -149,6 +156,9 @@ public:
 
     void setInstrumentMode(int mode);
     int getInstrumentMode() const { return m_instrumentMode; }
+    void configureShowcase(int modePreset, int overlayMode, bool freezeCull, int camPreset = -1);
+    void setF2SubMode(int subMode) { m_f2SubMode = std::clamp(subMode, 0, 2); }
+    int getF2SubMode() const { return m_f2SubMode; }
     void setPalette(BringUpPalette p);
     BringUpPalette getPalette() const { return m_palette; }
     bool waitForPendingInspections(uint32_t timeoutMs = 2500);
@@ -160,8 +170,8 @@ public:
     void exportResultsToJson(const std::string& filepath);
     void openLastExportFolder();
 
-    ExecutionState getExecutionState() const { return m_execState; }
-    ExecutionState getState() const { return m_execState; }
+    ExecutionState getExecutionState() const { return m_execState.load(); }
+    ExecutionState getState() const { return m_execState.load(); }
     const std::vector<ResultData>& getResults() const { return m_allResults; }
     void injectResultForTesting(const ResultData& res) { m_allResults.push_back(res); }
 
@@ -233,6 +243,7 @@ private:
     IsaCacheContext makeIsaCacheContext() const;
     bool tryPopulateIsaFromDiskCache(const BenchmarkItem& item, IsaInspectionResult& outRes);
     void requestIsaInspection(const BenchmarkItem& item, bool forceRefresh = false);
+    void isaWorkerLoop();
     void joinIsaThread();
     void startIsaWarmup();
     void joinIsaWarmThread();
@@ -241,12 +252,14 @@ private:
     void executeCommand(const std::string& rawCmd);
 
     // UI Panels (implemented across modular translation units)
-    void renderSidebarTelemetry();
     void renderBenchmarkSuitePanel();
     void renderLiveTelemetryDock();
     void renderResultsScorecard();
     void renderRooflinePanel();
+    void renderEmpiricalRooflineView();
     void renderRayTracingViewport();
+    void renderOptimizationShowcase();
+    void shutdownShowcase();
     void renderSettingsModal();
     void renderJsonSessionModal();
 
@@ -256,6 +269,7 @@ private:
     void renderBenchmarkTooltip(const BenchmarkItem& item, const std::string& sceneOverride = "");
     void renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, ImVec2 p1) const;
     std::string currentSceneTag() const;
+    std::string resolvedBackendName() const;
     void startSceneVerificationCapture(const std::string& sceneTag);
 
     // Subsystems
@@ -284,11 +298,12 @@ private:
     void updateBenchmarkSupport();
 
     // Execution State
-    ExecutionState m_execState{ExecutionState::Idle};
+    std::atomic<ExecutionState> m_execState{ExecutionState::Idle};
+    bool m_shutdownDone{false};
     bool m_wasRunning{false};
     std::atomic<bool> m_cancelToken{false};
     std::thread m_execThread;
-    std::mutex m_resultsMutex;
+    mutable std::mutex m_resultsMutex;
     std::vector<ResultData> m_incomingResults;
     std::vector<ResultData> m_allResults;
     std::unordered_map<std::string, ResultData> m_latestResults;
@@ -298,6 +313,19 @@ private:
     std::string m_comparisonSourceLabel;
     char m_jsonPathBuffer[512]{};
     bool m_showJsonSessionModal{false};
+    std::vector<std::pair<std::string, std::string>> m_cachedQuickJsons;
+    bool m_jsonDirCacheValid{false};
+    std::chrono::steady_clock::time_point m_lastJsonDirScan{};
+
+    struct CachedViewportJsonEntry {
+        std::string content;
+        bool found{false};
+        std::chrono::steady_clock::time_point lastChecked{};
+        uint64_t epoch{0};
+    };
+    std::unordered_map<std::string, CachedViewportJsonEntry> m_viewportJsonCache;
+    uint64_t m_viewportJsonEpoch{1};
+    bool getCachedViewportJson(const std::string& bareJsonName, std::string& outJson);
 
     std::string m_currentBenchmarkName;
     std::string m_currentlyRunningTestId;
@@ -310,6 +338,14 @@ private:
     std::chrono::steady_clock::time_point m_benchmarkStartTime;
     double m_elapsedSeconds{0.0};
     std::string m_statusMessage;
+    void setStatusMessage(std::string msg) {
+        std::lock_guard<std::mutex> lock(m_resultsMutex);
+        m_statusMessage = std::move(msg);
+    }
+    std::string getStatusMessage() const {
+        std::lock_guard<std::mutex> lock(m_resultsMutex);
+        return m_statusMessage;
+    }
 
     // Settings
     std::string m_scene{"all"};
@@ -339,9 +375,9 @@ private:
     int m_rtGeometryIndex{0};   // 0: Vehicle Wireframe & BVH, 1: Alpha Cutout Layers, 2: Scene BVH Heatmap
 
     // Navigation & Notifications
-    bool m_switchToScorecard{false};
+    std::atomic<bool> m_switchToScorecard{false};
     bool m_switchToRoofline{false};
-    bool m_switchToRtViewport{false};
+    std::atomic<bool> m_switchToRtViewport{false};
     std::string m_exportNotificationText;
     std::string m_lastExportPath;
     float m_exportNotificationTimer{0.0f};
@@ -357,8 +393,8 @@ private:
     // Silicon Bring-Up Mode & Palette
     BringUpPalette m_palette{BringUpPalette::AmberP3};
     bool m_themeDirty{true};
-    int m_instrumentMode{0}; // 0: F1 ISA & DIE, 1: F2 PERFORMANCE & SCORECARD, 2: F3 RT PARITY
-    int m_f2SubMode{0};      // 0: Charts, 1: Scorecard
+    int m_instrumentMode{0}; // 0: F1 ISA & DIE, 1: F2 PERFORMANCE & SCORECARD, 2: F3 RT PARITY, 3: F4 OPT SHOWCASE
+    int m_f2SubMode{0};      // 0: Charts, 1: Empirical Roofline, 2: Scorecard
     bool m_telemetryExpanded{false};
     float m_rtSplitRatio{0.5f};
     int m_rtComparatorPair{0};
@@ -373,8 +409,15 @@ private:
     char m_isaFilterBuf[128]{};
     char m_suiteSearchBuf[128]{};
     std::mutex m_isaMutex;
+    std::condition_variable m_isaCv;
     std::thread m_isaThread;
     std::atomic<bool> m_isaLoading{false};
+    bool m_isaStopWorker{false};
+    bool m_isaHasPending{false};
+    uint64_t m_isaRequestSeq{0};
+    std::string m_isaPendingKey;
+    IsaDumperOptions m_isaPendingOpts;
+    IsaCacheContext m_isaPendingCacheCtx;
     std::thread m_isaWarmThread;
     std::atomic<bool> m_isaWarmCancel{false};
     std::atomic<bool> m_isaWarmActive{false};
@@ -393,6 +436,24 @@ private:
     bool m_stayOnRtViewportAfterRun{false};
     bool m_restoreSceneAfterRun{false};
     std::string m_savedSceneBeforeCapture;
+
+    // F4: AAA Game Optimization Showcase
+    std::unique_ptr<gpubench::showcase::ShowcaseRenderer> m_showcaseRenderer;
+    bool m_showcaseInitAttempted{false};
+    bool m_showcaseInitFailed{false};
+    std::string m_showcaseInitError;
+    VulkanContext::TextureResource m_showcaseTex{};
+    uint64_t m_showcaseTexGen{0};
+    gpubench::showcase::ShowcaseSettings m_showcaseSettings{};
+    gpubench::showcase::ThreeWayResult m_showcaseThreeWay{};
+    bool m_showcaseTourPlaying{false};
+    float m_showcaseTourTime{0.0f};
+    int m_showcaseCamPreset{0};
+    int m_showcasePendingCamPreset{-1};
+    bool m_showcasePendingFreeze{false};
+    bool m_showcaseCallbackBound{false};
+    bool m_showcaseDraggingCam{false};
+    bool m_showcaseDraggingWipe{false};
 };
 
 } // namespace gpubench::gui

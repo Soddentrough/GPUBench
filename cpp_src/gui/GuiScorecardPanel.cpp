@@ -66,13 +66,14 @@ void GuiApp::renderResultsScorecard() {
             unsupportedCount++;
             continue;
         }
-        if (!r.isValid || r.time_ms <= 0.0) {
+        if (!r.isValid || effectiveResultTimeMs(r) <= 0.0) {
             invalidCount++;
             continue;
         }
         validCount++;
 
-        double opsPerSec = (r.operations > 0) ? ((static_cast<double>(r.operations) / r.time_ms) * 1000.0) : 0.0;
+        const double effMs = effectiveResultTimeMs(r);
+        double opsPerSec = (r.operations > 0) ? ((static_cast<double>(r.operations) / effMs) * 1000.0) : 0.0;
         if (r.metric == "TFLOPS" || r.metric == "TOPS") {
             double tops = opsPerSec / 1e12;
             if (tops > peakComputeTops) {
@@ -150,7 +151,11 @@ void GuiApp::renderResultsScorecard() {
             ImGui::TextColored(c.okColor, "%zu Valid (%zu Unsup)", validCount, unsupportedCount);
         }
         popBoldFont();
-        if (tacticalButton("##BtnScorecardToRoofline", "VIEW CHARTS ->", ImVec2(0.0f, s(21.0f)), false, c)) {
+        if (tacticalButton("##BtnScorecardToCharts", "VIEW CHARTS ->", ImVec2(0.0f, s(21.0f)), false, c)) {
+            m_f2SubMode = 0;
+        }
+        ImGui::SameLine(0.0f, s(4.0f));
+        if (tacticalButton("##BtnScorecardToRoofline", "ROOFLINE ->", ImVec2(0.0f, s(21.0f)), false, c)) {
             m_f2SubMode = 1;
         }
 
@@ -255,7 +260,7 @@ void GuiApp::renderResultsScorecard() {
                     cand.subcategory == r.subcategory &&
                     static_cast<int32_t>(cand.configIndex) == r.baselineConfigIndex &&
                     extractSceneName(cand.benchmarkName) == rScene &&
-                    !cand.isUnsupported && cand.time_ms > 0.0) {
+                    !cand.isUnsupported && effectiveResultTimeMs(cand) > 0.0) {
                     return &cand;
                 }
             }
@@ -285,14 +290,14 @@ void GuiApp::renderResultsScorecard() {
     if (ImGui::BeginTable(tableId, numCols, flags, ImVec2(0.0f, 0.0f))) {
         ImGui::TableSetupScrollFreeze(0, 1);
         if (showDeltaColumn) {
-            const char* deltaColTitle = m_comparisonResults.empty() ? "Speedup" : "vs Comparison JSON";
-            ImGui::TableSetupColumn("Device", ImGuiTableColumnFlags_WidthStretch, 0.14f);
+            const char* deltaColTitle = m_comparisonResults.empty() ? "Speedup" : "vs Baseline";
+            ImGui::TableSetupColumn("Device", ImGuiTableColumnFlags_WidthStretch, 0.17f);
             ImGui::TableSetupColumn("Domain", ImGuiTableColumnFlags_WidthStretch, 0.13f);
-            ImGui::TableSetupColumn("Workload", ImGuiTableColumnFlags_WidthStretch, 0.30f);
-            ImGui::TableSetupColumn("Throughput / Score", ImGuiTableColumnFlags_WidthStretch, 0.14f);
-            ImGui::TableSetupColumn("Median Time", ImGuiTableColumnFlags_WidthStretch, 0.10f);
-            ImGui::TableSetupColumn(deltaColTitle, ImGuiTableColumnFlags_WidthStretch, 0.10f);
-            ImGui::TableSetupColumn("ISA / Power", ImGuiTableColumnFlags_WidthStretch, 0.09f);
+            ImGui::TableSetupColumn("Workload", ImGuiTableColumnFlags_WidthStretch, 0.27f);
+            ImGui::TableSetupColumn("Throughput / Score", ImGuiTableColumnFlags_WidthStretch, 0.13f);
+            ImGui::TableSetupColumn("Median Time", ImGuiTableColumnFlags_WidthStretch, 0.09f);
+            ImGui::TableSetupColumn(deltaColTitle, ImGuiTableColumnFlags_WidthStretch, 0.13f);
+            ImGui::TableSetupColumn("ISA / Power", ImGuiTableColumnFlags_WidthStretch, 0.08f);
         } else {
             ImGui::TableSetupColumn("Device", ImGuiTableColumnFlags_WidthStretch, 0.15f);
             ImGui::TableSetupColumn("Domain", ImGuiTableColumnFlags_WidthStretch, 0.14f);
@@ -415,7 +420,7 @@ void GuiApp::renderResultsScorecard() {
                 ImGui::TableSetColumnIndex(5);
                 pushMonoFont();
                 const ResultData* basePtr = resolveRowBaseline(r);
-                if (basePtr && !r.isUnsupported && r.time_ms > 0.0) {
+                if (basePtr && !r.isUnsupported && effectiveResultTimeMs(r) > 0.0) {
                     double curRate = computeThroughputOrInvLatency(r);
                     double baseRate = computeThroughputOrInvLatency(*basePtr);
                     if (curRate > 0.0 && baseRate > 0.0) {

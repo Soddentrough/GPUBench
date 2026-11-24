@@ -15,8 +15,8 @@
 #include "benchmarks/SparseMatrixBench.h"
 #include "benchmarks/SysMemBandwidthBench.h"
 #include "benchmarks/SysMemLatencyBench.h"
-#include "benchmarks/WorkGraphsBench.h"
 #include "core/ComputeBackendFactory.h"
+#include "core/VulkanContext.h"
 #include "core/ResultFormatter.h"
 #include "core/ResultImporter.h"
 #include "core/RooflineModel.h"
@@ -47,7 +47,7 @@ std::unique_ptr<IComputeContext> createVulkanTestContext() {
     if (!ctx || ctx->getDevices().empty()) {
       return nullptr;
     }
-    ctx->pickDevice(0);
+    ctx->pickDevice(::gpubench::test::preferredTestDeviceIndex(ctx->getDevices().size()));
     return ctx;
   } catch (...) {
     return nullptr;
@@ -262,15 +262,48 @@ TEST_CASE(ModernizationAnd2026, EmpiricalRooflineAnalysisAndEdgeCases) {
          2048.0); // 50 TFLOPS
   addRes("FP16 (Matrix)", "Compute", "FP16", "TFLOPS", 200000000000ULL, 1.0,
          4096.0); // 200 TFLOPS
+  addRes("INT8 (Vector)", "Compute", "INT8", "TOPS", 85000000000ULL, 1.0,
+         131072.0); // 85 TOPS
+  addRes("FP8 (Matrix)", "Compute", "FP8", "TFLOPS", 400000000000ULL, 1.0,
+         174763.0); // 400 TFLOPS
+  addRes("FP4 (Matrix)", "Compute", "FP4", "TFLOPS", 800000000000ULL, 1.0,
+         209715.0); // 800 TFLOPS
+  addRes("2:4 Structured Sparse Matrix (FP16)", "Compute", "Matrix", "TFLOPS",
+         350000000000ULL, 1.0, 322639.0); // 350 TFLOPS
+
+  ResultData sysRes{};
+  sysRes.backendName = "System";
+  sysRes.deviceName = "Host CPU";
+  sysRes.deviceIndex = 0xFFFFFFFF;
+  sysRes.benchmarkName = "System Memory Bandwidth (Multi-Threaded)";
+  sysRes.component = "Memory";
+  sysRes.subcategory = "Host System Memory";
+  sysRes.metric = "GB/s";
+  sysRes.operations = 100000000ULL;
+  sysRes.time_ms = 1.0;
+  sysRes.isValid = true;
+  valid.push_back(sysRes);
 
   const auto rooflines = gpubench::RooflineModel::analyze(valid);
   ASSERT_EQ(rooflines.size(), 1u);
   const auto &dr = rooflines[0];
   ASSERT_NEAR(dr.primaryVramGBps(), 900.0, 1e-2);
   ASSERT_NEAR(dr.primaryFp32Gops(), 50000.0, 1e-1);
-  ASSERT_NEAR(dr.highestComputeGops(), 200000.0, 1e-1);
+  ASSERT_NEAR(dr.highestComputeGops(), 800000.0, 1e-1);
   ASSERT_FALSE(dr.ridgePoints.empty());
-  ASSERT_FALSE(dr.workloadPoints.empty());
+  // Only compute benchmarks should appear as workload points (never fabricated from GB/s)
+  ASSERT_EQ(dr.workloadPoints.size(), 6u);
+  bool foundInt8VecPoint = false;
+  for (const auto &wp : dr.workloadPoints) {
+    ASSERT_TRUE(wp.metric == "TFLOPS" || wp.metric == "TOPS");
+    ASSERT_GT(wp.attainmentPct, 0.0);
+    ASSERT_LE(wp.attainmentPct, 100.0);
+    if (wp.label == "INT8 (Vector)") {
+      foundInt8VecPoint = true;
+      ASSERT_EQ(wp.targetCeilingName, "INT8 Vector");
+    }
+  }
+  ASSERT_TRUE(foundInt8VecPoint);
 
   bool foundFp32VramRidge = false;
   for (const auto &rp : dr.ridgePoints) {
@@ -281,10 +314,24 @@ TEST_CASE(ModernizationAnd2026, EmpiricalRooflineAnalysisAndEdgeCases) {
   }
   ASSERT_TRUE(foundFp32VramRidge);
 
-  for (const auto &wp : dr.workloadPoints) {
-    ASSERT_GT(wp.attainmentPct, 0.0);
-    ASSERT_LE(wp.attainmentPct, 100.0);
+  bool hasInt8VecCeiling = false;
+  bool hasFp8MatCeiling = false;
+  bool hasSubByteCeiling = false;
+  bool hasSparseCeiling = false;
+  for (const auto &cc : dr.computeCeilings) {
+    if (cc.name == "INT8 Vector") {
+      hasInt8VecCeiling = true;
+      ASSERT_NEAR(cc.peakTops, 85.0, 1e-2);
+      ASSERT_EQ(cc.metric, "TOPS");
+    }
+    if (cc.name == "FP8/INT8 Matrix") hasFp8MatCeiling = true;
+    if (cc.name == "FP6/FP4/INT4 Matrix") hasSubByteCeiling = true;
+    if (cc.name == "2:4 Sparse Matrix") hasSparseCeiling = true;
   }
+  ASSERT_TRUE(hasInt8VecCeiling);
+  ASSERT_TRUE(hasFp8MatCeiling);
+  ASSERT_TRUE(hasSubByteCeiling);
+  ASSERT_TRUE(hasSparseCeiling);
 }
 
 TEST_CASE(ModernizationAnd2026, BenchmarkMetadataCatalogAndBarrierSemantics) {
@@ -304,7 +351,7 @@ TEST_CASE(ModernizationAnd2026, BenchmarkMetadataCatalogAndBarrierSemantics) {
   ASSERT_TRUE(benchNames.count("Async Compute & Copy Overlap") > 0);
   ASSERT_TRUE(benchNames.count("2:4 Structured Sparse Matrix") > 0);
   ASSERT_TRUE(benchNames.count("Cooperative Vector (Neural Shading)") > 0);
-  ASSERT_TRUE(benchNames.count("GPU Work Graphs (Producer-Consumer)") > 0);
+  ASSERT_TRUE(benchNames.count("GPU Work Graphs (Producer-Consumer)") == 0);
   ASSERT_TRUE(benchNames.count("Ray Tracing Opacity Micromap") > 0);
 
   // Barrier semantics contract: independent compute/cache throughput kernels omit
@@ -316,7 +363,6 @@ TEST_CASE(ModernizationAnd2026, BenchmarkMetadataCatalogAndBarrierSemantics) {
   MemBandwidthBench membw;
   Fp64Bench fp64;
   InShaderIndirectBench ind;
-  WorkGraphsBench wg;
   RaySchedulingBench rs(RaySchedulingBench::SceneType::Showroom);
 
   ASSERT_FALSE(fp32.RequiresInterIterationBarrier(0));
@@ -325,7 +371,6 @@ TEST_CASE(ModernizationAnd2026, BenchmarkMetadataCatalogAndBarrierSemantics) {
   ASSERT_TRUE(membw.RequiresInterIterationBarrier(0));
   ASSERT_TRUE(fp64.RequiresInterIterationBarrier(0));
   ASSERT_TRUE(ind.RequiresInterIterationBarrier(1));
-  ASSERT_TRUE(wg.RequiresInterIterationBarrier(0));
   ASSERT_TRUE(rs.RequiresInterIterationBarrier(10));
 }
 
@@ -387,8 +432,7 @@ TEST_CASE(ModernizationAnd2026, TelemetryEnergyCounterAndHostSimdValidation) {
 TEST_CASE(ModernizationAnd2026, Vulkan14_2026BenchmarksEndToEndValidation) {
   auto ctx = createVulkanTestContext();
   if (!ctx) {
-    std::cout << "[SKIP] Vulkan backend unavailable" << std::endl;
-    return;
+    SKIP_TEST("Vulkan backend unavailable");
   }
 
   const std::string kdir = KernelPath::find();
@@ -415,9 +459,6 @@ TEST_CASE(ModernizationAnd2026, Vulkan14_2026BenchmarksEndToEndValidation) {
   AsyncOverlapBench asyncOverlap;
   exerciseVulkanBenchmarkConfigs(*ctx, kdir, asyncOverlap);
 
-  WorkGraphsBench workGraphs;
-  exerciseVulkanBenchmarkConfigs(*ctx, kdir, workGraphs);
-
   RayOMMBench rayOmm;
   rayOmm.SetResolution(320, 180);
   exerciseVulkanBenchmarkConfigs(*ctx, kdir, rayOmm);
@@ -432,10 +473,10 @@ TEST_CASE(ModernizationAnd2026, Vulkan14_2026BenchmarksEndToEndValidation) {
 TEST_CASE(ModernizationAnd2026, IsaDumper_HonestReportingAndHotLoopAccuracy) {
   auto ctx = createVulkanTestContext();
   if (!ctx) {
-    std::cout << "[SKIP] Vulkan backend unavailable" << std::endl;
-    return;
+    SKIP_TEST("Vulkan backend unavailable");
   }
 
+  const uint32_t devIdx = ::gpubench::test::preferredTestDeviceIndex(ctx->getDevices().size());
   const DeviceInfo info = ctx->getCurrentDeviceInfo();
 
   // 1. BF16 Vector ISA inspection must match Bf16Bench support (skipped if emulated/unsupported)
@@ -444,6 +485,7 @@ TEST_CASE(ModernizationAnd2026, IsaDumper_HonestReportingAndHotLoopAccuracy) {
     opts.targets = {"bf16"};
     opts.backends = {"vulkan"};
     opts.configs = {0};
+    opts.deviceIndex = static_cast<int>(devIdx);
     const IsaInspectionResult res = IsaDumper::inspect(opts);
     ASSERT_TRUE(res.ok);
     ASSERT_EQ(res.artifacts.size(), size_t{1});
@@ -453,38 +495,56 @@ TEST_CASE(ModernizationAnd2026, IsaDumper_HonestReportingAndHotLoopAccuracy) {
     }
   }
 
-  // 2. Unrolled direct_worker (indirect config 2) must not fabricate a bogus prologue hot loop
+  // 2. Unrolled indirect_worker (indirect config 3) must not fabricate a bogus prologue hot loop
   {
     IsaDumperOptions opts;
     opts.targets = {"indirect"};
     opts.backends = {"vulkan"};
-    opts.configs = {2};
+    opts.configs = {3};
+    opts.deviceIndex = static_cast<int>(devIdx);
     const IsaInspectionResult res = IsaDumper::inspect(opts);
     ASSERT_TRUE(res.ok);
-    ASSERT_EQ(res.artifacts.size(), size_t{1});
-    if (res.artifacts[0].skipReason.empty() && !res.artifacts[0].executables.empty()) {
-      const auto &exec = res.artifacts[0].executables[0];
-      if (!exec.fullIsaLines.empty()) {
-        ASSERT_EQ(exec.hotLoopStartLine, -1);
-        ASSERT_TRUE(exec.hotLoopLines.empty());
-      }
-    }
-  }
-
-  // 3. WorkGraphs shaders must not mistake forward branch or s_endpgm exit stub for a hot loop
-  if (info.workGraphsSupported) {
-    IsaDumperOptions opts;
-    opts.targets = {"workgraphs"};
-    opts.backends = {"vulkan"};
-    const IsaInspectionResult res = IsaDumper::inspect(opts);
-    ASSERT_TRUE(res.ok);
+    ASSERT_FALSE(res.artifacts.empty());
+    bool foundWorker = false;
     for (const auto &art : res.artifacts) {
-      for (const auto &exec : art.executables) {
-        if (!exec.fullIsaLines.empty()) {
-          ASSERT_EQ(exec.hotLoopStartLine, -1);
-          ASSERT_TRUE(exec.hotLoopLines.empty());
+      if (art.artifactFile == "indirect_worker.comp.spv") {
+        foundWorker = true;
+        if (art.skipReason.empty() && !art.executables.empty()) {
+          const auto &exec = art.executables[0];
+          if (!exec.fullIsaLines.empty()) {
+            ASSERT_EQ(exec.hotLoopStartLine, -1);
+            ASSERT_TRUE(exec.hotLoopLines.empty());
+          }
         }
       }
+    }
+    ASSERT_TRUE(foundWorker);
+  }
+
+  // 3. MemBandwidthBench specialization constants: Config 0 (Read) vs Config 1 (Write) must produce distinct specialized ISA
+  {
+    IsaDumperOptions optsRead;
+    optsRead.targets = {"membw"};
+    optsRead.backends = {"vulkan"};
+    optsRead.configs = {0};
+    optsRead.deviceIndex = static_cast<int>(devIdx);
+    const IsaInspectionResult resRead = IsaDumper::inspect(optsRead);
+    ASSERT_TRUE(resRead.ok);
+    ASSERT_EQ(resRead.artifacts.size(), size_t{1});
+
+    IsaDumperOptions optsWrite = optsRead;
+    optsWrite.configs = {1};
+    const IsaInspectionResult resWrite = IsaDumper::inspect(optsWrite);
+    ASSERT_TRUE(resWrite.ok);
+    ASSERT_EQ(resWrite.artifacts.size(), size_t{1});
+
+    ASSERT_TRUE(resRead.artifacts[0].configLabel != resWrite.artifacts[0].configLabel);
+    if (resRead.artifacts[0].skipReason.empty() && resWrite.artifacts[0].skipReason.empty() &&
+        !resRead.artifacts[0].executables.empty() && !resWrite.artifacts[0].executables.empty() &&
+        !resRead.artifacts[0].executables[0].fullIsaLines.empty() &&
+        !resWrite.artifacts[0].executables[0].fullIsaLines.empty()) {
+      ASSERT_TRUE(resRead.artifacts[0].executables[0].fullIsaLines !=
+                  resWrite.artifacts[0].executables[0].fullIsaLines);
     }
   }
 
@@ -494,6 +554,7 @@ TEST_CASE(ModernizationAnd2026, IsaDumper_HonestReportingAndHotLoopAccuracy) {
     opts.targets = {"membw"};
     opts.backends = {"vulkan"};
     opts.configs = {0};
+    opts.deviceIndex = static_cast<int>(devIdx);
     const IsaInspectionResult res = IsaDumper::inspect(opts);
     ASSERT_TRUE(res.ok);
     ASSERT_EQ(res.artifacts.size(), size_t{1});
@@ -515,6 +576,7 @@ TEST_CASE(ModernizationAnd2026, IsaDumper_HonestReportingAndHotLoopAccuracy) {
     IsaDumperOptions opts;
     opts.targets = {"raydiv"};
     opts.backends = {"vulkan"};
+    opts.deviceIndex = static_cast<int>(devIdx);
     const IsaInspectionResult res = IsaDumper::inspect(opts);
     ASSERT_TRUE(res.ok);
     ASSERT_EQ(res.artifacts.size(), size_t{1});
@@ -528,39 +590,40 @@ TEST_CASE(ModernizationAnd2026, IsaDumper_HonestReportingAndHotLoopAccuracy) {
   // 6. RayScheduling non-SER configs must never fall back to SER, and GUI benchmark names must resolve
   {
     ASSERT_TRUE(IsaDumper::isDeferredWarmupTarget("RayScheduling", 0));
-    ASSERT_TRUE(IsaDumper::isDeferredWarmupTarget("RayScheduling", 32));
-    ASSERT_FALSE(IsaDumper::isDeferredWarmupTarget("RayScheduling", 1));
-    ASSERT_FALSE(IsaDumper::isDeferredWarmupTarget("RayScheduling", 33));
+    ASSERT_TRUE(IsaDumper::isDeferredWarmupTarget("RayScheduling", 21));
+    ASSERT_FALSE(IsaDumper::isDeferredWarmupTarget("RayScheduling", 3));
+    ASSERT_FALSE(IsaDumper::isDeferredWarmupTarget("RayScheduling", 22));
 
-    auto inspectSingle = [](const std::string &target, int cfg) {
+    auto inspectSingle = [&](const std::string &target, int cfg) {
       IsaDumperOptions opts;
       opts.targets = {target};
       opts.backends = {"vulkan"};
       opts.configs = {cfg};
+      opts.deviceIndex = static_cast<int>(devIdx);
       return IsaDumper::inspect(opts);
     };
 
-    const IsaInspectionResult rs33 = inspectSingle("RayScheduling", 33);
-    ASSERT_TRUE(rs33.ok);
-    ASSERT_EQ(rs33.artifacts.size(), size_t{1});
-    ASSERT_EQ(rs33.artifacts[0].configIndex, 33);
-    ASSERT_EQ(rs33.artifacts[0].artifactFile,
+    const IsaInspectionResult rs22 = inspectSingle("RayScheduling", 22);
+    ASSERT_TRUE(rs22.ok);
+    ASSERT_EQ(rs22.artifacts.size(), size_t{1});
+    ASSERT_EQ(rs22.artifacts[0].configIndex, 22);
+    ASSERT_EQ(rs22.artifacts[0].artifactFile,
               std::string("rt_scheduling_device_generated_commands_light.comp.spv"));
-    ASSERT_TRUE(rs33.artifacts[0].skipReason.empty());
-    ASSERT_FALSE(rs33.artifacts[0].executables.empty());
+    ASSERT_TRUE(rs22.artifacts[0].skipReason.empty());
+    ASSERT_FALSE(rs22.artifacts[0].executables.empty());
 
-    const IsaInspectionResult rs28 = inspectSingle("RayScheduling", 28);
-    ASSERT_TRUE(rs28.ok);
-    ASSERT_EQ(rs28.artifacts.size(), size_t{1});
-    ASSERT_EQ(rs28.artifacts[0].artifactFile, std::string("rt_scheduling.rgen.spv"));
+    const IsaInspectionResult rs15 = inspectSingle("RayScheduling", 15);
+    ASSERT_TRUE(rs15.ok);
+    ASSERT_EQ(rs15.artifacts.size(), size_t{1});
+    ASSERT_EQ(rs15.artifacts[0].artifactFile, std::string("rt_scheduling.rgen.spv"));
     if (info.rayTracingSupport) {
-      ASSERT_TRUE(rs28.artifacts[0].skipReason.empty());
+      ASSERT_TRUE(rs15.artifacts[0].skipReason.empty());
     }
 
-    const IsaInspectionResult rs1 = inspectSingle("RayScheduling", 1);
-    ASSERT_TRUE(rs1.ok);
-    ASSERT_EQ(rs1.artifacts.size(), size_t{1});
-    ASSERT_EQ(rs1.artifacts[0].artifactFile, std::string("rt_scheduling_ser.rgen.spv"));
+    const IsaInspectionResult rs3 = inspectSingle("RayScheduling", 3);
+    ASSERT_TRUE(rs3.ok);
+    ASSERT_EQ(rs3.artifacts.size(), size_t{1});
+    ASSERT_EQ(rs3.artifacts[0].artifactFile, std::string("rt_scheduling_ser.rgen.spv"));
 
     const IsaInspectionResult l0bw = inspectSingle("L0 Cache Bandwidth", 0);
     ASSERT_TRUE(l0bw.ok);
@@ -572,11 +635,6 @@ TEST_CASE(ModernizationAnd2026, IsaDumper_HonestReportingAndHotLoopAccuracy) {
     ASSERT_TRUE(l0lat.ok);
     ASSERT_EQ(l0lat.artifacts.size(), size_t{1});
     ASSERT_EQ(l0lat.artifacts[0].artifactFile, std::string("l0_cache_latency.comp.spv"));
-
-    const IsaInspectionResult wg0 = inspectSingle("GPU Work Graphs (Producer-Consumer)", 0);
-    ASSERT_TRUE(wg0.ok);
-    ASSERT_EQ(wg0.artifacts.size(), size_t{1});
-    ASSERT_EQ(wg0.artifacts[0].artifactFile, std::string("workgraphs_producer.comp.spv"));
 
     const IsaInspectionResult async2 = inspectSingle("Async Compute & Copy Overlap", 2);
     ASSERT_TRUE(async2.ok);
@@ -603,10 +661,21 @@ TEST_CASE(ModernizationAnd2026, IsaDumper_HonestReportingAndHotLoopAccuracy) {
     ASSERT_EQ(omm2.artifacts.size(), size_t{1});
     ASSERT_EQ(omm2.artifacts[0].artifactFile, std::string("rayomm_omm.rgen.spv"));
 
+    const IsaInspectionResult ind1 = inspectSingle("In-Shader Indirect Synthesis", 1);
+    ASSERT_TRUE(ind1.ok);
+    ASSERT_EQ(ind1.artifacts.size(), size_t{1});
+    ASSERT_EQ(ind1.artifacts[0].artifactFile, std::string("direct_worker.comp.spv"));
+
     const IsaInspectionResult ind6 = inspectSingle("In-Shader Indirect Synthesis", 6);
     ASSERT_TRUE(ind6.ok);
-    ASSERT_EQ(ind6.artifacts.size(), size_t{1});
-    ASSERT_EQ(ind6.artifacts[0].artifactFile, std::string("direct_worker.comp.spv"));
+    ASSERT_FALSE(ind6.artifacts.empty());
+    bool foundMbWorker = false;
+    for (const auto &art : ind6.artifacts) {
+      if (art.artifactFile == "indirect_multibucket_worker.comp.spv") {
+        foundMbWorker = true;
+      }
+    }
+    ASSERT_TRUE(foundMbWorker);
 
     const IsaInspectionResult asb0 = inspectSingle("RayASBuild", 0);
     ASSERT_TRUE(asb0.ok);
@@ -615,11 +684,12 @@ TEST_CASE(ModernizationAnd2026, IsaDumper_HonestReportingAndHotLoopAccuracy) {
   }
 }
 
-TEST_CASE(Modernization2026, IsaDiskCacheAndWarmupValidation) {
+TEST_CASE(ModernizationAnd2026, IsaDiskCacheAndWarmupValidation) {
   auto ctx = createVulkanTestContext();
   if (!ctx) {
-    return;
+    SKIP_TEST("Vulkan backend unavailable");
   }
+  const uint32_t devIdx = ::gpubench::test::preferredTestDeviceIndex(ctx->getDevices().size());
   const DeviceInfo &info = ctx->getCurrentDeviceInfo();
 
   IsaCacheContext cacheCtx;
@@ -634,7 +704,7 @@ TEST_CASE(Modernization2026, IsaDiskCacheAndWarmupValidation) {
   opts.targets = {"fp64"};
   opts.backends = {"vulkan"};
   opts.configs = {0};
-  opts.deviceIndex = 0;
+  opts.deviceIndex = static_cast<int>(devIdx);
   opts.fullIsa = true;
 
   const IsaInspectionResult inspected = IsaDumper::inspect(opts);
@@ -758,4 +828,67 @@ TEST_CASE(ModernizationAnd2026, TelemetryWorkerRecordsOnlyDuringRunAndStops) {
   }
 
   worker.stop();
+}
+
+TEST_CASE(ModernizationAnd2026, OpacityMicromapBirdCurveBijection) {
+  std::set<uint32_t> seen;
+  for (uint32_t m = 0; m < 64u; ++m) {
+    float u0, v0, u1, v1, u2, v2;
+    RayOMMBench::SampleMicroTriangleVertices(m, u0, v0, u1, v1, u2, v2);
+    const float uc = (u0 + u1 + u2) * (1.0f / 3.0f);
+    const float vc = (v0 + v1 + v2) * (1.0f / 3.0f);
+    const uint32_t idx = RayOMMBench::BarycentricsToBirdIndex(uc, vc, 3u);
+    ASSERT_LT(idx, 64u);
+    ASSERT_TRUE(seen.insert(idx).second);
+  }
+  ASSERT_EQ(seen.size(), size_t{64});
+
+  // Verify Khronos VK_EXT_opacity_micromap Bird-curve corner orientation:
+  // origin (u=0,v=0) -> index 0; vertex (u=1,v=0) -> index 42; vertex (u=0,v=1) -> index 63.
+  ASSERT_EQ(RayOMMBench::BarycentricsToBirdIndex(1.0f / 24.0f, 1.0f / 24.0f, 3u), 0u);
+  ASSERT_EQ(RayOMMBench::BarycentricsToBirdIndex(22.0f / 24.0f, 1.0f / 24.0f, 3u), 42u);
+  ASSERT_EQ(RayOMMBench::BarycentricsToBirdIndex(1.0f / 24.0f, 22.0f / 24.0f, 3u), 63u);
+}
+
+TEST_CASE(ModernizationAnd2026, HeadlessSwapchainPresentWithValidation) {
+  if (!ComputeBackendFactory::isAvailable(ComputeBackend::Vulkan)) {
+    SKIP_TEST("Vulkan backend unavailable");
+  }
+
+  uint32_t extCount = 0;
+  bool hasHeadlessSurface = false;
+  if (vkEnumerateInstanceExtensionProperties(nullptr, &extCount, nullptr) == VK_SUCCESS && extCount > 0) {
+    std::vector<VkExtensionProperties> exts(extCount);
+    if (vkEnumerateInstanceExtensionProperties(nullptr, &extCount, exts.data()) == VK_SUCCESS) {
+      for (const auto &e : exts) {
+        if (std::string(e.extensionName) == "VK_EXT_headless_surface") {
+          hasHeadlessSurface = true;
+          break;
+        }
+      }
+    }
+  }
+  if (!hasHeadlessSurface) {
+    SKIP_TEST("VK_EXT_headless_surface instance extension not exposed");
+  }
+
+  std::unique_ptr<IComputeContext> ctx;
+  try {
+    ctx = ComputeBackendFactory::create(ComputeBackend::Vulkan, false, true);
+  } catch (const std::exception &e) {
+    SKIP_TEST(std::string("Vulkan validation context unavailable: ") + e.what());
+  }
+  if (!ctx || ctx->getDevices().empty()) {
+    SKIP_TEST("No Vulkan devices available");
+  }
+  ctx->pickDevice(::gpubench::test::preferredTestDeviceIndex(ctx->getDevices().size()));
+
+  auto *vCtx = dynamic_cast<VulkanContext *>(ctx.get());
+  ASSERT_TRUE(vCtx != nullptr);
+  vCtx->enableHeadlessSwapchain();
+  ASSERT_TRUE(vCtx->isHeadlessSwapchainEnabled());
+  vCtx->presentFrame();
+  vCtx->presentFrame();
+  vCtx->waitIdle();
+  ASSERT_EQ(vCtx->getValidationErrorCount(), 0u);
 }

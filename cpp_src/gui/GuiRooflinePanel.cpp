@@ -1,5 +1,6 @@
 #include "GuiApp.h"
 #include "GuiUiHelpers.h"
+#include "core/RooflineModel.h"
 
 #include <algorithm>
 #include <array>
@@ -7,6 +8,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace gpubench::gui {
@@ -166,13 +168,29 @@ const char* domainEffAxisLabel(int dom) {
 }
 
 double computeLatencyNs(const ResultData& r) {
+    const double effMs = effectiveResultTimeMs(r);
     if (r.metric == "ns") {
-        return (r.operations > 0) ? ((r.time_ms * 1e6) / static_cast<double>(r.operations)) : r.time_ms;
+        return (r.operations > 0) ? ((effMs * 1e6) / static_cast<double>(r.operations)) : effMs;
     }
     if (r.metric == "us") {
-        return (r.operations > 1) ? ((r.time_ms * 1e6) / static_cast<double>(r.operations)) : (r.time_ms * 1000.0);
+        return (r.operations > 1) ? ((effMs * 1e6) / static_cast<double>(r.operations)) : (effMs * 1000.0);
     }
-    return r.time_ms * 1e6;
+    return effMs * 1e6;
+}
+
+int compactLog10Formatter(double value, char* buff, int size, void*) {
+    if (value <= 0.0 || !std::isfinite(value)) {
+        return std::snprintf(buff, static_cast<size_t>(size), "0");
+    }
+    const double expVal = std::log10(value);
+    const int expInt = static_cast<int>(std::round(expVal));
+    if (std::abs(expVal - static_cast<double>(expInt)) < 0.05) {
+        if (expInt >= -1 && expInt <= 2) {
+            return std::snprintf(buff, static_cast<size_t>(size), "%g", value);
+        }
+        return std::snprintf(buff, static_cast<size_t>(size), "1e%d", expInt);
+    }
+    return std::snprintf(buff, static_cast<size_t>(size), "%.1g", value);
 }
 
 } // namespace
@@ -182,7 +200,8 @@ void GuiApp::renderRooflinePanel() {
 
     std::vector<ChartDeviceGroup> devGroups;
     for (const auto& r : m_allResults) {
-        if (r.isUnsupported || !r.isValid || r.time_ms <= 0.0) continue;
+        const double effMs = effectiveResultTimeMs(r);
+        if (r.isUnsupported || !r.isValid || effMs <= 0.0) continue;
         if (r.operations == 0 && r.metric != "us" && r.metric != "ms") continue;
 
         const bool rHost = isHostSystemResult(r);
@@ -229,8 +248,9 @@ void GuiApp::renderRooflinePanel() {
     for (const ResultData* rPtr : devGroup.results) {
         const ResultData& r = *rPtr;
         const int dom = classifyChartDomain(r);
-        const double opsPerSec = (r.operations > 0)
-            ? ((static_cast<double>(r.operations) / r.time_ms) * 1000.0)
+        const double effMs = effectiveResultTimeMs(r);
+        const double opsPerSec = (r.operations > 0 && effMs > 0.0)
+            ? ((static_cast<double>(r.operations) / effMs) * 1000.0)
             : 0.0;
         const double watts = (r.hasPowerTelemetry && r.powerWatts > 0.0f)
             ? static_cast<double>(r.powerWatts)
@@ -242,11 +262,16 @@ void GuiApp::renderRooflinePanel() {
         item.shortLabel = abbreviateChartTickLabel(item.fullLabel);
         item.perfText = formatResultScoreString(r, true);
         item.watts = watts;
-        item.medianMs = (r.median_time_ms > 0.0) ? r.median_time_ms : r.time_ms;
-        item.isMatrix = (item.fullLabel.find("Matrix") != std::string::npos ||
-                         item.fullLabel.find("FP8") != std::string::npos ||
-                         item.fullLabel.find("INT8") != std::string::npos ||
-                         item.fullLabel.find("WMMA") != std::string::npos);
+        item.medianMs = effMs;
+        const bool isVectorLabel = (item.fullLabel.find("Vector") != std::string::npos);
+        item.isMatrix = !isVectorLabel && (
+            item.fullLabel.find("Matrix") != std::string::npos ||
+            item.fullLabel.find("WMMA") != std::string::npos ||
+            item.fullLabel.find("Sparse") != std::string::npos ||
+            item.fullLabel.find("FP6") != std::string::npos ||
+            item.fullLabel.find("FP4") != std::string::npos ||
+            item.fullLabel.find("INT4") != std::string::npos ||
+            item.fullLabel.find("CoopVector") != std::string::npos);
 
         switch (dom) {
         case DOMAIN_COMPUTE:
@@ -394,7 +419,7 @@ void GuiApp::renderRooflinePanel() {
     });
 
     const size_t totalInDomain = bars.size();
-    const size_t maxBars = (m_f2SubMode == 0) ? 7u : 15u;
+    const size_t maxBars = 16u;
     if (bars.size() > maxBars) {
         // Keep the top-performing tail (end of ascending-sorted array)
         bars.erase(bars.begin(), bars.end() - static_cast<std::ptrdiff_t>(maxBars));
@@ -670,6 +695,426 @@ void GuiApp::renderRooflinePanel() {
         }
 
         ImGui::EndTable();
+    }
+}
+
+void GuiApp::renderEmpiricalRooflineView() {
+    const BringUpColors c = getBringUpColors(m_palette);
+    const std::vector<DeviceRoofline> rooflines = gpubench::RooflineModel::analyze(m_allResults);
+
+    if (rooflines.empty()) {
+        drawEtchedHeader("INS-02", "EMPIRICAL ROOFLINE MODEL (LOG-LOG)", c, "NO GPU DATA");
+        ImGui::Spacing();
+        ImGui::TextColored(c.textSecondary, "No GPU Empirical Roofline model available yet.");
+        ImGui::TextColored(c.textMuted, "Run at least one GPU memory bandwidth test and one GPU compute test (or import a JSON session via [SESSION]).");
+        ImGui::Spacing();
+        if (tacticalButton("##RoofEmptyToCharts", "OPEN CHARTS", ImVec2(s(120.0f), s(24.0f)), false, c)) {
+            m_f2SubMode = 0;
+        }
+        ImGui::SameLine(0.0f, s(6.0f));
+        if (tacticalButton("##RoofEmptyToScore", "OPEN SCORECARD", ImVec2(s(132.0f), s(24.0f)), false, c)) {
+            m_f2SubMode = 2;
+        }
+        return;
+    }
+
+    if (m_rooflineDeviceFilter < 0 || m_rooflineDeviceFilter >= static_cast<int>(rooflines.size())) {
+        m_rooflineDeviceFilter = 0;
+    }
+    const DeviceRoofline& rf = rooflines[static_cast<size_t>(m_rooflineDeviceFilter)];
+
+    char hdrTag[96];
+    std::snprintf(hdrTag, sizeof(hdrTag), "GPU %u | %s", rf.deviceIndex, rf.backendName.c_str());
+    drawEtchedHeader("INS-02", "EMPIRICAL ROOFLINE MODEL (LOG-LOG)", c, hdrTag);
+    ImGui::Spacing();
+
+    static int sLastRoofDev = -1;
+    static size_t sLastResultCount = 0;
+    bool resetPlotLimits = (sLastRoofDev != m_rooflineDeviceFilter) || (sLastResultCount != m_allResults.size());
+    sLastRoofDev = m_rooflineDeviceFilter;
+    sLastResultCount = m_allResults.size();
+
+    if (rooflines.size() > 1) {
+        for (size_t i = 0; i < rooflines.size(); ++i) {
+            std::string lbl = "GPU " + std::to_string(rooflines[i].deviceIndex) + " (" + rooflines[i].backendName + ")";
+            float bw = ImGui::CalcTextSize(lbl.c_str()).x + s(16.0f);
+            if (i > 0) sameLineIfFits(bw, s(4.0f));
+            std::string bid = "##EmpRoofDev_" + std::to_string(i);
+            if (tacticalButton(bid.c_str(), lbl.c_str(), ImVec2(0.0f, s(21.0f)),
+                               m_rooflineDeviceFilter == static_cast<int>(i), c)) {
+                m_rooflineDeviceFilter = static_cast<int>(i);
+                resetPlotLimits = true;
+            }
+        }
+        ImGui::SameLine(0.0f, s(10.0f));
+    }
+    if (tacticalButton("##RoofResetZoom", "RESET ZOOM", ImVec2(s(98.0f), s(21.0f)), false, c)) {
+        resetPlotLimits = true;
+    }
+    ImGui::SameLine(0.0f, s(12.0f));
+    {
+        const float hintAvailW = std::max(s(60.0f), ImGui::GetContentRegionAvail().x);
+        const std::string hint = fitTextToPixelWidth(
+            "Drag to pan | Scroll to zoom | Box-select (RMB drag) | Hover points for OI & attainment",
+            hintAvailW);
+        ImGui::TextColored(c.textMuted, "%s", hint.c_str());
+    }
+    ImGui::Spacing();
+
+    const double vramGBps = rf.primaryVramGBps();
+    const double peakComputeGops = rf.highestComputeGops();
+    const double fp32Gops = rf.primaryFp32Gops();
+    const double fp32Ridge = (vramGBps > 0.0 && fp32Gops > 0.0) ? (fp32Gops / vramGBps) : 0.0;
+
+    std::string peakComputeLabel = "—";
+    if (!rf.computeCeilings.empty()) {
+        const auto* topCeil = &rf.computeCeilings.front();
+        for (const auto& cc : rf.computeCeilings) {
+            if (cc.peakGops > topCeil->peakGops) topCeil = &cc;
+        }
+        char buf[64];
+        std::snprintf(buf, sizeof(buf), "%.2f %s", topCeil->peakTops, topCeil->metric.c_str());
+        peakComputeLabel = buf;
+    }
+
+    size_t memBoundCount = 0;
+    size_t compBoundCount = 0;
+    for (const auto& wp : rf.workloadPoints) {
+        if (wp.isMemoryBound) memBoundCount++;
+        else compBoundCount++;
+    }
+
+    // 4-Cell Empirical Roofline KPI Strip
+    if (ImGui::BeginTable("EmpRoofKpiStrip", 4, ImGuiTableFlags_Borders | ImGuiTableFlags_SizingStretchSame)) {
+        ImGui::TableNextRow();
+
+        ImGui::TableNextColumn();
+        const float col0W = ImGui::GetContentRegionAvail().x;
+        ImGui::TextColored(c.textMuted, "%s",
+                           fitTextToPixelWidth((col0W < s(185.0f)) ? "VRAM CEILING" : "PRIMARY VRAM CEILING", col0W).c_str());
+        pushBoldFont();
+        if (vramGBps > 0.0) {
+            ImGui::TextColored(c.okColor, "%.2f GB/s", vramGBps);
+        } else {
+            ImGui::TextColored(c.textMuted, "N/A (Run MemBW)");
+        }
+        popBoldFont();
+
+        ImGui::TableNextColumn();
+        const float col1W = ImGui::GetContentRegionAvail().x;
+        ImGui::TextColored(c.textMuted, "%s",
+                           fitTextToPixelWidth((col1W < s(185.0f)) ? "PEAK COMPUTE" : "PEAK COMPUTE CEILING", col1W).c_str());
+        pushBoldFont();
+        ImGui::TextColored(c.cyanAccent, "%s",
+                           fitTextToPixelWidth(peakComputeLabel, col1W).c_str());
+        popBoldFont();
+
+        ImGui::TableNextColumn();
+        const float col2W = ImGui::GetContentRegionAvail().x;
+        ImGui::TextColored(c.textMuted, "%s",
+                           fitTextToPixelWidth((col2W < s(185.0f)) ? "FP32 RIDGE" : "FP32 / VRAM RIDGE", col2W).c_str());
+        pushBoldFont();
+        if (fp32Ridge > 0.0) {
+            ImGui::TextColored(c.phosphorHi, "%.2f FLOP/Byte", fp32Ridge);
+        } else {
+            ImGui::TextColored(c.textMuted, "—");
+        }
+        popBoldFont();
+
+        ImGui::TableNextColumn();
+        const float col3W = ImGui::GetContentRegionAvail().x;
+        ImGui::TextColored(c.textMuted, "%s",
+                           fitTextToPixelWidth((col3W < s(185.0f)) ? "BOTTLENECK" : "BOTTLENECK SPLIT", col3W).c_str());
+        pushBoldFont();
+        char splitBuf[64];
+        const char* splitFmt = (col3W < s(190.0f))
+            ? "%zu Mem | %zu Comp"
+            : "%zu Mem-Bound  |  %zu Compute-Bound";
+        std::snprintf(splitBuf, sizeof(splitBuf), splitFmt, memBoundCount, compBoundCount);
+        ImGui::TextColored(c.textPrimary, "%s",
+                           fitTextToPixelWidth(splitBuf, col3W).c_str());
+        popBoldFont();
+
+        ImGui::EndTable();
+    }
+
+    ImGui::Spacing();
+
+    // Compute strictly positive log10 axis domain covering ceilings and workload points
+    double maxOI = 64.0;
+    double minOI = 0.05;
+    double maxPerfGops = std::max(100.0, peakComputeGops);
+    double minPerfGops = 10.0;
+    for (const auto& wp : rf.workloadPoints) {
+        if (wp.operationalIntensity > 0.0) {
+            maxOI = std::max(maxOI, wp.operationalIntensity);
+            minOI = std::min(minOI, wp.operationalIntensity * 0.5);
+        }
+        if (wp.achievedGops > 0.0) {
+            maxPerfGops = std::max(maxPerfGops, wp.achievedGops);
+            minPerfGops = std::min(minPerfGops, wp.achievedGops * 0.5);
+        }
+    }
+    for (const auto& rp : rf.ridgePoints) {
+        if (rp.ridgeOpsPerByte > 0.0) {
+            maxOI = std::max(maxOI, rp.ridgeOpsPerByte * 4.0);
+        }
+    }
+    const double xMin = std::max(1e-2, std::pow(10.0, std::floor(std::log10(std::max(minOI, 1e-2)))));
+    const double xMax = std::max(1e3, std::pow(10.0, std::ceil(std::log10(maxOI * 2.5))));
+    const double yMin = std::max(1.0, std::pow(10.0, std::floor(std::log10(std::max(minPerfGops, 1.0)))));
+    const double yMax = std::max(1000.0, std::pow(10.0, std::ceil(std::log10(maxPerfGops * 2.2))));
+
+    const float totalAvailH = ImGui::GetContentRegionAvail().y;
+    const float availPlotW = ImGui::GetContentRegionAvail().x;
+    const bool tightHeight = (totalAvailH < s(240.0f)) || (availPlotW < s(640.0f));
+    const float tableReserveH = rf.workloadPoints.empty()
+        ? 0.0f
+        : (tightHeight ? s(140.0f) : std::min(s(165.0f), std::max(0.0f, totalAvailH * 0.34f)));
+    const float plotH = tightHeight
+        ? std::max(s(145.0f), totalAvailH - s(6.0f))
+        : std::max(s(210.0f), totalAvailH - tableReserveH - s(8.0f));
+    const char* xAxisLbl = tightHeight ? "OI (OP/Byte)" : "Operational Intensity (FLOP/Byte or OP/Byte)";
+    const char* yAxisLbl = tightHeight ? "GFLOPS / GOPS" : "Performance (GFLOPS / GOPS)";
+
+    const ImPlotCond axisCond = resetPlotLimits ? ImPlotCond_Always : ImPlotCond_Once;
+    const ImPlotFlags plotFlags = tightHeight
+        ? (ImPlotFlags_Crosshairs | ImPlotFlags_NoLegend)
+        : ImPlotFlags_Crosshairs;
+
+    std::vector<std::pair<std::string, ImVec4>> legendItems;
+
+    if (ImPlot::BeginPlot("EMPIRICAL ROOFLINE MODEL###EmpiricalRooflinePlot", ImVec2(-1.0f, plotH), plotFlags)) {
+        ImPlot::SetupAxes(xAxisLbl, yAxisLbl);
+        ImPlot::SetupAxisScale(ImAxis_X1, ImPlotScale_Log10);
+        ImPlot::SetupAxisScale(ImAxis_Y1, ImPlotScale_Log10);
+        ImPlot::SetupAxisFormat(ImAxis_X1, compactLog10Formatter);
+        if (tightHeight) {
+            ImPlot::SetupAxisFormat(ImAxis_Y1, compactLog10Formatter);
+        }
+        ImPlot::SetupAxesLimits(xMin, xMax, yMin, yMax, axisCond);
+        if (!tightHeight) {
+            ImPlot::SetupLegend(ImPlotLocation_SouthEast);
+        }
+
+        auto drawLogLine = [](const char* label, double x0, double x1,
+                              double slopeOrZero, double interceptGops,
+                              const ImVec4& col, float weight) {
+            if (x0 <= 0.0 || x1 <= x0) return;
+            constexpr int kSteps = 48;
+            double xs[kSteps];
+            double ys[kSteps];
+            const double log0 = std::log10(x0);
+            const double log1 = std::log10(x1);
+            int valid = 0;
+            for (int i = 0; i < kSteps; ++i) {
+                const double t = static_cast<double>(i) / static_cast<double>(kSteps - 1);
+                const double x = std::pow(10.0, log0 + t * (log1 - log0));
+                const double y = (slopeOrZero > 0.0) ? (slopeOrZero * x) : interceptGops;
+                if (x > 0.0 && y > 0.0) {
+                    xs[valid] = x;
+                    ys[valid] = y;
+                    valid++;
+                }
+            }
+            if (valid >= 2) {
+                ImPlotSpec spec;
+                spec.LineColor = col;
+                spec.LineWeight = weight;
+                ImPlot::PlotLine(label, xs, ys, valid, spec);
+            }
+        };
+
+        // 1. Sloped Memory Hierarchy Bandwidth Roofs (y = BW * x)
+        const ImVec4 bwColors[] = {
+            c.okColor,
+            c.cyanAccent,
+            c.phosphorHi,
+            c.violetAccent,
+            c.warnColor,
+            c.textSecondary
+        };
+        const double topRefGops = (peakComputeGops > 0.0) ? peakComputeGops : yMax;
+        for (size_t i = 0; i < rf.bandwidthCeilings.size(); ++i) {
+            const auto& bw = rf.bandwidthCeilings[i];
+            if (bw.bandwidthGBps <= 0.0) continue;
+            const double xRidgeTop = std::min(xMax, (topRefGops * 1.15) / bw.bandwidthGBps);
+            const double xStart = std::max(xMin, yMin / bw.bandwidthGBps);
+            if (xRidgeTop > xStart) {
+                char lbl[64];
+                std::snprintf(lbl, sizeof(lbl), "%s: %.0f GB/s", bw.level.c_str(), bw.bandwidthGBps);
+                const ImVec4 col = bwColors[i % (sizeof(bwColors) / sizeof(bwColors[0]))];
+                drawLogLine(lbl, xStart, xRidgeTop, bw.bandwidthGBps, 0.0, col,
+                            (bw.level == "VRAM") ? 2.4f : 1.5f);
+                legendItems.emplace_back(lbl, col);
+            }
+        }
+
+        // 2. Horizontal Compute Ceilings (starting at VRAM ridge point when available)
+        const ImVec4 compColors[] = {
+            c.phosphorHi,
+            c.cyanAccent,
+            c.violetAccent,
+            c.okColor,
+            c.warnColor,
+            c.errColor
+        };
+        for (size_t i = 0; i < rf.computeCeilings.size(); ++i) {
+            const auto& cc = rf.computeCeilings[i];
+            if (cc.peakGops <= 0.0) continue;
+            double xStart = xMin;
+            if (vramGBps > 0.0) {
+                xStart = std::max(xMin, cc.peakGops / vramGBps);
+            }
+            if (xMax > xStart) {
+                char lbl[80];
+                std::snprintf(lbl, sizeof(lbl), "%s: %.1f %s",
+                              cc.name.c_str(), cc.peakTops, cc.metric.c_str());
+                const ImVec4 col = compColors[i % (sizeof(compColors) / sizeof(compColors[0]))];
+                drawLogLine(lbl, xStart, xMax, 0.0, cc.peakGops, col, 2.0f);
+                legendItems.emplace_back(lbl, col);
+            }
+        }
+
+        // 3. Workload Scatter Points (Memory-Bound vs Compute-Bound)
+        std::vector<double> memX, memY, compX, compY;
+        std::vector<const RooflineWorkloadPoint*> allPts;
+        for (const auto& wp : rf.workloadPoints) {
+            if (wp.operationalIntensity <= 0.0 || wp.achievedGops <= 0.0) continue;
+            allPts.push_back(&wp);
+            if (wp.isMemoryBound) {
+                memX.push_back(wp.operationalIntensity);
+                memY.push_back(wp.achievedGops);
+            } else {
+                compX.push_back(wp.operationalIntensity);
+                compY.push_back(wp.achievedGops);
+            }
+        }
+        if (!memX.empty()) {
+            ImPlotSpec spec;
+            spec.Marker = ImPlotMarker_Diamond;
+            spec.MarkerSize = 6.0f;
+            spec.MarkerLineColor = c.warnColor;
+            spec.MarkerFillColor = c.warnColor;
+            ImPlot::PlotScatter("Memory-Bound Workloads", memX.data(), memY.data(),
+                                static_cast<int>(memX.size()), spec);
+        }
+        if (!compX.empty()) {
+            ImPlotSpec spec;
+            spec.Marker = ImPlotMarker_Circle;
+            spec.MarkerSize = 6.0f;
+            spec.MarkerLineColor = c.cyanAccent;
+            spec.MarkerFillColor = c.cyanAccent;
+            ImPlot::PlotScatter("Compute-Bound Workloads", compX.data(), compY.data(),
+                                static_cast<int>(compX.size()), spec);
+        }
+
+        // Interactive hover hit-testing in pixel space so log-log proximity feels natural
+        if (ImPlot::IsPlotHovered() && !allPts.empty()) {
+            const ImVec2 mousePx = ImGui::GetMousePos();
+            const RooflineWorkloadPoint* hovered = nullptr;
+            float bestDistSq = s(18.0f) * s(18.0f);
+            for (const auto* wp : allPts) {
+                ImVec2 ptPx = ImPlot::PlotToPixels(wp->operationalIntensity, wp->achievedGops,
+                                                   ImAxis_X1, ImAxis_Y1);
+                const float dx = ptPx.x - mousePx.x;
+                const float dy = ptPx.y - mousePx.y;
+                const float d2 = dx * dx + dy * dy;
+                if (d2 < bestDistSq) {
+                    bestDistSq = d2;
+                    hovered = wp;
+                }
+            }
+            if (hovered) {
+                ImGui::BeginTooltip();
+                pushBoldFont();
+                ImGui::TextColored(c.phosphorHi, "%s", hovered->label.c_str());
+                popBoldFont();
+                ImGui::Separator();
+                ImGui::Text("Target Ceiling:        %s", hovered->targetCeilingName.c_str());
+                ImGui::Text("Operational Intensity: %.2f OP/Byte", hovered->operationalIntensity);
+                ImGui::Text("Achieved Performance:  %.2f TFLOPS/TOPS (%.0f GOPS)",
+                            hovered->achievedGops / 1000.0, hovered->achievedGops);
+                if (hovered->rooflineBoundGops > 0.0) {
+                    ImGui::Text("Roofline Bound:        %.2f TFLOPS/TOPS (%.1f%%)",
+                                hovered->rooflineBoundGops / 1000.0, hovered->attainmentPct);
+                }
+                ImGui::TextColored(hovered->isMemoryBound ? c.warnColor : c.okColor,
+                                   "Classification:        %s",
+                                   hovered->isMemoryBound ? "MEMORY-BOUND" : "COMPUTE-BOUND");
+                ImGui::EndTooltip();
+            }
+        }
+
+        ImPlot::EndPlot();
+    }
+
+    if (tightHeight && !legendItems.empty()) {
+        ImGui::Spacing();
+        const float swatchSz = ImGui::GetTextLineHeight() * 0.72f;
+        for (size_t li = 0; li < legendItems.size(); ++li) {
+            const float itemW = swatchSz + s(4.0f) + ImGui::CalcTextSize(legendItems[li].first.c_str()).x + s(10.0f);
+            if (li > 0) sameLineIfFits(itemW, s(8.0f));
+            const ImVec2 p0 = ImGui::GetCursorScreenPos();
+            const float yOff = (ImGui::GetTextLineHeight() - swatchSz) * 0.5f;
+            ImGui::GetWindowDrawList()->AddRectFilled(
+                ImVec2(p0.x, p0.y + yOff),
+                ImVec2(p0.x + swatchSz, p0.y + yOff + swatchSz),
+                toU32(legendItems[li].second), 0.0f);
+            ImGui::Dummy(ImVec2(swatchSz, ImGui::GetTextLineHeight()));
+            ImGui::SameLine(0.0f, s(4.0f));
+            ImGui::TextColored(c.textPrimary, "%s", legendItems[li].first.c_str());
+        }
+    }
+
+    if (!rf.workloadPoints.empty() && (tightHeight || tableReserveH > s(60.0f))) {
+        ImGui::Spacing();
+        const ImGuiTableFlags tFlags = ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                                       ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingStretchProp;
+        if (ImGui::BeginTable("EmpiricalRooflineTable", 6, tFlags, ImVec2(0.0f, tightHeight ? s(140.0f) : 0.0f))) {
+            ImGui::TableSetupScrollFreeze(0, 1);
+            ImGui::TableSetupColumn("Workload", ImGuiTableColumnFlags_WidthStretch, 0.28f);
+            ImGui::TableSetupColumn("Target Ceiling", ImGuiTableColumnFlags_WidthStretch, 0.20f);
+            ImGui::TableSetupColumn("OI (OP/B)", ImGuiTableColumnFlags_WidthStretch, 0.13f);
+            ImGui::TableSetupColumn("Achieved", ImGuiTableColumnFlags_WidthStretch, 0.14f);
+            ImGui::TableSetupColumn("Attainment", ImGuiTableColumnFlags_WidthStretch, 0.11f);
+            ImGui::TableSetupColumn("Regime", ImGuiTableColumnFlags_WidthStretch, 0.14f);
+            ImGui::TableHeadersRow();
+
+            for (const auto& wp : rf.workloadPoints) {
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                ImGui::TextColored(c.textPrimary, "%s", wp.label.c_str());
+
+                ImGui::TableSetColumnIndex(1);
+                ImGui::TextColored(c.textSecondary, "%s", wp.targetCeilingName.c_str());
+
+                ImGui::TableSetColumnIndex(2);
+                pushMonoFont();
+                ImGui::TextColored(c.cyanAccent, "%.2f", wp.operationalIntensity);
+                popMonoFont();
+
+                ImGui::TableSetColumnIndex(3);
+                pushMonoFont();
+                ImGui::TextColored(c.textPrimary, "%.2f %s", wp.achievedGops / 1000.0, wp.metric.c_str());
+                popMonoFont();
+
+                ImGui::TableSetColumnIndex(4);
+                pushMonoFont();
+                if (wp.rooflineBoundGops > 0.0) {
+                    ImGui::TextColored(wp.attainmentPct >= 80.0 ? c.okColor : c.warnColor,
+                                       "%.1f%%", wp.attainmentPct);
+                } else {
+                    ImGui::TextColored(c.textMuted, "—");
+                }
+                popMonoFont();
+
+                ImGui::TableSetColumnIndex(5);
+                ImGui::TextColored(wp.isMemoryBound ? c.warnColor : c.okColor, "%s",
+                                   wp.isMemoryBound ? "MEMORY-BOUND" : "COMPUTE-BOUND");
+            }
+            ImGui::EndTable();
+        }
     }
 }
 

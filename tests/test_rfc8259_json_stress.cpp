@@ -3,6 +3,7 @@
 #include "core/ResultImporter.h"
 #include "core/RunnerAPI.h"
 #include "core/DeviceDatabase.h"
+#include "third_party/yyjson.h"
 
 #include <vector>
 #include <string>
@@ -539,13 +540,23 @@ TEST_CASE(RFC8259_JsonStress, BatchScaling1000AdversarialResults) {
   ASSERT_FALSE(jsonStr.empty());
   assertNoNonFiniteTokens(jsonStr);
 
-  // Write out to disk and verify with external strict validator
+  // Write out to disk and verify with strict yyjson file parser
   std::string outPath = (std::filesystem::temp_directory_path() / "gpubench_stress_1000.json").string();
   std::ofstream ofs(outPath);
   ASSERT_TRUE(ofs.is_open());
   ofs << jsonStr;
   ofs.close();
+
+  yyjson_read_err yErr{};
+  yyjson_doc *diskDoc = yyjson_read_file(outPath.c_str(), YYJSON_READ_NOFLAG, nullptr, &yErr);
   std::remove(outPath.c_str());
+  ASSERT_TRUE(diskDoc != nullptr);
+  yyjson_val *diskRoot = yyjson_doc_get_root(diskDoc);
+  ASSERT_TRUE(yyjson_is_obj(diskRoot));
+  yyjson_val *diskResults = yyjson_obj_get(diskRoot, "results");
+  ASSERT_TRUE(yyjson_is_arr(diskResults));
+  ASSERT_EQ(yyjson_arr_size(diskResults), size_t{1000});
+  yyjson_doc_free(diskDoc);
 
   // Test round-trip with internal ResultImporter
   ImportedRun run;

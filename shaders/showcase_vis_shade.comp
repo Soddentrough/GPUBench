@@ -1,0 +1,187 @@
+#version 460
+#extension GL_EXT_nonuniform_qualifier : require
+
+#include "showcase_common.glsl"
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+layout(constant_id = 0) const uint SPEC_ARCHETYPE = 8u;
+
+SHOWCASE_DECLARE_SCENE_SET(0);
+SHOWCASE_DECLARE_FRAME_SET(1);
+
+#include "showcase_pbr.glsl"
+
+layout(push_constant) uniform ShadePC {
+  uint arch;
+  uint queueCapacity;
+  uint width;
+  uint height;
+  uint optFlags;
+  uint overlayMode;
+  uint mode;
+  uint pad;
+} pc;
+
+float edge2D(vec2 a, vec2 b, vec2 c) {
+  return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+}
+
+vec3 perspectiveBary(vec2 p0, vec2 p1, vec2 p2, float iw0, float iw1, float iw2, vec2 ptNdc) {
+  float area = edge2D(p0, p1, p2);
+  float invArea = (abs(area) > 1e-8) ? (1.0 / area) : 0.0;
+  float b0 = edge2D(p1, p2, ptNdc) * invArea;
+  float b1 = edge2D(p2, p0, ptNdc) * invArea;
+  float b2 = 1.0 - b0 - b1;
+  vec3 wBary = vec3(b0 * iw0, b1 * iw1, b2 * iw2);
+  float wSum = wBary.x + wBary.y + wBary.z;
+  return (abs(wSum) > 1e-8) ? (wBary / wSum) : vec3(1.0 / 3.0);
+}
+
+float edgeDistPx(vec2 pt, vec2 a, vec2 b) {
+  vec2 ab = b - a;
+  float l = max(length(ab), 1e-4);
+  return abs((pt.x - a.x) * ab.y - (pt.y - a.y) * ab.x) / l;
+}
+
+void main() {
+  uint width = (pc.width > 0u) ? pc.width : ubo.screenInfo.x;
+  uint height = (pc.height > 0u) ? pc.height : ubo.screenInfo.y;
+  uint qCap = (pc.queueCapacity > 0u) ? pc.queueCapacity : ubo.frameMeta.z;
+
+  ivec2 px;
+  if (SPEC_ARCHETYPE < 8u) {
+    uint binCount = worklistCounters[8u + SPEC_ARCHETYPE];
+    uint gid = gl_GlobalInvocationID.x;
+    if (gid >= binCount) {
+      return;
+    }
+    uint packedPx = worklistData[SPEC_ARCHETYPE * qCap + gid];
+    px = ivec2(int(packedPx & 0xFFFFu), int(packedPx >> 16u));
+  } else {
+    uint gid = gl_GlobalInvocationID.x;
+    uint totalPx = width * height;
+    if (gid >= totalPx) {
+      return;
+    }
+    px = ivec2(int(gid % width), int(gid / width));
+  }
+
+  if (px.x >= int(width) || px.y >= int(height)) {
+    return;
+  }
+
+  uvec2 vis = imageLoad(uVisBufferImg, px).rg;
+  if (vis.y == 0xFFFFFFFFu) {
+    return;
+  }
+
+  imageAtomicAdd(uOverdrawImg, px, 1u);
+
+  uint meshletIdx = vis.x >> 8u;
+  uint primIdx = vis.x & 0xFFu;
+  uint instIdx = vis.y;
+
+  ShowcaseMeshlet m = meshlets[meshletIdx];
+  ShowcaseInstance inst = instances[instIdx];
+  uint packedTri = meshletTriangles[m.triangleOffset + primIdx];
+  uint gv0 = meshletVertices[m.vertexOffset + ((packedTri >> 0u) & 0xFFu)];
+  uint gv1 = meshletVertices[m.vertexOffset + ((packedTri >> 8u) & 0xFFu)];
+  uint gv2 = meshletVertices[m.vertexOffset + ((packedTri >> 16u) & 0xFFu)];
+
+  ShowcaseVertex v0 = vertices[gv0];
+  ShowcaseVertex v1 = vertices[gv1];
+  ShowcaseVertex v2 = vertices[gv2];
+
+  vec4 w0 = inst.model * vec4(v0.posMat.xyz, 1.0);
+  vec4 w1 = inst.model * vec4(v1.posMat.xyz, 1.0);
+  vec4 w2 = inst.model * vec4(v2.posMat.xyz, 1.0);
+
+  vec4 c0 = ubo.viewProj * w0;
+  vec4 c1 = ubo.viewProj * w1;
+  vec4 c2 = ubo.viewProj * w2;
+
+  float iw0 = 1.0 / max(abs(c0.w), 1e-4) * sign(c0.w >= 0.0 ? 1.0 : -1.0);
+  float iw1 = 1.0 / max(abs(c1.w), 1e-4) * sign(c1.w >= 0.0 ? 1.0 : -1.0);
+  float iw2 = 1.0 / max(abs(c2.w), 1e-4) * sign(c2.w >= 0.0 ? 1.0 : -1.0);
+
+  vec2 p0 = c0.xy * iw0;
+  vec2 p1 = c1.xy * iw1;
+  vec2 p2 = c2.xy * iw2;
+
+  vec2 resF = vec2(width, height);
+  vec2 s0 = (p0 * 0.5 + 0.5) * resF;
+  vec2 s1 = (p1 * 0.5 + 0.5) * resF;
+  vec2 s2 = (p2 * 0.5 + 0.5) * resF;
+  vec2 se1 = s1 - s0;
+  vec2 se2 = s2 - s0;
+  float areaPx = 0.5 * abs(se1.x * se2.y - se1.y * se2.x);
+  imageStore(uTriAreaImg, px, vec4(max(areaPx, 0.01), 0.0, 0.0, 0.0));
+
+  vec2 ptPx = vec2(px) + 0.5;
+  float dMin = min(edgeDistPx(ptPx, s0, s1), min(edgeDistPx(ptPx, s1, s2), edgeDistPx(ptPx, s2, s0)));
+  float edgeMask = 1.0 - smoothstep(0.0, 1.15, dMin);
+  uint edgeByte = clamp(uint(edgeMask * 255.0), 0u, 255u);
+  imageStore(uDebugTagImg, px, uvec4((meshletIdx << 8u) | edgeByte, 0u, 0u, 0u));
+
+  vec2 invRes = vec2(1.0 / float(width), 1.0 / float(height));
+  vec2 ndcC = ((vec2(px) + 0.5) * invRes) * 2.0 - 1.0;
+  vec2 ndcDx = ndcC + vec2(2.0 * invRes.x, 0.0);
+  vec2 ndcDy = ndcC + vec2(0.0, 2.0 * invRes.y);
+
+  vec3 lC = perspectiveBary(p0, p1, p2, iw0, iw1, iw2, ndcC);
+  vec3 lDx = perspectiveBary(p0, p1, p2, iw0, iw1, iw2, ndcDx);
+  vec3 lDy = perspectiveBary(p0, p1, p2, iw0, iw1, iw2, ndcDy);
+
+  vec2 uv0 = v0.uvPad.xy;
+  vec2 uv1 = v1.uvPad.xy;
+  vec2 uv2 = v2.uvPad.xy;
+
+  vec2 uv = uv0 * lC.x + uv1 * lC.y + uv2 * lC.z;
+  vec2 dUVdx = (uv0 * lDx.x + uv1 * lDx.y + uv2 * lDx.z) - uv;
+  vec2 dUVdy = (uv0 * lDy.x + uv1 * lDy.y + uv2 * lDy.z) - uv;
+
+  vec3 worldPos = w0.xyz * lC.x + w1.xyz * lC.y + w2.xyz * lC.z;
+  mat3 nrmMat = mat3(inst.model);
+  vec3 worldNormal = normalize(nrmMat * (v0.normalFlags.xyz * lC.x + v1.normalFlags.xyz * lC.y + v2.normalFlags.xyz * lC.z));
+  vec4 localTan = v0.tangent * lC.x + v1.tangent * lC.y + v2.tangent * lC.z;
+  vec3 worldTan = normalize(nrmMat * localTan.xyz);
+  float tanSign = (v0.tangent.w >= 0.0) ? 1.0 : -1.0;
+
+  uint matId = floatBitsToUint(v0.posMat.w);
+  uint flags = floatBitsToUint(v0.normalFlags.w) | inst.meta.w;
+  ShowcaseMaterial mat = materials[matId];
+
+  vec4 baseSample = vec4(1.0);
+  if (mat.texIndices.x >= 0) {
+    baseSample = textureGrad(uTextures[nonuniformEXT(mat.texIndices.x)], uv, dUVdx, dUVdy);
+  }
+  vec3 albedo = baseSample.rgb * mat.baseColorFactor.rgb;
+
+  float metallic = mat.pbrParams.x;
+  float roughness = mat.pbrParams.y;
+  if (mat.texIndices.z >= 0 && mat.texIndices.z != 2) {
+    vec4 mr = textureGrad(uTextures[nonuniformEXT(mat.texIndices.z)], uv, dUVdx, dUVdy);
+    roughness *= mr.g;
+    metallic *= mr.b;
+  }
+  roughness = clamp(roughness, 0.08, 1.0);
+
+  float ao = 1.0;
+  if (mat.texIndices.w >= 0 && mat.texIndices.w != 0) {
+    ao = textureGrad(uTextures[nonuniformEXT(mat.texIndices.w)], uv, dUVdx, dUVdy).r;
+  }
+
+  vec3 N = worldNormal;
+  if (mat.texIndices.y >= 0 && mat.texIndices.y != 1) {
+    vec3 mapN = textureGrad(uTextures[nonuniformEXT(mat.texIndices.y)], uv, dUVdx, dUVdy).xyz * 2.0 - 1.0;
+    mapN.xy *= mat.pbrParams.z;
+    vec3 T = normalize(worldTan - N * dot(worldTan, N));
+    vec3 B = cross(N, T) * tanSign;
+    N = normalize(mat3(T, B, N) * mapN);
+  }
+
+  vec3 ldr = evaluateShowcasePbr(worldPos, N, albedo, metallic, roughness, ao,
+                                 mat.emissiveFactor.rgb, flags);
+  imageStore(uSceneColorImg, px, vec4(ldr, 1.0));
+}

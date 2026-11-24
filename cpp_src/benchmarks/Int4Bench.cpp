@@ -34,7 +34,8 @@ void Int4Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
   if (context.getBackend() == ComputeBackend::ROCm) {
     if (context.getCurrentDeviceInfo().int4Support) {
       std::filesystem::path matrix_file = kdir / "rocm" / "int4_matrix.hip";
-      if (file_exists(matrix_file.string())) {
+      std::filesystem::path co_file = kdir / "rocm" / "int4_matrix.co";
+      if (file_exists(matrix_file.string()) || file_exists(co_file.string())) {
         try {
           matrixKernel =
               context.createKernel(matrix_file.string(), "run_benchmark", 1);
@@ -90,7 +91,7 @@ bool Int4Bench::ValidateResults(uint32_t config_idx) const {
   try {
     context->readBuffer(buffer, 0, hostOut.size() * sizeof(int32_t), hostOut.data());
     for (int32_t v : hostOut) {
-      if (v == 0 || static_cast<uint32_t>(v) == 0x12345678u) return false;
+      if (v <= 1000 || static_cast<uint32_t>(v) == 0x12345678u) return false;
     }
     return true;
   } catch (...) {

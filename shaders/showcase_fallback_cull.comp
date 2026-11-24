@@ -1,0 +1,127 @@
+#version 460
+
+#include "showcase_common.glsl"
+
+layout(local_size_x = 32, local_size_y = 1, local_size_z = 1) in;
+
+SHOWCASE_DECLARE_SCENE_SET(0);
+SHOWCASE_DECLARE_FRAME_SET(1);
+
+layout(push_constant) uniform CullPC {
+  uint phaseIndex;
+  uint packetCount;
+  uint maxFallbackDraws;
+  uint resetCounter;
+} pc;
+
+bool testHiZOcclusionFallback(vec3 centerW, float radiusW) {
+  vec2 minXY = vec2(1e9);
+  vec2 maxXY = vec2(-1e9);
+  float maxZ = 0.0;
+  for (int i = 0; i < 8; ++i) {
+    vec3 sgn = vec3((i & 1) != 0 ? 1.0 : -1.0,
+                    (i & 2) != 0 ? 1.0 : -1.0,
+                    (i & 4) != 0 ? 1.0 : -1.0);
+    vec4 clip = ubo.cullViewProj * vec4(centerW + sgn * radiusW, 1.0);
+    if (clip.w <= 1.0) return false;
+    vec3 ndc = clip.xyz / clip.w;
+    minXY = min(minXY, ndc.xy);
+    maxXY = max(maxXY, ndc.xy);
+    maxZ = max(maxZ, ndc.z);
+  }
+  vec2 uvMin = clamp(minXY * 0.5 + 0.5, vec2(0.0), vec2(1.0));
+  vec2 uvMax = clamp(maxXY * 0.5 + 0.5, vec2(0.0), vec2(1.0));
+  vec2 boxPx = max(uvMax - uvMin, vec2(0.0)) * vec2(ubo.screenInfo.xy);
+  float maxDim = max(boxPx.x, boxPx.y);
+  if (maxDim <= 0.01) return true;
+  float maxMip = float(max(ubo.frameMeta.y, 1u) - 1u);
+  float mip = clamp(ceil(log2(max(maxDim, 1.0))), 0.0, maxMip);
+  float d00 = textureLod(uHiZTex, vec2(uvMin.x, uvMin.y), mip).r;
+  float d10 = textureLod(uHiZTex, vec2(uvMax.x, uvMin.y), mip).r;
+  float d01 = textureLod(uHiZTex, vec2(uvMin.x, uvMax.y), mip).r;
+  float d11 = textureLod(uHiZTex, vec2(uvMax.x, uvMax.y), mip).r;
+  float hizMinZ = min(min(d00, d10), min(d01, d11));
+  return (maxZ + 0.00008 < hizMinZ);
+}
+
+void main() {
+  uint wgIdx = gl_WorkGroupID.x;
+  uint tid = gl_LocalInvocationID.x;
+  if (wgIdx >= pc.packetCount) {
+    return;
+  }
+
+  ShowcaseTaskPacket pkt = (pc.phaseIndex == 0u) ? taskPackets0[wgIdx] : taskPackets1[wgIdx];
+  if (tid >= pkt.count) {
+    return;
+  }
+
+  ShowcaseInstance inst = instances[pkt.instanceIdx];
+  uint optFlags = ubo.countsInfo.w;
+
+  uint lod = 0u;
+  if ((optFlags & SHOWCASE_OPT_ADAPTIVE_LOD) != 0u && inst.lodCountBase.y > 0u) {
+    float dist = length(inst.boundSphereWorld.xyz - ubo.cullCamPos.xyz);
+    float projSize = (inst.boundSphereWorld.w * 2.0) / max(dist * ubo.cullCamPos.w * 2.0, 1.0);
+    if (projSize < 0.055 && inst.lodCountBase.z > 0u) lod = 2u;
+    else if (projSize < 0.16) lod = 1u;
+  }
+
+  uint localIdx = pkt.localStart + tid;
+  uint lod0Count = inst.lodCountBase.x;
+  uint activeCount = inst.lodCountBase[lod];
+  if (localIdx >= lod0Count) {
+    return;
+  }
+
+  atomicAdd(stats.totalMeshlets, 1u);
+  if (localIdx >= activeCount) {
+    atomicAdd(stats.lodCulled, 1u);
+    return;
+  }
+
+  uint globalMeshletIdx = inst.lodFirstBase[lod] + localIdx;
+  ShowcaseMeshlet m = meshlets[globalMeshletIdx];
+
+  vec3 centerW = (inst.model * vec4(m.boundSphere.xyz, 1.0)).xyz;
+  float sx = length(inst.model[0].xyz);
+  float sy = length(inst.model[1].xyz);
+  float sz = length(inst.model[2].xyz);
+  float radiusW = m.boundSphere.w * max(max(sx, sy), max(sz, 1e-4));
+
+  if ((optFlags & SHOWCASE_OPT_FRUSTUM_CONE) != 0u) {
+    for (int p = 0; p < 6; ++p) {
+      vec4 plane = ubo.cullFrustumPlanes[p];
+      if (dot(plane.xyz, centerW) + plane.w < -radiusW) {
+        atomicAdd(stats.frustumCulled, 1u);
+        return;
+      }
+    }
+    if (m.coneAxisCutoff.w < 0.99 && (m.meta.y & SHOWCASE_FLAG_DOUBLE_SIDED) == 0u) {
+      vec3 worldAxis = normalize(mat3(inst.model) * m.coneAxisCutoff.xyz);
+      vec3 viewVec = centerW - ubo.cullCamPos.xyz;
+      float dist = length(viewVec);
+      if (dist > radiusW + 1.0) {
+        if (dot(viewVec / dist, worldAxis) >= m.coneAxisCutoff.w + (radiusW / dist) + 0.03) {
+          atomicAdd(stats.coneCulled, 1u);
+          return;
+        }
+      }
+    }
+  }
+
+  if (pc.phaseIndex == 1u && (optFlags & SHOWCASE_OPT_HIZ_OCCLUSION) != 0u) {
+    if (testHiZOcclusionFallback(centerW, radiusW)) {
+      atomicAdd(stats.hizCulled, 1u);
+      return;
+    }
+  }
+
+  uint drawSlot = atomicAdd(fallbackCount, 1u);
+  if (drawSlot < pc.maxFallbackDraws) {
+    fallbackCmds[drawSlot * 2u + 0u] = uvec4(m.triangleCount * 3u, 1u, m.meta.z, 0u);
+    fallbackCmds[drawSlot * 2u + 1u] = uvec4(drawSlot, pkt.instanceIdx, globalMeshletIdx, 0u);
+    atomicAdd(stats.renderedMeshlets, 1u);
+    atomicAdd(stats.renderedTriangles, m.triangleCount);
+  }
+}

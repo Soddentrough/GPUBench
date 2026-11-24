@@ -238,11 +238,11 @@ void RayASBuildBench::Setup(IComputeContext &context_ref,
           vContext->cmdPipelineMemoryBarrier2(
               cmd,
               VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
-              VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR | VK_ACCESS_2_SHADER_WRITE_BIT,
+              VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR,
               VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
               VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR |
                   VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR |
-                  VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT);
+                  VK_ACCESS_2_SHADER_READ_BIT);
         }
       }
       if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
@@ -254,8 +254,15 @@ void RayASBuildBench::Setup(IComputeContext &context_ref,
       VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
       submit.commandBufferCount = 1;
       submit.pCommandBuffers = &cmd;
-      VkResult submitRes = vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE);
-      VkResult waitRes = vkQueueWaitIdle(queue);
+      VkResult submitRes = VK_SUCCESS;
+      VkResult waitRes = VK_SUCCESS;
+      {
+        std::lock_guard<std::recursive_mutex> qlock(vContext->getQueueMutex());
+        submitRes = vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE);
+        if (submitRes == VK_SUCCESS) {
+          waitRes = vkQueueWaitIdle(queue);
+        }
+      }
       if (submitRes != VK_SUCCESS || waitRes != VK_SUCCESS) {
         vkDestroyCommandPool(device, tmpPool, nullptr);
         context_ref.releaseBuffer(libScratch);
@@ -436,7 +443,10 @@ void RayASBuildBench::Setup(IComputeContext &context_ref,
     VkSubmitInfo initSubmit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
     initSubmit.commandBufferCount = 1;
     initSubmit.pCommandBuffers = &cmd;
-    vkQueueSubmit(queue, 1, &initSubmit, VK_NULL_HANDLE);
+    {
+      std::lock_guard<std::recursive_mutex> qlock(vContext->getQueueMutex());
+      vkQueueSubmit(queue, 1, &initSubmit, VK_NULL_HANDLE);
+    }
     vContext->waitIdle();
   }
 }
@@ -449,12 +459,11 @@ void RayASBuildBench::recordBuildCommand(VkCommandBuffer cmd, uint32_t config_id
   vContext->cmdPipelineMemoryBarrier2(
       cmd,
       VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
-      VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR | VK_ACCESS_2_SHADER_WRITE_BIT,
-      VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT |
-          VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+      VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR,
+      VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
       VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR |
           VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR |
-          VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT);
+          VK_ACCESS_2_SHADER_READ_BIT);
 
   VkAccelerationStructureGeometryKHR geom{
       VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR};
@@ -530,11 +539,11 @@ void RayASBuildBench::recordBuildCommand(VkCommandBuffer cmd, uint32_t config_id
   vContext->cmdPipelineMemoryBarrier2(
       cmd,
       VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
-      VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR | VK_ACCESS_2_SHADER_WRITE_BIT,
+      VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR,
       VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
       VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR |
           VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR |
-          VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT);
+          VK_ACCESS_2_SHADER_READ_BIT);
 }
 
 void RayASBuildBench::Run(uint32_t config_idx) {
@@ -568,12 +577,11 @@ void RayASBuildBench::Run(uint32_t config_idx) {
   vContext->cmdPipelineMemoryBarrier2(
       frame.cmd,
       VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
-      VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR | VK_ACCESS_2_SHADER_WRITE_BIT,
-      VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT |
-          VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+      VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR,
+      VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
       VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR |
           VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR |
-          VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT);
+          VK_ACCESS_2_SHADER_READ_BIT);
 
   vContext->startTiming(frame.cmd);
   recordBuildCommand(frame.cmd, config_idx, vContext);
@@ -587,7 +595,11 @@ void RayASBuildBench::Run(uint32_t config_idx) {
   submit.commandBufferCount = 1;
   submit.pCommandBuffers = &frame.cmd;
 
-  VkResult res = vkQueueSubmit(queue, 1, &submit, frame.fence);
+  VkResult res = VK_SUCCESS;
+  {
+    std::lock_guard<std::recursive_mutex> qlock(vContext->getQueueMutex());
+    res = vkQueueSubmit(queue, 1, &submit, frame.fence);
+  }
   if (res != VK_SUCCESS) {
     throw std::runtime_error("vkQueueSubmit failed in RayASBuild: " + std::to_string(res));
   }
@@ -600,7 +612,13 @@ void RayASBuildBench::Teardown() {
   VkDevice device = vContext ? vContext->getVulkanDevice() : VK_NULL_HANDLE;
 
   if (device != VK_NULL_HANDLE) {
-    vkDeviceWaitIdle(device);
+    {
+      std::unique_lock<std::recursive_mutex> qlock;
+      if (vContext) {
+        qlock = std::unique_lock<std::recursive_mutex>(vContext->getQueueMutex());
+      }
+      vkDeviceWaitIdle(device);
+    }
 
     for (uint32_t i = 0; i < kNumFrames; ++i) {
       if (buildFrames[i].fence != VK_NULL_HANDLE) {

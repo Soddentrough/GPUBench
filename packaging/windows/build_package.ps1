@@ -1,4 +1,4 @@
-# GPUBench Windows Package Builder
+﻿# GPUBench Windows Package Builder
 # This script automates building Windows packages (ZIP and/or NSIS installer)
 
 param(
@@ -82,9 +82,19 @@ if (-not (Get-Command gcc -ErrorAction SilentlyContinue)) {
     }
 }
 
+# Ensure Vulkan SDK tools (glslc.exe, slangc.exe) are on PATH if present
+if ($env:VULKAN_SDK -and (Test-Path "$($env:VULKAN_SDK)\Bin")) {
+    $env:PATH = "$($env:VULKAN_SDK)\Bin;$env:PATH"
+} elseif (-not (Get-Command slangc -ErrorAction SilentlyContinue)) {
+    $sdkBins = Get-ChildItem "C:\VulkanSDK\*\Bin" -ErrorAction SilentlyContinue | Sort-Object FullName -Descending | Select-Object -First 1
+    if ($sdkBins) {
+        $env:PATH = "$($sdkBins.FullName);$env:PATH"
+    }
+}
+
 # Verify prerequisites
 if (-not (Test-CMake)) {
-    Write-Error-Custom "ERROR: CMake not found. Please install CMake 3.16 or later."
+    Write-Error-Custom "ERROR: CMake not found. Please install CMake 3.28 or later."
     exit 1
 }
 
@@ -164,7 +174,7 @@ try {
         throw "Build failed"
     }
     
-    if (-not (Test-Path "gpubench.exe")) {
+    if (-not ((Test-Path "gpubench.exe") -or (Test-Path "$BuildType\gpubench.exe"))) {
         throw "Build finished but gpubench.exe not found"
     }
     Write-Success "✓ Build complete"

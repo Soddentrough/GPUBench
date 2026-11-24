@@ -8,7 +8,7 @@
 namespace {
 
 bool evalLeafOpaqueHost(uint32_t primId, float u, float v) {
-  uint32_t layer = primId >> 7u;
+  uint32_t layer = primId >> 13u;
   float shiftX = static_cast<float>((layer * 3u) & 7u) * 0.025f - 0.08f;
   float shiftY = static_cast<float>((layer * 5u) & 7u) * 0.025f - 0.08f;
   float dx = u - (0.32f + shiftX);
@@ -16,10 +16,62 @@ bool evalLeafOpaqueHost(uint32_t primId, float u, float v) {
   return (dx * dx + dy * dy) <= 0.055f;
 }
 
-// Bird-curve / hierarchical barycentric sample for subdivision level 3 (64 micro-triangles)
-void sampleMicroTriangleVertices(uint32_t microIdx, float &u0, float &v0,
-                                 float &u1, float &v1, float &u2, float &v2) {
-  // Subdivision level 3 -> 8 segments per edge. Approximate micro-triangle i in [0..63]
+} // namespace
+
+// Official Khronos VK_EXT_opacity_micromap BarycentricsToSpaceFillingCurveIndex mapping
+uint32_t RayOMMBench::BarycentricsToBirdIndex(float u, float v,
+                                              uint32_t level) {
+  if (level == 0u) {
+    return 0u;
+  }
+  u = std::clamp(u, 0.0f, 1.0f);
+  v = std::clamp(v, 0.0f, 1.0f);
+  const uint32_t segs = 1u << level;
+  const float fu = u * static_cast<float>(segs);
+  const float fv = v * static_cast<float>(segs);
+  uint32_t iu = static_cast<uint32_t>(fu);
+  uint32_t iv = static_cast<uint32_t>(fv);
+  const float uf = fu - static_cast<float>(iu);
+  const float vf = fv - static_cast<float>(iv);
+  if (iu >= segs) {
+    iu = segs - 1u;
+  }
+  if (iv >= segs) {
+    iv = segs - 1u;
+  }
+  const uint32_t iuv = iu + iv;
+  if (iuv >= segs) {
+    iu -= iuv - segs + 1u;
+  }
+  uint32_t iw = ~(iu + iv);
+  if (uf + vf >= 1.0f && iuv < segs - 1u) {
+    --iw;
+  }
+  uint32_t b0 = ~(iu ^ iw);
+  b0 &= (segs - 1u);
+  const uint32_t t = (iu ^ iv) & b0;
+  uint32_t f = t;
+  f ^= f >> 1u;
+  f ^= f >> 2u;
+  f ^= f >> 4u;
+  f ^= f >> 8u;
+  uint32_t b1 = ((f ^ iu) & ~b0) | t;
+  b0 = (b0 | (b0 << 8u)) & 0x00ff00ffu;
+  b0 = (b0 | (b0 << 4u)) & 0x0f0f0f0fu;
+  b0 = (b0 | (b0 << 2u)) & 0x33333333u;
+  b0 = (b0 | (b0 << 1u)) & 0x55555555u;
+  b1 = (b1 | (b1 << 8u)) & 0x00ff00ffu;
+  b1 = (b1 | (b1 << 4u)) & 0x0f0f0f0fu;
+  b1 = (b1 | (b1 << 2u)) & 0x33333333u;
+  b1 = (b1 | (b1 << 1u)) & 0x55555555u;
+  return b0 | (b1 << 1u);
+}
+
+// Triangular lattice sampler for subdivision level 3 (64 micro-triangles)
+void RayOMMBench::SampleMicroTriangleVertices(uint32_t microIdx, float &u0,
+                                              float &v0, float &u1, float &v1,
+                                              float &u2, float &v2) {
+  // Subdivision level 3 -> 8 segments per edge. Enumerate micro-triangle i in [0..63]
   // by row/col on the 8-row triangular lattice: row r has (2*(7-r)+1) micro-triangles.
   uint32_t rem = microIdx & 63u;
   uint32_t row = 0u;
@@ -48,8 +100,6 @@ void sampleMicroTriangleVertices(uint32_t microIdx, float &u0, float &v0,
     v2 = static_cast<float>(row + 1u) * inv8;
   }
 }
-
-} // namespace
 
 std::string RayOMMBench::GetConfigName(uint32_t config_idx) const {
   switch (config_idx) {
@@ -272,12 +322,13 @@ void RayOMMBench::buildFoliageAS(uint32_t config_idx) {
       uint8_t *dstBytes = bitData.data() + static_cast<size_t>(p) * bytesPerTri;
       for (uint32_t m = 0; m < 64u; ++m) {
         float u0, v0, u1, v1, u2, v2;
-        sampleMicroTriangleVertices(m, u0, v0, u1, v1, u2, v2);
+        SampleMicroTriangleVertices(m, u0, v0, u1, v1, u2, v2);
         float uc = (u0 + u1 + u2) * (1.0f / 3.0f);
         float vc = (v0 + v1 + v2) * (1.0f / 3.0f);
+        uint32_t birdIdx = BarycentricsToBirdIndex(uc, vc, 3u);
         if (config_idx == 1) {
           if (evalLeafOpaqueHost(p, uc, vc)) {
-            dstBytes[m >> 3u] |= static_cast<uint8_t>(1u << (m & 7u));
+            dstBytes[birdIdx >> 3u] |= static_cast<uint8_t>(1u << (birdIdx & 7u));
           }
         } else {
           bool s0 = evalLeafOpaqueHost(p, u0, v0);
@@ -292,8 +343,8 @@ void RayOMMBench::buildFoliageAS(uint32_t config_idx) {
           } else {
             state2bit = 3u; // 3 = UNKNOWN_OPAQUE -> invokes AnyHit on border
           }
-          uint32_t byteIdx = m >> 2u;
-          uint32_t shift = (m & 3u) * 2u;
+          uint32_t byteIdx = birdIdx >> 2u;
+          uint32_t shift = (birdIdx & 3u) * 2u;
           dstBytes[byteIdx] |= static_cast<uint8_t>(state2bit << shift);
         }
       }
@@ -325,6 +376,7 @@ void RayOMMBench::buildFoliageAS(uint32_t config_idx) {
 
     VmaAllocationCreateInfo devAllocCi{};
     devAllocCi.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+    devAllocCi.minAlignment = 256;
     if (vmaCreateBuffer(vma, &mmStoreCi, &devAllocCi, &m_ommStorageBuf,
                         &m_ommStorageAlloc, nullptr) != VK_SUCCESS) {
       throw std::runtime_error("RayOMMBench: failed to allocate OMM storage");
@@ -355,6 +407,7 @@ void RayOMMBench::buildFoliageAS(uint32_t config_idx) {
       hostCi.usage = VMA_MEMORY_USAGE_AUTO;
       hostCi.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
                      VMA_ALLOCATION_CREATE_MAPPED_BIT;
+      hostCi.minAlignment = 256;
       VmaAllocationInfo aInfo{};
       if (vmaCreateBuffer(vma, &bCi, &hostCi, &outBuf, &outAlloc, &aInfo) !=
           VK_SUCCESS) {

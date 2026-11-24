@@ -1,8 +1,12 @@
 #include <hip/hip_runtime.h>
 
-extern "C" __global__ void run_benchmark(unsigned int *results,
-                                         unsigned int stride,
-                                         unsigned int iters) {
+// Use CU mode so each CU's independent 64 KB / 32-bank LDS runs at full
+// 128 B/cycle across all CUs (256 B/cycle per WGP on RDNA), matching RADV.
+extern "C" __global__ __attribute__((target("cumode"))) __launch_bounds__(32)
+void run_benchmark(
+    unsigned int *results,
+    unsigned int stride,
+    unsigned int iters) {
   __shared__ unsigned int lds[1280];
 
   unsigned int tid = threadIdx.x;
@@ -27,6 +31,7 @@ extern "C" __global__ void run_benchmark(unsigned int *results,
   unsigned int acc6 = 0u;
   unsigned int acc7 = 0u;
 
+  #pragma nounroll
   for (unsigned int i = 0u; i < iters; i++) {
     acc0 += lds[base_addr + 0u];
     acc1 += lds[base_addr + 32u];

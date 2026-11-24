@@ -10,6 +10,7 @@
 #include "vk_mem_alloc.h"
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -32,6 +33,7 @@ public:
 
     float getDisplayScale() const { return m_displayScale; }
     float getBuiltFontScale() const { return m_builtFontScale; }
+    float refreshDisplayScale(float scaleOverride = 0.0f);
     void requestFontRebuild(float scale);
 
     void beginFrame();
@@ -48,11 +50,14 @@ public:
     VkDescriptorPool getDescriptorPool() const { return m_descriptorPool; }
     std::shared_ptr<::VulkanContext> getSharedComputeContext() const { return m_sharedComputeCtx; }
     uint32_t getActiveDeviceIndex() const { return m_activeDeviceIndex; }
+    uint32_t getSwapchainImageCount() const { return static_cast<uint32_t>(m_mainWindowData.ImageCount); }
+    void setPreRenderPassCallback(std::function<void(VkCommandBuffer cmd, uint32_t frameIdx)> cb) {
+        m_preRenderPassCallback = std::move(cb);
+    }
 
     bool isInitialized() const { return m_initialized; }
     void waitDeviceIdleSafe();
     void setClearColor(float r, float g, float b, float a = 1.0f);
-    void setCrtPostFx(bool enabled, int paletteMode, float intensity = 1.0f);
 
     struct TextureResource {
         VkDescriptorSet descriptorSet{VK_NULL_HANDLE};
@@ -89,9 +94,6 @@ private:
     void flushDynamicImGuiTextures(ImDrawData* drawData);
     bool frameRender(ImDrawData* drawData);
     void framePresent();
-    bool createCrtPipeline();
-    void destroyCrtPipeline();
-    void recordCrtOverlay(VkCommandBuffer cmd, uint32_t width, uint32_t height);
 
     std::shared_ptr<::VulkanContext> m_sharedComputeCtx;
     uint32_t m_activeDeviceIndex{0};
@@ -119,11 +121,7 @@ private:
     ImFont* m_fontBold{nullptr};
     ImFont* m_fontMono{nullptr};
     VkClearColorValue m_clearColor{{0.031f, 0.035f, 0.031f, 1.00f}};
-    VkPipelineLayout m_crtPipelineLayout{VK_NULL_HANDLE};
-    VkPipeline m_crtPipeline{VK_NULL_HANDLE};
-    bool m_crtEnabled{false};
-    int m_crtPaletteMode{0};
-    float m_crtIntensity{1.0f};
+    std::function<void(VkCommandBuffer cmd, uint32_t frameIdx)> m_preRenderPassCallback;
 };
 
 } // namespace gpubench::gui

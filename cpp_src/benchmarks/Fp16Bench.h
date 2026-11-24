@@ -13,13 +13,18 @@ public:
   bool IsSupported(const DeviceInfo &info,
                    IComputeContext *context = nullptr) const override;
   std::string GetSupportNote() const override {
-    return "shaderFloat16 hardware bit not set (device does not support native 16-bit floating point)";
+    return "shaderFloat16 hardware feature not enabled (device does not support native 16-bit floating point)";
   }
   std::string GetSupportNote(const DeviceInfo &info,
                              IComputeContext *context = nullptr) const override {
     (void)info;
-    (void)context;
-    return "shaderFloat16 hardware bit not set (device does not support native 16-bit floating point)";
+    if (context && context->getBackend() == ComputeBackend::ROCm) {
+      return "Native FP16 (half-precision) compute not supported on this ROCm device";
+    }
+    if (context && context->getBackend() == ComputeBackend::OpenCL) {
+      return "cl_khr_fp16 half-precision extension not supported on this OpenCL device";
+    }
+    return "shaderFloat16 hardware feature not enabled (device does not support native 16-bit floating point)";
   }
   SupportLimitation GetSupportLimitation() const override {
     return SupportLimitation::kHardware;
@@ -30,6 +35,7 @@ public:
     (void)context;
     return SupportLimitation::kHardware;
   }
+  using IBenchmark::GetConfigSupportNote;
   std::string GetConfigSupportNote(uint32_t config_idx,
                                    const DeviceInfo &info,
                                    IComputeContext *context = nullptr) const override {
@@ -38,7 +44,10 @@ public:
         return "Cooperative matrix / WMMA not supported in OpenCL API";
       }
       if (!info.cooperativeMatrixSupport) {
-        return "extension VK_KHR_cooperative_matrix missing or ROCm WMMA not supported";
+        if (context && context->getBackend() == ComputeBackend::ROCm) {
+          return "ROCm FP16 WMMA / MFMA matrix instructions not supported on this GPU";
+        }
+        return "VK_KHR_cooperative_matrix extension not supported on this GPU/driver";
       }
     }
     return GetSupportNote(info, context);
@@ -81,14 +90,38 @@ public:
   int GetSortWeight() const override { return 30; }
   uint32_t GetNumConfigs() const override { return 2; }
   virtual uint32_t GetExpectedKernelCount() const override { return 2; }
+  using IBenchmark::GetConfigName;
   std::string GetConfigName(uint32_t config_idx) const override {
     return config_idx == 0 ? "Vector" : "Matrix";
   }
+  using IBenchmark::GetDescription;
   const char *GetDescription() const override {
     return "Half-precision IEEE 754 binary16 throughput across packed f16vec2/f16vec4 VALU and Cooperative Matrix / WMMA / MFMA cores.";
   }
+  const char *GetDescription(uint32_t config_idx) const override {
+    return config_idx == 0
+               ? "Half-precision IEEE 754 binary16 throughput across packed FP16 (f16vec4 / half2) VALU FMA instructions."
+               : "Half-precision IEEE 754 binary16 matrix multiply-accumulate throughput across Cooperative Matrix / WMMA / MFMA cores.";
+  }
+  const char *GetDescription(uint32_t config_idx, const DeviceInfo &info,
+                             IComputeContext *context = nullptr) const override {
+    (void)info;
+    if (context && context->getBackend() == ComputeBackend::ROCm) {
+      return config_idx == 0
+                 ? "Half-precision IEEE 754 binary16 throughput across packed half2 VALU FMA instructions."
+                 : "Half-precision IEEE 754 binary16 matrix multiply-accumulate throughput across WMMA / MFMA matrix cores.";
+    }
+    if (context && context->getBackend() == ComputeBackend::Vulkan) {
+      return config_idx == 0
+                 ? "Half-precision IEEE 754 binary16 throughput across packed f16vec4 VALU FMA instructions."
+                 : "Half-precision IEEE 754 binary16 matrix multiply-accumulate throughput via VK_KHR_cooperative_matrix.";
+    }
+    return GetDescription(config_idx);
+  }
   double GetOperationalIntensity(uint32_t config_idx = 0) const override {
-    return config_idx == 0 ? 1048576.0 : 4096.0;
+    // Config 0 (fp16.comp): 65536 * 16 f16vec4 FMAs (8,388,608 FLOPs) / 16 B = 524,288.0 FLOP/B
+    // Config 1 (coop_matrix_fp16.comp): 32768 * 8192 FLOPs / (512 B A + 512 B B + 1024 B C = 2048 B) = 131,072.0 FLOP/B
+    return (config_idx == 0u) ? 524288.0 : 131072.0;
   }
 
 private:

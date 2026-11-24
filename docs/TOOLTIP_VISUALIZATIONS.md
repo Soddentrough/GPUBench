@@ -160,7 +160,7 @@ At startup the GUI logs coverage, and warns per unmatched entry:
 [GPUBench GUI] Tooltip visualizations: 58/58 workloads mapped
 ```
 
-### 4.1 Mapping table (58 workloads)
+### 4.1 Mapping table (28-config RayScheduling 0..27 + Graphics/RT workloads)
 
 | Engine | Configs | Tier | Visualization |
 |:-------|:--------|:-----|:--------------|
@@ -168,20 +168,17 @@ At startup the GUI logs coverage, and warns per unmatched entry:
 | `RayASBuild` | 5 (TLAS: Corridor 20K) | 2 | `tlas_corridor_20k` → Geometry & BVH view 2 |
 | `RayASBuild` | 6 (TLAS: Jungle 50K) | 2 | `tlas_jungle_50k` → Geometry & BVH view 2 |
 | `RayASBuild` | 7 (TLAS: Open World 200K) | 2 | `tlas_openworld_200k` → Geometry & BVH view 2 |
-| `RayScheduling` | 0–2 (Material) | 1 | `thumb_material_lineup.png` → PBR Materials view 0 |
-| `RayScheduling` | 3–5, 23–25 (Path tracing) | 1 | `thumb_{scene}_stage6_indirect.png` → Pipeline Passes 5 |
-| `RayScheduling` | 6–8 (Incoherent GI) | 2 | `incoherent_{naive,ser,dgc}` → Pipeline Passes 5 |
-| `RayScheduling` | 9–11 (Full frame) | 1 | `thumb_{scene}_stage7_final.png` → Pipeline Passes 6 |
-| `RayScheduling` | 12 (Scanline) | 2 | `traversal_scanline` → Pipeline Passes 0 |
-| `RayScheduling` | 13, 26, 28 (Compaction) | 2 | `wave_ballot_compaction` |
-| `RayScheduling` | 14 (Tiled 8×4) | 2 | `traversal_tiled_8x4` → Pipeline Passes 0 |
-| `RayScheduling` | 15 (Morton 8×4) | 2 | `traversal_morton_8x4` → Pipeline Passes 0 |
-| `RayScheduling` | 16 (Morton 4×8) | 2 | `traversal_morton_4x8` → Pipeline Passes 0 |
-| `RayScheduling` | 17, 18, 29, 30 (Primary rays) | 1 | `thumb_{scene}_stage2_primary.png` → Pipeline Passes 1 |
-| `RayScheduling` | 19–22 (Shadows) | 1 | `thumb_{scene}_stage3_shadow.png` → Pipeline Passes 2 |
-| `RayScheduling` | 27 (Alpha cutout) | 1 | `thumb_alpha_layers.png` → Geometry & BVH view 1 |
-| `RayScheduling` | 31, 32 (Multi-light, 1 light) | 1 | `thumb_{scene}_stage5_direct.png` → Pipeline Passes 4 |
-| `RayScheduling` | 33, 34 (Multi-light, 128 lights) | 1 | `thumb_{scene}_multilight_128_dgc.png` → Pipeline Passes 4 |
+| `RayScheduling` | 0–3 (Material Shading: Megakernel, Legacy Indirect, DGC ExecutionSet, RTP + SER) | 1/2 | `thumb_material_lineup.png` / scheduling schematic → PBR Materials view 0 |
+| `RayScheduling` | 4–7 (Full Frame Scene Render: Megakernel, Legacy Indirect, DGC ExecutionSet, RTP + SER) | 1 | `thumb_{scene}_stage7_final.png` → Pipeline Passes 6 |
+| `RayScheduling` | 8–10 (Path Tracing N SPP: Megakernel, DGC, RTP + SER) & 11–12 (16 SPP: Megakernel, DGC) | 1 | `thumb_{scene}_stage6_indirect.png` → Pipeline Passes 5 |
+| `RayScheduling` | 13–16 (Primary Rays: Compute Megakernel, Wavefront - DGC, RTP, RTP + SER) | 1 | `thumb_{scene}_stage2_primary.png` → Pipeline Passes 1 |
+| `RayScheduling` | 17–18 (Incoherent Diffuse GI: Megakernel, DGC) | 2 | `incoherent_{naive,dgc}` → Pipeline Passes 5 |
+| `RayScheduling` | 19–20 (Directional Shadows: Megakernel, DGC) | 1 | `thumb_{scene}_stage3_shadow.png` → Pipeline Passes 2 |
+| `RayScheduling` | 21–22 (Multi-Light — 128 Lights: Megakernel, DGC Light Binning) | 1 | `thumb_{scene}_multilight_128_dgc.png` → Pipeline Passes 4 |
+| `RayScheduling` | 23 (Traversal Divergence — Alpha Cutout Geometry) | 1 | `thumb_alpha_layers.png` → Geometry & BVH view 1 |
+| `RayScheduling` | 24 (BVH Traversal — Linear 1D Scanline, Showroom only) | 2 | `traversal_scanline` → Pipeline Passes 0 |
+| `RayScheduling` | 25 (BVH Traversal — 2D Morton Z-Curve 8×4, Showroom only) | 2 | `traversal_morton_8x4` → Pipeline Passes 0 |
+| `RayScheduling` | 26–27 (Queue Compaction — 128B Expanded Stream / 16B Wave Ballot Bins, Showroom only) | 2 | `wave_ballot_compaction` |
 | `RayRawTraversal` | 0 (Coherent tris) | 2 | `bvh_coherent_triangles` |
 | `RayRawTraversal` | 1 (Deep boxes) | 2 | `bvh_nested_boxes` |
 | `RayIntersect` | 0 (Ray-triangle) | 2 | `intersect_ray_triangle` |
@@ -190,18 +187,18 @@ At startup the GUI logs coverage, and warns per unmatched entry:
 | `RayAnyHit` | 1 (50% cutout stress) | 2 | `anyhit_50_cutout` |
 | `RayProcedural` | 0 (AABB spheres) | 2 | `procedural_sphere` |
 | `RayDivergence` | 0–4 (90°…0°) | 2 | `cone_divergence_{90,67.5,45,22.5,0}` |
+| `Pixel Fill Rate` | 0–2 (RGBA8/HDR/blend) | 2 | `rop_fill_{rgba8,hdr,blend}` |
 
 > **Incoherent GI vs Ray Directional Coherence** — these two groups look
 > similar but answer different questions, and the tooltips say so explicitly:
 > `RayDivergence` is a *controlled cost curve* (synthetic chamber, one
 > technique, cone angle swept 0°→90°) — "how much does divergence cost this
-> hardware?" — while `Incoherent Ray Tracing` is a *technique comparison*
-> (real scenes, full-hemisphere secondary rays, three scheduling techniques)
-> — "how much do SER/DGC recover?". Their descriptions cross-reference each
+> hardware?" — while `Incoherent Diffuse GI` (configs 17–18) is a *technique comparison*
+> (real scenes, full-hemisphere secondary rays, Megakernel vs DGC)
+> — "how much does DGC recover?". Their descriptions cross-reference each
 > other, and the incoherent test gets its own mechanism diagrams
 > (`incoherent_*`) rather than reusing the static cone, so the reordering
 > being tested is actually visible.
-| `Pixel Fill Rate` | 0–2 (RGBA8/HDR/blend) | 2 | `rop_fill_{rgba8,hdr,blend}` |
 
 ---
 

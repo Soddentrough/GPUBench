@@ -110,35 +110,66 @@ void GuiApp::renderIsaInspectorPanel() {
         requestIsaInspection(*item, false);
     }
 
+    struct IsaStageChoice {
+        const IsaArtifactReport* art{nullptr};
+        const IsaExecutableReport* exec{nullptr};
+        std::string label;
+    };
+    std::vector<IsaStageChoice> stageChoices;
     const IsaArtifactReport* activeArt = nullptr;
     if (hasCachedIsa && !cachedIsa.artifacts.empty()) {
+        std::vector<const IsaArtifactReport*> matchedArts;
         for (const auto& a : cachedIsa.artifacts) {
             if (a.configIndex == item->configIndex) {
-                activeArt = &a;
-                break;
+                matchedArts.push_back(&a);
             }
         }
-        if (!activeArt) {
+        if (matchedArts.empty()) {
             for (const auto& a : cachedIsa.artifacts) {
                 if (!a.executables.empty()) {
-                    activeArt = &a;
-                    break;
+                    matchedArts.push_back(&a);
                 }
             }
         }
-        if (!activeArt) {
-            activeArt = &cachedIsa.artifacts.front();
+        if (matchedArts.empty()) {
+            matchedArts.push_back(&cachedIsa.artifacts.front());
         }
+
+        const bool multiArt = (matchedArts.size() > 1);
+        for (const IsaArtifactReport* art : matchedArts) {
+            if (art->executables.empty()) {
+                continue;
+            }
+            for (size_t ei = 0; ei < art->executables.size(); ++ei) {
+                const auto& ex = art->executables[ei];
+                std::string lbl;
+                if (multiArt && !art->configLabel.empty()) {
+                    lbl = art->configLabel;
+                    if (art->executables.size() > 1 && !ex.name.empty()) {
+                        lbl += " (" + ex.name + ")";
+                    }
+                } else {
+                    lbl = ex.name.empty() ? ("STAGE " + std::to_string(ei)) : ex.name;
+                }
+                stageChoices.push_back({art, &ex, std::move(lbl)});
+            }
+        }
+        activeArt = matchedArts.front();
     }
 
     const IsaExecutableReport* activeExec = nullptr;
-    if (activeArt && !activeArt->executables.empty()) {
+    if (!stageChoices.empty()) {
         if (m_isaExecStageIdx < 0 ||
-            m_isaExecStageIdx >= static_cast<int>(activeArt->executables.size())) {
+            m_isaExecStageIdx >= static_cast<int>(stageChoices.size())) {
             m_isaExecStageIdx = 0;
         }
-        activeExec = &activeArt->executables[static_cast<size_t>(m_isaExecStageIdx)];
+        activeArt = stageChoices[static_cast<size_t>(m_isaExecStageIdx)].art;
+        activeExec = stageChoices[static_cast<size_t>(m_isaExecStageIdx)].exec;
     }
+
+    const std::string displayBackend = (activeArt && !activeArt->backend.empty())
+        ? activeArt->backend
+        : resolvedBackendName();
 
     // ------------------------------------------------------------------------
     // F1 Top Slot Header Bar
@@ -160,9 +191,9 @@ void GuiApp::renderIsaInspectorPanel() {
             infoStr += "  |  " + activeArt->artifactFile;
         }
         if (hasCachedIsa && !cachedIsa.resolvedAsic.empty()) {
-            infoStr += "  |  " + cachedIsa.resolvedAsic + " [" + m_selectedBackend + "]";
+            infoStr += "  |  " + cachedIsa.resolvedAsic + " [" + displayBackend + "]";
         } else {
-            infoStr += "  |  [" + m_selectedBackend + "]";
+            infoStr += "  |  [" + displayBackend + "]";
         }
 
         const float maxTextW = std::max(s(120.0f), ImGui::GetContentRegionAvail().x - rightBtnsW);
@@ -265,8 +296,33 @@ void GuiApp::renderIsaInspectorPanel() {
             if (scratchB == 0) scratchB = static_cast<uint32_t>(disp.primaryResult.scratchSizeBytes);
             waves = static_cast<uint32_t>(disp.primaryResult.maxWavesPerSimd);
         }
-        if (waves == 0 && vgprs > 0) {
-            waves = std::clamp(1536u / std::max(vgprs, 1u), 1u, 16u);
+
+        std::string archTag = hasCachedIsa ? toLowerAscii(cachedIsa.resolvedAsic) : "";
+        if (archTag.empty()) {
+            for (const auto& dev : m_devices) {
+                if (!dev.isSystem && dev.deviceIndex == m_telemetryGpuIndex) {
+                    archTag = toLowerAscii(dev.architecture);
+                    break;
+                }
+            }
+        }
+        const bool isRdna34 = (archTag.find("gfx11") != std::string::npos ||
+                               archTag.find("gfx12") != std::string::npos ||
+                               archTag.find("rdna 3") != std::string::npos ||
+                               archTag.find("rdna 4") != std::string::npos);
+        const bool isRdna12 = (archTag.find("gfx10") != std::string::npos ||
+                               archTag.find("rdna 1") != std::string::npos ||
+                               archTag.find("rdna 2") != std::string::npos);
+        const bool isCdna = (archTag.find("gfx9") != std::string::npos ||
+                             archTag.find("cdna") != std::string::npos);
+        const bool hasKnownArchLimits = isRdna34 || isRdna12 || isCdna;
+        const uint32_t maxVgprBudget = 256u;
+        const uint32_t maxSgprBudget = isCdna ? 104u : 128u;
+        const uint32_t maxWavesLimit = isCdna ? 8u : 16u;
+
+        if (waves == 0 && vgprs > 0 && (isRdna34 || isRdna12)) {
+            const uint32_t simdVgprPool = isRdna34 ? 1536u : 1024u;
+            waves = std::clamp(simdVgprPool / std::max(vgprs, 1u), 1u, maxWavesLimit);
         }
 
         ImDrawList* dl = ImGui::GetWindowDrawList();
@@ -275,26 +331,48 @@ void GuiApp::renderIsaInspectorPanel() {
         ImVec2 gp0 = ImGui::GetCursorScreenPos();
         ImVec2 gp1(gp0.x + gridW, gp0.y + gridH);
         ImGui::Dummy(ImVec2(gridW, gridH));
-        drawVgprOccupancyGrid(dl, gp0, gp1, vgprs, sgprs, ldsB, waves, c);
+        drawVgprOccupancyGrid(dl, gp0, gp1, vgprs, sgprs, ldsB, waves, c,
+                              hasKnownArchLimits, maxVgprBudget, maxSgprBudget, maxWavesLimit);
         if (ImGui::IsItemHovered()) {
             ImGui::BeginTooltip();
             pushBoldFont();
             ImGui::TextColored(c.phosphorHi, "REGISTER FILE & WAVE OCCUPANCY");
             popBoldFont();
             ImGui::Separator();
-            const float occPct = (static_cast<float>(waves) / 16.0f) * 100.0f;
-            ImGui::TextColored(c.okColor, "VGPR (Vector Registers): %u / 256 per lane", vgprs);
-            ImGui::TextWrapped("  32-bit registers private to each thread/lane. Each block in the 4x16 grid = 4 VGPRs (Green <=64, Accent <=128, Warn <=192, Red >192). Scratch spill: %u B/lane.", scratchB);
-            ImGui::TextColored(c.cyanAccent, "SGPR (Scalar Registers): %u / 128 per wave", sgprs);
+            if (hasKnownArchLimits) {
+                ImGui::TextColored(c.okColor, "VGPR (Vector Registers): %u / %u per lane", vgprs, maxVgprBudget);
+            } else {
+                ImGui::TextColored(c.okColor, "VGPR (Vector Registers): %u per lane", vgprs);
+            }
+            ImGui::TextWrapped("  32-bit registers private to each thread/lane. Scratch spill: %u B/lane.", scratchB);
+            if (hasKnownArchLimits) {
+                ImGui::TextColored(c.cyanAccent, "SGPR (Scalar Registers): %u / %u per wave", sgprs, maxSgprBudget);
+            } else {
+                ImGui::TextColored(c.cyanAccent, "SGPR (Scalar Registers): %u per wave", sgprs);
+            }
             ImGui::TextWrapped("  32-bit registers shared across all lanes in a wave for descriptors, loop counters, and uniform constants.");
             ImGui::TextColored(c.violetAccent, "LDS (Local Data Share): %u B", ldsB);
             ImGui::TextWrapped("  On-CU shared scratchpad memory allocated per workgroup for thread cooperation and matrix/shared tiling.");
-            if (subgrpSz == 32 || subgrpSz == 64) {
-                ImGui::TextColored(c.phosphorHi, "WAVES / SIMD: %u / 16 (%.0f%% occupancy | Wave%u)", waves, occPct, subgrpSz);
+            if (hasKnownArchLimits && maxWavesLimit > 0 && waves > 0) {
+                const float occPct = (static_cast<float>(waves) / static_cast<float>(maxWavesLimit)) * 100.0f;
+                if (subgrpSz == 32 || subgrpSz == 64) {
+                    ImGui::TextColored(c.phosphorHi, "WAVES / SIMD: %u / %u (%.0f%% occupancy | Wave%u)",
+                                       waves, maxWavesLimit, occPct, subgrpSz);
+                } else if (subgrpSz > 0) {
+                    ImGui::TextColored(c.phosphorHi, "WAVES / SIMD: %u / %u (%.0f%% occupancy | Driver SG %u)",
+                                       waves, maxWavesLimit, occPct, subgrpSz);
+                } else {
+                    ImGui::TextColored(c.phosphorHi, "WAVES / SIMD: %u / %u (%.0f%% occupancy)",
+                                       waves, maxWavesLimit, occPct);
+                }
+            } else if (waves > 0) {
+                if (subgrpSz > 0) {
+                    ImGui::TextColored(c.phosphorHi, "WAVES / SIMD: %u | SG %u", waves, subgrpSz);
+                } else {
+                    ImGui::TextColored(c.phosphorHi, "WAVES / SIMD: %u", waves);
+                }
             } else if (subgrpSz > 0) {
-                ImGui::TextColored(c.phosphorHi, "WAVES / SIMD: %u / 16 (%.0f%% occupancy | Driver SG %u)", waves, occPct, subgrpSz);
-            } else {
-                ImGui::TextColored(c.phosphorHi, "WAVES / SIMD: %u / 16 (%.0f%% occupancy)", waves, occPct);
+                ImGui::TextColored(c.phosphorHi, "SUBGROUP SIZE: %u", subgrpSz);
             }
             ImGui::TextWrapped("  Max concurrent waves resident per SIMD. Higher occupancy hides memory latency; dense matrix tiles trade waves for register reuse.");
             ImGui::EndTooltip();
@@ -365,7 +443,9 @@ void GuiApp::renderIsaInspectorPanel() {
                     topLine += "  " + activeExec->topOpcodes[oi].first + "(" +
                                std::to_string(activeExec->topOpcodes[oi].second) + ")";
                 }
-                ImGui::TextColored(c.textMuted, "%s", fitTextToPixelWidth(topLine, gridW).c_str());
+                ImGui::PushStyleColor(ImGuiCol_Text, c.textMuted);
+                ImGui::TextWrapped("%s", topLine.c_str());
+                ImGui::PopStyleColor();
             }
         } else {
             drawInstructionMixStrip(dl, sp0, sp1, 0, 0, 0, 0, 0, 0, 0, c);
@@ -394,6 +474,12 @@ void GuiApp::renderIsaInspectorPanel() {
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("%s", item->description.c_str());
             }
+        }
+        if (!item->configCaveat.empty()) {
+            ImGui::Spacing();
+            ImGui::PushStyleColor(ImGuiCol_Text, c.warnColor);
+            ImGui::TextWrapped("NOTE / CAVEAT: %s", item->configCaveat.c_str());
+            ImGui::PopStyleColor();
         }
         if (item->hasSupportDiscrepancy) {
             ImGui::Spacing();
@@ -434,16 +520,19 @@ void GuiApp::renderIsaInspectorPanel() {
 
         // Controls Toolbar
         ImGui::Spacing();
-        if (activeArt && activeArt->executables.size() > 1) {
-            for (size_t ei = 0; ei < activeArt->executables.size(); ++ei) {
-                if (ei > 0) ImGui::SameLine(0.0f, s(4.0f));
-                const auto& ex = activeArt->executables[ei];
-                std::string lbl = ex.name.empty() ? ("STAGE " + std::to_string(ei)) : ex.name;
-                if (lbl.size() > 18) lbl = lbl.substr(0, 15) + "...";
+        if (stageChoices.size() > 1) {
+            for (size_t ei = 0; ei < stageChoices.size(); ++ei) {
+                std::string lbl = stageChoices[ei].label;
+                if (lbl.size() > 22) lbl = lbl.substr(0, 19) + "...";
+                const float bw = ImGui::CalcTextSize(lbl.c_str()).x + s(16.0f);
+                if (ei > 0) sameLineIfFits(bw, s(4.0f));
                 std::string bid = "##IsaStage" + std::to_string(ei);
                 if (tacticalButton(bid.c_str(), lbl.c_str(), ImVec2(0, s(22.0f)),
                                    m_isaExecStageIdx == static_cast<int>(ei), c)) {
                     m_isaExecStageIdx = static_cast<int>(ei);
+                }
+                if (lbl != stageChoices[ei].label && ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("%s", stageChoices[ei].label.c_str());
                 }
             }
         }
@@ -459,7 +548,7 @@ void GuiApp::renderIsaInspectorPanel() {
             m_isaHotLoopOnly = false;
         }
         ImGui::SameLine(0.0f, s(10.0f));
-        ImGui::SetNextItemWidth(std::min(s(240.0f), std::max(s(120.0f), ImGui::GetContentRegionAvail().x - s(130.0f))));
+        ImGui::SetNextItemWidth(std::min(s(280.0f), std::max(s(120.0f), ImGui::GetContentRegionAvail().x)));
         ImGui::InputTextWithHint("##IsaFilterInput", "FILTER OPCODE / REG...", m_isaFilterBuf, sizeof(m_isaFilterBuf));
 
         ImGui::Spacing();
@@ -509,10 +598,11 @@ void GuiApp::renderIsaInspectorPanel() {
                     }
                 }
 
+                const bool isComputeKernelBackend = (displayBackend == "rocm" || displayBackend == "opencl");
                 const std::string modeRangeLabel = useHotLoop
                     ? ("HOT LOOP LINES " + std::to_string(activeExec->hotLoopStartLine) + "-" +
                        std::to_string(activeExec->hotLoopEndLine))
-                    : "FULL SHADER";
+                    : (isComputeKernelBackend ? "FULL KERNEL" : "FULL SHADER");
                 ImGui::TextColored(c.textMuted,
                                    "SHOWING %zu / %zu LINES (%s)",
                                    visibleIndices.size(),

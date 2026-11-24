@@ -1,4 +1,4 @@
-.TH GPUBENCH 1 "September 2026" "GPUBench 1.0.0" "User Commands"
+.TH GPUBENCH 1 "November 2026" "GPUBench 1.0.0" "User Commands"
 .SH NAME
 gpubench \- Modern cross-backend GPU compute and hardware ray tracing benchmark
 .SH SYNOPSIS
@@ -6,17 +6,17 @@ gpubench \- Modern cross-backend GPU compute and hardware ray tracing benchmark
 [\fIOPTIONS\fR]
 .SH DESCRIPTION
 .B GPUBench
-is a high-performance cross-backend GPU compute and ray tracing benchmarking utility supporting Vulkan 1.4, AMD ROCm/HIP, and OpenCL 3.0. It evaluates raw compute capabilities (FP64, FP32, DualIssue, LDS, Indirect, FP16, BF16, FP8, FP6, FP4, INT8, INT4, 2:4 Structured Sparsity, Cooperative Vector), VRAM, cache, and PCIe/ReBAR/P2P interconnect bandwidth/latency, Async Compute & Copy Engine concurrency, GPU Work Graphs, hardware-accelerated BVH traversal (including Opacity Micromaps), dynamic wavefront ray scheduling via Device-Generated Commands (DGC), and Empirical Roofline modeling.
+is a high-performance GPU compute and ray tracing benchmarking utility built on Vulkan 1.4 (with optional AMD ROCm/HIP and OpenCL backends when enabled at configure time via \fB\-DGPUBENCH_ENABLE_ROCM=ON\fR / \fB\-DGPUBENCH_ENABLE_OPENCL=ON\fR). It evaluates raw compute capabilities (FP64, FP32, DualIssue, LDS, Indirect, FP16, BF16, FP8, FP6, FP4, INT8, INT4, 2:4 Structured Sparsity, Cooperative Vector), VRAM, cache, and PCIe/ReBAR/P2P interconnect bandwidth/latency, Async Compute & Copy Engine concurrency, hardware-accelerated BVH traversal (including Opacity Micromaps), dynamic wavefront ray scheduling via Device-Generated Commands (DGC) and SER, and Empirical Roofline modeling.
 .SH OPTIONS
 .TP
 \fB\-h\fR, \fB\-\-help\fR
 Print help message and exit.
 .TP
-\fB\-\-version\fR
+\fB\-v\fR, \fB\-\-version\fR
 Display program version information and exit.
 .TP
 \fB\-b\fR, \fB\-\-benchmark\fR, \fB\-\-benchmarks\fR \fIBENCHMARKS\fR
-Comma-separated list of benchmarks to run (e.g., fp32,fp64,dualissue,lds,indirect,fp16,bf16,fp8,fp6,fp4,int8,int4,sparsematrix,coopvector,membw,interconnect,l0b,l1b,l2b,l3b,cachebw,l0_cache,cache_latency_curve,asyncoverlap,workgraphs,pixelfill,rayrawtraversal,rayasbuild,rayintersect,rayanyhit,rayomm,rayprocedural,raypayload,rayscheduling,raydivergence,sysmembw,sysmemlatency,all).
+Comma-separated list of benchmarks to run (e.g., fp32,fp64,dualissue,lds,indirect,fp16,bf16,fp8,fp6,fp4,int8,int4,sparsematrix,coopvector,membw,interconnect,l0b,l1b,l2b,l3b,cachebw,l0_cache,cache_latency_curve,asyncoverlap,pixelfill,rayrawtraversal,rayasbuild,rayintersect,rayanyhit,rayomm,rayprocedural,raypayload,rayscheduling,raydivergence,sysmembw,sysmemlatency,all).
 .TP
 \fB\-g\fR, \fB\-\-group\fR, \fB\-\-groups\fR \fIGROUPS\fR
 Benchmark groups to run: compute, memory, scheduling, graphics (combines raster & raytracing), raster, raytracing, system, or all.
@@ -45,14 +45,14 @@ Run only specific sub-test configuration index(es) within a multi-configuration 
 \fB\-s\fR, \fB\-\-scene\fR \fISCENE\fR
 Ray tracing scenario: showroom, indoor, outdoor, forest, all (default: all).
 .TP
-\fB\-r\fR, \fB\-\-resolution\fR \fIRESPRESET\fR
+\fB\-r\fR, \fB\-\-res\fR, \fB\-\-resolution\fR \fIRESPRESET\fR
 Resolution preset: auto (scales dynamically by GPU VRAM capacity: 720p < 6 GB, 1080p < 10 GB, 1440p < 16 GB, 4K >= 16 GB), 720p, 1080p, 1440p, 4k, 8k, 1024x1024, or custom WxH (default: 4k).
 .TP
 \fB\-\-bounces\fR \fIBOUNCES\fR
 Number of light bounces for multi-bounce path tracing (1..8, default: 2).
 .TP
 \fB\-\-spp\fR \fISPP\fR
-Number of samples per pixel for path tracing accumulation (default: 1).
+Number of samples per pixel for path tracing accumulation (1..256, default: 1).
 .TP
 \fB\-\-dump\-renders\fR, \fB\-\-dump\fR
 Dump rendered images and parity difference heatmaps to the \fIrenders/\fR directory.
@@ -70,10 +70,16 @@ Enforce strict Megakernel vs. DGC framebuffer visual parity verification (PSNR >
 Run in single-frame deterministic profiling snapshot mode for RGP / Nsight capture.
 .TP
 \fB\-\-rra\fR
-Enable Radeon Raytracing Analyzer (RRA) BVH capture mode.
+Enable Radeon Raytracing Analyzer (RRA) BVH capture mode (implies \fB\-\-profile\-snapshot\fR and presents trace markers via swapchain frames).
 .TP
 \fB\-\-dump\-isa\fR \fITARGET\fR
-Disassemble compiled hardware shader/kernel ISA, VGPR/SGPR/LDS footprint, and instruction histograms via \fIVK_KHR_pipeline_executable_properties\fR or ROCm \fIllvm-objdump\fR without running benchmark loops. Combine with \fB\-\-full\-isa\fR to emit complete assembly.
+Disassemble compiled hardware shader/kernel ISA, VGPR/SGPR/LDS footprint, and instruction histograms via \fIVK_KHR_pipeline_executable_properties\fR (or ROCm \fIllvm\-objdump\fR when ROCm is enabled) without running benchmark loops.
+.TP
+\fB\-\-asic\fR \fIARCH\fR
+Target GPU architecture for ROCm code-object disassembly (auto-detected from active GPU if omitted).
+.TP
+\fB\-\-full\-isa\fR
+Print entire shader/kernel ISA disassembly instead of just the hot loop when using \fB\-\-dump\-isa\fR.
 .TP
 \fB\-\-roofline\fR
 Compute and display the Empirical Roofline analysis (peak memory/cache bandwidth ceilings, peak vector/matrix compute ceilings, ridge points, arithmetic intensity, and bottleneck classification) and include it in exported v2.0 JSON reports.
@@ -99,8 +105,8 @@ Enable verbose logging output.
 \fB\-\-debug\fR
 Enable Vulkan validation layers and detailed debug logging output.
 .TP
-\fB\-o\fR, \fB\-\-output\-json\fR [\fIFILE\fR]
-Write benchmark results to a unified v2.0 JSON report file (compatible with both \fBgpubench \-\-import\fR/\fB\-\-compare\fR and \fBgpubench-gui\fR). Specify \fB\-\fR to direct pure JSON to standard output.
+\fB\-o\fR, \fB\-\-output\fR, \fB\-\-output\-json\fR [\fIFILE\fR]
+Write benchmark results to a unified v2.0 JSON report file (compatible with both \fBgpubench \-\-import\fR/\fB\-\-compare\fR and \fBgpubench-gui\fR). Defaults to \fIgpubench_<hostname>_<timestamp>.json\fR; specify \fB\-\fR to direct pure JSON to standard output.
 .TP
 \fB\-\-json\fR
 Output pure JSON report directly to standard output (equivalent to \fB\-o \-\fR).

@@ -1,0 +1,39 @@
+#version 460
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+layout(constant_id = 0) const uint SPECIALIZED_PIPE = 0u;
+
+layout(set = 0, binding = 0) readonly buffer MultiBucketWorkList {
+    uint bucketItems[];
+};
+
+layout(set = 0, binding = 1) buffer OutputBuffer {
+    float results[];
+};
+
+layout(set = 0, binding = 2) readonly buffer BucketCounts {
+    uint bucketCounts[128];
+    uint bucketSnapshots[128];
+};
+
+layout(push_constant) uniform WorkerPC {
+    uint bucketId;
+    uint itemCount;
+} pc;
+
+void main() {
+    uint gid = gl_GlobalInvocationID.x;
+    uint count = bucketSnapshots[pc.bucketId];
+    if (gid >= count) {
+        return;
+    }
+
+    uint itemId = bucketItems[pc.bucketId * 2048u + gid];
+    float val = float(itemId) * 0.001f + (1.0f + 0.05f * float(SPECIALIZED_PIPE + 1u));
+    for (int i = 0; i < 16; ++i) {
+        val = sin(val) * 1.05f + cos(val * 0.5f);
+    }
+
+    results[itemId] = val;
+}

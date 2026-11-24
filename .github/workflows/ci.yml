@@ -43,8 +43,6 @@ jobs:
           sudo apt-get install -y \
             libvulkan-dev \
             libvulkan1 \
-            ocl-icd-opencl-dev \
-            opencl-headers \
             cmake \
             build-essential \
             rpm \
@@ -60,7 +58,7 @@ jobs:
             libxkbcommon-dev
 
       - name: Configure CMake
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DGPUBENCH_WERROR=ON
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DGPUBENCH_ENABLE_ROCM=OFF -DGPUBENCH_ENABLE_OPENCL=OFF -DGPUBENCH_WERROR=ON
 
       - name: Build
         run: cmake --build build --config Release --parallel
@@ -94,7 +92,7 @@ jobs:
           echo "C:\VulkanSDK\Bin" >> $env:GITHUB_PATH
 
       - name: Configure CMake
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DGPUBENCH_ENABLE_ROCM=OFF -DGPUBENCH_ENABLE_OPENCL=OFF
 
       - name: Build
         run: cmake --build build --config Release

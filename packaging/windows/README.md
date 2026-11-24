@@ -12,11 +12,11 @@ GPUBench can be packaged for Windows in two formats:
 
 ### For Building
 - Windows 10/11
-- Visual Studio 2019 or later (with C++ desktop development)
-- CMake 3.16 or later
-- At least one GPU compute backend:
-  - **Vulkan SDK** (recommended): https://vulkan.lunarg.com/
-  - **OpenCL SDK** (alternative): Intel, AMD, or NVIDIA OpenCL SDK
+- Visual Studio 2022 (17.8+) or later (with C++23 desktop development) or MinGW-w64 (GCC 13+)
+- CMake 3.28 or later
+- Required compute backend SDK:
+  - **Vulkan SDK 1.4+** (provides `glslc.exe`, `slangc.exe`, `spirv-as.exe`, headers & loader): https://vulkan.lunarg.com/
+  - **Optional backends**: OpenCL SDK (`-DGPUBENCH_ENABLE_OPENCL=ON`) or AMD HIP SDK (`-DGPUBENCH_ENABLE_ROCM=ON`)
 
 ### For Creating Installers (Optional)
 - **NSIS** (Nullsoft Scriptable Install System): https://nsis.sourceforge.io/
@@ -81,10 +81,10 @@ GPUBench/
 │   ├── gpubench-gui.exe       # Workstation Profiler GUI executable
 │   └── *.dll                  # Runtime dependencies (if any)
 └── share/gpubench/
-    ├── assets/models/         # Canonical glTF 3D scenes (sponza.glb, toycar.glb)
+    ├── assets/thumbnails/     # Pre-rendered GUI tooltip thumbnails (*.png)
+    ├── models/                # Canonical glTF 3D scenes (sponza.glb, toycar.glb)
     └── kernels/
-        ├── vulkan/            # Compiled SPIR-V shaders (*.spv)
-        └── opencl/            # OpenCL source files (*.cl)
+        └── vulkan/            # Compiled SPIR-V shaders (*.spv)
 ```
 
 ## Distribution

@@ -1,0 +1,52 @@
+#version 460
+
+#include "showcase_common.glsl"
+
+layout(local_size_x = 32, local_size_y = 1, local_size_z = 1) in;
+
+SHOWCASE_DECLARE_SCENE_SET(0);
+SHOWCASE_DECLARE_FRAME_SET(1);
+
+void main() {
+  uint tid = gl_LocalInvocationID.x;
+  if (tid != 0u) {
+    return;
+  }
+
+  uint qCap = ubo.frameMeta.z;
+  uint width = ubo.screenInfo.x;
+  uint height = ubo.screenInfo.y;
+  uint optFlags = ubo.countsInfo.w;
+  uint overlayMode = ubo.screenInfo.w;
+  uint renderMode = ubo.screenInfo.z;
+
+  uint activeSeqs = 0u;
+  for (uint m = 0u; m < 8u; ++m) {
+    uint count = min(worklistCounters[m], qCap);
+    worklistCounters[8u + m] = count;
+    worklistCounters[m] = 0u;
+
+    uint groupsX = (count > 0u) ? ((count + 63u) / 64u) : 0u;
+    fallbackCmds[m] = uvec4(groupsX, 1u, 1u, count);
+
+    if (count > 0u) {
+      dgcSeqs[activeSeqs].pipelineIndex = m;
+      dgcSeqs[activeSeqs].pc0_arch = m;
+      dgcSeqs[activeSeqs].pc1_queueCapacity = qCap;
+      dgcSeqs[activeSeqs].pc2_width = width;
+      dgcSeqs[activeSeqs].pc3_height = height;
+      dgcSeqs[activeSeqs].pc4_optFlags = optFlags;
+      dgcSeqs[activeSeqs].pc5_overlayMode = overlayMode;
+      dgcSeqs[activeSeqs].pc6_mode = renderMode;
+      dgcSeqs[activeSeqs].pc7_pad = 0u;
+      dgcSeqs[activeSeqs].dispatchX = groupsX;
+      dgcSeqs[activeSeqs].dispatchY = 1u;
+      dgcSeqs[activeSeqs].dispatchZ = 1u;
+      activeSeqs++;
+    }
+  }
+
+  dgcCount = activeSeqs;
+  fallbackCount = 8u;
+  stats.activeDgcBins = activeSeqs;
+}

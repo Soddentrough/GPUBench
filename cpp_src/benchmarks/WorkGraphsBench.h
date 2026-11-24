@@ -1,7 +1,9 @@
 #pragma once
 
 #include "IBenchmark.h"
+#ifdef HAVE_VULKAN
 #include "core/VulkanContext.h"
+#endif
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -50,6 +52,9 @@ public:
   std::string GetConfigSupportNote(
       uint32_t config_idx, const DeviceInfo &info,
       IComputeContext *context = nullptr) const override;
+  std::string GetConfigCaveat(
+      uint32_t config_idx, const DeviceInfo &info,
+      IComputeContext *context = nullptr) const override;
 
   bool UsesCustomTiming(uint32_t config_idx = 0) const override {
     return config_idx == 2u;
@@ -68,16 +73,23 @@ public:
   bool ValidateResults(uint32_t config_idx = 0) const override;
 
 private:
+  template <typename Tag> friend struct ::gpubench::test::TestBody;
   static constexpr uint32_t kTotalItems = 262144u; // 1024 * 256
 
-  VulkanContext *m_vk = nullptr;
   std::string m_kernelDir;
+  IComputeContext *m_ctx = nullptr;
   ComputeKernel m_producerKernel = nullptr;
   ComputeKernel m_consumerKernel = nullptr;
 
   ComputeBuffer m_indirectBuf = nullptr;
   ComputeBuffer m_payloadQueueBuf = nullptr;
   ComputeBuffer m_outBuf = nullptr;
+
+  double m_lastGraphDurationMs = 0.0;
+  uint32_t m_rocmPersistentWorkgroups = 1024u;
+
+#ifdef HAVE_VULKAN
+  VulkanContext *m_vk = nullptr;
 
   // DGC resources (Config 1)
   VkIndirectCommandsLayoutEXT m_dgcLayout = VK_NULL_HANDLE;
@@ -100,11 +112,11 @@ private:
   VkCommandBuffer m_wgCmd = VK_NULL_HANDLE;
   VkFence m_wgFence = VK_NULL_HANDLE;
   VkQueryPool m_wgTsPool = VK_NULL_HANDLE;
-  double m_lastGraphDurationMs = 0.0;
 
   PFN_vkCreateExecutionGraphPipelinesAMDX m_pfnCreateGraphPipelines = nullptr;
   PFN_vkGetExecutionGraphPipelineScratchSizeAMDX m_pfnGetGraphScratchSize = nullptr;
   PFN_vkGetExecutionGraphPipelineNodeIndexAMDX m_pfnGetGraphNodeIndex = nullptr;
   PFN_vkCmdInitializeGraphScratchMemoryAMDX m_pfnCmdInitGraphScratch = nullptr;
   PFN_vkCmdDispatchGraphAMDX m_pfnCmdDispatchGraph = nullptr;
+#endif
 };

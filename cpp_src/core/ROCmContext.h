@@ -71,10 +71,38 @@ public:
 
   hipDevice_t getROCmDevice() const override { return device; }
 
+  // Dynamically loaded HIP stream, pinned host memory, event, and multi-GPU P2P helpers
+  void *allocPinnedHost(size_t size, unsigned int flags = 0) const;
+  void freePinnedHost(void *hostPtr) const;
+  void *getHostDevicePointer(void *hostPtr) const;
+  hipStream_t createStream(unsigned int flags = hipStreamNonBlocking) const;
+  void destroyStream(hipStream_t stream) const;
+  void synchronizeStream(hipStream_t stream) const;
+  hipEvent_t createEvent(unsigned int flags = 0) const;
+  void destroyEvent(hipEvent_t ev) const;
+  void recordEvent(hipEvent_t ev, hipStream_t stream) const;
+  void synchronizeEvent(hipEvent_t ev) const;
+  float eventElapsedMs(hipEvent_t start, hipEvent_t stop) const;
+  void memcpyAsync(void *dst, const void *src, size_t size, hipMemcpyKind kind,
+                   hipStream_t stream) const;
+  void memsetAsync(void *dst, int value, size_t size, hipStream_t stream) const;
+  void dispatchOnStream(ComputeKernel kernel, uint32_t grid_x, uint32_t grid_y,
+                        uint32_t grid_z, uint32_t block_x, uint32_t block_y,
+                        uint32_t block_z, hipStream_t stream);
+  bool canAccessPeer(int srcDev, int dstDev) const;
+  bool enablePeerAccess(int peerDev) const;
+  void *allocOnDevice(int devIdx, size_t size) const;
+  void freeOnDevice(int devIdx, void *ptr) const;
+  void memcpyOnDevice(int devIdx, void *dst, const void *src, size_t size,
+                      hipMemcpyKind kind) const;
+  void memcpyPeerAsync(void *dst, int dstDev, const void *src, int srcDev,
+                       size_t size, hipStream_t stream) const;
+
 private:
   struct ROCmKernel {
     hipFunction_t function;
     std::map<uint32_t, std::vector<char>> args;
+    uint32_t lastBlockSize = 0;
   };
 
   static std::unique_ptr<utils::DynamicLibrary> hipLib;

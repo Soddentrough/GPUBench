@@ -1,10 +1,11 @@
-cmake_minimum_required(VERSION 3.22)
+cmake_minimum_required(VERSION 3.28)
 project(GPUBench VERSION 1.0.0 LANGUAGES C CXX)
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 
 # Versioning
 set(BUILD_NUMBER "0")
@@ -12,8 +13,8 @@ set(PROJECT_FULL_VERSION "${PROJECT_VERSION}")
 
 
 # Set proper debug flags based on compiler
-if(NOT CMAKE_BUILD_TYPE)
-    set(CMAKE_BUILD_TYPE Release)
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
 
 if(WIN32)
@@ -21,6 +22,11 @@ if(WIN32)
 endif()
 
 option(GPUBENCH_WERROR "Treat compiler warnings as errors" OFF)
+option(GPUBENCH_ENABLE_ROCM "Enable ROCm/HIP compute backend" ON)
+option(GPUBENCH_ENABLE_OPENCL "Enable OpenCL compute backend" OFF)
+option(GPUBENCH_ENABLE_SLANG "Compile Slang shaders to Vulkan 1.4 SPIR-V via slangc" ON)
+option(GPUBENCH_VALIDATE_SPIRV "Validate Slang-compiled SPIR-V with spirv-val" ON)
+option(GPUBENCH_ENABLE_EXPERIMENTAL_WORKGRAPHS "Enable experimental VK_AMDX_shader_enqueue Work Graphs benchmark" OFF)
 
 add_library(gpubench_compiler_flags INTERFACE)
 
@@ -96,64 +102,106 @@ if(Vulkan_FOUND)
         message(WARNING "glslc not found! Vulkan backend will be disabled.")
         set(Vulkan_FOUND FALSE)
     endif()
+
+    if(Vulkan_FOUND)
+        find_program(SPIRV_VAL_EXECUTABLE spirv-val
+            HINTS "$ENV{VULKAN_SDK}/Bin" "$ENV{VULKAN_SDK}/bin" "$ENV{VULKAN_SDK}/x86_64/bin" /usr/bin /usr/local/bin
+        )
+        if(SPIRV_VAL_EXECUTABLE)
+            message(STATUS "Found spirv-val: ${SPIRV_VAL_EXECUTABLE}")
+        elseif(GPUBENCH_VALIDATE_SPIRV)
+            message(WARNING "GPUBENCH_VALIDATE_SPIRV=ON but spirv-val was not found; skipping SPIR-V validation.")
+        endif()
+    endif()
+
+    if(Vulkan_FOUND AND GPUBENCH_ENABLE_SLANG)
+        find_program(SLANGC_EXECUTABLE slangc
+            HINTS "$ENV{VULKAN_SDK}/Bin" "$ENV{VULKAN_SDK}/bin" "$ENV{VULKAN_SDK}/x86_64/bin" /usr/bin /usr/local/bin
+        )
+        if(NOT SLANGC_EXECUTABLE)
+            message(FATAL_ERROR "GPUBENCH_ENABLE_SLANG=ON but slangc was not found. Install shader-slang or Vulkan SDK.")
+        endif()
+        message(STATUS "Found slangc: ${SLANGC_EXECUTABLE}")
+    endif()
 else()
     message(STATUS "Vulkan not found, will use OpenCL as fallback")
 endif()
 
 # Try to find OpenCL (fallback backend)
-find_package(OpenCL)
-if(OpenCL_FOUND)
-    message(STATUS "OpenCL found: ${OpenCL_LIBRARIES}")
+if(GPUBENCH_ENABLE_OPENCL)
+    find_package(OpenCL)
+    if(OpenCL_FOUND)
+        message(STATUS "OpenCL found: ${OpenCL_LIBRARIES}")
+    else()
+        message(STATUS "OpenCL not found")
+    endif()
 else()
-    message(STATUS "OpenCL not found")
+    set(OpenCL_FOUND FALSE)
+    message(STATUS "OpenCL backend soft-disabled (GPUBENCH_ENABLE_OPENCL=OFF)")
 endif()
 
-# Determine ROCm root path dynamically
-if(DEFINED ENV{ROCM_PATH} AND EXISTS "$ENV{ROCM_PATH}")
-    set(ROCM_PATH "$ENV{ROCM_PATH}")
-elseif(EXISTS "/opt/rocm/current")
-    set(ROCM_PATH "/opt/rocm/current")
-elseif(EXISTS "/opt/rocm/core-10.1")
-    set(ROCM_PATH "/opt/rocm/core-10.1")
-elseif(EXISTS "/opt/rocm")
-    set(ROCM_PATH "/opt/rocm")
-elseif(EXISTS "/opt/rocm/core-10.0")
-    set(ROCM_PATH "/opt/rocm/core-10.0")
-endif()
+# Determine ROCm root path dynamically (prefer active ROCm 10.2+ over older system/stale versions)
+if(GPUBENCH_ENABLE_ROCM)
+    if(DEFINED ENV{ROCM_PATH} AND EXISTS "$ENV{ROCM_PATH}")
+        set(ROCM_PATH "$ENV{ROCM_PATH}")
+    elseif(EXISTS "/opt/rocm/core")
+        set(ROCM_PATH "/opt/rocm/core")
+    elseif(EXISTS "/opt/rocm/core-10.2")
+        set(ROCM_PATH "/opt/rocm/core-10.2")
+    elseif(EXISTS "/opt/rocm/current")
+        set(ROCM_PATH "/opt/rocm/current")
+    elseif(EXISTS "/opt/rocm")
+        set(ROCM_PATH "/opt/rocm")
+    elseif(EXISTS "/opt/rocm/core-10.1")
+        set(ROCM_PATH "/opt/rocm/core-10.1")
+    elseif(EXISTS "/opt/rocm/core-10.0")
+        set(ROCM_PATH "/opt/rocm/core-10.0")
+    endif()
 
-if(ROCM_PATH)
-    if(NOT DEFINED CMAKE_HIP_COMPILER)
-        find_program(DETECTED_HIP_COMPILER clang++ HINTS ${ROCM_PATH}/llvm/bin ${ROCM_PATH}/lib/llvm/bin /usr/lib64/rocm/llvm/bin)
-        if(DETECTED_HIP_COMPILER)
-            set(CMAKE_HIP_COMPILER "${DETECTED_HIP_COMPILER}" CACHE FILEPATH "HIP compiler")
+    if(ROCM_PATH)
+        if(NOT DEFINED CMAKE_HIP_COMPILER)
+            find_program(DETECTED_HIP_COMPILER clang++
+                HINTS ${ROCM_PATH}/lib/llvm/bin ${ROCM_PATH}/llvm/bin /opt/rocm/core/lib/llvm/bin /opt/rocm/llvm/bin /usr/lib64/rocm/llvm/bin
+                NO_DEFAULT_PATH)
+            if(NOT DETECTED_HIP_COMPILER)
+                find_program(DETECTED_HIP_COMPILER clang++ HINTS ${ROCM_PATH}/llvm/bin ${ROCM_PATH}/lib/llvm/bin /usr/lib64/rocm/llvm/bin)
+            endif()
+            if(DETECTED_HIP_COMPILER)
+                set(CMAKE_HIP_COMPILER "${DETECTED_HIP_COMPILER}" CACHE FILEPATH "HIP compiler")
+            endif()
         endif()
+        set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} --rocm-path=${ROCM_PATH}")
+        if(EXISTS "${ROCM_PATH}/lib/llvm/amdgcn/bitcode")
+            set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} --rocm-device-lib-path=${ROCM_PATH}/lib/llvm/amdgcn/bitcode")
+        elseif(EXISTS "${ROCM_PATH}/amdgcn/bitcode")
+            set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} --rocm-device-lib-path=${ROCM_PATH}/amdgcn/bitcode")
+        endif()
+        find_package(HIP QUIET CONFIG HINTS "${ROCM_PATH}/lib/cmake/hip" "${ROCM_PATH}" NO_DEFAULT_PATH)
     endif()
-    set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} --rocm-path=${ROCM_PATH}")
-    if(EXISTS "${ROCM_PATH}/lib/llvm/amdgcn/bitcode")
-        set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} --rocm-device-lib-path=${ROCM_PATH}/lib/llvm/amdgcn/bitcode")
-    elseif(EXISTS "${ROCM_PATH}/amdgcn/bitcode")
-        set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} --rocm-device-lib-path=${ROCM_PATH}/amdgcn/bitcode")
+    if(NOT HIP_FOUND)
+        find_package(HIP QUIET)
     endif()
-endif()
-find_package(HIP QUIET)
-if(HIP_FOUND)
-    message(STATUS "HIP (ROCm) found: ${HIP_LIBRARIES}")
-    
-    # Find hiprtc for runtime compilation
-    find_library(HIPRTC_LIBRARY NAMES hiprtc)
-    if(HIPRTC_LIBRARY)
-        message(STATUS "Found hiprtc: ${HIPRTC_LIBRARY}")
+    if(HIP_FOUND)
+        if(ROCM_PATH AND EXISTS "${ROCM_PATH}/include/hip/hip_runtime_api.h")
+            list(FIND HIP_INCLUDE_DIRS "${ROCM_PATH}/include" _ROCM_INC_IDX)
+            if(_ROCM_INC_IDX EQUAL -1)
+                list(PREPEND HIP_INCLUDE_DIRS "${ROCM_PATH}/include")
+            endif()
+        endif()
+        message(STATUS "HIP (ROCm) found: ${HIP_LIBRARIES} (headers: ${HIP_INCLUDE_DIRS})")
+
+        # Find hiprtc for runtime compilation
+        find_library(HIPRTC_LIBRARY NAMES hiprtc
+            HINTS "${ROCM_PATH}/lib" /opt/rocm/core/lib /opt/rocm/lib)
+        if(HIPRTC_LIBRARY)
+            message(STATUS "Found hiprtc: ${HIPRTC_LIBRARY}")
+        endif()
+    else()
+        message(STATUS "HIP (ROCm) not found")
     endif()
 else()
-    message(STATUS "HIP (ROCm) not found")
-endif()
-
-# Find shaderc for runtime Vulkan shader compilation
-find_path(SHADERC_INCLUDE_DIR NAMES shaderc/shaderc.hpp)
-find_library(SHADERC_LIBRARY NAMES shaderc_shared)
-if(SHADERC_INCLUDE_DIR AND SHADERC_LIBRARY)
-    set(SHADERC_FOUND TRUE)
-    message(STATUS "Found shaderc: ${SHADERC_LIBRARY}")
+    set(HIP_FOUND FALSE)
+    message(STATUS "ROCm/HIP backend soft-disabled (GPUBENCH_ENABLE_ROCM=OFF)")
 endif()
 
 # Check that at least one backend is available
@@ -163,8 +211,11 @@ endif()
 
 # Shader/Kernel sources
 if(Vulkan_FOUND)
-    file(GLOB SHADERS CONFIGURE_DEPENDS "shaders/*.comp" "shaders/*.rgen" "shaders/*.rmiss" "shaders/*.rchit" "shaders/*.rahit" "shaders/*.rint" "shaders/*.vert" "shaders/*.frag")
+    file(GLOB SHADERS CONFIGURE_DEPENDS "shaders/*.comp" "shaders/*.rgen" "shaders/*.rmiss" "shaders/*.rchit" "shaders/*.rahit" "shaders/*.rint" "shaders/*.vert" "shaders/*.frag" "shaders/*.tesc" "shaders/*.tese" "shaders/*.task" "shaders/*.mesh")
     list(REMOVE_DUPLICATES SHADERS)
+    if(NOT GPUBENCH_ENABLE_EXPERIMENTAL_WORKGRAPHS)
+        list(FILTER SHADERS EXCLUDE REGEX ".*/workgraphs_[^/]+$")
+    endif()
     file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/kernels/vulkan)
     
     file(GLOB SHADER_HEADERS CONFIGURE_DEPENDS "shaders/*.glsl" "shaders/*.h")
@@ -182,6 +233,7 @@ if(Vulkan_FOUND)
 
     foreach(SHADER ${SHADERS})
         get_filename_component(SHADER_NAME ${SHADER} NAME)
+        get_filename_component(SHADER_EXT ${SHADER} LAST_EXT)
         set(DEST_SHADER "${CMAKE_CURRENT_BINARY_DIR}/kernels/vulkan/${SHADER_NAME}")
         set(SPV_SHADER "${DEST_SHADER}.spv")
         # spirv-opt in shaderc 2026.2 rejects SPV_EXT_ocp_microscaling_types capability operands (4228/4229).
@@ -189,11 +241,22 @@ if(Vulkan_FOUND)
         if(SHADER_NAME STREQUAL "coop_matrix_fp4.comp" OR SHADER_NAME STREQUAL "coop_matrix_fp6.comp")
             set(SHADER_OPT_FLAG "-O0")
         endif()
+        set(SHADER_STAGE_FLAG "")
+        if(SHADER_EXT STREQUAL ".task")
+            set(SHADER_STAGE_FLAG "-fshader-stage=task")
+        elseif(SHADER_EXT STREQUAL ".mesh")
+            set(SHADER_STAGE_FLAG "-fshader-stage=mesh")
+        endif()
+        set(SHADER_VAL_CMD "")
+        if(GPUBENCH_VALIDATE_SPIRV AND SPIRV_VAL_EXECUTABLE AND SHADER_NAME MATCHES "^showcase_")
+            set(SHADER_VAL_CMD COMMAND ${SPIRV_VAL_EXECUTABLE} --target-env vulkan1.4 ${SPV_SHADER})
+        endif()
         
         # Pre-compile GLSL to SPIR-V
         add_custom_command(
             OUTPUT ${SPV_SHADER}
-            COMMAND ${GLSLC_EXECUTABLE} ${SHADER_OPT_FLAG} --target-env=vulkan1.4 -I${CMAKE_CURRENT_SOURCE_DIR}/shaders ${SHADER} -o ${SPV_SHADER}
+            COMMAND ${GLSLC_EXECUTABLE} ${SHADER_OPT_FLAG} --target-env=vulkan1.4 ${SHADER_STAGE_FLAG} -I${CMAKE_CURRENT_SOURCE_DIR}/shaders ${SHADER} -o ${SPV_SHADER}
+            ${SHADER_VAL_CMD}
             DEPENDS ${SHADER} ${SHADER_HEADERS}
             COMMENT "Compiling Vulkan shader to SPIR-V: ${SHADER}"
         )
@@ -209,6 +272,9 @@ if(Vulkan_FOUND)
     endforeach()
 
     file(GLOB SPVASM_SHADERS CONFIGURE_DEPENDS "shaders/*.spvasm")
+    if(NOT GPUBENCH_ENABLE_EXPERIMENTAL_WORKGRAPHS)
+        list(FILTER SPVASM_SHADERS EXCLUDE REGEX ".*/workgraphs_[^/]+$")
+    endif()
     foreach(SPVASM ${SPVASM_SHADERS})
         get_filename_component(SPVASM_NAME ${SPVASM} NAME)
         get_filename_component(SPVASM_STEM ${SPVASM} NAME_WE)
@@ -233,6 +299,44 @@ if(Vulkan_FOUND)
             list(APPEND VULKAN_SHADERS ${SPV_SPVASM})
         endif()
     endforeach()
+
+    if(GPUBENCH_ENABLE_SLANG)
+        file(GLOB SLANG_MODULES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/shaders/slang/modules/*.slang")
+
+        function(gpubench_add_slang_shader SLANG_FILE STAGE ENTRY PROFILE OUT_SPV_NAME)
+            set(SLANG_SRC "${CMAKE_CURRENT_SOURCE_DIR}/shaders/slang/${SLANG_FILE}")
+            set(SPV_OUT "${CMAKE_CURRENT_BINARY_DIR}/kernels/vulkan/${OUT_SPV_NAME}")
+            set(SLANG_VAL_CMD "")
+            if(GPUBENCH_VALIDATE_SPIRV AND SPIRV_VAL_EXECUTABLE)
+                set(SLANG_VAL_CMD COMMAND ${SPIRV_VAL_EXECUTABLE} --target-env vulkan1.4 ${SPV_OUT})
+            endif()
+            add_custom_command(
+                OUTPUT ${SPV_OUT}
+                COMMAND ${SLANGC_EXECUTABLE} -target spirv -profile ${PROFILE} -stage ${STAGE} -entry ${ENTRY}
+                        -O3 -warnings-as-errors all -I "${CMAKE_CURRENT_SOURCE_DIR}/shaders/slang/modules"
+                        ${SLANG_SRC} -o ${SPV_OUT}
+                ${SLANG_VAL_CMD}
+                DEPENDS ${SLANG_SRC} ${SLANG_MODULES}
+                COMMENT "Compiling Slang shader to Vulkan 1.4 SPIR-V: ${SLANG_FILE} -> ${OUT_SPV_NAME}"
+                VERBATIM
+            )
+            list(APPEND VULKAN_SHADERS ${SPV_OUT})
+            set(VULKAN_SHADERS "${VULKAN_SHADERS}" PARENT_SCOPE)
+        endfunction()
+
+        gpubench_add_slang_shader("rt_scheduling_reset.slang" "compute" "main" "spirv_1_6" "rt_scheduling_reset.comp.spv")
+        gpubench_add_slang_shader("rt_scheduling_resolve.slang" "compute" "main" "spirv_1_6+spvGroupNonUniform+spvGroupNonUniformArithmetic" "rt_scheduling_resolve.comp.spv")
+        gpubench_add_slang_shader("rt_scheduling_dgc_shadow.slang" "compute" "main" "spirv_1_6+spvGroupNonUniform+spvGroupNonUniformArithmetic+spvRayQueryKHR" "rt_scheduling_device_generated_commands_shadow.comp.spv")
+        gpubench_add_slang_shader("rt_scheduling_dgc_light.slang" "compute" "main" "spirv_1_6+spvGroupNonUniform+spvGroupNonUniformArithmetic+spvGroupNonUniformBallot+spvGroupNonUniformVote+spvGroupNonUniformShuffle" "rt_scheduling_device_generated_commands_light.comp.spv")
+        gpubench_add_slang_shader("rt_scheduling_dgc_material.slang" "compute" "main" "spirv_1_6+spvGroupNonUniform+spvGroupNonUniformArithmetic+spvGroupNonUniformBallot+spvGroupNonUniformVote+spvGroupNonUniformShuffle" "rt_scheduling_device_generated_commands_material.comp.spv")
+        gpubench_add_slang_shader("rt_scheduling_dgc_bounce.slang" "compute" "main" "spirv_1_6+spvGroupNonUniform+spvGroupNonUniformArithmetic+spvGroupNonUniformBallot+spvGroupNonUniformVote+spvGroupNonUniformShuffle+spvRayQueryKHR" "rt_scheduling_device_generated_commands_bounce.comp.spv")
+        gpubench_add_slang_shader("rt_scheduling_dgc_classify.slang" "compute" "main" "spirv_1_6+spvGroupNonUniform+spvGroupNonUniformArithmetic+spvGroupNonUniformBallot+spvGroupNonUniformVote+spvGroupNonUniformShuffle+spvRayQueryKHR" "rt_scheduling_device_generated_commands_classify.comp.spv")
+        gpubench_add_slang_shader("rt_scheduling_megakernel.slang" "compute" "main" "spirv_1_6+spvGroupNonUniform+spvGroupNonUniformArithmetic+spvGroupNonUniformBallot+spvRayQueryKHR" "rt_scheduling_traditional_megakernel.comp.spv")
+        gpubench_add_slang_shader("rt_scheduling_rgen.slang" "raygeneration" "main" "spirv_1_6+spvGroupNonUniform+spvGroupNonUniformArithmetic+spvGroupNonUniformBallot+spvRayTracingKHR" "rt_scheduling.rgen.spv")
+        gpubench_add_slang_shader("rt_scheduling_ser_rgen.slang" "raygeneration" "main" "spirv_1_6+spvGroupNonUniform+spvGroupNonUniformArithmetic+spvGroupNonUniformBallot+spvRayTracingKHR+spvShaderInvocationReorderEXT" "rt_scheduling_ser.rgen.spv")
+        gpubench_add_slang_shader("rt_scheduling_rmiss.slang" "miss" "main" "spirv_1_6+spvRayTracingKHR" "rt_scheduling.rmiss.spv")
+        gpubench_add_slang_shader("rt_scheduling_rchit.slang" "closesthit" "main" "spirv_1_6+spvRayTracingKHR+spvRayQueryKHR" "rt_scheduling.rchit.spv")
+    endif()
 
     file(GLOB EXISTING_VULKAN_ARTIFACTS "${CMAKE_CURRENT_BINARY_DIR}/kernels/vulkan/*")
     foreach(EXISTING_FILE ${EXISTING_VULKAN_ARTIFACTS})
@@ -271,11 +375,21 @@ endif()
 
 # Copy HIP kernels and compile code objects
 if(HIP_FOUND)
-    find_program(HIPCC_EXECUTABLE hipcc HINTS ${ROCM_PATH}/bin /opt/rocm/current/bin /opt/rocm/core-10.1/bin /usr/bin /opt/rocm/bin)
+    find_program(HIPCC_EXECUTABLE hipcc
+        HINTS ${ROCM_PATH}/bin /opt/rocm/core/bin /opt/rocm/core-10.2/bin /opt/rocm/current/bin /opt/rocm/bin /opt/rocm/core-10.1/bin
+        NO_DEFAULT_PATH)
+    if(NOT HIPCC_EXECUTABLE)
+        find_program(HIPCC_EXECUTABLE hipcc HINTS ${ROCM_PATH}/bin /opt/rocm/core/bin /opt/rocm/bin /usr/bin)
+    endif()
     if(NOT HIPCC_EXECUTABLE)
         set(HIPCC_EXECUTABLE hipcc)
     endif()
-    find_path(ROCM_CLANG_PATH clang++ HINTS ${ROCM_PATH}/llvm/bin ${ROCM_PATH}/lib/llvm/bin /opt/rocm/current/lib/llvm/bin /opt/rocm/core-10.1/lib/llvm/bin /usr/lib64/rocm/llvm/bin)
+    find_path(ROCM_CLANG_PATH clang++
+        HINTS ${ROCM_PATH}/lib/llvm/bin ${ROCM_PATH}/llvm/bin /opt/rocm/core/lib/llvm/bin /opt/rocm/core-10.2/lib/llvm/bin /opt/rocm/current/lib/llvm/bin /opt/rocm/llvm/bin /opt/rocm/core-10.1/lib/llvm/bin
+        NO_DEFAULT_PATH)
+    if(NOT ROCM_CLANG_PATH)
+        find_path(ROCM_CLANG_PATH clang++ HINTS ${ROCM_PATH}/llvm/bin ${ROCM_PATH}/lib/llvm/bin /usr/lib64/rocm/llvm/bin)
+    endif()
     if(ROCM_CLANG_PATH)
         if(ROCM_PATH)
             set(HIPCC_ENV ${CMAKE_COMMAND} -E env HIP_CLANG_PATH=${ROCM_CLANG_PATH} ROCM_PATH=${ROCM_PATH})
@@ -314,6 +428,9 @@ if(HIP_FOUND)
     message(STATUS "HIP target offload architectures: ${TARGET_ARCH_LIST}")
 
     file(GLOB HIP_SOURCES CONFIGURE_DEPENDS "hip_kernels/*.hip")
+    if(NOT GPUBENCH_ENABLE_EXPERIMENTAL_WORKGRAPHS)
+        list(FILTER HIP_SOURCES EXCLUDE REGEX ".*/workgraphs_[^/]+$")
+    endif()
     file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/kernels/rocm)
     
     foreach(HIP_SOURCE ${HIP_SOURCES})
@@ -380,7 +497,6 @@ set(LIB_SOURCES
     cpp_src/benchmarks/AsyncOverlapBench.cpp
     cpp_src/benchmarks/SparseMatrixBench.cpp
     cpp_src/benchmarks/CoopVectorBench.cpp
-    cpp_src/benchmarks/WorkGraphsBench.cpp
     cpp_src/benchmarks/RayOMMBench.cpp
     cpp_src/benchmarks/PixelFillRateBench.cpp
     cpp_src/benchmarks/RayIntersectBench.cpp
@@ -402,11 +518,17 @@ set(LIB_SOURCES
 
 set(CORE_THIRD_PARTY_SOURCES cpp_src/third_party/yyjson.c)
 
+if(GPUBENCH_ENABLE_EXPERIMENTAL_WORKGRAPHS)
+    list(APPEND LIB_SOURCES cpp_src/benchmarks/WorkGraphsBench.cpp)
+endif()
+
 # Add backend-specific sources
 if(Vulkan_FOUND)
     list(APPEND LIB_SOURCES
         cpp_src/core/VulkanContext.cpp
         cpp_src/core/VmaImpl.cpp
+        cpp_src/showcase/ShowcaseScene.cpp
+        cpp_src/showcase/ShowcaseRenderer.cpp
     )
     list(APPEND CORE_THIRD_PARTY_SOURCES cpp_src/core/VmaImpl.cpp)
 endif()
@@ -483,10 +605,6 @@ target_include_directories(gpubench_lib PUBLIC
 if(Vulkan_FOUND)
     target_include_directories(gpubench SYSTEM PUBLIC ${Vulkan_INCLUDE_DIRS})
     target_include_directories(gpubench_lib SYSTEM PUBLIC ${Vulkan_INCLUDE_DIRS})
-    if(SHADERC_FOUND)
-        target_include_directories(gpubench SYSTEM PUBLIC ${SHADERC_INCLUDE_DIR})
-        target_include_directories(gpubench_lib SYSTEM PUBLIC ${SHADERC_INCLUDE_DIR})
-    endif()
 endif()
 
 target_include_directories(gpubench SYSTEM PUBLIC
@@ -528,7 +646,7 @@ endif()
 
 if(HIP_FOUND)
     target_compile_definitions(gpubench PRIVATE HAVE_HIPRTC __HIP_PLATFORM_AMD__)
-    target_compile_definitions(gpubench_lib PRIVATE HAVE_HIPRTC __HIP_PLATFORM_AMD__)
+    target_compile_definitions(gpubench_lib PUBLIC HAVE_HIPRTC __HIP_PLATFORM_AMD__)
 endif()
 
 if(APPLE)
@@ -538,21 +656,26 @@ endif()
 
 # Compiler definitions for conditional compilation
 target_compile_definitions(gpubench PRIVATE GPUBENCH_VERSION="${PROJECT_FULL_VERSION}")
-target_compile_definitions(gpubench_lib PRIVATE GPUBENCH_VERSION="${PROJECT_FULL_VERSION}")
+target_compile_definitions(gpubench_lib PUBLIC GPUBENCH_VERSION="${PROJECT_FULL_VERSION}")
 
 if(Vulkan_FOUND)
     target_compile_definitions(gpubench PRIVATE HAVE_VULKAN)
-    target_compile_definitions(gpubench_lib PRIVATE HAVE_VULKAN)
+    target_compile_definitions(gpubench_lib PUBLIC HAVE_VULKAN)
 endif()
 
 if(OpenCL_FOUND)
     target_compile_definitions(gpubench PRIVATE HAVE_OPENCL)
-    target_compile_definitions(gpubench_lib PRIVATE HAVE_OPENCL)
+    target_compile_definitions(gpubench_lib PUBLIC HAVE_OPENCL)
 endif()
 
 if(HIP_FOUND)
     target_compile_definitions(gpubench PRIVATE HAVE_ROCM)
-    target_compile_definitions(gpubench_lib PRIVATE HAVE_ROCM)
+    target_compile_definitions(gpubench_lib PUBLIC HAVE_ROCM)
+endif()
+
+if(GPUBENCH_ENABLE_EXPERIMENTAL_WORKGRAPHS)
+    target_compile_definitions(gpubench PRIVATE GPUBENCH_ENABLE_EXPERIMENTAL_WORKGRAPHS)
+    target_compile_definitions(gpubench_lib PUBLIC GPUBENCH_ENABLE_EXPERIMENTAL_WORKGRAPHS)
 endif()
 
 
@@ -641,6 +764,7 @@ if(GPUBENCH_BUILD_GUI)
             cpp_src/gui/GuiTelemetryPanel.cpp
             cpp_src/gui/GuiScorecardPanel.cpp
             cpp_src/gui/GuiViewportPanel.cpp
+            cpp_src/gui/GuiShowcasePanel.cpp
             cpp_src/gui/GuiRooflinePanel.cpp
             cpp_src/gui/TelemetryWorker.cpp
             cpp_src/gui/VulkanContext.cpp
@@ -684,6 +808,9 @@ if(GPUBENCH_BUILD_GUI)
         set_target_properties(gpubench-gui PROPERTIES CXX_STANDARD 23 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
         if(Vulkan_FOUND)
             add_dependencies(gpubench-gui shaders)
+        endif()
+        if(HIP_FOUND)
+            add_dependencies(gpubench-gui hip_kernels)
         endif()
         if(UNIX AND NOT APPLE)
             set_target_properties(gpubench-gui PROPERTIES
@@ -770,6 +897,8 @@ if(GPUBENCH_BUILD_GUI)
         endif()
 
         install(TARGETS gpubench-gui DESTINATION bin)
+        add_test(NAME GuiSmoke COMMAND $<TARGET_FILE:gpubench-gui> --help)
+        set_tests_properties(GuiSmoke PROPERTIES WORKING_DIRECTORY "${CMAKE_BINARY_DIR}" LABELS "cpu")
     else()
         message(WARNING "SDL3 or Vulkan not found. Native C++ GUI will not be built.")
     endif()
@@ -889,18 +1018,6 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets/thumbnails")
     install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/assets/thumbnails/"
             DESTINATION share/gpubench/assets/thumbnails
             FILES_MATCHING PATTERN "*.png")
-endif()
-
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/docs/images")
-    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/docs/images/"
-            DESTINATION share/gpubench/docs/images
-            FILES_MATCHING PATTERN "*.png")
-endif()
-
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/renders")
-    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/renders/"
-            DESTINATION share/gpubench/renders
-            FILES_MATCHING PATTERN "*.json")
 endif()
 
 # CPack configuration for creating packages

@@ -7,11 +7,10 @@ GPUBench is a high-performance cross-platform GPU benchmarking tool designed to 
 
 ## Features
 
-- **Multi-Backend Support**: Benchmarks using **Vulkan 1.4** (with **VulkanMemoryAllocator 3.5.0** & persistent disk-backed `VkPipelineCache`), **ROCm/HIP** (`hipGraphLaunch` stream capture + RDNA WMMA & CDNA MFMA), and **OpenCL 3.0**.
+- **Vulkan-First + Full ROCm Compute Parity (Optional OpenCL)**: Benchmarks across **Vulkan 1.4** (with **VulkanMemoryAllocator 3.5.0**, precompiled **Slang** + GLSL SPIR-V shaders, and persistent disk-backed `VkPipelineCache`) and **ROCm/HIP 6.4–10.2+** (enabled by default via `-DGPUBENCH_ENABLE_ROCM=ON` with dynamic `dlopen` loading, `hipGraphLaunch` stream capture, RDNA WMMA & CDNA MFMA, Multi-GPU P2P, SDMA overlap, and persistent GPU work queues), plus optional **OpenCL 3.0** (`-DGPUBENCH_ENABLE_OPENCL=ON`).
 - **Hardware Ray Tracing & Next-Gen 2026 Microbenchmarks**:
-  - **Ray Scheduling Architectures (`RayScheduling`)**: Megakernel vs. Decoupled Wavefronts via Device-Generated Commands (DGC), Persistent Workgroups (dynamically scaled by hardware CU/SM count), and Shader Execution Reordering (SER, where supported by hardware).
+  - **Ray Scheduling Architectures (`RayScheduling`)**: Megakernel vs. Decoupled Wavefronts via Device-Generated Commands (DGC) and Shader Execution Reordering (`VK_EXT_ray_tracing_invocation_reorder`, where supported by hardware).
   - **Hardware Opacity Micromaps (`RayOMM`)**: Evaluates `VK_EXT_opacity_micromap` 2-state and 4-state hardware BVH micromap culling vs. AnyHit shader fallback on dense alpha-cutout geometry.
-  - **GPU Work Graphs (`WorkGraphs`)**: Producer-to-consumer multi-node GPU work expansion via `VK_AMDX_shader_enqueue` (`SPV_AMDX_shader_enqueue`) compared against CPU/DGC indirect dispatch.
   - **Async Compute & Copy Engine Concurrency (`AsyncOverlap`)**: Quantifies standalone vs. concurrent Graphics/RT + Async Compute (`VK_QUEUE_COMPUTE_BIT` ACE) + DMA Copy Engine (`VK_QUEUE_TRANSFER_BIT`) execution overlap.
   - **Raw Hardware BVH Traversal (`RayRawTraversal`)**: Hardware BVH8 node traversal evaluating zero-overhead in-register ray queries (Coherent Triangles & 64-Layer `VK_GEOMETRY_TYPE_AABBS_KHR` Box Stress).
   - **Real-World Material & Spatial Ray Divergence (`RayDivergence`, `RayAnyHit`, `RayASBuild`, `RayPayload`)**: Heterogeneous PBR material shading, parametric cone divergence, 16-layer AnyHit cutout stacks, BLAS/TLAS build/refit throughput, and 16B–256B payload register pressure.
@@ -30,9 +29,9 @@ GPUBench is a high-performance cross-platform GPU benchmarking tool designed to 
 
 | Backend | Platform | Primary Use Case | Minimum Version |
 | :--- | :--- | :--- | :--- |
-| **Vulkan** | Linux, Windows | Primary cross-vendor compute, ray tracing, Work Graphs, OMM & GUI | **1.4+** |
-| **ROCm/HIP** | Linux, Windows | Native AMD RDNA WMMA & CDNA MFMA compute + `hipGraphLaunch` | **6.4+** |
-| **OpenCL** | Linux, Windows | Cross-vendor compute (`CL_TARGET_OPENCL_VERSION=300`) | **3.0** (1.2+ ICD) |
+| **Vulkan** | Linux, Windows | Primary cross-vendor compute, ray tracing, DGC, OMM & GUI (enabled by default) | **1.4+** |
+| **ROCm/HIP** | Linux, Windows | Default (`GPUBENCH_ENABLE_ROCM=ON`): AMD RDNA WMMA, CDNA MFMA, `hipGraphLaunch`, SDMA & P2P | **6.4–10.2+** |
+| **OpenCL** | Linux, Windows | Optional (`-DGPUBENCH_ENABLE_OPENCL=ON`): cross-vendor compute (`CL_TARGET_OPENCL_VERSION=300`) | **3.0** (1.2+ ICD) |
 
 ---
 
@@ -134,17 +133,17 @@ Modern ray tracing performance in production games and visual effects engines is
 
 GPUBench evaluates how different GPU hardware architectures handle these workloads across distinct scheduling architectures:
 
-1. **Traditional Megakernel**: Traces rays and evaluates all hit shading in a single compute pass. Suffering from the "convoy effect," a single complex material forces all lanes to allocate worst-case VGPRs and serializes execution over divergent SIMD branches.
-2. **Traditional + SER (Shader Execution Reordering)**: Evaluates in-pipeline thread regrouping (`VK_EXT_ray_tracing_invocation_reorder`) on supported architectures (e.g. NVIDIA Ada Lovelace / Blackwell) to dynamically regroup divergent lanes by spatial direction and material hit ID before executing hit shaders. *(Note: Unsupported on AMD RDNA hardware, which relies on software stream compaction).*
-3. **Device-Generated Commands (DGC / Wavefront Compaction)**: Compacts divergent hits into categorized material queues via ballot/atomic compaction and dispatches uniform waves using GPU-driven command generation (`VK_EXT_device_generated_commands`), providing optimal scaling across AMD RDNA and multi-vendor GPUs.
+1. **Traditional Megakernel**: Traces rays and evaluates all hit shading in a single compute pass. Suffering from the "convoy effect," divergent material branches serialize execution within a wavefront and inflate the monolithic shader's code footprint.
+2. **Traditional + SER (Shader Execution Reordering)**: Evaluates in-pipeline thread regrouping (`VK_EXT_ray_tracing_invocation_reorder`) on architectures with hardware sorting support (e.g., **NVIDIA Ada Lovelace / Blackwell** and **Intel Arc Battlemage Xe2 / Xe3** Thread Sorting Unit) to regroup divergent lanes by spatial direction and material hit ID before executing hit shaders. *(Note: Hardware SER is unsupported on AMD RDNA GPUs; pass-through/no-op configurations are flagged explicitly).*
+3. **Device-Generated Commands (DGC / Wavefront Compaction)**: Compacts divergent hits into categorized material queues via ballot/atomic compaction and dispatches uniform waves using GPU-driven command generation (`VK_EXT_device_generated_commands`), providing strong scaling across AMD RDNA and multi-vendor GPUs.
 
 #### Four-Scenario Benchmarking Morphology
-All scenario throughput measurements below were evaluated at **4K UHD (3840x2160, ~8.29M primary rays)** on the **AMD Radeon AI PRO R9700** (RDNA 4 / gfx1201):
-- **Showroom Studio (`-s showroom`)**: $108,936$ triangles featuring the Khronos ToyCar glTF asset with clearcoat, decals, and velvet pedestal. Device-Generated Commands (DGC) achieve **101.3 FPS** vs. Megakernel **57.6 FPS** (**1.76x speedup**).
-- **Complex Indoor Atrium (`-s indoor`)**: $426,064$ triangles featuring the Renaissance Colonnade Atrium glTF (`assets/models/sponza.glb`) with 25 PBR materials, open-air courtyard skylight, and two-story colonnade arcades. Device-Generated Commands (DGC) achieve **68.0 FPS** vs. Megakernel **30.5 FPS** (**2.23x speedup**).
+Reference measurements below were recorded at **4K UHD (3840x2160, ~8.29M primary rays)** on an **AMD Radeon AI PRO R9700** (RDNA 4 / gfx1201):
+- **Showroom Studio (`-s showroom`)**: $108,936$ triangles featuring the Khronos ToyCar glTF asset with clearcoat, metallic trim, and fabric pedestal. Device-Generated Commands (DGC) achieve **101.3 FPS** vs. Megakernel **57.6 FPS** (**1.76x speedup**).
+- **Complex Indoor Atrium (`-s indoor`)**: $426,064$ triangles featuring a clean-room Renaissance Colonnade Atrium glTF (`assets/models/sponza.glb`) with 25 PBR materials, open-air courtyard skylight, and two-story colonnade arcades. Device-Generated Commands (DGC) achieve **68.0 FPS** vs. Megakernel **30.5 FPS** (**2.23x speedup**).
 - **Open-World Outdoor Landscape (`-s outdoor`)**: $57,216$ triangles spanning $>2000\text{m}$ alpine terrain, lake, conifer foliage, and Rayleigh-Mie atmospheric scattering. Device-Generated Commands (DGC) achieve **420.0 FPS** vs. Megakernel **185.8 FPS** (**2.26x speedup**).
 - **Open-World Forest (`-s forest`)**: $1,051,696$ triangles featuring high-density 256×256 terrain, river bathymetry, 530 trees (350 pines, 180 birches), and 8 nature PBR shaders. Device-Generated Commands (DGC) achieve **55.0 FPS** vs. Megakernel **27.0 FPS** (**2.04x speedup**).
-- **100% Bit-Exact Analytical Parity**: Verified bit-exact 120.00 dB PSNR, 0.000000 MAE, and 0 discrepant pixels across all 8,294,400 pixels at 4K UHD across all four scenarios.
+- **LDR & HDR Analytical Parity (`--verify-parity`)**: Compares both tone-mapped 8-bit LDR framebuffers and linear HDR FP32 outputs between Megakernel and DGC (PSNR, RMSE, max absolute delta, and discrepant pixel counts across 8,294,400 pixels at 4K UHD; fails non-zero if PSNR < 45 dB or discrepancy > 0.01%).
 
 ---
 
@@ -163,14 +162,14 @@ Production scenes rarely contain uniform shaders; they feature a **heterogeneous
 ![5-Material Shader Lineup](docs/images/material_lineup.png)
 *Fig 3: Lineup of production material candidates on test pedestals.*
 
-| Archetype | Reference Shading Model | Computational / SIMD Bottleneck |
+| Archetype | Reference Shading Model (`shaders/slang/modules/rt_pbr.slang`) | Computational / SIMD Bottleneck |
 | :--- | :--- | :--- |
-| **Clearcoat Car Paint** | Dual-specular GGX lobes (clearcoat + metallic substrate), Beer-Lambert absorption, high-frequency Voronoi micro-flake glints. | Multi-lobe evaluation, procedural hash functions, secondary normal perturbations. |
-| **Dispersive Crystal / Glass** | Snell's law refraction with total internal reflection (TIR) branching, Cauchy spectral dispersion, 450 nm thin-film wave interference. | Directional ray branching (reflection vs. transmission), trigonometric Airy interference series. |
-| **Organic Jade / Wax** | Multi-channel subsurface diffusion profile ($R, G, B$ differing mean free paths), dual-lobe surface gloss. | Multi-channel exponential attenuation, non-local volumetric scattering. |
-| **Anisotropic Velvet / Fabric** | Dual-axis anisotropic roughness ($a_x \neq a_y$) with tangent frame rotation, Charlie micro-fiber inverted grazing sheen ($D_{\text{charlie}}$). | Tangent-space matrix transforms, transcendental power functions ($x^{1/2\alpha}$). |
-| **Weathered Industrial Rust** | 6-octave Fractal Brownian Motion (FBM) noise loops, continuous dynamic phase transition from conductor steel to porous dielectric rust. | Heavy arithmetic loop execution, divergent multi-octave iteration depth. |
-| **Matte Ceramic & Concrete** | Standard Lambertian/Oren-Nayar diffuse PBR. | Minimal ALU baseline, high wave occupancy. |
+| **Clearcoat Car Paint** | Dual GGX specular lobes (narrow clearcoat + metallic base) with spatial hash micro-flake glints. | Multi-lobe specular evaluation and high-exponent highlight shaping. |
+| **Dispersive Crystal / Glass** | Schlick Fresnel reflection vs. per-channel RGB `refract()` offset approximation ($\eta \pm 0.02$) with TIR fallback and GGX specular. | Directional refraction/TIR branching and multi-channel environment lookup. |
+| **Organic Jade / Wax** | Wrapped diffuse illumination with per-channel RGB exponential absorption approximation and single-lobe GGX specular. | Per-channel exponential attenuation and wrap-lighting math. |
+| **Velvet / Fabric** | Diffuse base plus Charlie micro-fiber inverted grazing sheen ($D_{\text{charlie}}$) and Fresnel rim weighting. | Transcendental power evaluation ($x^{\text{invAlpha}}$) and divergent shading branch. |
+| **Weathered Industrial Rust** | 4-octave 3D Fractal Brownian Motion (`rustFBM3D`) + fine 3D noise blending bare conductor metal into dielectric oxidized rust. | Multi-octave 3D value-noise loop execution and material blend masks. |
+| **Matte Ceramic & Polished Marble** | Lambertian diffuse PBR or two-term diffuse + sharp dielectric specular (`alpha2 = 0.008`). | Lightweight ALU baseline, high wave occupancy. |
 
 #### Analytic Atmospheric Skybox Model
 
@@ -215,8 +214,8 @@ gpubench --list-backends
 # Run all benchmarks on default device
 gpubench
 
-# Run Next-Gen 2026 Interconnect, Async Overlap, Work Graphs, Sparsity, CoopVec & OMM benchmarks
-gpubench -d 0 -b interconnect,asyncoverlap,workgraphs,rayomm,sparsematrix,coopvector
+# Run Next-Gen 2026 Interconnect, Async Overlap, Sparsity, CoopVec & OMM benchmarks
+gpubench -d 0 -b interconnect,asyncoverlap,rayomm,sparsematrix,coopvector
 
 # Run Empirical Roofline analysis across memory/cache & compute tiers and export unified v2.0 JSON
 gpubench -d 0 -g compute,memory --roofline -o benchmark_results.json
@@ -225,14 +224,13 @@ gpubench -d 0 -g compute,memory --roofline -o benchmark_results.json
 gpubench --import benchmark_results.json --roofline
 gpubench --compare baseline.json candidate.json
 
-# Run Dual-Issue & Concurrency benchmark suite across backends
+# Run Dual-Issue & Concurrency benchmark suite (or explicitly across optional backends if enabled)
 gpubench -d 0 -b dualissue
-gpubench -d 0 -b dualissue -k vulkan,rocm
 
 # Select benchmark scene morphology: showroom, indoor, outdoor, forest, or all
 gpubench -d 0 -b rayscheduling -s indoor -r 4k --verify-parity
 
-# Run specific config (e.g. Config 9: Megakernel, Config 11: DGC, Config 25: Dynamic Persistent) in profiling snapshot mode
+# Run specific config (e.g. Config 9: Full Frame Megakernel, Config 11: Full Frame DGC, Config 25: Single-Pass Queue Compaction)
 gpubench -d 0 -b rayscheduling -s forest -c 11 --profile-snapshot
 ```
 
@@ -243,7 +241,6 @@ GPUBench includes built-in hardware ISA disassembly (`VK_KHR_pipeline_executable
 ```bash
 # Inspect hardware ISA, instruction histograms, hot-loop disassembly, and VGPR/SGPR usage
 gpubench --dump-isa bf16
-gpubench --dump-isa workgraphs
 gpubench --dump-isa rayomm
 gpubench --dump-isa dualissue --full-isa
 gpubench --dump-isa fp16 -k rocm

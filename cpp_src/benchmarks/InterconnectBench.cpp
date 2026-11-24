@@ -1,4 +1,5 @@
 #include "InterconnectBench.h"
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstring>
@@ -110,12 +111,40 @@ const char *InterconnectBench::GetDescription(uint32_t config_idx) const {
   case 4:
     return "Measures fine-grained coherent atomic cache-line round-trip latency between CPU and GPU on Unified Memory APUs.";
   case 5:
-    return "Measures direct GPU-to-GPU Peer-to-Peer (P2P) DMA bandwidth across PCIe / xGMI / NVLink device groups.";
+    return "Measures direct GPU-to-GPU Peer-to-Peer (P2P) DMA bandwidth across PCIe / xGMI / NVLink.";
   default:
     return "PCIe, Resizable BAR, Unified Memory, and Multi-GPU Peer-to-Peer interconnect benchmark.";
   }
 }
 
+const char *InterconnectBench::GetDescription(uint32_t config_idx,
+                                              const DeviceInfo &info,
+                                              IComputeContext *context) const {
+  (void)info;
+  if (context && context->getBackend() == ComputeBackend::ROCm) {
+    switch (config_idx) {
+    case 0:
+      return "Measures sustained PCIe Host-to-Device DMA read throughput via hipMemcpyAsync from pinned host memory into local VRAM.";
+    case 1:
+      return "Measures sustained PCIe Device-to-Host DMA write throughput via hipMemcpyAsync from local VRAM into pinned host memory.";
+    case 2:
+      return "Measures full-duplex PCIe interconnect bandwidth by issuing concurrent H2D and D2H hipMemcpyAsync transfers across two non-blocking HIP streams.";
+    case 4:
+      return "Measures fine-grained coherent atomic cache-line round-trip latency between CPU and GPU via hipHostMallocCoherent on Unified Memory APUs.";
+    case 5:
+      return "Measures direct GPU-to-GPU Peer-to-Peer (P2P) DMA bandwidth via hipMemcpyPeerAsync across PCIe / xGMI peer-accessible GPUs.";
+    default:
+      break;
+    }
+  } else if (context && context->getBackend() == ComputeBackend::Vulkan) {
+    if (config_idx == 5) {
+      return "Measures direct GPU-to-GPU Peer-to-Peer (P2P) DMA bandwidth across linked Vulkan VkDeviceGroup GPUs.";
+    }
+  }
+  return GetDescription(config_idx);
+}
+
+#ifdef HAVE_VULKAN
 bool InterconnectBench::probeVulkanDeviceGroupP2P(const VulkanContext *vc,
                                                   std::string &outReason) const {
   if (!vc || vc->getInstance() == VK_NULL_HANDLE) {
@@ -156,16 +185,44 @@ bool InterconnectBench::probeVulkanDeviceGroupP2P(const VulkanContext *vc,
       "GPUs are in independent VkDeviceGroups (driver does not expose linked Vulkan P2P device group)";
   return false;
 }
+#endif
 
 bool InterconnectBench::IsSupported(const DeviceInfo & /*info*/,
                                     IComputeContext *context) const {
   if (!context) return true;
-  return context->getBackend() == ComputeBackend::Vulkan;
+  return context->getBackend() == ComputeBackend::Vulkan ||
+         context->getBackend() == ComputeBackend::ROCm;
 }
 
 bool InterconnectBench::IsConfigSupported(uint32_t config_idx,
                                           const DeviceInfo &info,
                                           IComputeContext *context) const {
+  if (context && context->getBackend() == ComputeBackend::ROCm) {
+#ifdef HAVE_ROCM
+    const auto *rc = dynamic_cast<const ROCmContext *>(context);
+    switch (config_idx) {
+    case 0:
+    case 1:
+    case 2:
+      return true;
+    case 3:
+      return false;
+    case 4:
+      return info.isApu;
+    case 5: {
+      if (!rc || rc->getDevices().size() < 2) return false;
+      int srcDev = static_cast<int>(rc->getSelectedDeviceIndex());
+      if (srcDev < 0) srcDev = 0;
+      int peerDev = (srcDev + 1) % static_cast<int>(rc->getDevices().size());
+      return rc->canAccessPeer(srcDev, peerDev);
+    }
+    default:
+      return false;
+    }
+#else
+    return false;
+#endif
+  }
   if (context && context->getBackend() != ComputeBackend::Vulkan) {
     return false;
   }
@@ -179,10 +236,14 @@ bool InterconnectBench::IsConfigSupported(uint32_t config_idx,
   case 4:
     return info.isApu;
   case 5: {
+#ifdef HAVE_VULKAN
     const auto *vc = dynamic_cast<const VulkanContext *>(context);
     if (!vc) return false;
     std::string reason;
     return probeVulkanDeviceGroupP2P(vc, reason);
+#else
+    return false;
+#endif
   }
   default:
     return false;
@@ -192,7 +253,8 @@ bool InterconnectBench::IsConfigSupported(uint32_t config_idx,
 IBenchmark::SupportLimitation
 InterconnectBench::GetSupportLimitation(const DeviceInfo & /*info*/,
                                         IComputeContext *context) const {
-  if (context && context->getBackend() != ComputeBackend::Vulkan) {
+  if (context && context->getBackend() != ComputeBackend::Vulkan &&
+      context->getBackend() != ComputeBackend::ROCm) {
     return SupportLimitation::kApi;
   }
   return SupportLimitation::kNone;
@@ -201,6 +263,15 @@ InterconnectBench::GetSupportLimitation(const DeviceInfo & /*info*/,
 IBenchmark::SupportLimitation InterconnectBench::GetConfigSupportLimitation(
     uint32_t config_idx, const DeviceInfo & /*info*/,
     IComputeContext *context) const {
+  if (context && context->getBackend() == ComputeBackend::ROCm) {
+    if (config_idx == 3) {
+      return SupportLimitation::kApi;
+    }
+    if (config_idx == 4 || config_idx == 5) {
+      return SupportLimitation::kHardware;
+    }
+    return SupportLimitation::kNone;
+  }
   if (context && context->getBackend() != ComputeBackend::Vulkan) {
     return SupportLimitation::kApi;
   }
@@ -208,10 +279,12 @@ IBenchmark::SupportLimitation InterconnectBench::GetConfigSupportLimitation(
     return SupportLimitation::kHardware;
   }
   if (config_idx == 5) {
+#ifdef HAVE_VULKAN
     const auto *vc = dynamic_cast<const VulkanContext *>(context);
     if (vc && vc->getPhysicalDevices().size() < 2) {
       return SupportLimitation::kHardware;
     }
+#endif
     return SupportLimitation::kApi;
   }
   return SupportLimitation::kNone;
@@ -219,8 +292,9 @@ IBenchmark::SupportLimitation InterconnectBench::GetConfigSupportLimitation(
 
 std::string InterconnectBench::GetSupportNote(const DeviceInfo & /*info*/,
                                               IComputeContext *context) const {
-  if (context && context->getBackend() != ComputeBackend::Vulkan) {
-    return "Requires Vulkan 1.4 compute & DMA transfer queues";
+  if (context && context->getBackend() != ComputeBackend::Vulkan &&
+      context->getBackend() != ComputeBackend::ROCm) {
+    return "Requires Vulkan 1.4 or ROCm/HIP compute & DMA transfer queues";
   }
   return "";
 }
@@ -228,8 +302,26 @@ std::string InterconnectBench::GetSupportNote(const DeviceInfo & /*info*/,
 std::string InterconnectBench::GetConfigSupportNote(
     uint32_t config_idx, const DeviceInfo &info,
     IComputeContext *context) const {
+  if (context && context->getBackend() == ComputeBackend::ROCm) {
+#ifdef HAVE_ROCM
+    if (config_idx == 3) {
+      return "HIP API does not expose persistent CPU-mapped PCIe BAR VRAM pointers; use Vulkan for direct ReBAR CPU->VRAM write testing";
+    }
+    if (config_idx == 4 && !info.isApu) {
+      return "Requires Unified Memory APU / SoC architecture (discrete PCIe GPU detected)";
+    }
+    if (config_idx == 5) {
+      const auto *rc = dynamic_cast<const ROCmContext *>(context);
+      if (!rc || rc->getDevices().size() < 2) {
+        return "Requires >= 2 GPUs for Multi-GPU Peer-to-Peer (P2P) transfer";
+      }
+      return "PCIe/xGMI peer-to-peer access disabled or unsupported between GPUs";
+    }
+#endif
+    return "";
+  }
   if (context && context->getBackend() != ComputeBackend::Vulkan) {
-    return "Requires Vulkan 1.4 backend";
+    return "Requires Vulkan 1.4 or ROCm/HIP backend";
   }
   if (config_idx == 3) {
     if (info.isApu) {
@@ -246,11 +338,13 @@ std::string InterconnectBench::GetConfigSupportNote(
     return "Requires Unified Memory APU / SoC architecture (discrete PCIe GPU detected)";
   }
   if (config_idx == 5) {
+#ifdef HAVE_VULKAN
     const auto *vc = dynamic_cast<const VulkanContext *>(context);
     std::string reason;
     if (!probeVulkanDeviceGroupP2P(vc, reason)) {
       return reason;
     }
+#endif
   }
   return "";
 }
@@ -263,7 +357,8 @@ std::string InterconnectBench::GetConfigCaveat(uint32_t config_idx,
       config_idx == 3 || config_idx == 5) {
     caveat = gpubench::formatRebarCaveat(info, context);
   }
-  if (config_idx == 2) {
+#ifdef HAVE_VULKAN
+  if (config_idx == 2 && (!context || context->getBackend() == ComputeBackend::Vulkan)) {
     const auto *vc = dynamic_cast<const VulkanContext *>(context);
     if (vc && !vc->hasDedicatedTransferQueue()) {
       caveat = gpubench::appendCaveat(
@@ -275,6 +370,7 @@ std::string InterconnectBench::GetConfigCaveat(uint32_t config_idx,
           "Driver exposes 1 dedicated SDMA transfer queue; H2D issued on primary queue alongside SDMA D2H");
     }
   }
+#endif
   return caveat;
 }
 
@@ -292,12 +388,33 @@ double InterconnectBench::GetLastRunDurationMs(uint32_t config_idx) const {
 void InterconnectBench::Setup(IComputeContext &context,
                               const std::string &kernel_dir) {
   m_context = &context;
+  m_kernelDir = kernel_dir;
+  m_lastDurationMs.fill(0.0);
+
+#ifdef HAVE_ROCM
+  if (context.getBackend() == ComputeBackend::ROCm) {
+    m_rocm = dynamic_cast<ROCmContext *>(&context);
+    if (!m_rocm) {
+      throw std::runtime_error("InterconnectBench requires ROCmContext");
+    }
+    m_rocmStream0 = m_rocm->createStream(hipStreamNonBlocking);
+    m_rocmStream1 = m_rocm->createStream(hipStreamNonBlocking);
+    m_rocmStartEv = m_rocm->createEvent();
+    m_rocmStopEv = m_rocm->createEvent();
+
+    std::filesystem::path kernelPath =
+        std::filesystem::path(kernel_dir) / "rocm" / "interconnect_latency.hip";
+    m_helperKernel =
+        m_rocm->createKernel(kernelPath.string(), "run_benchmark", 5);
+    return;
+  }
+#endif
+
+#ifdef HAVE_VULKAN
   m_vk = dynamic_cast<VulkanContext *>(&context);
   if (!m_vk) {
     throw std::runtime_error("InterconnectBench requires VulkanContext");
   }
-  m_kernelDir = kernel_dir;
-  m_lastDurationMs.fill(0.0);
 
   std::filesystem::path shaderPath =
       std::filesystem::path(kernel_dir) / "vulkan" / "interconnect_latency.comp";
@@ -358,10 +475,85 @@ void InterconnectBench::Setup(IComputeContext &context,
       vkCreateFence(dev, &fenceCi, nullptr, &m_secondaryTransferFence);
     }
   }
+#else
+  throw std::runtime_error("InterconnectBench requires Vulkan or ROCm backend");
+#endif
 }
 
 void InterconnectBench::PrepareConfig(uint32_t config_idx) {
   ReleaseConfigResources(config_idx);
+
+#ifdef HAVE_ROCM
+  if (m_rocm) {
+    const size_t words = kDmaBytes / sizeof(uint32_t);
+    if (config_idx == 0) {
+      m_rocmPinnedUpload = m_rocm->allocPinnedHost(kDmaBytes);
+      auto *u32 = static_cast<uint32_t *>(m_rocmPinnedUpload);
+      for (size_t i = 0; i < words; ++i) {
+        u32[i] = 0xA55A0000u ^ static_cast<uint32_t>(i);
+      }
+      m_devDst = m_rocm->createBuffer(kDmaBytes);
+      m_rocm->memsetAsync(m_devDst, 0, kDmaBytes, m_rocmStream0);
+      m_rocm->synchronizeStream(m_rocmStream0);
+    } else if (config_idx == 1) {
+      std::vector<uint32_t> initWords(words);
+      for (size_t i = 0; i < words; ++i) {
+        initWords[i] = 0x5AA50000u ^ static_cast<uint32_t>(i);
+      }
+      m_devSrc = m_rocm->createBuffer(kDmaBytes, initWords.data());
+      m_rocmPinnedDownload = m_rocm->allocPinnedHost(kDmaBytes);
+      std::memset(m_rocmPinnedDownload, 0, kDmaBytes);
+    } else if (config_idx == 2) {
+      m_rocmPinnedUpload = m_rocm->allocPinnedHost(kDmaBytes);
+      auto *u32 = static_cast<uint32_t *>(m_rocmPinnedUpload);
+      for (size_t i = 0; i < words; ++i) {
+        u32[i] = 0x3CC30000u ^ static_cast<uint32_t>(i);
+      }
+      m_devDst = m_rocm->createBuffer(kDmaBytes);
+      m_rocm->memsetAsync(m_devDst, 0, kDmaBytes, m_rocmStream0);
+
+      std::vector<uint32_t> initWords(words);
+      for (size_t i = 0; i < words; ++i) {
+        initWords[i] = 0x96690000u ^ static_cast<uint32_t>(i);
+      }
+      m_devSrc = m_rocm->createBuffer(kDmaBytes, initWords.data());
+      m_rocmPinnedDownload = m_rocm->allocPinnedHost(kDmaBytes);
+      std::memset(m_rocmPinnedDownload, 0, kDmaBytes);
+      m_rocm->synchronizeStream(m_rocmStream0);
+    } else if (config_idx == 4) {
+      m_rocmMailboxHost =
+          m_rocm->allocPinnedHost(4096, hipHostMallocCoherent | hipHostMallocMapped);
+      std::memset(m_rocmMailboxHost, 0, 4096);
+      m_rocmMailboxDevPtr = m_rocm->getHostDevicePointer(m_rocmMailboxHost);
+      uint32_t zeros[4] = {0, 0, 0, 0};
+      m_verifyOutBuf = m_rocm->createBuffer(sizeof(zeros), zeros);
+    } else if (config_idx == 5) {
+      const int devCount = static_cast<int>(m_rocm->getDevices().size());
+      if (devCount < 2) {
+        throw std::runtime_error("InterconnectBench: P2P requires >= 2 ROCm devices");
+      }
+      int srcDev = static_cast<int>(m_rocm->getSelectedDeviceIndex());
+      if (srcDev < 0) srcDev = 0;
+      const int peerDev = (srcDev + 1) % devCount;
+      if (!m_rocm->enablePeerAccess(peerDev)) {
+        throw std::runtime_error("InterconnectBench: hipDeviceEnablePeerAccess failed");
+      }
+      std::vector<uint32_t> bufWords(words);
+      for (size_t i = 0; i < words; ++i) {
+        bufWords[i] = 0x77880000u ^ static_cast<uint32_t>(i);
+      }
+      m_devSrc = m_rocm->createBuffer(kDmaBytes, bufWords.data());
+      m_rocmP2pDstDev = peerDev;
+      m_rocmP2pDst = m_rocm->allocOnDevice(peerDev, kDmaBytes);
+      std::fill(bufWords.begin(), bufWords.end(), 0u);
+      m_rocm->memcpyOnDevice(peerDev, m_rocmP2pDst, bufWords.data(), kDmaBytes,
+                             hipMemcpyHostToDevice);
+    }
+    return;
+  }
+#endif
+
+#ifdef HAVE_VULKAN
   if (!m_vk) return;
 
   if (config_idx == 0) {
@@ -501,7 +693,7 @@ void InterconnectBench::PrepareConfig(uint32_t config_idx) {
     uint32_t zeros[4] = {0, 0, 0, 0};
     m_verifyOutBuf = m_vk->createBuffer(sizeof(zeros), zeros);
   } else if (config_idx == 4) {
-    m_pinnedUpload = m_vk->createPinnedHostBuffer(4096, true, &m_mappedUpload);
+    m_pinnedUpload = m_vk->createPinnedHostBuffer(4096, false, &m_mappedUpload);
     std::memset(m_mappedUpload, 0, 4096);
     uint32_t zeros[4] = {0, 0, 0, 0};
     m_verifyOutBuf = m_vk->createBuffer(sizeof(zeros), zeros);
@@ -688,9 +880,50 @@ void InterconnectBench::PrepareConfig(uint32_t config_idx) {
     vkQueueSubmit(m_p2pQueue, 1, &si, m_p2pFence);
     vkWaitForFences(m_p2pDevice, 1, &m_p2pFence, VK_TRUE, UINT64_MAX);
   }
+#endif
 }
 
 void InterconnectBench::ReleaseConfigResources(uint32_t /*config_idx*/) {
+#ifdef HAVE_ROCM
+  if (m_rocm) {
+    m_rocm->waitIdle();
+    if (m_rocmStream0) m_rocm->synchronizeStream(m_rocmStream0);
+    if (m_rocmStream1) m_rocm->synchronizeStream(m_rocmStream1);
+    if (m_rocmPinnedUpload) {
+      m_rocm->freePinnedHost(m_rocmPinnedUpload);
+      m_rocmPinnedUpload = nullptr;
+    }
+    if (m_rocmPinnedDownload) {
+      m_rocm->freePinnedHost(m_rocmPinnedDownload);
+      m_rocmPinnedDownload = nullptr;
+    }
+    if (m_rocmMailboxHost) {
+      m_rocm->freePinnedHost(m_rocmMailboxHost);
+      m_rocmMailboxHost = nullptr;
+      m_rocmMailboxDevPtr = nullptr;
+    }
+    if (m_rocmP2pDst) {
+      m_rocm->freeOnDevice(m_rocmP2pDstDev, m_rocmP2pDst);
+      m_rocmP2pDst = nullptr;
+      m_rocmP2pDstDev = -1;
+    }
+    if (m_devDst) {
+      m_rocm->releaseBuffer(m_devDst);
+      m_devDst = nullptr;
+    }
+    if (m_devSrc) {
+      m_rocm->releaseBuffer(m_devSrc);
+      m_devSrc = nullptr;
+    }
+    if (m_verifyOutBuf) {
+      m_rocm->releaseBuffer(m_verifyOutBuf);
+      m_verifyOutBuf = nullptr;
+    }
+    return;
+  }
+#endif
+
+#ifdef HAVE_VULKAN
   if (!m_vk) return;
   m_vk->waitIdle();
 
@@ -787,9 +1020,119 @@ void InterconnectBench::ReleaseConfigResources(uint32_t /*config_idx*/) {
     m_p2pDstMem = VK_NULL_HANDLE;
     m_p2pStageMem = VK_NULL_HANDLE;
   }
+#endif
 }
 
 void InterconnectBench::Run(uint32_t config_idx) {
+#ifdef HAVE_ROCM
+  if (m_rocm) {
+    if (config_idx == 0) {
+      m_rocm->clearLastDispatchedKernel();
+      auto t0 = std::chrono::steady_clock::now();
+      m_rocm->recordEvent(m_rocmStartEv, m_rocmStream0);
+      m_rocm->memcpyAsync(m_devDst, m_rocmPinnedUpload, kDmaBytes,
+                          hipMemcpyHostToDevice, m_rocmStream0);
+      m_rocm->recordEvent(m_rocmStopEv, m_rocmStream0);
+      m_rocm->synchronizeEvent(m_rocmStopEv);
+      auto t1 = std::chrono::steady_clock::now();
+      double gpuMs =
+          static_cast<double>(m_rocm->eventElapsedMs(m_rocmStartEv, m_rocmStopEv));
+      m_lastDurationMs[0] =
+          (gpuMs > 0.0)
+              ? gpuMs
+              : std::chrono::duration<double, std::milli>(t1 - t0).count();
+    } else if (config_idx == 1) {
+      m_rocm->clearLastDispatchedKernel();
+      auto t0 = std::chrono::steady_clock::now();
+      m_rocm->recordEvent(m_rocmStartEv, m_rocmStream0);
+      m_rocm->memcpyAsync(m_rocmPinnedDownload, m_devSrc, kDmaBytes,
+                          hipMemcpyDeviceToHost, m_rocmStream0);
+      m_rocm->recordEvent(m_rocmStopEv, m_rocmStream0);
+      m_rocm->synchronizeEvent(m_rocmStopEv);
+      auto t1 = std::chrono::steady_clock::now();
+      double gpuMs =
+          static_cast<double>(m_rocm->eventElapsedMs(m_rocmStartEv, m_rocmStopEv));
+      m_lastDurationMs[1] =
+          (gpuMs > 0.0)
+              ? gpuMs
+              : std::chrono::duration<double, std::milli>(t1 - t0).count();
+    } else if (config_idx == 2) {
+      m_rocm->clearLastDispatchedKernel();
+      auto t0 = std::chrono::steady_clock::now();
+      m_rocm->memcpyAsync(m_devDst, m_rocmPinnedUpload, kDmaBytes,
+                          hipMemcpyHostToDevice, m_rocmStream0);
+      m_rocm->memcpyAsync(m_rocmPinnedDownload, m_devSrc, kDmaBytes,
+                          hipMemcpyDeviceToHost, m_rocmStream1);
+      m_rocm->synchronizeStream(m_rocmStream0);
+      m_rocm->synchronizeStream(m_rocmStream1);
+      auto t1 = std::chrono::steady_clock::now();
+      m_lastDurationMs[2] =
+          std::chrono::duration<double, std::milli>(t1 - t0).count();
+    } else if (config_idx == 4) {
+      auto *mail = static_cast<uint32_t *>(m_rocmMailboxHost);
+      std::atomic_ref<uint32_t> atomicFlag(mail[0]);
+      atomicFlag.store(0u, std::memory_order_release);
+      uint32_t zero = 0u;
+      m_rocm->writeBuffer(m_verifyOutBuf, 0, sizeof(uint32_t), &zero);
+
+      uint32_t mode = 0u;
+      uint32_t count = kPingPongSteps;
+      uint32_t seed = 0u;
+      m_rocm->setKernelArg(m_helperKernel, 0, sizeof(void *),
+                           &m_rocmMailboxDevPtr);
+      m_rocm->setKernelArg(m_helperKernel, 1, m_verifyOutBuf);
+      m_rocm->setKernelArg(m_helperKernel, 2, sizeof(uint32_t), &mode);
+      m_rocm->setKernelArg(m_helperKernel, 3, sizeof(uint32_t), &count);
+      m_rocm->setKernelArg(m_helperKernel, 4, sizeof(uint32_t), &seed);
+
+      m_rocm->dispatchOnStream(m_helperKernel, 1, 1, 1, 64, 1, 1, m_rocmStream0);
+
+      auto waitStart = std::chrono::steady_clock::now();
+      while (atomicFlag.load(std::memory_order_acquire) != 1u) {
+        if (std::chrono::steady_clock::now() - waitStart >
+            std::chrono::milliseconds(500)) {
+          break;
+        }
+      }
+
+      auto t0 = std::chrono::steady_clock::now();
+      for (uint32_t step = 0; step < kPingPongSteps; ++step) {
+        uint32_t sendVal = step * 2u + 2u;
+        uint32_t expectReply = sendVal + 1u;
+        atomicFlag.store(sendVal, std::memory_order_release);
+        while (atomicFlag.load(std::memory_order_acquire) != expectReply) {
+          if (std::chrono::steady_clock::now() - t0 >
+              std::chrono::milliseconds(1000)) {
+            break;
+          }
+        }
+      }
+      auto t1 = std::chrono::steady_clock::now();
+      m_rocm->synchronizeStream(m_rocmStream0);
+      m_lastDurationMs[4] =
+          std::chrono::duration<double, std::milli>(t1 - t0).count();
+    } else if (config_idx == 5 && m_rocmP2pDst && m_devSrc && m_rocmP2pDstDev >= 0) {
+      m_rocm->clearLastDispatchedKernel();
+      const int srcDev = static_cast<int>(m_rocm->getSelectedDeviceIndex());
+      auto t0 = std::chrono::steady_clock::now();
+      m_rocm->recordEvent(m_rocmStartEv, m_rocmStream0);
+      m_rocm->memcpyPeerAsync(m_rocmP2pDst, m_rocmP2pDstDev, m_devSrc, srcDev,
+                              kDmaBytes, m_rocmStream0);
+      m_rocm->recordEvent(m_rocmStopEv, m_rocmStream0);
+      m_rocm->synchronizeEvent(m_rocmStopEv);
+      auto t1 = std::chrono::steady_clock::now();
+      double gpuMs =
+          static_cast<double>(m_rocm->eventElapsedMs(m_rocmStartEv, m_rocmStopEv));
+      m_lastDurationMs[5] =
+          (gpuMs > 0.0)
+              ? gpuMs
+              : std::chrono::duration<double, std::milli>(t1 - t0).count();
+    }
+    return;
+  }
+#endif
+
+#ifdef HAVE_VULKAN
   if (!m_vk) return;
   VkDevice dev = m_vk->getDevice();
   double tsPeriodNs =
@@ -952,6 +1295,7 @@ void InterconnectBench::Run(uint32_t config_idx) {
           std::chrono::duration<double, std::milli>(t1 - t0).count();
     }
   } else if (config_idx == 3) {
+    m_vk->clearLastDispatchedKernel();
     m_rebarSeed += 0x01010101u;
     const size_t wordCount = kRebarBytes / sizeof(uint32_t);
     auto *dst = static_cast<uint32_t *>(m_mappedRebar);
@@ -1038,6 +1382,9 @@ void InterconnectBench::Run(uint32_t config_idx) {
     m_lastDurationMs[5] =
         std::chrono::duration<double, std::milli>(t1 - t0).count();
   }
+#else
+  (void)config_idx;
+#endif
 }
 
 BenchmarkResult InterconnectBench::GetResult(uint32_t config_idx) const {
@@ -1047,17 +1394,97 @@ BenchmarkResult InterconnectBench::GetResult(uint32_t config_idx) const {
   } else if (config_idx == 3) {
     ops = kRebarBytes;
   } else if (config_idx == 4) {
-    ops = static_cast<uint64_t>(kPingPongSteps) * 2ULL; // one-way coherency hops
+    ops = static_cast<uint64_t>(kPingPongSteps); // CPU<->GPU round-trip latency
   }
   return {ops, GetLastRunDurationMs(config_idx)};
 }
 
 bool InterconnectBench::ValidateResults(uint32_t config_idx) const {
-  if (!m_vk) return false;
   constexpr size_t kSliceWords = 4096;
   const size_t totalDmaWords = kDmaBytes / sizeof(uint32_t);
   const size_t midWordOffset = totalDmaWords / 2;
   const size_t tailWordOffset = totalDmaWords - kSliceWords;
+
+#ifdef HAVE_ROCM
+  if (m_rocm) {
+    if (config_idx == 0) {
+      if (!m_devDst) return false;
+      std::vector<uint32_t> slice(kSliceWords, 0);
+      const size_t offsets[3] = {0, midWordOffset, tailWordOffset};
+      for (size_t wordOff : offsets) {
+        m_rocm->readBuffer(m_devDst, wordOff * sizeof(uint32_t),
+                           kSliceWords * sizeof(uint32_t), slice.data());
+        for (size_t i = 0; i < kSliceWords; ++i) {
+          uint32_t expected =
+              0xA55A0000u ^ static_cast<uint32_t>(wordOff + i);
+          if (slice[i] != expected) return false;
+        }
+      }
+      return true;
+    }
+    if (config_idx == 1) {
+      if (!m_rocmPinnedDownload) return false;
+      const auto *dst = static_cast<const uint32_t *>(m_rocmPinnedDownload);
+      const size_t offsets[3] = {0, midWordOffset, tailWordOffset};
+      for (size_t wordOff : offsets) {
+        for (size_t i = 0; i < kSliceWords; ++i) {
+          uint32_t expected =
+              0x5AA50000u ^ static_cast<uint32_t>(wordOff + i);
+          if (dst[wordOff + i] != expected) return false;
+        }
+      }
+      return true;
+    }
+    if (config_idx == 2) {
+      if (!m_devDst || !m_rocmPinnedDownload) return false;
+      std::vector<uint32_t> slice(kSliceWords, 0);
+      m_rocm->readBuffer(m_devDst, tailWordOffset * sizeof(uint32_t),
+                         kSliceWords * sizeof(uint32_t), slice.data());
+      for (size_t i = 0; i < kSliceWords; ++i) {
+        if (slice[i] !=
+            (0x3CC30000u ^ static_cast<uint32_t>(tailWordOffset + i))) {
+          return false;
+        }
+      }
+      const auto *hostDst = static_cast<const uint32_t *>(m_rocmPinnedDownload);
+      for (size_t i = 0; i < kSliceWords; ++i) {
+        if (hostDst[tailWordOffset + i] !=
+            (0x96690000u ^ static_cast<uint32_t>(tailWordOffset + i))) {
+          return false;
+        }
+      }
+      return true;
+    }
+    if (config_idx == 4) {
+      if (!m_verifyOutBuf) return false;
+      uint32_t completed = 0;
+      m_rocm->readBuffer(m_verifyOutBuf, 0, sizeof(uint32_t), &completed);
+      return completed == kPingPongSteps;
+    }
+    if (config_idx == 5) {
+      if (!m_rocmP2pDst || m_rocmP2pDstDev < 0) return false;
+      std::vector<uint32_t> slice(kSliceWords, 0);
+      const size_t offsets[3] = {0, midWordOffset, tailWordOffset};
+      for (size_t wordOff : offsets) {
+        const auto *peerSrc =
+            static_cast<const uint32_t *>(m_rocmP2pDst) + wordOff;
+        m_rocm->memcpyOnDevice(m_rocmP2pDstDev, slice.data(), peerSrc,
+                               kSliceWords * sizeof(uint32_t),
+                               hipMemcpyDeviceToHost);
+        for (size_t i = 0; i < kSliceWords; ++i) {
+          uint32_t expected =
+              0x77880000u ^ static_cast<uint32_t>(wordOff + i);
+          if (slice[i] != expected) return false;
+        }
+      }
+      return true;
+    }
+    return false;
+  }
+#endif
+
+#ifdef HAVE_VULKAN
+  if (!m_vk) return false;
 
   if (config_idx == 0) {
     if (!m_devDst) return false;
@@ -1183,10 +1610,43 @@ bool InterconnectBench::ValidateResults(uint32_t config_idx) const {
     return true;
   }
   return false;
+#else
+  (void)config_idx;
+  (void)kSliceWords;
+  (void)midWordOffset;
+  (void)tailWordOffset;
+  return false;
+#endif
 }
 
 void InterconnectBench::Teardown() {
   ReleaseConfigResources(0);
+#ifdef HAVE_ROCM
+  if (m_rocm) {
+    if (m_helperKernel) {
+      m_rocm->releaseKernel(m_helperKernel);
+      m_helperKernel = nullptr;
+    }
+    if (m_rocmStartEv) {
+      m_rocm->destroyEvent(m_rocmStartEv);
+      m_rocmStartEv = nullptr;
+    }
+    if (m_rocmStopEv) {
+      m_rocm->destroyEvent(m_rocmStopEv);
+      m_rocmStopEv = nullptr;
+    }
+    if (m_rocmStream0) {
+      m_rocm->destroyStream(m_rocmStream0);
+      m_rocmStream0 = nullptr;
+    }
+    if (m_rocmStream1) {
+      m_rocm->destroyStream(m_rocmStream1);
+      m_rocmStream1 = nullptr;
+    }
+    m_rocm = nullptr;
+  }
+#endif
+#ifdef HAVE_VULKAN
   if (m_vk) {
     VkDevice dev = m_vk->getDevice();
     if (m_helperKernel) {
@@ -1226,5 +1686,6 @@ void InterconnectBench::Teardown() {
     }
   }
   m_vk = nullptr;
+#endif
   m_context = nullptr;
 }

@@ -6,9 +6,11 @@
 #include "benchmarks/Fp64Bench.h"
 #include "benchmarks/Fp32Bench.h"
 #include "benchmarks/Fp16Bench.h"
+#include "benchmarks/Fp8Bench.h"
 #include "benchmarks/Fp6Bench.h"
 #include "benchmarks/Fp4Bench.h"
 #include "benchmarks/Int8Bench.h"
+#include "benchmarks/Int4Bench.h"
 #include "benchmarks/DualIssueBench.h"
 #include "benchmarks/Bf16Bench.h"
 
@@ -27,7 +29,7 @@ std::unique_ptr<IComputeContext> createVulkanContext() {
     if (!ctx || ctx->getDevices().empty()) {
       return nullptr;
     }
-    ctx->pickDevice(0);
+    ctx->pickDevice(::gpubench::test::preferredTestDeviceIndex(ctx->getDevices().size()));
     return ctx;
   } catch (...) {
     return nullptr;
@@ -42,7 +44,7 @@ std::unique_ptr<IComputeContext> createVulkanContext() {
 
 TEST_CASE(ComputeValidation, FP64_FivePassStress_ZeroExplosion) {
   auto ctx = createVulkanContext();
-  if (!ctx) { return; }
+  if (!ctx) { SKIP_TEST("Vulkan backend unavailable"); }
 
   std::string kdir = KernelPath::find();
   ASSERT_FALSE(kdir.empty());
@@ -50,8 +52,7 @@ TEST_CASE(ComputeValidation, FP64_FivePassStress_ZeroExplosion) {
   Fp64Bench bench;
   DeviceInfo info = ctx->getCurrentDeviceInfo();
   if (!bench.IsSupported(info, ctx.get())) {
-    std::cout << "[SKIP] FP64 not supported on current device" << std::endl;
-    return;
+    SKIP_TEST("FP64 not supported on current device");
   }
 
   bench.Setup(*ctx, kdir);
@@ -96,7 +97,7 @@ TEST_CASE(ComputeValidation, FP64_FivePassStress_ZeroExplosion) {
 
 TEST_CASE(ComputeValidation, INT8_AnalyticalVerification_And_NegativeInjection) {
   auto ctx = createVulkanContext();
-  if (!ctx) { return; }
+  if (!ctx) { SKIP_TEST("Vulkan backend unavailable"); }
 
   std::string kdir = KernelPath::find();
   ASSERT_FALSE(kdir.empty());
@@ -104,8 +105,7 @@ TEST_CASE(ComputeValidation, INT8_AnalyticalVerification_And_NegativeInjection) 
   Int8Bench bench;
   DeviceInfo info = ctx->getCurrentDeviceInfo();
   if (!bench.IsSupported(info, ctx.get())) {
-    std::cout << "[SKIP] INT8 not supported on current device" << std::endl;
-    return;
+    SKIP_TEST("INT8 not supported on current device");
   }
 
   bench.Setup(*ctx, kdir);
@@ -176,7 +176,7 @@ TEST_CASE(ComputeValidation, INT8_AnalyticalVerification_And_NegativeInjection) 
 
 TEST_CASE(ComputeValidation, DualIssue_FreshBufferConfig1ValidationPass) {
   auto ctx = createVulkanContext();
-  if (!ctx) { return; }
+  if (!ctx) { SKIP_TEST("Vulkan backend unavailable"); }
 
   std::string kdir = KernelPath::find();
   ASSERT_FALSE(kdir.empty());
@@ -215,7 +215,7 @@ TEST_CASE(ComputeValidation, DualIssue_FreshBufferConfig1ValidationPass) {
 
 TEST_CASE(ComputeValidation, DualIssue_MultiPassAccumulationValidationPass) {
   auto ctx = createVulkanContext();
-  if (!ctx) { return; }
+  if (!ctx) { SKIP_TEST("Vulkan backend unavailable"); }
 
   std::string kdir = KernelPath::find();
   ASSERT_FALSE(kdir.empty());
@@ -252,7 +252,7 @@ TEST_CASE(ComputeValidation, DualIssue_MultiPassAccumulationValidationPass) {
 
 TEST_CASE(ComputeValidation, DualIssue_NegativeInjection) {
   auto ctx = createVulkanContext();
-  if (!ctx) { return; }
+  if (!ctx) { SKIP_TEST("Vulkan backend unavailable"); }
 
   std::string kdir = KernelPath::find();
   ASSERT_FALSE(kdir.empty());
@@ -288,7 +288,8 @@ TEST_CASE(ComputeValidation, Bf16Bench_SentinelSeedRejection_NoSelfValidation) {
     try {
       auto vkCtx = ComputeBackendFactory::create(ComputeBackend::Vulkan, false, false);
       if (vkCtx && !vkCtx->getDevices().empty()) {
-        vkCtx->pickDevice(0);
+        const uint32_t devIdx = ::gpubench::test::preferredTestDeviceIndex(vkCtx->getDevices().size());
+        vkCtx->pickDevice(devIdx);
         if (bench.IsSupported(vkCtx->getCurrentDeviceInfo(), vkCtx.get())) {
           ctx = std::move(vkCtx);
         }
@@ -299,16 +300,18 @@ TEST_CASE(ComputeValidation, Bf16Bench_SentinelSeedRejection_NoSelfValidation) {
   if (!ctx && ComputeBackendFactory::isAvailable(ComputeBackend::ROCm)) {
     try {
       auto rocmCtx = ComputeBackendFactory::create(ComputeBackend::ROCm, false, false);
-      rocmCtx->pickDevice(0);
-      if (bench.IsSupported(rocmCtx->getCurrentDeviceInfo(), rocmCtx.get())) {
-        ctx = std::move(rocmCtx);
+      if (rocmCtx && !rocmCtx->getDevices().empty()) {
+        const uint32_t devIdx = ::gpubench::test::preferredTestDeviceIndex(rocmCtx->getDevices().size());
+        rocmCtx->pickDevice(devIdx);
+        if (bench.IsSupported(rocmCtx->getCurrentDeviceInfo(), rocmCtx.get())) {
+          ctx = std::move(rocmCtx);
+        }
       }
     } catch (...) {
     }
   }
   if (!ctx) {
-    std::cout << "[SKIP] Native BF16 not supported on any available backend" << std::endl;
-    return;
+    SKIP_TEST("Native BF16 not supported on any available backend");
   }
 
   std::string kdir = KernelPath::find();
@@ -371,7 +374,7 @@ TEST_CASE(ComputeValidation, Bf16Bench_SentinelSeedRejection_NoSelfValidation) {
 
 TEST_CASE(ComputeValidation, DualIssue_BufferIsolation_ExhaustiveVerification) {
   auto ctx = createVulkanContext();
-  if (!ctx) { return; }
+  if (!ctx) { SKIP_TEST("Vulkan backend unavailable"); }
 
   std::string kdir = KernelPath::find();
   ASSERT_FALSE(kdir.empty());
@@ -417,7 +420,7 @@ TEST_CASE(ComputeValidation, DualIssue_BufferIsolation_ExhaustiveVerification) {
 
 TEST_CASE(ComputeValidation, DualIssue_MultiPassStress_All7Configs_ZeroDriftFailures) {
   auto ctx = createVulkanContext();
-  if (!ctx) { return; }
+  if (!ctx) { SKIP_TEST("Vulkan backend unavailable"); }
 
   std::string kdir = KernelPath::find();
   ASSERT_FALSE(kdir.empty());
@@ -454,7 +457,7 @@ TEST_CASE(ComputeValidation, DualIssue_MultiPassStress_All7Configs_ZeroDriftFail
 
 TEST_CASE(ComputeValidation, DualIssue_NegativeValidation_ExhaustiveAll7Configs) {
   auto ctx = createVulkanContext();
-  if (!ctx) { return; }
+  if (!ctx) { SKIP_TEST("Vulkan backend unavailable"); }
 
   std::string kdir = KernelPath::find();
   ASSERT_FALSE(kdir.empty());
@@ -557,7 +560,7 @@ TEST_CASE(ComputeValidation, DualIssue_NegativeValidation_ExhaustiveAll7Configs)
 
 TEST_CASE(ComputeValidation, Fp32_Fp16_Int8_SentinelSeedRejection_NoSelfValidation) {
   auto ctx = createVulkanContext();
-  if (!ctx) { return; }
+  if (!ctx) { SKIP_TEST("Vulkan backend unavailable"); }
 
   std::string kdir = KernelPath::find();
   ASSERT_FALSE(kdir.empty());
@@ -625,7 +628,7 @@ TEST_CASE(ComputeValidation, Fp32_Fp16_Int8_SentinelSeedRejection_NoSelfValidati
 
 TEST_CASE(ComputeValidation, Fp6_Fp4_CapabilityGating_And_Validation) {
   auto ctx = createVulkanContext();
-  if (!ctx) { return; }
+  if (!ctx) { SKIP_TEST("Vulkan backend unavailable"); }
 
   std::string kdir = KernelPath::find();
   ASSERT_FALSE(kdir.empty());
@@ -691,6 +694,61 @@ TEST_CASE(ComputeValidation, Fp6_Fp4_CapabilityGating_And_Validation) {
       ASSERT_FALSE(fp4.ValidateResults(0));
     }
     fp4.Teardown();
+  }
+}
+
+// ============================================================================
+// 12. FP8 & INT4 Capability Gating & Analytical Validation
+// ============================================================================
+
+TEST_CASE(ComputeValidation, Fp8_Int4_CapabilityGating_And_Validation) {
+  auto ctx = createVulkanContext();
+  if (!ctx) { SKIP_TEST("Vulkan backend unavailable"); }
+
+  std::string kdir = KernelPath::find();
+  ASSERT_FALSE(kdir.empty());
+
+  DeviceInfo info = ctx->getCurrentDeviceInfo();
+
+  // Verify synthetic capability gating & uninitialized rejection for Fp8Bench and Int4Bench
+  {
+    Fp8Bench fp8Probe;
+    DeviceInfo noFp8 = info;
+    noFp8.fp8Support = false;
+    noFp8.cooperativeMatrixSupport = true;
+    ASSERT_FALSE(fp8Probe.IsSupported(noFp8, ctx.get()));
+    ASSERT_TRUE(fp8Probe.GetSupportLimitation(noFp8, ctx.get()) == IBenchmark::SupportLimitation::kHardware);
+    ASSERT_FALSE(fp8Probe.GetSupportNote(noFp8, ctx.get()).empty());
+    ASSERT_FALSE(fp8Probe.ValidateResults(0));
+
+    DeviceInfo yesFp8 = info;
+    yesFp8.fp8Support = true;
+    yesFp8.cooperativeMatrixSupport = true;
+    ASSERT_TRUE(fp8Probe.IsSupported(yesFp8, ctx.get()));
+  }
+  {
+    Int4Bench int4Probe;
+    ASSERT_FALSE(int4Probe.IsSupported(info, ctx.get()));
+    ASSERT_TRUE(int4Probe.GetSupportLimitation(info, ctx.get()) == IBenchmark::SupportLimitation::kApi);
+    ASSERT_FALSE(int4Probe.GetSupportNote(info, ctx.get()).empty());
+    ASSERT_FALSE(int4Probe.ValidateResults(0));
+  }
+
+  // If the current GPU exposes native Vulkan FP8 Cooperative Matrix, run live positive & negative validation
+  Fp8Bench fp8;
+  if (fp8.IsSupported(info, ctx.get())) {
+    fp8.Setup(*ctx, kdir);
+    ASSERT_FALSE(fp8.ValidateResults(0));
+    if (fp8.matrixKernel != nullptr) {
+      fp8.Run(0);
+      ctx->waitIdle();
+      ASSERT_TRUE(fp8.ValidateResults(0));
+      std::vector<float> zeros(64, 0.0f);
+      ctx->writeBuffer(fp8.outputBuffer, 0, zeros.size() * sizeof(float), zeros.data());
+      ctx->waitIdle();
+      ASSERT_FALSE(fp8.ValidateResults(0));
+    }
+    fp8.Teardown();
   }
 }
 

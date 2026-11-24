@@ -62,9 +62,16 @@ int main(int argc, char** argv) {
     std::string screenshotPath;
     std::string modeStr;
     std::string paletteStr;
+    std::string showcasePresetStr;
+    std::string showcaseOverlayStr;
+    bool showcaseFreeze = false;
+    int showcaseCamPreset = -1;
+    std::string positionalJsonPath;
     float uiScaleOverride = 0.0f;
+    uint32_t samplesPerPixel = 1;
     int maxFrames = -1;
     bool autoRun = false;
+    bool openRoofline = false;
     bool exitOnComplete = false;
     bool dumpRenders = false;
     bool noDumpRenders = false;
@@ -78,22 +85,34 @@ int main(int argc, char** argv) {
     cli.add_option("-g,--group,--groups", groupOpt, "Pre-select benchmark category (compute, memory, raytracing, scheduling, raster, graphics, system, all)");
     cli.add_option("-s,--scene", preselectedScene, "Pre-select Ray Tracing scene (indoor, forest, outdoor, showroom, all)");
     cli.add_option("-r,--res,--resolution", resolutionOpt, "Pre-select render resolution (720p, 1080p, 1440p, 4k, 8k, auto, or WxH)");
-    cli.add_option("-i,--import", importJsonPath, "Import a unified CLI/GUI JSON session file on startup");
+    cli.add_option("--spp", samplesPerPixel, "Samples per pixel for path tracing accumulation (1..256, default: 1)")
+        ->check(CLI::Range(1u, 256u));
+    cli.add_option("-i,--import,--input", importJsonPath, "Import a unified CLI/GUI JSON session file on startup");
     cli.add_option("--compare", compareJsonPath, "Load a unified CLI/GUI JSON file as comparison baseline");
-    cli.add_option("-o,--output", outputJsonPath, "Export unified v2.0 JSON results to path upon completion");
+    cli.add_option("-o,--output,--output-json", outputJsonPath, "Export unified v2.0 JSON results to path upon completion");
     cli.add_flag("--dump-renders,--dump", dumpRenders, "Enable saving rendered scene PNGs to disk");
     cli.add_flag("--no-dump-renders,--no-dump", noDumpRenders, "Disable saving rendered scene PNGs to disk (uses GPU SharedPreviewImages)");
     cli.add_flag("--auto-run,--auto-start,--run", autoRun, "Automatically start benchmarks upon launch");
+    cli.add_flag("--roofline", openRoofline, "Open the Empirical Roofline chart tab");
     cli.add_flag("--exit-on-complete", exitOnComplete, "Exit automatically when benchmark run finishes");
     cli.add_option("--frames", maxFrames, "Run for specified number of frames and exit");
     cli.add_option("--screenshot", screenshotPath, "Save rendered GUI window PNG before exit");
     cli.add_option("--ui-scale,--scale", uiScaleOverride, "UI scaling factor (e.g. 1.0, 1.5, 2.0)");
-    cli.add_option("--mode", modeStr, "Initial instrument mode (f1/isa, f2/charts/perf/scorecard, f3/rt/viewport)");
+    cli.add_option("--mode", modeStr, "Initial instrument mode (f1/isa, f2/charts/perf/roofline/scorecard, f3/rt/viewport, f4/showcase)");
+    cli.add_option("--showcase-preset", showcasePresetStr, "Initial F4 showcase preset (naive, legacy, modern)");
+    cli.add_option("--showcase-overlay", showcaseOverlayStr, "Initial F4 X-Ray overlay (beauty, overdraw, microtri, meshlets)");
+    cli.add_flag("--showcase-freeze", showcaseFreeze, "Freeze culling frustum & switch to overview in F4 showcase");
+    cli.add_option("--showcase-cam", showcaseCamPreset, "Initial F4 camera preset index (0..3)");
     cli.add_option("--palette", paletteStr, "Bring-up phosphor palette (amber, green, paper)");
     cli.add_flag("--verbose", verboseMode, "Enable verbose logging output");
     cli.add_flag("--debug", debugMode, "Enable Vulkan Khronos Validation Layers");
+    cli.add_option("session_file", positionalJsonPath, "Optional unified JSON session file to import on startup");
 
     CLI11_PARSE(cli, argc, argv);
+
+    if (importJsonPath.empty() && !positionalJsonPath.empty()) {
+        importJsonPath = positionalJsonPath;
+    }
 
     bool selectAllGpus = false;
     std::vector<int> preselectedDevices;
@@ -207,6 +226,9 @@ int main(int argc, char** argv) {
     } else if (preselectedWidth > 0 && preselectedHeight > 0) {
         app.setRenderResolution(preselectedWidth, preselectedHeight);
     }
+    if (samplesPerPixel > 1) {
+        app.setSamplesPerPixel(samplesPerPixel);
+    }
     if (noDumpRenders) {
         app.setDumpRenders(false);
     } else if (dumpRenders) {
@@ -231,13 +253,44 @@ int main(int argc, char** argv) {
         const std::string m = toLowerAscii(modeStr);
         if (m == "f1" || m == "isa") {
             app.setInstrumentMode(0);
-        } else if (m == "f2" || m == "charts" || m == "perf" || m == "roofline" || m == "scorecard") {
+        } else if (m == "f2" || m == "charts" || m == "perf") {
             app.setInstrumentMode(1);
+            app.setF2SubMode(0);
+        } else if (m == "roofline") {
+            app.setInstrumentMode(1);
+            app.setF2SubMode(1);
+        } else if (m == "scorecard") {
+            app.setInstrumentMode(1);
+            app.setF2SubMode(2);
         } else if (m == "f3" || m == "rt" || m == "viewport") {
             app.setInstrumentMode(2);
+        } else if (m == "f4" || m == "showcase") {
+            app.setInstrumentMode(3);
         } else {
-            std::cerr << "Warning: Unknown --mode '" << modeStr << "', expected f1|f2|f3.\n";
+            std::cerr << "Warning: Unknown --mode '" << modeStr << "', expected f1|f2|f3|f4.\n";
         }
+    }
+    if (!showcasePresetStr.empty() || !showcaseOverlayStr.empty() || showcaseFreeze || showcaseCamPreset >= 0) {
+        int presetIdx = 2;
+        if (!showcasePresetStr.empty()) {
+            const std::string sp = toLowerAscii(showcasePresetStr);
+            if (sp == "naive" || sp == "0") presetIdx = 0;
+            else if (sp == "legacy" || sp == "1") presetIdx = 1;
+            else presetIdx = 2;
+        }
+        int overlayIdx = 0;
+        if (!showcaseOverlayStr.empty()) {
+            const std::string so = toLowerAscii(showcaseOverlayStr);
+            if (so == "overdraw" || so == "1") overlayIdx = 1;
+            else if (so == "microtri" || so == "micro" || so == "microtris" || so == "2") overlayIdx = 2;
+            else if (so == "meshlets" || so == "meshlet" || so == "3") overlayIdx = 3;
+            else overlayIdx = 0;
+        }
+        app.configureShowcase(presetIdx, overlayIdx, showcaseFreeze, showcaseCamPreset);
+    }
+    if (openRoofline) {
+        app.setInstrumentMode(1);
+        app.setF2SubMode(1);
     }
     if (!paletteStr.empty()) {
         const std::string p = toLowerAscii(paletteStr);
@@ -280,9 +333,12 @@ int main(int argc, char** argv) {
             running = false;
         }
         if (ev.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED ||
-            ev.type == SDL_EVENT_WINDOW_RESIZED ||
-            ev.type == SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED) {
+            ev.type == SDL_EVENT_WINDOW_RESIZED) {
             vulkanContext.requestSwapchainRebuild();
+        } else if (ev.type == SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED) {
+            vulkanContext.requestSwapchainRebuild();
+            const float newScale = vulkanContext.refreshDisplayScale(uiScaleOverride);
+            app.updateBaseScale(newScale);
         }
     };
 
@@ -358,6 +414,7 @@ int main(int argc, char** argv) {
         }
     }
 
+    app.shutdown();
     ImPlot::DestroyContext();
     vulkanContext.shutdown();
 

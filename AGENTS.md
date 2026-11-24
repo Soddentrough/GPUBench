@@ -3,10 +3,14 @@
 ## AMD GPU Tools & ROCm Paths
 Do not search for SMI tool paths across runs; use these exact absolute paths:
 - **`amd-smi`**:
+  - `/opt/rocm/core/bin/amd-smi`
+  - `/opt/rocm/core-10.2/bin/amd-smi`
   - `/opt/rocm/current/bin/amd-smi`
   - `~/.local/bin/amd-smi`
   - `/opt/rocm/core-10.1/bin/amd-smi`
 - **`rocm-smi`**:
+  - `/opt/rocm/core/bin/rocm-smi`
+  - `/opt/rocm/core-10.2/bin/rocm-smi`
   - `/opt/rocm/current/bin/rocm-smi`
   - `~/.local/bin/rocm-smi`
   - `/opt/rocm/core-10.1/bin/rocm-smi`
@@ -31,7 +35,7 @@ Do not search for SMI tool paths across runs; use these exact absolute paths:
 - `--dump-isa <target>`: Disassemble shader/kernel hardware ISA via RGA without running benchmarks.
 
 ## Hardware & Target GPU Discovery
-- **Target GPU**: Dynamic discovery. Always check available devices with `./build/gpubench --list-devices` or `/opt/rocm/core-10.0/bin/amd-smi list` before executing.
+- **Target GPU**: Dynamic discovery. Always check available devices with `./build/gpubench --list-devices` or `/opt/rocm/core/bin/amd-smi list` before executing.
   - On single-GPU systems, use **`-d 0`** (or omit `-d`, which defaults to 0). Never attempt `-d 1` on single-GPU nodes.
   - On multi-GPU systems, target `-d 0` or `-d 1` as enumerated by `--list-devices`.
 - **Supported Workstation Profiles**:

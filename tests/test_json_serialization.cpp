@@ -244,14 +244,20 @@ TEST_CASE(JsonSerialization, RayScheduling16SppFpsDividedBySamplesPerPixel) {
 }
 
 TEST_CASE(JsonSerialization, RaySchedulingMultiLightBaselineFormatting) {
-  // 1. Verify RaySchedulingBench::GetBaselineConfigIndex maps Single Light (31->30) and 128 Lights (33->32)
+  // 1. Verify RaySchedulingBench::GetBaselineConfigIndex maps Material (1,2->0), FullFrame (5,6->4), Shadows (20->19), 128-Light (22->21)
   RaySchedulingBench bench(RaySchedulingBench::SceneType::Showroom);
-  ASSERT_EQ(bench.GetBaselineConfigIndex(30), -1);
-  ASSERT_EQ(bench.GetBaselineConfigIndex(31), 30);
-  ASSERT_EQ(bench.GetBaselineConfigIndex(32), -1);
-  ASSERT_EQ(bench.GetBaselineConfigIndex(33), 32);
+  ASSERT_EQ(bench.GetBaselineConfigIndex(0), -1);
+  ASSERT_EQ(bench.GetBaselineConfigIndex(1), 0);
+  ASSERT_EQ(bench.GetBaselineConfigIndex(2), 0);
+  ASSERT_EQ(bench.GetBaselineConfigIndex(4), -1);
+  ASSERT_EQ(bench.GetBaselineConfigIndex(5), 4);
+  ASSERT_EQ(bench.GetBaselineConfigIndex(6), 4);
+  ASSERT_EQ(bench.GetBaselineConfigIndex(19), -1);
+  ASSERT_EQ(bench.GetBaselineConfigIndex(20), 19);
+  ASSERT_EQ(bench.GetBaselineConfigIndex(21), -1);
+  ASSERT_EQ(bench.GetBaselineConfigIndex(22), 21);
 
-  // 2. Verify ResultFormatter::print() marks both MK configs as [Baseline] and compares 31->30 and 33->32
+  // 2. Verify ResultFormatter::print() marks MK configs as [Baseline] and compares 20->19 and 22->21
   auto makeMultiLightResult = [&](uint32_t cfg, int32_t baseCfg, double timeMs, int sortWeight, const std::string &name) {
     ResultData r{};
     r.backendName = "Vulkan";
@@ -259,7 +265,7 @@ TEST_CASE(JsonSerialization, RaySchedulingMultiLightBaselineFormatting) {
     r.deviceIndex = 0;
     r.benchmarkName = "RayScheduling (Showroom Studio) (" + name + ")";
     r.component = "Ray Tracing";
-    r.subcategory = "Multi-Light Evaluation";
+    r.subcategory = (cfg >= 21u) ? "Multi-Light Evaluation" : "Directional Shadows";
     r.metric = "MRays/s";
     r.operations = 8294400ULL;
     r.time_ms = timeMs;
@@ -273,10 +279,10 @@ TEST_CASE(JsonSerialization, RaySchedulingMultiLightBaselineFormatting) {
   };
 
   ResultFormatter fmt;
-  fmt.addResult(makeMultiLightResult(30, -1, 2.0, 639, "Stage: Multi-Light Evaluation - Single Light (Megakernel)"));
-  fmt.addResult(makeMultiLightResult(31, 30, 1.6, 640, "Stage: Multi-Light Evaluation - Single Light (DGC)"));
-  fmt.addResult(makeMultiLightResult(32, -1, 8.0, 641, "Stage: Multi-Light Evaluation - 128 Lights (Megakernel)"));
-  fmt.addResult(makeMultiLightResult(33, 32, 6.4, 642, "Stage: Multi-Light Evaluation - 128 Lights (DGC Light Binning)"));
+  fmt.addResult(makeMultiLightResult(19, -1, 2.0, 636, "Stage: Directional Shadows (Megakernel)"));
+  fmt.addResult(makeMultiLightResult(20, 19, 1.6, 637, "Stage: Directional Shadows (DGC)"));
+  fmt.addResult(makeMultiLightResult(21, -1, 8.0, 639, "Stage: Multi-Light - 128 Lights (Megakernel)"));
+  fmt.addResult(makeMultiLightResult(22, 21, 6.4, 640, "Stage: Multi-Light - 128 Lights (DGC Light Binning)"));
 
   std::ostringstream captured;
   struct CoutRedirectGuard {
@@ -307,24 +313,24 @@ TEST_CASE(JsonSerialization, RaySchedulingMultiLightBaselineFormatting) {
     return out;
   };
 
-  std::string lineSingleMk, lineSingleDgc, line128Mk, line128Dgc;
+  std::string lineShdMk, lineShdDgc, line128Mk, line128Dgc;
   std::istringstream lines(stripAnsi(captured.str()));
   std::string line;
   while (std::getline(lines, line)) {
     if (line.find("Vulkan") == std::string::npos) continue;
-    if (lineSingleMk.empty() && line.find("Single Light (Megakernel)") != std::string::npos) lineSingleMk = line;
-    else if (lineSingleDgc.empty() && line.find("Single Light (DGC)") != std::string::npos) lineSingleDgc = line;
+    if (lineShdMk.empty() && line.find("Directional Shadows (Megakernel)") != std::string::npos) lineShdMk = line;
+    else if (lineShdDgc.empty() && line.find("Directional Shadows (DGC)") != std::string::npos) lineShdDgc = line;
     else if (line128Mk.empty() && line.find("128 Lights (Megakernel)") != std::string::npos) line128Mk = line;
     else if (line128Dgc.empty() && line.find("128 Lights (DGC Light Binning)") != std::string::npos) line128Dgc = line;
   }
 
-  ASSERT_TRUE(!lineSingleMk.empty());
-  ASSERT_TRUE(lineSingleMk.find("[Baseline]") != std::string::npos);
-  ASSERT_TRUE(lineSingleMk.find("└──>") == std::string::npos);
+  ASSERT_TRUE(!lineShdMk.empty());
+  ASSERT_TRUE(lineShdMk.find("[Baseline]") != std::string::npos);
+  ASSERT_TRUE(lineShdMk.find("└──>") == std::string::npos);
 
-  ASSERT_TRUE(!lineSingleDgc.empty());
-  ASSERT_TRUE(lineSingleDgc.find("└──>") != std::string::npos);
-  ASSERT_TRUE(lineSingleDgc.find("1.25x (+25.0%)") != std::string::npos);
+  ASSERT_TRUE(!lineShdDgc.empty());
+  ASSERT_TRUE(lineShdDgc.find("└──>") != std::string::npos);
+  ASSERT_TRUE(lineShdDgc.find("1.25x (+25.0%)") != std::string::npos);
 
   ASSERT_TRUE(!line128Mk.empty());
   ASSERT_TRUE(line128Mk.find("[Baseline]") != std::string::npos);
@@ -344,10 +350,10 @@ TEST_CASE(JsonSerialization, RaySchedulingMultiLightBaselineFormatting) {
       "device_id": 0,
       "device_name": "0: Test GPU",
       "benchmarks": [
-        {"id": "rt_sched_multilight_single_trad", "unit": "MRays/s", "status": "ok", "raw_operations": 8294400, "raw_time_ms": 2.0},
-        {"id": "rt_sched_multilight_single_dgc",  "unit": "MRays/s", "status": "ok", "raw_operations": 8294400, "raw_time_ms": 1.6},
-        {"id": "rt_sched_multilight_128_trad",    "unit": "MRays/s", "status": "ok", "raw_operations": 8294400, "raw_time_ms": 8.0},
-        {"id": "rt_sched_multilight_128_dgc",     "unit": "MRays/s", "status": "ok", "raw_operations": 8294400, "raw_time_ms": 6.4}
+        {"id": "rt_sched_shadow_trad",       "unit": "MRays/s", "status": "ok", "raw_operations": 8294400, "raw_time_ms": 2.0},
+        {"id": "rt_sched_shadow_wl",         "unit": "MRays/s", "status": "ok", "raw_operations": 8294400, "raw_time_ms": 1.6},
+        {"id": "rt_sched_multilight_128_trad", "unit": "MRays/s", "status": "ok", "raw_operations": 8294400, "raw_time_ms": 8.0},
+        {"id": "rt_sched_multilight_128_dgc",  "unit": "MRays/s", "status": "ok", "raw_operations": 8294400, "raw_time_ms": 6.4}
       ]
     }]
   })json";
@@ -356,12 +362,87 @@ TEST_CASE(JsonSerialization, RaySchedulingMultiLightBaselineFormatting) {
   std::string guiErr;
   ASSERT_TRUE(ResultImporter::loadFromString(guiJson, guiImported, guiErr));
   ASSERT_EQ(guiImported.results.size(), 4u);
-  ASSERT_EQ(guiImported.results[0].configIndex, 30u);
+  ASSERT_EQ(guiImported.results[0].configIndex, 19u);
   ASSERT_EQ(guiImported.results[0].baselineConfigIndex, -1);
-  ASSERT_EQ(guiImported.results[1].configIndex, 31u);
-  ASSERT_EQ(guiImported.results[1].baselineConfigIndex, 30);
-  ASSERT_EQ(guiImported.results[2].configIndex, 32u);
+  ASSERT_EQ(guiImported.results[1].configIndex, 20u);
+  ASSERT_EQ(guiImported.results[1].baselineConfigIndex, 19);
+  ASSERT_EQ(guiImported.results[2].configIndex, 21u);
   ASSERT_EQ(guiImported.results[2].baselineConfigIndex, -1);
-  ASSERT_EQ(guiImported.results[3].configIndex, 33u);
-  ASSERT_EQ(guiImported.results[3].baselineConfigIndex, 32);
+  ASSERT_EQ(guiImported.results[3].configIndex, 22u);
+  ASSERT_EQ(guiImported.results[3].baselineConfigIndex, 21);
+}
+
+TEST_CASE(JsonSerialization, MedianHeadlineAndLosslessMultiGpuV2RoundTrip) {
+  // 1. Median-driven headline scoring with fallback to time_ms when median_time_ms == 0
+  ResultData skewed{};
+  skewed.metric = "TFLOPS";
+  skewed.operations = 1000000000000ULL;
+  skewed.time_ms = 2000.0;
+  skewed.mean_time_ms = 2000.0;
+  skewed.median_time_ms = 1000.0;
+  skewed.isValid = true;
+  ASSERT_NEAR(computeResultValue(skewed), 1.0, 1e-6);
+
+  ResultData legacy = skewed;
+  legacy.median_time_ms = 0.0;
+  ASSERT_NEAR(computeResultValue(legacy), 0.5, 1e-6);
+
+  // 2. Multi-GPU device_profiles, sample_durations_ms, and lossless v2.0 metadata preservation
+  DeviceProfile gpu0{};
+  gpu0.backend = "Vulkan";
+  gpu0.deviceIndex = 0;
+  gpu0.deviceName = "GPU Zero";
+  gpu0.vendorID = 0x1002;
+  gpu0.deviceID = 0x7551;
+  gpu0.vramTotalMb = 32624;
+  gpu0.float16Supported = true;
+  gpu0.ocpFp4Supported = true;
+
+  DeviceProfile gpu1{};
+  gpu1.backend = "Vulkan";
+  gpu1.deviceIndex = 1;
+  gpu1.deviceName = "GPU One";
+  gpu1.vendorID = 0x1002;
+  gpu1.deviceID = 0x7551;
+  gpu1.vramTotalMb = 32624;
+  gpu1.int8Supported = true;
+  gpu1.ocpFp6Supported = true;
+
+  ResultData r0{};
+  r0.backendName = "Vulkan";
+  r0.deviceName = "GPU One";
+  r0.deviceIndex = 1;
+  r0.benchmarkName = "FP32";
+  r0.component = "Compute";
+  r0.subcategory = "Single Precision (Custom V2)";
+  r0.metric = "TFLOPS";
+  r0.operations = 100000000000ULL;
+  r0.time_ms = 2.5;
+  r0.min_time_ms = 2.0;
+  r0.median_time_ms = 2.1;
+  r0.mean_time_ms = 2.5;
+  r0.p95_time_ms = 3.2;
+  r0.sample_count = 3;
+  r0.sample_durations_ms = {2.0, 2.1, 3.4};
+  r0.configIndex = 7;
+  r0.sortWeight = 444;
+  r0.isValid = true;
+
+  const std::string json = resultsToJson({r0}, {gpu0, gpu1}, nullptr, false);
+  ImportedRun imported;
+  std::string err;
+  ASSERT_TRUE(ResultImporter::loadFromString(json, imported, err));
+  ASSERT_EQ(imported.deviceProfiles.size(), 2u);
+  ASSERT_EQ(imported.deviceProfiles[0].deviceName, "GPU Zero");
+  ASSERT_TRUE(imported.deviceProfiles[0].ocpFp4Supported);
+  ASSERT_EQ(imported.deviceProfiles[1].deviceName, "GPU One");
+  ASSERT_TRUE(imported.deviceProfiles[1].ocpFp6Supported);
+  ASSERT_EQ(imported.results.size(), 1u);
+  ASSERT_EQ(imported.results[0].benchmarkName, "FP32");
+  ASSERT_EQ(imported.results[0].subcategory, "Single Precision (Custom V2)");
+  ASSERT_EQ(imported.results[0].configIndex, 7u);
+  ASSERT_EQ(imported.results[0].sortWeight, 444);
+  ASSERT_EQ(imported.results[0].sample_durations_ms.size(), 3u);
+  ASSERT_NEAR(imported.results[0].sample_durations_ms[1], 2.1, 1e-5);
+  ASSERT_NEAR(imported.results[0].sample_durations_ms[2], 3.4, 1e-5);
 }

@@ -21,7 +21,7 @@ public:
     }
     if (context && context->getBackend() == ComputeBackend::ROCm) {
       if (!info.int4Support) {
-        return "INT4 WMMA hardware support not available on this GPU";
+        return "INT4 WMMA hardware support not available on this GPU (requires AMD RDNA 3/4)";
       }
       return "";
     }
@@ -40,12 +40,14 @@ public:
     }
     return SupportLimitation::kApi;
   }
+  using IBenchmark::GetConfigSupportNote;
   std::string GetConfigSupportNote(uint32_t config_idx,
                                    const DeviceInfo &info,
                                    IComputeContext *context = nullptr) const override {
     (void)config_idx;
     return GetSupportNote(info, context);
   }
+  using IBenchmark::GetConfigSupportLimitation;
   SupportLimitation GetConfigSupportLimitation(uint32_t config_idx,
                                                const DeviceInfo &info,
                                                IComputeContext *context = nullptr) const override {
@@ -75,17 +77,20 @@ public:
 
   uint32_t GetNumConfigs() const override { return 1; }
   virtual uint32_t GetExpectedKernelCount() const override { return 1; }
+  using IBenchmark::GetConfigName;
   std::string GetConfigName(uint32_t config_idx) const override {
     (void)config_idx;
     return "Matrix";
   }
   const char *GetMetric() const override { return "TOPS"; }
+  using IBenchmark::GetDescription;
   const char *GetDescription() const override {
     return "4-bit integer (INT4) packed WMMA matrix multiply-accumulate throughput.";
   }
   double GetOperationalIntensity(uint32_t config_idx = 0) const override {
     (void)config_idx;
-    return 16384.0;
+    // int4_matrix: 32768 * 8192 IOPs / (128 B A + 128 B B + 1024 B C = 1280 B) = 209,715.20 OP/B
+    return (32768.0 * 8192.0) / 1280.0;
   }
 
   bool IsEmulated(uint32_t config_idx = 0) const override {

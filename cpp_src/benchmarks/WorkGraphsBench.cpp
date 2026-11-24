@@ -1,4 +1,5 @@
 #include "WorkGraphsBench.h"
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstring>
@@ -8,84 +9,85 @@
 
 namespace {
 
+#ifdef HAVE_VULKAN
 // Validated SPV_AMDX_shader_enqueue module (see shaders/workgraphs_amdx.spvasm)
 const uint32_t kWorkGraphAmdxSpv[] = {
-    0x07230203u, 0x00010600u, 0x00070000u, 0x00000064u, 0x00000000u, 0x00020011u, 0x00000001u, 0x00020011u,
+    0x07230203u, 0x00010600u, 0x00070000u, 0x00000062u, 0x00000000u, 0x00020011u, 0x00000001u, 0x00020011u,
     0x000013CBu, 0x0007000Au, 0x5F565053u, 0x58444D41u, 0x6168735Fu, 0x5F726564u, 0x75716E65u, 0x00657565u,
     0x0006000Bu, 0x00000001u, 0x4C534C47u, 0x6474732Eu, 0x3035342Eu, 0x00000000u, 0x0003000Eu, 0x00000000u,
-    0x00000001u, 0x0009000Fu, 0x00000005u, 0x00000002u, 0x646F7270u, 0x72656375u, 0x65646F4Eu, 0x00000000u,
-    0x00000003u, 0x00000004u, 0x000A000Fu, 0x00000005u, 0x00000005u, 0x736E6F63u, 0x72656D75u, 0x65646F4Eu,
-    0x00000000u, 0x00000006u, 0x00000007u, 0x00000008u, 0x00060010u, 0x00000002u, 0x00000011u, 0x00000100u,
-    0x00000001u, 0x00000001u, 0x0004014Bu, 0x00000002u, 0x000013CEu, 0x00000009u, 0x0004014Bu, 0x00000002u,
-    0x000013D1u, 0x0000000Au, 0x0006014Bu, 0x00000002u, 0x000013D0u, 0x0000000Bu, 0x0000000Cu, 0x0000000Cu,
-    0x00060010u, 0x00000005u, 0x00000011u, 0x00000040u, 0x00000001u, 0x00000001u, 0x00030010u, 0x00000005u,
-    0x000013CDu, 0x0004014Bu, 0x00000005u, 0x000013D1u, 0x0000000Cu, 0x00040047u, 0x00000003u, 0x0000000Bu,
-    0x0000001Cu, 0x00040047u, 0x00000006u, 0x0000000Bu, 0x0000001Du, 0x00030047u, 0x0000000Du, 0x00000002u,
-    0x00050048u, 0x0000000Du, 0x00000000u, 0x00000023u, 0x00000000u, 0x00050048u, 0x0000000Du, 0x00000001u,
-    0x00000023u, 0x00000004u, 0x00050048u, 0x0000000Du, 0x00000002u, 0x00000023u, 0x00000008u, 0x0004014Cu,
-    0x00000004u, 0x000013EAu, 0x0000000Cu, 0x0004014Cu, 0x00000004u, 0x000013ECu, 0x0000000Cu, 0x0004014Cu,
-    0x00000007u, 0x0000139Cu, 0x0000000Eu, 0x00030047u, 0x00000004u, 0x000013D6u, 0x00040047u, 0x0000000Fu,
-    0x00000006u, 0x00000004u, 0x00030047u, 0x00000010u, 0x00000002u, 0x00050048u, 0x00000010u, 0x00000000u,
-    0x00000023u, 0x00000000u, 0x00040047u, 0x00000008u, 0x00000022u, 0x00000000u, 0x00040047u, 0x00000008u,
-    0x00000021u, 0x00000000u, 0x00020013u, 0x00000011u, 0x00030021u, 0x00000012u, 0x00000011u, 0x00040015u,
-    0x00000013u, 0x00000020u, 0x00000000u, 0x00040017u, 0x00000014u, 0x00000013u, 0x00000003u, 0x00030016u,
-    0x00000015u, 0x00000020u, 0x00020014u, 0x00000016u, 0x00030029u, 0x00000016u, 0x00000009u, 0x0004002Bu,
-    0x00000013u, 0x0000000Au, 0x00000000u, 0x0004002Bu, 0x00000013u, 0x0000000Cu, 0x00000001u, 0x0004002Bu,
-    0x00000013u, 0x00000017u, 0x00000002u, 0x0004002Bu, 0x00000013u, 0x00000018u, 0x00000004u, 0x0004002Bu,
-    0x00000013u, 0x00000019u, 0x00000016u, 0x0004002Bu, 0x00000013u, 0x0000001Au, 0x0000001Cu, 0x0004002Bu,
-    0x00000013u, 0x0000001Bu, 0x00000020u, 0x0004002Bu, 0x00000013u, 0x0000000Eu, 0x00000040u, 0x0004002Bu,
-    0x00000013u, 0x0000001Cu, 0x000000FFu, 0x0004002Bu, 0x00000013u, 0x0000000Bu, 0x00000400u, 0x0004002Bu,
-    0x00000013u, 0x0000001Du, 0x0000FFFFu, 0x0004002Bu, 0x00000013u, 0x0000001Eu, 0x2C9277B5u, 0x0004002Bu,
-    0x00000013u, 0x0000001Fu, 0xAC564B05u, 0x0004002Bu, 0x00000013u, 0x00000020u, 0x108EF2D9u, 0x0004002Bu,
-    0x00000015u, 0x00000021u, 0x39000000u, 0x0004002Bu, 0x00000015u, 0x00000022u, 0x3E000000u, 0x0004002Bu,
-    0x00000015u, 0x00000023u, 0x3F7FE000u, 0x0004002Bu, 0x00000015u, 0x00000024u, 0x3A800000u, 0x0005001Eu,
-    0x0000000Du, 0x00000013u, 0x00000013u, 0x00000013u, 0x000313D4u, 0x00000025u, 0x0000000Du, 0x00040020u,
-    0x00000026u, 0x000013CCu, 0x00000025u, 0x00040020u, 0x00000027u, 0x000013CCu, 0x00000013u, 0x00040020u,
-    0x00000028u, 0x00000001u, 0x00000014u, 0x00040020u, 0x00000029u, 0x00000001u, 0x00000013u, 0x0003001Du,
-    0x0000000Fu, 0x00000015u, 0x0003001Eu, 0x00000010u, 0x0000000Fu, 0x00040020u, 0x0000002Au, 0x0000000Cu,
-    0x00000010u, 0x00040020u, 0x0000002Bu, 0x0000000Cu, 0x00000015u, 0x0004003Bu, 0x00000028u, 0x00000003u,
-    0x00000001u, 0x0004003Bu, 0x00000029u, 0x00000006u, 0x00000001u, 0x0004003Bu, 0x00000026u, 0x00000004u,
-    0x000013CCu, 0x0004003Bu, 0x00000026u, 0x00000007u, 0x000013CCu, 0x0004003Bu, 0x0000002Au, 0x00000008u,
-    0x0000000Cu, 0x00050036u, 0x00000011u, 0x00000002u, 0x00000000u, 0x00000012u, 0x000200F8u, 0x0000002Cu,
-    0x00050041u, 0x00000029u, 0x0000002Du, 0x00000003u, 0x0000000Au, 0x0004003Du, 0x00000013u, 0x0000002Eu,
-    0x0000002Du, 0x00050084u, 0x00000013u, 0x0000002Fu, 0x0000002Eu, 0x0000001Eu, 0x00050080u, 0x00000013u,
-    0x00000030u, 0x0000002Fu, 0x0000001Fu, 0x000500C2u, 0x00000013u, 0x00000031u, 0x00000030u, 0x0000001Au,
-    0x00050080u, 0x00000013u, 0x00000032u, 0x00000031u, 0x00000018u, 0x000500C2u, 0x00000013u, 0x00000033u,
-    0x00000030u, 0x00000032u, 0x000500C6u, 0x00000013u, 0x00000034u, 0x00000033u, 0x00000030u, 0x00050084u,
-    0x00000013u, 0x00000035u, 0x00000034u, 0x00000020u, 0x000500C2u, 0x00000013u, 0x00000036u, 0x00000035u,
-    0x00000019u, 0x000500C6u, 0x00000013u, 0x00000037u, 0x00000036u, 0x00000035u, 0x000500C7u, 0x00000013u,
-    0x00000038u, 0x00000037u, 0x0000000Cu, 0x000500AAu, 0x00000016u, 0x00000039u, 0x00000038u, 0x0000000Au,
-    0x000600A9u, 0x00000013u, 0x0000003Au, 0x00000039u, 0x0000000Cu, 0x0000000Au, 0x000613D2u, 0x00000026u,
-    0x0000003Bu, 0x00000017u, 0x0000003Au, 0x0000000Cu, 0x000300F7u, 0x0000003Cu, 0x00000000u, 0x000400FAu,
-    0x00000039u, 0x0000003Du, 0x0000003Eu, 0x000200F8u, 0x0000003Du, 0x00060041u, 0x00000027u, 0x0000003Fu,
-    0x0000003Bu, 0x0000000Au, 0x0000000Au, 0x00060041u, 0x00000027u, 0x00000040u, 0x0000003Bu, 0x0000000Au,
-    0x0000000Cu, 0x00060041u, 0x00000027u, 0x00000041u, 0x0000003Bu, 0x0000000Au, 0x00000017u, 0x000500C5u,
-    0x00000013u, 0x00000042u, 0x00000037u, 0x0000000Cu, 0x000500C7u, 0x00000013u, 0x00000043u, 0x0000002Eu,
-    0x0000001Cu, 0x00050080u, 0x00000013u, 0x00000044u, 0x00000043u, 0x0000000Cu, 0x0003003Eu, 0x0000003Fu,
-    0x0000002Eu, 0x0003003Eu, 0x00000040u, 0x00000042u, 0x0003003Eu, 0x00000041u, 0x00000044u, 0x000200F9u,
-    0x0000003Eu, 0x000200F8u, 0x0000003Eu, 0x000413D6u, 0x00000016u, 0x00000045u, 0x0000003Bu, 0x000300F7u,
-    0x00000046u, 0x00000000u, 0x000400FAu, 0x00000045u, 0x00000047u, 0x00000046u, 0x000200F8u, 0x00000047u,
-    0x000213D3u, 0x0000003Bu, 0x000200F9u, 0x00000046u, 0x000200F8u, 0x00000046u, 0x000200F9u, 0x0000003Cu,
-    0x000200F8u, 0x0000003Cu, 0x000100FDu, 0x00010038u, 0x00050036u, 0x00000011u, 0x00000005u, 0x00000000u,
-    0x00000012u, 0x000200F8u, 0x00000048u, 0x0004003Du, 0x00000013u, 0x00000049u, 0x00000006u, 0x000413E2u,
-    0x00000013u, 0x0000004Au, 0x00000007u, 0x000500B0u, 0x00000016u, 0x0000004Bu, 0x00000049u, 0x0000004Au,
-    0x000300F7u, 0x0000004Cu, 0x00000000u, 0x000400FAu, 0x0000004Bu, 0x0000004Du, 0x0000004Cu, 0x000200F8u,
-    0x0000004Du, 0x00060041u, 0x00000027u, 0x0000004Eu, 0x00000007u, 0x00000049u, 0x0000000Au, 0x00060041u,
-    0x00000027u, 0x0000004Fu, 0x00000007u, 0x00000049u, 0x0000000Cu, 0x00060041u, 0x00000027u, 0x00000050u,
-    0x00000007u, 0x00000049u, 0x00000017u, 0x0004003Du, 0x00000013u, 0x00000051u, 0x0000004Eu, 0x0004003Du,
-    0x00000013u, 0x00000052u, 0x0000004Fu, 0x0004003Du, 0x00000013u, 0x00000053u, 0x00000050u, 0x000500C7u,
-    0x00000013u, 0x00000054u, 0x00000052u, 0x0000001Du, 0x00040070u, 0x00000015u, 0x00000055u, 0x00000054u,
-    0x00050085u, 0x00000015u, 0x00000056u, 0x00000055u, 0x00000021u, 0x00040070u, 0x00000015u, 0x00000057u,
-    0x00000053u, 0x00050085u, 0x00000015u, 0x00000058u, 0x00000057u, 0x00000022u, 0x00050081u, 0x00000015u,
-    0x00000059u, 0x00000056u, 0x00000058u, 0x000200F9u, 0x0000005Au, 0x000200F8u, 0x0000005Au, 0x000700F5u,
-    0x00000013u, 0x0000005Bu, 0x0000000Au, 0x0000004Du, 0x0000005Cu, 0x0000005Du, 0x000700F5u, 0x00000015u,
-    0x0000005Eu, 0x00000059u, 0x0000004Du, 0x0000005Fu, 0x0000005Du, 0x000500B0u, 0x00000016u, 0x00000060u,
-    0x0000005Bu, 0x0000001Bu, 0x000400F6u, 0x00000061u, 0x0000005Du, 0x00000000u, 0x000400FAu, 0x00000060u,
-    0x00000062u, 0x00000061u, 0x000200F8u, 0x00000062u, 0x0008000Cu, 0x00000015u, 0x0000005Fu, 0x00000001u,
-    0x00000032u, 0x0000005Eu, 0x00000023u, 0x00000024u, 0x000200F9u, 0x0000005Du, 0x000200F8u, 0x0000005Du,
-    0x00050080u, 0x00000013u, 0x0000005Cu, 0x0000005Bu, 0x0000000Cu, 0x000200F9u, 0x0000005Au, 0x000200F8u,
-    0x00000061u, 0x00060041u, 0x0000002Bu, 0x00000063u, 0x00000008u, 0x0000000Au, 0x00000051u, 0x0003003Eu,
-    0x00000063u, 0x0000005Eu, 0x000200F9u, 0x0000004Cu, 0x000200F8u, 0x0000004Cu, 0x000100FDu, 0x00010038u};
+    0x00000001u, 0x0008000Fu, 0x00000005u, 0x00000002u, 0x646F7270u, 0x72656375u, 0x65646F4Eu, 0x00000000u,
+    0x00000003u, 0x000A000Fu, 0x00000005u, 0x00000004u, 0x736E6F63u, 0x72656D75u, 0x65646F4Eu, 0x00000000u,
+    0x00000005u, 0x00000006u, 0x00000007u, 0x00060010u, 0x00000002u, 0x00000011u, 0x00000100u, 0x00000001u,
+    0x00000001u, 0x0004014Bu, 0x00000002u, 0x000013CEu, 0x00000008u, 0x0004014Bu, 0x00000002u, 0x000013D1u,
+    0x00000009u, 0x0006014Bu, 0x00000002u, 0x000013D0u, 0x0000000Au, 0x0000000Bu, 0x0000000Bu, 0x00060010u,
+    0x00000004u, 0x00000011u, 0x00000040u, 0x00000001u, 0x00000001u, 0x00030010u, 0x00000004u, 0x000013CDu,
+    0x0004014Bu, 0x00000004u, 0x000013D1u, 0x0000000Bu, 0x00040047u, 0x00000003u, 0x0000000Bu, 0x0000001Cu,
+    0x00040047u, 0x00000005u, 0x0000000Bu, 0x0000001Du, 0x00030047u, 0x0000000Cu, 0x00000002u, 0x00050048u,
+    0x0000000Cu, 0x00000000u, 0x00000023u, 0x00000000u, 0x00050048u, 0x0000000Cu, 0x00000001u, 0x00000023u,
+    0x00000004u, 0x00050048u, 0x0000000Cu, 0x00000002u, 0x00000023u, 0x00000008u, 0x0004014Cu, 0x0000000Du,
+    0x000013E3u, 0x0000000Eu, 0x0004014Cu, 0x0000000Du, 0x000013EAu, 0x0000000Bu, 0x0004014Cu, 0x0000000Du,
+    0x000013ECu, 0x0000000Bu, 0x0004014Cu, 0x0000000Du, 0x0000139Cu, 0x0000000Bu, 0x0004014Cu, 0x0000000Fu,
+    0x0000139Cu, 0x00000010u, 0x00040047u, 0x00000011u, 0x00000006u, 0x00000004u, 0x00030047u, 0x00000012u,
+    0x00000002u, 0x00050048u, 0x00000012u, 0x00000000u, 0x00000023u, 0x00000000u, 0x00040047u, 0x00000007u,
+    0x00000022u, 0x00000000u, 0x00040047u, 0x00000007u, 0x00000021u, 0x00000000u, 0x00020013u, 0x00000013u,
+    0x00030021u, 0x00000014u, 0x00000013u, 0x00040015u, 0x00000015u, 0x00000020u, 0x00000000u, 0x00040017u,
+    0x00000016u, 0x00000015u, 0x00000003u, 0x00030016u, 0x00000017u, 0x00000020u, 0x00020014u, 0x00000018u,
+    0x00030029u, 0x00000018u, 0x00000008u, 0x0004002Bu, 0x00000015u, 0x00000009u, 0x00000000u, 0x0004002Bu,
+    0x00000015u, 0x0000000Bu, 0x00000001u, 0x0004002Bu, 0x00000015u, 0x00000019u, 0x00000002u, 0x0004002Bu,
+    0x00000015u, 0x0000001Au, 0x00000004u, 0x0004002Bu, 0x00000015u, 0x0000001Bu, 0x00000016u, 0x0004002Bu,
+    0x00000015u, 0x0000001Cu, 0x0000001Cu, 0x0004002Bu, 0x00000015u, 0x0000001Du, 0x00000020u, 0x0004002Bu,
+    0x00000015u, 0x00000010u, 0x00000040u, 0x0004002Bu, 0x00000015u, 0x0000001Eu, 0x000000FFu, 0x0004002Bu,
+    0x00000015u, 0x0000000Au, 0x00000400u, 0x0004002Bu, 0x00000015u, 0x0000001Fu, 0x0000FFFFu, 0x0004002Bu,
+    0x00000015u, 0x00000020u, 0x2C9277B5u, 0x0004002Bu, 0x00000015u, 0x00000021u, 0xAC564B05u, 0x0004002Bu,
+    0x00000015u, 0x00000022u, 0x108EF2D9u, 0x0004002Bu, 0x00000017u, 0x00000023u, 0x39000000u, 0x0004002Bu,
+    0x00000017u, 0x00000024u, 0x3E000000u, 0x0004002Bu, 0x00000017u, 0x00000025u, 0x3F7FE000u, 0x0004002Bu,
+    0x00000017u, 0x00000026u, 0x3A800000u, 0x000613EFu, 0x0000000Eu, 0x736E6F63u, 0x72656D75u, 0x65646F4Eu,
+    0x00000000u, 0x0005001Eu, 0x0000000Cu, 0x00000015u, 0x00000015u, 0x00000015u, 0x000313D4u, 0x0000000Du,
+    0x0000000Cu, 0x000313D4u, 0x0000000Fu, 0x0000000Cu, 0x00040020u, 0x00000027u, 0x000013CCu, 0x0000000Du,
+    0x00040020u, 0x00000028u, 0x000013CCu, 0x0000000Fu, 0x00040020u, 0x00000029u, 0x000013CCu, 0x00000015u,
+    0x00040020u, 0x0000002Au, 0x00000001u, 0x00000016u, 0x00040020u, 0x0000002Bu, 0x00000001u, 0x00000015u,
+    0x0003001Du, 0x00000011u, 0x00000017u, 0x0003001Eu, 0x00000012u, 0x00000011u, 0x00040020u, 0x0000002Cu,
+    0x0000000Cu, 0x00000012u, 0x00040020u, 0x0000002Du, 0x0000000Cu, 0x00000017u, 0x0004003Bu, 0x0000002Au,
+    0x00000003u, 0x00000001u, 0x0004003Bu, 0x0000002Bu, 0x00000005u, 0x00000001u, 0x0004003Bu, 0x00000028u,
+    0x00000006u, 0x000013CCu, 0x0004003Bu, 0x0000002Cu, 0x00000007u, 0x0000000Cu, 0x00050036u, 0x00000013u,
+    0x00000002u, 0x00000000u, 0x00000014u, 0x000200F8u, 0x0000002Eu, 0x00050041u, 0x0000002Bu, 0x0000002Fu,
+    0x00000003u, 0x00000009u, 0x0004003Du, 0x00000015u, 0x00000030u, 0x0000002Fu, 0x00050084u, 0x00000015u,
+    0x00000031u, 0x00000030u, 0x00000020u, 0x00050080u, 0x00000015u, 0x00000032u, 0x00000031u, 0x00000021u,
+    0x000500C2u, 0x00000015u, 0x00000033u, 0x00000032u, 0x0000001Cu, 0x00050080u, 0x00000015u, 0x00000034u,
+    0x00000033u, 0x0000001Au, 0x000500C2u, 0x00000015u, 0x00000035u, 0x00000032u, 0x00000034u, 0x000500C6u,
+    0x00000015u, 0x00000036u, 0x00000035u, 0x00000032u, 0x00050084u, 0x00000015u, 0x00000037u, 0x00000036u,
+    0x00000022u, 0x000500C2u, 0x00000015u, 0x00000038u, 0x00000037u, 0x0000001Bu, 0x000500C6u, 0x00000015u,
+    0x00000039u, 0x00000038u, 0x00000037u, 0x000500C7u, 0x00000015u, 0x0000003Au, 0x00000039u, 0x0000000Bu,
+    0x000500AAu, 0x00000018u, 0x0000003Bu, 0x0000003Au, 0x00000009u, 0x000600A9u, 0x00000015u, 0x0000003Cu,
+    0x0000003Bu, 0x0000000Bu, 0x00000009u, 0x000613D2u, 0x00000027u, 0x0000003Du, 0x0000001Au, 0x0000003Cu,
+    0x00000009u, 0x000300F7u, 0x0000003Eu, 0x00000000u, 0x000400FAu, 0x0000003Bu, 0x0000003Fu, 0x0000003Eu,
+    0x000200F8u, 0x0000003Fu, 0x00060041u, 0x00000029u, 0x00000040u, 0x0000003Du, 0x00000009u, 0x00000009u,
+    0x00060041u, 0x00000029u, 0x00000041u, 0x0000003Du, 0x00000009u, 0x0000000Bu, 0x00060041u, 0x00000029u,
+    0x00000042u, 0x0000003Du, 0x00000009u, 0x00000019u, 0x000500C5u, 0x00000015u, 0x00000043u, 0x00000039u,
+    0x0000000Bu, 0x000500C7u, 0x00000015u, 0x00000044u, 0x00000030u, 0x0000001Eu, 0x00050080u, 0x00000015u,
+    0x00000045u, 0x00000044u, 0x0000000Bu, 0x0003003Eu, 0x00000040u, 0x00000030u, 0x0003003Eu, 0x00000041u,
+    0x00000043u, 0x0003003Eu, 0x00000042u, 0x00000045u, 0x000200F9u, 0x0000003Eu, 0x000200F8u, 0x0000003Eu,
+    0x000213D3u, 0x0000003Du, 0x000100FDu, 0x00010038u, 0x00050036u, 0x00000013u, 0x00000004u, 0x00000000u,
+    0x00000014u, 0x000200F8u, 0x00000046u, 0x0004003Du, 0x00000015u, 0x00000047u, 0x00000005u, 0x000413E2u,
+    0x00000015u, 0x00000048u, 0x00000006u, 0x000500B0u, 0x00000018u, 0x00000049u, 0x00000047u, 0x00000048u,
+    0x000300F7u, 0x0000004Au, 0x00000000u, 0x000400FAu, 0x00000049u, 0x0000004Bu, 0x0000004Au, 0x000200F8u,
+    0x0000004BU, 0x00060041u, 0x00000029u, 0x0000004Cu, 0x00000006u, 0x00000047u, 0x00000009u, 0x00060041u,
+    0x00000029u, 0x0000004Du, 0x00000006u, 0x00000047u, 0x0000000Bu, 0x00060041u, 0x00000029u, 0x0000004Eu,
+    0x00000006u, 0x00000047u, 0x00000019u, 0x0004003Du, 0x00000015u, 0x0000004Fu, 0x0000004Cu, 0x0004003Du,
+    0x00000015u, 0x00000050u, 0x0000004Du, 0x0004003Du, 0x00000015u, 0x00000051u, 0x0000004Eu, 0x000500C7u,
+    0x00000015u, 0x00000052u, 0x00000050u, 0x0000001Fu, 0x00040070u, 0x00000017u, 0x00000053u, 0x00000052u,
+    0x00050085u, 0x00000017u, 0x00000054u, 0x00000053u, 0x00000023u, 0x00040070u, 0x00000017u, 0x00000055u,
+    0x00000051u, 0x00050085u, 0x00000017u, 0x00000056u, 0x00000055u, 0x00000024u, 0x00050081u, 0x00000017u,
+    0x00000057u, 0x00000054u, 0x00000056u, 0x000200F9u, 0x00000058u, 0x000200F8u, 0x00000058u, 0x000700F5u,
+    0x00000015u, 0x00000059u, 0x00000009u, 0x0000004Bu, 0x0000005Au, 0x0000005Bu, 0x000700F5u, 0x00000017u,
+    0x0000005Cu, 0x00000057u, 0x0000004Bu, 0x0000005Du, 0x0000005Bu, 0x000500B0u, 0x00000018u, 0x0000005Eu,
+    0x00000059u, 0x0000001Du, 0x000400F6u, 0x0000005Fu, 0x0000005Bu, 0x00000000u, 0x000400FAu, 0x0000005EU,
+    0x00000060u, 0x0000005Fu, 0x000200F8u, 0x00000060u, 0x0008000Cu, 0x00000017u, 0x0000005Du, 0x00000001u,
+    0x00000032u, 0x0000005Cu, 0x00000025u, 0x00000026u, 0x000200F9u, 0x0000005BU, 0x000200F8u, 0x0000005Bu,
+    0x00050080u, 0x00000015u, 0x0000005Au, 0x00000059u, 0x0000000Bu, 0x000200F9u, 0x00000058u, 0x000200F8u,
+    0x0000005Fu, 0x00060041u, 0x0000002Du, 0x00000061u, 0x00000007u, 0x00000009u, 0x0000004Fu, 0x0003003Eu,
+    0x00000061u, 0x0000005Cu, 0x000200F9u, 0x0000004Au, 0x000200F8u, 0x0000004Au, 0x000100FDU, 0x00010038u};
+#endif
 
 uint32_t pcgClassifyHash(uint32_t gid) {
   uint32_t hash = (gid * 747796405u + 2891336453u);
@@ -123,7 +125,7 @@ const char *WorkGraphsBench::GetDescription(uint32_t config_idx) const {
   case 0:
     return "Two-pass producer-consumer pipeline using atomic work-queue compaction + vkCmdDispatchIndirect.";
   case 1:
-    return "Two-pass producer-consumer pipeline using VK_EXT_device_generated_commands GPU command preprocessing + execution.";
+    return "Two-pass producer-consumer pipeline using VK_EXT_device_generated_commands (isolates fixed DGC preprocess cost on a 1-sequence graph vs. multi-pipeline ExecutionSet scaling in InShaderIndirectBench/RaySchedulingBench).";
   case 2:
     return "Single-submission hardware GPU Work Graph (VK_AMDX_shader_enqueue) with on-chip producer-to-coalescing-consumer payload enqueue.";
   default:
@@ -134,13 +136,18 @@ const char *WorkGraphsBench::GetDescription(uint32_t config_idx) const {
 bool WorkGraphsBench::IsSupported(const DeviceInfo & /*info*/,
                                   IComputeContext *context) const {
   if (!context) return true;
-  return context->getBackend() == ComputeBackend::Vulkan;
+  return context->getBackend() == ComputeBackend::Vulkan ||
+         context->getBackend() == ComputeBackend::ROCm;
 }
 
 bool WorkGraphsBench::IsConfigSupported(uint32_t config_idx,
                                         const DeviceInfo &info,
                                         IComputeContext *context) const {
+  if (context && context->getBackend() == ComputeBackend::ROCm) {
+    return config_idx == 0u;
+  }
   if (context && context->getBackend() != ComputeBackend::Vulkan) return false;
+#ifdef HAVE_VULKAN
   const auto *vc = dynamic_cast<const VulkanContext *>(context);
   if (config_idx == 0) return true;
   if (config_idx == 1) {
@@ -149,13 +156,18 @@ bool WorkGraphsBench::IsConfigSupported(uint32_t config_idx,
   if (config_idx == 2) {
     return vc ? vc->isWorkGraphsSupported() : info.workGraphsSupported;
   }
+#else
+  (void)config_idx;
+  (void)info;
+#endif
   return false;
 }
 
 IBenchmark::SupportLimitation
 WorkGraphsBench::GetSupportLimitation(const DeviceInfo & /*info*/,
                                       IComputeContext *context) const {
-  if (context && context->getBackend() != ComputeBackend::Vulkan) {
+  if (context && context->getBackend() != ComputeBackend::Vulkan &&
+      context->getBackend() != ComputeBackend::ROCm) {
     return SupportLimitation::kApi;
   }
   return SupportLimitation::kNone;
@@ -164,6 +176,9 @@ WorkGraphsBench::GetSupportLimitation(const DeviceInfo & /*info*/,
 IBenchmark::SupportLimitation WorkGraphsBench::GetConfigSupportLimitation(
     uint32_t config_idx, const DeviceInfo & /*info*/,
     IComputeContext *context) const {
+  if (context && context->getBackend() == ComputeBackend::ROCm) {
+    return (config_idx == 0u) ? SupportLimitation::kNone : SupportLimitation::kApi;
+  }
   if (context && context->getBackend() != ComputeBackend::Vulkan) {
     return SupportLimitation::kApi;
   }
@@ -175,8 +190,9 @@ IBenchmark::SupportLimitation WorkGraphsBench::GetConfigSupportLimitation(
 
 std::string WorkGraphsBench::GetSupportNote(const DeviceInfo & /*info*/,
                                             IComputeContext *context) const {
-  if (context && context->getBackend() != ComputeBackend::Vulkan) {
-    return "Requires Vulkan 1.4 compute pipeline";
+  if (context && context->getBackend() != ComputeBackend::Vulkan &&
+      context->getBackend() != ComputeBackend::ROCm) {
+    return "Requires Vulkan 1.4 compute pipeline or ROCm persistent work queue";
   }
   return "";
 }
@@ -184,6 +200,12 @@ std::string WorkGraphsBench::GetSupportNote(const DeviceInfo & /*info*/,
 std::string WorkGraphsBench::GetConfigSupportNote(
     uint32_t config_idx, const DeviceInfo & /*info*/,
     IComputeContext *context) const {
+  if (context && context->getBackend() == ComputeBackend::ROCm) {
+    if (config_idx >= 1u) {
+      return "VK_EXT_device_generated_commands and VK_AMDX_shader_enqueue require Vulkan 1.4 backend";
+    }
+    return "";
+  }
   if (context && context->getBackend() != ComputeBackend::Vulkan) {
     return "Requires Vulkan 1.4 backend";
   }
@@ -196,40 +218,73 @@ std::string WorkGraphsBench::GetConfigSupportNote(
   return "";
 }
 
+std::string WorkGraphsBench::GetConfigCaveat(
+    uint32_t config_idx, const DeviceInfo & /*info*/,
+    IComputeContext *context) const {
+  if (context && context->getBackend() == ComputeBackend::ROCm &&
+      config_idx == 0u) {
+    return "ROCm GPU-compacted persistent consumer queue (HIP lacks CP vkCmdDispatchIndirect)";
+  }
+  return "";
+}
+
 void WorkGraphsBench::Setup(IComputeContext &context,
                             const std::string &kernel_dir) {
+  m_ctx = &context;
+  m_kernelDir = kernel_dir;
+  const DeviceInfo devInfo = context.getCurrentDeviceInfo();
+  m_rocmPersistentWorkgroups = std::clamp(devInfo.computeUnits * 16u, 256u, 4096u);
+
+  if (context.getBackend() == ComputeBackend::ROCm) {
+    std::filesystem::path rocmDir = std::filesystem::path(kernel_dir) / "rocm";
+    m_producerKernel = m_ctx->createKernel(
+        (rocmDir / "workgraphs_producer.hip").string(), "run_benchmark", 2);
+    m_consumerKernel = m_ctx->createKernel(
+        (rocmDir / "workgraphs_consumer.hip").string(), "run_benchmark", 3);
+    return;
+  }
+
+#ifdef HAVE_VULKAN
   m_vk = dynamic_cast<VulkanContext *>(&context);
   if (!m_vk) {
-    throw std::runtime_error("WorkGraphsBench requires VulkanContext");
+    throw std::runtime_error("WorkGraphsBench requires Vulkan or ROCm context");
   }
-  m_kernelDir = kernel_dir;
 
   std::filesystem::path vkDir = std::filesystem::path(kernel_dir) / "vulkan";
   m_producerKernel = m_vk->createKernel(
       (vkDir / "workgraphs_producer.comp").string(), "main", 2);
   m_consumerKernel = m_vk->createKernel(
       (vkDir / "workgraphs_consumer.comp").string(), "main", 3);
+#else
+  (void)context;
+  (void)kernel_dir;
+  throw std::runtime_error("WorkGraphsBench requires Vulkan or ROCm backend");
+#endif
 }
 
 void WorkGraphsBench::PrepareConfig(uint32_t config_idx) {
   ReleaseConfigResources(config_idx);
-  if (!m_vk) return;
+  if (!m_ctx) return;
 
   uint32_t initHeader[4] = {0u, 1u, 1u, 0u};
-  m_indirectBuf = m_vk->createBuffer(sizeof(initHeader), initHeader);
+  m_indirectBuf = m_ctx->createBuffer(sizeof(initHeader), initHeader);
   m_payloadQueueBuf =
-      m_vk->createBuffer(static_cast<size_t>(kTotalItems) * sizeof(uint32_t) * 4u);
+      m_ctx->createBuffer(static_cast<size_t>(kTotalItems) * sizeof(uint32_t) * 4u);
   std::vector<float> zeroOut(kTotalItems, 0.0f);
   m_outBuf =
-      m_vk->createBuffer(zeroOut.size() * sizeof(float), zeroOut.data());
+      m_ctx->createBuffer(zeroOut.size() * sizeof(float), zeroOut.data());
 
-  m_vk->setKernelArg(m_producerKernel, 0, m_indirectBuf);
-  m_vk->setKernelArg(m_producerKernel, 1, m_payloadQueueBuf);
+  m_ctx->setKernelArg(m_producerKernel, 0, m_indirectBuf);
+  m_ctx->setKernelArg(m_producerKernel, 1, m_payloadQueueBuf);
 
-  m_vk->setKernelArg(m_consumerKernel, 0, m_indirectBuf);
-  m_vk->setKernelArg(m_consumerKernel, 1, m_payloadQueueBuf);
-  m_vk->setKernelArg(m_consumerKernel, 2, m_outBuf);
+  m_ctx->setKernelArg(m_consumerKernel, 0, m_indirectBuf);
+  m_ctx->setKernelArg(m_consumerKernel, 1, m_payloadQueueBuf);
+  m_ctx->setKernelArg(m_consumerKernel, 2, m_outBuf);
 
+#ifdef HAVE_VULKAN
+  if (!m_vk) {
+    return;
+  }
   if (config_idx == 1 && m_vk->isDGCSupported()) {
     VkIndirectCommandsLayoutTokenEXT token{
         VK_STRUCTURE_TYPE_INDIRECT_COMMANDS_LAYOUT_TOKEN_EXT};
@@ -455,11 +510,30 @@ void WorkGraphsBench::PrepareConfig(uint32_t config_idx) {
     }
     vkWaitForFences(dev, 1, &m_wgFence, VK_TRUE, UINT64_MAX);
   }
+#else
+  (void)config_idx;
+#endif
 }
 
 void WorkGraphsBench::ReleaseConfigResources(uint32_t /*config_idx*/) {
+  if (!m_ctx) return;
+  m_ctx->waitIdle();
+
+  if (m_indirectBuf) {
+    m_ctx->releaseBuffer(m_indirectBuf);
+    m_indirectBuf = nullptr;
+  }
+  if (m_payloadQueueBuf) {
+    m_ctx->releaseBuffer(m_payloadQueueBuf);
+    m_payloadQueueBuf = nullptr;
+  }
+  if (m_outBuf) {
+    m_ctx->releaseBuffer(m_outBuf);
+    m_outBuf = nullptr;
+  }
+
+#ifdef HAVE_VULKAN
   if (!m_vk) return;
-  m_vk->waitIdle();
   VkDevice dev = m_vk->getDevice();
 
   if (m_dgcLayout != VK_NULL_HANDLE) {
@@ -473,18 +547,6 @@ void WorkGraphsBench::ReleaseConfigResources(uint32_t /*config_idx*/) {
   if (m_dgcCountBuf) {
     m_vk->releaseBuffer(m_dgcCountBuf);
     m_dgcCountBuf = nullptr;
-  }
-  if (m_indirectBuf) {
-    m_vk->releaseBuffer(m_indirectBuf);
-    m_indirectBuf = nullptr;
-  }
-  if (m_payloadQueueBuf) {
-    m_vk->releaseBuffer(m_payloadQueueBuf);
-    m_payloadQueueBuf = nullptr;
-  }
-  if (m_outBuf) {
-    m_vk->releaseBuffer(m_outBuf);
-    m_outBuf = nullptr;
   }
 
   if (m_wgTsPool != VK_NULL_HANDLE) {
@@ -522,9 +584,28 @@ void WorkGraphsBench::ReleaseConfigResources(uint32_t /*config_idx*/) {
     vkDestroyDescriptorSetLayout(dev, m_wgSetLayout, nullptr);
     m_wgSetLayout = VK_NULL_HANDLE;
   }
+#endif
 }
 
 void WorkGraphsBench::Run(uint32_t config_idx) {
+  if (m_ctx && m_ctx->getBackend() == ComputeBackend::ROCm) {
+    if (config_idx != 0u) return;
+    uint32_t total = kTotalItems;
+    uint32_t resetMode = 0u;
+    m_ctx->setKernelArg(m_producerKernel, 2, sizeof(uint32_t), &total);
+    m_ctx->setKernelArg(m_producerKernel, 3, sizeof(uint32_t), &resetMode);
+    m_ctx->dispatch(m_producerKernel, 1, 1, 1, 256, 1, 1);
+
+    uint32_t classifyMode = 1u;
+    m_ctx->setKernelArg(m_producerKernel, 2, sizeof(uint32_t), &total);
+    m_ctx->setKernelArg(m_producerKernel, 3, sizeof(uint32_t), &classifyMode);
+    m_ctx->dispatch(m_producerKernel, kTotalItems / 256u, 1, 1, 256, 1, 1);
+
+    m_ctx->dispatch(m_consumerKernel, m_rocmPersistentWorkgroups, 1, 1, 64, 1, 1);
+    return;
+  }
+
+#ifdef HAVE_VULKAN
   if (!m_vk) return;
 
   if (config_idx == 0) {
@@ -625,6 +706,9 @@ void WorkGraphsBench::Run(uint32_t config_idx) {
           std::chrono::duration<double, std::milli>(t1 - t0).count();
     }
   }
+#else
+  (void)config_idx;
+#endif
 }
 
 BenchmarkResult WorkGraphsBench::GetResult(uint32_t config_idx) const {
@@ -632,10 +716,10 @@ BenchmarkResult WorkGraphsBench::GetResult(uint32_t config_idx) const {
 }
 
 bool WorkGraphsBench::ValidateResults(uint32_t config_idx) const {
-  if (!m_vk || !m_outBuf) return false;
+  if (!m_ctx || !m_outBuf) return false;
   constexpr uint32_t kCheckCount = 4096u;
   std::vector<float> out(kCheckCount, -1.0f);
-  m_vk->readBuffer(m_outBuf, 0, kCheckCount * sizeof(float), out.data());
+  m_ctx->readBuffer(m_outBuf, 0, kCheckCount * sizeof(float), out.data());
 
   if (config_idx <= 2u) {
     uint32_t activeChecked = 0;
@@ -657,11 +741,14 @@ bool WorkGraphsBench::ValidateResults(uint32_t config_idx) const {
 
 void WorkGraphsBench::Teardown() {
   ReleaseConfigResources(0);
-  if (m_vk) {
-    if (m_producerKernel) m_vk->releaseKernel(m_producerKernel);
-    if (m_consumerKernel) m_vk->releaseKernel(m_consumerKernel);
+  if (m_ctx) {
+    if (m_producerKernel) m_ctx->releaseKernel(m_producerKernel);
+    if (m_consumerKernel) m_ctx->releaseKernel(m_consumerKernel);
   }
   m_producerKernel = nullptr;
   m_consumerKernel = nullptr;
+#ifdef HAVE_VULKAN
   m_vk = nullptr;
+#endif
+  m_ctx = nullptr;
 }

@@ -32,7 +32,7 @@ std::string RayDivergenceBench::GetSupportNote(const DeviceInfo &info,
     return "No support for ray tracing pipelines in ROCm/HIP API";
   }
   if (!info.rayTracingSupport) {
-    return "VK_KHR_acceleration_structure or VK_KHR_ray_query missing";
+    return "VK_KHR_acceleration_structure or VK_KHR_ray_tracing_pipeline missing";
   }
   if (context) {
     const VulkanContext *vc = dynamic_cast<const VulkanContext *>(context);
@@ -290,11 +290,14 @@ void RayDivergenceBench::buildAS() {
   VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
   submit.commandBufferCount = 1;
   submit.pCommandBuffers = &cmd;
-  if (vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE) != VK_SUCCESS) {
-    vkDestroyCommandPool(device, tmpPool, nullptr);
-    throw std::runtime_error("Failed to submit AS build in RayDivergenceBench");
+  {
+    std::lock_guard<std::recursive_mutex> qlock(vContext->getQueueMutex());
+    if (vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE) != VK_SUCCESS) {
+      vkDestroyCommandPool(device, tmpPool, nullptr);
+      throw std::runtime_error("Failed to submit AS build in RayDivergenceBench");
+    }
+    vkQueueWaitIdle(queue);
   }
-  vkQueueWaitIdle(queue);
 
   vkDestroyCommandPool(device, tmpPool, nullptr);
 }

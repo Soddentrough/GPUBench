@@ -16,12 +16,18 @@ set(TEST_SOURCES
     test_graphics_and_rt_validation.cpp
     test_rfc8259_json_stress.cpp
     test_modernization_and_2026.cpp
+    test_ray_scheduling_parity.cpp
+    test_showcase_validation.cpp
+    test_rocm_parity.cpp
     ../cpp_src/gui/TelemetryWorker.cpp
 )
 
 add_executable(gpubench_tests ${TEST_SOURCES})
 
 add_dependencies(gpubench_tests gpubench)
+if(HIP_FOUND)
+    add_dependencies(gpubench_tests hip_kernels)
+endif()
 
 target_link_libraries(gpubench_tests PRIVATE
     gpubench_lib
@@ -71,6 +77,9 @@ add_test(NAME MemoryAndCacheValidation COMMAND gpubench_tests --filter=MemoryAnd
 add_test(NAME GraphicsAndRayTracingValidation COMMAND gpubench_tests --filter=GraphicsAndRayTracingValidation)
 add_test(NAME RFC8259_JsonStress COMMAND gpubench_tests --filter=RFC8259_JsonStress)
 add_test(NAME ModernizationAnd2026 COMMAND gpubench_tests --filter=ModernizationAnd2026)
+add_test(NAME RaySchedulingParity COMMAND gpubench_tests --filter=RaySchedulingParity)
+add_test(NAME ShowcaseValidation COMMAND gpubench_tests --filter=ShowcaseValidation)
+add_test(NAME ROCmParityValidation COMMAND gpubench_tests --filter=ROCmParityValidation)
 
 set_tests_properties(
     DeviceDatabase
@@ -78,8 +87,13 @@ set_tests_properties(
     MathAndParity
     BlockSuballocator
     KernelPath
-    PixelFill
     DescriptionsAndThumbnails
+    RFC8259_JsonStress
+    PROPERTIES WORKING_DIRECTORY "${CMAKE_BINARY_DIR}" LABELS "cpu"
+)
+
+set_tests_properties(
+    PixelFill
     E2E_Tier1
     E2E_Tier2
     E2E_Tier3
@@ -90,9 +104,11 @@ set_tests_properties(
     ComputeValidation
     MemoryAndCacheValidation
     GraphicsAndRayTracingValidation
-    RFC8259_JsonStress
     ModernizationAnd2026
-    PROPERTIES WORKING_DIRECTORY "${CMAKE_BINARY_DIR}" RESOURCE_LOCK gpu_execution
+    RaySchedulingParity
+    ShowcaseValidation
+    ROCmParityValidation
+    PROPERTIES WORKING_DIRECTORY "${CMAKE_BINARY_DIR}" RESOURCE_LOCK gpu_execution LABELS "gpu"
 )
 
 add_custom_target(check

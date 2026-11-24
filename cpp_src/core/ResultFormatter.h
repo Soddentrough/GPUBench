@@ -101,6 +101,10 @@ struct UnifiedSessionMetadata {
   float uiScale = 1.0f;
 };
 
+inline double effectiveResultTimeMs(const ResultData &r) {
+  return (r.median_time_ms > 0.0) ? r.median_time_ms : r.time_ms;
+}
+
 double computeResultValue(const ResultData &r);
 std::string cleanWorkloadName(const std::string &rawName, const std::string &subcat);
 std::string extractSceneName(const std::string &rawName);
@@ -111,3 +115,7 @@ std::string resultsToJson(const std::vector<ResultData> &results,
 std::string resultsToJson(const std::vector<ResultData> &results,
                           const std::vector<DeviceProfile> &profiles,
                           const UnifiedSessionMetadata *sessionMeta);
+std::string resultsToJson(const std::vector<ResultData> &results,
+                          const std::vector<DeviceProfile> &profiles,
+                          const UnifiedSessionMetadata *sessionMeta,
+                          bool probeLiveContention);

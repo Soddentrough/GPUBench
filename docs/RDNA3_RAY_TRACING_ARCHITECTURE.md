@@ -356,7 +356,7 @@ During deep optimization of `RaySchedulingBench` on an AMD Radeon RX 7900 XTX (N
      waveOffset = subgroupBroadcastFirst(waveOffset);
      uint slot = waveOffset + subgroupBallotExclusiveBitCount(activeBallot);
      ```
-- **Outcome**: Zero-LDS compaction achieved **10,800–12,437 MRecords/s (>12.4 GB/s)** throughput while freeing 100% of LDS capacity, enabling maximum WGP wave occupancy for concurrent BVH traversal.
+- **Outcome**: Zero-LDS compaction achieved **10,800–12,437 MRecords/s (~173–199 GB/s at 16 B/record)** throughput while freeing 100% of LDS capacity, enabling maximum WGP wave occupancy for concurrent BVH traversal.
 
 #### Theory 3: Consolidated Octant Indirect Dispatch (MEC Overhead Elimination)
 - **Hypothesis**: Dispatching 8 separate `vkCmdDispatchIndirect` calls sequentially introduced Command Processor (CP / MEC) serialization, cache-flush stalls, and redundant pipeline barriers.
@@ -447,7 +447,7 @@ Following the removal of user LDS from RT shaders, native 8x4 Wave32 mapping, an
 1. **Size Queues to Fit Infinity Cache (MALL)**:
    Never allocate maximum possible bounds ($N \times \text{rayCount}$). Constrain queue capacity to realistic bin distributions (e.g. 30–35% for 8 octants). On Navi 31 / 32, ensuring the working set fits within the 96 MB / 64 MB Infinity Cache is the difference between winning and losing against a megakernel.
 2. **Zero-LDS Pure Wave32 Stream Compaction (Eliminate LDS from RT Shaders)**:
-   Never allocate user LDS arrays or use workgroup `barrier()` calls inside ray traversal or compaction compute shaders on RDNA 3. User LDS allocations restrict Dual Compute Unit (WGP) occupancy, stalling the hardware Ray Accelerators (RAv2) during memory latency. Use `subgroupBallot` intrinsics and wave-leader scalar atomics to compact records directly into global memory queues in registers, achieving **10.8–12.4 Billion records/s (>12.4 GB/s)** throughput.
+   Never allocate user LDS arrays or use workgroup `barrier()` calls inside ray traversal or compaction compute shaders on RDNA 3. User LDS allocations restrict Dual Compute Unit (WGP) occupancy, stalling the hardware Ray Accelerators (RAv2) during memory latency. Use `subgroupBallot` intrinsics and wave-leader scalar atomics to compact records directly into global memory queues in registers, achieving **10.8–12.4 Billion records/s (~173–199 GB/s at 16 B/record)** throughput.
 3. **Consolidate Indirect Dispatches**:
    Avoid issuing multiple sequential `vkCmdDispatchIndirect` calls for sparse or empty queues. Consolidate queues into a single prefix-summed dispatch buffer to minimize Command Processor overhead and synchronization barriers.
 4. **Reserve Compaction for Divergent Workloads (Post-First-Hit)**:
@@ -470,7 +470,7 @@ Subsequent source-level profiling and low-level disassembly disproved that concl
 ### 11.1. Root Cause: The glTF Material Shading Benchmark Disparity
 In the `sponza.glb` (Indoor Atrium) scene, the two implementations were executing entirely disparate workloads:
 - **Traditional Megakernel** (`rt_scheduling_traditional_megakernel.comp`): Mode 4 explicitly called `evaluateGltfPbr(..., false)` with `enableShadows = false`. It used dummy registers, bypassing all vertex buffer reads, normal map texture sampling, and secondary ray query traversals. It was purely measuring isolated ALU arithmetic.
-- **DGC** (`rt_scheduling_device_generated_commands_material.comp`): Mode 4 called `evaluateGltfPbr(...)` without specifying the shadow flag, defaulting to `enableShadows = true`. For every ray, it fetched 36 floats of vertex data from VRAM, unpacked barycentrics, sampled PBR textures, and **launched a full hardware ray query BVH traversal (`traceShadowRay`) across all 262,267 triangles in Sponza**.
+- **DGC** (`rt_scheduling_device_generated_commands_material.comp`): Mode 4 called `evaluateGltfPbr(...)` without specifying the shadow flag, defaulting to `enableShadows = true`. For every ray, it fetched 36 floats of vertex data from VRAM, unpacked barycentrics, sampled PBR textures, and **launched a full hardware ray query BVH traversal (`traceShadowRay`) across all triangles in the historical 262,267-triangle Crytek Sponza test asset** *(note: current builds ship a clean-room 426,064-triangle Renaissance Colonnade Atrium `assets/models/sponza.glb` compiled from Slang)*.
 
 When benchmarked under true apples-to-apples workloads without shadow disparities:
 - **Procedural Showroom Studio** (8 heterogeneous BSDF archetypes): DGC delivers **29,315.12 MHits/s** vs. Megakernel's **6,902.40 MHits/s** (**4.25x speedup** on RX 7900 XTX at 1080p, scaling to **4.68x** at 4K).

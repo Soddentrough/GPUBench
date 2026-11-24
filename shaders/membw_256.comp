@@ -7,68 +7,76 @@ layout(set = 0, binding = 0, std430) readonly restrict buffer InputData {
     vec4 inputData[];
 } InputBuffer;
 
-layout(set = 0, binding = 1, std430) writeonly coherent restrict buffer OutputData {
+layout(set = 0, binding = 1, std430) writeonly restrict buffer OutputData {
     vec4 outputData[];
 } OutputBuffer;
+
+layout(constant_id = 0) const uint SPEC_MODE = 3u;
 
 layout(push_constant) uniform PushConstants {
     uint mode;
     uint bufferSize;  // Buffer size in bytes
+    uint outerIters;  // Number of 32-element inner passes per thread
 } pc;
 
 void main() {
     uint thread_id = gl_GlobalInvocationID.x;
     uint num_threads = gl_NumWorkGroups.x * gl_WorkGroupSize.x;
-    
-    uint total_vec4s = pc.bufferSize / 16;
-    uint buffer_mask = total_vec4s - 1;
+
+    uint total_vec4s = pc.bufferSize / 16u;
+    uint buffer_mask = total_vec4s - 1u;
+    uint iters = (pc.outerIters > 0u) ? pc.outerIters : 32u;
+    uint activeMode = (SPEC_MODE < 3u) ? SPEC_MODE : pc.mode;
 
     vec4 accumulator = vec4(0.0);
 
-    if (pc.mode == 1) { // Write
-        for (int i = 0; i < 32; ++i) {
-            uint base = (i * 32) * num_threads + thread_id;
+    if (activeMode == 1u) { // Write
+        for (uint i = 0u; i < iters; ++i) {
+            uint base = (i * 32u) * num_threads + thread_id;
             [[dont_unroll]]
-            for (uint k = 0; k < 32; ++k) {
-                OutputBuffer.outputData[(base + k * num_threads) & buffer_mask] = vec4(1.0);
+            for (uint k = 0u; k < 32u; k += 4u) {
+                OutputBuffer.outputData[(base + (k + 0u) * num_threads) & buffer_mask] = vec4(1.0);
+                OutputBuffer.outputData[(base + (k + 1u) * num_threads) & buffer_mask] = vec4(1.0);
+                OutputBuffer.outputData[(base + (k + 2u) * num_threads) & buffer_mask] = vec4(1.0);
+                OutputBuffer.outputData[(base + (k + 3u) * num_threads) & buffer_mask] = vec4(1.0);
             }
         }
-    } else if (pc.mode == 0) { // Read
-        for (int i = 0; i < 32; ++i) {
-            uint base = (i * 32) * num_threads + thread_id;
+    } else if (activeMode == 0u) { // Read
+        for (uint i = 0u; i < iters; ++i) {
+            uint base = (i * 32u) * num_threads + thread_id;
 
-            vec4 data0 = InputBuffer.inputData[(base + 0 * num_threads) & buffer_mask];
-            vec4 data1 = InputBuffer.inputData[(base + 1 * num_threads) & buffer_mask];
-            vec4 data2 = InputBuffer.inputData[(base + 2 * num_threads) & buffer_mask];
-            vec4 data3 = InputBuffer.inputData[(base + 3 * num_threads) & buffer_mask];
-            vec4 data4 = InputBuffer.inputData[(base + 4 * num_threads) & buffer_mask];
-            vec4 data5 = InputBuffer.inputData[(base + 5 * num_threads) & buffer_mask];
-            vec4 data6 = InputBuffer.inputData[(base + 6 * num_threads) & buffer_mask];
-            vec4 data7 = InputBuffer.inputData[(base + 7 * num_threads) & buffer_mask];
-            vec4 data8 = InputBuffer.inputData[(base + 8 * num_threads) & buffer_mask];
-            vec4 data9 = InputBuffer.inputData[(base + 9 * num_threads) & buffer_mask];
-            vec4 data10 = InputBuffer.inputData[(base + 10 * num_threads) & buffer_mask];
-            vec4 data11 = InputBuffer.inputData[(base + 11 * num_threads) & buffer_mask];
-            vec4 data12 = InputBuffer.inputData[(base + 12 * num_threads) & buffer_mask];
-            vec4 data13 = InputBuffer.inputData[(base + 13 * num_threads) & buffer_mask];
-            vec4 data14 = InputBuffer.inputData[(base + 14 * num_threads) & buffer_mask];
-            vec4 data15 = InputBuffer.inputData[(base + 15 * num_threads) & buffer_mask];
-            vec4 data16 = InputBuffer.inputData[(base + 16 * num_threads) & buffer_mask];
-            vec4 data17 = InputBuffer.inputData[(base + 17 * num_threads) & buffer_mask];
-            vec4 data18 = InputBuffer.inputData[(base + 18 * num_threads) & buffer_mask];
-            vec4 data19 = InputBuffer.inputData[(base + 19 * num_threads) & buffer_mask];
-            vec4 data20 = InputBuffer.inputData[(base + 20 * num_threads) & buffer_mask];
-            vec4 data21 = InputBuffer.inputData[(base + 21 * num_threads) & buffer_mask];
-            vec4 data22 = InputBuffer.inputData[(base + 22 * num_threads) & buffer_mask];
-            vec4 data23 = InputBuffer.inputData[(base + 23 * num_threads) & buffer_mask];
-            vec4 data24 = InputBuffer.inputData[(base + 24 * num_threads) & buffer_mask];
-            vec4 data25 = InputBuffer.inputData[(base + 25 * num_threads) & buffer_mask];
-            vec4 data26 = InputBuffer.inputData[(base + 26 * num_threads) & buffer_mask];
-            vec4 data27 = InputBuffer.inputData[(base + 27 * num_threads) & buffer_mask];
-            vec4 data28 = InputBuffer.inputData[(base + 28 * num_threads) & buffer_mask];
-            vec4 data29 = InputBuffer.inputData[(base + 29 * num_threads) & buffer_mask];
-            vec4 data30 = InputBuffer.inputData[(base + 30 * num_threads) & buffer_mask];
-            vec4 data31 = InputBuffer.inputData[(base + 31 * num_threads) & buffer_mask];
+            vec4 data0 = InputBuffer.inputData[(base + 0u * num_threads) & buffer_mask];
+            vec4 data1 = InputBuffer.inputData[(base + 1u * num_threads) & buffer_mask];
+            vec4 data2 = InputBuffer.inputData[(base + 2u * num_threads) & buffer_mask];
+            vec4 data3 = InputBuffer.inputData[(base + 3u * num_threads) & buffer_mask];
+            vec4 data4 = InputBuffer.inputData[(base + 4u * num_threads) & buffer_mask];
+            vec4 data5 = InputBuffer.inputData[(base + 5u * num_threads) & buffer_mask];
+            vec4 data6 = InputBuffer.inputData[(base + 6u * num_threads) & buffer_mask];
+            vec4 data7 = InputBuffer.inputData[(base + 7u * num_threads) & buffer_mask];
+            vec4 data8 = InputBuffer.inputData[(base + 8u * num_threads) & buffer_mask];
+            vec4 data9 = InputBuffer.inputData[(base + 9u * num_threads) & buffer_mask];
+            vec4 data10 = InputBuffer.inputData[(base + 10u * num_threads) & buffer_mask];
+            vec4 data11 = InputBuffer.inputData[(base + 11u * num_threads) & buffer_mask];
+            vec4 data12 = InputBuffer.inputData[(base + 12u * num_threads) & buffer_mask];
+            vec4 data13 = InputBuffer.inputData[(base + 13u * num_threads) & buffer_mask];
+            vec4 data14 = InputBuffer.inputData[(base + 14u * num_threads) & buffer_mask];
+            vec4 data15 = InputBuffer.inputData[(base + 15u * num_threads) & buffer_mask];
+            vec4 data16 = InputBuffer.inputData[(base + 16u * num_threads) & buffer_mask];
+            vec4 data17 = InputBuffer.inputData[(base + 17u * num_threads) & buffer_mask];
+            vec4 data18 = InputBuffer.inputData[(base + 18u * num_threads) & buffer_mask];
+            vec4 data19 = InputBuffer.inputData[(base + 19u * num_threads) & buffer_mask];
+            vec4 data20 = InputBuffer.inputData[(base + 20u * num_threads) & buffer_mask];
+            vec4 data21 = InputBuffer.inputData[(base + 21u * num_threads) & buffer_mask];
+            vec4 data22 = InputBuffer.inputData[(base + 22u * num_threads) & buffer_mask];
+            vec4 data23 = InputBuffer.inputData[(base + 23u * num_threads) & buffer_mask];
+            vec4 data24 = InputBuffer.inputData[(base + 24u * num_threads) & buffer_mask];
+            vec4 data25 = InputBuffer.inputData[(base + 25u * num_threads) & buffer_mask];
+            vec4 data26 = InputBuffer.inputData[(base + 26u * num_threads) & buffer_mask];
+            vec4 data27 = InputBuffer.inputData[(base + 27u * num_threads) & buffer_mask];
+            vec4 data28 = InputBuffer.inputData[(base + 28u * num_threads) & buffer_mask];
+            vec4 data29 = InputBuffer.inputData[(base + 29u * num_threads) & buffer_mask];
+            vec4 data30 = InputBuffer.inputData[(base + 30u * num_threads) & buffer_mask];
+            vec4 data31 = InputBuffer.inputData[(base + 31u * num_threads) & buffer_mask];
 
             accumulator += data0 + data1 + data2 + data3 + data4 + data5 + data6 + data7;
             accumulator += data8 + data9 + data10 + data11 + data12 + data13 + data14 + data15;
@@ -76,10 +84,9 @@ void main() {
             accumulator += data24 + data25 + data26 + data27 + data28 + data29 + data30 + data31;
         }
     } else { // Read + Write
-        for (int i = 0; i < 32; ++i) {
-            uint base = (i * 32) * num_threads + thread_id;
-            [[dont_unroll]]
-            for (uint k = 0; k < 32; ++k) {
+        for (uint i = 0u; i < iters; ++i) {
+            uint base = (i * 32u) * num_threads + thread_id;
+            for (uint k = 0u; k < 32u; ++k) {
                 uint idx = (base + k * num_threads) & buffer_mask;
                 OutputBuffer.outputData[idx] = InputBuffer.inputData[idx];
             }
@@ -87,8 +94,8 @@ void main() {
     }
 
     // Genuine writeback: prevent dead-code elimination of loads without
-    // skewing read memory bus saturation (16 bytes written vs 16,384 bytes read = <0.1% bus overhead).
-    if (pc.mode == 0) {
+    // skewing read memory bus saturation.
+    if (activeMode == 0u) {
         OutputBuffer.outputData[thread_id] = accumulator;
     }
 }

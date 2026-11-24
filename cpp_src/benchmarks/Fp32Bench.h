@@ -30,6 +30,7 @@ public:
   }
   double GetOperationalIntensity(uint32_t config_idx = 0) const override {
     (void)config_idx;
+    // fp32.comp: 65536 * 8 vec4 FMAs * 8 FLOPs = 4,194,304 FLOPs / (4 B read + 4 B write = 8 B) = 524,288.0 FLOP/B
     return 524288.0;
   }
   int GetSortWeight() const override { return 20; }

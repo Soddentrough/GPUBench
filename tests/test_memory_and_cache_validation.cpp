@@ -27,7 +27,7 @@ std::unique_ptr<IComputeContext> createVulkanContext() {
     if (!ctx || ctx->getDevices().empty()) {
       return nullptr;
     }
-    ctx->pickDevice(0);
+    ctx->pickDevice(::gpubench::test::preferredTestDeviceIndex(ctx->getDevices().size()));
     return ctx;
   } catch (...) {
     return nullptr;
@@ -42,7 +42,7 @@ std::unique_ptr<IComputeContext> createVulkanContext() {
 
 TEST_CASE(MemoryAndCacheValidation, MemBandwidth_PositiveValidation_AllModes) {
   auto ctx = createVulkanContext();
-  if (!ctx) { return; }
+  if (!ctx) { SKIP_TEST("Vulkan backend unavailable"); }
 
   std::string kdir = KernelPath::find();
   ASSERT_FALSE(kdir.empty());
@@ -66,7 +66,7 @@ TEST_CASE(MemoryAndCacheValidation, MemBandwidth_PositiveValidation_AllModes) {
 
 TEST_CASE(MemoryAndCacheValidation, MemBandwidth_NegativeValidation_ZeroedBuffer) {
   auto ctx = createVulkanContext();
-  if (!ctx) { return; }
+  if (!ctx) { SKIP_TEST("Vulkan backend unavailable"); }
 
   std::string kdir = KernelPath::find();
   ASSERT_FALSE(kdir.empty());
@@ -110,7 +110,7 @@ TEST_CASE(MemoryAndCacheValidation, MemBandwidth_NegativeValidation_ZeroedBuffer
 
 TEST_CASE(MemoryAndCacheValidation, MemBandwidth_NegativeValidation_CorruptedFloatValues) {
   auto ctx = createVulkanContext();
-  if (!ctx) { return; }
+  if (!ctx) { SKIP_TEST("Vulkan backend unavailable"); }
 
   std::string kdir = KernelPath::find();
   ASSERT_FALSE(kdir.empty());
@@ -138,6 +138,16 @@ TEST_CASE(MemoryAndCacheValidation, MemBandwidth_NegativeValidation_CorruptedFlo
   ctx->waitIdle();
   ASSERT_FALSE(bench.ValidateResults(6));
 
+  // Tail corruption check on full-buffer Write mode (config 1)
+  bench.Run(1);
+  ctx->waitIdle();
+  ASSERT_TRUE(bench.ValidateResults(1));
+
+  size_t tailOffsetBytes = bench.bufferSize - sizeof(float);
+  ctx->writeBuffer(bench.outputBuffer, tailOffsetBytes, sizeof(float), &corruptVal);
+  ctx->waitIdle();
+  ASSERT_FALSE(bench.ValidateResults(1));
+
   bench.Teardown();
 }
 
@@ -147,7 +157,7 @@ TEST_CASE(MemoryAndCacheValidation, MemBandwidth_NegativeValidation_CorruptedFlo
 
 TEST_CASE(MemoryAndCacheValidation, CacheBench_PositiveAndNegativeValidation_Word1) {
   auto ctx = createVulkanContext();
-  if (!ctx) { return; }
+  if (!ctx) { SKIP_TEST("Vulkan backend unavailable"); }
 
   std::string kdir = KernelPath::find();
   ASSERT_FALSE(kdir.empty());
@@ -198,7 +208,7 @@ TEST_CASE(MemoryAndCacheValidation, CacheBench_PositiveAndNegativeValidation_Wor
 
 TEST_CASE(MemoryAndCacheValidation, CacheLatencyCurve_PositiveAndNegativeValidation_Word1) {
   auto ctx = createVulkanContext();
-  if (!ctx) { return; }
+  if (!ctx) { SKIP_TEST("Vulkan backend unavailable"); }
 
   std::string kdir = KernelPath::find();
   ASSERT_FALSE(kdir.empty());
@@ -242,7 +252,7 @@ TEST_CASE(MemoryAndCacheValidation, CacheLatencyCurve_PositiveAndNegativeValidat
 
 TEST_CASE(MemoryAndCacheValidation, SysMemBandwidth_PositiveAndNegativeValidation) {
   auto ctx = createVulkanContext();
-  if (!ctx) { return; }
+  if (!ctx) { SKIP_TEST("Vulkan backend unavailable"); }
 
   std::string kdir = KernelPath::find();
   ASSERT_FALSE(kdir.empty());
@@ -283,7 +293,7 @@ TEST_CASE(MemoryAndCacheValidation, SysMemBandwidth_PositiveAndNegativeValidatio
 
 TEST_CASE(MemoryAndCacheValidation, SysMemLatency_PositiveAndNegativeValidation) {
   auto ctx = createVulkanContext();
-  if (!ctx) { return; }
+  if (!ctx) { SKIP_TEST("Vulkan backend unavailable"); }
 
   std::string kdir = KernelPath::find();
   ASSERT_FALSE(kdir.empty());
@@ -324,7 +334,7 @@ TEST_CASE(MemoryAndCacheValidation, SysMemLatency_PositiveAndNegativeValidation)
 
 TEST_CASE(MemoryAndCacheValidation, NoSelfValidatingStubs_OOBAndUninitialized) {
   auto ctx = createVulkanContext();
-  if (!ctx) { return; }
+  if (!ctx) { SKIP_TEST("Vulkan backend unavailable"); }
 
   std::string kdir = KernelPath::find();
   ASSERT_FALSE(kdir.empty());
@@ -383,7 +393,7 @@ TEST_CASE(MemoryAndCacheValidation, NoSelfValidatingStubs_OOBAndUninitialized) {
 
 TEST_CASE(MemoryAndCacheValidation, CacheBenchBandwidth_PositiveAndNegative_IncludingNonPowerOfTwo) {
   auto ctx = createVulkanContext();
-  if (!ctx) { return; }
+  if (!ctx) { SKIP_TEST("Vulkan backend unavailable"); }
 
   std::string kdir = KernelPath::find();
   ASSERT_FALSE(kdir.empty());

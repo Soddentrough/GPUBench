@@ -27,7 +27,7 @@ public:
     return SupportLimitation::kHardware;
   }
   std::string GetSupportNote() const override {
-    return "Ray tracing requires Vulkan ray query acceleration structures";
+    return "Ray tracing AS build requires Vulkan VK_KHR_acceleration_structure";
   }
   std::string GetSupportNote(const DeviceInfo &info,
                              IComputeContext *context = nullptr) const override {
@@ -38,9 +38,9 @@ public:
       return "No support for ray tracing acceleration structures in ROCm/HIP API";
     }
     if (!info.rayTracingSupport) {
-      return "extension VK_KHR_acceleration_structure or VK_KHR_ray_query missing";
+      return "extension VK_KHR_acceleration_structure missing";
     }
-    return "Ray tracing requires Vulkan ray query acceleration structures";
+    return "Ray tracing AS build requires Vulkan VK_KHR_acceleration_structure";
   }
   void Setup(IComputeContext &context, const std::string &kernel_dir) override;
   void Run(uint32_t config_idx) override;

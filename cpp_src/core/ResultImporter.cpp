@@ -204,33 +204,50 @@ bool ResultImporter::loadFromString(const std::string &content, ImportedRun &out
 
   uint32_t profileVendorId = 0;
   uint32_t profileDeviceId = 0;
+  std::map<uint32_t, std::pair<uint32_t, uint32_t>> idsByDeviceIndex;
   if (root["device_profiles"].is_array() && !root["device_profiles"].empty()) {
-    const JsonView p = root["device_profiles"][static_cast<size_t>(0)];
-    outRun.deviceProfile.backend = p["backend"].as_string();
-    outRun.deviceProfile.deviceIndex = p["device_index"].as_uint32(0);
-    outRun.deviceProfile.deviceName = p["device_name"].as_string();
-    outRun.deviceProfile.vendorId = p["vendor_id"].as_string();
-    outRun.deviceProfile.deviceId = p["device_id"].as_string(p["device_id_hex"].as_string());
-    outRun.deviceProfile.driverName = p["driver_name"].as_string();
-    outRun.deviceProfile.driverInfo = p["driver_info"].as_string();
-    outRun.deviceProfile.driverVersion = p["driver_version"].as_string();
-    outRun.deviceProfile.apiVersion = p["api_version"].as_string();
-    outRun.deviceProfile.vramTotalMb = p["vram_total_mb"].as_uint64(0);
-    outRun.deviceProfile.computeUnits = p["compute_units"].as_uint32(0);
-    outRun.deviceProfile.subgroupSize = p["subgroup_size"].as_uint32(0);
-    outRun.deviceProfile.maxWorkgroupSize = p["max_workgroup_size"].as_uint32(1024);
-    outRun.deviceProfile.isApu = p["is_apu"].as_bool(false);
-    outRun.deviceProfile.rebarSupported = p["rebar_supported"].as_bool(false);
-    outRun.deviceProfile.rebarSizeMb = p["rebar_size_mb"].as_uint64(0);
-    outRun.deviceProfile.rayTracingSupported = p["ray_tracing_supported"].as_bool(false);
-    outRun.deviceProfile.serSupported = p["ser_supported"].as_bool(false);
-    outRun.deviceProfile.opacityMicromapSupported = p["opacity_micromap_supported"].as_bool(false);
-    outRun.deviceProfile.workGraphsSupported = p["work_graphs_supported"].as_bool(false);
-    outRun.deviceProfile.cooperativeMatrixSupported = p["cooperative_matrix_supported"].as_bool(false);
-    outRun.deviceProfile.structuredSparsitySupported = p["structured_sparsity_supported"].as_bool(false);
-    outRun.deviceProfile.cooperativeVectorSupported = p["cooperative_vector_supported"].as_bool(false);
-    profileVendorId = parseHexUint32(outRun.deviceProfile.vendorId);
-    profileDeviceId = parseHexUint32(outRun.deviceProfile.deviceId);
+    size_t pIdx = 0, pMax = 0;
+    yyjson_val *pRaw = nullptr;
+    yyjson_arr_foreach(root["device_profiles"].v, pIdx, pMax, pRaw) {
+      const JsonView p{pRaw};
+      ImportedDeviceProfile dp;
+      dp.backend = p["backend"].as_string();
+      dp.deviceIndex = p["device_index"].as_uint32(0);
+      dp.deviceName = p["device_name"].as_string();
+      dp.vendorId = p["vendor_id"].as_string();
+      dp.deviceId = p["device_id"].as_string(p["device_id_hex"].as_string());
+      dp.driverName = p["driver_name"].as_string();
+      dp.driverInfo = p["driver_info"].as_string();
+      dp.driverVersion = p["driver_version"].as_string();
+      dp.apiVersion = p["api_version"].as_string();
+      dp.vramTotalMb = p["vram_total_mb"].as_uint64(0);
+      dp.computeUnits = p["compute_units"].as_uint32(0);
+      dp.subgroupSize = p["subgroup_size"].as_uint32(0);
+      dp.maxWorkgroupSize = p["max_workgroup_size"].as_uint32(1024);
+      dp.isApu = p["is_apu"].as_bool(false);
+      dp.rebarSupported = p["rebar_supported"].as_bool(false);
+      dp.rebarSizeMb = p["rebar_size_mb"].as_uint64(0);
+      dp.rayTracingSupported = p["ray_tracing_supported"].as_bool(false);
+      dp.serSupported = p["ser_supported"].as_bool(false);
+      dp.opacityMicromapSupported = p["opacity_micromap_supported"].as_bool(false);
+      dp.workGraphsSupported = p["work_graphs_supported"].as_bool(false);
+      dp.cooperativeMatrixSupported = p["cooperative_matrix_supported"].as_bool(false);
+      dp.structuredSparsitySupported = p["structured_sparsity_supported"].as_bool(false);
+      dp.cooperativeVectorSupported = p["cooperative_vector_supported"].as_bool(false);
+      dp.float16Supported = p["float16_supported"].as_bool(false);
+      dp.int8Supported = p["int8_supported"].as_bool(false);
+      dp.ocpFp6Supported = p["ocp_fp6_supported"].as_bool(false);
+      dp.ocpFp4Supported = p["ocp_fp4_supported"].as_bool(false);
+      dp.performanceQuerySupported = p["performance_query_supported"].as_bool(false);
+      idsByDeviceIndex[dp.deviceIndex] = {parseHexUint32(dp.vendorId),
+                                          parseHexUint32(dp.deviceId)};
+      outRun.deviceProfiles.push_back(std::move(dp));
+    }
+    if (!outRun.deviceProfiles.empty()) {
+      outRun.deviceProfile = outRun.deviceProfiles[0];
+      profileVendorId = parseHexUint32(outRun.deviceProfile.vendorId);
+      profileDeviceId = parseHexUint32(outRun.deviceProfile.deviceId);
+    }
   }
 
   if (outRun.deviceProfile.deviceName.empty()) {
@@ -527,61 +544,59 @@ bool ResultImporter::loadFromString(const std::string &content, ImportedRun &out
         } else if (id == "rt_sched_shadow_trad") {
           rd.component = "Ray Tracing";
           rd.subcategory = "Directional Shadows";
-          rd.benchmarkName = "RayScheduling (Shadows - Single Light (Megakernel))";
+          rd.benchmarkName = "RayScheduling (Stage: Directional Shadows (Megakernel))";
           rd.sortWeight = 400;
-          rd.configIndex = 0;
+          rd.configIndex = 19;
+          rd.baselineConfigIndex = -1;
         } else if (id == "rt_sched_shadow_wl") {
           rd.component = "Ray Tracing";
           rd.subcategory = "Directional Shadows";
-          rd.benchmarkName = "RayScheduling (Shadows - Single Light (DGC))";
+          rd.benchmarkName = "RayScheduling (Stage: Directional Shadows (DGC))";
           rd.sortWeight = 401;
-          rd.configIndex = 1;
+          rd.configIndex = 20;
+          rd.baselineConfigIndex = 19;
         } else if (id == "rt_sched_shadow_bin") {
           rd.component = "Ray Tracing";
           rd.subcategory = "Directional Shadows";
-          rd.benchmarkName = "RayScheduling (Shadows - Multi-Light (3 Lights, DGC))";
+          rd.benchmarkName = "RayScheduling (Stage: Directional Shadows (DGC))";
           rd.sortWeight = 402;
-          rd.configIndex = 2;
-        } else if (id == "rt_sched_multilight_single_trad") {
-          rd.component = "Ray Tracing";
-          rd.subcategory = "Multi-Light Evaluation";
-          rd.benchmarkName = "RayScheduling (Multi-Light - Single Light (Megakernel))";
-          rd.sortWeight = 405;
-          rd.configIndex = 30;
-          rd.baselineConfigIndex = -1;
-        } else if (id == "rt_sched_multilight_single_dgc") {
-          rd.component = "Ray Tracing";
-          rd.subcategory = "Multi-Light Evaluation";
-          rd.benchmarkName = "RayScheduling (Multi-Light - Single Light (DGC))";
-          rd.sortWeight = 406;
-          rd.configIndex = 31;
-          rd.baselineConfigIndex = 30;
+          rd.configIndex = 20;
+          rd.baselineConfigIndex = 19;
         } else if (id == "rt_sched_multilight_128_trad") {
           rd.component = "Ray Tracing";
           rd.subcategory = "Multi-Light Evaluation";
-          rd.benchmarkName = "RayScheduling (Multi-Light - 128 Lights (Megakernel))";
+          rd.benchmarkName = "RayScheduling (Stage: Multi-Light - 128 Lights (Megakernel))";
           rd.sortWeight = 407;
-          rd.configIndex = 32;
+          rd.configIndex = 21;
           rd.baselineConfigIndex = -1;
         } else if (id == "rt_sched_multilight_128_dgc") {
           rd.component = "Ray Tracing";
           rd.subcategory = "Multi-Light Evaluation";
-          rd.benchmarkName = "RayScheduling (Multi-Light - 128 Lights (DGC Light Binning))";
+          rd.benchmarkName = "RayScheduling (Stage: Multi-Light - 128 Lights (DGC Light Binning))";
           rd.sortWeight = 408;
-          rd.configIndex = 33;
-          rd.baselineConfigIndex = 32;
+          rd.configIndex = 22;
+          rd.baselineConfigIndex = 21;
         } else if (id == "rt_sched_mat_trad") {
           rd.component = "Ray Tracing";
           rd.subcategory = "Material Shading";
-          rd.benchmarkName = "RayScheduling (Material Shading (Megakernel))";
+          rd.benchmarkName = "RayScheduling (Stage: Material Shading (Megakernel))";
           rd.sortWeight = 410;
           rd.configIndex = 0;
+          rd.baselineConfigIndex = -1;
+        } else if (id == "rt_sched_mat_legacy") {
+          rd.component = "Ray Tracing";
+          rd.subcategory = "Material Shading";
+          rd.benchmarkName = "RayScheduling (Stage: Material Shading (Legacy Indirect))";
+          rd.sortWeight = 411;
+          rd.configIndex = 1;
+          rd.baselineConfigIndex = 0;
         } else if (id == "rt_sched_mat_wl") {
           rd.component = "Ray Tracing";
           rd.subcategory = "Material Shading";
-          rd.benchmarkName = "RayScheduling (Material Shading (DGC))";
-          rd.sortWeight = 411;
-          rd.configIndex = 1;
+          rd.benchmarkName = "RayScheduling (Stage: Material Shading (DGC ExecutionSet))";
+          rd.sortWeight = 412;
+          rd.configIndex = 2;
+          rd.baselineConfigIndex = 0;
         } else if (id == "rt_sched_incoh_trad") {
           rd.component = "Ray Tracing";
           rd.subcategory = "Secondary Rays";
@@ -802,8 +817,14 @@ bool ResultImporter::loadFromString(const std::string &content, ImportedRun &out
       rd.backendName = entry["backend"].as_string("Vulkan");
       rd.deviceName = entry["device"].as_string("Target GPU");
       rd.deviceIndex = entry["device_index"].is_null() ? 0xFFFFFFFF : entry["device_index"].as_uint32(0);
-      rd.vendorId = profileVendorId;
-      rd.deviceId = profileDeviceId;
+      auto idIt = idsByDeviceIndex.find(rd.deviceIndex);
+      if (idIt != idsByDeviceIndex.end()) {
+        rd.vendorId = idIt->second.first;
+        rd.deviceId = idIt->second.second;
+      } else {
+        rd.vendorId = profileVendorId;
+        rd.deviceId = profileDeviceId;
+      }
       rd.benchmarkName = entry["benchmark"].as_string();
       rd.component = entry["component"].as_string("Compute");
       rd.subcategory = entry["subcategory"].as_string();
@@ -849,6 +870,13 @@ bool ResultImporter::loadFromString(const std::string &content, ImportedRun &out
         rd.median_time_ms = st["median_time_ms"].as_double(0.0);
         rd.mean_time_ms = st["mean_time_ms"].as_double(0.0);
         rd.p95_time_ms = st["p95_time_ms"].as_double(0.0);
+        if (st.has("sample_durations_ms") && st["sample_durations_ms"].is_array()) {
+          size_t sdIdx = 0, sdMax = 0;
+          yyjson_val *sdRaw = nullptr;
+          yyjson_arr_foreach(st["sample_durations_ms"].v, sdIdx, sdMax, sdRaw) {
+            rd.sample_durations_ms.push_back(JsonView{sdRaw}.as_double(0.0));
+          }
+        }
       }
       if (entry.has("compiler_telemetry")) {
         const JsonView ct = entry["compiler_telemetry"];
@@ -900,8 +928,31 @@ bool ResultImporter::loadFromString(const std::string &content, ImportedRun &out
         }
       }
 
-      // Deduce sort weight and normalize legacy CLI schema while preserving 2026 subcategories
-      if (rd.component == "Compute") {
+      // Preserve schema v2.0 metadata verbatim without destructive rewriting;
+      // normalize legacy (<2.0 or missing subcategory) entries for display parity.
+      const bool isV2Schema = (outRun.schemaVersion == "2.0");
+      const bool hasExplicitSortWeight = entry.has("sort_weight");
+      if (hasExplicitSortWeight) {
+        rd.sortWeight = entry["sort_weight"].as_int32(300);
+      }
+      if (isV2Schema && !rd.subcategory.empty()) {
+        if (!hasExplicitSortWeight) {
+          if (rd.component == "Compute") {
+            rd.sortWeight = 20;
+          } else if (rd.component == "Memory") {
+            rd.sortWeight = 100;
+          } else if (rd.component == "Scheduling") {
+            rd.sortWeight = 180;
+          } else if (rd.component == "Raster" || rd.component == "Graphics" ||
+                     rd.component == "Rasterization & ROP") {
+            rd.sortWeight = 200;
+          } else if (rd.component == "Ray Tracing") {
+            rd.sortWeight = 500;
+          } else {
+            rd.sortWeight = 300;
+          }
+        }
+      } else if (rd.component == "Compute") {
         rd.sortWeight = 10;
         if (rd.subcategory == "Sparse Matrix (2:4)") {
           rd.sortWeight = 75;
@@ -1056,7 +1107,7 @@ bool ResultImporter::loadFromString(const std::string &content, ImportedRun &out
         rd.sortWeight = 300;
       }
 
-      if (entry.has("sort_weight")) {
+      if (hasExplicitSortWeight) {
         int explicitSortWeight = entry["sort_weight"].as_int32(0);
         if (explicitSortWeight > 0) {
           rd.sortWeight = explicitSortWeight;

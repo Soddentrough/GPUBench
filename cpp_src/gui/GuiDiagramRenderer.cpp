@@ -19,6 +19,8 @@ std::string GuiApp::currentSceneTag() const {
 }
 
 void GuiApp::applyVisualizationMetadata() {
+    const bool isRocm = (resolvedBackendName() == "rocm");
+
     for (auto& cat : m_categories) {
         for (auto& sg : cat.subgroups) {
             for (auto& item : sg.items) {
@@ -28,6 +30,11 @@ void GuiApp::applyVisualizationMetadata() {
                 // 1. RayScheduling 3D Scene Actual Renders (falling back to shipped scene thumbnails / procedural schematics)
                 if (item.id == "RayScheduling") {
                     const std::string& nm = item.name;
+                    const bool isDgcCfg = containsCaseInsensitive(nm, "DGC");
+                    const bool isLegacyInd = containsCaseInsensitive(nm, "Legacy Indirect");
+                    const bool isWavefront = isDgcCfg || isLegacyInd || containsCaseInsensitive(nm, "Wavefront");
+                    const bool isMega = containsCaseInsensitive(nm, "Megakernel");
+
                     if (containsCaseInsensitive(nm, "Queue Compaction")) {
                         viz.diagramId = "queue_compaction";
                         viz.caption = "Wave Ballot Stream Compaction & Compact Active Ray Worklist";
@@ -41,38 +48,52 @@ void GuiApp::applyVisualizationMetadata() {
                         viz.linkedViewportMode = 1;
                         viz.linkedViewportSubIndex = 0;
                     } else if (containsCaseInsensitive(nm, "128 Lights")) {
-                        viz.assetPath = "renders/render_{scene}_multilight_128_dgc.png";
+                        viz.assetPath = isMega
+                            ? "renders/render_{scene}_multilight_128_traditional.png"
+                            : "renders/render_{scene}_multilight_128_dgc.png";
                         viz.fallbackAssetPath = "assets/thumbnails/thumb_{scene}_multilight_128_dgc.png";
-                        viz.diagramId = "bvh_cutout_layers";
-                        viz.caption = "128-Light Direct Evaluation (Megakernel vs DGC Light Binning)";
+                        viz.diagramId = isWavefront ? "dgc_wavefront_dispatch" : "bvh_rayquery";
+                        viz.caption = isWavefront
+                            ? "128-Light Direct Evaluation via Spatial Light-Binned DGC Dispatch"
+                            : "128-Light Direct Evaluation via Monolithic Compute Megakernel";
                         viz.linkedViewportMode = 0;
                         viz.linkedViewportSubIndex = 4;
                     } else if (containsCaseInsensitive(nm, "Alpha Cutout")) {
                         viz.assetPath = "renders/render_{scene}_alpha_cutout.png";
                         viz.fallbackAssetPath = "assets/thumbnails/thumb_{scene}_alpha_cutout.png";
                         viz.diagramId = "bvh_cutout_layers";
-                        viz.caption = "Alpha-Cutout Any-Hit Foliage & Grate Traversal";
+                        viz.caption = "Alpha-Cutout Foliage Traversal Divergence & Mid-Traversal Alpha Testing";
                         viz.linkedViewportMode = 3;
                         viz.linkedViewportSubIndex = 1;
                     } else if (containsCaseInsensitive(nm, "Path Tracing") && containsCaseInsensitive(nm, "16 SPP")) {
-                        viz.assetPath = "renders/render_{scene}_pathtracing_16spp_worklist.png";
+                        viz.assetPath = isMega
+                            ? "renders/render_{scene}_pathtracing_16spp_traditional.png"
+                            : "renders/render_{scene}_pathtracing_16spp_worklist.png";
                         viz.fallbackAssetPath = "assets/thumbnails/thumb_{scene}_pathtracing_16spp.png";
-                        viz.diagramId = "cone_divergence";
-                        viz.caption = "Unbiased Monte Carlo Path Tracing (16 SPP Converged)";
+                        viz.diagramId = isWavefront ? "dgc_wavefront_dispatch" : "cone_divergence";
+                        viz.caption = isWavefront
+                            ? "Unbiased Monte Carlo Path Tracing (16 SPP — Octant-Sorted Wavefront DGC)"
+                            : "Unbiased Monte Carlo Path Tracing (16 SPP — Compute Megakernel)";
                         viz.linkedViewportMode = 2;
                         viz.linkedViewportSubIndex = 0;
                     } else if (containsCaseInsensitive(nm, "Path Tracing")) {
-                        viz.assetPath = "renders/render_{scene}_pathtracing_1spp_worklist.png";
+                        viz.assetPath = isMega
+                            ? "renders/render_{scene}_pathtracing_1spp_traditional.png"
+                            : "renders/render_{scene}_pathtracing_1spp_worklist.png";
                         viz.fallbackAssetPath = "assets/thumbnails/thumb_{scene}_pathtracing_1spp.png";
-                        viz.diagramId = "cone_divergence";
-                        viz.caption = "Unbiased Monte Carlo Path Tracing (1 SPP)";
+                        viz.diagramId = isWavefront ? "dgc_wavefront_dispatch" : "cone_divergence";
+                        viz.caption = isWavefront
+                            ? "Multi-Bounce Monte Carlo Path Tracing (Octant-Sorted Wavefront DGC)"
+                            : "Multi-Bounce Monte Carlo Path Tracing (Megakernel / RTP+SER)";
                         viz.linkedViewportMode = 2;
                         viz.linkedViewportSubIndex = 1;
                     } else if (containsCaseInsensitive(nm, "Shadow")) {
                         viz.assetPath = "renders/render_{scene}_stage3_shadow.png";
                         viz.fallbackAssetPath = "assets/thumbnails/thumb_{scene}_stage3_shadow.png";
-                        viz.diagramId = "bvh_cutout_layers";
-                        viz.caption = "Directional Shadow Ray Visibility Pass";
+                        viz.diagramId = isWavefront ? "dgc_wavefront_dispatch" : "bvh_rayquery";
+                        viz.caption = isWavefront
+                            ? "Directional Shadow Ray Visibility Pass (Wavefront DGC)"
+                            : "Directional Shadow Ray Visibility Pass (RayQuery Megakernel)";
                         viz.linkedViewportMode = 1;
                         viz.linkedViewportSubIndex = 2;
                     } else if (containsCaseInsensitive(nm, "Ambient Occlusion") || containsCaseInsensitive(nm, "RTAO")) {
@@ -85,35 +106,55 @@ void GuiApp::applyVisualizationMetadata() {
                     } else if (containsCaseInsensitive(nm, "Indirect") || containsCaseInsensitive(nm, "GI")) {
                         viz.assetPath = "renders/render_{scene}_stage6_indirect.png";
                         viz.fallbackAssetPath = "assets/thumbnails/thumb_{scene}_stage6_indirect.png";
-                        viz.diagramId = "cone_divergence";
-                        viz.caption = "Secondary Diffuse Global Illumination Bounce";
+                        viz.diagramId = isWavefront ? "dgc_wavefront_dispatch" : "cone_divergence";
+                        viz.caption = isWavefront
+                            ? "Incoherent Diffuse GI Bounce (Octant-Sorted Wavefront DGC)"
+                            : "Incoherent Diffuse GI Bounce (Hemisphere Ray Divergence)";
                         viz.linkedViewportMode = 1;
                         viz.linkedViewportSubIndex = 5;
                     } else if (containsCaseInsensitive(nm, "Primary")) {
                         viz.assetPath = "renders/render_{scene}_stage2_primary.png";
                         viz.fallbackAssetPath = "assets/thumbnails/thumb_{scene}_stage2_primary.png";
-                        viz.diagramId = "bvh_cutout_layers";
-                        viz.caption = "Coherent Primary G-Buffer Ray Generation";
+                        viz.diagramId = isWavefront ? "dgc_wavefront_dispatch" : "bvh_rayquery";
+                        viz.caption = isWavefront
+                            ? "Primary G-Buffer Ray Generation & Wavefront Material Compaction"
+                            : "Coherent Primary G-Buffer Ray Cast & BVH Traversal";
                         viz.linkedViewportMode = 1;
                         viz.linkedViewportSubIndex = 1;
                     } else if (containsCaseInsensitive(nm, "Material")) {
-                        viz.assetPath = "renders/render_{scene}_worklist_dgc.png";
+                        viz.assetPath = isMega
+                            ? "renders/render_{scene}_traditional_megakernel.png"
+                            : "renders/render_{scene}_worklist_dgc.png";
                         viz.fallbackAssetPath = "assets/thumbnails/thumb_material_lineup.png";
-                        viz.diagramId = "cone_divergence";
-                        viz.caption = "Heterogeneous Uber-Material BSDF Shading";
+                        viz.diagramId = "dgc_wavefront_dispatch";
+                        if (isDgcCfg) {
+                            viz.caption = "8-Archetype BSDF Material Shading via Single-Call DGC ExecutionSet";
+                        } else if (isLegacyInd) {
+                            viz.caption = "8-Archetype BSDF Material Shading via 8x Legacy vkCmdDispatchIndirect";
+                        } else if (containsCaseInsensitive(nm, "SER")) {
+                            viz.caption = "8-Archetype BSDF Material Shading via RTP + Shader Execution Reordering";
+                        } else {
+                            viz.caption = "8-Archetype BSDF Material Shading via Monolithic Compute Megakernel";
+                        }
                         viz.linkedViewportMode = 0;
                         viz.linkedViewportSubIndex = 1;
                     } else if (containsCaseInsensitive(nm, "Full Frame") || containsCaseInsensitive(nm, "Deferred")) {
-                        viz.assetPath = "renders/render_{scene}_stage7_final.png";
+                        viz.assetPath = isMega
+                            ? "renders/render_{scene}_traditional_megakernel.png"
+                            : "renders/render_{scene}_stage7_final.png";
                         viz.fallbackAssetPath = "assets/thumbnails/thumb_{scene}_stage7_final.png";
-                        viz.diagramId = "bvh_cutout_layers";
-                        viz.caption = "Full Multi-Stage Deferred Ray-Traced Frame";
+                        viz.diagramId = isWavefront ? "dgc_wavefront_dispatch" : "bvh_rayquery";
+                        viz.caption = isDgcCfg
+                            ? "End-to-End Hybrid RT Frame (Wavefront Classify + DGC ExecutionSet)"
+                            : (isLegacyInd
+                                ? "End-to-End Hybrid RT Frame (Wavefront Classify + 8x Legacy Indirect)"
+                                : "End-to-End Hybrid Ray-Traced Beauty Frame");
                         viz.linkedViewportMode = 0;
                         viz.linkedViewportSubIndex = 2;
                     } else {
                         viz.assetPath = "renders/render_{scene}_stage5_direct.png";
                         viz.fallbackAssetPath = "assets/thumbnails/thumb_{scene}_stage5_direct.png";
-                        viz.diagramId = "bvh_cutout_layers";
+                        viz.diagramId = "bvh_rayquery";
                         viz.caption = "Direct PBR Illumination & Reflection Evaluation";
                         viz.linkedViewportMode = 1;
                         viz.linkedViewportSubIndex = 4;
@@ -142,7 +183,7 @@ void GuiApp::applyVisualizationMetadata() {
                         viz.assetPath = "assets/thumbnails/thumb_blas_wireframe.png";
                         viz.caption = "Bottom-Level Acceleration Structure (BLAS) Triangle Mesh BVH";
                     }
-                    viz.diagramId = "bvh_cutout_layers";
+                    viz.diagramId = "bvh_rayquery";
                     viz.linkedViewportMode = 3;
                     viz.linkedViewportSubIndex = 0;
                     continue;
@@ -150,9 +191,19 @@ void GuiApp::applyVisualizationMetadata() {
                 if (containsCaseInsensitive(item.id, "Any-Hit") || containsCaseInsensitive(item.id, "RayAnyHit")) {
                     viz.assetPath = "assets/thumbnails/thumb_alpha_layers.png";
                     viz.diagramId = "bvh_cutout_layers";
-                    viz.caption = "16-Layer Stacked Alpha-Cutout Planes (Any-Hit vs Opaque Traversal)";
+                    viz.caption = "16-Layer Stacked Alpha-Cutout Planes (Opaque Fast-Path vs Any-Hit Shader)";
                     viz.linkedViewportMode = 3;
                     viz.linkedViewportSubIndex = 1;
+                    continue;
+                }
+                if (containsCaseInsensitive(item.id, "RayProcedural")) {
+                    viz.diagramId = "bvh_procedural";
+                    viz.caption = "Vulkan Ray Tracing Pipeline Procedural AABB Intersection Shader (.rint)";
+                    continue;
+                }
+                if (containsCaseInsensitive(item.id, "RayIntersect")) {
+                    viz.diagramId = "bvh_rayquery";
+                    viz.caption = "Hardware RayQuery Inline BVH Box & Triangle Intersection";
                     continue;
                 }
                 if (containsCaseInsensitive(item.id, "Raw") && containsCaseInsensitive(item.id, "Traversal")) {
@@ -164,16 +215,45 @@ void GuiApp::applyVisualizationMetadata() {
                 }
                 if (containsCaseInsensitive(item.id, "Divergence")) {
                     viz.diagramId = "cone_divergence";
-                    viz.caption = "GGX Roughness Cone Spread & SIMD Wavefront Ray Divergence";
+                    viz.caption = "Secondary Bounce Cone Spread (90 deg -> 0 deg) & Wavefront Ray Divergence";
                     continue;
                 }
                 if (containsCaseInsensitive(item.id, "Payload")) {
                     viz.diagramId = "payload_registers";
-                    viz.caption = "Ray Payload VGPR Footprint vs Active Wave Occupancy";
+                    viz.caption = "Ray Payload VGPR Footprint (16B / 128B / 256B) vs Active Wave Occupancy";
                     continue;
                 }
 
-                // 3. 2026 Compute, Interconnect & Scheduling Schematics
+                // 3. Host System DRAM (must precede GPU Cache / Memory Bandwidth matching!)
+                if (item.category == "System" ||
+                    containsCaseInsensitive(item.id, "System Memory")) {
+                    viz.diagramId = "host_sysmem_dram";
+                    viz.caption = containsCaseInsensitive(item.id, "Latency")
+                        ? "Host CPU Pointer-Chasing Chain across L1/L2/L3 Cache & System DRAM (THP / Large Pages)"
+                        : "Host CPU SIMD Cores (AVX-512 / AVX2 / NEON) <-> L1/L2/L3 <-> System DDR/LPDDR DRAM";
+                    continue;
+                }
+
+                // 4. Raster / ROP
+                if (item.id == "Pixel Fill Rate" || item.category == "Raster") {
+                    viz.diagramId = "raster_rop_fill";
+                    viz.caption = "Fixed-Function Rasterizer -> Fragment Shader -> ROP / Alpha Blend -> Framebuffer";
+                    continue;
+                }
+
+                // 5. Compute, Interconnect & Scheduling Schematics
+                if (containsCaseInsensitive(item.id, "In-Shader Indirect")) {
+                    if (isRocm && item.configIndex >= 2 && item.configIndex <= 4) {
+                        viz.diagramId = "rocm_persistent_queue";
+                        viz.caption = "ROCm/HIP Persistent Work-Queue Compaction (Classify + Fixed-Grid Consumer)";
+                    } else {
+                        viz.diagramId = "indirect_dispatch";
+                        viz.caption = (item.configIndex == 6)
+                            ? "GPU Sparse-Bucket Compaction -> 1x vkCmdExecuteGeneratedCommandsEXT (DGC ExecutionSet)"
+                            : "GPU-Side Indirect Dispatch Argument Synthesis (vkCmdDispatchIndirect) vs CPU Direct";
+                    }
+                    continue;
+                }
                 if (containsCaseInsensitive(item.id, "Sparse")) {
                     viz.diagramId = "sparse_2_4";
                     viz.caption = "Hardware 2:4 Structured Sparsity (50% Non-Zero Weight Compression + 2-Bit Metadata)";
@@ -185,25 +265,48 @@ void GuiApp::applyVisualizationMetadata() {
                     continue;
                 }
                 if (containsCaseInsensitive(item.id, "Interconnect")) {
-                    viz.diagramId = "pcie_interconnect";
-                    viz.caption = "Host Pinned DMA <-> PCIe Root Complex <-> ReBAR / Multi-GPU P2P Crossbar";
+                    if (item.configIndex == 4 || containsCaseInsensitive(item.name, "Unified")) {
+                        viz.diagramId = "apu_unified_memory";
+                        viz.caption = "APU / Unified Memory Host CPU <-> Coherent Shared Fabric <-> GPU Latency";
+                    } else {
+                        viz.diagramId = "pcie_interconnect";
+                        viz.caption = "Host Pinned DMA <-> PCIe Root Complex <-> ReBAR / Multi-GPU P2P Crossbar";
+                    }
                     continue;
                 }
+#ifdef GPUBENCH_ENABLE_EXPERIMENTAL_WORKGRAPHS
                 if (containsCaseInsensitive(item.id, "Work Graphs")) {
                     viz.diagramId = "workgraphs_dag";
                     viz.caption = "GPU-Autonomous Producer -> Consumer Node Enqueue (Zero Host Roundtrip)";
                     continue;
                 }
+#endif
                 if (containsCaseInsensitive(item.id, "Async Compute")) {
-                    viz.diagramId = "async_ace_overlap";
-                    viz.caption = "Concurrent Graphics Queue + Async Compute Engine (ACE) + Copy Engine (SDMA)";
+                    if (item.configIndex >= 2) {
+                        viz.diagramId = "async_compute_dma";
+                        viz.caption = isRocm
+                            ? "Concurrent HIP Compute Stream + Asynchronous DMA Copy Stream"
+                            : "Concurrent Async Compute Queue (ACE) + Dedicated Transfer Engine (SDMA)";
+                    } else {
+                        viz.diagramId = "async_ace_overlap";
+                        viz.caption = "Concurrent Vulkan Graphics Queue (3D) + Async Compute Engine (ACE)";
+                    }
                     continue;
                 }
                 if (containsCaseInsensitive(item.name, "Matrix") &&
                     (item.id == "FP16" || item.id == "BF16" || item.id == "FP8" ||
                      item.id == "FP6" || item.id == "FP4" || item.id == "INT8" || item.id == "INT4")) {
                     viz.diagramId = "coop_matrix_tile";
-                    viz.caption = "Hardware Cooperative Matrix / WMMA / MFMA Sub-Tile D = A * B + C";
+                    viz.caption = "Hardware Matrix Core (Cooperative Matrix / WMMA / MFMA) Tile D = A * B + C";
+                    continue;
+                }
+                if (item.id == "FP64" || item.id == "FP32" || item.id == "FP16" ||
+                    item.id == "BF16" || item.id == "INT8" ||
+                    item.id == "ILP & Dual-Issue" || containsCaseInsensitive(item.id, "Dual-Issue")) {
+                    viz.diagramId = "simd_vector_alu";
+                    viz.caption = (item.id == "ILP & Dual-Issue" || containsCaseInsensitive(item.id, "Dual-Issue"))
+                        ? "SIMD Vector ALU Instruction-Level Parallelism (ILP) & FP32/INT32 Co-Issue"
+                        : "SIMD Vector ALU Execution Lanes -> Vector Register File (VGPR)";
                     continue;
                 }
                 if (item.id == "LDS Bank Conflicts") {
@@ -213,7 +316,7 @@ void GuiApp::applyVisualizationMetadata() {
                 }
                 if (containsCaseInsensitive(item.id, "Cache") || containsCaseInsensitive(item.id, "Memory Bandwidth")) {
                     viz.diagramId = "cache_hierarchy";
-                    viz.caption = "L0 Vector -> L1 -> L2 -> L3 Infinity/MALL -> GDDR/HBM VRAM Hierarchy";
+                    viz.caption = "GPU L0 Vector -> L1 -> L2 -> L3/MALL -> GDDR/HBM VRAM Hierarchy";
                     continue;
                 }
             }
@@ -272,6 +375,12 @@ void GuiApp::renderBenchmarkTooltip(const BenchmarkItem& item, const std::string
         if (!item.viz.caption.empty()) {
             ImGui::TextColored(c.textSecondary, "%s", item.viz.caption.c_str());
         }
+    }
+
+    if (!item.configCaveat.empty()) {
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::TextColored(c.warnColor, "NOTE / CAVEAT: %s", item.configCaveat.c_str());
     }
 
     if (item.hasSupportDiscrepancy) {
@@ -443,6 +552,7 @@ void GuiApp::renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, Im
         dl->AddText(ImVec2(p0.x + w * 0.64f, p0.y + h * 0.22f), greenCol, "OPAQUE (HW HIT)");
         dl->AddText(ImVec2(p0.x + w * 0.64f, p0.y + h * 0.44f), mutedCol, "EMPTY (HW SKIP)");
         dl->AddText(ImVec2(p0.x + w * 0.64f, p0.y + h * 0.66f), amberCol, "EDGE (AHS)");
+#ifdef GPUBENCH_ENABLE_EXPERIMENTAL_WORKGRAPHS
     } else if (diagramId == "workgraphs_dag") {
         ImVec2 prod0(p0.x + w * 0.06f, p0.y + h * 0.32f);
         ImVec2 prod1(p0.x + w * 0.34f, p0.y + h * 0.68f);
@@ -463,25 +573,157 @@ void GuiApp::renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, Im
             dl->AddLine(ImVec2(prod1.x, (prod0.y + prod1.y) * 0.5f),
                         ImVec2(c0.x, (c0.y + c1.y) * 0.5f), cols[t], 1.8f);
         }
+#endif
+    } else if (diagramId == "async_compute_dma") {
+        dl->AddText(ImVec2(p0.x + w * 0.05f, p0.y + h * 0.14f), mutedCol, "SERIAL:");
+        dl->AddRectFilled(ImVec2(p0.x + w * 0.28f, p0.y + h * 0.12f),
+                          ImVec2(p0.x + w * 0.60f, p0.y + h * 0.30f), amberCol, 0.0f);
+        dl->AddRectFilled(ImVec2(p0.x + w * 0.62f, p0.y + h * 0.12f),
+                          ImVec2(p0.x + w * 0.94f, p0.y + h * 0.30f), greenCol, 0.0f);
+
+        dl->AddText(ImVec2(p0.x + w * 0.05f, p0.y + h * 0.52f), greenCol, "OVERLAP:");
+        dl->AddRectFilled(ImVec2(p0.x + w * 0.28f, p0.y + h * 0.44f),
+                          ImVec2(p0.x + w * 0.72f, p0.y + h * 0.64f), amberCol, 0.0f);
+        dl->AddText(ImVec2(p0.x + w * 0.30f, p0.y + h * 0.46f), invCol, "COMPUTE STREAM");
+
+        dl->AddRectFilled(ImVec2(p0.x + w * 0.28f, p0.y + h * 0.69f),
+                          ImVec2(p0.x + w * 0.66f, p0.y + h * 0.89f), greenCol, 0.0f);
+        dl->AddText(ImVec2(p0.x + w * 0.30f, p0.y + h * 0.71f), invCol, "DMA COPY ENGINE");
     } else if (diagramId == "async_ace_overlap") {
-        dl->AddText(ImVec2(p0.x + w * 0.05f, p0.y + h * 0.10f), mutedCol, "SERIAL:");
-        dl->AddRectFilled(ImVec2(p0.x + w * 0.30f, p0.y + h * 0.09f),
-                          ImVec2(p0.x + w * 0.62f, p0.y + h * 0.24f), cyanCol, 0.0f);
-        dl->AddRectFilled(ImVec2(p0.x + w * 0.63f, p0.y + h * 0.09f),
-                          ImVec2(p0.x + w * 0.95f, p0.y + h * 0.24f), amberCol, 0.0f);
+        dl->AddText(ImVec2(p0.x + w * 0.05f, p0.y + h * 0.14f), mutedCol, "SERIAL:");
+        dl->AddRectFilled(ImVec2(p0.x + w * 0.28f, p0.y + h * 0.12f),
+                          ImVec2(p0.x + w * 0.60f, p0.y + h * 0.30f), cyanCol, 0.0f);
+        dl->AddRectFilled(ImVec2(p0.x + w * 0.62f, p0.y + h * 0.12f),
+                          ImVec2(p0.x + w * 0.94f, p0.y + h * 0.30f), amberCol, 0.0f);
 
-        dl->AddText(ImVec2(p0.x + w * 0.05f, p0.y + h * 0.44f), greenCol, "OVERLAP:");
-        dl->AddRectFilled(ImVec2(p0.x + w * 0.30f, p0.y + h * 0.38f),
-                          ImVec2(p0.x + w * 0.68f, p0.y + h * 0.54f), cyanCol, 0.0f);
-        dl->AddText(ImVec2(p0.x + w * 0.32f, p0.y + h * 0.39f), invCol, "GFX QUEUE");
+        dl->AddText(ImVec2(p0.x + w * 0.05f, p0.y + h * 0.52f), greenCol, "OVERLAP:");
+        dl->AddRectFilled(ImVec2(p0.x + w * 0.28f, p0.y + h * 0.44f),
+                          ImVec2(p0.x + w * 0.68f, p0.y + h * 0.64f), cyanCol, 0.0f);
+        dl->AddText(ImVec2(p0.x + w * 0.30f, p0.y + h * 0.46f), invCol, "GFX QUEUE (3D)");
 
-        dl->AddRectFilled(ImVec2(p0.x + w * 0.30f, p0.y + h * 0.58f),
-                          ImVec2(p0.x + w * 0.72f, p0.y + h * 0.74f), amberCol, 0.0f);
-        dl->AddText(ImVec2(p0.x + w * 0.32f, p0.y + h * 0.59f), invCol, "ACE COMPUTE");
-
-        dl->AddRectFilled(ImVec2(p0.x + w * 0.30f, p0.y + h * 0.78f),
-                          ImVec2(p0.x + w * 0.64f, p0.y + h * 0.92f), greenCol, 0.0f);
-        dl->AddText(ImVec2(p0.x + w * 0.32f, p0.y + h * 0.78f), invCol, "SDMA COPY");
+        dl->AddRectFilled(ImVec2(p0.x + w * 0.28f, p0.y + h * 0.69f),
+                          ImVec2(p0.x + w * 0.72f, p0.y + h * 0.89f), amberCol, 0.0f);
+        dl->AddText(ImVec2(p0.x + w * 0.30f, p0.y + h * 0.71f), invCol, "ASYNC COMPUTE (ACE)");
+    } else if (diagramId == "host_sysmem_dram") {
+        const char* stages[4] = {"CPU SIMD", "L1/L2/L3", "MEM CTRL", "SYS DRAM"};
+        const ImU32 cols[4] = {cyanCol, midCol, amberCol, greenCol};
+        float boxW = w * 0.19f;
+        float gap = w * 0.045f;
+        float y0 = p0.y + h * 0.30f;
+        float y1 = p0.y + h * 0.74f;
+        dl->AddText(ImVec2(p0.x + w * 0.05f, p0.y + h * 0.08f), cyanCol, "HOST CPU MEMORY SUBSYSTEM (NO GPU)");
+        for (int i = 0; i < 4; ++i) {
+            float x0 = p0.x + w * 0.05f + i * (boxW + gap);
+            dl->AddRectFilled(ImVec2(x0, y0), ImVec2(x0 + boxW, y1), elevCol, 0.0f);
+            dl->AddRect(ImVec2(x0, y0), ImVec2(x0 + boxW, y1), cols[i], 0.0f);
+            dl->AddText(ImVec2(x0 + s(5.0f), y0 + s(10.0f)), cols[i], stages[i]);
+            if (i < 3) {
+                dl->AddLine(ImVec2(x0 + boxW, (y0 + y1) * 0.5f),
+                            ImVec2(x0 + boxW + gap, (y0 + y1) * 0.5f), cols[i + 1], 1.8f);
+            }
+        }
+    } else if (diagramId == "apu_unified_memory") {
+        dl->AddText(ImVec2(p0.x + w * 0.05f, p0.y + h * 0.08f), cyanCol, "UNIFIED MEMORY COHERENCY FABRIC");
+        ImVec2 c0(p0.x + w * 0.05f, p0.y + h * 0.30f), c1(p0.x + w * 0.30f, p0.y + h * 0.78f);
+        ImVec2 f0(p0.x + w * 0.36f, p0.y + h * 0.30f), f1(p0.x + w * 0.64f, p0.y + h * 0.78f);
+        ImVec2 g0(p0.x + w * 0.70f, p0.y + h * 0.30f), g1(p0.x + w * 0.95f, p0.y + h * 0.78f);
+        dl->AddRectFilled(c0, c1, elevCol, 0.0f); dl->AddRect(c0, c1, cyanCol, 0.0f);
+        dl->AddText(ImVec2(c0.x + s(6.0f), c0.y + s(10.0f)), cyanCol, "HOST CPU");
+        dl->AddRectFilled(f0, f1, elevCol, 0.0f); dl->AddRect(f0, f1, amberCol, 0.0f);
+        dl->AddText(ImVec2(f0.x + s(6.0f), f0.y + s(10.0f)), amberCol, "COHERENT");
+        dl->AddText(ImVec2(f0.x + s(6.0f), f0.y + s(26.0f)), mutedCol, "SHARED RAM");
+        dl->AddRectFilled(g0, g1, elevCol, 0.0f); dl->AddRect(g0, g1, greenCol, 0.0f);
+        dl->AddText(ImVec2(g0.x + s(6.0f), g0.y + s(10.0f)), greenCol, "GPU CU");
+        dl->AddLine(ImVec2(c1.x, (c0.y + c1.y) * 0.5f), ImVec2(f0.x, (f0.y + f1.y) * 0.5f), cyanCol, 2.0f);
+        dl->AddLine(ImVec2(f1.x, (f0.y + f1.y) * 0.5f), ImVec2(g0.x, (g0.y + g1.y) * 0.5f), greenCol, 2.0f);
+    } else if (diagramId == "raster_rop_fill") {
+        const char* stages[4] = {"RASTER", "FRAG", "ROP/BLD", "FB OUT"};
+        const ImU32 cols[4] = {cyanCol, midCol, amberCol, greenCol};
+        float boxW = w * 0.19f;
+        float gap = w * 0.045f;
+        float y0 = p0.y + h * 0.30f;
+        float y1 = p0.y + h * 0.74f;
+        dl->AddText(ImVec2(p0.x + w * 0.05f, p0.y + h * 0.08f), amberCol, "FIXED-FUNCTION RASTER & ROP PIPELINE");
+        for (int i = 0; i < 4; ++i) {
+            float x0 = p0.x + w * 0.05f + i * (boxW + gap);
+            dl->AddRectFilled(ImVec2(x0, y0), ImVec2(x0 + boxW, y1), elevCol, 0.0f);
+            dl->AddRect(ImVec2(x0, y0), ImVec2(x0 + boxW, y1), cols[i], 0.0f);
+            dl->AddText(ImVec2(x0 + s(5.0f), y0 + s(10.0f)), cols[i], stages[i]);
+            if (i < 3) {
+                dl->AddLine(ImVec2(x0 + boxW, (y0 + y1) * 0.5f),
+                            ImVec2(x0 + boxW + gap, (y0 + y1) * 0.5f), cols[i + 1], 1.8f);
+            }
+        }
+    } else if (diagramId == "indirect_dispatch" || diagramId == "dgc_wavefront_dispatch") {
+        const bool isRt = (diagramId == "dgc_wavefront_dispatch");
+        const char* stages[4] = {
+            isRt ? "PRIMARY" : "CLASSIFY",
+            isRt ? "BIN/SORT" : "COMPACT",
+            "IND / DGC",
+            isRt ? "SHADERS" : "WORKER"
+        };
+        const ImU32 cols[4] = {cyanCol, midCol, amberCol, greenCol};
+        float boxW = w * 0.19f;
+        float gap = w * 0.045f;
+        float y0 = p0.y + h * 0.30f;
+        float y1 = p0.y + h * 0.74f;
+        dl->AddText(ImVec2(p0.x + w * 0.05f, p0.y + h * 0.08f), amberCol,
+                    isRt ? "GPU-DRIVEN WAVEFRONT / DGC SCHEDULING"
+                         : "GPU INDIRECT COMMAND SYNTHESIS / DGC");
+        for (int i = 0; i < 4; ++i) {
+            float x0 = p0.x + w * 0.05f + i * (boxW + gap);
+            dl->AddRectFilled(ImVec2(x0, y0), ImVec2(x0 + boxW, y1), elevCol, 0.0f);
+            dl->AddRect(ImVec2(x0, y0), ImVec2(x0 + boxW, y1), cols[i], 0.0f);
+            dl->AddText(ImVec2(x0 + s(5.0f), y0 + s(10.0f)), cols[i], stages[i]);
+            if (i < 3) {
+                dl->AddLine(ImVec2(x0 + boxW, (y0 + y1) * 0.5f),
+                            ImVec2(x0 + boxW + gap, (y0 + y1) * 0.5f), cols[i + 1], 1.8f);
+            }
+        }
+    } else if (diagramId == "rocm_persistent_queue") {
+        const char* stages[3] = {"CLASSIFY", "WORK QUEUE", "PERSIST WGs"};
+        const ImU32 cols[3] = {cyanCol, amberCol, greenCol};
+        float boxW = w * 0.26f;
+        float gap = w * 0.06f;
+        float y0 = p0.y + h * 0.30f;
+        float y1 = p0.y + h * 0.74f;
+        dl->AddText(ImVec2(p0.x + w * 0.05f, p0.y + h * 0.08f), cyanCol, "ROCm / HIP PERSISTENT WORK-QUEUE COMPACTION");
+        for (int i = 0; i < 3; ++i) {
+            float x0 = p0.x + w * 0.05f + i * (boxW + gap);
+            dl->AddRectFilled(ImVec2(x0, y0), ImVec2(x0 + boxW, y1), elevCol, 0.0f);
+            dl->AddRect(ImVec2(x0, y0), ImVec2(x0 + boxW, y1), cols[i], 0.0f);
+            dl->AddText(ImVec2(x0 + s(6.0f), y0 + s(10.0f)), cols[i], stages[i]);
+            if (i < 2) {
+                dl->AddLine(ImVec2(x0 + boxW, (y0 + y1) * 0.5f),
+                            ImVec2(x0 + boxW + gap, (y0 + y1) * 0.5f), cols[i + 1], 1.8f);
+            }
+        }
+    } else if (diagramId == "bvh_rayquery" || diagramId == "bvh_procedural") {
+        const bool isProc = (diagramId == "bvh_procedural");
+        const char* stages[4] = {
+            isProc ? "RAYGEN" : "RAYQUERY",
+            "TLAS INST",
+            isProc ? "AABB BLAS" : "BLAS BVH",
+            isProc ? ".RINT HIT" : "TRI/BOX HW"
+        };
+        const ImU32 cols[4] = {cyanCol, midCol, amberCol, greenCol};
+        float boxW = w * 0.19f;
+        float gap = w * 0.045f;
+        float y0 = p0.y + h * 0.30f;
+        float y1 = p0.y + h * 0.74f;
+        dl->AddText(ImVec2(p0.x + w * 0.05f, p0.y + h * 0.08f), cyanCol,
+                    isProc ? "PROCEDURAL AABB RAY TRACING PIPELINE"
+                           : "HARDWARE INLINE RAYQUERY BVH TRAVERSAL");
+        for (int i = 0; i < 4; ++i) {
+            float x0 = p0.x + w * 0.05f + i * (boxW + gap);
+            dl->AddRectFilled(ImVec2(x0, y0), ImVec2(x0 + boxW, y1), elevCol, 0.0f);
+            dl->AddRect(ImVec2(x0, y0), ImVec2(x0 + boxW, y1), cols[i], 0.0f);
+            dl->AddText(ImVec2(x0 + s(5.0f), y0 + s(10.0f)), cols[i], stages[i]);
+            if (i < 3) {
+                dl->AddLine(ImVec2(x0 + boxW, (y0 + y1) * 0.5f),
+                            ImVec2(x0 + boxW + gap, (y0 + y1) * 0.5f), cols[i + 1], 1.8f);
+            }
+        }
     } else if (diagramId == "cone_divergence") {
         ImVec2 hitPt(p0.x + w * 0.50f, p0.y + h * 0.82f);
         dl->AddLine(ImVec2(p0.x + w * 0.14f, p0.y + h * 0.82f),
@@ -528,23 +770,23 @@ void GuiApp::renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, Im
         dl->AddRectFilled(a0, ImVec2(a0.x + boxW, y + boxH), elevCol, 0.0f);
         dl->AddRect(a0, ImVec2(a0.x + boxW, y + boxH), cyanCol, 0.0f);
         dl->AddText(ImVec2(a0.x + s(6.0f), y + s(8.0f)), cyanCol, "TILE A");
-        dl->AddText(ImVec2(a0.x + s(6.0f), y + s(24.0f)), mutedCol, "16x16");
+        dl->AddText(ImVec2(a0.x + s(6.0f), y + s(24.0f)), mutedCol, "M x K");
 
         dl->AddRectFilled(b0, ImVec2(b0.x + boxW, y + boxH), elevCol, 0.0f);
         dl->AddRect(b0, ImVec2(b0.x + boxW, y + boxH), amberCol, 0.0f);
         dl->AddText(ImVec2(b0.x + s(6.0f), y + s(8.0f)), amberCol, "TILE B");
-        dl->AddText(ImVec2(b0.x + s(6.0f), y + s(24.0f)), mutedCol, "16x16");
+        dl->AddText(ImVec2(b0.x + s(6.0f), y + s(24.0f)), mutedCol, "K x N");
 
         dl->AddRectFilled(w0, ImVec2(w0.x + w * 0.30f, y + boxH), elevCol, 0.0f);
         dl->AddRect(w0, ImVec2(w0.x + w * 0.30f, y + boxH), greenCol, 0.0f, 0, 1.5f);
-        dl->AddText(ImVec2(w0.x + s(6.0f), y + s(8.0f)), greenCol, "WMMA CORE");
+        dl->AddText(ImVec2(w0.x + s(6.0f), y + s(8.0f)), greenCol, "MATRIX CORE");
         dl->AddText(ImVec2(w0.x + s(6.0f), y + s(24.0f)), textCol, "D=A*B+C");
 
         dl->AddLine(ImVec2(a0.x + boxW, y + boxH * 0.5f), ImVec2(b0.x, y + boxH * 0.5f), amberCol, 1.5f);
         dl->AddLine(ImVec2(b0.x + boxW, y + boxH * 0.5f), ImVec2(w0.x, y + boxH * 0.5f), greenCol, 1.5f);
     } else if (diagramId == "simd_vector_alu") {
-        // Wave32 SIMD vector issue lanes -> dual-issue VALU -> VGPR bank
-        dl->AddText(ImVec2(p0.x + w * 0.05f, p0.y + h * 0.08f), amberCol, "WAVE32 SIMD // DUAL-ISSUE VALU");
+        // SIMD vector issue lanes -> Vector ALU -> VGPR bank
+        dl->AddText(ImVec2(p0.x + w * 0.05f, p0.y + h * 0.08f), amberCol, "SIMD VECTOR ALU // LANE EXECUTION");
         for (int lane = 0; lane < 4; ++lane) {
             float y0 = p0.y + h * (0.28f + lane * 0.16f);
             float y1 = y0 + h * 0.11f;
@@ -582,7 +824,7 @@ void GuiApp::renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, Im
             ++outIdx;
         }
     } else if (diagramId == "bvh_raw_traversal") {
-        dl->AddText(ImVec2(p0.x + w * 0.05f, p0.y + h * 0.07f), cyanCol, "COHERENT RAY WARP -> STRATIFIED BVH4 LAYERS");
+        dl->AddText(ImVec2(p0.x + w * 0.05f, p0.y + h * 0.07f), cyanCol, "COHERENT RAY WARP -> STRATIFIED BVH LAYERS");
         for (int layer = 0; layer < 5; ++layer) {
             float x0 = p0.x + w * (0.28f + layer * 0.13f);
             float x1 = x0 + w * 0.08f;
@@ -597,7 +839,7 @@ void GuiApp::renderProceduralDiagram(const std::string& diagramId, ImVec2 p0, Im
             dl->AddLine(ImVec2(p0.x + w * 0.06f, ry), ImVec2(p0.x + w * 0.90f, ry), cyanCol, 1.8f);
         }
     } else if (diagramId == "bvh_cutout_layers") {
-        const char* stages[4] = {"TLAS INST", "BLAS BVH4", "TRI / BOX HW", "AHS / HIT"};
+        const char* stages[4] = {"TLAS INST", "BLAS BVH", "TRI / BOX HW", "AHS / HIT"};
         const ImU32 cols[4] = {cyanCol, midCol, amberCol, greenCol};
         float boxW = w * 0.19f;
         float gap = w * 0.045f;

@@ -36,19 +36,24 @@ public:
       return "No support for 8-bit floating point in OpenCL API (extension cl_khr_fp8 missing)";
     }
     if (!info.fp8Support) {
-      return "shaderFloat8 hardware bit not set (no native FP8 support on GPU)";
+      if (context && context->getBackend() == ComputeBackend::ROCm) {
+        return "Native FP8 (E4M3) matrix hardware (RDNA 4 WMMA / CDNA 3+ MFMA) not supported on this GPU";
+      }
+      return "VK_EXT_shader_float8 (shaderFloat8) not supported on this GPU/driver";
     }
     if (context && context->getBackend() == ComputeBackend::Vulkan && !info.cooperativeMatrixSupport) {
       return "VK_KHR_cooperative_matrix not supported on device";
     }
     return "";
   }
+  using IBenchmark::GetConfigSupportNote;
   std::string GetConfigSupportNote(uint32_t config_idx,
                                    const DeviceInfo &info,
                                    IComputeContext *context = nullptr) const override {
     (void)config_idx;
     return GetSupportNote(info, context);
   }
+  using IBenchmark::GetConfigSupportLimitation;
   SupportLimitation GetConfigSupportLimitation(uint32_t config_idx,
                                                const DeviceInfo &info,
                                                IComputeContext *context = nullptr) const override {
@@ -78,17 +83,32 @@ public:
 
   uint32_t GetNumConfigs() const override { return 1; }
   virtual uint32_t GetExpectedKernelCount() const override { return 1; }
+  using IBenchmark::GetConfigName;
   std::string GetConfigName(uint32_t config_idx) const override {
     (void)config_idx;
     return "Matrix";
   }
   const char *GetMetric() const override { return "TFLOPS"; }
+  using IBenchmark::GetDescription;
   const char *GetDescription() const override {
     return "8-bit floating-point (FP8 E4M3) Cooperative Matrix / WMMA / MFMA tensor throughput.";
   }
+  const char *GetDescription(uint32_t config_idx, const DeviceInfo &info,
+                             IComputeContext *context = nullptr) const override {
+    (void)config_idx;
+    (void)info;
+    if (context && context->getBackend() == ComputeBackend::ROCm) {
+      return "8-bit floating-point (FP8 E4M3) hardware WMMA / MFMA matrix throughput.";
+    }
+    if (context && context->getBackend() == ComputeBackend::Vulkan) {
+      return "8-bit floating-point (FP8 E4M3) Cooperative Matrix throughput via VK_EXT_shader_float8 and VK_KHR_cooperative_matrix.";
+    }
+    return GetDescription();
+  }
   double GetOperationalIntensity(uint32_t config_idx = 0) const override {
     (void)config_idx;
-    return 8192.0;
+    // coop_matrix_fp8.comp: 32768 * 8192 FLOPs / (256 B A + 256 B B + 1024 B C = 1536 B) = 174,762.67 FLOP/B
+    return (32768.0 * 8192.0) / 1536.0;
   }
 
   bool IsEmulated(uint32_t config_idx = 0) const override {

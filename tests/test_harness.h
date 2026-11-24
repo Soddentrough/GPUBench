@@ -2,15 +2,39 @@
 
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <functional>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
 namespace gpubench::test {
+
+class TestSkipped : public std::runtime_error {
+public:
+  using std::runtime_error::runtime_error;
+};
+
+inline uint32_t preferredTestDeviceIndex(size_t deviceCount) {
+  if (deviceCount == 0) {
+    return 0;
+  }
+  if (const char *envDev = std::getenv("GPUBENCH_TEST_DEVICE")) {
+    char *end = nullptr;
+    unsigned long parsed = std::strtoul(envDev, &end, 10);
+    if (end != envDev && *end == '\0') {
+      if (parsed < deviceCount) {
+        return static_cast<uint32_t>(parsed);
+      }
+      return static_cast<uint32_t>(deviceCount - 1);
+    }
+  }
+  return 0;
+}
 
 struct TestCase {
   std::string suite;
@@ -32,9 +56,11 @@ public:
   const std::vector<TestCase> &tests() const { return m_tests; }
 
   int runAll(const std::string &filter = "") {
+    int matched = 0;
     int passed = 0;
     int failed = 0;
-    int skipped = 0;
+    int skippedRuntime = 0;
+    int filteredOut = 0;
 
     std::cout << "\n╭─ GPUBench Test Runner ──────────────────────────────────────────────────────╮\n";
     std::cout << "│ Running registered automated unit tests                                     │\n";
@@ -43,10 +69,11 @@ public:
     for (const auto &t : m_tests) {
       std::string fullName = t.suite + "." + t.name;
       if (!filter.empty() && fullName.find(filter) == std::string::npos && t.suite.find(filter) == std::string::npos) {
-        ++skipped;
+        ++filteredOut;
         continue;
       }
 
+      ++matched;
       std::cout << "  • [" << std::left << std::setw(24) << t.suite << "] " 
                 << std::setw(42) << t.name << " ... " << std::flush;
       try {
@@ -56,6 +83,9 @@ public:
         double elapsedUs = std::chrono::duration<double, std::micro>(t1 - t0).count();
         std::cout << "\033[32m✔ PASS\033[0m (" << std::fixed << std::setprecision(1) << elapsedUs << " µs)\n";
         ++passed;
+      } catch (const TestSkipped &e) {
+        std::cout << "\033[33m⊘ SKIP\033[0m (" << e.what() << ")\n";
+        ++skippedRuntime;
       } catch (const std::exception &e) {
         std::cout << "\033[31m✘ FAIL\033[0m\n";
         std::cerr << "      \033[31m[ERROR]\033[0m " << e.what() << "\n";
@@ -68,16 +98,27 @@ public:
 
     std::cout << "\n───────────────────────────────────────────────────────────────────────────────\n";
     std::cout << " Test Summary: ";
-    if (failed == 0) {
-      std::cout << "\033[32mAll " << passed << " tests passed\033[0m";
+    if (!filter.empty() && matched == 0) {
+      std::cout << "\033[31m0 tests matched filter '" << filter << "'\033[0m";
+    } else if (failed == 0) {
+      std::cout << "\033[32m" << passed << " passed\033[0m";
+      if (skippedRuntime > 0) {
+        std::cout << ", \033[33m" << skippedRuntime << " skipped\033[0m";
+      }
     } else {
       std::cout << "\033[31m" << failed << " failed\033[0m, \033[32m" << passed << " passed\033[0m";
+      if (skippedRuntime > 0) {
+        std::cout << ", \033[33m" << skippedRuntime << " skipped\033[0m";
+      }
     }
-    if (skipped > 0) {
-      std::cout << " (" << skipped << " filtered out)";
+    if (filteredOut > 0) {
+      std::cout << " (" << filteredOut << " filtered out)";
     }
     std::cout << "\n───────────────────────────────────────────────────────────────────────────────\n\n";
 
+    if (!filter.empty() && matched == 0) {
+      return 1;
+    }
     return (failed == 0) ? 0 : 1;
   }
 
@@ -99,6 +140,9 @@ public:
 template <typename Tag> struct TestBody;
 
 } // namespace gpubench::test
+
+#define SKIP_TEST(reason) \
+  throw ::gpubench::test::TestSkipped(reason)
 
 #define TEST_CASE(suite, name) \
   namespace gpubench::test { \

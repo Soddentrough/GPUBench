@@ -1,0 +1,177 @@
+#version 460
+#extension GL_EXT_mesh_shader : require
+#extension GL_EXT_nonuniform_qualifier : require
+
+#include "showcase_common.glsl"
+
+layout(local_size_x = 32, local_size_y = 1, local_size_z = 1) in;
+
+SHOWCASE_DECLARE_SCENE_SET(0);
+SHOWCASE_DECLARE_FRAME_SET(1);
+
+layout(push_constant) uniform TaskPC {
+  uint phaseIndex;
+  uint packetCount;
+} pc;
+
+struct TaskPayload {
+  uint instanceIndices[32];
+  uint meshletIndices[32];
+};
+
+taskPayloadSharedEXT TaskPayload payload;
+
+shared uint s_surviveCount;
+shared uint s_totalTested;
+shared uint s_lodCulled;
+shared uint s_frustumCulled;
+shared uint s_coneCulled;
+shared uint s_hizCulled;
+shared uint s_surviveTris;
+
+bool testHiZOcclusion(vec3 centerW, float radiusW) {
+  // Check bounding cube corners against cullViewProj (Reversed-Z: near -> 1, far -> 0)
+  vec2 minXY = vec2(1e9);
+  vec2 maxXY = vec2(-1e9);
+  float maxZ = 0.0;
+  for (int i = 0; i < 8; ++i) {
+    vec3 signOffset = vec3((i & 1) != 0 ? 1.0 : -1.0,
+                           (i & 2) != 0 ? 1.0 : -1.0,
+                           (i & 4) != 0 ? 1.0 : -1.0);
+    vec4 clip = ubo.cullViewProj * vec4(centerW + signOffset * radiusW, 1.0);
+    if (clip.w <= 1.0) {
+      return false; // Intersects near camera plane -> conservatively visible
+    }
+    vec3 ndc = clip.xyz / clip.w;
+    minXY = min(minXY, ndc.xy);
+    maxXY = max(maxXY, ndc.xy);
+    maxZ = max(maxZ, ndc.z);
+  }
+
+  vec2 uvMin = clamp(minXY * 0.5 + 0.5, vec2(0.0), vec2(1.0));
+  vec2 uvMax = clamp(maxXY * 0.5 + 0.5, vec2(0.0), vec2(1.0));
+  vec2 boxPx = max(uvMax - uvMin, vec2(0.0)) * vec2(ubo.screenInfo.xy);
+  float maxDim = max(boxPx.x, boxPx.y);
+  if (maxDim <= 0.01) {
+    return true;
+  }
+
+  float maxMip = float(max(ubo.frameMeta.y, 1u) - 1u);
+  float mip = clamp(ceil(log2(max(maxDim, 1.0))), 0.0, maxMip);
+  float d00 = textureLod(uHiZTex, vec2(uvMin.x, uvMin.y), mip).r;
+  float d10 = textureLod(uHiZTex, vec2(uvMax.x, uvMin.y), mip).r;
+  float d01 = textureLod(uHiZTex, vec2(uvMin.x, uvMax.y), mip).r;
+  float d11 = textureLod(uHiZTex, vec2(uvMax.x, uvMax.y), mip).r;
+  float hizMinZ = min(min(d00, d10), min(d01, d11));
+
+  // In Reversed-Z, smaller Z is farther away; occluded if closest corner maxZ < conservative minZ in Hi-Z
+  return (maxZ + 0.00008 < hizMinZ);
+}
+
+void main() {
+  uint tid = gl_LocalInvocationID.x;
+  if (tid == 0u) {
+    s_surviveCount = 0u;
+    s_totalTested = 0u;
+    s_lodCulled = 0u;
+    s_frustumCulled = 0u;
+    s_coneCulled = 0u;
+    s_hizCulled = 0u;
+    s_surviveTris = 0u;
+  }
+  barrier();
+
+  uint wgIdx = gl_WorkGroupID.x;
+  if (wgIdx < pc.packetCount) {
+    ShowcaseTaskPacket pkt = (pc.phaseIndex == 0u) ? taskPackets0[wgIdx] : taskPackets1[wgIdx];
+    ShowcaseInstance inst = instances[pkt.instanceIdx];
+    uint optFlags = ubo.countsInfo.w;
+
+    // Select LOD for multi-LOD enriched props
+    uint lod = 0u;
+    if ((optFlags & SHOWCASE_OPT_ADAPTIVE_LOD) != 0u && inst.lodCountBase.y > 0u) {
+      float dist = length(inst.boundSphereWorld.xyz - ubo.cullCamPos.xyz);
+      float projSize = (inst.boundSphereWorld.w * 2.0) / max(dist * ubo.cullCamPos.w * 2.0, 1.0);
+      if (projSize < 0.055 && inst.lodCountBase.z > 0u) {
+        lod = 2u;
+      } else if (projSize < 0.16) {
+        lod = 1u;
+      }
+    }
+
+    uint localIdx = pkt.localStart + tid;
+    uint lod0Count = inst.lodCountBase.x;
+    uint activeCount = inst.lodCountBase[lod];
+
+    if (tid < pkt.count && localIdx < lod0Count) {
+      atomicAdd(s_totalTested, 1u);
+      if (localIdx >= activeCount) {
+        atomicAdd(s_lodCulled, 1u);
+      } else {
+        uint globalMeshletIdx = inst.lodFirstBase[lod] + localIdx;
+        ShowcaseMeshlet m = meshlets[globalMeshletIdx];
+
+        vec3 centerW = (inst.model * vec4(m.boundSphere.xyz, 1.0)).xyz;
+        float sx = length(inst.model[0].xyz);
+        float sy = length(inst.model[1].xyz);
+        float sz = length(inst.model[2].xyz);
+        float maxScale = max(max(sx, sy), max(sz, 1e-4));
+        float radiusW = m.boundSphere.w * maxScale;
+
+        bool culled = false;
+
+        if ((optFlags & SHOWCASE_OPT_FRUSTUM_CONE) != 0u) {
+          for (int p = 0; p < 6; ++p) {
+            vec4 plane = ubo.cullFrustumPlanes[p];
+            if (dot(plane.xyz, centerW) + plane.w < -radiusW) {
+              culled = true;
+              atomicAdd(s_frustumCulled, 1u);
+              break;
+            }
+          }
+          if (!culled && m.coneAxisCutoff.w < 0.99 && (m.meta.y & SHOWCASE_FLAG_DOUBLE_SIDED) == 0u) {
+            vec3 worldAxis = normalize(mat3(inst.model) * m.coneAxisCutoff.xyz);
+            vec3 viewVec = centerW - ubo.cullCamPos.xyz;
+            float dist = length(viewVec);
+            if (dist > radiusW + 1.0) {
+              float sinTest = m.coneAxisCutoff.w + (radiusW / dist) + 0.03;
+              if (dot(viewVec / dist, worldAxis) >= sinTest) {
+                culled = true;
+                atomicAdd(s_coneCulled, 1u);
+              }
+            }
+          }
+        }
+
+        if (!culled && pc.phaseIndex == 1u && (optFlags & SHOWCASE_OPT_HIZ_OCCLUSION) != 0u) {
+          if (testHiZOcclusion(centerW, radiusW)) {
+            culled = true;
+            atomicAdd(s_hizCulled, 1u);
+          }
+        }
+
+        if (!culled) {
+          uint outSlot = atomicAdd(s_surviveCount, 1u);
+          payload.instanceIndices[outSlot] = pkt.instanceIdx;
+          payload.meshletIndices[outSlot] = globalMeshletIdx;
+          atomicAdd(s_surviveTris, m.triangleCount);
+        }
+      }
+    }
+  }
+
+  barrier();
+
+  if (tid == 0u) {
+    if (s_totalTested > 0u) atomicAdd(stats.totalMeshlets, s_totalTested);
+    if (s_surviveCount > 0u) atomicAdd(stats.renderedMeshlets, s_surviveCount);
+    if (s_lodCulled > 0u) atomicAdd(stats.lodCulled, s_lodCulled);
+    if (s_frustumCulled > 0u) atomicAdd(stats.frustumCulled, s_frustumCulled);
+    if (s_coneCulled > 0u) atomicAdd(stats.coneCulled, s_coneCulled);
+    if (s_hizCulled > 0u) atomicAdd(stats.hizCulled, s_hizCulled);
+    if (s_surviveTris > 0u) atomicAdd(stats.renderedTriangles, s_surviveTris);
+  }
+
+  uint emitCount = s_surviveCount;
+  EmitMeshTasksEXT(emitCount, 1u, 1u);
+}

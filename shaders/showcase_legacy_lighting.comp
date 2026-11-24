@@ -1,0 +1,42 @@
+#version 460
+#extension GL_EXT_nonuniform_qualifier : require
+
+#include "showcase_common.glsl"
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+SHOWCASE_DECLARE_SCENE_SET(0);
+SHOWCASE_DECLARE_FRAME_SET(1);
+
+#include "showcase_pbr.glsl"
+
+void main() {
+  ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+  if (px.x >= int(ubo.screenInfo.x) || px.y >= int(ubo.screenInfo.y)) {
+    return;
+  }
+
+  vec2 uv = (vec2(px) + 0.5) / vec2(ubo.screenInfo.xy);
+  float depth = texelFetch(uDepthTex, px, 0).r;
+  if (depth <= 1e-6) {
+    // Reversed-Z far plane -> sky gradient
+    vec2 ndc = uv * 2.0 - 1.0;
+    mat4 invVP = inverse(ubo.viewProj);
+    vec4 wpFar = invVP * vec4(ndc, 0.001, 1.0);
+    vec3 rayDir = normalize(wpFar.xyz / wpFar.w - ubo.camPosFov.xyz);
+    vec3 sky = showcaseLinearToSrgb(showcaseAcesTonemap(showcaseSkyColor(rayDir, ubo.sunDirIntensity.xyz)));
+    imageStore(uSceneColorImg, px, vec4(sky, 1.0));
+    return;
+  }
+
+  vec4 g0 = texelFetch(uGBufAlbedo, px, 0);
+  vec4 g1 = texelFetch(uGBufNormal, px, 0);
+  vec4 g2 = texelFetch(uGBufWorldPos, px, 0);
+
+  bool dbl = g2.w >= 1.5;
+  float metallic = dbl ? (g2.w - 2.0) : g2.w;
+  uint flags = dbl ? SHOWCASE_FLAG_DOUBLE_SIDED : 0u;
+
+  vec3 ldr = evaluateShowcasePbr(g2.xyz, normalize(g1.xyz), g0.rgb, metallic, g1.a, g0.a, vec3(0.0), flags);
+  imageStore(uSceneColorImg, px, vec4(ldr, 1.0));
+}

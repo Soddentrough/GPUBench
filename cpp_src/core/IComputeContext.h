@@ -281,7 +281,8 @@ inline std::string formatRebarCaveat(const DeviceInfo &info,
   if (info.isApu) {
     return "";
   }
-  if (context && context->getBackend() != ComputeBackend::Vulkan) {
+  if (context && context->getBackend() != ComputeBackend::Vulkan &&
+      !(info.rebarSupported || info.rebarSizeBytes > 0)) {
     return "";
   }
   return "ReBAR: " + formatRebarStatus(info.rebarSupported, info.rebarSizeBytes,

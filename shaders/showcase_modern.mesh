@@ -1,0 +1,62 @@
+#version 460
+#extension GL_EXT_mesh_shader : require
+#extension GL_EXT_nonuniform_qualifier : require
+
+#include "showcase_common.glsl"
+
+layout(local_size_x = 32, local_size_y = 1, local_size_z = 1) in;
+layout(triangles, max_vertices = 64, max_primitives = 124) out;
+
+SHOWCASE_DECLARE_SCENE_SET(0);
+SHOWCASE_DECLARE_FRAME_SET(1);
+
+struct TaskPayload {
+  uint instanceIndices[32];
+  uint meshletIndices[32];
+};
+
+taskPayloadSharedEXT TaskPayload payload;
+
+layout(location = 0) out vec3 vWorldPos[];
+layout(location = 1) out vec3 vWorldNormal[];
+layout(location = 2) out vec4 vWorldTangent[];
+layout(location = 3) out vec2 vUV[];
+layout(location = 4) flat out uint vMatId[];
+layout(location = 5) flat out uint vFlags[];
+layout(location = 6) perprimitiveEXT flat out uvec2 vVisData[];
+
+void main() {
+  uint wg = gl_WorkGroupID.x;
+  uint tid = gl_LocalInvocationID.x;
+
+  uint instIdx = payload.instanceIndices[wg];
+  uint mIdx = payload.meshletIndices[wg];
+
+  ShowcaseMeshlet m = meshlets[mIdx];
+  ShowcaseInstance inst = instances[instIdx];
+  mat3 nrmMat = mat3(inst.model);
+
+  SetMeshOutputsEXT(m.vertexCount, m.triangleCount);
+
+  for (uint i = tid; i < m.vertexCount; i += 32u) {
+    uint gv = meshletVertices[m.vertexOffset + i];
+    ShowcaseVertex v = vertices[gv];
+    vec4 wp = inst.model * vec4(v.posMat.xyz, 1.0);
+    gl_MeshVerticesEXT[i].gl_Position = ubo.viewProj * wp;
+    vWorldPos[i] = wp.xyz;
+    vWorldNormal[i] = normalize(nrmMat * v.normalFlags.xyz);
+    vWorldTangent[i] = vec4(normalize(nrmMat * v.tangent.xyz), v.tangent.w);
+    vUV[i] = v.uvPad.xy;
+    vMatId[i] = floatBitsToUint(v.posMat.w);
+    vFlags[i] = floatBitsToUint(v.normalFlags.w) | inst.meta.w;
+  }
+
+  for (uint t = tid; t < m.triangleCount; t += 32u) {
+    uint packed = meshletTriangles[m.triangleOffset + t];
+    uint i0 = (packed >> 0u) & 0xFFu;
+    uint i1 = (packed >> 8u) & 0xFFu;
+    uint i2 = (packed >> 16u) & 0xFFu;
+    gl_PrimitiveTriangleIndicesEXT[t] = uvec3(i0, i1, i2);
+    vVisData[t] = uvec2((mIdx << 8u) | t, instIdx);
+  }
+}

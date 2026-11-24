@@ -42,8 +42,8 @@ extern "C" __global__ void run_benchmark(half* data) {
     half2 mult = __half2half2(-0.9990234375f);
     half2 addend = __half2half2(0.5f);
 
-    // 16384 iterations * 32 half2 FMAs = 16384 * 128 FP16 ops per thread
-    for (int i = 0; i < 16384; ++i) {
+    // 65536 iterations * 32 half2 FMAs = 65536 * 128 FP16 ops per thread (parity with fp16.comp)
+    for (int i = 0; i < 65536; ++i) {
         val1  = __hfma2(val1,  mult, addend);
         val2  = __hfma2(val2,  mult, addend);
         val3  = __hfma2(val3,  mult, addend);

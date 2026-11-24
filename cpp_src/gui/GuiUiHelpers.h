@@ -70,27 +70,29 @@ inline bool isLowerBetterMetric(const std::string& metric) {
 }
 
 inline double computeThroughputOrInvLatency(const ResultData& r) {
-    if (r.isUnsupported || r.time_ms <= 0.0) return 0.0;
+    const double effMs = effectiveResultTimeMs(r);
+    if (r.isUnsupported || effMs <= 0.0) return 0.0;
     if (r.metric == "us" || r.metric == "ms") {
         const double ops = (r.operations > 0) ? static_cast<double>(r.operations) : 1.0;
-        return (ops * 1000.0) / r.time_ms;
+        return (ops * 1000.0) / effMs;
     }
     if (r.metric.find("ns") != std::string::npos) {
         if (r.operations == 0) return 0.0;
-        double nsPerOp = (r.time_ms * 1e6) / static_cast<double>(r.operations);
+        double nsPerOp = (effMs * 1e6) / static_cast<double>(r.operations);
         return (nsPerOp > 0.0) ? (1e9 / nsPerOp) : 0.0;
     }
     if (r.operations == 0) return 0.0;
-    return (static_cast<double>(r.operations) / r.time_ms) * 1000.0;
+    return (static_cast<double>(r.operations) / effMs) * 1000.0;
 }
 
 inline std::string formatResultScoreString(const ResultData& r, bool compactPrecision = false) {
     if (r.time_ms == -3.0) return "ABORTED";
     if (r.time_ms < 0.0) return "FAILED";
-    if (r.time_ms == 0.0 || (r.operations == 0 && r.metric != "us" && r.metric != "ms")) return "-";
+    const double effMs = effectiveResultTimeMs(r);
+    if (effMs <= 0.0 || (r.operations == 0 && r.metric != "us" && r.metric != "ms")) return "-";
 
     double opsPerSec = (r.operations > 0)
-        ? ((static_cast<double>(r.operations) / r.time_ms) * 1000.0)
+        ? ((static_cast<double>(r.operations) / effMs) * 1000.0)
         : 0.0;
 
     char buf[64];
@@ -116,13 +118,13 @@ inline std::string formatResultScoreString(const ResultData& r, bool compactPrec
                r.metric.find("MRecords/s") != std::string::npos) {
         std::snprintf(buf, sizeof(buf), f1, opsPerSec / 1e6, r.metric.c_str());
     } else if (r.metric.find("ns") != std::string::npos) {
-        double nsVal = (r.operations > 0) ? ((r.time_ms * 1e6) / static_cast<double>(r.operations)) : r.time_ms;
+        double nsVal = (r.operations > 0) ? ((effMs * 1e6) / static_cast<double>(r.operations)) : effMs;
         std::snprintf(buf, sizeof(buf), compactPrecision ? "%.1f ns" : "%.2f ns", nsVal);
     } else if (r.metric == "us") {
-        double usVal = (r.operations > 1) ? ((r.time_ms * 1000.0) / static_cast<double>(r.operations)) : (r.time_ms * 1000.0);
+        double usVal = (r.operations > 1) ? ((effMs * 1000.0) / static_cast<double>(r.operations)) : (effMs * 1000.0);
         std::snprintf(buf, sizeof(buf), compactPrecision ? "%.1f us" : "%.2f us", usVal);
     } else if (r.metric == "ms") {
-        std::snprintf(buf, sizeof(buf), "%.2f ms", r.time_ms);
+        std::snprintf(buf, sizeof(buf), "%.2f ms", effMs);
     } else {
         std::snprintf(buf, sizeof(buf), f1, opsPerSec, r.metric.c_str());
     }

@@ -10,7 +10,7 @@
 > - **Device-Generated Commands (DGC)**: `VK_EXT_device_generated_commands` utilizing Indirect Execution Sets (`VkIndirectExecutionSetEXT`) and Indirect Commands Layouts (`VkIndirectCommandsLayoutEXT`), paired with GPU-driven compute queue compaction.
 > - **Ray Tracing Pipelines (RTP)**: `VK_KHR_ray_tracing_pipeline` utilizing Shader Binding Tables (SBT) and `vkCmdTraceRaysKHR`.
 > - **Ray Queries**: `VK_KHR_ray_query` utilizing `rayQueryEXT` inside compute shaders.
-> - **Shader Execution Reordering (SER)**: `VK_EXT_ray_tracing_invocation_reorder` / `GL_EXT_shader_invocation_reorder` utilizing Hit Objects (`hitObjectEXT`). **Hardware Note**: Hardware SER with on-chip thread sorting queues is an NVIDIA-exclusive architectural feature (introduced in Ada Lovelace). **AMD RDNA 4 does not feature hardware-level Shader Execution Reordering.** Consequently, ray and material sorting on RDNA 4 is achieved via software stream compaction (e.g. ballot-compacted queues and DGC).
+> - **Shader Execution Reordering (SER)**: `VK_EXT_ray_tracing_invocation_reorder` / `GL_EXT_shader_invocation_reorder` utilizing Hit Objects (`hitObjectEXT`). **Hardware Note**: Hardware SER with dedicated thread sorting hardware is supported on **NVIDIA (Ada Lovelace / Blackwell)** and **Intel Arc Battlemage (Xe2) / Xe3** (Thread Sorting Unit). **AMD RDNA 4 does not feature hardware-level Shader Execution Reordering.** Consequently, ray and material sorting on RDNA 4 is achieved via software stream compaction (e.g. ballot-compacted queues and DGC).
 
 ---
 
@@ -21,7 +21,7 @@ The transition from AMD RDNA 3 (Navi 31 / GFX1100) to **AMD RDNA 4 (Navi 48 / GF
 In RDNA 2 and RDNA 3, AMD implemented a **hybrid ray tracing model**: fixed-function Ray Accelerators (RAv1 and RAv2) evaluated ray-box and ray-triangle intersection math, while the **bounding volume hierarchy (BVH) traversal loop, traversal stack management, node fetching, and instance transforms were executed in shader instructions** via the `image_bvh_intersect_ray` instruction. 
 
 While requiring less dedicated silicon area, this model imposed specific microarchitectural trade-offs:
-1. **Vector Register (VGPR) Allocation**: Traversal stacks, hit candidate state, and ray descriptors occupied space in the Vector General Purpose Register (VGPR) file. In monolithic megakernels, register usage reached **160–240 VGPRs**, reducing active SIMD wave occupancy to **2 waves per SIMD (12.5% occupancy)**.
+1. **Vector Register (VGPR) & Occupancy Pressure**: Traversal stacks, hit candidate state, and ray descriptors competed for space in the Vector General Purpose Register (VGPR) file (1,536 Wave32 VGPRs/SIMD on RDNA 3; reaching `160–240 VGPRs` drops occupancy to `6–8 waves/SIMD`, or `37.5%–50%`, and lower under scratch/Wave64 pressure).
 2. **Chiplet Interconnect Latency (Navi 31)**: On chiplet-based RDNA 3 hardware, memory accesses that missed the Graphics Compute Die's (GCD) 6MB L2 cache crossed the Infinity Fabric On-Package (IFOP) to the external Memory Cache Dies (MCDs), adding approximately **140–150 ns of round-trip latency**.
 3. **Branch Divergence on Non-Uniform Rays**: When secondary rays scattered across diverse directions or hit different materials, SIMD32 wavefronts experienced lane masking, reducing active ALU utilization to **12.5%–25%**.
 
@@ -64,7 +64,7 @@ The following diagram illustrates the compute and ray tracing pipeline of the AM
 |  |  +-------------------------------+  |   |  +-------------------------------+ | |
 |  +-------------------------------------+   +------------------------------------+ |
 |                                                                                   |
-|  [ Local Data Share (LDS): 64 KB ]    [ Vector L0 Cache (GL0C): 32 KB per WGP ]   |
+|  [ Local Data Share (LDS): 128 KB / WGP (64 KB / CU) ] [ L0 Cache: 32 KB / WGP ]   |
 |  (Houses Hardware BVH Stack)                                                      |
 +-----------------------------------------------------------------------------------+
                                          |
@@ -80,16 +80,16 @@ The following diagram illustrates the compute and ray tracing pipeline of the AM
 ```
 
 ### 2.1. Compute Unit Organization & Register File
-- **Dual Compute Unit Architecture**: Each Workgroup Processor (WGP) contains two Compute Units (CUs), each equipped with two independent SIMD32 vector units capable of dual-issue VOPD ALU operation.
+- **Dual Compute Unit Architecture**: Each Workgroup Processor (WGP) contains two Compute Units (CUs), each equipped with two independent SIMD32 vector units capable of dual-issue VOPD ALU operation, plus **128 KB of LDS per WGP (64 KB per CU)**.
 - **GFX1201 Scale (Radeon AI PRO R9700)**:
   - **32 WGPs / 64 Compute Units / 128 SIMD32 vector engines**.
-  - **Physical VGPR Capacity**: 1536 Wave32 registers per SIMD.
+  - **Physical VGPR Capacity**: 1,536 Wave32 registers (192 KB) per SIMD, with Dynamic VGPR allocation in block granularities (16 or 32 registers).
   - **Maximum Concurrent Waves**: Up to 16 Wave32s per SIMD (32 waves per CU, 64 waves per WGP).
-  - **Occupancy Scaling**:
-    - $\le 48\text{ VGPRs}$: $10\text{ to }16\text{ waves per SIMD}$ ($62.5\%\text{ to }100\%\text{ occupancy}$).
-    - $64\text{ VGPRs}$: $8\text{ waves per SIMD}$ ($50.0\%\text{ occupancy}$).
-    - $128\text{ VGPRs}$: $4\text{ waves per SIMD}$ ($25.0\%\text{ occupancy}$).
-    - $\ge 240\text{ VGPRs}$: $2\text{ waves per SIMD}$ ($12.5\%\text{ occupancy}$, limiting memory latency hiding capability).
+  - **Theoretical Register-Limited Wave32 Occupancy** (subject to LDS and dynamic VGPR allocation granularity):
+    - $\le 96\text{ VGPRs}$: $16\text{ waves per SIMD}$ ($100.0\%\text{ occupancy}$).
+    - $97\text{–}128\text{ VGPRs}$: $12\text{ waves per SIMD}$ ($75.0\%\text{ occupancy}$).
+    - $129\text{–}192\text{ VGPRs}$: $8\text{ waves per SIMD}$ ($50.0\%\text{ occupancy}$).
+    - $193\text{–}256\text{ VGPRs}$: $6\text{ waves per SIMD}$ ($37.5\%\text{ occupancy}$).
 
 ### 2.2. Monolithic 4nm Silicon vs. RDNA 3 Chiplet Topology
 A key operational difference between RDNA 3 and RDNA 4 is the physical die packaging:
@@ -113,7 +113,7 @@ The core of RDNA 4's ray tracing capability is the **Ray Accelerator v3 (RAv3)**
 | **Ray-Triangle Intersections** | 1 / clock / CU | 1 / clock / CU | **2 / clock / CU (Dual Engine)** |
 | **Instance Transforms** | Software ALU matrix math | Software ALU matrix math | **Hardware Matrix Transform in Silicon** |
 | **Oriented Bounding Box (OBB)** | Unsupported (AABB only) | Unsupported (AABB only) | **Hardware OBB Intersection Supported** |
-| **Shader Execution Reordering** | Unsupported | Unsupported | **Unsupported in Hardware** (Software DGC used) |
+| **Shader Execution Reordering** | Unsupported | Unsupported | **Unsupported in Hardware** (NV Ada+/Intel Xe2+ only; DGC used on RDNA) |
 
 ### 3.1. Instruction-Driven BVH8 Traversal & LDS Stack Acceleration
 Unlike fixed-function black-box traversal architectures (such as NVIDIA RT Cores or Intel Xe), AMD RDNA architectures keep the traversal loop under driver/compiler control in shader instructions, while offloading math and stack operations to dedicated hardware units.
@@ -146,13 +146,14 @@ In RDNA 4:
 2. **BVH8 Multiplier**: Evaluating 8 child nodes per intersection instruction halves the number of traversal loop iterations and cache lookups required compared to BVH4.
 3. **Hardware Matrix Transforms**: TLAS instance transforms execute directly inside RAv3, eliminating VALU matrix multiplication instruction sequences.
 
-| Shader Configuration | Architecture | VGPRs | Waves / SIMD | Active Occupancy | Traversal / Register Bottleneck |
-| :--- | :--- | :---: | :---: | :---: | :--- |
-| **Monolithic Megakernel** (`rt_scheduling_traditional_megakernel.comp`) | RDNA 3 (GFX1100) | 160–240 | 2–3 | 12.5%–18.8% | Traversal stack + materials saturate VGPRs/SGPRs |
-| **Monolithic Megakernel** (`rt_scheduling_traditional_megakernel.comp`) | RDNA 4 (GFX1201) | 97–240 (106 SGPRs) | 2–3 | 12.5%–18.8% | Max SGPRs (106) + divergent material branches |
-| **DGC Classify Kernel** (`rt_scheduling_device_generated_commands_classify.comp`) | RDNA 4 (GFX1201) | **48–85** | **5–10** | **31.3%–62.5%** | **Compact traversal + wave ballot classification** |
-| **DGC Bounce / Shadow / Resolve Micro-Kernels** | RDNA 4 (GFX1201) | **19–49** | **10–16** | **62.5%–100.0%** | **Peak wave residency for latency hiding** |
-| **DGC Shading Micro-Kernel** (`rt_scheduling_device_generated_commands_material.comp`) | RDNA 4 (GFX1201) | **92** | **5** | **31.3%** | **Zero traversal footprint; 100% homogeneous SIMD** |
+On RDNA 4 (GFX1201), compiler resource footprints from `VK_KHR_pipeline_executable_properties` (Mesa 26.2 ACO, Slang SPIR-V shaders) clarify where the megakernel bottleneck actually sits:
+
+| Shader Configuration | Architecture | Pre-Sched / Alloc VGPRs | Code Size | LDS | Waves / SIMD | Dominant Bottleneck |
+| :--- | :--- | :---: | :---: | :---: | :---: | :--- |
+| **Monolithic Megakernel** (`rt_scheduling_traditional_megakernel.comp`) | RDNA 4 (GFX1201) | **80 / 96** (108 SGPRs) | **298.7 KB** | 2,048 B | 16 (ACO dynamic) | Divergent material lanes + L1I cache footprint (51,883 insts) |
+| **DGC Classify Kernel** (`rt_scheduling_device_generated_commands_classify.comp`) | RDNA 4 (GFX1201) | **63 / 96** (108 SGPRs) | **84.8 KB** | 2,048 B | 16 | Inline traversal + wave ballot classification |
+| **DGC Material Shading** (`rt_scheduling_device_generated_commands_material.comp`) | RDNA 4 (GFX1201) | **63 / 96** (108 SGPRs) | **116.2 KB** | 0 B | 16 | Homogeneous per-queue shading (zero traversal) |
+| **DGC Bounce / Shadow / Light Micro-Kernels** | RDNA 4 (GFX1201) | **32–53 / 96** | **2.0–16.2 KB** | 0–2,048 B | 16 | Small L1I footprint + uniform wave execution |
 
 ---
 
@@ -164,10 +165,10 @@ A frequent point of technical misunderstanding in modern ray tracing is **Shader
 +-----------------------------------------------------------------------------------+
 |                        RAY REORDERING ARCHITECTURAL COMPARISON                    |
 |                                                                                   |
-|  Approach A: In-Pipeline Hardware SER (NVIDIA Ada Lovelace / Blackwell)           |
-|     • Mechanism: Dedicated on-chip sorting buffers & warp regrouping schedulers. |
-|     • Support: Supported exclusively on NVIDIA GPUs via VK_EXT_ray_tracing_...    |
-|     • AMD RDNA 4 Status: UNSUPPORTED IN HARDWARE.                                 |
+|  Approach A: In-Pipeline Hardware SER (NVIDIA Ada+/Blackwell, Intel Battlemage Xe2+/Xe3) |
+|     • Mechanism: Dedicated on-chip sorting / Thread Sorting Unit (TSU).              |
+|     • Support: Exposed via VK_EXT_ray_tracing_invocation_reorder on NV/Intel GPUs.    |
+|     • AMD RDNA 4 Status: UNSUPPORTED IN HARDWARE.                                     |
 |                                                                                   |
 |  Approach B: Decoupled GPU-Driven DGC (Vulkan Device-Generated Commands)          |
 |     • Scope: General Compute Pipelines & Autonomous Workfront Schedulers.         |
@@ -178,7 +179,7 @@ A frequent point of technical misunderstanding in modern ray tracing is **Shader
 ```
 
 ### 4.1. The Reality of SER on AMD RDNA 4
-On architectures equipped with dedicated hardware SER (e.g. NVIDIA Ada Lovelace), the Ray Tracing Pipeline provides `hitObjectTraceRayEXT` and `reorderThreadWithHitObjectEXT` primitives backed by dedicated physical sorting logic that pause divergent warps and assemble new coherent execution groups in silicon.
+On architectures equipped with dedicated hardware SER (e.g., NVIDIA Ada Lovelace / Blackwell or Intel Arc Battlemage Xe2 / Xe3 with a Thread Sorting Unit), the Ray Tracing Pipeline provides `hitObjectTraceRayEXT` and `reorderThreadWithHitObjectEXT` primitives backed by physical sorting logic that pause divergent warps/waves and assemble coherent execution groups in silicon.
 
 **AMD RDNA 4 does not feature dedicated hardware for dynamic thread reordering.**
 - On AMD GPUs, `vContext->isSERSupported()` returns `false`, and `VK_EXT_ray_tracing_invocation_reorder` is not exposed by the driver.
@@ -195,7 +196,7 @@ To achieve high performance on RDNA 4, applications must employ **software strea
 
 ### 4.3. DGC vs. Hardware SER Architectural Comparison Matrix
 
-| Architectural Metric | In-Pipeline Hardware SER (NVIDIA Only) | Monolithic Megakernel (Cross-Platform) | Decoupled DGC Compaction (Native on RDNA 4) |
+| Architectural Metric | In-Pipeline Hardware SER (NVIDIA / Intel Xe2+) | Monolithic Megakernel (Cross-Platform) | Decoupled DGC Compaction (Native on RDNA 4) |
 | :--- | :--- | :--- | :--- |
 | **AMD RDNA 4 Support** | ❌ **Unsupported in Hardware** | ✅ Supported | ✅ **Fully Supported & Optimized** |
 | **Pipeline Model** | `vkCmdTraceRaysKHR` + Hit Objects | `vkCmdDispatch` / Compute Megakernel | Indirect Compute (`vkCmdExecuteGeneratedCommandsEXT`)|
@@ -217,11 +218,11 @@ All benchmarks were evaluated at native **4K UHD (3840×2160, 8,294,400 primary 
 | Scenario | Triangles | Megakernel Framerate | DGC Framerate | Speedup | Bit-Exact Match | PSNR |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
 | **Showroom Studio** (`toycar.glb`) | 108,936 | 57.6 FPS (17.37 ms) | **101.3 FPS (9.87 ms)** | **1.76x (+75.9%)** | 8,294,400 / 8,294,400 | 120.0 dB |
-| **Indoor Atrium** (`sponza.glb`) | 262,267 | 30.5 FPS (32.77 ms) | **68.0 FPS (14.70 ms)** | **2.23x (+123.0%)**| 8,294,400 / 8,294,400 | 120.0 dB |
+| **Indoor Atrium** (`sponza.glb`) | 426,064 | 30.5 FPS (32.77 ms) | **68.0 FPS (14.70 ms)** | **2.23x (+123.0%)**| 8,294,400 / 8,294,400 | 120.0 dB |
 | **Outdoor Landscape** (Procedural) | 57,216 | 185.8 FPS (5.38 ms) | **420.0 FPS (2.38 ms)** | **2.26x (+126.1%)**| 8,294,400 / 8,294,400 | 120.0 dB |
 | **Open-World Forest** (Dense Nature) | 1,051,696| 27.0 FPS (37.00 ms) | **55.0 FPS (18.18 ms)** | **2.04x (+103.7%)**| 8,294,400 / 8,294,400 | 120.0 dB |
 
-Across all four benchmark scenarios, decoupling the ray tracing pipeline with DGC cuts frame render times by **43% to 56%**, doubling interactive framerates while achieving bit-exact visual parity.
+Across all four benchmark scenarios, decoupling the ray tracing pipeline with DGC cuts frame render times by **43% to 56%**, doubling interactive framerates while passing both LDR 8-bit and HDR FP32 analytical parity checks (`--verify-parity`).
 
 ---
 
@@ -254,38 +255,34 @@ To isolate the cost of material divergence, GPUBench evaluates an isolated mater
 
 ---
 
-### 5.3. Compiler Statistics & Kernel Footprint (RGA / ACO GFX1201)
+### 5.3. Compiler Statistics & Kernel Footprint (ACO GFX1201, Slang SPIR-V)
 
-Inspecting compiler metrics generated for GFX1201 reveals the root cause of the megakernel bottleneck:
+Querying hardware executable properties natively (`gpubench --dump-isa rayscheduling -d 1` on Mesa 26.2 ACO) reveals how the monolithic megakernel differs from decoupled DGC stages:
 
-```
-=== Traditional Megakernel (rt_scheduling_traditional_megakernel.comp) ===
-Code Size:        266,364 bytes (260.1 KB)
-VGPRs / SGPRs:    97 VGPRs / 106 SGPRs (Max SGPR hardware limit reached)
-LDS Allocated:    4,096 bytes
-Waves per SIMD:   2–3 waves
-SIMD Occupancy:   12.5%–18.8% (2–3 of 16 wave slots active)
+```text
+=== Traditional Megakernel (rt_scheduling_traditional_megakernel.comp.spv) ===
+Code Size:        298,684 bytes (291.7 KB, 51,883 instructions)
+Pre-Sched / Alloc: 80 -> 96 VGPRs / 57 -> 108 SGPRs
+LDS Allocated:    2,048 bytes (Spilled VGPRs/SGPRs: 0)
+Waves per SIMD:   16 waves (ACO dynamic VGPR allocation; throughput bottlenecked by SIMD divergence & L1I footprint)
 
-=== DGC Classification Kernel (rt_scheduling_device_generated_commands_classify.comp) ===
-Code Size:        37,396 bytes (36.5 KB)
-VGPRs / SGPRs:    85 VGPRs / 106 SGPRs
-LDS Allocated:    4,096 bytes
-Waves per SIMD:   5 waves
-SIMD Occupancy:   31.3% (5 of 16 wave slots active)
-
-=== DGC Bounce / Shadow / Resolve Micro-Kernels (bounce / shadow / resolve) ===
-Code Size:        2,068 – 5,064 bytes (2.0 – 4.9 KB, fits in L1I cache)
-VGPRs / SGPRs:    19–49 VGPRs / 34–56 SGPRs
-LDS Allocated:    0 – 4,096 bytes
-Waves per SIMD:   10–16 waves
-SIMD Occupancy:   62.5%–100.0% (Peak wave residency)
-
-=== DGC Specialized Shading Kernel (rt_scheduling_device_generated_commands_material.comp) ===
-Code Size:        209,004 bytes (204.1 KB)
-VGPRs / SGPRs:    92 VGPRs / 92 SGPRs (Homogeneous ALU only, zero traversal stack)
+=== DGC Classification Kernel (rt_scheduling_device_generated_commands_classify.comp.spv) ===
+Code Size:        84,796 bytes (82.8 KB, 15,390 instructions)
+Pre-Sched / Alloc: 63 -> 96 VGPRs / 54 -> 108 SGPRs
 LDS Allocated:    2,048 bytes
-Waves per SIMD:   5 waves
-SIMD Occupancy:   31.3% (2x higher occupancy than Megakernel)
+Waves per SIMD:   16 waves
+
+=== DGC Bounce / Shadow / Light Micro-Kernels ===
+Code Size:        2,004 – 16,168 bytes (2.0 – 15.8 KB, fits cleanly in L1I cache)
+Pre-Sched / Alloc: 32–53 -> 96 VGPRs / 22–56 -> 108 SGPRs
+LDS Allocated:    0 – 2,048 bytes
+Waves per SIMD:   16 waves
+
+=== DGC Specialized Shading Kernel (rt_scheduling_device_generated_commands_material.comp.spv) ===
+Code Size:        116,164 bytes (113.4 KB, Homogeneous ALU only, zero traversal)
+Pre-Sched / Alloc: 63 -> 96 VGPRs / 28 -> 108 SGPRs
+LDS Allocated:    0 bytes
+Waves per SIMD:   16 waves (100% active SIMD lanes per material queue)
 ```
 
 ---
@@ -308,7 +305,7 @@ The following table summarizes the architectural differences governing ray traci
 | **Ray-Triangle Intersections** | 1 per clock per CU | **2 per clock per CU (Dual-Engine)** |
 | **Instance Transform Math** | Software shader ALU instructions | **Dedicated hardware matrix transforms in silicon** |
 | **Oriented Bounding Box (OBB)** | Software emulation | **Native hardware acceleration** |
-| **Shader Execution Reordering** | Unsupported | **Unsupported in Hardware** (Software DGC required) |
+| **Shader Execution Reordering** | Unsupported | **Unsupported in Hardware** (NVIDIA/Intel Xe2+ only; DGC used on RDNA) |
 | **Command Processor (MEC)** | Standard asynchronous compute engine | **Next-gen low-latency autonomous MEC** |
 | **Material Shading Speedup (DGC)** | ~2.86x–4.25x | **4.80x (up to 16.4 GHits/s)** |
 | **Total 4K Scene Render Speedup** | +15% to +33% (1.15x–1.33x) | **+76% to +126% (1.76x–2.26x)** |
@@ -330,6 +327,6 @@ The following table summarizes the architectural differences governing ray traci
    - Metadata / Pixel Index: 32-bit integer: 4 bytes.
    - **Total**: 16 bytes. Keeping payloads $\le 16\text{ bytes}$ maximizes cache line utilization, allowing compact ray queue segments to maintain high residency within the monolithic L2 cache and MALL.
 5. **Zero User LDS in Ray Compaction Shaders**:
-   Never allocate large user LDS arrays or use workgroup `barrier()` calls in ray compaction shaders. Use single-wave `subgroupBallot`, `subgroupExclusiveAdd`, and leader `atomicAdd` to maintain maximum (68.8%+) WGP wave residency, while leaving LDS capacity available for the hardware traversal stack.
+   Never allocate large user LDS arrays or use workgroup `barrier()` calls in ray compaction shaders. Use single-wave `subgroupBallot`, `subgroupExclusiveAdd`, and leader `atomicAdd` to maintain maximum WGP wave residency, while leaving LDS capacity available for the hardware traversal stack.
 6. **Enforce 1:1 Wave32 Compute Mapping**:
    Configure compute kernels as `layout(local_size_x = 32) in;`. Each workgroup maps directly to one RDNA 4 SIMD32 wave slot, eliminating workgroup scheduling overhead and inter-wave synchronization.

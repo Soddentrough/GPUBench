@@ -71,6 +71,7 @@ struct BenchmarkConfigMetadata {
     std::string subcategory;
     std::string metric;
     std::string description;
+    std::string configCaveat;
     int sortWeight = 0;
     double operationalIntensity = 0.0;
     bool isDeviceDependent = true;
@@ -81,12 +82,16 @@ std::vector<std::string> GetAvailableHardwareAPI();
 std::vector<std::string> GetAvailableBenchmarksAPI();
 std::vector<DeviceProfile> GetDeviceProfilesAPI();
 std::vector<BenchmarkConfigMetadata> GetBenchmarkMetadataCatalogAPI();
+std::vector<BenchmarkConfigMetadata> GetBenchmarkMetadataCatalogAPI(
+    const std::string& backend_name,
+    uint32_t device_idx);
 
 struct BenchmarkSupportInfo {
     std::string id;
     bool isSupported{true};
     std::string reason;
     std::string limitationCategory;
+    std::string configCaveat;
     bool hasSupportDiscrepancy{false};
     std::string hardwareSupportText;
     std::string driverSupportText;

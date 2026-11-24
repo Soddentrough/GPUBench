@@ -198,6 +198,7 @@ public:
 private:
     struct DevicePollState {
         uint32_t deviceIndex{0};
+        std::string pciBusId;
         GpuTelemetryData prevSample{};
         std::chrono::steady_clock::time_point prevSampleTime{};
         bool hasPrevSample{false};
@@ -222,6 +223,7 @@ private:
     mutable std::mutex m_graphMutex;
     std::condition_variable m_graphCv;
     uint64_t m_sampleGeneration{0};
+    uint64_t m_historyGeneration{1};
     bool m_graphWorkPending{false};
     std::vector<DevicePollState> m_pollStates;
     std::vector<DeviceTelemetrySnapshot> m_snapshots;

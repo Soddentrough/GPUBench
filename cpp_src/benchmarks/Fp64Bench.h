@@ -13,13 +13,18 @@ public:
   bool IsSupported(const DeviceInfo &info,
                    IComputeContext *context = nullptr) const override;
   std::string GetSupportNote() const override {
-    return "shaderFloat64 hardware bit not set (device does not support 64-bit floating point)";
+    return "shaderFloat64 hardware feature not enabled (device does not support 64-bit floating point)";
   }
   std::string GetSupportNote(const DeviceInfo &info,
                              IComputeContext *context = nullptr) const override {
     (void)info;
-    (void)context;
-    return "shaderFloat64 hardware bit not set (device does not support 64-bit floating point)";
+    if (context && context->getBackend() == ComputeBackend::ROCm) {
+      return "FP64 (double-precision) compute not supported on this ROCm device";
+    }
+    if (context && context->getBackend() == ComputeBackend::OpenCL) {
+      return "cl_khr_fp64 double-precision extension not supported on this OpenCL device";
+    }
+    return "shaderFloat64 hardware feature not enabled (device does not support 64-bit floating point)";
   }
   SupportLimitation GetSupportLimitation() const override {
     return SupportLimitation::kHardware;
@@ -43,12 +48,14 @@ public:
     (void)config_idx;
     return "FP64";
   }
+  using IBenchmark::GetDescription;
   const char *GetDescription() const override {
     return "Double-precision IEEE 754 binary64 FMA throughput across hardware FP64 ALUs.";
   }
   double GetOperationalIntensity(uint32_t config_idx = 0) const override {
     (void)config_idx;
-    return 262144.0;
+    // fp64.comp: 4096 FP64 FLOPs per thread / (8 B seed read + 8 B output write = 16 B) = 256.0 FLOP/B
+    return 256.0;
   }
   bool RequiresInterIterationBarrier(uint32_t config_idx = 0) const override {
     (void)config_idx;

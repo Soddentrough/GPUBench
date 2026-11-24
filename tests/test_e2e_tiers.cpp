@@ -85,7 +85,27 @@ std::string getGpubenchPath() {
 #endif
 }
 
-CommandResult runGpubench(const std::vector<std::string> &args) {
+CommandResult runGpubench(const std::vector<std::string> &inArgs) {
+  std::vector<std::string> args = inArgs;
+  auto hasArg = [&](const std::string &flag) {
+    for (const auto &a : args) {
+      if (a == flag) return true;
+    }
+    return false;
+  };
+  if (const char *envDev = std::getenv("GPUBENCH_TEST_DEVICE")) {
+    if (*envDev != '\0' &&
+        !hasArg("-d") && !hasArg("--device") &&
+        !hasArg("-h") && !hasArg("--help") &&
+        !hasArg("-v") && !hasArg("--version") &&
+        !hasArg("--list-benchmarks") && !hasArg("--list") &&
+        !hasArg("--list-groups") && !hasArg("--list-backends") &&
+        !hasArg("--list-devices") && !hasArg("-l") &&
+        !hasArg("--compare") && !hasArg("-i") && !hasArg("--import") && !hasArg("--input")) {
+      args.insert(args.begin(), std::string(envDev));
+      args.insert(args.begin(), "-d");
+    }
+  }
   std::string bin = getGpubenchPath();
 #ifdef _WIN32
   static unsigned long callCounter = 0;
@@ -283,7 +303,7 @@ TEST_CASE(E2E_Tier1, HelpFlag) {
 }
 
 TEST_CASE(E2E_Tier1, ListDevicesFlag) {
-  if (!hasUsableGpu()) { return; }
+  if (!hasUsableGpu()) { SKIP_TEST("No usable GPU detected"); }
   auto res = runGpubench({"--list-devices"});
   ASSERT_EQ(res.exitCode, 0);
   ASSERT_TRUE(res.stdoutStr.find("Backend:") != std::string::npos);
@@ -298,7 +318,8 @@ TEST_CASE(E2E_Tier1, ListBenchmarksFlag) {
   ASSERT_TRUE(res.stdoutStr.find("FP32") != std::string::npos);
   ASSERT_TRUE(res.stdoutStr.find("FP64") != std::string::npos);
   ASSERT_TRUE(res.stdoutStr.find("[Memory]") != std::string::npos);
-  ASSERT_TRUE(res.stdoutStr.find("[Graphics]") != std::string::npos);
+  ASSERT_TRUE(res.stdoutStr.find("-g graphics") != std::string::npos);
+  ASSERT_TRUE(res.stdoutStr.find("[Graphics]") == std::string::npos);
   ASSERT_TRUE(res.stdoutStr.find("[Raster]") != std::string::npos);
   ASSERT_TRUE(res.stdoutStr.find("Pixel Fill Rate") != std::string::npos);
   ASSERT_TRUE(res.stdoutStr.find("[Ray Tracing]") != std::string::npos);
@@ -327,7 +348,7 @@ TEST_CASE(E2E_Tier1, ListBackendsFlag) {
 }
 
 TEST_CASE(E2E_Tier1, BenchmarkSelectionFlag) {
-  if (!hasUsableGpu()) { return; }
+  if (!hasUsableGpu()) { SKIP_TEST("No usable GPU detected"); }
   auto res = runGpubench({"-b", "FP32", "-c", "0", "--profile-snapshot", "-f"});
   ASSERT_EQ(res.exitCode, 0);
   ASSERT_TRUE(res.stdoutStr.find("FP32") != std::string::npos);
@@ -337,7 +358,7 @@ TEST_CASE(E2E_Tier1, BenchmarkSelectionFlag) {
 }
 
 TEST_CASE(E2E_Tier1, GroupSelectionFlag) {
-  if (!hasUsableGpu()) { return; }
+  if (!hasUsableGpu()) { SKIP_TEST("No usable GPU detected"); }
   auto res = runGpubench({"-g", "raster", "-c", "0", "--profile-snapshot", "-f"});
   ASSERT_EQ(res.exitCode, 0);
   ASSERT_TRUE(res.stdoutStr.find("Raster") != std::string::npos);
@@ -346,7 +367,7 @@ TEST_CASE(E2E_Tier1, GroupSelectionFlag) {
 }
 
 TEST_CASE(E2E_Tier1, ConfigTargetSelectionFlag) {
-  if (!hasUsableGpu()) { return; }
+  if (!hasUsableGpu()) { SKIP_TEST("No usable GPU detected"); }
   auto res = runGpubench({"-b", "Device Memory Bandwidth", "-c", "0", "--profile-snapshot", "-f"});
   ASSERT_EQ(res.exitCode, 0);
   ASSERT_TRUE(res.stdoutStr.find("Read 128 threads/group") != std::string::npos);
@@ -354,7 +375,7 @@ TEST_CASE(E2E_Tier1, ConfigTargetSelectionFlag) {
 }
 
 TEST_CASE(E2E_Tier1, QuietFlag) {
-  if (!hasUsableGpu()) { return; }
+  if (!hasUsableGpu()) { SKIP_TEST("No usable GPU detected"); }
   auto res = runGpubench({"-b", "FP32", "-c", "0", "--profile-snapshot", "-f", "-q"});
   ASSERT_EQ(res.exitCode, 0);
   // Quiet flag suppresses top decorative banner
@@ -364,7 +385,7 @@ TEST_CASE(E2E_Tier1, QuietFlag) {
 }
 
 TEST_CASE(E2E_Tier1, VerboseFlag) {
-  if (!hasUsableGpu()) { return; }
+  if (!hasUsableGpu()) { SKIP_TEST("No usable GPU detected"); }
   auto res = runGpubench({"--verbose", "--list-devices"});
   ASSERT_EQ(res.exitCode, 0);
   ASSERT_TRUE(res.stdoutStr.find("Backend:") != std::string::npos);
@@ -490,7 +511,7 @@ TEST_CASE(E2E_Tier2, OutOfRangeConfigIndexHandling) {
 // ============================================================================
 
 TEST_CASE(E2E_Tier3, GroupAndConfigCombination) {
-  if (!hasUsableGpu()) { return; }
+  if (!hasUsableGpu()) { SKIP_TEST("No usable GPU detected"); }
   auto res = runGpubench({"-g", "raster", "-c", "0", "--profile-snapshot", "-f"});
   ASSERT_EQ(res.exitCode, 0);
   ASSERT_TRUE(res.stdoutStr.find("Pixel Fill Rate") != std::string::npos);
@@ -498,7 +519,7 @@ TEST_CASE(E2E_Tier3, GroupAndConfigCombination) {
 }
 
 TEST_CASE(E2E_Tier3, MultipleBenchmarksSelection) {
-  if (!hasUsableGpu()) { return; }
+  if (!hasUsableGpu()) { SKIP_TEST("No usable GPU detected"); }
   auto res = runGpubench({"-b", "FP32,FP16", "-c", "0", "--profile-snapshot", "-f"});
   ASSERT_EQ(res.exitCode, 0);
   ASSERT_TRUE(res.stdoutStr.find("FP32") != std::string::npos);
@@ -506,7 +527,7 @@ TEST_CASE(E2E_Tier3, MultipleBenchmarksSelection) {
 }
 
 TEST_CASE(E2E_Tier3, GroupPlusIndividualBenchmark) {
-  if (!hasUsableGpu()) { return; }
+  if (!hasUsableGpu()) { SKIP_TEST("No usable GPU detected"); }
   auto res = runGpubench({"-g", "raster", "-b", "FP32", "-c", "0", "--profile-snapshot", "-f"});
   ASSERT_EQ(res.exitCode, 0);
   ASSERT_TRUE(res.stdoutStr.find("Pixel Fill Rate") != std::string::npos);
@@ -514,7 +535,7 @@ TEST_CASE(E2E_Tier3, GroupPlusIndividualBenchmark) {
 }
 
 TEST_CASE(E2E_Tier3, JsonFileExportAndImportRoundTrip) {
-  if (!hasUsableGpu()) { return; }
+  if (!hasUsableGpu()) { SKIP_TEST("No usable GPU detected"); }
   const std::string tmpPath = getTempFilePath("gpubench_e2e_roundtrip_test");
   std::remove(tmpPath.c_str());
 
@@ -540,7 +561,7 @@ TEST_CASE(E2E_Tier3, JsonFileExportAndImportRoundTrip) {
 }
 
 TEST_CASE(E2E_Tier3, JsonStdoutSchemaValidation) {
-  if (!hasUsableGpu()) { return; }
+  if (!hasUsableGpu()) { SKIP_TEST("No usable GPU detected"); }
   auto res = runGpubench({"-b", "FP32", "-c", "0", "--profile-snapshot", "-f", "--json"});
   ASSERT_EQ(res.exitCode, 0);
 
@@ -576,7 +597,7 @@ TEST_CASE(E2E_Tier3, JsonStdoutSchemaValidation) {
 }
 
 TEST_CASE(E2E_Tier3, JsonComparisonModeMultiRun) {
-  if (!hasUsableGpu()) { return; }
+  if (!hasUsableGpu()) { SKIP_TEST("No usable GPU detected"); }
   const std::string runA = getTempFilePath("gpubench_e2e_runA");
   const std::string runB = getTempFilePath("gpubench_e2e_runB");
   std::remove(runA.c_str());
@@ -601,7 +622,7 @@ TEST_CASE(E2E_Tier3, JsonComparisonModeMultiRun) {
 }
 
 TEST_CASE(E2E_Tier3, QuietAndJsonOutputCleanliness) {
-  if (!hasUsableGpu()) { return; }
+  if (!hasUsableGpu()) { SKIP_TEST("No usable GPU detected"); }
   auto res = runGpubench({"-b", "FP32", "-c", "0", "--profile-snapshot", "-f", "--json", "-q"});
   ASSERT_EQ(res.exitCode, 0);
 
@@ -618,7 +639,7 @@ TEST_CASE(E2E_Tier3, QuietAndJsonOutputCleanliness) {
 // ============================================================================
 
 TEST_CASE(E2E_Tier4, RealComputeWorkloadExecution) {
-  if (!hasUsableGpu()) { return; }
+  if (!hasUsableGpu()) { SKIP_TEST("No usable GPU detected"); }
   auto res = runGpubench({"-b", "FP32,FP16,LDS Bank Conflicts,ILP & Dual-Issue", "-c", "0", "--profile-snapshot", "--strict", "-f"});
   ASSERT_EQ(res.exitCode, 0);
   ASSERT_TRUE(res.stdoutStr.find("FP32") != std::string::npos);
@@ -630,7 +651,7 @@ TEST_CASE(E2E_Tier4, RealComputeWorkloadExecution) {
 }
 
 TEST_CASE(E2E_Tier4, RealMemoryWorkloadExecution) {
-  if (!hasUsableGpu()) { return; }
+  if (!hasUsableGpu()) { SKIP_TEST("No usable GPU detected"); }
   auto res = runGpubench({"-b", "Device Memory Bandwidth,L0 Vector Cache Latency (16 KB)", "-c", "0", "--profile-snapshot", "--strict", "-f"});
   ASSERT_EQ(res.exitCode, 0);
   ASSERT_TRUE(res.stdoutStr.find("Device Memory Bandwidth") != std::string::npos);
@@ -640,7 +661,7 @@ TEST_CASE(E2E_Tier4, RealMemoryWorkloadExecution) {
 }
 
 TEST_CASE(E2E_Tier4, RealGraphicsWorkloadExecution) {
-  if (!hasUsableGpu()) { return; }
+  if (!hasUsableGpu()) { SKIP_TEST("No usable GPU detected"); }
   auto res = runGpubench({"-b", "Pixel Fill Rate", "-c", "0", "--profile-snapshot", "--strict", "-f"});
   ASSERT_EQ(res.exitCode, 0);
   ASSERT_TRUE(res.stdoutStr.find("Pixel Fill Rate") != std::string::npos);
@@ -648,7 +669,7 @@ TEST_CASE(E2E_Tier4, RealGraphicsWorkloadExecution) {
 }
 
 TEST_CASE(E2E_Tier4, RealRayTracingWorkloadExecution) {
-  if (!hasUsableGpu()) { return; }
+  if (!hasUsableGpu()) { SKIP_TEST("No usable GPU detected"); }
   auto res = runGpubench({"-b", "RayRawTraversal", "-c", "0", "--profile-snapshot", "--strict", "-f"});
   ASSERT_EQ(res.exitCode, 0);
   ASSERT_TRUE(res.stdoutStr.find("Hardware BVH Traversal") != std::string::npos);
@@ -657,7 +678,7 @@ TEST_CASE(E2E_Tier4, RealRayTracingWorkloadExecution) {
 }
 
 TEST_CASE(E2E_Tier4, RealSystemMemoryWorkloadExecution) {
-  if (!hasUsableGpu()) { return; }
+  if (!hasUsableGpu()) { SKIP_TEST("No usable GPU detected"); }
   auto res = runGpubench({"-b", "System Memory Bandwidth,System Memory Latency", "-c", "0", "--profile-snapshot", "--strict", "-f"});
   ASSERT_EQ(res.exitCode, 0);
   ASSERT_TRUE(res.stdoutStr.find("System") != std::string::npos);
@@ -667,21 +688,23 @@ TEST_CASE(E2E_Tier4, RealSystemMemoryWorkloadExecution) {
 }
 
 TEST_CASE(E2E_Tier4, SceneParameterValidation) {
-  if (!hasUsableGpu()) { return; }
+  if (!hasUsableGpu()) { SKIP_TEST("No usable GPU detected"); }
   auto res = runGpubench({"-b", "RayRawTraversal", "-s", "showroom", "-c", "0", "--profile-snapshot", "--strict", "-f"});
   ASSERT_EQ(res.exitCode, 0);
   ASSERT_TRUE(res.stdoutStr.find("Hardware BVH Traversal") != std::string::npos);
 }
 
 TEST_CASE(E2E_Tier4, ParityFlagHonestyAndExecution) {
-  if (!hasUsableGpu()) { return; }
-  auto res = runGpubench({"-b", "Pixel Fill Rate", "-c", "0", "--verify-parity", "--profile-snapshot", "-f"});
+  if (!hasUsableGpu()) { SKIP_TEST("No usable GPU detected"); }
+  auto res = runGpubench({"-b", "RayScheduling", "-s", "showroom", "-c", "6", "--verify-parity", "--profile-snapshot", "-f"});
   ASSERT_EQ(res.exitCode, 0);
-  ASSERT_TRUE(res.stdoutStr.find("Pixel Fill Rate") != std::string::npos);
+  ASSERT_TRUE(res.stdoutStr.find("RayScheduling") != std::string::npos ||
+              res.stdoutStr.find("Scene Render") != std::string::npos);
+  ASSERT_TRUE(res.stdoutStr.find("PSNR") != std::string::npos);
 }
 
 TEST_CASE(E2E_Tier4, DumpIsaFp6AndFp4GracefulSkipOrDisassembly) {
-  if (!hasUsableGpu()) { return; }
+  if (!hasUsableGpu()) { SKIP_TEST("No usable GPU detected"); }
   auto resFp6 = runGpubench({"--dump-isa", "fp6"});
   ASSERT_EQ(resFp6.exitCode, 0);
   ASSERT_TRUE(resFp6.combinedStr.find("coop_matrix_fp6") != std::string::npos ||
@@ -694,7 +717,7 @@ TEST_CASE(E2E_Tier4, DumpIsaFp6AndFp4GracefulSkipOrDisassembly) {
 }
 
 TEST_CASE(E2E_Tier4, CacheBandwidthGroupExecution) {
-  if (!hasUsableGpu()) { return; }
+  if (!hasUsableGpu()) { SKIP_TEST("No usable GPU detected"); }
   auto res = runGpubench({"-b", "cachebw", "--profile-snapshot", "--strict", "-f"});
   ASSERT_EQ(res.exitCode, 0);
   ASSERT_TRUE(res.stdoutStr.find("L0 Cache Bandwidth") != std::string::npos);

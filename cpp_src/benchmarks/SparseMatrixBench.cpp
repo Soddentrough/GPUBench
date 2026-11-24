@@ -109,30 +109,51 @@ void SparseMatrixBench::Setup(IComputeContext &context,
   m_gridX = cus * 128u;
 
   constexpr size_t kElements = 1048576;
-  std::vector<uint32_t> initWords(kElements);
-  for (size_t i = 0; i < kElements; ++i) {
-    // Non-zero packed FP16 (0x3400 = 0.25) / FP8 / INT8 values
-    initWords[i] = 0x34003400u;
-  }
-  m_inBuf = context.createBuffer(kElements * sizeof(uint32_t), initWords.data());
+  // Non-zero packed payloads per precision so 2:4 sparse indices (0, 2) never multiply by zero:
+  //   - FP16: 0x3400 = 0.25f per half
+  //   - FP8 : 0x34   = 0.75f (OCP E4M3) / 0.375f (E4M3 FNUZ) in every byte
+  //   - INT8: 0x02   = 2 in every byte (keeps 8-lane sum well inside signed int32)
+  std::vector<uint32_t> fp16Words(kElements, 0x34003400u);
+  std::vector<uint32_t> fp8Words(kElements, 0x34343434u);
+  std::vector<uint32_t> int8Words(kElements, 0x02020202u);
+  m_fp16InBuf =
+      context.createBuffer(kElements * sizeof(uint32_t), fp16Words.data());
+  m_fp8InBuf =
+      context.createBuffer(kElements * sizeof(uint32_t), fp8Words.data());
+  m_int8InBuf =
+      context.createBuffer(kElements * sizeof(uint32_t), int8Words.data());
   std::vector<uint32_t> zeroWords(524288, 0u);
   m_outBuf = context.createBuffer(zeroWords.size() * sizeof(uint32_t),
                                   zeroWords.data());
 
-  std::filesystem::path hipDir = std::filesystem::path(kernel_dir) / "hip";
+  std::filesystem::path rocmDir = std::filesystem::path(kernel_dir) / "rocm";
   m_fp16Kernel = context.createKernel(
-      (hipDir / "sparse_fp16_matrix.co").string(), "run_benchmark", 2);
+      (rocmDir / "sparse_fp16_matrix.hip").string(), "run_benchmark", 2);
   m_fp8Kernel = context.createKernel(
-      (hipDir / "sparse_fp8_matrix.co").string(), "run_benchmark", 2);
+      (rocmDir / "sparse_fp8_matrix.hip").string(), "run_benchmark", 2);
   m_int8Kernel = context.createKernel(
-      (hipDir / "sparse_int8_matrix.co").string(), "run_benchmark", 2);
+      (rocmDir / "sparse_int8_matrix.hip").string(), "run_benchmark", 2);
 
-  for (ComputeKernel k : {m_fp16Kernel, m_fp8Kernel, m_int8Kernel}) {
-    if (k) {
-      context.setKernelArg(k, 0, m_inBuf);
-      context.setKernelArg(k, 1, m_outBuf);
-    }
+  if (m_fp16Kernel) {
+    context.setKernelArg(m_fp16Kernel, 0, m_fp16InBuf);
+    context.setKernelArg(m_fp16Kernel, 1, m_outBuf);
   }
+  if (m_fp8Kernel) {
+    context.setKernelArg(m_fp8Kernel, 0, m_fp8InBuf);
+    context.setKernelArg(m_fp8Kernel, 1, m_outBuf);
+  }
+  if (m_int8Kernel) {
+    context.setKernelArg(m_int8Kernel, 0, m_int8InBuf);
+    context.setKernelArg(m_int8Kernel, 1, m_outBuf);
+  }
+}
+
+void SparseMatrixBench::PrepareConfig(uint32_t /*config_idx*/) {
+  if (!m_context || !m_outBuf) return;
+  std::vector<uint32_t> zeroWords(524288, 0u);
+  m_context->writeBuffer(m_outBuf, 0, zeroWords.size() * sizeof(uint32_t),
+                         zeroWords.data());
+  m_context->waitIdle();
 }
 
 void SparseMatrixBench::Run(uint32_t config_idx) {
@@ -157,20 +178,23 @@ bool SparseMatrixBench::ValidateResults(uint32_t config_idx) const {
     std::vector<int32_t> vals(4096, 0);
     m_context->readBuffer(m_outBuf, 0, vals.size() * sizeof(int32_t),
                           vals.data());
-    bool anyNonZero = false;
+    // Seed-only sum is < 10,000; 4096 non-zero sparse MACs produce >= 1,000,000.
+    bool hasValidAccum = false;
     for (int32_t v : vals) {
-      if (v != 0) anyNonZero = true;
+      if (v < 0) return false;
+      if (v >= 100000) hasValidAccum = true;
     }
-    return anyNonZero;
+    return hasValidAccum;
   }
   std::vector<float> vals(4096, 0.0f);
   m_context->readBuffer(m_outBuf, 0, vals.size() * sizeof(float), vals.data());
-  bool anyNonZero = false;
+  // Seed-only sum is < 50.0f; non-zero 2:4 sparse MAC accumulation exceeds 1,000.0f.
+  bool hasValidAccum = false;
   for (float v : vals) {
-    if (!std::isfinite(v)) return false;
-    if (std::fabs(v) > 1e-5f) anyNonZero = true;
+    if (!std::isfinite(v) || v < 0.0f) return false;
+    if (v > 1000.0f) hasValidAccum = true;
   }
-  return anyNonZero;
+  return hasValidAccum;
 }
 
 void SparseMatrixBench::Teardown() {
@@ -178,13 +202,17 @@ void SparseMatrixBench::Teardown() {
     if (m_fp16Kernel) m_context->releaseKernel(m_fp16Kernel);
     if (m_fp8Kernel) m_context->releaseKernel(m_fp8Kernel);
     if (m_int8Kernel) m_context->releaseKernel(m_int8Kernel);
-    if (m_inBuf) m_context->releaseBuffer(m_inBuf);
+    if (m_fp16InBuf) m_context->releaseBuffer(m_fp16InBuf);
+    if (m_fp8InBuf) m_context->releaseBuffer(m_fp8InBuf);
+    if (m_int8InBuf) m_context->releaseBuffer(m_int8InBuf);
     if (m_outBuf) m_context->releaseBuffer(m_outBuf);
   }
   m_fp16Kernel = nullptr;
   m_fp8Kernel = nullptr;
   m_int8Kernel = nullptr;
-  m_inBuf = nullptr;
+  m_fp16InBuf = nullptr;
+  m_fp8InBuf = nullptr;
+  m_int8InBuf = nullptr;
   m_outBuf = nullptr;
   m_context = nullptr;
 }

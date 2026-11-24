@@ -430,23 +430,28 @@ def main():
 
     # 6. Extraction & Binary Header Integrity
     print(f"{Colors.BOLD}5. CPIO Extraction & ELF Binary Integrity:{Colors.RESET}")
-    ext_ok, ext_errs = verify_extraction_and_elf(rpm_path)
+    ext_ok, ext_msgs = verify_extraction_and_elf(rpm_path)
     if ext_ok:
-        print(f"  Extracted binaries verified: Valid ELF64 executable magic headers and size bounds.")
-        print(f"  Status:       {Colors.GREEN}PASS{Colors.RESET}\n")
+        if ext_msgs and ext_msgs[0].startswith("(Skipped"):
+            print(f"  {Colors.YELLOW}{ext_msgs[0]}{Colors.RESET}")
+            print(f"  Status:       {Colors.YELLOW}SKIPPED{Colors.RESET}\n")
+        else:
+            print(f"  Extracted binaries verified: Valid ELF64 executable magic headers and size bounds.")
+            print(f"  Status:       {Colors.GREEN}PASS{Colors.RESET}\n")
     else:
         all_passed = False
         print(f"  Status:       {Colors.RED}FAIL (Extraction or ELF Corrupt){Colors.RESET}")
-        for e in ext_errs:
+        for e in ext_msgs:
             print(f"    - {Colors.RED}{e}{Colors.RESET}")
             all_regressions.append(e)
         print()
 
     # 7. Live Transaction Dry-Run
     print(f"{Colors.BOLD}6. Live Host Transaction Dry-Run Simulation:{Colors.RESET}")
+    has_rpmdb = os.path.exists("/var/lib/rpm") or os.path.exists("/usr/lib/sysimage/rpm")
     if args.skip_install_test:
         print(f"  (Skipped via --skip-install-test flag)")
-    elif not shutil.which("rpm") or not os.path.exists("/var/lib/rpm"):
+    elif not shutil.which("rpm") or not has_rpmdb:
         print(f"  {Colors.YELLOW}Host lacks active RPM database; skipping transaction simulation.{Colors.RESET}\n")
     else:
         tx_ok, tx_out, tx_errs = verify_dry_run_transaction(rpm_path)

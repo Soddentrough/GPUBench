@@ -31,7 +31,8 @@ public:
   const char *GetDescription() const override { return GetDescription(0); }
   const char *GetDescription(uint32_t config_idx) const override;
   double GetOperationalIntensity(uint32_t config_idx = 0) const override {
-    return (config_idx == 0u) ? 4096.0 : 8192.0;
+    // 536,870,912 effective 2:4 sparse ops per wave / per-wave global bytes (FP16: 1664 B, FP8/INT8: 896 B)
+    return (config_idx == 0u) ? (536870912.0 / 1664.0) : (536870912.0 / 896.0);
   }
 
   bool IsSupported(const DeviceInfo &info,
@@ -49,6 +50,7 @@ public:
 
   void Setup(IComputeContext &context,
              const std::string &kernel_dir) override;
+  void PrepareConfig(uint32_t config_idx) override;
   void Run(uint32_t config_idx = 0) override;
   void Teardown() override;
   BenchmarkResult GetResult(uint32_t config_idx = 0) const override;
@@ -56,7 +58,9 @@ public:
 
 private:
   IComputeContext *m_context = nullptr;
-  ComputeBuffer m_inBuf = nullptr;
+  ComputeBuffer m_fp16InBuf = nullptr;
+  ComputeBuffer m_fp8InBuf = nullptr;
+  ComputeBuffer m_int8InBuf = nullptr;
   ComputeBuffer m_outBuf = nullptr;
   ComputeKernel m_fp16Kernel = nullptr;
   ComputeKernel m_fp8Kernel = nullptr;

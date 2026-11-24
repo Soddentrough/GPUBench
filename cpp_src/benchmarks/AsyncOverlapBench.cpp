@@ -37,18 +37,45 @@ const char *AsyncOverlapBench::GetDescription(uint32_t config_idx) const {
   }
 }
 
+const char *AsyncOverlapBench::GetDescription(uint32_t config_idx,
+                                              const DeviceInfo & /*info*/,
+                                              IComputeContext *context) const {
+  if (context && context->getBackend() == ComputeBackend::ROCm) {
+    switch (config_idx) {
+    case 2:
+      return "Executes a heavy ALU compute kernel followed serially by a 128 MB host-to-device DMA transfer (hipMemcpyAsync) on a single HIP stream.";
+    case 3:
+      return "Overlaps a heavy ALU compute kernel on one non-blocking HIP stream with a concurrent 128 MB PCIe DMA copy (hipMemcpyAsync) on a second HIP stream (SDMA).";
+    default:
+      break;
+    }
+  }
+  return GetDescription(config_idx);
+}
+
 bool AsyncOverlapBench::IsSupported(const DeviceInfo & /*info*/,
                                     IComputeContext *context) const {
   if (!context) return true;
+  if (context->getBackend() == ComputeBackend::ROCm) return true;
   if (context->getBackend() != ComputeBackend::Vulkan) return false;
+#ifdef HAVE_VULKAN
   const auto *vc = dynamic_cast<const VulkanContext *>(context);
   return vc && vc->isDynamicRenderingSupported();
+#else
+  return false;
+#endif
 }
 
 bool AsyncOverlapBench::IsConfigSupported(uint32_t config_idx,
                                           const DeviceInfo &info,
                                           IComputeContext *context) const {
   if (!IsSupported(info, context)) return false;
+  if (context && context->getBackend() == ComputeBackend::ROCm) {
+    if (config_idx == 2) return true;
+    if (config_idx == 3) return info.dedicatedTransferQueue;
+    return false;
+  }
+#ifdef HAVE_VULKAN
   const auto *vc = dynamic_cast<const VulkanContext *>(context);
   if (config_idx == 1) {
     return vc ? vc->hasAsyncComputeQueue() : info.dedicatedAsyncComputeQueue;
@@ -57,12 +84,17 @@ bool AsyncOverlapBench::IsConfigSupported(uint32_t config_idx,
     return vc ? vc->hasDedicatedTransferQueue() : info.dedicatedTransferQueue;
   }
   return (config_idx == 0 || config_idx == 2);
+#else
+  (void)config_idx;
+  return false;
+#endif
 }
 
 IBenchmark::SupportLimitation
 AsyncOverlapBench::GetSupportLimitation(const DeviceInfo & /*info*/,
                                         IComputeContext *context) const {
-  if (context && context->getBackend() != ComputeBackend::Vulkan) {
+  if (context && context->getBackend() != ComputeBackend::Vulkan &&
+      context->getBackend() != ComputeBackend::ROCm) {
     return SupportLimitation::kApi;
   }
   return SupportLimitation::kHardware;
@@ -71,6 +103,15 @@ AsyncOverlapBench::GetSupportLimitation(const DeviceInfo & /*info*/,
 IBenchmark::SupportLimitation AsyncOverlapBench::GetConfigSupportLimitation(
     uint32_t config_idx, const DeviceInfo & /*info*/,
     IComputeContext *context) const {
+  if (context && context->getBackend() == ComputeBackend::ROCm) {
+    if (config_idx == 0 || config_idx == 1) {
+      return SupportLimitation::kApi;
+    }
+    if (config_idx == 3) {
+      return SupportLimitation::kHardware;
+    }
+    return SupportLimitation::kNone;
+  }
   if (context && context->getBackend() != ComputeBackend::Vulkan) {
     return SupportLimitation::kApi;
   }
@@ -82,8 +123,9 @@ IBenchmark::SupportLimitation AsyncOverlapBench::GetConfigSupportLimitation(
 
 std::string AsyncOverlapBench::GetSupportNote(const DeviceInfo & /*info*/,
                                               IComputeContext *context) const {
-  if (context && context->getBackend() != ComputeBackend::Vulkan) {
-    return "Requires Vulkan 1.4 Dynamic Rendering & multi-queue submission";
+  if (context && context->getBackend() != ComputeBackend::Vulkan &&
+      context->getBackend() != ComputeBackend::ROCm) {
+    return "Requires Vulkan 1.4 Dynamic Rendering or ROCm multi-stream compute+SDMA concurrency";
   }
   return "";
 }
@@ -91,8 +133,17 @@ std::string AsyncOverlapBench::GetSupportNote(const DeviceInfo & /*info*/,
 std::string AsyncOverlapBench::GetConfigSupportNote(
     uint32_t config_idx, const DeviceInfo & /*info*/,
     IComputeContext *context) const {
+  if (context && context->getBackend() == ComputeBackend::ROCm) {
+    if (config_idx == 0 || config_idx == 1) {
+      return "No graphics rasterization pipeline in ROCm/HIP API";
+    }
+    if (config_idx == 3) {
+      return "GPU/driver exposes no dedicated DMA transfer engine separate from compute stream";
+    }
+    return "";
+  }
   if (context && context->getBackend() != ComputeBackend::Vulkan) {
-    return "Requires Vulkan 1.4 backend";
+    return "Requires Vulkan 1.4 or ROCm/HIP backend";
   }
   if (config_idx == 1) {
     return "GPU/driver exposes no dedicated Async Compute queue separate from primary graphics queue";
@@ -112,6 +163,7 @@ std::string AsyncOverlapBench::GetConfigCaveat(uint32_t config_idx,
   return "";
 }
 
+#ifdef HAVE_VULKAN
 VkShaderModule
 AsyncOverlapBench::loadSpirvModule(const std::string &shaderStem) const {
   std::filesystem::path spvPath =
@@ -141,15 +193,34 @@ AsyncOverlapBench::loadSpirvModule(const std::string &shaderStem) const {
   }
   return mod;
 }
+#endif
 
 void AsyncOverlapBench::Setup(IComputeContext &context,
                               const std::string &kernel_dir) {
+  m_kernelDir = kernel_dir;
+  m_lastDurationMs.fill(0.0);
+
+#ifdef HAVE_ROCM
+  if (context.getBackend() == ComputeBackend::ROCm) {
+    m_rocm = dynamic_cast<ROCmContext *>(&context);
+    if (!m_rocm) {
+      throw std::runtime_error("AsyncOverlapBench requires ROCmContext");
+    }
+    m_rocmCompStream = m_rocm->createStream(hipStreamNonBlocking);
+    m_rocmCopyStream = m_rocm->createStream(hipStreamNonBlocking);
+    std::filesystem::path compPath =
+        std::filesystem::path(kernel_dir) / "rocm" / "async_compute_heavy.hip";
+    m_rocmCompKernel =
+        m_rocm->createKernel(compPath.string(), "run_benchmark", 4);
+    return;
+  }
+#endif
+
+#ifdef HAVE_VULKAN
   m_vk = dynamic_cast<VulkanContext *>(&context);
   if (!m_vk) {
     throw std::runtime_error("AsyncOverlapBench requires VulkanContext");
   }
-  m_kernelDir = kernel_dir;
-  m_lastDurationMs.fill(0.0);
 
   VkDevice dev = m_vk->getDevice();
 
@@ -336,10 +407,37 @@ void AsyncOverlapBench::Setup(IComputeContext &context,
     vkAllocateCommandBuffers(dev, &cmdAi, &m_xferCmd);
     vkCreateFence(dev, &fCi, nullptr, &m_xferFence);
   }
+#else
+  throw std::runtime_error("AsyncOverlapBench requires Vulkan or ROCm backend");
+#endif
 }
 
 void AsyncOverlapBench::PrepareConfig(uint32_t config_idx) {
   ReleaseConfigResources(config_idx);
+
+#ifdef HAVE_ROCM
+  if (m_rocm) {
+    if (config_idx != 2 && config_idx != 3) {
+      return;
+    }
+    const size_t compBytes =
+        static_cast<size_t>(kComputeElements) * sizeof(float) * 4u;
+    m_rocmCompOut = m_rocm->createBuffer(compBytes);
+    m_rocm->memsetAsync(m_rocmCompOut, 0, compBytes, m_rocmCompStream);
+
+    m_rocmDmaSrcPinned = m_rocm->allocPinnedHost(kCopyBytes);
+    auto *srcU32 = static_cast<uint32_t *>(m_rocmDmaSrcPinned);
+    for (size_t i = 0; i < kCopyBytes / sizeof(uint32_t); ++i) {
+      srcU32[i] = 0xCAFE0000u ^ static_cast<uint32_t>(i);
+    }
+    m_rocmDmaDst = m_rocm->createBuffer(kCopyBytes);
+    m_rocm->memsetAsync(m_rocmDmaDst, 0, kCopyBytes, m_rocmCompStream);
+    m_rocm->synchronizeStream(m_rocmCompStream);
+    return;
+  }
+#endif
+
+#ifdef HAVE_VULKAN
   if (!m_vk || m_vk->getVmaAllocator() == VK_NULL_HANDLE) return;
 
   VkDevice dev = m_vk->getDevice();
@@ -458,21 +556,60 @@ void AsyncOverlapBench::PrepareConfig(uint32_t config_idx) {
       srcU32[i] = 0xCAFE0000u ^ static_cast<uint32_t>(i);
     }
 
-    VmaAllocationCreateInfo hostDnCi{};
-    hostDnCi.usage = VMA_MEMORY_USAGE_AUTO_PREFER_HOST;
-    hostDnCi.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT |
-                     VMA_ALLOCATION_CREATE_MAPPED_BIT;
-    VmaAllocationInfo dstInfo{};
-    if (vmaCreateBuffer(vma, &dmaCi, &hostDnCi, &m_dmaDstBuf, &m_dmaDstAlloc,
-                        &dstInfo) != VK_SUCCESS) {
-      throw std::runtime_error("AsyncOverlapBench: failed to allocate DMA dst");
+    VmaAllocationCreateInfo devDstCi{};
+    devDstCi.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+    if (vmaCreateBuffer(vma, &dmaCi, &devDstCi, &m_dmaDstBuf, &m_dmaDstAlloc,
+                        nullptr) != VK_SUCCESS) {
+      throw std::runtime_error("AsyncOverlapBench: failed to allocate device DMA dst");
     }
-    m_dmaDstMapped = dstInfo.pMappedData;
-    std::memset(m_dmaDstMapped, 0, kCopyBytes);
+
+    // Zero-initialize device-local destination buffer so validation proves real H2D copy
+    vkResetCommandBuffer(m_gfxCmd, 0);
+    VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(m_gfxCmd, &bi);
+    vkCmdFillBuffer(m_gfxCmd, m_dmaDstBuf, 0, kCopyBytes, 0);
+    m_vk->cmdPipelineMemoryBarrier2(
+        m_gfxCmd, VK_PIPELINE_STAGE_2_CLEAR_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+        VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+        VK_ACCESS_2_TRANSFER_WRITE_BIT | VK_ACCESS_2_TRANSFER_READ_BIT);
+    vkEndCommandBuffer(m_gfxCmd);
+    vkResetFences(dev, 1, &m_gfxFence);
+    VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+    si.commandBufferCount = 1;
+    si.pCommandBuffers = &m_gfxCmd;
+    {
+      std::lock_guard<std::recursive_mutex> qlock(m_vk->getQueueMutex());
+      vkQueueSubmit(m_vk->getGraphicsQueue(), 1, &si, m_gfxFence);
+    }
+    vkWaitForFences(dev, 1, &m_gfxFence, VK_TRUE, UINT64_MAX);
   }
+#endif
 }
 
 void AsyncOverlapBench::ReleaseConfigResources(uint32_t /*config_idx*/) {
+#ifdef HAVE_ROCM
+  if (m_rocm) {
+    m_rocm->waitIdle();
+    if (m_rocmCompStream) m_rocm->synchronizeStream(m_rocmCompStream);
+    if (m_rocmCopyStream) m_rocm->synchronizeStream(m_rocmCopyStream);
+    if (m_rocmCompOut) {
+      m_rocm->releaseBuffer(m_rocmCompOut);
+      m_rocmCompOut = nullptr;
+    }
+    if (m_rocmDmaSrcPinned) {
+      m_rocm->freePinnedHost(m_rocmDmaSrcPinned);
+      m_rocmDmaSrcPinned = nullptr;
+    }
+    if (m_rocmDmaDst) {
+      m_rocm->releaseBuffer(m_rocmDmaDst);
+      m_rocmDmaDst = nullptr;
+    }
+    return;
+  }
+#endif
+
+#ifdef HAVE_VULKAN
   if (!m_vk) return;
   m_vk->waitIdle();
   VkDevice dev = m_vk->getDevice();
@@ -511,11 +648,53 @@ void AsyncOverlapBench::ReleaseConfigResources(uint32_t /*config_idx*/) {
     vmaDestroyBuffer(vma, m_dmaDstBuf, m_dmaDstAlloc);
     m_dmaDstBuf = VK_NULL_HANDLE;
     m_dmaDstAlloc = VK_NULL_HANDLE;
-    m_dmaDstMapped = nullptr;
   }
+#endif
 }
 
 void AsyncOverlapBench::Run(uint32_t config_idx) {
+#ifdef HAVE_ROCM
+  if (m_rocm) {
+    if (config_idx != 2 && config_idx != 3) {
+      return;
+    }
+    m_runSeed = (m_runSeed > 1.5f) ? 0.25f : (m_runSeed + 0.0625f);
+    uint32_t count = kComputeElements;
+    uint32_t iterations = 12288u;
+    float seed = m_runSeed;
+    m_rocm->setKernelArg(m_rocmCompKernel, 0, m_rocmCompOut);
+    m_rocm->setKernelArg(m_rocmCompKernel, 1, sizeof(uint32_t), &count);
+    m_rocm->setKernelArg(m_rocmCompKernel, 2, sizeof(uint32_t), &iterations);
+    m_rocm->setKernelArg(m_rocmCompKernel, 3, sizeof(float), &seed);
+
+    const uint32_t gridX = (count + 255u) / 256u;
+    if (config_idx == 2) {
+      auto t0 = std::chrono::steady_clock::now();
+      m_rocm->dispatchOnStream(m_rocmCompKernel, gridX, 1, 1, 256, 1, 1,
+                               m_rocmCompStream);
+      m_rocm->memcpyAsync(m_rocmDmaDst, m_rocmDmaSrcPinned, kCopyBytes,
+                          hipMemcpyHostToDevice, m_rocmCompStream);
+      m_rocm->synchronizeStream(m_rocmCompStream);
+      auto t1 = std::chrono::steady_clock::now();
+      m_lastDurationMs[2] =
+          std::chrono::duration<double, std::milli>(t1 - t0).count();
+    } else {
+      auto t0 = std::chrono::steady_clock::now();
+      m_rocm->dispatchOnStream(m_rocmCompKernel, gridX, 1, 1, 256, 1, 1,
+                               m_rocmCompStream);
+      m_rocm->memcpyAsync(m_rocmDmaDst, m_rocmDmaSrcPinned, kCopyBytes,
+                          hipMemcpyHostToDevice, m_rocmCopyStream);
+      m_rocm->synchronizeStream(m_rocmCompStream);
+      m_rocm->synchronizeStream(m_rocmCopyStream);
+      auto t1 = std::chrono::steady_clock::now();
+      m_lastDurationMs[3] =
+          std::chrono::duration<double, std::milli>(t1 - t0).count();
+    }
+    return;
+  }
+#endif
+
+#ifdef HAVE_VULKAN
   if (!m_vk) return;
   VkDevice dev = m_vk->getDevice();
   m_runSeed = (m_runSeed > 1.5f) ? 0.25f : (m_runSeed + 0.0625f);
@@ -533,12 +712,16 @@ void AsyncOverlapBench::Run(uint32_t config_idx) {
            (config_idx <= 1u) ? 98304u : 12288u, m_runSeed};
 
   auto recordGfxPass = [&](VkCommandBuffer cmd) {
-    VkImageMemoryBarrier imgBars[2]{};
-    imgBars[0].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    VkImageMemoryBarrier2 imgBars[2]{};
+    imgBars[0].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+    imgBars[0].srcStageMask = m_colorImageInitialized
+                                  ? VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT
+                                  : VK_PIPELINE_STAGE_2_NONE;
     imgBars[0].srcAccessMask = m_colorImageInitialized
-                                   ? VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
-                                   : 0;
-    imgBars[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+                                   ? VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT
+                                   : VK_ACCESS_2_NONE;
+    imgBars[0].dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+    imgBars[0].dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
     imgBars[0].oldLayout = m_colorImageInitialized
                                ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
                                : VK_IMAGE_LAYOUT_UNDEFINED;
@@ -548,13 +731,18 @@ void AsyncOverlapBench::Run(uint32_t config_idx) {
     imgBars[0].image = m_colorImage;
     imgBars[0].subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
-    imgBars[1].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    imgBars[1].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+    imgBars[1].srcStageMask = m_colorImageInitialized
+                                  ? VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT
+                                  : VK_PIPELINE_STAGE_2_NONE;
     imgBars[1].srcAccessMask =
         m_colorImageInitialized
-            ? VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT
-            : 0;
-    imgBars[1].dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
-                               VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+            ? VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT
+            : VK_ACCESS_2_NONE;
+    imgBars[1].dstStageMask = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
+                              VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
+    imgBars[1].dstAccessMask = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+                               VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
     imgBars[1].oldLayout = m_colorImageInitialized
                                ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
                                : VK_IMAGE_LAYOUT_UNDEFINED;
@@ -564,16 +752,10 @@ void AsyncOverlapBench::Run(uint32_t config_idx) {
     imgBars[1].image = m_depthImage;
     imgBars[1].subresourceRange = {VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1};
 
-    vkCmdPipelineBarrier(
-        cmd,
-        m_colorImageInitialized
-            ? (VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
-               VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT)
-            : VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-        VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
-            VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT |
-            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-        0, 0, nullptr, 0, nullptr, 2, imgBars);
+    VkDependencyInfo depGfx{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+    depGfx.imageMemoryBarrierCount = 2;
+    depGfx.pImageMemoryBarriers = imgBars;
+    vkCmdPipelineBarrier2(cmd, &depGfx);
     m_colorImageInitialized = true;
 
     VkRenderingAttachmentInfo colorAtt{
@@ -739,6 +921,9 @@ void AsyncOverlapBench::Run(uint32_t config_idx) {
     m_lastDurationMs[3] =
         std::chrono::duration<double, std::milli>(t1 - t0).count();
   }
+#else
+  (void)config_idx;
+#endif
 }
 
 BenchmarkResult AsyncOverlapBench::GetResult(uint32_t config_idx) const {
@@ -746,17 +931,61 @@ BenchmarkResult AsyncOverlapBench::GetResult(uint32_t config_idx) const {
 }
 
 bool AsyncOverlapBench::ValidateResults(uint32_t config_idx) const {
+  constexpr size_t kCheckFloats = 256;
+  constexpr size_t kDmaSliceWords = 1024;
+  constexpr size_t kDmaSliceBytes = kDmaSliceWords * sizeof(uint32_t);
+  const size_t totalDmaWords = kCopyBytes / sizeof(uint32_t);
+  const size_t midWordOff = totalDmaWords / 2u;
+  const size_t tailWordOff = totalDmaWords - kDmaSliceWords;
+
+#ifdef HAVE_ROCM
+  if (m_rocm) {
+    if ((config_idx != 2 && config_idx != 3) || !m_rocmCompOut || !m_rocmDmaDst) {
+      return false;
+    }
+    std::vector<float> floats(kCheckFloats, 0.0f);
+    m_rocm->readBuffer(m_rocmCompOut, 0, kCheckFloats * sizeof(float),
+                       floats.data());
+    bool computeOk = false;
+    for (float v : floats) {
+      if (!std::isfinite(v)) {
+        return false;
+      }
+      if (std::fabs(v) > 1e-4f) {
+        computeOk = true;
+      }
+    }
+    std::vector<uint32_t> midU32(kDmaSliceWords, 0u);
+    std::vector<uint32_t> tailU32(kDmaSliceWords, 0u);
+    m_rocm->readBuffer(m_rocmDmaDst, midWordOff * sizeof(uint32_t),
+                       kDmaSliceBytes, midU32.data());
+    m_rocm->readBuffer(m_rocmDmaDst, tailWordOff * sizeof(uint32_t),
+                       kDmaSliceBytes, tailU32.data());
+    for (size_t i = 0; i < kDmaSliceWords; ++i) {
+      if (midU32[i] != (0xCAFE0000u ^ static_cast<uint32_t>(midWordOff + i)) ||
+          tailU32[i] !=
+              (0xCAFE0000u ^ static_cast<uint32_t>(tailWordOff + i))) {
+        return false;
+      }
+    }
+    return computeOk;
+  }
+#endif
+
+#ifdef HAVE_VULKAN
   if (!m_vk || m_compOutBuf == VK_NULL_HANDLE) return false;
   VkDevice dev = m_vk->getDevice();
 
-  // Read back 64 vec4s from compute buffer + (for Config 0/1) 16 pixels from color image
-  constexpr size_t kCheckFloats = 256;
+  // Read back 64 vec4s from compute buffer + either 16 image pixels (0/1) or mid/tail DMA slices (2/3)
+  const size_t readbackBytes =
+      (config_idx == 2 || config_idx == 3)
+          ? (kCheckFloats * sizeof(float) + 2u * kDmaSliceBytes)
+          : (kCheckFloats * sizeof(float) * 2u);
   void *mappedRead = nullptr;
   ComputeBuffer readback =
-      m_vk->createPinnedHostBuffer(kCheckFloats * sizeof(float) * 2, false,
-                                   &mappedRead);
+      m_vk->createPinnedHostBuffer(readbackBytes, false, &mappedRead);
   if (!readback || !mappedRead) return false;
-  std::memset(mappedRead, 0, kCheckFloats * sizeof(float) * 2);
+  std::memset(mappedRead, 0, readbackBytes);
 
   vkResetCommandBuffer(m_gfxCmd, 0);
   VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
@@ -767,20 +996,35 @@ bool AsyncOverlapBench::ValidateResults(uint32_t config_idx) const {
   vkCmdCopyBuffer(m_gfxCmd, m_compOutBuf, m_vk->getVkBuffer(readback), 1,
                   &bufCopy);
 
+  if ((config_idx == 2 || config_idx == 3) && m_dmaDstBuf != VK_NULL_HANDLE) {
+    VkBufferCopy dmaCopies[2]{};
+    dmaCopies[0].srcOffset = midWordOff * sizeof(uint32_t);
+    dmaCopies[0].dstOffset = kCheckFloats * sizeof(float);
+    dmaCopies[0].size = kDmaSliceBytes;
+    dmaCopies[1].srcOffset = tailWordOff * sizeof(uint32_t);
+    dmaCopies[1].dstOffset = kCheckFloats * sizeof(float) + kDmaSliceBytes;
+    dmaCopies[1].size = kDmaSliceBytes;
+    vkCmdCopyBuffer(m_gfxCmd, m_dmaDstBuf, m_vk->getVkBuffer(readback), 2,
+                    dmaCopies);
+  }
+
   if ((config_idx == 0 || config_idx == 1) && m_colorImage != VK_NULL_HANDLE &&
       m_colorImageInitialized) {
-    VkImageMemoryBarrier bar{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
-    bar.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-    bar.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    VkImageMemoryBarrier2 bar{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
+    bar.srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+    bar.srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+    bar.dstStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
+    bar.dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT;
     bar.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     bar.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
     bar.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     bar.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     bar.image = m_colorImage;
     bar.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-    vkCmdPipelineBarrier(m_gfxCmd, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
-                         nullptr, 1, &bar);
+    VkDependencyInfo dep1{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+    dep1.imageMemoryBarrierCount = 1;
+    dep1.pImageMemoryBarriers = &bar;
+    vkCmdPipelineBarrier2(m_gfxCmd, &dep1);
 
     VkBufferImageCopy imgCopy{};
     imgCopy.bufferOffset = kCheckFloats * sizeof(float);
@@ -791,14 +1035,14 @@ bool AsyncOverlapBench::ValidateResults(uint32_t config_idx) const {
                            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                            m_vk->getVkBuffer(readback), 1, &imgCopy);
 
-    bar.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-    bar.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
-                        VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    bar.srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
+    bar.srcAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT;
+    bar.dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+    bar.dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT |
+                        VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
     bar.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
     bar.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    vkCmdPipelineBarrier(m_gfxCmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0,
-                         nullptr, 0, nullptr, 1, &bar);
+    vkCmdPipelineBarrier2(m_gfxCmd, &dep1);
   }
 
   m_vk->cmdPipelineMemoryBarrier2(
@@ -845,13 +1089,15 @@ bool AsyncOverlapBench::ValidateResults(uint32_t config_idx) const {
       }
     }
   } else {
-    if (m_dmaDstMapped) {
-      const auto *dstU32 = static_cast<const uint32_t *>(m_dmaDstMapped);
-      size_t tailOff = (kCopyBytes / sizeof(uint32_t)) - 1024;
+    if (m_dmaDstBuf != VK_NULL_HANDLE) {
+      const auto *midU32 =
+          reinterpret_cast<const uint32_t *>(floats + kCheckFloats);
+      const auto *tailU32 = midU32 + kDmaSliceWords;
       secondOk = true;
-      for (size_t i = 0; i < 1024; ++i) {
-        if (dstU32[tailOff + i] !=
-            (0xCAFE0000u ^ static_cast<uint32_t>(tailOff + i))) {
+      for (size_t i = 0; i < kDmaSliceWords; ++i) {
+        if (midU32[i] != (0xCAFE0000u ^ static_cast<uint32_t>(midWordOff + i)) ||
+            tailU32[i] !=
+                (0xCAFE0000u ^ static_cast<uint32_t>(tailWordOff + i))) {
           secondOk = false;
           break;
         }
@@ -861,10 +1107,38 @@ bool AsyncOverlapBench::ValidateResults(uint32_t config_idx) const {
 
   m_vk->releaseBuffer(readback);
   return computeOk && secondOk;
+#else
+  (void)config_idx;
+  (void)kCheckFloats;
+  (void)kDmaSliceWords;
+  (void)kDmaSliceBytes;
+  (void)totalDmaWords;
+  (void)midWordOff;
+  (void)tailWordOff;
+  return false;
+#endif
 }
 
 void AsyncOverlapBench::Teardown() {
   ReleaseConfigResources(0);
+#ifdef HAVE_ROCM
+  if (m_rocm) {
+    if (m_rocmCompKernel) {
+      m_rocm->releaseKernel(m_rocmCompKernel);
+      m_rocmCompKernel = nullptr;
+    }
+    if (m_rocmCompStream) {
+      m_rocm->destroyStream(m_rocmCompStream);
+      m_rocmCompStream = nullptr;
+    }
+    if (m_rocmCopyStream) {
+      m_rocm->destroyStream(m_rocmCopyStream);
+      m_rocmCopyStream = nullptr;
+    }
+    m_rocm = nullptr;
+  }
+#endif
+#ifdef HAVE_VULKAN
   if (m_vk) {
     VkDevice dev = m_vk->getDevice();
     if (m_gfxPipeline != VK_NULL_HANDLE)
@@ -905,4 +1179,5 @@ void AsyncOverlapBench::Teardown() {
   m_xferFence = VK_NULL_HANDLE;
   m_xferPool = VK_NULL_HANDLE;
   m_vk = nullptr;
+#endif
 }

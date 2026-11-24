@@ -76,6 +76,18 @@ def source_list():
 def make_one(src_rel, dst_name, check_only=False):
     src = os.path.join(ROOT, src_rel)
     dst = os.path.join(OUT_DIR, dst_name + ".png")
+    if check_only:
+        if os.path.exists(dst):
+            try:
+                with Image.open(dst) as existing:
+                    w, h = existing.size
+                    if 0 < w <= THUMB_W and 0 < h <= THUMB_H:
+                        return True
+            except Exception:
+                pass
+        print(f"  STALE OR MISSING: {dst_name}.png")
+        return False
+
     if not os.path.exists(src):
         print(f"  MISSING SOURCE: {src_rel}")
         return False
@@ -92,14 +104,6 @@ def make_one(src_rel, dst_name, check_only=False):
         elif scale > 1.0:
             new_size = (THUMB_W, THUMB_H)
             im = im.resize(new_size, Image.LANCZOS)
-
-    if check_only:
-        if os.path.exists(dst):
-            with Image.open(dst) as existing:
-                if existing.size == (THUMB_W, THUMB_H):
-                    return True
-        print(f"  STALE: {dst_name}.png")
-        return False
 
     im.save(dst, "PNG", optimize=True)
     kb = os.path.getsize(dst) / 1024.0

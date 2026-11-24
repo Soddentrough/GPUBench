@@ -1,7 +1,12 @@
 #pragma once
 
 #include "IBenchmark.h"
+#ifdef HAVE_VULKAN
 #include "core/VulkanContext.h"
+#endif
+#ifdef HAVE_ROCM
+#include "core/ROCmContext.h"
+#endif
 #include <array>
 #include <cstdint>
 #include <string>
@@ -24,9 +29,13 @@ public:
   uint32_t GetExpectedKernelCount() const override { return 2; }
 
   uint32_t GetNumConfigs() const override { return 4; }
+  using IBenchmark::GetConfigName;
   std::string GetConfigName(uint32_t config_idx) const override;
+  using IBenchmark::GetDescription;
   const char *GetDescription() const override { return GetDescription(0); }
   const char *GetDescription(uint32_t config_idx) const override;
+  const char *GetDescription(uint32_t config_idx, const DeviceInfo &info,
+                             IComputeContext *context = nullptr) const override;
   int32_t GetBaselineConfigIndex(uint32_t config_idx) const override {
     if (config_idx == 1u) return 0;
     if (config_idx == 3u) return 2;
@@ -77,8 +86,10 @@ private:
   static constexpr uint32_t kComputeElements = 262144u;
   static constexpr size_t kCopyBytes = 128ULL * 1024ULL * 1024ULL;
 
-  VulkanContext *m_vk = nullptr;
   std::string m_kernelDir;
+
+#ifdef HAVE_VULKAN
+  VulkanContext *m_vk = nullptr;
 
   // Graphics Dynamic Rendering pipeline
   VkPipelineLayout m_gfxPipeLayout = VK_NULL_HANDLE;
@@ -106,7 +117,6 @@ private:
   VmaAllocation m_dmaSrcAlloc = VK_NULL_HANDLE;
   VkBuffer m_dmaDstBuf = VK_NULL_HANDLE;
   VmaAllocation m_dmaDstAlloc = VK_NULL_HANDLE;
-  void *m_dmaDstMapped = nullptr;
 
   // Command pools, buffers, fences
   VkCommandPool m_gfxPool = VK_NULL_HANDLE;
@@ -121,8 +131,19 @@ private:
   VkCommandBuffer m_xferCmd = VK_NULL_HANDLE;
   VkFence m_xferFence = VK_NULL_HANDLE;
 
+  VkShaderModule loadSpirvModule(const std::string &shaderStem) const;
+#endif
+
+#ifdef HAVE_ROCM
+  ROCmContext *m_rocm = nullptr;
+  ComputeKernel m_rocmCompKernel = nullptr;
+  ComputeBuffer m_rocmCompOut = nullptr;
+  void *m_rocmDmaSrcPinned = nullptr;
+  ComputeBuffer m_rocmDmaDst = nullptr;
+  hipStream_t m_rocmCompStream = nullptr;
+  hipStream_t m_rocmCopyStream = nullptr;
+#endif
+
   std::array<double, 4> m_lastDurationMs{};
   float m_runSeed = 0.25f;
-
-  VkShaderModule loadSpirvModule(const std::string &shaderStem) const;
 };

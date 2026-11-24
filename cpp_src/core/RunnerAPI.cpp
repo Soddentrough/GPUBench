@@ -15,6 +15,54 @@ namespace {
 std::mutex g_sharedVkMutex;
 std::shared_ptr<VulkanContext> g_sharedVulkanContext;
 
+std::string toLowerCopy(const std::string& s) {
+    std::string lower = s;
+    std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return lower;
+}
+
+bool resolveBackendForQuery(const std::string& backend_name, ComputeBackend& outBackend) {
+    const std::string lower = toLowerCopy(backend_name);
+    if (lower == "rocm") {
+        outBackend = ComputeBackend::ROCm;
+        return ComputeBackendFactory::isAvailable(outBackend);
+    }
+    if (lower == "opencl") {
+        outBackend = ComputeBackend::OpenCL;
+        return ComputeBackendFactory::isAvailable(outBackend);
+    }
+    if (lower == "vulkan") {
+        outBackend = ComputeBackend::Vulkan;
+        return ComputeBackendFactory::isAvailable(outBackend);
+    }
+    // "auto" or empty: pick highest-priority available backend with devices
+#ifdef HAVE_VULKAN
+    auto sharedVk = GetSharedVulkanContextAPI();
+    if (sharedVk && sharedVk->isAvailable() && !sharedVk->getDevices().empty()) {
+        outBackend = ComputeBackend::Vulkan;
+        return true;
+    }
+#endif
+    const ComputeBackend auto_order[] = {
+        ComputeBackend::Vulkan, ComputeBackend::ROCm, ComputeBackend::OpenCL};
+    for (ComputeBackend candidate : auto_order) {
+        if (!ComputeBackendFactory::isAvailable(candidate)) {
+            continue;
+        }
+        try {
+            auto ctx = ComputeBackendFactory::create(candidate, false, false);
+            if (ctx && ctx->isAvailable() && !ctx->getDevices().empty()) {
+                outBackend = candidate;
+                return true;
+            }
+        } catch (...) {
+        }
+    }
+    return false;
+}
+
 void populateDeviceProfileFromInfo(DeviceProfile &p, const DeviceInfo &dev) {
     p.deviceName = dev.name;
     p.vendorID = dev.vendorID;
@@ -259,43 +307,119 @@ std::vector<std::string> GetAvailableBenchmarksAPI() {
     }
 }
 
-std::vector<BenchmarkConfigMetadata> GetBenchmarkMetadataCatalogAPI() {
+namespace {
+std::vector<BenchmarkConfigMetadata> buildBenchmarkCatalog(
+    const DeviceInfo* info,
+    IComputeContext* ctx) {
     std::vector<BenchmarkConfigMetadata> catalog;
-    try {
-        std::vector<IComputeContext*> dummy;
-        BenchmarkRunner runner(dummy, false, false, false, false, "all");
-        for (const auto& bench : runner.getBenchmarkList()) {
-            std::string bName = bench->GetName();
-            uint32_t numConfigs = bench->GetNumConfigs();
-            auto aliases = bench->GetAliases();
-            for (uint32_t ci = 0; ci < numConfigs; ++ci) {
-                BenchmarkConfigMetadata meta;
-                meta.benchmarkName = bName;
-                meta.configIndex = ci;
-                meta.configName = bench->GetConfigName(ci);
-                if (meta.configName.rfind(bName, 0) == 0) {
-                    meta.displayName = meta.configName;
-                } else if (!meta.configName.empty()) {
-                    meta.displayName = bName + " (" + meta.configName + ")";
-                } else {
-                    meta.displayName = bName;
-                }
-                meta.component = bench->GetComponent(ci);
-                meta.subcategory = bench->GetSubCategory(ci);
-                meta.metric = bench->GetMetric(ci);
-                const char* desc = bench->GetDescription(ci);
-                meta.description = desc ? desc : "";
-                meta.sortWeight = bench->GetSortWeight(ci);
-                meta.operationalIntensity = bench->GetOperationalIntensity(ci);
-                meta.isDeviceDependent = bench->IsDeviceDependent();
-                meta.aliases = aliases;
-                catalog.push_back(std::move(meta));
+    std::vector<IComputeContext*> dummy;
+    BenchmarkRunner runner(dummy, false, false, false, false, "all");
+    for (const auto& bench : runner.getBenchmarkList()) {
+        std::string bName = bench->GetName();
+        uint32_t numConfigs = bench->GetNumConfigs();
+        auto aliases = bench->GetAliases();
+        for (uint32_t ci = 0; ci < numConfigs; ++ci) {
+            BenchmarkConfigMetadata meta;
+            meta.benchmarkName = bName;
+            meta.configIndex = ci;
+            meta.configName = (info && ctx)
+                ? bench->GetConfigName(ci, *info, ctx)
+                : bench->GetConfigName(ci);
+            if (meta.configName.rfind(bName, 0) == 0) {
+                meta.displayName = meta.configName;
+            } else if (!meta.configName.empty()) {
+                meta.displayName = bName + " (" + meta.configName + ")";
+            } else {
+                meta.displayName = bName;
             }
+            meta.component = bench->GetComponent(ci);
+            meta.subcategory = bench->GetSubCategory(ci);
+            meta.metric = bench->GetMetric(ci);
+            const char* desc = (info && ctx)
+                ? bench->GetDescription(ci, *info, ctx)
+                : bench->GetDescription(ci);
+            meta.description = desc ? desc : "";
+            meta.configCaveat = (info && ctx)
+                ? bench->GetConfigCaveat(ci, *info, ctx)
+                : bench->GetConfigCaveat(ci);
+            meta.sortWeight = bench->GetSortWeight(ci);
+            meta.operationalIntensity = bench->GetOperationalIntensity(ci);
+            meta.isDeviceDependent = bench->IsDeviceDependent();
+            meta.aliases = aliases;
+            catalog.push_back(std::move(meta));
         }
+    }
+    return catalog;
+}
+} // namespace
+
+std::vector<BenchmarkConfigMetadata> GetBenchmarkMetadataCatalogAPI() {
+    try {
+        return buildBenchmarkCatalog(nullptr, nullptr);
     } catch (const std::exception& e) {
         std::cerr << "GetBenchmarkMetadataCatalogAPI failed: " << e.what() << std::endl;
     } catch (...) {
         std::cerr << "GetBenchmarkMetadataCatalogAPI failed: unknown error" << std::endl;
+    }
+    return {};
+}
+
+std::vector<BenchmarkConfigMetadata> GetBenchmarkMetadataCatalogAPI(
+    const std::string& backend_name,
+    uint32_t device_idx) {
+    if (backend_name.empty()) {
+        return GetBenchmarkMetadataCatalogAPI();
+    }
+
+    static std::map<std::pair<std::string, uint32_t>, std::vector<BenchmarkConfigMetadata>> s_catalogCache;
+    static std::mutex s_catalogCacheMutex;
+
+    const std::string lowerBackend = toLowerCopy(backend_name);
+    {
+        std::lock_guard<std::mutex> lock(s_catalogCacheMutex);
+        auto it = s_catalogCache.find({lowerBackend, device_idx});
+        if (it != s_catalogCache.end()) {
+            return it->second;
+        }
+    }
+
+    std::vector<BenchmarkConfigMetadata> catalog;
+    try {
+        ComputeBackend backend = ComputeBackend::Vulkan;
+        if (resolveBackendForQuery(lowerBackend, backend)) {
+            std::unique_ptr<IComputeContext> ownedCtx;
+            IComputeContext* activeCtx = nullptr;
+#ifdef HAVE_VULKAN
+            auto sharedVk = GetSharedVulkanContextAPI();
+            if (backend == ComputeBackend::Vulkan && sharedVk &&
+                sharedVk->isAvailable() &&
+                device_idx == sharedVk->getSelectedDeviceIndex()) {
+                activeCtx = sharedVk.get();
+            }
+#endif
+            if (!activeCtx) {
+                ownedCtx = ComputeBackendFactory::create(backend, false, false);
+                if (ownedCtx && device_idx < ownedCtx->getDevices().size()) {
+                    ownedCtx->pickDevice(device_idx);
+                    activeCtx = ownedCtx.get();
+                }
+            }
+            if (activeCtx) {
+                DeviceInfo info = activeCtx->getCurrentDeviceInfo();
+                catalog = buildBenchmarkCatalog(&info, activeCtx);
+            }
+        }
+        if (catalog.empty()) {
+            catalog = buildBenchmarkCatalog(nullptr, nullptr);
+        }
+        if (!catalog.empty()) {
+            std::lock_guard<std::mutex> lock(s_catalogCacheMutex);
+            s_catalogCache[{lowerBackend, device_idx}] = catalog;
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "GetBenchmarkMetadataCatalogAPI(backend, dev) failed: " << e.what() << std::endl;
+    } catch (...) {
+        std::cerr << "GetBenchmarkMetadataCatalogAPI(backend, dev) failed: unknown error" << std::endl;
     }
     return catalog;
 }
@@ -337,7 +461,7 @@ std::vector<DeviceProfile> GetDeviceProfilesAPI() {
                 }
             } catch (...) {}
         }
-        if (profiles.empty() && ComputeBackendFactory::isAvailable(ComputeBackend::ROCm)) {
+        if (ComputeBackendFactory::isAvailable(ComputeBackend::ROCm)) {
             try {
                 auto ctx = ComputeBackendFactory::create(ComputeBackend::ROCm, false, false);
                 if (ctx) {
@@ -361,7 +485,7 @@ std::vector<DeviceProfile> GetDeviceProfilesAPI() {
                 }
             } catch (...) {}
         }
-        if (profiles.empty() && ComputeBackendFactory::isAvailable(ComputeBackend::OpenCL)) {
+        if (ComputeBackendFactory::isAvailable(ComputeBackend::OpenCL)) {
             try {
                 auto ctx = ComputeBackendFactory::create(ComputeBackend::OpenCL, false, false);
                 if (ctx) {
@@ -403,9 +527,10 @@ std::vector<BenchmarkSupportInfo> ProbeBenchmarkSupportAPI(
     static std::map<std::pair<std::string, uint32_t>, std::vector<BenchmarkSupportInfo>> s_supportCache;
     static std::mutex s_supportCacheMutex;
 
+    const std::string lowerBackend = toLowerCopy(backend_name);
     {
         std::lock_guard<std::mutex> lock(s_supportCacheMutex);
-        auto it = s_supportCache.find({backend_name, device_idx});
+        auto it = s_supportCache.find({lowerBackend, device_idx});
         if (it != s_supportCache.end()) {
             return it->second;
         }
@@ -414,10 +539,7 @@ std::vector<BenchmarkSupportInfo> ProbeBenchmarkSupportAPI(
     std::vector<BenchmarkSupportInfo> results;
     try {
         ComputeBackend backend = ComputeBackend::Vulkan;
-        if (backend_name == "rocm") backend = ComputeBackend::ROCm;
-        else if (backend_name == "opencl") backend = ComputeBackend::OpenCL;
-
-        if (ComputeBackendFactory::isAvailable(backend)) {
+        if (resolveBackendForQuery(lowerBackend, backend)) {
             std::unique_ptr<IComputeContext> ownedCtx;
             IComputeContext* activeCtx = nullptr;
 #ifdef HAVE_VULKAN
@@ -472,10 +594,12 @@ std::vector<BenchmarkSupportInfo> ProbeBenchmarkSupportAPI(
                     for (uint32_t ci = 0; ci < num_configs; ++ci) {
                         const bool cfgSupported = bench->IsConfigSupported(ci, info, activeCtx);
                         const auto disc = bench->GetConfigSupportDiscrepancy(ci, info, activeCtx);
-                        if (!cfgSupported || disc.differs) {
+                        const std::string caveat = bench->GetConfigCaveat(ci, info, activeCtx);
+                        if (!cfgSupported || disc.differs || !caveat.empty()) {
                             BenchmarkSupportInfo cfgItem;
-                            cfgItem.id = bench->GetConfigName(ci);
+                            cfgItem.id = bench->GetConfigName(ci, info, activeCtx);
                             cfgItem.isSupported = cfgSupported;
+                            cfgItem.configCaveat = caveat;
                             cfgItem.hasSupportDiscrepancy = disc.differs;
                             cfgItem.hardwareSupportText = disc.hardwareStatus;
                             cfgItem.driverSupportText = disc.driverStatus;
@@ -533,7 +657,7 @@ std::vector<BenchmarkSupportInfo> ProbeBenchmarkSupportAPI(
 
         if (!results.empty()) {
             std::lock_guard<std::mutex> lock(s_supportCacheMutex);
-            s_supportCache[{backend_name, device_idx}] = results;
+            s_supportCache[{lowerBackend, device_idx}] = results;
         }
     } catch (const std::exception& e) {
         std::cerr << "ProbeBenchmarkSupportAPI failed: " << e.what() << std::endl;

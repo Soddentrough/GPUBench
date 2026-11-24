@@ -1,0 +1,55 @@
+#version 460
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform sampler2D uSrcDepth;
+layout(set = 0, binding = 1, r32f) uniform writeonly image2D uDstMip;
+
+layout(push_constant) uniform HizPC {
+  uint srcWidth;
+  uint srcHeight;
+  uint dstWidth;
+  uint dstHeight;
+  uint isBaseLevel;
+} pc;
+
+void main() {
+  ivec2 dstCoord = ivec2(gl_GlobalInvocationID.xy);
+  if (dstCoord.x >= int(pc.dstWidth) || dstCoord.y >= int(pc.dstHeight)) {
+    return;
+  }
+
+  if (pc.isBaseLevel != 0u) {
+    // Copy exact depth attachment into mip 0
+    float d = texelFetch(uSrcDepth, dstCoord, 0).r;
+    imageStore(uDstMip, dstCoord, vec4(d, 0.0, 0.0, 0.0));
+    return;
+  }
+
+  ivec2 base = dstCoord * 2;
+  ivec2 maxSrc = ivec2(int(pc.srcWidth) - 1, int(pc.srcHeight) - 1);
+  float d00 = texelFetch(uSrcDepth, min(base + ivec2(0, 0), maxSrc), 0).r;
+  float d10 = texelFetch(uSrcDepth, min(base + ivec2(1, 0), maxSrc), 0).r;
+  float d01 = texelFetch(uSrcDepth, min(base + ivec2(0, 1), maxSrc), 0).r;
+  float d11 = texelFetch(uSrcDepth, min(base + ivec2(1, 1), maxSrc), 0).r;
+  float minDepth = min(min(d00, d10), min(d01, d11));
+
+  // Conservatively include extra border row/col on odd source extents
+  if ((pc.srcWidth & 1u) != 0u && dstCoord.x == int(pc.dstWidth) - 1) {
+    float e0 = texelFetch(uSrcDepth, min(base + ivec2(2, 0), maxSrc), 0).r;
+    float e1 = texelFetch(uSrcDepth, min(base + ivec2(2, 1), maxSrc), 0).r;
+    minDepth = min(minDepth, min(e0, e1));
+  }
+  if ((pc.srcHeight & 1u) != 0u && dstCoord.y == int(pc.dstHeight) - 1) {
+    float e0 = texelFetch(uSrcDepth, min(base + ivec2(0, 2), maxSrc), 0).r;
+    float e1 = texelFetch(uSrcDepth, min(base + ivec2(1, 2), maxSrc), 0).r;
+    minDepth = min(minDepth, min(e0, e1));
+  }
+  if ((pc.srcWidth & 1u) != 0u && (pc.srcHeight & 1u) != 0u &&
+      dstCoord.x == int(pc.dstWidth) - 1 && dstCoord.y == int(pc.dstHeight) - 1) {
+    float e2 = texelFetch(uSrcDepth, min(base + ivec2(2, 2), maxSrc), 0).r;
+    minDepth = min(minDepth, e2);
+  }
+
+  imageStore(uDstMip, dstCoord, vec4(minDepth, 0.0, 0.0, 0.0));
+}

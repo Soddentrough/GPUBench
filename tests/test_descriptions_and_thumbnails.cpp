@@ -113,27 +113,31 @@ TEST_CASE(DescriptionsAndThumbnails, LdsBankConflictConfigs) {
 
 TEST_CASE(DescriptionsAndThumbnails, IndirectSynthesisConfigs) {
   InShaderIndirectBench ind;
+  ASSERT_EQ(std::string(ind.GetComponent()), "Scheduling");
   ASSERT_EQ(ind.GetNumConfigs(), 7u);
-  ASSERT_EQ(ind.GetConfigName(0), "CPU Direct Fixed Grid (100% Active Baseline)");
-  ASSERT_EQ(ind.GetConfigName(1), "In-Shader Indirect Synthesis (100% Active)");
-  ASSERT_EQ(ind.GetConfigName(2), "In-Shader Indirect Synthesis (50% Active)");
-  ASSERT_EQ(ind.GetConfigName(3), "In-Shader Indirect Synthesis (10% Active)");
-  ASSERT_EQ(ind.GetConfigName(4), "In-Shader Indirect Synthesis (1% Active)");
-  ASSERT_EQ(ind.GetConfigName(5), "In-Shader Zero-Dispatch Pruning (0% Active)");
-  ASSERT_EQ(ind.GetConfigName(6), "CPU Direct Fixed Grid (10% Active)");
+  ASSERT_EQ(ind.GetConfigName(0), "CPU Direct Fixed Grid (100% Active)");
+  ASSERT_EQ(ind.GetConfigName(1), "CPU Direct Fixed Grid (10% Active)");
+  ASSERT_EQ(ind.GetConfigName(2), "Legacy Indirect Dispatch (100% Active)");
+  ASSERT_EQ(ind.GetConfigName(3), "Legacy Indirect Dispatch (10% Active)");
+  ASSERT_EQ(ind.GetConfigName(4), "Legacy Zero-Dispatch Pruning (0% Active)");
+  ASSERT_EQ(ind.GetConfigName(5), "Multi-Bucket 128x Sparse (Legacy vkCmdDispatchIndirect)");
+  ASSERT_EQ(ind.GetConfigName(6), "Multi-Bucket 128x Sparse (DGC ExecutionSet + Pruning)");
 }
 
 TEST_CASE(DescriptionsAndThumbnails, RaySchedulingConfigsCount) {
   RaySchedulingBench rs(RaySchedulingBench::SceneType::Showroom);
-  ASSERT_EQ(rs.GetNumConfigs(), 34u);
+  ASSERT_EQ(rs.GetNumConfigs(), 28u);
   ASSERT_EQ(rs.GetConfigName(0), "Stage: Material Shading (Megakernel)");
-  ASSERT_EQ(rs.GetConfigName(9), "Scene Render: Full Frame (Megakernel)");
-  ASSERT_EQ(rs.GetConfigName(17), "Primary Rays (Compute Megakernel)");
-  ASSERT_EQ(rs.GetConfigName(19), "Stage: Directional Shadows - Single Light (Megakernel)");
-  ASSERT_EQ(rs.GetConfigName(26), "Stage: Traversal Divergence - Alpha Cutout Geometry");
-  ASSERT_EQ(rs.GetConfigName(30), "Stage: Multi-Light Evaluation - Single Light (Megakernel)");
-  ASSERT_EQ(rs.GetConfigName(32), "Stage: Multi-Light Evaluation - 128 Lights (Megakernel)");
-  ASSERT_EQ(rs.GetConfigName(33), "Stage: Multi-Light Evaluation - 128 Lights (DGC Light Binning)");
+  ASSERT_EQ(rs.GetConfigName(1), "Stage: Material Shading (Legacy Indirect)");
+  ASSERT_EQ(rs.GetConfigName(2), "Stage: Material Shading (DGC ExecutionSet)");
+  ASSERT_EQ(rs.GetConfigName(4), "Scene Render: Full Frame (Megakernel)");
+  ASSERT_EQ(rs.GetConfigName(5), "Scene Render: Full Frame (Legacy Indirect)");
+  ASSERT_EQ(rs.GetConfigName(6), "Scene Render: Full Frame (DGC ExecutionSet)");
+  ASSERT_EQ(rs.GetConfigName(13), "Primary Rays (Compute Megakernel)");
+  ASSERT_EQ(rs.GetConfigName(19), "Stage: Directional Shadows (Megakernel)");
+  ASSERT_EQ(rs.GetConfigName(21), "Stage: Multi-Light - 128 Lights (Megakernel)");
+  ASSERT_EQ(rs.GetConfigName(22), "Stage: Multi-Light - 128 Lights (DGC Light Binning)");
+  ASSERT_EQ(rs.GetConfigName(23), "Stage: Traversal Divergence - Alpha Cutout Geometry");
 }
 
 TEST_CASE(DescriptionsAndThumbnails, RayHardwareTraversalAndDivergenceConfigs) {
@@ -149,7 +153,7 @@ TEST_CASE(DescriptionsAndThumbnails, RayHardwareTraversalAndDivergenceConfigs) {
 
   RayAnyHitBench anyhit;
   ASSERT_EQ(anyhit.GetNumConfigs(), 2u);
-  ASSERT_EQ(anyhit.GetConfigName(0), "100% Solid (Any-Hit Baseline)");
+  ASSERT_EQ(anyhit.GetConfigName(0), "100% Solid (Opaque Fast-Path Baseline)");
   ASSERT_EQ(anyhit.GetConfigName(1), "50% Solid (Cutout Stress)");
 
   RayProceduralBench proc;

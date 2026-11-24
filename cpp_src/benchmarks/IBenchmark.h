@@ -96,8 +96,22 @@ public:
   }
   virtual uint32_t GetNumConfigs() const { return 1; }
   virtual std::string GetConfigName(uint32_t /*config_idx*/) const { return ""; }
+  virtual std::string GetConfigName(uint32_t config_idx,
+                                    const DeviceInfo &info,
+                                    IComputeContext *context = nullptr) const {
+    (void)info;
+    (void)context;
+    return GetConfigName(config_idx);
+  }
   virtual const char *GetDescription() const { return ""; }
   virtual const char *GetDescription(uint32_t /*config_idx*/) const { return GetDescription(); }
+  virtual const char *GetDescription(uint32_t config_idx,
+                                     const DeviceInfo &info,
+                                     IComputeContext *context = nullptr) const {
+    (void)info;
+    (void)context;
+    return GetDescription(config_idx);
+  }
   // Empirical Roofline Operational Intensity (FLOPs or OPs per byte of memory traffic).
   // Returns > 0.0 for compute/matrix/vector workloads plotted on the Roofline chart.
   virtual double GetOperationalIntensity(uint32_t /*config_idx*/ = 0) const { return 0.0; }

@@ -42,7 +42,9 @@ public:
   }
   int GetSortWeight() const override { return 400; }
   uint32_t GetNumConfigs() const override;
+  using IBenchmark::GetConfigName;
   std::string GetConfigName(uint32_t config_idx) const override;
+  using IBenchmark::GetDescription;
   const char *GetDescription() const override { return GetDescription(0); }
   const char *GetDescription(uint32_t config_idx) const override;
 
@@ -50,6 +52,7 @@ public:
   bool IsDeviceDependent() const override { return false; }
 
   bool IsEmulated(uint32_t config_idx = 0) const override;
+  using IBenchmark::GetConfigCaveat;
   std::string GetConfigCaveat(uint32_t config_idx = 0) const override;
 
 private:

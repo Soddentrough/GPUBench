@@ -370,10 +370,28 @@ const char *SysMemBandwidthBench::GetName() const {
 const char *SysMemBandwidthBench::GetMetric() const { return "GB/s"; }
 
 const char *SysMemBandwidthBench::GetDescription(uint32_t config_idx) const {
-  if (config_idx >= 3) {
-    return "Single-core host DRAM bandwidth using non-temporal SIMD streaming (AVX-512 / AVX2 / NEON).";
+  const bool singleThread = (config_idx >= 3u);
+  const SysMemTestMode mode =
+      (config_idx < configs.size()) ? configs[config_idx].mode : SysMemTestMode::Read;
+  if (singleThread) {
+    switch (mode) {
+    case SysMemTestMode::Read:
+      return "Single-core host DRAM read bandwidth using aligned SIMD vector loads (AVX-512 / AVX2 / NEON).";
+    case SysMemTestMode::Write:
+      return "Single-core host DRAM write bandwidth using non-temporal SIMD streaming stores (AVX-512 / AVX2 / NEON).";
+    case SysMemTestMode::ReadWrite:
+      return "Single-core host DRAM copy bandwidth using SIMD vector loads paired with non-temporal streaming stores (AVX-512 / AVX2 / NEON).";
+    }
   }
-  return "Multi-threaded NUMA/CCD first-touch host DRAM bandwidth using non-temporal SIMD streaming (AVX-512 / AVX2 / NEON).";
+  switch (mode) {
+  case SysMemTestMode::Read:
+    return "Multi-threaded NUMA/CCD first-touch host DRAM read bandwidth using aligned SIMD vector loads (AVX-512 / AVX2 / NEON).";
+  case SysMemTestMode::Write:
+    return "Multi-threaded NUMA/CCD first-touch host DRAM write bandwidth using non-temporal SIMD streaming stores (AVX-512 / AVX2 / NEON).";
+  case SysMemTestMode::ReadWrite:
+    return "Multi-threaded NUMA/CCD first-touch host DRAM copy bandwidth using SIMD vector loads paired with non-temporal streaming stores (AVX-512 / AVX2 / NEON).";
+  }
+  return "Multi-threaded NUMA/CCD first-touch host DRAM bandwidth using SIMD vectorization (AVX-512 / AVX2 / NEON).";
 }
 
 bool SysMemBandwidthBench::IsSupported(const DeviceInfo & /*info*/,
@@ -602,16 +620,21 @@ bool SysMemBandwidthBench::IsEmulated(uint32_t config_idx) const {
 }
 
 std::string SysMemBandwidthBench::GetConfigCaveat(uint32_t config_idx) const {
-  (void)config_idx;
+  const bool isRead =
+      (config_idx < configs.size() && configs[config_idx].mode == SysMemTestMode::Read);
   switch (detectHostSimdTier()) {
   case HostSimdTier::Avx512:
-    return "AVX-512 512-bit non-temporal streaming";
+    return isRead ? "AVX-512 512-bit vector loads"
+                  : "AVX-512 512-bit non-temporal streaming stores";
   case HostSimdTier::Avx2:
     return "";
   case HostSimdTier::ArmNeon:
-    return "ARM64 NEON 128-bit streaming";
+    return isRead ? "ARM64 NEON 128-bit vector loads"
+                  : "ARM64 NEON 128-bit non-temporal streaming stores";
   case HostSimdTier::Scalar:
-    return "Executing without SIMD non-temporal stores; memory writes pass through CPU cache hierarchy";
+    return isRead
+               ? "Executing with scalar 64-bit loads (no SIMD vectorization)"
+               : "Executing without SIMD non-temporal stores; memory writes pass through CPU cache hierarchy";
   }
   return "";
 }

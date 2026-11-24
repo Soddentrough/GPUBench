@@ -3,6 +3,7 @@
 #include "IComputeContext.h"
 #include "BlockSuballocator.h"
 #include <array>
+#include <atomic>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -39,9 +40,14 @@ public:
   // Buffer management (VMA-backed)
   ComputeBuffer createBuffer(size_t size,
                              const void *host_ptr = nullptr) override;
+  ComputeBuffer createAlignedBuffer(size_t size, VkDeviceSize alignment,
+                                    const void *host_ptr = nullptr);
   ComputeBuffer createPinnedHostBuffer(size_t size, bool forUpload,
                                        void **outMappedPtr = nullptr);
   ComputeBuffer createRebarBuffer(size_t size, void **outMappedPtr = nullptr);
+  VkDeviceSize getMinASScratchOffsetAlignment() const {
+    return minASScratchOffsetAlignment;
+  }
   void *getBufferMappedPtr(ComputeBuffer buffer) const;
   void writeBuffer(ComputeBuffer buffer, size_t offset, size_t size,
                    const void *host_ptr) override;
@@ -253,11 +259,35 @@ public:
   bool isDynamicRenderingSupported() const {
     return dynamicRenderingSupported;
   }
+  bool isTessellationSupported() const {
+    return tessellationSupported;
+  }
+  bool isMeshShaderSupported() const {
+    return meshShaderSupported;
+  }
+  bool isDrawIndirectCountSupported() const {
+    return drawIndirectCountSupported;
+  }
+  bool isFragmentBarycentricSupported() const {
+    return fragmentBarycentricSupported;
+  }
   PFN_vkCmdBeginRenderingKHR getCmdBeginRendering() const {
     return vkCmdBeginRendering_ptr;
   }
   PFN_vkCmdEndRenderingKHR getCmdEndRendering() const {
     return vkCmdEndRendering_ptr;
+  }
+  PFN_vkCmdDrawMeshTasksEXT getCmdDrawMeshTasks() const {
+    return vkCmdDrawMeshTasksEXT_ptr;
+  }
+  PFN_vkCmdDrawMeshTasksIndirectEXT getCmdDrawMeshTasksIndirect() const {
+    return vkCmdDrawMeshTasksIndirectEXT_ptr;
+  }
+  PFN_vkCmdDrawMeshTasksIndirectCountEXT getCmdDrawMeshTasksIndirectCount() const {
+    return vkCmdDrawMeshTasksIndirectCountEXT_ptr;
+  }
+  PFN_vkCmdDrawIndexedIndirectCount getCmdDrawIndexedIndirectCount() const {
+    return vkCmdDrawIndexedIndirectCount_ptr;
   }
   KernelResourceUsage getKernelResourceUsage(ComputeKernel kernel) const override;
   bool isKernelBf16Emulated(ComputeKernel kernel) const;
@@ -346,6 +376,9 @@ public:
   void enableHeadlessSwapchain() override;
   void presentFrame() override;
   bool isHeadlessSwapchainEnabled() const override { return headlessSwapchain != VK_NULL_HANDLE; }
+  uint32_t getValidationErrorCount() const {
+    return validationErrorCount.load(std::memory_order_relaxed);
+  }
 
 public:
   const std::vector<VkPhysicalDevice> &getPhysicalDevices() const {
@@ -360,6 +393,10 @@ public:
       VkAccessFlags2 srcAccessMask,
       VkPipelineStageFlags2 dstStageMask,
       VkAccessFlags2 dstAccessMask);
+  void cmdImageMemoryBarrier2(
+      VkCommandBuffer cmd,
+      const VkImageMemoryBarrier2 *barriers,
+      uint32_t count);
 
 private:
   struct VulkanBuffer {
@@ -451,6 +488,7 @@ private:
   bool timingSupported = false;
   bool isTimingActive = false;
   double timestampPeriod = 1.0;
+  uint32_t timestampValidBits = 64;
   uint32_t currentQueryIndex = 0;
   static constexpr uint32_t kMaxTimestamps = 4096;
   struct TimestampQueryPair {
@@ -465,13 +503,19 @@ private:
   void maybeBeginTiming(VkCommandBuffer cmd);
   void maybeEndTiming(VkCommandBuffer cmd);
   bool hostQueryResetSupported = false;
-
-  PFN_vkCmdPipelineBarrier2KHR vkCmdPipelineBarrier2KHR_ptr = nullptr;
   bool sync2Supported = false;
 
   PFN_vkCmdBeginRenderingKHR vkCmdBeginRendering_ptr = nullptr;
   PFN_vkCmdEndRenderingKHR vkCmdEndRendering_ptr = nullptr;
+  PFN_vkCmdDrawMeshTasksEXT vkCmdDrawMeshTasksEXT_ptr = nullptr;
+  PFN_vkCmdDrawMeshTasksIndirectEXT vkCmdDrawMeshTasksIndirectEXT_ptr = nullptr;
+  PFN_vkCmdDrawMeshTasksIndirectCountEXT vkCmdDrawMeshTasksIndirectCountEXT_ptr = nullptr;
+  PFN_vkCmdDrawIndexedIndirectCount vkCmdDrawIndexedIndirectCount_ptr = nullptr;
   bool dynamicRenderingSupported = false;
+  bool tessellationSupported = false;
+  bool meshShaderSupported = false;
+  bool drawIndirectCountSupported = false;
+  bool fragmentBarycentricSupported = false;
 
   PFN_vkGetPipelineExecutablePropertiesKHR vkGetPipelineExecutablePropertiesKHR_ptr = nullptr;
   PFN_vkGetPipelineExecutableStatisticsKHR vkGetPipelineExecutableStatisticsKHR_ptr = nullptr;
@@ -479,6 +523,7 @@ private:
   bool pipelineExecutablePropertiesSupported = false;
 
   VkDebugUtilsMessengerEXT debugMessenger = VK_NULL_HANDLE;
+  std::atomic<uint32_t> validationErrorCount{0};
   PFN_vkCreateDebugUtilsMessengerEXT vkCreateDebugUtilsMessengerEXT_ptr = nullptr;
   PFN_vkDestroyDebugUtilsMessengerEXT vkDestroyDebugUtilsMessengerEXT_ptr = nullptr;
 
@@ -551,6 +596,7 @@ private:
   bool structuredSparsitySupported = false;
   bool memoryBudgetSupported = false;
   bool amdDeviceCoherentMemorySupported = false;
+  VkDeviceSize minASScratchOffsetAlignment = 256;
 
   // DGC (VK_EXT_device_generated_commands) function pointers
   PFN_vkGetGeneratedCommandsMemoryRequirementsEXT vkGetGeneratedCommandsMemoryRequirementsEXT_ptr = nullptr;
@@ -561,7 +607,6 @@ private:
   PFN_vkCreateIndirectExecutionSetEXT vkCreateIndirectExecutionSetEXT_ptr = nullptr;
   PFN_vkDestroyIndirectExecutionSetEXT vkDestroyIndirectExecutionSetEXT_ptr = nullptr;
   PFN_vkUpdateIndirectExecutionSetPipelineEXT vkUpdateIndirectExecutionSetPipelineEXT_ptr = nullptr;
-  PFN_vkGetBufferDeviceAddressKHR vkGetBufferDeviceAddressKHR_ptr = nullptr;
 
   // VK_KHR_performance_query state and function pointers
   bool performanceQuerySupported = false;

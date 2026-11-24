@@ -47,8 +47,10 @@ void main() {
         
         payload = vec3(0.0);
         
-        // Trace ray against geometry that has an AnyHit shader attached
-        traceRayEXT(topLevelAS, gl_RayFlagsNoneEXT, 0xFF, 0, 1, 0, origin, 0.001, dir, 100.0, 0);
+        // Config 0 (alphaDensity >= 0.999): hardware opaque fast-path culling (bypasses AnyHit)
+        // Config 1 (alphaDensity < 0.999): force NoOpaque so AnyHit shader runs cutout stress
+        uint rayFlags = (pc.alphaDensity >= 0.999) ? gl_RayFlagsOpaqueEXT : gl_RayFlagsNoOpaqueEXT;
+        traceRayEXT(topLevelAS, rayFlags, 0xFF, 0, 1, 0, origin, 0.001, dir, 100.0, 0);
 
         myHits = uint(payload.x);
     }

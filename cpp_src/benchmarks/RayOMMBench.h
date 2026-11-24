@@ -64,6 +64,11 @@ public:
   BenchmarkResult GetResult(uint32_t config_idx = 0) const override;
   bool ValidateResults(uint32_t config_idx = 0) const override;
 
+  // Khronos VK_EXT_opacity_micromap hierarchical Bird-curve mapping & level-3 sampler
+  static uint32_t BarycentricsToBirdIndex(float u, float v, uint32_t level);
+  static void SampleMicroTriangleVertices(uint32_t microIdx, float &u0, float &v0,
+                                          float &u1, float &v1, float &u2, float &v2);
+
 private:
   static constexpr uint32_t kGridDim = 64u;
   static constexpr uint32_t kNumLayers = 16u;

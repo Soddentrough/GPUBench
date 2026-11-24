@@ -42,8 +42,10 @@ void main() {
     float acc[16];
     APPLY16(INIT)
 
-    // Each iteration performs 64 bf16vec2 dot-accumulates into FP32 (256 BF16 ops/iter),
-    // matching hip_kernels/bf16.hip (v_dot2_f32_bf16 semantics) across 32,768 iterations.
+    // Each iteration performs 64 bf16vec2 dot() operations accumulated into FP32 (256 BF16 ops/iter),
+    // matching hip_kernels/bf16.hip op count across 32,768 iterations. (GLSL dot(bf16vec2, bf16vec2)
+    // returns bfloat16_t — compiled to v_dot2_bf16_bf16 + FP32 add on RDNA 4 — whereas ROCm bf16.hip
+    // invokes native FP32-accumulating v_dot2_f32_bf16.)
     for (int i = 0; i < 32768; ++i) {
         bf16vec2 m0 = uintBitsToBFloat16EXT(u16vec2(uint16_t(rawM & 0xFFFFu), uint16_t(rawM >> 16u)));
         uint rawM1 = rawM ^ 0x00020001u;

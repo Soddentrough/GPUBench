@@ -73,9 +73,9 @@ private:
   PFN_vkCmdBeginRenderingKHR pfnCmdBeginRendering = nullptr;
   PFN_vkCmdEndRenderingKHR pfnCmdEndRendering = nullptr;
 
-  uint32_t width = 8192;
-  uint32_t height = 8192;
-  uint32_t passesPerDispatch = 8;
+  uint32_t width = 2048;
+  uint32_t height = 2048;
+  uint32_t passesPerDispatch = 128;
 
   VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
   VkShaderModule vertShaderModule = VK_NULL_HANDLE;

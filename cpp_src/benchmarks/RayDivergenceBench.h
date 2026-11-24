@@ -48,7 +48,7 @@ public:
   const char *GetComponent(uint32_t config_idx = 0) const override;
   const char *GetSubCategory(uint32_t config_idx = 0) const override;
   const char *GetDescription() const override {
-    return "SIMT wavefront execution divergence across coherent, block-coherent, and fully random ray directions and material branches.";
+    return "VK_KHR_ray_tracing_pipeline SIMT wavefront traversal divergence across 5 bounce cone spreads from 90° rough diffuse (r=1.0) to 0° coherent mirror reflection (r=0.0) using a single uniform hit shader.";
   }
 
 private:

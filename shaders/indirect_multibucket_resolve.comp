@@ -1,0 +1,63 @@
+#version 460
+
+layout(local_size_x = 128, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) coherent buffer BucketCounts {
+    uint bucketCounts[128];
+    uint bucketSnapshots[128];
+};
+
+layout(set = 0, binding = 1) buffer IndirectCmds {
+    uint cmds[];
+};
+
+layout(set = 0, binding = 2) buffer DgcCount {
+    uint seqCount[];
+};
+
+layout(set = 0, binding = 3) buffer DgcSeq {
+    uint seqData[];
+};
+
+layout(push_constant) uniform ResolvePC {
+    uint arg0;
+    uint dgcMode;
+    uint pad;
+} rpc;
+
+shared uint sActiveCount;
+
+void main() {
+    uint b = gl_LocalInvocationID.x;
+    if (b == 0u) {
+        sActiveCount = 0u;
+    }
+    barrier();
+
+    uint count = bucketCounts[b];
+    bucketSnapshots[b] = count;
+    bucketCounts[b] = 0u;
+
+    uint wg = (count + 63u) / 64u;
+    cmds[b * 3u + 0u] = wg;
+    cmds[b * 3u + 1u] = (count > 0u) ? 1u : 0u;
+    cmds[b * 3u + 2u] = (count > 0u) ? 1u : 0u;
+
+    if (rpc.dgcMode != 0u && count > 0u) {
+        uint slot = atomicAdd(sActiveCount, 1u);
+        uint base = slot * 8u;
+        seqData[base + 0u] = b & 7u;
+        seqData[base + 1u] = b;
+        seqData[base + 2u] = count;
+        seqData[base + 3u] = wg;
+        seqData[base + 4u] = 1u;
+        seqData[base + 5u] = 1u;
+        seqData[base + 6u] = 0u;
+        seqData[base + 7u] = 0u;
+    }
+
+    barrier();
+    if (rpc.dgcMode != 0u && b == 0u) {
+        seqCount[0] = sActiveCount;
+    }
+}

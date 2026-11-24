@@ -1,7 +1,12 @@
 #pragma once
 
 #include "IBenchmark.h"
+#ifdef HAVE_VULKAN
 #include "core/VulkanContext.h"
+#endif
+#ifdef HAVE_ROCM
+#include "core/ROCmContext.h"
+#endif
 #include <array>
 #include <cstdint>
 #include <string>
@@ -29,25 +34,35 @@ public:
   uint32_t GetExpectedKernelCount() const override { return 1; }
 
   uint32_t GetNumConfigs() const override { return 6; }
+  using IBenchmark::GetConfigName;
   std::string GetConfigName(uint32_t config_idx) const override;
+  using IBenchmark::GetDescription;
   const char *GetDescription() const override { return GetDescription(0); }
   const char *GetDescription(uint32_t config_idx) const override;
+  const char *GetDescription(uint32_t config_idx, const DeviceInfo &info,
+                             IComputeContext *context = nullptr) const override;
 
   bool IsSupported(const DeviceInfo &info,
                    IComputeContext *context = nullptr) const override;
+  using IBenchmark::IsConfigSupported;
   bool IsConfigSupported(uint32_t config_idx, const DeviceInfo &info,
                          IComputeContext *context = nullptr) const override;
+  using IBenchmark::GetSupportLimitation;
   SupportLimitation GetSupportLimitation(
       const DeviceInfo &info,
       IComputeContext *context = nullptr) const override;
+  using IBenchmark::GetConfigSupportLimitation;
   SupportLimitation GetConfigSupportLimitation(
       uint32_t config_idx, const DeviceInfo &info,
       IComputeContext *context = nullptr) const override;
+  using IBenchmark::GetSupportNote;
   std::string GetSupportNote(const DeviceInfo &info,
                              IComputeContext *context = nullptr) const override;
+  using IBenchmark::GetConfigSupportNote;
   std::string GetConfigSupportNote(
       uint32_t config_idx, const DeviceInfo &info,
       IComputeContext *context = nullptr) const override;
+  using IBenchmark::GetConfigCaveat;
   std::string GetConfigCaveat(
       uint32_t config_idx, const DeviceInfo &info,
       IComputeContext *context = nullptr) const override;
@@ -70,10 +85,17 @@ private:
   static constexpr uint32_t kPingPongSteps = 2048u;
 
   IComputeContext *m_context = nullptr;
-  VulkanContext *m_vk = nullptr;
   std::string m_kernelDir;
 
   ComputeKernel m_helperKernel = nullptr;
+
+  // Shared device buffers across backends
+  ComputeBuffer m_devDst = nullptr;
+  ComputeBuffer m_devSrc = nullptr;
+  ComputeBuffer m_verifyOutBuf = nullptr;
+
+#ifdef HAVE_VULKAN
+  VulkanContext *m_vk = nullptr;
   VkCommandPool m_primaryPool = VK_NULL_HANDLE;
   VkCommandBuffer m_primaryCmd = VK_NULL_HANDLE;
   VkFence m_primaryFence = VK_NULL_HANDLE;
@@ -89,9 +111,7 @@ private:
   // Per-config lazily allocated buffers
   ComputeBuffer m_pinnedUpload = nullptr;
   void *m_mappedUpload = nullptr;
-  ComputeBuffer m_devDst = nullptr;
 
-  ComputeBuffer m_devSrc = nullptr;
   ComputeBuffer m_pinnedDownload = nullptr;
   void *m_mappedDownload = nullptr;
 
@@ -109,7 +129,6 @@ private:
 
   ComputeBuffer m_rebarBuf = nullptr;
   void *m_mappedRebar = nullptr;
-  ComputeBuffer m_verifyOutBuf = nullptr;
 
   // Vulkan DeviceGroup P2P resources (Config 5)
   VkDevice m_p2pDevice = VK_NULL_HANDLE;
@@ -125,9 +144,24 @@ private:
   VkDeviceMemory m_p2pStageMem = VK_NULL_HANDLE;
   void *m_p2pStageMapped = nullptr;
 
-  std::array<double, 6> m_lastDurationMs{};
-  uint32_t m_rebarSeed = 0xC33C5A5Au;
-
   bool probeVulkanDeviceGroupP2P(const VulkanContext *vc,
                                  std::string &outReason) const;
+#endif
+
+#ifdef HAVE_ROCM
+  ROCmContext *m_rocm = nullptr;
+  hipStream_t m_rocmStream0 = nullptr;
+  hipStream_t m_rocmStream1 = nullptr;
+  hipEvent_t m_rocmStartEv = nullptr;
+  hipEvent_t m_rocmStopEv = nullptr;
+  void *m_rocmPinnedUpload = nullptr;
+  void *m_rocmPinnedDownload = nullptr;
+  void *m_rocmMailboxHost = nullptr;
+  void *m_rocmMailboxDevPtr = nullptr;
+  void *m_rocmP2pDst = nullptr;
+  int m_rocmP2pDstDev = -1;
+#endif
+
+  std::array<double, 6> m_lastDurationMs{};
+  uint32_t m_rebarSeed = 0xC33C5A5Au;
 };

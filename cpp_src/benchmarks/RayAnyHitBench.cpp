@@ -31,7 +31,7 @@ std::string RayAnyHitBench::GetSupportNote(const DeviceInfo &info,
     return "No support for ray tracing pipelines in ROCm/HIP API";
   }
   if (!info.rayTracingSupport) {
-    return "VK_KHR_acceleration_structure or VK_KHR_ray_query missing";
+    return "VK_KHR_acceleration_structure or VK_KHR_ray_tracing_pipeline missing";
   }
   if (context) {
     const VulkanContext *vc = dynamic_cast<const VulkanContext *>(context);
@@ -217,8 +217,8 @@ void RayAnyHitBench::buildAS() {
   triInstance.instanceCustomIndex = 0;
   triInstance.mask = 0xFF;
   triInstance.accelerationStructureReference = triASAddr;
-  // Also ensuring we do NOT force opaque at the instance level
-  triInstance.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR | VK_GEOMETRY_INSTANCE_FORCE_NO_OPAQUE_BIT_KHR;
+  // Allow per-ray traceRayEXT flags (Opaque vs NoOpaque) to select hardware fast-path or AnyHit
+  triInstance.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
 
   instanceBuffer =
       context->createBuffer(sizeof(VkAccelerationStructureInstanceKHR));
@@ -332,11 +332,14 @@ void RayAnyHitBench::buildAS() {
   VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
   submit.commandBufferCount = 1;
   submit.pCommandBuffers = &cmd;
-  if (vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE) != VK_SUCCESS) {
-    vkDestroyCommandPool(device, tmpPool, nullptr);
-    throw std::runtime_error("Failed to submit AS build in RayAnyHitBench");
+  {
+    std::lock_guard<std::recursive_mutex> qlock(vContext->getQueueMutex());
+    if (vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE) != VK_SUCCESS) {
+      vkDestroyCommandPool(device, tmpPool, nullptr);
+      throw std::runtime_error("Failed to submit AS build in RayAnyHitBench");
+    }
+    vkQueueWaitIdle(queue);
   }
-  vkQueueWaitIdle(queue);
 
   vkDestroyCommandPool(device, tmpPool, nullptr);
 }
@@ -405,7 +408,7 @@ const char *RayAnyHitBench::GetSubCategory(uint32_t config_idx) const {
 }
 
 std::string RayAnyHitBench::GetConfigName(uint32_t config_idx) const {
-  if (config_idx == 0) return "100% Solid (Any-Hit Baseline)";
+  if (config_idx == 0) return "100% Solid (Opaque Fast-Path Baseline)";
   return "50% Solid (Cutout Stress)";
 }
 

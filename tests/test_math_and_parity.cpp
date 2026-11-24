@@ -4,7 +4,78 @@
 #include "benchmarks/RaySchedulingBench.h"
 #include <cmath>
 #include <cstdint>
+#include <cstring>
+#include <limits>
 #include <vector>
+
+namespace {
+
+uint16_t floatToHalfBits(float val) {
+  uint32_t bits = 0;
+  std::memcpy(&bits, &val, sizeof(bits));
+  uint16_t sign = static_cast<uint16_t>((bits >> 16) & 0x8000u);
+  int32_t exp = static_cast<int32_t>((bits >> 23) & 0xFFu) - 127 + 15;
+  uint32_t mant = bits & 0x007FFFFFu;
+
+  if ((bits & 0x7FFFFFFFu) > 0x7F800000u) {
+    return static_cast<uint16_t>(sign | 0x7E00u | (mant >> 13)); // NaN
+  }
+  if (exp >= 31) {
+    return static_cast<uint16_t>(sign | 0x7C00u); // Inf / overflow
+  }
+  if (exp <= 0) {
+    if (exp < -10) {
+      return sign; // Underflow to zero
+    }
+    mant = (mant | 0x00800000u) >> (1 - exp);
+    if (mant & 0x00001000u) {
+      mant += 0x00002000u;
+    }
+    return static_cast<uint16_t>(sign | (mant >> 13));
+  }
+  uint32_t rounded = mant + 0x00000FFFu + ((mant >> 13) & 1u);
+  if (rounded & 0x00800000u) {
+    rounded = 0;
+    ++exp;
+    if (exp >= 31) {
+      return static_cast<uint16_t>(sign | 0x7C00u);
+    }
+  }
+  return static_cast<uint16_t>(sign | (static_cast<uint32_t>(exp) << 10) | (rounded >> 13));
+}
+
+float halfBitsToFloat(uint16_t h) {
+  uint32_t sign = (static_cast<uint32_t>(h & 0x8000u)) << 16;
+  uint32_t exp = (h >> 10) & 0x1Fu;
+  uint32_t mant = h & 0x03FFu;
+  uint32_t out = 0;
+  if (exp == 0) {
+    if (mant == 0) {
+      out = sign;
+    } else {
+      int32_t e = -14;
+      while ((mant & 0x0400u) == 0) {
+        mant <<= 1;
+        --e;
+      }
+      mant &= 0x03FFu;
+      out = sign | (static_cast<uint32_t>(e + 127) << 23) | (mant << 13);
+    }
+  } else if (exp == 31) {
+    out = sign | 0x7F800000u | (mant << 13);
+  } else {
+    out = sign | ((exp - 15u + 127u) << 23) | (mant << 13);
+  }
+  float res = 0.0f;
+  std::memcpy(&res, &out, sizeof(res));
+  return res;
+}
+
+float roundToFp16(float v) {
+  return halfBitsToFloat(floatToHalfBits(v));
+}
+
+} // namespace
 
 TEST_CASE(MathAndParity, Fp32RecurrenceConvergence) {
   // Analytical verification of x_{n+1} = fma(m, x_n, c) with |m| < 1.0:
@@ -27,13 +98,13 @@ TEST_CASE(MathAndParity, Fp32RecurrenceConvergence) {
 }
 
 TEST_CASE(MathAndParity, Fp16AndDualIssueRecurrenceBounds) {
-  // 1. Verify FP16 self-recurrence: a = fma(a, -0.9990234375f, 0.5f)
-  // remains strictly within IEEE-754 FP16 range (max 65504.0) across 65,536 iterations.
-  const float m16 = -0.9990234375f;
-  const float c16 = 0.5f;
-  float a16 = 0.03125f;
+  // 1. Verify FP16 self-recurrence under genuine IEEE-754 binary16 rounding:
+  // a = fp16(fma(a, -0.9990234375, 0.5)) remains strictly within IEEE-754 FP16 range (max 65504.0).
+  const float m16 = roundToFp16(-0.9990234375f);
+  const float c16 = roundToFp16(0.5f);
+  float a16 = roundToFp16(0.03125f);
   for (int i = 0; i < 65536; ++i) {
-    a16 = std::fma(a16, m16, c16);
+    a16 = roundToFp16(std::fma(a16, m16, c16));
     ASSERT_TRUE(std::isfinite(a16));
     ASSERT_LT(std::abs(a16), 65504.0f);
   }
@@ -81,23 +152,26 @@ TEST_CASE(MathAndParity, LdsBankConflictStridePreservation) {
 
 TEST_CASE(MathAndParity, BenchmarkBaselineAndSortWeightIntegrity) {
   RaySchedulingBench rtBench;
-  // Verify DGC Path Tracing and GI configs map to their Megakernel baselines
+  // Verify Legacy Indirect and DGC configs map to their Megakernel baselines
+  ASSERT_EQ(rtBench.GetBaselineConfigIndex(1), 0);
   ASSERT_EQ(rtBench.GetBaselineConfigIndex(2), 0);
-  ASSERT_EQ(rtBench.GetBaselineConfigIndex(5), 3);
-  ASSERT_EQ(rtBench.GetBaselineConfigIndex(8), 6);
-  ASSERT_EQ(rtBench.GetBaselineConfigIndex(11), 9);
+  ASSERT_EQ(rtBench.GetBaselineConfigIndex(5), 4);
+  ASSERT_EQ(rtBench.GetBaselineConfigIndex(6), 4);
+  ASSERT_EQ(rtBench.GetBaselineConfigIndex(9), 8);
+  ASSERT_EQ(rtBench.GetBaselineConfigIndex(12), 11);
   ASSERT_EQ(rtBench.GetBaselineConfigIndex(18), 17);
-  ASSERT_EQ(rtBench.GetBaselineConfigIndex(24), 23);
+  ASSERT_EQ(rtBench.GetBaselineConfigIndex(25), 24);
 
-  // Verify Config 2 (Material Shading DGC) and Config 6 (Incoherent GI Megakernel) do not share sortWeight
-  ASSERT_NE(rtBench.GetSortWeight(2), rtBench.GetSortWeight(6));
+  // Verify Config 2 (Material Shading DGC) and Config 17 (Incoherent GI Megakernel) do not share sortWeight
+  ASSERT_NE(rtBench.GetSortWeight(2), rtBench.GetSortWeight(17));
 
-  // Verify Wavefront Stream Compaction orders naive Single-Pass (25) as baseline before Throughput (27) and Wave Ballot (13)
-  ASSERT_EQ(rtBench.GetBaselineConfigIndex(25), -1);
-  ASSERT_EQ(rtBench.GetBaselineConfigIndex(27), 25);
-  ASSERT_EQ(rtBench.GetBaselineConfigIndex(13), 25);
-  ASSERT_LT(rtBench.GetSortWeight(25), rtBench.GetSortWeight(27));
-  ASSERT_LT(rtBench.GetSortWeight(27), rtBench.GetSortWeight(13));
+  // Verify BVH Traversal (24->25) and Queue Compaction (26->27) baselines and ordering
+  ASSERT_EQ(rtBench.GetBaselineConfigIndex(24), -1);
+  ASSERT_EQ(rtBench.GetBaselineConfigIndex(26), -1);
+  ASSERT_EQ(rtBench.GetBaselineConfigIndex(27), 26);
+  ASSERT_LT(rtBench.GetSortWeight(24), rtBench.GetSortWeight(25));
+  ASSERT_LT(rtBench.GetSortWeight(26), rtBench.GetSortWeight(27));
+  ASSERT_LT(rtBench.GetSortWeight(13), rtBench.GetSortWeight(14));
 
   DualIssueBench diBench;
   ASSERT_EQ(std::string(diBench.GetName()), "ILP & Dual-Issue");

@@ -85,7 +85,7 @@ std::unique_ptr<IComputeContext> createVulkanContext() {
     if (!ctx || ctx->getDevices().empty()) {
       return nullptr;
     }
-    ctx->pickDevice(0);
+    ctx->pickDevice(::gpubench::test::preferredTestDeviceIndex(ctx->getDevices().size()));
     return ctx;
   } catch (...) {
     return nullptr;
@@ -104,7 +104,7 @@ void clearPixelFillImageToZero(PixelFillRateBench &bench, uint32_t configIdx) {
 
 TEST_CASE(GraphicsAndRayTracingValidation, PixelFill_PositiveAndNegativeValidation) {
   auto ctx = createVulkanContext();
-  if (!ctx) { return; }
+  if (!ctx) { SKIP_TEST("Vulkan backend unavailable"); }
 
   std::string kdir = KernelPath::find();
   ASSERT_FALSE(kdir.empty());
@@ -112,11 +112,15 @@ TEST_CASE(GraphicsAndRayTracingValidation, PixelFill_PositiveAndNegativeValidati
   PixelFillRateBench bench;
   DeviceInfo info = ctx->getCurrentDeviceInfo();
   if (!bench.IsSupported(info, ctx.get())) {
-    std::cout << "[SKIP] PixelFillRate not supported" << std::endl;
-    return;
+    SKIP_TEST("PixelFillRate not supported on current device");
   }
 
   bench.Setup(*ctx, kdir);
+
+  // 0. Pre-clear negative validation: unexecuted Run() must fail (images pre-cleared to zero)
+  ASSERT_FALSE(bench.ValidateResults(0));
+  ASSERT_FALSE(bench.ValidateResults(1));
+  ASSERT_FALSE(bench.ValidateResults(2));
 
   // 1. Positive validation for all configs
   for (uint32_t i = 0; i < bench.GetNumConfigs(); ++i) {
@@ -145,7 +149,7 @@ TEST_CASE(GraphicsAndRayTracingValidation, PixelFill_PositiveAndNegativeValidati
 
 TEST_CASE(GraphicsAndRayTracingValidation, RayRawTraversal_PositiveAndNegativeValidation) {
   auto ctx = createVulkanContext();
-  if (!ctx) { return; }
+  if (!ctx) { SKIP_TEST("Vulkan backend unavailable"); }
 
   std::string kdir = KernelPath::find();
   ASSERT_FALSE(kdir.empty());
@@ -153,8 +157,7 @@ TEST_CASE(GraphicsAndRayTracingValidation, RayRawTraversal_PositiveAndNegativeVa
   RayRawTraversalBench bench;
   DeviceInfo info = ctx->getCurrentDeviceInfo();
   if (!bench.IsSupported(info, ctx.get())) {
-    std::cout << "[SKIP] RayRawTraversal not supported" << std::endl;
-    return;
+    SKIP_TEST("RayRawTraversal not supported on current device");
   }
 
   bench.Setup(*ctx, kdir);
@@ -186,7 +189,7 @@ TEST_CASE(GraphicsAndRayTracingValidation, RayRawTraversal_PositiveAndNegativeVa
 
 TEST_CASE(GraphicsAndRayTracingValidation, RayIntersect_PositiveAndNegativeValidation) {
   auto ctx = createVulkanContext();
-  if (!ctx) { return; }
+  if (!ctx) { SKIP_TEST("Vulkan backend unavailable"); }
 
   std::string kdir = KernelPath::find();
   ASSERT_FALSE(kdir.empty());
@@ -194,8 +197,7 @@ TEST_CASE(GraphicsAndRayTracingValidation, RayIntersect_PositiveAndNegativeValid
   RayIntersectBench bench;
   DeviceInfo info = ctx->getCurrentDeviceInfo();
   if (!bench.IsSupported(info, ctx.get())) {
-    std::cout << "[SKIP] RayIntersect not supported" << std::endl;
-    return;
+    SKIP_TEST("RayIntersect not supported on current device");
   }
 
   bench.Setup(*ctx, kdir);
@@ -228,7 +230,7 @@ TEST_CASE(GraphicsAndRayTracingValidation, RayIntersect_PositiveAndNegativeValid
 
 TEST_CASE(GraphicsAndRayTracingValidation, RayDivergence_PositiveAndNegativeValidation) {
   auto ctx = createVulkanContext();
-  if (!ctx) { return; }
+  if (!ctx) { SKIP_TEST("Vulkan backend unavailable"); }
 
   std::string kdir = KernelPath::find();
   ASSERT_FALSE(kdir.empty());
@@ -236,8 +238,7 @@ TEST_CASE(GraphicsAndRayTracingValidation, RayDivergence_PositiveAndNegativeVali
   RayDivergenceBench bench;
   DeviceInfo info = ctx->getCurrentDeviceInfo();
   if (!bench.IsSupported(info, ctx.get())) {
-    std::cout << "[SKIP] RayDivergence not supported" << std::endl;
-    return;
+    SKIP_TEST("RayDivergence not supported on current device");
   }
 
   bench.Setup(*ctx, kdir);
@@ -262,7 +263,7 @@ TEST_CASE(GraphicsAndRayTracingValidation, RayDivergence_PositiveAndNegativeVali
 
 TEST_CASE(GraphicsAndRayTracingValidation, RayAnyHit_PositiveAndNegativeValidation) {
   auto ctx = createVulkanContext();
-  if (!ctx) { return; }
+  if (!ctx) { SKIP_TEST("Vulkan backend unavailable"); }
 
   std::string kdir = KernelPath::find();
   ASSERT_FALSE(kdir.empty());
@@ -270,8 +271,7 @@ TEST_CASE(GraphicsAndRayTracingValidation, RayAnyHit_PositiveAndNegativeValidati
   RayAnyHitBench bench;
   DeviceInfo info = ctx->getCurrentDeviceInfo();
   if (!bench.IsSupported(info, ctx.get())) {
-    std::cout << "[SKIP] RayAnyHit not supported" << std::endl;
-    return;
+    SKIP_TEST("RayAnyHit not supported on current device");
   }
 
   bench.Setup(*ctx, kdir);
@@ -301,7 +301,7 @@ TEST_CASE(GraphicsAndRayTracingValidation, RayAnyHit_PositiveAndNegativeValidati
 
 TEST_CASE(GraphicsAndRayTracingValidation, RayProcedural_PositiveAndNegativeValidation) {
   auto ctx = createVulkanContext();
-  if (!ctx) { return; }
+  if (!ctx) { SKIP_TEST("Vulkan backend unavailable"); }
 
   std::string kdir = KernelPath::find();
   ASSERT_FALSE(kdir.empty());
@@ -309,8 +309,7 @@ TEST_CASE(GraphicsAndRayTracingValidation, RayProcedural_PositiveAndNegativeVali
   RayProceduralBench bench;
   DeviceInfo info = ctx->getCurrentDeviceInfo();
   if (!bench.IsSupported(info, ctx.get())) {
-    std::cout << "[SKIP] RayProcedural not supported" << std::endl;
-    return;
+    SKIP_TEST("RayProcedural not supported on current device");
   }
 
   bench.Setup(*ctx, kdir);
@@ -335,7 +334,7 @@ TEST_CASE(GraphicsAndRayTracingValidation, RayProcedural_PositiveAndNegativeVali
 
 TEST_CASE(GraphicsAndRayTracingValidation, RayScheduling_PositiveAndNegativeValidation) {
   auto ctx = createVulkanContext();
-  if (!ctx) { return; }
+  if (!ctx) { SKIP_TEST("Vulkan backend unavailable"); }
 
   std::string kdir = KernelPath::find();
   ASSERT_FALSE(kdir.empty());
@@ -343,8 +342,7 @@ TEST_CASE(GraphicsAndRayTracingValidation, RayScheduling_PositiveAndNegativeVali
   RaySchedulingBench bench(RaySchedulingBench::SceneType::Showroom);
   DeviceInfo info = ctx->getCurrentDeviceInfo();
   if (!bench.IsSupported(info, ctx.get())) {
-    std::cout << "[SKIP] RayScheduling not supported" << std::endl;
-    return;
+    SKIP_TEST("RayScheduling not supported on current device");
   }
 
   bench.Setup(*ctx, kdir);
@@ -353,9 +351,9 @@ TEST_CASE(GraphicsAndRayTracingValidation, RayScheduling_PositiveAndNegativeVali
   ctx->waitIdle();
   ASSERT_TRUE(bench.ValidateResults(0));
 
-  // Verify non-zero worklist compaction for Incoherent GI (Config 8, mode 2),
-  // Primary Rays G-Buffer (Config 18, mode 9), and Single Light (Config 31, mode 8)
-  for (uint32_t cfg : {8u, 18u, 31u}) {
+  // Verify non-zero worklist compaction for Primary Rays G-Buffer (14),
+  // Incoherent GI (18), and Multi-Light 128 Lights (22)
+  for (uint32_t cfg : {14u, 18u, 22u}) {
     if (!bench.unsupportedConfig[cfg]) {
       bench.Run(cfg);
       ctx->waitIdle();
@@ -400,7 +398,7 @@ TEST_CASE(GraphicsAndRayTracingValidation, RayScheduling_PositiveAndNegativeVali
   for (const auto &sc : extraScenes) {
     RaySchedulingBench sceneBench(sc.first);
     sceneBench.Setup(*ctx, kdir);
-    for (uint32_t cfg : {8u, 18u, 31u}) {
+    for (uint32_t cfg : {14u, 18u, 22u}) {
       if (!sceneBench.unsupportedConfig[cfg]) {
         sceneBench.Run(cfg);
         ctx->waitIdle();
@@ -455,7 +453,7 @@ TEST_CASE(GraphicsAndRayTracingValidation, RayRawTraversal_Disclosures_JSON_And_
 
 TEST_CASE(GraphicsAndRayTracingValidation, RayPayload_PositiveAndNegativeValidation_All3Configs) {
   auto ctx = createVulkanContext();
-  if (!ctx) { return; }
+  if (!ctx) { SKIP_TEST("Vulkan backend unavailable"); }
 
   std::string kdir = KernelPath::find();
   ASSERT_FALSE(kdir.empty());
@@ -463,8 +461,7 @@ TEST_CASE(GraphicsAndRayTracingValidation, RayPayload_PositiveAndNegativeValidat
   RayPayloadBench bench;
   DeviceInfo info = ctx->getCurrentDeviceInfo();
   if (!bench.IsSupported(info, ctx.get())) {
-    std::cout << "[SKIP] RayPayload not supported on current device" << std::endl;
-    return;
+    SKIP_TEST("RayPayload not supported on current device");
   }
 
   bench.Setup(*ctx, kdir);

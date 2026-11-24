@@ -1,0 +1,42 @@
+#version 460
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) readonly buffer InputBuffer {
+    uint inputItems[];
+};
+
+layout(set = 0, binding = 1) coherent buffer MultiBucketWorkList {
+    uint bucketItems[];
+};
+
+layout(set = 0, binding = 2) coherent buffer BucketCounts {
+    uint bucketCounts[128];
+    uint bucketSnapshots[128];
+};
+
+layout(push_constant) uniform PushConstants {
+    uint totalItems;
+    uint numBuckets;
+    uint bucketCapacity;
+    uint pad;
+} pc;
+
+void main() {
+    uint gid = gl_GlobalInvocationID.x;
+    if (gid >= pc.totalItems) {
+        return;
+    }
+
+    uint itemId = inputItems[gid];
+    uint bucket = (itemId * 2654435761u) & 127u;
+    bool activeItem = (bucket == 3u || bucket == 36u || bucket == 73u || bucket == 118u);
+    if (!activeItem || bucket >= pc.numBuckets) {
+        return;
+    }
+
+    uint slot = atomicAdd(bucketCounts[bucket], 1u);
+    if (slot < pc.bucketCapacity) {
+        bucketItems[bucket * pc.bucketCapacity + slot] = itemId;
+    }
+}

@@ -48,7 +48,7 @@ static double computeRaySchedulingFps(const ResultData &r, double mraysPerSec) {
   const uint32_t h = r.height ? r.height : 1080u;
   const uint32_t spp = (r.samplesPerFrame > 1u)
       ? r.samplesPerFrame
-      : ((r.configIndex == 23u || r.configIndex == 24u) ? 16u : 1u);
+      : ((r.configIndex == 11u || r.configIndex == 12u) ? 16u : 1u);
   return (mraysPerSec * 1e6) /
          (static_cast<double>(w) * static_cast<double>(h) * static_cast<double>(spp));
 }
@@ -199,6 +199,35 @@ static std::string cleanSupportNote(const std::string &rawNote) {
   }
 
   return note;
+}
+
+static std::string stripHiddenPowerCaveat(const std::string &rawNote,
+                                          bool showPower,
+                                          bool &usedShortHwmonFootnote) {
+  if (rawNote.empty()) {
+    return rawNote;
+  }
+  const std::string kPwrCaveat =
+      "Power sampled via lagging hwmon power1_average over <2s window";
+  size_t pos = rawNote.find(kPwrCaveat);
+  if (pos == std::string::npos) {
+    return rawNote;
+  }
+  std::string out = rawNote;
+  if (showPower) {
+    usedShortHwmonFootnote = true;
+    out.replace(pos, kPwrCaveat.size(), "*<2s hwmon");
+    return out;
+  }
+  if (pos >= 2 && out.compare(pos - 2, 2, "; ") == 0) {
+    out.erase(pos - 2, kPwrCaveat.size() + 2);
+  } else {
+    out.erase(pos, kPwrCaveat.size());
+    if (out.rfind("; ", 0) == 0) {
+      out.erase(0, 2);
+    }
+  }
+  return out;
 }
 
 std::string extractSceneName(const std::string &rawName) {
@@ -446,11 +475,12 @@ void ResultFormatter::print() {
     subcatGroup.benchmarks[{res.sortWeight, res.configIndex, cleanName}][res.backendName] = res;
 
     // Track metrics for executive summary
-    if (!res.isUnsupported && res.isValid && res.time_ms > 0.0) {
-      double rate = (static_cast<double>(res.operations) / (res.time_ms / 1000.0)) / 1e6;
+    const double resEffMs = effectiveResultTimeMs(res);
+    if (!res.isUnsupported && res.isValid && resEffMs > 0.0) {
+      double rate = (static_cast<double>(res.operations) / (resEffMs / 1000.0)) / 1e6;
       if (res.benchmarkName.find("RayRawTraversal") != std::string::npos ||
           res.subcategory == "Hardware BVH Traversal") {
-        double time_s = res.time_ms / 1000.0;
+        double time_s = resEffMs / 1000.0;
         uint64_t ops = (res.configIndex == 0) ? res.operations : (res.operations * 64);
         double gis = (time_s > 0.0) ? ((static_cast<double>(ops) / time_s) / 1e9) : 0.0;
         if (res.configIndex == 0) {
@@ -506,13 +536,17 @@ void ResultFormatter::print() {
   const std::string MAGENTA = useColor ? "\033[35m" : "";
   const std::string BLUE = useColor ? "\033[34m" : "";
 
-  const size_t cardBoxWidth = std::clamp<size_t>(getTerminalWidth(), 80, 128);
-  const size_t cardInnerWidth = cardBoxWidth - 4; // 124
-
   const size_t w1 = 46;
   const size_t w2 = 8;
   const size_t w3 = 22;
-  const size_t w4 = 39;
+  const size_t termW = getTerminalWidth();
+  const size_t extraCols = (showPower && termW > 130)
+                               ? ((termW - 130) < 16 ? (termW - 130) : size_t{16})
+                               : size_t{0};
+  const size_t w4 = (showPower ? 52 : 39) + extraCols;
+  const size_t cardInnerWidth = w1 + 3 + w2 + 3 + w3 + 3 + w4;
+  const size_t cardBoxWidth = cardInnerWidth + 4;
+  bool usedShortHwmonFootnote = false;
 
   std::cout << std::endl;
   for (uint32_t devIdx : deviceIndices) {
@@ -675,14 +709,15 @@ void ResultFormatter::print() {
                 for (const auto &backend : backends) {
                   if (benchPair.second.count(backend)) {
                     const auto &res = benchPair.second.at(backend);
-                    if (!res.isUnsupported && res.isValid && res.time_ms > 0.0) {
+                    const double effMs = effectiveResultTimeMs(res);
+                    if (!res.isUnsupported && res.isValid && effMs > 0.0) {
                       double val = 0.0;
                       if (res.metric == "us") {
-                        val = (res.time_ms * 1000.0) / static_cast<double>(res.operations);
+                        val = (effMs * 1000.0) / static_cast<double>(res.operations);
                       } else if (res.metric == "ns") {
-                        val = (res.time_ms * 1e6) / static_cast<double>(res.operations);
+                        val = (effMs * 1e6) / static_cast<double>(res.operations);
                       } else {
-                        val = static_cast<double>(res.operations) / (res.time_ms / 1000.0);
+                        val = static_cast<double>(res.operations) / (effMs / 1000.0);
                         if (res.metric == "TB/s" || res.metric == "TFLOPS" || res.metric == "TOPS") {
                           val /= 1e12;
                         } else if (res.metric == "GB/s" || res.metric == "GIS/s" || res.metric == "GRays/s" ||
@@ -695,7 +730,7 @@ void ResultFormatter::print() {
                         } else if (res.component == "Compute") {
                           val /= 1e12;
                         } else if (res.component == "Memory") {
-                          val = (res.subcategory == "Latency") ? ((res.time_ms * 1e6) / res.operations) : (val / 1e9);
+                          val = (res.subcategory == "Latency") ? ((effMs * 1e6) / res.operations) : (val / 1e9);
                         } else {
                           val /= 1e6;
                         }
@@ -753,15 +788,16 @@ void ResultFormatter::print() {
                   noteStr = "[" + res.errorString + "]";
                 }
               } else if (res.component == "Compute") {
+                const double effMs = effectiveResultTimeMs(res);
                 double value = 0.0;
                 if (res.metric == "MItems/s" || res.metric == "MSamples/s" || res.metric == "MBVH/s") {
-                  value = (static_cast<double>(res.operations) / (res.time_ms / 1000.0)) / 1e6;
+                  value = (static_cast<double>(res.operations) / (effMs / 1000.0)) / 1e6;
                 } else if (res.metric == "GB/s" || res.metric == "GOPS" || res.metric == "GFLOPS") {
-                  value = (static_cast<double>(res.operations) / (res.time_ms / 1000.0)) / 1e9;
+                  value = (static_cast<double>(res.operations) / (effMs / 1000.0)) / 1e9;
                 } else if (res.metric == "us") {
-                  value = (res.time_ms * 1000.0) / static_cast<double>(res.operations);
+                  value = (effMs * 1000.0) / static_cast<double>(res.operations);
                 } else {
-                  value = (static_cast<double>(res.operations) / (res.time_ms / 1000.0)) / 1e12;
+                  value = (static_cast<double>(res.operations) / (effMs / 1000.0)) / 1e12;
                 }
                 valStr = formatDouble(value, 2) + " " + res.metric;
                 if (res.subcategory == "LDS Bank Conflicts") {
@@ -772,8 +808,9 @@ void ResultFormatter::print() {
                     for (const auto &bp : subcat.benchmarks) {
                       if (bp.second.count(backend)) {
                         const auto &br = bp.second.at(backend);
-                        if (br.subcategory == "LDS Bank Conflicts" && br.configIndex == 0 && br.time_ms > 0.0) {
-                          baseVal = (static_cast<double>(br.operations) / (br.time_ms / 1000.0)) / 1e12;
+                        const double brEffMs = effectiveResultTimeMs(br);
+                        if (br.subcategory == "LDS Bank Conflicts" && br.configIndex == 0 && brEffMs > 0.0) {
+                          baseVal = (static_cast<double>(br.operations) / (brEffMs / 1000.0)) / 1e12;
                           break;
                         }
                       }
@@ -785,18 +822,26 @@ void ResultFormatter::print() {
                     }
                   }
                 } else if (res.subcategory == "Indirect Command Synthesis") {
-                  if (res.configIndex == 0) {
+                  if (res.baselineConfigIndex < 0) {
                     noteStr = "[Baseline]";
                   } else {
                     double baseVal = 0.0;
                     for (const auto &bp : subcat.benchmarks) {
                       if (bp.second.count(backend)) {
                         const auto &br = bp.second.at(backend);
-                        if (br.subcategory == "Indirect Command Synthesis" && br.configIndex == 0 && br.time_ms > 0.0) {
-                          if (br.metric == "us") {
-                            baseVal = (br.time_ms * 1000.0) / static_cast<double>(br.operations);
+                        const double brEffMs = effectiveResultTimeMs(br);
+                        if (br.subcategory == "Indirect Command Synthesis" &&
+                            br.configIndex == static_cast<uint32_t>(res.baselineConfigIndex) &&
+                            br.isValid && !br.isUnsupported &&
+                            br.metric == res.metric && brEffMs > 0.0 && br.operations > 0) {
+                          if (br.metric == "MItems/s" || br.metric == "MSamples/s" || br.metric == "MBVH/s") {
+                            baseVal = (static_cast<double>(br.operations) / (brEffMs / 1000.0)) / 1e6;
+                          } else if (br.metric == "GB/s" || br.metric == "GOPS" || br.metric == "GFLOPS") {
+                            baseVal = (static_cast<double>(br.operations) / (brEffMs / 1000.0)) / 1e9;
+                          } else if (br.metric == "us") {
+                            baseVal = (brEffMs * 1000.0) / static_cast<double>(br.operations);
                           } else {
-                            baseVal = (static_cast<double>(br.operations) / (br.time_ms / 1000.0)) / 1e6;
+                            baseVal = (static_cast<double>(br.operations) / (brEffMs / 1000.0)) / 1e12;
                           }
                           break;
                         }
@@ -821,11 +866,12 @@ void ResultFormatter::print() {
                     for (const auto &bp : subcat.benchmarks) {
                       if (bp.second.count(backend)) {
                         const auto &br = bp.second.at(backend);
-                        if ((br.subcategory == "Dual-Issue" || br.subcategory == "ILP & Concurrency") && br.time_ms > 0.0) {
+                        const double brEffMs = effectiveResultTimeMs(br);
+                        if ((br.subcategory == "Dual-Issue" || br.subcategory == "ILP & Concurrency") && brEffMs > 0.0) {
                           if (br.configIndex == 0) {
-                            baseFP32 = (static_cast<double>(br.operations) / (br.time_ms / 1000.0)) / 1e12;
+                            baseFP32 = (static_cast<double>(br.operations) / (brEffMs / 1000.0)) / 1e12;
                           } else if (br.configIndex == 3) {
-                            baseINT32 = (static_cast<double>(br.operations) / (br.time_ms / 1000.0)) / 1e12;
+                            baseINT32 = (static_cast<double>(br.operations) / (brEffMs / 1000.0)) / 1e12;
                           }
                         }
                       }
@@ -843,8 +889,9 @@ void ResultFormatter::print() {
                     for (const auto &bp : subcat.benchmarks) {
                       if (bp.second.count(backend)) {
                         const auto &br = bp.second.at(backend);
-                        if ((br.subcategory == "Dual-Issue" || br.subcategory == "ILP & Concurrency") && br.configIndex == targetBaseConfig && br.time_ms > 0.0) {
-                          double baseVal = (static_cast<double>(br.operations) / (br.time_ms / 1000.0)) / 1e12;
+                        const double brEffMs = effectiveResultTimeMs(br);
+                        if ((br.subcategory == "Dual-Issue" || br.subcategory == "ILP & Concurrency") && br.configIndex == targetBaseConfig && brEffMs > 0.0) {
+                          double baseVal = (static_cast<double>(br.operations) / (brEffMs / 1000.0)) / 1e12;
                           if (baseVal > 0.0) {
                             double ratio = value / baseVal;
                             double pct = (ratio - 1.0) * 100.0;
@@ -865,43 +912,47 @@ void ResultFormatter::print() {
                   }
                 }
               } else if (res.component == "Memory") {
+                const double effMs = effectiveResultTimeMs(res);
                 if (res.subcategory == "Latency" || res.subcategory == "Cache Latency Curve" || res.metric == "ns") {
-                  double value = (res.time_ms * 1e6) / res.operations; // ns
+                  double value = (effMs * 1e6) / res.operations; // ns
                   valStr = formatDouble(value, 2) + " ns";
-                  if (!res.supportNote.empty()) {
-                    noteStr = "[" + res.supportNote + "]";
+                  const std::string visibleNote = stripHiddenPowerCaveat(res.supportNote, showPower, usedShortHwmonFootnote);
+                  if (!visibleNote.empty()) {
+                    noteStr = "[" + visibleNote + "]";
                   }
                 } else {
                   if (res.metric == "TB/s") {
                     double value = (static_cast<double>(res.operations) /
-                                   (res.time_ms / 1000.0)) / 1e12; // TB/s
+                                   (effMs / 1000.0)) / 1e12; // TB/s
                     valStr = formatDouble(value, 2) + " TB/s";
                   } else {
                     double value = (static_cast<double>(res.operations) /
-                                   (res.time_ms / 1000.0)) / 1e9; // GB/s
+                                   (effMs / 1000.0)) / 1e9; // GB/s
                     valStr = formatDouble(value, 2) + " GB/s";
                   }
-                  if (!res.supportNote.empty()) {
-                    noteStr = "[" + cleanSupportNote(res.supportNote) + "]";
+                  const std::string visibleNote = stripHiddenPowerCaveat(res.supportNote, showPower, usedShortHwmonFootnote);
+                  if (!visibleNote.empty()) {
+                    noteStr = "[" + cleanSupportNote(visibleNote) + "]";
                   }
                 }
               } else {
+                const double effMs = effectiveResultTimeMs(res);
                 double value = 0.0;
                 int precision = 2;
                 if (res.metric == "us") {
                   value = (res.operations > 0)
-                              ? ((res.time_ms * 1000.0) / static_cast<double>(res.operations))
-                              : (res.time_ms * 1000.0);
+                              ? ((effMs * 1000.0) / static_cast<double>(res.operations))
+                              : (effMs * 1000.0);
                 } else if (res.metric == "ns") {
                   value = (res.operations > 0)
-                              ? ((res.time_ms * 1e6) / static_cast<double>(res.operations))
+                              ? ((effMs * 1e6) / static_cast<double>(res.operations))
                               : 0.0;
                 } else if (res.metric == "ms") {
                   value = (res.operations > 0)
-                              ? (res.time_ms / static_cast<double>(res.operations))
-                              : res.time_ms;
+                              ? (effMs / static_cast<double>(res.operations))
+                              : effMs;
                 } else {
-                  value = static_cast<double>(res.operations) / (res.time_ms / 1000.0);
+                  value = static_cast<double>(res.operations) / (effMs / 1000.0);
                   if (res.metric == "TB/s" || res.metric == "TFLOPS" || res.metric == "TOPS") {
                     value /= 1e12;
                   } else if (res.metric == "GIS/s" || res.metric == "GRays/s" ||
@@ -926,7 +977,7 @@ void ResultFormatter::print() {
 
                 if (res.benchmarkName.find("RayRawTraversal") != std::string::npos ||
                     res.subcategory == "Hardware BVH Traversal") {
-                  double time_s = res.time_ms / 1000.0;
+                  double time_s = effMs / 1000.0;
                   uint64_t ops = (res.configIndex == 0) ? res.operations : (res.operations * 64);
                   double gis = (time_s > 0.0) ? ((static_cast<double>(ops) / time_s) / 1e9) : 0.0;
                   if (res.configIndex == 0) {
@@ -945,8 +996,9 @@ void ResultFormatter::print() {
                       for (const auto &bp : subcat.benchmarks) {
                         if (bp.second.count(backend)) {
                           const auto &br = bp.second.at(backend);
-                          if (br.benchmarkName.find("RayDivergence") != std::string::npos && br.configIndex == 0 && br.time_ms > 0.0) {
-                            localBaseVal = static_cast<double>(br.operations) / (br.time_ms / 1000.0) / 1e6;
+                          const double brEffMs = effectiveResultTimeMs(br);
+                          if (br.benchmarkName.find("RayDivergence") != std::string::npos && br.configIndex == 0 && brEffMs > 0.0) {
+                            localBaseVal = static_cast<double>(br.operations) / (brEffMs / 1000.0) / 1e6;
                             localBaseMetric = br.metric;
                             break;
                           }
@@ -959,8 +1011,9 @@ void ResultFormatter::print() {
                       for (const auto &bp : subcat.benchmarks) {
                         if (bp.second.count(backend)) {
                           const auto &br = bp.second.at(backend);
-                          if (br.benchmarkName.find("RayPayload") != std::string::npos && br.configIndex == 0 && br.time_ms > 0.0) {
-                            localBaseVal = static_cast<double>(br.operations) / (br.time_ms / 1000.0) / 1e6;
+                          const double brEffMs = effectiveResultTimeMs(br);
+                          if (br.benchmarkName.find("RayPayload") != std::string::npos && br.configIndex == 0 && brEffMs > 0.0) {
+                            localBaseVal = static_cast<double>(br.operations) / (brEffMs / 1000.0) / 1e6;
                             localBaseMetric = br.metric;
                             break;
                           }
@@ -973,8 +1026,9 @@ void ResultFormatter::print() {
                       for (const auto &bp : subcat.benchmarks) {
                         if (bp.second.count(backend)) {
                           const auto &br = bp.second.at(backend);
-                          if (br.benchmarkName.find("RayAnyHit") != std::string::npos && br.configIndex == 0 && br.time_ms > 0.0) {
-                            localBaseVal = static_cast<double>(br.operations) / (br.time_ms / 1000.0) / 1e6;
+                          const double brEffMs = effectiveResultTimeMs(br);
+                          if (br.benchmarkName.find("RayAnyHit") != std::string::npos && br.configIndex == 0 && brEffMs > 0.0) {
+                            localBaseVal = static_cast<double>(br.operations) / (brEffMs / 1000.0) / 1e6;
                             localBaseMetric = br.metric;
                             break;
                           }
@@ -985,7 +1039,7 @@ void ResultFormatter::print() {
                     for (const auto &bp : subcat.benchmarks) {
                       if (bp.second.count(backend)) {
                         const auto &br = bp.second.at(backend);
-                        if (br.configIndex == static_cast<uint32_t>(res.baselineConfigIndex) && br.time_ms > 0.0 && br.isValid) {
+                        if (br.configIndex == static_cast<uint32_t>(res.baselineConfigIndex) && effectiveResultTimeMs(br) > 0.0 && br.isValid) {
                           localBaseVal = computeResultValue(br);
                           localBaseMetric = br.metric;
                           break;
@@ -993,6 +1047,7 @@ void ResultFormatter::print() {
                       }
                     }
                   } else if (fullName == baselineKeyName ||
+                             res.subcategory == "Indirect Command Synthesis" ||
                              (((fullName.find("Megakernel") != std::string::npos && fullName.find("RTP") == std::string::npos) ||
                                fullName.find("Traditional") != std::string::npos || fullName.find("Baseline") != std::string::npos ||
                                fullName.find("Scanline") != std::string::npos || fullName.find("Single-Pass") != std::string::npos))) {
@@ -1016,13 +1071,15 @@ void ResultFormatter::print() {
                   }
                 }
 
-                if (!res.supportNote.empty() &&
+                const std::string visibleNote = stripHiddenPowerCaveat(res.supportNote, showPower, usedShortHwmonFootnote);
+                if (!visibleNote.empty() &&
                     res.benchmarkName.find("RayRawTraversal") == std::string::npos &&
                     res.subcategory != "Hardware BVH Traversal") {
-                  noteStr += (noteStr.empty() ? "" : " ") + ("[" + cleanSupportNote(res.supportNote) + "]");
+                  noteStr += (noteStr.empty() ? "" : " ") + ("[" + cleanSupportNote(visibleNote) + "]");
                 }
               }
 
+              std::string pwrBracket;
               if (showPower && res.hasPowerTelemetry && res.powerWatts > 0.0f && !res.isUnsupported && res.isValid && res.time_ms > 0.0) {
                 std::string pwrStr = formatDouble(res.powerWatts, 0) + "W";
                 if (res.joulesPerUnit > 0.0 && res.unitPerWatt > 0.0) {
@@ -1046,7 +1103,16 @@ void ResultFormatter::print() {
                     pwrStr += " | " + formatDouble(res.unitPerWatt, 0) + " MIS/J";
                   }
                 }
-                noteStr += (noteStr.empty() ? "" : " ") + ("[" + pwrStr + "]");
+                pwrBracket = "[" + pwrStr + "]";
+              }
+              if (!pwrBracket.empty()) {
+                if (noteStr.find("*<2s hwmon") != std::string::npos ||
+                    noteStr.find("Requires") != std::string::npos ||
+                    res.component == "Memory") {
+                  noteStr = pwrBracket + (noteStr.empty() ? "" : " " + noteStr);
+                } else {
+                  noteStr += (noteStr.empty() ? "" : " ") + pwrBracket;
+                }
               }
 
               std::string backendStr = truncateUtf8(backend, w2, "");
@@ -1215,18 +1281,19 @@ void ResultFormatter::print() {
 
   if (hasMultiBackendParity) {
     auto computeParityVal = [](const ResultData &r) -> double {
-      if (r.time_ms <= 0.0 || r.operations == 0)
+      const double effMs = effectiveResultTimeMs(r);
+      if (effMs <= 0.0 || r.operations == 0)
         return 0.0;
       if (r.metric == "MItems/s") {
-        return (static_cast<double>(r.operations) / (r.time_ms / 1000.0)) / 1e6;
+        return (static_cast<double>(r.operations) / (effMs / 1000.0)) / 1e6;
       } else if (r.metric == "GB/s") {
-        return (static_cast<double>(r.operations) / (r.time_ms / 1000.0)) / 1e9;
+        return (static_cast<double>(r.operations) / (effMs / 1000.0)) / 1e9;
       } else if (r.metric == "us") {
-        return (r.time_ms * 1000.0) / static_cast<double>(r.operations);
+        return (effMs * 1000.0) / static_cast<double>(r.operations);
       } else if (r.metric == "ns") {
-        return (r.time_ms * 1e6) / static_cast<double>(r.operations);
+        return (effMs * 1e6) / static_cast<double>(r.operations);
       }
-      return (static_cast<double>(r.operations) / (r.time_ms / 1000.0)) / 1e12;
+      return (static_cast<double>(r.operations) / (effMs / 1000.0)) / 1e12;
     };
 
     std::cout << "\n";
@@ -1268,8 +1335,10 @@ void ResultFormatter::print() {
             std::cout << YELLOW << (deltaPct > 0 ? "Vulkan +" : "ROCm +") << formatDouble(std::abs(deltaPct), 1) << "% delta" << RESET;
             if (v.hasRegisterTelemetry && roc.hasRegisterTelemetry) {
               if (v.vgprCount != roc.vgprCount) {
-                std::cout << " — attributed to compiler register allocation (ACO "
-                          << v.vgprCount << " VGPRs vs LLVM " << roc.vgprCount << " VGPRs; "
+                const std::string vCompiler = !v.compilerTarget.empty() ? v.compilerTarget : v.backendName;
+                const std::string rCompiler = !roc.compilerTarget.empty() ? roc.compilerTarget : roc.backendName;
+                std::cout << " — attributed to compiler register allocation (" << vCompiler << " "
+                          << v.vgprCount << " VGPRs vs " << rCompiler << " " << roc.vgprCount << " VGPRs; "
                           << v.maxWavesPerSimd << " vs " << roc.maxWavesPerSimd << " waves/SIMD occupancy)";
               } else {
                 std::cout << " — equal register allocation (" << v.vgprCount << " VGPRs); attributed to instruction scheduling / dual-issue packing";
@@ -1281,6 +1350,12 @@ void ResultFormatter::print() {
       }
     }
     std::cout << BOLD << CYAN << "  ╰──────────────────────────────────────────────────────────────────────────────╯" << RESET << "\n";
+  }
+
+  if (usedShortHwmonFootnote) {
+    std::cout << "  " << DIM
+              << "*<2s hwmon: Power sampled via lagging kernel hwmon power1_average over <2s window (energy1_input counter unavailable)."
+              << RESET << "\n";
   }
 
   std::cout << std::endl;
@@ -1464,12 +1539,13 @@ void ResultFormatter::printComparison(const std::vector<ImportedRun> &runs) {
       wv.isValid = false;
       return wv;
     }
-    if (res.time_ms <= 0.0 || res.operations == 0) {
+    const double effMs = effectiveResultTimeMs(res);
+    if (effMs <= 0.0 || res.operations == 0) {
       wv.formattedStr = "N/A";
       return wv;
     }
 
-    double time_s = res.time_ms / 1000.0;
+    double time_s = effMs / 1000.0;
     double rawRate = static_cast<double>(res.operations) / time_s;
     int prec = 2;
 
@@ -1481,7 +1557,7 @@ void ResultFormatter::printComparison(const std::vector<ImportedRun> &runs) {
         wv.val = rawRate / 1e9;
         wv.metric = res.metric;
       } else if (res.metric == "us") {
-        wv.val = (res.time_ms * 1000.0) / static_cast<double>(res.operations);
+        wv.val = (effMs * 1000.0) / static_cast<double>(res.operations);
         wv.isLatency = true;
         wv.metric = "us";
         wv.isValid = true;
@@ -1493,7 +1569,7 @@ void ResultFormatter::printComparison(const std::vector<ImportedRun> &runs) {
       }
     } else if (res.component == "Memory") {
       if (res.subcategory == "Latency" || res.subcategory == "Cache Latency Curve" || res.metric == "ns" || res.benchmarkName.find("Latency") != std::string::npos) {
-        wv.val = (res.time_ms * 1e6) / static_cast<double>(res.operations);
+        wv.val = (effMs * 1e6) / static_cast<double>(res.operations);
         wv.isLatency = true;
         wv.metric = "ns";
         wv.isValid = true;
@@ -1508,15 +1584,15 @@ void ResultFormatter::printComparison(const std::vector<ImportedRun> &runs) {
       }
     } else {
       if (res.metric == "us") {
-        wv.val = (res.time_ms * 1000.0) / static_cast<double>(res.operations);
+        wv.val = (effMs * 1000.0) / static_cast<double>(res.operations);
         wv.isLatency = true;
         wv.metric = "us";
       } else if (res.metric == "ns") {
-        wv.val = (res.time_ms * 1e6) / static_cast<double>(res.operations);
+        wv.val = (effMs * 1e6) / static_cast<double>(res.operations);
         wv.isLatency = true;
         wv.metric = "ns";
       } else if (res.metric == "ms") {
-        wv.val = res.time_ms / static_cast<double>(res.operations);
+        wv.val = effMs / static_cast<double>(res.operations);
         wv.isLatency = true;
         wv.metric = "ms";
       } else if (res.metric == "TB/s" || res.metric == "TFLOPS" || res.metric == "TOPS") {
@@ -1639,7 +1715,7 @@ void ResultFormatter::printComparison(const std::vector<ImportedRun> &runs) {
           }
           if (subcat.name == "Device Memory Bandwidth" && wl.configIndex == 0) vramBwRates[i] = vals[i].val;
           if (subcat.name == "Latency" && wl.cleanName.find("L0") != std::string::npos) l0LatRates[i] = vals[i].val;
-          if (subcat.name.find("Scene Path Tracing (Multi-Bounce)") != std::string::npos && wl.configIndex == 3) {
+          if (subcat.name.find("Scene Path Tracing (Multi-Bounce)") != std::string::npos && wl.configIndex == 8) {
             if (ptTradRates[i] == 0.0 || subcat.name.find("Indoor") != std::string::npos) {
               ptTradRates[i] = vals[i].val;
             }
@@ -1934,8 +2010,9 @@ HostSystemSummary collectHostSystemSummary() {
 
 double computeResultValue(const ResultData &r) {
   double value = 0.0;
-  if (r.time_ms > 0.0 && r.operations > 0) {
-    double seconds = r.time_ms / 1000.0;
+  const double effMs = effectiveResultTimeMs(r);
+  if (effMs > 0.0 && r.operations > 0) {
+    double seconds = effMs / 1000.0;
     if (r.metric == "TFLOPS" || r.metric == "TOPS" || r.metric == "TB/s") {
       value = (static_cast<double>(r.operations) / seconds) / 1e12;
     } else if (r.metric == "GB/s" || r.metric == "GIS/s" ||
@@ -1949,11 +2026,11 @@ double computeResultValue(const ResultData &r) {
                r.metric == "MPixels/s") {
       value = (static_cast<double>(r.operations) / seconds) / 1e6;
     } else if (r.metric == "us") {
-      value = (r.time_ms * 1000.0) / static_cast<double>(r.operations);
+      value = (effMs * 1000.0) / static_cast<double>(r.operations);
     } else if (r.metric == "ns") {
-      value = (r.time_ms * 1e6) / static_cast<double>(r.operations);
+      value = (effMs * 1e6) / static_cast<double>(r.operations);
     } else if (r.metric == "ms") {
-      value = r.time_ms / static_cast<double>(r.operations);
+      value = effMs / static_cast<double>(r.operations);
     }
   }
   return value;
@@ -1997,17 +2074,24 @@ std::string getDefaultJsonFilename() {
 }
 
 std::string resultsToJson(const std::vector<ResultData> &results) {
-  return resultsToJson(results, GetDeviceProfilesAPI(), nullptr);
+  return resultsToJson(results, GetDeviceProfilesAPI(), nullptr, true);
 }
 
 std::string resultsToJson(const std::vector<ResultData> &results,
                           const std::vector<DeviceProfile> &profiles) {
-  return resultsToJson(results, profiles, nullptr);
+  return resultsToJson(results, profiles, nullptr, true);
 }
 
 std::string resultsToJson(const std::vector<ResultData> &results,
                           const std::vector<DeviceProfile> &profiles,
                           const UnifiedSessionMetadata *sessionMeta) {
+  return resultsToJson(results, profiles, sessionMeta, true);
+}
+
+std::string resultsToJson(const std::vector<ResultData> &results,
+                          const std::vector<DeviceProfile> &profiles,
+                          const UnifiedSessionMetadata *sessionMeta,
+                          bool probeLiveContention) {
   yyjson_mut_doc *doc = yyjson_mut_doc_new(nullptr);
   if (!doc) {
     return "{}";
@@ -2116,18 +2200,20 @@ std::string resultsToJson(const std::vector<ResultData> &results,
       addFixed6(doc, pObj, "theoretical_box_gis", prof.theoreticalBoxGis);
     }
 
-    const GpuContentionInfo cont = HardwareTelemetry::checkContention(dp.deviceIndex);
-    yyjson_mut_val *contObj = yyjson_mut_obj_add_obj(doc, pObj, "hardware_contention");
-    yyjson_mut_obj_add_bool(doc, contObj, "detected", cont.hasContention);
-    yyjson_mut_obj_add_bool(doc, contObj, "is_critical", cont.isCritical);
-    yyjson_mut_obj_add_uint(doc, contObj, "gpu_busy_percent", cont.gpuBusyPct);
-    yyjson_mut_obj_add_uint(doc, contObj, "vram_used_mb", cont.vramUsedMb);
-    yyjson_mut_obj_add_uint(doc, contObj, "vram_total_mb", cont.vramTotalMb);
-    yyjson_mut_obj_add_uint(doc, contObj, "gtt_used_mb", cont.gttUsedMb);
-    addFixed6(doc, contObj, "cpu_load_1min", cont.cpuLoad1Min);
-    yyjson_mut_val *reasonsArr = yyjson_mut_obj_add_arr(doc, contObj, "reasons");
-    for (const auto &reason : cont.reasons) {
-      yyjson_mut_arr_add_strcpy(doc, reasonsArr, reason.c_str());
+    if (probeLiveContention) {
+      const GpuContentionInfo cont = HardwareTelemetry::checkContention(dp.deviceIndex);
+      yyjson_mut_val *contObj = yyjson_mut_obj_add_obj(doc, pObj, "hardware_contention");
+      yyjson_mut_obj_add_bool(doc, contObj, "detected", cont.hasContention);
+      yyjson_mut_obj_add_bool(doc, contObj, "is_critical", cont.isCritical);
+      yyjson_mut_obj_add_uint(doc, contObj, "gpu_busy_percent", cont.gpuBusyPct);
+      yyjson_mut_obj_add_uint(doc, contObj, "vram_used_mb", cont.vramUsedMb);
+      yyjson_mut_obj_add_uint(doc, contObj, "vram_total_mb", cont.vramTotalMb);
+      yyjson_mut_obj_add_uint(doc, contObj, "gtt_used_mb", cont.gttUsedMb);
+      addFixed6(doc, contObj, "cpu_load_1min", cont.cpuLoad1Min);
+      yyjson_mut_val *reasonsArr = yyjson_mut_obj_add_arr(doc, contObj, "reasons");
+      for (const auto &reason : cont.reasons) {
+        yyjson_mut_arr_add_strcpy(doc, reasonsArr, reason.c_str());
+      }
     }
   }
 
@@ -2158,7 +2244,7 @@ std::string resultsToJson(const std::vector<ResultData> &results,
       const uint32_t h = r.height ? r.height : 1080u;
       const uint32_t spp = (r.samplesPerFrame > 1u)
           ? r.samplesPerFrame
-          : ((r.configIndex == 23u || r.configIndex == 24u) ? 16u : 1u);
+          : ((r.configIndex == 11u || r.configIndex == 12u) ? 16u : 1u);
       const double fps = computeRaySchedulingFps(r, value);
       addFixed6(doc, rObj, "fps", fps);
       if (spp > 1u) {
@@ -2170,7 +2256,8 @@ std::string resultsToJson(const std::vector<ResultData> &results,
 
     if (r.benchmarkName.find("RayRawTraversal") != std::string::npos ||
         r.subcategory == "Hardware BVH Traversal") {
-      const double time_s = r.time_ms / 1000.0;
+      const double effMs = effectiveResultTimeMs(r);
+      const double time_s = effMs / 1000.0;
       double throughputGis = 0.0;
       if (time_s > 0.0) {
         const uint64_t ops = (r.configIndex == 0) ? r.operations : (r.operations * 64);
@@ -2257,6 +2344,20 @@ std::string resultsToJson(const std::vector<ResultData> &results,
       addFixed6(doc, statObj, "median_time_ms", r.median_time_ms);
       addFixed6(doc, statObj, "mean_time_ms", r.mean_time_ms);
       addFixed6(doc, statObj, "p95_time_ms", r.p95_time_ms);
+      if (!r.sample_durations_ms.empty()) {
+        yyjson_mut_val *sArr = yyjson_mut_obj_add_arr(doc, statObj, "sample_durations_ms");
+        for (double sampleMs : r.sample_durations_ms) {
+          char sBuf[64];
+          const double safeSample = std::isfinite(sampleMs) ? sampleMs : 0.0;
+          int sLen = std::snprintf(sBuf, sizeof(sBuf), "%.6f", safeSample);
+          if (sLen > 0 && static_cast<size_t>(sLen) < sizeof(sBuf)) {
+            yyjson_mut_arr_add_val(
+                sArr, yyjson_mut_rawncpy(doc, sBuf, static_cast<size_t>(sLen)));
+          } else {
+            yyjson_mut_arr_add_val(sArr, yyjson_mut_rawncpy(doc, "0.000000", 8));
+          }
+        }
+      }
     }
 
     if (r.hasRegisterTelemetry) {

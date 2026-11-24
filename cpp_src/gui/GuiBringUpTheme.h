@@ -320,16 +320,36 @@ inline std::string resolveDiagramIdForItem(const std::string& benchId,
         return h.find(n) != std::string::npos;
     };
     const std::string combo = benchId + " " + subcat + " " + itemName;
+    if (hasI(combo, "system memory") || hasI(combo, "host dram") || hasI(combo, "sysmem")) {
+        return "host_sysmem_dram";
+    }
+    if (hasI(combo, "pixel fill") || hasI(combo, "fill rate") || hasI(combo, "rop")) {
+        return "raster_rop_fill";
+    }
+    if (hasI(combo, "persistent work-queue") || hasI(combo, "persistent queue")) {
+        return "rocm_persistent_queue";
+    }
+    if (hasI(combo, "indirect") || hasI(combo, "dgc")) {
+        return "indirect_dispatch";
+    }
+    if (hasI(combo, "procedural")) {
+        return "bvh_procedural";
+    }
+    if (hasI(combo, "rayintersect") || hasI(combo, "ray intersect")) {
+        return "bvh_rayquery";
+    }
+    if (hasI(combo, "unified memory") || hasI(combo, "apu coherency")) {
+        return "apu_unified_memory";
+    }
     if (hasI(combo, "matrix") || hasI(combo, "fp8") || hasI(combo, "fp6") ||
         hasI(combo, "fp4") || hasI(combo, "int4") || hasI(combo, "coop")) {
-        return "wmma_matrix_core";
+        return "coop_matrix_tile";
     }
-    if (hasI(combo, "interconnect") || hasI(combo, "pcie") || hasI(combo, "rebar") ||
-        hasI(combo, "unified") || hasI(combo, "system") || hasI(combo, "host")) {
+    if (hasI(combo, "interconnect") || hasI(combo, "pcie") || hasI(combo, "rebar")) {
         return "interconnect_fabric";
     }
     if (hasI(combo, "bandwidth") || hasI(combo, "cache") || hasI(combo, "latency") || hasI(combo, "lds")) {
-        return "memory_hierarchy_bus";
+        return "cache_hierarchy";
     }
     if (hasI(combo, "bvh") || hasI(combo, "ray")) {
         return "bvh_cutout_layers";
@@ -603,7 +623,11 @@ inline void drawSteppedLedBar(ImDrawList* dl, ImVec2 p0, ImVec2 p1, float fracti
 inline void drawVgprOccupancyGrid(ImDrawList* dl, ImVec2 p0, ImVec2 p1,
                                   uint32_t vgprs, uint32_t sgprs,
                                   uint32_t ldsBytes, uint32_t maxWaves,
-                                  const BringUpColors& c) {
+                                  const BringUpColors& c,
+                                  bool hasKnownArchLimits = true,
+                                  uint32_t maxVgprBudget = 256u,
+                                  uint32_t maxSgprBudget = 128u,
+                                  uint32_t maxWavesLimit = 16u) {
     dl->AddRectFilled(p0, p1, toU32(c.bgRecessed), 0.0f);
     dl->AddRect(p0, p1, toU32(c.borderOuter), 0.0f, 0, 1.0f);
     dl->PushClipRect(p0, p1, true);
@@ -613,13 +637,33 @@ inline void drawVgprOccupancyGrid(ImDrawList* dl, ImVec2 p0, ImVec2 p1,
     float lineH = ImGui::GetTextLineHeight();
 
     char hdr[160];
-    std::snprintf(hdr, sizeof(hdr), "VGPR %u/256  SGPR %u/128  LDS %u B  WAVES %u/16",
-                  vgprs, sgprs, ldsBytes, maxWaves);
+    if (hasKnownArchLimits && maxVgprBudget > 0 && maxSgprBudget > 0 && maxWavesLimit > 0) {
+        std::snprintf(hdr, sizeof(hdr), "VGPR %u/%u  SGPR %u/%u  LDS %u B  WAVES %u/%u",
+                      vgprs, maxVgprBudget, sgprs, maxSgprBudget, ldsBytes, maxWaves, maxWavesLimit);
+    } else if (maxWaves > 0) {
+        std::snprintf(hdr, sizeof(hdr), "VGPR %u  SGPR %u  LDS %u B  WAVES %u",
+                      vgprs, sgprs, ldsBytes, maxWaves);
+    } else {
+        std::snprintf(hdr, sizeof(hdr), "VGPR %u  SGPR %u  LDS %u B",
+                      vgprs, sgprs, ldsBytes);
+    }
     float maxHdrW = (w - 2.0f * pad) > 0.0f ? (w - 2.0f * pad) : 0.0f;
+    if (ImGui::CalcTextSize(hdr).x > maxHdrW) {
+        if (hasKnownArchLimits && maxVgprBudget > 0 && maxSgprBudget > 0 && maxWavesLimit > 0) {
+            std::snprintf(hdr, sizeof(hdr), "V:%u/%u S:%u/%u LDS:%uB W:%u/%u",
+                          vgprs, maxVgprBudget, sgprs, maxSgprBudget, ldsBytes, maxWaves, maxWavesLimit);
+        } else if (maxWaves > 0) {
+            std::snprintf(hdr, sizeof(hdr), "V:%u S:%u LDS:%uB W:%u",
+                          vgprs, sgprs, ldsBytes, maxWaves);
+        } else {
+            std::snprintf(hdr, sizeof(hdr), "V:%u S:%u LDS:%uB",
+                          vgprs, sgprs, ldsBytes);
+        }
+    }
     std::string fittedHdr = fitBringUpText(hdr, maxHdrW);
     dl->AddText(ImVec2(p0.x + pad, p0.y + 5.0f), toU32(c.textPrimary), fittedHdr.c_str());
 
-    // 64 pips (4 rows x 16 cols) representing 256 VGPR budget (each pip = 4 VGPRs)
+    // 64 pips (4 rows x 16 cols) scaled to VGPR budget (default 256 -> 4 VGPRs/pip)
     const int cols = 16;
     const int rows = 4;
     float gridX0 = p0.x + pad;
@@ -630,7 +674,9 @@ inline void drawVgprOccupancyGrid(ImDrawList* dl, ImVec2 p0, ImVec2 p1,
     float cellW = (gridW - gap * (cols - 1)) / static_cast<float>(cols);
     float cellH = (gridH - gap * (rows - 1)) / static_cast<float>(rows);
 
-    int activePips = static_cast<int>(std::ceil(static_cast<float>(std::min<uint32_t>(vgprs, 256u)) / 4.0f));
+    const uint32_t safeBudget = (maxVgprBudget > 0) ? maxVgprBudget : 256u;
+    const float vgprsPerPip = static_cast<float>(safeBudget) / 64.0f;
+    int activePips = static_cast<int>(std::ceil(static_cast<float>(std::min<uint32_t>(vgprs, safeBudget)) / std::max(1.0f, vgprsPerPip)));
     for (int r = 0; r < rows; ++r) {
         for (int col = 0; col < cols; ++col) {
             int idx = r * cols + col;

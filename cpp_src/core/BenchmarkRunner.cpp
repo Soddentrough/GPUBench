@@ -28,7 +28,9 @@
 #include "benchmarks/AsyncOverlapBench.h"
 #include "benchmarks/SparseMatrixBench.h"
 #include "benchmarks/CoopVectorBench.h"
+#ifdef GPUBENCH_ENABLE_EXPERIMENTAL_WORKGRAPHS
 #include "benchmarks/WorkGraphsBench.h"
+#endif
 #include "benchmarks/RayOMMBench.h"
 #include "core/VulkanContext.h"
 #include <iomanip>
@@ -155,7 +157,7 @@ std::vector<BenchmarkGroupInfo> BenchmarkRunner::getAvailableGroups() const {
     {"Graphics", "graphics", {"gfx"}, "Complete 3D graphics rendering pipelines (combines Raster and Ray Tracing)", {}},
     {"Raster", "raster", {"rop", "rasterization"}, "Fixed-function rasterization and ROP pixel/blend fill rates (subset of Graphics)", {}},
     {"Ray Tracing", "raytracing", {"rt", "ray", "ray tracing", "ray_tracing"}, "Hardware BVH traversal, Opacity Micromaps, intersection, and scheduling architectures", {}},
-    {"Scheduling", "scheduling", {"sched"}, "Multi-queue concurrency, async compute/copy overlap, and GPU Work Graphs", {}},
+    {"Scheduling", "scheduling", {"sched"}, "Multi-queue concurrency, async compute/copy overlap, and GPU-driven indirect scheduling", {}},
     {"System", "system", {"sys", "host"}, "Host system memory bandwidth and latency", {}}
   };
 
@@ -279,7 +281,9 @@ void BenchmarkRunner::discoverBenchmarks() {
   benchmarks.push_back(std::make_unique<DualIssueBench>());
   benchmarks.push_back(std::make_unique<LdsBankConflictBench>());
   benchmarks.push_back(std::make_unique<InShaderIndirectBench>());
+#ifdef GPUBENCH_ENABLE_EXPERIMENTAL_WORKGRAPHS
   benchmarks.push_back(std::make_unique<WorkGraphsBench>());
+#endif
   benchmarks.push_back(std::make_unique<AsyncOverlapBench>());
   benchmarks.push_back(std::make_unique<Fp16Bench>());
   benchmarks.push_back(std::make_unique<Bf16Bench>());
@@ -388,6 +392,48 @@ static std::string to_lower(std::string s) {
   std::transform(s.begin(), s.end(), s.begin(),
                  [](unsigned char c) { return std::tolower(c); });
   return s;
+}
+
+// Strip any parenthesized scene suffix (e.g. "RayScheduling (Indoor Atrium)" -> "RayScheduling")
+static std::string stripSceneSuffix(const std::string &name) {
+  size_t p = name.find(" (");
+  if (p != std::string::npos) {
+    return name.substr(0, p);
+  }
+  return name;
+}
+
+static bool matchesWorkloadFilter(const std::vector<std::string> &workloadFilter,
+                                  const std::string &bName,
+                                  const std::string &cName,
+                                  const std::string &defaultCName,
+                                  const std::string &fullTaskName,
+                                  uint32_t cfgIdx,
+                                  size_t *outRank = nullptr) {
+  const std::string keyIndex = bName + "#" + std::to_string(cfgIdx);
+  const std::string baseBenchName = stripSceneSuffix(bName);
+  const std::string baseKeyIndex = baseBenchName + "#" + std::to_string(cfgIdx);
+
+  std::string defaultFullName = bName;
+  if (defaultCName.rfind(bName, 0) == 0) {
+    defaultFullName = defaultCName;
+  } else if (!defaultCName.empty()) {
+    defaultFullName += " (" + defaultCName + ")";
+  }
+
+  for (size_t fi = 0; fi < workloadFilter.size(); ++fi) {
+    const auto &filt = workloadFilter[fi];
+    if (filt == baseBenchName || filt == bName || filt == baseKeyIndex ||
+        filt == keyIndex || (!cName.empty() && filt == cName) ||
+        (!defaultCName.empty() && filt == defaultCName) ||
+        filt == fullTaskName || filt == defaultFullName) {
+      if (outRank) {
+        *outRank = fi;
+      }
+      return true;
+    }
+  }
+  return false;
 }
 
 // Case-insensitive, delimiter-agnostic exact benchmark matching
@@ -716,48 +762,30 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
             continue;
           }
 
-          // Deduplicate algorithmic microbenchmarks across non-Showroom scenes when running all scenes
+          // Deduplicate showroom-only algorithmic microbenchmarks across non-Showroom scenes when running all scenes
           if (auto *rs = dynamic_cast<RaySchedulingBench *>(bench.get())) {
             if (sceneName == "all" && rs->GetSceneType() != RaySchedulingBench::SceneType::Showroom) {
-              if (i == 12 || i == 13 || i == 14 || i == 15 || i == 16 || i == 26 || i == 28) {
+              if (RaySchedulingBench::isShowroomOnlyConfigIdx(i)) {
                 continue;
               }
             }
           }
 
           if (!workloadFilter.empty()) {
-            bool matched = false;
             std::string bName = bench->GetName();
-            std::string cName = bench->GetConfigName(i);
+            std::string cName = bench->GetConfigName(i, info, context);
+            std::string defaultCName = bench->GetConfigName(i);
             std::string fullTaskName = bName;
             if (cName.rfind(bName, 0) == 0) {
               fullTaskName = cName;
             } else if (!cName.empty()) {
               fullTaskName += " (" + cName + ")";
             }
-            std::string keyIndex = bName + "#" + std::to_string(i);
-
-            // Strip any parenthesized scene name from RayScheduling (e.g. "RayScheduling (Indoor Atrium)" -> "RayScheduling")
-            std::string baseBenchName = bName;
-            size_t p = baseBenchName.find(" (");
-            if (p != std::string::npos) {
-              baseBenchName = baseBenchName.substr(0, p);
-            }
-            std::string baseKeyIndex = baseBenchName + "#" + std::to_string(i);
-
-            for (size_t fi = 0; fi < workloadFilter.size(); ++fi) {
-              const auto &filt = workloadFilter[fi];
-              if (filt == baseBenchName || filt == bName || filt == baseKeyIndex ||
-                  filt == keyIndex || (!cName.empty() && filt == cName) ||
-                  filt == fullTaskName) {
-                matched = true;
-                configRank[i] = fi;
-                break;
-              }
-            }
-            if (!matched) {
+            size_t rank = 0;
+            if (!matchesWorkloadFilter(workloadFilter, bName, cName, defaultCName, fullTaskName, i, &rank)) {
               continue;
             }
+            configRank[i] = rank;
           }
 
           selectedConfigs.push_back(i);
@@ -783,8 +811,10 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
           groupPlans.push_back({bPtr, std::move(selectedConfigs), minWeight, minRank});
         }
       } else if (should_run && bench->IsDeviceDependent()) {
-        // Skip logging unsupported Ray Tracing benchmarks under compute-only backends (ROCm / OpenCL)
-        if (std::string_view(bench->GetComponent()) == "Ray Tracing" && context->getBackend() != ComputeBackend::Vulkan) {
+        // Skip logging unsupported Ray Tracing / Raster benchmarks under compute-only backends (ROCm / OpenCL)
+        const std::string_view compView(bench->GetComponent());
+        if ((compView == "Ray Tracing" || compView == "Raster") &&
+            context->getBackend() != ComputeBackend::Vulkan) {
           continue;
         }
 
@@ -800,7 +830,8 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
             continue;
           }
 
-          std::string cname = bench->GetConfigName(ci);
+          std::string cname = bench->GetConfigName(ci, info, context);
+          std::string defaultCName = bench->GetConfigName(ci);
           std::string fullName = bname;
           if (cname.rfind(bname, 0) == 0) {
             fullName = cname;
@@ -809,15 +840,7 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
           }
 
           if (!workloadFilter.empty()) {
-            bool matched = false;
-            std::string keyIndex = bname + "#" + std::to_string(ci);
-            for (const auto &filt : workloadFilter) {
-              if (filt == bname || filt == keyIndex || filt == cname || filt == fullName) {
-                matched = true;
-                break;
-              }
-            }
-            if (!matched) {
+            if (!matchesWorkloadFilter(workloadFilter, bname, cname, defaultCName, fullName, ci)) {
               continue;
             }
           }
@@ -892,10 +915,13 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
     IBenchmark *prevBench = nullptr;
     size_t taskIdx = 0;
     bool deviceLost = false;
+    if (rraTrace) {
+      context->enableHeadlessSwapchain();
+    }
 
     auto emitAbortedTask = [&](IBenchmark *abortedBench, uint32_t abortedConfig, const std::string &reason) {
       std::string abortedName = abortedBench->GetName();
-      std::string cfgName = abortedBench->GetConfigName(abortedConfig);
+      std::string cfgName = abortedBench->GetConfigName(abortedConfig, info, context);
       if (cfgName.rfind(abortedName, 0) == 0) {
         abortedName = cfgName;
       } else if (!cfgName.empty()) {
@@ -985,7 +1011,7 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
         }
         for (uint32_t cfg : group.configs) {
           std::string failName = bench->GetName();
-          std::string cfgName = bench->GetConfigName(cfg);
+          std::string cfgName = bench->GetConfigName(cfg, info, context);
           if (cfgName.rfind(failName, 0) == 0) {
             failName = cfgName;
           } else if (!cfgName.empty()) {
@@ -1040,7 +1066,7 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
         prevBench = bench;
 
         std::string bench_name = bench->GetName();
-        std::string config_name = bench->GetConfigName(i);
+        std::string config_name = bench->GetConfigName(i, info, context);
         if (config_name.rfind(bench_name, 0) == 0) {
           bench_name = config_name;
         } else if (!config_name.empty()) {
@@ -1186,9 +1212,10 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
           // Time-bounded warmup & measurement windows:
           // Never execute a fixed amount of work; execute sets of operations over
           // a fixed time window and count total completed work.
-          const double target_warmup_ms = profileSnapshot ? 25.0 : 250.0;
-          const double target_measurement_ms = profileSnapshot ? 60.0 : 500.0;
-          const double target_batch_ms = profileSnapshot ? 20.0 : 50.0;
+          // When --profile-snapshot is enabled, run a single fast warmup + 1 timed invocation.
+          const double target_warmup_ms = 250.0;
+          const double target_measurement_ms = 500.0;
+          const double target_batch_ms = 50.0;
 
           // Always start each config from the full-size reference workload.
           bench->SetWorkScale(i, 1.0);
@@ -1199,8 +1226,8 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
           // scale and are saturated via batching below, slow GPUs settle at a
           // fraction of the reference workload. Measured work is always
           // reported via GetResult() for the scale in effect.
-          if (!usesCustomTiming && bench->SupportsWorkScaling(i)) {
-            const double target_run_ms = profileSnapshot ? 10.0 : 25.0;
+          if (!profileSnapshot && !usesCustomTiming && bench->SupportsWorkScaling(i)) {
+            const double target_run_ms = 25.0;
             const double min_scale = 1.0 / 8192.0;
             double scale = 1.0 / 1024.0;
             for (int probe = 0; probe < 12; ++probe) {
@@ -1239,45 +1266,66 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
             }
           }
 
-          double warmup_elapsed_ms = 0.0;
           double single_run_ms = 0.0;
-          while (warmup_elapsed_ms < target_warmup_ms) {
-            if (cancelToken && cancelToken->load()) break;
-            auto w_start = std::chrono::high_resolution_clock::now();
-            bench->Run(i);
-            if (!usesCustomTiming) {
-              context->waitIdle();
+          if (profileSnapshot) {
+            if (!cancelToken || !cancelToken->load()) {
+              auto w_start = std::chrono::high_resolution_clock::now();
+              bench->Run(i);
+              if (!usesCustomTiming) {
+                context->waitIdle();
+              }
+              auto w_end = std::chrono::high_resolution_clock::now();
+              single_run_ms = usesCustomTiming
+                  ? bench->GetLastRunDurationMs(i)
+                  : std::chrono::duration<double, std::milli>(w_end - w_start).count();
+              if (single_run_ms <= 0.0) single_run_ms = 0.001;
             }
-            auto w_end = std::chrono::high_resolution_clock::now();
-            double w_ms = usesCustomTiming
-                ? bench->GetLastRunDurationMs(i)
-                : std::chrono::duration<double, std::milli>(w_end - w_start).count();
-            if (w_ms <= 0.0) {
-              w_ms = std::chrono::duration<double, std::milli>(w_end - w_start).count();
+          } else {
+            double warmup_elapsed_ms = 0.0;
+            while (warmup_elapsed_ms < target_warmup_ms) {
+              if (cancelToken && cancelToken->load()) break;
+              auto w_start = std::chrono::high_resolution_clock::now();
+              bench->Run(i);
+              if (!usesCustomTiming) {
+                context->waitIdle();
+              }
+              auto w_end = std::chrono::high_resolution_clock::now();
+              double w_ms = usesCustomTiming
+                  ? bench->GetLastRunDurationMs(i)
+                  : std::chrono::duration<double, std::milli>(w_end - w_start).count();
+              if (w_ms <= 0.0) {
+                w_ms = std::chrono::duration<double, std::milli>(w_end - w_start).count();
+              }
+              if (w_ms <= 0.0) w_ms = 0.001;
+              warmup_elapsed_ms += w_ms;
+              single_run_ms = w_ms;
             }
-            if (w_ms <= 0.0) w_ms = 0.001;
-            warmup_elapsed_ms += w_ms;
-            single_run_ms = w_ms;
           }
 
           uint64_t batch_iters = 1;
-          if (!usesCustomTiming && single_run_ms > 0.0 && single_run_ms < target_batch_ms) {
+          if (!profileSnapshot && !usesCustomTiming && single_run_ms > 0.0 &&
+              single_run_ms < target_batch_ms) {
             batch_iters = static_cast<uint64_t>(
                 std::max(1.0, std::round(target_batch_ms / single_run_ms)));
+            batch_iters = std::clamp<uint64_t>(batch_iters, 1, 4096);
           }
-          batch_iters = std::clamp<uint64_t>(batch_iters, 1, 4096);
 
           std::vector<double> sample_time_per_invoc;
           total_invocations = 0;
           double accumulated_time_ms = 0.0;
           double wall_elapsed_ms = 0.0;
           const uint32_t min_samples = profileSnapshot ? 1u : 4u;
+          const uint32_t max_samples = profileSnapshot ? 1u : UINT32_MAX;
           const double max_wall_ms = target_measurement_ms * 4.0 + 4000.0;
+          uint32_t invalidGpuSamples = 0;
+          const uint32_t maxInvalidGpuRetries = profileSnapshot ? 3u : 5u;
+          bool usedGpuFallbackToWall = false;
 
-          powerStart = HardwareTelemetry::queryGpu(devIdx);
+          powerStart = HardwareTelemetry::queryGpuByPciBusId(info.pcieBusId, devIdx);
           auto loop_wall_start = std::chrono::high_resolution_clock::now();
 
-          while ((accumulated_time_ms < target_measurement_ms ||
+          while (sample_time_per_invoc.size() < max_samples &&
+                 (accumulated_time_ms < target_measurement_ms ||
                   sample_time_per_invoc.size() < min_samples) &&
                  wall_elapsed_ms < max_wall_ms) {
             if (cancelToken && cancelToken->load()) break;
@@ -1313,10 +1361,19 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
                 if (gpu_time > 0.0) {
                   sample_ms = gpu_time;
                 } else {
-                  context->waitIdle();
-                  auto s_end = std::chrono::high_resolution_clock::now();
-                  sample_ms =
-                      std::chrono::duration<double, std::milli>(s_end - s_start).count();
+                  invalidGpuSamples++;
+                  if (invalidGpuSamples >= maxInvalidGpuRetries &&
+                      sample_time_per_invoc.empty()) {
+                    auto s_end = std::chrono::high_resolution_clock::now();
+                    sample_ms =
+                        std::chrono::duration<double, std::milli>(s_end - s_start).count();
+                    usedGpuFallbackToWall = true;
+                  } else {
+                    auto now = std::chrono::high_resolution_clock::now();
+                    wall_elapsed_ms =
+                        std::chrono::duration<double, std::milli>(now - loop_wall_start).count();
+                    continue;
+                  }
                 }
               } else {
                 context->waitIdle();
@@ -1389,9 +1446,14 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
                       << std::endl;
           }
 
-          GpuTelemetryData powerEnd = HardwareTelemetry::queryGpu(devIdx);
+          GpuTelemetryData powerEnd =
+              HardwareTelemetry::queryGpuByPciBusId(info.pcieBusId, devIdx);
           avgPowerWatts = HardwareTelemetry::computeWindowPowerWatts(
               powerStart, powerEnd, wall_elapsed_ms);
+
+          // Capture compiler resource usage from the timed benchmark run BEFORE
+          // validation or secondary helper dispatches can overwrite it.
+          const KernelResourceUsage kUsage = context->getLastKernelResourceUsage();
 
           // Run VK_KHR_performance_query in an isolated untimed pass so SPM/SQTT
           // serialization barriers do not contaminate the timed throughput measurement.
@@ -1443,6 +1505,19 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
           if (result_data.supportNote.empty() && result_data.isEmulated) {
             result_data.supportNote = "Emulated via software unpack";
           }
+          auto appendSupportCaveat = [&](const std::string &caveat) {
+            if (caveat.empty()) return;
+            if (result_data.supportNote.find(caveat) != std::string::npos) return;
+            if (result_data.supportNote.empty()) {
+              result_data.supportNote = caveat;
+            } else {
+              result_data.supportNote += "; " + caveat;
+            }
+          };
+          if (usedGpuFallbackToWall) {
+            appendSupportCaveat(
+                "GPU timestamp query returned zero; fell back to host wall-clock timing");
+          }
           result_data.component = bench->GetComponent(i);
           result_data.subcategory = bench->GetSubCategory(i);
           result_data.maxWorkGroupSize = info.maxWorkGroupSize;
@@ -1454,7 +1529,6 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
           result_data.height = effectiveHeight;
           result_data.samplesPerFrame = bench->GetSamplesPerFrame(i);
 
-          KernelResourceUsage kUsage = context->getLastKernelResourceUsage();
           if (kUsage.available) {
             result_data.hasRegisterTelemetry = true;
             result_data.vgprCount = kUsage.vgprCount;
@@ -1498,11 +1572,28 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
             }
           }
 
-          if (avgPowerWatts > 0.0f && total_time_ms > 0.0) {
+          const double effective_time_ms =
+              (stat_med_ms > 0.0) ? stat_med_ms : total_time_ms;
+          if (avgPowerWatts > 0.0f && effective_time_ms > 0.0) {
             result_data.hasPowerTelemetry = true;
             result_data.powerWatts = avgPowerWatts;
-            double durationSec = total_time_ms / 1000.0;
-            result_data.energyJoules = avgPowerWatts * durationSec;
+            const double durationSec = effective_time_ms / 1000.0;
+            if (powerStart.hasEnergyCounter && powerEnd.hasEnergyCounter &&
+                powerEnd.energyMicroJoules > powerStart.energyMicroJoules) {
+              result_data.energyJoules =
+                  static_cast<double>(powerEnd.energyMicroJoules -
+                                      powerStart.energyMicroJoules) *
+                  1e-6;
+            } else {
+              result_data.energyJoules =
+                  static_cast<double>(avgPowerWatts) * (wall_elapsed_ms / 1000.0);
+            }
+            if ((!powerStart.hasEnergyCounter || !powerEnd.hasEnergyCounter) &&
+                wall_elapsed_ms < 2000.0 &&
+                (formatter->getShowPower() || result_data.hasPowerTelemetry)) {
+              appendSupportCaveat(
+                  "Power sampled via lagging hwmon power1_average over <2s window");
+            }
 
             if ((result_data.metric == "TFLOPS" || result_data.metric == "GFLOPS" ||
                  result_data.metric == "TOPS") &&
@@ -1595,8 +1686,10 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
           }
 
           formatter->addResult(result_data);
-          double opsPerSec = (result_data.time_ms > 0.0 && result_data.operations > 0)
-              ? (static_cast<double>(result_data.operations) / result_data.time_ms) * 1000.0
+          double headline_ms =
+              (result_data.median_time_ms > 0.0) ? result_data.median_time_ms : result_data.time_ms;
+          double opsPerSec = (headline_ms > 0.0 && result_data.operations > 0)
+              ? (static_cast<double>(result_data.operations) / headline_ms) * 1000.0
               : 0.0;
           char scoreBuf[64];
           if (result_data.metric.find("TFLOPS") != std::string::npos || result_data.metric.find("TOPS") != std::string::npos) {
@@ -1614,10 +1707,10 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
           } else if (result_data.metric.find("GPixels/s") != std::string::npos) {
             snprintf(scoreBuf, sizeof(scoreBuf), "%.2f GPixels/s", opsPerSec / 1e9);
           } else if (result_data.metric.find("ns") != std::string::npos) {
-            double nsVal = (result_data.operations > 0) ? ((result_data.time_ms * 1e6) / result_data.operations) : result_data.time_ms;
+            double nsVal = (result_data.operations > 0) ? ((headline_ms * 1e6) / result_data.operations) : headline_ms;
             snprintf(scoreBuf, sizeof(scoreBuf), "%.1f ns", nsVal);
           } else if (result_data.metric.find("us") != std::string::npos) {
-            double usVal = (result_data.operations > 0) ? ((result_data.time_ms * 1000.0) / result_data.operations) : (result_data.time_ms * 1000.0);
+            double usVal = (result_data.operations > 0) ? ((headline_ms * 1000.0) / result_data.operations) : (headline_ms * 1000.0);
             snprintf(scoreBuf, sizeof(scoreBuf), "%.1f us", usVal);
           } else if (result_data.metric.find("M") != std::string::npos) {
             snprintf(scoreBuf, sizeof(scoreBuf), "%.1f %s", opsPerSec / 1e6, result_data.metric.c_str());
@@ -1636,6 +1729,9 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
             onResult(result_data);
           }
           context->waitIdle();
+          if (rraTrace) {
+            context->presentFrame();
+          }
         } catch (const std::exception &e) {
           context->abortBatch();
           taskIdx++;
@@ -1898,26 +1994,33 @@ void BenchmarkRunner::runHostBenchmarks(const std::vector<std::string> &benchmar
           bench->PrepareConfig(i);
           HostConfigGuard hostCfgGuard{bench.get(), i};
 
-          const double target_warmup_ms = profileSnapshot ? 25.0 : 150.0;
-          const double target_measurement_ms = profileSnapshot ? 60.0 : 500.0;
+          const double target_warmup_ms = 150.0;
+          const double target_measurement_ms = 500.0;
 
-          double warmup_elapsed_ms = 0.0;
-          auto warmup_start = std::chrono::high_resolution_clock::now();
-          while (warmup_elapsed_ms < target_warmup_ms) {
-            if (cancelToken && cancelToken->load()) {
-              break;
+          if (profileSnapshot) {
+            if (!cancelToken || !cancelToken->load()) {
+              bench->Run(i);
             }
-            bench->Run(i);
-            auto now = std::chrono::high_resolution_clock::now();
-            warmup_elapsed_ms =
-                std::chrono::duration<double, std::milli>(now - warmup_start)
-                    .count();
+          } else {
+            double warmup_elapsed_ms = 0.0;
+            auto warmup_start = std::chrono::high_resolution_clock::now();
+            while (warmup_elapsed_ms < target_warmup_ms) {
+              if (cancelToken && cancelToken->load()) {
+                break;
+              }
+              bench->Run(i);
+              auto now = std::chrono::high_resolution_clock::now();
+              warmup_elapsed_ms =
+                  std::chrono::duration<double, std::milli>(now - warmup_start)
+                      .count();
+            }
           }
 
           double total_time_ms = 0.0;
           uint64_t total_invocations = 0;
           std::vector<double> sample_durations;
-          while (total_time_ms < target_measurement_ms) {
+          while ((profileSnapshot && sample_durations.empty()) ||
+                 (!profileSnapshot && total_time_ms < target_measurement_ms)) {
             if (cancelToken && cancelToken->load()) {
               break;
             }
@@ -2004,7 +2107,7 @@ void BenchmarkRunner::runHostBenchmarks(const std::vector<std::string> &benchmar
         fail_data.backendName = "System";
         fail_data.deviceName = "Host CPU";
         fail_data.benchmarkName = bench->GetName();
-        fail_data.component = "Host System";
+        fail_data.component = "System";
         fail_data.subcategory = bench->GetSubCategory(0);
         fail_data.metric = bench->GetMetric(0);
         fail_data.operations = 0;

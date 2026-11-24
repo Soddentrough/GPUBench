@@ -1,5 +1,7 @@
 #include "PixelFillRateBench.h"
 #include "core/VulkanContext.h"
+#include <cmath>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -348,25 +350,22 @@ void PixelFillRateBench::Setup(IComputeContext &ctx, const std::string &kernel_d
   vkBeginCommandBuffer(frames[0].commandBuffer, &cmdBeginInfo);
 
   for (auto &cfg : configs) {
-    VkImageMemoryBarrier barrier{};
-    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    VkImageMemoryBarrier2 barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
+    barrier.srcStageMask = VK_PIPELINE_STAGE_2_NONE;
+    barrier.srcAccessMask = VK_ACCESS_2_NONE;
+    barrier.dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+    barrier.dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
     barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     barrier.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.image = cfg.image;
-    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    barrier.subresourceRange.baseMipLevel = 0;
-    barrier.subresourceRange.levelCount = 1;
-    barrier.subresourceRange.baseArrayLayer = 0;
-    barrier.subresourceRange.layerCount = 1;
-    barrier.srcAccessMask = 0;
-    barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
-    vkCmdPipelineBarrier(frames[0].commandBuffer,
-                         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                         0, 0, nullptr, 0, nullptr, 1, &barrier);
+    VkDependencyInfo depInfo{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+    depInfo.imageMemoryBarrierCount = 1;
+    depInfo.pImageMemoryBarriers = &barrier;
+    vkCmdPipelineBarrier2(frames[0].commandBuffer, &depInfo);
 
     VkRenderingAttachmentInfoKHR clearAttachment{};
     clearAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR;
@@ -374,7 +373,7 @@ void PixelFillRateBench::Setup(IComputeContext &ctx, const std::string &kernel_d
     clearAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     clearAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     clearAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    clearAttachment.clearValue.color = {{0.1f, 0.2f, 0.3f, 1.0f}};
+    clearAttachment.clearValue.color = {{0.0f, 0.0f, 0.0f, 0.0f}};
 
     VkRenderingInfoKHR clearRenderInfo{};
     clearRenderInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO_KHR;
@@ -395,8 +394,14 @@ void PixelFillRateBench::Setup(IComputeContext &ctx, const std::string &kernel_d
   submitInfo.commandBufferCount = 1;
   submitInfo.pCommandBuffers = &frames[0].commandBuffer;
 
-  vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
-  vkQueueWaitIdle(queue);
+  {
+    std::unique_lock<std::recursive_mutex> qlock;
+    if (vulkanContext) {
+      qlock = std::unique_lock<std::recursive_mutex>(vulkanContext->getQueueMutex());
+    }
+    vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+    vkQueueWaitIdle(queue);
+  }
 }
 
 void PixelFillRateBench::Run(uint32_t config_idx) {
@@ -458,7 +463,7 @@ void PixelFillRateBench::Run(uint32_t config_idx) {
   vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, cfg.pipeline);
 
   for (uint32_t p = 0; p < passesPerDispatch; ++p) {
-    colorSeed[0] = static_cast<float>(p) * 0.1f;
+    colorSeed[0] = static_cast<float>(p + 1u) * 0.01f;
     vkCmdPushConstants(frame.commandBuffer, pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0,
                        sizeof(colorSeed), colorSeed);
 
@@ -479,7 +484,13 @@ void PixelFillRateBench::Run(uint32_t config_idx) {
   submitInfo.pCommandBuffers = &frame.commandBuffer;
 
   vkResetFences(device, 1, &frame.fence);
-  vkQueueSubmit(queue, 1, &submitInfo, frame.fence);
+  {
+    std::unique_lock<std::recursive_mutex> qlock;
+    if (vContext) {
+      qlock = std::unique_lock<std::recursive_mutex>(vContext->getQueueMutex());
+    }
+    vkQueueSubmit(queue, 1, &submitInfo, frame.fence);
+  }
   frame.inFlight = true;
 
   frameIndex = (frameIndex + 1) % kMaxInFlight;
@@ -487,7 +498,14 @@ void PixelFillRateBench::Run(uint32_t config_idx) {
 
 void PixelFillRateBench::Teardown() {
   if (device != VK_NULL_HANDLE) {
-    vkDeviceWaitIdle(device);
+    auto *vContext = dynamic_cast<VulkanContext *>(context);
+    {
+      std::unique_lock<std::recursive_mutex> qlock;
+      if (vContext) {
+        qlock = std::unique_lock<std::recursive_mutex>(vContext->getQueueMutex());
+      }
+      vkDeviceWaitIdle(device);
+    }
 
     for (auto &cfg : configs) {
       if (cfg.pipeline != VK_NULL_HANDLE) {
@@ -558,7 +576,14 @@ bool PixelFillRateBench::ValidateResults(uint32_t config_idx) const {
     return false;
   }
 
-  vkQueueWaitIdle(queue);
+  const auto *vContext = dynamic_cast<const VulkanContext *>(context);
+  {
+    std::unique_lock<std::recursive_mutex> qlock;
+    if (vContext) {
+      qlock = std::unique_lock<std::recursive_mutex>(vContext->getQueueMutex());
+    }
+    vkQueueWaitIdle(queue);
+  }
 
   // Allocate 64-byte host staging buffer for 1 pixel (supports up to RGBA32F)
   VkBuffer stagingBuffer = VK_NULL_HANDLE;
@@ -609,61 +634,59 @@ bool PixelFillRateBench::ValidateResults(uint32_t config_idx) const {
   vkBeginCommandBuffer(cmd, &beginInfo);
 
   // Barrier: COLOR_ATTACHMENT_OPTIMAL -> TRANSFER_SRC_OPTIMAL
-  VkImageMemoryBarrier barrierToSrc{};
-  barrierToSrc.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+  VkImageMemoryBarrier2 barrierToSrc{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
+  barrierToSrc.srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+  barrierToSrc.srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+  barrierToSrc.dstStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
+  barrierToSrc.dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT;
   barrierToSrc.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
   barrierToSrc.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
   barrierToSrc.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
   barrierToSrc.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
   barrierToSrc.image = cfg.image;
-  barrierToSrc.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-  barrierToSrc.subresourceRange.baseMipLevel = 0;
-  barrierToSrc.subresourceRange.levelCount = 1;
-  barrierToSrc.subresourceRange.baseArrayLayer = 0;
-  barrierToSrc.subresourceRange.layerCount = 1;
-  barrierToSrc.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-  barrierToSrc.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+  barrierToSrc.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
-  vkCmdPipelineBarrier(cmd,
-                       VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                       VK_PIPELINE_STAGE_TRANSFER_BIT,
-                       0, 0, nullptr, 0, nullptr, 1, &barrierToSrc);
+  VkDependencyInfo depToSrc{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+  depToSrc.imageMemoryBarrierCount = 1;
+  depToSrc.pImageMemoryBarriers = &barrierToSrc;
+  vkCmdPipelineBarrier2(cmd, &depToSrc);
 
-  // Copy center pixel (width / 2, height / 2)
-  VkBufferImageCopy region{};
-  region.bufferOffset = 0;
-  region.bufferRowLength = 0;
-  region.bufferImageHeight = 0;
-  region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-  region.imageSubresource.mipLevel = 0;
-  region.imageSubresource.baseArrayLayer = 0;
-  region.imageSubresource.layerCount = 1;
-  region.imageOffset = {static_cast<int32_t>(width / 2), static_cast<int32_t>(height / 2), 0};
-  region.imageExtent = {1, 1, 1};
+  // Copy 4 distinct spatial probe pixels (16-byte stride satisfies both RGBA8=4B and RGBA16F=8B alignment)
+  VkBufferImageCopy regions[4]{};
+  const int32_t xs[4] = {0, 1, static_cast<int32_t>(width / 2), static_cast<int32_t>(width - 1)};
+  const int32_t ys[4] = {0, 0, static_cast<int32_t>(height / 2), static_cast<int32_t>(height - 1)};
+  for (int r = 0; r < 4; ++r) {
+    regions[r].bufferOffset = static_cast<VkDeviceSize>(r) * 16ULL;
+    regions[r].bufferRowLength = 0;
+    regions[r].bufferImageHeight = 0;
+    regions[r].imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    regions[r].imageSubresource.mipLevel = 0;
+    regions[r].imageSubresource.baseArrayLayer = 0;
+    regions[r].imageSubresource.layerCount = 1;
+    regions[r].imageOffset = {xs[r], ys[r], 0};
+    regions[r].imageExtent = {1, 1, 1};
+  }
 
   vkCmdCopyImageToBuffer(cmd, cfg.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                         stagingBuffer, 1, &region);
+                         stagingBuffer, 4, regions);
 
   // Barrier: TRANSFER_SRC_OPTIMAL -> COLOR_ATTACHMENT_OPTIMAL
-  VkImageMemoryBarrier barrierBack{};
-  barrierBack.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+  VkImageMemoryBarrier2 barrierBack{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
+  barrierBack.srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
+  barrierBack.srcAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT;
+  barrierBack.dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+  barrierBack.dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
   barrierBack.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
   barrierBack.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
   barrierBack.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
   barrierBack.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
   barrierBack.image = cfg.image;
-  barrierBack.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-  barrierBack.subresourceRange.baseMipLevel = 0;
-  barrierBack.subresourceRange.levelCount = 1;
-  barrierBack.subresourceRange.baseArrayLayer = 0;
-  barrierBack.subresourceRange.layerCount = 1;
-  barrierBack.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-  barrierBack.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+  barrierBack.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
-  vkCmdPipelineBarrier(cmd,
-                       VK_PIPELINE_STAGE_TRANSFER_BIT,
-                       VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                       0, 0, nullptr, 0, nullptr, 1, &barrierBack);
+  VkDependencyInfo depBack{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+  depBack.imageMemoryBarrierCount = 1;
+  depBack.pImageMemoryBarriers = &barrierBack;
+  vkCmdPipelineBarrier2(cmd, &depBack);
 
   vkEndCommandBuffer(cmd);
 
@@ -676,25 +699,73 @@ bool PixelFillRateBench::ValidateResults(uint32_t config_idx) const {
   VkFenceCreateInfo fenceInfo{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
   vkCreateFence(device, &fenceInfo, nullptr, &fence);
 
-  vkQueueSubmit(queue, 1, &submitInfo, fence);
+  {
+    std::unique_lock<std::recursive_mutex> qlock;
+    if (vContext) {
+      qlock = std::unique_lock<std::recursive_mutex>(vContext->getQueueMutex());
+    }
+    vkQueueSubmit(queue, 1, &submitInfo, fence);
+  }
   vkWaitForFences(device, 1, &fence, VK_TRUE, 3000000000ULL);
   vkDestroyFence(device, fence, nullptr);
   vkFreeCommandBuffers(device, commandPool, 1, &cmd);
 
   bool valid = false;
   void *mapped = nullptr;
-  if (vkMapMemory(device, stagingMemory, 0, 64, 0, &mapped) == VK_SUCCESS) {
-    if (cfg.format == VK_FORMAT_R8G8B8A8_UNORM) {
-      auto *rgba = static_cast<const uint8_t *>(mapped);
-      // Verify non-zero color channels and non-zero alpha
-      valid = (rgba[0] > 0 || rgba[1] > 0 || rgba[2] > 0) && rgba[3] > 0;
-    } else if (cfg.format == VK_FORMAT_R16G16B16A16_SFLOAT) {
-      auto *hdr = static_cast<const uint16_t *>(mapped);
-      // In half float, 0 is 0x0000 or 0x8000 (-0.0)
-      valid = (hdr[0] != 0 || hdr[1] != 0 || hdr[2] != 0) && hdr[3] != 0;
+  auto halfToFloat = [](uint16_t h) -> float {
+    uint32_t sign = static_cast<uint32_t>(h & 0x8000u) << 16;
+    uint32_t exp = (h >> 10) & 0x1Fu;
+    uint32_t mant = h & 0x03FFu;
+    uint32_t fBits = 0;
+    if (exp == 0) {
+      if (mant != 0) {
+        int e = -14;
+        while ((mant & 0x0400u) == 0) { mant <<= 1; --e; }
+        mant &= 0x03FFu;
+        fBits = sign | static_cast<uint32_t>((e + 127) << 23) | (mant << 13);
+      } else {
+        fBits = sign;
+      }
+    } else if (exp == 0x1Fu) {
+      fBits = sign | 0x7F800000u | (mant << 13);
     } else {
-      valid = true;
+      fBits = sign | ((exp + 112u) << 23) | (mant << 13);
     }
+    float out = 0.0f;
+    std::memcpy(&out, &fBits, sizeof(out));
+    return out;
+  };
+  if (vkMapMemory(device, stagingMemory, 0, 64, 0, &mapped) == VK_SUCCESS) {
+    const auto *bytes = static_cast<const uint8_t *>(mapped);
+    float px[4][4]{};
+    bool allFiniteNonZero = true;
+    for (int p = 0; p < 4; ++p) {
+      if (cfg.format == VK_FORMAT_R8G8B8A8_UNORM) {
+        const uint8_t *rgba = bytes + p * 16;
+        for (int c = 0; c < 4; ++c) px[p][c] = static_cast<float>(rgba[c]) / 255.0f;
+      } else if (cfg.format == VK_FORMAT_R16G16B16A16_SFLOAT) {
+        const uint16_t *hdr = reinterpret_cast<const uint16_t *>(bytes + p * 16);
+        for (int c = 0; c < 4; ++c) px[p][c] = halfToFloat(hdr[c]);
+      }
+      for (int c = 0; c < 4; ++c) {
+        if (!std::isfinite(px[p][c])) allFiniteNonZero = false;
+      }
+      const bool rgbOk = (px[p][0] >= 0.05f && px[p][0] <= 0.95f) &&
+                         (px[p][1] >= 0.05f && px[p][1] <= 0.95f) &&
+                         (px[p][2] >= 0.05f && px[p][2] <= 0.95f);
+      const bool alphaOk = (px[p][3] >= 0.45f && px[p][3] <= 1.05f);
+      if (!rgbOk || !alphaOk) allFiniteNonZero = false;
+    }
+    bool hasSpatialVariation = false;
+    for (int p = 1; p < 4; ++p) {
+      if (std::abs(px[p][0] - px[0][0]) > 0.005f ||
+          std::abs(px[p][1] - px[0][1]) > 0.005f ||
+          std::abs(px[p][2] - px[0][2]) > 0.005f) {
+        hasSpatialVariation = true;
+        break;
+      }
+    }
+    valid = allFiniteNonZero && hasSpatialVariation;
     vkUnmapMemory(device, stagingMemory);
   }
 

@@ -7,7 +7,7 @@ public:
   bool IsSupported(const DeviceInfo &info,
                    IComputeContext *context) const override;
   std::string GetSupportNote() const override {
-    return "Requires VK_KHR_shader_bfloat16 or ROCm BF16 WMMA support";
+    return "Requires VK_KHR_shader_bfloat16 or ROCm BF16 WMMA / MFMA support";
   }
   std::string GetSupportNote(const DeviceInfo &info,
                              IComputeContext *context = nullptr) const override {
@@ -15,11 +15,14 @@ public:
       return "No support for native BFloat16 floating-point arithmetic in OpenCL API (extension cl_khr_bfloat16 missing)";
     }
     if (!info.bf16Support) {
+      if (context && context->getBackend() == ComputeBackend::ROCm) {
+        return "Native BFloat16 (BF16) compute / WMMA / MFMA hardware not supported on this ROCm GPU";
+      }
       if (info.archName.find("RDNA 3") != std::string::npos ||
           info.archName.find("gfx11") != std::string::npos) {
-        return "RDNA 3 lacks native BF16 VALU dot-product hardware (no native BF16 support on Vulkan)";
+        return "RDNA 3 lacks BF16-return v_dot2_bf16_bf16 VALU dot-product hardware (Vulkan RADV lowers to FP32; ROCm uses native FP32-accum v_dot2_f32_bf16)";
       }
-      return "shaderBfloat16 / BF16 hardware support bit not set";
+      return "VK_KHR_shader_bfloat16 (shaderBFloat16) hardware/driver support not available";
     }
     return "";
   }
@@ -72,23 +75,31 @@ public:
     }
     return false;
   }
+  using IBenchmark::GetConfigSupportNote;
   std::string GetConfigSupportNote(uint32_t config_idx,
                                    const DeviceInfo &info,
                                    IComputeContext *context = nullptr) const override {
     if (config_idx == 0 && !info.shaderBfloat16DotProductSupport) {
-      return "Packed BFloat16 vector dot2 instruction not supported by device/driver";
+      if (context && context->getBackend() == ComputeBackend::ROCm) {
+        return "Packed BFloat16 vector dot2 (v_dot2_f32_bf16) instruction not supported on this ROCm GPU";
+      }
+      return "VK_KHR_shader_bfloat16::shaderBFloat16DotProduct not supported by device/driver";
     }
     if (config_idx == 1) {
       if (!info.cooperativeMatrixSupport) {
-        return "VK_KHR_cooperative_matrix or ROCm WMMA/MFMA not supported";
+        if (context && context->getBackend() == ComputeBackend::ROCm) {
+          return "ROCm BF16 WMMA / MFMA matrix instructions not supported on this GPU";
+        }
+        return "VK_KHR_cooperative_matrix extension not supported on this GPU/driver";
       }
       if (context && context->getBackend() == ComputeBackend::Vulkan &&
           !info.shaderBfloat16CoopMatrixSupport) {
-        return "shaderBFloat16CooperativeMatrix not supported by active Vulkan driver";
+        return "VK_KHR_shader_bfloat16::shaderBFloat16CooperativeMatrix not supported by active Vulkan driver";
       }
     }
     return GetSupportNote(info, context);
   }
+  using IBenchmark::GetConfigSupportLimitation;
   SupportLimitation GetConfigSupportLimitation(uint32_t config_idx,
                                                const DeviceInfo &info,
                                                IComputeContext *context = nullptr) const override {
@@ -137,6 +148,7 @@ public:
   bool SupportsWorkScaling(uint32_t config_idx = 0) const override { (void)config_idx; return true; }
   BenchmarkResult GetResult(uint32_t config_idx) const override;
   uint32_t GetNumConfigs() const override { return 2; }
+  using IBenchmark::GetConfigName;
   std::string GetConfigName(uint32_t config_idx) const override {
     return config_idx == 0 ? "Vector" : "Matrix";
   }
@@ -152,11 +164,34 @@ public:
     (void)config_idx;
     return "BF16";
   }
+  using IBenchmark::GetDescription;
   const char *GetDescription() const override {
     return "Brain Floating-Point (bfloat16) packed dot-product VALU and Cooperative Matrix / WMMA / MFMA throughput.";
   }
+  const char *GetDescription(uint32_t config_idx) const override {
+    return config_idx == 0
+               ? "Brain Floating-Point (bfloat16) packed 2-element dot-product VALU throughput."
+               : "Brain Floating-Point (bfloat16) matrix multiply-accumulate throughput across Cooperative Matrix / WMMA / MFMA cores.";
+  }
+  const char *GetDescription(uint32_t config_idx, const DeviceInfo &info,
+                             IComputeContext *context = nullptr) const override {
+    (void)info;
+    if (context && context->getBackend() == ComputeBackend::ROCm) {
+      return config_idx == 0
+                 ? "Brain Floating-Point (bfloat16) packed dot-product VALU throughput via native FP32-accumulating v_dot2_f32_bf16."
+                 : "Brain Floating-Point (bfloat16) matrix multiply-accumulate throughput across WMMA / MFMA matrix cores.";
+    }
+    if (context && context->getBackend() == ComputeBackend::Vulkan) {
+      return config_idx == 0
+                 ? "Brain Floating-Point (bfloat16) packed dot-product VALU throughput via VK_KHR_shader_bfloat16."
+                 : "Brain Floating-Point (bfloat16) matrix multiply-accumulate throughput via VK_KHR_cooperative_matrix and VK_KHR_shader_bfloat16.";
+    }
+    return GetDescription(config_idx);
+  }
   double GetOperationalIntensity(uint32_t config_idx = 0) const override {
-    return config_idx == 0 ? 524288.0 : 4096.0;
+    // Config 0 (bf16.comp): 32768 * 256 ops (8,388,608 FLOPs) / (8 B read + 8 B write = 16 B) = 524,288.0 FLOP/B
+    // Config 1 (coop_matrix_bf16.comp): 32768 * 8192 FLOPs / (512 B A + 512 B B + 1024 B C = 2048 B) = 131,072.0 FLOP/B
+    return (config_idx == 0u) ? 524288.0 : 131072.0;
   }
   int GetSortWeight() const override { return 35; }
   uint32_t GetExpectedKernelCount() const override { return 2; }

@@ -4,10 +4,12 @@ This document describes how to build and install GPUBench on your system.
 
 ## Prerequisites
 
-At least one of the following compute backends must be available:
-- **Vulkan**: Vulkan SDK with `glslc` compiler
-- **OpenCL**: OpenCL development libraries
-- **ROCm**: AMD ROCm with HIP support
+- **CMake 3.28+** and Ninja / Make / MSBuild
+- **C++23 Compiler**: GCC 13+, Clang 17+, or MSVC 19.38+ (Visual Studio 2022 17.8+)
+- **Vulkan (Primary Backend)**: Vulkan SDK 1.4+ with `glslc`, `slangc` (`shader-slang` / Vulkan SDK), and `spirv-as`
+- **SDL3** (for `gpubench-gui`, auto-fetched by CMake if not present on system)
+- **ROCm/HIP (`GPUBENCH_ENABLE_ROCM=ON` by default)**: AMD ROCm 6.4–10.2+ with HIP/HIPRTC support (dynamically loaded via `dlopen` with zero hard runtime link dependency; disable with `-DGPUBENCH_ENABLE_ROCM=OFF`)
+- **Optional OpenCL (`-DGPUBENCH_ENABLE_OPENCL=ON`, soft-disabled by default)**: OpenCL 3.0 headers & ICD loader
 
 ## Building from Source
 
@@ -129,7 +131,7 @@ gpubench-gui
 
 ## Kernel Path Resolution
 
-GPUBench (`PathResolver::getKernelPath()`) searches for kernel files in the following order:
+GPUBench (`KernelPath::find()`) searches for kernel files in the following order:
 
 1. **Environment variable** `GPUBENCH_KERNEL_PATH` (if set)
 2. **Relative to executable**: `<exe_dir>/../share/gpubench/kernels` and `<exe_dir>/kernels`
@@ -229,18 +231,18 @@ Then add `$HOME/.local/bin` to your PATH.
 - Requires Administrator privileges for installation
 - Add installation directory to system PATH for easy access
 
-## Building with Specific Backends
+## Building with Specific Backends & Build Options
 
-You can disable backends by not installing their dependencies:
+By default, CMake builds both the primary **Vulkan 1.4** backend (with Slang shader compilation enabled) and the **ROCm/HIP** backend (`GPUBENCH_ENABLE_ROCM=ON`), while keeping optional OpenCL off:
 
 ```bash
-# Build with only Vulkan
-cmake .. -DCMAKE_INSTALL_PREFIX=/usr/local
+# Default Vulkan + ROCm build with warnings treated as errors
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DGPUBENCH_WERROR=ON
 
-# CMake will automatically detect available backends
+# Optionally enable OpenCL or disable ROCm/HIP
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+  -DGPUBENCH_ENABLE_OPENCL=ON -DGPUBENCH_ENABLE_ROCM=OFF
 ```
-
-The build system will automatically detect and enable available backends.
 
 ## Creating Distribution Packages
 

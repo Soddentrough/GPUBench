@@ -58,7 +58,7 @@ DualIssueBench::DualIssueBench() {
       "Concurrent Mixed (FP32+INT32)",
       "dual_issue_mixed.comp",
       "run_dual_issue_mixed",
-      16384ULL * 192ULL, // 3,145,728 ops/thread (16 FP32 FMA insts = 32 FLOPs + 16 INT32 ALU insts = 16 IOPs per iter)
+      16384ULL * 192ULL, // 3,145,728 ops/thread (16384 outer iters * 4x unroll * [16 FP32 FMAs = 32 FLOPs + 16 INT32 ALU insts = 16 IOPs])
       "TOPS",
       "Concurrent FP32 + INT32 (1:1 instruction mix); evaluates simultaneous execution across float and integer ALU datapaths"
     }
@@ -82,6 +82,13 @@ std::string DualIssueBench::GetConfigName(uint32_t config_idx) const {
     return configs[config_idx].name;
   }
   return "";
+}
+
+const char *DualIssueBench::GetDescription(uint32_t config_idx) const {
+  if (config_idx < configs.size()) {
+    return configs[config_idx].hint.c_str();
+  }
+  return GetDescription();
 }
 
 std::string DualIssueBench::GetConfigSupportNote(uint32_t config_idx) const {

@@ -41,11 +41,28 @@ public:
   const char *GetSubCategory(uint32_t /*config_idx*/ = 0) const override {
     return "ILP & Concurrency";
   }
+  using IBenchmark::GetDescription;
   const char *GetDescription() const override {
-    return "Instruction-level parallelism, VOPD dual-issue, and VALU + SALU co-execution efficiency.";
+    return "Instruction-level parallelism, VOPD dual-issue, and FP32 + INT32 VALU co-execution efficiency.";
   }
+  const char *GetDescription(uint32_t config_idx) const override;
   double GetOperationalIntensity(uint32_t config_idx = 0) const override {
-    return config_idx == 0 ? 131072.0 : 524288.0;
+    // Each dual_issue_*.comp shader reads 4 B + writes 4 B = 8 B per thread
+    switch (config_idx) {
+      case 0: // 524,288 ops / 8 B
+      case 3:
+        return 65536.0;
+      case 1: // 1,048,576 ops / 8 B
+      case 4:
+        return 131072.0;
+      case 2: // 2,097,152 ops / 8 B
+      case 5:
+        return 262144.0;
+      case 6: // 3,145,728 ops / 8 B
+        return 393216.0;
+      default:
+        return 65536.0;
+    }
   }
   int GetSortWeight() const override { return 25; }
 
@@ -55,7 +72,9 @@ public:
   uint32_t GetExpectedKernelCount() const override {
     return static_cast<uint32_t>(configs.size());
   }
+  using IBenchmark::GetConfigName;
   std::string GetConfigName(uint32_t config_idx) const override;
+  using IBenchmark::GetConfigSupportNote;
   std::string GetConfigSupportNote(uint32_t config_idx) const override;
 
 private:

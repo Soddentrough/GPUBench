@@ -31,7 +31,10 @@ public:
   const char *GetDescription() const override { return GetDescription(0); }
   const char *GetDescription(uint32_t config_idx) const override;
   double GetOperationalIntensity(uint32_t config_idx = 0) const override {
-    return (config_idx == 0u) ? 256.0 : 512.0;
+    // 256 iterations * 512 ops = 131,072 ops per thread;
+    // FP16: 512 B weights + 32 B bias + 32 B output = 576 B -> 227.56 FLOP/B
+    // INT8: 256 B weights + 64 B bias + 64 B output = 384 B -> 341.33 OP/B
+    return (config_idx == 0u) ? (131072.0 / 576.0) : (131072.0 / 384.0);
   }
 
   bool IsSupported(const DeviceInfo &info,

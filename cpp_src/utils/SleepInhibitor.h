@@ -2,6 +2,9 @@
 
 #include <string>
 #include <cstdint>
+#ifdef __linux__
+#include <sys/types.h>
+#endif
 
 namespace utils {
 
@@ -30,8 +33,9 @@ private:
     uint32_t previousState = 0;
 #elif defined(__APPLE__)
     uint32_t assertionID = 0;
-#else
-    uint32_t cookie = 0;
+#elif defined(__linux__)
+    pid_t inhibitorPid = -1;
+    int inhibitorPipeFd = -1;
 #endif
 };
 

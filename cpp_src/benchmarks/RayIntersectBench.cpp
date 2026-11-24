@@ -350,11 +350,14 @@ void RayIntersectBench::buildAS() {
   VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
   submit.commandBufferCount = 1;
   submit.pCommandBuffers = &cmd;
-  if (vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE) != VK_SUCCESS) {
-    vkDestroyCommandPool(device, tmpPool, nullptr);
-    throw std::runtime_error("Failed to submit AS build in RayIntersectBench");
+  {
+    std::lock_guard<std::recursive_mutex> qlock(vContext->getQueueMutex());
+    if (vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE) != VK_SUCCESS) {
+      vkDestroyCommandPool(device, tmpPool, nullptr);
+      throw std::runtime_error("Failed to submit AS build in RayIntersectBench");
+    }
+    vkQueueWaitIdle(queue);
   }
-  vkQueueWaitIdle(queue);
 
   vkDestroyCommandPool(device, tmpPool, nullptr);
 }

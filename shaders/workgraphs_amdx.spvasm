@@ -8,7 +8,7 @@
                OpExtension "SPV_AMDX_shader_enqueue"
     %glsl450 = OpExtInstImport "GLSL.std.450"
                OpMemoryModel Logical GLSL450
-               OpEntryPoint GLCompute %producerMain "producerNode" %gl_GlobalInvocationID %outPayloads
+               OpEntryPoint GLCompute %producerMain "producerNode" %gl_GlobalInvocationID
                OpEntryPoint GLCompute %consumerMain "consumerNode" %gl_LocalInvocationIndex %inPayloads %outBuf
                OpExecutionMode %producerMain LocalSize 256 1 1
                OpExecutionModeId %producerMain IsApiEntryAMDX %true_val
@@ -23,10 +23,11 @@
                OpMemberDecorate %PayloadStruct 0 Offset 0
                OpMemberDecorate %PayloadStruct 1 Offset 4
                OpMemberDecorate %PayloadStruct 2 Offset 8
-               OpDecorateId %outPayloads PayloadNodeBaseIndexAMDX %uint_1
-               OpDecorateId %outPayloads PayloadNodeArraySizeAMDX %uint_1
-               OpDecorateId %inPayloads NodeMaxPayloadsAMDX %uint_64
-               OpDecorate %outPayloads TrackFinishWritingAMDX
+               OpDecorateId %OutPayloadArr PayloadNodeNameAMDX %consumer_name
+               OpDecorateId %OutPayloadArr PayloadNodeBaseIndexAMDX %uint_1
+               OpDecorateId %OutPayloadArr PayloadNodeArraySizeAMDX %uint_1
+               OpDecorateId %OutPayloadArr NodeMaxPayloadsAMDX %uint_1
+               OpDecorateId %InPayloadArr NodeMaxPayloadsAMDX %uint_64
                OpDecorate %rta ArrayStride 4
                OpDecorate %OutBlock Block
                OpMemberDecorate %OutBlock 0 Offset 0
@@ -57,9 +58,12 @@
      %flt_c1 = OpConstant %float 0.125
 %flt_fma_mul = OpConstant %float 0.99951171875
 %flt_fma_add = OpConstant %float 0.0009765625
+%consumer_name = OpConstantStringAMDX "consumerNode"
 %PayloadStruct = OpTypeStruct %uint %uint %uint
-%PayloadArr  = OpTypeNodePayloadArrayAMDX %PayloadStruct
-%_ptr_PayloadArr = OpTypePointer NodePayloadAMDX %PayloadArr
+%OutPayloadArr = OpTypeNodePayloadArrayAMDX %PayloadStruct
+%InPayloadArr  = OpTypeNodePayloadArrayAMDX %PayloadStruct
+%_ptr_OutPayloadArr = OpTypePointer NodePayloadAMDX %OutPayloadArr
+%_ptr_InPayloadArr  = OpTypePointer NodePayloadAMDX %InPayloadArr
 %_ptr_PayloadU = OpTypePointer NodePayloadAMDX %uint
 %_ptr_InputV3U = OpTypePointer Input %v3uint
 %_ptr_InputU = OpTypePointer Input %uint
@@ -69,8 +73,7 @@
 %_ptr_SB_Flt = OpTypePointer StorageBuffer %float
 %gl_GlobalInvocationID = OpVariable %_ptr_InputV3U Input
 %gl_LocalInvocationIndex = OpVariable %_ptr_InputU Input
-%outPayloads = OpVariable %_ptr_PayloadArr NodePayloadAMDX
- %inPayloads = OpVariable %_ptr_PayloadArr NodePayloadAMDX
+ %inPayloads = OpVariable %_ptr_InPayloadArr NodePayloadAMDX
      %outBuf = OpVariable %_ptr_SB_Out StorageBuffer
 
 %producerMain = OpFunction %void None %func
@@ -89,9 +92,9 @@
        %low  = OpBitwiseAnd %uint %hash %uint_1
   %isActive  = OpIEqual %bool %low %uint_0
     %recCnt  = OpSelect %uint %isActive %uint_1 %uint_0
-       %pArr = OpAllocateNodePayloadsAMDX %_ptr_PayloadArr %uint_2 %recCnt %uint_1
-               OpSelectionMerge %prod_done None
-               OpBranchConditional %isActive %prod_emit %prod_finish
+       %pArr = OpAllocateNodePayloadsAMDX %_ptr_OutPayloadArr %uint_4 %recCnt %uint_0
+               OpSelectionMerge %prod_merge None
+               OpBranchConditional %isActive %prod_emit %prod_merge
   %prod_emit = OpLabel
        %wPx  = OpAccessChain %_ptr_PayloadU %pArr %uint_0 %uint_0
        %wPy  = OpAccessChain %_ptr_PayloadU %pArr %uint_0 %uint_1
@@ -102,17 +105,9 @@
                OpStore %wPx %gid
                OpStore %wPy %hashOr1
                OpStore %wPz %pzVal
-               OpBranch %prod_finish
-%prod_finish = OpLabel
-   %finished = OpFinishWritingNodePayloadAMDX %bool %pArr
-               OpSelectionMerge %enq_done None
-               OpBranchConditional %finished %do_enq %enq_done
-     %do_enq = OpLabel
+               OpBranch %prod_merge
+ %prod_merge = OpLabel
                OpEnqueueNodePayloadsAMDX %pArr
-               OpBranch %enq_done
-   %enq_done = OpLabel
-               OpBranch %prod_done
-  %prod_done = OpLabel
                OpReturn
                OpFunctionEnd
 

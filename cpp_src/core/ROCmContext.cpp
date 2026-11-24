@@ -12,10 +12,12 @@
 #include <hip/hiprtc.h>
 #endif
 #include "utils/ShaderCache.h"
-#include <cstring>
-#include <fstream>
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
 
 // Static members
 std::unique_ptr<utils::DynamicLibrary> ROCmContext::hipLib;
@@ -59,6 +61,22 @@ typedef hipError_t (*p_hipGraphInstantiate)(hipGraphExec_t *, hipGraph_t,
 typedef hipError_t (*p_hipGraphLaunch)(hipGraphExec_t, hipStream_t);
 typedef hipError_t (*p_hipGraphExecDestroy)(hipGraphExec_t);
 typedef hipError_t (*p_hipGraphDestroy)(hipGraph_t);
+typedef hipError_t (*p_hipGetLastError)(void);
+typedef hipError_t (*p_hipHostMalloc)(void **, size_t, unsigned int);
+typedef hipError_t (*p_hipHostFree)(void *);
+typedef hipError_t (*p_hipHostGetDevicePointer)(void **, void *, unsigned int);
+typedef hipError_t (*p_hipMemcpyAsync)(void *, const void *, size_t,
+                                       hipMemcpyKind, hipStream_t);
+typedef hipError_t (*p_hipMemset)(void *, int, size_t);
+typedef hipError_t (*p_hipMemsetAsync)(void *, int, size_t, hipStream_t);
+typedef hipError_t (*p_hipStreamCreateWithFlags)(hipStream_t *, unsigned int);
+typedef hipError_t (*p_hipStreamWaitEvent)(hipStream_t, hipEvent_t,
+                                           unsigned int);
+typedef hipError_t (*p_hipEventCreateWithFlags)(hipEvent_t *, unsigned int);
+typedef hipError_t (*p_hipDeviceCanAccessPeer)(int *, int, int);
+typedef hipError_t (*p_hipDeviceEnablePeerAccess)(int, unsigned int);
+typedef hipError_t (*p_hipMemcpyPeerAsync)(void *, int, const void *, int,
+                                           size_t, hipStream_t);
 
 // Function pointers for HIPRTC
 #ifdef HAVE_HIPRTC
@@ -114,6 +132,93 @@ static p_hipGraphExecDestroy f_hipGraphExecDestroy;
 static p_hipGraphDestroy f_hipGraphDestroy;
 typedef hipError_t (*p_hipFuncGetAttribute)(int *, hipFunction_attribute, hipFunction_t);
 static p_hipFuncGetAttribute f_hipFuncGetAttribute;
+static p_hipGetLastError f_hipGetLastError;
+static p_hipHostMalloc f_hipHostMalloc;
+static p_hipHostFree f_hipHostFree;
+static p_hipHostGetDevicePointer f_hipHostGetDevicePointer;
+static p_hipMemcpyAsync f_hipMemcpyAsync;
+static p_hipMemset f_hipMemset;
+static p_hipMemsetAsync f_hipMemsetAsync;
+static p_hipStreamCreateWithFlags f_hipStreamCreateWithFlags;
+static p_hipStreamWaitEvent f_hipStreamWaitEvent;
+static p_hipEventCreateWithFlags f_hipEventCreateWithFlags;
+static p_hipDeviceCanAccessPeer f_hipDeviceCanAccessPeer;
+static p_hipDeviceEnablePeerAccess f_hipDeviceEnablePeerAccess;
+static p_hipMemcpyPeerAsync f_hipMemcpyPeerAsync;
+
+namespace {
+#ifndef _WIN32
+std::vector<std::string> buildLinuxRocmLibPrefixes() {
+  std::vector<std::string> prefixes;
+  auto addPrefix = [&](const std::string &p) {
+    if (p.empty()) return;
+    if (std::find(prefixes.begin(), prefixes.end(), p) == prefixes.end()) {
+      prefixes.push_back(p);
+    }
+  };
+  if (const char *rocmEnv = std::getenv("ROCM_PATH"); rocmEnv && rocmEnv[0] != '\0') {
+    addPrefix(std::string(rocmEnv) + "/lib");
+  }
+  if (const char *hipEnv = std::getenv("HIP_PATH"); hipEnv && hipEnv[0] != '\0') {
+    addPrefix(std::string(hipEnv) + "/lib");
+  }
+  addPrefix("/opt/rocm/core/lib");
+  addPrefix("/opt/rocm/lib");
+  addPrefix("/opt/rocm/core-10.2/lib");
+  addPrefix("/opt/rocm/current/lib");
+  addPrefix("/opt/rocm/core-10.1/lib");
+  return prefixes;
+}
+
+std::unique_ptr<utils::DynamicLibrary> loadFirstValidLinuxLib(
+    const std::vector<std::string> &prefixes,
+    const std::vector<std::string> &sonames) {
+  for (const auto &prefix : prefixes) {
+    for (const auto &soname : sonames) {
+      std::string fullPath = prefix + "/" + soname;
+      if (!std::filesystem::exists(fullPath)) continue;
+      auto lib = std::make_unique<utils::DynamicLibrary>(fullPath);
+      if (lib && lib->isValid()) {
+        return lib;
+      }
+    }
+  }
+  // Fallback to default dynamic linker search path when /opt/rocm is absent
+  for (const auto &soname : sonames) {
+    auto lib = std::make_unique<utils::DynamicLibrary>(soname);
+    if (lib && lib->isValid()) {
+      return lib;
+    }
+  }
+  return nullptr;
+}
+#endif
+
+std::string detectRocmVersionString() {
+  std::vector<std::filesystem::path> candidates;
+  if (const char *rocmEnv = std::getenv("ROCM_PATH"); rocmEnv && rocmEnv[0] != '\0') {
+    candidates.emplace_back(std::filesystem::path(rocmEnv) / ".info" / "version");
+  }
+  candidates.emplace_back("/opt/rocm/core/.info/version");
+  candidates.emplace_back("/opt/rocm/.info/version");
+  candidates.emplace_back("/opt/rocm/core-10.2/.info/version");
+  candidates.emplace_back("/opt/rocm/current/.info/version");
+  for (const auto &p : candidates) {
+    std::error_code ec;
+    if (!std::filesystem::exists(p, ec)) continue;
+    std::ifstream ifs(p);
+    if (!ifs.is_open()) continue;
+    std::string ver;
+    std::getline(ifs, ver);
+    while (!ver.empty() && (ver.back() == '\r' || ver.back() == '\n' ||
+                            ver.back() == ' ' || ver.back() == '\t')) {
+      ver.pop_back();
+    }
+    if (!ver.empty()) return ver;
+  }
+  return "";
+}
+} // namespace
 
 bool ROCmContext::loadLibraries() {
   if (librariesLoaded)
@@ -146,40 +251,9 @@ bool ROCmContext::loadLibraries() {
     }
   }
 #else
-  hipLib = std::make_unique<utils::DynamicLibrary>("libamdhip64.so.7");
-  if (!hipLib->isValid()) {
-    hipLib = std::make_unique<utils::DynamicLibrary>("libamdhip64.so.6");
-  }
-  if (!hipLib->isValid()) {
-    hipLib = std::make_unique<utils::DynamicLibrary>("libamdhip64.so");
-  }
-  if (!hipLib->isValid()) {
-    hipLib = std::make_unique<utils::DynamicLibrary>("/opt/rocm/current/lib/libamdhip64.so.7");
-  }
-  if (!hipLib->isValid()) {
-    hipLib = std::make_unique<utils::DynamicLibrary>("/opt/rocm/current/lib/libamdhip64.so.6");
-  }
-  if (!hipLib->isValid()) {
-    hipLib = std::make_unique<utils::DynamicLibrary>("/opt/rocm/current/lib/libamdhip64.so");
-  }
-  if (!hipLib->isValid()) {
-    hipLib = std::make_unique<utils::DynamicLibrary>("/opt/rocm/core-10.1/lib/libamdhip64.so.7");
-  }
-  if (!hipLib->isValid()) {
-    hipLib = std::make_unique<utils::DynamicLibrary>("/opt/rocm/core-10.1/lib/libamdhip64.so.6");
-  }
-  if (!hipLib->isValid()) {
-    hipLib = std::make_unique<utils::DynamicLibrary>("/opt/rocm/core-10.1/lib/libamdhip64.so");
-  }
-  if (!hipLib->isValid()) {
-    hipLib = std::make_unique<utils::DynamicLibrary>("/opt/rocm/lib/libamdhip64.so.7");
-  }
-  if (!hipLib->isValid()) {
-    hipLib = std::make_unique<utils::DynamicLibrary>("/opt/rocm/lib/libamdhip64.so.6");
-  }
-  if (!hipLib->isValid()) {
-    hipLib = std::make_unique<utils::DynamicLibrary>("/opt/rocm/lib/libamdhip64.so");
-  }
+  const std::vector<std::string> rocmPrefixes = buildLinuxRocmLibPrefixes();
+  hipLib = loadFirstValidLinuxLib(
+      rocmPrefixes, {"libamdhip64.so.7", "libamdhip64.so.6", "libamdhip64.so"});
 #endif
 
   if (hipLib && hipLib->isValid()) {
@@ -227,6 +301,26 @@ bool ROCmContext::loadLibraries() {
     f_hipGraphExecDestroy = hipLib->getFunction<p_hipGraphExecDestroy>("hipGraphExecDestroy");
     f_hipGraphDestroy = hipLib->getFunction<p_hipGraphDestroy>("hipGraphDestroy");
     f_hipFuncGetAttribute = hipLib->getFunction<p_hipFuncGetAttribute>("hipFuncGetAttribute");
+    f_hipGetLastError = hipLib->getFunction<p_hipGetLastError>("hipGetLastError");
+    f_hipHostMalloc = hipLib->getFunction<p_hipHostMalloc>("hipHostMalloc");
+    f_hipHostFree = hipLib->getFunction<p_hipHostFree>("hipHostFree");
+    f_hipHostGetDevicePointer =
+        hipLib->getFunction<p_hipHostGetDevicePointer>("hipHostGetDevicePointer");
+    f_hipMemcpyAsync = hipLib->getFunction<p_hipMemcpyAsync>("hipMemcpyAsync");
+    f_hipMemset = hipLib->getFunction<p_hipMemset>("hipMemset");
+    f_hipMemsetAsync = hipLib->getFunction<p_hipMemsetAsync>("hipMemsetAsync");
+    f_hipStreamCreateWithFlags =
+        hipLib->getFunction<p_hipStreamCreateWithFlags>("hipStreamCreateWithFlags");
+    f_hipStreamWaitEvent =
+        hipLib->getFunction<p_hipStreamWaitEvent>("hipStreamWaitEvent");
+    f_hipEventCreateWithFlags =
+        hipLib->getFunction<p_hipEventCreateWithFlags>("hipEventCreateWithFlags");
+    f_hipDeviceCanAccessPeer =
+        hipLib->getFunction<p_hipDeviceCanAccessPeer>("hipDeviceCanAccessPeer");
+    f_hipDeviceEnablePeerAccess =
+        hipLib->getFunction<p_hipDeviceEnablePeerAccess>("hipDeviceEnablePeerAccess");
+    f_hipMemcpyPeerAsync =
+        hipLib->getFunction<p_hipMemcpyPeerAsync>("hipMemcpyPeerAsync");
 
 #ifdef HAVE_HIPRTC
 #ifdef _WIN32
@@ -249,40 +343,8 @@ bool ROCmContext::loadLibraries() {
       }
     }
 #else
-    hiprtcLib = std::make_unique<utils::DynamicLibrary>("libhiprtc.so.7");
-    if (!hiprtcLib->isValid()) {
-      hiprtcLib = std::make_unique<utils::DynamicLibrary>("libhiprtc.so.6");
-    }
-    if (!hiprtcLib->isValid()) {
-      hiprtcLib = std::make_unique<utils::DynamicLibrary>("libhiprtc.so");
-    }
-    if (!hiprtcLib->isValid()) {
-      hiprtcLib = std::make_unique<utils::DynamicLibrary>("/opt/rocm/current/lib/libhiprtc.so.7");
-    }
-    if (!hiprtcLib->isValid()) {
-      hiprtcLib = std::make_unique<utils::DynamicLibrary>("/opt/rocm/current/lib/libhiprtc.so.6");
-    }
-    if (!hiprtcLib->isValid()) {
-      hiprtcLib = std::make_unique<utils::DynamicLibrary>("/opt/rocm/current/lib/libhiprtc.so");
-    }
-    if (!hiprtcLib->isValid()) {
-      hiprtcLib = std::make_unique<utils::DynamicLibrary>("/opt/rocm/core-10.1/lib/libhiprtc.so.7");
-    }
-    if (!hiprtcLib->isValid()) {
-      hiprtcLib = std::make_unique<utils::DynamicLibrary>("/opt/rocm/core-10.1/lib/libhiprtc.so.6");
-    }
-    if (!hiprtcLib->isValid()) {
-      hiprtcLib = std::make_unique<utils::DynamicLibrary>("/opt/rocm/core-10.1/lib/libhiprtc.so");
-    }
-    if (!hiprtcLib->isValid()) {
-      hiprtcLib = std::make_unique<utils::DynamicLibrary>("/opt/rocm/lib/libhiprtc.so.7");
-    }
-    if (!hiprtcLib->isValid()) {
-      hiprtcLib = std::make_unique<utils::DynamicLibrary>("/opt/rocm/lib/libhiprtc.so.6");
-    }
-    if (!hiprtcLib->isValid()) {
-      hiprtcLib = std::make_unique<utils::DynamicLibrary>("/opt/rocm/lib/libhiprtc.so");
-    }
+    hiprtcLib = loadFirstValidLinuxLib(
+        rocmPrefixes, {"libhiprtc.so.7", "libhiprtc.so.6", "libhiprtc.so"});
 #endif
 
     if (hiprtcLib && hiprtcLib->isValid()) {
@@ -410,6 +472,48 @@ void ROCmContext::enumerateDevices() {
         (void)f_hipRuntimeGetVersion(&runtimeVersion);
       }
       info.driverVersion = static_cast<uint32_t>(runtimeVersion);
+      info.driverName = "AMD ROCm / HIP";
+      info.driverInfo = prop.gcnArchName;
+      if (runtimeVersion > 0) {
+        const int hipMajor = runtimeVersion / 10000000;
+        const int hipMinor = (runtimeVersion / 100000) % 100;
+        const int hipPatch = runtimeVersion % 100000;
+        std::string hipVer = std::to_string(hipMajor) + "." +
+                             std::to_string(hipMinor) + "." +
+                             std::to_string(hipPatch);
+        std::string rocmVer = detectRocmVersionString();
+        info.driverVersionStr = rocmVer.empty()
+                                    ? ("HIP " + hipVer)
+                                    : ("ROCm " + rocmVer + " (HIP " + hipVer + ")");
+      }
+
+      char bdfStr[32];
+      snprintf(bdfStr, sizeof(bdfStr), "%04x:%02x:%02x.0",
+               prop.pciDomainID, prop.pciBusID, prop.pciDeviceID);
+      info.pcieBusId = bdfStr;
+
+#ifdef __linux__
+      {
+        const std::filesystem::path pciDevDir =
+            std::filesystem::path("/sys/bus/pci/devices") / info.pcieBusId;
+        std::ifstream devIdFile(pciDevDir / "device");
+        if (devIdFile.is_open()) {
+          std::string devIdHex;
+          std::getline(devIdFile, devIdHex);
+          try {
+            info.deviceID = static_cast<uint32_t>(std::stoul(devIdHex, nullptr, 16));
+          } catch (...) {
+          }
+        }
+        std::ifstream visVramFile(pciDevDir / "mem_info_vis_vram_total");
+        if (visVramFile.is_open()) {
+          uint64_t visBytes = 0;
+          if (visVramFile >> visBytes) {
+            info.rebarSizeBytes = visBytes;
+          }
+        }
+      }
+#endif
 
       char uuid_str[64];
       snprintf(uuid_str, sizeof(uuid_str), "%s_%04x:%02x:%02x.%d",
@@ -426,6 +530,15 @@ void ROCmContext::enumerateDevices() {
           }
         }
       }
+      info.isApu = (prop.integrated != 0);
+      info.dedicatedVramBytes = info.isApu ? 0ULL : info.memorySize;
+      info.rebarSupported = (!info.isApu && prop.isLargeBar != 0);
+      if (!info.isApu && info.rebarSizeBytes >= 512ULL * 1024ULL * 1024ULL) {
+        info.rebarSupported = true;
+      }
+      info.dedicatedTransferQueue = (prop.asyncEngineCount > 0);
+      info.dedicatedAsyncComputeQueue = (prop.concurrentKernels != 0);
+
       info.verbose = verbose;
       info.maxWorkGroupSize = prop.maxThreadsPerBlock;
       info.maxComputeWorkGroupCountX = prop.maxGridSize[0];
@@ -670,12 +783,27 @@ ComputeKernel ROCmContext::createKernel(const std::string &file_name,
           clean_arch = clean_arch.substr(0, space_pos);
         }
         std::string offload_arch = "--offload-arch=" + clean_arch;
-        const char *opts[] = {offload_arch.c_str(), "-O3",
-                              "-I/usr/include", "-I/opt/rocm/current/include",
-                              "-I/opt/rocm/core-10.1/include",
-                              "-I/opt/rocm/core-10.0/include",
-                              "-I/opt/rocm/include", "-I/usr/local/include"};
-        hiprtcResult compileResult = f_hiprtcCompileProgram(prog, 8, opts);
+        std::vector<std::string> optStrings;
+        optStrings.push_back(offload_arch);
+        optStrings.push_back("-O3");
+        if (const char *rocmEnv = std::getenv("ROCM_PATH"); rocmEnv && rocmEnv[0] != '\0') {
+          optStrings.push_back(std::string("-I") + rocmEnv + "/include");
+        }
+        optStrings.push_back("-I/opt/rocm/core/include");
+        optStrings.push_back("-I/opt/rocm/include");
+        optStrings.push_back("-I/opt/rocm/core-10.2/include");
+        optStrings.push_back("-I/opt/rocm/current/include");
+        optStrings.push_back("-I/opt/rocm/core-10.1/include");
+        optStrings.push_back("-I/opt/rocm/core-10.0/include");
+        optStrings.push_back("-I/usr/include");
+        optStrings.push_back("-I/usr/local/include");
+        std::vector<const char *> opts;
+        opts.reserve(optStrings.size());
+        for (const auto &s : optStrings) {
+          opts.push_back(s.c_str());
+        }
+        hiprtcResult compileResult =
+            f_hiprtcCompileProgram(prog, static_cast<int>(opts.size()), opts.data());
 
         if (compileResult != HIPRTC_SUCCESS) {
           std::cerr << "HIPRTC compilation failed with code: " << compileResult
@@ -796,6 +924,7 @@ void ROCmContext::dispatch(ComputeKernel kernel, uint32_t grid_x,
   }
 
   lastDispatchedKernel = kernel;
+  it->second.lastBlockSize = block_x * block_y * block_z;
 
   if (m_inBatch) {
     RecordedDispatch rec;
@@ -857,16 +986,43 @@ KernelResourceUsage ROCmContext::getKernelResourceUsage(ComputeKernel kernel) co
   }
 
   if (usage.vgprCount > 0) {
-    const bool isWave64 =
+    const bool hasDev =
         (selectedDeviceIndex >= 0 &&
-         selectedDeviceIndex < static_cast<int>(devices.size()) &&
-         devices[selectedDeviceIndex].subgroupSize == 64u);
+         selectedDeviceIndex < static_cast<int>(devices.size()));
+    const bool isWave64 =
+        (hasDev && devices[selectedDeviceIndex].subgroupSize == 64u);
     if (isWave64) {
       // CDNA SIMD64 ArchVGPR budget (512 ArchVGPRs per SIMD, max 8 waves)
       usage.maxWavesPerSimd = std::min(8u, 512u / usage.vgprCount);
     } else {
       // RDNA SIMD32 physical VGPR budget (1536 VGPRs per SIMD32, max 16 waves)
       usage.maxWavesPerSimd = std::min(16u, 1536u / usage.vgprCount);
+    }
+
+    if (usage.ldsSizeBytes > 0 && usage.maxWavesPerSimd > 0) {
+      const uint32_t cuLdsBytes =
+          (hasDev && devices[selectedDeviceIndex].maxComputeSharedMemorySize > 0)
+              ? static_cast<uint32_t>(devices[selectedDeviceIndex].maxComputeSharedMemorySize)
+              : 65536u;
+      const uint32_t waveSize = isWave64 ? 64u : 32u;
+      uint32_t blockThreads = it->second.lastBlockSize;
+      if (blockThreads == 0) {
+        int maxBlockThreads = 0;
+        if (f_hipFuncGetAttribute(&maxBlockThreads, HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK,
+                                  it->second.function) == hipSuccess &&
+            maxBlockThreads > 0) {
+          blockThreads = static_cast<uint32_t>(maxBlockThreads);
+        } else {
+          blockThreads = waveSize;
+        }
+      }
+      const uint32_t wavesPerWg =
+          std::max(1u, (blockThreads + waveSize - 1u) / waveSize);
+      const uint32_t maxWgsPerCu = cuLdsBytes / usage.ldsSizeBytes;
+      const uint32_t simdsPerCu = isWave64 ? 4u : 2u;
+      const uint32_t ldsWavesPerSimd =
+          std::max(1u, (maxWgsPerCu * wavesPerWg) / simdsPerCu);
+      usage.maxWavesPerSimd = std::min(usage.maxWavesPerSimd, ldsWavesPerSimd);
     }
   }
 
@@ -1092,5 +1248,280 @@ double ROCmContext::stopTiming() {
 bool ROCmContext::hasGpuTiming() const {
   return available && timingSupported && (f_hipEventRecord != nullptr) &&
          (f_hipEventElapsedTime != nullptr);
+}
+
+void *ROCmContext::allocPinnedHost(size_t size, unsigned int flags) const {
+  if (!available || !f_hipHostMalloc) {
+    throw std::runtime_error("hipHostMalloc unavailable on ROCm backend");
+  }
+  void *ptr = nullptr;
+  hipError_t err = f_hipHostMalloc(&ptr, size, flags);
+  if (err != hipSuccess || !ptr) {
+    throw std::runtime_error("hipHostMalloc failed: " +
+                             std::string(f_hipGetErrorString ? f_hipGetErrorString(err) : ""));
+  }
+  return ptr;
+}
+
+void ROCmContext::freePinnedHost(void *hostPtr) const {
+  if (hostPtr && f_hipHostFree) {
+    (void)f_hipHostFree(hostPtr);
+  }
+}
+
+void *ROCmContext::getHostDevicePointer(void *hostPtr) const {
+  if (!available || !f_hipHostGetDevicePointer || !hostPtr) {
+    throw std::runtime_error("hipHostGetDevicePointer unavailable");
+  }
+  void *devPtr = nullptr;
+  hipError_t err = f_hipHostGetDevicePointer(&devPtr, hostPtr, 0);
+  if (err != hipSuccess || !devPtr) {
+    throw std::runtime_error("hipHostGetDevicePointer failed: " +
+                             std::string(f_hipGetErrorString ? f_hipGetErrorString(err) : ""));
+  }
+  return devPtr;
+}
+
+hipStream_t ROCmContext::createStream(unsigned int flags) const {
+  if (!available) {
+    throw std::runtime_error("ROCm backend unavailable");
+  }
+  hipStream_t st = nullptr;
+  hipError_t err = f_hipStreamCreateWithFlags
+                       ? f_hipStreamCreateWithFlags(&st, flags)
+                       : (f_hipStreamCreate ? f_hipStreamCreate(&st) : hipErrorNotSupported);
+  if (err != hipSuccess || !st) {
+    throw std::runtime_error("Failed to create HIP stream");
+  }
+  return st;
+}
+
+void ROCmContext::destroyStream(hipStream_t stream) const {
+  if (stream && f_hipStreamDestroy) {
+    (void)f_hipStreamDestroy(stream);
+  }
+}
+
+void ROCmContext::synchronizeStream(hipStream_t stream) const {
+  if (stream && f_hipStreamSynchronize) {
+    hipError_t err = f_hipStreamSynchronize(stream);
+    if (err != hipSuccess) {
+      throw std::runtime_error("hipStreamSynchronize failed: " +
+                               std::string(f_hipGetErrorString ? f_hipGetErrorString(err) : ""));
+    }
+  } else if (f_hipDeviceSynchronize) {
+    (void)f_hipDeviceSynchronize();
+  }
+}
+
+hipEvent_t ROCmContext::createEvent(unsigned int flags) const {
+  if (!available) {
+    throw std::runtime_error("ROCm backend unavailable");
+  }
+  hipEvent_t ev = nullptr;
+  hipError_t err = f_hipEventCreateWithFlags
+                       ? f_hipEventCreateWithFlags(&ev, flags)
+                       : (f_hipEventCreate ? f_hipEventCreate(&ev) : hipErrorNotSupported);
+  if (err != hipSuccess || !ev) {
+    throw std::runtime_error("Failed to create HIP event");
+  }
+  return ev;
+}
+
+void ROCmContext::destroyEvent(hipEvent_t ev) const {
+  if (ev && f_hipEventDestroy) {
+    (void)f_hipEventDestroy(ev);
+  }
+}
+
+void ROCmContext::recordEvent(hipEvent_t ev, hipStream_t stream) const {
+  if (!ev || !f_hipEventRecord) return;
+  hipError_t err = f_hipEventRecord(ev, stream);
+  if (err != hipSuccess) {
+    throw std::runtime_error("hipEventRecord failed");
+  }
+}
+
+void ROCmContext::synchronizeEvent(hipEvent_t ev) const {
+  if (!ev || !f_hipEventSynchronize) return;
+  hipError_t err = f_hipEventSynchronize(ev);
+  if (err != hipSuccess) {
+    throw std::runtime_error("hipEventSynchronize failed");
+  }
+}
+
+float ROCmContext::eventElapsedMs(hipEvent_t start, hipEvent_t stop) const {
+  if (!start || !stop || !f_hipEventElapsedTime) return 0.0f;
+  float ms = 0.0f;
+  if (f_hipEventElapsedTime(&ms, start, stop) != hipSuccess) {
+    return 0.0f;
+  }
+  return ms;
+}
+
+void ROCmContext::memcpyAsync(void *dst, const void *src, size_t size,
+                              hipMemcpyKind kind, hipStream_t stream) const {
+  if (f_hipMemcpyAsync) {
+    hipError_t err = f_hipMemcpyAsync(dst, src, size, kind, stream);
+    if (err != hipSuccess) {
+      throw std::runtime_error("hipMemcpyAsync failed: " +
+                               std::string(f_hipGetErrorString ? f_hipGetErrorString(err) : ""));
+    }
+  } else if (f_hipMemcpy) {
+    hipError_t err = f_hipMemcpy(dst, src, size, kind);
+    if (err != hipSuccess) {
+      throw std::runtime_error("hipMemcpy failed");
+    }
+  } else {
+    throw std::runtime_error("hipMemcpyAsync unavailable");
+  }
+}
+
+void ROCmContext::memsetAsync(void *dst, int value, size_t size,
+                              hipStream_t stream) const {
+  if (f_hipMemsetAsync) {
+    hipError_t err = f_hipMemsetAsync(dst, value, size, stream);
+    if (err != hipSuccess) {
+      throw std::runtime_error("hipMemsetAsync failed");
+    }
+  } else if (f_hipMemset) {
+    hipError_t err = f_hipMemset(dst, value, size);
+    if (err != hipSuccess) {
+      throw std::runtime_error("hipMemset failed");
+    }
+  } else {
+    throw std::runtime_error("hipMemsetAsync unavailable");
+  }
+}
+
+void ROCmContext::dispatchOnStream(ComputeKernel kernel, uint32_t grid_x,
+                                   uint32_t grid_y, uint32_t grid_z,
+                                   uint32_t block_x, uint32_t block_y,
+                                   uint32_t block_z, hipStream_t stream) {
+  auto it = kernels.find(kernel);
+  if (it == kernels.end()) {
+    throw std::runtime_error("Invalid kernel handle");
+  }
+  lastDispatchedKernel = kernel;
+  it->second.lastBlockSize = block_x * block_y * block_z;
+  std::vector<void *> arg_pointers;
+  if (!it->second.args.empty()) {
+    arg_pointers.resize(it->second.args.rbegin()->first + 1, nullptr);
+    for (auto &[key, val] : it->second.args) {
+      arg_pointers[key] = static_cast<void *>(val.data());
+    }
+  }
+  if (!f_hipModuleLaunchKernel ||
+      f_hipModuleLaunchKernel(it->second.function, grid_x, grid_y, grid_z,
+                              block_x, block_y, block_z, 0, stream,
+                              arg_pointers.data(), nullptr) != hipSuccess) {
+    throw std::runtime_error("Failed to launch HIP kernel on stream");
+  }
+}
+
+bool ROCmContext::canAccessPeer(int srcDev, int dstDev) const {
+  if (!available || !f_hipDeviceCanAccessPeer) return false;
+  if (srcDev < 0 || dstDev < 0 || srcDev == dstDev) return false;
+  if (srcDev >= static_cast<int>(devices.size()) ||
+      dstDev >= static_cast<int>(devices.size())) {
+    return false;
+  }
+  int canAccess = 0;
+  if (f_hipDeviceCanAccessPeer(&canAccess, srcDev, dstDev) != hipSuccess) {
+    if (f_hipGetLastError) (void)f_hipGetLastError();
+    return false;
+  }
+  return canAccess != 0;
+}
+
+bool ROCmContext::enablePeerAccess(int peerDev) const {
+  if (!available || !f_hipDeviceEnablePeerAccess) return false;
+  if (peerDev < 0 || peerDev >= static_cast<int>(devices.size())) return false;
+  hipError_t err = f_hipDeviceEnablePeerAccess(peerDev, 0);
+  if (err == hipErrorPeerAccessAlreadyEnabled) {
+    if (f_hipGetLastError) (void)f_hipGetLastError();
+    return true;
+  }
+  if (err != hipSuccess) {
+    if (f_hipGetLastError) (void)f_hipGetLastError();
+    return false;
+  }
+  return true;
+}
+
+void *ROCmContext::allocOnDevice(int devIdx, size_t size) const {
+  if (!available || !f_hipSetDevice || !f_hipMalloc) {
+    throw std::runtime_error("ROCmContext::allocOnDevice unavailable");
+  }
+  struct RestoreDeviceGuard {
+    int origDev;
+    ~RestoreDeviceGuard() {
+      if (origDev >= 0 && f_hipSetDevice) {
+        (void)f_hipSetDevice(origDev);
+      }
+    }
+  } guard{selectedDeviceIndex};
+
+  if (f_hipSetDevice(devIdx) != hipSuccess) {
+    throw std::runtime_error("Failed to set HIP device for peer allocation");
+  }
+  void *ptr = nullptr;
+  hipError_t err = f_hipMalloc(&ptr, size);
+  if (err != hipSuccess || !ptr) {
+    throw std::runtime_error("hipMalloc on peer device failed");
+  }
+  return ptr;
+}
+
+void ROCmContext::freeOnDevice(int devIdx, void *ptr) const {
+  if (!ptr || !f_hipSetDevice || !f_hipFree) return;
+  struct RestoreDeviceGuard {
+    int origDev;
+    ~RestoreDeviceGuard() {
+      if (origDev >= 0 && f_hipSetDevice) {
+        (void)f_hipSetDevice(origDev);
+      }
+    }
+  } guard{selectedDeviceIndex};
+
+  if (f_hipSetDevice(devIdx) == hipSuccess) {
+    (void)f_hipFree(ptr);
+  }
+}
+
+void ROCmContext::memcpyOnDevice(int devIdx, void *dst, const void *src,
+                                 size_t size, hipMemcpyKind kind) const {
+  if (!available || !f_hipSetDevice || !f_hipMemcpy) {
+    throw std::runtime_error("ROCmContext::memcpyOnDevice unavailable");
+  }
+  struct RestoreDeviceGuard {
+    int origDev;
+    ~RestoreDeviceGuard() {
+      if (origDev >= 0 && f_hipSetDevice) {
+        (void)f_hipSetDevice(origDev);
+      }
+    }
+  } guard{selectedDeviceIndex};
+
+  if (f_hipSetDevice(devIdx) != hipSuccess) {
+    throw std::runtime_error("Failed to set HIP device for peer memcpy");
+  }
+  hipError_t err = f_hipMemcpy(dst, src, size, kind);
+  if (err != hipSuccess) {
+    throw std::runtime_error("hipMemcpy on peer device failed");
+  }
+}
+
+void ROCmContext::memcpyPeerAsync(void *dst, int dstDev, const void *src,
+                                  int srcDev, size_t size,
+                                  hipStream_t stream) const {
+  if (!available || !f_hipMemcpyPeerAsync) {
+    throw std::runtime_error("hipMemcpyPeerAsync unavailable");
+  }
+  hipError_t err = f_hipMemcpyPeerAsync(dst, dstDev, src, srcDev, size, stream);
+  if (err != hipSuccess) {
+    throw std::runtime_error("hipMemcpyPeerAsync failed: " +
+                             std::string(f_hipGetErrorString ? f_hipGetErrorString(err) : ""));
+  }
 }
 

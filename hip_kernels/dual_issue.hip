@@ -13,11 +13,13 @@ extern "C" __global__ void run_dual_issue_ilp4(float* data, float multiplier, ui
     float m = multiplier;
 
     // 131072 iterations * 2 scalar FMAs = 131072 * 4 = 524,288 FP32 operations.
-    // Inline asm barrier prevents LLVM from algebraically folding ping-pong FMAs across unrolled pairs.
-    #pragma unroll 8
+    // Blank asm fences block algebraic folding across iterations without suppressing AMDGPU s_delay_alu scheduling.
+    #pragma nounroll
     for (int i = 0; i < 131072; ++i) {
-        __asm__ volatile("v_fma_f32 %0, %1, %0, %2" : "+v"(val0) : "s"(m), "v"(val1));
-        __asm__ volatile("v_fma_f32 %0, %1, %0, %2" : "+v"(val1) : "s"(m), "v"(val0));
+        val0 = fmaf(m, val0, val1);
+        __asm__ volatile("" : "+v"(val0));
+        val1 = fmaf(m, val1, val0);
+        __asm__ volatile("" : "+v"(val1));
     }
 
     data[index] = val0 + val1;

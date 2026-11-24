@@ -44,6 +44,16 @@ double DeviceRoofline::highestComputeGops() const {
 }
 
 double RooflineModel::inferOperationalIntensity(const ResultData &r) {
+  if ((r.metric == "TFLOPS" || r.metric == "TOPS") &&
+      r.hasPerfQueryTelemetry && r.perfCounters.vramReadBytes > 0 &&
+      r.operations > 0) {
+    const double empiricalOi = static_cast<double>(r.operations) /
+                               static_cast<double>(r.perfCounters.vramReadBytes);
+    if (std::isfinite(empiricalOi) && empiricalOi > 0.0) {
+      return empiricalOi;
+    }
+  }
+
   if (r.operationalIntensity > 0.0 && std::isfinite(r.operationalIntensity)) {
     return r.operationalIntensity;
   }
@@ -52,25 +62,6 @@ double RooflineModel::inferOperationalIntensity(const ResultData &r) {
   const std::string lowSub = toLowerCopy(r.subcategory);
 
   if (r.metric == "GB/s") {
-    // Copy/streaming benchmarks execute ~1 address/element op per 8-16 bytes transferred
-    if (lowName.find("vram bandwidth") != std::string::npos ||
-        lowName.find("device memory bandwidth") != std::string::npos ||
-        lowSub == "vram bandwidth") {
-      if (lowName.find("1024") != std::string::npos) return 0.0625;
-      if (lowName.find("256") != std::string::npos) return 0.125;
-      return 0.25;
-    }
-    if (lowName.find("l0") != std::string::npos) return 0.50;
-    if (lowName.find("l1") != std::string::npos) return 0.35;
-    if (lowName.find("l2") != std::string::npos) return 0.25;
-    if (lowName.find("l3") != std::string::npos) return 0.18;
-    if (lowName.find("interconnect") != std::string::npos ||
-        lowSub.find("interconnect") != std::string::npos ||
-        lowName.find("h2d") != std::string::npos ||
-        lowName.find("d2h") != std::string::npos ||
-        lowName.find("rebar") != std::string::npos) {
-      return 0.03125;
-    }
     return 0.0;
   }
 
@@ -83,28 +74,34 @@ double RooflineModel::inferOperationalIntensity(const ResultData &r) {
                         (lowName.find("fp8") != std::string::npos) ||
                         (lowName.find("mxfp6") != std::string::npos) ||
                         (lowName.find("mxfp4") != std::string::npos) ||
+                        (lowName.find("fp6") != std::string::npos) ||
+                        (lowName.find("fp4") != std::string::npos) ||
                         (lowName.find("int4") != std::string::npos) ||
                         (lowName.find("sparse") != std::string::npos) ||
                         (lowName.find("coop") != std::string::npos);
   if (isMatrix) {
-    if (lowName.find("sparse") != std::string::npos) return 8192.0;
-    if (lowName.find("mxfp4") != std::string::npos || lowName.find("int4") != std::string::npos)
-      return 8192.0;
-    if (lowName.find("mxfp6") != std::string::npos) return 6826.0;
-    if (lowName.find("fp8") != std::string::npos || lowName.find("int8") != std::string::npos)
-      return 6144.0;
-    if (lowName.find("coop") != std::string::npos || lowName.find("neural") != std::string::npos)
-      return 512.0;
-    return 4096.0;
+    if (lowName.find("sparse") != std::string::npos) return 322639.0;
+    if (lowName.find("fp4") != std::string::npos || lowName.find("int4") != std::string::npos)
+      return 209715.0;
+    if (lowName.find("fp6") != std::string::npos) return 190650.0;
+    if (lowName.find("fp8") != std::string::npos ||
+        (lowName.find("int8") != std::string::npos &&
+         lowName.find("coop") == std::string::npos)) {
+      return 174763.0;
+    }
+    if (lowName.find("coop") != std::string::npos || lowName.find("neural") != std::string::npos) {
+      return (lowName.find("int8") != std::string::npos) ? 341.33 : 227.56;
+    }
+    return 131072.0;
   }
 
   // Vector ALU FMA loops
-  if (lowName.find("fp64") != std::string::npos) return 1024.0;
-  if (lowName.find("dual-issue") != std::string::npos) return 4096.0;
+  if (lowName.find("fp64") != std::string::npos) return 256.0;
+  if (lowName.find("dual-issue") != std::string::npos) return 262144.0;
   if (lowName.find("fp16") != std::string::npos || lowName.find("bf16") != std::string::npos)
-    return 4096.0;
-  if (lowName.find("int8") != std::string::npos) return 4096.0;
-  if (lowName.find("fp32") != std::string::npos) return 2048.0;
+    return 524288.0;
+  if (lowName.find("int8") != std::string::npos) return 131072.0;
+  if (lowName.find("fp32") != std::string::npos) return 524288.0;
 
   return 0.0;
 }
@@ -125,8 +122,11 @@ RooflineModel::analyze(const std::vector<ResultData> &results) {
   std::map<GroupKey, std::vector<const ResultData *>> grouped;
   for (const auto &r : results) {
     if (r.isUnsupported || !r.isValid || !r.errorString.empty()) continue;
-    if (r.backendName == "Host" || r.deviceName.find("System") == 0) continue;
-    if (r.time_ms <= 0.0) continue;
+    if (r.backendName == "Host" || r.backendName == "System" ||
+        r.deviceName.rfind("System", 0) == 0) {
+      continue;
+    }
+    if (effectiveResultTimeMs(r) <= 0.0) continue;
     grouped[{r.backendName, r.deviceName, r.deviceIndex}].push_back(&r);
   }
 
@@ -144,7 +144,8 @@ RooflineModel::analyze(const std::vector<ResultData> &results) {
     };
 
     PeakTrack bwVram, bwL3, bwL2, bwL1, bwL0, bwPcie;
-    PeakTrack cFp64, cFp32, cFp16Vec, cBf16Vec, cFp16Mat, cLowPrecMat;
+    PeakTrack cFp64, cFp32, cFp16Vec, cBf16Vec, cInt8Vec, cFp16Mat;
+    PeakTrack cFp8Int8Mat, cLowPrecMat, cSparseMat;
 
     auto updatePeak = [](PeakTrack &p, double v, const std::string &src,
                          const std::string &metric = "") {
@@ -186,18 +187,20 @@ RooflineModel::analyze(const std::vector<ResultData> &results) {
           updatePeak(bwPcie, val, r.benchmarkName);
         }
       } else if (r.metric == "TFLOPS" || r.metric == "TOPS") {
+        const bool isSparse = (lowName.find("sparse") != std::string::npos);
         const bool isMat = (lowName.find("matrix") != std::string::npos) ||
                            (lowName.find("fp8") != std::string::npos) ||
                            (lowName.find("mxfp6") != std::string::npos) ||
                            (lowName.find("mxfp4") != std::string::npos) ||
+                           (lowName.find("fp6") != std::string::npos) ||
+                           (lowName.find("fp4") != std::string::npos) ||
                            (lowName.find("int4") != std::string::npos) ||
-                           (lowName.find("sparse") != std::string::npos);
+                           isSparse;
 
         if (lowName.find("fp64") != std::string::npos) {
           updatePeak(cFp64, val, r.benchmarkName, r.metric);
         } else if (!isMat && (lowName.find("fp32") != std::string::npos ||
                               lowName.find("dual-issue") != std::string::npos)) {
-          // Only float32 / mixed dual-issue counts for FP32 ceiling (exclude pure INT32 dual-issue)
           if (lowName.find("int32") == std::string::npos) {
             updatePeak(cFp32, val, r.benchmarkName, "TFLOPS");
           }
@@ -205,12 +208,20 @@ RooflineModel::analyze(const std::vector<ResultData> &results) {
           updatePeak(cFp16Vec, val, r.benchmarkName, r.metric);
         } else if (!isMat && lowName.find("bf16") != std::string::npos && !r.isEmulated) {
           updatePeak(cBf16Vec, val, r.benchmarkName, r.metric);
-        } else if (isMat && (lowName.find("fp16") != std::string::npos ||
-                             lowName.find("bf16") != std::string::npos) &&
-                   lowName.find("sparse") == std::string::npos) {
-          updatePeak(cFp16Mat, val, r.benchmarkName, r.metric);
-        } else if (isMat) {
+        } else if (!isMat && lowName.find("int8") != std::string::npos) {
+          updatePeak(cInt8Vec, val, r.benchmarkName, r.metric);
+        } else if (isSparse) {
+          updatePeak(cSparseMat, val, r.benchmarkName, r.metric);
+        } else if (isMat && (lowName.find("fp6") != std::string::npos ||
+                             lowName.find("fp4") != std::string::npos ||
+                             lowName.find("int4") != std::string::npos)) {
           updatePeak(cLowPrecMat, val, r.benchmarkName, r.metric);
+        } else if (isMat && (lowName.find("fp8") != std::string::npos ||
+                             lowName.find("int8") != std::string::npos)) {
+          updatePeak(cFp8Int8Mat, val, r.benchmarkName, r.metric);
+        } else if (isMat && (lowName.find("fp16") != std::string::npos ||
+                             lowName.find("bf16") != std::string::npos)) {
+          updatePeak(cFp16Mat, val, r.benchmarkName, r.metric);
         }
       }
     }
@@ -238,8 +249,11 @@ RooflineModel::analyze(const std::vector<ResultData> &results) {
     pushComp("FP32 Vector", cFp32);
     pushComp("BF16 Vector", cBf16Vec);
     pushComp("FP16 Vector", cFp16Vec);
+    pushComp("INT8 Vector", cInt8Vec);
     pushComp("FP16/BF16 Matrix", cFp16Mat);
-    pushComp("Low-Precision/Sparse Matrix", cLowPrecMat);
+    pushComp("FP8/INT8 Matrix", cFp8Int8Mat);
+    pushComp("FP6/FP4/INT4 Matrix", cLowPrecMat);
+    pushComp("2:4 Sparse Matrix", cSparseMat);
 
     // Compute Ridge Points across measured memory levels & key compute ceilings
     for (const auto &bw : dr.bandwidthCeilings) {
@@ -263,9 +277,10 @@ RooflineModel::analyze(const std::vector<ResultData> &results) {
                    ? dr.bandwidthCeilings.front().bandwidthGBps
                    : 0.0);
 
-    // Map executed workloads onto Roofline points
+    // Map executed compute workloads onto Roofline points (bandwidth benchmarks define ceilings only)
     for (const ResultData *rp : group) {
       const ResultData &r = *rp;
+      if (r.metric == "GB/s" || r.metric == "TB/s") continue;
       const double oi = inferOperationalIntensity(r);
       if (oi <= 0.0) continue;
 
@@ -283,16 +298,13 @@ RooflineModel::analyze(const std::vector<ResultData> &results) {
                     (lowName.find("fp8") != std::string::npos) ||
                     (lowName.find("mxfp6") != std::string::npos) ||
                     (lowName.find("mxfp4") != std::string::npos) ||
+                    (lowName.find("fp6") != std::string::npos) ||
+                    (lowName.find("fp4") != std::string::npos) ||
                     (lowName.find("int4") != std::string::npos) ||
                     (lowName.find("sparse") != std::string::npos) ||
                     (lowName.find("coop") != std::string::npos);
 
-      if (r.metric == "GB/s") {
-        // Achieved effective GOPS at streaming operational intensity: GB/s * OP/Byte
-        wp.achievedGops = val * oi;
-      } else {
-        wp.achievedGops = val * 1000.0;
-      }
+      wp.achievedGops = val * 1000.0;
 
       // Match applicable compute ceiling
       double targetCompGops = dr.highestComputeGops();
@@ -311,17 +323,37 @@ RooflineModel::analyze(const std::vector<ResultData> &results) {
       if (lowName.find("fp64") != std::string::npos) {
         selectCeiling("FP64 Vector");
       } else if (wp.isMatrix) {
-        if (lowName.find("fp16") != std::string::npos ||
-            lowName.find("bf16") != std::string::npos) {
+        if (lowName.find("sparse") != std::string::npos) {
+          if (!selectCeiling("2:4 Sparse Matrix")) {
+            selectCeiling("FP16/BF16 Matrix");
+          }
+        } else if (lowName.find("fp6") != std::string::npos ||
+                   lowName.find("fp4") != std::string::npos ||
+                   lowName.find("int4") != std::string::npos) {
+          if (!selectCeiling("FP6/FP4/INT4 Matrix")) {
+            if (!selectCeiling("FP8/INT8 Matrix")) {
+              selectCeiling("FP16/BF16 Matrix");
+            }
+          }
+        } else if (lowName.find("fp8") != std::string::npos ||
+                   lowName.find("int8") != std::string::npos) {
+          if (!selectCeiling("FP8/INT8 Matrix")) {
+            if (!selectCeiling("FP16/BF16 Matrix")) {
+              selectCeiling("FP32 Vector");
+            }
+          }
+        } else if (lowName.find("fp16") != std::string::npos ||
+                   lowName.find("bf16") != std::string::npos) {
           if (!selectCeiling("FP16/BF16 Matrix")) selectCeiling("FP16 Vector");
         } else {
-          if (!selectCeiling("Low-Precision/Sparse Matrix"))
-            selectCeiling("FP16/BF16 Matrix");
+          if (!selectCeiling("FP16/BF16 Matrix")) selectCeiling("FP32 Vector");
         }
       } else if (lowName.find("fp16") != std::string::npos) {
         if (!selectCeiling("FP16 Vector")) selectCeiling("FP32 Vector");
       } else if (lowName.find("bf16") != std::string::npos && !r.isEmulated) {
         if (!selectCeiling("BF16 Vector")) selectCeiling("FP16 Vector");
+      } else if (lowName.find("int8") != std::string::npos) {
+        if (!selectCeiling("INT8 Vector")) selectCeiling("FP32 Vector");
       } else {
         selectCeiling("FP32 Vector");
       }

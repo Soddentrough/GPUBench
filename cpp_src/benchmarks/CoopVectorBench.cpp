@@ -1,5 +1,4 @@
 #include "CoopVectorBench.h"
-#include "core/VulkanContext.h"
 #include <cmath>
 #include <cstring>
 #include <filesystem>

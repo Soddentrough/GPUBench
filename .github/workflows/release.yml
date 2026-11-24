@@ -50,7 +50,7 @@ jobs:
         run: |
           mkdir build
           cd build
-          cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="GPUBench"
+          cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="GPUBench" -DGPUBENCH_ENABLE_ROCM=OFF -DGPUBENCH_ENABLE_OPENCL=OFF
 
       - name: Build C++ Target
         run: |
@@ -104,7 +104,7 @@ jobs:
         run: |
           mkdir build
           cd build
-          cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="GPUBench"
+          cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="GPUBench" -DGPUBENCH_ENABLE_ROCM=OFF -DGPUBENCH_ENABLE_OPENCL=OFF
 
       - name: Build C++ Target
         run: |
@@ -155,8 +155,6 @@ jobs:
           sudo apt-get install -y \
             libvulkan-dev \
             libvulkan1 \
-            ocl-icd-opencl-dev \
-            opencl-headers \
             cmake \
             build-essential \
             rpm \
@@ -173,7 +171,7 @@ jobs:
         run: |
           mkdir build
           cd build
-          cmake .. -DCMAKE_BUILD_TYPE=Release -DGPUBENCH_WERROR=ON
+          cmake .. -DCMAKE_BUILD_TYPE=Release -DGPUBENCH_ENABLE_ROCM=OFF -DGPUBENCH_ENABLE_OPENCL=OFF -DGPUBENCH_WERROR=ON
 
       - name: Build C++ Target
         run: |

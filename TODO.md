@@ -36,8 +36,8 @@
         "properties": {
           "os": { "type": "string", "example": "Fedora 44" },
           "kernel": { "type": "string" },
-          "cpu_model": { "type": "string", "example": "AMD Threadripper 3750X" },
-          "ram_gb": { "type": "number", "example": 64.0 }
+          "cpu_model": { "type": "string", "example": "AMD Ryzen Threadripper 3970X" },
+          "ram_gb": { "type": "number", "example": 80.0 }
         }
       },
       "gpu_info": {
@@ -96,9 +96,8 @@
   - **Command Buffer Replay (`cl_khr_command_buffer`)**: Leverage the OpenCL 3.1.2 finalized command-buffer extension to record and replay benchmark dispatch graphs, minimizing CPU submission overhead.
 
 ### Architectural Backlog (Best Practices)
-- **Resource Management & RAII**: Transition Vulkan buffer (`VulkanBuffer`) and kernel (`VulkanKernel`) handles to full RAII semantics using C++ smart pointers with custom deleters or `Vulkan-Hpp` to guarantee leak-free teardowns.
-- **Vulkan Memory Allocator (VMA)**: Integrate AMD's VMA library into `VulkanContext` to pool device memory allocations, eliminate the 4,096 allocation cap limitation, and reduce VRAM fragmentation.
-- **Dynamic Workgroup Dispatch Scaling**: Scale dispatch workgroup counts dynamically at runtime based on enumerated Compute Unit / Streaming Multiprocessor counts (`numWorkgroups = CUs * wave_multiplier`), adapting to low-power IGPs and high-CU discrete GPUs alike.
-- **Modular Execution Engine**: Decouple `BenchmarkRunner::run()` timing loops from terminal/GUI reporting into reusable template abstractions and dedicated logging interfaces.
+- **Resource Management & RAII**: Transition remaining raw Vulkan/backend resource handles to full RAII semantics using C++ smart pointers with custom deleters or `Vulkan-Hpp` to guarantee leak-free teardowns.
+- **Dynamic Workgroup Dispatch Scaling**: Further generalize dynamic CU/SM workgroup scaling across remaining legacy kernels for low-power IGPs and ultra-wide discrete GPUs alike.
+- **Modular Execution Engine**: Decouple `BenchmarkRunner::run()` timing loops cleanly from terminal/GUI formatting callbacks.
 - **Teardown Null-Safety**: Implement explicit initialization and null checks across all benchmark `Teardown()` routines to ensure resilience if `Setup()` aborts early.
 

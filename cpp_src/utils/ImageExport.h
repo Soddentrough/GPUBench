@@ -14,13 +14,18 @@
 namespace gpubench {
 
 struct ImageMetrics {
-  float maxDelta = 0.0f;     // Max channel delta [0, 1]
-  float mae = 0.0f;          // Mean Absolute Error
-  float rmse = 0.0f;         // Root Mean Square Error
-  float psnr = 0.0f;         // Peak Signal-to-Noise Ratio (dB)
-  uint32_t exactPixels = 0;  // Count of 100% bit-exact pixels
-  uint32_t diffPixels = 0;   // Count of pixels with delta > 1/255
+  float maxDelta = 0.0f;         // Max 8-bit sRGB channel delta [0, 1]
+  float mae = 0.0f;              // 8-bit sRGB Mean Absolute Error [0, 1]
+  float rmse = 0.0f;             // 8-bit sRGB Root Mean Square Error [0, 1]
+  float psnr = 0.0f;             // 8-bit sRGB Peak Signal-to-Noise Ratio (dB)
+  uint32_t exactPixels = 0;      // Count of 8-bit sRGB exact pixels (0 LSB delta)
+  uint32_t ldr1LsbPixels = 0;    // Count of 8-bit sRGB pixels differing by exactly 1 LSB
+  uint32_t diffPixels = 0;       // Count of 8-bit sRGB pixels differing by > 1 LSB
   uint32_t totalPixels = 0;
+  float hdrRmse = 0.0f;          // Raw linear FP32 HDR Root Mean Square Error
+  float hdrMaxAbsDelta = 0.0f;   // Raw linear FP32 HDR Max Absolute Delta
+  float hdrMaxRelDelta = 0.0f;   // Raw linear FP32 HDR Max Relative Delta
+  uint32_t hdrExactPixels = 0;   // Count of bit-identical linear FP32 HDR pixels
 };
 
 class ImageExport {
@@ -67,6 +72,7 @@ public:
 
     double sumSqDiff = 0.0;
     double sumAbsDiff = 0.0;
+    double sumHdrSqDiff = 0.0;
 
     for (uint32_t i = 0; i < numPixels; ++i) {
       float rA = hdrA[i * 4 + 0];
@@ -76,6 +82,23 @@ public:
       float rB = hdrB[i * 4 + 0];
       float gB = hdrB[i * 4 + 1];
       float bB = hdrB[i * 4 + 2];
+
+      // Raw linear FP32 HDR comparison prior to 8-bit sRGB quantization
+      double hdrDr = static_cast<double>(rA) - static_cast<double>(rB);
+      double hdrDg = static_cast<double>(gA) - static_cast<double>(gB);
+      double hdrDb = static_cast<double>(bA) - static_cast<double>(bB);
+      if (std::isfinite(rA) && std::isfinite(gA) && std::isfinite(bA) &&
+          std::isfinite(rB) && std::isfinite(gB) && std::isfinite(bB)) {
+        sumHdrSqDiff += (hdrDr * hdrDr + hdrDg * hdrDg + hdrDb * hdrDb) / 3.0;
+        float absPix = std::max({std::abs(rA - rB), std::abs(gA - gB), std::abs(bA - bB)});
+        float denom = std::max({std::abs(rA), std::abs(gA), std::abs(bA),
+                                std::abs(rB), std::abs(gB), std::abs(bB), 1e-4f});
+        metrics.hdrMaxAbsDelta = std::max(metrics.hdrMaxAbsDelta, absPix);
+        metrics.hdrMaxRelDelta = std::max(metrics.hdrMaxRelDelta, absPix / denom);
+      }
+      if (rA == rB && gA == gB && bA == bB) {
+        metrics.hdrExactPixels++;
+      }
 
       uint8_t uR_A = floatToSrgb(rA);
       uint8_t uG_A = floatToSrgb(gA);
@@ -93,10 +116,15 @@ public:
       outLdrB[i * 3 + 1] = uG_B;
       outLdrB[i * 3 + 2] = uB_B;
 
-      // Differences in tonemapped [0, 1] domain
-      float dR = std::abs(float(uR_A) - float(uR_B)) / 255.0f;
-      float dG = std::abs(float(uG_A) - float(uG_B)) / 255.0f;
-      float dB = std::abs(float(uB_A) - float(uB_B)) / 255.0f;
+      // Differences in 8-bit sRGB quantized [0, 1] domain
+      int dR_i = std::abs(int(uR_A) - int(uR_B));
+      int dG_i = std::abs(int(uG_A) - int(uG_B));
+      int dB_i = std::abs(int(uB_A) - int(uB_B));
+      int maxDiffLdr = std::max({dR_i, dG_i, dB_i});
+
+      float dR = float(dR_i) / 255.0f;
+      float dG = float(dG_i) / 255.0f;
+      float dB = float(dB_i) / 255.0f;
 
       float maxD = std::max({dR, dG, dB});
       metrics.maxDelta = std::max(metrics.maxDelta, maxD);
@@ -107,10 +135,11 @@ public:
       float pixSq = (dR * dR + dG * dG + dB * dB) / 3.0f;
       sumSqDiff += pixSq;
 
-      if (maxD == 0.0f) {
+      if (maxDiffLdr == 0) {
         metrics.exactPixels++;
-      }
-      if (maxD > (1.0f / 255.0f)) {
+      } else if (maxDiffLdr == 1) {
+        metrics.ldr1LsbPixels++;
+      } else {
         metrics.diffPixels++;
       }
 
@@ -130,11 +159,13 @@ public:
       }
     }
 
-    metrics.mae = static_cast<float>(sumAbsDiff / numPixels);
-    metrics.rmse = static_cast<float>(std::sqrt(sumSqDiff / numPixels));
+    const double safePixels = (numPixels > 0u) ? static_cast<double>(numPixels) : 1.0;
+    metrics.mae = static_cast<float>(sumAbsDiff / safePixels);
+    metrics.rmse = static_cast<float>(std::sqrt(sumSqDiff / safePixels));
+    metrics.hdrRmse = static_cast<float>(std::sqrt(sumHdrSqDiff / safePixels));
 
     if (metrics.rmse < 1e-7f) {
-      metrics.psnr = 120.0f; // Perfect floating point match
+      metrics.psnr = 120.0f; // Quantized 8-bit sRGB zero-delta ceiling
     } else {
       metrics.psnr = static_cast<float>(20.0 * std::log10(1.0 / metrics.rmse));
     }

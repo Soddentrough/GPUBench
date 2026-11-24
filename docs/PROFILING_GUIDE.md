@@ -1,8 +1,8 @@
 # Performance Profiling & Hardware Pathway Verification Guide
 
 **Target Architecture**: AMD RDNA 4 (GFX1201 / AMD Radeon AI PRO R9700 / Navi 4x)  
-**Target Driver**: Mesa RADV 26.1.8 / Vulkan 1.4 / SPIR-V 1.4  
-**Host Platform**: AMD Ryzen Threadripper 3970X (64GB RAM), Fedora 44  
+**Target Driver**: Mesa RADV 26.2+ / Vulkan 1.4 / SPIR-V 1.4  
+**Host Platform**: AMD Ryzen Threadripper 3970X (80GB RAM), Fedora 45  
 **Primary Target Device**: GPU 1 (`-d 1`). *(Note: GPU 0 is strictly reserved for external host display and background tasks)*.
 
 ---
@@ -104,30 +104,23 @@ rga -s vk-spv-offline \
 
 ### 4.2 GFX1201 Hardware Resource Profile
 
-Compilation statistics for all `rt_scheduling` compute kernels (`build/kernels/vulkan/rt_scheduling_*.spv`) targeting GFX1201:
+Compilation statistics for current Slang-compiled `rt_scheduling` compute kernels (`build/kernels/vulkan/rt_scheduling_*.spv`) queried via `--dump-isa rayscheduling -d 1` (Mesa 26.2 ACO):
 
-| Shader Kernel | VGPRs | SGPRs | LDS (Bytes) | Binary Size | VGPR Spills | SGPR Spills | SIMD Wave Occupancy |
-|---|---|---|---|---|---|---|---|
-| `rt_scheduling_reset.comp` | **4** | 9 | 0 | 168 B | 0 | 0 | **16 waves / SIMD (Peak)** |
-| `rt_scheduling_resolve.comp` (DGC Resolve) | **19** | 34 | 0 | 2,068 B | 0 | 0 | **16 waves / SIMD (Peak)** |
-| `rt_scheduling_device_generated_commands_shadow.comp` | **34** | 43 | 2,048 | 3,176 B | 0 | 0 | **16 waves / SIMD (Peak)** |
-| `rt_scheduling_device_generated_commands_bounce.comp` | **49** | 56 | 4,096 | 5,064 B | 0 | 0 | **10–16 waves / SIMD** |
-| `rt_scheduling_device_generated_commands_classify.comp` | **85** | 106 | 4,096 | 37,396 B | 0 | 0 | **5 waves / SIMD** |
-| `rt_scheduling_device_generated_commands_material.comp` | **92** | 92 | 2,048 | 209,004 B | 0 | 0 | **5 waves / SIMD** |
-| **Traditional Megakernel** (`rt_scheduling_traditional_megakernel.comp`) | **97** | **106 (Max)** | 4,096 | **266,364 B** | 0 | 0 | **2–3 waves / SIMD** |
+| Shader Kernel | Pre-Sched / Alloc VGPRs | Pre-Sched / Alloc SGPRs | LDS (Bytes) | Binary Size | VGPR/SGPR Spills | SIMD Wave Occupancy |
+|---|---|---|---|---|---|---|
+| `rt_scheduling_device_generated_commands_shadow.comp` | **32 -> 96** | 29 -> 108 | 2,048 | 2,004 B | 0 / 0 | **16 waves / SIMD** |
+| `rt_scheduling_device_generated_commands_light.comp` | **33 -> 96** | 22 -> 108 | 0 | 4,576 B | 0 / 0 | **16 waves / SIMD** |
+| `rt_scheduling_device_generated_commands_bounce.comp` | **53 -> 96** | 56 -> 108 | 2,048 | 16,168 B | 0 / 0 | **16 waves / SIMD** |
+| `rt_scheduling_device_generated_commands_classify.comp` | **63 -> 96** | 54 -> 108 | 2,048 | 84,796 B | 0 / 0 | **16 waves / SIMD** |
+| `rt_scheduling_device_generated_commands_material.comp` | **63 -> 96** | 28 -> 108 | 0 | 116,164 B | 0 / 0 | **16 waves / SIMD** |
+| **Traditional Megakernel** (`rt_scheduling_traditional_megakernel.comp`) | **80 -> 96** | **57 -> 108** | 2,048 | **298,684 B** | 0 / 0 | **16 waves / SIMD** *(dynamic)* |
 
-### 4.3 Architectural Insights from Register Analysis
-1. **The Megakernel Occupancy Cliff**:
-   - The monolithic traditional megakernel requires **97 VGPRs and all 106 available SGPRs**.
-   - Because each Compute Unit has a fixed physical register file, this forces the hardware scheduler to throttle down to only **2–3 active waves per SIMD**.
-   - When divergent rays cause high-latency BVH traversal stalls (cache misses), the SIMD unit sits idle because there are not enough in-flight waves to hide memory latency.
-2. **Micro-kernel Latency Hiding**:
-   - The Device-Generated Commands (DGC) pipeline splits execution into specialized micro-kernels.
-   - `resolve` uses only **19 VGPRs**, `shadow` uses **34 VGPRs**, and `bounce` uses **49 VGPRs**.
-   - This unlocks up to the **maximum hardware occupancy of 10–16 waves per SIMD**, ensuring continuous arithmetic execution while other waves wait for memory fetches.
-3. **L1 Instruction Cache (L1I) Footprint**:
-   - The monolithic megakernel is **266.3 KB**, far exceeding the L1I cache size and causing constant instruction cache misses.
-   - The DGC bounce micro-kernel is **5.0 KB** and the shadow kernel is **3.1 KB**, allowing both to fit entirely inside high-speed L1I cache.
+### 4.3 Architectural Insights from Register & Cache Analysis
+1. **Why the Megakernel Still Stalls Under Divergent Ray Tracing**:
+   - RDNA 4 provides **1,536 Wave32 VGPRs per SIMD** (`192 KB`) with dynamic VGPR block allocation (so `<= 96 VGPRs` fits up to `16 waves/SIMD` without register spilling, `Scratch size: 0`).
+   - Instead of static VGPR exhaustion, the monolithic megakernel suffers from severe **SIMD branch serialization** across divergent neighboring rays and an oversized **298.7 KB (`51,883`-instruction) binary footprint**.
+2. **Micro-kernel Instruction Cache & Uniform Lane Utilization**:
+   - Splitting traversal and shading via Device-Generated Commands (DGC) gives auxiliary kernels (`shadow`: `2.0 KB`, `light`: `4.6 KB`, `bounce`: `16.2 KB`) small L1I footprints while ensuring each `material` indirect wave runs 100% uniform BSDF lanes.
 
 ---
 

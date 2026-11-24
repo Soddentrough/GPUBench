@@ -61,10 +61,34 @@ public:
   bool ValidateResults(uint32_t config_idx = 0) const override;
   const char *GetComponent(uint32_t config_idx = 0) const override;
   const char *GetSubCategory(uint32_t config_idx = 0) const override;
+  using IBenchmark::GetDescription;
   const char *GetDescription() const override {
-    return (metric == "GB/s")
-               ? "Multi-CU streaming GPU cache bandwidth across L0, L1, L2, and L3/MALL cache tiers."
-               : "Pointer-chasing dependent load latency across GPU L0, L1, L2, L3/MALL, and VRAM tiers.";
+    if (metric == "GB/s") {
+      switch (targetCacheLevel) {
+      case 0:
+        return "Multi-CU streaming GPU L0 vector cache bandwidth (16 KB working set targeting per-WGP/CU L0 TCP cache).";
+      case 1:
+        return "Multi-CU streaming GPU L1 cache bandwidth (128 KB working set targeting shader-array L1 cache).";
+      case 2:
+        return "Multi-CU streaming GPU L2 shared cache bandwidth (dynamically sized to half of reported L2 capacity).";
+      case 3:
+        return "Multi-CU streaming GPU L3 / Infinity Cache (MALL) bandwidth (dynamically sized to half of reported L3 capacity).";
+      default:
+        return "Multi-CU streaming GPU cache bandwidth targeting the selected cache hierarchy tier.";
+      }
+    }
+    switch (targetCacheLevel) {
+    case 0:
+      return "Dependent pointer-chasing load latency isolating nearest GPU L0 vector cache (16 KB working set, 128 B cache-line stride).";
+    case 1:
+      return "Dependent pointer-chasing load latency targeting GPU L1 cache tier (128 B cache-line stride).";
+    case 2:
+      return "Dependent pointer-chasing load latency targeting GPU L2 shared cache tier (128 B cache-line stride).";
+    case 3:
+      return "Dependent pointer-chasing load latency targeting GPU L3 / Infinity Cache (MALL) tier (128 B cache-line stride).";
+    default:
+      return "Dependent pointer-chasing load latency isolating GPU cache round-trip time.";
+    }
   }
   double GetOperationalIntensity(uint32_t config_idx = 0) const override {
     (void)config_idx;

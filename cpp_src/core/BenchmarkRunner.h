@@ -71,6 +71,8 @@ public:
   int getTargetConfig() const { return targetConfig; }
   void setProfileSnapshot(bool enable) { profileSnapshot = enable; }
   bool getProfileSnapshot() const { return profileSnapshot; }
+  void setRraTrace(bool enable) { rraTrace = enable; }
+  bool getRraTrace() const { return rraTrace; }
 
   void setVerifyParity(bool enable);
   bool getVerifyParity() const { return verifyParity; }
@@ -127,5 +129,6 @@ private:
   uint32_t samplesPerPixel = 1;
   int targetConfig = -1;
   bool profileSnapshot = false;
+  bool rraTrace = false;
   std::atomic<bool> *cancelToken = nullptr;
 };

@@ -11,6 +11,7 @@ public:
   const char *GetMetric() const override { return "TFLOPS"; }
   uint32_t GetNumConfigs() const override { return 1; }
   uint32_t GetExpectedKernelCount() const override { return 1; }
+  using IBenchmark::GetConfigName;
   std::string GetConfigName(uint32_t config_idx) const override {
     (void)config_idx;
     return "Matrix";
@@ -27,7 +28,10 @@ public:
       return "No support for 6-bit microscaling floating point in OpenCL API";
     }
     if (!info.fp6Support) {
-      return "No native OCP MXFP6 (Float6E3M2EXT) 16x16x16 matrix units exposed on GPU";
+      if (context && context->getBackend() == ComputeBackend::ROCm) {
+        return "Requires AMD CDNA 4 (gfx950) OCP MXFP6 (E3M2) 16x16x128 MFMA hardware";
+      }
+      return "No native OCP MXFP6 (VK_EXT_shader_ocp_microscaling_types::shaderFloat6 / Float6E3M2EXT) 16x16x16 cooperative matrix support exposed on GPU/driver";
     }
     if (context && context->getBackend() == ComputeBackend::Vulkan &&
         !info.cooperativeMatrixSupport) {
@@ -35,6 +39,7 @@ public:
     }
     return "";
   }
+  using IBenchmark::GetConfigSupportNote;
   std::string GetConfigSupportNote(uint32_t config_idx, const DeviceInfo &info,
                                    IComputeContext *context = nullptr) const override {
     (void)config_idx;
@@ -57,6 +62,7 @@ public:
     }
     return SupportLimitation::kNone;
   }
+  using IBenchmark::GetConfigSupportLimitation;
   SupportLimitation GetConfigSupportLimitation(uint32_t config_idx,
                                                const DeviceInfo &info,
                                                IComputeContext *context = nullptr) const override {
@@ -86,12 +92,26 @@ public:
     return "FP6";
   }
   int GetSortWeight() const override { return 50; }
+  using IBenchmark::GetDescription;
   const char *GetDescription() const override {
     return "OCP Microscaling 6-bit floating-point (MXFP6 E3M2) Cooperative Matrix / MFMA throughput.";
   }
+  const char *GetDescription(uint32_t config_idx, const DeviceInfo &info,
+                             IComputeContext *context = nullptr) const override {
+    (void)config_idx;
+    (void)info;
+    if (context && context->getBackend() == ComputeBackend::ROCm) {
+      return "OCP Microscaling 6-bit floating-point (MXFP6 E3M2) 16x16x128 MFMA matrix throughput on CDNA 4.";
+    }
+    if (context && context->getBackend() == ComputeBackend::Vulkan) {
+      return "OCP Microscaling 6-bit floating-point (MXFP6 E3M2) 16x16x16 Cooperative Matrix throughput via VK_EXT_shader_ocp_microscaling_types.";
+    }
+    return GetDescription();
+  }
   double GetOperationalIntensity(uint32_t config_idx = 0) const override {
     (void)config_idx;
-    return 10922.0;
+    // coop_matrix_fp6.comp: 32768 * 8192 FLOPs / (192 B A + 192 B B + 1024 B C = 1408 B) = 190,650.18 FLOP/B
+    return (32768.0 * 8192.0) / 1408.0;
   }
   void Teardown() override;
   bool IsEmulated(uint32_t config_idx = 0) const override {

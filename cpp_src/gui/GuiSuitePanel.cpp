@@ -51,14 +51,16 @@ std::string subgroupTitleForCatalogEntry(const BenchmarkConfigMetadata& meta, st
         if (meta.benchmarkName.find("Bandwidth") != std::string::npos) {
             return "Host DRAM Streaming Bandwidth (AVX-512 / AVX2 / NEON)";
         }
-        return "Host DRAM Pointer-Chasing Latency (2 MB Large Pages)";
+        return "Host DRAM Pointer-Chasing Latency (2 MB Large / Huge Pages)";
     }
 
     if (meta.component == "Scheduling" || meta.benchmarkName == "In-Shader Indirect Synthesis") {
         outCategory = "Scheduling";
+#ifdef GPUBENCH_ENABLE_EXPERIMENTAL_WORKGRAPHS
         if (meta.benchmarkName.find("Work Graphs") != std::string::npos) {
             return "GPU Work Graphs (VK_AMDX_shader_enqueue)";
         }
+#endif
         if (meta.benchmarkName.find("Async") != std::string::npos) {
             return "Multi-Queue Async Compute (ACE) & Copy (SDMA) Overlap";
         }
@@ -109,14 +111,18 @@ std::string subgroupTitleForCatalogEntry(const BenchmarkConfigMetadata& meta, st
     return "Compute Precision (Vec & Matrix)";
 }
 
-bool isCoreSuiteSlot(const BenchmarkItem& itm) {
+bool isCoreSuiteSlot(const BenchmarkItem& itm, bool isRocm) {
+    const bool indirectCore = isRocm
+        ? (itm.id == "In-Shader Indirect Synthesis" && (itm.configIndex == 1 || itm.configIndex == 3))
+        : (itm.id == "In-Shader Indirect Synthesis" && (itm.configIndex == 5 || itm.configIndex == 6));
     return itm.id == "FP32" || itm.id == "FP16" || itm.id == "BF16" ||
            itm.id == "FP8" || itm.id == "INT8" ||
            (itm.id == "Device Memory Bandwidth" && itm.configIndex == 0) ||
            itm.id == "L0 Cache Bandwidth" || itm.id == "L1 Cache Bandwidth" ||
            itm.id == "L2 Cache Bandwidth" || itm.id == "L3 Cache Bandwidth" ||
            (itm.id == "PCIe & Host-Device Interconnect" && itm.configIndex <= 1) ||
-           (itm.id == "RayScheduling" && (itm.configIndex == 9 || itm.configIndex == 10 || itm.configIndex == 11));
+           indirectCore ||
+           (itm.id == "RayScheduling" && (itm.configIndex <= 2 || itm.configIndex == 4 || itm.configIndex == 5 || itm.configIndex == 6));
 }
 
 const char* shortCategoryTag(const std::string& name) {
@@ -216,6 +222,14 @@ std::string compactWorkloadSlotLabel(const std::string& fullName, const std::str
 
     struct ReplaceRule { const char* from; const char* to; };
     static constexpr ReplaceRule kRules[] = {
+        {"FP32 Baseline (Ping-Pong)", "FP32 Baseline"},
+        {"FP32 Moderate ILP (8 Chains)", "FP32 Mid ILP (8ch)"},
+        {"FP32 Peak ILP / Co-Issue (16 Chains)", "FP32 Peak ILP (16ch)"},
+        {"INT32 Baseline (Ping-Pong)", "INT32 Baseline"},
+        {"INT32 Moderate ILP (8 Chains)", "INT32 Mid ILP (8ch)"},
+        {"INT32 Peak ILP (16 Chains)", "INT32 Peak ILP (16ch)"},
+        {"Concurrent Mixed (FP32+INT32)", "FP32+INT32 Mixed"},
+        {"Concurrent Mixed (FP32 + INT32)", "FP32+INT32 Mixed"},
         {"(Device-Generated Commands (DGC))", "(DGC)"},
         {"Device-Generated Commands (DGC)", "DGC"},
         {"(DGC Light Binning)", "(DGC)"},
@@ -262,9 +276,9 @@ void GuiApp::initializeBenchmarkCategories() {
         {"Compute",      "Floating-point, quantized matrix, 2:4 sparse, neural Cooperative Vector, ILP, and LDS bank throughput."},
         {"Memory",       "VRAM streaming bandwidth, L0-L3 cache hierarchy, PCIe/ReBAR/P2P interconnect, and pointer-chasing latency."},
         {"Ray Tracing",  "Hardware BVH build/traversal, Opacity Micromaps (OMM), SER/DGC scheduling, and 4-scene PBR path tracing."},
-        {"Scheduling",   "GPU Work Graphs (producer-consumer), Async Compute/Copy engine overlap, and GPU indirect command synthesis."},
+        {"Scheduling",   "Async Compute/Copy engine overlap, GPU indirect command synthesis, and persistent work-queue compaction."},
         {"Raster",       "Vulkan 1.4 dynamic rendering rasterization and Render Output Unit (ROP) pixel/blend fill throughput."},
-        {"Host System",  "CPU host DRAM streaming bandwidth (AVX-512 / AVX2 / NEON) and 2 MB Large Page pointer-chasing latency."}
+        {"Host System",  "CPU host DRAM streaming bandwidth (AVX-512 / AVX2 / NEON) and 2 MB Large / Huge Page pointer-chasing latency."}
     };
 
     for (const auto& [catName, catDesc] : categoryDefs) {
@@ -326,6 +340,7 @@ void GuiApp::initializeBenchmarkCategories() {
                 fallbackDescriptionForBenchmark(meta),
                 true,
                 -1);
+            item.configCaveat = meta.configCaveat;
             sg.items.push_back(std::move(item));
             continue;
         }
@@ -373,6 +388,7 @@ void GuiApp::initializeBenchmarkCategories() {
             fallbackDescriptionForBenchmark(meta),
             true,
             static_cast<int>(meta.configIndex));
+        item.configCaveat = meta.configCaveat;
         sg.items.push_back(std::move(item));
     }
 }
@@ -645,13 +661,14 @@ void GuiApp::renderBenchmarkSuitePanel() {
     const uint32_t activeGpu = m_telemetryGpuIndex;
     const std::string activeScene = (m_scene == "all") ? m_suiteActiveScene : m_scene;
 
+    const bool isRocmBackend = (resolvedBackendName() == "rocm");
     size_t totalArmed = 0;
     size_t totalSupported = 0;
     bool matchesCorePreset = true;
     for (const auto& cat : m_categories) {
         for (const auto& sg : cat.subgroups) {
             for (const auto& itm : sg.items) {
-                const bool wantCore = itm.isSupported && isCoreSuiteSlot(itm);
+                const bool wantCore = itm.isSupported && isCoreSuiteSlot(itm, isRocmBackend);
                 if (itm.selected != wantCore) {
                     matchesCorePreset = false;
                 }
@@ -762,7 +779,7 @@ void GuiApp::renderBenchmarkSuitePanel() {
         for (size_t ci = 0; ci < m_categories.size(); ++ci) {
             for (auto& sg : m_categories[ci].subgroups) {
                 for (auto& itm : sg.items) {
-                    itm.selected = itm.isSupported && isCoreSuiteSlot(itm);
+                    itm.selected = itm.isSupported && isCoreSuiteSlot(itm, isRocmBackend);
                     if (itm.selected && firstArmedCat < 0) firstArmedCat = static_cast<int>(ci);
                 }
             }
@@ -927,7 +944,10 @@ void GuiApp::renderBenchmarkSuitePanel() {
     ImGui::Spacing();
     ImGui::Separator();
 
-    ImGui::BeginChild("SuiteScrollRegion", ImVec2(0, 0), ImGuiChildFlags_None);
+    const bool useInnerScroll = (ImGui::GetContentRegionAvail().y >= s(140.0f));
+    if (useInnerScroll) {
+        ImGui::BeginChild("SuiteScrollRegion", ImVec2(0, 0), ImGuiChildFlags_None);
+    }
 
     size_t cursorRow = 0;
     for (size_t ci = 0; ci < m_categories.size(); ++ci) {
@@ -1043,8 +1063,12 @@ void GuiApp::renderBenchmarkSuitePanel() {
             if (startIdx == endIdx) continue;
 
             size_t selectedCount = 0;
+            size_t supportedCount = 0;
             for (const auto& itm : sg.items) {
-                if (itm.selected && itm.isSupported) selectedCount++;
+                if (itm.isSupported) {
+                    supportedCount++;
+                    if (itm.selected) selectedCount++;
+                }
             }
 
             ImGui::PushID(static_cast<int>(sgi));
@@ -1073,7 +1097,7 @@ void GuiApp::renderBenchmarkSuitePanel() {
 
                 char hdrBuf[220];
                 std::snprintf(hdrBuf, sizeof(hdrBuf), "%s %s [%zu/%zu]",
-                              sg.collapsed ? "[+]" : "[-]", sg.name.c_str(), selectedCount, sg.items.size());
+                              sg.collapsed ? "[+]" : "[-]", sg.name.c_str(), selectedCount, supportedCount);
                 std::string fittedHdr = fitTextToPixelWidth(hdrBuf, toggleW - s(10.0f));
                 dl->AddText(ImVec2(hdrP0.x + s(6.0f), hdrP0.y + (hdrH - ImGui::GetTextLineHeight()) * 0.5f),
                             toU32(hdrHovered ? c.phosphorHi : c.textPrimary), fittedHdr.c_str());
@@ -1190,10 +1214,20 @@ void GuiApp::renderBenchmarkSuitePanel() {
                             }
                         } else if (disp.hasResult) {
                             ImGui::TextColored(c.textPrimary, "%s", disp.scoreText.c_str());
-                            if (!disp.deltaText.empty() && ImGui::GetContentRegionAvail().x > s(55.0f)) {
+                            const float remW = ImGui::GetContentRegionAvail().x;
+                            if (!disp.deltaText.empty() && remW > s(34.0f)) {
                                 ImGui::SameLine(0.0f, s(4.0f));
+                                const float badgeAvailW = std::max(s(12.0f), ImGui::GetContentRegionAvail().x);
+                                std::string badge = disp.deltaText;
+                                if (ImGui::CalcTextSize(badge.c_str()).x > badgeAvailW - s(4.0f) && disp.hasComparison) {
+                                    char cbuf[24];
+                                    std::snprintf(cbuf, sizeof(cbuf),
+                                                  (std::abs(disp.percentDelta) >= 9.95) ? "%+.0f%%" : "%+.1f%%",
+                                                  disp.percentDelta);
+                                    badge = cbuf;
+                                }
                                 ImGui::TextColored(disp.deltaColor, "%s",
-                                    fitTextToPixelWidth(disp.deltaText, ImGui::GetContentRegionAvail().x).c_str());
+                                    fitTextToPixelWidth(badge, badgeAvailW).c_str());
                             }
                         } else {
                             ImGui::TextColored(c.textMuted, "— %s", itm.metricType.c_str());
@@ -1233,7 +1267,9 @@ void GuiApp::renderBenchmarkSuitePanel() {
         ImGui::PopID();
     }
 
-    ImGui::EndChild();
+    if (useInnerScroll) {
+        ImGui::EndChild();
+    }
 }
 
 } // namespace gpubench::gui

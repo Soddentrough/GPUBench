@@ -21,6 +21,9 @@
 #endif
 #include <windows.h>
 #include <dxgi1_4.h>
+#elif defined(__linux__)
+#include <cctype>
+#include <dlfcn.h>
 #else
 #include <dlfcn.h>
 #endif
@@ -522,12 +525,25 @@ public:
     std::lock_guard<std::mutex> lock(m_mutex);
     if (!m_ready || !m_counterEngine || !pfnCollect || !pfnGetArray) return false;
 
+    const uint64_t luidKey =
+        (static_cast<uint64_t>(static_cast<uint32_t>(luid.HighPart)) << 32) |
+        static_cast<uint64_t>(luid.LowPart);
     auto now = std::chrono::steady_clock::now();
     double dtMs = std::chrono::duration<double, std::milli>(now - m_lastCollectTime).count();
-    if (!m_hasBaseline || dtMs < 40.0) {
-      pfnCollect(m_query);
-      std::this_thread::sleep_for(std::chrono::milliseconds(50));
-      m_hasBaseline = true;
+    if (!m_hasBaseline) {
+      if (pfnCollect(m_query) == 0) {
+        m_lastCollectTime = now;
+        m_hasBaseline = true;
+      }
+      return false;
+    }
+    if (dtMs < 40.0) {
+      auto it = m_cachedBusyPct.find(luidKey);
+      if (it != m_cachedBusyPct.end()) {
+        outBusyPct = it->second;
+        return true;
+      }
+      return false;
     }
     if (pfnCollect(m_query) != 0) return false;
     m_lastCollectTime = std::chrono::steady_clock::now();
@@ -568,6 +584,7 @@ public:
       if (kv.second > maxEng) maxEng = kv.second;
     }
     outBusyPct = static_cast<uint32_t>(std::clamp(std::round(maxEng), 0.0, 100.0));
+    m_cachedBusyPct[luidKey] = outBusyPct;
     return true;
   }
 
@@ -669,6 +686,7 @@ private:
   bool m_ready = false;
   bool m_hasBaseline = false;
   std::chrono::steady_clock::time_point m_lastCollectTime{};
+  std::map<uint64_t, uint32_t> m_cachedBusyPct;
   std::mutex m_mutex;
   std::vector<uint8_t> m_scratch;
   PFN_PdhOpenQueryA pfnOpen = nullptr;
@@ -837,7 +855,7 @@ private:
   std::mutex m_mutex;
   std::vector<AdapterRecord> m_adapters;
 };
-#else // !_WIN32
+#elif defined(__linux__)
 // ============================================================================
 // Linux Sysfs / Hwmon Telemetry (AMDGPU, Intel xe / i915) + Energy Delta Fallback
 // ============================================================================
@@ -846,10 +864,46 @@ static std::string readSysfsFile(const std::string &path) {
   if (!f.is_open()) return "";
   std::string line;
   std::getline(f, line);
-  while (!line.empty() && (line.back() == '\n' || line.back() == '\r' || line.back() == ' ')) {
+  while (!line.empty() &&
+         (line.back() == '\n' || line.back() == '\r' || line.back() == ' ')) {
     line.pop_back();
   }
   return line;
+}
+
+static std::string toLowerAsciiCopy(std::string s) {
+  for (char &c : s) {
+    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  }
+  return s;
+}
+
+static std::string normalizePciBusId(std::string bdf) {
+  while (!bdf.empty() && std::isspace(static_cast<unsigned char>(bdf.front()))) {
+    bdf.erase(bdf.begin());
+  }
+  while (!bdf.empty() && std::isspace(static_cast<unsigned char>(bdf.back()))) {
+    bdf.pop_back();
+  }
+  bdf = toLowerAsciiCopy(std::move(bdf));
+  // Prepend default PCI domain "0000:" if abbreviated bb:dd.f form is supplied.
+  if (bdf.size() == 7 && bdf[2] == ':' && bdf[5] == '.') {
+    bdf = "0000:" + bdf;
+  }
+  return bdf;
+}
+
+static std::string readPciSlotFromUevent(const std::string &devDir) {
+  std::ifstream f(devDir + "/uevent");
+  if (!f.is_open()) return "";
+  std::string line;
+  while (std::getline(f, line)) {
+    constexpr const char *kPrefix = "PCI_SLOT_NAME=";
+    if (line.rfind(kPrefix, 0) == 0) {
+      return normalizePciBusId(line.substr(14));
+    }
+  }
+  return "";
 }
 
 struct LinuxCardEntry {
@@ -874,11 +928,17 @@ static std::vector<LinuxCardEntry> getSortedLinuxDrmDevices() {
         LinuxCardEntry ce;
         ce.cardDir = cardDir;
         ce.deviceDir = devDir;
-        try {
-          ce.pciBusId = std::filesystem::canonical(devDir).filename().string();
-        } catch (...) {
-          ce.pciBusId = name;
+        ce.pciBusId = readPciSlotFromUevent(devDir);
+        if (ce.pciBusId.empty()) {
+          try {
+            ce.pciBusId = normalizePciBusId(
+                std::filesystem::canonical(devDir).filename().string());
+          } catch (...) {
+            ce.pciBusId = normalizePciBusId(name);
+          }
         }
+        std::string vendorStr = toLowerAsciiCopy(readSysfsFile(devDir + "/vendor"));
+        std::string bootVgaStr = readSysfsFile(devDir + "/boot_vga");
         std::string vramTotalStr = readSysfsFile(devDir + "/mem_info_vram_total");
         uint64_t vramBytes = 0;
         if (!vramTotalStr.empty()) {
@@ -889,8 +949,12 @@ static std::vector<LinuxCardEntry> getSortedLinuxDrmDevices() {
         if (!gttTotalStr.empty()) {
           try { gttBytes = std::stoull(gttTotalStr); } catch (...) {}
         }
-        ce.isDiscrete = (vramBytes > (4ULL * 1024ULL * 1024ULL * 1024ULL)) ||
-                        (vramBytes > 0 && gttBytes > 0 && vramBytes >= gttBytes / 2);
+        const bool isNvidia = (vendorStr == "0x10de");
+        ce.isDiscrete =
+            (vramBytes > (4ULL * 1024ULL * 1024ULL * 1024ULL)) ||
+            (vramBytes >= (2ULL * 1024ULL * 1024ULL * 1024ULL) &&
+             gttBytes > 0 && vramBytes >= gttBytes / 2) ||
+            (isNvidia && bootVgaStr != "1");
         cards.push_back(std::move(ce));
       }
     }
@@ -911,8 +975,232 @@ struct EnergyRateTracker {
 };
 
 static std::mutex g_energyMutex;
-static std::map<uint32_t, EnergyRateTracker> g_energyTrackers;
-#endif // _WIN32
+static std::map<std::string, EnergyRateTracker> g_energyTrackers;
+
+static void populateLinuxGpuTelemetry(const std::string &cardRoot,
+                                      const std::string &cardPath,
+                                      const std::string &pciBusId,
+                                      uint32_t reportDeviceIndex,
+                                      GpuTelemetryData &data) {
+  data.deviceIndex = reportDeviceIndex;
+  data.pciBusId = pciBusId;
+
+  std::error_code ec;
+  if (!std::filesystem::exists(cardPath, ec)) {
+    if (DynamicNvml::instance().available() &&
+        (!pciBusId.empty() || reportDeviceIndex < DynamicNvml::instance().deviceCount())) {
+      DynamicNvml::instance().queryDeviceByPciOrIndex(pciBusId, reportDeviceIndex, data);
+    }
+    return;
+  }
+
+  data.isAvailable = true;
+
+  std::string vendorHex = readSysfsFile(cardPath + "vendor");
+  std::string deviceHex = readSysfsFile(cardPath + "device");
+  if (!vendorHex.empty()) {
+    try { data.vendorId = static_cast<uint32_t>(std::stoul(vendorHex, nullptr, 0)); } catch (...) {}
+  }
+  if (!deviceHex.empty()) {
+    try { data.deviceId = static_cast<uint32_t>(std::stoul(deviceHex, nullptr, 0)); } catch (...) {}
+  }
+
+  if (data.vendorId == 0x10DE && DynamicNvml::instance().available()) {
+    DynamicNvml::instance().queryDeviceByPciOrIndex(data.pciBusId, reportDeviceIndex, data);
+    return;
+  }
+
+  std::string prodName = readSysfsFile(cardPath + "product_name");
+  if (!prodName.empty()) {
+    data.deviceName = prodName;
+  }
+
+  std::string busyStr = readSysfsFile(cardPath + "gpu_busy_percent");
+  if (!busyStr.empty()) {
+    try {
+      data.gpuActivityPct = static_cast<uint32_t>(std::stoul(busyStr));
+      data.hasGpuActivity = true;
+    } catch (...) {}
+  }
+  std::string memBusyStr = readSysfsFile(cardPath + "mem_busy_percent");
+  if (!memBusyStr.empty()) {
+    try {
+      data.memActivityPct = static_cast<uint32_t>(std::stoul(memBusyStr));
+      data.hasMemActivity = true;
+    } catch (...) {}
+  }
+
+  std::string foundHwmonPath;
+  if (std::filesystem::exists(cardPath + "hwmon", ec)) {
+    for (const auto &entry : std::filesystem::directory_iterator(cardPath + "hwmon", ec)) {
+      if (entry.is_directory(ec)) {
+        foundHwmonPath = entry.path().string() + "/";
+        break;
+      }
+    }
+  }
+
+  if (!foundHwmonPath.empty()) {
+    if (data.deviceName.empty()) {
+      std::string hwmonName = readSysfsFile(foundHwmonPath + "name");
+      if (!hwmonName.empty()) data.deviceName = hwmonName;
+    }
+
+    float fallbackTemp[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    for (int tIdx = 1; tIdx <= 8; ++tIdx) {
+      std::string prefix = foundHwmonPath + "temp" + std::to_string(tIdx);
+      std::string tempStr = readSysfsFile(prefix + "_input");
+      if (tempStr.empty()) continue;
+      float tempC = 0.0f;
+      try { tempC = std::stof(tempStr) / 1000.0f; } catch (...) { continue; }
+      if (tempC <= 0.0f) continue;
+
+      if (tIdx <= 3) fallbackTemp[tIdx] = tempC;
+      std::string label = toLowerAsciiCopy(readSysfsFile(prefix + "_label"));
+      if (label.find("edge") != std::string::npos) {
+        data.temperatureC = tempC;
+        data.hasTempEdge = true;
+      } else if (label.find("junction") != std::string::npos ||
+                 label.find("hotspot") != std::string::npos) {
+        data.tempJunctionC = tempC;
+        data.hasTempJct = true;
+      } else if (label.find("mem") != std::string::npos ||
+                 label.find("vram") != std::string::npos) {
+        data.tempMemoryC = tempC;
+        data.hasTempMem = true;
+      }
+    }
+    if (!data.hasTempEdge && fallbackTemp[1] > 0.0f) {
+      data.temperatureC = fallbackTemp[1];
+      data.hasTempEdge = true;
+    }
+    if (!data.hasTempJct && fallbackTemp[2] > 0.0f) {
+      data.tempJunctionC = fallbackTemp[2];
+      data.hasTempJct = true;
+    }
+    if (!data.hasTempMem && fallbackTemp[3] > 0.0f) {
+      data.tempMemoryC = fallbackTemp[3];
+      data.hasTempMem = true;
+    }
+
+    std::string energyStr = readSysfsFile(foundHwmonPath + "energy1_input");
+    if (!energyStr.empty()) {
+      try {
+        data.energyMicroJoules = std::stoull(energyStr);
+        data.hasEnergyCounter = (data.energyMicroJoules > 0);
+      } catch (...) {}
+    }
+
+    std::string powerStr = readSysfsFile(foundHwmonPath + "power1_average");
+    if (powerStr.empty()) {
+      powerStr = readSysfsFile(foundHwmonPath + "power1_input");
+    }
+    if (!powerStr.empty()) {
+      try {
+        data.powerWatts = std::stof(powerStr) / 1000000.0f;
+        data.hasPower = (data.powerWatts > 0.0f);
+      } catch (...) {}
+    } else if (data.hasEnergyCounter) {
+      std::lock_guard<std::mutex> lock(g_energyMutex);
+      auto now = std::chrono::steady_clock::now();
+      const std::string trackerKey =
+          pciBusId.empty() ? std::to_string(reportDeviceIndex) : pciBusId;
+      auto &tr = g_energyTrackers[trackerKey];
+      if (tr.valid && data.energyMicroJoules >= tr.lastEnergyUj) {
+        double dt = std::chrono::duration<double>(now - tr.lastTime).count();
+        if (dt >= 0.02) {
+          double dJ = static_cast<double>(data.energyMicroJoules - tr.lastEnergyUj) * 1e-6;
+          float w = static_cast<float>(dJ / dt);
+          if (w > 0.0f && w < 1500.0f) {
+            tr.lastDerivedWatts = w;
+          }
+          tr.lastEnergyUj = data.energyMicroJoules;
+          tr.lastTime = now;
+        }
+        if (tr.lastDerivedWatts > 0.0f) {
+          data.powerWatts = tr.lastDerivedWatts;
+          data.hasPower = true;
+        }
+      } else {
+        tr.lastEnergyUj = data.energyMicroJoules;
+        tr.lastTime = now;
+        tr.valid = true;
+      }
+    }
+
+    std::string fanRpmStr = readSysfsFile(foundHwmonPath + "fan1_input");
+    if (!fanRpmStr.empty()) {
+      try {
+        data.fanRpm = static_cast<uint32_t>(std::stoul(fanRpmStr));
+        data.hasFanRpm = true;
+      } catch (...) {}
+    }
+    std::string pwmStr = readSysfsFile(foundHwmonPath + "pwm1");
+    if (!pwmStr.empty()) {
+      try {
+        data.fanSpeedPct = static_cast<uint32_t>(std::stoul(pwmStr) * 100 / 255);
+        data.hasFanSpeed = true;
+      } catch (...) {}
+    }
+  }
+
+  std::string vramUsedStr = readSysfsFile(cardPath + "mem_info_vram_used");
+  std::string vramTotalStr = readSysfsFile(cardPath + "mem_info_vram_total");
+  if (!vramUsedStr.empty() && !vramTotalStr.empty()) {
+    try {
+      data.vramUsedBytes = std::stoull(vramUsedStr);
+      data.vramTotalBytes = std::stoull(vramTotalStr);
+      data.vramUsedMb = data.vramUsedBytes / (1024ULL * 1024ULL);
+      data.vramTotalMb = data.vramTotalBytes / (1024ULL * 1024ULL);
+      data.hasVram = (data.vramTotalBytes > 0);
+    } catch (...) {}
+  }
+
+  std::string gttUsedStr = readSysfsFile(cardPath + "mem_info_gtt_used");
+  std::string gttTotalStr = readSysfsFile(cardPath + "mem_info_gtt_total");
+  if (!gttUsedStr.empty() && !gttTotalStr.empty()) {
+    try {
+      data.gttUsedBytes = std::stoull(gttUsedStr);
+      data.gttTotalBytes = std::stoull(gttTotalStr);
+      data.gttUsedMb = data.gttUsedBytes / (1024ULL * 1024ULL);
+      data.gttTotalMb = data.gttTotalBytes / (1024ULL * 1024ULL);
+      data.hasGtt = (data.gttTotalBytes > 0);
+    } catch (...) {}
+  }
+
+  std::string sclkStr = readSysfsFile(cardPath + "current_gfxclk");
+  if (!sclkStr.empty()) {
+    try { data.coreClockMhz = static_cast<uint32_t>(std::stoul(sclkStr)); } catch (...) {}
+  }
+  if (data.coreClockMhz == 0 && !foundHwmonPath.empty()) {
+    std::string freq1Str = readSysfsFile(foundHwmonPath + "freq1_input");
+    if (!freq1Str.empty()) {
+      try { data.coreClockMhz = static_cast<uint32_t>(std::stoull(freq1Str) / 1000000ULL); } catch (...) {}
+    }
+  }
+  if (data.coreClockMhz == 0) {
+    std::string i915Clk = readSysfsFile(cardRoot + "gt_act_freq_mhz");
+    if (i915Clk.empty()) {
+      i915Clk = readSysfsFile(cardPath + "tile0/gt0/freq0/act_freq");
+    }
+    if (!i915Clk.empty()) {
+      try { data.coreClockMhz = static_cast<uint32_t>(std::stoul(i915Clk)); } catch (...) {}
+    }
+  }
+  data.hasCoreClock = (data.coreClockMhz > 0);
+
+  std::string mclkStr = readSysfsFile(cardPath + "current_uclk");
+  if (!mclkStr.empty()) {
+    try { data.memoryClockMhz = static_cast<uint32_t>(std::stoul(mclkStr)); } catch (...) {}
+  } else if (!foundHwmonPath.empty()) {
+    std::string freq2Str = readSysfsFile(foundHwmonPath + "freq2_input");
+    if (!freq2Str.empty()) {
+      try { data.memoryClockMhz = static_cast<uint32_t>(std::stoull(freq2Str) / 1000000ULL); } catch (...) {}
+    }
+  }
+  data.hasMemoryClock = (data.memoryClockMhz > 0);
+}
+#endif // _WIN32 / __linux__
 
 } // namespace
 
@@ -931,7 +1219,7 @@ GpuTelemetryData HardwareTelemetry::queryGpu(uint32_t deviceIndex) {
   GpuTelemetryData empty;
   empty.deviceIndex = deviceIndex;
   return empty;
-#else
+#elif defined(__linux__)
   GpuTelemetryData data;
   data.deviceIndex = deviceIndex;
   data.isAvailable = false;
@@ -939,216 +1227,68 @@ GpuTelemetryData HardwareTelemetry::queryGpu(uint32_t deviceIndex) {
   std::vector<LinuxCardEntry> sortedCards = getSortedLinuxDrmDevices();
   std::string cardRoot;
   std::string cardPath;
+  std::string pciBusId;
   if (deviceIndex < sortedCards.size()) {
     cardRoot = sortedCards[deviceIndex].cardDir + "/";
     cardPath = sortedCards[deviceIndex].deviceDir + "/";
-    data.pciBusId = sortedCards[deviceIndex].pciBusId;
+    pciBusId = sortedCards[deviceIndex].pciBusId;
   } else {
     cardRoot = "/sys/class/drm/card" + std::to_string(deviceIndex) + "/";
     cardPath = cardRoot + "device/";
   }
 
-  std::error_code ec;
-  if (std::filesystem::exists(cardPath, ec)) {
-    data.isAvailable = true;
-
-    std::string vendorHex = readSysfsFile(cardPath + "vendor");
-    std::string deviceHex = readSysfsFile(cardPath + "device");
-    if (!vendorHex.empty()) {
-      try { data.vendorId = static_cast<uint32_t>(std::stoul(vendorHex, nullptr, 0)); } catch (...) {}
-    }
-    if (!deviceHex.empty()) {
-      try { data.deviceId = static_cast<uint32_t>(std::stoul(deviceHex, nullptr, 0)); } catch (...) {}
-    }
-
-    // If NVIDIA card on Linux, query NVML for rich sensors (preferring exact PCI Bus ID)
-    if (data.vendorId == 0x10DE && DynamicNvml::instance().available()) {
-      DynamicNvml::instance().queryDeviceByPciOrIndex(data.pciBusId, deviceIndex, data);
-      return data;
-    }
-
-    std::string prodName = readSysfsFile(cardPath + "product_name");
-    if (!prodName.empty()) {
-      data.deviceName = prodName;
-    }
-
-    std::string busyStr = readSysfsFile(cardPath + "gpu_busy_percent");
-    if (!busyStr.empty()) {
-      try {
-        data.gpuActivityPct = static_cast<uint32_t>(std::stoul(busyStr));
-        data.hasGpuActivity = true;
-      } catch (...) {}
-    }
-    std::string memBusyStr = readSysfsFile(cardPath + "mem_busy_percent");
-    if (!memBusyStr.empty()) {
-      try {
-        data.memActivityPct = static_cast<uint32_t>(std::stoul(memBusyStr));
-        data.hasMemActivity = true;
-      } catch (...) {}
-    }
-
-    // Locate hwmon directory (AMDGPU, Intel xe, Intel i915)
-    std::string foundHwmonPath;
-    if (std::filesystem::exists(cardPath + "hwmon", ec)) {
-      for (const auto &entry : std::filesystem::directory_iterator(cardPath + "hwmon", ec)) {
-        if (entry.is_directory(ec)) {
-          foundHwmonPath = entry.path().string() + "/";
-          break;
-        }
-      }
-    }
-
-    if (!foundHwmonPath.empty()) {
-      if (data.deviceName.empty()) {
-        std::string hwmonName = readSysfsFile(foundHwmonPath + "name");
-        if (!hwmonName.empty()) data.deviceName = hwmonName;
-      }
-      std::string temp1Str = readSysfsFile(foundHwmonPath + "temp1_input");
-      if (!temp1Str.empty()) {
-        try {
-          data.temperatureC = std::stof(temp1Str) / 1000.0f;
-          data.hasTempEdge = (data.temperatureC > 0.0f);
-        } catch (...) {}
-      }
-      std::string temp2Str = readSysfsFile(foundHwmonPath + "temp2_input");
-      if (!temp2Str.empty()) {
-        try {
-          data.tempJunctionC = std::stof(temp2Str) / 1000.0f;
-          data.hasTempJct = (data.tempJunctionC > 0.0f);
-        } catch (...) {}
-      }
-      std::string temp3Str = readSysfsFile(foundHwmonPath + "temp3_input");
-      if (!temp3Str.empty()) {
-        try {
-          data.tempMemoryC = std::stof(temp3Str) / 1000.0f;
-          data.hasTempMem = (data.tempMemoryC > 0.0f);
-        } catch (...) {}
-      }
-
-      // Monotonic microjoule energy accumulator (AMDGPU & Intel xe/i915 energy1_input)
-      std::string energyStr = readSysfsFile(foundHwmonPath + "energy1_input");
-      if (!energyStr.empty()) {
-        try {
-          data.energyMicroJoules = std::stoull(energyStr);
-          data.hasEnergyCounter = (data.energyMicroJoules > 0);
-        } catch (...) {}
-      }
-
-      std::string powerStr = readSysfsFile(foundHwmonPath + "power1_average");
-      if (powerStr.empty()) {
-        powerStr = readSysfsFile(foundHwmonPath + "power1_input");
-      }
-      if (!powerStr.empty()) {
-        try {
-          data.powerWatts = std::stof(powerStr) / 1000000.0f;
-          data.hasPower = (data.powerWatts > 0.0f);
-        } catch (...) {}
-      } else if (data.hasEnergyCounter) {
-        // Derive live power from energy1_input delta (Intel xe/i915 & APUs lacking power1_average)
-        std::lock_guard<std::mutex> lock(g_energyMutex);
-        auto now = std::chrono::steady_clock::now();
-        auto &tr = g_energyTrackers[deviceIndex];
-        if (tr.valid && data.energyMicroJoules >= tr.lastEnergyUj) {
-          double dt = std::chrono::duration<double>(now - tr.lastTime).count();
-          if (dt >= 0.02) {
-            double dJ = static_cast<double>(data.energyMicroJoules - tr.lastEnergyUj) * 1e-6;
-            float w = static_cast<float>(dJ / dt);
-            if (w > 0.0f && w < 1500.0f) {
-              tr.lastDerivedWatts = w;
-            }
-            tr.lastEnergyUj = data.energyMicroJoules;
-            tr.lastTime = now;
-          }
-          if (tr.lastDerivedWatts > 0.0f) {
-            data.powerWatts = tr.lastDerivedWatts;
-            data.hasPower = true;
-          }
-        } else {
-          tr.lastEnergyUj = data.energyMicroJoules;
-          tr.lastTime = now;
-          tr.valid = true;
-        }
-      }
-
-      std::string fanRpmStr = readSysfsFile(foundHwmonPath + "fan1_input");
-      if (!fanRpmStr.empty()) {
-        try {
-          data.fanRpm = static_cast<uint32_t>(std::stoul(fanRpmStr));
-          data.hasFanRpm = true;
-        } catch (...) {}
-      }
-      std::string pwmStr = readSysfsFile(foundHwmonPath + "pwm1");
-      if (!pwmStr.empty()) {
-        try {
-          data.fanSpeedPct = static_cast<uint32_t>(std::stoul(pwmStr) * 100 / 255);
-          data.hasFanSpeed = true;
-        } catch (...) {}
-      }
-    }
-
-    // VRAM & GTT usage
-    std::string vramUsedStr = readSysfsFile(cardPath + "mem_info_vram_used");
-    std::string vramTotalStr = readSysfsFile(cardPath + "mem_info_vram_total");
-    if (!vramUsedStr.empty() && !vramTotalStr.empty()) {
-      try {
-        data.vramUsedBytes = std::stoull(vramUsedStr);
-        data.vramTotalBytes = std::stoull(vramTotalStr);
-        data.vramUsedMb = data.vramUsedBytes / (1024ULL * 1024ULL);
-        data.vramTotalMb = data.vramTotalBytes / (1024ULL * 1024ULL);
-        data.hasVram = (data.vramTotalBytes > 0);
-      } catch (...) {}
-    }
-
-    std::string gttUsedStr = readSysfsFile(cardPath + "mem_info_gtt_used");
-    std::string gttTotalStr = readSysfsFile(cardPath + "mem_info_gtt_total");
-    if (!gttUsedStr.empty() && !gttTotalStr.empty()) {
-      try {
-        data.gttUsedBytes = std::stoull(gttUsedStr);
-        data.gttTotalBytes = std::stoull(gttTotalStr);
-        data.gttUsedMb = data.gttUsedBytes / (1024ULL * 1024ULL);
-        data.gttTotalMb = data.gttTotalBytes / (1024ULL * 1024ULL);
-        data.hasGtt = (data.gttTotalBytes > 0);
-      } catch (...) {}
-    }
-
-    // Core & Memory clocks (AMDGPU + Intel i915 gt_act_freq_mhz + Intel xe tile0/gt0/freq0/act_freq)
-    std::string sclkStr = readSysfsFile(cardPath + "current_gfxclk");
-    if (!sclkStr.empty()) {
-      try { data.coreClockMhz = static_cast<uint32_t>(std::stoul(sclkStr)); } catch (...) {}
-    }
-    if (data.coreClockMhz == 0 && !foundHwmonPath.empty()) {
-      std::string freq1Str = readSysfsFile(foundHwmonPath + "freq1_input");
-      if (!freq1Str.empty()) {
-        try { data.coreClockMhz = static_cast<uint32_t>(std::stoull(freq1Str) / 1000000ULL); } catch (...) {}
-      }
-    }
-    if (data.coreClockMhz == 0) {
-      std::string i915Clk = readSysfsFile(cardRoot + "gt_act_freq_mhz");
-      if (i915Clk.empty()) {
-        i915Clk = readSysfsFile(cardPath + "tile0/gt0/freq0/act_freq");
-      }
-      if (!i915Clk.empty()) {
-        try { data.coreClockMhz = static_cast<uint32_t>(std::stoul(i915Clk)); } catch (...) {}
-      }
-    }
-    data.hasCoreClock = (data.coreClockMhz > 0);
-
-    std::string mclkStr = readSysfsFile(cardPath + "current_uclk");
-    if (!mclkStr.empty()) {
-      try { data.memoryClockMhz = static_cast<uint32_t>(std::stoul(mclkStr)); } catch (...) {}
-    } else if (!foundHwmonPath.empty()) {
-      std::string freq2Str = readSysfsFile(foundHwmonPath + "freq2_input");
-      if (!freq2Str.empty()) {
-        try { data.memoryClockMhz = static_cast<uint32_t>(std::stoull(freq2Str) / 1000000ULL); } catch (...) {}
-      }
-    }
-    data.hasMemoryClock = (data.memoryClockMhz > 0);
-  } else if (DynamicNvml::instance().available() &&
-             deviceIndex < DynamicNvml::instance().deviceCount()) {
-    DynamicNvml::instance().queryDevice(deviceIndex, data);
-  }
-
+  populateLinuxGpuTelemetry(cardRoot, cardPath, pciBusId, deviceIndex, data);
   return data;
+#else
+  GpuTelemetryData empty;
+  empty.deviceIndex = deviceIndex;
+  empty.isAvailable = false;
+  return empty;
+#endif
+}
+
+GpuTelemetryData HardwareTelemetry::queryGpuByPciBusId(const std::string &pciBusId,
+                                                       uint32_t fallbackDeviceIndex) {
+#ifdef _WIN32
+  auto allWin = WindowsDxgiTelemetry::instance().queryAll();
+  if (!pciBusId.empty()) {
+    for (const auto &entry : allWin) {
+      if (!entry.pciBusId.empty() && entry.pciBusId == pciBusId) {
+        return entry;
+      }
+    }
+  }
+  return queryGpu(fallbackDeviceIndex);
+#elif defined(__linux__)
+  const std::string targetBdf = normalizePciBusId(pciBusId);
+  if (!targetBdf.empty()) {
+    std::vector<LinuxCardEntry> sortedCards = getSortedLinuxDrmDevices();
+    for (size_t idx = 0; idx < sortedCards.size(); ++idx) {
+      if (sortedCards[idx].pciBusId == targetBdf) {
+        GpuTelemetryData data;
+        populateLinuxGpuTelemetry(sortedCards[idx].cardDir + "/",
+                                  sortedCards[idx].deviceDir + "/",
+                                  sortedCards[idx].pciBusId,
+                                  fallbackDeviceIndex, data);
+        return data;
+      }
+    }
+    if (DynamicNvml::instance().available()) {
+      GpuTelemetryData nvData;
+      nvData.deviceIndex = fallbackDeviceIndex;
+      if (DynamicNvml::instance().queryDeviceByPciOrIndex(
+              targetBdf, fallbackDeviceIndex, nvData)) {
+        return nvData;
+      }
+    }
+  }
+  return queryGpu(fallbackDeviceIndex);
+#else
+  (void)pciBusId;
+  GpuTelemetryData empty;
+  empty.deviceIndex = fallbackDeviceIndex;
+  empty.isAvailable = false;
+  return empty;
 #endif
 }
 
@@ -1166,7 +1306,7 @@ std::vector<GpuTelemetryData> HardwareTelemetry::queryAllGpus() {
     }
   }
   return nvList;
-#else
+#elif defined(__linux__)
   std::vector<GpuTelemetryData> result;
   std::vector<LinuxCardEntry> sortedCards = getSortedLinuxDrmDevices();
   uint32_t count = sortedCards.empty()
@@ -1179,6 +1319,8 @@ std::vector<GpuTelemetryData> HardwareTelemetry::queryAllGpus() {
     }
   }
   return result;
+#else
+  return {};
 #endif
 }
 
@@ -1243,7 +1385,7 @@ GpuContentionInfo HardwareTelemetry::checkContention(uint32_t deviceIndex) {
   GpuContentionInfo info;
   info.cpuCores = std::thread::hardware_concurrency();
 
-#ifndef _WIN32
+#ifdef __linux__
   std::string loadStr = readSysfsFile("/proc/loadavg");
   if (!loadStr.empty()) {
     std::istringstream iss(loadStr);

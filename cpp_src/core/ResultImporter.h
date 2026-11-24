@@ -28,6 +28,11 @@ struct ImportedDeviceProfile {
   bool cooperativeMatrixSupported = false;
   bool structuredSparsitySupported = false;
   bool cooperativeVectorSupported = false;
+  bool float16Supported = false;
+  bool int8Supported = false;
+  bool ocpFp6Supported = false;
+  bool ocpFp4Supported = false;
+  bool performanceQuerySupported = false;
 };
 
 struct ImportedRun {
@@ -46,6 +51,7 @@ struct ImportedRun {
   bool sessionDumpRenders = true;
   float sessionUiScale = 1.0f;
   ImportedDeviceProfile deviceProfile;
+  std::vector<ImportedDeviceProfile> deviceProfiles;
   std::vector<ResultData> results;
 };
 

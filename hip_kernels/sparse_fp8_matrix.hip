@@ -44,7 +44,7 @@ extern "C" __global__ void run_benchmark(const float* in_data, float* out_data) 
 
     float8_v c = c0 + c1 + c2 + c3 + c4 + c5 + c6 + c7;
     out_data[idx % 524288u] = c[0] + c[1] + c[2] + c[3] + c[4] + c[5] + c[6] + c[7];
-#elif defined(__gfx942__) || defined(__gfx950__)
+#elif defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__) || defined(__gfx950__)
     typedef int int2_v __attribute__((vector_size(8)));
     typedef int int4_v __attribute__((vector_size(16)));
     typedef float float4_v __attribute__((vector_size(16)));

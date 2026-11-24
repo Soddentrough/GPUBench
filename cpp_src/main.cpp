@@ -43,7 +43,7 @@ int main(int argc, char **argv) {
 #endif
 
   CLI::App app{"GPUBench"};
-  app.set_version_flag("--version", GPUBENCH_VERSION);
+  app.set_version_flag("-v,--version", GPUBENCH_VERSION);
 
   std::vector<std::string> benchmarks_to_run;
   app.add_option("-b,--benchmarks,--benchmark", benchmarks_to_run,
@@ -59,14 +59,13 @@ int main(int argc, char **argv) {
       "\nBENCHMARK GROUPS & INCLUDED TESTS:\n"
       "  compute     Compute arithmetic units (vector, matrix & sparse tensor operations):\n"
       "              FP64, FP32, ILP & Dual-Issue, LDS Bank Conflicts,\n"
-      "              In-Shader Indirect Synthesis, FP16, FP8, INT8,\n"
-      "              BF16, FP6, FP4, INT4, SparseMatrix (2:4), CoopVector (capability-probed)\n"
+      "              FP16, FP8, INT8, BF16, FP6, FP4, INT4, SparseMatrix (2:4), CoopVector (capability-probed)\n"
       "  memory      VRAM, cache hierarchy & PCIe/host-device interconnect:\n"
       "              Device Memory Bandwidth, L0/L1/L2/L3 Cache Bandwidth,\n"
       "              L0 Vector Cache Latency (16 KB), Cache Latency Curve,\n"
       "              Interconnect (PCIe H2D/D2H/Bidir, ReBAR, Unified Memory, Multi-GPU P2P)\n"
-      "  scheduling  Multi-queue async overlap & GPU-driven work graphs:\n"
-      "              AsyncOverlap (Graphics + Async Compute + Copy DMA), WorkGraphs (DGC vs AMDX)\n"
+      "  scheduling  Multi-queue async overlap & GPU-driven indirect scheduling:\n"
+      "              AsyncOverlap (Graphics + Async Compute + Copy DMA), In-Shader Indirect Synthesis\n"
       "  graphics    All 3D graphics rendering pipelines (combines 'raster' and 'raytracing', alias: 'gfx'):\n"
       "              Runs both fixed-function rasterization (ROP) and hardware ray tracing\n"
       "  raster      Fixed-function rasterization & ROP pixel fill rates (subset of graphics):\n"
@@ -80,7 +79,7 @@ int main(int argc, char **argv) {
       "  all         Run all benchmark groups across enabled devices\n\n"
       "METHODOLOGY DISCLOSURES & EXECUTION NOTES:\n"
       "  Baseline:    Vulkan backend targets Vulkan 1.4 with VMA 3.5.0 and persistent disk VkPipelineCache.\n"
-      "  Precisions:  BF16, FP8, FP6, FP4, INT4, SparseMatrix, CoopVector, WorkGraphs, and RayOMM require\n"
+      "  Precisions:  BF16, FP8, FP6, FP4, INT4, SparseMatrix, CoopVector, and RayOMM require\n"
       "               native hardware and API/driver support; unsupported combinations report UNSUPPORTED\n"
       "               without silent fallback or fake stubs.\n"
       "  Roofline:    Pass --roofline to print an Empirical Roofline Model table (ridge points & bottleneck\n"
@@ -161,10 +160,10 @@ int main(int argc, char **argv) {
   std::string scene_str = "all";
   app.add_option("-s,--scene", scene_str,
                  "Ray tracing benchmark scenario: showroom, indoor, outdoor, forest, all (default: all)")
-      ->check(CLI::IsMember({"showroom", "indoor", "outdoor", "forest", "aaa_forest", "all"}));
+      ->check(CLI::IsMember({"showroom", "indoor", "outdoor", "forest", "aaa_forest", "all"}, CLI::ignore_case));
 
   std::string resolution_str = "4k";
-  app.add_option("-r,--resolution", resolution_str,
+  app.add_option("-r,--res,--resolution", resolution_str,
                  "Resolution preset (auto, 8k, 4k, 1440p, 1080p, 720p, 1024x1024) or custom WxH (default: 4k)");
 
   std::vector<int> config_targets;
@@ -207,7 +206,7 @@ int main(int argc, char **argv) {
 
   std::string output_json_path;
   CLI::Option *opt_output_json = app.add_option(
-      "-o,--output-json", output_json_path,
+      "-o,--output,--output-json", output_json_path,
       "Write benchmark results to JSON file (optional file path, defaults to gpubench_<hostname>_<timestamp>.json)")
       ->expected(0, 1);
 
@@ -306,22 +305,77 @@ int main(int argc, char **argv) {
       return EXIT_FAILURE;
     }
 
-    ResultFormatter formatter;
-    formatter.setShowPower(show_power);
-    formatter.setShowTelemetry(show_telemetry);
-    for (const auto &res : run.results) {
-      formatter.addResult(res);
-    }
-    formatter.print();
-    if (show_roofline) {
-      gpubench::RooflineModel::printReport(
-          gpubench::RooflineModel::analyze(run.results));
+    const bool jsonToStdout =
+        want_json_output && (output_json_path == "-" || output_json_path == "stdout");
+    if (!jsonToStdout) {
+      ResultFormatter formatter;
+      formatter.setShowPower(show_power);
+      formatter.setShowTelemetry(show_telemetry);
+      for (const auto &res : run.results) {
+        formatter.addResult(res);
+      }
+      formatter.print();
+      if (show_roofline) {
+        gpubench::RooflineModel::printReport(
+            gpubench::RooflineModel::analyze(run.results));
+      }
     }
 
-    // Also support re-exporting to json if requested
+    // Also support re-exporting to json if requested (preserving imported profiles without live host probing)
     if (want_json_output) {
-      std::string payload = resultsToJson(run.results);
-      if (output_json_path == "-" || output_json_path == "stdout") {
+      auto parseHex = [](const std::string &hexStr) -> uint32_t {
+        if (hexStr.empty()) return 0;
+        try {
+          return static_cast<uint32_t>(std::stoul(hexStr, nullptr, 0));
+        } catch (...) {
+          return 0;
+        }
+      };
+      auto toDeviceProfile = [&](const ImportedDeviceProfile &imp) -> DeviceProfile {
+        DeviceProfile dp;
+        dp.backend = imp.backend;
+        dp.deviceIndex = imp.deviceIndex;
+        dp.deviceName = imp.deviceName;
+        dp.vendorID = parseHex(imp.vendorId);
+        dp.deviceID = parseHex(imp.deviceId);
+        dp.driverName = imp.driverName;
+        dp.driverInfo = imp.driverInfo;
+        dp.driverVersion = imp.driverVersion;
+        dp.apiVersion = imp.apiVersion;
+        dp.vramTotalMb = imp.vramTotalMb;
+        dp.computeUnits = imp.computeUnits;
+        dp.subgroupSize = imp.subgroupSize;
+        dp.maxWorkGroupSize = imp.maxWorkgroupSize;
+        dp.isApu = imp.isApu;
+        dp.rebarSupported = imp.rebarSupported;
+        dp.rebarSizeBytes = imp.rebarSizeMb * 1024ULL * 1024ULL;
+        dp.rayTracingSupported = imp.rayTracingSupported;
+        dp.serSupported = imp.serSupported;
+        dp.opacityMicromapSupported = imp.opacityMicromapSupported;
+        dp.workGraphsSupported = imp.workGraphsSupported;
+        dp.cooperativeMatrixSupported = imp.cooperativeMatrixSupported;
+        dp.structuredSparsitySupported = imp.structuredSparsitySupported;
+        dp.cooperativeVectorSupported = imp.cooperativeVectorSupported;
+        dp.float16Supported = imp.float16Supported;
+        dp.int8Supported = imp.int8Supported;
+        dp.ocpFp6Supported = imp.ocpFp6Supported;
+        dp.ocpFp4Supported = imp.ocpFp4Supported;
+        dp.performanceQuerySupported = imp.performanceQuerySupported;
+        return dp;
+      };
+      std::vector<DeviceProfile> importedProfiles;
+      if (!run.deviceProfiles.empty()) {
+        importedProfiles.reserve(run.deviceProfiles.size());
+        for (const auto &imp : run.deviceProfiles) {
+          importedProfiles.push_back(toDeviceProfile(imp));
+        }
+      } else if (!run.deviceProfile.deviceName.empty()) {
+        importedProfiles.push_back(toDeviceProfile(run.deviceProfile));
+      }
+
+      std::string payload = resultsToJson(run.results, importedProfiles, nullptr,
+                                          /*probeLiveContention=*/false);
+      if (jsonToStdout) {
         std::cout << payload;
       } else {
         std::ofstream ofs(output_json_path, std::ios::out | std::ios::trunc);
@@ -433,6 +487,9 @@ int main(int argc, char **argv) {
     BenchmarkRunner runner({});
     std::cout << "Available benchmarks (grouped):" << std::endl;
     for (const auto &grp : runner.getAvailableGroups()) {
+      if (grp.id == "graphics") {
+        continue;
+      }
       std::cout << std::endl << "[" << grp.name << "]  (run group with: -g " << grp.id << ")" << std::endl;
       for (const auto &name : grp.benchmarks) {
         std::cout << "  - " << name << std::endl;
@@ -450,10 +507,16 @@ int main(int argc, char **argv) {
         }
         if (name == "BF16") {
           std::cout << "      [0] Vector  (Runs when VK_KHR_shader_bfloat16 dotProduct or ROCm BF16 is driver-supported; lowerings flagged if no native VALU dot2)" << std::endl;
-          std::cout << "      [1] Matrix  (Requires VK_KHR_cooperative_matrix + BF16 or ROCm BF16 WMMA driver support)" << std::endl;
+          std::cout << "      [1] Matrix  (Requires VK_KHR_cooperative_matrix + BF16 or ROCm BF16 WMMA/MFMA driver support)" << std::endl;
         }
-        if (name == "INT4" || name == "FP4" || name == "FP6") {
-          std::cout << "      Note: Requires native sub-byte hardware/API support (e.g. ROCm RDNA 4 iu4 WMMA for INT4); reports UNSUPPORTED otherwise" << std::endl;
+        if (name == "INT4") {
+          std::cout << "      Note: Requires native 4-bit integer matrix support (ROCm RDNA 3/4 iu4 WMMA); reports UNSUPPORTED otherwise" << std::endl;
+        }
+        if (name == "FP6") {
+          std::cout << "      Note: Requires OCP MXFP6 (Float6E3M2EXT) 16x16x16 Cooperative Matrix support or ROCm CDNA 4 (gfx950) MXFP6 MFMA; reports UNSUPPORTED otherwise" << std::endl;
+        }
+        if (name == "FP4") {
+          std::cout << "      Note: Requires OCP MXFP4 (Float4E2M1EXT) 16x16x16 Cooperative Matrix support or ROCm CDNA 4 (gfx950) MXFP4 MFMA; reports UNSUPPORTED otherwise" << std::endl;
         }
         if (name == "RayScheduling") {
           std::cout << "      Note: SER configs run when VK_EXT_ray_tracing_invocation_reorder is driver-supported (pass-through flagged if hint=NONE); DGC configs require VK_EXT_device_generated_commands" << std::endl;
@@ -467,8 +530,17 @@ int main(int argc, char **argv) {
         }
       }
     }
-    std::cout << std::endl;
+    std::cout << "\nNote: Umbrella group '-g graphics' (alias 'gfx') combines [Raster] and [Ray Tracing]." << std::endl << std::endl;
     return EXIT_SUCCESS;
+  }
+
+  for (auto &b : backend_strs) {
+    for (char &ch : b) {
+      ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    }
+  }
+  for (char &ch : scene_str) {
+    ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
   }
 
   for (const auto &grp : groups_to_run) {
@@ -605,6 +677,7 @@ int main(int argc, char **argv) {
       SetRunnerTargetConfigs(config_targets);
     }
     runner.setProfileSnapshot(profile_snapshot);
+    runner.setRraTrace(rra_trace);
     runner.setVerifyParity(verify_parity);
     runner.setForce(force);
     runner.setStrict(strict);

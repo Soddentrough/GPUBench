@@ -23,7 +23,7 @@ std::unique_ptr<IComputeContext> createVulkanContext() {
     if (!ctx || ctx->getDevices().empty()) {
       return nullptr;
     }
-    int devIdx = (ctx->getDevices().size() > 1) ? 1 : 0;
+    const uint32_t devIdx = ::gpubench::test::preferredTestDeviceIndex(ctx->getDevices().size());
     ctx->pickDevice(devIdx);
     return ctx;
   } catch (...) {
@@ -39,7 +39,7 @@ std::unique_ptr<IComputeContext> createVulkanContext() {
 
 TEST_CASE(LdsAndBf16Validation, LdsBankConflicts_PositiveValidation_AllConfigs) {
   auto ctx = createVulkanContext();
-  if (!ctx) { return; }
+  if (!ctx) { SKIP_TEST("Vulkan backend unavailable"); }
 
   std::string kdir = KernelPath::find();
   ASSERT_FALSE(kdir.empty());
@@ -63,7 +63,7 @@ TEST_CASE(LdsAndBf16Validation, LdsBankConflicts_PositiveValidation_AllConfigs) 
 
 TEST_CASE(LdsAndBf16Validation, LdsBankConflicts_NegativeValidation_ZeroedBuffer) {
   auto ctx = createVulkanContext();
-  if (!ctx) { return; }
+  if (!ctx) { SKIP_TEST("Vulkan backend unavailable"); }
 
   std::string kdir = KernelPath::find();
   ASSERT_FALSE(kdir.empty());
@@ -90,7 +90,7 @@ TEST_CASE(LdsAndBf16Validation, LdsBankConflicts_NegativeValidation_ZeroedBuffer
 
 TEST_CASE(LdsAndBf16Validation, LdsBankConflicts_NegativeValidation_SingleElementCorruption) {
   auto ctx = createVulkanContext();
-  if (!ctx) { return; }
+  if (!ctx) { SKIP_TEST("Vulkan backend unavailable"); }
 
   std::string kdir = KernelPath::find();
   ASSERT_FALSE(kdir.empty());
@@ -132,7 +132,7 @@ TEST_CASE(LdsAndBf16Validation, LdsBankConflicts_NegativeValidation_SingleElemen
 
 TEST_CASE(LdsAndBf16Validation, LdsBankConflicts_NegativeValidation_OffByOneExpectedValue) {
   auto ctx = createVulkanContext();
-  if (!ctx) { return; }
+  if (!ctx) { SKIP_TEST("Vulkan backend unavailable"); }
 
   std::string kdir = KernelPath::find();
   ASSERT_FALSE(kdir.empty());
@@ -163,7 +163,7 @@ TEST_CASE(LdsAndBf16Validation, LdsBankConflicts_NegativeValidation_OffByOneExpe
 
 TEST_CASE(LdsAndBf16Validation, LdsBankConflicts_NegativeValidation_OOBAndTeardown) {
   auto ctx = createVulkanContext();
-  if (!ctx) { return; }
+  if (!ctx) { SKIP_TEST("Vulkan backend unavailable"); }
 
   std::string kdir = KernelPath::find();
   ASSERT_FALSE(kdir.empty());
@@ -187,7 +187,7 @@ TEST_CASE(LdsAndBf16Validation, LdsBankConflicts_NegativeValidation_OOBAndTeardo
 
 TEST_CASE(LdsAndBf16Validation, LdsBankConflicts_SerializationCurve_EmpiricalVerification) {
   auto ctx = createVulkanContext();
-  if (!ctx) { return; }
+  if (!ctx) { SKIP_TEST("Vulkan backend unavailable"); }
 
   std::string kdir = KernelPath::find();
   ASSERT_FALSE(kdir.empty());
@@ -247,7 +247,7 @@ std::unique_ptr<IComputeContext> createBf16Context() {
     try {
       auto vkCtx = ComputeBackendFactory::create(ComputeBackend::Vulkan, false, false);
       if (vkCtx && !vkCtx->getDevices().empty()) {
-        int devIdx = (vkCtx->getDevices().size() > 1) ? 1 : 0;
+        const uint32_t devIdx = ::gpubench::test::preferredTestDeviceIndex(vkCtx->getDevices().size());
         vkCtx->pickDevice(devIdx);
         if (probe.IsSupported(vkCtx->getCurrentDeviceInfo(), vkCtx.get())) {
           return vkCtx;
@@ -259,10 +259,12 @@ std::unique_ptr<IComputeContext> createBf16Context() {
   if (ComputeBackendFactory::isAvailable(ComputeBackend::ROCm)) {
     try {
       auto rocmCtx = ComputeBackendFactory::create(ComputeBackend::ROCm, false, false);
-      int devIdx = (rocmCtx->getDevices().size() > 1) ? 1 : 0;
-      rocmCtx->pickDevice(devIdx);
-      if (probe.IsSupported(rocmCtx->getCurrentDeviceInfo(), rocmCtx.get())) {
-        return rocmCtx;
+      if (rocmCtx && !rocmCtx->getDevices().empty()) {
+        const uint32_t devIdx = ::gpubench::test::preferredTestDeviceIndex(rocmCtx->getDevices().size());
+        rocmCtx->pickDevice(devIdx);
+        if (probe.IsSupported(rocmCtx->getCurrentDeviceInfo(), rocmCtx.get())) {
+          return rocmCtx;
+        }
       }
     } catch (...) {
     }
@@ -274,7 +276,7 @@ std::unique_ptr<IComputeContext> createBf16Context() {
 
 TEST_CASE(LdsAndBf16Validation, Bf16Bench_HonestyContract_NoSilentFp16Fallback) {
   auto ctx = createVulkanContext();
-  if (!ctx) { return; }
+  if (!ctx) { SKIP_TEST("Vulkan backend unavailable"); }
 
   Bf16Bench bench;
   DeviceInfo info = ctx->getCurrentDeviceInfo();
@@ -295,8 +297,7 @@ TEST_CASE(LdsAndBf16Validation, Bf16Bench_HonestyContract_NoSilentFp16Fallback) 
 TEST_CASE(LdsAndBf16Validation, Bf16Bench_PositiveValidation_VectorAndMatrix) {
   auto ctx = createBf16Context();
   if (!ctx) {
-    std::cout << "[SKIP] Native BF16 not supported on any available backend" << std::endl;
-    return;
+    SKIP_TEST("Native BF16 not supported on any available backend");
   }
 
   std::string kdir = KernelPath::find();
@@ -324,8 +325,7 @@ TEST_CASE(LdsAndBf16Validation, Bf16Bench_PositiveValidation_VectorAndMatrix) {
 TEST_CASE(LdsAndBf16Validation, Bf16Bench_NegativeValidation_ZeroedBuffer) {
   auto ctx = createBf16Context();
   if (!ctx) {
-    std::cout << "[SKIP] Native BF16 not supported on any available backend" << std::endl;
-    return;
+    SKIP_TEST("Native BF16 not supported on any available backend");
   }
 
   std::string kdir = KernelPath::find();
@@ -363,8 +363,7 @@ TEST_CASE(LdsAndBf16Validation, Bf16Bench_NegativeValidation_ZeroedBuffer) {
 TEST_CASE(LdsAndBf16Validation, Bf16Bench_NegativeValidation_NaNInjection) {
   auto ctx = createBf16Context();
   if (!ctx) {
-    std::cout << "[SKIP] Native BF16 not supported on any available backend" << std::endl;
-    return;
+    SKIP_TEST("Native BF16 not supported on any available backend");
   }
 
   std::string kdir = KernelPath::find();
@@ -400,8 +399,7 @@ TEST_CASE(LdsAndBf16Validation, Bf16Bench_NegativeValidation_NaNInjection) {
 TEST_CASE(LdsAndBf16Validation, Bf16Bench_NegativeValidation_InfInjection) {
   auto ctx = createBf16Context();
   if (!ctx) {
-    std::cout << "[SKIP] Native BF16 not supported on any available backend" << std::endl;
-    return;
+    SKIP_TEST("Native BF16 not supported on any available backend");
   }
 
   std::string kdir = KernelPath::find();
@@ -438,8 +436,7 @@ TEST_CASE(LdsAndBf16Validation, Bf16Bench_NegativeValidation_InfInjection) {
 TEST_CASE(LdsAndBf16Validation, Bf16Bench_RecurrenceStability_MultiPassStress) {
   auto ctx = createBf16Context();
   if (!ctx) {
-    std::cout << "[SKIP] Native BF16 not supported on any available backend" << std::endl;
-    return;
+    SKIP_TEST("Native BF16 not supported on any available backend");
   }
 
   std::string kdir = KernelPath::find();

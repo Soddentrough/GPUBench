@@ -1,10 +1,13 @@
 #include "benchmarks/SysMemLatencyBench.h"
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <cstdlib>
+#include <fstream>
 #include <iostream>
 #include <numeric>
 #include <random>
+#include <sstream>
 #include <stdexcept>
 #include <vector>
 
@@ -140,6 +143,55 @@ void SysMemLatencyBench::Setup(IComputeContext & /*context*/,
   pBuffer[lineIndices[numLines - 1] * kStrideElements] =
       lineIndices[0] * kStrideElements;
   currentIndex = 0;
+
+#ifdef __linux__
+  // Verify whether Linux Transparent Huge Pages actually backed the faulted-in buffer
+  // so caveats accurately reflect 2 MB HugePage vs 4 KB page TLB walk behavior.
+  {
+    const uintptr_t bufStart = reinterpret_cast<uintptr_t>(buffer);
+    const uintptr_t bufEnd = bufStart + bufferSize;
+    std::ifstream smaps("/proc/self/smaps");
+    if (smaps.is_open()) {
+      uint64_t anonHugeKb = 0;
+      bool inRange = false;
+      std::string line;
+      while (std::getline(smaps, line)) {
+        const size_t dashPos = line.find('-');
+        const size_t spacePos = line.find(' ');
+        if (dashPos != std::string::npos && spacePos != std::string::npos &&
+            dashPos < spacePos) {
+          uintptr_t vmaStart = 0;
+          uintptr_t vmaEnd = 0;
+          try {
+            vmaStart = std::stoull(line.substr(0, dashPos), nullptr, 16);
+            vmaEnd = std::stoull(line.substr(dashPos + 1, spacePos - dashPos - 1),
+                                 nullptr, 16);
+            inRange = (vmaEnd > bufStart && vmaStart < bufEnd);
+          } catch (...) {
+            inRange = false;
+          }
+        } else if (inRange && line.rfind("AnonHugePages:", 0) == 0) {
+          std::istringstream iss(line.substr(14));
+          uint64_t kb = 0;
+          if (iss >> kb) {
+            anonHugeKb += kb;
+          }
+        }
+      }
+      const uint64_t halfBufKb = (bufferSize / 1024ULL) / 2ULL;
+      if (anonHugeKb >= halfBufKb) {
+        usingLargePages = true;
+      } else {
+        usingLargePages = false;
+        pageCaveat =
+            "Linux Transparent Huge Pages (MADV_HUGEPAGE) not backed by 2 MB pages; 4 KB page TLB walk overhead may be included";
+      }
+    } else {
+      pageCaveat =
+          "Linux Transparent Huge Pages requested via MADV_HUGEPAGE (2 MB backing unverified)";
+    }
+  }
+#endif
 }
 
 void SysMemLatencyBench::Run(uint32_t config_idx) {

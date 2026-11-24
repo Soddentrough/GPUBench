@@ -19,9 +19,16 @@ extern "C" __global__ void run_benchmark(const uint32_t* in_data, float* out_dat
 
     uint32_t lane = threadIdx.x & 63u;
     uint32_t wg_offset = (wg_id & 4095u) * 64u;
-    const int8_v* iptr = reinterpret_cast<const int8_v*>(in_data) + wg_offset;
-    int8_v a = iptr[lane];
-    int8_v b = iptr[(lane + 1u) & 63u];
+    // Load 6 consecutive words (192 bits = 32 packed 6-bit FP6 elements) per lane
+    // so every lane aligns on the 3-word (96-bit) packed pattern boundary.
+    const uint32_t* aptr = in_data + (wg_offset + lane) * 6u;
+    const uint32_t* bptr = in_data + (wg_offset + ((lane + 1u) & 63u)) * 6u;
+    int8_v a = {static_cast<int>(aptr[0]), static_cast<int>(aptr[1]),
+                static_cast<int>(aptr[2]), static_cast<int>(aptr[3]),
+                static_cast<int>(aptr[4]), static_cast<int>(aptr[5]), 0, 0};
+    int8_v b = {static_cast<int>(bptr[0]), static_cast<int>(bptr[1]),
+                static_cast<int>(bptr[2]), static_cast<int>(bptr[3]),
+                static_cast<int>(bptr[4]), static_cast<int>(bptr[5]), 0, 0};
 
     float seed = static_cast<float>((a[0] & 0xFF) + 1) * 0.001f + static_cast<float>(lane + 1u) * 0.0001f;
     float4_v c0 = {seed * 1.0f, seed, seed, seed};

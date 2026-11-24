@@ -7,123 +7,6 @@
 
 namespace gpubench::gui {
 
-void GuiApp::renderSidebarTelemetry() {
-    const BringUpColors c = getBringUpColors(m_palette);
-    pushBoldFont();
-    ImGui::TextColored(c.phosphorHi, "LIVE HARDWARE TELEMETRY");
-    popBoldFont();
-
-    uint32_t devCount = m_telemetryWorker.getDeviceCount();
-    if (devCount == 0) {
-        ImGui::TextColored(c.textMuted, "No hardware telemetry sensors detected (N/A)");
-        return;
-    }
-
-    if (devCount > 1) {
-        auto names = m_telemetryWorker.getDeviceNames();
-        for (uint32_t i = 0; i < devCount; ++i) {
-            if (i > 0) ImGui::SameLine(0.0f, s(4.0f));
-            char lbl[32];
-            std::snprintf(lbl, sizeof(lbl), "GPU %u", i);
-            bool sel = (m_telemetryGpuIndex == i);
-            std::string bId = "##SideTelGpu_" + std::to_string(i);
-            if (tacticalButton(bId.c_str(), lbl, ImVec2(0.0f, s(20.0f)), sel, c)) {
-                m_telemetryGpuIndex = i;
-            }
-            if (ImGui::IsItemHovered() && i < names.size()) {
-                ImGui::SetTooltip("%s", names[i].c_str());
-            }
-        }
-    }
-
-    DeviceTelemetrySnapshot snap{};
-    if (!m_telemetryWorker.getSnapshot(m_telemetryGpuIndex, snap) || !snap.isAvailable) {
-        ImGui::TextColored(c.textMuted, "Telemetry polling initializing... (N/A)");
-        return;
-    }
-
-    ImGui::BeginChild("SidebarTelemetryCard", ImVec2(0, s(168.0f)), ImGuiChildFlags_Borders);
-
-    auto renderSensorRow = [&](const char* label, bool available, const char* valueStr, ImVec4 valueColor) {
-        ImGui::TableNextRow();
-        ImGui::TableSetColumnIndex(0);
-        ImGui::TextColored(c.textMuted, "%s", label);
-        ImGui::TableSetColumnIndex(1);
-        pushMonoFont();
-        if (available) {
-            ImGui::TextColored(valueColor, "%s", valueStr);
-        } else {
-            ImGui::TextColored(c.textMuted, "N/A");
-        }
-        popMonoFont();
-    };
-
-    if (ImGui::BeginTable("SidebarSensorGrid", 2, ImGuiTableFlags_SizingStretchProp)) {
-        ImGui::TableSetupColumn("Sensor", ImGuiTableColumnFlags_WidthStretch, 0.46f);
-        ImGui::TableSetupColumn("Reading", ImGuiTableColumnFlags_WidthStretch, 0.54f);
-
-        char buf[64];
-
-        float dispGpuBusy = (snap.gpuBusySmoothPct > 0.0f) ? snap.gpuBusySmoothPct : snap.gpuBusyPct;
-        std::snprintf(buf, sizeof(buf), "%.0f%%", dispGpuBusy);
-        renderSensorRow("GPU Load", snap.hasGpuBusy, buf,
-                        (dispGpuBusy > 85.0f) ? c.okColor : c.textPrimary);
-
-        float dispSclk = (snap.sclkSmoothMhz > 0.0f) ? snap.sclkSmoothMhz : snap.sclkMhz;
-        std::snprintf(buf, sizeof(buf), "%.0f MHz", dispSclk);
-        renderSensorRow("Shader Clock", snap.hasSclk, buf, c.cyanAccent);
-
-        std::snprintf(buf, sizeof(buf), "%.0f MHz", snap.mclkMhz);
-        renderSensorRow("Memory Clock", snap.hasMclk, buf, c.violetAccent);
-
-        float dispPower = (snap.powerSmoothWatts > 0.0f) ? snap.powerSmoothWatts : snap.powerWatts;
-        std::snprintf(buf, sizeof(buf), "%.1f W", dispPower);
-        renderSensorRow("Board Power", snap.hasPower, buf, c.phosphorHi);
-
-        bool hasTemp = snap.hasTempJct || snap.hasTempEdge;
-        if (snap.hasTempJct && snap.hasTempEdge) {
-            std::snprintf(buf, sizeof(buf), "%.0f C (Jct %.0f C)", snap.tempEdgeC, snap.tempJctC);
-        } else if (snap.hasTempJct) {
-            std::snprintf(buf, sizeof(buf), "%.0f C (Hotspot)", snap.tempJctC);
-        } else {
-            std::snprintf(buf, sizeof(buf), "%.0f C", snap.tempEdgeC);
-        }
-        float refTemp = snap.hasTempJct ? snap.tempJctC : snap.tempEdgeC;
-        ImVec4 tempCol = (refTemp >= 90.0f)
-            ? c.errColor
-            : ((refTemp >= 75.0f) ? c.warnColor : c.okColor);
-        renderSensorRow("Temperature", hasTemp, buf, tempCol);
-
-        bool hasFan = snap.hasFanRpm || snap.hasFanSpeedPct;
-        if (snap.hasFanRpm && snap.hasFanSpeedPct) {
-            std::snprintf(buf, sizeof(buf), "%.0f RPM (%.0f%%)", snap.fanRpm, snap.fanSpeedPct);
-        } else if (snap.hasFanRpm) {
-            std::snprintf(buf, sizeof(buf), "%.0f RPM", snap.fanRpm);
-        } else {
-            std::snprintf(buf, sizeof(buf), "%.0f%%", snap.fanSpeedPct);
-        }
-        renderSensorRow("Cooling Fan", hasFan, buf, c.textSecondary);
-
-        ImGui::EndTable();
-    }
-
-    if (snap.hasVram && snap.vramTotalBytes > 0) {
-        double usedGb = static_cast<double>(snap.vramUsedBytes) / (1024.0 * 1024.0 * 1024.0);
-        double totalGb = static_cast<double>(snap.vramTotalBytes) / (1024.0 * 1024.0 * 1024.0);
-        float frac = std::clamp(static_cast<float>(usedGb / std::max(0.001, totalGb)), 0.0f, 1.0f);
-        char vramOverlay[64];
-        std::snprintf(vramOverlay, sizeof(vramOverlay), "VRAM: %.2f / %.1f GB (%.0f%%)",
-                      usedGb, totalGb, frac * 100.0f);
-        ImGui::PushStyleColor(ImGuiCol_PlotHistogram, c.phosphorMid);
-        ImGui::ProgressBar(frac, ImVec2(-1.0f, s(16.0f)), vramOverlay);
-        ImGui::PopStyleColor();
-    } else {
-        ImGui::TextColored(c.textMuted, "VRAM Usage: N/A");
-    }
-
-    ImGui::EndChild();
-}
-
 void GuiApp::renderLiveTelemetryDock() {
     const BringUpColors c = getBringUpColors(m_palette);
     uint32_t devCount = m_telemetryWorker.getDeviceCount();
@@ -299,7 +182,13 @@ void GuiApp::renderLiveTelemetryDock() {
             }
             if (showTriggerLabels && !tr.label.empty()) {
                 std::string shortLbl = tr.label.substr(0, std::min<size_t>(10, tr.label.size()));
-                dl->AddText(ImVec2(x + s(2.0f), gy0 + s(1.0f)), toU32(c.warnColor), shortLbl.c_str());
+                const ImVec2 lblPos(x + s(2.0f), gy0 + s(1.0f));
+                const ImVec2 lblSz = ImGui::CalcTextSize(shortLbl.c_str());
+                dl->AddRectFilled(
+                    ImVec2(lblPos.x - s(2.0f), lblPos.y - s(1.0f)),
+                    ImVec2(lblPos.x + lblSz.x + s(2.0f), lblPos.y + lblSz.y + s(1.0f)),
+                    toU32(c.bgVoid, 0.80f), 0.0f);
+                dl->AddText(lblPos, toU32(c.warnColor), shortLbl.c_str());
             }
         }
 

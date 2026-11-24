@@ -13,6 +13,7 @@ struct BandwidthConfig {
   std::string kernelFile;
   uint32_t workgroupSize;
   uint32_t numWorkgroups;
+  uint32_t outerIters;
   TestMode mode;
   ComputeKernel kernel;
 };
@@ -73,6 +74,9 @@ private:
   size_t bufferSize = 0;
   bool debug = false;
 
-  void initDefaultConfigs(uint32_t maxWorkgroupSize = 1024);
+  void initDefaultConfigs(uint32_t maxWorkgroupSize = 1024,
+                          uint32_t computeUnits = 0,
+                          size_t targetBufferSize = 512ULL * 1024ULL * 1024ULL,
+                          bool scaleByCu = false);
   void createKernel(BandwidthConfig &config, const std::string &kernel_dir);
 };

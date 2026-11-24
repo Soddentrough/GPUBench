@@ -14,13 +14,18 @@ public:
   bool IsSupported(const DeviceInfo &info,
                    IComputeContext *context = nullptr) const override;
   std::string GetSupportNote() const override {
-    return "shaderInt8 hardware bit not set";
+    return "shaderInt8 hardware feature not enabled";
   }
   std::string GetSupportNote(const DeviceInfo &info,
                              IComputeContext *context = nullptr) const override {
     (void)info;
-    (void)context;
-    return "shaderInt8 hardware bit not set";
+    if (context && context->getBackend() == ComputeBackend::ROCm) {
+      return "Native INT8 (8-bit integer) compute not supported on this ROCm device";
+    }
+    if (context && context->getBackend() == ComputeBackend::OpenCL) {
+      return "8-bit integer compute not supported on this OpenCL device";
+    }
+    return "shaderInt8 hardware feature not enabled on this Vulkan device";
   }
   SupportLimitation GetSupportLimitation() const override {
     return SupportLimitation::kHardware;
@@ -31,6 +36,7 @@ public:
     (void)context;
     return SupportLimitation::kHardware;
   }
+  using IBenchmark::GetConfigSupportNote;
   std::string GetConfigSupportNote(uint32_t config_idx,
                                    const DeviceInfo &info,
                                    IComputeContext *context = nullptr) const override {
@@ -39,7 +45,10 @@ public:
         return "Cooperative matrix / WMMA not supported in OpenCL API";
       }
       if (!info.cooperativeMatrixSupport) {
-        return "extension VK_KHR_cooperative_matrix missing or ROCm WMMA not supported";
+        if (context && context->getBackend() == ComputeBackend::ROCm) {
+          return "ROCm INT8 WMMA / MFMA matrix instructions not supported on this GPU";
+        }
+        return "VK_KHR_cooperative_matrix extension not supported on this GPU/driver";
       }
     }
     return GetSupportNote(info, context);
@@ -82,15 +91,39 @@ public:
   int GetSortWeight() const override { return 70; }
   uint32_t GetNumConfigs() const override { return 2; }
   virtual uint32_t GetExpectedKernelCount() const override { return 2; }
+  using IBenchmark::GetConfigName;
   std::string GetConfigName(uint32_t config_idx) const override {
     return config_idx == 0 ? "Vector" : "Matrix";
   }
   const char *GetMetric() const override { return "TOPS"; }
+  using IBenchmark::GetDescription;
   const char *GetDescription() const override {
     return "8-bit integer (INT8) packed dot-product VALU and Cooperative Matrix / WMMA / MFMA throughput.";
   }
+  const char *GetDescription(uint32_t config_idx) const override {
+    return config_idx == 0
+               ? "8-bit integer (INT8) packed 4-element dot-product VALU throughput."
+               : "8-bit integer (INT8) matrix multiply-accumulate throughput across Cooperative Matrix / WMMA / MFMA cores.";
+  }
+  const char *GetDescription(uint32_t config_idx, const DeviceInfo &info,
+                             IComputeContext *context = nullptr) const override {
+    (void)info;
+    if (context && context->getBackend() == ComputeBackend::ROCm) {
+      return config_idx == 0
+                 ? "8-bit integer (INT8) packed 4-element dot-product VALU throughput via v_dot4_i32_iu8."
+                 : "8-bit integer (INT8) matrix multiply-accumulate throughput across WMMA / MFMA matrix cores.";
+    }
+    if (context && context->getBackend() == ComputeBackend::Vulkan) {
+      return config_idx == 0
+                 ? "8-bit integer (INT8) packed 4-element dot-product VALU throughput via GL_EXT_integer_dot_product / SPIR-V SDot."
+                 : "8-bit integer (INT8) matrix multiply-accumulate throughput via VK_KHR_cooperative_matrix.";
+    }
+    return GetDescription(config_idx);
+  }
   double GetOperationalIntensity(uint32_t config_idx = 0) const override {
-    return config_idx == 0 ? 524288.0 : 8192.0;
+    // Config 0 (int8.comp): 16384 * 64 ops (1,048,576 IOPs) / (4 B read + 4 B write = 8 B) = 131,072.0 OP/B
+    // Config 1 (coop_matrix_int8.comp): 32768 * 8192 IOPs / (256 B A + 256 B B + 1024 B C = 1536 B) = 174,762.67 OP/B
+    return (config_idx == 0u) ? 131072.0 : ((32768.0 * 8192.0) / 1536.0);
   }
 
 private:

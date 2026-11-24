@@ -90,7 +90,7 @@ def identify_arch(device_str: str) -> str:
         return "gfx1201"
     if "7900" in dev or "gfx1100" in dev or "navi 31" in dev or "navi31" in dev:
         return "navi31"
-    return "strix_halo"  # Default to current hardware
+    return "unknown"
 
 
 def discover_device_index(binary: str = "./build/gpubench") -> int:
@@ -169,6 +169,16 @@ def canonicalize_bench_name(bench: str, subcat: str) -> str:
         if "matrix" in b or "wmma" in b:
             return "BF16 (Matrix)"
         return "BF16 (Vector)"
+    if "l0 cache" in b or "l0 vector cache" in b:
+        return "L0 Cache Latency" if "latency" in b else "L0 Cache"
+    if "l1 cache" in b:
+        return "L1 Cache Latency" if "latency" in b else "L1 Cache"
+    if "l2 cache" in b:
+        return "L2 Cache Latency" if "latency" in b else "L2 Cache"
+    if "l3 cache" in b:
+        return "L3 Cache Latency" if "latency" in b else "L3 Cache"
+    if "system memory" in b:
+        return bench
     if "bandwidth" in b:
         # Avoid matching 'read' inside 'threads'!
         mode_str = "READ"
@@ -185,8 +195,6 @@ def canonicalize_bench_name(bench: str, subcat: str) -> str:
             if sz in b:
                 return f"Memory Bandwidth ({mode_str} {sz})"
         return f"Memory Bandwidth ({mode_str})"
-    if "l1 cache" in b:
-        return "L1 Cache"
     return bench
 
 
@@ -226,6 +234,8 @@ def extract_benchmark_items(data: Any) -> Tuple[List[Dict[str, Any]], List[Dict[
                         "subcategory": bm.get("approach", ""),
                         "metric": bm.get("unit", ""),
                         "value": float(numeric_val),
+                        "status": bm.get("status", ""),
+                        "valid": bm.get("valid", bm.get("is_valid", True)),
                         "unsupported": bm.get("status", "").lower() == "unsupported",
                         "unsupported_reason": bm.get("unsupported_reason") or bm.get("support_note") or "",
                     })
@@ -248,6 +258,8 @@ def extract_benchmark_items(data: Any) -> Tuple[List[Dict[str, Any]], List[Dict[
                         "subcategory": bm.get("approach", ""),
                         "metric": bm.get("unit", ""),
                         "value": float(numeric_val),
+                        "status": bm.get("status", ""),
+                        "valid": bm.get("valid", bm.get("is_valid", True)),
                         "unsupported": bm.get("status", "").lower() == "unsupported",
                         "unsupported_reason": bm.get("unsupported_reason") or bm.get("support_note") or "",
                     })
@@ -304,13 +316,27 @@ def evaluate_results(raw_data: Any) -> bool:
     rt_scheduling: Dict[str, float] = {}
 
     for item in data:
-        if item.get("unsupported", False):
+        status_upper = str(item.get("status", "")).upper()
+        is_unsupp = bool(item.get("unsupported", False)) or status_upper == "UNSUPPORTED"
+        if is_unsupp:
             continue
         bench = item.get("benchmark", "")
         subcat = item.get("subcategory", "")
         metric = item.get("metric", "")
         backend = item.get("backend", "")
-        val = item.get("value", 0.0)
+        raw_val = item.get("value")
+        val = float(raw_val) if raw_val is not None else 0.0
+        is_valid = bool(item.get("valid", item.get("is_valid", True))) and status_upper not in (
+            "INVALID",
+            "FAILED",
+            "ABORTED",
+        )
+        if not is_valid:
+            all_passed = False
+            bad_tag = status_upper if status_upper in ("INVALID", "FAILED", "ABORTED") else "INVALID"
+            regressions.append(f"{bench} ({subcat}) on {backend} reported {bad_tag}")
+            print(f"{bench:<32} {backend:<10} {f'{val:.2f} {metric}':<16} {'[Validation]':<20} {Colors.RED}{bad_tag}{Colors.RESET}")
+            continue
 
         name = canonicalize_bench_name(bench, subcat)
         if name not in grouped:
@@ -318,8 +344,9 @@ def evaluate_results(raw_data: Any) -> bool:
             metric_map[name] = metric
         grouped[name][backend] = val
 
-        if "RayScheduling" in bench or "RayScheduling" in name:
-            rt_scheduling[bench] = val
+        if "RayScheduling" in bench or "RayScheduling" in name or "RayScheduling" in subcat:
+            rt_key = f"{bench} {subcat}".strip()
+            rt_scheduling[rt_key] = val
 
         # Check baseline
         key = (name, metric)
@@ -501,8 +528,8 @@ def evaluate_results(raw_data: Any) -> bool:
 def main():
     parser = argparse.ArgumentParser(description="GPUBench Verification & Regression Detection Suite")
     parser.add_argument("-d", "--device", type=int, default=None, help="Target GPU device index (default: auto-detect)")
-    parser.add_argument("-k", "--backends", type=str, default="opencl,rocm,vulkan", help="Backends to benchmark")
-    parser.add_argument("-b", "--benchmarks", type=str, default="fp64,fp32,fp16,int8,ray_scheduling", help="Benchmarks to run")
+    parser.add_argument("-k", "--backends", type=str, default="vulkan", help="Backends to benchmark")
+    parser.add_argument("-b", "--benchmarks", type=str, default="fp64,fp32,fp16,int8,rayscheduling", help="Benchmarks to run")
     parser.add_argument("-r", "--resolution", type=str, default=None, help="Resolution preset (e.g. 1080p, 4k)")
     parser.add_argument("-s", "--scene", type=str, default=None, help="Scene preset (showroom, indoor, outdoor, forest, all)")
     parser.add_argument("--binary", type=str, default="./build/gpubench", help="Path to gpubench binary")

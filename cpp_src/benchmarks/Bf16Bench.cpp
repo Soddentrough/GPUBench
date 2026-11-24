@@ -31,11 +31,15 @@ void Bf16Bench::Setup(IComputeContext &context, const std::string &kernel_dir) {
   size_t bufferSize =
       8192 * 64 * 4 * 4; // 8MB buffer to prevent out of bounds
   buffer = context.createBuffer(bufferSize);
-  matrixInputBuffer = context.createBuffer(bufferSize);
+  if (context.getBackend() == ComputeBackend::Vulkan) {
+    matrixInputBuffer = context.createBuffer(bufferSize);
+  }
   matrixBuffer = context.createBuffer(bufferSize);
   std::vector<uint32_t> initData(bufferSize / sizeof(uint32_t), 0x3D003D00u);
   context.writeBuffer(buffer, 0, bufferSize, initData.data());
-  context.writeBuffer(matrixInputBuffer, 0, bufferSize, initData.data());
+  if (matrixInputBuffer) {
+    context.writeBuffer(matrixInputBuffer, 0, bufferSize, initData.data());
+  }
   context.writeBuffer(matrixBuffer, 0, bufferSize, initData.data());
 
   // Load Vector Kernel

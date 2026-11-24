@@ -21,7 +21,7 @@ def format_status(status: str) -> Text:
         return Text(status.upper(), style="bold green")
     if status_lower in ("unsupported", "skipped"):
         return Text(status.upper(), style="dim yellow")
-    if status_lower in ("failed", "error"):
+    if status_lower in ("failed", "error", "invalid", "aborted"):
         return Text(status.upper(), style="bold red")
     return Text(status, style="cyan")
 
@@ -34,11 +34,12 @@ def format_value(val_str: str, status: str) -> Text:
 
 def display_detailed_results(data: dict[str, Any], console: Console) -> None:
     timestamp = data.get("timestamp")
-    time_str = (
-        datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S")
-        if timestamp
-        else "Unknown"
-    )
+    if isinstance(timestamp, (int, float)):
+        time_str = datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S")
+    elif timestamp:
+        time_str = str(timestamp)
+    else:
+        time_str = "Unknown"
     backend = data.get("backend", "Unknown")
 
     header_text = Text()
@@ -125,14 +126,34 @@ def display_detailed_results(data: dict[str, Any], console: Console) -> None:
             backend_name = r.get("backend", "")
             subcat = r.get("subcategory", "") or r.get("component", "")
             speedup = r.get("details_speedup", "") or "-"
-            unsupp = r.get("unsupported", False)
+            status_raw = str(r.get("status", "")).upper()
+            unsupp = bool(r.get("unsupported", False)) or status_raw == "UNSUPPORTED"
+            is_valid = bool(r.get("valid", r.get("is_valid", True))) and status_raw not in (
+                "INVALID",
+                "FAILED",
+                "ABORTED",
+            )
+            val = r.get("value")
             if unsupp:
                 status_styled = Text("UNSUPPORTED", style="dim yellow")
                 reason = r.get("unsupported_reason", "N/A")
-                val_styled = Text(reason, style="dim italic")
+                val_styled = Text(str(reason), style="dim italic")
+            elif not is_valid:
+                bad_label = status_raw if status_raw in ("INVALID", "FAILED", "ABORTED") else "INVALID"
+                status_styled = Text(bad_label, style="bold red")
+                if isinstance(val, (int, float)):
+                    val_str = f"{val:.2f} {r.get('metric', '')}".strip()
+                else:
+                    val_str = str(r.get("error") or "N/A")
+                val_styled = Text(val_str, style="bold red")
             else:
                 status_styled = Text("COMPLETED", style="bold green")
-                val_str = f"{r.get('value', 0.0):.2f} {r.get('metric', '')}"
+                if isinstance(val, (int, float)):
+                    val_str = f"{val:.2f} {r.get('metric', '')}".strip()
+                elif val is None:
+                    val_str = "N/A"
+                else:
+                    val_str = f"{val} {r.get('metric', '')}".strip()
                 val_styled = Text(val_str, style="bold cyan")
             table.add_row(bench, backend_name, subcat, val_styled, speedup, status_styled)
 
@@ -170,6 +191,8 @@ def display_detailed_results(data: dict[str, Any], console: Console) -> None:
                 approach = item.get("approach", "-")
                 val = item.get("value", str(item.get("numeric", "-")))
                 status = item.get("status", "completed")
+                if status.lower() != "unsupported" and not item.get("valid", item.get("is_valid", True)):
+                    status = "INVALID"
 
                 status_styled = format_status(status)
                 val_styled = format_value(val, status)
@@ -249,7 +272,7 @@ def main() -> None:
         "json_paths",
         nargs="*",
         default=[],
-        help="Path(s) to GPUBench JSON results file(s) (defaults to newest gpubench_results*.json)",
+        help="Path(s) to GPUBench JSON results file(s) (defaults to newest gpubench*.json)",
     )
     args = parser.parse_args()
 
@@ -257,11 +280,11 @@ def main() -> None:
 
     paths = args.json_paths
     if not paths:
-        candidates = sorted(Path(".").glob("gpubench_results*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+        candidates = sorted(Path(".").glob("gpubench*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
         if candidates:
             paths = [str(candidates[0])]
         else:
-            console.print("[bold red]Error:[/bold red] No JSON file specified and no 'gpubench_results*.json' found in current directory.")
+            console.print("[bold red]Error:[/bold red] No JSON file specified and no 'gpubench*.json' found in current directory.")
             sys.exit(1)
 
     for path_str in paths:

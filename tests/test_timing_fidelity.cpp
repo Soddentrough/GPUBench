@@ -26,7 +26,7 @@ std::unique_ptr<IComputeContext> createVulkanContext() {
     if (!ctx || ctx->getDevices().empty()) {
       return nullptr;
     }
-    ctx->pickDevice(0);
+    ctx->pickDevice(::gpubench::test::preferredTestDeviceIndex(ctx->getDevices().size()));
     return ctx;
   } catch (...) {
     return nullptr;
@@ -41,7 +41,7 @@ std::unique_ptr<IComputeContext> createVulkanContext() {
 
 TEST_CASE(TimingFidelity, GpuTiming_ExcludesHostCpuSleepDelays) {
   auto ctx = createVulkanContext();
-  if (!ctx) { return; }
+  if (!ctx) { SKIP_TEST("Vulkan backend unavailable"); }
 
   auto *vCtx = dynamic_cast<VulkanContext *>(ctx.get());
   ASSERT_TRUE(vCtx != nullptr);
@@ -110,7 +110,7 @@ TEST_CASE(TimingFidelity, GpuTiming_ExcludesHostCpuSleepDelays) {
 
 TEST_CASE(TimingFidelity, GpuTiming_BatchRecordingExcludesHostStalls) {
   auto ctx = createVulkanContext();
-  if (!ctx) { return; }
+  if (!ctx) { SKIP_TEST("Vulkan backend unavailable"); }
 
   auto *vCtx = dynamic_cast<VulkanContext *>(ctx.get());
   ASSERT_TRUE(vCtx != nullptr);
@@ -150,7 +150,7 @@ TEST_CASE(TimingFidelity, GpuTiming_BatchRecordingExcludesHostStalls) {
 
 TEST_CASE(TimingFidelity, IndirectResetPass_SubMicrosecondExecutionLatency) {
   auto ctx = createVulkanContext();
-  if (!ctx) { return; }
+  if (!ctx) { SKIP_TEST("Vulkan backend unavailable"); }
 
   auto *vCtx = dynamic_cast<VulkanContext *>(ctx.get());
   ASSERT_TRUE(vCtx != nullptr);
@@ -207,7 +207,7 @@ TEST_CASE(TimingFidelity, IndirectResetPass_SubMicrosecondExecutionLatency) {
 
 TEST_CASE(TimingFidelity, InShaderIndirect_ZeroDispatchPruningSpeedup) {
   auto ctx = createVulkanContext();
-  if (!ctx) { return; }
+  if (!ctx) { SKIP_TEST("Vulkan backend unavailable"); }
 
   auto *vCtx = dynamic_cast<VulkanContext *>(ctx.get());
   ASSERT_TRUE(vCtx != nullptr);
@@ -216,33 +216,31 @@ TEST_CASE(TimingFidelity, InShaderIndirect_ZeroDispatchPruningSpeedup) {
   InShaderIndirectBench bench;
   bench.Setup(*ctx, kdir);
 
-  // Warmup Config 1 and measure median of 5 runs
-  bench.Run(1);
+  // Warmup Config 2 (100% Legacy Indirect) and measure median of 5 runs
+  bench.Run(2);
   ctx->waitIdle();
   std::vector<double> samples100;
   for (int t = 0; t < 5; ++t) {
     vCtx->startTiming();
-    bench.Run(1);
+    bench.Run(2);
     samples100.push_back(vCtx->stopTiming());
   }
   std::sort(samples100.begin(), samples100.end());
   double t100Ms = samples100[2];
-  // Validate immediately after running config 1
-  ASSERT_TRUE(bench.ValidateResults(1));
+  ASSERT_TRUE(bench.ValidateResults(2));
 
-  // Warmup Config 5 and measure median of 5 runs
-  bench.Run(5);
+  // Warmup Config 4 (0% Pruned) and measure median of 5 runs
+  bench.Run(4);
   ctx->waitIdle();
   std::vector<double> samples0;
   for (int t = 0; t < 5; ++t) {
     vCtx->startTiming();
-    bench.Run(5);
+    bench.Run(4);
     samples0.push_back(vCtx->stopTiming());
   }
   std::sort(samples0.begin(), samples0.end());
   double t0Ms = samples0[2];
-  // Validate immediately after running config 5
-  ASSERT_TRUE(bench.ValidateResults(5));
+  ASSERT_TRUE(bench.ValidateResults(4));
 
   double speedup = t100Ms / t0Ms;
   std::cout << "\n    [Indirect Latency Scaling] 100% active: " << t100Ms * 1000.0 << " µs"
@@ -263,13 +261,13 @@ TEST_CASE(TimingFidelity, InShaderIndirect_ZeroDispatchPruningSpeedup) {
 
 TEST_CASE(TimingFidelity, RayASBuild_PreRecordedCommandExecutionIntegrity) {
   auto ctx = createVulkanContext();
-  if (!ctx) { return; }
+  if (!ctx) { SKIP_TEST("Vulkan backend unavailable"); }
 
   std::string kdir = KernelPath::find();
   RayASBuildBench bench;
   DeviceInfo info = ctx->getCurrentDeviceInfo();
   if (!bench.IsSupported(info, ctx.get())) {
-    return;
+    SKIP_TEST("RayASBuild not supported on current device");
   }
 
   bench.Setup(*ctx, kdir);
@@ -291,7 +289,7 @@ TEST_CASE(TimingFidelity, RayASBuild_PreRecordedCommandExecutionIntegrity) {
 
 TEST_CASE(TimingFidelity, BenchmarkRunner_FilterDurationUpdatesSummaryStatistics) {
   auto ctx = createVulkanContext();
-  if (!ctx) { return; }
+  if (!ctx) { SKIP_TEST("Vulkan backend unavailable"); }
 
   // Run CacheLatencyCurveBench config 0 (16 KB) through BenchmarkRunner with multi-sample timing.
   // CacheLatencyCurveBench::FilterDuration subtracts baseline launch overhead from each sample,
@@ -321,7 +319,7 @@ TEST_CASE(TimingFidelity, BenchmarkRunner_FilterDurationUpdatesSummaryStatistics
 
 TEST_CASE(TimingFidelity, VulkanContext_AbortBatchAndMultiChunkTimingIntegrity) {
   auto ctx = createVulkanContext();
-  if (!ctx) { return; }
+  if (!ctx) { SKIP_TEST("Vulkan backend unavailable"); }
 
   auto *vCtx = dynamic_cast<VulkanContext *>(ctx.get());
   ASSERT_TRUE(vCtx != nullptr);
