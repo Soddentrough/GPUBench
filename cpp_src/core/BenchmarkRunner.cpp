@@ -734,6 +734,7 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
       std::vector<uint32_t> configs;
       int minSortWeight = 0;
       size_t minFilterRank = 0;
+      bool isWholeUnsupported = false;
     };
 
     std::vector<BenchmarkGroupPlan> groupPlans;
@@ -809,7 +810,7 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
                            });
           size_t minRank = ordered ? configRank[selectedConfigs.front()] : 0;
           totalPlannedTasks += selectedConfigs.size();
-          groupPlans.push_back({bPtr, std::move(selectedConfigs), minWeight, minRank});
+          groupPlans.push_back({bPtr, std::move(selectedConfigs), minWeight, minRank, false});
         }
       } else if (should_run && bench->IsDeviceDependent()) {
         // Skip logging unsupported Ray Tracing / Raster benchmarks under compute-only backends (ROCm / OpenCL)
@@ -821,6 +822,9 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
 
         std::string bname = bench->GetName();
         uint32_t num_unsupported_configs = bench->GetNumConfigs();
+        std::vector<uint32_t> selectedConfigs;
+        std::map<uint32_t, size_t> configRank;
+        int minWeight = 1000000000;
 
         for (uint32_t ci = 0; ci < num_unsupported_configs; ++ci) {
           if (!g_targetConfigs.empty()) {
@@ -829,6 +833,14 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
             }
           } else if (targetConfig >= 0 && static_cast<int>(ci) != targetConfig) {
             continue;
+          }
+
+          if (auto *rs = dynamic_cast<RaySchedulingBench *>(bench.get())) {
+            if (sceneName == "all" && rs->GetSceneType() != RaySchedulingBench::SceneType::Showroom) {
+              if (RaySchedulingBench::isShowroomOnlyConfigIdx(ci)) {
+                continue;
+              }
+            }
           }
 
           std::string cname = bench->GetConfigName(ci, info, context);
@@ -841,53 +853,30 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
           }
 
           if (!workloadFilter.empty()) {
-            if (!matchesWorkloadFilter(workloadFilter, bname, cname, defaultCName, fullName, ci)) {
+            size_t rank = 0;
+            if (!matchesWorkloadFilter(workloadFilter, bname, cname, defaultCName, fullName, ci, &rank)) {
               continue;
             }
+            configRank[ci] = rank;
           }
 
-          ResultData result_data;
-          result_data.backendName =
-              ComputeBackendFactory::getBackendName(context->getBackend());
-          result_data.deviceName = info.name;
-          result_data.vendorId = info.vendorID;
-          result_data.deviceId = info.deviceID;
-          result_data.benchmarkName = fullName;
-          result_data.metric = bench->GetMetric(ci);
-          result_data.operations = 0;
-          result_data.time_ms = 0;
-          result_data.isEmulated = false;
-          result_data.isUnsupported = true;
-          result_data.supportNote = bench->GetConfigSupportNote(ci, info, context);
-          if (result_data.supportNote.empty()) {
-            result_data.supportNote = bench->GetSupportNote(info, context);
+          selectedConfigs.push_back(ci);
+          int w = bench->GetSortWeight(ci);
+          if (w < minWeight) {
+            minWeight = w;
           }
-          switch (bench->GetConfigSupportLimitation(ci, info, context)) {
-          case IBenchmark::SupportLimitation::kHardware:
-            result_data.supportCategory = "hardware";
-            break;
-          case IBenchmark::SupportLimitation::kApi:
-            result_data.supportCategory = "driver/api";
-            break;
-          case IBenchmark::SupportLimitation::kToolchain:
-            result_data.supportCategory = "toolchain";
-            break;
-          default:
-            break;
-          }
-          result_data.component = bench->GetComponent(ci);
-          result_data.subcategory = bench->GetSubCategory(ci);
-          result_data.maxWorkGroupSize = info.maxWorkGroupSize;
-          result_data.deviceIndex = context->getSelectedDeviceIndex();
-          result_data.configIndex = ci;
-          result_data.sortWeight = bench->GetSortWeight(ci);
-          result_data.operationalIntensity = bench->GetOperationalIntensity(ci);
+        }
 
-          formatter->addResult(result_data);
-          numBenchmarksRun++;
-          if (onResult) {
-            onResult(result_data);
-          }
+        if (!selectedConfigs.empty()) {
+          IBenchmark *bPtr = bench.get();
+          const bool ordered = !workloadFilter.empty();
+          std::stable_sort(selectedConfigs.begin(), selectedConfigs.end(),
+                           [bPtr, ordered, &configRank](uint32_t a, uint32_t b) {
+                             if (ordered) return configRank[a] < configRank[b];
+                             return bPtr->GetSortWeight(a) < bPtr->GetSortWeight(b);
+                           });
+          size_t minRank = ordered ? configRank[selectedConfigs.front()] : 0;
+          groupPlans.push_back({bPtr, std::move(selectedConfigs), minWeight, minRank, true});
         }
       }
     }
@@ -967,6 +956,65 @@ void BenchmarkRunner::runForContext(IComputeContext *context,
         }
         break;
       }
+
+      if (group.isWholeUnsupported) {
+        std::string bname = bench->GetName();
+        uint32_t num_unsupported_configs = bench->GetNumConfigs();
+        for (uint32_t ci : group.configs) {
+          std::string cname = bench->GetConfigName(ci, info, context);
+          std::string fullName = bname;
+          if (cname.rfind(bname, 0) == 0) {
+            fullName = cname;
+          } else if (num_unsupported_configs > 1 || !cname.empty()) {
+            fullName = bname + " (" + cname + ")";
+          }
+
+          ResultData result_data;
+          result_data.backendName =
+              ComputeBackendFactory::getBackendName(context->getBackend());
+          result_data.deviceName = info.name;
+          result_data.vendorId = info.vendorID;
+          result_data.deviceId = info.deviceID;
+          result_data.benchmarkName = fullName;
+          result_data.metric = bench->GetMetric(ci);
+          result_data.operations = 0;
+          result_data.time_ms = 0;
+          result_data.isEmulated = false;
+          result_data.isUnsupported = true;
+          result_data.supportNote = bench->GetConfigSupportNote(ci, info, context);
+          if (result_data.supportNote.empty()) {
+            result_data.supportNote = bench->GetSupportNote(info, context);
+          }
+          switch (bench->GetConfigSupportLimitation(ci, info, context)) {
+          case IBenchmark::SupportLimitation::kHardware:
+            result_data.supportCategory = "hardware";
+            break;
+          case IBenchmark::SupportLimitation::kApi:
+            result_data.supportCategory = "driver/api";
+            break;
+          case IBenchmark::SupportLimitation::kToolchain:
+            result_data.supportCategory = "toolchain";
+            break;
+          default:
+            break;
+          }
+          result_data.component = bench->GetComponent(ci);
+          result_data.subcategory = bench->GetSubCategory(ci);
+          result_data.maxWorkGroupSize = info.maxWorkGroupSize;
+          result_data.deviceIndex = context->getSelectedDeviceIndex();
+          result_data.configIndex = ci;
+          result_data.sortWeight = bench->GetSortWeight(ci);
+          result_data.operationalIntensity = bench->GetOperationalIntensity(ci);
+
+          formatter->addResult(result_data);
+          numBenchmarksRun++;
+          if (onResult) {
+            onResult(result_data);
+          }
+        }
+        continue;
+      }
+
       if (deviceLost) {
         for (uint32_t cfg : group.configs) {
           emitAbortedTask(bench, cfg, "Aborted: GPU device hung/lost");

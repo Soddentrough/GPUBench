@@ -18,6 +18,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <set>
 #include <sstream>
 #include <thread>
 
@@ -203,10 +204,13 @@ VulkanContext::TextureResource GuiApp::getOrLoadTexture(const std::string& relPa
 
     // 2. Disk-backed texture cache fallback
     auto it = m_textureCache.find(normKey);
+    const bool isDynamicRender = (normKey.rfind("renders/", 0) == 0);
     if (it != m_textureCache.end() && !it->second.borrowsExternalImage) {
-        return it->second;
-    }
-    if (it != m_textureCache.end()) {
+        if (it->second.isValid() || !isDynamicRender) {
+            return it->second;
+        }
+        m_textureCache.erase(it);
+    } else if (it != m_textureCache.end()) {
         m_vulkanContext->waitDeviceIdleSafe();
         m_vulkanContext->destroyTexture(it->second);
         m_textureCache.erase(it);
@@ -248,7 +252,9 @@ VulkanContext::TextureResource GuiApp::getOrLoadTexture(const std::string& relPa
         }
     }
 
-    m_textureCache[normKey] = VulkanContext::TextureResource{};
+    if (!isDynamicRender) {
+        m_textureCache[normKey] = VulkanContext::TextureResource{};
+    }
     return {};
 }
 
@@ -1012,33 +1018,74 @@ void GuiApp::startBenchmarks() {
 
     std::vector<std::string> benchmarksToRun;
     std::vector<std::string> selectedWorkloads;
+    std::set<std::string> activeSubgroups;
+    std::set<std::string> activeIds;
+    std::vector<bool> emitWholeCategoryUnsupported(m_categories.size(), false);
     size_t systemSelectedItemCount = 0;
+    size_t selectedSupportedCount = 0;
 
-    for (const auto& cat : m_categories) {
+    // Pass 1: Determine active selections and category-level unsupported sibling propagation
+    for (size_t catIdx = 0; catIdx < m_categories.size(); ++catIdx) {
+        const auto& cat = m_categories[catIdx];
+        bool anyCatSupported = false;
+        bool allCatSupportedSelected = true;
         for (const auto& sg : cat.subgroups) {
             for (const auto& item : sg.items) {
-                if (item.selected && item.isSupported) {
-                    if (std::find(benchmarksToRun.begin(), benchmarksToRun.end(), item.id) == benchmarksToRun.end()) {
-                        benchmarksToRun.push_back(item.id);
-                    }
-                    if (item.configIndex >= 0) {
-                        selectedWorkloads.push_back(item.id + "#" + std::to_string(item.configIndex));
+                if (item.isSupported) {
+                    anyCatSupported = true;
+                    if (!item.selected) {
+                        allCatSupportedSelected = false;
                     } else {
-                        // Whole-benchmark items (e.g. the Cache Latency Curve sweep)
-                        // must match by bare id; "id:name" never matched any task.
-                        selectedWorkloads.push_back(item.id);
-                    }
-                    if (item.category == "System") {
-                        systemSelectedItemCount++;
+                        selectedSupportedCount++;
+                        activeIds.insert(item.id);
+                        activeSubgroups.insert(item.category + "|" + item.subcategory);
+                        if (item.category == "System") {
+                            systemSelectedItemCount++;
+                        }
                     }
                 }
             }
         }
+        emitWholeCategoryUnsupported[catIdx] =
+            anyCatSupported && allCatSupportedSelected && cat.subgroups.size() > 1;
     }
 
-    if (benchmarksToRun.empty()) {
+    if (selectedSupportedCount == 0) {
         setStatusMessage("No supported benchmarks selected!");
         return;
+    }
+
+    // Pass 2: Emit both supported selections and structured UNSUPPORTED siblings in strict
+    // GUI group/listing order so execution and exported reports match what the user sees.
+    const bool includeUnsupported = (activeSubgroups.size() > 1 || selectedSupportedCount > 1);
+    for (size_t catIdx = 0; catIdx < m_categories.size(); ++catIdx) {
+        const auto& cat = m_categories[catIdx];
+        for (const auto& sg : cat.subgroups) {
+            for (const auto& item : sg.items) {
+                bool includeItem = (item.selected && item.isSupported);
+                if (!includeItem && includeUnsupported && !item.isSupported) {
+                    const bool siblingActive =
+                        activeIds.count(item.id) > 0 ||
+                        activeSubgroups.count(item.category + "|" + item.subcategory) > 0;
+                    includeItem = siblingActive ||
+                                  (emitWholeCategoryUnsupported[catIdx] && item.category != "System");
+                }
+                if (!includeItem) {
+                    continue;
+                }
+                if (std::find(benchmarksToRun.begin(), benchmarksToRun.end(), item.id) == benchmarksToRun.end()) {
+                    benchmarksToRun.push_back(item.id);
+                }
+                // Whole-benchmark items (e.g. the Cache Latency Curve sweep)
+                // must match by bare id; "id:name" never matched any task.
+                const std::string tag = (item.configIndex >= 0)
+                    ? (item.id + "#" + std::to_string(item.configIndex))
+                    : item.id;
+                if (std::find(selectedWorkloads.begin(), selectedWorkloads.end(), tag) == selectedWorkloads.end()) {
+                    selectedWorkloads.push_back(tag);
+                }
+            }
+        }
     }
 
     std::vector<uint32_t> deviceIndices;
@@ -1244,11 +1291,13 @@ void GuiApp::processIncomingResults() {
             m_currentlyRunningTestId.clear();
             m_hasCurrentlyRunningResult = false;
         }
-        m_completedTasks++;
-        if (m_completedTasks > m_totalTasks) {
-            m_totalTasks = m_completedTasks;
+        if (!res.isUnsupported) {
+            m_completedTasks++;
+            if (m_completedTasks > m_totalTasks) {
+                m_totalTasks = m_completedTasks;
+            }
+            setStatusMessage("Completed: " + res.benchmarkName);
         }
-        setStatusMessage("Completed: " + res.benchmarkName);
     }
 
     if (m_execState.load() == ExecutionState::Running) {
