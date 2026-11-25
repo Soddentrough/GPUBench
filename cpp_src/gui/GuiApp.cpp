@@ -666,7 +666,6 @@ void GuiApp::updateBenchmarkSupport() {
                             if (!matchedMeta->configName.empty()) item.name = matchedMeta->configName;
                         } else if (sg.name.rfind("Compute Precision", 0) == 0 ||
                                    sg.name.rfind("Structured Sparsity", 0) == 0 ||
-                                   sg.name.rfind("Hardware BVH", 0) == 0 ||
                                    sg.name.rfind("Cache Hierarchy Bandwidth", 0) == 0 ||
                                    sg.name.rfind("Pointer-Chasing Latency", 0) == 0) {
                             if (!matchedMeta->displayName.empty()) item.name = matchedMeta->displayName;
@@ -2130,7 +2129,7 @@ void GuiApp::startSceneVerificationCapture(const std::string& sceneTag) {
                 m_savedSelectionSnapshot.push_back(itm.selected);
                 const bool match =
                     (itm.id == "RayScheduling" && itm.isSupported &&
-                     (itm.configIndex == 4 || itm.configIndex == 5 || itm.configIndex == 6));
+                     (itm.configIndex == 4 || itm.configIndex == 5));
                 itm.selected = match;
                 if (match) anyPicked = true;
             }
@@ -2411,9 +2410,9 @@ void GuiApp::updateAndRender() {
             m_vulkanContext->setPreRenderPassCallback(nullptr);
             m_showcaseCallbackBound = false;
         }
-        const float minSidebar = std::min(s(320.0f), availWidth * 0.34f);
-        const float maxSidebar = std::min(s(440.0f), availWidth * 0.36f);
-        const float leftW = std::clamp(availWidth * 0.27f, minSidebar, std::max(minSidebar, maxSidebar));
+        const float minSidebar = std::min(s(350.0f), availWidth * 0.34f);
+        const float maxSidebar = std::min(s(480.0f), availWidth * 0.38f);
+        const float leftW = std::clamp(availWidth * 0.29f, minSidebar, std::max(minSidebar, maxSidebar));
         const float rightW = std::max(s(320.0f), availWidth - leftW - s(8.0f));
 
         ImGui::BeginChild("ZoneLeftRomMatrix", ImVec2(leftW, middleH), ImGuiChildFlags_Borders);

@@ -351,9 +351,9 @@ TEST_CASE(GraphicsAndRayTracingValidation, RayScheduling_PositiveAndNegativeVali
   ctx->waitIdle();
   ASSERT_TRUE(bench.ValidateResults(0));
 
-  // Verify non-zero worklist compaction for Primary Rays G-Buffer (14),
-  // Incoherent GI (18), and Multi-Light 128 Lights (22)
-  for (uint32_t cfg : {14u, 18u, 22u}) {
+  // Verify non-zero worklist compaction for Path Tracing 1 SPP (5),
+  // Incoherent GI (13), and Multi-Light 128 Lights (15)
+  for (uint32_t cfg : {5u, 13u, 15u}) {
     if (!bench.unsupportedConfig[cfg]) {
       bench.Run(cfg);
       ctx->waitIdle();
@@ -398,7 +398,7 @@ TEST_CASE(GraphicsAndRayTracingValidation, RayScheduling_PositiveAndNegativeVali
   for (const auto &sc : extraScenes) {
     RaySchedulingBench sceneBench(sc.first);
     sceneBench.Setup(*ctx, kdir);
-    for (uint32_t cfg : {14u, 18u, 22u}) {
+    for (uint32_t cfg : {5u, 13u, 15u}) {
       if (!sceneBench.unsupportedConfig[cfg]) {
         sceneBench.Run(cfg);
         ctx->waitIdle();

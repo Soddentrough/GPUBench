@@ -105,27 +105,27 @@ public void getSceneSunParams(uint sceneType, out float3 sunDir, out float3 sunC
 public void getShadowLightParams(uint sceneType, uint lightIndex, out float3 lightDir, out float maxDist) {
     if (sceneType == SCENE_INDOOR_ATRIUM) {
         if (lightIndex == 1u) {
-            lightDir = normalize(float3(0.32, 0.91, -0.22));
+            lightDir = normalize(float3(-0.65, 0.65, 0.40));
         } else if (lightIndex == 2u) {
-            lightDir = normalize(float3(0.38, 0.89, -0.28));
+            lightDir = normalize(float3(0.55, 0.45, 0.70));
         } else {
             lightDir = normalize(float3(0.35, 0.90, -0.25));
         }
         maxDist = 10000.0;
     } else if (sceneType == SCENE_SHOWROOM_STUDIO) {
         if (lightIndex == 1u) {
-            lightDir = normalize(float3(0.57, 0.82, 0.47));
+            lightDir = normalize(float3(-0.7, 0.5, -0.5));
         } else if (lightIndex == 2u) {
-            lightDir = normalize(float3(0.63, 0.78, 0.53));
+            lightDir = normalize(float3(-0.4, 0.4, 0.8));
         } else {
             lightDir = normalize(float3(0.6, 0.8, 0.5));
         }
         maxDist = 5000.0;
     } else {
         if (lightIndex == 1u) {
-            lightDir = normalize(float3(0.42, 0.38, 0.82));
+            lightDir = normalize(float3(-0.70, 0.30, 0.65));
         } else if (lightIndex == 2u) {
-            lightDir = normalize(float3(0.48, 0.32, 0.82));
+            lightDir = normalize(float3(0.20, -0.75, 0.63));
         } else {
             lightDir = normalize(float3(0.45, 0.35, 0.82));
         }

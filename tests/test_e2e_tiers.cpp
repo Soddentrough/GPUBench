@@ -696,10 +696,10 @@ TEST_CASE(E2E_Tier4, SceneParameterValidation) {
 
 TEST_CASE(E2E_Tier4, ParityFlagHonestyAndExecution) {
   if (!hasUsableGpu()) { SKIP_TEST("No usable GPU detected"); }
-  auto res = runGpubench({"-b", "RayScheduling", "-s", "showroom", "-c", "6", "--verify-parity", "--profile-snapshot", "-f"});
+  auto res = runGpubench({"-b", "RayScheduling", "-s", "showroom", "-c", "5", "--verify-parity", "--profile-snapshot", "-f"});
   ASSERT_EQ(res.exitCode, 0);
   ASSERT_TRUE(res.stdoutStr.find("RayScheduling") != std::string::npos ||
-              res.stdoutStr.find("Scene Render") != std::string::npos);
+              res.stdoutStr.find("Path Tracing") != std::string::npos);
   ASSERT_TRUE(res.stdoutStr.find("PSNR") != std::string::npos);
 }
 

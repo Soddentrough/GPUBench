@@ -9,13 +9,17 @@ struct GpuIndirectCommand {
     uint32_t workgroupsFinished;
 };
 
-extern "C" __global__ __launch_bounds__(64) void run_benchmark(
+extern "C" __global__ __launch_bounds__(256) void run_benchmark(
     const uint32_t *__restrict__ inputItems,
     uint32_t *__restrict__ activeWorklist,
     GpuIndirectCommand *__restrict__ cmd,
     uint32_t selectivity,
     uint32_t totalItems,
     uint32_t totalWorkgroups) {
+    __shared__ uint32_t sWarpCount[8];
+    __shared__ uint32_t sWarpOffset[8];
+    __shared__ uint32_t sWgBase;
+
     const uint32_t gid = blockIdx.x * blockDim.x + threadIdx.x;
     bool activeItem = false;
     uint32_t itemId = gid;
@@ -26,23 +30,32 @@ extern "C" __global__ __launch_bounds__(64) void run_benchmark(
         activeItem = (hash % 100u) < selectivity;
     }
 
+    const uint32_t lane = threadIdx.x & static_cast<uint32_t>(warpSize - 1);
+    const uint32_t warpId = threadIdx.x / static_cast<uint32_t>(warpSize);
+    const uint32_t numWarps = blockDim.x / static_cast<uint32_t>(warpSize);
+
     const unsigned long long ballot = __ballot(activeItem ? 1 : 0);
-    if (ballot != 0ULL) {
-        const uint32_t lane = threadIdx.x & static_cast<uint32_t>(warpSize - 1);
-        const uint32_t subgroupActive = static_cast<uint32_t>(__popcll(ballot));
-        const uint64_t belowMask = (1ULL << lane) - 1ULL;
-        const uint32_t laneOffset = static_cast<uint32_t>(__popcll(ballot & belowMask));
-        const int firstLane = __ffsll(static_cast<long long>(ballot)) - 1;
+    const uint32_t subgroupActive = static_cast<uint32_t>(__popcll(ballot));
+    const uint64_t belowMask = (1ULL << lane) - 1ULL;
+    const uint32_t laneOffset = static_cast<uint32_t>(__popcll(ballot & belowMask));
 
-        uint32_t baseSlot = 0u;
-        if (static_cast<int>(lane) == firstLane) {
-            baseSlot = atomicAdd(&cmd->activeCount, subgroupActive);
-        }
-        baseSlot = __shfl(baseSlot, firstLane);
+    if (lane == 0u) {
+        sWarpCount[warpId] = subgroupActive;
+    }
+    __syncthreads();
 
-        if (activeItem) {
-            activeWorklist[baseSlot + laneOffset] = itemId;
+    if (threadIdx.x == 0u) {
+        uint32_t wgTotal = 0u;
+        for (uint32_t w = 0u; w < numWarps; ++w) {
+            sWarpOffset[w] = wgTotal;
+            wgTotal += sWarpCount[w];
         }
+        sWgBase = (wgTotal > 0u) ? atomicAdd(&cmd->activeCount, wgTotal) : 0u;
+    }
+    __syncthreads();
+
+    if (activeItem) {
+        activeWorklist[sWgBase + sWarpOffset[warpId] + laneOffset] = itemId;
     }
 
     __syncthreads();
@@ -52,7 +65,7 @@ extern "C" __global__ __launch_bounds__(64) void run_benchmark(
         if (finished == totalWorkgroups - 1u) {
             __threadfence();
             const uint32_t totalActive = atomicAdd(&cmd->activeCount, 0u);
-            cmd->x = (totalActive + 63u) / 64u;
+            cmd->x = (totalActive + 255u) / 256u;
             cmd->y = (totalActive > 0u) ? 1u : 0u;
             cmd->z = (totalActive > 0u) ? 1u : 0u;
             __threadfence();

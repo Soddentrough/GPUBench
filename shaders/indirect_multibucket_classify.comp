@@ -1,6 +1,8 @@
 #version 460
+#extension GL_KHR_shader_subgroup_ballot : enable
+#extension GL_KHR_shader_subgroup_arithmetic : enable
 
-layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
 
 layout(set = 0, binding = 0) readonly buffer InputBuffer {
     uint inputItems[];
@@ -11,8 +13,8 @@ layout(set = 0, binding = 1) coherent buffer MultiBucketWorkList {
 };
 
 layout(set = 0, binding = 2) coherent buffer BucketCounts {
-    uint bucketCounts[128];
-    uint bucketSnapshots[128];
+    uint bucketCounts[1024];
+    uint bucketSnapshots[1024];
 };
 
 layout(push_constant) uniform PushConstants {
@@ -24,19 +26,34 @@ layout(push_constant) uniform PushConstants {
 
 void main() {
     uint gid = gl_GlobalInvocationID.x;
-    if (gid >= pc.totalItems) {
-        return;
+    uint itemId = 0u;
+    uint bucket = 0xFFFFFFFFu;
+    if (gid < pc.totalItems) {
+        itemId = inputItems[gid];
+        uint b = (itemId * 2654435761u) & 1023u;
+        if ((b == 3u || b == 292u || b == 617u || b == 942u) && b < pc.numBuckets) {
+            bucket = b;
+        }
     }
 
-    uint itemId = inputItems[gid];
-    uint bucket = (itemId * 2654435761u) & 127u;
-    bool activeItem = (bucket == 3u || bucket == 36u || bucket == 73u || bucket == 118u);
-    if (!activeItem || bucket >= pc.numBuckets) {
-        return;
-    }
-
-    uint slot = atomicAdd(bucketCounts[bucket], 1u);
-    if (slot < pc.bucketCapacity) {
-        bucketItems[bucket * pc.bucketCapacity + slot] = itemId;
+    const uint kActiveBuckets[4] = uint[4](3u, 292u, 617u, 942u);
+    for (uint ai = 0u; ai < 4u; ++ai) {
+        uint targetB = kActiveBuckets[ai];
+        bool match = (bucket == targetB);
+        uvec4 ballot = subgroupBallot(match);
+        uint count = subgroupBallotBitCount(ballot);
+        if (count > 0u) {
+            uint baseSlot = 0u;
+            if (subgroupElect()) {
+                baseSlot = atomicAdd(bucketCounts[targetB], count);
+            }
+            baseSlot = subgroupBroadcastFirst(baseSlot);
+            if (match) {
+                uint slot = baseSlot + subgroupBallotExclusiveBitCount(ballot);
+                if (slot < pc.bucketCapacity) {
+                    bucketItems[targetB * pc.bucketCapacity + slot] = itemId;
+                }
+            }
+        }
     }
 }

@@ -244,20 +244,21 @@ TEST_CASE(JsonSerialization, RayScheduling16SppFpsDividedBySamplesPerPixel) {
 }
 
 TEST_CASE(JsonSerialization, RaySchedulingMultiLightBaselineFormatting) {
-  // 1. Verify RaySchedulingBench::GetBaselineConfigIndex maps Material (1,2->0), FullFrame (5,6->4), Shadows (20->19), 128-Light (22->21)
+  // 1. Verify RaySchedulingBench::GetBaselineConfigIndex maps Material (1,2->0), PT (5->4, 8->7), GI (13->12), 128-Light (15->14)
   RaySchedulingBench bench(RaySchedulingBench::SceneType::Showroom);
   ASSERT_EQ(bench.GetBaselineConfigIndex(0), -1);
   ASSERT_EQ(bench.GetBaselineConfigIndex(1), 0);
   ASSERT_EQ(bench.GetBaselineConfigIndex(2), 0);
   ASSERT_EQ(bench.GetBaselineConfigIndex(4), -1);
   ASSERT_EQ(bench.GetBaselineConfigIndex(5), 4);
-  ASSERT_EQ(bench.GetBaselineConfigIndex(6), 4);
-  ASSERT_EQ(bench.GetBaselineConfigIndex(19), -1);
-  ASSERT_EQ(bench.GetBaselineConfigIndex(20), 19);
-  ASSERT_EQ(bench.GetBaselineConfigIndex(21), -1);
-  ASSERT_EQ(bench.GetBaselineConfigIndex(22), 21);
+  ASSERT_EQ(bench.GetBaselineConfigIndex(7), -1);
+  ASSERT_EQ(bench.GetBaselineConfigIndex(8), 7);
+  ASSERT_EQ(bench.GetBaselineConfigIndex(12), -1);
+  ASSERT_EQ(bench.GetBaselineConfigIndex(13), 12);
+  ASSERT_EQ(bench.GetBaselineConfigIndex(14), -1);
+  ASSERT_EQ(bench.GetBaselineConfigIndex(15), 14);
 
-  // 2. Verify ResultFormatter::print() marks MK configs as [Baseline] and compares 20->19 and 22->21
+  // 2. Verify ResultFormatter::print() marks MK configs as [Baseline] and compares 13->12 and 15->14
   auto makeMultiLightResult = [&](uint32_t cfg, int32_t baseCfg, double timeMs, int sortWeight, const std::string &name) {
     ResultData r{};
     r.backendName = "Vulkan";
@@ -265,7 +266,7 @@ TEST_CASE(JsonSerialization, RaySchedulingMultiLightBaselineFormatting) {
     r.deviceIndex = 0;
     r.benchmarkName = "RayScheduling (Showroom Studio) (" + name + ")";
     r.component = "Ray Tracing";
-    r.subcategory = (cfg >= 21u) ? "Multi-Light Evaluation" : "Directional Shadows";
+    r.subcategory = (cfg >= 14u) ? "Multi-Light Evaluation" : "Incoherent Ray Tracing";
     r.metric = "MRays/s";
     r.operations = 8294400ULL;
     r.time_ms = timeMs;
@@ -279,10 +280,10 @@ TEST_CASE(JsonSerialization, RaySchedulingMultiLightBaselineFormatting) {
   };
 
   ResultFormatter fmt;
-  fmt.addResult(makeMultiLightResult(19, -1, 2.0, 636, "Stage: Directional Shadows (Megakernel)"));
-  fmt.addResult(makeMultiLightResult(20, 19, 1.6, 637, "Stage: Directional Shadows (DGC)"));
-  fmt.addResult(makeMultiLightResult(21, -1, 8.0, 639, "Stage: Multi-Light - 128 Lights (Megakernel)"));
-  fmt.addResult(makeMultiLightResult(22, 21, 6.4, 640, "Stage: Multi-Light - 128 Lights (DGC Light Binning)"));
+  fmt.addResult(makeMultiLightResult(12, -1, 2.0, 646, "Incoherent Diffuse GI (Megakernel)"));
+  fmt.addResult(makeMultiLightResult(13, 12, 1.6, 647, "Incoherent Diffuse GI (DGC)"));
+  fmt.addResult(makeMultiLightResult(14, -1, 8.0, 639, "Stage: Multi-Light - 128 Lights (Megakernel)"));
+  fmt.addResult(makeMultiLightResult(15, 14, 6.4, 640, "Stage: Multi-Light - 128 Lights (DGC Light Binning)"));
 
   std::ostringstream captured;
   struct CoutRedirectGuard {
@@ -313,24 +314,24 @@ TEST_CASE(JsonSerialization, RaySchedulingMultiLightBaselineFormatting) {
     return out;
   };
 
-  std::string lineShdMk, lineShdDgc, line128Mk, line128Dgc;
+  std::string lineGiMk, lineGiDgc, line128Mk, line128Dgc;
   std::istringstream lines(stripAnsi(captured.str()));
   std::string line;
   while (std::getline(lines, line)) {
     if (line.find("Vulkan") == std::string::npos) continue;
-    if (lineShdMk.empty() && line.find("Directional Shadows (Megakernel)") != std::string::npos) lineShdMk = line;
-    else if (lineShdDgc.empty() && line.find("Directional Shadows (DGC)") != std::string::npos) lineShdDgc = line;
+    if (lineGiMk.empty() && line.find("Incoherent Diffuse GI (Megakernel)") != std::string::npos) lineGiMk = line;
+    else if (lineGiDgc.empty() && line.find("Incoherent Diffuse GI (DGC)") != std::string::npos) lineGiDgc = line;
     else if (line128Mk.empty() && line.find("128 Lights (Megakernel)") != std::string::npos) line128Mk = line;
     else if (line128Dgc.empty() && line.find("128 Lights (DGC Light Binning)") != std::string::npos) line128Dgc = line;
   }
 
-  ASSERT_TRUE(!lineShdMk.empty());
-  ASSERT_TRUE(lineShdMk.find("[Baseline]") != std::string::npos);
-  ASSERT_TRUE(lineShdMk.find("└──>") == std::string::npos);
+  ASSERT_TRUE(!lineGiMk.empty());
+  ASSERT_TRUE(lineGiMk.find("[Baseline]") != std::string::npos);
+  ASSERT_TRUE(lineGiMk.find("└──>") == std::string::npos);
 
-  ASSERT_TRUE(!lineShdDgc.empty());
-  ASSERT_TRUE(lineShdDgc.find("└──>") != std::string::npos);
-  ASSERT_TRUE(lineShdDgc.find("1.25x (+25.0%)") != std::string::npos);
+  ASSERT_TRUE(!lineGiDgc.empty());
+  ASSERT_TRUE(lineGiDgc.find("└──>") != std::string::npos);
+  ASSERT_TRUE(lineGiDgc.find("1.25x (+25.0%)") != std::string::npos);
 
   ASSERT_TRUE(!line128Mk.empty());
   ASSERT_TRUE(line128Mk.find("[Baseline]") != std::string::npos);

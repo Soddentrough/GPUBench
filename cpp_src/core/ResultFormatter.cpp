@@ -43,12 +43,21 @@ static bool shouldUseColor() {
 #endif
 }
 
+static uint32_t raySchedulingEffectiveSpp(const ResultData &r) {
+  if (r.samplesPerFrame > 1u) {
+    return r.samplesPerFrame;
+  }
+  if (r.benchmarkName.find("16 SPP") != std::string::npos || r.configIndex == 7u ||
+      r.configIndex == 8u) {
+    return 16u;
+  }
+  return 1u;
+}
+
 static double computeRaySchedulingFps(const ResultData &r, double mraysPerSec) {
   const uint32_t w = r.width ? r.width : 1920u;
   const uint32_t h = r.height ? r.height : 1080u;
-  const uint32_t spp = (r.samplesPerFrame > 1u)
-      ? r.samplesPerFrame
-      : ((r.configIndex == 11u || r.configIndex == 12u) ? 16u : 1u);
+  const uint32_t spp = raySchedulingEffectiveSpp(r);
   return (mraysPerSec * 1e6) /
          (static_cast<double>(w) * static_cast<double>(h) * static_cast<double>(spp));
 }
@@ -437,16 +446,25 @@ void ResultFormatter::print() {
   // Track executive takeaways
   double maxRayRate = 0.0;
   std::string maxRayWorkload = "";
-  double megakernelPBRRate = 0.0;
-  double dgcPBRRate = 0.0;
-  std::string pbrSceneName = "";
-  bool hasPbrScene = false;
   double scanlineRate = 0.0;
   double tiledRate = 0.0;
-  double maxBlasUpdateRate = 0.0;
+  double maxBlasBuildRate = 0.0;
   double maxTlasRate = 0.0;
   double rawBoxGis = 0.0;
   double rawTriangleGis = 0.0;
+  struct ScenePairRates {
+    double mk = 0.0;
+    double dgc = 0.0;
+  };
+  std::map<std::string, ScenePairRates> matByScene;
+  std::map<std::string, ScenePairRates> pt1ByScene;
+  std::map<std::string, ScenePairRates> giByScene;
+  std::map<std::string, ScenePairRates> multiLightByScene;
+  double cpuSparse10Us = 0.0;
+  double gpuIndirect10Us = 0.0;
+  double cpuMbDirectUs = 0.0;
+  double gpuMbLegacyUs = 0.0;
+  double gpuMbDgcUs = 0.0;
   size_t totalWorkloadsEvaluated = 0;
 
   for (const auto &res : results) {
@@ -494,30 +512,49 @@ void ResultFormatter::print() {
           maxRayRate = rate;
           maxRayWorkload = cleanName;
         }
-        if (res.benchmarkName.find("Scene Render: Full Frame (Megakernel)") != std::string::npos ||
-            res.benchmarkName.find("Full Scene Ray Tracing (PBR) - Megakernel") != std::string::npos) {
-          if (!hasPbrScene || sceneName == pbrSceneName) {
-            megakernelPBRRate = (std::max)(megakernelPBRRate, rate);
-            pbrSceneName = sceneName;
-            hasPbrScene = true;
-          }
-        } else if (res.benchmarkName.find("Scene Render: Full Frame (DGC)") != std::string::npos ||
-                   res.benchmarkName.find("Full Scene Ray Tracing (PBR) - DGC") != std::string::npos ||
-                   res.benchmarkName.find("Full Scene Ray Tracing (PBR) - Work Lists") != std::string::npos ||
-                   res.benchmarkName.find("Full Scene Ray Tracing (PBR) - Device-Generated Commands") != std::string::npos) {
-          if (!hasPbrScene || sceneName == pbrSceneName) {
-            dgcPBRRate = (std::max)(dgcPBRRate, rate);
-            pbrSceneName = sceneName;
-            hasPbrScene = true;
-          }
+        if (res.benchmarkName.find("Path Tracing (1 SPP) (Megakernel)") != std::string::npos) {
+          pt1ByScene[sceneName].mk = (std::max)(pt1ByScene[sceneName].mk, rate);
+        } else if (res.benchmarkName.find("Path Tracing (1 SPP) (DGC)") != std::string::npos) {
+          pt1ByScene[sceneName].dgc = (std::max)(pt1ByScene[sceneName].dgc, rate);
+        } else if (res.benchmarkName.find("Incoherent Diffuse GI (Megakernel)") != std::string::npos) {
+          giByScene[sceneName].mk = (std::max)(giByScene[sceneName].mk, rate);
+        } else if (res.benchmarkName.find("Incoherent Diffuse GI (DGC)") != std::string::npos) {
+          giByScene[sceneName].dgc = (std::max)(giByScene[sceneName].dgc, rate);
+        } else if (res.benchmarkName.find("Multi-Light - 128 Lights (Megakernel)") != std::string::npos) {
+          multiLightByScene[sceneName].mk = (std::max)(multiLightByScene[sceneName].mk, rate);
+        } else if (res.benchmarkName.find("Multi-Light - 128 Lights (DGC Light Binning)") != std::string::npos) {
+          multiLightByScene[sceneName].dgc = (std::max)(multiLightByScene[sceneName].dgc, rate);
         } else if (res.benchmarkName.find("1D Scanline") != std::string::npos) {
           scanlineRate = (std::max)(scanlineRate, rate);
         } else if (res.benchmarkName.find("2D Screen Tiled") != std::string::npos) {
           tiledRate = (std::max)(tiledRate, rate);
         }
+      } else if (res.metric == "MHits/s") {
+        if (res.benchmarkName.find("Stage: Material Shading (Megakernel)") != std::string::npos) {
+          matByScene[sceneName].mk = (std::max)(matByScene[sceneName].mk, rate);
+        } else if (res.benchmarkName.find("Stage: Material Shading (DGC ExecutionSet)") != std::string::npos) {
+          matByScene[sceneName].dgc = (std::max)(matByScene[sceneName].dgc, rate);
+        }
+      } else if (res.metric == "us" && res.operations > 0) {
+        const double usVal = (resEffMs * 1000.0) / static_cast<double>(res.operations);
+        if (res.benchmarkName.find("CPU Direct Fixed Grid (10% Active)") != std::string::npos) {
+          cpuSparse10Us = (cpuSparse10Us > 0.0) ? (std::min)(cpuSparse10Us, usVal) : usVal;
+        } else if (res.benchmarkName.find("Legacy Indirect Dispatch (10% Active)") != std::string::npos ||
+                   res.benchmarkName.find("Persistent Work-Queue Compaction (10% Active)") != std::string::npos) {
+          gpuIndirect10Us = (gpuIndirect10Us > 0.0) ? (std::min)(gpuIndirect10Us, usVal) : usVal;
+        } else if (res.benchmarkName.find("Multi-Bucket 1024x Sparse (CPU Direct Fixed Grid)") != std::string::npos) {
+          cpuMbDirectUs = (cpuMbDirectUs > 0.0) ? (std::min)(cpuMbDirectUs, usVal) : usVal;
+        } else if (res.benchmarkName.find("Multi-Bucket 1024x Sparse (Legacy vkCmdDispatchIndirect)") != std::string::npos) {
+          gpuMbLegacyUs = (gpuMbLegacyUs > 0.0) ? (std::min)(gpuMbLegacyUs, usVal) : usVal;
+        } else if (res.benchmarkName.find("Multi-Bucket 1024x Sparse (DGC ExecutionSet + Pruning)") != std::string::npos) {
+          gpuMbDgcUs = (gpuMbDgcUs > 0.0) ? (std::min)(gpuMbDgcUs, usVal) : usVal;
+        }
       } else if (res.metric == "MTris/s") {
-        if (res.benchmarkName.find("BLAS Update") != std::string::npos && rate > maxBlasUpdateRate) {
-          maxBlasUpdateRate = rate;
+        if ((res.benchmarkName.find("BLAS Build") != std::string::npos ||
+             res.benchmarkName.find("Batched BLAS") != std::string::npos ||
+             maxBlasBuildRate == 0.0) &&
+            rate > maxBlasBuildRate) {
+          maxBlasBuildRate = rate;
         }
       } else if (res.metric == "MInst/s" && rate > maxTlasRate) {
         maxTlasRate = rate;
@@ -1197,7 +1234,8 @@ void ResultFormatter::print() {
     }
   }
 
-  if (totalWorkloadsEvaluated > 0 && (maxRayRate > 0.0 || (showPower && hasAnyPower))) {
+  if (totalWorkloadsEvaluated > 0 &&
+      (maxRayRate > 0.0 || (showPower && hasAnyPower) || gpuIndirect10Us > 0.0 || gpuMbDgcUs > 0.0)) {
     std::cout << "\n";
     std::string cardTitle = " Executive Performance Summary & Architectural Takeaways ";
     size_t dashCount = (cardBoxWidth > cardTitle.length() + 3)
@@ -1218,13 +1256,65 @@ void ResultFormatter::print() {
                 << BOLD << CYAN << " │" << RESET << "\n";
     };
 
-    if (megakernelPBRRate > 0.0 && dgcPBRRate > 0.0) {
-      double pbrSpeedup = dgcPBRRate / megakernelPBRRate;
-      std::string val = BOLD + GREEN + formatDouble(pbrSpeedup, 2) + "x" + RESET;
-      std::string sceneTag = pbrSceneName.empty() ? "" : (" [" + pbrSceneName + "]");
-      std::string extra = " in PBR Ray Tracing" + sceneTag + " (" + formatDouble(dgcPBRRate, 1) + " vs " +
-                          formatDouble(megakernelPBRRate, 1) + " MRays/s)";
-      printSummaryRow("Wavefront Scheduling Speedup", val, extra);
+    auto bestScenePair = [](const std::map<std::string, ScenePairRates> &m,
+                            std::string &outScene, double &outMk, double &outDgc) -> bool {
+      double bestSpeedup = -1.0;
+      bool found = false;
+      for (const auto &kv : m) {
+        if (kv.second.mk > 0.0 && kv.second.dgc > 0.0) {
+          double sp = kv.second.dgc / kv.second.mk;
+          if (!found || sp > bestSpeedup) {
+            bestSpeedup = sp;
+            outScene = kv.first;
+            outMk = kv.second.mk;
+            outDgc = kv.second.dgc;
+            found = true;
+          }
+        }
+      }
+      return found;
+    };
+
+    auto printSceneTakeaway = [&](const std::string &label,
+                                  const std::map<std::string, ScenePairRates> &m,
+                                  const std::string &desc,
+                                  const std::string &unit) {
+      std::string sc;
+      double mk = 0.0, dgc = 0.0;
+      if (bestScenePair(m, sc, mk, dgc)) {
+        double sp = dgc / mk;
+        std::string val = BOLD + (sp >= 1.0 ? GREEN : YELLOW) + formatDouble(sp, 2) + "x" + RESET;
+        std::string scTag = sc.empty() ? "" : (" [" + sc + "]");
+        std::string extra = " " + desc + scTag + " (" + formatDouble(dgc, 1) + " vs " +
+                            formatDouble(mk, 1) + " " + unit + ")";
+        printSummaryRow(label, val, extra);
+      }
+    };
+
+    printSceneTakeaway("Wavefront Material Shading  ", matByScene, "(DGC ExecutionSet vs MK)", "MHits/s");
+    printSceneTakeaway("Wavefront Path Tracing (1 SPP)", pt1ByScene, "(DGC Compaction vs MK)", "MRays/s");
+    printSceneTakeaway("Wavefront Multi-Light (128) ", multiLightByScene, "(DGC Cone Cull vs MK)", "MRays/s");
+    printSceneTakeaway("Wavefront Incoherent GI     ", giByScene, "(4-Bounce DGC vs MK)", "MRays/s");
+    if (cpuSparse10Us > 0.0 && gpuIndirect10Us > 0.0) {
+      double sp = cpuSparse10Us / gpuIndirect10Us;
+      std::string val = BOLD + GREEN + formatDouble(sp, 2) + "x" + RESET;
+      std::string extra = " (GPU Indirect vs CPU Direct Fixed Grid: " + formatDouble(gpuIndirect10Us, 1) + " vs " +
+                          formatDouble(cpuSparse10Us, 1) + " us)";
+      printSummaryRow("Producer-Consumer Sparse (10%)", val, extra);
+    }
+    if (cpuMbDirectUs > 0.0 && gpuMbDgcUs > 0.0) {
+      double sp = cpuMbDirectUs / gpuMbDgcUs;
+      std::string val = BOLD + GREEN + formatDouble(sp, 2) + "x" + RESET;
+      std::string extra = " (DGC ExecutionSet vs CPU Direct 1024x: " + formatDouble(gpuMbDgcUs, 1) + " vs " +
+                          formatDouble(cpuMbDirectUs, 1) + " us)";
+      printSummaryRow("Multi-Bucket 1024x DGC vs CPU", val, extra);
+    }
+    if (gpuMbLegacyUs > 0.0 && gpuMbDgcUs > 0.0) {
+      double sp = gpuMbLegacyUs / gpuMbDgcUs;
+      std::string val = BOLD + GREEN + formatDouble(sp, 2) + "x" + RESET;
+      std::string extra = " (DGC Pruning vs 1024x Indirect: " + formatDouble(gpuMbDgcUs, 1) + " vs " +
+                          formatDouble(gpuMbLegacyUs, 1) + " us)";
+      printSummaryRow("Multi-Bucket 1024x DGC vs Leg", val, extra);
     }
     if (scanlineRate > 0.0 && tiledRate > 0.0) {
       double cacheGain = ((tiledRate - scanlineRate) / scanlineRate) * 100.0;
@@ -1233,9 +1323,15 @@ void ResultFormatter::print() {
                           formatDouble(scanlineRate, 1) + " MRays/s)";
       printSummaryRow("BVH Traversal Cache Locality", val, extra);
     }
-    if (maxBlasUpdateRate > 0.0 || maxTlasRate > 0.0) {
-      std::string val = BOLD + YELLOW + formatDouble(maxBlasUpdateRate, 1) + " MTris/s" + RESET + " (BLAS Update) | " +
-                        BOLD + YELLOW + formatDouble(maxTlasRate, 1) + " MInst/s" + RESET + " (TLAS Construction)";
+    if (maxBlasBuildRate > 0.0 || maxTlasRate > 0.0) {
+      std::string val;
+      if (maxBlasBuildRate > 0.0) {
+        val += BOLD + YELLOW + formatDouble(maxBlasBuildRate, 1) + " MTris/s" + RESET + " (BLAS Build)";
+      }
+      if (maxTlasRate > 0.0) {
+        if (!val.empty()) val += " | ";
+        val += BOLD + YELLOW + formatDouble(maxTlasRate, 1) + " MInst/s" + RESET + " (TLAS Construction)";
+      }
       printSummaryRow("Acceleration Build Peak Rates", val, "");
     }
     if (rawBoxGis > 0.0) {
@@ -1715,7 +1811,7 @@ void ResultFormatter::printComparison(const std::vector<ImportedRun> &runs) {
           }
           if (subcat.name == "Device Memory Bandwidth" && wl.configIndex == 0) vramBwRates[i] = vals[i].val;
           if (subcat.name == "Latency" && wl.cleanName.find("L0") != std::string::npos) l0LatRates[i] = vals[i].val;
-          if (subcat.name.find("Scene Path Tracing (Multi-Bounce)") != std::string::npos && wl.configIndex == 8) {
+          if (subcat.name.find("Scene Path Tracing (Multi-Bounce)") != std::string::npos && wl.configIndex == 4) {
             if (ptTradRates[i] == 0.0 || subcat.name.find("Indoor") != std::string::npos) {
               ptTradRates[i] = vals[i].val;
             }
@@ -2242,9 +2338,7 @@ std::string resultsToJson(const std::vector<ResultData> &results,
     if (r.benchmarkName.find("RayScheduling") != std::string::npos && r.metric == "MRays/s") {
       const uint32_t w = r.width ? r.width : 1920u;
       const uint32_t h = r.height ? r.height : 1080u;
-      const uint32_t spp = (r.samplesPerFrame > 1u)
-          ? r.samplesPerFrame
-          : ((r.configIndex == 11u || r.configIndex == 12u) ? 16u : 1u);
+      const uint32_t spp = raySchedulingEffectiveSpp(r);
       const double fps = computeRaySchedulingFps(r, value);
       addFixed6(doc, rObj, "fps", fps);
       if (spp > 1u) {

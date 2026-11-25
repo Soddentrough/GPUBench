@@ -11,17 +11,20 @@ void GuiApp::renderLiveTelemetryDock() {
     const BringUpColors c = getBringUpColors(m_palette);
     uint32_t devCount = m_telemetryWorker.getDeviceCount();
     if (devCount == 0) {
-        ImGui::TextColored(c.textMuted, "OSC-04 // No hardware telemetry devices detected on host.");
+        ImGui::TextColored(c.textMuted, "GPU TELEMETRY // No hardware telemetry devices detected on host.");
         return;
     }
+    if (m_telemetryGpuIndex >= devCount) {
+        m_telemetryGpuIndex = 0;
+    }
 
-    // Compact DSO Control Bus
+    // Compact Telemetry Control Bar
     {
         pushBoldFont();
-        ImGui::TextColored(c.phosphorHi, "OSC-04");
+        ImGui::TextColored(c.phosphorHi, "GPU TELEMETRY");
         popBoldFont();
         ImGui::SameLine(0.0f, s(6.0f));
-        ImGui::TextColored(c.textPrimary, "4-CH DSO @ 10Hz");
+        ImGui::TextColored(c.textSecondary, "@ 10Hz");
         ImGui::SameLine(0.0f, s(10.0f));
 
         auto names = m_telemetryWorker.getDeviceNames();
@@ -272,25 +275,25 @@ void GuiApp::renderLiveTelemetryDock() {
     }
 
     const bool hasTraceStats = (nPts >= 2);
-    drawScopeChannel("##Ch1Sclk", "CH1 SCLK", ch1Val, c.cyanAccent,
+    drawScopeChannel("##Ch1Sclk", "SCLK", ch1Val, c.cyanAccent,
                      graph->hasSclk, graph->sclkNorm,
                      ImVec2(colW, stripH), true,
                      ch1ScaleTop, ch1ScaleInfo,
                      graph->sclkWinMin, graph->sclkWinMax, hasTraceStats && graph->hasSclk);
     ImGui::SameLine(0.0f, gap);
-    drawScopeChannel("##Ch2Pwr", "CH2 PWR", ch2Val, c.phosphorHi,
+    drawScopeChannel("##Ch2Pwr", "POWER", ch2Val, c.phosphorHi,
                      graph->hasPower, graph->pwrNorm,
                      ImVec2(colW, stripH), false,
                      ch2ScaleTop, ch2ScaleInfo,
                      graph->pwrWinMin, graph->pwrWinMax, hasTraceStats && graph->hasPower);
     ImGui::SameLine(0.0f, gap);
-    drawScopeChannel("##Ch3Busy", "CH3 BUSY", ch3Val, c.okColor,
+    drawScopeChannel("##Ch3Busy", "GPU BUSY", ch3Val, c.okColor,
                      graph->hasGpuBusy, graph->busyNorm,
                      ImVec2(colW, stripH), false,
                      "100%", "Scale: 0 .. 100 %",
                      graph->busyWinMin, graph->busyWinMax, hasTraceStats && graph->hasGpuBusy);
     ImGui::SameLine(0.0f, gap);
-    drawScopeChannel("##Ch4TempVram", "CH4 TMP/VRAM", ch4Val, c.warnColor,
+    drawScopeChannel("##Ch4TempVram", "TEMP / VRAM", ch4Val, c.warnColor,
                      hasTemp || graph->hasVram, graph->tempNorm,
                      ImVec2(colW, stripH), false,
                      ch4ScaleTop, ch4ScaleInfo,
@@ -324,7 +327,7 @@ void GuiApp::renderLiveTelemetryDock() {
     };
 
     // Chart 1: GPU Utilization (%) & VRAM Used (MB)
-    if (ImPlot::BeginPlot("CH3/CH4 // ENGINE & VRAM###PlotLoadVram", ImVec2(plotColW, plotH))) {
+    if (ImPlot::BeginPlot("GPU LOAD & VRAM###PlotLoadVram", ImVec2(plotColW, plotH))) {
         ImPlot::SetupAxes("Time (s)", "GPU Load (%)", ImPlotAxisFlags_None, ImPlotAxisFlags_None);
         ImPlot::SetupAxis(ImAxis_Y2, "VRAM (MB)", ImPlotAxisFlags_AuxDefault);
         ImPlot::SetupAxisLimits(ImAxis_X1, tMin, tMax, ImPlotCond_Always);
@@ -347,7 +350,7 @@ void GuiApp::renderLiveTelemetryDock() {
     ImGui::SameLine(0.0f, plotGap);
 
     // Chart 2: Shader & Memory Clocks (MHz)
-    if (ImPlot::BeginPlot("CH1 // CLOCKS (MHz)###PlotClocks", ImVec2(plotColW, plotH))) {
+    if (ImPlot::BeginPlot("CLOCKS (MHz)###PlotClocks", ImVec2(plotColW, plotH))) {
         ImPlot::SetupAxes("Time (s)", "MHz", ImPlotAxisFlags_None, ImPlotAxisFlags_None);
         ImPlot::SetupAxisLimits(ImAxis_X1, tMin, tMax, ImPlotCond_Always);
         ImPlot::SetupAxisLimits(ImAxis_Y1, 0.0, static_cast<double>(graph->clockCeilingPlot), ImPlotCond_Always);
@@ -369,7 +372,7 @@ void GuiApp::renderLiveTelemetryDock() {
     ImGui::SameLine(0.0f, plotGap);
 
     // Chart 3: Board Power (W) & Thermal Sensors (C)
-    if (ImPlot::BeginPlot("CH2/CH4 // POWER & THERMALS###PlotPowerTemp", ImVec2(plotColW, plotH))) {
+    if (ImPlot::BeginPlot("POWER & THERMALS###PlotPowerTemp", ImVec2(plotColW, plotH))) {
         ImPlot::SetupAxes("Time (s)", "Power (W)", ImPlotAxisFlags_None, ImPlotAxisFlags_None);
         ImPlot::SetupAxis(ImAxis_Y2, "Temp (C)", ImPlotAxisFlags_AuxDefault);
         ImPlot::SetupAxisLimits(ImAxis_X1, tMin, tMax, ImPlotCond_Always);

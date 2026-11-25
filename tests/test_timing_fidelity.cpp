@@ -272,8 +272,9 @@ TEST_CASE(TimingFidelity, RayASBuild_PreRecordedCommandExecutionIntegrity) {
 
   bench.Setup(*ctx, kdir);
 
-  // Verify that all 8 configurations execute cleanly and validate
-  for (uint32_t c = 0; c < 8; ++c) {
+  // Verify that all 4 configurations execute cleanly and validate
+  ASSERT_EQ(bench.GetNumConfigs(), 4u);
+  for (uint32_t c = 0; c < bench.GetNumConfigs(); ++c) {
     bench.Run(c);
     ctx->waitIdle();
     bool valid = bench.ValidateResults(c);

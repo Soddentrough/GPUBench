@@ -54,9 +54,9 @@ public:
   const char *GetSubCategory(uint32_t config_idx) const override;
   std::string GetConfigName(uint32_t config_idx) const override;
 
-  uint32_t GetNumConfigs() const override { return 8; } // 1M/5M/10M BLAS Build/Update + 3 Real-World Branched TLAS scenes
+  uint32_t GetNumConfigs() const override { return 4; } // 1 batched multi-mesh BLAS build + 3 Real-World Branched TLAS scenes
   const char *GetDescription() const override {
-    return "Hardware BVH Bottom-Level (BLAS) build/refit and Top-Level (TLAS) multi-instance scene construction throughput.";
+    return "Hardware BVH batched multi-mesh Bottom-Level (BLAS) and Top-Level (TLAS) scene acceleration structure construction throughput.";
   }
   bool RequiresInterIterationBarrier(uint32_t /*config_idx*/ = 0) const override {
     return true;
@@ -64,6 +64,9 @@ public:
   int GetSortWeight(uint32_t config_idx = 0) const override {
     return 600 + static_cast<int>(config_idx);
   }
+
+  static constexpr uint32_t kBlasBatchMeshes = 256;
+  static constexpr uint32_t kBlasBatchTotalTris = 5000000;
 
   struct BlasInfo {
     uint32_t numPrimitives = 0;
@@ -89,11 +92,16 @@ private:
 
   IComputeContext *context = nullptr;
 
-  // Single-BLAS benchmark resources (1M, 5M, 10M)
+  // Batched multi-mesh BLAS benchmark resources (256 meshes, 5M tris total)
   ComputeBuffer vertexBuffer = nullptr;
   ComputeBuffer scratchBuffer = nullptr;
-  ComputeBuffer updateScratchBuffer = nullptr;
   std::vector<BlasInfo> blases;
+  std::vector<VkAccelerationStructureKHR> blasBatchHandles;
+  std::vector<VkDeviceSize> blasBatchOffsets;
+  std::vector<VkAccelerationStructureGeometryKHR> blasBatchGeometries;
+  std::vector<VkAccelerationStructureBuildGeometryInfoKHR> blasBatchBuildInfos;
+  std::vector<VkAccelerationStructureBuildRangeInfoKHR> blasBatchRanges;
+  std::vector<const VkAccelerationStructureBuildRangeInfoKHR *> blasBatchRangePtrs;
 
   // Multi-BLAS scene library (5,000 distinct geometries)
   ComputeBuffer blasLibVertexBuffer = nullptr;

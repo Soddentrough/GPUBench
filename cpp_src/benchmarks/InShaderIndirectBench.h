@@ -13,6 +13,7 @@
 enum class IndirectBenchMode {
   CPU_Direct,
   GPU_Indirect,
+  CPU_MultiBucket_Direct,
   GPU_MultiBucket_Legacy,
   GPU_MultiBucket_DGC
 };
@@ -45,6 +46,7 @@ public:
     case 4:
       return 2;
     case 6:
+    case 7:
       return 5;
     default:
       return -1;
@@ -59,7 +61,7 @@ public:
   }
   bool IsConfigSupported(uint32_t config_idx) const override {
     if (config_idx >= configs.size()) return false;
-    return !mbSetupComplete || (config_idx != 6u) || mbDgcAvailable;
+    return !mbSetupComplete || (config_idx != 7u) || mbDgcAvailable;
   }
   bool IsConfigSupported(uint32_t config_idx, const DeviceInfo &info,
                          IComputeContext *context = nullptr) const override;
@@ -104,7 +106,7 @@ public:
   int GetSortWeight() const override { return 28; }
 
   uint32_t GetNumConfigs() const override { return static_cast<uint32_t>(configs.size()); }
-  uint32_t GetExpectedKernelCount() const override { return 14; }
+  uint32_t GetExpectedKernelCount() const override { return 15; }
   std::string GetConfigName(uint32_t config_idx) const override;
   std::string GetConfigName(uint32_t config_idx, const DeviceInfo &info,
                             IComputeContext *context = nullptr) const override;
@@ -124,7 +126,8 @@ private:
   ComputeBuffer indirectBuffer = nullptr;
   ComputeBuffer outputBuffer = nullptr;
 
-  // 128-Bucket Sparse Multi-Pipeline Showcase (Legacy Indirect vs. DGC ExecutionSet)
+  // 1024-Bucket Sparse Multi-Pipeline Showcase (CPU Direct vs. Legacy Indirect vs. DGC ExecutionSet)
+  ComputeKernel kernelMbDirect = nullptr;
   ComputeKernel kernelMbClassify = nullptr;
   ComputeKernel kernelMbResolve = nullptr;
   std::array<ComputeKernel, 8> kernelMbWorker{};
@@ -148,9 +151,9 @@ private:
 #endif
 
   static constexpr uint32_t kTotalItems = 4194304; // 4M items
-  static constexpr uint32_t kWorkgroupSize = 64;
+  static constexpr uint32_t kWorkgroupSize = 256;
   static constexpr uint32_t kTotalWorkgroups = kTotalItems / kWorkgroupSize;
-  static constexpr uint32_t kMbTotalItems = 131072u; // 128 * 1024 items -> 1024 items/bucket when active
-  static constexpr uint32_t kMbNumBuckets = 128u;
+  static constexpr uint32_t kMbTotalItems = 1048576u; // 1024 * 1024 items -> 1024 items/bucket when active
+  static constexpr uint32_t kMbNumBuckets = 1024u;
   static constexpr uint32_t kMbBucketCapacity = 2048u;
 };

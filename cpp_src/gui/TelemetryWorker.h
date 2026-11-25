@@ -12,6 +12,8 @@
 #include <thread>
 #include <vector>
 
+struct DeviceProfile;
+
 namespace gpubench::gui {
 
 class TelemetryBuffer {
@@ -194,6 +196,7 @@ public:
     bool getSnapshot(uint32_t deviceIndex, DeviceTelemetrySnapshot& outSnapshot);
     bool getPreparedGraphs(uint32_t deviceIndex, std::shared_ptr<const PreparedGraphData>& outData) const;
     std::vector<std::string> getDeviceNames() const;
+    static size_t computeUniqueGpuCount(size_t hwGpuCount, const std::vector<DeviceProfile>& profiles);
 
 private:
     struct DevicePollState {

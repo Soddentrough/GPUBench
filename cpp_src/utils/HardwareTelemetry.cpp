@@ -1260,9 +1260,15 @@ GpuTelemetryData HardwareTelemetry::queryGpu(uint32_t deviceIndex) {
     cardRoot = sortedCards[deviceIndex].cardDir + "/";
     cardPath = sortedCards[deviceIndex].deviceDir + "/";
     pciBusId = sortedCards[deviceIndex].pciBusId;
-  } else {
+  } else if (sortedCards.empty()) {
     cardRoot = "/sys/class/drm/card" + std::to_string(deviceIndex) + "/";
     cardPath = cardRoot + "device/";
+  } else {
+    if (DynamicNvml::instance().available() &&
+        deviceIndex < DynamicNvml::instance().deviceCount()) {
+      DynamicNvml::instance().queryDevice(deviceIndex, data);
+    }
+    return data;
   }
 
   populateLinuxGpuTelemetry(cardRoot, cardPath, pciBusId, deviceIndex, data);

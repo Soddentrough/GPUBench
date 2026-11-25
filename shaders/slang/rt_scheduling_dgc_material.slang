@@ -22,7 +22,7 @@ struct PushConstants {
     uint height;
     uint sceneType;
     uint isGltf;
-    uint mode; // 0: Full Render, 1: Pure Shading microbenchmark, 2: Primary Surface Normals / G-Buffer
+    uint mode; // 0: Full Render, 1: Pure Shading microbenchmark
 };
 
 [[vk::push_constant]] PushConstants pc;
@@ -30,40 +30,6 @@ struct PushConstants {
 [numthreads(32, 1, 1)]
 void main(uint3 gid : SV_DispatchThreadID) {
     uint threadIdx = gid.x;
-
-    // Mode 2 / Specialized 8: Primary Surface Normals (G-Buffer) from compacted queue 0
-    if (SPECIALIZED_ARCHETYPE == 8u || (SPECIALIZED_ARCHETYPE != 9u && SPECIALIZED_ARCHETYPE != 10u && pc.mode == 2u)) {
-        uint count = wlLoadSnapshot(worklist, 0u);
-        if (threadIdx >= count || threadIdx >= pc.queueCapacity) return;
-
-        float4 p = wlLoadRecord(worklist, threadIdx);
-        uint pixelIdx = asuint(p.y);
-        uint primId = asuint(p.z);
-        if (WaveActiveAllEqual(primId)) {
-            primId = WaveReadLaneFirst(primId);
-        }
-        float2 bary = unpackUnorm2x16_spv(asuint(p.w));
-
-        Camera cam = getCamera(pc.sceneType, pc.isGltf);
-        uint px_u = pixelIdx % pc.width;
-        uint py_u = pixelIdx / pc.width;
-        float3 inDir = makePrimaryRayDir(cam, px_u, py_u, pc.width, pc.height);
-
-        float3 normal;
-        if (pc.isGltf != 0u) {
-            normal = computeSmoothNormal(vbuf, pc.sceneType, 1u, primId, float3(0.0), inDir, bary);
-        } else {
-            float3 hitPos = (pc.sceneType == SCENE_OUTDOOR_TERRAIN) ? float3(0.0) : (cam.pos + inDir * p.x);
-            normal = computeSmoothNormal(vbuf, pc.sceneType, 0u, primId, hitPos, inDir, float2(0.0));
-        }
-        float3 shadedColor = clamp(normal * 0.5 + 0.5, 0.0, 1.0);
-        if (pc.dumpRenders != 0u) {
-            fb[pixelIdx] = float4(shadedColor, 1.0);
-        } else {
-            addWaveLum(results, luminanceToUint(shadedColor));
-        }
-        return;
-    }
 
     bool isPureShading = (SPECIALIZED_ARCHETYPE != 9u && SPECIALIZED_ARCHETYPE != 10u && pc.mode == 1u);
     uint count = isPureShading ? pc.queueCapacity : wlLoadSnapshot(worklist, pc.materialId);

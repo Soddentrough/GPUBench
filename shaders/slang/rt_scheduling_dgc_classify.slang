@@ -38,9 +38,11 @@ void main(uint3 gid : SV_DispatchThreadID, uint gidx : SV_GroupIndex, uint3 wgid
     const uint mode = (CLASSIFY_MODE != 0xFFFFFFFFu) ? CLASSIFY_MODE : pc.mode;
     uint3 nwg = WorkgroupCount();
     uint idx = (nwg.y > 1u) ? (gid.y * pc.width + gid.x) : (wgid.x * 32u + gidx);
-    if (mode == 1u && idx == 0u) {
+    if ((mode == 1u || mode == 5u) && idx == 0u) {
         wlStoreSeed(worklist, pc.seed);
-        wlStoreMeta(worklist, (pc.dumpRenders & 0xFFu) | ((pc.spp & 0xFFu) << 8u) | ((pc.bounce & 0xFFu) << 16u));
+        if (mode == 1u) {
+            wlStoreMeta(worklist, (pc.dumpRenders & 0xFFu) | ((pc.spp & 0xFFu) << 8u) | ((pc.bounce & 0xFFu) << 16u));
+        }
     }
 
     uint tileIdx = (nwg.y > 1u) ? (idx >> 5u) : wgid.x;
@@ -85,7 +87,7 @@ void main(uint3 gid : SV_DispatchThreadID, uint gidx : SV_GroupIndex, uint3 wgid
                 primaryHit = true;
                 t = rq.CommittedRayT();
                 primId = rq.CommittedPrimitiveIndex();
-                rawBary = (mode == 2u && pc.isGltf == 0u) ? float2(0.0) : rq.CommittedTriangleBarycentrics();
+                rawBary = rq.CommittedTriangleBarycentrics();
             }
         } else {
             RayDesc ray = { origin, tMinPrimary, direction, tMaxPrimary };
@@ -150,24 +152,26 @@ void main(uint3 gid : SV_DispatchThreadID, uint gidx : SV_GroupIndex, uint3 wgid
                 }
                 payload0 = float4(t, asfloat(pixelIdx), asfloat(primId), asfloat(packUnorm2x16_spv(rawBary)));
             } else if (mode == 5u) {
-                uint q = (pc.spp == 3u) ? ((wgid.x >> 6u) % 3u) : 0u;
+                uint q = (pc.spp == 3u) ? ((px_u + py_u * 2u) % 3u) : 0u;
                 float3 geomNormal = (pc.isGltf != 0u)
                     ? computeGltfGeomNormal(vbuf, primId, direction)
                     : computeSmoothNormal(vbuf, pc.sceneType, 0u, primId, hitPos, direction, rawBary);
+                geomNormal = quantizeOctDir(geomNormal);
                 float3 lightDir;
                 float unusedDist;
                 getShadowLightParams(pc.sceneType, q, lightDir, unusedDist);
 
                 if (dot(geomNormal, lightDir) > 0.0) {
-                    threadRays += 1u;
+                    threadRays += 4u;
                     assignedQueue = q;
-                    payload0 = float4(hitPos + geomNormal * 0.12, asfloat(pixelIdx));
+                    payload0 = float4(hitPos, asfloat(pixelIdx));
+                    payload1 = asfloat(uint4(packSnorm2x16_spv(octEncode(geomNormal)), 0u, 0u, 0u));
                 } else {
                     assignedQueue = 0xFFFFFFFFu;
                     if (pc.dumpRenders != 0u) {
                         fb[pixelIdx] = float4(float3(0.95), 1.0);
                     } else {
-                        threadLum = 243u;
+                        threadLum = 242u;
                     }
                 }
             } else if (mode == 8u) {
@@ -235,10 +239,10 @@ void main(uint3 gid : SV_DispatchThreadID, uint gidx : SV_GroupIndex, uint3 wgid
                     uint packedPixMet = (pixelIdx & 0x00FFFFFFu) | (uint(clamp(metallic, 0.0, 1.0) * 255.0 + 0.5) << 24u);
                     uint packedAlbRG = packHalf2x16_spv(albedo.xy);
                     uint packedAlbBR = packHalf2x16_spv(float2(albedo.z, roughness));
-                    uint octQ = (qNorm.x >= 0.0 ? 1u : 0u)
-                              | (qNorm.y >= 0.0 ? 2u : 0u)
-                              | (qNorm.z >= 0.0 ? 4u : 0u);
-                    assignedQueue = (pc.spp > 1u) ? octQ : 0u;
+                    float2 octN = octEncode(qNorm);
+                    uint bx = min(3u, uint(max(0.0, (octN.x * 0.5 + 0.5) * 4.0)));
+                    uint by = min(3u, uint(max(0.0, (octN.y * 0.5 + 0.5) * 4.0)));
+                    assignedQueue = (pc.spp > 1u) ? (by * 4u + bx) : 0u;
                     payload0 = asfloat(uint4(packedNorm, packedPixMet, packedAlbRG, packedAlbBR));
                 }
             } else if (mode == 6u || mode == 7u) {
@@ -285,15 +289,25 @@ void main(uint3 gid : SV_DispatchThreadID, uint gidx : SV_GroupIndex, uint3 wgid
                     GltfMaterialGpu mat = matBuf[matId];
                     assignedQueue = mat.archetype % 8u;
                     float2 bary = unpackUnorm2x16_spv(packUnorm2x16_spv(rawBary));
-                    float3 interpHitPos, geomNormal, smoothNormal;
-                    float4 dummyTan;
-                    float2 dummyUv;
-                    unpackGltfHit(vbuf, primId, bary, false, interpHitPos, geomNormal, smoothNormal, dummyTan, dummyUv);
-                    float3 faceNormal = (dot(smoothNormal, direction) > 0.0) ? -smoothNormal : smoothNormal;
+                    uint base = primId * 36u;
+                    float3 p0 = float3(vbuf[base + 0u], vbuf[base + 1u], vbuf[base + 2u]);
+                    float3 p1 = float3(vbuf[base + 12u], vbuf[base + 13u], vbuf[base + 14u]);
+                    float3 p2 = float3(vbuf[base + 24u], vbuf[base + 25u], vbuf[base + 26u]);
+                    float w = 1.0 - bary.x - bary.y;
+                    float3 interpHitPos = w * p0 + bary.x * p1 + bary.y * p2;
+                    float3 geomNormal = normalize(cross(p1 - p0, p2 - p0));
+                    float3 faceNormal = geomNormal;
+                    if (mat.transmissionFactor > 0.80) {
+                        float3 n0 = float3(vbuf[base + 3u], vbuf[base + 4u], vbuf[base + 5u]);
+                        float3 n1 = float3(vbuf[base + 15u], vbuf[base + 16u], vbuf[base + 17u]);
+                        float3 n2 = float3(vbuf[base + 27u], vbuf[base + 28u], vbuf[base + 29u]);
+                        float3 sn = w * n0 + bary.x * n1 + bary.y * n2;
+                        float3 smoothNormal = (length(sn) > 1e-4) ? normalize(sn) : geomNormal;
+                        faceNormal = (dot(smoothNormal, direction) > 0.0) ? -smoothNormal : smoothNormal;
+                    }
 
                     uint visRng = pixelIdx;
                     float3 vis = computeGltfVisibility(topLevelAS, rq, mat, assignedQueue, interpHitPos, geomNormal, faceNormal, direction, pc.sceneType, true, visRng);
-
                     uint packedVis = packHalf2x16_spv(vis.xy);
                     payload0 = float4(asfloat(packedVis), asfloat(pixelIdx), asfloat(primId), asfloat(packUnorm2x16_spv(rawBary)));
                     payload1 = float4(vis.z, 0.0, 0.0, 0.0);
@@ -509,7 +523,7 @@ void main(uint3 gid : SV_DispatchThreadID, uint gidx : SV_GroupIndex, uint3 wgid
                                 uint nextRayOct = computeBounceOctant(pc.sceneType, nextBDir);
                                 bOrigin = b_hitPos + b_normal * rayOffset;
                                 packedDir = packSnorm2x16_spv(octEncode(nextBDir));
-                                assignedQueue = 8u + nextRayOct;
+                                assignedQueue = nextRayOct;
                             } else {
                                 assignedQueue = 0xFFFFFFFFu;
                             }
@@ -554,12 +568,9 @@ void main(uint3 gid : SV_DispatchThreadID, uint gidx : SV_GroupIndex, uint3 wgid
                     float u2 = randFloat(rngState);
                     float3 incohDir = alignToNormal(cosineSampleHemisphere(u1, u2), normal);
                     float rayOffset = (pc.isGltf != 0u) ? 0.05 : 0.005;
-                    uint oct8 = (incohDir.x >= 0.0 ? 1u : 0u)
-                              | (incohDir.y >= 0.0 ? 2u : 0u)
-                              | (incohDir.z >= 0.0 ? 4u : 0u);
-                    uint oct16 = oct8 | ((abs(incohDir.z) >= 0.6) ? 8u : 0u);
-                    assignedQueue = oct16;
                     uint packedDir = packSnorm2x16_spv(octEncode(incohDir));
+                    float3 qDir = octDecode(unpackSnorm2x16_spv(packedDir));
+                    assignedQueue = computeBounceOctant(pc.sceneType, qDir);
                     payload0 = float4(hitPos + normal * rayOffset, asfloat(packedDir));
                 }
             }
@@ -650,12 +661,17 @@ void main(uint3 gid : SV_DispatchThreadID, uint gidx : SV_GroupIndex, uint3 wgid
             if (match) {
                 uint slot = baseSlot + slotInWave;
                 if (slot < pc.queueCapacity) {
-                    wlStoreRecord(worklist, slot, payload0);
+                    if (mode == 5u) {
+                        wlStoreRecord(worklist, slot * 2u, payload0);
+                        wlStoreRecord(worklist, slot * 2u + 1u, payload1);
+                    } else {
+                        wlStoreRecord(worklist, slot, payload0);
+                    }
                 }
             }
         }
     } else {
-        uint maxQ = (mode == 2u || mode == 1u) ? 16u : 8u;
+        uint maxQ = (mode == 1u || (mode == 8u && pc.spp > 1u)) ? 16u : 8u;
         if (mode == 5u && pc.spp == 3u) {
             maxQ = 3u;
         }
@@ -687,15 +703,18 @@ void main(uint3 gid : SV_DispatchThreadID, uint gidx : SV_GroupIndex, uint3 wgid
             if (hasValidQueue) {
                 uint slot = myBase + mySlotInWave;
                 if (slot < pc.queueCapacity) {
-                    if (mode == 1u) {
+                    if (mode == 1u || mode == 5u) {
                         uint recIdx = (assignedQueue * pc.queueCapacity + slot) * 2u;
                         wlStoreRecord(worklist, recIdx, payload0);
                         wlStoreRecord(worklist, recIdx + 1u, payload1);
-                    } else {
+                    } else if (mode == 0u) {
                         wlStoreRecord(worklist, assignedQueue * pc.queueCapacity + slot, payload0);
-                        if (mode == 0u && ((pc.isGltf != 0u && pc.sceneType == SCENE_AAA_FOREST && assignedQueue == 5u) || (pc.isGltf == 0u && pc.sceneType != SCENE_OUTDOOR_TERRAIN))) {
+                        if ((pc.isGltf != 0u && pc.sceneType == SCENE_AAA_FOREST && assignedQueue == 5u) ||
+                            (pc.isGltf == 0u && pc.sceneType != SCENE_OUTDOOR_TERRAIN)) {
                             wlStoreRecord(worklist, (8u + assignedQueue) * pc.queueCapacity + slot, payload1);
                         }
+                    } else {
+                        wlStoreRecord(worklist, assignedQueue * pc.queueCapacity + slot, payload0);
                     }
                 }
             }

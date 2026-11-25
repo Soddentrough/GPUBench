@@ -18,7 +18,7 @@ void main(uint3 lid : SV_GroupThreadID) {
     uint id = lid.x;
     uint bank = (rpc.bounceIndex & 1u);
     uint baseQ = bank * 8u;
-    bool pingPong = (rpc.dgcMode == 3u) || (rpc.resetQueue != 0xFFFFFFFFu) || (rpc.bounceIndex > 0u);
+    bool pingPong = (rpc.dgcMode == 3u || rpc.dgcMode == 7u) || (rpc.resetQueue != 0xFFFFFFFFu) || (rpc.bounceIndex > 0u);
 
     if (id < 16u && (!pingPong || (id >= baseQ && id < baseQ + 8u))) {
         uint count = wlLoadCounter(worklist, id);
@@ -164,7 +164,7 @@ void main(uint3 lid : SV_GroupThreadID) {
     } else if (rpc.dgcMode == 6u) {
         bool isActive = false;
         uint count = 0u;
-        if (id < 8u) {
+        if (id < 16u) {
             count = wlLoadSnapshot(worklist, id);
             isActive = (count > 0u);
         }
@@ -186,11 +186,12 @@ void main(uint3 lid : SV_GroupThreadID) {
             dgcCount[0] = totalActive;
         }
     } else if (rpc.dgcMode == 7u) {
-        if (id == 0u) {
-            uint count = wlLoadSnapshot(worklist, 0u);
-            if (count > 0u) {
-                DGCSequenceItem item = dgcData[24];
-                item.cmdX = (count + 31u) / 32u;
+        if (id == 7u) {
+            uint totalWaves = indirectCmds[16u + bank].x;
+            if (totalWaves > 0u) {
+                uint templateIdx = 24u + rpc.bounceIndex;
+                DGCSequenceItem item = dgcData[templateIdx];
+                item.cmdX = totalWaves;
                 item.cmdY = 1u;
                 item.cmdZ = 1u;
                 dgcData[32] = item;

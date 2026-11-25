@@ -39,67 +39,127 @@ void RayASBuildBench::Setup(IComputeContext &context_ref,
   VkDevice device = vContext->getVulkanDevice();
   loadRTProcs(device);
 
-  // 1. Allocate primary vertex pool (10M triangles max = 360 MB)
-  uint32_t maxPrimitives = 10000000;
-  std::vector<float> vertices(maxPrimitives * 9, 0.0f);
+  // 1. Allocate primary vertex pool (5M localized triangles = 180 MB)
+  uint32_t maxPrimitives = kBlasBatchTotalTris;
+  std::vector<float> vertices(static_cast<size_t>(maxPrimitives) * 9, 0.0f);
   std::mt19937 rng(1337);
-  std::uniform_real_distribution<float> dist(0.0f, 1.0f);
-  for (uint32_t i = 0; i < vertices.size(); ++i) {
-    vertices[i] = dist(rng);
+  std::uniform_real_distribution<float> distCenter(0.05f, 0.95f);
+  std::uniform_real_distribution<float> distOffset(-0.03f, 0.03f);
+  for (uint32_t t = 0; t < maxPrimitives; ++t) {
+    float cx = distCenter(rng);
+    float cy = distCenter(rng);
+    float cz = distCenter(rng);
+    size_t base = static_cast<size_t>(t) * 9;
+    for (uint32_t v = 0; v < 3; ++v) {
+      vertices[base + v * 3 + 0] = cx + distOffset(rng);
+      vertices[base + v * 3 + 1] = cy + distOffset(rng);
+      vertices[base + v * 3 + 2] = cz + distOffset(rng);
+    }
   }
   vertexBuffer =
       context_ref.createBuffer(vertices.size() * sizeof(float), vertices.data());
 
   VkDeviceAddress vAddr = vContext->getBufferDeviceAddress(vertexBuffer);
 
-  // 2. Setup 3 standalone BLAS tiers (1M, 5M, 10M triangles)
-  std::vector<uint32_t> primCounts = {1000000, 5000000, 10000000};
-  blases.resize(primCounts.size());
-  size_t maxBuildScratch = 0;
-  size_t maxUpdateScratch = 0;
+  // Query AS alignment requirements
+  VkPhysicalDeviceAccelerationStructurePropertiesKHR asProps{
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR};
+  VkPhysicalDeviceProperties2 props2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
+  props2.pNext = &asProps;
+  vkGetPhysicalDeviceProperties2(vContext->getPhysicalDevice(), &props2);
+  const VkDeviceSize scratchAlign =
+      std::max<VkDeviceSize>(256, asProps.minAccelerationStructureScratchOffsetAlignment);
+  auto alignUp = [](VkDeviceSize val, VkDeviceSize align) -> VkDeviceSize {
+    return (align <= 1) ? val : (((val + align - 1) / align) * align);
+  };
 
-  for (size_t b = 0; b < primCounts.size(); ++b) {
-    blases[b].numPrimitives = primCounts[b];
-    VkAccelerationStructureGeometryKHR triGeom{
-        VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR};
+  // 2. Setup 256-mesh batched BLAS build totaling 5,000,000 triangles
+  // Distribution: 160 small props (2.5K) + 80 medium assets (20K) + 16 hero meshes (187.5K) = 5.0M tris
+  blasBatchHandles.assign(kBlasBatchMeshes, VK_NULL_HANDLE);
+  blasBatchOffsets.assign(kBlasBatchMeshes, 0);
+  blasBatchGeometries.assign(kBlasBatchMeshes, VkAccelerationStructureGeometryKHR{});
+  blasBatchBuildInfos.assign(kBlasBatchMeshes, VkAccelerationStructureBuildGeometryInfoKHR{});
+  blasBatchRanges.assign(kBlasBatchMeshes, VkAccelerationStructureBuildRangeInfoKHR{});
+  blasBatchRangePtrs.assign(kBlasBatchMeshes, nullptr);
+
+  std::vector<VkAccelerationStructureBuildSizesInfoKHR> batchSizes(kBlasBatchMeshes);
+  std::vector<VkDeviceSize> batchScratchOffsets(kBlasBatchMeshes, 0);
+  VkDeviceSize totalBatchAsSize = 0;
+  VkDeviceSize totalBatchScratchSize = 0;
+  uint32_t triCursor = 0;
+
+  for (uint32_t m = 0; m < kBlasBatchMeshes; ++m) {
+    uint32_t prims = (m < 160) ? 2500u : ((m < 240) ? 20000u : 187500u);
+
+    auto &triGeom = blasBatchGeometries[m];
+    triGeom.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
     triGeom.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
     triGeom.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
     triGeom.geometry.triangles.sType =
         VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
     triGeom.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
-    triGeom.geometry.triangles.vertexData.deviceAddress = vAddr;
+    triGeom.geometry.triangles.vertexData.deviceAddress =
+        vAddr + (static_cast<VkDeviceSize>(triCursor) * 9 * sizeof(float));
     triGeom.geometry.triangles.vertexStride = sizeof(float) * 3;
-    triGeom.geometry.triangles.maxVertex = primCounts[b] * 3 - 1;
+    triGeom.geometry.triangles.maxVertex = prims * 3 - 1;
     triGeom.geometry.triangles.indexType = VK_INDEX_TYPE_NONE_KHR;
 
-    VkAccelerationStructureBuildGeometryInfoKHR blasBuildInfo{
-        VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR};
+    auto &blasBuildInfo = blasBatchBuildInfos[m];
+    blasBuildInfo.sType =
+        VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
     blasBuildInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-    blasBuildInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR |
-                          VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
+    blasBuildInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
     blasBuildInfo.geometryCount = 1;
-    blasBuildInfo.pGeometries = &triGeom;
+    blasBuildInfo.pGeometries = &blasBatchGeometries[m];
     blasBuildInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
 
-    uint32_t maxPrimCount = primCounts[b];
-    blases[b].sizes.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
+    batchSizes[m].sType =
+        VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
     vkGetAccelerationStructureBuildSizesKHR_ptr(
         device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &blasBuildInfo,
-        &maxPrimCount, &blases[b].sizes);
+        &prims, &batchSizes[m]);
 
-    blases[b].buffer = context_ref.createBuffer(blases[b].sizes.accelerationStructureSize);
+    totalBatchAsSize = alignUp(totalBatchAsSize, 256);
+    blasBatchOffsets[m] = totalBatchAsSize;
+    totalBatchAsSize += batchSizes[m].accelerationStructureSize;
+
+    totalBatchScratchSize = alignUp(totalBatchScratchSize, scratchAlign);
+    batchScratchOffsets[m] = totalBatchScratchSize;
+    totalBatchScratchSize += batchSizes[m].buildScratchSize;
+
+    blasBatchRanges[m].primitiveCount = prims;
+    blasBatchRangePtrs[m] = &blasBatchRanges[m];
+    triCursor += prims;
+  }
+  if (triCursor != kBlasBatchTotalTris) {
+    throw std::runtime_error("RayASBuildBench: Batched BLAS triangle count mismatch");
+  }
+
+  blases.resize(1);
+  blases[0].numPrimitives = kBlasBatchTotalTris;
+  blases[0].handle = VK_NULL_HANDLE;
+  blases[0].sizes.sType =
+      VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
+  blases[0].sizes.accelerationStructureSize = totalBatchAsSize;
+  blases[0].sizes.buildScratchSize = totalBatchScratchSize;
+  blases[0].buffer = context_ref.createBuffer(totalBatchAsSize);
+  VkBuffer batchedBlasVkBuf = vContext->getVkBuffer(blases[0].buffer);
+
+  for (uint32_t m = 0; m < kBlasBatchMeshes; ++m) {
     VkAccelerationStructureCreateInfoKHR blasCreateInfo{
         VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR};
-    blasCreateInfo.buffer = vContext->getVkBuffer(blases[b].buffer);
-    blasCreateInfo.size = blases[b].sizes.accelerationStructureSize;
+    blasCreateInfo.buffer = batchedBlasVkBuf;
+    blasCreateInfo.offset = blasBatchOffsets[m];
+    blasCreateInfo.size = batchSizes[m].accelerationStructureSize;
     blasCreateInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-    if (vkCreateAccelerationStructureKHR_ptr(device, &blasCreateInfo, nullptr, &blases[b].handle) != VK_SUCCESS) {
-      throw std::runtime_error("RayASBuildBench: Failed to create standalone BLAS");
+    if (vkCreateAccelerationStructureKHR_ptr(
+            device, &blasCreateInfo, nullptr, &blasBatchHandles[m]) != VK_SUCCESS) {
+      throw std::runtime_error("RayASBuildBench: Failed to create batched BLAS");
     }
-
-    maxBuildScratch = std::max(maxBuildScratch, (size_t)blases[b].sizes.buildScratchSize);
-    maxUpdateScratch = std::max(maxUpdateScratch, (size_t)blases[b].sizes.updateScratchSize);
+    blasBatchBuildInfos[m].dstAccelerationStructure = blasBatchHandles[m];
   }
+
+  size_t maxBuildScratch = static_cast<size_t>(totalBatchScratchSize);
 
   // 3. Setup Multi-BLAS Library (5,000 distinct geometries for branched TLAS)
   uint32_t numBlasLib = 5000;
@@ -403,7 +463,11 @@ void RayASBuildBench::Setup(IComputeContext &context_ref,
   }
 
   scratchBuffer = context_ref.createBuffer(maxBuildScratch);
-  updateScratchBuffer = context_ref.createBuffer(maxUpdateScratch);
+  VkDeviceAddress baseScratchAddr = vContext->getBufferDeviceAddress(scratchBuffer);
+  for (uint32_t m = 0; m < kBlasBatchMeshes; ++m) {
+    blasBatchBuildInfos[m].scratchData.deviceAddress =
+        baseScratchAddr + batchScratchOffsets[m];
+  }
 
   // 5. Persistent command pool and per-frame command buffers/fences
   VkCommandPoolCreateInfo cpInfo{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
@@ -429,32 +493,10 @@ void RayASBuildBench::Setup(IComputeContext &context_ref,
     buildFrames[i].inFlight = false;
   }
   frameIndex = 0;
-
-  // Initial builds for standalone BLASes (1M and 5M) so refit updates work cleanly
-  VkQueue queue = vContext->getComputeQueue();
-  for (uint32_t initCfg : {0u, 2u}) {
-    VkCommandBuffer cmd = buildFrames[0].cmd;
-    vkResetCommandBuffer(cmd, 0);
-    VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
-    begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vkBeginCommandBuffer(cmd, &begin);
-    recordBuildCommand(cmd, initCfg, vContext);
-    vkEndCommandBuffer(cmd);
-    VkSubmitInfo initSubmit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
-    initSubmit.commandBufferCount = 1;
-    initSubmit.pCommandBuffers = &cmd;
-    {
-      std::lock_guard<std::recursive_mutex> qlock(vContext->getQueueMutex());
-      vkQueueSubmit(queue, 1, &initSubmit, VK_NULL_HANDLE);
-    }
-    vContext->waitIdle();
-  }
 }
 
 void RayASBuildBench::recordBuildCommand(VkCommandBuffer cmd, uint32_t config_idx,
                                          VulkanContext *vContext) {
-  VkDeviceAddress vAddr = vContext->getBufferDeviceAddress(vertexBuffer);
-
   // Pre-barrier: ensure any previous build on the queue has completed and memory is synchronized
   vContext->cmdPipelineMemoryBarrier2(
       cmd,
@@ -465,62 +507,26 @@ void RayASBuildBench::recordBuildCommand(VkCommandBuffer cmd, uint32_t config_id
           VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR |
           VK_ACCESS_2_SHADER_READ_BIT);
 
-  VkAccelerationStructureGeometryKHR geom{
-      VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR};
-  VkAccelerationStructureBuildGeometryInfoKHR buildInfo{
-      VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR};
-  VkAccelerationStructureBuildRangeInfoKHR range{};
-
-  if (config_idx < 5) { // BLAS: 0=1M Build, 1=1M Update, 2=5M Build, 3=5M Update, 4=10M Build
-    size_t bIdx = 0;
-    bool isUpdate = false;
-    if (config_idx == 0) { bIdx = 0; isUpdate = false; }
-    else if (config_idx == 1) { bIdx = 0; isUpdate = true; }
-    else if (config_idx == 2) { bIdx = 1; isUpdate = false; }
-    else if (config_idx == 3) { bIdx = 1; isUpdate = true; }
-    else if (config_idx == 4) { bIdx = 2; isUpdate = false; }
-
-    uint32_t prims = blases[bIdx].numPrimitives;
-    geom.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
-    geom.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
-    geom.geometry.triangles.sType =
-        VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
-    geom.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
-    geom.geometry.triangles.vertexData.deviceAddress = vAddr;
-    geom.geometry.triangles.vertexStride = sizeof(float) * 3;
-    geom.geometry.triangles.maxVertex = prims * 3 - 1;
-    geom.geometry.triangles.indexType = VK_INDEX_TYPE_NONE_KHR;
-
-    buildInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-    buildInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR |
-                      VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
-    buildInfo.geometryCount = 1;
-    buildInfo.pGeometries = &geom;
-    buildInfo.dstAccelerationStructure = blases[bIdx].handle;
-
-    if (!isUpdate) {
-      buildInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
-      buildInfo.scratchData.deviceAddress =
-          vContext->getBufferDeviceAddress(scratchBuffer);
-    } else {
-      buildInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR;
-      buildInfo.srcAccelerationStructure = blases[bIdx].handle;
-      buildInfo.scratchData.deviceAddress =
-          vContext->getBufferDeviceAddress(updateScratchBuffer);
-    }
-    range.primitiveCount = prims;
-  } else { // TLAS: 5=Indoor Corridor (20K), 6=Dense Jungle (50K), 7=Massive Open World (200K)
-    size_t tIdx = config_idx - 5;
+  if (config_idx == 0) { // Config 0: Batched 256-mesh BLAS build (5M Tris total)
+    vkCmdBuildAccelerationStructuresKHR_ptr(
+        cmd, static_cast<uint32_t>(blasBatchBuildInfos.size()),
+        blasBatchBuildInfos.data(), blasBatchRangePtrs.data());
+  } else { // TLAS: 1=Indoor Corridor (20K), 2=Dense Jungle (50K), 3=Massive Open World (200K)
+    size_t tIdx = config_idx - 1;
     uint32_t instCount = tlases[tIdx].numInstances;
 
     VkDeviceAddress iAddr =
         vContext->getBufferDeviceAddress(tlases[tIdx].instanceBuffer);
 
+    VkAccelerationStructureGeometryKHR geom{
+        VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR};
     geom.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
     geom.geometry.instances.sType =
         VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
     geom.geometry.instances.data.deviceAddress = iAddr;
 
+    VkAccelerationStructureBuildGeometryInfoKHR buildInfo{
+        VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR};
     buildInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
     buildInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
     buildInfo.geometryCount = 1;
@@ -529,11 +535,12 @@ void RayASBuildBench::recordBuildCommand(VkCommandBuffer cmd, uint32_t config_id
     buildInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
     buildInfo.scratchData.deviceAddress =
         vContext->getBufferDeviceAddress(scratchBuffer);
-    range.primitiveCount = instCount;
-  }
 
-  const VkAccelerationStructureBuildRangeInfoKHR *pRange = &range;
-  vkCmdBuildAccelerationStructuresKHR_ptr(cmd, 1, &buildInfo, &pRange);
+    VkAccelerationStructureBuildRangeInfoKHR range{};
+    range.primitiveCount = instCount;
+    const VkAccelerationStructureBuildRangeInfoKHR *pRange = &range;
+    vkCmdBuildAccelerationStructuresKHR_ptr(cmd, 1, &buildInfo, &pRange);
+  }
 
   // Post-barrier: ensure acceleration structure writes are flushed and visible
   vContext->cmdPipelineMemoryBarrier2(
@@ -635,6 +642,11 @@ void RayASBuildBench::Teardown() {
     }
 
     if (vkDestroyAccelerationStructureKHR_ptr) {
+      for (auto h : blasBatchHandles) {
+        if (h != VK_NULL_HANDLE) {
+          vkDestroyAccelerationStructureKHR_ptr(device, h, nullptr);
+        }
+      }
       for (auto &b : blases) {
         if (b.handle != VK_NULL_HANDLE) {
           vkDestroyAccelerationStructureKHR_ptr(device, b.handle, nullptr);
@@ -656,6 +668,13 @@ void RayASBuildBench::Teardown() {
       }
     }
   }
+
+  blasBatchHandles.clear();
+  blasBatchOffsets.clear();
+  blasBatchGeometries.clear();
+  blasBatchBuildInfos.clear();
+  blasBatchRanges.clear();
+  blasBatchRangePtrs.clear();
 
   if (context) {
     for (auto &b : blases) {
@@ -681,7 +700,6 @@ void RayASBuildBench::Teardown() {
 
     if (vertexBuffer) { context->releaseBuffer(vertexBuffer); vertexBuffer = nullptr; }
     if (scratchBuffer) { context->releaseBuffer(scratchBuffer); scratchBuffer = nullptr; }
-    if (updateScratchBuffer) { context->releaseBuffer(updateScratchBuffer); updateScratchBuffer = nullptr; }
     context = nullptr;
   }
 }
@@ -689,38 +707,32 @@ void RayASBuildBench::Teardown() {
 BenchmarkResult RayASBuildBench::GetResult(uint32_t config_idx) const {
   uint64_t ops = 0;
   switch (config_idx) {
-  case 0: ops = 1000000; break;
-  case 1: ops = 1000000; break;
-  case 2: ops = 5000000; break;
-  case 3: ops = 5000000; break;
-  case 4: ops = 10000000; break;
-  case 5: ops = 20000; break;
-  case 6: ops = 50000; break;
-  case 7: ops = 200000; break;
+  case 0: ops = kBlasBatchTotalTris; break;
+  case 1: ops = 20000; break;
+  case 2: ops = 50000; break;
+  case 3: ops = 200000; break;
   default: ops = 1; break;
   }
   return {ops, 0.0};
 }
 
 bool RayASBuildBench::ValidateResults(uint32_t config_idx) const {
-  if (!context) return false;
+  if (!context || config_idx >= GetNumConfigs()) return false;
   try {
-    ComputeBuffer targetBuffer = nullptr;
-    if (config_idx < 5) {
-      size_t bIdx = (config_idx < 2) ? 0 : (config_idx < 4) ? 1 : 2;
-      if (bIdx >= blases.size()) return false;
-      targetBuffer = blases[bIdx].buffer;
-    } else {
-      size_t tIdx = config_idx - 5;
-      if (tIdx >= tlases.size()) return false;
-      targetBuffer = tlases[tIdx].buffer;
-    }
-    if (!targetBuffer) return false;
+    auto hasNonZeroHeader = [&](ComputeBuffer buf, size_t offset) -> bool {
+      uint32_t header[4] = {0, 0, 0, 0};
+      context->readBuffer(buf, offset, sizeof(header), header);
+      return (header[0] != 0 || header[1] != 0 || header[2] != 0 || header[3] != 0);
+    };
 
-    // Read back first 16 bytes of AS buffer to verify non-zero header written by GPU BVH builder
-    uint32_t header[4] = {0, 0, 0, 0};
-    context->readBuffer(targetBuffer, 0, sizeof(header), header);
-    return (header[0] != 0 || header[1] != 0 || header[2] != 0 || header[3] != 0);
+    if (config_idx == 0) {
+      if (blases.empty() || !blases[0].buffer || blasBatchOffsets.empty()) return false;
+      return hasNonZeroHeader(blases[0].buffer, 0) &&
+             hasNonZeroHeader(blases[0].buffer, static_cast<size_t>(blasBatchOffsets.back()));
+    }
+    size_t tIdx = config_idx - 1;
+    if (tIdx >= tlases.size() || !tlases[tIdx].buffer) return false;
+    return hasNonZeroHeader(tlases[tIdx].buffer, 0);
   } catch (...) {
     return false;
   }
@@ -731,24 +743,20 @@ const char *RayASBuildBench::GetComponent(uint32_t config_idx) const {
   return "Ray Tracing";
 }
 const char *RayASBuildBench::GetMetric(uint32_t config_idx) const {
-  if (config_idx >= 5) return "MInst/s";
+  if (config_idx >= 1) return "MInst/s";
   return "MTris/s";
 }
 const char *RayASBuildBench::GetSubCategory(uint32_t config_idx) const {
-  if (config_idx < 5) return "BLAS Build & Update";
+  if (config_idx == 0) return "BLAS Construction";
   return "TLAS Construction";
 }
 
 std::string RayASBuildBench::GetConfigName(uint32_t config_idx) const {
   switch (config_idx) {
-  case 0: return "BLAS Build (1M Tris)";
-  case 1: return "BLAS Update (1M Tris)";
-  case 2: return "BLAS Build (5M Tris)";
-  case 3: return "BLAS Update (5M Tris)";
-  case 4: return "BLAS Build (10M Tris)";
-  case 5: return "Indoor Corridor (20K Inst, 5K Meshes)";
-  case 6: return "Dense Jungle (50K Inst, 500 Meshes)";
-  case 7: return "Massive Open World (200K Inst, 5K Meshes)";
+  case 0: return "Batched BLAS Build (5M Tris, 256 Meshes)";
+  case 1: return "TLAS: Indoor Corridor (20K Inst)";
+  case 2: return "TLAS: Dense Jungle (50K Inst)";
+  case 3: return "TLAS: Massive Open World (200K Inst)";
   default: return "Unknown";
   }
 }

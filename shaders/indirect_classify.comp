@@ -2,7 +2,7 @@
 #extension GL_KHR_shader_subgroup_ballot : enable
 #extension GL_KHR_shader_subgroup_arithmetic : enable
 
-layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
 
 layout(set = 0, binding = 0) readonly buffer InputBuffer {
     uint inputItems[];
@@ -30,42 +30,55 @@ layout(push_constant) uniform PushConstants {
     uint totalWorkgroups;  // Total workgroups dispatched
 } pc;
 
+shared uint sSubgroupCount[16];
+shared uint sSubgroupOffset[16];
+shared uint sWgBase;
+
 void main() {
+    uint tid = gl_LocalInvocationID.x;
     uint gid = gl_GlobalInvocationID.x;
     bool activeItem = false;
     uint itemId = gid;
 
     if (gid < pc.totalItems) {
         itemId = inputItems[gid];
-        // Fast deterministic pseudo-random hash to determine selectivity
         uint hash = itemId * 2654435761u;
         activeItem = (hash % 100u) < pc.selectivity;
     }
 
-    // Subgroup-level compaction
+    // Subgroup ballot + workgroup LDS reduction: 1 global atomicAdd per 256-thread workgroup
     uvec4 ballot = subgroupBallot(activeItem);
     uint subgroupActive = subgroupBallotBitCount(ballot);
     uint laneOffset = subgroupBallotExclusiveBitCount(ballot);
 
-    uint baseSlot = 0;
-    if (subgroupElect() && subgroupActive > 0) {
-        baseSlot = atomicAdd(cmd.activeCount, subgroupActive);
+    if (subgroupElect()) {
+        sSubgroupCount[gl_SubgroupID] = subgroupActive;
     }
-    baseSlot = subgroupBroadcastFirst(baseSlot);
+    barrier();
+
+    if (tid == 0u) {
+        uint wgTotal = 0u;
+        for (uint s = 0u; s < gl_NumSubgroups; ++s) {
+            sSubgroupOffset[s] = wgTotal;
+            wgTotal += sSubgroupCount[s];
+        }
+        sWgBase = (wgTotal > 0u) ? atomicAdd(cmd.activeCount, wgTotal) : 0u;
+    }
+    barrier();
 
     if (activeItem) {
-        activeWorklist[baseSlot + laneOffset] = itemId;
+        activeWorklist[sWgBase + sSubgroupOffset[gl_SubgroupID] + laneOffset] = itemId;
     }
 
-    // Ensure all subgroups in this workgroup have finished updating cmd.activeCount
+    // Ensure all workgroups finish writing activeCount before final indirect sizing
     barrier();
     memoryBarrierBuffer();
-    if (gl_LocalInvocationIndex == 0u) {
+    if (tid == 0u) {
         uint finished = atomicAdd(cmd.workgroupsFinished, 1u);
         if (finished == pc.totalWorkgroups - 1u) {
             memoryBarrierBuffer();
             uint totalActive = atomicAdd(cmd.activeCount, 0u);
-            cmd.x = (totalActive + 63u) / 64u;
+            cmd.x = (totalActive + 255u) / 256u;
             cmd.y = (totalActive > 0u) ? 1u : 0u;
             cmd.z = (totalActive > 0u) ? 1u : 0u;
         }

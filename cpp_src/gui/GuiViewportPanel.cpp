@@ -490,7 +490,7 @@ void GuiApp::renderRayTracingViewport() {
         for (const auto& cat : m_categories) {
             for (const auto& sg : cat.subgroups) {
                 for (const auto& itm : sg.items) {
-                    if (itm.id == "RayScheduling" && (itm.configIndex == 2 || itm.configIndex == 6)) {
+                    if (itm.id == "RayScheduling" && (itm.configIndex == 2 || itm.configIndex == 5)) {
                         return itm.isSupported;
                     }
                 }

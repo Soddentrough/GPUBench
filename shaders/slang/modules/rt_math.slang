@@ -223,3 +223,14 @@ public void computePixelCoords(uint idx, uint pattern, uint width, uint height, 
 public uint ballotFindLSB(uint4 b) {
     return (b.x != 0u) ? firstbitlow(b.x) : (32u + firstbitlow(b.y));
 }
+
+public uint giRayHash(float3 origin, uint packedDir, uint bounceIdx) {
+    uint h = asuint(origin.x) * 747796405u ^ asuint(origin.y) * 2891336453u
+           ^ asuint(origin.z) * 277803737u ^ packedDir * 1664525u ^ (bounceIdx * 2654435761u);
+    h ^= h >> 16u;
+    h *= 0x7feb352du;
+    h ^= h >> 15u;
+    h *= 0x846ca68bu;
+    h ^= h >> 16u;
+    return h;
+}

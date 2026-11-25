@@ -181,7 +181,7 @@ void GuiApp::applyVisualizationMetadata() {
                         viz.caption = "Top-Level AS (TLAS): 200K Open-World Instances across 5K BLAS Meshes";
                     } else {
                         viz.assetPath = "assets/thumbnails/thumb_blas_wireframe.png";
-                        viz.caption = "Bottom-Level Acceleration Structure (BLAS) Triangle Mesh BVH";
+                        viz.caption = "Batched Bottom-Level AS (BLAS): 256 Multi-Scale Meshes (5M Triangles)";
                     }
                     viz.diagramId = "bvh_rayquery";
                     viz.linkedViewportMode = 3;
@@ -248,7 +248,7 @@ void GuiApp::applyVisualizationMetadata() {
                         viz.caption = "ROCm/HIP Persistent Work-Queue Compaction (Classify + Fixed-Grid Consumer)";
                     } else {
                         viz.diagramId = "indirect_dispatch";
-                        viz.caption = (item.configIndex == 6)
+                        viz.caption = (item.configIndex == 7)
                             ? "GPU Sparse-Bucket Compaction -> 1x vkCmdExecuteGeneratedCommandsEXT (DGC ExecutionSet)"
                             : "GPU-Side Indirect Dispatch Argument Synthesis (vkCmdDispatchIndirect) vs CPU Direct";
                     }
@@ -327,14 +327,18 @@ void GuiApp::applyVisualizationMetadata() {
 void GuiApp::renderBenchmarkTooltip(const BenchmarkItem& item, const std::string& sceneOverride) {
     const BringUpColors c = activeBringUpColors();
     ImGui::BeginTooltip();
-    float wrapW = s(360.0f);
+    float wrapW = s(380.0f);
     ImGui::PushTextWrapPos(ImGui::GetCursorPos().x + wrapW);
 
     pushBoldFont();
-    ImGui::TextColored(c.phosphorHi, "%s", item.name.c_str());
+    ImGui::PushStyleColor(ImGuiCol_Text, c.phosphorHi);
+    ImGui::TextWrapped("%s", item.name.c_str());
+    ImGui::PopStyleColor();
     popBoldFont();
-    ImGui::TextColored(c.textMuted, "%s  |  %s  |  UNIT: %s",
+    ImGui::PushStyleColor(ImGuiCol_Text, c.textMuted);
+    ImGui::TextWrapped("%s  |  %s  |  UNIT: %s",
                        item.category.c_str(), item.subcategory.c_str(), item.metricType.c_str());
+    ImGui::PopStyleColor();
     ImGui::Separator();
     ImGui::Spacing();
     ImGui::TextWrapped("%s", item.description.c_str());

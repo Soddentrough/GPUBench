@@ -114,33 +114,43 @@ TEST_CASE(DescriptionsAndThumbnails, LdsBankConflictConfigs) {
 TEST_CASE(DescriptionsAndThumbnails, IndirectSynthesisConfigs) {
   InShaderIndirectBench ind;
   ASSERT_EQ(std::string(ind.GetComponent()), "Scheduling");
-  ASSERT_EQ(ind.GetNumConfigs(), 7u);
+  ASSERT_EQ(ind.GetNumConfigs(), 8u);
   ASSERT_EQ(ind.GetConfigName(0), "CPU Direct Fixed Grid (100% Active)");
   ASSERT_EQ(ind.GetConfigName(1), "CPU Direct Fixed Grid (10% Active)");
   ASSERT_EQ(ind.GetConfigName(2), "Legacy Indirect Dispatch (100% Active)");
   ASSERT_EQ(ind.GetConfigName(3), "Legacy Indirect Dispatch (10% Active)");
   ASSERT_EQ(ind.GetConfigName(4), "Legacy Zero-Dispatch Pruning (0% Active)");
-  ASSERT_EQ(ind.GetConfigName(5), "Multi-Bucket 128x Sparse (Legacy vkCmdDispatchIndirect)");
-  ASSERT_EQ(ind.GetConfigName(6), "Multi-Bucket 128x Sparse (DGC ExecutionSet + Pruning)");
+  ASSERT_EQ(ind.GetConfigName(5), "Multi-Bucket 1024x Sparse (CPU Direct Fixed Grid)");
+  ASSERT_EQ(ind.GetConfigName(6), "Multi-Bucket 1024x Sparse (Legacy vkCmdDispatchIndirect)");
+  ASSERT_EQ(ind.GetConfigName(7), "Multi-Bucket 1024x Sparse (DGC ExecutionSet + Pruning)");
 }
 
 TEST_CASE(DescriptionsAndThumbnails, RaySchedulingConfigsCount) {
   RaySchedulingBench rs(RaySchedulingBench::SceneType::Showroom);
-  ASSERT_EQ(rs.GetNumConfigs(), 28u);
+  ASSERT_EQ(rs.GetNumConfigs(), 21u);
   ASSERT_EQ(rs.GetConfigName(0), "Stage: Material Shading (Megakernel)");
   ASSERT_EQ(rs.GetConfigName(1), "Stage: Material Shading (Legacy Indirect)");
   ASSERT_EQ(rs.GetConfigName(2), "Stage: Material Shading (DGC ExecutionSet)");
-  ASSERT_EQ(rs.GetConfigName(4), "Scene Render: Full Frame (Megakernel)");
-  ASSERT_EQ(rs.GetConfigName(5), "Scene Render: Full Frame (Legacy Indirect)");
-  ASSERT_EQ(rs.GetConfigName(6), "Scene Render: Full Frame (DGC ExecutionSet)");
-  ASSERT_EQ(rs.GetConfigName(13), "Primary Rays (Compute Megakernel)");
-  ASSERT_EQ(rs.GetConfigName(19), "Stage: Directional Shadows (Megakernel)");
-  ASSERT_EQ(rs.GetConfigName(21), "Stage: Multi-Light - 128 Lights (Megakernel)");
-  ASSERT_EQ(rs.GetConfigName(22), "Stage: Multi-Light - 128 Lights (DGC Light Binning)");
-  ASSERT_EQ(rs.GetConfigName(23), "Stage: Traversal Divergence - Alpha Cutout Geometry");
+  ASSERT_EQ(rs.GetConfigName(4), "Path Tracing (1 SPP) (Megakernel)");
+  ASSERT_EQ(rs.GetConfigName(5), "Path Tracing (1 SPP) (DGC)");
+  ASSERT_EQ(rs.GetConfigName(9), "Primary Rays (Compute Megakernel)");
+  ASSERT_EQ(rs.GetConfigName(12), "Incoherent Diffuse GI (Megakernel)");
+  ASSERT_EQ(rs.GetConfigName(13), "Incoherent Diffuse GI (DGC)");
+  ASSERT_EQ(rs.GetConfigName(14), "Stage: Multi-Light - 128 Lights (Megakernel)");
+  ASSERT_EQ(rs.GetConfigName(15), "Stage: Multi-Light - 128 Lights (DGC Light Binning)");
+  ASSERT_EQ(rs.GetConfigName(16), "Stage: Traversal Divergence - Alpha Cutout Geometry");
 }
 
 TEST_CASE(DescriptionsAndThumbnails, RayHardwareTraversalAndDivergenceConfigs) {
+  RayASBuildBench asbuild;
+  ASSERT_EQ(asbuild.GetNumConfigs(), 4u);
+  ASSERT_EQ(asbuild.GetConfigName(0), "Batched BLAS Build (5M Tris, 256 Meshes)");
+  ASSERT_EQ(asbuild.GetConfigName(1), "TLAS: Indoor Corridor (20K Inst)");
+  ASSERT_EQ(asbuild.GetConfigName(2), "TLAS: Dense Jungle (50K Inst)");
+  ASSERT_EQ(asbuild.GetConfigName(3), "TLAS: Massive Open World (200K Inst)");
+  ASSERT_EQ(std::string(asbuild.GetMetric(0)), "MTris/s");
+  ASSERT_EQ(std::string(asbuild.GetMetric(1)), "MInst/s");
+
   RayRawTraversalBench raw;
   ASSERT_EQ(raw.GetNumConfigs(), 2u);
   ASSERT_EQ(raw.GetConfigName(0), "Raw BVH - Coherent Triangle Traversal (Max Occupancy)");

@@ -29,7 +29,7 @@ std::vector<ResultData> RunBenchmarksAPI(
     std::atomic<bool>* cancel_token = nullptr,
     bool quiet = false,
     const std::vector<std::string>& selected_workloads = {},
-    uint32_t bounce_depth = 2);
+    uint32_t bounce_depth = 5);
 
 struct DeviceProfile {
     std::string backend;

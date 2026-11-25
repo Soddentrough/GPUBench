@@ -306,20 +306,41 @@ void main(uint3 gid : SV_DispatchThreadID, uint gidx : SV_GroupIndex, uint3 wgid
             threadHits++;
             float3 hitPos = rayOrigin + rayDir * t1;
             float3 normal = computeSmoothNormal(vbuf, pc.sceneType, pc.isGltf, prim1, hitPos, rayDir, bary1);
-            float u1 = randFloat(rngState);
-            float u2 = randFloat(rngState);
-            float3 incohDir = quantizeOctDir(alignToNormal(cosineSampleHemisphere(u1, u2), normal));
-
-            threadRays++;
             float tMaxSec = (pc.isGltf != 0u) ? 5000.0 : ((pc.sceneType == SCENE_OUTDOOR_TERRAIN) ? 500.0 : 20.0);
             float rayOffset = (pc.isGltf != 0u) ? 0.05 : 0.005;
-            float3 secOrigin = hitPos + normal * rayOffset;
-            {
-                RayDesc secRay = { secOrigin, rayOffset, incohDir, tMaxSec };
+
+            float u1 = randFloat(rngState);
+            float u2 = randFloat(rngState);
+            float3 incohDir = alignToNormal(cosineSampleHemisphere(u1, u2), normal);
+            uint curPackedDir = packSnorm2x16_spv(octEncode(incohDir));
+            float3 curDir = octDecode(unpackSnorm2x16_spv(curPackedDir));
+            float3 curOrigin = hitPos + normal * rayOffset;
+
+            for (uint b = 1u; b <= 4u; ++b) {
+                threadRays++;
+                RayDesc secRay = { curOrigin, rayOffset, curDir, tMaxSec };
                 rq.TraceRayInline(topLevelAS, RAY_FLAG_FORCE_OPAQUE, 0xFFu, secRay);
                 while (rq.Proceed()) {}
-                if (rq.CommittedStatus() != COMMITTED_NOTHING) {
-                    threadHits++;
+                if (rq.CommittedStatus() != COMMITTED_TRIANGLE_HIT) {
+                    break;
+                }
+                threadHits++;
+                if (b < 4u) {
+                    uint h = giRayHash(curOrigin, curPackedDir, b);
+                    if (b >= 2u && randFloat(h) < 0.4) {
+                        break;
+                    }
+                    float b_t = rq.CommittedRayT();
+                    uint b_primId = rq.CommittedPrimitiveIndex();
+                    float2 b_bary = rq.CommittedTriangleBarycentrics();
+                    float3 b_hitPos = curOrigin + curDir * b_t;
+                    float3 b_normal = computeSmoothNormal(vbuf, pc.sceneType, pc.isGltf, b_primId, b_hitPos, curDir, b_bary);
+                    float bu1 = randFloat(h);
+                    float bu2 = randFloat(h);
+                    float3 nextDir = alignToNormal(cosineSampleHemisphere(bu1, bu2), b_normal);
+                    curPackedDir = packSnorm2x16_spv(octEncode(nextDir));
+                    curDir = octDecode(unpackSnorm2x16_spv(curPackedDir));
+                    curOrigin = b_hitPos + b_normal * rayOffset;
                 }
             }
         }
@@ -384,25 +405,26 @@ void main(uint3 gid : SV_DispatchThreadID, uint gidx : SV_GroupIndex, uint3 wgid
             float3 geomNormal = (pc.isGltf != 0u)
                 ? computeGltfGeomNormal(vbuf, primId, rayDir)
                 : computeSmoothNormal(vbuf, pc.sceneType, 0u, primId, hitPos, rayDir, rawBary);
+            geomNormal = quantizeOctDir(geomNormal);
 
+            uint lightIdx = (px_u + py_u * 2u) % 3u;
             float3 lightDir;
             float maxDist;
-            getShadowLightParams(pc.sceneType, 0u, lightDir, maxDist);
+            getShadowLightParams(pc.sceneType, lightIdx, lightDir, maxDist);
 
-            bool occluded = false;
+            float shadowVal = 0.95;
             if (dot(geomNormal, lightDir) > 0.0) {
-                threadRays++;
-                occluded = traceShadowRay(topLevelAS, rq, hitPos, geomNormal, lightDir, maxDist);
-                if (occluded) {
-                    threadHits++;
-                }
+                threadRays += 4u;
+                uint shRng = pixelIdx + pc.seed;
+                float vis = traceAreaShadow(topLevelAS, rq, hitPos, geomNormal, lightDir, maxDist, 0.045, shRng, 4);
+                threadHits += uint(round((1.0 - vis) * 4.0));
+                shadowVal = lerp(0.08, 0.95, vis);
             }
 
             if (pc.dumpRenders != 0u) {
-                float shadowVal = occluded ? 0.08 : 0.95;
                 fb[pixelIdx] = float4(float3(shadowVal), 1.0);
             } else {
-                threadLum = occluded ? 20u : 243u;
+                threadLum = uint(clamp(shadowVal, 0.0, 1.0) * 255.0 + 0.5);
             }
         } else {
             if (pc.dumpRenders != 0u) {

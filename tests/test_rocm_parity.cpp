@@ -429,9 +429,12 @@ TEST_CASE(ROCmParityValidation, ROCm_Indirect_SchedulingParity) {
     }
     ASSERT_FALSE(bench.IsConfigSupported(5, info, ctx.get()));
     ASSERT_FALSE(bench.IsConfigSupported(6, info, ctx.get()));
+    ASSERT_FALSE(bench.IsConfigSupported(7, info, ctx.get()));
     ASSERT_EQ(static_cast<int>(bench.GetConfigSupportLimitation(5, info, ctx.get())),
               static_cast<int>(IBenchmark::SupportLimitation::kApi));
     ASSERT_EQ(static_cast<int>(bench.GetConfigSupportLimitation(6, info, ctx.get())),
+              static_cast<int>(IBenchmark::SupportLimitation::kApi));
+    ASSERT_EQ(static_cast<int>(bench.GetConfigSupportLimitation(7, info, ctx.get())),
               static_cast<int>(IBenchmark::SupportLimitation::kApi));
 
     bench.Setup(*ctx, kdir);

@@ -326,7 +326,7 @@ if(Vulkan_FOUND)
 
         gpubench_add_slang_shader("rt_scheduling_reset.slang" "compute" "main" "spirv_1_6" "rt_scheduling_reset.comp.spv")
         gpubench_add_slang_shader("rt_scheduling_resolve.slang" "compute" "main" "spirv_1_6+spvGroupNonUniform+spvGroupNonUniformArithmetic" "rt_scheduling_resolve.comp.spv")
-        gpubench_add_slang_shader("rt_scheduling_dgc_shadow.slang" "compute" "main" "spirv_1_6+spvGroupNonUniform+spvGroupNonUniformArithmetic+spvRayQueryKHR" "rt_scheduling_device_generated_commands_shadow.comp.spv")
+        gpubench_add_slang_shader("rt_scheduling_dgc_shadow.slang" "compute" "main" "spirv_1_6+spvGroupNonUniform+spvGroupNonUniformArithmetic+spvGroupNonUniformBallot+spvRayQueryKHR" "rt_scheduling_device_generated_commands_shadow.comp.spv")
         gpubench_add_slang_shader("rt_scheduling_dgc_light.slang" "compute" "main" "spirv_1_6+spvGroupNonUniform+spvGroupNonUniformArithmetic+spvGroupNonUniformBallot+spvGroupNonUniformVote+spvGroupNonUniformShuffle" "rt_scheduling_device_generated_commands_light.comp.spv")
         gpubench_add_slang_shader("rt_scheduling_dgc_material.slang" "compute" "main" "spirv_1_6+spvGroupNonUniform+spvGroupNonUniformArithmetic+spvGroupNonUniformBallot+spvGroupNonUniformVote+spvGroupNonUniformShuffle" "rt_scheduling_device_generated_commands_material.comp.spv")
         gpubench_add_slang_shader("rt_scheduling_dgc_bounce.slang" "compute" "main" "spirv_1_6+spvGroupNonUniform+spvGroupNonUniformArithmetic+spvGroupNonUniformBallot+spvGroupNonUniformVote+spvGroupNonUniformShuffle+spvRayQueryKHR" "rt_scheduling_device_generated_commands_bounce.comp.spv")

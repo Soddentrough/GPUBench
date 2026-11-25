@@ -4079,8 +4079,10 @@ void VulkanContext::dispatchWorkListSequence(
         maxSeq = std::min(maxSeq, 1u);
       } else if (dgcMode == 4u) {
         maxSeq = std::min(maxSeq, 3u);
-      } else if (dgcMode == 1u || dgcMode == 6u) {
+      } else if (dgcMode == 1u) {
         maxSeq = std::min(maxSeq, 8u);
+      } else if (dgcMode == 6u) {
+        maxSeq = std::min(maxSeq, 16u);
       }
       genCmds.maxSequenceCount = maxSeq;
       genCmds.sequenceCountAddress = dgcInfo->sequenceCountBuffer ?
@@ -4136,7 +4138,7 @@ void VulkanContext::dispatchWorkListSequence(
                                     resolveKernel->pipelineLayout, 0, 1, &resolveKernel->descriptorSet, 0, nullptr);
             uint32_t nextBounce = static_cast<uint32_t>(e + 1);
             uint32_t resetQueue = (nextBounce + 1 < entries.size()) ? static_cast<uint32_t>((nextBounce + 1) % 2) : 0xFFFFFFFFu;
-            struct { uint32_t resetQueue; uint32_t dgcMode; uint32_t bounceIndex; } rpcBounce{resetQueue, 3u, nextBounce};
+            struct { uint32_t resetQueue; uint32_t dgcMode; uint32_t bounceIndex; } rpcBounce{resetQueue, dgcMode, nextBounce};
             vkCmdPushConstants(frame.commandBuffer, resolveKernel->pipelineLayout,
                                VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(rpcBounce), &rpcBounce);
             vkCmdDispatch(frame.commandBuffer, 1, 1, 1);

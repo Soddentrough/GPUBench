@@ -1,5 +1,5 @@
 #version 460
-layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
 
 layout(set = 0, binding = 0) buffer InputBuffer {
     uint inputItems[];
@@ -32,7 +32,7 @@ void main() {
 
     // Identical representative compute arithmetic loop
     float val = float(itemId) * 0.001f;
-    for (int i = 0; i < 32; i++) {
+    for (int i = 0; i < 256; i++) {
         val = sin(val) * 1.05f + cos(val * 0.5f);
     }
 

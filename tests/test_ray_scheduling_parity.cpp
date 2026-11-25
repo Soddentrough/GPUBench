@@ -82,14 +82,10 @@ struct TestBody<RaySchedulingParityHelperTag> {
     static constexpr ParityPair kPairs[] = {
         {0u, 1u, "MaterialShading_LegacyIndirect", true},
         {0u, 2u, "MaterialShading_DGC", true},
-        {4u, 5u, "FullFramePBR_LegacyIndirect", true},
-        {4u, 6u, "FullFramePBR_DGC", true},
-        {8u, 9u, "PathTracing_1SPP", true},
-        {11u, 12u, "PathTracing_16SPP", true},
-        {13u, 14u, "PrimaryGBuffer", true},
-        {17u, 18u, "IncoherentGI", false},
-        {19u, 20u, "DirectionalShadows", true},
-        {21u, 22u, "MultiLight_128", true},
+        {4u, 5u, "PathTracing_1SPP", true},
+        {7u, 8u, "PathTracing_16SPP", true},
+        {12u, 13u, "IncoherentGI", false},
+        {14u, 15u, "MultiLight_128", true},
     };
 
     const uint32_t zeroStats[4] = {0u, 0u, 0u, 0u};
@@ -209,29 +205,29 @@ struct TestBody<RaySchedulingParityHelperTag> {
     }
 
     if (info.dgcSupported) {
-      ASSERT_TRUE(verifiedPairs >= 8u);
+      ASSERT_TRUE(verifiedPairs >= 5u);
     }
   }
 };
 
 } // namespace gpubench::test
 
-TEST_CASE(RaySchedulingParity, Showroom_All9Pairs) {
+TEST_CASE(RaySchedulingParity, Showroom_All6Pairs) {
   ::gpubench::test::TestBody<::gpubench::test::RaySchedulingParityHelperTag>::runSceneParity(
       RaySchedulingBench::SceneType::Showroom, "Showroom");
 }
 
-TEST_CASE(RaySchedulingParity, IndoorAtrium_All9Pairs) {
+TEST_CASE(RaySchedulingParity, IndoorAtrium_All6Pairs) {
   ::gpubench::test::TestBody<::gpubench::test::RaySchedulingParityHelperTag>::runSceneParity(
       RaySchedulingBench::SceneType::IndoorAtrium, "IndoorAtrium");
 }
 
-TEST_CASE(RaySchedulingParity, OutdoorLandscape_All9Pairs) {
+TEST_CASE(RaySchedulingParity, OutdoorLandscape_All6Pairs) {
   ::gpubench::test::TestBody<::gpubench::test::RaySchedulingParityHelperTag>::runSceneParity(
       RaySchedulingBench::SceneType::OutdoorLandscape, "OutdoorLandscape");
 }
 
-TEST_CASE(RaySchedulingParity, AAAOutdoorForest_All9Pairs) {
+TEST_CASE(RaySchedulingParity, AAAOutdoorForest_All6Pairs) {
   ::gpubench::test::TestBody<::gpubench::test::RaySchedulingParityHelperTag>::runSceneParity(
       RaySchedulingBench::SceneType::AAAOutdoorForest, "AAAOutdoorForest");
 }

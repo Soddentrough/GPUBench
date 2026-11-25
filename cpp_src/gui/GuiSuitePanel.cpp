@@ -62,7 +62,7 @@ std::string subgroupTitleForCatalogEntry(const BenchmarkConfigMetadata& meta, st
         }
 #endif
         if (meta.benchmarkName.find("Async") != std::string::npos) {
-            return "Multi-Queue Async Compute (ACE) & Copy (SDMA) Overlap";
+            return "Async Compute (ACE) & Copy Overlap";
         }
         return "In-Shader Indirect Command Synthesis";
     }
@@ -92,9 +92,15 @@ std::string subgroupTitleForCatalogEntry(const BenchmarkConfigMetadata& meta, st
             return meta.subcategory.empty() ? "Scene Ray Scheduling" : meta.subcategory;
         }
         if (meta.benchmarkName.find("Opacity Micromap") != std::string::npos) {
-            return "Opacity Micromap Alpha-Cutout Traversal (OMM)";
+            return "Opacity Micromaps (OMM)";
         }
-        return "Hardware BVH Build, Traversal & Divergence Stress";
+        if (meta.benchmarkName == "RayASBuild") {
+            return "BVH Construction (BLAS / TLAS)";
+        }
+        if (meta.benchmarkName == "RayDivergence" || meta.benchmarkName == "RayPayload") {
+            return "Ray Divergence & Payload";
+        }
+        return "BVH Traversal & Intersection";
     }
 
     outCategory = "Compute";
@@ -114,7 +120,7 @@ std::string subgroupTitleForCatalogEntry(const BenchmarkConfigMetadata& meta, st
 bool isCoreSuiteSlot(const BenchmarkItem& itm, bool isRocm) {
     const bool indirectCore = isRocm
         ? (itm.id == "In-Shader Indirect Synthesis" && (itm.configIndex == 1 || itm.configIndex == 3))
-        : (itm.id == "In-Shader Indirect Synthesis" && (itm.configIndex == 5 || itm.configIndex == 6));
+        : (itm.id == "In-Shader Indirect Synthesis" && (itm.configIndex == 1 || itm.configIndex == 3 || itm.configIndex == 5 || itm.configIndex == 7));
     return itm.id == "FP32" || itm.id == "FP16" || itm.id == "BF16" ||
            itm.id == "FP8" || itm.id == "INT8" ||
            (itm.id == "Device Memory Bandwidth" && itm.configIndex == 0) ||
@@ -122,7 +128,7 @@ bool isCoreSuiteSlot(const BenchmarkItem& itm, bool isRocm) {
            itm.id == "L2 Cache Bandwidth" || itm.id == "L3 Cache Bandwidth" ||
            (itm.id == "PCIe & Host-Device Interconnect" && itm.configIndex <= 1) ||
            indirectCore ||
-           (itm.id == "RayScheduling" && (itm.configIndex <= 2 || itm.configIndex == 4 || itm.configIndex == 5 || itm.configIndex == 6));
+           (itm.id == "RayScheduling" && (itm.configIndex <= 2 || itm.configIndex == 4 || itm.configIndex == 5));
 }
 
 const char* shortCategoryTag(const std::string& name) {
@@ -203,7 +209,7 @@ std::string compactWorkloadSlotLabel(const std::string& fullName, const std::str
     if (!stripPrefixWithSep(out, subgroupName)) {
         static constexpr const char* kGroupPrefixes[] = {
             "Multi-Light Evaluation",
-            "Directional Shadows",
+            "Multi-Light",
             "BVH Traversal",
             "Queue Compaction",
             "Traversal Divergence",
@@ -230,6 +236,19 @@ std::string compactWorkloadSlotLabel(const std::string& fullName, const std::str
         {"INT32 Peak ILP (16 Chains)", "INT32 Peak ILP (16ch)"},
         {"Concurrent Mixed (FP32+INT32)", "FP32+INT32 Mixed"},
         {"Concurrent Mixed (FP32 + INT32)", "FP32+INT32 Mixed"},
+        {"Batched BLAS Build (5M Tris, 256 Meshes)", "Batched BLAS (5M, 256m)"},
+        {"TLAS: Indoor Corridor (20K Inst)", "TLAS: Indoor (20K Inst)"},
+        {"TLAS: Dense Jungle (50K Inst)", "TLAS: Jungle (50K Inst)"},
+        {"TLAS: Massive Open World (200K Inst)", "TLAS: Open World (200K)"},
+        {"Raw BVH - Coherent Triangle Traversal (Max Occupancy)", "Raw BVH: Coherent Triangles"},
+        {"Raw BVH - Deep Multi-Layer Box Stress", "Raw BVH: Deep Box Stress"},
+        {"100% Solid (Opaque Fast-Path Baseline)", "Any-Hit: 100% Opaque"},
+        {"50% Solid (Cutout Stress)", "Any-Hit: 50% Cutout"},
+        {"Spheres (AABB)", "Procedural AABB (Spheres)"},
+        {"Bounce Divergence: ", ""},
+        {"16B Payload (Shadow / AO Visibility Probe)", "16B Payload (Shadow/AO)"},
+        {"128B Payload (Real-Time Path Tracing & GI)", "128B Payload (Path Trace)"},
+        {"256B Payload (Production / Film BSDF & MIS)", "256B Payload (Film BSDF)"},
         {"(Device-Generated Commands (DGC))", "(DGC)"},
         {"Device-Generated Commands (DGC)", "DGC"},
         {"(DGC Light Binning)", "(DGC)"},
@@ -244,6 +263,12 @@ std::string compactWorkloadSlotLabel(const std::string& fullName, const std::str
         {"Wavefront Compaction (Ray Reordering)", "Wavefront (Reorder)"},
         {"RTP + Hardware SER", "RTP + SER"},
         {"Single Light", "1 Light"},
+        {"Multi-Bucket 1024x Sparse (CPU Direct Fixed Grid)", "Multi-Bucket 1024x (CPU)"},
+        {"Multi-Bucket 1024x Sparse (Legacy vkCmdDispatchIndirect)", "Multi-Bucket 1024x (Indirect)"},
+        {"Multi-Bucket 1024x Sparse (DGC ExecutionSet + Pruning)", "Multi-Bucket 1024x (DGC)"},
+        {"Legacy Indirect Dispatch", "Legacy Indirect"},
+        {"Legacy Zero-Dispatch Pruning (0% Active)", "Zero-Dispatch (0% Active)"},
+        {"Persistent Work-Queue Compaction", "Work-Queue Compaction"},
         {"In-Shader Indirect Synthesis", "Indirect"},
         {"In-Shader Zero-Dispatch ", "Zero-Dispatch "},
         {"CPU Direct Fixed Grid", "CPU Fixed Grid"}
@@ -371,7 +396,6 @@ void GuiApp::initializeBenchmarkCategories() {
             friendlyName = meta.configName.empty() ? meta.displayName : meta.configName;
         } else if (sgTitle.rfind("Compute Precision", 0) == 0 ||
                    sgTitle.rfind("Structured Sparsity", 0) == 0 ||
-                   sgTitle.rfind("Hardware BVH", 0) == 0 ||
                    sgTitle.rfind("Cache Hierarchy Bandwidth", 0) == 0 ||
                    sgTitle.rfind("Pointer-Chasing Latency", 0) == 0) {
             friendlyName = meta.displayName;
@@ -1095,12 +1119,17 @@ void GuiApp::renderBenchmarkSuitePanel() {
                     dl->AddRectFilled(hdrP0, ImVec2(hdrP0.x + toggleW, hdrP1.y), toU32(c.bgHover, 0.55f), 0.0f);
                 }
 
-                char hdrBuf[220];
-                std::snprintf(hdrBuf, sizeof(hdrBuf), "%s %s [%zu/%zu]",
-                              sg.collapsed ? "[+]" : "[-]", sg.name.c_str(), selectedCount, supportedCount);
-                std::string fittedHdr = fitTextToPixelWidth(hdrBuf, toggleW - s(10.0f));
-                dl->AddText(ImVec2(hdrP0.x + s(6.0f), hdrP0.y + (hdrH - ImGui::GetTextLineHeight()) * 0.5f),
-                            toU32(hdrHovered ? c.phosphorHi : c.textPrimary), fittedHdr.c_str());
+                char countBuf[32];
+                std::snprintf(countBuf, sizeof(countBuf), "[%zu/%zu]", selectedCount, supportedCount);
+                const float countW = ImGui::CalcTextSize(countBuf).x;
+                const std::string titleText = std::string(sg.collapsed ? "[+] " : "[-] ") + sg.name;
+                const float maxTitleW = std::max(s(40.0f), toggleW - s(16.0f) - countW);
+                const std::string fittedTitle = fitTextToPixelWidth(titleText, maxTitleW);
+                const float textY = hdrP0.y + (hdrH - ImGui::GetTextLineHeight()) * 0.5f;
+                dl->AddText(ImVec2(hdrP0.x + s(6.0f), textY),
+                            toU32(hdrHovered ? c.phosphorHi : c.textPrimary), fittedTitle.c_str());
+                dl->AddText(ImVec2(hdrP0.x + toggleW - s(6.0f) - countW, textY),
+                            toU32(c.textSecondary), countBuf);
 
                 if (!isRunning) {
                     ImGui::SameLine(0.0f, s(4.0f));
@@ -1125,8 +1154,8 @@ void GuiApp::renderBenchmarkSuitePanel() {
                                            ImGuiTableFlags_SizingStretchProp;
                 if (ImGui::BeginTable("SubgroupItemsTable", 4, tblFlags)) {
                     ImGui::TableSetupColumn("Arm",   ImGuiTableColumnFlags_WidthFixed,   s(22.0f));
-                    ImGui::TableSetupColumn("Slot",  ImGuiTableColumnFlags_WidthStretch, 0.58f);
-                    ImGui::TableSetupColumn("Score", ImGuiTableColumnFlags_WidthStretch, 0.42f);
+                    ImGui::TableSetupColumn("Slot",  ImGuiTableColumnFlags_WidthStretch, 0.67f);
+                    ImGui::TableSetupColumn("Score", ImGuiTableColumnFlags_WidthStretch, 0.33f);
                     ImGui::TableSetupColumn("Run",   ImGuiTableColumnFlags_WidthFixed,   s(24.0f));
 
                     for (size_t r = startIdx; r < endIdx; ++r) {

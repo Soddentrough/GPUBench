@@ -24,74 +24,90 @@ struct PushConstants {
 void main(uint3 gid : SV_DispatchThreadID) {
     uint threadIdx = gid.x;
     uint count = min(wlLoadSnapshot(worklist, pc.queueId), pc.queueCapacity);
+    if (count == 0u) return;
 
-    uint threadLum = 0u;
+    bool activeThread = (threadIdx < count);
+    float3 smoothNormal = float3(0.0);
+    uint pixelIdx = 0u;
+    float metallic = 0.0;
+    float3 albedo = float3(0.0);
+    float roughness = 0.5;
+    float3 viewDir = float3(0.0, 0.0, 1.0);
 
-    if (threadIdx < count) {
+    if (activeThread) {
         uint recordIdx = pc.queueId * pc.queueCapacity + threadIdx;
         uint4 raw = wlLoadRecordBits(worklist, recordIdx);
-        float3 smoothNormal = octDecode(unpackSnorm2x16_spv(raw.x));
-        uint pixelIdx = raw.y & 0x00FFFFFFu;
-        float metallic = float(raw.y >> 24u) * (1.0 / 255.0);
+        smoothNormal = octDecode(unpackSnorm2x16_spv(raw.x));
+        pixelIdx = raw.y & 0x00FFFFFFu;
+        metallic = float(raw.y >> 24u) * (1.0 / 255.0);
         float2 albRG = unpackHalf2x16_spv(raw.z);
         float2 albBR = unpackHalf2x16_spv(raw.w);
-        float3 albedo = float3(albRG, albBR.x);
-        float roughness = albBR.y;
+        albedo = float3(albRG, albBR.x);
+        roughness = albBR.y;
 
         Camera cam = getCamera(pc.sceneType, pc.isGltf);
         uint px_u = pixelIdx % pc.width;
         uint py_u = pixelIdx / pc.width;
         float3 inDir = makePrimaryRayDir(cam, px_u, py_u, pc.width, pc.height);
-        float3 viewDir = -inDir;
+        viewDir = -inDir;
+    }
 
-        float3 outRadiance;
-        if (pc.binIndex <= 1u || pc.binIndex == 0xFFFFFFFFu) {
+    float3 outRadiance = float3(0.0);
+    if (pc.binIndex <= 1u || pc.binIndex == 0xFFFFFFFFu) {
+        if (activeThread) {
             float3 L, C;
             getMultiLight(0u, 1u, pc.sceneType, L, C);
             outRadiance = evalCookTorranceDirect(smoothNormal, viewDir, L, C, albedo, roughness, metallic);
-        } else {
-            float3 totalRadiance = float3(0.0);
-            uint lane16 = WaveGetLaneIndex() & 15u;
-            uint qOct = WaveReadLaneFirst(pc.queueId & 7u);
-            uint oppositeOctant = (~qOct) & 7u;
-            bool has16 = ((WaveActiveBallot(true).x & 0xFFFFu) == 0xFFFFu);
+        }
+    } else {
+        float3 nMin = WaveActiveMin(activeThread ? smoothNormal : float3(1.0));
+        float3 nMax = WaveActiveMax(activeThread ? smoothNormal : float3(-1.0));
+        float3 totalRadiance = float3(0.0);
+        uint lane16 = WaveGetLaneIndex() & 15u;
+        bool has16 = ((WaveActiveBallot(true).x & 0xFFFFu) == 0xFFFFu);
 
-            for (uint b = 0u; b < 8u; ++b) {
-                if (b == oppositeOctant) continue;
-                float3 octSign = float3(
-                    (b & 1u) != 0u ? 1.0 : -1.0,
-                    (b & 2u) != 0u ? 1.0 : -1.0,
-                    (b & 4u) != 0u ? 1.0 : -1.0
-                );
-                float3 s = smoothNormal * octSign;
-                float maxDot = length(max(s, float3(0.0))) + min(s.x, 0.0) * 0.06 + min(s.y, 0.0) * 0.06 + min(s.z, 0.0) * 0.20;
-                if (WaveActiveAllTrue(maxDot <= 0.0)) continue;
+        for (uint b = 0u; b < 8u; ++b) {
+            float3 octSign = float3(
+                (b & 1u) != 0u ? 1.0 : -1.0,
+                (b & 2u) != 0u ? 1.0 : -1.0,
+                (b & 4u) != 0u ? 1.0 : -1.0
+            );
+            float3 sMax = max(nMin * octSign, nMax * octSign);
+            float octUpper = max(sMax.x, 0.0) * 0.98 + min(sMax.x, 0.0) * 0.06
+                           + max(sMax.y, 0.0) * 0.98 + min(sMax.y, 0.0) * 0.06
+                           + max(sMax.z, 0.0) * 0.90 + min(sMax.z, 0.0) * 0.20;
+            if (octUpper <= 0.0) continue;
 
-                if (has16) {
-                    float3 binL, binC;
-                    getMultiLight(b * 16u + lane16, 128u, pc.sceneType, binL, binC);
-                    for (uint li = 0u; li < 16u; ++li) {
-                        float3 L = WaveReadLaneAt(binL, li);
-                        float3 C = WaveReadLaneAt(binC, li);
-                        float NdotL = dot(smoothNormal, L);
-                        if (WaveActiveAllTrue(NdotL <= 0.0)) continue;
-                        if (NdotL > 0.0) {
-                            totalRadiance += evalCookTorranceDirect(smoothNormal, viewDir, L, C, albedo, roughness, metallic);
-                        }
+            if (has16) {
+                float3 binL, binC;
+                getMultiLight(b * 16u + lane16, 128u, pc.sceneType, binL, binC);
+                bool lightVisible = (dot(max(binL * nMin, binL * nMax), float3(1.0)) > 0.0);
+                uint visMask = WaveActiveBallot(lightVisible).x & 0xFFFFu;
+                while (visMask != 0u) {
+                    uint li = firstbitlow(visMask);
+                    visMask &= visMask - 1u;
+                    float3 L = WaveReadLaneAt(binL, li);
+                    float3 C = WaveReadLaneAt(binC, li);
+                    float NdotL = dot(smoothNormal, L);
+                    if (activeThread && NdotL > 0.0) {
+                        totalRadiance += evalCookTorranceDirect(smoothNormal, viewDir, L, C, albedo, roughness, metallic);
                     }
-                } else {
-                    for (uint li = 0u; li < 16u; ++li) {
-                        float3 L, C;
-                        getMultiLight(b * 16u + li, 128u, pc.sceneType, L, C);
-                        if (dot(smoothNormal, L) > 0.0) {
-                            totalRadiance += evalCookTorranceDirect(smoothNormal, viewDir, L, C, albedo, roughness, metallic);
-                        }
+                }
+            } else if (activeThread) {
+                for (uint li = 0u; li < 16u; ++li) {
+                    float3 L, C;
+                    getMultiLight(b * 16u + li, 128u, pc.sceneType, L, C);
+                    if (dot(smoothNormal, L) > 0.0) {
+                        totalRadiance += evalCookTorranceDirect(smoothNormal, viewDir, L, C, albedo, roughness, metallic);
                     }
                 }
             }
-            outRadiance = totalRadiance;
         }
+        outRadiance = totalRadiance;
+    }
 
+    uint threadLum = 0u;
+    if (activeThread) {
         if (pc.dumpRenders != 0u) {
             fb[pixelIdx] = float4(tonemapACES(outRadiance), 1.0);
         } else {

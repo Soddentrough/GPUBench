@@ -125,7 +125,7 @@ private:
   std::string sceneName = "all";
   uint32_t renderWidth = 3840;
   uint32_t renderHeight = 2160;
-  uint32_t bounceDepth = 2;
+  uint32_t bounceDepth = 5;
   uint32_t samplesPerPixel = 1;
   int targetConfig = -1;
   bool profileSnapshot = false;

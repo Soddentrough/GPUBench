@@ -3,7 +3,7 @@ import rt_math;
 import rt_scene;
 import rt_pbr;
 
-[[vk::constant_id(0)]] const uint BOUNCE_MODE = 0u; // 0: Non-terminal PT, 1: Terminal PT, 2: Terminal Octants
+[[vk::constant_id(0)]] const uint BOUNCE_MODE = 0u; // 0: Non-terminal PT, 1: Terminal PT, 2: Non-terminal GI, 3: Terminal GI
 
 [[vk::binding(0, 0)]] RaytracingAccelerationStructure topLevelAS;
 [[vk::binding(1, 0)]] RWStructuredBuffer<Results> results;
@@ -31,8 +31,9 @@ struct PushConstants {
 void main(uint3 wgid : SV_GroupID, uint3 ltid : SV_GroupThreadID) {
     uint waveId = wgid.x;
     uint lid = ltid.x;
-    uint baseQ = (BOUNCE_MODE == 2u) ? 0u : ((pc.inQueue & 1u) * 8u);
-    uint numQ = (BOUNCE_MODE == 2u) ? 16u : 8u;
+    bool isGi = (BOUNCE_MODE >= 2u);
+    uint baseQ = (pc.inQueue & 1u) * 8u;
+    uint numQ = 8u;
     uint qPref = (lid < numQ) ? wlLoadPrefix(worklist, baseQ + lid) : 0xFFFFFFFFu;
     uint qSnap = (lid < numQ) ? wlLoadFastSnap(worklist, baseQ + lid) : 0u;
     uint4 geMask = WaveActiveBallot(waveId >= qPref);
@@ -43,7 +44,7 @@ void main(uint3 wgid : SV_GroupID, uint3 ltid : SV_GroupThreadID) {
 
     uint sampleSeed = 0u;
     uint packedMeta = 0u;
-    if (BOUNCE_MODE != 2u) {
+    if (!isGi) {
         if (lid == 0u) {
             sampleSeed = wlLoadSeed(worklist);
             packedMeta = wlLoadMeta(worklist);
@@ -68,14 +69,14 @@ void main(uint3 wgid : SV_GroupID, uint3 ltid : SV_GroupThreadID) {
 
     if (activeRay) {
         RayQuery<RAY_FLAG_NONE> rq;
-        uint recordIdx = (BOUNCE_MODE == 2u)
+        uint recordIdx = isGi
             ? (oct * pc.maxQueueSize + rayIdx)
             : ((oct * pc.maxQueueSize + rayIdx) * 2u);
         float4 p = wlLoadRecord(worklist, recordIdx);
         float3 origin = p.xyz;
         float3 direction = octDecode(unpackSnorm2x16_spv(asuint(p.w)));
 
-        float tMaxBounce = (BOUNCE_MODE == 2u)
+        float tMaxBounce = isGi
             ? ((pc.isGltf != 0u) ? 5000.0 : ((pc.sceneType == SCENE_OUTDOOR_TERRAIN) ? 500.0 : 20.0))
             : ((pc.isGltf != 0u) ? 5000.0 : ((pc.sceneType == SCENE_OUTDOOR_TERRAIN) ? 2500.0 : 50.0));
         float rayOffset = (pc.isGltf != 0u) ? 0.05 : 0.005;
@@ -96,9 +97,26 @@ void main(uint3 wgid : SV_GroupID, uint3 ltid : SV_GroupThreadID) {
             }
         }
 
-        if (BOUNCE_MODE == 2u) {
+        if (isGi) {
             if (hitFound) {
                 threadHits = 1u;
+                if (BOUNCE_MODE == 2u && pc.outQueue < 32u) {
+                    uint h = giRayHash(origin, asuint(p.w), pc.bounceIndex);
+                    if (pc.bounceIndex < 2u || randFloat(h) >= 0.4) {
+                        float3 b_hitPos = origin + direction * b_t;
+                        if (WaveActiveAllEqual(b_primId)) {
+                            b_primId = WaveReadLaneFirst(b_primId);
+                        }
+                        float3 b_normal = computeSmoothNormal(vbuf, pc.sceneType, pc.isGltf, b_primId, b_hitPos, direction, b_bary);
+                        float bu1 = randFloat(h);
+                        float bu2 = randFloat(h);
+                        float3 nextDir = alignToNormal(cosineSampleHemisphere(bu1, bu2), b_normal);
+                        uint nextPackedDir = packSnorm2x16_spv(octEncode(nextDir));
+                        float3 qNextDir = octDecode(unpackSnorm2x16_spv(nextPackedDir));
+                        nextRayOct = computeBounceOctant(pc.sceneType, qNextDir);
+                        nextRayPayload = float4(b_hitPos + b_normal * rayOffset, asfloat(nextPackedDir));
+                    }
+                }
             }
         } else {
             bool isTerminal = (BOUNCE_MODE != 0u) || (pc.outQueue >= 32u);
@@ -180,7 +198,7 @@ void main(uint3 wgid : SV_GroupID, uint3 ltid : SV_GroupThreadID) {
     }
 
     // Ping-Pong Subgroup Compaction into 8 Directional Octant Queues of outQueue Bank
-    if (BOUNCE_MODE == 0u && pc.outQueue < 32u) {
+    if ((BOUNCE_MODE == 0u || BOUNCE_MODE == 2u) && pc.outQueue < 32u) {
         uint outBaseQ = (pc.outQueue & 1u) * 8u;
         bool hasNext = (nextRayOct < 8u);
         uint waveOctMask = WaveActiveBitOr(hasNext ? (1u << nextRayOct) : 0u);
@@ -210,9 +228,13 @@ void main(uint3 wgid : SV_GroupID, uint3 ltid : SV_GroupThreadID) {
             if (hasNext) {
                 uint slot = myBase + mySlotInWave;
                 if (slot < pc.maxQueueSize) {
-                    uint outRecIdx = ((outBaseQ + nextRayOct) * pc.maxQueueSize + slot) * 2u;
-                    wlStoreRecord(worklist, outRecIdx, nextRayPayload);
-                    wlStoreRecord(worklist, outRecIdx + 1u, nextRayPayload1);
+                    if (BOUNCE_MODE == 2u) {
+                        wlStoreRecord(worklist, (outBaseQ + nextRayOct) * pc.maxQueueSize + slot, nextRayPayload);
+                    } else {
+                        uint outRecIdx = ((outBaseQ + nextRayOct) * pc.maxQueueSize + slot) * 2u;
+                        wlStoreRecord(worklist, outRecIdx, nextRayPayload);
+                        wlStoreRecord(worklist, outRecIdx + 1u, nextRayPayload1);
+                    }
                 }
             }
         }

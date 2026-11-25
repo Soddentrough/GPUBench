@@ -475,6 +475,12 @@ bool ResultImporter::loadFromString(const std::string &content, ImportedRun &out
           rd.benchmarkName = "Alpha Blending Fill";
           rd.sortWeight = 220;
           rd.configIndex = 2;
+        } else if (id == "rt_blas_build") {
+          rd.component = "Ray Tracing";
+          rd.subcategory = "BLAS Construction";
+          rd.benchmarkName = "RayASBuild (Batched BLAS Build (5M Tris, 256 Meshes))";
+          rd.sortWeight = 300;
+          rd.configIndex = 0;
         } else if (id == "rt_blas_build_1m") {
           rd.component = "Ray Tracing";
           rd.subcategory = "BLAS Construction";
@@ -508,21 +514,21 @@ bool ResultImporter::loadFromString(const std::string &content, ImportedRun &out
         } else if (id == "rt_tlas_indoor") {
           rd.component = "Ray Tracing";
           rd.subcategory = "TLAS Construction";
-          rd.benchmarkName = "TLAS: Indoor Corridor (20k Inst)";
+          rd.benchmarkName = "RayASBuild (TLAS: Indoor Corridor (20K Inst))";
           rd.sortWeight = 330;
-          rd.configIndex = 0;
+          rd.configIndex = 1;
         } else if (id == "rt_tlas_jungle") {
           rd.component = "Ray Tracing";
           rd.subcategory = "TLAS Construction";
-          rd.benchmarkName = "TLAS: Dense Jungle (50k Inst)";
+          rd.benchmarkName = "RayASBuild (TLAS: Dense Jungle (50K Inst))";
           rd.sortWeight = 335;
-          rd.configIndex = 1;
+          rd.configIndex = 2;
         } else if (id == "rt_tlas_openworld") {
           rd.component = "Ray Tracing";
           rd.subcategory = "TLAS Construction";
-          rd.benchmarkName = "TLAS: Open World (200k Inst)";
+          rd.benchmarkName = "RayASBuild (TLAS: Massive Open World (200K Inst))";
           rd.sortWeight = 340;
-          rd.configIndex = 2;
+          rd.configIndex = 3;
         } else if (id == "rt_triangle") {
           rd.component = "Ray Tracing";
           rd.subcategory = "Ray Intersection";
@@ -1076,12 +1082,13 @@ bool ResultImporter::loadFromString(const std::string &content, ImportedRun &out
         } else if (rd.benchmarkName.find("RayPayload") != std::string::npos) {
           rd.subcategory = "Payload Overhead";
           rd.sortWeight = 540;
-        } else if (rd.benchmarkName.find("BLAS Build") != std::string::npos) {
-          rd.subcategory = "BLAS Build & Update";
+        } else if (rd.benchmarkName.find("BLAS Build") != std::string::npos ||
+                   rd.benchmarkName.find("Batched BLAS") != std::string::npos) {
+          rd.subcategory = "BLAS Construction";
           rd.sortWeight = 550;
           if (!hasExplicitConfigIndex) rd.configIndex = 0;
         } else if (rd.benchmarkName.find("BLAS Update") != std::string::npos) {
-          rd.subcategory = "BLAS Build & Update";
+          rd.subcategory = "BLAS Construction";
           rd.sortWeight = 550;
           if (!hasExplicitConfigIndex) rd.configIndex = 1;
         } else if (rd.benchmarkName.find("TLAS Build") != std::string::npos) {

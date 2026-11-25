@@ -23,7 +23,7 @@ public:
     AAAOutdoorForest = 3
   };
 
-  static constexpr uint32_t kNumConfigs = 28u;
+  static constexpr uint32_t kNumConfigs = 21u;
 
   RaySchedulingBench(SceneType scene = SceneType::IndoorAtrium) : sceneType(scene) {}
 
@@ -79,17 +79,17 @@ public:
 
   BenchmarkResult GetResult(uint32_t config_idx = 0) const override;
   uint32_t GetSamplesPerFrame(uint32_t config_idx = 0) const override {
-    if (config_idx == 11u || config_idx == 12u) {
+    if (config_idx == 7u || config_idx == 8u) {
       return (lastCompletedPasses[config_idx] > 0) ? lastCompletedPasses[config_idx] : 16u;
     }
-    if (config_idx >= 8u && config_idx <= 10u) {
+    if (config_idx >= 4u && config_idx <= 6u) {
       return (samplesPerPixel > 1) ? samplesPerPixel : 1u;
     }
     return 1u;
   }
   bool ValidateResults(uint32_t config_idx = 0) const override;
   int GetSortWeight(uint32_t config_idx = 0) const override;
-  uint32_t GetExpectedKernelCount() const override { return 31; }
+  uint32_t GetExpectedKernelCount() const override { return 26; }
 
   uint32_t GetNumConfigs() const override { return kNumConfigs; }
   std::vector<std::string> GetAliases() const override {
@@ -107,24 +107,23 @@ public:
   int32_t GetBaselineConfigIndex(uint32_t config_idx) const override;
   const char *GetMetric(uint32_t config_idx = 0) const override {
     if (config_idx <= 3u) return "MHits/s";
-    if (config_idx == 26u || config_idx == 27u) return "MRecords/s";
+    if (config_idx == 19u || config_idx == 20u) return "MRecords/s";
     return "MRays/s";
   }
   void SetVerifyParity(bool verify) override { verifyParity = verify; }
   bool GetVerifyParity() const { return verifyParity; }
   bool HasParityFailure() const override { return parityFailure; }
   static constexpr bool isSERConfigIdx(uint32_t c) {
-    return c == 3u || c == 7u || c == 10u || c == 16u;
+    return c == 3u || c == 6u || c == 11u;
   }
   static constexpr bool isDGCExecutionSetConfigIdx(uint32_t c) {
-    return c == 2u || c == 6u;
+    return c == 2u;
   }
   static constexpr bool isStandardDGCConfigIdx(uint32_t c) {
-    return c == 9u || c == 12u || c == 14u ||
-           c == 18u || c == 20u || c == 22u;
+    return c == 5u || c == 8u || c == 13u || c == 15u;
   }
   static constexpr bool isShowroomOnlyConfigIdx(uint32_t c) {
-    return c >= 24u && c <= 27u;
+    return c >= 17u && c <= 20u;
   }
   bool IsConfigSupported(uint32_t config_idx) const override {
     return config_idx < kNumConfigs && !unsupportedConfig[config_idx];
@@ -184,7 +183,7 @@ public:
     if (isSERConfigIdx(config_idx)) {
       return "VK_EXT_ray_tracing_invocation_reorder not supported by device/driver";
     }
-    if (config_idx == 15u) {
+    if (config_idx == 10u) {
       return "Vulkan Ray Tracing Pipeline unsupported or pipeline creation failed";
     }
     if (isDGCExecutionSetConfigIdx(config_idx)) {
@@ -223,7 +222,7 @@ public:
     return "";
   }
   SupportLimitation GetConfigSupportLimitation(uint32_t config_idx) const override {
-    if (isSERConfigIdx(config_idx) || config_idx == 15u ||
+    if (isSERConfigIdx(config_idx) || config_idx == 10u ||
         isDGCExecutionSetConfigIdx(config_idx) || isStandardDGCConfigIdx(config_idx)) {
       return SupportLimitation::kHardware;
     }
@@ -367,14 +366,13 @@ private:
   ComputeKernel kernelClassify = nullptr;
   ComputeKernel kernelClassifySpecialized[10] = {nullptr};
   ComputeKernel kernelMaterial = nullptr;
-  ComputeKernel kernelMaterialPrimary = nullptr;
   ComputeKernel kernelMaterialGltf = nullptr;
   ComputeKernel kernelMaterialProcedural = nullptr;
   ComputeKernel kernelMaterialSpecialized[8] = {nullptr};
   ComputeKernel kernelBounce = nullptr;
   ComputeKernel kernelBounceTerminal = nullptr;
+  ComputeKernel kernelBounceGiNonTerm = nullptr;
   ComputeKernel kernelBounceOctant = nullptr;
-  ComputeKernel kernelShadow = nullptr;
   ComputeKernel kernelMultiLight = nullptr;
   ComputeKernel kernelReset = nullptr;
   ComputeKernel kernelResolve = nullptr;
@@ -413,12 +411,9 @@ private:
   void buildAS();
 
   std::vector<VulkanContext::IndirectBatchEntry> materialBatches;
-  std::vector<VulkanContext::IndirectBatchEntry> primaryMaterialBatches;
   std::vector<VulkanContext::IndirectBatchEntry> materialBatchesBreakdown;
   std::vector<VulkanContext::IndirectBatchEntry> bounceBatches;
   std::vector<VulkanContext::IndirectBatchEntry> octantBatches;
-  std::vector<VulkanContext::IndirectBatchEntry> shadowBatches;
-  std::vector<VulkanContext::IndirectBatchEntry> shadowBinBatches;
   std::vector<VulkanContext::IndirectBatchEntry> multiLightBatchesSingle;
   std::vector<VulkanContext::IndirectBatchEntry> multiLightBatches128;
   void rebuildBounceBatches();
@@ -444,7 +439,7 @@ private:
   void rebuildDGCBounceBatches();
 #endif
 
-  uint32_t bounceDepth = 2;
+  uint32_t bounceDepth = 5;
   uint32_t samplesPerPixel = 1;
   uint32_t renderWidth = 1920;
   uint32_t renderHeight = 1080;

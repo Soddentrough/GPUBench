@@ -1,5 +1,7 @@
 import rt_types;
+import rt_math;
 import rt_scene;
+import rt_pbr;
 
 [[vk::binding(0, 0)]] RaytracingAccelerationStructure topLevelAS;
 [[vk::binding(1, 0)]] RWStructuredBuffer<Results> results;
@@ -24,37 +26,37 @@ void main(uint3 gid : SV_DispatchThreadID) {
     uint threadIdx = gid.x;
     uint count = min(wlLoadSnapshot(worklist, pc.queueId), pc.queueCapacity);
 
+    uint sampleSeed = 0u;
+    if (WaveIsFirstLane()) {
+        sampleSeed = wlLoadSeed(worklist);
+    }
+    sampleSeed = WaveReadLaneFirst(sampleSeed);
+
     uint threadHits = 0u;
     uint threadLum = 0u;
 
     if (threadIdx < count) {
         uint recordIdx = pc.queueId * pc.queueCapacity + threadIdx;
-        float4 p = wlLoadRecord(worklist, recordIdx);
-        float3 rayOrig = p.xyz;
-        uint pixelIdx = asuint(p.w);
+        float4 p0 = wlLoadRecord(worklist, recordIdx * 2u);
+        uint4 p1 = wlLoadRecordBits(worklist, recordIdx * 2u + 1u);
+        float3 hitPos = p0.xyz;
+        uint pixelIdx = asuint(p0.w);
+        float3 geomNormal = octDecode(unpackSnorm2x16_spv(p1.x));
 
         float3 lightDir;
         float maxDist;
         getShadowLightParams(pc.sceneType, pc.lightIndex, lightDir, maxDist);
 
-        bool occluded = false;
-        {
-            RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER | RAY_FLAG_FORCE_OPAQUE> sQuery;
-            RayDesc ray = { rayOrig, 0.05, lightDir, maxDist };
-            sQuery.TraceRayInline(topLevelAS, 0u, 0xFFu, ray);
-            while (sQuery.Proceed()) {}
-            occluded = (sQuery.CommittedStatus() != COMMITTED_NOTHING);
-        }
-
-        if (occluded) {
-            threadHits = 1u;
-        }
+        RayQuery<RAY_FLAG_NONE> sQuery;
+        uint shRng = pixelIdx + sampleSeed;
+        float vis = traceAreaShadow(topLevelAS, sQuery, hitPos, geomNormal, lightDir, maxDist, 0.045, shRng, 4);
+        threadHits = uint(round((1.0 - vis) * 4.0));
+        float shadowVal = lerp(0.08, 0.95, vis);
 
         if (pc.dumpRenders != 0u) {
-            float shadowVal = occluded ? 0.08 : 0.95;
             fb[pixelIdx] = float4(float3(shadowVal), 1.0);
         } else {
-            threadLum = occluded ? 20u : 243u;
+            threadLum = uint(clamp(shadowVal, 0.0, 1.0) * 255.0 + 0.5);
         }
     }
 

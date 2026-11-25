@@ -1,7 +1,7 @@
 #include <hip/hip_runtime.h>
 #include <cstdint>
 
-extern "C" __global__ __launch_bounds__(64) void run_benchmark(
+extern "C" __global__ __launch_bounds__(256) void run_benchmark(
     const uint32_t *__restrict__ inputItems,
     float *__restrict__ results,
     uint32_t selectivity,
@@ -18,7 +18,7 @@ extern "C" __global__ __launch_bounds__(64) void run_benchmark(
     }
 
     float val = static_cast<float>(itemId) * 0.001f;
-    for (int i = 0; i < 32; ++i) {
+    for (int i = 0; i < 256; ++i) {
         val = sinf(val) * 1.05f + cosf(val * 0.5f);
     }
     results[gid] = val;

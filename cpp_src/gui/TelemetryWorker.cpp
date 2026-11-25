@@ -65,6 +65,18 @@ void TelemetryWorker::refreshDevices() {
     discoverDevices();
 }
 
+size_t TelemetryWorker::computeUniqueGpuCount(size_t hwGpuCount,
+                                              const std::vector<DeviceProfile>& profiles) {
+    size_t profileGpuCount = 0;
+    for (const auto& prof : profiles) {
+        if (prof.deviceIndex == 0xFFFFFFFFu) {
+            continue;
+        }
+        profileGpuCount = std::max(profileGpuCount, static_cast<size_t>(prof.deviceIndex) + 1);
+    }
+    return std::max(hwGpuCount, profileGpuCount);
+}
+
 void TelemetryWorker::discoverDevices() {
     std::lock_guard<std::mutex> lock(m_mutex);
     m_pollStates.clear();
@@ -73,7 +85,8 @@ void TelemetryWorker::discoverDevices() {
     std::vector<GpuTelemetryData> hwGpus = HardwareTelemetry::queryAllGpus();
     std::vector<DeviceProfile> profiles = GetDeviceProfilesAPI();
 
-    size_t count = std::max(hwGpus.size(), profiles.size());
+    // GetDeviceProfilesAPI() returns one entry per backend per GPU; deduplicate by deviceIndex.
+    size_t count = computeUniqueGpuCount(hwGpus.size(), profiles);
     auto now = std::chrono::steady_clock::now();
 
     for (size_t i = 0; i < count; ++i) {

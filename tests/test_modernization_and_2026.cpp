@@ -495,8 +495,32 @@ TEST_CASE(ModernizationAnd2026, IsaDumper_HonestReportingAndHotLoopAccuracy) {
     }
   }
 
-  // 2. Unrolled indirect_worker (indirect config 3) must not fabricate a bogus prologue hot loop
+  // 2. Unrolled indirect_multibucket_worker (indirect config 7) must not fabricate a bogus prologue hot loop,
+  //    while non-unrolled indirect_worker (256-iter loop, indirect config 3) must report a genuine hot loop
   {
+    IsaDumperOptions optsMb;
+    optsMb.targets = {"indirect"};
+    optsMb.backends = {"vulkan"};
+    optsMb.configs = {7};
+    optsMb.deviceIndex = static_cast<int>(devIdx);
+    const IsaInspectionResult resMb = IsaDumper::inspect(optsMb);
+    ASSERT_TRUE(resMb.ok);
+    ASSERT_FALSE(resMb.artifacts.empty());
+    bool foundMbWorker = false;
+    for (const auto &art : resMb.artifacts) {
+      if (art.artifactFile == "indirect_multibucket_worker.comp.spv") {
+        foundMbWorker = true;
+        if (art.skipReason.empty() && !art.executables.empty()) {
+          const auto &exec = art.executables[0];
+          if (!exec.fullIsaLines.empty()) {
+            ASSERT_EQ(exec.hotLoopStartLine, -1);
+            ASSERT_TRUE(exec.hotLoopLines.empty());
+          }
+        }
+      }
+    }
+    ASSERT_TRUE(foundMbWorker);
+
     IsaDumperOptions opts;
     opts.targets = {"indirect"};
     opts.backends = {"vulkan"};
@@ -512,8 +536,8 @@ TEST_CASE(ModernizationAnd2026, IsaDumper_HonestReportingAndHotLoopAccuracy) {
         if (art.skipReason.empty() && !art.executables.empty()) {
           const auto &exec = art.executables[0];
           if (!exec.fullIsaLines.empty()) {
-            ASSERT_EQ(exec.hotLoopStartLine, -1);
-            ASSERT_TRUE(exec.hotLoopLines.empty());
+            ASSERT_GE(exec.hotLoopStartLine, 0);
+            ASSERT_FALSE(exec.hotLoopLines.empty());
           }
         }
       }
@@ -590,9 +614,9 @@ TEST_CASE(ModernizationAnd2026, IsaDumper_HonestReportingAndHotLoopAccuracy) {
   // 6. RayScheduling non-SER configs must never fall back to SER, and GUI benchmark names must resolve
   {
     ASSERT_TRUE(IsaDumper::isDeferredWarmupTarget("RayScheduling", 0));
-    ASSERT_TRUE(IsaDumper::isDeferredWarmupTarget("RayScheduling", 21));
+    ASSERT_TRUE(IsaDumper::isDeferredWarmupTarget("RayScheduling", 14));
     ASSERT_FALSE(IsaDumper::isDeferredWarmupTarget("RayScheduling", 3));
-    ASSERT_FALSE(IsaDumper::isDeferredWarmupTarget("RayScheduling", 22));
+    ASSERT_FALSE(IsaDumper::isDeferredWarmupTarget("RayScheduling", 15));
 
     auto inspectSingle = [&](const std::string &target, int cfg) {
       IsaDumperOptions opts;
@@ -603,21 +627,21 @@ TEST_CASE(ModernizationAnd2026, IsaDumper_HonestReportingAndHotLoopAccuracy) {
       return IsaDumper::inspect(opts);
     };
 
-    const IsaInspectionResult rs22 = inspectSingle("RayScheduling", 22);
-    ASSERT_TRUE(rs22.ok);
-    ASSERT_EQ(rs22.artifacts.size(), size_t{1});
-    ASSERT_EQ(rs22.artifacts[0].configIndex, 22);
-    ASSERT_EQ(rs22.artifacts[0].artifactFile,
-              std::string("rt_scheduling_device_generated_commands_light.comp.spv"));
-    ASSERT_TRUE(rs22.artifacts[0].skipReason.empty());
-    ASSERT_FALSE(rs22.artifacts[0].executables.empty());
-
     const IsaInspectionResult rs15 = inspectSingle("RayScheduling", 15);
     ASSERT_TRUE(rs15.ok);
     ASSERT_EQ(rs15.artifacts.size(), size_t{1});
-    ASSERT_EQ(rs15.artifacts[0].artifactFile, std::string("rt_scheduling.rgen.spv"));
+    ASSERT_EQ(rs15.artifacts[0].configIndex, 15);
+    ASSERT_EQ(rs15.artifacts[0].artifactFile,
+              std::string("rt_scheduling_device_generated_commands_light.comp.spv"));
+    ASSERT_TRUE(rs15.artifacts[0].skipReason.empty());
+    ASSERT_FALSE(rs15.artifacts[0].executables.empty());
+
+    const IsaInspectionResult rs10 = inspectSingle("RayScheduling", 10);
+    ASSERT_TRUE(rs10.ok);
+    ASSERT_EQ(rs10.artifacts.size(), size_t{1});
+    ASSERT_EQ(rs10.artifacts[0].artifactFile, std::string("rt_scheduling.rgen.spv"));
     if (info.rayTracingSupport) {
-      ASSERT_TRUE(rs15.artifacts[0].skipReason.empty());
+      ASSERT_TRUE(rs10.artifacts[0].skipReason.empty());
     }
 
     const IsaInspectionResult rs3 = inspectSingle("RayScheduling", 3);
@@ -676,11 +700,11 @@ TEST_CASE(ModernizationAnd2026, IsaDumper_HonestReportingAndHotLoopAccuracy) {
     ASSERT_EQ(ind1.artifacts.size(), size_t{1});
     ASSERT_EQ(ind1.artifacts[0].artifactFile, std::string("direct_worker.comp.spv"));
 
-    const IsaInspectionResult ind6 = inspectSingle("In-Shader Indirect Synthesis", 6);
-    ASSERT_TRUE(ind6.ok);
-    ASSERT_FALSE(ind6.artifacts.empty());
+    const IsaInspectionResult ind7 = inspectSingle("In-Shader Indirect Synthesis", 7);
+    ASSERT_TRUE(ind7.ok);
+    ASSERT_FALSE(ind7.artifacts.empty());
     bool foundMbWorker = false;
-    for (const auto &art : ind6.artifacts) {
+    for (const auto &art : ind7.artifacts) {
       if (art.artifactFile == "indirect_multibucket_worker.comp.spv") {
         foundMbWorker = true;
       }
@@ -838,6 +862,49 @@ TEST_CASE(ModernizationAnd2026, TelemetryWorkerRecordsOnlyDuringRunAndStops) {
   }
 
   worker.stop();
+}
+
+TEST_CASE(ModernizationAnd2026, TelemetryWorkerDeduplicatesMultiBackendProfiles) {
+  std::vector<DeviceProfile> twoGpuMultiBackend(6);
+  twoGpuMultiBackend[0].backend = "Vulkan";
+  twoGpuMultiBackend[0].deviceIndex = 0;
+  twoGpuMultiBackend[1].backend = "Vulkan";
+  twoGpuMultiBackend[1].deviceIndex = 1;
+  twoGpuMultiBackend[2].backend = "ROCm";
+  twoGpuMultiBackend[2].deviceIndex = 0;
+  twoGpuMultiBackend[3].backend = "ROCm";
+  twoGpuMultiBackend[3].deviceIndex = 1;
+  twoGpuMultiBackend[4].backend = "OpenCL";
+  twoGpuMultiBackend[4].deviceIndex = 0;
+  twoGpuMultiBackend[5].backend = "OpenCL";
+  twoGpuMultiBackend[5].deviceIndex = 1;
+  ASSERT_EQ(gpubench::gui::TelemetryWorker::computeUniqueGpuCount(2, twoGpuMultiBackend), size_t{2});
+
+  std::vector<DeviceProfile> oneGpuTwoBackends(2);
+  oneGpuTwoBackends[0].backend = "Vulkan";
+  oneGpuTwoBackends[0].deviceIndex = 0;
+  oneGpuTwoBackends[1].backend = "ROCm";
+  oneGpuTwoBackends[1].deviceIndex = 0;
+  ASSERT_EQ(gpubench::gui::TelemetryWorker::computeUniqueGpuCount(1, oneGpuTwoBackends), size_t{1});
+
+  std::vector<DeviceProfile> withSentinel(2);
+  withSentinel[0].deviceIndex = 0;
+  withSentinel[1].deviceIndex = 0xFFFFFFFFu;
+  ASSERT_EQ(gpubench::gui::TelemetryWorker::computeUniqueGpuCount(1, withSentinel), size_t{1});
+
+  ASSERT_EQ(gpubench::gui::TelemetryWorker::computeUniqueGpuCount(2, {}), size_t{2});
+
+  const auto hwGpus = HardwareTelemetry::queryAllGpus();
+  const auto profiles = GetDeviceProfilesAPI();
+  gpubench::gui::TelemetryWorker worker;
+  const size_t expectedCount =
+      gpubench::gui::TelemetryWorker::computeUniqueGpuCount(hwGpus.size(), profiles);
+  ASSERT_EQ(static_cast<size_t>(worker.getDeviceCount()), expectedCount);
+  if (!hwGpus.empty()) {
+    ASSERT_EQ(static_cast<size_t>(worker.getDeviceCount()), hwGpus.size());
+    const auto outOfRange = HardwareTelemetry::queryGpu(static_cast<uint32_t>(hwGpus.size()));
+    ASSERT_FALSE(outOfRange.isAvailable);
+  }
 }
 
 TEST_CASE(ModernizationAnd2026, OpacityMicromapBirdCurveBijection) {

@@ -171,10 +171,10 @@ int main(int argc, char **argv) {
                  "Run specific benchmark configuration index(es) (0-based, comma-separated)")
       ->delimiter(',');
 
-  uint32_t bounce_depth = 2;
+  uint32_t bounce_depth = 5;
   app.add_option("--bounces", bounce_depth,
-                 "Ray tracing path tracing bounce depth (1..8, default: 2)")
-      ->check(CLI::Range(1u, 8u));
+                 "Ray tracing path tracing bounce depth (2..8, default: 5)")
+      ->check(CLI::Range(2u, 8u));
 
   uint32_t samples_per_pixel = 1;
   app.add_option("--spp", samples_per_pixel,

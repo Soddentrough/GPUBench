@@ -1,0 +1,40 @@
+#version 460
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) readonly buffer InputBuffer {
+    uint inputItems[];
+};
+
+layout(set = 0, binding = 1) buffer OutputBuffer {
+    float results[];
+};
+
+layout(push_constant) uniform PushConstants {
+    uint totalItems;
+    uint numBuckets;
+    uint bucketCapacity;
+    uint pad;
+} pc;
+
+void main() {
+    uint gid = gl_GlobalInvocationID.x;
+    if (gid >= pc.totalItems) {
+        return;
+    }
+
+    uint itemId = inputItems[gid];
+    uint bucket = (itemId * 2654435761u) & 1023u;
+    bool activeItem = (bucket == 3u || bucket == 292u || bucket == 617u || bucket == 942u);
+    if (!activeItem || bucket >= pc.numBuckets) {
+        return;
+    }
+
+    uint pipe = bucket & 7u;
+    float val = float(itemId) * 0.001f + (1.0f + 0.05f * float(pipe + 1u));
+    for (int i = 0; i < 64; ++i) {
+        val = sin(val) * 1.05f + cos(val * 0.5f);
+    }
+
+    results[itemId] = val;
+}

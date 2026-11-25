@@ -59,7 +59,7 @@ TEST_CASE(IndirectAndASBuildValidation, RayASBuild_NegativeValidation_ZeroedBlas
 
   bench.Setup(*ctx, kdir);
 
-  // 1. Run legitimate BLAS build (config 0: 1M Tris)
+  // 1. Run legitimate BLAS build (config 0: Batched BLAS Build (5M Tris, 256 Meshes))
   bench.Run(0);
   ctx->waitIdle();
 
@@ -79,6 +79,7 @@ TEST_CASE(IndirectAndASBuildValidation, RayASBuild_NegativeValidation_ZeroedBlas
   ASSERT_FALSE(zeroedValid);
 
   // 3. Out-of-bounds config index must return false
+  ASSERT_FALSE(bench.ValidateResults(4));
   bool oobValid = bench.ValidateResults(999);
   ASSERT_FALSE(oobValid);
 
@@ -104,12 +105,12 @@ TEST_CASE(IndirectAndASBuildValidation, RayASBuild_NegativeValidation_ZeroedTlas
 
   bench.Setup(*ctx, kdir);
 
-  // Run legitimate TLAS build (config 5: Indoor Corridor)
-  bench.Run(5);
+  // Run legitimate TLAS build (config 1: Indoor Corridor)
+  bench.Run(1);
   ctx->waitIdle();
 
   // Baseline validation must pass
-  bool baselineValid = bench.ValidateResults(5);
+  bool baselineValid = bench.ValidateResults(1);
   ASSERT_TRUE(baselineValid);
 
   // Deliberately zero out the TLAS header in GPU memory
@@ -120,7 +121,7 @@ TEST_CASE(IndirectAndASBuildValidation, RayASBuild_NegativeValidation_ZeroedTlas
   ctx->waitIdle();
 
   // Negative validation: ValidateResults MUST return false when TLAS buffer is zeroed!
-  bool zeroedValid = bench.ValidateResults(5);
+  bool zeroedValid = bench.ValidateResults(1);
   ASSERT_FALSE(zeroedValid);
 
   bench.Teardown();
@@ -154,15 +155,15 @@ TEST_CASE(IndirectAndASBuildValidation, InShaderIndirect_NegativeValidation_Indi
   bool zeroIndirectValid = bench.ValidateResults(2);
   ASSERT_FALSE(zeroIndirectValid); // Must fail because workgroupsFinished == 0
 
-  // Subcase B: Corrupt workgroupsFinished (e.g. 12345 instead of 65536)
-  TestGpuIndirectCommand corruptWgfCmd{65536, 1, 1, 4194304, 12345};
+  // Subcase B: Corrupt workgroupsFinished (e.g. 12345 instead of 16384)
+  TestGpuIndirectCommand corruptWgfCmd{16384, 1, 1, 4194304, 12345};
   ctx->writeBuffer(bench.indirectBuffer, 0, sizeof(corruptWgfCmd), &corruptWgfCmd);
   ctx->waitIdle();
   bool corruptWgfValid = bench.ValidateResults(2);
   ASSERT_FALSE(corruptWgfValid); // Must fail
 
-  // Subcase C: Corrupt cmd.x (0 instead of 65536 for 100% selectivity)
-  TestGpuIndirectCommand corruptXCmd{0, 1, 1, 4194304, 65536};
+  // Subcase C: Corrupt cmd.x (0 instead of 16384 for 100% selectivity)
+  TestGpuIndirectCommand corruptXCmd{0, 1, 1, 4194304, 16384};
   ctx->writeBuffer(bench.indirectBuffer, 0, sizeof(corruptXCmd), &corruptXCmd);
   ctx->waitIdle();
   bool corruptXValid = bench.ValidateResults(2);
@@ -172,7 +173,7 @@ TEST_CASE(IndirectAndASBuildValidation, InShaderIndirect_NegativeValidation_Indi
   bench.Run(4);
   ctx->waitIdle();
   ASSERT_TRUE(bench.ValidateResults(4));
-  TestGpuIndirectCommand corrupt0PctCmd{1, 1, 1, 100, 65536};
+  TestGpuIndirectCommand corrupt0PctCmd{1, 1, 1, 100, 16384};
   ctx->writeBuffer(bench.indirectBuffer, 0, sizeof(corrupt0PctCmd), &corrupt0PctCmd);
   ctx->waitIdle();
   bool corrupt0PctValid = bench.ValidateResults(4);
@@ -192,7 +193,7 @@ TEST_CASE(IndirectAndASBuildValidation, InShaderIndirect_NegativeValidation_Outp
   std::string kdir = KernelPath::find();
   ASSERT_FALSE(kdir.empty());
 
-  const std::vector<uint32_t> activeConfigs = {0, 1, 2, 3, 5, 6};
+  const std::vector<uint32_t> activeConfigs = {0, 1, 2, 3, 5, 6, 7};
 
   for (uint32_t cfgIdx : activeConfigs) {
     InShaderIndirectBench bench;
@@ -224,7 +225,7 @@ TEST_CASE(IndirectAndASBuildValidation, InShaderIndirect_NegativeValidation_Outp
   std::string kdir = KernelPath::find();
   ASSERT_FALSE(kdir.empty());
 
-  const std::vector<uint32_t> activeConfigs = {0, 1, 2, 3, 5, 6};
+  const std::vector<uint32_t> activeConfigs = {0, 1, 2, 3, 5, 6, 7};
 
   for (uint32_t cfgIdx : activeConfigs) {
     InShaderIndirectBench bench;
@@ -272,7 +273,7 @@ TEST_CASE(IndirectAndASBuildValidation, InShaderIndirect_NegativeValidation_Sing
   std::string kdir = KernelPath::find();
   ASSERT_FALSE(kdir.empty());
 
-  const std::vector<uint32_t> activeConfigs = {0, 1, 2, 3, 5, 6};
+  const std::vector<uint32_t> activeConfigs = {0, 1, 2, 3, 5, 6, 7};
 
   for (uint32_t cfgIdx : activeConfigs) {
     InShaderIndirectBench bench;
@@ -297,11 +298,11 @@ TEST_CASE(IndirectAndASBuildValidation, InShaderIndirect_NegativeValidation_Sing
         }
       }
       ctx->writeBuffer(bench.outputBuffer, targetGid * sizeof(float), sizeof(float), &badVal);
-    } else if (cfgIdx == 5 || cfgIdx == 6) {
+    } else if (cfgIdx == 5 || cfgIdx == 6 || cfgIdx == 7) {
       uint32_t targetGid = 0;
-      for (uint32_t gid = 0; gid < 4096; ++gid) {
-        uint32_t bucket = (gid * 2654435761u) & 127u;
-        if (bucket == 3u || bucket == 36u || bucket == 73u || bucket == 118u) {
+      for (uint32_t gid = 0; gid < 16384; ++gid) {
+        uint32_t bucket = (gid * 2654435761u) & 1023u;
+        if (bucket == 3u || bucket == 292u || bucket == 617u || bucket == 942u) {
           targetGid = gid;
           break;
         }
@@ -346,7 +347,7 @@ TEST_CASE(IndirectAndASBuildValidation, InShaderIndirect_PrunedConfig_ZeroWorkgr
   ASSERT_EQ(cmd.y, 0u);
   ASSERT_EQ(cmd.z, 0u);
   ASSERT_EQ(cmd.activeCount, 0u);
-  ASSERT_EQ(cmd.workgroupsFinished, 65536u);
+  ASSERT_EQ(cmd.workgroupsFinished, 16384u);
 
   std::vector<float> readback(1024, 0.0f);
   ctx->readBuffer(bench.outputBuffer, 0, readback.size() * sizeof(float), readback.data());
@@ -372,25 +373,29 @@ TEST_CASE(IndirectAndASBuildValidation, InShaderIndirect_PrunedConfig_ZeroWorkgr
   ctx->waitIdle();
   ASSERT_FALSE(bench.ValidateResults(4));
 
-  // Verify 128-Bucket Multi-Pipeline Legacy (5) and DGC ExecutionSet Pruning (6)
+  // Verify 1024-Bucket Multi-Pipeline CPU Direct (5), Legacy (6), and DGC ExecutionSet Pruning (7)
   bench.Run(5);
   ctx->waitIdle();
   ASSERT_TRUE(bench.ValidateResults(5));
 
-  if (bench.IsConfigSupported(6, ctx->getCurrentDeviceInfo(), ctx.get())) {
-    bench.Run(6);
+  bench.Run(6);
+  ctx->waitIdle();
+  ASSERT_TRUE(bench.ValidateResults(6));
+
+  if (bench.IsConfigSupported(7, ctx->getCurrentDeviceInfo(), ctx.get())) {
+    bench.Run(7);
     ctx->waitIdle();
-    ASSERT_TRUE(bench.ValidateResults(6));
+    ASSERT_TRUE(bench.ValidateResults(7));
 
     uint32_t seqCount = 0u;
     ctx->readBuffer(bench.mbDgcCountBuffer, 0, sizeof(seqCount), &seqCount);
     ASSERT_EQ(seqCount, 4u);
 
     // Negative check: corrupting seqCount away from 4 must fail validation
-    uint32_t badSeqCount = 128u;
+    uint32_t badSeqCount = 1024u;
     ctx->writeBuffer(bench.mbDgcCountBuffer, 0, sizeof(badSeqCount), &badSeqCount);
     ctx->waitIdle();
-    ASSERT_FALSE(bench.ValidateResults(6));
+    ASSERT_FALSE(bench.ValidateResults(7));
   }
 
   auto savedOutput = bench.outputBuffer;

@@ -20,12 +20,12 @@ struct GpuIndirectCommand {
 namespace {
 
 bool isMbActiveBucket(uint32_t bucket) {
-  return bucket == 3u || bucket == 36u || bucket == 73u || bucket == 118u;
+  return bucket == 3u || bucket == 292u || bucket == 617u || bucket == 942u;
 }
 
 float computeIndirectExpectedWorkerVal(uint32_t itemId) {
   float val = static_cast<float>(itemId) * 0.001f;
-  for (int i = 0; i < 32; ++i) {
+  for (int i = 0; i < 256; ++i) {
     val = std::sin(val) * 1.05f + std::cos(val * 0.5f);
   }
   return val;
@@ -34,7 +34,7 @@ float computeIndirectExpectedWorkerVal(uint32_t itemId) {
 float computeMbExpectedWorkerVal(uint32_t itemId, uint32_t specializedPipe) {
   float val = static_cast<float>(itemId) * 0.001f +
               (1.0f + 0.05f * static_cast<float>(specializedPipe + 1u));
-  for (int i = 0; i < 16; ++i) {
+  for (int i = 0; i < 64; ++i) {
     val = std::sin(val) * 1.05f + std::cos(val * 0.5f);
   }
   return val;
@@ -54,9 +54,11 @@ InShaderIndirectBench::InShaderIndirectBench() {
      "Sparse workload; GPU skips 90% of workgroups via synthesized grid sizing vs 10% CPU Direct"},
     {"Legacy Zero-Dispatch Pruning (0% Active)", IndirectBenchMode::GPU_Indirect, 0,
      "Hardware Command Processor instantaneously dismisses zero-workgroup (0,0,0) dispatches"},
-    {"Multi-Bucket 128x Sparse (Legacy vkCmdDispatchIndirect)", IndirectBenchMode::GPU_MultiBucket_Legacy, 0,
-     "128 specialized buckets (only 4 active) recorded via 128 CPU pipeline-bind + vkCmdDispatchIndirect calls"},
-    {"Multi-Bucket 128x Sparse (DGC ExecutionSet + Pruning)", IndirectBenchMode::GPU_MultiBucket_DGC, 0,
+    {"Multi-Bucket 1024x Sparse (CPU Direct Fixed Grid)", IndirectBenchMode::CPU_MultiBucket_Direct, 0,
+     "Host fixed grid dispatch over 1024 sparse buckets (only 4 active); baseline wasted wave occupancy"},
+    {"Multi-Bucket 1024x Sparse (Legacy vkCmdDispatchIndirect)", IndirectBenchMode::GPU_MultiBucket_Legacy, 0,
+     "1024 specialized buckets (only 4 active) recorded via 1024 CPU pipeline-bind + vkCmdDispatchIndirect calls"},
+    {"Multi-Bucket 1024x Sparse (DGC ExecutionSet + Pruning)", IndirectBenchMode::GPU_MultiBucket_DGC, 0,
      "Single vkCmdExecuteGeneratedCommandsEXT + VkIndirectExecutionSetEXT with on-GPU empty-bucket pruning"}
   };
 }
@@ -120,7 +122,7 @@ bool InShaderIndirectBench::IsConfigSupported(uint32_t config_idx,
   if (ctx && ctx->getBackend() == ComputeBackend::ROCm) {
     return config_idx <= 4u;
   }
-  if (config_idx == 6u) {
+  if (config_idx == 7u) {
 #ifdef HAVE_VULKAN
     if (const auto *vc = dynamic_cast<const VulkanContext *>(ctx)) {
       if (!vc->isDGCSupported() || !vc->isDGCExecutionSetSupported()) {
@@ -143,7 +145,7 @@ IBenchmark::SupportLimitation InShaderIndirectBench::GetConfigSupportLimitation(
   if (ctx && ctx->getBackend() != ComputeBackend::Vulkan) {
     return SupportLimitation::kApi;
   }
-  if (config_idx == 6u) {
+  if (config_idx == 7u) {
     bool basicDgc = info.dgcSupported;
     bool execSet = info.dgcExecutionSetSupported;
 #ifdef HAVE_VULKAN
@@ -170,7 +172,7 @@ std::string InShaderIndirectBench::GetSupportNote(const DeviceInfo & /*info*/,
 }
 
 std::string InShaderIndirectBench::GetConfigSupportNote(uint32_t config_idx) const {
-  if (config_idx == 6u && !mbDgcUnsupportedReason.empty()) {
+  if (config_idx == 7u && !mbDgcUnsupportedReason.empty()) {
     return mbDgcUnsupportedReason;
   }
   if (config_idx < configs.size()) {
@@ -183,9 +185,9 @@ std::string InShaderIndirectBench::GetConfigSupportNote(uint32_t config_idx,
                                                         const DeviceInfo &info,
                                                         IComputeContext *ctx) const {
   if (ctx && ctx->getBackend() == ComputeBackend::ROCm && config_idx >= 5u) {
-    return "128-bucket multi-pipeline indirect/DGC ExecutionSet requires Vulkan 1.4";
+    return "1024-bucket multi-pipeline indirect/DGC ExecutionSet requires Vulkan 1.4";
   }
-  if (config_idx == 6u) {
+  if (config_idx == 7u) {
     if (!mbDgcUnsupportedReason.empty()) {
       return mbDgcUnsupportedReason;
     }
@@ -278,7 +280,7 @@ void InShaderIndirectBench::Setup(IComputeContext &context_ref, const std::strin
     return;
   }
 
-  // Allocate Multi-Bucket 128x buffers (Vulkan only)
+  // Allocate Multi-Bucket 1024x buffers (Vulkan only)
   mbWorkListBuffer = context_ref.createBuffer(
       static_cast<size_t>(kMbNumBuckets) * kMbBucketCapacity * sizeof(uint32_t));
   std::vector<uint32_t> zeroCounts(kMbNumBuckets * 2u, 0u);
@@ -294,9 +296,14 @@ void InShaderIndirectBench::Setup(IComputeContext &context_ref, const std::strin
   mbDgcCountBuffer = context_ref.createBuffer(
       zeroDgcCount.size() * sizeof(uint32_t), zeroDgcCount.data());
 
+  std::filesystem::path mb_direct_path = kdir / "vulkan" / "indirect_multibucket_direct.comp";
   std::filesystem::path mb_classify_path = kdir / "vulkan" / "indirect_multibucket_classify.comp";
   std::filesystem::path mb_resolve_path = kdir / "vulkan" / "indirect_multibucket_resolve.comp";
   std::filesystem::path mb_worker_path = kdir / "vulkan" / "indirect_multibucket_worker.comp";
+
+  kernelMbDirect = context_ref.createKernel(mb_direct_path.string(), "main", 2);
+  context_ref.setKernelArg(kernelMbDirect, 0, inputBuffer);
+  context_ref.setKernelArg(kernelMbDirect, 1, outputBuffer);
 
   kernelMbClassify = context_ref.createKernel(mb_classify_path.string(), "main", 3);
   context_ref.setKernelArg(kernelMbClassify, 0, inputBuffer);
@@ -469,6 +476,17 @@ void InShaderIndirectBench::Run(uint32_t config_idx) {
 #endif
     context->dispatch(kernelReset, 1, 1, 1, 1, 1, 1);
     context->dispatch(kernelClassify, kTotalWorkgroups, 1, 1, kWorkgroupSize, 1, 1);
+  } else if (cfg.mode == IndirectBenchMode::CPU_MultiBucket_Direct) {
+#ifdef HAVE_VULKAN
+    struct MbClassifyPC {
+      uint32_t totalItems;
+      uint32_t numBuckets;
+      uint32_t bucketCapacity;
+      uint32_t pad;
+    } pcMb{kMbTotalItems, kMbNumBuckets, kMbBucketCapacity, 0u};
+    context->setKernelArg(kernelMbDirect, 2, sizeof(pcMb), &pcMb);
+    context->dispatch(kernelMbDirect, kMbTotalItems / kWorkgroupSize, 1, 1, kWorkgroupSize, 1, 1);
+#endif
   } else if (cfg.mode == IndirectBenchMode::GPU_MultiBucket_Legacy) {
 #ifdef HAVE_VULKAN
     auto *vContext = dynamic_cast<VulkanContext *>(context);
@@ -556,6 +574,10 @@ void InShaderIndirectBench::Teardown() {
     if (kernelDirectWorker) {
       context->releaseKernel(kernelDirectWorker);
       kernelDirectWorker = nullptr;
+    }
+    if (kernelMbDirect) {
+      context->releaseKernel(kernelMbDirect);
+      kernelMbDirect = nullptr;
     }
     if (kernelMbClassify) {
       context->releaseKernel(kernelMbClassify);
@@ -647,7 +669,7 @@ bool InShaderIndirectBench::ValidateResults(uint32_t config_idx) const {
         return false;
       }
 
-      uint32_t expectedX = (cmd.activeCount + 63u) / 64u;
+      uint32_t expectedX = (cmd.activeCount + kWorkgroupSize - 1u) / kWorkgroupSize;
       if (cmd.x != expectedX) {
         std::cerr << "InShaderIndirectBench validation failed (config "
                   << config_idx << "): cmd.x=" << cmd.x
@@ -657,7 +679,7 @@ bool InShaderIndirectBench::ValidateResults(uint32_t config_idx) const {
 
       if (cfg.selectivity == 100) {
         if (cmd.activeCount != kTotalItems ||
-            cmd.x != (kTotalItems + 63u) / 64u) {
+            cmd.x != (kTotalItems + kWorkgroupSize - 1u) / kWorkgroupSize) {
           std::cerr << "InShaderIndirectBench validation failed (100% active): "
                     << "activeCount=" << cmd.activeCount << ", cmd.x=" << cmd.x
                     << "\n";
@@ -713,6 +735,28 @@ bool InShaderIndirectBench::ValidateResults(uint32_t config_idx) const {
           }
         }
       }
+    } else if (cfg.mode == IndirectBenchMode::CPU_MultiBucket_Direct) {
+      constexpr uint32_t kCheckCount = 16384u;
+      std::vector<float> results(kCheckCount, 0.0f);
+      context->readBuffer(outputBuffer, 0, results.size() * sizeof(float), results.data());
+      uint32_t activeChecked = 0u;
+      for (uint32_t gid = 0; gid < kCheckCount; ++gid) {
+        uint32_t bucket = (gid * 2654435761u) & 1023u;
+        if (isMbActiveBucket(bucket)) {
+          float val = results[gid];
+          float expectedVal = computeMbExpectedWorkerVal(gid, bucket & 7u);
+          if (!std::isfinite(val) || std::abs(val - expectedVal) > 0.05f) {
+            std::cerr << "InShaderIndirectBench MultiBucket Direct validation failed (config "
+                      << config_idx << "): outputBuffer[" << gid << "] = "
+                      << val << ", expected " << expectedVal << "\n";
+            return false;
+          }
+          activeChecked++;
+        }
+      }
+      if (activeChecked == 0u) {
+        return false;
+      }
     } else if (cfg.mode == IndirectBenchMode::GPU_MultiBucket_Legacy ||
                cfg.mode == IndirectBenchMode::GPU_MultiBucket_DGC) {
       if (cfg.mode == IndirectBenchMode::GPU_MultiBucket_DGC && !mbDgcAvailable) {
@@ -759,12 +803,12 @@ bool InShaderIndirectBench::ValidateResults(uint32_t config_idx) const {
         }
       }
 
-      constexpr uint32_t kCheckCount = 4096u;
+      constexpr uint32_t kCheckCount = 16384u;
       std::vector<float> results(kCheckCount, 0.0f);
       context->readBuffer(outputBuffer, 0, results.size() * sizeof(float), results.data());
       uint32_t activeChecked = 0u;
       for (uint32_t gid = 0; gid < kCheckCount; ++gid) {
-        uint32_t bucket = (gid * 2654435761u) & 127u;
+        uint32_t bucket = (gid * 2654435761u) & 1023u;
         if (isMbActiveBucket(bucket)) {
           float val = results[gid];
           float expectedVal = computeMbExpectedWorkerVal(gid, bucket & 7u);
