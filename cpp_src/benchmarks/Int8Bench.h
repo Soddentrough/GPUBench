@@ -120,6 +120,36 @@ public:
     }
     return GetDescription(config_idx);
   }
+  using IBenchmark::GetExplanation;
+  BenchmarkExplanation GetExplanation(uint32_t config_idx = 0) const override {
+    if (config_idx == 0u) {
+      return {
+        "Packed 8-bit integer 4-element dot-product (DP4a / SDOT) throughput inside standard shader vector ALUs.",
+        "Used by fallback/shader-based AI upscalers (e.g., FSR / XeSS DP4a paths), quantized image filters, and integer compute without dedicated matrix cores.",
+        "Register-resident compute shader executing packed 4x INT8 dot-product-accumulate chains."
+      };
+    }
+    return {
+      "Hardware 8-bit integer (INT8) matrix-core throughput (WMMA / MFMA / Cooperative Matrix) with INT32 accumulation.",
+      "Powers quantized real-time AI upscaling (XeSS / FSR / DLSS paths), neural denoisers, and high-throughput quantized ML inference.",
+      "Subgroup-cooperative 16x16x16 INT8 matrix multiply-accumulate tile loop in registers."
+    };
+  }
+  BenchmarkExplanation GetExplanation(uint32_t config_idx, const DeviceInfo &info,
+                                      IComputeContext *context = nullptr) const override {
+    (void)info;
+    BenchmarkExplanation e = GetExplanation(config_idx);
+    if (context && context->getBackend() == ComputeBackend::ROCm) {
+      e.method = (config_idx == 0u)
+          ? "HIP kernel executing native packed INT8 dot-product instructions (v_dot4_i32_iu8)."
+          : "HIP kernel executing native INT8 WMMA / MFMA matrix-core tiles.";
+    } else if (context && context->getBackend() == ComputeBackend::Vulkan) {
+      e.method = (config_idx == 0u)
+          ? "Vulkan compute shader using GL_EXT_integer_dot_product / SPIR-V SDot instructions."
+          : "Vulkan compute shader using VK_KHR_cooperative_matrix INT8 tensor tiles.";
+    }
+    return e;
+  }
   double GetOperationalIntensity(uint32_t config_idx = 0) const override {
     // Config 0 (int8.comp): 16384 * 64 ops (1,048,576 IOPs) / (4 B read + 4 B write = 8 B) = 131,072.0 OP/B
     // Config 1 (coop_matrix_int8.comp): 32768 * 8192 IOPs / (256 B A + 256 B B + 1024 B C = 1536 B) = 174,762.67 OP/B

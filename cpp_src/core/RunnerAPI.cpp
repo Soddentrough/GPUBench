@@ -338,7 +338,17 @@ std::vector<BenchmarkConfigMetadata> buildBenchmarkCatalog(
             const char* desc = (info && ctx)
                 ? bench->GetDescription(ci, *info, ctx)
                 : bench->GetDescription(ci);
-            meta.description = desc ? desc : "";
+            BenchmarkExplanation exp = (info && ctx)
+                ? bench->GetExplanation(ci, *info, ctx)
+                : bench->GetExplanation(ci);
+            meta.whatItTests = exp.whatItTests;
+            meta.pipelineImpact = exp.pipelineImpact;
+            meta.method = exp.method;
+            if (desc && desc[0] != '\0') {
+                meta.description = desc;
+            } else {
+                meta.description = exp.formatSummary();
+            }
             meta.configCaveat = (info && ctx)
                 ? bench->GetConfigCaveat(ci, *info, ctx)
                 : bench->GetConfigCaveat(ci);

@@ -573,15 +573,15 @@ bool ResultImporter::loadFromString(const std::string &content, ImportedRun &out
           rd.subcategory = "Multi-Light Evaluation";
           rd.benchmarkName = "RayScheduling (Stage: Multi-Light - 128 Lights (Megakernel))";
           rd.sortWeight = 407;
-          rd.configIndex = 21;
+          rd.configIndex = 14;
           rd.baselineConfigIndex = -1;
         } else if (id == "rt_sched_multilight_128_dgc") {
           rd.component = "Ray Tracing";
           rd.subcategory = "Multi-Light Evaluation";
           rd.benchmarkName = "RayScheduling (Stage: Multi-Light - 128 Lights (DGC Light Binning))";
           rd.sortWeight = 408;
-          rd.configIndex = 22;
-          rd.baselineConfigIndex = 21;
+          rd.configIndex = 15;
+          rd.baselineConfigIndex = 14;
         } else if (id == "rt_sched_mat_trad") {
           rd.component = "Ray Tracing";
           rd.subcategory = "Material Shading";

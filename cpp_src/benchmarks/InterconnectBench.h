@@ -41,6 +41,10 @@ public:
   const char *GetDescription(uint32_t config_idx) const override;
   const char *GetDescription(uint32_t config_idx, const DeviceInfo &info,
                              IComputeContext *context = nullptr) const override;
+  using IBenchmark::GetExplanation;
+  BenchmarkExplanation GetExplanation(uint32_t config_idx = 0) const override;
+  BenchmarkExplanation GetExplanation(uint32_t config_idx, const DeviceInfo &info,
+                                      IComputeContext *context = nullptr) const override;
 
   bool IsSupported(const DeviceInfo &info,
                    IComputeContext *context = nullptr) const override;

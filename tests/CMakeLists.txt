@@ -19,6 +19,9 @@ set(TEST_SOURCES
     test_ray_scheduling_parity.cpp
     test_showcase_validation.cpp
     test_rocm_parity.cpp
+    test_gui_logic.cpp
+    test_runner_and_utils.cpp
+    test_opencl_validation.cpp
     ../cpp_src/gui/TelemetryWorker.cpp
 )
 
@@ -57,29 +60,32 @@ target_include_directories(gpubench_tests SYSTEM PRIVATE
 
 target_compile_definitions(gpubench_tests PRIVATE GPUBENCH_VERSION="${PROJECT_FULL_VERSION}")
 
-# Register individual test suites with CTest
-add_test(NAME DeviceDatabase COMMAND gpubench_tests --filter=DeviceDatabase)
-add_test(NAME JsonSerialization COMMAND gpubench_tests --filter=JsonSerialization)
-add_test(NAME MathAndParity COMMAND gpubench_tests --filter=MathAndParity)
-add_test(NAME BlockSuballocator COMMAND gpubench_tests --filter=BlockSuballocator)
-add_test(NAME KernelPath COMMAND gpubench_tests --filter=KernelPath)
-add_test(NAME PixelFill COMMAND gpubench_tests --filter=PixelFill)
-add_test(NAME DescriptionsAndThumbnails COMMAND gpubench_tests --filter=DescriptionsAndThumbnails)
-add_test(NAME E2E_Tier1 COMMAND gpubench_tests --filter=E2E_Tier1)
-add_test(NAME E2E_Tier2 COMMAND gpubench_tests --filter=E2E_Tier2)
-add_test(NAME E2E_Tier3 COMMAND gpubench_tests --filter=E2E_Tier3)
-add_test(NAME E2E_Tier4 COMMAND gpubench_tests --filter=E2E_Tier4)
-add_test(NAME IndirectAndASBuildValidation COMMAND gpubench_tests --filter=IndirectAndASBuildValidation)
-add_test(NAME TimingFidelity COMMAND gpubench_tests --filter=TimingFidelity)
-add_test(NAME LdsAndBf16Validation COMMAND gpubench_tests --filter=LdsAndBf16Validation)
-add_test(NAME ComputeValidation COMMAND gpubench_tests --filter=ComputeValidation)
-add_test(NAME MemoryAndCacheValidation COMMAND gpubench_tests --filter=MemoryAndCacheValidation)
-add_test(NAME GraphicsAndRayTracingValidation COMMAND gpubench_tests --filter=GraphicsAndRayTracingValidation)
-add_test(NAME RFC8259_JsonStress COMMAND gpubench_tests --filter=RFC8259_JsonStress)
-add_test(NAME ModernizationAnd2026 COMMAND gpubench_tests --filter=ModernizationAnd2026)
-add_test(NAME RaySchedulingParity COMMAND gpubench_tests --filter=RaySchedulingParity)
-add_test(NAME ShowcaseValidation COMMAND gpubench_tests --filter=ShowcaseValidation)
-add_test(NAME ROCmParityValidation COMMAND gpubench_tests --filter=ROCmParityValidation)
+# Register individual test suites with CTest (exact suite matching + skip exit code 77)
+add_test(NAME DeviceDatabase COMMAND gpubench_tests --suite=DeviceDatabase)
+add_test(NAME JsonSerialization COMMAND gpubench_tests --suite=JsonSerialization)
+add_test(NAME MathAndParity COMMAND gpubench_tests --suite=MathAndParity)
+add_test(NAME BlockSuballocator COMMAND gpubench_tests --suite=BlockSuballocator)
+add_test(NAME KernelPath COMMAND gpubench_tests --suite=KernelPath)
+add_test(NAME PixelFill COMMAND gpubench_tests --suite=PixelFill)
+add_test(NAME DescriptionsAndThumbnails COMMAND gpubench_tests --suite=DescriptionsAndThumbnails)
+add_test(NAME GuiLogic COMMAND gpubench_tests --suite=GuiLogic)
+add_test(NAME RunnerAndUtils COMMAND gpubench_tests --suite=RunnerAndUtils)
+add_test(NAME E2E_Tier1 COMMAND gpubench_tests --suite=E2E_Tier1)
+add_test(NAME E2E_Tier2 COMMAND gpubench_tests --suite=E2E_Tier2)
+add_test(NAME E2E_Tier3 COMMAND gpubench_tests --suite=E2E_Tier3)
+add_test(NAME E2E_Tier4 COMMAND gpubench_tests --suite=E2E_Tier4)
+add_test(NAME IndirectAndASBuildValidation COMMAND gpubench_tests --suite=IndirectAndASBuildValidation)
+add_test(NAME TimingFidelity COMMAND gpubench_tests --suite=TimingFidelity)
+add_test(NAME LdsAndBf16Validation COMMAND gpubench_tests --suite=LdsAndBf16Validation)
+add_test(NAME ComputeValidation COMMAND gpubench_tests --suite=ComputeValidation)
+add_test(NAME MemoryAndCacheValidation COMMAND gpubench_tests --suite=MemoryAndCacheValidation)
+add_test(NAME GraphicsAndRayTracingValidation COMMAND gpubench_tests --suite=GraphicsAndRayTracingValidation)
+add_test(NAME RFC8259_JsonStress COMMAND gpubench_tests --suite=RFC8259_JsonStress)
+add_test(NAME ModernizationAnd2026 COMMAND gpubench_tests --suite=ModernizationAnd2026)
+add_test(NAME RaySchedulingParity COMMAND gpubench_tests --suite=RaySchedulingParity)
+add_test(NAME ShowcaseValidation COMMAND gpubench_tests --suite=ShowcaseValidation)
+add_test(NAME ROCmParityValidation COMMAND gpubench_tests --suite=ROCmParityValidation)
+add_test(NAME OpenCLValidation COMMAND gpubench_tests --suite=OpenCLValidation)
 
 set_tests_properties(
     DeviceDatabase
@@ -87,13 +93,15 @@ set_tests_properties(
     MathAndParity
     BlockSuballocator
     KernelPath
+    PixelFill
     DescriptionsAndThumbnails
+    GuiLogic
+    RunnerAndUtils
     RFC8259_JsonStress
-    PROPERTIES WORKING_DIRECTORY "${CMAKE_BINARY_DIR}" LABELS "cpu"
+    PROPERTIES WORKING_DIRECTORY "${CMAKE_BINARY_DIR}" LABELS "cpu" SKIP_RETURN_CODE 77
 )
 
 set_tests_properties(
-    PixelFill
     E2E_Tier1
     E2E_Tier2
     E2E_Tier3
@@ -108,7 +116,8 @@ set_tests_properties(
     RaySchedulingParity
     ShowcaseValidation
     ROCmParityValidation
-    PROPERTIES WORKING_DIRECTORY "${CMAKE_BINARY_DIR}" RESOURCE_LOCK gpu_execution LABELS "gpu"
+    OpenCLValidation
+    PROPERTIES WORKING_DIRECTORY "${CMAKE_BINARY_DIR}" RESOURCE_LOCK gpu_execution LABELS "gpu" SKIP_RETURN_CODE 77
 )
 
 add_custom_target(check

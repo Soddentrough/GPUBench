@@ -44,22 +44,22 @@ float computeMbExpectedWorkerVal(uint32_t itemId, uint32_t specializedPipe) {
 
 InShaderIndirectBench::InShaderIndirectBench() {
   configs = {
-    {"CPU Direct Fixed Grid (100% Active)", IndirectBenchMode::CPU_Direct, 100,
-     "Host fixed grid dispatch with 100% item activity; baseline compute throughput"},
-    {"CPU Direct Fixed Grid (10% Active)", IndirectBenchMode::CPU_Direct, 10,
-     "Host fixed grid dispatch on sparse 10% active workload; shows wasted wave occupancy"},
-    {"Legacy Indirect Dispatch (100% Active)", IndirectBenchMode::GPU_Indirect, 100,
-     "Classifier synthesizes VkDispatchIndirectCommand on GPU; measures indirect dispatch overhead"},
-    {"Legacy Indirect Dispatch (10% Active)", IndirectBenchMode::GPU_Indirect, 10,
-     "Sparse workload; GPU skips 90% of workgroups via synthesized grid sizing vs 10% CPU Direct"},
-    {"Legacy Zero-Dispatch Pruning (0% Active)", IndirectBenchMode::GPU_Indirect, 0,
-     "Hardware Command Processor instantaneously dismisses zero-workgroup (0,0,0) dispatches"},
-    {"Multi-Bucket 1024x Sparse (CPU Direct Fixed Grid)", IndirectBenchMode::CPU_MultiBucket_Direct, 0,
-     "Host fixed grid dispatch over 1024 sparse buckets (only 4 active); baseline wasted wave occupancy"},
-    {"Multi-Bucket 1024x Sparse (Legacy vkCmdDispatchIndirect)", IndirectBenchMode::GPU_MultiBucket_Legacy, 0,
-     "1024 specialized buckets (only 4 active) recorded via 1024 CPU pipeline-bind + vkCmdDispatchIndirect calls"},
-    {"Multi-Bucket 1024x Sparse (DGC ExecutionSet + Pruning)", IndirectBenchMode::GPU_MultiBucket_DGC, 0,
-     "Single vkCmdExecuteGeneratedCommandsEXT + VkIndirectExecutionSetEXT with on-GPU empty-bucket pruning"}
+    {"Compute Fixed Grid - CPU Direct (100% Active)", IndirectBenchMode::CPU_Direct, 100,
+     "CPU-submitted fixed-grid compute dispatch with 100% item activity; baseline compute throughput"},
+    {"Compute Fixed Grid - CPU Direct (10% Active)", IndirectBenchMode::CPU_Direct, 10,
+     "CPU-submitted fixed-grid compute dispatch on a sparse 10% workload; measures wasted SIMD wave occupancy"},
+    {"GPU Indirect Compute Dispatch (100% Active)", IndirectBenchMode::GPU_Indirect, 100,
+     "GPU classify shader compacts items and writes VkDispatchIndirectCommand; isolates indirect dispatch overhead"},
+    {"GPU Indirect Compute Dispatch (10% Active)", IndirectBenchMode::GPU_Indirect, 10,
+     "Sparse 10% compute workload; GPU stream compaction + indirect dispatch skips 90% of empty workgroups"},
+    {"GPU Zero-Dispatch Pruning (0% Active)", IndirectBenchMode::GPU_Indirect, 0,
+     "GPU Command Processor instantaneously dismisses a (0,0,0) indirect compute dispatch when no items survive"},
+    {"1024-Shader Sparse Buckets (CPU Fixed Grid)", IndirectBenchMode::CPU_MultiBucket_Direct, 0,
+     "CPU fixed-grid compute dispatch across 1024 sparse buckets (only 4 active); baseline wasted wave occupancy"},
+    {"1024-Shader Sparse Buckets (1024x Indirect)", IndirectBenchMode::GPU_MultiBucket_Legacy, 0,
+     "1024 specialized compute buckets (only 4 active) recorded via 1024 CPU pipeline-bind + vkCmdDispatchIndirect calls"},
+    {"1024-Shader Sparse Buckets (Single DGC Call)", IndirectBenchMode::GPU_MultiBucket_DGC, 0,
+     "Single vkCmdExecuteGeneratedCommandsEXT + VkIndirectExecutionSetEXT call pruning empty compute buckets on GPU"}
   };
 }
 
@@ -80,9 +80,9 @@ std::string InShaderIndirectBench::GetConfigName(uint32_t config_idx,
   if (ctx && ctx->getBackend() == ComputeBackend::ROCm) {
     switch (config_idx) {
     case 2u:
-      return "Persistent Work-Queue Compaction (100% Active)";
+      return "Persistent Compute Work-Queue (100% Active)";
     case 3u:
-      return "Persistent Work-Queue Compaction (10% Active)";
+      return "Persistent Compute Work-Queue (10% Active)";
     case 4u:
       return "Persistent Work-Queue Early-Exit (0% Active)";
     default:
@@ -112,6 +112,107 @@ const char *InShaderIndirectBench::GetDescription(uint32_t config_idx,
     }
   }
   return GetDescription(config_idx);
+}
+
+BenchmarkExplanation InShaderIndirectBench::GetExplanation(uint32_t config_idx) const {
+  switch (config_idx) {
+  case 0u:
+    return {
+      "Baseline full-utilization compute throughput when the CPU submits a fixed-size grid and 100% of threads have active work.",
+      "Reference ceiling for compute passes (culling, particle simulation, deferred/tile shading) before comparing sparse GPU-driven culling or indirect dispatch overhead. Schedules compute dispatches—not raster draw calls or ray traces.",
+      "CPU submits a fixed-grid compute dispatch covering all 4,194,304 items (16,384 workgroups x 256 threads); every thread executes the 256-step sin/cos workload."
+    };
+  case 1u:
+    return {
+      "Wasted GPU SIMD occupancy when the CPU submits a full fixed-size compute grid on sparse data (only 10% active) and skips inactive work via shader branches.",
+      "Exposes the cost of naive compute passes in games (e.g., running shading or VFX updates on every pixel/particle when 90% are culled). Active threads still hold partial waves open, costing gamers frame time.",
+      "CPU submits a fixed-grid compute dispatch across all 4,194,304 items; 90% of threads return early on a hash filter while 10% run the 256-step compute loop."
+    };
+  case 2u:
+    return {
+      "Pure GPU stream-compaction and indirect dispatch overhead when 100% of items remain active and nothing is culled.",
+      "Tells rendering engineers the break-even tax of adding a GPU classify + compact + vkCmdDispatchIndirect pass when scenes are dense. Schedules compute dispatches (not draw calls or ray traces).",
+      "Three-stage compute sequence: reset atomic counter -> subgroup-ballot classify & compact 4M items into a worklist -> vkCmdDispatchIndirect launches the exact worker grid."
+    };
+  case 3u:
+    return {
+      "Speedup from compacting sparse compute work on the GPU so worker shaders only launch over the 10% of items that actually survived culling.",
+      "Models GPU-driven culling, tile/cluster light binning, and visibility-buffer material shading. Directly cuts wasted GPU cycles and raises frame rates in sparse or heavily occluded game scenes.",
+      "Subgroup-ballot classify shader compacts the 10% active items into a dense worklist and writes VkDispatchIndirectCommand; vkCmdDispatchIndirect launches 10x fewer workgroups."
+    };
+  case 4u:
+    return {
+      "How fast the GPU Command Processor discards an empty (0, 0, 0) indirect compute dispatch when zero items pass classification.",
+      "Critical for multi-material or conditional post-FX passes where many shader buckets are empty on a given frame—avoiding synchronization stalls and shader-core wakeups.",
+      "Classify shader counts 0 active items across 4M inputs and writes dispatch dimensions (0, 0, 0); vkCmdDispatchIndirect tests Command Processor zero-workgroup dismissal."
+    };
+  case 5u:
+    return {
+      "Brute-force CPU fixed-grid compute penalty when items belong to 1,024 distinct shader buckets, only 4 of which are active on this frame.",
+      "Shows what happens in GPU-driven material/visibility-buffer pipelines without indirect dispatch or DGC: shader waves suffer heavy divergence and wasted occupancy across 1,020 empty buckets.",
+      "CPU dispatches a fixed grid over 1,048,576 items; only items hashing to 4 of 1,024 buckets are active, executing a 64-step specialized compute loop."
+    };
+  case 6u:
+    return {
+      "CPU command-recording and pipeline-switch overhead of issuing 1,024 separate legacy vkCmdDispatchIndirect calls (one per shader bucket), even though 1,020 are empty.",
+      "Highlights why traditional per-material indirect dispatch bottlenecks CPU render threads and GPU command processors in modern multi-material engines (e.g., Unreal Nanite-style shading).",
+      "Classify + Resolve passes populate 1,024 indirect command slots; CPU loops 1,024 times binding specialized compute pipelines and calling vkCmdDispatchIndirect (only 4 buckets non-zero)."
+    };
+  case 7u:
+    return {
+      "Modern Device-Generated Commands (DGC) efficiency: the GPU itself selects only the 4 active compute pipelines and prunes all 1,020 empty buckets in one call.",
+      "Key capability for next-gen GPU-driven engines and visibility-buffer shading: eliminates 1,024 CPU pipeline binds, reduces driver overhead, and avoids Command Processor stalls on empty material buckets.",
+      "GPU resolve shader emits packed 32-byte DGC sequences only for non-empty buckets; CPU submits a single vkCmdExecuteGeneratedCommandsEXT with a VkIndirectExecutionSetEXT of 8 pipelines."
+    };
+  default:
+    return {
+      GetDescription(),
+      "Measures GPU-driven compute dispatch scheduling vs. brute-force CPU fixed-grid submission.",
+      "Multi-pass Vulkan compute indirect dispatch / DGC ExecutionSet benchmark."
+    };
+  }
+}
+
+BenchmarkExplanation InShaderIndirectBench::GetExplanation(
+    uint32_t config_idx, const DeviceInfo &info, IComputeContext *ctx) const {
+  (void)info;
+  if (ctx && ctx->getBackend() == ComputeBackend::ROCm) {
+    switch (config_idx) {
+    case 0u:
+      return {
+        "Baseline full-utilization HIP compute throughput when the host launches a fixed grid and 100% of threads have active work.",
+        "Reference ceiling for compute kernels before comparing sparse stream compaction and persistent work-queue overhead. Schedules compute dispatches—not raster draw calls or ray traces.",
+        "Host launches a fixed-grid HIP compute kernel across 4,194,304 items (16,384 workgroups x 256 threads); all lanes execute the 256-step sin/cos workload."
+      };
+    case 1u:
+      return {
+        "Wasted GPU wave occupancy when the host launches a full fixed-size HIP grid on sparse data (10% active) and skips inactive threads with branches.",
+        "Exposes the penalty of uncompacted sparse compute workloads where 90% of SIMD lanes exit early while active neighbors keep waves resident.",
+        "Host launches a fixed-grid HIP kernel across 4,194,304 items; 90% return early on a hash filter while 10% execute the 256-step compute loop."
+      };
+    case 2u:
+      return {
+        "Stream-compaction and persistent work-queue consumer overhead on ROCm when 100% of items remain active.",
+        "Establishes the break-even cost of GPU-side worklist compaction in HIP compute pipelines when nothing is culled.",
+        "HIP classifier compacts active items into a VRAM worklist; a fixed-grid persistent consumer kernel pops compacted batches via atomic counters."
+      };
+    case 3u:
+      return {
+        "Speedup from compacting sparse 10% compute work into a dense VRAM work queue consumed by persistent GPU workgroups.",
+        "Models GPU-driven culling and sparse particle/compute compaction in HIP—recovering SIMD occupancy by eliminating 90% of inactive work.",
+        "HIP classifier compacts the 10% active items into a dense worklist; persistent consumer workgroups drain only active items from the queue."
+      };
+    case 4u:
+      return {
+        "How quickly persistent HIP compute workgroups exit when the GPU-compacted work queue is empty (0 active items).",
+        "Measures empty-queue early-exit overhead so conditional compute stages cost near zero when nothing passes culling.",
+        "HIP classifier produces activeCount = 0; persistent consumer workgroups read the atomic counter and exit immediately."
+      };
+    default:
+      break;
+    }
+  }
+  return GetExplanation(config_idx);
 }
 
 bool InShaderIndirectBench::IsConfigSupported(uint32_t config_idx,

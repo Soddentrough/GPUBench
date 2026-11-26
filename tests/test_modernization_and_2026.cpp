@@ -695,12 +695,12 @@ TEST_CASE(ModernizationAnd2026, IsaDumper_HonestReportingAndHotLoopAccuracy) {
     ASSERT_EQ(omm2.artifacts.size(), size_t{1});
     ASSERT_EQ(omm2.artifacts[0].artifactFile, std::string("rayomm_omm.rgen.spv"));
 
-    const IsaInspectionResult ind1 = inspectSingle("In-Shader Indirect Synthesis", 1);
+    const IsaInspectionResult ind1 = inspectSingle("GPU-Driven Compute Dispatch", 1);
     ASSERT_TRUE(ind1.ok);
     ASSERT_EQ(ind1.artifacts.size(), size_t{1});
     ASSERT_EQ(ind1.artifacts[0].artifactFile, std::string("direct_worker.comp.spv"));
 
-    const IsaInspectionResult ind7 = inspectSingle("In-Shader Indirect Synthesis", 7);
+    const IsaInspectionResult ind7 = inspectSingle("GPU-Driven Compute Dispatch", 7);
     ASSERT_TRUE(ind7.ok);
     ASSERT_FALSE(ind7.artifacts.empty());
     bool foundMbWorker = false;

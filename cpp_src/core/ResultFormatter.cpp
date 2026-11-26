@@ -298,6 +298,7 @@ std::string cleanWorkloadName(const std::string &rawName, const std::string &sub
     if (!strippedExact &&
         (name.rfind("Ray", 0) == 0 ||
          name.rfind("LDS Bank Conflicts (", 0) == 0 ||
+         name.rfind("GPU-Driven Compute Dispatch (", 0) == 0 ||
          name.rfind("In-Shader Indirect Synthesis (", 0) == 0 ||
          name.rfind("Cache Latency Curve (", 0) == 0 ||
          name.rfind("Device Memory Bandwidth (", 0) == 0 ||
@@ -537,16 +538,22 @@ void ResultFormatter::print() {
         }
       } else if (res.metric == "us" && res.operations > 0) {
         const double usVal = (resEffMs * 1000.0) / static_cast<double>(res.operations);
-        if (res.benchmarkName.find("CPU Direct Fixed Grid (10% Active)") != std::string::npos) {
+        if (res.benchmarkName.find("Compute Fixed Grid - CPU Direct (10% Active)") != std::string::npos ||
+            res.benchmarkName.find("CPU Direct Fixed Grid (10% Active)") != std::string::npos) {
           cpuSparse10Us = (cpuSparse10Us > 0.0) ? (std::min)(cpuSparse10Us, usVal) : usVal;
-        } else if (res.benchmarkName.find("Legacy Indirect Dispatch (10% Active)") != std::string::npos ||
+        } else if (res.benchmarkName.find("GPU Indirect Compute Dispatch (10% Active)") != std::string::npos ||
+                   res.benchmarkName.find("Persistent Compute Work-Queue (10% Active)") != std::string::npos ||
+                   res.benchmarkName.find("Legacy Indirect Dispatch (10% Active)") != std::string::npos ||
                    res.benchmarkName.find("Persistent Work-Queue Compaction (10% Active)") != std::string::npos) {
           gpuIndirect10Us = (gpuIndirect10Us > 0.0) ? (std::min)(gpuIndirect10Us, usVal) : usVal;
-        } else if (res.benchmarkName.find("Multi-Bucket 1024x Sparse (CPU Direct Fixed Grid)") != std::string::npos) {
+        } else if (res.benchmarkName.find("1024-Shader Sparse Buckets (CPU Fixed Grid)") != std::string::npos ||
+                   res.benchmarkName.find("Multi-Bucket 1024x Sparse (CPU Direct Fixed Grid)") != std::string::npos) {
           cpuMbDirectUs = (cpuMbDirectUs > 0.0) ? (std::min)(cpuMbDirectUs, usVal) : usVal;
-        } else if (res.benchmarkName.find("Multi-Bucket 1024x Sparse (Legacy vkCmdDispatchIndirect)") != std::string::npos) {
+        } else if (res.benchmarkName.find("1024-Shader Sparse Buckets (1024x Indirect)") != std::string::npos ||
+                   res.benchmarkName.find("Multi-Bucket 1024x Sparse (Legacy vkCmdDispatchIndirect)") != std::string::npos) {
           gpuMbLegacyUs = (gpuMbLegacyUs > 0.0) ? (std::min)(gpuMbLegacyUs, usVal) : usVal;
-        } else if (res.benchmarkName.find("Multi-Bucket 1024x Sparse (DGC ExecutionSet + Pruning)") != std::string::npos) {
+        } else if (res.benchmarkName.find("1024-Shader Sparse Buckets (Single DGC Call)") != std::string::npos ||
+                   res.benchmarkName.find("Multi-Bucket 1024x Sparse (DGC ExecutionSet + Pruning)") != std::string::npos) {
           gpuMbDgcUs = (gpuMbDgcUs > 0.0) ? (std::min)(gpuMbDgcUs, usVal) : usVal;
         }
       } else if (res.metric == "MTris/s") {
@@ -1298,23 +1305,23 @@ void ResultFormatter::print() {
     if (cpuSparse10Us > 0.0 && gpuIndirect10Us > 0.0) {
       double sp = cpuSparse10Us / gpuIndirect10Us;
       std::string val = BOLD + GREEN + formatDouble(sp, 2) + "x" + RESET;
-      std::string extra = " (GPU Indirect vs CPU Direct Fixed Grid: " + formatDouble(gpuIndirect10Us, 1) + " vs " +
+      std::string extra = " (GPU Indirect vs CPU Fixed Grid: " + formatDouble(gpuIndirect10Us, 1) + " vs " +
                           formatDouble(cpuSparse10Us, 1) + " us)";
-      printSummaryRow("Producer-Consumer Sparse (10%)", val, extra);
+      printSummaryRow("Compute Compaction (10% Active)", val, extra);
     }
     if (cpuMbDirectUs > 0.0 && gpuMbDgcUs > 0.0) {
       double sp = cpuMbDirectUs / gpuMbDgcUs;
       std::string val = BOLD + GREEN + formatDouble(sp, 2) + "x" + RESET;
-      std::string extra = " (DGC ExecutionSet vs CPU Direct 1024x: " + formatDouble(gpuMbDgcUs, 1) + " vs " +
+      std::string extra = " (DGC Single Call vs CPU Grid 1024x: " + formatDouble(gpuMbDgcUs, 1) + " vs " +
                           formatDouble(cpuMbDirectUs, 1) + " us)";
-      printSummaryRow("Multi-Bucket 1024x DGC vs CPU", val, extra);
+      printSummaryRow("1024-Shader Buckets DGC vs CPU", val, extra);
     }
     if (gpuMbLegacyUs > 0.0 && gpuMbDgcUs > 0.0) {
       double sp = gpuMbLegacyUs / gpuMbDgcUs;
       std::string val = BOLD + GREEN + formatDouble(sp, 2) + "x" + RESET;
       std::string extra = " (DGC Pruning vs 1024x Indirect: " + formatDouble(gpuMbDgcUs, 1) + " vs " +
                           formatDouble(gpuMbLegacyUs, 1) + " us)";
-      printSummaryRow("Multi-Bucket 1024x DGC vs Leg", val, extra);
+      printSummaryRow("1024-Shader Buckets DGC vs Leg", val, extra);
     }
     if (scanlineRate > 0.0 && tiledRate > 0.0) {
       double cacheGain = ((tiledRate - scanlineRate) / scanlineRate) * 100.0;

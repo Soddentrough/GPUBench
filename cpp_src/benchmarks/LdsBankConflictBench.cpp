@@ -34,6 +34,53 @@ std::string LdsBankConflictBench::GetConfigSupportNote(uint32_t config_idx) cons
   return "";
 }
 
+const char *LdsBankConflictBench::GetDescription(uint32_t config_idx) const {
+  if (config_idx < configs.size()) {
+    return configs[config_idx].hint.c_str();
+  }
+  return GetDescription();
+}
+
+BenchmarkExplanation LdsBankConflictBench::GetExplanation(uint32_t config_idx) const {
+  if (config_idx >= configs.size()) {
+    return {
+      GetDescription(),
+      "Measures on-chip workgroup shared memory (LDS) bank conflict penalties.",
+      "32-lane shared-memory load sweep across 32 hardware banks."
+    };
+  }
+  const uint32_t stride = configs[config_idx].stride;
+  switch (stride) {
+  case 1u:
+    return {
+      "Peak conflict-free on-chip shared memory (LDS) bandwidth when all 32 lanes hit 32 separate 4-byte banks in parallel.",
+      "Baseline speed for tile-based deferred lighting, screen-space blur/SSR filters, workgroup reductions, and matrix shared-memory tiling in games.",
+      "2,048 workgroups x 32 threads each execute 50,000 iterations of 8 LDS dword loads at stride 1 (128 B bank-preserving offsets)."
+    };
+  case 2u:
+  case 4u:
+  case 8u:
+  case 16u:
+    return {
+      "Shared memory (LDS) bandwidth degradation under a " + std::to_string(stride) + "-way bank conflict, where " + std::to_string(stride) + " threads collide on the same memory bank and must serialize.",
+      "Demonstrates how power-of-two array strides in shared memory (e.g., 16x16 image tiles or FFT/radix-sort tables without padding) quietly cut shader throughput by " + std::to_string(stride) + "x.",
+      "Same LDS load loop with lane address stride " + std::to_string(stride) + " dwords, forcing " + std::to_string(stride) + "-way bank serialization across 32 hardware banks."
+    };
+  case 32u:
+    return {
+      "Worst-case 32-way LDS bank serialization where every thread in the wave hits bank 0 simultaneously (~3.1% of peak bandwidth).",
+      "Exposes catastrophic shared-memory broadcast/collision stalls when shader indexing collapses onto a single bank.",
+      "Same LDS load loop with stride 32 dwords, mapping all 32 lanes onto bank 0."
+    };
+  default:
+    return {
+      "Conflict-free odd-stride control (stride " + std::to_string(stride) + ", coprime to 32 banks) verifying full LDS throughput recovery.",
+      "Proves to rendering engineers how adding +1 dword padding (odd stride) to shared-memory tile rows eliminates bank conflicts in image filters and reductions.",
+      "Same LDS load loop with odd stride " + std::to_string(stride) + "; gcd(" + std::to_string(stride) + ", 32) = 1 permutes lanes across all 32 banks without collisions."
+    };
+  }
+}
+
 void LdsBankConflictBench::Setup(IComputeContext &context, const std::string &kernel_dir) {
   this->context = &context;
 

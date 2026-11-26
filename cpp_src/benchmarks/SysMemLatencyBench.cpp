@@ -64,6 +64,14 @@ const char *SysMemLatencyBench::GetDescription(uint32_t /*config_idx*/) const {
   return "256 MB random Hamiltonian-cycle cache-line pointer chasing measuring true host DRAM latency.";
 }
 
+BenchmarkExplanation SysMemLatencyBench::GetExplanation(uint32_t /*config_idx*/) const {
+  return {
+    "True host CPU system RAM access latency (in nanoseconds) isolated from CPU caches and TLB page-walk overhead.",
+    "One of the biggest drivers of CPU-bound game performance and 1% low FPS stability—governs AI, physics, entity-component traversal, and draw-call submission.",
+    "256 MB random Hamiltonian-cycle pointer chase on a single thread backed by 2 MB Large / Huge Pages."
+  };
+}
+
 std::string SysMemLatencyBench::GetConfigCaveat(uint32_t /*config_idx*/) const {
   return pageCaveat;
 }

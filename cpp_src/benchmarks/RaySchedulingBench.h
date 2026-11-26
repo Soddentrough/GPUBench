@@ -297,8 +297,11 @@ public:
                               IComputeContext *context = nullptr) const override;
   const char *GetComponent(uint32_t config_idx = 0) const override { (void)config_idx; return "Ray Tracing"; }
   const char *GetSubCategory(uint32_t config_idx = 0) const override;
+  using IBenchmark::GetDescription;
   const char *GetDescription() const override { return GetDescription(0); }
   const char *GetDescription(uint32_t config_idx) const override;
+  using IBenchmark::GetExplanation;
+  BenchmarkExplanation GetExplanation(uint32_t config_idx = 0) const override;
   bool RequiresInterIterationBarrier(uint32_t /*config_idx*/ = 0) const override {
     return true;
   }

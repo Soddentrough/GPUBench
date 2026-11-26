@@ -46,6 +46,8 @@ public:
     return "Instruction-level parallelism, VOPD dual-issue, and FP32 + INT32 VALU co-execution efficiency.";
   }
   const char *GetDescription(uint32_t config_idx) const override;
+  using IBenchmark::GetExplanation;
+  BenchmarkExplanation GetExplanation(uint32_t config_idx = 0) const override;
   double GetOperationalIntensity(uint32_t config_idx = 0) const override {
     // Each dual_issue_*.comp shader reads 4 B + writes 4 B = 8 B per thread
     switch (config_idx) {

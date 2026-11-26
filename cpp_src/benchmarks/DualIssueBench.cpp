@@ -7,12 +7,12 @@
 DualIssueBench::DualIssueBench() {
   configs = {
     {
-      "FP32 Baseline (Ping-Pong)",
+      "FP32 Serialized (1 Chain / Low ILP)",
       "dual_issue_ilp4.comp",
       "run_dual_issue_ilp4",
       16384ULL * 32ULL, // 524,288 ops/thread
       "TFLOPS",
-      "Single-issue FP32 baseline (1 FMA/cycle); sequential ping-pong dependency prevents superscalar latency hiding and dual-issuing"
+      "Serialized FP32 dependency chain (1 FMA/cycle); prevents superscalar latency hiding and dual-issue co-execution"
     },
     {
       "FP32 Moderate ILP (8 Chains)",
@@ -20,23 +20,23 @@ DualIssueBench::DualIssueBench() {
       "run_dual_issue_ilp8",
       16384ULL * 64ULL, // 1,048,576 ops/thread
       "TFLOPS",
-      "Moderate ILP (8 independent chains); measures latency hiding across arithmetic stages before peak saturation"
+      "Moderate ILP (8 independent FP32 chains); measures ALU latency hiding across arithmetic pipeline stages"
     },
     {
-      "FP32 Peak ILP / Co-Issue (16 Chains)",
+      "FP32 Peak ILP / Dual-Issue (16 Chains)",
       "dual_issue_ilp16.comp",
       "run_dual_issue_ilp16",
       16384ULL * 128ULL, // 2,097,152 ops/thread
       "TFLOPS",
-      "Peak ILP saturation (16 independent chains); saturates pipeline depth and evaluates dual-issue capacity on architectures with dual VALUs (e.g. RDNA 4 VOPD)"
+      "Peak ILP saturation (16 independent FP32 chains); saturates pipeline depth and unlocks dual-issue VALUs (e.g. RDNA 3/4 VOPD)"
     },
     {
-      "INT32 Baseline (Ping-Pong)",
+      "INT32 Serialized (1 Chain / Low ILP)",
       "dual_issue_int32_4.comp",
       "run_dual_issue_int32_4",
       16384ULL * 32ULL, // 524,288 ops/thread
       "TOPS",
-      "Single-issue integer baseline (1 ALU/cycle); sequential dependency prevents pipelined execution"
+      "Serialized INT32 dependency chain (1 ALU/cycle); exposes integer pipeline latency without parallel instruction chains"
     },
     {
       "INT32 Moderate ILP (8 Chains)",
@@ -44,18 +44,18 @@ DualIssueBench::DualIssueBench() {
       "run_dual_issue_int32_8",
       16384ULL * 64ULL, // 1,048,576 ops/thread
       "TOPS",
-      "Moderate integer ILP (8 independent chains); evaluates integer ALU latency hiding under typical instruction-level parallelism"
+      "Moderate integer ILP (8 independent INT32 chains); evaluates integer ALU latency hiding"
     },
     {
-      "INT32 Peak ILP (16 Chains)",
+      "INT32 Peak ILP / Dual-Issue (16 Chains)",
       "dual_issue_int32.comp",
       "run_dual_issue_int32",
       16384ULL * 128ULL, // 2,097,152 ops/thread
       "TOPS",
-      "Peak integer ILP (16 independent chains); reveals whether integer datapath supports dual ALUs or single ALU/cycle"
+      "Peak integer ILP (16 independent INT32 chains); reveals whether integer datapaths support dual-issue or single ALU/cycle"
     },
     {
-      "Concurrent Mixed (FP32+INT32)",
+      "Concurrent Mixed (FP32 + INT32)",
       "dual_issue_mixed.comp",
       "run_dual_issue_mixed",
       16384ULL * 192ULL, // 3,145,728 ops/thread (16384 outer iters * 4x unroll * [16 FP32 FMAs = 32 FLOPs + 16 INT32 ALU insts = 16 IOPs])
@@ -89,6 +89,59 @@ const char *DualIssueBench::GetDescription(uint32_t config_idx) const {
     return configs[config_idx].hint.c_str();
   }
   return GetDescription();
+}
+
+BenchmarkExplanation DualIssueBench::GetExplanation(uint32_t config_idx) const {
+  switch (config_idx) {
+  case 0u:
+    return {
+      "Serialized FP32 shader math throughput when every instruction depends on the previous result (low instruction-level parallelism).",
+      "Reveals how much shader performance is lost when game shaders have tight dependency chains (ray marching, iterative loops) that starve ALU latency hiding and block dual-issue execution.",
+      "Compute shader executing tightly dependent serialized FP32 FMA chains (1 independent chain per lane)."
+    };
+  case 1u:
+    return {
+      "Mid-level FP32 instruction-level parallelism (8 independent chains) showing how well the GPU hides arithmetic pipeline latency.",
+      "Reflects typical well-scheduled PBR pixel and compute shaders—shows engineers how much throughput unlocks before hitting full dual-issue saturation.",
+      "Compute shader interleaving 8 independent FP32 FMA accumulator chains across 16,384 loop iterations."
+    };
+  case 2u:
+    return {
+      "Peak FP32 ALU saturation and dual-issue co-execution (e.g., AMD RDNA 3/4 VOPD) when 16 independent chains are available.",
+      "Shows the upper ceiling compilers can reach in unrolled lighting, post-FX, and compute kernels on dual-VALU architectures—explaining why two GPUs with similar clock/CU counts can differ in shader speed.",
+      "Compute shader interleaving 16 independent FP32 FMA chains so the shader compiler can pair dual-issue instructions."
+    };
+  case 3u:
+    return {
+      "Serialized 32-bit integer (INT32) ALU throughput under a single dependent chain.",
+      "Baseline for address calculation, bit-packing, hash/RNG, and BVH index math when integer operations cannot be overlapped.",
+      "Compute shader executing serialized dependent INT32 ALU chains (1 chain per lane)."
+    };
+  case 4u:
+    return {
+      "Moderate INT32 instruction-level parallelism (8 independent chains) measuring integer pipeline latency hiding.",
+      "Shows how well integer address math, texture coordinate hashing, and compression shaders hide ALU latency.",
+      "Compute shader interleaving 8 independent INT32 ALU chains across 16,384 loop iterations."
+    };
+  case 5u:
+    return {
+      "Peak INT32 ALU throughput and whether integer units support dual-issue or only single-ALU-per-cycle execution.",
+      "Important for shaders heavy on bit-manipulation, procedural noise, software rasterization, and indexing—often a hidden bottleneck vs. FP32.",
+      "Compute shader interleaving 16 independent INT32 ALU chains to saturate integer execution pipes."
+    };
+  case 6u:
+    return {
+      "Simultaneous FP32 float + INT32 integer co-execution efficiency under a 1:1 mixed instruction stream.",
+      "Real game shaders constantly mix FP32 shading math with INT32 buffer/texture address math—shows whether INT32 steals cycles from FP32 or runs in parallel.",
+      "Compute shader executing 16 FP32 FMAs paired 1:1 with 16 INT32 ALU ops per inner unroll step."
+    };
+  default:
+    return {
+      GetDescription(config_idx),
+      "Measures shader instruction-level parallelism (ILP) and dual-issue ALU utilization.",
+      "Compute shader ILP sweep across FP32 and INT32 accumulator chains."
+    };
+  }
 }
 
 std::string DualIssueBench::GetConfigSupportNote(uint32_t config_idx) const {

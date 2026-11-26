@@ -4,6 +4,7 @@
 
 int main(int argc, char **argv) {
   std::string filter = "";
+  bool exactSuite = false;
 
   for (int i = 1; i < argc; ++i) {
     std::string arg = argv[i];
@@ -13,14 +14,23 @@ int main(int argc, char **argv) {
         std::cout << "  - " << t.suite << "." << t.name << "\n";
       }
       return 0;
+    } else if (arg.rfind("--suite=", 0) == 0) {
+      filter = arg.substr(8);
+      exactSuite = true;
+    } else if (arg == "--suite" && i + 1 < argc) {
+      filter = argv[++i];
+      exactSuite = true;
     } else if (arg.rfind("--filter=", 0) == 0) {
       filter = arg.substr(9);
+      exactSuite = false;
     } else if ((arg == "-f" || arg == "--filter") && i + 1 < argc) {
       filter = argv[++i];
+      exactSuite = false;
     } else if (arg == "--help" || arg == "-h") {
       std::cout << "GPUBench Automated Test Suite\n";
       std::cout << "Usage: " << argv[0] << " [options]\n";
       std::cout << "Options:\n";
+      std::cout << "  --suite <name>       Run only tests belonging exactly to suite <name>\n";
       std::cout << "  -f, --filter <str>   Run only tests whose suite or name contains <str>\n";
       std::cout << "  -l, --list           List all registered test cases\n";
       std::cout << "  -h, --help           Display this help message\n";
@@ -30,5 +40,5 @@ int main(int argc, char **argv) {
     }
   }
 
-  return ::gpubench::test::TestRegistry::instance().runAll(filter);
+  return ::gpubench::test::TestRegistry::instance().runAll(filter, exactSuite);
 }

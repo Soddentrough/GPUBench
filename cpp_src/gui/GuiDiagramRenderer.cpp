@@ -242,15 +242,16 @@ void GuiApp::applyVisualizationMetadata() {
                 }
 
                 // 5. Compute, Interconnect & Scheduling Schematics
-                if (containsCaseInsensitive(item.id, "In-Shader Indirect")) {
+                if (containsCaseInsensitive(item.id, "GPU-Driven Compute") ||
+                    containsCaseInsensitive(item.id, "In-Shader Indirect")) {
                     if (isRocm && item.configIndex >= 2 && item.configIndex <= 4) {
                         viz.diagramId = "rocm_persistent_queue";
-                        viz.caption = "ROCm/HIP Persistent Work-Queue Compaction (Classify + Fixed-Grid Consumer)";
+                        viz.caption = "ROCm/HIP Persistent Compute Work-Queue (Classify + Fixed-Grid Consumer)";
                     } else {
                         viz.diagramId = "indirect_dispatch";
                         viz.caption = (item.configIndex == 7)
-                            ? "GPU Sparse-Bucket Compaction -> 1x vkCmdExecuteGeneratedCommandsEXT (DGC ExecutionSet)"
-                            : "GPU-Side Indirect Dispatch Argument Synthesis (vkCmdDispatchIndirect) vs CPU Direct";
+                            ? "1024-Shader Sparse Compute Buckets -> 1x vkCmdExecuteGeneratedCommandsEXT (DGC)"
+                            : "GPU-Generated Compute Dispatch (vkCmdDispatchIndirect) vs CPU Fixed Grid";
                     }
                     continue;
                 }
@@ -327,7 +328,7 @@ void GuiApp::applyVisualizationMetadata() {
 void GuiApp::renderBenchmarkTooltip(const BenchmarkItem& item, const std::string& sceneOverride) {
     const BringUpColors c = activeBringUpColors();
     ImGui::BeginTooltip();
-    float wrapW = s(380.0f);
+    float wrapW = s(430.0f);
     ImGui::PushTextWrapPos(ImGui::GetCursorPos().x + wrapW);
 
     pushBoldFont();
@@ -341,11 +342,29 @@ void GuiApp::renderBenchmarkTooltip(const BenchmarkItem& item, const std::string
     ImGui::PopStyleColor();
     ImGui::Separator();
     ImGui::Spacing();
-    ImGui::TextWrapped("%s", item.description.c_str());
+
+    if (!item.whatItTests.empty() || !item.pipelineImpact.empty() || !item.method.empty()) {
+        auto renderSection = [&](const char* label, const ImVec4& labelCol,
+                                 const std::string& body, const ImVec4& bodyCol) {
+            if (body.empty()) return;
+            pushBoldFont();
+            ImGui::TextColored(labelCol, "%s", label);
+            popBoldFont();
+            ImGui::PushStyleColor(ImGuiCol_Text, bodyCol);
+            ImGui::TextWrapped("%s", body.c_str());
+            ImGui::PopStyleColor();
+            ImGui::Spacing();
+        };
+        renderSection("TESTS", c.cyanAccent, item.whatItTests, c.textPrimary);
+        renderSection("PIPELINE & IMPACT", c.okColor, item.pipelineImpact, c.textPrimary);
+        renderSection("METHOD", c.textMuted, item.method, c.textSecondary);
+    } else {
+        ImGui::TextWrapped("%s", item.description.c_str());
+    }
 
     if (item.viz.hasVisualization()) {
         ImGui::Spacing();
-        float canvasW = s(340.0f);
+        float canvasW = s(380.0f);
         float canvasH = std::round(canvasW / std::max(1.2f, item.viz.aspectRatio));
 
         bool drewImage = false;

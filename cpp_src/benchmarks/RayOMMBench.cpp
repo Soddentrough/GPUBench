@@ -135,6 +135,47 @@ const char *RayOMMBench::GetDescription(uint32_t config_idx) const {
   }
 }
 
+BenchmarkExplanation RayOMMBench::GetExplanation(uint32_t config_idx) const {
+  switch (config_idx) {
+  case 0u:
+    return {
+      "Software alpha-cutout ray tracing using inline Compute RayQuery to sample leaf textures mid-traversal.",
+      "Baseline for engines running ray-traced shadows or GI through layered foliage without hardware Opacity Micromaps.",
+      "Compute shader using GL_EXT_ray_query through 16 stacked alpha-cutout foliage layers, sampling alpha inline."
+    };
+  case 1u:
+    return {
+      "Ray Tracing Pipeline (RTP) alpha-cutout baseline invoking software Any-Hit shaders across 16 foliage layers.",
+      "Demonstrates traditional Any-Hit pipeline interruption overhead on trees, grass, and fences before enabling OMM.",
+      "VK_KHR_ray_tracing_pipeline tracing rays through 16 stacked foliage layers with .rahit alpha testing."
+    };
+  case 2u:
+    return {
+      "Hardware 2-state Opacity Micromap (OMM) speedup—resolving opaque/transparent micro-triangles directly in BVH hardware with zero Any-Hit calls.",
+      "Recovers massive RT frame-rate gains in foliage-heavy games (forests, grass, hair, fences) by keeping traversal 100% inside fixed-function RT silicon.",
+      "VK_EXT_opacity_micromap (2-state OMM) attached to the 16-layer foliage BLAS; hardware skips or accepts micro-triangles without .rahit."
+    };
+  case 3u:
+    return {
+      "Hardware 4-state Opacity Micromap (OMM)—hardware handles solid interiors and empty space, calling Any-Hit only on fine leaf edges.",
+      "Highest-quality OMM mode for games: preserves pixel-perfect leaf silhouettes while eliminating ~80-90% of Any-Hit shader stalls.",
+      "VK_EXT_opacity_micromap (4-state OMM) resolving interior/exterior micro-triangles in HW and invoking .rahit only on unknown edge states."
+    };
+  case 4u:
+    return {
+      "Force-opaque theoretical upper-bound ceiling across the identical 16-layer foliage BLAS with zero alpha testing.",
+      "Shows rendering engineers the exact maximum FPS theoretically recoverable on that geometry if Any-Hit overhead were reduced to zero.",
+      "VK_KHR_ray_tracing_pipeline forcing GEOMETRY_OPAQUE across the 16-layer foliage BLAS."
+    };
+  default:
+    return {
+      GetDescription(config_idx),
+      "Measures hardware Opacity Micromap speedup on alpha-cutout ray-traced geometry.",
+      "Vulkan RT / OMM 16-layer foliage traversal benchmark."
+    };
+  }
+}
+
 bool RayOMMBench::IsSupported(const DeviceInfo &info,
                               IComputeContext *context) const {
   if (!info.rayTracingSupport) return false;

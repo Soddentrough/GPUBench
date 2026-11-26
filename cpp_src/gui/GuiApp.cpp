@@ -664,10 +664,10 @@ void GuiApp::updateBenchmarkSupport() {
                         const bool isRaySched = (item.id == "RayScheduling");
                         if (isRaySched) {
                             if (!matchedMeta->configName.empty()) item.name = matchedMeta->configName;
-                        } else if (sg.name.rfind("Compute Precision", 0) == 0 ||
-                                   sg.name.rfind("Structured Sparsity", 0) == 0 ||
-                                   sg.name.rfind("Cache Hierarchy Bandwidth", 0) == 0 ||
-                                   sg.name.rfind("Pointer-Chasing Latency", 0) == 0) {
+                        } else if (sg.name.rfind("Shader & AI Matrix Compute", 0) == 0 ||
+                                   sg.name.rfind("2:4 Sparse Matrix", 0) == 0 ||
+                                   sg.name.rfind("GPU Cache Bandwidth", 0) == 0 ||
+                                   sg.name.rfind("GPU Cache & VRAM Access Latency", 0) == 0) {
                             if (!matchedMeta->displayName.empty()) item.name = matchedMeta->displayName;
                         } else {
                             const std::string& nextName = matchedMeta->configName.empty()
@@ -678,6 +678,15 @@ void GuiApp::updateBenchmarkSupport() {
                     }
                     if (!matchedMeta->description.empty()) {
                         item.description = matchedMeta->description;
+                    }
+                    if (!matchedMeta->whatItTests.empty()) {
+                        item.whatItTests = matchedMeta->whatItTests;
+                    }
+                    if (!matchedMeta->pipelineImpact.empty()) {
+                        item.pipelineImpact = matchedMeta->pipelineImpact;
+                    }
+                    if (!matchedMeta->method.empty()) {
+                        item.method = matchedMeta->method;
                     }
                     item.configCaveat = matchedMeta->configCaveat;
                 } else {
@@ -857,7 +866,7 @@ void GuiApp::selectOnlyBenchmark(const std::string& benchmarkId) {
 
     std::unordered_map<std::string, std::string> aliasMap = {
         {"raster", "Pixel Fill Rate"},
-        {"indirect", "In-Shader Indirect Synthesis"},
+        {"indirect", "GPU-Driven Compute Dispatch"},
         {"lds", "LDS Bank Conflicts"},
         {"rayscheduling", "RayScheduling"}
     };

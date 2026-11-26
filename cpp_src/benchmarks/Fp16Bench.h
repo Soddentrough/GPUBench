@@ -118,8 +118,37 @@ public:
     }
     return GetDescription(config_idx);
   }
+  using IBenchmark::GetExplanation;
+  BenchmarkExplanation GetExplanation(uint32_t config_idx = 0) const override {
+    if (config_idx == 0u) {
+      return {
+        "Peak 16-bit half-precision (FP16) packed vector ALU throughput inside standard shader cores.",
+        "Modern games use FP16 rapid-packed math for post-processing, volumetric lighting, color grading, and mobile/console-ported shaders to double math rate and halve VGPR register pressure.",
+        "Register-resident compute shader executing packed f16vec4 / half2 FMA chains across all CUs."
+      };
+    }
+    return {
+      "Peak FP16 tensor/matrix-core throughput (WMMA / MFMA / Cooperative Matrix) for dense 16x16 matrix multiplies.",
+      "Drives AI upscalers (FSR, DLSS, XeSS), real-time ray-tracing denoisers, frame generation, and in-game neural inference.",
+      "Subgroup-cooperative 16x16x16 FP16 matrix multiply-accumulate (D = A * B + C) loops in registers."
+    };
+  }
+  BenchmarkExplanation GetExplanation(uint32_t config_idx, const DeviceInfo &info,
+                                      IComputeContext *context = nullptr) const override {
+    (void)info;
+    BenchmarkExplanation e = GetExplanation(config_idx);
+    if (context && context->getBackend() == ComputeBackend::ROCm) {
+      e.method = (config_idx == 0u)
+          ? "Register-resident HIP kernel executing packed half2 VALU FMA chains across all CUs."
+          : "Register-resident HIP kernel executing native FP16 WMMA / MFMA matrix-core tiles.";
+    } else if (context && context->getBackend() == ComputeBackend::Vulkan) {
+      e.method = (config_idx == 0u)
+          ? "Register-resident Vulkan compute shader executing packed f16vec4 FMA chains."
+          : "Vulkan VK_KHR_cooperative_matrix compute shader executing 16x16x16 FP16 tensor tiles.";
+    }
+    return e;
+  }
   double GetOperationalIntensity(uint32_t config_idx = 0) const override {
-    // Config 0 (fp16.comp): 65536 * 16 f16vec4 FMAs (8,388,608 FLOPs) / 16 B = 524,288.0 FLOP/B
     // Config 1 (coop_matrix_fp16.comp): 32768 * 8192 FLOPs / (512 B A + 512 B B + 1024 B C = 2048 B) = 131,072.0 FLOP/B
     return (config_idx == 0u) ? 524288.0 : 131072.0;
   }

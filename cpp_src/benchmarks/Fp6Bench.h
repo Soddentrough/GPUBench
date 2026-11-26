@@ -108,6 +108,27 @@ public:
     }
     return GetDescription();
   }
+  using IBenchmark::GetExplanation;
+  BenchmarkExplanation GetExplanation(uint32_t config_idx = 0) const override {
+    (void)config_idx;
+    return {
+      "OCP Microscaling 6-bit floating-point (MXFP6 E3M2) hardware matrix-core throughput.",
+      "Next-generation sub-byte AI format preserving higher accuracy than FP4/INT4 for quantized neural rendering models and local LLM inference.",
+      "Hardware MXFP6 matrix multiply-accumulate tile loop (16x16x16 Cooperative Matrix or CDNA 4 MFMA)."
+    };
+  }
+  BenchmarkExplanation GetExplanation(uint32_t config_idx, const DeviceInfo &info,
+                                      IComputeContext *context = nullptr) const override {
+    (void)config_idx;
+    (void)info;
+    BenchmarkExplanation e = GetExplanation(0);
+    if (context && context->getBackend() == ComputeBackend::ROCm) {
+      e.method = "HIP kernel executing native CDNA 4 MXFP6 (16x16x128) MFMA matrix instructions.";
+    } else if (context && context->getBackend() == ComputeBackend::Vulkan) {
+      e.method = "Vulkan compute shader executing 16x16x16 MXFP6 Cooperative Matrix tiles via VK_EXT_shader_ocp_microscaling_types.";
+    }
+    return e;
+  }
   double GetOperationalIntensity(uint32_t config_idx = 0) const override {
     (void)config_idx;
     // coop_matrix_fp6.comp: 32768 * 8192 FLOPs / (192 B A + 192 B B + 1024 B C = 1408 B) = 190,650.18 FLOP/B

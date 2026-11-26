@@ -30,6 +30,8 @@ public:
   std::string GetConfigName(uint32_t config_idx) const override;
   const char *GetDescription() const override { return GetDescription(0); }
   const char *GetDescription(uint32_t config_idx) const override;
+  using IBenchmark::GetExplanation;
+  BenchmarkExplanation GetExplanation(uint32_t config_idx = 0) const override;
   int32_t GetBaselineConfigIndex(uint32_t config_idx) const override {
     if (config_idx == 1u) return 0; // RTP AnyHit vs Compute RayQuery cutout
     if (config_idx == 2u || config_idx == 3u || config_idx == 4u) return 1; // OMM / Opaque ref vs RTP AnyHit

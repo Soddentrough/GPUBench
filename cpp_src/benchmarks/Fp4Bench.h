@@ -108,6 +108,27 @@ public:
     }
     return GetDescription();
   }
+  using IBenchmark::GetExplanation;
+  BenchmarkExplanation GetExplanation(uint32_t config_idx = 0) const override {
+    (void)config_idx;
+    return {
+      "OCP Microscaling 4-bit floating-point (MXFP4 E2M1) hardware matrix-core throughput—4x matrix density vs. FP16.",
+      "Targets extreme-efficiency local AI, neural texture/radiance compression, and next-gen real-time neural upscaling where memory capacity and bandwidth are tight.",
+      "Hardware MXFP4 matrix multiply-accumulate tile loop (16x16x16 Cooperative Matrix or CDNA 4 MFMA)."
+    };
+  }
+  BenchmarkExplanation GetExplanation(uint32_t config_idx, const DeviceInfo &info,
+                                      IComputeContext *context = nullptr) const override {
+    (void)config_idx;
+    (void)info;
+    BenchmarkExplanation e = GetExplanation(0);
+    if (context && context->getBackend() == ComputeBackend::ROCm) {
+      e.method = "HIP kernel executing native CDNA 4 MXFP4 (16x16x128) MFMA matrix instructions.";
+    } else if (context && context->getBackend() == ComputeBackend::Vulkan) {
+      e.method = "Vulkan compute shader executing 16x16x16 MXFP4 Cooperative Matrix tiles via VK_EXT_shader_ocp_microscaling_types.";
+    }
+    return e;
+  }
   double GetOperationalIntensity(uint32_t config_idx = 0) const override {
     (void)config_idx;
     // coop_matrix_fp4.comp: 32768 * 8192 FLOPs / (128 B A + 128 B B + 1024 B C = 1280 B) = 209,715.20 FLOP/B

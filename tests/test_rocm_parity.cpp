@@ -414,15 +414,20 @@ TEST_CASE(ROCmParityValidation, ROCm_Indirect_SchedulingParity) {
     ASSERT_TRUE(bench.IsSupported(info, ctx.get()));
     ASSERT_EQ(std::string(bench.GetComponent()), std::string("Scheduling"));
     ASSERT_EQ(bench.GetConfigName(2, info, ctx.get()),
-              std::string("Persistent Work-Queue Compaction (100% Active)"));
+              std::string("Persistent Compute Work-Queue (100% Active)"));
     ASSERT_EQ(bench.GetConfigName(3, info, ctx.get()),
-              std::string("Persistent Work-Queue Compaction (10% Active)"));
+              std::string("Persistent Compute Work-Queue (10% Active)"));
     ASSERT_EQ(bench.GetConfigName(4, info, ctx.get()),
               std::string("Persistent Work-Queue Early-Exit (0% Active)"));
     for (uint32_t c = 2u; c <= 4u; ++c) {
       const std::string desc = bench.GetDescription(c, info, ctx.get());
       ASSERT_TRUE(desc.find("vkCmdDispatchIndirect") == std::string::npos);
       ASSERT_TRUE(desc.find("VkDispatchIndirectCommand") == std::string::npos);
+      const BenchmarkExplanation exp = bench.GetExplanation(c, info, ctx.get());
+      ASSERT_TRUE(exp.whatItTests.find("vkCmdDispatchIndirect") == std::string::npos);
+      ASSERT_TRUE(exp.pipelineImpact.find("vkCmdDispatchIndirect") == std::string::npos);
+      ASSERT_TRUE(exp.method.find("vkCmdDispatchIndirect") == std::string::npos);
+      ASSERT_TRUE(exp.method.find("VkDispatchIndirectCommand") == std::string::npos);
     }
     for (uint32_t c = 0; c <= 4u; ++c) {
       ASSERT_TRUE(bench.IsConfigSupported(c, info, ctx.get()));

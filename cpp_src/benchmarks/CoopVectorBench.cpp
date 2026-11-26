@@ -35,6 +35,41 @@ const char *CoopVectorBench::GetDescription(uint32_t config_idx) const {
   }
 }
 
+BenchmarkExplanation CoopVectorBench::GetExplanation(uint32_t config_idx) const {
+  switch (config_idx) {
+  case 0u:
+    return {
+      "Baseline per-pixel/per-ray neural network (MLP) speed using standard FP16 packed shader ALU math without Cooperative Vector hardware.",
+      "Shows the cost of evaluating neural materials (BRDFs), neural radiance caches, or neural texture decompression in normal shader cores.",
+      "Vulkan compute shader evaluating a 256-layer 16x16 FP16 MLP per invocation using packed f16vec2 arithmetic."
+    };
+  case 1u:
+    return {
+      "Hardware-accelerated per-thread neural shading throughput via VK_NV_cooperative_vector in FP16—no workgroup-wide matrix sync needed.",
+      "Key building block for next-gen neural shaders in games (neural materials, compressed neural textures, and real-time neural radiance caching inside ray/fragment shaders).",
+      "Vulkan compute shader evaluating a 256-layer 16x16 FP16 MLP per invocation using coopVecMatMulAddNV."
+    };
+  case 2u:
+    return {
+      "Baseline per-thread quantized INT8 neural MLP speed using standard integer shader ALU instructions.",
+      "Reference point to measure how much faster dedicated Cooperative Vector hardware runs quantized in-shader neural networks.",
+      "Vulkan compute shader evaluating a 256-layer 16x16 INT8 MLP per invocation using standard integer arithmetic."
+    };
+  case 3u:
+    return {
+      "Hardware-accelerated INT8 quantized per-thread neural shading throughput via VK_NV_cooperative_vector.",
+      "Enables ultra-compact INT8 neural materials and radiance caches to run inline inside ray hit and pixel shaders at minimal frame-time cost.",
+      "Vulkan compute shader evaluating a 256-layer 16x16 INT8 MLP per invocation using INT8 coopVecMatMulAddNV."
+    };
+  default:
+    return {
+      GetDescription(config_idx),
+      "Measures in-shader per-invocation neural network inference for neural rendering.",
+      "Vulkan compute shader executing 256-layer 16x16 MLP inference."
+    };
+  }
+}
+
 bool CoopVectorBench::IsSupported(const DeviceInfo &info,
                                   IComputeContext *context) const {
   if (context && context->getBackend() != ComputeBackend::Vulkan) return false;

@@ -347,6 +347,14 @@ std::string RayProceduralBench::GetConfigName(uint32_t config_idx) const {
   return "Spheres (AABB)";
 }
 
+BenchmarkExplanation RayProceduralBench::GetExplanation(uint32_t /*config_idx*/) const {
+  return {
+    "Ray-tracing throughput when geometry uses custom programmable Intersection Shaders instead of fixed-function triangles.",
+    "Used for ray-traced hair/fur curves, particle metaballs, signed-distance fields (SDFs), and volumetric proxies where the GPU must exit BVH hardware to run custom math.",
+    "VK_KHR_ray_tracing_pipeline traversing 200,000 procedural AABBs and executing analytic ray-sphere intersection (.rint) shaders."
+  };
+}
+
 bool RayProceduralBench::ValidateResults(uint32_t config_idx) const {
   if (config_idx >= GetNumConfigs()) {
     return false;

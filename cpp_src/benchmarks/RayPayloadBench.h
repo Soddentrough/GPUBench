@@ -42,9 +42,13 @@ public:
   const char *GetComponent(uint32_t config_idx) const override;
   const char *GetMetric() const override;
   const char *GetSubCategory(uint32_t config_idx) const override;
+  using IBenchmark::GetDescription;
   const char *GetDescription() const override {
     return "VK_KHR_ray_tracing_pipeline register-file and stack spill sensitivity across 16 B, 128 B, and 256 B ray payload sizes.";
   }
+  const char *GetDescription(uint32_t config_idx) const override;
+  using IBenchmark::GetExplanation;
+  BenchmarkExplanation GetExplanation(uint32_t config_idx = 0) const override;
   std::string GetConfigName(uint32_t config_idx) const override;
 
   uint32_t GetNumConfigs() const override { return 3; } // 16B, 128B, 256B

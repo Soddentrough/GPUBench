@@ -105,6 +105,27 @@ public:
     }
     return GetDescription();
   }
+  using IBenchmark::GetExplanation;
+  BenchmarkExplanation GetExplanation(uint32_t config_idx = 0) const override {
+    (void)config_idx;
+    return {
+      "8-bit floating-point (FP8 E4M3) hardware tensor/matrix-core throughput—typically 2x FP16 matrix speed.",
+      "Accelerates quantized AI upscaling, frame generation, neural texture compression, and local LLM/diffusion inference while cutting model VRAM usage in half vs. FP16.",
+      "Cooperative Matrix / WMMA / MFMA loop running register-resident FP8 E4M3 matrix multiply-accumulate tiles."
+    };
+  }
+  BenchmarkExplanation GetExplanation(uint32_t config_idx, const DeviceInfo &info,
+                                      IComputeContext *context = nullptr) const override {
+    (void)config_idx;
+    (void)info;
+    BenchmarkExplanation e = GetExplanation(0);
+    if (context && context->getBackend() == ComputeBackend::ROCm) {
+      e.method = "HIP kernel executing native FP8 E4M3 WMMA / MFMA matrix-core instructions.";
+    } else if (context && context->getBackend() == ComputeBackend::Vulkan) {
+      e.method = "Vulkan compute shader executing FP8 E4M3 tiles via VK_EXT_shader_float8 + VK_KHR_cooperative_matrix.";
+    }
+    return e;
+  }
   double GetOperationalIntensity(uint32_t config_idx = 0) const override {
     (void)config_idx;
     // coop_matrix_fp8.comp: 32768 * 8192 FLOPs / (256 B A + 256 B B + 1024 B C = 1536 B) = 174,762.67 FLOP/B

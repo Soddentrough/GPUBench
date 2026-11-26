@@ -469,6 +469,27 @@ std::string RayIntersectBench::GetConfigName(uint32_t config_idx) const {
   return config_idx == 0 ? "Ray-Triangle" : "Ray-Box";
 }
 
+const char *RayIntersectBench::GetDescription(uint32_t config_idx) const {
+  return config_idx == 0
+      ? "Hardware ray-triangle leaf intersection throughput using VK_KHR_ray_query."
+      : "Hardware ray-box (AABB) BVH node intersection throughput using VK_KHR_ray_query.";
+}
+
+BenchmarkExplanation RayIntersectBench::GetExplanation(uint32_t config_idx) const {
+  if (config_idx == 0u) {
+    return {
+      "Raw hardware ray-vs-triangle leaf intersection rate inside the RT unit.",
+      "Determines how fast the GPU resolves exact triangle hits on detailed meshes (characters, vehicles, architecture) once BVH traversal reaches leaf geometry.",
+      "Inline GL_EXT_ray_query compute pass intersecting rays against a dense triangle BLAS."
+    };
+  }
+  return {
+    "Raw hardware ray-vs-AABB bounding-box intersection rate inside the BVH traversal unit.",
+    "Ray-box tests make up the majority of work in any RT frame as rays descend BVH trees—comparing Ray-Box vs. Ray-Triangle reveals the GPU's hardware RT ratio.",
+    "Inline GL_EXT_ray_query compute pass intersecting rays against a dense AABB BLAS."
+  };
+}
+
 void RayIntersectBench::DumpGeometry() const {
   std::ofstream objFile("raytracing_scene.obj");
   uint32_t gridSize = 16;

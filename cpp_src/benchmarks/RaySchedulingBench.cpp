@@ -566,6 +566,143 @@ const char *RaySchedulingBench::GetDescription(uint32_t config_idx) const {
   return "Hardware ray tracing execution paradigm and scheduling microbenchmark.";
 }
 
+BenchmarkExplanation RaySchedulingBench::GetExplanation(uint32_t config_idx) const {
+  switch (config_idx) {
+  case 0u:
+    return {
+      "Traditional Megakernel material shading throughput when one monolithic shader branches across 8 distinct PBR material models (paint, subsurface, velvet, glass, rust, etc.).",
+      "Shows SIMD thread divergence and register bloat in conventional RT engines where neighboring pixels hit completely different materials in the same wave.",
+      "Single compute megakernel branching across 8 BSDF archetypes after ray hits in the active 3D scene."
+    };
+  case 1u:
+    return {
+      "Wavefront material sorting via 8 separate CPU-recorded vkCmdDispatchIndirect calls (one specialized shader per material).",
+      "Eliminates shader branching divergence within waves, but pays CPU/driver indirect dispatch overhead for each material bucket.",
+      "GPU classify/binning pass compacts hits into 8 material queues; CPU issues 8 separate vkCmdDispatchIndirect calls."
+    };
+  case 2u:
+    return {
+      "Wavefront material sorting via a single Device-Generated Commands (DGC) ExecutionSet call—GPU picks and launches only active material shaders.",
+      "Best-case GPU-driven material shading for path-traced games: eliminates SIMD divergence AND eliminates per-material CPU dispatch overhead.",
+      "GPU classify/resolve passes populate a DGC sequence buffer; single vkCmdExecuteGeneratedCommandsEXT dispatches specialized BSDF pipelines."
+    };
+  case 3u:
+    return {
+      "Hardware Ray Tracing Pipeline with Shader Execution Reordering (RTP + SER) grouping coherent material hits before shading.",
+      "Tests whether GPU hardware/driver ray reordering reduces divergence in multi-material RT shading without refactoring into wavefront queues.",
+      "VK_KHR_ray_tracing_pipeline with hitObjectReorderThreadNV/EXT sorting invocations by hit/material coherence."
+    };
+  case 4u:
+    return {
+      "Full multi-bounce path tracing frame throughput using a traditional monolithic Compute Megakernel (" + std::to_string(samplesPerPixel) + " SPP).",
+      "Baseline for real-time path-traced games (Cyberpunk Overdrive / Portal RTX style)—combines ray traversal, bounce divergence, and multi-material shading in one kernel.",
+      "Monolithic GL_EXT_ray_query compute path tracer running primary + multi-bounce indirect lighting at " + std::to_string(samplesPerPixel) + " SPP."
+    };
+  case 5u:
+    return {
+      "Full multi-bounce path tracing using octant-sorted Wavefront DGC (" + std::to_string(samplesPerPixel) + " SPP).",
+      "Tests how much real-world path-tracing FPS improves when incoherent bounce rays are sorted by direction/material into coherent DGC dispatches.",
+      "Multi-bounce wavefront path tracer sorting active rays into directional/material bins and launching bounce passes via DGC."
+    };
+  case 6u:
+    return {
+      "Full multi-bounce path tracing using Ray Tracing Pipeline + Shader Execution Reordering (RTP + SER) at " + std::to_string(samplesPerPixel) + " SPP.",
+      "Compares hardware/driver SER ray reordering directly against Compute Megakernel and Wavefront DGC on full path-traced scenes.",
+      "VK_KHR_ray_tracing_pipeline path tracer using invocation reordering between bounces and material shading."
+    };
+  case 7u:
+    return {
+      "Sustained 16-SPP multi-bounce Compute Megakernel path tracing—modeling high-quality photo-mode or offline-converged rendering.",
+      "Measures long-running thermal/clock stability and pure path-tracing throughput without single-sample overhead.",
+      "16-pass accumulated GL_EXT_ray_query compute megakernel path tracer."
+    };
+  case 8u:
+    return {
+      "Sustained 16-SPP multi-bounce Wavefront DGC path tracing with octant sorting.",
+      "Quantifies cumulative frame-time savings of wavefront ray sorting across 16 samples per pixel.",
+      "16-pass accumulated octant-sorted Wavefront DGC path tracer."
+    };
+  case 9u:
+    return {
+      "Coherent primary camera ray casting and G-buffer evaluation using inline Compute RayQuery (Megakernel).",
+      "Baseline for hybrid ray-traced renderers or pure ray-cast visibility passes where rays start cleanly from the camera.",
+      "Compute shader tracing coherent screen-space primary rays via GL_EXT_ray_query."
+    };
+  case 10u:
+    return {
+      "Coherent primary camera ray casting using the dedicated Vulkan Ray Tracing Pipeline (RTP).",
+      "Compares fixed-stage RayGen/ClosestHit/Miss pipeline overhead vs. inline Compute RayQuery for primary visibility.",
+      "VK_KHR_ray_tracing_pipeline (.rgen/.rchit/.rmiss) tracing screen-space primary camera rays."
+    };
+  case 11u:
+    return {
+      "Coherent primary ray casting with RTP + Shader Execution Reordering (SER) enabled.",
+      "Measures the fixed reordering overhead (or pass-through cost) of SER on rays that are already spatially coherent.",
+      "VK_KHR_ray_tracing_pipeline with SER reorder hint on primary camera rays."
+    };
+  case 12u:
+    return {
+      "4-bounce incoherent diffuse Global Illumination (GI) throughput using a monolithic Compute Megakernel.",
+      "Models worst-case diffuse bounce divergence in RTGI/Lumen-style pipelines where hemisphere rays scatter wildly.",
+      "Compute megakernel tracing 4 bounces of cosine-weighted diffuse GI rays across the 3D scene."
+    };
+  case 13u:
+    return {
+      "4-bounce incoherent diffuse GI throughput using octant-sorted Wavefront DGC ping-pong ray queues.",
+      "Shows how much GI performance is recovered by sorting scattered diffuse rays into coherent directional octants before tracing.",
+      "Wavefront DGC pipeline binning diffuse bounce rays into directional octants across 4 bounce passes."
+    };
+  case 14u:
+    return {
+      "Direct lighting evaluation across 128 dynamic lights using a monolithic Megakernel.",
+      "Represents scenes with dense neon/city/torch lighting where naive shaders test or sample too many lights per hit.",
+      "Compute megakernel evaluating 128 stochastic scene lights per visible surface hit."
+    };
+  case 15u:
+    return {
+      "Direct lighting across 128 lights using 16-bin octahedral normal-cone DGC light binning.",
+      "Shows frame-time gains from GPU light culling/binning by surface orientation before running shadow/shading evaluation.",
+      "GPU normal-cone classifier bins surface hits into 16 octahedral light groups dispatched via DGC."
+    };
+  case 16u:
+    return {
+      "Ray-tracing traversal slowdown caused by alpha-cutout foliage (leaves, grass, grates) requiring mid-traversal texture alpha lookups.",
+      "Isolates real-world scene foliage traversal divergence in outdoor/forest scenes.",
+      "Wavefront classify/trace pass evaluating mid-traversal alpha cutout geometry in the 3D scene."
+    };
+  case 17u:
+    return {
+      "BVH traversal speed when screen pixels launch rays in linear 1D scanline row order.",
+      "Baseline ray launch pattern—adjacent threads span wide horizontal strips, reducing 2D spatial cache locality in BVH nodes.",
+      "Compute ray-query traversal launching primary rays in linear 1D row-major screen coordinates."
+    };
+  case 18u:
+    return {
+      "BVH traversal speed when screen pixels launch rays in 2D Morton Z-order (8x4 tiles).",
+      "Shows rendering engineers how swizzling ray launch order into 2D tiles improves L1/L2 BVH cache hit rates on coherent rays.",
+      "Compute ray-query traversal launching identical primary rays mapped through an 8x4 2D Morton Z-curve."
+    };
+  case 19u:
+    return {
+      "Wavefront hit-record stream compaction throughput when writing large 128-byte expanded hit structs.",
+      "Measures VRAM bandwidth pressure of heavy hit-record compaction in wavefront path tracers.",
+      "Subgroup-ballot compaction kernel writing 128-byte expanded hit payloads into VRAM queues."
+    };
+  case 20u:
+    return {
+      "Wavefront hit-record stream compaction throughput using compact 16-byte material-binned records.",
+      "Shows engineers how shrinking hit queue records from 128B to 16B accelerates wavefront sorting and cuts memory traffic.",
+      "Subgroup-ballot compaction kernel packing compact 16-byte hit records into material-binned queues."
+    };
+  default:
+    return {
+      GetDescription(config_idx),
+      "Evaluates ray-tracing scheduling and wavefront execution efficiency.",
+      "Vulkan ray tracing scheduling benchmark across 3D PBR scenes."
+    };
+  }
+}
+
 std::string RaySchedulingBench::GetConfigCaveat(uint32_t config_idx) const {
   if (isSERConfigIdx(config_idx) && serEmulated) {
     return "Driver exposes VK_EXT_ray_tracing_invocation_reorder, but hardware reordering hint is NONE (pass-through / no dedicated hardware SER unit)";

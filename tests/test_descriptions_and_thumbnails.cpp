@@ -1,4 +1,5 @@
 #include "test_harness.h"
+#include "core/RunnerAPI.h"
 #include "benchmarks/Fp64Bench.h"
 #include "benchmarks/Fp32Bench.h"
 #include "benchmarks/DualIssueBench.h"
@@ -89,13 +90,13 @@ TEST_CASE(DescriptionsAndThumbnails, QuantizedAndFloatPrecisionConfigs) {
 TEST_CASE(DescriptionsAndThumbnails, DualIssueConfigs) {
   DualIssueBench di;
   ASSERT_EQ(di.GetNumConfigs(), 7u);
-  ASSERT_EQ(di.GetConfigName(0), "FP32 Baseline (Ping-Pong)");
+  ASSERT_EQ(di.GetConfigName(0), "FP32 Serialized (1 Chain / Low ILP)");
   ASSERT_EQ(di.GetConfigName(1), "FP32 Moderate ILP (8 Chains)");
-  ASSERT_EQ(di.GetConfigName(2), "FP32 Peak ILP / Co-Issue (16 Chains)");
-  ASSERT_EQ(di.GetConfigName(3), "INT32 Baseline (Ping-Pong)");
+  ASSERT_EQ(di.GetConfigName(2), "FP32 Peak ILP / Dual-Issue (16 Chains)");
+  ASSERT_EQ(di.GetConfigName(3), "INT32 Serialized (1 Chain / Low ILP)");
   ASSERT_EQ(di.GetConfigName(4), "INT32 Moderate ILP (8 Chains)");
-  ASSERT_EQ(di.GetConfigName(5), "INT32 Peak ILP (16 Chains)");
-  ASSERT_EQ(di.GetConfigName(6), "Concurrent Mixed (FP32+INT32)");
+  ASSERT_EQ(di.GetConfigName(5), "INT32 Peak ILP / Dual-Issue (16 Chains)");
+  ASSERT_EQ(di.GetConfigName(6), "Concurrent Mixed (FP32 + INT32)");
 }
 
 TEST_CASE(DescriptionsAndThumbnails, LdsBankConflictConfigs) {
@@ -113,16 +114,17 @@ TEST_CASE(DescriptionsAndThumbnails, LdsBankConflictConfigs) {
 
 TEST_CASE(DescriptionsAndThumbnails, IndirectSynthesisConfigs) {
   InShaderIndirectBench ind;
+  ASSERT_EQ(std::string(ind.GetName()), "GPU-Driven Compute Dispatch");
   ASSERT_EQ(std::string(ind.GetComponent()), "Scheduling");
   ASSERT_EQ(ind.GetNumConfigs(), 8u);
-  ASSERT_EQ(ind.GetConfigName(0), "CPU Direct Fixed Grid (100% Active)");
-  ASSERT_EQ(ind.GetConfigName(1), "CPU Direct Fixed Grid (10% Active)");
-  ASSERT_EQ(ind.GetConfigName(2), "Legacy Indirect Dispatch (100% Active)");
-  ASSERT_EQ(ind.GetConfigName(3), "Legacy Indirect Dispatch (10% Active)");
-  ASSERT_EQ(ind.GetConfigName(4), "Legacy Zero-Dispatch Pruning (0% Active)");
-  ASSERT_EQ(ind.GetConfigName(5), "Multi-Bucket 1024x Sparse (CPU Direct Fixed Grid)");
-  ASSERT_EQ(ind.GetConfigName(6), "Multi-Bucket 1024x Sparse (Legacy vkCmdDispatchIndirect)");
-  ASSERT_EQ(ind.GetConfigName(7), "Multi-Bucket 1024x Sparse (DGC ExecutionSet + Pruning)");
+  ASSERT_EQ(ind.GetConfigName(0), "Compute Fixed Grid - CPU Direct (100% Active)");
+  ASSERT_EQ(ind.GetConfigName(1), "Compute Fixed Grid - CPU Direct (10% Active)");
+  ASSERT_EQ(ind.GetConfigName(2), "GPU Indirect Compute Dispatch (100% Active)");
+  ASSERT_EQ(ind.GetConfigName(3), "GPU Indirect Compute Dispatch (10% Active)");
+  ASSERT_EQ(ind.GetConfigName(4), "GPU Zero-Dispatch Pruning (0% Active)");
+  ASSERT_EQ(ind.GetConfigName(5), "1024-Shader Sparse Buckets (CPU Fixed Grid)");
+  ASSERT_EQ(ind.GetConfigName(6), "1024-Shader Sparse Buckets (1024x Indirect)");
+  ASSERT_EQ(ind.GetConfigName(7), "1024-Shader Sparse Buckets (Single DGC Call)");
 }
 
 TEST_CASE(DescriptionsAndThumbnails, RaySchedulingConfigsCount) {
@@ -263,5 +265,15 @@ TEST_CASE(DescriptionsAndThumbnails, ThumbnailPngAssetsIntegrity) {
     ASSERT_EQ(header[1], 0x50); // 'P'
     ASSERT_EQ(header[2], 0x4E); // 'N'
     ASSERT_EQ(header[3], 0x47); // 'G'
+  }
+}
+
+TEST_CASE(DescriptionsAndThumbnails, AllCatalogEntriesHaveThreePartExplanations) {
+  const auto catalog = GetBenchmarkMetadataCatalogAPI();
+  ASSERT_FALSE(catalog.empty());
+  for (const auto &meta : catalog) {
+    ASSERT_TRUE(meta.whatItTests.size() >= 20u);
+    ASSERT_TRUE(meta.pipelineImpact.size() >= 20u);
+    ASSERT_TRUE(meta.method.size() >= 20u);
   }
 }

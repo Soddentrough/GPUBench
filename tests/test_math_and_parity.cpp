@@ -152,26 +152,42 @@ TEST_CASE(MathAndParity, LdsBankConflictStridePreservation) {
 
 TEST_CASE(MathAndParity, BenchmarkBaselineAndSortWeightIntegrity) {
   RaySchedulingBench rtBench;
-  // Verify Legacy Indirect and DGC configs map to their Megakernel baselines
+  ASSERT_EQ(rtBench.GetNumConfigs(), 21u);
+
+  // Verify Legacy Indirect, DGC, RTP, and SER configs map to their respective baselines
+  ASSERT_EQ(rtBench.GetBaselineConfigIndex(0), -1);
   ASSERT_EQ(rtBench.GetBaselineConfigIndex(1), 0);
   ASSERT_EQ(rtBench.GetBaselineConfigIndex(2), 0);
+  ASSERT_EQ(rtBench.GetBaselineConfigIndex(3), 0);
+
+  ASSERT_EQ(rtBench.GetBaselineConfigIndex(4), -1);
   ASSERT_EQ(rtBench.GetBaselineConfigIndex(5), 4);
   ASSERT_EQ(rtBench.GetBaselineConfigIndex(6), 4);
-  ASSERT_EQ(rtBench.GetBaselineConfigIndex(9), 8);
-  ASSERT_EQ(rtBench.GetBaselineConfigIndex(12), 11);
+
+  ASSERT_EQ(rtBench.GetBaselineConfigIndex(7), -1);
+  ASSERT_EQ(rtBench.GetBaselineConfigIndex(8), 7);
+
+  ASSERT_EQ(rtBench.GetBaselineConfigIndex(9), -1);
+  ASSERT_EQ(rtBench.GetBaselineConfigIndex(10), 9);
+  ASSERT_EQ(rtBench.GetBaselineConfigIndex(11), 9);
+
+  ASSERT_EQ(rtBench.GetBaselineConfigIndex(12), -1);
+  ASSERT_EQ(rtBench.GetBaselineConfigIndex(13), 12);
+
+  ASSERT_EQ(rtBench.GetBaselineConfigIndex(14), -1);
+  ASSERT_EQ(rtBench.GetBaselineConfigIndex(15), 14);
+
+  // Verify Config 2 (Material Shading DGC) and Config 12 (Incoherent GI Megakernel) do not share sortWeight
+  ASSERT_NE(rtBench.GetSortWeight(2), rtBench.GetSortWeight(12));
+
+  // Verify BVH Traversal (17->18) and Queue Compaction (19->20) baselines and ordering
+  ASSERT_EQ(rtBench.GetBaselineConfigIndex(17), -1);
   ASSERT_EQ(rtBench.GetBaselineConfigIndex(18), 17);
-  ASSERT_EQ(rtBench.GetBaselineConfigIndex(25), 24);
-
-  // Verify Config 2 (Material Shading DGC) and Config 17 (Incoherent GI Megakernel) do not share sortWeight
-  ASSERT_NE(rtBench.GetSortWeight(2), rtBench.GetSortWeight(17));
-
-  // Verify BVH Traversal (24->25) and Queue Compaction (26->27) baselines and ordering
-  ASSERT_EQ(rtBench.GetBaselineConfigIndex(24), -1);
-  ASSERT_EQ(rtBench.GetBaselineConfigIndex(26), -1);
-  ASSERT_EQ(rtBench.GetBaselineConfigIndex(27), 26);
-  ASSERT_LT(rtBench.GetSortWeight(24), rtBench.GetSortWeight(25));
-  ASSERT_LT(rtBench.GetSortWeight(26), rtBench.GetSortWeight(27));
-  ASSERT_LT(rtBench.GetSortWeight(13), rtBench.GetSortWeight(14));
+  ASSERT_EQ(rtBench.GetBaselineConfigIndex(19), -1);
+  ASSERT_EQ(rtBench.GetBaselineConfigIndex(20), 19);
+  ASSERT_LT(rtBench.GetSortWeight(17), rtBench.GetSortWeight(18));
+  ASSERT_LT(rtBench.GetSortWeight(19), rtBench.GetSortWeight(20));
+  ASSERT_LT(rtBench.GetSortWeight(14), rtBench.GetSortWeight(15));
 
   DualIssueBench diBench;
   ASSERT_EQ(std::string(diBench.GetName()), "ILP & Dual-Issue");

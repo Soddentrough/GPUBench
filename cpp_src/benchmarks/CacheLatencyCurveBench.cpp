@@ -38,6 +38,16 @@ std::string CacheLatencyCurveBench::GetConfigName(uint32_t config_idx) const {
   return "";
 }
 
+BenchmarkExplanation CacheLatencyCurveBench::GetExplanation(uint32_t config_idx) const {
+  std::string sizeStr = (config_idx < configs.size()) ? configs[config_idx].name : "16 KB - 256 MB";
+  std::string hintStr = (config_idx < configs.size()) ? configs[config_idx].cacheLevelHint : "L0 -> L3 -> VRAM";
+  return {
+    "Dependent memory access latency at a " + sizeStr + " working set (" + hintStr + "), exposing exact cache capacities and latency cliffs.",
+    "Ray tracing (BVH traversal), sparse virtual texturing, and bindless/indirection tables stall whenever their working set spills past L1/L2/L3 into VRAM. Engineers use this curve to size data structures to fit cache tiers.",
+    "1,000,000-step randomized Hamiltonian-cycle pointer chase across " + sizeStr + " at 128-byte cache-line stride."
+  };
+}
+
 std::string CacheLatencyCurveBench::ComputeAdaptiveHint(
     uint64_t workingSetBytes, const DeviceInfo &info) const {
   auto containsCi = [](const std::string &haystack, const char *needle) {

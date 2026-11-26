@@ -55,6 +55,48 @@ std::string PixelFillRateBench::GetConfigName(uint32_t config_idx) const {
   return "";
 }
 
+const char *PixelFillRateBench::GetDescription(uint32_t config_idx) const {
+  switch (config_idx) {
+  case 0u:
+    return "Standard 8-bit SDR color pixel output throughput across the fixed-function rasterizer and ROPs.";
+  case 1u:
+    return "64-bit floating-point HDR (RGBA16F) pixel output throughput across ROPs and framebuffer memory.";
+  case 2u:
+    return "Read-modify-write alpha-blended ROP pixel fill throughput under multi-layer overdraw.";
+  default:
+    return GetDescription();
+  }
+}
+
+BenchmarkExplanation PixelFillRateBench::GetExplanation(uint32_t config_idx) const {
+  switch (config_idx) {
+  case 0u:
+    return {
+      "Peak 32-bit SDR color pixel fill rate (GPixels/s) of the fixed-function rasterizer and Render Output Units (ROPs).",
+      "Determines how fast the GPU outputs high-resolution / high-refresh frames (e.g., 4K 120+ Hz) and handles heavy opaque screen overdraw.",
+      "Vulkan dynamic rendering graphics pass drawing 64 full-screen quads to an RGBA8_UNORM target with a minimal fragment shader."
+    };
+  case 1u:
+    return {
+      "64-bit HDR (RGBA16F) pixel fill rate—doubling framebuffer byte traffic per pixel compared to SDR RGBA8.",
+      "Gates deferred lighting/reflection accumulation buffers, HDR bloom chains, and wide-gamut HDR game pipelines at 1440p and 4K.",
+      "Vulkan dynamic rendering graphics pass drawing 64 full-screen quads to an RGBA16F floating-point color target."
+    };
+  case 2u:
+    return {
+      "Alpha-blended read-modify-write ROP throughput when every pixel must read, blend, and write back the destination color.",
+      "Directly impacts frame rates in dense particle effects (smoke, fire, explosions, volumetric fog), translucent foliage, and layered UI.",
+      "Vulkan dynamic rendering pass drawing 64 full-screen quads to RGBA8_UNORM with hardware SrcAlpha/OneMinusSrcAlpha blending enabled."
+    };
+  default:
+    return {
+      GetDescription(),
+      "Measures fixed-function ROP pixel output and blend throughput.",
+      "Vulkan dynamic rendering multi-layer fullscreen quad fill pass."
+    };
+  }
+}
+
 uint32_t PixelFillRateBench::findMemoryType(uint32_t typeFilter,
                                             VkMemoryPropertyFlags properties) const {
   VkPhysicalDeviceMemoryProperties memProperties;

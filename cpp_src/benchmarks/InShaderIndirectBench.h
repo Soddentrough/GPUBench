@@ -30,9 +30,9 @@ public:
   InShaderIndirectBench();
   ~InShaderIndirectBench() override;
 
-  const char *GetName() const override { return "In-Shader Indirect Synthesis"; }
+  const char *GetName() const override { return "GPU-Driven Compute Dispatch"; }
   std::vector<std::string> GetAliases() const override {
-    return {"indirect", "indirect-dispatch", "inshaderindirect", "in-shader-indirect", "indirect_synth", "command_synth"};
+    return {"indirect", "indirect-dispatch", "inshaderindirect", "in-shader-indirect", "indirect_synth", "command_synth", "gpu-driven", "compute-dispatch", "dgc-dispatch"};
   }
   const char *GetMetric() const override { return "us"; }
   const char *GetMetric(uint32_t /*config_idx*/) const override { return "us"; }
@@ -88,9 +88,9 @@ public:
   bool ValidateResults(uint32_t config_idx = 0) const override;
 
   const char *GetComponent(uint32_t config_idx = 0) const override { (void)config_idx; return "Scheduling"; }
-  const char *GetSubCategory(uint32_t config_idx = 0) const override { (void)config_idx; return "Indirect Command Synthesis"; }
+  const char *GetSubCategory(uint32_t config_idx = 0) const override { (void)config_idx; return "Compute Dispatch Scheduling"; }
   const char *GetDescription() const override {
-    return "GPU-side indirect dispatch argument synthesis (Vulkan vkCmdDispatchIndirect / DGC ExecutionSet) or persistent work-queue compaction (ROCm HIP) vs CPU direct dispatch.";
+    return "GPU-generated compute dispatch scheduling (Vulkan vkCmdDispatchIndirect / DGC ExecutionSet) or persistent compute work-queue compaction (ROCm HIP) vs. CPU fixed-grid dispatch.";
   }
   const char *GetDescription(uint32_t config_idx) const override {
     if (config_idx < configs.size()) {
@@ -100,6 +100,10 @@ public:
   }
   const char *GetDescription(uint32_t config_idx, const DeviceInfo &info,
                              IComputeContext *context = nullptr) const override;
+  BenchmarkExplanation GetExplanation(uint32_t config_idx = 0) const override;
+  BenchmarkExplanation GetExplanation(uint32_t config_idx,
+                                      const DeviceInfo &info,
+                                      IComputeContext *context = nullptr) const override;
   bool RequiresInterIterationBarrier(uint32_t /*config_idx*/ = 0) const override {
     return true;
   }

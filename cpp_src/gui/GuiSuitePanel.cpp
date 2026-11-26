@@ -1,4 +1,5 @@
 #include "GuiApp.h"
+#include "GuiSuiteLogic.h"
 #include "GuiUiHelpers.h"
 
 #include <algorithm>
@@ -12,115 +13,12 @@ namespace gpubench::gui {
 
 namespace {
 
-std::string fallbackDescriptionForBenchmark(const BenchmarkConfigMetadata& meta) {
-    if (!meta.description.empty()) {
-        return meta.description;
-    }
-    const std::string& bn = meta.benchmarkName;
-    if (bn == "FP64") return "IEEE-754 double-precision (64-bit) FMA throughput across SIMD vector lanes.";
-    if (bn == "FP32") return "Single-precision (32-bit) FMA throughput (including VOPD dual-issue where supported).";
-    if (bn == "FP16") return (meta.configIndex == 0)
-        ? "Packed 16-bit half-precision vector FMA throughput across shader ALU lanes."
-        : "Hardware Cooperative Matrix / WMMA / MFMA tensor tile throughput in FP16.";
-    if (bn == "BF16") return (meta.configIndex == 0)
-        ? "BFloat16 vector dot/FMA throughput (with hardware ISA emulation detection)."
-        : "Hardware Cooperative Matrix / WMMA / MFMA tensor tile throughput in BF16.";
-    if (bn == "FP8") return "8-bit E4M3 floating-point hardware matrix core throughput.";
-    if (bn == "FP6") return "OCP MXFP6 (E3M2) microscaling hardware matrix throughput.";
-    if (bn == "FP4") return "OCP MXFP4 (E2M1) microscaling hardware matrix throughput.";
-    if (bn == "INT8") return (meta.configIndex == 0)
-        ? "Packed 8-bit integer dot-product (SDOT/UDOT) throughput across vector ALUs."
-        : "8-bit integer Cooperative Matrix / WMMA / MFMA tensor throughput.";
-    if (bn == "INT4") return "Sub-byte 4-bit integer Cooperative Matrix / WMMA / MFMA throughput.";
-    if (bn == "DualIssue" || bn.find("Dual-Issue") != std::string::npos) return "Instruction-level parallelism (ILP) & FP32/INT32 co-issue scaling from serialized chains to peak wave occupancy.";
-    if (bn == "LDS Bank Conflicts") return "Shared memory / Local Data Share (LDS) bank serialization sweep from conflict-free stride-1 to 32-way bank conflicts.";
-    if (bn == "Pixel Fill Rate") return "Fixed-function rasterizer & Render Output Unit (ROP) pixel/blend fill throughput via Vulkan dynamic rendering.";
-    if (bn == "System Memory Bandwidth") return "Host CPU DRAM streaming read/write/copy throughput using runtime-dispatched AVX-512, AVX2, or ARM64 NEON non-temporal stores.";
-    if (bn == "System Memory Latency") return "Host CPU DRAM pointer-chasing latency using 2 MB Large Pages / Transparent Huge Pages to isolate DRAM access from TLB walks.";
-    if (bn.find("Latency") != std::string::npos) return "Dependent pointer-chasing latency isolating GPU cache hierarchy and VRAM controller round-trip time.";
-    if (bn.find("Cache Bandwidth") != std::string::npos) return "Streaming coalesced bandwidth targeting a dedicated GPU cache hierarchy residency tier.";
-    if (bn.rfind("RayScheduling", 0) == 0) {
-        return "Hardware ray-tracing execution paradigm & lighting stage (" + meta.configName + ") evaluated across complex 3D PBR geometry.";
-    }
-    return meta.displayName + " (" + meta.subcategory + ") — hardware throughput & efficiency microbenchmark.";
-}
-
-std::string subgroupTitleForCatalogEntry(const BenchmarkConfigMetadata& meta, std::string& outCategory) {
-    if (!meta.isDeviceDependent || meta.component == "System") {
-        outCategory = "Host System";
-        if (meta.benchmarkName.find("Bandwidth") != std::string::npos) {
-            return "Host DRAM Streaming Bandwidth (AVX-512 / AVX2 / NEON)";
-        }
-        return "Host DRAM Pointer-Chasing Latency (2 MB Large / Huge Pages)";
-    }
-
-    if (meta.component == "Scheduling" || meta.benchmarkName == "In-Shader Indirect Synthesis") {
-        outCategory = "Scheduling";
-#ifdef GPUBENCH_ENABLE_EXPERIMENTAL_WORKGRAPHS
-        if (meta.benchmarkName.find("Work Graphs") != std::string::npos) {
-            return "GPU Work Graphs (VK_AMDX_shader_enqueue)";
-        }
-#endif
-        if (meta.benchmarkName.find("Async") != std::string::npos) {
-            return "Async Compute (ACE) & Copy Overlap";
-        }
-        return "In-Shader Indirect Command Synthesis";
-    }
-
-    if (meta.component == "Raster" || meta.component == "Graphics" || meta.component == "Rasterization & ROP") {
-        outCategory = "Raster";
-        return "ROP Pixel & Blend Fill Rate";
-    }
-
-    if (meta.component == "Memory") {
-        outCategory = "Memory";
-        if (meta.benchmarkName.find("Interconnect") != std::string::npos) {
-            return "PCIe DMA, ReBAR & Multi-GPU P2P Interconnect";
-        }
-        if (meta.benchmarkName == "Device Memory Bandwidth") {
-            return "Device VRAM Streaming Bandwidth";
-        }
-        if (meta.benchmarkName.find("Cache Bandwidth") != std::string::npos) {
-            return "Cache Hierarchy Bandwidth (L0 -> L3)";
-        }
-        return "Pointer-Chasing Latency & Working-Set Curve";
-    }
-
-    if (meta.component == "Ray Tracing") {
-        outCategory = "Ray Tracing";
-        if (meta.benchmarkName.rfind("RayScheduling", 0) == 0) {
-            return meta.subcategory.empty() ? "Scene Ray Scheduling" : meta.subcategory;
-        }
-        if (meta.benchmarkName.find("Opacity Micromap") != std::string::npos) {
-            return "Opacity Micromaps (OMM)";
-        }
-        if (meta.benchmarkName == "RayASBuild") {
-            return "BVH Construction (BLAS / TLAS)";
-        }
-        if (meta.benchmarkName == "RayDivergence" || meta.benchmarkName == "RayPayload") {
-            return "Ray Divergence & Payload";
-        }
-        return "BVH Traversal & Intersection";
-    }
-
-    outCategory = "Compute";
-    if (meta.benchmarkName.find("Sparse") != std::string::npos ||
-        meta.benchmarkName.find("Cooperative Vector") != std::string::npos) {
-        return "Structured Sparsity & Neural Shading (2026)";
-    }
-    if (meta.benchmarkName == "DualIssue" || meta.benchmarkName.find("Dual-Issue") != std::string::npos) {
-        return "Instruction Co-Issue & ILP (DualIssue)";
-    }
-    if (meta.benchmarkName == "LDS Bank Conflicts") {
-        return "Shared Memory / LDS Bank Conflicts";
-    }
-    return "Compute Precision (Vec & Matrix)";
-}
-
 bool isCoreSuiteSlot(const BenchmarkItem& itm, bool isRocm) {
+    const bool isIndirect = (itm.id == "GPU-Driven Compute Dispatch" ||
+                             itm.id == "In-Shader Indirect Synthesis");
     const bool indirectCore = isRocm
-        ? (itm.id == "In-Shader Indirect Synthesis" && (itm.configIndex == 1 || itm.configIndex == 3))
-        : (itm.id == "In-Shader Indirect Synthesis" && (itm.configIndex == 1 || itm.configIndex == 3 || itm.configIndex == 5 || itm.configIndex == 7));
+        ? (isIndirect && (itm.configIndex == 1 || itm.configIndex == 3))
+        : (isIndirect && (itm.configIndex == 1 || itm.configIndex == 3 || itm.configIndex == 5 || itm.configIndex == 7));
     return itm.id == "FP32" || itm.id == "FP16" || itm.id == "BF16" ||
            itm.id == "FP8" || itm.id == "INT8" ||
            (itm.id == "Device Memory Bandwidth" && itm.configIndex == 0) ||
@@ -129,16 +27,6 @@ bool isCoreSuiteSlot(const BenchmarkItem& itm, bool isRocm) {
            (itm.id == "PCIe & Host-Device Interconnect" && itm.configIndex <= 1) ||
            indirectCore ||
            (itm.id == "RayScheduling" && (itm.configIndex <= 2 || itm.configIndex == 4 || itm.configIndex == 5));
-}
-
-const char* shortCategoryTag(const std::string& name) {
-    if (name == "Ray Tracing") return "RT";
-    if (name == "Scheduling") return "SCHED";
-    if (name == "Raster" || name == "Graphics") return "RASTER";
-    if (name == "Host System") return "HOST";
-    if (name == "Compute") return "COMP";
-    if (name == "Memory") return "MEM";
-    return name.c_str();
 }
 
 void syncSelectionFlags(std::vector<BenchmarkCategory>& categories) {
@@ -173,137 +61,18 @@ void setCategoryArmed(BenchmarkCategory& cat, bool arm) {
     cat.allSelected = any;
 }
 
-/// Produce a compact sidebar slot label by stripping subgroup-redundant prefixes
-/// while preserving full names in tooltips, inspectors, and exported charts.
-std::string compactWorkloadSlotLabel(const std::string& fullName, const std::string& subgroupName) {
-    std::string out = fullName;
-
-    static constexpr const char* kLeadingTags[] = {
-        "Stage: ",
-        "Scene Render: ",
-        "Stage Breakdown - "
-    };
-    for (const char* tag : kLeadingTags) {
-        const size_t len = std::char_traits<char>::length(tag);
-        if (out.rfind(tag, 0) == 0) {
-            out.erase(0, len);
-            break;
-        }
-    }
-
-    auto stripPrefixWithSep = [](std::string& s, const std::string& prefix) -> bool {
-        if (prefix.empty() || s.size() <= prefix.size() || s.rfind(prefix, 0) != 0) {
-            return false;
-        }
-        const size_t n = prefix.size();
-        for (const char* sep : {" - ", ": ", " "}) {
-            const size_t sepLen = std::char_traits<char>::length(sep);
-            if (s.compare(n, sepLen, sep) == 0 && s.size() > n + sepLen) {
-                s.erase(0, n + sepLen);
-                return true;
-            }
-        }
-        return false;
-    };
-
-    if (!stripPrefixWithSep(out, subgroupName)) {
-        static constexpr const char* kGroupPrefixes[] = {
-            "Multi-Light Evaluation",
-            "Multi-Light",
-            "BVH Traversal",
-            "Queue Compaction",
-            "Traversal Divergence",
-            "Alpha-Cutout Traversal Divergence",
-            "Incoherent Ray Tracing",
-            "Primary Ray Tracing",
-            "Full Scene Path Tracing",
-            "Material Shading"
-        };
-        for (const char* gp : kGroupPrefixes) {
-            if (stripPrefixWithSep(out, gp)) {
-                break;
-            }
-        }
-    }
-
-    struct ReplaceRule { const char* from; const char* to; };
-    static constexpr ReplaceRule kRules[] = {
-        {"FP32 Baseline (Ping-Pong)", "FP32 Baseline"},
-        {"FP32 Moderate ILP (8 Chains)", "FP32 Mid ILP (8ch)"},
-        {"FP32 Peak ILP / Co-Issue (16 Chains)", "FP32 Peak ILP (16ch)"},
-        {"INT32 Baseline (Ping-Pong)", "INT32 Baseline"},
-        {"INT32 Moderate ILP (8 Chains)", "INT32 Mid ILP (8ch)"},
-        {"INT32 Peak ILP (16 Chains)", "INT32 Peak ILP (16ch)"},
-        {"Concurrent Mixed (FP32+INT32)", "FP32+INT32 Mixed"},
-        {"Concurrent Mixed (FP32 + INT32)", "FP32+INT32 Mixed"},
-        {"Batched BLAS Build (5M Tris, 256 Meshes)", "Batched BLAS (5M, 256m)"},
-        {"TLAS: Indoor Corridor (20K Inst)", "TLAS: Indoor (20K Inst)"},
-        {"TLAS: Dense Jungle (50K Inst)", "TLAS: Jungle (50K Inst)"},
-        {"TLAS: Massive Open World (200K Inst)", "TLAS: Open World (200K)"},
-        {"Raw BVH - Coherent Triangle Traversal (Max Occupancy)", "Raw BVH: Coherent Triangles"},
-        {"Raw BVH - Deep Multi-Layer Box Stress", "Raw BVH: Deep Box Stress"},
-        {"100% Solid (Opaque Fast-Path Baseline)", "Any-Hit: 100% Opaque"},
-        {"50% Solid (Cutout Stress)", "Any-Hit: 50% Cutout"},
-        {"Spheres (AABB)", "Procedural AABB (Spheres)"},
-        {"Bounce Divergence: ", ""},
-        {"16B Payload (Shadow / AO Visibility Probe)", "16B Payload (Shadow/AO)"},
-        {"128B Payload (Real-Time Path Tracing & GI)", "128B Payload (Path Trace)"},
-        {"256B Payload (Production / Film BSDF & MIS)", "256B Payload (Film BSDF)"},
-        {"(Device-Generated Commands (DGC))", "(DGC)"},
-        {"Device-Generated Commands (DGC)", "DGC"},
-        {"(DGC Light Binning)", "(DGC)"},
-        {"(DGC Indirect)", "(DGC)"},
-        {"(DGC Specialized)", "(DGC Spec)"},
-        {"DGC Specialized", "DGC Spec"},
-        {"(Traditional Megakernel)", "(MK)"},
-        {"Traditional Megakernel", "MK"},
-        {"(Megakernel)", "(MK)"},
-        {"Wavefront Compaction (Material Sorting)", "Wavefront (Mat)"},
-        {"Wavefront Compaction (Directional Binning)", "Wavefront (Dir)"},
-        {"Wavefront Compaction (Ray Reordering)", "Wavefront (Reorder)"},
-        {"RTP + Hardware SER", "RTP + SER"},
-        {"Single Light", "1 Light"},
-        {"Multi-Bucket 1024x Sparse (CPU Direct Fixed Grid)", "Multi-Bucket 1024x (CPU)"},
-        {"Multi-Bucket 1024x Sparse (Legacy vkCmdDispatchIndirect)", "Multi-Bucket 1024x (Indirect)"},
-        {"Multi-Bucket 1024x Sparse (DGC ExecutionSet + Pruning)", "Multi-Bucket 1024x (DGC)"},
-        {"Legacy Indirect Dispatch", "Legacy Indirect"},
-        {"Legacy Zero-Dispatch Pruning (0% Active)", "Zero-Dispatch (0% Active)"},
-        {"Persistent Work-Queue Compaction", "Work-Queue Compaction"},
-        {"In-Shader Indirect Synthesis", "Indirect"},
-        {"In-Shader Zero-Dispatch ", "Zero-Dispatch "},
-        {"CPU Direct Fixed Grid", "CPU Fixed Grid"}
-    };
-    for (const auto& rule : kRules) {
-        const size_t fromLen = std::char_traits<char>::length(rule.from);
-        const size_t toLen = std::char_traits<char>::length(rule.to);
-        size_t pos = 0;
-        while ((pos = out.find(rule.from, pos)) != std::string::npos) {
-            out.replace(pos, fromLen, rule.to);
-            pos += toLen;
-        }
-    }
-
-    if (out.size() >= 2 && out.front() == '(' && out.back() == ')') {
-        std::string inner = out.substr(1, out.size() - 2);
-        if (inner.find('(') == std::string::npos && inner.find(')') == std::string::npos) {
-            out = std::move(inner);
-        }
-    }
-    return out;
-}
-
 } // namespace
 
 void GuiApp::initializeBenchmarkCategories() {
     m_categories.clear();
 
     const std::vector<std::pair<std::string, std::string>> categoryDefs = {
-        {"Compute",      "Floating-point, quantized matrix, 2:4 sparse, neural Cooperative Vector, ILP, and LDS bank throughput."},
-        {"Memory",       "VRAM streaming bandwidth, L0-L3 cache hierarchy, PCIe/ReBAR/P2P interconnect, and pointer-chasing latency."},
-        {"Ray Tracing",  "Hardware BVH build/traversal, Opacity Micromaps (OMM), SER/DGC scheduling, and 4-scene PBR path tracing."},
-        {"Scheduling",   "Async Compute/Copy engine overlap, GPU indirect command synthesis, and persistent work-queue compaction."},
-        {"Raster",       "Vulkan 1.4 dynamic rendering rasterization and Render Output Unit (ROP) pixel/blend fill throughput."},
-        {"Host System",  "CPU host DRAM streaming bandwidth (AVX-512 / AVX2 / NEON) and 2 MB Large / Huge Page pointer-chasing latency."}
+        {"Compute",      "Core shader math, AI/tensor matrix throughput, neural shading, shader ILP/dual-issue, and on-chip LDS memory."},
+        {"Memory",       "VRAM streaming bandwidth, L0-L3 cache hierarchy bandwidth & latency cliffs, and PCIe/ReBAR/P2P interconnect speed."},
+        {"Ray Tracing",  "BVH acceleration builds, hardware ray traversal/intersection, Opacity Micromaps, bounce divergence, and 4-scene path tracing."},
+        {"Scheduling",   "GPU-driven compute dispatch compaction/DGC, Async Compute + DMA engine overlap, and shader-to-shader Work Graphs."},
+        {"Raster",       "Fixed-function rasterization and Render Output Unit (ROP) pixel fill, HDR, and alpha-blending throughput."},
+        {"Host System",  "CPU host system RAM streaming bandwidth and access latency—gating game logic, asset streaming, and APU graphics."}
     };
 
     for (const auto& [catName, catDesc] : categoryDefs) {
@@ -352,10 +121,10 @@ void GuiApp::initializeBenchmarkCategories() {
             if (!memCat) continue;
             auto& sg = findOrAddSubgroup(
                 *memCat,
-                "Pointer-Chasing Latency & Working-Set Curve",
+                "GPU Cache & VRAM Access Latency",
                 "Memory",
                 "Cache Latency Curve",
-                "Dependent pointer-chasing latency across GPU cache tiers and 16 KB -> 256 MB working sets.");
+                "Measures memory round-trip latency across 16 KB to 256 MB working sets, exposing cache size cliffs that stall irregular shader fetches in BVH traversal and indirection tables.");
             BenchmarkItem item(
                 "Cache Latency Curve",
                 meta.subcategory,
@@ -365,6 +134,9 @@ void GuiApp::initializeBenchmarkCategories() {
                 fallbackDescriptionForBenchmark(meta),
                 true,
                 -1);
+            item.whatItTests = meta.whatItTests;
+            item.pipelineImpact = meta.pipelineImpact;
+            item.method = meta.method;
             item.configCaveat = meta.configCaveat;
             sg.items.push_back(std::move(item));
             continue;
@@ -379,7 +151,8 @@ void GuiApp::initializeBenchmarkCategories() {
         }
 
         std::string targetCatName;
-        std::string sgTitle = subgroupTitleForCatalogEntry(meta, targetCatName);
+        std::string sgDesc;
+        std::string sgTitle = subgroupTitleForCatalogEntry(meta, targetCatName, sgDesc);
         BenchmarkCategory* cat = findCategory(targetCatName);
         if (!cat) continue;
 
@@ -389,15 +162,18 @@ void GuiApp::initializeBenchmarkCategories() {
             ? "System"
             : meta.component;
 
-        auto& sg = findOrAddSubgroup(*cat, sgTitle, itemComponent, sgEngineId, "");
+        auto& sg = findOrAddSubgroup(*cat, sgTitle, itemComponent, sgEngineId, sgDesc);
+        if (sg.description.empty() && !sgDesc.empty()) {
+            sg.description = sgDesc;
+        }
 
         std::string friendlyName;
         if (isRaySched) {
             friendlyName = meta.configName.empty() ? meta.displayName : meta.configName;
-        } else if (sgTitle.rfind("Compute Precision", 0) == 0 ||
-                   sgTitle.rfind("Structured Sparsity", 0) == 0 ||
-                   sgTitle.rfind("Cache Hierarchy Bandwidth", 0) == 0 ||
-                   sgTitle.rfind("Pointer-Chasing Latency", 0) == 0) {
+        } else if (sgTitle.rfind("Shader & AI Matrix Compute", 0) == 0 ||
+                   sgTitle.rfind("2:4 Sparse Matrix", 0) == 0 ||
+                   sgTitle.rfind("GPU Cache Bandwidth", 0) == 0 ||
+                   sgTitle.rfind("GPU Cache & VRAM Access Latency", 0) == 0) {
             friendlyName = meta.displayName;
         } else {
             friendlyName = meta.configName.empty() ? meta.displayName : meta.configName;
@@ -412,6 +188,9 @@ void GuiApp::initializeBenchmarkCategories() {
             fallbackDescriptionForBenchmark(meta),
             true,
             static_cast<int>(meta.configIndex));
+        item.whatItTests = meta.whatItTests;
+        item.pipelineImpact = meta.pipelineImpact;
+        item.method = meta.method;
         item.configCaveat = meta.configCaveat;
         sg.items.push_back(std::move(item));
     }
@@ -424,71 +203,7 @@ void GuiApp::hydrateMetadataFromCatalog() {
 }
 
 bool GuiApp::matchesItem(const ResultData& r, const BenchmarkItem& itm, uint32_t activeDev) const {
-    const bool rIsHost = (r.component == "System" || r.backendName == "CPU" ||
-                          r.backendName == "System" || r.deviceIndex == UINT32_MAX ||
-                          r.deviceName == "Host CPU");
-    if (itm.category == "System") {
-        if (!rIsHost) return false;
-    } else {
-        if (rIsHost || r.deviceIndex != activeDev) return false;
-    }
-
-    if (itm.id == "Cache Latency Curve") {
-        return r.benchmarkName.rfind("Cache Latency Curve", 0) == 0;
-    }
-
-    if (itm.id == "RayScheduling") {
-        if (r.benchmarkName.rfind("RayScheduling", 0) != 0) return false;
-        return (itm.configIndex >= 0) && (static_cast<int>(r.configIndex) == itm.configIndex);
-    }
-
-    // Normalized multi-precision Vector / Matrix records from ResultImporter
-    if (r.benchmarkName == "Vector" || r.benchmarkName == "Matrix") {
-        const bool subMatches = (r.subcategory == itm.id) ||
-                                (r.subcategory.find("(" + itm.id + ")") != std::string::npos);
-        if (!subMatches) return false;
-        if (itm.name.find("(Matrix)") != std::string::npos) {
-            return r.benchmarkName == "Matrix";
-        }
-        if (itm.name.find("(Vector)") != std::string::npos) {
-            return r.benchmarkName == "Vector";
-        }
-        return (itm.configIndex >= 0) && (static_cast<int>(r.configIndex) == itm.configIndex);
-    }
-
-    // Normalized Device Memory Bandwidth records from ResultImporter
-    if (itm.id == "Device Memory Bandwidth") {
-        if (r.benchmarkName == "GPU VRAM Bandwidth" && itm.configIndex == 3) {
-            return true;
-        }
-        if ((r.benchmarkName.rfind("Device Memory Bandwidth", 0) == 0 ||
-             r.benchmarkName.rfind("VRAM Bandwidth", 0) == 0) &&
-            static_cast<int>(r.configIndex) == itm.configIndex) {
-            return true;
-        }
-    }
-
-    // Normalized RayIntersect & Pixel Fill Rate records from ResultImporter
-    if (itm.id == "RayIntersect" && static_cast<int>(r.configIndex) == itm.configIndex) {
-        if ((itm.configIndex == 0 && r.benchmarkName == "Ray-Triangle Intersection") ||
-            (itm.configIndex == 1 && r.benchmarkName == "Ray-Box Intersection") ||
-            r.benchmarkName.rfind("RayTracing (", 0) == 0) {
-            return true;
-        }
-    }
-    if (itm.id == "Pixel Fill Rate" && r.subcategory == "Pixel Fill Rate" &&
-        static_cast<int>(r.configIndex) == itm.configIndex) {
-        return true;
-    }
-
-    if (itm.configIndex >= 0 && static_cast<int>(r.configIndex) == itm.configIndex) {
-        if (r.benchmarkName == itm.id || r.benchmarkName.rfind(itm.id + " (", 0) == 0 ||
-            r.benchmarkName.rfind(itm.id + " -", 0) == 0) {
-            return true;
-        }
-    }
-
-    return r.benchmarkName == itm.id;
+    return matchesWorkloadItem(r, itm.id, itm.name, itm.category, itm.configIndex, activeDev);
 }
 
 GuiApp::BenchmarkDisplayInfo GuiApp::getBenchmarkDisplayInfo(
@@ -1114,9 +829,20 @@ void GuiApp::renderBenchmarkSuitePanel() {
                 if (ImGui::InvisibleButton("##SGHdrToggle", ImVec2(toggleW, hdrH))) {
                     sg.collapsed = !sg.collapsed;
                 }
-                bool hdrHovered = ImGui::IsItemHovered();
+                bool hdrHovered = ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled);
                 if (hdrHovered) {
                     dl->AddRectFilled(hdrP0, ImVec2(hdrP0.x + toggleW, hdrP1.y), toU32(c.bgHover, 0.55f), 0.0f);
+                    if (!sg.description.empty()) {
+                        ImGui::BeginTooltip();
+                        ImGui::PushTextWrapPos(ImGui::GetCursorPos().x + s(380.0f));
+                        pushBoldFont();
+                        ImGui::TextColored(c.phosphorHi, "%s", sg.name.c_str());
+                        popBoldFont();
+                        ImGui::Separator();
+                        ImGui::TextWrapped("%s", sg.description.c_str());
+                        ImGui::PopTextWrapPos();
+                        ImGui::EndTooltip();
+                    }
                 }
 
                 char countBuf[32];

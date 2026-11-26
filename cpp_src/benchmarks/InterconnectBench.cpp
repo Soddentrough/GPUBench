@@ -144,6 +144,83 @@ const char *InterconnectBench::GetDescription(uint32_t config_idx,
   return GetDescription(config_idx);
 }
 
+BenchmarkExplanation InterconnectBench::GetExplanation(uint32_t config_idx) const {
+  switch (config_idx) {
+  case 0u:
+    return {
+      "Sustained PCIe Host-to-Device (CPU RAM -> GPU VRAM) DMA upload bandwidth.",
+      "Governs level loading times, open-world texture/geometry streaming (DirectStorage-style), and per-frame dynamic buffer uploads.",
+      "DMA copy engine transfers from pinned host memory into device-local VRAM."
+    };
+  case 1u:
+    return {
+      "Sustained PCIe Device-to-Host (GPU VRAM -> CPU RAM) DMA readback bandwidth.",
+      "Affects gameplay recording/streaming, screenshot/frame readback, GPU physics/occlusion query feedback, and ML/compute output downloads.",
+      "DMA copy engine transfers from device-local VRAM into cached pinned host memory."
+    };
+  case 2u:
+    return {
+      "Full-duplex simultaneous PCIe H2D + D2H bandwidth across dual DMA engines.",
+      "Reflects heavy real-time workloads that stream assets into VRAM at the same time they read back frames, telemetry, or compute results.",
+      "Concurrent host-to-device and device-to-host DMA transfers running simultaneously across dual engines."
+    };
+  case 3u:
+    return {
+      "Direct CPU-to-VRAM streaming write bandwidth over PCIe Resizable BAR (ReBAR / Smart Access Memory).",
+      "Used by modern DX12/Vulkan engines to write per-frame uniforms, instance transforms, and dynamic meshes straight to VRAM without intermediate staging copies.",
+      "Non-temporal SIMD CPU writes streamed directly into HOST_VISIBLE | DEVICE_LOCAL ReBAR VRAM."
+    };
+  case 4u:
+    return {
+      "Fine-grained CPU <-> GPU coherent atomic round-trip latency on Unified Memory APUs / integrated GPUs.",
+      "Measures how fast the CPU and GPU can hand off work or read shared data structures without copying buffers—critical for APU low-latency pipelines.",
+      "Ping-pong coherent atomic cache-line round-trips between a CPU thread and an active GPU shader on shared memory."
+    };
+  case 5u:
+    return {
+      "Direct GPU-to-GPU Peer-to-Peer (P2P) bandwidth over PCIe, xGMI, or NVLink.",
+      "Relevant to multi-GPU rendering, offscreen frame compositing, and multi-GPU AI/compute tensor parallelism without bouncing through CPU RAM.",
+      "Direct peer DMA transfer from GPU 0 VRAM into GPU 1 VRAM across linked physical devices."
+    };
+  default:
+    return {
+      GetDescription(config_idx),
+      "Measures PCIe, Resizable BAR, Unified Memory, and Multi-GPU interconnect performance.",
+      "Host-to-device / peer-to-peer interconnect bandwidth & latency microbenchmark."
+    };
+  }
+}
+
+BenchmarkExplanation InterconnectBench::GetExplanation(
+    uint32_t config_idx, const DeviceInfo &info, IComputeContext *context) const {
+  (void)info;
+  BenchmarkExplanation e = GetExplanation(config_idx);
+  if (context && context->getBackend() == ComputeBackend::ROCm) {
+    switch (config_idx) {
+    case 0u:
+      e.method = "ROCm hipMemcpyAsync H2D transfer from pinned host memory into device VRAM.";
+      break;
+    case 1u:
+      e.method = "ROCm hipMemcpyAsync D2H transfer from device VRAM into pinned host memory.";
+      break;
+    case 2u:
+      e.method = "Concurrent H2D and D2H hipMemcpyAsync transfers across two non-blocking HIP streams.";
+      break;
+    case 4u:
+      e.method = "Coherent atomic cache-line ping-pong between host CPU and GPU kernel via hipHostMallocCoherent.";
+      break;
+    case 5u:
+      e.method = "Direct GPU-to-GPU hipMemcpyPeerAsync transfer across peer-accessible ROCm devices.";
+      break;
+    default:
+      break;
+    }
+  } else if (context && context->getBackend() == ComputeBackend::Vulkan && config_idx == 5u) {
+    e.method = "Vulkan VkDeviceGroup direct peer DMA copy between physical GPUs.";
+  }
+  return e;
+}
+
 #ifdef HAVE_VULKAN
 bool InterconnectBench::probeVulkanDeviceGroupP2P(const VulkanContext *vc,
                                                   std::string &outReason) const {

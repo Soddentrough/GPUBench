@@ -45,6 +45,16 @@ std::string getTempFilePath(const std::string &prefix) {
   return (tmpDir / (prefix + "_" + getProcessIdStr() + ".json")).string();
 }
 
+struct TempFileGuard {
+  std::string path;
+  explicit TempFileGuard(std::string p) : path(std::move(p)) {
+    std::remove(path.c_str());
+  }
+  ~TempFileGuard() {
+    if (!path.empty()) std::remove(path.c_str());
+  }
+};
+
 std::string getGpubenchPath() {
   const char *envBin = std::getenv("GPUBENCH_BIN");
   if (envBin && std::filesystem::exists(envBin)) {
@@ -397,6 +407,15 @@ TEST_CASE(E2E_Tier1, SceneFlag) {
   ASSERT_TRUE(res.stdoutStr.find("RayRawTraversal") != std::string::npos);
 }
 
+TEST_CASE(E2E_Tier1, ListBenchmarksVerboseFlag) {
+  auto res = runGpubench({"--list-benchmarks", "--verbose"});
+  ASSERT_EQ(res.exitCode, 0);
+  ASSERT_TRUE(res.stdoutStr.find("GPU-Driven Compute Dispatch") != std::string::npos);
+  ASSERT_TRUE(res.stdoutStr.find("TESTS:") != std::string::npos);
+  ASSERT_TRUE(res.stdoutStr.find("PIPELINE:") != std::string::npos);
+  ASSERT_TRUE(res.stdoutStr.find("METHOD:") != std::string::npos);
+}
+
 // ============================================================================
 // Tier 2: Boundary & Corner Cases (Graceful rejection without crash)
 // ============================================================================
@@ -469,14 +488,13 @@ TEST_CASE(E2E_Tier2, OutOfRangeSppRejection) {
 }
 
 TEST_CASE(E2E_Tier2, CorruptJsonFileImportRejection) {
-  const std::string corruptPath = getTempFilePath("gpubench_corrupt_test");
+  TempFileGuard corruptGuard(getTempFilePath("gpubench_corrupt_test"));
   {
-    std::ofstream ofs(corruptPath);
+    std::ofstream ofs(corruptGuard.path);
     ofs << "{\"version\": \"" << GPUBENCH_VERSION << "\", \"incomplete\": [";
   }
 
-  auto res = runGpubench({"-i", corruptPath});
-  std::remove(corruptPath.c_str());
+  auto res = runGpubench({"-i", corruptGuard.path});
 
   ASSERT_NE(res.exitCode, 0);
   ASSERT_LT(res.exitCode, 128);
@@ -536,28 +554,24 @@ TEST_CASE(E2E_Tier3, GroupPlusIndividualBenchmark) {
 
 TEST_CASE(E2E_Tier3, JsonFileExportAndImportRoundTrip) {
   if (!hasUsableGpu()) { SKIP_TEST("No usable GPU detected"); }
-  const std::string tmpPath = getTempFilePath("gpubench_e2e_roundtrip_test");
-  std::remove(tmpPath.c_str());
+  TempFileGuard tmpGuard(getTempFilePath("gpubench_e2e_roundtrip_test"));
 
   // 1. Export benchmark run to JSON file
-  auto exportRes = runGpubench({"-b", "FP32", "-c", "0", "--profile-snapshot", "-f", "-o", tmpPath});
+  auto exportRes = runGpubench({"-b", "FP32", "-c", "0", "--profile-snapshot", "-f", "-o", tmpGuard.path});
   ASSERT_EQ(exportRes.exitCode, 0);
 
   // 2. Verify file was created and is non-empty
-  std::ifstream ifs(tmpPath);
+  std::ifstream ifs(tmpGuard.path);
   ASSERT_TRUE(ifs.is_open());
   std::string content((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
   ifs.close();
   ASSERT_TRUE(content.size() > 200);
 
   // 3. Import and display results from the generated JSON report
-  auto importRes = runGpubench({"-i", tmpPath});
+  auto importRes = runGpubench({"-i", tmpGuard.path});
   ASSERT_EQ(importRes.exitCode, 0);
   ASSERT_TRUE(importRes.stdoutStr.find("FP32") != std::string::npos);
   ASSERT_TRUE(importRes.stdoutStr.find("TFLOPS") != std::string::npos);
-
-  // Clean up
-  std::remove(tmpPath.c_str());
 }
 
 TEST_CASE(E2E_Tier3, JsonStdoutSchemaValidation) {
@@ -577,11 +591,11 @@ TEST_CASE(E2E_Tier3, JsonStdoutSchemaValidation) {
   // Validate top-level metadata schema
   ASSERT_EQ(run.appVersion, GPUBENCH_VERSION);
   ASSERT_GT(run.timestamp, 0ULL);
-  ASSERT_EQ(run.backend, "Vulkan");
+  ASSERT_TRUE(run.backend == "Vulkan" || run.backend == "ROCm" || run.backend == "OpenCL");
 
   // Validate device profile schema
   ASSERT_FALSE(run.deviceProfile.deviceName.empty());
-  ASSERT_EQ(run.deviceProfile.backend, "Vulkan");
+  ASSERT_EQ(run.deviceProfile.backend, run.backend);
   ASSERT_GT(run.deviceProfile.vramTotalMb, 0ULL);
 
   // Validate results schema
@@ -598,27 +612,30 @@ TEST_CASE(E2E_Tier3, JsonStdoutSchemaValidation) {
 
 TEST_CASE(E2E_Tier3, JsonComparisonModeMultiRun) {
   if (!hasUsableGpu()) { SKIP_TEST("No usable GPU detected"); }
-  const std::string runA = getTempFilePath("gpubench_e2e_runA");
-  const std::string runB = getTempFilePath("gpubench_e2e_runB");
-  std::remove(runA.c_str());
-  std::remove(runB.c_str());
+  TempFileGuard runAGuard(getTempFilePath("gpubench_e2e_runA"));
+  TempFileGuard runBGuard(getTempFilePath("gpubench_e2e_runB"));
 
   // Generate run A and run B
-  auto resA = runGpubench({"-b", "FP32", "-c", "0", "--profile-snapshot", "-f", "-o", runA});
+  auto resA = runGpubench({"-b", "FP32", "-c", "0", "--profile-snapshot", "-f", "-o", runAGuard.path});
   ASSERT_EQ(resA.exitCode, 0);
 
-  auto resB = runGpubench({"-b", "FP32", "-c", "0", "--profile-snapshot", "-f", "-o", runB});
+  auto resB = runGpubench({"-b", "FP32", "-c", "0", "--profile-snapshot", "-f", "-o", runBGuard.path});
   ASSERT_EQ(resB.exitCode, 0);
 
   // Compare both raw JSON runs side-by-side without post-hoc sanitization
-  auto cmpRes = runGpubench({"--compare", runA, runB});
+  auto cmpRes = runGpubench({"--compare", runAGuard.path, runBGuard.path});
   ASSERT_EQ(cmpRes.exitCode, 0);
   ASSERT_TRUE(cmpRes.stdoutStr.find("FP32") != std::string::npos);
   ASSERT_TRUE(cmpRes.stdoutStr.find("TFLOPS") != std::string::npos);
+}
 
-  // Clean up
-  std::remove(runA.c_str());
-  std::remove(runB.c_str());
+TEST_CASE(E2E_Tier3, RooflineFlagExecution) {
+  if (!hasUsableGpu()) { SKIP_TEST("No usable GPU detected"); }
+  auto res = runGpubench({"-b", "FP32,Device Memory Bandwidth", "-c", "0", "--profile-snapshot", "-f", "--roofline"});
+  ASSERT_EQ(res.exitCode, 0);
+  ASSERT_TRUE(res.stdoutStr.find("Roofline") != std::string::npos);
+  ASSERT_TRUE(res.stdoutStr.find("FLOP/B") != std::string::npos ||
+              res.stdoutStr.find("Ridge") != std::string::npos);
 }
 
 TEST_CASE(E2E_Tier3, QuietAndJsonOutputCleanliness) {

@@ -62,9 +62,13 @@ public:
   std::string GetConfigName(uint32_t config_idx) const override;
   const char *GetComponent(uint32_t config_idx = 0) const override;
   const char *GetSubCategory(uint32_t config_idx = 0) const override;
+  using IBenchmark::GetDescription;
   const char *GetDescription() const override {
     return "Hardware BVH box-intersection and traversal throughput across coherent flat grids and 64-layer nested AABB hierarchies.";
   }
+  const char *GetDescription(uint32_t config_idx) const override;
+  using IBenchmark::GetExplanation;
+  BenchmarkExplanation GetExplanation(uint32_t config_idx = 0) const override;
   bool ValidateResults(uint32_t config_idx = 0) const override;
 
   // Telemetry accessors

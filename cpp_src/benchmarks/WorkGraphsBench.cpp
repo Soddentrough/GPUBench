@@ -133,6 +133,35 @@ const char *WorkGraphsBench::GetDescription(uint32_t config_idx) const {
   }
 }
 
+BenchmarkExplanation WorkGraphsBench::GetExplanation(uint32_t config_idx) const {
+  switch (config_idx) {
+  case 0u:
+    return {
+      "Baseline multi-pass GPU scheduling overhead using atomic VRAM worklist compaction plus legacy vkCmdDispatchIndirect.",
+      "Represents today's standard GPU-driven producer-consumer pattern (e.g., cull -> compact -> shade) that must spill intermediate records to VRAM and sync via a pipeline barrier.",
+      "Producer compute pass filters items into a VRAM buffer with atomics; a barrier syncs before vkCmdDispatchIndirect launches the consumer pass."
+    };
+  case 1u:
+    return {
+      "Fixed preprocess and scheduling overhead of Device-Generated Commands (DGC) on a minimal single-sequence producer-consumer graph.",
+      "Isolates DGC's fixed setup cost vs. legacy indirect dispatch—showing engineers where DGC breaks even vs. multi-pipeline ExecutionSet scaling.",
+      "Producer compacts active work into a DGC sequence buffer; vkCmdExecuteGeneratedCommandsEXT launches the single consumer dispatch."
+    };
+  case 2u:
+    return {
+      "Next-gen GPU-autonomous Work Graph throughput where producer shaders enqueue consumer work directly on chip without CPU roundtrips or VRAM staging.",
+      "Eliminates intermediate VRAM traffic and full-pass barriers in multi-stage procedural geometry, mesh/visibility shading, and complex ray/compute DAGs.",
+      "Single VK_AMDX_shader_enqueue Work Graph submission: producer node classifies items and enqueues coalesced payloads directly into consumer node waves."
+    };
+  default:
+    return {
+      GetDescription(config_idx),
+      "Evaluates producer-consumer GPU scheduling across Indirect, DGC, and hardware Work Graphs.",
+      "Vulkan producer-consumer compute graph benchmark."
+    };
+  }
+}
+
 bool WorkGraphsBench::IsSupported(const DeviceInfo & /*info*/,
                                   IComputeContext *context) const {
   if (!context) return true;

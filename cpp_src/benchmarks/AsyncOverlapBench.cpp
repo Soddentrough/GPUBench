@@ -53,6 +53,63 @@ const char *AsyncOverlapBench::GetDescription(uint32_t config_idx,
   return GetDescription(config_idx);
 }
 
+BenchmarkExplanation AsyncOverlapBench::GetExplanation(uint32_t config_idx) const {
+  switch (config_idx) {
+  case 0u:
+    return {
+      "Baseline frame time when 3D rasterization and heavy compute run one after another on a single GPU queue with no overlap.",
+      "Reference point for engines that do not use Async Compute—every post-FX, culling, or shadow compute pass adds directly to total frame time.",
+      "Submits a multi-layer 4K Early-Z/Hi-Z dynamic rendering pass followed serially by a register-resident VALU compute pass on the primary graphics queue."
+    };
+  case 1u:
+    return {
+      "True hardware concurrency between the 3D Graphics queue and the Async Compute Engine (ACE), hiding compute work inside raster bubbles.",
+      "Important for modern games using Async Compute for SSAO, volumetric fog, shadow denoising, culling, or FSR/post-FX—higher overlap yields free FPS gains.",
+      "Submits the 4K Early-Z/Hi-Z graphics pass on VK_QUEUE_GRAPHICS_BIT concurrently with heavy VALU compute on a dedicated VK_QUEUE_COMPUTE_BIT queue."
+    };
+  case 2u:
+    return {
+      "Baseline combined time when GPU shader compute and a 128 MB PCIe memory copy execute sequentially without DMA overlap.",
+      "Reference ceiling for engines that stall rendering/compute while uploading streamed textures, meshes, or dynamic frame data over PCIe.",
+      "Executes a heavy ALU compute pass followed serially by a 128 MB host-to-device DMA transfer on the primary queue."
+    };
+  case 3u:
+    return {
+      "Hardware overlap between active shader compute and dedicated DMA copy engines (SDMA) streaming data over PCIe.",
+      "Affects open-world games streaming high-res textures and geometry mid-frame—strong SDMA overlap prevents traversal stutters and frame-time spikes.",
+      "Runs heavy ALU compute on the compute queue concurrently with a 128 MB PCIe DMA copy on a dedicated VK_QUEUE_TRANSFER_BIT queue."
+    };
+  default:
+    return {
+      GetDescription(config_idx),
+      "Measures multi-engine GPU concurrency across Graphics, Async Compute, and DMA copy hardware.",
+      "Vulkan multi-queue submission with GPU timestamp concurrency measurement."
+    };
+  }
+}
+
+BenchmarkExplanation AsyncOverlapBench::GetExplanation(
+    uint32_t config_idx, const DeviceInfo &info, IComputeContext *context) const {
+  (void)info;
+  if (context && context->getBackend() == ComputeBackend::ROCm) {
+    if (config_idx == 2u) {
+      return {
+        "Baseline time when a HIP compute kernel and a 128 MB host-to-device PCIe copy run serially on one HIP stream.",
+        "Reference point for compute/ML pipelines that do not overlap host-to-device data staging with GPU kernel execution.",
+        "Executes a heavy ALU HIP kernel followed serially by a 128 MB hipMemcpyAsync on a single HIP stream."
+      };
+    }
+    if (config_idx == 3u) {
+      return {
+        "Hardware overlap between HIP shader compute and a dedicated SDMA copy engine transferring 128 MB over PCIe.",
+        "Measures how effectively multi-stream HIP workloads hide PCIe upload latency behind active compute.",
+        "Overlaps a heavy ALU HIP kernel on one non-blocking stream with a 128 MB hipMemcpyAsync on a second SDMA stream."
+      };
+    }
+  }
+  return GetExplanation(config_idx);
+}
+
 bool AsyncOverlapBench::IsSupported(const DeviceInfo & /*info*/,
                                     IComputeContext *context) const {
   if (!context) return true;

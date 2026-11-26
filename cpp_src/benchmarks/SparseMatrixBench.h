@@ -28,8 +28,11 @@ public:
 
   uint32_t GetNumConfigs() const override { return 3; }
   std::string GetConfigName(uint32_t config_idx) const override;
+  using IBenchmark::GetDescription;
   const char *GetDescription() const override { return GetDescription(0); }
   const char *GetDescription(uint32_t config_idx) const override;
+  using IBenchmark::GetExplanation;
+  BenchmarkExplanation GetExplanation(uint32_t config_idx = 0) const override;
   double GetOperationalIntensity(uint32_t config_idx = 0) const override {
     // 536,870,912 effective 2:4 sparse ops per wave / per-wave global bytes (FP16: 1664 B, FP8/INT8: 896 B)
     return (config_idx == 0u) ? (536870912.0 / 1664.0) : (536870912.0 / 896.0);

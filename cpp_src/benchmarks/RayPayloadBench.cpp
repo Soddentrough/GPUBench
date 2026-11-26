@@ -395,6 +395,48 @@ std::string RayPayloadBench::GetConfigName(uint32_t config_idx) const {
   return "";
 }
 
+const char *RayPayloadBench::GetDescription(uint32_t config_idx) const {
+  switch (config_idx) {
+  case 0u:
+    return "Minimal 16-byte ray payload throughput modeling lightweight RT shadow and ambient occlusion probes.";
+  case 1u:
+    return "128-byte ray payload throughput modeling real-time game path tracing and multi-bounce GI hit state.";
+  case 2u:
+    return "Heavy 256-byte ray payload stress measuring VGPR occupancy drop and scratch-memory spill penalty.";
+  default:
+    return GetDescription();
+  }
+}
+
+BenchmarkExplanation RayPayloadBench::GetExplanation(uint32_t config_idx) const {
+  switch (config_idx) {
+  case 0u:
+    return {
+      "Ray-tracing speed with a tiny 16-byte per-ray payload—fitting cleanly in VGPR registers at maximum wave occupancy.",
+      "Models lightweight RT shadow and Ambient Occlusion (RTAO) visibility rays in games that only return hit distance or occlusion.",
+      "VK_KHR_ray_tracing_pipeline tracing rays with a 16-byte rayPayloadEXT struct."
+    };
+  case 1u:
+    return {
+      "Ray-tracing throughput when each ray carries a 128-byte PBR hit payload (albedo, normal, roughness, throughput, RNG).",
+      "Models real-time game path tracing and GI passes—shows how much occupancy drops when payloads consume significant register file space.",
+      "VK_KHR_ray_tracing_pipeline tracing rays with a 128-byte rayPayloadEXT struct."
+    };
+  case 2u:
+    return {
+      "Severe register-file pressure and scratch-memory spill sensitivity with an oversized 256-byte per-ray payload.",
+      "Warns rendering engineers what happens when bloated ray payloads exceed on-chip VGPR budgets and spill to VRAM scratch—essential for tuning path-tracer payload packing.",
+      "VK_KHR_ray_tracing_pipeline tracing rays with a 256-byte rayPayloadEXT struct across .rgen/.rchit/.rmiss stages."
+    };
+  default:
+    return {
+      GetDescription(),
+      "Measures ray payload register pressure and stack spill overhead in RT pipelines.",
+      "VK_KHR_ray_tracing_pipeline payload size sweep (16B / 128B / 256B)."
+    };
+  }
+}
+
 bool RayPayloadBench::ValidateResults(uint32_t config_idx) const {
   if (config_idx >= GetNumConfigs()) {
     return false;

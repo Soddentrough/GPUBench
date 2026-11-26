@@ -72,13 +72,13 @@ std::string abbreviateChartTickLabel(const std::string& full) {
     if (s.rfind("ILP & Dual-Issue (", 0) == 0) {
         s = s.substr(18);
         if (!s.empty() && s.back() == ')') s.pop_back();
-        if (s.find("Ping-Pong") != std::string::npos) {
+        if (s.find("Serialized") != std::string::npos || s.find("Ping-Pong") != std::string::npos) {
             s = (s.rfind("FP32", 0) == 0) ? "FP32 Base" : "INT32 Base";
         } else if (s.find("Moderate ILP") != std::string::npos) {
             s = (s.rfind("FP32", 0) == 0) ? "FP32 Mid ILP" : "INT32 Mid ILP";
         } else if (s.find("Peak ILP") != std::string::npos) {
             s = (s.rfind("FP32", 0) == 0) ? "FP32 Peak ILP" : "INT32 Peak ILP";
-        } else if (s.find("Combined FP32 + INT32") != std::string::npos) {
+        } else if (s.find("Concurrent Mixed") != std::string::npos || s.find("Combined FP32 + INT32") != std::string::npos) {
             s = "FP32+INT32 Dual";
         }
     } else if (s.rfind("Device Memory Bandwidth (", 0) == 0) {

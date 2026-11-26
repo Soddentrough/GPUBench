@@ -279,6 +279,54 @@ std::string MemBandwidthBench::GetConfigName(uint32_t config_idx) const {
   return configs[config_idx].name;
 }
 
+const char *MemBandwidthBench::GetDescription(uint32_t config_idx) const {
+  if (config_idx >= configs.size()) {
+    return GetDescription();
+  }
+  switch (configs[config_idx].mode) {
+  case TestMode::Read:
+    return "Coalesced streaming VRAM read bandwidth from device memory beyond L3/Infinity Cache.";
+  case TestMode::Write:
+    return "Coalesced streaming VRAM write bandwidth to device memory beyond L3/Infinity Cache.";
+  case TestMode::ReadWrite:
+    return "Coalesced streaming VRAM copy (simultaneous read + write) bandwidth across device memory.";
+  }
+  return GetDescription();
+}
+
+BenchmarkExplanation MemBandwidthBench::GetExplanation(uint32_t config_idx) const {
+  if (config_idx >= configs.size()) {
+    return {
+      GetDescription(),
+      "Measures peak GDDR/HBM VRAM bandwidth—critical for 4K resolution, deferred rendering, and post-processing.",
+      "Coalesced streaming compute shader sweep across a 512 MB VRAM buffer."
+    };
+  }
+  const auto &cfg = configs[config_idx];
+  const std::string wg = std::to_string(cfg.workgroupSize);
+  switch (cfg.mode) {
+  case TestMode::Read:
+    return {
+      "Peak sustained GPU VRAM read bandwidth (at " + wg + " threads/workgroup) when data exceeds L2/L3 caches.",
+      "Directly gates texture sampling, G-buffer reads in deferred lighting, shadow-map lookups, and upscaling at 1440p/4K—comparing " + wg + " threads/group exposes memory-controller occupancy sweet spots.",
+      "Coalesced compute shader streaming vec4 reads across a 512 MB device buffer using " + wg + "-thread workgroups with inter-dispatch barriers."
+    };
+  case TestMode::Write:
+    return {
+      "Peak sustained GPU VRAM write bandwidth (at " + wg + " threads/workgroup) to device memory.",
+      "Limits high-resolution G-buffer writes, shadow-map generation, particle/compute buffer output, and full-screen render-target clears.",
+      "Coalesced compute shader streaming vec4 writes across a 512 MB device buffer using " + wg + "-thread workgroups."
+    };
+  case TestMode::ReadWrite:
+    return {
+      "Simultaneous GPU VRAM read + write (copy) bandwidth (at " + wg + " threads/workgroup)—reflecting real bidirectional memory controller load.",
+      "Closest match to full-screen post-processing passes (bloom, TAA, FSR/DLSS pre-pass, tone mapping) and compute buffers that read and write VRAM every frame.",
+      "Coalesced compute shader reading and writing 512 MB VRAM buffers simultaneously using " + wg + "-thread workgroups."
+    };
+  }
+  return {GetDescription(), "", ""};
+}
+
 bool MemBandwidthBench::ValidateResults(uint32_t config_idx) const {
   if (config_idx >= configs.size() || !context || !outputBuffer || bufferSize == 0) {
     return false;

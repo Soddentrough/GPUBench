@@ -71,6 +71,9 @@ struct BenchmarkConfigMetadata {
     std::string subcategory;
     std::string metric;
     std::string description;
+    std::string whatItTests;
+    std::string pipelineImpact;
+    std::string method;
     std::string configCaveat;
     int sortWeight = 0;
     double operationalIntensity = 0.0;

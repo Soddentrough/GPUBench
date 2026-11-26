@@ -14,6 +14,8 @@
 
 namespace gpubench::test {
 
+constexpr int kTestSkipExitCode = 77;
+
 class TestSkipped : public std::runtime_error {
 public:
   using std::runtime_error::runtime_error;
@@ -55,7 +57,7 @@ public:
 
   const std::vector<TestCase> &tests() const { return m_tests; }
 
-  int runAll(const std::string &filter = "") {
+  int runAll(const std::string &filter = "", bool exactSuite = false) {
     int matched = 0;
     int passed = 0;
     int failed = 0;
@@ -68,9 +70,14 @@ public:
 
     for (const auto &t : m_tests) {
       std::string fullName = t.suite + "." + t.name;
-      if (!filter.empty() && fullName.find(filter) == std::string::npos && t.suite.find(filter) == std::string::npos) {
-        ++filteredOut;
-        continue;
+      if (!filter.empty()) {
+        const bool isMatch = exactSuite
+            ? (t.suite == filter)
+            : (fullName.find(filter) != std::string::npos || t.suite.find(filter) != std::string::npos);
+        if (!isMatch) {
+          ++filteredOut;
+          continue;
+        }
       }
 
       ++matched;
@@ -118,6 +125,9 @@ public:
 
     if (!filter.empty() && matched == 0) {
       return 1;
+    }
+    if (failed == 0 && passed == 0 && skippedRuntime > 0) {
+      return kTestSkipExitCode;
     }
     return (failed == 0) ? 0 : 1;
   }

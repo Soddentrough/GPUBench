@@ -25,8 +25,18 @@ public:
     (void)config_idx;
     return "FP32";
   }
+  using IBenchmark::GetDescription;
   const char *GetDescription() const override {
     return "Single-precision IEEE 754 binary32 FMA throughput across GPU vector ALUs.";
+  }
+  using IBenchmark::GetExplanation;
+  BenchmarkExplanation GetExplanation(uint32_t config_idx = 0) const override {
+    (void)config_idx;
+    return {
+      "Peak 32-bit single-precision (FP32) shader math throughput—the headline compute spec of a GPU.",
+      "Powers virtually every game shader stage: vertex transforms, PBR lighting, skeletal skinning, particle physics, and post-processing. Directly determines shader-bound frame rates.",
+      "Register-resident compute kernel executing 65,536 iterations of 8 vec4 FP32 FMA chains per thread."
+    };
   }
   double GetOperationalIntensity(uint32_t config_idx = 0) const override {
     (void)config_idx;

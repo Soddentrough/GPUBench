@@ -412,6 +412,27 @@ std::string RayAnyHitBench::GetConfigName(uint32_t config_idx) const {
   return "50% Solid (Cutout Stress)";
 }
 
+const char *RayAnyHitBench::GetDescription(uint32_t config_idx) const {
+  return config_idx == 0
+      ? "Baseline ray tracing through 100% opaque geometry with hardware culling and zero Any-Hit shader pauses."
+      : "50% alpha-cutout geometry forcing BVH traversal to pause and invoke software Any-Hit shaders.";
+}
+
+BenchmarkExplanation RayAnyHitBench::GetExplanation(uint32_t config_idx) const {
+  if (config_idx == 0u) {
+    return {
+      "Baseline ray-tracing throughput when geometry is marked 100% opaque so RT hardware handles all hits without shader interruption.",
+      "Reference speed before transparent cutouts (leaves, chain-link fences, grates, hair cards) force the GPU out of fixed-function BVH traversal.",
+      "VK_KHR_ray_tracing_pipeline tracing rays against solid opaque geometry with no Any-Hit shader invocations."
+    };
+  }
+  return {
+    "Ray-tracing slowdown caused when 50% cutout geometry interrupts fixed-function BVH traversal to run an Any-Hit shader.",
+    "Explains why dense forests, grass, and fences tank RT shadow and reflection FPS in games—every alpha-tested hit stalls the RT pipeline to check transparency.",
+    "VK_KHR_ray_tracing_pipeline invoking an Any-Hit (.rahit) shader that stochastically rejects 50% of triangle intersections."
+  };
+}
+
 bool RayAnyHitBench::ValidateResults(uint32_t config_idx) const {
   if (config_idx >= GetNumConfigs()) {
     return false;

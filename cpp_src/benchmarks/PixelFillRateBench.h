@@ -44,9 +44,13 @@ public:
   const char *GetSubCategory(uint32_t /*config_idx*/ = 0) const override {
     return "ROP Throughput";
   }
+  using IBenchmark::GetDescription;
   const char *GetDescription() const override {
     return "Fixed-function rasterizer and Render Output Unit (ROP) pixel fill rate across RGBA8, RGBA16F HDR, and alpha-blended targets.";
   }
+  const char *GetDescription(uint32_t config_idx) const override;
+  using IBenchmark::GetExplanation;
+  BenchmarkExplanation GetExplanation(uint32_t config_idx = 0) const override;
   int GetSortWeight() const override { return 450; }
 
   uint32_t GetNumConfigs() const override { return static_cast<uint32_t>(configs.size()); }

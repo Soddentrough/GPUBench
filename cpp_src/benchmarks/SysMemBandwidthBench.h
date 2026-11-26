@@ -47,6 +47,8 @@ public:
   using IBenchmark::GetDescription;
   const char *GetDescription() const override { return GetDescription(0); }
   const char *GetDescription(uint32_t config_idx) const override;
+  using IBenchmark::GetExplanation;
+  BenchmarkExplanation GetExplanation(uint32_t config_idx = 0) const override;
 
   // System benchmark is not tied to a specific GPU
   bool IsDeviceDependent() const override { return false; }

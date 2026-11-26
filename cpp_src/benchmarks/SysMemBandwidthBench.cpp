@@ -394,6 +394,55 @@ const char *SysMemBandwidthBench::GetDescription(uint32_t config_idx) const {
   return "Multi-threaded NUMA/CCD first-touch host DRAM bandwidth using SIMD vectorization (AVX-512 / AVX2 / NEON).";
 }
 
+BenchmarkExplanation SysMemBandwidthBench::GetExplanation(uint32_t config_idx) const {
+  const bool singleThread = (config_idx >= 3u);
+  const SysMemTestMode mode =
+      (config_idx < configs.size()) ? configs[config_idx].mode : SysMemTestMode::Read;
+  if (singleThread) {
+    switch (mode) {
+    case SysMemTestMode::Read:
+      return {
+        "Single CPU core streaming read bandwidth from host system RAM.",
+        "Shows per-core memory ceiling for single-threaded game loops, asset parsing, and scene-graph/physics updates; reveals per-CCD/fabric caps on multi-chiplet CPUs.",
+        "Single-thread aligned SIMD vector load loop (AVX-512 / AVX2 / NEON) across a 4 GB host buffer."
+      };
+    case SysMemTestMode::Write:
+      return {
+        "Single CPU core streaming write bandwidth into host system RAM.",
+        "Governs single-threaded CPU buffer staging, decompression output, and command/uniform preparation before GPU upload.",
+        "Single-thread non-temporal SIMD streaming stores bypassing CPU caches across a 4 GB host buffer."
+      };
+    case SysMemTestMode::ReadWrite:
+      return {
+        "Single CPU core simultaneous read + write (memory copy) bandwidth in host RAM.",
+        "Reflects single-thread asset unpacking, staging buffer copies, and audio/physics state duplication.",
+        "Single-thread SIMD vector loads paired with non-temporal streaming stores across 4 GB buffers."
+      };
+    }
+  }
+  switch (mode) {
+  case SysMemTestMode::Read:
+    return {
+      "Peak multi-core system RAM read bandwidth across all memory channels.",
+      "Feeds multi-threaded asset streaming, shader/texture decompression, and directly determines texture/geometry bandwidth on unified-memory APUs.",
+      "All-core NUMA/CCD first-touch parallel aligned SIMD vector loads (AVX-512 / AVX2 / NEON) across a 4 GB buffer."
+    };
+  case SysMemTestMode::Write:
+    return {
+      "Peak multi-core system RAM write bandwidth across all memory channels.",
+      "Caps parallel CPU asset decompression, world streaming, and shared-memory frame writes on APU systems.",
+      "All-core NUMA/CCD first-touch parallel non-temporal SIMD streaming stores across a 4 GB buffer."
+    };
+  case SysMemTestMode::ReadWrite:
+    return {
+      "Peak multi-core system RAM simultaneous read + write (copy) bandwidth.",
+      "Closest mirror to real system memory pressure during heavy level loading, background tasks, and integrated GPU rendering.",
+      "All-core NUMA/CCD first-touch SIMD loads paired with non-temporal streaming stores across 4 GB buffers."
+    };
+  }
+  return {GetDescription(config_idx), "", ""};
+}
+
 bool SysMemBandwidthBench::IsSupported(const DeviceInfo & /*info*/,
                                        IComputeContext * /*context*/) const {
   return true;

@@ -36,6 +36,10 @@ public:
   const char *GetDescription(uint32_t config_idx) const override;
   const char *GetDescription(uint32_t config_idx, const DeviceInfo &info,
                              IComputeContext *context = nullptr) const override;
+  using IBenchmark::GetExplanation;
+  BenchmarkExplanation GetExplanation(uint32_t config_idx = 0) const override;
+  BenchmarkExplanation GetExplanation(uint32_t config_idx, const DeviceInfo &info,
+                                      IComputeContext *context = nullptr) const override;
   int32_t GetBaselineConfigIndex(uint32_t config_idx) const override {
     if (config_idx == 1u) return 0;
     if (config_idx == 3u) return 2;

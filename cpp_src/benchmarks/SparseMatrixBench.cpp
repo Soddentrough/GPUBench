@@ -40,6 +40,35 @@ const char *SparseMatrixBench::GetDescription(uint32_t config_idx) const {
   }
 }
 
+BenchmarkExplanation SparseMatrixBench::GetExplanation(uint32_t config_idx) const {
+  switch (config_idx) {
+  case 0u:
+    return {
+      "Hardware 2:4 structured sparse FP16 matrix throughput—skipping 50% zero weights in silicon to double effective tensor speed.",
+      "Accelerates pruned neural denoisers, AI upscalers, and compressed ML inference models that retain 2 non-zero weights per 4-element block.",
+      "ROCm HIP kernel executing native 2:4 sparse FP16 matrix instructions (v_swmmac / v_smfmac) with 2-bit sparsity metadata."
+    };
+  case 1u:
+    return {
+      "Hardware 2:4 structured sparse FP8 (E4M3) matrix throughput, doubling sparse K-dimension rate over dense FP8.",
+      "Targets high-efficiency pruned AI frame generation, neural texture compression, and fast local LLM inference.",
+      "ROCm HIP kernel executing native 2:4 sparse FP8 E4M3 matrix instructions with 2-bit sparsity metadata."
+    };
+  case 2u:
+    return {
+      "Hardware 2:4 structured sparse INT8 matrix throughput with INT32 accumulation.",
+      "Speeds up pruned 8-bit quantized vision, denoising, and upscaling networks on architectures with hardware sparse tensor units.",
+      "ROCm HIP kernel executing native 2:4 sparse INT8 matrix instructions with 2-bit sparsity metadata."
+    };
+  default:
+    return {
+      GetDescription(config_idx),
+      "Measures hardware 2:4 structured sparsity matrix throughput.",
+      "ROCm HIP sparse matrix multiply-accumulate kernel."
+    };
+  }
+}
+
 bool SparseMatrixBench::IsSupported(const DeviceInfo &info,
                                     IComputeContext *context) const {
   if (!info.structuredSparsitySupport) return false;

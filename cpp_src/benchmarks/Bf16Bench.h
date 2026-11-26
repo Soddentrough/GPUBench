@@ -188,6 +188,36 @@ public:
     }
     return GetDescription(config_idx);
   }
+  using IBenchmark::GetExplanation;
+  BenchmarkExplanation GetExplanation(uint32_t config_idx = 0) const override {
+    if (config_idx == 0u) {
+      return {
+        "BFloat16 packed 2-element dot-product throughput in shader vector ALUs (checks native HW support vs. FP32 emulation).",
+        "Preserves FP32 exponent range in 16 bits for shader ML layers and HDR lighting without FP16 overflow; flags drivers that silently emulate BF16 in FP32.",
+        "Register-resident compute shader running packed BF16 dot2-accumulate chains with FP32 accumulation."
+      };
+    }
+    return {
+      "Peak BFloat16 matrix-core throughput (WMMA / MFMA / Cooperative Matrix) for AI and neural workloads.",
+      "Primary precision for modern AI inference, neural rendering, and ML workloads needing FP32 dynamic range at half the memory footprint.",
+      "Cooperative Matrix / WMMA / MFMA 16x16x16 BF16 matrix multiply-accumulate loops with FP32 accumulation."
+    };
+  }
+  BenchmarkExplanation GetExplanation(uint32_t config_idx, const DeviceInfo &info,
+                                      IComputeContext *context = nullptr) const override {
+    (void)info;
+    BenchmarkExplanation e = GetExplanation(config_idx);
+    if (context && context->getBackend() == ComputeBackend::ROCm) {
+      e.method = (config_idx == 0u)
+          ? "HIP kernel executing packed v_dot2_f32_bf16 VALU dot-product instructions."
+          : "HIP kernel executing native BF16 WMMA / MFMA matrix-core tiles.";
+    } else if (context && context->getBackend() == ComputeBackend::Vulkan) {
+      e.method = (config_idx == 0u)
+          ? "Vulkan shader using VK_KHR_shader_bfloat16 packed dot-product instructions."
+          : "Vulkan compute shader using VK_KHR_cooperative_matrix + VK_KHR_shader_bfloat16.";
+    }
+    return e;
+  }
   double GetOperationalIntensity(uint32_t config_idx = 0) const override {
     // Config 0 (bf16.comp): 32768 * 256 ops (8,388,608 FLOPs) / (8 B read + 8 B write = 16 B) = 524,288.0 FLOP/B
     // Config 1 (coop_matrix_bf16.comp): 32768 * 8192 FLOPs / (512 B A + 512 B B + 1024 B C = 2048 B) = 131,072.0 FLOP/B

@@ -52,6 +52,15 @@ public:
   const char *GetDescription() const override {
     return "Double-precision IEEE 754 binary64 FMA throughput across hardware FP64 ALUs.";
   }
+  using IBenchmark::GetExplanation;
+  BenchmarkExplanation GetExplanation(uint32_t config_idx = 0) const override {
+    (void)config_idx;
+    return {
+      "Peak 64-bit double-precision (FP64) floating-point math throughput across GPU shader ALUs.",
+      "Used by scientific simulation, CAD/CAE solvers, and double-precision physics/orbital math—rarely used by games (consumer gaming GPUs intentionally keep FP64 at 1:16 to 1:64 of FP32).",
+      "Register-resident compute loop executing 2,048 FP64 FMA operations (4,096 FLOPs) per thread."
+    };
+  }
   double GetOperationalIntensity(uint32_t config_idx = 0) const override {
     (void)config_idx;
     // fp64.comp: 4096 FP64 FLOPs per thread / (8 B seed read + 8 B output write = 16 B) = 256.0 FLOP/B

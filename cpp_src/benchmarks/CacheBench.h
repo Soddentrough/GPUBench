@@ -90,6 +90,49 @@ public:
       return "Dependent pointer-chasing load latency isolating GPU cache round-trip time.";
     }
   }
+  using IBenchmark::GetExplanation;
+  BenchmarkExplanation GetExplanation(uint32_t config_idx = 0) const override {
+    (void)config_idx;
+    if (metric == "GB/s") {
+      switch (targetCacheLevel) {
+      case 0:
+        return {
+          "Peak bandwidth of each Compute Unit's nearest L0 vector data cache (16 KB working set).",
+          "Feeds fast per-CU texture fetches, uniform/material tables, and inner shader loops without stalling on lower caches.",
+          "Multi-CU compute shader streaming coalesced vec4 loads from a 16 KB buffer resident in L0 cache."
+        };
+      case 1:
+        return {
+          "Peak bandwidth of the Shader-Array L1 cache tier (128 KB working set) shared across nearby Compute Units.",
+          "Serves spatially coherent screen tiles, neighboring pixel textures, and local BVH nodes across CUs in a shader engine.",
+          "Multi-CU compute shader streaming coalesced vec4 loads from a 128 KB buffer sized for L1 cache."
+        };
+      case 2:
+        return {
+          "Peak bandwidth of the GPU-wide shared L2 cache (sized to half of reported L2 capacity).",
+          "Critical hub for cross-CU sharing: shadow maps, G-buffer tiles, ray-tracing BVH trees, and atomic/indirect buffers.",
+          "Multi-CU compute shader streaming coalesced vec4 loads from a working set sized to half the GPU's L2 cache."
+        };
+      case 3:
+        return {
+          "Peak bandwidth of the GPU L3 / Infinity Cache (MALL) tier (sized to half of reported L3 capacity).",
+          "Keeps active render targets, depth buffers, and BVH working sets out of slow external GDDR VRAM—boosting effective 1440p/4K memory speed.",
+          "Multi-CU compute shader streaming coalesced vec4 loads from a working set sized to half the GPU's L3 cache."
+        };
+      default:
+        return {
+          GetDescription(),
+          "Measures sustained streaming throughput of the targeted GPU cache tier.",
+          "Multi-CU compute shader streaming coalesced vec4 loads."
+        };
+      }
+    }
+    return {
+      "True round-trip latency (in nanoseconds) of a dependent memory load hitting the GPU's nearest L0 vector cache.",
+      "Determines how fast a single wave recovers from irregular/uncoalesced reads such as indirect texture lookups, pointer tables, and BVH node traversal.",
+      "Single-thread dependent pointer-chasing chain over a 16 KB buffer at 128-byte cache-line stride."
+    };
+  }
   double GetOperationalIntensity(uint32_t config_idx = 0) const override {
     (void)config_idx;
     // cache_bw_robust.comp executes 8 vec4 FP32 additions (32 FLOPs) per 8 vec4 loads (128 bytes) = 0.25 OP/Byte

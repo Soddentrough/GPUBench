@@ -33,9 +33,13 @@ public:
 
   const char *GetComponent(uint32_t config_idx = 0) const override { return "Compute"; }
   const char *GetSubCategory(uint32_t config_idx = 0) const override { return "LDS Bank Conflicts"; }
+  using IBenchmark::GetDescription;
   const char *GetDescription() const override {
     return "On-chip Local Data Share (LDS / Shared Memory) bank serialization sweep across conflict-free, power-of-two, and odd-stride access patterns.";
   }
+  const char *GetDescription(uint32_t config_idx) const override;
+  using IBenchmark::GetExplanation;
+  BenchmarkExplanation GetExplanation(uint32_t config_idx = 0) const override;
   int GetSortWeight() const override { return 26; }
 
   uint32_t GetNumConfigs() const override { return static_cast<uint32_t>(configs.size()); }

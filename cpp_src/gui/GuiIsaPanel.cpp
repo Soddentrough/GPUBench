@@ -459,14 +459,29 @@ void GuiApp::renderIsaInspectorPanel() {
         const std::string diagramId = resolveDiagramIdForItem(
             item->id, item->subcategory, item->name, item->viz.diagramId);
         const float remainH = ImGui::GetContentRegionAvail().y;
-        const float descReserve = item->hasSupportDiscrepancy ? s(110.0f) : s(52.0f);
-        const float diagH = std::clamp(remainH - descReserve, s(96.0f), s(185.0f));
+        const float descReserve = item->hasSupportDiscrepancy ? s(130.0f) : s(96.0f);
+        const float diagH = std::clamp(remainH - descReserve, s(90.0f), s(145.0f));
         ImVec2 dp0 = ImGui::GetCursorScreenPos();
         ImVec2 dp1(dp0.x + gridW, dp0.y + diagH);
         ImGui::Dummy(ImVec2(gridW, diagH));
         renderProceduralDiagram(diagramId, dp0, dp1);
 
-        if (!item->description.empty()) {
+        if (!item->whatItTests.empty() || !item->pipelineImpact.empty() || !item->method.empty()) {
+            auto renderF1Section = [&](const char* label, const ImVec4& labelCol,
+                                       const std::string& body, const ImVec4& bodyCol) {
+                if (body.empty()) return;
+                ImGui::Spacing();
+                pushBoldFont();
+                ImGui::TextColored(labelCol, "%s", label);
+                popBoldFont();
+                ImGui::PushStyleColor(ImGuiCol_Text, bodyCol);
+                ImGui::TextWrapped("%s", body.c_str());
+                ImGui::PopStyleColor();
+            };
+            renderF1Section("TESTS", c.cyanAccent, item->whatItTests, c.textPrimary);
+            renderF1Section("PIPELINE & IMPACT", c.okColor, item->pipelineImpact, c.textPrimary);
+            renderF1Section("METHOD", c.textMuted, item->method, c.textSecondary);
+        } else if (!item->description.empty()) {
             ImGui::Spacing();
             ImGui::PushStyleColor(ImGuiCol_Text, c.textSecondary);
             ImGui::TextWrapped("%s", item->description.c_str());

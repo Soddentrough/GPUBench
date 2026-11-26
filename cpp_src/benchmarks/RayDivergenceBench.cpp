@@ -381,6 +381,64 @@ std::string RayDivergenceBench::GetConfigName(uint32_t config_idx) const {
   }
 }
 
+const char *RayDivergenceBench::GetDescription(uint32_t config_idx) const {
+  switch (config_idx) {
+  case 0u:
+    return "Worst-case 90-degree hemisphere bounce divergence modeling rough diffuse Global Illumination.";
+  case 1u:
+    return "Wide 67.5-degree bounce cone modeling matte/satin rough surface scattering.";
+  case 2u:
+    return "Moderate 45-degree bounce cone modeling brushed metal glossy reflections.";
+  case 3u:
+    return "Tight 22.5-degree bounce cone modeling smooth glossy clearcoat reflections.";
+  case 4u:
+    return "Coherent 0-degree bounce baseline modeling sharp mirror reflections.";
+  default:
+    return GetDescription();
+  }
+}
+
+BenchmarkExplanation RayDivergenceBench::GetExplanation(uint32_t config_idx) const {
+  switch (config_idx) {
+  case 0u:
+    return {
+      "Ray-tracing throughput under maximum 90-degree directional bounce divergence (adjacent threads shoot rays in completely different directions).",
+      "Models rough diffuse Global Illumination (GI) bounces—explaining why RT diffuse GI is far heavier than mirror reflections due to BVH cache thrashing and wave divergence.",
+      "VK_KHR_ray_tracing_pipeline bouncing rays inside a uniform 307K-triangle chamber with r=1.0 (90-degree) hemisphere spread."
+    };
+  case 1u:
+    return {
+      "Ray-tracing throughput under wide 67.5-degree bounce cone divergence (matte/satin surfaces).",
+      "Models rough architectural surfaces (concrete, wood, fabric) in RT GI and glossy probe passes.",
+      "VK_KHR_ray_tracing_pipeline bouncing rays inside a uniform 307K-triangle chamber with r=0.75 (67.5-degree) cone spread."
+    };
+  case 2u:
+    return {
+      "Ray-tracing throughput under moderate 45-degree bounce cone divergence (brushed metal).",
+      "Models semi-rough metallic reflections common on car rims, weapons, and wet pavement in games.",
+      "VK_KHR_ray_tracing_pipeline bouncing rays inside a uniform 307K-triangle chamber with r=0.50 (45-degree) cone spread."
+    };
+  case 3u:
+    return {
+      "Ray-tracing throughput under tight 22.5-degree bounce cone divergence (glossy clearcoat).",
+      "Models smooth lacquered surfaces and puddles where nearby rays mostly traverse shared BVH branches.",
+      "VK_KHR_ray_tracing_pipeline bouncing rays inside a uniform 307K-triangle chamber with r=0.25 (22.5-degree) cone spread."
+    };
+  case 4u:
+    return {
+      "Coherent 0-degree ray-tracing throughput where neighboring threads bounce in parallel along the same BVH path.",
+      "Models sharp mirror/glass reflections—gives engineers the coherent traversal baseline to quantify divergence loss in GI.",
+      "VK_KHR_ray_tracing_pipeline bouncing rays inside a uniform 307K-triangle chamber with r=0.0 (0-degree coherent spread)."
+    };
+  default:
+    return {
+      GetDescription(),
+      "Measures RT wavefront divergence sensitivity across bounce roughness levels.",
+      "VK_KHR_ray_tracing_pipeline bounce cone spread sweep."
+    };
+  }
+}
+
 void RayDivergenceBench::generateGeometry(std::vector<float> &vertices) const {
   // Uniformly tessellated 6-face enclosing chamber [-100, 100]^3 (160x160 quads = 51,200 tris per face, 307,200 tris total).
   // Every direction in the hemisphere encounters identical triangle density and BVH tree depth,

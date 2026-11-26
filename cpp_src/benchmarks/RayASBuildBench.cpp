@@ -761,3 +761,53 @@ std::string RayASBuildBench::GetConfigName(uint32_t config_idx) const {
   }
 }
 
+const char *RayASBuildBench::GetDescription(uint32_t config_idx) const {
+  switch (config_idx) {
+  case 0u:
+    return "Batched Bottom-Level Acceleration Structure (BLAS) build rate across 256 meshes totaling 5M triangles.";
+  case 1u:
+    return "Top-Level Acceleration Structure (TLAS) build rate for a 20,000-instance indoor corridor scene.";
+  case 2u:
+    return "Top-Level Acceleration Structure (TLAS) build rate for a 50,000-instance dense foliage jungle scene.";
+  case 3u:
+    return "Top-Level Acceleration Structure (TLAS) build rate for a 200,000-instance open-world scene.";
+  default:
+    return GetDescription();
+  }
+}
+
+BenchmarkExplanation RayASBuildBench::GetExplanation(uint32_t config_idx) const {
+  switch (config_idx) {
+  case 0u:
+    return {
+      "Hardware Bottom-Level Acceleration Structure (BLAS) build speed for raw triangle meshes (MTris/s).",
+      "Determines per-frame RT prep overhead when deforming skinned characters, cloth, hair, destruction physics, or newly streamed meshes enter a game.",
+      "Single batched vkCmdBuildAccelerationStructuresKHR call building 256 BLAS meshes totaling 5,000,000 triangles."
+    };
+  case 1u:
+    return {
+      "Top-Level Acceleration Structure (TLAS) rebuild speed for a 20,000-instance indoor scene (MInst/s).",
+      "TLAS must be rebuilt every frame whenever doors, lights, NPCs, or props move—a fast TLAS keeps CPU/GPU RT prep overhead low in indoor games.",
+      "vkCmdBuildAccelerationStructuresKHR building a 20,000-instance TLAS referencing 5,000 BLAS meshes."
+    };
+  case 2u:
+    return {
+      "TLAS rebuild speed for a 50,000-instance dense jungle scene with high spatial bounding-box overlap.",
+      "Reflects wind-animated trees, foliage instances, and dense forest environments where overlapping bounds stress BVH tree construction.",
+      "vkCmdBuildAccelerationStructuresKHR building a 50,000-instance TLAS across 500 instanced BLAS meshes."
+    };
+  case 3u:
+    return {
+      "TLAS rebuild speed at massive open-world scale (200,000 moving/streamed instances).",
+      "Measures worst-case per-frame RT scene update cost in large open-world games before ray tracing even starts.",
+      "vkCmdBuildAccelerationStructuresKHR building a 200,000-instance TLAS across 5,000 BLAS meshes."
+    };
+  default:
+    return {
+      GetDescription(),
+      "Measures hardware BVH acceleration structure construction throughput.",
+      "Vulkan vkCmdBuildAccelerationStructuresKHR BLAS/TLAS build pass."
+    };
+  }
+}
+

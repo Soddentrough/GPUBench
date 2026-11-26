@@ -87,6 +87,15 @@ public:
   const char *GetDescription() const override {
     return "4-bit integer (INT4) packed WMMA matrix multiply-accumulate throughput.";
   }
+  using IBenchmark::GetExplanation;
+  BenchmarkExplanation GetExplanation(uint32_t config_idx = 0) const override {
+    (void)config_idx;
+    return {
+      "Native 4-bit integer (INT4) hardware matrix-core throughput for ultra-compact quantized neural models.",
+      "Enables 4-bit quantized local AI inference and compact neural rendering weights at 4x lower VRAM footprint than FP16.",
+      "ROCm HIP kernel executing packed 4-bit integer WMMA matrix multiply-accumulate instructions."
+    };
+  }
   double GetOperationalIntensity(uint32_t config_idx = 0) const override {
     (void)config_idx;
     // int4_matrix: 32768 * 8192 IOPs / (128 B A + 128 B B + 1024 B C = 1280 B) = 209,715.20 OP/B

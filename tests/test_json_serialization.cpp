@@ -206,21 +206,21 @@ TEST_CASE(JsonSerialization, MalformedJsonRejected) {
 }
 
 TEST_CASE(JsonSerialization, RayScheduling16SppFpsDividedBySamplesPerPixel) {
-  // 4K resolution (8,294,400 pixels) at 16 SPP (configs 23/24):
+  // 4K resolution (8,294,400 pixels) at 16 SPP (configs 7/8):
   // 16 passes/frame * 8,294,400 rays / 0.1 s = 1,327.104 MRays/s => true FPS must be 10.0, not 160.0.
   ResultData pt16{};
   pt16.backendName = "Vulkan";
   pt16.deviceName = "Test GPU";
-  pt16.benchmarkName = "RayScheduling (Open-World Forest) (Full Scene Path Tracing (16 SPP) - DGC)";
+  pt16.benchmarkName = "RayScheduling (Open-World Forest) (Path Tracing (16 SPP) (DGC))";
   pt16.component = "Ray Tracing";
-  pt16.subcategory = "Full Scene Path Tracing";
+  pt16.subcategory = "Scene Path Tracing (16 SPP)";
   pt16.metric = "MRays/s";
   pt16.operations = 8294400ULL * 16ULL;
   pt16.time_ms = 100.0;
   pt16.width = 3840;
   pt16.height = 2160;
   pt16.samplesPerFrame = 16;
-  pt16.configIndex = 24;
+  pt16.configIndex = 8;
   pt16.isValid = true;
 
   std::string jsonPayload = resultsToJson({pt16});
@@ -367,10 +367,10 @@ TEST_CASE(JsonSerialization, RaySchedulingMultiLightBaselineFormatting) {
   ASSERT_EQ(guiImported.results[0].baselineConfigIndex, -1);
   ASSERT_EQ(guiImported.results[1].configIndex, 20u);
   ASSERT_EQ(guiImported.results[1].baselineConfigIndex, 19);
-  ASSERT_EQ(guiImported.results[2].configIndex, 21u);
+  ASSERT_EQ(guiImported.results[2].configIndex, 14u);
   ASSERT_EQ(guiImported.results[2].baselineConfigIndex, -1);
-  ASSERT_EQ(guiImported.results[3].configIndex, 22u);
-  ASSERT_EQ(guiImported.results[3].baselineConfigIndex, 21);
+  ASSERT_EQ(guiImported.results[3].configIndex, 15u);
+  ASSERT_EQ(guiImported.results[3].baselineConfigIndex, 14);
 }
 
 TEST_CASE(JsonSerialization, MedianHeadlineAndLosslessMultiGpuV2RoundTrip) {

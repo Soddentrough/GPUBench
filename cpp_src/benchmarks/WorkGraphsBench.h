@@ -28,8 +28,11 @@ public:
 
   uint32_t GetNumConfigs() const override { return 3; }
   std::string GetConfigName(uint32_t config_idx) const override;
+  using IBenchmark::GetDescription;
   const char *GetDescription() const override { return GetDescription(0); }
   const char *GetDescription(uint32_t config_idx) const override;
+  using IBenchmark::GetExplanation;
+  BenchmarkExplanation GetExplanation(uint32_t config_idx = 0) const override;
   int32_t GetBaselineConfigIndex(uint32_t config_idx) const override {
     return (config_idx >= 1u && config_idx <= 2u) ? 0 : -1;
   }

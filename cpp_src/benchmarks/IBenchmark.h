@@ -16,6 +16,29 @@ struct BenchmarkResult {
   double elapsedTime; // in milliseconds
 };
 
+struct BenchmarkExplanation {
+  std::string whatItTests;    // Plain-English hardware capability or bottleneck measured
+  std::string pipelineImpact; // Rendering / game pipeline stage & why gamers + engineers care
+  std::string method;         // Concise technical summary of the shader/API/workload executed
+
+  bool empty() const {
+    return whatItTests.empty() && pipelineImpact.empty() && method.empty();
+  }
+  std::string formatSummary() const {
+    std::string out;
+    if (!whatItTests.empty()) out += whatItTests;
+    if (!pipelineImpact.empty()) {
+      if (!out.empty()) out += " ";
+      out += pipelineImpact;
+    }
+    if (!method.empty()) {
+      if (!out.empty()) out += " ";
+      out += method;
+    }
+    return out;
+  }
+};
+
 class IBenchmark {
 public:
   virtual ~IBenchmark() = default;
@@ -112,6 +135,19 @@ public:
     (void)info;
     (void)context;
     return GetDescription(config_idx);
+  }
+  virtual BenchmarkExplanation GetExplanation(uint32_t config_idx = 0) const {
+    BenchmarkExplanation e;
+    const char *d = GetDescription(config_idx);
+    if (d && d[0] != '\0') e.whatItTests = d;
+    return e;
+  }
+  virtual BenchmarkExplanation GetExplanation(uint32_t config_idx,
+                                              const DeviceInfo &info,
+                                              IComputeContext *context = nullptr) const {
+    (void)info;
+    (void)context;
+    return GetExplanation(config_idx);
   }
   // Empirical Roofline Operational Intensity (FLOPs or OPs per byte of memory traffic).
   // Returns > 0.0 for compute/matrix/vector workloads plotted on the Roofline chart.

@@ -572,6 +572,27 @@ std::string RayRawTraversalBench::GetConfigName(uint32_t config_idx) const {
       : "Raw BVH - Deep Multi-Layer Box Stress";
 }
 
+const char *RayRawTraversalBench::GetDescription(uint32_t config_idx) const {
+  return config_idx == 0
+      ? "Peak coherent hardware BVH ray-triangle traversal ceiling at maximum occupancy."
+      : "Deep 64-layer overlapping AABB BVH traversal stress measuring raw ray-box intersection throughput.";
+}
+
+BenchmarkExplanation RayRawTraversalBench::GetExplanation(uint32_t config_idx) const {
+  if (config_idx == 0u) {
+    return {
+      "Peak fixed-function ray-tracing traversal ceiling when every ray hits nearby triangles coherently with zero misses.",
+      "Establishes the theoretical upper bound of the GPU's ray traversal units before real-world scene complexity, shading, or bounce divergence slows it down.",
+      "Inline GL_EXT_ray_query compute shader tracing coherent primary rays against a flat triangle grid."
+    };
+  }
+  return {
+    "Sustained hardware BVH box-testing throughput through 64 overlapping bounding-box layers.",
+    "Simulates heavy geometric overlap (dense foliage, layered hair/particles, deep scene hierarchies) where rays must test dozens of BVH bounding boxes per ray.",
+    "Inline GL_EXT_ray_query compute shader marching rays through 64 stratified AABB layers (65,536 boxes)."
+  };
+}
+
 uint64_t RayRawTraversalBench::GetTraversedRays(uint32_t config_idx) const {
   if (config_idx >= 2) return 0;
   return static_cast<uint64_t>(rayCount) * recordedInvocations[config_idx];

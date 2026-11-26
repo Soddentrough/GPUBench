@@ -64,8 +64,8 @@ int main(int argc, char **argv) {
       "              Device Memory Bandwidth, L0/L1/L2/L3 Cache Bandwidth,\n"
       "              L0 Vector Cache Latency (16 KB), Cache Latency Curve,\n"
       "              Interconnect (PCIe H2D/D2H/Bidir, ReBAR, Unified Memory, Multi-GPU P2P)\n"
-      "  scheduling  Multi-queue async overlap & GPU-driven indirect scheduling:\n"
-      "              AsyncOverlap (Graphics + Async Compute + Copy DMA), In-Shader Indirect Synthesis\n"
+      "  scheduling  Multi-queue async overlap & GPU-driven compute dispatch:\n"
+      "              AsyncOverlap (Graphics + Async Compute + Copy DMA), GPU-Driven Compute Dispatch\n"
       "  graphics    All 3D graphics rendering pipelines (combines 'raster' and 'raytracing', alias: 'gfx'):\n"
       "              Runs both fixed-function rasterization (ROP) and hardware ray tracing\n"
       "  raster      Fixed-function rasterization & ROP pixel fill rates (subset of graphics):\n"
@@ -486,6 +486,18 @@ int main(int argc, char **argv) {
   if (list_benchmarks) {
     BenchmarkRunner runner({});
     std::cout << "Available benchmarks (grouped):" << std::endl;
+    auto findBenchPtr = [&](const std::string &name) -> const IBenchmark * {
+      for (const auto &b : runner.getBenchmarkList()) {
+        std::string bn = b->GetName();
+        if (name == "RayScheduling" && bn.rfind("RayScheduling", 0) == 0) {
+          return b.get();
+        }
+        if (bn == name) {
+          return b.get();
+        }
+      }
+      return nullptr;
+    };
     for (const auto &grp : runner.getAvailableGroups()) {
       if (grp.id == "graphics") {
         continue;
@@ -493,6 +505,24 @@ int main(int argc, char **argv) {
       std::cout << std::endl << "[" << grp.name << "]  (run group with: -g " << grp.id << ")" << std::endl;
       for (const auto &name : grp.benchmarks) {
         std::cout << "  - " << name << std::endl;
+        if (verbose) {
+          if (const IBenchmark *b = findBenchPtr(name)) {
+            const uint32_t nCfg = b->GetNumConfigs();
+            for (uint32_t c = 0; c < nCfg; ++c) {
+              std::string cfgName = b->GetConfigName(c);
+              if (cfgName.empty()) cfgName = "Default";
+              std::cout << "      [" << c << "] " << cfgName << std::endl;
+              BenchmarkExplanation exp = b->GetExplanation(c);
+              if (!exp.whatItTests.empty())
+                std::cout << "          TESTS:    " << exp.whatItTests << std::endl;
+              if (!exp.pipelineImpact.empty())
+                std::cout << "          PIPELINE: " << exp.pipelineImpact << std::endl;
+              if (!exp.method.empty())
+                std::cout << "          METHOD:   " << exp.method << std::endl;
+            }
+          }
+          continue;
+        }
         if (name == "RayRawTraversal") {
           RayRawTraversalBench rawBench;
           for (uint32_t c = 0; c < rawBench.GetNumConfigs(); ++c) {
@@ -530,7 +560,11 @@ int main(int argc, char **argv) {
         }
       }
     }
-    std::cout << "\nNote: Umbrella group '-g graphics' (alias 'gfx') combines [Raster] and [Ray Tracing]." << std::endl << std::endl;
+    std::cout << "\nNote: Umbrella group '-g graphics' (alias 'gfx') combines [Raster] and [Ray Tracing]." << std::endl;
+    if (!verbose) {
+      std::cout << "Tip:  Pass '--list-benchmarks --verbose' for detailed TESTS / PIPELINE / METHOD descriptions." << std::endl;
+    }
+    std::cout << std::endl;
     return EXIT_SUCCESS;
   }
 

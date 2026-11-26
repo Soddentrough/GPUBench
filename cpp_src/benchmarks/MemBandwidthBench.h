@@ -42,9 +42,13 @@ public:
     (void)config_idx;
     return "Bandwidth";
   }
+  using IBenchmark::GetDescription;
   const char *GetDescription() const override {
     return "Streaming device VRAM read, write, and read-write bandwidth across coalesced workgroup sizes.";
   }
+  const char *GetDescription(uint32_t config_idx) const override;
+  using IBenchmark::GetExplanation;
+  BenchmarkExplanation GetExplanation(uint32_t config_idx = 0) const override;
   double GetOperationalIntensity(uint32_t config_idx = 0) const override {
     // Streaming read/write does ~0.0625..0.125 ops per byte transferred
     return (config_idx % 3 == 2) ? 0.125 : 0.0625;

@@ -38,9 +38,12 @@ public:
 
   const char *GetComponent(uint32_t config_idx = 0) const override { (void)config_idx; return "Memory"; }
   const char *GetSubCategory(uint32_t config_idx = 0) const override { (void)config_idx; return "Cache Latency Curve"; }
+  using IBenchmark::GetDescription;
   const char *GetDescription() const override {
     return "15-step pointer-chasing latency curve (16 KB to 256 MB) mapping L0, L1, L2, L3/MALL, and DRAM transitions.";
   }
+  using IBenchmark::GetExplanation;
+  BenchmarkExplanation GetExplanation(uint32_t config_idx = 0) const override;
   int GetSortWeight() const override { return 210; }
 
   uint32_t GetNumConfigs() const override { return static_cast<uint32_t>(configs.size()); }

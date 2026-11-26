@@ -66,6 +66,9 @@ struct BenchmarkItem {
     std::string category;    // Component name (e.g. "Compute", "Memory", "Ray Tracing", "Scheduling", "Raster", "System")
     std::string metricType;  // e.g. TFLOPS, GB/s, GIS/s, MRays/s, MItems/s, us
     std::string description; // Tooltip / detail description (hydrated from IBenchmark metadata)
+    std::string whatItTests;
+    std::string pipelineImpact;
+    std::string method;
     bool selected{true};
     bool isSupported{true};
     std::string supportReason;
